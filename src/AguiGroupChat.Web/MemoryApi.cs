@@ -79,6 +79,40 @@ public static class MemoryApi
             });
         });
 
+        // ---- 记忆时间线（2.2）：按话题回放记忆的<b>时间演进</b>（旧→新），便于复盘「某主题结论如何演化」 ----
+        root.MapGet("/timeline", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IUserStore users, IMessageMemory memory,
+            string? groupId, string? topicId, string? keyword, int limit = 200) =>
+        {
+            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
+            if (error is not null) return error;
+            if (userId is null) return error!;
+            // 只能回放自己所在群的记忆
+            if (!string.IsNullOrWhiteSpace(groupId) && !store.IsMember(groupId, userId))
+                return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看该群记忆"),
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            var items = memory.ListMessages(groupId, null, keyword, Math.Clamp(limit, 1, 500), 0).ToList();
+            if (!string.IsNullOrWhiteSpace(topicId)) items = items.Where(m => m.TopicId == topicId).ToList();
+            // 时间演进：旧 → 新（ListMessages 返回新→旧，这里取反并按话题分组）
+            var asc = items.OrderBy(m => m.Timestamp).ToList();
+            return Results.Ok(new
+            {
+                groupId, topicId, keyword, count = asc.Count,
+                topics = asc.GroupBy(m => m.TopicId).Select(g => new
+                {
+                    topicId = g.Key,
+                    startMs = g.Min(m => m.Timestamp),
+                    endMs = g.Max(m => m.Timestamp),
+                    steps = g.Select(m => new
+                    {
+                        m.MessageId, m.Timestamp, m.SenderId, m.SenderType,
+                        senderNickname = ResolveSenderName(store, users, m.GroupId, m.SenderId, m.SenderType),
+                        m.Content, m.Importance,
+                    }).ToList(),
+                }).ToList(),
+            });
+        });
+
         // ---- 调整单条记忆级别 ----
         root.MapPost("/{messageId}/importance", (string messageId, MemoryImportanceHttpRequest req, HttpContext ctx,
             AuthService auth, AuthOptions authOptions, IMessageMemory memory) =>
