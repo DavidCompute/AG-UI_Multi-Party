@@ -13,6 +13,7 @@
       <button id="themeBtn" class="chip-btn" title="切换界面风格（深色 / 浅色）">☀️</button>
       <button id="helpBtn" class="chip-btn" title="使用帮助">❓ 帮助</button>
       <button id="agentManageBtn" class="chip-btn" title="AI 角色管理">🤖 智能体</button>
+      <button id="notifBtn" class="chip-btn notif-btn" title="通知中心" aria-label="通知中心" aria-haspopup="true" aria-expanded="false">🔔<span id="notifBadge" class="notif-badge hidden">0</span></button>
       <span id="meChip" class="me-chip hidden" title="账户">
         <span id="meAvatar" class="me-avatar hidden"><img alt="" /></span>
         <span id="meNickname"></span><span class="me-arrow">▾</span>
@@ -20,6 +21,15 @@
       <span id="connStatus" class="badge offline">未连接</span>
     </div>
   </header>
+
+  <div id="notifPanel" class="notif-panel hidden" role="region" aria-label="通知中心">
+    <div class="notif-head">
+      <span class="notif-title">通知</span>
+      <button id="notifClear" class="chip-btn" title="清除全部通知">清空</button>
+    </div>
+    <div id="notifList" class="notif-list" role="list"></div>
+    <div id="notifEmpty" class="notif-empty hidden">暂无通知</div>
+  </div>
 
   <div id="meMenu" class="me-menu hidden">
     <div id="meMenuProfile" class="me-menu-item">修改资料</div>
@@ -55,7 +65,7 @@
         </span>
       </div>
       <div id="topicBar" class="topic-bar hidden"></div>
-      <div id="messages" class="messages"></div>
+      <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="消息列表"></div>
       <div id="typingRow" class="typing-row"></div>
       <div id="chatResizer" class="chat-resizer" title="拖动调整聊天记录与输入区大小"></div>
       <div class="composer">
@@ -73,12 +83,12 @@
           <span id="mentionChips" class="chips"></span>
         </div>
         <div class="composer-row">
-          <textarea id="input" rows="2" placeholder="输入消息，@ 成员可触发智能体（如 @需求助手 帮我生成 V2 大纲），支持上传附件…"></textarea>
-          <button id="discussBtn" class="composer-icon-btn" title="发起多智能体讨论（选定群内智能体按序发言）" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
-          <button id="attachBtn" class="composer-icon-btn" title="上传附件" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-          <button id="voiceBtn" class="composer-icon-btn" title="语音消息：点击开始，再点发送录音" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
-          <button id="canvasBtn" class="composer-icon-btn" title="画布标注：绘图后作为图片发送" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
-          <button id="sendBtn" class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+          <textarea id="input" rows="2" aria-label="消息输入" placeholder="输入消息，@ 成员可触发智能体（如 @需求助手 帮我生成 V2 大纲），支持上传附件…"></textarea>
+          <button id="discussBtn" class="composer-icon-btn" title="发起多智能体讨论（选定群内智能体按序发言）" aria-label="发起多智能体讨论" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
+          <button id="attachBtn" class="composer-icon-btn" title="上传附件" aria-label="上传附件" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <button id="voiceBtn" class="composer-icon-btn" title="语音消息：点击开始，再点发送录音" aria-label="录音语音消息" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+          <button id="canvasBtn" class="composer-icon-btn" title="画布标注：绘图后作为图片发送" aria-label="画布标注" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+          <button id="sendBtn" class="send" aria-label="发送消息"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
         </div>
         <div id="voiceStatus" class="voice-status hidden"><span class="rec-dot">●</span> 正在录音 <span id="voiceTimer" class="rec-timer">0:00</span> <button id="voiceCancel" class="chip-btn" type="button">取消</button></div>
         <div id="attachList" class="attach-list"></div>
@@ -311,7 +321,7 @@
   </div>
 
   <!-- 画布标注（富媒体 5.2）：绘图后导出 PNG 作为图片附件发送 -->
-  <div id="canvasModal" class="modal-overlay hidden">
+  <div id="canvasModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="画布标注">
     <div class="modal canvas-modal">
       <div class="modal-title">🎨 画布标注</div>
       <p class="form-hint" style="margin:2px 0 8px">用鼠标 / 画笔绘制示意，完成后「插入画布」作为图片附件发送。</p>
@@ -322,7 +332,7 @@
         <label class="cv-color"><input id="cvColor" type="color" value="#4f8cff" /></label>
         <span class="cv-hint">按住拖动绘制</span>
       </div>
-      <canvas id="cvCanvas" width="640" height="360"></canvas>
+      <canvas id="cvCanvas" width="640" height="360" tabindex="0" aria-label="画布绘图区"></canvas>
       <div class="modal-actions">
         <button id="cvCancel" class="btn-ghost">取消</button>
         <button id="cvInsert" class="send">插入画布</button>

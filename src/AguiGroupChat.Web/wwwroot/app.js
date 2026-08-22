@@ -27,6 +27,10 @@ const state = {
   // 按群记忆的话题：groupId → 话题 ID（持久化 localStorage，切群/再登录自动恢复）
   topicMemory: new Map(),
   visibility: "all",
+  // 应用内通知中心（5.4）：{ id, type, icon, title, body, groupId?, topicId?, ts, read }[]
+  notifications: [],
+  notifSeq: 0,
+  notifPanelOpen: false,
   reconnectTimer: null, // 断线重连定时器（登出时需取消，防止登出后无限重连）
 };
 
@@ -66,11 +70,13 @@ function connect() {
   const ws = new WebSocket(`${proto}://${location.host}/ws?${query}`);
   state.ws = ws;
   setStatus(false, "连接中…");
+  const firstConnect = !state.hadConnection;
 
-  ws.onopen = () => { setStatus(true, "已连接"); state.reconnectDelay = 1000; };
+  ws.onopen = () => { setStatus(true, "已连接"); state.reconnectDelay = 1000; state.hadConnection = true; if (!firstConnect) addNotification("reconnect", "已重新连接", "网络恢复，实时消息通道已重连"); };
   ws.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) { console.error("事件解析失败：长度 " + e.data.length + "，原因 " + (err && err.message)); } };
   ws.onclose = () => {
     setStatus(false, "已断开");
+    if (state.memberId && state.hadConnection) addNotification("reconnect", "连接已断开", "正在自动重连…消息已保留，重连后可继续操作");
     if (state.ws === ws) {
       state.reconnectTimer = setTimeout(connect, state.reconnectDelay);
       checkSession(); // 令牌可能已失效（如服务端重启），失效则引导重新登录
@@ -253,6 +259,11 @@ function resetChatState() {
   state.groupUnread.clear();
   pendingAttachments = [];
   state.visibility = "all";
+  // 通知中心（5.4）：登出清空通知，避免跨账号残留
+  state.notifications = [];
+  state.hadConnection = false;
+  hideNotifPanel();
+  if ($("notifBadge")) renderNotifications();
   const input = $("input"); if (input) input.value = "";
   // 富媒体（5.2）：登出 / 切换身份时停止录音、关闭画布，避免残留麦克风占用
   stopVoiceRecording();
@@ -1747,6 +1758,18 @@ function onMessageStart(evt) {
     // 非当前视图的新消息：页面不可见时桌面通知（可见时站内徽标已提示）
     notifyNewMessage(evt, m);
   }
+  // 应用内通知中心（5.4）：非当前视图的入群消息 + 提及我 / 审批（在下方钩子单独处理）
+  if (evt.senderId !== state.memberId) {
+    const isMeMentioned = (evt.mentionAll) || (Array.isArray(evt.mentions) && evt.mentions.includes(state.memberId));
+    const isCurrentView = evt.groupId === state.activeGroupId && (m.topicId || "main") === (state.activeTopicId || "main");
+    const gnameStr = (state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId;
+    if (isMeMentioned) {
+      addNotification("mention", `${evt.senderNickname || evt.senderId} 提到了你`, `在「${gnameStr}」：${String(m.content || "").slice(0, 80)}`, { groupId: evt.groupId, topicId: m.topicId });
+    } else if (!isCurrentView && evt.senderType !== "sys") {
+      const label = evt.senderType === "agent" ? "智能体发来" : "新消息";
+      addNotification("message", `「${gnameStr}」· ${evt.senderNickname || evt.senderId}`, String(m.content || "（图片 / 语音 / 附件）").slice(0, 80), { groupId: evt.groupId, topicId: m.topicId });
+    }
+  }
   if (state.activeGroupId !== evt.groupId) return; // 非当前群不渲染
   // 是否跟随（滚动到底）由 stickBottom 决定：滚动监听只在用户停靠最底部时置位，
   // 任何上滑立即取消——避免滚轮大幅滚动时视口被反复拉回底部。
@@ -2113,6 +2136,11 @@ function onInteractionRequest(evt) {
   };
   m.waiting = false; // 卡片替代“等待确认”占位
   m._html = undefined; // 内容区无变化，但渲染缓存与卡片块独立，无需清（保守清一次）
+  // 应用内通知中心（5.4）：当前用户待处理的人机交互（审批 / 输入）入通知，含系统兜底
+  if (m.interaction.canDecide) {
+    const act = m.interaction.kind === "input" ? "请求输入" : "请求批准";
+    addNotification("approval", `智能体${act}：${m.interaction.toolName || "工具调用"}`, `在「${(state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId}」等待你处理`, { groupId: evt.groupId });
+  }
   if (state.activeGroupId !== evt.groupId) return;
   const msgEl = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
   if (!msgEl) { scheduleVirtualRender(); return; } // 窗口外：状态已挂，滚动到时由 msgDom 渲染卡片块
@@ -2560,6 +2588,99 @@ function notifyNewMessage(evt, m) {
       Notification.requestPermission().catch(() => {}); // 浏览器可能要求用户手势，被忽略不影响功能
     }
   } catch { /* 通知失败忽略 */ }
+}
+
+/* ============ 应用内通知中心（5.4） ============ */
+
+/** 新增应用内通知；页面隐藏时同步发系统桌面通知。 */
+function addNotification(type, title, body, opts = {}) {
+  const n = {
+    id: "n" + (++state.notifSeq),
+    type, // mention / approval / message / reconnect / info
+    title, body,
+    groupId: opts.groupId || null,
+    topicId: opts.topicId || null,
+    ts: Date.now(),
+    read: false,
+    icon: opts.icon || notifIcon(type),
+  };
+  state.notifications.unshift(n);
+  if (state.notifications.length > 100) state.notifications.pop(); // 上限：仅保留最近 100 条
+  renderNotifications();
+  // 页面隐藏时用系统桌面通知兜底（站内面板可见时不打扰）
+  if (document.hidden) showSystemNotification(title, body, opts.groupId);
+}
+
+function notifIcon(type) {
+  return ({ mention: "📣", approval: "🔐", message: "💬", reconnect: "🔌", info: "ℹ️" })[type] || "🔔";
+}
+
+/** 系统桌面通知（页面隐藏时的兜底）。 */
+function showSystemNotification(title, body, tag) {
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const n = new Notification(title, { body: String(body || "").slice(0, 100), tag: tag || "agui" });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch { /* 忽略 */ }
+}
+
+/** 未读通知条数。 */
+function unreadNotifCount() {
+  return state.notifications.filter((n) => !n.read).length;
+}
+
+/** 渲染通知面板列表 + 徽标。 */
+function renderNotifications() {
+  const list = $("notifList");
+  if (!list) return;
+  const badge = $("notifBadge");
+  const unread = unreadNotifCount();
+  badge.classList.toggle("hidden", unread === 0);
+  badge.textContent = unread > 99 ? "99+" : String(unread);
+  $("notifEmpty").classList.toggle("hidden", state.notifications.length > 0);
+  list.innerHTML = state.notifications.length === 0 ? "" : state.notifications.map((n) => `
+    <div class="notif-item${n.read ? "" : " unread"}" data-nid="${n.id}" role="listitem" tabindex="0">
+      <span class="notif-ico">${n.icon}</span>
+      <span class="notif-body">
+        <span class="notif-text"><b>${escapeHtml(n.title)}</b><br/>${escapeHtml(n.body)}</span>
+        <span class="notif-time">${escapeHtml(fmtTime(n.ts))}</span>
+      </span>
+    </div>`).join("");
+  // 点击跳转 / 键盘 Enter 触发
+  for (const el of list.querySelectorAll(".notif-item")) {
+    const go = () => {
+      const n = state.notifications.find((x) => String(x.id) === el.dataset.nid);
+      if (n) { n.read = true; renderNotifications(); }
+      if (n?.groupId) {
+        hideNotifPanel();
+        selectGroup(n.groupId); // 跳转到来源群（话题跟随群内记忆恢复，可靠且无竞态）
+      }
+    };
+    el.onclick = go;
+    el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+  }
+}
+
+function toggleNotifPanel() {
+  state.notifPanelOpen = !state.notifPanelOpen;
+  $("notifPanel").classList.toggle("hidden", !state.notifPanelOpen);
+  $("notifBtn").setAttribute("aria-expanded", String(state.notifPanelOpen));
+  if (state.notifPanelOpen) {
+    // 打开即清空未读徽标（列表项保留，点击跳转时才标已读）——徽标只反映“新”数量
+    state.notifications.forEach((n) => { n.read = true; });
+    renderNotifications();
+  }
+}
+
+function hideNotifPanel() {
+  state.notifPanelOpen = false;
+  $("notifPanel").classList.add("hidden");
+  $("notifBtn").setAttribute("aria-expanded", "false");
+}
+
+function clearNotifications() {
+  state.notifications = [];
+  renderNotifications();
 }
 
 /** 本地把某话题未读清零（进入群 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
@@ -3647,6 +3768,10 @@ function msgDom(m, r) {
   const div = document.createElement("div");
   div.className = "msg" + (isMine ? " mine" : "") + (m.senderType === "agent" ? " agent" : "") + " vmsg";
   div.setAttribute("data-mid", m.id); // 供展开/收起、流式增量、撤回等局部更新定位
+  // ARIA（5.3）：每条消息作为列表项，附发件人 + 时间 + 内容摘要标签供读屏朗读
+  div.setAttribute("role", "listitem");
+  const labelText = (m.sys ? "" : (m.senderNickname || m.senderId) + ", " + m.time + ", ") + String(m.content || "").replace(/\s+/g, " ").slice(0, 120);
+  div.setAttribute("aria-label", m.sys ? "系统消息：" + m.sys : labelText);
 
   // 撤回按钮：本人消息或当前用户是群主 / 管理员（服务端同样校验）+ 发送 3 分钟内；已撤回 / 流式中 / 系统行不显示
   const meRole = r.members?.find((x) => x.memberId === state.memberId)?.role;
@@ -4596,6 +4721,7 @@ function cancelVoiceRecording() {
 let cvTool = "brush";
 let cvDrawing = false;
 let cvLast = null;
+let cvFocusReturn = null; // 打开画布前的焦点元素（ARIA：关闭后回移）
 
 function openCanvasModal() {
   if (!state.activeGroupId) { toast("请先选择群"); return; }
@@ -4607,12 +4733,17 @@ function openCanvasModal() {
   $("cvToolBrush").classList.add("on");
   $("cvToolEraser").classList.remove("on");
   $("canvasModal").classList.remove("hidden");
+  // ARIA（5.3）：打开聚焦画布，焦点回移到画布按钮
+  cvFocusReturn = document.activeElement;
+  c.focus();
 }
 
 function closeCanvasModal() {
   $("canvasModal").classList.add("hidden");
   cvDrawing = false;
   cvLast = null;
+  if (cvFocusReturn && cvFocusReturn.focus) { try { cvFocusReturn.focus(); } catch { /* 忽略 */ } }
+  cvFocusReturn = null;
 }
 
 function cvDown(e) {
@@ -5076,6 +5207,17 @@ function init() {
   $("meMenuLogout").onclick = () => { $("meMenu").classList.add("hidden"); logout(); };
   $("pwCancel").onclick = () => $("pwModal").classList.add("hidden");
   $("pwConfirm").onclick = submitChangePassword;
+
+  // ---- 应用内通知中心（5.4）----
+  $("notifBtn").onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); $("meMenu").classList.add("hidden"); };
+  $("notifClear").onclick = (e) => { e.stopPropagation(); clearNotifications(); };
+  document.addEventListener("click", (e) => {
+    if (state.notifPanelOpen && !$("notifPanel").contains(e.target) && e.target !== $("notifBtn") && !$("notifBtn").contains(e.target)) hideNotifPanel();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.notifPanelOpen) hideNotifPanel();
+    if (e.key === "Escape" && !$("canvasModal").classList.contains("hidden")) closeCanvasModal();
+  });
   $("pwNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitChangePassword(); } });
   $("pfCancel").onclick = () => $("profileModal").classList.add("hidden");
   $("pfConfirm").onclick = submitProfile;
