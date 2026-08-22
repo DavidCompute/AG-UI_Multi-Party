@@ -59,4 +59,21 @@ public static partial class Bm25Ranker
         var textScore = cosine * (1 - w) + bm25 * w; // 文本相似度（cosine + BM25 融合）
         return textScore * (1 + importance);          // 重要级加成（仅作排序用，不改变命中集合）
     }
+
+    /// <summary>
+    /// 语义相关度（5.1 跨话题关联）：两段文本的共享关键词评分（Jaccard-ish，含重要度/词频加权），返回 [0,1]。
+    /// 用于判断某话题与其它话题的讨论内容是否相关（供前端展示「也在此主题讨论过」）。
+    /// </summary>
+    public static double Relatedness(string a, string b)
+    {
+        var ta = Tokens(a ?? "").Select(t => t.ToLowerInvariant()).ToList();
+        var tb = Tokens(b ?? "").Select(t => t.ToLowerInvariant()).ToList();
+        if (ta.Count == 0 || tb.Count == 0) return 0;
+        var setA = new HashSet<string>(ta, StringComparer.Ordinal);
+        var setB = new HashSet<string>(tb, StringComparer.Ordinal);
+        var inter = setA.Count(x => setB.Contains(x));
+        if (inter == 0) return 0;
+        var union = setA.Count + setB.Count - inter;
+        return (double)inter / Math.Max(1, union); // Jaccard，取值 [0,1]
+    }
 }

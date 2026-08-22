@@ -241,6 +241,44 @@ public static class HttpGroupApi
                 return Results.Ok(hub.Store.ListTopics(groupId));
             }));
 
+        // 跨话题主题关联（5.1）：返回与指定话题<b>讨论内容最相关</b>的其它话题（按共享关键词评分）。
+        group.MapGet("/{groupId}/topics/related", async (string groupId, string? topicId, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
+            => await RunAsync(async () =>
+            {
+                var (identity, error) = RequireIdentity(ctx, auth, authOptions);
+                if (identity is null) return error!;
+                if (hub.Store.GetGroup(groupId) is null)
+                    return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
+                if (!hub.Store.IsMember(groupId, identity))
+                    return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
+                        statusCode: StatusCodes.Status403Forbidden);
+
+                var messages = hub.Store.AllMessages(groupId).Where(m => !m.Recalled && !string.IsNullOrWhiteSpace(m.Content)).ToList();
+                var textByTopic = messages
+                    .GroupBy(m => string.IsNullOrEmpty(m.TopicId) ? "main" : m.TopicId)
+                    .ToDictionary(g => g.Key, g => string.Join(" ", g.Select(m => m.Content)), StringComparer.Ordinal);
+
+                var target = string.IsNullOrWhiteSpace(topicId) ? "main" : topicId;
+                if (!textByTopic.TryGetValue(target, out var targetText))
+                    return Results.Ok(new { topicId = target, related = Array.Empty<object>() }); // 目标无内容，无关联
+
+                var related = textByTopic
+                    .Where(kv => kv.Key != target)
+                    .Select(kv =>
+                    {
+                        var score = TopicRelatedness(targetText, kv.Value);
+                        return (TopicId: kv.Key, Score: score,
+                            Name: hub.Store.GetTopic(groupId, kv.Key)?.Name ?? kv.Key);
+                    })
+                    .Where(r => r.Score > 0.02)
+                    .OrderByDescending(r => r.Score)
+                    .ThenBy(r => r.TopicId)
+                    .Take(6)
+                    .Select(r => new { r.TopicId, r.Name, score = Math.Round(r.Score, 3) })
+                    .ToList();
+                return Results.Ok(new { topicId = target, related });
+            }));
+
         // 话题消息历史分页：before=游标消息 ID（不含），count 默认 50（上限 100）。
         // 返回与快照 latestMessages 相同结构的 SnapshotMessage 列表（按时间序，过滤撤回）。
         group.MapGet("/{groupId}/topics/{topicId}/messages", async (string groupId, string topicId, string? before, int? count, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
@@ -625,4 +663,31 @@ public static class HttpGroupApi
             => Results.Json(new AguiError(ex.ErrorCode, ex.Message), statusCode: StatusCodes.Status409Conflict),
         _ => Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)),
     };
+
+    /// <summary>跨话题关联（5.1）：两段文本的共享关键词相似度（Jaccard on 分词），取值 [0,1]。</summary>
+    private static double TopicRelatedness(string a, string b)
+    {
+        var ta = Tokens(a).ToHashSet(StringComparer.Ordinal);
+        var tb = Tokens(b).ToHashSet(StringComparer.Ordinal);
+        if (ta.Count == 0 || tb.Count == 0) return 0;
+        var inter = ta.Count(tb.Contains);
+        if (inter == 0) return 0;
+        return (double)inter / Math.Max(1, ta.Count + tb.Count - inter);
+    }
+
+    /// <summary>分词：ASCII 字母/数字/下划线整词 + 汉字逐字（与检索层一致，便于跨话题关键词比对）。</summary>
+    private static IEnumerable<string> Tokens(string s)
+    {
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(s ?? "", @"[a-zA-Z0-9_\u4e00-\u9fa5]+"))
+        {
+            var t = m.Value;
+            var pure = true;
+            foreach (var ch in t)
+            {
+                if (ch is >= '\u4e00' and <= '\u9fa5') { yield return ch.ToString(); pure = false; }
+                else break;
+            }
+            if (pure) yield return t.ToLowerInvariant();
+        }
+    }
 }

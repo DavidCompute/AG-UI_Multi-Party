@@ -233,4 +233,37 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/messages/around?messageId={Uri.EscapeDataString(targetId)}", outsider.GetProperty("token").GetString());
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
+
+    [Fact]
+    public async Task TopicsRelated_ReturnsRelatedBySharedKeywords_OnlyForMembers()
+    {
+        var user = await RegisterAsync("related_user");
+        var token = user.GetProperty("token").GetString()!;
+        var userId = user.GetProperty("userId").GetString()!;
+
+        var create = await _client.PostAsJsonAsync("/ag-ui/group/create", new { groupName = "关联群", ownerId = userId, memberIds = new[] { userId } });
+        create.EnsureSuccessStatusCode();
+        var groupId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+
+        // 主话题（main）与新建话题 t2 都讨论「数据库选型」，含共享关键词
+        await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, topicId = "main", content = "讨论数据库选型，考虑 Postgres 与 MySQL" });
+        var tRes = await _client.PostAsJsonAsync("/ag-ui/group/topic/create", new { groupId, operatorId = userId, name = "存储" });
+        tRes.EnsureSuccessStatusCode();
+        var t2Id = (await tRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("topicId").GetString()!;
+        await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, topicId = t2Id, content = "数据库选型：Postgres 更稳定，缓存用 Redis" });
+        await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, topicId = "main", content = "今天天气不错" });
+
+        using var req = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/topics/related?topicId={Uri.EscapeDataString("main")}", token);
+        var res = await _client.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+        var related = d.GetProperty("related");
+        Assert.True(related.GetArrayLength() >= 1, "应返回至少一个相关话题");
+        Assert.Contains(related.EnumerateArray(), r => r.GetProperty("topicId").GetString() == t2Id);
+
+        // 非成员 → 403
+        var outsider = await RegisterAsync("related_outsider");
+        using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/topics/related?topicId=main", outsider.GetProperty("token").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
+    }
 }
