@@ -1,0 +1,22 @@
+# .NET 构建产物
+**/bin
+**/obj
+**/*.user
+**/*.suo
+.vs/
+.vscode/
+TestResults/
+
+# 运行期持久化数据（由命名卷承载，勿打入镜像）
+**/data/
+
+# 测试与示例客户端不需要进入服务镜像（如需容器化示例客户端可临时移除）
+tests/
+samples/
+
+# 敏感/本机配置
+.git/
+.gitignore
+.env
+.env.*
+!.env.example

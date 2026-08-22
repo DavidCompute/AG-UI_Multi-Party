@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/AguiGroupChat.Client/AguiGroupChat.Client.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/AguiGroupChat.Agents/AguiGroupChat.Agents.csproj" />
+    <Project Path="src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj" />
+    <Project Path="src/AguiGroupChat.Desktop.Core/AguiGroupChat.Desktop.Core.csproj" />
+    <Project Path="src/AguiGroupChat.Desktop.Cross/AguiGroupChat.Desktop.Cross.csproj" />
+    <Project Path="src/AguiGroupChat.Hub/AguiGroupChat.Hub.csproj" />
+    <Project Path="src/AguiGroupChat.Web/AguiGroupChat.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,150 @@
+# AG-UI 群聊扩展协议 Hub —— 容器化编排（一键 RAG 记忆 + 人机交互演示）
+#
+# 默认启动：postgres（pgvector）+ ollama（自动拉取 embedding 模型）+ web。
+# 浏览器打开 http://localhost:5200 即可体验：智能体回复前会自动检索群聊历史记忆（RAG）；
+# 工具调用默认开启（Agents__EnableTools=true）——请求智能体「发布公告」时会在聊天区弹出
+# 🔐 审批卡片（人机交互 HITL），仅发起请求的用户可批准 / 拒绝。
+# 需要同时启动仅协议 Hub（http://localhost:5100）时启用 profile：
+#   docker compose --profile hub up -d
+#
+# 存储 / 记忆（.env 的 STORAGE_PROVIDER / MEMORY_ENABLED）：
+#   postgres（默认）+ Memory.Enabled=true：群聊数据 + 向量记忆全部落 PostgreSQL（pgvector），
+#   embedding 由内置 ollama 服务提供（首次启动自动拉取 bge-m3 模型，约 1.2GB）
+#   memory：进程内内存 + JSON 快照（关闭记忆体验，STORAGE_PROVIDER=memory 即切换）
+#
+# 配置项见 .env.example，复制为 .env 后按需修改（docker compose 自动读取）。
+
+name: agui-group-chat
+
+services:
+  postgres:
+    # pgvector 镜像：与 postgres 16 同内核，额外提供向量扩展（语义记忆 RAG 依赖）
+    image: pgvector/pgvector:pg16
+    container_name: agui-group-chat-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE:-agui}
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-agui}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - agui-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ${PG_DATABASE:-agui}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ollama:
+    # 语义记忆的 embedding 服务：启动时自动拉取模型（默认 bge-m3，中文语义效果好）
+    image: ollama/ollama:latest
+    container_name: agui-group-chat-ollama
+    restart: unless-stopped
+    ports:
+      # 宿主机端口默认 11435（避开本机已装的 Ollama 11434）；web 容器内走内网 http://ollama:11434
+      - "${OLLAMA_PORT:-11435}:11434"
+    volumes:
+      - agui-ollama-data:/root/.ollama
+    environment:
+      # 模型常驻内存：避免空闲 5 分钟后卸载导致的首次加载慢（如需释放内存改为 5m）
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:--1}
+    # 启动流程：serve → 拉模型 → 装 curl（镜像无 curl/wget）→ 预热加载（CPU 首次加载 bge-m3 需数十秒，预热后应用侧即时可用）；
+    # 用 ; 串联：拉取/预热失败不终止 serve，容器保持可用，web 侧会打印告警日志
+    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5; echo 'Pulling embedding model ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}...'; ollama pull ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest} || echo 'WARN: model pull failed (check network), embedding requests will fail until model is available'; (apt-get update -qq && apt-get install -y -qq --no-install-recommends curl >/dev/null 2>&1) || true; echo 'Warming up model...'; curl -s --max-time 300 http://localhost:11434/v1/embeddings -H 'Content-Type: application/json' -d '{\"model\":\"${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}\",\"input\":\"warmup\"}' >/dev/null && echo 'Model warmup done' || echo 'WARN: model warmup failed'; wait"]
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agui-group-chat-web:latest
+    container_name: agui-group-chat-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    ports:
+      - "${WEB_PORT:-5200}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      # 模型提供方（mock / openai / deepseek）与连接参数
+      Agents__Provider: ${AGENTS_PROVIDER:-deepseek}
+      Agents__ApiKey: ${DEEPSEEK_API_KEY:-}
+      # 透传环境变量密钥：模型配置「apiKey 留空」时回退进程环境变量（DEEPSEEK_API_KEY / OPENAI_API_KEY）
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      Agents__Endpoint: ${AGENTS_ENDPOINT:-}
+      Agents__Model: ${AGENTS_MODEL:-deepseek-chat}
+      # 思考模式（默认开启）：智能体调用推理模型 deepseek-reasoner（可在「模型配置」弹窗开关）
+      Agents__ThinkingMode: ${AGENTS_THINKING_MODE:-true}
+      # 每用户每日 token 用量配额（0 = 不限）：超出后该用户当天无法再触发智能体（管理员控制台「用量统计」查看）
+      Agents__DailyTokenQuotaPerUser: ${AGENTS_DAILY_TOKEN_QUOTA:-0}
+      # 工具调用（默认开启）：内置 get_current_time（免审批）+ calculator / unit_converter /
+      # group_memory_search / read_attachment + publish_announcement（需审批，人机交互 HITL）
+      Agents__EnableTools: ${AGENTS_ENABLE_TOOLS:-true}
+      # 网络类工具 web_search / read_url（默认关闭：需外网；开启后可搜索互联网 / 读取网页）
+      Agents__EnableWebTools: ${AGENTS_ENABLE_WEBTOOLS:-false}
+      Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
+      # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）
+      # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
+      Agents__WorkToolsEnabled: ${AGENTS_WORK_TOOLS_ENABLED:-false}
+      Agents__WorkSpaceRoot: ${AGENTS_WORKSPACE_ROOT:-data/workspaces}
+      # 需审批的工具名（命中后用 ApprovalRequiredAIFunction 包装，模型调用时运行中断等触发者决策）
+      Agents__RequireApprovalToolNames__0: ${AGENTS_REQUIRE_APPROVAL_TOOLS:-publish_announcement}
+      # 启动时播种示例群/成员/智能体（无历史数据时）
+      GroupChat__SeedSampleData: ${SEED_SAMPLE_DATA:-true}
+      # 实时连接 / 写接口强制令牌鉴权（默认 true：未携带有效 token 的连接与写请求一律 401；false 为旧客户端兼容回退）
+      Auth__RequireTokenOnRealTime: ${REQUIRE_TOKEN_ON_REALTIME:-true}
+      # 存储：postgres（默认，含向量记忆）；memory 为内存 + JSON 快照
+      Storage__Provider: ${STORAGE_PROVIDER:-postgres}
+      Storage__ConnectionString: ${STORAGE_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${PG_DATABASE:-agui};Username=${PG_USER:-postgres};Password=${PG_PASSWORD:-agui}}
+      # 语义记忆（RAG）：默认开启，embedding 走内置 ollama 服务（bge-m3，1024 维）
+      Agents__Memory__Enabled: ${MEMORY_ENABLED:-true}
+      Agents__Memory__EmbeddingEndpoint: ${MEMORY_EMBEDDING_ENDPOINT:-http://ollama:11434/v1}
+      Agents__Memory__EmbeddingModel: ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}
+      Agents__Memory__EmbeddingDimensions: ${MEMORY_EMBEDDING_DIMENSIONS:-1024}
+      Agents__Memory__TopK: ${MEMORY_TOP_K:-5}
+      Agents__Memory__MinScore: ${MEMORY_MIN_SCORE:-0.25}
+      Agents__Memory__Scope: ${MEMORY_SCOPE:-agent}
+      Agents__Memory__PersonalTopK: ${MEMORY_PERSONAL_TOP_K:-3}
+      Agents__Memory__PersonalMinScore: ${MEMORY_PERSONAL_MIN_SCORE:-0.25}
+      Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # memory 模式持久化快照 data/agui-state.json
+      - agui-web-data:/app/data
+      # Web 项目 appsettings.json 被 csproj 从发布输出移除（避免污染桌面端），这里只读挂载回容器：
+      # 提供 Agents:Agents 种子智能体定义等默认配置；环境变量（Agents__*）优先级更高，仍可覆盖
+      - ./src/AguiGroupChat.Web/appsettings.json:/app/appsettings.json:ro
+
+  hub:
+    profiles: ["hub"]
+    build:
+      context: .
+      dockerfile: Dockerfile.hub
+    image: agui-group-chat-hub:latest
+    container_name: agui-group-chat-hub
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${HUB_PORT:-5100}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      GroupChat__SeedSampleData: ${SEED_SAMPLE_DATA_HUB:-false}
+      Storage__Provider: ${STORAGE_PROVIDER_HUB:-postgres}
+      Storage__ConnectionString: ${STORAGE_CONNECTION_STRING_HUB:-Host=postgres;Port=5432;Database=${PG_DATABASE:-agui};Username=${PG_USER:-postgres};Password=${PG_PASSWORD:-agui}}
+    volumes:
+      - agui-hub-data:/app/data
+
+volumes:
+  agui-web-data:
+  agui-hub-data:
+  agui-pg-data:
+  agui-ollama-data:

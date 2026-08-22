@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>AguiGroupChat.Desktop</RootNamespace>
+    <AssemblyName>AguiGroupChat.Desktop</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.Agents\AguiGroupChat.Agents.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.Web\AguiGroupChat.Web.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.Desktop.Core\AguiGroupChat.Desktop.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内嵌 WebView2（Chromium Edge WebView2 Runtime，Win10/11 通常已内置） -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 复用现有静态前端：编译时复制到桌面输出目录 wwwroot/（组合根 UseWebRoot 指向它） -->
+    <Content Include="..\AguiGroupChat.Web\wwwroot\**\*"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 捆绑本地 embedding 模型（bge-m3-Q8_0，1024 维，约 605MB）与 sqlite-vec 原生扩展。
+         vec0.dll 输出到根目录：LoadExtension("vec0") 按工作目录 / PATH 查找。
+         模型体积大：MSI 会因此达到数百 MB，如需瘦身可去掉下方 models 行并配置 ModelDownloadUrl -->
+    <None Include="models\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="libs\vec0.dll" CopyToOutputDirectory="PreserveNewest" Link="vec0.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 排除从 Web 项目（Sdk.Web）传递复制到输出目录的冗余文件：
+         旧 JSON 快照 data/agui-state.json（sqlite 模式不写/不读它，只是残留）与开发配置 -->
+    <Content Remove="data\**\*" />
+    <Content Remove="appsettings.Development.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

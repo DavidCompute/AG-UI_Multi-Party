@@ -1,0 +1,13 @@
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+# 构建输出（发布目录 / MSI / WebView2 缓存 / 测试产物，勿入库）
+artifacts/
+# 持久化状态文件（运行期生成，勿入库）
+data/
+# docker compose 环境变量（密钥等，勿入库）
+.env
+.env.*
+!.env.example

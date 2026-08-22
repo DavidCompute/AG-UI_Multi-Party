@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AG-UI 群聊</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">💬 AG-UI 群聊 <span class="sub">Microsoft Agent Framework 多智能体</span></div>
+    <div class="topbar-right">
+      <button id="themeBtn" class="chip-btn" title="切换界面风格（深色 / 浅色）">☀️</button>
+      <button id="helpBtn" class="chip-btn" title="使用帮助">❓ 帮助</button>
+      <button id="agentManageBtn" class="chip-btn" title="AI 角色管理">🤖 智能体</button>
+      <span id="meChip" class="me-chip hidden" title="账户">
+        <span id="meAvatar" class="me-avatar hidden"><img alt="" /></span>
+        <span id="meNickname"></span><span class="me-arrow">▾</span>
+      </span>
+      <span id="connStatus" class="badge offline">未连接</span>
+    </div>
+  </header>
+
+  <div id="meMenu" class="me-menu hidden">
+    <div id="meMenuProfile" class="me-menu-item">修改资料</div>
+    <div id="meMenuPassword" class="me-menu-item">修改密码</div>
+    <div id="meMenuModelConfig" class="me-menu-item">模型配置</div>
+    <div id="meMenuAdmin" class="me-menu-item">用户管理</div>
+    <div id="meMenuStatus" class="me-menu-item">系统状态</div>
+    <div id="meMenuMemory" class="me-menu-item">记忆管理</div>
+    <div id="meMenuTasks" class="me-menu-item">任务中心</div>
+    <div id="meMenuBackup" class="me-menu-item">数据备份</div>
+    <div id="meMenuLogout" class="me-menu-item danger">退出登录</div>
+  </div>
+
+  <div class="layout">
+    <aside class="panel groups">
+      <div class="panel-title groups-title">
+        <span>我的群组</span>
+        <div class="title-actions">
+          <button id="refreshGroupsBtn" class="create-group-btn" title="刷新群组列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+          <button id="createGroupBtn" class="create-group-btn" title="创建群"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+        </div>
+      </div>
+      <div id="groupList" class="group-list"></div>
+    </aside>
+
+    <main class="chat">
+      <div class="chat-header">
+        <span id="chatGroupName">请选择一个群</span>
+        <span id="chatGroupMeta" class="muted"></span>
+        <span class="chat-header-ops">
+          <button id="searchBtn" class="chip-btn" title="搜索群内消息" disabled>🔍</button>
+          <button id="groupSettingsBtn" class="chip-btn" title="群设置（群名 / 头像 / 私密）" disabled>⚙</button>
+        </span>
+      </div>
+      <div id="topicBar" class="topic-bar hidden"></div>
+      <div id="messages" class="messages"></div>
+      <div id="typingRow" class="typing-row"></div>
+      <div id="chatResizer" class="chat-resizer" title="拖动调整聊天记录与输入区大小"></div>
+      <div class="composer">
+        <div id="mentionPicker" class="mention-picker" hidden></div>
+        <div id="replyBar" class="reply-bar hidden"></div>
+        <div class="composer-opts">
+          <label>可见范围
+            <select id="visibilitySelect">
+              <option value="all">全群可见</option>
+              <option value="mentioned">仅 @ 提及者可见</option>
+              <option value="private">私聊（仅选中成员）</option>
+            </select>
+          </label>
+          <button id="mentionAllBtn" class="chip-btn" title="@ 全体">@全体</button>
+          <span id="mentionChips" class="chips"></span>
+        </div>
+        <div class="composer-row">
+          <textarea id="input" rows="2" placeholder="输入消息，@ 成员可触发智能体（如 @需求助手 帮我生成 V2 大纲），支持上传附件…"></textarea>
+          <button id="discussBtn" class="composer-icon-btn" title="发起多智能体讨论（选定群内智能体按序发言）" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></button>
+          <button id="attachBtn" class="composer-icon-btn" title="上传附件" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+          <button id="sendBtn" class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+        </div>
+        <div id="attachList" class="attach-list"></div>
+        <input type="file" id="attachInput" multiple hidden />
+      </div>
+    </main>
+
+    <aside class="panel members">
+      <div class="panel-title members-title">
+        <span>群成员 <span id="memberCount" class="muted"></span></span>
+        <div class="title-actions">
+          <button id="refreshMembersBtn" class="create-group-btn" title="刷新群成员列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+          <button id="addMemberBtn" class="create-group-btn" title="添加成员" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+        </div>
+      </div>
+      <div id="memberList" class="member-list"></div>
+    </aside>
+  </div>
+
+  <!-- 登录 / 注册 -->
+  <div id="authOverlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-brand">💬 AG-UI 群聊</div>
+      <div class="auth-tabs">
+        <button id="authTabLogin" class="auth-tab on">登录</button>
+        <button id="authTabRegister" class="auth-tab">注册</button>
+      </div>
+      <form id="authForm" autocomplete="off">
+        <input id="authUsername" class="auth-input" placeholder="用户名（≥3 字符）" maxlength="32" />
+        <input id="authPassword" class="auth-input" type="password" placeholder="密码（≥6 位）" />
+        <input id="authNickname" class="auth-input hidden" placeholder="昵称（可选，默认取用户名）" maxlength="20" />
+        <label class="auth-remember"><input id="authRemember" type="checkbox" /> 保持登录状态（下次访问无需再次登录，退出登录后失效）</label>
+        <button id="authSubmit" type="submit" class="send auth-submit">登录</button>
+      </form>
+      <div id="authError" class="auth-error"></div>
+    </div>
+  </div>
+
+  <!-- 智能体管理 -->
+  <div id="agentModal" class="modal-overlay hidden">
+    <div class="modal agent-modal">
+      <!-- 列表视图：工具栏 + 表格化列表 -->
+      <div id="agentListView">
+        <div class="modal-title">AI 角色管理 <span id="agentCount" class="count-badge"></span></div>
+        <div class="agent-toolbar">
+          <input id="agentSearch" class="modal-input agent-search" placeholder="搜索昵称 / ID / 简介…" />
+          <button id="agentImportBtn" class="chip-btn" title="从 JSON 文件导入智能体配置">📥 导入</button>
+          <button id="agentExportAllBtn" class="chip-btn" title="导出全部智能体配置为 JSON 文件">📤 导出全部</button>
+          <button id="agentAddBtn" class="send">＋ 新增智能体</button>
+          <input id="agentImportFile" type="file" accept=".json,application/json" class="hidden" />
+        </div>
+        <div class="agent-table">
+          <div class="agent-table-head">
+            <span>角色</span>
+            <span>标识</span>
+            <span>触发方式</span>
+            <span>模型</span>
+            <span>创建者</span>
+            <span class="agent-op-col">操作</span>
+          </div>
+          <div id="agentList" class="agent-table-body"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="agentClose" class="btn-ghost">关闭</button>
+        </div>
+      </div>
+
+      <!-- 表单视图：分组表单 -->
+      <div id="agentFormView" class="hidden">
+        <div class="modal-title" id="agentFormTitle">新增智能体</div>
+        <div class="agent-form">
+          <div class="form-section">基本信息</div>
+          <div class="form-group">
+            <label>昵称 <span class="req">*</span></label>
+            <input id="afNickname" class="modal-input" placeholder="如：需求助手" maxlength="20" />
+          </div>
+          <div class="form-group">
+            <label>头像</label>
+            <div class="avatar-edit">
+              <span id="afAvatarPreview" class="avatar-edit-preview">🤖</span>
+              <div class="avatar-edit-actions">
+                <button id="afAvatarUploadBtn" class="chip-btn" type="button">上传头像</button>
+                <button id="afAvatarClearBtn" class="chip-btn" type="button">移除</button>
+              </div>
+              <input id="afAvatarFile" type="file" accept="image/*" class="hidden" />
+            </div>
+            <p class="form-hint">选择本地图片上传（支持 jpg / png / gif / webp，建议正方形）</p>
+          </div>
+          <div class="form-group">
+            <label>Agent ID</label>
+            <input id="afAgentId" class="modal-input" placeholder="留空自动生成 agent_xxx" />
+            <p class="form-hint">群内唯一标识，创建后不可修改</p>
+          </div>
+          <div class="form-group">
+            <label>一句话简介</label>
+            <div class="input-row">
+              <input id="afDescription" class="modal-input" placeholder="如：产品需求分析助手" />
+              <button id="afGenInstructionsBtn" class="chip-btn" type="button" title="根据一句话简介生成角色设定（身份定位 / 职责范围 / 回复风格要求），填充到下方 Instructions">✨ 生成角色设定</button>
+            </div>
+            <p class="form-hint">点击「✨ 生成角色设定」可自动生成完整系统提示词并填入下方 Instructions，生成后请检查微调</p>
+          </div>
+
+          <div class="form-section">角色设定</div>
+          <div class="form-group">
+            <label>Instructions（系统提示词）</label>
+            <textarea id="afInstructions" class="modal-input agent-instructions" rows="4" placeholder="定义角色的身份、职责范围与回复风格…"></textarea>
+            <p class="form-hint">建议包含：身份定位、职责范围、回复风格要求</p>
+          </div>
+
+          <div class="form-section">触发与模型</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>触发方式</label>
+              <select id="afTriggerMode" class="modal-input">
+                <option value="mentioned">提及触发</option>
+                <option value="allMessages">全量监听</option>
+                <option value="keyword">关键词触发</option>
+                <option value="contextual">语境触发</option>
+              </select>
+              <p id="afTriggerHint" class="form-hint"></p>
+            </div>
+            <div class="form-group">
+              <label>模型（可选）</label>
+              <input id="afModel" class="modal-input" placeholder="默认 deepseek-chat" />
+            </div>
+          </div>
+          <div class="form-group" id="afKeywordGroup">
+            <label>触发关键词</label>
+            <input id="afKeywords" class="modal-input" placeholder="逗号分隔，如：需求,评审" />
+            <p class="form-hint">仅「关键词触发」模式生效</p>
+          </div>
+
+          <div class="form-group">
+            <label>定时任务（Cron）</label>
+            <input id="afSchedule" class="modal-input" placeholder="留空 = 不启用；如：0 9 * * *（每天 9 点 UTC 汇报）" />
+            <p class="form-hint">5 段表达式：分 时 日 月 周（UTC），到点自动向该智能体加入的每个群发汇报。支持 * 、*/n 、a-b 、a,b,c。示例：*/30 * * * *（每 30 分钟）、0 18 * * 1-5（工作日 18 点）</p>
+          </div>
+
+          <div class="form-section">AG-UI 桥接（可选，外部专家）</div>
+          <div class="form-group">
+            <label>桥接端点</label>
+            <input id="afBridgeEndpoint" class="modal-input" placeholder="留空 = 本地大模型；填写 http(s):// 或 ws(s):// 即对接外部 AG-UI 服务" />
+            <p class="form-hint">配置后该角色不再调用本地大模型，消息经 AG-UI 协议转发给外部服务（HTTP 走 POST + SSE/JSON 回复，WebSocket 走事件流），其流式回复回灌群聊</p>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>协议方言</label>
+              <select id="afBridgeMode" class="modal-input">
+                <option value="standard">standard（标准 AG-UI 事件）</option>
+                <option value="hub">hub（本协议群聊扩展）</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>认证令牌（可选）</label>
+              <input id="afBridgeToken" class="modal-input" type="password" autocomplete="off" placeholder="编辑时留空表示不修改" />
+              <p class="form-hint">以 Authorization: Bearer 随连接携带；不随列表回显</p>
+            </div>
+          </div>
+
+          <div class="form-section">技能（Skills，可选）</div>
+          <div class="form-group">
+            <p class="form-hint" style="margin-bottom:8px">把<b>其他智能体</b>作为可调用技能（Microsoft Agent Framework 智能体间调用）：本智能体需要该领域信息时，由模型决定调用子智能体获取答复。</p>
+            <div id="afSkillsList"></div>
+            <button id="afSkillAddBtn" class="chip-btn" type="button" style="margin-top:6px">＋ 添加技能</button>
+          </div>
+
+          <div class="form-section">知识库（可选）</div>
+          <div class="form-group">
+            <p class="form-hint" style="margin-bottom:8px">绑定<b>知识库</b>后，智能体回复前会检索其中的知识文档相关内容（RAG），基于您的资料作答。知识库在下方弹窗中创建并上传文档。</p>
+            <div id="afKbList" class="kb-pick"></div>
+            <button id="afKbManageBtn" class="chip-btn" type="button" style="margin-top:6px">📚 管理知识库</button>
+          </div>
+
+          <div class="form-section">记忆</div>
+          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="afPersonalMemory" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+            <label for="afPersonalMemory" style="margin:0;cursor:pointer">🧠 个人记忆</label>
+            <span style="color:#8a8f98;font-size:12px">（默认关闭。开启后，该智能体回复时会参考触发者本人的历史发言，了解其偏好；需触发者用户也开启个人记忆才生效）</span>
+          </div>
+
+          <div class="form-section">访问权限</div>
+          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="afIsPrivate" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+            <label for="afIsPrivate" style="margin:0;cursor:pointer">🔒 私密智能体</label>
+            <span style="color:#8a8f98;font-size:12px">（默认关闭。开启后仅创建者可将它拉进群，其他用户看不到也无法使用）</span>
+          </div>
+
+          <div class="form-section">工作能力</div>
+          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="afEnableWorkTools" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+            <label for="afEnableWorkTools" style="margin:0;cursor:pointer">🛠️ 工作型智能体</label>
+            <span style="color:#8a8f98;font-size:12px">（默认关闭。开启后可在专属工作区读取/写入文件、执行白名单命令；写操作需你在群内批准。仅供可信智能体使用）</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="afCancel" class="btn-ghost">取消</button>
+          <button id="afSave" class="send">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 知识库管理：创建知识库、上传文档（附件提取文本 + 向量化） -->
+  <div id="kbModal" class="modal-overlay hidden">
+    <div class="modal kb-modal">
+      <div class="modal-title">📚 知识库管理</div>
+      <div class="kb-create">
+        <input id="kbName" class="modal-input" placeholder="知识库名称（如：公司制度）" maxlength="40" />
+        <input id="kbDesc" class="modal-input" placeholder="一句话说明（可选）" maxlength="120" style="margin-top:6px" />
+        <button id="kbCreateBtn" class="send" style="margin-top:6px">＋ 创建知识库</button>
+      </div>
+      <div id="kbListWrap" class="kb-list"></div>
+      <div class="modal-actions">
+        <button id="kbCloseBtn" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 修改密码 -->
+  <div id="pwModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">修改密码</div>
+      <input id="pwOld" class="modal-input" type="password" placeholder="旧密码" />
+      <input id="pwNew" class="modal-input" type="password" placeholder="新密码（≥6 位）" style="margin-top:8px" />
+      <div class="modal-actions">
+        <button id="pwCancel" class="btn-ghost">取消</button>
+        <button id="pwConfirm" class="send">确认修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数据备份：导出 / 导入（账号 + 智能体 + 聊天记录 + 附件） -->
+  <div id="backupModal" class="modal-overlay hidden">
+    <div class="modal backup-modal">
+      <div class="modal-title">数据备份</div>
+      <p class="form-hint" style="margin:2px 0 10px">导出全部账号、智能体与聊天记录为 zip（含附件文件）；导入时勾选要恢复的聊天记录群，<b>账号</b>按用户名、<b>智能体</b>按标识自动检查，缺失的自动补齐，消息发送者与提及引用随之重写，保证数据完整。</p>
+      <div class="backup-row">
+        <button id="backupExportBtn" class="chip-btn" title="导出全部账号、智能体、聊天记录与附件为 zip">📦 导出全部数据</button>
+        <button id="backupImportBtn" class="chip-btn" title="从 zip 数据包导入（可勾选要恢复的聊天记录群）">📥 导入数据</button>
+        <input id="backupImportFile" type="file" accept=".zip,application/zip" class="hidden" />
+      </div>
+      <div id="backupImportPanel" class="hidden">
+        <div id="backupImportSummary" class="backup-summary"></div>
+        <div id="backupImportGroups" class="backup-groups"></div>
+        <div class="backup-row">
+          <button id="backupImportConfirm" class="send">开始导入</button>
+          <button id="backupImportCancel" class="btn-ghost">取消</button>
+        </div>
+      </div>
+      <div id="backupResult" class="backup-result hidden"></div>
+      <div class="backup-section" style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px">
+        <div class="form-section">危险操作</div>
+        <button id="backupInitBtn" class="chip-btn" style="color:var(--err);border-color:rgba(255,107,107,.4)" title="删除全部数据并清空浏览器缓存，不可恢复">🗑 初始化（清空一切）</button>
+        <div id="backupInitPanel" class="hidden" style="margin-top:10px">
+          <p class="form-hint">将<b style="color:var(--err)">删除全部数据</b>：账号、智能体、聊天记录、附件、语义记忆与模型配置，所有已登录端立即失效，且会<b>清空浏览器缓存</b>。此操作不可恢复，如需保留数据请先在上方导出。请输入 <b>确认</b> 以继续。</p>
+          <div class="backup-row">
+            <input id="backupInitText" class="modal-input" placeholder="输入「确认」两个字" style="flex:1" />
+            <button id="backupInitConfirm" class="send" style="background:var(--err);border-color:var(--err)">确认初始化</button>
+            <button id="backupInitCancel" class="btn-ghost">取消</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="backupClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模型配置：DeepSeek endpoint / apiKey（留空则用默认端点与环境变量） -->
+  <div id="modelConfigModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">模型配置</div>
+      <p class="form-hint" style="margin:2px 0 10px">填写 DeepSeek 的 Endpoint 与 API Key。<b>Endpoint 留空</b>时使用官方端点 <code>https://api.deepseek.com</code>；<b>API Key 留空</b>时使用环境变量（<code>DEEPSEEK_API_KEY</code> / <code>OPENAI_API_KEY</code>）。</p>
+      <div class="form-group">
+        <label>Endpoint</label>
+        <input id="mcEndpoint" class="modal-input" placeholder="https://api.deepseek.com（留空用默认）" />
+      </div>
+      <div class="form-group">
+        <label>API Key <span id="mcApiKeyState" class="muted" style="font-size:11px"></span></label>
+        <input id="mcApiKey" class="modal-input" type="password" placeholder="留空使用环境变量 DEEPSEEK_API_KEY / OPENAI_API_KEY" />
+      </div>
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
+        <input id="mcThinking" type="checkbox" style="width:16px;height:16px" checked />
+        <label for="mcThinking" style="margin:0">思考模式（调用推理模型 <code>deepseek-reasoner</code>，回复前先思考，质量更高但更慢 / 更贵）</label>
+      </div>
+      <div class="modal-actions">
+        <button id="mcCancel" class="btn-ghost">取消</button>
+        <button id="mcSave" class="send">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 记忆管理：分群分级 / 自动遗忘 / 可视化 -->
+  <div id="memoryModal" class="modal-overlay hidden">
+    <div class="modal memory-modal">
+      <div class="modal-title">记忆管理 <span id="memTotal" class="count-badge"></span></div>
+      <p class="form-hint" style="margin:2px 0 10px">智能体的<b>语义记忆</b>（RAG）：聊天记录向量化后供回复前检索。可<b>分级</b>（重要记忆同相似度下优先检索）、<b>手动遗忘</b>与<b>可视化浏览</b>；过期记忆由系统按配置的保留天数自动清理。</p>
+      <div class="memory-toolbar">
+        <select id="memGroupSelect" class="modal-input" style="flex:1;min-width:120px">
+          <option value="">全部群</option>
+        </select>
+        <input id="memKeyword" class="modal-input" placeholder="搜索记忆内容…" style="flex:2;min-width:140px" />
+        <button id="memSearchBtn" class="create-group-btn" title="搜索记忆内容"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
+        <button id="memForgetBtn" class="create-group-btn" style="color:var(--warn)" title="按群设置遗忘（保留最近 N 天或立即遗忘）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+      </div>
+      <div id="memForgetPanel" class="memory-forget-panel hidden">
+        <span style="color:var(--muted);font-size:12px">遗忘范围：</span>
+        <select id="memForgetRange" class="modal-input" style="flex:1">
+          <option value="7">保留最近 7 天</option>
+          <option value="30">保留最近 30 天</option>
+          <option value="90">保留最近 90 天</option>
+          <option value="0">立即遗忘全部</option>
+        </select>
+        <button id="memForgetConfirm" class="send" style="background:var(--warn);border-color:var(--warn)">确认遗忘</button>
+        <button id="memForgetCancel" class="btn-ghost">取消</button>
+      </div>
+      <div id="memForgetHint" class="hidden" style="color:var(--muted);font-size:12px;margin:-4px 0 6px">非管理员：遗忘仅作用于<b>你自己的记忆</b>，不影响他人</div>
+      <div id="memList" class="memory-list"></div>
+      <div id="memPager" class="memory-pager"></div>
+      <div class="modal-actions">
+        <button id="memoryClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务中心：工作型智能体的任务级编排（状态 / 进度 / 结果） -->
+  <div id="taskModal" class="modal-overlay hidden">
+    <div class="modal task-modal">
+      <div class="modal-title">任务中心 <span id="taskCount" class="count-badge"></span></div>
+      <p class="form-hint" style="margin:2px 0 10px">工作型智能体在<b>专属工作区</b>执行的任务编排（采集、整理、发布等）：创建后后台运行，可随时查看<b>状态 / 进度 / 结果</b>。跨对话记忆延续通过工作区 <code>NOTES.md</code> 实现。</p>
+      <div class="memory-toolbar">
+        <select id="taskGroupFilter" class="modal-input" style="flex:1;min-width:120px">
+          <option value="">我的全部任务</option>
+        </select>
+        <button id="taskRefreshBtn" class="create-group-btn" title="刷新任务列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      </div>
+      <div id="taskList" class="memory-list"><div class="mem-empty">加载中…</div></div>
+      <div class="modal-actions">
+        <button id="taskClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 修改资料 -->
+  <div id="profileModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">修改资料</div>
+      <input id="pfNickname" class="modal-input" placeholder="昵称" maxlength="20" />
+      <div class="form-group" style="margin-top:12px">
+        <label>头像</label>
+        <div class="avatar-edit">
+          <span id="pfAvatarPreview" class="avatar-edit-preview">🧑</span>
+          <div class="avatar-edit-actions">
+            <button id="pfAvatarUploadBtn" class="chip-btn" type="button">上传头像</button>
+            <button id="pfAvatarClearBtn" class="chip-btn" type="button">移除</button>
+          </div>
+          <input id="pfAvatarFile" type="file" accept="image/*" class="hidden" />
+        </div>
+        <p class="form-hint">选择本地图片上传（支持 jpg / png / gif / webp，建议正方形）</p>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input id="pfPersonalMemory" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+        <label for="pfPersonalMemory" style="margin:0;cursor:pointer">🧠 个人记忆</label>
+        <span style="color:#8a8f98;font-size:12px">（默认关闭。开启后，智能体回复您时会参考您在其他对话中的历史发言，帮助了解您的偏好；关闭时您的发言不会被作为个人记忆读取）</span>
+      </div>
+
+      <div class="form-section">AI 分身</div>
+      <div class="form-group">
+        <label>触发方式</label>
+        <select id="pfTwinTrigger" class="modal-input">
+          <option value="mentioned">提及触发（被 @ 时回复）</option>
+          <option value="contextual">语境触发（相关话题主动回复）</option>
+          <option value="allMessages">全量监听（每条都接收）</option>
+          <option value="keyword">关键词触发</option>
+        </select>
+        <p class="form-hint">分身基于您在公开群的发言自动生成人设，加入您所在的所有公开群，按此方式回复；成员列表中显示 🪞 分身标识。即使在线，您也可以在群里 @ 自己召唤分身立即回答</p>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px">
+        <button id="pfTwinEnable" class="chip-btn" type="button">🪞 启用分身</button>
+        <button id="pfTwinDisable" class="chip-btn danger" type="button" style="display:none">停用分身</button>
+        <button id="pfTwinSync" class="chip-btn" type="button" style="display:none">同步到公开群</button>
+        <span id="pfTwinStatus" class="muted"></span>
+      </div>
+      <div class="modal-actions">
+        <button id="pfCancel" class="btn-ghost">取消</button>
+        <button id="pfConfirm" class="send">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addMemberModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">添加成员</div>
+      <div class="modal-label">选择要加入「<span id="addMemberGroupName"></span>」的成员</div>
+      <input id="addMemberSearch" class="modal-input" placeholder="搜索成员（昵称 / ID）…" />
+      <div id="addMemberList" class="member-pick"></div>
+      <div class="modal-actions">
+        <button id="addMemberCancel" class="btn-ghost">取消</button>
+        <button id="addMemberConfirm" class="send" disabled>添加</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="createModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">创建群</div>
+      <input id="createGroupName" class="modal-input" placeholder="群名称（必填）" maxlength="30" />
+      <div class="modal-label" style="margin-top:10px;display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input id="createGroupPrivate" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+        <span>🔒 私密群</span>
+        <span style="color:#8a8f98;font-size:12px">（私密群的聊天记忆仅限本群内检索，其他群触发智能体时不会读到）</span>
+      </div>
+      <div class="modal-label">选择成员（群主自动加入，可勾选智能体）</div>
+      <input id="createMemberSearch" class="modal-input" placeholder="搜索成员（昵称 / ID）…" />
+      <div id="createMemberList" class="member-pick"></div>
+      <div class="modal-actions">
+        <button id="createCancel" class="btn-ghost">取消</button>
+        <button id="createConfirm" class="send" disabled>创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 群设置：群名 / 头像 / 私密（仅群主或管理员可保存，服务端校验） -->
+  <div id="groupSettingsModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">群设置</div>
+      <div class="form-section" style="margin-top:0">基本信息</div>
+      <div class="form-group">
+        <label>群名称</label>
+        <input id="gsGroupName" class="modal-input" maxlength="30" placeholder="群名称" />
+      </div>
+      <div class="form-group">
+        <label>群头像</label>
+        <div class="avatar-edit">
+          <span id="gsAvatarPreview" class="avatar-edit-preview">👥</span>
+          <div class="avatar-edit-actions">
+            <button id="gsAvatarUploadBtn" class="chip-btn" type="button">上传头像</button>
+            <button id="gsAvatarClearBtn" class="chip-btn" type="button">移除</button>
+          </div>
+          <input id="gsAvatarFile" type="file" accept="image/*" class="hidden" />
+        </div>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input id="gsIsPrivate" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+        <label for="gsIsPrivate" style="margin:0;cursor:pointer">🔒 私密群</label>
+        <span style="color:#8a8f98;font-size:12px">（私密群的聊天记忆仅限本群内检索，其他群触发智能体时不会读到）</span>
+      </div>
+      <div class="danger-zone">
+        <button id="gsDisbandBtn" class="btn-ghost danger">解散群</button>
+      </div>
+      <div class="modal-actions">
+        <button id="gsCancel" class="btn-ghost">取消</button>
+        <button id="gsConfirm" class="send">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 群内触发方式设置：智能体成员 ⚙ 按钮弹出，可覆盖角色默认触发方式 -->
+  <div id="groupTriggerModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">群内触发方式 · <span id="gtAgentName"></span></div>
+      <p class="form-hint" style="margin:6px 0 10px">本设置仅作用于当前群，可覆盖角色的默认触发方式；
+        选择「跟随角色默认」后，编辑角色时本群自动跟随新设定。</p>
+      <select id="gtTriggerMode" class="modal-input">
+        <option value="inherit">跟随角色默认</option>
+        <option value="mentioned">提及触发</option>
+        <option value="allMessages">全量监听</option>
+        <option value="keyword">关键词触发</option>
+        <option value="contextual">语境触发</option>
+      </select>
+      <input id="gtKeywords" class="modal-input hidden" placeholder="触发关键词（逗号分隔），如：需求,评审" style="margin-top:8px" />
+      <div class="modal-actions">
+        <button id="gtCancel" class="btn-ghost">取消</button>
+        <button id="gtSave" class="send">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 使用帮助 -->
+  <div id="helpModal" class="modal-overlay hidden">
+    <div class="modal help-modal">
+      <div class="modal-title">❓ 使用帮助</div>
+      <div class="help-content">
+        <div class="help-section">
+          <h4>🚀 快速上手</h4>
+          <ul>
+            <li><b>登录 / 注册</b>：注册新账号或登录已有账号；勾选「保持登录状态」后，除非退出登录，否则下次访问无需再次登录</li>
+            <li><b>创建群</b>：左侧「我的群组」点 <code>＋</code>，填写群名并勾选成员（可勾选智能体一起入群）</li>
+            <li><b>发送消息</b>：底部输入框输入，<code>Enter</code> 发送、<code>Shift+Enter</code> 换行；发送前可选可见范围</li>
+            <li><b>刷新</b>：群组列表 / 成员列表<b>标题栏</b>的 <code>🔄</code> 按钮可重新拉取最新数据（与创建群 / 添加成员按钮并排）</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>🔒 群管理</h4>
+          <ul>
+            <li><b>私密群</b>：创建群时可勾选「🔒 私密群」。私密群的聊天记忆<b>仅限本群内检索</b>，智能体在其他群触发时不会读到私密群内容</li>
+            <li><b>群设置</b>：聊天区右上角 <code>⚙</code> 按钮，可修改群名 / 头像 / 私密开关，并<b>解散群</b>（仅群主可操作，解散后聊天与记忆一并清除）</li>
+            <li><b>移除成员</b>：群主 / 管理员可在成员列表点击成员行右侧 <code>✕</code> 移除（不能移除群主；智能体 / 分身同样可移除）</li>
+            <li><b>群主显示</b>：聊天区头部显示群主昵称（无昵称时显示用户名）</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>🤖 智能体与触发</h4>
+          <ul>
+            <li><b>@ 触发</b>：<b>双击</b>成员列表中的成员（再次双击取消），被 @ 的行会高亮，输入框上方出现 @ 标签</li>
+            <li><b>@ 全体</b>：点输入框上方的「@全体」按钮</li>
+            <li><b>触发方式</b>（角色默认）：<code>@</code> 提及触发 / <code>👁</code> 全量监听 / <code>#</code> 关键词触发 / <code>🧠</code> 语境触发，成员列表中以图标显示</li>
+            <li><b>群内覆盖</b>：智能体成员行右侧 <code>⚙</code> 按钮，可单独设置该智能体在本群的触发方式（覆盖角色默认）</li>
+            <li><b>语义记忆（RAG）</b>：聊天记录向量化存入 PostgreSQL（pgvector），智能体回复前自动检索<b>相关历史记忆</b>注入上下文；私密群内容自动隔离</li>
+            <li><b>个人记忆</b>：智能体可开启「🧠 个人记忆」，回复时参考<b>触发者本人</b>的历史发言（需触发者用户也开启）</li>
+            <li><b>人机交互（审批）</b>：智能体执行需审批的操作（如发布公告）时，聊天区出现 🔐 交互卡片——<b>仅发起请求的您</b>可点「批准 / 拒绝」，其他成员只能看到等待状态；决策后智能体继续回复</li>
+            <li><b>智能体自建技能</b>：让智能体「创建技能 xxx + 人设」→ 🔐 审批卡片 → 批准后自动生成可复用的子智能体技能（下一条消息生效）；自建技能与手动配置的技能同样可被调用</li>
+            <li><b>回复不回显 @</b>：智能体回复不携带 @ 信息</li>
+            <li>示例：<code>@需求助手 帮我生成 V2 大纲</code></li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>💬 消息能力</h4>
+          <ul>
+            <li><b>Markdown 渲染</b>：标题、列表、表格、代码块、引用、<b>加粗</b>、<code>行内代码</code> 等均支持，发送与回复都实时渲染</li>
+            <li><b>附件上传</b>：点 <code>📎</code> 选择文件，单次最多 9 个、单个 ≤ 20 MB；支持 Word / Excel / PPT / PDF / 文本类附件，服务端自动提取内容供智能体阅读；图片显示缩略图，其他文件显示下载卡片</li>
+            <li><b>长消息</b>：超长内容默认折叠，点「更多 ▾」展开、「收起 ▴」折叠</li>
+            <li><b>撤回消息</b>：悬停某条消息，点 <code>🚫</code> 撤回（<b>本人消息</b>或<b>群主 / 管理员</b>可撤回任意消息；撤回后内容对所有人隐藏，并清除其语义记忆）</li>
+            <li><b>历史记录</b>：滚动到聊天顶部，点「⬆ 加载更早消息」翻页加载更早的消息</li>
+            <li><b>话题</b>：聊天区顶部可<b>切换话题</b>或「＋ 新建话题」；悬停某条发言点 <code>💬</code> 可<b>以此消息新建话题</b>（该发言自动迁入新话题作为讨论起点）；话题右侧 <code>🗑</code> 可<b>删除话题</b>（创建者或群主 / 管理员，<b>其下聊天记录与记忆一并删除</b>）</li>
+            <li><b>🔗 链接代理</b>：智能体回复中的链接（含内网地址，如外部 AG-UI 专家返回的本地服务）由<b>后端代访</b>——点击后打开经 Hub 代理的页面，无需担心浏览器无法直连 / 混合内容被拦截；下载类链接自动使用正确文件名</li>
+            <li><b>🧠 思考过程</b>：外部 AG-UI 专家的「思考」独立展示为可折叠的灰底块（流式中展开实时可见，结束后自动收起），与正文分离</li>
+            <li><b>🔧 工具调用</b>：智能体执行工具时显示「🔧 名称 调用中…」进度行，完成后自动收起，不打扰阅读</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>🧩 AI 角色管理</h4>
+          <ul>
+            <li>入口：顶栏「🤖 智能体」，可<b>新增 / 编辑 / 删除</b>角色（删除为行内两步确认），支持搜索</li>
+            <li>角色设定：昵称、头像、Agent ID、一句话简介、<b>Instructions</b>（系统提示词，定义身份 / 职责 / 回复风格）、模型</li>
+            <li><b>🧩 技能（Skills）</b>：可把<b>其他智能体</b>挂为本角色的可调用技能（智能体间调用）——配置技能标识、描述与目标智能体后，模型需要该领域信息时会自动调起子智能体并引用其答复；目标智能体可为 AG-UI 桥接的外部专家</li>
+            <li><b>触发与模型</b>：触发方式（提及 / 全量 / 关键词 / 语境）、模型（默认 <code>deepseek-chat</code>）</li>
+            <li><b>🧠 个人记忆</b>：开启后回复时参考触发者历史发言（默认关闭）</li>
+            <li><b>🔒 私密智能体</b>：开启后<b>仅创建者</b>可看到、拉入群、编辑与删除，其他用户无法使用</li>
+            <li><b>导出 / 导入</b>：工具栏 <code>📥 导入</code> / <code>📤 导出全部</code>；每行操作列（📤 导出 / ✏️ 编辑 / 🗑️ 删除图标按钮）也可单独操作；配置以 JSON 文件交换（敏感令牌与归属不导出，导入后归属当前用户）</li>
+            <li><b>AG-UI 桥接（外部专家）</b>：填写 <code>http(s)://</code> 或 <code>ws(s)://</code> 端点后，该角色不再调用本地大模型，消息经 AG-UI 协议转发给外部服务，其流式回复回灌群聊</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>👤 账号与资料</h4>
+          <ul>
+            <li>右上角账户菜单：<b>修改资料</b>（昵称 / 头像 / 个人记忆）、<b>修改密码</b>、<b>模型配置</b>、<b>数据备份</b>、<b>退出登录</b></li>
+            <li><b>保持登录</b>：登录时可勾选「保持登录状态」，除非退出登录，否则下次访问无需再次登录</li>
+            <li><b>界面风格</b>：顶栏 <b>☀️ / 🌙</b> 按钮切换深色 / 浅色风格，选择会被记住</li>
+            <li><b>记忆</b>：系统会记住您<b>最后选择的群</b>（再次登录自动进入）与<b>每个群最近使用的话题</b>（再次进入该群自动选中）</li>
+            <li>用户与智能体均支持<b>上传头像</b>（jpg / png / gif / webp，建议正方形）；上传后立即预览，保存后同步到顶栏与各群</li>
+            <li><b>🧠 个人记忆</b>（默认关闭）：开启后，智能体回复您时会参考您在其他对话中的历史发言；关闭时您的发言不会被作为个人记忆读取</li>
+            <li><b>🪞 AI 分身</b>：修改资料 → 「AI 分身」区。启用后系统根据您在<b>公开群</b>的发言生成人设，以分身加入您所在全部公开群；可设定触发方式（提及 / 语境 / 全量 / 关键词）并随时修改；<b>同步到公开群</b>可补齐新建的群；停用即分身退出全部群</li>
+            <li><b>分身与在线状态</b>：您<b>在线</b>时成员列表显示您本人、分身暂停回复；您<b>离线</b>时分身接管（成员列表显示 🪞 分身、隐藏您本人）</li>
+            <li><b>在线召唤分身</b>：即使在线，您在群里 <b>@ 自己</b>（提及自己的名字）即可让分身立即回答（需分身已启用且在本群）</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>⚙ 模型配置</h4>
+          <ul>
+            <li>账户菜单 → <b>模型配置</b>：填写 DeepSeek 的 <b>Endpoint</b> 与 <b>API Key</b></li>
+            <li><b>Endpoint 留空</b> → 使用官方端点 <code>https://api.deepseek.com</code>；<b>API Key 留空</b> → 使用环境变量（<code>DEEPSEEK_API_KEY</code> / <code>OPENAI_API_KEY</code>）</li>
+            <li>保存后<b>立即生效</b>（无需重启）并持久化；API Key 不回显，只提示是否已配置</li>
+            <li>首次进入系统且未配置过模型时，会自动弹出配置界面</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>🧠 记忆管理</h4>
+          <ul>
+            <li>账户菜单 → <b>记忆管理</b>：可视化浏览智能体的<b>语义记忆</b>（各群条数统计、按群 / 关键词搜索）</li>
+            <li><b>分级</b>：每条记忆可设 <b>普通 / 重要 / 关键</b>——同相似度下重要记忆<b>优先被检索</b>注入回复，关键决策建议升级</li>
+            <li><b>自动遗忘</b>：系统按配置的<b>保留天数</b>自动清理过期记忆（普通记忆到期后不再被检索并物理删除）；也可<b>手动遗忘</b>——按群保留最近 7/30/90 天或立即遗忘</li>
+            <li><b>删除</b>：单条记忆可物理删除（撤回消息、清空话题同样会清除对应记忆）</li>
+            <li>权限：只能查看 / 治理<b>自己所在群</b>的记忆，私密群记忆仅本群成员可见</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>📦 数据备份</h4>
+          <ul>
+            <li>账户菜单 → <b>数据备份</b>：<b>导出全部数据</b>为 zip——账号、智能体、聊天记录与附件文件（含头像），可离线保存或迁移</li>
+            <li><b>导入数据</b>：选择 zip → 系统自动检查<b>账号</b>（按用户名）与<b>智能体</b>（按标识）是否存在，缺失的自动补齐，已存在的账号会更新资料（密码保留）</li>
+            <li>导入时<b>勾选要恢复的聊天记录群</b>，消息发送者 / 提及引用自动重写，附件与头像一并还原</li>
+            <li><b>初始化（清空一切）</b>（危险操作，需输入「确认」）：删除全部数据并清空浏览器缓存，回到登录页；如需保留数据请先导出</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h4>🎯 可见范围</h4>
+          <ul>
+            <li><b>全群可见</b>：所有成员都能看到</li>
+            <li><b>仅 @ 提及者可见</b>：只有被 @ 的成员可见</li>
+            <li><b>私聊</b>：仅当前选中的成员（双击选中的 @ 对象）可见</li>
+          </ul>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="helpClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建话题 -->
+  <div id="topicModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title" id="topicModalTitle">新建话题</div>
+      <p id="topicModalHint" class="form-hint hidden" style="margin:2px 0 8px">该发言将迁移为新话题的起点（从原话题移除）</p>
+      <div class="modal-label">话题名称（群内独立的讨论线，如「需求评审」「闲聊」）</div>
+      <input id="topicName" class="modal-input" placeholder="话题名称" maxlength="30" />
+      <div class="modal-actions">
+        <button id="topicCancel" class="btn-ghost">取消</button>
+        <button id="topicConfirm" class="send">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mermaid 源码查看：图表工具条「查看源码」打开，可选中复制 / 一键复制 -->
+  <div id="mmdSourceModal" class="modal-overlay hidden">
+    <div class="modal mmd-source-modal">
+      <div class="modal-title">Mermaid 源码</div>
+      <pre id="mmdSourceCode" class="mmd-source-code" spellcheck="false"></pre>
+      <div class="modal-actions">
+        <button id="mmdSourceCopy" class="btn-ghost">复制源码</button>
+        <button id="mmdSourceClose" class="send">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 消息搜索：群内全文搜索，结果可点击跳转到对应话题 / 消息 -->
+  <div id="searchModal" class="modal-overlay hidden">
+    <div class="modal search-modal">
+      <div class="modal-title">🔍 搜索消息 · <span id="searchGroupName"></span></div>
+      <div class="search-input-row">
+        <input id="searchInput" class="modal-input" placeholder="输入关键词搜索群内消息（Enter 搜索）" maxlength="100" />
+        <button id="searchGo" class="send">搜索</button>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+      <div class="modal-actions">
+        <button id="searchClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 多智能体讨论：选定群内智能体，按序参与同一主题（后台串行触发，回复实时广播） -->
+  <div id="discussModal" class="modal-overlay hidden">
+    <div class="modal discuss-modal">
+      <div class="modal-title">🗣 发起多智能体讨论 · <span id="discussGroupName"></span></div>
+      <div class="form-group">
+        <label>参与讨论的智能体</label>
+        <div id="discussAgentPicks" class="discuss-picks"></div>
+      </div>
+      <div class="form-group">
+        <label>讨论主题</label>
+        <textarea id="discussInput" class="modal-input" rows="3" maxlength="500" placeholder="如：如何设计本项目的权限模型？请各抒己见。"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="discussCancel" class="btn-ghost">取消</button>
+        <button id="discussGo" class="send">开始讨论</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 用户管理（仅管理员）：账号列表 / 禁用 / 启用 / 重置密码 / 用量统计 -->
+  <div id="adminModal" class="modal-overlay hidden">
+    <div class="modal admin-modal">
+      <div class="modal-title">👥 管理员控制台</div>
+      <div class="admin-tabs">
+        <button id="adminTabUsers" class="chip-btn admin-tab on">用户管理</button>
+        <button id="adminTabUsage" class="chip-btn admin-tab">用量统计</button>
+      </div>
+      <div id="adminUsersView">
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>用户名</th><th>昵称</th><th>角色</th><th>状态</th><th>所在群</th><th>注册时间</th><th>操作</th></tr></thead>
+            <tbody id="adminUserRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="adminUsageView" class="hidden">
+        <p id="adminUsageMeta" class="form-hint"></p>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>日期</th><th>总 Token</th><th>输入</th><th>输出</th><th>思考</th><th>调用次数</th></tr></thead>
+            <tbody id="adminUsageRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="adminClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 系统状态（仅管理员）：连接 / 群 / 用户 / 消息 / 智能体统计 -->
+  <div id="statusModal" class="modal-overlay hidden">
+    <div class="modal status-modal">
+      <div class="modal-title">📊 系统状态</div>
+      <div id="statusBody" class="status-body">加载中…</div>
+      <div class="modal-actions">
+        <button id="statusClose" class="btn-ghost">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/vendor/mermaid.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

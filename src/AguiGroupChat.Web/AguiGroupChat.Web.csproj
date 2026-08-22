@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 开发环境密钥存储：dotnet user-secrets set "Agents:ApiKey" "sk-..." -->
+    <UserSecretsId>AguiGroupChat-Web</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.Agents\AguiGroupChat.Agents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Sdk.Web 默认把 data/**（运行期数据）与 appsettings*.json 作为 Content 复制到输出并传递给引用方；
+         它们应在内容根目录运行时生成 / 读取，不应随产物分发——显式移除，避免污染引用方（如桌面版）输出 -->
+    <Content Remove="data\**" />
+    <Content Remove="appsettings.json" />
+    <Content Remove="appsettings.Development.json" />
+  </ItemGroup>
+
+</Project>

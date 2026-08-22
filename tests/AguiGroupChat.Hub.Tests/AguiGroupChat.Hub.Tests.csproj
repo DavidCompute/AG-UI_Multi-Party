@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AGUI.Abstractions" Version="0.0.5" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
+    <ProjectReference Include="..\..\src\AguiGroupChat.Agents\AguiGroupChat.Agents.csproj" />
+    <ProjectReference Include="..\..\src\AguiGroupChat.Web\AguiGroupChat.Web.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- sqlite-vec 原生扩展：验证 vec0 按连接加载（LoadExtension("vec0") 按工作目录 / PATH 查找） -->
+    <None Include="..\..\src\AguiGroupChat.Desktop\libs\vec0.dll" CopyToOutputDirectory="PreserveNewest" Link="vec0.dll" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,56 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!--
+    AG-UI 群聊桌面版 —— WiX v4 MSI 主配置
+    构建：tools/build-msi.ps1（publish 后自动收集文件清单）
+    依赖：dotnet tool install -g wix（版本 4.x）
+  -->
+
+  <Package Name="AG-UI 群聊桌面版"
+           Manufacturer="AGUI GroupChat"
+           Version="$(var.Version)"
+           UpgradeCode="3f8b2c9a-5e71-4a6d-9c3f-2b1d8e4a7c65"
+           Scope="perUser">
+
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 AG-UI 群聊桌面版，请先卸载旧版本。" />
+
+    <!-- 全部内容打进单个 MSI（EmbedCab） -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 安装目录：%LocalAppData%\AguiGroupChat（perUser：无需管理员、目录可写，
+          data/ 数据库与模型落盘无需额外权限） -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="AguiGroupChat" />
+    </StandardDirectory>
+
+    <!-- 开始菜单目录（卸载时移除空目录） -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="AG-UI 群聊桌面版" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="AG-UI 群聊桌面版" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="ExeAndShortcuts" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <!-- 桌面快捷方式 + 开始菜单快捷方式；exe 单独安装（KeyPath），heat 的 AppFiles 已排除 exe -->
+    <StandardDirectory Id="DesktopFolder" />
+
+    <Component Id="ExeAndShortcuts" Directory="INSTALLFOLDER" Guid="5d0e9f3a-8c24-4b7a-a1d5-6e9b2c8f4a31">
+      <File Id="MainExe" KeyPath="yes"
+            Source="$(var.PublishDir)\AguiGroupChat.Desktop.exe" />
+      <Shortcut Id="StartMenuShortcut"
+                Directory="ProgramMenuDir"
+                Name="AG-UI 群聊桌面版"
+                Target="[#MainExe]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="DesktopShortcut"
+                Directory="DesktopFolder"
+                Name="AG-UI 群聊桌面版"
+                Target="[#MainExe]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
+    </Component>
+  </Fragment>
+</Wix>

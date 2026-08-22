@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+# AG-UI 群聊扩展协议 Hub —— Web 完整演示镜像（Hub + MSAGENT 智能体网关 + 静态前端）
+# 构建：docker build -t agui-group-chat-web .
+# 运行：docker run --rm -p 5200:8080 -e DEEPSEEK_API_KEY=sk-xxx -v agui-web-data:/app/data agui-group-chat-web
+
+# ---------- 阶段一：编译发布 ----------
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# 先只复制项目文件做 restore，最大化利用 Docker 层缓存
+COPY AguiGroupChat.slnx ./
+COPY src/AguiGroupChat.Hub/AguiGroupChat.Hub.csproj src/AguiGroupChat.Hub/
+COPY src/AguiGroupChat.Agents/AguiGroupChat.Agents.csproj src/AguiGroupChat.Agents/
+COPY src/AguiGroupChat.Web/AguiGroupChat.Web.csproj src/AguiGroupChat.Web/
+RUN dotnet restore src/AguiGroupChat.Web/AguiGroupChat.Web.csproj
+
+# 复制全部源码并发布（Release，框架依赖）
+COPY src/ src/
+RUN dotnet publish src/AguiGroupChat.Web/AguiGroupChat.Web.csproj \
+    -c Release -o /app/publish --no-restore
+
+# ---------- 阶段二：精简运行 ----------
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+WORKDIR /app
+
+# 容器内监听端口（对外映射由 docker compose / -p 控制）
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+
+# 持久化快照目录：compose 中挂载命名卷 agui-web-data
+# 安装 curl 供健康检查使用（官方镜像不内置，Ubuntu 24.04 经 apt 获取）
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 官方镜像内置非 root 的 app 用户（APP_UID=1654，主组与其相同），显式切换并以该用户运行
+RUN mkdir -p /app/data && chown $APP_UID:$APP_UID /app/data
+USER $APP_UID
+
+COPY --from=build /app/publish ./
+
+# 健康检查：GET /ag-ui/health（curl 于上方 apt 安装）
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -fsS http://localhost:8080/ag-ui/health || exit 1
+
+ENTRYPOINT ["dotnet", "AguiGroupChat.Web.dll"]

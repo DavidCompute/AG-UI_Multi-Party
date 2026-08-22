@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Hub 被 Web 项目引用：Web SDK 默认把 appsettings 作为 Content（带 CopyToOutputDirectory），
+       会随项目引用流入 Web 的发布输出，与 Web 自身 appsettings 同名冲突（NETSDK1152）。
+       改为 None 项（不复制到输出目录）即可阻断该流；Hub 单独发布时经下方 Target 显式纳入产物。 -->
+  <ItemGroup>
+    <Content Remove="appsettings*.json" />
+    <None Include="appsettings*.json" />
+  </ItemGroup>
+
+  <Target Name="IncludeAppSettingsInPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(_AppSettingsToPublish)" />
+      <ResolvedFileToPublish Include="@(_AppSettingsToPublish)">
+        <RelativePath>%(_AppSettingsToPublish.Filename)%(_AppSettingsToPublish.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <_AppSettingsToPublish Include="appsettings*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 供测试项目访问 internal 成员（如 PostgresStore.Open） -->
+    <InternalsVisibleTo Include="AguiGroupChat.Hub.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <PackageReference Include="MySqlConnector" Version="2.4.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
+  </ItemGroup>
+
+</Project>

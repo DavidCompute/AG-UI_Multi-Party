@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AguiGroupChat.Desktop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 跨平台共享宿主：纯托管，无 UI 依赖（WPF / Avalonia 壳均可引用） -->
+    <ProjectReference Include="..\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.Agents\AguiGroupChat.Agents.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.Web\AguiGroupChat.Web.csproj" />
+  </ItemGroup>
+
+</Project>

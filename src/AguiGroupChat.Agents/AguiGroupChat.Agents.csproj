@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 供测试项目访问 internal 成员（如 AgentGateway.ComputeTextDelta） -->
+    <InternalsVisibleTo Include="AguiGroupChat.Hub.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LLamaSharp" Version="0.27.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.17.0" />
+    <PackageReference Include="Microsoft.Agents.AI.AGUI" Version="1.13.0-preview.260703.1" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.17.0" />
+  </ItemGroup>
+
+</Project>

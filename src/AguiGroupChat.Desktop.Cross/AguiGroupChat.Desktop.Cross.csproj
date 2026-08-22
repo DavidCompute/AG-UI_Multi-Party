@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <RootNamespace>AguiGroupChat.Desktop.Cross</RootNamespace>
+    <AssemblyName>AguiGroupChat.Desktop.Cross</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Avalonia 12 跨平台 UI + 官方 WebView 控件（macOS=WKWebView / Linux=WebKitGTK；
+         Windows=WebView2 适配器在部分环境失败，见 README——Windows 推荐用 WPF 版） -->
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 跨平台共享宿主（纯托管，无 UI 依赖） -->
+    <ProjectReference Include="..\AguiGroupChat.Desktop.Core\AguiGroupChat.Desktop.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 复用现有静态前端：编译时复制到输出目录 wwwroot/（组合根 UseWebRoot 指向它） -->
+    <Content Include="..\AguiGroupChat.Web\wwwroot\**\*"
+             CopyToOutputDirectory="PreserveNewest"
+             Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- sqlite-vec 原生扩展（Windows：vec0.dll 输出到根目录供 LoadExtension；
+         macOS/Linux 用户可放置 libvec0.dylib / vec0.so 到应用目录，缺失时自动降级 BLOB 检索）。
+         捆绑桌面版模型目录（bge-m3-Q8_0 = embedding.gguf，1024 维） -->
+    <None Include="..\AguiGroupChat.Desktop\models\**\*" CopyToOutputDirectory="PreserveNewest" Link="models\%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="..\AguiGroupChat.Desktop\libs\vec0.dll" CopyToOutputDirectory="PreserveNewest" Link="vec0.dll" />
+    <None Include="..\AguiGroupChat.Desktop\appsettings.json" CopyToOutputDirectory="PreserveNewest" Link="appsettings.json" />
+  </ItemGroup>
+
+</Project>
