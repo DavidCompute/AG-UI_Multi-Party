@@ -132,6 +132,16 @@ public sealed class MemoryOptions
     /// <summary>个人记忆相似度阈值（0..1），低于此值不注入。</summary>
     public double PersonalMinScore { get; set; } = 0.25;
 
+    /// <summary>
+    /// 混合检索（2.1）：默认开。在稠密向量检索的命中集合内，用 BM25 词项评分做<b>二次精排</b>——
+    /// 同 cosine 相似度/重要级下，命中查询关键词的记忆排得更靠前。不改变返回条数与召回集合
+    /// （只在既有命中内调序，避免引入假阳性），因此对既有索引行为无破坏。
+    /// </summary>
+    public bool HybridSearch { get; set; } = true;
+
+    /// <summary>混合检索中 BM25 分数的权重（与余弦相似度线性融合：score = cosine×(1-w) + bm25×w）。</summary>
+    public double HybridBm25Weight { get; set; } = 0.35;
+
     /// <summary>注入的每条记忆文本截断长度。</summary>
     public int MaxCharsPerMemory { get; set; } = 600;
 

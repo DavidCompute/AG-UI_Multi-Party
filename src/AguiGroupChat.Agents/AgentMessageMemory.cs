@@ -210,7 +210,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 _logger.LogDebug("语义记忆检索命中 {Count} 条（agent={AgentId}，scope={Scope}）：{Snippets}",
                     hits.Count, agentId, _options.Scope, string.Join(" | ", hits.Take(3).Select(h =>
                         (h.Content.Length > 40 ? h.Content[..40] + "…" : h.Content).ReplaceLineEndings(" "))));
-            return hits;
+            return _options.HybridSearch ? HybridRerank(hits, query) : hits;
         }
         catch (Exception ex)
         {
@@ -232,7 +232,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 _logger.LogDebug("个人记忆检索命中 {Count} 条（person={PersonId}）：{Snippets}",
                     hits.Count, personId, string.Join(" | ", hits.Take(3).Select(h =>
                         (h.Content.Length > 40 ? h.Content[..40] + "…" : h.Content).ReplaceLineEndings(" "))));
-            return hits;
+            return _options.HybridSearch ? HybridRerank(hits, query) : hits;
         }
         catch (Exception ex)
         {
@@ -240,6 +240,20 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
             return [];
         }
     }
+
+    /// <summary>
+    /// 混合检索精排（2.1）：在<b>既有稠密命中集合内</b>，用 BM25 词项评分与余弦相似度融合、重要级加成重排；
+    /// 返回的条数与集合不变（只在同集合内调序，避免引入假阳性）。传入集合为空则原样返回。
+    /// </summary>
+    private IReadOnlyList<MessageMemoryHit> HybridRerank(IReadOnlyList<MessageMemoryHit> hits, string query)
+        => hits.Count < 2
+            ? hits
+            : hits
+                .Select(h => (Hit: h, Fused: Bm25Ranker.FusedScore(h.Score, Bm25Ranker.Score(query, h.Content), h.Importance, _options.HybridBm25Weight)))
+                .OrderByDescending(x => x.Fused)
+                .ThenBy(x => x.Hit.Score)
+                .Select(x => x.Hit)
+                .ToList();
 
     /// <summary>写入记忆前净化：剥离 prompt 注入段落（「相关历史记忆」「群最近对话」区块）。
     /// 模拟客户端会把注入段落回显进回复，不剥离会造成记忆嵌套污染。</summary>
