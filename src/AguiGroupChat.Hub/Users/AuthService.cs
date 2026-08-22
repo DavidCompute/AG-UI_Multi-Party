@@ -141,6 +141,32 @@ public sealed class AuthService
             (_, old) => nowMs - old.FirstFailMs < LoginFailWindowMs ? (old.Count + 1, old.FirstFailMs) : (1, nowMs));
     }
 
+    /// <summary>
+    /// 对外 API 密钥（6.4）鉴权：命中 <see cref="AuthOptions.ApiKeys"/> 中某条且其用户名存在时返回该用户。
+    /// 用恒定时间比较避免时序侧信道；未配置密钥或未命中返回 null。
+    /// </summary>
+    public UserAccount? ResolveApiKey(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        foreach (var entry in _options.ApiKeys)
+        {
+            if (string.IsNullOrWhiteSpace(entry.ApiKey) || string.IsNullOrWhiteSpace(entry.Username)) continue;
+            if (FixedTimeEquals(entry.ApiKey, token.Trim()))
+                return _store.GetUserByUsername(entry.Username);
+        }
+        return null;
+    }
+
+    private static bool FixedTimeEquals(string a, string b)
+    {
+        var ba = System.Text.Encoding.UTF8.GetBytes(a);
+        var bb = System.Text.Encoding.UTF8.GetBytes(b);
+        if (ba.Length != bb.Length) return false;
+        var d = 0;
+        for (var i = 0; i < ba.Length; i++) d |= ba[i] ^ bb[i];
+        return d == 0;
+    }
+
     /// <summary>校验令牌并滑动续期；无效 / 已过期 / 超过绝对有效期返回 null。</summary>
     public UserAccount? ValidateToken(string? token)
     {

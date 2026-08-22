@@ -378,7 +378,7 @@ public static class AgentApi
     }
 
     internal static UserAccount? RequireUser(HttpContext ctx, AuthService auth)
-        => auth.ValidateToken(ResolveToken(ctx));
+        => auth.ValidateToken(ResolveToken(ctx)) ?? auth.ResolveApiKey(ResolveToken(ctx));
 
     /// <summary>校验技能配置：非空 SkillId 须合法（OpenAI 工具名规范，否则模型调用直接 400），目标智能体非空。</summary>
 

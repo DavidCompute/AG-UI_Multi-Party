@@ -16,7 +16,13 @@ internal static class WebIdentity
         var token = ResolveToken(ctx.Request);
         if (!string.IsNullOrEmpty(token))
         {
+            // 1) 会话令牌
             var user = auth.ValidateToken(token);
+            if (user is null)
+            {
+                // 2) 对外 API 密钥（6.4）：命中配置的 ApiKeys 时以绑定用户身份访问（免登录程序化接入）
+                user = auth.ResolveApiKey(token);
+            }
             if (user is null)
                 return (null, Results.Json(new AguiError(ErrorCodes.UserUnauthorized, "未登录或令牌无效"),
                     statusCode: StatusCodes.Status401Unauthorized));
