@@ -24,6 +24,8 @@ public sealed class AttachmentStore
     {
         // 图片
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+        // 音频（语音消息）：无脚本 / 渲染风险，音频可安全内联播放
+        ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".opus", ".webm",
         // 文本 / 文档 / 压缩包
         ".txt", ".md", ".markdown", ".json", ".csv", ".tsv", ".log", ".yaml", ".yml", ".toml",
         ".ini", ".cfg", ".conf", ".properties", ".env", ".xml", ".pdf", ".docx", ".xlsx", ".pptx", ".zip",
@@ -56,6 +58,12 @@ public sealed class AttachmentStore
     private static readonly HashSet<string> DocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".pdf", ".docx", ".xlsx", ".pptx",
+    };
+
+    /// <summary>音频扩展名（语音消息，富媒体 5.2）：仅携带元数据供前端播放，不注入文本上下文。</summary>
+    private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".aac", ".flac", ".opus", ".webm",
     };
 
     private readonly string _root;
@@ -126,6 +134,13 @@ public sealed class AttachmentStore
         ".png" => "image/png",
         ".jpg" or ".jpeg" => "image/jpeg",
         ".gif" => "image/gif",
+        ".mp3" => "audio/mpeg",
+        ".wav" => "audio/wav",
+        ".ogg" or ".oga" => "audio/ogg",
+        ".m4a" => "audio/mp4",
+        ".aac" => "audio/aac",
+        ".flac" => "audio/flac",
+        ".opus" => "audio/opus",
         ".zip" => "application/zip",
         _ => "application/octet-stream",
     };
@@ -212,11 +227,14 @@ public sealed class AttachmentStore
         return name.Length > 120 ? name[..120] : name;
     }
 
-    /// <summary>附件类别：image（图片）/ text（可提取文本）/ document（办公文档，可提取文本）/ binary（其余）。</summary>
+    /// <summary>附件类别：image（图片）/ audio（音频）/ text（可提取文本）/ document（办公文档，可提取文本）/ binary（其余）。</summary>
     internal static string Classify(string? contentType, string fileName)
     {
         if (contentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true)
             return "image";
+        if (contentType?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) == true
+            || AudioExtensions.Contains(Path.GetExtension(fileName)))
+            return "audio";
         if (contentType?.StartsWith("text/", StringComparison.OrdinalIgnoreCase) == true
             || TextExtensions.Contains(Path.GetExtension(fileName)))
             return "text";

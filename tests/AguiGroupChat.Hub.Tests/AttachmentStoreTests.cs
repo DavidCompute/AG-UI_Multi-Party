@@ -61,6 +61,42 @@ public sealed class AttachmentStoreTests : IDisposable
     }
 
     [Fact]
+    public void Classify_Audio_IsAudioKindAndNotTextExtractable()
+    {
+        var cases = new[]
+        {
+            ("voice.mp3", "audio/mpeg"),
+            ("voice.wav", "audio/wav"),
+            ("voice.m4a", "audio/mp4"),
+            ("voice.ogg", "audio/ogg"),
+            ("voice.flac", "audio/flac"),
+            ("voice.opus", "audio/opus"),
+            // 前端 MediaRecorder 常见产物 webm/opus，ContentType 即 audio/webm
+            ("voice.webm", "audio/webm;codecs=opus"),
+        };
+        using var ms = new MemoryStream([0xFF, 0xF3, 0x00]); // 占位字节，仅测分类
+        foreach (var (name, mime) in cases)
+        {
+            ms.Position = 0;
+            Assert.True(AttachmentStore.IsAllowedUploadExtension(name), $"{name} 应在允许上传白名单内");
+            var info = _store.Save(name, mime, ms, 3);
+            Assert.Equal("audio", info.Kind);
+            // 语音消息仅携元数据供前端播放，不注入模型文本上下文
+            Assert.False(AttachmentStore.IsExtractable(info), $"{name} 不应注入文本上下文");
+        }
+    }
+
+    [Fact]
+    public void UploadWhitelist_AllowsAudio_ButRejectsScripts()
+    {
+        Assert.True(AttachmentStore.IsAllowedUploadExtension("msg.mp3"));
+        Assert.True(AttachmentStore.IsAllowedUploadExtension("msg.ogg"));
+        Assert.False(AttachmentStore.IsAllowedUploadExtension("x.svg"));      // 内联渲染类仍拒绝
+        Assert.False(AttachmentStore.IsAllowedUploadExtension("x.html"));     // 可执行 / 脚本类仍拒绝
+        Assert.False(AttachmentStore.IsAllowedUploadExtension(""));           // 无扩展名拒绝
+    }
+
+    [Fact]
     public async Task ExtractText_Txt_StillWorks()
     {
         var bytes = Encoding.UTF8.GetBytes("纯文本内容\n第二行 SKY-2026");

@@ -348,6 +348,40 @@ public sealed class GroupHubTests
     }
 
     [Fact]
+    public async Task SendMessage_AudioAttachment_CarriesAudioKindNotTextExtracted()
+    {
+        // 富媒体（5.2）：语音消息附件 kind=audio，仅携元数据供前端播放，不进模型文本上下文。
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "user_2");
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var att = new AttachmentInfo
+        {
+            AttachmentId = "att_voice",
+            Name = "语音-2026.webm",
+            ContentType = "audio/webm",
+            Size = 4096,
+            Url = "/ag-ui/files/att_voice/语音-2026.webm",
+            Kind = "audio",
+        };
+        Assert.False(AguiGroupChat.Hub.Storage.AttachmentStore.IsExtractable(att), "语音附件不应注入模型文本上下文");
+
+        var msg = await f.Hub.SendMessageAsync(new GroupMessageSendRequest
+        {
+            GroupId = group.GroupId,
+            UserId = "user_1",
+            Content = "",
+            Attachments = [att],
+        });
+        Assert.Equal("audio", Assert.Single(msg.Attachments).Kind);
+
+        var start = HubFixture.Parse(f.Drain(inbox)[0]);
+        Assert.Equal("audio", start.GetProperty("attachments")[0].GetProperty("kind").GetString());
+    }
+
+    [Fact]
     public async Task SendMessage_Snapshot_CarriesMentions()
     {
         var f = new HubFixture();

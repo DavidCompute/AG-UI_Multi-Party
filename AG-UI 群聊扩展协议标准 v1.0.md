@@ -105,7 +105,7 @@
 |contentType|string|是|MIME 类型|
 |size|number|是|字节大小|
 |url|string|是|下载地址 `GET /ag-ui/files/{attachmentId}/{name}`|
-|kind|enum|是|类别：`image` / `text` / `document` / `binary`|
+|kind|enum|是|类别：`image` / `audio` / `text` / `document` / `binary`（audio 为语音消息，仅携元数据供前端播放）|
 
 ## 3\. 传输层规范
 
@@ -910,7 +910,7 @@ PUT /ag-ui/user/profile
 
 |接口|路径|说明|
 |---|---|---|
-|上传附件|`POST /ag-ui/upload`|multipart/form-data，字段名 `file`；单请求最多 9 个、单文件 ≤20 MB。需身份（登录令牌，或演示模式 `?memberId=`，与 WS/SSE 鉴权一致）|
+|上传附件|`POST /ag-ui/upload`|multipart/form-data，字段名 `file`；单请求最多 9 个、单文件 ≤20 MB。需身份（登录令牌，或演示模式 `?memberId=`，与 WS/SSE 鉴权一致）。图片 / 音频 / 文本 / 办公文档自动归类 `kind`|
 |下载 / 预览|`GET /ag-ui/files/{attachmentId}/{fileName}`|按附件 ID 定位，文件名仅用于展示（下载保留原名）|
 
 上传返回示例（响应体为 `{ "attachments": [...] }`）：

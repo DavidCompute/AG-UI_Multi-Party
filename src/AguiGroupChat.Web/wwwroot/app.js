@@ -254,6 +254,9 @@ function resetChatState() {
   pendingAttachments = [];
   state.visibility = "all";
   const input = $("input"); if (input) input.value = "";
+  // 富媒体（5.2）：登出 / 切换身份时停止录音、关闭画布，避免残留麦克风占用
+  stopVoiceRecording();
+  closeCanvasModal();
   hideMentionPicker();
   renderMentionChips();
   renderAttachList();
@@ -3691,18 +3694,24 @@ function msgDom(m, r) {
     ? `<details class="thinking" ${m.streaming ? "open" : ""}><summary>💭 ${m.streaming ? "思考中…" : "思考过程"}</summary><div class="thinking-body ${m.streaming ? "" : "md"}">${m.streaming ? escapeHtml(m.reasoning) : renderMarkdown(m.reasoning)}</div></details>`
     : "";
   // 附件 URL 过 scheme 白名单：外部桥接 / 服务端数据可能含 javascript: 等危险协议，非法则跳过该附件
-  const attachments = [...(m.attachments || []), ...bridgeAttachments]
-    .filter((att) => safeUrl(att.url, att.kind === "image"))
-    .map((att) => {
-      const href = escapeHtml(authedAssetUrl(att.url));
-      const name = escapeHtml(att.name);
-      if (att.kind === "image") {
-        return `<a class="att-img-wrap" href="${href}" target="_blank" rel="noopener" title="${name}"><img class="att-img" src="${href}" alt="${name}" loading="lazy" /></a>`;
-      }
-      const icon = att.kind === "text" || att.kind === "document" ? "📄" : "📎";
-      const meta = att.size > 0 ? fmtBytes(att.size) : "下载";
-      return `<a class="att-file" href="${href}" target="_blank" rel="noopener" title="附件：${escapeHtml(att.kind)}">${icon} ${name}<span class="att-meta">${meta}</span></a>`;
-    }).join("");
+  const allAtts = [...(m.attachments || []), ...bridgeAttachments]
+    .filter((att) => safeUrl(att.url, att.kind === "image" || att.kind === "audio"));
+  // 富媒体（5.2）：全部为图片时使用平铺网格；否则回退流式横向布局
+  const imgGrid = allAtts.length > 0 && allAtts.every((att) => att.kind === "image");
+  const attachments = allAtts.map((att) => {
+    const href = escapeHtml(authedAssetUrl(att.url));
+    const name = escapeHtml(att.name);
+    if (att.kind === "image") {
+      return `<a class="att-img-wrap" href="${href}" target="_blank" rel="noopener" title="${name}"><img class="att-img" src="${href}" alt="${name}" loading="lazy" /></a>`;
+    }
+    if (att.kind === "audio") {
+      const meta = att.size > 0 ? fmtBytes(att.size) : "语音";
+      return `<div class="att-audio"><span title="语音消息">🎤</span><audio controls preload="none" src="${href}"></audio><span class="att-meta">${meta}</span></div>`;
+    }
+    const icon = att.kind === "text" || att.kind === "document" ? "📄" : "📎";
+    const meta = att.size > 0 ? fmtBytes(att.size) : "下载";
+    return `<a class="att-file" href="${href}" target="_blank" rel="noopener" title="附件：${escapeHtml(att.kind)}">${icon} ${name}<span class="att-meta">${meta}</span></a>`;
+  }).join("");
   const avatar = (() => {
     const sender = r.members.find((x) => x.memberId === m.senderId);
     // 头像 URL 过 scheme 白名单（图片场景放行 data:image/），非法回退默认图标；站内头像追加会话令牌
@@ -3737,7 +3746,7 @@ function msgDom(m, r) {
       ${thinking}
       <div class="content ${m.recalled ? "recalled" : ""} ${m.streaming ? "streaming" : ""} ${m.waiting ? "waiting" : ""}${clamp}${md}">${truncatedHint}${contentHtml}</div>
       ${interactionBlock}
-      ${attachments && !m.recalled ? `<div class="attachments">${attachments}</div>` : ""}
+      ${attachments && !m.recalled ? `<div class="attachments${imgGrid ? " img-grid" : ""}">${attachments}</div>` : ""}
       ${m.plan && m.plan.steps && m.plan.steps.length && !m.recalled ? `<div class="plan-card">${renderPlanCard(m.plan)}</div>` : ""}
       ${toolCalls}
     </div>`;
@@ -4460,12 +4469,22 @@ function renderAttachList() {
   pendingAttachments.forEach((a, i) => {
     const div = document.createElement("div");
     div.className = "attach-chip";
+    // 富媒体（5.2）：图片显示缩略图，音频显示麦克风图标，其余显示纸夹
+    const isImg = a.file.type.startsWith("image/") || /image\//i.test(a.file.type || "");
+    if (isImg) {
+      const img = document.createElement("img");
+      img.className = "att-thumb";
+      img.src = URL.createObjectURL(a.file);
+      img.title = a.file.name;
+      div.appendChild(img);
+    }
     const name = document.createElement("span");
     name.className = "att-name";
-    name.textContent = "📎 " + a.file.name;
+    const icon = isImg ? "" : (a.file.type.startsWith("audio/") ? "🎤 " : "📎 ");
+    name.textContent = icon + a.file.name;
     const meta = document.createElement("span");
     meta.className = "att-meta";
-    meta.textContent = fmtBytes(a.file.size);
+    meta.textContent = fmtBytes(a.file.size) + (a.file.type.startsWith("audio/") ? " · 语音" : "");
     div.appendChild(name);
     div.appendChild(meta);
     if (a.uploading) {
@@ -4483,6 +4502,160 @@ function renderAttachList() {
     }
     el.appendChild(div);
   });
+}
+
+/* ============ 语音消息（富媒体 5.2）：MediaRecorder 录音 → 音频附件 ============ */
+let voiceRecorder = null;
+let voiceStream = null;
+let voiceChunks = [];
+let voiceTimerId = null;
+let voiceStartAt = 0;
+
+function fmtDuration(sec) {
+  const s = Math.floor(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** 开始录音：请求麦克风权限 + MediaRecorder（webm/opus）。失败（无权限 / 无硬件）时 toast 提示。 */
+async function startVoiceRecording() {
+  if (voiceRecorder) return;
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    toast("无法访问麦克风：" + (err?.name === "NotAllowedError" ? "请授予麦克风权限" : "本机无可用录音设备"));
+    return;
+  }
+  voiceChunks = [];
+  const mime = (() => {
+    const c = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
+    for (const m of c) { if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) return m; }
+    return "";
+  })();
+  try {
+    voiceRecorder = new MediaRecorder(voiceStream, mime ? { mimeType: mime } : undefined);
+  } catch (err) {
+    toast("此浏览器不支持音频录制");
+    voiceStream.getTracks().forEach((t) => t.stop());
+    voiceStream = null;
+    return;
+  }
+  voiceRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) voiceChunks.push(e.data); };
+  voiceRecorder.onstop = () => {
+    const blob = new Blob(voiceChunks, { type: voiceRecorder.mimeType || "audio/webm" });
+    const ext = (voiceRecorder.mimeType || "audio/webm").includes("ogg") ? ".ogg" : ".webm";
+    const name = `语音-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}${ext}`;
+    // 空录音（< ~0.5s 仅几字节）不入列；正常则加入待发送附件
+    if (blob.size > 1024) pendingAttachments.push({ file: new File([blob], name, { type: voiceRecorder.mimeType || "audio/webm" }), uploading: false });
+    renderAttachList();
+  };
+  voiceStartAt = Date.now();
+  voiceRecorder.start(250);
+  $("voiceBtn").classList.add("recording");
+  $("voiceBtn").title = "点击停止录音并加入附件";
+  $("voiceStatus").classList.remove("hidden");
+  voiceTimerId = setInterval(() => {
+    $("voiceTimer").textContent = fmtDuration((Date.now() - voiceStartAt) / 1000);
+  }, 500);
+}
+
+/** 停止录音：仍在录音则停止；否则进入录音。Toggle 兼顾「点击开始 / 再点停止」。 */
+function stopVoiceRecording() {
+  if (!voiceRecorder) return;
+  const r = voiceRecorder;
+  try { r.state !== "inactive" && r.stop(); } catch { /* 已停 */ }
+  r.stream?.getTracks()?.forEach((t) => t.stop());
+  voiceStream?.getTracks()?.forEach((t) => t.stop());
+  clearInterval(voiceTimerId);
+  voiceRecorder = null;
+  voiceStream = null;
+  voiceChunks = [];
+  $("voiceBtn").classList.remove("recording");
+  $("voiceBtn").title = "语音消息：点击开始，再点发送录音";
+  $("voiceStatus").classList.add("hidden");
+}
+
+/** 取消录音：丢弃音频片段。 */
+function cancelVoiceRecording() {
+  if (voiceRecorder) {
+    const r = voiceRecorder;
+    // 直接 stop 会触发 onstop 入列；用空标记配合阻止入列
+    voiceChunks = [];
+    try { r.state !== "inactive" && r.stop(); } catch { /* 已停 */ }
+    r.stream?.getTracks()?.forEach((t) => t.stop());
+    voiceStream?.getTracks()?.forEach((t) => t.stop());
+    clearInterval(voiceTimerId);
+    voiceRecorder = null;
+    voiceStream = null;
+  }
+  $("voiceBtn").classList.remove("recording");
+  $("voiceBtn").title = "语音消息：点击开始，再点发送录音";
+  $("voiceStatus").classList.add("hidden");
+}
+
+/* ============ 画布标注（富媒体 5.2）：canvas 绘制 → PNG 图片附件 ============ */
+let cvTool = "brush";
+let cvDrawing = false;
+let cvLast = null;
+
+function openCanvasModal() {
+  if (!state.activeGroupId) { toast("请先选择群"); return; }
+  const c = $("cvCanvas");
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, c.width, c.height);
+  cvTool = "brush";
+  $("cvToolBrush").classList.add("on");
+  $("cvToolEraser").classList.remove("on");
+  $("canvasModal").classList.remove("hidden");
+}
+
+function closeCanvasModal() {
+  $("canvasModal").classList.add("hidden");
+  cvDrawing = false;
+  cvLast = null;
+}
+
+function cvDown(e) {
+  cvDrawing = true;
+  const p = cvPoint(e);
+  cvLast = p;
+  cvStroke(p, p);
+}
+function cvMove(e) {
+  if (!cvDrawing || !cvLast) return;
+  const p = cvPoint(e);
+  cvStroke(cvLast, p);
+  cvLast = p;
+}
+function cvUp() {
+  cvDrawing = false;
+  cvLast = null;
+}
+function cvPoint(e) {
+  const r = $("cvCanvas").getBoundingClientRect();
+  const scaleX = $("cvCanvas").width / r.width;
+  const scaleY = $("cvCanvas").height / r.height;
+  return { x: (e.clientX - r.left) * scaleX, y: (e.clientY - r.top) * scaleY };
+}
+function cvStroke(a, b) {
+  const c = $("cvCanvas");
+  const ctx = c.getContext("2d");
+  ctx.strokeStyle = cvTool === "eraser" ? "#ffffff" : $("cvColor").value;
+  ctx.lineWidth = cvTool === "eraser" ? 22 : 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+}
+function insertCanvas() {
+  const c = $("cvCanvas");
+  c.toBlob((blob) => {
+    if (!blob) { toast("画布导出失败"); return; }
+    pendingAttachments.push({ file: new File([blob], `画布-${Date.now()}.png`, { type: "image/png" }), uploading: false });
+    renderAttachList();
+    closeCanvasModal();
+  }, "image/png");
 }
 
 const SEND_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
@@ -5087,7 +5260,7 @@ function init() {
   initChatResizer();
   applyChatResizer();
 
-  // ---- 附件上传 ----
+  // ---- 附件上传（富媒体 5.2：图片多选 / 语音 / 画布标注）----
   $("attachBtn").disabled = false;
   $("attachBtn").onclick = () => $("attachInput").click();
   $("attachInput").onchange = (e) => {
@@ -5099,6 +5272,27 @@ function init() {
     e.target.value = "";
     renderAttachList();
   };
+  // 语音消息：点击开始录音，再点停止并加入附件（取消走状态条按钮）
+  $("voiceBtn").disabled = false;
+  $("voiceBtn").onclick = () => { if (voiceRecorder) stopVoiceRecording(); else startVoiceRecording(); };
+  $("voiceCancel").onclick = cancelVoiceRecording;
+  // 画布标注
+  $("canvasBtn").disabled = false;
+  $("canvasBtn").onclick = openCanvasModal;
+  $("cvCancel").onclick = closeCanvasModal;
+  $("cvInsert").onclick = insertCanvas;
+  $("cvClear").onclick = () => {
+    const c = $("cvCanvas");
+    c.getContext("2d").fillStyle = "#fff";
+    c.getContext("2d").fillRect(0, 0, c.width, c.height);
+  };
+  $("cvToolBrush").onclick = () => { cvTool = "brush"; $("cvToolBrush").classList.add("on"); $("cvToolEraser").classList.remove("on"); };
+  $("cvToolEraser").onclick = () => { cvTool = "eraser"; $("cvToolEraser").classList.add("on"); $("cvToolBrush").classList.remove("on"); };
+  const cvEl = $("cvCanvas");
+  cvEl.addEventListener("pointerdown", cvDown);
+  cvEl.addEventListener("pointermove", cvMove);
+  cvEl.addEventListener("pointerup", cvUp);
+  cvEl.addEventListener("pointerleave", cvUp);
   $("createGroupBtn").onclick = () => { Promise.all([loadAgentDirectory(), loadUserDirectory()]).then(openCreateModal); };
   $("refreshGroupsBtn").onclick = () => { loadGroups(); toast("群组列表已刷新"); };
   $("refreshMembersBtn").onclick = async () => {

@@ -579,10 +579,13 @@ select {
 .msg .itx-status { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .msg .itx-status.ok { color: #4caf50; }
 .msg .itx-status.no { color: #f44336; }
-/* 消息附件：图片缩略图与文件卡片 */
+/* 消息附件：图片平铺网格 / 文件卡片 / 音频播放条 */
 .msg .attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.msg .attachments.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); max-width: 520px; }
 .msg .att-img-wrap { display: block; max-width: 240px; }
+.msg .attachments.img-grid .att-img-wrap { max-width: none; }
 .msg .att-img { display: block; max-width: 100%; max-height: 160px; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; }
+.msg .attachments.img-grid .att-img { width: 100%; max-height: 180px; object-fit: cover; }
 .msg .att-file {
   display: inline-flex; align-items: center; gap: 6px; max-width: 260px;
   font-size: 13px; color: var(--accent); text-decoration: none;
@@ -590,8 +593,19 @@ select {
   padding: 5px 10px; overflow: hidden;
 }
 .msg .att-file:hover { border-color: var(--accent); }
+/* 语音消息：内联播放条（音频无脚本 / 渲染风险，安全内联） */
+.msg .att-audio {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  padding: 6px 10px; max-width: 340px;
+}
+.msg .att-audio audio { height: 34px; min-width: 220px; }
 .att-meta { font-size: 11px; color: var(--muted); }
 @keyframes blink { 50% { opacity: 0; } }
+
+/* 输入区录音中 / 画布标注模态 */
+.rec-dot { color: #e5534b; animation: blink 1s infinite; font-weight: bold; }
+.rec-timer { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
 
 .sys-line { align-self: center; font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px; }
 .sys-line.error { color: var(--err); }
@@ -680,6 +694,14 @@ body.resizing { cursor: ns-resize; user-select: none; }
 .attach-btn { flex: none; align-self: flex-end; padding: 10px 12px; font-size: 16px; line-height: 1; }
 .attach-list { display: none; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .attach-list.show { display: flex; }
+/* 语音录音状态行 */
+.voice-status {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px;
+  font-size: 12px; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 10px; width: fit-content;
+}
+.voice-status.hidden { display: none; }
 .attach-chip {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
@@ -689,6 +711,12 @@ body.resizing { cursor: ns-resize; user-select: none; }
 .attach-chip .att-uploading { color: var(--muted); animation: blink 1s infinite; }
 .attach-chip .att-remove { color: var(--muted); cursor: pointer; font-size: 12px; }
 .attach-chip .att-remove:hover { color: var(--danger, #e5534b); }
+/* 输入区图片附件：缩略图（移除圆角胶囊背景） */
+.attach-chip:has(.att-thumb) { border-radius: 10px; padding: 4px; align-items: flex-start; }
+.attach-chip:has(.att-thumb) .att-name { max-width: 150px; }
+.att-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+/* 录音中：麦克风按钮高亮 */
+#voiceBtn.recording { color: var(--danger, #e5534b); border-color: var(--danger, #e5534b); background: rgba(229,83,75,.12); }
 textarea {
   flex: 1; resize: none; background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 14px; font-family: inherit;
@@ -725,6 +753,15 @@ textarea:focus { outline: none; border-color: var(--accent); }
 }
 /* Mermaid 源码查看弹窗：等宽代码区，超高内部滚动，可选中复制 */
 .modal.mmd-source-modal { width: 660px; max-width: 94vw; }
+/* 画布标注弹窗（富媒体 5.2） */
+.modal.canvas-modal { width: 680px; max-width: 94vw; }
+.canvas-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.canvas-toolbar .chip-btn.on { border-color: var(--accent); color: var(--accent); background: rgba(79,140,255,.10); }
+.cv-color { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.cv-color input[type="color"] { width: 30px; height: 26px; border: 1px solid var(--border); background: transparent; border-radius: 6px; padding: 0; }
+.cv-hint { font-size: 12px; color: var(--muted); margin-left: auto; }
+#cvCanvas { width: 100%; height: auto; max-height: 46vh; background: #fff; border: 1px solid var(--border); border-radius: 8px; touch-action: none; cursor: crosshair; }
+[data-theme="dark"] #cvCanvas { background: #fdfdfd; }
 .mmd-source-code {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px 12px; margin: 0 0 4px;

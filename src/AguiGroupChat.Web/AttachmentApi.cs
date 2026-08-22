@@ -112,6 +112,16 @@ public static class AttachmentApi
             ".bmp" => "image/bmp",
             ".pdf" => "application/pdf",
             ".json" => "application/json",
+            // 音频（语音消息 5.2）：返回正确 MIME 供 <audio> 内联流式播放（未列入 ForceDownload，安全）
+            ".mp3" => "audio/mpeg",
+            ".wav" => "audio/wav",
+            ".ogg" or ".oga" => "audio/ogg",
+            ".m4a" => "audio/mp4",
+            ".aac" => "audio/aac",
+            ".flac" => "audio/flac",
+            ".opus" => "audio/opus",
+            // MediaRecorder 语音录音默认产物（webm/opus）；无视频轨时浏览器按音频渲染
+            ".webm" => "audio/webm",
             // 允许上传的文本类附件保持内联预览（text/plain 无脚本执行风险）
             ".txt" or ".md" or ".markdown" or ".log" or ".csv" or ".tsv"
                 or ".yaml" or ".yml" or ".toml" or ".ini" or ".cfg" or ".conf" or ".properties" or ".env"
