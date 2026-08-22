@@ -43,6 +43,8 @@ public static class AgentApi
             if (scheduleError is not null) return scheduleError;
             var pipelineError = ValidatePipeline(req.Pipeline, catalog);
             if (pipelineError is not null) return pipelineError;
+            var relayError = ValidateRelay(req.RelayToAgentId, catalog);
+            if (relayError is not null) return relayError;
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库（防跨用户检索他人私密知识库）
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
@@ -85,6 +87,8 @@ public static class AgentApi
             if (scheduleError is not null) return scheduleError;
             var pipelineError = ValidatePipeline(req.Pipeline, catalog);
             if (pipelineError is not null) return pipelineError;
+            var relayError = ValidateRelay(req.RelayToAgentId, catalog);
+            if (relayError is not null) return relayError;
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
@@ -258,6 +262,7 @@ public static class AgentApi
         d.KnowledgeBaseIds,
         d.RequireApprovalToolNames,
         d.Pipeline,
+        d.RelayToAgentId,
     });
 
     /// <summary>定时任务 cron 表达式校验：非法返回 400 错误（调度器每分钟空转会刷警告日志）。</summary>
@@ -321,6 +326,7 @@ public static class AgentApi
             RequireApprovalToolNames = req.RequireApprovalToolNames
                 ?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct().ToList() ?? [],
             Pipeline = BuildPipeline(req.Pipeline),
+            RelayToAgentId = string.IsNullOrWhiteSpace(req.RelayToAgentId) ? null : req.RelayToAgentId.Trim(),
         };
     }
 
@@ -350,6 +356,16 @@ public static class AgentApi
             if (catalog.GetDefinition(s.StepAgentId.Trim()) is null)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"流水线步骤智能体未注册：{s.StepAgentId.Trim()}"));
         }
+        return null;
+    }
+
+    /// <summary>校验角色交接（1.2）：不得指向自身，且目标智能体须已注册。</summary>
+    private static IResult? ValidateRelay(string? relayAgentId, AgentCatalog catalog)
+    {
+        if (string.IsNullOrWhiteSpace(relayAgentId)) return null;
+        var target = relayAgentId.Trim();
+        if (catalog.GetDefinition(target) is null)
+            return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"交接目标智能体未注册：{target}"));
         return null;
     }
 
@@ -458,7 +474,8 @@ public sealed record AgentUpsertHttpRequest(
     IReadOnlyList<AgentSkillHttpRequest>? Skills = null,
     IReadOnlyList<string>? KnowledgeBaseIds = null,
     IReadOnlyList<string>? RequireApprovalToolNames = null,
-    IReadOnlyList<AgentPipelineStepHttpRequest>? Pipeline = null);
+    IReadOnlyList<AgentPipelineStepHttpRequest>? Pipeline = null,
+    string? RelayToAgentId = null);
 
 /// <summary>技能配置（把其他已注册智能体作为可调用子代理）。</summary>
 /// <param name="SkillId">技能标识（给模型的工具名，同一智能体内唯一）。</param>

@@ -142,6 +142,7 @@ public sealed class MarketplaceService
         Skills = d.Skills?.Select(s => new AgentSkillConfig { SkillId = s.SkillId, Description = s.Description, TargetAgentId = s.TargetAgentId }).ToList(),
         KnowledgeBaseIds = d.KnowledgeBaseIds?.ToList(),
         Pipeline = d.Pipeline?.Select(p => new AgentPipelineStep { StepAgentId = p.StepAgentId, Prompt = p.Prompt }).ToList(),
+        RelayToAgentId = d.RelayToAgentId,
     };
 }
 

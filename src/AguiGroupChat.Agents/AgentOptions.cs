@@ -254,6 +254,14 @@ public sealed class AgentDefinition
     /// </summary>
     public List<string> RequireApprovalToolNames { get; set; } = [];
 
+    /// <summary>
+    /// **角色交接（1.2，整轮委托）**：非空时，本智能体收到触发后<b>整轮委托</b>给该中继智能体，
+    /// 中继的回复即作为本智能体对群的答复（「由 X 代答 / 交接」）。与技能（模型按需调用子代理）
+    /// 和编排流水线（多步 + 聚合）不同：本字段是<b>确定性、整轮</b>的角色别名/交接。
+    /// 不得指向自身（且中继目标自身不再接力，防止循环链）。
+    /// </summary>
+    public string? RelayToAgentId { get; set; }
+
     /// <summary>创建者 userId（运行时创建时记录；appsettings 种子为 null = 系统级智能体）。</summary>
     public string? OwnerId { get; set; }
 

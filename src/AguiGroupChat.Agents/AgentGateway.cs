@@ -254,6 +254,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (def.Pipeline is { Count: > 0 })
             return await InvokePipelineAsync(context, def, ct);
 
+        // 角色交接（1.2）：配置了 RelayToAgentId 的智能体整轮委托给中继智能体（防止自环 / 接力环）
+        var relayTarget = def.RelayToAgentId;
+        if (!string.IsNullOrWhiteSpace(relayTarget) && relayTarget != def.AgentId
+            && _catalog.GetDefinition(relayTarget) is { RelayToAgentId: null or "" })
+            return await InvokeRelayAsync(context, def, relayTarget, ct);
+
         // 语境触发（Contextual）：群内触发模式优先（可覆盖角色默认），先结合群上下文判断是否应该发言，
         // 不发言则静默跳过（不发任何事件）
         var effectiveMode = context.TriggerMode ?? def.TriggerMode;
@@ -590,6 +596,78 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 MemberId = context.AgentId,
                 IsTyping = false,
             }, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// 角色交接（1.2）：整轮把触发委托给 <paramref name="relayAgentId"/>，中继智能体运行一次，
+    /// 其回复即作为本智能体对群的答复流式回灌（「由 X 代答」的角色别名）。
+    /// </summary>
+    private async Task<AgentInvocationResult> InvokeRelayAsync(AgentInvocationContext context, AgentDefinition def, string relayAgentId, CancellationToken ct)
+    {
+        var relayDef = _catalog.GetDefinition(relayAgentId);
+        if (relayDef is null)
+            throw new AguiProtocolException(ErrorCodes.BadRequest, $"交接目标智能体未配置：{relayAgentId}");
+        var runId = "run_" + IdGenerator.NewId();
+        _logger.LogInformation("智能体 {AgentId} 角色交接：整轮委托给 {Relay}（run={RunId}）", context.AgentId, relayAgentId, runId);
+        await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        var runCt = timeoutCts.Token;
+        _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
+        string? messageId = null;
+        try
+        {
+            var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
+            {
+                GroupId = context.GroupId,
+                AgentId = context.AgentId,
+                RunId = runId,
+                TopicId = context.TopicId,
+                ReplyToMessageId = context.TriggerMessageId,
+                Mentions = [], MentionAll = false,
+                Visibility = context.Visibility,
+                VisibleMemberIds = context.VisibleMemberIds ?? [],
+            }, runCt);
+            messageId = started.MessageId;
+
+            var input = await BuildUserMessageAsync(context, runCt);
+            var relay = _catalog.GetOrCreate(relayAgentId);
+            var prompt = "你正被「" + (def.Nickname ?? context.AgentId) + "」整轮交接代答。请就以下用户请求直接给出你的专业答复：\n\n" + input;
+            var session = await relay.CreateSessionAsync(runCt);
+            var resp = await relay.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, runCt);
+            var text = string.IsNullOrWhiteSpace(resp.Text) ? "（交接对象未返回内容）" : resp.Text.Trim();
+            foreach (var chunk in ChunkReply(text, 160))
+                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
+
+            await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
+            return new AgentInvocationResult(true, runId, null);
+        }
+        catch (OperationCanceledException)
+        {
+            await SafeEndAsync(context, messageId);
+            return new AgentInvocationResult(false, runId, "AGENT_RUN_CANCELLED");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "角色交接运行失败：agent={AgentId} relay={Relay} run={RunId}", context.AgentId, relayAgentId, runId);
+            await SafeEndAsync(context, messageId);
+            try
+            {
+                await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent
+                {
+                    GroupId = context.GroupId, ErrorCode = "AGENT_RUN_ERROR",
+                    Message = "角色交接失败：" + ex.Message, Timestamp = _hub.Value.NowMs,
+                }, ct: CancellationToken.None);
+            }
+            catch { /* 广播失败不影响返回 */ }
+            return new AgentInvocationResult(false, runId, "AGENT_RUN_ERROR");
+        }
+        finally
+        {
+            _activeRuns.TryRemove(runId, out _);
+            await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = false }, CancellationToken.None);
         }
     }
 
