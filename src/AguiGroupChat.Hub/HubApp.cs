@@ -79,6 +79,7 @@ public static class HubApp
         var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
         builder.Services.AddSingleton(authOptions);
         builder.Services.AddSingleton<AuthService>();
+        builder.Services.AddSingleton<TotpService>(); // 登录二次验证（TOTP，4.4）
         builder.Services.AddSingleton<AgentRegistry>();
         /// 操作审计日志（内存环形缓冲）：管理员控制台查询关键 / 敏感操作留痕
         builder.Services.AddSingleton<AguiGroupChat.Hub.Infra.AuditLogService>();
@@ -145,6 +146,20 @@ public static class HubApp
         Action<JsonElement> restore = element => auth.RestoreSessions(
             element.Deserialize<List<PersistedSession>>(AguiJson.Options) ?? []);
         services.GetService<ISectionStore>()?.AddSection("sessions", snapshot, restore);
+    }
+
+    /// <summary>注册 TOTP 二次验证密钥（4.4）到扩展区「totpSecrets」：memory 与数据库模式均需（核心快照不含它）。</summary>
+    public static void RegisterTotpPersistence(this IServiceProvider services)
+    {
+        var totp = services.GetService<TotpService>();
+        if (totp is null) return;
+        Func<object?> snapshot = () => totp.Snapshot().ToDictionary(kv => kv.Key, kv => kv.Value);
+        Action<JsonElement> restore = element => totp.Restore(
+            element.Deserialize<Dictionary<string, UserTotp>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null) persistence.AddSection("totpSecrets", snapshot, restore);
+        else services.GetService<ISectionStore>()?.AddSection("totpSecrets", snapshot, restore);
     }
 
     /// <summary>

@@ -75,6 +75,7 @@ app.Services.RegisterSessionPersistence(); // 会话跨重启保持：桌面版 
 app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
 app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoint / apiKey）跨重启保持
 app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
+app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

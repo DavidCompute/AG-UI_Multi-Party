@@ -46,9 +46,18 @@ public static class UserApi
                     auth.Login(user.Username, req.Password, ctx.Connection.RemoteIpAddress?.ToString()))));
             }));
 
-        root.MapPost("/login", (LoginHttpRequest req, HttpContext ctx, AuthService auth) =>
-            RunAsync(() => Task.FromResult(Results.Ok(ToAuthResponse(
-                auth.Login(req.Username, req.Password, ctx.Connection.RemoteIpAddress?.ToString()))))));
+        root.MapPost("/login", (LoginHttpRequest req, HttpContext ctx, AuthService auth, TotpService totp) =>
+            RunAsync(() =>
+            {
+                var result = auth.Login(req.Username, req.Password, ctx.Connection.RemoteIpAddress?.ToString());
+                // 登录二次验证（TOTP，4.4）：账号启用 TOTP 时要求 6 位动态码；缺失 / 错误 → 拒绝登录（密码正确但 2FA 未过）
+                if (totp.IsEnabled(result.User.UserId) && !totp.Verify(result.User.UserId, req.TotpCode ?? ""))
+                {
+                    auth.Logout(result.Token); // 吊销刚签发的会话，避免未过 2FA 却持有有效令牌
+                    throw new AguiProtocolException(ErrorCodes.UserBadCredentials, "需要动态验证码（TOTP）或验证码错误：请在登录请求携带 totpCode");
+                }
+                return Task.FromResult(Results.Ok(ToAuthResponse(result)));
+            }));
 
         root.MapPost("/logout", (HttpContext ctx, AuthService auth) =>
         {
@@ -82,6 +91,42 @@ public static class UserApi
                 await hub.SyncUserDisplayNameAsync(user.UserId);
                 await hub.SyncUserAvatarAsync(user.UserId);
                 return Results.Ok(ToProfile(updated));
+            }));
+
+        // ---- 登录二次验证（TOTP，4.4）：状态 / 签发密钥 / 确认启用 / 停用 ----
+        root.MapGet("/totp", (HttpContext ctx, AuthService auth, TotpService totp) =>
+        {
+            var user = RequireUser(ctx, auth);
+            if (user is null) return Unauthorized();
+            return Results.Ok(new { enabled = totp.IsEnabled(user.UserId) });
+        });
+
+        root.MapPost("/totp/enroll", (HttpContext ctx, AuthService auth, TotpService totp) =>
+        {
+            var user = RequireUser(ctx, auth);
+            if (user is null) return Unauthorized();
+            var secret = totp.Enroll(user.UserId);
+            return Results.Ok(new { secret, otpauth = BuildOtpauth(user.Username, secret), enabled = false });
+        });
+
+        root.MapPost("/totp/confirm", (TotpCodeHttpRequest req, HttpContext ctx, AuthService auth, TotpService totp) =>
+            RunAsync(() =>
+            {
+                var user = RequireUser(ctx, auth);
+                if (user is null) return Task.FromResult(Unauthorized());
+                if (!totp.Confirm(user.UserId, req.Code ?? ""))
+                    throw new AguiProtocolException(ErrorCodes.BadRequest, "TOTP 验证码错误或未先启用（请先 enroll），启用失败");
+                return Task.FromResult(Results.Ok(new { ok = true, enabled = true }));
+            }));
+
+        root.MapPost("/totp/disable", (TotpCodeHttpRequest req, HttpContext ctx, AuthService auth, TotpService totp) =>
+            RunAsync(() =>
+            {
+                var user = RequireUser(ctx, auth);
+                if (user is null) return Task.FromResult(Unauthorized());
+                if (!totp.Disable(user.UserId, req.Code ?? ""))
+                    throw new AguiProtocolException(ErrorCodes.BadRequest, "TOTP 验证码错误或未启用，停用失败");
+                return Task.FromResult(Results.Ok(new { ok = true, enabled = false }));
             }));
 
         // ---- 多设备会话管理（4.4）：列出 / 吊销指定会话 / 吊销其他全部会话 ----
@@ -195,13 +240,18 @@ public static class UserApi
 
     private static IResult Unauthorized(string message = "未登录或令牌无效")
         => Results.Json(new AguiError(ErrorCodes.UserUnauthorized, message), statusCode: StatusCodes.Status401Unauthorized);
+
+    /// <summary>构造 otpauth 二维码 URI（供 Authenticator 录入）。</summary>
+    private static string BuildOtpauth(string username, string secret)
+        => "otpauth://totp/" + Uri.EscapeDataString("AGUI") + ":" + Uri.EscapeDataString(username)
+           + "?secret=" + secret + "&issuer=AGUI&algorithm=SHA1&digits=6&period=30";
 }
 
 // ================= 请求体 =================
 
 public sealed record RegisterHttpRequest(string Username, string Password, string? Nickname, string? Avatar);
 
-public sealed record LoginHttpRequest(string Username, string Password);
+public sealed record LoginHttpRequest(string Username, string Password, string? TotpCode = null);
 
 public sealed record ChangePasswordHttpRequest(string OldPassword, string NewPassword);
 
@@ -209,3 +259,6 @@ public sealed record UpdateProfileHttpRequest(string? Nickname, string? Avatar, 
 
 /// <summary>吊销指定会话请求体（多设备会话管理，4.4）。</summary>
 public sealed record RevokeSessionHttpRequest(string? SessionId);
+
+/// <summary>TOTP 验证码请求体（confirm / disable）。</summary>
+public sealed record TotpCodeHttpRequest(string? Code);

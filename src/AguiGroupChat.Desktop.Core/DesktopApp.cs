@@ -75,6 +75,7 @@ public static class DesktopApp
         app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
         app.Services.RegisterModelConfigPersistence(); // 运行时模型配置跨重启保持
         app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
+        app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();
