@@ -70,6 +70,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly Lazy<AguiGroupChat.Hub.Agents.TaskService?> _tasks;
     // 轻量运行指标（可选，6.1 可观测性）
     private readonly Lazy<MetricsService?> _metrics;
+    // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
+    private readonly BridgeCircuitBreaker _bridgeCircuit = new();
     // 每个线程（群）一个会话锁：并发流式写入同一群消息时串行化。
     // 存储 (锁, 上次使用毫秒时间戳)，超时未用（30 分钟）自动清理，避免群解散后残留泄漏。
     private const long SessionLockTtlMs = 30 * 60 * 1000;
@@ -214,9 +216,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         AmbientContext.Value = context;
         try
         {
+            var isBridge = IsBridgeAgent(context.AgentId);
+            // 桥接退避（3.1）：外部端点刚连续失败 → 短时抑制重连，避免频繁重试打爆端点/本地
+            if (isBridge && _bridgeCircuit.IsOpen(context.AgentId, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+                return new AgentInvocationResult(false, null, "AGENT_BRIDGE_BACKOFF");
+
             var result = await InvokeCoreAsync(context, ct);
+            _bridgeCircuit.Record(context.AgentId,
+                isFailure: result.ErrorCode is "AGENT_BRIDGE_ERROR" or "AGENT_BRIDGE_DISCONNECTED",
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _metrics.Value?.RecordInvocation(context.AgentId, result.Accepted,
-                isBridge: IsBridgeAgent(context.AgentId),
+                isBridge: isBridge,
                 isBridgeFailure: result.ErrorCode is "AGENT_BRIDGE_ERROR" or "AGENT_BRIDGE_DISCONNECTED",
                 outputChars: 0); // 输出字数由流式累加；此处仅记是否接受。细粒度 token 计费另属用量服务
             return result;
