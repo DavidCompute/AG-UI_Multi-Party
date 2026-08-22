@@ -901,6 +901,7 @@ PUT /ag-ui/user/profile
 |删除话题|`POST /ag-ui/group/topic/delete`|groupId、topicId、operatorId；仅群主 / 管理员或话题创建者；**话题下聊天记录与对应记忆一并删除**，全群广播 `GROUP_TOPIC_DELETED`；主话题 `main` 不可删除|
 |清空话题记录|`POST /ag-ui/group/topic/clear`|groupId、topicId（可为 `main`）、operatorId；仅群主 / 管理员；**话题保留**，该话题下消息与对应语义记忆一并物理删除，全群广播 `GROUP_TOPIC_CLEARED`，返回 `{cleared, topicId, removedCount}`|
 |话题列表|`GET /ag-ui/group/{groupId}/topics`|全部话题（不含默认 `main`）|
+|关联话题|`GET /ag-ui/group/{groupId}/topics/related?topicId=`|**跨话题主题关联（5.1）**：按话题消息分词共享关键词（Jaccard）计算关联分，返回与该话题内容最相关的其它话题 `{topicId, name, score}`（阈值 >0.02、Top6），便于「此主题还在哪讨论过」；需群成员，非成员 403|
 |话题消息分页|`GET /ag-ui/group/{groupId}/topics/{topicId}/messages?before=&count=`|话题内按游标向前分页，语义同 §5.4；`topicId=main` 表示主话题|
 
 新建话题成功返回话题对象，并全群广播 `GROUP_TOPIC_CREATED`；指定起点消息时同步广播 `GROUP_MESSAGE_TOPIC_MOVED`（消息归属迁移，起点消息不能是已撤回消息）。
@@ -961,6 +962,8 @@ PUT /ag-ui/user/profile
 |personalMemoryEnabled|boolean|是否开启个人记忆（默认 false）：开启后回复时检索触发者本人历史发言注入（还需触发者用户开启）|
 |skills|object\[\]?|技能（智能体间调用）：`[{skillId, description, targetAgentId}]`；skillId 给模型作工具名（仅字母/数字/下划线/连字符，**留空自动生成 `skill_<目标ID>`，冲突追加 `_2/_3`**），targetAgentId 为已注册智能体（含 AG-UI 桥接角色）；目标智能体单层展开、不能指向自身|
 |knowledgeBaseIds|string\[\]|绑定的知识库 ID 列表（见 §5.8）：回复前按这些知识库检索相关文档片段注入上下文（RAG 知识库）|
+|relayToAgentId|string?|**角色交接（1.2）**：非空时该智能体整轮委托给中继智能体（`agent_xxx`），外部调用者视角仍是原角色；中继不存在 / 形成接力环时回退本地处理|
+|requireApprovalToolNames|string\[\]?|**智能体级审批策略（4.1）**：非空则用本名单决定哪些工具需审批，否则回退全局 `Agents:RequireApprovalToolNames`；`approveAll` 可一次性批准当前 run 后续全部待审批工具|
 |isPrivate|boolean|是否私密智能体（默认 false）：仅创建者（ownerId）可拉入群 / 编辑 / 删除，目录对其他用户隐藏|
 |ownerId|string?|创建者 userId（appsettings 种子为 null = 系统级）|
 
@@ -997,6 +1000,69 @@ PUT /ag-ui/user/profile
 ```
 
 `override=true` 表示在群内显式覆盖角色默认触发方式（角色编辑不再覆写本群）；`false` 表示跟随角色默认（角色编辑自动同步）。
+
+### 5.9 记忆、任务与运维管理接口（Hub 扩展）
+
+以下均为 Hub 扩展管理类接口，扩展群聊协议的能力面（记忆治理、重复任务、外部专家市场、审计与运维观测）。
+
+**记忆治理与时间线**（需登录，仅可治理**自己所在群**的记忆）：
+
+|接口|路径|说明|
+|---|---|---|
+|记忆总览|`GET /ag-ui/memory/groups`|用户所在各群的记忆统计（条目数 / 各级别分布）|
+|记忆列表|`GET /ag-ui/memory`|记忆条目可视化（按群 `groupId` / 发送者 `senderId` / 关键词 `keyword` 筛选，`limit`/`offset` 分页）|
+|记忆时间线|`GET /ag-ui/memory/timeline`|**2.2 时间线回放**：按群 / 话题 / 关键词回放记忆的旧→新演进，用于复盘「某结论如何演化」|
+|调整记忆级别|`POST /ag-ui/memory/{messageId}/importance`|设置单条记忆级别 `0 普通 / 1 重要 / 2 关键`（同相似度下高级别优先被检索注入）|
+|删除记忆|`DELETE /ag-ui/memory/{messageId}`|物理删除单条记忆|
+|手动遗忘|`POST /ag-ui/memory/forget`|按群（或全部）设过期，可保留最近 N 小时；对应记忆停止参与检索并由后台定时清理|
+|记忆沉淀知识库|`POST /ag-ui/memory/consolidate`|**1.3**：把某群「关键」级别的记忆聚合写入指定知识库（自动/半自动沉淀结论为文档），body 含 `groupId` / `kbId` 等；复用知识库切片向量化|
+
+**重复性定时任务（1.4，值班智能体）**：
+
+|接口|路径|说明|
+|---|---|---|
+|任务列表|`GET /ag-ui/scheduled-tasks`|我所在群的智能体任务；管理员看全部|
+|创建任务|`POST /ag-ui/scheduled-tasks`|`{agentId, name, cron, prompt?, groupId?, enabled?}`——到点触发智能体生成汇报 / 核对 / 催办|
+|更新任务|`PUT /ag-ui/scheduled-tasks/{taskId}`|改名称 / cron / 汇报指令 / 目标群 / 启用状态|
+|删除任务|`DELETE /ag-ui/scheduled-tasks/{taskId}`|删除任务；创建 / 编辑须为相关群成员（管理员任意）|
+
+**智能体 / 技能市场（3.3）**：
+
+|接口|路径|说明|
+|---|---|---|
+|市场目录|`GET /ag-ui/marketplace`|可选角色 / 技能包目录（行业角色包，复用 `agents-starter` 打包结构，需登录）|
+|一键导入|`POST /ag-ui/marketplace/import/{packId}`|把市场包导入为当前用户智能体（agentId 冲突自动改 ID 不覆盖）|
+
+**桥接健康度与能力（3.1 / 3.2，仅管理员）**：
+
+|接口|路径|说明|
+|---|---|---|
+|桥接健康度|`GET /ag-ui/admin/bridge-health?refresh=`|已配置外部 AG-UI 端点的实时/缓存连通状态（支持自动重连退避、断线补发，`BridgeCircuitBreaker`）|
+|桥接能力协商|`GET /ag-ui/admin/bridge-capabilities?refresh=`|外部端点能力（支持的工具 / 附件 / 审批类型，Capability Discovery），减少人工配置|
+
+**审计与观测（4.3 / 6.1 / 6.3，仅管理员）**：
+
+|接口|路径|说明|
+|---|---|---|
+|操作审计日志|`GET /ag-ui/admin/audit?limit=`|关键 / 敏感操作留痕（谁 / 何时 / 批准了什么工具 / 导入导出 / 重置等），`limit` ≤200，可导出满足合规|
+|运行状态|`GET /ag-ui/admin/status`|连接 / 群 / 用户 / 智能体 / 消息计数、内存、线程等进程信息|
+|模型用量|`GET /ag-ui/admin/usage?days=`|最近 N 天模型调用量按日汇总 + 配额配置|
+|运行指标|`GET /ag-ui/admin/metrics`|智能体调用 / 桥接 / 记忆命中 / 输出长度等进程内指标计数（6.1）|
+|配置快照|`GET /ag-ui/admin/config`|集中只读展示 appsettings / .env 关键运维参数（模型、存储、权限、允许来源等），供治理与排障（6.3）|
+
+**多设备会话与二次验证（4.4，需令牌）**：
+
+|接口|路径|说明|
+|---|---|---|
+|TOTP 状态|`GET /ag-ui/user/totp`|是否已启用二次验证 |
+|签发密钥|`POST /ag-ui/user/totp/enroll`|生成 TOTP 密钥（供绑定）|
+|确认启用|`POST /ag-ui/user/totp/confirm`|校验动态码后启用 TOTP（登录时需二次验证）|
+|停用 TOTP|`POST /ag-ui/user/totp/disable`|关闭二次验证|
+|会话列表|`GET /ag-ui/user/sessions`|当前账号全部登录设备会话|
+|吊销会话|`POST /ag-ui/user/sessions/revoke`|吊销指定会话 |
+|吊销其它|`POST /ag-ui/user/sessions/revoke-others`|吊销除本会话外的全部会话|
+
+**细粒度 RBAC（4.2，频道级）**：群成员经 `extra["rbac"]` 携带 `GroupMemberPermissions`（`canInvokeAgents` 谁能 @ 智能体 / `canApprove` 谁能批准人机交互 / `canManageKnowledge` 谁能管理知识库）；字段显式置 false 时限制，null 跟随角色 / 管理员默认允许；`IsAdmin` / `AdminUserIds` 决定系统级管理员，可访问 §5.9 管理员接口。
 
 ### 5\.8 WebSocket 上行事件
 
