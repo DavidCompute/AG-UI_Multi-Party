@@ -1,7 +1,7 @@
 # AG-UI 群聊扩展平台 — 产品路线图（Roadmap）
 
-> ✅ 标记 = 已实现；🟡 = 部分实现。当前已完成：**1.1–1.4 / 2.1–2.4 / 3.1–3.3 / 4.1–4.4 / 5.1–5.4 / 6.1 / 6.3 / 6.4**；
-> **唯一未实现**：6.2（Web 多副本 / Redis 共享存储）。
+> ✅ 标记 = 已实现；🟡 = 部分实现。当前已完成：**1.1–1.4 / 2.1–2.4 / 3.1–3.3 / 4.1–4.4 / 5.1–5.4 / 6.1–6.4**；
+> 路线图全部条目均已实现 🎉
 
 
 > 本文档规划项目的**未来功能增长与完善方向**，并给出优先级建议，供排期与资源决策参考。
@@ -152,10 +152,11 @@
 - **目标**：模型调用量、token 消耗、延迟、桥接故障率、记忆命中率的指标与可视化。
 - **落点模块**：`/ag-ui/health`、`agui_usage` 写入点、`AgentGateway` 埋点。
 
-### 6.2 Web 端多副本横向扩展（★☆☆）
+### 6.2 Web 端多副本横向扩展（★☆☆） ✅已实现（Redis 共享存储）
 - **现状**：单进程 Kestrel。
 - **目标**：Docker 场景多副本 + Redis 共享会话 / 存储（README 已预留 `IGroupStore` / `IUserStore` 可替换为 Redis / DB）。
-- **落点模块**：`IGroupStore` / `IUserStore` / `IAgentDefinitionStore` 的 Redis 实现、会话扩展区。
+- **实现**：新增 `Storage:Provider=redis`。`RedisContext`（连接复用与 key 约定）+ `RedisGroupStore` / `RedisUserStore` / `RedisTaskStore` / `RedisUsageStore` / `RedisAgentRegistryStore` / `RedisSectionStore`；登录会话经 `ISessionStore` 抽象（`RedisSessionStore`）跨副本共享，一台副本登录即可其余副本校验。多副本读写同一批 `agui:*` key 保持一致。
+- **落点模块**：`src/AguiGroupChat.Hub/Persistence/Redis/`、`src/AguiGroupChat.Hub/Users/ISessionStore.cs`、`HubApp.ConfigureServices` 的 redis 分支。
 
 ### 6.3 配置治理 UI（★☆☆） ✅已实现
 - **现状**：运维参数在 `.env` / appsettings。
@@ -188,7 +189,7 @@
 | ★★☆ | 2.3 / 3.1 跨实例记忆同步 + 桥接重连 | 打通桌面/Web 孤岛，提升外部专家可靠性 |
 | ★☆☆ | 6.1 可观测性 | 提升运维与调优能力，成本较低 |
 
-> **里程碑建议**：路线图 1.1–5.4 与 6.1 / 6.3 / 6.4 已按上述方向落地；**剩余唯一项 6.2（Web 多副本 / Redis 共享存储）** 需分布式存储实现（Redis 版 `IGroupStore` / `IUserStore` / `IAgentDefinitionStore` + 共享会话），属独立迭代。
+> **里程碑建议**：路线图 1.1–6.4 已全部落地；后续按运营反馈迭代优化（如 Redis 分片 / Redis 集群、可观测性增强、更多企业合规），见主 README 与 MARKETING「下一步」展望。
 
 ---
 

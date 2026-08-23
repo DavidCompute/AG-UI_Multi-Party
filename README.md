@@ -139,7 +139,7 @@ docker compose down
 | `AGENTS_MODEL` | `deepseek-chat` | 默认模型名 |
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
-| `STORAGE_PROVIDER` | `postgres` | 存储模式：`postgres`（默认，企业级落盘）或 `memory`（进程内 + JSON 快照） |
+| `STORAGE_PROVIDER` | `postgres` | 存储模式：`postgres`（默认，企业级落盘）、`memory`（进程内 + JSON 快照）、`sqlite` / `mysql`（单文件 / MySQL 落盘）、`redis`（多副本共享，6.2） |
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL 库名 / 用户 / 密码（`STORAGE_PROVIDER=postgres` 时生效） |
 | `STORAGE_CONNECTION_STRING` | 指向内置 postgres | 自定义连接串（可指向外部 PostgreSQL 实例） |
 | `MEMORY_ENABLED` | `true` | 语义记忆（RAG）开关：需 `STORAGE_PROVIDER=postgres` + pgvector 扩展（compose 已内置） |
@@ -653,11 +653,32 @@ docker run -d --name agui-mysql-test -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABA
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `Provider` | `memory` | `memory`（JSON 快照）/ `postgres` / `mysql` / `sqlite` |
-| `ConnectionString` | 空 | 数据库连接串（Provider 非 memory 时必填） |
-| `AutoCreateSchema` | true | 启动时自动建表 |
+| `Provider` | `memory` | `memory`（JSON 快照）/ `postgres` / `mysql` / `sqlite` / `redis` |
+| `ConnectionString` | 空 | 数据库 / Redis 连接串（Provider 非 memory 时必填） |
+| `AutoCreateSchema` | true | 启动时自动建表（数据库模式） |
 
-已知限制（各模式一致）：智能体会话记忆（MSAGENT AgentSession）为运行时对象，重启后重建——群消息历史本身已持久化，语境决策读取的即是持久化消息；登录会话为进程内对象，数据库模式重启后需重新登录（memory 模式经快照保留登录态）。
+### 模式三：Redis 共享存储（6.2 Web 多副本横向扩展）
+
+```json
+"Storage": {
+  "Provider": "redis",
+  "ConnectionString": "localhost:6379"
+}
+```
+
+多副本部署时全部 Store 与登录会话共享同一批 Redis key（前缀 `agui:`），使「一台副本写入、其余副本立即可读 / 同一登录令牌全局有效」：
+
+- **共享存储**：`RedisGroupStore` / `RedisUserStore` / `RedisTaskStore` / `RedisUsageStore` / `RedisAgentRegistryStore` / `RedisSectionStore`（智能体定义 / 知识库目录 / 桥接游标 / 模型配置 / TOTP 密钥等扩展区）。群 / 成员 / 话题 / 消息 JSON 落 Redis；撤回标志独立 key 存储；原地修改经 `UpdateX` 显式写回（与其他实现语义一致）。
+- **共享会话**：`RedisSessionStore` 把登录会话写入 `agui:sessions:{tokenHash}`（带 TTL），多副本读写同一批 key——任一副本登录，其余副本可校验同一令牌（见 `AuthService`/`ISessionStore`）。
+- **注意**：语义记忆（RAG）目前需数据库模式（pgvector / sqlite-vec）；`redis` 模式自身不含向量检索，需结合嵌入向量存储（如仍用 pgvector）或关闭 `MEMORY_ENABLED`。
+
+快速起 local Redis 供测试 / 演示：
+
+```bash
+docker run -d --name agui-redis -p 6379:6379 redis:7
+```
+
+已知限制（各模式一致）：智能体会话记忆（MSAGENT AgentSession）为运行时对象，重启后重建——群消息历史本身已持久化，语境决策读取的即是持久化消息；登录会话默认进程内，`memory` 模式重启后经快照保留登录态，`redis` 模式则跨进程 / 副本共享。
 
 ## 语义记忆（RAG，PostgreSQL + pgvector）
 
