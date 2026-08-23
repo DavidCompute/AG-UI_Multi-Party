@@ -11,8 +11,10 @@ Linux uses WebKitGTK. Features match the Windows version (`src/AguiGroupChat.Des
 ## Run
 
 ```bash
-# 1. (Nothing to prepare) The local embedding model bge-m3 (models/embedding.gguf, 1024 dimensions) is already bundled, ready to use;
-#    swapping the model requires updating EmbeddingDimensions in appsettings as well
+# 1. (Optional) Prepare the local embedding model bge-m3 (models/embedding.gguf, 1024 dims, ~605MB):
+#    The model file is NOT in the source repo (exceeds GitHub's per-file limit); a source build needs it downloaded first:
+#      powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1
+#    or set Agents:Memory:ModelDownloadUrl to auto-download on first launch; swapping the model also requires updating EmbeddingDimensions in appsettings
 # 2. Build and run (same command on Windows / macOS / Linux)
 dotnet run --project src/AguiGroupChat.Desktop.Cross
 ```

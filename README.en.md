@@ -35,7 +35,7 @@ src/AguiGroupChat.Hub/Persistence/ # Persistence: PersistenceService (snapshot t
 src/AguiGroupChat.Agents/        # MSAGENT agent gateway: AgentGateway (IAgentGateway implementation), AgentCatalog, MemoryContextProvider (RAG injection), KnowledgeBaseCatalog (knowledge base: document chunk vectors + retrieval), TwinService (user twin + ITwinAgentSync hook), IAgentDefinitionStore (private agent ownership), MockChatClient, skills (AgentSkillCall inter-agent invocation); embedding abstraction (IEmbeddingProvider: HTTP / LLamaSharp local model); built-in tool set (Tools/: calculator / unit_converter / group_memory_search / read_attachment / web_search / read_url)
 src/AguiGroupChat.Web/           # Demo Web: composition root (Hub + Agents) + static frontend (index.html / app.js) + management APIs such as TwinApi / AgentApi
 src/AguiGroupChat.Sdk/           # Third-party integration SDK: AguiClient (HTTP uplink) + AguiRealtimeClient (WS/SSE downlink) + strongly-typed Models
-src/AguiGroupChat.Desktop/       # Pure desktop (Windows, WPF + WebView2): SQLite + sqlite-vec memory, LLamaSharp local embedding (bundled bge-m3 model)
+src/AguiGroupChat.Desktop/       # Pure desktop (Windows, WPF + WebView2): SQLite + sqlite-vec memory, LLamaSharp local embedding (bge-m3 model — NOT in git; bundled in the MSI / downloaded via script when building from source)
 src/AguiGroupChat.Desktop.Core/  # Desktop shared host (pure managed, cross-platform): in-process Kestrel assembling Hub + gateway + API + frontend
 src/AguiGroupChat.Desktop.Cross/ # Cross-platform desktop shell (Avalonia 12 + official WebView): Windows=WebView2 / macOS=WKWebView / Linux=WebKitGTK
 tests/AguiGroupChat.Hub.Tests/   # Unit / integration tests (real Kestrel + ClientWebSocket), including SQLite + sqlite-vec vector memory tests
@@ -114,7 +114,10 @@ dotnet run --project src/AguiGroupChat.Web
 dotnet run --project src/AguiGroupChat.Hub
 
 # Option 3: Pure desktop app (Windows): WPF + WebView2 window, data stored in SQLite (sqlite-vec semantic memory),
-# embedding uses the LLamaSharp local model, bundled with bge-m3 (1024 dims, models/embedding.gguf), ready to use out of the box
+# embedding uses the LLamaSharp local model bge-m3 (1024 dims, models/embedding.gguf).
+# ⚠️ This model file is NOT in the source repo (exceeds GitHub's per-file limit): the released MSI bundles it;
+#    when building from source, run tools/download-embedding-model.ps1 first or set Agents:Memory:ModelDownloadUrl,
+#    otherwise semantic memory (RAG) is auto-disabled
 # Multi-instance supported: multiple launches share the same backend process (fixed 5200; the first instance automatically starts the --backend child process),
 # each instance has its own window, and the backend stops only when the last instance closes (see src/AguiGroupChat.Desktop/README.md)
 dotnet run --project src/AguiGroupChat.Desktop

@@ -12,11 +12,17 @@ personal memory, AI twin, attachments, topics, trigger modes, etc.), but with **
 ## Quick Start
 
 ```bash
-# 1. (Nothing to prepare) The local embedding model bge-m3 (1024 dimensions, models/embedding.gguf) is already bundled, ready to use and fully offline.
-#    To swap the model yourself: rename any GGUF embedding model to embedding.gguf and place it in the models/ directory,
-#    then update EmbeddingDimensions in appsettings accordingly (nomic-embed-text=768, bge-m3=1024)
+# 1. (Optional) Prepare the local embedding model bge-m3 (1024 dims, models/embedding.gguf, ~605MB):
+#    - The model file is **NOT distributed in the source repo** (too large, exceeds GitHub's 100MB single-file limit),
+#      so building from a fresh clone needs it downloaded first.
+#    - Download it with: powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1
+#      or set `Agents:Memory:ModelDownloadUrl` (direct gguf link) and let it auto-download on first launch.
+#    - Alternatively place any GGUF embedding model as models/embedding.gguf and adjust
+#      EmbeddingDimensions in appsettings (nomic-embed-text=768, bge-m3=1024)
 
 # 2. Build and run
+#    Note: the released MSI already bundles the model; a source build requires step 1 first.
+#    Alternative: set Agents:Memory:Provider to http (external embedding endpoint) to avoid downloading.
 dotnet build src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 ```
@@ -24,9 +30,12 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 Once launched, a desktop window opens. Multiple instances share the same backend process: the local service **always runs on `http://127.0.0.1:5200`** (the first instance automatically starts a `--backend` child process). If port 5200 is occupied by another program, the first launch will prompt "Close the program occupying the port and try again."
 On first use, just register an account.
 
-> **Model bundled**: bge-m3-Q8_0 (about 605MB, 1024 dimensions) is distributed together with the installer, which is why the MSI is relatively large (several hundred MB).
-> To slim it down: delete the models/ directory and configure `Agents:Memory:ModelDownloadUrl` (direct link); it will be downloaded automatically on first launch.
-> The MSI is a per-user install (`%LocalAppData%\AguiGroupChat`, no admin required, writable directory); data and models are placed directly in the install directory.
+> **About the model (important)**: the local embedding model `bge-m3-Q8_0` (about 605MB, 1024 dims) is **NOT distributed in the source repository** (its size exceeds GitHub's 100MB per-file limit, so it is excluded from git).
+> The released **MSI installer still bundles this model** (ready to use locally and fully offline after install); when **building from source** you need to download it first:
+> - Run `tools/download-embedding-model.ps1`, or
+> - Set `Agents:Memory:ModelDownloadUrl` (direct gguf link, e.g. Hugging Face / ModelScope); it will be downloaded to `models/` on first launch (falls back to `%LocalAppData%\AguiGroupChat\models` when the install directory is not writable).
+> The MSI is a per-user install (`%LocalAppData%\AguiGroupChat`, no admin required, writable directory); data and models land directly in the install directory.
+> If the model is missing, the app **automatically degrades by disabling semantic memory** and logs the error; other features such as group chat remain unaffected (same fallback as when LLamaSharp fails to load).
 
 ## Configuration (appsettings.json)
 
@@ -65,7 +74,8 @@ src/AguiGroupChat.Desktop/
 ├── Program.cs            # Composition root: embedded Kestrel (reuses Hub + gateway + API + frontend) + WPF window
 ├── MainWindow.xaml(.cs)  # WebView2 window
 ├── appsettings.json      # Desktop configuration (sqlite + local llama embedding)
-├── models/               # Bundled local embedding model: embedding.gguf (bge-m3-Q8_0, 1024 dims, ~605MB)
+├── models/               # Local embedding model: embedding.gguf (bge-m3-Q8_0, 1024 dims, ~605MB).
+│                        # Not in the source repo—see "About the model"; get it via the download script or ModelDownloadUrl
 ├── libs/vec0.dll         # sqlite-vec native extension (Windows x86_64)
 └── data/                 # Generated at runtime: agui.sqlite + uploads/
 ```

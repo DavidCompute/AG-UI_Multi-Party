@@ -11,8 +11,10 @@ Linux 走 WebKitGTK。功能与 Windows 版（`src/AguiGroupChat.Desktop`）一�
 ## 运行
 
 ```bash
-# 1.（无需准备）已捆绑本地 embedding 模型 bge-m3（models/embedding.gguf，1024 维），开箱即用；
-#    更换模型需同步改 appsettings 的 EmbeddingDimensions
+# 1.（可选）准备本地 embedding 模型 bge-m3（models/embedding.gguf，1024 维，约 605MB）：
+#    模型文件不随源码仓库分发（超 GitHub 单文件限制）；从源码构建需先下载：
+#      powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1
+#    或配置 Agents:Memory:ModelDownloadUrl 首次启动自动下载；更换模型需同步改 appsettings 的 EmbeddingDimensions
 # 2. 构建并运行（Windows / macOS / Linux 同一命令）
 dotnet run --project src/AguiGroupChat.Desktop.Cross
 ```

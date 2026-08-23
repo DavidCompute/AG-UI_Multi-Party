@@ -35,7 +35,7 @@ src/AguiGroupChat.Hub/Persistence/ # 持久化：PersistenceService（快照落�
 src/AguiGroupChat.Agents/        # MSAGENT 智能体网关：AgentGateway（IAgentGateway 实现）、AgentCatalog、MemoryContextProvider（RAG 注入）、KnowledgeBaseCatalog（知识库：文档切片向量 + 检索）、TwinService（用户分身 + ITwinAgentSync 钩子）、IAgentDefinitionStore（私密智能体归属）、MockChatClient、技能（AgentSkillCall 智能体间调用）；embedding 抽象（IEmbeddingProvider：HTTP / LLamaSharp 本地模型）；内置工具集（Tools/：calculator / unit_converter / group_memory_search / read_attachment / web_search / read_url）
 src/AguiGroupChat.Web/           # 演示 Web：组合根（Hub + Agents）+ 静态前端（index.html / app.js）+ TwinApi / AgentApi 等管理接口
 src/AguiGroupChat.Sdk/           # 第三方接入 SDK：AguiClient（HTTP 上行）+ AguiRealtimeClient（WS/SSE 下行）+ 强类型 Models
-src/AguiGroupChat.Desktop/       # 纯桌面版（Windows，WPF + WebView2）：SQLite + sqlite-vec 记忆、LLamaSharp 本地 embedding（捆绑 bge-m3 模型）
+src/AguiGroupChat.Desktop/       # 纯桌面版（Windows，WPF + WebView2）：SQLite + sqlite-vec 记忆、LLamaSharp 本地 embedding（bge-m3 模型，不入 git，MSI 内置 / 构建时用脚本下载）
 src/AguiGroupChat.Desktop.Core/  # 桌面共享宿主（纯托管，跨平台）：进程内 Kestrel 组装 Hub + 网关 + API + 前端
 src/AguiGroupChat.Desktop.Cross/ # 跨平台桌面壳（Avalonia 12 + 官方 WebView）：Windows=WebView2 / macOS=WKWebView / Linux=WebKitGTK
 tests/AguiGroupChat.Hub.Tests/   # 单元 / 集成测试（真实 Kestrel + ClientWebSocket），含 SQLite + sqlite-vec 向量记忆测试
@@ -114,7 +114,9 @@ dotnet run --project src/AguiGroupChat.Web
 dotnet run --project src/AguiGroupChat.Hub
 
 # 方式三：纯桌面应用（Windows）：WPF + WebView2 窗口，数据落 SQLite（sqlite-vec 语义记忆），
-# embedding 用 LLamaSharp 本地模型，已捆绑 bge-m3（1024 维，models/embedding.gguf），开箱即用
+# embedding 用 LLamaSharp 本地模型 bge-m3（1024 维，models/embedding.gguf）。
+# ⚠️ 该模型文件不入源码仓库（超 GitHub 单文件限制）：发行版 MSI 已内置；clone 源码构建请先运行
+#    tools/download-embedding-model.ps1 或配置 Agents:Memory:ModelDownloadUrl，否则自动降级关闭 RAG
 # 支持多实例：多次启动共享同一后端进程（固定 5200，第一个实例自动拉起 --backend 子进程），
 # 每个实例独立窗口，最后一个实例关闭才停后端（详见 src/AguiGroupChat.Desktop/README.md）
 dotnet run --project src/AguiGroupChat.Desktop

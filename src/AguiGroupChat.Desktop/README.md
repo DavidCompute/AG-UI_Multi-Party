@@ -12,11 +12,16 @@
 ## 快速开始
 
 ```bash
-# 1.（无需准备）已捆绑本地 embedding 模型 bge-m3（1024 维，models/embedding.gguf），开箱即用、全程离线。
-#    如需自行更换模型：把任一 GGUF embedding 模型重命名为 embedding.gguf 放入 models/ 目录，
-#    并同步改 appsettings 的 EmbeddingDimensions（nomic-embed-text=768，bge-m3=1024）
+# 1.（可选）准备本地 embedding 模型 bge-m3（1024 维，models/embedding.gguf，约 605MB）：
+#    - 模型文件**不随源码仓库分发**（体积大、超 GitHub 单文件限制），首次启动若缺失会自动提示；
+#    - 先用脚本下载：powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1
+#      或配置 `Agents:Memory:ModelDownloadUrl`（gguf 直链），首次启动自动下载；
+#    - 也可自行放置任一 GGUF embedding 模型为 models/embedding.gguf，并同步改
+#      appsettings 的 EmbeddingDimensions（nomic-embed-text=768，bge-m3=1024）
 
 # 2. 构建并运行
+#    说明：发行版 MSI 已含模型；从源码构建则需先完成第 1 步下载模型
+#    避免自行下载时：可先把 `Agents:Memory:Provider` 改为 http（外部 embedding 端点）
 dotnet build src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 ```
@@ -24,9 +29,12 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 启动后弹出桌面窗口，多实例共享同一后端进程：本地服务**固定运行在 `http://127.0.0.1:5200`**（第一个实例自动拉起 `--backend` 子进程）。若 5200 被其他程序占用，首次启动会提示「请关闭占用端口的程序后重试」。
 首次使用注册一个账号即可。
 
-> **模型已捆绑**：bge-m3-Q8_0（约 605MB，1024 维）随安装包一并分发，MSI 因此较大（数百 MB）。
-> 如需瘦身：删除 models/ 目录并配置 `Agents:Memory:ModelDownloadUrl`（直链），首次启动自动下载。
+> **关于模型（重要）**：本地 embedding 模型 `bge-m3-Q8_0`（约 605MB，1024 维）**不随源码仓库分发**（体积超过 GitHub 单文件 100MB 限制，已从 git 中排除）。
+> 发行版 **MSI 安装包仍已内置该模型**（安装后即用、全程离线）；**从源码 clone 自行构建**时需先下载模型：
+> - 运行 `tools/download-embedding-model.ps1`，或
+> - 配置 `Agents:Memory:ModelDownloadUrl`（gguf 直链，Hugging Face / ModelScope），首次启动自动下载到 `models/`（安装目录不可写时落到 `%LocalAppData%\AguiGroupChat\models`）。
 > MSI 为 perUser 安装（`%LocalAppData%\AguiGroupChat`，免管理员、目录可写），数据与模型直接落在安装目录。
+> 模型缺失时应用会**自动降级禁用语义记忆**并记日志，群聊等其余功能不受影响（LLamaSharp 加载失败的兜底行为）。
 
 ## 配置（appsettings.json）
 
@@ -65,7 +73,8 @@ src/AguiGroupChat.Desktop/
 ├── Program.cs            # 组合根：内嵌 Kestrel（复用 Hub + 网关 + API + 前端）+ WPF 窗口
 ├── MainWindow.xaml(.cs)  # WebView2 窗口
 ├── appsettings.json      # 桌面配置（sqlite + 本地 llama embedding）
-├── models/               # 捆绑的本地 embedding 模型：embedding.gguf（bge-m3-Q8_0，1024 维，约 605MB）
+├── models/               # 本地 embedding 模型：embedding.gguf（bge-m3-Q8_0，1024 维，约 605MB）
+│                        # 不入源码仓库，见上方「关于模型」——下载脚本或 ModelDownloadUrl 获取
 ├── libs/vec0.dll         # sqlite-vec 原生扩展（Windows x86_64）
 └── data/                 # 运行时生成：agui.sqlite + uploads/
 ```
