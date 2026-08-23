@@ -145,6 +145,87 @@ function applyTheme(theme) {
 }
 applyTheme(localStorage.getItem(THEME_KEY));
 
+/* ============ 白标 / 品牌化（6.4）：应用名 + Logo + 主色 + 嵌入模式 ============ */
+
+/** 品牌配置缓存（从 /ag-ui/settings/branding 拉取）。 */
+let branding = { appName: "AG-UI 群聊", logoUrl: null, primaryColor: "", forceDark: null, tagline: null };
+
+/** 是否处于 iframe 嵌入 / 显式嵌入模式：压缩顶栏、隐藏无关操作。 */
+const isEmbedMode = (() => {
+  try {
+    const explicit = new URLSearchParams(location.search).get("embed") === "1";
+    return explicit || (window.self !== window.top);
+  } catch { return false; }
+})();
+if (isEmbedMode) document.documentElement.classList.add("embed-mode");
+
+/** 从十六进制主色派生强调色（亮 / 暗两套），经 CSS 变量覆盖默认主题。 */
+function applyAccentFromHex(hex) {
+  const root = document.documentElement;
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) {
+    root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-text");
+    root.style.removeProperty("--agent");
+    return;
+  }
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  // 由单一主色生成：深色模式用原色，浅色模式加深；派生浅色文字标 / 紫色智能体色
+  const light = document.documentElement.dataset.theme !== "light";
+  const base = light
+    ? `rgb(${r},${g},${b})`
+    : `rgb(${Math.max(0, r - 40)},${Math.max(0, g - 40)},${Math.max(0, b - 40)})`;
+  root.style.setProperty("--accent", base);
+  root.style.setProperty("--accent-text", light
+    ? `rgb(${Math.min(255, r + 130)},${Math.min(255, g + 130)},${Math.min(255, b + 130)})`
+    : `rgb(${Math.max(0, r - 130)},${Math.max(0, g - 130)},${Math.max(0, b - 130)})`);
+  root.style.setProperty("--agent", light
+    ? `rgb(${Math.min(255, r + 60)},${Math.max(0, g - 40)},${Math.min(255, b + 40)})`
+    : `rgb(${Math.max(0, r - 30)},${Math.max(0, g - 70)},${Math.max(0, b - 20)})`);
+}
+
+/** 应用品牌配置到页面：名称 / Logo / 主色 / 强制深色 / 副标语。 */
+function applyBranding(br) {
+  if (!br) br = { appName: "AG-UI 群聊" };
+  branding = { appName: br.appName || "AG-UI 群聊", logoUrl: br.logoUrl || null, primaryColor: br.primaryColor || "", forceDark: br.forceDark ?? null, tagline: br.tagline || null };
+  const name = branding.appName;
+  const setBrand = (id, sub) => {
+    const nameEl = document.getElementById(id);
+    if (nameEl) nameEl.textContent = name;
+  };
+  setBrand("brandName");
+  setBrand("authBrandName");
+  // Logo：安全 URL 才渲染（复用 safeUrl），否则回退文字图标
+  const logoEl = document.getElementById("brandLogo");
+  const authLogoEl = document.getElementById("authBrandLogo");
+  const safeLogo = safeUrl(branding.logoUrl, true);
+  if (safeLogo) {
+    const src = escapeHtml(authedAssetUrl(safeLogo));
+    logoEl.innerHTML = `<img src="${src}" alt="${escapeHtml(name)}" />`;
+    authLogoEl.innerHTML = `<img src="${src}" alt="" />`;
+  } else {
+    logoEl.innerHTML = "💬 ";
+    authLogoEl.innerHTML = "💬 ";
+  }
+  // 副标语 / 登录页 tagline
+  const sub = document.getElementById("brandSub");
+  if (sub) sub.textContent = branding.tagline || "Microsoft Agent Framework 多智能体";
+  // 强制深色：嵌入 / 门户白标时锁定深色，隐藏主题切换
+  if (branding.forceDark) {
+    applyTheme("dark");
+    const t = document.getElementById("themeBtn");
+    if (t) t.classList.add("hidden");
+  }
+  applyAccentFromHex(branding.primaryColor);
+}
+
+/** 拉取并应用品牌配置（页面加载与登录后调用；失败静默用默认）。 */
+async function loadBranding() {
+  try {
+    const res = await fetch("/ag-ui/settings/branding");
+    if (res.ok) applyBranding(await res.json());
+  } catch { /* 品牌拉取失败不影响主功能 */ }
+}
+
 /* ============ 登录 / 注册 / 登出 ============ */
 
 const AUTH_KEY = "agui.auth";
@@ -228,6 +309,7 @@ function enterApp(data) {
   $("meMenuModelConfig").classList.toggle("hidden", !state.isAdmin);
   $("meMenuAdmin").classList.toggle("hidden", !state.isAdmin);   // 用户管理（仅管理员）
   $("meMenuStatus").classList.toggle("hidden", !state.isAdmin);  // 系统状态（仅管理员）
+  $("meMenuBranding").classList.toggle("hidden", !state.isAdmin); // 白标品牌（仅管理员）
   renderMeAvatar();
   applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
   resetChatState();
@@ -368,6 +450,46 @@ async function openMemoryModal() {
   $("memoryModal").classList.remove("hidden");
   await loadMemoryGroups();
   await loadMemoryList(0);
+}
+
+/* ============ 白标 / 品牌化（6.4）弹窗：应用名 / Logo / 主色 / 强制深色 ============ */
+
+function openBrandingModal() {
+  $("brName").value = branding.appName === "AG-UI 群聊" ? "" : branding.appName;
+  $("brLogo").value = branding.logoUrl || "";
+  $("brColor").value = branding.primaryColor || "#4f8cff";
+  $("brTagline").value = branding.tagline || "";
+  $("brForceDark").checked = !!branding.forceDark;
+  $("brandModal").classList.remove("hidden");
+}
+
+async function saveBranding() {
+  const body = {
+    appName: $("brName").value.trim(),
+    logoUrl: $("brLogo").value.trim() || null,
+    primaryColor: $("brColor").value || null,
+    tagline: $("brTagline").value.trim() || null,
+    forceDark: $("brForceDark").checked || null,
+  };
+  const btn = $("brSave");
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "⏳ 保存中…";
+  try {
+    const res = await fetch("/ag-ui/settings/branding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + (state.token || "") },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast((data?.message) || "保存失败"); return; }
+    applyBranding(await (await fetch("/ag-ui/settings/branding")).json());
+    toast("已保存品牌配置");
+    $("brandModal").classList.add("hidden");
+  } catch (ex) {
+    toast("保存失败：" + ex.message);
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
 }
 
 /** 各群记忆统计 → 群选择器 + 总条数。 */
@@ -5088,6 +5210,9 @@ function toast(text) {
 /* ============ 初始化 ============ */
 
 function init() {
+  // 加载品牌配置（应用名 / Logo / 主色 / 嵌入），登录页与顶栏据此渲染
+  loadBranding();
+
   // ---- 界面风格切换（深色 / 浅色，选择持久化）----
   $("themeBtn").onclick = () => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
@@ -5122,6 +5247,16 @@ function init() {
   // 记忆管理（分群分级 / 自动遗忘 / 可视化）
   $("meMenuMemory").onclick = () => { $("meMenu").classList.add("hidden"); openMemoryModal(); };
   $("memoryClose").onclick = () => $("memoryModal").classList.add("hidden");
+  // 白标 / 品牌化（6.4，仅管理页）
+  $("meMenuBranding").onclick = (e) => { e.stopPropagation(); $("meMenu").classList.add("hidden"); openBrandingModal(); };
+  $("brSave").onclick = saveBranding;
+  $("brCancel").onclick = () => $("brandModal").classList.add("hidden");
+  $("brReset").onclick = async () => {
+    $("brName").value = ""; $("brLogo").value = ""; $("brColor").value = "#4f8cff"; $("brTagline").value = ""; $("brForceDark").checked = false;
+    $("brandModal").classList.add("hidden");
+    applyBranding({ appName: "AG-UI 群聊", primaryColor: "", forceDark: null }); // 本地立即恢复默认（不落库）
+    toast("已恢复默认品牌（未保存）");
+  };
   // 任务中心（工作型智能体任务编排）
   $("meMenuTasks").onclick = () => { $("meMenu").classList.add("hidden"); openTaskModal(); };
   $("taskClose").onclick = () => $("taskModal").classList.add("hidden");

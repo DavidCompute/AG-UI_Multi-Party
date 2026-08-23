@@ -20,6 +20,7 @@ builder.Services.AddAgentFramework(builder.Configuration); // 以 MSAGENT 网关
 builder.Services.AddSingleton<AgentScheduler>(); // 智能体定时任务（cron）调度器
 builder.Services.AddSingleton<AguiGroupChat.Hub.Persistence.MessageRetentionService>(); // 消息保留策略（按天清理历史）
 builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey），持久化到扩展区 modelConfig
+builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4），持久化到扩展区「branding」
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
@@ -41,17 +42,37 @@ app.Use(async (ctx, next) =>
 {
     var headers = ctx.Response.Headers;
     headers["X-Content-Type-Options"] = "nosniff";
-    headers["X-Frame-Options"] = "DENY";
     headers["Referrer-Policy"] = "same-origin";
+    // iframe 嵌入（6.4）：配置 AllowedFrameOrigins 时放行指定来源，否则默认禁止任何站点嵌套
+    var frameOrigins = app.Services.GetRequiredService<GroupChatOptions>().AllowedFrameOrigins
+        ?.Where(o => !string.IsNullOrWhiteSpace(o)).Select(o => o.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
+    if (frameOrigins.Count == 0)
+    {
+        headers["X-Frame-Options"] = "DENY";
+    }
+    else
+    {
+        // X-Frame-Options 是逐域名且不支持通配/多源，改为 CSP frame-ancestors 承载多源；省略 X-Frame-Options 由 CSP 兜底
+        headers.Remove("X-Frame-Options");
+    }
     if (!ctx.Request.Path.StartsWithSegments("/ag-ui/files"))
     {
+        var frameAncestors = frameOrigins.Count == 0 ? "'none'" : string.Join(" ", frameOrigins.Select(UriEscapeCspSource));
         headers["Content-Security-Policy"] =
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-            "img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss:; " +
-            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'";
+            $"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+            $"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss:; " +
+            $"frame-ancestors {frameAncestors}; base-uri 'self'; form-action 'self'; object-src 'none'";
     }
     await next();
 });
+
+static string UriEscapeCspSource(string src)
+{
+    // CSP frame-ancestors 需要 scheme 源：若用户填的是裸域名补 https:，其余按原样（带引号转义危险字符）
+    var s = src.Trim();
+    if (!s.Contains("://")) s = "https://" + s;
+    return s.Replace("'", "").Replace(";", "").Replace("\r", "").Replace("\n", "");
+}
 
 HubApp.MapEndpoints(app);
 app.MapAgentApi(); // 智能体目录 + 运行时可新增 / 更新 / 删除 AI 角色
@@ -62,6 +83,7 @@ app.MapExportImportApi(); // 数据导出 / 导入：账号 + 智能体 + 聊天
 app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
+app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
 app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
 app.MapTaskApi();   // 任务编排（工作型智能体）
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
@@ -76,6 +98,7 @@ app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游�
 app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoint / apiKey）跨重启保持
 app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
+app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

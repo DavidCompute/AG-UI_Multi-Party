@@ -44,9 +44,19 @@ body {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
 }
-.brand { font-size: 17px; font-weight: 600; }
+.brand { font-size: 17px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
 .brand .sub { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 8px; }
+.brand img { height: 24px; max-width: 120px; object-fit: contain; }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
+
+/* 嵌入模式（iframe / ?embed=1，6.4）：紧凑顶栏，隐藏品牌副标题与部分操作按钮 */
+html.embed-mode .brand .sub { display: none; }
+html.embed-mode .topbar { padding: 6px 10px; }
+html.embed-mode #themeBtn,
+html.embed-mode #helpBtn,
+html.embed-mode #refreshGroupsBtn { display: none; }
+/* 白标 Logo 在登录页 */
+.auth-brand img { height: 34px; max-width: 160px; object-fit: contain; margin-bottom: 4px; }
 label { font-size: 13px; color: var(--muted); }
 select {
   background: var(--panel-2); color: var(--text); border: 1px solid var(--border);

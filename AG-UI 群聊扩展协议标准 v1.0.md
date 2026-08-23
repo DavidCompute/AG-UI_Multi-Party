@@ -1064,6 +1064,15 @@ PUT /ag-ui/user/profile
 
 **细粒度 RBAC（4.2，频道级）**：群成员经 `extra["rbac"]` 携带 `GroupMemberPermissions`（`canInvokeAgents` 谁能 @ 智能体 / `canApprove` 谁能批准人机交互 / `canManageKnowledge` 谁能管理知识库）；字段显式置 false 时限制，null 跟随角色 / 管理员默认允许；`IsAdmin` / `AdminUserIds` 决定系统级管理员，可访问 §5.9 管理员接口。
 
+**白标品牌与嵌入（6.4）**：
+
+|接口|路径|说明|
+|---|---|---|
+|查询品牌配置|`GET /ag-ui/settings/branding`|公开：返回 `{configured, appName, logoUrl, primaryColor, forceDark, tagline}`，供登录页 / 嵌入页渲染 |
+|保存品牌配置|`POST /ag-ui/settings/branding`|仅系统管理员：配置应用名（≤40）/ Logo（站内路径或 https / data:image）/ 品牌主色（6 位 hex）/ 强制深色 / 副标语；持久化到扩展区；非法主色 / 危险 Logo 返回 400 |
+|iframe 嵌入|—|`GroupChatOptions.AllowedFrameOrigins` 配置允许嵌入来源（默认空 = 禁止）；CSP `frame-ancestors` 与 `X-Frame-Options` 相应放行 |
+|对外 API 密钥|—|`Auth:ApiKeys`：`Authorization: Bearer <apiKey>` 免登录以绑定账号身份调用全部 HTTP API（继承其群成员 / 权限 / 管理员标记）|
+
 ### 5\.8 WebSocket 上行事件
 
 WebSocket 连接上可直接上行以下事件（等效对应 HTTP 接口），字段与 HTTP 请求体一致：

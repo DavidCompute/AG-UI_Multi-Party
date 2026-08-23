@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">💬 AG-UI 群聊 <span class="sub">Microsoft Agent Framework 多智能体</span></div>
+    <div class="brand" id="brandEl"><span id="brandLogo"></span><span id="brandName">💬 AG-UI 群聊</span> <span class="sub" id="brandSub">Microsoft Agent Framework 多智能体</span></div>
     <div class="topbar-right">
       <button id="themeBtn" class="chip-btn" title="切换界面风格（深色 / 浅色）">☀️</button>
       <button id="helpBtn" class="chip-btn" title="使用帮助">❓ 帮助</button>
@@ -38,6 +38,7 @@
     <div id="meMenuAdmin" class="me-menu-item">用户管理</div>
     <div id="meMenuStatus" class="me-menu-item">系统状态</div>
     <div id="meMenuMemory" class="me-menu-item">记忆管理</div>
+    <div id="meMenuBranding" class="me-menu-item">白标设置</div>
     <div id="meMenuTasks" class="me-menu-item">任务中心</div>
     <div id="meMenuBackup" class="me-menu-item">数据备份</div>
     <div id="meMenuLogout" class="me-menu-item danger">退出登录</div>
@@ -111,7 +112,7 @@
   <!-- 登录 / 注册 -->
   <div id="authOverlay" class="auth-overlay">
     <div class="auth-card">
-      <div class="auth-brand">💬 AG-UI 群聊</div>
+      <div class="auth-brand" id="authBrand"><span id="authBrandLogo"></span><span id="authBrandName">💬 AG-UI 群聊</span></div>
       <div class="auth-tabs">
         <button id="authTabLogin" class="auth-tab on">登录</button>
         <button id="authTabRegister" class="auth-tab">注册</button>
@@ -397,6 +398,39 @@
       <div class="modal-actions">
         <button id="mcCancel" class="btn-ghost">取消</button>
         <button id="mcSave" class="send">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 白标 / 品牌化（6.4）：应用名 + Logo + 品牌主色 + 强制深色（仅管理员） -->
+  <div id="brandModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">白标品牌</div>
+      <p class="form-hint" style="margin:2px 0 10px">自定义登录页与顶栏的品牌观感（应用名 / Logo / 主色）。主色将作为主题强调色；<b>强制深色</b>适合嵌入门户统一样式。Logo 支持站内上传地址或 https / data:image。</p>
+      <div class="form-group">
+        <label>应用名</label>
+        <input id="brName" class="modal-input" placeholder="AG-UI 群聊（留空用默认）" maxlength="40" />
+      </div>
+      <div class="form-group">
+        <label>Logo URL</label>
+        <input id="brLogo" class="modal-input" placeholder="/ag-ui/files/... 或 https://...">
+      </div>
+      <div class="form-group">
+        <label>品牌主色（hex）</label>
+        <input id="brColor" class="modal-input" type="color" value="#4f8cff" title="选择品牌主色" style="height:38px;padding:4px" />
+      </div>
+      <div class="form-group">
+        <label>副标语（可选）</label>
+        <input id="brTagline" class="modal-input" placeholder="让每一个团队都有 AI 助手" maxlength="60" />
+      </div>
+      <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
+        <input id="brForceDark" type="checkbox" style="width:16px;height:16px" />
+        <label for="brForceDark" style="margin:0">强制深色模式（嵌入门户时锁定深色观感）</label>
+      </div>
+      <div class="modal-actions">
+        <button id="brReset" class="btn-ghost">恢复默认</button>
+        <button id="brCancel" class="btn-ghost">取消</button>
+        <button id="brSave" class="send">保存</button>
       </div>
     </div>
   </div>

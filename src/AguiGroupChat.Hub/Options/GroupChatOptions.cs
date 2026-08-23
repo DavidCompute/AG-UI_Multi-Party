@@ -34,4 +34,11 @@ public sealed class GroupChatOptions
     /// 清理前请确认已做数据备份（管理员「数据备份」导出）。
     /// </summary>
     public int MessageRetentionDays { get; set; }
+
+    /// <summary>
+    /// 允许通过 <c>iframe</c> 嵌入本站的第三方来源（白标 / 嵌入，6.4），如 <c>["https://portal.example.com"]</c>。
+    /// 对应 CSP <c>frame-ancestors</c> 与 X-Frame-Options；留空 = 禁止任何站点嵌入（默认，安全）。
+    /// 注意：允许嵌入意味着该来源可阅读会话页面，请仅对可信站点开放。
+    /// </summary>
+    public List<string> AllowedFrameOrigins { get; set; } = [];
 }
