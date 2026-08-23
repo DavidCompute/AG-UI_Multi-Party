@@ -23,6 +23,7 @@ const HUMANS = [
   { username: "d_akai", nickname: "后端阿凯", role: "后端" },
   { username: "f_xiaoye", nickname: "前端小叶", role: "前端" },
   { username: "q_xiaodi", nickname: "测试小迪", role: "测试" },
+  { username: "o_xiaolin", nickname: "运营小林", role: "运营" },
 ];
 const AGENTS = [
   { agentId: "agent_case_prd", nickname: "产品助理", description: "产品需求分析助手",
@@ -151,6 +152,13 @@ async function main() {
   console.log("\n────────── Round 2 · 技术评审（后端阿凯 @代码帮） ──────────");
   await roundAsk(p["d_akai"], gid, "@代码帮 产品助理刚给了 MVP 范围。你从工程角度评审数据模型和权限怎么做、有哪些坑？给最关键约束。", ["agent_case_code"], 90000, "Round2 代码帮回复");
 
+  // 运营小林：不 @ 数字员工，仅作为真人成员插一句，证明“多人真人同场”
+  console.log("\n────────── Round 2.5 · 运营插话（运营小林，不 @ 数字员工） ──────────");
+  console.log("\n👤 运营小林：「我先记一笔：这轮信息要同步到周报，大家接着聊，结论我最后汇总。」");
+  await post("/ag-ui/group/message/send", p["o_xiaolin"].token, {
+    groupId: gid, userId: p["o_xiaolin"].userId, content: "我先记一笔：这轮信息要同步到周报，大家接着聊，结论我最后汇总。", mentions: [], timestamp: Date.now(),
+  });
+
   console.log("\n────────── Round 3 · 多方对齐（前端小叶 发起多数字员工讨论） ──────────");
   console.log(`\n👤 前端小叶：「你们俩直接对一轮，把权限模型和 MVP 验收对齐。」`);
   const obs3 = observeWS(p["f_xiaoye"], gid); await sleep(300);
@@ -163,14 +171,18 @@ async function main() {
   console.log("\n────────── Round 4 · 收敛与遗留项（测试小迪 再次@两位） ──────────");
   await roundAsk(p["q_xiaodi"], gid, "@产品助理 @代码帮 对齐后最易返工的一条验收标准是？上线先做的两件事？一时没结论的遗留项列出来。", ["agent_case_prd", "agent_case_code"], 120000, "Round4 数字员工收口");
 
-  // 4. 汇总：按时间序回放（真人 + 数字员工交替）
+  // 4. 汇总：明确列出参与者（真人几人 + 数字员工几人），再按时间序回放
   console.log("\n\n═══════════ 完整推进会回放 ═══════════");
   const snap = await get(`/ag-ui/group/${gid}`, owner.token);
+  const members = snap.members || [];
+  const humans = members.filter((m) => m.memberType === "user");
+  const agents = members.filter((m) => m.memberType === "agent");
+  console.log(`\n👥 本知聚参与者：真人 ${humans.length} 位（${humans.map((m) => m.nickname).join("、")}） + 数字员工 ${agents.length} 位（${agents.map((m) => m.nickname).join("、")}）`);
   for (const m of (snap.latestMessages || []).filter((x) => !x.recalled)) {
     const isAgent = m.senderId.startsWith("agent_");
     const tag = isAgent ? "🤖" : "👤";
     const name = m.senderNickname || (isAgent ? nickOf(m.senderId) : "成员");
-    console.log(`\n${tag} [${name}] ${m.content.trim().slice(0, 160)}${m.content.trim().length > 160 ? " …" : ""}`);
+    console.log(`\n${tag} [${name}] ${m.content.trim().slice(0, 140)}${m.content.trim().length > 140 ? " …" : ""}`);
   }
   console.log(`\n[完成] 全面会可登录 http://localhost:5200 查看（知聚 ${gid}）；真人账号见上。`);
   process.exit(0);
