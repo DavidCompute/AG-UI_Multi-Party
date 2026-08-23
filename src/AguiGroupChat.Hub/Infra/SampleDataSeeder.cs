@@ -18,7 +18,9 @@ public sealed class SampleDataSeeder
 
     public async Task SeedAsync()
     {
-        SeedDemoUsers();
+        // 注意：不播种演示账号（zhangsan / lisi）——否则首个真实注册用户会因 FirstUserIsAdmin 判定
+        // 时已有这些内建账号而被跳过，导致「第一个注册用户无法成为管理员」。示例群 / 示例智能体
+        // 用固定 memberId 创建，不依赖真实登录账号；需要演示登录账号时可用 appsettings 显式配置。
 
         var group = await _hub.CreateGroupAsync(new GroupCreateRequest
         {
@@ -64,18 +66,5 @@ public sealed class SampleDataSeeder
             UserId = "user_1002",
             Content = "我补充一点：V2 需要支持 WebSocket 推送",
         });
-    }
-
-    /// <summary>
-    /// 演示账号：与示例群成员 user_1001 / user_1002 固定对应，密码均为 123456。
-    /// 重复启动（如热重载）时账号已存在则静默跳过。
-    /// </summary>
-    private void SeedDemoUsers()
-    {
-        if (_auth is null) return;
-        try { _auth.Register("zhangsan", "123456", "张三", null, "user_1001"); }
-        catch (AguiProtocolException) { /* 已存在则跳过 */ }
-        try { _auth.Register("lisi", "123456", "李四", null, "user_1002"); }
-        catch (AguiProtocolException) { /* 已存在则跳过 */ }
     }
 }

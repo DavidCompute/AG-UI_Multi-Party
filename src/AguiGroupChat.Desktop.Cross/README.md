@@ -1,5 +1,7 @@
 # AG-UI 群聊桌面版（跨平台：Avalonia）
 
+[English](README.en.md) | **简体中文**
+
 同一套桌面应用的另一 UI 壳：**Avalonia 12**（跨平台 XAML）+ 官方 **WebView 控件**
 （`Avalonia.Controls.WebView` / `NativeWebView`）——Windows 走 WebView2、**macOS 走 WKWebView**、
 Linux 走 WebKitGTK。功能与 Windows 版（`src/AguiGroupChat.Desktop`）一致，共享

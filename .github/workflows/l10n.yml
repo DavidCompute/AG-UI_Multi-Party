@@ -1,0 +1,50 @@
+name: i18n (l10n) checks
+
+on:
+  pull_request:
+    paths:
+      - "src/AguiGroupChat.Web/wwwroot/i18n/**"
+      - "src/AguiGroupChat.Web/wwwroot/index.html"
+      - "src/AguiGroupChat.Web/wwwroot/app.js"
+  push:
+    branches: [main, master]
+    paths:
+      - "src/AguiGroupChat.Web/wwwroot/i18n/**"
+
+jobs:
+  dictionaries:
+    name: Verify en/zh dictionary key symmetry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Symmetry check
+        run: node .github/workflows/check-i18n-keys.js
+      - name: Orphan key detection
+        run: node .github/workflows/check-orphan-keys.js
+
+  docs:
+    name: Verify docs have an English counterpart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check top-level docs have English versions
+        shell: bash
+        run: |
+          set -e
+          for f in README.md ROADMAP.md MARKETING.md; do
+            [ -f "$f" ] && [ -f "${f%.md}.en.md" ] || { echo "Missing ${f%.md}.en.md"; exit 1; }
+          done
+          [ -f "PROTOCOL.en.md" ] || { echo "Missing PROTOCOL.en.md (protocol standard)"; exit 1; }
+      - name: Check subproject READMEs have English versions
+        shell: bash
+        run: |
+          set -e
+          for f in \
+            src/AguiGroupChat.Desktop/README.md \
+            src/AguiGroupChat.Desktop.Cross/README.md \
+            src/AguiGroupChat.Sdk/README.md; do
+            [ -f "$f" ] && [ -f "${f%.md}.en.md" ] || { echo "Missing ${f%.md}.en.md"; exit 1; }
+          done

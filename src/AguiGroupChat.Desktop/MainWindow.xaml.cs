@@ -22,16 +22,14 @@ public partial class MainWindow : Window
             await WebView.EnsureCoreWebView2Async();
             WebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
             WebView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-            StatusText.Text = $"本地服务：{_baseUrl}（数据与记忆全部存储在本机）";
+            StatusText.Text = L10n.StatusLocalService(_baseUrl);
             WebView.Source = new Uri(_baseUrl);
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"WebView2 初始化失败：{ex.Message}";
+            StatusText.Text = L10n.WebviewInitFailed(ex.Message);
             MessageBox.Show(this,
-                "无法初始化 WebView2（Chromium Edge WebView2 Runtime）。\n" +
-                "请安装 Microsoft Edge WebView2 Runtime（Windows 10/11 通常已内置）。\n\n" +
-                ex.Message, "AG-UI 桌面版", MessageBoxButton.OK, MessageBoxImage.Error);
+                L10n.WebviewRuntimeBody(ex.Message), L10n.MessageBoxTitle, MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -49,7 +47,7 @@ public partial class MainWindow : Window
             }
             catch { /* 清缓存失败不影响重载 */ }
             WebView.CoreWebView2.Reload();
-            StatusText.Text = $"本地服务：{_baseUrl}（已强制刷新缓存）";
+            StatusText.Text = L10n.StatusWebviewReloaded(_baseUrl);
         }
         else
         {

@@ -11,3 +11,7 @@ data/
 .env
 .env.*
 !.env.example
+# i18n 抽取报告（脚本可随时重新生成）
+tools/extract-report.json
+# node 依赖（如果有，勿入库）
+node_modules/

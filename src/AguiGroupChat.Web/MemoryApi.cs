@@ -4,6 +4,7 @@ using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Hub.Users;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 
 namespace AguiGroupChat.Web;
@@ -167,9 +168,13 @@ public static class MemoryApi
         // ---- 记忆 / 结论沉淀为知识库文档（1.3）：把某群「关键」级别的记忆聚合写入指定知识库 ----
         root.MapPost("/consolidate", async (MemoryConsolidateHttpRequest req, HttpContext ctx,
             AuthService auth, AuthOptions authOptions, IGroupStore store,
-            AguiGroupChat.Agents.KnowledgeBaseCatalog kbs, AguiGroupChat.Hub.Persistence.IMessageMemoryStore memoryStore,
+            AguiGroupChat.Agents.KnowledgeBaseCatalog kbs,
             CancellationToken ct) =>
         {
+            // 语义记忆未启用（存储未注册）时该端点不可用，返回明确错误而非崩溃
+            var memoryStore = ctx.RequestServices.GetService<AguiGroupChat.Hub.Persistence.IMessageMemoryStore>();
+            if (memoryStore is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "语义记忆（IMessageMemoryStore）未启用，无法沉淀群记忆"));
             var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
             if (error is not null) return error;
             if (userId is null) return error!;

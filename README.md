@@ -1,5 +1,7 @@
 # AG-UI 群聊扩展协议 Hub（.NET 10）
 
+[English](README.en.md) | **简体中文**
+
 基于《AG-UI 群聊扩展协议标准 v1.0》实现的群聊协议枢纽，C# / .NET 10（ASP.NET Core Minimal API）。
 
 - ✅ 群组生命周期：创建 / 更新 / 解散（`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`）

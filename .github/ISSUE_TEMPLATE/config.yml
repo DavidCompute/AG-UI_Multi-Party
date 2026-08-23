@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/DavidCompute/AG-UI_Multi-Party/discussions
+    about: Ask usage questions, discuss ideas, and get help with "how do I..." before opening an issue.
+  - name: Documentation
+    url: https://github.com/DavidCompute/AG-UI_Multi-Party/blob/main/README.en.md
+    about: Read the English README (Quick Start, configuration, transport endpoints, persistence, semantic memory).
+  - name: Protocol Standard
+    url: https://github.com/DavidCompute/AG-UI_Multi-Party/blob/main/PROTOCOL.en.md
+    about: The AG-UI Group Chat Extension Protocol Standard v1.0 (protocol events, transport, extensions).
+  - name: Security
+    url: https://github.com/DavidCompute/AG-UI_Multi-Party/security/advisories/new
+    about: Report security vulnerabilities privately instead of opening a public issue.

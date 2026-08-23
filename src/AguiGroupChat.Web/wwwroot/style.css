@@ -131,6 +131,8 @@ select {
   border: 1px solid var(--border); border-radius: 14px; padding: 26px 28px;
 }
 .auth-brand { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 18px; }
+.auth-lang-row { display: flex; justify-content: center; margin-bottom: 14px; }
+.auth-lang-row .chip-btn { font-size: 12px; }
 .auth-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
 .auth-tab {
   flex: 1; background: transparent; border: 1px solid var(--border); color: var(--muted);

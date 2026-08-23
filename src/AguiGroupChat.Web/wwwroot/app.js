@@ -1,6 +1,25 @@
 /* 知聚(KnowGath)前端：连接 Hub WebSocket，渲染协议事件 */
 "use strict";
 
+/** 后端错误本地化：优先按返回的 errorCode 查字典（err.<CODE>），未覆盖时回退后端 message，再回退未知。
+ *  用法：errMsg(res); 或 errMsg(data?.code, data?.message);
+ */
+function errMsg(codeOrRes, fallback) {
+  let code = codeOrRes;
+  let msg = fallback;
+  if (codeOrRes && typeof codeOrRes === "object") {
+    code = codeOrRes.code ?? codeOrRes.errorCode;
+    msg = codeOrRes.message;
+  }
+  if (code) {
+    const localized = t("err." + code);
+    // t 找不到时会回显 key 本身（以 err. 开头），据此区分是否成功命中
+    if (localized !== "err." + code) return localized;
+  }
+  if (msg) return msg;
+  return t("err.unknown", { code: code || "?" });
+}
+
 const state = {
   memberId: null,   // 当前身份（登录用户的 userId 或示例身份）
   token: null,      // 会话令牌（登录 / 注册后签发；示例身份为空）
@@ -69,14 +88,14 @@ function connect() {
   const query = `memberId=${encodeURIComponent(state.memberId)}${state.token ? `&token=${encodeURIComponent(state.token)}` : ""}`;
   const ws = new WebSocket(`${proto}://${location.host}/ws?${query}`);
   state.ws = ws;
-  setStatus(false, "连接中…");
+  setStatus(false, "status.connecting");
   const firstConnect = !state.hadConnection;
 
-  ws.onopen = () => { setStatus(true, "已连接"); state.reconnectDelay = 1000; state.hadConnection = true; if (!firstConnect) addNotification("reconnect", "已重新连接", "网络恢复，实时消息通道已重连"); };
+  ws.onopen = () => { setStatus(true, "status.connected"); state.reconnectDelay = 1000; state.hadConnection = true; if (!firstConnect) addNotification("reconnect", t("notif.reconnected"), t("notif.reconnected.body")); };
   ws.onmessage = (e) => { try { handleEvent(JSON.parse(e.data)); } catch (err) { console.error("事件解析失败：长度 " + e.data.length + "，原因 " + (err && err.message)); } };
   ws.onclose = () => {
-    setStatus(false, "已断开");
-    if (state.memberId && state.hadConnection) addNotification("reconnect", "连接已断开", "正在自动重连…消息已保留，重连后可继续操作");
+    setStatus(false, "status.disconnected");
+    if (state.memberId && state.hadConnection) addNotification("reconnect", t("notif.disconnected"), t("notif.disconnected.body"));
     if (state.ws === ws) {
       state.reconnectTimer = setTimeout(connect, state.reconnectDelay);
       checkSession(); // 令牌可能已失效（如服务端重启），失效则引导重新登录
@@ -185,8 +204,8 @@ function applyAccentFromHex(hex) {
 
 /** 应用品牌配置到页面：名称 / Logo / 主色 / 强制深色 / 副标语。 */
 function applyBranding(br) {
-  if (!br) br = { appName: "知聚(KnowGath)" };
-  branding = { appName: br.appName || "知聚(KnowGath)", logoUrl: br.logoUrl || null, primaryColor: br.primaryColor || "", forceDark: br.forceDark ?? null, tagline: br.tagline || null };
+  if (!br) br = { appName: null };
+  branding = { appName: br.appName || t("brand.name"), logoUrl: br.logoUrl || null, primaryColor: br.primaryColor || "", forceDark: br.forceDark ?? null, tagline: br.tagline || null };
   const name = branding.appName;
   const setBrand = (id, sub) => {
     const nameEl = document.getElementById(id);
@@ -208,7 +227,7 @@ function applyBranding(br) {
   }
   // 副标语 / 登录页 tagline
   const sub = document.getElementById("brandSub");
-  if (sub) sub.textContent = branding.tagline || "Microsoft Agent Framework 数字员工协作";
+  if (sub) sub.textContent = branding.tagline || t("brand.sub");
   // 强制深色：嵌入 / 门户白标时锁定深色，隐藏主题切换
   if (branding.forceDark) {
     applyTheme("dark");
@@ -231,11 +250,12 @@ async function loadBranding() {
 const AUTH_KEY = "agui.auth";
 let authMode = "login";
 
-/** 会话持久化：始终写入 sessionStorage（标签页级）；勾选「保持登录」时同时写入 localStorage（跨浏览器重启）。 */
+/** 会话持久化：始终写入 sessionStorage（标签页级）与 localStorage（跨刷新 / 重启的会话兜底）。
+ * 注意：localStorage 也始终写入，是为避免某些环境（WebView / 隐私模式）刷新时 sessionStorage 被清
+ * 导致「刷新就自动退出登录」。登出时 clearAuth() 会同时清掉两者。 */
 function storeAuth(auth) {
-  sessionStorage.setItem(AUTH_KEY, JSON.stringify(auth));
-  const remember = document.getElementById("authRemember");
-  if (remember && remember.checked) localStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+  try { sessionStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch { /* 存储不可用忽略 */ }
+  try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch { /* 存储不可用忽略 */ }
 }
 
 /** 读取会话：优先 sessionStorage（当前标签页），其次 localStorage（保持登录）。 */
@@ -265,7 +285,7 @@ function setAuthMode(mode) {
   $("authTabLogin").classList.toggle("on", mode === "login");
   $("authTabRegister").classList.toggle("on", mode === "register");
   $("authNickname").classList.toggle("hidden", mode === "login");
-  $("authSubmit").textContent = mode === "login" ? "登录" : "注册";
+  $("authSubmit").textContent = mode === "login" ? t("auth.login") : t("auth.register");
   $("authError").textContent = "";
 }
 
@@ -273,7 +293,7 @@ async function submitAuth(e) {
   e.preventDefault();
   const username = $("authUsername").value.trim();
   const password = $("authPassword").value;
-  if (!username || !password) { $("authError").textContent = "请输入用户名和密码"; return; }
+  if (!username || !password) { $("authError").textContent = t("auth.err.required"); return; }
   const body = authMode === "register"
     ? { username, password, nickname: $("authNickname").value.trim() || null }
     : { username, password };
@@ -284,10 +304,10 @@ async function submitAuth(e) {
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { $("authError").textContent = data?.message || `请求失败（${res.status}）`; return; }
+    if (!res.ok) { $("authError").textContent = errMsg(data?.code, data?.message); return; }
     enterApp(data);
   } catch (ex) {
-    $("authError").textContent = "网络错误，请稍后重试"; // 固定文案，异常细节只进 console 不暴露到界面
+    $("authError").textContent = t("auth.err.network"); // 固定文案，异常细节只进 console 不暴露到界面
     console.warn("登录/注册请求异常：", ex && ex.message);
   }
 }
@@ -302,21 +322,24 @@ function enterApp(data) {
   state.topicMemory = loadTopicMemory(data.userId); // 恢复该用户的话题记忆
   pendingAutoEnterGroup = true; // 知聚列表加载完成后自动进入上次选择的知聚
   hideAuth();
-  $("meChip").classList.remove("hidden");
-  $("meNickname").textContent = data.nickname || data.userId;
-  // 管理菜单（数据备份 / 模型配置）仅管理员显示
-  $("meMenuBackup").classList.toggle("hidden", !state.isAdmin);
-  $("meMenuModelConfig").classList.toggle("hidden", !state.isAdmin);
-  $("meMenuAdmin").classList.toggle("hidden", !state.isAdmin);   // 用户管理（仅管理员）
-  $("meMenuStatus").classList.toggle("hidden", !state.isAdmin);  // 系统状态（仅管理员）
-  $("meMenuBranding").classList.toggle("hidden", !state.isAdmin); // 白标品牌（仅管理员）
-  renderMeAvatar();
-  applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
-  resetChatState();
-  loadUserDirectory();
-  loadGroups();
+  // 尽早建立 WebSocket：不依赖下方任何渲染，避免渲染异常阻断连接导致在线状态停留在 Offline
   connect();
   checkModelConfig(); // 未配置过 DeepSeek 模型 → 自动弹出配置界面
+  try {
+    $("meChip").classList.remove("hidden");
+    $("meNickname").textContent = data.nickname || data.userId;
+    // 管理菜单（数据备份 / 模型配置）仅管理员显示
+    $("meMenuBackup").classList.toggle("hidden", !state.isAdmin);
+    $("meMenuModelConfig").classList.toggle("hidden", !state.isAdmin);
+    $("meMenuAdmin").classList.toggle("hidden", !state.isAdmin);   // 用户管理（仅管理员）
+    $("meMenuStatus").classList.toggle("hidden", !state.isAdmin);  // 系统状态（仅管理员）
+    $("meMenuBranding").classList.toggle("hidden", !state.isAdmin); // 白标品牌（仅管理员）
+    renderMeAvatar();
+    applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
+    resetChatState();
+  } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
+  loadUserDirectory();
+  loadGroups();
 }
 
 function resetChatState() {
@@ -371,8 +394,13 @@ async function logout() {
   state.isAdmin = false;
   pendingAutoEnterGroup = false;
   clearAuth(); // 同时清除 sessionStorage 与 localStorage（保持登录状态随退出登录失效）
-  resetChatState();
-  $("meChip").classList.add("hidden");
+  try {
+    resetChatState();
+  } catch (e) { console.error("登出清理出错（已罗到登录页）", e); }
+  $("meChip") && $("meChip").classList.add("hidden");
+  state.visibility = "all";
+  state.mentionAll = false;
+  state.mentions = new Set();
   showAuth();
 }
 
@@ -387,9 +415,18 @@ async function tryRestoreSession() {
     // 恢复会话时必须带上 isAdmin（/me 返回该字段）：否则管理菜单（备份 / 模型配置 / 用户管理 / 系统状态）会被隐藏
     enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
   } catch {
-    // 网络异常（断网 / 服务未启动）：保留登录态，提示后回到登录页（不销毁 keep-login，恢复网络后刷新仍可自动登录）
-    showAuth();
-    $("authError").textContent = "网络连接失败，请检查服务是否可用（登录信息已保留，恢复后可自动登录）";
+    // 网络异常（断网 / 后端未就绪 / WebView 刚加载）：自动重试一次，避免启动或瞬时抖动导致误退回登录页；
+    // 重试后仍失败才回到登录页（保留 token：keep-login 不销毁，恢复后刷新仍可自动登录）
+    try {
+      await new Promise((r) => setTimeout(r, 1200));
+      const retry = await fetch("/ag-ui/user/me", { headers: { Authorization: `Bearer ${auth.token}` } });
+      if (!retry.ok) { clearAuth(); showAuth(); return; }
+      const me = await retry.json();
+      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
+    } catch {
+      showAuth();
+      $("authError").textContent = t("auth.err.restoreNetwork");
+    }
   }
 }
 
@@ -404,7 +441,7 @@ async function openModelConfigModal() {
   } catch { /* 网络异常忽略，使用缓存值 */ }
   $("mcEndpoint").value = modelConfigData?.endpoint || "";
   $("mcApiKey").value = "";
-  $("mcApiKeyState").textContent = modelConfigData?.apiKeyConfigured ? "（已配置，留空不变更）" : "";
+  $("mcApiKeyState").textContent = modelConfigData?.apiKeyConfigured ? t("mc.apiKeyConfigured") : "";
   $("mcThinking").checked = modelConfigData?.thinkingMode !== false; // 默认开启
   $("modelConfigModal").classList.remove("hidden");
 }
@@ -473,7 +510,7 @@ async function saveBranding() {
   };
   const btn = $("brSave");
   const orig = btn.textContent;
-  btn.disabled = true; btn.textContent = "⏳ 保存中…";
+  btn.disabled = true; btn.textContent = t("common.saving");
   try {
     const res = await fetch("/ag-ui/settings/branding", {
       method: "POST",
@@ -481,12 +518,12 @@ async function saveBranding() {
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast((data?.message) || "保存失败"); return; }
+    if (!res.ok) { toast(errMsg(data, t("common.saveFail", { err: res.status }))); return; }
     applyBranding(await (await fetch("/ag-ui/settings/branding")).json());
-    toast("已保存品牌配置");
+    toast(t("brand.saved"));
     $("brandModal").classList.add("hidden");
   } catch (ex) {
-    toast("保存失败：" + ex.message);
+    toast(t("common.saveFail", { err: ex.message }));
   } finally {
     btn.disabled = false; btn.textContent = orig;
   }
@@ -499,14 +536,15 @@ async function loadMemoryGroups() {
     const data = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(data)) { $("memTotal").textContent = ""; return; }
     const total = data.reduce((s, g) => s + (Number(g.count) || 0), 0); // 数值归一，防字符串拼接 / 注入
-    $("memTotal").textContent = `${total} 条记忆`;
+    $("memTotal").textContent = t("memory.totalCount", { count: total });
     const sel = $("memGroupSelect");
     const current = sel.value;
-    sel.innerHTML = `<option value="">全部知聚（${total} 条）</option>`
+    sel.innerHTML = `<option value="">${t("memory.allGroupsCount", { count: total })}</option>`
       + data.map((g) => {
           const count = Number(g.count) || 0; // 服务端数值先 Number 归一再入 HTML
           const expiredCount = Number(g.expiredCount) || 0;
-          return `<option value="${escapeHtml(g.groupId)}" ${g.groupId === current ? "selected" : ""}>${escapeHtml(g.groupName)}（${escapeHtml(count)} 条${expiredCount ? `，${escapeHtml(expiredCount)} 过期` : ""}）</option>`;
+          const expired = expiredCount ? t("memory.expiredCount", { count: escapeHtml(expiredCount) }) : "";
+          return `<option value="${escapeHtml(g.groupId)}" ${g.groupId === current ? "selected" : ""}>${t("memory.groupOption", { name: escapeHtml(g.groupName), count: escapeHtml(count), expired })}</option>`;
         }).join("");
   } catch { /* 忽略 */ }
 }
@@ -520,43 +558,43 @@ async function loadMemoryList(offset = memOffset) {
   if (groupId) params.set("groupId", groupId);
   if (keyword) params.set("keyword", keyword);
   const list = $("memList");
-  list.innerHTML = `<div class="mem-empty">加载中…</div>`;
+  list.innerHTML = `<div class="mem-empty">${t("memory.loading")}</div>`;
   try {
     const res = await fetch("/ag-ui/memory?" + params.toString(), { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
-    if (!res.ok || !data) { list.innerHTML = `<div class="mem-empty">记忆加载失败</div>`; return; }
+    if (!res.ok || !data) { list.innerHTML = `<div class="mem-empty">${t("memory.loadFail")}</div>`; return; }
     const items = data.items || [];
-    if (!items.length) { list.innerHTML = `<div class="mem-empty">${keyword || groupId ? "没有匹配的记忆" : "暂无记忆（启用语义记忆后自动记录聊天）"}</div>`; $("memPager").innerHTML = ""; return; }
+    if (!items.length) { list.innerHTML = `<div class="mem-empty">${keyword || groupId ? t("memory.noMatch") : t("memory.empty")}</div>`; $("memPager").innerHTML = ""; return; }
     list.innerHTML = items.map((m) => {
       const impN = Number(m.importance); // 服务端数值强制转整型，防 class 属性注入
       const impKey = Number.isInteger(impN) && impN >= 0 ? impN : 0;
-      const imp = ["普通", "重要", "关键"][impKey] || "普通";
+      const imp = [t("memory.level0"), t("memory.level1"), t("memory.level2")][impKey] || t("memory.level0");
       const expired = m.expiresAt && m.expiresAt <= Date.now();
       return `<div class="memory-item ${expired ? "expired" : ""}">
         <div class="mem-head">
           <span class="mem-badge imp-${impKey}">${imp}</span>
           <span class="mem-sender">${escapeHtml(memorySenderName(m))}</span>
           <span class="mem-time">${new Date(m.timestamp).toLocaleString()}</span>
-          ${expired ? '<span class="mem-expired">已过期</span>' : ""}
+          ${expired ? `<span class="mem-expired">${t("memory.expired")}</span>` : ""}
         </div>
         <div class="mem-content">${escapeHtml(m.content)}</div>
         ${m.canManage ? `<div class="mem-ops">
-          <select class="mem-imp" data-mid="${escapeHtml(m.messageId)}" title="记忆级别（高级别同相似度下优先检索）">
-            <option value="0" ${impN === 0 ? "selected" : ""}>普通</option>
-            <option value="1" ${impN === 1 ? "selected" : ""}>重要</option>
-            <option value="2" ${impN === 2 ? "selected" : ""}>关键</option>
+          <select class="mem-imp" data-mid="${escapeHtml(m.messageId)}" title="${t("memory.levelTitle")}">
+            <option value="0" ${impN === 0 ? "selected" : ""}>${t("memory.level0")}</option>
+            <option value="1" ${impN === 1 ? "selected" : ""}>${t("memory.level1")}</option>
+            <option value="2" ${impN === 2 ? "selected" : ""}>${t("memory.level2")}</option>
           </select>
-          <button class="mem-del" data-mid="${escapeHtml(m.messageId)}" title="物理删除该条记忆">🗑 删除</button>
-        </div>` : '<div class="mem-ops muted">仅本人 / 管理员可管理</div>'}
+          <button class="mem-del" data-mid="${escapeHtml(m.messageId)}" title="${t("memory.delTitle")}">${t("memory.delBtn")}</button>
+        </div>` : '<div class="mem-ops muted">' + t("memory.onlyOwner") + '</div>'}
       </div>`;
     }).join("");
     // 分页
     const total = Number(data.total) || 0;
     const pages = Math.max(1, Math.ceil(total / MEM_PAGE));
     const cur = Math.floor(offset / MEM_PAGE) + 1;
-    $("memPager").innerHTML = `共 ${total} 条 · 第 ${cur}/${pages} 页
-      <button class="chip-btn" id="memPrev" ${offset <= 0 ? "disabled" : ""}>⬅ 上一页</button>
-      <button class="chip-btn" id="memNext" ${offset + MEM_PAGE >= total ? "disabled" : ""}>下一页 ➡</button>`;
+    $("memPager").innerHTML = `${t("memory.pager", { total, cur, pages })}
+      <button class="chip-btn" id="memPrev" ${offset <= 0 ? "disabled" : ""}>${t("memory.prevPage")}</button>
+      <button class="chip-btn" id="memNext" ${offset + MEM_PAGE >= total ? "disabled" : ""}>${t("memory.nextPage")}</button>`;
     const prev = $("memPrev");
     const next = $("memNext");
     if (prev) prev.onclick = () => loadMemoryList(Math.max(0, memOffset - MEM_PAGE));
@@ -569,23 +607,23 @@ async function loadMemoryList(offset = memOffset) {
           headers: { "Content-Type": "application/json", Authorization: "Bearer " + (state.token || "") },
           body: JSON.stringify({ importance: Number(sel.value) }),
         });
-        toast(res.ok ? "记忆级别已更新" : "更新失败");
+        toast(res.ok ? t("memory.levelUpdated") : t("memory.updateFail"));
         loadMemoryList(memOffset);
       };
     });
     list.querySelectorAll(".mem-del").forEach((btn) => {
       btn.onclick = async () => {
-        if (!confirm("确定删除这条记忆？删除后不可恢复。")) return;
+        if (!confirm(t("memory.delConfirm"))) return;
         const res = await fetch(`/ag-ui/memory/${encodeURIComponent(btn.dataset.mid)}`, {
           method: "DELETE",
           headers: { Authorization: "Bearer " + (state.token || "") },
         });
-        toast(res.ok ? "记忆已删除" : "删除失败");
+        toast(res.ok ? t("memory.deleted") : t("memory.delFail"));
         loadMemoryList(memOffset);
         loadMemoryGroups();
       };
     });
-  } catch { list.innerHTML = `<div class="mem-empty">记忆加载失败</div>`; }
+  } catch { list.innerHTML = `<div class="mem-empty">${t("memory.loadFail")}</div>`; }
 }
 
 /* ============ 任务中心（工作型数字员工任务编排） ============ */
@@ -601,7 +639,7 @@ function openTaskModal() {
 
 async function loadTasks() {
   const list = $("taskList");
-  list.innerHTML = `<div class="mem-empty">加载中…</div>`;
+  list.innerHTML = `<div class="mem-empty">${t("task.loading")}</div>`;
   const filter = $("taskGroupFilter").value || "";
   taskGroupFilter = filter;
   try {
@@ -611,16 +649,16 @@ async function loadTasks() {
     const res = await fetch(url, { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(data)) {
-      list.innerHTML = `<div class="mem-empty">任务加载失败（${res.status}）</div>`;
+      list.innerHTML = `<div class="mem-empty">${t("task.loadFailTpl", { status: res.status })}</div>`;
       return;
     }
-    $("taskCount").textContent = `${data.length} 条`;
-    if (!data.length) { list.innerHTML = `<div class="mem-empty">暂无任务。在知聚里给启用了 🛠️ 工作型数字员工发指令即可创建任务。</div>`; return; }
+    $("taskCount").textContent = t("task.count", { count: data.length });
+    if (!data.length) { list.innerHTML = `<div class="mem-empty">${t("task.empty")}</div>`; return; }
     // 知聚选择器选项（从任务去重）
     const sel = $("taskGroupFilter");
     const currentGroup = sel.value;
     const groups = [...new Set(data.map((t) => t.groupId))];
-    sel.innerHTML = `<option value="">我的全部任务</option>`
+    sel.innerHTML = `<option value="">${t("task.all")}</option>`
       + groups.map((g) => {
         const gm = state.groups?.find((x) => x.groupId === g);
         const gName = gm?.groupName || g;
@@ -629,15 +667,17 @@ async function loadTasks() {
     sel.value = filter || currentGroup;
     list.innerHTML = data.map((t) => {
       const st = t.status || "";
-      const label = { queue: "排队中", running: "运行中", finished: "已完成", failed: "失败", cancelled: "已取消" }[st] || st;
+      // 值/显示分离：后端枚举值（queue/running/...）→ 前端按当前语言映射标签；未知值回显原值
+      const label = st ? t("task.state." + st) : "";
+      const safeLabel = label.startsWith("task.state.") ? st : label;
       const gm = state.groups?.find((x) => x.groupId === t.groupId);
       const gName = gm?.groupName || t.groupId;
       const progress = (typeof t.progress === "number") ? Math.min(100, Math.max(0, t.progress)) : (st === "finished" ? 100 : 0);
       const agentNick = (() => { for (const g of state.groups || []) { const r = room(g.groupId); const mm = r?.members?.find((m) => m.memberId === t.agentId); if (mm?.nickname) return mm.nickname; } return t.agentId; })();
       return `<div class="memory-item">
         <div class="mem-head">
-          <span class="task-state st-${escapeHtml(st)}">${label}</span>
-          <span class="mem-sender" style="font-weight:600">${escapeHtml(t.title || t.content || "（未命名任务）")}</span>
+          <span class="task-state st-${escapeHtml(st)}">${escapeHtml(safeLabel)}</span>
+          <span class="mem-sender" style="font-weight:600">${escapeHtml(t.title || t.content || t("task.untitled"))}</span>
           <span class="mem-time">${new Date(t.createdAt).toLocaleString()}</span>
         </div>
         <div class="task-meta">${escapeHtml(gName)} · ${escapeHtml(agentNick)} · 发起人 ${escapeHtml(t.userId)}</div>
@@ -647,7 +687,7 @@ async function loadTasks() {
         ${t.error ? `<div class="mem-content task-error">错误：${escapeHtml(t.error)}</div>` : ""}
       </div>`;
     }).join("");
-  } catch { list.innerHTML = `<div class="mem-empty">任务加载失败</div>`; }
+  } catch { list.innerHTML = `<div class="mem-empty">${t("task.loadFail")}</div>`; }
 }
 
 let lastAuthCheck = 0;
@@ -660,7 +700,7 @@ async function checkSession() {
   lastAuthCheck = now;
   try {
     const res = await fetch("/ag-ui/user/me", { headers: { Authorization: `Bearer ${state.token}` } });
-    if (!res.ok) { toast("登录已过期，请重新登录"); logout(); }
+    if (!res.ok) { toast(t("auth.err.sessionExpired")); logout(); }
   } catch { /* 网络异常时静默，继续重连 */ }
 }
 
@@ -692,23 +732,23 @@ function saveTopicMemory(uid) {
 /* ============ 数字员工管理（运行时可新增 / 编辑 / 删除 AI 角色） ============ */
 
 const TRIGGER_LABELS = {
-  mentioned: "提及触发", allMessages: "全量监听", keyword: "关键词触发", contextual: "语境触发",
+  mentioned: t("agent.form.trigger.mentioned"), allMessages: t("agent.form.trigger.allMessages"), keyword: t("agent.form.trigger.keyword"), contextual: t("agent.form.trigger.contextual"),
 };
 // 成员列表用紧凑图标代替文字标签；inherit = 跟随角色默认
 const TRIGGER_ICONS = {
   inherit: "◎", mentioned: "@", allMessages: "👁", keyword: "#", contextual: "🧠",
 };
 const TRIGGER_HINTS = {
-  mentioned: "被 @ 或提及时才发言，最常用的方式",
-  allMessages: "知聚内每条消息都会收到（可能刷屏，建议谨慎）",
-  keyword: "消息命中下方关键词时发言",
-  contextual: "由模型结合知聚上下文自主判断是否发言",
+  mentioned: t("agent.form.trigger.mentioned.hint"),
+  allMessages: t("agent.form.trigger.allMessages.hint"),
+  keyword: t("agent.form.trigger.keyword.hint"),
+  contextual: t("agent.form.trigger.contextual.hint"),
 };
 let agentList = [];
 let editingAgentId = null;
 
 async function openAgentModal() {
-  if (!state.token) { toast("请先登录后管理数字员工"); return; }
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
   await Promise.all([loadAgents(), loadKbs()]);
   $("agentModal").classList.remove("hidden");
   showAgentListView();
@@ -730,8 +770,8 @@ async function loadAgents() {
 
 /** 数字员工创建者显示名：本人显示「我」，否则从用户目录取昵称，查不到则显示 ID 前段。内置数字员工（无 ownerId）显示「系统」。 */
 function agentOwnerName(ownerId) {
-  if (!ownerId) return `<span class="agent-owner sys">系统</span>`;
-  if (ownerId === state.memberId) return `<span class="agent-owner me">我</span>`;
+  if (!ownerId) return `<span class="agent-owner sys">${escapeHtml(t("agent.ownerSystem"))}</span>`;
+  if (ownerId === state.memberId) return `<span class="agent-owner me">${escapeHtml(t("agent.ownerMe"))}</span>`;
   const u = userDirectory.find((x) => x.memberId === ownerId);
   if (u?.nickname) return `<span class="agent-owner">${escapeHtml(u.nickname)}</span>`;
   return `<span class="agent-owner" title="${escapeHtml(ownerId)}">${escapeHtml(ownerId.length > 14 ? ownerId.slice(0, 14) + "…" : ownerId)}</span>`;
@@ -746,19 +786,19 @@ function renderAgentList() {
     || (a.agentId || "").toLowerCase().includes(keyword)
     || (a.description || "").toLowerCase().includes(keyword));
 
-  $("agentCount").textContent = agentList.length ? `${agentList.length} 个角色` : "";
+  $("agentCount").textContent = agentList.length ? t("agent.count", { count: agentList.length }) : "";
   el.innerHTML = "";
 
   if (!agentList.length) {
     const empty = document.createElement("div");
     empty.className = "agent-empty";
     empty.innerHTML = `<div class="agent-empty-icon">🤖</div>
-      <div>还没有数字员工，点击上方「＋ 新增数字员工」创建第一个 AI 角色参与知聚</div>`;
+      <div>${t("agent.empty")}</div>`;
     el.appendChild(empty);
     return;
   }
   if (!filtered.length) {
-    el.innerHTML = `<div class="agent-empty"><div class="agent-empty-icon">🔍</div><div>没有匹配「${escapeHtml(keyword)}」的数字员工</div></div>`;
+    el.innerHTML = `<div class="agent-empty"><div class="agent-empty-icon">🔍</div><div>${t("agent.noMatch", { kw: escapeHtml(keyword) })}</div></div>`;
     return;
   }
 
@@ -773,20 +813,20 @@ function renderAgentList() {
       : "";
     row.innerHTML = `
       <div class="agent-cell">
-        <div class="agent-name">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? '<span class="tag-lock" title="私密数字员工（仅创建者可拉进知聚）">🔒</span>' : ""}${(a.skills || []).length ? `<span class="tag-skill" title="技能：${escapeHtml((a.skills || []).map((s) => s.skillId).join(", "))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="知识库：${escapeHtml(a.knowledgeBaseIds.join(", "))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
+        <div class="agent-name">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? `<span class="tag-lock" title="${escapeHtml(t("agent.privateTip"))}">🔒</span>` : ""}${(a.skills || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.skillsTip", { ids: (a.skills || []).map((s) => s.skillId).join(", ") }))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.kbTip", { ids: a.knowledgeBaseIds.join(", ") }))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
         <div class="agent-desc">${escapeHtml(a.description || "—")}</div>
       </div>
       <div class="agent-cell agent-cell-id"><code>${escapeHtml(a.agentId)}</code></div>
       <div class="agent-cell">
-        <span class="tag-mode">${TRIGGER_LABELS[a.triggerMode] || escapeHtml(a.triggerMode)}</span>
-        ${a.bridgeEndpoint ? `<span class="tag-bridge" title="${escapeHtml(a.bridgeEndpoint)}">🔗 AG-UI 桥接</span>` : ""}
-        ${kw ? `<div class="agent-desc">关键词：${escapeHtml(kw)}</div>` : ""}
+        <span class="tag-mode">${escapeHtml(TRIGGER_LABELS[a.triggerMode] || a.triggerMode)}</span>
+        ${a.bridgeEndpoint ? `<span class="tag-bridge" title="${escapeHtml(a.bridgeEndpoint)}">${escapeHtml(t("agent.bridgeTag"))}</span>` : ""}
+        ${kw ? `<div class="agent-desc">${escapeHtml(t("agent.keywordsLabel", { kw }))}</div>` : ""}
       </div>
-      <div class="agent-cell agent-cell-model">${a.model ? escapeHtml(a.model) : `<span class="muted">默认</span>`}</div>
+      <div class="agent-cell agent-cell-model">${a.model ? escapeHtml(a.model) : `<span class="muted">${escapeHtml(t("agent.defaultModel"))}</span>`}</div>
       <div class="agent-cell agent-cell-owner">${agentOwnerName(a.ownerId)}</div>
       <div class="agent-cell agent-op-col">
-        <button class="icon-btn" data-act="export" title="导出 JSON">📤</button>
-        ${canManage ? '<button class="icon-btn" data-act="edit" title="编辑">✏️</button><button class="icon-btn danger" data-act="del" title="删除">🗑️</button>' : ""}
+        <button class="icon-btn" data-act="export" title="${escapeHtml(t("agent.exportTip"))}">📤</button>
+        ${canManage ? `<button class="icon-btn" data-act="edit" title="${escapeHtml(t("agent.edit"))}">✏️</button><button class="icon-btn danger" data-act="del" title="${escapeHtml(t("agent.del"))}">🗑️</button>` : ""}
       </div>`;
     row.querySelector('[data-act="export"]').onclick = () => exportAgents([a], `${a.agentId}.json`);
     if (canManage) {
@@ -837,37 +877,41 @@ function renderBackupPreview(data) {
   const missingAccounts = data.accounts.filter((a) => !a.exists).length;
   const missingAgents = data.agents.filter((a) => !a.exists).length;
   $("backupImportSummary").textContent =
-    `数据包包含 ${data.accounts.length} 个账号、${data.agents.length} 个数字员工、${data.groups.length} 个聊天记录知聚。`
-    + (missingAccounts ? ` 将自动新建 ${missingAccounts} 个账号。` : " 账号全部已存在。")
-    + (missingAgents ? ` 将自动新建 ${missingAgents} 个数字员工。` : " 数字员工全部已存在。");
+    t("backup.previewSummary", {
+      accounts: data.accounts.length,
+      agents: data.agents.length,
+      groups: data.groups.length,
+      acctNotes: missingAccounts ? t("backup.previewAcctNew", { n: missingAccounts }) : t("backup.previewAcctAllThere"),
+      agentNotes: missingAgents ? t("backup.previewAgentNew", { n: missingAgents }) : t("backup.previewAgentAllThere"),
+    });
   const list = $("backupImportGroups");
   list.innerHTML = data.groups.map((g) => `
     <label class="backup-group-item">
       <input type="checkbox" value="${escapeHtml(g.groupId)}" checked />
       <span class="bg-name">${escapeHtml(g.groupName)}</span>
-      <span class="bg-meta">${Number(g.memberCount) || 0} 成员 · ${Number(g.messageCount) || 0} 消息</span>
+      <span class="bg-meta">${t("backup.previewGroupItem", { members: Number(g.memberCount) || 0, messages: Number(g.messageCount) || 0 })}</span>
     </label>`).join("");
 }
 
 /** 系统数据备份：导入结果报告渲染。 */
 function renderBackupResult(r) {
   const groups = (r.groupsImported || []).map((g) =>
-    `<li>「${escapeHtml(g.groupName)}」：${g.memberCount} 成员 / ${g.messageCount} 消息（${escapeHtml(g.newGroupId)}）</li>`).join("");
+    `<li>${t("backup.resultGroupItem", { name: escapeHtml(g.groupName), memberCount: g.memberCount, messageCount: g.messageCount, id: escapeHtml(g.newGroupId) })}</li>`).join("");
   $("backupResult").innerHTML = `
-    <div class="br-title">✅ 导入完成</div>
+    <div class="br-title">${t("backup.resultTitle")}</div>
     <ul>
-      <li>账号：新建 ${r.accountsCreated}，已存在并更新资料 ${r.accountsUpdated}</li>
-      <li>数字员工：新建 ${r.agentsCreated}，已存在跳过 ${r.agentsSkipped}</li>
-      <li>附件：还原 ${r.attachmentsRestored}，跳过 ${r.attachmentsSkipped}</li>
-      ${groups ? `<li>聊天记录：</li>${groups}` : "<li>未导入聊天记录知聚</li>"}
+      <li>${t("backup.resultAccounts", { created: r.accountsCreated, updated: r.accountsUpdated })}</li>
+      <li>${t("backup.resultAgents", { created: r.agentsCreated, skipped: r.agentsSkipped })}</li>
+      <li>${t("backup.resultAttachments", { restored: r.attachmentsRestored, skipped: r.attachmentsSkipped })}</li>
+      ${groups ? `<li>${t("backup.resultGroups")}</li>${groups}` : `<li>${t("backup.resultNoGroups")}</li>`}
     </ul>`;
 }
 
 /** 导出单个 / 多个数字员工为 JSON 文件（格式：{ version, agents: [...] }）。 */
 function exportAgents(agents, filename = `agents-${Date.now()}.json`) {
-  if (!agents.length) { toast("没有可导出的数字员工"); return; }
+  if (!agents.length) { toast(t("agent.exportNone")); return; }
   downloadJson(filename, { version: 1, agents: agents.map(serializeAgent) });
-  toast(`已导出 ${agents.length} 个数字员工`);
+  toast(t("agent.exported", { count: agents.length }));
 }
 
 /** 解析导入文件：支持 {version, agents:[...]} 与裸数组两种格式；返回数字员工列表或抛错。 */
@@ -885,11 +929,11 @@ async function importAgentsFromFile(file) {
   try {
     agents = parseAgentImport(await file.text());
   } catch (ex) {
-    toast("导入失败：" + ex.message);
+    toast(t("agent.importFail", { err: ex.message }));
     return;
   }
-  if (!Array.isArray(agents) || agents.length === 0) { toast("导入文件为空"); return; }
-  if (!state.token) { toast("请先登录后再导入数字员工"); return; }
+  if (!Array.isArray(agents) || agents.length === 0) { toast(t("agent.importEmpty")); return; }
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
 
   let ok = 0, conflict = 0, failed = 0;
   for (const a of agents) {
@@ -932,7 +976,7 @@ async function importAgentsFromFile(file) {
     } catch { failed++; }
   }
   await Promise.all([loadAgents(), loadAgentDirectory()]);
-  toast(`导入完成：成功 ${ok}${conflict ? `（其中 ${conflict} 个 ID 冲突已自动改名）` : ""}，失败 ${failed}`);
+  toast(t("agent.importDone", { ok, failed }) + (conflict ? t("agent.importConflict", { n: conflict }) : ""));
 }
 
 /** 删除二次确认：首次点击进入确认态（✅ 确认 / ❌ 取消图标），再次点击确认执行删除。
@@ -946,11 +990,11 @@ function confirmDeleteAgent(agent, btn) {
     btn.dataset.confirming = "1";
     btn.classList.add("danger-solid");
     btn.textContent = "✅";
-    btn.title = "确认删除";
+    btn.title = t("agent.delConfirm");
     const cancel = document.createElement("button");
     cancel.className = "icon-btn";
     cancel.textContent = "❌";
-    cancel.title = "取消";
+    cancel.title = t("agent.delCancel");
     cancel.onclick = (e) => { e.stopPropagation(); restoreDeleteBtn(btn); };
     btn.parentElement.appendChild(cancel);
     return;
@@ -962,7 +1006,7 @@ function restoreDeleteBtn(btn) {
   delete btn.dataset.confirming;
   btn.classList.remove("danger-solid", "confirming");
   btn.textContent = "🗑️";
-  btn.title = "删除";
+  btn.title = t("agent.del");
   const cancel = btn.parentElement.querySelector(".icon-btn:not([data-act])");
   if (cancel) cancel.remove();
 }
@@ -970,7 +1014,7 @@ function restoreDeleteBtn(btn) {
 function openAgentForm(agentId) {
   editingAgentId = agentId || null;
   const a = editingAgentId ? agentList.find((x) => x.agentId === editingAgentId) : null;
-  $("agentFormTitle").textContent = a ? `编辑数字员工「${a.nickname}」` : "新增数字员工";
+  $("agentFormTitle").textContent = a ? t("agent.form.editTitle", { name: a.nickname }) : t("agent.form.add");
   $("afAgentId").value = a?.agentId || "";
   $("afAgentId").disabled = !!a;
   $("afNickname").value = a?.nickname || "";
@@ -1033,16 +1077,16 @@ async function saveAgent() {
       .filter((s) => s.targetAgentId.trim())
       .map((s) => ({ skillId: s.skillId.trim(), description: s.description.trim(), targetAgentId: s.targetAgentId.trim() })),
   };
-  if (!body.nickname) { toast("请填写昵称"); return; }
+  if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）
   if (body.schedule && !/^(\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+))* (\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+))* (\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+))* (\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+))* (\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+)(,(\*|[0-9]+|\*\/[0-9]+|[0-9]+-[0-9]+))*$/.test(body.schedule)) {
-    toast("定时表达式格式错误：需 5 段（分 时 日 月 周），如：0 9 * * *"); return;
+    toast(t("agent.err.scheduleInvalid")); return;
   }
   // 填了技能标识的必须合法（OpenAI 工具名规范）；留空的由后端自动生成 skill_<目标ID>
-  if (body.skills.some((s) => s.skillId && !/^[a-zA-Z0-9_-]+$/.test(s.skillId))) { toast("技能标识仅允许字母/数字/下划线/连字符（如 skill_docs，不能含中文/空格）；留空则自动生成"); return; }
-  if (body.skills.some((s) => s.targetAgentId === editingAgentId)) { toast("技能不能指向数字员工自身"); return; }
+  if (body.skills.some((s) => s.skillId && !/^[a-zA-Z0-9_-]+$/.test(s.skillId))) { toast(t("agent.form.skill.invalid")); return; }
+  if (body.skills.some((s) => s.targetAgentId === editingAgentId)) { toast(t("agent.form.skill.selfTarget")); return; }
   const ids = body.skills.map((s) => s.skillId).filter(Boolean);
-  if (new Set(ids).size !== ids.length) { toast("技能标识重复"); return; }
+  if (new Set(ids).size !== ids.length) { toast(t("agent.form.skill.dup")); return; }
   const url = editingAgentId ? `/ag-ui/agents/${encodeURIComponent(editingAgentId)}` : "/ag-ui/agents";
   try {
     const res = await fetch(url, {
@@ -1051,12 +1095,12 @@ async function saveAgent() {
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`保存失败：${data?.message || res.status}`); return; }
-    toast(editingAgentId ? "数字员工已更新" : "数字员工已创建");
+    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, `保存失败（${res.status}）`) })); return; }
+    toast(editingAgentId ? t("agent.updated") : t("agent.created"));
     await loadAgents();
     await loadAgentDirectory();
     showAgentListView();
-  } catch (ex) { toast("保存失败：" + ex.message); }
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
 /** 技能行渲染：SkillId / 描述 / 目标数字员工下拉 / 删除。目标列表排除当前编辑的数字员工。 */
@@ -1135,23 +1179,23 @@ function renderKbModal() {
   const wrap = $("kbListWrap");
   wrap.innerHTML = "";
   if (!kbList.length) {
-    wrap.innerHTML = '<div class="form-hint" style="padding:8px 0">还没有知识库，先在上方创建</div>';
+    wrap.innerHTML = `<div class="form-hint" style="padding:8px 0">${t("kb.noKb")}</div>`;
     return;
   }
   kbList.forEach((kb) => {
     const mine = kb.ownerId === state.memberId;
     const docs = (kb.documents || []).map((d) => {
       const st = d.status === "processing"
-        ? '<span class="kb-status kb-status-proc">⏳ 处理中…</span>'
+        ? `<span class="kb-status kb-status-proc">${t("kb.processing")}</span>`
         : d.status === "error"
-          ? `<span class="kb-status kb-status-err" title="${escapeHtml(d.error || "")}">❌ 失败</span>`
-          : `<span class="kb-status kb-status-ok">✅ ${Number(d.chunkCount) || 0} 片</span>`;
+          ? `<span class="kb-status kb-status-err" title="${escapeHtml(d.error || "")}">${t("kb.failed")}</span>`
+          : `<span class="kb-status kb-status-ok">${t("kb.chunks", { count: Number(d.chunkCount) || 0 })}</span>`;
       return `
       <div class="kb-doc" style="display:flex;align-items:center;gap:6px;margin-top:4px">
         <span style="flex:1;font-size:12px;color:#c9cdd6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${escapeHtml(d.fileName)}</span>${st}
-        ${mine ? `<button class="icon-btn kb-doc-del" data-kb="${escapeHtml(kb.kbId)}" data-doc="${escapeHtml(d.docId)}" title="移除文档">🗑️</button>` : ""}
+        ${mine ? `<button class="icon-btn kb-doc-del" data-kb="${escapeHtml(kb.kbId)}" data-doc="${escapeHtml(d.docId)}" title="${t("kb.removeDocTitle")}">🗑️</button>` : ""}
       </div>`;
-    }).join("") || '<span class="form-hint">暂无文档</span>';
+    }).join("") || `<span class="form-hint">${t("kb.noDocs")}</span>`;
     const box = document.createElement("div");
     box.className = "kb-card";
     box.style.cssText = "border:1px solid #3a3f4b;border-radius:8px;padding:10px;margin-bottom:10px";
@@ -1159,22 +1203,22 @@ function renderKbModal() {
       <div style="display:flex;align-items:center;gap:6px">
         <b style="flex:1">📚 ${escapeHtml(kb.name)}</b>
         ${mine
-          ? `<button class="chip-btn kb-upload" data-kb="${escapeHtml(kb.kbId)}" type="button">📤 上传文档</button>
-             <button class="icon-btn kb-del" data-kb="${escapeHtml(kb.kbId)}" title="删除知识库">🗑️</button>`
-          : '<span class="form-hint">系统知识库（只读）</span>'}
+          ? `<button class="chip-btn kb-upload" data-kb="${escapeHtml(kb.kbId)}" type="button">${t("kb.uploadDoc")}</button>
+             <button class="icon-btn kb-del" data-kb="${escapeHtml(kb.kbId)}" title="${t("kb.delTitle")}">🗑️</button>`
+          : `<span class="form-hint">${t("kb.systemReadonly")}</span>`}
       </div>
       ${kb.description ? `<div class="form-hint">${escapeHtml(kb.description)}</div>` : ""}
       <div class="kb-docs">${docs}</div>
       ${mine ? `<input type="file" class="hidden kb-file" data-kb="${escapeHtml(kb.kbId)}" accept=".txt,.md,.docx,.xlsx,.pptx,.pdf,.json,.csv" />` : ""}`;
     box.querySelectorAll(".kb-doc-del").forEach((btn) => {
       btn.onclick = async () => {
-        if (!confirm("移除该文档？其向量数据将被删除")) return;
+        if (!confirm(t("kb.docDelConfirm"))) return;
         const res = await fetch(`/ag-ui/kb/${btn.dataset.kb}/documents/${btn.dataset.doc}`, {
           method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
         });
         const data = await res.json().catch(() => null);
-        if (!res.ok) { toast(`移除失败：${data?.message || res.status}`); return; }
-        toast("文档已移除");
+        if (!res.ok) { toast(errMsg(data, t("kb.docRemoveFail", { err: res.status }))); return; }
+        toast(t("kb.docRemoved"));
         await loadKbs();
       };
     });
@@ -1188,13 +1232,13 @@ function renderKbModal() {
     };
     const delBtn = box.querySelector(".kb-del");
     if (delBtn) delBtn.onclick = async () => {
-      if (!confirm("删除整个知识库？其全部文档与向量将被清除")) return;
+      if (!confirm(t("kb.delConfirm"))) return;
       const res = await fetch(`/ag-ui/kb/${delBtn.dataset.kb}`, {
         method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`删除失败：${data?.message || res.status}`); return; }
-      toast("知识库已删除");
+      if (!res.ok) { toast(errMsg(data, t("kb.delFail", { err: res.status }))); return; }
+      toast(t("kb.deleted"));
       agentKbIds = agentKbIds.filter((x) => x !== delBtn.dataset.kb);
       renderKbPicks();
       await loadKbs();
@@ -1230,7 +1274,7 @@ function startKbPolling() {
 
 /** 上传文档到知识库：先经 /ag-ui/upload 传附件，再调 kb documents API（后台提取文本 + 向量化，返回后轮询状态）。 */
 async function addKbDocument(kbId, file) {
-  toast(`正在上传 ${file.name}…`);
+  toast(t("kb.uploading", { name: file.name }));
   try {
     const form = new FormData();
     form.append("file", file, file.name);
@@ -1239,18 +1283,18 @@ async function addKbDocument(kbId, file) {
     const ups = await up.json().catch(() => null);
     // 上传接口返回 { attachments: [...] }（对象包裹数组），与 uploadAvatarFile / uploadAttachments 一致
     const atts = Array.isArray(ups?.attachments) ? ups.attachments : null;
-    if (!up.ok || !atts || !atts.length) { toast("附件上传失败"); return; }
+    if (!up.ok || !atts || !atts.length) { toast(t("kb.uploadFail")); return; }
     const res = await fetch(`/ag-ui/kb/${kbId}/documents`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({ attachmentId: atts[0].attachmentId }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`文档添加失败：${data?.message || res.status}`); return; }
-    toast(`「${data.fileName}」已上传，正在提取文本 + 向量化…`);
+    if (!res.ok) { toast(errMsg(data, t("kb.docAddFail", { err: res.status }))); return; }
+    toast(t("kb.uploaded", { name: data.fileName }));
     await loadKbs();
     startKbPolling();
-  } catch (ex) { toast("文档处理失败：" + ex.message); }
+  } catch (ex) { toast(t("kb.docProcessFail", { err: ex.message })); }
 }
 
 async function deleteAgent(agent) {
@@ -1261,11 +1305,11 @@ async function deleteAgent(agent) {
       headers: { Authorization: `Bearer ${state.token}` },
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`删除失败：${data?.message || res.status}`); return; }
-    toast("数字员工已删除");
+    if (!res.ok) { toast(errMsg(data, t("agent.delFail", { err: res.status }))); return; }
+    toast(t("agent.deleted"));
     await loadAgents();
     await loadAgentDirectory();
-  } catch (ex) { toast("删除失败：" + ex.message); }
+  } catch (ex) { toast(t("agent.delFail", { err: ex.message })); }
 }
 
 /* ============ 修改密码 / 资料 ============ */
@@ -1273,7 +1317,7 @@ async function deleteAgent(agent) {
 async function submitChangePassword() {
   const oldPassword = $("pwOld").value;
   const newPassword = $("pwNew").value;
-  if (!oldPassword || !newPassword) { toast("请填写完整"); return; }
+  if (!oldPassword || !newPassword) { toast(t("pw.fillAll")); return; }
   try {
     const res = await fetch("/ag-ui/user/password", {
       method: "POST",
@@ -1281,11 +1325,11 @@ async function submitChangePassword() {
       body: JSON.stringify({ oldPassword, newPassword }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`修改失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, t("pw.changeFail", { err: res.status }))); return; }
     $("pwModal").classList.add("hidden");
-    toast("密码已修改，请重新登录");
+    toast(t("pw.changed"));
     logout();
-  } catch (ex) { toast("修改失败：" + ex.message); }
+  } catch (ex) { toast(t("pw.changeFail", { err: ex.message })); }
 }
 
 function openProfileModal() {
@@ -1321,8 +1365,11 @@ function refreshTwinUi(status) {
   $("pfTwinDisable").style.display = on ? "" : "none";
   $("pfTwinSync").style.display = on ? "" : "none";
   $("pfTwinStatus").textContent = on
-    ? `分身已启用（${status.nickname || ""}，触发：${TRIGGER_LABELS[(status.triggerMode || "").toLowerCase()] || status.triggerMode || ""}）`
-    : (state.token ? "分身未启用" : "请先登录");
+    ? t("profile.twinStatusEnabled", {
+        name: status.nickname || "",
+        mode: TRIGGER_LABELS[(status.triggerMode || "").toLowerCase()] || status.triggerMode || "",
+      })
+    : (state.token ? t("profile.twinNotEnabled") : t("common.loginFirst"));
   if (status?.triggerMode) $("pfTwinTrigger").value = status.triggerMode.toLowerCase();
 }
 
@@ -1336,12 +1383,12 @@ async function syncTwinGroups() {
       headers: { Authorization: `Bearer ${state.token}` },
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`同步失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, t("profile.twinSyncFail", { err: res.status }))); return; }
     refreshTwinUi(data);
-    toast("分身已同步到全部公开知聚");
+    toast(t("profile.twinSynced"));
     loadGroups();
     refreshActiveGroup();
-  } catch (ex) { toast("同步失败：" + ex.message); }
+  } catch (ex) { toast(t("profile.twinSyncFail", { err: ex.message })); }
   finally { $("pfTwinSync").disabled = false; }
 }
 
@@ -1356,10 +1403,10 @@ async function updateTwinTrigger() {
       body: JSON.stringify({ triggerMode: mode }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`触发方式更新失败：${data?.message || res.status}`); loadTwinStatus(); return; }
+    if (!res.ok) { toast(errMsg(data, t("profile.twinTriggerFail", { err: res.status }))); loadTwinStatus(); return; }
     refreshTwinUi(data);
-    toast("分身触发方式已更新");
-  } catch (ex) { toast("触发方式更新失败：" + ex.message); loadTwinStatus(); }
+    toast(t("profile.twinTriggerUpdated"));
+  } catch (ex) { toast(t("profile.twinTriggerFail", { err: ex.message })); loadTwinStatus(); }
 }
 
 /** 重新拉取当前知聚快照并应用（成员 / 话题 / 消息刷新，不依赖事件时序）。 */
@@ -1375,9 +1422,9 @@ async function refreshActiveGroup() {
 
 /** 启用分身：服务端基于公开知聚发言生成人设并加入全部公开知聚。 */
 async function enableTwin() {
-  if (!state.token) { toast("请先登录"); return; }
+  if (!state.token) { toast(t("common.loginFirst")); return; }
   $("pfTwinEnable").disabled = true;
-  $("pfTwinStatus").textContent = "正在生成人设并加入公开知聚…（可能需几十秒）";
+  $("pfTwinStatus").textContent = t("profile.twinGenerating");
   try {
     const res = await fetch("/ag-ui/twin/enable", {
       method: "POST",
@@ -1385,31 +1432,31 @@ async function enableTwin() {
       body: JSON.stringify({ triggerMode: $("pfTwinTrigger").value }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`分身启用失败：${data?.message || res.status}`); refreshTwinUi(null); return; }
+    if (!res.ok) { toast(errMsg(data, t("profile.twinEnableFail", { err: res.status }))); refreshTwinUi(null); return; }
     refreshTwinUi(data);
-    toast("分身已启用");
+    toast(t("profile.twinEnabledToast"));
     loadGroups(); // 刷新知聚列表（分身已加入公开知聚，成员数变化）
     refreshActiveGroup(); // 立即刷新当前知聚成员列表（显示 🪞 分身）
-  } catch (ex) { toast("分身启用失败：" + ex.message); refreshTwinUi(null); }
+  } catch (ex) { toast(t("profile.twinEnableFail", { err: ex.message })); refreshTwinUi(null); }
   finally { $("pfTwinEnable").disabled = false; }
 }
 
 /** 停用分身：删除分身并退出全部知聚。 */
 async function disableTwin() {
   if (!state.token) return;
-  if (!confirm("确定停用分身？分身将从所有知聚退出并停止回复。")) return;
+  if (!confirm(t("profile.twinDisableConfirm"))) return;
   try {
     const res = await fetch("/ag-ui/twin/disable", {
       method: "POST",
       headers: { Authorization: `Bearer ${state.token}` },
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`停用失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, t("profile.twinDisableFail", { err: res.status }))); return; }
     refreshTwinUi(null);
-    toast("分身已停用");
+    toast(t("profile.twinDisableToast"));
     loadGroups();
     refreshActiveGroup(); // 立即刷新当前知聚成员列表（移除 🪞 分身）
-  } catch (ex) { toast("停用失败：" + ex.message); }
+  } catch (ex) { toast(t("profile.twinDisableFail", { err: ex.message })); }
 }
 
 async function submitProfile() {
@@ -1424,7 +1471,7 @@ async function submitProfile() {
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`保存失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, `保存失败（${res.status}）`)); return; }
     $("profileModal").classList.add("hidden");
     $("meNickname").textContent = data.nickname || state.memberId;
     state.avatar = data.avatar || null;
@@ -1433,8 +1480,8 @@ async function submitProfile() {
     renderMeAvatar();
     loadUserDirectory();
     loadGroups();
-    toast("资料已保存"); // 单例 toast：只提示一次（loadUserDirectory/loadGroups 为异步刷新，不重复提示）
-  } catch (ex) { toast("保存失败：" + ex.message); }
+    toast(t("profile.saved")); // 单例 toast：只提示一次（loadUserDirectory/loadGroups 为异步刷新，不重复提示）
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
 /* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
@@ -1450,8 +1497,8 @@ function pickItemHtml(m) {
     ? `<span class="member-avatar"><img src="${escapeHtml(authedAssetUrl(m.avatar))}" alt="" onerror="this.remove()" />${statusIcon}</span>`
     : statusIcon;
   const sub = m.memberType === "agent"
-    ? (isTwin ? "AI 分身（用户离线时代班）" : `AI 数字员工 · ${TRIGGER_LABELS[m.triggerMode] || "提及触发"}`)
-    : "用户";
+    ? (isTwin ? t("member.twinTip") : `${t("agent.pickPrefix")} · ${TRIGGER_LABELS[m.triggerMode] || t("agent.form.trigger.mentioned")}`)
+    : t("agent.pickUser");
   return `${avatar}<span class="pick-info"><span class="pick-name">${escapeHtml(m.nickname || m.memberId)}</span><span class="pick-sub">${sub}</span></span>` +
     (!isTwin && m.memberType === "agent" ? '<span class="tag-agent">AI</span>' : "");
 }
@@ -1459,7 +1506,7 @@ function pickItemHtml(m) {
 /** 渲染成员勾选列表（搜索过滤已由调用方完成）：checkbox + 头像 + 信息；onChange 在选中集变化时回调。 */
 function renderMemberPick(listEl, members, selected, onChange) {
   listEl.innerHTML = "";
-  if (members.length === 0) { listEl.innerHTML = '<div class="pick-empty">无匹配成员</div>'; return; }
+  if (members.length === 0) { listEl.innerHTML = `<div class="pick-empty">${escapeHtml(t("member.noMatch"))}</div>`; return; }
   for (const m of members) {
     const div = document.createElement("div");
     div.className = "pick-item" + (selected.has(m.memberId) ? " checked" : "");
@@ -1510,7 +1557,7 @@ function openGroupSettings() {
   if (!g) return;
   // 权限：仅知聚主 / 管理员（服务端同样校验）
   const me = room(gid)?.members.find((m) => m.memberId === state.memberId);
-  if (me && me.role !== "owner" && me.role !== "admin") { toast("仅知聚主或管理员可修改知聚设置"); return; }
+  if (me && me.role !== "owner" && me.role !== "admin") { toast(t("gs.permEdit")); return; }
   // 解散仅知聚主可执行
   $("gsDisbandBtn").style.display = me?.role === "owner" || g.ownerId === state.memberId ? "" : "none";
   $("gsGroupName").value = g.groupName || "";
@@ -1525,7 +1572,7 @@ async function saveGroupSettings() {
   const g = state.groups.find((x) => x.groupId === gid);
   if (!g) return;
   const groupName = $("gsGroupName").value.trim();
-  if (!groupName) { toast("知聚名称不能为空"); return; }
+  if (!groupName) { toast(t("gs.nameRequired")); return; }
   const updateFields = [];
   const groupInfo = {};
   if (groupName !== g.groupName) { updateFields.push("groupName"); groupInfo.groupName = groupName; }
@@ -1541,7 +1588,7 @@ async function saveGroupSettings() {
       body: JSON.stringify({ groupId: gid, operatorId: state.memberId, updateFields, groupInfo }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`保存失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, `保存失败（${res.status}）`)); return; }
     $("groupSettingsModal").classList.add("hidden");
     // 本地立即生效（GROUP_UPDATED 事件也会同步，双保险）
     if (groupInfo.groupName !== undefined) g.groupName = groupInfo.groupName;
@@ -1549,8 +1596,8 @@ async function saveGroupSettings() {
     if (groupInfo.isPrivate !== undefined) g.isPrivate = groupInfo.isPrivate;
     renderGroupList();
     $("chatGroupName").textContent = (g.isPrivate ? "🔒 " : "") + (g.groupName || "");
-    toast("知聚设置已保存");
-  } catch (ex) { toast("保存失败：" + ex.message); }
+    toast(t("gs.saved"));
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
 /** 解散知聚（仅知聚主）：二次确认后调用 /ag-ui/group/disband，本地立即清理（GROUP_DISBANDED 事件到达后幂等处理）。 */
@@ -1558,7 +1605,7 @@ async function disbandGroup() {
   const gid = state.activeGroupId;
   const g = state.groups.find((x) => x.groupId === gid);
   if (!g) return;
-  if (!confirm(`确定要解散知聚「${g.groupName}」吗？\n解散后所有成员将被移除，聊天记录不可恢复。`)) return;
+  if (!confirm(t("gs.disbandConfirm", { name: g.groupName }))) return;
   try {
     const res = await fetch("/ag-ui/group/disband", {
       method: "POST",
@@ -1566,11 +1613,11 @@ async function disbandGroup() {
       body: JSON.stringify({ groupId: gid, operatorId: state.memberId }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`解散失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, t("gs.disbandFail", { err: res.status }))); return; }
     $("groupSettingsModal").classList.add("hidden");
     onDisbanded({ groupId: gid }); // 本地立即清理（事件到达后再执行一次无副作用）
-    toast("知聚已解散");
-  } catch (ex) { toast("解散失败：" + ex.message); }
+    toast(t("gs.disbanded"));
+  } catch (ex) { toast(t("gs.disbandFail", { err: ex.message })); }
 }
 
 async function createGroup() {
@@ -1578,12 +1625,12 @@ async function createGroup() {
   const picked = memberDirectory().filter((m) => selectedMembers.has(m.memberId));
   // 用户不填知聚名：由 AI 按所选成员自动生成 6-12 字知聚名（需登录；演示模式无令牌则提示手动填写）
   if (!groupName) {
-    if (picked.length === 0) { toast("请选择成员或填写知聚名称"); return; }
-    if (!state.token) { toast("未登录，请手动填写知聚名称"); return; }
+    if (picked.length === 0) { toast(t("create.needMemberOrName")); return; }
+    if (!state.token) { toast(t("create.loginManualName")); return; }
     const btn = $("createConfirm");
     const oldText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "生成知聚名中…";
+    btn.textContent = t("create.genName");
     try {
       const res = await fetch("/ag-ui/group/generate-name", {
         method: "POST",
@@ -1591,11 +1638,11 @@ async function createGroup() {
         body: JSON.stringify({ memberNames: picked.map((m) => m.nickname) }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`知聚名生成失败：${data?.message || res.status}，请手动填写`); return; }
+      if (!res.ok) { toast(errMsg(data, t("create.genNameFail", { err: res.status }))); return; }
       groupName = data.groupName;
       $("createGroupName").value = groupName; // 回填展示
     } catch (ex) {
-      toast("知聚名生成失败：" + ex.message);
+      toast(t("create.genNameFail2", { err: ex.message }));
       return;
     } finally {
       btn.disabled = false;
@@ -1620,7 +1667,7 @@ async function createGroup() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => null);
-      toast(`创建失败：${err?.message || res.status}`);
+      toast(errMsg(err, t("create.createFail2", { err: res.status })));
       return;
     }
     const group = await res.json();
@@ -1642,18 +1689,23 @@ async function createGroup() {
     }
 
     $("createModal").classList.add("hidden");
-    toast(`知聚「${group.groupName}」创建成功`);
+    toast(t("create.created", { name: group.groupName }));
     await loadGroups();
     selectGroup(group.groupId);
   } catch (ex) {
-    toast("创建失败：" + ex.message);
+    toast(t("create.createFail", { err: ex.message }));
   }
 }
 
-function setStatus(online, text) {
+/* 连接状态徽标：记录当前状态 key，语言切换时据此按新语言重渲染。 */
+let _connOnline = false;
+let _connKey = "status.offline";
+function setStatus(online, key) {
+  _connOnline = online;
+  _connKey = key;
   const el = $("connStatus");
   el.className = "badge " + (online ? "online" : "offline");
-  el.textContent = text;
+  el.textContent = t(key || "status.offline");
 }
 
 /* ============ 知聚与成员加载 ============ */
@@ -1681,7 +1733,7 @@ async function loadGroups() {
     resetVScroll();
     renderMembers();
     renderTopicBar();
-    $("chatGroupName").textContent = "请选择一个知聚";
+    $("chatGroupName").textContent = t("chat.selectGroup");
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
@@ -1752,7 +1804,7 @@ function handleEvent(evt) {
     case "AGENT_INTERACTION_REQUEST": onInteractionRequest(evt); break;
     case "AGENT_INTERACTION_RESOLVED": onInteractionResolved(evt); break;
     case "GROUP_MEMBER_JOINED":
-      addSystemLine(evt.groupId, `${evt.members.map((m) => m.nickname).join("、")} 加入了知聚`);
+      addSystemLine(evt.groupId, t("msg.memberJoined", { names: evt.members.map((m) => m.nickname).join("、") }));
       {
         const r = room(evt.groupId);
         for (const m of evt.members || []) {
@@ -1763,7 +1815,9 @@ function handleEvent(evt) {
       loadGroups();
       break;
     case "GROUP_MEMBER_LEFT":
-      addSystemLine(evt.groupId, `${evt.memberIds.join("、")} ${evt.leaveType === "kick" ? "被移出知聚" : "退出了知聚"}`);
+      addSystemLine(evt.groupId, evt.leaveType === "kick"
+        ? t("msg.memberKicked", { names: evt.memberIds.join("、") })
+        : t("msg.memberLeft", { names: evt.memberIds.join("、") }));
       if (evt.memberIds.includes(state.memberId)) {
         // 自己被移出 / 退出知聚：与解散同等清理（清空该知聚消息与索引、移除订阅与知聚列表），本地不再保留该知聚
         cleanupRoom(evt.groupId);
@@ -1886,10 +1940,10 @@ function onMessageStart(evt) {
     const isCurrentView = evt.groupId === state.activeGroupId && (m.topicId || "main") === (state.activeTopicId || "main");
     const gnameStr = (state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId;
     if (isMeMentioned) {
-      addNotification("mention", `${evt.senderNickname || evt.senderId} 提到了你`, `在「${gnameStr}」：${String(m.content || "").slice(0, 80)}`, { groupId: evt.groupId, topicId: m.topicId });
+      addNotification("mention", window.t("notif.mentionedYou", { name: evt.senderNickname || evt.senderId }), window.t("notif.mentionBody", { group: gnameStr, content: String(m.content || "").slice(0, 80) }), { groupId: evt.groupId, topicId: m.topicId });
     } else if (!isCurrentView && evt.senderType !== "sys") {
-      const label = evt.senderType === "agent" ? "数字员工发来" : "新消息";
-      addNotification("message", `「${gnameStr}」· ${evt.senderNickname || evt.senderId}`, String(m.content || "（图片 / 语音 / 附件）").slice(0, 80), { groupId: evt.groupId, topicId: m.topicId });
+      const label = evt.senderType === "agent" ? window.t("notif.agentSent") : window.t("notif.newMessage");
+      addNotification("message", window.t("notif.messageTitle", { group: gnameStr, sender: evt.senderNickname || evt.senderId }), String(m.content || window.t("notif.bodyAttachment")).slice(0, 80), { groupId: evt.groupId, topicId: m.topicId });
     }
   }
   if (state.activeGroupId !== evt.groupId) return; // 非当前知聚不渲染
@@ -1986,7 +2040,7 @@ function onMessageReasoning(evt) {
     const box = document.createElement("details");
     box.className = "thinking";
     box.open = true;
-    box.innerHTML = "<summary>💭 思考中…</summary><div class='thinking-body'></div>";
+    box.innerHTML = `<summary>${t("msg.thinkingStreaming")}</summary><div class='thinking-body'></div>`;
     box.querySelector(".thinking-body").textContent = m.reasoning;
     (content ? content.parentNode : msgEl.querySelector(".body")).insertBefore(box, content);
     if (vscroll.stickBottom) scheduleFollow();
@@ -2020,7 +2074,7 @@ function onMessageReset(evt) {
     if (th) th.remove(); // 思考块随内容一起清空
     const contentEl = msgEl.querySelector(".content");
     if (contentEl && !m.recalled && m.streaming) {
-      contentEl.textContent = "⏳ 数字员工等待你的确认，确认后继续运行…";
+      contentEl.textContent = t("msg.waitingConfirm");
       contentEl.classList.add("waiting");
     }
   }
@@ -2079,7 +2133,7 @@ function onMessageEnd(evt) {
     if (th) {
       th.open = false;
       const s = th.querySelector("summary");
-      if (s) s.textContent = "💭 思考过程";
+      if (s) s.textContent = t("msg.thinkingDone");
       const thBody = th.querySelector(".thinking-body");
       if (thBody) {
         thBody.classList.add("md");
@@ -2170,7 +2224,7 @@ function applyRecallLocal(groupId, messageId) {
 
 function onRecalled(evt) {
   applyRecallLocal(evt.groupId, evt.messageId);
-  addSystemLine(evt.groupId, "一条消息已被撤回");
+  addSystemLine(evt.groupId, t("msg.recalledNotice"));
 }
 
 /** 工具调用行 DOM（msgDom 与 onToolCall 局部更新共用）；兼容旧数据（toolCalls 为字符串数组）。
@@ -2180,7 +2234,7 @@ function toolCallElement(tc) {
   const div = document.createElement("div");
   div.className = "tool-call";
   if (t.id) div.dataset.toolcallId = t.id;
-  div.textContent = `🔧 ${t.name || "tool"} 调用中…`;
+  div.textContent = `🔧 ${window.t("msg.toolCalling", { name: t.name || "tool" })}`;
   return div;
 }
 
@@ -2194,7 +2248,7 @@ function createToolCallsWrap(msgEl) {
 function onToolCall(evt) {
   const r = room(evt.groupId);
   const m = r.messages.find((x) => x.id === evt.parentMessageId);
-  if (!m) { addSystemLine(evt.groupId, `🔧 数字员工调用工具：${evt.toolCallName}`); return; }
+  if (!m) { addSystemLine(evt.groupId, t("msg.toolCallNotice", { name: evt.toolCallName })); return; }
   m.toolCalls = m.toolCalls || [];
   m.toolCalls.push({ id: evt.toolCallId, name: evt.toolCallName || "tool", done: false });
   if (state.activeGroupId !== evt.groupId) return;
@@ -2240,7 +2294,7 @@ function onToolCallResult(evt) {
 function onInteractionRequest(evt) {
   const r = room(evt.groupId);
   const m = r.messages.find((x) => x.id === evt.messageId);
-  if (!m) { addSystemLine(evt.groupId, `数字员工请求确认：${evt.toolName || "工具调用"}`); return; } // 兜底：消息未找到
+  if (!m) { addSystemLine(evt.groupId, t("msg.interactionRequest", { name: evt.toolName || t("msg.toolCall") })); return; } // 兜底：消息未找到
   if (m.interaction && m.interaction.interruptId === evt.interruptId) return; // 幂等
   m.interaction = {
     interruptId: evt.interruptId,
@@ -2260,8 +2314,13 @@ function onInteractionRequest(evt) {
   m._html = undefined; // 内容区无变化，但渲染缓存与卡片块独立，无需清（保守清一次）
   // 应用内通知中心（5.4）：当前用户待处理的人机交互（审批 / 输入）入通知，含系统兜底
   if (m.interaction.canDecide) {
-    const act = m.interaction.kind === "input" ? "请求输入" : "请求批准";
-    addNotification("approval", `数字员工${act}：${m.interaction.toolName || "工具调用"}`, `在「${(state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId}」等待你处理`, { groupId: evt.groupId });
+    const actKey = m.interaction.kind === "input" ? "itx.notif.input" : "itx.notif.approve";
+    const toolName = m.interaction.toolName || t("msg.toolCall");
+    const groupName = (state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId;
+    addNotification("approval",
+      t("itx.notif.title", { act: t(actKey), tool: toolName }),
+      t("itx.notif.body", { group: groupName }),
+      { groupId: evt.groupId });
   }
   if (state.activeGroupId !== evt.groupId) return;
   const msgEl = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
@@ -2319,13 +2378,13 @@ function submitInteractionInput(container, m) {
       const q = itx.questions[qi];
       if (q.multiple) {
         const picked = [...container.querySelectorAll(`.itx-q-opt:checked[data-q="${qi}"]`)].map((c) => c.value);
-        if (picked.length === 0) { toast(`请回答第 ${qi + 1} 个问题（可多选）`); return; }
+        if (picked.length === 0) { toast(t("itx.answerQuestionMulti", { n: qi + 1 })); return; }
         answers.push(picked); // 多选：多个 label 的数组
       } else {
         const opt = container.querySelector(`.itx-q-opt:checked[data-q="${qi}"]`);
         const text = container.querySelector(`.itx-q-text[data-q="${qi}"]`);
         const val = opt ? opt.value : (text ? text.value.trim() : "");
-        if (!val) { toast(`请回答第 ${qi + 1} 个问题`); return; }
+        if (!val) { toast(t("itx.answerQuestion", { n: qi + 1 })); return; }
         answers.push([val]); // 单选：单元素数组
       }
     }
@@ -2342,12 +2401,12 @@ function submitInteractionInput(container, m) {
     const required = Array.isArray(schema.required) ? schema.required : [];
     for (const f of required) {
       const v = payload[f];
-      if (v === undefined || v === null || v === "") { toast("请填写必填项"); return; }
+      if (v === undefined || v === null || v === "") { toast(t("itx.requiredFields")); return; }
     }
-    if (Object.keys(payload).length === 0) { toast("请填写内容后提交"); return; }
+    if (Object.keys(payload).length === 0) { toast(t("itx.enterContent")); return; }
   } else {
     value = (container.querySelector(".itx-text")?.value || "").trim();
-    if (!value) { toast("请输入内容后提交"); inputElFocus(container); return; }
+    if (!value) { toast(t("itx.enterText")); inputElFocus(container); return; }
   }
   resolveInteraction(m, true, value, payload);
 }
@@ -2365,12 +2424,12 @@ function schemaFieldHtml(key, def, required) {
   const label = `<span class="itx-label">${escapeHtml(title)}${required ? ' <b style="color:#f44336">*</b>' : ""}</span>`;
   if (type === "boolean") {
     return `<label class="itx-field">${label}<select class="itx-schema-field" data-field="${escapeHtml(key)}">` +
-      `<option value="true">是</option><option value="false">否</option></select></label>`;
+      `<option value="true">${t("itx.booleanYes")}</option><option value="false">${t("itx.booleanNo")}</option></select></label>`;
   }
   if (type === "array" && Array.isArray(def.items?.enum)) {
     const opts = def.items.enum.map((v) =>
       `<label class="itx-check"><input type="checkbox" class="itx-schema-check" value="${escapeHtml(String(v))}" /> ${escapeHtml(String(v))}</label>`).join("");
-    return `<div class="itx-field">${label}<span class="itx-hint">（可多选）</span><div class="itx-checks" data-field="${escapeHtml(key)}">${opts}</div></div>`;
+    return `<div class="itx-field">${label}<span class="itx-hint">${t("itx.multiSelect")}</span><div class="itx-checks" data-field="${escapeHtml(key)}">${opts}</div></div>`;
   }
   if (type === "string" && Array.isArray(def.enum)) {
     const opts = def.enum.map((v) => `<option value="${escapeHtml(String(v))}">${escapeHtml(String(v))}</option>`).join("");
@@ -2398,7 +2457,7 @@ function renderPlanCard(plan) {
   const steps = plan.steps || [];
   const done = steps.filter((s) => s.done).length;
   const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
-  return `<div class="plan-card-head">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : "任务计划"}<span class="plan-progress-txt">${done}/${steps.length}（${pct}%）</span></div>`
+  return `<div class="plan-card-head">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : t("itx.planCardTitle")}<span class="plan-progress-txt">${done}/${steps.length}（${pct}%）</span></div>`
     + `<div class="plan-progress"><div class="plan-progress-bar" style="width:${pct}%"></div></div>`
     + `<ul class="plan-steps">${steps.map((s) =>
         `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>`;
@@ -2426,40 +2485,41 @@ function renderInteractionCard(m) {
         const ctlType = q.multiple ? "checkbox" : "radio";
         const opts = (q.options || []).map((o) =>
           `<label class="itx-check itx-q-opt-label"><input type="${ctlType}" class="itx-q-opt" name="${qCtlName(qi)}" data-q="${qi}" value="${escapeHtml(o.label)}" /> ${escapeHtml(o.label)}${o.description ? `<span class="itx-hint">— ${escapeHtml(o.description)}</span>` : ""}</label>`).join("");
-        return `<div class="itx-q"><div class="itx-q-title">${qi + 1}. ${q.header ? `<span class="itx-q-header">[${escapeHtml(q.header)}]</span> ` : ""}${escapeHtml(q.question)}${q.multiple ? `<span class="itx-hint">（可多选）</span>` : ""}</div>` +
-          (opts ? `<div class="itx-q-opts">${opts}</div>` : `<input class="itx-q-text" data-q="${qi}" type="text" placeholder="请输入第 ${qi + 1} 个问题的答案…" maxlength="500" />`) +
+        return `<div class="itx-q"><div class="itx-q-title">${qi + 1}. ${q.header ? `<span class="itx-q-header">[${escapeHtml(q.header)}]</span> ` : ""}${escapeHtml(q.question)}${q.multiple ? `<span class="itx-hint">${t("itx.multiSelect")}</span>` : ""}</div>` +
+          (opts ? `<div class="itx-q-opts">${opts}</div>` : `<input class="itx-q-text" data-q="${qi}" type="text" placeholder="${escapeHtml(t("itx.questionAnswerPh", { n: qi + 1 }))}" maxlength="500" />`) +
           `</div>`;
       }).join("")}</div>`
     : "";
   // 工具行：approval 恒显示；input 型在外部服务提供工具名（非 unknown）时同样显示，明确向哪个工具输入（如 question）
   const toolName = itx.toolName && itx.toolName !== "unknown" ? itx.toolName : "";
-  const toolLine = toolName ? `<div class="itx-tool">工具：<code>${escapeHtml(toolName)}</code></div>` : "";
+  const toolLine = toolName ? `<div class="itx-tool">${t("itx.toolDesc")}<code>${escapeHtml(toolName)}</code></div>` : "";
   let actions = "";
   if (itx.resolved) {
     actions = `<div class="itx-status ${itx.decision ? "ok" : "no"}">${
       isInput
-        ? "✅ 已提交，等待数字员工继续…"
-        : (itx.decision ? "✅ 已批准，等待数字员工继续…" : "❌ 已拒绝，操作未执行")
+        ? t("itx.submittedInput")
+        : (itx.decision ? t("itx.approved") : t("itx.rejected"))
     }</div>`;
   } else if (itx.canDecide) {
     if (isInput) {
       // 结构化问题卡片优先，其次 schema 表单；两者都没有时用单输入框（占位符带上输入字段名）
-      const hint = itx.inputField ? `请输入 ${itx.inputField}…` : "请输入…";
+      const hint = itx.inputField ? t("itx.inputFieldPh", { field: itx.inputField }) : t("itx.inputPh");
       actions = `<div class="itx-input">${qHtml || formHtml}` +
         ((qHtml || hasForm) ? "" : `<input class="itx-text" type="text" placeholder="${escapeHtml(hint)}" maxlength="500" />`) +
-        `<div class="itx-submit-row"><button class="itx-btn submit" data-act="submit">➤ 提交</button></div></div>`;
+        `<div class="itx-submit-row"><button class="itx-btn submit" data-act="submit">${t("itx.submit")}</button></div></div>`;
     } else {
       actions = `<div class="itx-actions">
-        <button class="itx-btn approve" data-act="approve">✅ 批准</button>
-        <button class="itx-btn approve-all" data-act="approveAll" title="批准本次运行的后续所有操作，不再逐个打断">✅🔄 批准本次全部</button>
-        <button class="itx-btn reject" data-act="reject">❌ 拒绝</button>
+        <button class="itx-btn approve" data-act="approve">${t("itx.approve")}</button>
+        <button class="itx-btn approve-all" data-act="approveAll" title="${escapeHtml(t("itx.approveAllTip"))}">${t("itx.approveAll")}</button>
+        <button class="itx-btn reject" data-act="reject">${t("itx.reject")}</button>
       </div>`;
     }
   } else {
-    actions = `<div class="itx-status">⏳ 等待 ${escapeHtml(memberName(itx.targetMemberId))} ${isInput ? "输入" : "确认"}…</div>`;
+    const verb = isInput ? t("itx.inputVerb") : t("itx.confirmVerb");
+    actions = `<div class="itx-status">${t("itx.waiting", { name: escapeHtml(memberName(itx.targetMemberId)), text: verb })}</div>`;
   }
   return `<div class="interaction-card">
-    <div class="itx-title">${isInput ? "✍️ 数字员工请求输入" : "🔐 数字员工请求确认"}</div>
+    <div class="itx-title">${isInput ? t("itx.cardAskInput") : t("itx.cardAskConfirm")}</div>
     ${itx.questions && itx.questions.length ? "" : `<div class="itx-message">${escapeHtml(itx.message || "")}</div>`}
     ${toolLine}
     ${argsHtml}
@@ -2473,7 +2533,7 @@ function resolveInteraction(m, approved, inputText, payload, approveAll) {
   if (!itx || itx.resolved) return;
   // 断网检测：未连接时仅提示并保留卡片（服务端交互仍在悬挂，等待重连后再决策）
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-    toast("连接已断开，无法提交决策");
+    toast(t("msg.connLostDecision"));
     return;
   }
   send({
@@ -2525,7 +2585,9 @@ function onMemberUpdated(evt) {
   const m = r.members.find((x) => x.memberId === evt.memberId);
   if (m) Object.assign(m, evt.memberInfo);
   if (evt.updateFields?.includes("onlineStatus")) {
-    addSystemLine(evt.groupId, `${m?.nickname || evt.memberId} ${evt.memberInfo.onlineStatus === "online" ? "上线了" : "离线了"}`);
+    addSystemLine(evt.groupId, evt.memberInfo.onlineStatus === "online"
+      ? t("msg.memberOnline", { name: m?.nickname || evt.memberId })
+      : t("msg.memberOffline", { name: m?.nickname || evt.memberId }));
   }
   if (state.activeGroupId === evt.groupId) {
     renderMembers();
@@ -2593,7 +2655,7 @@ function cleanupRoom(gid) {
     renderGroupList();
     renderMembers();
     renderTopicBar();
-    $("chatGroupName").textContent = "请选择一个知聚";
+    $("chatGroupName").textContent = t("chat.selectGroup");
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
@@ -2602,7 +2664,7 @@ function cleanupRoom(gid) {
 }
 
 function onDisbanded(evt) {
-  addSystemLine(evt.groupId, "知聚已解散");
+  addSystemLine(evt.groupId, t("msg.groupDisbanded"));
   cleanupRoom(evt.groupId);
 }
 
@@ -2645,7 +2707,7 @@ function renderGroupList() {
       ? `<span class="group-avatar"><img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" /></span>`
       : `<span class="icon">👥</span>`;
     div.innerHTML = avatar + `<span>${g.isPrivate ? "🔒 " : ""}${escapeHtml(g.groupName)}</span>` +
-      (unread > 0 ? `<span class="unread-badge" title="${unread} 条未读">${unread > 99 ? "99+" : unread}</span>` : "") +
+      (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
     div.onclick = () => selectGroup(g.groupId);
     el.appendChild(div);
@@ -2659,7 +2721,7 @@ function unreadBadgeEl(count, tip) {
   const b = document.createElement("span");
   b.className = "unread-badge";
   b.textContent = count > 99 ? "99+" : String(count);
-  b.title = `${count} 条${tip || "未读"}`;
+  b.title = t("list.unreadTitle", { count, label: tip || t("list.unreadLabel") });
   return b;
 }
 
@@ -2667,7 +2729,7 @@ function unreadBadgeEl(count, tip) {
 function unreadDotEl(count, tip) {
   const d = document.createElement("span");
   d.className = "unread-dot";
-  d.title = `${count} 条${tip || "未读"}`;
+  d.title = t("list.unreadTitle", { count, label: tip || t("list.unreadLabel") });
   return d;
 }
 
@@ -2691,7 +2753,7 @@ function totalUnreadCount() {
 /** 未读数写入 document.title：离开页面也能在标签页看到新消息提示。 */
 function updateDocTitle() {
   const n = totalUnreadCount();
-  document.title = n > 0 ? `(${n}) 知聚(KnowGath)` : "知聚(KnowGath)";
+  document.title = n > 0 ? `(${n}) ${t("brand.name")}` : t("brand.name");
 }
 
 /** 浏览器桌面通知：页面不可见且非当前视图的新消息才通知（站内徽标已覆盖可见场景）；自己发的消息不通知。 */
@@ -2701,7 +2763,7 @@ function notifyNewMessage(evt, m) {
     if (evt.senderId === state.memberId) return;
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
-      const n = new Notification(`${evt.senderNickname || evt.senderId} 发来消息`, {
+      const n = new Notification(t("notif.messageFrom", { name: evt.senderNickname || evt.senderId }), {
         body: String(m.content || "").slice(0, 100),
         tag: evt.groupId,
       });
@@ -2912,10 +2974,10 @@ function renderTopicBar() {
 
   const main = document.createElement("span");
   main.className = "topic-chip" + (state.activeTopicId === "main" ? " active" : "");
-  main.textContent = "# 综合";
-  main.title = "主话题（知聚默认）";
+  main.textContent = t("topic.mainText");
+  main.title = t("topic.mainTitle");
   const mainUnread = state.groupUnread.get(state.activeGroupId)?.byTopic["main"] || 0;
-  if (mainUnread > 0) main.appendChild(unreadDotEl(mainUnread, "未读消息"));
+  if (mainUnread > 0) main.appendChild(unreadDotEl(mainUnread, t("topic.unreadLabel")));
   main.onclick = () => selectTopic("main");
   el.appendChild(main);
 
@@ -2925,7 +2987,7 @@ function renderTopicBar() {
 
   /** 清空话题聊天记录（含主话题）：调 /ag-ui/group/topic/clear，本地移除该话题消息与全局索引。 */
   const clearTopic = async (topicId, name) => {
-    if (!confirm(`清空「${name}」的全部聊天记录？消息与对应记忆将一并删除，不可恢复（话题本身保留）`)) return;
+    if (!confirm(t("topic.clearConfirm", { name }))) return;
     try {
       const res = await fetch("/ag-ui/group/topic/clear", {
         method: "POST",
@@ -2933,12 +2995,12 @@ function renderTopicBar() {
         body: JSON.stringify({ groupId: state.activeGroupId, topicId, operatorId: state.memberId }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`清空失败：${data?.message || res.status}`); return; }
-      toast(`已清空「${name}」聊天记录（${data.removedCount || 0} 条）`);
+      if (!res.ok) { toast(errMsg(data, t("topic.clearFail", { err: res.status }))); return; }
+      toast(t("topic.clearSuccess", { name, count: data.removedCount || 0 }));
       dropTopicMessages(r, topicId);
       scheduleVirtualRender();
       await refreshActiveGroup();
-    } catch (ex) { toast("清空失败：" + ex.message); }
+    } catch (ex) { toast(t("topic.clearFail", { err: ex.message })); }
   };
 
   // 主话题：知聚主 / 管理员可清空聊天记录
@@ -2946,49 +3008,49 @@ function renderTopicBar() {
     const clear = document.createElement("button");
     clear.className = "topic-del-btn";
     clear.textContent = "🗑";
-    clear.title = "清空主话题聊天记录（消息与记忆一并删除，话题保留）";
-    clear.onclick = (e) => { e.stopPropagation(); clearTopic("main", "# 综合"); };
+    clear.title = t("topic.clearMainTitle");
+    clear.onclick = (e) => { e.stopPropagation(); clearTopic("main", t("topic.mainText")); };
     main.appendChild(clear);
   }
 
-  for (const t of r.topics || []) {
+  for (const tpc of r.topics || []) {
     const chip = document.createElement("span");
-    chip.className = "topic-chip" + (state.activeTopicId === t.topicId ? " active" : "");
-    chip.textContent = "# " + t.name;
-    chip.title = `话题「${t.name}」· 创建者 ${t.creatorId}`;
-    const tUnread = state.groupUnread.get(state.activeGroupId)?.byTopic[t.topicId] || 0;
-    if (tUnread > 0) chip.appendChild(unreadDotEl(tUnread, "未读消息"));
-    chip.onclick = () => selectTopic(t.topicId);
-    if (canManage || t.creatorId === state.memberId) {
+    chip.className = "topic-chip" + (state.activeTopicId === tpc.topicId ? " active" : "");
+    chip.textContent = "# " + tpc.name;
+    chip.title = t("topic.creatorTitle", { name: tpc.name, creator: tpc.creatorId });
+    const tUnread = state.groupUnread.get(state.activeGroupId)?.byTopic[tpc.topicId] || 0;
+    if (tUnread > 0) chip.appendChild(unreadDotEl(tUnread, t("topic.unreadLabel")));
+    chip.onclick = () => selectTopic(tpc.topicId);
+    if (canManage || tpc.creatorId === state.memberId) {
       if (canManage) {
         const clear = document.createElement("button");
         clear.className = "topic-del-btn";
         clear.textContent = "🗑";
-        clear.title = "清空该话题聊天记录（消息与记忆一并删除，话题保留）";
-        clear.onclick = (e) => { e.stopPropagation(); clearTopic(t.topicId, `# ${t.name}`); };
+        clear.title = t("topic.clearTitle");
+        clear.onclick = (e) => { e.stopPropagation(); clearTopic(tpc.topicId, `# ${tpc.name}`); };
         chip.appendChild(clear);
       }
       const del = document.createElement("button");
       del.className = "topic-del-btn";
       del.textContent = "✕";
-      del.title = "删除话题（其下聊天记录与记忆一并删除）";
+      del.title = t("topic.deleteTitle");
       del.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm(`删除话题「${t.name}」？其下聊天记录与记忆将一并删除，不可恢复`)) return;
+        if (!confirm(t("topic.deleteConfirm", { name: tpc.name }))) return;
         try {
           const res = await fetch("/ag-ui/group/topic/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-            body: JSON.stringify({ groupId: state.activeGroupId, topicId: t.topicId, operatorId: state.memberId }),
+            body: JSON.stringify({ groupId: state.activeGroupId, topicId: tpc.topicId, operatorId: state.memberId }),
           });
           const data = await res.json().catch(() => null);
-          if (!res.ok) { toast(`删除失败：${data?.message || res.status}`); return; }
-          toast(`话题「${t.name}」已删除`);
+          if (!res.ok) { toast(errMsg(data, t("topic.deleteFail", { err: res.status }))); return; }
+          toast(t("topic.deleteSuccess", { name: tpc.name }));
           // 本地同步清理该话题消息与全局索引（事件丢失时快照合并不会移除旧消息，需显式清理）
-          dropTopicMessages(r, t.topicId);
-          if (state.activeTopicId === t.topicId) selectTopic("main");
+          dropTopicMessages(r, tpc.topicId);
+          if (state.activeTopicId === tpc.topicId) selectTopic("main");
           await refreshActiveGroup();
-        } catch (ex) { toast("删除失败：" + ex.message); }
+        } catch (ex) { toast(t("topic.deleteFail", { err: ex.message })); }
       };
       chip.appendChild(del);
     }
@@ -2997,8 +3059,8 @@ function renderTopicBar() {
 
   const btn = document.createElement("button");
   btn.className = "topic-new-btn";
-  btn.textContent = "＋ 新建话题";
-  btn.title = "创建新话题";
+  btn.textContent = t("topic.newBtn");
+  btn.title = t("topic.newTitle");
   btn.onclick = openTopicModal;
   el.appendChild(btn);
 }
@@ -3054,7 +3116,7 @@ async function selectTopic(topicId, opts) {
 /* ============ 管理员控制台：用户管理 + 系统状态 ============ */
 
 async function openAdminModal() {
-  if (!state.isAdmin) { toast("仅管理员可访问"); return; }
+  if (!state.isAdmin) { toast(t("admin.adminOnly")); return; }
   $("adminModal").classList.remove("hidden");
   switchAdminTab("users");
 }
@@ -3071,10 +3133,10 @@ function switchAdminTab(tab) {
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminConfigView").classList.toggle("hidden", !conf);
   if (users) {
-    $("adminUserRows").innerHTML = '<tr><td colspan="7" class="admin-empty">加载中…</td></tr>';
+    $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsers();
   } else if (usage) {
-    $("adminUsageRows").innerHTML = '<tr><td colspan="6" class="admin-empty">加载中…</td></tr>';
+    $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsage();
   } else {
     loadConfigGovernance();
@@ -3086,11 +3148,11 @@ async function loadAdminUsage() {
   try {
     const res = await fetch("/ag-ui/admin/usage?days=7", { headers: { Authorization: "Bearer " + state.token } });
     const data = await res.json().catch(() => null);
-    if (!res.ok || !data) { $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">加载失败：${escapeHtml(data?.message || res.status)}</td></tr>`; return; }
+    if (!res.ok || !data) { $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
     const quota = Number(data.dailyQuotaPerUser) || 0;
     $("adminUsageMeta").textContent = quota > 0
-      ? `每用户每日配额：${quota.toLocaleString()} token（超限触发将被拒绝，UTC 次日自动恢复）`
-      : `未启用用量配额（Agents:DailyTokenQuotaPerUser=0）；下方为数字员工模型调用统计`;
+      ? t("admin.quotaEnabled", { quota: quota.toLocaleString() })
+      : t("admin.quotaDisabled");
     const days = data.days || [];
     $("adminUsageRows").innerHTML = days.length
       ? days.map((d) => `<tr>
@@ -3101,8 +3163,8 @@ async function loadAdminUsage() {
           <td>${Number(d.reasoningTokens).toLocaleString()}</td>
           <td>${Number(d.calls).toLocaleString()}</td>
         </tr>`).join("")
-      : '<tr><td colspan="6" class="admin-empty">暂无模型调用记录</td></tr>';
-  } catch { $("adminUsageRows").innerHTML = '<tr><td colspan="6" class="admin-empty">网络错误</td></tr>'; }
+      : `<tr><td colspan="6" class="admin-empty">${t("admin.usageEmpty")}</td></tr>`;
+  } catch { $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
 }
 
 /* ============ 配置治理（6.3）：管理员在线调参 ============ */
@@ -3112,7 +3174,7 @@ async function loadConfigGovernance() {
   try {
     const res = await fetch("/ag-ui/admin/config/governance", { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { toast("配置读取失败：" + ((d && d.message) || res.status)); return; }
+    if (!res.ok || !d) { toast(errMsg(d, `配置读取失败（HTTP ${res.status}）`)); return; }
     setCfg("cfgSessionTtlHours", d.sessionTtlHours);
     setCfg("cfgMessageHistoryLimit", d.messageHistoryLimit);
     setCfg("cfgMaxGroupMembers", d.maxGroupMembers);
@@ -3126,7 +3188,7 @@ async function loadConfigGovernance() {
     setCfgBool("cfgThinking", d.thinkingMode);
     $("cfgApprovalTools").value = (d.requireApprovalToolNames || []).join(", ");
     $("cfgFrameOrigins").value = (d.allowedFrameOrigins || []).join(", ");
-  } catch { toast("配置读取失败：网络错误"); }
+  } catch { toast(t("admin.configLoadFail")); }
 }
 
 function setCfg(id, v) { const el = $(id); if (el) el.value = v === null || v === undefined ? "" : String(v); }
@@ -3167,7 +3229,7 @@ function listOrUndefined(str) {
 async function saveConfigGovernance() {
   const btn = $("cfgSave");
   const orig = btn.textContent;
-  btn.disabled = true; btn.textContent = "⏳ 保存中…";
+  btn.disabled = true; btn.textContent = t("common.saving");
   try {
     const res = await fetch("/ag-ui/admin/config", {
       method: "POST",
@@ -3175,9 +3237,9 @@ async function saveConfigGovernance() {
       body: JSON.stringify(collectCfg()),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast((data?.message) || ("保存失败：" + res.status)); return; }
-    toast("已保存运行配置");
-  } catch (ex) { toast("保存失败：" + ex.message); }
+    if (!res.ok) { toast(errMsg(data, t("common.saveFail", { err: res.status }))); return; }
+    toast(t("admin.configSaved"));
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }
 
@@ -3185,16 +3247,16 @@ async function loadAdminUsers() {
   try {
     const res = await fetch("/ag-ui/admin/users", { headers: { Authorization: "Bearer " + state.token } });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">加载失败：${escapeHtml(data?.message || res.status)}</td></tr>`; return; }
+    if (!res.ok) { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
     const meId = state.memberId;
     $("adminUserRows").innerHTML = (data || []).map((u) => {
-      const role = u.isAdmin ? '<span class="tag-admin">管理员</span>' : '<span class="tag-user">用户</span>';
-      const status = u.isDisabled ? '<span class="tag-disabled">已禁用</span>' : '<span class="tag-active">正常</span>';
-      const self = u.userId === meId ? '（我）' : '';
+      const role = u.isAdmin ? `<span class="tag-admin">${t("admin.role")}</span>` : `<span class="tag-user">${t("admin.user")}</span>`;
+      const status = u.isDisabled ? `<span class="tag-disabled">${t("admin.disabled")}</span>` : `<span class="tag-active">${t("admin.active")}</span>`;
+      const self = u.userId === meId ? t("admin.me") : "";
       const actions = u.userId === meId
-        ? '<span class="muted">当前账号</span>'
-        : `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? "启用账号" : "禁用账号（其会话将立即全部登出）"}">${u.isDisabled ? "🔓" : "🔒"}</button>`
-          + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="重置密码（旧会话将全部登出）">🔑</button>`;
+        ? `<span class="muted">${t("admin.currentAccount")}</span>`
+        : `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? t("admin.enableTitle") : t("admin.disableTitle")}">${u.isDisabled ? "🔓" : "🔒"}</button>`
+          + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.resetPwTitle")}">🔑</button>`;
       return `<tr>
         <td>${escapeHtml(u.username)}${self}</td>
         <td>${escapeHtml(u.nickname || "")}</td>
@@ -3204,8 +3266,8 @@ async function loadAdminUsers() {
         <td>${fmtDateTime(Number(u.createdAt) || 0)}</td>
         <td>${actions}</td>
       </tr>`;
-    }).join("") || '<tr><td colspan="7" class="admin-empty">暂无用户</td></tr>';
-  } catch { $("adminUserRows").innerHTML = '<tr><td colspan="7" class="admin-empty">网络错误</td></tr>'; }
+    }).join("") || `<tr><td colspan="7" class="admin-empty">${t("admin.noUsers")}</td></tr>`;
+  } catch { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
 }
 
 /** 管理员操作：禁用 / 启用 / 重置密码（重置密码弹输入框）。 */
@@ -3214,9 +3276,9 @@ async function adminUserAction(op, uid, name) {
     // 先重新拉取列表确认当前状态，再提示目标动作（禁用 / 启用）
     const list = await (await fetch("/ag-ui/admin/users", { headers: { Authorization: "Bearer " + state.token } })).json().catch(() => null);
     const u = (list || []).find((x) => x.userId === uid);
-    if (!u) { toast("用户不存在"); return; }
+    if (!u) { toast(t("admin.userNotFound")); return; }
     const disabled = !u.isDisabled;
-    const actionText = disabled ? `禁用账号「${name}」？其会话将立即全部登出` : `启用账号「${name}」？`;
+    const actionText = disabled ? t("admin.userDisableConfirm", { name }) : t("admin.userEnableConfirm", { name });
     if (!confirm(actionText)) return;
     const res = await fetch(`/ag-ui/admin/users/${encodeURIComponent(uid)}/disabled`, {
       method: "POST",
@@ -3224,46 +3286,47 @@ async function adminUserAction(op, uid, name) {
       body: JSON.stringify({ disabled }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`操作失败：${data?.message || res.status}`); return; }
-    toast(disabled ? `已禁用 ${name}（其会话已全部登出）` : `已启用 ${name}`);
+    if (!res.ok) { toast(errMsg(data, t("admin.opFail", { err: res.status }))); return; }
+    toast(disabled ? t("admin.userDisabled", { name }) : t("admin.userEnabled", { name }));
     await loadAdminUsers();
   } else if (op === "resetpw") {
-    const pw = prompt(`为「${name}」设置新密码（至少 6 位）：`);
+    const pw = prompt(t("admin.resetPwPrompt", { name }));
     if (pw === null) return;
-    if (pw.length < 6) { toast("密码至少 6 位"); return; }
+    if (pw.length < 6) { toast(t("admin.pwMin")); return; }
     const res = await fetch(`/ag-ui/admin/users/${encodeURIComponent(uid)}/password`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
       body: JSON.stringify({ newPassword: pw }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`重置失败：${data?.message || res.status}`); return; }
-    toast(`已重置 ${name} 的密码（旧会话已登出）`);
+    if (!res.ok) { toast(errMsg(data, t("admin.resetPwFail", { err: res.status }))); return; }
+    toast(t("admin.pwReset", { name }));
   }
 }
 
 async function openStatusModal() {
-  if (!state.isAdmin) { toast("仅管理员可访问"); return; }
+  if (!state.isAdmin) { toast(t("admin.adminOnly")); return; }
   $("statusModal").classList.remove("hidden");
-  $("statusBody").innerHTML = "加载中…";
+  $("statusBody").innerHTML = t("status.loading");
   try {
     const res = await fetch("/ag-ui/admin/status", { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { $("statusBody").innerHTML = `加载失败：${escapeHtml(d?.message || res.status)}`; return; }
+    if (!res.ok || !d) { $("statusBody").innerHTML = t("admin.loadFail", { err: escapeHtml(errMsg(d, "HTTP " + res.status)) }); return; }
+    // 每项 [标签 key, 值]：标签翻译，数值作为数据原样显示（数字 / 时长 / 版本字符串）
     const items = [
-      ["运行时长", fmtDuration(Number(d.uptimeSeconds) || 0)],
-      ["实时连接", `${Number(d.connections) || 0} 个`],
-      ["知聚", `${Number(d.groups) || 0} 个`],
-      ["用户", `${Number(d.users) || 0} 个`],
-      ["数字员工", `${Number(d.agents) || 0} 个`],
-      ["消息总数", `${Number(d.messages) || 0} 条`],
-      ["内存占用", `${Number(d.memoryMb) || 0} MB`],
-      ["线程数", `${Number(d.threadCount) || 0}`],
-      [".NET 版本", escapeHtml(String(d.dotnetVersion || ""))],
+      [t("status.uptime"), fmtDuration(Number(d.uptimeSeconds) || 0)],
+      [t("status.connections"), Number(d.connections) || 0],
+      [t("status.groups"), Number(d.groups) || 0],
+      [t("status.users"), Number(d.users) || 0],
+      [t("status.agents"), Number(d.agents) || 0],
+      [t("status.messages"), Number(d.messages) || 0],
+      [t("status.memory"), (Number(d.memoryMb) || 0) + " MB"],
+      [t("status.threads"), Number(d.threadCount) || 0],
+      [t("status.dotnet"), escapeHtml(String(d.dotnetVersion || ""))],
     ];
     $("statusBody").innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
       `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`;
-  } catch { $("statusBody").innerHTML = "网络错误"; }
+  } catch { $("statusBody").innerHTML = t("admin.sysNetErr"); }
 }
 
 /** 运行时长格式化（秒 → “X天X小时X分”）。 */
@@ -3288,7 +3351,7 @@ function openDiscussModal() {
   const agents = (r.members || []).filter((m) => m.memberType === "agent" && m.memberId !== state.memberId);
   $("discussAgentPicks").innerHTML = agents.length
     ? agents.map((a) => `<label class="discuss-pick"><input type="checkbox" value="${escapeHtml(a.memberId)}" checked /> ${escapeHtml(a.nickname || a.memberId)}</label>`).join("")
-    : '<div class="search-empty">该知聚暂无数字员工成员，请先添加数字员工</div>';
+    : `<div class="search-empty">${t("discuss.noAgents")}</div>`;
   $("discussInput").value = "";
   $("discussGo").disabled = agents.length === 0;
   $("discussModal").classList.remove("hidden");
@@ -3299,13 +3362,13 @@ async function startDiscussion() {
   const gid = state.activeGroupId;
   const theme = $("discussInput").value.trim();
   if (!gid) return;
-  if (!theme) { toast("请填写讨论主题"); return; }
+  if (!theme) { toast(t("discuss.needTopic")); return; }
   const agentIds = [...$("discussAgentPicks").querySelectorAll("input:checked")].map((c) => c.value);
-  if (agentIds.length === 0) { toast("请至少选择一位数字员工"); return; }
+  if (agentIds.length === 0) { toast(t("discuss.needAgent")); return; }
   const go = $("discussGo");
   go.disabled = true;
   const old = go.textContent;
-  go.textContent = "发起中…";
+  go.textContent = t("discuss.going");
   try {
     const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/discussion`, {
       method: "POST",
@@ -3313,10 +3376,10 @@ async function startDiscussion() {
       body: JSON.stringify({ content: theme, agentIds, topicId: state.activeTopicId || "main" }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`发起失败：${data?.message || res.status}`); return; }
+    if (!res.ok) { toast(errMsg(data, t("discuss.fail", { err: res.status }))); return; }
     $("discussModal").classList.add("hidden");
-    toast(`讨论已开始：${agentIds.length} 位数字员工将依次发言`);
-  } catch (ex) { toast("发起失败：" + ex.message); }
+    toast(t("discuss.started", { count: agentIds.length }));
+  } catch (ex) { toast(t("discuss.fail", { err: ex.message })); }
   finally { go.disabled = false; go.textContent = old; }
 }
 
@@ -3326,7 +3389,7 @@ function openSearchModal() {
   const g = state.groups.find((x) => x.groupId === gid);
   $("searchGroupName").textContent = g?.groupName || gid;
   $("searchInput").value = "";
-  $("searchResults").innerHTML = '<div class="search-empty">输入关键词后回车搜索知聚内消息</div>';
+  $("searchResults").innerHTML = `<div class="search-empty">${t("search.emptyHint")}</div>`;
   $("searchModal").classList.remove("hidden");
   $("searchInput").focus();
 }
@@ -3335,29 +3398,29 @@ async function doSearch() {
   const gid = state.activeGroupId;
   const q = $("searchInput").value.trim();
   if (!gid) return;
-  if (!q) { toast("请输入搜索关键词"); return; }
-  $("searchResults").innerHTML = '<div class="search-empty">搜索中…</div>';
+  if (!q) { toast(t("search.needKeyword")); return; }
+  $("searchResults").innerHTML = `<div class="search-empty">${t("search.searching")}</div>`;
   try {
     const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/messages/search?q=${encodeURIComponent(q)}&count=50`,
       { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { $("searchResults").innerHTML = `<div class="search-empty">搜索失败：${escapeHtml(data?.message || res.status)}</div>`; return; }
+    if (!res.ok) { $("searchResults").innerHTML = `<div class="search-empty">${escapeHtml(errMsg(data, t("search.fail", { err: "HTTP " + res.status })))}</div>`; return; }
     renderSearchResults(data || [], q);
   } catch {
-    $("searchResults").innerHTML = '<div class="search-empty">网络错误，请稍后重试</div>';
+    $("searchResults").innerHTML = `<div class="search-empty">${t("search.networkErr")}</div>`;
   }
 }
 
 function renderSearchResults(results, q) {
   const wrap = $("searchResults");
-  if (!results.length) { wrap.innerHTML = '<div class="search-empty">没有找到匹配的消息</div>'; return; }
+  if (!results.length) { wrap.innerHTML = `<div class="search-empty">${t("search.noMatch")}</div>`; return; }
   const r = room(state.activeGroupId);
   const topicName = (tid) => {
-    const t = r?.topics?.find((x) => x.topicId === tid);
-    return t ? t.name : (tid === "main" ? "主话题" : tid);
+    const tp = r?.topics?.find((x) => x.topicId === tid);
+    return tp ? tp.name : (tid === "main" ? t("topic.mainShort") : tid);
   };
   wrap.innerHTML = results.map((m) => {
-    const sender = m.senderId === state.memberId ? "我" : (memberName(m.senderId) || m.senderNickname || m.senderId);
+    const sender = m.senderId === state.memberId ? t("search.me") : (memberName(m.senderId) || m.senderNickname || m.senderId);
     const snippet = String(m.content || "").slice(0, 120);
     return `<div class="search-hit" data-mid="${escapeHtml(m.messageId)}" data-topic="${escapeHtml(m.topicId || "main")}">
       <div class="search-hit-head"><span class="search-hit-sender">${escapeHtml(sender)}</span><span class="search-hit-topic"># ${escapeHtml(topicName(m.topicId || "main"))}</span><span class="search-hit-time">${escapeHtml(fmtTime(m.timestamp))}</span></div>
@@ -3387,7 +3450,7 @@ async function jumpToSearchHit(messageId, topicId) {
     const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/messages/around?messageId=${encodeURIComponent(messageId)}&topicId=${encodeURIComponent(topicId || "main")}&count=60`,
       { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
-    if (!res.ok || !Array.isArray(data) || data.length === 0) { toast("定位失败：消息不存在或已撤回"); return; }
+    if (!res.ok || !Array.isArray(data) || data.length === 0) { toast(t("search.locateFail")); return; }
     const known = new Set(r.messages.map((m) => m.id));
     // 重建窗口：保留流式进行中的消息与系统行（避免正在输出的回复丢失），其余以定位窗口为准
     const live = r.messages.filter((m) => m.streaming || m.sys);
@@ -3398,20 +3461,20 @@ async function jumpToSearchHit(messageId, topicId) {
     vscroll.force = true;
     scheduleVirtualRender();
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToMessage(messageId)));
-  } catch { toast("定位失败：网络错误"); }
+  } catch { toast(t("search.locateNetErr")); }
 }
 
 /** 滚动到指定消息并高亮（2.2s 闪烁）。 */
 function scrollToMessage(messageId) {
   const el = document.querySelector(`[data-mid="${cssEsc(messageId)}"]`);
-  if (!el) { toast("消息不在当前加载范围"); return; }
+  if (!el) { toast(t("search.msgNotInRange")); return; }
   el.scrollIntoView({ block: "center", behavior: "smooth" });
   el.classList.add("flash-highlight");
   setTimeout(() => el.classList.remove("flash-highlight"), 2200);
 }
 
 function openTopicModal() {
-  $("topicModalTitle").textContent = topicSourceMessageId ? "以此消息新建话题" : "新建话题";
+  $("topicModalTitle").textContent = topicSourceMessageId ? t("topic.modalTitleFromMsg") : t("topic.title");
   $("topicModalHint").classList.toggle("hidden", !topicSourceMessageId);
   $("topicName").value = "";
   $("topicModal").classList.remove("hidden");
@@ -3435,7 +3498,7 @@ async function createTopic() {
   const gid = state.activeGroupId;
   if (!gid) return;
   const name = $("topicName").value.trim();
-  if (!name) { toast("请输入话题名称"); return; }
+  if (!name) { toast(t("topic.needName")); return; }
   const sourceMessageId = topicSourceMessageId;
   try {
     const res = await fetch("/ag-ui/group/topic/create", {
@@ -3450,9 +3513,9 @@ async function createTopic() {
     if (!r.topics.some((t) => t.topicId === topic.topicId)) r.topics.push(topic);
     renderTopicBar();
     await selectTopic(topic.topicId);
-    toast(sourceMessageId ? `已创建话题「${topic.name}」并迁移该发言` : `已创建话题「${topic.name}」`);
+    toast(t("topic.created", { name: topic.name }) + (sourceMessageId ? t("topic.migratedSuffix") : ""));
   } catch (ex) {
-    toast("创建话题失败：" + ex.message);
+    toast(t("topic.createFail", { err: ex.message }));
   }
 }
 
@@ -3487,7 +3550,7 @@ function visibleGroupMembers() {
 /** 成员状态图标 HTML（与成员列表一致）：分身 🪞；数字员工按触发方式图标；用户在线状态点。 */
 function memberStatusIconHtml(m) {
   const isTwin = (m.memberId || "").startsWith("twin_");
-  if (isTwin) return `<span class="twin-status-icon" title="AI 分身（用户离线时代班回复）">🪞</span>`;
+  if (isTwin) return `<span class="twin-status-icon" title="${escapeHtml(t("member.twinTip"))}">🪞</span>`;
   if (m.memberType === "agent") {
     // 本知聚已覆盖 → 显示本知聚触发方式；跟随角色默认 → 解析角色默认的具体触发方式图标（agentDirectory 当前默认，回退成员快照值）
     const overridden = m.isTriggerOverridden;
@@ -3496,8 +3559,8 @@ function memberStatusIconHtml(m) {
       : (agentDirectory.find((a) => a.memberId === m.memberId)?.triggerMode || m.triggerMode || "mentioned");
     const label = TRIGGER_LABELS[mode] || mode || "mentioned";
     return overridden
-      ? `<span class="trigger-mode-icon overridden" title="本知聚触发方式：${escapeHtml(label)}（已覆盖角色默认）">${TRIGGER_ICONS[mode] || "⚙"}</span>`
-      : `<span class="trigger-mode-icon" title="跟随角色默认触发方式：${escapeHtml(label)}">${TRIGGER_ICONS[mode] || TRIGGER_ICONS.inherit}</span>`;
+      ? `<span class="trigger-mode-icon overridden" title="${escapeHtml(t("member.triggerOverridden", { mode: label }))}">${TRIGGER_ICONS[mode] || "⚙"}</span>`
+      : `<span class="trigger-mode-icon" title="${escapeHtml(t("member.triggerInheritTip", { mode: label }))}">${TRIGGER_ICONS[mode] || TRIGGER_ICONS.inherit}</span>`;
   }
   // 用户在线状态点（有头像时叠加到头像右下角，无头像时独立显示）
   return `<span class="dot ${m.onlineStatus || "offline"}"></span>`;
@@ -3516,10 +3579,10 @@ function renderMembers() {
     const legend = document.createElement("div");
     legend.className = "trigger-legend";
     legend.innerHTML =
-      `<span>${TRIGGER_ICONS.mentioned} 提及</span>` +
-      `<span>${TRIGGER_ICONS.allMessages} 全量</span>` +
-      `<span>${TRIGGER_ICONS.keyword} 关键词</span>` +
-      `<span>${TRIGGER_ICONS.contextual} 语境</span>`;
+      `<span>${TRIGGER_ICONS.mentioned} ${escapeHtml(t("agent.form.trigger.mentioned"))}</span>` +
+      `<span>${TRIGGER_ICONS.allMessages} ${escapeHtml(t("agent.form.trigger.allMessages"))}</span>` +
+      `<span>${TRIGGER_ICONS.keyword} ${escapeHtml(t("agent.form.trigger.keyword"))}</span>` +
+      `<span>${TRIGGER_ICONS.contextual} ${escapeHtml(t("agent.form.trigger.contextual"))}</span>`;
     el.appendChild(legend);
   }
 
@@ -3528,7 +3591,7 @@ function renderMembers() {
 
     const div = document.createElement("div");
     div.className = "member-item";
-    const role = m.role === "owner" ? "知聚主" : m.role === "admin" ? "管理员" : "";
+    const role = m.role === "owner" ? t("member.roleOwner") : m.role === "admin" ? t("member.roleAdmin") : "";
     // 头像（有则显示）：状态图标叠加到头像右下角；无头像时状态图标独立显示（16px 圆形）
     const statusIcon = memberStatusIconHtml(m);
     const avatarHtml = m.avatar
@@ -3540,7 +3603,7 @@ function renderMembers() {
       ${!isTwin && m.memberType === "agent" ? '<span class="tag-agent">AI</span>' : ""}
       <span class="role">${role}</span>`;
     // 双击成员行 = @（选中为提及 / 私聊对象），再次双击取消；被 @ 的行高亮
-    div.title = "双击 @ 该成员（再次双击取消）";
+    div.title = t("member.dblClickMention");
     div.classList.toggle("mentioned", state.mentions.has(m.memberId));
     div.ondblclick = () => toggleMention(m.memberId);
 
@@ -3549,7 +3612,7 @@ function renderMembers() {
       const btn = document.createElement("button");
       btn.className = "trigger-btn";
       btn.textContent = "⚙";
-      btn.title = "设置本知聚触发方式";
+      btn.title = t("member.setTrigger");
       btn.onclick = () => openGroupTriggerModal(gid, m);
       div.appendChild(btn);
     }
@@ -3562,10 +3625,10 @@ function renderMembers() {
       const rm = document.createElement("button");
       rm.className = "trigger-btn rm-btn";
       rm.textContent = "✕";
-      rm.title = "移除该成员";
+      rm.title = t("member.remove");
       rm.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm(`确认将「${m.nickname || m.memberId}」移出知聚？`)) return;
+        if (!confirm(t("member.removeConfirm", { name: m.nickname || m.memberId }))) return;
         try {
           const res = await fetch("/ag-ui/group/member/remove", {
             method: "POST",
@@ -3573,10 +3636,10 @@ function renderMembers() {
             body: JSON.stringify({ groupId: gid, memberIds: [m.memberId], operatorId: state.memberId }),
           });
           const data = await res.json().catch(() => null);
-          if (!res.ok) { toast(`移除失败：${data?.message || res.status}`); return; }
-          toast(`已移除「${m.nickname || m.memberId}」`);
+          if (!res.ok) { toast(t("member.removeFail", { err: errMsg(data, `删除失败（${res.status}）`) })); return; }
+          toast(t("member.removed", { name: m.nickname || m.memberId }));
           await refreshActiveGroup();
-        } catch (ex) { toast("移除失败：" + ex.message); }
+        } catch (ex) { toast(t("member.removeFail", { err: ex.message })); }
       };
       div.appendChild(rm);
     }
@@ -3646,10 +3709,10 @@ async function saveGroupTrigger() {
     closeGroupTriggerModal();
     renderMembers();
     toast(inherit
-      ? `「${m.nickname}」已恢复为角色默认触发方式`
-      : `「${m.nickname}」本知聚触发方式已保存`);
+      ? t("member.triggerRestored", { name: m.nickname })
+      : t("member.triggerSaved", { name: m.nickname }));
   } catch (ex) {
-    toast("保存失败：" + ex.message);
+    toast(t("common.saveFail", { err: ex.message }));
   }
 }
 
@@ -3697,12 +3760,12 @@ function renderLoadMoreRow(el, r) {
     if (!row) {
       row = document.createElement("div");
       row.className = "load-more-row";
-      row.innerHTML = `<button class="load-more-btn">⬆ 加载更早消息</button>`;
+      row.innerHTML = `<button class="load-more-btn">${escapeHtml(t("msg.loadEarlier"))}</button>`;
       row.querySelector(".load-more-btn").onclick = loadEarlierMessages;
       el.insertBefore(row, el.querySelector(".vtop") || el.firstChild); // 位于 .vtop 之上，避免抢首位置
     }
     const btn = row.querySelector(".load-more-btn");
-    btn.textContent = r.loadingEarlier ? "加载中…" : "⬆ 加载更早消息";
+    btn.textContent = r.loadingEarlier ? t("msg.loading") : t("msg.loadEarlier");
     btn.disabled = !!r.loadingEarlier;
   } else if (row) {
     row.remove();
@@ -3941,7 +4004,7 @@ async function loadEarlierMessages() {
     }
     if (older.length < 50) r.allLoaded = true; // 一页不足 → 已到最早
   } catch (ex) {
-    toast("加载更早消息失败：" + ex.message);
+    toast(t("msg.loadEarlierFail", { err: ex.message }));
   } finally {
     r.loadingEarlier = false;
     scheduleVirtualRender();
@@ -3975,7 +4038,7 @@ function msgDom(m, r) {
   // ARIA（5.3）：每条消息作为列表项，附发件人 + 时间 + 内容摘要标签供读屏朗读
   div.setAttribute("role", "listitem");
   const labelText = (m.sys ? "" : (m.senderNickname || m.senderId) + ", " + m.time + ", ") + String(m.content || "").replace(/\s+/g, " ").slice(0, 120);
-  div.setAttribute("aria-label", m.sys ? "系统消息：" + m.sys : labelText);
+  div.setAttribute("aria-label", m.sys ? t("msg.systemMessage", { text: m.sys }) : labelText);
 
   // 撤回按钮：本人消息或当前用户是知聚主 / 管理员（服务端同样校验）+ 发送 3 分钟内；已撤回 / 流式中 / 系统行不显示
   const meRole = r.members?.find((x) => x.memberId === state.memberId)?.role;
@@ -3990,10 +4053,10 @@ function msgDom(m, r) {
   const canRegenerate = isLastAgentMsg(m, r);
   // 停止生成按钮：数字员工消息流式进行中显示（点击后调停止 API，END 后随重建消失）
   const canStop = !m.sys && !m.recalled && m.streaming && m.senderType === "agent" && !!m.runId;
-  const replyRef = m.replyTo ? `<div class="reply-ref">↩ 回复 ${escapeHtml(quoteOf(m.replyTo))}</div>` : "";
+  const replyRef = m.replyTo ? `<div class="reply-ref">${t("msg.replyRef", { sender: escapeHtml(quoteOf(m.replyTo)) })}</div>` : "";
   // @ 提及回显：chips 选择的成员（或 @全体）在消息内以标签形式展示
   const mentionTags = (() => {
-    if (m.mentionAll) return `<span class="mention-tag">@全体</span>`;
+    if (m.mentionAll) return `<span class="mention-tag">${escapeHtml(t("msg.mentionAllTag"))}</span>`;
     if (!m.mentions || m.mentions.length === 0) return "";
     return m.mentions.map((id) => `<span class="mention-tag">@${escapeHtml(memberName(id))}</span>`).join(" ");
   })();
@@ -4003,13 +4066,13 @@ function msgDom(m, r) {
     return rows.length
       ? `<div class="tool-calls">${rows.map((tc) => {
           const t = typeof tc === "string" ? { id: null, name: tc, done: false } : tc;
-          return `<div class="tool-call"${t.id ? ` data-toolcall-id="${escapeHtml(t.id)}"` : ""}>🔧 ${escapeHtml(t.name || "tool")} 调用中…</div>`;
+          return `<div class="tool-call"${t.id ? ` data-toolcall-id="${escapeHtml(t.id)}"` : ""}>🔧 ${window.t("msg.toolCalling", { name: escapeHtml(t.name || "tool") })}</div>`;
         }).join("")}</div>`
       : "";
   })();
   // 外部 AG-UI 结构化响应（agent 消息）：剥离 JSON 附件信息，转为显示文本 + 附件卡片。
   // 解析结果缓存到 m._bridgeParse（内容不变时避免每次渲染重复 JSON 解析）。
-  let displayText = m.waiting ? "⏳ 数字员工等待你的确认，确认后继续运行…" : m.content;
+  let displayText = m.waiting ? t("msg.waitingConfirm") : m.content;
   let bridgeAttachments = [];
   if (!m.streaming && !m.recalled && m.senderType === "agent") {
     let parsed = m._bridgeParse;
@@ -4020,7 +4083,7 @@ function msgDom(m, r) {
   // 思考过程块（AG-UI 思考模式）：流式中展开实时可见，结束后默认收起；与正文分离的灰底折叠块。
   // 与正文一致：流式中纯文本（避免每增量解析），结束后 Markdown 渲染
   const thinking = (m.reasoning && !m.recalled && !m.sys)
-    ? `<details class="thinking" ${m.streaming ? "open" : ""}><summary>💭 ${m.streaming ? "思考中…" : "思考过程"}</summary><div class="thinking-body ${m.streaming ? "" : "md"}">${m.streaming ? escapeHtml(m.reasoning) : renderMarkdown(m.reasoning)}</div></details>`
+    ? `<details class="thinking" ${m.streaming ? "open" : ""}><summary>${m.streaming ? t("msg.thinkingStreaming") : t("msg.thinkingDone")}</summary><div class="thinking-body ${m.streaming ? "" : "md"}">${m.streaming ? escapeHtml(m.reasoning) : renderMarkdown(m.reasoning)}</div></details>`
     : "";
   // 附件 URL 过 scheme 白名单：外部桥接 / 服务端数据可能含 javascript: 等危险协议，非法则跳过该附件
   const allAtts = [...(m.attachments || []), ...bridgeAttachments]
@@ -4034,12 +4097,12 @@ function msgDom(m, r) {
       return `<a class="att-img-wrap" href="${href}" target="_blank" rel="noopener" title="${name}"><img class="att-img" src="${href}" alt="${name}" loading="lazy" /></a>`;
     }
     if (att.kind === "audio") {
-      const meta = att.size > 0 ? fmtBytes(att.size) : "语音";
-      return `<div class="att-audio"><span title="语音消息">🎤</span><audio controls preload="none" src="${href}"></audio><span class="att-meta">${meta}</span></div>`;
+      const meta = att.size > 0 ? fmtBytes(att.size) : t("msg.attachmentAudio");
+      return `<div class="att-audio"><span title="${escapeHtml(t("msg.attachmentAudio"))}">🎤</span><audio controls preload="none" src="${href}"></audio><span class="att-meta">${meta}</span></div>`;
     }
     const icon = att.kind === "text" || att.kind === "document" ? "📄" : "📎";
-    const meta = att.size > 0 ? fmtBytes(att.size) : "下载";
-    return `<a class="att-file" href="${href}" target="_blank" rel="noopener" title="附件：${escapeHtml(att.kind)}">${icon} ${name}<span class="att-meta">${meta}</span></a>`;
+    const meta = att.size > 0 ? fmtBytes(att.size) : t("msg.attachmentDownload");
+    return `<a class="att-file" href="${href}" target="_blank" rel="noopener" title="${escapeHtml(t("msg.attachmentTitle", { kind: att.kind }))}">${icon} ${name}<span class="att-meta">${meta}</span></a>`;
   }).join("");
   const avatar = (() => {
     const sender = r.members.find((x) => x.memberId === m.senderId);
@@ -4060,7 +4123,7 @@ function msgDom(m, r) {
     if (!m.streaming && !m.recalled) m._html = contentHtml;
   }
   // 流式截断提示：内容超限（正文 / 思考）时在消息头部提示，避免误以为回复不完整
-  const truncatedHint = m.truncated ? `<div class="msg-truncated">⚠️ 内容过长已截断（仅保留前 2MB）</div>` : "";
+  const truncatedHint = m.truncated ? `<div class="msg-truncated">${escapeHtml(t("msg.truncated"))}</div>` : "";
   // 审批卡片嵌入数字员工回复内部：独立块（interaction-block），紧跟内容区，不受流式内容局部更新影响；
   // 触发者做出选择后隐藏（resolved）——历史重建时也不再渲染
   const interactionBlock = m.interaction && !m.interaction.resolved && !m.recalled
@@ -4069,7 +4132,7 @@ function msgDom(m, r) {
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
-      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : '<button class="topic-start-btn" title="以此消息新建话题">' + icon("topic") + "</button>"}${canStop ? '<button class="stop-btn" title="停止生成">' + icon("stop") + "</button>" : ""}${canReply ? '<button class="reply-btn" title="引用回复这条消息">' + icon("reply") + "</button>" : ""}${canCopy ? '<button class="copy-btn" title="复制消息内容">' + icon("copy") + "</button>" : ""}${canRegenerate ? '<button class="regenerate-btn" title="重新回答：撤回本条并以你的上一条消息重新生成（仅最后一条数字员工消息）">' + icon("refresh") + "</button>" : ""}${canRecall ? '<button class="recall-btn" title="撤回消息（发送 3 分钟内可撤回；本人或知聚主/管理员可操作；撤回后内容隐藏并清除记忆）">' + icon("recall") + "</button>" : ""}</div>
+      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
       ${replyRef}
       ${mentionTags ? `<div class="mention-line">${mentionTags}</div>` : ""}
       ${thinking}
@@ -4145,7 +4208,7 @@ function fallbackCopyText(text) {
 function bindStopButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (!m.runId) { toast("该运行已结束"); return; }
+    if (!m.runId) { toast(t("msg.runEnded")); return; }
     try {
       const res = await fetch("/ag-ui/group/agent/stop", {
         method: "POST",
@@ -4153,10 +4216,10 @@ function bindStopButton(btn, m) {
         body: JSON.stringify({ runId: m.runId, groupId: state.activeGroupId, operatorId: state.memberId }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`停止失败：${data?.message || res.status}`); return; }
-      toast(data?.stopped ? "已停止生成" : "该运行已结束");
+      if (!res.ok) { toast(t("msg.stopFail", { err: errMsg(data, `停止失败（${res.status}）`) })); return; }
+      toast(data?.stopped ? t("msg.stoppedGenerating") : t("msg.runEnded"));
       btn.disabled = true; // 已请求停止：避免重复点击
-    } catch (ex) { toast("停止失败：" + ex.message); }
+    } catch (ex) { toast(t("msg.stopFail", { err: ex.message })); }
   };
 }
 
@@ -4165,9 +4228,9 @@ function bindCopyButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
     const text = displayTextOf(m);
-    if (!text) { toast("没有可复制的内容"); return; }
+    if (!text) { toast(t("msg.noCopyContent")); return; }
     const ok = await copyText(text);
-    toast(ok ? "已复制" : "复制失败，请手动选择复制");
+    toast(ok ? t("msg.copied") : t("msg.copyFail"));
   };
 }
 
@@ -4175,7 +4238,7 @@ function bindCopyButton(btn, m) {
 function bindRegenerateButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm("重新回答？将撤回本条回答并以你的上一条消息重新生成（仅最后一条数字员工消息可操作）")) return;
+    if (!confirm(t("msg.regenConfirm"))) return;
     try {
       const res = await fetch("/ag-ui/group/message/regenerate", {
         method: "POST",
@@ -4183,10 +4246,10 @@ function bindRegenerateButton(btn, m) {
         body: JSON.stringify({ groupId: state.activeGroupId, topicId: state.activeTopicId || "main", messageId: m.id, operatorId: state.memberId }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`重新回答失败：${data?.message || res.status}`); return; }
-      toast("已重新回答，请稍候…");
+      if (!res.ok) { toast(t("msg.regenFail", { err: errMsg(data, `重新生成失败（${res.status}）`) })); return; }
+      toast(t("msg.regenQueued"));
       applyRecallLocal(state.activeGroupId, m.id); // 旧回答立即标记撤回（GROUP_MESSAGE_RECALLED 事件到达时幂等）
-    } catch (ex) { toast("重新回答失败：" + ex.message); }
+    } catch (ex) { toast(t("msg.regenFail", { err: ex.message })); }
   };
 }
 
@@ -4205,21 +4268,21 @@ function attachHeadActions(msgEl, m, r) {
     && (Number(m.timestamp) > 0 && Date.now() - Number(m.timestamp) <= RECALL_WINDOW_MS);
   if (canCopy && !head.querySelector(".copy-btn")) {
     const btn = document.createElement("button");
-    btn.className = "copy-btn"; btn.type = "button"; btn.title = "复制消息内容";
+    btn.className = "copy-btn"; btn.type = "button"; btn.title = t("msg.copy");
     btn.innerHTML = icon("copy");
     bindCopyButton(btn, m);
     head.appendChild(btn);
   }
   if (canRegenerate && !head.querySelector(".regenerate-btn")) {
     const btn = document.createElement("button");
-    btn.className = "regenerate-btn"; btn.type = "button"; btn.title = "重新回答：撤回本条并以你的上一条消息重新生成（仅最后一条数字员工消息）";
+    btn.className = "regenerate-btn"; btn.type = "button"; btn.title = t("msg.regenTitle");
     btn.innerHTML = icon("refresh");
     bindRegenerateButton(btn, m);
     head.appendChild(btn);
   }
   if (canRecall && !head.querySelector(".recall-btn")) {
     const btn = document.createElement("button");
-    btn.className = "recall-btn"; btn.type = "button"; btn.title = "撤回消息（发送 3 分钟内可撤回；本人或知聚主/管理员可操作；撤回后内容隐藏并清除记忆）";
+    btn.className = "recall-btn"; btn.type = "button"; btn.title = t("msg.recallTitle");
     btn.innerHTML = icon("recall");
     bindRecallButton(btn, m);
     head.appendChild(btn);
@@ -4230,7 +4293,7 @@ function attachHeadActions(msgEl, m, r) {
 function bindRecallButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm("撤回该消息？撤回后内容对所有人隐藏，并清除其语义记忆")) return;
+    if (!confirm(t("msg.recallConfirm"))) return;
     try {
       const res = await fetch("/ag-ui/group/message/recall", {
         method: "POST",
@@ -4238,10 +4301,10 @@ function bindRecallButton(btn, m) {
         body: JSON.stringify({ groupId: state.activeGroupId, messageId: m.id, operatorId: state.memberId }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`撤回失败：${data?.message || res.status}`); return; }
-      toast("已撤回");
+      if (!res.ok) { toast(t("msg.recallFail", { err: errMsg(data, `撤回失败（${res.status}）`) })); return; }
+      toast(t("msg.recalled"));
       applyRecallLocal(state.activeGroupId, m.id); // 立即本地更新（不等事件广播），事件到达时幂等
-    } catch (ex) { toast("撤回失败：" + ex.message); }
+    } catch (ex) { toast(t("msg.recallFail", { err: ex.message })); }
   };
 }
 
@@ -4268,7 +4331,7 @@ function attachToggleButton(msgEl, m) {
   const collapsed = !m.expanded && m.long;
   const expanded = m.expanded && m.long;
   if (!collapsed && !expanded) return;
-  const text = collapsed ? "更多 ▾" : "收起 ▴";
+  const text = collapsed ? t("msg.more") : t("msg.collapse");
   const old = body.querySelector(".toggle-btn");
   if (old) {
     if (old.textContent === text) return; // 按钮已就位，无需重建
@@ -4299,13 +4362,13 @@ function toggleExpandMessage(m) {
   if (m.expanded) {
     const btn = document.createElement("button");
     btn.className = "toggle-btn";
-    btn.textContent = "收起 ▴";
+    btn.textContent = t("msg.collapse");
     btn.onclick = () => toggleExpandMessage(m);
     body.appendChild(btn);
   } else if (m.long) {
     const btn = document.createElement("button");
     btn.className = "toggle-btn";
-    btn.textContent = "更多 ▾";
+    btn.textContent = t("msg.more");
     btn.onclick = () => toggleExpandMessage(m);
     body.appendChild(btn);
   }
@@ -4320,7 +4383,7 @@ function renderTyping() {
   pruneTyping(r); // 渲染前过滤超过 5 秒未刷新的成员（无需定时器，渲染时自然收敛）
   if (r.typing.size === 0) { el.textContent = ""; return; }
   const names = [...r.typing].map((id) => memberName(id));
-  el.textContent = names.join("、") + " 正在输入…";
+  el.textContent = t("msg.typing", { names: names.join("、") });
 }
 
 function renderMentionChips() {
@@ -4370,8 +4433,8 @@ function renderReplyBar() {
   bar.classList.toggle("hidden", !rt);
   if (!rt) return;
   const preview = String(rt.content || "").replace(/\s+/g, " ").slice(0, 60);
-  bar.innerHTML = `<span class="reply-bar-text">↩ 回复 <b>${escapeHtml(rt.sender)}</b>：${escapeHtml(preview || "（附件 / 空消息）")}</span>`
-    + `<button class="reply-bar-cancel" title="取消引用">✕</button>`;
+  bar.innerHTML = `<span class="reply-bar-text">${t("msg.replyBarText", { sender: escapeHtml(rt.sender), preview: escapeHtml(preview || t("msg.replyBarEmpty")) })}</span>`
+    + `<button class="reply-bar-cancel" title="${escapeHtml(t("msg.cancelQuote"))}">✕</button>`;
   bar.querySelector(".reply-bar-cancel").onclick = clearReplyTo;
 }
 
@@ -4440,7 +4503,7 @@ function showMentionPicker(query) {
   });
   if (mentionPickerIndex > list.length - 1) mentionPickerIndex = Math.max(0, list.length - 1);
   if (list.length === 0) {
-    el.innerHTML = `<div class="mention-pick-empty">无匹配成员</div>`;
+    el.innerHTML = `<div class="mention-pick-empty">${escapeHtml(t("member.noMatch"))}</div>`;
   } else {
     el.innerHTML = list.map((m, i) => {
       const isTwin = (m.memberId || "").startsWith("twin_");
@@ -4506,7 +4569,7 @@ let selectedAddMembers = new Set();
 
 function renderAddPick() {
   if (addPickOptions.length === 0) {
-    $("addMemberList").innerHTML = '<div class="pick-empty">没有可添加的成员了</div>';
+    $("addMemberList").innerHTML = `<div class="pick-empty">${escapeHtml(t("member.noAddable"))}</div>`;
     return;
   }
   const q = $("addMemberSearch").value.trim().toLowerCase();
@@ -4552,7 +4615,7 @@ async function addMembers() {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => null);
-      toast(`添加失败：${err?.message || res.status}`);
+      toast(t("member.addFail", { err: errMsg(err, `添加失败（${res.status}）`) }));
       return;
     }
     // 为添加的数字员工注册该知聚触发规则，使其加入知聚后即可被触发
@@ -4571,9 +4634,9 @@ async function addMembers() {
       } catch { /* 单个数字员工注册失败不阻塞添加 */ }
     }
     $("addMemberModal").classList.add("hidden");
-    toast(`已添加 ${picked.map((m) => m.nickname).join("、")}`);
+    toast(t("member.added", { names: picked.map((m) => m.nickname).join("、") }));
   } catch (ex) {
-    toast("添加失败：" + ex.message);
+    toast(t("member.addFail", { err: ex.message }));
   }
 }
 
@@ -4638,7 +4701,7 @@ async function sendMessage() {
   if (!content && pendingAttachments.length === 0) return;
   // 断线 / 未连接：明确提示而不是静默丢弃（内容保留在输入框，重连后可直接重发）
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-    toast("连接已断开，正在重连…内容已保留，重连成功后请重新发送");
+    toast(t("msg.sendDisconnected"));
     return;
   }
   if (sending) return; // 防连按：上一次发送尚未结束时忽略本次
@@ -4653,17 +4716,17 @@ async function sendMessage() {
     // 有待发送附件：先上传，成功后随消息携带附件元信息
     let attachments = [];
     if (pendingAttachments.length > 0) {
-      if (pendingAttachments.some((a) => a.uploading)) { toast("附件上传中，请稍候"); return; }
-      setComposerBusy(true, "上传中…");
+      if (pendingAttachments.some((a) => a.uploading)) { toast(t("msg.attachUploading")); return; }
+      setComposerBusy(true, t("msg.uploading"));
       try {
         attachments = await uploadAttachments();
       } catch (ex) {
-        toast("附件上传失败：" + (ex.message || "请重试"));
+        toast(t("msg.attachUploadFail", { err: ex.message || t("msg.retry") }));
         setComposerBusy(false);
         return;
       }
       setComposerBusy(false);
-      if (attachments.length === 0) { toast("没有可发送的附件"); return; }
+      if (attachments.length === 0) { toast(t("msg.noAttachToSend")); return; }
     }
 
     const payload = {
@@ -4712,9 +4775,9 @@ async function uploadAvatarFile(file) {
   const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
   const res = await fetch(url, { method: "POST", headers, body: form });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+  if (!res.ok) throw new Error(errMsg(data, t("upload.fail", { err: "HTTP " + res.status })));
   const att = (data?.attachments || [])[0];
-  if (!att) throw new Error("上传失败，请重试");
+  if (!att) throw new Error(t("upload.noResult"));
   return att.url;
 }
 
@@ -4758,8 +4821,8 @@ function bindAvatarPicker(previewId, fileId, uploadId, clearId, defaultEmoji, on
       // 预览用本地对象 URL：服务端附件鉴权在资料保存（Avatar 关联）前不认新附件，直接加载会 403
       render(URL.createObjectURL(file));
       onChanged(url);
-      toast("头像已上传");
-    } catch (ex) { toast("头像上传失败：" + ex.message); }
+      toast(t("profile.avatarUploaded"));
+    } catch (ex) { toast(t("profile.avatarUploadFail", { err: ex.message })); }
   };
   $(clearId).onclick = () => { render(""); onChanged(""); };
   return { render };
@@ -4782,7 +4845,7 @@ async function uploadAttachments() {
   try {
     const res = await fetch(url, { method: "POST", headers, body: form });
     const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(errMsg(data, t("upload.fail", { err: "HTTP " + res.status })));
     return data?.attachments || [];
   } finally {
     for (const a of pendingAttachments) a.uploading = false;
@@ -4813,19 +4876,19 @@ function renderAttachList() {
     name.textContent = icon + a.file.name;
     const meta = document.createElement("span");
     meta.className = "att-meta";
-    meta.textContent = fmtBytes(a.file.size) + (a.file.type.startsWith("audio/") ? " · 语音" : "");
+    meta.textContent = fmtBytes(a.file.size) + (a.file.type.startsWith("audio/") ? t("attach.audio") : "");
     div.appendChild(name);
     div.appendChild(meta);
     if (a.uploading) {
       const spin = document.createElement("span");
       spin.className = "att-uploading";
-      spin.textContent = "上传中…";
+      spin.textContent = t("attach.uploading");
       div.appendChild(spin);
     } else {
       const rm = document.createElement("span");
       rm.className = "att-remove";
       rm.textContent = "✕";
-      rm.title = "移除";
+      rm.title = t("attach.remove");
       rm.onclick = () => { pendingAttachments.splice(i, 1); renderAttachList(); };
       div.appendChild(rm);
     }
@@ -4851,7 +4914,7 @@ async function startVoiceRecording() {
   try {
     voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
-    toast("无法访问麦克风：" + (err?.name === "NotAllowedError" ? "请授予麦克风权限" : "本机无可用录音设备"));
+    toast(err?.name === "NotAllowedError" ? t("voice.micDenied") : t("voice.micNotFound"));
     return;
   }
   voiceChunks = [];
@@ -4863,7 +4926,7 @@ async function startVoiceRecording() {
   try {
     voiceRecorder = new MediaRecorder(voiceStream, mime ? { mimeType: mime } : undefined);
   } catch (err) {
-    toast("此浏览器不支持音频录制");
+    toast(t("voice.unsupported"));
     voiceStream.getTracks().forEach((t) => t.stop());
     voiceStream = null;
     return;
@@ -4880,7 +4943,7 @@ async function startVoiceRecording() {
   voiceStartAt = Date.now();
   voiceRecorder.start(250);
   $("voiceBtn").classList.add("recording");
-  $("voiceBtn").title = "点击停止录音并加入附件";
+  $("voiceBtn").title = t("voice.stopTip");
   $("voiceStatus").classList.remove("hidden");
   voiceTimerId = setInterval(() => {
     $("voiceTimer").textContent = fmtDuration((Date.now() - voiceStartAt) / 1000);
@@ -4899,7 +4962,7 @@ function stopVoiceRecording() {
   voiceStream = null;
   voiceChunks = [];
   $("voiceBtn").classList.remove("recording");
-  $("voiceBtn").title = "语音消息：点击开始，再点发送录音";
+  $("voiceBtn").title = t("chat.voice");
   $("voiceStatus").classList.add("hidden");
 }
 
@@ -4917,7 +4980,7 @@ function cancelVoiceRecording() {
     voiceStream = null;
   }
   $("voiceBtn").classList.remove("recording");
-  $("voiceBtn").title = "语音消息：点击开始，再点发送录音";
+  $("voiceBtn").title = t("chat.voice");
   $("voiceStatus").classList.add("hidden");
 }
 
@@ -4928,7 +4991,7 @@ let cvLast = null;
 let cvFocusReturn = null; // 打开画布前的焦点元素（ARIA：关闭后回移）
 
 function openCanvasModal() {
-  if (!state.activeGroupId) { toast("请先选择知聚"); return; }
+  if (!state.activeGroupId) { toast(t("chat.selectGroup")); return; }
   const c = $("cvCanvas");
   const ctx = c.getContext("2d");
   ctx.fillStyle = "#fff";
@@ -4986,7 +5049,7 @@ function cvStroke(a, b) {
 function insertCanvas() {
   const c = $("cvCanvas");
   c.toBlob((blob) => {
-    if (!blob) { toast("画布导出失败"); return; }
+    if (!blob) { toast(t("canvas.exportFail")); return; }
     pendingAttachments.push({ file: new File([blob], `画布-${Date.now()}.png`, { type: "image/png" }), uploading: false });
     renderAttachList();
     closeCanvasModal();
@@ -5001,7 +5064,7 @@ function setComposerBusy(busy, text) {
   btn.disabled = busy;
   // 图标按钮：忙时旋转 spinner 图标并更新 title，空闲恢复发送图标（不写文本，保持图标风格统一）
   btn.innerHTML = busy ? BUSY_ICON : SEND_ICON;
-  btn.title = busy ? (text || "处理中…") : "发送消息（Enter）";
+  btn.title = busy ? (text || t("msg.processing")) : t("msg.sendTooltip");
 }
 
 function fmtBytes(n) {
@@ -5017,7 +5080,7 @@ function fmtBytes(n) {
 function renderMessageContent(text, m) {
   if (typeof text === "object" && text !== null) { m = text; text = m.content || ""; }
   const s = String(text ?? "");
-  if (m?.recalled) return escapeHtml("🚫 消息已撤回"); // 撤回后不显示原文，仅占位提示
+  if (m?.recalled) return escapeHtml(t("msg.recalledHint")); // 撤回后不显示原文，仅占位提示
   if (m?.streaming) return escapeHtml(s);
   return renderMarkdown(s);
 }
@@ -5205,18 +5268,18 @@ async function renderMermaidBlocks(scope) {
       const viewBtn = document.createElement("button");
       viewBtn.type = "button";
       viewBtn.className = "mermaid-btn";
-      viewBtn.title = "查看 Mermaid 源码（可选中复制）";
+      viewBtn.title = t("mmd.viewSource");
       viewBtn.innerHTML = icon("code");
       viewBtn.onclick = (e) => { e.stopPropagation(); openMermaidSource(source); };
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "mermaid-btn";
-      copyBtn.title = "复制 Mermaid 源码";
+      copyBtn.title = t("mmd.copySource");
       copyBtn.innerHTML = icon("copy");
       copyBtn.onclick = async (e) => {
         e.stopPropagation();
         const ok = await copyText(source);
-        toast(ok ? "已复制 Mermaid 源码" : "复制失败，请手动选择复制");
+        toast(ok ? t("mmd.copied") : t("mmd.copyFail"));
       };
       bar.appendChild(viewBtn);
       bar.appendChild(copyBtn);
@@ -5292,6 +5355,9 @@ function toast(text) {
 /* ============ 初始化 ============ */
 
 function init() {
+  // 连接状态徽标初始为「未连接」（登录前 connect() 尚未建立 WebSocket，先按当前语言渲染）
+  setStatus(false, "status.offline");
+
   // 加载品牌配置（应用名 / Logo / 主色 / 嵌入），登录页与顶栏据此渲染
   loadBranding();
 
@@ -5300,7 +5366,7 @@ function init() {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
     localStorage.setItem(THEME_KEY, next);
     applyTheme(next);
-    toast(next === "light" ? "已切换为浅色风格" : "已切换为深色风格");
+    toast(next === "light" ? t("theme.light") : t("theme.dark"));
   };
 
   // ---- 认证 UI ----
@@ -5336,8 +5402,8 @@ function init() {
   $("brReset").onclick = async () => {
     $("brName").value = ""; $("brLogo").value = ""; $("brColor").value = "#4f8cff"; $("brTagline").value = ""; $("brForceDark").checked = false;
     $("brandModal").classList.add("hidden");
-    applyBranding({ appName: "知聚(KnowGath)", primaryColor: "", forceDark: null }); // 本地立即恢复默认（不落库）
-    toast("已恢复默认品牌（未保存）");
+    applyBranding({ appName: t("brand.name"), primaryColor: "", forceDark: null }); // 本地立即恢复默认（不落库）
+    toast(t("brand.resetDone"));
   };
   // 任务中心（工作型数字员工任务编排）
   $("meMenuTasks").onclick = () => { $("meMenu").classList.add("hidden"); openTaskModal(); };
@@ -5366,8 +5432,9 @@ function init() {
   $("memForgetConfirm").onclick = async () => {
     const groupId = $("memGroupSelect").value;
     const hours = Number($("memForgetRange").value) * 24;
-    const scope = groupId ? "该知聚" : "全部知聚";
-    if (!confirm(`确定遗忘${scope}的记忆${hours ? `（保留最近 ${hours / 24} 天）` : "（立即）"}？将不再被检索，后台定时清理。`)) return;
+    const scope = groupId ? t("memory.scopeThis") : t("memory.scopeAll");
+    const retain = hours ? t("memory.forgetRetain", { n: hours / 24 }) : t("memory.forgetImmediate");
+    if (!confirm(t("memory.forgetConfirm", { scope, retain }))) return;
     const btn = $("memForgetConfirm");
     const orig = btn.textContent;
     btn.disabled = true; btn.textContent = "⏳…";
@@ -5378,12 +5445,12 @@ function init() {
         body: JSON.stringify({ groupId: groupId || null, retentionHours: hours || null }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`遗忘失败：${data?.message || res.status}`); return; }
-      toast(`已设置遗忘 ${data.affected || 0} 条记忆`);
+      if (!res.ok) { toast(errMsg(data, t("memory.forgetFail", { err: res.status }))); return; }
+      toast(t("memory.forgetSet", { count: data.affected || 0 }));
       $("memForgetPanel").classList.add("hidden");
       loadMemoryList(0);
       loadMemoryGroups();
-    } catch (ex) { toast("遗忘失败：" + ex.message); }
+    } catch (ex) { toast(t("memory.forgetFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
   $("mcSave").onclick = async () => {
@@ -5392,7 +5459,7 @@ function init() {
     const thinkingMode = $("mcThinking").checked;
     const btn = $("mcSave");
     const orig = btn.textContent;
-    btn.disabled = true; btn.textContent = "⏳ 保存中…";
+    btn.disabled = true; btn.textContent = t("common.saving");
     try {
       const res = await fetch("/ag-ui/settings/model", {
         method: "POST",
@@ -5400,28 +5467,28 @@ function init() {
         body: JSON.stringify({ endpoint, apiKey, thinkingMode }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`保存失败：${data?.message || res.status}`); return; }
+      if (!res.ok) { toast(errMsg(data, t("common.saveFail", { err: res.status }))); return; }
       $("modelConfigModal").classList.add("hidden");
-      toast(data.endpoint ? `模型配置已保存：${data.endpoint}` : "模型配置已保存");
-    } catch (ex) { toast("保存失败：" + ex.message); }
+      toast(data.endpoint ? t("mc.savedWithEp", { endpoint: data.endpoint }) : t("mc.saved"));
+    } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
   // 初始化（清空一切）：位于「数据备份」弹窗的危险操作区；删除全部数据 + 清浏览器缓存，回到登录页
   $("backupInitBtn").onclick = () => { $("backupInitText").value = ""; $("backupInitPanel").classList.remove("hidden"); };
   $("backupInitCancel").onclick = () => $("backupInitPanel").classList.add("hidden");
   $("backupInitConfirm").onclick = async () => {
-    if ($("backupInitText").value.trim() !== "确认") { toast("请先输入「确认」两个字"); return; }
+    if ($("backupInitText").value.trim() !== "确认") { toast(t("backup.initTypeConfirm")); return; }
     const btn = $("backupInitConfirm");
     const orig = btn.textContent;
-    btn.disabled = true; btn.textContent = "⏳ 初始化中…";
+    btn.disabled = true; btn.textContent = "⏳ " + t("backup.initProgress");
     try {
       const res = await fetch("/ag-ui/reset", { method: "POST", headers: { Authorization: "Bearer " + (state.token || "") } });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`初始化失败：${data?.message || res.status}`); return; }
+      if (!res.ok) { toast(errMsg(data, t("backup.initFail", { err: res.status }))); return; }
       // 清空浏览器缓存（登录态 / 主题 / 话题记忆 / 上次知聚等全部本地存储）并回登录页
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* 存储不可用忽略 */ }
       location.reload();
-    } catch (ex) { toast("初始化失败：" + ex.message); }
+    } catch (ex) { toast(t("backup.initFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
   $("meMenuLogout").onclick = () => { $("meMenu").classList.add("hidden"); logout(); };
@@ -5471,10 +5538,10 @@ function init() {
     const btn = $("backupExportBtn");
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "⏳ 打包中…";
+    btn.textContent = "⏳ " + t("backup.exporting");
     try {
       const res = await fetch("/ag-ui/export?token=" + encodeURIComponent(state.token || ""), { headers: { Authorization: "Bearer " + (state.token || "") } });
-      if (!res.ok) { const err = await res.json().catch(() => null); toast(`导出失败：${err?.message || res.status}`); return; }
+      if (!res.ok) { const err = await res.json().catch(() => null); toast(errMsg(err, t("backup.exportFail", { err: res.status }))); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -5482,8 +5549,8 @@ function init() {
       a.download = "agui-data-export.zip";
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      toast("数据包已导出（账号 / 数字员工 / 聊天记录 / 附件）");
-    } catch (ex) { toast("导出失败：" + ex.message); }
+      toast(t("backup.exported"));
+    } catch (ex) { toast(t("backup.exportFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
 
@@ -5493,44 +5560,44 @@ function init() {
     e.target.value = "";
     if (!file) return;
     $("backupResult").classList.add("hidden");
-    toast("解析数据包…");
+    toast(t("backup.parsing"));
     try {
       const form = new FormData();
       form.append("file", file);
       const res = await fetch("/ag-ui/import/preview", { method: "POST", headers: { Authorization: "Bearer " + (state.token || "") }, body: form });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data) { toast(`解析失败：${data?.message || res.status}`); return; }
+      if (!res.ok || !data) { toast(errMsg(data, t("backup.parseFail", { err: res.status }))); return; }
       backupFile = file;
       backupPreview = data;
       renderBackupPreview(data);
       $("backupImportPanel").classList.remove("hidden");
-      toast("请勾选要恢复的聊天记录知聚");
-    } catch (ex) { toast("解析失败：" + ex.message); }
+      toast(t("backup.selectGroupsToRestore"));
+    } catch (ex) { toast(t("backup.parseFail", { err: ex.message })); }
   };
 
   $("backupImportCancel").onclick = hideBackupImport;
   $("backupImportConfirm").onclick = async () => {
     if (!backupFile || !backupPreview) return;
     const selected = [...$("backupImportGroups").querySelectorAll(".backup-group-item input:checked")].map((cb) => cb.value);
-    if (selected.length === 0) { toast("请至少勾选一个聊天记录知聚"); return; }
+    if (selected.length === 0) { toast(t("backup.needSelectGroup")); return; }
     const btn = $("backupImportConfirm");
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "⏳ 导入中…";
+    btn.textContent = "⏳ " + t("backup.importing");
     try {
       const form = new FormData();
       form.append("file", backupFile);
       form.append("selectedGroupIds", JSON.stringify(selected));
       const res = await fetch("/ag-ui/import", { method: "POST", headers: { Authorization: "Bearer " + (state.token || "") }, body: form });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data) { toast(`导入失败：${data?.message || res.status}`); return; }
+      if (!res.ok || !data) { toast(errMsg(data, t("backup.importFail", { err: res.status }))); return; }
       renderBackupResult(data);
       $("backupImportPanel").classList.add("hidden");
       $("backupResult").classList.remove("hidden");
       backupFile = null; backupPreview = null;
-      toast("导入完成");
+      toast(t("backup.importDone"));
       loadGroups(); // 新知聚立即可见
-    } catch (ex) { toast("导入失败：" + ex.message); }
+    } catch (ex) { toast(t("backup.importFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
   $("afCancel").onclick = () => showAgentListView();
@@ -5538,12 +5605,12 @@ function init() {
   // 根据一句话简介生成角色设定（身份定位 / 职责范围 / 回复风格），填充 Instructions
   $("afGenInstructionsBtn").onclick = async () => {
     const desc = $("afDescription").value.trim();
-    if (desc.length < 2) { toast("请先填写一句话简介（至少 2 个字符）"); $("afDescription").focus(); return; }
-    if (!state.token) { toast("请先登录"); return; }
+    if (desc.length < 2) { toast(t("agent.form.descTooShort")); $("afDescription").focus(); return; }
+    if (!state.token) { toast(t("common.loginFirst")); return; }
     const btn = $("afGenInstructionsBtn");
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "⏳ 生成中…";
+    btn.textContent = t("agent.form.generating");
     try {
       const res = await fetch("/ag-ui/agents/generate-instructions", {
         method: "POST",
@@ -5551,10 +5618,10 @@ function init() {
         body: JSON.stringify({ description: desc }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.instructions) { toast(`生成失败：${data?.message || res.status}`); return; }
+      if (!res.ok || !data?.instructions) { toast(errMsg(data, t("agent.form.genFail", { err: res.status }))); return; }
       $("afInstructions").value = data.instructions;
-      toast("角色设定已生成并填入 Instructions，请检查后微调");
-    } catch (ex) { toast("生成失败：" + ex.message); }
+      toast(t("agent.form.generated"));
+    } catch (ex) { toast(t("agent.form.genFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
   $("afSkillAddBtn").onclick = () => { agentSkills.push({ skillId: "", description: "", targetAgentId: "" }); renderSkillRows(); };
@@ -5563,15 +5630,15 @@ function init() {
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };
   $("kbCreateBtn").onclick = async () => {
     const name = $("kbName").value.trim();
-    if (!name) { toast("请填写知识库名称"); return; }
+    if (!name) { toast(t("kb.needName")); return; }
     const res = await fetch("/ag-ui/kb", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({ name, description: $("kbDesc").value.trim() || null }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(`创建失败：${data?.message || res.status}`); return; }
-    toast(`知识库「${data.name}」已创建`);
+    if (!res.ok) { toast(errMsg(data, t("kb.createFail", { err: res.status }))); return; }
+    toast(t("kb.created", { name: data.name }));
     $("kbName").value = "";
     $("kbDesc").value = "";
     await loadKbs();
@@ -5627,8 +5694,8 @@ function init() {
   $("attachBtn").onclick = () => $("attachInput").click();
   $("attachInput").onchange = (e) => {
     for (const f of e.target.files || []) {
-      if (pendingAttachments.length >= 9) { toast("单次最多 9 个附件"); break; }
-      if (f.size > 20 * 1024 * 1024) { toast(`「${f.name}」超过 20 MB 上限`); continue; }
+      if (pendingAttachments.length >= 9) { toast(t("attach.maxCount", { count: 9 })); break; }
+      if (f.size > 20 * 1024 * 1024) { toast(t("attach.overSize", { name: f.name, mb: 20 })); continue; }
       pendingAttachments.push({ file: f, uploading: false });
     }
     e.target.value = "";
@@ -5656,11 +5723,11 @@ function init() {
   cvEl.addEventListener("pointerup", cvUp);
   cvEl.addEventListener("pointerleave", cvUp);
   $("createGroupBtn").onclick = () => { Promise.all([loadAgentDirectory(), loadUserDirectory()]).then(openCreateModal); };
-  $("refreshGroupsBtn").onclick = () => { loadGroups(); toast("知聚列表已刷新"); };
+  $("refreshGroupsBtn").onclick = () => { loadGroups(); toast(t("groups.refreshed")); };
   $("refreshMembersBtn").onclick = async () => {
-    if (!state.activeGroupId) { toast("请先选择知聚"); return; }
+    if (!state.activeGroupId) { toast(t("chat.selectGroup")); return; }
     await refreshActiveGroup();
-    toast("知聚成员已刷新");
+    toast(t("members.refreshed"));
   };
   $("createCancel").onclick = () => $("createModal").classList.add("hidden");
   $("createConfirm").onclick = createGroup;
@@ -5684,7 +5751,7 @@ function init() {
   // ---- Mermaid 源码查看 ----
   $("mmdSourceCopy").onclick = async () => {
     const ok = await copyText($("mmdSourceCode").textContent);
-    toast(ok ? "已复制 Mermaid 源码" : "复制失败，请手动选择复制");
+    toast(ok ? t("mmd.copied") : t("mmd.copyFail"));
   };
   $("mmdSourceClose").onclick = () => $("mmdSourceModal").classList.add("hidden");
   $("addMemberBtn").onclick = () => { Promise.all([loadAgentDirectory(), loadUserDirectory()]).then(openAddMemberModal); };
@@ -5727,6 +5794,13 @@ function init() {
       }
     }
     scheduleVirtualRender();
+  });
+
+  // 语言切换后刷新品牌、标签标题与连接状态（其余动态文案随 app.js 逐个迁移接入 t()）
+  document.addEventListener("i18nchanged", () => {
+    applyBranding(branding);
+    if (typeof updateDocTitle === "function") updateDocTitle();
+    if (typeof setStatus === "function") setStatus(_connOnline, _connKey);
   });
 
   // 恢复上次会话（校验令牌），否则显示登录页

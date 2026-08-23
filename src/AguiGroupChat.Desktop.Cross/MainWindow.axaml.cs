@@ -13,7 +13,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         SetWindowIcon();
-        StatusText.Text = $"本地服务：{App.BaseUrl}（数据与记忆全部存储在本机）";
+        StatusText.Text = L10n.StatusLocalService(App.BaseUrl);
         // 内嵌 WebView：AttachedToVisualTree 后显式 Navigate（Source 属性在适配器就绪前设置会被忽略）；
         // 3 秒后复查：若 WebView 初始化失败（LastUiError 被 Dispatcher 兜底记录），自动降级为系统浏览器打开。
         AttachedToVisualTree += (_, _) => NavigateSafely();
@@ -53,10 +53,10 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrEmpty(App.LastUiError))
         {
-            StatusText.Text = $"本地服务：{App.BaseUrl}（数据与记忆全部存储在本机）";
+            StatusText.Text = L10n.StatusLocalService(App.BaseUrl);
             return;
         }
-        StatusText.Text = $"内嵌窗口不可用（{App.LastUiError}）——已用浏览器打开 {App.BaseUrl}";
+        StatusText.Text = L10n.StatusEmbedFallback(App.LastUiError, App.BaseUrl);
         OpenBrowserOnce();
     }
 
@@ -70,7 +70,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"打开浏览器失败：{ex.Message}（请手动访问 {App.BaseUrl}）";
+            StatusText.Text = L10n.StatusBrowserFailed(ex.Message, App.BaseUrl);
         }
     }
 
@@ -82,7 +82,7 @@ public partial class MainWindow : Window
             // 强制刷新：带时间戳重新导航（URL 变化绕开 HTTP 缓存；同源，登录态保留）
             var url = App.BaseUrl + (App.BaseUrl.Contains('?') ? "&" : "?") + "_t=" + Environment.TickCount64;
             Web.Navigate(new System.Uri(url));
-            StatusText.Text = $"本地服务：{App.BaseUrl}（已强制刷新缓存）";
+            StatusText.Text = L10n.StatusWebviewReloaded(App.BaseUrl);
         }
         catch
         {

@@ -1,5 +1,7 @@
 # AguiGroupChat.Sdk — 第三方应用接入 SDK
 
+[English](README.en.md) | **简体中文**
+
 `AguiGroupChat.Sdk` 是 AG-UI 群聊扩展协议 Hub 的官方 .NET 客户端 SDK，面向需要**把第三方应用接入 Hub** 的开发者。
 它封装了 Hub 暴露的全部对外能力，开发者无需关心 WebSocket / SSE / 鉴权等底层细节。
 

@@ -1,0 +1,124 @@
+name: 🐛 Bug report
+description: Report a bug or unexpected behavior in the AG-UI Group Chat Protocol Hub (KnowGath / 知聚)
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Before opening, please
+        [search existing issues](https://github.com/DavidCompute/AG-UI_Multi-Party/issues) to avoid duplicates.
+        Help us reproduce and fix the problem quickly by filling in as much detail as you can.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug. What happened, and what did you expect to happen instead?
+      placeholder: |
+        Steps to reproduce:
+        1. Start the Hub / Web...
+        2. Connect a client / open the Web UI...
+        3. Do...
+        4. Observe...
+      render: markdown
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      description: Which part of the project does this bug affect?
+      options:
+        - Hub (AG-UI protocol hub / transport)
+        - Web frontend (native JS / index.html / app.js)
+        - Agents gateway (MSAGENT / triggering / model provider)
+        - SDK (AguiClient / AguiRealtimeClient)
+        - Desktop WPF (Windows)
+        - Desktop Avalonia (cross-platform)
+        - Persistence (postgres / mysql / sqlite / redis / json snapshot)
+        - Semantic memory / RAG (pgvector)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: phase
+    attributes:
+      label: Protocol phase / endpoint
+      description: If relevant, which event, endpoint, or protocol phase is involved?
+      placeholder: e.g. TEXT_MESSAGE_START/CONTENT/END, /ag-ui/proxy, AGENT_INTERACTION_REQUEST, GROUP_SUBSCRIBE_ACK
+  - type: dropdown
+    id: clients
+    attributes:
+      label: How did you reproduce it?
+      options:
+        - Web frontend (browser)
+        - SDK sample client
+        - Desktop app
+        - Raw WebSocket / SSE client
+        - Python / curl / other HTTP request
+        - Other
+      description: Optional but very helpful.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or error messages
+      description: Paste relevant logs, stack traces, or describe error events. Omit any API keys, passwords, or tokens.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Which version or commit (hash) are you running?
+      placeholder: e.g. main@abc1234
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: OS you reproduced on.
+      placeholder: e.g. Windows 11, macOS 14, Ubuntu 22.04, Docker (linux/amd64)
+    validations:
+      required: true
+  - type: input
+    id: dotnet
+    attributes:
+      label: .NET version
+      description: Output of `dotnet --version`.
+      placeholder: e.g. 10.0.x
+  - type: dropdown
+    id: storage
+    attributes:
+      label: Storage in use
+      description: Which persistence mode were you using when the bug occurred?
+      options:
+        - Memory (default JSON snapshot)
+        - PostgreSQL
+        - MySQL
+        - SQLite
+        - Redis shared storage
+        - Not applicable
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Relevant `appsettings.json` `GroupChat` / `Provider` / storage snippet (redact secrets).
+      placeholder: |
+        "GroupChat": { ... },
+        "Provider": "deepseek" | "mock" | ...
+      render: json
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Blocker (can't use the feature at all)
+        - Major (feature partially broken)
+        - Minor (edge case / cosmetic)
+        - Question (not sure if it's a bug)
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        Maintainers will triage and label this issue. For general "how do I..." questions, please use
+        [GitHub Discussions](https://github.com/DavidCompute/AG-UI_Multi-Party/discussions) instead.

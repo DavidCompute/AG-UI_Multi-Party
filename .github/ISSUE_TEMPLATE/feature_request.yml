@@ -1,0 +1,68 @@
+name: ✨ Feature request
+description: Suggest an idea or enhancement for the AG-UI Group Chat Protocol Hub (KnowGath / 知聚)
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Before opening, please
+        [search existing issues and discussions](https://github.com/DavidCompute/AG-UI_Multi-Party/issues)
+        to avoid duplicates.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: Describe the problem you want to solve or the use case you have. What is missing today, and why does it matter?
+      placeholder: |
+        As a (user / group admin / agent developer / integrator), I want to ...
+        so that I can ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed solution
+      description: Describe the solution or behavior you'd like to see. Include sketches of the API, protocol events, or UI when helpful.
+      placeholder: |
+        - New protocol event(s): ...
+        - New HTTP endpoint: ...
+        - New UI capability: ...
+        - New configuration / storage option: ...
+      render: markdown
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      description: Which area of the project does this feature touch?
+      options:
+        - Hub (protocol hub / transport)
+        - Web frontend (native JS)
+        - Agents gateway (MSAGENT / triggering / tools)
+        - SDK (AguiClient / AguiRealtimeClient)
+        - Desktop WPF (Windows)
+        - Desktop Avalonia (cross-platform)
+        - Persistence (postgres / mysql / sqlite / redis)
+        - Semantic memory / RAG (pgvector)
+        - Protocol specification / documentation
+        - Cross-cutting / other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or alternatives have you tried? Are there related existing features (e.g. topics, twins, skills, HITL, recall) that could be extended instead?
+      render: markdown
+  - type: textarea
+    id: impact
+    attributes:
+      label: Compatibility / impact
+      description: Any backwards-compatibility concerns (protocol §8 compatibility principle), performance, security, or migration notes we should keep in mind?
+      render: markdown
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        Keep the discussion constructive. Maintainers and the community may refine the design here together
+        before any implementation work begins.
