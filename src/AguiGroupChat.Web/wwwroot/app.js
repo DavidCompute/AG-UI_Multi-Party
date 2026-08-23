@@ -1,4 +1,4 @@
-/* AG-UI 群聊前端：连接 Hub WebSocket，渲染协议事件 */
+/* 知聚(KnowGath)前端：连接 Hub WebSocket，渲染协议事件 */
 "use strict";
 
 const state = {
@@ -12,19 +12,19 @@ const state = {
   reconnectDelay: 1000,
   groups: [],
   activeGroupId: null,
-  activeTopicId: "main", // 当前群内话题（默认主话题）
+  activeTopicId: "main", // 当前知聚内话题（默认主话题）
   // groupId -> { messages: [], members: [], typing: Set<memberId> }
   rooms: new Map(),
   // messageId -> 消息对象（TEXT_MESSAGE_CONTENT 事件不含 groupId，需跨 room 按 id 定位）
   msgIndex: new Map(),
-  subscribedGroups: new Set(), // 已订阅群 ID（重连后自动恢复订阅）
+  subscribedGroups: new Set(), // 已订阅知聚 ID（重连后自动恢复订阅）
   mentions: new Set(),   // 当前输入选中（提及 / 私聊对象）
   mentionAll: false,
-  // 按群未读信息（groupId → { lastMessageAt, unreadCount, byTopic: { topicId: n } }）：来自群列表 API，实时事件增量维护
+  // 按知聚未读信息（groupId → { lastMessageAt, unreadCount, byTopic: { topicId: n } }）：来自知聚列表 API，实时事件增量维护
   groupUnread: new Map(),
-  // 按群记忆的 @ 选择（groupId → {ids, all}）：切群恢复、发送后保留，避免每次重新 @
+  // 按知聚记忆的 @ 选择（groupId → {ids, all}）：切知聚恢复、发送后保留，避免每次重新 @
   mentionMemory: new Map(),
-  // 按群记忆的话题：groupId → 话题 ID（持久化 localStorage，切群/再登录自动恢复）
+  // 按知聚记忆的话题：groupId → 话题 ID（持久化 localStorage，切知聚/再登录自动恢复）
   topicMemory: new Map(),
   visibility: "all",
   // 应用内通知中心（5.4）：{ id, type, icon, title, body, groupId?, topicId?, ts, read }[]
@@ -92,7 +92,7 @@ function send(payload) {
 
 /* ============ 成员目录 ============ */
 
-// 回退目录：/ag-ui/users 无注册用户时（如示例身份模式）展示内置示例用户；智能体从 /ag-ui/agents 拉取
+// 回退目录：/ag-ui/users 无注册用户时（如示例身份模式）展示内置示例用户；数字员工从 /ag-ui/agents 拉取
 const USER_DIRECTORY = [
   { memberId: "user_1001", nickname: "张三", memberType: "user", triggerMode: null, keywords: null },
   { memberId: "user_1002", nickname: "李四", memberType: "user", triggerMode: null, keywords: null },
@@ -124,7 +124,7 @@ async function loadAgentDirectory() {
       avatar: a.avatar || null,
       ownerId: a.ownerId || null,
     }));
-  } catch { /* 目录加载失败不阻塞创建群 */ }
+  } catch { /* 目录加载失败不阻塞创建知聚 */ }
 }
 
 function memberDirectory() {
@@ -148,7 +148,7 @@ applyTheme(localStorage.getItem(THEME_KEY));
 /* ============ 白标 / 品牌化（6.4）：应用名 + Logo + 主色 + 嵌入模式 ============ */
 
 /** 品牌配置缓存（从 /ag-ui/settings/branding 拉取）。 */
-let branding = { appName: "AG-UI 群聊", logoUrl: null, primaryColor: "", forceDark: null, tagline: null };
+let branding = { appName: "知聚(KnowGath)", logoUrl: null, primaryColor: "", forceDark: null, tagline: null };
 
 /** 是否处于 iframe 嵌入 / 显式嵌入模式：压缩顶栏、隐藏无关操作。 */
 const isEmbedMode = (() => {
@@ -169,7 +169,7 @@ function applyAccentFromHex(hex) {
     return;
   }
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-  // 由单一主色生成：深色模式用原色，浅色模式加深；派生浅色文字标 / 紫色智能体色
+  // 由单一主色生成：深色模式用原色，浅色模式加深；派生浅色文字标 / 紫色数字员工色
   const light = document.documentElement.dataset.theme !== "light";
   const base = light
     ? `rgb(${r},${g},${b})`
@@ -185,8 +185,8 @@ function applyAccentFromHex(hex) {
 
 /** 应用品牌配置到页面：名称 / Logo / 主色 / 强制深色 / 副标语。 */
 function applyBranding(br) {
-  if (!br) br = { appName: "AG-UI 群聊" };
-  branding = { appName: br.appName || "AG-UI 群聊", logoUrl: br.logoUrl || null, primaryColor: br.primaryColor || "", forceDark: br.forceDark ?? null, tagline: br.tagline || null };
+  if (!br) br = { appName: "知聚(KnowGath)" };
+  branding = { appName: br.appName || "知聚(KnowGath)", logoUrl: br.logoUrl || null, primaryColor: br.primaryColor || "", forceDark: br.forceDark ?? null, tagline: br.tagline || null };
   const name = branding.appName;
   const setBrand = (id, sub) => {
     const nameEl = document.getElementById(id);
@@ -208,7 +208,7 @@ function applyBranding(br) {
   }
   // 副标语 / 登录页 tagline
   const sub = document.getElementById("brandSub");
-  if (sub) sub.textContent = branding.tagline || "Microsoft Agent Framework 多智能体";
+  if (sub) sub.textContent = branding.tagline || "Microsoft Agent Framework 数字员工协作";
   // 强制深色：嵌入 / 门户白标时锁定深色，隐藏主题切换
   if (branding.forceDark) {
     applyTheme("dark");
@@ -300,7 +300,7 @@ function enterApp(data) {
   state.isAdmin = !!data.isAdmin; // 系统管理员：数据备份 / 模型配置等管理菜单仅管理员可见
   storeAuth({ memberId: data.userId, token: data.token, nickname: data.nickname });
   state.topicMemory = loadTopicMemory(data.userId); // 恢复该用户的话题记忆
-  pendingAutoEnterGroup = true; // 群列表加载完成后自动进入上次选择的群
+  pendingAutoEnterGroup = true; // 知聚列表加载完成后自动进入上次选择的知聚
   hideAuth();
   $("meChip").classList.remove("hidden");
   $("meNickname").textContent = data.nickname || data.userId;
@@ -326,7 +326,7 @@ function resetChatState() {
   state.groups = [];
   state.activeGroupId = null;
   state.activeTopicId = "main";
-  state.replyTo = null; // 切群 / 重置时清除引用
+  state.replyTo = null; // 切知聚 / 重置时清除引用
   renderReplyBar();
   $("addMemberBtn").disabled = true;
   $("groupSettingsBtn").disabled = true;
@@ -424,12 +424,12 @@ async function checkModelConfig() {
   } catch { /* 检查失败不阻塞进入 */ }
 }
 
-// ============ 记忆管理（分群分级 / 自动遗忘 / 可视化） ============
+// ============ 记忆管理（分知聚分级 / 自动遗忘 / 可视化） ============
 
 let memOffset = 0;
 const MEM_PAGE = 30;
 
-/** 发送者显示名：优先服务端解析的昵称（m.senderNickname），回退本地群成员昵称 / 原始 ID。 */
+/** 发送者显示名：优先服务端解析的昵称（m.senderNickname），回退本地知聚成员昵称 / 原始 ID。 */
 function memorySenderName(m) {
   if (m.senderNickname) return m.senderNickname;
   const id = m.senderId ?? m;
@@ -441,7 +441,7 @@ function memorySenderName(m) {
   return id;
 }
 
-/** 打开记忆管理弹窗：加载群统计 + 首屏条目。 */
+/** 打开记忆管理弹窗：加载知聚统计 + 首屏条目。 */
 async function openMemoryModal() {
   $("memGroupSelect").value = "";
   $("memKeyword").value = "";
@@ -455,7 +455,7 @@ async function openMemoryModal() {
 /* ============ 白标 / 品牌化（6.4）弹窗：应用名 / Logo / 主色 / 强制深色 ============ */
 
 function openBrandingModal() {
-  $("brName").value = branding.appName === "AG-UI 群聊" ? "" : branding.appName;
+  $("brName").value = branding.appName === "知聚(KnowGath)" ? "" : branding.appName;
   $("brLogo").value = branding.logoUrl || "";
   $("brColor").value = branding.primaryColor || "#4f8cff";
   $("brTagline").value = branding.tagline || "";
@@ -492,7 +492,7 @@ async function saveBranding() {
   }
 }
 
-/** 各群记忆统计 → 群选择器 + 总条数。 */
+/** 各知聚记忆统计 → 知聚选择器 + 总条数。 */
 async function loadMemoryGroups() {
   try {
     const res = await fetch("/ag-ui/memory/groups", { headers: { Authorization: "Bearer " + (state.token || "") } });
@@ -502,7 +502,7 @@ async function loadMemoryGroups() {
     $("memTotal").textContent = `${total} 条记忆`;
     const sel = $("memGroupSelect");
     const current = sel.value;
-    sel.innerHTML = `<option value="">全部群（${total} 条）</option>`
+    sel.innerHTML = `<option value="">全部知聚（${total} 条）</option>`
       + data.map((g) => {
           const count = Number(g.count) || 0; // 服务端数值先 Number 归一再入 HTML
           const expiredCount = Number(g.expiredCount) || 0;
@@ -511,7 +511,7 @@ async function loadMemoryGroups() {
   } catch { /* 忽略 */ }
 }
 
-/** 加载记忆条目列表（按当前群 / 关键词 / 分页）。 */
+/** 加载记忆条目列表（按当前知聚 / 关键词 / 分页）。 */
 async function loadMemoryList(offset = memOffset) {
   memOffset = offset;
   const groupId = $("memGroupSelect").value;
@@ -588,7 +588,7 @@ async function loadMemoryList(offset = memOffset) {
   } catch { list.innerHTML = `<div class="mem-empty">记忆加载失败</div>`; }
 }
 
-/* ============ 任务中心（工作型智能体任务编排） ============ */
+/* ============ 任务中心（工作型数字员工任务编排） ============ */
 
 let taskGroupFilter = "";
 
@@ -615,8 +615,8 @@ async function loadTasks() {
       return;
     }
     $("taskCount").textContent = `${data.length} 条`;
-    if (!data.length) { list.innerHTML = `<div class="mem-empty">暂无任务。在群里给启用了 🛠️ 工作型智能体发指令即可创建任务。</div>`; return; }
-    // 群选择器选项（从任务去重）
+    if (!data.length) { list.innerHTML = `<div class="mem-empty">暂无任务。在知聚里给启用了 🛠️ 工作型数字员工发指令即可创建任务。</div>`; return; }
+    // 知聚选择器选项（从任务去重）
     const sel = $("taskGroupFilter");
     const currentGroup = sel.value;
     const groups = [...new Set(data.map((t) => t.groupId))];
@@ -664,9 +664,9 @@ async function checkSession() {
   } catch { /* 网络异常时静默，继续重连 */ }
 }
 
-/* ============ 群 / 话题记忆（本地持久化，按用户隔离） ============ */
+/* ============ 知聚 / 话题记忆（本地持久化，按用户隔离） ============ */
 
-let pendingAutoEnterGroup = false; // 登录后群列表加载完成时自动进入上次选择的群（一次性）
+let pendingAutoEnterGroup = false; // 登录后知聚列表加载完成时自动进入上次选择的知聚（一次性）
 
 const LastGroupKey = (uid) => "agui.lastGroup." + uid;
 const TopicMemKey = (uid) => "agui.topicMem." + uid;
@@ -689,7 +689,7 @@ function saveTopicMemory(uid) {
   try { localStorage.setItem(TopicMemKey(uid), JSON.stringify(Object.fromEntries(state.topicMemory))); } catch {}
 }
 
-/* ============ 智能体管理（运行时可新增 / 编辑 / 删除 AI 角色） ============ */
+/* ============ 数字员工管理（运行时可新增 / 编辑 / 删除 AI 角色） ============ */
 
 const TRIGGER_LABELS = {
   mentioned: "提及触发", allMessages: "全量监听", keyword: "关键词触发", contextual: "语境触发",
@@ -700,15 +700,15 @@ const TRIGGER_ICONS = {
 };
 const TRIGGER_HINTS = {
   mentioned: "被 @ 或提及时才发言，最常用的方式",
-  allMessages: "群内每条消息都会收到（可能刷屏，建议谨慎）",
+  allMessages: "知聚内每条消息都会收到（可能刷屏，建议谨慎）",
   keyword: "消息命中下方关键词时发言",
-  contextual: "由模型结合群上下文自主判断是否发言",
+  contextual: "由模型结合知聚上下文自主判断是否发言",
 };
 let agentList = [];
 let editingAgentId = null;
 
 async function openAgentModal() {
-  if (!state.token) { toast("请先登录后管理智能体"); return; }
+  if (!state.token) { toast("请先登录后管理数字员工"); return; }
   await Promise.all([loadAgents(), loadKbs()]);
   $("agentModal").classList.remove("hidden");
   showAgentListView();
@@ -728,7 +728,7 @@ async function loadAgents() {
   } catch { agentList = []; }
 }
 
-/** 智能体创建者显示名：本人显示「我」，否则从用户目录取昵称，查不到则显示 ID 前段。内置智能体（无 ownerId）显示「系统」。 */
+/** 数字员工创建者显示名：本人显示「我」，否则从用户目录取昵称，查不到则显示 ID 前段。内置数字员工（无 ownerId）显示「系统」。 */
 function agentOwnerName(ownerId) {
   if (!ownerId) return `<span class="agent-owner sys">系统</span>`;
   if (ownerId === state.memberId) return `<span class="agent-owner me">我</span>`;
@@ -753,12 +753,12 @@ function renderAgentList() {
     const empty = document.createElement("div");
     empty.className = "agent-empty";
     empty.innerHTML = `<div class="agent-empty-icon">🤖</div>
-      <div>还没有智能体，点击上方「＋ 新增智能体」创建第一个 AI 角色参与群聊</div>`;
+      <div>还没有数字员工，点击上方「＋ 新增数字员工」创建第一个 AI 角色参与知聚</div>`;
     el.appendChild(empty);
     return;
   }
   if (!filtered.length) {
-    el.innerHTML = `<div class="agent-empty"><div class="agent-empty-icon">🔍</div><div>没有匹配「${escapeHtml(keyword)}」的智能体</div></div>`;
+    el.innerHTML = `<div class="agent-empty"><div class="agent-empty-icon">🔍</div><div>没有匹配「${escapeHtml(keyword)}」的数字员工</div></div>`;
     return;
   }
 
@@ -766,14 +766,14 @@ function renderAgentList() {
     const row = document.createElement("div");
     row.className = "agent-row";
     const kw = (a.keywords || []).join("、");
-    // 编辑 / 删除仅限创建者本人（服务端即将强制归属校验；内置智能体 ownerId 为 null，不显示）
+    // 编辑 / 删除仅限创建者本人（服务端即将强制归属校验；内置数字员工 ownerId 为 null，不显示）
     const canManage = !!a.ownerId && a.ownerId === state.memberId;
     const avatarImg = a.avatar
       ? `<img class="agent-avatar" src="${escapeHtml(authedAssetUrl(a.avatar))}" alt="" onerror="this.remove()" />`
       : "";
     row.innerHTML = `
       <div class="agent-cell">
-        <div class="agent-name">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? '<span class="tag-lock" title="私密智能体（仅创建者可拉入群）">🔒</span>' : ""}${(a.skills || []).length ? `<span class="tag-skill" title="技能：${escapeHtml((a.skills || []).map((s) => s.skillId).join(", "))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="知识库：${escapeHtml(a.knowledgeBaseIds.join(", "))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
+        <div class="agent-name">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? '<span class="tag-lock" title="私密数字员工（仅创建者可拉进知聚）">🔒</span>' : ""}${(a.skills || []).length ? `<span class="tag-skill" title="技能：${escapeHtml((a.skills || []).map((s) => s.skillId).join(", "))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="知识库：${escapeHtml(a.knowledgeBaseIds.join(", "))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
         <div class="agent-desc">${escapeHtml(a.description || "—")}</div>
       </div>
       <div class="agent-cell agent-cell-id"><code>${escapeHtml(a.agentId)}</code></div>
@@ -797,9 +797,9 @@ function renderAgentList() {
   }
 }
 
-/* ============ 智能体导出 / 导入（JSON 文件） ============ */
+/* ============ 数字员工导出 / 导入（JSON 文件） ============ */
 
-/** 序列化智能体配置：排除敏感字段 bridgeToken（不导出）；ownerId 不导出（导入后归属当前用户）。 */
+/** 序列化数字员工配置：排除敏感字段 bridgeToken（不导出）；ownerId 不导出（导入后归属当前用户）。 */
 function serializeAgent(a) {
   return {
     agentId: a.agentId || null,
@@ -832,14 +832,14 @@ function downloadJson(filename, data) {
   URL.revokeObjectURL(url);
 }
 
-/** 系统数据备份：导入预览渲染（账号 / 智能体存在性摘要 + 群勾选列表）。 */
+/** 系统数据备份：导入预览渲染（账号 / 数字员工存在性摘要 + 知聚勾选列表）。 */
 function renderBackupPreview(data) {
   const missingAccounts = data.accounts.filter((a) => !a.exists).length;
   const missingAgents = data.agents.filter((a) => !a.exists).length;
   $("backupImportSummary").textContent =
-    `数据包包含 ${data.accounts.length} 个账号、${data.agents.length} 个智能体、${data.groups.length} 个聊天记录群。`
+    `数据包包含 ${data.accounts.length} 个账号、${data.agents.length} 个数字员工、${data.groups.length} 个聊天记录知聚。`
     + (missingAccounts ? ` 将自动新建 ${missingAccounts} 个账号。` : " 账号全部已存在。")
-    + (missingAgents ? ` 将自动新建 ${missingAgents} 个智能体。` : " 智能体全部已存在。");
+    + (missingAgents ? ` 将自动新建 ${missingAgents} 个数字员工。` : " 数字员工全部已存在。");
   const list = $("backupImportGroups");
   list.innerHTML = data.groups.map((g) => `
     <label class="backup-group-item">
@@ -857,26 +857,26 @@ function renderBackupResult(r) {
     <div class="br-title">✅ 导入完成</div>
     <ul>
       <li>账号：新建 ${r.accountsCreated}，已存在并更新资料 ${r.accountsUpdated}</li>
-      <li>智能体：新建 ${r.agentsCreated}，已存在跳过 ${r.agentsSkipped}</li>
+      <li>数字员工：新建 ${r.agentsCreated}，已存在跳过 ${r.agentsSkipped}</li>
       <li>附件：还原 ${r.attachmentsRestored}，跳过 ${r.attachmentsSkipped}</li>
-      ${groups ? `<li>聊天记录：</li>${groups}` : "<li>未导入聊天记录群</li>"}
+      ${groups ? `<li>聊天记录：</li>${groups}` : "<li>未导入聊天记录知聚</li>"}
     </ul>`;
 }
 
-/** 导出单个 / 多个智能体为 JSON 文件（格式：{ version, agents: [...] }）。 */
+/** 导出单个 / 多个数字员工为 JSON 文件（格式：{ version, agents: [...] }）。 */
 function exportAgents(agents, filename = `agents-${Date.now()}.json`) {
-  if (!agents.length) { toast("没有可导出的智能体"); return; }
+  if (!agents.length) { toast("没有可导出的数字员工"); return; }
   downloadJson(filename, { version: 1, agents: agents.map(serializeAgent) });
-  toast(`已导出 ${agents.length} 个智能体`);
+  toast(`已导出 ${agents.length} 个数字员工`);
 }
 
-/** 解析导入文件：支持 {version, agents:[...]} 与裸数组两种格式；返回智能体列表或抛错。 */
+/** 解析导入文件：支持 {version, agents:[...]} 与裸数组两种格式；返回数字员工列表或抛错。 */
 function parseAgentImport(text) {
   let data = JSON.parse(text);
   if (Array.isArray(data)) return data;
   if (data && Array.isArray(data.agents)) return data.agents;
   if (data && typeof data === "object" && data.nickname) return [data];
-  throw new Error("无法识别的导入文件格式（应为 {version, agents:[…]} 或智能体数组）");
+  throw new Error("无法识别的导入文件格式（应为 {version, agents:[…]} 或数字员工数组）");
 }
 
 /** 从文件导入：逐条调用 POST /ag-ui/agents 创建（agentId 冲突时自动生成新 ID；bridgeToken 不导入）。 */
@@ -889,7 +889,7 @@ async function importAgentsFromFile(file) {
     return;
   }
   if (!Array.isArray(agents) || agents.length === 0) { toast("导入文件为空"); return; }
-  if (!state.token) { toast("请先登录后再导入智能体"); return; }
+  if (!state.token) { toast("请先登录后再导入数字员工"); return; }
 
   let ok = 0, conflict = 0, failed = 0;
   for (const a of agents) {
@@ -919,7 +919,7 @@ async function importAgentsFromFile(file) {
         body: JSON.stringify(body),
       });
       if (res.status === 409 && body.agentId) {
-        // agentId 冲突：自动生成新 ID 重试，避免覆盖现有智能体
+        // agentId 冲突：自动生成新 ID 重试，避免覆盖现有数字员工
         conflict++;
         body.agentId = null;
         res = await fetch("/ag-ui/agents", {
@@ -970,7 +970,7 @@ function restoreDeleteBtn(btn) {
 function openAgentForm(agentId) {
   editingAgentId = agentId || null;
   const a = editingAgentId ? agentList.find((x) => x.agentId === editingAgentId) : null;
-  $("agentFormTitle").textContent = a ? `编辑智能体「${a.nickname}」` : "新增智能体";
+  $("agentFormTitle").textContent = a ? `编辑数字员工「${a.nickname}」` : "新增数字员工";
   $("afAgentId").value = a?.agentId || "";
   $("afAgentId").disabled = !!a;
   $("afNickname").value = a?.nickname || "";
@@ -995,7 +995,7 @@ function openAgentForm(agentId) {
   // 知识库：回显绑定
   agentKbIds = [...(a?.knowledgeBaseIds || [])];
   renderKbPicks();
-  // 私密智能体仅创建者可编辑（种子智能体无 ownerId，登录即可编辑）
+  // 私密数字员工仅创建者可编辑（种子数字员工无 ownerId，登录即可编辑）
   const canEditPrivate = !a?.isPrivate || !a?.ownerId || a.ownerId === state.memberId;
   $("afIsPrivate").disabled = !canEditPrivate;
   syncTriggerForm();
@@ -1040,7 +1040,7 @@ async function saveAgent() {
   }
   // 填了技能标识的必须合法（OpenAI 工具名规范）；留空的由后端自动生成 skill_<目标ID>
   if (body.skills.some((s) => s.skillId && !/^[a-zA-Z0-9_-]+$/.test(s.skillId))) { toast("技能标识仅允许字母/数字/下划线/连字符（如 skill_docs，不能含中文/空格）；留空则自动生成"); return; }
-  if (body.skills.some((s) => s.targetAgentId === editingAgentId)) { toast("技能不能指向智能体自身"); return; }
+  if (body.skills.some((s) => s.targetAgentId === editingAgentId)) { toast("技能不能指向数字员工自身"); return; }
   const ids = body.skills.map((s) => s.skillId).filter(Boolean);
   if (new Set(ids).size !== ids.length) { toast("技能标识重复"); return; }
   const url = editingAgentId ? `/ag-ui/agents/${encodeURIComponent(editingAgentId)}` : "/ag-ui/agents";
@@ -1052,14 +1052,14 @@ async function saveAgent() {
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(`保存失败：${data?.message || res.status}`); return; }
-    toast(editingAgentId ? "智能体已更新" : "智能体已创建");
+    toast(editingAgentId ? "数字员工已更新" : "数字员工已创建");
     await loadAgents();
     await loadAgentDirectory();
     showAgentListView();
   } catch (ex) { toast("保存失败：" + ex.message); }
 }
 
-/** 技能行渲染：SkillId / 描述 / 目标智能体下拉 / 删除。目标列表排除当前编辑的智能体。 */
+/** 技能行渲染：SkillId / 描述 / 目标数字员工下拉 / 删除。目标列表排除当前编辑的数字员工。 */
 let agentSkills = [];
 function renderSkillRows() {
   const el = $("afSkillsList");
@@ -1072,7 +1072,7 @@ function renderSkillRows() {
     row.innerHTML = `
       <input class="modal-input skill-id" placeholder="留空自动生成（如 skill_agent_docs）" maxlength="40" value="${escapeHtml(s.skillId)}" style="width:150px" />
       <select class="modal-input skill-target" style="width:150px">
-        <option value="">— 目标智能体 —</option>
+        <option value="">— 目标数字员工 —</option>
         ${candidates.map((x) => `<option value="${escapeHtml(x.agentId)}" ${x.agentId === s.targetAgentId ? "selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`).join("")}
       </select>
       <input class="modal-input skill-desc" placeholder="描述：何时调用、能获得什么" maxlength="200" value="${escapeHtml(s.description)}" style="flex:1;min-width:160px" />
@@ -1088,7 +1088,7 @@ function renderSkillRows() {
 /* ============ 知识库（Knowledge Base，RAG 知识文档） ============ */
 
 let kbList = [];       // 可见知识库 [{kbId,name,description,ownerId,documents}]
-let agentKbIds = [];   // 智能体表单当前选中的知识库 ID
+let agentKbIds = [];   // 数字员工表单当前选中的知识库 ID
 
 /** 加载可见知识库列表并刷新表单多选 / 管理弹窗。 */
 async function loadKbs() {
@@ -1102,7 +1102,7 @@ async function loadKbs() {
   } catch { /* 知识库不可用时表单不阻塞 */ }
 }
 
-/** 智能体表单：知识库多选（选中项写入 agentKbIds）。 */
+/** 数字员工表单：知识库多选（选中项写入 agentKbIds）。 */
 function renderKbPicks() {
   const el = $("afKbList");
   el.innerHTML = "";
@@ -1262,7 +1262,7 @@ async function deleteAgent(agent) {
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(`删除失败：${data?.message || res.status}`); return; }
-    toast("智能体已删除");
+    toast("数字员工已删除");
     await loadAgents();
     await loadAgentDirectory();
   } catch (ex) { toast("删除失败：" + ex.message); }
@@ -1326,7 +1326,7 @@ function refreshTwinUi(status) {
   if (status?.triggerMode) $("pfTwinTrigger").value = status.triggerMode.toLowerCase();
 }
 
-/** 同步分身到当前全部公开群（补齐启用后新建 / 加入的群）。 */
+/** 同步分身到当前全部公开知聚（补齐启用后新建 / 加入的知聚）。 */
 async function syncTwinGroups() {
   if (!state.token || !twinStatus?.enabled) return;
   $("pfTwinSync").disabled = true;
@@ -1338,14 +1338,14 @@ async function syncTwinGroups() {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(`同步失败：${data?.message || res.status}`); return; }
     refreshTwinUi(data);
-    toast("分身已同步到全部公开群");
+    toast("分身已同步到全部公开知聚");
     loadGroups();
     refreshActiveGroup();
   } catch (ex) { toast("同步失败：" + ex.message); }
   finally { $("pfTwinSync").disabled = false; }
 }
 
-/** 修改分身触发方式（分身已启用时即时保存并同步各公开群）。 */
+/** 修改分身触发方式（分身已启用时即时保存并同步各公开知聚）。 */
 async function updateTwinTrigger() {
   if (!state.token || !twinStatus?.enabled) return;
   const mode = $("pfTwinTrigger").value;
@@ -1362,7 +1362,7 @@ async function updateTwinTrigger() {
   } catch (ex) { toast("触发方式更新失败：" + ex.message); loadTwinStatus(); }
 }
 
-/** 重新拉取当前群快照并应用（成员 / 话题 / 消息刷新，不依赖事件时序）。 */
+/** 重新拉取当前知聚快照并应用（成员 / 话题 / 消息刷新，不依赖事件时序）。 */
 async function refreshActiveGroup() {
   const gid = state.activeGroupId;
   if (!gid) return;
@@ -1373,11 +1373,11 @@ async function refreshActiveGroup() {
   } catch { /* 刷新失败不阻塞 */ }
 }
 
-/** 启用分身：服务端基于公开群发言生成人设并加入全部公开群。 */
+/** 启用分身：服务端基于公开知聚发言生成人设并加入全部公开知聚。 */
 async function enableTwin() {
   if (!state.token) { toast("请先登录"); return; }
   $("pfTwinEnable").disabled = true;
-  $("pfTwinStatus").textContent = "正在生成人设并加入公开群…（可能需几十秒）";
+  $("pfTwinStatus").textContent = "正在生成人设并加入公开知聚…（可能需几十秒）";
   try {
     const res = await fetch("/ag-ui/twin/enable", {
       method: "POST",
@@ -1388,16 +1388,16 @@ async function enableTwin() {
     if (!res.ok) { toast(`分身启用失败：${data?.message || res.status}`); refreshTwinUi(null); return; }
     refreshTwinUi(data);
     toast("分身已启用");
-    loadGroups(); // 刷新群列表（分身已加入公开群，成员数变化）
-    refreshActiveGroup(); // 立即刷新当前群成员列表（显示 🪞 分身）
+    loadGroups(); // 刷新知聚列表（分身已加入公开知聚，成员数变化）
+    refreshActiveGroup(); // 立即刷新当前知聚成员列表（显示 🪞 分身）
   } catch (ex) { toast("分身启用失败：" + ex.message); refreshTwinUi(null); }
   finally { $("pfTwinEnable").disabled = false; }
 }
 
-/** 停用分身：删除分身并退出全部群。 */
+/** 停用分身：删除分身并退出全部知聚。 */
 async function disableTwin() {
   if (!state.token) return;
-  if (!confirm("确定停用分身？分身将从所有群退出并停止回复。")) return;
+  if (!confirm("确定停用分身？分身将从所有知聚退出并停止回复。")) return;
   try {
     const res = await fetch("/ag-ui/twin/disable", {
       method: "POST",
@@ -1408,7 +1408,7 @@ async function disableTwin() {
     refreshTwinUi(null);
     toast("分身已停用");
     loadGroups();
-    refreshActiveGroup(); // 立即刷新当前群成员列表（移除 🪞 分身）
+    refreshActiveGroup(); // 立即刷新当前知聚成员列表（移除 🪞 分身）
   } catch (ex) { toast("停用失败：" + ex.message); }
 }
 
@@ -1437,9 +1437,9 @@ async function submitProfile() {
   } catch (ex) { toast("保存失败：" + ex.message); }
 }
 
-/* ============ 创建群 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
+/* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
 
-let createPickOptions = []; // 创建群弹窗的可选成员（打开时快照，供搜索过滤）
+let createPickOptions = []; // 创建知聚弹窗的可选成员（打开时快照，供搜索过滤）
 let addPickOptions = [];    // 添加成员弹窗的可选成员
 
 /** 成员选择项 HTML：头像（状态图标叠加）+ 名称 + 副标题 + AI 标签。 */
@@ -1450,7 +1450,7 @@ function pickItemHtml(m) {
     ? `<span class="member-avatar"><img src="${escapeHtml(authedAssetUrl(m.avatar))}" alt="" onerror="this.remove()" />${statusIcon}</span>`
     : statusIcon;
   const sub = m.memberType === "agent"
-    ? (isTwin ? "AI 分身（用户离线时代班）" : `AI 智能体 · ${TRIGGER_LABELS[m.triggerMode] || "提及触发"}`)
+    ? (isTwin ? "AI 分身（用户离线时代班）" : `AI 数字员工 · ${TRIGGER_LABELS[m.triggerMode] || "提及触发"}`)
     : "用户";
   return `${avatar}<span class="pick-info"><span class="pick-name">${escapeHtml(m.nickname || m.memberId)}</span><span class="pick-sub">${sub}</span></span>` +
     (!isTwin && m.memberType === "agent" ? '<span class="tag-agent">AI</span>' : "");
@@ -1494,12 +1494,12 @@ function openCreateModal() {
   $("createGroupName").value = "";
   $("createGroupPrivate").checked = false;
   $("createMemberSearch").value = "";
-  $("createConfirm").disabled = false; // 允许创建仅含群主的群
+  $("createConfirm").disabled = false; // 允许创建仅含知聚主的知聚
   $("createModal").classList.remove("hidden");
   $("createGroupName").focus();
 }
 
-/* ============ 群设置（群名 / 头像 / 私密） ============ */
+/* ============ 知聚设置（知聚名 / 头像 / 私密） ============ */
 
 let groupSettingsAvatar = null; // null=未改动；""=移除；url=新头像
 let gsAvatarPicker = null;
@@ -1508,10 +1508,10 @@ function openGroupSettings() {
   const gid = state.activeGroupId;
   const g = state.groups.find((x) => x.groupId === gid);
   if (!g) return;
-  // 权限：仅群主 / 管理员（服务端同样校验）
+  // 权限：仅知聚主 / 管理员（服务端同样校验）
   const me = room(gid)?.members.find((m) => m.memberId === state.memberId);
-  if (me && me.role !== "owner" && me.role !== "admin") { toast("仅群主或管理员可修改群设置"); return; }
-  // 解散仅群主可执行
+  if (me && me.role !== "owner" && me.role !== "admin") { toast("仅知聚主或管理员可修改知聚设置"); return; }
+  // 解散仅知聚主可执行
   $("gsDisbandBtn").style.display = me?.role === "owner" || g.ownerId === state.memberId ? "" : "none";
   $("gsGroupName").value = g.groupName || "";
   $("gsIsPrivate").checked = !!g.isPrivate;
@@ -1525,7 +1525,7 @@ async function saveGroupSettings() {
   const g = state.groups.find((x) => x.groupId === gid);
   if (!g) return;
   const groupName = $("gsGroupName").value.trim();
-  if (!groupName) { toast("群名称不能为空"); return; }
+  if (!groupName) { toast("知聚名称不能为空"); return; }
   const updateFields = [];
   const groupInfo = {};
   if (groupName !== g.groupName) { updateFields.push("groupName"); groupInfo.groupName = groupName; }
@@ -1549,16 +1549,16 @@ async function saveGroupSettings() {
     if (groupInfo.isPrivate !== undefined) g.isPrivate = groupInfo.isPrivate;
     renderGroupList();
     $("chatGroupName").textContent = (g.isPrivate ? "🔒 " : "") + (g.groupName || "");
-    toast("群设置已保存");
+    toast("知聚设置已保存");
   } catch (ex) { toast("保存失败：" + ex.message); }
 }
 
-/** 解散群（仅群主）：二次确认后调用 /ag-ui/group/disband，本地立即清理（GROUP_DISBANDED 事件到达后幂等处理）。 */
+/** 解散知聚（仅知聚主）：二次确认后调用 /ag-ui/group/disband，本地立即清理（GROUP_DISBANDED 事件到达后幂等处理）。 */
 async function disbandGroup() {
   const gid = state.activeGroupId;
   const g = state.groups.find((x) => x.groupId === gid);
   if (!g) return;
-  if (!confirm(`确定要解散群「${g.groupName}」吗？\n解散后所有成员将被移除，聊天记录不可恢复。`)) return;
+  if (!confirm(`确定要解散知聚「${g.groupName}」吗？\n解散后所有成员将被移除，聊天记录不可恢复。`)) return;
   try {
     const res = await fetch("/ag-ui/group/disband", {
       method: "POST",
@@ -1569,21 +1569,21 @@ async function disbandGroup() {
     if (!res.ok) { toast(`解散失败：${data?.message || res.status}`); return; }
     $("groupSettingsModal").classList.add("hidden");
     onDisbanded({ groupId: gid }); // 本地立即清理（事件到达后再执行一次无副作用）
-    toast("群组已解散");
+    toast("知聚已解散");
   } catch (ex) { toast("解散失败：" + ex.message); }
 }
 
 async function createGroup() {
   let groupName = $("createGroupName").value.trim();
   const picked = memberDirectory().filter((m) => selectedMembers.has(m.memberId));
-  // 用户不填群名：由 AI 按所选成员自动生成 6-12 字群名（需登录；演示模式无令牌则提示手动填写）
+  // 用户不填知聚名：由 AI 按所选成员自动生成 6-12 字知聚名（需登录；演示模式无令牌则提示手动填写）
   if (!groupName) {
-    if (picked.length === 0) { toast("请选择成员或填写群名称"); return; }
-    if (!state.token) { toast("未登录，请手动填写群名称"); return; }
+    if (picked.length === 0) { toast("请选择成员或填写知聚名称"); return; }
+    if (!state.token) { toast("未登录，请手动填写知聚名称"); return; }
     const btn = $("createConfirm");
     const oldText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = "生成群名中…";
+    btn.textContent = "生成知聚名中…";
     try {
       const res = await fetch("/ag-ui/group/generate-name", {
         method: "POST",
@@ -1591,11 +1591,11 @@ async function createGroup() {
         body: JSON.stringify({ memberNames: picked.map((m) => m.nickname) }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(`群名生成失败：${data?.message || res.status}，请手动填写`); return; }
+      if (!res.ok) { toast(`知聚名生成失败：${data?.message || res.status}，请手动填写`); return; }
       groupName = data.groupName;
       $("createGroupName").value = groupName; // 回填展示
     } catch (ex) {
-      toast("群名生成失败：" + ex.message);
+      toast("知聚名生成失败：" + ex.message);
       return;
     } finally {
       btn.disabled = false;
@@ -1625,7 +1625,7 @@ async function createGroup() {
     }
     const group = await res.json();
 
-    // 为勾选的智能体注册新群触发规则（协议 §6），使其在新群内可被触发
+    // 为勾选的数字员工注册新知聚触发规则（协议 §6），使其在新知聚内可被触发
     for (const a of picked.filter((m) => m.memberType === "agent")) {
       try {
         await fetch(`/ag-ui/agents/register?memberId=${encodeURIComponent(state.memberId)}`, {
@@ -1638,11 +1638,11 @@ async function createGroup() {
             triggerMode: a.triggerMode, keywords: a.keywords,
           }),
         });
-      } catch { /* 单个智能体注册失败不阻塞创建 */ }
+      } catch { /* 单个数字员工注册失败不阻塞创建 */ }
     }
 
     $("createModal").classList.add("hidden");
-    toast(`群「${group.groupName}」创建成功`);
+    toast(`知聚「${group.groupName}」创建成功`);
     await loadGroups();
     selectGroup(group.groupId);
   } catch (ex) {
@@ -1656,7 +1656,7 @@ function setStatus(online, text) {
   el.textContent = text;
 }
 
-/* ============ 群与成员加载 ============ */
+/* ============ 知聚与成员加载 ============ */
 
 async function loadGroups() {
   const res = await fetch(`/ag-ui/member/${state.memberId}/groups`);
@@ -1672,21 +1672,21 @@ async function loadGroups() {
     });
   }
   renderGroupList();
-  // 刷新完成：当前群话题栏同步最新未读（话题红点 / 主话题红点）
+  // 刷新完成：当前知聚话题栏同步最新未读（话题红点 / 主话题红点）
   if (state.activeGroupId) renderTopicBar();
-  // 当前打开的群若已被解散 / 不再是成员，清空聊天区（刷新列表场景）
+  // 当前打开的知聚若已被解散 / 不再是成员，清空聊天区（刷新列表场景）
   if (state.activeGroupId && !state.groups.some((g) => g.groupId === state.activeGroupId)) {
     state.activeGroupId = null;
     state.activeTopicId = "main";
     resetVScroll();
     renderMembers();
     renderTopicBar();
-    $("chatGroupName").textContent = "请选择一个群";
+    $("chatGroupName").textContent = "请选择一个知聚";
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
   }
-  // 登录后自动进入上次选择的群（一次性，手动刷新群列表不触发）
+  // 登录后自动进入上次选择的知聚（一次性，手动刷新知聚列表不触发）
   if (pendingAutoEnterGroup && state.memberId && !state.activeGroupId) {
     pendingAutoEnterGroup = false;
     const last = localStorage.getItem(LastGroupKey(state.memberId));
@@ -1700,7 +1700,7 @@ function room(gid) {
   return state.rooms.get(gid);
 }
 
-/** 单群消息内存上限：超过 1200 条时裁剪最旧消息（含全局索引同步）。 */
+/** 单知聚消息内存上限：超过 1200 条时裁剪最旧消息（含全局索引同步）。 */
 const MAX_MESSAGES = 1200;
 /** 单条消息流式内容累计上限（正文 / 思考各 2MB）：超限忽略后续增量并标记截断，防异常超长内容拖垮前端。 */
 const STREAM_MAX_LENGTH = 2 * 1024 * 1024;
@@ -1728,7 +1728,7 @@ function handleEvent(evt) {
   switch (evt.type) {
     case "GROUP_CONNECTED":
       loadGroups();
-      // 重连后自动恢复此前已订阅的群，避免流式事件（TEXT_MESSAGE_CONTENT 等）丢失
+      // 重连后自动恢复此前已订阅的知聚，避免流式事件（TEXT_MESSAGE_CONTENT 等）丢失
       if (state.subscribedGroups.size > 0) {
         send({ type: "GROUP_SUBSCRIBE", groupIds: [...state.subscribedGroups], timestamp: Date.now() });
       }
@@ -1752,7 +1752,7 @@ function handleEvent(evt) {
     case "AGENT_INTERACTION_REQUEST": onInteractionRequest(evt); break;
     case "AGENT_INTERACTION_RESOLVED": onInteractionResolved(evt); break;
     case "GROUP_MEMBER_JOINED":
-      addSystemLine(evt.groupId, `${evt.members.map((m) => m.nickname).join("、")} 加入了群`);
+      addSystemLine(evt.groupId, `${evt.members.map((m) => m.nickname).join("、")} 加入了知聚`);
       {
         const r = room(evt.groupId);
         for (const m of evt.members || []) {
@@ -1763,9 +1763,9 @@ function handleEvent(evt) {
       loadGroups();
       break;
     case "GROUP_MEMBER_LEFT":
-      addSystemLine(evt.groupId, `${evt.memberIds.join("、")} ${evt.leaveType === "kick" ? "被移出群" : "退出了群"}`);
+      addSystemLine(evt.groupId, `${evt.memberIds.join("、")} ${evt.leaveType === "kick" ? "被移出知聚" : "退出了知聚"}`);
       if (evt.memberIds.includes(state.memberId)) {
-        // 自己被移出 / 退群：与解散同等清理（清空该群消息与索引、移除订阅与群列表），本地不再保留该群
+        // 自己被移出 / 退出知聚：与解散同等清理（清空该知聚消息与索引、移除订阅与知聚列表），本地不再保留该知聚
         cleanupRoom(evt.groupId);
         break;
       }
@@ -1795,7 +1795,7 @@ function applySnapshot(evt) {
   state.subscribedGroups.add(gid); // 快照到达 = 订阅已生效，同步本地订阅状态
   r.members = evt.members || [];
   r.topics = evt.topics || [];
-  // 话题记忆：切群时 topics 尚未加载 → 快照到达后校验记忆话题仍存在则自动选中（auto：不视为主动查看，保留未读徽标）
+  // 话题记忆：切知聚时 topics 尚未加载 → 快照到达后校验记忆话题仍存在则自动选中（auto：不视为主动查看，保留未读徽标）
   if (r._pendingTopic && state.activeGroupId === gid) {
     const t = r._pendingTopic;
     r._pendingTopic = null;
@@ -1832,8 +1832,8 @@ function applySnapshot(evt) {
   r.allLoaded = (evt.latestMessages?.length ?? 0) < 50;
   if (state.activeGroupId === gid) {
     renderMembers();
-    renderChatMeta(); // 成员列表就绪后刷新群主昵称显示
-    renderTopicBar(); // 话题列表随快照到达刷新（未读徽标保留展示，进入群不标记已读）
+    renderChatMeta(); // 成员列表就绪后刷新知聚主昵称显示
+    renderTopicBar(); // 话题列表随快照到达刷新（未读徽标保留展示，进入知聚不标记已读）
     // 快照可能晚于首次渲染到达（新消息沉在视口下方）：贴近底部时重新跟随到最新
     const el = $("messages");
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) vscroll.stickBottom = true;
@@ -1848,7 +1848,7 @@ function onMessageStart(evt) {
     id: evt.messageId, senderId: evt.senderId, senderNickname: evt.senderNickname || evt.senderId,
     senderType: evt.senderType, role: evt.role, content: "", reasoning: "", attachments: evt.attachments || [],
     mentions: evt.mentions || [], mentionAll: !!evt.mentionAll, topicId: evt.topicId || "main",
-    runId: evt.runId || null, // 智能体运行 ID（「停止生成」需要）
+    runId: evt.runId || null, // 数字员工运行 ID（「停止生成」需要）
     timestamp: Number(evt.timestamp) || Date.now(),
     time: fmtTime(evt.timestamp),
     replyTo: evt.replyToMessageId, streaming: true, recalled: false, plan: null,
@@ -1856,14 +1856,14 @@ function onMessageStart(evt) {
   r.messages.push(m);
   state.msgIndex.set(m.id, m);
   trimMessages(r); // 内存上限：超限裁剪最旧消息
-  // 新消息到达：之前的“最后一条智能体消息”不再满足刷新条件，清除其刷新按钮
+  // 新消息到达：之前的“最后一条数字员工消息”不再满足刷新条件，清除其刷新按钮
   // （虚拟窗口重建时由 isLastAgentMsg 重新评估；此处覆盖 PLAIN 局部更新不重建头部的情况）
   if (state.activeGroupId === evt.groupId) {
     const el = $("messages");
     if (el) el.querySelectorAll(".regenerate-btn").forEach((b) => b.remove());
   }
-  // 未读 / 已读维护：当前群内，当前话题的新消息视为已读（发回执），其他话题计入未读；
-  // 同时刷新该群活跃度（lastMessageAt）→ 群列表按最新发言动态重排
+  // 未读 / 已读维护：当前知聚内，当前话题的新消息视为已读（发回执），其他话题计入未读；
+  // 同时刷新该知聚活跃度（lastMessageAt）→ 知聚列表按最新发言动态重排
   if (evt.groupId === state.activeGroupId && state.subscribedGroups.has(evt.groupId)) {
     const info = state.groupUnread.get(evt.groupId);
     if (info) {
@@ -1880,7 +1880,7 @@ function onMessageStart(evt) {
     // 非当前视图的新消息：页面不可见时桌面通知（可见时站内徽标已提示）
     notifyNewMessage(evt, m);
   }
-  // 应用内通知中心（5.4）：非当前视图的入群消息 + 提及我 / 审批（在下方钩子单独处理）
+  // 应用内通知中心（5.4）：非当前视图的加入知聚消息 + 提及我 / 审批（在下方钩子单独处理）
   if (evt.senderId !== state.memberId) {
     const isMeMentioned = (evt.mentionAll) || (Array.isArray(evt.mentions) && evt.mentions.includes(state.memberId));
     const isCurrentView = evt.groupId === state.activeGroupId && (m.topicId || "main") === (state.activeTopicId || "main");
@@ -1888,11 +1888,11 @@ function onMessageStart(evt) {
     if (isMeMentioned) {
       addNotification("mention", `${evt.senderNickname || evt.senderId} 提到了你`, `在「${gnameStr}」：${String(m.content || "").slice(0, 80)}`, { groupId: evt.groupId, topicId: m.topicId });
     } else if (!isCurrentView && evt.senderType !== "sys") {
-      const label = evt.senderType === "agent" ? "智能体发来" : "新消息";
+      const label = evt.senderType === "agent" ? "数字员工发来" : "新消息";
       addNotification("message", `「${gnameStr}」· ${evt.senderNickname || evt.senderId}`, String(m.content || "（图片 / 语音 / 附件）").slice(0, 80), { groupId: evt.groupId, topicId: m.topicId });
     }
   }
-  if (state.activeGroupId !== evt.groupId) return; // 非当前群不渲染
+  if (state.activeGroupId !== evt.groupId) return; // 非当前知聚不渲染
   // 是否跟随（滚动到底）由 stickBottom 决定：滚动监听只在用户停靠最底部时置位，
   // 任何上滑立即取消——避免滚轮大幅滚动时视口被反复拉回底部。
   scheduleVirtualRender();
@@ -1904,9 +1904,9 @@ function onMessageContent(evt) {
   const created = !m;
   if (!m) {
     // 兜底：START 事件可能因断线等丢失，收到 CONTENT 时自动创建消息，避免回复内容丢失；
-    // 群定位优先取事件携带的 GroupId（Hub 扩展字段），缺省才回退当前活动群（防快速切群时写入错误 room）
+    // 知聚定位优先取事件携带的 GroupId（Hub 扩展字段），缺省才回退当前活动知聚（防快速切知聚时写入错误 room）
     const r = evt.groupId ? room(evt.groupId) : room(state.activeGroupId);
-    m = { id: evt.messageId, senderId: "", senderNickname: "智能体", senderType: "agent", role: "assistant",
+    m = { id: evt.messageId, senderId: "", senderNickname: "数字员工", senderType: "agent", role: "assistant",
           content: "", reasoning: "", timestamp: null, time: fmtTime(Date.now()), replyTo: null, streaming: true, recalled: false };
     r.messages.push(m);
     state.msgIndex.set(m.id, m);
@@ -1923,7 +1923,7 @@ function onMessageContent(evt) {
   m._bridgeParse = null; // 结构化响应解析缓存同样失效
 
   // 流式增量：窗口内的消息只局部更新文本节点（避免整窗重建闪烁 + 重复 Markdown 解析），
-  // 行高变化由 ResizeObserver 测量刷新占位——大群“吐字卡顿”的根源也在这条路径上消除。
+  // 行高变化由 ResizeObserver 测量刷新占位——大知聚“吐字卡顿”的根源也在这条路径上消除。
   const el = $("messages");
   const msgEl = el.querySelector(`[data-mid="${cssEsc(m.id)}"]`);
   const contentEl = msgEl ? msgEl.querySelector(".content") : null;
@@ -1946,7 +1946,7 @@ function onMessageContent(evt) {
 }
 
 /**
- * TEXT_MESSAGE_REASONING：智能体思考过程增量（AG-UI 思考模式，独立于正文）——
+ * TEXT_MESSAGE_REASONING：数字员工思考过程增量（AG-UI 思考模式，独立于正文）——
  * 追加到消息的 reasoning 字段，窗口内局部更新折叠的「思考中…」块，窗口外标记重建。
  */
 function onMessageReasoning(evt) {
@@ -1955,9 +1955,9 @@ function onMessageReasoning(evt) {
   const created = !m;
   if (!m) {
     // 兜底：START 可能因断线丢失，收到 REASONING 时自动创建消息（思考往往先于正文到达）；
-    // 群定位优先取事件携带的 GroupId，缺省才回退当前活动群
+    // 知聚定位优先取事件携带的 GroupId，缺省才回退当前活动知聚
     const r = evt.groupId ? room(evt.groupId) : room(state.activeGroupId);
-    m = { id: evt.messageId, senderId: "", senderNickname: "智能体", senderType: "agent", role: "assistant",
+    m = { id: evt.messageId, senderId: "", senderNickname: "数字员工", senderType: "agent", role: "assistant",
           content: "", reasoning: "", timestamp: null, time: fmtTime(Date.now()), replyTo: null, streaming: true, recalled: false };
     r.messages.push(m);
     state.msgIndex.set(m.id, m);
@@ -2001,7 +2001,7 @@ function onMessageReasoning(evt) {
 
 /**
  * TEXT_MESSAGE_RESET：人机交互中断时服务端清空了已回灌的中间内容——
- * 智能体等用户反馈、运行继续结束后，最终结果再一次性回灌到这条消息。
+ * 数字员工等用户反馈、运行继续结束后，最终结果再一次性回灌到这条消息。
  * 本地立即清空显示，并展示“等待确认”占位（恢复后流式内容会直接覆盖它）。
  */
 function onMessageReset(evt) {
@@ -2020,14 +2020,14 @@ function onMessageReset(evt) {
     if (th) th.remove(); // 思考块随内容一起清空
     const contentEl = msgEl.querySelector(".content");
     if (contentEl && !m.recalled && m.streaming) {
-      contentEl.textContent = "⏳ 智能体等待你的确认，确认后继续运行…";
+      contentEl.textContent = "⏳ 数字员工等待你的确认，确认后继续运行…";
       contentEl.classList.add("waiting");
     }
   }
 }
 
 /**
- * TEXT_MESSAGE_ATTACHMENTS：智能体消息运行中追加外部附件（AG-UI 桥接回灌）——
+ * TEXT_MESSAGE_ATTACHMENTS：数字员工消息运行中追加外部附件（AG-UI 桥接回灌）——
  * 按 URL 去重合并到消息附件，强制重渲染显示附件卡片 / 图片；快照 / 历史恢复自带持久化附件。
  */
 function onMessageAttachments(evt) {
@@ -2045,7 +2045,7 @@ function onMessageAttachments(evt) {
 }
 
 /**
- * TEXT_MESSAGE_PLAN：工作型智能体消息结束时的任务计划回填（任务规划可视化）——
+ * TEXT_MESSAGE_PLAN：工作型数字员工消息结束时的任务计划回填（任务规划可视化）——
  * 把工作区 PLAN.md 的结构化步骤挂到消息上，前端渲染「计划清单 + 进度条」。
  */
 function onMessagePlan(evt) {
@@ -2194,7 +2194,7 @@ function createToolCallsWrap(msgEl) {
 function onToolCall(evt) {
   const r = room(evt.groupId);
   const m = r.messages.find((x) => x.id === evt.parentMessageId);
-  if (!m) { addSystemLine(evt.groupId, `🔧 智能体调用工具：${evt.toolCallName}`); return; }
+  if (!m) { addSystemLine(evt.groupId, `🔧 数字员工调用工具：${evt.toolCallName}`); return; }
   m.toolCalls = m.toolCalls || [];
   m.toolCalls.push({ id: evt.toolCallId, name: evt.toolCallName || "tool", done: false });
   if (state.activeGroupId !== evt.groupId) return;
@@ -2233,14 +2233,14 @@ function onToolCallResult(evt) {
 }
 
 /**
- * AGENT_INTERACTION_REQUEST：智能体运行中断，请求人机交互（工具审批）。
- * 审批卡片嵌入智能体回复消息内部（interaction-block）：仅触发者（targetMemberId）能看到批准 / 拒绝按钮，
+ * AGENT_INTERACTION_REQUEST：数字员工运行中断，请求人机交互（工具审批）。
+ * 审批卡片嵌入数字员工回复消息内部（interaction-block）：仅触发者（targetMemberId）能看到批准 / 拒绝按钮，
  * 其他成员只读等待；决策后卡片就地更新状态，运行恢复后内容继续追加到同一消息。
  */
 function onInteractionRequest(evt) {
   const r = room(evt.groupId);
   const m = r.messages.find((x) => x.id === evt.messageId);
-  if (!m) { addSystemLine(evt.groupId, `智能体请求确认：${evt.toolName || "工具调用"}`); return; } // 兜底：消息未找到
+  if (!m) { addSystemLine(evt.groupId, `数字员工请求确认：${evt.toolName || "工具调用"}`); return; } // 兜底：消息未找到
   if (m.interaction && m.interaction.interruptId === evt.interruptId) return; // 幂等
   m.interaction = {
     interruptId: evt.interruptId,
@@ -2261,7 +2261,7 @@ function onInteractionRequest(evt) {
   // 应用内通知中心（5.4）：当前用户待处理的人机交互（审批 / 输入）入通知，含系统兜底
   if (m.interaction.canDecide) {
     const act = m.interaction.kind === "input" ? "请求输入" : "请求批准";
-    addNotification("approval", `智能体${act}：${m.interaction.toolName || "工具调用"}`, `在「${(state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId}」等待你处理`, { groupId: evt.groupId });
+    addNotification("approval", `数字员工${act}：${m.interaction.toolName || "工具调用"}`, `在「${(state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId}」等待你处理`, { groupId: evt.groupId });
   }
   if (state.activeGroupId !== evt.groupId) return;
   const msgEl = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
@@ -2393,7 +2393,7 @@ function collectSchemaPayload(container) {
   return payload;
 }
 
-/** 任务计划可视化卡片：工作型智能体消息结束时，把其工作区 PLAN.md 的步骤渲染为带勾选清单 + 进度条的计划卡。 */
+/** 任务计划可视化卡片：工作型数字员工消息结束时，把其工作区 PLAN.md 的步骤渲染为带勾选清单 + 进度条的计划卡。 */
 function renderPlanCard(plan) {
   const steps = plan.steps || [];
   const done = steps.filter((s) => s.done).length;
@@ -2438,8 +2438,8 @@ function renderInteractionCard(m) {
   if (itx.resolved) {
     actions = `<div class="itx-status ${itx.decision ? "ok" : "no"}">${
       isInput
-        ? "✅ 已提交，等待智能体继续…"
-        : (itx.decision ? "✅ 已批准，等待智能体继续…" : "❌ 已拒绝，操作未执行")
+        ? "✅ 已提交，等待数字员工继续…"
+        : (itx.decision ? "✅ 已批准，等待数字员工继续…" : "❌ 已拒绝，操作未执行")
     }</div>`;
   } else if (itx.canDecide) {
     if (isInput) {
@@ -2459,7 +2459,7 @@ function renderInteractionCard(m) {
     actions = `<div class="itx-status">⏳ 等待 ${escapeHtml(memberName(itx.targetMemberId))} ${isInput ? "输入" : "确认"}…</div>`;
   }
   return `<div class="interaction-card">
-    <div class="itx-title">${isInput ? "✍️ 智能体请求输入" : "🔐 智能体请求确认"}</div>
+    <div class="itx-title">${isInput ? "✍️ 数字员工请求输入" : "🔐 数字员工请求确认"}</div>
     ${itx.questions && itx.questions.length ? "" : `<div class="itx-message">${escapeHtml(itx.message || "")}</div>`}
     ${toolLine}
     ${argsHtml}
@@ -2467,7 +2467,7 @@ function renderInteractionCard(m) {
   </div>`;
 }
 
-/** 触发者决策：approval 型批准 / 拒绝（approveAll=true 表示批准本次运行后续全部操作），input 型提交用户输入（inputText）或按 schema 提交 payload；经 WS 上行恢复被中断的智能体运行。 */
+/** 触发者决策：approval 型批准 / 拒绝（approveAll=true 表示批准本次运行后续全部操作），input 型提交用户输入（inputText）或按 schema 提交 payload；经 WS 上行恢复被中断的数字员工运行。 */
 function resolveInteraction(m, approved, inputText, payload, approveAll) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
@@ -2500,8 +2500,8 @@ function resolveInteraction(m, approved, inputText, payload, approveAll) {
 }
 
 /**
- * AGENT_INTERACTION_RESOLVED：触发者已决策，服务端全群广播——
- * 嵌入在智能体回复内的卡片同步更新为「已批准 / 已拒绝」（决策者本人由本地回显 + 本事件双保险，幂等）。
+ * AGENT_INTERACTION_RESOLVED：触发者已决策，服务端全知聚广播——
+ * 嵌入在数字员工回复内的卡片同步更新为「已批准 / 已拒绝」（决策者本人由本地回显 + 本事件双保险，幂等）。
  */
 function onInteractionResolved(evt) {
   const r = room(evt.groupId);
@@ -2516,7 +2516,7 @@ function onInteractionResolved(evt) {
   const el = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
   if (el) {
     const block = el.querySelector(".interaction-block");
-    if (block) block.remove(); // 决策后隐藏审批块（全群同步）
+    if (block) block.remove(); // 决策后隐藏审批块（全知聚同步）
   }
 }
 
@@ -2533,7 +2533,7 @@ function onMemberUpdated(evt) {
   }
 }
 
-/** 群内新建话题：本地登记并刷新话题栏（消息走事件流无需额外处理）。 */
+/** 知聚内新建话题：本地登记并刷新话题栏（消息走事件流无需额外处理）。 */
 function onTopicCreated(evt) {
   const r = room(evt.groupId);
   if (evt.topic && !r.topics.some((t) => t.topicId === evt.topic.topicId)) r.topics.push(evt.topic);
@@ -2553,7 +2553,7 @@ function onTopicDeleted(evt) {
   const r = room(evt.groupId);
   r.topics = (r.topics || []).filter((t) => t.topicId !== evt.topicId);
   dropTopicMessages(r, evt.topicId); // 话题下聊天记录一并清除（含全局索引，避免孤儿对象与 CONTENT 兜底误命中）
-  // 话题记忆同步清理：被删话题不再是记忆目标（下次进群回主话题）
+  // 话题记忆同步清理：被删话题不再是记忆目标（下次加入知聚回主话题）
   if (state.topicMemory.get(evt.groupId) === evt.topicId) {
     state.topicMemory.delete(evt.groupId);
     saveTopicMemory(state.memberId);
@@ -2580,7 +2580,7 @@ function onTopicCleared(evt) {
   }
 }
 
-/** 群已解散 / 自己被移出或退群：清理该群本地状态（消息与索引、房间、订阅、群列表），并退出当前视图。 */
+/** 知聚已解散 / 自己被移出或退出知聚：清理该知聚本地状态（消息与索引、房间、订阅、知聚列表），并退出当前视图。 */
 function cleanupRoom(gid) {
   const r = state.rooms.get(gid);
   if (r) for (const m of r.messages) state.msgIndex.delete(m.id);
@@ -2593,7 +2593,7 @@ function cleanupRoom(gid) {
     renderGroupList();
     renderMembers();
     renderTopicBar();
-    $("chatGroupName").textContent = "请选择一个群";
+    $("chatGroupName").textContent = "请选择一个知聚";
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
@@ -2602,7 +2602,7 @@ function cleanupRoom(gid) {
 }
 
 function onDisbanded(evt) {
-  addSystemLine(evt.groupId, "群组已解散");
+  addSystemLine(evt.groupId, "知聚已解散");
   cleanupRoom(evt.groupId);
 }
 
@@ -2633,7 +2633,7 @@ function addSystemLine(gid, text) {
 function renderGroupList() {
   const el = $("groupList");
   el.innerHTML = "";
-  // 按活跃度排序：最后发言（lastMessageAt）最新的群排在最前，无消息的排最后。
+  // 按活跃度排序：最后发言（lastMessageAt）最新的知聚排在最前，无消息的排最后。
   // 实时值取自 state.groupUnread（loadGroups 初始化，onMessageStart 收到消息时增量更新），排序随新消息动态变化
   const sorted = [...state.groups].sort((a, b) =>
     (state.groupUnread.get(b.groupId)?.lastMessageAt || 0) - (state.groupUnread.get(a.groupId)?.lastMessageAt || 0));
@@ -2654,7 +2654,7 @@ function renderGroupList() {
 
 /* ============ 未读提示与已读回执 ============ */
 
-/** 未读徽标元素（群列表 / 话题栏共用）。 */
+/** 未读徽标元素（知聚列表 / 话题栏共用）。 */
 function unreadBadgeEl(count, tip) {
   const b = document.createElement("span");
   b.className = "unread-badge";
@@ -2671,7 +2671,7 @@ function unreadDotEl(count, tip) {
   return d;
 }
 
-/** 发送已读回执（服务端落读位点，供群列表 / 话题未读计算）；仅需登录态，失败静默。 */
+/** 发送已读回执（服务端落读位点，供知聚列表 / 话题未读计算）；仅需登录态，失败静默。 */
 function sendReadReceipt(gid, topicId, messageId) {
   if (!gid || !messageId || !state.token) return;
   fetch("/ag-ui/group/message/read", {
@@ -2681,7 +2681,7 @@ function sendReadReceipt(gid, topicId, messageId) {
   }).catch(() => {});
 }
 
-/** 全部群未读总数（供浏览器标签页标题提示）。 */
+/** 全部知聚未读总数（供浏览器标签页标题提示）。 */
 function totalUnreadCount() {
   let n = 0;
   for (const info of state.groupUnread.values()) n += info.unreadCount || 0;
@@ -2691,7 +2691,7 @@ function totalUnreadCount() {
 /** 未读数写入 document.title：离开页面也能在标签页看到新消息提示。 */
 function updateDocTitle() {
   const n = totalUnreadCount();
-  document.title = n > 0 ? `(${n}) AG-UI 群聊` : "AG-UI 群聊";
+  document.title = n > 0 ? `(${n}) 知聚(KnowGath)` : "知聚(KnowGath)";
 }
 
 /** 浏览器桌面通知：页面不可见且非当前视图的新消息才通知（站内徽标已覆盖可见场景）；自己发的消息不通知。 */
@@ -2775,7 +2775,7 @@ function renderNotifications() {
       if (n) { n.read = true; renderNotifications(); }
       if (n?.groupId) {
         hideNotifPanel();
-        selectGroup(n.groupId); // 跳转到来源群（话题跟随群内记忆恢复，可靠且无竞态）
+        selectGroup(n.groupId); // 跳转到来源知聚（话题跟随知聚内记忆恢复，可靠且无竞态）
       }
     };
     el.onclick = go;
@@ -2805,7 +2805,7 @@ function clearNotifications() {
   renderNotifications();
 }
 
-/** 本地把某话题未读清零（进入群 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
+/** 本地把某话题未读清零（进入知聚 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
 function markTopicRead(gid, topicId, messageId) {
   const info = state.groupUnread.get(gid);
   if (info) {
@@ -2820,7 +2820,7 @@ function markTopicRead(gid, topicId, messageId) {
   updateDocTitle(); // 未读变化同步标签页标题
 }
 
-/** 本地把某话题未读 +1（当前群其他话题收到新消息时），并重渲染话题栏与群列表。 */
+/** 本地把某话题未读 +1（当前知聚其他话题收到新消息时），并重渲染话题栏与知聚列表。 */
 function bumpTopicUnread(gid, topicId) {
   const info = state.groupUnread.get(gid);
   if (!info) return;
@@ -2830,38 +2830,38 @@ function bumpTopicUnread(gid, topicId) {
   updateDocTitle(); // 未读变化同步标签页标题
 }
 
-/** 当前群某话题的最后一条真实消息 ID（无则 null）；供进入群 / 切话题时发已读回执。 */
+/** 当前知聚某话题的最后一条真实消息 ID（无则 null）；供进入知聚 / 切话题时发已读回执。 */
 function lastMessageIdOf(gid, topicId) {
   const r = room(gid);
   const msgs = (r?.messages || []).filter((m) => !m.sys && (m.topicId || "main") === (topicId || "main"));
   return msgs.length ? msgs[msgs.length - 1].id : null;
 }
 
-/** 群头部元信息：群主显示昵称（无昵称则用户名 / ID），附我的身份。 */
+/** 知聚头部元信息：知聚主显示昵称（无昵称则用户名 / ID），附我的身份。 */
 function renderChatMeta() {
   const g = state.groups.find((x) => x.groupId === state.activeGroupId);
   if (!g) { $("chatGroupMeta").textContent = ""; return; }
   const owner = room(g.groupId)?.members.find((m) => m.memberId === g.ownerId)
     || userDirectory.find((u) => u.memberId === g.ownerId);
   const ownerName = owner?.nickname || g.ownerId || "";
-  $("chatGroupMeta").textContent = `群主 ${ownerName} · 我的身份 ${g.myRole || ""}`;
+  $("chatGroupMeta").textContent = `知聚主 ${ownerName} · 我的身份 ${g.myRole || ""}`;
 }
 
 function selectGroup(gid) {
   if (state.activeGroupId === gid) return;
-  clearReplyTo(); // 切群时清除引用目标（引用属于原群上下文）
-  // 按群记忆 @ 选择：保存当前群，恢复目标群（无记忆则空）
+  clearReplyTo(); // 切知聚时清除引用目标（引用属于原知聚上下文）
+  // 按知聚记忆 @ 选择：保存当前知聚，恢复目标知聚（无记忆则空）
   if (state.activeGroupId) {
     state.mentionMemory.set(state.activeGroupId, { ids: [...state.mentions], all: state.mentionAll });
   }
   state.activeGroupId = gid;
   state.activeTopicId = "main"; // 先主话题，随后按话题记忆恢复
-  // 记住用户最后选择的群（再次登录自动进入）
+  // 记住用户最后选择的知聚（再次登录自动进入）
   try { localStorage.setItem(LastGroupKey(state.memberId), gid); } catch {}
   const mem = state.mentionMemory.get(gid);
   state.mentions = new Set(mem?.ids || []);
   state.mentionAll = !!mem?.all;
-  // 话题记忆：目标群 topics 已加载（此前进过）直接选中；未加载则等快照（_pendingTopic）
+  // 话题记忆：目标知聚 topics 已加载（此前进过）直接选中；未加载则等快照（_pendingTopic）
   const memTopic = state.topicMemory.get(gid);
   const r = room(gid);
   if (memTopic && memTopic !== "main") {
@@ -2871,24 +2871,24 @@ function selectGroup(gid) {
       r._pendingTopic = memTopic; // 等 GROUP_STATE_SNAPSHOT 到达后校验并选中
     }
   }
-  resetVScroll(); // 清空上一群的虚拟滚动状态与消息 DOM
-  vscroll.stickBottom = true; // 切群后定位到最新消息（快照到达后由 renderMessages 生效）
+  resetVScroll(); // 清空上一知聚的虚拟滚动状态与消息 DOM
+  vscroll.stickBottom = true; // 切知聚后定位到最新消息（快照到达后由 renderMessages 生效）
   hideMentionPicker();
-  // 进入群不标记任何话题已读：话题栏先展示全部未读徽标，用户点击对应话题（或该话题收到新消息）后才已读
+  // 进入知聚不标记任何话题已读：话题栏先展示全部未读徽标，用户点击对应话题（或该话题收到新消息）后才已读
   $("mentionAllBtn").classList.toggle("on", state.mentionAll);
   renderMentionChips();
   renderMembers(); // 恢复被 @ 成员的高亮
   renderGroupList();
   $("addMemberBtn").disabled = false;
   $("groupSettingsBtn").disabled = false;
-  $("searchBtn").disabled = false; // 群内消息全文搜索（进入群后可用）
-  $("discussBtn").disabled = false; // 多智能体讨论（进入群后可用）
+  $("searchBtn").disabled = false; // 知聚内消息全文搜索（进入知聚后可用）
+  $("discussBtn").disabled = false; // 多位数字员工讨论（进入知聚后可用）
   const g = state.groups.find((x) => x.groupId === gid);
   $("chatGroupName").textContent = (g?.isPrivate ? "🔒 " : "") + (g?.groupName || "");
   renderChatMeta();
   state.subscribedGroups.add(gid);
   send({ type: "GROUP_SUBSCRIBE", groupIds: [gid], timestamp: Date.now() });
-  // 进入群前刷新未读数据（未读可能产生于未订阅期间，事件收不到）：loadGroups 完成后话题栏红点 / 群列表徽标同步最新
+  // 进入知聚前刷新未读数据（未读可能产生于未订阅期间，事件收不到）：loadGroups 完成后话题栏红点 / 知聚列表徽标同步最新
   loadGroups();
   // 订阅前先显示旧状态，快照到达后刷新
   renderTopicBar();
@@ -2897,7 +2897,7 @@ function selectGroup(gid) {
   renderTyping();
 }
 
-/* ============ 群话题（群聊扩展） ============ */
+/* ============ 知聚话题（知聚扩展） ============ */
 
 /** 当前“以此消息新建话题”的来源消息 ID（null = 普通新建话题）。 */
 let topicSourceMessageId = null;
@@ -2913,13 +2913,13 @@ function renderTopicBar() {
   const main = document.createElement("span");
   main.className = "topic-chip" + (state.activeTopicId === "main" ? " active" : "");
   main.textContent = "# 综合";
-  main.title = "主话题（群聊默认）";
+  main.title = "主话题（知聚默认）";
   const mainUnread = state.groupUnread.get(state.activeGroupId)?.byTopic["main"] || 0;
   if (mainUnread > 0) main.appendChild(unreadDotEl(mainUnread, "未读消息"));
   main.onclick = () => selectTopic("main");
   el.appendChild(main);
 
-  // 话题管理权限：清空聊天记录（群主 / 管理员）；删除话题（群主 / 管理员或话题创建者，服务端同样校验）
+  // 话题管理权限：清空聊天记录（知聚主 / 管理员）；删除话题（知聚主 / 管理员或话题创建者，服务端同样校验）
   const me = r.members?.find((x) => x.memberId === state.memberId);
   const canManage = me?.role === "owner" || me?.role === "admin";
 
@@ -2941,7 +2941,7 @@ function renderTopicBar() {
     } catch (ex) { toast("清空失败：" + ex.message); }
   };
 
-  // 主话题：群主 / 管理员可清空聊天记录
+  // 主话题：知聚主 / 管理员可清空聊天记录
   if (canManage) {
     const clear = document.createElement("button");
     clear.className = "topic-del-btn";
@@ -3017,7 +3017,7 @@ async function selectTopic(topicId, opts) {
   }
   state.activeTopicId = topicId;
   r.allLoaded = false; // 切换话题后允许加载更早（实际是否有更早由分页返回纠正）
-  // 记住话题选择：切群 / 再次进入该群时自动恢复（localStorage 按用户持久化）
+  // 记住话题选择：切知聚 / 再次进入该知聚时自动恢复（localStorage 按用户持久化）
   state.topicMemory.set(gid, topicId);
   saveTopicMemory(state.memberId);
   renderTopicBar();
@@ -3049,7 +3049,7 @@ async function selectTopic(topicId, opts) {
   }
 }
 
-/* ============ 消息搜索（群内全文） ============ */
+/* ============ 消息搜索（知聚内全文） ============ */
 
 /* ============ 管理员控制台：用户管理 + 系统状态 ============ */
 
@@ -3090,7 +3090,7 @@ async function loadAdminUsage() {
     const quota = Number(data.dailyQuotaPerUser) || 0;
     $("adminUsageMeta").textContent = quota > 0
       ? `每用户每日配额：${quota.toLocaleString()} token（超限触发将被拒绝，UTC 次日自动恢复）`
-      : `未启用用量配额（Agents:DailyTokenQuotaPerUser=0）；下方为智能体模型调用统计`;
+      : `未启用用量配额（Agents:DailyTokenQuotaPerUser=0）；下方为数字员工模型调用统计`;
     const days = data.days || [];
     $("adminUsageRows").innerHTML = days.length
       ? days.map((d) => `<tr>
@@ -3253,9 +3253,9 @@ async function openStatusModal() {
     const items = [
       ["运行时长", fmtDuration(Number(d.uptimeSeconds) || 0)],
       ["实时连接", `${Number(d.connections) || 0} 个`],
-      ["群组", `${Number(d.groups) || 0} 个`],
+      ["知聚", `${Number(d.groups) || 0} 个`],
       ["用户", `${Number(d.users) || 0} 个`],
-      ["智能体", `${Number(d.agents) || 0} 个`],
+      ["数字员工", `${Number(d.agents) || 0} 个`],
       ["消息总数", `${Number(d.messages) || 0} 条`],
       ["内存占用", `${Number(d.memoryMb) || 0} MB`],
       ["线程数", `${Number(d.threadCount) || 0}`],
@@ -3277,7 +3277,7 @@ function fmtDuration(totalSeconds) {
   return parts.join(" ");
 }
 
-/* ============ 多智能体讨论 ============ */
+/* ============ 多位数字员工讨论 ============ */
 
 function openDiscussModal() {
   const gid = state.activeGroupId;
@@ -3288,7 +3288,7 @@ function openDiscussModal() {
   const agents = (r.members || []).filter((m) => m.memberType === "agent" && m.memberId !== state.memberId);
   $("discussAgentPicks").innerHTML = agents.length
     ? agents.map((a) => `<label class="discuss-pick"><input type="checkbox" value="${escapeHtml(a.memberId)}" checked /> ${escapeHtml(a.nickname || a.memberId)}</label>`).join("")
-    : '<div class="search-empty">该群暂无智能体成员，请先添加智能体</div>';
+    : '<div class="search-empty">该知聚暂无数字员工成员，请先添加数字员工</div>';
   $("discussInput").value = "";
   $("discussGo").disabled = agents.length === 0;
   $("discussModal").classList.remove("hidden");
@@ -3301,7 +3301,7 @@ async function startDiscussion() {
   if (!gid) return;
   if (!theme) { toast("请填写讨论主题"); return; }
   const agentIds = [...$("discussAgentPicks").querySelectorAll("input:checked")].map((c) => c.value);
-  if (agentIds.length === 0) { toast("请至少选择一位智能体"); return; }
+  if (agentIds.length === 0) { toast("请至少选择一位数字员工"); return; }
   const go = $("discussGo");
   go.disabled = true;
   const old = go.textContent;
@@ -3315,7 +3315,7 @@ async function startDiscussion() {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(`发起失败：${data?.message || res.status}`); return; }
     $("discussModal").classList.add("hidden");
-    toast(`讨论已开始：${agentIds.length} 位智能体将依次发言`);
+    toast(`讨论已开始：${agentIds.length} 位数字员工将依次发言`);
   } catch (ex) { toast("发起失败：" + ex.message); }
   finally { go.disabled = false; go.textContent = old; }
 }
@@ -3326,7 +3326,7 @@ function openSearchModal() {
   const g = state.groups.find((x) => x.groupId === gid);
   $("searchGroupName").textContent = g?.groupName || gid;
   $("searchInput").value = "";
-  $("searchResults").innerHTML = '<div class="search-empty">输入关键词后回车搜索群内消息</div>';
+  $("searchResults").innerHTML = '<div class="search-empty">输入关键词后回车搜索知聚内消息</div>';
   $("searchModal").classList.remove("hidden");
   $("searchInput").focus();
 }
@@ -3467,7 +3467,7 @@ function onMessageTopicMoved(evt) {
   }
 }
 
-/** 群成员可见列表（分身与本人互斥）：用户在线 → 隐藏分身；用户离线且已启用分身 → 隐藏用户本人（由分身代班）。 */
+/** 知聚成员可见列表（分身与本人互斥）：用户在线 → 隐藏分身；用户离线且已启用分身 → 隐藏用户本人（由分身代班）。 */
 function visibleGroupMembers() {
   const r = state.activeGroupId ? room(state.activeGroupId) : null;
   if (!r) return [];
@@ -3484,19 +3484,19 @@ function visibleGroupMembers() {
   });
 }
 
-/** 成员状态图标 HTML（与成员列表一致）：分身 🪞；智能体按触发方式图标；用户在线状态点。 */
+/** 成员状态图标 HTML（与成员列表一致）：分身 🪞；数字员工按触发方式图标；用户在线状态点。 */
 function memberStatusIconHtml(m) {
   const isTwin = (m.memberId || "").startsWith("twin_");
   if (isTwin) return `<span class="twin-status-icon" title="AI 分身（用户离线时代班回复）">🪞</span>`;
   if (m.memberType === "agent") {
-    // 本群已覆盖 → 显示本群触发方式；跟随角色默认 → 解析角色默认的具体触发方式图标（agentDirectory 当前默认，回退成员快照值）
+    // 本知聚已覆盖 → 显示本知聚触发方式；跟随角色默认 → 解析角色默认的具体触发方式图标（agentDirectory 当前默认，回退成员快照值）
     const overridden = m.isTriggerOverridden;
     const mode = overridden
       ? m.triggerMode
       : (agentDirectory.find((a) => a.memberId === m.memberId)?.triggerMode || m.triggerMode || "mentioned");
     const label = TRIGGER_LABELS[mode] || mode || "mentioned";
     return overridden
-      ? `<span class="trigger-mode-icon overridden" title="本群触发方式：${escapeHtml(label)}（已覆盖角色默认）">${TRIGGER_ICONS[mode] || "⚙"}</span>`
+      ? `<span class="trigger-mode-icon overridden" title="本知聚触发方式：${escapeHtml(label)}（已覆盖角色默认）">${TRIGGER_ICONS[mode] || "⚙"}</span>`
       : `<span class="trigger-mode-icon" title="跟随角色默认触发方式：${escapeHtml(label)}">${TRIGGER_ICONS[mode] || TRIGGER_ICONS.inherit}</span>`;
   }
   // 用户在线状态点（有头像时叠加到头像右下角，无头像时独立显示）
@@ -3511,7 +3511,7 @@ function renderMembers() {
   if (!r) return;
   const gid = state.activeGroupId;
 
-  // 触发方式图例：仅当群内有普通智能体成员时显示，悬停图标可看具体说明
+  // 触发方式图例：仅当知聚内有普通数字员工成员时显示，悬停图标可看具体说明
   if (r.members.some((m) => m.memberType === "agent" && !(m.memberId || "").startsWith("twin_"))) {
     const legend = document.createElement("div");
     legend.className = "trigger-legend";
@@ -3528,7 +3528,7 @@ function renderMembers() {
 
     const div = document.createElement("div");
     div.className = "member-item";
-    const role = m.role === "owner" ? "群主" : m.role === "admin" ? "管理员" : "";
+    const role = m.role === "owner" ? "知聚主" : m.role === "admin" ? "管理员" : "";
     // 头像（有则显示）：状态图标叠加到头像右下角；无头像时状态图标独立显示（16px 圆形）
     const statusIcon = memberStatusIconHtml(m);
     const avatarHtml = m.avatar
@@ -3544,17 +3544,17 @@ function renderMembers() {
     div.classList.toggle("mentioned", state.mentions.has(m.memberId));
     div.ondblclick = () => toggleMention(m.memberId);
 
-    // 智能体成员：⚙ 按钮弹出本群触发方式设置（可覆盖角色默认；分身不提供群内覆盖）
+    // 数字员工成员：⚙ 按钮弹出本知聚触发方式设置（可覆盖角色默认；分身不提供知聚内覆盖）
     if (m.memberType === "agent" && !isTwin) {
       const btn = document.createElement("button");
       btn.className = "trigger-btn";
       btn.textContent = "⚙";
-      btn.title = "设置本群触发方式";
+      btn.title = "设置本知聚触发方式";
       btn.onclick = () => openGroupTriggerModal(gid, m);
       div.appendChild(btn);
     }
 
-    // 成员移除（群主 / 管理员可见）：不能移除群主和自己；智能体、分身同样可移除
+    // 成员移除（知聚主 / 管理员可见）：不能移除知聚主和自己；数字员工、分身同样可移除
     const me = r.members.find((x) => x.memberId === state.memberId);
     const canManage = me?.role === "owner" || me?.role === "admin";
     const ownerId = state.groups.find((g) => g.groupId === gid)?.ownerId;
@@ -3565,7 +3565,7 @@ function renderMembers() {
       rm.title = "移除该成员";
       rm.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm(`确认将「${m.nickname || m.memberId}」移出群？`)) return;
+        if (!confirm(`确认将「${m.nickname || m.memberId}」移出知聚？`)) return;
         try {
           const res = await fetch("/ag-ui/group/member/remove", {
             method: "POST",
@@ -3585,7 +3585,7 @@ function renderMembers() {
   }
 }
 
-/* ============ 群内触发方式设置（弹窗） ============ */
+/* ============ 知聚内触发方式设置（弹窗） ============ */
 
 /** 当前弹窗编辑对象：{ gid, member }。 */
 let gtEditing = null;
@@ -3609,8 +3609,8 @@ function closeGroupTriggerModal() {
 }
 
 /**
- * 保存某智能体在本群的触发方式：非「跟随角色默认」即显式覆盖
- * （override=true，角色编辑不再覆写本群）；「跟随角色默认」以角色当前默认值注册。
+ * 保存某数字员工在本知聚的触发方式：非「跟随角色默认」即显式覆盖
+ * （override=true，角色编辑不再覆写本知聚）；「跟随角色默认」以角色当前默认值注册。
  */
 async function saveGroupTrigger() {
   const editing = gtEditing;
@@ -3647,7 +3647,7 @@ async function saveGroupTrigger() {
     renderMembers();
     toast(inherit
       ? `「${m.nickname}」已恢复为角色默认触发方式`
-      : `「${m.nickname}」本群触发方式已保存`);
+      : `「${m.nickname}」本知聚触发方式已保存`);
   } catch (ex) {
     toast("保存失败：" + ex.message);
   }
@@ -3657,7 +3657,7 @@ async function saveGroupTrigger() {
 
 /**
  * 虚拟滚动：消息区只渲染视口附近窗口内的消息（+上下缓冲），其余高度由 .vtop / .vbottom 占位；
- * 配合「加载更早消息」服务端分页，大群历史再多 DOM 节点也保持恒定、滚动流畅。
+ * 配合「加载更早消息」服务端分页，大知聚历史再多 DOM 节点也保持恒定、滚动流畅。
  */
 const VIRTUAL_WINDOW = 40;   // 视口窗口内渲染的消息条数
 const VIRTUAL_BUFFER = 25;   // 窗口上下额外缓冲（提前渲染，滚动不白屏；大滚轮/动量滚动吸收用）
@@ -3667,7 +3667,7 @@ const LOAD_MORE_HEIGHT = 42; // 「加载更早消息」行高
 const PLAIN_LIMIT = 200;     // 消息数 ≤ 该值时整表渲染（与服务端 MessageHistoryLimit 一致：零占位/零估算/零伪影），超出才启用虚拟窗口
 const RECALL_WINDOW_MS = 3 * 60 * 1000; // 撤回时限：仅允许撤回发送 3 分钟内的消息（与服务端强校验一致，按钮按时间隐藏）
 
-/** 虚拟滚动运行时状态（仅当前群；切群 / 重置时清空）。
+/** 虚拟滚动运行时状态（仅当前知聚；切知聚 / 重置时清空）。
  * stickBottom = 用户“停靠底部”意图：滚动监听在贴底时置位、一上滑即清除；渲染不消耗。
  * avgH = 实测行高的滑动平均，用于未测量消息的估算（比固定 88px 更贴近真实，减少滚动条漂移）。 */
 let vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBottom: false, avgH: 0 };
@@ -3749,7 +3749,7 @@ function virtualRender() {
   const loadH = r.allLoaded ? 0 : LOAD_MORE_HEIGHT; // loadMore 行占据的顶部高度
 
   const anchor = Math.min(lowerBound(h, Math.max(0, el.scrollTop - loadH)), n - 1);
-  // 小群（≤ 历史上限）整表渲染：无占位 / 无估算 / 无伪影；大群才启用虚拟窗口
+  // 小知聚（≤ 历史上限）整表渲染：无占位 / 无估算 / 无伪影；大知聚才启用虚拟窗口
   const start = n <= PLAIN_LIMIT ? 0 : Math.max(0, anchor - VIRTUAL_BUFFER);
   const end = n <= PLAIN_LIMIT ? n : Math.min(n, anchor + VIRTUAL_WINDOW + VIRTUAL_BUFFER);
 
@@ -3778,7 +3778,7 @@ function virtualRender() {
   vscroll.start = start;
   vscroll.end = end;
 
-  // PLAIN 模式尾部增量：新消息只追加渲染，不重建已有 DOM（发送消息 / 智能体回复 / 快照合并不卡）。
+  // PLAIN 模式尾部增量：新消息只追加渲染，不重建已有 DOM（发送消息 / 数字员工回复 / 快照合并不卡）。
   // 头部插入（loadEarlierMessages）已强制 force 走整表重建；撤回/工具行/结束等也走整表。
   if (start === 0 && prevEnd > 0 && prevEnd < end) {
     const frag = document.createDocumentFragment();
@@ -3884,14 +3884,14 @@ function scheduleFollow() {
   });
 }
 
-/** 切群 / 重置时清空虚拟滚动状态与消息 DOM。 */
+/** 切知聚 / 重置时清空虚拟滚动状态与消息 DOM。 */
 function resetVScroll() {
   vscrollRO?.disconnect();
   vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBottom: false, avgH: 0 };
   $("messages").innerHTML = "";
 }
 
-/** 兼容入口：整表重建场景（快照 / 解散 / 切群）统一走虚拟滚动调度。 */
+/** 兼容入口：整表重建场景（快照 / 解散 / 切知聚）统一走虚拟滚动调度。 */
 function renderMessages() { scheduleVirtualRender(); }
 
 /** 快照 / 分页消息 → 前端消息对象。 */
@@ -3936,7 +3936,7 @@ async function loadEarlierMessages() {
       for (const m of added) state.msgIndex.set(m.id, m);
       trimMessages(r); // 内存上限：超限裁剪最旧消息（游标取当前首条，翻页继续可用）
       vscroll.force = true; // 头部插入：整表重建（PLAIN 增量路径仅适用尾部新增，避免索引错位）
-      // 顶部锚定：翻页后视口应停在刚加载的页首（scrollTop 越界时浏览器自动钳制）；已切群则不动当前视图
+      // 顶部锚定：翻页后视口应停在刚加载的页首（scrollTop 越界时浏览器自动钳制）；已切知聚则不动当前视图
       if (state.activeGroupId === gid && scrollBefore > 0) el.scrollTop = scrollBefore + added.length * (vscroll.avgH || EST_MSG_HEIGHT);
     }
     if (older.length < 50) r.allLoaded = true; // 一页不足 → 已到最早
@@ -3977,18 +3977,18 @@ function msgDom(m, r) {
   const labelText = (m.sys ? "" : (m.senderNickname || m.senderId) + ", " + m.time + ", ") + String(m.content || "").replace(/\s+/g, " ").slice(0, 120);
   div.setAttribute("aria-label", m.sys ? "系统消息：" + m.sys : labelText);
 
-  // 撤回按钮：本人消息或当前用户是群主 / 管理员（服务端同样校验）+ 发送 3 分钟内；已撤回 / 流式中 / 系统行不显示
+  // 撤回按钮：本人消息或当前用户是知聚主 / 管理员（服务端同样校验）+ 发送 3 分钟内；已撤回 / 流式中 / 系统行不显示
   const meRole = r.members?.find((x) => x.memberId === state.memberId)?.role;
   const canRecall = !m.sys && !m.recalled && !m.streaming
     && (m.senderId === state.memberId || meRole === "owner" || meRole === "admin")
     && (Number(m.timestamp) > 0 && Date.now() - Number(m.timestamp) <= RECALL_WINDOW_MS);
-  // 复制按钮：非系统行 / 未撤回 / 内容非空（智能体消息复制剥离结构化附件后的显示文本）
+  // 复制按钮：非系统行 / 未撤回 / 内容非空（数字员工消息复制剥离结构化附件后的显示文本）
   const canCopy = !m.sys && !m.recalled && !!displayTextOf(m);
   // 回复按钮：非系统行 / 未撤回即可引用（流式进行中也允许，发送时按当时状态取内容）
   const canReply = !m.sys && !m.recalled;
-  // 重新回答按钮：仅当前话题最后一条消息且为智能体消息（流式中不显示，END 后补挂）
+  // 重新回答按钮：仅当前话题最后一条消息且为数字员工消息（流式中不显示，END 后补挂）
   const canRegenerate = isLastAgentMsg(m, r);
-  // 停止生成按钮：智能体消息流式进行中显示（点击后调停止 API，END 后随重建消失）
+  // 停止生成按钮：数字员工消息流式进行中显示（点击后调停止 API，END 后随重建消失）
   const canStop = !m.sys && !m.recalled && m.streaming && m.senderType === "agent" && !!m.runId;
   const replyRef = m.replyTo ? `<div class="reply-ref">↩ 回复 ${escapeHtml(quoteOf(m.replyTo))}</div>` : "";
   // @ 提及回显：chips 选择的成员（或 @全体）在消息内以标签形式展示
@@ -4009,7 +4009,7 @@ function msgDom(m, r) {
   })();
   // 外部 AG-UI 结构化响应（agent 消息）：剥离 JSON 附件信息，转为显示文本 + 附件卡片。
   // 解析结果缓存到 m._bridgeParse（内容不变时避免每次渲染重复 JSON 解析）。
-  let displayText = m.waiting ? "⏳ 智能体等待你的确认，确认后继续运行…" : m.content;
+  let displayText = m.waiting ? "⏳ 数字员工等待你的确认，确认后继续运行…" : m.content;
   let bridgeAttachments = [];
   if (!m.streaming && !m.recalled && m.senderType === "agent") {
     let parsed = m._bridgeParse;
@@ -4061,7 +4061,7 @@ function msgDom(m, r) {
   }
   // 流式截断提示：内容超限（正文 / 思考）时在消息头部提示，避免误以为回复不完整
   const truncatedHint = m.truncated ? `<div class="msg-truncated">⚠️ 内容过长已截断（仅保留前 2MB）</div>` : "";
-  // 审批卡片嵌入智能体回复内部：独立块（interaction-block），紧跟内容区，不受流式内容局部更新影响；
+  // 审批卡片嵌入数字员工回复内部：独立块（interaction-block），紧跟内容区，不受流式内容局部更新影响；
   // 触发者做出选择后隐藏（resolved）——历史重建时也不再渲染
   const interactionBlock = m.interaction && !m.interaction.resolved && !m.recalled
     ? `<div class="interaction-block">${renderInteractionCard(m)}</div>`
@@ -4069,7 +4069,7 @@ function msgDom(m, r) {
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
-      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : '<button class="topic-start-btn" title="以此消息新建话题">' + icon("topic") + "</button>"}${canStop ? '<button class="stop-btn" title="停止生成">' + icon("stop") + "</button>" : ""}${canReply ? '<button class="reply-btn" title="引用回复这条消息">' + icon("reply") + "</button>" : ""}${canCopy ? '<button class="copy-btn" title="复制消息内容">' + icon("copy") + "</button>" : ""}${canRegenerate ? '<button class="regenerate-btn" title="重新回答：撤回本条并以你的上一条消息重新生成（仅最后一条智能体消息）">' + icon("refresh") + "</button>" : ""}${canRecall ? '<button class="recall-btn" title="撤回消息（发送 3 分钟内可撤回；本人或群主/管理员可操作；撤回后内容隐藏并清除记忆）">' + icon("recall") + "</button>" : ""}</div>
+      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : '<button class="topic-start-btn" title="以此消息新建话题">' + icon("topic") + "</button>"}${canStop ? '<button class="stop-btn" title="停止生成">' + icon("stop") + "</button>" : ""}${canReply ? '<button class="reply-btn" title="引用回复这条消息">' + icon("reply") + "</button>" : ""}${canCopy ? '<button class="copy-btn" title="复制消息内容">' + icon("copy") + "</button>" : ""}${canRegenerate ? '<button class="regenerate-btn" title="重新回答：撤回本条并以你的上一条消息重新生成（仅最后一条数字员工消息）">' + icon("refresh") + "</button>" : ""}${canRecall ? '<button class="recall-btn" title="撤回消息（发送 3 分钟内可撤回；本人或知聚主/管理员可操作；撤回后内容隐藏并清除记忆）">' + icon("recall") + "</button>" : ""}</div>
       ${replyRef}
       ${mentionTags ? `<div class="mention-line">${mentionTags}</div>` : ""}
       ${thinking}
@@ -4098,7 +4098,7 @@ function msgDom(m, r) {
   return div;
 }
 
-/** 消息显示文本：智能体消息剥离结构化 JSON 附件信息后的正文（解析缓存到 m._bridgeParse）；其余消息为原始内容。 */
+/** 消息显示文本：数字员工消息剥离结构化 JSON 附件信息后的正文（解析缓存到 m._bridgeParse）；其余消息为原始内容。 */
 function displayTextOf(m) {
   if (!m || m.recalled) return "";
   if (m.senderType === "agent") {
@@ -4108,7 +4108,7 @@ function displayTextOf(m) {
   return m.content || "";
 }
 
-/** 是否「当前话题最后一条消息且为智能体消息」（重新回答按钮的显示条件）。 */
+/** 是否「当前话题最后一条消息且为数字员工消息」（重新回答按钮的显示条件）。 */
 function isLastAgentMsg(m, r) {
   if (!m || m.sys || m.recalled || m.streaming || m.senderType !== "agent") return false;
   if (!r) return false;
@@ -4160,7 +4160,7 @@ function bindStopButton(btn, m) {
   };
 }
 
-/** 绑定复制按钮：复制消息显示文本（智能体消息为剥离附件后的正文）。 */
+/** 绑定复制按钮：复制消息显示文本（数字员工消息为剥离附件后的正文）。 */
 function bindCopyButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
@@ -4171,11 +4171,11 @@ function bindCopyButton(btn, m) {
   };
 }
 
-/** 绑定重新回答按钮：调 /ag-ui/group/message/regenerate（服务端校验最后一条智能体消息 + 触发者 / 管理员权限）。 */
+/** 绑定重新回答按钮：调 /ag-ui/group/message/regenerate（服务端校验最后一条数字员工消息 + 触发者 / 管理员权限）。 */
 function bindRegenerateButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm("重新回答？将撤回本条回答并以你的上一条消息重新生成（仅最后一条智能体消息可操作）")) return;
+    if (!confirm("重新回答？将撤回本条回答并以你的上一条消息重新生成（仅最后一条数字员工消息可操作）")) return;
     try {
       const res = await fetch("/ag-ui/group/message/regenerate", {
         method: "POST",
@@ -4212,21 +4212,21 @@ function attachHeadActions(msgEl, m, r) {
   }
   if (canRegenerate && !head.querySelector(".regenerate-btn")) {
     const btn = document.createElement("button");
-    btn.className = "regenerate-btn"; btn.type = "button"; btn.title = "重新回答：撤回本条并以你的上一条消息重新生成（仅最后一条智能体消息）";
+    btn.className = "regenerate-btn"; btn.type = "button"; btn.title = "重新回答：撤回本条并以你的上一条消息重新生成（仅最后一条数字员工消息）";
     btn.innerHTML = icon("refresh");
     bindRegenerateButton(btn, m);
     head.appendChild(btn);
   }
   if (canRecall && !head.querySelector(".recall-btn")) {
     const btn = document.createElement("button");
-    btn.className = "recall-btn"; btn.type = "button"; btn.title = "撤回消息（发送 3 分钟内可撤回；本人或群主/管理员可操作；撤回后内容隐藏并清除记忆）";
+    btn.className = "recall-btn"; btn.type = "button"; btn.title = "撤回消息（发送 3 分钟内可撤回；本人或知聚主/管理员可操作；撤回后内容隐藏并清除记忆）";
     btn.innerHTML = icon("recall");
     bindRecallButton(btn, m);
     head.appendChild(btn);
   }
 }
 
-/** 绑定撤回按钮：确认后调 /ag-ui/group/message/recall（服务端校验本人 / 群主 / 管理员 + 3 分钟时限；撤回后内容隐藏并清除记忆）。 */
+/** 绑定撤回按钮：确认后调 /ag-ui/group/message/recall（服务端校验本人 / 知聚主 / 管理员 + 3 分钟时限；撤回后内容隐藏并清除记忆）。 */
 function bindRecallButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
@@ -4247,7 +4247,7 @@ function bindRecallButton(btn, m) {
 
 /** 测量 .content 是否溢出 3 行。调用前提：折叠态（clamp3 已应用）——
  * Blink/WebKit/Gecko 的 -webkit-line-clamp 元素 scrollHeight 均为完整内容高度，
- * 直接对比即可；不做类切换（那会逐条强制整页布局，大群首次渲染卡顿的根源）。 */
+ * 直接对比即可；不做类切换（那会逐条强制整页布局，大知聚首次渲染卡顿的根源）。 */
 function measureLong(content) {
   return content.scrollHeight > content.clientHeight + 2;
 }
@@ -4396,7 +4396,7 @@ function toggleMention(id) {
   renderMembers(); // 刷新被 @ 成员的高亮
 }
 
-/* ============ 输入框输入 @ 弹出群成员选择 ============ */
+/* ============ 输入框输入 @ 弹出知聚成员选择 ============ */
 let composing = false;      // 中文输入法组合中（避免输入法输入 @ 时误弹）
 let mentionPickerIndex = 0; // 键盘上下选择时的高亮索引
 let mentionSession = null;  // 浮层打开时 @ 的位置与查询串快照 { index, query }，选择/取消时据此移除 @ 及后续输入
@@ -4555,7 +4555,7 @@ async function addMembers() {
       toast(`添加失败：${err?.message || res.status}`);
       return;
     }
-    // 为添加的智能体注册该群触发规则，使其入群后即可被触发
+    // 为添加的数字员工注册该知聚触发规则，使其加入知聚后即可被触发
     for (const a of picked.filter((m) => m.memberType === "agent")) {
       try {
         await fetch(`/ag-ui/agents/register?memberId=${encodeURIComponent(state.memberId)}`, {
@@ -4568,7 +4568,7 @@ async function addMembers() {
             triggerMode: a.triggerMode, keywords: a.keywords,
           }),
         });
-      } catch { /* 单个智能体注册失败不阻塞添加 */ }
+      } catch { /* 单个数字员工注册失败不阻塞添加 */ }
     }
     $("addMemberModal").classList.add("hidden");
     toast(`已添加 ${picked.map((m) => m.nickname).join("、")}`);
@@ -4643,7 +4643,7 @@ async function sendMessage() {
   }
   if (sending) return; // 防连按：上一次发送尚未结束时忽略本次
 
-  // 兜底：若当前群未订阅（如断线重连后恢复失败），先补发订阅，保证消息回显与后续事件可达
+  // 兜底：若当前知聚未订阅（如断线重连后恢复失败），先补发订阅，保证消息回显与后续事件可达
   if (!state.subscribedGroups.has(gid)) {
     state.subscribedGroups.add(gid);
     send({ type: "GROUP_SUBSCRIBE", groupIds: [gid], timestamp: Date.now() });
@@ -4685,7 +4685,7 @@ async function sendMessage() {
     clearReplyTo(); // 引用一次性消费：发送后清除引用条
     pendingAttachments = [];
     renderAttachList();
-    // @ 选择保留（按群记忆）：连续对话无需每次重新 @；点输入框上方的 chips ✕ 可随时取消
+    // @ 选择保留（按知聚记忆）：连续对话无需每次重新 @；点输入框上方的 chips ✕ 可随时取消
     renderMentionChips();
     renderMembers();
   } finally {
@@ -4694,7 +4694,7 @@ async function sendMessage() {
   }
 }
 
-/* ============ 头像上传（用户资料 / 智能体表单共用） ============ */
+/* ============ 头像上传（用户资料 / 数字员工表单共用） ============ */
 
 /** 资料表单待保存的头像 URL；null = 未改动，"" = 移除。 */
 let profileAvatar = null;
@@ -4928,7 +4928,7 @@ let cvLast = null;
 let cvFocusReturn = null; // 打开画布前的焦点元素（ARIA：关闭后回移）
 
 function openCanvasModal() {
-  if (!state.activeGroupId) { toast("请先选择群"); return; }
+  if (!state.activeGroupId) { toast("请先选择知聚"); return; }
   const c = $("cvCanvas");
   const ctx = c.getContext("2d");
   ctx.fillStyle = "#fff";
@@ -5326,7 +5326,7 @@ function init() {
   // 模型配置（DeepSeek endpoint / apiKey；留空用默认端点与环境变量）
   $("meMenuModelConfig").onclick = () => { $("meMenu").classList.add("hidden"); openModelConfigModal(); };
   $("mcCancel").onclick = () => $("modelConfigModal").classList.add("hidden");
-  // 记忆管理（分群分级 / 自动遗忘 / 可视化）
+  // 记忆管理（分知聚分级 / 自动遗忘 / 可视化）
   $("meMenuMemory").onclick = () => { $("meMenu").classList.add("hidden"); openMemoryModal(); };
   $("memoryClose").onclick = () => $("memoryModal").classList.add("hidden");
   // 白标 / 品牌化（6.4，仅管理页）
@@ -5336,10 +5336,10 @@ function init() {
   $("brReset").onclick = async () => {
     $("brName").value = ""; $("brLogo").value = ""; $("brColor").value = "#4f8cff"; $("brTagline").value = ""; $("brForceDark").checked = false;
     $("brandModal").classList.add("hidden");
-    applyBranding({ appName: "AG-UI 群聊", primaryColor: "", forceDark: null }); // 本地立即恢复默认（不落库）
+    applyBranding({ appName: "知聚(KnowGath)", primaryColor: "", forceDark: null }); // 本地立即恢复默认（不落库）
     toast("已恢复默认品牌（未保存）");
   };
-  // 任务中心（工作型智能体任务编排）
+  // 任务中心（工作型数字员工任务编排）
   $("meMenuTasks").onclick = () => { $("meMenu").classList.add("hidden"); openTaskModal(); };
   $("taskClose").onclick = () => $("taskModal").classList.add("hidden");
   $("taskRefreshBtn").onclick = () => loadTasks();
@@ -5366,7 +5366,7 @@ function init() {
   $("memForgetConfirm").onclick = async () => {
     const groupId = $("memGroupSelect").value;
     const hours = Number($("memForgetRange").value) * 24;
-    const scope = groupId ? "该群" : "全部群";
+    const scope = groupId ? "该知聚" : "全部知聚";
     if (!confirm(`确定遗忘${scope}的记忆${hours ? `（保留最近 ${hours / 24} 天）` : "（立即）"}？将不再被检索，后台定时清理。`)) return;
     const btn = $("memForgetConfirm");
     const orig = btn.textContent;
@@ -5418,7 +5418,7 @@ function init() {
       const res = await fetch("/ag-ui/reset", { method: "POST", headers: { Authorization: "Bearer " + (state.token || "") } });
       const data = await res.json().catch(() => null);
       if (!res.ok) { toast(`初始化失败：${data?.message || res.status}`); return; }
-      // 清空浏览器缓存（登录态 / 主题 / 话题记忆 / 上次群等全部本地存储）并回登录页
+      // 清空浏览器缓存（登录态 / 主题 / 话题记忆 / 上次知聚等全部本地存储）并回登录页
       try { localStorage.clear(); sessionStorage.clear(); } catch { /* 存储不可用忽略 */ }
       location.reload();
     } catch (ex) { toast("初始化失败：" + ex.message); }
@@ -5445,15 +5445,15 @@ function init() {
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;
   $("pfTwinTrigger").addEventListener("change", updateTwinTrigger);
-  // 资料 / 智能体头像选择控件
+  // 资料 / 数字员工头像选择控件
   pfAvatarPicker = bindAvatarPicker("pfAvatarPreview", "pfAvatarFile", "pfAvatarUploadBtn", "pfAvatarClearBtn", "🧑", (url) => { profileAvatar = url; });
   afAvatarPicker = bindAvatarPicker("afAvatarPreview", "afAvatarFile", "afAvatarUploadBtn", "afAvatarClearBtn", "🤖", (url) => { agentAvatar = url; });
 
-  // ---- 智能体管理 ----
+  // ---- 数字员工管理 ----
   $("agentManageBtn").onclick = openAgentModal;
   $("agentClose").onclick = () => $("agentModal").classList.add("hidden");
   $("agentAddBtn").onclick = () => openAgentForm(null);
-  // 智能体导出 / 导入
+  // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);
   $("agentImportBtn").onclick = () => $("agentImportFile").click();
   $("agentImportFile").onchange = async (e) => {
@@ -5462,7 +5462,7 @@ function init() {
     if (file) await importAgentsFromFile(file);
   };
 
-  // ---- 系统数据备份：导出 / 导入（账号 + 智能体 + 聊天记录 + 附件）----
+  // ---- 系统数据备份：导出 / 导入（账号 + 数字员工 + 聊天记录 + 附件）----
   let backupFile = null;
   let backupPreview = null;
   const hideBackupImport = () => { $("backupImportPanel").classList.add("hidden"); $("backupResult").classList.add("hidden"); backupFile = null; backupPreview = null; };
@@ -5482,7 +5482,7 @@ function init() {
       a.download = "agui-data-export.zip";
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      toast("数据包已导出（账号 / 智能体 / 聊天记录 / 附件）");
+      toast("数据包已导出（账号 / 数字员工 / 聊天记录 / 附件）");
     } catch (ex) { toast("导出失败：" + ex.message); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
@@ -5504,7 +5504,7 @@ function init() {
       backupPreview = data;
       renderBackupPreview(data);
       $("backupImportPanel").classList.remove("hidden");
-      toast("请勾选要恢复的聊天记录群");
+      toast("请勾选要恢复的聊天记录知聚");
     } catch (ex) { toast("解析失败：" + ex.message); }
   };
 
@@ -5512,7 +5512,7 @@ function init() {
   $("backupImportConfirm").onclick = async () => {
     if (!backupFile || !backupPreview) return;
     const selected = [...$("backupImportGroups").querySelectorAll(".backup-group-item input:checked")].map((cb) => cb.value);
-    if (selected.length === 0) { toast("请至少勾选一个聊天记录群"); return; }
+    if (selected.length === 0) { toast("请至少勾选一个聊天记录知聚"); return; }
     const btn = $("backupImportConfirm");
     const orig = btn.textContent;
     btn.disabled = true;
@@ -5529,7 +5529,7 @@ function init() {
       $("backupResult").classList.remove("hidden");
       backupFile = null; backupPreview = null;
       toast("导入完成");
-      loadGroups(); // 新群立即可见
+      loadGroups(); // 新知聚立即可见
     } catch (ex) { toast("导入失败：" + ex.message); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
@@ -5656,16 +5656,16 @@ function init() {
   cvEl.addEventListener("pointerup", cvUp);
   cvEl.addEventListener("pointerleave", cvUp);
   $("createGroupBtn").onclick = () => { Promise.all([loadAgentDirectory(), loadUserDirectory()]).then(openCreateModal); };
-  $("refreshGroupsBtn").onclick = () => { loadGroups(); toast("群组列表已刷新"); };
+  $("refreshGroupsBtn").onclick = () => { loadGroups(); toast("知聚列表已刷新"); };
   $("refreshMembersBtn").onclick = async () => {
-    if (!state.activeGroupId) { toast("请先选择群"); return; }
+    if (!state.activeGroupId) { toast("请先选择知聚"); return; }
     await refreshActiveGroup();
-    toast("群成员已刷新");
+    toast("知聚成员已刷新");
   };
   $("createCancel").onclick = () => $("createModal").classList.add("hidden");
   $("createConfirm").onclick = createGroup;
-  $("createMemberSearch").addEventListener("input", renderCreatePick); // 创建群：按昵称 / ID 过滤可选成员
-  // 群设置
+  $("createMemberSearch").addEventListener("input", renderCreatePick); // 创建知聚：按昵称 / ID 过滤可选成员
+  // 知聚设置
   gsAvatarPicker = bindAvatarPicker("gsAvatarPreview", "gsAvatarFile", "gsAvatarUploadBtn", "gsAvatarClearBtn", "👥", (url) => { groupSettingsAvatar = url; });
   $("groupSettingsBtn").onclick = openGroupSettings;
   $("gsCancel").onclick = () => $("groupSettingsModal").classList.add("hidden");
@@ -5675,7 +5675,7 @@ function init() {
   $("createGroupName").addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); createGroup(); }
   });
-  // ---- 群话题 ----
+  // ---- 知聚话题 ----
   $("topicCancel").onclick = closeTopicModal;
   $("topicConfirm").onclick = createTopic;
   $("topicName").addEventListener("keydown", (e) => {
@@ -5691,16 +5691,16 @@ function init() {
   $("addMemberCancel").onclick = () => $("addMemberModal").classList.add("hidden");
   $("addMemberConfirm").onclick = addMembers;
   $("addMemberSearch").addEventListener("input", renderAddPick); // 添加成员：按昵称 / ID 过滤可选成员
-  // 消息搜索（群内全文）
+  // 消息搜索（知聚内全文）
   $("searchBtn").onclick = openSearchModal;
   $("searchClose").onclick = () => $("searchModal").classList.add("hidden");
   $("searchGo").onclick = doSearch;
   $("searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doSearch(); } });
-  // 多智能体讨论
+  // 多位数字员工讨论
   $("discussBtn").onclick = openDiscussModal;
   $("discussCancel").onclick = () => $("discussModal").classList.add("hidden");
   $("discussGo").onclick = startDiscussion;
-  // 群内触发方式设置弹窗
+  // 知聚内触发方式设置弹窗
   $("gtTriggerMode").addEventListener("change", syncGroupTriggerForm);
   $("gtCancel").onclick = closeGroupTriggerModal;
   $("gtSave").onclick = saveGroupTrigger;

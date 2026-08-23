@@ -16,7 +16,7 @@ namespace AguiGroupChat.Web;
 /// </summary>
 public sealed class BrandingState
 {
-    /// <summary>是否显式保存过（未保存时前端用默认「AG-UI 群聊」）。</summary>
+    /// <summary>是否显式保存过（未保存时前端用默认「知聚(KnowGath)」）。</summary>
     public bool IsConfigured { get; set; }
 
     /// <summary>产品名（登录页 / 顶栏显示）。</summary>
@@ -46,7 +46,7 @@ public static class BrandingApi
             Results.Ok(new
             {
                 configured = branding.IsConfigured,
-                appName = string.IsNullOrWhiteSpace(branding.AppName) ? "AG-UI 群聊" : branding.AppName,
+                appName = string.IsNullOrWhiteSpace(branding.AppName) ? "知聚(KnowGath)" : branding.AppName,
                 logoUrl = branding.LogoUrl,
                 primaryColor = branding.PrimaryColor,
                 forceDark = branding.ForceDark,
