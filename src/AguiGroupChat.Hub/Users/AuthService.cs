@@ -19,7 +19,7 @@ public sealed class AuthService
     private readonly TimeProvider _time;
     private readonly ChangeHub? _changes;
     private readonly ILogger<AuthService> _logger;
-    private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
+    private readonly ISessionStore _sessions;
 
     // 登录失败限速：按「IP + 用户名」组合键计数，窗口内失败次数超限后临时拒绝（防暴力破解）。
     // 组合键防「同一 IP 刷不同用户名绕过单用户名限速」的 DoS；纯 username 维度会被分布式小号批量绕开。
@@ -31,21 +31,14 @@ public sealed class AuthService
     private static readonly string DummySalt = Convert.ToBase64String([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10]);
     private static readonly string DummyHash = Convert.ToBase64String([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30]);
 
-    private sealed record Session(string UserId, TimeSpan Ttl)
-    {
-        /// <summary>会话唯一标识（用于多设备会话管理：列出 / 单独吊销，不暴露令牌）。</summary>
-        public string Id { get; set; } = "";
-        public DateTimeOffset ExpiresAt { get; set; }
-        public DateTimeOffset IssuedAt { get; set; }
-    }
-
-    public AuthService(IUserStore store, AuthOptions options, TimeProvider time, ILogger<AuthService> logger, ChangeHub? changes = null)
+    public AuthService(IUserStore store, AuthOptions options, TimeProvider time, ILogger<AuthService> logger, ChangeHub? changes = null, ISessionStore? sessions = null)
     {
         _store = store;
         _options = options;
         _time = time;
         _logger = logger;
         _changes = changes;
+        _sessions = sessions ?? new InMemorySessionStore();
     }
 
     /// <summary>
@@ -172,22 +165,24 @@ public sealed class AuthService
     {
         if (string.IsNullOrEmpty(token)) return null;
         var key = HashToken(token);
-        if (!_sessions.TryGetValue(key, out var session)) return null;
+        var session = _sessions.TryGet(key);
+        if (session is null) return null;
 
         var now = _time.GetUtcNow();
         var absoluteTtl = TimeSpan.FromDays(Math.Max(1, _options.AbsoluteSessionTtlDays));
         if (now > session.ExpiresAt || now > session.IssuedAt + absoluteTtl)
         {
-            _sessions.TryRemove(key, out _);
+            _sessions.Remove(key);
             return null;
         }
         session.ExpiresAt = now + session.Ttl; // 滑动续期
+        _sessions.Upsert(session, session.Ttl); // 续期后写回（Redis 模式更新 TTL / 过期时间，供多副本共享）
         _changes?.Notify(); // 续期后通知持久化（memory 快照模式下重启后令牌过期时间保持最新）
         var user = _store.GetUserById(session.UserId);
         // 被管理员禁用后：已有会话令牌立即失效（账号删除 / 停用场景要求登出在线会话）
         if (user is null || user.IsDisabled)
         {
-            _sessions.TryRemove(key, out _);
+            _sessions.Remove(key);
             _changes?.Notify();
             return null;
         }
@@ -197,7 +192,7 @@ public sealed class AuthService
     /// <summary>退出登录：吊销指定令牌。</summary>
     public void Logout(string? token)
     {
-        if (!string.IsNullOrEmpty(token) && _sessions.TryRemove(HashToken(token), out _))
+        if (!string.IsNullOrEmpty(token) && _sessions.Remove(HashToken(token)))
             _changes?.Notify();
     }
 
@@ -216,9 +211,9 @@ public sealed class AuthService
         _store.UpdateUser(user);
 
         var invalidated = 0;
-        foreach (var kv in _sessions.Where(kv => kv.Value.UserId == userId))
+        foreach (var s in _sessions.All().Where(s => s.UserId == userId))
         {
-            if (_sessions.TryRemove(kv.Key, out _)) invalidated++;
+            if (_sessions.Remove(s.TokenHash)) invalidated++;
         }
         if (invalidated > 0)
         {
@@ -261,9 +256,9 @@ public sealed class AuthService
     private void RevokeUserSessions(string userId)
     {
         var invalidated = 0;
-        foreach (var kv in _sessions.Where(kv => kv.Value.UserId == userId))
+        foreach (var s in _sessions.All().Where(s => s.UserId == userId))
         {
-            if (_sessions.TryRemove(kv.Key, out _)) invalidated++;
+            if (_sessions.Remove(s.TokenHash)) invalidated++;
         }
         if (invalidated > 0)
         {
@@ -325,13 +320,13 @@ public sealed class AuthService
 
     /// <summary>导出全部会话（供持久化快照；Token 为 SHA-256 哈希，明文令牌不落盘）。</summary>
     public IReadOnlyList<PersistedSession> SnapshotSessions()
-        => _sessions.Select(kv => new PersistedSession
+        => _sessions.All().Select(s => new PersistedSession
         {
-            Token = kv.Key,
-            UserId = kv.Value.UserId,
-            ExpiresAt = kv.Value.ExpiresAt.ToUnixTimeMilliseconds(),
-            IssuedAt = kv.Value.IssuedAt.ToUnixTimeMilliseconds(),
-            SessionId = string.IsNullOrEmpty(kv.Value.Id) ? null : kv.Value.Id,
+            Token = s.TokenHash,
+            UserId = s.UserId,
+            ExpiresAt = s.ExpiresAt.ToUnixTimeMilliseconds(),
+            IssuedAt = s.IssuedAt.ToUnixTimeMilliseconds(),
+            SessionId = string.IsNullOrEmpty(s.SessionId) ? null : s.SessionId,
         }).ToList();
 
     /// <summary>恢复会话（跳过已过期 / 超过绝对有效期 / 用户已不存在的令牌）。</summary>
@@ -339,7 +334,7 @@ public sealed class AuthService
     {
         foreach (var s in sessions)
         {
-            if (_sessions.ContainsKey(s.Token)) continue;
+            if (_sessions.TryGet(s.Token) is not null) continue;
             if (_store.GetUserById(s.UserId) is null) continue;
             var expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(s.ExpiresAt);
             if (_time.GetUtcNow() > expiresAt) continue;
@@ -352,17 +347,26 @@ public sealed class AuthService
             var absoluteTtl = TimeSpan.FromDays(Math.Max(1, _options.AbsoluteSessionTtlDays));
             if (_time.GetUtcNow() > issuedAt + absoluteTtl) continue;
 
-            _sessions[s.Token] = new Session(s.UserId, ttl) { ExpiresAt = expiresAt, IssuedAt = issuedAt, Id = s.SessionId ?? "ses_" + IdGenerator.NewId() };
+            var session = new UserSession
+            {
+                TokenHash = s.Token,
+                UserId = s.UserId,
+                Ttl = ttl,
+                ExpiresAt = expiresAt,
+                IssuedAt = issuedAt,
+                SessionId = s.SessionId ?? "ses_" + IdGenerator.NewId(),
+            };
+            _sessions.Upsert(session, ttl);
         }
     }
 
     /// <summary>列出某用户的全部活跃会话（供多设备会话管理）。返回去掉令牌的元信息。</summary>
     public IReadOnlyList<AuthSessionInfo> GetUserSessions(string userId)
-        => _sessions.Where(kv => kv.Value.UserId == userId)
-            .Select(kv => new AuthSessionInfo(
-                SessionId: string.IsNullOrEmpty(kv.Value.Id) ? "ses_" + kv.Key[..8] : kv.Value.Id,
-                IssuedAt: kv.Value.IssuedAt.ToUnixTimeMilliseconds(),
-                ExpiresAt: kv.Value.ExpiresAt.ToUnixTimeMilliseconds()))
+        => _sessions.All().Where(s => s.UserId == userId)
+            .Select(s => new AuthSessionInfo(
+                SessionId: string.IsNullOrEmpty(s.SessionId) ? "ses_" + s.TokenHash[..8] : s.SessionId,
+                IssuedAt: s.IssuedAt.ToUnixTimeMilliseconds(),
+                ExpiresAt: s.ExpiresAt.ToUnixTimeMilliseconds()))
             .OrderByDescending(s => s.IssuedAt)
             .ToList();
 
@@ -370,9 +374,9 @@ public sealed class AuthService
     public bool RevokeSession(string userId, string sessionId)
     {
         var removed = false;
-        foreach (var kv in _sessions.Where(kv => kv.Value.UserId == userId && kv.Value.Id == sessionId).ToList())
+        foreach (var s in _sessions.All().Where(s => s.UserId == userId && s.SessionId == sessionId).ToList())
         {
-            if (_sessions.TryRemove(kv.Key, out _)) removed = true;
+            if (_sessions.Remove(s.TokenHash)) removed = true;
         }
         if (removed) _changes?.Notify();
         return removed;
@@ -382,9 +386,9 @@ public sealed class AuthService
     public int RevokeOtherSessions(string userId, string currentSessionId)
     {
         var removed = 0;
-        foreach (var kv in _sessions.Where(kv => kv.Value.UserId == userId && kv.Value.Id != currentSessionId).ToList())
+        foreach (var s in _sessions.All().Where(s => s.UserId == userId && s.SessionId != currentSessionId).ToList())
         {
-            if (_sessions.TryRemove(kv.Key, out _)) removed++;
+            if (_sessions.Remove(s.TokenHash)) removed++;
         }
         if (removed > 0) _changes?.Notify();
         return removed;
@@ -392,20 +396,29 @@ public sealed class AuthService
 
     /// <summary>返回当前令牌对应会话的 SessionId（供「吊销其他会话」识别当前会话），令牌无效返回 null。</summary>
     public string? GetSessionIdOfToken(string? token)
-        => string.IsNullOrEmpty(token) || !_sessions.TryGetValue(HashToken(token), out var s) ? null
-            : (string.IsNullOrEmpty(s.Id) ? "ses_" + HashToken(token)[..8] : s.Id);
+        => string.IsNullOrEmpty(token) || _sessions.TryGet(HashToken(token)) is not { } s ? null
+            : (string.IsNullOrEmpty(s.SessionId) ? "ses_" + HashToken(token)[..8] : s.SessionId);
 
     private string IssueSession(string userId, out long expiresAt)
     {
         // 顺手清理过期会话，避免无限增长
         var now = _time.GetUtcNow();
-        foreach (var kv in _sessions.Where(kv => now > kv.Value.ExpiresAt))
-            _sessions.TryRemove(kv.Key, out _);
+        foreach (var s in _sessions.All().Where(s => now > s.ExpiresAt))
+            _sessions.Remove(s.TokenHash);
 
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_');
         var ttl = TimeSpan.FromHours(Math.Max(1, _options.SessionTtlHours));
-        _sessions[HashToken(token)] = new Session(userId, ttl) { ExpiresAt = now + ttl, IssuedAt = now, Id = "ses_" + IdGenerator.NewId() }; // 字典键存哈希，返回给客户端的仍是明文令牌
+        var session = new UserSession
+        {
+            TokenHash = HashToken(token),
+            UserId = userId,
+            Ttl = ttl,
+            ExpiresAt = now + ttl,
+            IssuedAt = now,
+            SessionId = "ses_" + IdGenerator.NewId(),
+        }; // 字典键存哈希，返回给客户端的仍是明文令牌
+        _sessions.Upsert(session, ttl);
         expiresAt = (now + ttl).ToUnixTimeMilliseconds();
         _changes?.Notify();
         return token;

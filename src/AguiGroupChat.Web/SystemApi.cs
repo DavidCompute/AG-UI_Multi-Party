@@ -124,11 +124,12 @@ public static class SystemApi
             }
             else
             {
-                // 内存模式：清空各内存存储
+                // 内存 / Redis 模式：清空各存储（Redis 的 ClearAll 会冲刷 agui:* 全部 key）
                 sp.GetRequiredService<IGroupStore>().ClearAll();
                 sp.GetRequiredService<IUserStore>().ClearAll();
                 sp.GetService<IUsageStore>()?.ClearAll(); // 用量统计（可选）
-                sp.GetService<PersistenceService>()?.Reset(); // 删除 JSON 快照文件
+                if (provider != "redis")
+                    sp.GetService<PersistenceService>()?.Reset(); // 删除 JSON 快照文件（仅 memory 模式）
             }
 
             // 内存对象（两种模式都清：数据库模式清完表后同步清内存缓存）

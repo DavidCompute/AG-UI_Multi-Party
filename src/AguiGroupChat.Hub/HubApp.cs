@@ -1,9 +1,11 @@
 using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Messaging;
+using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Hub.Persistence.Postgres;
+using AguiGroupChat.Hub.Persistence.Redis;
 using AguiGroupChat.Hub.Persistence.Relational;
 using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Hub.Transport;
@@ -43,6 +45,7 @@ public static class HubApp
             builder.Services.AddSingleton<ISectionStore, PostgresSectionStore>();
             builder.Services.AddSingleton<IUsageStore, PostgresUsageStore>(); // 模型用量统计（按日聚合）
             builder.Services.AddSingleton<ITaskStore, PostgresTaskStore>();    // 工作任务编排
+            builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
         }
         else if (string.Equals(storageOptions.Provider, "mysql", StringComparison.OrdinalIgnoreCase)
                  || string.Equals(storageOptions.Provider, "sqlite", StringComparison.OrdinalIgnoreCase))
@@ -60,12 +63,28 @@ public static class HubApp
             builder.Services.AddSingleton<ISectionStore, RelationalSectionStore>();
             builder.Services.AddSingleton<IUsageStore, RelationalUsageStore>(); // 模型用量统计（按日聚合）
             builder.Services.AddSingleton<ITaskStore, RelationalTaskStore>();    // 工作任务编排
+            builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
+        }
+        else if (string.Equals(storageOptions.Provider, "redis", StringComparison.OrdinalIgnoreCase))
+        {
+            // Redis 模式（6.2 Web 多副本横向扩展）：全部 Store 与登录会话共享 Redis，
+            // 多副本读写同一批 key 保持一致；禁用 JSON 快照（Redis 本身即落盘）。
+            var redis = new RedisContext(storageOptions.ConnectionString ?? "localhost:6379");
+            builder.Services.AddSingleton(redis);
+            builder.Services.AddSingleton<IGroupStore, RedisGroupStore>();
+            builder.Services.AddSingleton<IUserStore, RedisUserStore>();
+            builder.Services.AddSingleton<IAgentRegistryStore, RedisAgentRegistryStore>();
+            builder.Services.AddSingleton<ISectionStore, RedisSectionStore>();
+            builder.Services.AddSingleton<IUsageStore, RedisUsageStore>();   // 模型用量统计（按日聚合）
+            builder.Services.AddSingleton<ITaskStore, RedisTaskStore>();     // 工作任务编排
+            builder.Services.AddSingleton<ISessionStore, RedisSessionStore>(); // 登录会话跨副本共享
         }
         else
         {
             // 用户管理（Hub 扩展）：内存账号存储 + 认证服务（会话令牌）
             builder.Services.AddSingleton<IGroupStore>(new InMemoryGroupStore(options.MessageHistoryLimit, changeHub));
             builder.Services.AddSingleton<IUserStore>(new InMemoryUserStore(changeHub));
+            builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内，随 JSON 快照持久化）
             builder.Services.AddSingleton<IUsageStore>(new InMemoryUsageStore(changeHub)); // 模型用量统计（按日聚合）
             builder.Services.AddSingleton<ITaskStore>(new InMemoryTaskStore(changeHub));  // 工作任务编排
             // 持久化（Hub 扩展）：单文件快照，变更后定时落盘，启动时恢复
@@ -141,6 +160,9 @@ public static class HubApp
         var persistence = services.GetService<PersistenceService>();
         if (persistence is not null) return; // memory 模式：核心快照已含会话（SnapshotSessions）
 
+        // Redis 模式：登录会话由 RedisSessionStore 共享（跨副本一致），无需再写入 sections 扩展区
+        if (services.GetService<ISessionStore>() is RedisSessionStore) return;
+
         var auth = services.GetRequiredService<AuthService>();
         Func<object?> snapshot = () => auth.SnapshotSessions().Select(s => (object)s).ToList();
         Action<JsonElement> restore = element => auth.RestoreSessions(
@@ -190,9 +212,38 @@ public static class HubApp
             // 返回是否已有历史数据（决定是否播种示例数据）
             return store.AllGroups().Count > 0;
         }
+        if (provider == "redis")
+        {
+            // Redis 模式（6.2 多副本）：各 Store 经 Redis 共享；这里恢复扩展区（智能体定义），
+            // 并把成员在线状态复位为离线（连接态，避免上次进程留下的在线残留）。
+            var sections = app.Services.GetService<ISectionStore>();
+            if (sections is not null)
+            {
+                sections.LoadSections();
+                app.Lifetime.ApplicationStopping.Register(sections.Flush);
+            }
+            var store = app.Services.GetRequiredService<IGroupStore>();
+            ResetGroupMembersOnline(store);
+
+            return store.AllGroups().Count > 0;
+        }
 
         var persistence = app.Services.GetRequiredService<PersistenceService>();
         app.Lifetime.ApplicationStopping.Register(() => persistence.Flush());
         return persistence.Load();
+    }
+
+    /// <summary>把全部群成员的在线状态复位为离线（连接态为瞬时量，进程退出/启动时归零）。</summary>
+    private static void ResetGroupMembersOnline(IGroupStore store)
+    {
+        foreach (var g in store.AllGroups())
+        {
+            foreach (var m in store.ListMembers(g.GroupId))
+            {
+                if (m.OnlineStatus == OnlineStatus.Offline) continue;
+                m.OnlineStatus = OnlineStatus.Offline;
+                store.UpdateMember(g.GroupId, m);
+            }
+        }
     }
 }

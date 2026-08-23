@@ -12,7 +12,7 @@ namespace AguiGroupChat.Hub.Options;
 /// </summary>
 public sealed class StorageOptions
 {
-    /// <summary>存储提供器：memory / postgres / mysql / sqlite。</summary>
+    /// <summary>存储提供器：memory / postgres / mysql / sqlite / redis。</summary>
     public string Provider { get; set; } = "memory";
 
     /// <summary>数据库连接串（Provider 非 memory 时必填）。</summary>
