@@ -1,171 +1,179 @@
-// AG-UI 群聊 —— 8.4 切入故事「多轮开发团队推进会」自动化（基于现有 Docker 环境 http://localhost:5200）
+// AG-UI 群聊 —— 8.4 切入故事「多真人群 + 数字员工 · 多轮推进会」自动化（基于 Docker 环境 http://localhost:5200）
 //
-// 模拟一个开发团队（产品 / 后端 / 前端 / 测试 等成员轮流发言）与两个数字员工
-//「产品助理」「代码帮」围绕一个需求（做「知聚」多角色协作平台的 MVP）进行 4 轮推进会：
-//   Round1 需求澄清  产品 @产品助理 拆需求 → 产品助理给 MVP 用户故事
-//   Round2 技术评审  后端 @代码帮 评方案 → 代码帮给工程方案/约束
-//   Round3 多方对齐  「多位数字员工讨论」→ 产品助理 + 代码帮 互相回应、求同存异
-//   Round4 收敛追问  团队抛验收标准/风险，@两位 收敛成结论 & 遗留项
+// 与上一版的关键差异：
+//  1) 真人有多个（不再是一个演示账号贴不同角色标签）：注册 产品小梦 / 后端阿凯 / 前端小叶 / 测试小迪 四个真实账号，
+//     各自作为独立群成员用自己的身份发言（端到端验证“多人真人 + 数字员工”同场协作）。
+//  2) 修复“再次 @ 数字员工无回复”可见性：
+//     - 每轮都从【新】@ 消息出发，等待一个【新产生】的数字员工回复 messageId；
+//     - 用 WebSocket 订阅该轮，实时记录 RUN_ERROR / AGENT_QUOTA_EXCEEDED 等失败事件；
+//     - 若某轮超时未拿到新回复，直接报错退出（绝不静默跳过），把 WS 观察到的错误一并打印。
 //
-// 关键机制：所有成员与数字员工的发言都会进入该知聚的群历史；每轮触发数字员工时，
-// 其回复会读取最近群历史，因此在后一轮能看到前几轮的内容，形成“有来有回、逐步收敛”。
+// 机制：所有真人发言与数字员工回复都进入知聚群历史；每轮触发数字员工时会读取最近历史，
+// 因此在后一轮能看到前几轮内容，形成“有来有回、逐步收敛”的过程。
 //
-// 依赖：Docker web 容器健康；Provider=deepseek 且已配置 API Key（真实 AI 回复）。
-// 运行：node tools/verify-case.mjs        （幂等可重跑：登录固定账号，数字员工已存在则跳过）
+// 依赖：Docker web 容器健康；Provider=deepseek 且已配置 API Key。
+// 运行：node tools/verify-case.mjs   （幂等可重跑：各账号均先尝试登录，已存在则复用，避免撞注册限流）
 const base = "http://localhost:5200";
+const wsBase = "ws://localhost:5200";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const username = "case_demo_user";
-const GROUP_NAME = "MVP 推进会-技术讨论";
+const PASSWORD = "secret123";
 
+const HUMANS = [
+  { username: "p_xiaomeng", nickname: "产品小梦", role: "产品" },
+  { username: "d_akai", nickname: "后端阿凯", role: "后端" },
+  { username: "f_xiaoye", nickname: "前端小叶", role: "前端" },
+  { username: "q_xiaodi", nickname: "测试小迪", role: "测试" },
+];
 const AGENTS = [
   { agentId: "agent_case_prd", nickname: "产品助理", description: "产品需求分析助手",
-    instructions: "你是「产品助理」，负责需求澄清、用户故事与产品方案。先给结论再展开，回复可用结构列表，结尾可提一个反问推进讨论。" },
+    instructions: "你是「产品助理」，负责需求澄清、用户故事与产品方案。先给结论再展开；结尾可反问推进讨论。" },
   { agentId: "agent_case_code", nickname: "代码帮", description: "代码/架构评审助手",
-    instructions: "你是「代码帮」，负责架构评审与工程实现。给代码或方案前先讲思路，关注约束/风险/验收，可回应前序发言。" },
+    instructions: "你是「代码帮」，负责架构评审与工程实现。讲思路优先，关注约束/风险/验收，可回应前序发言。" },
 ];
 
-async function raw(url, opts = {}) {
-  const res = await fetch(url, opts);
-  const text = await res.text();
-  let json = null; try { json = text ? JSON.parse(text) : null; } catch {}
-  return { res, json, text };
-}
-async function must(url, opts = {}) {
-  const { res, json, text } = await raw(url, opts);
-  if (!res.ok) throw new Error(`请求失败 ${res.status} ${url} :: ${text}`);
-  return json;
-}
-const auth = (token) => ({ "Content-Type": "application/json", Authorization: `Bearer ${token}` });
-const post = (path, token, payload) => must(base + path, { method: "POST", headers: auth(token), body: JSON.stringify(payload) });
-const get = (path, token) => must(base + path, { method: "GET", headers: auth(token) });
+async function raw(url, opts = {}) { const r = await fetch(url, opts); const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch {} return { r, j, t }; }
+async function must(url, opts = {}) { const { r, j, t } = await raw(url, opts); if (!r.ok) throw new Error(`请求失败 ${r.status} ${url} :: ${t}`); return j; }
+const auth = (tok) => ({ "Content-Type": "application/json", Authorization: `Bearer ${tok}` });
+const post = (path, tok, payload) => must(base + path, { method: "POST", headers: auth(tok), body: JSON.stringify(payload) });
+const get = (path, tok) => must(base + path, { method: "GET", headers: auth(tok) });
+const nickOf = (sid) => AGENTS.find((x) => x.agentId === sid)?.nickname || HUMANS.find((x) => x.username === sid)?.nickname || sid;
 
-const _seenMsgIds = new Set(); // 全局：已打印过的消息，保证每轮只打印新增的数字员工回复
+/// 登录，不存在则注册；返回 { token, userId, nickname }
+async function ensureUser(u) {
+  const lg = await raw(`${base}/ag-ui/user/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u.username, password: PASSWORD }) });
+  if (lg.r.ok) return { token: lg.j.token, userId: lg.j.userId, nickname: u.nickname };
+  const rg = await raw(`${base}/ag-ui/user/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: u.username, password: PASSWORD, nickname: u.nickname }) });
+  if (!rg.r.ok) throw new Error(`账号 ${u.username} 登录/注册均失败: login=${lg.r.status} register=${rg.r.status} ${rg.t}`);
+  return { token: rg.j.token, userId: rg.j.userId, nickname: u.nickname };
+}
 
-async function snapshotAgentMessages(token, gid, agentIds) {
+const _seenMsgIds = new Set();
+async function snapshotAgentMsgs(token, gid, agentIds) {
   const snap = await get(`/ag-ui/group/${gid}`, token);
-  return ((snap.latestMessages || [])).filter((m) => agentIds.includes(m.senderId) && m.content && m.content.trim());
+  return (snap.latestMessages || []).filter((m) => agentIds.includes(m.senderId) && m.content && m.content.trim());
 }
 
-const nickOf = (sid) => (AGENTS.find((x) => x.agentId === sid)?.nickname || sid);
+/// 开一条 WS 观察该轮失败事件（RUN_ERROR / 配额 / 交互等），返回一个收集器。不主动发消息。
+function observeWS(user, gid) {
+  const ws = new WebSocket(`${wsBase}/ws?memberId=${encodeURIComponent(user.userId)}&token=${encodeURIComponent(user.token)}`);
+  const errors = [];
+  let connected = false;
+  ws.onopen = () => { };
+  ws.onmessage = (e) => {
+    const evt = JSON.parse(e.data);
+    if (evt.type === "GROUP_CONNECTED") { connected = true; ws.send(JSON.stringify({ type: "GROUP_SUBSCRIBE", groupIds: [gid], timestamp: Date.now() })); }
+    if ([ "RUN_ERROR", "AGENT_QUOTA_EXCEEDED", "GROUP_TYPING", "AGENT_INTERACTION_REQUEST", "TEXT_MESSAGE_RESET" ].includes(evt.type)) errors.push(evt.type + (evt.message ? ` :: ${evt.message}` : "") + (evt.errorCode ? ` [${evt.errorCode}]` : ""));
+  };
+  return { ws, errors, close: () => { try { ws.close(); } catch {} } };
+}
 
-/// 等待指定发送者在本轮产生'新增且稳定'的回复；有则打印新内容。返回本轮收到的新消息（senderId -> {text}）
-async function waitReplies(token, gid, agentIds, timeoutMs, label) {
+/// 等目标数字员工产生『本轮新增』回复（内容稳定后打印），返回收到的新回复；带 WS 错误收集
+async function waitNewReplies(token, gid, agentIds, timeoutMs, errors) {
   const deadline = Date.now() + timeoutMs;
-  const stable = new Map(); // messageId -> { text, stableSince }
-  const gotThisRound = new Map(); // senderId -> { text, messageId }
+  const stable = new Map(); // messageId -> { senderId, text, stableSince }
+  const labelled = new Map(); // senderId/target -> messageId 已打印
   let lastLog = Date.now();
   while (Date.now() < deadline) {
-    for (const m of await snapshotAgentMessages(token, gid, agentIds)) {
-      const isNew = !_seenMsgIds.has(m.messageId);
-      if (!isNew) continue; // 己打印过的旧消息跳过
-      const st = stable.get(m.messageId) || { text: "", stableSince: null };
-      if (m.content !== st.text) stable.set(m.messageId, { text: m.content, stableSince: Date.now() });
-      else if (!st.stableSince) stable.set(m.messageId, { text: m.content, stableSince: Date.now() });
+    for (const m of await snapshotAgentMsgs(token, gid, agentIds)) {
+      if (_seenMsgIds.has(m.messageId)) continue;
+      const st = stable.get(m.messageId) || { senderId: m.senderId, text: "", stableSince: null };
+      if (m.content !== st.text) stable.set(m.messageId, { senderId: m.senderId, text: m.content, stableSince: Date.now() });
+      else if (!st.stableSince) stable.set(m.messageId, { senderId: m.senderId, text: m.content, stableSince: Date.now() });
     }
-    // 内容稳定（连续约 3s 未变化）且本轮尚未打印 → 打印并标记
-    const toPrint = [...stable.entries()]
-      .filter(([, st]) => st.text && st.stableSince && (Date.now() - st.stableSince) >= 3000)
-      .filter(([mid]) => !_seenMsgIds.has(mid));
-    for (const [mid, st] of toPrint) {
-      _seenMsgIds.add(mid);
-      const senderId = (await snapshotAgentMessages(token, gid, agentIds)).find((m) => m.messageId === mid)?.senderId;
-      gotThisRound.set(senderId, { text: st.text, messageId: mid });
-      console.log(`\n── 🤖 ${nickOf(senderId)} 回复 ──\n${st.text.trim().replace(/^/gm, "  ")}`);
+    // 打印任何内容已稳定（3s 未变）且尚未打印的新消息（每消息只打一次）
+    for (const [mid, st] of [...stable.entries()]) {
+      if (_seenMsgIds.has(mid)) continue;
+      if (st.text && st.stableSince && Date.now() - st.stableSince >= 3000) {
+        _seenMsgIds.add(mid);
+        labelled.set(st.senderId, mid);
+        console.log(`\n── 🤖 ${nickOf(st.senderId)} 回复 ──\n${st.text.trim().replace(/^/gm, "  ")}`);
+      }
     }
-    // 本轮目标数字员工是否都己回复新消息
-    const okIds = new Set([...gotThisRound.keys()].filter((sid) => agentIds.includes(sid)));
-    if (agentIds.every((a) => okIds.has(a))) return gotThisRound;
-    if (Date.now() - lastLog > 12000) { console.log(`  · 等待 ${label}…（${okIds.size}/${agentIds.length} 已到位）`); lastLog = Date.now(); }
+    const okIds = new Set([...labelled.keys()].filter((s) => agentIds.includes(s)));
+    if (agentIds.every((a) => okIds.has(a))) return labelled;
+    if (Date.now() - lastLog > 12000) { console.log(`  · 等待回复…（${okIds.size}/${agentIds.length}；WS: ${errors.join(" | ") || "-"}）`); lastLog = Date.now(); }
     await sleep(900);
   }
-  return gotThisRound;
+  return labelled;
 }
 
-/// 发一条“团队成员”发言并等待指定数字员工回复（带人类角色标签）
-async function roundHumanAsk(token, gid, speaker, text, agents, label, timeoutMs) {
-  console.log(`\n👤 ${speaker}：「${text}」`);
-  await post("/ag-ui/group/message/send", token, {
-    groupId: gid, userId: username, content: text.replace(/\n/g, " "),
-    mentions: agents, timestamp: Date.now(),
-  });
-  const got = await waitReplies(token, gid, agents, timeoutMs, label);
-  if (!agents.every((a) => got.has(a))) throw new Error(`超时：${label} 未收到全部数字员工本轮的回复`);
+/// 由某个真人发言 @某数字员工，等待新回复；超时则抛出（含 WS 错误）
+async function roundAsk(user, gid, text, agents, timeoutMs, label) {
+  const obs = observeWS(user, gid);
+  await sleep(300);
+  console.log(`\n👤 ${user.nickname}：「${text}」`);
+  await post("/ag-ui/group/message/send", user.token, { groupId: gid, userId: user.userId, content: text.replace(/\n/g, " "), mentions: agents, timestamp: Date.now() });
+  const got = await waitNewReplies(user.token, gid, agents, timeoutMs, obs.errors);
+  obs.close();
+  const missing = agents.filter((a) => !got.has(a));
+  if (missing.length) {
+    throw new Error(`${label} 未收到新回复：${missing.join(",")}；WS 观察到: ${obs.errors.join(" | ") || "无明显错误"}`);
+  }
 }
 
 async function main() {
-  console.log("═══ 知聚 8.4 案例 · 多轮开发团队推进会（真实 DeepSeek 模型） ═══\n");
+  console.log("═══ 知聚 8.4 案例 · 多真人群 + 数字员工 · 4 轮推进会（真实 DeepSeek） ═══\n");
 
-  // 0. 登录固定演示账号（不存在则注册）
-  let user;
-  const loginRes = await raw(`${base}/ag-ui/user/login`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password: "secret123" }),
-  });
-  if (loginRes.res.ok) user = loginRes.json;
-  else {
-    const reg = await raw(`${base}/ag-ui/user/register`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password: "secret123", nickname: "演示者" }),
-    });
-    if (!reg.res.ok) throw new Error(`登录/注册失败 login=${loginRes.res.status} register=${reg.res.status}`);
-    user = reg.json;
-  }
-  const token = user.token, userId = user.userId;
-  console.log(`[OK] 演示者已登录: ${userId}\n`);
+  // 1. 注册/登录多个真人 + 数字员工
+  const people = {};
+  for (const h of HUMANS) people[h.username] = { role: h.role, ...(await ensureUser(h)) };
+  console.log(`[OK] 已就绪真人: ${HUMANS.map((h) => `${h.nickname}(@${h.username})`).join("、")}`);
 
-  // 1. 确保两个数字员工存在
+  const owner = people[HUMANS[0].username];
   for (const a of AGENTS) {
-    const existing = await get("/ag-ui/agents", token);
-    if (existing.some((x) => x.agentId === a.agentId)) continue;
-    await post("/ag-ui/agents", token, { agentId: a.agentId, nickname: a.nickname, description: a.description, instructions: a.instructions, triggerMode: "mentioned", keywords: [] });
+    const ex = await get("/ag-ui/agents", owner.token);
+    if (!ex.some((x) => x.agentId === a.agentId))
+      await post("/ag-ui/agents", owner.token, { agentId: a.agentId, nickname: a.nickname, description: a.description, instructions: a.instructions, triggerMode: "mentioned", keywords: [] });
   }
-  console.log("[OK] 数字员工作备就绪：产品助理 / 代码帮\n");
+  console.log(`[OK] 数字员工作备：${AGENTS.map((a) => a.nickname).join("、")}\n`);
 
-  // 2. 建知聚（每次运行新建一个，保证群历史是最新一轮）
-  const group = await post("/ag-ui/group/create", token, {
-    groupName: GROUP_NAME, ownerId: userId,
-    memberIds: [userId, "agent_case_prd", "agent_case_code"],
-    members: AGENTS.map((a) => ({ memberId: a.agentId, memberType: "agent", nickname: a.nickname })),
+  // 2. 建知聚：所有真人都入群 + 两个数字员工
+  const allHumenIds = HUMANS.map((h) => people[h.username].userId);
+  const group = await post("/ag-ui/group/create", owner.token, {
+    groupName: "MVP-协作平台推进会", ownerId: owner.userId,
+    memberIds: [...allHumenIds, ...AGENTS.map((a) => a.agentId)],
+    members: [
+      ...HUMANS.map((h) => ({ memberId: people[h.username].userId, memberType: "user", nickname: h.nickname })),
+      ...AGENTS.map((a) => ({ memberId: a.agentId, memberType: "agent", nickname: a.nickname })),
+    ],
   });
   const gid = group.groupId;
-  // 触发规则
   for (const a of AGENTS)
-    await post(`/ag-ui/agents/register?memberId=${encodeURIComponent(userId)}`, token, { agentId: a.agentId, nickname: a.nickname, groupId: gid, triggerMode: "mentioned" });
-  console.log(`[OK] 已创建知聚「${GROUP_NAME}」：${gid}（群历史将累积全部轮次发言）\n`);
+    await post(`/ag-ui/agents/register?memberId=${encodeURIComponent(owner.userId)}`, owner.token, { agentId: a.agentId, nickname: a.nickname, groupId: gid, triggerMode: "mentioned" });
+  console.log(`[OK] 建知聚「MVP-协作平台推进会」：${gid}（真人 ${HUMANS.length} + 数字员工 2，群历史跨轮累积）\n`);
 
-  // ============ 四轮推进会 ============
-  // R1 需求澄清
-  console.log("───────────────────── Round 1 · 需求澄清 ─────────────────────");
-  await roundHumanAsk(token, gid, "产品(小梦)", "@产品助理 我们想把「知聚」做成一个多角色协作平台，目标团队 3-10 人。先帮我们把最小可用版本的边界和用户故事理清楚，别贪多。", ["agent_case_prd"], "产品助理回复", 90000);
+  // 3. 四轮推进会（每次由不同真人@数字员工，验证“再次@也能回复”）
+  const p = people;
 
-  // R2 技术评审
-  console.log("\n───────────────────── Round 2 · 技术评审 ─────────────────────");
-  await roundHumanAsk(token, gid, "后端(阿凯)", "@代码帮 产品助理刚给了 MVP 范围，你从工程角度评审一下：数据模型、权限怎么做，有没有明显坑？不要太发散，先给最关键的约束。", ["agent_case_code"], "代码帮回复", 90000);
+  console.log("────────── Round 1 · 需求澄清（产品小梦 @产品助理） ──────────");
+  await roundAsk(p["p_xiaomeng"], gid, "@产品助理 我们团队 3-10 人想把「知聚」做成多角色协作平台。先帮我们把 MVP 边界和用户故事理清楚，别贪多。", ["agent_case_prd"], 90000, "Round1 产品助理回复");
 
-  // R3 多方对齐：两位数字员工直接对话、互相回应
-  console.log("\n───────────────────── Round 3 · 多位数字员工对齐 ─────────────────────");
-  console.log("👤 前端(小叶)：「你们俩角度不一样，直接在群里对一对，别各说各话。」");
-  const discuss = await post(`/ag-ui/group/${gid}/discussion`, token, {
-    content: `基于前序：产品给了 MVP 用户故事，代码帮给了工程约束。请你俩把「权限模型」和「MVP 验收标准」对齐成一份结论，并各自明确指出对方的提案里需要补或改的一点。`,
-    agentIds: ["agent_case_prd", "agent_case_code"],
-  });
-  console.log(`[发起讨论] 参与: ${(discuss.agents || []).join(", ")}\n`);
-  const got3 = await waitReplies(token, gid, ["agent_case_prd", "agent_case_code"], 150000, "数字员工对齐");
-  if (got3.size < 2) throw new Error("Round3 数字员工对齐全员未到位");
+  console.log("\n────────── Round 2 · 技术评审（后端阿凯 @代码帮） ──────────");
+  await roundAsk(p["d_akai"], gid, "@代码帮 产品助理刚给了 MVP 范围。你从工程角度评审数据模型和权限怎么做、有哪些坑？给最关键约束。", ["agent_case_code"], 90000, "Round2 代码帮回复");
 
-  // R4 收敛追问：团队抛验收标准/风险，@两位收口
-  console.log("\n───────────────────── Round 4 · 收敛与遗留项 ─────────────────────");
-  await roundHumanAsk(token, gid, "测试(小迪)", "@产品助理 @代码帮 你们对齐后的结论里，那条最关键、最容易返工的验收标准是什么？上线的两件事先做哪两件？顺便把一时没结论的遗留项列出来。", ["agent_case_prd", "agent_case_code"], "数字员工收口", 120000);
+  console.log("\n────────── Round 3 · 多方对齐（前端小叶 发起多数字员工讨论） ──────────");
+  console.log(`\n👤 前端小叶：「你们俩直接对一轮，把权限模型和 MVP 验收对齐。」`);
+  const obs3 = observeWS(p["f_xiaoye"], gid); await sleep(300);
+  const dis = await post(`/ag-ui/group/${gid}/discussion`, p["f_xiaoye"].token, { content: "基于前序：产品助理给了 MVP 用户故事，代码帮给了工程约束。请你俩对齐「权限模型」和「MVP 验收标准」为一份结论，并互相明确指出对方提案需补的一点。", agentIds: ["agent_case_prd", "agent_case_code"] });
+  console.log(`[发起讨论] 参与: ${(dis.agents || []).join(", ")}`);
+  const got3 = await waitNewReplies(p["f_xiaoye"].token, gid, ["agent_case_prd", "agent_case_code"], 150000, obs3.errors);
+  obs3.close();
+  if (got3.size < 2) throw new Error(`Round3 数字员工对齐全员未到位；WS: ${obs3.errors.join(" | ") || "无明显错误"}`);
 
-  // 3. 汇总：回读群历史，按时间序列出完整对话骨架（人 + 数字员工交替）
-  console.log("\n\n═══════════ 完整推进会记录（按时间序） ═══════════");
-  const snap = await get(`/ag-ui/group/${gid}`, token);
-  const all = (snap.latestMessages || []).filter((m) => !m.recalled);
-  const who = (m) => (m.senderId === userId ? "👤 演示者/团队" : (AGENTS.find((x) => x.agentId === m.senderId)?.nickname || m.senderId));
-  for (const m of all) {
-    const tag = m.senderId.startsWith("agent_") ? "🤖" : "👤";
-    console.log(`\n${tag} [${who(m)}] ${m.content.trim().slice(0, 220)}${m.content.trim().length > 220 ? " …" : ""}`);
+  console.log("\n────────── Round 4 · 收敛与遗留项（测试小迪 再次@两位） ──────────");
+  await roundAsk(p["q_xiaodi"], gid, "@产品助理 @代码帮 对齐后最易返工的一条验收标准是？上线先做的两件事？一时没结论的遗留项列出来。", ["agent_case_prd", "agent_case_code"], 120000, "Round4 数字员工收口");
+
+  // 4. 汇总：按时间序回放（真人 + 数字员工交替）
+  console.log("\n\n═══════════ 完整推进会回放 ═══════════");
+  const snap = await get(`/ag-ui/group/${gid}`, owner.token);
+  for (const m of (snap.latestMessages || []).filter((x) => !x.recalled)) {
+    const isAgent = m.senderId.startsWith("agent_");
+    const tag = isAgent ? "🤖" : "👤";
+    const name = m.senderNickname || (isAgent ? nickOf(m.senderId) : "成员");
+    console.log(`\n${tag} [${name}] ${m.content.trim().slice(0, 160)}${m.content.trim().length > 160 ? " …" : ""}`);
   }
-  console.log(`\n[完成] 推进会可登录 http://localhost:5200 查看完整对话（知聚 ${gid}）`);
+  console.log(`\n[完成] 全面会可登录 http://localhost:5200 查看（知聚 ${gid}）；真人账号见上。`);
   process.exit(0);
 }
 
-main().catch((e) => { console.error(`[失败] ${e.message}`); process.exit(1); });
+main().catch((e) => { console.error(`\n[失败] ${e.message}`); process.exit(1); });
