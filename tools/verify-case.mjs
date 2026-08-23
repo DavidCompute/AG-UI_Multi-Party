@@ -26,10 +26,12 @@ const HUMANS = [
   { username: "o_xiaolin", nickname: "运营小林", role: "运营" },
 ];
 const AGENTS = [
-  { agentId: "agent_case_prd", nickname: "产品助理", description: "产品需求分析助手",
-    instructions: "你是「产品助理」，负责需求澄清、用户故事与产品方案。先给结论再展开；结尾可反问推进讨论。" },
-  { agentId: "agent_case_code", nickname: "代码帮", description: "代码/架构评审助手",
-    instructions: "你是「代码帮」，负责架构评审与工程实现。讲思路优先，关注约束/风险/验收，可回应前序发言。" },
+  { agentId: "agent_sw_prd", nickname: "产品助理", description: "产品需求分析助手",
+    instructions: "你是「产品助理」，负责需求澄清、用户故事与产品方案。先给结论再展开；结尾可反问推进讨论。",
+    skills: [ { skillId: "skill_tech", description: "当需要工程技术可行性、数据模型或权限设计的工程评审意见时，调用此技能获取代码帮的工程视角。", targetAgentId: "agent_sw_code" } ] },
+  { agentId: "agent_sw_code", nickname: "代码帮", description: "代码/架构评审助手",
+    instructions: "你是「代码帮」，负责架构评审与工程实现。讲思路优先，关注约束/风险/验收，可回应前序发言。",
+    skills: [ { skillId: "skill_prd", description: "当需要产品需求视角、MVP 边界或用户故事验证时，调用此技能获取产品助理的产品意见。", targetAgentId: "agent_sw_prd" } ] },
 ];
 
 async function raw(url, opts = {}) { const r = await fetch(url, opts); const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch {} return { r, j, t }; }
@@ -58,14 +60,15 @@ async function snapshotAgentMsgs(token, gid, agentIds) {
 function observeWS(user, gid) {
   const ws = new WebSocket(`${wsBase}/ws?memberId=${encodeURIComponent(user.userId)}&token=${encodeURIComponent(user.token)}`);
   const errors = [];
-  let connected = false;
+  const tools = []; // 观测到数字员工调用的工具/技能名（TOOL_CALL_START）
   ws.onopen = () => { };
   ws.onmessage = (e) => {
     const evt = JSON.parse(e.data);
-    if (evt.type === "GROUP_CONNECTED") { connected = true; ws.send(JSON.stringify({ type: "GROUP_SUBSCRIBE", groupIds: [gid], timestamp: Date.now() })); }
-    if ([ "RUN_ERROR", "AGENT_QUOTA_EXCEEDED", "GROUP_TYPING", "AGENT_INTERACTION_REQUEST", "TEXT_MESSAGE_RESET" ].includes(evt.type)) errors.push(evt.type + (evt.message ? ` :: ${evt.message}` : "") + (evt.errorCode ? ` [${evt.errorCode}]` : ""));
+    if (evt.type === "GROUP_CONNECTED") ws.send(JSON.stringify({ type: "GROUP_SUBSCRIBE", groupIds: [gid], timestamp: Date.now() }));
+    if ([ "RUN_ERROR", "AGENT_QUOTA_EXCEEDED", "AGENT_INTERACTION_REQUEST", "TEXT_MESSAGE_RESET" ].includes(evt.type)) errors.push(evt.type + (evt.message ? ` :: ${evt.message}` : "") + (evt.errorCode ? ` [${evt.errorCode}]` : ""));
+    if (evt.type === "TOOL_CALL_START") tools.push(evt.toolCallName || evt.toolName || "unknown");
   };
-  return { ws, errors, close: () => { try { ws.close(); } catch {} } };
+  return { ws, errors, tools, close: () => { try { ws.close(); } catch {} } };
 }
 
 /// 等目标数字员工产生『本轮新增』回复（内容稳定后打印），返回收到的新回复；带 WS 错误收集
@@ -110,6 +113,7 @@ async function roundAsk(user, gid, text, agents, timeoutMs, label) {
   if (missing.length) {
     throw new Error(`${label} 未收到新回复：${missing.join(",")}；WS 观察到: ${obs.errors.join(" | ") || "无明显错误"}`);
   }
+  return { replies: got, tools: [...new Set(obs.tools)] };
 }
 
 async function main() {
@@ -121,10 +125,13 @@ async function main() {
   console.log(`[OK] 已就绪真人: ${HUMANS.map((h) => `${h.nickname}(@${h.username})`).join("、")}`);
 
   const owner = people[HUMANS[0].username];
+  // 创建数字员工并配置技能（技能 = 数字员工间协作：宿主可调用目标子数字员工）；已存在则跳过（幂等）
+  const skillOf = (agents) => agents.map((s) => ({ skillId: s.skillId, description: s.description, targetAgentId: s.targetAgentId }));
   for (const a of AGENTS) {
     const ex = await get("/ag-ui/agents", owner.token);
+    const payload = { agentId: a.agentId, nickname: a.nickname, description: a.description, instructions: a.instructions, triggerMode: "mentioned", keywords: [], skills: skillOf(a.skills) };
     if (!ex.some((x) => x.agentId === a.agentId))
-      await post("/ag-ui/agents", owner.token, { agentId: a.agentId, nickname: a.nickname, description: a.description, instructions: a.instructions, triggerMode: "mentioned", keywords: [] });
+      await post("/ag-ui/agents", owner.token, payload);
   }
   console.log(`[OK] 数字员工作备：${AGENTS.map((a) => a.nickname).join("、")}\n`);
 
@@ -147,10 +154,10 @@ async function main() {
   const p = people;
 
   console.log("────────── Round 1 · 需求澄清（产品小梦 @产品助理） ──────────");
-  await roundAsk(p["p_xiaomeng"], gid, "@产品助理 我们团队 3-10 人想把「知聚」做成多角色协作平台。先帮我们把 MVP 边界和用户故事理清楚，别贪多。", ["agent_case_prd"], 90000, "Round1 产品助理回复");
+  await roundAsk(p["p_xiaomeng"], gid, "@产品助理 我们团队 3-10 人想把「知聚」做成多角色协作平台。先帮我们把 MVP 边界和用户故事理清楚，别贪多。", ["agent_sw_prd"], 90000, "Round1 产品助理回复");
 
   console.log("\n────────── Round 2 · 技术评审（后端阿凯 @代码帮） ──────────");
-  await roundAsk(p["d_akai"], gid, "@代码帮 产品助理刚给了 MVP 范围。你从工程角度评审数据模型和权限怎么做、有哪些坑？给最关键约束。", ["agent_case_code"], 90000, "Round2 代码帮回复");
+  await roundAsk(p["d_akai"], gid, "@代码帮 产品助理刚给了 MVP 范围。你从工程角度评审数据模型和权限怎么做、有哪些坑？给最关键约束。", ["agent_sw_code"], 90000, "Round2 代码帮回复");
 
   // 运营小林：不 @ 数字员工，仅作为真人成员插一句，证明“多人真人同场”
   console.log("\n────────── Round 2.5 · 运营插话（运营小林，不 @ 数字员工） ──────────");
@@ -159,17 +166,37 @@ async function main() {
     groupId: gid, userId: p["o_xiaolin"].userId, content: "我先记一笔：这轮信息要同步到周报，大家接着聊，结论我最后汇总。", mentions: [], timestamp: Date.now(),
   });
 
-  console.log("\n────────── Round 3 · 多方对齐（前端小叶 发起多数字员工讨论） ──────────");
-  console.log(`\n👤 前端小叶：「你们俩直接对一轮，把权限模型和 MVP 验收对齐。」`);
+  console.log("\n────────── Round 3 · 技能协作（前端小叶请代码帮调用「产品助理」技能） ──────────");
+  console.log(`\n👤 前端小叶：「代码帮，请先调用你的「产品助理」技能核对一下需求边界的这条验收口径，再给我权限相关的工程结论。」`);
   const obs3 = observeWS(p["f_xiaoye"], gid); await sleep(300);
-  const dis = await post(`/ag-ui/group/${gid}/discussion`, p["f_xiaoye"].token, { content: "基于前序：产品助理给了 MVP 用户故事，代码帮给了工程约束。请你俩对齐「权限模型」和「MVP 验收标准」为一份结论，并互相明确指出对方提案需补的一点。", agentIds: ["agent_case_prd", "agent_case_code"] });
-  console.log(`[发起讨论] 参与: ${(dis.agents || []).join(", ")}`);
-  const got3 = await waitNewReplies(p["f_xiaoye"].token, gid, ["agent_case_prd", "agent_case_code"], 150000, obs3.errors);
+  await post("/ag-ui/group/message/send", p["f_xiaoye"].token, {
+    groupId: gid, userId: p["f_xiaoye"].userId,
+    content: "@代码帮 请先调用你的「skill_prd」产品助理技能，核对一下需求边界的验收口径，再给出权限相关的工程结论。",
+    mentions: ["agent_sw_code"], timestamp: Date.now(),
+  });
+  const got3 = await waitNewReplies(p["f_xiaoye"].token, gid, ["agent_sw_code"], 120000, obs3.errors);
+  const skillTools3 = [...new Set(obs3.tools.filter((t) => t.startsWith("skill")))];
   obs3.close();
-  if (got3.size < 2) throw new Error(`Round3 数字员工对齐全员未到位；WS: ${obs3.errors.join(" | ") || "无明显错误"}`);
+  if (!got3.has("agent_sw_code")) throw new Error(`Round3 代码帮未回复；WS: ${obs3.errors.join(" | ") || "无明显错误"}`);
+  console.log(`\n[技能协作观测] 本轮模型调用了技能/工具: ${obs3.tools.join(", ") || "（未观测到工具调用）"}${skillTools3.length ? ` → ✅ 数字员工间技能协作 ${skillTools3.join("、")} 已触发` : " → ⚠️ 未触发技能（模型直接作答）"}`);
 
-  console.log("\n────────── Round 4 · 收敛与遗留项（测试小迪 再次@两位） ──────────");
-  await roundAsk(p["q_xiaodi"], gid, "@产品助理 @代码帮 对齐后最易返工的一条验收标准是？上线先做的两件事？一时没结论的遗留项列出来。", ["agent_case_prd", "agent_case_code"], 120000, "Round4 数字员工收口");
+  // 反向技能演示：产品助理调用「代码帮」技能做工程校核（可选，说明技能可双向）
+  console.log(`\n────────── Round 3b · 技能协作（产品助理调用「代码帮」技能） ──────────`);
+  console.log(`\n👤 产品小梦：「产品助理，请你调用你的「代码帮」技能，让代码帮看看这个权限约束在工程上有没有坑，再回我。」`);
+  const obs3b = observeWS(p["p_xiaomeng"], gid); await sleep(300);
+  await post("/ag-ui/group/message/send", p["p_xiaomeng"].token, {
+    groupId: gid, userId: p["p_xiaomeng"].userId,
+    content: "@产品助理 请调用你的「skill_tech」代码帮技能，让代码帮评审一下「ACL 先于 RBAC」这条约束在工程上的实现有没有坑，再给我你的结论。",
+    mentions: ["agent_sw_prd"], timestamp: Date.now(),
+  });
+  const got3b = await waitNewReplies(p["p_xiaomeng"].token, gid, ["agent_sw_prd"], 120000, obs3b.errors);
+  const skillTools3b = [...new Set(obs3b.tools.filter((t) => t.startsWith("skill")))];
+  obs3b.close();
+  if (!got3b.has("agent_sw_prd")) throw new Error(`Round3b 产品助理未回复；WS: ${obs3b.errors.join(" | ") || "无明显错误"}`);
+  console.log(`\n[技能协作观测] 本轮模型调用了技能/工具: ${obs3b.tools.join(", ") || "（未观测到工具调用）"}${skillTools3b.length ? ` → ✅ 反向技能协作 ${skillTools3b.join("、")} 已触发` : " → ⚠️ 未触发技能（模型直接作答）"}`);
+
+  console.log("\n────────── Round 4 · 收口（测试小迪 再次@代码帮） ──────────");
+  await roundAsk(p["q_xiaodi"], gid, "@代码帮 结合刚才的情况，把「最易返工的一条验收标准 + 上线先做的两件事 + 遗留项」收口成一份简洁结论。", ["agent_sw_code"], 150000, "Round4 数字员工收口");
 
   // 4. 汇总：明确列出参与者（真人几人 + 数字员工几人），再按时间序回放
   console.log("\n\n═══════════ 完整推进会回放 ═══════════");
