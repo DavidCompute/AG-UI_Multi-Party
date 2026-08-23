@@ -1,8 +1,8 @@
 # AG-UI GroupChat Desktop - WiX v4 MSI build script
-# Usage: powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 [-Version 1.0.0]
+# Usage: powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 [-Version 1.0.73]
 # Deps: dotnet tool install -g wix --version "4.*"
 param(
-  [string]$Version = "1.0.0",
+  [string]$Version = "1.0.73",
   [string]$PublishDir = "artifacts/win-x64",
   [string]$OutDir = "artifacts/wix"
 )
