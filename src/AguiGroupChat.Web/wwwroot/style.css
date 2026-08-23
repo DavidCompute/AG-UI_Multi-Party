@@ -772,7 +772,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-  padding: 8px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 10;
+  padding: 8px 18px; border-radius: 8px; font-size: 13px; display: none;
+  /* 置于所有悬浮层（弹窗遮罩 z-20 / 菜单 z-40 / 登录层 z-50）之上，避免被弹窗背景模糊遮罩盖住而看不清 */
+  z-index: 100; box-shadow: 0 6px 20px rgba(0,0,0,.35);
 }
 .toast.show { display: block; }
 
