@@ -810,6 +810,7 @@
       <div class="admin-tabs">
         <button id="adminTabUsers" class="chip-btn admin-tab on">用户管理</button>
         <button id="adminTabUsage" class="chip-btn admin-tab">用量统计</button>
+        <button id="adminTabConfig" class="chip-btn admin-tab">配置治理</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -826,6 +827,30 @@
             <thead><tr><th>日期</th><th>总 Token</th><th>输入</th><th>输出</th><th>思考</th><th>调用次数</th></tr></thead>
             <tbody id="adminUsageRows"></tbody>
           </table>
+        </div>
+      </div>
+      <div id="adminConfigView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 10px">在线调整并持久化运维参数（无需改配置文件 / 重启）。存储提供方 / 模型 / 记忆提供方等<span style="color:var(--warn)">需重启</span>的项目为只读，见数据备份菜单「系统状态」旁的参数快照。</p>
+        <div class="config-grid">
+          <div class="form-group"><label>会话有效期（小时）</label><input id="cfgSessionTtlHours" class="modal-input" type="number" min="1" max="720" /></div>
+          <div class="form-group"><label>单群消息历史上限</label><input id="cfgMessageHistoryLimit" class="modal-input" type="number" min="1" max="100000" /></div>
+          <div class="form-group"><label>群成员上限</label><input id="cfgMaxGroupMembers" class="modal-input" type="number" min="1" max="5000" /></div>
+          <div class="form-group"><label>单消息最大字符数</label><input id="cfgMaxMessageChars" class="modal-input" type="number" min="1" max="1000000" /></div>
+          <div class="form-group"><label>消息保留天数（0=不清理）</label><input id="cfgMessageRetentionDays" class="modal-input" type="number" min="0" /></div>
+          <div class="form-group"><label>每日 Token 配额 / 用户</label><input id="cfgDailyTokenQuota" class="modal-input" type="number" min="0" /></div>
+        </div>
+        <div class="config-checks">
+          <label class="cfg-check"><input id="cfgRequireToken" type="checkbox" /> 实时通道强制令牌（RequireTokenOnRealTime）</label>
+          <label class="cfg-check"><input id="cfgEnableTools" type="checkbox" /> 启用工具调用</label>
+          <label class="cfg-check"><input id="cfgEnableWebTools" type="checkbox" /> 启用联网工具</label>
+          <label class="cfg-check"><input id="cfgWorkTools" type="checkbox" /> 启用工作型智能体文件/命令工具</label>
+          <label class="cfg-check"><input id="cfgThinking" type="checkbox" /> 思考模式</label>
+        </div>
+        <div class="form-group"><label>需审批的工具名（逗号分隔）</label><input id="cfgApprovalTools" class="modal-input" placeholder="publish_announcement"></div>
+        <div class="form-group"><label>允许 iframe 嵌入的来源（逗号分隔，空=禁止嵌入）</label><input id="cfgFrameOrigins" class="modal-input" placeholder="https://portal.example.com"></div>
+        <div class="modal-actions" style="padding-top:8px">
+          <button id="cfgReload" class="btn-ghost">刷新</button>
+          <button id="cfgSave" class="send">保存</button>
         </div>
       </div>
       <div class="modal-actions">

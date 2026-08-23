@@ -21,6 +21,7 @@ builder.Services.AddSingleton<AgentScheduler>(); // 智能体定时任务（cron
 builder.Services.AddSingleton<AguiGroupChat.Hub.Persistence.MessageRetentionService>(); // 消息保留策略（按天清理历史）
 builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey），持久化到扩展区 modelConfig
 builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4），持久化到扩展区「branding」
+builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员持久化运维旋钮，持久化到扩展区「configGovernance」
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
@@ -89,6 +90,7 @@ app.MapTaskApi();   // 任务编排（工作型智能体）
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
+app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
 
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();
@@ -99,6 +101,7 @@ app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoi
 app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
+app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

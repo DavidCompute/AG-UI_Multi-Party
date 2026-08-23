@@ -196,6 +196,91 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         catch (Exception ex) { _logger.LogDebug(ex, "过期记忆清理失败"); return 0; }
     }
 
+    // ================= 跨实例记忆同步（2.3）：导出 / 导入 =================
+
+    /// <summary>
+    /// 导出记忆（分页，可选择群 groupId 与时间下限 sinceMs）——「记忆即数据包」的导出侧。
+    /// 文本内容可移植，向量在目标实例导入时按各自 embedding 模型重算（跨实例模型维度可能不同，不导出向量）。
+    /// </summary>
+    public IReadOnlyList<MessageMemoryItem> ExportMemories(string? groupId, long sinceMs, int limit, int offset)
+    {
+        if (!_options.Enabled) return [];
+        try
+        {
+            const int page = 1000;
+            var matched = new List<MessageMemoryItem>();
+            var off = 0;
+            while (true)
+            {
+                var chunk = _store.ListMessages(groupId, null, null, page, off);
+                if (chunk.Count == 0) break;
+                foreach (var it in chunk) if (it.Timestamp >= sinceMs) matched.Add(it);
+                off += chunk.Count;
+                if (chunk.Count < page) break;
+            }
+            return matched.Skip(Math.Max(0, offset)).Take(Math.Min(limit, 5000)).ToList();
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "记忆导出失败"); return []; }
+    }
+
+    public long CountMemories(string? groupId, long sinceMs)
+    {
+        if (!_options.Enabled) return 0;
+        try
+        {
+            const int page = 1000;
+            long n = 0;
+            var off = 0;
+            while (true)
+            {
+                var chunk = _store.ListMessages(groupId, null, null, page, off);
+                if (chunk.Count == 0) break;
+                n += chunk.Count(it => it.Timestamp >= sinceMs);
+                off += chunk.Count;
+                if (chunk.Count < page) break;
+            }
+            return n;
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "记忆导出计数失败"); return 0; }
+    }
+
+    /// <summary>
+    /// 导入记忆：逐条向量化后 upsert（按 messageId 去重，已存在或 embedding 不可用则跳过）。
+    /// 导入侧复用本实例的 embedding 模型，故支持跨实例（不同向量维度）迁移。返回实际写入条数。
+    /// </summary>
+    public async Task<int> ImportMemoriesAsync(IReadOnlyList<MessageMemoryItem> items, CancellationToken ct = default)
+    {
+        if (!_options.Enabled || items is null || items.Count == 0) return 0;
+        var imported = 0;
+        foreach (var it in items)
+        {
+            if (ct.IsCancellationRequested) break;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(it.MessageId) || string.IsNullOrWhiteSpace(it.Content)) continue;
+                // 去重：同 messageId 已存在（或内容一致）则跳过
+                var existing = _store.GetByMessageId(it.MessageId);
+                if (existing is not null) continue;
+                if (!await _embeddingLimiter.WaitAsync(TimeSpan.FromSeconds(EmbeddingWaitTimeoutSeconds), ct)) { _logger.LogWarning("记忆导入 embedding 排队超时，跳过 {MessageId}", it.MessageId); continue; }
+                try
+                {
+                    var embedding = await _embedding.EmbedAsync(SanitizeForMemory(it.Content), ct);
+                    if (embedding is null || embedding.Length == 0) continue;
+                    var importance = MemoryImportance.IsValid(it.Importance) ? it.Importance : MemoryImportance.Normal;
+                    _store.Upsert(new MessageMemoryRecord(
+                        it.MessageId, it.GroupId, it.TopicId, it.SenderId, it.SenderType,
+                        SanitizeForMemory(it.Content), embedding, it.Timestamp, importance, it.ExpiresAt));
+                    imported++;
+                }
+                finally { _embeddingLimiter.Release(); }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex) { _logger.LogDebug(ex, "记忆导入单条失败：{MessageId}", it.MessageId); }
+        }
+        _logger.LogInformation("记忆导入完成：达成 {Imported} 条，跳过 {Skipped} 条", imported, (items.Count - imported));
+        return imported;
+    }
+
     /// <summary>按语义相似度检索历史记忆（提供方不可用 / 未启用时返回空）。
     /// Scope=agent（默认）时检索该智能体所在的所有群。</summary>
     public async Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default)

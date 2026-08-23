@@ -36,11 +36,13 @@ public sealed class AdminApiServerFixture : IAsyncLifetime
         });
         HubApp.ConfigureServices(builder);
         builder.Services.AddAgentFramework(builder.Configuration);
+        builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 
         App = builder.Build();
         HubApp.MapEndpoints(App);
         App.MapAdminApi();
+        App.MapConfigGovernanceApi();
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }
@@ -264,6 +266,53 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         // 非成员 → 403
         var outsider = await RegisterAsync("related_outsider");
         using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/topics/related?topicId=main", outsider.GetProperty("token").GetString());
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
+    }
+
+    [Fact]
+    public async Task ConfigGovernance_Post_AdminUpdatesAndPersists()
+    {
+        var admin = await RegisterAsync("admin_chief"); // 配置名单管理员
+        var token = admin.GetProperty("token").GetString()!;
+
+        using var set = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        set.Content = JsonContent.Create(new
+        {
+            sessionTtlHours = 48,
+            messageHistoryLimit = 2000,
+            maxGroupMembers = 300,
+            enableWebTools = true,
+            workToolsEnabled = true,
+            requireApprovalToolNames = new[] { "publish_announcement", "deploy" },
+            allowedFrameOrigins = new[] { "https://portal.example.com" },
+        });
+        var setRes = await _client.SendAsync(set);
+        setRes.EnsureSuccessStatusCode();
+
+        using var get = Authed(HttpMethod.Get, "/ag-ui/admin/config/governance", token);
+        var d = await (await _client.SendAsync(get)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(48, d.GetProperty("sessionTtlHours").GetInt32());
+        Assert.Equal(2000, d.GetProperty("messageHistoryLimit").GetInt32());
+        Assert.Equal(300, d.GetProperty("maxGroupMembers").GetInt32());
+        Assert.Contains(d.GetProperty("requireApprovalToolNames").EnumerateArray(), x => x.GetString() == "deploy");
+        Assert.Contains(d.GetProperty("allowedFrameOrigins").EnumerateArray(), x => x.GetString() == "https://portal.example.com");
+    }
+
+    [Fact]
+    public async Task ConfigGovernance_Post_RejectsInvalidAndForbidsNonAdmin()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+
+        // 非法边界 → 400
+        using var bad = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        bad.Content = JsonContent.Create(new { messageHistoryLimit = -1 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(bad)).StatusCode);
+
+        // 非管理员 → 403
+        var normal = await RegisterAsync("cfg_normal_admin");
+        using var denied = Authed(HttpMethod.Post, "/ag-ui/admin/config", normal.GetProperty("token").GetString());
+        denied.Content = JsonContent.Create(new { sessionTtlHours = 24 });
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
 }

@@ -50,4 +50,18 @@ public interface IMessageMemory
 
     /// <summary>物理删除已过期记忆（自动遗忘定时清理执行）。</summary>
     int PruneExpired();
+
+    // ================= 跨实例记忆同步（2.3）：导出「记忆即数据包」 / 增量导入 =================
+
+    /// <summary>导出记忆（分页；可选择群与时间下限，供增量同步到中心 Hub）。默认返回空（未实现时回退）。</summary>
+    IReadOnlyList<MessageMemoryItem> ExportMemories(string? groupId, long sinceMs, int limit, int offset)
+        => [];
+
+    /// <summary>符合条件的记忆总数（与 <see cref="ExportMemories"/> 同过滤）。默认返回 0。</summary>
+    long CountMemories(string? groupId, long sinceMs) => 0;
+
+    /// <summary>导入记忆：逐条向量化后写入（按 messageId 去重，已存在 / embedding 不可用则跳过）。跨实例同步的核心。
+    /// 返回实际写入条数。默认返回 0。</summary>
+    Task<int> ImportMemoriesAsync(IReadOnlyList<MessageMemoryItem> items, CancellationToken ct = default)
+        => Task.FromResult(0);
 }

@@ -1094,6 +1094,11 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .admin-modal { width: 900px; max-width: 96vw; }
 .admin-modal .admin-table-wrap { max-height: 55vh; overflow: auto; }
 .admin-modal .admin-table td { white-space: nowrap; }
+/* 配置治理（6.3）：参数网格 / 开关行 */
+.config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-bottom: 6px; }
+.config-checks { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 8px 0; }
+.cfg-check { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.cfg-check input { width: 15px; height: 15px; accent-color: var(--accent); }
 .admin-modal .admin-table td:last-child { white-space: nowrap; }
 /* 图标操作按钮：禁用/启用/重置密码（仅图标 + title，行内紧凑） */
 .admin-modal .icon-btn { padding: 3px 8px; font-size: 14px; line-height: 1; border-radius: 6px; }

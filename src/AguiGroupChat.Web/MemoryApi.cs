@@ -4,6 +4,7 @@ using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Hub.Users;
+using System.Text.Json;
 
 namespace AguiGroupChat.Web;
 
@@ -198,6 +199,99 @@ public static class MemoryApi
                 memoryCount = count,
             });
         });
+
+        // ---- 跨实例记忆同步（2.3）：导出「记忆即数据包」 / 增量导入（打通桌面 / Web 孤岛）----
+        // 导出：groupId 为空 = 全部自己所在群；since 毫秒时间戳 = 仅导该时间之后的增量；limit / offset 分页。
+        root.MapGet("/export", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IMessageMemory memory)
+            => ExportMemories(ctx, auth, authOptions, store, memory));
+
+        // 导入：body 为导出产生的数组（或 {items:[...]}）；逐条向量化写入（按 messageId 去重）。
+        root.MapPost("/import", async (JsonElement body, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+            IMessageMemory memory, CancellationToken ct) =>
+        {
+            var (_, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
+            if (error is not null) return error;
+            var items = body.ValueKind == JsonValueKind.Array ? body :
+                (body.TryGetProperty("items", out var arr) ? arr : default);
+            if (items.ValueKind != JsonValueKind.Array)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请求体需为记忆数组或 {items:[...]}"));
+            var list = items.EnumerateArray().Select(ParseMemoryItem).Where(x => x is not null).Select(x => x!).ToList();
+            if (list.Count == 0)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "没有可导入的记忆条目"));
+            var imported = await memory.ImportMemoriesAsync(list, ct);
+            return Results.Ok(new { ok = true, imported, provided = list.Count });
+        });
+    }
+
+    private static IResult ExportMemories(HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IMessageMemory memory)
+    {
+        var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
+        if (error is not null) return error;
+        if (userId is null) return error!;
+
+        var groupId = ctx.Request.Query["groupId"].ToString();
+        var since = long.TryParse(ctx.Request.Query["since"].ToString(), out var sMs) ? sMs : 0;
+        var limit = int.TryParse(ctx.Request.Query["limit"].ToString(), out var lo) ? Math.Clamp(lo, 1, 10_000) : 2000;
+        var offset = int.TryParse(ctx.Request.Query["offset"].ToString(), out var of) ? Math.Max(0, of) : 0;
+
+        // 校验：groupId 为空时仅可导自己所在群；指定群时须为该群成员（管理员可导任意群）
+        if (!string.IsNullOrWhiteSpace(groupId))
+        {
+            if (store.GetGroup(groupId) is null)
+                return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群不存在"));
+            if (!store.IsMember(groupId, userId) && !auth.IsAdmin(userId))
+                return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可见该群记忆"),
+                    statusCode: StatusCodes.Status403Forbidden);
+        }
+        else if (!auth.IsAdmin(userId))
+        {
+            // 非管理员：只导出自己所在群（避免枚举他人群记忆）
+            groupId = null; // 服务端 ExportMemories 传 null 会导出全部群 → 需按成员过滤
+            var memberGroups = store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
+            // 逐群导出并合并（保持游标语义按各群时间线）+ 上限保护
+            var collected = new List<MessageMemoryItem>();
+            foreach (var gid in memberGroups)
+            {
+                const int page = 1000;
+                int off = 0;
+                while (true)
+                {
+                    var chunk = memory.ExportMemories(gid, since, page, off);
+                    if (chunk.Count == 0) break;
+                    collected.AddRange(chunk);
+                    off += chunk.Count;
+                    if (chunk.Count < page) break;
+                }
+            }
+            collected = collected.OrderByDescending(m => m.Timestamp).Skip(offset).Take(limit).ToList();
+            return Results.Ok(new { total = collected.Count, items = collected });
+        }
+
+        var items = memory.ExportMemories(groupId, since, limit, offset);
+        return Results.Ok(new { total = memory.CountMemories(groupId, since), items });
+    }
+
+    /// <summary>解析一条导出记忆（字段缺失 / 非法则返回 null 跳过）。</summary>
+    private static MessageMemoryItem? ParseMemoryItem(JsonElement e)
+    {
+        try
+        {
+            var msg = e.TryGetProperty("messageId", out var v) ? v.GetString() : null;
+            var gid = e.TryGetProperty("groupId", out var vg) ? vg.GetString() : null;
+            var content = e.TryGetProperty("content", out var vc) ? vc.GetString() : null;
+            if (string.IsNullOrWhiteSpace(msg) || string.IsNullOrWhiteSpace(gid) || string.IsNullOrWhiteSpace(content)) return null;
+            return new MessageMemoryItem(
+                msg,
+                gid,
+                e.TryGetProperty("topicId", out var vt) ? vt.GetString() ?? "" : "",
+                e.TryGetProperty("senderId", out var vs) ? vs.GetString() ?? "" : "",
+                e.TryGetProperty("senderType", out var vst) ? vst.GetString() ?? "user" : "user",
+                content,
+                e.TryGetProperty("timestamp", out var t) && t.TryGetInt64(out var ts) ? ts : 0,
+                e.TryGetProperty("importance", out var vi) && vi.TryGetInt32(out var imp) ? imp : MemoryImportance.Normal,
+                e.TryGetProperty("expiresAt", out var ve) && ve.TryGetInt64(out var exp) && exp > 0 ? exp : null);
+        }
+        catch { return null; }
     }
 
     /// <summary>单条记忆所有权校验：仅记忆本人（或管理员）可删除 / 分级；越权返回 403。</summary>

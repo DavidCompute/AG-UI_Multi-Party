@@ -1015,7 +1015,9 @@ PUT /ag-ui/user/profile
 |调整记忆级别|`POST /ag-ui/memory/{messageId}/importance`|设置单条记忆级别 `0 普通 / 1 重要 / 2 关键`（同相似度下高级别优先被检索注入）|
 |删除记忆|`DELETE /ag-ui/memory/{messageId}`|物理删除单条记忆|
 |手动遗忘|`POST /ag-ui/memory/forget`|按群（或全部）设过期，可保留最近 N 小时；对应记忆停止参与检索并由后台定时清理|
-|记忆沉淀知识库|`POST /ag-ui/memory/consolidate`|**1.3**：把某群「关键」级别的记忆聚合写入指定知识库（自动/半自动沉淀结论为文档），body 含 `groupId` / `kbId` 等；复用知识库切片向量化|
+|记忆沉淀知识库|`POST /ag-ui/memory/consolidate`|**1.3**：把某群「关键」级别的记忆聚合写入指定知识库（自动/半自动沉淀结论为文档），body 含 `groupId` / `kbId` 等；复用知识库切片向量化 |
+|记忆导出|`GET /ag-ui/memory/export?groupId=&since=&limit=&offset=`|**2.3 跨实例同步**：导出「记忆即数据包」（文本元数据：messageId/群/话题/发送者/内容/时间/分级/过期），支持按群与时间下限 `since` 增量；非管理员仅可导自己所在群，管理员可导任意 |
+|记忆导入|`POST /ag-ui/memory/import`|**2.3**：导入记忆数组（或 `{items:[...]}`），逐条在目标实例按各自 embedding 模型重算向量，按 messageId 去重；返回 `{imported, provided}` |
 
 **重复性定时任务（1.4，值班智能体）**：
 
@@ -1048,7 +1050,9 @@ PUT /ag-ui/user/profile
 |运行状态|`GET /ag-ui/admin/status`|连接 / 群 / 用户 / 智能体 / 消息计数、内存、线程等进程信息|
 |模型用量|`GET /ag-ui/admin/usage?days=`|最近 N 天模型调用量按日汇总 + 配额配置|
 |运行指标|`GET /ag-ui/admin/metrics`|智能体调用 / 桥接 / 记忆命中 / 输出长度等进程内指标计数（6.1）|
-|配置快照|`GET /ag-ui/admin/config`|集中只读展示 appsettings / .env 关键运维参数（模型、存储、权限、允许来源等），供治理与排障（6.3）|
+|配置快照|`GET /ag-ui/admin/config`|集中只读展示 appsettings / .env 关键运维参数（模型、存储、权限、允许来源等），供治理与排障（6.3） |
+|配置写入|`POST /ag-ui/admin/config`|**6.3 配置治理**：仅管理员；在线写入并持久化运行时安全可改旋钮（会话有效期、群消息上限 / 群成员上限 / 单消息字符、消息保留天数、强制令牌、工具开关 / 工作型工具 / 思考模式 / 每日 Token 配额、审批名单、iframe 嵌入来源），非法值 400；持久化到 `configGovernance`，重启自动应用 |
+|配置覆盖回读|`GET /ag-ui/admin/config/governance`|返回当前已保存的治理覆盖值（未设置的沿用配置默认） |
 
 **多设备会话与二次验证（4.4，需令牌）**：
 

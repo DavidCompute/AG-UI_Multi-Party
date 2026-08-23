@@ -3062,16 +3062,22 @@ async function openAdminModal() {
 /** 管理员弹窗 tab 切换：用户管理 / 用量统计。 */
 function switchAdminTab(tab) {
   const users = tab === "users";
+  const usage = tab === "usage";
+  const conf = tab === "config";
   $("adminTabUsers").classList.toggle("on", users);
-  $("adminTabUsage").classList.toggle("on", !users);
+  $("adminTabUsage").classList.toggle("on", usage);
+  $("adminTabConfig").classList.toggle("on", conf);
   $("adminUsersView").classList.toggle("hidden", !users);
-  $("adminUsageView").classList.toggle("hidden", users);
+  $("adminUsageView").classList.toggle("hidden", !usage);
+  $("adminConfigView").classList.toggle("hidden", !conf);
   if (users) {
     $("adminUserRows").innerHTML = '<tr><td colspan="7" class="admin-empty">加载中…</td></tr>';
     loadAdminUsers();
-  } else {
+  } else if (usage) {
     $("adminUsageRows").innerHTML = '<tr><td colspan="6" class="admin-empty">加载中…</td></tr>';
     loadAdminUsage();
+  } else {
+    loadConfigGovernance();
   }
 }
 
@@ -3097,6 +3103,82 @@ async function loadAdminUsage() {
         </tr>`).join("")
       : '<tr><td colspan="6" class="admin-empty">暂无模型调用记录</td></tr>';
   } catch { $("adminUsageRows").innerHTML = '<tr><td colspan="6" class="admin-empty">网络错误</td></tr>'; }
+}
+
+/* ============ 配置治理（6.3）：管理员在线调参 ============ */
+
+/** 读取治理状态并回填表单（值 undefined → 留空表示沿用配置默认；布尔以三态呈现：未设置不勾也不禁用）。 */
+async function loadConfigGovernance() {
+  try {
+    const res = await fetch("/ag-ui/admin/config/governance", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { toast("配置读取失败：" + ((d && d.message) || res.status)); return; }
+    setCfg("cfgSessionTtlHours", d.sessionTtlHours);
+    setCfg("cfgMessageHistoryLimit", d.messageHistoryLimit);
+    setCfg("cfgMaxGroupMembers", d.maxGroupMembers);
+    setCfg("cfgMaxMessageChars", d.maxMessageChars);
+    setCfg("cfgMessageRetentionDays", d.messageRetentionDays);
+    setCfg("cfgDailyTokenQuota", d.dailyTokenQuotaPerUser);
+    setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
+    setCfgBool("cfgEnableTools", d.enableTools);
+    setCfgBool("cfgEnableWebTools", d.enableWebTools);
+    setCfgBool("cfgWorkTools", d.workToolsEnabled);
+    setCfgBool("cfgThinking", d.thinkingMode);
+    $("cfgApprovalTools").value = (d.requireApprovalToolNames || []).join(", ");
+    $("cfgFrameOrigins").value = (d.allowedFrameOrigins || []).join(", ");
+  } catch { toast("配置读取失败：网络错误"); }
+}
+
+function setCfg(id, v) { const el = $(id); if (el) el.value = v === null || v === undefined ? "" : String(v); }
+function setCfgBool(id, v) {
+  const el = $(id);
+  if (!el) return;
+  if (v === null || v === undefined) { el.checked = false; el.indeterminate = true; } // 三态：沿用配置默认
+  else { el.checked = !!v; el.indeterminate = false; }
+}
+/** 把表单值收集为请求体：空值 / 三态布尔（indeterminate=沿用）不发送 → 服务端保留原值。 */
+function collectCfg() {
+  const body = {};
+  body.sessionTtlHours = numOrNull("cfgSessionTtlHours");
+  body.messageHistoryLimit = numOrNull("cfgMessageHistoryLimit");
+  body.maxGroupMembers = numOrNull("cfgMaxGroupMembers");
+  body.maxMessageChars = numOrNull("cfgMaxMessageChars");
+  body.messageRetentionDays = numOrNull("cfgMessageRetentionDays");
+  body.dailyTokenQuotaPerUser = numOrNull("cfgDailyTokenQuota");
+  body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
+  body.enableTools = boolOrNull("cfgEnableTools");
+  body.enableWebTools = boolOrNull("cfgEnableWebTools");
+  body.workToolsEnabled = boolOrNull("cfgWorkTools");
+  body.thinkingMode = boolOrNull("cfgThinking");
+  body.requireApprovalToolNames = listOrUndefined($("cfgApprovalTools").value);
+  body.allowedFrameOrigins = listOrUndefined($("cfgFrameOrigins").value);
+  // 去掉 undefined / null 字段（保持后端语义：未传不修改）
+  for (const k of Object.keys(body)) if (body[k] === undefined || body[k] === null) delete body[k];
+  return body;
+}
+function numOrNull(id) { const v = $(id).value.trim(); return v === "" ? null : Number(v); }
+function boolOrNull(id) { const el = $(id); return el.indeterminate ? null : el.checked; }
+function listOrUndefined(str) {
+  const items = (str || "").split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+  if (!str || !items.length) return undefined; // 空 → 不修改审批名单/嵌入来源
+  return items;
+}
+
+async function saveConfigGovernance() {
+  const btn = $("cfgSave");
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "⏳ 保存中…";
+  try {
+    const res = await fetch("/ag-ui/admin/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify(collectCfg()),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast((data?.message) || ("保存失败：" + res.status)); return; }
+    toast("已保存运行配置");
+  } catch (ex) { toast("保存失败：" + ex.message); }
+  finally { btn.disabled = false; btn.textContent = orig; }
 }
 
 async function loadAdminUsers() {
@@ -5271,6 +5353,9 @@ function init() {
   });
   $("adminTabUsers").onclick = () => switchAdminTab("users");
   $("adminTabUsage").onclick = () => switchAdminTab("usage");
+  $("adminTabConfig").onclick = () => switchAdminTab("config");
+  $("cfgSave").onclick = saveConfigGovernance;
+  $("cfgReload").onclick = loadConfigGovernance;
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
   $("memSearchBtn").onclick = () => loadMemoryList(0);
