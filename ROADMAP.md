@@ -168,10 +168,11 @@
   - 已含 2 个集成测试（管理员更新持久化 + 非法值 400 / 非管理员 403）。
 
 ### 6.4 嵌入 / 白标 / 对外 API（★☆☆） ✅已实现
-- **现状**：接入走网页会话 token。
-- **目标**：iframe 嵌入第三方站点、品牌定制（Logo / 主题）、面向实现的 REST API 密钥。
-- **落点模块**：`SystemApi`、`AuthService`（API key）、前端主题化。
+- **现状**：接入走网页会话 token；已提供官方 .NET SDK 供第三方应用程序化接入。
+- **目标**：iframe 嵌入第三方站点、品牌定制（Logo / 主题）、面向实现的 REST API 密钥与官方客户端 SDK。
+- **落点模块**：`SystemApi`、`AuthService`（API key）、前端主题化、`AguiGroupChat.Sdk`。
 - **已实现**：
+  - **官方 .NET SDK（第三方接入）**：`src/AguiGroupChat.Sdk`——`AguiClient`（HTTP 上行：认证 / 群组 / 成员 / 话题 / 消息 / 多智能体讨论 / 人机交互 / 智能体操 / 附件）+ `AguiRealtimeClient`（WS 全双工 / SSE 下行 + 强类型事件分发）+ `Models`（与协议线格式一致的 DTO / 事件），`net8.0` / `net10.0`、零外部依赖；错误统一抛 `AguiException`（协议错误码 + HTTP 状态码）。示例 `samples/AguiGroupChat.Client`，端到端测试 `tests/AguiGroupChat.Sdk.Tests`（自托管真实 Hub，含 WebSocket 全链路）。
   - **对外 API 密钥**：`Auth:ApiKeys`（`[{apiKey, username}]`），`Authorization: Bearer <apiKey>` 免登录以绑定账号身份调用 HTTP API，继承其权限 / 管理员标记。
   - **白标品牌**：`GET/POST /ag-ui/settings/branding`（公开读 / 管理员写），配置应用名 + Logo + 品牌主色 + 强制深色 + 副标语，持久化到扩展区「branding」；前端以 CSS 变量注入主色、渲染登录页 / 顶栏 Logo 与应用名，管理菜单「白标设置」可在线编辑。
   - **iframe 嵌入**：`GroupChatOptions.AllowedFrameOrigins` 配置允许嵌入来源（CSP `frame-ancestors` 与 X-Frame-Options 相应放行，默认禁止）；前端自动检测 iframe / `?embed=1` 进入紧凑嵌入模式（隐藏无关按钮 / 副标题）。

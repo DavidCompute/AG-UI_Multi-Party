@@ -8,4 +8,8 @@
     <RootNamespace>AguiGroupChat.Client</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AguiGroupChat.Sdk\AguiGroupChat.Sdk.csproj" />
+  </ItemGroup>
+
 </Project>

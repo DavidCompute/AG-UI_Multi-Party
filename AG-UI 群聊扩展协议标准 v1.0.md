@@ -16,6 +16,8 @@
 
 - 适配 SSE 与 WebSocket 两种传输模式
 
+> **官方参考实现**：本协议对应的官方 .NET 客户端 SDK 位于 `src/AguiGroupChat.Sdk`（`AguiClient` HTTP 上行 + `AguiRealtimeClient` WS/SSE 下行 + 与线格式一致的强类型 Models），第三方应用可直接引用接入（示例 `samples/AguiGroupChat.Client`，详见 [SDK 文档](src/AguiGroupChat.Sdk/README.md)）。
+
 ### 1\.2 兼容性原则
 
 - 所有群聊专属字段均为可选，原生 AG\-UI 客户端可直接忽略新增字段

@@ -32,11 +32,13 @@ src/AguiGroupChat.Hub/Users/     # 用户管理：AuthService（注册/登录/�
 src/AguiGroupChat.Hub/Persistence/ # 持久化：PersistenceService（快照落盘/恢复）、ChangeHub、HubSnapshot DTO
 src/AguiGroupChat.Agents/        # MSAGENT 智能体网关：AgentGateway（IAgentGateway 实现）、AgentCatalog、MemoryContextProvider（RAG 注入）、KnowledgeBaseCatalog（知识库：文档切片向量 + 检索）、TwinService（用户分身 + ITwinAgentSync 钩子）、IAgentDefinitionStore（私密智能体归属）、MockChatClient、技能（AgentSkillCall 智能体间调用）；embedding 抽象（IEmbeddingProvider：HTTP / LLamaSharp 本地模型）；内置工具集（Tools/：calculator / unit_converter / group_memory_search / read_attachment / web_search / read_url）
 src/AguiGroupChat.Web/           # 演示 Web：组合根（Hub + Agents）+ 静态前端（index.html / app.js）+ TwinApi / AgentApi 等管理接口
+src/AguiGroupChat.Sdk/           # 第三方接入 SDK：AguiClient（HTTP 上行）+ AguiRealtimeClient（WS/SSE 下行）+ 强类型 Models
 src/AguiGroupChat.Desktop/       # 纯桌面版（Windows，WPF + WebView2）：SQLite + sqlite-vec 记忆、LLamaSharp 本地 embedding（捆绑 bge-m3 模型）
 src/AguiGroupChat.Desktop.Core/  # 桌面共享宿主（纯托管，跨平台）：进程内 Kestrel 组装 Hub + 网关 + API + 前端
 src/AguiGroupChat.Desktop.Cross/ # 跨平台桌面壳（Avalonia 12 + 官方 WebView）：Windows=WebView2 / macOS=WKWebView / Linux=WebKitGTK
 tests/AguiGroupChat.Hub.Tests/   # 单元 / 集成测试（真实 Kestrel + ClientWebSocket），含 SQLite + sqlite-vec 向量记忆测试
-samples/AguiGroupChat.Client/    # 示例 WS 客户端
+tests/AguiGroupChat.Sdk.Tests/   # SDK 端到端集成测试：自托管真实 Hub 验证 HTTP 与 WebSocket 全链路
+samples/AguiGroupChat.Client/    # 示例客户端：基于 SDK 演示登录 → 建群/发消息 → 实时订阅 → 流式接收回复
 tools/agents-starter.json        # 行业智能体包（25 个角色）：登录后在「智能体管理 → 导入 JSON」选择该文件即批量创建
 tools/build-msi.ps1              # WiX v4 MSI 安装包构建（perUser 安装到 %LocalAppData%\AguiGroupChat；剔除全平台运行库，捆绑 bge-m3 模型，MSI 约 580MB）
 tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑模型的瘦身版可用；默认 nomic-embed-text-v1.5.Q8_0）
@@ -50,6 +52,9 @@ graph TD
     C1[WS 客户端] -->|/ws?memberId=user_1001| WS
     C2[SSE 客户端] -->|/sse?memberId=...&groupIds=...| SSE[SseEndpoint]
     C3[HTTP 客户端] -->|/ag-ui/group/*| HTTP[HttpGroupApi]
+    SDK[第三方 App · AguiGroupChat.Sdk] -->|RealtimeClient WS| WS
+    SDK -->|AguiClient HTTP| HTTP
+    SDK -->|RealtimeClient SSE| SSE
     WS --> HUB[GroupHub]
     SSE --> HUB
     HTTP --> HUB
@@ -68,6 +73,29 @@ graph TD
     CM -.事件扇出.-> C1
     CM -.事件扇出.-> C2
 ```
+
+## 第三方接入 SDK（AguiGroupChat.Sdk）
+
+面向**第三方应用**接入 Hub 的官方 .NET 客户端 SDK（`src/AguiGroupChat.Sdk`，[README](src/AguiGroupChat.Sdk/README.md)）。
+只需一个 `AguiClient`（HTTP）+ 一个 `AguiRealtimeClient`（WS/SSE）即可完成登录、建群、发消息、实时订阅与智能体流式回复接收。
+
+```csharp
+var options = new AguiClientOptions { BaseUri = new Uri("http://localhost:5100") };
+using var client = new AguiClient(options);
+var auth = await client.LoginAsync("zhangsan", "123456");
+client.Token = auth.Token;
+
+await using var realtime = new AguiRealtimeClient(options) { Token = auth.Token };
+realtime.On<TextMessageContentEvent>(e => Console.Write(e.Delta));
+await realtime.ConnectAsync(["group_001"], ct);
+await realtime.SendMessageAsync(new GroupMessageSendRequest {
+    GroupId = "group_001", Content = "你好", Mentions = ["agent_prd"],
+});
+```
+
+- 覆盖：认证 / 群组 / 成员 / 话题 / 消息（含撤回、重答、已读、输入中）/ 多智能体讨论 / 人机交互决策 / 智能体目录 / 上传附件 / SSE 动态订阅
+- 目标框架：`net8.0` / `net10.0`，零外部运行时依赖；错误统一抛出 `AguiException`（协议错误码 + HTTP 状态码）
+- 完整示例：`samples/AguiGroupChat.Client`；端到端测试：`tests/AguiGroupChat.Sdk.Tests`
 
 ## 快速开始
 
@@ -96,11 +124,13 @@ dotnet run --project src/AguiGroupChat.Desktop.Cross
 示例数据：群 `group_xxx`（产品需求评审群），成员 `user_1001`（张三，群主）、`user_1002`（李四）、`agent_prd`（需求助手，提及触发）、`agent_code`（代码助手，语境触发：不 @ 也能根据上下文主动发言）。
 
 ```bash
-# 终端 1：示例 WS 客户端（连接 + 订阅 + 打印事件，20 秒后退出）
-dotnet run --project samples/AguiGroupChat.Client -- --memberId user_1001 --groupIds group_001
+# 终端 1：基于 SDK 的示例客户端（登录演示种子账号 → 连接 + 订阅 + 打印事件，20 秒后退出）
+# 演示账号 zhangsan / 123456（user_1001）；--login 用户名 密码
+# 连订阅群 group_001
+dotnet run --project samples/AguiGroupChat.Client -- --login zhangsan 123456 --groupIds group_001
 
-# 终端 2：另一个成员加入同一群
-dotnet run --project samples/AguiGroupChat.Client -- --memberId user_1002 --groupIds group_001 --send "大家好"
+# 终端 2：另一成员登录同一群并发消息（@需求助手 触发其回复）
+dotnet run --project samples/AguiGroupChat.Client -- --login lisi 123456 --groupIds group_001 --send "大家好，请给个需求大纲"
 ```
 
 ## 容器化部署（Docker）

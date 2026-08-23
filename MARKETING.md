@@ -99,6 +99,7 @@
 - **白标主题（6.4）**：管理员在线配置应用名 + Logo + 品牌主色 + 强制深色 + 副标语（「白标设置」），登录页与顶栏即时生效，主题可一键恢复默认；品牌主色自动派生强调色 / 深色适配。
 - **iframe 嵌入（6.4）**：配置 `AllowedFrameOrigins` 允许可信站点以 iframe 嵌入（CSP `frame-ancestors` 放行，默认禁止）；嵌入后自动进入紧凑模式（隐藏无关按钮）。
 - **对外 API 密钥（6.4）**：`Auth:ApiKeys` 配置密钥，`Authorization: Bearer <apiKey>` 免登录以绑定账号身份调用 HTTP API，适配脚本 / 集成对接。
+- **官方 .NET SDK（第三方接入）**：`src/AguiGroupChat.Sdk` 提供 `AguiClient`（HTTP 上行）+ `AguiRealtimeClient`（WS/SSE 下行）与强类型 Models，第三方应用一条引用即可登录、建群、发消息、实时订阅与接收智能体流式回复（详见 [SDK 文档](src/AguiGroupChat.Sdk/README.md)，示例见 `samples/AguiGroupChat.Client`）。
 
 ----
 

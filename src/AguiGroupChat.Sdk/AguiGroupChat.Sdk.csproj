@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 第三方应用接入 SDK：尽量宽的 TFM 使其可被 .NET 8+ 应用引用 -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AguiGroupChat.Sdk</RootNamespace>
+    <AssemblyName>AguiGroupChat.Sdk</AssemblyName>
+    <PackageId>AguiGroupChat.Sdk</PackageId>
+    <Version>0.1.0</Version>
+    <Description>AG-UI 群聊扩展协议 Hub 的第三方接入 SDK：封装 HTTP 上行 API 与 WebSocket/SSE 实时下行事件。</Description>
+    <PackageTags>ag-ui;group-chat;hub;sdk;client;websocket;sse</PackageTags>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- net8.0/net10.0 均内建 System.Net.Http.Json 与 System.Net.WebSockets.Client，无需额外包。 -->
+  </ItemGroup>
+
+</Project>
