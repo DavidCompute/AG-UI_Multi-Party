@@ -132,7 +132,10 @@ if (-not $filesWxs) { throw "generate files.wxs failed" }
 # 3. compile MSI
 Write-Host "[3/4] wix build -> AguiGroupChat-Desktop-$Version.msi"
 $msi = Join-Path $out "AguiGroupChat-Desktop-$Version.msi"
-wix build (Join-Path $root "tools/wix/package.wxs") (Join-Path $out "files.wxs") -d "PublishDir=$publish" -d "Version=$Version" -o $msi
+# 品牌图标（package.wxs 的 $(var.AppIcon)）：tools/wix/agui-icon.ico（多尺寸，含 256，供 ARPPRODUCTICON / 快捷方式）
+$appIcon = Join-Path $root "tools/wix/agui-icon.ico"
+if (-not (Test-Path $appIcon)) { throw "Missing icon: $appIcon (expected from assets/, copy via tools/icon-gen)" }
+wix build (Join-Path $root "tools/wix/package.wxs") (Join-Path $out "files.wxs") -d "PublishDir=$publish" -d "Version=$Version" -d "AppIcon=$appIcon" -o $msi
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 
 # 4. result

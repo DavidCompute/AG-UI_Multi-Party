@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Avalonia.Controls;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 
 namespace AguiGroupChat.Desktop.Cross;
@@ -11,6 +12,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SetWindowIcon();
         StatusText.Text = $"本地服务：{App.BaseUrl}（数据与记忆全部存储在本机）";
         // 内嵌 WebView：AttachedToVisualTree 后显式 Navigate（Source 属性在适配器就绪前设置会被忽略）；
         // 3 秒后复查：若 WebView 初始化失败（LastUiError 被 Dispatcher 兜底记录），自动降级为系统浏览器打开。
@@ -18,6 +20,19 @@ public partial class MainWindow : Window
         var check = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
         check.Tick += (_, _) => { check.Stop(); EnsureFallback(); };
         check.Start();
+    }
+
+    /// <summary>加载 AG-UI 品牌图标作为窗口图标（输出目录 Assets/agui-icon-256.png，跨平台）。</summary>
+    private void SetWindowIcon()
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "agui-icon-256.png");
+            if (System.IO.File.Exists(path))
+                using (var fs = System.IO.File.OpenRead(path))
+                    Icon = new WindowIcon(new Bitmap(fs));
+        }
+        catch { /* 图标缺失 / 加载失败不影响窗口启动 */ }
     }
 
     private void NavigateSafely()

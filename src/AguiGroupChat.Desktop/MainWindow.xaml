@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="AG-UI 群聊桌面版"
+        Icon="Assets/agui-icon-128.png"
         Height="860" Width="1280"
         MinHeight="600" MinWidth="900"
         WindowStartupLocation="CenterScreen">

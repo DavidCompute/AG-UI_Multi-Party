@@ -8,7 +8,14 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <RootNamespace>AguiGroupChat.Desktop.Cross</RootNamespace>
     <AssemblyName>AguiGroupChat.Desktop.Cross</AssemblyName>
+    <!-- Windows exe / 任务栏图标 -->
+    <ApplicationIcon>Assets\agui-icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 运行时窗口图标（跨平台：Windows/macOS/Linux 均可加载） -->
+    <None Include="Assets\agui-icon-256.png" CopyToOutputDirectory="PreserveNewest" Link="Assets\agui-icon-256.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Avalonia 12 跨平台 UI + 官方 WebView 控件（macOS=WKWebView / Linux=WebKitGTK；

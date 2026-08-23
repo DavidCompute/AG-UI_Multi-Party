@@ -13,6 +13,9 @@
 
     <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 AG-UI 群聊桌面版，请先卸载旧版本。" />
 
+    <!-- 控制面板「添加 / 删除程序」图标 -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
     <!-- 全部内容打进单个 MSI（EmbedCab） -->
     <MediaTemplate EmbedCab="yes" />
 
@@ -43,14 +46,19 @@
       <Shortcut Id="StartMenuShortcut"
                 Directory="ProgramMenuDir"
                 Name="AG-UI 群聊桌面版"
+                Icon="AppIcon"
                 Target="[#MainExe]"
                 WorkingDirectory="INSTALLFOLDER" />
       <Shortcut Id="DesktopShortcut"
                 Directory="DesktopFolder"
                 Name="AG-UI 群聊桌面版"
+                Icon="AppIcon"
                 Target="[#MainExe]"
                 WorkingDirectory="INSTALLFOLDER" />
       <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
     </Component>
+
+    <!-- 品牌图标：MSI 产品 / 快捷方式图标（产品图集：256 最大，WiX 自动取） -->
+    <Icon Id="AppIcon" SourceFile="$(var.AppIcon)" />
   </Fragment>
 </Wix>

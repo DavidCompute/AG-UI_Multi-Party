@@ -39,6 +39,8 @@ src/AguiGroupChat.Desktop.Cross/ # 跨平台桌面壳（Avalonia 12 + 官方 Web
 tests/AguiGroupChat.Hub.Tests/   # 单元 / 集成测试（真实 Kestrel + ClientWebSocket），含 SQLite + sqlite-vec 向量记忆测试
 tests/AguiGroupChat.Sdk.Tests/   # SDK 端到端集成测试：自托管真实 Hub 验证 HTTP 与 WebSocket 全链路
 samples/AguiGroupChat.Client/    # 示例客户端：基于 SDK 演示登录 → 建群/发消息 → 实时订阅 → 流式接收回复
+assets/                          # 品牌图标：agui-icon.svg 矢量源 + 多尺寸 PNG/ICO（详见 assets/README.md）
+tools/icon-gen/                  # 图标栅格化生成器：把 SVG 矢量图标输出为多尺寸 PNG 与 Windows ICO
 tools/agents-starter.json        # 行业智能体包（25 个角色）：登录后在「智能体管理 → 导入 JSON」选择该文件即批量创建
 tools/build-msi.ps1              # WiX v4 MSI 安装包构建（perUser 安装到 %LocalAppData%\AguiGroupChat；剔除全平台运行库，捆绑 bge-m3 模型，MSI 约 580MB）
 tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑模型的瘦身版可用；默认 nomic-embed-text-v1.5.Q8_0）

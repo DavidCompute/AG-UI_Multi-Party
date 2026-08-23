@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6fa8ff"/>
+      <stop offset="0.55" stop-color="#4f8cff"/>
+      <stop offset="1" stop-color="#2b5fd9"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbe7ff"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 圆角底板 -->
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#g)"/>
+
+  <!-- 协作连线：外圈节点 → 中心（圆桌讨论的汇聚感） -->
+  <g stroke="#ffffff" stroke-opacity="0.85" stroke-width="2.4" fill="none" stroke-linecap="round">
+    <line x1="16" y1="22" x2="30" y2="30"/>
+    <line x1="13" y1="38" x2="29" y2="35"/>
+    <line x1="24" y1="50" x2="31" y2="39"/>
+    <line x1="40" y1="50" x2="34" y2="39"/>
+    <line x1="51" y1="38" x2="36" y2="35"/>
+    <line x1="48" y1="22" x2="34" y2="30"/>
+  </g>
+
+  <!-- 外圈节点（代表每个成员 / 智能体） -->
+  <g fill="#ffffff">
+    <circle cx="16" cy="22" r="4"/>
+    <circle cx="13" cy="38" r="4"/>
+    <circle cx="24" cy="50" r="4"/>
+    <circle cx="40" cy="50" r="4"/>
+    <circle cx="51" cy="38" r="4"/>
+    <circle cx="48" cy="22" r="4"/>
+  </g>
+
+  <!-- 中心协作中枢（汇聚 / 圆桌） -->
+  <circle cx="32" cy="33" r="11" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+  <circle cx="32" cy="33" r="5" fill="url(#core)"/>
+</svg>

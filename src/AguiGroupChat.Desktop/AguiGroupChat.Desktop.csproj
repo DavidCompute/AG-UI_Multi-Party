@@ -8,7 +8,14 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>AguiGroupChat.Desktop</RootNamespace>
     <AssemblyName>AguiGroupChat.Desktop</AssemblyName>
+    <!-- 应用图标：exe / 任务栏（Windows） -->
+    <ApplicationIcon>Assets\agui-icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 嵌入包资源：供 WPF 窗口图标（Icon 属性 / pack URI）使用 -->
+    <Resource Include="Assets\agui-icon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
