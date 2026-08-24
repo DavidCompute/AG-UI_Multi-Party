@@ -75,6 +75,8 @@ public sealed class KnowledgeBaseTests
     {
         public List<MessageMemoryRecord> Records { get; } = [];
         public List<string> RemovedGroups { get; } = [];
+        /// <summary>模拟纯语义检索低于阈值而空手（用于验证关键词召回兜底）。</summary>
+        public bool VectorSearchReturnsEmpty { get; set; }
         public void EnsureSchema() { }
         public void Upsert(MessageMemoryRecord record) => Records.Add(record);
         public void Remove(string groupId, string messageId) => Records.RemoveAll(r => r.GroupId == groupId && r.MessageId == messageId);
@@ -84,7 +86,12 @@ public sealed class KnowledgeBaseTests
             Records.RemoveAll(r => r.GroupId == groupId);
         }
         public void ClearAll() => Records.Clear();
-        public IReadOnlyList<MessageMemoryItem> ListMessages(string? groupId, string? senderId, string? keyword, int limit, int offset) => [];
+        public IReadOnlyList<MessageMemoryItem> ListMessages(string? groupId, string? senderId, string? keyword, int limit, int offset)
+            => Records.Where(r => (groupId is null || r.GroupId == groupId)
+                            && (senderId is null || r.SenderId == senderId)
+                            && (string.IsNullOrWhiteSpace(keyword) || r.Content.Contains(keyword, StringComparison.Ordinal)))
+                    .Select(r => new MessageMemoryItem(r.MessageId, r.GroupId, r.TopicId, r.SenderId, r.SenderType, r.Content, r.Timestamp, r.Importance, r.ExpiresAt))
+                    .OrderByDescending(r => r.Timestamp).Take(limit).ToList();
         public long CountMessages(string? groupId, string? senderId, string? keyword) => 0;
         public IReadOnlyList<MessageMemoryGroupStat> GroupStats(long nowMs) => [];
         public bool DeleteByMessageId(string messageId) => false;
@@ -92,9 +99,11 @@ public sealed class KnowledgeBaseTests
         public int SetExpiry(string? groupId, long? expiresAt, long nowMs) => 0;
         public int PruneExpired(long nowMs) => 0;
         public IReadOnlyList<MessageMemoryHit> Search(string groupId, string? agentId, float[] embedding, int topK, double minScore, string scope)
-            => Records.Where(r => r.GroupId == groupId && r.SenderType == "kb")
-                .Select(r => new MessageMemoryHit(r.MessageId, r.Content, r.SenderId, r.Timestamp, 0.9))
-                .Take(topK).ToList();
+            => VectorSearchReturnsEmpty
+                ? []
+                : Records.Where(r => r.GroupId == groupId && r.SenderType == "kb")
+                    .Select(r => new MessageMemoryHit(r.MessageId, r.Content, r.SenderId, r.Timestamp, 0.9))
+                    .Take(topK).ToList();
         public IReadOnlyList<MessageMemoryHit> SearchPerson(string personId, string currentGroupId, float[] embedding, int topK, double minScore) => [];
     }
 
@@ -193,6 +202,21 @@ public sealed class KnowledgeBaseTests
         var hit = Assert.Single(hits);
         Assert.Equal("制度库", hit.KbName);
         Assert.Contains("报销", hit.Content);
+    }
+
+    [Fact]
+    public async Task Search_KeywordRecall_RescuesDistinctiveTermDroppedByVector()
+    {
+        // 场景：文档里确实有“专享福利假”，但纯语义检索（此处模拟返回空 / 低分）会把它丢掉；
+        // 关键词召回应把词面命中的切片补回来，避免“有这个词却找不到”。
+        var text = "员工手册：9.12 在职灵通员工专享福利假，为在职员工提供带薪福利假。\n另有丧假、病假、事假等假期规定。";
+        var (catalog, store, kbId, attId) = SetupKb(text);
+        var (doc, _) = await catalog.AddDocumentAsync(kbId, attId);
+        await catalog.WaitForDocumentAsync(doc!.DocId);
+        store.VectorSearchReturnsEmpty = true; // 模拟向量相似度低于阈值
+
+        var hits = await catalog.SearchAsync([kbId], "专享福利假是什么", topK: 3, minScore: 0.9);
+        Assert.Contains(hits, h => h.Content.Contains("专享福利假", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -433,7 +433,41 @@ public sealed class KnowledgeBaseCatalog
             }
             catch (Exception ex) { _logger.LogDebug(ex, "知识库 {KbId} 检索失败", kbId); }
         }
-        return hits.OrderByDescending(h => h.Score).Take(topK).ToList();
+
+        // 关键词召回兜底（防止向量相似度低于阈值就丢命中的高频特征词）
+        // 纯语义检索对“专享福利假”之类的稀有词 / 长目录文本容易低于 minScore 而被过滤；
+        // 这里用 BM25 对知识库切片做一次关键词评分，把词面命中但向量漏掉的片段补回来。
+        try { hits.AddRange(KeywordRecall(store, kbIds, query, topK)); }
+        catch (Exception ex) { _logger.LogDebug(ex, "知识库关键词召回失败"); }
+
+        // 按内容去重（向量命中与关键词命中可能落在同一片段），合并后统一按融合分排序
+        return hits
+            .GroupBy(h => h.Content, StringComparer.Ordinal)
+            .Select(g => g.OrderByDescending(h => h.Score).First())
+            .OrderByDescending(h => h.Score)
+            .Take(topK)
+            .ToList();
+    }
+
+    /// <summary>关键词召回：用 BM25 在候选切片集合内检索与查询高度词面相关的片段；用于兜底纯语义检索丢命中的场景。</summary>
+    private List<KbHit> KeywordRecall(IMessageMemoryStore store, IReadOnlyList<string> kbIds, string query, int topK)
+    {
+        // 候选切片：限制扫描规模（每库取最近 N 片，覆盖绝大多数知识提问；超大库由纯语义路径兜底）
+        var candidateCap = Math.Max(topK, 120);
+        var scored = new List<KbHit>();
+        foreach (var kbId in kbIds)
+        {
+            var kb = GetKb(kbId);
+            if (kb is null) continue;
+            var items = store.ListMessages(KbGroupPrefix + kbId, null, null, candidateCap, 0);
+            foreach (var it in items)
+            {
+                var bm25 = Bm25Ranker.Score(query, it.Content);
+                if (bm25 <= 0.0) continue; // 无任何查询词命中，跳过（避免大量弱相关噪音）
+                scored.Add(new KbHit(kbId, kb.Name, it.SenderId, it.Content, bm25));
+            }
+        }
+        return scored.OrderByDescending(h => h.Score).Take(topK).ToList();
     }
 
     /// <summary>长文本智能切片：优先沿换行 / 句末标点收尾，避免在句子中间硬切切断语义；
