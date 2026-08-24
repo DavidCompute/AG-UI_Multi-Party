@@ -280,7 +280,7 @@ window.I18N_DICTS.en = {
   /* --- 白标 / 品牌化 --- */
   "brand.title": "Whitelabel Branding",
   "brand.explain": "Customize the login page and top bar branding (app name / logo / primary color). The primary color is used as the theme accent; <b>force dark</b> suits embedded portals. Logo accepts an in-site upload URL or <code>https</code> / <code>data:image</code>.",
-  "brand.name": "App name",
+  "brand.appNameLabel": "App name",
   "brand.namePh": "KnowGath(知聚) (blank = default)",
   "brand.logo": "Logo URL",
   "brand.logoPh": "/ag-ui/files/... or https://...",

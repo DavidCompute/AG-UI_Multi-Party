@@ -280,7 +280,7 @@ window.I18N_DICTS.zh = {
   /* --- 白标 / 品牌化 --- */
   "brand.title": "白标品牌",
   "brand.explain": "自定义登录页与顶栏的品牌观感（应用名 / Logo / 主色）。主色将作为主题强调色；<b>强制深色</b>适合嵌入门户统一样式。Logo 支持站内上传地址或 https / data:image。",
-  "brand.name": "应用名",
+  "brand.appNameLabel": "应用名",
   "brand.namePh": "知聚(KnowGath)（留空用默认）",
   "brand.logo": "Logo URL",
   "brand.logoPh": "/ag-ui/files/... 或 https://...",
