@@ -48,7 +48,12 @@ internal sealed class AgentSkillCall
             try
             {
                 var session = await _agent.CreateSessionAsync(ct);
-                var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, query)], session, null, ct);
+                // 以技能方式调用子智能体：附加强化指令，促使其在需要时调用自身的子技能、
+                // 并把子技能检索到的结论写入最终答复，确保多跳技能链（A→B→C）的结论逐层回传。
+                var message = "请你就以下请求给出答复。"
+                    + "如果有任何你掌握的下游子技能（specialist/skill）能更准确地回答，请先调用它们，"
+                    + $"并把它们的结论清晰地包含在你的最终回复中，不要只写“已调用”或“请查阅”。\n\n请求：{query}";
+                var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, message)], session, null, ct);
                 var text = ExtractResponseText(response);
                 return string.IsNullOrWhiteSpace(text) ? "（子智能体未返回内容）" : text;
             }
