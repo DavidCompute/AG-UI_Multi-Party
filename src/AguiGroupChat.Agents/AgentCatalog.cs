@@ -154,6 +154,11 @@ public sealed class AgentCatalog
         return _agentToolNames.TryGetValue(agentId, out var names) ? names : [];
     }
 
+    /// <summary>返回已填充缓存中的工具名（不强制重建智能体）。用于验证技能目标在多跳构建中
+    /// 已挂载自身技能：顶层智能体构建时会递归填充其技能目标的工具名缓存。</summary>
+    internal IReadOnlyList<string> GetCachedToolNames(string agentId)
+        => _agentToolNames.TryGetValue(agentId, out var names) ? names : [];
+
     /// <summary>返回某个智能体已挂载且**需要人机交互审批**的工具名（差异化审批策略下每个智能体可不同）。
     /// 若智能体未启用工具则返回空集。</summary>
     public IReadOnlyList<string> GetAgentApprovalToolNames(string agentId)
@@ -220,11 +225,16 @@ public sealed class AgentCatalog
 
     private ChatClientAgent Create(string agentId) => Create(agentId, includeSkills: true);
 
-    /// <summary>创建 ChatClientAgent。includeSkills=false 用于技能目标（子代理不再递归挂载技能，防循环引用）。
-    /// 技能目标子代理同时做<b>工具隔离</b>：不挂网络 / 文件读取类工具（web_search / read_url / read_attachment）——
+    /// <summary>技能链最大递归深度（防配置病态深链打爆构建 / 运行）。</summary>
+    private const int MaxSkillDepth = 6;
+
+    /// <summary>创建 ChatClientAgent。支持<b>多跳技能链</b>：技能目标（isSkillTarget=true）会继续挂载自身的技能，
+    /// 使 A→B→C 逐层激活成为可能；通过 <c>building</c> 访问链在构建期破坏循环引用（A→B→A 只在首次出现处
+    /// 注册目标，之后不再递归展开该目标，避免无限递归），并受 <see cref="MaxSkillDepth"/> 深度上限兜底。
+    /// 技能目标同时做<b>工具隔离</b>：不挂网络 / 文件读取类工具（web_search / read_url / read_attachment）——
     /// 技能链会把宿主的人设指令交由子代理执行，若子代理可联网 / 读附件，宿主被人设注入时会把
     /// SSRF / 文件读取等能力带进技能执行（攻击面放大）；基础工具（时间 / 计算 / 换算 / 记忆检索）与审批包装保留。</summary>
-    private ChatClientAgent Create(string agentId, bool includeSkills)
+    private ChatClientAgent Create(string agentId, bool includeSkills, bool isSkillTarget = false, IReadOnlySet<string>? building = null)
     {
         var def = GetDefinition(agentId)
             ?? throw new InvalidOperationException($"智能体 {agentId} 未在 Agents 配置中声明");
@@ -233,7 +243,7 @@ public sealed class AgentCatalog
             ? def.RequireApprovalToolNames
             : _options.RequireApprovalToolNames;
         var tools = _options.EnableTools ? BuildTools(approvalNames) : null;
-        if (!includeSkills && tools is not null)
+        if (isSkillTarget && tools is not null)
             tools = tools.Where(t => t.Name is not ("web_search" or "read_url" or "read_attachment")).ToList();
         // 工作型智能体（EnableWorkTools + 全局 WorkToolsEnabled）：额外挂载文件/命令工具。
         // 只能在专属工作区（data/workspaces/<agentId>/）内操作；命令/写操作有白名单与审批边界。
@@ -305,7 +315,8 @@ public sealed class AgentCatalog
 
         // MSAGENT 技能（智能体间调用）：把其他已注册智能体封装为可调用子代理（AIFunction 形式），
         // 模型需要该领域信息时经框架 AgentSession 调起目标智能体并取回其回复。
-        // 目标智能体以 includeSkills=false 构建：技能只展开一层，循环引用（A→B→A）不会无限递归。
+        // 支持多跳技能链：技能目标（isSkillTarget）会继续挂载自身技能，因此 A→B→C 能逐层激活。
+        // 用 building 访问链在构建期破坏循环（A→B→A 在目标已出现于当前链时不再次展开），并以深度上限兑底。
         if (includeSkills && def.Skills is { Count: > 0 })
         {
             var skillTools = new List<AITool>();
@@ -341,7 +352,17 @@ public sealed class AgentCatalog
                 }
                 try
                 {
-                    var target = Create(skill.TargetAgentId, includeSkills: false);
+                    // 访问链：当前链（祖先） + 本智能体，作为构建期防循环与深度限制的依据
+                    var childChain = new HashSet<string>(StringComparer.Ordinal);
+                    if (building is not null) childChain.UnionWith(building);
+                    childChain.Add(agentId);
+                    // 循环引用（目标已在本链）：注册一个不带自身技能的目标，避免无限递归
+                    var isCycle = childChain.Contains(skill.TargetAgentId);
+                    var expandTarget = !isCycle && childChain.Count < MaxSkillDepth;
+                    var target = Create(skill.TargetAgentId,
+                        includeSkills: expandTarget,
+                        isSkillTarget: true,
+                        building: childChain);
                     var targetNick = _definitions.TryGetValue(skill.TargetAgentId, out var tDef) ? tDef.Nickname ?? "" : skill.TargetAgentId;
                     // 技能返回子智能体的 Markdown 答复：提示宿主模型原样保留（含 mermaid 代码块），
                     // 否则模型常把代码块转义 / 改写，前端无法渲染成图表
