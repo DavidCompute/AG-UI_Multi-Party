@@ -109,6 +109,8 @@ services:
       Agents__Memory__TopK: ${MEMORY_TOP_K:-5}
       Agents__Memory__MinScore: ${MEMORY_MIN_SCORE:-0.25}
       Agents__Memory__Scope: ${MEMORY_SCOPE:-agent}
+      Agents__Memory__KnowledgeChunkSize: ${MEMORY_KNOWLEDGE_CHUNK_SIZE:-800}
+      Agents__Memory__KnowledgeChunkOverlap: ${MEMORY_KNOWLEDGE_CHUNK_OVERLAP:-100}
       Agents__Memory__PersonalTopK: ${MEMORY_PERSONAL_TOP_K:-3}
       Agents__Memory__PersonalMinScore: ${MEMORY_PERSONAL_MIN_SCORE:-0.25}
       Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}

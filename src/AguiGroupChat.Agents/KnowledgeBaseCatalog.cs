@@ -17,14 +17,22 @@ namespace AguiGroupChat.Agents;
 /// </summary>
 public sealed class KnowledgeBaseCatalog
 {
-    /// <summary>切片大小（字符）。</summary>
-    public const int ChunkSize = 800;
-
-    /// <summary>切片重叠（字符），避免跨片语义截断。</summary>
-    public const int ChunkOverlap = 100;
-
     /// <summary>单文档切片上限（防超大文档打爆 embedding / 存储）。</summary>
     public const int MaxChunksPerDoc = 500;
+
+    /// <summary>切片大小（字符）默认值，可用 <c>Agents:Memory:KnowledgeChunkSize</c> 覆盖。</summary>
+    internal const int ChunkSize = 800;
+
+    /// <summary>切片重叠（字符）默认值，可用 <c>Agents:Memory:KnowledgeChunkOverlap</c> 覆盖。</summary>
+    internal const int ChunkOverlap = 100;
+
+    /// <summary>实际生效的切片大小（优先读配置，回退默认）。</summary>
+    private int ConfigChunkSize => _options.Memory is { KnowledgeChunkSize: > 0 } m ? m.KnowledgeChunkSize : ChunkSize;
+
+    /// <summary>实际生效的切片重叠（优先读配置；默认取切片 1/5，保证 ≤ 切片大小以免后退）。</summary>
+    private int ConfigChunkOverlap => _options.Memory is { KnowledgeChunkOverlap: > 0 } m
+        ? Math.Min(m.KnowledgeChunkOverlap, ConfigChunkSize - 1)
+        : Math.Max(0, ConfigChunkSize / 5);
 
     /// <summary>GroupId 约定前缀：知识库向量的群维度 = kb:{KbId}。</summary>
     public const string KbGroupPrefix = "kb:";
@@ -239,7 +247,7 @@ public sealed class KnowledgeBaseCatalog
     /// <summary>切片 → 向量化 → 写入知识库向量表（attachment 与原始文本两条路径共用）。</summary>
     private async Task VectorizeAndStoreAsync(KnowledgeBase kb, KbDocument doc, string text, IMessageMemoryStore store, IEmbeddingProvider embedding)
     {
-        var chunks = Chunk(text);
+        var chunks = Chunk(text, ConfigChunkSize, ConfigChunkOverlap);
         if (chunks.Count == 0)
         {
             MarkError(doc, "文档内容为空");
@@ -247,7 +255,7 @@ public sealed class KnowledgeBaseCatalog
         }
         if (chunks.Count > MaxChunksPerDoc)
         {
-            MarkError(doc, $"文档过大（超过 {MaxChunksPerDoc} 个切片，约 {MaxChunksPerDoc * ChunkSize} 字符），请拆分后上传");
+            MarkError(doc, $"文档过大（超过 {MaxChunksPerDoc} 个切片，约 {MaxChunksPerDoc * ConfigChunkSize} 字符），请拆分后上传");
             return;
         }
 
@@ -429,20 +437,62 @@ public sealed class KnowledgeBaseCatalog
     }
 
     /// <summary>长文本切片（按字符固定长度 + 重叠）。</summary>
+    /// <summary>长文本智能切片：优先沿换行 / 句末标点收尾，避免在句子中间硬切切断语义；
+    /// 相邻切片携带重叠尾部（降低边界信息丢失）。窗口与重叠可传参（生产经配置 <c>KnowledgeChunkSize</c> / <c>KnowledgeChunkOverlap</c> 传入）。</summary>
     internal static List<string> Chunk(string text, int chunkSize = ChunkSize, int overlap = ChunkOverlap)
     {
         text = text.Trim();
         if (string.IsNullOrEmpty(text)) return [];
-        if (text.Length <= chunkSize) return [text];
+        var win = chunkSize > 0 ? chunkSize : ChunkSize;
+        var ov = overlap >= 0 ? overlap : ChunkOverlap;
+        if (text.Length <= win) return [text];
+
+        // 切点回找下限：切割位置至少覆盖窗口的一半，避免切出过碎、失去边界的切片。
+        var minCut = Math.Min(win, Math.Max(200, win / 2));
+
         var chunks = new List<string>();
         var pos = 0;
         while (pos < text.Length)
         {
-            var len = Math.Min(chunkSize, text.Length - pos);
-            chunks.Add(text.Substring(pos, len));
-            if (pos + len >= text.Length) break;
-            pos += len - overlap;
+            var winLen = Math.Min(win, text.Length - pos);
+            var windowEnd = pos + winLen;
+            var cut = windowEnd;
+            if (windowEnd < text.Length)
+            {
+                var window = text.Substring(pos, winLen);
+                // 1) 优先在换行符之后收尾（按自然段落切，尽量不断句）
+                var nl = window.LastIndexOf('\n');
+                if (nl >= 0 && (nl + 1) >= minCut)
+                {
+                    cut = pos + nl + 1;
+                }
+                else
+                {
+                    // 2) 无合适换行时，回找句末标点收尾
+                    var se = FindSentenceEnd(window);
+                    if (se >= 0 && (se + 1) >= minCut)
+                        cut = pos + se + 1;
+                }
+                // 找不到合适边界则保持硬切（cut = windowEnd），保证不产生碎片
+            }
+            chunks.Add(text.Substring(pos, cut - pos));
+            if (cut >= text.Length) break;
+            // 下一片起点 = 切点 - 重叠（携带上一片尾部）；重叠比本片还长时保守回退到切点，避免后退/死循环
+            var next = cut - ov;
+            pos = next <= pos ? cut : next;
         }
         return chunks;
+    }
+
+    /// <summary>在切片窗口内从尾部回找最后一个句子结束标点（找不到返回 -1）。</summary>
+    private static int FindSentenceEnd(string window)
+    {
+        for (var i = window.Length - 1; i >= 0; i--)
+        {
+            var c = window[i];
+            if (c == '。' || c == '！' || c == '？' || c == '；' || c == '.' || c == '!' || c == '?' || c == ';')
+                return i;
+        }
+        return -1;
     }
 }

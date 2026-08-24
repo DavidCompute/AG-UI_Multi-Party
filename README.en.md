@@ -186,6 +186,7 @@ Configuration options are set in `.env` (see `.env.example`):
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `5` / `0.25` | Number of memory entries injected per reply / similarity threshold. **The `group_memory_search` tool is stricter**: threshold is max(0.40, MIN_SCORE), at most 3 entries, low-relevance hits are physically filtered to avoid memory flooding |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | Embedding call timeout (seconds). First load of bge-m3 on a CPU environment takes tens of seconds |
 | `MEMORY_SCOPE` | `agent` | Retrieval scope: `agent` all groups the agent belongs to (default) / `group` only the current group / `all` all groups |
+| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `800` / `100` | Knowledge-base document chunking: window size (chars) / overlap (chars). Cuts are placed at line breaks or sentence-ending punctuation (avoiding mid-sentence splits), and adjacent slices share an overlapping tail to reduce boundary information loss |
 | `MEMORY_PERSONAL_TOP_K` / `MEMORY_PERSONAL_MIN_SCORE` | `3` / `0.25` | Personal memory: number of "the triggerer's own past messages" injected per reply / similarity threshold. Overall capability switch (on by default); whether it is actually injected also depends on the **switches of the user and the agent individually** (both off by default) |
 | `SEED_SAMPLE_DATA` | `true` | Web demo: seed sample data when there is no history |
 | `SEED_SAMPLE_DATA_HUB` | `false` | Protocol Hub only: whether to seed sample data |

@@ -37,6 +37,38 @@ public sealed class KnowledgeBaseTests
     public void Chunk_Empty_ReturnsEmpty()
         => Assert.Empty(KnowledgeBaseCatalog.Chunk("   "));
 
+    [Fact]
+    public void Chunk_WithParagraphs_DoesNotSplitMidSentence()
+    {
+        // 每段 300 字符 + 换行（无句末标点），连续 10 段共 3010 字符。
+        // 智能切片应在换行处收尾，绝不在段落中间硬切。
+        var para = new string('长', 300) + "\n";
+        var text = string.Concat(Enumerable.Repeat(para, 10));
+        var chunks = KnowledgeBaseCatalog.Chunk(text);
+        Assert.True(chunks.Count >= 3);
+        // 除最后一片外，每一片都应结束于换行（重叠内容可含换行，但不得以段落中间字符结束）。
+        foreach (var c in chunks.Take(chunks.Count - 1))
+            Assert.True(c.EndsWith('\n'), $"切片不应在段中切断：…{c[^10..]}");
+        // 切片长度不超过窗口
+        Assert.All(chunks, c => Assert.True(c.Length <= KnowledgeBaseCatalog.ChunkSize));
+    }
+
+    [Fact]
+    public void Chunk_NoNewline_SplitsAtSentenceEnd()
+    {
+        // 无换行、由句号分隔的长句：应尽量在句号后收尾，而不是在文字中间硬切。
+        var seg = new string('啊', 200) + "。";
+        var text = string.Concat(Enumerable.Repeat(seg, 12)); // 2412 字符
+        var chunks = KnowledgeBaseCatalog.Chunk(text);
+        Assert.True(chunks.Count >= 3);
+        foreach (var c in chunks.Take(chunks.Count - 1))
+        {
+            var last = c[^1];
+            Assert.Contains(last, "。！？；.!?;");
+        }
+        Assert.All(chunks, c => Assert.True(c.Length <= KnowledgeBaseCatalog.ChunkSize));
+    }
+
     // ================= 目录 / 文档 / 检索 =================
 
     private sealed class FakeKbStore : IMessageMemoryStore
