@@ -714,12 +714,22 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         string? messageId = null;
         try
         {
-            // 沿委派链解析最终答复（可能多层：B→C→…），返回最终答复文本 + 逐层「由 X 代为响应」名单
+            // 沿委派链解析最终答复（组织架构式：向下探答、不行向上回退）
             var input = await BuildUserMessageAsync(context, runCt);
             var chain = new HashSet<string>(StringComparer.Ordinal) { context.AgentId };
-            var (finalText, standinNames) = await ResolveStandinReplyAsync(context, standinAgentId, input, chain, depth: 1, runCt);
-            // 首层委派（被 @ 的宿主 A → B）本身也是一环：把 B 的昵称放到名单最前
-            standinNames.Insert(0, _catalog.GetDefinition(standinAgentId)?.Nickname ?? standinAgentId);
+            var (answered, finalText, standinNames) = await ResolveStandinReplyAsync(context, standinAgentId, input, chain, depth: 1, runCt);
+            if (answered)
+            {
+                // 首层委派（被 @ 的宿主 A → B）本身也是一环：把 B 的昵称放到名单最前
+                standinNames.Insert(0, _catalog.GetDefinition(standinAgentId)?.Nickname ?? standinAgentId);
+            }
+
+            // 整条委派链（B→C→…）都判定不符而回退：由被 @ 的宿主 A 兑底作答（不硬塞给下层）
+            if (!answered)
+            {
+                finalText = await RunStandinAnswerAsync(context, context.AgentId, input, runCt);
+                standinNames = [];
+            }
 
             var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
             {
@@ -734,7 +744,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }, runCt);
             messageId = started.MessageId;
 
-            // 逐层叠加「由 X 代为响应」前缀（B → C → …）
+            // 逐层叠加「由 X 代为响应」前缀（B → C → …）；无人答时无前缀（A 直接答复）
             foreach (var name in standinNames)
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（由 {name} 代为响应）\n", runCt);
 
@@ -776,38 +786,48 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private const int MaxStandinDepth = 4;
 
     /// <summary>
-    /// 递归解析代为响应委派链：从 <paramref name="agentId"/> 起逐个向下游委派，
-    /// 直到某层判定「自己应该回答」（无委派 / 目标环回 / 超过深度 / 语境应自己答）为止；
-    /// 返回最终应答文本与逐层委派名单（nickname）。
+    /// 递归解析代为响应委派链（**组织架构式：向下探答、不行向上回退**）：
+    /// 从 <paramref name="agentId"/> 开始，若本级判定「语境应自己答」→ 本级作答；
+    /// 否则尝试向下游委派；若下游整条链都判定不符而回退，本级也**回退给上一级**（不硬答）。
+    /// 返回 (是否最终作答, 答复文本, 逐层委派名单[昵称])。宿主（被 @ 的 A）作为最上层兑底作答。
     /// </summary>
-    private async Task<(string Text, List<string> StandinNames)> ResolveStandinReplyAsync(
+    private async Task<(bool Answered, string Text, List<string> StandinNames)> ResolveStandinReplyAsync(
         AgentInvocationContext context, string agentId, string input, HashSet<string> visited, int depth, CancellationToken ct)
     {
         var def = _catalog.GetDefinition(agentId);
-        var standinNames = new List<string>();
-        var chooseNext = def is not null
-            && depth < MaxStandinDepth
-            && def.DelegateWhenOutOfScope
-            && !string.IsNullOrWhiteSpace(def.StandinAgentId)
-            && !string.Equals(def.StandinAgentId, agentId, StringComparison.Ordinal)
-            && !visited.Contains(def.StandinAgentId)
-            && await ShouldSpeakAsync(context, def, ct) == false; // 语境判定：自己不适合回答 → 向下游委派
+        if (def is null)
+            return (false, "", []); // 目标不存在：交由上层回退处理
 
-        if (!chooseNext || def is null || _catalog.GetDefinition(def.StandinAgentId!) is null)
+        // 1) 本级是否愿意回答：语境应自己答 → 直接作答（含满足场景）
+        if (await ShouldSpeakAsync(context, def, ct))
         {
-            // 最终层：由本智能体实际作答
-            visited.Add(agentId);
             var text = await RunStandinAnswerAsync(context, agentId, input, ct);
-            return (text, standinNames);
+            return (true, text, []);
         }
 
-        // 委派给下游：记录本层委派目标昵称，并继续解析下一层
-        var nextName = _catalog.GetDefinition(def.StandinAgentId!)?.Nickname ?? def.StandinAgentId!;
-        standinNames.Add(nextName);
-        visited.Add(agentId);
-        var deeper = await ResolveStandinReplyAsync(context, def.StandinAgentId!, input, visited, depth + 1, ct);
-        standinNames.AddRange(deeper.StandinNames);
-        return (deeper.Text, standinNames);
+        // 2) 本级不愿答 → 尝试向下游委派
+        var next = def.StandinAgentId;
+        if (!string.IsNullOrWhiteSpace(next)
+            && !string.Equals(next, agentId, StringComparison.Ordinal)
+            && depth < MaxStandinDepth
+            && !visited.Contains(next)
+            && _catalog.GetDefinition(next) is not null)
+        {
+            visited.Add(agentId);
+            var (subAnswered, subText, subNames) = await ResolveStandinReplyAsync(context, next, input, visited, depth + 1, ct);
+            if (subAnswered)
+            {
+                var names = new List<string> { _catalog.GetDefinition(next)?.Nickname ?? next };
+                names.AddRange(subNames);
+                return (true, subText, names);
+            }
+            // 下游整条链都判定不符 → 本级也不硬答，回退给上一级
+            visited.Remove(agentId);
+            return (false, "", []);
+        }
+
+        // 3) 无下游可委派（或环回/触顶） → 本级答不了，回退给上一级，由上层兑底
+        return (false, "", []);
     }
 
     /// <summary>让单个数字员工就委派请求实际作答（模型一次 run），返回最终文本。</summary>
@@ -1656,7 +1676,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     {
         // 轻量决策：用裸 ChatClientAgent（无工具 / 无记忆注入 / 无审批包装）——语境决策不需要业务能力，
         // 避免双重工具 / 记忆注入（决策轮与正式回复轮各注入一次记忆、重复挂载工具浪费上下文）
-        var agent = _catalog.CreateBare(context.AgentId);
+        // 按被评估的智能体（def）构建决策体，而非总是宿主：委派链上每层用各自的身份判断语境。
+        var agent = _catalog.CreateBare(def.AgentId);
         // 语境判断同样按话题取最近对话（会话历史以话题为单位，与 BuildUserMessageAsync 一致）
         var history = _hub.Value.Store.RecentMessages(context.GroupId, _options.ContextMaxMessages, context.TopicId)
             .Where(m => !m.Recalled && m.Visibility == MessageVisibility.All)

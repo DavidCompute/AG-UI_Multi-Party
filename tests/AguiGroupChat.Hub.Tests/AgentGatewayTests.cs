@@ -159,10 +159,9 @@ public sealed class AgentGatewayTests
         var messageId = start.GetProperty("messageId").GetString()!;
         var stored = f.Store.GetMessage(group.GroupId, messageId);
         Assert.NotNull(stored);
-        // 正面是代为响应前缀 + 答复专家（agent_resp）的答复，以 agent_a 身份发出
-        Assert.Contains("代为响应", stored!.Content);
-        // MockChatClient 以「作为「答复专家」…」模板输出（体现候选身份已被委派执行）
-        Assert.Contains("答复专家", stored.Content);
+        // 组织架构式回退：委托对象（agent_resp）也判定语境不符且无下游 → 向上回退，由被 @ 的宿主 A（前台专员）兑底作答
+        Assert.DoesNotContain("代为响应", stored!.Content); // 无「由 X 代为响应」前缀（A 直接答复）
+        Assert.Contains("前台专员", stored.Content); // A 的本体 Mock 回复
     }
 
     /// <summary>装配带「多层代为响应」链的网关：agent_a → agent_b → agent_c（c 为最终作答）。</summary>
@@ -225,11 +224,47 @@ public sealed class AgentGatewayTests
         var messageId = start.GetProperty("messageId").GetString()!;
         var stored = f.Store.GetMessage(group.GroupId, messageId);
         Assert.NotNull(stored);
-        // 逐层委派前缀：B → C
-        Assert.Contains("由 中层专员 代为响应", stored!.Content);
-        Assert.Contains("由 终答专家 代为响应", stored.Content);
-        // 最终答复来自 agent_c（Mock 模板含「作为「终答专家」」）
-        Assert.Contains("终答专家", stored.Content);
+        // 组织架构式回退：整条链 B→C 都判定语境不符 → 逐层向上回退，由被 @ 的宿主 A 兜底作答（无委派前缀）
+        Assert.DoesNotContain("代为响应", stored!.Content);
+        Assert.DoesNotContain("中层专员", stored.Content);
+        Assert.DoesNotContain("终答专家", stored.Content);
+        Assert.Contains("前台专员", stored.Content); // A 的本体 Mock 回复
+    }
+
+    [Fact]
+    public async Task Invoke_StandinAccepts_StreamsStandinReply()
+    {
+        // 内容里提到被委派的数字员工（答复专家）→ Mock 语境判定：A 不符（委派），B 应自己答（接受）
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a", "agent_resp"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" },
+                new MemberSeed { MemberId = "agent_resp", MemberType = MemberType.Agent, Nickname = "答复专家" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateStandinGateway(f); // agent_a → agent_resp（答复专家）
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "@答复专家 这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "代为响应失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 委派成功：B（答复专家）接受并作答 → 前缀「由 答复专家 代为响应」+ B 的本体回复
+        Assert.Contains("由 答复专家 代为响应", stored!.Content);
+        Assert.Contains("答复专家", stored.Content);
     }
 
     /// <summary>装配环路代为响应链：agent_a → agent_b → agent_a（应在第二次委派处破环，不留死循环）。</summary>
