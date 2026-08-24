@@ -342,6 +342,7 @@ public sealed class AgentCatalog
                 try
                 {
                     var target = Create(skill.TargetAgentId, includeSkills: false);
+                    var targetNick = _definitions.TryGetValue(skill.TargetAgentId, out var tDef) ? tDef.Nickname ?? "" : skill.TargetAgentId;
                     // 技能返回子智能体的 Markdown 答复：提示宿主模型原样保留（含 mermaid 代码块），
                     // 否则模型常把代码块转义 / 改写，前端无法渲染成图表
                     var desc = (skill.Description ?? "").Trim();
@@ -349,7 +350,7 @@ public sealed class AgentCatalog
                     desc += "该技能返回 Markdown 文本，若其中包含以 ``` 包裹的 mermaid 代码块（如 ```mermaid ... ```），"
                         + "请在你的最终回复中原样保留该代码块（不要转义、不要省略反引号），系统会自动将其渲染为图表";
                     skillTools.Add(AIFunctionFactory.Create(
-                        new AgentSkillCall(target, _loggerFactory).InvokeAsync,
+                        new AgentSkillCall(target, skill.TargetAgentId, targetNick, _loggerFactory).InvokeAsync,
                         skill.SkillId, desc));
                 }
                 catch (Exception ex)

@@ -1,3 +1,4 @@
+using AguiGroupChat.Hub.Agents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -13,11 +14,15 @@ namespace AguiGroupChat.Agents.Tools;
 internal sealed class AgentSkillCall
 {
     private readonly ChatClientAgent _agent;
+    private readonly string _targetAgentId;
+    private readonly string _targetNickname;
     private readonly ILogger _logger;
 
-    public AgentSkillCall(ChatClientAgent agent, ILoggerFactory loggerFactory)
+    public AgentSkillCall(ChatClientAgent agent, string targetAgentId, string targetNickname, ILoggerFactory loggerFactory)
     {
         _agent = agent;
+        _targetAgentId = targetAgentId;
+        _targetNickname = targetNickname;
         _logger = loggerFactory.CreateLogger<AgentSkillCall>();
     }
 
@@ -27,9 +32,29 @@ internal sealed class AgentSkillCall
         if (string.IsNullOrWhiteSpace(query)) return "查询内容为空。";
         try
         {
-            var session = await _agent.CreateSessionAsync(ct);
-            var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, query)], session, null, ct);
-            return string.IsNullOrWhiteSpace(response.Text) ? "（子智能体未返回内容）" : response.Text;
+            // 子智能体以技能方式运行：把 ambient 上下文切到目标智能体（AgentId=目标），
+            // 使 MemoryContextProvider 注入的是目标智能体自己的知识库 / 群记忆，而不是宿主的。
+            // 原来直接复用宿主的 ambient 上下文，会导致“技能激活带知识库的智能体2”却检索了智能体1的知识库。
+            var prev = AgentGateway.AmbientContext.Value;
+            if (prev is not null && !string.Equals(prev.AgentId, _targetAgentId, StringComparison.Ordinal))
+            {
+                AgentGateway.AmbientContext.Value = prev with
+                {
+                    AgentId = _targetAgentId,
+                    AgentNickname = _targetNickname,
+                    Content = query,
+                };
+            }
+            try
+            {
+                var session = await _agent.CreateSessionAsync(ct);
+                var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, query)], session, null, ct);
+                return string.IsNullOrWhiteSpace(response.Text) ? "（子智能体未返回内容）" : response.Text;
+            }
+            finally
+            {
+                AgentGateway.AmbientContext.Value = prev;
+            }
         }
         catch (Exception ex)
         {
