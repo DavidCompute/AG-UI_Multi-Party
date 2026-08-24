@@ -3794,7 +3794,11 @@ function virtualRender() {
   const msgs = activeTopicMessages(r);
   const n = msgs.length;
   if (!r || n === 0) {
-    el.innerHTML = "";
+    // 已选中知聚但当前话题无消息：注入空态提示（避免误显示「选择一个群开始对话」的 CSS 占位，那样语义误导为尚未选群）；
+    // 未选中任何知聚（activeGroupId 为空）才让元素置空，交给 #messages:empty::before 显示「选择群」引导。
+    el.innerHTML = state.activeGroupId
+      ? `<div class="msg-empty-hint">${escapeHtml(t("msg.noMessages"))}</div>`
+      : "";
     vscroll.start = vscroll.end = 0;
     vscroll.heights = null;
     return;

@@ -1358,6 +1358,12 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: inset 0
 }
 #messages:empty { display: flex; align-items: center; justify-content: center; min-height: 100%; }
 
+/* 已选知聚但无消息时的空态提示（区别于上方「未选群」的占位引导） */
+.msg-empty-hint {
+  color: var(--muted); font-size: 15px; letter-spacing: .02em;
+  text-align: center; padding: 24px 16px;
+}
+
 /* ---- 侧栏标题更精致 ---- */
 .panel-title { text-transform: uppercase; letter-spacing: .08em; font-size: 11.5px; }
 

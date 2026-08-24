@@ -612,6 +612,7 @@ window.I18N_DICTS.en = {
   "msg.attachUploadFail": "Attachment upload failed: {err}",
   "msg.retry": "Please retry",
   "msg.noAttachToSend": "No attachments to send",
+  "msg.noMessages": "No messages yet in this group. Say hi to start the conversation",
   "msg.sendTooltip": "Send message (Enter)",
   "msg.connLostDecision": "Connection lost, cannot submit decision",
   "msg.memberJoined": "{names} joined the group",

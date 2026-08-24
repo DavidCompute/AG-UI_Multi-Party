@@ -610,6 +610,7 @@ window.I18N_DICTS.zh = {
   "msg.attachUploadFail": "附件上传失败：{err}",
   "msg.retry": "请重试",
   "msg.noAttachToSend": "没有可发送的附件",
+  "msg.noMessages": "该知聚还没有消息，发第一条开始对话吧",
   "msg.sendTooltip": "发送消息（Enter）",
   "msg.connLostDecision": "连接已断开，无法提交决策",
   "msg.memberJoined": "{names} 加入了知聚",
