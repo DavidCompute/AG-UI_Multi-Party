@@ -578,6 +578,8 @@ window.I18N_DICTS.zh = {
   "msg.thinkingDone": "💭 思考过程",
   "msg.chainTitle": "智能体调用链",
   "msg.chainResult": "答复",
+  "msg.chainSkill": "技能",
+  "msg.chainStandin": "代为响应",
   "msg.attachmentAudio": "语音",
   "msg.attachmentDownload": "下载",
   "msg.attachmentTitle": "附件：{kind}",

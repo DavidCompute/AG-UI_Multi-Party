@@ -15,6 +15,9 @@ public sealed class ChainNode
     /// <summary>当前智能体昵称（用于展示）。</summary>
     public string AgentNickname { get; set; } = "";
 
+    /// <summary>本次调用类型标识（前端区分展示）：<c>skill</c> = 技能调用 / <c>standin</c> = 代为响应（委派/回退）。</summary>
+    public string Kind { get; set; } = "skill";
+
     /// <summary>触发进入本节点的技能名（根节点为空串）。</summary>
     public string SkillId { get; set; } = "";
 

@@ -2495,6 +2495,10 @@ function renderChainCard(chainJson) {
     if (!node) return "";
     const pad = depth * 16;
     const hasSub = node.children && node.children.length > 0;
+    const isStandin = node.kind === "standin";
+    const kindTag = isStandin
+      ? `<span class="chain-kind chain-kind-standin">${t("msg.chainStandin")}</span>`
+      : (node.skillId ? `<span class="chain-kind">${t("msg.chainSkill")}</span>` : "");
     const label = node.skillId
       ? `${escapeHtml(node.skillId)} <span class="chain-arrow">→</span> ${escapeHtml(node.agentNickname || node.agentId)}`
       : `${escapeHtml(node.agentNickname || node.agentId)}`;
@@ -2502,7 +2506,7 @@ function renderChainCard(chainJson) {
     const result = node.result ? `<div class="chain-result"><b>${t("msg.chainResult")}</b> ${escapeHtml(node.result)}</div>` : "";
     const sub = hasSub ? `<ul class="chain-children">${node.children.map((c) => renderNode(c, depth + 1)).join("")}</ul>` : "";
     return `<li class="chain-node" style="margin-left:${pad}px">`
-      + `<div class="chain-row">${hasSub ? "▸" : "•"} <span class="chain-label">${label}</span></div>`
+      + `<div class="chain-row">${hasSub ? "▸" : "•"} ${kindTag} <span class="chain-label">${label}</span></div>`
       + (q ? q : "") + (result ? result : "") + sub + `</li>`;
   };
   // 顶层调用：若根是宿主智能体，其 children 才是实际技能调用（根自身行已由消息作者体现，这里从技能开始）

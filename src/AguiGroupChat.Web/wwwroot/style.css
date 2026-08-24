@@ -1537,6 +1537,11 @@ button { white-space: nowrap; }
 .chain-row { display: flex; align-items: center; gap: 6px; color: var(--text); }
 .chain-row .chain-arrow { color: var(--muted); }
 .chain-label { font-weight: 500; }
+.chain-kind {
+  display: inline-block; font-size: 10px; font-weight: 600; line-height: 1; padding: 2px 6px;
+  border-radius: 999px; background: rgba(111,139,255,.18); color: var(--accent); vertical-align: 1px;
+}
+.chain-kind-standin { background: rgba(157,107,255,.2); color: #b18cff; }
 .chain-node:not(:first-child) { border-top: 1px dashed rgba(128,141,180,.15); margin-top: 4px; padding-top: 6px; }
 .chain-query { color: var(--muted); font-size: 12px; margin: 2px 0 0 20px; }
 .chain-result { color: var(--text); font-size: 12px; margin: 2px 0 0 20px; }

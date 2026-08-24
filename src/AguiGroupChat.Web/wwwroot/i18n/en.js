@@ -580,6 +580,8 @@ window.I18N_DICTS.en = {
   "msg.thinkingDone": "💭 Thought process",
   "msg.chainTitle": "Agent call chain",
   "msg.chainResult": "Reply",
+  "msg.chainSkill": "Skill",
+  "msg.chainStandin": "Stand-in",
   "msg.attachmentAudio": "Voice",
   "msg.attachmentDownload": "Download",
   "msg.attachmentTitle": "Attachment: {kind}",
