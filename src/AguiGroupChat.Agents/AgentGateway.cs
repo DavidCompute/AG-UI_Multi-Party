@@ -296,6 +296,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             IsTyping = true,
         }, ct);
 
+        // 链路可视化：为本次运行建立技能调用链（skill 调用经 AgentSkillCall 嵌套填充），运行结束写库并广播
+        var prevChain = SkillChainBuilder.Ambient.Value;
+        SkillChainBuilder.Ambient.Value = new SkillChainBuilder();
+        SkillChainBuilder.Ambient.Value.EnsureRoot(context.AgentId, def.Nickname ?? context.AgentId);
+
         string? messageId = null;
         ToolApprovalRequestContent? approval = null;
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -462,6 +467,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 前端拿到 TEXT_MESSAGE_ATTACHMENTS 渲染可下载附件卡片（不只是模型在正文里说“已发布”）。
             await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
             await AttachPlanIfAnyAsync(context, messageId, runCt);
+            await AttachAgentChainAsync(context, messageId, runCt);
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
             CompleteTaskIfAny(context, succeeded: true, accumulated);
             return new AgentInvocationResult(true, runId, null);
@@ -490,6 +496,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             if (acquired) sessionLock.Release(); // 未获得锁时不 Release（避免 SemaphoreFullException）
             _activeRuns.TryRemove(runId, out _); // 运行结束 / 取消：注销停止能力
+            SkillChainBuilder.Ambient.Value = prevChain; // 清理链构造器（恢复外层）
             await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
             {
                 GroupId = context.GroupId,
@@ -1204,6 +1211,23 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "工作型智能体计划回档失败（已忽略）");
+        }
+    }
+
+    /// <summary>技能调用链可视化：运行结束时把 <see cref="SkillChainBuilder.Ambient"/> 中的多跳技能树
+    /// 写入当前消息（JSON），供前端渲染链路。无技能调用（null）静默跳过，不阻断主流程。</summary>
+    private async Task AttachAgentChainAsync(AgentInvocationContext context, string messageId, CancellationToken ct)
+    {
+        try
+        {
+            var chainJson = SkillChainBuilder.Ambient.Value?.ToJson();
+            if (string.IsNullOrWhiteSpace(chainJson)) return;
+            await _hub.Value.AttachAgentChainAsync(context.GroupId, messageId, chainJson, ct);
+            _logger.LogDebug("技能调用链回档：消息 {MessageId}（{AgentId}）", messageId, context.AgentId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "技能调用链回档失败（已忽略）");
         }
     }
 

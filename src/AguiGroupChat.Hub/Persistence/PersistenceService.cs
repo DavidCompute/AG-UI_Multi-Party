@@ -214,6 +214,7 @@ public sealed class PersistenceService : IDisposable
         Attachments = m.Attachments.ToList(),
         Content = m.Content,
         Reasoning = m.Reasoning,
+        AgentChain = m.AgentChain,
         Timestamp = m.Timestamp,
         Recalled = m.Recalled,
     };
@@ -271,6 +272,7 @@ public sealed class PersistenceService : IDisposable
             Attachments = m.Attachments,
             Content = m.Content,
             Reasoning = m.Reasoning,
+            AgentChain = m.AgentChain,
             Timestamp = m.Timestamp,
         };
         msg.Recalled = m.Recalled;

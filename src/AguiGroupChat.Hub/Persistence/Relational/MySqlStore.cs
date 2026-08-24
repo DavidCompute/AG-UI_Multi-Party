@@ -23,6 +23,7 @@ public sealed class MySqlStore : RelationalStore
         EnsureColumn("agui_users", "personal_memory_enabled", "ALTER TABLE agui_users ADD COLUMN personal_memory_enabled TINYINT(1) NOT NULL DEFAULT 0");
         EnsureColumn("agui_users", "is_admin", "ALTER TABLE agui_users ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0");
         EnsureColumn("agui_messages", "reasoning", "ALTER TABLE agui_messages ADD COLUMN reasoning MEDIUMTEXT NULL");
+        EnsureColumn("agui_messages", "agent_chain", "ALTER TABLE agui_messages ADD COLUMN agent_chain MEDIUMTEXT NULL");
         EnsureIndex("agui_group_members", "idx_members_member",
             "CREATE INDEX idx_members_member ON agui_group_members(member_id)");
         EnsureIndex("agui_topics", "idx_topics_group",
@@ -137,6 +138,7 @@ public sealed class MySqlStore : RelationalStore
             attachments MEDIUMTEXT NULL,
             content MEDIUMTEXT NOT NULL,
             reasoning MEDIUMTEXT NULL,
+            agent_chain MEDIUMTEXT NULL,
             timestamp BIGINT NOT NULL,
             recalled TINYINT(1) NOT NULL DEFAULT 0
         ) CHARACTER SET utf8mb4;

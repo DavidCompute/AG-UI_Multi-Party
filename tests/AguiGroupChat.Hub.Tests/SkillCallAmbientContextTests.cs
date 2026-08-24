@@ -50,7 +50,7 @@ public sealed class SkillCallAmbientContextTests
         var client = new RecordingChatClient();
         var target = new ChatClientAgent(client, "你是目标智能体", "目标", "描述", null, NullLoggerFactory.Instance,
             new ServiceCollection().BuildServiceProvider());
-        var skillCall = new AgentSkillCall(target, "agent_target", "目标", NullLoggerFactory.Instance);
+        var skillCall = new AgentSkillCall(target, "agent_target", "目标", "skill_x", NullLoggerFactory.Instance);
 
         // 宿主（智能体 1）正运行：ambient 指向宿主
         var prev = AgentGateway.AmbientContext.Value;

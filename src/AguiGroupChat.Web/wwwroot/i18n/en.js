@@ -573,6 +573,8 @@ window.I18N_DICTS.en = {
   "msg.waitingConfirm": "⏳ Digital employee awaits your confirmation to continue…",
   "msg.thinkingStreaming": "💭 Thinking…",
   "msg.thinkingDone": "💭 Thought process",
+  "msg.chainTitle": "Agent call chain",
+  "msg.chainResult": "Reply",
   "msg.attachmentAudio": "Voice",
   "msg.attachmentDownload": "Download",
   "msg.attachmentTitle": "Attachment: {kind}",

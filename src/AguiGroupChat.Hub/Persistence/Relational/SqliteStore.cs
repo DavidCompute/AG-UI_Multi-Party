@@ -39,6 +39,7 @@ public sealed class SqliteStore : RelationalStore
         EnsureColumn("agui_users", "is_admin", "ALTER TABLE agui_users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("agui_users", "is_disabled", "ALTER TABLE agui_users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("agui_messages", "reasoning", "ALTER TABLE agui_messages ADD COLUMN reasoning TEXT");
+        EnsureColumn("agui_messages", "agent_chain", "ALTER TABLE agui_messages ADD COLUMN agent_chain TEXT");
     }
 
     /// <summary>是否内存库（:memory: 或 file: URI 的 mode=memory），内存库无持久化文件，不适用 WAL 等文件级参数。</summary>
@@ -137,6 +138,7 @@ public sealed class SqliteStore : RelationalStore
             attachments TEXT,
             content TEXT NOT NULL,
             reasoning TEXT,
+            agent_chain TEXT,
             timestamp INTEGER NOT NULL,
             recalled INTEGER NOT NULL DEFAULT 0
         );

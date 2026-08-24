@@ -110,6 +110,7 @@ public sealed class PostgresStore
                 attachments TEXT,
                 content TEXT NOT NULL,
                 reasoning TEXT,
+                agent_chain TEXT,
                 timestamp BIGINT NOT NULL,
                 recalled BOOLEAN NOT NULL DEFAULT FALSE
             );
@@ -117,6 +118,7 @@ public sealed class PostgresStore
             CREATE INDEX IF NOT EXISTS idx_messages_topic ON agui_messages(group_id, topic_id, timestamp);
             -- 旧库迁移（CREATE TABLE IF NOT EXISTS 不修改已有表）
             ALTER TABLE agui_messages ADD COLUMN IF NOT EXISTS reasoning TEXT;
+            ALTER TABLE agui_messages ADD COLUMN IF NOT EXISTS agent_chain TEXT;
 
             CREATE TABLE IF NOT EXISTS agui_users (
                 user_id TEXT PRIMARY KEY,

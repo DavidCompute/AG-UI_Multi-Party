@@ -51,6 +51,10 @@ public sealed record GroupMessage
     /// <summary>智能体思考过程（AG-UI REASONING_MESSAGE_CONTENT 桥接回灌，独立于正文展示；可空 = 无思考内容）。</summary>
     public string? Reasoning { get; set; }
 
+    /// <summary>智能体技能调用链（链路可视化）：JSON 序列化的 <c>ChainNode</c> 树，
+    /// 记录多跳技能调用（宿主→技能→目标→…）的层级与各层答复；可空 = 无技能调用。</summary>
+    public string? AgentChain { get; set; }
+
     /// <summary>发送时间戳（毫秒级）。</summary>
     public required long Timestamp { get; init; }
 

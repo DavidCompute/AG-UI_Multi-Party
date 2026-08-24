@@ -1864,7 +1864,7 @@ function applySnapshot(evt) {
     const m = {
       id: sm.messageId, senderId: sm.senderId, senderNickname: sm.senderNickname,
       senderType: sm.senderId?.startsWith("agent_") ? "agent" : "user",
-      content: sm.content, reasoning: sm.reasoning || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll,
+      content: sm.content, reasoning: sm.reasoning || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll, agentChain: sm.agentChain || null,
       topicId: sm.topicId || "main",
       timestamp: Number(sm.timestamp) || 0,
       time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: null,
@@ -2121,6 +2121,7 @@ function onMessageEnd(evt) {
   m.streaming = false;
   // 思考内容以结束事件携带的完整快照为准（防抖 / 乱序场景下保证回放完整）
   m.reasoning = evt.reasoning ?? m.reasoning;
+  m.agentChain = evt.agentChain ?? m.agentChain; // 技能调用链（链路可视化）
   m._html = undefined; // 结束 → 切 Markdown 渲染
   if (state.activeGroupId !== evt.groupId) return;
   // 窗口内消息立即局部更新（切 Markdown + 折叠 + 挂按钮）。
@@ -2461,6 +2462,35 @@ function renderPlanCard(plan) {
     + `<div class="plan-progress"><div class="plan-progress-bar" style="width:${pct}%"></div></div>`
     + `<ul class="plan-steps">${steps.map((s) =>
         `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>`;
+}
+
+/**
+ * 技能调用链（链路可视化）卡片：把嵌套的 ChainNode 树渲染为逐层缩进的“智能体链”，
+ * 每层显示：触发技能名 + 目标数字员工名 + 传入请求；结果在可折叠条目内展示（点开查看上下文）。
+ * 输入为后端序列化的 JSON 文本（camelCase：agentId/agentNickname/skillId/query/result/children）。
+ */
+function renderChainCard(chainJson) {
+  let root;
+  try { root = typeof chainJson === "string" ? JSON.parse(chainJson) : chainJson; } catch { return ""; }
+  if (!root) return "";
+  const renderNode = (node, depth) => {
+    if (!node) return "";
+    const pad = depth * 16;
+    const hasSub = node.children && node.children.length > 0;
+    const label = node.skillId
+      ? `${escapeHtml(node.skillId)} <span class="chain-arrow">→</span> ${escapeHtml(node.agentNickname || node.agentId)}`
+      : `${escapeHtml(node.agentNickname || node.agentId)}`;
+    const q = node.query ? `<div class="chain-query">💬 ${escapeHtml(node.query)}</div>` : "";
+    const result = node.result ? `<div class="chain-result"><b>${t("msg.chainResult")}</b> ${escapeHtml(node.result)}</div>` : "";
+    const sub = hasSub ? `<ul class="chain-children">${node.children.map((c) => renderNode(c, depth + 1)).join("")}</ul>` : "";
+    return `<li class="chain-node" style="margin-left:${pad}px">`
+      + `<div class="chain-row">${hasSub ? "▸" : "•"} <span class="chain-label">${label}</span></div>`
+      + (q ? q : "") + (result ? result : "") + sub + `</li>`;
+  };
+  // 顶层调用：若根是宿主智能体，其 children 才是实际技能调用（根自身行已由消息作者体现，这里从技能开始）
+  const kids = root.children && root.children.length ? root.children : [root];
+  if (kids.length === 0) return "";
+  return `<details class="chain-card" open><summary>🧩 ${t("msg.chainTitle")} <span class="chain-count">${kids.length}</span></summary><ul class="chain-tree">${kids.map((n) => renderNode(n, 0)).join("")}</ul></details>`;
 }
 
 /** 渲染人机交互卡片：approval（工具审批）→ 批准 / 拒绝按钮；input / choice / multi_choice（请求输入 / 单选 / 多选）→ 按 responseSchema 渲染表单或单输入框。 */
@@ -4137,6 +4167,10 @@ function msgDom(m, r) {
   const interactionBlock = m.interaction && !m.interaction.resolved && !m.recalled
     ? `<div class="interaction-block">${renderInteractionCard(m)}</div>`
     : "";
+  // 技能调用链（链路可视化）：仅 agent 消息、非撤回、有链数据时渲染嵌套调用卡片
+  const chainCard = (m.senderType === "agent" && !m.recalled && !m.sys && m.agentChain)
+    ? renderChainCard(m.agentChain)
+    : "";
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
@@ -4148,6 +4182,7 @@ function msgDom(m, r) {
       ${interactionBlock}
       ${attachments && !m.recalled ? `<div class="attachments${imgGrid ? " img-grid" : ""}">${attachments}</div>` : ""}
       ${m.plan && m.plan.steps && m.plan.steps.length && !m.recalled ? `<div class="plan-card">${renderPlanCard(m.plan)}</div>` : ""}
+      ${chainCard}
       ${toolCalls}
     </div>`;
   const topicStartBtn = div.querySelector(".topic-start-btn");

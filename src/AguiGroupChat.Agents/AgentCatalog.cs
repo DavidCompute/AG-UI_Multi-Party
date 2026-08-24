@@ -371,7 +371,7 @@ public sealed class AgentCatalog
                     desc += "该技能返回 Markdown 文本，若其中包含以 ``` 包裹的 mermaid 代码块（如 ```mermaid ... ```），"
                         + "请在你的最终回复中原样保留该代码块（不要转义、不要省略反引号），系统会自动将其渲染为图表";
                     skillTools.Add(AIFunctionFactory.Create(
-                        new AgentSkillCall(target, skill.TargetAgentId, targetNick, _loggerFactory).InvokeAsync,
+                        new AgentSkillCall(target, skill.TargetAgentId, targetNick, skill.SkillId, _loggerFactory).InvokeAsync,
                         skill.SkillId, desc));
                 }
                 catch (Exception ex)

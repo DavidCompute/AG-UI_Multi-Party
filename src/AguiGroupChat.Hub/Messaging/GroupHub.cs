@@ -827,6 +827,7 @@ public sealed class GroupHub : IDisposable
                 Mentions = m.Mentions,
                 MentionAll = m.MentionAll,
                 Reasoning = m.Reasoning,
+                AgentChain = m.AgentChain,
                 Timestamp = m.Timestamp,
             })
             .ToList();
@@ -1179,6 +1180,25 @@ public sealed class GroupHub : IDisposable
         await FanOutAsync(groupId, new TextMessageReasoningEvent { MessageId = messageId, GroupId = groupId, Delta = delta }, state.Recipients, ct);
     }
 
+    /// <summary>为流式中的智能体消息附加技能调用链（链路可视化，于运行结束时写库一次）。
+    /// 链为 JSON 文本；消息必须仍在流式开启状态（_agentStreams），与正文通道共用锁。</summary>
+    public async Task AttachAgentChainAsync(string groupId, string messageId, string chainJson, CancellationToken ct = default)
+    {
+        if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
+            throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或未开启流式灌入");
+        lock (_pendingLock)
+        {
+            if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+                _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+            var msg = _store.GetMessage(groupId, messageId)
+                ?? throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在");
+            msg.AgentChain = chainJson;
+            _store.UpdateMessage(msg);
+        }
+        _changes?.Notify();
+        await Task.CompletedTask;
+    }
+
     /// <summary>为流式中的智能体消息追加附件（AG-UI 桥接回灌）：按 URL 去重合并写入消息并广播 TEXT_MESSAGE_ATTACHMENTS。
     /// 附件为外部 URL（ext_ 前缀）或本地上传附件；消息必须仍在流式开启状态（_agentStreams）。</summary>
     public async Task AppendAgentAttachmentsAsync(string groupId, string messageId, IReadOnlyList<AttachmentInfo> attachments, CancellationToken ct = default)
@@ -1277,6 +1297,7 @@ public sealed class GroupHub : IDisposable
             MessageId = messageId,
             GroupId = groupId,
             Reasoning = msg?.Reasoning, // 思考内容完整快照（供前端回放）
+            AgentChain = msg?.AgentChain, // 技能调用链（链路可视化）
             Timestamp = NowMs,
         }, state.Recipients, ct);
     }

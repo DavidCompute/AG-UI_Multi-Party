@@ -1518,6 +1518,30 @@ button { white-space: nowrap; }
 .plan-steps li { display: flex; align-items: flex-start; gap: 7px; font-size: 13px; color: var(--text); }
 .plan-steps li.done { color: var(--muted); }
 .plan-steps li.done .plan-step-text { text-decoration: line-through; }
+
+/* 智能体技能调用链（链路可视化）：嵌套缩进卡片 */
+.msg .chain-card {
+  margin-top: 10px; padding: 2px 12px 10px;
+  border: 1px solid rgba(111,139,255,.35); border-radius: 12px;
+  background: linear-gradient(180deg, rgba(111,139,255,.07), transparent);
+  font-size: 13px; line-height: 1.5;
+}
+.chain-card summary { cursor: pointer; padding: 8px 0; font-weight: 600; color: var(--text); user-select: none; }
+.chain-card .chain-count {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 6px;
+  text-align: center; font-size: 11px; font-weight: 600; border-radius: 999px;
+  background: rgba(111,139,255,.2); color: var(--accent);
+}
+.chain-tree { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.chain-node { padding: 2px 0; }
+.chain-row { display: flex; align-items: center; gap: 6px; color: var(--text); }
+.chain-row .chain-arrow { color: var(--muted); }
+.chain-label { font-weight: 500; }
+.chain-node:not(:first-child) { border-top: 1px dashed rgba(128,141,180,.15); margin-top: 4px; padding-top: 6px; }
+.chain-query { color: var(--muted); font-size: 12px; margin: 2px 0 0 20px; }
+.chain-result { color: var(--text); font-size: 12px; margin: 2px 0 0 20px; }
+.chain-result b { color: var(--accent); font-weight: 600; }
+.chain-children { list-style: none; margin: 4px 0 0; padding: 0; }
 .plan-check { flex: none; font-size: 12px; line-height: 1.4; }
 .plan-step-text { word-break: break-word; min-width: 0; }
 

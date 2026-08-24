@@ -310,10 +310,10 @@ public sealed class PostgresGroupStore : IGroupStore
             INSERT INTO agui_messages
                 (message_id, group_id, topic_id, thread_id, sender_id, sender_type, sender_nickname,
                  reply_to_message_id, mentions, mention_all, visibility, visible_member_ids, attachments,
-                 content, reasoning, timestamp, recalled)
+                 content, reasoning, agent_chain, timestamp, recalled)
             VALUES (@mid, @gid, @topic, @thread, @sender, @senderType, @nick,
                     @reply, @mentions, @mentionAll, @visibility, @visible, @attachments,
-                    @content, @reasoning, @time, @recalled)
+                    @content, @reasoning, @agentChain, @time, @recalled)
             ON CONFLICT (message_id) DO NOTHING
             """;
         cmd.Parameters.AddWithValue("mid", message.MessageId);
@@ -331,6 +331,7 @@ public sealed class PostgresGroupStore : IGroupStore
         cmd.Parameters.AddWithValue("attachments", Json(message.Attachments));
         cmd.Parameters.AddWithValue("content", message.Content);
         cmd.Parameters.AddWithValue("reasoning", (object?)message.Reasoning ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("agentChain", (object?)message.AgentChain ?? DBNull.Value);
         cmd.Parameters.AddWithValue("time", message.Timestamp);
         cmd.Parameters.AddWithValue("recalled", message.Recalled);
         cmd.ExecuteNonQuery();
@@ -572,11 +573,12 @@ public sealed class PostgresGroupStore : IGroupStore
     {
         using var conn = _pg.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning WHERE group_id = @gid AND message_id = @mid";
+        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain WHERE group_id = @gid AND message_id = @mid";
         cmd.Parameters.AddWithValue("topic", message.TopicId);
         cmd.Parameters.AddWithValue("content", message.Content);
         cmd.Parameters.AddWithValue("attachments", Json(message.Attachments));
         cmd.Parameters.AddWithValue("reasoning", (object?)message.Reasoning ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("agentChain", (object?)message.AgentChain ?? DBNull.Value);
         cmd.Parameters.AddWithValue("gid", message.GroupId);
         cmd.Parameters.AddWithValue("mid", message.MessageId);
         cmd.ExecuteNonQuery();
@@ -671,6 +673,7 @@ public sealed class PostgresGroupStore : IGroupStore
         Attachments = FromJson<List<AttachmentInfo>>(r.IsDBNull(r.GetOrdinal("attachments")) ? null : r.GetString(r.GetOrdinal("attachments"))) ?? [],
         Content = r.GetString(r.GetOrdinal("content")),
         Reasoning = r.IsDBNull(r.GetOrdinal("reasoning")) ? null : r.GetString(r.GetOrdinal("reasoning")),
+        AgentChain = r.IsDBNull(r.GetOrdinal("agent_chain")) ? null : r.GetString(r.GetOrdinal("agent_chain")),
         Timestamp = r.GetInt64(r.GetOrdinal("timestamp")),
         Recalled = r.GetBoolean(r.GetOrdinal("recalled")),
     };

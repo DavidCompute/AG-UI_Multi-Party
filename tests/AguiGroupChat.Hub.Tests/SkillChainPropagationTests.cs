@@ -75,26 +75,38 @@ public sealed class SkillChainPropagationTests
         // 员工手册解读专家（叶子）：直接答复
         var leaf = PlainAgent("「员工手册」规定：男员工陪产假 15 天（含周末）。");
         // hr专员（中层）：技能 → 叶子；模型调用技能后引用其结果
-        var leafSkill = AIFunctionFactory.Create(new AgentSkillCall(leaf, "handbook", "员工手册解读专家", NullLoggerFactory.Instance).InvokeAsync, "skill_handbook", "解读员工手册");
+        var leafSkill = AIFunctionFactory.Create(new AgentSkillCall(leaf, "handbook", "员工手册解读专家", "skill_handbook", NullLoggerFactory.Instance).InvokeAsync, "skill_handbook", "解读员工手册");
         var mid = SkillAgent("skill_handbook", leafSkill);
         // 万事通（顶层）：技能 → 中层
-        var midSkill = AIFunctionFactory.Create(new AgentSkillCall(mid, "hr", "hr专员", NullLoggerFactory.Instance).InvokeAsync, "skill_hr", "咨询 HR");
+        var midSkill = AIFunctionFactory.Create(new AgentSkillCall(mid, "hr", "hr专员", "skill_hr", NullLoggerFactory.Instance).InvokeAsync, "skill_hr", "咨询 HR");
         var top = SkillAgent("skill_hr", midSkill);
 
         // 以技能方式运行顶层
         var hostCtx = new AgentInvocationContext("g1", "t1", "wst", "万事通", "msg1", "user_1", "陪产假公司怎么规定", [], false);
         var prev = AgentGateway.AmbientContext.Value;
+        var prevChain = SkillChainBuilder.Ambient.Value;
         AgentGateway.AmbientContext.Value = hostCtx;
+        var chain = new SkillChainBuilder();
+        chain.EnsureRoot("wst", "万事通");
+        SkillChainBuilder.Ambient.Value = chain; // 链路可视化：技能调用嵌套记录
         try
         {
-            var result = await new AgentSkillCall(top, "wst", "万事通", NullLoggerFactory.Instance).InvokeAsync("陪产假公司怎么规定", CancellationToken.None);
+            var result = await new AgentSkillCall(top, "wst", "万事通", "skill_hr", NullLoggerFactory.Instance).InvokeAsync("陪产假公司怎么规定", CancellationToken.None);
             // 顶层最终答复应引用到最底层叶子的结论（15 天），证明结果逐层回传
             Assert.Contains("15 天", result);
             Assert.Contains("陪产假", result);
+
+            // 链路可视化：多跳应记录三层结构 万事通(skill_hr→hr) →(skill_handbook→手册)
+            var json = chain.ToJson();
+            Assert.NotNull(json);
+            Assert.Contains("skill_hr", json);
+            Assert.Contains("skill_handbook", json);
+            Assert.Contains("员工手册解读专家", json);
         }
         finally
         {
             AgentGateway.AmbientContext.Value = prev;
+            SkillChainBuilder.Ambient.Value = prevChain;
         }
     }
 

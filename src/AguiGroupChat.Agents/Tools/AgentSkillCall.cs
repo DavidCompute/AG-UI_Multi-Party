@@ -16,15 +16,23 @@ internal sealed class AgentSkillCall
     private readonly ChatClientAgent _agent;
     private readonly string _targetAgentId;
     private readonly string _targetNickname;
+    private readonly string _skillId;
     private readonly ILogger _logger;
 
-    public AgentSkillCall(ChatClientAgent agent, string targetAgentId, string targetNickname, ILoggerFactory loggerFactory)
+    /// <summary>链路展示文本截断长度（避免把整段长答复塞进消息元数据）。</summary>
+    private const int MaxChainTextChars = 600;
+
+    public AgentSkillCall(ChatClientAgent agent, string targetAgentId, string targetNickname, string? skillId, ILoggerFactory loggerFactory)
     {
         _agent = agent;
         _targetAgentId = targetAgentId;
         _targetNickname = targetNickname;
+        _skillId = skillId ?? "";
         _logger = loggerFactory.CreateLogger<AgentSkillCall>();
     }
+
+    private static string Truncate(string? s, int max)
+        => string.IsNullOrEmpty(s) ? "" : s.Length <= max ? s : s[..max] + "…";
 
     /// <summary>以 query 作为用户消息调用目标智能体，返回其回复文本。</summary>
     public async Task<string> InvokeAsync(string query, CancellationToken ct)
@@ -47,15 +55,36 @@ internal sealed class AgentSkillCall
             }
             try
             {
-                var session = await _agent.CreateSessionAsync(ct);
-                // 以技能方式调用子智能体：附加强化指令，促使其在需要时调用自身的子技能、
-                // 并把子技能检索到的结论写入最终答复，确保多跳技能链（A→B→C）的结论逐层回传。
-                var message = "请你就以下请求给出答复。"
-                    + "如果有任何你掌握的下游子技能（specialist/skill）能更准确地回答，请先调用它们，"
-                    + $"并把它们的结论清晰地包含在你的最终回复中，不要只写“已调用”或“请查阅”。\n\n请求：{query}";
-                var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, message)], session, null, ct);
-                var text = ExtractResponseText(response);
-                return string.IsNullOrWhiteSpace(text) ? "（子智能体未返回内容）" : text;
+                // 链路可视化：记录本次技能调用到链构造器（嵌套调用会自动成为子节点）
+                var chain = SkillChainBuilder.Ambient.Value;
+                ChainNode? node = null;
+                if (chain is not null)
+                {
+                    node = chain.Push(new ChainNode
+                    {
+                        AgentId = _targetAgentId,
+                        AgentNickname = _targetNickname,
+                        SkillId = _skillId,
+                        Query = Truncate(query, MaxChainTextChars),
+                    });
+                }
+                try
+                {
+                    var session = await _agent.CreateSessionAsync(ct);
+                    // 以技能方式调用子智能体：附加强化指令，促使其在需要时调用自身的子技能、
+                    // 并把子技能检索到的结论写入最终答复，确保多跳技能链（A→B→C）的结论逐层回传。
+                    var message = "请你就以下请求给出答复。"
+                        + "如果有任何你掌握的下游子技能（specialist/skill）能更准确地回答，请先调用它们，"
+                        + $"并把它们的结论清晰地包含在你的最终回复中，不要只写“已调用”或“请查阅”。\n\n请求：{query}";
+                    var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, message)], session, null, ct);
+                    var text = ExtractResponseText(response);
+                    if (node is not null) node.Result = Truncate(text, MaxChainTextChars);
+                    return string.IsNullOrWhiteSpace(text) ? "（子智能体未返回内容）" : text;
+                }
+                finally
+                {
+                    if (node is not null) chain!.Pop(); // 回退到父级作用域
+                }
             }
             finally
             {

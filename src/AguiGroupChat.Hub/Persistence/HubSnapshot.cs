@@ -70,6 +70,8 @@ public sealed class PersistedMessage
     public required string Content { get; set; }
     /// <summary>智能体思考过程（AG-UI 思考模式，独立于正文；可空）。</summary>
     public string? Reasoning { get; set; }
+    /// <summary>智能体技能调用链（链路可视化；可空）。</summary>
+    public string? AgentChain { get; set; }
     public required long Timestamp { get; init; }
     public bool Recalled { get; init; }
 }

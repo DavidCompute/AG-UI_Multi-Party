@@ -173,6 +173,8 @@ public sealed class TextMessageStartEvent
     public IReadOnlyList<AttachmentInfo> Attachments { get; init; } = [];
     /// <summary>智能体思考过程（AG-UI 思考模式：独立于正文展示，可空）。</summary>
     public string? Reasoning { get; init; }
+    /// <summary>智能体技能调用链（链路可视化；可空 = 无技能调用）。</summary>
+    public string? AgentChain { get; init; }
     public required long Timestamp { get; init; }
 }
 
@@ -238,6 +240,8 @@ public sealed class TextMessageEndEvent
     public required string GroupId { get; init; }
     /// <summary>消息结束时思考过程完整内容（可空 = 无思考内容）。</summary>
     public string? Reasoning { get; init; }
+    /// <summary>消息结束时智能体技能调用链（链路可视化；可空 = 无技能调用）。</summary>
+    public string? AgentChain { get; init; }
     public required long Timestamp { get; init; }
 }
 
@@ -479,6 +483,8 @@ public sealed class SnapshotMessage
     public IReadOnlyList<AttachmentInfo> Attachments { get; init; } = [];
     /// <summary>智能体思考过程（AG-UI 思考模式，独立于正文展示；可空）。</summary>
     public string? Reasoning { get; init; }
+    /// <summary>智能体技能调用链（链路可视化；可空 = 无技能调用）。</summary>
+    public string? AgentChain { get; init; }
     /// <summary>@ 提及成员（协议 2.3 扩展字段，前端回显）。</summary>
     public IReadOnlyList<string> Mentions { get; init; } = [];
     /// <summary>是否 @ 全体。</summary>
