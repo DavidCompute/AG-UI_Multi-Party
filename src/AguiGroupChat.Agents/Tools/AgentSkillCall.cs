@@ -49,7 +49,8 @@ internal sealed class AgentSkillCall
             {
                 var session = await _agent.CreateSessionAsync(ct);
                 var response = await _agent.RunAsync([new ChatMessage(ChatRole.User, query)], session, null, ct);
-                return string.IsNullOrWhiteSpace(response.Text) ? "（子智能体未返回内容）" : response.Text;
+                var text = ExtractResponseText(response);
+                return string.IsNullOrWhiteSpace(text) ? "（子智能体未返回内容）" : text;
             }
             finally
             {
@@ -61,5 +62,25 @@ internal sealed class AgentSkillCall
             _logger.LogWarning(ex, "技能调用失败：{Query}", query);
             return "技能调用失败：" + ex.Message;
         }
+    }
+
+    /// <summary>稳健提取子智能体最终答复文本：优先 <see cref="AgentResponse.Text"/>，
+    /// 部分 OpenAI 兼容客户端（含推理模型）不填充该字段，回退到最终 assistant 消息的文本内容。</summary>
+    private static string ExtractResponseText(Microsoft.Agents.AI.AgentResponse response)
+    {
+        var text = response.Text;
+        if (!string.IsNullOrWhiteSpace(text)) return text;
+        // 消息最后一条 assistant 消息的 Text 或其 TextContent
+        var msgs = response.Messages;
+        for (var i = msgs.Count - 1; i >= 0; i--)
+        {
+            var m = msgs[i];
+            if (m.Role != ChatRole.Assistant) continue;
+            var mt = m.Text;
+            if (!string.IsNullOrWhiteSpace(mt)) return mt;
+            foreach (var c in m.Contents)
+                if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text)) return tc.Text;
+        }
+        return "";
     }
 }
