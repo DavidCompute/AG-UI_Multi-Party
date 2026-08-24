@@ -44,7 +44,7 @@ samples/AguiGroupChat.Client/    # 示例客户端：基于 SDK 演示登录 →
 assets/                          # 品牌图标：agui-icon.svg 矢量源 + 多尺寸 PNG/ICO（详见 assets/README.md）
 tools/icon-gen/                  # 图标栅格化生成器：把 SVG 矢量图标输出为多尺寸 PNG 与 Windows ICO
 tools/agents-starter.json        # 行业智能体包（25 个角色）：登录后在「智能体管理 → 导入 JSON」选择该文件即批量创建
-tools/agents-standin-demo.json   # 「代为响应（向上回退 + 向下委派）」演示智能体包：导入后在总前台@提问即可观察多层委派与向上回退（见 README）
+tools/agents-standin-demo.json   # 「任务指派 + 问题提升」演示智能体包：导入后在总前台@提问即可观察下行指派与上行提升（见 README）
 tools/build-msi.ps1              # WiX v4 MSI 安装包构建（perUser 安装到 %LocalAppData%\AguiGroupChat；剔除全平台运行库，捆绑 bge-m3 模型，MSI 约 580MB）
 tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑模型的瘦身版可用；默认 nomic-embed-text-v1.5.Q8_0）
 tools/verify-hitl.mjs            # 人机交互（审批卡片）端到端验证脚本
