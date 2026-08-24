@@ -12,6 +12,7 @@
 - **技能激活智能体时检索错知识库**：智能体 1 通过技能调用带知识库的智能体 2 时，原来会错误地检索智能体 1 的知识库（技能调用复用宿主环境上下文导致）。本版在技能调用期间把上下文切到**目标智能体**，智能体 2 会按自己的知识库检索后再回复。
 - **网页标题显示“应用名”而非实际应用名**：国际化字典里 `brand.name` 键被“白标设置-应用名输入框”的标签覆盖，导致标题 / 顶栏 / 未读提示显示的是标签“应用名 / App name”而不是配置的应用名。本版把该标签键重命名为独立的 `brand.appNameLabel`，页面标题与顶栏恢复显示白标设置里配置的应用名。
 - **技能只能激活一层（万事通→hr→手册专家 无法逐层触发）**：旧版为防循环，技能目标智能体不再挂载自身技能，导致 A→B→C 的多跳技能链失效。本版放开为**支持多跳技能链**：目标智能体继续挂载自身技能，使“万事通→hr专员→员工手册解读专家”逐层调用、结果逐层嵌套返回；同时以<b>访问链 + 深度上限</b>在构建期破坏循环引用（A→B→A 不会无限递归）。
+- **技能多跳结果未逐层回传**：子智能体终答复若由真实 OpenAI 兼容客户端（含推理模型）以“最终 assistant 消息内容”形式返回、未填充 `response.Text`，技能调用会误报“子智能体未返回内容”，导致链路像断了。本版在技能调用获取答复时<b>稳健提取文本</b>：`response.Text` 为空时回退到最终 assistant 消息的文本内容，确保多跳结果逐层回传。
 
 ## Fixes (English)
 - **First registered user couldn't become admin**: the old build re-seeded built-in demo accounts (`zhangsan`, who automatically became admin as the "first registered" user; and `lisi`) after a data reset, so your real account never got admin rights. This version **completely removes demo-account seeding** - after clearing data, the first account you register is now the admin.
@@ -24,6 +25,7 @@
 - **Skills could only activate one level (万事通→hr→手册 expert chain failed)**: the old build, to prevent loops, did not mount skills on skill-target agents, so multi-hop chains (A→B→C) did not work. This version enables **multi-hop skill chains**: a target agent continues to mount its own skills, so 万事通→hr专员→员工手册解读专家 activates level-by-level and the results nest back up; cycles (A→B→A) are broken at build time via a visited-chain + depth cap, so they cannot recurse infinitely.
 - **KB has the term but `can't find it`**: pure vector search can drop hits for rare terms like `专享福利假` or long table-of-contents text when similarity falls below the threshold. This version adds a **keyword-recall fallback**: after retrieving candidate chunks, it re-scores them with BM25 against the query terms and recovers fragments that match by wording but were missed by the vector search - so a term that clearly exists in the document is no longer reported as `not found`.
 - **Skill invocation searched the wrong knowledge base**: when agent 1 uses a skill to invoke a KB-enabled agent 2, the old build incorrectly searched agent 1's knowledge base (the skill call reused the host's ambient context). This version switches the context to the **target agent** during the skill call, so agent 2 retrieves from its own knowledge base and then replies.
+- **Multi-hop skill results were not returned layer by layer**: when a real OpenAI-compatible client (including reasoning models) returns the sub-agent's final reply as the last assistant message contents instead of populating `response.Text`, the skill call wrongly reported “sub-agent returned no content”, making the chain appear broken. This version extracts the reply text **robustly**: when `response.Text` is empty it falls back to the final assistant message's text, so multi-hop results propagate back level by level.
 
 ## 使用提示（中文）
 全新安装或想彻底重置：先完全退出桌面版，再删除 `%LocalAppData%\AguiGroupChat\data\` 目录后启动，第一个注册账号即为管理员。
