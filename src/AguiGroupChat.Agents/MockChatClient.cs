@@ -76,6 +76,19 @@ public sealed class MockChatClient : IChatClient
             return [shouldSpeak ? "YES" : "NO"];
         }
 
+        // 任务指派目标推断（组织化路由）：请求含问意（？/帮我/派）→ 指派给第一个候选；否则不指派（NONE）
+        if (lastUserText.Contains("__AGUI_ROUTE__", StringComparison.Ordinal))
+        {
+            var reqIdx = lastUserText.IndexOf("请求：", StringComparison.Ordinal);
+            var req = reqIdx >= 0 ? lastUserText[(reqIdx + "请求：".Length)..] : "";
+            var candIdx = lastUserText.IndexOf("候选（agentId 列表）：", StringComparison.Ordinal);
+            var cand = candIdx >= 0 ? lastUserText[(candIdx + "候选（agentId 列表）：".Length)..] : "";
+            cand = cand.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+            var shouldAssign = req.Contains('?') || req.Contains('？') || req.Contains("帮我") || req.Contains("派");
+            var first = cand.Split(',').Select(x => x.Trim()).FirstOrDefault(x => x.Length > 0);
+            return [shouldAssign && !string.IsNullOrEmpty(first) ? first : "NONE"];
+        }
+
         var text = $"收到！关于「{lastUserText}」，作为「{_agent.Nickname}」我的建议如下：\n\n" +
                    "1. 明确需求边界与验收标准，避免范围蔓延；\n" +
                    "2. 拆分里程碑，先交付可验证的最小闭环；\n" +

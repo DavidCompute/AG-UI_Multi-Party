@@ -269,15 +269,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return new AgentInvocationResult(false, null, "AGENT_DECIDED_SILENT");
         }
 
-        // 代为响应（条件委派）：被显式 @（Mentioned）触发且开启委派时，先判断语境是否属于自己的职责；
-        // 若判定不属于自己（如被 @ 但内容是其他角色领域），则委派给 StandinAgentId 代为回答，而非由本智能体硬答或沉默。
+        // 任务指派 / 问题提升（组织化路由）：被显式 @（Mentioned）触发，且配置了「指派白名单」或「提升目标」时，
+        // 按本数字员工系统提示词推断：该我答 → 直接答；不该我答且白名单有合适 → 向下指派；
+        // 无合适指派对象且配了提升目标 → 向上提升；再无可解 → 回答不能解决。
         if (effectiveMode == AgentTriggerMode.Mentioned
-            && def.DelegateWhenOutOfScope
-            && !string.IsNullOrWhiteSpace(def.StandinAgentId)
-            && !string.Equals(def.StandinAgentId, context.AgentId, StringComparison.Ordinal)
-            && !await ShouldSpeakAsync(context, def, ct)) // 语境判定：自己不适合回答 → 委派
+            && (def.AssignmentIds is { Count: > 0 } || !string.IsNullOrWhiteSpace(def.EscalationAgentId)))
         {
-            return await InvokeStandinAsync(context, def.StandinAgentId!, ct);
+            return await InvokeAssignmentEscalationAsync(context, ct);
         }
 
         var agent = _catalog.GetOrCreate(context.AgentId);
@@ -690,21 +688,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>
-    /// 代为响应（条件委派，**支持多层委派链**）：被显式 @ 的智能体判定「语境不属于自己」时，委派给
-    /// <paramref name="standinAgentId"/> 代为回答。若被委派的数字员工也开启了委派且判定语境仍不属于自己，
-    /// 则继续向下游智能体委派（B→C→…），逐层累积「由 X 代为响应」前缀，直到某层由最终的智能体实际作答。
-    /// 回复统一以原始的 @ 宿主智能体身份发出；含深度上限与环路保护（A→B→A 不会死循环）。
+    /// 任务指派 / 问题提升（组织化路由）：被显式 @ 的宿主（或其下游被指派/提升）进入该路由。
+    /// 优先按本数字员工系统提示词推断「该不该我答」：该我答 → 直接答；不该我答且白名单有合适 → 向下<b>任务指派</b>；
+    /// 无合适指派对象且配了提升目标 → 向上<b>问题提升</b>；再无解 → 回答「不能解决」。
+    /// 回复统一以原始 @ 宿主身份发出；含深度上限与环路保护（A→B→A 不环回）。
     /// </summary>
-    private async Task<AgentInvocationResult> InvokeStandinAsync(AgentInvocationContext context, string standinAgentId, CancellationToken ct)
+    private async Task<AgentInvocationResult> InvokeAssignmentEscalationAsync(AgentInvocationContext context, CancellationToken ct)
     {
-        if (_catalog.GetDefinition(standinAgentId) is null)
-        {
-            _logger.LogWarning("智能体 {AgentId} 代为响应目标不存在：{Target}，改由自身常规回复", context.AgentId, standinAgentId);
-            return new AgentInvocationResult(false, null, "AGENT_STANDIN_NOT_FOUND");
-        }
-
         var runId = "run_" + IdGenerator.NewId();
-        _logger.LogInformation("智能体 {AgentId} 代为响应：语境判定不适合自己，委派给 {Standin}（run={RunId}）", context.AgentId, standinAgentId, runId);
+        _logger.LogInformation("智能体 {AgentId} 进入指派/提升路由（run={RunId}，group={GroupId}）", context.AgentId, runId, context.GroupId);
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -714,31 +706,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         string? messageId = null;
         try
         {
-            // 沿委派链解析最终答复（组织架构式：向下探答、不行向上回退）
             var input = await BuildUserMessageAsync(context, runCt);
-            var chain = new HashSet<string>(StringComparer.Ordinal) { context.AgentId };
-            var (answered, finalText, hops) = await ResolveStandinReplyAsync(context, standinAgentId, input, chain, depth: 1, runCt);
-            var prefixNames = new List<string>();
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            var (outcome, finalText, hops) = await ResolveRouteAsync(context, context.AgentId, input, visited, depth: 1, runCt);
+            var prefixNames = hops.Where(h => !string.IsNullOrWhiteSpace(h.AgentId)).Select(h => h.AgentNickname).ToList();
+            if (outcome == RouteOutcome.CannotSolve)
+                finalText = "（该问题不在我可解决的范围内，且没有可指派的同事或可提升的上级，暂时无法解决。请直接联系处理该问题的负责人。）";
 
-            // 委派成功：前缀 = 委派路径上各届的数字员工（B → C → …）
-            if (answered)
-            {
-                // 首层委派（被 @ 的宿主 A → B）本身也是一跳（若递归尚未包含 B）
-                if (hops.Count == 0 || !string.Equals(hops[0].AgentId, standinAgentId, StringComparison.Ordinal))
-                    hops.Insert(0, new ChainNode { Kind = "standin", AgentId = standinAgentId, AgentNickname = _catalog.GetDefinition(standinAgentId)?.Nickname ?? standinAgentId });
-                prefixNames = hops.Where(h => !string.IsNullOrWhiteSpace(h.AgentId)).Select(h => h.AgentNickname).ToList();
-            }
-            else
-            {
-                // 整条委派链（B→C→…）都判定不符而回退：由被 @ 的宿主 A 兑底作答（无前缀）
-                finalText = await RunStandinAnswerAsync(context, context.AgentId, input, runCt);
-                var hostDef = _catalog.GetDefinition(context.AgentId);
-                var fallbackHop = new ChainNode { Kind = "standin", AgentId = context.AgentId, AgentNickname = hostDef?.Nickname ?? context.AgentId, Result = TruncateForChain(finalText) };
-                hops.Add(fallbackHop); // 可视化：回退后由宿主兑底作答
-                prefixNames = [];
-            }
-
-            // 链路可视化：把委派路径写入消息级链（根=宿主，委派逐层嵌套）
+            // 链路可视化：把指派/提升路径写入消息级链（根=宿主，逐层嵌套）
             RecordStandinChain(context, hops);
 
             var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
@@ -754,11 +729,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }, runCt);
             messageId = started.MessageId;
 
-            // 逐层叠加「由 X 代为响应」前缀（B → C → …）；回退兑底时无前缀（A 直接答复）
+            // 逐层叠加「已指派给 X / 已提升给 Y」前缀
             foreach (var name in prefixNames)
-                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（由 {name} 代为响应）\n", runCt);
+                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
 
-            var text = string.IsNullOrWhiteSpace(finalText) ? "（代为响应对象未返回内容）" : finalText.Trim();
+            var text = string.IsNullOrWhiteSpace(finalText) ? "（处理对象未返回内容）" : finalText.Trim();
             foreach (var chunk in ChunkReply(text, 160))
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
@@ -772,14 +747,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "代为响应运行失败：agent={AgentId} standin={Standin} run={RunId}", context.AgentId, standinAgentId, runId);
+            _logger.LogWarning(ex, "指派/提升路由运行失败：agent={AgentId} run={RunId}", context.AgentId, runId);
             await SafeEndAsync(context, messageId);
             try
             {
                 await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent
                 {
                     GroupId = context.GroupId, ErrorCode = "AGENT_RUN_ERROR",
-                    Message = "代为响应失败：" + ex.Message, Timestamp = _hub.Value.NowMs,
+                    Message = "指派/提升失败：" + ex.Message, Timestamp = _hub.Value.NowMs,
                 }, ct: CancellationToken.None);
             }
             catch { /* 广播失败不影响返回 */ }
@@ -792,92 +767,101 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
-    /// <summary>代为响应最大委派层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>
-    private const int MaxStandinDepth = 4;
+    /// <summary>指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>
+    private const int MaxRouteDepth = 4;
+
+    private enum RouteOutcome { Answer, CannotSolve }
 
     /// <summary>
-    /// 递归解析代为响应委派链（**组织架构式：向下探答、不行向上回退**）：
-    /// 从 <paramref name="agentId"/> 开始，若本级判定「语境应自己答」→ 本级作答；
-    /// 否则尝试向下游委派；若下游整条链都判定不符而回退，本级也**回退给上一级**（不硬答）。
-    /// 返回 (是否最终作答, 答复文本, 委派路径[ChainNode:kind=standin])。宿主（被 @ 的 A）作为最上层兑底作答。
+    /// 递归路由：本级先判是否应答，否则尝试<b>任务指派</b>（白名单内推断目标），
+    /// 再否则尝试<b>问题提升</b>（配置的提升目标）；全部无解 → <see cref="RouteOutcome.CannotSolve"/>。
+    /// 返回 (结局, 最终答复, 路由路径[ChainNode])。
     /// </summary>
-    private async Task<(bool Answered, string Text, List<ChainNode> Hops)> ResolveStandinReplyAsync(
+    private async Task<(RouteOutcome Outcome, string Text, List<ChainNode> Hops)> ResolveRouteAsync(
         AgentInvocationContext context, string agentId, string input, HashSet<string> visited, int depth, CancellationToken ct)
     {
         var def = _catalog.GetDefinition(agentId);
-        if (def is null)
-            return (false, "", []); // 目标不存在：交由上层回退处理
+        if (def is null || depth > MaxRouteDepth || visited.Contains(agentId))
+            return (RouteOutcome.CannotSolve, "", []);
+        visited.Add(agentId);
+        var hops = new List<ChainNode>();
 
-        // 1) 本级是否愿意回答：语境应自己答 → 直接作答（含满足场景）
+        // 1) 系统提示词语境推断：该我答 → 直接作答
         if (await ShouldSpeakAsync(context, def, ct))
         {
-            var text = await RunStandinAnswerAsync(context, agentId, input, ct);
-            var hop = new ChainNode
-            {
-                Kind = "standin",
-                AgentId = agentId,
-                AgentNickname = def.Nickname ?? agentId,
-                Query = TruncateForChain(input),
-                Result = TruncateForChain(text),
-            };
-            return (true, text, [hop]);
+            var text = await RunRouteAnswerAsync(context, agentId, input, ct);
+            hops.Add(new ChainNode { Kind = "assignment", AgentId = agentId, AgentNickname = def.Nickname ?? agentId, Query = TruncateForChain(input), Result = TruncateForChain(text) });
+            return (RouteOutcome.Answer, text, hops);
         }
 
-        // 2) 本级不愿答 → 尝试向下游委派
-        var next = def.StandinAgentId;
-        if (!string.IsNullOrWhiteSpace(next)
-            && !string.Equals(next, agentId, StringComparison.Ordinal)
-            && depth < MaxStandinDepth
-            && !visited.Contains(next)
-            && _catalog.GetDefinition(next) is not null)
+        // 2) 任务指派（白名单 + 系统提示词推断目标）
+        var candidates = (def.AssignmentIds ?? [])
+            .Where(id => !string.IsNullOrWhiteSpace(id)
+                && !string.Equals(id, agentId, StringComparison.Ordinal)
+                && !visited.Contains(id)
+                && _catalog.GetDefinition(id) is not null)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var assignTarget = candidates.Count > 0 ? await PickAssignTargetAsync(context, def, candidates, input, ct) : null;
+        if (!string.IsNullOrWhiteSpace(assignTarget))
         {
-            visited.Add(agentId);
-            var (subAnswered, subText, subHops) = await ResolveStandinReplyAsync(context, next, input, visited, depth + 1, ct);
-            if (subAnswered)
+            var (subOutcome, subText, subHops) = await ResolveRouteAsync(context, assignTarget, input, visited, depth + 1, ct);
+            if (subOutcome == RouteOutcome.Answer)
             {
-                // 委派路径 = 本级委派目标 + 下游委派路径（本层虽未作答，但委派了下一层）
-                var hops = new List<ChainNode> { new() { Kind = "standin", AgentId = next, AgentNickname = _catalog.GetDefinition(next)?.Nickname ?? next, Query = TruncateForChain(input) } };
+                hops.Add(new ChainNode { Kind = "assignment", AgentId = assignTarget, AgentNickname = _catalog.GetDefinition(assignTarget)?.Nickname ?? assignTarget, Query = TruncateForChain(input) });
                 hops.AddRange(subHops);
-                return (true, subText, hops);
+                return (RouteOutcome.Answer, subText, hops);
             }
-            // 下游整条链都判定不符 → 本级也不硬答，回退给上一级
-            visited.Remove(agentId);
-            // 记录“委派到 next 但回退”这一环（供可视化：展示尝试过的路径）
-            var declineHop = new ChainNode
-            {
-                Kind = "standin",
-                AgentId = next,
-                AgentNickname = _catalog.GetDefinition(next)?.Nickname ?? next,
-                Query = TruncateForChain(input),
-                Result = _catalog.GetDefinition(next) is { } nd && !string.IsNullOrWhiteSpace(nd.StandinAgentId)
-                    ? "（下游均判定不符，向上回退）"
-                    : "（判定不符，无下游可委派，向上回退）",
-            };
-            return (false, "", [declineHop]);
         }
 
-        // 3) 无下游可委派（或环回/触顶） → 本级答不了，回退给上一级，由上层兑底
-        return (false, "", []);
+        // 3) 问题提升（配置的提升目标）
+        var esc = def.EscalationAgentId;
+        if (!string.IsNullOrWhiteSpace(esc)
+            && !string.Equals(esc, agentId, StringComparison.Ordinal)
+            && !visited.Contains(esc)
+            && _catalog.GetDefinition(esc) is not null)
+        {
+            var (subOutcome, subText, subHops) = await ResolveRouteAsync(context, esc, input, visited, depth + 1, ct);
+            if (subOutcome == RouteOutcome.Answer)
+            {
+                hops.Add(new ChainNode { Kind = "escalation", AgentId = esc, AgentNickname = _catalog.GetDefinition(esc)?.Nickname ?? esc, Query = TruncateForChain(input) });
+                hops.AddRange(subHops);
+                return (RouteOutcome.Answer, subText, hops);
+            }
+        }
+
+        // 4) 无解
+        return (RouteOutcome.CannotSolve, "", hops);
     }
 
-    private static string TruncateForChain(string? s)
+    /// <summary>
+    /// 任务指派目标推断：在 <paramref name="candidates"/>（白名单）里选最合适的下游数字员工；
+    /// 由该数字员工按自身系统提示词 + 请求内容判断，返回选中目标或 null（不指派）。
+    /// </summary>
+    private async Task<string?> PickAssignTargetAsync(AgentInvocationContext context, AgentDefinition def, List<string> candidates, string input, CancellationToken ct)
     {
-        const int max = 200;
-        return string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
+        var agent = _catalog.CreateBare(def.AgentId);
+        var sb = new StringBuilder();
+        sb.AppendLine("以下是一个待处理请求，请判断是否应把它交给某个下游数字员工（任务指派）。");
+        sb.AppendLine("你只输出一个结果，不要附加说明。");
+        sb.AppendLine("候选（agentId 列表）：" + string.Join(", ", candidates));
+        sb.AppendLine("若请求应由其中某位处理，输出该 agentId；否则输出 NONE。");
+        var prompt = "__AGUI_ROUTE__\n" + sb + "\n请求：\n" + UntrustedBoundary.Wrap(input);
+        var resp = await agent.RunAsync(prompt, session: null, new ChatClientAgentRunOptions { ChatOptions = new ChatOptions { MaxOutputTokens = 32 } }, ct);
+        var choice = (resp.Text ?? "NONE").Trim();
+        return candidates.Any(c => string.Equals(c, choice, StringComparison.OrdinalIgnoreCase)) ? choice : null;
     }
 
-    /// <summary>让单个数字员工就委派请求实际作答（模型一次 run），返回最终文本。</summary>
-    private async Task<string> RunStandinAnswerAsync(AgentInvocationContext context, string agentId, string input, CancellationToken ct)
+    /// <summary>让单个数字员工就指派/提升请求实际作答（模型一次 run），返回最终文本。</summary>
+    private async Task<string> RunRouteAnswerAsync(AgentInvocationContext context, string agentId, string input, CancellationToken ct)
     {
         var host = _catalog.GetDefinition(context.AgentId);
         var hostName = host?.Nickname ?? context.AgentId;
         var agent = _catalog.GetOrCreate(agentId);
-        var prompt = "你正被「" + hostName + "」委派代为回答。"
-            + "请结合你的职责直接给出专业答复。\n\n" + input;
+        var prompt = "你正被「" + hostName + "」委派处理该请求。请结合你的职责直接给出专业答复。\n\n" + input;
         var session = await agent.CreateSessionAsync(ct);
         var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
         if (!string.IsNullOrWhiteSpace(resp.Text)) return resp.Text.Trim();
-        // 部分 OpenAI 兼容客户端不填充 response.Text，回退最终 assistant 消息文本
         foreach (var m in resp.Messages)
         {
             if (m.Role != ChatRole.Assistant) continue;
@@ -886,6 +870,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text)) return tc.Text.Trim();
         }
         return "";
+    }
+
+    private static string TruncateForChain(string? s)
+    {
+        const int max = 200;
+        return string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
     }
 
     /// <summary>把长文本切成固定长度的片段（用于分块广播渐进渲染）。</summary>
@@ -1441,7 +1431,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
-    /// <summary>把代为响应委派路径写入链构造器（根=宿主；委派跳按嵌套结构记录），
+    /// <summary>把任务指派 / 问题提升路径写入链构造器（根=宿主；指派/提升跳按嵌套结构记录），
     /// 供链路可视化与技能调用同屏展示。无构造器（非网关驱动）静默跳过。</summary>
     private void RecordStandinChain(AgentInvocationContext context, List<ChainNode> hops)
     {
@@ -1452,7 +1442,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             builder.EnsureRoot(context.AgentId, _catalog.GetDefinition(context.AgentId)?.Nickname ?? context.AgentId);
             foreach (var hop in hops)
             {
-                hop.Kind = "standin";
+                if (string.IsNullOrWhiteSpace(hop.Kind)) hop.Kind = "assignment";
                 builder.Push(hop); // 依序嵌套：root → B → C → …
             }
             // 回到根作用域（Pop 不越过根），不影响后续技能调用作用域

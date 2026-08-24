@@ -291,17 +291,18 @@
             <label for="afEnableWorkTools" style="margin:0;cursor:pointer" data-i18n="agent.form.enableWorkTools">🛠️ 工作型数字员工</label>
             <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.enableWorkToolsHint">（默认关闭。开启后可在专属工作区读取/写入文件、执行白名单命令；写操作需你在知聚内批准。仅供可信数字员工使用）</span>
           </div>
-          <div class="form-section" data-i18n="agent.form.section.delegate">代为响应</div>
-          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input id="afDelegateWhenOutOfScope" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
-            <label for="afDelegateWhenOutOfScope" style="margin:0;cursor:pointer" data-i18n="agent.form.delegateWhenOutOfScope">🔁 语境不符时代为响应</label>
+          <div class="form-section" data-i18n="agent.form.section.route">任务指派 / 问题提升</div>
+          <div class="form-group">
+            <label data-i18n="agent.form.assignmentIds">任务指派白名单（可下行指派）</label>
+            <select id="afAssignmentIds" class="modal-input" multiple size="3"></select>
+            <p class="form-hint" style="margin-top:4px" data-i18n="agent.form.assignmentHint">被 @ 时，若按本数字员工系统提示词判定“不属于我”，会在<b>此白名单</b>内自动推断并指派给更合适的下游数字员工（可 Ctrl+点选多个）。留空 = 不向下指派。</p>
           </div>
           <div class="form-group">
-            <label data-i18n="agent.form.standinAgent">代为响应数字员工</label>
-            <select id="afStandinAgent" class="modal-input">
-              <option value="" data-i18n="agent.form.standinNone">— 请选择 —</option>
+            <label data-i18n="agent.form.escalationAgent">问题提升目标（向上）</label>
+            <select id="afEscalationAgent" class="modal-input">
+              <option value="" data-i18n="agent.form.escalationNone">— 不设置（无解时回答不能解决）—</option>
             </select>
-            <p class="form-hint" style="margin-top:4px" data-i18n="agent.form.standinHint">被直接 @ 时，若本数字员工判定“这不是我该回复的语境”，将由所选数字员工代为回答（回复以本数字员工身份发出，并标注“由 X 代为响应”）。留空则不启用。</p>
+            <p class="form-hint" style="margin-top:4px" data-i18n="agent.form.escalationHint">无法指派且自身也无解时，把问题<b>提升</b>给该数字员工（通常是上级/主管，手工配置）。若为空则回答“不能解决”。</p>
           </div>
         </div>
         <div class="modal-actions">

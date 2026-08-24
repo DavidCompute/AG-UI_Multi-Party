@@ -269,16 +269,17 @@ public sealed class AgentDefinition
     public string? RelayToAgentId { get; set; }
 
     /// <summary>
-    /// **代为响应（委派代答）**：配合 <see cref="DelegateWhenOutOfScope"/> 使用。<br/>
-    /// 本智能体被显式 @（或召唤）触发时，若开启 <see cref="DelegateWhenOutOfScope"/> 且语境判断
-    /// 「不是自己该回复的内容」，则把这一轮<b>委派给</b> <c>StandinAgentId</c> 代为响应，
-    /// 返回其答复（带「由 X 代为响应」前缀）。区别于整轮交接 <see cref="RelayToAgentId"/>：
-    /// 这里是<b>条件委派</b>——只有判定语境不属于自己才代答，否则仍由本智能体正常回答。
+    /// **任务指派白名单（向下）**：本数字员工被 @ 时，若按自身系统提示词判定语境不属于自己，
+    /// 可在<b>白名单内自动指派</b>给更合适的下游数字员工（由模型在该名单里推断目标）。
+    /// 留空 = 不做向下指派。指派方向由「白名单 + 系统提示词语境推断」自动决定。
     /// </summary>
-    public string? StandinAgentId { get; set; }
+    public List<string> AssignmentIds { get; set; } = [];
 
-    /// <summary>是否开启「代为响应」条件委派（见 <see cref="StandinAgentId"/>）。</summary>
-    public bool DelegateWhenOutOfScope { get; set; }
+    /// <summary>
+    /// **问题提升目标（向上，手工配置）**：本数字员工达不到语境且白名单也无合适指派对象时，
+    /// <b>提升</b>给该数字员工（通常是其上级/主管）。由人工配置。若为空，且自身也无解，则回答「不能解决」。
+    /// </summary>
+    public string? EscalationAgentId { get; set; }
 
     /// <summary>创建者 userId（运行时创建时记录；appsettings 种子为 null = 系统级智能体）。</summary>
     public string? OwnerId { get; set; }

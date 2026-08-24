@@ -105,8 +105,8 @@ public sealed class AgentGatewayTests
         Assert.Contains("答复专家", stored!.Content);
     }
 
-    /// <summary>装配带「代为响应」（条件委派）的网关：agent_a 被 @ 但判定语境不属于自己时，委派给 agent_resp 代答。</summary>
-    private static AgentGateway CreateStandinGateway(HubFixture f)
+    /// <summary>装配「任务指派」路由网关：agent_a 被 @、语境不符且有白名单 → 指派给 agent_resp 作答。</summary>
+    private static AgentGateway CreateAssignmentGateway(HubFixture f)
     {
         var options = new AgentOptions
         {
@@ -122,8 +122,7 @@ public sealed class AgentGatewayTests
                 {
                     AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术问题", Instructions = "你只是前台，不回答技术问题",
                     TriggerMode = AgentTriggerMode.Mentioned,
-                    DelegateWhenOutOfScope = true,
-                    StandinAgentId = "agent_resp",
+                    AssignmentIds = ["agent_resp"],
                 },
             ],
         };
@@ -133,108 +132,8 @@ public sealed class AgentGatewayTests
     }
 
     [Fact]
-    public async Task Invoke_MentionedOutOfScope_DelegatesToStandin()
+    public async Task Invoke_MentionedOutOfScope_AssignsDownToWhitelist()
     {
-        var f = new HubFixture();
-        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
-        {
-            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
-            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" }],
-        });
-        var (conn, inbox) = f.NewConnection("user_1");
-        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
-        f.Drain(inbox);
-
-        var gateway = CreateStandinGateway(f);
-        // 内容不触发语境发言（无 ？/帮我/建议）→ Mock 决策 NO → 判定不属于前台 → 委派给答复专家
-        var result = await gateway.InvokeAsync(new AgentInvocationContext(
-            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
-            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
-            TriggerUserId: "user_1", Content: "这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
-            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
-
-        Assert.True(result.Accepted, "代为响应运行失败: " + result.ErrorCode);
-        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
-        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
-        var messageId = start.GetProperty("messageId").GetString()!;
-        var stored = f.Store.GetMessage(group.GroupId, messageId);
-        Assert.NotNull(stored);
-        // 组织架构式回退：委托对象（agent_resp）也判定语境不符且无下游 → 向上回退，由被 @ 的宿主 A（前台专员）兑底作答
-        Assert.DoesNotContain("代为响应", stored!.Content); // 无「由 X 代为响应」前缀（A 直接答复）
-        Assert.Contains("前台专员", stored.Content); // A 的本体 Mock 回复
-    }
-
-    /// <summary>装配带「多层代为响应」链的网关：agent_a → agent_b → agent_c（c 为最终作答）。</summary>
-    private static AgentGateway CreateMultiStandinGateway(HubFixture f)
-    {
-        var options = new AgentOptions
-        {
-            Provider = "mock",
-            Agents =
-            [
-                new AgentDefinition
-                {
-                    AgentId = "agent_c", Nickname = "终答专家", Description = "测试", Instructions = "你是终答专家，输出：终答内容",
-                    TriggerMode = AgentTriggerMode.Mentioned,
-                },
-                new AgentDefinition
-                {
-                    AgentId = "agent_b", Nickname = "中层专员", Description = "不答技术", Instructions = "你不答技术",
-                    TriggerMode = AgentTriggerMode.Mentioned,
-                    DelegateWhenOutOfScope = true,
-                    StandinAgentId = "agent_c",
-                },
-                new AgentDefinition
-                {
-                    AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术", Instructions = "你只是前台，不回答技术问题",
-                    TriggerMode = AgentTriggerMode.Mentioned,
-                    DelegateWhenOutOfScope = true,
-                    StandinAgentId = "agent_b",
-                },
-            ],
-        };
-        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
-        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
-        return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
-    }
-
-    [Fact]
-    public async Task Invoke_MentionedOutOfScope_DelegatesMultiLayerToDeepest()
-    {
-        var f = new HubFixture();
-        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
-        {
-            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
-            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" }],
-        });
-        var (conn, inbox) = f.NewConnection("user_1");
-        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
-        f.Drain(inbox);
-
-        var gateway = CreateMultiStandinGateway(f);
-        var result = await gateway.InvokeAsync(new AgentInvocationContext(
-            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
-            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
-            TriggerUserId: "user_1", Content: "这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
-            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
-
-        Assert.True(result.Accepted, "多层代为响应运行失败: " + result.ErrorCode);
-        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
-        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
-        var messageId = start.GetProperty("messageId").GetString()!;
-        var stored = f.Store.GetMessage(group.GroupId, messageId);
-        Assert.NotNull(stored);
-        // 组织架构式回退：整条链 B→C 都判定语境不符 → 逐层向上回退，由被 @ 的宿主 A 兜底作答（无委派前缀）
-        Assert.DoesNotContain("代为响应", stored!.Content);
-        Assert.DoesNotContain("中层专员", stored.Content);
-        Assert.DoesNotContain("终答专家", stored.Content);
-        Assert.Contains("前台专员", stored.Content); // A 的本体 Mock 回复
-    }
-
-    [Fact]
-    public async Task Invoke_StandinAccepts_StreamsStandinReply()
-    {
-        // 内容里提到被委派的数字员工（答复专家）→ Mock 语境判定：A 不符（委派），B 应自己答（接受）
         var f = new HubFixture();
         var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
         {
@@ -249,26 +148,122 @@ public sealed class AgentGatewayTests
         await f.Hub.SubscribeAsync(conn, [group.GroupId]);
         f.Drain(inbox);
 
-        var gateway = CreateStandinGateway(f); // agent_a → agent_resp（答复专家）
+        var gateway = CreateAssignmentGateway(f);
+        // 内容含「派」（触发指派推断）且 @答复专家（使被指派对象判 YES 作答），前台判 NO → 指派
         var result = await gateway.InvokeAsync(new AgentInvocationContext(
             GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
             AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
-            TriggerUserId: "user_1", Content: "@答复专家 这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
+            TriggerUserId: "user_1", Content: "@答复专家 这个部署活怎么派", Mentions: [], MentionAll: false,
             TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
 
-        Assert.True(result.Accepted, "代为响应失败: " + result.ErrorCode);
+        Assert.True(result.Accepted, "任务指派运行失败: " + result.ErrorCode);
         var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
         var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
         var messageId = start.GetProperty("messageId").GetString()!;
         var stored = f.Store.GetMessage(group.GroupId, messageId);
         Assert.NotNull(stored);
-        // 委派成功：B（答复专家）接受并作答 → 前缀「由 答复专家 代为响应」+ B 的本体回复
-        Assert.Contains("由 答复专家 代为响应", stored!.Content);
-        Assert.Contains("答复专家", stored.Content);
+        // 指派成功：前缀「答复专家 代为处理」+ 答复专家的本体回复；不会说「无法解决」
+        Assert.Contains("答复专家 代为处理", stored!.Content);
+        Assert.DoesNotContain("无法解决", stored.Content);
     }
 
-    /// <summary>装配环路代为响应链：agent_a → agent_b → agent_a（应在第二次委派处破环，不留死循环）。</summary>
-    private static AgentGateway CreateCycleStandinGateway(HubFixture f)
+    /// <summary>装配「问题提升」路由网关：agent_a 无白名单、配提升目标 agent_mgr ⇒ 提升给主管。</summary>
+    private static AgentGateway CreateEscalationGateway(HubFixture f)
+    {
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_mgr", Nickname = "主管", Description = "测试", Instructions = "你是主管，输出：主管处理结果",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术问题", Instructions = "你只是前台，不回答技术问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    EscalationAgentId = "agent_mgr",
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+    }
+
+    [Fact]
+    public async Task Invoke_MentionedOutOfScope_EscalatesUpToManager()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a", "agent_mgr"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" },
+                new MemberSeed { MemberId = "agent_mgr", MemberType = MemberType.Agent, Nickname = "主管" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateEscalationGateway(f);
+        // 前台判 NO、无白名单 → 提升给主管（@主管使主管判 YES 作答）
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "@主管 服务器宕机了这活怎么办", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "问题提升运行失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        Assert.Contains("主管 代为处理", stored!.Content);
+        Assert.DoesNotContain("无法解决", stored.Content);
+    }
+
+    [Fact]
+    public async Task Invoke_NoAssignNoEscalate_AnswersCannotSolve()
+    {
+        // 有白名单但内容不触发指派（无 ?/帮我/派），也未配提升目标 → 无法解决
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a", "agent_resp"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" },
+                new MemberSeed { MemberId = "agent_resp", MemberType = MemberType.Agent, Nickname = "答复专家" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateAssignmentGateway(f); // agent_a 白名单=[答复专家] 但无提升目标
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "这个活不太好办", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "无法解决分支运行失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        Assert.Contains("无法解决", stored!.Content);
+    }
+
+    /// <summary>装配提升环路：agent_a → agent_b → agent_a（第二次处破环，不留死循环）。</summary>
+    private static AgentGateway CreateCycleEscalationGateway(HubFixture f)
     {
         var options = new AgentOptions
         {
@@ -279,15 +274,13 @@ public sealed class AgentGatewayTests
                 {
                     AgentId = "agent_b", Nickname = "中层专员", Description = "不答技术", Instructions = "你不答技术",
                     TriggerMode = AgentTriggerMode.Mentioned,
-                    DelegateWhenOutOfScope = true,
-                    StandinAgentId = "agent_a",
+                    EscalationAgentId = "agent_a",
                 },
                 new AgentDefinition
                 {
                     AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术", Instructions = "你只是前台，不回答技术问题",
                     TriggerMode = AgentTriggerMode.Mentioned,
-                    DelegateWhenOutOfScope = true,
-                    StandinAgentId = "agent_b",
+                    EscalationAgentId = "agent_b",
                 },
             ],
         };
@@ -297,7 +290,7 @@ public sealed class AgentGatewayTests
     }
 
     [Fact]
-    public async Task Invoke_StandinCycle_DoesNotDeadlock()
+    public async Task Invoke_EscalationCycle_DoesNotDeadlock()
     {
         var f = new HubFixture();
         var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
@@ -309,15 +302,15 @@ public sealed class AgentGatewayTests
         await f.Hub.SubscribeAsync(conn, [group.GroupId]);
         f.Drain(inbox);
 
-        var gateway = CreateCycleStandinGateway(f);
+        var gateway = CreateCycleEscalationGateway(f);
         var result = await gateway.InvokeAsync(new AgentInvocationContext(
             GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
             AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
-            TriggerUserId: "user_1", Content: "这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
+            TriggerUserId: "user_1", Content: "这个活不太好办", Mentions: [], MentionAll: false,
             TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
 
-        // 环路不被委派链破环后仍能正常完成（不挂起），由某层直接作答返回
-        Assert.True(result.Accepted, "环路委派应可正常结束: " + result.ErrorCode);
+        // 提升环路破环后正常结束，不挂起
+        Assert.True(result.Accepted, "环路提升应可正常结束: " + result.ErrorCode);
         var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
         Assert.Contains(events, e => e.GetProperty("type").GetString() == EventTypes.TextMessageEnd);
     }

@@ -856,8 +856,8 @@ function serializeAgent(a) {
     isPrivate: !!a.isPrivate,
     knowledgeBaseIds: (a.knowledgeBaseIds || []),
     skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
-    standinAgentId: a.standinAgentId || null,
-    delegateWhenOutOfScope: !!a.delegateWhenOutOfScope,
+    assignmentIds: (a.assignmentIds || []),
+    escalationAgentId: a.escalationAgentId || null,
   };
 }
 
@@ -956,8 +956,8 @@ async function importAgentsFromFile(file) {
       isPrivate: !!a.isPrivate,
       knowledgeBaseIds: (a.knowledgeBaseIds || []),
       skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
-      standinAgentId: a.standinAgentId || null,
-      delegateWhenOutOfScope: !!a.delegateWhenOutOfScope,
+      assignmentIds: (a.assignmentIds || []),
+      escalationAgentId: a.escalationAgentId || null,
     };
     if (!body.nickname) { failed++; continue; }
     try {
@@ -1037,17 +1037,17 @@ function openAgentForm(agentId) {
   $("afPersonalMemory").checked = !!a?.personalMemoryEnabled;
   $("afEnableWorkTools").checked = !!a?.enableWorkTools;
   $("afIsPrivate").checked = !!a?.isPrivate;
-  // 代为响应：填充候选数字员工（排除当前编辑的）并回显当前配置
-  $("afDelegateWhenOutOfScope").checked = !!a?.delegateWhenOutOfScope;
-  const standinSel = $("afStandinAgent");
-  const standinVal = a?.standinAgentId || "";
-  standinSel.innerHTML = `<option value="">${escapeHtml(t("agent.form.standinNone"))}</option>`
-    + (agentList || [])
-      .filter((x) => x.agentId !== editingAgentId && !(x.isSkillTarget))
-      .map((x) => `<option value="${escapeHtml(x.agentId)}" ${x.agentId === standinVal ? "selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`)
-      .join("");
-  if (standinVal && ![editingAgentId, ...(agentList || []).map((x) => x.agentId)].includes(standinVal)) {
-    standinSel.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(standinVal)}" selected>${escapeHtml(standinVal)}</option>`);
+  // 任务指派白名单（可多选）+ 问题提升目标（单选）：填充排除当前编辑自己的候选数字员工并回显
+  const cands = (agentList || []).filter((x) => x.agentId !== editingAgentId && !(x.isSkillTarget));
+  const assignVals = new Set(a?.assignmentIds || []);
+  $("afAssignmentIds").innerHTML = cands.map((x) =>
+    `<option value="${escapeHtml(x.agentId)}"${assignVals.has(x.agentId) ? " selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`).join("");
+  const escSel = $("afEscalationAgent");
+  const escVal = a?.escalationAgentId || "";
+  escSel.innerHTML = `<option value="">${escapeHtml(t("agent.form.escalationNone"))}</option>`
+    + cands.map((x) => `<option value="${escapeHtml(x.agentId)}" ${x.agentId === escVal ? "selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`).join("");
+  if (escVal && ![...cands.map((x) => x.agentId), editingAgentId].includes(escVal)) {
+    escSel.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(escVal)}" selected>${escapeHtml(escVal)}</option>`);
   }
   // 技能（Skills）：回显配置
   agentSkills = (a?.skills || []).map((s) => ({ skillId: s.skillId || "", description: s.description || "", targetAgentId: s.targetAgentId || "" }));
@@ -1092,8 +1092,8 @@ async function saveAgent() {
     skills: agentSkills
       .filter((s) => s.targetAgentId.trim())
       .map((s) => ({ skillId: s.skillId.trim(), description: s.description.trim(), targetAgentId: s.targetAgentId.trim() })),
-    standinAgentId: $("afStandinAgent").value.trim() || null,
-    delegateWhenOutOfScope: $("afDelegateWhenOutOfScope").checked,
+    assignmentIds: [...$("afAssignmentIds").selectedOptions].map((o) => o.value).filter(Boolean),
+    escalationAgentId: $("afEscalationAgent").value.trim() || null,
   };
   if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）
@@ -2495,10 +2495,12 @@ function renderChainCard(chainJson) {
     if (!node) return "";
     const pad = depth * 16;
     const hasSub = node.children && node.children.length > 0;
-    const isStandin = node.kind === "standin";
-    const kindTag = isStandin
-      ? `<span class="chain-kind chain-kind-standin">${t("msg.chainStandin")}</span>`
-      : (node.skillId ? `<span class="chain-kind">${t("msg.chainSkill")}</span>` : "");
+    const isRoute = node.kind === "assignment" || node.kind === "escalation";
+    const kindTag = node.kind === "assignment"
+      ? `<span class="chain-kind chain-kind-assign">${t("msg.chainAssign")}</span>`
+      : (node.kind === "escalation"
+        ? `<span class="chain-kind chain-kind-esc">${t("msg.chainEscalate")}</span>`
+        : (node.skillId ? `<span class="chain-kind">${t("msg.chainSkill")}</span>` : ""));
     const label = node.skillId
       ? `${escapeHtml(node.skillId)} <span class="chain-arrow">→</span> ${escapeHtml(node.agentNickname || node.agentId)}`
       : `${escapeHtml(node.agentNickname || node.agentId)}`;

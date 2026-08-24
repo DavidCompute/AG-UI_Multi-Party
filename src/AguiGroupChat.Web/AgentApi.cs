@@ -45,8 +45,8 @@ public static class AgentApi
             if (pipelineError is not null) return pipelineError;
             var relayError = ValidateRelay(req.RelayToAgentId, catalog);
             if (relayError is not null) return relayError;
-            var standinError = ValidateStandin(req.StandinAgentId, catalog);
-            if (standinError is not null) return standinError;
+            var routeError = ValidateRouting(req.AssignmentIds, req.EscalationAgentId, catalog);
+            if (routeError is not null) return routeError;
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库（防跨用户检索他人私密知识库）
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
@@ -91,8 +91,8 @@ public static class AgentApi
             if (pipelineError is not null) return pipelineError;
             var relayError = ValidateRelay(req.RelayToAgentId, catalog);
             if (relayError is not null) return relayError;
-            var standinError = ValidateStandin(req.StandinAgentId, catalog);
-            if (standinError is not null) return standinError;
+            var routeError = ValidateRouting(req.AssignmentIds, req.EscalationAgentId, catalog);
+            if (routeError is not null) return routeError;
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
@@ -267,8 +267,8 @@ public static class AgentApi
         d.RequireApprovalToolNames,
         d.Pipeline,
         d.RelayToAgentId,
-        d.StandinAgentId,
-        d.DelegateWhenOutOfScope,
+        d.AssignmentIds,
+        d.EscalationAgentId,
         d.IsSkillTarget,
     });
 
@@ -334,8 +334,8 @@ public static class AgentApi
                 ?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct().ToList() ?? [],
             Pipeline = BuildPipeline(req.Pipeline),
             RelayToAgentId = string.IsNullOrWhiteSpace(req.RelayToAgentId) ? null : req.RelayToAgentId.Trim(),
-            StandinAgentId = string.IsNullOrWhiteSpace(req.StandinAgentId) ? null : req.StandinAgentId.Trim(),
-            DelegateWhenOutOfScope = req.DelegateWhenOutOfScope ?? false,
+            AssignmentIds = req.AssignmentIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [],
+            EscalationAgentId = string.IsNullOrWhiteSpace(req.EscalationAgentId) ? null : req.EscalationAgentId.Trim(),
         };
     }
 
@@ -378,13 +378,22 @@ public static class AgentApi
         return null;
     }
 
-    /// <summary>校验代为响应：目标智能体须已注册（指向自身体由调用方忽略，不阻断）。</summary>
-    private static IResult? ValidateStandin(string? standinAgentId, AgentCatalog catalog)
+    /// <summary>校验路由配置（任务指派白名单 + 问题提升目标）：各目标均须已注册。</summary>
+    private static IResult? ValidateRouting(IReadOnlyList<string>? assignmentIds, string? escalationAgentId, AgentCatalog catalog)
     {
-        if (string.IsNullOrWhiteSpace(standinAgentId)) return null;
-        var target = standinAgentId.Trim();
-        if (catalog.GetDefinition(target) is null)
-            return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"代为响应目标智能体未注册：{target}"));
+        foreach (var raw in assignmentIds ?? [])
+        {
+            var id = raw?.Trim();
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (catalog.GetDefinition(id) is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"任务指派目标数字员工未注册：{id}"));
+        }
+        if (!string.IsNullOrWhiteSpace(escalationAgentId))
+        {
+            var target = escalationAgentId.Trim();
+            if (catalog.GetDefinition(target) is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"问题提升目标数字员工未注册：{target}"));
+        }
         return null;
     }
 
@@ -495,8 +504,8 @@ public sealed record AgentUpsertHttpRequest(
     IReadOnlyList<string>? RequireApprovalToolNames = null,
     IReadOnlyList<AgentPipelineStepHttpRequest>? Pipeline = null,
     string? RelayToAgentId = null,
-    string? StandinAgentId = null,
-    bool? DelegateWhenOutOfScope = null);
+    IReadOnlyList<string>? AssignmentIds = null,
+    string? EscalationAgentId = null);
 
 /// <summary>技能配置（把其他已注册智能体作为可调用子代理）。</summary>
 /// <param name="SkillId">技能标识（给模型的工具名，同一智能体内唯一）。</param>
