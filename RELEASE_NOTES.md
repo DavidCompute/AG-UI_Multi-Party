@@ -8,6 +8,7 @@
 - **界面底部出现游离的 `""` 字符**：页脚残留了两个引号字符的零星文本，已清除。
 - **知识库 RAG 检索不准 / 找不到信息**：① 切片窗口与重叠改为**可配置**（默认 **4096 字符** / 重叠 **512**，可在 `.env` 用 `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` 调整）；② 切分升级为**智能切分**，优先沿换行 / 句末标点收尾，避免在句子中间硬切切断语义，显著提升检索命中。
 - 安装包同步内置最新前端国际化与登录态保持等改进。
+- **知识库“有这个词但搜不到”**：纯语义检索对“专享福利假”等稀有词 / 长篇目录文本容易因相似度低于阈值而丢命中。本版新增**关键词召回兜底**：在切分命中集合内用 BM25 对查询词做第二次评分，把词面命中但向量漏掉的片段补回来，避免“明明有内容却回答没有”。
 
 ## Fixes (English)
 - **First registered user couldn't become admin**: the old build re-seeded built-in demo accounts (`zhangsan`, who automatically became admin as the "first registered" user; and `lisi`) after a data reset, so your real account never got admin rights. This version **completely removes demo-account seeding** - after clearing data, the first account you register is now the admin.
@@ -16,6 +17,7 @@
 - **Stray `""` characters at the bottom of the UI**: leftover quote characters were rendered at the page footer; removed.
 - **Knowledge-base RAG retrieval missed / failed to find info**: ① chunk window & overlap are now **configurable** (default **4096 chars** / **512 overlap**; adjust via `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` in `.env`); ② chunking upgraded to **smart splitting** that cuts at line breaks / sentence-ending punctuation instead of mid-sentence, notably improving retrieval recall.
 - Bundles the latest frontend i18n and login-session persistence improvements.
+- **KB has the term but `can't find it`**: pure vector search can drop hits for rare terms like `专享福利假` or long table-of-contents text when similarity falls below the threshold. This version adds a **keyword-recall fallback**: after retrieving candidate chunks, it re-scores them with BM25 against the query terms and recovers fragments that match by wording but were missed by the vector search - so a term that clearly exists in the document is no longer reported as `not found`.
 
 ## 使用提示（中文）
 全新安装或想彻底重置：先完全退出桌面版，再删除 `%LocalAppData%\AguiGroupChat\data\` 目录后启动，第一个注册账号即为管理员。
