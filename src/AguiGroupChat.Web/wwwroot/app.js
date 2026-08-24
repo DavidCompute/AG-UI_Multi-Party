@@ -856,6 +856,8 @@ function serializeAgent(a) {
     isPrivate: !!a.isPrivate,
     knowledgeBaseIds: (a.knowledgeBaseIds || []),
     skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
+    standinAgentId: a.standinAgentId || null,
+    delegateWhenOutOfScope: !!a.delegateWhenOutOfScope,
   };
 }
 
@@ -954,6 +956,8 @@ async function importAgentsFromFile(file) {
       isPrivate: !!a.isPrivate,
       knowledgeBaseIds: (a.knowledgeBaseIds || []),
       skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
+      standinAgentId: a.standinAgentId || null,
+      delegateWhenOutOfScope: !!a.delegateWhenOutOfScope,
     };
     if (!body.nickname) { failed++; continue; }
     try {
