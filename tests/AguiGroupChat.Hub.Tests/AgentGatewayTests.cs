@@ -105,6 +105,66 @@ public sealed class AgentGatewayTests
         Assert.Contains("答复专家", stored!.Content);
     }
 
+    /// <summary>装配带「代为响应」（条件委派）的网关：agent_a 被 @ 但判定语境不属于自己时，委派给 agent_resp 代答。</summary>
+    private static AgentGateway CreateStandinGateway(HubFixture f)
+    {
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_resp", Nickname = "答复专家", Description = "测试", Instructions = "你是答复专家，输出：代为答复内容",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术问题", Instructions = "你只是前台，不回答技术问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    DelegateWhenOutOfScope = true,
+                    StandinAgentId = "agent_resp",
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+    }
+
+    [Fact]
+    public async Task Invoke_MentionedOutOfScope_DelegatesToStandin()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
+            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" }],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateStandinGateway(f);
+        // 内容不触发语境发言（无 ？/帮我/建议）→ Mock 决策 NO → 判定不属于前台 → 委派给答复专家
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "代为响应运行失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 正面是代为响应前缀 + 答复专家（agent_resp）的答复，以 agent_a 身份发出
+        Assert.Contains("代为响应", stored!.Content);
+        // MockChatClient 以「作为「答复专家」…」模板输出（体现候选身份已被委派执行）
+        Assert.Contains("答复专家", stored.Content);
+    }
+
     /// <summary>装配带编排流水线（1.1）的网关：宿主 agent_pipe 依次调用两个子智能体。</summary>
     private static AgentGateway CreatePipelineGateway(HubFixture f)
     {

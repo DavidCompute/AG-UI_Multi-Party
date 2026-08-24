@@ -184,6 +184,11 @@ window.I18N_DICTS.en = {
   "agent.form.enableWorkTools": "Work-capable Digital Employee",
   "agent.form.enableWorkToolsHint": "(default off. When on, it can read/write files and run whitelisted commands in a dedicated workspace; write operations need your approval in the group. For trusted digital employees only)",
   "agent.form.enableWorkTools.hint": "(default off)",
+  "agent.form.section.delegate": "Stand-in reply",
+  "agent.form.delegateWhenOutOfScope": "Reply on my behalf when out of scope",
+  "agent.form.standinAgent": "Stand-in digital employee",
+  "agent.form.standinNone": "— Select —",
+  "agent.form.standinHint": "When directly @-mentioned but this digital employee judges it is not its context to reply, the selected digital employee will answer on its behalf (the reply is sent under this digital employee's identity and marked \"replied by X\"). Leave empty to disable.",
   "agent.form.cancel": "Cancel",
   "agent.form.save": "Save",
 

@@ -143,6 +143,8 @@ public sealed class MarketplaceService
         KnowledgeBaseIds = d.KnowledgeBaseIds?.ToList(),
         Pipeline = d.Pipeline?.Select(p => new AgentPipelineStep { StepAgentId = p.StepAgentId, Prompt = p.Prompt }).ToList(),
         RelayToAgentId = d.RelayToAgentId,
+        StandinAgentId = d.StandinAgentId,
+        DelegateWhenOutOfScope = d.DelegateWhenOutOfScope,
     };
 }
 

@@ -269,6 +269,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return new AgentInvocationResult(false, null, "AGENT_DECIDED_SILENT");
         }
 
+        // 代为响应（条件委派）：被显式 @（Mentioned）触发且开启委派时，先判断语境是否属于自己的职责；
+        // 若判定不属于自己（如被 @ 但内容是其他角色领域），则委派给 StandinAgentId 代为回答，而非由本智能体硬答或沉默。
+        if (effectiveMode == AgentTriggerMode.Mentioned
+            && def.DelegateWhenOutOfScope
+            && !string.IsNullOrWhiteSpace(def.StandinAgentId)
+            && !string.Equals(def.StandinAgentId, context.AgentId, StringComparison.Ordinal)
+            && !await ShouldSpeakAsync(context, def, ct)) // 语境判定：自己不适合回答 → 委派
+        {
+            return await InvokeStandinAsync(context, def, def.StandinAgentId!, ct);
+        }
+
         var agent = _catalog.GetOrCreate(context.AgentId);
         var runId = "run_" + IdGenerator.NewId();
         _logger.LogInformation("智能体 {AgentId} 开始运行：run={RunId} group={GroupId} 触发消息={MessageId}",
@@ -666,6 +677,88 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     GroupId = context.GroupId, ErrorCode = "AGENT_RUN_ERROR",
                     Message = "角色交接失败：" + ex.Message, Timestamp = _hub.Value.NowMs,
+                }, ct: CancellationToken.None);
+            }
+            catch { /* 广播失败不影响返回 */ }
+            return new AgentInvocationResult(false, runId, "AGENT_RUN_ERROR");
+        }
+        finally
+        {
+            _activeRuns.TryRemove(runId, out _);
+            await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = false }, CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// 代为响应（条件委派）：被显式 @ 的智能体判定「语境不属于自己」时，委派给
+    /// <paramref name="standinAgentId"/> 代为回答。回复以本智能体身份发出，并带「由 X 代为响应」前缀，
+    /// 让群成员知道实际答复来自哪个角色。与整轮交接 <see cref="InvokeRelayAsync"/> 不同：仅当判不属于自己才走这里。
+    /// </summary>
+    private async Task<AgentInvocationResult> InvokeStandinAsync(AgentInvocationContext context, AgentDefinition def, string standinAgentId, CancellationToken ct)
+    {
+        var standinDef = _catalog.GetDefinition(standinAgentId);
+        if (standinDef is null)
+        {
+            _logger.LogWarning("智能体 {AgentId} 代为响应目标不存在：{Target}，改由自身常规回复", context.AgentId, standinAgentId);
+            return new AgentInvocationResult(false, null, "AGENT_STANDIN_NOT_FOUND");
+        }
+
+        var runId = "run_" + IdGenerator.NewId();
+        var standinName = standinDef.Nickname ?? standinAgentId;
+        _logger.LogInformation("智能体 {AgentId} 代为响应：语境判定不适合自己，委派给 {Standin}（run={RunId}）", context.AgentId, standinAgentId, runId);
+        await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        var runCt = timeoutCts.Token;
+        _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
+        string? messageId = null;
+        try
+        {
+            var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
+            {
+                GroupId = context.GroupId,
+                AgentId = context.AgentId,
+                RunId = runId,
+                TopicId = context.TopicId,
+                ReplyToMessageId = context.TriggerMessageId,
+                Mentions = [], MentionAll = false,
+                Visibility = context.Visibility,
+                VisibleMemberIds = context.VisibleMemberIds ?? [],
+            }, runCt);
+            messageId = started.MessageId;
+
+            var prefix = $"（由 {standinName} 代为响应）\n";
+            await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, prefix, runCt);
+
+            var input = await BuildUserMessageAsync(context, runCt);
+            var standin = _catalog.GetOrCreate(standinAgentId);
+            var prompt = "你正被「" + (def.Nickname ?? context.AgentId) + "」委派代为回答。"
+                + "请结合你的职责直接给出专业答复。\n\n" + input;
+            var session = await standin.CreateSessionAsync(runCt);
+            var resp = await standin.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, runCt);
+            var text = string.IsNullOrWhiteSpace(resp.Text) ? "（代为响应对象未返回内容）" : resp.Text.Trim();
+            foreach (var chunk in ChunkReply(text, 160))
+                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
+
+            await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
+            return new AgentInvocationResult(true, runId, null);
+        }
+        catch (OperationCanceledException)
+        {
+            await SafeEndAsync(context, messageId);
+            return new AgentInvocationResult(false, runId, "AGENT_RUN_CANCELLED");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "代为响应运行失败：agent={AgentId} standin={Standin} run={RunId}", context.AgentId, standinAgentId, runId);
+            await SafeEndAsync(context, messageId);
+            try
+            {
+                await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent
+                {
+                    GroupId = context.GroupId, ErrorCode = "AGENT_RUN_ERROR",
+                    Message = "代为响应失败：" + ex.Message, Timestamp = _hub.Value.NowMs,
                 }, ct: CancellationToken.None);
             }
             catch { /* 广播失败不影响返回 */ }

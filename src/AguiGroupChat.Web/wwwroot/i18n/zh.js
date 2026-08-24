@@ -184,6 +184,11 @@ window.I18N_DICTS.zh = {
   "agent.form.enableWorkTools": "🛠️ 工作型数字员工",
   "agent.form.enableWorkToolsHint": "（默认关闭。开启后可在专属工作区读取/写入文件、执行白名单命令；写操作需你在知聚内批准。仅供可信数字员工使用）",
   "agent.form.enableWorkTools.hint": "（默认关闭）",
+  "agent.form.section.delegate": "代为响应",
+  "agent.form.delegateWhenOutOfScope": "🔁 语境不符时代为响应",
+  "agent.form.standinAgent": "代为响应数字员工",
+  "agent.form.standinNone": "— 请选择 —",
+  "agent.form.standinHint": "被直接 @ 时，若本数字员工判定“这不是我该回复的语境”，将由所选数字员工代为回答（回复以本数字员工身份发出，并标注“由 X 代为响应”）。留空则不启用。",
   "agent.form.cancel": "取消",
   "agent.form.save": "保存",
 

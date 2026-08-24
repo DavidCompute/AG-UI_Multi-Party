@@ -268,6 +268,18 @@ public sealed class AgentDefinition
     /// </summary>
     public string? RelayToAgentId { get; set; }
 
+    /// <summary>
+    /// **代为响应（委派代答）**：配合 <see cref="DelegateWhenOutOfScope"/> 使用。<br/>
+    /// 本智能体被显式 @（或召唤）触发时，若开启 <see cref="DelegateWhenOutOfScope"/> 且语境判断
+    /// 「不是自己该回复的内容」，则把这一轮<b>委派给</b> <c>StandinAgentId</c> 代为响应，
+    /// 返回其答复（带「由 X 代为响应」前缀）。区别于整轮交接 <see cref="RelayToAgentId"/>：
+    /// 这里是<b>条件委派</b>——只有判定语境不属于自己才代答，否则仍由本智能体正常回答。
+    /// </summary>
+    public string? StandinAgentId { get; set; }
+
+    /// <summary>是否开启「代为响应」条件委派（见 <see cref="StandinAgentId"/>）。</summary>
+    public bool DelegateWhenOutOfScope { get; set; }
+
     /// <summary>创建者 userId（运行时创建时记录；appsettings 种子为 null = 系统级智能体）。</summary>
     public string? OwnerId { get; set; }
 

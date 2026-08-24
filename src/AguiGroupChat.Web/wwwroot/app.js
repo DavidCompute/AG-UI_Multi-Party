@@ -1033,6 +1033,18 @@ function openAgentForm(agentId) {
   $("afPersonalMemory").checked = !!a?.personalMemoryEnabled;
   $("afEnableWorkTools").checked = !!a?.enableWorkTools;
   $("afIsPrivate").checked = !!a?.isPrivate;
+  // 代为响应：填充候选数字员工（排除当前编辑的）并回显当前配置
+  $("afDelegateWhenOutOfScope").checked = !!a?.delegateWhenOutOfScope;
+  const standinSel = $("afStandinAgent");
+  const standinVal = a?.standinAgentId || "";
+  standinSel.innerHTML = `<option value="">${escapeHtml(t("agent.form.standinNone"))}</option>`
+    + (agentList || [])
+      .filter((x) => x.agentId !== editingAgentId && !(x.isSkillTarget))
+      .map((x) => `<option value="${escapeHtml(x.agentId)}" ${x.agentId === standinVal ? "selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`)
+      .join("");
+  if (standinVal && ![editingAgentId, ...(agentList || []).map((x) => x.agentId)].includes(standinVal)) {
+    standinSel.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(standinVal)}" selected>${escapeHtml(standinVal)}</option>`);
+  }
   // 技能（Skills）：回显配置
   agentSkills = (a?.skills || []).map((s) => ({ skillId: s.skillId || "", description: s.description || "", targetAgentId: s.targetAgentId || "" }));
   renderSkillRows();
@@ -1076,6 +1088,8 @@ async function saveAgent() {
     skills: agentSkills
       .filter((s) => s.targetAgentId.trim())
       .map((s) => ({ skillId: s.skillId.trim(), description: s.description.trim(), targetAgentId: s.targetAgentId.trim() })),
+    standinAgentId: $("afStandinAgent").value.trim() || null,
+    delegateWhenOutOfScope: $("afDelegateWhenOutOfScope").checked,
   };
   if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）
