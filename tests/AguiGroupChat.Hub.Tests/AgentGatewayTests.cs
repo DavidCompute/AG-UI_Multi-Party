@@ -165,6 +165,128 @@ public sealed class AgentGatewayTests
         Assert.Contains("答复专家", stored.Content);
     }
 
+    /// <summary>装配带「多层代为响应」链的网关：agent_a → agent_b → agent_c（c 为最终作答）。</summary>
+    private static AgentGateway CreateMultiStandinGateway(HubFixture f)
+    {
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_c", Nickname = "终答专家", Description = "测试", Instructions = "你是终答专家，输出：终答内容",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_b", Nickname = "中层专员", Description = "不答技术", Instructions = "你不答技术",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    DelegateWhenOutOfScope = true,
+                    StandinAgentId = "agent_c",
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术", Instructions = "你只是前台，不回答技术问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    DelegateWhenOutOfScope = true,
+                    StandinAgentId = "agent_b",
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+    }
+
+    [Fact]
+    public async Task Invoke_MentionedOutOfScope_DelegatesMultiLayerToDeepest()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
+            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" }],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateMultiStandinGateway(f);
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "多层代为响应运行失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 逐层委派前缀：B → C
+        Assert.Contains("由 中层专员 代为响应", stored!.Content);
+        Assert.Contains("由 终答专家 代为响应", stored.Content);
+        // 最终答复来自 agent_c（Mock 模板含「作为「终答专家」」）
+        Assert.Contains("终答专家", stored.Content);
+    }
+
+    /// <summary>装配环路代为响应链：agent_a → agent_b → agent_a（应在第二次委派处破环，不留死循环）。</summary>
+    private static AgentGateway CreateCycleStandinGateway(HubFixture f)
+    {
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_b", Nickname = "中层专员", Description = "不答技术", Instructions = "你不答技术",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    DelegateWhenOutOfScope = true,
+                    StandinAgentId = "agent_a",
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术", Instructions = "你只是前台，不回答技术问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    DelegateWhenOutOfScope = true,
+                    StandinAgentId = "agent_b",
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+    }
+
+    [Fact]
+    public async Task Invoke_StandinCycle_DoesNotDeadlock()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
+            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" }],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateCycleStandinGateway(f);
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "这台服务器的部署环境应该如何规划", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        // 环路不被委派链破环后仍能正常完成（不挂起），由某层直接作答返回
+        Assert.True(result.Accepted, "环路委派应可正常结束: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == EventTypes.TextMessageEnd);
+    }
+
     /// <summary>装配带编排流水线（1.1）的网关：宿主 agent_pipe 依次调用两个子智能体。</summary>
     private static AgentGateway CreatePipelineGateway(HubFixture f)
     {

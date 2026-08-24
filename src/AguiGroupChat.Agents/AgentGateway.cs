@@ -277,7 +277,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             && !string.Equals(def.StandinAgentId, context.AgentId, StringComparison.Ordinal)
             && !await ShouldSpeakAsync(context, def, ct)) // 语境判定：自己不适合回答 → 委派
         {
-            return await InvokeStandinAsync(context, def, def.StandinAgentId!, ct);
+            return await InvokeStandinAsync(context, def.StandinAgentId!, ct);
         }
 
         var agent = _catalog.GetOrCreate(context.AgentId);
@@ -690,21 +690,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>
-    /// 代为响应（条件委派）：被显式 @ 的智能体判定「语境不属于自己」时，委派给
-    /// <paramref name="standinAgentId"/> 代为回答。回复以本智能体身份发出，并带「由 X 代为响应」前缀，
-    /// 让群成员知道实际答复来自哪个角色。与整轮交接 <see cref="InvokeRelayAsync"/> 不同：仅当判不属于自己才走这里。
+    /// 代为响应（条件委派，**支持多层委派链**）：被显式 @ 的智能体判定「语境不属于自己」时，委派给
+    /// <paramref name="standinAgentId"/> 代为回答。若被委派的数字员工也开启了委派且判定语境仍不属于自己，
+    /// 则继续向下游智能体委派（B→C→…），逐层累积「由 X 代为响应」前缀，直到某层由最终的智能体实际作答。
+    /// 回复统一以原始的 @ 宿主智能体身份发出；含深度上限与环路保护（A→B→A 不会死循环）。
     /// </summary>
-    private async Task<AgentInvocationResult> InvokeStandinAsync(AgentInvocationContext context, AgentDefinition def, string standinAgentId, CancellationToken ct)
+    private async Task<AgentInvocationResult> InvokeStandinAsync(AgentInvocationContext context, string standinAgentId, CancellationToken ct)
     {
-        var standinDef = _catalog.GetDefinition(standinAgentId);
-        if (standinDef is null)
+        if (_catalog.GetDefinition(standinAgentId) is null)
         {
             _logger.LogWarning("智能体 {AgentId} 代为响应目标不存在：{Target}，改由自身常规回复", context.AgentId, standinAgentId);
             return new AgentInvocationResult(false, null, "AGENT_STANDIN_NOT_FOUND");
         }
 
         var runId = "run_" + IdGenerator.NewId();
-        var standinName = standinDef.Nickname ?? standinAgentId;
         _logger.LogInformation("智能体 {AgentId} 代为响应：语境判定不适合自己，委派给 {Standin}（run={RunId}）", context.AgentId, standinAgentId, runId);
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
@@ -715,6 +714,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         string? messageId = null;
         try
         {
+            // 沿委派链解析最终答复（可能多层：B→C→…），返回最终答复文本 + 逐层「由 X 代为响应」名单
+            var input = await BuildUserMessageAsync(context, runCt);
+            var chain = new HashSet<string>(StringComparer.Ordinal) { context.AgentId };
+            var (finalText, standinNames) = await ResolveStandinReplyAsync(context, standinAgentId, input, chain, depth: 1, runCt);
+            // 首层委派（被 @ 的宿主 A → B）本身也是一环：把 B 的昵称放到名单最前
+            standinNames.Insert(0, _catalog.GetDefinition(standinAgentId)?.Nickname ?? standinAgentId);
+
             var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
             {
                 GroupId = context.GroupId,
@@ -728,16 +734,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }, runCt);
             messageId = started.MessageId;
 
-            var prefix = $"（由 {standinName} 代为响应）\n";
-            await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, prefix, runCt);
+            // 逐层叠加「由 X 代为响应」前缀（B → C → …）
+            foreach (var name in standinNames)
+                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（由 {name} 代为响应）\n", runCt);
 
-            var input = await BuildUserMessageAsync(context, runCt);
-            var standin = _catalog.GetOrCreate(standinAgentId);
-            var prompt = "你正被「" + (def.Nickname ?? context.AgentId) + "」委派代为回答。"
-                + "请结合你的职责直接给出专业答复。\n\n" + input;
-            var session = await standin.CreateSessionAsync(runCt);
-            var resp = await standin.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, runCt);
-            var text = string.IsNullOrWhiteSpace(resp.Text) ? "（代为响应对象未返回内容）" : resp.Text.Trim();
+            var text = string.IsNullOrWhiteSpace(finalText) ? "（代为响应对象未返回内容）" : finalText.Trim();
             foreach (var chunk in ChunkReply(text, 160))
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
@@ -769,6 +770,66 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             _activeRuns.TryRemove(runId, out _);
             await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = false }, CancellationToken.None);
         }
+    }
+
+    /// <summary>代为响应最大委派层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>
+    private const int MaxStandinDepth = 4;
+
+    /// <summary>
+    /// 递归解析代为响应委派链：从 <paramref name="agentId"/> 起逐个向下游委派，
+    /// 直到某层判定「自己应该回答」（无委派 / 目标环回 / 超过深度 / 语境应自己答）为止；
+    /// 返回最终应答文本与逐层委派名单（nickname）。
+    /// </summary>
+    private async Task<(string Text, List<string> StandinNames)> ResolveStandinReplyAsync(
+        AgentInvocationContext context, string agentId, string input, HashSet<string> visited, int depth, CancellationToken ct)
+    {
+        var def = _catalog.GetDefinition(agentId);
+        var standinNames = new List<string>();
+        var chooseNext = def is not null
+            && depth < MaxStandinDepth
+            && def.DelegateWhenOutOfScope
+            && !string.IsNullOrWhiteSpace(def.StandinAgentId)
+            && !string.Equals(def.StandinAgentId, agentId, StringComparison.Ordinal)
+            && !visited.Contains(def.StandinAgentId)
+            && await ShouldSpeakAsync(context, def, ct) == false; // 语境判定：自己不适合回答 → 向下游委派
+
+        if (!chooseNext || def is null || _catalog.GetDefinition(def.StandinAgentId!) is null)
+        {
+            // 最终层：由本智能体实际作答
+            visited.Add(agentId);
+            var text = await RunStandinAnswerAsync(context, agentId, input, ct);
+            return (text, standinNames);
+        }
+
+        // 委派给下游：记录本层委派目标昵称，并继续解析下一层
+        var nextName = _catalog.GetDefinition(def.StandinAgentId!)?.Nickname ?? def.StandinAgentId!;
+        standinNames.Add(nextName);
+        visited.Add(agentId);
+        var deeper = await ResolveStandinReplyAsync(context, def.StandinAgentId!, input, visited, depth + 1, ct);
+        standinNames.AddRange(deeper.StandinNames);
+        return (deeper.Text, standinNames);
+    }
+
+    /// <summary>让单个数字员工就委派请求实际作答（模型一次 run），返回最终文本。</summary>
+    private async Task<string> RunStandinAnswerAsync(AgentInvocationContext context, string agentId, string input, CancellationToken ct)
+    {
+        var host = _catalog.GetDefinition(context.AgentId);
+        var hostName = host?.Nickname ?? context.AgentId;
+        var agent = _catalog.GetOrCreate(agentId);
+        var prompt = "你正被「" + hostName + "」委派代为回答。"
+            + "请结合你的职责直接给出专业答复。\n\n" + input;
+        var session = await agent.CreateSessionAsync(ct);
+        var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
+        if (!string.IsNullOrWhiteSpace(resp.Text)) return resp.Text.Trim();
+        // 部分 OpenAI 兼容客户端不填充 response.Text，回退最终 assistant 消息文本
+        foreach (var m in resp.Messages)
+        {
+            if (m.Role != ChatRole.Assistant) continue;
+            if (!string.IsNullOrWhiteSpace(m.Text)) return m.Text.Trim();
+            foreach (var c in m.Contents)
+                if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text)) return tc.Text.Trim();
+        }
+        return "";
     }
 
     /// <summary>把长文本切成固定长度的片段（用于分块广播渐进渲染）。</summary>
