@@ -3804,6 +3804,10 @@ function virtualRender() {
     return;
   }
 
+  // 之前若有空态提示（n 由 0 变 >0 的残留，如快照比首次渲染晚到），清理掉再正常渲染
+  const emptyHint = el.querySelector(".msg-empty-hint");
+  if (emptyHint) emptyHint.remove();
+
   // 结构：可选 loadMore 行 + .vtop 占位 + 窗口消息 + .vbottom 占位
   let top = el.querySelector(".vtop");
   if (!top) { top = document.createElement("div"); top.className = "vtop"; el.prepend(top); }
