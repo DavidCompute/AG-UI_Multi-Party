@@ -21,18 +21,18 @@ public sealed class KnowledgeBaseCatalog
     public const int MaxChunksPerDoc = 500;
 
     /// <summary>切片大小（字符）默认值，可用 <c>Agents:Memory:KnowledgeChunkSize</c> 覆盖。</summary>
-    internal const int ChunkSize = 800;
+    internal const int ChunkSize = 4096;
 
     /// <summary>切片重叠（字符）默认值，可用 <c>Agents:Memory:KnowledgeChunkOverlap</c> 覆盖。</summary>
-    internal const int ChunkOverlap = 100;
+    internal const int ChunkOverlap = 512;
 
     /// <summary>实际生效的切片大小（优先读配置，回退默认）。</summary>
     private int ConfigChunkSize => _options.Memory is { KnowledgeChunkSize: > 0 } m ? m.KnowledgeChunkSize : ChunkSize;
 
-    /// <summary>实际生效的切片重叠（优先读配置；默认取切片 1/5，保证 ≤ 切片大小以免后退）。</summary>
+    /// <summary>实际生效的切片重叠（优先读配置；默认取切片 1/8，保证 ≤ 切片大小以免后退）。</summary>
     private int ConfigChunkOverlap => _options.Memory is { KnowledgeChunkOverlap: > 0 } m
         ? Math.Min(m.KnowledgeChunkOverlap, ConfigChunkSize - 1)
-        : Math.Max(0, ConfigChunkSize / 5);
+        : Math.Max(0, ConfigChunkSize / 8);
 
     /// <summary>GroupId 约定前缀：知识库向量的群维度 = kb:{KbId}。</summary>
     public const string KbGroupPrefix = "kb:";
@@ -436,7 +436,6 @@ public sealed class KnowledgeBaseCatalog
         return hits.OrderByDescending(h => h.Score).Take(topK).ToList();
     }
 
-    /// <summary>长文本切片（按字符固定长度 + 重叠）。</summary>
     /// <summary>长文本智能切片：优先沿换行 / 句末标点收尾，避免在句子中间硬切切断语义；
     /// 相邻切片携带重叠尾部（降低边界信息丢失）。窗口与重叠可传参（生产经配置 <c>KnowledgeChunkSize</c> / <c>KnowledgeChunkOverlap</c> 传入）。</summary>
     internal static List<string> Chunk(string text, int chunkSize = ChunkSize, int overlap = ChunkOverlap)

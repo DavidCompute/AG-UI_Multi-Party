@@ -149,10 +149,10 @@ public sealed class MemoryOptions
     public int MaxQueryChars { get; set; } = 2000;
 
     /// <summary>知识库文档切片大小（字符）：长文本按此窗口切片后向量化，窗口偏小/过长都会影响检索命中。</summary>
-    public int KnowledgeChunkSize { get; set; } = 800;
+    public int KnowledgeChunkSize { get; set; } = 4096;
 
-    /// <summary>知识库文档切片重叠（字符）：相邻切片共享的重叠文本，降低边界信息丢失风险。一般取切片大小的 1/5~1/4。</summary>
-    public int KnowledgeChunkOverlap { get; set; } = 100;
+    /// <summary>知识库文档切片重叠（字符）：相邻切片共享的重叠文本，降低边界信息丢失风险。一般取切片大小的 1/8~1/5。</summary>
+    public int KnowledgeChunkOverlap { get; set; } = 512;
 
     /// <summary>embedding 调用超时（秒）。默认 60：CPU 环境首次加载模型（如 bge-m3 约 1.1GB）可能超过 15 秒。</summary>
     public int EmbeddingTimeoutSeconds { get; set; } = 60;

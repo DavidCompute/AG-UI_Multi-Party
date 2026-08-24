@@ -185,7 +185,7 @@ docker compose down
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `5` / `0.25` | 每次回复注入的记忆条数 / 相似度阈值。**`group_memory_search` 工具更严格**：阈值取 max(0.40, MIN_SCORE)、最多 3 条，低相关命中物理过滤，避免记忆泛滥 |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | embedding 调用超时（秒）。CPU 环境首次加载 bge-m3 需数十秒 |
 | `MEMORY_SCOPE` | `agent` | 检索范围：`agent` 该智能体所在的所有群（默认）/ `group` 仅当前群 / `all` 全部群 |
-| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `800` / `100` | 知识库文档切片窗口（字符）与重叠（字符）：切分沿换行 / 句末标点收尾（避免句子中间硬切），相邻切片携带重叠尾部降低边界信息丢失 |
+| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | 知识库文档切片窗口（字符）与重叠（字符）：切分沿换行 / 句末标点收尾（避免句子中间硬切），相邻切片携带重叠尾部降低边界信息丢失 |
 | `MEMORY_PERSONAL_TOP_K` / `MEMORY_PERSONAL_MIN_SCORE` | `3` / `0.25` | 个人记忆：回复时注入的「触发者本人历史发言」条数 / 相似度阈值。能力总开关（默认开）；实际是否注入还取决于**用户与智能体各自的开关**（默认均关） |
 | `SEED_SAMPLE_DATA` | `true` | Web 演示：无历史数据时播种示例数据 |
 | `SEED_SAMPLE_DATA_HUB` | `false` | 仅协议 Hub：是否播种示例数据 |

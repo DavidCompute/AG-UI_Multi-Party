@@ -25,9 +25,9 @@ public sealed class KnowledgeBaseTests
     public void Chunk_LongText_SplitsWithOverlap()
     {
         var text = new string('中', 2000);
-        var chunks = KnowledgeBaseCatalog.Chunk(text);
+        var chunks = KnowledgeBaseCatalog.Chunk(text, 800, 100);
         Assert.True(chunks.Count >= 3);
-        Assert.All(chunks, c => Assert.True(c.Length <= KnowledgeBaseCatalog.ChunkSize));
+        Assert.All(chunks, c => Assert.True(c.Length <= 800));
         // 相邻切片有重叠（后一片开头 10 字符应出现在前一片中）
         var tail = chunks[1][..10];
         Assert.True(chunks[0].Contains(tail, StringComparison.Ordinal));
@@ -44,13 +44,13 @@ public sealed class KnowledgeBaseTests
         // 智能切片应在换行处收尾，绝不在段落中间硬切。
         var para = new string('长', 300) + "\n";
         var text = string.Concat(Enumerable.Repeat(para, 10));
-        var chunks = KnowledgeBaseCatalog.Chunk(text);
+        var chunks = KnowledgeBaseCatalog.Chunk(text, 800, 100);
         Assert.True(chunks.Count >= 3);
         // 除最后一片外，每一片都应结束于换行（重叠内容可含换行，但不得以段落中间字符结束）。
         foreach (var c in chunks.Take(chunks.Count - 1))
             Assert.True(c.EndsWith('\n'), $"切片不应在段中切断：…{c[^10..]}");
         // 切片长度不超过窗口
-        Assert.All(chunks, c => Assert.True(c.Length <= KnowledgeBaseCatalog.ChunkSize));
+        Assert.All(chunks, c => Assert.True(c.Length <= 800));
     }
 
     [Fact]
@@ -59,14 +59,14 @@ public sealed class KnowledgeBaseTests
         // 无换行、由句号分隔的长句：应尽量在句号后收尾，而不是在文字中间硬切。
         var seg = new string('啊', 200) + "。";
         var text = string.Concat(Enumerable.Repeat(seg, 12)); // 2412 字符
-        var chunks = KnowledgeBaseCatalog.Chunk(text);
+        var chunks = KnowledgeBaseCatalog.Chunk(text, 800, 100);
         Assert.True(chunks.Count >= 3);
         foreach (var c in chunks.Take(chunks.Count - 1))
         {
             var last = c[^1];
             Assert.Contains(last, "。！？；.!?;");
         }
-        Assert.All(chunks, c => Assert.True(c.Length <= KnowledgeBaseCatalog.ChunkSize));
+        Assert.All(chunks, c => Assert.True(c.Length <= 800));
     }
 
     // ================= 目录 / 文档 / 检索 =================

@@ -976,7 +976,7 @@ PUT /ag-ui/user/profile
 ### 5.8 知识库管理接口（Hub 扩展，RAG 知识文档）
 
 智能体可绑定知识库（`AgentDefinition.knowledgeBaseIds`），回复前按绑定列表检索知识文档相关片段注入上下文。
-知识库由用户创建并上传文档（txt/md/json/csv 与 docx/xlsx/pptx/pdf，复用附件文本提取）：文档切片后向量化存入语义记忆向量表（GroupId 约定 `kb:{KbId}`）。切片默认按窗口 800 字符 + 重叠 100 字符，可经 `Agents:Memory:KnowledgeChunkSize` / `KnowledgeChunkOverlap` 配置；切分沿换行 / 句末标点收尾（避免句子中间硬切切断语义），相邻切片携带重叠尾部降低边界信息丢失。依赖向量存储与 embedding（pgvector / sqlite-vec + llama / http），不可用时文档入库返回 400 明确错误。
+知识库由用户创建并上传文档（txt/md/json/csv 与 docx/xlsx/pptx/pdf，复用附件文本提取）：文档切片后向量化存入语义记忆向量表（GroupId 约定 `kb:{KbId}`）。切片默认按窗口 4096 字符 + 重叠 512 字符，可经 `Agents:Memory:KnowledgeChunkSize` / `KnowledgeChunkOverlap` 配置；切分沿换行 / 句末标点收尾（避免句子中间硬切切断语义），相邻切片携带重叠尾部降低边界信息丢失。依赖向量存储与 embedding（pgvector / sqlite-vec + llama / http），不可用时文档入库返回 400 明确错误。
 
 **文档入库为异步处理**：`POST /ag-ui/kb/{kbId}/documents` 立即返回 `status=processing` 的文档记录（提取文本 / 切片 / 向量化在后台执行，避免上传请求长时间阻塞）；前端轮询知识库列表观察状态变化——`processing`（处理中）→ `ready`（已入库，chunkCount>0）或 `error`（失败，error 字段为原因）。处理中文档可随时移除（后台丢弃未写入的向量）；服务重启导致处理中断的文档恢复为 `error`。
 
