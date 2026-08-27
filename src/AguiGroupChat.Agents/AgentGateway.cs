@@ -231,6 +231,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         => !string.IsNullOrWhiteSpace(_options.AguiBridge?.Endpoint)
            || _catalog.GetDefinition(agentId)?.BridgeEndpoint is { Length: > 0 };
 
+    /// <summary>按工具名（技能库 SkillId）反查技能定义；客户端执行技能在其 <see cref="AgentSkillDefinition.ClientRunner"/> 中携带前端运行配置。</summary>
+    private AgentSkillDefinition? GetSkillById(string toolName)
+    {
+        var catalog = _skillCatalog.Value;
+        if (catalog is null) return null;
+        var d = catalog.Get(toolName);
+        if (d is not null) return d;
+        return catalog.ListAll().FirstOrDefault(s => s.SkillId == toolName);
+    }
+
     private async Task<AgentInvocationResult> InvokeCoreAsync(AgentInvocationContext context, CancellationToken ct)
     {
         var def = _catalog.GetDefinition(context.AgentId);
@@ -433,6 +443,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
                 var interruptId = "interrupt_" + IdGenerator.NewId();
                 var fc = approval.ToolCall as FunctionCallContent;
+                // 客户端执行技能：toolName 命中则标记 kind=client_tool，下发给前端执行（复用 HITL 通道下发 + 回传）
+                var isClientTool = fc is not null
+                    && _catalog.GetAgentClientToolNames(context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
+                var clientRunner = isClientTool ? GetSkillById(fc!.Name)?.ClientRunner : null;
                 _pendingInteractions[interruptId] = new PendingInteraction(
                     interruptId, context.GroupId, context.AgentId, runId, messageId,
                     context.TriggerUserId, context.TopicId, _hub.Value.NowMs, context,
@@ -441,7 +455,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     Agent: agent, Session: session, ApprovalRequest: approval,
                     BridgeClient: null);
                 await PurgeExpiredInteractions();
-
                 await _hub.Value.BroadcastAsync(context.GroupId, new AgentInteractionRequestEvent
                 {
                     GroupId = context.GroupId,
@@ -451,10 +464,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     InterruptId = interruptId,
                     ToolCallId = fc?.CallId ?? "tool_" + IdGenerator.NewId(),
                     ToolName = fc?.Name ?? "unknown",
-                    ToolArguments = fc?.Arguments is { } args
-                        ? JsonSerializer.SerializeToElement(args)
-                        : null,
-                    Message = $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？",
+                    ToolArguments = fc?.Arguments is { } args ? JsonSerializer.SerializeToElement(args) : null,
+                    Message = isClientTool
+                        ? $"智能体「{def.Nickname}」请求你在本机执行客户端技能「{fc?.Name}」"
+                        : $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？",
+                    Kind = isClientTool ? "client_tool" : "approval",
+                    ClientRunner = clientRunner,
                     TargetMemberId = context.TriggerUserId,
                     Timestamp = _hub.Value.NowMs,
                 }, ct: runCt);
@@ -1964,7 +1979,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 触发者决策后恢复被中断的运行：校验决策者必须是交互请求的 TargetMemberId（触发者），
     /// 把「批准 / 拒绝」作为 User 消息回灌同一 AgentSession，工具随之执行（或跳过），流式回复继续回灌群聊。
     /// </summary>
-    public async Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false)
+    public async Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null)
     {
         // 入口先做一次周期清理：定时器兜底外，决策前把已超时的交互先清掉，避免继续处理过期请求
         await PurgeExpiredInteractions();
@@ -2012,10 +2027,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             AmbientContext.Value = pending.Context; // 记忆注入等沿用触发时的业务上下文
             try
             {
-                // 本地 run：决策作为 User 消息恢复同一 AgentSession
+                // 本地 run：决策作为 User 消息恢复同一 AgentSession（客户端执行技能附带前端回传的 toolResult）
                 if (pending.Agent is not null && pending.Session is not null && pending.ApprovalRequest is not null)
                 {
-                    await ResumeRunAsync(pending, approved, resumeCts.Token);
+                    await ResumeRunAsync(pending, approved, toolResult, resumeCts.Token);
                 }
                 // 桥接（WS / HTTP standard / hub）：向外部服务发送恢复指令，继续消费其事件流
                 else if (pending.BridgeClient is not null)
@@ -2069,7 +2084,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>恢复被中断的运行：同一 AgentSession 继续流式，最终结果追加到中断时保留的同一消息；
     /// 若再次中断且该运行处于「批量批准」态（用户曾对该 run 点过“批准并继续本次运行”），则自动批准后续同类操作（不打断用户）；
     /// 否则保存新的交互请求。运行结束才结束消息（中间内容在中断时已清空）。</summary>
-    private async Task ResumeRunAsync(PendingInteraction pending, bool approved, CancellationToken ct)
+    private async Task ResumeRunAsync(PendingInteraction pending, bool approved, string? toolResult, CancellationToken ct)
     {
         var agent = pending.Agent!;            // 调用方已保证非空（本地 run 分支）
         var session = pending.Session!;
@@ -2095,7 +2110,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 批量批准循环：同一 Session 连续流式；后续审批若命中“本次运行批量批准”自动批准，否则交还用户决策
             while (true)
             {
-                var resumeMessage = new ChatMessage(ChatRole.User, [lastApproval.CreateResponse(lastApproved)]);
+                var resumeMessage = BuildResumeMessage(pending, lastApproval, lastApproved, toolResult, runCt);
                 ToolApprovalRequestContent? nextApproval = null;
                 await foreach (var update in agent.RunStreamingAsync(resumeMessage, session, new ChatClientAgentRunOptions(), runCt))
                 {
@@ -2193,7 +2208,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "智能体交互恢复运行失败：run={RunId}", pending.RunId);
-            _logger.LogWarning(ex, "交互恢复运行异常：interrupt={InterruptId}", pending.InterruptId);
+            _logger.LogWarning(ex, "智能体交互恢复运行异常：interrupt={InterruptId}", pending.InterruptId);
             _autoApprovedRuns.TryRemove(runId, out _);
             await SafeEndAsync(pending.Context, messageId);
         }
@@ -2203,8 +2218,27 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
+    /// <summary>构造审批 / 客户端工具恢复时的回灌消息：
+    /// 普通审批 → <see cref="ToolApprovalRequestContent.CreateResponse"/>（批准则服务端执行，拒绝则跳过）；
+    /// 客户端执行技能（有前端回传 toolResult）→ 用 FunctionCall + FunctionResult 消息直接“告诉”模型工具已在客户端执行且结果为 toolResult，不触发服务端 stub。</summary>
+    private ChatMessage BuildResumeMessage(PendingInteraction pending, ToolApprovalRequestContent approval, bool approved, string? toolResult, CancellationToken ct)
+    {
+        var fc = approval.ToolCall as FunctionCallContent;
+        var isClientTool = fc is not null && !string.IsNullOrEmpty(toolResult)
+            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
+        if (isClientTool && fc is not null)
+        {
+            // 客户端执行：前端已给出 toolResult → 以 FunctionCall + FunctionResult 回灌，让模型认为工具已执行、拿到结果继续
+            return new ChatMessage(ChatRole.User,
+            [
+                new FunctionCallContent(fc.CallId, fc.Name, fc.Arguments),
+                new FunctionResultContent(fc.CallId, toolResult),
+            ]);
+        }
+        return new ChatMessage(ChatRole.User, [approval.CreateResponse(approved)]);
+    }
 
-    /// <summary>清理超时未决策的交互请求（防内存泄漏）：安全结束因此仍挂起的智能体消息（避免永久悬挂），
+    /// <summary>清理超时未决策的交互请求
     /// 并释放超时交互保留的桥接连接（WS / HTTP standard / hub，防连接泄漏）。async：桥接连接释放为异步。</summary>
     private async Task PurgeExpiredInteractions()
     {

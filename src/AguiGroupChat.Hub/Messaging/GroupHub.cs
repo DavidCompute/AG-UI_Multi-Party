@@ -760,7 +760,7 @@ public sealed class GroupHub : IDisposable
         // 频道级 RBAC（4.2）：被群限制为不可审批（CanApprove=false）的成员无法作出任何交互决策
         if (!_store.GetMember(group.GroupId, req.MemberId!)!.CanApproveInteractions)
             return false; // 与「非触发者 / 已过期」一致地拒绝
-        var resolved = await _agentGateway.ResolveInteractionAsync(req.InterruptId, req.MemberId!, req.Approved, req.Input, req.Payload, ct, approveAll: req.ApproveAll);
+        var resolved = await _agentGateway.ResolveInteractionAsync(req.InterruptId, req.MemberId!, req.Approved, req.Input, req.Payload, ct, approveAll: req.ApproveAll, toolResult: req.ToolResult);
         if (resolved)
         {
             // 决策已生效：全群广播，其他成员的卡片同步更新为「已批准 / 已拒绝」（仅触发者可发起决策）

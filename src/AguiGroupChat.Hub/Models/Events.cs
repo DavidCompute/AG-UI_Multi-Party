@@ -362,8 +362,10 @@ public sealed class AgentInteractionRequestEvent
     public JsonElement? ToolArguments { get; init; }
     /// <summary>展示给用户的交互提示（如「是否批准发布公告？」）。</summary>
     public required string Message { get; init; }
-    /// <summary>交互类型：approval（工具审批，默认）/ input（请求输入，文本框）/ choice（单选）/ multi_choice（多选）。</summary>
+    /// <summary>交互类型：approval（工具审批，默认）/ input（请求输入，文本框）/ choice（单选）/ multi_choice（多选）/ client_tool（客户端执行技能）。</summary>
     public string Kind { get; init; } = "approval";
+    /// <summary>kind=client_tool 时前端执行所需的运行配置（技能的 ClientRunner JSON，前端执行器据此执行并回传结果）。</summary>
+    public string? ClientRunner { get; init; }
     /// <summary>kind=input/choice/multi_choice 时的响应字段名（如 answer），前端提交的用户输入以其为键回传。</summary>
     public string? InputField { get; init; }
     /// <summary>kind=choice/multi_choice 的可选项列表（来自 responseSchema 的 enum）。</summary>

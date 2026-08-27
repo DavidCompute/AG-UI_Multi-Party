@@ -237,7 +237,7 @@ public sealed class HitlAgentFlowTests
         public Task<AgentInvocationResult> InvokeAsync(AgentInvocationContext context, CancellationToken ct)
             => Task.FromResult(new AgentInvocationResult(true, "run_x", null));
         public Task<bool> IsAvailableAsync(string agentId, CancellationToken ct) => Task.FromResult(true);
-        public Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, System.Text.Json.JsonElement? payload, CancellationToken ct, bool approveAll = false)
+        public Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, System.Text.Json.JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null)
             => Task.FromResult(Resolved);
 
         public bool StopRun(string runId, string operatorId, string groupId, bool isManager) => false;

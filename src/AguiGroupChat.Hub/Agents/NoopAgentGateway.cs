@@ -21,7 +21,7 @@ public sealed class NoopAgentGateway : IAgentGateway
     public Task<bool> IsAvailableAsync(string agentId, CancellationToken ct)
         => Task.FromResult(false);
 
-    public Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, System.Text.Json.JsonElement? payload, CancellationToken ct, bool approveAll = false)
+    public Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, System.Text.Json.JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null)
         => Task.FromResult(false); // 空实现：不存在任何待决策的交互请求
 
     public bool StopRun(string runId, string operatorId, string groupId, bool isManager)

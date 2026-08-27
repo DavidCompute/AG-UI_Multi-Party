@@ -41,6 +41,8 @@ public sealed class AgentCatalog
     private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _agentToolNames = new(StringComparer.Ordinal);
     // agentId → 已挂载且需要人机交互审批的工具名（创建时填充；差异化审批策略测试 / 调试用）
     private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _agentApprovalToolNames = new(StringComparer.Ordinal);
+    // agentId → 已挂载的「客户端执行」技能名（ExecutionLocation=Client；网关识别后中断下发前端执行，不在服务端跑）
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _agentClientToolNames = new(StringComparer.Ordinal);
     // 技能库与技能执行器（惰性解析：技能提供者为可选项）
     private readonly Lazy<AgentSkillCatalog?> _skillCatalog;
     private readonly Lazy<SkillRunner?> _skillRunner;
@@ -177,6 +179,13 @@ public sealed class AgentCatalog
     {
         GetOrCreate(agentId); // 确保缓存已填充
         return _agentApprovalToolNames.TryGetValue(agentId, out var names) ? names : [];
+    }
+
+    /// <summary>返回某个智能体已挂载且为**客户端执行**的技能工具名（网关据此把调用中断下发前端执行）。</summary>
+    public IReadOnlyList<string> GetAgentClientToolNames(string agentId)
+    {
+        GetOrCreate(agentId); // 确保缓存已填充
+        return _agentClientToolNames.TryGetValue(agentId, out var names) ? names : [];
     }
 
     public IReadOnlyList<string> AgentIds => _definitions.Keys.ToList();
@@ -324,14 +333,22 @@ public sealed class AgentCatalog
                     desc += $"调用外部 HTTP 接口（Body JSON 定义 method/url/headers/body，可用 ${{query}} 占位）。需用户批准后执行。";
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
-                var func = AIFunctionFactory.Create(
-                    (string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct),
-                    toolName, desc);
-                var wrapped = skill.RequiresApproval ? new ApprovalRequiredAIFunction(func) : func;
+                var isClientSkill = skill.ExecutionLocation == AgentSkillExecutionLocation.Client;
+                // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；底层用占位 stub（走审批中断后不会在服务端跑）。
+                // 恢复时网关用前端回传的结果（FunctionCall + FunctionResult 消息）驱动模型继续，见 AgentGateway.ResumeRunAsync。
+                var func = isClientSkill
+                    ? AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => Task.FromResult("客户端执行（本技能不在服务端运行，请等待前端执行并回传结果）"), toolName, desc)
+                    : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct), toolName, desc);
+                // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
+                var needsApproval = skill.RequiresApproval || isClientSkill;
+                var wrapped = needsApproval ? new ApprovalRequiredAIFunction(func) : func;
                 defTools.Add(wrapped);
                 occupied.Add(toolName);
-                if (skill.RequiresApproval)
+                if (needsApproval)
                     _agentApprovalToolNames[agentId] = (_agentApprovalToolNames.TryGetValue(agentId, out var a) ? a.ToList() : [])
+                        .Append(toolName).Distinct().ToList();
+                if (isClientSkill)
+                    _agentClientToolNames[agentId] = (_agentClientToolNames.TryGetValue(agentId, out var c) ? c.ToList() : [])
                         .Append(toolName).Distinct().ToList();
             }
             if (defTools.Count > 0)

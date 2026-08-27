@@ -198,6 +198,8 @@ public sealed class GroupInteractionResolveRequest
     public string? Input { get; set; }
     /// <summary>kind=input 交互按 responseSchema 提交的完整 payload（单选 / 多选 / 数字 / 多字段对象）。</summary>
     public JsonElement? Payload { get; set; }
+    /// <summary>kind=client_tool 交互前端执行后的结果（文本 / JSON 字符串）：回传后由网关作为工具结果回灌模型。</summary>
+    public string? ToolResult { get; set; }
     /// <summary>true = 对本次运行启用批量批准（后续同类审批自动放行，不再逐个打断）。仅批准（Approved=true）时生效。</summary>
     public bool ApproveAll { get; set; }
 }

@@ -50,7 +50,7 @@ public interface IAgentGateway
     /// 返回 false 表示交互请求不存在 / 已过期 / 非触发者。
     /// <paramref name="approveAll"/>：是否对<b>本次运行</b>启用批量批准——true 时，该 run 后续的审批工具自动放行（不再打断）。
     /// </summary>
-    Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false);
+    Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null);
 
     /// <summary>停止指定运行（「停止生成」）：取消进行中的模型 / 桥接流式调用。
     /// 命中并已取消返回 true；运行不存在 / 已结束 / 无权限返回 false。</summary>
