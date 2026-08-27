@@ -403,8 +403,8 @@
         </div>
         <div class="form-group" id="sfClientRunnerGroup" style="display:none">
           <label data-i18n="skill.form.clientRunner">客户端执行配置（ClientRunner，JSON）</label>
-          <textarea id="sfClientRunner" class="modal-input" rows="3" style="width:100%;resize:vertical" placeholder={"kind":"http","url":"https://example.com","method":"POST"}></textarea>
-          <p class="form-hint" style="margin:2px 0 0;font-size:12px" data-i18n-html="skill.form.clientRunnerHint">客户端 exec 时由前端解析：<code>http</code> 填 method/url/headers/body；<code>shell</code> 填 command/cwd/timeoutSec（经本机桥执行）。</p>
+          <textarea id="sfClientRunner" class="modal-input" rows="3" style="width:100%;resize:vertical" placeholder='{"kind":"http","url":"https://example.com","method":"POST"}'></textarea>
+          <p class="form-hint" style="margin:2px 0 0;font-size:12px" data-i18n-html="skill.form.clientRunnerHint">客户端执行时由前端解析：<code>http</code> 填 <code>method/url/headers/body</code>；<code>shell</code> 填 <code>command/cwd/timeoutSec</code>（经本机桥执行）。</p>
         </div>
         <div class="form-group">
           <label>正文（<span id="sfBodyLabel" data-i18n="skill.form.bodyShell">命令 / 脚本</span>）</label>

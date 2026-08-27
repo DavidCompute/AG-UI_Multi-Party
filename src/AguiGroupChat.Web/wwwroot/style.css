@@ -572,6 +572,13 @@ select {
 .msg .itx-message { color: var(--text); }
 .msg .itx-tool { margin-top: 4px; color: var(--muted); }
 .msg .itx-tool code { background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 12px; }
+.msg .itx-runner { margin-top: 6px; font-size: 12px; }
+.msg .itx-runner-tag { display: inline-block; background: var(--accent-dim, rgba(0,0,0,.06)); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; font-weight: 600; margin-bottom: 4px; }
+.msg .itx-runner-cmd {
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  font-family: var(--mono, monospace); word-break: break-all; white-space: pre-wrap; max-height: 120px; overflow: auto;
+}
+.msg .itx-runner-cwd { margin-top: 4px; color: var(--muted); }
 .msg .itx-args {
   margin-top: 6px; max-height: 160px; overflow: auto; font-size: 12px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;

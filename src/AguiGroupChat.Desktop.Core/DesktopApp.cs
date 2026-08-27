@@ -68,6 +68,7 @@ public static class DesktopApp
         app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
         app.MapGroupNameApi();  // 群名自动生成
         app.MapSkillApi();      // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
+        app.MapClientToolBridgeApi(); // 客户端执行技能（shell）的本机桥：登录用户在 WebView 里执行，沙箱 + 超时
         app.MapLinkProxyApi();  // 链接代理（智能体回复中的链接由后端代访）
         app.MapExportImportApi(); // 数据导出 / 导入（账号 + 智能体 + 聊天记录 + 附件）
         app.MapSystemApi();     // 模型配置（endpoint / apiKey）+ 初始化（清空一切）

@@ -2931,7 +2931,8 @@ function onInteractionRequest(evt) {
     toolName: evt.toolName,
     toolArguments: evt.toolArguments || null,
     message: evt.message || "",
-    kind: evt.kind || "approval", // approval（工具审批）/ input（请求用户输入）
+    kind: evt.kind || "approval", // approval（工具审批）/ input（请求用户输入）/ client_tool（客户端执行技能）
+    clientRunner: evt.clientRunner || null, // kind=client_tool：前端执行器配置（http/shell JSON），前端执行后回传 toolResult
     inputField: evt.inputField || null,
     responseSchema: evt.responseSchema || null, // input 型：完整 JSON Schema（渲染单选 / 多选 / 数字 / 多字段表单）
     questions: evt.questions || null, // 外部 question 工具结构化问题（逐题渲染选项，答案按问题顺序回传）
@@ -2981,6 +2982,7 @@ function bindInteractionButtons(container, m) {
   container.querySelectorAll(".itx-btn").forEach((btn) => {
     if (btn.dataset.act === "submit") { btn.onclick = () => submitInteractionInput(container, m); return; }
     if (btn.dataset.act === "approveAll") { btn.onclick = () => resolveInteraction(m, true, null, null, true); return; }
+    if (btn.dataset.act === "run") { btn.onclick = () => runClientTool(m); return; }
     btn.onclick = () => resolveInteraction(m, btn.dataset.act === "approve");
   });
 }
@@ -3131,7 +3133,8 @@ function renderChainCard(chainJson) {
 /** 渲染人机交互卡片：approval（工具审批）→ 批准 / 拒绝按钮；input / choice / multi_choice（请求输入 / 单选 / 多选）→ 按 responseSchema 渲染表单或单输入框。 */
 function renderInteractionCard(m) {
   const itx = m.interaction;
-  const isInput = itx.kind !== "approval"; // input / choice / multi_choice 均为输入型
+  const isClientTool = itx.kind === "client_tool"; // 客户端执行技能：由前端按 ClientRunner 执行并回传结果
+  const isInput = itx.kind === "input" || itx.kind === "choice" || itx.kind === "multi_choice";
   // 工具参数：approval / input 型均显示（外部 question 工具的问题与选项常在参数里，供用户判断要输入什么）；空对象不显示
   const argsHtml = itx.toolArguments && Object.keys(itx.toolArguments).length
     ? `<pre class="itx-args">${escapeHtml(JSON.stringify(itx.toolArguments, null, 2))}</pre>`
@@ -3158,15 +3161,24 @@ function renderInteractionCard(m) {
   // 工具行：approval 恒显示；input 型在外部服务提供工具名（非 unknown）时同样显示，明确向哪个工具输入（如 question）
   const toolName = itx.toolName && itx.toolName !== "unknown" ? itx.toolName : "";
   const toolLine = toolName ? `<div class="itx-tool">${t("itx.toolDesc")}<code>${escapeHtml(toolName)}</code></div>` : "";
+  // 客户端执行技能：展示执行器配置（http url / shell command），让用户明确即将在本机执行什么
+  const runnerHtml = isClientTool ? clientToolPreview(itx) : "";
   let actions = "";
   if (itx.resolved) {
     actions = `<div class="itx-status ${itx.decision ? "ok" : "no"}">${
-      isInput
-        ? t("itx.submittedInput")
-        : (itx.decision ? t("itx.approved") : t("itx.rejected"))
+      isClientTool
+        ? t("itx.clientToolDone")
+        : (isInput
+          ? t("itx.submittedInput")
+          : (itx.decision ? t("itx.approved") : t("itx.rejected")))
     }</div>`;
   } else if (itx.canDecide) {
-    if (isInput) {
+    if (isClientTool) {
+      actions = `<div class="itx-actions">
+        <button class="itx-btn approve" data-act="run">${t("itx.clientToolRun")}</button>
+        <button class="itx-btn reject" data-act="reject">${t("itx.reject")}</button>
+      </div>`;
+    } else if (isInput) {
       // 结构化问题卡片优先，其次 schema 表单；两者都没有时用单输入框（占位符带上输入字段名）
       const hint = itx.inputField ? t("itx.inputFieldPh", { field: itx.inputField }) : t("itx.inputPh");
       actions = `<div class="itx-input">${qHtml || formHtml}` +
@@ -3180,20 +3192,103 @@ function renderInteractionCard(m) {
       </div>`;
     }
   } else {
-    const verb = isInput ? t("itx.inputVerb") : t("itx.confirmVerb");
+    const verb = isClientTool ? t("itx.clientToolVerb") : (isInput ? t("itx.inputVerb") : t("itx.confirmVerb"));
     actions = `<div class="itx-status">${t("itx.waiting", { name: escapeHtml(memberName(itx.targetMemberId)), text: verb })}</div>`;
   }
   return `<div class="interaction-card">
-    <div class="itx-title">${isInput ? t("itx.cardAskInput") : t("itx.cardAskConfirm")}</div>
+    <div class="itx-title">${isClientTool ? t("itx.cardAskClientTool") : (isInput ? t("itx.cardAskInput") : t("itx.cardAskConfirm"))}</div>
     ${itx.questions && itx.questions.length ? "" : `<div class="itx-message">${escapeHtml(itx.message || "")}</div>`}
     ${toolLine}
+    ${runnerHtml}
     ${argsHtml}
     ${actions}
   </div>`;
 }
 
+/** 客户端执行技能的运行器预览：解析 itx.clientRunner（JSON），按 kind 展示即将在本机执行的动作。
+ *   - http：展示 method + url（浏览器侧 fetch）；
+ *   - shell：展示命令（command，经本机桥执行）；
+ *   无 clientRunner 时回退用 toolName 展示。
+ */
+function clientToolPreview(itx) {
+  let cfg = null;
+  try { cfg = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { cfg = null; }
+  if (!cfg || typeof cfg !== "object") {
+    const n = itx.toolName || "";
+    return n ? `<div class="itx-runner">${t("itx.clientToolPreview", { name: escapeHtml(n) })}</div>` : "";
+  }
+  const kind = cfg.kind || "http";
+  if (kind === "shell") {
+    const cmd = clientToolSubstitute(cfg.command, itx.toolArguments).trim();
+    const cwd = cfg.cwd || ".";
+    const line = cmd ? `<code>${escapeHtml(cmd)}</code>` : "";
+    return `<div class="itx-runner"><span class="itx-runner-tag">${t("itx.clientToolShell")}</span>${line ? `<div class="itx-runner-cmd">${line}</div>` : ""}${cwd ? `<div class="itx-runner-cwd">${t("itx.clientToolCwd")}<code>${escapeHtml(String(cwd))}</code></div>` : ""}</div>`;
+  }
+  // http（默认）
+  const method = String(cfg.method || "GET").toUpperCase();
+  const url = clientToolSubstitute(cfg.url, itx.toolArguments);
+  const line = url ? `<code>${escapeHtml(url)}</code>` : "";
+  return `<div class="itx-runner"><span class="itx-runner-tag">${t("itx.clientToolHttp")}</span><div class="itx-runner-cmd">[${escapeHtml(method)}] ${line}</div></div>`;
+}
+
+/** 用本次函数调用的参数替换 ClientRunner 里的 ${query} / ${param} 占位（与后端技能执行一致）。
+ *  <paramref name>args</paramref>：itx.toolArguments 对象；无值时 query 回退为 JSON 序列化的全部参数。 */
+function clientToolSubstitute(template, args) {
+  if (!template || typeof template !== "string") return template || "";
+  const vars = {};
+  if (args && typeof args === "object") {
+    for (const k of Object.keys(args)) vars[k] = String(args[k]);
+    vars.query = args.query !== undefined ? String(args.query) : JSON.stringify(args);
+  } else {
+    vars.query = args === undefined ? "" : String(args);
+  }
+  return template.replace(/\$\{(\w+)\}/g, (_m, k) => (k in vars ? vars[k] : _m));
+}
+
+/** 在客户端（浏览器 / 桌面壳）实际执行客户端技能，并把结果作为 toolResult 回传给后端回灌模型。
+ *  kind=http → 浏览器 fetch；kind=shell → 经本机桥（桌面壳）执行；执行成功后 resolve 并携带 toolResult。
+ */
+async function runClientTool(m) {
+  const itx = m.interaction;
+  if (!itx || itx.resolved) return;
+  let cfg = null;
+  try { cfg = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { cfg = null; }
+  const kind = (cfg && cfg.kind) || "http";
+  let result;
+  try {
+    if (kind === "shell") {
+      // 本机桥：桌面壳暴露鉴权端点执行 shell。请求参数：command（来自 ClientRunner）、cwd、超时；${query} 占位经参数替换
+      const command = clientToolSubstitute(cfg.command, itx.toolArguments).trim();
+      if (!command) { toast(t("itx.clientToolNoCmd")); return; }
+      const res = await fetch("/ag-ui/client-tool", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.token}` },
+        body: JSON.stringify({ kind: "shell", command, cwd: cfg.cwd || ".", timeoutSec: cfg.timeoutSec || 30, query: itx.toolArguments?.query || undefined }),
+      });
+      if (!res.ok) { throw new Error((await res.text()) || res.statusText); }
+      const d = await res.json();
+      result = d.output || d.message || JSON.stringify(d);
+    } else {
+      // http（默认）：浏览器侧 fetch，沿用 URL scheme 白名单（http/https）；url / body 同样做占位替换
+      const method = String(cfg.method || "GET").toUpperCase();
+      const url = clientToolSubstitute(cfg.url, itx.toolArguments);
+      if (!url) { toast(t("itx.clientToolNoUrl")); return; }
+      const headers = (cfg.headers && typeof cfg.headers === "object") ? cfg.headers : {};
+      const rawBody = typeof cfg.body === "string" ? cfg.body : (cfg.body ? JSON.stringify(cfg.body) : undefined);
+      const bodyText = clientToolSubstitute(rawBody, itx.toolArguments);
+      const res = await fetch(url, { method, headers, body: (method === "GET" || method === "HEAD") ? undefined : bodyText });
+      const text = await res.text();
+      result = `HTTP ${res.status}\n${text.slice(0, 4000)}`;
+    }
+  } catch (err) {
+    toast(t("itx.clientToolFail", { msg: err && err.message ? err.message : String(err) }));
+    return;
+  }
+  resolveInteraction(m, true, undefined, undefined, false, result);
+}
+
 /** 触发者决策：approval 型批准 / 拒绝（approveAll=true 表示批准本次运行后续全部操作），input 型提交用户输入（inputText）或按 schema 提交 payload；经 WS 上行恢复被中断的数字员工运行。 */
-function resolveInteraction(m, approved, inputText, payload, approveAll) {
+function resolveInteraction(m, approved, inputText, payload, approveAll, toolResult) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
   // 断网检测：未连接时仅提示并保留卡片（服务端交互仍在悬挂，等待重连后再决策）
@@ -3208,6 +3303,7 @@ function resolveInteraction(m, approved, inputText, payload, approveAll) {
     approved,
     input: inputText || undefined,
     payload: payload || undefined,
+    toolResult: toolResult || undefined, // 客户端执行技能：前端回传执行结果，网关回灌模型继续
     approveAll: !!approveAll,
     memberId: state.memberId,
   });
@@ -3216,6 +3312,7 @@ function resolveInteraction(m, approved, inputText, payload, approveAll) {
   itx.decision = approved;
   itx.inputText = inputText || null;
   itx.approveAll = !!approveAll;
+  itx.toolResult = toolResult || null;
   m._html = undefined; // 卡片状态变化，强制重渲染
   const el = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
   if (el) {

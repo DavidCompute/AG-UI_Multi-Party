@@ -67,7 +67,7 @@ app.Use(async (ctx, next) =>
         var frameAncestors = frameOrigins.Count == 0 ? "'none'" : string.Join(" ", frameOrigins.Select(UriEscapeCspSource));
         headers["Content-Security-Policy"] =
             $"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-            $"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss:; " +
+            $"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https: http:; " +
             $"frame-ancestors {frameAncestors}; base-uri 'self'; form-action 'self'; object-src 'none'";
     }
     await next();
@@ -89,6 +89,7 @@ app.MapLinkProxyApi(); // 链接代理：智能体回复中的 http/https 链接
 app.MapExportImportApi(); // 数据导出 / 导入：账号 + 智能体 + 聊天记录（含附件）
 app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
 app.MapSkillApi(); // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
+app.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（登录用户执行，沙箱 + 超时）
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
