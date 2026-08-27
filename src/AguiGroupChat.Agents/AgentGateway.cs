@@ -2115,6 +2115,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 ToolApprovalRequestContent? nextApproval = null;
                 await foreach (var update in agent.RunStreamingAsync(resumeMessage, session, new ChatClientAgentRunOptions(), runCt))
                 {
+                    ClientToolTrace.Write($"RESUME-UPDATE textLen={(update.Text?.Length ?? 0)} cts=[{string.Join(",", update.Contents.Select(c => c.GetType().Name))}]");
                     if (update.Text is { Length: > 0 } text)
                     {
                         var delta = ComputeTextDelta(accumulated, text);
@@ -2143,7 +2144,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 }
 
                 if (nextApproval is null)
+                {
+                    ClientToolTrace.Write($"RESUME-END accumulatedLen={accumulated.Length} first= {accumulated.Substring(0, Math.Min(120, accumulated.Length)).Replace(Environment.NewLine, " ")}");
                     break; // 本轮流式正常结束 → 运行完成
+                }
 
                 // 又需审批
                 resumeRounds++;
@@ -2210,6 +2214,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             _logger.LogWarning(ex, "智能体交互恢复运行失败：run={RunId}", pending.RunId);
             _logger.LogWarning(ex, "智能体交互恢复运行异常：interrupt={InterruptId}", pending.InterruptId);
+            ClientToolTrace.Write($"RESUME-EX unless={ex.GetType().Name} msg={ex.Message}");
             _autoApprovedRuns.TryRemove(runId, out _);
             await SafeEndAsync(pending.Context, messageId);
         }

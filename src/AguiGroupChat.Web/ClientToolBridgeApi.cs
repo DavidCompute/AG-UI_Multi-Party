@@ -85,7 +85,8 @@ public static class ClientToolBridgeApi
         else
         {
             var scriptPath = Path.Combine(workDir, "client_run.sh");
-            await File.WriteAllTextAsync(scriptPath, command, Encoding.UTF8, ct);
+            // UTF8Encoding(false) 无 BOM：带 BOM 的脚本首行会被 bash 当成 \xEF\xBB\xBF 前缀，命令变成 command not found
+            await File.WriteAllTextAsync(scriptPath, command, new UTF8Encoding(false), ct);
             fileName = "/bin/bash";
             argsText = "\"" + scriptPath + "\"";
         }
