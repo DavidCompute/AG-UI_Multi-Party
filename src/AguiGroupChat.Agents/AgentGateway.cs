@@ -2219,22 +2219,23 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>构造审批 / 客户端工具恢复时的回灌消息：
-    /// 普通审批 → <see cref="ToolApprovalRequestContent.CreateResponse"/>（批准则服务端执行，拒绝则跳过）；
-    /// 客户端执行技能（有前端回传 toolResult）→ 用 FunctionCall + FunctionResult 消息直接“告诉”模型工具已在客户端执行且结果为 toolResult，不触发服务端 stub。</summary>
+    /// 一律用 <see cref="ToolApprovalRequestContent.CreateResponse"/>（批准则 MSAGENT 执行被包装的工具、拒绝则跳过）——
+    /// MSAGENT 要求待决的 <see cref="ToolApprovalRequestContent"/> 必须有匹配的 <see cref="ToolApprovalResponseContent"/>，
+    /// 否则恢复时抛「no matching ToolApprovalResponseContent」、模型拿不到工具结果（自定义 FunctionCall+FunctionResult 回灌不可行）。
+    /// 客户端执行技能：批准且前端已回传 toolResult 时先写入 <see cref="ClientToolResultStore"/>，
+    /// 随后 CreateResponse(true) 执行其占位函数时读取到真实结果返回给模型。</summary>
     private ChatMessage BuildResumeMessage(PendingInteraction pending, ToolApprovalRequestContent approval, bool approved, string? toolResult, CancellationToken ct)
     {
         var fc = approval.ToolCall as FunctionCallContent;
-        var isClientTool = fc is not null && !string.IsNullOrEmpty(toolResult)
-            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
-        if (isClientTool && fc is not null)
+        if (fc is not null
+            && approved
+            && !string.IsNullOrEmpty(toolResult)
+            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal))
         {
-            // 客户端执行：前端已给出 toolResult → 以 FunctionCall + FunctionResult 回灌，让模型认为工具已执行、拿到结果继续
-            return new ChatMessage(ChatRole.User,
-            [
-                new FunctionCallContent(fc.CallId, fc.Name, fc.Arguments),
-                new FunctionResultContent(fc.CallId, toolResult),
-            ]);
+            // 客户端执行技能：前端已在本地执行并回传结果 → 写入共享存储，批准后 MSAGENT 执行其占位函数时返回真实结果
+            ClientToolResultStore.Put(fc.Name, toolResult);
         }
+        // 标准审批应答：MSAGENT 据此决议（批准 → 执行工具；拒绝 → 跳过）并继续模型生成
         return new ChatMessage(ChatRole.User, [approval.CreateResponse(approved)]);
     }
 

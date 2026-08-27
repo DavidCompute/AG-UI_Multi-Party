@@ -334,10 +334,12 @@ public sealed class AgentCatalog
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
                 var isClientSkill = skill.ExecutionLocation == AgentSkillExecutionLocation.Client;
-                // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；底层用占位 stub（走审批中断后不会在服务端跑）。
-                // 恢复时网关用前端回传的结果（FunctionCall + FunctionResult 消息）驱动模型继续，见 AgentGateway.ResumeRunAsync。
+                // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；批准恢复时 MSAGENT 会执行这个占位函数，
+                // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
                 var func = isClientSkill
-                    ? AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => Task.FromResult("客户端执行（本技能不在服务端运行，请等待前端执行并回传结果）"), toolName, desc)
+                    ? AIFunctionFactory.Create(() =>
+                        Task.FromResult(ClientToolResultStore.ConsumeOrDefault(toolName)
+                            ?? "客户端执行（本技能不在服务端运行，需前端执行并回传结果）"), toolName, desc)
                     : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct), toolName, desc);
                 // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
                 var needsApproval = skill.RequiresApproval || isClientSkill;
