@@ -21,6 +21,20 @@ public enum AgentSkillKind
 }
 
 /// <summary>
+/// 技能执行位置：决定这个技能在<b>哪里</b>真正执行。
+/// 默认 <see cref="Server"/>：由服务端（本 Hub 的 SkillRunner）执行，行为与既有版本完全一致，<b>现有技能不受影响</b>。
+/// 选 <see cref="Client"/>：模型调用时服务端<b>不执行</b>，把调用与运行配置下发给前端，由前端（WebView / 浏览器 / 本机桥）执行后回传结果。
+/// </summary>
+public enum AgentSkillExecutionLocation
+{
+    /// <summary>服务端执行（默认）：沿用现有 SkillRunner 在 Hub 进程内执行。</summary>
+    Server,
+
+    /// <summary>客户端执行：服务端只转发调用，由前端执行并回传结果。</summary>
+    Client,
+}
+
+/// <summary>
 /// 可复用技能定义（OpenClaw 风格）：一段「能跑的功能 / 可复用的提示词」，独立于具体数字员工，
 /// 存于技能库，可被任意数字员工挂载复用。
 /// 与旧的 <see cref="AgentSkillConfig"/>（调另一个智能体代为回答）语义完全分开。
@@ -64,6 +78,18 @@ public sealed class AgentSkillDefinition
     /// 纯提示词技能可设 false 免审批。
     /// </summary>
     public bool RequiresApproval { get; set; } = true;
+
+    /// <summary>执行位置（默认服务端 = 现状不变）。选客户端时见 <see cref="ClientRunner"/>。</summary>
+    public AgentSkillExecutionLocation ExecutionLocation { get; set; } = AgentSkillExecutionLocation.Server;
+
+    /// <summary>
+    /// 客户端执行所需的前端运行配置（仅 <see cref="ExecutionLocation"/> 为 <see cref="AgentSkillExecutionLocation.Client"/> 时有效）。
+    /// 由前端执行器解析：
+    ///   - kind=<c>http</c>：JSON 配置，如 <c>{"method":"GET","url":"https://...","headers":{},"body":null}</c>（浏览器侧 fetch，沿用 URL scheme 白名单）；
+    ///   - kind=<c>shell</c>：JSON 配置，如 <c>{"command":"...","cwd":".","timeoutSec":30}</c>，前端经<b>本机桥</b>交桌面壳执行（需审批 + 隔离目录）。
+    /// 留空则前端用技能的 kind 与 Body 作默认执行依据。
+    /// </summary>
+    public string? ClientRunner { get; set; }
 
     /// <summary>创建者 userId（系统内置为 null）。</summary>
     public string? OwnerId { get; set; }

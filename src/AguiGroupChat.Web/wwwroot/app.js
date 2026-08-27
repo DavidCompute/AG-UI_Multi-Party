@@ -1582,21 +1582,26 @@ function openSkillForm(skillId) {
   sf("sfInterpreter").value = s?.interpreter || "";
   sf("sfBody").value = s?.body || "";
   sf("sfRequiresApproval").checked = s?.requiresApproval !== false;
+  sf("sfExecutionLocation").value = s?.executionLocation || "server";
+  sf("sfClientRunner").value = s?.clientRunner || "";
   syncSkillKind();
   sf("sfTestResult").textContent = "";
   showSkillFormView();
 }
 
-/** 类型切换时联动：shell/ http 显示解释器 / 强制审批。 */
+/** 类型切换时联动：shell/ http 显示解释器 / 强制审批；客户端执行显示 ClientRunner 配置。 */
 function syncSkillKind() {
   const kind = $("sfKind").value;
   const showInterp = kind === "shell";
   $("sfInterpreterGroup").style.display = showInterp ? "" : "none";
-  // 仅 shell 技能强制需审批（任意本机命令执行面最大）；HTTP / 提示词技能允许关闭以自动调用
-  $("sfRequiresApproval").disabled = (kind === "shell");
+  // 仅 shell 技能强制需审批（任意本机命令执行面最大）；HTTP / 提示词技能允许关闭以自动调用；
+  // 客户端执行（含 shell / http）同样强制审批（本机 / 外部副作用安全兜底）
+  $("sfRequiresApproval").disabled = (kind === "shell" || $("sfExecutionLocation").value === "client");
   $("sfBodyLabel").dataset.i18n = kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell");
   const label = t(kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell"));
   $("sfBodyLabel").textContent = label;
+  // 客户端执行 → 显示 ClientRunner 配置；服务端 → 隐藏
+  $("sfClientRunnerGroup").style.display = $("sfExecutionLocation").value === "client" ? "" : "none";
 }
 
 /** 保存技能（新建 POST / 更新 PUT）。 */
@@ -1615,6 +1620,8 @@ async function saveSkill() {
     interpreter: $("sfInterpreter").value.trim() || null,
     httpTimeoutSeconds: 30,
     requiresApproval: $("sfRequiresApproval").checked,
+    executionLocation: $("sfExecutionLocation").value || "server",
+    clientRunner: $("sfClientRunner").value.trim() || null,
   };
   const url = editingSkillId ? `/ag-ui/skills/${encodeURIComponent(editingSkillId)}` : "/ag-ui/skills";
   const method = editingSkillId ? "PUT" : "POST";
@@ -6202,6 +6209,7 @@ function init() {
   $("skillAddBtn").onclick = () => openSkillForm(null);
   $("sfBack").onclick = showSkillListView;
   $("sfKind").addEventListener("change", syncSkillKind);
+  $("sfExecutionLocation").addEventListener("change", syncSkillKind);
   $("sfSave").onclick = saveSkill;
   $("sfTest").onclick = () => testSkill(editingSkillId);
   $("afSkillLibManageBtn").onclick = openSkillModal;

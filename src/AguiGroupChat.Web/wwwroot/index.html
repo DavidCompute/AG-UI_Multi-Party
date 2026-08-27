@@ -395,11 +395,23 @@
           <input id="sfInterpreter" class="modal-input" maxlength="80" style="width:100%" placeholder="python3" />
         </div>
         <div class="form-group">
+          <label data-i18n="skill.form.executionLocation">执行位置</label>
+          <select id="sfExecutionLocation" class="modal-input" style="width:100%">
+            <option value="server" data-i18n="skill.form.execServer">服务端执行（默认，由 Hub 进程内执行）</option>
+            <option value="client" data-i18n="skill.form.execClient">客户端执行（由前端 / 本机执行，需配合 ClientRunner 配置）</option>
+          </select>
+        </div>
+        <div class="form-group" id="sfClientRunnerGroup" style="display:none">
+          <label data-i18n="skill.form.clientRunner">客户端执行配置（ClientRunner，JSON）</label>
+          <textarea id="sfClientRunner" class="modal-input" rows="3" style="width:100%;resize:vertical" placeholder={"kind":"http","url":"https://example.com","method":"POST"}></textarea>
+          <p class="form-hint" style="margin:2px 0 0;font-size:12px" data-i18n-html="skill.form.clientRunnerHint">客户端 exec 时由前端解析：<code>http</code> 填 method/url/headers/body；<code>shell</code> 填 command/cwd/timeoutSec（经本机桥执行）。</p>
+        </div>
+        <div class="form-group">
           <label>正文（<span id="sfBodyLabel" data-i18n="skill.form.bodyShell">命令 / 脚本</span>）</label>
           <textarea id="sfBody" class="modal-input agent-instructions" rows="7" style="width:100%;resize:vertical"></textarea>
         </div>
         <div class="form-group" style="display:flex;align-items:center;gap:8px">
-          <label style="margin:0" data-i18n="skill.form.requiresApproval">执行需人工批准（shell 强制；HTTP 可关闭以自动执行）</label>
+          <label style="margin:0" data-i18n="skill.form.requiresApproval">执行需人工批准（客户端执行 / shell 强制；HTTP 可关闭以自动执行）</label>
           <input id="sfRequiresApproval" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
         </div>
         <div class="modal-actions">

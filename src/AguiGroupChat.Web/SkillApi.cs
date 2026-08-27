@@ -115,6 +115,7 @@ public static class SkillApi
             ["name"] = s.Name,
             ["kind"] = s.Kind.ToString().ToLowerInvariant(),
             ["requiresApproval"] = s.RequiresApproval,
+            ["executionLocation"] = s.ExecutionLocation.ToString().ToLowerInvariant(),
             ["ownerId"] = s.OwnerId,
         };
         if (canReadBody)
@@ -124,6 +125,7 @@ public static class SkillApi
             dto["parametersJson"] = s.ParametersJson;
             dto["interpreter"] = s.Interpreter;
             dto["httpTimeoutSeconds"] = s.HttpTimeoutSeconds;
+            dto["clientRunner"] = s.ClientRunner;
         }
         return dto;
     }
@@ -144,6 +146,13 @@ public static class SkillApi
         // Shell 技能强制需审批（任意本机命令执行面最大）；HTTP / 提示词技能按创建者的 RequiresApproval 决定
         //（是否允许调用本机 / 内网另由 Agents:AllowPrivateSkillEndpoints 控制，安全兜底与其解耦）
         var requiresApproval = kind is AgentSkillKind.Shell ? true : (req.RequiresApproval ?? true);
+        // 客户端执行位置：默认服务端（现状不变）；Shell / HTTP 客户端技能一律强制需审批（本机执行 / 外部请求安全兜底）
+        var executionLocation = Enum.TryParse<AgentSkillExecutionLocation>(req.ExecutionLocation, true, out var loc)
+            && req.ExecutionLocation is not null
+            ? loc
+            : AgentSkillExecutionLocation.Server;
+        if (executionLocation == AgentSkillExecutionLocation.Client)
+            requiresApproval = true; // 客户端执行（尤其 shell）属本机/外部副作用，一律需人工批准
         if (kind == AgentSkillKind.Shell && string.IsNullOrWhiteSpace(req.Body))
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "shell 技能的正文（命令/脚本）不能为空")));
         if (kind == AgentSkillKind.Http && string.IsNullOrWhiteSpace(req.Body))
@@ -161,6 +170,8 @@ public static class SkillApi
             HttpTimeoutSeconds = Math.Clamp(req.HttpTimeoutSeconds.GetValueOrDefault(30), 5, 120),
             RequiresApproval = requiresApproval,
             OwnerId = ownerId,
+            ExecutionLocation = executionLocation,
+            ClientRunner = string.IsNullOrWhiteSpace(req.ClientRunner) ? null : req.ClientRunner.Trim(),
         }, null);
     }
 
@@ -180,7 +191,9 @@ public sealed record SkillDefHttpRequest(
     string? ParametersJson,
     string? Interpreter,
     int? HttpTimeoutSeconds,
-    bool? RequiresApproval);
+    bool? RequiresApproval,
+    string? ExecutionLocation = null,
+    string? ClientRunner = null);
 
 /// <summary>技能试运行请求体。</summary>
 public sealed record SkillRunHttpRequest(string Query = "");
