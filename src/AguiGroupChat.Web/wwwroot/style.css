@@ -1525,8 +1525,6 @@ button { white-space: nowrap; }
 .plan-progress-bar { height: 100%; background: var(--agent-grad, linear-gradient(135deg, #9d6bff, #6f8bff)); transition: width .4s ease; }
 .plan-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .plan-steps li { display: flex; align-items: flex-start; gap: 7px; font-size: 13px; color: var(--text); }
-.plan-steps li.done { color: var(--muted); }
-.plan-steps li.done .plan-step-text { text-decoration: line-through; }
 
 /* 智能体技能调用链（链路可视化）：嵌套缩进卡片 */
 .msg .chain-card {
