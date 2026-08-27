@@ -46,10 +46,19 @@ public sealed class ClientToolResumeTests
             AIFunctionFactory.Create(() =>
                 Task.FromResult(AguiGroupChat.Agents.ClientToolResultStore.ConsumeOrDefault("sk_hostname")
                     ?? "客户端执行（占位）"), "sk_hostname", "查询主机名"));
+        // 模拟：首轮返回工具调用；恢复后的模型续答根据输入里是否含前端结果给出「看到了 / 没看到」
+        var callsHolder = new List<List<ChatMessage>>();
         var mock = new RecordingMockClient(idx =>
-            idx == 0
-                ? new AIContent[] { new FunctionCallContent("call_1", "sk_hostname", null) }
-                : new AIContent[] { new TextContent("已获取。") });
+        {
+            if (idx == 0)
+                return new AIContent[] { new FunctionCallContent("call_1", "sk_hostname", null) };
+            // 检查本轮输入里模型能否看到 FunctionResultContent
+            var msgs = callsHolder[idx];
+            var hasResult = msgs.SelectMany(x => x.Contents).Any(c =>
+                c is FunctionResultContent r && r.Result?.ToString()?.Contains("DESKTOP-PROBE-123") == true);
+            return new AIContent[] { new TextContent("sawResult=" + (hasResult ? "TRUE" : "FALSE")) };
+        });
+        mock.Calls = callsHolder; // 让 mock 把收到的输入写进同一容器，供上述闭包检查
         var agent = new ChatClientAgent(mock, "probe", null, null, new[] { tool }, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
         var session = await agent.CreateSessionAsync();
 
@@ -65,13 +74,17 @@ public sealed class ClientToolResumeTests
 
         // 恢复：先写入前端回传的真实结果，再用 CreateResponse(true)（批准后 MSAGENT 执行占位函数读取该结果）
         AguiGroupChat.Agents.ClientToolResultStore.Put("sk_hostname", "DESKTOP-PROBE-123");
-        var resume = new List<AgentResponseUpdate>();
+        var resumeTexts = new List<string>();
         await foreach (var u in agent.RunStreamingAsync(
             new ChatMessage(ChatRole.User, [approval.CreateResponse(approved: true)]), session))
-            resume.Add(u);
+            if (u.Text is { Length: > 0 } t) resumeTexts.Add(t);
 
-        // MSAGENT 批准后执行占位函数 → 应产生带真实结果的 FunctionResultContent，模型据此继续
-        var fr = Assert.Single(resume.SelectMany(u => u.Contents).OfType<FunctionResultContent>());
-        Assert.Equal("DESKTOP-PROBE-123", fr.Result?.ToString());
+        // 关键：MSAGENT 在工具执行后应带 FunctionResult 再次回调 provider，模型续答能「看到」前端结果而非只见工具调用
+        Assert.Contains(resumeTexts, t => t.Contains("sawResult=TRUE"));
+
+        // 工具执行产生带真实结果的 FunctionResultContent
+        var last = mock.Calls[^1];
+        Assert.Contains(last.SelectMany(x => x.Contents), c =>
+            c is FunctionResultContent r && r.Result?.ToString()?.Contains("DESKTOP-PROBE-123") == true);
     }
 }
