@@ -44,14 +44,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>思考过程总量截断（推理模型 reasoning_content 可能很长：防消息 / 前端 / 存储被撑爆）。</summary>
     private const int MaxReasoningTotalChars = 12000;
 
-    /// <summary>工具调用参数 / 结果的展示截断长度（结果可能很大，如 bash 输出，放宽到 5000 供前端滚动查看）。</summary>
-    private const int MaxToolResultChars = 5000;
-
     /// <summary>桥接流式正文累计上限（standard 方言是累计文本，防外部服务流式下发无限长正文撑爆内存；截断到前缀不影响增量计算）。</summary>
     private const int MaxBridgeAccumulatedChars = 50000;
-
-    /// <summary>外部 AG-UI 附件名最大长度（超长截断，防前端 / 存储被撑爆）。</summary>
-    private const int MaxAttachmentNameChars = 255;
 
     /// <summary>
     /// 当前 run 的业务上下文（AsyncLocal ambient，与 MSAGENT 内部 AgentRunContext 机制同构）。
@@ -404,7 +398,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         ToolCallId = fr.CallId ?? "tool_" + IdGenerator.NewId(),
                         ParentMessageId = messageId,
                         GroupId = context.GroupId,
-                        Result = DescribeToolResult(fr.Result),
+                        Result = AgentGatewayHelpers.DescribeToolResult(fr.Result),
                         Timestamp = _hub.Value.NowMs,
                     }, ct: runCt);
                 }
@@ -420,7 +414,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
                     break; // 模型流正常完成（审批中断时 approval 已置位，由下方分支处理）
                 }
-                catch (Exception ex) when (IsRetryableModelError(ex) && attempt < MaxModelAttempts)
+                catch (Exception ex) when (AgentGatewayHelpers.IsRetryableModelError(ex) && attempt < MaxModelAttempts)
                 {
                     attempt++;
                     _logger.LogWarning(ex, "模型调用返回可重试错误，第 {Attempt} 次退避重试（agent={AgentId}）", attempt, context.AgentId);
@@ -488,7 +482,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 GroupId = context.GroupId,
                 ErrorCode = "AGENT_RUN_ERROR",
-                Message = DescribeModelError(ex),
+                Message = AgentGatewayHelpers.DescribeModelError(ex),
                 Timestamp = _hub.Value.NowMs,
             });
             return new AgentInvocationResult(false, runId, "AGENT_RUN_ERROR");
@@ -579,7 +573,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
 
             var finalText = sb.Length == 0 ? "（流水线未产出内容）" : sb.ToString().Trim();
-            foreach (var chunk in ChunkReply(finalText, 160)) // 分块广播，前端可像流式一样渐进渲染
+            foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText, 160)) // 分块广播，前端可像流式一样渐进渲染
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
@@ -669,7 +663,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 AgentGateway.AmbientContext.Value = prevAmbient;
             }
-            foreach (var chunk in ChunkReply(text, 160))
+            foreach (var chunk in AgentGatewayHelpers.ChunkReply(text, 160))
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
@@ -768,7 +762,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 foreach (var name in prefixNames)
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
                 finalText ??= "（处理对象未返回内容）";
-                foreach (var chunk in ChunkReply(finalText.Trim(), 160))
+                foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText.Trim(), 160))
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
             }
 
@@ -931,7 +925,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     var stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（未返回内容）" : resp.Text.Trim();
                     // 计划卡已展示“指派「配置管理员」代为处理”，正文不再叠加（X 代为处理）前缀，避免重复
                     if (!hops.Any(h => h.AgentId == step.Target))
-                        hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = TruncateForChain(working), Result = TruncateForChain(stepOut) });
+                        hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = AgentGatewayHelpers.TruncateForChain(working), Result = AgentGatewayHelpers.TruncateForChain(stepOut) });
                     sb.Clear().Append(stepOut);
                     working = stepOut;
                 }
@@ -953,9 +947,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     if (!string.IsNullOrWhiteSpace(clean)) skillQuery = clean;
                 }
                 var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
-                _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, TruncateForChain(skillQuery));
+                _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, AgentGatewayHelpers.TruncateForChain(skillQuery));
                 if (!hops.Any(h => h.AgentId == skill.SkillId))
-                    hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = TruncateForChain(skillQuery), Result = TruncateForChain(res) });
+                    hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = AgentGatewayHelpers.TruncateForChain(res) });
                 sb.Clear().Append(res);
                 working = res;
                 if (di < display.Count) { display[di] = new PlanStepInfo { Id = display[di].Id, Text = display[di].Text, Done = true }; di++; }
@@ -974,7 +968,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var final = await SynthesizePlanAnswerAsync(context, root, plan.Input, sb.ToString(), ct);
         var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
-        foreach (var chunk in ChunkReply(text.Trim(), 160))
+        foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
             await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
     }
 
@@ -1138,7 +1132,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     // 末级自答：subHops 首节点即 target（叶子），避免「target 关系节点 + subHops 作答节点」重复
                     var targetSelfAnswer = subHops.Count > 0 && string.Equals(subHops[0].AgentId, target, StringComparison.Ordinal);
                     if (!targetSelfAnswer)
-                        hops.Add(new ChainNode { Kind = "assignment", AgentId = target, AgentNickname = _catalog.GetDefinition(target)?.Nickname ?? target, Query = TruncateForChain(input) });
+                        hops.Add(new ChainNode { Kind = "assignment", AgentId = target, AgentNickname = _catalog.GetDefinition(target)?.Nickname ?? target, Query = AgentGatewayHelpers.TruncateForChain(input) });
                     hops.AddRange(subHops);
                     return (RouteOutcome.Answer, subText, hops);
                 }
@@ -1149,7 +1143,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (await ShouldSpeakAsync(context, def, ct))
         {
             var text = await RunRouteAnswerAsync(context, agentId, input, ct);
-            hops.Add(new ChainNode { Kind = "assignment", AgentId = agentId, AgentNickname = def.Nickname ?? agentId, Query = TruncateForChain(input), Result = TruncateForChain(text) });
+            hops.Add(new ChainNode { Kind = "assignment", AgentId = agentId, AgentNickname = def.Nickname ?? agentId, Query = AgentGatewayHelpers.TruncateForChain(input), Result = AgentGatewayHelpers.TruncateForChain(text) });
             return (RouteOutcome.Answer, text, hops);
         }
 
@@ -1166,7 +1160,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 // 末级自答同理去重：subHops 首节点即 esc（叶子）时不再重复叠加
                 var escSelfAnswer = subHops.Count > 0 && string.Equals(subHops[0].AgentId, esc, StringComparison.Ordinal);
                 if (!escSelfAnswer)
-                    hops.Add(new ChainNode { Kind = "escalation", AgentId = esc, AgentNickname = _catalog.GetDefinition(esc)?.Nickname ?? esc, Query = TruncateForChain(input) });
+                    hops.Add(new ChainNode { Kind = "escalation", AgentId = esc, AgentNickname = _catalog.GetDefinition(esc)?.Nickname ?? esc, Query = AgentGatewayHelpers.TruncateForChain(input) });
                 hops.AddRange(subHops);
                 return (RouteOutcome.Answer, subText, hops);
             }
@@ -1228,26 +1222,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return "";
     }
 
-    private static string TruncateForChain(string? s)
-    {
-        const int max = 200;
-        return string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
-    }
-
-    /// <summary>把长文本切成固定长度的片段（用于分块广播渐进渲染）。</summary>
-    private static IEnumerable<string> ChunkReply(string text, int size)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= size) { yield return text; yield break; }
-        var pos = 0;
-        while (pos < text.Length)
-        {
-            var len = Math.Min(size, text.Length - pos);
-            yield return text.Substring(pos, len);
-            pos += len;
-        }
-    }
-
-    /// <summary>停止指定运行：触发者本人或同群管理员可调；命中并已取消返回 true。</summary>
+    /// <summary>停止指定运行触发者本人或同群管理员可调；命中并已取消返回 true。</summary>
     public bool StopRun(string runId, string operatorId, string groupId, bool isManager)
     {
         if (!_activeRuns.TryGetValue(runId, out var run)) return false;
@@ -1259,11 +1234,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _logger.LogInformation("用户 {Operator} 停止智能体运行：run={RunId} agent={AgentId}", operatorId, runId, run.AgentId);
         return true;
     }
-
-    /// <summary>按端点 scheme 选择 WebSocket 桥接传输（http/https 走官方 AGUIChatClient，见 <see cref="InvokeBridgeAsync"/>）。</summary>
-    private static bool IsWebSocketEndpoint(string endpoint)
-        => endpoint.StartsWith("ws://", StringComparison.OrdinalIgnoreCase)
-            || endpoint.StartsWith("wss://", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// AG-UI 桥接路径：发送用户消息（含历史窗口与附件上下文）并订阅其流式回复，回灌群聊。
@@ -1282,7 +1252,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             throw new InvalidOperationException("桥接端点未配置：智能体 BridgeEndpoint 与全局 AguiBridge:Endpoint 均为空（桥接角色必须配置外部 AG-UI 服务端点）");
         var runId = "run_" + IdGenerator.NewId();
         // 外部 AG-UI 会话按话题隔离：main 话题沿用群级 threadId，非 main 话题追加话题后缀
-        var externalThreadId = BuildExternalThreadId(context.ThreadId, context.TopicId);
+        var externalThreadId = AgentGatewayHelpers.BuildExternalThreadId(context.ThreadId, context.TopicId);
 
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
         {
@@ -1315,7 +1285,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (endpointError is not null)
                 throw new InvalidOperationException($"桥接端点配置非法：{endpointError}");
 
-            if (IsWebSocketEndpoint(endpoint))
+            if (AgentGatewayHelpers.IsWebSocketEndpoint(endpoint))
             {
                 bridgeClient = new AguiBridgeClient(endpoint, mode, token, context.AgentId, _logger, connectTimeout);
                 await bridgeClient.ConnectAsync(context.AgentId, runCt);
@@ -1497,7 +1467,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             if (bridgeAttachments.Count > 0)
             {
-                try { await _hub.Value.AppendAgentAttachmentsAsync(context.GroupId, replyId, ToAttachmentInfos(bridgeAttachments), runCt); }
+                try { await _hub.Value.AppendAgentAttachmentsAsync(context.GroupId, replyId, AgentGatewayHelpers.ToAttachmentInfos(bridgeAttachments), runCt); }
                 catch (Exception ex) { _logger.LogWarning(ex, "AG-UI 桥接附件回灌失败：agent={AgentId}", context.AgentId); }
             }
             await _hub.Value.EndAgentMessageAsync(context.GroupId, replyId, runCt);
@@ -1538,15 +1508,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 IsTyping = false,
             }, CancellationToken.None);
         }
-    }
-
-    /// <summary>模型调用可重试错误：HTTP 429（限流）或 5xx（网关暂时性故障）；连接重置 / 超时也可重试。
-    /// 取消（OperationCanceledException）不算可重试，走正常取消路径。</summary>
-    private static bool IsRetryableModelError(Exception ex)
-    {
-        if (ex is HttpRequestException { StatusCode: { } code })
-            return (int)code == 429 || (int)code >= 500;
-        return ex is IOException or TimeoutException;
     }
 
     /// <summary>推进外部会话增量游标：以本次 agent 回复消息为「上次节点」，下次触发只发其后的本话题新消息；
@@ -1699,7 +1660,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
                 if (bridgeAttachments.Count > 0)
                 {
-                    try { await _hub.Value.AppendAgentAttachmentsAsync(pending.GroupId, messageId, ToAttachmentInfos(bridgeAttachments), runCt); }
+                    try { await _hub.Value.AppendAgentAttachmentsAsync(pending.GroupId, messageId, AgentGatewayHelpers.ToAttachmentInfos(bridgeAttachments), runCt); }
                     catch (Exception ex) { _logger.LogWarning(ex, "AG-UI 桥接恢复流附件回灌失败：agent={AgentId}", pending.AgentId); }
                 }
                 await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);
@@ -1805,39 +1766,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.AppendAgentReasoningAsync(groupId, messageId, text, ct);
     }
 
-    /// <summary>外部 AG-UI 附件 → 群聊消息附件（AttachmentInfo：ext_ id + 外部 URL）。URL 仅放行
-    /// http/https 与 data:image 前缀（与前端渲染 scheme 白名单一致），其余丢弃——防外部服务下发
-    /// javascript: 等危险 scheme 诱导前端 / 用户访问。附件名截断到 <see cref="MaxAttachmentNameChars"/> 字符。</summary>
-    private static IReadOnlyList<AttachmentInfo> ToAttachmentInfos(IReadOnlyList<BridgeAttachment> attachments)
-        => attachments
-            .Where(a => IsAllowedAttachmentUrl(a.Url))
-            .Select(a => new AttachmentInfo
-            {
-                AttachmentId = "ext_" + IdGenerator.NewId(),
-                Name = TruncateAttachmentName(a.Name),
-                ContentType = a.Kind == "image" ? "image/png" : "application/octet-stream",
-                Size = 0,
-                Url = a.Url,
-                Kind = a.Kind,
-            }).ToList();
-
-    /// <summary>外部 AG-UI 附件 URL 白名单：仅放行 http/https 与 data:image 前缀，其余 scheme 一律丢弃。</summary>
-    private static bool IsAllowedAttachmentUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url)) return false;
-        var lower = url.Trim().ToLowerInvariant();
-        return lower.StartsWith("http://", StringComparison.Ordinal)
-            || lower.StartsWith("https://", StringComparison.Ordinal)
-            || lower.StartsWith("data:image", StringComparison.Ordinal);
-    }
-
-    /// <summary>附件名截断到 <see cref="MaxAttachmentNameChars"/> 字符（外部文件名可能超长）。</summary>
-    private static string TruncateAttachmentName(string? name)
-    {
-        var n = string.IsNullOrWhiteSpace(name) ? "attachment" : name;
-        return n.Length > MaxAttachmentNameChars ? n[..MaxAttachmentNameChars] : n;
-    }
-
     /// <summary>外部 AG-UI 工具调用开始（TOOL_CALL_START）：广播 TOOL_CALL_START 群事件
     /// （前端渲染「🔧 调用工具：xxx」），可见性继承触发消息（定向 / 私聊回复的工具行不外泄）。</summary>
     private async Task BroadcastBridgeToolCallAsync(AgentInvocationContext context, string messageId, AguiBridgeEvent evt, CancellationToken ct)
@@ -1874,7 +1802,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private async Task BroadcastBridgeToolResultAsync(AgentInvocationContext context, string messageId, AguiBridgeEvent evt, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(evt.Delta)) return;
-        var text = evt.Delta!.Length > MaxToolResultChars ? evt.Delta[..MaxToolResultChars] + "…" : evt.Delta;
+        var text = evt.Delta!.Length > AgentGatewayHelpers.MaxToolResultChars ? evt.Delta[..AgentGatewayHelpers.MaxToolResultChars] + "…" : evt.Delta;
         await _hub.Value.BroadcastAsync(context.GroupId, new ToolCallResultEvent
         {
             ToolCallId = evt.ToolCallId ?? "tool_" + IdGenerator.NewId(),
@@ -1942,11 +1870,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return sb.ToString();
     }
 
-    /// <summary>外部 AG-UI 会话标识：按话题隔离——main 话题沿用群级 threadId（兼容既有会话），
-    /// 非 main 话题追加话题后缀，外部服务据此为每个话题维护独立会话。</summary>
-    private static string BuildExternalThreadId(string threadId, string? topicId)
-        => string.IsNullOrEmpty(topicId) || topicId == "main" ? threadId : $"{threadId}:{topicId}";
-
     /// <summary>外部 AG-UI 桥接用户消息组装：会话首次建立（无增量游标）发送话题全部历史；
     /// 会话已建立后只发送上次节点（游标）之后的本话题增量 + 当前消息，避免每次全量重发。</summary>
     private async Task<string> BuildBridgeUserMessageAsync(AgentInvocationContext context, string externalThreadId, CancellationToken ct)
@@ -2008,44 +1931,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     continue;
                 }
             }
-            sb.Append($"\n\n【附件：{att.Name}】（{att.Kind}，{FormatBytes(att.Size)}，{att.Url}）");
+            sb.Append($"\n\n【附件：{att.Name}】（{att.Kind}，{AgentGatewayHelpers.FormatBytes(att.Size)}，{att.Url}）");
         }
-    }
-
-    private static string FormatBytes(long bytes)
-        => bytes >= 1024 * 1024 ? $"{bytes / 1024.0 / 1024.0:0.#} MB"
-            : bytes >= 1024 ? $"{bytes / 1024.0:0.#} KB"
-            : $"{bytes} B";
-
-    /// <summary>工具执行结果的展示文本：字符串原样，对象序列化 JSON；超长截断。</summary>
-    private static string DescribeToolResult(object? result)
-    {
-        var text = result switch
-        {
-            null => "",
-            string s => s,
-            _ => JsonSerializer.Serialize(result),
-        };
-        return text.Length > MaxToolResultChars ? text[..MaxToolResultChars] + "…" : text;
-    }
-
-    /// <summary>用 AguiJson 反序列化（工作型智能体 publish_file 标记载荷）；失败返回 null。</summary>
-    private static T? AguiJsonOrDefault<T>(string json) where T : class
-    {
-        try { return JsonSerializer.Deserialize<T>(json, AguiJson.Options); }
-        catch { return null; }
-    }
-
-    /// <summary>
-    /// 模型调用错误的人读描述（脱敏）：只输出固定文案 + 错误码，原始错误详情
-    /// （异常链 / 响应体，可能含敏感信息）仅记录到日志（调用点 LogWarning），不向前端透出内部细节。
-    /// </summary>
-    private static string DescribeModelError(Exception ex)
-    {
-        var code = ex is System.ClientModel.ClientResultException { Status: { } status }
-            ? status.ToString()
-            : "MODEL_ERROR";
-        return $"模型调用失败（{code}）";
     }
 
     /// <summary>
@@ -2187,7 +2074,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     // 按 responseSchema 规范化前端提交的输入 payload（多选拆数组 / 数字转数值）
                     var normalized = AguiBridgeProtocol.NormalizeInputPayload(pending.ResponseSchema, payload);
                     // 恢复沿用话题级外部 threadId（与首发会话一致，外部服务据此关联中断运行）
-                    var externalThreadId = BuildExternalThreadId(pending.Context.ThreadId, pending.Context.TopicId);
+                    var externalThreadId = AgentGatewayHelpers.BuildExternalThreadId(pending.Context.ThreadId, pending.Context.TopicId);
                     await pending.BridgeClient.ResumeInteractionAsync(
                         pending.ExternalInterruptId ?? pending.InterruptId,
                         externalThreadId, pending.RunId, pending.GroupId, approved, resumeCts.Token,
@@ -2211,7 +2098,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     {
                         GroupId = pending.GroupId,
                         ErrorCode = "AGENT_RESUME_ERROR",
-                        Message = DescribeModelError(ex),
+                        Message = AgentGatewayHelpers.DescribeModelError(ex),
                         Timestamp = _hub.Value.NowMs,
                     }, ct: CancellationToken.None);
                 }
