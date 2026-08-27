@@ -797,10 +797,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     // ---------- 确定性编排计划（Coordinator Plan）：问题 → 按组织架构/技能配置定计划 → 激活对应员工与能力执行 ----------
-    private sealed record PlanStep(string Action, string Target, string? Note); // Action: dispatch | skill | answer
-
-    /// <summary>编排计划上下文：计划步骤 + 可指派的员工清单 + 可调用的技能库。供随消息流逐项执行。</summary>
-    private sealed record CoordinatedPlan(List<PlanStep> Steps, IReadOnlyList<AgentDefinition> Reached, Dictionary<string, AgentSkillDefinition> Skills, string Input);
 
     /// <summary>最多纳入计划的清单项 / 步骤数（防配置病态深链 / 打爆模型时长）。</summary>
     private const int CoordinatorPlanMaxItems = 12;
@@ -906,7 +902,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 var feedsParameterizedSkill = si + 1 < plan.Steps.Count
                     && plan.Steps[si + 1].Action == "skill"
                     && plan.Skills.TryGetValue(plan.Steps[si + 1].Target, out var nextSkill)
-                    && SkillRequiredInputs(nextSkill).Contains("query", StringComparer.Ordinal);
+                    && AgentGatewayHelpers.SkillRequiredInputs(nextSkill).Contains("query", StringComparer.Ordinal);
                 var prompt = "你正被「" + (target.Nickname ?? step.Target) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：\n" + working
                     + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + sb : "")
                     + (feedsParameterizedSkill
@@ -941,9 +937,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
                 // 参数化技能（body 含 ${query}）：从“上一步输出”中尽可能提取干净的 URL/值，再作为技能输入
                 var skillQuery = working;
-                if (SkillRequiredInputs(skill).Contains("query", StringComparer.Ordinal))
+                if (AgentGatewayHelpers.SkillRequiredInputs(skill).Contains("query", StringComparer.Ordinal))
                 {
-                    var clean = ExtractCleanValueForSkill(skillQuery);
+                    var clean = AgentGatewayHelpers.ExtractCleanValueForSkill(skillQuery);
                     if (!string.IsNullOrWhiteSpace(clean)) skillQuery = clean;
                 }
                 var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
@@ -997,7 +993,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             sb.Append("- [技能] ").Append(s.SkillId).Append("｜").Append(s.Name ?? s.SkillId).Append("：")
               .Append((s.Description ?? "").ReplaceLineEndings(" "));
             // 技能需要的外部输入（body 里的 ${query}/${xxx} 占位符）→ 提示计划先拿到该值再调用它
-            var inputs = SkillRequiredInputs(s);
+            var inputs = AgentGatewayHelpers.SkillRequiredInputs(s);
             if (inputs.Count > 0)
                 sb.Append("【需要输入：").Append(string.Join("、", inputs)).Append("】");
             sb.AppendLine();
@@ -1005,22 +1001,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (reached.Count == 0) sb.AppendLine("- （无可指派的数字员工）");
         if (skills.Count == 0) sb.AppendLine("- （无可调用的技能）");
         return sb.ToString();
-    }
-
-    /// <summary>技能正文里的外部输入占位符（${query} / ${xxx}）→ 该技能运行时需要填入的参数名。
-    /// 用于让协调计划识别“某技能的输入要靠另一员工/前序步骤提供”的依赖，并据此排序执行。</summary>
-    private static List<string> SkillRequiredInputs(AgentSkillDefinition skill)
-        => System.Text.RegularExpressions.Regex.Matches(skill.Body ?? "", @"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
-            .Select(m => m.Groups[1].Value).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().ToList();
-
-    /// <summary>从“上一步输出”（可能含解释性文字）中提取技能可用的纯净输入：优先取第一个 URL；
-    /// 否则去掉首尾空白 / 常见引号。这样“配置管理员给了带解释的 OWA 地址”也能干净地喂给技能。</summary>
-    private static string? ExtractCleanValueForSkill(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var m = System.Text.RegularExpressions.Regex.Match(text, @"https?://[^\s'""<>]+|\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?::[0-9]+)?\b");
-        if (m.Success) return m.Value.TrimEnd('.', '，', ',', '）', ')', '】', ']');
-        return text.Trim().Trim('"', '\'', '“', '”', '，', ',', '。', '.', '：', ':').Trim();
     }
 
     private async Task<List<PlanStep>?> PlanCoordinatedAsync(AgentInvocationContext context, AgentDefinition root, string input,
@@ -1042,7 +1022,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             + "只输出 JSON，不要任何其他文字：{\"steps\":[...]}，步骤 1~" + CoordinatorPlanMaxSteps + " 条。若问题与任何员工/技能都不相关，输出 {\"steps\":[]}。";
         var session = await agent.CreateSessionAsync(ct);
         var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
-        return ParsePlan(resp.Text);
+        return AgentGatewayHelpers.ParsePlan(resp.Text);
     }
 
     private async Task<string> SynthesizePlanAnswerAsync(AgentInvocationContext context, AgentDefinition root, string input, string resultText, CancellationToken ct)
@@ -1054,37 +1034,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var session = await agent.CreateSessionAsync(ct);
         var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
         return string.IsNullOrWhiteSpace(resp.Text) ? resultText : resp.Text.Trim();
-    }
-
-    private static List<PlanStep>? ParsePlan(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return null;
-        var cleaned = text.Trim();
-        // 容忍模型把代码块 / 前后缀一起返回：截取第一对 { } 包裹的 JSON
-        var start = cleaned.IndexOf('{');
-        var end = cleaned.LastIndexOf('}');
-        if (start < 0 || end <= start) return null;
-        cleaned = cleaned[start..(end + 1)];
-        try
-        {
-            using var doc = JsonDocument.Parse(cleaned);
-            if (!doc.RootElement.TryGetProperty("steps", out var arr) || arr.ValueKind != JsonValueKind.Array) return null;
-            var steps = new List<PlanStep>();
-            foreach (var e in arr.EnumerateArray())
-            {
-                var action = e.TryGetProperty("action", out var a) ? a.GetString() : null;
-                var target = e.TryGetProperty("target", out var t) ? t.GetString() : null;
-                var note = e.TryGetProperty("note", out var n) ? n.GetString() : null;
-                if (string.IsNullOrWhiteSpace(action)) continue;
-                if (action is "dispatch" or "skill" && string.IsNullOrWhiteSpace(target)) continue;
-                steps.Add(new PlanStep(action.Trim(), target?.Trim() ?? "", note));
-            }
-            return steps;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
     }
 
     /// <summary>指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>

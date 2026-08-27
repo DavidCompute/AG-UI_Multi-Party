@@ -4,6 +4,16 @@ using AguiGroupChat.Hub.Models;
 
 namespace AguiGroupChat.Agents;
 
+/// <summary>确定性编排计划的单个步骤。Action: dispatch | skill | answer。</summary>
+internal sealed record PlanStep(string Action, string Target, string? Note);
+
+/// <summary>编排计划上下文：计划步骤 + 可指派的员工清单 + 可调用的技能库。供随消息流逐项执行。</summary>
+internal sealed record CoordinatedPlan(
+    List<PlanStep> Steps,
+    IReadOnlyList<AgentDefinition> Reached,
+    Dictionary<string, AgentSkillDefinition> Skills,
+    string Input);
+
 /// <summary>
 /// 智能体网关的纯静态工具集合：与实例状态（会话 / 流式缓冲 / 交互现场）无关的格式化、
 /// 校验与文本处理。把这类无副作用的逻辑从 <see cref="AgentGateway"/>（God class）中剥离，
@@ -123,5 +133,50 @@ internal static class AgentGatewayHelpers
             ? status.ToString()
             : "MODEL_ERROR";
         return $"模型调用失败（{code}）";
+    }
+
+    /// <summary>技能正文里的外部输入占位符（${query} / ${xxx}）→ 该技能运行时需要填入的参数名。</summary>
+    internal static List<string> SkillRequiredInputs(AgentSkillDefinition skill)
+        => System.Text.RegularExpressions.Regex.Matches(skill.Body ?? "", @"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+            .Select(m => m.Groups[1].Value).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().ToList();
+
+    /// <summary>从“上一步输出”（可能含解释性文字）中提取技能可用的纯净输入。</summary>
+    internal static string? ExtractCleanValueForSkill(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(text, @"https?://[^\s'\""<>]+|\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?::[0-9]+)?\b");
+        if (m.Success) return m.Value.TrimEnd('.', '，', ',', '）', ')', '】', ']');
+        return text.Trim().Trim('"', '\'', '“', '”', '，', ',', '。', '.', '：', ':').Trim();
+    }
+
+    /// <summary>解析路由模型返回的编排计划 JSON（容忍代码块 / 前后缀），非法或空返回 null。</summary>
+    internal static List<PlanStep>? ParsePlan(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var cleaned = text.Trim();
+        var start = cleaned.IndexOf('{');
+        var end = cleaned.LastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+        cleaned = cleaned[start..(end + 1)];
+        try
+        {
+            using var doc = JsonDocument.Parse(cleaned);
+            if (!doc.RootElement.TryGetProperty("steps", out var arr) || arr.ValueKind != JsonValueKind.Array) return null;
+            var steps = new List<PlanStep>();
+            foreach (var e in arr.EnumerateArray())
+            {
+                var action = e.TryGetProperty("action", out var a) ? a.GetString() : null;
+                var target = e.TryGetProperty("target", out var t) ? t.GetString() : null;
+                var note = e.TryGetProperty("note", out var n) ? n.GetString() : null;
+                if (string.IsNullOrWhiteSpace(action)) continue;
+                if (action is "dispatch" or "skill" && string.IsNullOrWhiteSpace(target)) continue;
+                steps.Add(new PlanStep(action.Trim(), target?.Trim() ?? "", note));
+            }
+            return steps;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }

@@ -9,7 +9,7 @@ public sealed class CoordinatorSkillValueExtractionTests
 {
     private static string? Extract(string? text)
     {
-        var m = typeof(AgentGateway).GetMethod("ExtractCleanValueForSkill", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var m = typeof(AgentGatewayHelpers).GetMethod("ExtractCleanValueForSkill", BindingFlags.NonPublic | BindingFlags.Static)!;
         return (string?)m.Invoke(null, new object[] { text! });
     }
 
