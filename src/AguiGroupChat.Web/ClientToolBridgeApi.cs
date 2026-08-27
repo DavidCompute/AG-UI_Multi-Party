@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Models;
 using Microsoft.AspNetCore.Hosting;
 
@@ -40,14 +41,17 @@ public static class ClientToolBridgeApi
             try
             {
                 output = await RunShellAsync(rootDir, req.Command, req.Cwd, req.TimeoutSec, req.Query, ct);
+                ClientToolTrace.Write($"BRIDGE-OK cmd={req.Command} outputLen={output.Length} outputHead={output.Substring(0, Math.Min(120, output.Length)).Replace(Environment.NewLine, " ")}");
             }
             catch (OperationCanceledException)
             {
+                ClientToolTrace.Write($"BRIDGE-CANCEL cmd={req.Command}");
                 return Results.Json(new { output = null as string, error = "客户端技能执行已取消（超时或连接中断）。" }, statusCode: StatusCodes.Status408RequestTimeout);
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "客户端技能（shell）执行失败：{Cmd}", req.Command);
+                ClientToolTrace.Write($"BRIDGE-ERR cmd={req.Command} error={ex.Message}");
                 return Results.Json(new { output = null as string, error = "客户端技能执行失败：" + ex.Message }, statusCode: StatusCodes.Status500InternalServerError);
             }
 

@@ -2017,6 +2017,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         _logger.LogInformation("交互决策：interrupt={InterruptId} member={Member} approved={Approved} hasToolResult={HasToolResult} toolResultLen={ToolResultLen}",
             interruptId, memberId, approved, !string.IsNullOrEmpty(toolResult), toolResult?.Length ?? 0);
+        ClientToolTrace.Write($"RESOLVE interrupt={interruptId} member={memberId} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} toolResultLen={toolResult?.Length ?? 0} agent={pending.Context.AgentId}");
         // 恢复任务与 HTTP 请求生命周期解耦：独立 5 分钟超时 CTS（请求断开 / 前端超时不影响恢复执行，
         // 避免恢复任务在 WaitAsync / 流式消费中被请求取消令牌中断）。
         // 注意：不能在方法末尾 using 释放——后台任务仍在使用该令牌，须等任务结束后再释放。
@@ -2234,9 +2235,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             // 客户端执行技能：前端已在本地执行并回传结果 → 写入共享存储，批准后 MSAGENT 执行其占位函数时返回真实结果
             _logger.LogInformation("客户端技能恢复：写入工具栏结果 tool={Tool} agent={Agent} resultLen={Len}", fc.Name, pending.Context.AgentId, toolResult.Length);
+            ClientToolTrace.Write($"WRITE-STORE tool={fc.Name} agent={pending.Context.AgentId} resultLen={toolResult.Length} first= {toolResult.Substring(0, Math.Min(80, toolResult.Length))}");
             ClientToolResultStore.Put(fc.Name, toolResult);
         }
         // 标准审批应答：MSAGENT 据此决议（批准 → 执行工具；拒绝 → 跳过）并继续模型生成
+        ClientToolTrace.Write($"RESUME-MSG tool={(fc?.Name ?? "?")} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} isClientAgentTool={fc is not null && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal)} agent={pending.Context.AgentId}");
         return new ChatMessage(ChatRole.User, [approval.CreateResponse(approved)]);
     }
 
