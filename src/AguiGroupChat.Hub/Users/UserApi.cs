@@ -50,11 +50,20 @@ public static class UserApi
             RunAsync(() =>
             {
                 var result = auth.Login(req.Username, req.Password, ctx.Connection.RemoteIpAddress?.ToString());
-                // 登录二次验证（TOTP，4.4）：账号启用 TOTP 时要求 6 位动态码；缺失 / 错误 → 拒绝登录（密码正确但 2FA 未过）
-                if (totp.IsEnabled(result.User.UserId) && !totp.Verify(result.User.UserId, req.TotpCode ?? ""))
+                // 登录二次验证（TOTP，4.4）：账号启用 TOTP 时要求 6 位动态码；缺失 / 错误 → 拒绝登录（密码正确但 2FA 未过）。
+                // 先查分用户锁定：窗口内码错超限即拒绝（不消耗新签发会话），防对 6 位动态码的无休止暴力枚举。
+                if (totp.IsEnabled(result.User.UserId))
                 {
-                    auth.Logout(result.Token); // 吊销刚签发的会话，避免未过 2FA 却持有有效令牌
-                    throw new AguiProtocolException(ErrorCodes.UserBadCredentials, "需要动态验证码（TOTP）或验证码错误：请在登录请求携带 totpCode");
+                    if (totp.IsLockedOut(result.User.UserId))
+                    {
+                        auth.Logout(result.Token);
+                        throw new AguiProtocolException(ErrorCodes.UserBadCredentials, "动态验证码尝试次数过多，请稍后再试");
+                    }
+                    if (!totp.Verify(result.User.UserId, req.TotpCode ?? ""))
+                    {
+                        auth.Logout(result.Token); // 吊销刚签发的会话，避免未过 2FA 却持有有效令牌
+                        throw new AguiProtocolException(ErrorCodes.UserBadCredentials, "需要动态验证码（TOTP）或验证码错误：请在登录请求携带 totpCode");
+                    }
                 }
                 return Task.FromResult(Results.Ok(ToAuthResponse(result)));
             }));

@@ -17,6 +17,14 @@ public sealed class TotpService
     private readonly ConcurrentDictionary<string, UserTotp> _users = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _lastUsedWindow = new(StringComparer.Ordinal); // 防重放
 
+    // 登录 TOTP 校验失败限速：按用户计数，窗口内累计失败超限后临时拒绝（防对 6 位动态码的离线/在线暴力枚举）。
+    // OWASP 建议 MFA 校验失败约 5 次即锁定；这里与口令锁定窗口错开（<see cref="AuthService"/> 只锁口令路径），
+    // 避免口令正确但 TOTP 被绕过锁定后仍然放行。仅作用于 <see cref="Verify"/>（登录路径）；
+    // Confirm / Disable 为已登录操作，不受此限速（避免合法启用/停用被误伤）。
+    private const long TotpFailWindowMs = 3 * 60 * 1000;
+    private const int TotpFailMaxAttempts = 5;
+    private readonly ConcurrentDictionary<string, (int Count, long FirstFailMs)> _totpFailures = new(StringComparer.Ordinal);
+
     public bool IsEnabled(string userId) => _users.TryGetValue(userId, out var t) && t.Enabled;
 
     /// <summary>签发（或重新签发）密钥并返回明文（客户端录入用）；未启用，须 confirm 后生效。</summary>
@@ -45,9 +53,30 @@ public sealed class TotpService
         return true;
     }
 
-    /// <summary>校验用户当前动态码（6 位）。</summary>
+    /// <summary>校验用户当前动态码（6 位，登录路径）。失败计入限速；锁定期间直接拒绝。</summary>
     public bool Verify(string userId, string code)
-        => _users.TryGetValue(userId, out var t) && t.Enabled && Validate(userId, t.SecretBase32, code);
+    {
+        if (!_users.TryGetValue(userId, out var t) || !t.Enabled) return false;
+        if (IsLockedOut(userId)) return false; // 锁定：直接拒绝（不再累计，避免误伤合法用户的后继尝试）
+        var ok = Validate(userId, t.SecretBase32, code);
+        if (!ok) RecordFailure(userId);
+        return ok;
+    }
+
+    /// <summary>记录一次 TOTP 校验失败（登录路径）；超限时清空限速状态（供上层额外整体锁定时可查）。
+    /// 计数窗口与 AuthService 口令锁错开，且仅在 <see cref="Verify"/> 路径累计。</summary>
+    private void RecordFailure(string userId)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (_totpFailures.Count >= 10000)
+        {
+            foreach (var kv in _totpFailures)
+                if (now - kv.Value.FirstFailMs >= TotpFailWindowMs) _totpFailures.TryRemove(kv.Key, out _);
+        }
+        _totpFailures.AddOrUpdate(userId,
+            _ => (1, now),
+            (_, old) => now - old.FirstFailMs < TotpFailWindowMs ? (old.Count + 1, old.FirstFailMs) : (1, now));
+    }
 
     /// <summary>登录校验：未启用 TOTP 直接放行；启用则要求有效码。</summary>
     public bool VerifyLogin(string userId, string? code)
@@ -68,6 +97,16 @@ public sealed class TotpService
         var offset = hash[^1] & 0x0F;
         var binary = (hash[offset] & 0x7F) << 24 | (hash[offset + 1] & 0xFF) << 16 | (hash[offset + 2] & 0xFF) << 8 | (hash[offset + 3] & 0xFF);
         return (binary % 1_000_000).ToString("D6");
+    }
+
+    /// <summary>该用户当前是否处于 TOTP 校验锁定（窗口内失败超限）。供上层在签发前拒绝 / 提示。
+    /// 返回 false 表示允许继续尝试；true 表示已临时锁定（应拒绝并提示稍后再试）。</summary>
+    public bool IsLockedOut(string userId)
+    {
+        if (!_totpFailures.TryGetValue(userId, out var f)) return false;
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (now - f.FirstFailMs >= TotpFailWindowMs) { _totpFailures.TryRemove(userId, out _); return false; }
+        return f.Count >= TotpFailMaxAttempts;
     }
 
     private bool Validate(string userId, string secretBase32, string code)
