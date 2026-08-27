@@ -2820,8 +2820,13 @@ function applyRecallLocal(groupId, messageId) {
 
 function onRecalled(evt) {
   applyRecallLocal(evt.groupId, evt.messageId);
+  // 重新生成场景：旧回答被撤回是预期内的中间步骤，不打扰用户（不显示“消息已撤回”系统行）
+  if (suppressedRecallMessageIds.delete(evt.messageId)) return;
   addSystemLine(evt.groupId, t("msg.recalledNotice"));
 }
+
+/** 重新生成时被抑制的“撤回”提示：regenerate 发起时记录旧回答 id，onRecalled 命中则不显示系统撤回行。 */
+const suppressedRecallMessageIds = new Set();
 
 /** 工具调用行 DOM（msgDom 与 onToolCall 局部更新共用）；兼容旧数据（toolCalls 为字符串数组）。
  * 简洁展示：工具开始「🔧 xxx 调用中…」，结果到达后整行隐藏（含工具名）。 */
@@ -4898,6 +4903,7 @@ function bindRegenerateButton(btn, m) {
       const data = await res.json().catch(() => null);
       if (!res.ok) { toast(t("msg.regenFail", { err: errMsg(data, `重新生成失败（${res.status}）`) })); return; }
       toast(t("msg.regenQueued"));
+      suppressedRecallMessageIds.add(m.id); // 旧回答被撤回属预期中间步骤：抑制“消息已撤回”系统提示行
       applyRecallLocal(state.activeGroupId, m.id); // 旧回答立即标记撤回（GROUP_MESSAGE_RECALLED 事件到达时幂等）
     } catch (ex) { toast(t("msg.regenFail", { err: ex.message })); }
   };
