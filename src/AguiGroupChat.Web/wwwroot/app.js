@@ -2838,6 +2838,18 @@ function onRecalled(evt) {
 /** 重新生成时被抑制的“撤回”提示：regenerate 发起时记录旧回答 id，onRecalled 命中则不显示系统撤回行。 */
 const suppressedRecallMessageIds = new Set();
 
+/** 从消息列表移除一条消息（重新生成时用：旧回答被新回答整体替代，不再显示“🚫 已撤回”占位）。 */
+function removeMessage(groupId, messageId) {
+  const r = room(groupId);
+  const idx = r.messages.findIndex((x) => x.id === messageId);
+  if (idx < 0) return;
+  r.messages.splice(idx, 1);
+  state.msgIndex?.delete?.(messageId);
+  if (state.activeGroupId !== groupId) return;
+  vscroll.force = true;
+  scheduleVirtualRender();
+}
+
 /** 工具调用行 DOM（msgDom 与 onToolCall 局部更新共用）；兼容旧数据（toolCalls 为字符串数组）。
  * 简洁展示：工具开始「🔧 xxx 调用中…」，结果到达后整行隐藏（含工具名）。 */
 function toolCallElement(tc) {
@@ -4914,7 +4926,7 @@ function bindRegenerateButton(btn, m) {
       if (!res.ok) { toast(t("msg.regenFail", { err: errMsg(data, `重新生成失败（${res.status}）`) })); return; }
       toast(t("msg.regenQueued"));
       suppressedRecallMessageIds.add(m.id); // 旧回答被撤回属预期中间步骤：抑制“消息已撤回”系统提示行
-      applyRecallLocal(state.activeGroupId, m.id); // 旧回答立即标记撤回（GROUP_MESSAGE_RECALLED 事件到达时幂等）
+      removeMessage(state.activeGroupId, m.id); // 移除旧回答，让新的回答整体替代（不显示“已撤回”占位）
     } catch (ex) { toast(t("msg.regenFail", { err: ex.message })); }
   };
 }
