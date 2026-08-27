@@ -18,11 +18,9 @@ public static class MarketplaceApi
         var root = app.MapGroup("/ag-ui/marketplace");
 
         // ---- 目录 ----
-        root.MapGet("/", (HttpContext ctx, AuthService auth, AuthOptions authOptions, MarketplaceService market) =>
+        root.MapGet("/", (HttpContext ctx, MarketplaceService market) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!; // 身份已由 RequireIdentityFilter 解析校验
             var packs = market.Packs().Select(p => new
             {
                 p.PackId,
@@ -32,16 +30,14 @@ public static class MarketplaceApi
                 agents = p.Agents.Select(a => new { agentId = a.AgentId, a.Nickname, a.Description }).ToList(),
             });
             return Results.Ok(packs);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 一键导入 ----
-        root.MapPost("/import/{packId}", (string packId, HttpContext ctx, AuthService auth, AuthOptions authOptions, MarketplaceService market) =>
+        root.MapPost("/import/{packId}", (string packId, HttpContext ctx, MarketplaceService market) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!; // 身份已由 RequireIdentityFilter 解析校验
             var result = market.ImportPack(packId, userId);
             return Results.Ok(new { ok = true, result.PackId, result.PackName, result.AgentsCreated });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 }

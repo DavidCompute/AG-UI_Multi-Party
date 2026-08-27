@@ -11,6 +11,9 @@ namespace AguiGroupChat.Web;
 /// </summary>
 internal static class WebIdentity
 {
+    /// <summary>经 <see cref="ResolveIdentityFilter"/> 解析后，把身份写入 HttpContext.Items 的键。</summary>
+    public const string IdentityKey = "webidentity";
+
     public static (string? UserId, IResult? Error) ResolveIdentity(HttpContext ctx, AuthService auth, AuthOptions authOptions)
     {
         var token = ResolveToken(ctx.Request);
@@ -62,5 +65,39 @@ internal static class WebIdentity
             return (null, Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅系统管理员可执行此操作"),
                 statusCode: StatusCodes.Status403Forbidden));
         return (userId, null);
+    }
+
+    /// <summary>从 HttpContext.Items 取回 <see cref="ResolveIdentityFilter"/> 解析并暂存的用户 ID；未校验通过返回 null。</summary>
+    public static string? UserId(HttpContext ctx)
+        => ctx.Items.TryGetValue(IdentityKey, out var v) ? v as string : null;
+
+    /// <summary>由 <see cref="WebIdentity"/> 实现的常规登录身份端点过滤器：先解析再放行，失败以统一错误中止。</summary>
+    public sealed class RequireIdentityFilter : IEndpointFilter
+    {
+        public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+        {
+            var http = context.HttpContext;
+            var auth = http.RequestServices.GetRequiredService<AuthService>();
+            var authOptions = http.RequestServices.GetRequiredService<AuthOptions>();
+            var (userId, error) = ResolveIdentity(http, auth, authOptions);
+            if (error is not null) return error;
+            http.Items[IdentityKey] = userId;
+            return await next(context);
+        }
+    }
+
+    /// <summary>需要系统管理员身份的端点过滤器（在 <see cref="RequireIdentityFilter"/> 基础上追加管理员校验）。</summary>
+    public sealed class RequireAdminFilter : IEndpointFilter
+    {
+        public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+        {
+            var http = context.HttpContext;
+            var auth = http.RequestServices.GetRequiredService<AuthService>();
+            var authOptions = http.RequestServices.GetRequiredService<AuthOptions>();
+            var (userId, error) = RequireAdmin(http, auth, authOptions);
+            if (error is not null) return error;
+            http.Items[IdentityKey] = userId;
+            return await next(context);
+        }
     }
 }

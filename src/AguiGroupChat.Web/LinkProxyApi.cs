@@ -60,11 +60,9 @@ public static class LinkProxyApi
     {
         var root = app.MapGroup("/ag-ui");
 
-        root.MapGet("/proxy", async (HttpContext ctx, AuthService auth, AuthOptions authOptions, LinkProxyOptions options) =>
+        root.MapGet("/proxy", async (HttpContext ctx, LinkProxyOptions options) =>
         {
-            var (_, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-
+            // 身份已由 RequireIdentityFilter 解析校验（本端点仅需已登录，不读取具体用户）
             _allowPrivate = options.AllowPrivate; // 同步连接级校验口径（进程内静态配置，运行期极少变更）
 
             var url = ctx.Request.Query["url"].ToString();
@@ -163,7 +161,7 @@ public static class LinkProxyApi
             {
                 return Results.Text("代理访问失败。", "text/plain; charset=utf-8", statusCode: StatusCodes.Status502BadGateway);
             }
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 
     /// <summary>

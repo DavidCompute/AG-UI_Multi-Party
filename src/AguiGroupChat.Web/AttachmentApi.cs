@@ -22,13 +22,12 @@ public static class AttachmentApi
     {
         var root = app.MapGroup("/ag-ui");
 
-        root.MapPost("/upload", async (HttpContext ctx, AttachmentStore store, AuthService auth, AuthOptions authOptions) =>
-        {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (userId is null) return error!;
+        root.MapPost("/upload", async (HttpContext ctx, AttachmentStore store) =>
+            {
+                var userId = WebIdentity.UserId(ctx)!; // 身份已由 RequireIdentityFilter 解析校验
 
-            if (!ctx.Request.HasFormContentType || !ctx.Request.Form.Files.Any())
-                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "缺少上传文件（multipart/form-data 的 file 字段）"));
+                if (!ctx.Request.HasFormContentType || !ctx.Request.Form.Files.Any())
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "缺少上传文件（multipart/form-data 的 file 字段）"));
 
             var files = ctx.Request.Form.Files.Take(MaxFilesPerRequest).ToList();
             var attachments = new List<AttachmentInfo>(files.Count);
@@ -53,15 +52,13 @@ public static class AttachmentApi
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "没有可保存的文件"));
 
             return Results.Ok(new { attachments });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // 附件下载 / 预览：按附件 ID 定位目录，文件名仅用于展示（下载时保留原名）。
         // 鉴权：需登录身份，且仅附件所在群（任一）的成员可访问；脚本 / 内联渲染类强制附件下载。
-        root.MapGet("/files/{attachmentId}/{fileName}", async (string attachmentId, string fileName, HttpContext ctx, AttachmentStore store, IGroupStore groupStore, AuthService auth, AuthOptions authOptions, AgentCatalog catalog) =>
+        root.MapGet("/files/{attachmentId}/{fileName}", async (string attachmentId, string fileName, HttpContext ctx, AttachmentStore store, IGroupStore groupStore, AuthService auth, AgentCatalog catalog) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (userId is null) return error!;
-
+            var userId = WebIdentity.UserId(ctx)!; // 身份已由 RequireIdentityFilter 解析校验
             var path = store.ResolvePath(attachmentId);
             if (path is null)
                 return Results.NotFound(new AguiError(ErrorCodes.GroupMessageNotFound, "附件不存在或已删除"));
@@ -97,7 +94,7 @@ public static class AttachmentApi
                 return Results.File(path, contentType, fileDownloadName: downloadName, enableRangeProcessing: true);
             }
             return Results.File(path, contentType, enableRangeProcessing: true);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 
     private static string GuessContentType(string path)
