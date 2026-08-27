@@ -53,7 +53,13 @@ public static class DesktopApp
 
         var app = builder.Build();
         app.UseDefaultFiles();
-        app.UseStaticFiles();
+        // 桌面版前端用静态文件（index.html 直引 app.js / style.css / i18n 无版本号）：no-cache + ETag 强制每次校验，
+        // 装新包 / WebView 缓存旧文件时必然重新加载，避免改版不生效。Web 版（独立后端）在 Program.cs 相同处理。
+        app.UseStaticFiles(new StaticFileOptions
+        {
+            OnPrepareResponse = ctx =>
+                ctx.Context.Response.Headers.CacheControl = "no-cache, must-revalidate",
+        });
 
         HubApp.MapEndpoints(app);
         app.MapAgentApi();      // 智能体目录 + 运行时可新增 / 更新 / 删除 AI 角色
