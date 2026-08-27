@@ -20,17 +20,17 @@ public static class SkillApi
         // ---- 技能库列表（需登录；技能正文 / 解释器 / HTTP 配置仅归属者或管理员可见，避免脚本/密钥泄露）----
         root.MapGet("/", (HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var isAdmin = auth.IsAdmin(user.UserId);
             return Results.Ok(catalog.ListAll().Select(s => ToDto(s, s.OwnerId == user.UserId || isAdmin)));
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 新增技能（需登录；Shell / HTTP 技能的创建仅限管理员——它们的执行可能触发任意命令 / 外部请求，
         //      普通用户只能创建纯提示词技能，避免「自建 shell 技能自 run」的任意命令执行面）----
         root.MapPost("/", (SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var isAdmin = auth.IsAdmin(user.UserId);
             if (RequiresPrivilegedKind(req.Kind) && !isAdmin)
@@ -42,12 +42,12 @@ public static class SkillApi
                 return Results.Json(new AguiError(ErrorCodes.SkillExists, $"技能「{skill.SkillId}」已存在"), statusCode: StatusCodes.Status409Conflict);
             catalog.Upsert(skill);
             return Results.Ok(new { created = true, skillId = skill.SkillId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 更新技能（技能归属者或系统管理员）；Shell / HTTP 技能非管理员不可改（含把 Prompt 改成 Shell 提权）----
         root.MapPut("/{skillId}", (string skillId, SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var isAdmin = auth.IsAdmin(user.UserId);
             var existing = catalog.Get(skillId);
@@ -65,12 +65,12 @@ public static class SkillApi
             skill.SkillId = skillId; // ID 用 URL 的，不允许改名
             catalog.Upsert(skill);
             return Results.Ok(new { updated = true, skillId = skill.SkillId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 删除技能（技能归属者或系统管理员）；已被数字员工引用的技能一并解除（按引用的 agent 引用清理在下文做，暂无外键）----
         root.MapDelete("/{skillId}", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var existing = catalog.Get(skillId);
             if (existing is null)
@@ -81,14 +81,14 @@ public static class SkillApi
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可删除该技能"), statusCode: StatusCodes.Status403Forbidden);
             catalog.Remove(skillId);
             return Results.Ok(new { deleted = true, skillId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 试运行技能（仅归属者或管理员；系统技能仅管理员）----
         //      /run 是无审批通道的手动执行，不能让它被任意登录用户触发 shell / HTTP；
         //      归属者运行自己建的 prompt 技能用于调试验证，shell / HTTP 则限定管理员与归属者。
         root.MapPost("/{skillId}/run", async (string skillId, SkillRunHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AgentCatalog agents, CancellationToken ct) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var existing = catalog.Get(skillId);
             if (existing is null)
@@ -100,7 +100,7 @@ public static class SkillApi
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅系统管理员可试运行系统技能"), statusCode: StatusCodes.Status403Forbidden);
             var result = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
             return Results.Ok(new { skillId, result });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 
     /// <summary>Shell / HTTP 技能属特权类型：创建 / 修改 / 运行仅限管理员（及归属者试运行 prompt 由 /run 单独管控）。</summary>

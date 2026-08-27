@@ -54,12 +54,10 @@ public static class BrandingApi
             }));
 
         // ---- 保存品牌配置：仅系统管理员（品牌信息影响全站展示）----
-        root.MapPost("/branding", (BrandingHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/branding", (BrandingHttpRequest req, HttpContext ctx, AuthService auth,
             BrandingState branding, ChangeHub changes, AuditLogService audit) =>
         {
-            var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
-            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+            var me = WebIdentity.UserId(ctx)!;
 
             var appName = (req.AppName ?? "").Trim();
             if (appName.Length > 40) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "应用名过长（≤40 字符）"));
@@ -83,7 +81,7 @@ public static class BrandingApi
 
             audit.Record("settings.branding", me, auth.GetUser(me)?.Username, detail: "修改白标品牌配置");
             return Results.Ok(new { ok = true, appName = branding.AppName, primaryColor = branding.PrimaryColor });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
     /// <summary>Logo URL scheme 白名单：站内相对路径、https、data:image/（防 javascript: 存储型 XSS）。</summary>

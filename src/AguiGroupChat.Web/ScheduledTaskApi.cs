@@ -23,12 +23,10 @@ public static class ScheduledTaskApi
         var root = app.MapGroup("/ag-ui/scheduled-tasks");
 
         // ---- 列表 ----
-        root.MapGet("/", (HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapGet("/", (HttpContext ctx, AuthService auth,
             AguiGroupChat.Agents.ScheduledTaskService scheduled, GroupHub hub, AgentCatalog catalog) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             var isAdmin = auth.IsAdmin(userId);
             var myGroups = hub.Store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
             var tasks = scheduled.List().Where(t =>
@@ -43,15 +41,13 @@ public static class ScheduledTaskApi
                 agentNickname = catalog.GetDefinition(t.AgentId)?.Nickname ?? t.AgentId,
             });
             return Results.Ok(tasks);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 创建 ----
-        root.MapPost("/", (ScheduledTaskHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/", (ScheduledTaskHttpRequest req, HttpContext ctx, AuthService auth,
             AguiGroupChat.Agents.ScheduledTaskService scheduled, GroupHub hub, AgentCatalog catalog, ChangeHub changes) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             if (catalog.GetDefinition(req.AgentId) is null)
                 return Results.BadRequest(new AguiError(ErrorCodes.AgentNotFound, "智能体不存在"));
             if (ScheduledTaskService.ValidateCron(req.Cron) is { } cronErr)
@@ -72,15 +68,13 @@ public static class ScheduledTaskApi
             scheduled.Upsert(task);
             changes.Notify();
             return Results.Ok(new { ok = true, taskId = task.TaskId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 更新 ----
-        root.MapPut("/{taskId}", (string taskId, ScheduledTaskHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPut("/{taskId}", (string taskId, ScheduledTaskHttpRequest req, HttpContext ctx, AuthService auth,
             AguiGroupChat.Agents.ScheduledTaskService scheduled, GroupHub hub, AgentCatalog catalog, ChangeHub changes) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             var task = scheduled.Get(taskId);
             if (task is null) return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "任务不存在"));
             if (catalog.GetDefinition(task.AgentId) is null)
@@ -97,15 +91,13 @@ public static class ScheduledTaskApi
             if (req.Enabled is { } en) task.Enabled = en;
             changes.Notify();
             return Results.Ok(new { ok = true });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 删除 ----
-        root.MapDelete("/{taskId}", (string taskId, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapDelete("/{taskId}", (string taskId, HttpContext ctx, AuthService auth,
             AguiGroupChat.Agents.ScheduledTaskService scheduled, GroupHub hub, ChangeHub changes) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             var task = scheduled.Get(taskId);
             if (task is null) return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "任务不存在"));
             // 与创建 / 更新一致的权限校验：非管理员须为该任务目标群成员（或与该智能体有共同群），
@@ -118,7 +110,7 @@ public static class ScheduledTaskApi
                 return Results.Ok(new { ok = true });
             }
             return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "任务不存在"));
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 
     /// <summary>目标群访问校验：群存在、调用者是成员、且智能体在该群内；未指定群时调用者须与该智能体在至少一个共同群。</summary>

@@ -16,7 +16,7 @@ public static class GroupNameApi
         app.MapPost("/ag-ui/group/generate-name", async (GroupNameGenerateRequest req, HttpContext ctx,
             AuthService auth, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
-            var user = AgentApi.RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return AgentApi.Unauthorized();
 
             var names = (req.MemberNames ?? [])
@@ -38,7 +38,7 @@ public static class GroupNameApi
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, "群名生成失败：" + ex.Message),
                     statusCode: StatusCodes.Status502BadGateway);
             }
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 }
 

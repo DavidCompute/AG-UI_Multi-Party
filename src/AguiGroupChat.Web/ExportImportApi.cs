@@ -41,13 +41,11 @@ public static class ExportImportApi
         var root = app.MapGroup("/ag-ui");
 
         // ---- 导出：全量数据 zip（账号 + 智能体定义/触发规则 + 群/话题/消息 + 附件文件）----
-        root.MapGet("/export", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store,
+        root.MapGet("/export", (HttpContext ctx, AuthService auth, IGroupStore store,
             IUserStore userStore, AgentCatalog catalog, AgentRegistry registry, AttachmentStore attachments,
             AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
-            var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
-            var actorId = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+            var actorId = WebIdentity.UserId(ctx)!;
 
             var manifest = BuildManifest(store, userStore, catalog, registry);
             var bytes = BuildExportZip(manifest, store, userStore, catalog, attachments);
@@ -55,14 +53,12 @@ public static class ExportImportApi
             audit.Record("data.export", actorId, auth.GetUser(actorId)?.Username,
                 detail: $"导出全部数据（账号 {manifest.Accounts.Count} / 智能体 {manifest.Agents.Count} / 群 {manifest.Groups.Count}）");
             return Results.File(bytes, "application/zip", fileDownloadName: name);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // ---- 导入预览：解析 zip 的 manifest，返回账号 / 智能体存在性检查与群清单 ----
-        root.MapPost("/import/preview", async (HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/import/preview", async (HttpContext ctx,
             AgentCatalog catalog, IUserStore userStore) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请上传导出的 zip 文件（表单字段 file）"));
 
@@ -96,16 +92,14 @@ public static class ExportImportApi
                     avatar = g.Group.GroupAvatar,
                 }),
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // ---- 导入执行：selectedGroupIds 为 JSON 数组字符串（勾选的群，按导出 groupId）----
-        root.MapPost("/import", async (HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/import", async (HttpContext ctx, AuthService auth,
             IGroupStore store, IUserStore userStore, AgentCatalog catalog, AgentRegistry registry,
             GroupHub hub, AttachmentStore attachments, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
-            var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
-            var actorId = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+            var actorId = WebIdentity.UserId(ctx)!;
             if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请上传导出的 zip 文件（表单字段 file）"));
 
@@ -132,7 +126,7 @@ public static class ExportImportApi
                 // 导入中途校验失败（如消息超长 / 解压总量超限）：以 400 返回，不把异常冒泡成 500
                 return Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message));
             }
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
     // ================= 导出 =================

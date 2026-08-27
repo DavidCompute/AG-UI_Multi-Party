@@ -25,11 +25,9 @@ public static class MemoryApi
         var root = app.MapGroup("/ag-ui/memory");
 
         // ---- 总览：各群记忆统计 ----
-        root.MapGet("/groups", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IMessageMemory memory) =>
+        root.MapGet("/groups", (HttpContext ctx, IGroupStore store, IMessageMemory memory) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             var memberGroups = store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
             var stats = memory.GroupStats()
                 .Where(s => memberGroups.Contains(s.GroupId))
@@ -43,15 +41,13 @@ public static class MemoryApi
                 })
                 .ToList();
             return Results.Ok(stats);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 记忆条目列表（可视化） ----
-        root.MapGet("/", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IUserStore users, IMessageMemory memory,
+        root.MapGet("/", (HttpContext ctx, AuthService auth, IGroupStore store, IUserStore users, IMessageMemory memory,
             string? groupId, string? senderId, string? keyword, int limit = 50, int offset = 0) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
 
             // 群过滤：只能查看自己所在群
             if (!string.IsNullOrWhiteSpace(groupId) && !store.IsMember(groupId, userId))
@@ -79,15 +75,13 @@ public static class MemoryApi
                     canManage = isAdmin || m.SenderId == userId, // 仅本人 / 管理员可删除、分级
                 }),
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 记忆时间线（2.2）：按话题回放记忆的<b>时间演进</b>（旧→新），便于复盘「某主题结论如何演化」 ----
-        root.MapGet("/timeline", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IUserStore users, IMessageMemory memory,
+        root.MapGet("/timeline", (HttpContext ctx, IGroupStore store, IUserStore users, IMessageMemory memory,
             string? groupId, string? topicId, string? keyword, int limit = 200) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             // 只能回放自己所在群的记忆
             if (!string.IsNullOrWhiteSpace(groupId) && !store.IsMember(groupId, userId))
                 return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看该群记忆"),
@@ -113,15 +107,13 @@ public static class MemoryApi
                     }).ToList(),
                 }).ToList(),
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 调整单条记忆级别 ----
         root.MapPost("/{messageId}/importance", (string messageId, MemoryImportanceHttpRequest req, HttpContext ctx,
-            AuthService auth, AuthOptions authOptions, IMessageMemory memory) =>
+            AuthService auth, IMessageMemory memory) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             if (!MemoryImportance.IsValid(req.Importance))
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "importance 取值范围 0（普通）/ 1（重要）/ 2（关键）"));
             var ownership = CheckOwnership(memory, auth, messageId, userId);
@@ -129,28 +121,24 @@ public static class MemoryApi
             return memory.UpdateImportance(messageId, req.Importance)
                 ? Results.Ok(new { ok = true })
                 : Results.NotFound(new AguiError(ErrorCodes.GroupMessageNotFound, "记忆不存在"));
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 物理删除单条记忆 ----
-        root.MapDelete("/{messageId}", (string messageId, HttpContext ctx, AuthService auth, AuthOptions authOptions, IMessageMemory memory) =>
+        root.MapDelete("/{messageId}", (string messageId, HttpContext ctx, AuthService auth, IMessageMemory memory) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             var ownership = CheckOwnership(memory, auth, messageId, userId);
             if (ownership is not null) return ownership;
             return memory.DeleteByMessageId(messageId)
                 ? Results.Ok(new { ok = true })
                 : Results.NotFound(new AguiError(ErrorCodes.GroupMessageNotFound, "记忆不存在"));
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 手动遗忘：按群（或全部）设过期，可选保留最近 N 小时 ----
-        root.MapPost("/forget", (MemoryForgetHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/forget", (MemoryForgetHttpRequest req, HttpContext ctx, AuthService auth,
             IGroupStore store, IMessageMemory memory) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
 
             var isAdmin = auth.IsAdmin(userId);
             if (!isAdmin && !string.IsNullOrWhiteSpace(req.GroupId) && !store.IsMember(req.GroupId, userId))
@@ -163,11 +151,11 @@ public static class MemoryApi
                 ? memory.ForgetGroup(string.IsNullOrWhiteSpace(req.GroupId) ? null : req.GroupId, req.RetentionHours)
                 : ForgetOwnMessages(memory, string.IsNullOrWhiteSpace(req.GroupId) ? null : req.GroupId, userId, req.RetentionHours);
             return Results.Ok(new { ok = true, affected });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 记忆 / 结论沉淀为知识库文档（1.3）：把某群「关键」级别的记忆聚合写入指定知识库 ----
         root.MapPost("/consolidate", async (MemoryConsolidateHttpRequest req, HttpContext ctx,
-            AuthService auth, AuthOptions authOptions, IGroupStore store,
+            AuthService auth, IGroupStore store,
             AguiGroupChat.Agents.KnowledgeBaseCatalog kbs,
             CancellationToken ct) =>
         {
@@ -175,9 +163,7 @@ public static class MemoryApi
             var memoryStore = ctx.RequestServices.GetService<AguiGroupChat.Hub.Persistence.IMessageMemoryStore>();
             if (memoryStore is null)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "语义记忆（IMessageMemoryStore）未启用，无法沉淀群记忆"));
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             if (string.IsNullOrWhiteSpace(req.GroupId) || string.IsNullOrWhiteSpace(req.KbId))
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "groupId 与 kbId 均必填"));
             // 只能沉淀「自己所在群」的记忆
@@ -203,22 +189,20 @@ public static class MemoryApi
                 status = doc.Status,
                 memoryCount = count,
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 跨实例记忆同步（2.3）：导出「记忆即数据包」 / 增量导入（打通桌面 / Web 孤岛）----
         // 导出：groupId 为空 = 全部自己所在群；since 毫秒时间戳 = 仅导该时间之后的增量；limit / offset 分页。
-        root.MapGet("/export", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IMessageMemory memory)
-            => ExportMemories(ctx, auth, authOptions, store, memory));
+        root.MapGet("/export", (HttpContext ctx, AuthService auth, IGroupStore store, IMessageMemory memory)
+            => ExportMemories(ctx, auth, store, memory)).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // 导入：body 为导出产生的数组（或 {items:[...]}）；逐条向量化写入（按 messageId 去重）。
         // 安全限制：非管理员只能向自己所在的群导入记忆（堵住向他人 / 任意群注入记忆影响智能体 RAG 的投毒面）；
         // 且对 user 型发送者强制为调用者本人 / 管理员，其余条目被拒绝并计数返回。
-        root.MapPost("/import", async (JsonElement body, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/import", async (JsonElement body, HttpContext ctx, AuthService auth,
             IGroupStore store, IMessageMemory memory, CancellationToken ct) =>
         {
-            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
-            if (userId is null) return error!;
+            var userId = WebIdentity.UserId(ctx)!;
             var isAdmin = auth.IsAdmin(userId);
             var myGroups = store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
             var items = body.ValueKind == JsonValueKind.Array ? body :
@@ -243,14 +227,12 @@ public static class MemoryApi
                 return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, $"没有可导入的记忆条目（{rejected} 条无权导入）"), statusCode: StatusCodes.Status403Forbidden);
             var imported = await memory.ImportMemoriesAsync(allowed, ct);
             return Results.Ok(new { ok = true, imported, provided = parsed.Count, rejected });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 
-    private static IResult ExportMemories(HttpContext ctx, AuthService auth, AuthOptions authOptions, IGroupStore store, IMessageMemory memory)
+    private static IResult ExportMemories(HttpContext ctx, AuthService auth, IGroupStore store, IMessageMemory memory)
     {
-        var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-        if (error is not null) return error;
-        if (userId is null) return error!;
+        var userId = WebIdentity.UserId(ctx)!;
 
         var groupId = ctx.Request.Query["groupId"].ToString();
         var since = long.TryParse(ctx.Request.Query["since"].ToString(), out var sMs) ? sMs : 0;

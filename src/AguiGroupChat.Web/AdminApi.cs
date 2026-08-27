@@ -22,10 +22,8 @@ public static class AdminApi
     public static void MapAdminApi(this WebApplication app)
     {
         var root = app.MapGroup("/ag-ui/admin");
-        root.MapGet("/users", (HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub) =>
+        root.MapGet("/users", (HttpContext ctx, AuthService auth, GroupHub hub) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             var users = auth.ListUsers().Select(u => new
             {
                 u.UserId,
@@ -41,14 +39,12 @@ public static class AdminApi
                 groupCount = hub.Store.GroupsOf(u.UserId).Count,
             });
             return Results.Ok(users);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
-        root.MapPost("/users/{userId}/disabled", (string userId, AdminDisabledHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        root.MapPost("/users/{userId}/disabled", (string userId, AdminDisabledHttpRequest req, HttpContext ctx, AuthService auth, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
             Run(() =>
             {
-                var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-                if (error is not null) return error;
-                var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+                var me = WebIdentity.UserId(ctx)!;
                 // 防止管理员误禁自己（把自己禁掉后控制台失联）
                 if (req.Disabled && me == userId)
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "不能禁用当前登录的管理员账号"));
@@ -56,23 +52,19 @@ public static class AdminApi
                 audit.Record("admin.user.disable", me, auth.GetUser(me)?.Username, targetType: "user",
                     targetId: userId, detail: req.Disabled ? "禁用账号" : "启用账号");
                 return Results.Ok(new { ok = true, userId, disabled = req.Disabled });
-            }));
+            })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
-        root.MapPost("/users/{userId}/password", (string userId, AdminPasswordHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        root.MapPost("/users/{userId}/password", (string userId, AdminPasswordHttpRequest req, HttpContext ctx, AuthService auth, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
             Run(() =>
             {
-                var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-                if (error is not null) return error;
-                var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+                var me = WebIdentity.UserId(ctx)!;
                 auth.AdminResetPassword(userId, req.NewPassword);
                 audit.Record("admin.user.reset_password", me, auth.GetUser(me)?.Username, targetType: "user", targetId: userId);
                 return Results.Ok(new { ok = true, userId });
-            }));
+            })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
-        root.MapGet("/status", (HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, AgentCatalog catalog, ConnectionManager connections, IServiceProvider sp) =>
+        root.MapGet("/status", (HttpContext ctx, AuthService auth, GroupHub hub, AgentCatalog catalog, ConnectionManager connections, IServiceProvider sp) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             var store = hub.Store;
             var messageCount = store.AllGroups().Sum(g => store.AllMessages(g.GroupId).Count);
             var proc = Process.GetCurrentProcess();
@@ -106,68 +98,56 @@ public static class AdminApi
                     graphEdges = gs?.EdgeCount ?? 0,                   // 当前图谱关系边数
                 },
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 模型用量统计（最近 N 天按日汇总 + 配额配置）：仅管理员
-        root.MapGet("/usage", (int? days, HttpContext ctx, AuthService auth, AuthOptions authOptions, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
+        root.MapGet("/usage", (int? days, HttpContext ctx, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             return Results.Ok(new
             {
                 dailyQuotaPerUser = usage.DailyQuotaPerUser,
                 days = usage.GetDailySummary(days ?? 7),
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 操作审计日志（4.3）：关键 / 敏感操作留痕，仅管理员。limit 最多 200。
-        root.MapGet("/audit", (int? limit, HttpContext ctx, AuthService auth, AuthOptions authOptions, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        root.MapGet("/audit", (int? limit, HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             return Results.Ok(new
             {
                 total = audit.Count,
                 entries = audit.Query(limit ?? 100),
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 桥接端点健康度（3.1）：查看已配置外部 AG-UI 端点的实时/缓存连通状态，仅管理员。
-        root.MapGet("/bridge-health", async (bool? refresh, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapGet("/bridge-health", async (bool? refresh, HttpContext ctx,
             AguiGroupChat.Agents.BridgeHealthService bridgeHealth, CancellationToken ct) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             if (refresh == true)
                 return Results.Ok(await bridgeHealth.ProbeAllAsync(ct)); // 同步触发一次实时探测
             return Results.Ok(bridgeHealth.GetStatus());
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 桥接能力协商（3.2）：查看外部端点的能力（支持的工具 / 附件 / 审批类型），仅管理员。
-        root.MapGet("/bridge-capabilities", async (bool? refresh, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapGet("/bridge-capabilities", async (bool? refresh, HttpContext ctx,
             AguiGroupChat.Agents.BridgeCapabilitiesService caps, CancellationToken ct) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             if (refresh == true)
                 return Results.Ok((await caps.ProbeAllAsync(ct)).Select(r => new { r.AgentId, r.Endpoint, supportsProtocol = r.Cap.Discovered, r.Cap.SupportsTools, r.Cap.SupportsAttachments, r.Cap.ApprovalTypes }));
             return Results.Ok(caps.GetCached().Select(r => new { r.AgentId, r.Endpoint, supportsProtocol = r.Cap.Discovered, r.Cap.SupportsTools, r.Cap.SupportsAttachments, r.Cap.ApprovalTypes }));
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员。
-        root.MapGet("/metrics", (HttpContext ctx, AuthService auth, AuthOptions authOptions, AguiGroupChat.Agents.MetricsService metrics) =>
+        root.MapGet("/metrics", (HttpContext ctx, AguiGroupChat.Agents.MetricsService metrics) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             return Results.Ok(metrics.Snapshot());
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 运维配置只读快照（6.3 数据面，仅管理员）：集中展示散在各处 appsettings / .env 的关键参数，供治理与排障。
-        root.MapGet("/config", (HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupChatOptions groupChat, StorageOptions storage,
+        root.MapGet("/config", (HttpContext ctx, AuthOptions authOptions, GroupChatOptions groupChat, StorageOptions storage,
             AgentOptions agents, IServiceProvider sp) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             var persistence = sp.GetService<AguiGroupChat.Hub.Persistence.PersistenceOptions>() ?? new AguiGroupChat.Hub.Persistence.PersistenceOptions();
             return Results.Ok(new
             {
@@ -218,7 +198,7 @@ public static class AdminApi
                     },
                 },
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
     private static IResult Run(Func<IResult> action)

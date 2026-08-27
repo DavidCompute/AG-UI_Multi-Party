@@ -71,6 +71,31 @@ internal static class WebIdentity
     public static string? UserId(HttpContext ctx)
         => ctx.Items.TryGetValue(IdentityKey, out var v) ? v as string : null;
 
+    /// <summary>由 HttpContext.Items 中已解析的用户 ID，回读该账号（供需要完整 <see cref="UserAccount"/> 的 handler 用）。</summary>
+    public static UserAccount? User(HttpContext ctx, AuthService auth)
+    {
+        var id = UserId(ctx);
+        return id is null ? null : auth.GetUser(id);
+    }
+
+    /// <summary>严格令牌身份过滤器（token / ApiKey 二选一，不回退 ?memberId= 演示身份）。
+    /// 用于需完整账号且须明确登录的操作（智能体管理 / 分身 / 知识库 / 技能），语义与 <see cref="AgentApi.RequireUser"/> 一致。</summary>
+    public sealed class RequireTokenFilter : IEndpointFilter
+    {
+        public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+        {
+            var http = context.HttpContext;
+            var auth = http.RequestServices.GetRequiredService<AuthService>();
+            var token = ResolveToken(http.Request);
+            var user = string.IsNullOrEmpty(token) ? null : (auth.ValidateToken(token) ?? auth.ResolveApiKey(token));
+            if (user is null)
+                return Results.Json(new AguiError(ErrorCodes.UserUnauthorized, "未登录或令牌无效"),
+                    statusCode: StatusCodes.Status401Unauthorized);
+            http.Items[IdentityKey] = user.UserId;
+            return await next(context);
+        }
+    }
+
     /// <summary>由 <see cref="WebIdentity"/> 实现的常规登录身份端点过滤器：先解析再放行，失败以统一错误中止。</summary>
     public sealed class RequireIdentityFilter : IEndpointFilter
     {

@@ -40,10 +40,8 @@ public static class SystemApi
         var root = app.MapGroup("/ag-ui");
 
         // ---- 查询模型配置：前端据此判断是否需要在进入时弹出配置 ----
-        root.MapGet("/settings/model", (HttpContext ctx, AuthService auth, AuthOptions authOptions, AgentOptions options, ModelConfigState modelConfig) =>
+        root.MapGet("/settings/model", (HttpContext ctx, AgentOptions options, ModelConfigState modelConfig) =>
         {
-            var (_, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
-            if (error is not null) return error;
             return Results.Ok(new
             {
                 configured = modelConfig.IsConfigured,
@@ -54,17 +52,15 @@ public static class SystemApi
                 model = options.Model,
                 thinkingMode = options.ThinkingMode,
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 保存模型配置：endpoint / apiKey 均可留空（留空 → 默认官方端点 / 环境变量密钥）----
         // 仅系统管理员可改：恶意 endpoint 会把全部智能体请求（含群消息）转发到攻击者服务器
-        root.MapPost("/settings/model", (ModelConfigHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions,
+        root.MapPost("/settings/model", (ModelConfigHttpRequest req, HttpContext ctx, AuthService auth,
             AgentOptions options, ModelConfigState modelConfig, AgentCatalog catalog, ChangeHub changes,
             AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
-            var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
-            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+            var me = WebIdentity.UserId(ctx)!;
 
             var endpoint = (req.Endpoint ?? "").Trim();
             if (endpoint.Length > 0)
@@ -89,14 +85,12 @@ public static class SystemApi
                 endpoint = options.Endpoint ?? "https://api.deepseek.com", // 留空默认官方端点
                 apiKeyConfigured = !string.IsNullOrWhiteSpace(modelConfig.ApiKey),
             });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // ---- 系统初始化：删除所有数据（清空一切），仅系统管理员可执行 ----
-        root.MapPost("/reset", (HttpContext ctx, AuthService auth, AuthOptions authOptions, IServiceProvider sp) =>
+        root.MapPost("/reset", (HttpContext ctx, AuthService auth, IServiceProvider sp) =>
         {
-            var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
-            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+            var me = WebIdentity.UserId(ctx)!;
 
             var storage = sp.GetRequiredService<StorageOptions>();
             var provider = storage.Provider.Trim().ToLowerInvariant();
@@ -160,7 +154,7 @@ public static class SystemApi
                 .Record("data.reset", me, auth.GetUser(me)?.Username, detail: "系统初始化（清空全部数据）");
 
             return Results.Ok(new { reset = true });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
     /// <summary>

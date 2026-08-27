@@ -35,7 +35,7 @@ public static class AgentApi
         // ---- 新增智能体（需登录）----
         root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentSkillCatalog skillCatalog) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var skillError = ValidateSkills(req.Skills);
             if (skillError is not null) return skillError;
@@ -75,12 +75,12 @@ public static class AgentApi
             var def = BuildDefinition(agentId, req, ownerId: user.UserId);
             catalog.Upsert(def);
             return Results.Ok(new { created = true, agentId, nickname = def.Nickname });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 更新智能体（需登录）：同步已注册群内的触发规则（保留群内显式覆盖）----
         root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             if (agentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied,
@@ -151,12 +151,12 @@ public static class AgentApi
                 });
             }
             return Results.Ok(new { updated = true, agentId, nickname = def.Nickname });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 删除智能体（需登录）：移除目录、触发规则，并从所有群退出；系统内置只读，仅创建者可删 ----
         root.MapDelete("/{agentId}", async (string agentId, HttpContext ctx, AuthService auth, AgentCatalog catalog, AgentRegistry registry, GroupHub hub, CancellationToken ct) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             if (agentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied,
@@ -190,12 +190,12 @@ public static class AgentApi
                 }, ct: ct);
             }
             return Results.Ok(new { deleted = true, agentId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 根据一句话简介生成角色设定（需登录）：身份定位 / 职责范围 / 回复风格，填充 Instructions ----
         root.MapPost("/generate-instructions", async (GenerateInstructionsHttpRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var description = (req.Description ?? "").Trim();
             if (description.Length < 2)
@@ -214,14 +214,14 @@ public static class AgentApi
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, "角色设定生成失败：" + ex.Message),
                     statusCode: StatusCodes.Status502BadGateway);
             }
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 优化「管理下一层任务指派」提示词（需登录，组织架构图节点上调用）：
         //      依据该角色自身职责 + 其直接下一层下属，生成一段可追加到 Instructions 的指派指引，
         //      让“只看下一层”的多下级指派选得更准（不向上钻、不引入更深层叶子）。 ----
         root.MapPost("/{agentId}/optimize-assignment", async (string agentId, HttpContext ctx, AuthService auth, AgentOptions agentOptions, AgentCatalog catalog, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
-            var user = RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             if (agentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied,
@@ -257,7 +257,7 @@ public static class AgentApi
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, "指派指引生成失败：" + ex.Message),
                     statusCode: StatusCodes.Status502BadGateway);
             }
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 为群注册触发规则（协议 §6，前端建群 / 加成员 / 群内覆盖触发方式时调用）----
         root.MapPost("/register", (AgentRegisterHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub) =>

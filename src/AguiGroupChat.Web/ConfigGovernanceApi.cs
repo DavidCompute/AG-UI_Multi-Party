@@ -82,9 +82,7 @@ public static class ConfigGovernanceApi
             GroupChatOptions groupChat, AgentOptions agents, IServiceProvider sp,
             ConfigGovernanceState state, ChangeHub changes, AuditLogService audit) =>
         {
-            var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
-            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
+            var me = WebIdentity.UserId(ctx)!;
 
             // 校验边界（非法值返回 400 而不是静默忽略）
             if (req.MessageHistoryLimit is { } mh && mh is not (> 0 and <= 100_000)) return BadReq("messageHistoryLimit 需在 1..100000");
@@ -115,15 +113,13 @@ public static class ConfigGovernanceApi
             audit.Record("config.update", me, auth.GetUser(me)?.Username,
                 detail: "更新运行配置（会话/群/消息/工具/审批/嵌入）");
             return Results.Ok(new { ok = true });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // 单字段便捷读取：配置治理状态当前值（含此前持久化的覆盖）
-        root.MapGet("/config/governance", (HttpContext ctx, AuthService auth, AuthOptions authOptions, ConfigGovernanceState state) =>
+        root.MapGet("/config/governance", (HttpContext ctx, ConfigGovernanceState state) =>
         {
-            var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
-            if (error is not null) return error;
             return Results.Ok(state);
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         static IResult BadReq(string msg) => Results.BadRequest(new AguiError(ErrorCodes.BadRequest, msg));
     }

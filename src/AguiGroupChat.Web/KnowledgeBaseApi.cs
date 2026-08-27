@@ -22,7 +22,7 @@ public static class KnowledgeBaseApi
         root.MapPost("/", (KbCreateRequest req, HttpContext ctx, AuthService auth,
             KnowledgeBaseCatalog catalog, GroupHub hub) =>
         {
-            var user = AgentApi.RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return AgentApi.Unauthorized();
             if (string.IsNullOrWhiteSpace(req.Name))
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "知识库名称不能为空"));
@@ -40,7 +40,7 @@ public static class KnowledgeBaseApi
             var kb = catalog.CreateKb(req.Name, req.Description ?? "", user.UserId);
             if (req.SharedGroupIds is { Count: > 0 }) kb.SharedGroupIds = req.SharedGroupIds.Distinct().ToList();
             return Results.Ok(new { kbId = kb.KbId, kb.Name, kb.Description, kb.OwnerId, kb.SharedGroupIds });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 可见列表（系统级 + 自己创建的 + 群共享 + 管理员），含文档清单 ----
         root.MapGet("/", (HttpContext ctx, AuthService auth, KnowledgeBaseCatalog catalog, GroupHub hub) =>
@@ -68,7 +68,7 @@ public static class KnowledgeBaseApi
         // ---- 删除知识库（仅创建者；删除后其向量一并清除，绑定它的智能体检索为空）----
         root.MapDelete("/{kbId}", (string kbId, HttpContext ctx, AuthService auth, KnowledgeBaseCatalog catalog) =>
         {
-            var user = AgentApi.RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return AgentApi.Unauthorized();
             var kb = catalog.GetKb(kbId);
             if (kb is null) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "知识库不存在"));
@@ -77,12 +77,12 @@ public static class KnowledgeBaseApi
                     statusCode: StatusCodes.Status403Forbidden);
             catalog.RemoveKb(kbId);
             return Results.Ok(new { deleted = true, kbId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 添加文档（仅创建者；attachmentId 来自 POST /ag-ui/upload）----
         root.MapPost("/{kbId}/documents", async (string kbId, KbAddDocumentRequest req, HttpContext ctx, AuthService auth, KnowledgeBaseCatalog catalog, CancellationToken ct) =>
         {
-            var user = AgentApi.RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return AgentApi.Unauthorized();
             var kb = catalog.GetKb(kbId);
             if (kb is null) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "知识库不存在"));
@@ -96,12 +96,12 @@ public static class KnowledgeBaseApi
             if (doc is null)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "文档添加失败"));
             return Results.Ok(new { added = true, kbId, docId = doc.DocId, doc.FileName, doc.ChunkCount, doc.Status, doc.Error });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 移除文档（仅创建者）----
         root.MapDelete("/{kbId}/documents/{docId}", (string kbId, string docId, HttpContext ctx, AuthService auth, KnowledgeBaseCatalog catalog) =>
         {
-            var user = AgentApi.RequireUser(ctx, auth);
+            var user = WebIdentity.User(ctx, auth);
             if (user is null) return AgentApi.Unauthorized();
             var kb = catalog.GetKb(kbId);
             if (kb is null) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "知识库不存在"));
@@ -111,7 +111,7 @@ public static class KnowledgeBaseApi
             if (!catalog.RemoveDocument(kbId, docId))
                 return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "文档不存在"));
             return Results.Ok(new { removed = true, kbId, docId });
-        });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 }
 
