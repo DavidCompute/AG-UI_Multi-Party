@@ -78,13 +78,6 @@ public sealed class TotpService
             (_, old) => now - old.FirstFailMs < TotpFailWindowMs ? (old.Count + 1, old.FirstFailMs) : (1, now));
     }
 
-    /// <summary>登录校验：未启用 TOTP 直接放行；启用则要求有效码。</summary>
-    public bool VerifyLogin(string userId, string? code)
-    {
-        if (!IsEnabled(userId)) return true;
-        return !string.IsNullOrWhiteSpace(code) && Verify(userId, code.Trim());
-    }
-
     // ================= RFC 6238 =================
 
     /// <summary>RFC 6238 动态码（公开，供测试 / 外部工具复算）。counter 为时间步序号（30s 一格）。</summary>

@@ -34,25 +34,6 @@ public sealed class TotpTests
     }
 
     [Fact]
-    public void VerifyLogin_TotpRequired_WhenEnabled()
-    {
-        var svc = new TotpService();
-        // 未启用 → 不校验，直接放行
-        Assert.True(svc.VerifyLogin("user_x", null));
-        Assert.True(svc.VerifyLogin("user_x", "123456"));
-
-        // 启用后 → 需要有效码
-        var secret = svc.Enroll("user_y");
-        var counter = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30;
-        Assert.True(svc.Confirm("user_y", TotpService.TOTP(secret, counter)));
-        Assert.True(svc.IsEnabled("user_y"));
-        Assert.False(svc.VerifyLogin("user_y", null));                       // 缺码被拒
-        Assert.False(svc.VerifyLogin("user_y", "000000"));                   // 错码被拒
-        var nowStep = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30;
-        Assert.True(svc.VerifyLogin("user_y", TotpService.TOTP(secret, nowStep + 1))); // 未来窗口码放行（避免与 Confirm 同窗的重放检测）
-    }
-
-    [Fact]
     public void Disable_RequiresCurrentCode_ThenAllowsLogin()
     {
         var svc = new TotpService();
@@ -65,7 +46,6 @@ public sealed class TotpTests
         var nowStep = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30;
         Assert.True(svc.Disable("user_z", TotpService.TOTP(secret, nowStep + 1)));
         Assert.False(svc.IsEnabled("user_z"));
-        Assert.True(svc.VerifyLogin("user_z", null)); // 停用后不需码
     }
 
     [Fact]
