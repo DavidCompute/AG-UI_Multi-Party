@@ -33,62 +33,23 @@ public static class HubApp
         var changeHub = new ChangeHub();
         builder.Services.AddSingleton(changeHub);
 
-        if (string.Equals(storageOptions.Provider, "postgres", StringComparison.OrdinalIgnoreCase))
+        // 存储注册：按 Provider 选择方言实现。每种方言把「底层连接上下文 + 一组 Store」收敛为单一职责的注册方法，
+        // 消除四段 if/else 里重复的 Store 注册行，新增数据库时只加一个分支。
+        switch (storageOptions.Provider.Trim().ToLowerInvariant())
         {
-            // PostgreSQL 模式：建表（幂等）并以数据库实现替换全部内存存储；JSON 快照（PersistenceService）不注册
-            var pg = new PostgresStore(storageOptions.ConnectionString ?? "");
-            if (storageOptions.AutoCreateSchema) pg.EnsureSchema();
-            builder.Services.AddSingleton(pg);
-            builder.Services.AddSingleton<IGroupStore, PostgresGroupStore>();
-            builder.Services.AddSingleton<IUserStore, PostgresUserStore>();
-            builder.Services.AddSingleton<IAgentRegistryStore, PostgresAgentRegistryStore>();
-            builder.Services.AddSingleton<ISectionStore, PostgresSectionStore>();
-            builder.Services.AddSingleton<IUsageStore, PostgresUsageStore>(); // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
-        }
-        else if (string.Equals(storageOptions.Provider, "mysql", StringComparison.OrdinalIgnoreCase)
-                 || string.Equals(storageOptions.Provider, "sqlite", StringComparison.OrdinalIgnoreCase))
-        {
-            // MySQL / SQLite 模式：共用 Relational* 实现（方言差异隔离在 RelationalStore），同样禁用 JSON 快照
-            var isMySql = string.Equals(storageOptions.Provider, "mysql", StringComparison.OrdinalIgnoreCase);
-            RelationalStore relational = isMySql
-                ? new MySqlStore(storageOptions.ConnectionString ?? "")
-                : new SqliteStore(ResolveSqliteConnectionString(builder, storageOptions.ConnectionString));
-            if (storageOptions.AutoCreateSchema) relational.EnsureSchema();
-            builder.Services.AddSingleton<RelationalStore>(relational);
-            builder.Services.AddSingleton<IGroupStore, RelationalGroupStore>();
-            builder.Services.AddSingleton<IUserStore, RelationalUserStore>();
-            builder.Services.AddSingleton<IAgentRegistryStore, RelationalAgentRegistryStore>();
-            builder.Services.AddSingleton<ISectionStore, RelationalSectionStore>();
-            builder.Services.AddSingleton<IUsageStore, RelationalUsageStore>(); // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
-        }
-        else if (string.Equals(storageOptions.Provider, "redis", StringComparison.OrdinalIgnoreCase))
-        {
-            // Redis 模式（6.2 Web 多副本横向扩展）：全部 Store 与登录会话共享 Redis，
-            // 多副本读写同一批 key 保持一致；禁用 JSON 快照（Redis 本身即落盘）。
-            var redis = new RedisContext(storageOptions.ConnectionString ?? "localhost:6379");
-            builder.Services.AddSingleton(redis);
-            builder.Services.AddSingleton<IGroupStore, RedisGroupStore>();
-            builder.Services.AddSingleton<IUserStore, RedisUserStore>();
-            builder.Services.AddSingleton<IAgentRegistryStore, RedisAgentRegistryStore>();
-            builder.Services.AddSingleton<ISectionStore, RedisSectionStore>();
-            builder.Services.AddSingleton<IUsageStore, RedisUsageStore>();   // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ISessionStore, RedisSessionStore>(); // 登录会话跨副本共享
-        }
-        else
-        {
-            // 用户管理（Hub 扩展）：内存账号存储 + 认证服务（会话令牌）
-            builder.Services.AddSingleton<IGroupStore>(new InMemoryGroupStore(options.MessageHistoryLimit, changeHub));
-            builder.Services.AddSingleton<IUserStore>(new InMemoryUserStore(changeHub));
-            builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内，随 JSON 快照持久化）
-            builder.Services.AddSingleton<IUsageStore>(new InMemoryUsageStore(changeHub)); // 模型用量统计（按日聚合）
-            // 持久化（Hub 扩展）：单文件快照，变更后定时落盘，启动时恢复
-            var persistenceOptions = builder.Configuration.GetSection("Persistence").Get<PersistenceOptions>() ?? new PersistenceOptions();
-            if (!string.IsNullOrEmpty(persistenceOptions.FilePath) && !Path.IsPathRooted(persistenceOptions.FilePath))
-                persistenceOptions.FilePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, persistenceOptions.FilePath));
-            builder.Services.AddSingleton(persistenceOptions);
-            builder.Services.AddSingleton<PersistenceService>();
+            case "postgres":
+                RegisterPostgresStore(builder, storageOptions);
+                break;
+            case "mysql":
+            case "sqlite":
+                RegisterRelationalStore(builder, storageOptions);
+                break;
+            case "redis":
+                RegisterRedisStore(builder, storageOptions);
+                break;
+            default:
+                RegisterMemoryStore(builder, storageOptions, options, changeHub);
+                break;
         }
 
         var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
@@ -109,6 +70,65 @@ public static class HubApp
         builder.Services.AddSingleton<WebSocketEndpoint>();
         builder.Services.AddSingleton<SseEndpoint>();
         builder.Services.AddSingleton(TimeProvider.System);
+    }
+
+    /// <summary>PostgreSQL 存储：建表（幂等），以数据库实现替换全部内存存储；JSON 快照（PersistenceService）不注册。</summary>
+    private static void RegisterPostgresStore(WebApplicationBuilder builder, StorageOptions storageOptions)
+    {
+        var pg = new PostgresStore(storageOptions.ConnectionString ?? "");
+        if (storageOptions.AutoCreateSchema) pg.EnsureSchema();
+        builder.Services.AddSingleton(pg);
+        builder.Services.AddSingleton<IGroupStore, PostgresGroupStore>();
+        builder.Services.AddSingleton<IUserStore, PostgresUserStore>();
+        builder.Services.AddSingleton<IAgentRegistryStore, PostgresAgentRegistryStore>();
+        builder.Services.AddSingleton<ISectionStore, PostgresSectionStore>();
+        builder.Services.AddSingleton<IUsageStore, PostgresUsageStore>(); // 模型用量统计（按日聚合）
+        builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
+    }
+
+    /// <summary>MySQL / SQLite 存储：共用 Relational* 实现（方言差异隔离在 RelationalStore），同样禁用 JSON 快照。</summary>
+    private static void RegisterRelationalStore(WebApplicationBuilder builder, StorageOptions storageOptions)
+    {
+        var isMySql = string.Equals(storageOptions.Provider, "mysql", StringComparison.OrdinalIgnoreCase);
+        RelationalStore relational = isMySql
+            ? new MySqlStore(storageOptions.ConnectionString ?? "")
+            : new SqliteStore(ResolveSqliteConnectionString(builder, storageOptions.ConnectionString));
+        if (storageOptions.AutoCreateSchema) relational.EnsureSchema();
+        builder.Services.AddSingleton<RelationalStore>(relational);
+        builder.Services.AddSingleton<IGroupStore, RelationalGroupStore>();
+        builder.Services.AddSingleton<IUserStore, RelationalUserStore>();
+        builder.Services.AddSingleton<IAgentRegistryStore, RelationalAgentRegistryStore>();
+        builder.Services.AddSingleton<ISectionStore, RelationalSectionStore>();
+        builder.Services.AddSingleton<IUsageStore, RelationalUsageStore>(); // 模型用量统计（按日聚合）
+        builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
+    }
+
+    /// <summary>Redis 存储（6.2 Web 多副本横向扩展）：全部 Store 与登录会话共享 Redis，多副本读写同一批 key 保持一致；禁用 JSON 快照（Redis 本身即落盘）。</summary>
+    private static void RegisterRedisStore(WebApplicationBuilder builder, StorageOptions storageOptions)
+    {
+        var redis = new RedisContext(storageOptions.ConnectionString ?? "localhost:6379");
+        builder.Services.AddSingleton(redis);
+        builder.Services.AddSingleton<IGroupStore, RedisGroupStore>();
+        builder.Services.AddSingleton<IUserStore, RedisUserStore>();
+        builder.Services.AddSingleton<IAgentRegistryStore, RedisAgentRegistryStore>();
+        builder.Services.AddSingleton<ISectionStore, RedisSectionStore>();
+        builder.Services.AddSingleton<IUsageStore, RedisUsageStore>();   // 模型用量统计（按日聚合）
+        builder.Services.AddSingleton<ISessionStore, RedisSessionStore>(); // 登录会话跨副本共享
+    }
+
+    /// <summary>内存存储：进程内账号存储 + 认证服务 + 单文件快照持久化（变更后定时落盘，启动时恢复）。</summary>
+    private static void RegisterMemoryStore(WebApplicationBuilder builder, StorageOptions storageOptions, GroupChatOptions options, ChangeHub changeHub)
+    {
+        builder.Services.AddSingleton<IGroupStore>(new InMemoryGroupStore(options.MessageHistoryLimit, changeHub));
+        builder.Services.AddSingleton<IUserStore>(new InMemoryUserStore(changeHub));
+        builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内，随 JSON 快照持久化）
+        builder.Services.AddSingleton<IUsageStore>(new InMemoryUsageStore(changeHub)); // 模型用量统计（按日聚合）
+        // 持久化（Hub 扩展）：单文件快照，变更后定时落盘，启动时恢复
+        var persistenceOptions = builder.Configuration.GetSection("Persistence").Get<PersistenceOptions>() ?? new PersistenceOptions();
+        if (!string.IsNullOrEmpty(persistenceOptions.FilePath) && !Path.IsPathRooted(persistenceOptions.FilePath))
+            persistenceOptions.FilePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, persistenceOptions.FilePath));
+        builder.Services.AddSingleton(persistenceOptions);
+        builder.Services.AddSingleton<PersistenceService>();
     }
 
     public static void MapEndpoints(WebApplication app)
