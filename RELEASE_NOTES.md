@@ -1,44 +1,114 @@
-# AG-UI 群聊桌面版 1.0.75 发布说明
-# AG-UI Group Chat Desktop 1.0.75 Release Notes
+# AG-UI 群聊桌面版 1.0.80 发布说明
+# AG-UI Group Chat Desktop 1.0.80 Release Notes
 
-## 修复（中文）
-- **首个注册用户无法成为管理员**：旧版会在删除数据后重新播种内建的演示账号（`zhangsan`，且因其是"首个注册"而自动成为管理员；`lisi`），导致你注册的真实账号拿不到管理员权限。本版**彻底移除了演示账号播种逻辑**，删库重开后第一个注册的新账号即成为管理员。
-- **数字员工管理列表空白**：新建/已有数字员工在列表中不显示，是前端国际化把标题里的动态计数徽标覆盖掉了，导致列表渲染中断。本版修复，列表与计数恢复正常。
-- **已选群但无消息时误提示"选择一个群开始对话"**：进群后消息区为空时会误显示"选择群"的引导（语义像是在让你再去选群）。本版区分了"未选群"与"已选空群"：已选群无消息时改为提示"该知聚还没有消息，发第一条开始对话吧"，输入 / 发送 / 附件组件正常可用。
-- **界面底部出现游离的 `""` 字符**：页脚残留了两个引号字符的零星文本，已清除。
-- **知识库 RAG 检索不准 / 找不到信息**：① 切片窗口与重叠改为**可配置**（默认 **4096 字符** / 重叠 **512**，可在 `.env` 用 `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` 调整）；② 切分升级为**智能切分**，优先沿换行 / 句末标点收尾，避免在句子中间硬切切断语义，显著提升检索命中。
-- 安装包同步内置最新前端国际化与登录态保持等改进。
-- **知识库“有这个词但搜不到”**：纯语义检索对“专享福利假”等稀有词 / 长篇目录文本容易因相似度低于阈值而丢命中。本版新增**关键词召回兜底**：在切分命中集合内用 BM25 对查询词做第二次评分，把词面命中但向量漏掉的片段补回来，避免“明明有内容却回答没有”。
-- **技能激活智能体时检索错知识库**：智能体 1 通过技能调用带知识库的智能体 2 时，原来会错误地检索智能体 1 的知识库（技能调用复用宿主环境上下文导致）。本版在技能调用期间把上下文切到**目标智能体**，智能体 2 会按自己的知识库检索后再回复。
-- **网页标题显示“应用名”而非实际应用名**：国际化字典里 `brand.name` 键被“白标设置-应用名输入框”的标签覆盖，导致标题 / 顶栏 / 未读提示显示的是标签“应用名 / App name”而不是配置的应用名。本版把该标签键重命名为独立的 `brand.appNameLabel`，页面标题与顶栏恢复显示白标设置里配置的应用名。
-- **技能只能激活一层（万事通→hr→手册专家 无法逐层触发）**：旧版为防循环，技能目标智能体不再挂载自身技能，导致 A→B→C 的多跳技能链失效。本版放开为**支持多跳技能链**：目标智能体继续挂载自身技能，使“万事通→hr专员→员工手册解读专家”逐层调用、结果逐层嵌套返回；同时以<b>访问链 + 深度上限</b>在构建期破坏循环引用（A→B→A 不会无限递归）。
-- **技能多跳结果未逐层回传**：子智能体终答复若由真实 OpenAI 兼容客户端（含推理模型）以“最终 assistant 消息内容”形式返回、未填充 `response.Text`，技能调用会误报“子智能体未返回内容”，导致链路像断了。本版在技能调用获取答复时<b>稳健提取文本</b>：`response.Text` 为空时回退到最终 assistant 消息的文本内容，确保多跳结果逐层回传。
-- **新增智能体调用链可视化**：含技能的智能体回复下方会显示一张可折叠的“智能体调用链”卡片，逐层展示<b>万事通 →(skill_hr) → hr专员 →(skill_handbook) → 员工手册解读专家</b>的完整调用链路，每层显示触发技能名、目标数字员工与传入请求，点开可看各层答复；链路随消息持久化（重启 / 刷新可回放）。**指派/提升链一并可视化**：任务指派/问题提升的路径也以“指派/提升”标记（紫/橙标签）呈现在同一张调用链卡片里，与技能调用区分展示。
-- **新增“任务指派 + 问题提升”组织化路由**：在数字员工作用域里配置【任务指派白名单（可下行指派）】与【问题提升目标（向上，手工配置）】。被直接 @ 时，按本数字员工<b>系统提示词</b>推断：该我答 → 直接答；不该我答且<b>白名单</b>有合适 → 自动<b>任务指派</b>给白名单里的下游（无需逐个配置触发条件）；无合适指派对象且配了提升目标 → <b>问题提升</b>给上级/主管；再无解 → 回答“无法解决”。提升方向为手工配置的单一路径。带深度上限与环路保护（A→B→A 不环回）。区别于整轮交接：只按语境推断在“答 / 指派 / 提升”间路由。
-  **演示包**：`tools/agents-standin-demo.json` 内置“总前台 → 一线-人力/IT分线 → 人力/IT专员”并配置指派白名单与提升目标；导入后 @总前台：人力问题→下行任务指派；IT问题→指派 IT 链；无法归类→向上提升、无人可升则答“无法解决”。
+## 修复与改进（中文）
+- **修复：桌面版技能库不持久化（重启丢失）**。桌面后端装配漏注册技能库持久化（`DesktopApp` 缺 `RegisterSkillPersistence()`，Web 版有）——导致桌面版里新建 / 编辑的技能不写盘、重启即丢，且数字员工经 `skillDefIds` 引用的技能在重启后会被当「不存在」跳过而不被调用。已补上 `RegisterSkillPersistence()`，桌面技能库跨重启保持。
+- **新增：HTTP 技能访问本机 / 内网开关（`Agents:AllowPrivateSkillEndpoints`）**。默认关（保留 SSRF 防护，拒绝本机/内网）；确需调用本机 / 内网接口（本地 Ollama / 内网 API）时置 `true` 放行，放行后仍保留 http/https 白名单与重定向逐跳校验。桌面 `appsettings.json`，Docker `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS`。
+- **修复：桌面版保存技能失败（405）**。桌面版后端装配漏注册技能库 API（`DesktopApp` 未调用 `MapSkillApi()`，Web 版有）；导致桌面版里技能库新增 / 编辑 / 试运行全部返回 405。已补上 `MapSkillApi()`，桌面与 Web 技能库功能一致。
+- **修复：指派链路前缀末级对象重复显示**。多级下派到叶子作答时，最末端对象在「代为处理」前缀里会出现两次（如 `（Exchange连接测试助手 代为处理）` ×2）。修复 `AgentGateway` 路由链构建：末级自答时不再重复叠加末级关系节点，链路各层只出现一次。
+- **修复：组织架构未保存改动时「优化指派」会出错**。新增未保存检测——新拖的指派/提升连线未点「保存」时，点「优化指派」会提示「请先保存」而不再基于过时后端数据生成。
+- **指派判断只看下一层**：组织架构里的数字员工只依据<b>自己直接下一层</b>的提示词/职责判断是否指派（不向上钻、不引入更深层叶子），同时保留下层<b>多指派</b>（多候选排序 + 回退）与「收到指派后继续嵌套指派」（多级深钻链）。
+- **新增：组织架构「优化指派」提示词生成**：组织架构图每个节点新增「优化指派」按钮，按该数字员工的<b>直接下一层</b>（AssignmentIds）自动生成一段「管理下一层任务指派」指引（只依据下一层挑下游、不越级、行不通则返回 NONE），预览后可追加到其 Instructions。端点 `POST /ag-ui/agents/{agentId}/optimize-assignment`（需登录，仅创建者/管理员）。
+- **修复：任务指派无法按组织架构深钻到最后一层**。此前指派到达下一层时仅做「单候选贪心」：若该层语义分析返回 NONE 就提前终结，即使真正匹配的数字员工在更深层。现改为<b>多候选排序 + 递归探测回退</b>：指派持续向下钻取，某子分支无解时回退到下一候选，直到命中能作答的末端层；并向模型传入候选昵称+职责，语义匹配更准。
+- **图谱 RAG 默认关闭（本次交付默认禁用，可手动开启）**：为排除图谱检索对问答/下派效果的干扰，本次 <b>Docker 与桌面版默认 `GraphEnabled=false`</b>（向量语义记忆不受影响）。需要图谱时再于 `.env`（`MEMORY_GRAPH_ENABLED=true`）或 `appsettings.json`（`Agents:Memory:GraphEnabled=true`）开启。
+- **图谱 RAG 注入收敛（提升检索效果）**：图谱定位为补强而非并重——新增 `GraphMaxSectionChars=700` 注入预算，收紧默认 `GraphTopK=3→2`、`GraphMinScore=0.30→0.45`、`GraphHops=2→1`、`GraphMaxNodes=40→12`，避免图谱挤占、稀释向量切片。
+- **修复：数字员工“未调用已关联的 HTTP 技能”**。根因是 HTTP 技能在创建/更新时被<b>强制置为需审批</b>（`SkillApi.BuildDef` 把 shell/http 一律写死 `RequiresApproval=true`）——技能虽已挂载，但模型一调用就进审批卡，自动化流程没有人工批，看起来就是“没被调用”。现将 `RequiresApproval` 改为：<b>仅 shell 技能强制需审批</b>，HTTP / 提示词技能跟随创建者勾选（可<b>关闭审批以自动调用</b>），需要本机/内网时另由 `Agents:AllowPrivateSkillEndpoints=true` 放行。前端技能表单相应放开 HTTP 的“需审批”开关。
+- **修复：数字员工保存失败（请求格式错误 / 缺少字段）**。前端错误展示改为<b>优先显示后端返回的具体原因</b>（如“引用的技能不存在于技能库：xxx”），不再被通用错误码文案掩盖；同时排查并修正了数字员工 `skillDefIds` 引用不存在技能导致保存 400 的数据问题。
+- **新增：数字员工表单「可调用子数字员工」**：把下层（或其他）数字员工挂为上层角色的可调用技能——模型需要其领域能力时可自动调起、引用其答复（即“上层正好需要下层能力时触发”）。此前后端与文档都已支持 `Skills（子代理）`，但前端表单不再暴露入口，导致无法配置；已在「技能与知识」段补回多选择器 + 每项调用说明，`skillId` 留空后端自动生成 `skill_<目标ID>`。
+- **修复：所有桌面实例退出后后台进程残留**。根因是运行期 `instance-count`（记录多少个 UI 窗口在共享同一个后端）在异常退出后可能残留非零，导致后续每次启动把计数不断抬升、永远到不了 0，`/ag-ui/shutdown` 也就不会触发，后端进程残留。修复分三层：① 后端进程启动时把残留计数<b>归零</b>（新进程必然没有已存活的 UI）；② 后端自监视停机兜底——实例计数为 0 且无活动连接持续约 15s、或即使计数残留为正但无活动连接持续约 2 分钟时，后端自行优雅停机（显式 `Environment.Exit` 冲刷落盘）；③ 正常链路（计数归零 → HTTP shutdown）仍即时退出。已实测：无 UI 时后端自动退出、有 UI（计数=1）时后端保持在线。
+- **新增：确定性编排计划（Coordinator Plan，`Agents:CoordinatorPlanning`）**：针对“技能/数字员工难以被可靠触发”的痛点，提供“问题 → 按<b>组织架构与技能配置</b>定计划 → <b>依次激活</b>对应数字员工与技能执行 → 聚合答复”的编排方式。开启后，带指派白名单/提升目标的路由型数字员工收到问题时，会把<b>可达的下游员工清单</b>与<b>可调用技能清单</b>显式列给模型，由其产出结构化执行计划（dispatch 派谁 / skill 调什么 / answer 汇总），再确定性逐项激活；任何环节失败自动回退到原有递归指派，不阻断主流程。桌面默认开启，Docker `AGENTS_COORDINATOR_PLANNING`；默认关（未启用时行为不变）。
+- **增强：支撑<b>技能→技能 / 员工→技能的依赖链</b>**。编排计划会识别技能正文里的输入占位（`${query}` 等，见清单中技能的【需要输入：…】），并明确引导计划<b>先 dispatch 掌握该输入的员工拿值，再调用技能</b>（技能步骤自动收到上一步结果作输入）。这解决了“某技能的运行需要另一员工/前序步骤提供参数（如 Exchange 连接测试技能需要 OWA 地址，而地址由配置管理员提供）”的依赖场景；并补充了该依赖链的回归测试。
+- **新增：编排计划可视化**。当确定性编排计划运行时，界面会把<b>执行计划步骤</b>广播为 `TEXT_MESSAGE_PLAN`（前端计划卡渲染）：如「指派「配置管理员」→ 调用技能「连接测试」→ 综合答复」逐项勾选展示，让用户看清“问题 → 按组织/技能定的计划 → 依次激活了谁”。
+- **增强：编排计划<b>边执行边逐条点亮</b>**。计划拆分重构为「先规划 → 随消息流逐项执行」：消息开播即广播“全部待执行”的计划卡，每完成一步（派下属 / 调技能）动态把对应步骤勾选为完成并<b>实时刷新计划卡</b>，全部完成后综合答复——用户能实时看到每一步在现场点亮。测试断言：多次计划广播、首帧全未完成、末帧全部完成且含“调用技能”。
+- **修复：技能需要的“值”喂不干净（如 Exchange 测试技能要 OWA 地址，却拿到带解释的文字）**。参数化技能（正文含 `${query}`）执行前，编排计划会：① 前置的取值步骤（派给配置管理员等）提示<b>只输出所需的值本身</b>；② 即便员工返回了带解释的文字，也会用 `ExtractCleanValueForSkill` <b>提取出干净的 URL/地址</b>再作为技能输入。新增 4 个取值提取单测 + 依赖链回归（断言先派后调、多次点亮）。
+- **修复：协调计划派给子员工时丢上下文（配置管理员答“数据不足”）**。根因：协调计划经 `child.RunAsync` 直接调子员工时，`MemoryContextProvider` 仍按<b>宿主</b>的 `AmbientContext` 注入知识库/记忆——于是派给绑了配置库的“配置管理员”时它拿不到自己的配置库（`mail.lingtong.com`），只会答“数据不足/请提供地址”。修复：执行 dispatch 步骤时把 ambient 上下文<b>切换到子员工本人</b>（Group/Topic/触发者不变，仅 AgentId/Nickname 改为子员工），子员工据此检索自己的知识库。
+- **相同修复顺带覆盖编排流水线（Pipeline）与角色交接（Relay）**：这两处直接 `child/relay.RunAsync` 调子员工/被交接方，同样会因宿主 ambient 上下文拿不到自己的知识库记忆；已做一致处理（Pipeline 每步、Relay 整轮都切到对方）。
+- **“代为处理”表述对齐**：协调计划卡上被指派的步骤显示为「指派「X」代为处理」，与消息正文的前缀「（X 代为处理）」一致。
+- **有计划卡时不再在正文重复“（X 代为处理）前缀”**：既然计划卡已把“指派给谁”表达清楚了，协调计划路径的消息正文不再叠加「（X 代为处理）」前缀，避免冗余；无计划卡的非编排路径仍保留前缀。
+- **计划卡文字调整**：指派步骤由「指派「X」代为处理」改为「**为「X」分配工作**」。
 
-## Fixes (English)
-- **First registered user couldn't become admin**: the old build re-seeded built-in demo accounts (`zhangsan`, who automatically became admin as the "first registered" user; and `lisi`) after a data reset, so your real account never got admin rights. This version **completely removes demo-account seeding** - after clearing data, the first account you register is now the admin.
-- **Agent management list appeared empty**: new/existing agents were not shown because the i18n text overwrite removed the title's dynamic count badge and broke list rendering. Fixed - the list and count now render correctly.
-- **Selected empty group wrongly showed "select a group" prompt**: when a group had no messages, the empty area mistakenly showed the "select a group" guide (as if you had not picked one). Now it distinguishes "no group selected" from "an empty chosen group" - an empty chosen group shows "No messages yet in this group. Say hi to start the conversation", with the composer fully usable.
-- **Stray `""` characters at the bottom of the UI**: leftover quote characters were rendered at the page footer; removed.
-- **Knowledge-base RAG retrieval missed / failed to find info**: ① chunk window & overlap are now **configurable** (default **4096 chars** / **512 overlap**; adjust via `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` in `.env`); ② chunking upgraded to **smart splitting** that cuts at line breaks / sentence-ending punctuation instead of mid-sentence, notably improving retrieval recall.
-- Bundles the latest frontend i18n and login-session persistence improvements.
-- **Page title showed `应用名` instead of the actual app name**: the `brand.name` i18n key was being overwritten by the “whitelabel settings → app name input” label, so the title / top bar / unread badge showed the label (`应用名` / `App name`) instead of the configured app name. This version renames that label key to a distinct `brand.appNameLabel`, restoring the real configured app name in the title and top bar.
-- **Skills could only activate one level (万事通→hr→手册 expert chain failed)**: the old build, to prevent loops, did not mount skills on skill-target agents, so multi-hop chains (A→B→C) did not work. This version enables **multi-hop skill chains**: a target agent continues to mount its own skills, so 万事通→hr专员→员工手册解读专家 activates level-by-level and the results nest back up; cycles (A→B→A) are broken at build time via a visited-chain + depth cap, so they cannot recurse infinitely.
-- **KB has the term but `can't find it`**: pure vector search can drop hits for rare terms like `专享福利假` or long table-of-contents text when similarity falls below the threshold. This version adds a **keyword-recall fallback**: after retrieving candidate chunks, it re-scores them with BM25 against the query terms and recovers fragments that match by wording but were missed by the vector search - so a term that clearly exists in the document is no longer reported as `not found`.
-- **Skill invocation searched the wrong knowledge base**: when agent 1 uses a skill to invoke a KB-enabled agent 2, the old build incorrectly searched agent 1's knowledge base (the skill call reused the host's ambient context). This version switches the context to the **target agent** during the skill call, so agent 2 retrieves from its own knowledge base and then replies.
-- **Multi-hop skill results were not returned layer by layer**: when a real OpenAI-compatible client (including reasoning models) returns the sub-agent's final reply as the last assistant message contents instead of populating `response.Text`, the skill call wrongly reported “sub-agent returned no content”, making the chain appear broken. This version extracts the reply text **robustly**: when `response.Text` is empty it falls back to the final assistant message's text, so multi-hop results propagate back level by level.
-- **New agent call-chain visualization**: under a skill-enabled agent's reply, a collapsible “agent call chain” card now shows the full nested invocation — 万事通 →(skill_hr) → hr专员 →(skill_handbook) → 员工手册解读专家 — with each level's skill name, target agent and the request sent; expand to view each level's reply. The chain is persisted with the message, so it can be replayed after refresh. **Assignment/escalation paths are visualized too**: the task-assignment / issue-escalation path appears in the same call-chain card with “Assignment”(purple)/“Escalation”(orange) tags, distinct from skill calls.
-- **New “Task Assignment + Issue Escalation” organizational routing**: in a digital employee's scope, configure 【Task-assignment whitelist (downstream)】 and 【Escalation target (upstream, manual)】. When directly @-mentioned, it infers from its own <b>system prompt</b>: answer if it's mine; otherwise auto-assign to a suitable downstream in the <b>whitelist</b> (no per-trigger condition needed); if no suitable assignee and an escalation target is set, escalate to the manager; if still unsolvable, answer “cannot solve”. Escalation is a single manually-configured path upward. A depth cap and cycle protection (A→B→A cannot loop) are enforced. Unlike full handoff, it routes between answer / assign / escalate purely by context inference.
-  **Demo pack**: `tools/agents-standin-demo.json` ships test employees (“总前台 → 一线-人力/IT分线 → 人力/IT专员”) with assignment whitelists and escalation targets. Import and @总前台: HR questions route down by assignment, IT questions route to the IT chain, uncategorized issues escalate up and, with no one to escalate to, answer “cannot solve”.
+## Fixed & Improved (English)
+- **Fix: router agents no longer self-answer and swallow issues that should be dispatched (IT Service Desk → Exchange Expert scenario)**. Previously the "should I answer" semantic check ran before dispatch, so the IT Service Desk self-answered "outlook can't connect to exchange" instead of dispatching to a dedicated Exchange expert. Now <b>router nodes (with an assignment whitelist) dispatch first</b> - drill to the best-matching specialist layer before self-answering, and only fall back to self-serving when no specialist claims it; multi-level deep drilling to the last layer is also supported.
+- **Assignment judgment only looks at the next layer**: an org-chart agent decides whether to assign based solely on its <b>direct subordinates'</b> prompts/roles (no up-drilling, no bringing in deeper specialist leaves), while keeping down-layer <b>multi-assignment</b> (multi-candidate ranking + fallback) and <b>nested assignment</b> after receiving a task (multi-level deep-drill chain).
+- **New: org-chart "Optimize dispatch" prompt generator**: each org-chart node gains an "Optimize dispatch" button that auto-generates a "manage next-layer dispatch" guidance paragraph from the employee's <b>direct next layer</b> (AssignmentIds) - pick a subordinate based only on the next layer, no override, return NONE if none fits - previewable and appendable to its Instructions. Endpoint `POST /ag-ui/agents/{agentId}/optimize-assignment` (login required, owner/admin only).
+- **Fix: task assignment cannot drill down the org tree to the last layer**. Assignment previously used a greedy single-candidate pick at the next layer: if that layer's semantic analysis returned NONE, the chain terminated early even though the real matching agent sat deeper. Now it is <b>multi-candidate ranking + recursive probe with fallback</b>: assignment keeps drilling downward, and when one branch fails it falls back to the next candidate until it reaches an answering leaf (supports inference down the org tree to the end); the model is also given each candidate's nickname + role so semantic matching is more accurate.
+- **Tightened Graph RAG injection (better retrieval quality)**: the graph is now a supplement, not an equal-weight block - a `GraphMaxSectionChars=700` injection budget and tighter defaults (`GraphTopK=3→2`, `GraphMinScore=0.30→0.45`, `GraphHops=2→1`, `GraphMaxNodes=40→12`) keep it from crowding out or diluting the vector chunks.
+- **Fix: digital employee "does not call its associated HTTP skill"**. Root cause: HTTP skills were hard-forced to `RequiresApproval=true` at create/update (`SkillApi.BuildDef` hard-coded shell/http), so although the skill was mounted, the model's call immediately hit an approval card that no human approved in the automated flow - looking like "not called". Now `RequiresApproval` follows the creator's choice for <b>HTTP / prompt</b> skills (can be <b>turned off to auto-invoke</b>), while <b>shell skills stay always-requiring-approval</b>; access to local/intranet targets is governed separately by `Agents:AllowPrivateSkillEndpoints=true`. The skill form's "requires approval" toggle is now enabled for HTTP.
+- **Fix: digital employee save failure (request format error / missing fields)**. Error display now <b>prefers the backend's specific message</b> (e.g. "referenced skill not found in library: xxx") instead of being masked by a generic code, and a data issue where an agent's `skillDefIds` referenced a nonexistent skill causing a 400 on save was diagnosed and fixed.
+- **New: "Callable sub employees" in the digital-employee form**: attach a lower (or any other) digital employee as a callable skill of an upper role - the model auto-invokes and cites it when it needs that employee's capability (i.e. "the upper employee triggering a lower employee's capability when needed"). The backend and docs already supported `Skills` (sub-agents) but the form no longer exposed an entry to configure it; a multi-selector plus a per-item call description is now restored under the "Skills & Knowledge" section, with `skillId` auto-generated (`skill_<targetAgentId>`) when left blank.
+- **Fix: background process lingers after all desktop instances exit**. The runtime `instance-count` (which records how many UI windows share the one backend) could be left non-zero after an abnormal exit, so every subsequent launch kept inflating it and it never reached 0 - the `/ag-ui/shutdown` call never fired and the backend process lingered. The fix has three layers: ① the backend process <b>resets any stale count to 0 on startup</b> (a newly started backend has no live UI by definition); ② a backend <b>self-monitoring watchdog</b> gracefully stops the backend when the instance count is 0 with no active connections for ~15s, or even if the count is stale-positive but there are no active connections for ~2 minutes (`Environment.Exit` flushes persistence); ③ the normal path (count hits 0 -> HTTP shutdown) still exits immediately. Verified: the backend exits when no UI is attached and stays online when a UI (count=1) is present.
+- **New: deterministic orchestration plan (Coordinator Plan, `Agents:CoordinatorPlanning`)**. To address the unreliable triggering of skills / digital employees, this adds a "question -> build a plan from the <b>org chart & skill config</b> -> <b>activate</b> the selected digital employees & skills in sequence -> aggregate the answer" orchestration. When enabled, a router-type digital employee (with an assignment whitelist / escalation target) receives a question, explicitly enumerates the <b>reachable subordinate employees</b> and <b>callable skills</b> to the model, has it produce a structured execution plan (dispatch who / invoke which skill / how to summarize), then activates each step deterministically; any failure falls back to the original recursive dispatch without blocking the flow. Enabled by default in the desktop; Docker `AGENTS_COORDINATOR_PLANNING`; default off (behavior unchanged when not enabled).
+- **Enhanced: supports <b>skill->skill / employee->skill dependency chains</b>**. The orchestration plan now detects the input placeholders in a skill body (`${query}` etc., shown as 【需要输入：…】 in the inventory) and explicitly guides the plan to <b>first dispatch the employee that holds that input, then invoke the skill</b> (the skill step automatically receives the previous step's result as its input). This addresses cases where one skill's execution needs a parameter supplied by another employee / earlier step (e.g. the Exchange connectivity-test skill needs the OWA address, which the config admin provides); a regression test covers the chain.
+- **New: orchestration-plan visualization**. When the deterministic orchestration plan runs, the UI now receives the <b>execution-plan steps</b> as a `TEXT_MESSAGE_PLAN` (rendered as a plan card): e.g. "dispatch to 配置管理员 -> invoke the connectivity-test skill -> synthesize the answer", shown step-by-step, so the user can see "question -> plan from the org/skills -> who was actually activated". Covered by a test that asserts the plan event contains a skill step in the dependency-chain scenario.
+- **Enhanced: orchestration plan lights up step-by-step in real time**. The plan was split into "first plan, then execute step-by-step while the message streams": as soon as the message starts, the plan card is broadcast with all steps pending; each step (dispatch to an employee / invoke a skill) marks its own row complete and <b>refreshes the plan card live</b>, and after all steps the final synthesized answer streams. The test asserts multiple plan broadcasts, first frame all pending, last frame all done and containing an "invoke skill" step.
+- **Fix: coordinator lost context when dispatching to a sub employee (config admin answering "insufficient data")**. Root cause: the coordinator invoked the sub employee via its own `child.RunAsync`, but `MemoryContextProvider` injected knowledge/memory based on the <b>host's</b> ambient context - so when it dispatched to a config admin bound to a config knowledge base, that admin could not see its own config base (`mail.lingtong.com`) and only answered "insufficient data / please provide the address". Fix: when executing a dispatch step, the ambient context is now <b>switched to the sub employee</b> (Group/Topic/triggerer stay the same, only AgentId/Nickname are the sub employee's) so it retrieves its own knowledge base.
+- **The same fix also covers the orchestration pipeline (`Pipeline`) and role handoff (`Relay`)**: both invoke sub/passee agents via `child/relay.RunAsync` directly and would lose their own knowledge/memory under the host's ambient context; they are now handled consistently (each pipeline step and the whole relay run switch the ambient context to the counterpart).
 
 ## 使用提示（中文）
-全新安装或想彻底重置：先完全退出桌面版，再删除 `%LocalAppData%\AguiGroupChat\data\` 目录后启动，第一个注册账号即为管理员。
+全新安装或想彻底重置：先完全退出桌面版，再删除 `%LocalAppData%\AguiGroupChat\data\` 目录后启动，第一个注册账号即为管理员。启用图谱记忆：`appsettings.json` → `Agents:Memory:GraphEnabled=true`。组织下派靠「智能体管理 → 组织架构」配置各角色的任务指派白名单（AssignmentIds）与问题提升目标。
 
 ## Usage Note (English)
-For a clean start: fully quit the app, delete `%LocalAppData%\AguiGroupChat\data\`, then launch - the first account you register becomes the admin.
+For a clean start: fully quit the app, delete `%LocalAppData%\AguiGroupChat\data\`, then launch - the first account you register becomes the admin. To enable graph memory set `Agents:Memory:GraphEnabled=true` in `appsettings.json`. Configure per-role assignment whitelists (`AssignmentIds`) and escalation targets via "Agent Management → Org Chart".
 
 ---
-文件：`AguiGroupChat-Desktop-1.0.75.msi`（约 584 MB，已内置本地 embedding 模型）
-File: `AguiGroupChat-Desktop-1.0.75.msi` (~584 MB, bundles the local embedding model)
+文件：`AguiGroupChat-Desktop-1.0.80.msi` / Docker（postgres+ollama+web，`MEMORY_GRAPH_ENABLED=true`）
+File: `AguiGroupChat-Desktop-1.0.80.msi` / Docker (postgres+ollama+web, `MEMORY_GRAPH_ENABLED=true`)
+
+---
+
+# AG-UI 群聊桌面版 1.0.79 发布说明
+# AG-UI Group Chat Desktop 1.0.79 Release Notes
+
+## 改进（中文）
+- **图谱 RAG 注入收敛（提升检索效果）**：之前图谱子图（最多 40 实体 + 50 边）与向量切片平权强塞进 prompt，反而稀释了向量检索结果。本次把图谱定位为<b>补强而非并重</b>：段落强引导语「仅作参考、涉及具体事实以向量/知识库切片原文为准」，并新增 `GraphMaxSectionChars=700` 总字符预算——先保留种子/近层实体与其连接的高价值边，超出部分丢弃；同时收紧默认召回 `GraphTopK=3→2`、`GraphMinScore=0.30→0.45`、`GraphHops=2→1`、`GraphMaxNodes=40→12`，让图谱只在查询很贴近实体时少量补充，避免挤占、稀释向量切片。
+
+## Improved (English)
+- **Tightened Graph RAG injection (better retrieval quality)**: previously the graph subgraph (up to 40 entities + 50 edges) was injected with equal weight alongside the vector chunks, which diluted the vector results. The graph is now positioned as a <b>supplement</b>: the section carries explicit guidance "for reference only; specifics should defer to the vector/KB snippets", and a new `GraphMaxSectionChars=700` char budget keeps seed/nearby entities and the high-value edges connecting them first, dropping anything beyond; defaults are also tightened (`GraphTopK=3→2`, `GraphMinScore=0.30→0.45`, `GraphHops=2→1`, `GraphMaxNodes=40→12`) so the graph only adds a little when the query is very close to an entity, without crowding out the vector chunks.
+
+## 使用提示（中文）
+全新安装或想彻底重置：先完全退出桌面版，再删除 `%LocalAppData%\AguiGroupChat\data\` 目录后启动，第一个注册账号即为管理员。启用图谱记忆：`appsettings.json` → `Agents:Memory:GraphEnabled=true`。已启用用户若觉得图谱仍偏噪声，可进一步调低 `GraphMaxSectionChars` 或关闭 `GraphEnabled`。
+
+## Usage Note (English)
+For a clean start: fully quit the app, delete `%LocalAppData%\AguiGroupChat\data\`, then launch - the first account you register becomes the admin. To enable graph memory set `Agents:Memory:GraphEnabled=true` in `appsettings.json`. If you still find the graph noisy, lower `GraphMaxSectionChars` further or turn `GraphEnabled` off.
+
+---
+文件：`AguiGroupChat-Desktop-1.0.79.msi` / Docker（postgres+ollama+web，`MEMORY_GRAPH_ENABLED=true`）
+File: `AguiGroupChat-Desktop-1.0.79.msi` / Docker (postgres+ollama+web, `MEMORY_GRAPH_ENABLED=true`)
+
+---
+
+# AG-UI 群聊桌面版 1.0.78 发布说明
+# AG-UI Group Chat Desktop 1.0.78 Release Notes
+
+## 修复（中文）
+- **修复：长文档上传知识库向量化失败（返回「embedding 不可用」）**。本地 embedding（LLamaSharp / bge-m3）超长文本分段的字符/token 比值误设为 2.0，导致单次 embedding 的字数上限（context×2=4096）超过模型真实 context，凡正文切片约 2000+ 字符的文档（如员工手册类 docx）都会被整片交给模型、返回空向量而入库失败。已改为 0.9，长切片自动切成多段（每段 ≤ context×0.9 字）分别向量化、再取平均，长文档可正常入库。
+
+## Fixed (English)
+- **Fix: long documents fail vectorization on KB upload** (reported as "embedding unavailable"). The safe chars/token ratio for long-text segmenting in the local embedding (LLamaSharp / bge-m3) was mistakenly set to 2.0, so the single-shot character cap (context×2=4096) exceeded the model's real context; any document whose chunks exceed ~2000 characters (e.g. employee-handbook docx) was passed whole to the model, returned an empty vector, and failed to ingest. Changed to 0.9 - long chunks are now split into multiple segments (each ≤ context×0.9 chars), embedded separately, then averaged, so long documents ingest correctly.
+
+## 使用提示（中文）
+全新安装或想彻底重置：先完全退出桌面版，再删除 `%LocalAppData%\AguiGroupChat\data\` 目录后启动，第一个注册账号即为管理员。启用图谱记忆：`appsettings.json` → `Agents:Memory:GraphEnabled=true`。
+
+## Usage Note (English)
+For a clean start: fully quit the app, delete `%LocalAppData%\AguiGroupChat\data\`, then launch - the first account you register becomes the admin. To enable graph memory set `Agents:Memory:GraphEnabled=true` in `appsettings.json`.
+
+---
+文件：`AguiGroupChat-Desktop-1.0.78.msi`（约 584 MB，已内置本地 embedding 模型）
+File: `AguiGroupChat-Desktop-1.0.78.msi` (~584 MB, bundles the local embedding model)
+
+---
+
+# 上一版：1.0.77
+# Previous: 1.0.77
+
+## 新增（中文）
+- **知识库图谱 RAG（Graph RAG）**：上传到知识库的文档在入库时也会抽取「实体-关系-实体」建入隔离域 `kb:{KbId}` 的图谱；检索知识库时对绑定知识库做「语义召回种子实体 + n 跳图遍历」，把可达子图与向量切片并列注入 prompt，补强知识文档中的关系型知识。知识库图谱与群记忆图谱按域隔离、互不污染；删除知识库时同步清其图谱。
+- **系统状态页：RAG 检索方式可视化**：管理员「系统状态」页新增两行——「向量语义记忆」（开/关）与「图谱方式（Graph RAG）」（已生效 · 实体 N / 关系 M，或未启用），直观展示当前 RAG 是否使用图谱方式。
+
+## New (English)
+- **Knowledge-base Graph RAG**: knowledge-base documents are now also entity/relation-extracted into the isolated `kb:{KbId}` graph on ingest; knowledge retrieval performs semantic seed recall + n-hop traversal over the bound knowledge bases and injects the reachable subgraph alongside the vector chunks, augmenting relational knowledge in documents. KB graphs and group-memory graphs are domain-isolated and cross-contamination-free; deleting a KB also removes its graph.
+- **System-status RAG visualization**: the admin "System Status" page now shows two rows — "Vector semantic memory" (On/Off) and "Graph mode (Graph RAG)" (Active · N entities / M relations, or Not enabled), making it clear whether RAG is currently using the graph approach.
+
+---
+文件：`AguiGroupChat-Desktop-1.0.77.msi`
+File: `AguiGroupChat-Desktop-1.0.77.msi`

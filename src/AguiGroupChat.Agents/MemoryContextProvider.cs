@@ -23,6 +23,7 @@ namespace AguiGroupChat.Agents;
 public sealed class MemoryContextProvider : AIContextProvider
 {
     private readonly IMessageMemory? _memory;
+    private readonly IGraphMemory? _graph;
     private readonly AgentOptions _options;
     private readonly ILogger<MemoryContextProvider> _logger;
     private readonly Lazy<GroupHub> _hub;
@@ -33,12 +34,14 @@ public sealed class MemoryContextProvider : AIContextProvider
         AgentOptions options,
         IServiceProvider services,
         ILogger<MemoryContextProvider> logger,
-        IMessageMemory? memory = null)
+        IMessageMemory? memory = null,
+        IGraphMemory? graph = null)
         : base(msgs => msgs, msgs => msgs, msgs => msgs) // 不做输入/存储消息过滤（记忆仅经 Instructions 注入）
     {
         _options = options;
         _logger = logger;
         _memory = memory;
+        _graph = graph;
         _hub = new Lazy<GroupHub>(() => services.GetService(typeof(GroupHub)) as GroupHub
             ?? throw new InvalidOperationException("GroupHub 未注册（记忆检索需要群数据访问）"));
         _catalog = new Lazy<AgentCatalog>(() => services.GetService(typeof(AgentCatalog)) as AgentCatalog
@@ -116,6 +119,40 @@ public sealed class MemoryContextProvider : AIContextProvider
                     _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条知识库片段（kbs={Kbs}）", run.AgentId, kbHits.Count, string.Join(",", kbIds));
                     sb.Append(kbSection).AppendLine();
                 }
+
+                // 知识库图谱（Graph RAG，启用时）：对绑定知识库的图谱隔离域做种子召回 + 图遍历，注入子图补强
+                if (_options.Memory.GraphEnabled && _graph is not null)
+                {
+                    try
+                    {
+                        var kbSub = await kbCatalog.SearchGraphAsync(kbIds, query, _options.Memory.GraphTopK, _options.Memory.GraphMinScore, _options.Memory.GraphHops, _options.Memory.GraphMaxNodes, ct);
+                        var kbGraphSection = BuildKbGraphSection(kbSub, _options.Memory.GraphMaxSectionChars);
+                        if (kbGraphSection.Length > 0)
+                        {
+                            _logger.LogInformation("智能体 {AgentId} 回复前注入知识库图谱子图（kbs={Kbs}，实体{Entities} 边{Edges}）",
+                                run.AgentId, string.Join(",", kbIds), kbSub.Entities.Count, kbSub.Edges.Count);
+                            sb.Append(kbGraphSection).AppendLine();
+                        }
+                    }
+                    catch (Exception ex) { _logger.LogDebug(ex, "知识库图谱检索注入异常（已跳过）"); }
+                }
+            }
+
+            // 图谱记忆（Graph RAG）：按语义召回种子实体 + n 跳图遍历，把命中子图注入（补强关系型知识）
+            if (_graph is not null && _options.Memory.GraphEnabled)
+            {
+                try
+                {
+                    var sub = await _graph.SearchAsync(run.GroupId, query, ct);
+                    var graphSection = BuildGraphSection(sub, _options.Memory.GraphMaxSectionChars);
+                    if (graphSection.Length > 0)
+                    {
+                        _logger.LogInformation("智能体 {AgentId} 回复前注入图谱子图（group={GroupId}，实体{Entities} 边{Edges}）",
+                            run.AgentId, run.GroupId, sub.Entities.Count, sub.Edges.Count);
+                        sb.Append(graphSection).AppendLine();
+                    }
+                }
+                catch (Exception ex) { _logger.LogDebug(ex, "图谱检索注入异常（已跳过）"); }
             }
 
             if (sb.Length > 0) aiContext.Instructions = sb.ToString();
@@ -182,5 +219,91 @@ public sealed class MemoryContextProvider : AIContextProvider
             sb.AppendLine($"[知识库 {h.KbName} · 文档 {h.FileName} · 相似度{h.Score:0.00}] {text}");
         }
         return UntrustedBoundary.Wrap(sb.ToString());
+    }
+
+    /// <summary>把图谱检索命中的子图（实体 + 边）排版为 prompt 段落（无命中返回空串）。
+    /// 图谱实体/关系来自历史消息（可能含恶意指令）：整段包上不可信边界。
+    /// 图谱是补强：实体与边受 <paramref name="maxSectionChars"/> 总字符预算约束，先排置信度更高的种子/近层实体
+    /// 与连接这些实体的边，超过预算的部分丢弃，避免挤占向量切片。</summary>
+    internal static string BuildGraphSection(GraphSubgraph sub, int maxSectionChars)
+    {
+        if (sub.IsEmpty) return "";
+        const string intro =
+            "以下是相关实体知识图谱子图，仅作参考：用于补强主体间关系；涉及具体事实/数据时，以其他记忆或知识库原文为准。";
+        var (entities, edges) = RenderWithinBudget(sub, maxSectionChars);
+        var sb = new StringBuilder();
+        sb.AppendLine(intro);
+        sb.AppendLine($"[实体] " + string.Join("，", entities));
+        if (edges.Length > 0)
+        {
+            sb.AppendLine("[关系（重点）]");
+            foreach (var e in edges)
+                sb.AppendLine("  " + e);
+        }
+        return UntrustedBoundary.Wrap(sb.ToString());
+    }
+
+    /// <summary>把知识库图谱子图排版为 prompt 段落（无命中返回空串）。
+    /// 知识库图谱来自上传文档（可能含恶意指令）：整段包上不可信边界。
+    /// 同样受总字符预算约束，且首行明示以切片原文为准。</summary>
+    internal static string BuildKbGraphSection(GraphSubgraph sub, int maxSectionChars)
+    {
+        if (sub.IsEmpty) return "";
+        const string intro =
+            "以下是知识库文档中的实体关系图谱，仅作参考、用于理解文档主体间的关系；回答具体事实时，以知识库切片原文为准。";
+        var (entities, edges) = RenderWithinBudget(sub, maxSectionChars);
+        var sb = new StringBuilder();
+        sb.AppendLine(intro);
+        sb.AppendLine($"[实体] " + string.Join("，", entities));
+        if (edges.Length > 0)
+        {
+            sb.AppendLine("[关系（重点）]");
+            foreach (var e in edges)
+                sb.AppendLine("  " + e);
+        }
+        return UntrustedBoundary.Wrap(sb.ToString());
+    }
+
+    /// <summary>在 <paramref name="maxChars"/> 预算内渲染子图：实体按相关性（种子/近层在前）排序且优先保留，
+    /// 关系边只保留「起止点都在已保留实体集合内」的高价值边并优先；返回渲染后的实体名列表与关系行列表。
+    /// 预算优先给实体，关系边占剩余预算（边信息密度低于实体名录，噪声也主要来自边）。</summary>
+    private static (string[] Entities, string[] Edges) RenderWithinBudget(GraphSubgraph sub, int maxChars)
+    {
+        if (sub.IsEmpty || maxChars <= 0) return ([], []);
+        // 实体排序：Hop 升序（种子=0 在前）→ 分数降序 → 名字稳定排序
+        var orderedEntities = sub.Entities
+            .OrderBy(e => e.Hop)
+            .ThenByDescending(e => e.Score)
+            .ThenBy(e => e.Name, StringComparer.Ordinal)
+            .Take(Math.Max(1, sub.Entities.Count));
+
+        // 关系边只保留两端都在已保留实体中的，且优先种子/near 实体间的边；按权重降序
+        var keptIds = new HashSet<string>(orderedEntities.Select(e => e.EntityId), StringComparer.Ordinal);
+        var orderedEdges = sub.Edges
+            .Where(e => keptIds.Contains(e.SourceId) && keptIds.Contains(e.TargetId))
+            .OrderByDescending(e => e.Weight)
+            .ThenBy(e => e.Relation, StringComparer.Ordinal);
+
+        var entities = new List<string>();
+        var edges = new List<string>();
+        var used = 0; // 预算针对可选内容（实体名录 + 关系边）；固定引导语不计入，因其很短且属必要框架
+        foreach (var e in orderedEntities)
+        {
+            var label = "「" + e.Name + "」"
+                + (e.Type is not ("" or null) && e.Type != "Concept" ? $"（{e.Type}）" : "");
+            var cost = label.Length + 2; // 逗号/分隔
+            if (used + cost > maxChars) continue;
+            entities.Add(label);
+            used += cost;
+        }
+        foreach (var edge in orderedEdges)
+        {
+            var line = $"  {edge.SourceName} ——[{edge.Relation}]→ {edge.TargetName}";
+            var cost = line.Length + 1;
+            if (used + cost > maxChars) break;
+            edges.Add(line);
+            used += cost;
+        }
+        return (entities.ToArray(), edges.ToArray());
     }
 }

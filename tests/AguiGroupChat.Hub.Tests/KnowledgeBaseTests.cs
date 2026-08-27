@@ -226,7 +226,7 @@ public sealed class KnowledgeBaseTests
         var (doc, _) = await catalog.AddDocumentAsync(kbId, attId);
         await catalog.WaitForDocumentAsync(doc!.DocId);
         Assert.True(catalog.RemoveDocument(kbId, doc.DocId));
-        Assert.Empty(store.Records.Where(r => r.GroupId == KnowledgeBaseCatalog.KbGroupPrefix + kbId));
+        Assert.DoesNotContain(store.Records, r => r.GroupId == KnowledgeBaseCatalog.KbGroupPrefix + kbId);
         Assert.Empty(catalog.GetKb(kbId)!.Documents);
     }
 
@@ -258,7 +258,7 @@ public sealed class KnowledgeBaseTests
             Assert.True(catalog.RemoveDocument(kb.KbId, doc.DocId)); // 处理中移除
             await catalog.WaitForDocumentAsync(doc.DocId);
             // 后台任务检测到文档已被移除，不得写入孤儿向量
-            Assert.Empty(fakeStore.Records.Where(r => r.GroupId == KnowledgeBaseCatalog.KbGroupPrefix + kb.KbId));
+            Assert.DoesNotContain(fakeStore.Records, r => r.GroupId == KnowledgeBaseCatalog.KbGroupPrefix + kb.KbId);
             Assert.Empty(catalog.GetKb(kb.KbId)!.Documents);
         }
         finally { try { Directory.Delete(dir, true); } catch { } }

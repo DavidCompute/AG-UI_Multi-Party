@@ -17,8 +17,8 @@ public sealed class LlamaEmbeddingProviderTests
     [Fact]
     public void Split_AtContextBoundary_ReturnsSingle()
     {
-        // 512 context × 2 字符/token = 1024 字符上限；恰好等于上限时不分段
-        var text = new string('中', 1024);
+        // 512 context × 0.9 字符/token = 460 字符上限；恰好等于上限时不分段
+        var text = new string('中', 460);
         var segs = LlamaEmbeddingProvider.SplitForEmbedding(text, contextSize: 512);
         Assert.Single(segs);
     }
@@ -26,10 +26,10 @@ public sealed class LlamaEmbeddingProviderTests
     [Fact]
     public void Split_ExceedsContext_SplitsWithOverlap()
     {
-        var text = new string('中', 3000); // 3000 > 1024 上限
+        var text = new string('中', 3000); // 3000 > 460 上限
         var segs = LlamaEmbeddingProvider.SplitForEmbedding(text, contextSize: 512);
         Assert.True(segs.Count >= 3, $"预期至少 3 段，实际 {segs.Count}");
-        Assert.All(segs, s => Assert.True(s.Length <= 1024));
+        Assert.All(segs, s => Assert.True(s.Length <= 460));
         // 相邻段有重叠（后一段开头应出现在前一段中）
         Assert.Contains(segs[1][..64], segs[0]);
     }
@@ -51,8 +51,8 @@ public sealed class LlamaEmbeddingProviderTests
     {
         var text = new string('a', 300);
         var segs = LlamaEmbeddingProvider.SplitForEmbedding(text, contextSize: 64);
-        // 64 context × 2 = 128 字符上限 → 300 字符切 3 段
+        // 64 context × 0.9 = 57.6，但下限 max(64,...)=64 → 300 字符切 ~5 段
         Assert.True(segs.Count >= 2);
-        Assert.All(segs, s => Assert.True(s.Length <= 128));
+        Assert.All(segs, s => Assert.True(s.Length <= 64));
     }
 }

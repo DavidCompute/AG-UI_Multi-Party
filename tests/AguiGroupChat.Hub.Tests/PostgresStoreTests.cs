@@ -41,10 +41,10 @@ public abstract class PostgresTestBase : IDisposable
     protected static readonly bool PgAvailable;
     protected static readonly string PgConnectionString;
 
-    protected PostgresStore Store { get; }
-    protected PostgresGroupStore Groups { get; }
-    protected PostgresUserStore Users { get; }
-    protected PostgresAgentRegistryStore AgentRegistrations { get; }
+    protected PostgresStore Store { get; } = null!;
+    protected PostgresGroupStore Groups { get; } = null!;
+    protected PostgresUserStore Users { get; } = null!;
+    protected PostgresAgentRegistryStore AgentRegistrations { get; } = null!;
     protected ChangeHub Changes { get; } = new();
 
     static PostgresTestBase()
@@ -325,7 +325,7 @@ public sealed class PostgresAgentRegistryStoreTests : PostgresTestBase
         var fresh = new PostgresAgentRegistryStore(Store);
         var all = fresh.LoadAll();
         Assert.Equal(3, all.Count);
-        var reg = Assert.Single(all.Where(r => r.AgentId == "agent_a" && r.GroupId == "g2"));
+        var reg = Assert.Single(all, r => r.AgentId == "agent_a" && r.GroupId == "g2");
         Assert.Equal(AgentTriggerMode.Keyword, reg.TriggerMode);
         Assert.Contains("测试", reg.Keywords);
         Assert.True(reg.IsOverridden);
@@ -333,7 +333,7 @@ public sealed class PostgresAgentRegistryStoreTests : PostgresTestBase
         // 更新（写通）
         fresh.Upsert(new AgentRegistration("agent_a", "改名A", "g2", AgentTriggerMode.AllMessages, ["新词"], IsOverridden: false));
         var fresh2 = new PostgresAgentRegistryStore(Store);
-        var updated = Assert.Single(fresh2.LoadAll().Where(r => r.AgentId == "agent_a" && r.GroupId == "g2"));
+        var updated = Assert.Single(fresh2.LoadAll(), r => r.AgentId == "agent_a" && r.GroupId == "g2");
         Assert.Equal("改名A", updated.Nickname);
         Assert.Equal(AgentTriggerMode.AllMessages, updated.TriggerMode);
 

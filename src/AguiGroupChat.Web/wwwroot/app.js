@@ -9,14 +9,15 @@ function errMsg(codeOrRes, fallback) {
   let msg = fallback;
   if (codeOrRes && typeof codeOrRes === "object") {
     code = codeOrRes.code ?? codeOrRes.errorCode;
-    msg = codeOrRes.message;
+    msg = codeOrRes.message || codeOrRes.detail;
   }
+  // 优先展示后端具体原因（例如「引用的技能不存在于技能库：xxx」），避免被通用错误码文案掩盖
+  if (msg) return msg;
   if (code) {
     const localized = t("err." + code);
     // t 找不到时会回显 key 本身（以 err. 开头），据此区分是否成功命中
     if (localized !== "err." + code) return localized;
   }
-  if (msg) return msg;
   return t("err.unknown", { code: code || "?" });
 }
 
@@ -626,70 +627,6 @@ async function loadMemoryList(offset = memOffset) {
   } catch { list.innerHTML = `<div class="mem-empty">${t("memory.loadFail")}</div>`; }
 }
 
-/* ============ 任务中心（工作型数字员工任务编排） ============ */
-
-let taskGroupFilter = "";
-
-/** 打开任务中心弹窗：加载“我的任务”列表。 */
-function openTaskModal() {
-  $("taskGroupFilter").value = taskGroupFilter;
-  $("taskModal").classList.remove("hidden");
-  loadTasks();
-}
-
-async function loadTasks() {
-  const list = $("taskList");
-  list.innerHTML = `<div class="mem-empty">${t("task.loading")}</div>`;
-  const filter = $("taskGroupFilter").value || "";
-  taskGroupFilter = filter;
-  try {
-    const url = filter
-      ? `/ag-ui/tasks/${encodeURIComponent(filter)}/group?count=100`
-      : `/ag-ui/tasks?count=100`;
-    const res = await fetch(url, { headers: { Authorization: "Bearer " + (state.token || "") } });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !Array.isArray(data)) {
-      list.innerHTML = `<div class="mem-empty">${t("task.loadFailTpl", { status: res.status })}</div>`;
-      return;
-    }
-    $("taskCount").textContent = t("task.count", { count: data.length });
-    if (!data.length) { list.innerHTML = `<div class="mem-empty">${t("task.empty")}</div>`; return; }
-    // 知聚选择器选项（从任务去重）
-    const sel = $("taskGroupFilter");
-    const currentGroup = sel.value;
-    const groups = [...new Set(data.map((t) => t.groupId))];
-    sel.innerHTML = `<option value="">${t("task.all")}</option>`
-      + groups.map((g) => {
-        const gm = state.groups?.find((x) => x.groupId === g);
-        const gName = gm?.groupName || g;
-        return `<option value="${escapeHtml(g)}">${escapeHtml(gName)}</option>`;
-      }).join("");
-    sel.value = filter || currentGroup;
-    list.innerHTML = data.map((t) => {
-      const st = t.status || "";
-      // 值/显示分离：后端枚举值（queue/running/...）→ 前端按当前语言映射标签；未知值回显原值
-      const label = st ? t("task.state." + st) : "";
-      const safeLabel = label.startsWith("task.state.") ? st : label;
-      const gm = state.groups?.find((x) => x.groupId === t.groupId);
-      const gName = gm?.groupName || t.groupId;
-      const progress = (typeof t.progress === "number") ? Math.min(100, Math.max(0, t.progress)) : (st === "finished" ? 100 : 0);
-      const agentNick = (() => { for (const g of state.groups || []) { const r = room(g.groupId); const mm = r?.members?.find((m) => m.memberId === t.agentId); if (mm?.nickname) return mm.nickname; } return t.agentId; })();
-      return `<div class="memory-item">
-        <div class="mem-head">
-          <span class="task-state st-${escapeHtml(st)}">${escapeHtml(safeLabel)}</span>
-          <span class="mem-sender" style="font-weight:600">${escapeHtml(t.title || t.content || t("task.untitled"))}</span>
-          <span class="mem-time">${new Date(t.createdAt).toLocaleString()}</span>
-        </div>
-        <div class="task-meta">${escapeHtml(gName)} · ${escapeHtml(agentNick)} · 发起人 ${escapeHtml(t.userId)}</div>
-        <div class="task-progress"><div class="task-progress-bar" style="width:${progress}%"></div></div>
-        <div class="mem-content" style="white-space:pre-wrap">${escapeHtml(t.content || "")}</div>
-        ${t.result ? `<div class="mem-content task-result">结果：${escapeHtml(t.result)}</div>` : ""}
-        ${t.error ? `<div class="mem-content task-error">错误：${escapeHtml(t.error)}</div>` : ""}
-      </div>`;
-    }).join("");
-  } catch { list.innerHTML = `<div class="mem-empty">${t("task.loadFail")}</div>`; }
-}
-
 let lastAuthCheck = 0;
 
 // 令牌失效兜底：会话为服务端内存态（重启即失效），重连失败时校验 /me，401 则回到登录页
@@ -749,7 +686,8 @@ let editingAgentId = null;
 
 async function openAgentModal() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
-  await Promise.all([loadAgents(), loadKbs()]);
+  // 一并刷新用户目录：创建者列优先显示昵称（别名），避免因目录未加载 / 已过期而回退到原始 ID
+  await Promise.all([loadAgents(), loadKbs(), loadUserDirectory()]);
   $("agentModal").classList.remove("hidden");
   showAgentListView();
 }
@@ -806,8 +744,8 @@ function renderAgentList() {
     const row = document.createElement("div");
     row.className = "agent-row";
     const kw = (a.keywords || []).join("、");
-    // 编辑 / 删除仅限创建者本人（服务端即将强制归属校验；内置数字员工 ownerId 为 null，不显示）
-    const canManage = !!a.ownerId && a.ownerId === state.memberId;
+    // 编辑 / 删除：创建者本人 或 系统管理员（内置数字员工 ownerId 为 null，不可改）
+    const canManage = !!a.ownerId && (state.isAdmin || a.ownerId === state.memberId);
     const avatarImg = a.avatar
       ? `<img class="agent-avatar" src="${escapeHtml(authedAssetUrl(a.avatar))}" alt="" onerror="this.remove()" />`
       : "";
@@ -837,7 +775,427 @@ function renderAgentList() {
   }
 }
 
-/* ============ 数字员工导出 / 导入（JSON 文件） ============ */
+/* ============ 数字员工组织架构图（图形化编辑任务指派 / 问题提升；端口拖拽连线） ============ */
+
+/** 组织架构画布状态。 */
+let orgState = null;
+
+/** 组织架构节点布局持久化键（按用户隔离：节点横纵坐标是查看者偏好，存浏览器，不写服务端）。 */
+const ORG_LAYOUT_KEY = "agui.orgLayout";
+function orgLayoutKey() { return ORG_LAYOUT_KEY + "." + (state.memberId || ""); }
+/** 读取上次保存的节点坐标（仅当前用户）；无则返回空对象。 */
+function loadOrgPositions() {
+  try {
+    const raw = localStorage.getItem(orgLayoutKey());
+    if (raw) return JSON.parse(raw);
+  } catch { /* 存储不可用忽略 */ }
+  return {};
+}
+/** 保存当前所有节点坐标到浏览器（仅当前用户）。 */
+function saveOrgPositions() {
+  if (!orgState || !orgState.nodes) return;
+  const map = {};
+  orgState.nodes.forEach((n) => { if (typeof n.x === "number" && typeof n.y === "number") map[n.agentId] = { x: n.x, y: n.y }; });
+  try { localStorage.setItem(orgLayoutKey(), JSON.stringify(map)); } catch { /* 存储不可用忽略 */ }
+}
+
+/** 事件坐标 → 画布本地坐标（与节点 x/y 同坐标系）。 */
+function orgCanvasPoint(e) {
+  const rect = $("orgCanvas").getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+/** 自动布局：纵向层级树（调度/提升关系自上而下），一对多时多个子节点横向并排。
+ *  上级边 = 其他指向自己的指派 + 自己的提升目标；父子相邻（子在下并排），父节点居于子聚中间。
+ *  纯树/森林走 tidy 布局；遇多父共享或环（非树）则兑为按行分组横向排列。 */
+function orgAutoLayout(nodes, byId) {
+  const ids = new Set(nodes.map((n) => n.agentId));
+
+  // 有向边（上级→下级）：指派（源=上级） + 提升（提升目标=上级）
+  const parents = {}, children = {};
+  const addEdge = (p, c) => {
+    if (!ids.has(p) || !ids.has(c) || p === c) return;
+    (parents[c] || (parents[c] = new Set())).add(p);
+    (children[p] || (children[p] = new Set())).add(c);
+  };
+  nodes.forEach((n) => {
+    (n.assignmentIds || []).forEach((t) => addEdge(n.agentId, t));
+    if (n.escalationAgentId && n.escalationAgentId !== n.agentId) addEdge(n.escalationAgentId, n.agentId);
+  });
+
+  // 是否为树/森林（每个节点至多一个父）
+  let isForest = true;
+  nodes.forEach((n) => { const ps = parents[n.agentId]; if (ps && ps.size > 1) isForest = false; });
+
+  const X_GAP = 210, Y_GAP = 130, PAD = 40;
+
+  // ---- 兑底：按“到根节点的末端深度”分组；同组横向依次排开 ----
+  function layoutByDepth() {
+    const depth = {};
+    const visiting = new Set();
+    const depOf = (id) => {
+      if (id in depth) return depth[id];
+      if (visiting.has(id)) { depth[id] = 0; return 0; }   // 环保护
+      visiting.add(id);
+      const ps = parents[id];
+      let d = 0;
+      if (ps) ps.forEach((p) => { d = Math.max(d, 1 + depOf(p)); });
+      visiting.delete(id);
+      depth[id] = d;
+      return d;
+    };
+    nodes.forEach((n) => depOf(n.agentId));
+    const rows = new Map();
+    nodes.forEach((n) => {
+      const d = depth[n.agentId]; if (!rows.has(d)) rows.set(d, []); rows.get(d).push(n.agentId);
+    });
+    const pos = {};
+    // 同组内按父节点所在列居中聚类（父多的靠左，父列近似则按昵称）
+    const colIndex = {}; nodes.forEach((n, i) => { colIndex[n.agentId] = i; });
+    [...rows.entries()].sort((p, q) => p[0] - q[0]).forEach(([d, list]) => {
+      list.sort((a, b) => {
+        const ap = [...(parents[a] || [])].map((p) => colIndex[p] ?? 1e9);
+        const bp = [...(parents[b] || [])].map((p) => colIndex[p] ?? 1e9);
+        const minA = Math.min(...ap), minB = Math.min(...bp);
+        return (minA - minB) || byId[a].nickname.localeCompare(byId[b].nickname);
+      });
+      list.forEach((id, i) => { pos[id] = { x: PAD + i * X_GAP, y: PAD + d * Y_GAP }; });
+    });
+    return pos;
+  }
+
+  if (!isForest) return layoutByDepth();
+
+  // ---- tidy 树 / 森林：先序遍历分配列，父节点居于其子聚中点，同层子节点横向并排 ----
+  const width = {};
+  const widthOf = (id) => {
+    if (id in width) return width[id];
+    const cs = children[id];
+    let w = 0;
+    if (cs && cs.size) cs.forEach((c) => { w += widthOf(c); });
+    else w = 1;
+    width[id] = w;
+    return w;
+  };
+
+  const pos = {};
+  let cursor = 0;
+  const place = (id, row) => {
+    const w = widthOf(id);
+    const cs = children[id];
+    if (!cs || cs.size === 0) {
+      pos[id] = { x: PAD + cursor * X_GAP, y: PAD + row * Y_GAP };
+      cursor += 1;
+      return;
+    }
+    const start = cursor;
+    [...cs].forEach((c) => place(c, row + 1));
+    // 父节点列 = 其子聚的中间列格子（偶数子时取中间空隙，仍不与不同行冲突）
+    const mid = start + (w - 1) / 2;
+    pos[id] = { x: PAD + mid * X_GAP, y: PAD + row * Y_GAP };
+  };
+
+  const roots = nodes.filter((n) => !parents[n.agentId] || parents[n.agentId].size === 0);
+  if (roots.length === 0) return layoutByDepth();          // 全有父（成环）
+  roots.forEach((r) => place(r.agentId, 0));
+  return pos;
+}
+
+function openOrgChart() {
+  const agents = (agentList || []).filter((a) => !a.isSkillTarget);
+  const el = $("orgCanvas");
+  el.innerHTML = "";
+  const svg = $("orgSvg");
+  svg.innerHTML = "";
+  const NS = "http://www.w3.org/2000/svg";
+
+  // 节点数据（不含 DOM，先建模型再做布局与 DOM）
+  const nodes = agents.map((a) => ({
+    agentId: a.agentId,
+    nickname: a.nickname,
+    assignmentIds: [...(a.assignmentIds || [])],
+    escalationAgentId: a.escalationAgentId || "",
+  }));
+  const byId = Object.fromEntries(nodes.map((n) => [n.agentId, n]));
+
+  orgState = { nodes, byId, base: {} };
+  nodes.forEach((n) => { orgState.base[n.agentId] = { assignmentIds: [...n.assignmentIds], escalationAgentId: n.escalationAgentId }; });
+
+  const positions = orgAutoLayout(nodes, byId);
+  // 恢复该用户上次保存的布局：有记录的节点用之，其余落到自动布局；没有记录时整体用自动布局
+  const saved = loadOrgPositions();
+  nodes.forEach((n) => { if (saved[n.agentId]) { positions[n.agentId] = { x: saved[n.agentId].x, y: saved[n.agentId].y }; } });
+
+  // 复位为自动布局（重新计算并覆盖保存为当前布局）
+  const applyAuto = () => {
+    const pos = orgAutoLayout(nodes, byId);
+    nodes.forEach((n) => { n.x = pos[n.agentId].x; n.y = pos[n.agentId].y; n.el.style.left = n.x + "px"; n.el.style.top = n.y + "px"; });
+    retrofitCanvas();
+    draw();
+    saveOrgPositions();   // 自动布局即成为下次打开记住的布局
+  };
+
+  // 依据节点位置推算画布尺寸（列数随数字员工数量变化，不再写死 920）
+  function retrofitCanvas() {
+    let maxX = 0, maxY = 0;
+    nodes.forEach((n) => { maxX = Math.max(maxX, n.x + (n.el.offsetWidth || 150)); maxY = Math.max(maxY, n.y + (n.el.offsetHeight || 60)); });
+    const w = Math.max(380, maxX + 80);
+    const h = Math.max(320, maxY + 40);
+    el.style.width = w + "px";
+    svg.style.width = w + "px";
+    el.style.height = h + "px";
+    svg.style.height = h + "px";
+    svg.setAttribute("width", w); svg.setAttribute("height", h);
+    $("orgCanvasWrap").style.height = h + "px";
+  }
+
+  // 建节点 DOM（含两个连接端口：下方=指派，顶部=提升）
+  nodes.forEach((n) => {
+    n.x = positions[n.agentId].x;
+    n.y = positions[n.agentId].y;
+    n.el = document.createElement("div");
+    n.el.className = "org-node";
+    n.el.dataset.agentId = n.agentId;
+    n.el.style.left = n.x + "px";
+    n.el.style.top = n.y + "px";
+    n.el.innerHTML = `
+      <div class="org-port org-port-assign" data-port="assign" title="${escapeHtml(t("org.portAssign"))}"></div>
+      <div class="org-port org-port-esc" data-port="esc" title="${escapeHtml(t("org.portEsc"))}"></div>
+      <button class="org-opt-btn" type="button" title="${escapeHtml(t("org.optimizeTip"))}" aria-label="${escapeHtml(t("org.optimize"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 8 8 21 3 21 3 16 16 3"/></svg></button>
+      <b>${escapeHtml(n.nickname)}</b><code>${escapeHtml(n.agentId)}</code>`;
+    el.appendChild(n.el);
+    // 「优化指派」：为该数字员工生成/管理下一层任务指派提示词；阻止按钮事件冒泡以免触发节点拖拽
+    n.el.querySelector(".org-opt-btn").addEventListener("pointerdown", (e) => e.stopPropagation());
+    n.el.querySelector(".org-opt-btn").addEventListener("click", (e) => { e.stopPropagation(); openOrgOptimize(n.agentId); });
+  });
+
+  // ---- 连线绘制（纵向布线：指派=源底→目标顶；提升=源顶→目标底） ----
+  function edgeParams(n, t, type) {
+    if (type === "assign") {
+      const x1 = n.x + n.el.offsetWidth / 2, y1 = n.y + n.el.offsetHeight, x2 = t.x + t.el.offsetWidth / 2, y2 = t.y;
+      const gap = Math.max(30, (y2 - y1) / 2);
+      const d = `M${x1} ${y1} C${x1} ${y1 + gap} ${x2} ${y2 - gap} ${x2} ${y2}`;
+      return { d, x1, y1, x2, y2 };
+    }
+    const x1 = n.x + n.el.offsetWidth / 2, y1 = n.y, x2 = t.x + t.el.offsetWidth / 2, y2 = t.y + t.el.offsetHeight;
+    const gap = Math.max(30, (y1 - y2) / 2);
+    const d = `M${x1} ${y1} C${x1} ${y1 - gap} ${x2} ${y2 + gap} ${x2} ${y2}`;
+    return { d, x1, y1, x2, y2 };
+  }
+  function drawEdge(src, tgt, type) {
+    const p = edgeParams(byId[src], byId[tgt], type);
+    // 透明宽命中路径：点击即删除该连线
+    const hit = document.createElementNS(NS, "path");
+    hit.setAttribute("d", p.d);
+    hit.setAttribute("class", "org-edge org-edge-hit");
+    hit.setAttribute("stroke-width", 14);
+    hit.dataset.edge = src + "|" + tgt + "|" + type;
+    svg.appendChild(hit);
+    const vis = document.createElementNS(NS, "path");
+    vis.setAttribute("d", p.d);
+    vis.setAttribute("class", "org-edge " + (type === "assign" ? "org-edge-assign" : "org-edge-esc"));
+    vis.setAttribute("marker-end", "url(#orgArrow" + (type === "assign" ? "Assign" : "Esc") + ")");
+    svg.appendChild(vis);
+  }
+  function draw() {
+    svg.innerHTML = "";
+    const defs = document.createElementNS(NS, "defs");
+    defs.innerHTML = `<marker id="orgArrowAssign" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a98bff"/></marker>`
+      + `<marker id="orgArrowEsc" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#ff9b85"/></marker>`;
+    svg.appendChild(defs);
+    nodes.forEach((n) => {
+      n.assignmentIds.forEach((tgt) => { if (byId[tgt]) drawEdge(n.agentId, tgt, "assign"); });
+      if (n.escalationAgentId && byId[n.escalationAgentId]) drawEdge(n.agentId, n.escalationAgentId, "esc");
+    });
+  }
+
+  // 点击连线删除
+  svg.addEventListener("click", (e) => {
+    const hit = e.target && e.target.closest ? e.target.closest(".org-edge-hit") : null;
+    if (!hit) return;
+    const [src, tgt, type] = hit.dataset.edge.split("|");
+    const s = byId[src];
+    if (type === "assign") { s.assignmentIds = s.assignmentIds.filter((id) => id !== tgt); $("orgStatus").textContent = t("org.assignRemoved"); }
+    else { s.escalationAgentId = ""; $("orgStatus").textContent = t("org.escRemoved"); }
+    draw();
+  });
+
+  // ---- 端口拖拽：创建 / 重设 / 移除连线；拖到空白 = 清空该源的该类全部连线 ----
+  nodes.forEach((n) => {
+    const portByType = (type) => (type === "assign" ? n.el.querySelector(".org-port-assign") : n.el.querySelector(".org-port-esc"));
+    const anchor = (type) => (type === "assign"
+      ? { x: n.x + n.el.offsetWidth / 2, y: n.y + n.el.offsetHeight }
+      : { x: n.x + n.el.offsetWidth / 2, y: n.y });
+
+    const onPortDown = (e, type) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const a = anchor(type);
+      const tmp = document.createElementNS(NS, "path");
+      tmp.setAttribute("class", "org-edge org-edge-preview");
+      tmp.setAttribute("d", `M${a.x} ${a.y} L${a.x} ${a.y}`);
+      svg.appendChild(tmp);
+      const move = (me) => {
+        const p = orgCanvasPoint(me);
+        const gap = Math.max(30, Math.abs(p.y - a.y) / 2);
+        const d = type === "assign"
+          ? `M${a.x} ${a.y} C${a.x} ${a.y + gap} ${p.x} ${p.y - gap} ${p.x} ${p.y}`
+          : `M${a.x} ${a.y} C${a.x} ${a.y - gap} ${p.x} ${p.y + gap} ${p.x} ${p.y}`;
+        tmp.setAttribute("d", d);
+      };
+      const up = (ue) => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        tmp.remove();
+        const hit = document.elementFromPoint(ue.clientX, ue.clientY);
+        const nodeEl = hit && hit.closest ? hit.closest(".org-node") : null;
+        const tgtId = nodeEl && nodeEl.dataset.agentId !== n.agentId ? nodeEl.dataset.agentId : null;
+        if (tgtId) {
+          if (type === "assign") {
+            const i = n.assignmentIds.indexOf(tgtId);
+            if (i >= 0) n.assignmentIds.splice(i, 1); else n.assignmentIds.push(tgtId);
+            $("orgStatus").textContent = i >= 0 ? t("org.assignRemoved") : t("org.assignSet");
+          } else {
+            if (tgtId === n.escalationAgentId) n.escalationAgentId = "";
+            else n.escalationAgentId = tgtId;
+            $("orgStatus").textContent = n.escalationAgentId ? t("org.escSet") : t("org.escRemoved");
+          }
+        } else {
+          // 拖到空白：清空该源的该类全部连线
+          if (type === "assign") { n.assignmentIds = []; $("orgStatus").textContent = t("org.assignCleared"); }
+          else { n.escalationAgentId = ""; $("orgStatus").textContent = t("org.escCleared"); }
+        }
+        draw();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    };
+    n.el.querySelector(".org-port-assign").addEventListener("pointerdown", (e) => onPortDown(e, "assign"));
+    n.el.querySelector(".org-port-esc").addEventListener("pointerdown", (e) => onPortDown(e, "esc"));
+
+    // 节点主体拖拽：移动位置
+    let sx = 0, sy = 0, startX = 0, startY = 0;
+    n.el.addEventListener("pointerdown", (e) => {
+      sx = e.clientX; sy = e.clientY; startX = n.x; startY = n.y;
+      n.el.setPointerCapture(e.pointerId);
+    });
+    n.el.addEventListener("pointermove", (e) => {
+      if (n.el.hasPointerCapture(e.pointerId)) {
+        n.x = Math.max(0, startX + (e.clientX - sx));
+        n.y = Math.max(0, startY + (e.clientY - sy));
+        n.el.style.left = n.x + "px"; n.el.style.top = n.y + "px";
+        draw();
+      }
+    });
+    n.el.addEventListener("pointerup", (e) => { if (n.el.hasPointerCapture(e.pointerId)) { n.el.releasePointerCapture(e.pointerId); saveOrgPositions(); } });
+  });
+
+  // 画布复位与打开：先显示弹窗再计算尺寸与绘制，否则隐藏态的 offsetWidth/Height 为 0，连线会画在错误位置
+  $("orgReset").onclick = applyAuto;
+  $("orgStatus").textContent = "";
+  $("orgModal").classList.remove("hidden");
+  $("orgSave").onclick = saveOrgChart;
+  $("orgCancel").onclick = () => $("orgModal").classList.add("hidden");
+  $("orgOptCancel").onclick = () => $("orgOptModal").classList.add("hidden");
+  $("orgOptAppend").onclick = applyOrgOptimize;
+  retrofitCanvas();
+  draw();
+}
+
+async function saveOrgChart() {
+  if (!orgState) return;
+  saveOrgPositions();   // 无论连线是否变更，都记录当前布局（拖拽/自动布局已实时记录，此处兜底）
+  const changes = [];
+  orgState.nodes.forEach((n) => {
+    const b = orgState.base[n.agentId];
+    const changed = JSON.stringify(n.assignmentIds.slice().sort()) !== JSON.stringify((b.assignmentIds || []).slice().sort())
+      || (n.escalationAgentId || "") !== (b.escalationAgentId || "");
+    if (changed) changes.push({ agentId: n.agentId, assignmentIds: [...n.assignmentIds], escalationAgentId: n.escalationAgentId || null });
+  });
+  if (changes.length === 0) { toast(t("org.noChange")); $("orgModal").classList.add("hidden"); return; }
+  for (const c of changes) {
+    try {
+      const src = agentList.find((x) => x.agentId === c.agentId);
+      const body = serializeAgent(src);
+      body.assignmentIds = c.assignmentIds;
+      body.escalationAgentId = c.escalationAgentId;
+      const res = await fetch(`/ag-ui/agents/${encodeURIComponent(c.agentId)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }
+    } catch (ex) { toast(t("common.saveFail", { err: ex.message })); return; }
+  }
+  toast(t("org.saved"));
+  $("orgModal").classList.add("hidden");
+  await loadAgents();
+}
+
+/** 组织架构是否存在未保存改动（指派 / 提升连线与“打开时基准”不一致）。 */
+function orgHasUncommittedChanges() {
+  if (!orgState || !orgState.nodes) return false;
+  const cmpArr = (a, b) => JSON.stringify((a || []).slice().sort()) !== JSON.stringify((b || []).slice().sort());
+  return orgState.nodes.some((n) => {
+    const b = orgState.base && orgState.base[n.agentId];
+    if (!b) return true;
+    return cmpArr(n.assignmentIds, b.assignmentIds) || ((n.escalationAgentId || "") !== (b.escalationAgentId || ""));
+  });
+}
+
+/** 组织架构节点「优化指派」：生成该数字员工管理下一层指派提示词，预览后可追加到其 Instructions。
+ * 若组织架构有<b>未保存</b>的指派/提升改动，先提示保存，避免基于过时后端数据生成。 */
+let orgOptAgentId = "";
+async function openOrgOptimize(agentId) {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  // 有未保存改动（含本节点或其它节点新增/删除的指派连线）→ 先提示保存，不生成
+  if (orgHasUncommittedChanges()) { toast(t("org.optimizeNeedSave")); return; }
+  orgOptAgentId = agentId;
+  const src = (agentList || []).find((x) => x.agentId === agentId);
+  $("orgOptAgent").textContent = src ? `${src.nickname || agentId}（${agentId}）` : agentId;
+  $("orgOptText").value = t("org.optimizeGen");
+  $("orgOptAppend").disabled = true;
+  $("orgOptModal").classList.remove("hidden");
+  // 异步生成：期间弹窗可见；失败回退提示
+  try {
+    const res = await fetch(`/ag-ui/agents/${encodeURIComponent(agentId)}/optimize-assignment`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.assignmentGuidance) {
+      $("orgOptText").value = "";
+      toast(t("org.optimizeGenFail", { err: errMsg(data, res.status) }));
+      return;
+    }
+    $("orgOptText").value = data.assignmentGuidance;
+    $("orgOptAppend").disabled = false;
+  } catch (ex) {
+    $("orgOptText").value = "";
+    toast(t("org.optimizeGenFail", { err: ex.message }));
+  }
+}
+
+/** 应用生成结果：把下一层指派指引追加到该数字员工的 Instructions（保留原指令，去重）。 */
+async function applyOrgOptimize() {
+  const guidance = ($("orgOptText").value || "").trim();
+  if (!guidance) return;
+  const src = (agentList || []).find((x) => x.agentId === orgOptAgentId);
+  if (!src) return;
+  const body = serializeAgent(src);
+  const cur = (src.instructions || "").trim();
+  body.instructions = cur ? cur + "\n\n" + guidance : guidance;
+  try {
+    const res = await fetch(`/ag-ui/agents/${encodeURIComponent(orgOptAgentId)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }
+    $("orgOptModal").classList.add("hidden");
+    toast(t("org.optimizeApplied"));
+    await loadAgents();
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
 
 /** 序列化数字员工配置：排除敏感字段 bridgeToken（不导出）；ownerId 不导出（导入后归属当前用户）。 */
 function serializeAgent(a) {
@@ -858,6 +1216,7 @@ function serializeAgent(a) {
     skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
     assignmentIds: (a.assignmentIds || []),
     escalationAgentId: a.escalationAgentId || null,
+    skillDefIds: (a.skillDefIds || []),
   };
 }
 
@@ -958,6 +1317,7 @@ async function importAgentsFromFile(file) {
       skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
       assignmentIds: (a.assignmentIds || []),
       escalationAgentId: a.escalationAgentId || null,
+      skillDefIds: (a.skillDefIds || []),
     };
     if (!body.nickname) { failed++; continue; }
     try {
@@ -1015,8 +1375,45 @@ function restoreDeleteBtn(btn) {
   if (cancel) cancel.remove();
 }
 
+
+/* 数字员工表单：可折叠分组。绑定折叠点击，并按 data-collapse-default / 用户记忆恢复开合。 */
+const AF_SECTION_KEY = "agui.agentFormSections";
+function loadAgentSectionState() {
+  try { return JSON.parse(localStorage.getItem(AF_SECTION_KEY) || "{}") || {}; } catch { return {}; }
+}
+function initCollapsibleSections(bindOnly = false) {
+  document.querySelectorAll("#agentFormView .form-section[data-collapse-key]").forEach((sec) => {
+    // 静态区块（data-static-section）：不可折叠，始终展开
+    if (sec.dataset.staticSection) return;
+    const key = sec.dataset.collapseKey;
+    const body = document.getElementById(key);
+    if (!body) return;
+    if (!bindOnly && !sec.dataset.bound) {
+      sec.dataset.bound = "1";
+      sec.addEventListener("click", () => {
+        const collapsed = !sec.classList.contains("collapsed");
+        sec.classList.toggle("collapsed", collapsed);
+        body.classList.toggle("hidden-section", collapsed);
+        addAgentSectionState(key, collapsed ? "closed" : "open");
+      });
+    }
+    // 用户记忆优先，其次 data-collapse-default
+    const saved = loadAgentSectionState()[key];
+    const def = sec.dataset.collapseDefault || "open";
+    const collapsed = (saved ? saved === "closed" : def === "closed");
+    sec.classList.toggle("collapsed", collapsed);
+    body.classList.toggle("hidden-section", collapsed);
+  });
+}
+function addAgentSectionState(key, state) {
+  const s = loadAgentSectionState();
+  s[key] = state;
+  try { localStorage.setItem(AF_SECTION_KEY, JSON.stringify(s)); } catch { /* 存储不可用忽略 */ }
+}
+
 function openAgentForm(agentId) {
   editingAgentId = agentId || null;
+  initCollapsibleSections(false);
   const a = editingAgentId ? agentList.find((x) => x.agentId === editingAgentId) : null;
   $("agentFormTitle").textContent = a ? t("agent.form.editTitle", { name: a.nickname }) : t("agent.form.add");
   $("afAgentId").value = a?.agentId || "";
@@ -1035,28 +1432,20 @@ function openAgentForm(agentId) {
   $("afBridgeMode").value = a?.bridgeMode || "standard";
   $("afBridgeToken").value = "";
   $("afPersonalMemory").checked = !!a?.personalMemoryEnabled;
-  $("afEnableWorkTools").checked = !!a?.enableWorkTools;
   $("afIsPrivate").checked = !!a?.isPrivate;
-  // 任务指派白名单（可多选）+ 问题提升目标（单选）：填充排除当前编辑自己的候选数字员工并回显
-  const cands = (agentList || []).filter((x) => x.agentId !== editingAgentId && !(x.isSkillTarget));
-  const assignVals = new Set(a?.assignmentIds || []);
-  $("afAssignmentIds").innerHTML = cands.map((x) =>
-    `<option value="${escapeHtml(x.agentId)}"${assignVals.has(x.agentId) ? " selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`).join("");
-  const escSel = $("afEscalationAgent");
-  const escVal = a?.escalationAgentId || "";
-  escSel.innerHTML = `<option value="">${escapeHtml(t("agent.form.escalationNone"))}</option>`
-    + cands.map((x) => `<option value="${escapeHtml(x.agentId)}" ${x.agentId === escVal ? "selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`).join("");
-  if (escVal && ![...cands.map((x) => x.agentId), editingAgentId].includes(escVal)) {
-    escSel.insertAdjacentHTML("beforeend", `<option value="${escapeHtml(escVal)}" selected>${escapeHtml(escVal)}</option>`);
-  }
-  // 技能（Skills）：回显配置
-  agentSkills = (a?.skills || []).map((s) => ({ skillId: s.skillId || "", description: s.description || "", targetAgentId: s.targetAgentId || "" }));
-  renderSkillRows();
+  // 可复用技能（技能库）：回显挂载 + 异步加载技能库选项
+  agentSkillDefIds = [...(a?.skillDefIds || [])];
+  if (state.token && !skillList.length) loadSkills().then(() => renderAgentSkillDefPicks());
+  else renderAgentSkillDefPicks();
+  // 可调用子数字员工（Skills）：回显 + 渲染选择器
+  agentSkillPicks = [...(a?.skills || [])].filter((s) => s && s.targetAgentId)
+    .map((s) => ({ skillId: s.skillId || "", description: s.description || "", targetAgentId: s.targetAgentId }));
+  renderAgentSkillPicks();
   // 知识库：回显绑定
   agentKbIds = [...(a?.knowledgeBaseIds || [])];
   renderKbPicks();
-  // 私密数字员工仅创建者可编辑（种子数字员工无 ownerId，登录即可编辑）
-  const canEditPrivate = !a?.isPrivate || !a?.ownerId || a.ownerId === state.memberId;
+  // 私密数字员工仅创建者或系统管理员可编辑（种子数字员工无 ownerId，登录即可编辑）
+  const canEditPrivate = !a?.isPrivate || !a?.ownerId || state.isAdmin || a.ownerId === state.memberId;
   $("afIsPrivate").disabled = !canEditPrivate;
   syncTriggerForm();
   $("agentListView").classList.add("hidden");
@@ -1086,14 +1475,16 @@ async function saveAgent() {
     bridgeMode: $("afBridgeMode").value,
     bridgeToken: $("afBridgeToken").value.trim() || null, // 编辑时留空 → 后端沿用原令牌
     personalMemoryEnabled: $("afPersonalMemory").checked,
-    enableWorkTools: $("afEnableWorkTools").checked,
     isPrivate: $("afIsPrivate").checked,
     knowledgeBaseIds: [...agentKbIds],
-    skills: agentSkills
-      .filter((s) => s.targetAgentId.trim())
-      .map((s) => ({ skillId: s.skillId.trim(), description: s.description.trim(), targetAgentId: s.targetAgentId.trim() })),
-    assignmentIds: [...$("afAssignmentIds").selectedOptions].map((o) => o.value).filter(Boolean),
-    escalationAgentId: $("afEscalationAgent").value.trim() || null,
+    // 可调用子数字员工（Skills）：由表单「可调用子数字员工」勾选维护，skillId 留空后端自动生成
+    skills: [...agentSkillPicks].filter((s) => s && s.targetAgentId)
+      .map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId })),
+    // 任务指派 / 问题提升由「组织架构」入口维护，此处仅保留原值（编辑时沿用，新增为空）
+    assignmentIds: [...((agentList.find((x) => x.agentId === editingAgentId)?.assignmentIds) || [])],
+    escalationAgentId: (agentList.find((x) => x.agentId === editingAgentId)?.escalationAgentId) || null,
+    // 可复用技能：技能库引用（SkillDefIds）
+    skillDefIds: [...agentSkillDefIds],
   };
   if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）
@@ -1101,10 +1492,6 @@ async function saveAgent() {
     toast(t("agent.err.scheduleInvalid")); return;
   }
   // 填了技能标识的必须合法（OpenAI 工具名规范）；留空的由后端自动生成 skill_<目标ID>
-  if (body.skills.some((s) => s.skillId && !/^[a-zA-Z0-9_-]+$/.test(s.skillId))) { toast(t("agent.form.skill.invalid")); return; }
-  if (body.skills.some((s) => s.targetAgentId === editingAgentId)) { toast(t("agent.form.skill.selfTarget")); return; }
-  const ids = body.skills.map((s) => s.skillId).filter(Boolean);
-  if (new Set(ids).size !== ids.length) { toast(t("agent.form.skill.dup")); return; }
   const url = editingAgentId ? `/ag-ui/agents/${encodeURIComponent(editingAgentId)}` : "/ag-ui/agents";
   try {
     const res = await fetch(url, {
@@ -1121,33 +1508,223 @@ async function saveAgent() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
-/** 技能行渲染：SkillId / 描述 / 目标数字员工下拉 / 删除。目标列表排除当前编辑的数字员工。 */
-let agentSkills = [];
-function renderSkillRows() {
-  const el = $("afSkillsList");
+let agentSkillDefIds = [];   // 数字员工表单：从技能库挂载的可复用技能 ID
+let agentSkillPicks = [];    // 数字员工表单：可调用子数字员工（Skills）[{skillId,description,targetAgentId}]
+
+/* ============ 技能库（可复用技能：shell / http / prompt） ============ */
+
+let skillList = [];      // 技能库 [{skillId,name,description,kind,body,parametersJson,interpreter,httpTimeoutSeconds,requiresApproval,ownerId}]
+let editingSkillId = null;
+
+/** 加载技能库列表。返回是否成功（登录态）。 */
+async function loadSkills() {
+  if (!state.token) return false;
+  try {
+    const res = await fetch("/ag-ui/skills", { headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) return false;
+    skillList = await res.json();
+    return true;
+  } catch { return false; }
+}
+
+/** 渲染技能库列表。 */
+function renderSkillList() {
+  const el = $("skillList");
   el.innerHTML = "";
-  const candidates = (agentList || []).filter((x) => x.agentId !== editingAgentId);
-  agentSkills.forEach((s, i) => {
+  if (!skillList.length) {
+    el.innerHTML = `<div class="kb-empty" data-i18n="skill.empty">技能库为空，点「新增技能」创建第一个可复用技能。</div>`;
+    return;
+  }
+  const kindLabel = { shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort") };
+  skillList.forEach((s) => {
     const row = document.createElement("div");
-    row.className = "skill-row";
-    row.style.cssText = "display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap";
+    row.className = "skill-row skill-list-item";
+    const canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId;
     row.innerHTML = `
-      <input class="modal-input skill-id" placeholder="留空自动生成（如 skill_agent_docs）" maxlength="40" value="${escapeHtml(s.skillId)}" style="width:150px" />
-      <select class="modal-input skill-target" style="width:150px">
-        <option value="">— 目标数字员工 —</option>
-        ${candidates.map((x) => `<option value="${escapeHtml(x.agentId)}" ${x.agentId === s.targetAgentId ? "selected" : ""}>${escapeHtml(x.nickname)}（${escapeHtml(x.agentId)}）</option>`).join("")}
-      </select>
-      <input class="modal-input skill-desc" placeholder="描述：何时调用、能获得什么" maxlength="200" value="${escapeHtml(s.description)}" style="flex:1;min-width:160px" />
-      <button type="button" class="icon-btn" title="删除技能">🗑️</button>`;
-    row.querySelector(".skill-id").addEventListener("input", (e) => { agentSkills[i].skillId = e.target.value; });
-    row.querySelector(".skill-desc").addEventListener("input", (e) => { agentSkills[i].description = e.target.value; });
-    row.querySelector(".skill-target").addEventListener("change", (e) => { agentSkills[i].targetAgentId = e.target.value; });
-    row.querySelector(".icon-btn").onclick = () => { agentSkills.splice(i, 1); renderSkillRows(); };
+      <span class="skill-name"><b>${escapeHtml(s.name)}</b><code>${escapeHtml(s.skillId)}</code></span>
+      <span class="skill-kind tag-skill">${escapeHtml(kindLabel[s.kind] || s.kind)}</span>
+      <span class="skill-desc">${escapeHtml(s.description || "—")}</span>
+      <span class="skill-op-col">
+        <button class="icon-btn" data-skill-act="test" title="${escapeHtml(t("skill.testRun"))}">▶</button>
+        ${canManage ? `<button class="icon-btn" data-skill-act="edit" title="${escapeHtml(t("skill.edit"))}">✏️</button><button class="icon-btn danger" data-skill-act="del" title="${escapeHtml(t("skill.del"))}">🗑️</button>` : ""}
+      </span>`;
+    row.querySelector('[data-skill-act="test"]').onclick = () => testSkill(s.skillId);
+    if (canManage) {
+      row.querySelector('[data-skill-act="edit"]').onclick = () => openSkillForm(s.skillId);
+      row.querySelector('[data-skill-act="del"]').onclick = () => deleteSkill(s.skillId);
+    }
     el.appendChild(row);
   });
 }
 
-/* ============ 知识库（Knowledge Base，RAG 知识文档） ============ */
+/** 打开技能库弹窗。 */
+async function openSkillModal() {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  showSkillListView();
+  await loadSkills();
+  renderSkillList();
+  $("skillModal").classList.remove("hidden");
+}
+
+function showSkillListView() { $("skillListView").classList.remove("hidden"); $("skillFormView").classList.add("hidden"); }
+function showSkillFormView() { $("skillListView").classList.add("hidden"); $("skillFormView").classList.remove("hidden"); }
+
+/** 打开技能表单编辑（skillId 为空 = 新建）。 */
+function openSkillForm(skillId) {
+  editingSkillId = skillId || null;
+  const s = skillId ? skillList.find((x) => x.skillId === skillId) : null;
+  const sf = (id) => $(id);
+  sf("sfName").value = s?.name || "";
+  sf("sfSkillId").value = s?.skillId || "";
+  sf("sfSkillId").disabled = !!s; // 已存在技能 ID 不可改（工具名稳定）
+  sf("sfKind").value = s?.kind || "prompt";
+  sf("sfDescription").value = s?.description || "";
+  sf("sfInterpreter").value = s?.interpreter || "";
+  sf("sfBody").value = s?.body || "";
+  sf("sfRequiresApproval").checked = s?.requiresApproval !== false;
+  syncSkillKind();
+  sf("sfTestResult").textContent = "";
+  showSkillFormView();
+}
+
+/** 类型切换时联动：shell/ http 显示解释器 / 强制审批。 */
+function syncSkillKind() {
+  const kind = $("sfKind").value;
+  const showInterp = kind === "shell";
+  $("sfInterpreterGroup").style.display = showInterp ? "" : "none";
+  // 仅 shell 技能强制需审批（任意本机命令执行面最大）；HTTP / 提示词技能允许关闭以自动调用
+  $("sfRequiresApproval").disabled = (kind === "shell");
+  $("sfBodyLabel").dataset.i18n = kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell");
+  const label = t(kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell"));
+  $("sfBodyLabel").textContent = label;
+}
+
+/** 保存技能（新建 POST / 更新 PUT）。 */
+async function saveSkill() {
+  const name = $("sfName").value.trim();
+  if (!name) { toast(t("skill.err.nameRequired")); return; }
+  const desc = $("sfDescription").value.trim();
+  if (!desc) { toast(t("skill.err.descRequired")); return; }
+  const kind = $("sfKind").value;
+  const body = $("sfBody").value;
+  if (kind !== "prompt" && !body.trim()) { toast(t("skill.err.bodyRequired")); return; }
+  const payload = {
+    skillId: editingSkillId || $("sfSkillId").value.trim() || null,
+    name, description: desc, kind, body,
+    parametersJson: "",
+    interpreter: $("sfInterpreter").value.trim() || null,
+    httpTimeoutSeconds: 30,
+    requiresApproval: $("sfRequiresApproval").checked,
+  };
+  const url = editingSkillId ? `/ag-ui/skills/${encodeURIComponent(editingSkillId)}` : "/ag-ui/skills";
+  const method = editingSkillId ? "PUT" : "POST";
+  try {
+    const res = await fetch(url, { method, headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify(payload) });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }
+    toast(editingSkillId ? t("skill.updated") : t("skill.created"));
+    await loadSkills(); renderSkillList();
+    showSkillListView();
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
+
+/** 试运行技能（用当前表单定义或已存定义跑一次）。 */
+async function testSkill(skillId) {
+  const id = skillId || editingSkillId;
+  if (!id) { toast(t("skill.err.saveFirst")); return; }
+  const query = prompt(t("skill.testQuery"), "你好");
+  if (query === null) return;
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ query }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }
+    $("sfTestResult").textContent = `▶ ${t("skill.testResult")}\n${data.result || ""}`;
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
+
+/** 删除技能。 */
+async function deleteSkill(skillId) {
+  if (!confirm(t("skill.delConfirm", { name: skillId }))) return;
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(skillId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) { const d = await res.json().catch(() => null); toast(t("common.saveFail", { err: errMsg(d, res.status) })); return; }
+    toast(t("skill.deleted"));
+    await loadSkills(); renderSkillList();
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
+
+/** 数字员工表单：可复用技能（技能库）多选回显渲染。 */
+function renderAgentSkillDefPicks() {
+  const el = $("afSkillDefList");
+  el.innerHTML = "";
+  (skillList || []).forEach((s) => {
+    const on = agentSkillDefIds.includes(s.skillId);
+    const label = document.createElement("label");
+    label.className = "kb-pick-item" + (on ? " on" : "");
+    label.innerHTML = `<input type="checkbox" value="${escapeHtml(s.skillId)}" ${on ? "checked" : ""} /> <span class="skill-kind tag-skill">${escapeHtml(s.kind)}</span> <b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code> <span class="kb-meta">${escapeHtml(s.description || "")}</span>`;
+    label.querySelector("input").addEventListener("change", (e) => {
+      const id = e.target.value, check = e.target.checked;
+      const i = agentSkillDefIds.indexOf(id);
+      if (check && i < 0) agentSkillDefIds.push(id);
+      if (!check && i >= 0) agentSkillDefIds.splice(i, 1);
+      renderAgentSkillDefPicks();
+    });
+    el.appendChild(label);
+  });
+}
+
+/** 数字员工表单：可调用子数字员工（Skills）多选渲染 + 每项调用说明。
+ *  选中某数字员工 = 把它作为本角色可调用技能（模型需要其能力时自动调起），
+ *  skillId 留空由后端自动生成 skill_<目标ID>。 */
+function renderAgentSkillPicks() {
+  const el = $("afSkillAgentList");
+  if (!el) return;
+  el.innerHTML = "";
+  const candidates = (agentList || []).filter((x) =>
+    x.agentId && x.agentId !== editingAgentId && !/^skill_/.test(x.agentId) && x.agentId !== "agent_" + editingAgentId);
+  if (!candidates.length) {
+    el.innerHTML = '<span class="form-hint">暂无可调用的数字员工（先新建其他数字员工）。</span>';
+    return;
+  }
+  candidates.forEach((ag) => {
+    const existing = agentSkillPicks.find((p) => p.targetAgentId === ag.agentId);
+    const on = !!existing;
+    const label = document.createElement("label");
+    label.className = "kb-pick-item" + (on ? " on" : "");
+    label.style.cursor = "pointer";
+    label.innerHTML = `<input type="checkbox" value="${escapeHtml(ag.agentId)}" ${on ? "checked" : ""} /> <span class="skill-kind tag-agent">AI</span> <b>${escapeHtml(ag.nickname || ag.agentId)}</b> <code>${escapeHtml(ag.agentId)}</code> <span class="kb-meta">${escapeHtml(ag.description || "")}</span>`;
+    label.querySelector("input").addEventListener("change", (e) => {
+      const id = e.target.value, check = e.target.checked;
+      const i = agentSkillPicks.findIndex((p) => p.targetAgentId === id);
+      if (check && i < 0) {
+        const ag2 = (agentList || []).find((x) => x.agentId === id);
+        const desc = ag2?.description || ag2?.nickname
+          ? `调用数字员工「${ag2?.nickname || id}」${ag2?.description ? "（" + ag2.description + "）" : ""}处理相关事务。`
+          : `调用数字员工「${id}」处理相关事务。`;
+        agentSkillPicks.push({ skillId: "", description: desc, targetAgentId: id });
+      } else if (!check && i >= 0) {
+        agentSkillPicks.splice(i, 1);
+      }
+      renderAgentSkillPicks();
+    });
+    el.appendChild(label);
+    if (on && existing) {
+      const descBox = document.createElement("div");
+      descBox.style.cssText = "margin:-2px 0 6px 22px";
+      const ta = document.createElement("textarea");
+      ta.className = "modal-input";
+      ta.rows = 2;
+      ta.placeholder = t("agent.form.subAgentDescPh");
+      ta.value = existing.description || "";
+      ta.addEventListener("input", () => { existing.description = ta.value; });
+      descBox.appendChild(ta);
+      el.appendChild(descBox);
+    }
+  });
+}
 
 let kbList = [];       // 可见知识库 [{kbId,name,description,ownerId,documents}]
 let agentKbIds = [];   // 数字员工表单当前选中的知识库 ID
@@ -3238,7 +3815,6 @@ async function loadConfigGovernance() {
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
     setCfgBool("cfgEnableWebTools", d.enableWebTools);
-    setCfgBool("cfgWorkTools", d.workToolsEnabled);
     setCfgBool("cfgThinking", d.thinkingMode);
     $("cfgApprovalTools").value = (d.requireApprovalToolNames || []).join(", ");
     $("cfgFrameOrigins").value = (d.allowedFrameOrigins || []).join(", ");
@@ -3264,7 +3840,6 @@ function collectCfg() {
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");
   body.enableWebTools = boolOrNull("cfgEnableWebTools");
-  body.workToolsEnabled = boolOrNull("cfgWorkTools");
   body.thinkingMode = boolOrNull("cfgThinking");
   body.requireApprovalToolNames = listOrUndefined($("cfgApprovalTools").value);
   body.allowedFrameOrigins = listOrUndefined($("cfgFrameOrigins").value);
@@ -3377,7 +3952,15 @@ async function openStatusModal() {
       [t("status.memory"), (Number(d.memoryMb) || 0) + " MB"],
       [t("status.threads"), Number(d.threadCount) || 0],
       [t("status.dotnet"), escapeHtml(String(d.dotnetVersion || ""))],
+      // RAG 检索方式（向量语义 / 图谱遍历）
+      [t("status.ragVector"), (d.rag && d.rag.vectorEnabled) ? t("status.on") : t("status.off")],
     ];
+    // 图谱命中时展示其规模；未命中（未启用）显示“未启用”
+    if (d.rag && d.rag.graphInUse) {
+      items.push([t("status.ragGraph"), t("status.graphActive", { e: Number(d.rag.graphEntities) || 0, r: Number(d.rag.graphEdges) || 0 })]);
+    } else {
+      items.push([t("status.ragGraph"), t("status.ragGraphOff")]);
+    }
     $("statusBody").innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
       `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`;
   } catch { $("statusBody").innerHTML = t("admin.sysNetErr"); }
@@ -5472,11 +6055,6 @@ function init() {
     applyBranding({ appName: t("brand.name"), primaryColor: "", forceDark: null }); // 本地立即恢复默认（不落库）
     toast(t("brand.resetDone"));
   };
-  // 任务中心（工作型数字员工任务编排）
-  $("meMenuTasks").onclick = () => { $("meMenu").classList.add("hidden"); openTaskModal(); };
-  $("taskClose").onclick = () => $("taskModal").classList.add("hidden");
-  $("taskRefreshBtn").onclick = () => loadTasks();
-  $("taskGroupFilter").onchange = () => loadTasks();
   // 管理员控制台：用户管理 + 系统状态
   $("meMenuAdmin").onclick = () => { $("meMenu").classList.add("hidden"); openAdminModal(); };
   $("adminClose").onclick = () => $("adminModal").classList.add("hidden");
@@ -5587,6 +6165,18 @@ function init() {
   $("agentManageBtn").onclick = openAgentModal;
   $("agentClose").onclick = () => $("agentModal").classList.add("hidden");
   $("agentAddBtn").onclick = () => openAgentForm(null);
+  initCollapsibleSections(false); // 绑定数字员工表单可折叠分组的开合
+  // 数字员工组织架构（全局入口，一个图标即可）：确保目录已加载后打开
+  $("agentOrgBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } if (!agentList?.length) await loadAgents(); openOrgChart(); };
+  // 技能库：工具条入口 + 弹窗内部动作
+  $("agentSkillLibBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } await loadSkills(); openSkillModal(); };
+  $("skillCloseBtn").onclick = () => $("skillModal").classList.add("hidden");
+  $("skillAddBtn").onclick = () => openSkillForm(null);
+  $("sfBack").onclick = showSkillListView;
+  $("sfKind").addEventListener("change", syncSkillKind);
+  $("sfSave").onclick = saveSkill;
+  $("sfTest").onclick = () => testSkill(editingSkillId);
+  $("afSkillLibManageBtn").onclick = openSkillModal;
   // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);
   $("agentImportBtn").onclick = () => $("agentImportFile").click();
@@ -5691,7 +6281,6 @@ function init() {
     } catch (ex) { toast(t("agent.form.genFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
-  $("afSkillAddBtn").onclick = () => { agentSkills.push({ skillId: "", description: "", targetAgentId: "" }); renderSkillRows(); };
   // 知识库：管理弹窗 + 创建
   $("afKbManageBtn").onclick = openKbModal;
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };

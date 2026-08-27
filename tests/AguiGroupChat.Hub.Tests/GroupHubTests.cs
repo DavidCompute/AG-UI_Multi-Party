@@ -550,8 +550,8 @@ public sealed class GroupHubTests
         });
 
         // 发送者与目标成员可见
-        Assert.Equal(1, (await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_1")).LatestMessages.Count);
-        Assert.Equal(1, (await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_2")).LatestMessages.Count);
+        Assert.Single((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_1")).LatestMessages);
+        Assert.Single((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_2")).LatestMessages);
         // 非接收者（user_3）看不到
         Assert.Empty((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_3")).LatestMessages);
     }
@@ -568,8 +568,8 @@ public sealed class GroupHubTests
             Mentions = ["user_2"],
         });
 
-        Assert.Equal(1, (await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_1")).LatestMessages.Count);
-        Assert.Equal(1, (await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_2")).LatestMessages.Count);
+        Assert.Single((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_1")).LatestMessages);
+        Assert.Single((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_2")).LatestMessages);
         Assert.Empty((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_3")).LatestMessages);
     }
 
@@ -583,7 +583,7 @@ public sealed class GroupHubTests
             GroupId = group.GroupId, UserId = "user_1", Content = "大家好",
         });
 
-        Assert.Equal(1, (await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_3")).LatestMessages.Count);
+        Assert.Single((await f.Hub.BuildSnapshotAsync(group.GroupId, viewerId: "user_3")).LatestMessages);
     }
 
     [Fact]

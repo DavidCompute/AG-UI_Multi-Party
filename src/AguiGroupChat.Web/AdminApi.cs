@@ -48,11 +48,12 @@ public static class AdminApi
             {
                 var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
                 if (error is not null) return error;
+                var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
                 // 防止管理员误禁自己（把自己禁掉后控制台失联）
-                if (req.Disabled && meId == userId)
+                if (req.Disabled && me == userId)
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "不能禁用当前登录的管理员账号"));
                 auth.SetUserDisabled(userId, req.Disabled);
-                audit.Record("admin.user.disable", meId, auth.GetUser(meId)?.Username, targetType: "user",
+                audit.Record("admin.user.disable", me, auth.GetUser(me)?.Username, targetType: "user",
                     targetId: userId, detail: req.Disabled ? "禁用账号" : "启用账号");
                 return Results.Ok(new { ok = true, userId, disabled = req.Disabled });
             }));
@@ -62,18 +63,25 @@ public static class AdminApi
             {
                 var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
                 if (error is not null) return error;
+                var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
                 auth.AdminResetPassword(userId, req.NewPassword);
-                audit.Record("admin.user.reset_password", meId, auth.GetUser(meId)?.Username, targetType: "user", targetId: userId);
+                audit.Record("admin.user.reset_password", me, auth.GetUser(me)?.Username, targetType: "user", targetId: userId);
                 return Results.Ok(new { ok = true, userId });
             }));
 
-        root.MapGet("/status", (HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, AgentCatalog catalog, ConnectionManager connections) =>
+        root.MapGet("/status", (HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, AgentCatalog catalog, ConnectionManager connections, IServiceProvider sp) =>
         {
             var (_, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
             var store = hub.Store;
             var messageCount = store.AllGroups().Sum(g => store.AllMessages(g.GroupId).Count);
             var proc = Process.GetCurrentProcess();
+            // RAG 配置与图存储：图谱记忆是否生效取决于配置开启（GraphEnabled）且 IGraphMemory 可用（非 null 占位）
+            var agents = sp.GetRequiredService<AgentOptions>();
+            var graph = sp.GetService<IGraphMemory>();
+            var graphActive = graph is not null && agents.Memory.GraphEnabled;
+            GraphStats? gs = null;
+            if (graphActive) { try { gs = graph!.Stats(); } catch { gs = null; } }
             return Results.Ok(new
             {
                 status = "ok",
@@ -86,6 +94,17 @@ public static class AdminApi
                 memoryMb = proc.WorkingSet64 / 1024 / 1024,
                 threadCount = proc.Threads.Count,
                 dotnetVersion = Environment.Version.ToString(),
+                rag = new
+                {
+                    vectorEnabled = agents.Memory.Enabled,             // 向量 RAG（语义记忆）配置开关
+                    graphEnabled = agents.Memory.GraphEnabled,         // 图谱 RAG 配置开关
+                    graphInUse = graphActive,                          // 图谱 RAG 是否真正生效（配置开 + 图存储可用）
+                    graphProvider = graphActive ? agents.Memory.Provider : null,
+                    graphTopK = agents.Memory.GraphTopK,
+                    graphHops = agents.Memory.GraphHops,
+                    graphEntities = gs?.EntityCount ?? 0,              // 当前图谱实体数
+                    graphEdges = gs?.EdgeCount ?? 0,                   // 当前图谱关系边数
+                },
             });
         });
 
@@ -185,7 +204,6 @@ public static class AdminApi
                     provider = agents.Provider,
                     enableTools = agents.EnableTools,
                     enableWebTools = agents.EnableWebTools,
-                    workToolsEnabled = agents.WorkToolsEnabled,
                     thinkingMode = agents.ThinkingMode,
                     dailyTokenQuotaPerUser = agents.DailyTokenQuotaPerUser,
                     requireApprovalToolNames = agents.RequireApprovalToolNames,

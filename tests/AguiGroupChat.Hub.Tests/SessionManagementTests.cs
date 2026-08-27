@@ -78,6 +78,6 @@ public sealed class SessionManagementTests
 
         Assert.NotNull(auth2.ValidateToken(t));
         Assert.StartsWith("ses_", auth2.GetSessionIdOfToken(t)!);
-        Assert.Equal(1, auth2.GetUserSessions(auth1.ListUsers()[0].UserId).Count);
+        Assert.Single(auth2.GetUserSessions(auth1.ListUsers()[0].UserId));
     }
 }

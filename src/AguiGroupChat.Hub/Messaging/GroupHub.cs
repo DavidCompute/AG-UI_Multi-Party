@@ -29,6 +29,7 @@ public sealed class GroupHub : IDisposable
     private readonly IMessageMemory? _memory;
     private readonly IAgentDefinitionStore? _agentDefinitions;
     private readonly ITwinAgentSync? _twinSync;
+    private readonly IGraphMemory? _graph;
     private readonly ConcurrentDictionary<string, byte> _disbanded = new();
     private readonly ConcurrentDictionary<string, AgentStreamState> _agentStreams = new();
     // 智能体触发调用并发限制（防止语境智能体多 / 消息频繁时打爆模型与桥接服务）
@@ -75,7 +76,8 @@ public sealed class GroupHub : IDisposable
         ChangeHub? changes = null,
         IMessageMemory? memory = null,
         IAgentDefinitionStore? agentDefinitions = null,
-        ITwinAgentSync? twinSync = null)
+        ITwinAgentSync? twinSync = null,
+        IGraphMemory? graph = null)
     {
         _store = store;
         _users = users;
@@ -90,6 +92,7 @@ public sealed class GroupHub : IDisposable
         _memory = memory;
         _agentDefinitions = agentDefinitions;
         _twinSync = twinSync;
+        _graph = graph;
         _agentInvocationLimiter = new SemaphoreSlim(Math.Max(1, options.MaxConcurrentAgentInvocations));
         // 孤儿流兜底定时器：周期清理 End 丢失 / 智能体进程崩溃的流式消息（方法内 try/catch，Timer 随 Dispose 释放）
         _orphanTimer = new Timer(_ => CleanupOrphanStreams(), null, OrphanCleanupIntervalMs, OrphanCleanupIntervalMs);
@@ -225,6 +228,7 @@ public sealed class GroupHub : IDisposable
 
         _store.RemoveGroup(group.GroupId);
         _memory?.RemoveGroup(group.GroupId); // 解散群：同步物理删除该群全部语义记忆（含 pgvector 向量）
+        _graph?.RemoveGroup(group.GroupId); // 解散群：同步删除该群图谱（实体 + 边）
         // 清理该群残留的流式状态（_agentStreams / 防抖待落库内容 / typing 节流表），避免内存泄漏与后续误写
         foreach (var kv in _agentStreams.Where(kv => kv.Value.GroupId == group.GroupId).ToList())
             _agentStreams.TryRemove(kv.Key, out _);
@@ -496,7 +500,7 @@ public sealed class GroupHub : IDisposable
         if (attachments.Count > MaxAttachmentsPerMessage)
             throw new AguiProtocolException(ErrorCodes.BadRequest, $"附件数量超过上限（{MaxAttachmentsPerMessage} 个）");
 
-        var sender = _store.GetMember(group.GroupId, req.UserId)!;
+        var sender = _store.GetMember(group.GroupId, req.UserId!)!;
         var topicId = string.IsNullOrWhiteSpace(req.TopicId) ? "main" : req.TopicId!;
         if (topicId != "main" && _store.GetTopic(group.GroupId, topicId) is null)
             throw new AguiProtocolException(ErrorCodes.GroupNotFound, "话题不存在");
@@ -515,7 +519,7 @@ public sealed class GroupHub : IDisposable
             Visibility = req.Visibility ?? MessageVisibility.All,
             VisibleMemberIds = req.VisibleMemberIds ?? [],
             Attachments = attachments,
-            Content = req.Content,
+            Content = req.Content ?? "", // 协议允许纯附件消息（正文可空），以空串落库满足非空 Content
             Timestamp = NowMs,
         };
 
@@ -583,7 +587,7 @@ public sealed class GroupHub : IDisposable
         {
             GroupId = group.GroupId,
             MessageId = req.MessageId,
-            OperatorId = req.OperatorId,
+            OperatorId = req.OperatorId!,
             Timestamp = NowMs,
         }, ct: ct);
     }
@@ -623,7 +627,7 @@ public sealed class GroupHub : IDisposable
         {
             GroupId = group.GroupId,
             MessageId = req.MessageId,
-            OperatorId = req.OperatorId,
+            OperatorId = req.OperatorId!,
             Timestamp = NowMs,
         }, ct: ct);
 
@@ -1705,6 +1709,8 @@ public sealed class GroupHub : IDisposable
         _memory.Remember(new MessageMemoryEntry(
             msg.MessageId, msg.GroupId, msg.TopicId,
             msg.SenderId, msg.SenderType.ToString(), msg.Content, msg.Timestamp));
+        // 图谱记忆：同一消息也送入图抽取队列（仅对全群可见内容，防私密内容进图污染关系）
+        _graph?.Remember(new GraphMessageEntry(msg.GroupId, msg.SenderId, msg.Content, msg.Timestamp));
     }
 
     /// <summary>查询用户是否开启个人记忆（未注册用户 / 未开启返回 false）。供 AgentGateway 决定是否检索注入触发者的个人记忆。</summary>

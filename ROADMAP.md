@@ -42,12 +42,13 @@
 
 ## 二、记忆与知识层
 
-已有基础：RAG（pgvector / sqlite-vec）、个人记忆、记忆分级 / 自动遗忘 / 可视化、知识库（异步入库）。
+已有基础：RAG（pgvector / sqlite-vec）、个人记忆、记忆分级 / 自动遗忘 / 可视化、知识库（异步入库）、**图谱记忆（Graph RAG，实体-关系子图注入）**。
 
 ### 2.1 混合检索（稀疏 BM25 + 稠密向量）（★★☆） ✅已实现
 - **现状**：单一 embedding 模型。
 - **目标**：引入 BM25 稀疏检索与稠密向量融合，提升中文 / 代码场景召回率；支持按需切换 embedding 提供方。
 - **落点模块**：`MessageMemory`、`IMessageMemory`（检索聚合）、`SqliteVecMessageMemoryStore.cs` / `PgMessageMemoryStore.cs`。
+- **图谱记忆（Graph RAG，已实现）**：`Memory.GraphEnabled` 开启后，从群消息抽取「实体-关系-实体」建图（PostgreSQL：`agui_graph_entities`/`agui_graph_edges` + pgvector 实体向量；SQLite：同表 + BLOB 向量 + 内存余弦），回复前语义召回种子实体 + 逐层 BFS 双向 n 跳遍历，子图与向量记忆并列注入 prompt（补强关系型知识）。<b>知识库同样建图</b>：上传文档时同步抽取实体/关系建入隔离域 `kb:{KbId}`，检索时对绑定知识库做图谱种子召回 + n 跳遍历，子图与向量切片并列注入。`IGraphMemory` / `IGraphMemoryStore` 接口 + `PgGraphMemoryStore` / `RelationalGraphMemoryStore` / `GraphMemory` / `GraphEntityExtractor`；仅在 `GroupChat.Memory.GraphEnabled=true` 且存储为 postgres/sqlite 时启用。
 
 ### 2.2 记忆时间线 / 版本化（★★☆） ✅已实现（时间线回放）
 - **现状**：记忆仅记「最新」+ 过期删除，无演进回放。

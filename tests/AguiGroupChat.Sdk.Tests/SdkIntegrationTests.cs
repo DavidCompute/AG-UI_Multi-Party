@@ -45,6 +45,14 @@ public sealed class SdkServerFixture : IAsyncLifetime
         HubApp.InitializePersistence(App);
         // 种子：示例数据中的 user_1001（zhangsan / 123456）已加入「产品需求评审群」
         await HubApp.SeedSampleDataAsync(App);
+        // v1.0.75 起不再播种演示账号——这里由夹具显式创建固定身份账号（zhangsan/lisi → user_1001/user_1002），
+        // 对齐种子群的既有成员并绕开首账号管理员判定，供 SDK 用例登录使用；已存在则跳过。
+        var auth = App.Services.GetRequiredService<AguiGroupChat.Hub.Users.AuthService>();
+        if (auth is not null && App.Services.GetRequiredService<AguiGroupChat.Hub.Users.IUserStore>().GetUserByUsername("zhangsan") is null)
+        {
+            auth.Register("zhangsan", "123456", "张三", null, "user_1001");
+            auth.Register("lisi", "123456", "李四", null, "user_1002");
+        }
         HttpBase = App.Urls.First().TrimEnd('/');
     }
 

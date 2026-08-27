@@ -410,7 +410,6 @@ public static class HttpGroupApi
 
         // 多智能体讨论：用户 @ 多个智能体发起话题，按序串行触发（前序智能体的回复作为后序的群历史上下文），
         // 后台执行（智能体回复经 WS 实时广播），接口立即返回已受理。
-        // 工作型智能体参与时自动转为「计划→执行」：先 plan_write 规划，再逐步用工作工具执行、plan_mark 打勾。
         group.MapPost("/{groupId}/discussion", async (string groupId, DiscussionHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, IAgentGateway gateway, ILoggerFactory loggerFactory, CancellationToken ct)
             => await RunAsync(async () =>
             {
@@ -426,8 +425,6 @@ public static class HttpGroupApi
                 var agentIds = (req.AgentIds ?? []).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct().ToList();
                 if (agentIds.Count == 0)
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请至少选择一位智能体参与讨论"));
-                // 工作型智能体归属查询（可选：未注册时不启用计划-执行提示，普通讨论不变）
-                var agentDefs = ctx.RequestServices.GetService(typeof(IAgentDefinitionStore)) as IAgentDefinitionStore;
                 // 参与讨论的智能体必须是群成员（防把外部/无权智能体拉进群话题）
                 foreach (var agentId in agentIds)
                 {
@@ -448,16 +445,7 @@ public static class HttpGroupApi
                         try
                         {
                             var member = hub.Store.GetMember(groupId, agentId);
-                            var isWorkAgent = agentDefs?.GetDefinition(agentId)?.EnableWorkTools == true;
-                            // 工作型智能体参与讨论：把主题当作可执行任务，计划→执行→汇报（PLAN.md 打勾），而非仅发表观点
-                            var content = isWorkAgent
-                                ? $"【工作讨论】{inviterNick} 布置了一个需要你在工作区完成的任务：「{theme}」。\n"
-                                  + "请按以下方式执行：\n"
-                                  + "1. 先用 plan_write 把任务拆成步骤计划（写入 PLAN.md）；\n"
-                                  + "2. 逐步调用工作工具（list_dir/read_file/fetch_url/write_file/shell/batch_rename/archive/remove 等）执行；\n"
-                                  + "3. 每完成一步用 plan_mark 打勾，出问题用 read_notes/remember 记录中间结论；\n"
-                                  + "4. 全部完成后，read_notes/plan_read 汇总，向群汇报执行结果（含产物），并发布需要的文件（publish_file）。"
-                                : $"【群讨论】{inviterNick} 邀请你参与讨论「{theme}」。请先阐述你的观点，再回应其他智能体的发言（如有）；保持简洁，直接开始。";
+                            var content = $"【群讨论】{inviterNick} 邀请你参与讨论「{theme}」。请先阐述你的观点，再回应其他智能体的发言（如有）；保持简洁，直接开始。";
                             await gateway.InvokeAsync(new AgentInvocationContext(
                                 GroupId: groupId,
                                 ThreadId: threadId,

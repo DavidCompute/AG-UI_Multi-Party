@@ -51,6 +51,15 @@ public static class ErrorCodes
 
     /// <summary>私密智能体仅创建者可操作（拉入群 / 编辑 / 删除）。</summary>
     public const string AgentPermissionDenied = "AGENT_PERMISSION_DENIED";
+
+    /// <summary>技能库：技能不存在。</summary>
+    public const string SkillNotFound = "SKILL_NOT_FOUND";
+
+    /// <summary>技能库：技能 ID 已被占用。</summary>
+    public const string SkillExists = "SKILL_EXISTS";
+
+    /// <summary>技能库：技能仅创建者或系统管理员可操作。</summary>
+    public const string SkillPermissionDenied = "SKILL_PERMISSION_DENIED";
 }
 
 /// <summary>HTTP 上行错误响应体：{"code": "...", "message": "..."}。</summary>

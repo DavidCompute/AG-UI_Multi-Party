@@ -13,35 +13,21 @@ public sealed class RelationalUsageStore : IUsageStore
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        // SQLite 与 MySQL 均支持 INSERT ... ON CONFLICT / ON DUPLICATE —— 用通用写法：
-        // 先 UPDATE，未命中再 INSERT（两条语句在同一连接内串行执行，避免方言差异）
-        cmd.CommandText = """
-            UPDATE agui_usage
-            SET prompt_tokens = prompt_tokens + @p, completion_tokens = completion_tokens + @c,
-                reasoning_tokens = reasoning_tokens + @r, calls = calls + 1
-            WHERE usage_date = @d AND agent_id = @a AND user_id = @u
-            """;
+        // 单条原子 UPSERT：冲突（同一 date+agent+user 已存在）时对 token/calls 做增量累加，
+        // 避免旧「先 UPDATE 未命中再 INSERT」在并发写同键时第二个 INSERT 抛主键冲突。
+        cmd.CommandText = _db.Dialect.IncrementUpsert(
+            "agui_usage",
+            "usage_date, agent_id, user_id, prompt_tokens, completion_tokens, reasoning_tokens, calls",
+            "@d, @a, @u, @p, @c, @r, 1",
+            "usage_date, agent_id, user_id",
+            "prompt_tokens, completion_tokens, reasoning_tokens, calls");
         cmd.AddWithValue("p", prompt);
         cmd.AddWithValue("c", completion);
         cmd.AddWithValue("r", reasoning);
         cmd.AddWithValue("d", date);
         cmd.AddWithValue("a", agentId);
         cmd.AddWithValue("u", userId);
-        if (cmd.ExecuteNonQuery() == 0)
-        {
-            using var cmd2 = conn.CreateCommand();
-            cmd2.CommandText = """
-                INSERT INTO agui_usage (usage_date, agent_id, user_id, prompt_tokens, completion_tokens, reasoning_tokens, calls)
-                VALUES (@d, @a, @u, @p, @c, @r, 1)
-                """;
-            cmd2.AddWithValue("d", date);
-            cmd2.AddWithValue("a", agentId);
-            cmd2.AddWithValue("u", userId);
-            cmd2.AddWithValue("p", prompt);
-            cmd2.AddWithValue("c", completion);
-            cmd2.AddWithValue("r", reasoning);
-            cmd2.ExecuteNonQuery();
-        }
+        cmd.ExecuteNonQuery();
     }
 
     public long GetUserUsage(string userId, string date)

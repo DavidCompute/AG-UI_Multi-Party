@@ -65,7 +65,7 @@ public sealed class ScheduledTaskTests
         var snap = svc.Snapshot();
         var svc2 = new ScheduledTaskService();
         svc2.Restore(snap);
-        Assert.Equal(1, svc2.List().Count);
+        Assert.Single(svc2.List());
         Assert.Equal("30 18 * * 1-5", svc2.List()[0].Cron);
     }
 }

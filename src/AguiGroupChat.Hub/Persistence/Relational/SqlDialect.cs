@@ -47,4 +47,18 @@ public sealed class SqlDialect
             ? $"INSERT INTO {table} ({columns}) VALUES ({values}) AS new ON DUPLICATE KEY UPDATE {setColumn} = GREATEST({table}.{setColumn}, new.{setColumn})"
             : $"INSERT INTO {table} ({columns}) VALUES ({values}) ON CONFLICT ({conflictColumns}) DO UPDATE SET {setColumn} = MAX({table}.{setColumn}, excluded.{setColumn})";
     }
+
+    /// <summary>
+    /// 构造「累加型」UPSERT（用量统计等对冲突行做增量累加的场景）：冲突时把冲突行对应列加上本次插入值，
+    /// 而非覆盖——MySQL 用行别名 new.<col>，SQLite 用 excluded.<col>。
+    /// </summary>
+    public string IncrementUpsert(string table, string columns, string values, string conflictColumns, string setColumns)
+    {
+        var sets = string.Join(", ",
+            setColumns.Split(',').Select(c => c.Trim()).Select(c =>
+                _mysql ? $"{c} = {table}.{c} + new.{c}" : $"{c} = {table}.{c} + excluded.{c}"));
+        return _mysql
+            ? $"INSERT INTO {table} ({columns}) VALUES ({values}) AS new ON DUPLICATE KEY UPDATE {sets}"
+            : $"INSERT INTO {table} ({columns}) VALUES ({values}) ON CONFLICT ({conflictColumns}) DO UPDATE SET {sets}";
+    }
 }

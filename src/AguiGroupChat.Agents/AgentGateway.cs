@@ -66,8 +66,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly ILogger<AgentGateway> _logger;
     // 模型 token 用量统计与配额（可选：未注册用量存储时不统计）
     private readonly Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?> _usage;
-    // 工作任务编排（可选，TaskId 有值才回写；未注册 TaskService 时为空）
-    private readonly Lazy<AguiGroupChat.Hub.Agents.TaskService?> _tasks;
+    // 技能库（可复用技能：shell/http/prompt）——供确定性编排计划枚举与按计划激活技能
+    private readonly Lazy<AgentSkillCatalog?> _skillCatalog;
     // 轻量运行指标（可选，6.1 可观测性）
     private readonly Lazy<MetricsService?> _metrics;
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
@@ -149,9 +149,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _changes = services.GetService<ChangeHub>(); // 游标持久化脏位通知（可选：未注册持久化时不落盘）
         _usage = new Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?>(() =>
             services.GetService(typeof(AguiGroupChat.Hub.Agents.AgentUsageService)) as AguiGroupChat.Hub.Agents.AgentUsageService);
-        // 工作任务编排：可选。任务触发的运行在完成 / 恢复完成 / 失败时回写任务状态（TaskId 有值才回写）。
-        _tasks = new Lazy<AguiGroupChat.Hub.Agents.TaskService?>(() =>
-            services.GetService(typeof(AguiGroupChat.Hub.Agents.TaskService)) as AguiGroupChat.Hub.Agents.TaskService);
+        _skillCatalog = new Lazy<AgentSkillCatalog?>(() => services.GetService(typeof(AgentSkillCatalog)) as AgentSkillCatalog);
         // 轻量运行指标（可选，6.1）
         _metrics = new Lazy<MetricsService?>(() =>
             services.GetService(typeof(MetricsService)) as MetricsService);
@@ -472,19 +470,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
             }
 
-            // 工作型智能体产物回档：把正文里引用的 publish_file 产物（att_xxx）追加为消息附件，
-            // 前端拿到 TEXT_MESSAGE_ATTACHMENTS 渲染可下载附件卡片（不只是模型在正文里说“已发布”）。
             await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
-            await AttachPlanIfAnyAsync(context, messageId, runCt);
             await AttachAgentChainAsync(context, messageId, runCt);
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
-            CompleteTaskIfAny(context, succeeded: true, accumulated);
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
         {
             await SafeEndAsync(context, messageId);
-            CompleteTaskIfAny(context, succeeded: false, error: "AGENT_RUN_CANCELLED");
             return new AgentInvocationResult(false, runId, "AGENT_RUN_CANCELLED");
         }
         catch (Exception ex)
@@ -498,7 +491,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 Message = DescribeModelError(ex),
                 Timestamp = _hub.Value.NowMs,
             });
-            CompleteTaskIfAny(context, succeeded: false, error: "AGENT_RUN_ERROR: " + ex.Message);
             return new AgentInvocationResult(false, runId, "AGENT_RUN_ERROR");
         }
         finally
@@ -563,10 +555,22 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     + "用户请求：\n" + input + "\n\n"
                     + (sb.Length > 0 ? "前序步骤已产出（可参考）：\n" + sb + "\n\n" : "")
                     + "只输出本步结论，不要复述前序内容。";
-                // 子智能体在干净会话上一次 run（不继承本群模型会话），产出该步文本
+                // 子智能体在干净会话上一次 run（不继承本群模型会话），产出该步文本。
+                // 关键：把 ambient 上下文切到<b>本步骤子智能体</b>——MemoryContextProvider 据此注入
+                // 它自己的知识库/记忆（否则按宿主检索，绑知识库的子智能体会丢上下文）。
                 var childSession = await child.CreateSessionAsync(runCt);
-                var resp = await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], childSession, null, runCt);
-                var stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（子智能体未返回内容）" : resp.Text.Trim();
+                var prevAmbient = AgentGateway.AmbientContext.Value;
+                AgentGateway.AmbientContext.Value = context with { AgentId = step.StepAgentId, AgentNickname = stepDef.Nickname ?? step.StepAgentId };
+                string stepOut;
+                try
+                {
+                    var resp = await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], childSession, null, runCt);
+                    stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（子智能体未返回内容）" : resp.Text.Trim();
+                }
+                finally
+                {
+                    AgentGateway.AmbientContext.Value = prevAmbient;
+                }
                 sb.Append("【").Append(stepDef.Nickname ?? step.StepAgentId).Append("】").AppendLine(stepOut).AppendLine();
                 _logger.LogInformation("流水线步骤完成：agent={AgentId} step={StepAgent} run={RunId}", context.AgentId, step.StepAgentId, runId);
 
@@ -652,8 +656,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var relay = _catalog.GetOrCreate(relayAgentId);
             var prompt = "你正被「" + (def.Nickname ?? context.AgentId) + "」整轮交接代答。请就以下用户请求直接给出你的专业答复：\n\n" + input;
             var session = await relay.CreateSessionAsync(runCt);
-            var resp = await relay.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, runCt);
-            var text = string.IsNullOrWhiteSpace(resp.Text) ? "（交接对象未返回内容）" : resp.Text.Trim();
+            // 关键：交接代答时把 ambient 上下文切到<b>被交接方</b>，使其能检索自己的知识库/记忆
+            var prevAmbient = AgentGateway.AmbientContext.Value;
+            AgentGateway.AmbientContext.Value = context with { AgentId = relayAgentId, AgentNickname = relayDef.Nickname ?? relayAgentId };
+            string text;
+            try
+            {
+                var resp = await relay.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, runCt);
+                text = string.IsNullOrWhiteSpace(resp.Text) ? "（交接对象未返回内容）" : resp.Text.Trim();
+            }
+            finally
+            {
+                AgentGateway.AmbientContext.Value = prevAmbient;
+            }
             foreach (var chunk in ChunkReply(text, 160))
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
@@ -708,13 +723,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             var input = await BuildUserMessageAsync(context, runCt);
             var visited = new HashSet<string>(StringComparer.Ordinal);
-            var (outcome, finalText, hops) = await ResolveRouteAsync(context, context.AgentId, input, visited, depth: 1, runCt);
-            var prefixNames = hops.Where(h => !string.IsNullOrWhiteSpace(h.AgentId)).Select(h => h.AgentNickname).ToList();
+            string? finalText = null;
+            var hops = new List<ChainNode>();
+            var outcome = RouteOutcome.CannotSolve;
+
+            // 先尝试构建编排计划（只规划、不执行）；拿到计划则进入「随消息流逐项激活」；否则回退到递归指派
+            CoordinatedPlan? plan = null;
+            if (_options.CoordinatorPlanning && _catalog.GetDefinition(context.AgentId) is { } coordDef)
+                plan = await BuildCoordinatedPlanAsync(context, coordDef, input, runCt);
+            if (plan is null)
+            {
+                (outcome, finalText, hops) = await ResolveRouteAsync(context, context.AgentId, input, visited, depth: 1, runCt);
+            }
+            else
+            {
+                outcome = RouteOutcome.Answer;
+            }
             if (outcome == RouteOutcome.CannotSolve)
                 finalText = "（该问题不在我可解决的范围内，且没有可指派的同事或可提升的上级，暂时无法解决。请直接联系处理该问题的负责人。）";
-
-            // 链路可视化：把指派/提升路径写入消息级链（根=宿主，逐层嵌套）
-            RecordStandinChain(context, hops);
 
             var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
             {
@@ -729,13 +755,22 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }, runCt);
             messageId = started.MessageId;
 
-            // 逐层叠加「已指派给 X / 已提升给 Y」前缀
-            foreach (var name in prefixNames)
-                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
-
-            var text = string.IsNullOrWhiteSpace(finalText) ? "（处理对象未返回内容）" : finalText.Trim();
-            foreach (var chunk in ChunkReply(text, 160))
-                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
+            if (plan is not null)
+            {
+                // 编排计划：随消息流逐项激活 & 逐条点亮计划卡（TEXT_MESSAGE_PLAN 前端渲染）
+                await ExecuteCoordinatedPlanAsync(context, plan, messageId, runCt);
+            }
+            else
+            {
+                // 非编排路径：链路可视化 + 前缀 + 直接方案
+                RecordStandinChain(context, hops);
+                var prefixNames = hops.Where(h => !string.IsNullOrWhiteSpace(h.AgentId)).Select(h => h.AgentNickname).ToList();
+                foreach (var name in prefixNames)
+                    await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
+                finalText ??= "（处理对象未返回内容）";
+                foreach (var chunk in ChunkReply(finalText.Trim(), 160))
+                    await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
+            }
 
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
             return new AgentInvocationResult(true, runId, null);
@@ -767,6 +802,297 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
+    // ---------- 确定性编排计划（Coordinator Plan）：问题 → 按组织架构/技能配置定计划 → 激活对应员工与能力执行 ----------
+    private sealed record PlanStep(string Action, string Target, string? Note); // Action: dispatch | skill | answer
+
+    /// <summary>编排计划上下文：计划步骤 + 可指派的员工清单 + 可调用的技能库。供随消息流逐项执行。</summary>
+    private sealed record CoordinatedPlan(List<PlanStep> Steps, IReadOnlyList<AgentDefinition> Reached, Dictionary<string, AgentSkillDefinition> Skills, string Input);
+
+    /// <summary>最多纳入计划的清单项 / 步骤数（防配置病态深链 / 打爆模型时长）。</summary>
+    private const int CoordinatorPlanMaxItems = 12;
+    private const int CoordinatorPlanMaxSteps = 6;
+
+    /// <summary>
+    /// 构建一张编排计划（只规划、不执行）：把问题、可指派的组织下属、可调用技能显式列给路由模型，
+    /// 由它产出结构化步骤（谁先、调什么、如何汇总）；返回 null = 无需/无法编排 → 调用方回退到递归指派。
+    /// 计划随后由 <see cref="ExecuteCoordinatedPlanAsync"/> 随消息流逐项激活（并逐条点亮计划卡）。
+    /// </summary>
+    private async Task<CoordinatedPlan?> BuildCoordinatedPlanAsync(
+        AgentInvocationContext context, AgentDefinition root, string input, CancellationToken ct)
+    {
+        try
+        {
+            // 清单：可指派的组织下属（AssignmentIds 递归 BFS + 子代理 Skills）+ 可调用技能（SkillDefIds 技能库）
+            var reached = new List<AgentDefinition>();
+            var seen = new HashSet<string>(StringComparer.Ordinal) { root.AgentId };
+            var queue = new Queue<AgentDefinition>();
+            foreach (var id in root.AssignmentIds ?? [])
+                if (_catalog.GetDefinition(id) is { } d) queue.Enqueue(d);
+            foreach (var s in root.Skills ?? [])
+                if (_catalog.GetDefinition(s.TargetAgentId) is { } d) queue.Enqueue(d);
+            while (queue.Count > 0 && reached.Count < CoordinatorPlanMaxItems)
+            {
+                var d = queue.Dequeue();
+                if (!seen.Add(d.AgentId)) continue;
+                if (d.IsSkillTarget) continue;
+                reached.Add(d);
+                foreach (var id in d.AssignmentIds ?? [])
+                    if (_catalog.GetDefinition(id) is { } sub) queue.Enqueue(sub);
+            }
+            var catalog = _skillCatalog.Value;
+            var skills = new Dictionary<string, AgentSkillDefinition>(StringComparer.Ordinal);
+            void Collect(AgentDefinition? d)
+            {
+                if (d is null || catalog is null) return;
+                foreach (var refId in d.SkillDefIds ?? [])
+                    if (catalog.Get(refId) is { } def && !skills.ContainsKey(def.SkillId)) skills[def.SkillId] = def;
+            }
+            Collect(root);
+            foreach (var r in reached) Collect(r);
+
+            if (reached.Count == 0 && skills.Count == 0)
+                return null; // 无可指派 / 可调用
+
+            var steps = await PlanCoordinatedAsync(context, root, input, reached, skills.Values.ToList(), ct);
+            if (steps is null || steps.Count == 0) return null;
+            return new CoordinatedPlan(steps.Take(CoordinatorPlanMaxSteps).ToList(), reached, skills, input);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "构建编排计划失败（已回退到递归指派）：agent={AgentId}", root.AgentId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 随消息流逐项激活编排计划：先广播“全部待执行”的计划卡，再逐条执行（派下属 / 调技能），
+    /// 每完成一条即把该步标记完成并<b>重新广播计划卡</b>（前端逐条点亮），中间步骤产出作为下一步输入；
+    /// 最后综合各步给最终答复并广播计划完成。任一异常都优雅收尾（不再阻断消息）。
+    /// </summary>
+    private async Task ExecuteCoordinatedPlanAsync(AgentInvocationContext context, CoordinatedPlan plan, string messageId, CancellationToken ct)
+    {
+        var root = _catalog.GetDefinition(context.AgentId);
+        if (root is null) return;
+        var gid = context.GroupId;
+
+        // 1) 构造展示步骤（即时生效步 + 最终综合步），全部“待执行”
+        var display = new List<PlanStepInfo>();
+        foreach (var step in plan.Steps)
+        {
+            if (step.Action == "dispatch")
+            {
+                var nick = _catalog.GetDefinition(step.Target)?.Nickname ?? step.Target;
+                display.Add(new PlanStepInfo { Id = display.Count + 1, Text = "为「" + nick + "」分配工作" + (string.IsNullOrWhiteSpace(step.Note) ? "" : "：" + step.Note), Done = false });
+            }
+            else if (step.Action == "skill")
+            {
+                var name = plan.Skills.TryGetValue(step.Target, out var sk) ? (sk.Name ?? sk.SkillId) : step.Target;
+                display.Add(new PlanStepInfo { Id = display.Count + 1, Text = "调用技能「" + name + "」" + (string.IsNullOrWhiteSpace(step.Note) ? "" : "：" + step.Note), Done = false });
+            }
+        }
+        var finalStep = new PlanStepInfo { Id = display.Count + 1, Text = "综合各步结果并给出最终答复", Done = false };
+        display.Add(finalStep);
+
+        await BroadcastPlanAsync(gid, messageId, display, ct);
+
+        // 2) 逐项执行 & 点亮
+        var sb = new StringBuilder();
+        var working = plan.Input;
+        var hops = new List<ChainNode>();
+        var di = 0;
+        for (var si = 0; si < plan.Steps.Count; si++)
+        {
+            var step = plan.Steps[si];
+            if (step.Action == "dispatch")
+            {
+                if (_catalog.GetDefinition(step.Target) is not { } target
+                    || !plan.Reached.Any(r => r.AgentId == step.Target)) continue;
+                var child = _catalog.GetOrCreate(step.Target);
+                // 预判下游：若下一步是“需要 ${query} 输入的技能”，则让本员工<b>只输出该值本身</b>，供技能直接使用
+                var feedsParameterizedSkill = si + 1 < plan.Steps.Count
+                    && plan.Steps[si + 1].Action == "skill"
+                    && plan.Skills.TryGetValue(plan.Steps[si + 1].Target, out var nextSkill)
+                    && SkillRequiredInputs(nextSkill).Contains("query", StringComparer.Ordinal);
+                var prompt = "你正被「" + (target.Nickname ?? step.Target) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：\n" + working
+                    + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + sb : "")
+                    + (feedsParameterizedSkill
+                        ? "\n\n<b>请只输出所需的值本身</b>（如一个完整 URL / 地址 / 参数），不要添加解释或多余文字——它会被直接作为下一步技能的输入。"
+                        : "")
+                    + "\n\n只输出本步结论，不要复述前序内容。";
+                var session = await child.CreateSessionAsync(ct);
+                // 关键：把 ambient 上下文切到<b>子员工</b>（保留群/话题/触发者，只改 AgentId/Nickname）
+                // ——MemoryContextProvider 据此注入<b>子员工自己的知识库/记忆</b>，否则它会按宿主(Exchange连接测试助手)
+                // 的库检索（宿主没绑配置库 → 配置管理员丢上下文、答“数据不足”）。
+                var prev = AgentGateway.AmbientContext.Value;
+                AgentGateway.AmbientContext.Value = context with { AgentId = target.AgentId, AgentNickname = target.Nickname ?? target.AgentId };
+                try
+                {
+                    var resp = await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
+                    var stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（未返回内容）" : resp.Text.Trim();
+                    // 计划卡已展示“指派「配置管理员」代为处理”，正文不再叠加（X 代为处理）前缀，避免重复
+                    if (!hops.Any(h => h.AgentId == step.Target))
+                        hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = TruncateForChain(working), Result = TruncateForChain(stepOut) });
+                    sb.Clear().Append(stepOut);
+                    working = stepOut;
+                }
+                finally
+                {
+                    AgentGateway.AmbientContext.Value = prev;
+                }
+                if (di < display.Count) { display[di] = new PlanStepInfo { Id = display[di].Id, Text = display[di].Text, Done = true }; di++; }
+                await BroadcastPlanAsync(gid, messageId, display, ct);
+            }
+            else if (step.Action == "skill")
+            {
+                if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
+                // 参数化技能（body 含 ${query}）：从“上一步输出”中尽可能提取干净的 URL/值，再作为技能输入
+                var skillQuery = working;
+                if (SkillRequiredInputs(skill).Contains("query", StringComparer.Ordinal))
+                {
+                    var clean = ExtractCleanValueForSkill(skillQuery);
+                    if (!string.IsNullOrWhiteSpace(clean)) skillQuery = clean;
+                }
+                var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
+                _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, TruncateForChain(skillQuery));
+                if (!hops.Any(h => h.AgentId == skill.SkillId))
+                    hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = TruncateForChain(skillQuery), Result = TruncateForChain(res) });
+                sb.Clear().Append(res);
+                working = res;
+                if (di < display.Count) { display[di] = new PlanStepInfo { Id = display[di].Id, Text = display[di].Text, Done = true }; di++; }
+                await BroadcastPlanAsync(gid, messageId, display, ct);
+            }
+        }
+
+        // 3) 综合答复制止
+        display[^1] = new PlanStepInfo { Id = display[^1].Id, Text = display[^1].Text, Done = true };
+        await BroadcastPlanAsync(gid, messageId, display, ct);
+
+        // 链路可视化
+        RecordStandinChain(context, hops);
+
+        // 4) 综合答复
+        var final = await SynthesizePlanAnswerAsync(context, root, plan.Input, sb.ToString(), ct);
+        var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
+        if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
+        foreach (var chunk in ChunkReply(text.Trim(), 160))
+            await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
+    }
+
+    private async Task BroadcastPlanAsync(string groupId, string messageId, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct)
+    {
+        try
+        {
+            await _hub.Value.BroadcastMessagePlanAsync(groupId, messageId, "执行计划", steps, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "编排计划广播失败（已忽略）：group={GroupId}", groupId);
+        }
+    }
+
+    private string BuildPlanInventory(AgentDefinition root, IReadOnlyList<AgentDefinition> reached, IReadOnlyList<AgentSkillDefinition> skills)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# 可用的数字员工（组织分工）");
+        foreach (var d in reached)
+            sb.Append("- [员工] ").Append(d.Nickname ?? d.AgentId).Append(" (id=").Append(d.AgentId).Append(")")
+              .AppendLine(string.IsNullOrWhiteSpace(d.Description) ? "" : "｜" + d.Description.ReplaceLineEndings(" "));
+        sb.AppendLine("# 可调用的技能（技能库）");
+        foreach (var s in skills)
+        {
+            sb.Append("- [技能] ").Append(s.SkillId).Append("｜").Append(s.Name ?? s.SkillId).Append("：")
+              .Append((s.Description ?? "").ReplaceLineEndings(" "));
+            // 技能需要的外部输入（body 里的 ${query}/${xxx} 占位符）→ 提示计划先拿到该值再调用它
+            var inputs = SkillRequiredInputs(s);
+            if (inputs.Count > 0)
+                sb.Append("【需要输入：").Append(string.Join("、", inputs)).Append("】");
+            sb.AppendLine();
+        }
+        if (reached.Count == 0) sb.AppendLine("- （无可指派的数字员工）");
+        if (skills.Count == 0) sb.AppendLine("- （无可调用的技能）");
+        return sb.ToString();
+    }
+
+    /// <summary>技能正文里的外部输入占位符（${query} / ${xxx}）→ 该技能运行时需要填入的参数名。
+    /// 用于让协调计划识别“某技能的输入要靠另一员工/前序步骤提供”的依赖，并据此排序执行。</summary>
+    private static List<string> SkillRequiredInputs(AgentSkillDefinition skill)
+        => System.Text.RegularExpressions.Regex.Matches(skill.Body ?? "", @"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+            .Select(m => m.Groups[1].Value).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().ToList();
+
+    /// <summary>从“上一步输出”（可能含解释性文字）中提取技能可用的纯净输入：优先取第一个 URL；
+    /// 否则去掉首尾空白 / 常见引号。这样“配置管理员给了带解释的 OWA 地址”也能干净地喂给技能。</summary>
+    private static string? ExtractCleanValueForSkill(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(text, @"https?://[^\s'""<>]+|\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?::[0-9]+)?\b");
+        if (m.Success) return m.Value.TrimEnd('.', '，', ',', '）', ')', '】', ']');
+        return text.Trim().Trim('"', '\'', '“', '”', '，', ',', '。', '.', '：', ':').Trim();
+    }
+
+    private async Task<List<PlanStep>?> PlanCoordinatedAsync(AgentInvocationContext context, AgentDefinition root, string input,
+        IReadOnlyList<AgentDefinition> reached, IReadOnlyList<AgentSkillDefinition> skills, CancellationToken ct)
+    {
+        var agent = _catalog.GetOrCreate(root.AgentId);
+        var inventory = BuildPlanInventory(root, reached, skills);
+        var prompt =
+            "你是群聊的协调员「" + (root.Nickname ?? root.AgentId) + "」。\n\n"
+            + "用户问题：\n" + input + "\n\n"
+            + "你掌握的组织分工与技能如下（只能从中选，不能造）：\n" + inventory + "\n\n"
+            + "请针对该问题制定一张<b>执行计划</b>：\n"
+            + "- 若需要某数字员工提供信息/处理某部分 → {\"action\":\"dispatch\",\"target\":\"<该员工id>\"}\n"
+            + "- 若需要调用某技能做检测/验证 → {\"action\":\"skill\",\"target\":\"<该技能id>\"}\n"
+            + "- 最后用一步 {\"action\":\"answer\",\"note\":\"<你要怎么综合答复>\"} 汇总。\n"
+            + "<b>依赖顺序很重要</b>：如果一个技能<b>需要某个输入</b>（见技能后的【需要输入：…】），而这个输入由某位员工掌握，\n"
+            + "你必须<b>先用一步 dispatch 该员工拿到输入值</b>，<b>再</b>在后续步骤里调用该技能——技能步骤会自动收到它前一步的结果作为输入。\n"
+            + "例如：要“测 Exchange 连接”需先知道 OWA 地址，而地址由配置管理员提供，则应安排 [dispatch→配置管理员, skill→连接测试技能, answer]。\n"
+            + "只输出 JSON，不要任何其他文字：{\"steps\":[...]}，步骤 1~" + CoordinatorPlanMaxSteps + " 条。若问题与任何员工/技能都不相关，输出 {\"steps\":[]}。";
+        var session = await agent.CreateSessionAsync(ct);
+        var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
+        return ParsePlan(resp.Text);
+    }
+
+    private async Task<string> SynthesizePlanAnswerAsync(AgentInvocationContext context, AgentDefinition root, string input, string resultText, CancellationToken ct)
+    {
+        var agent = _catalog.GetOrCreate(root.AgentId);
+        var prompt = "你是「" + (root.Nickname ?? root.AgentId) + "」。用户问题：\n" + input
+            + "\n\n你已按计划调用下属/技能，得到以下处理结果：\n" + (resultText.Length == 0 ? "（无）" : resultText)
+            + "\n\n请基于这些结果，给用户一个完整、连贯的最终答复（不要在开头重复“已按计划…实现”之类话术，直接作答；若结果不足以回答，如实说明并给出下一步建议）。";
+        var session = await agent.CreateSessionAsync(ct);
+        var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
+        return string.IsNullOrWhiteSpace(resp.Text) ? resultText : resp.Text.Trim();
+    }
+
+    private static List<PlanStep>? ParsePlan(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var cleaned = text.Trim();
+        // 容忍模型把代码块 / 前后缀一起返回：截取第一对 { } 包裹的 JSON
+        var start = cleaned.IndexOf('{');
+        var end = cleaned.LastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+        cleaned = cleaned[start..(end + 1)];
+        try
+        {
+            using var doc = JsonDocument.Parse(cleaned);
+            if (!doc.RootElement.TryGetProperty("steps", out var arr) || arr.ValueKind != JsonValueKind.Array) return null;
+            var steps = new List<PlanStep>();
+            foreach (var e in arr.EnumerateArray())
+            {
+                var action = e.TryGetProperty("action", out var a) ? a.GetString() : null;
+                var target = e.TryGetProperty("target", out var t) ? t.GetString() : null;
+                var note = e.TryGetProperty("note", out var n) ? n.GetString() : null;
+                if (string.IsNullOrWhiteSpace(action)) continue;
+                if (action is "dispatch" or "skill" && string.IsNullOrWhiteSpace(target)) continue;
+                steps.Add(new PlanStep(action.Trim(), target?.Trim() ?? "", note));
+            }
+            return steps;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>
     private const int MaxRouteDepth = 4;
 
@@ -786,15 +1112,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         visited.Add(agentId);
         var hops = new List<ChainNode>();
 
-        // 1) 系统提示词语境推断：该我答 → 直接作答
-        if (await ShouldSpeakAsync(context, def, ct))
-        {
-            var text = await RunRouteAnswerAsync(context, agentId, input, ct);
-            hops.Add(new ChainNode { Kind = "assignment", AgentId = agentId, AgentNickname = def.Nickname ?? agentId, Query = TruncateForChain(input), Result = TruncateForChain(text) });
-            return (RouteOutcome.Answer, text, hops);
-        }
-
-        // 2) 任务指派（白名单 + 系统提示词推断目标）
+        // 1) 任务指派白名单（向下）：对<b>路由器</b>节点（配了白名单）先尝试向下钻取。
+        //    即便本节点语义（ShouldSpeak）也认定该由系统处理，也优先路由到更专业的下游——因为组织里
+        //    专门负责该问题的数字员工更有权威；只有下游无解（没有专业层认领）时才回退到本节点自答。
+        //    多候选排序 + 递归探测回退：召回层只排序，逐候选递归，某子分支无解回退下一候选，
+        //    支持推断到最后一层。召回为空（NONE）表示「本层不派”：根层（depth==1）尊重它；
+        //    处于上层下派链（depth>1）、本层为无法解决的管理者时按白名单顺序继续下钻，避免深层漏解。
         var candidates = (def.AssignmentIds ?? [])
             .Where(id => !string.IsNullOrWhiteSpace(id)
                 && !string.Equals(id, agentId, StringComparison.Ordinal)
@@ -802,16 +1125,32 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 && _catalog.GetDefinition(id) is not null)
             .Distinct(StringComparer.Ordinal)
             .ToList();
-        var assignTarget = candidates.Count > 0 ? await PickAssignTargetAsync(context, def, candidates, input, ct) : null;
-        if (!string.IsNullOrWhiteSpace(assignTarget))
+        if (candidates.Count > 0)
         {
-            var (subOutcome, subText, subHops) = await ResolveRouteAsync(context, assignTarget, input, visited, depth + 1, ct);
-            if (subOutcome == RouteOutcome.Answer)
+            var ranked = await RankAssignTargetsAsync(context, def, candidates, input, ct);
+            var probeOrder = ranked.Count > 0 || depth <= 1 ? ranked : candidates;
+            foreach (var target in probeOrder)
             {
-                hops.Add(new ChainNode { Kind = "assignment", AgentId = assignTarget, AgentNickname = _catalog.GetDefinition(assignTarget)?.Nickname ?? assignTarget, Query = TruncateForChain(input) });
-                hops.AddRange(subHops);
-                return (RouteOutcome.Answer, subText, hops);
+                if (string.IsNullOrWhiteSpace(target) || visited.Contains(target)) continue;
+                var (subOutcome, subText, subHops) = await ResolveRouteAsync(context, target, input, visited, depth + 1, ct);
+                if (subOutcome == RouteOutcome.Answer)
+                {
+                    // 末级自答：subHops 首节点即 target（叶子），避免「target 关系节点 + subHops 作答节点」重复
+                    var targetSelfAnswer = subHops.Count > 0 && string.Equals(subHops[0].AgentId, target, StringComparison.Ordinal);
+                    if (!targetSelfAnswer)
+                        hops.Add(new ChainNode { Kind = "assignment", AgentId = target, AgentNickname = _catalog.GetDefinition(target)?.Nickname ?? target, Query = TruncateForChain(input) });
+                    hops.AddRange(subHops);
+                    return (RouteOutcome.Answer, subText, hops);
+                }
             }
+        }
+
+        // 2) 本节点语义（ShouldSpeak）：下游无解时才轮到本节点自答
+        if (await ShouldSpeakAsync(context, def, ct))
+        {
+            var text = await RunRouteAnswerAsync(context, agentId, input, ct);
+            hops.Add(new ChainNode { Kind = "assignment", AgentId = agentId, AgentNickname = def.Nickname ?? agentId, Query = TruncateForChain(input), Result = TruncateForChain(text) });
+            return (RouteOutcome.Answer, text, hops);
         }
 
         // 3) 问题提升（配置的提升目标）
@@ -824,7 +1163,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var (subOutcome, subText, subHops) = await ResolveRouteAsync(context, esc, input, visited, depth + 1, ct);
             if (subOutcome == RouteOutcome.Answer)
             {
-                hops.Add(new ChainNode { Kind = "escalation", AgentId = esc, AgentNickname = _catalog.GetDefinition(esc)?.Nickname ?? esc, Query = TruncateForChain(input) });
+                // 末级自答同理去重：subHops 首节点即 esc（叶子）时不再重复叠加
+                var escSelfAnswer = subHops.Count > 0 && string.Equals(subHops[0].AgentId, esc, StringComparison.Ordinal);
+                if (!escSelfAnswer)
+                    hops.Add(new ChainNode { Kind = "escalation", AgentId = esc, AgentNickname = _catalog.GetDefinition(esc)?.Nickname ?? esc, Query = TruncateForChain(input) });
                 hops.AddRange(subHops);
                 return (RouteOutcome.Answer, subText, hops);
             }
@@ -835,21 +1177,35 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>
-    /// 任务指派目标推断：在 <paramref name="candidates"/>（白名单）里选最合适的下游数字员工；
-    /// 由该数字员工按自身系统提示词 + 请求内容判断，返回选中目标或 null（不指派）。
+    /// 任务指派目标<b>排序</b>：在 <paramref name="candidates"/>（白名单）里按匹配度从高到低输出一个或多个
+    /// 候选下游数字员工（可逗号分隔返回多个，供上层做递归探测回退）；都不合适输出 NONE。
+    /// 返回候选 agentId 的已排序列表（保证都在 <paramref name="candidates"/> 内）。
+    /// <summary>
+    /// 任务指派目标<b>排序</b>：在 <paramref name="candidates"/>（白名单）里按匹配度从高到低输出一个或多个
+    /// 候选下游数字员工（可逗号分隔返回多个，供上层做递归探测回退）；都不合适输出 NONE。
+    /// 返回候选 agentId 的已排序列表（保证都在 <paramref name="candidates"/> 内）。
+    /// 只依据<b>直接下级</b>的昵称与职责做语义匹配——组织架构的指派判断只看下一层，不向上钻、不引入更深层叶子。
     /// </summary>
-    private async Task<string?> PickAssignTargetAsync(AgentInvocationContext context, AgentDefinition def, List<string> candidates, string input, CancellationToken ct)
+    private async Task<List<string>> RankAssignTargetsAsync(AgentInvocationContext context, AgentDefinition def, List<string> candidates, string input, CancellationToken ct)
     {
         var agent = _catalog.CreateBare(def.AgentId);
         var sb = new StringBuilder();
-        sb.AppendLine("以下是一个待处理请求，请判断是否应把它交给某个下游数字员工（任务指派）。");
-        sb.AppendLine("你只输出一个结果，不要附加说明。");
+        sb.AppendLine("以下是一个待处理请求，请判断该把它交给哪个下游数字员工（任务指派）。");
+        sb.AppendLine("你只输出匹配结果，不要附加说明。");
         sb.AppendLine("候选（agentId 列表）：" + string.Join(", ", candidates));
-        sb.AppendLine("若请求应由其中某位处理，输出该 agentId；否则输出 NONE。");
+        sb.AppendLine("候选职责：");
+        foreach (var cid in candidates)
+        {
+            var cdef = _catalog.GetDefinition(cid);
+            sb.AppendLine($"  - {cid}：{cdef?.Nickname ?? cid} - {cdef?.Description ?? ""}");
+        }
+        sb.AppendLine("按匹配度从高到低输出一个或多个候选 agentId，多个用英文逗号分隔；若都不适合只输出 NONE。");
         var prompt = "__AGUI_ROUTE__\n" + sb + "\n请求：\n" + UntrustedBoundary.Wrap(input);
-        var resp = await agent.RunAsync(prompt, session: null, new ChatClientAgentRunOptions { ChatOptions = new ChatOptions { MaxOutputTokens = 32 } }, ct);
-        var choice = (resp.Text ?? "NONE").Trim();
-        return candidates.Any(c => string.Equals(c, choice, StringComparison.OrdinalIgnoreCase)) ? choice : null;
+        var resp = await agent.RunAsync(prompt, session: null, new ChatClientAgentRunOptions { ChatOptions = new ChatOptions { MaxOutputTokens = 64 } }, ct);
+        // 解析输出：逗号分隔的候选 id（兼容单个 / NONE / 混合文本），只保留在白名单内的
+        var choices = (resp.Text ?? "NONE")
+            .Split([',', '，'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return choices.Where(c => candidates.Contains(c)).ToList();
     }
 
     /// <summary>让单个数字员工就指派/提升请求实际作答（模型一次 run），返回最终文本。</summary>
@@ -1397,22 +1753,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
-    /// <summary>工作型智能体任务计划可视化：消息结束时读取其工作区 PLAN.md，解析为结构化步骤并广播
-    /// TEXT_MESSAGE_PLAN（前端在消息正文后渲染勾选清单 + 进度条）。读取失败静默，不阻断主流程。</summary>
-    private async Task AttachPlanIfAnyAsync(AgentInvocationContext context, string messageId, CancellationToken ct)
-    {
-        try
-        {
-            var plan = _catalog.ReadPlan(context.AgentId);
-            if (plan.Steps is null || plan.Steps.Count == 0) return;
-            await _hub.Value.BroadcastMessagePlanAsync(context.GroupId, messageId, plan.Title, plan.Steps, ct);
-            _logger.LogInformation("工作型智能体计划回档：{Count} 步挂到消息 {MessageId}", plan.Steps.Count, messageId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "工作型智能体计划回档失败（已忽略）");
-        }
-    }
 
     /// <summary>技能调用链可视化：运行结束时把 <see cref="SkillChainBuilder.Ambient"/> 中的多跳技能树
     /// 写入当前消息（JSON），供前端渲染链路。无技能调用（null）静默跳过，不阻断主流程。</summary>
@@ -1598,15 +1938,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
 
         sb.Append(context.Content);
-        // 工作型智能体：当前任务消息是「要执行的指令」，与上面的不可信历史上下文清晰隔离——
-        // 明确告知模型只有这段是需求，避免它把用户的任务指令也当成 prompt injection 而拒绝执行
-        if (_catalog.GetDefinition(context.AgentId)?.EnableWorkTools == true
-            && _options.WorkToolsEnabled)
-        {
-            sb.AppendLine()
-              .AppendLine("【任务指令】以上带 <untrusted_content> 标记的只是群聊历史/记忆上下文，仅供参考、可忽略；")
-              .AppendLine("你现在必须执行这一条由用户发出的任务指令（不使用工具无法完成时，调用可用工具：list_dir / read_file / write_file / shell）。");
-        }
         await AppendAttachmentsAsync(sb, context, ct);
         return sb.ToString();
     }
@@ -1975,7 +2306,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         Message = $"智能体审批交互超过最大轮数（{MaxInteractionRounds}），运行已终止，请重新发起消息",
                         Timestamp = _hub.Value.NowMs,
                     }, ct: CancellationToken.None);
-                    CompleteTaskIfAny(pending.Context, succeeded: false, error: "AGENT_INTERACTION_LIMIT");
                     return;
                 }
 
@@ -2021,11 +2351,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             // 运行完成
             _autoApprovedRuns.TryRemove(runId, out _); // 批量批准随运行结束失效
-            // 工作型智能体产物回档（与首发路径一致）：把正文引用的 publish_file 产物挂为群附件
             await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, runCt);
-            await AttachPlanIfAnyAsync(pending.Context, messageId, runCt);
             await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);
-            CompleteTaskIfAny(pending.Context, succeeded: true, accumulated);
         }
         catch (Exception ex)
         {
@@ -2033,7 +2360,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             _logger.LogWarning(ex, "交互恢复运行异常：interrupt={InterruptId}", pending.InterruptId);
             _autoApprovedRuns.TryRemove(runId, out _);
             await SafeEndAsync(pending.Context, messageId);
-            CompleteTaskIfAny(pending.Context, succeeded: false, error: "AGENT_RUN_ERROR: " + ex.Message);
         }
         finally
         {
@@ -2041,28 +2367,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
-    /// <summary>
-    /// 任务编排闭环：任务触发的运行（context.TaskId 非空）结束时回写任务状态。
-    /// 成功 → MarkFinished（结果 = 智能体最终回复全文）；失败 → MarkFailed。
-    /// 幂等：TaskService.MarkFinished 对已结束任务不重复改动；TaskService 未注册 / 任务不存在则静默跳过。
-    /// </summary>
-    private void CompleteTaskIfAny(AgentInvocationContext context, bool succeeded, string? summary = null, string? error = null)
-    {
-        if (string.IsNullOrEmpty(context.TaskId)) return;
-        var tasks = _tasks.Value;
-        if (tasks is null) return;
-        try
-        {
-            if (succeeded)
-                tasks.MarkFinished(context.TaskId, string.IsNullOrWhiteSpace(summary) ? "任务已完成" : summary);
-            else
-                tasks.MarkFinished(context.TaskId, $"未完成（{error}）", error ?? "AGENT_RUN_ERROR");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "任务状态回写失败：task={TaskId}", context.TaskId);
-        }
-    }
 
     /// <summary>清理超时未决策的交互请求（防内存泄漏）：安全结束因此仍挂起的智能体消息（避免永久悬挂），
     /// 并释放超时交互保留的桥接连接（WS / HTTP standard / hub，防连接泄漏）。async：桥接连接释放为异步。</summary>

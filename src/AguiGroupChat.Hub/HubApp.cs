@@ -44,7 +44,6 @@ public static class HubApp
             builder.Services.AddSingleton<IAgentRegistryStore, PostgresAgentRegistryStore>();
             builder.Services.AddSingleton<ISectionStore, PostgresSectionStore>();
             builder.Services.AddSingleton<IUsageStore, PostgresUsageStore>(); // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ITaskStore, PostgresTaskStore>();    // 工作任务编排
             builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
         }
         else if (string.Equals(storageOptions.Provider, "mysql", StringComparison.OrdinalIgnoreCase)
@@ -62,7 +61,6 @@ public static class HubApp
             builder.Services.AddSingleton<IAgentRegistryStore, RelationalAgentRegistryStore>();
             builder.Services.AddSingleton<ISectionStore, RelationalSectionStore>();
             builder.Services.AddSingleton<IUsageStore, RelationalUsageStore>(); // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ITaskStore, RelationalTaskStore>();    // 工作任务编排
             builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
         }
         else if (string.Equals(storageOptions.Provider, "redis", StringComparison.OrdinalIgnoreCase))
@@ -76,7 +74,6 @@ public static class HubApp
             builder.Services.AddSingleton<IAgentRegistryStore, RedisAgentRegistryStore>();
             builder.Services.AddSingleton<ISectionStore, RedisSectionStore>();
             builder.Services.AddSingleton<IUsageStore, RedisUsageStore>();   // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ITaskStore, RedisTaskStore>();     // 工作任务编排
             builder.Services.AddSingleton<ISessionStore, RedisSessionStore>(); // 登录会话跨副本共享
         }
         else
@@ -86,7 +83,6 @@ public static class HubApp
             builder.Services.AddSingleton<IUserStore>(new InMemoryUserStore(changeHub));
             builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内，随 JSON 快照持久化）
             builder.Services.AddSingleton<IUsageStore>(new InMemoryUsageStore(changeHub)); // 模型用量统计（按日聚合）
-            builder.Services.AddSingleton<ITaskStore>(new InMemoryTaskStore(changeHub));  // 工作任务编排
             // 持久化（Hub 扩展）：单文件快照，变更后定时落盘，启动时恢复
             var persistenceOptions = builder.Configuration.GetSection("Persistence").Get<PersistenceOptions>() ?? new PersistenceOptions();
             if (!string.IsNullOrEmpty(persistenceOptions.FilePath) && !Path.IsPathRooted(persistenceOptions.FilePath))
@@ -107,8 +103,6 @@ public static class HubApp
         builder.Services.AddSingleton(new AttachmentStore(uploadsRoot));
         builder.Services.AddSingleton<ConnectionManager>();
         builder.Services.AddSingleton<AgentTriggerService>();
-        // 工作任务编排服务（AgentGateway 经 Lazy 依赖，工作型智能体运行绑定任务状态）
-        builder.Services.AddSingleton<TaskService>();
         // 预留接口：接入真实 AG-UI 网关时替换为自定义实现
         builder.Services.AddSingleton<IAgentGateway, NoopAgentGateway>();
         builder.Services.AddSingleton<GroupHub>();

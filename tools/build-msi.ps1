@@ -98,8 +98,33 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
   throw 'wix CLI not found. Run: dotnet tool install -g wix --version "4.*"'
 }
 
+# 0.5 记录脚本启动时间：用于校验本次 publish 是否真的重新生成了关键 DLL（防增量跳过导致 MSI 打包旧 DLL）
+$scriptStart = Get-Date
+
+# 0.6 强制全新编译：清理关键项目 Release 中间产物 + 发布目录旧 DLL/exe。
+#      dotnet publish 默认增量，若它认为项目未变会复用旧的 bin/Release 产物 → artifacts 里留旧 DLL →
+#      MSI 打包的就是旧后端（曾致「重装无效 / 仍 405」）。清掉后 publish 必重编。
+Write-Host "[0/5] clean Release intermediates + stale publish DLLs (force fresh build)"
+$cleanProjects = @(
+  "src/AguiGroupChat.Agents",
+  "src/AguiGroupChat.Hub",
+  "src/AguiGroupChat.Web",
+  "src/AguiGroupChat.Desktop.Core",
+  "src/AguiGroupChat.Desktop"
+)
+foreach ($p in $cleanProjects) {
+  foreach ($sub in @('bin\Release', 'obj\Release')) {
+    $dir = Join-Path $root (Join-Path $p $sub)
+    if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
+  }
+}
+# 清掉发布目录里可能残留的旧桌面程序集（AguiGroupChat.*.dll/.exe/.pdb），保证 artifacts 不残留旧版被 wix 复用
+Get-ChildItem -Path $publish -File -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match '^AguiGroupChat\.(Agents|Hub|Web|Desktop|Sdk)' -or $_.Name -eq 'AguiGroupChat.Desktop.exe' } |
+  ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
+
 # 1. publish (Release)
-Write-Host "[1/4] dotnet publish -> $publish"
+Write-Host "[1/5] dotnet publish -> $publish"
 dotnet publish (Join-Path $root "src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj") -c Release -o $publish
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 
@@ -124,21 +149,40 @@ if (Test-Path $redist) {
 
 # 2. generate file manifest (files.wxs) by walking the publish dir
 New-Item -ItemType Directory -Force -Path $out | Out-Null
-Write-Host "[2/4] generate files.wxs"
+Write-Host "[2/5] generate files.wxs"
+# 清理 wix 中间产物，避免复用旧组件的 cab / wixobj
+Get-ChildItem -Path $out -Filter '*.wixpdb' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 $filesWxs = GenerateFilesWxs -PublishDir $publish
 Set-Content -Path (Join-Path $out "files.wxs") -Value $filesWxs -Encoding UTF8
 if (-not $filesWxs) { throw "generate files.wxs failed" }
 
 # 3. compile MSI
-Write-Host "[3/4] wix build -> AguiGroupChat-Desktop-$Version.msi"
+Write-Host "[3/5] wix build -> AguiGroupChat-Desktop-$Version.msi"
 $msi = Join-Path $out "AguiGroupChat-Desktop-$Version.msi"
 # 品牌图标（package.wxs 的 $(var.AppIcon)）：tools/wix/agui-icon.ico（多尺寸，含 256，供 ARPPRODUCTICON / 快捷方式）
 $appIcon = Join-Path $root "tools/wix/agui-icon.ico"
 if (-not (Test-Path $appIcon)) { throw "Missing icon: $appIcon (expected from assets/, copy via tools/icon-gen)" }
+# 输出 MSI 若已存在先删（避免 wix 复用旧 cab / 旧产物）
+if (Test-Path $msi) { Remove-Item $msi -Force }
 wix build (Join-Path $root "tools/wix/package.wxs") (Join-Path $out "files.wxs") -d "PublishDir=$publish" -d "Version=$Version" -d "AppIcon=$appIcon" -o $msi
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
 
-# 4. result
+# 4. verify backend DLL freshness (abort if publish reused stale DLL -> MSI would bundle old backend)
+Write-Host "[4/5] verify backend DLL freshness"
+$gate = @('AguiGroupChat.Web.dll', 'AguiGroupChat.Agents.dll', 'AguiGroupChat.Desktop.Core.dll', 'AguiGroupChat.Desktop.dll')
+$stale = @()
+foreach ($name in $gate) {
+  $dll = Join-Path $publish $name
+  if (-not (Test-Path $dll)) { $stale += ($name + '-MISSING'); continue }
+  $dllTime = (Get-Item $dll).LastWriteTime
+  if ($dllTime -lt $scriptStart.AddSeconds(-5)) { $stale += ($name + '-STALE') }
+}
+if ($stale.Count -gt 0) {
+  throw ('STALE backend DLL detected in publish dir: ' + ($stale -join ', ') + '. Aborted - rerun to rebuild.')
+}
+Write-Host "  OK: backend DLLs are fresh from this publish"
+
+# 5. result
 $size = [math]::Round((Get-Item $msi).Length / 1MB, 1)
-Write-Host "[4/4] Done: $msi (${size} MB)"
+Write-Host ("[5/5] Done: " + $msi + " (" + $size + " MB)")
 Write-Host ('Install: msiexec /i "' + $msi + '"   Uninstall: Control Panel > Programs')

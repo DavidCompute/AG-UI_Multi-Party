@@ -45,6 +45,8 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 | `Agents:ApiKey` | - | 对话模型密钥（`mock` 不需要）；也读环境变量 `DEEPSEEK_API_KEY` |
 | `Agents:EnableTools` | `true` | 工具调用：calculator 计算 / unit_converter 换算 / group_memory_search 记忆检索 / read_attachment 读附件 / publish_announcement 公告（需审批） |
 | `Agents:EnableWebTools` | `false` | 网络工具：web_search（搜索网页）/ read_url（读网页，防内网 SSRF）；开启需外网 |
+| `Agents:AllowPrivateSkillEndpoints` | `false` | 技能库 HTTP 是否放行<b>本机 / 内网 / 私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机 / 内网接口（如本地 Ollama / 内网 API）时置 `true` |
+| `Agents:CoordinatorPlanning` | `false` | 确定性编排计划：开启后路由型数字员工（配了指派白名单/提升目标）收到问题时，先按<b>组织架构与技能配置</b>生成一张执行计划（明确列出选中的下游员工与要调用的技能），再<b>依次激活</b>对应员工/技能并聚合答复（“问题 → 定计划 → 激活执行”）；计划失败自动回退到原有递归指派 |
 | `Agents:Memory:Enabled` | `true` | 语义记忆开关 |
 | `Agents:Memory:Provider` | `llama` | embedding 提供方：`llama`（本地 LLamaSharp）/ `http`（OpenAI 兼容端点） |
 | `Agents:Memory:LlamaModelPath` | `models/embedding.gguf` | 本地 GGUF 模型路径；缺失时也自动探测 `%LocalAppData%\AguiGroupChat\models\embedding.gguf`（老版本 perMachine 安装场景的兼容回退） |
@@ -66,6 +68,8 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 **降级路径**：`libs/vec0.dll` 缺失或加载失败时，自动降级为「向量存 BLOB + .NET 内存余弦检索」，
 功能等价（大数据量下性能低于向量索引）。日志会提示当前模式。
 
+**长文本自动分段**：本地 llama embedding 对超长文本（如大型知识库文档切片）会按模型 context 自动切成多段分别向量化再取平均（分段字符/token 比值取 0.9，留有安全余量），避免超 context 导致向量化失败（1.0.78 修复）。长文档上传知识库不受长度限制。
+
 ## 目录结构
 
 ```
@@ -83,10 +87,11 @@ src/AguiGroupChat.Desktop/
 
 - 桌面版与 Web 版共用同一套协议 / Hub / 网关 / 前端代码，功能一致；
 - 智能体触发、人机交互审批卡片、分身、附件、话题、私密群等全部可用；
-- **技能（Skills）**：智能体管理里可为角色配置技能，把其他智能体（含 AG-UI 桥接外部专家）挂为可调用子代理，
-  模型需要该领域信息时自动调起子智能体并引用其答复；智能体也可经 `create_skill` 工具（需审批）自建技能；
+- **技能（Skills，两层含义）**：① 把<b>其他数字员工</b>挂为可调用子代理（“技能与知识 → 可调用子数字员工”）——模型需要其领域能力时会自动调起子数字员工并引用其答复（含 AG-UI 桥接外部专家）；上下层数字员工如此接钩后，上层需要下层能力时即可触发调用。② 在「技能库」手动配置 shell / http / prompt 三类可复用技能，数字员工经 `skillDefIds` 挂载调用。HTTP / 提示词技能在表单里可**关闭“需审批”以自动调用**（需访问本机/内网时另置 `Agents:AllowPrivateSkillEndpoints=true`）；
+  shell 技能因可执行任意命令而<b>始终强制需审批</b>；智能体也可经 `create_skill` 工具（需审批）自建技能；
 - **知识库（Knowledge Base）**：智能体管理里可创建知识库并上传文档（Word / Excel / PPT / PDF / 文本），
   回复前自动检索知识文档相关内容注入（RAG），让智能体基于您的资料作答；文档向量与语义记忆共用一套存储（sqlite-vec + 本地 bge-m3）；
+- **数字员工组织架构**：顶栏「🌐 组织架构」画布拖拽连线配置各角色的<b>任务指派（向下）/ 问题提升（向上）</b>；节点右上角「**优化指派**」图标按钮可按该角色的<b>直接下一层</b>自动生成「管理下一层任务指派」提示词（只看下一层挑下游、不越级），预览后可追加到其 Instructions；
 - **VC++ 运行库已捆绑**（`vcruntime140.dll` / `vcruntime140_1.dll` / `msvcp140.dll` 随 MSI 装在 exe 旁，
   app-local 部署，目标机无需预装）。若个别机器 LLamaSharp 原生库仍加载失败（如缺失的旧系统库），
   应用会自动降级禁用语义记忆并记日志，**不会崩溃**，群聊等其余功能不受影响；

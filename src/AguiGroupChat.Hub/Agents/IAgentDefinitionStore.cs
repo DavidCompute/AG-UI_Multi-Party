@@ -12,5 +12,4 @@ public interface IAgentDefinitionStore
 
 /// <summary>智能体归属信息（轻量投影）。</summary>
 /// <param name="OwnerId">创建者 userId（种子 / appsettings 声明为 null = 系统级）。</param>
-/// <param name="EnableWorkTools">是否工作型智能体（讨论 / 调度接入计划-执行用）。</param>
-public sealed record AgentDefinitionInfo(string AgentId, string Nickname, bool IsPrivate, string? OwnerId, bool EnableWorkTools = false);
+public sealed record AgentDefinitionInfo(string AgentId, string Nickname, bool IsPrivate, string? OwnerId);

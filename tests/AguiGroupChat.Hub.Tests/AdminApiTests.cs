@@ -159,7 +159,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
 
         // 非管理员 → 403
         var outsider = await RegisterAsync("usage_outsider");
-        using var denied = Authed(HttpMethod.Get, "/ag-ui/admin/usage", outsider.GetProperty("token").GetString());
+        using var denied = Authed(HttpMethod.Get, "/ag-ui/admin/usage", outsider.GetProperty("token").GetString()!);
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
 
@@ -198,7 +198,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
 
         // 非管理员 → 403
         var outsider = await RegisterAsync("config_outsider");
-        using var denied = Authed(HttpMethod.Get, "/ag-ui/admin/config", outsider.GetProperty("token").GetString());
+        using var denied = Authed(HttpMethod.Get, "/ag-ui/admin/config", outsider.GetProperty("token").GetString()!);
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
 
@@ -214,8 +214,8 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         create.EnsureSuccessStatusCode();
         var groupId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
         await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, content = "第一条", timestamp = 1000L });
-        var targetId = (await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, content = "目标消息", timestamp = 2000L }))
-            .Content.ReadFromJsonAsync<JsonElement>().Result.GetProperty("messageId").GetString()!;
+        var targetRes = await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, content = "目标消息", timestamp = 2000L });
+        var targetId = (await targetRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("messageId").GetString()!;
         await _client.PostAsJsonAsync("/ag-ui/group/message/send", new { groupId, userId, content = "第三条", timestamp = 3000L });
 
         // around：目标消息前后各 1 条 → 返回 3 条（含目标），按时间序
@@ -232,7 +232,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
 
         // 非成员 → 403
         var outsider = await RegisterAsync("around_outsider");
-        using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/messages/around?messageId={Uri.EscapeDataString(targetId)}", outsider.GetProperty("token").GetString());
+        using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/messages/around?messageId={Uri.EscapeDataString(targetId)}", outsider.GetProperty("token").GetString()!);
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
 
@@ -265,7 +265,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
 
         // 非成员 → 403
         var outsider = await RegisterAsync("related_outsider");
-        using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/topics/related?topicId=main", outsider.GetProperty("token").GetString());
+        using var denied = Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/topics/related?topicId=main", outsider.GetProperty("token").GetString()!);
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
 
@@ -282,7 +282,6 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             messageHistoryLimit = 2000,
             maxGroupMembers = 300,
             enableWebTools = true,
-            workToolsEnabled = true,
             requireApprovalToolNames = new[] { "publish_announcement", "deploy" },
             allowedFrameOrigins = new[] { "https://portal.example.com" },
         });
@@ -311,7 +310,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
 
         // 非管理员 → 403
         var normal = await RegisterAsync("cfg_normal_admin");
-        using var denied = Authed(HttpMethod.Post, "/ag-ui/admin/config", normal.GetProperty("token").GetString());
+        using var denied = Authed(HttpMethod.Post, "/ag-ui/admin/config", normal.GetProperty("token").GetString()!);
         denied.Content = JsonContent.Create(new { sessionTtlHours = 24 });
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }

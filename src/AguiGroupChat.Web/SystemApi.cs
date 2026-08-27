@@ -64,6 +64,7 @@ public static class SystemApi
         {
             var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
+            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
 
             var endpoint = (req.Endpoint ?? "").Trim();
             if (endpoint.Length > 0)
@@ -79,7 +80,7 @@ public static class SystemApi
             ApplyModelConfig(options, modelConfig, catalog);
             changes.Notify(); // 驱动持久化（JSON 快照 / agui_sections 定时落盘）
 
-            audit.Record("settings.model", meId, auth.GetUser(meId)?.Username,
+            audit.Record("settings.model", me, auth.GetUser(me)?.Username,
                 detail: "修改模型配置" + (endpoint.Length > 0 ? $" 端点={endpoint}" : " （使用官方端点）"));
 
             return Results.Ok(new
@@ -95,6 +96,7 @@ public static class SystemApi
         {
             var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
+            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
 
             var storage = sp.GetRequiredService<StorageOptions>();
             var provider = storage.Provider.Trim().ToLowerInvariant();
@@ -109,6 +111,8 @@ public static class SystemApi
                 else
                 {
                     sp.GetRequiredService<RelationalStore>().ExecuteScript("""
+                        DELETE FROM agui_graph_edges;
+                        DELETE FROM agui_graph_entities;
                         DELETE FROM agui_message_memory;
                         DELETE FROM agui_agent_registrations;
                         DELETE FROM agui_group_reads;
@@ -141,6 +145,7 @@ public static class SystemApi
             sp.GetService<AgentGateway>()?.ClearBridgeCursors();
             sp.GetRequiredService<AttachmentStore>().ClearAll();
             sp.GetService<IMessageMemoryStore>()?.ClearAll();
+            sp.GetService<AguiGroupChat.Hub.Agents.IGraphMemory>()?.ClearAll(); // 图谱记忆（实体/边）
 
             // 模型配置复位（再次进入系统时重新弹窗填写）
             var modelConfig = sp.GetRequiredService<ModelConfigState>();
@@ -152,7 +157,7 @@ public static class SystemApi
             sp.GetRequiredService<ChangeHub>().Notify();
 
             sp.GetRequiredService<AguiGroupChat.Hub.Infra.AuditLogService>()
-                .Record("data.reset", meId, auth.GetUser(meId)?.Username, detail: "系统初始化（清空全部数据）");
+                .Record("data.reset", me, auth.GetUser(me)?.Username, detail: "系统初始化（清空全部数据）");
 
             return Results.Ok(new { reset = true });
         });

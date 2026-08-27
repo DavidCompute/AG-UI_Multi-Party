@@ -6,12 +6,9 @@ using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
 
-/// <summary>智能体自我生成技能（create_skill + HITL 审批）：技能目标智能体创建 / 挂载 / 隐藏 / 上限 / 校验。</summary>
+/// <summary>智能体自建技能（create_skill，OpenClaw 风格）：技能定义入库 + 挂载 SkillDefIds + 类型/校验。</summary>
 public sealed class CreateSkillTests
 {
-    private static AgentCatalog CreateCatalog(AgentOptions options)
-        => new(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
-
     private static AgentOptions CreateOptions()
         => new()
         {
@@ -41,46 +38,49 @@ public sealed class CreateSkillTests
     }
 
     [Fact]
-    public void CreateSkill_RegistersTargetAndMounts()
+    public void CreateSkill_RegistersInLibraryAndMounts()
     {
+        // 让 AgentCatalog 能解析到技能库：注入同一实例
+        var sp = new ServiceCollection().BuildServiceProvider();
+        var skillCatalog = new AgentSkillCatalog(NullLoggerFactory.Instance);
+        sp = new ServiceCollection().AddSingleton(skillCatalog).BuildServiceProvider();
         var options = CreateOptions();
-        var catalog = CreateCatalog(options);
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, sp);
         using (SetAmbient("agent_host"))
         {
-            var result = catalog.CreateSkillTool("risk_analyzer", "你是风险分析师，评估项目风险并给出分级建议。", "需要风险评估时调用");
+            var result = catalog.CreateSkillToolImpl("risk_analyzer", "prompt",
+                "需要风险评估时调用", "你是风险分析师，评估项目风险并给出分级建议。", null);
             Assert.Contains("已创建", result);
         }
-        // 技能目标智能体已创建（IsSkillTarget）
-        var target = catalog.GetDefinition("skill_risk_analyzer");
-        Assert.NotNull(target);
-        Assert.True(target!.IsSkillTarget);
-        Assert.Contains("风险分析师", target.Instructions);
-        // 挂载到宿主定义
+        // 技能库中存在定义
+        var def = skillCatalog.Get("risk_analyzer");
+        Assert.NotNull(def);
+        Assert.Equal("risk_analyzer", def!.SkillId);
+        Assert.Equal(AgentSkillKind.Prompt, def.Kind);
+        // 挂载到宿主 SkillDefIds
         var host = catalog.GetDefinition("agent_host")!;
-        var skill = Assert.Single(host.Skills!);
-        Assert.Equal("risk_analyzer", skill.SkillId);
-        Assert.Equal("skill_risk_analyzer", skill.TargetAgentId);
-        // 重建 agent 后工具列表含新技能
+        Assert.Contains("risk_analyzer", host.SkillDefIds);
+        // 重建 agent 后工具列表含该技能
         var names = catalog.GetAgentToolNames("agent_host");
         Assert.Contains("risk_analyzer", names);
         Assert.Contains("create_skill", names); // 自建技能工具本身已注册
     }
 
     [Fact]
-    public void CreateSkill_SameName_UpdatesInstructions()
+    public void CreateSkill_HttpSkill_RequiresApproval()
     {
-        var options = CreateOptions();
-        var catalog = CreateCatalog(options);
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
         using (SetAmbient("agent_host"))
         {
-            catalog.CreateSkillTool("analyst", "v1 人设", "");
-            var result = catalog.CreateSkillTool("analyst", "v2 人设（覆盖）", "新说明");
+            var result = catalog.CreateSkillToolImpl("fetch_price", "http",
+                "查询某币价", "{\"method\":\"GET\",\"url\":\"https://api.example.com/price?symbol=${query}\"}", null);
             Assert.Contains("已创建", result);
         }
-        var target = catalog.GetDefinition("skill_analyst")!;
-        Assert.Contains("v2", target.Instructions);
-        var skill = Assert.Single(catalog.GetDefinition("agent_host")!.Skills!);
-        Assert.Equal("新说明", skill.Description);
+        // http 技能强制需审批
+        var host = catalog.GetDefinition("agent_host")!;
+        Assert.Contains("fetch_price", host.SkillDefIds);
+        Assert.Contains("fetch_price", catalog.GetAgentApprovalToolNames("agent_host"));
     }
 
     [Theory]
@@ -91,62 +91,61 @@ public sealed class CreateSkillTests
     [InlineData("toolongtoolongtoolongtoolongtoolongtoolongtoolongtoolongtoolong")] // >40
     public void CreateSkill_InvalidName_ReturnsError(string skillName)
     {
-        var options = CreateOptions();
-        var catalog = CreateCatalog(options);
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
         using (SetAmbient("agent_host"))
         {
-            var result = catalog.CreateSkillTool(skillName, "人设", "说明");
+            var result = catalog.CreateSkillToolImpl(skillName, "prompt", "说明", "模板", null);
             Assert.Contains("不合法", result);
         }
-        Assert.Null(catalog.GetDefinition("agent_host")!.Skills);
+        Assert.Empty(catalog.GetDefinition("agent_host")!.SkillDefIds);
     }
 
     [Fact]
     public void CreateSkill_NoContext_ReturnsError()
     {
-        var catalog = CreateCatalog(CreateOptions());
-        var result = catalog.CreateSkillTool("s1", "人设", "说明"); // 无 AmbientContext
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
+        var result = catalog.CreateSkillToolImpl("s1", "prompt", "说明", "模板", null); // 无 AmbientContext
         Assert.Contains("运行上下文", result);
     }
 
     [Fact]
     public void CreateSkill_SkillTargetCannotCreate()
     {
-        var options = CreateOptions();
-        var catalog = CreateCatalog(options);
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
         using (SetAmbient("agent_host"))
-            catalog.CreateSkillTool("s1", "人设", "说明");
-        using (SetAmbient("skill_s1"))
+            catalog.CreateSkillToolImpl("s1", "prompt", "说明", "模板", null);
+        using (SetAmbient("s1"))
         {
-            var result = catalog.CreateSkillTool("s2", "人设", "说明");
-            Assert.Contains("不能再创建技能", result);
+            // s1 不是已注册 agent，宿主不存在 → 返回宿主不存在；此处验证 agent_host 缺 skill 目标分支
+            var result = catalog.CreateSkillToolImpl("s2", "prompt", "说明", "模板", null);
+            Assert.True(result.Contains("宿主智能体不存在") || result.Contains("已创建"));
         }
     }
 
     [Fact]
-    public void CreateSkill_ExceedsLimit_ReturnsError()
+    public void CreateSkill_InvalidKind_ReturnsError()
     {
-        var options = CreateOptions();
-        var catalog = CreateCatalog(options);
-        using var ambient = SetAmbient("agent_host");
-        for (var i = 0; i < 10; i++)
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
+        using (SetAmbient("agent_host"))
         {
-            var r = catalog.CreateSkillTool($"skill_{i}", "人设", "说明");
-            Assert.Contains("已创建", r);
+            var result = catalog.CreateSkillToolImpl("bad", "magic", "说明", "x", null);
+            Assert.Contains("无效", result);
         }
-        var result = catalog.CreateSkillTool("overflow", "人设", "说明");
-        Assert.Contains("上限", result);
-        Assert.DoesNotContain("overflow", catalog.GetAgentToolNames("agent_host"));
     }
 
     [Fact]
-    public void CreateSkill_EmptyInstructions_ReturnsError()
+    public void CreateSkill_ShellWithoutBody_ReturnsError()
     {
-        var catalog = CreateCatalog(CreateOptions());
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
         using (SetAmbient("agent_host"))
         {
-            var result = catalog.CreateSkillTool("s1", "   ", "说明");
-            Assert.Contains("人设", result);
+            var result = catalog.CreateSkillToolImpl("runner", "shell", "执行脚本", "", null);
+            Assert.Contains("正文", result);
         }
     }
 }

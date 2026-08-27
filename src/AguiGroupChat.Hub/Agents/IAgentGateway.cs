@@ -22,8 +22,7 @@ public sealed record AgentInvocationContext(
     AgentTriggerMode? TriggerMode = null,
     string TopicId = "main",
     MessageVisibility Visibility = MessageVisibility.All,
-    IReadOnlyList<string>? VisibleMemberIds = null,
-    string? TaskId = null);
+    IReadOnlyList<string>? VisibleMemberIds = null);
 
 /// <summary>智能体调用的应答结果。</summary>
 public sealed record AgentInvocationResult(bool Accepted, string? RunId, string? ErrorCode);

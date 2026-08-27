@@ -36,8 +36,8 @@ using AguiGroupChat.Sdk.Models;
 var options = new AguiClientOptions { BaseUri = new Uri("http://localhost:5100") };
 using var client = new AguiClient(options);
 
-// 登录（注册即登录：client.RegisterAsync(...)）
-var auth = await client.LoginAsync("zhangsan", "123456");
+// 注册（注册即登录）；v1.0.75 起不再播种演示账号 zhangsan/lisi，首次运行请先注册
+var auth = await client.RegisterAsync("zhangsan", "123456");
 client.Token = auth.Token;               // SDK 自动携带 Bearer 令牌
 
 // 建群
@@ -72,8 +72,8 @@ realtime.On<TextMessageContentEvent>(e => Console.Write(e.Delta));   // 智能�
 realtime.On<TextMessageEndEvent>(_   => Console.WriteLine());
 realtime.On<GroupTypingEvent>(e      => Console.WriteLine($"[输入中] {e.MemberId}"));
 
-await realtime.ConnectAsync(["group_001", "group_002"], ct);
-// ConentAsync 会自动订阅；之后也可增删：
+await realtime.ConnectAsync(["group_001", "group_002"], CancellationToken.None);
+// ConnectAsync 会自动订阅；之后也可增删：
 await realtime.SubscribeAsync(["group_003"], ct);
 await realtime.UnsubscribeAsync(["group_001"], ct);
 

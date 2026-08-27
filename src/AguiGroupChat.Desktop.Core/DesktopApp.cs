@@ -61,16 +61,17 @@ public static class DesktopApp
         app.MapAttachmentApi(); // 附件上传 / 下载
         app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
         app.MapGroupNameApi();  // 群名自动生成
+        app.MapSkillApi();      // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
         app.MapLinkProxyApi();  // 链接代理（智能体回复中的链接由后端代访）
         app.MapExportImportApi(); // 数据导出 / 导入（账号 + 智能体 + 聊天记录 + 附件）
         app.MapSystemApi();     // 模型配置（endpoint / apiKey）+ 初始化（清空一切）
         app.MapMemoryApi();     // 记忆治理：分群分级 / 自动遗忘 / 可视化
-        app.MapTaskApi();       // 任务编排（工作型智能体）
         app.MapScheduledTaskApi(); // 重复性定时任务（1.4）
         app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
         app.Services.RegisterAgentPersistence();
         app.Services.RegisterKnowledgeBasePersistence();
+        app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
         app.Services.RegisterSessionPersistence(); // 会话落库（哈希）：桌面重启后「保持登录」仍有效
         app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
         app.Services.RegisterModelConfigPersistence(); // 运行时模型配置跨重启保持
@@ -92,6 +93,10 @@ public static class DesktopApp
 
         if (backendMode)
         {
+            // 后端是新进程：任何残留实例计数都已陈旧（上次异常退出可能遗留），必须先归零，
+            // 否则遗留计数会把后续每次启动的计数抬升，导致计数永远到不了 0、后端永不关闭。
+            InstanceCoordinator.ResetInstanceCount();
+
             // 优雅停机端点：最后一个 UI 实例关闭时调用（仅回环可达 + 共享 secret 校验），后台停机不阻塞请求
             var secret = InstanceCoordinator.ReadOrCreateBackendSecret();
             app.MapPost("/ag-ui/shutdown", (HttpContext ctx) =>

@@ -1,0 +1,91 @@
+using System.Text.RegularExpressions;
+
+namespace AguiGroupChat.Agents;
+
+/// <summary>
+/// 技能类型：定义技能的「实现形态」。
+///   - <see cref="Shell"/>：一段可执行命令 / 脚本（bash / python / node 等），在技能专属沙箱内运行。
+///   - <see cref="Http"/>：调用一个 HTTP(S) 接口（method + url + headers/body 模板）。
+///   - <see cref="Prompt"/>：纯提示词 / 流程模板（无可执行代码，给宿主模型的一段指令，由模型自带推理 / 聚合）。
+/// </summary>
+public enum AgentSkillKind
+{
+    /// <summary>命令 / 脚本：在技能专属沙箱目录里执行（需批准）。</summary>
+    Shell,
+
+    /// <summary>HTTP 调用：请求外部接口（SSRF / 内网防护）。</summary>
+    Http,
+
+    /// <summary>提示词 / 流程模板：无可执行代码，给模型的说明。</summary>
+    Prompt,
+}
+
+/// <summary>
+/// 可复用技能定义（OpenClaw 风格）：一段「能跑的功能 / 可复用的提示词」，独立于具体数字员工，
+/// 存于技能库，可被任意数字员工挂载复用。
+/// 与旧的 <see cref="AgentSkillConfig"/>（调另一个智能体代为回答）语义完全分开。
+/// </summary>
+public sealed class AgentSkillDefinition
+{
+    /// <summary>技能唯一 ID（给模型的工具名，须符合 OpenAI 工具名规范：字母/数字/下划线/连字符；可中文意译但运行时映射为 ASCII 工具名）。</summary>
+    public string SkillId { get; set; } = "";
+
+    /// <summary>技能显示名（管理界面）。</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>给模型的调用说明：何时调用、需传哪些参数、返回什么。</summary>
+    public string Description { get; set; } = "";
+
+    /// <summary>技能类型：shell / http / prompt。</summary>
+    public AgentSkillKind Kind { get; set; } = AgentSkillKind.Prompt;
+
+    /// <summary>
+    /// 技能正文：
+    ///   - shell：脚本 / 命令文本（多行脚本直接执行）；
+    ///   - http：JSON 配置（method / url / headers / body 模板，可选）；
+    ///   - prompt：提示词 / 流程模板正文。
+    /// </summary>
+    public string Body { get; set; } = "";
+
+    /// <summary>
+    /// 可选：技能参数（给模型的 JSON 说明，如 <c>[{"name":"query","description":"...","required":true}]</c>）。
+    /// shell / http 运行时把它们作为输入参数注入执行环境。
+    /// </summary>
+    public string ParametersJson { get; set; } = "";
+
+    /// <summary>脚本解释器 / 运行时：shell 类型专用（如 bash / python3 / node）。留空 = 由 Body 首行 shebang 决定，否则默认按多行脚本用 bash。</summary>
+    public string? Interpreter { get; set; }
+
+    /// <summary>HTTP 请求超时秒数（默认 30）。</summary>
+    public int HttpTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// 是否需人工批准后执行（默认 true）。代码 / HTTP 技能一律默认需批准（安全兜底）；
+    /// 纯提示词技能可设 false 免审批。
+    /// </summary>
+    public bool RequiresApproval { get; set; } = true;
+
+    /// <summary>创建者 userId（系统内置为 null）。</summary>
+    public string? OwnerId { get; set; }
+
+    /// <summary>技能名 / 智能体工具名的合法模式（OpenAI 工具名：字母数字下划线连字符）。</summary>
+    private static readonly Regex ToolNamePattern = new("^[a-zA-Z0-9_-]{1,64}$", RegexOptions.Compiled);
+
+    /// <summary>校验 SkillId 是否可直接作为工具名（ASCII 工具名）。</summary>
+    public static bool IsValidAsciiToolId(string skillId)
+        => !string.IsNullOrWhiteSpace(skillId) && ToolNamePattern.IsMatch(skillId);
+
+    /// <summary>
+    /// 由任意用户自定义 ID（可含中文 / 空格）生成 ASCII 工具名：替换为下划线、去重后缀。
+    /// 用 <paramref name="occupied"/> 规避冲突（会就地更新占用集合）。
+    /// </summary>
+    public static string ToAsciiToolId(string raw, ISet<string> occupied, string fallback = "skill")
+    {
+        var safe = Regex.Replace(raw ?? "", "[^a-zA-Z0-9_-]", "_").Trim('_');
+        if (safe.Length == 0) safe = fallback;
+        if (safe.Length > 40) safe = safe[..40];
+        var id = safe;
+        for (var i = 2; !occupied.Add(id); i++) id = $"{safe}_{i}";
+        return id;
+    }
+}

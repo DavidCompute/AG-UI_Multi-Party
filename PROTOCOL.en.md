@@ -947,6 +947,7 @@ The Agent Definition directory provides runtime management: it is seeded from th
 |Edit agent|`PUT /ag-ui/agents/{agentId}`|Updates the definition；synchronizes trigger rules and group member profiles of non-overridden groups；**private agents can only be edited by their creator**（otherwise 403）|
 |Delete agent|`DELETE /ag-ui/agents/{agentId}`|Removes the definition、all trigger rules、and exits all groups；**private agents can only be deleted by their creator**（otherwise 403）|
 |Register in-group trigger|`POST /ag-ui/agents/register`|Registers trigger rules for a specified group（triggerMode / keywords / override）|
+|Optimize next-layer dispatch prompt|`POST /ag-ui/agents/{agentId}/optimize-assignment`|**Org-chart "Optimize dispatch"**：auto-generates a "manage next-layer dispatch" guidance paragraph from the employee's direct next layer (AssignmentIds) - pick a subordinate based only on the next layer, no override, return NONE if none fits；login required，owner/admin only；returns `{ assignmentGuidance, subordinateCount }`|
 
 Agent definition fields:
 

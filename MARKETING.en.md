@@ -114,7 +114,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 | Multi-client coverage | Web (Docker), Windows desktop (WPF + WebView2, multi-instance), cross-platform desktop (Avalonia) |
 | Extensible | Storage abstraction (IGroupStore / IUserStore) with built-in **memory / postgres / mysql / sqlite / redis** implementations, switchable in one click; `IAgentGateway` for custom gateways; digital employee directory / trigger rules / topics all managed at runtime |
 | Data security | Password PBKDF2, token auth, attachment whitelist, strict ownership validation for private group chats / private digital employees, HTML sandbox, SSRF protection, memory tiering and auto-forgetting |
-| Quality assurance | **579 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end) |
+| Quality assurance | **603 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end) |
 
 ---
 

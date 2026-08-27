@@ -101,11 +101,17 @@ public static class ScheduledTaskApi
 
         // ---- 删除 ----
         root.MapDelete("/{taskId}", (string taskId, HttpContext ctx, AuthService auth, AuthOptions authOptions,
-            AguiGroupChat.Agents.ScheduledTaskService scheduled, ChangeHub changes) =>
+            AguiGroupChat.Agents.ScheduledTaskService scheduled, GroupHub hub, ChangeHub changes) =>
         {
             var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
             if (error is not null) return error;
             if (userId is null) return error!;
+            var task = scheduled.Get(taskId);
+            if (task is null) return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "任务不存在"));
+            // 与创建 / 更新一致的权限校验：非管理员须为该任务目标群成员（或与该智能体有共同群），
+            // 否则可枚举删除他人 / 管理员的任务（IDOR 授权绕过）。
+            var accessErr = EnsureGroupAccess(task.GroupId, task.AgentId, hub, userId, auth);
+            if (accessErr is not null) return accessErr;
             if (scheduled.Remove(taskId))
             {
                 changes.Notify();

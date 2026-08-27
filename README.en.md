@@ -86,7 +86,8 @@ All you need is one `AguiClient` (HTTP) plus one `AguiRealtimeClient` (WS/SSE) t
 ```csharp
 var options = new AguiClientOptions { BaseUri = new Uri("http://localhost:5100") };
 using var client = new AguiClient(options);
-var auth = await client.LoginAsync("zhangsan", "123456");
+// Register on first run (registration logs you in); v1.0.75+ no longer seeds demo accounts zhangsan/lisi
+var auth = await client.RegisterAsync("zhangsan", "123456");
 client.Token = auth.Token;
 
 await using var realtime = new AguiRealtimeClient(options) { Token = auth.Token };
@@ -131,14 +132,18 @@ dotnet run --project src/AguiGroupChat.Desktop.Cross
 Sample data: group `group_xxx` (product requirements review group), members `user_1001` (Zhangsan, group owner), `user_1002` (Lisi), `agent_prd` (requirements assistant, mention-triggered), `agent_code` (code assistant, contextual trigger: can proactively speak based on context even without @).
 
 ```bash
-# Terminal 1: sample client based on the SDK (logs in the demo seed account → connects + subscribes + prints events, exits after 20 seconds)
-# Demo accounts zhangsan / 123456 (user_1001); --login username password
-# Subscribes to group_001
-dotnet run --project samples/AguiGroupChat.Client -- --login zhangsan 123456 --groupIds group_001
+# Terminal 1: sample client based on the SDK (register a new account → connects + subscribes + prints events, exits after 20 seconds)
+# Register on the first run with --register (the first registered account becomes admin); reuse it with --login later
+# Subscribes to group_001 (if sample data is seeded, group_001 is the product requirements review group)
+dotnet run --project samples/AguiGroupChat.Client -- --register zhangsan 123456 --groupIds group_001
 
-# Terminal 2: Another member logs into the same group and sends a message (@需求助手 triggers its reply)
-dotnet run --project samples/AguiGroupChat.Client -- --login lisi 123456 --groupIds group_001 --send "大家好，请给个需求大纲"
+# Terminal 2: register a second account and send a message in the same group (@需求助手 triggers its reply)
+dotnet run --project samples/AguiGroupChat.Client -- --register lisi 654321 --groupIds group_001 --send "大家好，请给个需求大纲"
 ```
+
+> Note: v1.0.75+ **no longer seeds demo accounts** `zhangsan` / `lisi` (so the first account you register becomes the admin).
+> Sample data only seeds the sample group (product requirements review group with members `user_1001/user_1002/agent_prd/agent_code`); it does not create corresponding login accounts.
+> Register your own account with `--register` on first run instead.
 
 ## Containerized Deployment (Docker)
 
@@ -175,6 +180,7 @@ Configuration options are set in `.env` (see `.env.example`):
 | `AGENTS_ENDPOINT` | empty | OpenAI-compatible endpoint (e.g. `http://host.docker.internal:11434/v1`) |
 | `AGENTS_MODEL` | `deepseek-chat` | Default model name |
 | `AGENTS_ENABLE_TOOLS` | `true` | Whether to enable tool calls (enabled by default: built-in `get_current_time` without approval + `publish_announcement` requiring approval) |
+| `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | Allow HTTP skills to reach <b>loopback / LAN / private</b> addresses (off by default = keep SSRF protection); set `true` if you must call on-prem / LAN endpoints |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | Tool names requiring **human-in-the-loop approval** (on match it is wrapped with `ApprovalRequiredAIFunction`: the run is interrupted when the model invokes it, a 🔐 approval card pops up in the chat, and only the requesting user can approve / reject) |
 | `STORAGE_PROVIDER` | `postgres` | Storage mode: `postgres` (default, enterprise-grade persistence), `memory` (in-process + JSON snapshot), `sqlite` / `mysql` (single-file / MySQL persistence), `redis` (multi-replica shared, 6.2) |
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL database / user / password (effective when `STORAGE_PROVIDER=postgres`) |
@@ -186,7 +192,7 @@ Configuration options are set in `.env` (see `.env.example`):
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `5` / `0.25` | Number of memory entries injected per reply / similarity threshold. **The `group_memory_search` tool is stricter**: threshold is max(0.40, MIN_SCORE), at most 3 entries, low-relevance hits are physically filtered to avoid memory flooding |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | Embedding call timeout (seconds). First load of bge-m3 on a CPU environment takes tens of seconds |
 | `MEMORY_SCOPE` | `agent` | Retrieval scope: `agent` all groups the agent belongs to (default) / `group` only the current group / `all` all groups |
-| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | Knowledge-base document chunking: window size (chars) / overlap (chars). Cuts are placed at line breaks or sentence-ending punctuation (avoiding mid-sentence splits), and adjacent slices share an overlapping tail to reduce boundary information loss |
+| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | Knowledge-base document chunking: window size (chars) / overlap (chars). Cuts are placed at line breaks or sentence-ending punctuation (avoiding mid-sentence splits), and adjacent slices share an overlapping tail to reduce boundary information loss; slices that still exceed the model context are auto re-split by the embedding provider (chars/token ratio 0.9 since 1.0.78), so long documents are not size-limited |
 | `MEMORY_PERSONAL_TOP_K` / `MEMORY_PERSONAL_MIN_SCORE` | `3` / `0.25` | Personal memory: number of "the triggerer's own past messages" injected per reply / similarity threshold. Overall capability switch (on by default); whether it is actually injected also depends on the **switches of the user and the agent individually** (both off by default) |
 | `SEED_SAMPLE_DATA` | `true` | Web demo: seed sample data when there is no history |
 | `SEED_SAMPLE_DATA_HUB` | `false` | Protocol Hub only: whether to seed sample data |
@@ -332,6 +338,8 @@ Newly created agents automatically appear in the checkable catalog for creating 
 「📥 import」reads the JSON and creates entries one by one (requires login, ownership goes to the current user; on an agentId conflict the ID is auto-changed rather than overwritten).
 Avatars of both users and agents support local image upload (reusing `/ag-ui/upload`), and avatars appear in the group member list, chat messages, and the top bar;
 avatar / nickname changes auto-sync to the member profiles of all the groups they belong to and broadcast `GROUP_MEMBER_UPDATED`.
+
+**Digital-employee org chart (graphically edit task assignment / escalation)**: the top-bar「🌐 Org chart」opens a visual canvas where you drag-link each digital employee's <b>assignment (downward, multiple)</b> and <b>escalation (upward, single)</b>. The "**Optimize dispatch**" <b>icon button</b> at each node's top-right auto-generates a "manage next-layer dispatch" guidance paragraph from that employee's <b>direct next layer</b> (`AssignmentIds`) - pick a subordinate based only on the next layer, no override, return NONE if none fits. The result can be previewed and then <b>appended to that role's Instructions</b> (`POST /ag-ui/agents/{agentId}/optimize-assignment`, login required, owner/admin only).
 
 **Data backup and initialization (user menu → Data Backup)**:
 
@@ -734,7 +742,15 @@ Vectorize chat records into PostgreSQL (pgvector); before replying, the agent re
     "PersonalTopK": 3,                                    // personal memory entries (0=capability off; actual injection also depends on each user's and agent's switches)
     "PersonalMinScore": 0.25,                             // personal memory similarity threshold
     "MaxCharsPerMemory": 600,
-    "RetentionDays": 0                       // auto-forgetting: memory default retention days (0=never expires; >0 ordinary memories are written with an expiry, physically cleaned hourly in the background)
+    "RetentionDays": 0,                        // auto-forgetting: memory default retention days (0=never expires; >0 ordinary memories are written with an expiry, physically cleaned hourly in the background)
+    "GraphEnabled": false,                     // Graph memory (Graph RAG): default off; extract entity/relation triples from group messages to build a graph, retrieve by semantic seed recall + n-hop traversal before replying
+    "GraphTopK": 2,                            // number of seed entities recalled for graph retrieval (small keeps weak seed matches from spreading noise)
+    "GraphMinScore": 0.45,                     // similarity threshold for graph seed recall (higher: only recall when the query is very close to an entity)
+    "GraphHops": 1,                            // graph traversal hops (1..4; 1 hop keeps the subgraph focused on the seed neighborhood)
+    "GraphMaxNodes": 12,                       // max graph nodes injected per turn (prevent an oversized subgraph from crowding the prompt)
+    "GraphMaxSectionChars": 700,               // total char budget for one graph section (graphs are supplementary; must not crowd out vector chunks)
+    "GraphMaxChars": 2000,                     // source-text truncation length for graph extraction
+    "GraphQueueCapacity": 256                  // graph extraction queue cap (drops when full to avoid background backlog)
   }
 }
 ```
@@ -757,13 +773,27 @@ How it works:
 - **Degradation**: if the pgvector extension is unavailable / the embedding endpoint is unreachable, it silently disables itself without affecting any existing functionality; the config does not take effect under the MySQL / SQLite providers
 - **Deployment**: the postgres service in the Docker orchestration has been switched to the pgvector image (`pgvector/pgvector:pg16`, same kernel as postgres 16); local database: `docker run -d --name agui-pg -e POSTGRES_PASSWORD=agui -e POSTGRES_DB=agui -p 5432:5432 pgvector/pgvector:pg16`; embedding with Ollama: `ollama pull bge-m3:latest && ollama serve`
 
+### Graph Memory (Graph RAG, entity-relation subgraph injection)
+
+In addition to vector memory, you can enable <b>graph memory</b> (`Memory.GraphEnabled=true`): it extracts "entity-relation-entity" triples from group messages and builds an entity/relation graph (on PostgreSQL using `agui_graph_entities`/`agui_graph_edges` tables + pgvector entity vectors; on SQLite the same tables with BLOB vectors and in-memory cosine). Before replying it first <b>recalls seed entities</b> with the query vector, then does an <b>n-hop graph traversal</b> to obtain the reachable subgraph (entities + edges), which is textified and injected into the prompt alongside vector memory / knowledge base — augmenting the <b>relational knowledge</b> that vector retrieval struggles to cover (e.g. who is responsible for what, what depends on what).
+
+- <b>Extraction</b>: reuses the agent model (OpenAI-compatible endpoint) to extract triples (entity types, relation verbs); falls back to <b>rule-based extraction</b> when `Provider=mock` or the LLM is unavailable (nouns inside 书名号/quotes, English proper nouns, "A handles B" patterns), so it works offline
+- <b>Storage</b>: entities are merged idempotently (dedup by name, accumulating mention count); relation edges are idempotent by `source+relation+target+group` (accumulating weight); physically stored in the existing relational database (no extra graph database); the group's graph is deleted when the group is disbanded
+- <b>Retrieval</b>: embed the trigger message -> semantically recall seed entities -> bidirectional layer-by-layer BFS for n hops (pure managed traversal, consistent across Postgres/SQLite) -> dedup and cap the subgraph to `GraphMaxNodes`
+- <b>Injection</b>: alongside group memory / personal memory / knowledge base, injected as a separate section in `MemoryContextProvider.ProvideAIContextAsync` (also wrapped in an untrusted-content boundary). The graph is a <b>supplement</b>: the section carries explicit guidance "for reference only; facts should defer to the vector snippets", and is bounded by the `GraphMaxSectionChars` char budget - seed/nearby entities and the high-value edges connecting them are kept first, exceeding content is dropped so the graph does not crowd out or dilute the vector chunks (since 1.0.79)
+- <b>Knowledge base also builds a graph</b>: when a knowledge-base document is uploaded, its text is also entity/relation-extracted into the isolated `kb:{KbId}` domain; when retrieving knowledge, the bound knowledge bases are semantically seed-recalled and n-hop traversed, and the subgraph is injected alongside the vector chunks (isolated domains do not cross-contaminate; deleting a KB also removes its graph)
+- <b>Safety</b>: only <b>group-visible</b> messages are extracted (directed private/mentioned messages never enter the graph, preventing private relations from leaking); entity/relation text is wrapped with `UntrustedBoundary`
+- <b>On/off</b>: off by default (`GraphEnabled=false`); when enabled it activates automatically, and extraction failures / embedding outages degrade silently without affecting group chat or existing vector memory
+
+> For the Docker orchestration you can enable it via `.env` `MEMORY_GRAPH_ENABLED=true` (see docker-compose); for the desktop SQLite build, configure under `Agents:Memory:Graph*` in `appsettings.json`.
+
 ## Tests
 
 ```bash
 dotnet test AguiGroupChat.slnx
 ```
 
-567 test cases cover: group lifecycle, permission control, subscription and snapshot, visibility fan-out (all/mentioned/private), recall, kick/leave, online-status interplay, agent trigger rules (including contextual triggering and **in-group trigger modes overriding the role default**, **twin online pause**), MSAGENT gateway streaming feed-back (mock + incremental/accumulated text compatibility + contextual speaking decision + in-group trigger-mode effectiveness), **human-in-the-loop (approval interrupt producing ToolApprovalRequestContent, triggerer-only decisions, approval resuming the same session to execute the tool and feed back, `approveAll` one-shot approval)**, DeepSeek/API Key config resolution, **user management (register/login/change-password/profile/avatar sync/personal-memory switch/token/WS·SSE auth/multi-device sessions / TOTP two-factor)**, **agent runtime management (dynamic catalog add-edit-delete + avatar + private-agent permissions + agent-level differentiated approval + role handoff relay + market import + HTTP management APIs)**, **AI twin (enable/disable/trigger-mode change/public-group follow/sync)**, **semantic memory (pgvector write/retrieval/private-group isolation/disband-deletes-memory/personal memory/timeline replay/hybrid BM25 rerank/materialized knowledge base)**, **topics (create/delete/create-from-message/clear-topic-records/cross-topic subject linking)**, **approval and governance (fine-grained RBAC, operation audit logs, TOTP)**, **orchestration and scheduling (multi-step workflow pipeline, recurring scheduled tasks)**, **rich-media attachments (multi-image selection / voice audio kind / canvas annotation, audio not injected into text context)**, **whitelabel branding and embedding (6.4: public read + admin save + invalid primary color / dangerous Logo rejected + unauthorized 403)**, **config governance (6.3: admin online write / persistence + invalid values 400 / non-admin 403)**, **memory cross-instance sync (2.3: export / import round-trip + idempotent dedup + sinceMs incremental)**, **persistence (JSON snapshot round-trip + full-app restart recovery)**, **PostgreSQL storage** (groups/members/topics/message pagination/recall/in-place modifications/users/trigger rules/extension sections round-trip + full-app PG restart recovery, requires a local PG test database, `AGUI_PG_TEST_CONN` overrides the connection string), **MySQL storage** (same 11 cases, requires local MySQL 8.0.13+, `AGUI_MYSQL_TEST_CONN` overrides the connection string), **SQLite storage** (same 11 cases, single file, runs locally with zero deployment), with the corresponding cases auto-skipped when a database is not configured; plus full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
+603 test cases cover: group lifecycle, permission control, subscription and snapshot, visibility fan-out (all/mentioned/private), recall, kick/leave, online-status interplay, agent trigger rules (including contextual triggering and **in-group trigger modes overriding the role default**, **twin online pause**), MSAGENT gateway streaming feed-back (mock + incremental/accumulated text compatibility + contextual speaking decision + in-group trigger-mode effectiveness), **human-in-the-loop (approval interrupt producing ToolApprovalRequestContent, triggerer-only decisions, approval resuming the same session to execute the tool and feed back, `approveAll` one-shot approval)**, DeepSeek/API Key config resolution, **user management (register/login/change-password/profile/avatar sync/personal-memory switch/token/WS·SSE auth/multi-device sessions / TOTP two-factor)**, **agent runtime management (dynamic catalog add-edit-delete + avatar + private-agent permissions + agent-level differentiated approval + role handoff relay + market import + HTTP management APIs)**, **AI twin (enable/disable/trigger-mode change/public-group follow/sync)**, **semantic memory (pgvector write/retrieval/private-group isolation/disband-deletes-memory/personal memory/timeline replay/hybrid BM25 rerank/materialized knowledge base)**, **topics (create/delete/create-from-message/clear-topic-records/cross-topic subject linking)**, **approval and governance (fine-grained RBAC, operation audit logs, TOTP)**, **orchestration and scheduling (multi-step workflow pipeline, recurring scheduled tasks)**, **rich-media attachments (multi-image selection / voice audio kind / canvas annotation, audio not injected into text context)**, **whitelabel branding and embedding (6.4: public read + admin save + invalid primary color / dangerous Logo rejected + unauthorized 403)**, **config governance (6.3: admin online write / persistence + invalid values 400 / non-admin 403)**, **memory cross-instance sync (2.3: export / import round-trip + idempotent dedup + sinceMs incremental)**, **persistence (JSON snapshot round-trip + full-app restart recovery)**, **PostgreSQL storage** (groups/members/topics/message pagination/recall/in-place modifications/users/trigger rules/extension sections round-trip + full-app PG restart recovery, requires a local PG test database, `AGUI_PG_TEST_CONN` overrides the connection string), **MySQL storage** (same 11 cases, requires local MySQL 8.0.13+, `AGUI_MYSQL_TEST_CONN` overrides the connection string), **SQLite storage** (same 11 cases, single file, runs locally with zero deployment), with the corresponding cases auto-skipped when a database is not configured; plus full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
 
 **Agent tool / skill / knowledge-base specifics** (test count keeps growing per version; `dotnet test` is the source of truth): calculator (expression evaluation + injection/divide-by-zero/overlength rejection + exponent and unary-minus precedence), unit conversion (6 unit kinds + temperature offsets + category-mismatch rejection), tool registration (EnableTools/EnableWebTools switch combinations), attachment reading and group-memory retrieval tools (including AmbientContext injection), network-tool SSRF protection (private/loopback/cloud-metadata address rejection), end-to-end tool-call pipeline (mock model calls calculator → real execution → feed-back), skills (Skills) inter-agent invocation (API round-trip, empty-SkillId auto-generation and conflict dedup, invalid SkillId 400 / mount skip, cyclic-reference protection, end-to-end sub-agent invocation), **knowledge base (RAG knowledge documents: chunking, document vectorization into storage, retrieval hits, delete cascading, visibility, explicit degradation error without a vector store, MemoryContextProvider injecting bound knowledge bases)**.
 

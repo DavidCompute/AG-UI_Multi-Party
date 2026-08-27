@@ -211,20 +211,38 @@ public static class MemoryApi
             => ExportMemories(ctx, auth, authOptions, store, memory));
 
         // 导入：body 为导出产生的数组（或 {items:[...]}）；逐条向量化写入（按 messageId 去重）。
+        // 安全限制：非管理员只能向自己所在的群导入记忆（堵住向他人 / 任意群注入记忆影响智能体 RAG 的投毒面）；
+        // 且对 user 型发送者强制为调用者本人 / 管理员，其余条目被拒绝并计数返回。
         root.MapPost("/import", async (JsonElement body, HttpContext ctx, AuthService auth, AuthOptions authOptions,
-            IMessageMemory memory, CancellationToken ct) =>
+            IGroupStore store, IMessageMemory memory, CancellationToken ct) =>
         {
-            var (_, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
+            var (userId, error) = WebIdentity.ResolveIdentity(ctx, auth, authOptions);
             if (error is not null) return error;
+            if (userId is null) return error!;
+            var isAdmin = auth.IsAdmin(userId);
+            var myGroups = store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
             var items = body.ValueKind == JsonValueKind.Array ? body :
                 (body.TryGetProperty("items", out var arr) ? arr : default);
             if (items.ValueKind != JsonValueKind.Array)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请求体需为记忆数组或 {items:[...]}"));
-            var list = items.EnumerateArray().Select(ParseMemoryItem).Where(x => x is not null).Select(x => x!).ToList();
-            if (list.Count == 0)
+            var parsed = items.EnumerateArray().Select(ParseMemoryItem).Where(x => x is not null).Select(x => x!).ToList();
+            if (parsed.Count == 0)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "没有可导入的记忆条目"));
-            var imported = await memory.ImportMemoriesAsync(list, ct);
-            return Results.Ok(new { ok = true, imported, provided = list.Count });
+            // 过滤无权导入的条目：管理员可全量；非管理员须群存在且调用者是其成员、user 型发送者须为本人
+            var allowed = parsed.Where(i =>
+            {
+                if (isAdmin) return true;
+                var gid = i.GroupId;
+                if (string.IsNullOrWhiteSpace(gid) || !myGroups.Contains(gid)) return false;
+                if (string.Equals(i.SenderType, "user", StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(i.SenderId) && i.SenderId != userId) return false;
+                return true;
+            }).ToList();
+            var rejected = parsed.Count - allowed.Count;
+            if (allowed.Count == 0)
+                return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, $"没有可导入的记忆条目（{rejected} 条无权导入）"), statusCode: StatusCodes.Status403Forbidden);
+            var imported = await memory.ImportMemoriesAsync(allowed, ct);
+            return Results.Ok(new { ok = true, imported, provided = parsed.Count, rejected });
         });
     }
 

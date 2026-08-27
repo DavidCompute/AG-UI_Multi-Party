@@ -44,7 +44,6 @@
     <div id="meMenuStatus" class="me-menu-item" data-i18n="menu.status">系统状态</div>
     <div id="meMenuMemory" class="me-menu-item" data-i18n="menu.memory">记忆管理</div>
     <div id="meMenuBranding" class="me-menu-item" data-i18n="menu.branding">白标设置</div>
-    <div id="meMenuTasks" class="me-menu-item" data-i18n="menu.tasks">任务中心</div>
     <div id="meMenuBackup" class="me-menu-item" data-i18n="menu.backup">数据备份</div>
     <div id="meMenuLogout" class="me-menu-item danger" data-i18n="menu.logout">退出登录</div>
   </div>
@@ -144,6 +143,8 @@
         <div class="modal-title"><span data-i18n="agent.title">AI 角色管理</span> <span id="agentCount" class="count-badge"></span></div>
         <div class="agent-toolbar">
           <input id="agentSearch" class="modal-input agent-search" data-i18n-placeholder="agent.search" />
+          <button id="agentOrgBtn" class="chip-btn" data-i18n-title="agent.orgChart">🌐 <span data-i18n="agent.orgBtn">组织架构</span></button>
+          <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
           <button id="agentImportBtn" class="chip-btn" data-i18n-title="agent.importTip">📥 <span data-i18n="agent.import">导入</span></button>
           <button id="agentExportAllBtn" class="chip-btn" data-i18n-title="agent.exportAllTip">📤 <span data-i18n="agent.exportAll">导出全部</span></button>
           <button id="agentAddBtn" class="send" data-i18n="agent.add">＋ 新增数字员工</button>
@@ -169,7 +170,8 @@
       <div id="agentFormView" class="hidden">
         <div class="modal-title" id="agentFormTitle" data-i18n="agent.form.add">新增数字员工</div>
         <div class="agent-form">
-          <div class="form-section" data-i18n="agent.form.basic">基本信息</div>
+          <div class="form-section" data-collapse-key="afSectBasic" data-static-section="1"><span data-i18n="agent.form.basic">基本信息</span></div>
+          <div class="form-section-body" id="afSectBasic">
           <div class="form-group">
             <label><span data-i18n="agent.form.nickname">昵称</span> <span class="req">*</span></label>
             <input id="afNickname" class="modal-input" data-i18n-placeholder="agent.form.nicknamePh" maxlength="20" />
@@ -199,15 +201,19 @@
             </div>
             <p class="form-hint" data-i18n="agent.form.desc.hint">点击「✨ 生成角色设定」可自动生成完整系统提示词并填入下方 Instructions，生成后请检查微调</p>
           </div>
+          </div>
 
-          <div class="form-section" data-i18n="agent.form.section.role">角色设定</div>
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectRole"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.role">角色设定</span></div>
+          <div class="form-section-body" id="afSectRole">
           <div class="form-group">
             <label data-i18n="agent.form.instructions">Instructions（系统提示词）</label>
             <textarea id="afInstructions" class="modal-input agent-instructions" rows="4" data-i18n-placeholder="agent.form.instructions.ph"></textarea>
             <p class="form-hint" data-i18n="agent.form.instructions.hint">建议包含：身份定位、职责范围、回复风格要求</p>
           </div>
+          </div>
 
-          <div class="form-section" data-i18n="agent.form.section.trigger">触发与模型</div>
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectTrigger"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.trigger">触发与模型</span></div>
+          <div class="form-section-body" id="afSectTrigger">
           <div class="form-row">
             <div class="form-group">
               <label data-i18n="agent.form.trigger">触发方式</label>
@@ -235,8 +241,10 @@
             <input id="afSchedule" class="modal-input" data-i18n-placeholder="agent.form.schedule.ph" />
             <p class="form-hint" data-i18n="agent.form.schedule.hint">5 段表达式：分 时 日 月 周（UTC），到点自动向该数字员工加入的每个知聚发汇报。支持 * 、*/n 、a-b 、a,b,c。示例：*/30 * * * *（每 30 分钟）、0 18 * * 1-5（工作日 18 点）</p>
           </div>
+          </div>
 
-          <div class="form-section" data-i18n="agent.form.section.bridge">AG-UI 桥接（可选，外部专家）</div>
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectBridge"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.bridge">AG-UI 桥接（可选，外部专家）</span></div>
+          <div class="form-section-body" id="afSectBridge">
           <div class="form-group">
             <label data-i18n="agent.form.bridge.endpoint">桥接端点</label>
             <input id="afBridgeEndpoint" class="modal-input" data-i18n-placeholder="agent.form.bridge.endpoint.ph" />
@@ -256,59 +264,150 @@
               <p class="form-hint" data-i18n="agent.form.bridge.token.hint">以 Authorization: Bearer 随连接携带；不随列表回显</p>
             </div>
           </div>
-
-          <div class="form-section" data-i18n="agent.form.section.skills">技能（Skills，可选）</div>
-          <div class="form-group">
-            <p class="form-hint" style="margin-bottom:8px" data-i18n-html="agent.form.skills.hint">把<b>其他数字员工</b>作为可调用技能（Microsoft Agent Framework 数字员工间调用）：本数字员工需要该领域信息时，由模型决定调用子数字员工获取答复。</p>
-            <div id="afSkillsList"></div>
-            <button id="afSkillAddBtn" class="chip-btn" type="button" style="margin-top:6px" data-i18n="agent.form.skills.add">＋ 添加技能</button>
           </div>
 
-          <div class="form-section" data-i18n="agent.form.section.kb">知识库（可选）</div>
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectSkill"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.skill">技能与知识</span></div>
+          <div class="form-section-body" id="afSectSkill">
+
+          <div class="form-group">
+            <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.skillDefs.hint"><b>可复用技能（技能库）</b>：勾选从<b>技能库</b>挂载的可复用技能（shell / http / prompt），可跨数字员工复用。技能在「技能库」里创建维护，或让智能体用自然语言创建。</p>
+            <div id="afSkillDefList" class="kb-pick"></div>
+            <button id="afSkillLibManageBtn" class="chip-btn" type="button" style="margin-top:6px" data-i18n="skill.manage">🎯 管理技能库</button>
+          </div>
+
+          <div class="form-group">
+            <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.subAgents.hint"><b>可调用子数字员工（技能）</b>：把<b>其他数字员工</b>挂为本角色的可调用技能——模型需要其领域能力时会自动调起子数字员工。勾选后可为每项填一句调用说明。</p>
+            <div id="afSkillAgentList" class="kb-pick"></div>
+          </div>
+
+          <div class="form-section" data-collapse-key="afSectKb" style="border:none;margin:14px 0 8px;padding:0 0 4px"><span data-i18n="agent.form.section.kb">知识库（可选）</span></div>
           <div class="form-group">
             <p class="form-hint" style="margin-bottom:8px" data-i18n-html="agent.form.kb.hint">绑定<b>知识库</b>后，数字员工回复前会检索其中的知识文档相关内容（RAG），基于您的资料作答。知识库在下方弹窗中创建并上传文档。</p>
             <div id="afKbList" class="kb-pick"></div>
             <button id="afKbManageBtn" class="chip-btn" type="button" style="margin-top:6px" data-i18n="agent.form.kb.manage">📚 管理知识库</button>
           </div>
+          </div>
 
-          <div class="form-section" data-i18n="agent.form.section.memory">记忆</div>
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectMisc"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.memory">记忆与权限</span></div>
+          <div class="form-section-body" id="afSectMisc">
+
           <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
             <input id="afPersonalMemory" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
             <label for="afPersonalMemory" style="margin:0;cursor:pointer" data-i18n="agent.form.personalMemory">🧠 个人记忆</label>
             <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.personalMemoryHint">（默认关闭。开启后，该数字员工回复时会参考触发者本人的历史发言，了解其偏好；需触发者用户也开启个人记忆才生效）</span>
           </div>
 
-          <div class="form-section" data-i18n="agent.form.section.access">访问权限</div>
           <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
             <input id="afIsPrivate" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
             <label for="afIsPrivate" style="margin:0;cursor:pointer" data-i18n="agent.form.isPrivate">🔒 私密数字员工</label>
             <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.isPrivateHint">（默认关闭。开启后仅创建者可将它拉进知聚，其他用户看不到也无法使用）</span>
           </div>
-
-          <div class="form-section" data-i18n="agent.form.section.work">工作能力</div>
-          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input id="afEnableWorkTools" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
-            <label for="afEnableWorkTools" style="margin:0;cursor:pointer" data-i18n="agent.form.enableWorkTools">🛠️ 工作型数字员工</label>
-            <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.enableWorkToolsHint">（默认关闭。开启后可在专属工作区读取/写入文件、执行白名单命令；写操作需你在知聚内批准。仅供可信数字员工使用）</span>
-          </div>
-          <div class="form-section" data-i18n="agent.form.section.route">任务指派 / 问题提升</div>
-          <div class="form-group">
-            <label data-i18n="agent.form.assignmentIds">任务指派白名单（可下行指派）</label>
-            <select id="afAssignmentIds" class="modal-input" multiple size="3"></select>
-            <p class="form-hint" style="margin-top:4px" data-i18n="agent.form.assignmentHint">被 @ 时，若按本数字员工系统提示词判定“不属于我”，会在<b>此白名单</b>内自动推断并指派给更合适的下游数字员工（可 Ctrl+点选多个）。留空 = 不向下指派。</p>
-          </div>
-          <div class="form-group">
-            <label data-i18n="agent.form.escalationAgent">问题提升目标（向上）</label>
-            <select id="afEscalationAgent" class="modal-input">
-              <option value="" data-i18n="agent.form.escalationNone">— 不设置（无解时回答不能解决）—</option>
-            </select>
-            <p class="form-hint" style="margin-top:4px" data-i18n="agent.form.escalationHint">无法指派且自身也无解时，把问题<b>提升</b>给该数字员工（通常是上级/主管，手工配置）。若为空则回答“不能解决”。</p>
           </div>
         </div>
         <div class="modal-actions">
           <button id="afCancel" class="btn-ghost" data-i18n="agent.form.cancel">取消</button>
           <button id="afSave" class="send" data-i18n="agent.form.save">保存</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数字员工组织架构图（图形化编辑任务指派 / 问题提升） -->
+  <div id="orgModal" class="modal-overlay hidden">
+    <div class="modal org-modal">
+      <div class="modal-title">🌐 <span data-i18n="org.title">数字员工组织架构</span></div>
+      <p class="form-hint" style="margin-bottom:8px" data-i18n-html="org.hint">拖动节点调整位置；拖动节点<b>下方紫点▼</b>到另一节点＝<b>指派</b>（紫虚线，可多）；拖动<b>上方橙点▲</b>到另一节点＝<b>提升</b>（橙实线，唯一）。拖到空白＝清空该类连线，点击连线＝删除。</p>
+      <div id="orgCanvasWrap" class="org-canvas-wrap">
+        <div id="orgCanvas" class="org-canvas"></div>
+        <svg id="orgSvg" class="org-svg"></svg>
+      </div>
+      <div class="org-toolbar">
+        <span class="muted" style="font-size:12px" id="orgStatus"></span>
+      </div>
+      <div class="modal-actions">
+        <button id="orgReset" class="btn-ghost" data-i18n="org.reset">自动布局</button>
+        <button id="orgCancel" class="btn-ghost" data-i18n="org.cancel">取消</button>
+        <button id="orgSave" class="send" data-i18n="org.save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 优化下一层任务指派提示词（组织架构节点内调用） -->
+  <div id="orgOptModal" class="modal-overlay hidden">
+    <div class="modal org-modal">
+      <div class="modal-title">🧠 <span data-i18n="org.optimizeTitle">优化下一层任务指派提示词</span></div>
+      <p class="form-hint" style="margin-bottom:8px" data-i18n="org.optimizeTip">按该数字员工的直接下一层，自动生成一段「管理下一层任务指派」指引（只看下一层挑选下游）</p>
+      <div class="form-group">
+        <span class="muted" id="orgOptAgent"></span>
+        <textarea id="orgOptText" class="modal-input agent-instructions" rows="8" style="width:100%;resize:vertical" readonly></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="orgOptCancel" class="btn-ghost" data-i18n="org.cancel">取消</button>
+        <button id="orgOptAppend" class="send" data-i18n="org.optimizeAppend">追加到该数字员工的指令</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 技能库：可复用技能管理（shell / http / prompt 定义 + 试运行） -->
+  <div id="skillModal" class="modal-overlay hidden">
+    <div class="modal skill-modal">
+      <div class="modal-title">🎯 <span data-i18n="skill.title">技能库</span></div>
+      <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="skill.hint">定义<b>可复用技能</b>：<b>shell</b>（可执行命令/脚本）、<b>http</b>（调用外部接口）、<b>prompt</b>（提示词/流程模板）。技能存入技能库，可被任意数字员工反复挂载，也支持在技能管理界面手工维护或让智能体用自然语言创建。</p>
+      <!-- 技能库列表 -->
+      <div id="skillListView">
+        <div class="skill-grid-head">
+          <span data-i18n="skill.col.name">名称 / ID</span>
+          <span data-i18n="skill.col.kind">类型</span>
+          <span data-i18n="skill.col.desc">描述</span>
+          <span class="skill-op-col" data-i18n="skill.col.ops">操作</span>
+        </div>
+        <div id="skillList" class="skill-list"></div>
+        <div class="modal-actions">
+          <button id="skillAddBtn" class="send" data-i18n="skill.add">＋ 新增技能</button>
+          <button id="skillCloseBtn" class="btn-ghost" data-i18n="skill.close">关闭</button>
+        </div>
+      </div>
+      <!-- 技能编辑 -->
+      <div id="skillFormView" class="hidden">
+        <div class="form-section" data-i18n="skill.form.basic">基本信息</div>
+        <div class="form-group">
+          <label data-i18n="skill.form.name">技能名</label>
+          <input id="sfName" class="modal-input" maxlength="64" style="width:100%" data-i18n-placeholder="skill.form.namePh" />
+        </div>
+        <div class="form-group">
+          <label data-i18n="skill.form.id">技能 ID（工具名，字母/数字/下划线/连字符；留空自动生成）</label>
+          <input id="sfSkillId" class="modal-input" maxlength="64" style="width:100%" placeholder="risk_analyzer" />
+        </div>
+        <div class="form-group">
+          <label data-i18n="skill.form.kind">类型</label>
+          <select id="sfKind" class="modal-input" style="width:100%">
+            <option value="shell" data-i18n="skill.kind.shell">shell：可执行命令 / 脚本</option>
+            <option value="http" data-i18n="skill.kind.http">http：调用外部接口</option>
+            <option value="prompt" data-i18n="skill.kind.prompt">prompt：提示词 / 流程模板</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label data-i18n="skill.form.description">调用说明（给模型的：何时调用、参数、返回什么）</label>
+          <textarea id="sfDescription" class="modal-input" rows="2" maxlength="500" style="width:100%;resize:vertical"></textarea>
+        </div>
+        <div class="form-group" id="sfInterpreterGroup" style="display:none">
+          <label data-i18n="skill.form.interpreter">脚本解释器（可选，如 python3 / node / bash；留空 = 按 Body 首行 shebang 或 bash）</label>
+          <input id="sfInterpreter" class="modal-input" maxlength="80" style="width:100%" placeholder="python3" />
+        </div>
+        <div class="form-group">
+          <label>正文（<span id="sfBodyLabel" data-i18n="skill.form.bodyShell">命令 / 脚本</span>）</label>
+          <textarea id="sfBody" class="modal-input agent-instructions" rows="7" style="width:100%;resize:vertical"></textarea>
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:8px">
+          <label style="margin:0" data-i18n="skill.form.requiresApproval">执行需人工批准（shell 强制；HTTP 可关闭以自动执行）</label>
+          <input id="sfRequiresApproval" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+        </div>
+        <div class="modal-actions">
+          <button id="sfBack" class="btn-ghost" data-i18n="skill.form.back">返回</button>
+          <button id="sfTest" class="btn-ghost" data-i18n="skill.form.test">▶ 试运行</button>
+          <button id="sfSave" class="send" data-i18n="skill.form.save">保存技能</button>
+        </div>
+        <div class="skill-test-result muted" id="sfTestResult" style="margin-top:8px;font-size:12px"></div>
       </div>
     </div>
   </div>
@@ -485,24 +584,6 @@
       <div id="memPager" class="memory-pager"></div>
       <div class="modal-actions">
         <button id="memoryClose" class="btn-ghost" data-i18n="memory.close">关闭</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 任务中心：工作型数字员工的任务级编排（状态 / 进度 / 结果） -->
-  <div id="taskModal" class="modal-overlay hidden">
-    <div class="modal task-modal">
-      <div class="modal-title"><span data-i18n="task.title">任务中心</span> <span id="taskCount" class="count-badge"></span></div>
-      <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="task.explain">工作型数字员工在<b>专属工作区</b>执行的任务编排（采集、整理、发布等）：创建后后台运行，可随时查看<b>状态 / 进度 / 结果</b>。跨对话记忆延续通过工作区 <code>NOTES.md</code> 实现。</p>
-      <div class="memory-toolbar">
-        <select id="taskGroupFilter" class="modal-input" style="flex:1;min-width:120px">
-          <option value="" data-i18n="task.all">我的全部任务</option>
-        </select>
-        <button id="taskRefreshBtn" class="create-group-btn" data-i18n-title="task.refreshTip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
-      </div>
-      <div id="taskList" class="memory-list"><div class="mem-empty" data-i18n="task.loading">加载中…</div></div>
-      <div class="modal-actions">
-        <button id="taskClose" class="btn-ghost" data-i18n="task.close">关闭</button>
       </div>
     </div>
   </div>
@@ -863,7 +944,6 @@
           <label class="cfg-check"><input id="cfgRequireToken" type="checkbox" /> <span data-i18n="admin.reqRealTime">实时通道强制令牌（RequireTokenOnRealTime）</span></label>
           <label class="cfg-check"><input id="cfgEnableTools" type="checkbox" /> <span data-i18n="admin.enableTools">启用工具调用</span></label>
           <label class="cfg-check"><input id="cfgEnableWebTools" type="checkbox" /> <span data-i18n="admin.enableWeb">启用联网工具</span></label>
-          <label class="cfg-check"><input id="cfgWorkTools" type="checkbox" /> <span data-i18n="admin.enableWork">启用工作型数字员工文件/命令工具</span></label>
           <label class="cfg-check"><input id="cfgThinking" type="checkbox" /> <span data-i18n="admin.thinking">思考模式</span></label>
         </div>
         <div class="form-group"><label data-i18n="admin.approvalTools">需审批的工具名（逗号分隔）</label><input id="cfgApprovalTools" class="modal-input" placeholder="publish_announcement"></div>

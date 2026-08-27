@@ -31,7 +31,6 @@ public sealed class RedisStoreTests : IDisposable
     private readonly RedisGroupStore Groups;
     private readonly RedisUserStore Users;
     private readonly RedisAgentRegistryStore AgentRegistrations;
-    private readonly RedisTaskStore Tasks;
     private readonly RedisUsageStore Usage;
     private readonly RedisSectionStore Sections;
 
@@ -54,13 +53,12 @@ public sealed class RedisStoreTests : IDisposable
 
     public RedisStoreTests()
     {
-        if (!RedisAvailable) { _ctx = null!; Groups = null!; Users = null!; AgentRegistrations = null!; Tasks = null!; Usage = null!; Sections = null!; return; }
+        if (!RedisAvailable) { _ctx = null!; Groups = null!; Users = null!; AgentRegistrations = null!; Usage = null!; Sections = null!; return; }
         _ctx = new RedisContext(RedisUrl);
         _ctx.FlushAguiKeys();
         Groups = new RedisGroupStore(_ctx);
         Users = new RedisUserStore(_ctx);
         AgentRegistrations = new RedisAgentRegistryStore(_ctx);
-        Tasks = new RedisTaskStore(_ctx);
         Usage = new RedisUsageStore(_ctx);
         Sections = new RedisSectionStore(_ctx, new ChangeHub(), NullLogger<RedisSectionStore>.Instance);
     }
@@ -248,25 +246,6 @@ public sealed class RedisStoreTests : IDisposable
         Assert.DoesNotContain(AgentRegistrations.LoadAll(), r => r.AgentId == "agent_c");
     }
 
-    [Fact]
-    public void TaskStore_Add_Get_Update_List()
-    {
-        if (!Ready) return;
-        Tasks.Add(new WorkTask { TaskId = "t1", GroupId = "g1", AgentId = "agent_a", UserId = "user_1", Title = "周报", Content = "内容", CreatedAt = 100, Status = WorkTaskStatus.Queue });
-        Tasks.Add(new WorkTask { TaskId = "t2", GroupId = "g1", AgentId = "agent_a", UserId = "user_1", Title = "日报", Content = "内容", CreatedAt = 200, Status = WorkTaskStatus.Running });
-
-        Assert.Equal("周报", Tasks.Get("t1")!.Title);
-        Assert.Single(Tasks.ListForGroup("g1", 1));
-
-        var t = Tasks.Get("t2")!;
-        t.Status = WorkTaskStatus.Finished;
-        t.Result = "完成";
-        Tasks.Update(t);
-        Assert.Equal(WorkTaskStatus.Finished, Tasks.Get("t2")!.Status);
-        Assert.Equal("完成", Tasks.Get("t2")!.Result);
-
-        Assert.Equal(2, Tasks.ListForUser("user_1", 10).Count);
-    }
 
     [Fact]
     public void UsageStore_RecordAndQuery()

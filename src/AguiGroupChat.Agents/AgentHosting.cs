@@ -30,6 +30,8 @@ public static class AgentHosting
         services.AddSingleton<ITwinAgentSync>(sp => sp.GetRequiredService<TwinService>()); // 分身跟随钩子（GroupHub）
         services.AddSingleton<AgentCatalog>();
         services.AddSingleton<KnowledgeBaseCatalog>(); // 知识库目录（文档切片向量 + 检索）
+        services.AddSingleton<AgentSkillCatalog>(sp => new AgentSkillCatalog(
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(), options)); // 技能库（OpenClaw 风格可复用技能）
         // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值取 Agents:DailyTokenQuotaPerUser）
         services.AddSingleton(sp => new AguiGroupChat.Hub.Agents.AgentUsageService(
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
@@ -68,6 +70,7 @@ public static class AgentHosting
                 logger.LogDebug("语义记忆未启用（Agents:Memory:Enabled 默认 false，开启后智能体回复前会先检索历史记忆）");
                 return null!;
             });
+            services.AddSingleton<IGraphMemory>(_ => null!); // 图谱记忆随语义记忆同门：未启用即不可用
             return;
         }
         var provider = (configuration["Storage:Provider"] ?? "memory").Trim().ToLowerInvariant();
@@ -82,6 +85,7 @@ public static class AgentHosting
                 logger.LogWarning("当前存储模式（{Provider}）不支持语义记忆，已禁用（向量检索需 pgvector 或 sqlite-vec，请切换 Storage:Provider=postgres/sqlite 或关闭 Agents:Memory:Enabled）", provider);
                 return null!;
             });
+            services.AddSingleton<IGraphMemory>(_ => null!); // 图谱记忆依赖向量存储，随记忆一同不可用
             return;
         }
 
@@ -144,6 +148,16 @@ public static class AgentHosting
                 store.EnsureSchema();
                 return store;
             });
+            // 图谱记忆（Graph RAG，PostgreSQL + pgvector）：实体/关系表 + 递归 CTE 图遍历
+            services.AddSingleton<IGraphMemoryStore>(sp =>
+            {
+                var pg = sp.GetRequiredService<PostgresStore>();
+                var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<PgGraphMemoryStore>();
+                var store = new PgGraphMemoryStore(pg, ResolveEmbeddingDimensions(sp, options, logger), logger);
+                store.EnsureSchema();
+                return store;
+            });
+            RegisterGraphMemory(services, options);
             return;
         }
 
@@ -160,6 +174,29 @@ public static class AgentHosting
             store.EnsureSchema();
             return store;
         });
+        // 图谱记忆（Graph RAG，SQLite/MySQL）：实体向量 BLOB + 内存余弦 + 递归 CTE 图遍历
+        services.AddSingleton<IGraphMemoryStore>(sp =>
+        {
+            var relational = sp.GetRequiredService<RelationalStore>();
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger<RelationalGraphMemoryStore>();
+            var store = new RelationalGraphMemoryStore(relational, ResolveEmbeddingDimensions(sp, options, logger), logger);
+            store.EnsureSchema();
+            return store;
+        });
+        RegisterGraphMemory(services, options);
+    }
+
+    /// <summary>注册图谱记忆（Graph RAG）服务：实体/关系抽取器 + 编排（向 GroupHub / MemoryContextProvider 提供 IGraphMemory）。
+    /// 须在 IGraphMemoryStore + IEmbeddingProvider 已注册（AddMessageMemory 的 enabled 分支）后调用；GraphEnabled 关闭时内部禁用。</summary>
+    private static void RegisterGraphMemory(IServiceCollection services, AgentOptions options)
+    {
+        services.AddSingleton<GraphEntityExtractor>();
+        services.AddSingleton<IGraphMemory>(sp => new GraphMemory(
+            sp.GetService<IGraphMemoryStore>(),
+            sp.GetRequiredService<IEmbeddingProvider>(),
+            sp.GetRequiredService<GraphEntityExtractor>(),
+            options,
+            sp.GetRequiredService<ILogger<GraphMemory>>()));
     }
 
     /// <summary>解析记忆建表用向量维度：embedding 提供方（本地 llama 模型）能探测实际维度时优先用实际维度，
@@ -280,6 +317,29 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("kb", snapshot, restore);
+        }
+    }
+
+    /// <summary>
+    /// 注册技能库到持久化扩展区「skills」：memory 模式写入 JSON 快照（PersistenceService），
+    /// postgres 模式落库 agui_sections 表（ISectionStore）。
+    /// 须在应用构建后、状态恢复（InitializePersistence）之前调用（Web 组合根）。
+    /// </summary>
+    public static void RegisterSkillPersistence(this IServiceProvider services)
+    {
+        var catalog = services.GetRequiredService<AgentSkillCatalog>();
+        Func<object?> snapshot = () => catalog.ListAll();
+        Action<JsonElement> restore = element => catalog.RestoreAll(
+            element.Deserialize<List<AgentSkillDefinition>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("skills", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("skills", snapshot, restore);
         }
     }
 

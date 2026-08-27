@@ -27,18 +27,20 @@ public static class AgentApi
                 .Where(d => !d.IsSkillTarget)
                 // AI 分身（twin_*）由用户经「修改资料 → AI 分身」自我管理，不出现在智能体管理 / 成员勾选目录
                 .Where(d => !d.AgentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
-                .Where(d => !d.IsPrivate || (user is not null && d.OwnerId == user.UserId))
+                .Where(d => !d.IsPrivate || (user is not null && (auth.IsAdmin(user.UserId) || d.OwnerId == user.UserId)))
                 .ToList();
             return Results.Ok(ToDtos(defs));
         });
 
         // ---- 新增智能体（需登录）----
-        root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub) =>
+        root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentSkillCatalog skillCatalog) =>
         {
             var user = RequireUser(ctx, auth);
             if (user is null) return Unauthorized();
             var skillError = ValidateSkills(req.Skills);
             if (skillError is not null) return skillError;
+            var skillDefError = ValidateSkillDefIds(req.SkillDefIds, skillCatalog);
+            if (skillDefError is not null) return skillDefError;
             var scheduleError = ValidateSchedule(req.Schedule);
             if (scheduleError is not null) return scheduleError;
             var pipelineError = ValidatePipeline(req.Pipeline, catalog);
@@ -76,7 +78,7 @@ public static class AgentApi
         });
 
         // ---- 更新智能体（需登录）：同步已注册群内的触发规则（保留群内显式覆盖）----
-        root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct) =>
+        root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog) =>
         {
             var user = RequireUser(ctx, auth);
             if (user is null) return Unauthorized();
@@ -85,6 +87,8 @@ public static class AgentApi
                     "AI 分身请通过「修改资料 → AI 分身」管理，不支持在此编辑"), statusCode: StatusCodes.Status403Forbidden);
             var skillError = ValidateSkills(req.Skills);
             if (skillError is not null) return skillError;
+            var skillDefError = ValidateSkillDefIds(req.SkillDefIds, skillCatalog);
+            if (skillDefError is not null) return skillDefError;
             var scheduleError = ValidateSchedule(req.Schedule);
             if (scheduleError is not null) return scheduleError;
             var pipelineError = ValidatePipeline(req.Pipeline, catalog);
@@ -116,8 +120,8 @@ public static class AgentApi
             if (existing.OwnerId is null)
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "系统内置智能体只读，请导出后另建"),
                     statusCode: StatusCodes.Status403Forbidden);
-            if (existing.OwnerId != user.UserId)
-                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅创建者可编辑该智能体"),
+            if (!auth.IsAdmin(user.UserId) && existing.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅创建者或系统管理员可编辑该智能体"),
                     statusCode: StatusCodes.Status403Forbidden);
 
             // 更新时令牌留空表示沿用原值（令牌不回显给前端，避免公开目录泄露）
@@ -165,8 +169,8 @@ public static class AgentApi
             if (def.OwnerId is null)
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "系统内置智能体只读，请导出后另建"),
                     statusCode: StatusCodes.Status403Forbidden);
-            if (def.OwnerId != user.UserId)
-                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅创建者可删除该智能体"),
+            if (!auth.IsAdmin(user.UserId) && def.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅创建者或系统管理员可删除该智能体"),
                     statusCode: StatusCodes.Status403Forbidden);
 
             catalog.Remove(agentId);
@@ -208,6 +212,49 @@ public static class AgentApi
             catch (Exception ex)
             {
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, "角色设定生成失败：" + ex.Message),
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // ---- 优化「管理下一层任务指派」提示词（需登录，组织架构图节点上调用）：
+        //      依据该角色自身职责 + 其直接下一层下属，生成一段可追加到 Instructions 的指派指引，
+        //      让“只看下一层”的多下级指派选得更准（不向上钻、不引入更深层叶子）。 ----
+        root.MapPost("/{agentId}/optimize-assignment", async (string agentId, HttpContext ctx, AuthService auth, AgentOptions agentOptions, AgentCatalog catalog, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            var user = RequireUser(ctx, auth);
+            if (user is null) return Unauthorized();
+            if (agentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied,
+                    "AI 分身不支持优化指派提示词"), statusCode: StatusCodes.Status403Forbidden);
+            var existing = catalog.GetDefinition(agentId);
+            if (existing is null)
+                return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "智能体不存在"));
+            if (existing.IsSkillTarget)
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "技能目标智能体不可编辑"), statusCode: StatusCodes.Status403Forbidden);
+            // 权限：仅创建者或系统管理员（与编辑一致；系统内置智能体只读）
+            if (existing.OwnerId is null)
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "系统内置智能体只读，请导出后另建"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (!auth.IsAdmin(user.UserId) && existing.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅创建者或系统管理员可优化该智能体"),
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            var subordinates = (existing.AssignmentIds ?? [])
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => catalog.GetDefinition(id))
+                .Where(d => d is not null)
+                .Cast<AgentDefinition>()
+                .ToList();
+
+            try
+            {
+                var guidance = await AgentAssignmentPromptOptimizer.GenerateAsync(
+                    agentOptions, existing, subordinates, loggerFactory.CreateLogger("AgentAssignmentOptimizer"), ct);
+                return Results.Ok(new { assignmentGuidance = guidance, subordinateCount = subordinates.Count });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, "指派指引生成失败：" + ex.Message),
                     statusCode: StatusCodes.Status502BadGateway);
             }
         });
@@ -259,7 +306,6 @@ public static class AgentApi
         d.Model,
         d.BridgeEndpoint,
         d.PersonalMemoryEnabled,
-        d.EnableWorkTools,
         d.IsPrivate,
         d.OwnerId,
         d.Skills,
@@ -270,6 +316,7 @@ public static class AgentApi
         d.AssignmentIds,
         d.EscalationAgentId,
         d.IsSkillTarget,
+        d.SkillDefIds,
     });
 
     /// <summary>定时任务 cron 表达式校验：非法返回 400 错误（调度器每分钟空转会刷警告日志）。</summary>
@@ -325,7 +372,6 @@ public static class AgentApi
             BridgeMode = string.IsNullOrWhiteSpace(req.BridgeMode) ? null : req.BridgeMode.Trim().ToLowerInvariant(),
             BridgeToken = string.IsNullOrWhiteSpace(req.BridgeToken) ? existingToken : req.BridgeToken.Trim(),
             PersonalMemoryEnabled = req.PersonalMemoryEnabled ?? false,
-            EnableWorkTools = req.EnableWorkTools ?? false,
             IsPrivate = req.IsPrivate ?? false,
             OwnerId = ownerId,
             Skills = BuildSkills(req.Skills),
@@ -336,6 +382,8 @@ public static class AgentApi
             RelayToAgentId = string.IsNullOrWhiteSpace(req.RelayToAgentId) ? null : req.RelayToAgentId.Trim(),
             AssignmentIds = req.AssignmentIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [],
             EscalationAgentId = string.IsNullOrWhiteSpace(req.EscalationAgentId) ? null : req.EscalationAgentId.Trim(),
+            // 可复用技能（技能库引用）：去重保留定义顺序
+            SkillDefIds = req.SkillDefIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [],
         };
     }
 
@@ -441,6 +489,19 @@ public static class AgentApi
         return null;
     }
 
+    /// <summary>校验可复用技能引用（<see cref="AgentUpsertHttpRequest.SkillDefIds">）：每个引用的技能必须在技能库中存在。</summary>
+    private static IResult? ValidateSkillDefIds(IReadOnlyList<string>? skillDefIds, AgentSkillCatalog catalog)
+    {
+        if (skillDefIds is null) return null;
+        foreach (var id in skillDefIds)
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (catalog.Get(id) is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"引用的技能不存在于技能库：{id}"));
+        }
+        return null;
+    }
+
     /// <summary>解析身份（同群接口 / WS / SSE）：有效令牌 → 令牌身份；无令牌 → `?memberId=` 回退
     /// （兼容旧客户端 / 演示模式）；<see cref="AuthOptions.RequireTokenOnRealTime"/> = true 时一律 401。</summary>
     private static (string? Identity, IResult? Error) RequireIdentity(HttpContext ctx, AuthService auth, AuthOptions authOptions)
@@ -498,14 +559,14 @@ public sealed record AgentUpsertHttpRequest(
     string? Schedule = null,
     bool? PersonalMemoryEnabled = null,
     bool? IsPrivate = null,
-    bool? EnableWorkTools = null,
     IReadOnlyList<AgentSkillHttpRequest>? Skills = null,
     IReadOnlyList<string>? KnowledgeBaseIds = null,
     IReadOnlyList<string>? RequireApprovalToolNames = null,
     IReadOnlyList<AgentPipelineStepHttpRequest>? Pipeline = null,
     string? RelayToAgentId = null,
     IReadOnlyList<string>? AssignmentIds = null,
-    string? EscalationAgentId = null);
+    string? EscalationAgentId = null,
+    IReadOnlyList<string>? SkillDefIds = null);
 
 /// <summary>技能配置（把其他已注册智能体作为可调用子代理）。</summary>
 /// <param name="SkillId">技能标识（给模型的工具名，同一智能体内唯一）。</param>

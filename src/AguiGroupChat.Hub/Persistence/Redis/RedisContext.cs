@@ -42,9 +42,6 @@ public sealed class RedisContext : IDisposable
     public static string UserKey(string userId) => $"agui:user:{userId}";
     public static string UserByNameKey => "agui:userby:name";
     public static string AgentRegistryKey => "agui:registry:agents";
-    public static string TaskKey(string taskId) => $"agui:task:{taskId}";
-    public static string TaskUserKeysKey(string userId) => $"agui:tasks:user:{userId}";
-    public static string TaskGroupKeysKey(string groupId) => $"agui:tasks:group:{groupId}";
     public static string UsageRowKey(string date, string agentId, string userId) => $"agui:usage:{date}:{agentId}:{userId}";
     public static string UsageDateIndexKey => "agui:usage:dates";
     public static string SectionKey(string name) => $"agui:section:{name}";

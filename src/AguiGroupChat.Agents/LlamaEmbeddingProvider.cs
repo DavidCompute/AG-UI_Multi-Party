@@ -17,8 +17,13 @@ public sealed class LlamaEmbeddingProvider : IEmbeddingProvider
     private readonly int _contextSize;
     private readonly SemaphoreSlim _gate = new(1, 1); // llama.cpp 推理非线程安全，串行化
 
-    /// <summary>超长文本分段 embedding 的保守字符/token 比（中文约 1 字/token，取 2 覆盖标点/生僻字）。</summary>
-    private const double SafeCharsPerToken = 2.0;
+    /// <summary>
+    /// 超长文本分段 embedding 的保守字符/token 比。
+    /// 实证（bge-m3, context=2048）：中文约 1 字/token，超 context 会在 ~2000 字左右开始失败；
+    /// 因此取 0.9（更小的字符/token 比 → 单次放更少字 → 留有安全余量覆盖标点/生僻字）。
+    /// 注意取值必须 &lt; 1：若 &gt; 1（如 2.0）会假设 0.5 token/字，使单次字数上限超过模型真实 context，导致长文本返回空向量。
+    /// </summary>
+    private const double SafeCharsPerToken = 0.9;
 
     /// <summary>分段重叠比例：避免切在语义边界处丢失上下文。</summary>
     private const double SegmentOverlapRatio = 0.2;

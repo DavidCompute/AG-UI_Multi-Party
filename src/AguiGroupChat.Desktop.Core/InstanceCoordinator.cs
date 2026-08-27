@@ -128,6 +128,26 @@ public sealed class InstanceCoordinator
         return secret;
     }
 
+    /// <summary>后端进程启动时调用：把实例计数归零（后端是新进程，任何残留计数都已是陈旧的）。
+    /// 防止上次异常退出残留的 instance-count 把后续启动的计数永远抬升、导致后端永不关闭。</summary>
+    public static void ResetInstanceCount()
+    {
+        try
+        {
+            Directory.CreateDirectory(BaseDir);
+            using var lk = File.Open(LockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            if (File.Exists(CountFile)) File.Delete(CountFile);
+        }
+        catch { /* 计数文件不可用不影响后端启动 */ }
+    }
+
+    /// <summary>读取当前实例计数（文件不存在视为 0）。供后端自监视停机使用。</summary>
+    public static int ReadInstanceCount()
+    {
+        if (!File.Exists(CountFile)) return 0;
+        return int.TryParse(File.ReadAllText(CountFile).Trim(), out var c) ? c : 0;
+    }
+
     private static int ReadCount()
     {
         if (!File.Exists(CountFile)) return 0;

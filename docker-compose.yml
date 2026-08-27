@@ -114,6 +114,16 @@ services:
       Agents__Memory__PersonalTopK: ${MEMORY_PERSONAL_TOP_K:-3}
       Agents__Memory__PersonalMinScore: ${MEMORY_PERSONAL_MIN_SCORE:-0.25}
       Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}
+      # 技能库 HTTP 是否放行本机/内网（SSRF 防护开关；默认关。确需调用本机/内网接口时置 true）
+      Agents__AllowPrivateSkillEndpoints: ${AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS:-false}
+      # 确定性编排计划（Coordinator Plan）：路由型数字员工先按组织/技能定计划再依次激活执行；默认关
+      Agents__CoordinatorPlanning: ${AGENTS_COORDINATOR_PLANNING:-false}
+      # 图谱记忆（Graph RAG）：从群消息抽实体/关系建图，回复前按语义召回种子实体 + n 跳图遍历注入。默认关。
+      Agents__Memory__GraphEnabled: ${MEMORY_GRAPH_ENABLED:-false}
+      Agents__Memory__GraphTopK: ${MEMORY_GRAPH_TOP_K:-2}
+      Agents__Memory__GraphMinScore: ${MEMORY_GRAPH_MIN_SCORE:-0.45}
+      Agents__Memory__GraphHops: ${MEMORY_GRAPH_HOPS:-1}
+      Agents__Memory__GraphMaxSectionChars: ${MEMORY_GRAPH_SECTION_CHARS:-700}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

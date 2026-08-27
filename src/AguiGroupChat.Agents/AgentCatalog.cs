@@ -1,7 +1,6 @@
 using System.ClientModel;
 using System.Collections.Concurrent;
 using System.ComponentModel;
-using System.Text;
 using AguiGroupChat.Agents.Tools;
 using AguiGroupChat.Hub.Persistence;
 using Microsoft.Agents.AI;
@@ -36,14 +35,15 @@ public sealed class AgentCatalog
     private readonly ILogger<AgentCatalog> _logger;
     // 模型用量统计（可选：注册了 AgentUsageService 才包装 usage 捕获）
     private readonly Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?> _usage;
-    private readonly string _workSpaceRoot; // 工作型智能体工作区根（data/workspaces）
-    private readonly ConcurrentDictionary<string, AgentWorkSpace> _workSpaces = new(StringComparer.Ordinal); // 按 agentId 缓存
     private readonly ConcurrentDictionary<string, AgentDefinition> _definitions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, ChatClientAgent> _agents = new(StringComparer.Ordinal);
     // agentId → 已挂载工具名（创建时填充；测试 / 调试 / 前端展示用）
     private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _agentToolNames = new(StringComparer.Ordinal);
     // agentId → 已挂载且需要人机交互审批的工具名（创建时填充；差异化审批策略测试 / 调试用）
     private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _agentApprovalToolNames = new(StringComparer.Ordinal);
+    // 技能库与技能执行器（惰性解析：技能提供者为可选项）
+    private readonly Lazy<AgentSkillCatalog?> _skillCatalog;
+    private readonly Lazy<SkillRunner?> _skillRunner;
 
     public AgentCatalog(AgentOptions options, ILoggerFactory loggerFactory, IServiceProvider services, ChangeHub? changes = null, MemoryContextProvider? memoryContext = null)
     {
@@ -55,14 +55,19 @@ public sealed class AgentCatalog
         _logger = loggerFactory.CreateLogger<AgentCatalog>();
         _usage = new Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?>(() =>
             services.GetService(typeof(AguiGroupChat.Hub.Agents.AgentUsageService)) as AguiGroupChat.Hub.Agents.AgentUsageService);
-        // 工作区根：优先宿主环境内容根（Web/桌面），回退当前工作目录（测试 / 独立运行）
+        // 优先宿主环境内容根（Web/桌面），回退当前工作目录（测试 / 独立运行）
         var contentRoot = _services.GetService(typeof(Microsoft.AspNetCore.Hosting.IWebHostEnvironment)) is Microsoft.AspNetCore.Hosting.IWebHostEnvironment env
             ? env.ContentRootPath
             : Directory.GetCurrentDirectory();
-        _workSpaceRoot = Path.IsPathRooted(_options.WorkSpaceRoot)
-            ? Path.GetFullPath(_options.WorkSpaceRoot)
-            : Path.GetFullPath(Path.Combine(contentRoot, _options.WorkSpaceRoot));
         foreach (var def in options.Agents) _definitions.TryAdd(def.AgentId, def);
+        // 技能库 + 技能执行沙箱（data/skillruns）：沿用工作区根解析（data/workspaces 之上一级 /skillruns）
+        _skillCatalog = new Lazy<AgentSkillCatalog?>(() => _services.GetService(typeof(AgentSkillCatalog)) as AgentSkillCatalog);
+        var skillRunRoot = Directory.GetParent(
+            Path.GetFullPath(Path.IsPathRooted(_options.WorkSpaceRoot) ? _options.WorkSpaceRoot : Path.Combine(contentRoot, _options.WorkSpaceRoot)))
+            is { } p
+            ? Path.Combine(p.FullName, "skillruns")
+            : Path.Combine(contentRoot, "data", "skillruns");
+        _skillRunner = new Lazy<SkillRunner?>(() => new SkillRunner(skillRunRoot, _loggerFactory, allowPrivateEndpoints: _options.AllowPrivateSkillEndpoints));
     }
 
     public AgentDefinition? GetDefinition(string agentId)
@@ -88,6 +93,13 @@ public sealed class AgentCatalog
         if (ok) _changes?.Notify();
         return ok;
     }
+
+    /// <summary>
+    /// 技能库 API 测试运行：按技能定义执行一次（shell / http / prompt），返回结果文本。
+    /// 供管理界面试运行 / 调试验证技能定义；失败返回错误文本不抛（与技能运行时一致）。
+    /// </summary>
+    public Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
+        => _skillRunner.Value is { } runner ? runner.InvokeAsync(skill, query, ct) : Task.FromResult("技能执行器不可用。");
 
     /// <summary>清空并整体恢复智能体定义（启动恢复用）：<b>常驻配置智能体（appsettings Agents:Agents）始终保留</b>，
     /// 持久化快照中的运行时定义按 agentId 覆盖（同 ID 以运行时的为准），不触发脏标记。</summary>
@@ -169,60 +181,6 @@ public sealed class AgentCatalog
 
     public IReadOnlyList<string> AgentIds => _definitions.Keys.ToList();
 
-    /// <summary>取（或创建）某智能体的专属工作区（data/workspaces/&lt;agentId&gt;/）。</summary>
-    private AgentWorkSpace CreateWorkSpace(string agentId) => _workSpaces.GetOrAdd(agentId, id =>
-    {
-        // 目录名净化：仅保留字母/数字/下划线/连字符（其余替换为 _），杜绝路径穿越；空则退化为 agent
-        var cleaned = new StringBuilder(id.Length);
-        foreach (var ch in id)
-            cleaned.Append(char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' ? ch : '_');
-        var safeId = cleaned.ToString().Trim('_');
-        if (string.IsNullOrEmpty(safeId)) safeId = "agent";
-        return new AgentWorkSpace(Path.Combine(_workSpaceRoot, safeId));
-    });
-
-    /// <summary>解析工作区 PLAN.md 为结构化步骤计划（消息可视化用）：返回 (标题, 步骤)。
-    /// 非工作型智能体 / 无 PLAN.md 返回 (null, 空)。只读，不触发任何写操作。</summary>
-    public (string? Title, IReadOnlyList<AguiGroupChat.Hub.Models.PlanStepInfo> Steps) ReadPlan(string agentId)
-    {
-        if (!_definitions.TryGetValue(agentId, out var def) || !def.EnableWorkTools)
-            return (null, []);
-        try
-        {
-            var space = CreateWorkSpace(agentId);
-            var plan = space.ContainsResolve("PLAN.md");
-            if (plan is null || !File.Exists(plan)) return (null, []);
-            string? title = null;
-            var steps = new List<AguiGroupChat.Hub.Models.PlanStepInfo>();
-            var id = 0;
-            foreach (var raw in System.IO.File.ReadAllLines(plan))
-            {
-                var line = raw.Trim();
-                if (title is null && line.StartsWith("# ", StringComparison.Ordinal))
-                {
-                    title = line[2..].Trim();
-                    continue;
-                }
-                if (!line.StartsWith("- [ ", StringComparison.Ordinal)
-                    && !line.StartsWith("- [x]", StringComparison.Ordinal)
-                    && !line.StartsWith("- [X]", StringComparison.Ordinal) && !line.StartsWith("- [O]", StringComparison.Ordinal))
-                    continue;
-                var done = line.StartsWith("- [x]", StringComparison.Ordinal) || line.StartsWith("- [X]", StringComparison.Ordinal) || line.StartsWith("- [O]", StringComparison.Ordinal);
-                var text = line[5..].Trim(); // 去掉 "- [ ] " / "- [x] " 前缀
-                if (text.Length == 0) continue;
-                // 兼容 "1. 步骤" 序号前缀：展示时去掉
-                var dot = text.IndexOf('.');
-                if (dot > 0 && int.TryParse(text[..dot], out _)) text = text[(dot + 1)..].Trim();
-                steps.Add(new AguiGroupChat.Hub.Models.PlanStepInfo { Id = ++id, Text = text, Done = done });
-            }
-            return (title, steps);
-        }
-        catch
-        {
-            return (null, []); // 读取失败静默：计划可视化是增强，不阻断消息主流程
-        }
-    }
-
     private ChatClientAgent Create(string agentId) => Create(agentId, includeSkills: true);
 
     /// <summary>技能链最大递归深度（防配置病态深链打爆构建 / 运行）。</summary>
@@ -245,58 +203,6 @@ public sealed class AgentCatalog
         var tools = _options.EnableTools ? BuildTools(approvalNames) : null;
         if (isSkillTarget && tools is not null)
             tools = tools.Where(t => t.Name is not ("web_search" or "read_url" or "read_attachment")).ToList();
-        // 工作型智能体（EnableWorkTools + 全局 WorkToolsEnabled）：额外挂载文件/命令工具。
-        // 只能在专属工作区（data/workspaces/<agentId>/）内操作；命令/写操作有白名单与审批边界。
-        if (_options.WorkToolsEnabled && def.EnableWorkTools)
-        {
-            tools ??= [];
-            var workSpace = CreateWorkSpace(def.AgentId);
-            var workTools = new AgentWorkTools(workSpace, _services, _loggerFactory);
-            workSpace.EnsureRoot();
-            tools.Add(AIFunctionFactory.Create(workTools.ListDir, "list_dir",
-                "列出工作区目录内容（只读）。参数：relPath 相对路径（留空 = 工作区根目录）"));
-            tools.Add(AIFunctionFactory.Create(workTools.ReadFile, "read_file",
-                "读取工作区内文本文件（只读，UTF-8）。参数：path 工作区内的相对路径"));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.WriteFile, "write_file",
-                "写或追加工作区内文件（影响工作区，需用户批准）。参数：path 相对路径、content 完整内容、append 是否追加（默认 false 覆盖）")));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.PublishFile, "publish_file",
-                "把工作区内的文件发布为群可下载附件（产物回传，需用户批准）。参数：path 工作区内的相对路径")));
-            // 网页采集落盘：工作区文件（写操作，需批准）
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.FetchUrl, "fetch_url",
-                "抓取指定 URL 网页正文并保存为工作区内 Markdown 文件（采集外部资料，需用户批准）。参数：url 完整 http/https 链接、saveAs 保存的相对路径（如 doc.md）")));
-            // 文件整理：安全封装的复制 / 重命名（免 shell 转义，写操作需批准）
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.CopyFile, "copy_file",
-                "工作区内复制文件（整理归档，需用户批准）。参数：source 源相对路径、target 目标相对路径")));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.RenameFile, "rename_file",
-                "工作区内重命名 / 移动文件（整理归档，需用户批准）。参数：source 源相对路径、target 目标相对路径")));
-            // 记忆延续：NOTES.md 备忘（跨对话。remember 写需批准；read_notes 只读免审批）
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.Remember, "remember",
-                "把一条工作备忘写入工作区 NOTES.md（中间结论 / 待办 / 进度，跨对话延续，需用户批准）。参数：note 备忘内容")));
-            tools.Add(AIFunctionFactory.Create(workTools.ReadNotes, "read_notes",
-                "读取工作区 NOTES.md 备忘（跨对话回忆之前的进度 / 待办）。只读"));
-            // 批量 / 编排工具（复杂任务）：只读免审批；写类需批准
-            tools.Add(AIFunctionFactory.Create(workTools.ListTree, "list_tree",
-                "递归列出工作区内全部文件（含子目录与大小）。只读，不需批准"));
-            tools.Add(AIFunctionFactory.Create(workTools.ReadBatch, "read_batch",
-                "一次读取多个工作区文件（逗号分隔的相对路径，最多 20 个），便于批量查看产物。只读，不需批准"));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.BatchRename, "batch_rename",
-                "批量把符合扩展名（如 md / txt / json）的文件迁移到目标目录并可选加后缀（整理归档，需用户批准）。参数：extension 无点扩展名、sourceDir 源目录、targetDir 目标目录、suffix 可选后缀")));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.Archive, "archive",
-                "把工作区内的文件或目录打包为 zip（批量归档 / 发布，需用户批准）。参数：path 源相对路径、archiveName 归档文件名（.zip）")));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.Remove, "remove",
-                "安全删除工作区内的文件或目录（防删根保护，需用户批准）。参数：path 相对路径")));
-            // 任务计划器：复杂任务先写步骤计划（PLAN.md），逐步骤执行并用 plan_mark 打勾，跨对话 plan_read 接着干
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.PlanWrite, "plan_write",
-                "为复杂任务写一份步骤计划到 PLAN.md（先规划再执行，需用户批准）。参数：title 任务标题、steps 用换行或逗号分隔的步骤列表")));
-            tools.Add(AIFunctionFactory.Create(workTools.PlanRead, "plan_read",
-                "读取 PLAN.md 计划（各步完成状态）。只读，不需批准"));
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.PlanMarkDone, "plan_mark",
-                "把 PLAN.md 中的某一步标记为完成（打勾，需用户批准）。参数：step 步骤序号（从 1 开始）")));
-            // shell：一律需审批（写/删除/组合命令尤其敏感，统一由用户确认后再执行）；工具内再做白名单与越界拦截
-            tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(workTools.ShellAsync, "shell",
-                "在工作区内执行终端命令（只能访问你的工作区，执行前需用户批准）。" +
-                $"允许命令：{string.Join("/", AgentWorkTools.AllowedCommands)}")));
-        }
         _agentToolNames[agentId] = tools?.Select(t => t.Name).ToList() ?? [];
         _agentApprovalToolNames[agentId] = tools?.OfType<ApprovalRequiredAIFunction>().Select(t => t.Name).ToList() ?? [];
 
@@ -389,6 +295,54 @@ public sealed class AgentCatalog
             }
         }
 
+        // 可复用技能（OpenClaw 风格）：把技能库中本智能体引用的技能逐个封装为 AIFunction 挂上。
+        // shell / http / prompt 三类都经 SkillRunner 执行；需审批的技能用 ApprovalRequiredAIFunction 包装。
+        if (def.SkillDefIds is { Count: > 0 } && _skillCatalog.Value is { } skillCatalog && _skillRunner.Value is { } runner)
+        {
+            var defTools = new List<AITool>();
+            // 排除已挂工具名，避免技能工具名与内置 / 子代理技能撞名
+            var occupied = new HashSet<string>(StringComparer.Ordinal);
+            if (chatOptions.ChatOptions.Tools is IEnumerable<AITool> existingTools)
+                foreach (var t in existingTools) occupied.Add(t.Name);
+            foreach (var refId in def.SkillDefIds)
+            {
+                var skill = skillCatalog.Get(refId);
+                if (skill is null)
+                {
+                    _logger.LogWarning("智能体 {AgentId} 引用技能 {Ref} 不存在（已跳过）", agentId, refId);
+                    continue;
+                }
+                // 工具名：库内 SkillId 本身即 ASCII 工具名；占位则在已占用名上规避
+                var toolName = AgentSkillDefinition.IsValidAsciiToolId(skill.SkillId)
+                    ? skill.SkillId
+                    : AgentSkillDefinition.ToAsciiToolId(skill.SkillId, occupied, "skill");
+                var desc = (skill.Description ?? "").Trim();
+                if (desc.Length > 0) desc += "；";
+                if (skill.Kind == AgentSkillKind.Shell)
+                    desc += $"可执行命令/脚本（在专属沙箱运行，命令正文见技能定义，可用 $QUERY 变量读取请求）。需用户批准后执行。";
+                else if (skill.Kind == AgentSkillKind.Http)
+                    desc += $"调用外部 HTTP 接口（Body JSON 定义 method/url/headers/body，可用 ${{query}} 占位）。需用户批准后执行。";
+                else
+                    desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
+                var func = AIFunctionFactory.Create(
+                    (string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct),
+                    toolName, desc);
+                var wrapped = skill.RequiresApproval ? new ApprovalRequiredAIFunction(func) : func;
+                defTools.Add(wrapped);
+                occupied.Add(toolName);
+                if (skill.RequiresApproval)
+                    _agentApprovalToolNames[agentId] = (_agentApprovalToolNames.TryGetValue(agentId, out var a) ? a.ToList() : [])
+                        .Append(toolName).Distinct().ToList();
+            }
+            if (defTools.Count > 0)
+            {
+                var chatTools = (IList<AITool>)(chatOptions.ChatOptions.Tools ??= []);
+                foreach (var t in defTools) chatTools.Add(t);
+                _agentToolNames[agentId] = (_agentToolNames.TryGetValue(agentId, out var names) ? names.ToList() : [])
+                    .Concat(defTools.Select(t => t.Name)).Distinct().ToList();
+            }
+        }
+
         if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
         {
             return new ChatClientAgent(new MockChatClient(def, enableTools: _options.EnableTools, skills: def.Skills), chatOptions, _loggerFactory, _services);
@@ -464,12 +418,14 @@ public sealed class AgentCatalog
         tools.Add(AIFunctionFactory.Create(contextTools.ReadAttachment, "read_attachment",
             "按附件 ID 读取上传文件内容（支持 txt/md/json/csv 与 docx/xlsx/pptx/pdf）。附件 ID 形如 att_xxx，来自消息中的附件信息。参数：attachmentId"));
 
-        // 智能体自我生成技能：模型定义子智能体（技能名 + 人设 + 调用说明），需用户批准后创建并挂载。
-        // 强制审批（不随 RequireApprovalToolNames 名单调整）：技能创建属于敏感配置变更
-        tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(CreateSkillTool, "create_skill",
-            "创建 / 更新一个可复用技能（子智能体）：当前智能体在回复中需要特定领域的专长时，可用此工具定义技能名称、" +
-            "子智能体人设与调用说明，经用户批准后自动创建并挂载（下一条消息生效）。" +
-            "参数：skillName 技能名（字母/数字/下划线/连字符）、instructions 子智能体人设与职责、description 调用说明")));
+        // 智能体自建可复用技能：模型用 create_skill 定义「能执行的功能 / 提示词模板」，存入技能库，当前智能体挂载引用。
+        // 强制审批（不随 RequireApprovalToolNames 名单调整）：技能创建 / 更新属于敏感配置变更
+        tools.Add(new ApprovalRequiredAIFunction(AIFunctionFactory.Create(CreateSkillToolImpl, "create_skill",
+            "创建 / 更新一个可复用技能（OpenClaw 风格：能执行的功能 / 提示词模板），存入技能库并挂载到当前智能体，供本智能体与其他智能体复用。" +
+            "技能类型 kind：shell（可执行命令/脚本，body 填脚本正文）、http（调用外部接口，body 填 JSON 配置 {method,url,headers,body}）、" +
+            "prompt（提示词 / 流程模板，body 填模板正文）。" +
+            "参数：skillName 技能名、kind 类型名（shell/http/prompt）、description 调用说明（何时调用、能获得什么）、" +
+            "body 技能正文（按类型）、query 可选示例请求（用于首次试运行校验技能是否正确）")));
 
         if (_options.EnableWebTools)
         {
@@ -502,19 +458,19 @@ public sealed class AgentCatalog
     private static readonly System.Text.RegularExpressions.Regex SkillNamePattern = new(
         "^[a-zA-Z0-9_-]{1,40}$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
-    /// <summary>单个智能体最多可自建技能数（防滥用）。</summary>
-    private const int MaxSelfCreatedSkills = 10;
+    // ================= 自建技能（create_skill，OpenClaw 风格） =================
 
     /// <summary>
-    /// create_skill 工具实现（强制审批后执行）：创建 / 更新技能目标智能体（agentId = skill_&lt;skillName&gt;，
-    /// 标记 IsSkillTarget 对目录 / API 隐藏），并把 AgentSkillConfig 挂到当前智能体（快照持久化，重启不丢）。
-    /// 当前 run 仍用旧 agent 实例，下一条消息重建后生效。
+    /// create_skill 工具实现（强制审批后执行，OpenClaw 风格）：创建一个可复用技能定义（shell / http / prompt）到技能库，
+    /// 并把它的 SkillId 挂到当前智能体的 <see cref="AgentDefinition.SkillDefIds"/>（快照持久化，重启不丢）。
+    /// 技能可被任意其他智能体挂载复用。当前 run 仍用旧 agent 实例，下一条消息重建后生效。
     /// </summary>
-    [Description("创建 / 更新一个可复用技能（子智能体），需用户批准后生效")]
-    internal string CreateSkillTool(
+    internal string CreateSkillToolImpl(
         [Description("技能名（字母/数字/下划线/连字符，≤40）")] string skillName,
-        [Description("子智能体人设与职责（定义它擅长什么、如何回答）")] string instructions,
-        [Description("调用说明（何时调用这个技能、能获得什么）")] string description)
+        [Description("技能类型：shell / http / prompt")] string kind,
+        [Description("调用说明（何时调用这个技能、能获得什么）")] string description,
+        [Description("技能正文（shell 填命令/脚本；http 填 JSON 配置 {method,url,headers,body}；prompt 填提示词/流程模板）")] string? body,
+        [Description("可选：示例请求，用于创建后立即试运行校验技能是否正确")] string? query)
     {
         var ctx = AgentGateway.AmbientContext.Value;
         if (ctx is null) return "当前不在智能体运行上下文，无法创建技能。";
@@ -522,57 +478,56 @@ public sealed class AgentCatalog
         skillName = (skillName ?? "").Trim();
         if (!SkillNamePattern.IsMatch(skillName))
             return "技能名不合法：仅允许字母/数字/下划线/连字符，最长 40 字符（如 risk_analyzer）。";
-        if (string.IsNullOrWhiteSpace(instructions))
-            return "请提供子智能体人设（instructions）。";
-        if (instructions.Length > 4000)
-            return "人设过长（最多 4000 字符），请精简。";
+        if (!Enum.TryParse<AgentSkillKind>(kind, true, out var k) || kind is null or "")
+            return "技能类型 kind 无效：仅支持 shell / http / prompt。";
         var desc = (description ?? "").Trim();
-        if (desc.Length > 200) desc = desc[..200];
+        if (desc.Length == 0)
+            return "请提供技能描述（何时调用、能获得什么）。";
+        if (desc.Length > 500) desc = desc[..500];
+        var bodyTxt = (body ?? "").Trim();
+        if (k != AgentSkillKind.Prompt && string.IsNullOrWhiteSpace(bodyTxt))
+            return $"{k} 类型技能的正文（body）不能为空：shell 填脚本正文，http 填 JSON 配置（method/url/headers/body），prompt 填模板正文。";
+        if (bodyTxt.Length > 16_000)
+            return $"技能正文过长（最多 16000 字符），请精简：{bodyTxt.Length}。";
 
         var host = GetDefinition(ctx.AgentId);
         if (host is null) return "宿主智能体不存在。";
         if (host.IsSkillTarget) return "技能目标智能体不能再创建技能。";
 
-        var skills = host.Skills ??= [];
-        // 宿主技能列表的读改写共用同一把锁（并发创建技能时防止丢失更新；本方法无 await，锁内安全）
-        lock (skills)
-        {
-            var existingCount = skills.Count;
-            var already = skills.Any(s => string.Equals(s.SkillId, skillName, StringComparison.OrdinalIgnoreCase));
-            if (!already && existingCount >= MaxSelfCreatedSkills)
-                return $"技能数量已达上限（{MaxSelfCreatedSkills} 个），请先删除旧技能。";
-        }
+        // 技能库写入口（若未注册技能库则拒绝）
+        var catalog = _skillCatalog.Value;
+        if (catalog is null) return "技能库（AgentSkillCatalog）不可用。";
 
-        var targetId = "skill_" + skillName;
-        // 防覆盖：不允许用户自建技能静默覆盖同名系统 / 用户智能体（IsSkillTarget 的技能目标允许更新，现状）
-        var existing = GetDefinition(targetId);
-        if (existing is not null && !existing.IsSkillTarget)
-            return $"技能名「{skillName}」与现有智能体冲突，请换一个名字";
-
-        // 创建 / 更新技能目标智能体（同 skillName 复用，人设覆盖更新）
-        Upsert(new AgentDefinition
+        var ownerId = host.OwnerId;
+        var def = new AgentSkillDefinition
         {
-            AgentId = targetId,
-            Nickname = skillName,
+            SkillId = skillName,
+            Name = skillName,
             Description = desc,
-            Instructions = instructions.Trim(),
-            IsSkillTarget = true,
-            OwnerId = host.OwnerId,
-        });
+            Kind = k,
+            Body = bodyTxt,
+            ParametersJson = "",
+            RequiresApproval = k != AgentSkillKind.Prompt, // 代码 / HTTP 一律需批准（安全兜底）
+            OwnerId = ownerId,
+        };
+        catalog.Upsert(def);
 
-        // 挂载到宿主智能体（同 SkillId 更新描述；新增则追加），Upsert 失效 agent 缓存 → 下一条消息生效
-        lock (skills)
-        {
-            var skill = skills.FirstOrDefault(s => string.Equals(s.SkillId, skillName, StringComparison.OrdinalIgnoreCase));
-            if (skill is null)
-                skills.Add(new AgentSkillConfig { SkillId = skillName, Description = desc, TargetAgentId = targetId });
-            else
-                skill.Description = desc;
-        }
+        // 挂到宿主（去重）；Upsert 失效 agent 缓存 → 下一条消息生效
+        var refs = host.SkillDefIds ??= [];
+        if (!refs.Contains(def.SkillId, StringComparer.Ordinal)) refs.Add(def.SkillId);
         Upsert(host);
 
-        _logger.LogInformation("智能体 {AgentId} 自建技能 {SkillId}（目标 {Target}，操作者 {Operator}）",
-            ctx.AgentId, skillName, targetId, ctx.TriggerUserId);
-        return $"技能「{skillName}」已创建并挂载到当前智能体，下一条消息起生效（可回复技能相关问题时调用）。";
+        _logger.LogInformation("智能体 {AgentId} 自建技能 {SkillId}（{Kind}，操作者 {Operator}）",
+            ctx.AgentId, def.SkillId, def.Kind, ctx.TriggerUserId);
+
+        // 可选试运行校验：示例请求跑一次，方便发现定义错误
+        var validated = "未试运行";
+        if (!string.IsNullOrWhiteSpace(query) && _skillRunner.Value is { } runner)
+        {
+            var runResult = runner.InvokeAsync(def, query, CancellationToken.None).GetAwaiter().GetResult();
+            validated = string.IsNullOrWhiteSpace(runResult) ? "（空输出）" : (runResult.Length > 200 ? runResult[..200] + "…" : runResult);
+        }
+        return $"技能「{def.SkillId}」已创建并挂载到当前智能体（类型 {def.Kind}），其他智能体也可复用；下一条消息起生效。"
+            + (string.Equals(validated, "未试运行", StringComparison.Ordinal) ? "" : $"\n试运行结果：\n{validated}");
     }
 }

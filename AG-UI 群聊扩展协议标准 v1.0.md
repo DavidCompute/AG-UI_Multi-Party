@@ -947,6 +947,7 @@ PUT /ag-ui/user/profile
 |编辑智能体|`PUT /ag-ui/agents/{agentId}`|更新定义；同步未覆盖群的触发规则与群成员资料；**私密智能体仅创建者可编辑**（否则 403）|
 |删除智能体|`DELETE /ag-ui/agents/{agentId}`|移除定义、全部触发规则并从所有群退出；**私密智能体仅创建者可删除**（否则 403）|
 |群内注册触发|`POST /ag-ui/agents/register`|为指定群注册触发规则（triggerMode / keywords / override）|
+|优化下一层指派提示词|`POST /ag-ui/agents/{agentId}/optimize-assignment`|**组织架构「优化指派」**：按该数字员工的直接下一层（AssignmentIds）自动生成一段「管理下一层任务指派」指引（只依据下一层挑下游、不越级、无匹配则 NONE）；需登录，仅创建者/管理员；返回 `{ assignmentGuidance, subordinateCount }`|
 
 智能体定义字段：
 

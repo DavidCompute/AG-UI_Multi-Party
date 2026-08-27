@@ -997,8 +997,17 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .form-section {
   font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .05em;
   margin: 14px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px;
 }
+.form-section .section-chevron {
+  font-size: 10px; color: var(--muted); transition: transform .18s ease; flex: none;
+}
+.form-section.collapsed .section-chevron { transform: rotate(-90deg); }
+.form-section:hover { color: var(--accent); }
 .form-section:first-child { margin-top: 0; }
+.form-section.will-collapse-open { cursor: default; }
+.form-section-body { }
+.form-section-body.hidden-section { display: none; }
 .form-group { margin-bottom: 10px; }
 .form-group label { display: block; font-size: 13px; margin-bottom: 5px; }
 .form-group .req { color: #e5534b; }
@@ -1543,6 +1552,47 @@ button { white-space: nowrap; }
 }
 .chain-kind-esc, .chain-kind-assign { background: rgba(157,107,255,.2); color: #b18cff; }
 .chain-kind-esc { background: rgba(255,138,117,.22); color: #ff9b85; }
+
+/* 数字员工组织架构图（图形化编辑任务指派/问题提升） */
+.org-modal { width: 860px; max-width: 94vw; }
+.org-canvas-wrap { position: relative; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: rgba(128,141,180,.04); min-height: 320px; }
+.org-canvas { position: relative; width: 920px; height: 100%; }
+.org-svg { position: absolute; inset: 0; width: 920px; height: 100%; pointer-events: none; overflow: visible; z-index: 1; }
+.org-node {
+  position: absolute; min-width: 150px; padding: 8px 32px 8px 10px; border-radius: 10px; cursor: grab; user-select: none;
+  background: var(--panel-2); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  display: flex; flex-direction: column; gap: 2px; z-index: 2;
+}
+.org-node.org-selected { border-color: #a98bff; box-shadow: 0 0 0 2px rgba(169,139,255,.35); }
+.org-port {
+  position: absolute; z-index: 3; width: 14px; height: 14px; border-radius: 50%; cursor: crosshair;
+  border: 2px solid var(--panel-2); color: #fff; font-size: 9px; line-height: 10px; text-align: center;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .12s ease;
+}
+.org-port:hover { transform: scale(1.25); }
+.org-port-assign { left: 50%; bottom: -7px; transform: translateX(-50%); background: #a98bff; }
+.org-port-assign:hover { transform: translateX(-50%) scale(1.25); }
+.org-port-esc { left: 50%; top: -7px; transform: translateX(-50%); background: #ff9b85; }
+.org-port-esc:hover { transform: translateX(-50%) scale(1.25); }
+.org-port::after { content: ""; }
+.org-port-assign::after { content: "▼"; }
+.org-port-esc::after { content: "▲"; }
+.org-edge { fill: none; stroke-width: 2; pointer-events: none; }
+.org-edge-assign { stroke: #a98bff; stroke-dasharray: 5 3; }
+.org-edge-esc { stroke: #ff9b85; }
+.org-edge-preview { stroke: #ffd166; stroke-width: 2; stroke-dasharray: 6 3; pointer-events: none; }
+.org-edge-hit { fill: none; stroke: transparent; pointer-events: stroke; cursor: pointer; transition: stroke .15s ease; }
+.org-edge-hit:hover { stroke: rgba(255,209,102,.85); }
+.org-node b { font-size: 13px; color: var(--text); }
+.org-node code { font-size: 10px; color: var(--muted); }
+.org-opt-btn {
+  position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted);
+}
+.org-opt-btn svg { width: 13px; height: 13px; }
+.org-opt-btn:hover { color: #a98bff; border-color: #a98bff; background: rgba(169,139,255,.08); }
+.org-toolbar { margin-top: 8px; min-height: 18px; }
 .chain-node:not(:first-child) { border-top: 1px dashed rgba(128,141,180,.15); margin-top: 4px; padding-top: 6px; }
 .chain-query { color: var(--muted); font-size: 12px; margin: 2px 0 0 20px; }
 .chain-result { color: var(--text); font-size: 12px; margin: 2px 0 0 20px; }
@@ -1556,3 +1606,22 @@ button { white-space: nowrap; }
 .agent-owner { font-size: 12px; }
 .agent-owner.sys { color: var(--muted); font-style: italic; }
 .agent-owner.me { color: var(--accent); font-weight: 600; }
+
+/* 技能库弹窗 */
+.skill-modal { width: 900px; max-width: 94vw; }
+.skill-grid-head {
+  display: grid; grid-template-columns: 1.2fr .7fr 2fr 90px; gap: 10px; padding: 8px 12px;
+  font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600;
+}
+.skill-list { max-height: 52vh; overflow-y: auto; }
+.skill-list-item {
+  display: grid; grid-template-columns: 1.2fr .7fr 2fr 90px; gap: 10px; align-items: center;
+  padding: 10px 12px; border-bottom: 1px solid rgba(128,141,180,.12);
+}
+.skill-list-item:hover { background: var(--panel-2); }
+.skill-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.skill-name code { font-size: 10px; color: var(--muted); }
+.skill-desc { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-kind { flex: none; font-size: 11px; }
+.skill-op-col { display: flex; gap: 6px; justify-content: flex-end; }
+.skill-test-result { white-space: pre-wrap; background: rgba(0,0,0,.25); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); }

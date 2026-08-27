@@ -143,7 +143,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.Equal("agent_qa", (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("agentId").GetString());
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var agent = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_qa"));
+        var agent = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_qa");
         Assert.Equal("QA 助手", agent.GetProperty("nickname").GetString());
         Assert.Equal("keyword", agent.GetProperty("triggerMode").GetString());
         Assert.Equal("bug", agent.GetProperty("keywords")[0].GetString());
@@ -192,7 +192,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         (await _client.SendAsync(req)).EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var updated = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_ops"));
+        var updated = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_ops");
         Assert.Equal("运维助手", updated.GetProperty("nickname").GetString());
         Assert.Equal("contextual", updated.GetProperty("triggerMode").GetString());
         Assert.Equal("deepseek-chat", updated.GetProperty("model").GetString());
@@ -215,7 +215,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         created.EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var agent = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_ext"));
+        var agent = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_ext");
         Assert.Equal("ws://agui-external:8080/ws", agent.GetProperty("bridgeEndpoint").GetString());
         // 令牌不回显（公开只读目录）
         Assert.False(agent.TryGetProperty("bridgeToken", out _), "bridgeToken 不应出现在列表响应中");
@@ -252,7 +252,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         (await _client.SendAsync(req)).EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var agent = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_ext2"));
+        var agent = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_ext2");
         Assert.Equal("ws://new:8080/ws", agent.GetProperty("bridgeEndpoint").GetString());
         Assert.Equal("外部专家v2", agent.GetProperty("nickname").GetString());
         Assert.False(agent.TryGetProperty("bridgeToken", out _), "bridgeToken 不应出现在列表响应中");
@@ -320,7 +320,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         res.EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var host = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_host"));
+        var host = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_host");
         var skill = Assert.Single(host.GetProperty("skills").EnumerateArray());
         Assert.Equal("skill_docs", skill.GetProperty("skillId").GetString());
         Assert.Equal("查文档时调用", skill.GetProperty("description").GetString());
@@ -376,7 +376,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         res.EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var host = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_host2"));
+        var host = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_host2");
         var skill = Assert.Single(host.GetProperty("skills").EnumerateArray());
         var skillId = skill.GetProperty("skillId").GetString();
         Assert.Equal("skill_agent_docs2", skillId);
@@ -406,7 +406,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         res.EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var host = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_host3"));
+        var host = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_host3");
         var names = host.GetProperty("skills").EnumerateArray()
             .Select(x => x.GetProperty("skillId").GetString())
             .ToList();
@@ -479,13 +479,13 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
 
         // 目录回显头像
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var created = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_av"));
+        var created = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_av");
         Assert.Equal("/ag-ui/files/att_1/a.png", created.GetProperty("avatar").GetString());
 
         // 建群加入智能体（携带头像）→ 群成员头像生效
         var groupId = await CreateGroupWithAgentAsync("agent_av", "头像助手", "头像群", "/ag-ui/files/att_1/a.png");
         var members = await _client.GetFromJsonAsync<JsonElement[]>($"/ag-ui/group/{groupId}/members?memberId=user_x") ?? [];
-        var member = Assert.Single(members.Where(m => m.GetProperty("memberId").GetString() == "agent_av"));
+        var member = Assert.Single(members, m => m.GetProperty("memberId").GetString() == "agent_av");
         Assert.Equal("/ag-ui/files/att_1/a.png", member.GetProperty("avatar").GetString());
 
         // 编辑智能体（换头像 + 改昵称）→ 群成员资料同步
@@ -501,7 +501,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         (await _client.SendAsync(put)).EnsureSuccessStatusCode();
 
         var members2 = await _client.GetFromJsonAsync<JsonElement[]>($"/ag-ui/group/{groupId}/members?memberId=user_x") ?? [];
-        var member2 = Assert.Single(members2.Where(m => m.GetProperty("memberId").GetString() == "agent_av"));
+        var member2 = Assert.Single(members2, m => m.GetProperty("memberId").GetString() == "agent_av");
         Assert.Equal("/ag-ui/files/att_2/b.png", member2.GetProperty("avatar").GetString());
         Assert.Equal("头像助手v2", member2.GetProperty("nickname").GetString());
     }
@@ -549,7 +549,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
 
         var list = await _client.SendAsync(AuthMessage(HttpMethod.Get, "/ag-ui/kb", token));
         var kbs = await list.Content.ReadFromJsonAsync<JsonElement[]>();
-        var kb = Assert.Single(kbs!.Where(x => x.GetProperty("kbId").GetString() == kbId));
+        var kb = Assert.Single(kbs!, x => x.GetProperty("kbId").GetString() == kbId);
         Assert.Equal("公司制度", kb.GetProperty("name").GetString());
         Assert.Empty(kb.GetProperty("documents").EnumerateArray());
     }
@@ -600,7 +600,7 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         res.EnsureSuccessStatusCode();
 
         var list = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents") ?? [];
-        var agent = Assert.Single(list.Where(x => x.GetProperty("agentId").GetString() == "agent_kbhost"));
+        var agent = Assert.Single(list, x => x.GetProperty("agentId").GetString() == "agent_kbhost");
         Assert.Equal(kbId, Assert.Single(agent.GetProperty("knowledgeBaseIds").EnumerateArray()).GetString());
     }
 
@@ -671,17 +671,17 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
 
         // 目录可见性：匿名与 bob（他人）看不到；alice（创建者）看得到
         var anonList = await _client.GetFromJsonAsync<JsonElement[]>("/ag-ui/agents");
-        Assert.DoesNotContain(anonList, a => a.GetProperty("agentId").GetString() == "agent_priv");
+        Assert.DoesNotContain(anonList ?? [], a => a.GetProperty("agentId").GetString() == "agent_priv");
 
         using var bobReq = new HttpRequestMessage(HttpMethod.Get, "/ag-ui/agents");
         bobReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bobToken);
         var bobList = await (await _client.SendAsync(bobReq)).Content.ReadFromJsonAsync<JsonElement[]>();
-        Assert.DoesNotContain(bobList, a => a.GetProperty("agentId").GetString() == "agent_priv");
+        Assert.DoesNotContain(bobList ?? [], a => a.GetProperty("agentId").GetString() == "agent_priv");
 
         using var aliceReq = new HttpRequestMessage(HttpMethod.Get, "/ag-ui/agents");
         aliceReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", aliceToken);
         var aliceList = await (await _client.SendAsync(aliceReq)).Content.ReadFromJsonAsync<JsonElement[]>();
-        Assert.Contains(aliceList, a => a.GetProperty("agentId").GetString() == "agent_priv");
+        Assert.Contains(aliceList ?? [], a => a.GetProperty("agentId").GetString() == "agent_priv");
 
         // bob 建群拉入私密智能体 → 403 AGENT_PERMISSION_DENIED
         var bobCreate = await _client.PostAsJsonAsync("/ag-ui/group/create", new

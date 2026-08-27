@@ -51,11 +51,12 @@ public sealed class RedisUserStore : IUserStore
 
     public void ClearAll()
     {
+        // 先枚举用户 id 集合、再删除：若先删 UserByNameKey，后面就无法从它发现哪些 user:* key 需删除（泄漏用户 key）。
         var db = _ctx.Db;
-        db.KeyDelete(RedisContext.UserByNameKey);
         var userIds = db.HashValues(RedisContext.UserByNameKey)
-            .Where(v => !v.IsNullOrEmpty).Select(v => v.ToString()).ToArray();
+            .Where(v => !v.IsNullOrEmpty).Select(v => v.ToString()).Distinct().ToArray();
         if (userIds.Length > 0) db.KeyDelete(userIds.Select(u => (RedisKey)RedisContext.UserKey(u)).ToArray());
+        db.KeyDelete(RedisContext.UserByNameKey);
     }
 }
 
@@ -104,53 +105,6 @@ public sealed class RedisAgentRegistryStore : IAgentRegistryStore
         => JsonSerializer.Deserialize<AgentRegistration>(json, AguiJson.Options) ?? throw new InvalidDataException("注册记录反序列化失败");
 }
 
-/// <summary>Redis 工作任务存储：任务 JSON 存 <c>agui:task:{id}</c>，按用户 / 群维护 id 集合。</summary>
-public sealed class RedisTaskStore : ITaskStore
-{
-    private readonly RedisContext _ctx;
-    public RedisTaskStore(RedisContext ctx) => _ctx = ctx;
-
-    public bool Add(WorkTask task)
-    {
-        var db = _ctx.Db;
-        if (!db.StringSet(RedisContext.TaskKey(task.TaskId), RedisContext.Serialize(task), when: When.NotExists)) return false;
-        db.SetAdd(RedisContext.TaskUserKeysKey(task.UserId), task.TaskId);
-        db.SetAdd(RedisContext.TaskGroupKeysKey(task.GroupId), task.TaskId);
-        return true;
-    }
-
-    public WorkTask? Get(string taskId)
-        => RedisContext.Deserialize<WorkTask>(_ctx.Db.StringGet(RedisContext.TaskKey(taskId)));
-
-    public bool Update(WorkTask task)
-    {
-        var db = _ctx.Db;
-        if (!db.KeyExists(RedisContext.TaskKey(task.TaskId))) return false;
-        db.StringSet(RedisContext.TaskKey(task.TaskId), RedisContext.Serialize(task));
-        return true;
-    }
-
-    public IReadOnlyList<WorkTask> ListForUser(string userId, int limit)
-    {
-        var ids = _ctx.Db.SetMembers(RedisContext.TaskUserKeysKey(userId));
-        return LoadMany(ids.OrderByDescending(x => x.ToString()).ToArray(), limit);
-    }
-
-    public IReadOnlyList<WorkTask> ListForGroup(string groupId, int limit)
-    {
-        var ids = _ctx.Db.SetMembers(RedisContext.TaskGroupKeysKey(groupId));
-        return LoadMany(ids.OrderByDescending(x => x.ToString()).ToArray(), limit);
-    }
-
-    public void ClearAll() => _ctx.FlushAguiKeys();
-
-    private IReadOnlyList<WorkTask> LoadMany(RedisValue[] ids, int limit)
-    {
-        if (ids.Length == 0 || limit <= 0) return [];
-        var values = _ctx.Db.StringGet(ids.Take(limit).Select(id => (RedisKey)RedisContext.TaskKey(id)).ToArray());
-        return values.Where(v => !v.IsNullOrEmpty).Select(v => RedisContext.Deserialize<WorkTask>(v!)!).ToList();
-    }
-}
 
 /// <summary>
 /// Redis 模型用量存储：每行键 <c>agui:usage:{date}:{agent}:{user}</c> 以 hash 存各 token 计数，

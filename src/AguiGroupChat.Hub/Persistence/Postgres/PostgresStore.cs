@@ -36,7 +36,7 @@ public sealed class PostgresStore
         using var tx = conn.BeginTransaction();
         foreach (var table in new[]
         {
-            "agui_message_memory", "agui_agent_registrations", "agui_group_reads",
+            "agui_graph_edges", "agui_graph_entities", "agui_message_memory", "agui_agent_registrations", "agui_group_reads",
             "agui_messages", "agui_topics", "agui_group_members", "agui_groups",
             "agui_users", "agui_sections", "agui_usage", "agui_tasks",
         })

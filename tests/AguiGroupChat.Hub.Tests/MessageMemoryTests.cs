@@ -148,7 +148,7 @@ public sealed class MessageMemoryTests
 
         var group = await hub.CreateGroupAsync(new GroupCreateRequest { GroupName = "无记忆群", OwnerId = "user_1" });
         await hub.SendMessageAsync(new GroupMessageSendRequest { GroupId = group.GroupId, UserId = "user_1", Content = "正常消息" });
-        Assert.Equal(1, f.Store.AllMessages(group.GroupId).Count);
+        Assert.Single(f.Store.AllMessages(group.GroupId));
     }
 
     // ================= AgentMessageMemory（embedding 服务） =================
@@ -213,16 +213,16 @@ public sealed class MessageMemoryTests
     }
 
     [Fact]
-    public void Disabled_IsNoop()
+    public async Task Disabled_IsNoop()
     {
         var handler = new FakeHttpMessageHandler();
         var store = new FakeMemoryStore();
         using var mem = CreateMemory(store, handler, enabled: false);
 
         mem.Remember(new MessageMemoryEntry("m1", "g1", "main", "user_1", "User", "内容", 1000));
-        Task.Delay(200).Wait();
+        await Task.Delay(200);
         Assert.Empty(store.Records);
-        Assert.Empty(mem.SearchAsync("g1", "agent_a", "查询").Result);
+        Assert.Empty(await mem.SearchAsync("g1", "agent_a", "查询"));
     }
 
     // ================= prompt 段落排版 =================
@@ -254,6 +254,38 @@ public sealed class MessageMemoryTests
         Assert.Contains("user_1 的个人记忆", section);
         Assert.Contains("Kotlin", section);
         Assert.Equal("", MemoryContextProvider.BuildPersonSection("user_1", [], 600));
+    }
+
+    [Fact]
+    public void BuildGraphSection_EmptyWhenNone()
+    {
+        Assert.Equal("", MemoryContextProvider.BuildGraphSection(new GraphSubgraph([], []), 700));
+        Assert.Equal("", MemoryContextProvider.BuildKbGraphSection(new GraphSubgraph([], []), 700));
+    }
+
+    [Fact]
+    public void BuildGraphSection_InjectsEntitiesAndEdges_WithinBudget()
+    {
+        var seed = new GraphEntityHit("假期管理", "假期管理", "Concept", 0.9, null, 0);
+        var other = new GraphEntityHit("陪护假", "陪护假", "Concept", 0.5, null, 1);
+        var far = new GraphEntityHit("年度调薪", "年度调薪", "Concept", 0.1, null, 2);
+        var sub = new GraphSubgraph(
+            new[] { seed, other, far },
+            new[]
+            {
+                new GraphEdgeHit("假期管理", "假期管理", "包含", "陪护假", "陪护假", 3.0, 1),
+                new GraphEdgeHit("假期管理", "假期管理", "等于", "年度调薪", "年度调薪", 0.2, 2),
+            });
+        // 预算充足：实体全部、两条边都在（≤700）
+        var full = MemoryContextProvider.BuildGraphSection(sub, 700);
+        Assert.Contains("假期管理", full);
+        Assert.Contains("陪护假", full);
+        Assert.Contains("包含", full);
+        Assert.Contains("仅作参考", full);
+        // 紧预算：只保留种子及其近层实体，最远/低分节点被预算裁掉
+        var tight = MemoryContextProvider.BuildGraphSection(sub, 20);
+        Assert.Contains("假期管理", tight);   // 种子优先
+        Assert.DoesNotContain("年度调薪", tight); // 最远、低分节点被预算裁掉
     }
 }
 

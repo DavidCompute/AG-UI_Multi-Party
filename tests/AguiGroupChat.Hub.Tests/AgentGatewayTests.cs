@@ -167,6 +167,307 @@ public sealed class AgentGatewayTests
         Assert.DoesNotContain("无法解决", stored.Content);
     }
 
+    /// <summary>多级深钻 + 候选回退：agent_a 白名单=[b1, b2]，b1 无法解决（死端）、b2 匹配⇒
+    /// 应回退到 b2 并逐层下派到能作答的最终层（支持推断到最后一层）。</summary>
+    [Fact]
+    public async Task Invoke_MentionedOutOfScope_DrillsDownMultipleLayers_WithCandidateFallback()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a", "b1", "b2"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "前台专员" },
+                new MemberSeed { MemberId = "b1", MemberType = MemberType.Agent, Nickname = "科室A专员" },
+                new MemberSeed { MemberId = "b2", MemberType = MemberType.Agent, Nickname = "科室B专员" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "b1", Nickname = "科室A专员", Description = "不管部署", Instructions = "不答部署",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "b2", Nickname = "科室B专员", Description = "负责部署", Instructions = "输出：部署答复",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "前台专员", Description = "前台不答技术问题", Instructions = "你只是前台，不回答技术问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    AssignmentIds = ["b1", "b2"],
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        // 前台判 NO → 路由到 [b1,b2]；b1 死端（不答），候选回退到 b2（@科室B专员 → 判 YES 作答）
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "前台专员", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "@科室B专员 部署派单怎么处理", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "多级下派失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 回退到下派链末层的 b2：前缀「科室B专员 代为处理」且无「无法解决」
+        Assert.Contains("科室B专员 代为处理", stored!.Content);
+        Assert.DoesNotContain("无法解决", stored.Content);
+    }
+
+    /// <summary>路由器优先下派：即使本节点自身语境也可能应答（ShouldSpeak=YES），只要白名单里有
+    /// 专门负责该问题的下游，就先下派而非自答（IT服务台→Exchange专家 场景的回归）。</summary>
+    [Fact]
+    public async Task Invoke_RouterDispatchesToSpecialist_BeforeSelfAnswer()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a", "agent_ex"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "IT服务台" },
+                new MemberSeed { MemberId = "agent_ex", MemberType = MemberType.Agent, Nickname = "Exchange专家" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_ex", Nickname = "Exchange专家", Description = "负责邮件", Instructions = "输出：邮件排障答复",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "IT服务台", Description = "IT服务台", Instructions = "你是一线IT服务台，负责常见IT问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    AssignmentIds = ["agent_ex"],
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        // 内容同时 @IT服务台（使其自身 ShouldSpeak=YES）和 @Exchange专家（使专家认领）→ 路由器应先下派专家
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "IT服务台", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "@IT服务台 @Exchange专家 outlook连不上exchange了 帮我派单", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "路由器下派失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 应下派到 Exchange专家（前缀「Exchange专家 代为处理」），且不是由 IT服务台 自己自答
+        Assert.Contains("Exchange专家 代为处理", stored!.Content);
+        Assert.DoesNotContain("无法解决", stored.Content);
+    }
+
+    /// <summary>确定性编排计划（Coordinator Plan）：开启后路由模型按「组织清单」产出计划并派给对应员工执行，
+    /// 末级答复仍带「X 代为处理」前缀（回归”问题→按组织定计划→激活对应员工“）。</summary>
+    [Fact]
+    public async Task Invoke_CoordinatorPlan_DispatchesToWhitelistAndAnswers()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["it", "srv"],
+            Members =
+            [
+                new MemberSeed { MemberId = "it", MemberType = MemberType.Agent, Nickname = "IT服务台" },
+                new MemberSeed { MemberId = "srv", MemberType = MemberType.Agent, Nickname = "服务器运维助手" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var options = new AgentOptions { Provider = "mock", CoordinatorPlanning = true, Agents =
+        [
+            new AgentDefinition { AgentId = "srv", Nickname = "服务器运维助手", Description = "负责服务器/运维", Instructions = "输出：运维答复", TriggerMode = AgentTriggerMode.Mentioned },
+            new AgentDefinition { AgentId = "it", Nickname = "IT服务台", Description = "入口", Instructions = "IT入口，负责分派", TriggerMode = AgentTriggerMode.Mentioned, AssignmentIds = ["srv"] },
+        ]};
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton<AguiGroupChat.Hub.Messaging.GroupHub>(f.Hub).BuildServiceProvider();
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "it", AgentNickname: "IT服务台", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "服务器连不上了，请运维帮排查", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "编排计划下派失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 协调计划激活了「服务器运维助手」：因计划卡已展示指派，正文不再叠加前缀，但非“无法解决”
+        Assert.DoesNotContain("无法解决", stored.Content);
+    }
+
+    /// <summary>技能依赖链路：某技能需要输入（如 OWA 地址），该输入由下层员工掌握——协调计划应
+    /// 先 dispatch 该员工拿到值，再调用技能（技能收到上一步结果作为输入）。验证编排计划确实形成并执行了依赖链。</summary>
+    [Fact]
+    public async Task Invoke_CoordinatorPlan_SkillDependsOnSubordinateInput()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["exch", "cfg"],
+            Members =
+            [
+                new MemberSeed { MemberId = "exch", MemberType = MemberType.Agent, Nickname = "Exchange连接测试助手" },
+                new MemberSeed { MemberId = "cfg", MemberType = MemberType.Agent, Nickname = "配置管理员" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        // 技能库：sk_test 需要输入（body 含 ${query}）；配置管理员掌握该输入
+        var skillCatalog = new AgentSkillCatalog(NullLoggerFactory.Instance);
+        skillCatalog.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "sk_test", Name = "连接测试", Description = "提供地址进行连接测试", Kind = AgentSkillKind.Prompt,
+            Body = "你正在对地址 ${query} 做连接测试并返回结果。", RequiresApproval = false,
+        });
+        var sp = new ServiceCollection().AddSingleton(skillCatalog).AddSingleton<AguiGroupChat.Hub.Messaging.GroupHub>(f.Hub).BuildServiceProvider();
+        var options = new AgentOptions
+        {
+            Provider = "mock", CoordinatorPlanning = true,
+            Agents =
+            [
+                new AgentDefinition { AgentId = "cfg", Nickname = "配置管理员", Description = "你根据配置库回答配置管理相关问题（含 Exchange OWA 地址）", Instructions = "输出：OWA 地址 https://mail.example.com", TriggerMode = AgentTriggerMode.Mentioned },
+                new AgentDefinition { AgentId = "exch", Nickname = "Exchange连接测试助手", Description = "公司Exchange连接测试助手", Instructions = "负责连接测试", TriggerMode = AgentTriggerMode.Mentioned, AssignmentIds = ["cfg"], SkillDefIds = ["sk_test"] },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, sp);
+        var gateway = new AgentGateway(catalog, sp, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "exch", AgentNickname: "Exchange连接测试助手", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "测一下公司 exchange 连接", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "技能依赖链路失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 协调计划已运行（非“无法解决”），且因计划卡已展示“指派…代为处理”，正文不再叠加前缀
+        Assert.DoesNotContain("无法解决", stored.Content);
+        Assert.DoesNotContain("（配置管理员 代为处理）", stored.Content); // 前缀已移除（由计划卡表达）
+        // 编排计划可视化：应多次广播 TEXT_MESSAGE_PLAN（先“待执行”，逐条点亮后最终全 done），且含“调用技能”与“代为处理”
+        var planEvts = events.Where(e => e.GetProperty("type").GetString() == EventTypes.TextMessagePlan).ToList();
+        Assert.True(planEvts.Count >= 3, "应广播多次计划更新（首帧 + 每完成一步 + 最终），实际 " + planEvts.Count);
+        // 首帧：全部未完成
+        var firstSteps = planEvts[0].GetProperty("steps").EnumerateArray().ToList();
+        Assert.All(firstSteps, s => Assert.False(s.GetProperty("done").GetBoolean()));
+        // 末帧：全部完成
+        var lastSteps = planEvts[^1].GetProperty("steps").EnumerateArray().ToList();
+        Assert.All(lastSteps, s => Assert.True(s.GetProperty("done").GetBoolean()));
+        // 且步骤里含“调用技能”与“分配工作”（指派步骤表述）
+        var stepTexts = lastSteps.Select(e => e.GetProperty("text").GetString() ?? "").ToList();
+        Assert.Contains(stepTexts, s => s.Contains("调用技能"));
+        Assert.Contains(stepTexts, s => s.Contains("分配工作"));
+    }
+
+    /// <summary>回归：多级下派到叶子作答，链路前缀的<b>末级对象不应重复</b>（末尾叶子只出现一次）。</summary>
+    [Fact]
+    public async Task Invoke_MentionedDeepDrill_LeafAppearsOnce_InPrefix()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["it", "srv", "exch", "conn"],
+            Members =
+            [
+                new MemberSeed { MemberId = "it", MemberType = MemberType.Agent, Nickname = "IT服务台" },
+                new MemberSeed { MemberId = "srv", MemberType = MemberType.Agent, Nickname = "服务器运维助手" },
+                new MemberSeed { MemberId = "exch", MemberType = MemberType.Agent, Nickname = "Exchange专家" },
+                new MemberSeed { MemberId = "conn", MemberType = MemberType.Agent, Nickname = "Exchange连接测试助手" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition { AgentId = "conn", Nickname = "Exchange连接测试助手", Description = "连测", Instructions = "输出：连测答复", TriggerMode = AgentTriggerMode.Mentioned },
+                new AgentDefinition { AgentId = "exch", Nickname = "Exchange专家", Description = "Exchange", Instructions = "Exchange专家", TriggerMode = AgentTriggerMode.Mentioned, AssignmentIds = ["conn"] },
+                new AgentDefinition { AgentId = "srv", Nickname = "服务器运维助手", Description = "服务器", Instructions = "服务器运维", TriggerMode = AgentTriggerMode.Mentioned, AssignmentIds = ["exch"] },
+                new AgentDefinition { AgentId = "it", Nickname = "IT服务台", Description = "入口", Instructions = "IT入口", TriggerMode = AgentTriggerMode.Mentioned, AssignmentIds = ["srv"] },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        // 内容含 @conn（令叶子自答）与「派」（触发每层向下指派）→ 链路 IT→服务器→Exchange→连接测试助手
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "it", AgentNickname: "IT服务台", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "@Exchange连接测试助手 outlook连exchange断了 帮我派单", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "多级下派失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        var content = stored!.Content;
+        // 链路各层各出现一次，末级「Exchange连接测试助手 代为处理」只出现一次（此前会重复两次）
+        Assert.Contains("服务器运维助手 代为处理", content);
+        Assert.Contains("Exchange专家 代为处理", content);
+        Assert.Equal(1, CountOccurrences(content, "Exchange连接测试助手 代为处理"));
+        Assert.DoesNotContain("无法解决", content);
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        if (string.IsNullOrEmpty(needle)) return 0;
+        var c = 0; var i = 0;
+        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { c++; i += needle.Length; }
+        return c;
+    }
+
     /// <summary>装配「问题提升」路由网关：agent_a 无白名单、配提升目标 agent_mgr ⇒ 提升给主管。</summary>
     private static AgentGateway CreateEscalationGateway(HubFixture f)
     {
@@ -655,96 +956,6 @@ public sealed class AgentGatewayTests
         Assert.Equal(MemberType.Agent, stored!.SenderType);
         Assert.Contains("测试助手", stored.Content);
         Assert.True(stored.Content.Length > 0);
-    }
-
-    /// <summary>装配带 TaskService 的网关：任务编排回写闭环需在网关 DI 中注册 TaskService。</summary>
-    private static AgentGateway CreateGatewayWithTasks(HubFixture f, ITaskStore store, out AgentOptions options)
-    {
-        options = new AgentOptions
-        {
-            Provider = "mock",
-            Agents =
-            [
-                new AgentDefinition
-                {
-                    AgentId = "agent_t",
-                    Nickname = "工作助手",
-                    Description = "测试",
-                    Instructions = "你是工作助手",
-                    TriggerMode = AgentTriggerMode.Mentioned,
-                },
-            ],
-        };
-        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
-        var services = new ServiceCollection()
-            .AddSingleton(f.Hub)
-            .AddSingleton<ITaskStore>(store)
-            .AddSingleton(new TaskService(store, NullLogger<TaskService>.Instance))
-            .BuildServiceProvider();
-        return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
-    }
-
-    /// <summary>任务编排闭环：携带 TaskId 的运行直接完成时，网关把任务回写为 Finished（结果 = 智能体回复全文）。</summary>
-    [Fact]
-    public async Task Invoke_WithTaskId_MarksTaskFinishedOnDirectCompletion()
-    {
-        var f = new HubFixture();
-        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
-        {
-            GroupName = "g",
-            OwnerId = "user_1",
-            MemberIds = ["agent_t"],
-            Members = [new MemberSeed { MemberId = "agent_t", MemberType = MemberType.Agent, Nickname = "工作助手" }],
-        });
-        var store = new InMemoryTaskStore();
-        var tasks = new TaskService(store, NullLogger<TaskService>.Instance);
-        var taskId = tasks.CreateTask(group.GroupId, "agent_t", "user_1", "main", "任务", "写一个报告");
-        tasks.MarkRunning(taskId);
-
-        var gateway = CreateGatewayWithTasks(f, store, out _);
-        var result = await gateway.InvokeAsync(new AgentInvocationContext(
-            GroupId: group.GroupId,
-            ThreadId: "thread_" + group.GroupId,
-            AgentId: "agent_t",
-            AgentNickname: "工作助手",
-            TriggerMessageId: "msg_trigger",
-            TriggerUserId: "user_1",
-            Content: "帮我梳理需求",
-            Mentions: [],
-            MentionAll: false,
-            TaskId: taskId), CancellationToken.None);
-
-        Assert.True(result.Accepted, "网关运行失败: " + result.ErrorCode);
-        var task = tasks.Get(taskId)!;
-        Assert.Equal(WorkTaskStatus.Finished, task.Status);
-        Assert.False(string.IsNullOrWhiteSpace(task.Result));
-    }
-
-    [Fact]
-    public async Task Invoke_WithTaskId_NoTaskService_DoesNotThrow()
-    {
-        // 未注册 TaskService 的网关（原始 CreateGateway）带 TaskId 运行不应抛异常
-        var f = new HubFixture();
-        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
-        {
-            GroupName = "g",
-            OwnerId = "user_1",
-            MemberIds = ["agent_a"],
-            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "测试助手" }],
-        });
-        var gateway = CreateGateway(f, out _);
-        var result = await gateway.InvokeAsync(new AgentInvocationContext(
-            GroupId: group.GroupId,
-            ThreadId: "thread_" + group.GroupId,
-            AgentId: "agent_a",
-            AgentNickname: "测试助手",
-            TriggerMessageId: "msg_trigger",
-            TriggerUserId: "user_1",
-            Content: "帮我梳理需求",
-            Mentions: [],
-            MentionAll: false,
-            TaskId: "task_nonexistent"), CancellationToken.None);
-        Assert.True(result.Accepted, "网关运行失败: " + result.ErrorCode);
     }
 
     [Fact]

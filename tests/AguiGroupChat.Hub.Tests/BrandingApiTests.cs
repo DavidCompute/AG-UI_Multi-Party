@@ -108,7 +108,7 @@ public sealed class BrandingApiTests : IClassFixture<BrandingApiServerFixture>
 
         // 非管理员保存 → 403
         var normal = await RegisterAsync("brand_normal");
-        using var denied = Authed(HttpMethod.Post, "/ag-ui/settings/branding", normal.GetProperty("token").GetString());
+        using var denied = Authed(HttpMethod.Post, "/ag-ui/settings/branding", normal.GetProperty("token").GetString()!);
         denied.Content = JsonContent.Create(new { appName = "越权改名" });
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }

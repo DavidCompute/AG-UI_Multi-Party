@@ -120,6 +120,7 @@ public sealed class IntegrationTests : IClassFixture<HubServerFixture>
         var list = await _client.GetAsync("/ag-ui/member/user_t1/groups?memberId=user_t1");
         list.EnsureSuccessStatusCode();
         var groups = await list.Content.ReadFromJsonAsync<List<JsonElement>>();
+        Assert.NotNull(groups); // 成功响应必返回成员群列表
         var priv = groups.First(g => g.GetProperty("groupId").GetString() == privateGroupId);
         Assert.True(priv.GetProperty("isPrivate").GetBoolean(), "私密群的 isPrivate 应在成员群列表中带出");
 

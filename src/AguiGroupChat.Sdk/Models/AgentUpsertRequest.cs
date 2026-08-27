@@ -24,7 +24,6 @@ public sealed class AgentUpsertRequest
     public string? BridgeToken { get; set; }
 
     public bool? PersonalMemoryEnabled { get; set; }
-    public bool? EnableWorkTools { get; set; }
     public bool? IsPrivate { get; set; }
 
     public IReadOnlyList<string>? Skills { get; set; }

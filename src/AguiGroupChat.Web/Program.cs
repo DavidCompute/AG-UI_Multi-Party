@@ -82,11 +82,11 @@ app.MapAttachmentApi(); // 附件上传 / 下载（消息附件）
 app.MapLinkProxyApi(); // 链接代理：智能体回复中的 http/https 链接由 Hub 代访后返回前端
 app.MapExportImportApi(); // 数据导出 / 导入：账号 + 智能体 + 聊天记录（含附件）
 app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
+app.MapSkillApi(); // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
 app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
-app.MapTaskApi();   // 任务编排（工作型智能体）
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
@@ -95,6 +95,7 @@ app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整�
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();
 app.Services.RegisterKnowledgeBasePersistence();
+app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
 app.Services.RegisterSessionPersistence(); // 会话跨重启保持：桌面版 / 服务重启后「保持登录」仍有效
 app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
 app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoint / apiKey）跨重启保持

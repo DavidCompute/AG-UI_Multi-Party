@@ -36,8 +36,8 @@ using AguiGroupChat.Sdk.Models;
 var options = new AguiClientOptions { BaseUri = new Uri("http://localhost:5100") };
 using var client = new AguiClient(options);
 
-// Login (registering logs you in too: client.RegisterAsync(...))
-var auth = await client.LoginAsync("zhangsan", "123456");
+// Register (registration logs you in right away); v1.0.75+ no longer seeds demo accounts zhangsan/lisi
+var auth = await client.RegisterAsync("zhangsan", "123456");
 client.Token = auth.Token;               // The SDK attaches the Bearer token automatically
 
 // Create a group
@@ -72,10 +72,10 @@ realtime.On<TextMessageContentEvent>(e => Console.Write(e.Delta));   // agent st
 realtime.On<TextMessageEndEvent>(_   => Console.WriteLine());
 realtime.On<GroupTypingEvent>(e      => Console.WriteLine($"[输入中] {e.MemberId}"));
 
-await realtime.ConnectAsync(["group_001", "group_002"], ct);
+await realtime.ConnectAsync(["group_001", "group_002"], CancellationToken.None);
 // ConnectAsync subscribes automatically; after that you can add/remove:
-await realtime.SubscribeAsync(["group_003"], ct);
-await realtime.UnsubscribeAsync(["group_001"], ct);
+await realtime.SubscribeAsync(["group_003"], CancellationToken.None);
+await realtime.UnsubscribeAsync(["group_001"], CancellationToken.None);
 
 // WS full-duplex: send upstream directly through the real-time channel (equivalent to the HTTP write API)
 await realtime.SendMessageAsync(new GroupMessageSendRequest {

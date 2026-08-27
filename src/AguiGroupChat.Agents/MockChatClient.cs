@@ -76,7 +76,8 @@ public sealed class MockChatClient : IChatClient
             return [shouldSpeak ? "YES" : "NO"];
         }
 
-        // 任务指派目标推断（组织化路由）：请求含问意（？/帮我/派）→ 指派给第一个候选；否则不指派（NONE）
+        // 任务指派目标推理（组织化路由）：请求含问意（？/帮我/派）→ 按候选顺序输出全部候选（供上层逐候选
+        // 递归探测做回退，支持多下一层/多级深钻）；否则不指派（NONE）
         if (lastUserText.Contains("__AGUI_ROUTE__", StringComparison.Ordinal))
         {
             var reqIdx = lastUserText.IndexOf("请求：", StringComparison.Ordinal);
@@ -85,9 +86,35 @@ public sealed class MockChatClient : IChatClient
             var cand = candIdx >= 0 ? lastUserText[(candIdx + "候选（agentId 列表）：".Length)..] : "";
             cand = cand.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
             var shouldAssign = req.Contains('?') || req.Contains('？') || req.Contains("帮我") || req.Contains("派");
-            var first = cand.Split(',').Select(x => x.Trim()).FirstOrDefault(x => x.Length > 0);
-            return [shouldAssign && !string.IsNullOrEmpty(first) ? first : "NONE"];
+            var all = cand.Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+            return [shouldAssign && all.Count > 0 ? string.Join(", ", all) : "NONE"];
         }
+
+        // 确定性编排计划（Coordinator Plan）：命中协调员规划提示（含「执行计划」与 steps）→
+        // 从「可用」清单中取出第一个数字员工 id 与第一个技能 id：
+        //   有一个员工 → 派给它；员工 + 技能（技能需要输入）→ 安排 [dispatch 员工, skill 技能] 依赖链。
+        // mock 便于端到端验证「问题 → 按组织定计划 → 逐项激活执行」与「技能依赖前一员工的输出」链路；
+        // 真实模型会按语义挑选更合适的组合。
+        if (lastUserText.Contains("执行计划", StringComparison.Ordinal)
+            && lastUserText.Contains("steps", StringComparison.Ordinal))
+        {
+            var mEmp = Regex.Match(lastUserText, @"- \[员工\] [^\r\n]*\(id=([A-Za-z0-9_]+)\)");
+            var mSkill = Regex.Match(lastUserText, @"- \[技能\] ([A-Za-z0-9_]+)" );
+            var emp = mEmp.Success ? mEmp.Groups[1].Value : "";
+            var skill = mSkill.Success ? mSkill.Groups[1].Value : "";
+            if (emp.Length > 0 && skill.Length > 0 && lastUserText.Contains("需要输入", StringComparison.Ordinal))
+                return [$"{{\"steps\":[{{\"action\":\"dispatch\",\"target\":\"{emp}\"}},{{\"action\":\"skill\",\"target\":\"{skill}\"}}]}}"];
+            if (emp.Length > 0)
+                return [$"{{\"steps\":[{{\"action\":\"dispatch\",\"target\":\"{emp}\"}}]}}"];
+            if (skill.Length > 0)
+                return [$"{{\"steps\":[{{\"action\":\"skill\",\"target\":\"{skill}\"}}]}}"];
+            return ["{\"steps\":[]}"];
+        }
+
+        // 协调计划的“取值”步骤（含“只输出所需的值本身”）：mock 返回带解释的 URL，验证技能前的取值/URL 提取
+        if (lastUserText.Contains("只输出所需的值本身", StringComparison.Ordinal)
+            || lastUserText.Contains("只输出该值本身", StringComparison.Ordinal))
+            return ["Exchange OWA 服务器地址是 https://mail.example.com/owa，请用它测试。"];
 
         var text = $"收到！关于「{lastUserText}」，作为「{_agent.Nickname}」我的建议如下：\n\n" +
                    "1. 明确需求边界与验收标准，避免范围蔓延；\n" +

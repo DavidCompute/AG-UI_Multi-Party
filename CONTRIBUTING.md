@@ -88,7 +88,7 @@ dotnet run --project samples/AguiGroupChat.Client -- --login zhangsan 123456 --g
 dotnet test AguiGroupChat.slnx
 ```
 
-567+ test cases cover group lifecycle, permission control, subscriptions, visibility fan-out, recall, agent trigger rules, streaming feedback, human-in-the-loop, user management, persistence (JSON / PostgreSQL / MySQL / SQLite), semantic memory, and full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
+603 test cases cover group lifecycle, permission control, subscriptions, visibility fan-out, recall, agent trigger rules, streaming feedback, human-in-the-loop, user management, persistence (JSON / PostgreSQL / MySQL / SQLite), semantic memory, and full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
 
 When tests need a database, override the connection strings via environment variables (`AGUI_PG_TEST_CONN`, `AGUI_MYSQL_TEST_CONN`); otherwise those cases are auto-skipped.
 

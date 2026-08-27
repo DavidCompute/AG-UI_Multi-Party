@@ -33,7 +33,7 @@ public sealed class UnreadAndGroupNameTests : IClassFixture<AgentApiServerFixtur
         var msgId = (await send.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("messageId").GetString()!;
 
         var list = await GroupsOfAsync(token, userId);
-        var g = Assert.Single(list.Where(x => x.GetProperty("groupId").GetString() == gid));
+        var g = Assert.Single(list, x => x.GetProperty("groupId").GetString() == gid);
         Assert.True(g.GetProperty("lastMessageAt").GetInt64() > 0);
         Assert.Equal(1, g.GetProperty("unreadCount").GetInt32());
         Assert.Equal(1, g.GetProperty("unreadByTopic").GetProperty("main").GetInt32());
@@ -43,7 +43,7 @@ public sealed class UnreadAndGroupNameTests : IClassFixture<AgentApiServerFixtur
         read.EnsureSuccessStatusCode();
 
         var list2 = await GroupsOfAsync(token, userId);
-        var g2 = Assert.Single(list2.Where(x => x.GetProperty("groupId").GetString() == gid));
+        var g2 = Assert.Single(list2, x => x.GetProperty("groupId").GetString() == gid);
         Assert.Equal(0, g2.GetProperty("unreadCount").GetInt32());
     }
 
@@ -101,7 +101,7 @@ public sealed class UnreadAndGroupNameTests : IClassFixture<AgentApiServerFixtur
         var msgId = (await send.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("messageId").GetString()!;
 
         var list = await GroupsOfAsync(token, userId);
-        var g = Assert.Single(list.Where(x => x.GetProperty("groupId").GetString() == gid));
+        var g = Assert.Single(list, x => x.GetProperty("groupId").GetString() == gid);
         Assert.Equal(1, g.GetProperty("unreadCount").GetInt32()); // 主话题 0 + 话题 1
         Assert.Equal(0, g.GetProperty("unreadByTopic").GetProperty("main").GetInt32());
         Assert.Equal(1, g.GetProperty("unreadByTopic").GetProperty(topicId).GetInt32());
@@ -111,7 +111,7 @@ public sealed class UnreadAndGroupNameTests : IClassFixture<AgentApiServerFixtur
             new { groupId = gid, memberId = userId, readMessageId = msgId });
         read.EnsureSuccessStatusCode();
         var list2 = await GroupsOfAsync(token, userId);
-        var g2 = Assert.Single(list2.Where(x => x.GetProperty("groupId").GetString() == gid));
+        var g2 = Assert.Single(list2, x => x.GetProperty("groupId").GetString() == gid);
         Assert.Equal(0, g2.GetProperty("unreadByTopic").GetProperty(topicId).GetInt32());
     }
 

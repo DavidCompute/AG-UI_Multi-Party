@@ -27,7 +27,6 @@ public sealed class ConfigGovernanceState
     public int? SessionTtlHours { get; set; }
     public bool? EnableTools { get; set; }
     public bool? EnableWebTools { get; set; }
-    public bool? WorkToolsEnabled { get; set; }
     public bool? ThinkingMode { get; set; }
     public long? DailyTokenQuotaPerUser { get; set; }
     public List<string>? RequireApprovalToolNames { get; set; }
@@ -45,7 +44,6 @@ public sealed record ConfigGovernanceHttpRequest(
     int? SessionTtlHours,
     bool? EnableTools,
     bool? EnableWebTools,
-    bool? WorkToolsEnabled,
     bool? ThinkingMode,
     long? DailyTokenQuotaPerUser,
     List<string>? RequireApprovalToolNames,
@@ -67,7 +65,6 @@ public static class ConfigGovernanceApi
 
         if (s.EnableTools is { } c1) agents.EnableTools = c1;
         if (s.EnableWebTools is { } c2) agents.EnableWebTools = c2;
-        if (s.WorkToolsEnabled is { } c3) agents.WorkToolsEnabled = c3;
         if (s.ThinkingMode is { } c4) agents.ThinkingMode = c4;
         if (s.DailyTokenQuotaPerUser is { } c5 && c5 >= 0) agents.DailyTokenQuotaPerUser = c5;
         if (s.RequireApprovalToolNames is { } c6) agents.RequireApprovalToolNames = c6.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -87,6 +84,7 @@ public static class ConfigGovernanceApi
         {
             var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
+            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
 
             // 校验边界（非法值返回 400 而不是静默忽略）
             if (req.MessageHistoryLimit is { } mh && mh is not (> 0 and <= 100_000)) return BadReq("messageHistoryLimit 需在 1..100000");
@@ -106,7 +104,6 @@ public static class ConfigGovernanceApi
             state.SessionTtlHours = req.SessionTtlHours ?? state.SessionTtlHours;
             state.EnableTools = req.EnableTools ?? state.EnableTools;
             state.EnableWebTools = req.EnableWebTools ?? state.EnableWebTools;
-            state.WorkToolsEnabled = req.WorkToolsEnabled ?? state.WorkToolsEnabled;
             state.ThinkingMode = req.ThinkingMode ?? state.ThinkingMode;
             state.DailyTokenQuotaPerUser = req.DailyTokenQuotaPerUser ?? state.DailyTokenQuotaPerUser;
             if (req.RequireApprovalToolNames is not null) state.RequireApprovalToolNames = req.RequireApprovalToolNames;
@@ -115,7 +112,7 @@ public static class ConfigGovernanceApi
             Apply(state, groupChat, authOptions, agents);
             changes.Notify(); // 驱动持久化
 
-            audit.Record("config.update", meId, auth.GetUser(meId)?.Username,
+            audit.Record("config.update", me, auth.GetUser(me)?.Username,
                 detail: "更新运行配置（会话/群/消息/工具/审批/嵌入）");
             return Results.Ok(new { ok = true });
         });
@@ -150,7 +147,6 @@ public static class ConfigGovernanceApi
             state.SessionTtlHours = saved.SessionTtlHours;
             state.EnableTools = saved.EnableTools;
             state.EnableWebTools = saved.EnableWebTools;
-            state.WorkToolsEnabled = saved.WorkToolsEnabled;
             state.ThinkingMode = saved.ThinkingMode;
             state.DailyTokenQuotaPerUser = saved.DailyTokenQuotaPerUser;
             state.RequireApprovalToolNames = saved.RequireApprovalToolNames;

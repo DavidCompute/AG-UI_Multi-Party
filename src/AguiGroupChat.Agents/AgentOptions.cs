@@ -49,13 +49,6 @@ public sealed class AgentOptions
     /// 开启后工具可访问外网（搜索端点可配置）。</summary>
     public bool EnableWebTools { get; set; }
 
-    /// <summary>
-    /// <summary>是否启用工作型智能体的文件 / 命令工具（<c>list_dir</c> / <c>read_file</c> / <c>write_file</c> / <c>shell</c>）。
-    /// 默认 false：普通智能体不受影响。仅在智能体自身 <see cref="AgentDefinition.EnableWorkTools"/> 开启时挂载
-    /// 这些工具，且命令 / 写操作被限制在 <c>data/workspaces/&lt;agentId&gt;/</c> 工作区内、写操作用例子需经审批。
-    /// </summary>
-    public bool WorkToolsEnabled { get; set; }
-
     /// <summary>工作型智能体工作区根目录（相对路径基于内容根解析；绝对路径直接使用）。
     /// 每个启用工作工具的智能体拥有 <see cref="WorkSpaceRoot"/>/&lt;agentId&gt;/ 独立子目录。</summary>
     public string WorkSpaceRoot { get; set; } = "data/workspaces";
@@ -80,6 +73,25 @@ public sealed class AgentOptions
     public MemoryOptions Memory { get; set; } = new();
 
     public List<AgentDefinition> Agents { get; set; } = [];
+
+    /// <summary>技能库种子（appsettings 声明）：启动时若技能库为空则播种，与 <see cref="Agents"/> 同模式。</summary>
+    public List<AgentSkillDefinition> Skills { get; set; } = [];
+
+    /// <summary>
+    /// 是否允许 HTTP 技能访问<b>本机 / 内网 / 私网</b>地址（默认 false）。
+    /// 默认开 SSRF 防护：HTTP 技能拒绝本机 / 私网 / 链路本地地址（127.0.0.1、10/8、172.16/12、192.168/16、169.254/16 等）
+    /// 防止技能把服务端当作跳板访问内网。确需调用本机 / 内网接口（如本地 Ollama / 内网 API）时设为 true 放行；
+    /// 放行后仍保留 http/https 白名单与「重定向逐跳再校验」。（桌面：appsettings Agents:AllowPrivateSkillEndpoints；Docker：AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS）
+    /// </summary>
+    public bool AllowPrivateSkillEndpoints { get; set; }
+
+    /// <summary>
+    /// **确定性编排计划（Coordinator Plan）**：默认关。开启后，带「指派白名单 / 提升目标」的路由型数字员工
+    /// 收到问题时，先生成一张<b>基于组织架构与技能配置的执行计划</b>（明确列出选中的下游员工与要调用的技能），
+    /// 再按计划<b>依次激活</b>对应数字员工 / 技能并聚合答复——即“问题 → 按组织与技能定计划 → 激活对应员工与能力执行”，
+    /// 比“仅靠模型回复时自发决定调谁叫啥”更可靠。计划失败 / 未启用时回退到原有递归指派路由。
+    /// </summary>
+    public bool CoordinatorPlanning { get; set; }
 }
 
 /// <summary>
@@ -163,6 +175,32 @@ public sealed class MemoryOptions
     /// 不受此限制（保留更久，防止重要决策被误清理）。
     /// </summary>
     public int RetentionDays { get; set; }
+
+    // ================= 图谱 RAG（Graph Memory） =================
+
+    /// <summary>是否启用图谱记忆（从群消息抽实体/关系建图，回复前按图遍历检索注入）。默认关。</summary>
+    public bool GraphEnabled { get; set; }
+
+    /// <summary>图谱检索：从查询召回多少个种子实体（再各自做 n 跳遍历）。</summary>
+    public int GraphTopK { get; set; } = 2;
+
+    /// <summary>图谱检索的种子实体召回相似度阈值（0..1）。取高些，只在查询与实体很贴近时才召回，避免弱匹配种子扩散噪声。</summary>
+    public double GraphMinScore { get; set; } = 0.45;
+
+    /// <summary>图谱检索的图遍历跳数（hops，1..4）。取 1 跳更聚焦种子邻域，减少无关实体扩散。</summary>
+    public int GraphHops { get; set; } = 1;
+
+    /// <summary>单次注入的图谱节点上限（防子图过大拖垮 prompt）。</summary>
+    public int GraphMaxNodes { get; set; } = 12;
+
+    /// <summary>单条图谱段落注入的总字符预算：图谱是补强，不能挤占向量切片；超过则丢弃超出部分的边/实体。</summary>
+    public int GraphMaxSectionChars { get; set; } = 700;
+
+    /// <summary>图谱抽取的原文截断长度（字符）：超长消息只抽前 N 字符，避免一次抽取过载。</summary>
+    public int GraphMaxChars { get; set; } = 2000;
+
+    /// <summary>图谱抽取队列最大积压（超过则丢弃，防后台任务无限堆积）。</summary>
+    public int GraphQueueCapacity { get; set; } = 256;
 }
 
 /// <summary>
@@ -237,14 +275,6 @@ public sealed class AgentDefinition
     public bool PersonalMemoryEnabled { get; set; }
 
     /// <summary>
-    /// 是否为工作型智能体（默认关闭）：开启后挂载文件 / 命令工具（<c>list_dir</c> / <c>read_file</c> /
-    /// <c>write_file</c> / <c>shell</c>），只能在该智能体专属工作区（<c>data/workspaces/&lt;agentId&gt;/</c>）内
-    /// 执行只读操作或（经 HITL 审批的）写操作。文件 / 命令操作有安全边界（路径越界 / 危险命令拒绝），
-    /// 普通聊天智能体不受影响。需全局 <see cref="AgentOptions.WorkToolsEnabled"/> 开启。
-    /// </summary>
-    public bool EnableWorkTools { get; set; }
-
-    /// <summary>
     /// 是否私密智能体（默认关闭）。私密智能体仅创建者（<see cref="OwnerId"/>）可将其加入群。
     /// 创建者以外的用户看不到 / 拉不进私密智能体。
     /// </summary>
@@ -270,8 +300,11 @@ public sealed class AgentDefinition
 
     /// <summary>
     /// **任务指派白名单（向下）**：本数字员工被 @ 时，若按自身系统提示词判定语境不属于自己，
-    /// 可在<b>白名单内自动指派</b>给更合适的下游数字员工（由模型在该名单里推断目标）。
-    /// 留空 = 不做向下指派。指派方向由「白名单 + 系统提示词语境推断」自动决定。
+    /// 可在<b>白名单内自动指派</b>给更合适的下游数字员工。指派方向由「白名单 + 系统提示词语境推断」自动决定。
+    /// 判断<b>只看直接下一层</b>：每个节点仅依据自身直接下级的昵称/职责选择指派对象（不向上钻、不引入更深层叶子）。
+    /// 支持<b>多级深钻</b>：收到上派委托的非终端管理者会继续沿各自白名单向下递归探测到能作答的最后一层；
+    /// 且按<b>多候选排序 + 回退</b>逐候选尝试——某子分支无解时回退到下一候选，直到找到解（不会被单个分支的
+    /// 语义 NONE 提前终结）。留空 = 不做向下指派。
     /// </summary>
     public List<string> AssignmentIds { get; set; } = [];
 
@@ -295,6 +328,14 @@ public sealed class AgentDefinition
     /// 本智能体需要该领域信息时由模型决定调用。目标智能体不再挂载自身的技能（防循环引用）。
     /// </summary>
     public List<AgentSkillConfig>? Skills { get; set; }
+
+    /// <summary>
+    /// **可复用技能（OpenClaw 风格，2.8）**：引用技能库（<see cref="AgentSkillCatalog"/>）里
+    /// 定义的可复用功能的技能 ID 列表（shell / http / prompt 类型）。
+    /// 与 <see cref="Skills"/>（调另一个智能体代为回答）语义分开：本字段挂载的是<b>能执行的功能 / 可复用模板</b>，
+    /// 可在任意多个数字员工间复用。运行时为每个引用的技能生成 AIFunction（需审批的技能经审批包装）。
+    /// </summary>
+    public List<string> SkillDefIds { get; set; } = [];
 
     /// <summary>
     /// 绑定的知识库 ID 列表（<see cref="KnowledgeBaseCatalog"/> 管理）：回复前按这些知识库检索相关片段注入上下文，

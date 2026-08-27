@@ -87,7 +87,8 @@ graph TD
 ```csharp
 var options = new AguiClientOptions { BaseUri = new Uri("http://localhost:5100") };
 using var client = new AguiClient(options);
-var auth = await client.LoginAsync("zhangsan", "123456");
+// 首次运行先注册（注册即登录）；v1.0.75 起不再播种演示账号 zhangsan/lisi，请用 --register 自建账号
+var auth = await client.RegisterAsync("zhangsan", "123456");
 client.Token = auth.Token;
 
 await using var realtime = new AguiRealtimeClient(options) { Token = auth.Token };
@@ -131,14 +132,18 @@ dotnet run --project src/AguiGroupChat.Desktop.Cross
 示例数据：群 `group_xxx`（产品需求评审群），成员 `user_1001`（张三，群主）、`user_1002`（李四）、`agent_prd`（需求助手，提及触发）、`agent_code`（代码助手，语境触发：不 @ 也能根据上下文主动发言）。
 
 ```bash
-# 终端 1：基于 SDK 的示例客户端（登录演示种子账号 → 连接 + 订阅 + 打印事件，20 秒后退出）
-# 演示账号 zhangsan / 123456（user_1001）；--login 用户名 密码
-# 连订阅群 group_001
-dotnet run --project samples/AguiGroupChat.Client -- --login zhangsan 123456 --groupIds group_001
+# 终端 1：基于 SDK 的示例客户端（注册新账号 → 连接 + 订阅 + 打印事件，20 秒后退出）
+# 首端用 --register 注册新账号（首个注册账号自动成为管理员）；之后可用 --login 复用该账号
+# 连订阅群 group_001（示例数据如已播种，group_001 即产品需求评审群）
+dotnet run --project samples/AguiGroupChat.Client -- --register zhangsan 123456 --groupIds group_001
 
-# 终端 2：另一成员登录同一群并发消息（@需求助手 触发其回复）
-dotnet run --project samples/AguiGroupChat.Client -- --login lisi 123456 --groupIds group_001 --send "大家好，请给个需求大纲"
+# 终端 2：另一终端注册第二个账号登录同一群并发消息（@需求助手 触发其回复）
+dotnet run --project samples/AguiGroupChat.Client -- --register lisi 654321 --groupIds group_001 --send "大家好，请给个需求大纲"
 ```
+
+> 注：v1.0.75 起**不再播种演示账号** `zhangsan` / `lisi`（保证首个真实注册用户成为管理员）。
+> 示例数据仅播种示例群（产品需求评审群，成员 `user_1001/user_1002/agent_prd/agent_code`），不创建对应登录账号。
+> 需要登录请在首次运行后用 `--register` 注册自己的账号。
 
 ## 容器化部署（Docker）
 
@@ -175,6 +180,8 @@ docker compose down
 | `AGENTS_ENDPOINT` | 空 | OpenAI 兼容端点（如 `http://host.docker.internal:11434/v1`） |
 | `AGENTS_MODEL` | `deepseek-chat` | 默认模型名 |
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
+| `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
+| `AGENTS_COORDINATOR_PLANNING` | `false` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行（默认关） |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
 | `STORAGE_PROVIDER` | `postgres` | 存储模式：`postgres`（默认，企业级落盘）、`memory`（进程内 + JSON 快照）、`sqlite` / `mysql`（单文件 / MySQL 落盘）、`redis`（多副本共享，6.2） |
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL 库名 / 用户 / 密码（`STORAGE_PROVIDER=postgres` 时生效） |
@@ -186,7 +193,7 @@ docker compose down
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `5` / `0.25` | 每次回复注入的记忆条数 / 相似度阈值。**`group_memory_search` 工具更严格**：阈值取 max(0.40, MIN_SCORE)、最多 3 条，低相关命中物理过滤，避免记忆泛滥 |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | embedding 调用超时（秒）。CPU 环境首次加载 bge-m3 需数十秒 |
 | `MEMORY_SCOPE` | `agent` | 检索范围：`agent` 该智能体所在的所有群（默认）/ `group` 仅当前群 / `all` 全部群 |
-| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | 知识库文档切片窗口（字符）与重叠（字符）：切分沿换行 / 句末标点收尾（避免句子中间硬切），相邻切片携带重叠尾部降低边界信息丢失 |
+| `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | 知识库文档切片窗口（字符）与重叠（字符）：切分沿换行 / 句末标点收尾（避免句子中间硬切），相邻切片携带重叠尾部降低边界信息丢失；超长切片还会被 embedding 按模型 context 自动再分段（1.0.78 起字符/token 比取 0.9），长文档不受长度限制 |
 | `MEMORY_PERSONAL_TOP_K` / `MEMORY_PERSONAL_MIN_SCORE` | `3` / `0.25` | 个人记忆：回复时注入的「触发者本人历史发言」条数 / 相似度阈值。能力总开关（默认开）；实际是否注入还取决于**用户与智能体各自的开关**（默认均关） |
 | `SEED_SAMPLE_DATA` | `true` | Web 演示：无历史数据时播种示例数据 |
 | `SEED_SAMPLE_DATA_HUB` | `false` | 仅协议 Hub：是否播种示例数据 |
@@ -331,6 +338,8 @@ Web 界面支持**创建群**与**添加成员**：群列表右上角「＋」�
 「📥 导入」读取 JSON 逐条创建（需登录，归属当前用户；agentId 冲突自动改 ID 不覆盖）。
 用户与智能体的头像均支持本地图片上传（复用 `/ag-ui/upload`），头像显示在群成员列表、聊天消息与顶栏；
 头像 / 昵称变更会自动同步到其所在各群的成员资料并广播 `GROUP_MEMBER_UPDATED`。
+
+**数字员工组织架构（图形化编辑任务指派 / 问题提升）**：顶栏「🌐 组织架构」打开可视化画布，拖拽连线为各数字员工配置<b>任务指派（向下，可多）</b>与<b>问题提升（向上，唯一）</b>——每个节点右上角的「**优化指派**」图标按钮，按该数字员工的<b>直接下一层</b>（`AssignmentIds`）自动生成一段「管理下一层任务指派」指引：只依据下一层挑下游、不越级、无匹配则 NONE。生成结果可预览后<b>追加到该角色 Instructions</b>（`POST /ag-ui/agents/{agentId}/optimize-assignment`，需登录，仅创建者/管理员）。
 
 **数据备份与初始化（用户菜单 → 数据备份）**：
 
@@ -735,7 +744,15 @@ docker run -d --name agui-redis -p 6379:6379 redis:7
     "PersonalTopK": 3,                                    // 个人记忆条数（0=关闭能力；实际注入还取决于用户与智能体各自开关）
     "PersonalMinScore": 0.25,                             // 个人记忆相似度阈值
     "MaxCharsPerMemory": 600,
-    "RetentionDays": 0                       // 自动遗忘：记忆默认保留天数（0=永不过期；>0 时普通记忆写入即带过期时间，后台每小时物理清理）
+    "RetentionDays": 0,                       // 自动遗忘：记忆默认保留天数（0=永不过期；>0 时普通记忆写入即带过期时间，后台每小时物理清理）
+    "GraphEnabled": false,                    // 图谱记忆（Graph RAG）：默认关；从群消息抽取实体/关系建图，回复前按语义召回种子 + n 跳图遍历注入
+    "GraphTopK": 2,                           // 图谱检索召回的种子实体数（各种子再各自 n 跳遍历；取小避免弱匹配种子扩散噪声）
+    "GraphMinScore": 0.45,                    // 图谱种子实体召回相似度阈值（取高些，只在查询与实体很贴近时才召回）
+    "GraphHops": 1,                           // 图谱图遍历跳数（1..4；取 1 跳更聚焦种子邻域）
+    "GraphMaxNodes": 12,                      // 单次注入的图谱节点上限（防子图过大拖垮 prompt）
+    "GraphMaxSectionChars": 700,              // 单条图谱段落注入的总字符预算（图谱是补强，不能挤占向量切片）
+    "GraphMaxChars": 2000,                    // 图谱抽取的原文截断长度
+    "GraphQueueCapacity": 256                 // 图谱抽取队列上限（满则丢弃，防后台堆积）
   }
 }
 ```
@@ -758,13 +775,27 @@ docker run -d --name agui-redis -p 6379:6379 redis:7
 - **降级**：pgvector 扩展不可用 / embedding 端点不可达时自动静默失效，不影响任何既有功能；MySQL / SQLite 提供器下该配置不生效
 - **部署**：Docker 编排的 postgres 服务已换为 pgvector 镜像（`pgvector/pgvector:pg16`，与 postgres 16 同内核）；本地起库：`docker run -d --name agui-pg -e POSTGRES_PASSWORD=agui -e POSTGRES_DB=agui -p 5432:5432 pgvector/pgvector:pg16`；embedding 用 Ollama：`ollama pull bge-m3:latest && ollama serve`
 
+### 图谱记忆（Graph RAG，实体-关系子图注入）
+
+除向量记忆外，可启用<b>图谱记忆</b>（`Memory.GraphEnabled=true`）：从群消息抽取「实体-关系-实体」三元组，构建实体/关系图（PostgreSQL 用 `agui_graph_entities`/`agui_graph_edges` 表 + pgvector 实体向量；SQLite 同表 + BLOB 向量 + 内存余弦）。回复前先用查询向量<b>召回种子实体</b>，再做 <b>n 跳图遍历</b>取回可达子图（实体 + 边），文本化后与向量记忆 / 知识库并列注入 prompt——补强向量检索难以覆盖的<b>关系型知识</b>（如「A 负责 B、B 依赖 C」的关联）。
+
+- **抽取**：复用智能体模型（OpenAI 兼容端点）从消息抽三元组（覆盖实体类型、关系动词），`Provider=mock` 或 LLM 不可用时回退<b>规则抽取</b>（书名号/引号内名词、英文专有名词、「A 负责 B」句型），保证离线可用
+- **存储**：实体幂等 `MERGE`（按名去重、提及次数累加），关系边按 `source+relation+target+group` 幂等（权重累加）；物理建在既有关系库（不引入额外图数据库），解散群时同步删除该群图谱
+- **检索**：触发消息向量化 → 语义召回种子实体（`GraphMinScore` 阈值高些更贴近才召回）→ 双向逐层 BFS 展开 n 跳（纯托管遍历，跨 Postgres/SQLite 一致）→ 子图去重后按 `GraphMaxNodes` 截断
+- **注入口**：与群记忆 / 个人记忆 / 知识库并列，在 `MemoryContextProvider` 的 `ProvideAIContextAsync` 里作为独立段落注入（同样包不可信边界）。图谱是<b>补强</b>：段落强引导语「仅作参考、涉及具体事实以切片原文为准」，并受 `GraphMaxSectionChars` 总字符预算约束——先保留种子/近层实体与其连接的高价值边，超出预算部分丢弃，避免挤占、稀释向量切片（1.0.79 起）
+- **知识库也建图**：上传知识库文档时，对其文本同样做实体/关系抽取，建入隔离域 `kb:{KbId}` 的图谱；检索知识库时按绑定知识库做图谱种子召回 + n 跳遍历，子图与向量切片并列注入（隔离域彼此不串扰，删除知识库时同步清其图谱）
+- **安全**：仅对<b>全群可见</b>消息抽取（定向 private/mentioned 消息不进图，防私密关系污染）；实体/关系文本经 `UntrustedBoundary` 包裹
+- **雪崩**：默认关（`GraphEnabled=false`）；开启后自动生效，抽取失败/embedding 不可用静默降级，不影响群聊，也不影响既有向量记忆
+
+> Docker 编排可用 `.env` 的 `MEMORY_GRAPH_ENABLED=true` 等开启（见 docker-compose）；桌面 SQLite 版在 `appsettings.json` 的 `Agents:Memory:Graph*` 配置。
+
 ## 测试
 
 ```bash
 dotnet test AguiGroupChat.slnx
 ```
 
-567 个用例覆盖：群生命周期、权限控制、订阅与快照、可见性扇出（all/mentioned/private）、撤回、踢出/退群、在线状态联动、智能体触发规则（含语境触发与**群内触发方式覆盖角色默认**、**分身在线暂停**）、MSAGENT 网关流式回灌（mock + 增量/累计文本兼容 + 语境发言决策 + 群内触发模式生效）、**人机交互（审批中断产出 ToolApprovalRequestContent、仅触发者可决策、批准后恢复同一会话执行工具并回灌、`approveAll` 一次性批准）**、DeepSeek/API Key 配置解析、**用户管理（注册/登录/改密/资料/头像同步/个人记忆开关/令牌/WS·SSE 鉴权/多设备会话 / TOTP 二次验证）**、**智能体运行时管理（动态目录增删改 + 头像 + 私密智能体权限 + 智能体级差异化审批 + 角色交接 relay + 市场导入 + HTTP 管理 API）**、**AI 分身（启用/停用/触发方式修改/公开群跟随/同步）**、**语义记忆（pgvector 写入/检索/私密群隔离/解散删记忆/个人记忆/时间线回放/混合 BM25 重排/沉淀知识库）**、**话题（新建/删除/按消息新建/清空话题记录/跨话题主题关联）**、**审批与治理（细粒度 RBAC、操作审计日志、TOTP）**、**编排与定时（多步工作流 pipeline、重复性定时任务）**、**富媒体附件（图片多选 / 语音 audio 类别 / 画布标注，音频不注入文本上下文）**、**白标品牌与嵌入（6.4：公开读取 + 管理员保存 + 非法主色 / 危险 Logo 拒绝 + 越权 403）**、**配置治理（6.3：管理员在线写入 / 持久化 + 非法值 400 / 非管理员 403）**、**记忆跨实例同步（2.3：导出 / 导入 round-trip + 幂等去重 + sinceMs 增量）**、**持久化（JSON 快照 round-trip + 全应用重启恢复）**、**PostgreSQL 存储**（群/成员/话题/消息分页/撤回/原地修改/用户/触发规则/扩展区 round-trip + 全应用 PG 重启恢复，需本地 PG 测试库，`AGUI_PG_TEST_CONN` 覆盖连接串）、**MySQL 存储**（同上 11 例，需本地 MySQL 8.0.13+，`AGUI_MYSQL_TEST_CONN` 覆盖连接串）、**SQLite 存储**（同上 11 例，单文件零部署本机即跑），未配置数据库时对应用例自动跳过；以及真实 Kestrel 上的 HTTP + WebSocket 全流程集成测试。
+603 个用例覆盖：群生命周期、权限控制、订阅与快照、可见性扇出（all/mentioned/private）、撤回、踢出/退群、在线状态联动、智能体触发规则（含语境触发与**群内触发方式覆盖角色默认**、**分身在线暂停**）、MSAGENT 网关流式回灌（mock + 增量/累计文本兼容 + 语境发言决策 + 群内触发模式生效）、**人机交互（审批中断产出 ToolApprovalRequestContent、仅触发者可决策、批准后恢复同一会话执行工具并回灌、`approveAll` 一次性批准）**、DeepSeek/API Key 配置解析、**用户管理（注册/登录/改密/资料/头像同步/个人记忆开关/令牌/WS·SSE 鉴权/多设备会话 / TOTP 二次验证）**、**智能体运行时管理（动态目录增删改 + 头像 + 私密智能体权限 + 智能体级差异化审批 + 角色交接 relay + 市场导入 + HTTP 管理 API）**、**AI 分身（启用/停用/触发方式修改/公开群跟随/同步）**、**语义记忆（pgvector 写入/检索/私密群隔离/解散删记忆/个人记忆/时间线回放/混合 BM25 重排/沉淀知识库）**、**话题（新建/删除/按消息新建/清空话题记录/跨话题主题关联）**、**审批与治理（细粒度 RBAC、操作审计日志、TOTP）**、**编排与定时（多步工作流 pipeline、重复性定时任务）**、**富媒体附件（图片多选 / 语音 audio 类别 / 画布标注，音频不注入文本上下文）**、**白标品牌与嵌入（6.4：公开读取 + 管理员保存 + 非法主色 / 危险 Logo 拒绝 + 越权 403）**、**配置治理（6.3：管理员在线写入 / 持久化 + 非法值 400 / 非管理员 403）**、**记忆跨实例同步（2.3：导出 / 导入 round-trip + 幂等去重 + sinceMs 增量）**、**持久化（JSON 快照 round-trip + 全应用重启恢复）**、**PostgreSQL 存储**（群/成员/话题/消息分页/撤回/原地修改/用户/触发规则/扩展区 round-trip + 全应用 PG 重启恢复，需本地 PG 测试库，`AGUI_PG_TEST_CONN` 覆盖连接串）、**MySQL 存储**（同上 11 例，需本地 MySQL 8.0.13+，`AGUI_MYSQL_TEST_CONN` 覆盖连接串）、**SQLite 存储**（同上 11 例，单文件零部署本机即跑），未配置数据库时对应用例自动跳过；以及真实 Kestrel 上的 HTTP + WebSocket 全流程集成测试。
 
 **智能体工具 / 技能 / 知识库专项**（用例随版本持续增长，以 `dotnet test` 实测为准）：计算器（表达式求值 + 注入/除零/超长拒绝 + 幂与一元负号优先级）、单位换算（6 类单位 + 温度偏移 + 类别不一致拒绝）、工具注册（EnableTools/EnableWebTools 开关组合）、附件读取与群记忆检索工具（含 AmbientContext 注入）、网络工具 SSRF 防护（私网/环回/云元数据地址拒绝）、端到端工具调用链路（mock 模型调 calculator → 真实执行 → 回灌）、技能（Skills）智能体间调用（API 往返、空 SkillId 自动生成与冲突去重、非法 SkillId 400 / 挂载跳过、循环引用防护、端到端子代理调用）、**知识库（RAG 知识文档：切片、文档向量化入库、检索命中、删除级联、可见性、无向量存储时的明确降级错误、MemoryContextProvider 注入绑定知识库）**。
 

@@ -117,12 +117,15 @@ public sealed class KnowledgeBaseCatalog
         }
     }
 
-    /// <summary>删除知识库：移除其全部向量 + 目录项。</summary>
+    /// <summary>删除知识库：移除其全部向量 + 图谱（实体/关系） + 目录项。</summary>
     public bool RemoveKb(string kbId)
     {
         if (!_kbs.TryRemove(kbId, out _)) return false;
         try { _services.GetService<IMessageMemoryStore>()?.RemoveGroup(KbGroupPrefix + kbId); }
         catch (Exception ex) { _logger.LogWarning(ex, "删除知识库向量失败：{KbId}", kbId); }
+        // 图谱隔离域：知识库实体的群维度 = kb:{KbId}，一并清理（防残留实体/关系被后续检索命中）
+        try { _services.GetService<IGraphMemoryStore>()?.RemoveGroup(KbGroupPrefix + kbId); }
+        catch (Exception ex) { _logger.LogWarning(ex, "删除知识库图谱失败：{KbId}", kbId); }
         _changes?.Notify();
         return true;
     }
@@ -293,12 +296,61 @@ public sealed class KnowledgeBaseCatalog
                 Timestamp: now));
         }
 
+        // 图谱 RAG（启用时）：对文档文本抽实体/关系，建入隔离域 kb:{KbId} 的图谱（与向量切片并列）
+        await MaybeStoreKbGraphAsync(kb, text, embedding);
+
         doc.ChunkCount = chunks.Count;
         doc.Status = "ready";
         doc.Error = null;
         kb.UpdatedAtMs = now;
         _changes?.Notify();
         _logger.LogInformation("知识库 {KbId} 文档 {File} 入库完成：{Chunks} 个切片", kb.KbId, doc.FileName, chunks.Count);
+    }
+
+    /// <summary>
+    /// 知识库图谱抽取（图谱 RAG，启用时）：对文档文本抽「实体-关系-实体」建入隔离域 <c>kb:{KbId}</c> 的图谱，
+    /// 供 <see cref="SearchGraphAsync"/> 在知识库检索时做种子召回 + 图遍历补强。
+    /// 图存储 / 解析器不可用（未启用图谱）时静默跳过，不影响向量切片入库；任何失败仅记日志。</summary>
+    private async Task MaybeStoreKbGraphAsync(KnowledgeBase kb, string text, IEmbeddingProvider embedding)
+    {
+        if (!_options.Memory.GraphEnabled) return;
+        var graphStore = _services.GetService<IGraphMemoryStore>();
+        var extractor = _services.GetService<GraphEntityExtractor>();
+        if (graphStore is null || extractor is null) return; // 图谱未启用 / 图存储不可用
+        try
+        {
+            var content = text ?? "";
+            var maxChars = Math.Max(1, _options.Memory.GraphMaxChars);
+            if (content.Length > maxChars) content = content[..maxChars];
+            var extraction = await extractor.ExtractAsync(content, CancellationToken.None);
+            if (extraction.Entities.Count == 0 && extraction.Edges.Count == 0) return;
+
+            var domain = KbGroupPrefix + kb.KbId;
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var idByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in extraction.Entities)
+            {
+                var id = GraphMemory.NormalizeEntityId(e.Name);
+                idByName[e.Name] = id;
+                var vec = await embedding.EmbedAsync(e.Name);
+                if (vec is null || vec.Length == 0) continue;
+                graphStore.UpsertEntity(new GraphEntityRecord(id, e.Name, e.Type ?? "Concept", domain, e.Description, vec, now));
+            }
+            foreach (var ed in extraction.Edges)
+            {
+                var srcId = idByName.TryGetValue(ed.Source, out var s) ? s : GraphMemory.NormalizeEntityId(ed.Source);
+                var dstId = idByName.TryGetValue(ed.Target, out var d) ? d : GraphMemory.NormalizeEntityId(ed.Target);
+                if (srcId == dstId) continue;
+                graphStore.UpsertEdge(new GraphEdgeRecord(srcId, ed.Relation, dstId, domain, ed.Source, ed.Target));
+            }
+            _logger.LogInformation("知识库 {KbId} 图谱入库：{Entities} 实体 / {Edges} 关系（domain={Domain}）",
+                kb.KbId, extraction.Entities.Count, extraction.Edges.Count, domain);
+        }
+        catch (Exception ex)
+        {
+            // 图谱失败不影响文档向量入库（主流程继续）
+            _logger.LogWarning(ex, "知识库图谱抽取失败：{KbId}/{File}", kb.KbId, kb.Name);
+        }
     }
 
     /// <summary>把文档标记为失败并刷新快照。</summary>
@@ -447,6 +499,54 @@ public sealed class KnowledgeBaseCatalog
             .OrderByDescending(h => h.Score)
             .Take(topK)
             .ToList();
+    }
+
+    /// <summary>
+    /// 知识库图谱检索（图谱 RAG，启用时）：在指定知识库集合的<b>图谱隔离域</b> <c>kb:{KbId}</c> 内
+    /// 做「语义召回种子实体 → n 跳图遍历」，返回可达子图（实体 + 关系边）供注入——与向量切片检索
+    /// (<see cref="SearchAsync"/>) 并列，补强知识文档中的关系型知识。图存储未启用/不可用返回空。</summary>
+    public async Task<GraphSubgraph> SearchGraphAsync(IReadOnlyList<string> kbIds, string query, int topK, double minScore, int hops, int maxNodes, CancellationToken ct = default)
+    {
+        var empty = new GraphSubgraph([], []);
+        if (!_options.Memory.GraphEnabled || kbIds.Count == 0 || string.IsNullOrWhiteSpace(query)) return empty;
+        var graphStore = _services.GetService<IGraphMemoryStore>();
+        var embedding = _services.GetService<IEmbeddingProvider>();
+        if (graphStore is null || embedding is null) return empty;
+        try
+        {
+            var vec = await embedding.EmbedAsync(query, ct);
+            if (vec is null || vec.Length == 0) return empty;
+
+            var entities = new Dictionary<string, GraphEntityHit>(StringComparer.Ordinal);
+            var edges = new List<GraphEdgeHit>();
+            var seedK = Math.Max(1, topK);
+            foreach (var kbId in kbIds)
+            {
+                if (GetKb(kbId) is null) continue;
+                var domain = KbGroupPrefix + kbId;
+                var seeds = graphStore.SearchEntities(vec, seedK, minScore, domain);
+                foreach (var seed in seeds.Take(seedK))
+                {
+                    var sub = graphStore.ExpandSubgraph(seed.EntityId, Math.Clamp(hops, 1, 4), Math.Clamp(maxNodes, 1, 200));
+                    foreach (var e in sub.Entities)
+                        entities.TryAdd(e.EntityId, e with { Score = e.Score != 0 ? e.Score : seed.Score, Hop = e.Hop });
+                    foreach (var ed in sub.Edges)
+                        if (!edges.Any(x => x.SourceId == ed.SourceId && x.Relation == ed.Relation && x.TargetId == ed.TargetId))
+                            edges.Add(ed);
+                    if (entities.Count >= maxNodes) break;
+                }
+                if (entities.Count >= maxNodes) break;
+            }
+            var ordered = entities.Values.OrderBy(e => e.Hop).ThenByDescending(e => e.Score).Take(maxNodes).ToList();
+            if (ordered.Count == 0) return empty;
+            _logger.LogDebug("知识库图谱检索命中 {Entities} 实体 / {Edges} 边（kbs={Kbs}）", ordered.Count, edges.Count, string.Join(",", kbIds));
+            return new GraphSubgraph(ordered, edges);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "知识库图谱检索失败（已跳过，退回纯向量）");
+            return empty;
+        }
     }
 
     /// <summary>关键词召回：用 BM25 在候选切片集合内检索与查询高度词面相关的片段；用于兜底纯语义检索丢命中的场景。</summary>

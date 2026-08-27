@@ -296,6 +296,7 @@ public sealed class AguiBridgeProtocolCoverageTests
         using var schema = JsonDocument.Parse("""{"type":"string","enum":["事假","病假"]}""");
         using var payload = JsonDocument.Parse("""{"answer":"事假"}""");
         var normalized = AguiBridgeProtocol.NormalizeInputPayload(schema.RootElement, payload.RootElement);
+        Assert.True(normalized.HasValue); // 对象 payload 必规范化为非空
         Assert.Equal("事假", normalized.Value.GetProperty("answer").GetString());
     }
 
@@ -306,6 +307,7 @@ public sealed class AguiBridgeProtocolCoverageTests
         using var schema = JsonDocument.Parse("""{"type":"array","items":{"type":"string","enum":["A","B","C"]}}""");
         using var payload = JsonDocument.Parse("""{"answer":"A,C"}""");
         var normalized = AguiBridgeProtocol.NormalizeInputPayload(schema.RootElement, payload.RootElement);
+        Assert.True(normalized.HasValue); // 对象 payload 必规范化为非空
         var arr = normalized.Value.GetProperty("answer");
         Assert.Equal(JsonValueKind.Array, arr.ValueKind);
         Assert.Equal(2, arr.GetArrayLength());
@@ -321,6 +323,7 @@ public sealed class AguiBridgeProtocolCoverageTests
             "{\"type\":\"object\",\"properties\":{\"confirm\":{\"type\":\"boolean\"},\"days\":{\"type\":\"integer\"},\"tags\":{\"type\":\"array\",\"items\":{\"type\":\"string\",\"enum\":[\"x\",\"y\"]}}},\"required\":[\"confirm\"]}");
         using var payload = JsonDocument.Parse("""{"confirm":"true","days":"3","tags":"x,y"}""");
         var normalized = AguiBridgeProtocol.NormalizeInputPayload(schema.RootElement, payload.RootElement);
+        Assert.True(normalized.HasValue); // 对象 payload 必规范化为非空
         Assert.True(normalized.Value.GetProperty("confirm").GetBoolean());
         Assert.Equal(3L, normalized.Value.GetProperty("days").GetInt64());
         Assert.Equal(2, normalized.Value.GetProperty("tags").GetArrayLength());
