@@ -87,7 +87,7 @@ public static class OfficeTextExtractor
     {
         var sb = new StringBuilder();
         using var doc = WordprocessingDocument.Open(path, false);
-        var body = doc.MainDocumentPart?.Document.Body;
+        var body = doc.MainDocumentPart?.Document?.Body;
         if (body is null) return sb.ToString();
         foreach (var para in body.Descendants<WParagraph>())
         {
@@ -110,11 +110,11 @@ public static class OfficeTextExtractor
             .Select(s => string.Concat(s.Descendants<SText>().Select(t => t.Text)))
             .ToList() ?? [];
 
-        foreach (var sheet in wb.Workbook.Sheets?.Elements<Sheet>() ?? [])
+        foreach (var sheet in wb.Workbook?.Sheets?.Elements<Sheet>() ?? [])
         {
             sb.AppendLine($"【工作表：{sheet.Name}】");
             if (wb.GetPartById(sheet.Id!) is not WorksheetPart wsPart) continue;
-            foreach (var row in wsPart.Worksheet.Descendants<Row>())
+            foreach (var row in wsPart.Worksheet?.Descendants<Row>() ?? [])
             {
                 var cells = row.Elements<Cell>().Select(c => CellText(c, shared)).ToList();
                 sb.AppendLine(string.Join(" | ", cells));
@@ -139,7 +139,7 @@ public static class OfficeTextExtractor
         using var doc = PresentationDocument.Open(path, false);
         foreach (var slidePart in doc.PresentationPart?.SlideParts ?? [])
         {
-            foreach (var t in slidePart.Slide.Descendants<DText>())
+            foreach (var t in slidePart.Slide?.Descendants<DText>() ?? [])
             {
                 if (!string.IsNullOrEmpty(t.Text)) sb.AppendLine(t.Text);
             }

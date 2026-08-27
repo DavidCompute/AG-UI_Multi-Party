@@ -59,6 +59,7 @@ public static class BrandingApi
         {
             var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
+            var me = meId!; // RequireAdmin 保证 error 为空时 meId 非空
 
             var appName = (req.AppName ?? "").Trim();
             if (appName.Length > 40) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "应用名过长（≤40 字符）"));
@@ -80,7 +81,7 @@ public static class BrandingApi
             branding.Tagline = string.IsNullOrWhiteSpace(req.Tagline) ? null : req.Tagline.Trim();
             changes.Notify(); // 驱动持久化
 
-            audit.Record("settings.branding", meId, auth.GetUser(meId)?.Username, detail: "修改白标品牌配置");
+            audit.Record("settings.branding", me, auth.GetUser(me)?.Username, detail: "修改白标品牌配置");
             return Results.Ok(new { ok = true, appName = branding.AppName, primaryColor = branding.PrimaryColor });
         });
     }

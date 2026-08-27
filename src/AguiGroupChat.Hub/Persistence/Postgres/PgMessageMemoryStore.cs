@@ -413,7 +413,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
             cmd.Parameters.AddWithValue("now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // @gid 用于私密过滤（所有 scope 均需要）：私密群自身检索仅保留本群记忆
             cmd.Parameters.AddWithValue("gid", groupId);
-            if (scopeKey is not ("group" or "all")) cmd.Parameters.AddWithValue("agent", agentId);
+            if (scopeKey is not ("group" or "all")) cmd.Parameters.AddWithValue("agent", agentId!);
 
             var list = new List<MessageMemoryHit>();
             using var reader = cmd.ExecuteReader();

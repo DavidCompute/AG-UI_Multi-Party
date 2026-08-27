@@ -47,11 +47,12 @@ public static class ExportImportApi
         {
             var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
+            var actorId = meId!; // RequireAdmin 保证 error 为空时 meId 非空
 
             var manifest = BuildManifest(store, userStore, catalog, registry);
             var bytes = BuildExportZip(manifest, store, userStore, catalog, attachments);
             var name = $"agui-data-export-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
-            audit.Record("data.export", meId, auth.GetUser(meId)?.Username,
+            audit.Record("data.export", actorId, auth.GetUser(actorId)?.Username,
                 detail: $"导出全部数据（账号 {manifest.Accounts.Count} / 智能体 {manifest.Agents.Count} / 群 {manifest.Groups.Count}）");
             return Results.File(bytes, "application/zip", fileDownloadName: name);
         });
@@ -104,6 +105,7 @@ public static class ExportImportApi
         {
             var (meId, error) = WebIdentity.RequireAdmin(ctx, auth, authOptions);
             if (error is not null) return error;
+            var actorId = meId!; // RequireAdmin 保证 error 为空时 meId 非空
             if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请上传导出的 zip 文件（表单字段 file）"));
 
@@ -121,7 +123,7 @@ public static class ExportImportApi
             try
             {
                 var report = await ImportAsync(manifest, zip, selected, store, userStore, catalog, registry, hub, attachments);
-                audit.Record("data.import", meId, auth.GetUser(meId)?.Username,
+                audit.Record("data.import", actorId, auth.GetUser(actorId)?.Username,
                     detail: $"导入数据包（勾选群 {selected.Count} 个 / 账号 {manifest.Accounts.Count} / 智能体 {manifest.Agents.Count}）");
                 return Results.Ok(report);
             }
@@ -448,11 +450,11 @@ public static class ExportImportApi
                     SenderType = pm.SenderType,
                     SenderNickname = pm.SenderNickname,
                     ReplyToMessageId = pm.ReplyToMessageId,
-                    Mentions = pm.Mentions.Select(x => pm.SenderType == MemberType.User ? MapAccount(x) : x).ToList(),
+                    Mentions = (pm.Mentions ?? []).Select(x => pm.SenderType == MemberType.User ? MapAccount(x) : x).ToList(),
                     MentionAll = pm.MentionAll,
                     Visibility = pm.Visibility,
-                    VisibleMemberIds = pm.VisibleMemberIds.Select(x => MapAccount(x)).ToList(),
-                    Attachments = pm.Attachments.Select(a => new AttachmentInfo
+                    VisibleMemberIds = (pm.VisibleMemberIds ?? []).Select(x => MapAccount(x)).ToList(),
+                    Attachments = (pm.Attachments ?? []).Select(a => new AttachmentInfo
                     {
                         AttachmentId = a.AttachmentId,
                         Name = a.Name,
@@ -461,7 +463,7 @@ public static class ExportImportApi
                         Url = $"/ag-ui/files/{a.AttachmentId}/{Uri.EscapeDataString(a.Name)}",
                         Kind = a.Kind,
                     }).ToList(),
-                    Content = pm.Content,
+                    Content = pm.Content ?? "", // 导入消息无正文时以空串落库（协议允许纯附件消息）
                     Reasoning = pm.Reasoning,
                     Timestamp = pm.Timestamp,
                     Recalled = pm.Recalled,
