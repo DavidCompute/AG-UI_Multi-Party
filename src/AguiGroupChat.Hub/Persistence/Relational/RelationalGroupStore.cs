@@ -305,10 +305,10 @@ public sealed class RelationalGroupStore : IGroupStore
                 INSERT INTO agui_messages
                     (message_id, group_id, topic_id, thread_id, sender_id, sender_type, sender_nickname,
                      reply_to_message_id, mentions, mention_all, visibility, visible_member_ids, attachments,
-                     content, reasoning, agent_chain, timestamp, recalled)
+                     content, reasoning, agent_chain, plan_json, timestamp, recalled)
                 VALUES (@mid, @gid, @topic, @thread, @sender, @senderType, @nick,
                         @reply, @mentions, @mentionAll, @visibility, @visible, @attachments,
-                        @content, @reasoning, @agentChain, @time, @recalled)
+                        @content, @reasoning, @agentChain, @planJson, @time, @recalled)
                 """;
             AddMessageParams(cmd, message);
             cmd.ExecuteNonQuery();
@@ -552,12 +552,13 @@ public sealed class RelationalGroupStore : IGroupStore
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain WHERE group_id = @gid AND message_id = @mid";
+        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain, plan_json = @planJson WHERE group_id = @gid AND message_id = @mid";
         cmd.AddWithValue("topic", message.TopicId);
         cmd.AddWithValue("content", message.Content);
         cmd.AddWithValue("attachments", Json(message.Attachments));
         cmd.AddWithValue("reasoning", (object?)message.Reasoning ?? DBNull.Value);
         cmd.AddWithValue("agentChain", (object?)message.AgentChain ?? DBNull.Value);
+        cmd.AddWithValue("planJson", (object?)message.PlanJson ?? DBNull.Value);
         cmd.AddWithValue("gid", message.GroupId);
         cmd.AddWithValue("mid", message.MessageId);
         cmd.ExecuteNonQuery();
@@ -670,6 +671,7 @@ public sealed class RelationalGroupStore : IGroupStore
         Content = r.GetString(r.GetOrdinal("content")),
         Reasoning = r.IsDBNull(r.GetOrdinal("reasoning")) ? null : r.GetString(r.GetOrdinal("reasoning")),
         AgentChain = r.IsDBNull(r.GetOrdinal("agent_chain")) ? null : r.GetString(r.GetOrdinal("agent_chain")),
+        PlanJson = r.IsDBNull(r.GetOrdinal("plan_json")) ? null : r.GetString(r.GetOrdinal("plan_json")),
         Timestamp = r.GetInt64(r.GetOrdinal("timestamp")),
         Recalled = r.GetBoolean(r.GetOrdinal("recalled")),
     };
@@ -720,6 +722,7 @@ public sealed class RelationalGroupStore : IGroupStore
         cmd.AddWithValue("content", m.Content);
         cmd.AddWithValue("reasoning", (object?)m.Reasoning ?? DBNull.Value);
         cmd.AddWithValue("agentChain", (object?)m.AgentChain ?? DBNull.Value);
+        cmd.AddWithValue("planJson", (object?)m.PlanJson ?? DBNull.Value);
         cmd.AddWithValue("time", m.Timestamp);
         cmd.AddWithValue("recalled", m.Recalled);
     }

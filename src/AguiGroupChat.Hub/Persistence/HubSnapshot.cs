@@ -72,6 +72,8 @@ public sealed class PersistedMessage
     public string? Reasoning { get; set; }
     /// <summary>智能体技能调用链（链路可视化；可空）。</summary>
     public string? AgentChain { get; set; }
+    /// <summary>工作型智能体任务计划（JSON 序列化 { title, steps }；可空）。</summary>
+    public string? PlanJson { get; set; }
     public required long Timestamp { get; init; }
     public bool Recalled { get; init; }
 }

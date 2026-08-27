@@ -2462,7 +2462,7 @@ function applySnapshot(evt) {
       content: sm.content, reasoning: sm.reasoning || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll, agentChain: sm.agentChain || null,
       topicId: sm.topicId || "main",
       timestamp: Number(sm.timestamp) || 0,
-      time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: null,
+      time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: parsePlanJson(sm.planJson),
     };
     state.msgIndex.set(sm.messageId, m);
     seen.add(sm.messageId);
@@ -2706,6 +2706,16 @@ function onMessagePlan(evt) {
   if (state.activeGroupId !== evt.groupId) return;
   vscroll.force = true; // 计划追加 → 消息高度可能变化，强制重建窗口
   scheduleVirtualRender();
+}
+
+/** 解析消息快照携带的 planJson（刷新 / 重开后回显计划卡）；非法或缺失返回 null。 */
+function parsePlanJson(planJson) {
+  if (!planJson) return null;
+  try {
+    const p = JSON.parse(planJson);
+    if (p && Array.isArray(p.steps) && p.steps.length) return { title: p.title || "", steps: p.steps };
+    return null;
+  } catch { return null; }
 }
 
 
@@ -4615,7 +4625,7 @@ function snapshotToMessage(sm) {
     content: sm.content || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll,
     topicId: sm.topicId || "main", replyTo: sm.replyToMessageId || null,
     timestamp: Number(sm.timestamp) || 0,
-    time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: null,
+    time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: parsePlanJson(sm.planJson),
   };
 }
 

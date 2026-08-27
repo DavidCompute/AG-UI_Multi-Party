@@ -832,6 +832,7 @@ public sealed class GroupHub : IDisposable
                 MentionAll = m.MentionAll,
                 Reasoning = m.Reasoning,
                 AgentChain = m.AgentChain,
+                PlanJson = m.PlanJson,
                 Timestamp = m.Timestamp,
             })
             .ToList();
@@ -1242,6 +1243,21 @@ public sealed class GroupHub : IDisposable
         if (steps is null || steps.Count == 0) return Task.CompletedTask;
         if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
             return Task.CompletedTask;
+        // 计划随消息落库（刷新 / 重开后历史消息仍可回显计划卡）。持久化是增强，失败不阻断主流程。
+        try
+        {
+            var planJson = AguiJson.Serialize(new { Title = title, Steps = steps });
+            var msg = _store.GetMessage(groupId, messageId);
+            if (msg is not null)
+            {
+                msg.PlanJson = planJson;
+                _store.UpdateMessage(msg);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "计划落库失败（已忽略，仅实时广播）：message={MessageId}", messageId);
+        }
         _changes?.Notify();
         return FanOutAsync(groupId, new TextMessagePlanEvent
         {
@@ -1302,6 +1318,7 @@ public sealed class GroupHub : IDisposable
             GroupId = groupId,
             Reasoning = msg?.Reasoning, // 思考内容完整快照（供前端回放）
             AgentChain = msg?.AgentChain, // 技能调用链（链路可视化）
+            PlanJson = msg?.PlanJson, // 任务计划（刷新后回显）
             Timestamp = NowMs,
         }, state.Recipients, ct);
     }

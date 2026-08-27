@@ -215,6 +215,7 @@ public sealed class PersistenceService : IDisposable
         Content = m.Content,
         Reasoning = m.Reasoning,
         AgentChain = m.AgentChain,
+        PlanJson = m.PlanJson,
         Timestamp = m.Timestamp,
         Recalled = m.Recalled,
     };
@@ -273,6 +274,7 @@ public sealed class PersistenceService : IDisposable
             Content = m.Content,
             Reasoning = m.Reasoning,
             AgentChain = m.AgentChain,
+            PlanJson = m.PlanJson,
             Timestamp = m.Timestamp,
         };
         msg.Recalled = m.Recalled;

@@ -242,6 +242,8 @@ public sealed class TextMessageEndEvent
     public string? Reasoning { get; init; }
     /// <summary>消息结束时智能体技能调用链（链路可视化；可空 = 无技能调用）。</summary>
     public string? AgentChain { get; init; }
+    /// <summary>消息结束时工作型智能体任务计划（JSON 序列化 { title, steps }；可空 = 无计划）。</summary>
+    public string? PlanJson { get; init; }
     public required long Timestamp { get; init; }
 }
 
@@ -485,6 +487,8 @@ public sealed class SnapshotMessage
     public string? Reasoning { get; init; }
     /// <summary>智能体技能调用链（链路可视化；可空 = 无技能调用）。</summary>
     public string? AgentChain { get; init; }
+    /// <summary>工作型智能体任务计划（JSON 序列化 { title, steps }；可空 = 无计划）。</summary>
+    public string? PlanJson { get; init; }
     /// <summary>@ 提及成员（协议 2.3 扩展字段，前端回显）。</summary>
     public IReadOnlyList<string> Mentions { get; init; } = [];
     /// <summary>是否 @ 全体。</summary>

@@ -55,6 +55,10 @@ public sealed record GroupMessage
     /// 记录多跳技能调用（宿主→技能→目标→…）的层级与各层答复；可空 = 无技能调用。</summary>
     public string? AgentChain { get; set; }
 
+    /// <summary>工作型智能体的任务计划（任务规划可视化）：JSON 序列化 <c>{ title, steps:[{id,text,done}] }</c>；
+    /// 随消息落库，刷新 / 重开后历史消息仍可回显计划卡；可空 = 无计划。</summary>
+    public string? PlanJson { get; set; }
+
     /// <summary>发送时间戳（毫秒级）。</summary>
     public required long Timestamp { get; init; }
 
