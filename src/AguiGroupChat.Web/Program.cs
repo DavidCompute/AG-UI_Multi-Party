@@ -35,7 +35,13 @@ builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Ad
 var app = builder.Build();
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+// 静态前端资源（index.html 直接引用 app.js / style.css / i18n，无版本号）：用 no-cache + ETag 确保每次请求都向后端
+// 重新校验。装新安装包（文件时间戳变化）后 WebView2 / 浏览器必然拉到新文件，避免旧缓存的 app.js 导致改版不生效。
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+        ctx.Context.Response.Headers.CacheControl = "no-cache, must-revalidate",
+});
 
 // 安全响应头：防 MIME 嗅探 / 防 iframe 嵌套 / 限制 referrer；附件下载 / 预览路径不设 CSP
 // （避免影响 PDF / 图片内联渲染），其余页面设 CSP 防存储型 XSS 同源内联执行
