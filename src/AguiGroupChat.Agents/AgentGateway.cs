@@ -283,11 +283,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return new AgentInvocationResult(false, null, "AGENT_DECIDED_SILENT");
         }
 
-        // 任务指派 / 问题提升（组织化路由）：被显式 @（Mentioned）触发，且配置了「指派白名单」或「提升目标」时，
-        // 按本数字员工系统提示词推断：该我答 → 直接答；不该我答且白名单有合适 → 向下指派；
-        // 无合适指派对象且配了提升目标 → 向上提升；再无可解 → 回答不能解决。
+        // 任务指派 / 问题提升 / 技能型计划编排（组织化路由）：被显式 @（Mentioned）触发，且满足任一条件：
+        //   - 配置了「指派白名单」（向下指派）；
+        //   - 或配置了「提升目标」（向上提升）；
+        //   - 或开启了 CoordinatorPlanning 且挂了技能库技能（技能型智能体：被 @ 时也走「问题→定计划→多技能批量执行→综合回归」）。
+        // 命中则进入组织化路由：先尝试构建编排计划（按组织/技能激活），失败再回退递归指派。
+        var isSkillPlanner = _options.CoordinatorPlanning && (def.SkillDefIds is { Count: > 0 });
         if (effectiveMode == AgentTriggerMode.Mentioned
-            && (def.AssignmentIds is { Count: > 0 } || !string.IsNullOrWhiteSpace(def.EscalationAgentId)))
+            && (def.AssignmentIds is { Count: > 0 }
+                || !string.IsNullOrWhiteSpace(def.EscalationAgentId)
+                || isSkillPlanner))
         {
             return await InvokeAssignmentEscalationAsync(context, ct);
         }
