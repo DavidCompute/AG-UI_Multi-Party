@@ -1664,6 +1664,31 @@ async function saveSkill() {
 }
 
 /** 试运行技能（用当前表单定义或已存定义跑一次）。 */
+async function generateSkill() {
+  const request = $("sgRequest").value.trim();
+  if (!request) { toast(t("skill.gen.needRequest")); return; }
+  const btn = $("sgGenerate"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ " + t("skill.gen.generating");
+  try {
+    const res = await fetch("/ag-ui/skills/generate", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ request, preferClient: $("sgPreferClient").checked }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("skill.gen.fail", { err: errMsg(data, res.status) })); return; }
+    $("sfName").value = data.name || "";
+    $("sfSkillId").value = data.skillId || "";
+    $("sfKind").value = data.kind || "prompt";
+    $("sfDescription").value = data.description || "";
+    $("sfBody").value = data.body || "";
+    $("sfExecutionLocation").value = data.executionLocation === "client" ? "client" : "server";
+    $("sfClientRunner").value = data.clientRunner || "";
+    $("sfRequiresApproval").checked = !!data.requiresApproval;
+    syncSkillKind(); // 刷新正文标签 / 解释器 / ClientRunner 显隐
+    toast(t("skill.gen.done"));
+  } catch (ex) { toast(t("skill.gen.fail", { err: ex.message })); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
 async function testSkill(skillId) {
   const id = skillId || editingSkillId;
   if (!id) { toast(t("skill.err.saveFirst")); return; }
@@ -6528,6 +6553,7 @@ function init() {
   $("sfExecutionLocation").addEventListener("change", syncSkillKind);
   $("sfSave").onclick = saveSkill;
   $("sfTest").onclick = () => testSkill(editingSkillId);
+  $("sgGenerate").onclick = generateSkill;
   $("afSkillLibManageBtn").onclick = openSkillModal;
   // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);

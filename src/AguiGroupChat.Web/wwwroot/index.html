@@ -369,6 +369,19 @@
       </div>
       <!-- 技能编辑 -->
       <div id="skillFormView" class="hidden">
+        <!-- 用自然语言生成技能配置：输入需求 → 大模型生成并填入下表 -->
+        <details class="skill-gen-panel" id="skillGenPanel">
+          <summary class="skill-gen-summary" data-i18n="skill.gen.summary">🤖 用自然语言生成技能</summary>
+          <div class="form-group">
+            <label data-i18n="skill.gen.request">描述你想要的技能（做什么、输入/参数、返回什么）</label>
+            <div class="skill-gen-row">
+              <textarea id="sgRequest" class="modal-input agent-instructions" rows="3" style="flex:1;resize:vertical" maxlength="500" data-i18n-placeholder="skill.gen.requestPh"></textarea>
+              <button id="sgGenerate" class="send" style="white-space:nowrap" data-i18n="skill.gen.generate">✨ 生成</button>
+            </div>
+            <label class="skill-gen-client"><input id="sgPreferClient" type="checkbox" /> <span data-i18n="skill.gen.preferClient">优先本机执行（查本机/桌面信息）</span></label>
+            <p class="form-hint muted" style="padding:2px 0 6px" data-i18n="skill.gen.hint">生成结果会填入下方各字段，可再人工微调后保存。</p>
+          </div>
+        </details>
         <div class="form-section" data-i18n="skill.form.basic">基本信息</div>
         <div class="form-group">
           <label data-i18n="skill.form.name">技能名</label>

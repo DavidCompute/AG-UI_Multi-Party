@@ -26,6 +26,33 @@ public static class SkillApi
             return Results.Ok(catalog.ListAll().Select(s => ToDto(s, s.OwnerId == user.UserId || isAdmin)));
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 用自然语言生成技能配置（无需手填各字段）：输入需求，由大模型产出结构化技能定义，前端据此填入表单 ----
+        root.MapPost("/generate", async (SkillGenerateRequest req, HttpContext ctx, AuthService auth, AgentOptions options, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            if (string.IsNullOrWhiteSpace(req.Request)) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "需求描述不能为空"));
+            try
+            {
+                var gen = await SkillDefinitionGenerator.GenerateAsync(
+                    options, req.Request, req.PreferClient == true, loggerFactory.CreateLogger("SkillApi.Generate"), ct);
+                return Results.Ok(new
+                {
+                    generated = true,
+                    skillId = gen.SkillId,
+                    name = gen.Name,
+                    kind = gen.Kind,
+                    description = gen.Description,
+                    body = gen.Body,
+                    executionLocation = gen.ExecutionLocation,
+                    clientRunner = gen.ClientRunner,
+                    requiresApproval = gen.RequiresApproval,
+                });
+            }
+            catch (OperationCanceledException) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成已取消或超时"), statusCode: StatusCodes.Status408RequestTimeout); }
+            catch (Exception ex) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成失败：" + ex.Message), statusCode: StatusCodes.Status400BadRequest); }
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 新增技能（需登录；Shell / HTTP 技能的创建仅限管理员——它们的执行可能触发任意命令 / 外部请求，
         //      普通用户只能创建纯提示词技能，避免「自建 shell 技能自 run」的任意命令执行面）----
         root.MapPost("/", (SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
@@ -197,3 +224,6 @@ public sealed record SkillDefHttpRequest(
 
 /// <summary>技能试运行请求体。</summary>
 public sealed record SkillRunHttpRequest(string Query = "");
+
+/// <summary>用自然语言生成技能配置的请求体。</summary>
+public sealed record SkillGenerateRequest(string Request, bool? PreferClient = null);
