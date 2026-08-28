@@ -653,14 +653,19 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
    若浏览器页面来源与 `127.0.0.1` 跨源，需用 `--allowed-origin` 指明页面源：
 
    ```bash
-   AguiGroupChat.NativeBridge.exe --port 17321 --token my-token --allowed-origin http://<Docker主机>:5200
+   AguiGroupChat.NativeBridge.exe --port 17321 --allowed-origin http://<Docker主机>:5200
    ```
 
-   > 本机桥只监听回环 `127.0.0.1`，令牌鉴权 + CORS 白名单，命令在用户临时目录沙箱内运行，带超时与输出截断，
-   > 详见 `ShellRunner.cs`。
+   令牌默认**自动持久化**到 `%LocalAppData%\AguiGroupChat\bridge.token`（首次生成、重启复用），无需每次复制；
+   也无需手动填 token——网页端「一键检测」可自动读取桥地址与令牌并填入。只有需要固定令牌时才传 `--token`
+   （此时关闭自动配置端点）。
 
-2. 在网页端打开「修改资料」→「本机工具桥」，填入上面的**桥地址**（如 `http://127.0.0.1:17321/ag-ui/client-tool`）
-   与**桥令牌**，保存。留空则回落到服务器端本机桥。
+   > 本机桥只监听回环 `127.0.0.1`，令牌鉴权 + CORS 白名单，命令在用户临时目录沙箱内运行，带超时与输出截断，
+   > 详见 `ShellRunner.cs`。自配置端点 `GET /ag-ui/native-bridge/token` 仅在本机回环可达且受 CORS 白名单管控，
+   > 未配置 `--allowed-origin` 时浏览器无法跨源读到（纯桌面场景仍需手动填）。
+
+2. 在网页端打开「修改资料」→「本机工具桥」，点 **🔍 一键检测** 自动填入桥地址 + 令牌，再点保存。
+   也可手动填**桥地址**（如 `http://127.0.0.1:17321/ag-ui/client-tool`）与**桥令牌**。留空则回落到服务器端本机桥。
 3. 触发 `ps_hostname` 之类的客户端 shell 技能，前端确认后交给本机桥在本机执行，模型会引用您电脑的真实主机名。
 
 ## 配置（appsettings.json → `GroupChat` 节点）

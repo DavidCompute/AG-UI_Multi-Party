@@ -2120,6 +2120,35 @@ async function submitProfile() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
+/** 一键检测本机工具桥：从已填地址（默认 http://127.0.0.1:17321）探测 NativeBridge 的 /token 端点，
+ *  自动读出桥地址 + 令牌并填入表单（仍需用户点「保存」才持久化）。
+ *  需先在本机启动 NativeBridge（--allowed-origin 指向本页面源，浏览器才能跨源读到响应）。 */
+async function detectNativeBridge() {
+  // 从已填 url 提取 base（保留 scheme://host:port），未填则默认 17321
+  let url = $("pfBridgeUrl").value.trim();
+  let base = "http://127.0.0.1:17321";
+  if (url) {
+    try {
+      const u = new URL(url);
+      base = u.origin;
+    } catch { /* 非法地址则用默认 */ }
+  }
+  $("pfBridgeDetect").disabled = true;
+  try {
+    const res = await fetch(base + "/ag-ui/native-bridge/token", { method: "GET" });
+    if (!res.ok) throw new Error(t("profile.bridgeDetectFail", { status: res.status }));
+    const d = await res.json();
+    if (!d || !d.token) throw new Error(t("profile.bridgeDetectNoToken"));
+    if (d.url) $("pfBridgeUrl").value = d.url;
+    $("pfBridgeToken").value = d.token;
+    toast(t("profile.bridgeDetected"));
+  } catch (err) {
+    toast(t("profile.bridgeDetectErr", { msg: err && err.message ? err.message : String(err) }));
+  } finally {
+    $("pfBridgeDetect").disabled = false;
+  }
+}
+
 /* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
 
 let createPickOptions = []; // 创建知聚弹窗的可选成员（打开时快照，供搜索过滤）
@@ -6328,6 +6357,7 @@ function init() {
   $("pwNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitChangePassword(); } });
   $("pfCancel").onclick = () => $("profileModal").classList.add("hidden");
   $("pfConfirm").onclick = submitProfile;
+  $("pfBridgeDetect").onclick = detectNativeBridge;
   $("pfTwinEnable").onclick = enableTwin;
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;

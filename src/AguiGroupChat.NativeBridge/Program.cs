@@ -30,16 +30,20 @@ int port = int.TryParse(GetArg(args, "--port", "17321"), out var p) ? p : 17321;
 string? fixedToken = GetArg(args, "--token", "");
 string allowedOrigin = GetArg(args, "--allowed-origin", "");
 
-// 令牌：未显式给定则生成随机（打印给用户看，浏览器侧需配置）
-var token = string.IsNullOrWhiteSpace(fixedToken) ? Base64UrlToken.New(32) : fixedToken.Trim();
+// 令牌：--token 显式给定则用之；否则从用户目录持久化令牌文件读取/生成并复用，保证重启令牌不变（前端只需填一次）。
+var token = string.IsNullOrWhiteSpace(fixedToken)
+    ? TokenStore.LoadOrCreate()
+    : fixedToken.Trim();
+bool exposeTokenEndpoint = string.IsNullOrWhiteSpace(fixedToken); // 非固定令牌时向受信任源开放读取（CORS 白名单管控）
 
-// 打印启动信息（前端需知道地址+令牌才能执行 shell）
+// 打印启动信息（前端可用「一键检测」自动填入地址+令牌）
 Console.WriteLine("====================================================");
 Console.WriteLine($"AguiGroupChat NativeBridge 已启动");
 Console.WriteLine($"  监听地址 : http://127.0.0.1:{port}");
 Console.WriteLine($"  前端配置 : 设置 → 本机工具桥地址 = http://127.0.0.1:{port}/ag-ui/client-tool");
 Console.WriteLine($"  令牌     : {token}");
 Console.WriteLine($"  允许来源 : {(string.IsNullOrEmpty(allowedOrigin) ? "（未配置，令牌鉴权兜底）" : allowedOrigin)}");
+Console.WriteLine($"  自动配置 : {(exposeTokenEndpoint ? "允许（一键检测按钮）" : "--token 固定时关闭")}");
 Console.WriteLine("  停止     : Ctrl+C");
 Console.WriteLine("====================================================");
 
@@ -94,6 +98,15 @@ app.MapPost("/ag-ui/client-tool", async (NativeBridgeRunRequest req, HttpContext
 app.MapGet("/ag-ui/native-bridge/health", () =>
     Results.Ok(new { status = "ok", host = Environment.MachineName }));
 
+// 自动配置端点：让受信任来源（CORS 白名单内的页面）一键读到桥地址+令牌，免去手动复制。
+// 仅非固定令牌（--token 未指定）时开放；固定令牌场景认为用户已显式配置，不额外暴露。
+// 注意：此端点仅回环可直连，且受 CORS 白名单管控（未配置 --allowed-origin 时浏览器无法跨源读到响应）。
+if (exposeTokenEndpoint)
+{
+    app.MapGet("/ag-ui/native-bridge/token", () =>
+        Results.Ok(new { url = $"http://127.0.0.1:{port}/ag-ui/client-tool", token }));
+}
+
 await app.RunAsync();
 
 /// <summary>纯 URL 安全的随机 base64（令牌）。</summary>
@@ -102,6 +115,40 @@ file static class Base64UrlToken
     public static string New(int bytes)
         => Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(bytes))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+}
+
+/// <summary>持久化令牌：首次生成写入用户目录，后续复用，保证重启令牌不变。</summary>
+file static class TokenStore
+{
+    private static string FilePath()
+    {
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "AguiGroupChat");
+        return Path.Combine(dir, "bridge.token");
+    }
+
+    public static string LoadOrCreate()
+    {
+        var path = FilePath();
+        try
+        {
+            if (File.Exists(path))
+            {
+                var existing = File.ReadAllText(path).Trim();
+                if (existing.Length >= 16) return existing;
+            }
+            var created = Base64UrlToken.New(32);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, created);
+            return created;
+        }
+        catch
+        {
+            // 用户目录不可写时回落为一次性随机令牌（每次启动变化，自动配置端点照常开放）
+            return Base64UrlToken.New(32);
+        }
+    }
 }
 
 /// <summary>本机桥执行请求体。</summary>

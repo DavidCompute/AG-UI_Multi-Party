@@ -631,8 +631,11 @@
       </div>
       <div class="form-group">
         <label data-i18n="profile.bridgeToken">桥令牌（Bridge token）</label>
-        <input id="pfBridgeToken" class="modal-input" type="password" autocomplete="off" data-i18n-placeholder="profile.bridgeTokenPh" />
-        <p class="form-hint" data-i18n="profile.bridgeTokenHint">NativeBridge 启动时会打印一行令牌；也可用 --token 固定。留空时使用当前会话令牌。</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="pfBridgeToken" class="modal-input" type="password" autocomplete="off" data-i18n-placeholder="profile.bridgeTokenPh" style="flex:1" />
+          <button id="pfBridgeDetect" class="chip-btn" type="button" data-i18n="profile.bridgeDetect">🔍 一键检测</button>
+        </div>
+        <p class="form-hint" data-i18n="profile.bridgeTokenHint">NativeBridge 启动时会打印一行令牌；也可用 --token 固定。点「一键检测」可自动读取本机桥的地址与令牌并填入。</p>
       </div>
 
       <div class="form-section" data-i18n="profile.twinSection">AI 分身</div>
