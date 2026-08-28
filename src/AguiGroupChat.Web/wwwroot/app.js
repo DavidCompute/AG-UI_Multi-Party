@@ -2966,6 +2966,10 @@ function onInteractionRequest(evt) {
   bindInteractionButtons(div, m);
   if (contentEl) contentEl.after(div);
   else msgEl.querySelector(".body").appendChild(div);
+  // 前端工具（客户端执行技能）：触发者本人自动执行——http 直接 fetch，shell 先弹确认再执行；执行完自动回传结果
+  if (m.interaction.kind === "client_tool" && m.interaction.canDecide) {
+    runClientTool(m);
+  }
 }
 
 /** 以最新卡片状态替换消息内的卡片块（局部更新，需重新绑定按钮点击）。 */
@@ -3174,10 +3178,8 @@ function renderInteractionCard(m) {
     }</div>`;
   } else if (itx.canDecide) {
     if (isClientTool) {
-      actions = `<div class="itx-actions">
-        <button class="itx-btn approve" data-act="run">${t("itx.clientToolRun")}</button>
-        <button class="itx-btn reject" data-act="reject">${t("itx.reject")}</button>
-      </div>`;
+      // 前端工具：触发者本人已自动执行（见 onInteractionRequest）；执行中显示状态，失败/被拒时可用「重试」手动再跑
+      actions = `<div class="itx-status">${t("itx.clientToolRunning")} <button class="itx-btn approve" data-act="run" title="${escapeHtml(t("itx.clientToolRetryTip"))}">${t("itx.clientToolRetry")}</button></div>`;
     } else if (isInput) {
       // 结构化问题卡片优先，其次 schema 表单；两者都没有时用单输入框（占位符带上输入字段名）
       const hint = itx.inputField ? t("itx.inputFieldPh", { field: itx.inputField }) : t("itx.inputPh");
@@ -3257,6 +3259,10 @@ async function runClientTool(m) {
   let result;
   try {
     if (kind === "shell") {
+      // 敏感操作（shell）：先在浏览器侧确认（交互形态 2：shell 需确认，http 自动执行），拒绝则保留卡片供手动重试
+      if (!confirm(t("itx.clientToolConfirmShell", { cmd: clientToolSubstitute(cfg.command, itx.toolArguments).trim() || "" }))) {
+        return;
+      }
       // 本机桥：桌面壳暴露鉴权端点执行 shell。请求参数：command（来自 ClientRunner）、cwd、超时；${query} 占位经参数替换
       const command = clientToolSubstitute(cfg.command, itx.toolArguments).trim();
       if (!command) { toast(t("itx.clientToolNoCmd")); return; }
