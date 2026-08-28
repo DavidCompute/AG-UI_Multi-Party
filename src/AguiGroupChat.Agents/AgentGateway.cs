@@ -83,6 +83,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 该运行后续的审批工具自动放行（不再打断），直到运行结束清除。</summary>
     private readonly ConcurrentDictionary<string, byte> _autoApprovedRuns = new(StringComparer.Ordinal);
 
+    /// <summary>编排计划内「客户端技能」批量执行的等待器：key = interruptId。
+    /// 计划在执行到多个需在本机执行的客户端技能时（ExecutionLocation=Client），把它们合并成一张
+    /// 「本机一键执行全部」交互卡下发给前端；前端逐个执行并回传结果后，由 <see cref="ResolveInteractionAsync"/>
+    /// 写入此处 TCS，计划方法据此点亮各步骤并继续综合。</summary>
+    private sealed record BatchClientItem(string SkillId, string Name, string ClientRunner, string Query, int PlanIndex);
+    private sealed record BatchClientExec(
+        string GroupId, string MessageId, string AgentId, string TargetMemberId,
+        IReadOnlyList<BatchClientItem> Items,
+        int DisplayCount, // 展示步骤总数（用于索引对齐）
+        TaskCompletionSource<(bool Ok, Dictionary<string, string>? Results)> Completion);
+    private readonly ConcurrentDictionary<string, BatchClientExec> _batchClientExecWaits = new(StringComparer.Ordinal);
+
     /// <summary>外部 AG-UI 桥接增量游标：key = agentId|外部threadId，value = 上次已发送的本话题最后消息 ID。
     /// 会话（首次触发）发送话题全部历史；会话建立后只发游标之后的本话题新消息（增量）。
     /// 经扩展区「bridgeCursors」持久化（组合根 RegisterBridgeCursorPersistence），网关重启后游标不丢。</summary>
@@ -900,57 +912,59 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         await BroadcastPlanAsync(gid, messageId, display, ct);
 
-        // 2) 逐项执行 & 点亮
+        // 2) 分拣：客户端执行技能（ExecutionLocation=Client，需本机执行）与非客户端步骤（dispatch / 服务端技能）。
+        //    客户端技能统一合并成「本机一键执行全部」批处理（一次确认，逐个执行、逐条点亮），
+        //    其余步骤照旧循序执行、结果级联。
         var sb = new StringBuilder();
         var working = plan.Input;
         var hops = new List<ChainNode>();
-        var di = 0;
+        var clientSteps = new SortedDictionary<int, BatchClientItem>(); // planIndex(展示索) → 批量项
+        for (var i = 0; i < plan.Steps.Count; i++)
+        {
+            var st = plan.Steps[i];
+            if (st.Action != "skill" || !plan.Skills.TryGetValue(st.Target, out var csk)
+                || csk.ExecutionLocation != AgentSkillExecutionLocation.Client) continue;
+            var cq = working;
+            if (AgentGatewayHelpers.SkillRequiredInputs(csk).Contains("query", StringComparer.Ordinal))
+            {
+                var clean = AgentGatewayHelpers.ExtractCleanValueForSkill(working);
+                if (!string.IsNullOrWhiteSpace(clean)) cq = clean;
+            }
+            clientSteps[i] = new BatchClientItem(csk.SkillId, csk.Name ?? csk.SkillId, csk.ClientRunner ?? "", cq, i);
+        }
+
+        // 3) 逐项执行 dispatch / 服务端技能（跳过客户端技能，留到批量阶段）& 按原顺序点亮
         for (var si = 0; si < plan.Steps.Count; si++)
         {
             var step = plan.Steps[si];
+            if (clientSteps.ContainsKey(si)) continue; // 客户端技能统一在批量阶段执行
             if (step.Action == "dispatch")
             {
                 if (_catalog.GetDefinition(step.Target) is not { } target
                     || !plan.Reached.Any(r => r.AgentId == step.Target)) continue;
                 var child = _catalog.GetOrCreate(step.Target);
-                // 预判下游：若下一步是“需要 ${query} 输入的技能”，则让本员工<b>只输出该值本身</b>，供技能直接使用
-                var feedsParameterizedSkill = si + 1 < plan.Steps.Count
-                    && plan.Steps[si + 1].Action == "skill"
-                    && plan.Skills.TryGetValue(plan.Steps[si + 1].Target, out var nextSkill)
-                    && AgentGatewayHelpers.SkillRequiredInputs(nextSkill).Contains("query", StringComparer.Ordinal);
                 var prompt = "你正被「" + (target.Nickname ?? step.Target) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：\n" + working
                     + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + sb : "")
-                    + (feedsParameterizedSkill
-                        ? "\n\n<b>请只输出所需的值本身</b>（如一个完整 URL / 地址 / 参数），不要添加解释或多余文字——它会被直接作为下一步技能的输入。"
-                        : "")
                     + "\n\n只输出本步结论，不要复述前序内容。";
                 var session = await child.CreateSessionAsync(ct);
-                // 关键：把 ambient 上下文切到<b>子员工</b>（保留群/话题/触发者，只改 AgentId/Nickname）
-                // ——MemoryContextProvider 据此注入<b>子员工自己的知识库/记忆</b>，否则它会按宿主(Exchange连接测试助手)
-                // 的库检索（宿主没绑配置库 → 配置管理员丢上下文、答“数据不足”）。
                 var prev = AgentGateway.AmbientContext.Value;
                 AgentGateway.AmbientContext.Value = context with { AgentId = target.AgentId, AgentNickname = target.Nickname ?? target.AgentId };
                 try
                 {
                     var resp = await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
                     var stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（未返回内容）" : resp.Text.Trim();
-                    // 计划卡已展示“指派「配置管理员」代为处理”，正文不再叠加（X 代为处理）前缀，避免重复
                     if (!hops.Any(h => h.AgentId == step.Target))
                         hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = AgentGatewayHelpers.TruncateForChain(working), Result = AgentGatewayHelpers.TruncateForChain(stepOut) });
                     sb.Clear().Append(stepOut);
                     working = stepOut;
                 }
-                finally
-                {
-                    AgentGateway.AmbientContext.Value = prev;
-                }
-                if (di < display.Count) { display[di] = new PlanStepInfo { Id = display[di].Id, Text = display[di].Text, Done = true }; di++; }
+                finally { AgentGateway.AmbientContext.Value = prev; }
+                if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
                 await BroadcastPlanAsync(gid, messageId, display, ct);
             }
             else if (step.Action == "skill")
             {
                 if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
-                // 参数化技能（body 含 ${query}）：从“上一步输出”中尽可能提取干净的 URL/值，再作为技能输入
                 var skillQuery = working;
                 if (AgentGatewayHelpers.SkillRequiredInputs(skill).Contains("query", StringComparer.Ordinal))
                 {
@@ -963,12 +977,31 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = AgentGatewayHelpers.TruncateForChain(res) });
                 sb.Clear().Append(res);
                 working = res;
-                if (di < display.Count) { display[di] = new PlanStepInfo { Id = display[di].Id, Text = display[di].Text, Done = true }; di++; }
+                if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
                 await BroadcastPlanAsync(gid, messageId, display, ct);
             }
         }
 
-        // 3) 综合答复制止
+        // 4) 批量执行客户端技能（若有）：合并下发一张「本机一键执行全部」交互卡，前端逐个执行、逐条回传、逐条点亮
+        if (clientSteps.Count > 0)
+        {
+            var results = await AwaitBatchClientExecAsync(context, gid, messageId, display, clientSteps.Values.ToList(), ct);
+            foreach (var kv in clientSteps)
+            {
+                var idx = kv.Key;
+                var item = kv.Value;
+                var outText = (results is not null && results.TryGetValue(item.SkillId, out var r) && !string.IsNullOrWhiteSpace(r))
+                    ? r : "（本机执行未返回结果 / 已取消）";
+                if (!hops.Any(h => h.AgentId == item.SkillId))
+                    hops.Add(new ChainNode { Kind = "skill", AgentId = item.SkillId, AgentNickname = item.Name, Query = AgentGatewayHelpers.TruncateForChain(item.Query), Result = AgentGatewayHelpers.TruncateForChain(outText) });
+                sb.Clear().Append(outText);
+                working = outText;
+                if (idx < display.Count) display[idx] = new PlanStepInfo { Id = display[idx].Id, Text = display[idx].Text, Done = true };
+                await BroadcastPlanAsync(gid, messageId, display, ct);
+            }
+        }
+
+        // 5) 综合答复制止
         display[^1] = new PlanStepInfo { Id = display[^1].Id, Text = display[^1].Text, Done = true };
         await BroadcastPlanAsync(gid, messageId, display, ct);
 
@@ -992,6 +1025,78 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "编排计划广播失败（已忽略）：group={GroupId}", groupId);
+        }
+    }
+
+    /// <summary>
+    /// 编排计划内「客户端技能」的批量执行：把多个需在本机执行的技能合并成一张「本机一键执行全部」交互卡
+    /// （Kind=client_tool，ClientRunner 为要执行的技能数组 JSON），下发给触发者一次确认；前端逐个通过本机桥
+    /// 执行并回传结果（<see cref="ResolveInteractionAsync"/> 写入 TCS）。
+    /// 返回 skillId → 输出 的映射；取消 / 超时 / 未执行返回 null（调用方标记相应步骤为未返回）。
+    /// 本方法阻塞等待前端回传（计划引擎在指派路径内运行，不持会话锁，可安全等待）。
+    /// </summary>
+    private async Task<Dictionary<string, string>?> AwaitBatchClientExecAsync(
+        AgentInvocationContext context, string gid, string messageId,
+        IReadOnlyList<PlanStepInfo> display, IReadOnlyList<BatchClientItem> items, CancellationToken ct)
+    {
+        var interruptId = "interrupt_" + IdGenerator.NewId();
+        var runId = "run_" + IdGenerator.NewId();
+        var root = _catalog.GetDefinition(context.AgentId);
+        var tcs = new TaskCompletionSource<(bool Ok, Dictionary<string, string>? Results)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _batchClientExecWaits[interruptId] = new BatchClientExec(gid, messageId, context.AgentId, context.TriggerUserId, items, display.Count, tcs);
+
+        // 批量交互卡要执行的全部技能（前端据此逐个执行；clientRunner 复用技能的 ClientRunner JSON）
+        var payload = items.Select(it => new
+        {
+            skillId = it.SkillId,
+            name = it.Name,
+            query = it.Query,
+            runner = it.ClientRunner,
+        }).ToList();
+        try
+        {
+            await _hub.Value.BroadcastAsync(gid, new AgentInteractionRequestEvent
+            {
+                GroupId = gid,
+                MessageId = messageId,
+                ThreadId = context.ThreadId,
+                RunId = runId,
+                InterruptId = interruptId,
+                ToolCallId = "batch_" + interruptId,
+                ToolName = "本机一键执行全部",
+                ToolArguments = null,
+                Message = $"智能体「{root?.Nickname ?? context.AgentId}」请求你在本机执行 {items.Count} 个客户端技能（可一次全部执行）。",
+                Kind = "client_tool_batch",
+                ClientRunner = JsonSerializer.Serialize(payload),
+                TargetMemberId = context.TriggerUserId,
+                Timestamp = _hub.Value.NowMs,
+            }, ct: ct);
+            ClientToolTrace.Write($"BATCH-INVOKE interrupt={interruptId} count={items.Count} skills={string.Join(",", items.Select(i => i.SkillId))}");
+        }
+        catch (Exception ex)
+        {
+            _batchClientExecWaits.TryRemove(interruptId, out _);
+            _logger.LogWarning(ex, "批量客户端技能交互卡下发失败：group={GroupId}", gid);
+            return null;
+        }
+
+        // 阻塞等待前端回传（带交互 TTL 上限兜底，超时视为未执行）
+        try
+        {
+            var tcsDone = await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(InteractionTtlMs), ct);
+            _batchClientExecWaits.TryRemove(interruptId, out _);
+            return tcsDone.Ok ? tcsDone.Results : null;
+        }
+        catch (TimeoutException)
+        {
+            _batchClientExecWaits.TryRemove(interruptId, out _);
+            _logger.LogWarning("批量客户端技能执行超时未回传：interrupt={InterruptId}", interruptId);
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            _batchClientExecWaits.TryRemove(interruptId, out _);
+            return null;
         }
     }
 
@@ -1983,6 +2088,39 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     {
         // 入口先做一次周期清理：定时器兜底外，决策前把已超时的交互先清掉，避免继续处理过期请求
         await PurgeExpiredInteractions();
+
+        // 编排计划「客户端技能批量执行」的交互：不通过 PendingInteraction/ResumeRunAsync，而是直接
+        // 把前端回传的批量结果写入 TCS，让正在等待的计划方法恢复执行（再次校验触发者身份）。
+        if (_batchClientExecWaits.TryGetValue(interruptId, out var batch))
+        {
+            if (!string.Equals(batch.TargetMemberId, memberId, StringComparison.Ordinal))
+                return false;
+            if (!_batchClientExecWaits.TryRemove(interruptId, out batch))
+                return false;
+            Dictionary<string, string>? results = null;
+            if (approved && !string.IsNullOrWhiteSpace(toolResult))
+            {
+                try
+                {
+                    // 前端回传格式：JSON 数组 [{"skillId":..,"output":..}, ...]
+                    var arr = JsonSerializer.Deserialize<List<JsonElement>>(toolResult, AguiJson.Options) ?? [];
+                    results = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (var item in arr)
+                    {
+                        var sid = item.TryGetProperty("skillId", out var p) ? p.GetString() : null;
+                        var outp = item.TryGetProperty("output", out var op) ? op.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(sid)) results[sid] = outp ?? "（本机执行无输出）";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "批量客户端技能回传解析失败：interrupt={InterruptId}", interruptId);
+                }
+            }
+            ClientToolTrace.Write($"BATCH-RESOLVE interrupt={interruptId} member={memberId} approved={approved} results={results?.Count ?? 0}");
+            batch.Completion.TrySetResult((approved && results is not null, results));
+            return true;
+        }
 
         // 先校验存在性与触发者身份（仅触发者可决策），确认后才移除——非触发者的调用不会消耗请求
         if (!_pendingInteractions.TryGetValue(interruptId, out var pending))

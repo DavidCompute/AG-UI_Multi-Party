@@ -3058,6 +3058,7 @@ function bindInteractionButtons(container, m) {
     if (btn.dataset.act === "submit") { btn.onclick = () => submitInteractionInput(container, m); return; }
     if (btn.dataset.act === "approveAll") { btn.onclick = () => resolveInteraction(m, true, null, null, true); return; }
     if (btn.dataset.act === "run") { btn.onclick = () => runClientTool(m); return; }
+    if (btn.dataset.act === "runBatch") { btn.onclick = () => runBatchClientTools(m); return; }
     btn.onclick = () => resolveInteraction(m, btn.dataset.act === "approve");
   });
 }
@@ -3208,7 +3209,7 @@ function renderChainCard(chainJson) {
 /** 渲染人机交互卡片：approval（工具审批）→ 批准 / 拒绝按钮；input / choice / multi_choice（请求输入 / 单选 / 多选）→ 按 responseSchema 渲染表单或单输入框。 */
 function renderInteractionCard(m) {
   const itx = m.interaction;
-  const isClientTool = itx.kind === "client_tool"; // 客户端执行技能：由前端按 ClientRunner 执行并回传结果
+  const isClientTool = itx.kind === "client_tool" || itx.kind === "client_tool_batch"; // 客户端执行技能：由前端在本机执行并回传结果
   const isInput = itx.kind === "input" || itx.kind === "choice" || itx.kind === "multi_choice";
   // 工具参数：approval / input 型均显示（外部 question 工具的问题与选项常在参数里，供用户判断要输入什么）；空对象不显示
   const argsHtml = itx.toolArguments && Object.keys(itx.toolArguments).length
@@ -3249,8 +3250,14 @@ function renderInteractionCard(m) {
     }</div>`;
   } else if (itx.canDecide) {
     if (isClientTool) {
-      // 前端工具：shell 需在聊天历史卡片内人工确认——显示「执行 / 取消」按钮；http 自动执行（见 onInteractionRequest），执行中显示状态并可重试
-      if (clientToolKind(itx) === "shell") {
+      // 批量（编排计划「本机一键执行全部」）：一次确认后前端逐个执行，减少确认次数
+      if (itx.kind === "client_tool_batch") {
+        actions = `<div class="itx-status">${t("itx.batchConfirmRun")} <span class="itx-actions">`
+          + `<button class="itx-btn approve" data-act="runBatch">${t("itx.batchRunAll")}</button>`
+          + `<button class="itx-btn reject" data-act="reject">${t("itx.cancel")}</button>`
+          + `</span></div>`;
+      } else if (clientToolKind(itx) === "shell") {
+        // 前端工具：shell 需在聊天历史卡片内人工确认——显示「执行 / 取消」按钮；http 自动执行（见 onInteractionRequest），执行中显示状态并可重试
         actions = `<div class="itx-status">${t("itx.clientToolConfirmRun")} <span class="itx-actions">`
           + `<button class="itx-btn approve" data-act="run">${t("itx.clientToolRunConfirm")}</button>`
           + `<button class="itx-btn reject" data-act="reject">${t("itx.cancel")}</button>`
@@ -3285,9 +3292,9 @@ function renderInteractionCard(m) {
   </div>`;
 }
 
-/** 客户端执行技能的运行器预览：解析 itx.clientRunner（JSON），按 kind 展示即将在本机执行的动作。
- *   - http：展示 method + url（浏览器侧 fetch）；
- *   - shell：展示命令（command，经本机桥执行）；
+/** 客户端执行技能的运行器预览：解析 itx.clientRunner（JSON 对象或数组），展示即将在本机执行的动作。
+ *   - 数组（client_tool_batch，编排计划「本机一键执行全部」）：逐项列出技能名；
+ *   - 对象：按 kind 展示（http 浏览器 fetch；shell 经本机桥执行）。
  *   无 clientRunner 时回退用 toolName 展示。
  */
 function clientToolPreview(itx) {
@@ -3296,6 +3303,14 @@ function clientToolPreview(itx) {
   if (!cfg || typeof cfg !== "object") {
     const n = itx.toolName || "";
     return n ? `<div class="itx-runner">${t("itx.clientToolPreview", { name: escapeHtml(n) })}</div>` : "";
+  }
+  // 批量（编排计划）：clientRunner 为数组，逐个展示技能名
+  if (Array.isArray(cfg)) {
+    const rows = cfg.map((item) => {
+      const nm = (item && item.name) || (item && item.skillId) || "";
+      return `<div class="itx-batch-item">▸ ${escapeHtml(nm)}</div>`;
+    }).join("");
+    return `<div class="itx-runner"><span class="itx-runner-tag">${t("itx.batchTag")}</span>${rows}</div>`;
   }
   const kind = cfg.kind || "http";
   if (kind === "shell") {
@@ -3369,6 +3384,52 @@ async function runClientTool(m) {
     return;
   }
   resolveInteraction(m, true, undefined, undefined, false, result);
+}
+
+/** 编排计划「本机一键执行全部」（client_tool_batch）：解析 itx.clientRunner 里的技能数组，
+ *  逐个通过本机桥执行，收集各技能结果后一次回传（toolResult = JSON 数组 [{skillId, output}]），
+ *  后端据此点亮计划卡各步骤并继续综合。 */
+async function runBatchClientTools(m) {
+  const itx = m.interaction;
+  if (!itx || itx.resolved) return;
+  let items = null;
+  try { items = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { items = null; }
+  if (!Array.isArray(items) || items.length === 0) { toast(t("itx.batchNoSkill")); return; }
+  const results = [];
+  for (const item of items) {
+    let out;
+    try {
+      let cfg = null;
+      try { cfg = (item && item.runner) ? JSON.parse(item.runner) : null; } catch { cfg = null; }
+      const kind = (cfg && cfg.kind) || "http";
+      if (kind === "shell") {
+        const command = (cfg.command || "").trim();
+        if (!command) { results.push({ skillId: item.skillId, output: "（本机技能缺少命令）" }); continue; }
+        const bridgeUrl = state.nativeBridgeUrl || "/ag-ui/client-tool";
+        const bridgeToken = state.nativeBridgeUrl ? (state.nativeBridgeToken || "") : (state.token || "");
+        const res = await fetch(bridgeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${bridgeToken}` },
+          body: JSON.stringify({ kind: "shell", command, cwd: cfg.cwd || ".", timeoutSec: cfg.timeoutSec || 30, query: (item && item.query) || undefined }),
+        });
+        if (!res.ok) throw new Error((await res.text()).slice(0, 300) || res.statusText);
+        const d = await res.json();
+        out = d.output || d.message || JSON.stringify(d);
+      } else {
+        const method = String(cfg.method || "GET").toUpperCase();
+        const url = (cfg.url || "").trim();
+        const headers = (cfg.headers && typeof cfg.headers === "object") ? cfg.headers : {};
+        const rawBody = typeof cfg.body === "string" ? cfg.body : (cfg.body ? JSON.stringify(cfg.body) : undefined);
+        const res = await fetch(url, { method, headers, body: (method === "GET" || method === "HEAD") ? undefined : rawBody });
+        const text = await res.text();
+        out = `HTTP ${res.status}\n${text.slice(0, 4000)}`;
+      }
+      results.push({ skillId: item.skillId, output: out });
+    } catch (err) {
+      results.push({ skillId: item.skillId, output: "（本机执行失败：" + (err && err.message ? err.message : String(err)) + "）" });
+    }
+  }
+  resolveInteraction(m, true, undefined, undefined, false, JSON.stringify(results));
 }
 
 /** 触发者决策：approval 型批准 / 拒绝（approveAll=true 表示批准本次运行后续全部操作），input 型提交用户输入（inputText）或按 schema 提交 payload；经 WS 上行恢复被中断的数字员工运行。 */

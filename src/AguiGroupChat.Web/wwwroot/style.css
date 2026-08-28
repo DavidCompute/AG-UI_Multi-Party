@@ -628,6 +628,10 @@ select {
 .msg .itx-status { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .msg .itx-status.ok { color: #4caf50; }
 .msg .itx-status.no { color: #f44336; }
+/* 编排计划「本机一键执行全部」批量清单 */
+.msg .itx-batch-item { font-size: 12px; color: var(--text); padding: 2px 4px; }
+.msg .itx-runner { margin-top: 6px; }
+.msg .itx-runner .itx-batch-item + .itx-batch-item { margin-top: 2px; }
 /* 消息附件：图片平铺网格 / 文件卡片 / 音频播放条 */
 .msg .attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .msg .attachments.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); max-width: 520px; }
