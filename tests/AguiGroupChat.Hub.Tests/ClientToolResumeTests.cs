@@ -39,52 +39,45 @@ public sealed class RecordingMockClient : IChatClient
 public sealed class ClientToolResumeTests
 {
     [Fact]
-    public async Task CreatingApprovalResponse_WithStoredClientResult_DeliversRealToolResult_ToModel()
+    public async Task Resume_WithCreateResponseAndInjectedResult_DeliversResultToModel()
     {
-        // 客户端技能占位函数从 ClientToolResultStore 读取前端回传结果（无参：模型调用时无需绑定参数，避免参数缺失→Function failed）
+        // 客户端技能占位函数（不再依赖它：恢复改由 BuildResumeMessage 直接注入 User 消息，规避 MSAGENT 不执行 stub 的问题）
         var tool = new ApprovalRequiredAIFunction(
             AIFunctionFactory.Create(() =>
-                Task.FromResult(AguiGroupChat.Agents.ClientToolResultStore.ConsumeOrDefault("sk_hostname")
-                    ?? "客户端执行（占位）"), "sk_hostname", "查询主机名"));
-        // 模拟：首轮返回工具调用；恢复后的模型续答根据输入里是否含前端结果给出「看到了 / 没看到」
+                Task.FromResult("客户端执行（占位）"), "sk_hostname", "查询主机名"));
+        // 模拟：首轮返回工具调用；恢复后的模型续答检查输入里是否有注入的前端结果文本
         var callsHolder = new List<List<ChatMessage>>();
         var mock = new RecordingMockClient(idx =>
         {
             if (idx == 0)
                 return new AIContent[] { new FunctionCallContent("call_1", "sk_hostname", null) };
-            // 检查本轮输入里模型能否看到 FunctionResultContent
             var msgs = callsHolder[idx];
-            var hasResult = msgs.SelectMany(x => x.Contents).Any(c =>
-                c is FunctionResultContent r && r.Result?.ToString()?.Contains("DESKTOP-PROBE-123") == true);
-            return new AIContent[] { new TextContent("sawResult=" + (hasResult ? "TRUE" : "FALSE")) };
+            var hasInjected = msgs.Any(m => m.Text?.Contains("DESKTOP-PROBE-123") == true);
+            return new AIContent[] { new TextContent("sawInjected=" + (hasInjected ? "TRUE" : "FALSE")) };
         });
         mock.Calls = callsHolder; // 让 mock 把收到的输入写进同一容器，供上述闭包检查
         var agent = new ChatClientAgent(mock, "probe", null, null, new[] { tool }, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
         var session = await agent.CreateSessionAsync();
-
-        AguiGroupChat.Agents.ClientToolResultStore.Clear();
 
         // 第一轮触发中断
         var first = new List<AgentResponseUpdate>();
         await foreach (var u in agent.RunStreamingAsync(new ChatMessage(ChatRole.User, "hostname?"), session))
             first.Add(u);
         var approval = Assert.Single(first.SelectMany(u => u.Contents).OfType<ToolApprovalRequestContent>());
-        var fc = Assert.IsType<FunctionCallContent>(approval.ToolCall);
-        Assert.Equal("sk_hostname", fc.Name);
 
-        // 恢复：先写入前端回传的真实结果，再用 CreateResponse(true)（批准后 MSAGENT 执行占位函数读取该结果）
-        AguiGroupChat.Agents.ClientToolResultStore.Put("sk_hostname", "DESKTOP-PROBE-123");
+        // 恢复：按 BuildResumeMessage 的新行为——先 CreateResponse(true)，再追加一条 User 消息把前端结果直接注入模型上下文
+        var resumeInput = new ChatMessage[]
+        {
+            new(ChatRole.User, [approval.CreateResponse(approved: true)]),
+            new ChatMessage(ChatRole.User, "[前端工具] sk_hostname 已在客户端执行完毕，请直接引用它的结果作答：\nDESKTOP-PROBE-123\n（答完即可，无需再调用该工具）"),
+        };
         var resumeTexts = new List<string>();
-        await foreach (var u in agent.RunStreamingAsync(
-            new ChatMessage(ChatRole.User, [approval.CreateResponse(approved: true)]), session))
+        await foreach (var u in agent.RunStreamingAsync(resumeInput, session))
             if (u.Text is { Length: > 0 } t) resumeTexts.Add(t);
 
-        // 关键：MSAGENT 在工具执行后应带 FunctionResult 再次回调 provider，模型续答能「看到」前端结果而非只见工具调用
-        Assert.Contains(resumeTexts, t => t.Contains("sawResult=TRUE"));
-
-        // 工具执行产生带真实结果的 FunctionResultContent
+        // 关键：模型续答调用收到的输入里包含注入的前端结果（DESKTOP-PROBE-123）
+        Assert.Contains(resumeTexts, t => t.Contains("sawInjected=TRUE"));
         var last = mock.Calls[^1];
-        Assert.Contains(last.SelectMany(x => x.Contents), c =>
-            c is FunctionResultContent r && r.Result?.ToString()?.Contains("DESKTOP-PROBE-123") == true);
+        Assert.Contains(last, m => m.Role == ChatRole.User && m.Text?.Contains("DESKTOP-PROBE-123") == true);
     }
 }

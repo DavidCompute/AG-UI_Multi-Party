@@ -2111,9 +2111,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 批量批准循环：同一 Session 连续流式；后续审批若命中“本次运行批量批准”自动批准，否则交还用户决策
             while (true)
             {
-                var resumeMessage = BuildResumeMessage(pending, lastApproval, lastApproved, toolResult, runCt);
+                var resumeMessages = BuildResumeMessage(pending, lastApproval, lastApproved, toolResult, runCt);
                 ToolApprovalRequestContent? nextApproval = null;
-                await foreach (var update in agent.RunStreamingAsync(resumeMessage, session, new ChatClientAgentRunOptions(), runCt))
+                await foreach (var update in agent.RunStreamingAsync(resumeMessages, session, new ChatClientAgentRunOptions(), runCt))
                 {
                     ClientToolTrace.Write($"RESUME-UPDATE textLen={(update.Text?.Length ?? 0)} cts=[{string.Join(",", update.Contents.Select(c => c.GetType().Name))}]");
                     if (update.Text is { Length: > 0 } text)
@@ -2225,27 +2225,26 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>构造审批 / 客户端工具恢复时的回灌消息：
-    /// 一律用 <see cref="ToolApprovalRequestContent.CreateResponse"/>（批准则 MSAGENT 执行被包装的工具、拒绝则跳过）——
-    /// MSAGENT 要求待决的 <see cref="ToolApprovalRequestContent"/> 必须有匹配的 <see cref="ToolApprovalResponseContent"/>，
-    /// 否则恢复时抛「no matching ToolApprovalResponseContent」、模型拿不到工具结果（自定义 FunctionCall+FunctionResult 回灌不可行）。
-    /// 客户端执行技能：批准且前端已回传 toolResult 时先写入 <see cref="ClientToolResultStore"/>，
-    /// 随后 CreateResponse(true) 执行其占位函数时读取到真实结果返回给模型。</summary>
-    private ChatMessage BuildResumeMessage(PendingInteraction pending, ToolApprovalRequestContent approval, bool approved, string? toolResult, CancellationToken ct)
+    /// 一律返回 <see cref="ToolApprovalRequestContent.CreateResponse"/>（批准 / 拒绝，满足 MSAGENT 审批决议；否则恢复抛「no matching ToolApprovalResponseContent」），
+    /// 客户端执行技能（<see cref="AgentSkillDefinition.ExecutionLocation"/> = Client）批准且前端已回传 toolResult 时，
+    /// <b>额外追加一条 User 消息，把「该工具已在客户端执行、结果为 …」直接注入模型上下文</b>——
+    /// 规避 MSAGENT 的 `CreateResponse` 在真实 `AsAIAgent` 路径不执行占位函数、以及工具结果经 OpenAI 序列化可能到不了模型的问题。</summary>
+    private IReadOnlyList<ChatMessage> BuildResumeMessage(PendingInteraction pending, ToolApprovalRequestContent approval, bool approved, string? toolResult, CancellationToken ct)
     {
         var fc = approval.ToolCall as FunctionCallContent;
-        if (fc is not null
-            && approved
-            && !string.IsNullOrEmpty(toolResult)
-            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal))
+        var isClientTool = fc is not null
+            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
+        var msgs = new List<ChatMessage> { new(ChatRole.User, [approval.CreateResponse(approved)]) };
+        if (isClientTool && approved && !string.IsNullOrEmpty(toolResult))
         {
-            // 客户端执行技能：前端已在本地执行并回传结果 → 写入共享存储，批准后 MSAGENT 执行其占位函数时返回真实结果
-            _logger.LogInformation("客户端技能恢复：写入工具栏结果 tool={Tool} agent={Agent} resultLen={Len}", fc.Name, pending.Context.AgentId, toolResult.Length);
-            ClientToolTrace.Write($"WRITE-STORE tool={fc.Name} agent={pending.Context.AgentId} resultLen={toolResult.Length} first= {toolResult.Substring(0, Math.Min(80, toolResult.Length))}");
-            ClientToolResultStore.Put(fc.Name, toolResult);
+            // 客户端执行技能：前端已在本地执行并回传结果 → 以一句明确的 User 消息注入模型，让其「拿到结果继续作答」
+            _logger.LogInformation("客户端技能恢复：注入前端执行结果 tool={Tool} agent={Agent} resultLen={Len}", fc!.Name, pending.Context.AgentId, toolResult.Length);
+            ClientToolTrace.Write($"INJECT-RESULT tool={fc!.Name} agent={pending.Context.AgentId} resultLen={toolResult.Length} first= {toolResult.Substring(0, Math.Min(80, toolResult.Length))}");
+            msgs.Add(new ChatMessage(ChatRole.User,
+                $"[前端工具] {fc.Name} 已在客户端执行完毕，请直接引用它的结果作答：\n{toolResult}\n（答完即可，无需再调用该工具）"));
         }
-        // 标准审批应答：MSAGENT 据此决议（批准 → 执行工具；拒绝 → 跳过）并继续模型生成
-        ClientToolTrace.Write($"RESUME-MSG tool={(fc?.Name ?? "?")} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} isClientAgentTool={fc is not null && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal)} agent={pending.Context.AgentId}");
-        return new ChatMessage(ChatRole.User, [approval.CreateResponse(approved)]);
+        ClientToolTrace.Write($"RESUME-MSG tool={(fc?.Name ?? "?")} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} isClientAgentTool={isClientTool} agent={pending.Context.AgentId} msgCount={msgs.Count}");
+        return msgs;
     }
 
     /// <summary>清理超时未决策的交互请求

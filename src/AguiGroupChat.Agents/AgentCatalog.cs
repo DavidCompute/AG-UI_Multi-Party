@@ -338,8 +338,11 @@ public sealed class AgentCatalog
                 // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
                 var func = isClientSkill
                     ? AIFunctionFactory.Create(() =>
-                        Task.FromResult(ClientToolResultStore.ConsumeOrDefault(toolName)
-                            ?? "客户端执行（本技能不在服务端运行，需前端执行并回传结果）"), toolName, desc)
+                    {
+                        var v = ClientToolResultStore.ConsumeOrDefault(toolName);
+                        ClientToolTrace.Write($"STUB-INVOKE tool={toolName} read={(v is null ? "NULL" : $"len={v.Length} first={v.Substring(0, Math.Min(60, v.Length))}")}");
+                        return Task.FromResult(v ?? "客户端执行（本技能不在服务端运行，需前端执行并回传结果）");
+                    }, toolName, desc)
                     : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct), toolName, desc);
                 // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
                 var needsApproval = skill.RequiresApproval || isClientSkill;
