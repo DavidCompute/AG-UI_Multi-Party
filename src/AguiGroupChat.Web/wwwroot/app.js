@@ -3372,9 +3372,10 @@ function clientToolSubstitute(template, args) {
 async function runClientTool(m) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
-  itx._running = true; // 点击执行后立即隐藏按钮（显示执行中），避免卡片在执行期间停留
+  itx._running = true; // 点击执行后立即隐藏卡片，避免在执行期间停留
   m._html = undefined;
-  scheduleVirtualRender();
+  hideInteractionBlock(m); // 同步移除 DOM 卡片，不等下一帧 rAF，点击即消失
+  scheduleVirtualRender(); // 兜底：确保其它残留 / 重进群不再画回
   let cfg = null;
   try { cfg = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { cfg = null; }
   const kind = (cfg && cfg.kind) || "http";
@@ -3421,9 +3422,10 @@ async function runClientTool(m) {
 async function runBatchClientTools(m) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
-  itx._running = true; // 点击「一键执行全部」后立即隐藏按钮（显示执行中），避免卡片在执行期间停留
+  itx._running = true; // 点击「一键执行全部」后立即隐藏卡片，避免在执行期间停留
   m._html = undefined;
-  scheduleVirtualRender();
+  hideInteractionBlock(m); // 同步移除 DOM 卡片，不等下一帧 rAF，点击即消失
+  scheduleVirtualRender(); // 兜底：确保其它残留 / 重进群不再画回
   let items = null;
   try { items = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { items = null; }
   if (!Array.isArray(items) || items.length === 0) { toast(t("itx.batchNoSkill")); return; }
@@ -3464,6 +3466,16 @@ async function runBatchClientTools(m) {
   resolveInteraction(m, true, undefined, undefined, false, JSON.stringify(results));
 }
 
+/** 同步移除某消息内的审批/交互卡 DOM（点击执行 / 决策后调用），点击即消失，不等 rAF 重渲染。 */
+function hideInteractionBlock(m) {
+  if (!m) return;
+  const el = $("messages")?.querySelector(`[data-mid="${cssEsc(m.id)}"]`);
+  if (el) {
+    const ib = el.querySelector(".interaction-block");
+    if (ib) ib.remove();
+  }
+}
+
 /** 触发者决策：approval 型批准 / 拒绝（approveAll=true 表示批准本次运行后续全部操作），input 型提交用户输入（inputText）或按 schema 提交 payload；经 WS 上行恢复被中断的数字员工运行。 */
 function resolveInteraction(m, approved, inputText, payload, approveAll, toolResult) {
   const itx = m.interaction;
@@ -3491,11 +3503,7 @@ function resolveInteraction(m, approved, inputText, payload, approveAll, toolRes
   itx.approveAll = !!approveAll;
   itx.toolResult = toolResult || null;
   m._html = undefined; // 卡片状态变化，强制重渲染
-  const el = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
-  if (el) {
-    const block = el.querySelector(".interaction-block");
-    if (block) block.remove(); // 做出选择后隐藏审批块（恢复内容继续流式显示）
-  }
+  hideInteractionBlock(m); // 同步移除卡片（决策后立即消失）
   scheduleVirtualRender(); // 兜底：强制重渲消除任何残留卡片（resolved 后 renderInteractionCard 返回空）
 }
 
@@ -3513,11 +3521,7 @@ function onInteractionResolved(evt) {
   m.interaction.inputText = evt.input || m.interaction.inputText; // input 型：其他成员同步看到已提交内容
   m._html = undefined; // 强制重渲染卡片状态
   if (state.activeGroupId !== evt.groupId) return;
-  const el = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
-  if (el) {
-    const block = el.querySelector(".interaction-block");
-    if (block) block.remove(); // 决策后隐藏审批块（全知聚同步）
-  }
+  hideInteractionBlock(m); // 决策后同步隐藏审批块（全知聚同步）
   scheduleVirtualRender(); // 兜底：强制重渲消除残留卡片
 }
 
