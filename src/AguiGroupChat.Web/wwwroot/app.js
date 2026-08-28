@@ -3234,6 +3234,7 @@ function renderChainCard(chainJson) {
 /** 渲染人机交互卡片：approval（工具审批）→ 批准 / 拒绝按钮；input / choice / multi_choice（请求输入 / 单选 / 多选）→ 按 responseSchema 渲染表单或单输入框。 */
 function renderInteractionCard(m) {
   const itx = m.interaction;
+  if (!itx || itx.resolved) return ""; // 已决策：彻底隐藏审批/交互卡（不再显示“已批准”状态块），确保不会随任何重渲染复活
   const isClientTool = itx.kind === "client_tool" || itx.kind === "client_tool_batch"; // 客户端执行技能：由前端在本机执行并回传结果
   const isInput = itx.kind === "input" || itx.kind === "choice" || itx.kind === "multi_choice";
   // 工具参数：approval / input 型均显示（外部 question 工具的问题与选项常在参数里，供用户判断要输入什么）；空对象不显示
@@ -3275,8 +3276,11 @@ function renderInteractionCard(m) {
     }</div>`;
   } else if (itx.canDecide) {
     if (isClientTool) {
-      // 批量（编排计划「本机一键执行全部」）：一次确认后前端逐个执行，减少确认次数
-      if (itx.kind === "client_tool_batch") {
+      // 执行中：点击执行后立即隐藏确认/批量按钮，改为显示执行状态
+      if (itx._running) {
+        actions = `<div class="itx-status">${t("itx.clientToolRunning")}</div>`;
+      } else if (itx.kind === "client_tool_batch") {
+        // 批量（编排计划「本机一键执行全部」）：一次确认后前端逐个执行，减少确认次数
         actions = `<div class="itx-status">${t("itx.batchConfirmRun")} <span class="itx-actions">`
           + `<button class="itx-btn approve" data-act="runBatch">${t("itx.batchRunAll")}</button>`
           + `<button class="itx-btn reject" data-act="reject">${t("itx.cancel")}</button>`
@@ -3371,6 +3375,9 @@ function clientToolSubstitute(template, args) {
 async function runClientTool(m) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
+  itx._running = true; // 点击执行后立即隐藏按钮（显示执行中），避免卡片在执行期间停留
+  m._html = undefined;
+  scheduleVirtualRender();
   let cfg = null;
   try { cfg = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { cfg = null; }
   const kind = (cfg && cfg.kind) || "http";
@@ -3417,6 +3424,9 @@ async function runClientTool(m) {
 async function runBatchClientTools(m) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
+  itx._running = true; // 点击「一键执行全部」后立即隐藏按钮（显示执行中），避免卡片在执行期间停留
+  m._html = undefined;
+  scheduleVirtualRender();
   let items = null;
   try { items = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { items = null; }
   if (!Array.isArray(items) || items.length === 0) { toast(t("itx.batchNoSkill")); return; }
@@ -3489,6 +3499,7 @@ function resolveInteraction(m, approved, inputText, payload, approveAll, toolRes
     const block = el.querySelector(".interaction-block");
     if (block) block.remove(); // 做出选择后隐藏审批块（恢复内容继续流式显示）
   }
+  scheduleVirtualRender(); // 兜底：强制重渲消除任何残留卡片（resolved 后 renderInteractionCard 返回空）
 }
 
 /**
@@ -3510,6 +3521,7 @@ function onInteractionResolved(evt) {
     const block = el.querySelector(".interaction-block");
     if (block) block.remove(); // 决策后隐藏审批块（全知聚同步）
   }
+  scheduleVirtualRender(); // 兜底：强制重渲消除残留卡片
 }
 
 function onMemberUpdated(evt) {
