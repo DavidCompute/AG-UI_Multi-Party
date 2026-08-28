@@ -47,12 +47,19 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Warning); // 减少噪音
 builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
 
-var app = builder.Build();
-
-// CORS：仅放行配置的可信源（Docker 页面源）；未配置时也不开放任意源（依赖令牌 + 回环）
+// CORS：仅放行配置的可信源（Docker 页面源）。AddCors 必须在 Build 前注册服务，否则 UseCors 运行时因解析不到 ICorsService 而崩溃。
 if (!string.IsNullOrEmpty(allowedOrigin))
 {
-    app.UseCors(c => c.WithOrigins(allowedOrigin).AllowAnyHeader().AllowAnyMethod());
+    builder.Services.AddCors(c =>
+        c.AddDefaultPolicy(p => p.WithOrigins(allowedOrigin).AllowAnyHeader().AllowAnyMethod()));
+}
+
+var app = builder.Build();
+
+if (!string.IsNullOrEmpty(allowedOrigin))
+{
+    // 未配置时也不开放任意源（依赖令牌 + 回环）
+    app.UseCors();
 }
 
 var bridge = new ShellRunner();
