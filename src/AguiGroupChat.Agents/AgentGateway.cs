@@ -2237,11 +2237,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var msgs = new List<ChatMessage> { new(ChatRole.User, [approval.CreateResponse(approved)]) };
         if (isClientTool && approved && !string.IsNullOrEmpty(toolResult))
         {
-            // 客户端执行技能：前端已在本地执行并回传结果 → 以一句明确的 User 消息注入模型，让其「拿到结果继续作答」
+            // 客户端执行技能：前端已在本地执行并回传结果 → 以一句明确的 User 消息注入模型，
+            // 并要求它先<b>回归校验</b>结果（是否正常 / 是否满足问题 / 有无风险），再做有洞察的结论，
+            // 而非直接复述原始输出。
             _logger.LogInformation("客户端技能恢复：注入前端执行结果 tool={Tool} agent={Agent} resultLen={Len}", fc!.Name, pending.Context.AgentId, toolResult.Length);
             ClientToolTrace.Write($"INJECT-RESULT tool={fc!.Name} agent={pending.Context.AgentId} resultLen={toolResult.Length} first= {toolResult.Substring(0, Math.Min(80, toolResult.Length))}");
             msgs.Add(new ChatMessage(ChatRole.User,
-                $"[前端工具] {fc.Name} 已在客户端执行完毕，请直接引用它的结果作答：\n{toolResult}\n（答完即可，无需再调用该工具）"));
+                $"[前端工具] {fc.Name} 已在本机执行完毕，下面是它返回的数据：\n{toolResult}\n\n"
+                + "请先对这份数据进行<b>回归校验</b>，再作答：\n"
+                + "① 数据是否完整可读、命令是否正常返回（有无报错/异常）；\n"
+                + "② 有没有值得关注的异常、风险或异常趋势（如磁盘将满、内存占用过高、连接异常、报错）；\n"
+                + "③ 基于该校验给出精炼结论和可执行的建议或下一步排查方向。\n"
+                + "不必复述原始字段，直接谈判断与建议；数据本身无法回答问题时如实说明。无需再调用该工具。"));
         }
         ClientToolTrace.Write($"RESUME-MSG tool={(fc?.Name ?? "?")} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} isClientAgentTool={isClientTool} agent={pending.Context.AgentId} msgCount={msgs.Count}");
         return msgs;

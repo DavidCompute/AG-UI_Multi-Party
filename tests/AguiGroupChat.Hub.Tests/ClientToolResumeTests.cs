@@ -65,11 +65,11 @@ public sealed class ClientToolResumeTests
             first.Add(u);
         var approval = Assert.Single(first.SelectMany(u => u.Contents).OfType<ToolApprovalRequestContent>());
 
-        // 恢复：按 BuildResumeMessage 的新行为——先 CreateResponse(true)，再追加一条 User 消息把前端结果直接注入模型上下文
+        // 恢复：按 BuildResumeMessage 的新行为——先 CreateResponse(true)，再追加一条 User 消息把前端结果直接注入模型上下文（含回归校验指令）
         var resumeInput = new ChatMessage[]
         {
             new(ChatRole.User, [approval.CreateResponse(approved: true)]),
-            new ChatMessage(ChatRole.User, "[前端工具] sk_hostname 已在客户端执行完毕，请直接引用它的结果作答：\nDESKTOP-PROBE-123\n（答完即可，无需再调用该工具）"),
+            new ChatMessage(ChatRole.User, "[前端工具] sk_hostname 已在本机执行完毕，下面是它返回的数据：\nDESKTOP-PROBE-123\n\n请先对这份数据进行回归校验，再作答。"),
         };
         var resumeTexts = new List<string>();
         await foreach (var u in agent.RunStreamingAsync(resumeInput, session))
