@@ -630,6 +630,12 @@ window.I18N_DICTS.zh = {
   /* --- 通用 --- */
   "common.saveFail": "保存失败：{err}",
 
+  /* --- 通用网页内对话框（uiDialog）--- */
+  "ui.confirm": "确认",
+  "ui.prompt": "输入",
+  "ui.ok": "确定",
+  "ui.cancel": "取消",
+
   /* --- 审批卡片 / 任务计划卡片 / 人机交互 (interaction) --- */
   "itx.planCardTitle": "任务计划",
   "itx.multiSelect": "（可多选）",
@@ -655,6 +661,9 @@ window.I18N_DICTS.zh = {
   "itx.clientToolRun": "▶ 在客户端执行",
   "itx.clientToolDone": "✅ 已在客户端执行，等待数字员工继续…",
   "itx.clientToolRunning": "⏳ 正在客户端执行…",
+  "itx.clientToolConfirmRun": "🤔 数字员工请求在本机执行以下客户端 shell 技能：",
+  "itx.clientToolRunConfirm": "▶ 在本机执行",
+  "itx.cancel": "取消",
   "itx.clientToolRetry": "重试",
   "itx.clientToolRetryTip": "前端工具执行失败或被拒绝时，可手动重新执行",
   "itx.clientToolConfirmShell": "数字员工请求在本机执行以下命令（客户端 shell 技能）：\n\n{cmd}\n\n确认执行吗？",

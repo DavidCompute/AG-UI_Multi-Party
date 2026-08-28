@@ -997,6 +997,19 @@
     </div>
   </div>
 
+  <!-- 通用对话框（替代系统 confirm / prompt）：确认 / 输入两种模式，均由网页内弹层呈现 -->
+  <div id="uiDialog" class="modal-overlay hidden">
+    <div class="modal ui-dialog">
+      <div id="uiDialogTitle" class="modal-title">确认</div>
+      <div id="uiDialogMsg" class="ui-dialog-msg"></div>
+      <input id="uiDialogInput" class="modal-input hidden" type="text" maxlength="200" />
+      <div class="modal-actions ui-dialog-actions">
+        <button id="uiDialogCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
+        <button id="uiDialogOk" class="send" data-i18n="ui.ok">确定</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
   <script src="/vendor/marked.min.js"></script>
   <script src="/vendor/purify.min.js"></script>

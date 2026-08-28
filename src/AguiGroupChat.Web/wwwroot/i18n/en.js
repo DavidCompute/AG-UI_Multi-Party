@@ -632,6 +632,12 @@ window.I18N_DICTS.en = {
   /* --- 通用 --- */
   "common.saveFail": "Save failed: {err}",
 
+  /* --- In-page dialog (uiDialog) --- */
+  "ui.confirm": "Confirm",
+  "ui.prompt": "Input",
+  "ui.ok": "OK",
+  "ui.cancel": "Cancel",
+
   /* --- 审批卡片 / 任务计划卡片 / 人机交互 (interaction) --- */
   "itx.planCardTitle": "Task plan",
   "itx.multiSelect": "(multi-select)",
@@ -657,6 +663,9 @@ window.I18N_DICTS.en = {
   "itx.clientToolRun": "▶ Run on client",
   "itx.clientToolDone": "✅ Executed on client, waiting for the digital employee to continue…",
   "itx.clientToolRunning": "⏳ Running on client…",
+  "itx.clientToolConfirmRun": "🤔 The digital employee requests to run the following client shell skill on this machine:",
+  "itx.clientToolRunConfirm": "▶ Run on this machine",
+  "itx.cancel": "Cancel",
   "itx.clientToolRetry": "Retry",
   "itx.clientToolRetryTip": "The frontend tool failed or was declined; run it again manually",
   "itx.clientToolConfirmShell": "The digital employee asks to run this command on this machine (client shell skill):\n\n{cmd}\n\nConfirm execution?",

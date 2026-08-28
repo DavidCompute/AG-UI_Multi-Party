@@ -787,6 +787,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
 }
 .toast.show { display: block; }
 
+/* 通用对话框（替代系统 confirm / prompt）：消息区保留换行，输入框跟随弹层样式 */
+.ui-dialog { width: 400px; max-width: 92vw; }
+.ui-dialog-msg { font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word; margin-bottom: 4px; max-height: 45vh; overflow-y: auto; }
+.ui-dialog .modal-input { margin-top: 12px; }
+.ui-dialog-actions { margin-top: 16px; }
+.ui-dialog .send.danger { background: var(--danger, #e5534b); }
+
 /* 创建群弹窗 */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.55);

@@ -621,7 +621,7 @@ async function loadMemoryList(offset = memOffset) {
     });
     list.querySelectorAll(".mem-del").forEach((btn) => {
       btn.onclick = async () => {
-        if (!confirm(t("memory.delConfirm"))) return;
+        if (!await uiConfirm({ message: t("memory.delConfirm") })) return;
         const res = await fetch(`/ag-ui/memory/${encodeURIComponent(btn.dataset.mid)}`, {
           method: "DELETE",
           headers: { Authorization: "Bearer " + (state.token || "") },
@@ -1667,7 +1667,7 @@ async function saveSkill() {
 async function testSkill(skillId) {
   const id = skillId || editingSkillId;
   if (!id) { toast(t("skill.err.saveFirst")); return; }
-  const query = prompt(t("skill.testQuery"), "你好");
+  const query = await uiPrompt({ title: t("skill.testRun"), message: t("skill.testQuery"), defaultValue: "你好" });
   if (query === null) return;
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {
@@ -1682,7 +1682,7 @@ async function testSkill(skillId) {
 
 /** 删除技能。 */
 async function deleteSkill(skillId) {
-  if (!confirm(t("skill.delConfirm", { name: skillId }))) return;
+  if (!await uiConfirm({ message: t("skill.delConfirm", { name: skillId }) })) return;
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(skillId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
     if (!res.ok) { const d = await res.json().catch(() => null); toast(t("common.saveFail", { err: errMsg(d, res.status) })); return; }
@@ -1842,7 +1842,7 @@ function renderKbModal() {
       ${mine ? `<input type="file" class="hidden kb-file" data-kb="${escapeHtml(kb.kbId)}" accept=".txt,.md,.docx,.xlsx,.pptx,.pdf,.json,.csv" />` : ""}`;
     box.querySelectorAll(".kb-doc-del").forEach((btn) => {
       btn.onclick = async () => {
-        if (!confirm(t("kb.docDelConfirm"))) return;
+        if (!await uiConfirm({ message: t("kb.docDelConfirm"), danger: true })) return;
         const res = await fetch(`/ag-ui/kb/${btn.dataset.kb}/documents/${btn.dataset.doc}`, {
           method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
         });
@@ -1862,7 +1862,7 @@ function renderKbModal() {
     };
     const delBtn = box.querySelector(".kb-del");
     if (delBtn) delBtn.onclick = async () => {
-      if (!confirm(t("kb.delConfirm"))) return;
+      if (!await uiConfirm({ message: t("kb.delConfirm"), danger: true })) return;
       const res = await fetch(`/ag-ui/kb/${delBtn.dataset.kb}`, {
         method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
       });
@@ -2076,7 +2076,7 @@ async function enableTwin() {
 /** 停用分身：删除分身并退出全部知聚。 */
 async function disableTwin() {
   if (!state.token) return;
-  if (!confirm(t("profile.twinDisableConfirm"))) return;
+  if (!await uiConfirm({ message: t("profile.twinDisableConfirm"), danger: true })) return;
   try {
     const res = await fetch("/ag-ui/twin/disable", {
       method: "POST",
@@ -2270,7 +2270,7 @@ async function disbandGroup() {
   const gid = state.activeGroupId;
   const g = state.groups.find((x) => x.groupId === gid);
   if (!g) return;
-  if (!confirm(t("gs.disbandConfirm", { name: g.groupName }))) return;
+  if (!await uiConfirm({ message: t("gs.disbandConfirm", { name: g.groupName }), danger: true })) return;
   try {
     const res = await fetch("/ag-ui/group/disband", {
       method: "POST",
@@ -3029,10 +3029,18 @@ function onInteractionRequest(evt) {
   bindInteractionButtons(div, m);
   if (contentEl) contentEl.after(div);
   else msgEl.querySelector(".body").appendChild(div);
-  // 前端工具（客户端执行技能）：触发者本人自动执行——http 直接 fetch，shell 先弹确认再执行；执行完自动回传结果
-  if (m.interaction.kind === "client_tool" && m.interaction.canDecide) {
+  // 前端工具（客户端执行技能）：http 无敏感操作——触发者本人自动 fetch 并回传；shell 需在卡片内人工确认——不自动执行，
+  // 由用户点击卡片「▶ 在本机执行」按钮触发（确认动作发生在聊天历史内，而非系统弹窗）。
+  if (m.interaction.kind === "client_tool" && m.interaction.canDecide && clientToolKind(m.interaction) === "http") {
     runClientTool(m);
   }
+}
+
+/** 解析客户端执行技能的 kind（http / shell），异常时回退 http。 */
+function clientToolKind(itx) {
+  let cfg = null;
+  try { cfg = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { cfg = null; }
+  return (cfg && cfg.kind) || "http";
 }
 
 /** 以最新卡片状态替换消息内的卡片块（局部更新，需重新绑定按钮点击）。 */
@@ -3241,8 +3249,15 @@ function renderInteractionCard(m) {
     }</div>`;
   } else if (itx.canDecide) {
     if (isClientTool) {
-      // 前端工具：触发者本人已自动执行（见 onInteractionRequest）；执行中显示状态，失败/被拒时可用「重试」手动再跑
-      actions = `<div class="itx-status">${t("itx.clientToolRunning")} <button class="itx-btn approve" data-act="run" title="${escapeHtml(t("itx.clientToolRetryTip"))}">${t("itx.clientToolRetry")}</button></div>`;
+      // 前端工具：shell 需在聊天历史卡片内人工确认——显示「执行 / 取消」按钮；http 自动执行（见 onInteractionRequest），执行中显示状态并可重试
+      if (clientToolKind(itx) === "shell") {
+        actions = `<div class="itx-status">${t("itx.clientToolConfirmRun")} <span class="itx-actions">`
+          + `<button class="itx-btn approve" data-act="run">${t("itx.clientToolRunConfirm")}</button>`
+          + `<button class="itx-btn reject" data-act="reject">${t("itx.cancel")}</button>`
+          + `</span></div>`;
+      } else {
+        actions = `<div class="itx-status">${t("itx.clientToolRunning")} <button class="itx-btn approve" data-act="run" title="${escapeHtml(t("itx.clientToolRetryTip"))}">${t("itx.clientToolRetry")}</button></div>`;
+      }
     } else if (isInput) {
       // 结构化问题卡片优先，其次 schema 表单；两者都没有时用单输入框（占位符带上输入字段名）
       const hint = itx.inputField ? t("itx.inputFieldPh", { field: itx.inputField }) : t("itx.inputPh");
@@ -3322,10 +3337,7 @@ async function runClientTool(m) {
   let result;
   try {
     if (kind === "shell") {
-      // 敏感操作（shell）：先在浏览器侧确认（交互形态 2：shell 需确认，http 自动执行），拒绝则保留卡片供手动重试
-      if (!confirm(t("itx.clientToolConfirmShell", { cmd: clientToolSubstitute(cfg.command, itx.toolArguments).trim() || "" }))) {
-        return;
-      }
+      // 确认已由聊天历史内的卡片「▶ 在本机执行」按钮完成；此处仅执行
       // 本机桥：配置了本机工具桥（Docker + 浏览器在本机）时用其地址+令牌，在本机执行 shell（结果来自浏览器所在主机）；
       // 未配置则回落到服务器端 /ag-ui/client-tool（桌面壳 / 服务器即本机时）。请求参数：command、cwd、超时；${query} 占位经参数替换
       const command = clientToolSubstitute(cfg.command, itx.toolArguments).trim();
@@ -3821,7 +3833,7 @@ function renderTopicBar() {
 
   /** 清空话题聊天记录（含主话题）：调 /ag-ui/group/topic/clear，本地移除该话题消息与全局索引。 */
   const clearTopic = async (topicId, name) => {
-    if (!confirm(t("topic.clearConfirm", { name }))) return;
+    if (!await uiConfirm({ message: t("topic.clearConfirm", { name }), danger: true })) return;
     try {
       const res = await fetch("/ag-ui/group/topic/clear", {
         method: "POST",
@@ -3870,7 +3882,7 @@ function renderTopicBar() {
       del.title = t("topic.deleteTitle");
       del.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm(t("topic.deleteConfirm", { name: tpc.name }))) return;
+        if (!await uiConfirm({ message: t("topic.deleteConfirm", { name: tpc.name }), danger: true })) return;
         try {
           const res = await fetch("/ag-ui/group/topic/delete", {
             method: "POST",
@@ -4111,7 +4123,7 @@ async function adminUserAction(op, uid, name) {
     if (!u) { toast(t("admin.userNotFound")); return; }
     const disabled = !u.isDisabled;
     const actionText = disabled ? t("admin.userDisableConfirm", { name }) : t("admin.userEnableConfirm", { name });
-    if (!confirm(actionText)) return;
+    if (!await uiConfirm({ message: actionText, danger: disabled })) return;
     const res = await fetch(`/ag-ui/admin/users/${encodeURIComponent(uid)}/disabled`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
@@ -4122,7 +4134,7 @@ async function adminUserAction(op, uid, name) {
     toast(disabled ? t("admin.userDisabled", { name }) : t("admin.userEnabled", { name }));
     await loadAdminUsers();
   } else if (op === "resetpw") {
-    const pw = prompt(t("admin.resetPwPrompt", { name }));
+    const pw = await uiPrompt({ title: t("admin.resetPwTitle", { name }), message: t("admin.resetPwPrompt", { name }), required: true });
     if (pw === null) return;
     if (pw.length < 6) { toast(t("admin.pwMin")); return; }
     const res = await fetch(`/ag-ui/admin/users/${encodeURIComponent(uid)}/password`, {
@@ -4468,7 +4480,7 @@ function renderMembers() {
       rm.title = t("member.remove");
       rm.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm(t("member.removeConfirm", { name: m.nickname || m.memberId }))) return;
+        if (!await uiConfirm({ message: t("member.removeConfirm", { name: m.nickname || m.memberId }), danger: true })) return;
         try {
           const res = await fetch("/ag-ui/group/member/remove", {
             method: "POST",
@@ -5091,7 +5103,7 @@ function bindCopyButton(btn, m) {
 function bindRegenerateButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm(t("msg.regenConfirm"))) return;
+    if (!await uiConfirm({ message: t("msg.regenConfirm") })) return;
     try {
       const res = await fetch("/ag-ui/group/message/regenerate", {
         method: "POST",
@@ -5147,7 +5159,7 @@ function attachHeadActions(msgEl, m, r) {
 function bindRecallButton(btn, m) {
   btn.onclick = async (e) => {
     e.stopPropagation();
-    if (!confirm(t("msg.recallConfirm"))) return;
+    if (!await uiConfirm({ message: t("msg.recallConfirm"), danger: true })) return;
     try {
       const res = await fetch("/ag-ui/group/message/recall", {
         method: "POST",
@@ -6206,6 +6218,79 @@ function toast(text) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
 }
 
+/* ============ 通用网页内对话框（替代系统 confirm / prompt） ============ */
+
+// 单例：一次只展示一个。resolve 回调在关闭时调用（confirm: true/false；prompt: 输入值或 null=取消）。
+let _uiDialogResolve = null;
+
+function _closeUiDialog(v) {
+  const fn = _uiDialogResolve;
+  _uiDialogResolve = null;
+  $("uiDialog").classList.add("hidden");
+  if (fn) fn(v);
+}
+
+function _bindUiDialogKeys() {
+  // 全局 ESC / Enter：仅当对话框可见且无其它弹层干扰时生效（用捕获阶段避免与输入框 Enter 冲突）
+  document.addEventListener("keydown", (e) => {
+    if (_uiDialogResolve === null || $("uiDialog").classList.contains("hidden")) return;
+    if (e.key === "Escape") { e.preventDefault(); _closeUiDialog(null); }
+  });
+}
+
+/** 通用确认框（Promise<boolean>）。opts: { title, message, okText, cancelText, danger }。 */
+function uiConfirm(opts) {
+  return new Promise((resolve) => {
+    _uiDialogResolve = resolve;
+    $("uiDialogTitle").textContent = opts.title || t("ui.confirm");
+    $("uiDialogMsg").textContent = opts.message || "";
+    $("uiDialogMsg").style.display = "";
+    $("uiDialogInput").classList.add("hidden");
+    $("uiDialogInput").value = "";
+    const ok = $("uiDialogOk");
+    ok.textContent = opts.okText || t("ui.ok");
+    ok.classList.toggle("danger", !!opts.danger);
+    $("uiDialogCancel").style.display = "";
+    $("uiDialogCancel").textContent = opts.cancelText || t("ui.cancel");
+    $("uiDialog").classList.remove("hidden");
+    ok.onclick = () => _closeUiDialog(true);
+    $("uiDialogCancel").onclick = () => _closeUiDialog(false);
+  });
+}
+
+/** 通用输入框（Promise<string|null>，null=取消）。opts: { title, message, defaultValue, okText, cancelText, required }。 */
+function uiPrompt(opts) {
+  return new Promise((resolve) => {
+    _uiDialogResolve = resolve;
+    $("uiDialogTitle").textContent = opts.title || t("ui.prompt");
+    $("uiDialogMsg").textContent = opts.message || "";
+    $("uiDialogMsg").style.display = "";
+    const inputEl = $("uiDialogInput");
+    inputEl.classList.remove("hidden");
+    inputEl.value = opts.defaultValue || "";
+    const ok = $("uiDialogOk");
+    ok.textContent = opts.okText || t("ui.ok");
+    ok.classList.remove("danger");
+    $("uiDialogCancel").style.display = "";
+    $("uiDialogCancel").textContent = opts.cancelText || t("ui.cancel");
+    $("uiDialog").classList.remove("hidden");
+    const submit = () => {
+      const v = inputEl.value;
+      if (opts.required && !(v && v.trim())) { inputEl.focus(); return; }
+      _closeUiDialog(v);
+    };
+    ok.onclick = submit;
+    $("uiDialogCancel").onclick = () => _closeUiDialog(null);
+    inputEl.onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); submit(); }
+    };
+    inputEl.focus();
+    inputEl.select();
+  });
+}
+
+_bindUiDialogKeys(); // 绑定一次即可
+
 /* ============ 初始化 ============ */
 
 function init() {
@@ -6283,7 +6368,7 @@ function init() {
     const hours = Number($("memForgetRange").value) * 24;
     const scope = groupId ? t("memory.scopeThis") : t("memory.scopeAll");
     const retain = hours ? t("memory.forgetRetain", { n: hours / 24 }) : t("memory.forgetImmediate");
-    if (!confirm(t("memory.forgetConfirm", { scope, retain }))) return;
+    if (!await uiConfirm({ message: t("memory.forgetConfirm", { scope, retain }), danger: true })) return;
     const btn = $("memForgetConfirm");
     const orig = btn.textContent;
     btn.disabled = true; btn.textContent = "⏳…";
