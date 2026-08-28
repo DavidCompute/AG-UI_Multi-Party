@@ -3234,7 +3234,7 @@ function renderChainCard(chainJson) {
 /** 渲染人机交互卡片：approval（工具审批）→ 批准 / 拒绝按钮；input / choice / multi_choice（请求输入 / 单选 / 多选）→ 按 responseSchema 渲染表单或单输入框。 */
 function renderInteractionCard(m) {
   const itx = m.interaction;
-  if (!itx || itx.resolved) return ""; // 已决策：彻底隐藏审批/交互卡（不再显示“已批准”状态块），确保不会随任何重渲染复活
+  if (!itx || itx.resolved || itx._running) return ""; // 已决策或执行中：整卡彻底隐藏，不随任何重渲染复活
   const isClientTool = itx.kind === "client_tool" || itx.kind === "client_tool_batch"; // 客户端执行技能：由前端在本机执行并回传结果
   const isInput = itx.kind === "input" || itx.kind === "choice" || itx.kind === "multi_choice";
   // 工具参数：approval / input 型均显示（外部 question 工具的问题与选项常在参数里，供用户判断要输入什么）；空对象不显示
@@ -3276,11 +3276,8 @@ function renderInteractionCard(m) {
     }</div>`;
   } else if (itx.canDecide) {
     if (isClientTool) {
-      // 执行中：点击执行后立即隐藏确认/批量按钮，改为显示执行状态
-      if (itx._running) {
-        actions = `<div class="itx-status">${t("itx.clientToolRunning")}</div>`;
-      } else if (itx.kind === "client_tool_batch") {
-        // 批量（编排计划「本机一键执行全部」）：一次确认后前端逐个执行，减少确认次数
+      // 批量（编排计划「本机一键执行全部」）：一次确认后前端逐个执行，减少确认次数
+      if (itx.kind === "client_tool_batch") {
         actions = `<div class="itx-status">${t("itx.batchConfirmRun")} <span class="itx-actions">`
           + `<button class="itx-btn approve" data-act="runBatch">${t("itx.batchRunAll")}</button>`
           + `<button class="itx-btn reject" data-act="reject">${t("itx.cancel")}</button>`
@@ -5083,8 +5080,8 @@ function msgDom(m, r) {
   // 流式截断提示：内容超限（正文 / 思考）时在消息头部提示，避免误以为回复不完整
   const truncatedHint = m.truncated ? `<div class="msg-truncated">${escapeHtml(t("msg.truncated"))}</div>` : "";
   // 审批卡片嵌入数字员工回复内部：独立块（interaction-block），紧跟内容区，不受流式内容局部更新影响；
-  // 触发者做出选择后隐藏（resolved）——历史重建时也不再渲染
-  const interactionBlock = m.interaction && !m.interaction.resolved && !m.recalled
+  // 触发者做出选择（resolved）或正在执行（_running）后隐藏——历史重建时也不再渲染
+  const interactionBlock = m.interaction && !m.interaction.resolved && !m.interaction._running && !m.recalled
     ? `<div class="interaction-block">${renderInteractionCard(m)}</div>`
     : "";
   // 技能调用链（链路可视化）：仅 agent 消息、非撤回、有链数据时渲染嵌套调用卡片
