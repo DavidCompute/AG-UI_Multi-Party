@@ -181,7 +181,7 @@ docker compose down
 | `AGENTS_MODEL` | `deepseek-chat` | 默认模型名 |
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
-| `AGENTS_COORDINATOR_PLANNING` | `false` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行（默认关） |
+| `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
 | `STORAGE_PROVIDER` | `postgres` | 存储模式：`postgres`（默认，企业级落盘）、`memory`（进程内 + JSON 快照）、`sqlite` / `mysql`（单文件 / MySQL 落盘）、`redis`（多副本共享，6.2） |
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL 库名 / 用户 / 密码（`STORAGE_PROVIDER=postgres` 时生效） |
@@ -667,6 +667,17 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 2. 在网页端打开「修改资料」→「本机工具桥」，点 **🔍 一键检测** 自动填入桥地址 + 令牌，再点保存。
    也可手动填**桥地址**（如 `http://127.0.0.1:17321/ag-ui/client-tool`）与**桥令牌**。留空则回落到服务器端本机桥。
 3. 触发 `ps_hostname` 之类的客户端 shell 技能，前端确认后交给本机桥在本机执行，模型会引用您电脑的真实主机名。
+
+#### 编排计划中的客户端技能：本机一键执行全部
+
+数字员工在<b>编排计划</b>（`CoordinatorPlanning`，默认开启）里若一次规划出<b>多个需要在本机执行的客户端技能</b>
+（如 `ops_system_info` / `ops_disk_usage` / `ops_memory_cpu` …），网关会把它们合并成一张
+「💻 本机一键执行全部」确认卡：一次确认后，前端逐个通过本机桥执行并<b>逐条点亮计划卡</b>，
+所有结果回传后由数字员工<b>综合回归</b>给出结论。这样既保留了“问题 → 定计划 → 激活执行”的编排形态，
+又把“逐个确认”降为一次，适合多技能联查（系统、磁盘、内存、进程、网络、服务、事件日志等）。
+
+> 提示：客户端执行技能的判定依据是 `ExecutionLocation = Client`。要触发编排计划，数字员工需要配置
+> `AssignmentIds`（可指派的下属）或 `EscalationAgentId`（提升目标），且由 `@` 触发。
 
 ## 配置（appsettings.json → `GroupChat` 节点）
 
