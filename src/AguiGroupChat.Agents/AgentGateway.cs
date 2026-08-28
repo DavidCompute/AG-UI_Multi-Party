@@ -827,7 +827,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     /// <summary>最多纳入计划的清单项 / 步骤数（防配置病态深链 / 打爆模型时长）。</summary>
     private const int CoordinatorPlanMaxItems = 12;
-    private const int CoordinatorPlanMaxSteps = 6;
+    private const int CoordinatorPlanMaxSteps = 8;
 
     /// <summary>
     /// 构建一张编排计划（只规划、不执行）：把问题、可指派的组织下属、可调用技能显式列给路由模型，
@@ -1136,6 +1136,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             + "- 若需要某数字员工提供信息/处理某部分 → {\"action\":\"dispatch\",\"target\":\"<该员工id>\"}\n"
             + "- 若需要调用某技能做检测/验证 → {\"action\":\"skill\",\"target\":\"<该技能id>\"}\n"
             + "- 最后用一步 {\"action\":\"answer\",\"note\":\"<你要怎么综合答复>\"} 汇总。\n"
+            + "<b>多技能组合优先</b>：当用户想排查/全面检查（如“电脑/系统有没有问题、是不是异常、检查一下”）时，\n"
+            + "请在可用技能中挑选<b>多个相互补充</b>的检测项（如系统信息、磁盘、内存/CPU、进程、网络、服务、事件日志）组合成连续步骤，\n"
+            + "一起跑完后再综合判断——不要只挑一个就把结论下死。技能若无需特定输入（技能描述未标【需要输入：…】），可直接作为互不依赖的连续步骤。\n"
             + "<b>依赖顺序很重要</b>：如果一个技能<b>需要某个输入</b>（见技能后的【需要输入：…】），而这个输入由某位员工掌握，\n"
             + "你必须<b>先用一步 dispatch 该员工拿到输入值</b>，<b>再</b>在后续步骤里调用该技能——技能步骤会自动收到它前一步的结果作为输入。\n"
             + "例如：要“测 Exchange 连接”需先知道 OWA 地址，而地址由配置管理员提供，则应安排 [dispatch→配置管理员, skill→连接测试技能, answer]。\n"
