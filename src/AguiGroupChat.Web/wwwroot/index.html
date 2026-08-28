@@ -623,6 +623,18 @@
         <span style="color:#8a8f98;font-size:12px" data-i18n="profile.personalMemoryHint">（默认关闭。开启后，数字员工回复您时会参考您在其他对话中的历史发言，帮助了解您的偏好；关闭时您的发言不会被作为个人记忆读取）</span>
       </div>
 
+      <div class="form-section" data-i18n="profile.bridgeSection">本机工具桥</div>
+      <div class="form-group">
+        <label data-i18n="profile.bridgeUrl">桥地址（Bridge URL）</label>
+        <input id="pfBridgeUrl" class="modal-input" data-i18n-placeholder="profile.bridgeUrlPh" />
+        <p class="form-hint" data-i18n="profile.bridgeUrlHint">Docker + 浏览器在本机时，填写在本机运行的 NativeBridge 地址；客户端 shell 技能将在浏览器所在主机执行（而非 Docker 服务器）。留空则回落到服务器端执行。</p>
+      </div>
+      <div class="form-group">
+        <label data-i18n="profile.bridgeToken">桥令牌（Bridge token）</label>
+        <input id="pfBridgeToken" class="modal-input" type="password" autocomplete="off" data-i18n-placeholder="profile.bridgeTokenPh" />
+        <p class="form-hint" data-i18n="profile.bridgeTokenHint">NativeBridge 启动时会打印一行令牌；也可用 --token 固定。留空时使用当前会话令牌。</p>
+      </div>
+
       <div class="form-section" data-i18n="profile.twinSection">AI 分身</div>
       <div class="form-group">
         <label data-i18n="profile.trigger">触发方式</label>

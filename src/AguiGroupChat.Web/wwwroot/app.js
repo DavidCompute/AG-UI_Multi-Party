@@ -47,6 +47,10 @@ const state = {
   // 按知聚记忆的话题：groupId → 话题 ID（持久化 localStorage，切知聚/再登录自动恢复）
   topicMemory: new Map(),
   visibility: "all",
+  // 本机工具桥（Docker + 浏览器在本机时）：客户端 shell 技能改由浏览器所在主机上的本机桥执行，
+  // 而非在 Docker 服务器上执行。url=桥端点，token=桥鉴权令牌；为空则回落到服务器端 /ag-ui/client-tool。
+  nativeBridgeUrl: "", // http://127.0.0.1:17321/ag-ui/client-tool
+  nativeBridgeToken: "",
   // 应用内通知中心（5.4）：{ id, type, icon, title, body, groupId?, topicId?, ts, read }[]
   notifications: [],
   notifSeq: 0,
@@ -321,6 +325,9 @@ function enterApp(data) {
   state.isAdmin = !!data.isAdmin; // 系统管理员：数据备份 / 模型配置等管理菜单仅管理员可见
   storeAuth({ memberId: data.userId, token: data.token, nickname: data.nickname });
   state.topicMemory = loadTopicMemory(data.userId); // 恢复该用户的话题记忆
+  const bridge = loadBridgeConfig(data.userId); // 恢复本机工具桥配置（Docker + 浏览器在本机时执行客户端 shell）
+  state.nativeBridgeUrl = bridge.url;
+  state.nativeBridgeToken = bridge.token;
   pendingAutoEnterGroup = true; // 知聚列表加载完成后自动进入上次选择的知聚
   hideAuth();
   // 尽早建立 WebSocket：不依赖下方任何渲染，避免渲染异常阻断连接导致在线状态停留在 Offline
@@ -664,6 +671,27 @@ function loadTopicMemory(uid) {
 
 function saveTopicMemory(uid) {
   try { localStorage.setItem(TopicMemKey(uid), JSON.stringify(Object.fromEntries(state.topicMemory))); } catch {}
+}
+
+/* ============ 本机工具桥配置（按用户持久化，供 Docker + 浏览器在本机时执行客户端 shell） ============ */
+
+const BridgeKey = (uid) => "agui.bridge." + uid;
+
+/** 读取该用户的本机工具桥配置（{ url, token }），未配置返回空。 */
+function loadBridgeConfig(uid) {
+  try {
+    const raw = localStorage.getItem(BridgeKey(uid));
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && (o.url || o.token)) return { url: o.url || "", token: o.token || "" };
+    }
+  } catch {}
+  return { url: "", token: "" };
+}
+
+/** 保存该用户的本机工具桥配置。 */
+function saveBridgeConfig(uid, cfg) {
+  try { localStorage.setItem(BridgeKey(uid), JSON.stringify({ url: (cfg.url || "").trim(), token: (cfg.token || "").trim() })); } catch {}
 }
 
 /* ============ 数字员工管理（运行时可新增 / 编辑 / 删除 AI 角色） ============ */
@@ -1937,6 +1965,8 @@ async function submitChangePassword() {
 function openProfileModal() {
   $("pfNickname").value = $("meNickname").textContent;
   $("pfPersonalMemory").checked = !!state.personalMemoryEnabled;
+  $("pfBridgeUrl").value = state.nativeBridgeUrl || "";
+  $("pfBridgeToken").value = state.nativeBridgeToken || "";
   profileAvatar = state.avatar || null; // null = 未改动
   pfAvatarPicker.render(state.avatar || "");
   refreshTwinUi(null); // 默认未启用，随后异步查询
@@ -2078,6 +2108,10 @@ async function submitProfile() {
     $("meNickname").textContent = data.nickname || state.memberId;
     state.avatar = data.avatar || null;
     state.personalMemoryEnabled = !!data.personalMemoryEnabled;
+    // 本机工具桥配置：仅在填写时持久化；留空视为“使用服务器端本机桥”
+    state.nativeBridgeUrl = $("pfBridgeUrl").value.trim();
+    state.nativeBridgeToken = $("pfBridgeToken").value.trim();
+    saveBridgeConfig(state.memberId, { url: state.nativeBridgeUrl, token: state.nativeBridgeToken });
     updateAuthNickname(data.nickname); // 同步会话快照昵称（sessionStorage + localStorage）
     renderMeAvatar();
     loadUserDirectory();
@@ -3263,12 +3297,15 @@ async function runClientTool(m) {
       if (!confirm(t("itx.clientToolConfirmShell", { cmd: clientToolSubstitute(cfg.command, itx.toolArguments).trim() || "" }))) {
         return;
       }
-      // 本机桥：桌面壳暴露鉴权端点执行 shell。请求参数：command（来自 ClientRunner）、cwd、超时；${query} 占位经参数替换
+      // 本机桥：配置了本机工具桥（Docker + 浏览器在本机）时用其地址+令牌，在本机执行 shell（结果来自浏览器所在主机）；
+      // 未配置则回落到服务器端 /ag-ui/client-tool（桌面壳 / 服务器即本机时）。请求参数：command、cwd、超时；${query} 占位经参数替换
       const command = clientToolSubstitute(cfg.command, itx.toolArguments).trim();
       if (!command) { toast(t("itx.clientToolNoCmd")); return; }
-      const res = await fetch("/ag-ui/client-tool", {
+      const bridgeUrl = state.nativeBridgeUrl || "/ag-ui/client-tool";
+      const bridgeToken = state.nativeBridgeUrl ? (state.nativeBridgeToken || "") : (state.token || "");
+      const res = await fetch(bridgeUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.token}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${bridgeToken}` },
         body: JSON.stringify({ kind: "shell", command, cwd: cfg.cwd || ".", timeoutSec: cfg.timeoutSec || 30, query: itx.toolArguments?.query || undefined }),
       });
       if (!res.ok) { throw new Error((await res.text()) || res.statusText); }

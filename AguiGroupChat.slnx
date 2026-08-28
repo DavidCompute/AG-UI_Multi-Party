@@ -8,6 +8,7 @@
     <Project Path="src/AguiGroupChat.Desktop.Core/AguiGroupChat.Desktop.Core.csproj" />
     <Project Path="src/AguiGroupChat.Desktop.Cross/AguiGroupChat.Desktop.Cross.csproj" />
     <Project Path="src/AguiGroupChat.Hub/AguiGroupChat.Hub.csproj" />
+    <Project Path="src/AguiGroupChat.NativeBridge/AguiGroupChat.NativeBridge.csproj" />
     <Project Path="src/AguiGroupChat.Sdk/AguiGroupChat.Sdk.csproj" />
     <Project Path="src/AguiGroupChat.Web/AguiGroupChat.Web.csproj" />
   </Folder>

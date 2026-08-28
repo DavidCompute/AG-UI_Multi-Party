@@ -625,6 +625,44 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 自定义网关时，在 `Program.cs` / `HubApp.ConfigureServices` 中替换 DI 注册：
 `builder.Services.AddSingleton<IAgentGateway, YourGateway>();`
 
+### 客户端工具（客户端执行技能）与“本机工具桥”
+
+技能在定义时可选 `ExecutionLocation = Client`（连同 `kind=http/shell/prompt` 的 `ClientRunner` 配置），
+数字员工调用此类技能时会下发一张 `kind=client_tool` 交互卡，由**前端在浏览器/WebView 中执行**并回传结果，
+而非在服务器上执行。交互形态：`http` 自动执行；`shell` 先弹确认再执行。
+
+纯浏览器 JS 无法直接运行本机 shell，因此 `shell` 类的客户端技能需要一个**本机执行通道**。项目提供两个选择：
+
+- **服务器端本机桥**（默认）：`/ag-ui/client-tool`（`MapClientToolBridgeApi`），在**服务器/桌面壳**上执行。
+  桌面版天然适用（桌面壳即本机）；但 **Docker + 浏览器在本机（如 aibook）**时，它会在 **Docker 容器**里执行，
+  得到的 `hostname` 是容器名而不是您电脑。
+- **独立本机工具桥（NativeBridge）**：新增独立控制台项目 `src/AguiGroupChat.NativeBridge`，
+  在**浏览器所在的主机**上运行，让浏览器执行本机 shell（即浏览器所在那台机器的真实结果）。
+
+#### Docker + 浏览器在本机：启用 NativeBridge 的步骤
+
+1. 在浏览器所在主机（Windows 建议直接运行，Linux/macOS 用 `dotnet run`）构建并启动本机桥：
+
+   ```bash
+   # 先构建发布，再运行（Windows 直接双击/命令行均可）
+   dotnet publish src/AguiGroupChat.NativeBridge -c Release
+   ./src/AguiGroupChat.NativeBridge/bin/Release/.../AguiGroupChat.NativeBridge.exe
+   ```
+
+   启动后打印监听地址与令牌（例如 `http://127.0.0.1:17321/ag-ui/client-tool` 与一段随机令牌）。
+   若浏览器页面来源与 `127.0.0.1` 跨源，需用 `--allowed-origin` 指明页面源：
+
+   ```bash
+   AguiGroupChat.NativeBridge.exe --port 17321 --token my-token --allowed-origin http://<Docker主机>:5200
+   ```
+
+   > 本机桥只监听回环 `127.0.0.1`，令牌鉴权 + CORS 白名单，命令在用户临时目录沙箱内运行，带超时与输出截断，
+   > 详见 `ShellRunner.cs`。
+
+2. 在网页端打开「修改资料」→「本机工具桥」，填入上面的**桥地址**（如 `http://127.0.0.1:17321/ag-ui/client-tool`）
+   与**桥令牌**，保存。留空则回落到服务器端本机桥。
+3. 触发 `ps_hostname` 之类的客户端 shell 技能，前端确认后交给本机桥在本机执行，模型会引用您电脑的真实主机名。
+
 ## 配置（appsettings.json → `GroupChat` 节点）
 
 | 键 | 默认 | 说明 |
