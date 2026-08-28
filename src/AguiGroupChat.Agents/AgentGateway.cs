@@ -1006,15 +1006,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
         }
 
-        // 5) 综合答复制止
+        // 5) 综合答复制止（计划卡步骤全部点亮，先标记完成）
         display[^1] = new PlanStepInfo { Id = display[^1].Id, Text = display[^1].Text, Done = true };
         await BroadcastPlanAsync(gid, messageId, display, ct);
 
-        // 链路可视化
+        // 链路可视化（已收集的计划展开阶段的调用链保留）
         RecordStandinChain(context, hops);
 
-        // 4) 综合答复
-        var final = await SynthesizePlanAnswerAsync(context, root, plan.Input, sb.ToString(), ct);
+        // 6) 递归综合答复：模型基于已收集结果作答；若发现不足，主动补查（客户端技能批量确认 / 服务端技能 / 指派下属），
+        //    循环直到信息充分才给最终结论，不会中途停下问用户要不要继续。
+        var final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(), ct);
         var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
         foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
@@ -1163,6 +1164,150 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
         return string.IsNullOrWhiteSpace(resp.Text) ? resultText : resp.Text.Trim();
     }
+
+    /// <summary>
+    /// 模型驱动的<b>递归补查闭环</b>（方案 C）：数字员工基于已收集的检查结果作答，
+    /// 每轮让模型判断“是否已有足够信息回答用户的完整问题”；若不足，则输出下一步要补查的
+    /// 技能（<c>kind=skill</c>）或指派的数字员工（<c>kind=dispatch</c>），网关据此执行
+    /// （客户端技能合并成「本机一键执行全部」批量确认；服务端技能 / 子员工直接执行），
+    /// 结果回灌后进入下一轮，直到模型认为信息充分才给出最终答复。<b>不会中途停下问用户要不要继续。</b>
+    /// </summary>
+    private async Task<string> ExecuteRecursiveAnswerAsync(
+        AgentInvocationContext context, AgentDefinition root, string groupId, string messageId,
+        string input, string priorResults, CancellationToken ct)
+    {
+        var db = _skillCatalog.Value;
+        var agent = _catalog.GetOrCreate(root.AgentId);
+        var session = await agent.CreateSessionAsync(ct);
+        var facts = new StringBuilder(string.IsNullOrWhiteSpace(priorResults) ? "（暂无可用的检查结果）" : priorResults.Trim());
+        var lastAnswer = "";
+        var rounds = 0;
+        const int MaxRecursiveRounds = 5; // 防死循环 / 打爆时长
+
+        // 可用技能清单 + 可指派的直属下属，供模型判断“还能补查什么”
+        var skillList = new List<string>();
+        var dispatchList = new List<string>();
+        foreach (var sk in (root.SkillDefIds ?? []))
+            if (db?.Get(sk) is { } sd) skillList.Add($"{sd.SkillId}（{sd.Name ?? sd.SkillId}）：{(sd.Description ?? "").Replace("\n", " ")}");
+        foreach (var id in (root.AssignmentIds ?? []))
+            if (_catalog.GetDefinition(id) is { } sub) dispatchList.Add($"{sub.Nickname ?? id}（id={id}）：{(sub.Description ?? "").Replace("\n", " ")}");
+
+        while (rounds++ < MaxRecursiveRounds)
+        {
+            var prompt = "你是「" + (root.Nickname ?? root.AgentId) + "」，正在回答用户的问题。\n\n"
+                + "用户问题：\n" + input + "\n\n"
+                + "已掌握的检查结果：\n" + facts + "\n\n"
+                + "你当前可补查的能力：\n- 客户端/服务端技能：\n" + (skillList.Count == 0 ? "  （无）" : string.Join("\n", skillList.Select(x => "  - " + x)))
+                + "\n- 可指派的数字员工：\n" + (dispatchList.Count == 0 ? "  （无）" : string.Join("\n", dispatchList.Select(x => "  - " + x)))
+                + "\n\n请判断：现有的检查结果<b>是否已足以</b>完整回答用户的问题。\n"
+                + "- 若还缺关键信息/有疑问需要进一步排查 → 输出 JSON，`needsMore` 为 true，并在 `gather` 里列出<b>要补查的能力</b>（只能从上面列出的技能 id 或员工 id 中选）：\n"
+                + "  {\"needsMore\":true,\"gather\":[{\"kind\":\"skill\",\"target\":\"<技能id>\"},{\"kind\":\"dispatch\",\"target\":\"<员工id>\"}],\"answer\":\"\"}\n"
+                + "- 若已有信息<b>足以回答</b> → 输出 JSON，`needsMore` 为 false，并在 `answer` 里直接给出面向用户的<b>完整、连贯的最终答复</b>：\n"
+                + "  {\"needsMore\":false,\"gather\":[],\"answer\":\"<最终答复>\"}\n"
+                + "只输出这一行 JSON，不要任何其他文字。请<b>综合判断</b>，不要为答而反复补查；能回答就回答。";
+            var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
+            var text = (resp.Text ?? "").Trim();
+
+            // 宽松解析模型输出
+            var parsed = ParseRecursiveResponse(text);
+            if (parsed is null)
+            {
+                // 解析失败：把模型原文当作最终答复，结束递归（退化，避免卡死）
+                return string.IsNullOrWhiteSpace(text) ? facts.ToString() : text;
+            }
+            if (!string.IsNullOrWhiteSpace(parsed.Answer))
+                lastAnswer = parsed.Answer.Trim();
+            if (!parsed.NeedsMore || parsed.Gather.Count == 0)
+            {
+                // 信息充分：用模型给出的答案给最终答复
+                return string.IsNullOrWhiteSpace(lastAnswer) ? facts.ToString() : lastAnswer;
+            }
+
+            // 执行本轮要补查的能力：客户端技能→批量；服务端技能→直接执行；分派→子员工
+            var gathered = new StringBuilder();
+            var clientItems = new List<BatchClientItem>();
+            foreach (var req in parsed.Gather)
+            {
+                if (string.Equals(req.Kind, "skill", StringComparison.OrdinalIgnoreCase))
+                {
+                    var skill = db?.Get(req.Target);
+                    if (skill is null) { gathered.AppendLine($"技能「{req.Target}」不可用，已跳过。"); continue; }
+                    if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client)
+                        clientItems.Add(new BatchClientItem(skill.SkillId, skill.Name ?? skill.SkillId, skill.ClientRunner ?? "", req.Input ?? "", 0));
+                    else
+                        gathered.AppendLine($"【{skill.Name ?? skill.SkillId}】\n" + (await _catalog.RunSkillAsync(skill, req.Input ?? "", ct)));
+                }
+                else if (string.Equals(req.Kind, "dispatch", StringComparison.OrdinalIgnoreCase))
+                {
+                    var outText = await InvokeSubordinateAsync(context, req.Target, req.Input ?? input, ct);
+                    gathered.AppendLine($"【{req.Target} 协助】\n" + outText);
+                }
+            }
+            if (clientItems.Count > 0)
+            {
+                var map = await AwaitBatchClientExecAsync(context, groupId, messageId, [], clientItems, ct);
+                if (map is not null)
+                    foreach (var it in clientItems)
+                        gathered.AppendLine($"【{it.Name}】\n" + (map.TryGetValue(it.SkillId, out var o) ? o : "（未返回结果）"));
+                else
+                    gathered.AppendLine("（本机补查未执行 / 被取消）");
+            }
+            facts.Append("\n\n【本轮追加补查结果】\n").Append(gathered.ToString().Trim());
+            _logger.LogInformation("递归补查第 {Round} 轮：技能={Skills} 分派={Dispatches} agent={AgentId}",
+                rounds, string.Join(",", parsed.Gather.Where(g => g.Kind == "skill").Select(g => g.Target)),
+                string.Join(",", parsed.Gather.Where(g => g.Kind == "dispatch").Select(g => g.Target)), root.AgentId);
+        }
+
+        // 达到最大轮数仍未明确“信息充分”：用最近一次答案兜底
+        return string.IsNullOrWhiteSpace(lastAnswer) ? facts.ToString() : lastAnswer;
+    }
+
+    /// <summary>递归补查时指派的目标解析。</summary>
+    private sealed record RecursiveGatherItem(string Kind, string Target, string? Input);
+    private sealed record RecursiveResponse(bool NeedsMore, List<RecursiveGatherItem> Gather, string? Answer);
+
+    private static RecursiveResponse? ParseRecursiveResponse(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start) return null;
+        JsonDocument? doc = null;
+        try { doc = JsonDocument.Parse(text.Substring(start, end - start + 1)); }
+        catch { return null; }
+        using (doc)
+        {
+            var rootEl = doc.RootElement;
+            var needsMore = rootEl.TryGetProperty("needsMore", out var nm) && nm.ValueKind == JsonValueKind.True;
+            var answer = rootEl.TryGetProperty("answer", out var a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
+            var gather = new List<RecursiveGatherItem>();
+            if (rootEl.TryGetProperty("gather", out var g) && g.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in g.EnumerateArray())
+                {
+                    var kind = item.TryGetProperty("kind", out var k) ? k.GetString() : null;
+                    var target = item.TryGetProperty("target", out var t) ? t.GetString() : null;
+                    var input = item.TryGetProperty("input", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(kind) && !string.IsNullOrWhiteSpace(target))
+                        gather.Add(new RecursiveGatherItem(kind.Trim(), target.Trim(), input));
+                }
+            }
+            return new RecursiveResponse(needsMore, gather, answer);
+        }
+    }
+
+    /// <summary>递归补查时让某个直属下属就问题给结论（一次性 RunAsync，不递归下钻，避免无限深）。</summary>
+    private async Task<string> InvokeSubordinateAsync(AgentInvocationContext context, string agentId, string input, CancellationToken ct)
+    {
+        if (_catalog.GetDefinition(agentId) is not { } sub) return "（指派对象不存在）";
+        var child = _catalog.GetOrCreate(agentId);
+        var prompt = "你被「" + (sub.Nickname ?? sub.AgentId) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：" + input
+            + "\n\n只输出本步结论，不要复述前序内容。";
+        var session = await child.CreateSessionAsync(ct);
+        try { return (await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct)).Text?.Trim() ?? "（子员工未返回内容）"; }
+        catch (Exception ex) { return "（指派执行失败：" + ex.Message + "）"; }
+    }
+
 
     /// <summary>指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>
     private const int MaxRouteDepth = 4;
