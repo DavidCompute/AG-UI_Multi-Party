@@ -483,7 +483,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| `kind` | `input`（文本输入）/ `choice`（单选）/ `multi_choice`（多选）/ `approval`（工具审批，默认） |
+| `kind` | `input`（文本输入）/ `choice`（单选）/ `multi_choice`（多选）/ `approval`（工具审批，默认）；另有客户端执行技能（`client_tool` / `client_tool_batch`，见下文） |
 | `inputField` | 响应字段名（缺省 `answer`），恢复时以其为键回传用户输入 |
 | `responseSchema` | 完整 JSON Schema，前端据此渲染通用表单（单选 enum / 多选 array / 数字 / 多字段） |
 | `options` | kind=`choice`/`multi_choice` 的可选项列表（来自 `responseSchema` 的 enum） |
@@ -491,6 +491,17 @@
 
 `questions` 数组元素结构：`{ header?, question, options?: [{ label, description? }], multiple? }`。
 前端逐题渲染（单选 radio / `multiple:true` 多选 checkbox / 无选项文本输入），答案按问题顺序回传。
+
+**客户端执行技能扩展字段**（`kind=client_tool` / `kind=client_tool_batch`）：技能配置为 `ExecutionLocation=Client` 时，
+本事件 `kind=client_tool` 且携带 `clientRunner`（前端执行器配置 JSON，前端据此在本机执行后以 `toolResult` 回传）：
+
+| 字段 | 说明 |
+|---|---|
+| `kind` | `client_tool`（单技能）`client_tool_batch`（编排计划「本机一键执行全部」，`clientRunner` 为技能数组 JSON） |
+| `clientRunner` | 前端执行器配置：单个技能为 `{"kind":"shell","command":"…","cwd":".","timeoutSec":30}` 或 `{"kind":"http","method":"GET","url":"…"}`；批量时为上述对象组成的数组 |
+
+前端执行完毕经 `AGENT_INTERACTION_RESOLVE` 的 `toolResult` 回传结果：单个技能为结果文本；批量（`client_tool_batch`）为
+JSON 数组 `[{ "skillId": …, "output": … }, …]`。网关回灌模型继续作答（客户端技能可在浏览器/本机桥执行，见 README「客户端工具与本机工具桥」）。
 
 **输入型恢复（AGENT_INTERACTION_RESOLVE → 桥接 resume）的答案格式约定**：不采用二维数组；恢复载荷为以 `inputField`（`responseSchema` 子段名，缺省 `answer`）为键的**单键 JSON 对象**——文本 / 单选为字符串，多选为该键下的 JSON 字符串数组；若前端按完整 `responseSchema` 提交，则以 `payload` 对象原样回传（多个字段各占一个键）：
 

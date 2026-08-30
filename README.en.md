@@ -623,6 +623,39 @@ For local debugging without a key, set `Agents:Provider` back to `mock`.
 To customize the gateway, replace the DI registration in `Program.cs` / `HubApp.ConfigureServices`:
 `builder.Services.AddSingleton<IAgentGateway, YourGateway>();`
 
+### Client-execution skills and the “Native Tool Bridge”
+
+A skill can be marked `ExecutionLocation = Client` (with a `ClientRunner` for `kind=http/shell/prompt`).
+When a digital employee calls such a skill, the gateway delivers a `kind=client_tool` interaction card; the
+<b>frontend (browser/webview)</b> executes it and posts the result back instead of the server running it.
+Interaction shape: `http` auto-executes; `shell` is confirmed inline on the chat card (no native popup) and
+runs via a local bridge. Because a pure browser cannot run local shell, the bridge runs on the browser's host:
+
+- <b>Server bridge (default)</b>: `/ag-ui/client-tool` (`MapClientToolBridgeApi`) runs on the server/desktop shell.
+  This suits the desktop edition; for <b>Docker + a browser on the local machine</b> (e.g. aibook) it would run on the
+  Docker container (returning the container hostname, not yours).
+- <b>Standalone NativeBridge</b>: project `src/AguiGroupChat.NativeBridge` runs on the browser's host machine
+  (loopback, token auth, CORS allowlist, sandbox/timeout/truncation). Start it with `--allowed-origin http://<docker>:5200`;
+  the token persists to `%LocalAppData%\AguiGroupChat\bridge.token`, and the web UI's <b>Profile → Native Tool Bridge → Detect</b>
+  auto-reads address + token. Desktop needs no bridge config (the desktop shell is the local host).
+
+#### Batch execution inside a plan & recursive gather-and-answer
+
+When a coordinator plan (`CoordinatorPlanning`, on by default in Docker) selects several client skills, the gateway
+merges them into one <b>“run all locally”</b> card (`client_tool_batch`): confirm once, the frontend runs each locally
+and lights up each plan step, then synthesizes a combined answer. Skill-only digital employees (no subordinates) also
+enter plan orchestration when @-mentioned. While answering, if the gathered results are insufficient the employee
+<b>recursively invokes more skills / direct reports</b> until the info is complete — it never stops midway to ask
+“continue?”.
+
+#### Generating a skill from natural language
+
+In the Skill Library, “New skill” → <b>🤖 Generate a skill from plain text</b>: describe the request (e.g. “check local
+disk usage and report free space per partition”), optionally check “prefer local execution”, and the LLM produces the
+name / id / kind / description / command / execution location / ClientRunner, filled into the form for review before
+saving (no need to hand-write commands or JSON). Endpoint `POST /ag-ui/skills/generate` (login required); mock returns
+a deterministic template.
+
 ## Configuration (appsettings.json → `GroupChat` node)
 
 | Key | Default | Description |

@@ -483,11 +483,24 @@ the run in which the model invoked that tool ends with an **interruption** (the 
 
 | Field | Description |
 |---|---|
-| `kind` | `input` (text input) / `choice` (single choice) / `multi_choice` (multiple choice) / `approval` (tool approval, default) |
+| `kind` | `input` (text input) / `choice` (single choice) / `multi_choice` (multiple choice) / `approval` (tool approval, default); plus client-execution skills (`client_tool` / `client_tool_batch`, see below) |
 | `inputField` | The response field name (default `answer`); when resuming, user input is returned using this name as the key |
 | `responseSchema` | Complete JSON Schema, based on which the frontend renders a generic form (single-choice enum / multi-choice array / number / multi-field) |
 | `options` | List of options for kind=`choice`/`multi_choice` (from the `responseSchema` enum) |
 | `questions` | Structured question list for the external question tool (e.g., OpenCode `metadata.questions`), rendered option by option by the frontend |
+
+**Client-execution skill extension fields** (`kind=client_tool` / `kind=client_tool_batch`): when a skill is configured with
+`ExecutionLocation=Client`, this event uses `kind=client_tool` and carries `clientRunner` (the frontend executor config JSON, on which the
+frontend runs the skill locally and posts the result back as `toolResult`):
+
+| Field | Description |
+|---|---|
+| `kind` | `client_tool` (single skill) or `client_tool_batch` (plan "run all locally"; `clientRunner` is a JSON array of skills) |
+| `clientRunner` | Frontend runner config: a single skill as `{"kind":"shell","command":"…","cwd":".","timeoutSec":30}` or `{"kind":"http","method":"GET","url":"…"}`; for batch, an array of those objects |
+
+After the frontend finishes, it returns the result via `AGENT_INTERACTION_RESOLVE`.`toolResult`: text for a single skill; for batch
+(`client_tool_batch`) a JSON array `[{ "skillId": …, "output": … }, …]`. The gateway feeds it back to the model (client skills run on
+the browser / native bridge — see the README "client tools & native tool bridge").
 
 `questions` array element structure: `{ header?, question, options?: [{ label, description? }], multiple? }`.
 The frontend renders each question (single-choice radio / `multiple:true` multi-choice checkbox / text input when no options), and the answers are returned in question order.

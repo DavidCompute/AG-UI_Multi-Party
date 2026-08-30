@@ -629,7 +629,8 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 技能在定义时可选 `ExecutionLocation = Client`（连同 `kind=http/shell/prompt` 的 `ClientRunner` 配置），
 数字员工调用此类技能时会下发一张 `kind=client_tool` 交互卡，由**前端在浏览器/WebView 中执行**并回传结果，
-而非在服务器上执行。交互形态：`http` 自动执行；`shell` 先弹确认再执行。
+而非在服务器上执行。交互形态：`http` 自动执行；`shell` 在<b>聊天历史的卡片内</b>点「▶ 在本机执行」确认后执行（不弹系统确认框），
+执行后卡片即时隐藏。
 
 纯浏览器 JS 无法直接运行本机 shell，因此 `shell` 类的客户端技能需要一个**本机执行通道**。项目提供两个选择：
 
@@ -676,8 +677,22 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 所有结果回传后由数字员工<b>综合回归</b>给出结论。这样既保留了“问题 → 定计划 → 激活执行”的编排形态，
 又把“逐个确认”降为一次，适合多技能联查（系统、磁盘、内存、进程、网络、服务、事件日志等）。
 
-> 提示：客户端执行技能的判定依据是 `ExecutionLocation = Client`。要触发编排计划，数字员工需要配置
-> `AssignmentIds`（可指派的下属）或 `EscalationAgentId`（提升目标），且由 `@` 触发。
+#### 递归补查闭环（方案 C）
+
+数字员工在编排计划/综合阶段基于已收集结果作答时，若发现信息不足以完整回答用户问题（如还要看磁盘、内存、
+服务或事件日志），会<b>继续要求补查对应的技能/指派下属</b>（客户端技能仍合并批量确认），结果回灌后再回答，
+如此循环直到<b>信息充分</b>才给最终结论——<b>不会中途停下问“要不要继续”</b>。可对没有任何下属的
+<b>纯技能型数字员工</b>生效（开启 `CoordinatorPlanning` 后被 `@` 即进入计划编排），也让「全面检查/电脑有没有大问题」
+这类请求自动组合多个 `ops_*` 技能并综合研判。
+
+> 提示：客户端执行技能的判定依据是 `ExecutionLocation = Client`。开启 `CoordinatorPlanning` 后，
+> 配置了 `AssignmentIds` / `EscalationAgentId`，或<b>挂了技能</b>的数字员工被 `@` 触发时都会进入计划编排。
+
+#### 用自然语言生成技能
+
+技能库「新增技能」顶部有 <b>🤖 用自然语言生成技能</b>：输入需求（如「检查本机磁盘使用情况，输出各分区剩余空间与使用率」），
+（可选勾选「优先本机执行」），大模型即产出名称 / ID / 类型 / 描述 / 命令 / 执行位置 / ClientRunner，自动填入表单供微调后保存。
+无需手写命令与 JSON。端点 `POST /ag-ui/skills/generate`（需登录）；mock 模式返回确定性模板。
 
 ## 配置（appsettings.json → `GroupChat` 节点）
 

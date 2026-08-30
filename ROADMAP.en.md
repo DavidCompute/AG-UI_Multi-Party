@@ -21,6 +21,7 @@ Existing foundation: trigger rules (mention / full / keyword / context), in-grou
 - **Current state**: skills are "single-layer sub-agent invocations"—one run returns a single reply, with no multi-step collaboration.
 - **Goal**: planning → decomposition into subtasks → sub-agents executed in parallel / sequentially → aggregation → final reply, forming a plan/agent loop similar to a coding assistant. A complex requirement can be completed collaboratively by three assistants handling code + documentation + tests.
 - **Target module**: `src/AguiGroupChat.Agents/` (session and skill invocation), `AgentCatalog` (new event: subtask status).
+- **Enhancement (implemented)**: deterministic orchestration plan (`CoordinatorPlanning`) supports "question → build a plan → activate in sequence"; multiple <b>client-execution skills</b> inside a plan merge into one "run all locally" card after a single confirmation; the synthesis stage <b>recursively gathers more</b> (invoking more skills / direct reports when the info is insufficient) until the answer is complete; skill-only digital employees also enter plan orchestration.
 
 ### 1.2 Inter-Role Message Passing / Handoff (★★☆) ✅ Implemented (full-round-role handoff)
 - **Current state**: an agent uses another agent as a "tool" in a one-off call, with no bidirectional collaboration semantics.
