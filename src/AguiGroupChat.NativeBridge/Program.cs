@@ -109,7 +109,7 @@ static async Task RunLoopbackDiscoveryAsync(int port, bool useHttps, string clie
     {
         ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
         ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
-        ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+        ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
         ctx.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
         ctx.Response.StatusCode = StatusCodes.Status204NoContent;
         return Task.CompletedTask;

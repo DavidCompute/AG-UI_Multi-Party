@@ -2119,11 +2119,12 @@ async function submitProfile() {
  *  仅在浏览器与桥同机（回环可达）时有效；可传递 --local-port（默认 17321）与 --local-https。 */
 async function discoverLocalBridgeClient() {
   const btn = $("pfBridgeDiscover");
-  // 默认桥用 HTTP 回环（快、无证书问题）；若桥以 --local-https 起则 HTTPS 也能被发现
+  // 默认桥用 HTTP 回环（快、无证书问题）；若桥以 --local-https 起则 HTTPS 也能被发现。
+  // 用原始 fetch（不经全局鉴权包装，避免带 Authorization 头触发 CORS 预检，也避免把会话令牌发给回环端点）。
   const tries = [["http", "17321"], ["https", "17321"]];
   for (const [scheme, port] of tries) {
     try {
-      const res = await fetch(`${scheme}://127.0.0.1:${port}/ag-ui/bridge/info`, { method: "GET", cache: "no-store" });
+      const res = await _aguiFetch(`${scheme}://127.0.0.1:${port}/ag-ui/bridge/info`, { method: "GET", cache: "no-store" });
       if (!res.ok) continue;
       const d = await res.json().catch(() => null);
       if (d && (d.client || d.agentScope)) {
