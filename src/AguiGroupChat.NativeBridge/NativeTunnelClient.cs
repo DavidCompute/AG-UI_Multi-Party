@@ -13,6 +13,9 @@ namespace AguiGroupChat.NativeBridge;
 /// </summary>
 public sealed class NativeTunnelClient
 {
+    /// <summary>JSON 反序列化选项：Hub 下行载荷为 camelCase，需大小写不敏感映射到 record 字段。</summary>
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly HttpClient _http = new();
     private readonly string _hubBase;
     private readonly string _agent;
@@ -101,7 +104,12 @@ public sealed class NativeTunnelClient
     private async Task HandleTaskAsync(string payload, CancellationToken ct)
     {
         TunnelTask? task = null;
-        try { task = JsonSerializer.Deserialize<TunnelTask>(payload); }
+        try
+        {
+            // 大小写不敏感：Hub 下行 JSON 为 camelCase（taskId/kind/command/cwd/timeoutSec/query），
+            // 与本地 record（PascalCase）字段匹配。默认 JsonSerializer 大小写敏感，缺失映射会导致 TaskId 为 null 而静默丢弃任务。
+            task = JsonSerializer.Deserialize<TunnelTask>(payload, JsonOptions);
+        }
         catch { Console.WriteLine("  [隧道] 无法解析任务：" + Truncate(payload)); return; }
         if (task is null || string.IsNullOrWhiteSpace(task.TaskId))
             return;

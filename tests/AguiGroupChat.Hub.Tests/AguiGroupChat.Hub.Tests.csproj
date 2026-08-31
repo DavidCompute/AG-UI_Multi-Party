@@ -18,6 +18,7 @@
     <ProjectReference Include="..\..\src\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
     <ProjectReference Include="..\..\src\AguiGroupChat.Agents\AguiGroupChat.Agents.csproj" />
     <ProjectReference Include="..\..\src\AguiGroupChat.Web\AguiGroupChat.Web.csproj" />
+    <ProjectReference Include="..\..\src\AguiGroupChat.NativeBridge\AguiGroupChat.NativeBridge.csproj" />
   </ItemGroup>
 
   <ItemGroup>
