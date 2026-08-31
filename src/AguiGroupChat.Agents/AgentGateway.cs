@@ -477,12 +477,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (approval is not null) break;
                     }
 
-                    // —— 反向隧道（内网穿透）：客户端技能且该数字员工的客户端技能由内网机隧道桥承载时，
+                    // —— 反向隧道（内网穿透）：客户端技能且该数字员工的客户端技能由内网机隧道桥承载、且不要求确认时，
                     //     经隧道让那台内网机执行（不依赖前端浏览器），结果回灌模型继续，而非下发给前端。 ——
+                    //     若配置要求确认（ClientToolTunnelRequireApproval=true，默认），则不在此自动执行，交给下方
+                    //     「审批中断 → 下交互卡 → 触发者批准后由 ResumeRunAsync 经隧道执行」。
                     if (approval is not null
                         && approval.ToolCall is FunctionCallContent tfc
                         && _catalog.GetAgentClientToolNames(context.AgentId).Contains(tfc.Name, StringComparer.Ordinal)
                         && _nativeTunnel.Value?.HasTunnel(context.AgentId) == true
+                        && !_options.ClientToolTunnelRequireApproval
                         && TryParseClientShell(tfc.Name, out var shellCmd, out var shellCwd, out var shellTimeoutSec))
                     {
                         await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
@@ -1114,9 +1117,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         AgentInvocationContext context, string gid, string messageId,
         IReadOnlyList<PlanStepInfo> display, IReadOnlyList<BatchClientItem> items, CancellationToken ct)
     {
-        // 内网隧道在线（平台级或逐员工桥）时，跳过前端「本机一键执行全部」交互卡，直接经隧道在桥所在主机逐个执行
+        // 内网隧道在线（平台级或逐员工桥）且<b>不需要确认</b>时，跳过前端「本机一键执行全部」交互卡，直接经隧道在桥所在主机逐个执行
         // 这些客户端 shell 技能并收集结果——与本机桥在真机上执行等价，前端无需点确认。
-        if (_nativeTunnel.Value?.HasTunnel(context.AgentId) == true)
+        // 需要确认（默认）时走下方交互卡：触发者批准后由 <see cref="ResolveInteractionAsync"/> 再经隧道执行。
+        if (_nativeTunnel.Value?.HasTunnel(context.AgentId) == true && !_options.ClientToolTunnelRequireApproval)
         {
             var tunneled = new Dictionary<string, string>();
             foreach (var it in items)
@@ -1133,7 +1137,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     tunneled[it.SkillId] = "（该技能非本机 shell，无法经隧道执行）";
                 }
             }
-            _logger.LogInformation("客户端技能批量经内网隧道执行：agent={AgentId} count={Count}", context.AgentId, items.Count);
+            _logger.LogInformation("客户端技能批量经内网隧道执行（免确认）：agent={AgentId} count={Count}", context.AgentId, items.Count);
             return tunneled;
         }
 
@@ -2343,7 +2347,26 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (!_batchClientExecWaits.TryRemove(interruptId, out batch))
                 return false;
             Dictionary<string, string>? results = null;
-            if (approved && !string.IsNullOrWhiteSpace(toolResult))
+            // 内网隧道在线（平台级或逐员工桥）且已批准 → 经隧道在桥所在主机逐个执行批量客户端 shell 技能（而非前端回传结果）
+            if (approved && _nativeTunnel.Value is { } tunnelB && tunnelB.HasTunnel(batch.AgentId))
+            {
+                results = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var it in batch.Items)
+                {
+                    if (TryParseRunnerShell(it.ClientRunner, out var bCmd, out var bCwd, out var bTimeoutSec))
+                    {
+                        var br = await tunnelB.ExecuteAsync(
+                            batch.AgentId, bCmd!, bCwd, bTimeoutSec, it.Query,
+                            TimeSpan.FromSeconds(Math.Clamp(bTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                        results[it.SkillId] = string.IsNullOrWhiteSpace(br) ? "（本机执行未返回结果 / 超时）" : br;
+                    }
+                    else
+                    {
+                        results[it.SkillId] = "（该技能非本机 shell，无法经隧道执行）";
+                    }
+                }
+            }
+            else if (approved && !string.IsNullOrWhiteSpace(toolResult))
             {
                 try
                 {
@@ -2490,6 +2513,25 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var resumeRounds = 0;
             var lastApproval = pending.ApprovalRequest!;
             var lastApproved = approved;
+
+            // 客户端 shell 技能 + 内网隧道在线 + 已批准 → 由网关经隧道在桥所在主机执行以取得真实结果
+            // （而非依赖前端回传），结果写入 ClientToolResultStore 并作为 toolResult 注入恢复消息。
+            if (approved && _nativeTunnel.Value is { } tunnelForResume
+                && lastApproval.ToolCall is FunctionCallContent pfc
+                && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(pfc.Name, StringComparer.Ordinal)
+                && tunnelForResume.HasTunnel(pending.Context.AgentId)
+                && TryParseClientShell(pfc.Name, out var rCmd, out var rCwd, out var rTimeoutSec))
+            {
+                var tr = await tunnelForResume.ExecuteAsync(
+                    pending.Context.AgentId, rCmd!, rCwd, rTimeoutSec, null,
+                    TimeSpan.FromSeconds(Math.Clamp(rTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
+                if (!string.IsNullOrWhiteSpace(tr))
+                {
+                    toolResult = tr;
+                    ClientToolResultStore.Put(pfc.Name, tr);
+                }
+                _logger.LogInformation("客户端技能经内网隧道执行（审批后）：agent={AgentId} tool={Tool}", pending.Context.AgentId, pfc.Name);
+            }
 
             // 批量批准循环：同一 Session 连续流式；后续审批若命中“本次运行批量批准”自动批准，否则交还用户决策
             while (true)

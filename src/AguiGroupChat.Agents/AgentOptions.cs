@@ -92,6 +92,15 @@ public sealed class AgentOptions
     /// 比“仅靠模型回复时自发决定调谁叫啥”更可靠。计划失败 / 未启用时回退到原有递归指派路由。
     /// </summary>
     public bool CoordinatorPlanning { get; set; }
+
+    /// <summary>
+    /// 客户端 shell 技能<b>经内网反向隧道执行前是否需要触发者确认</b>（默认 <c>true</c> 要确认）。
+    /// - <c>true</c>：桥在线时也先下发审批卡，触发者确认后网关才经隧道在桥所在主机执行（默认更安全）；
+    /// - <c>false</c>：桥在线时跳过确认、直接经隧道自动执行（信任整个平台、少点一次确认）。
+    /// 仅当有内网隧道桥在线时影响路由；没有桥时始终走原交互卡。
+    /// （Docker 环境变量 <c>AGENTS_CLIENT_TOOL_TUNNEL_REQUIRE_APPROVAL</c>）
+    /// </summary>
+    public bool ClientToolTunnelRequireApproval { get; set; } = true;
 }
 
 /// <summary>
