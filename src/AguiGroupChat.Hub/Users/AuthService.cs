@@ -267,8 +267,8 @@ public sealed class AuthService
         }
     }
 
-    /// <summary>更新资料（昵称 / 头像 / 个人记忆开关），返回更新后的账号。昵称 / 头像带长度上限防存储 DoS。</summary>
-    public UserAccount UpdateProfile(string userId, string? nickname, string? avatar, bool? personalMemoryEnabled = null)
+    /// <summary>更新资料（昵称 / 头像 / 个人记忆开关 / 本机执行客户端），返回更新后的账号。昵称 / 头像带长度上限防存储 DoS。</summary>
+    public UserAccount UpdateProfile(string userId, string? nickname, string? avatar, bool? personalMemoryEnabled = null, string? preferredBridgeClient = null)
     {
         var user = _store.GetUserById(userId)
             ?? throw new AguiProtocolException(ErrorCodes.UserNotFound, "用户不存在");
@@ -286,6 +286,13 @@ public sealed class AuthService
             user.Avatar = avatar;
         }
         if (personalMemoryEnabled is not null) user.PersonalMemoryEnabled = personalMemoryEnabled.Value;
+        if (preferredBridgeClient is not null)
+        {
+            var c = preferredBridgeClient.Trim();
+            if (c.Length > 128)
+                throw new AguiProtocolException(ErrorCodes.BadRequest, "本机执行客户端标识最长 128 个字符");
+            user.PreferredBridgeClient = string.IsNullOrWhiteSpace(c) ? null : c;
+        }
         user.UpdatedAt = _time.GetUtcNow().ToUnixTimeMilliseconds();
         _store.UpdateUser(user);
         return user;

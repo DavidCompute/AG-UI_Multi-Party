@@ -26,6 +26,7 @@ const state = {
   token: null,      // 会话令牌（登录 / 注册后签发；示例身份为空）
   avatar: null,     // 当前用户头像 URL（顶栏头像 / 资料弹窗回显）
   personalMemoryEnabled: false, // 当前用户是否开启个人记忆（资料弹窗可改）
+  preferredBridgeClient: null, // 本机执行客户端/机器名（用户资料；客户端 shell 技能在哪台机器执行）
   isAdmin: false,   // 是否系统管理员（数据备份 / 模型配置等管理菜单仅管理员可见）
   replyTo: null,    // 引用回复目标 { id, sender, content }（输入框上方引用条）
   ws: null,
@@ -318,6 +319,7 @@ function enterApp(data) {
   state.token = data.token;
   state.avatar = data.avatar || null;
   state.personalMemoryEnabled = !!data.personalMemoryEnabled;
+  state.preferredBridgeClient = data.preferredBridgeClient || null;
   state.isAdmin = !!data.isAdmin; // 系统管理员：数据备份 / 模型配置等管理菜单仅管理员可见
   storeAuth({ memberId: data.userId, token: data.token, nickname: data.nickname });
   state.topicMemory = loadTopicMemory(data.userId); // 恢复该用户的话题记忆
@@ -414,16 +416,15 @@ async function tryRestoreSession() {
     if (!res.ok) { clearAuth(); showAuth(); return; } // 401（令牌失效）才清登录态
     const me = await res.json();
     // 恢复会话时必须带上 isAdmin（/me 返回该字段）：否则管理菜单（备份 / 模型配置 / 用户管理 / 系统状态）会被隐藏
-    enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
+    enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, preferredBridgeClient: me.preferredBridgeClient || null, isAdmin: !!me.isAdmin });
   } catch {
-    // 网络异常（断网 / 后端未就绪 / WebView 刚加载）：自动重试一次，避免启动或瞬时抖动导致误退回登录页；
-    // 重试后仍失败才回到登录页（保留 token：keep-login 不销毁，恢复后刷新仍可自动登录）
+    // 初次恢复失败：稍作退避重试一次（服务刚启动恢复快照时可能 503）
     try {
       await new Promise((r) => setTimeout(r, 1200));
       const retry = await fetch("/ag-ui/user/me", { headers: { Authorization: `Bearer ${auth.token}` } });
       if (!retry.ok) { clearAuth(); showAuth(); return; }
       const me = await retry.json();
-      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
+      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, preferredBridgeClient: me.preferredBridgeClient || null, isAdmin: !!me.isAdmin });
     } catch {
       showAuth();
       $("authError").textContent = t("auth.err.restoreNetwork");
@@ -1962,6 +1963,7 @@ async function submitChangePassword() {
 function openProfileModal() {
   $("pfNickname").value = $("meNickname").textContent;
   $("pfPersonalMemory").checked = !!state.personalMemoryEnabled;
+  $("pfBridgeClient").value = state.preferredBridgeClient || "";
   profileAvatar = state.avatar || null; // null = 未改动
   pfAvatarPicker.render(state.avatar || "");
   refreshTwinUi(null); // 默认未启用，随后异步查询
@@ -2088,7 +2090,7 @@ async function disableTwin() {
 
 async function submitProfile() {
   const nickname = $("pfNickname").value.trim();
-  const body = { nickname, personalMemoryEnabled: $("pfPersonalMemory").checked };
+  const body = { nickname, personalMemoryEnabled: $("pfPersonalMemory").checked, preferredBridgeClient: $("pfBridgeClient").value.trim() || null };
   // profileAvatar：null=未改动不发送；""=移除；否则=新头像 URL
   if (profileAvatar !== null) body.avatar = profileAvatar;
   try {
@@ -2102,6 +2104,7 @@ async function submitProfile() {
     $("profileModal").classList.add("hidden");
     $("meNickname").textContent = data.nickname || state.memberId;
     state.avatar = data.avatar || null;
+    state.preferredBridgeClient = data.preferredBridgeClient || null;
     state.personalMemoryEnabled = !!data.personalMemoryEnabled;
     updateAuthNickname(data.nickname); // 同步会话快照昵称（sessionStorage + localStorage）
     renderMeAvatar();

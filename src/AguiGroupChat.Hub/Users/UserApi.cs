@@ -95,7 +95,7 @@ public static class UserApi
             {
                 var user = RequireUser(ctx, auth);
                 if (user is null) return Unauthorized();
-                var updated = auth.UpdateProfile(user.UserId, req.Nickname, req.Avatar, req.PersonalMemoryEnabled);
+                var updated = auth.UpdateProfile(user.UserId, req.Nickname, req.Avatar, req.PersonalMemoryEnabled, req.PreferredBridgeClient);
                 // 昵称 / 头像变更同步到其所有群成员（显示名 / 头像），并广播 GROUP_MEMBER_UPDATED
                 await hub.SyncUserDisplayNameAsync(user.UserId);
                 await hub.SyncUserAvatarAsync(user.UserId);
@@ -214,6 +214,7 @@ public static class UserApi
         nickname = user.Nickname,
         avatar = user.Avatar,
         personalMemoryEnabled = user.PersonalMemoryEnabled,
+        preferredBridgeClient = user.PreferredBridgeClient,
         isAdmin = user.IsAdmin,
         createdAt = user.CreatedAt,
     };
@@ -225,6 +226,7 @@ public static class UserApi
         nickname = login.User.Nickname,
         avatar = login.User.Avatar,
         personalMemoryEnabled = login.User.PersonalMemoryEnabled,
+        preferredBridgeClient = login.User.PreferredBridgeClient,
         isAdmin = login.User.IsAdmin,
         token = login.Token,
         expiresAt = login.ExpiresAt,
@@ -264,7 +266,7 @@ public sealed record LoginHttpRequest(string Username, string Password, string? 
 
 public sealed record ChangePasswordHttpRequest(string OldPassword, string NewPassword);
 
-public sealed record UpdateProfileHttpRequest(string? Nickname, string? Avatar, bool? PersonalMemoryEnabled = null);
+public sealed record UpdateProfileHttpRequest(string? Nickname, string? Avatar, bool? PersonalMemoryEnabled = null, string? PreferredBridgeClient = null);
 
 /// <summary>吊销指定会话请求体（多设备会话管理，4.4）。</summary>
 public sealed record RevokeSessionHttpRequest(string? SessionId);

@@ -1445,6 +1445,8 @@ public sealed class GroupHub : IDisposable
     /// </summary>
     private void InvokeAgentFor(AgentRegistration reg, GroupMessage msg, bool mentioned, bool summoned)
     {
+        // 按客户端路由：触发者（用户）资料里配置的本机执行客户端 → 该用户发起的客户端 shell 技能在哪台机器执行
+        var preferredClient = string.IsNullOrWhiteSpace(msg.SenderId) ? null : _users.GetUserById(msg.SenderId)?.PreferredBridgeClient;
         var context = new AgentInvocationContext(
             msg.GroupId, msg.ThreadId, reg.AgentId, reg.Nickname,
             msg.MessageId, msg.SenderId, msg.Content, msg.Mentions, msg.MentionAll,
@@ -1452,7 +1454,8 @@ public sealed class GroupHub : IDisposable
             mentioned || summoned ? AgentTriggerMode.Mentioned : reg.TriggerMode, // 被 @ 或召唤：显式提及语义
             msg.TopicId,
             Visibility: msg.Visibility,          // 回复继承触发消息可见性（私密 / 定向内容不外泄）
-            VisibleMemberIds: msg.VisibleMemberIds);
+            VisibleMemberIds: msg.VisibleMemberIds,
+            PreferredBridgeClient: preferredClient);
         _ = Task.Run(async () =>
         {
             await _agentInvocationLimiter.WaitAsync();
