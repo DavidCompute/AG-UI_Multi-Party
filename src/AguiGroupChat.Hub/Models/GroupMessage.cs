@@ -42,6 +42,10 @@ public sealed record GroupMessage
     /// <summary>定向可见成员列表，配合 private 使用。</summary>
     public IReadOnlyList<string> VisibleMemberIds { get; init; } = [];
 
+    /// <summary>请求方所在客户端/机器（内网桥的 --client 标识，前端经同机回环自动发现带回）——
+    /// 网关据此把客户端 shell 技能路由到该客户端的桥。请求上下文携带，非用户设置项。</summary>
+    public string? BridgeClient { get; init; }
+
     /// <summary>消息附件（Hub 扩展，见 <see cref="AttachmentInfo"/>）；桥接外部附件在消息运行中追加。</summary>
     public IReadOnlyList<AttachmentInfo> Attachments { get; set; } = [];
 

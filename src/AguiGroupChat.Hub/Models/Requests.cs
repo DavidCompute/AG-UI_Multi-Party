@@ -104,6 +104,8 @@ public sealed class GroupMessageSendRequest
     public IReadOnlyList<string>? VisibleMemberIds { get; set; }
     /// <summary>消息附件（Hub 扩展）：前端先上传文件取得附件信息，再随消息携带。</summary>
     public IReadOnlyList<AttachmentInfo>? Attachments { get; set; }
+    /// <summary>请求方所在客户端/机器（内网桥的 --client 标识，前端经同机回环自动发现携带）。</summary>
+    public string? BridgeClient { get; set; }
 }
 
 /// <summary>群内新建话题（Hub 扩展）。SourceMessageId 非空时：该消息迁移为新话题的起点（原话题移除）。</summary>

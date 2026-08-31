@@ -519,6 +519,7 @@ public sealed class GroupHub : IDisposable
             Visibility = req.Visibility ?? MessageVisibility.All,
             VisibleMemberIds = req.VisibleMemberIds ?? [],
             Attachments = attachments,
+            BridgeClient = string.IsNullOrWhiteSpace(req.BridgeClient) ? null : req.BridgeClient.Trim(),
             Content = req.Content ?? "", // 协议允许纯附件消息（正文可空），以空串落库满足非空 Content
             Timestamp = NowMs,
         };
@@ -1445,8 +1446,8 @@ public sealed class GroupHub : IDisposable
     /// </summary>
     private void InvokeAgentFor(AgentRegistration reg, GroupMessage msg, bool mentioned, bool summoned)
     {
-        // 按客户端路由：触发者（用户）资料里配置的本机执行客户端 → 该用户发起的客户端 shell 技能在哪台机器执行
-        var preferredClient = string.IsNullOrWhiteSpace(msg.SenderId) ? null : _users.GetUserById(msg.SenderId)?.PreferredBridgeClient;
+        // 按客户端路由：使用请求携带的客户端/机器标识（前端经同机回环自动发现），非用户设置项
+        var preferredClient = string.IsNullOrWhiteSpace(msg.BridgeClient) ? null : msg.BridgeClient;
         var context = new AgentInvocationContext(
             msg.GroupId, msg.ThreadId, reg.AgentId, reg.Nickname,
             msg.MessageId, msg.SenderId, msg.Content, msg.Mentions, msg.MentionAll,

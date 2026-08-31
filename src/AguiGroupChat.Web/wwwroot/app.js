@@ -26,7 +26,7 @@ const state = {
   token: null,      // 会话令牌（登录 / 注册后签发；示例身份为空）
   avatar: null,     // 当前用户头像 URL（顶栏头像 / 资料弹窗回显）
   personalMemoryEnabled: false, // 当前用户是否开启个人记忆（资料弹窗可改）
-  preferredBridgeClient: null, // 本机执行客户端/机器名（用户资料；客户端 shell 技能在哪台机器执行）
+  bridgeClient: null, // 本机回环自动发现的客户端/机器标识（内网桥 --client；仅请求上下文用，非用户设置项）
   isAdmin: false,   // 是否系统管理员（数据备份 / 模型配置等管理菜单仅管理员可见）
   replyTo: null,    // 引用回复目标 { id, sender, content }（输入框上方引用条）
   ws: null,
@@ -319,7 +319,7 @@ function enterApp(data) {
   state.token = data.token;
   state.avatar = data.avatar || null;
   state.personalMemoryEnabled = !!data.personalMemoryEnabled;
-  state.preferredBridgeClient = data.preferredBridgeClient || null;
+  state.bridgeClient = null; // 不读用户资料；由本机回环自动发现（见 autoDiscoverClient）
   state.isAdmin = !!data.isAdmin; // 系统管理员：数据备份 / 模型配置等管理菜单仅管理员可见
   storeAuth({ memberId: data.userId, token: data.token, nickname: data.nickname });
   state.topicMemory = loadTopicMemory(data.userId); // 恢复该用户的话题记忆
@@ -343,8 +343,8 @@ function enterApp(data) {
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
-  // 打开/登录时自动发现并配置「本机执行客户端」（仅当用户尚未设置时，读到同机桥标识就自动保存）
-  autoDiscoverPreferredClient();
+  // 打开/登录时自动发现本机回环桥的客户端标识（非用户设置，随消息请求携带，供按客户端路由）
+  autoDiscoverClient();
 }
 
 function resetChatState() {
@@ -418,7 +418,7 @@ async function tryRestoreSession() {
     if (!res.ok) { clearAuth(); showAuth(); return; } // 401（令牌失效）才清登录态
     const me = await res.json();
     // 恢复会话时必须带上 isAdmin（/me 返回该字段）：否则管理菜单（备份 / 模型配置 / 用户管理 / 系统状态）会被隐藏
-    enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, preferredBridgeClient: me.preferredBridgeClient || null, isAdmin: !!me.isAdmin });
+    enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
   } catch {
     // 初次恢复失败：稍作退避重试一次（服务刚启动恢复快照时可能 503）
     try {
@@ -426,7 +426,7 @@ async function tryRestoreSession() {
       const retry = await fetch("/ag-ui/user/me", { headers: { Authorization: `Bearer ${auth.token}` } });
       if (!retry.ok) { clearAuth(); showAuth(); return; }
       const me = await retry.json();
-      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, preferredBridgeClient: me.preferredBridgeClient || null, isAdmin: !!me.isAdmin });
+      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
     } catch {
       showAuth();
       $("authError").textContent = t("auth.err.restoreNetwork");
@@ -1965,7 +1965,6 @@ async function submitChangePassword() {
 function openProfileModal() {
   $("pfNickname").value = $("meNickname").textContent;
   $("pfPersonalMemory").checked = !!state.personalMemoryEnabled;
-  $("pfBridgeClient").value = state.preferredBridgeClient || "";
   profileAvatar = state.avatar || null; // null = 未改动
   pfAvatarPicker.render(state.avatar || "");
   refreshTwinUi(null); // 默认未启用，随后异步查询
@@ -2092,7 +2091,7 @@ async function disableTwin() {
 
 async function submitProfile() {
   const nickname = $("pfNickname").value.trim();
-  const body = { nickname, personalMemoryEnabled: $("pfPersonalMemory").checked, preferredBridgeClient: $("pfBridgeClient").value.trim() || null };
+  const body = { nickname, personalMemoryEnabled: $("pfPersonalMemory").checked };
   // profileAvatar：null=未改动不发送；""=移除；否则=新头像 URL
   if (profileAvatar !== null) body.avatar = profileAvatar;
   try {
@@ -2106,7 +2105,6 @@ async function submitProfile() {
     $("profileModal").classList.add("hidden");
     $("meNickname").textContent = data.nickname || state.memberId;
     state.avatar = data.avatar || null;
-    state.preferredBridgeClient = data.preferredBridgeClient || null;
     state.personalMemoryEnabled = !!data.personalMemoryEnabled;
     updateAuthNickname(data.nickname); // 同步会话快照昵称（sessionStorage + localStorage）
     renderMeAvatar();
@@ -2132,33 +2130,16 @@ async function readLoopbackBridgeInfo() {
 }
 
 /* 💻 手动自动发现：读回环桥信息并填入「本机执行客户端」（仍需点保存）。 */
-async function discoverLocalBridgeClient() {
-  const info = await readLoopbackBridgeInfo();
-  if (!info || !info.client) { toast(t("profile.bridgeClientDiscoverFail")); return; }
-  $("pfBridgeClient").value = info.client;
-  const scope = info.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : info.agentScope;
-  toast(t("profile.bridgeDiscovered", { client: info.client, scope: scope || "" }));
-}
+/* （用户资料界面已移除该字段；自动发现改为打开/登录时自动执行，见 autoDiscoverClient。） */
 
-/* 页面打开/登录时自动发现并配置：仅当用户尚未设置「本机执行客户端」时，读到同机桥标识就自动保存，无需用户点击。 */
-async function autoDiscoverPreferredClient() {
-  if (state && state.preferredBridgeClient) return; // 已显式设置，尊重用户选择，不覆盖
-  if (!state || !state.token) return;
+/* 打开/登录时自动发现本机回环桥，把其客户端/机器标识存到内存 state.bridgeClient，随消息请求携带（非用户设置项，不落用户资料）。 */
+async function autoDiscoverClient() {
+  if (!state) return;
   const info = await readLoopbackBridgeInfo();
-  if (!info || !info.client) return; // 非同机/无桥/未配置，保持空
-  try {
-    const res = await _aguiFetch("/ag-ui/user/profile", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ preferredBridgeClient: info.client }),
-    });
-    const data = await res.json().catch(() => null);
-    if (res.ok && data) {
-      state.preferredBridgeClient = data.preferredBridgeClient || info.client;
-      const scope = info.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : info.agentScope;
-      toast(t("profile.bridgeAutoConfigured", { client: info.client, scope: scope || "" }));
-    }
-  } catch { /* 静默：首次登录等偶发失败不阻塞 */ }
+  if (!info || !info.client) { state.bridgeClient = null; return; } // 非同机/无桥：保持空，回落到 agent/平台作用域
+  state.bridgeClient = info.client;
+  const scope = info.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : info.agentScope;
+  toast(t("profile.bridgeAutoConfigured", { client: info.client, scope: scope || "" }));
 }
 
 /* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
@@ -5691,6 +5672,7 @@ async function sendMessage() {
       mentions: [...state.mentions],
       mentionAll: state.mentionAll,
       visibility: state.visibility,
+      bridgeClient: state.bridgeClient || undefined, // 请求所来自的客户端/机器标识（回环自动发现）；网关据此路由客户端 shell
     };
     if (state.replyTo?.id) payload.replyToMessageId = state.replyTo.id;
     if (state.visibility === "private") payload.visibleMemberIds = [...state.mentions];
@@ -6529,7 +6511,6 @@ function init() {
   $("pwNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitChangePassword(); } });
   $("pfCancel").onclick = () => $("profileModal").classList.add("hidden");
   $("pfConfirm").onclick = submitProfile;
-  $("pfBridgeDiscover").onclick = discoverLocalBridgeClient;
   $("pfTwinEnable").onclick = enableTwin;
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;

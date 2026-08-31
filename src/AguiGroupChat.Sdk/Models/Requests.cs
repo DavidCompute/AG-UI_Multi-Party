@@ -98,6 +98,8 @@ public sealed class GroupMessageSendRequest
     public MessageVisibility? Visibility { get; set; }
     public IReadOnlyList<string>? VisibleMemberIds { get; set; }
     public IReadOnlyList<AttachmentInfo>? Attachments { get; set; }
+    /// <summary>请求方所在客户端/机器（内网桥的 --client 标识）。</summary>
+    public string? BridgeClient { get; set; }
 }
 
 /// <summary>群内新建话题（Hub 扩展）。</summary>

@@ -29,12 +29,6 @@ public sealed class UserAccount
     /// </summary>
     public bool PersonalMemoryEnabled { get; set; }
 
-    /// <summary>
-    /// 本机执行客户端（可选）：该用户发起的客户端 shell 技能希望在哪台客户端（机器）上执行。
-    /// 对应某台以 <c>--client &lt;机器名&gt;</c> 注册的内网桥；为空时按 agent/平台作用域路由。
-    /// </summary>
-    public string? PreferredBridgeClient { get; set; }
-
     /// <summary>注册时间戳（毫秒级）。</summary>
     public long CreatedAt { get; init; }
 
