@@ -431,6 +431,7 @@ window.I18N_DICTS.en = {
   "profile.bridgeClientDiscover": "💻 Auto-discover",
   "profile.bridgeClientDiscoverFail": "No local bridge loopback service found at 127.0.0.1:17321. Make sure the bridge started with --local-port and that the browser is on the same machine.",
   "profile.bridgeDiscovered": "Detected local bridge: {client} (scope {scope}); click Save to apply",
+  "profile.bridgeAutoConfigured": "Auto-configured local execution client: {client} (scope {scope})",
   "profile.bridgeDiscoverScopePlatform": "whole platform(*)",
   "profile.twinSection": "AI Twin",
   "profile.trigger": "Trigger Mode",

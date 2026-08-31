@@ -431,6 +431,7 @@ window.I18N_DICTS.zh = {
   "profile.bridgeClientDiscover": "💻 自动发现",
   "profile.bridgeClientDiscoverFail": "未发现本机桥回环服务（127.0.0.1:17321）。请确认桥以 --local-port 启动，且浏览器与该桥在同一台机器。",
   "profile.bridgeDiscovered": "已识别本机桥：{client}（服务范围 {scope}），点击「保存」生效",
+  "profile.bridgeAutoConfigured": "已自动配置本机执行客户端：{client}（服务范围 {scope}）",
   "profile.bridgeDiscoverScopePlatform": "整个平台(*)",
   "profile.twinSection": "AI 分身",
   "profile.trigger": "触发方式",

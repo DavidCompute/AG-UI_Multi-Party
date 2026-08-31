@@ -343,6 +343,8 @@ function enterApp(data) {
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
+  // 打开/登录时自动发现并配置「本机执行客户端」（仅当用户尚未设置时，读到同机桥标识就自动保存）
+  autoDiscoverPreferredClient();
 }
 
 function resetChatState() {
@@ -2114,28 +2116,49 @@ async function submitProfile() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
-/* 💻 自动发现本机桥：读回环服务 http://127.0.0.1:<port>/ag-ui/bridge/info
- *  取得本机桥的机器/客户端标识（client）并填入「本机执行客户端」（需手动点保存）。
- *  仅在浏览器与桥同机（回环可达）时有效；可传递 --local-port（默认 17321）与 --local-https。 */
-async function discoverLocalBridgeClient() {
-  const btn = $("pfBridgeDiscover");
+/* 读取同机回环桥信息（原始 fetch，无鉴权头避免 CORS 预检 / 不泄露会话令牌）。返回 { client, agentScope } 或 null。 */
+async function readLoopbackBridgeInfo() {
   // 默认桥用 HTTP 回环（快、无证书问题）；若桥以 --local-https 起则 HTTPS 也能被发现。
-  // 用原始 fetch（不经全局鉴权包装，避免带 Authorization 头触发 CORS 预检，也避免把会话令牌发给回环端点）。
   const tries = [["http", "17321"], ["https", "17321"]];
   for (const [scheme, port] of tries) {
     try {
       const res = await _aguiFetch(`${scheme}://127.0.0.1:${port}/ag-ui/bridge/info`, { method: "GET", cache: "no-store" });
       if (!res.ok) continue;
       const d = await res.json().catch(() => null);
-      if (d && (d.client || d.agentScope)) {
-        if (d.client) $("pfBridgeClient").value = d.client;
-        const scope = d.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : d.agentScope;
-        toast(t("profile.bridgeDiscovered", { client: d.client || "", scope: scope || "" }));
-        return;
-      }
+      if (d && (d.client || d.agentScope)) return { client: d.client || "", agentScope: d.agentScope || "" };
     } catch { /* 不可达则试下一个 */ }
   }
-  toast(t("profile.bridgeClientDiscoverFail"));
+  return null;
+}
+
+/* 💻 手动自动发现：读回环桥信息并填入「本机执行客户端」（仍需点保存）。 */
+async function discoverLocalBridgeClient() {
+  const info = await readLoopbackBridgeInfo();
+  if (!info || !info.client) { toast(t("profile.bridgeClientDiscoverFail")); return; }
+  $("pfBridgeClient").value = info.client;
+  const scope = info.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : info.agentScope;
+  toast(t("profile.bridgeDiscovered", { client: info.client, scope: scope || "" }));
+}
+
+/* 页面打开/登录时自动发现并配置：仅当用户尚未设置「本机执行客户端」时，读到同机桥标识就自动保存，无需用户点击。 */
+async function autoDiscoverPreferredClient() {
+  if (state && state.preferredBridgeClient) return; // 已显式设置，尊重用户选择，不覆盖
+  if (!state || !state.token) return;
+  const info = await readLoopbackBridgeInfo();
+  if (!info || !info.client) return; // 非同机/无桥/未配置，保持空
+  try {
+    const res = await _aguiFetch("/ag-ui/user/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ preferredBridgeClient: info.client }),
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok && data) {
+      state.preferredBridgeClient = data.preferredBridgeClient || info.client;
+      const scope = info.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : info.agentScope;
+      toast(t("profile.bridgeAutoConfigured", { client: info.client, scope: scope || "" }));
+    }
+  } catch { /* 静默：首次登录等偶发失败不阻塞 */ }
 }
 
 /* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
