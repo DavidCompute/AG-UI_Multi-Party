@@ -40,14 +40,12 @@ var token = string.IsNullOrWhiteSpace(fixedToken)
     : fixedToken.Trim();
 bool exposeTokenEndpoint = string.IsNullOrWhiteSpace(fixedToken); // 非固定令牌时向受信任源开放读取（CORS 白名单管控）
 
-// 打印启动信息（前端可用「一键检测」自动填入地址+令牌）
+// 打印启动信息
 Console.WriteLine("====================================================");
 Console.WriteLine($"AguiGroupChat NativeBridge 已启动");
-Console.WriteLine($"  监听地址 : http://127.0.0.1:{port}");
-Console.WriteLine($"  前端配置 : 设置 → 本机工具桥地址 = http://127.0.0.1:{port}/ag-ui/client-tool");
+Console.WriteLine($"  监听地址 : http://127.0.0.1:{port}  (本机回环 HTTP，供命令行/脚本直接鉴权调用)");
 Console.WriteLine($"  令牌     : {token}");
 Console.WriteLine($"  允许来源 : {(string.IsNullOrEmpty(allowedOrigin) ? "（未配置，令牌鉴权兜底）" : allowedOrigin)}");
-Console.WriteLine($"  自动配置 : {(exposeTokenEndpoint ? "允许（一键检测按钮）" : "--token 固定时关闭")}");
 Console.WriteLine($"  反向隧道 : {(string.IsNullOrWhiteSpace(tunnelHub) ? "未启用（纯本机回环）" : $"{tunnelHub} → 服务{(string.IsNullOrWhiteSpace(tunnelAgent) ? "整个平台(*)" : "数字员工 " + tunnelAgent.Trim())}")}");
 Console.WriteLine("  停止     : Ctrl+C");
 Console.WriteLine("====================================================");
