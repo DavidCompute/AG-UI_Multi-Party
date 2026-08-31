@@ -261,12 +261,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 仅支持单技能对象（非批量数组）；解析失败返回 false。</summary>
     private bool TryParseClientShell(string toolName, out string? command, out string? cwd, out int? timeoutSec)
     {
-        command = null; cwd = null; timeoutSec = null;
         var skill = GetSkillById(toolName);
-        if (skill is null || string.IsNullOrWhiteSpace(skill.ClientRunner)) return false;
+        if (skill is null || string.IsNullOrWhiteSpace(skill.ClientRunner))
+        {
+            command = null; cwd = null; timeoutSec = null;
+            return false;
+        }
+        return TryParseRunnerShell(skill.ClientRunner, out command, out cwd, out timeoutSec);
+    }
+
+    /// <summary>从一段 <c>ClientRunner</c> JSON 解析 shell 命令 / 工作目录 / 超时（供内网隧道对单技能 / 批量项执行）。
+    /// 仅支持单技能对象（非批量数组）；要求 <c>kind=shell</c> 且命令非空；返回 false 表示不能经隧道执行。</summary>
+    private static bool TryParseRunnerShell(string clientRunner, out string? command, out string? cwd, out int? timeoutSec)
+    {
+        command = null; cwd = null; timeoutSec = null;
+        if (string.IsNullOrWhiteSpace(clientRunner)) return false;
         try
         {
-            using var doc = JsonDocument.Parse(skill.ClientRunner);
+            using var doc = JsonDocument.Parse(clientRunner);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return false; // 批量数组不在此路径处理
             var kind = root.TryGetProperty("kind", out var k) ? k.GetString() : null;
@@ -1102,6 +1114,29 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         AgentInvocationContext context, string gid, string messageId,
         IReadOnlyList<PlanStepInfo> display, IReadOnlyList<BatchClientItem> items, CancellationToken ct)
     {
+        // 内网隧道在线（平台级或逐员工桥）时，跳过前端「本机一键执行全部」交互卡，直接经隧道在桥所在主机逐个执行
+        // 这些客户端 shell 技能并收集结果——与本机桥在真机上执行等价，前端无需点确认。
+        if (_nativeTunnel.Value?.HasTunnel(context.AgentId) == true)
+        {
+            var tunneled = new Dictionary<string, string>();
+            foreach (var it in items)
+            {
+                if (TryParseRunnerShell(it.ClientRunner, out var cmd, out var cwd, out var timeoutSec))
+                {
+                    var r = await _nativeTunnel.Value.ExecuteAsync(
+                        context.AgentId, cmd!, cwd, timeoutSec, it.Query,
+                        TimeSpan.FromSeconds(Math.Clamp(timeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                    tunneled[it.SkillId] = string.IsNullOrWhiteSpace(r) ? "（本机执行未返回结果 / 超时）" : r;
+                }
+                else
+                {
+                    tunneled[it.SkillId] = "（该技能非本机 shell，无法经隧道执行）";
+                }
+            }
+            _logger.LogInformation("客户端技能批量经内网隧道执行：agent={AgentId} count={Count}", context.AgentId, items.Count);
+            return tunneled;
+        }
+
         var interruptId = "interrupt_" + IdGenerator.NewId();
         var runId = "run_" + IdGenerator.NewId();
         var root = _catalog.GetDefinition(context.AgentId);

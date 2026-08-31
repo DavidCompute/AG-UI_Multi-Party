@@ -24,6 +24,7 @@ public sealed class NativeTunnelEndToEndTests
 {
     private const string AgentId = "agent_ops";
     private const string AgentHost = "agent_host";
+    private const string AgentPlan = "agent_plan";
     private const string Token = "test-tunnel-token";
     private const string AgentPerAgent = "agent_special";
     private const string AgentPerToken = "per-agent-secret";
@@ -212,6 +213,113 @@ public sealed class NativeTunnelEndToEndTests
         Assert.True(result.Accepted, "网关运行失败: " + result.ErrorCode);
 
         // —— 5) 校验：完整回复落库，且其正文引用了桥在本机执行的真实主机名（证明结果经隧道回灌模型作答）——
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        Assert.Contains(Environment.MachineName, stored!.Content, StringComparison.OrdinalIgnoreCase);
+
+        quit.Cancel();
+        await Task.WhenAny(bridgeTask, Task.Delay(2000));
+    }
+
+    /// <summary>
+    /// 编排计划内的「客户端技能批量」也走反向隧道：数字员工（mock，CoordinatorPlanning）定计划选中两个客户端 shell 技能时，
+    /// 网关把它们合并成批量执行，不发给前端卡片；本机桥上线时经隧道逐个在本机执行并回灌真实结果。
+    /// </summary>
+    [Fact]
+    public async Task CoordinatorPlan_BatchClientTools_RouteThroughTunnel()
+    {
+        // —— 1) 真实宿主 + 平台级桥 ——
+        var envBuilder = HubApp.CreateBuilder([]);
+        envBuilder.Environment.EnvironmentName = "Testing";
+        envBuilder.WebHost.UseUrls("http://127.0.0.1:0");
+        envBuilder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GroupChat:SeedSampleData"] = "false",
+            ["Agents:Provider"] = "mock",
+            ["Persistence:Enabled"] = "false",
+            ["Auth:RequireTokenOnRealTime"] = "false",
+            ["NativeTunnel:Token"] = Token,
+        });
+        HubApp.ConfigureServices(envBuilder);
+        envBuilder.Services.AddAgentFramework(envBuilder.Configuration);
+        envBuilder.Services.AddSingleton<NativeTunnelService>();
+        envBuilder.Services.AddSingleton(envBuilder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions());
+        envBuilder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>()));
+        envBuilder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
+        await using var env = envBuilder.Build();
+        HubApp.MapEndpoints(env);
+        env.MapNativeTunnelApi();
+        await env.StartAsync();
+        var nativeTunnel = env.Services.GetRequiredService<NativeTunnelService>();
+
+        // 平台级桥（整个平台）
+        using var quit = new CancellationTokenSource();
+        var bridge = new NativeTunnelClient(env.Urls.First(), NativeTunnelService.PlatformWideScope, Token);
+        var bridgeTask = Task.Run(() => bridge.RunAsync(quit.Token));
+        await AssertEventuallyAsync(() => nativeTunnel.HasTunnel(AgentPlan), TimeSpan.FromSeconds(20), "平台级桥未能在超时内经隧道注册");
+
+        // —— 2) 群 + 技能库 + 平台计划型数字员工 ——
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = [AgentPlan],
+            Members = [new MemberSeed { MemberId = AgentPlan, MemberType = MemberType.Agent, Nickname = "体检助手" }],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var skillHost = new AgentSkillDefinition
+        {
+            SkillId = "sk_hostname", Name = "查询主机名", Description = "在本机查询主机名",
+            Kind = AgentSkillKind.Shell, ExecutionLocation = AgentSkillExecutionLocation.Client,
+            ClientRunner = "{\"kind\":\"shell\",\"command\":\"hostname\",\"cwd\":\".\",\"timeoutSec\":30}",
+        };
+        var skillEnv = new AgentSkillDefinition
+        {
+            SkillId = "sk_os", Name = "系统信息", Description = "本机系统信息",
+            Kind = AgentSkillKind.Shell, ExecutionLocation = AgentSkillExecutionLocation.Client,
+            ClientRunner = "{\"kind\":\"shell\",\"command\":\"echo $env:COMPUTERNAME; hostname\",\"cwd\":\".\",\"timeoutSec\":30}",
+        };
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            EnableTools = true,
+            CoordinatorPlanning = true, // 走「问题→定计划→批量激活客户端技能」
+            Skills = [skillHost, skillEnv],
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = AgentPlan, Nickname = "体检助手", Description = "体检", Instructions = "你是体检助手",
+                    TriggerMode = AgentTriggerMode.Mentioned, SkillDefIds = ["sk_hostname", "sk_os"],
+                },
+            ],
+        };
+        var skillCatalog = new AgentSkillCatalog(NullLoggerFactory.Instance, options);
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance,
+            new ServiceCollection().AddSingleton(skillCatalog).BuildServiceProvider());
+        var svcs = new ServiceCollection()
+            .AddSingleton(f.Hub)
+            .AddSingleton<NativeTunnelService>(nativeTunnel)
+            .AddSingleton(skillCatalog)
+            .BuildServiceProvider();
+        var gateway = new AgentGateway(catalog, svcs, options, attachmentStore: null,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<AgentGateway>.Instance);
+
+        // —— 3) 触发 @：期待 mock 定计划 → 批量客户端技能经隧道在本机执行 ——
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: AgentPlan, AgentNickname: "体检助手", TriggerMessageId: "msg_trigger",
+            TriggerUserId: "user_1", Content: "请对我的电脑做个体检，在本机查主机名和系统信息。",
+            Mentions: [], MentionAll: false), CancellationToken.None);
+
+        Assert.True(result.Accepted, "网关运行失败: " + result.ErrorCode);
+
+        // —— 4) 校验：最终落库正文包含桥在本机执行的真实主机名 ——
         var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
         var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
         var messageId = start.GetProperty("messageId").GetString()!;
