@@ -663,20 +663,24 @@ intranet machine has <b>no public IP</b> but the Hub is deployed on the public i
 reconnect to that intranet host. The project provides an <b>HTTP/SSE reverse tunnel</b> for NAT traversal:
 
 - <b>Direction is reversed</b>: the bridge on the intranet machine <b>makes an outbound</b> SSE long connection to the public
-  Hub and registers itself (bound to a digital-employee agentId). The Hub pushes a task to execute a client skill
-  for that employee <b>down the tunnel</b> to the intranet bridge, which runs it and <b>POST</b>s the result back. No inbound
-  public port and no third-party tunnel — plain HTTP is enough to cross the NAT.
+  Hub and registers itself. The Hub pushes a task to execute a client skill <b>down the tunnel</b> to the intranet bridge,
+  which runs it and <b>POST</b>s the result back. No inbound public port and no third-party tunnel — plain HTTP is enough to cross the NAT.
 
-Just start the bridge with three extra flags:
+Start the bridge with tunnel flags; two <b>serving scopes</b> are available:
 
 ```bash
-# Run on the intranet host with NO public IP (only needs outbound access to the Hub)
+# ① Per-employee binding: serve only this one employee (stronger isolation; one bridge per employee)
 AguiGroupChat.NativeBridge.exe \
   --tunnel https://your-hub-domain --agent <digital-employee-id> --tunnel-token <tunnel-token>
+
+# ② Trust the whole platform (recommended): omit --agent so one bridge serves any employee's client skills
+AguiGroupChat.NativeBridge.exe \
+  --tunnel https://your-hub-domain --tunnel-token <tunnel-token>
 ```
 
 - `--tunnel <hub>`: public Hub base URL (e.g. `https://hub.example.com`).
-- `--agent <id>`: which digital employee this bridge serves (binding).
+- `--agent <id>`: optional. Omit it for a <b>platform-wide bridge</b> (registers as `*`, serves all employees), or set it
+  to serve only that employee.
 - `--tunnel-token <t>`: tunnel token, must match the Hub config.<br>
   On the Hub side configure it in the `NativeTunnel` appsettings node (or `NativeTunnel__Token` env var):
 
@@ -684,16 +688,17 @@ AguiGroupChat.NativeBridge.exe \
   { "NativeTunnel": { "Token": "your-tunnel-token" } }
   ```
 
-Once that employee is mounted with an `ExecutionLocation = Client` skill whose `ClientRunner` is `kind=shell`, the
-gateway, upon detecting that a bridge is online via tunnel for this employee (`NativeTunnelService.HasTunnel`),
-<b>pushes the execution down the tunnel to that intranet host</b> (the one bound by `--agent`) instead of dispatching to the
-frontend browser; the result feeds back into the model to continue. As with frontend callbacks, the result is injected
-as a user message (`[frontend tool] … completed by the intranet bridge`).
+Once an employee is mounted with an `ExecutionLocation = Client` skill whose `ClientRunner` is `kind=shell`, the
+gateway, upon detecting that a bridge is online for it (`NativeTunnelService.HasTunnel` — an employee-specific bridge
+or the platform-wide bridge), <b>pushes the execution down the tunnel to that intranet host</b> instead of dispatching to
+the frontend browser; the result feeds back into the model to continue. As with frontend callbacks, the result is
+injected as a user message (`[frontend tool] … completed by the intranet bridge`).
 
 > Note: in tunnel mode the frontend need not point its bridge URL at the intranet host — point it at the Hub itself;
 > the gateway forwards over the tunnel. The tunnel bridge runs in parallel with the local HTTP bridge and auto-reconnects
-> with exponential backoff. Different intranet hosts can bind to different employees with their own `--agent`, each
-> dialing out independently (never inbound-connected by the Hub).
+> with exponential backoff. Different intranet hosts can bind to different employees with their own `--agent` (each
+> dialing out independently, never inbound-connected by the Hub); where an employee has a dedicated bridge it takes
+> precedence, otherwise execution falls back to the platform-wide bridge.
 
 <b>Security & edge cases</b>:
 - <b>Token auth</b>: a per-employee token (`NativeTunnel:AgentTokens__&lt;agentId&gt;` or env var) takes precedence when configured,

@@ -48,7 +48,7 @@ Console.WriteLine($"  前端配置 : 设置 → 本机工具桥地址 = http://1
 Console.WriteLine($"  令牌     : {token}");
 Console.WriteLine($"  允许来源 : {(string.IsNullOrEmpty(allowedOrigin) ? "（未配置，令牌鉴权兜底）" : allowedOrigin)}");
 Console.WriteLine($"  自动配置 : {(exposeTokenEndpoint ? "允许（一键检测按钮）" : "--token 固定时关闭")}");
-Console.WriteLine($"  反向隧道 : {(string.IsNullOrWhiteSpace(tunnelHub) ? "未启用（纯本机回环）" : $"{tunnelHub} → 数字员工 {tunnelAgent}")}");
+Console.WriteLine($"  反向隧道 : {(string.IsNullOrWhiteSpace(tunnelHub) ? "未启用（纯本机回环）" : $"{tunnelHub} → 服务{(string.IsNullOrWhiteSpace(tunnelAgent) ? "整个平台(*)" : "数字员工 " + tunnelAgent.Trim())}")}");
 Console.WriteLine("  停止     : Ctrl+C");
 Console.WriteLine("====================================================");
 
@@ -114,9 +114,13 @@ if (exposeTokenEndpoint)
 
 // 反向隧道（内网穿透）：内网桥主动连公网 Hub,为指定数字员工提供本机执行。与本地 HTTP 服务并行运行,
 // 断线自动重连;主进程退出时随 app.RunAsync 取消一并停止。
-if (!string.IsNullOrWhiteSpace(tunnelHub) && !string.IsNullOrWhiteSpace(tunnelAgent))
+// 绑定模式：--agent <id> 只服务那一个员工；不指定 --agent 时默认**信任整个平台**（scope=*），一座桥服务任意员工。
+if (!string.IsNullOrWhiteSpace(tunnelHub))
 {
-    var tunnel = new NativeTunnelClient(tunnelHub, tunnelAgent, tunnelToken);
+    var tunnelAgentScope = string.IsNullOrWhiteSpace(tunnelAgent) ? "*" : tunnelAgent.Trim();
+    var tunnelTokenValue = string.IsNullOrWhiteSpace(tunnelToken) && exposeTokenEndpoint ? token : tunnelToken;
+    // 隧道令牌未单独指定时，回落全局/本机令牌（平台级桥通常直接用一个令牌即可）
+    var tunnel = new NativeTunnelClient(tunnelHub, tunnelAgentScope, tunnelTokenValue);
     _ = Task.Run(() => tunnel.RunAsync(CancellationToken.None));
 }
 

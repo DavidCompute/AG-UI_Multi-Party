@@ -268,6 +268,49 @@ public sealed class NativeTunnelEndToEndTests
         await Task.Delay(500);
     }
 
+    /// <summary>平台级桥（信任整个平台）：以 <c>*</c> 注册一座桥，即可服务任意未绑定的数字员工。</summary>
+    [Fact]
+    public async Task PlatformWideBridge_ServesAnyAgent_OverSseTunnel()
+    {
+        var builder = HubApp.CreateBuilder([]);
+        builder.Environment.EnvironmentName = "Testing";
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GroupChat:SeedSampleData"] = "false",
+            ["Agents:Provider"] = "mock",
+            ["Persistence:Enabled"] = "false",
+            ["Auth:RequireTokenOnRealTime"] = "false",
+            ["NativeTunnel:Token"] = Token,
+        });
+        HubApp.ConfigureServices(builder);
+        builder.Services.AddAgentFramework(builder.Configuration);
+        builder.Services.AddSingleton<NativeTunnelService>();
+        builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions());
+        builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>()));
+        builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
+        await using var app = builder.Build();
+        HubApp.MapEndpoints(app);
+        app.MapNativeTunnelApi();
+        await app.StartAsync();
+        var svc = app.Services.GetRequiredService<NativeTunnelService>();
+
+        // 平台级桥：绑定 scope=*（信任整个平台，不指定具体员工）
+        using var quit = new CancellationTokenSource();
+        var bridge = new NativeTunnelClient(app.Urls.First(), NativeTunnelService.PlatformWideScope, Token);
+        _ = Task.Run(() => bridge.RunAsync(quit.Token));
+        await AssertEventuallyAsync(() => svc.HasTunnel("agent_unbound_zz"), TimeSpan.FromSeconds(20), "平台级桥未能在超时内经隧道注册");
+
+        // 对任意未绑定员工下发任务，都能经平台级桥在本机执行并回传真实主机名
+        var result = await svc.ExecuteAsync("agent_unbound_zz", "hostname", null, 30, null,
+            TimeSpan.FromSeconds(20), CancellationToken.None);
+        Assert.False(string.IsNullOrWhiteSpace(result));
+        Assert.Contains(Environment.MachineName, result, StringComparison.OrdinalIgnoreCase);
+
+        quit.Cancel();
+        await Task.Delay(500);
+    }
+
     private static async Task AssertEventuallyAsync(Func<bool> condition, TimeSpan timeout, string failMsg)
     {
         var deadline = DateTime.UtcNow + timeout;

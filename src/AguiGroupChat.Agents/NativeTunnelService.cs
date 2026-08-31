@@ -3,16 +3,24 @@ using System.Collections.Concurrent;
 namespace AguiGroupChat.Agents;
 
 /// <summary>
-/// 基于 HTTP/SSE 的反向隧道（内网穿透）：内网本机桥<b>主动向 Hub 发起一条 SSE 长连接</b>并注册（绑定一个数字员工 agentId），
-/// Hub 把「对该数字员工的某个客户端技能」的执行请求沿隧道下行推给该桥执行，桥执行后经 <c>POST /ag-ui/native-tunnel/result</c> 回传。
+/// 基于 HTTP/SSE 的反向隧道（内网穿透）：内网本机桥<b>主动向 Hub 发起一条 SSE 长连接</b>并注册，
+/// Hub 把「客户端技能」的执行请求沿隧道下行推给该桥执行，桥执行后经 <c>POST /ag-ui/native-tunnel/result</c> 回传。
 /// 从而让「没有公网 IP 的内网机器上的本机桥」也能被公网 Hub（进而被数字员工网关）调用执行 shell。
 ///
+/// 桥可注册为两种范围：
+///  - 逐数字员工（agentId）：只服务被 <c>--agent &lt;id&gt;</c> 绑定的那一个数字员工——隔离强，但每个员工要各自起桥；
+///  - <b>整个平台</b>（<see cref="PlatformWideScope"/>，即 <c>*</c>）：信任平台，一座桥即可服务任意数字员工的客户端技能执行。
+///   优先用逐员工桥；某员工无专属桥时回落到平台级桥。
+///
 /// 本服务只承担「路由 + 结果等待」：SSE 下行的实际写入由 API 层（Web）在桥连入时提供的 <see cref="TunnelConnection.Push"/> 委托完成，
-/// 以便独立单测（不依赖真实 HTTP 流）。用固定「隧道令牌」校验桥的合法注册（首版从简，可按需细化到逐 agent）。
+/// 以便独立单测（不依赖真实 HTTP 流）。用「隧道令牌」校验桥的合法注册（全局或逐 agent，详见 <c>NativeTunnelOptions</c>）。
 /// </summary>
 public sealed class NativeTunnelService
 {
-    /// <summary>一条已注册的内网桥连接（绑定到某数字员工）。</summary>
+    /// <summary>平台级桥的作用域标识：一座桥服务任意数字员工（不绑定具体 agent）。</summary>
+    public const string PlatformWideScope = "*";
+
+    /// <summary>一条已注册的内网桥连接（绑定到某数字员工，或平台级 <see cref="PlatformWideScope"/>）。</summary>
     public sealed class TunnelConnection
     {
         public required string AgentId { get; init; }
@@ -29,17 +37,23 @@ public sealed class NativeTunnelService
 
     private long _seq;
 
-    /// <summary>是否已有一台内网桥为该数字员工注册（隧道可执行）。</summary>
+    /// <summary>
+    /// 是否有一座桥能服务该数字员工的客户端技能执行：
+    /// 该员工有专属桥，或已有一座平台级桥（<see cref="PlatformWideScope"/>）承接任意员工。
+    /// </summary>
     public bool HasTunnel(string agentId)
-        => !string.IsNullOrWhiteSpace(agentId) && _byAgent.ContainsKey(agentId);
+    {
+        if (string.IsNullOrWhiteSpace(agentId)) return false;
+        return _byAgent.ContainsKey(agentId) || _byAgent.ContainsKey(PlatformWideScope);
+    }
 
     /// <summary>
-    /// 桥连入注册（API 层调用，并传入 SSE 下行写入委托）。同一 agentId 重复注册会<b>替换</b>旧连接（旧连接断开）。
-    /// 返回注册的连接（可置回）；若 agentId 已被其它桥占用且不是自己，可决定是否抢注 —— 这里直接替换并释放旧连接。
+    /// 桥连入注册（API 层调用，并传入 SSE 下行写入委托）。同一作用域（agentId 或 <see cref="PlatformWideScope"/>）重复注册会<b>替换</b>旧连接（旧连接断开）。
+    /// 返回注册的连接（可置回）；若作用域已被其它桥占用且不是自己，可决定是否抢注 —— 这里直接替换并释放旧连接。
     /// </summary>
     public TunnelConnection Register(string agentId, string bridgeId, long nowMs, Func<string, string, CancellationToken, Task> push)
     {
-        // 先移除旧连接（若同 agent 已有），避免多桥同绑一个 agent
+        // 先移除旧连接（若同作用域已有），避免多桥同绑一个作用域
         if (_byAgent.TryGetValue(agentId, out var _))
             _byAgent.TryRemove(agentId, out _);
         var conn = new TunnelConnection
@@ -54,16 +68,17 @@ public sealed class NativeTunnelService
         return conn;
     }
 
-    /// <summary>卸载某 agentId 的隧道（桥断开时调用）。</summary>
+    /// <summary>卸载某作用域（agentId 或 <see cref="PlatformWideScope"/>）的隧道（桥断开时调用）。</summary>
     public void Unregister(string agentId) => _byAgent.TryRemove(agentId, out _);
 
-    /// <summary>向该 agentId 的内网桥下行一个「执行客户端技能」任务并等待其回传结果。
-    /// 返回输出文本；桥未注册 / 超时 / 失败返回 null。</summary>
+    /// <summary>向能服务该数字员工的内网桥下行一个「执行客户端技能」任务并等待其回传结果：
+    /// 优先该员工的专属桥，否则回落到平台级桥（<see cref="PlatformWideScope"/>）。
+    /// 返回输出文本；无可用桥 / 超时 / 失败返回 null。</summary>
     public async Task<string?> ExecuteAsync(
         string agentId, string command, string? cwd, int? timeoutSec, string? query,
         TimeSpan? waitTimeout, CancellationToken ct)
     {
-        if (!_byAgent.TryGetValue(agentId, out var conn))
+        if (!_byAgent.TryGetValue(agentId, out var conn) && !_byAgent.TryGetValue(PlatformWideScope, out conn))
             return null;
         var taskId = "task_" + Interlocked.Increment(ref _seq).ToString("x") + "_" + Guid.NewGuid().ToString("N")[..8];
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);

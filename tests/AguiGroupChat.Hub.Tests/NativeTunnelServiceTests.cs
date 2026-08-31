@@ -79,5 +79,49 @@ public sealed class NativeTunnelServiceTests
         Assert.NotNull(svc);
     }
 
+    // —— 平台级桥（信任整个平台）：一座桥服务任意数字员工 ——
+
+    [Fact]
+    public void HasTunnel_PlatformWide_TrueForAnyAgent()
+    {
+        var svc = new NativeTunnelService();
+        svc.Register(NativeTunnelService.PlatformWideScope, "br_platform", Now, (p, t, c) => Task.CompletedTask);
+        Assert.True(svc.HasTunnel("agent_any_1"));
+        Assert.True(svc.HasTunnel("agent_any_2"));
+        Assert.False(svc.HasTunnel("")); // 空 agent 恒 false
+    }
+
+    [Fact]
+    public async Task Execute_FallsBackToPlatformWideBridge_ForUnboundAgent()
+    {
+        var svc = new NativeTunnelService();
+        string? tid = null;
+        svc.Register(NativeTunnelService.PlatformWideScope, "br_platform", Now,
+            (p, t, c) => { tid = t; return Task.CompletedTask; });
+        var exec = svc.ExecuteAsync("agent_unbound", "hostname", null, 30, null, TimeSpan.FromSeconds(5), CancellationToken.None);
+        Assert.NotNull(tid);
+        svc.Complete(tid!, "AnyHost", null);
+        Assert.Equal("AnyHost", await exec);
+    }
+
+    [Fact]
+    public async Task Execute_PrefersAgentSpecificBridge_OverPlatformWide()
+    {
+        var svc = new NativeTunnelService();
+        string? platformTid = null; string? agentTid = null;
+        // 平台级桥
+        svc.Register(NativeTunnelService.PlatformWideScope, "br_platform", Now,
+            (p, t, c) => { platformTid = t; return Task.CompletedTask; });
+        Assert.True(svc.HasTunnel("agent_a")); // 暂无专属桥时平台级生效
+        // 再注册 agent_a 专属桥 → 优先走专属桥
+        svc.Register("agent_a", "br_agent_a", Now,
+            (p, t, c) => { agentTid = t; return Task.CompletedTask; });
+        var exec = svc.ExecuteAsync("agent_a", "hostname", null, 30, null, TimeSpan.FromSeconds(5), CancellationToken.None);
+        Assert.Null(platformTid); // 未走平台级
+        Assert.NotNull(agentTid);
+        svc.Complete(agentTid!, "AgentHost", null);
+        Assert.Equal("AgentHost", await exec);
+    }
+
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }
