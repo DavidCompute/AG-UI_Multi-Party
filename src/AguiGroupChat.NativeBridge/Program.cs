@@ -36,7 +36,7 @@ static string GetArg(string[] args, string key, string def)
 string tunnelHub = GetArg(args, "--tunnel", "");                      // 公网 Hub 基址（必填）
 string tunnelAgent = GetArg(args, "--agent", "").Trim();              // 绑定的数字员工 id（可选；空 = 平台级）
 string tunnelToken = GetArg(args, "--tunnel-token", "");              // Hub 侧隧道令牌（必填）
-string tunnelClient = GetArg(args, "--client", "").Trim();            // 本机标识（可选；默认取本机名）
+string tunnelClient = GetArg(args, "--client", "").Trim();            // 本机标识（可选；默认用持久化的唯一编号）
 int localPort = int.TryParse(GetArg(args, "--local-port", "17321"), out var p) ? p : 17321;
 bool localHttps = GetArg(args, "--local-https", "") == "1";
 
@@ -47,11 +47,12 @@ if (string.IsNullOrWhiteSpace(tunnelHub) || string.IsNullOrWhiteSpace(tunnelToke
     Console.Error.WriteLine("  --tunnel        公网 Hub 基址（必填，如 https://hub.example.com）");
     Console.Error.WriteLine("  --tunnel-token  与 Hub 侧 NativeTunnel:Token 一致的令牌（必填）");
     Console.Error.WriteLine("  --agent         可选：不填=服务整个平台(*)；填了只服务该数字员工");
-    Console.Error.WriteLine("  --client        可选：本机标识（默认取本机名）——按请求来源路由到这台机器");
+    Console.Error.WriteLine("  --client        可选：本机唯一标识（默认生成并持久化一个 UUID，避免机器名重名）——按请求来源路由到这台机器");
     Console.Error.WriteLine("  回环发现 : 1)本机浏览器读回环标识自动绑定“本机执行客户端”；2) --local-port <端口>(默认17321, 0关闭)；3) --local-https 用自签证书HTTPS（浏览器需信任）");
     return 2;
 }
-string clientId = string.IsNullOrWhiteSpace(tunnelClient) ? Environment.MachineName : tunnelClient;
+// 本机唯一标识：显式 --client 用之；否则用持久化的随机 UUID（机器名易重名，用 UUID 保证跨机器唯一、重启不变）
+string clientId = string.IsNullOrWhiteSpace(tunnelClient) ? ClientIdStore.LoadOrCreate() : tunnelClient;
 string agentScope = string.IsNullOrWhiteSpace(tunnelAgent) ? "*" : tunnelAgent;
 
 Console.WriteLine("====================================================");
@@ -73,7 +74,16 @@ var tunnelTask = Task.Run(() => tunnel.RunAsync(CancellationToken.None));
 
 if (localPort > 0)
 {
-    await RunLoopbackDiscoveryAsync(localPort, localHttps, clientId, agentScope);
+    // 回环发现是可选的辅助服务：端口被占用/绑定失败时绝不能拖垮隧道——降级为仅隧道运行并提示。
+    try
+    {
+        await RunLoopbackDiscoveryAsync(localPort, localHttps, clientId, agentScope);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[回环发现] 启动失败（端口 {localPort} 可能被占用），已降级为仅隧道运行：{ex.Message}");
+        await tunnelTask;
+    }
 }
 else
 {
