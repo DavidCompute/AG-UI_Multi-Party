@@ -23,11 +23,21 @@ public static class NativeTunnelApi
         app.MapGet("/ag-ui/native-tunnel/connect", async (HttpContext ctx, CancellationToken ct) =>
         {
             var service = ctx.RequestServices.GetRequiredService<NativeTunnelService>();
-            var configuredToken = ctx.RequestServices.GetRequiredService<NativeTunnelOptions>().Token;
+            var options = ctx.RequestServices.GetRequiredService<NativeTunnelOptions>();
             var agent = ctx.Request.Query["agent"].ToString();
             var token = ctx.Request.Query["token"].ToString();
-            if (string.IsNullOrWhiteSpace(agent) || string.IsNullOrWhiteSpace(configuredToken)
-                || !string.Equals(token, configuredToken, StringComparison.Ordinal))
+
+            // 限流（单 IP 滑动窗口）：防暴力猜令牌 / DDoS——Hub 是公网端点
+            var ipKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+            var limiter = ctx.RequestServices.GetRequiredService<NativeTunnelRateLimitBag>().Connect;
+            if (!limiter.Allow(ipKey, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                await ctx.Response.WriteAsync("请求过于频繁，请稍后再试", ct);
+                return;
+            }
+            // 鉴权：逐 agent 专属令牌优先，未配置时用全局令牌；agent 必须配置了有效令牌
+            if (string.IsNullOrWhiteSpace(agent) || !options.HasTokenFor(agent) || !options.IsTokenValid(agent, token))
             {
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsync("未授权：隧道令牌不匹配", ct);
@@ -92,17 +102,100 @@ public static class NativeTunnelApi
         app.MapPost("/ag-ui/native-tunnel/result", (NativeTunnelResultRequest req, HttpContext ctx) =>
         {
             var service = ctx.RequestServices.GetRequiredService<NativeTunnelService>();
+            var options = ctx.RequestServices.GetRequiredService<NativeTunnelOptions>();
+            // 鉴权：结果回传必须带该 agent 的令牌，防伪造结果 / 无 token 刷接口（内网隧道桥用同一令牌 POST）
+            if (string.IsNullOrWhiteSpace(req.TaskId)
+                || !options.HasTokenFor(req.Agent) || !options.IsTokenValid(req.Agent, req.Token))
+                return Results.Json(new { error = "未授权：结果回传令牌无效" }, statusCode: StatusCodes.Status401Unauthorized);
+            // 限流：单 IP 滑动窗口，防 DDoS
+            var ipKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+            var limiter = ctx.RequestServices.GetRequiredService<NativeTunnelRateLimitBag>().Result;
+            if (!limiter.Allow(ipKey, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+                return Results.Json(new { error = "请求过于频繁" }, statusCode: StatusCodes.Status429TooManyRequests);
+
             service.Complete(req.TaskId, req.Output, req.ErrorLog);
             return Results.Ok(new { received = true });
         });
     }
 }
 
-/// <summary>隧道配置（appsettings 的 "NativeTunnel" 节 / 环境变量，如 NativeTunnel__Token）。</summary>
-public sealed class NativeTunnelOptions
+/// <summary>已装配的隧道限流器（按 IOptions 值构建，供端点复用同一实例统计）。</summary>
+public sealed class NativeTunnelRateLimitBag
 {
-    public string? Token { get; set; } = "";
+    public SlidingRateLimiter Connect { get; }
+    public SlidingRateLimiter Result { get; }
+
+    public NativeTunnelRateLimitBag(NativeTunnelOptions options)
+    {
+        Connect = new SlidingRateLimiter(options.ConnectRateLimitPerMinute);
+        Result = new SlidingRateLimiter(options.ResultRateLimitPerMinute);
+    }
 }
 
-/// <summary>桥执行完成回传的执行结果请求体。</summary>
-public sealed record NativeTunnelResultRequest(string TaskId, string? Output, string? ErrorLog = null);
+/// <summary>
+/// 隧道配置（appsettings 的 "NativeTunnel" 节 / 环境变量，如 <c>NativeTunnel__Token</c>）。
+/// 令牌鉴权：逐 agent 专属令牌（<c>NativeTunnel:AgentTokens__&lt;agentId&gt;</c>）优先，未配置时回落全局 <see cref="Token"/>。
+/// </summary>
+public sealed class NativeTunnelOptions
+{
+    /// <summary>全局隧道令牌（所有数字员工默认共用；逐 agent 配置后按 agent 严格匹配）。</summary>
+    public string? Token { get; set; } = "";
+
+    /// <summary>逐数字员工的专属隧道令牌（键为 agentId）。配置后，该普通员工注册 / 回传都必须用它自己的令牌。</summary>
+    public Dictionary<string, string> AgentTokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>是否已为该 agent 配置有效令牌（全局或逐 agent）。</summary>
+    public bool HasTokenFor(string? agent)
+        => (!string.IsNullOrWhiteSpace(agent)
+               && AgentTokens.TryGetValue(agent, out var aTok) && !string.IsNullOrWhiteSpace(aTok))
+           || !string.IsNullOrWhiteSpace(Token);
+
+    /// <summary>校验某 agent 的注册 / 回传令牌：逐 agent 专属令牌存在则必须严格匹配，否则用全局令牌兜底。</summary>
+    public bool IsTokenValid(string? agent, string? token)
+    {
+        if (!string.IsNullOrWhiteSpace(agent)
+            && AgentTokens.TryGetValue(agent, out var aTok) && !string.IsNullOrWhiteSpace(aTok))
+            return string.Equals(token, aTok, StringComparison.Ordinal);
+        return !string.IsNullOrWhiteSpace(Token) && string.Equals(token, Token, StringComparison.Ordinal);
+    }
+
+    /// <summary>connect 端点单 IP 每分钟最多尝试次数（防暴力猜测令牌 / DDoS）。</summary>
+    public int ConnectRateLimitPerMinute { get; set; } = 120;
+
+    /// <summary>result 端点单 IP 每分钟最多接收次数（防伪造结果刷接口 / DDoS）。</summary>
+    public int ResultRateLimitPerMinute { get; set; } = 600;
+}
+
+/// <summary>无依赖的内存滑动窗口限流：按（键）统计窗口内调用次数，超限拒绝。用于公网隧道端点的 DDoS / 暴力防御。</summary>
+public sealed class SlidingRateLimiter
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long StartMs, int Count)> _buckets =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly long _windowMs;
+    private readonly int _max;
+
+    public SlidingRateLimiter(int perMinute)
+    {
+        _max = Math.Max(1, perMinute);
+        _windowMs = 60_000;
+    }
+
+    /// <summary>本次调用是否被允许；超限返回 false。</summary>
+    public bool Allow(string key, long nowMs)
+    {
+        while (true)
+        {
+            var (start, count) = _buckets.GetOrAdd(key, _ => (nowMs, 0));
+            if (nowMs - start >= _windowMs) // 窗口过期：重置
+            {
+                if (_buckets.TryUpdate(key, (nowMs, 1), (start, count))) return true;
+                continue; // 竞争重试
+            }
+            if (count >= _max) return false;
+            if (_buckets.TryUpdate(key, (start, count + 1), (start, count))) return true;
+        }
+    }
+}
+
+/// <summary>桥执行完成回传的执行结果请求体。<c>Agent</c>/<c>Token</c> 用于鉴权，防止伪造结果。</summary>
+public sealed record NativeTunnelResultRequest(string TaskId, string? Output, string? ErrorLog = null, string? Agent = null, string? Token = null);

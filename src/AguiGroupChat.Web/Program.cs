@@ -25,6 +25,7 @@ builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
 builder.Services.AddSingleton<NativeTunnelService>(); // 内网本机桥反向隧道（HTTP/SSE）路由 + 执行等待
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
+builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>())); // 隧道端点限流器
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 200L * 1024 * 1024);

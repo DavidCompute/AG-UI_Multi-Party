@@ -25,6 +25,8 @@ public sealed class NativeTunnelEndToEndTests
     private const string AgentId = "agent_ops";
     private const string AgentHost = "agent_host";
     private const string Token = "test-tunnel-token";
+    private const string AgentPerAgent = "agent_special";
+    private const string AgentPerToken = "per-agent-secret";
 
     [Fact]
     public async Task RealBridge_ExecutesShellOverSseTunnel_AndReturnsResult()
@@ -45,6 +47,7 @@ public sealed class NativeTunnelEndToEndTests
         builder.Services.AddAgentFramework(builder.Configuration);
         builder.Services.AddSingleton<NativeTunnelService>();
         builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions());
+        builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>()));
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
         await using var app = builder.Build();
         HubApp.MapEndpoints(app);
@@ -94,6 +97,7 @@ public sealed class NativeTunnelEndToEndTests
         builder.Services.AddAgentFramework(builder.Configuration);
         builder.Services.AddSingleton<NativeTunnelService>();
         builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions());
+        builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>()));
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
         await using var app = builder.Build();
         HubApp.MapEndpoints(app);
@@ -140,6 +144,7 @@ public sealed class NativeTunnelEndToEndTests
         envBuilder.Services.AddAgentFramework(envBuilder.Configuration);
         envBuilder.Services.AddSingleton<NativeTunnelService>();
         envBuilder.Services.AddSingleton(envBuilder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions());
+        envBuilder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>()));
         envBuilder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
         await using var app = envBuilder.Build();
         HubApp.MapEndpoints(app);
@@ -216,6 +221,51 @@ public sealed class NativeTunnelEndToEndTests
 
         quit.Cancel();
         await Task.WhenAny(bridgeTask, Task.Delay(2000));
+    }
+
+    /// <summary>逐 agent 专属令牌：为该 agent 配置专有令牌后，持该令牌的桥能注册、持全局令牌反而被拒。</summary>
+    [Fact]
+    public async Task PerAgentToken_OverridesGlobal_ForThatAgent()
+    {
+        var builder = HubApp.CreateBuilder([]);
+        builder.Environment.EnvironmentName = "Testing";
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GroupChat:SeedSampleData"] = "false",
+            ["Agents:Provider"] = "mock",
+            ["Persistence:Enabled"] = "false",
+            ["Auth:RequireTokenOnRealTime"] = "false",
+            ["NativeTunnel:Token"] = "global-token",
+            ["NativeTunnel:AgentTokens:" + AgentPerAgent] = AgentPerToken, // 逐 agent 专有令牌
+        });
+        HubApp.ConfigureServices(builder);
+        builder.Services.AddAgentFramework(builder.Configuration);
+        builder.Services.AddSingleton<NativeTunnelService>();
+        builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions());
+        builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>()));
+        builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
+        await using var app = builder.Build();
+        HubApp.MapEndpoints(app);
+        app.MapNativeTunnelApi();
+        await app.StartAsync();
+        var svc = app.Services.GetRequiredService<NativeTunnelService>();
+
+        // 用全局令牌连该 agent → 配置了逐 agent 专属令牌后，全局令牌对该 agent 无效 → 被拒
+        using var quitGlobal = new CancellationTokenSource();
+        var badBridge = new NativeTunnelClient(app.Urls.First(), AgentPerAgent, "global-token");
+        _ = Task.Run(() => badBridge.RunAsync(quitGlobal.Token));
+        await Task.Delay(1200);
+        Assert.False(svc.HasTunnel(AgentPerAgent));
+        quitGlobal.Cancel();
+
+        // 用该 agent 的专属令牌连 → 成功注册
+        using var quit = new CancellationTokenSource();
+        var goodBridge = new NativeTunnelClient(app.Urls.First(), AgentPerAgent, AgentPerToken);
+        _ = Task.Run(() => goodBridge.RunAsync(quit.Token));
+        await AssertEventuallyAsync(() => svc.HasTunnel(AgentPerAgent), TimeSpan.FromSeconds(20), "持专属令牌的桥未能在超时内经隧道注册");
+        quit.Cancel();
+        await Task.Delay(500);
     }
 
     private static async Task AssertEventuallyAsync(Func<bool> condition, TimeSpan timeout, string failMsg)

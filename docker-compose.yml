@@ -116,6 +116,10 @@ services:
       Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}
       # 技能库 HTTP 是否放行本机/内网（SSRF 防护开关；默认关。确需调用本机/内网接口时置 true）
       Agents__AllowPrivateSkillEndpoints: ${AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS:-false}
+      # 内网穿透反向隧道（公网 Hub + 无公网 IP 的内网桥）：全局令牌 + 逐 agent 令牌 + 限流
+      NativeTunnel__Token: ${NATIVE_TUNNEL_TOKEN:-}
+      NativeTunnel__ConnectRateLimitPerMinute: ${NATIVE_TUNNEL_CONNECT_RATE:-120}
+      NativeTunnel__ResultRateLimitPerMinute: ${NATIVE_TUNNEL_RESULT_RATE:-600}
       # 确定性编排计划（Coordinator Plan）：路由型数字员工先按组织/技能定计划再依次激活执行；默认开（可用环境变量覆盖）
       Agents__CoordinatorPlanning: ${AGENTS_COORDINATOR_PLANNING:-true}
       # 图谱记忆（Graph RAG）：从群消息抽实体/关系建图，回复前按语义召回种子实体 + n 跳图遍历注入。默认关。

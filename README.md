@@ -728,8 +728,9 @@ AguiGroupChat.NativeBridge.exe \
 > 断线自动指数退避重连。多个不同内网机可用各自 `--agent` 绑到不同数字员工，各自独立出站不被 Hub 主动连接。
 
 **安全与边界**：
-- 隧道令牌首版为全局（`NativeTunnel:Token`），做过校验才允许注册；如需更细可后续按数字员工逐 agent 下发令牌。
-- `POST /ag-ui/native-tunnel/result` 回传端点按 `taskId` 回填，建议部署到公网后对隧道相关端点加限流 / 来源校验。
+- **令牌鉴权**：逐 agent 专属令牌（`NativeTunnel:AgentTokens__<agentId>`，或环境变量）优先，未配置时回落全局 `NativeTunnel:Token`；
+  `POST /ag-ui/native-tunnel/result` 回传端点同样需要携带该 agent 的有效令牌（本机桥自动带上 `--agent/--tunnel-token`），防止伪造结果 / 无令牌刷接口。
+- **限流**：`connect` 与 `result` 端点带内存滑动窗口限流（默认单 IP `connect` 120 次/分、`result` 600 次/分，可在 `NativeTunnel:ConnectRateLimitPerMinute` / `NativeTunnel:ResultRateLimitPerMinute` 调整），抵御公网暴力猜令牌 / DDoS。
 - 桌面版本机桥（同机回环）不涉及内网穿透：本机桥与桌面壳同机，直接回环即可，`--tunnel` 是为「Docker + 远端浏览器」场景准备的。
 
 ## 配置（appsettings.json → `GroupChat` 节点）

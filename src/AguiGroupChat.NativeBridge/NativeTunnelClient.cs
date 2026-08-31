@@ -132,7 +132,7 @@ public sealed class NativeTunnelClient
     {
         try
         {
-            var body = JsonSerializer.Serialize(new { taskId, output, errorLog });
+            var body = JsonSerializer.Serialize(new { taskId, output, errorLog, agent = _agent, token = _token });
             using var content = new StringContent(body, Encoding.UTF8, "application/json");
             using var resp = await _http.PostAsync($"{_hubBase}/ag-ui/native-tunnel/result", content, ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)

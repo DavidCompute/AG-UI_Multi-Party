@@ -696,10 +696,12 @@ as a user message (`[frontend tool] … completed by the intranet bridge`).
 > dialing out independently (never inbound-connected by the Hub).
 
 <b>Security & edge cases</b>:
-- The tunnel token is global (`NativeTunnel:Token`) and is required for registration; per-employee tokens can be
-  introduced later if needed.
-- The `POST /ag-ui/native-tunnel/result` endpoint resolves by `taskId`; once deployed to the public internet, add
-  rate limiting / origin checks on the tunnel endpoints.
+- <b>Token auth</b>: a per-employee token (`NativeTunnel:AgentTokens__&lt;agentId&gt;` or env var) takes precedence when configured,
+  falling back to the global `NativeTunnel:Token` otherwise. The `POST /ag-ui/native-tunnel/result` endpoint also requires a
+  valid token for that agent (the bridge sends `--agent`/`--tunnel-token` automatically) so spoofed results / tokenless uploads are rejected.
+- <b>Rate limiting</b>: `connect` and `result` carry an in-memory sliding-window limiter (default 120/min per IP for connect,
+  600/min for result; tune via `NativeTunnel:ConnectRateLimitPerMinute` / `NativeTunnel:ResultRateLimitPerMinute`) to
+  blunt brute-forcing / DDoS on the public endpoints.
 - The desktop bridge (same-host loopback) needs no NAT traversal: it talks over loopback. `--tunnel` is meant for the
   “Docker + remote browser” scenario.
 
