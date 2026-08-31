@@ -70,6 +70,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **Scheduled / cron tasks (1.4)**: "on-duty digital employees" report / verify / nag on a 5-field cron schedule, managed visually in a frontend task panel.
 - **Automatic accumulation of important memory (1.3)**: one-click aggregation of "critical" conclusions in a group chat into the knowledge base — knowledge is accumulated as conversation happens, cutting manual organization cost.
 - **Cross-topic theme linking (5.1)**: a relation matrix showing "which other topics this theme was also discussed in", so multi-person collaboration never misses context.
+- **Recursive gather-and-answer loop (Plan C)**: while answering, if the gathered data is insufficient (e.g. still need disk / memory / services / logs), the digital employee <b>proactively keeps invoking skills / assigning subordinates</b> until the info is complete — <b>never stopping to ask "continue?"</b>; skill-only digital employees can also enter plan orchestration, ideal for multi-skill checks like "is there anything wrong with this PC?"
 
 ### 9. Governance & Compliance (The Hard Threshold for Enterprise Rollout)
 - **Differentiated approval policies (4.1)**: in addition to the global tool list, each digital employee can have an independent approval tool list; `approveAll` approves all remaining pending tools for the current task in one go.
@@ -103,6 +104,16 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **External API keys (6.4)**: `Auth:ApiKeys` config keys; `Authorization: Bearer <apiKey>` authenticates without login to call the HTTP API as a bound account — suitable for scripts and integration.
 - **Official .NET SDK (third-party integration)**: `src/AguiGroupChat.Sdk` provides `AguiClient` (HTTP upstream) + `AguiRealtimeClient` (WS/SSE downstream) with strongly typed Models — a third-party app can log in, create group chats, send messages, subscribe in real time, and receive agent streaming replies with a single reference (see [SDK docs](src/AguiGroupChat.Sdk/README.md), examples in `samples/AguiGroupChat.Client`).
 
+### 14. On-Device Smart Tools & Desktop Ops (Human-in-the-loop local execution)
+- **Client-execution skills (`ExecutionLocation=Client`)**: a skill can be marked to <b>run on the local machine</b> — shell runs via the native bridge in a sandbox on the browser's host; http runs via the browser fetch; the result is fed back to the model. <b>Works out of the box in the desktop edition</b> (the desktop shell is the local host); for Docker + a local browser, use the standalone NativeBridge with one-click Detect (loopback + token auth + sandbox / timeout / truncation).
+- **Built-in standard ops skill pack**: ships seven `ops_*` client skills — system info / disk / memory & CPU / top processes / network connections / service status / recent System error logs — letting digital employees <b>troubleshoot the local PC</b> (disk nearly full, high memory, suspicious outbound connections, stopped services, error / blue screen) and act on real local data.
+- **Run all locally inside a plan**: when several local skills are needed at once, they merge into one "run all locally" confirmation card (approve once), the frontend runs each and lights up the execution-plan card, then synthesizes a combined answer.
+
+### 15. Zero-Friction Skill Configuration (Generate Skills from Natural Language)
+- **🤖 Generate a skill from plain text**: in the Skill Library, type a request (e.g. "check local disk usage and report free space per partition"), and the LLM produces name / kind / command / description / execution location / client-runner config, filled into the form for review then save — <b>no need to hand-write commands or JSON</b>, so even non-technical users can add capabilities to digital employees.
+
+---
+
 ---
 
 ## 3. Technical Advantages
@@ -110,11 +121,11 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 | Dimension | Description |
 |---|---|
 | Standard protocol | Built on AG-UI group chat extension protocol v1.0, aligned event / field by field with native AG-UI ecosystem (Microsoft.Agents.AI.AGUI) |
-| Mature framework | Digital employee gateway built on Microsoft Agent Framework (MSAGENT), natively supporting streaming, tool calls, skills (digital-employee-to-digital-employee), approvals |
+| Mature framework | Digital employee gateway built on Microsoft Agent Framework (MSAGENT), natively supporting streaming, tool calls, skills (digital-employee-to-digital-employee), approvals; client-execution skills / native tool bridge enable human-in-the-loop local execution, and plans support a recursive gather-and-answer loop |
 | Multi-client coverage | Web (Docker), Windows desktop (WPF + WebView2, multi-instance), cross-platform desktop (Avalonia) |
 | Extensible | Storage abstraction (IGroupStore / IUserStore) with built-in **memory / postgres / mysql / sqlite / redis** implementations, switchable in one click; `IAgentGateway` for custom gateways; digital employee directory / trigger rules / topics all managed at runtime |
-| Data security | Password PBKDF2, token auth, attachment whitelist, strict ownership validation for private group chats / private digital employees, HTML sandbox, SSRF protection, memory tiering and auto-forgetting |
-| Quality assurance | **603 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end) |
+| Data security | Password PBKDF2, token auth, attachment whitelist, strict ownership validation for private group chats / private digital employees, HTML sandbox, SSRF protection, memory tiering and auto-forgetting, local-execution sandbox + token auth |
+| Quality assurance | **648 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end) |
 
 ---
 
