@@ -367,7 +367,8 @@ public sealed class AgentCatalog
 
         if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
         {
-            return new ChatClientAgent(new MockChatClient(def, enableTools: _options.EnableTools, skills: def.Skills), chatOptions, _loggerFactory, _services);
+            var clientToolNames = _agentClientToolNames.TryGetValue(agentId, out var c) ? c : null;
+            return new ChatClientAgent(new MockChatClient(def, enableTools: _options.EnableTools, skills: def.Skills, clientToolNames: clientToolNames), chatOptions, _loggerFactory, _services);
         }
 
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);

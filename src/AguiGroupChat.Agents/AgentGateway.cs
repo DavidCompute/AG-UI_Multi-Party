@@ -480,6 +480,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         var resultText = string.IsNullOrWhiteSpace(tunnelResult)
                             ? (tunnelResult is null ? "（内网本机桥执行未返回结果 / 超时）" : "（内网本机执行无输出）")
                             : tunnelResult;
+                        // 关键：把隧道结果写入 ClientToolResultStore——approval.CreateResponse(true) 会让 MSAGENT 重放并执行
+                        // 该客户端技能的占位函数，占位函数从该 Store 读取真实结果；不写入则读到 null 回落为占位文本，覆盖掉隧道结果。
+                        ClientToolResultStore.Put(tfc.Name, resultText);
                         _logger.LogInformation("客户端技能经内网隧道执行：agent={AgentId} tool={Tool}", context.AgentId, tfc.Name);
                         accumulated = ""; reasoningAccumulated = 0;
                         userMessage = new ChatMessage(ChatRole.User, new AIContent[]

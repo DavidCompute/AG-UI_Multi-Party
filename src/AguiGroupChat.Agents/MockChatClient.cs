@@ -15,14 +15,18 @@ public sealed class MockChatClient : IChatClient
     private readonly TimeProvider _time;
     private readonly bool _enableTools;
     private readonly IReadOnlyList<AgentSkillConfig>? _skills;
+    // 已挂载的客户端执行技能工具名（ExecutionLocation=Client 的可复用目录技能）：供 mock 确定性调用，驱动"网关→隧道→桥"全链路
+    private readonly IReadOnlyList<string>? _clientToolNames;
     private int _toolCallSeq; // 工具调用序号：并发流式下用 Interlocked 自增保证唯一
 
-    public MockChatClient(AgentDefinition agent, TimeProvider? time = null, bool enableTools = false, IReadOnlyList<AgentSkillConfig>? skills = null)
+    public MockChatClient(AgentDefinition agent, TimeProvider? time = null, bool enableTools = false,
+        IReadOnlyList<AgentSkillConfig>? skills = null, IReadOnlyList<string>? clientToolNames = null)
     {
         _agent = agent;
         _time = time ?? TimeProvider.System;
         _enableTools = enableTools;
         _skills = skills;
+        _clientToolNames = clientToolNames;
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null)
@@ -215,6 +219,21 @@ public sealed class MockChatClient : IChatClient
                         ["from"] = convMatch.Groups[2].Value,
                         ["to"] = convMatch.Groups[3].Value,
                     })]);
+        }
+
+        // 客户端执行技能（ExecutionLocation=Client 的目录技能）：mock 确定性地调用第一个已挂载客户端工具，
+        // 以驱动"问题 → 网关识别客户端技能 → 中断审批 → 经内网反向隧道让本机桥执行 → 结果回灌"的完整链路。
+        // 触发词：请求在本机执行（本机/在本地/hostname 等）。已带结果回灌（消息含「[前端工具]」回显）时不再次触发，直接由 BuildChunks 基于回灌文本作答。
+        if (_enableTools && _clientToolNames is { Count: > 0 }
+            && !lastUserText.Contains("[前端工具]", StringComparison.Ordinal)
+            && (lastUserText.Contains("hostname", StringComparison.OrdinalIgnoreCase)
+                || lastUserText.Contains("主机名", StringComparison.Ordinal)
+                || (lastUserText.Contains("本机", StringComparison.Ordinal) && lastUserText.Contains("执行", StringComparison.Ordinal))))
+        {
+            var toolName = _clientToolNames[0];
+            return new ChatResponseUpdate(ChatRole.Assistant,
+                [new FunctionCallContent("call_mock_clienttool_" + Interlocked.Increment(ref _toolCallSeq), toolName,
+                    new Dictionary<string, object?> { ["query"] = lastUserText }) ]);
         }
 
         // 请求「时间」→ 调用普通工具
