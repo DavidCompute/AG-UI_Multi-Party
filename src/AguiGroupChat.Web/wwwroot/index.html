@@ -638,8 +638,11 @@
 
       <div class="form-group">
         <label for="pfBridgeClient" data-i18n="profile.bridgeClient">本机执行客户端</label>
-        <input id="pfBridgeClient" class="modal-input" data-i18n-placeholder="profile.bridgeClientPh" />
-        <p class="form-hint" data-i18n="profile.bridgeClientHint">留空 = 按数字员工/节点作用域路由；填写某台以 --client 注册的桥的机器名（如 AIBOOK）后，您发起的本机 shell 技能将在该机器上执行。</p>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="pfBridgeClient" class="modal-input" data-i18n-placeholder="profile.bridgeClientPh" style="flex:1" />
+          <button id="pfBridgeDiscover" class="chip-btn" type="button" data-i18n="profile.bridgeClientDiscover">💻 自动发现</button>
+        </div>
+        <p class="form-hint" data-i18n="profile.bridgeClientHint">留空 = 按数字员工/节点作用域路由；填写某台以 --client 注册的桥的机器名后，您发起的本机 shell 技能将优先在该机器上执行。</p>
       </div>
 
       <div class="form-section" data-i18n="profile.twinSection">AI 分身</div>

@@ -2114,6 +2114,30 @@ async function submitProfile() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
+/* 💻 自动发现本机桥：读回环服务 http://127.0.0.1:<port>/ag-ui/bridge/info
+ *  取得本机桥的机器/客户端标识（client）并填入「本机执行客户端」（需手动点保存）。
+ *  仅在浏览器与桥同机（回环可达）时有效；可传递 --local-port（默认 17321）与 --local-https。 */
+async function discoverLocalBridgeClient() {
+  const btn = $("pfBridgeDiscover");
+  const defaultScheme = "http";
+  const defaultPort = "17321";
+  // 先试 https（若桥以 --local-https 起），不行再试 http
+  for (const [scheme, port] of [["https", defaultPort], [defaultScheme, defaultPort]]) {
+    try {
+      const res = await fetch(`${scheme}://127.0.0.1:${port}/ag-ui/bridge/info`, { method: "GET" });
+      if (!res.ok) continue;
+      const d = await res.json().catch(() => null);
+      if (d && (d.client || d.agentScope)) {
+        if (d.client) $("pfBridgeClient").value = d.client;
+        const scope = d.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : d.agentScope;
+        toast(t("profile.bridgeDiscovered", { client: d.client || "", scope: scope || "" }));
+        return;
+      }
+    } catch { /* 不可达则试下一个 */ }
+  }
+  toast(t("profile.bridgeClientDiscoverFail"));
+}
+
 /* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
 
 let createPickOptions = []; // 创建知聚弹窗的可选成员（打开时快照，供搜索过滤）
@@ -6482,6 +6506,7 @@ function init() {
   $("pwNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitChangePassword(); } });
   $("pfCancel").onclick = () => $("profileModal").classList.add("hidden");
   $("pfConfirm").onclick = submitProfile;
+  $("pfBridgeDiscover").onclick = discoverLocalBridgeClient;
   $("pfTwinEnable").onclick = enableTwin;
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;

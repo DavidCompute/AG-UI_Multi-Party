@@ -11,4 +11,9 @@
     <Version>1.0.80</Version>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- 回环发现服务：极简 Kestrel 监听 127.0.0.1，供同机浏览器读取本机桥的客户端/机器标识以自动绑定 -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>
