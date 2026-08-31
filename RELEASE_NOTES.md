@@ -1,3 +1,15 @@
+# AG-UI 群聊桌面版 —— 新增：内网穿透（反向隧道）
+# AG-UI Group Chat Desktop — New: NAT traversal (reverse tunnel)
+
+## 新增（中文）
+- **新增：反向隧道（HTTP/SSE）让「无公网 IP」的内网机本机桥被公网 Hub 调用**。内网机上的本机桥主动出站连公网 Hub 并注册（`--agent` 绑定数字员工）；Hub 把对该员工的客户端技能任务沿隧道下行推给内网桥执行，结果回传模型继续作答——无需入站公网端口、无需第三方隧道。
+- **用法**：`NativeBridge --tunnel <hub> --agent <id> --tunnel-token <token>`；Hub 侧 `NativeTunnel__Token`（或 appsettings `NativeTunnel:Token`）校验。前端桥地址仍填 Hub 自身即可，网关经隧道转发。
+
+## New (English)
+- **New: reverse tunnel (HTTP/SSE) so an intranet local bridge with no public IP can be called by the public Hub**. The bridge on the intranet host dials out to the public Hub and registers (binding a digital employee via `--agent`); the Hub pushes that employee's client-skill task down the tunnel for the bridge to execute, posting the result back so the model can continue—no inbound public port, no third-party tunnel. Usage: `NativeBridge --tunnel <hub> --agent <id> --tunnel-token <token>`; the Hub validates via `NativeTunnel__Token` (or appsettings `NativeTunnel:Token`). The frontend bridge URL still points at the Hub itself; the gateway forwards over the tunnel.
+
+---
+
 # AG-UI 群聊桌面版 1.0.102 发布说明
 # AG-UI Group Chat Desktop 1.0.102 Release Notes
 

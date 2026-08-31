@@ -62,6 +62,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?> _usage;
     // 技能库（可复用技能：shell/http/prompt）——供确定性编排计划枚举与按计划激活技能
     private readonly Lazy<AgentSkillCatalog?> _skillCatalog;
+    // 内网本机桥反向隧道（HTTP/SSE）：数字员工客户端技能由内网机隧道桥承载时，经隧道执行而非前端浏览器
+    private readonly Lazy<NativeTunnelService?> _nativeTunnel;
     // 轻量运行指标（可选，6.1 可观测性）
     private readonly Lazy<MetricsService?> _metrics;
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
@@ -156,6 +158,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _usage = new Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?>(() =>
             services.GetService(typeof(AguiGroupChat.Hub.Agents.AgentUsageService)) as AguiGroupChat.Hub.Agents.AgentUsageService);
         _skillCatalog = new Lazy<AgentSkillCatalog?>(() => services.GetService(typeof(AgentSkillCatalog)) as AgentSkillCatalog);
+        // 内网本机桥反向隧道：数字员工调由内网桥承载的客户端技能时，优先经隧道让那台内网机执行（而非前端浏览器）
+        _nativeTunnel = new Lazy<NativeTunnelService?>(() => services.GetService(typeof(NativeTunnelService)) as NativeTunnelService);
         // 轻量运行指标（可选，6.1）
         _metrics = new Lazy<MetricsService?>(() =>
             services.GetService(typeof(MetricsService)) as MetricsService);
@@ -251,6 +255,28 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var d = catalog.Get(toolName);
         if (d is not null) return d;
         return catalog.ListAll().FirstOrDefault(s => s.SkillId == toolName);
+    }
+
+    /// <summary>从客户端执行技能的 <see cref="AgentSkillDefinition.ClientRunner"/>（JSON）解析 shell 命令 / 工作目录 / 超时，供内网隧道执行。
+    /// 仅支持单技能对象（非批量数组）；解析失败返回 false。</summary>
+    private bool TryParseClientShell(string toolName, out string? command, out string? cwd, out int? timeoutSec)
+    {
+        command = null; cwd = null; timeoutSec = null;
+        var skill = GetSkillById(toolName);
+        if (skill is null || string.IsNullOrWhiteSpace(skill.ClientRunner)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(skill.ClientRunner);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return false; // 批量数组不在此路径处理
+            var kind = root.TryGetProperty("kind", out var k) ? k.GetString() : null;
+            if (!string.Equals(kind, "shell", StringComparison.OrdinalIgnoreCase)) return false;
+            command = root.TryGetProperty("command", out var c) ? c.GetString() : null;
+            cwd = root.TryGetProperty("cwd", out var w) ? w.GetString() : null;
+            timeoutSec = root.TryGetProperty("timeoutSec", out var t) && t.ValueKind == JsonValueKind.Number ? t.GetInt32() : (int?)null;
+            return !string.IsNullOrWhiteSpace(command);
+        }
+        catch { return false; }
     }
 
     private async Task<AgentInvocationResult> InvokeCoreAsync(AgentInvocationContext context, CancellationToken ct)
@@ -439,6 +465,32 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (approval is not null) break;
                     }
 
+                    // —— 反向隧道（内网穿透）：客户端技能且该数字员工的客户端技能由内网机隧道桥承载时，
+                    //     经隧道让那台内网机执行（不依赖前端浏览器），结果回灌模型继续，而非下发给前端。 ——
+                    if (approval is not null
+                        && approval.ToolCall is FunctionCallContent tfc
+                        && _catalog.GetAgentClientToolNames(context.AgentId).Contains(tfc.Name, StringComparer.Ordinal)
+                        && _nativeTunnel.Value?.HasTunnel(context.AgentId) == true
+                        && TryParseClientShell(tfc.Name, out var shellCmd, out var shellCwd, out var shellTimeoutSec))
+                    {
+                        await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
+                        var tunnelResult = await _nativeTunnel.Value.ExecuteAsync(
+                            context.AgentId, shellCmd!, shellCwd, shellTimeoutSec, null,
+                            TimeSpan.FromSeconds(Math.Clamp(shellTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
+                        var resultText = string.IsNullOrWhiteSpace(tunnelResult)
+                            ? (tunnelResult is null ? "（内网本机桥执行未返回结果 / 超时）" : "（内网本机执行无输出）")
+                            : tunnelResult;
+                        _logger.LogInformation("客户端技能经内网隧道执行：agent={AgentId} tool={Tool}", context.AgentId, tfc.Name);
+                        accumulated = ""; reasoningAccumulated = 0;
+                        userMessage = new ChatMessage(ChatRole.User, new AIContent[]
+                        {
+                            approval.CreateResponse(true),
+                            new TextContent($"[前端工具] {tfc.Name} 已由内网本机桥执行完毕，请直接引用它的结果作答：\n{resultText}\n（答完即可，无需再调用该工具）"),
+                        });
+                        approval = null; // 复位，重新进入主循环以注入结果的用户消息继续流式作答
+                        continue;
+                    }
+
                     break; // 模型流正常完成（审批中断时 approval 已置位，由下方分支处理）
                 }
                 catch (Exception ex) when (AgentGatewayHelpers.IsRetryableModelError(ex) && attempt < MaxModelAttempts)
@@ -458,11 +510,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (approval is not null)
             {
                 await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
-                var interruptId = "interrupt_" + IdGenerator.NewId();
                 var fc = approval.ToolCall as FunctionCallContent;
-                // 客户端执行技能：toolName 命中则标记 kind=client_tool，下发给前端执行（复用 HITL 通道下发 + 回传）
+                // 客户端执行技能：toolName 命中则标记 kind=client_tool，下发给前端执行（复用 HITL 通道下发 + 回传）；
+                // 若该数字员工已有内网隧道桥，则在 while 内经隧道执行（见上），不会到达这里走前端下发。
                 var isClientTool = fc is not null
                     && _catalog.GetAgentClientToolNames(context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
+
+                var interruptId = "interrupt_" + IdGenerator.NewId();
                 var clientRunner = isClientTool ? GetSkillById(fc!.Name)?.ClientRunner : null;
                 _pendingInteractions[interruptId] = new PendingInteraction(
                     interruptId, context.GroupId, context.AgentId, runId, messageId,

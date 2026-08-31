@@ -29,6 +29,10 @@ static string GetArg(string[] args, string key, string def)
 int port = int.TryParse(GetArg(args, "--port", "17321"), out var p) ? p : 17321;
 string? fixedToken = GetArg(args, "--token", "");
 string allowedOrigin = GetArg(args, "--allowed-origin", "");
+// 反向隧道模式（内网穿透）：无公网 IP 时，经本命令连入公网 Hub，为指定数字员工提供本机执行能力。
+string tunnelHub = GetArg(args, "--tunnel", "");      // 如 https://hub.example.com（可选）
+string tunnelAgent = GetArg(args, "--agent", "");     // 绑定的数字员工 id
+string tunnelToken = GetArg(args, "--tunnel-token", ""); // Hub 侧 NativeTunnel:Token
 
 // 令牌：--token 显式给定则用之；否则从用户目录持久化令牌文件读取/生成并复用，保证重启令牌不变（前端只需填一次）。
 var token = string.IsNullOrWhiteSpace(fixedToken)
@@ -44,6 +48,7 @@ Console.WriteLine($"  前端配置 : 设置 → 本机工具桥地址 = http://1
 Console.WriteLine($"  令牌     : {token}");
 Console.WriteLine($"  允许来源 : {(string.IsNullOrEmpty(allowedOrigin) ? "（未配置，令牌鉴权兜底）" : allowedOrigin)}");
 Console.WriteLine($"  自动配置 : {(exposeTokenEndpoint ? "允许（一键检测按钮）" : "--token 固定时关闭")}");
+Console.WriteLine($"  反向隧道 : {(string.IsNullOrWhiteSpace(tunnelHub) ? "未启用（纯本机回环）" : $"{tunnelHub} → 数字员工 {tunnelAgent}")}");
 Console.WriteLine("  停止     : Ctrl+C");
 Console.WriteLine("====================================================");
 
@@ -105,6 +110,14 @@ if (exposeTokenEndpoint)
 {
     app.MapGet("/ag-ui/native-bridge/token", () =>
         Results.Ok(new { url = $"http://127.0.0.1:{port}/ag-ui/client-tool", token }));
+}
+
+// 反向隧道（内网穿透）：内网桥主动连公网 Hub,为指定数字员工提供本机执行。与本地 HTTP 服务并行运行,
+// 断线自动重连;主进程退出时随 app.RunAsync 取消一并停止。
+if (!string.IsNullOrWhiteSpace(tunnelHub) && !string.IsNullOrWhiteSpace(tunnelAgent))
+{
+    var tunnel = new NativeTunnelClient(tunnelHub, tunnelAgent, tunnelToken);
+    _ = Task.Run(() => tunnel.RunAsync(CancellationToken.None));
 }
 
 await app.RunAsync();

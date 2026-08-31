@@ -23,6 +23,8 @@ builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模
 builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4），持久化到扩展区「branding」
 builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员持久化运维旋钮，持久化到扩展区「configGovernance」
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
+builder.Services.AddSingleton<NativeTunnelService>(); // 内网本机桥反向隧道（HTTP/SSE）路由 + 执行等待
+builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 200L * 1024 * 1024);
@@ -90,6 +92,7 @@ app.MapExportImportApi(); // 数据导出 / 导入：账号 + 智能体 + 聊天
 app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
 app.MapSkillApi(); // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
 app.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（登录用户执行，沙箱 + 超时）
+app.MapNativeTunnelApi(); // 内网本机桥反向隧道入口（HTTP/SSE）：桥连入 + 结果回传
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）

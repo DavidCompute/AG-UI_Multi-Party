@@ -694,6 +694,44 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 （可选勾选「优先本机执行」），大模型即产出名称 / ID / 类型 / 描述 / 命令 / 执行位置 / ClientRunner，自动填入表单供微调后保存。
 无需手写命令与 JSON。端点 `POST /ag-ui/skills/generate`（需登录）；mock 模式返回确定性模板。
 
+#### 内网穿透：反向隧道（本机桥无公网 IP 也能被 Hub 调用）
+
+上面两种方式都要求<b>浏览器所在主机能直连到桥</b>（同一局域网 / 回环）。如果用户内网机器<b>没有公网 IP</b>，
+而 Hub 部署在公网，前端桥无法回连那台内网机。项目提供<b>基于 HTTP/SSE 的反向隧道</b>来穿透内网：
+
+- **方向反转**：内网机上的本机桥<b>主动发出站</b> SSE 长连接连到公网 Hub 并注册（绑定一个数字员工 agentId）；
+  Hub 把对该数字员工的客户端技能执行任务**沿这条隧道下行**推给内网桥执行，桥执行后 `POST` 回推结果。
+  全程没有公网入站端口，无需第三方隧道，纯 HTTP 即可穿透 NAT。
+
+起内网桥时加三个参数即启用：
+
+```bash
+# 在“没有公网 IP”的内网机器上运行（无需公网端口，只需能出站访问 Hub）
+AguiGroupChat.NativeBridge.exe \
+  --tunnel https://你的Hub域名 --agent <数字员工id> --tunnel-token <隧道令牌>
+```
+
+- `--tunnel <hub>`：公网 Hub 基址（如 `https://hub.example.com`）。
+- `--agent <id>`：这个桥为**哪个数字员工**提供本机执行能力（绑定关系）。
+- `--tunnel-token <t>`：隧道令牌，必须与 Hub 配置一致。<br>
+  Hub 侧在 appsettings 的 `NativeTunnel` 节（或环境变量 `NativeTunnel__Token`）配置：
+
+  ```json
+  { "NativeTunnel": { "Token": "你的隧道令牌" } }
+  ```
+
+该数字员工挂载一个 `ExecutionLocation = Client` 且 `ClientRunner` 为 `kind=shell` 的技能后，网关判定到该员工
+已有一台内网桥经隧道在线（`NativeTunnelService.HasTunnel`），会<b>直接把执行沿隧道推给那台内网机</b>（`--agent` 指定的那台），
+而非下发给前端浏览器；结果回灌模型继续作答。与前端回传一样，结果以用户消息注入模型（`[前端工具] …已由内网本机桥执行完毕`）。
+
+> 说明：隧道模式前端无需把桥地址指到内网机——仍填 Hub 自身地址即可，网关会经隧道转发。隧道桥与本地 HTTP 桥并行运行，
+> 断线自动指数退避重连。多个不同内网机可用各自 `--agent` 绑到不同数字员工，各自独立出站不被 Hub 主动连接。
+
+**安全与边界**：
+- 隧道令牌首版为全局（`NativeTunnel:Token`），做过校验才允许注册；如需更细可后续按数字员工逐 agent 下发令牌。
+- `POST /ag-ui/native-tunnel/result` 回传端点按 `taskId` 回填，建议部署到公网后对隧道相关端点加限流 / 来源校验。
+- 桌面版本机桥（同机回环）不涉及内网穿透：本机桥与桌面壳同机，直接回环即可，`--tunnel` 是为「Docker + 远端浏览器」场景准备的。
+
 ## 配置（appsettings.json → `GroupChat` 节点）
 
 | 键 | 默认 | 说明 |

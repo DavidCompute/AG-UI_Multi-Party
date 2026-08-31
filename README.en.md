@@ -656,6 +656,53 @@ name / id / kind / description / command / execution location / ClientRunner, fi
 saving (no need to hand-write commands or JSON). Endpoint `POST /ag-ui/skills/generate` (login required); mock returns
 a deterministic template.
 
+#### NAT traversal: reverse tunnel (a local bridge with no public IP can still be called by the Hub)
+
+Both approaches above assume the <b>browser host can reach the bridge</b> (same LAN / loopback). When the user's
+intranet machine has <b>no public IP</b> but the Hub is deployed on the public internet, the frontend bridge cannot
+reconnect to that intranet host. The project provides an <b>HTTP/SSE reverse tunnel</b> for NAT traversal:
+
+- <b>Direction is reversed</b>: the bridge on the intranet machine <b>makes an outbound</b> SSE long connection to the public
+  Hub and registers itself (bound to a digital-employee agentId). The Hub pushes a task to execute a client skill
+  for that employee <b>down the tunnel</b> to the intranet bridge, which runs it and <b>POST</b>s the result back. No inbound
+  public port and no third-party tunnel — plain HTTP is enough to cross the NAT.
+
+Just start the bridge with three extra flags:
+
+```bash
+# Run on the intranet host with NO public IP (only needs outbound access to the Hub)
+AguiGroupChat.NativeBridge.exe \
+  --tunnel https://your-hub-domain --agent <digital-employee-id> --tunnel-token <tunnel-token>
+```
+
+- `--tunnel <hub>`: public Hub base URL (e.g. `https://hub.example.com`).
+- `--agent <id>`: which digital employee this bridge serves (binding).
+- `--tunnel-token <t>`: tunnel token, must match the Hub config.<br>
+  On the Hub side configure it in the `NativeTunnel` appsettings node (or `NativeTunnel__Token` env var):
+
+  ```json
+  { "NativeTunnel": { "Token": "your-tunnel-token" } }
+  ```
+
+Once that employee is mounted with an `ExecutionLocation = Client` skill whose `ClientRunner` is `kind=shell`, the
+gateway, upon detecting that a bridge is online via tunnel for this employee (`NativeTunnelService.HasTunnel`),
+<b>pushes the execution down the tunnel to that intranet host</b> (the one bound by `--agent`) instead of dispatching to the
+frontend browser; the result feeds back into the model to continue. As with frontend callbacks, the result is injected
+as a user message (`[frontend tool] … completed by the intranet bridge`).
+
+> Note: in tunnel mode the frontend need not point its bridge URL at the intranet host — point it at the Hub itself;
+> the gateway forwards over the tunnel. The tunnel bridge runs in parallel with the local HTTP bridge and auto-reconnects
+> with exponential backoff. Different intranet hosts can bind to different employees with their own `--agent`, each
+> dialing out independently (never inbound-connected by the Hub).
+
+<b>Security & edge cases</b>:
+- The tunnel token is global (`NativeTunnel:Token`) and is required for registration; per-employee tokens can be
+  introduced later if needed.
+- The `POST /ag-ui/native-tunnel/result` endpoint resolves by `taskId`; once deployed to the public internet, add
+  rate limiting / origin checks on the tunnel endpoints.
+- The desktop bridge (same-host loopback) needs no NAT traversal: it talks over loopback. `--tunnel` is meant for the
+  “Docker + remote browser” scenario.
+
 ## Configuration (appsettings.json → `GroupChat` node)
 
 | Key | Default | Description |
