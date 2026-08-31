@@ -101,9 +101,19 @@ static async Task RunLoopbackDiscoveryAsync(int port, bool useHttps, string clie
     builder.WebHost.UseUrls(useHttps ? $"https://127.0.0.1:{port}" : $"http://127.0.0.1:{port}");
     if (useHttps)
         builder.WebHost.ConfigureKestrel(k => k.ConfigureHttpsDefaults(h => h.ServerCertificate = DevCert.CreateSelfSigned()));
-    // 回环发现端点允许同机页面跨源读取：只返回非敏感的机器标识 + 仅监听 127.0.0.1，故对回环 GET 放开 CORS
+    // 回环发现端点允许同机页面跨源读取：仅监听 127.0.0.1、只返回非敏感标识，对回环 GET 放开 CORS。
+    // Chrome/Edge 对「从普通网页访问本机」有 Private Network Access(PNA) 预检——需在 OPTIONS 响应里带
+    // Access-Control-Allow-Private-Network: true，否则即使 AAAO:* 也会被拦。
     var app = builder.Build();
-    // 简单 GET 跨源读取只需响应带 Access-Control-Allow-Origin；此处直接返回 *（非敏感标识，仅回环可达）保证浏览器能读到
+    app.MapMethods("/ag-ui/bridge/{**rest}", ["OPTIONS"], (HttpContext ctx) =>
+    {
+        ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
+        ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
+        ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+        ctx.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+        ctx.Response.StatusCode = StatusCodes.Status204NoContent;
+        return Task.CompletedTask;
+    });
     app.MapGet("/ag-ui/bridge/info", (HttpContext ctx) =>
     {
         ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
