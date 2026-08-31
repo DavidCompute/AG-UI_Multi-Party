@@ -16,7 +16,9 @@ public sealed class NativeTunnelClient
     /// <summary>JSON 反序列化选项：Hub 下行载荷为 camelCase，需大小写不敏感映射到 record 字段。</summary>
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly HttpClient _http = new();
+    // SSE 长连接不能被 HttpClient 默认 100s 请求超时中断（中断会周期性断开隧道、重连，导致调用瞬间没有桥而回落到服务器端）；
+    // 隧道连接的生命周期由 Hub 端 SSE 流 + 本端 _quit 取消令牌控制，客户端不设请求超时。
+    private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
     private readonly string _hubBase;
     private readonly string _agent;
     private readonly string _token;
