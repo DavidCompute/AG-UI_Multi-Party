@@ -626,18 +626,17 @@ To customize the gateway, replace the DI registration in `Program.cs` / `HubApp.
 ### Client-execution skills and the “Native Tool Bridge”
 
 A skill can be marked `ExecutionLocation = Client` (with a `ClientRunner` for `kind=http/shell/prompt`).
-When a digital employee calls such a skill, the gateway delivers a `kind=client_tool` interaction card; the
-<b>frontend (browser/webview)</b> executes it and posts the result back instead of the server running it.
-Interaction shape: `http` auto-executes; `shell` is confirmed inline on the chat card (no native popup) and
-runs via a local bridge. Because a pure browser cannot run local shell, the bridge runs on the browser's host:
+When a digital employee calls such a skill, the gateway delivers a `kind=client_tool` interaction card. `http` skills are
+fetched directly by the browser; `shell` skills need a <b>local execution channel</b>—confirmed inline on the chat card
+(no native popup), run on the local host, and the result is posted back. Because a pure browser cannot run local shell,
+the project provides two channels (<b>no bridge configuration is needed in the web UI</b>):
 
-- <b>Server bridge (default)</b>: `/ag-ui/client-tool` (`MapClientToolBridgeApi`) runs on the server/desktop shell.
+- <b>Server bridge (default fallback)</b>: `/ag-ui/client-tool` (`MapClientToolBridgeApi`) runs on the server/desktop shell.
   This suits the desktop edition; for <b>Docker + a browser on the local machine</b> (e.g. aibook) it would run on the
   Docker container (returning the container hostname, not yours).
-- <b>Standalone NativeBridge</b>: project `src/AguiGroupChat.NativeBridge` runs on the browser's host machine
-  (loopback, token auth, CORS allowlist, sandbox/timeout/truncation). Start it with `--allowed-origin http://<docker>:5200`;
-  the token persists to `%LocalAppData%\AguiGroupChat\bridge.token`, and the web UI's <b>Profile → Native Tool Bridge → Detect</b>
-  auto-reads address + token. Desktop needs no bridge config (the desktop shell is the local host).
+- <b>Reverse NAT tunnel (recommended for real local results)</b>: the project `src/AguiGroupChat.NativeBridge` runs in
+  <b>tunnel mode</b> on the browser's host machine; the gateway detects an online bridge (platform-wide or per-employee) and
+  <b>automatically pushes the shell down the tunnel to that machine</b> and feeds the result back—no bridge URL/token to fill in the frontend.
 
 #### Batch execution inside a plan & recursive gather-and-answer
 

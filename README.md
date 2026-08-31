@@ -628,46 +628,34 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 ### 客户端工具（客户端执行技能）与“本机工具桥”
 
 技能在定义时可选 `ExecutionLocation = Client`（连同 `kind=http/shell/prompt` 的 `ClientRunner` 配置），
-数字员工调用此类技能时会下发一张 `kind=client_tool` 交互卡，由**前端在浏览器/WebView 中执行**并回传结果，
-而非在服务器上执行。交互形态：`http` 自动执行；`shell` 在<b>聊天历史的卡片内</b>点「▶ 在本机执行」确认后执行（不弹系统确认框），
-执行后卡片即时隐藏。
+数字员工调用此类技能时会下发一张 `kind=client_tool` 交互卡。`http` 类由浏览器直接 fetch；`shell` 类需要<b>本机执行通道</b>——
+在<b>聊天历史卡片内</b>确认后于本机执行并回传结果（不弹系统确认框），执行后卡片即时隐藏。
 
-纯浏览器 JS 无法直接运行本机 shell，因此 `shell` 类的客户端技能需要一个**本机执行通道**。项目提供两个选择：
+纯浏览器 JS 无法直接运行本机 shell，因此 `shell` 类的客户端技能需要一个**本机执行通道**，项目提供两种（网页端<b>无需任何桥配置</b>）：
 
-- **服务器端本机桥**（默认）：`/ag-ui/client-tool`（`MapClientToolBridgeApi`），在**服务器/桌面壳**上执行。
+- **服务器端桥**（默认回落）：`/ag-ui/client-tool`（`MapClientToolBridgeApi`），在**服务器/桌面壳**上执行。
   桌面版天然适用（桌面壳即本机）；但 **Docker + 浏览器在本机（如 aibook）**时，它会在 **Docker 容器**里执行，
   得到的 `hostname` 是容器名而不是您电脑。
-- **独立本机工具桥（NativeBridge）**：新增独立控制台项目 `src/AguiGroupChat.NativeBridge`，
-  在**浏览器所在的主机**上运行，让浏览器执行本机 shell（即浏览器所在那台机器的真实结果）。
+- **内网反向隧道（首推，用于在本机拿真实结果）**：独立项目 `src/AguiGroupChat.NativeBridge` 以<b>隧道模式</b>跑在浏览器所在主机，
+  网关检测到该桥在线（平台级或逐员工）后，<b>自动经隧道把 shell 推给那台机器执行并回灌</b>，前端不需配置桥地址/令牌。
 
-#### Docker + 浏览器在本机：启用 NativeBridge 的步骤
+#### 让客户端 shell 技能在本机执行：内网反向隧道（推荐，无需网页配置）
 
-1. 在浏览器所在主机（Windows 建议直接运行，Linux/macOS 用 `dotnet run`）构建并启动本机桥：
+从 1.0.x 起，网页端已移除「本机工具桥」的桥地址 / 令牌手动配置——本机执行统一走<b>反向隧道</b>，前端无需任何配置：
+
+1. 在浏览器所在主机（即要有本机 shell 结果的机器）启动本机桥的<b>隧道模式</b>，一座平台级桥即可通吃所有数字员工：
 
    ```bash
-   # 先构建发布，再运行（Windows 直接双击/命令行均可）
+   # 构建并运行（Windows 双击/命令行均可；--agent 可选，不填 = 服务整个平台）
    dotnet publish src/AguiGroupChat.NativeBridge -c Release
-   ./src/AguiGroupChat.NativeBridge/bin/Release/.../AguiGroupChat.NativeBridge.exe
+   AguiGroupChat.NativeBridge.exe --tunnel https://你的Hub域名 --tunnel-token <隧道令牌>
    ```
 
-   启动后打印监听地址与令牌（例如 `http://127.0.0.1:17321/ag-ui/client-tool` 与一段随机令牌）。
-   若浏览器页面来源与 `127.0.0.1` 跨源，需用 `--allowed-origin` 指明页面源：
+2. Hub 侧配置同一令牌：`NativeTunnel__Token`（或 appsettings `NativeTunnel:Token`）。网关检测到平台级/逐员工桥在线时，
+   <b>直接经隧道把客户端 shell 推给那台内网机执行</b>，结果回灌模型继续作答——前端无需填桥地址、无需填令牌。
 
-   ```bash
-   AguiGroupChat.NativeBridge.exe --port 17321 --allowed-origin http://<Docker主机>:5200
-   ```
-
-   令牌默认**自动持久化**到 `%LocalAppData%\AguiGroupChat\bridge.token`（首次生成、重启复用），无需每次复制；
-   也无需手动填 token——网页端「一键检测」可自动读取桥地址与令牌并填入。只有需要固定令牌时才传 `--token`
-   （此时关闭自动配置端点）。
-
-   > 本机桥只监听回环 `127.0.0.1`，令牌鉴权 + CORS 白名单，命令在用户临时目录沙箱内运行，带超时与输出截断，
-   > 详见 `ShellRunner.cs`。自配置端点 `GET /ag-ui/native-bridge/token` 仅在本机回环可达且受 CORS 白名单管控，
-   > 未配置 `--allowed-origin` 时浏览器无法跨源读到（纯桌面场景仍需手动填）。
-
-2. 在网页端打开「修改资料」→「本机工具桥」，点 **🔍 一键检测** 自动填入桥地址 + 令牌，再点保存。
-   也可手动填**桥地址**（如 `http://127.0.0.1:17321/ag-ui/client-tool`）与**桥令牌**。留空则回落到服务器端本机桥。
-3. 触发 `ps_hostname` 之类的客户端 shell 技能，前端确认后交给本机桥在本机执行，模型会引用您电脑的真实主机名。
+> 若 Hub 与浏览器同机（桌面版 / 本机部署），shell 也会优雅回落到服务器端 `/ag-ui/client-tool`（桌面壳即本机）。
+> 本机桥的本地回环 HTTP 模式（`--port 17321` 等）仍可用于直接的命令行/脚本鉴权调用，但不参与网页交互。
 
 #### 编排计划中的客户端技能：本机一键执行全部
 
