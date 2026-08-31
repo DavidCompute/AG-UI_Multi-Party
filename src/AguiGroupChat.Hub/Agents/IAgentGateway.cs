@@ -22,7 +22,10 @@ public sealed record AgentInvocationContext(
     AgentTriggerMode? TriggerMode = null,
     string TopicId = "main",
     MessageVisibility Visibility = MessageVisibility.All,
-    IReadOnlyList<string>? VisibleMemberIds = null);
+    IReadOnlyList<string>? VisibleMemberIds = null,
+    // 按客户端（机器）路由：触发请求希望把客户端 shell 执行到哪一台客户端（机器）。
+    // 非空且该客户端有在线桥时，网关把客户端 shell 推给那台机器执行；否则回落到 agent/平台作用域。
+    string? PreferredBridgeClient = null);
 
 /// <summary>智能体调用的应答结果。</summary>
 public sealed record AgentInvocationResult(bool Accepted, string? RunId, string? ErrorCode);

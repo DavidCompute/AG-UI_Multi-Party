@@ -33,6 +33,8 @@ public sealed class NativeTunnelService
     }
 
     private readonly ConcurrentDictionary<string, TunnelConnection> _byAgent = new(StringComparer.Ordinal);
+    // 按客户端（机器）路由：clientId → 桥（多台机器各有专属桥时可做到“请求来自哪台就在哪台执行”）
+    private readonly ConcurrentDictionary<string, TunnelConnection> _byClient = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<string?>> _pending = new(StringComparer.Ordinal);
 
     private long _seq;
@@ -71,6 +73,41 @@ public sealed class NativeTunnelService
     /// <summary>卸载某作用域（agentId 或 <see cref="PlatformWideScope"/>）的隧道（桥断开时调用）。</summary>
     public void Unregister(string agentId) => _byAgent.TryRemove(agentId, out _);
 
+    /// <summary>卸载某个客户端（机器）桥（桥断开时调用）。</summary>
+    public void DropClient(string clientId) => _byClient.TryRemove(clientId, out _);
+
+    // ================= 按客户端（机器）路由：区分“请求来自哪台客户端” =================
+
+    /// <summary>该客户端（机器名）是否有一座在线桥（以 <c>--client</c> 注册）。</summary>
+    public bool HasClient(string clientId)
+        => !string.IsNullOrWhiteSpace(clientId) && _byClient.ContainsKey(clientId);
+
+    /// <summary>注册一台按客户端（机器）绑定的桥；同 clientId 重复注册替换旧连接。返回连接。</summary>
+    public TunnelConnection RegisterClient(string clientId, string bridgeId, long nowMs, Func<string, string, CancellationToken, Task> push)
+    {
+        if (_byClient.TryGetValue(clientId, out _))
+            _byClient.TryRemove(clientId, out _);
+        var conn = new TunnelConnection
+        {
+            AgentId = PlatformWideScope, // 客户端桥不区分 agent，仅按机器路由
+            BridgeId = bridgeId,
+            RegisteredAtMs = nowMs,
+            Push = push,
+            Lease = new ConnectionLease(() => _byClient.TryRemove(clientId, out _)),
+        };
+        _byClient[clientId] = conn;
+        return conn;
+    }
+
+    /// <summary>向指定客户端的桥下行任务并等待结果（按机器路由）。无该客户端桥 / 超时 / 失败返回 null。</summary>
+    public async Task<string?> ExecuteForClientAsync(
+        string clientId, string command, string? cwd, int? timeoutSec, string? query,
+        TimeSpan? waitTimeout, CancellationToken ct)
+    {
+        if (!_byClient.TryGetValue(clientId, out var conn)) return null;
+        return await ExecuteInternalAsync(conn, command, cwd, timeoutSec, query, waitTimeout, ct);
+    }
+
     /// <summary>向能服务该数字员工的内网桥下行一个「执行客户端技能」任务并等待其回传结果：
     /// 优先该员工的专属桥，否则回落到平台级桥（<see cref="PlatformWideScope"/>）。
     /// 返回输出文本；无可用桥 / 超时 / 失败返回 null。</summary>
@@ -80,6 +117,13 @@ public sealed class NativeTunnelService
     {
         if (!_byAgent.TryGetValue(agentId, out var conn) && !_byAgent.TryGetValue(PlatformWideScope, out conn))
             return null;
+        return await ExecuteInternalAsync(conn, command, cwd, timeoutSec, query, waitTimeout, ct);
+    }
+
+    private async Task<string?> ExecuteInternalAsync(
+        TunnelConnection conn, string command, string? cwd, int? timeoutSec, string? query,
+        TimeSpan? waitTimeout, CancellationToken ct)
+    {
         var taskId = "task_" + Interlocked.Increment(ref _seq).ToString("x") + "_" + Guid.NewGuid().ToString("N")[..8];
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[taskId] = tcs;

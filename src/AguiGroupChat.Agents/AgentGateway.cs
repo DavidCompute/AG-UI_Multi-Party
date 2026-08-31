@@ -91,7 +91,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 写入此处 TCS，计划方法据此点亮各步骤并继续综合。</summary>
     private sealed record BatchClientItem(string SkillId, string Name, string ClientRunner, string Query, int PlanIndex);
     private sealed record BatchClientExec(
-        string GroupId, string MessageId, string AgentId, string TargetMemberId,
+        string GroupId, string MessageId, string AgentId, string? ClientId, string TargetMemberId,
         IReadOnlyList<BatchClientItem> Items,
         int DisplayCount, // 展示步骤总数（用于索引对齐）
         TaskCompletionSource<(bool Ok, Dictionary<string, string>? Results)> Completion);
@@ -291,6 +291,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch { return false; }
     }
 
+    /// <summary>是否有桥能服务“该数字员工 + 该客户端”：优先按<paramref name="clientId"/>（机器）路由，否则按 agent/平台作用域。</summary>
+    private bool TunnelAvailable(string agentId, string? clientId)
+        => (!string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value?.HasClient(clientId) == true)
+           || _nativeTunnel.Value?.HasTunnel(agentId) == true;
+
+    /// <summary>经隧道执行客户端 shell 并按“客户端优先、其次 agent/平台”的路由选择桥；无可用桥返回 null。</summary>
+    private async Task<string?> ExecuteTunnelAsync(
+        string agentId, string? clientId,
+        string command, string? cwd, int? timeoutSec, string? query,
+        TimeSpan waitTimeout, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value is { } t && t.HasClient(clientId))
+            return await t.ExecuteForClientAsync(clientId, command, cwd, timeoutSec, query, waitTimeout, ct);
+        if (_nativeTunnel.Value?.HasTunnel(agentId) == true)
+            return await _nativeTunnel.Value.ExecuteAsync(agentId, command, cwd, timeoutSec, query, waitTimeout, ct);
+        return null;
+    }
+
     private async Task<AgentInvocationResult> InvokeCoreAsync(AgentInvocationContext context, CancellationToken ct)
     {
         var def = _catalog.GetDefinition(context.AgentId);
@@ -484,13 +502,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     if (approval is not null
                         && approval.ToolCall is FunctionCallContent tfc
                         && _catalog.GetAgentClientToolNames(context.AgentId).Contains(tfc.Name, StringComparer.Ordinal)
-                        && _nativeTunnel.Value?.HasTunnel(context.AgentId) == true
+                        && TunnelAvailable(context.AgentId, context.PreferredBridgeClient)
                         && !_options.ClientToolTunnelRequireApproval
                         && TryParseClientShell(tfc.Name, out var shellCmd, out var shellCwd, out var shellTimeoutSec))
                     {
                         await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
-                        var tunnelResult = await _nativeTunnel.Value.ExecuteAsync(
-                            context.AgentId, shellCmd!, shellCwd, shellTimeoutSec, null,
+                        var tunnelResult = await ExecuteTunnelAsync(
+                            context.AgentId, context.PreferredBridgeClient, shellCmd!, shellCwd, shellTimeoutSec, null,
                             TimeSpan.FromSeconds(Math.Clamp(shellTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
                         var resultText = string.IsNullOrWhiteSpace(tunnelResult)
                             ? (tunnelResult is null ? "（内网本机桥执行未返回结果 / 超时）" : "（内网本机执行无输出）")
@@ -1120,15 +1138,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 内网隧道在线（平台级或逐员工桥）且<b>不需要确认</b>时，跳过前端「本机一键执行全部」交互卡，直接经隧道在桥所在主机逐个执行
         // 这些客户端 shell 技能并收集结果——与本机桥在真机上执行等价，前端无需点确认。
         // 需要确认（默认）时走下方交互卡：触发者批准后由 <see cref="ResolveInteractionAsync"/> 再经隧道执行。
-        if (_nativeTunnel.Value?.HasTunnel(context.AgentId) == true && !_options.ClientToolTunnelRequireApproval)
+        if (TunnelAvailable(context.AgentId, context.PreferredBridgeClient) && !_options.ClientToolTunnelRequireApproval)
         {
             var tunneled = new Dictionary<string, string>();
             foreach (var it in items)
             {
                 if (TryParseRunnerShell(it.ClientRunner, out var cmd, out var cwd, out var timeoutSec))
                 {
-                    var r = await _nativeTunnel.Value.ExecuteAsync(
-                        context.AgentId, cmd!, cwd, timeoutSec, it.Query,
+                    var r = await ExecuteTunnelAsync(
+                        context.AgentId, context.PreferredBridgeClient, cmd!, cwd, timeoutSec, it.Query,
                         TimeSpan.FromSeconds(Math.Clamp(timeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
                     tunneled[it.SkillId] = string.IsNullOrWhiteSpace(r) ? "（本机执行未返回结果 / 超时）" : r;
                 }
@@ -1145,7 +1163,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var runId = "run_" + IdGenerator.NewId();
         var root = _catalog.GetDefinition(context.AgentId);
         var tcs = new TaskCompletionSource<(bool Ok, Dictionary<string, string>? Results)>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _batchClientExecWaits[interruptId] = new BatchClientExec(gid, messageId, context.AgentId, context.TriggerUserId, items, display.Count, tcs);
+        _batchClientExecWaits[interruptId] = new BatchClientExec(gid, messageId, context.AgentId, context.PreferredBridgeClient, context.TriggerUserId, items, display.Count, tcs);
 
         // 批量交互卡要执行的全部技能（前端据此逐个执行；clientRunner 复用技能的 ClientRunner JSON）
         var payload = items.Select(it => new
@@ -2347,16 +2365,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (!_batchClientExecWaits.TryRemove(interruptId, out batch))
                 return false;
             Dictionary<string, string>? results = null;
-            // 内网隧道在线（平台级或逐员工桥）且已批准 → 经隧道在桥所在主机逐个执行批量客户端 shell 技能（而非前端回传结果）
-            if (approved && _nativeTunnel.Value is { } tunnelB && tunnelB.HasTunnel(batch.AgentId))
+            // 内网隧道在线（平台级 / 逐员工 / 逐客户端）且已批准 → 经隧道在桥所在主机逐个执行批量客户端 shell 技能（而非前端回传结果）
+            if (approved && TunnelAvailable(batch.AgentId, batch.ClientId))
             {
                 results = new Dictionary<string, string>(StringComparer.Ordinal);
                 foreach (var it in batch.Items)
                 {
                     if (TryParseRunnerShell(it.ClientRunner, out var bCmd, out var bCwd, out var bTimeoutSec))
                     {
-                        var br = await tunnelB.ExecuteAsync(
-                            batch.AgentId, bCmd!, bCwd, bTimeoutSec, it.Query,
+                        var br = await ExecuteTunnelAsync(
+                            batch.AgentId, batch.ClientId, bCmd!, bCwd, bTimeoutSec, it.Query,
                             TimeSpan.FromSeconds(Math.Clamp(bTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
                         results[it.SkillId] = string.IsNullOrWhiteSpace(br) ? "（本机执行未返回结果 / 超时）" : br;
                     }
@@ -2516,14 +2534,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             // 客户端 shell 技能 + 内网隧道在线 + 已批准 → 由网关经隧道在桥所在主机执行以取得真实结果
             // （而非依赖前端回传），结果写入 ClientToolResultStore 并作为 toolResult 注入恢复消息。
-            if (approved && _nativeTunnel.Value is { } tunnelForResume
-                && lastApproval.ToolCall is FunctionCallContent pfc
+            if (approved && lastApproval.ToolCall is FunctionCallContent pfc
                 && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(pfc.Name, StringComparer.Ordinal)
-                && tunnelForResume.HasTunnel(pending.Context.AgentId)
+                && TunnelAvailable(pending.Context.AgentId, pending.Context.PreferredBridgeClient)
                 && TryParseClientShell(pfc.Name, out var rCmd, out var rCwd, out var rTimeoutSec))
             {
-                var tr = await tunnelForResume.ExecuteAsync(
-                    pending.Context.AgentId, rCmd!, rCwd, rTimeoutSec, null,
+                var tr = await ExecuteTunnelAsync(
+                    pending.Context.AgentId, pending.Context.PreferredBridgeClient, rCmd!, rCwd, rTimeoutSec, null,
                     TimeSpan.FromSeconds(Math.Clamp(rTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
                 if (!string.IsNullOrWhiteSpace(tr))
                 {

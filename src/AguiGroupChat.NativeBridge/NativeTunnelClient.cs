@@ -22,14 +22,16 @@ public sealed class NativeTunnelClient
     private readonly string _hubBase;
     private readonly string _agent;
     private readonly string _token;
+    private readonly string _client;
     private readonly ShellRunner _runner = new();
     private readonly CancellationTokenSource _quit = new();
 
-    public NativeTunnelClient(string hubBase, string agent, string token)
+    public NativeTunnelClient(string hubBase, string agent, string token, string? clientId = null)
     {
         _hubBase = hubBase.TrimEnd('/');
         _agent = agent;
         _token = token;
+        _client = string.IsNullOrWhiteSpace(clientId) ? Environment.MachineName : clientId.Trim();
     }
 
     public void Dispose() => _quit.Cancel();
@@ -66,7 +68,7 @@ public sealed class NativeTunnelClient
         var url = $"{_hubBase}/ag-ui/native-tunnel/connect";
         using var req = new HttpRequestMessage(HttpMethod.Get, url)
         {
-            RequestUri = new Uri($"{url}?agent={Uri.EscapeDataString(_agent)}&token={Uri.EscapeDataString(_token)}"),
+            RequestUri = new Uri($"{url}?agent={Uri.EscapeDataString(_agent)}&token={Uri.EscapeDataString(_token)}&client={Uri.EscapeDataString(_client)}"),
         };
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);

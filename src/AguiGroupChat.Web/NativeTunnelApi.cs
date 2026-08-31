@@ -26,6 +26,7 @@ public static class NativeTunnelApi
             var options = ctx.RequestServices.GetRequiredService<NativeTunnelOptions>();
             var agent = ctx.Request.Query["agent"].ToString();
             var token = ctx.Request.Query["token"].ToString();
+            var client = ctx.Request.Query["client"].ToString(); // 可选：客户端/机器名，用于“按发起请求的客户端路由”
 
             // 限流（单 IP 滑动窗口）：防暴力猜令牌 / DDoS——Hub 是公网端点
             var ipKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
@@ -50,6 +51,11 @@ public static class NativeTunnelApi
             var bridgeId = "br_" + Guid.NewGuid().ToString("N")[..8];
             var conn = service.Register(agent, bridgeId, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 (payload, _taskId, c) => channel.Writer.WriteAsync(payload, c).AsTask());
+            // 客户端（机器）维度也注册一份：用于按“请求来自哪台客户端”路由到对应桥；断开时一并清理
+            var clientConn = !string.IsNullOrWhiteSpace(client)
+                ? service.RegisterClient(client.Trim(), bridgeId, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    (payload, _taskId, c) => channel.Writer.WriteAsync(payload, c).AsTask())
+                : null;
 
             // SSE 响应头
             ctx.Response.ContentType = "text/event-stream";
@@ -94,7 +100,8 @@ public static class NativeTunnelApi
             finally
             {
                 service.DropAllForAgent(agent);
-                logger.LogInformation("内网桥隧道断开：agent={Agent}", agent);
+                if (!string.IsNullOrWhiteSpace(client)) service.DropClient(client.Trim());
+                logger.LogInformation("内网桥隧道断开：agent={Agent} client={Client}", agent, string.IsNullOrWhiteSpace(client) ? "-" : client);
             }
         });
 

@@ -123,5 +123,34 @@ public sealed class NativeTunnelServiceTests
         Assert.Equal("AgentHost", await exec);
     }
 
+    // —— 按客户端（机器）路由：区分“请求来自哪台客户端” ——
+
+    [Fact]
+    public async Task ClientRouting_ExecutesOnTheNamedClientBridge()
+    {
+        var svc = new NativeTunnelService();
+        string? clientTid = null;
+        svc.RegisterClient("AIBOOK", "br_aibook", Now,
+            (p, t, c) => { clientTid = t; return Task.CompletedTask; });
+        Assert.True(svc.HasClient("AIBOOK"));
+        Assert.False(svc.HasClient("OTHER_MACHINE"));
+        var exec = svc.ExecuteForClientAsync("AIBOOK", "hostname", null, 30, null, TimeSpan.FromSeconds(5), CancellationToken.None);
+        Assert.NotNull(clientTid);
+        svc.Complete(clientTid!, "AiBook", null);
+        Assert.Equal("AiBook", await exec);
+        // 未注册的客户端 → null
+        Assert.Null(await svc.ExecuteForClientAsync("OTHER_MACHINE", "hostname", null, 30, null, TimeSpan.FromSeconds(2), CancellationToken.None));
+    }
+
+    [Fact]
+    public void DropClient_RemovesClientBridge()
+    {
+        var svc = new NativeTunnelService();
+        svc.RegisterClient("AIBOOK", "br_aibook", Now, (p, t, c) => Task.CompletedTask);
+        Assert.True(svc.HasClient("AIBOOK"));
+        svc.DropClient("AIBOOK");
+        Assert.False(svc.HasClient("AIBOOK"));
+    }
+
     private static long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 }
