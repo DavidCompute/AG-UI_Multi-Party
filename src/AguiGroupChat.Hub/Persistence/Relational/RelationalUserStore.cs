@@ -50,7 +50,7 @@ public sealed class RelationalUserStore : IUserStore
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM agui_users WHERE user_id = @uid";
+        cmd.CommandText = "SELECT user_id, username, password_hash, password_salt, nickname, avatar, created_at, updated_at, personal_memory_enabled, is_admin, is_disabled, platform_role FROM agui_users WHERE user_id = @uid";
         cmd.AddWithValue("uid", userId);
         using var reader = cmd.ExecuteReader();
         return reader.Read() ? ReadUser(reader) : null;
@@ -60,7 +60,7 @@ public sealed class RelationalUserStore : IUserStore
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM agui_users WHERE LOWER(username) = LOWER(@username)";
+        cmd.CommandText = "SELECT user_id, username, password_hash, password_salt, nickname, avatar, created_at, updated_at, personal_memory_enabled, is_admin, is_disabled, platform_role FROM agui_users WHERE LOWER(username) = LOWER(@username)";
         cmd.AddWithValue("username", username);
         using var reader = cmd.ExecuteReader();
         return reader.Read() ? ReadUser(reader) : null;
@@ -94,7 +94,7 @@ public sealed class RelationalUserStore : IUserStore
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT * FROM agui_users ORDER BY created_at";
+        cmd.CommandText = "SELECT user_id, username, password_hash, password_salt, nickname, avatar, created_at, updated_at, personal_memory_enabled, is_admin, is_disabled, platform_role FROM agui_users ORDER BY created_at";
         var list = new List<UserAccount>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read()) list.Add(ReadUser(reader));

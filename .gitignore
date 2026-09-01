@@ -9,6 +9,8 @@ artifacts/
 dist/
 # 持久化状态文件（运行期生成，勿入库）
 data/
+# 本地数据库备份（运维脚本临时输出，勿入库）
+backup/
 # docker compose 环境变量（密钥等，勿入库）
 .env
 .env.*
