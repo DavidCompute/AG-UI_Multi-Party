@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Agents;
+using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Web;
 using Microsoft.AspNetCore.Builder;
@@ -82,9 +83,9 @@ public sealed class AgentApiServerFixture : IAsyncLifetime
             ["Persistence:Enabled"] = "false",
             // 建群 / 加成员等协议写接口测试走请求体身份回退（默认已改为强制令牌，这里显式关闭）
             ["Auth:RequireTokenOnRealTime"] = "false",
-            // 桥接端点仅系统管理员可配置：固定 heidi / grace / orch_admin 为管理员（首个注册用户在其他测试先注册时不一定是管理员）；
+            // 桥接端点仅系统管理员可配置：固定 heidi / grace / orch_admin / orch_support 为管理员（首个注册用户在其他测试先注册时不一定是管理员）；
             // 关闭 FirstUserIsAdmin 以避免「首个注册者自动成 admin」造成权限/顺序不确定
-            ["Auth:AdminUserIds"] = "heidi,grace,orch_admin",
+            ["Auth:AdminUserIds"] = "heidi,grace,orch_admin,orch_support",
             ["Auth:FirstUserIsAdmin"] = "false",
         });
         HubApp.ConfigureServices(builder);
@@ -917,6 +918,39 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
         // 没有任何数字员工被创建（整体拒绝）
         Assert.Null(catalog.GetDefinition(preview.Agents[0].AgentId!));
+    }
+
+    [Fact]
+    public async Task Orchestrate_Apply_CreateSupportCircle_BuildsCircleWithAgents()
+    {
+        // 管理员 apply + createSupportCircle=true：应创建客服知聚并把方案数字员工作为客服成员
+        var token = await RegisterAsync("orch_support");
+        var preview = await AgentOrchestrator.GenerateAsync(new AgentOptions { Provider = "mock" },
+            "客户服务团队", NullLoggerFactory.Instance.CreateLogger("t"), CancellationToken.None);
+        var reqBody = new OrchestrateApplyRequest(preview.Title,
+            preview.Agents.Select(a => new OrchestratedAgentHttp(a.AgentId, a.Nickname, a.Description, a.Instructions,
+                a.TriggerMode, a.SkillIds, a.AssignmentIds, a.EscalationAgentId, a.RelayToAgentId)).ToList(),
+            preview.Skills.Select(s => new OrchestratedSkillHttp(s.SkillId, s.Name, s.Description, s.Kind,
+                s.Body, s.ExecutionLocation, s.RequiresApproval)).ToList(),
+            CreateSupportCircle: true, SupportCircleName: "客服知聚-测试");
+
+        var res = await _client.SendAsync(ApplyRequest(token, reqBody));
+        res.EnsureSuccessStatusCode();
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+        var gid = d.TryGetProperty("supportCircleGroupId", out var g) ? g.GetString() : null;
+        Assert.False(string.IsNullOrWhiteSpace(gid));
+
+        // 客服知聚应为 Support 且成员包含全部方案数字员工（Role=Admin 的客服）
+        var hub = _fixture.App.Services.GetRequiredService<GroupHub>();
+        var group = hub.Store.GetGroup(gid!);
+        Assert.NotNull(group);
+        Assert.True(group!.IsSupportCircle);
+        foreach (var a in preview.Agents)
+        {
+            var m = hub.Store.GetMember(gid!, a.AgentId!);
+            Assert.NotNull(m);
+            Assert.Equal(GroupRole.Admin, m!.Role); // 客服知聚的客服成员 Role=Admin
+        }
     }
 }
 

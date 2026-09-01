@@ -1264,6 +1264,8 @@ function openOrgOrchestrate() {
   orchestrationPreview = null;
   $("orgOrchPreview").textContent = t("org.orchEmpty");
   $("orgOrchReq").value = "";
+  $("orgOrchSupportCircle").checked = false;
+  $("orgOrchSupportName").value = "";
   $("orgOrchStatus").textContent = "";
   $("orgOrchApply").disabled = true;
   $("orgOrchModal").classList.remove("hidden");
@@ -1337,12 +1339,14 @@ async function applyOrchestration() {
           skillId: s.skillId, name: s.name, description: s.description, kind: s.kind, body: s.body,
           executionLocation: s.executionLocation || "server", requiresApproval: !!s.requiresApproval,
         })),
+        createSupportCircle: $("orgOrchSupportCircle").checked,
+        supportCircleName: $("orgOrchSupportName").value.trim() || null,
       }),
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(t("org.orchApplyFail", { err: errMsg(data, res.status) })); $("orgOrchApply").disabled = false; return; }
     $("orgOrchModal").classList.add("hidden");
-    toast(t("org.orchApplied", { n: (data.agents || []).length }));
+    toast((data.supportCircleGroupId ? t("org.orchSupportCircleCreated", { name: data.title || "" }) + " " : "") + t("org.orchApplied", { n: (data.agents || []).length }));
     orchestrationPreview = null;
     await loadAgents();
     await loadSkills();

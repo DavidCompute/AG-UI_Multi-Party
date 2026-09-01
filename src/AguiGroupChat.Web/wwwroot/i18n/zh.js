@@ -237,6 +237,9 @@ window.I18N_DICTS.zh = {
   "org.orchApply": "确认并创建",
   "org.orchApplying": "创建中",
   "org.orchApplyFail": "创建失败：{err}",
+  "org.orchSupportCircle": "同时创建客服知聚（把方案中的数字员工作为客服团队，直接上线服务顾客）",
+  "org.orchSupportNamePh": "客服知聚名称（可选）",
+  "org.orchSupportCircleCreated": "已创建客服知聚「{name}」",
   "org.orchApplied": "已创建 {n} 个数字员工及其技能与连接",
 
   /* --- 技能库（可复用技能 shell / http / prompt） --- */

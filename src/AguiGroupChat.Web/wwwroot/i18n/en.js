@@ -237,6 +237,9 @@ window.I18N_DICTS.en = {
   "org.orchApply": "Confirm & create",
   "org.orchApplying": "Creating",
   "org.orchApplyFail": "Creation failed: {err}",
+  "org.orchSupportCircle": "Also create a support circle (making the plan's digital employees the staff who serve customers)",
+  "org.orchSupportNamePh": "Support circle name (optional)",
+  "org.orchSupportCircleCreated": "Support circle \"{name}\" created",
   "org.orchApplied": "Created {n} digital employees with skills and links",
 
   /* --- Skill library (reusable skills shell / http / prompt) --- */

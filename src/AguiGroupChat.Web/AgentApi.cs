@@ -265,8 +265,8 @@ public static class AgentApi
 
         // ---- 一键组织编排（确认后落库）：把 /orchestrate 返回并确认过的方案写入技能库 + 数字员工库，并建好连接 ----
         //      幂等部署安全：全部先校验通过再造；失败则整体返回错误（不部分落库）。
-        root.MapPost("/orchestrate/apply", (OrchestrateApplyRequest req, HttpContext ctx, AuthService auth,
-            AgentCatalog catalog, AgentSkillCatalog skillCatalog) =>
+        root.MapPost("/orchestrate/apply", async (OrchestrateApplyRequest req, HttpContext ctx, AuthService auth,
+            AgentCatalog catalog, AgentSkillCatalog skillCatalog, GroupHub hub, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -363,7 +363,40 @@ public static class AgentApi
                 catalog.Upsert(def);
                 created.Add(id);
             }
-            return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList() });
+            // ---- 4. 可选：把这个方案的数字员工组建为一个客服知聚（Support circle）并注册触发规则，直接上线服务顾客 ----
+            string? supportCircleGroupId = null;
+            if (req.CreateSupportCircle)
+            {
+                var circleName = string.IsNullOrWhiteSpace(req.SupportCircleName) ? (req.Title ?? "客服组织") : req.SupportCircleName!.Trim();
+                var group = await hub.CreateGroupAsync(new GroupCreateRequest
+                {
+                    GroupName = circleName,
+                    OwnerId = user.UserId,
+                    Kind = GroupKind.Support,
+                    MemberIds = created,
+                    Members = created.Select(id => new MemberSeed
+                    {
+                        MemberId = id,
+                        MemberType = MemberType.Agent,
+                        Nickname = agents.FirstOrDefault(x => x.AgentId == id)?.Nickname ?? id,
+                    }).ToList(),
+                }, ct);
+                supportCircleGroupId = group.GroupId;
+                // 方案里的数字员工作为客服，注册到客服知聚的触发规则（@ 即可应答）
+                foreach (var id in created)
+                {
+                    var def = catalog.GetDefinition(id);
+                    hub.RegisterAgent(new AgentRegisterRequest
+                    {
+                        AgentId = id,
+                        Nickname = def?.Nickname ?? id,
+                        GroupIds = [group.GroupId],
+                        TriggerMode = def?.TriggerMode ?? AgentTriggerMode.Mentioned,
+                        Keywords = def?.Keywords,
+                    });
+                }
+            }
+            return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList(), supportCircleGroupId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 优化「管理下一层任务指派」提示词（需登录，组织架构图节点上调用）：
@@ -697,7 +730,8 @@ public sealed record GenerateInstructionsHttpRequest(string? Description);
 public sealed record OrchestrateRequest(string? Requirement);
 
 /// <summary>一键组织编排：确认后提交的完整方案（前端把 /orchestrate 返回的预览原样回传，服务端校验后逐个落库）。</summary>
-public sealed record OrchestrateApplyRequest(string? Title, IReadOnlyList<OrchestratedAgentHttp>? Agents, IReadOnlyList<OrchestratedSkillHttp>? Skills);
+public sealed record OrchestrateApplyRequest(string? Title, IReadOnlyList<OrchestratedAgentHttp>? Agents, IReadOnlyList<OrchestratedSkillHttp>? Skills,
+    bool CreateSupportCircle = false, string? SupportCircleName = null);
 
 /// <summary>编排方案中的一个数字员工岗位。</summary>
 public sealed record OrchestratedAgentHttp(string? AgentId, string? Nickname, string? Description, string? Instructions,
