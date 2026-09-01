@@ -112,7 +112,11 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 ### 15. Zero-Friction Skill Configuration (Generate Skills from Natural Language)
 - **🤖 Generate a skill from plain text**: in the Skill Library, type a request (e.g. "check local disk usage and report free space per partition"), and the LLM produces name / kind / command / description / execution location / client-runner config, filled into the form for review then save — <b>no need to hand-write commands or JSON</b>, so even non-technical users can add capabilities to digital employees.
 
----
+### 16. Support Circles (Public Reception + One-by-One Conversation Isolation)
+- **Public, enterable support / FAQ circles**: on top of public/private circles, a "support circle" is <b>visible and enterable by every signed-in user</b> with no invitation needed; other circles keep membership-only semantics.
+- **A support team serves everyone**: the creator invites humans + digital employees into the support team; staff see <b>all conversations</b> and can coordinate internally (without disturbing customers) to route / escalate cases.
+- **Each customer gets an isolated conversation**: a regular user who enters is <i>not a member</i> and holds a private conversation with the team — user A's content is never visible to user B, naturally satisfying client privacy and enabling a public-hall + one-to-one service model.
+- **Server-enforced isolation**: conversation visibility is enforced end-to-end (send / snapshot / history / search / attachments / realtime fan-out), so no client can leak a message to another customer.
 
 ---
 
@@ -125,7 +129,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 | Multi-client coverage | Web (Docker), Windows desktop (WPF + WebView2, multi-instance), cross-platform desktop (Avalonia) |
 | Extensible | Storage abstraction (IGroupStore / IUserStore) with built-in **memory / postgres / mysql / sqlite / redis** implementations, switchable in one click; `IAgentGateway` for custom gateways; digital employee directory / trigger rules / topics all managed at runtime |
 | Data security | Password PBKDF2, token auth, attachment whitelist, strict ownership validation for private group chats / private digital employees, HTML sandbox, SSRF protection, memory tiering and auto-forgetting, local-execution sandbox + token auth |
-| Quality assurance | **648 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end) |
+| Quality assurance | **679 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end / support-circle conversation isolation) |
 
 ---
 
@@ -209,6 +213,16 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - Each party configures **memory retention days** per compliance requirements; after the project ends, **export** the collaboration group chat data for archiving, or **initialize** to clear external-access traces.
 
 **Value**: makes "organizational boundaries" no longer block AI collaboration; cascaded approval keeps cross-organization operations **human-controllable**; memory governance and data sovereignty are each preserved.
+
+### Scenario 7: Public AI Support / FAQ Hall (Community Reach + One-to-One Personalized Service)
+
+**Scenario description**: deploy a "support circle" on your website / community, staff it with human agents + digital employees (human-machine co-desk), share one enter link to receive every visitor.
+
+- **One-time team setup**: the creator pulls the support team (humans + digital employees) in once; staff get a unified view of <b>all visitor conversations</b> and can transfer / discuss internally without disturbing customers; digital employees answer 24×7 first, escalating hard cases to humans.
+- **Inherently isolated per-visitor conversations**: users A and B join the same public hall yet each gets a private conversation invisible to the other — protecting client privacy while keeping the low-friction "public hall" distribution.
+- **Knowledge feedback loop**: staff persist frequent answers via "important memory" into the shared knowledge base, so digital employees answer from it later — the more it serves, the fewer hands it needs.
+
+**Value**: upgrades "AI support" from a set of isolated one-off bots into <b>an operable, self-improving, multi-person public service hall</b> — public low-friction entry plus per-conversation isolation balancing reach and privacy.
 
 ---
 

@@ -1,3 +1,20 @@
+# AG-UI 群聊桌面版 1.0.103 发布说明
+# AG-UI Group Chat Desktop 1.0.103 Release Notes
+
+## 新增（中文）
+- **新增：客服知聚（`kind=support`）**。在公有 / 私有知聚之上新增客服知聚：创建者建群时拉入的**客服团队**（真人用户或数字员工，`Role=Admin`）为知聚的全部成员，可看到**所有会话**；客服知聚对所有用户可见、可进入，无需邀请。
+- **顾客非成员、会话隔离**：普通用户进入客服知聚时**不会加入成员表**（不占成员名额、不出现在成员清单），而是登记为一个带 30 分钟活动 TTL 的**顾客参与者**，获得与客服团队聊天的**独立会话**；每位顾客之间彼此隔离（A 看不到 B 的会话），客服回复某顾客定向到该顾客，客服之间的内部沟通仅客服可见。
+- **接口**：`POST /ag-ui/group/create` 增加 `kind=normal|support`；`GET /ag-ui/group/discover` 发现全部客服知聚（对已登录用户可见，含 `isMember`/`hasEntered`）；`POST /ag-ui/group/{groupId}/enter` 进入（非成员登记为顾客参与者）。
+- **前端**：创建弹窗增加「普通知聚 / 🛟 客服知聚」选择；侧栏自动展示可进入的客服知聚（蓝色标签 + 非成员「进入」标）；进入后作为参与者直接聊天。
+
+## New (English)
+- **New: support circles (`kind=support`)**. On top of public/private circles: the invited **support team** (humans and agent employees, `Role=Admin`) is the circle's entire membership and sees **every conversation**; a support circle is discoverable and enterable by all users without invitation.
+- **Customers are non-members with isolated conversations**: entering a support circle does **not** add you to the member roster (no headcount, not listed); you register as a time-limited **customer participant** (30-min activity TTL) with your **own isolated conversation** with staff. Customers are isolated from each other; staff replies target the specific customer; internal staff chats stay staff-only.
+- **APIs**: `POST /ag-ui/group/create` now takes `kind=normal|support`; `GET /ag-ui/group/discover` lists support circles (visible to any logged-in user, with `isMember`/`hasEntered`); `POST /ag-ui/group/{groupId}/enter` to enter (registers non-members as customer participants).
+- **Frontend**: create dialog gains a "Normal / 🛟 Support circle" picker; the sidebar automatically shows enterable support circles (blue badge + an "Enter" chip for non-members); entered participants can chat directly.
+
+---
+
 # AG-UI 群聊桌面版 —— 新增：内网穿透（反向隧道）
 # AG-UI Group Chat Desktop — New: NAT traversal (reverse tunnel)
 
