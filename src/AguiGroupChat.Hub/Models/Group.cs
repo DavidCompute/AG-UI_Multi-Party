@@ -18,7 +18,19 @@ public sealed class Group
     /// </summary>
     public GroupKind Kind
     {
-        get => Extra is { } e && e.TryGetValue("kind", out var k) && k is string s && s == "support" ? GroupKind.Support : GroupKind.Normal;
+        get
+        {
+            // Extra 反序列化自数据库 JSON 时，值可能是 CLR string 或 JsonElement（依存储反序列化实现而定），
+            // 统一归一化为字符串再比较，避免持久化后 reload 丢失 kind。
+            if (Extra is null || !Extra.TryGetValue("kind", out var k) || k is null) return GroupKind.Normal;
+            var s = k switch
+            {
+                string str => str,
+                System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String => je.GetString(),
+                _ => k.ToString(),
+            };
+            return s == "support" ? GroupKind.Support : GroupKind.Normal;
+        }
         set
         {
             if (Extra is null) return; // Extra 在初始值为 null 时不支持原地写入（由创建路径预置）

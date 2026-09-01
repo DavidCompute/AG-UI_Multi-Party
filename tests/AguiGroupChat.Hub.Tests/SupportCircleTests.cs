@@ -1,5 +1,6 @@
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
+using System.Text.Json;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -160,5 +161,26 @@ public sealed class SupportCircleTests
         // 客服看到全部
         Assert.Contains(staffSnap.LatestMessages, m => m.Content == "A 的问题");
         Assert.Contains(staffSnap.LatestMessages, m => m.Content == "B 的问题");
+    }
+
+    [Fact]
+    public void Kind_SurvivesStoreRoundTrip_WhenExtraValueIsJsonElement()
+    {
+        // 客服知聚 kind 存在 Extra["kind"]；数据库存储把 extra 作为 JSON 列读回时，字符串值反序列化
+        // 为 JsonElement 而非 CLR string。此前 Group.Kind 只识别 string，导致持久化 reload 后识别为普通知聚
+        // （/discover 为空、/enter 报“仅客服知聚可自行进入”）。此处复现并验证已修复。
+        var g = new Group
+        {
+            GroupId = "group_x",
+            GroupName = "客服",
+            OwnerId = "user_1",
+            MemberCount = 1,
+            CreateTime = 1,
+            IsPrivate = false,
+            Extra = AguiJson.Deserialize<Dictionary<string, object?>>("{\"kind\":\"support\"}"), // 值类型 = JsonElement
+        };
+
+        Assert.True(g.IsSupportCircle);
+        Assert.Equal(GroupKind.Support, g.Kind);
     }
 }
