@@ -220,6 +220,23 @@ window.I18N_DICTS.en = {
   "org.optimizeAppend": "Append to this employee's instructions",
   "org.optimizeApplied": "Next-layer dispatch guidance appended",
   "agent.orgBtn": "Org chart",
+  /* One-click organization orchestration (requirement → plan preview → confirm & create) */
+  "org.orchBtn": "Orchestrate",
+  "org.orchTitle": "One-click Organization",
+  "org.orchTip": "Describe the organization you want in one sentence (e.g. set up a customer-service team). The system generates digital-employee roles, per-role skills, and reporting/escalation links. Generate a preview first, then confirm to create.",
+  "org.orchReqPh": "One sentence describing the organization / business you want",
+  "org.orchReqShort": "Describe the organization first (at least 2 characters)",
+  "org.orchGen": "✨ Generate preview",
+  "org.orchGenIns": "Generating",
+  "org.orchGenDone": "Preview ready - review then click Confirm & create",
+  "org.orchGenFail": "Preview generation failed: {err}",
+  "org.orchSecAgents": "Digital employees:",
+  "org.orchSecSkills": "Skills to create:",
+  "org.orchEmpty": "(Preview will appear here after generation)",
+  "org.orchApply": "Confirm & create",
+  "org.orchApplying": "Creating",
+  "org.orchApplyFail": "Creation failed: {err}",
+  "org.orchApplied": "Created {n} digital employees with skills and links",
 
   /* --- Skill library (reusable skills shell / http / prompt) --- */
   "skill.toolbarBtn": "Skills",

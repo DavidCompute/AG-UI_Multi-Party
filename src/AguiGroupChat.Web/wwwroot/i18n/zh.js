@@ -220,6 +220,23 @@ window.I18N_DICTS.zh = {
   "org.optimizeAppend": "追加到该数字员工的指令",
   "org.optimizeApplied": "已追加下一层指派指引",
   "agent.orgBtn": "组织架构",
+  /* 一键组织编排（需求 → 方案预览 → 确认创建） */
+  "org.orchBtn": "一键编排",
+  "org.orchTitle": "一键组织编排",
+  "org.orchTip": "用一句话描述要建立的组织（如：组建一个客户服务团队），系统会生成数字员工岗位、各岗位技能与上下级连接。先生成方案预览，确认后再创建。",
+  "org.orchReqPh": "描述你想建立的组织 / 业务的一句话",
+  "org.orchReqShort": "请先描述你要建立的组织（至少 2 个字符）",
+  "org.orchGen": "✨ 生成方案预览",
+  "org.orchGenIns": "生成中",
+  "org.orchGenDone": "方案已生成，请核对后点击「确认并创建」",
+  "org.orchGenFail": "方案生成失败：{err}",
+  "org.orchSecAgents": "数字员工岗位：",
+  "org.orchSecSkills": "待创建技能：",
+  "org.orchEmpty": "（生成后在此展示方案预览）",
+  "org.orchApply": "确认并创建",
+  "org.orchApplying": "创建中",
+  "org.orchApplyFail": "创建失败：{err}",
+  "org.orchApplied": "已创建 {n} 个数字员工及其技能与连接",
 
   /* --- 技能库（可复用技能 shell / http / prompt） --- */
   "skill.toolbarBtn": "技能库",

@@ -1204,6 +1204,102 @@ async function applyOrgOptimize() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
+/* ============ 一键组织编排：需求 → 方案预览 → 确认后落库 ============ */
+
+let orchestrationPreview = null;
+
+/** 打开一键编排弹窗（需登录）。 */
+function openOrgOrchestrate() {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  orchestrationPreview = null;
+  $("orgOrchPreview").textContent = t("org.orchEmpty");
+  $("orgOrchReq").value = "";
+  $("orgOrchStatus").textContent = "";
+  $("orgOrchApply").disabled = true;
+  $("orgOrchModal").classList.remove("hidden");
+}
+
+/** 生成方案预览（不落库）。 */
+async function generateOrchestration() {
+  const requirement = ($("orgOrchReq").value || "").trim();
+  if (requirement.length < 2) { toast(t("org.orchReqShort")); return; }
+  $("orgOrchGen").disabled = true;
+  $("orgOrchStatus").textContent = t("org.orchGenIns") + "…";
+  $("orgOrchPreview").textContent = t("org.orchGenIns") + "…";
+  try {
+    const res = await fetch("/ag-ui/agents/orchestrate", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ requirement }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || !data.agents) { toast(t("org.orchGenFail", { err: errMsg(data, res.status) })); return; }
+    orchestrationPreview = data;
+    $("orgOrchPreview").textContent = formatOrchestrationPlan(data);
+    $("orgOrchStatus").textContent = t("org.orchGenDone");
+    $("orgOrchApply").disabled = false;
+  } catch (ex) {
+    $("orgOrchPreview").textContent = "";
+    toast(t("org.orchGenFail", { err: ex.message }));
+  } finally {
+    $("orgOrchGen").disabled = false;
+  }
+}
+
+/** 把方案预览对象格式化为可读文本。 */
+function formatOrchestrationPlan(p) {
+  const lines = [];
+  lines.push(`【${p.title || t("org.title")}】`);
+  lines.push("");
+  lines.push(t("org.orchSecAgents"));
+  (p.agents || []).forEach((a) => {
+    const subs = (a.assignmentIds || []).join("、");
+    const esc = a.escalationAgentId ? ` ↑${a.escalationAgentId}` : "";
+    lines.push(` • ${a.nickname || a.agentId}（${a.agentId}）${esc}`);
+    if (a.skillIds && a.skillIds.length) lines.push(`     技能: ${a.skillIds.join("、")}`);
+    if (subs) lines.push(`     指派下级: ${subs}`);
+  });
+  if (p.skills && p.skills.length) {
+    lines.push("");
+    lines.push(t("org.orchSecSkills"));
+    (p.skills).forEach((s) => lines.push(` • ${s.name || s.skillId}（${s.kind}）`));
+  }
+  return lines.join("\n");
+}
+
+/** 确认并创建（apply 落库）；成功后刷新数字员工 / 技能 / 组织架构。 */
+async function applyOrchestration() {
+  if (!orchestrationPreview || !state.token) return;
+  $("orgOrchApply").disabled = true;
+  $("orgOrchStatus").textContent = t("org.orchApplying") + "…";
+  try {
+    const res = await fetch("/ag-ui/agents/orchestrate/apply", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({
+        title: orchestrationPreview.title || null,
+        agents: (orchestrationPreview.agents || []).map((a) => ({
+          agentId: a.agentId, nickname: a.nickname, description: a.description, instructions: a.instructions,
+          triggerMode: a.triggerMode || "mentioned", skillIds: a.skillIds || [], assignmentIds: a.assignmentIds || [],
+          escalationAgentId: a.escalationAgentId || null, relayToAgentId: a.relayToAgentId || null,
+        })),
+        skills: (orchestrationPreview.skills || []).map((s) => ({
+          skillId: s.skillId, name: s.name, description: s.description, kind: s.kind, body: s.body,
+          executionLocation: s.executionLocation || "server", requiresApproval: !!s.requiresApproval,
+        })),
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("org.orchApplyFail", { err: errMsg(data, res.status) })); $("orgOrchApply").disabled = false; return; }
+    $("orgOrchModal").classList.add("hidden");
+    toast(t("org.orchApplied", { n: (data.agents || []).length }));
+    orchestrationPreview = null;
+    await loadAgents();
+    await loadSkills();
+  } catch (ex) {
+    toast(t("org.orchApplyFail", { err: ex.message }));
+    $("orgOrchApply").disabled = false;
+  }
+}
+
 /** 序列化数字员工配置：排除敏感字段 bridgeToken（不导出）；ownerId 不导出（导入后归属当前用户）。 */
 function serializeAgent(a) {
   return {
@@ -6658,6 +6754,12 @@ function init() {
   initCollapsibleSections(false); // 绑定数字员工表单可折叠分组的开合
   // 数字员工组织架构（全局入口，一个图标即可）：确保目录已加载后打开
   $("agentOrgBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } if (!agentList?.length) await loadAgents(); openOrgChart(); };
+  // 一键组织编排（根据一句话需求生成组织 + 技能 + 连接）
+  $("agentOrchBtn").onclick = openOrgOrchestrate;
+  $("orgOrchGen").onclick = generateOrchestration;
+  $("orgOrchApply").onclick = applyOrchestration;
+  $("orgOrchCancel").onclick = () => $("orgOrchModal").classList.add("hidden");
+  $("orgOrchReq").addEventListener("keydown", (e) => { if (e.key === "Enter") generateOrchestration(); });
   // 技能库：工具条入口 + 弹窗内部动作
   $("agentSkillLibBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } await loadSkills(); openSkillModal(); };
   $("skillCloseBtn").onclick = () => $("skillModal").classList.add("hidden");

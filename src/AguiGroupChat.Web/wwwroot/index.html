@@ -144,6 +144,7 @@
         <div class="agent-toolbar">
           <input id="agentSearch" class="modal-input agent-search" data-i18n-placeholder="agent.search" />
           <button id="agentOrgBtn" class="chip-btn" data-i18n-title="agent.orgChart">🌐 <span data-i18n="agent.orgBtn">组织架构</span></button>
+          <button id="agentOrchBtn" class="chip-btn" data-i18n-title="org.orchTitle">🛠️ <span data-i18n="org.orchBtn">一键编排</span></button>
           <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
           <button id="agentImportBtn" class="chip-btn" data-i18n-title="agent.importTip">📥 <span data-i18n="agent.import">导入</span></button>
           <button id="agentExportAllBtn" class="chip-btn" data-i18n-title="agent.exportAllTip">📤 <span data-i18n="agent.exportAll">导出全部</span></button>
@@ -344,6 +345,28 @@
       <div class="modal-actions">
         <button id="orgOptCancel" class="btn-ghost" data-i18n="org.cancel">取消</button>
         <button id="orgOptAppend" class="send" data-i18n="org.optimizeAppend">追加到该数字员工的指令</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 一键组织编排：根据一句需求生成 组织方案（数字员工 + 技能 + 连接）→ 预览 → 确认后落库 -->
+  <div id="orgOrchModal" class="modal-overlay hidden">
+    <div class="modal org-modal">
+      <div class="modal-title">🛠️ <span data-i18n="org.orchTitle">一键组织编排</span></div>
+      <p class="form-hint" style="margin-bottom:8px" data-i18n="org.orchTip">用一句话描述要建立的组织（如：组建一个客户服务团队），系统会生成数字员工岗位、各岗位技能与上下级连接。先生成方案预览，确认后再创建。</p>
+      <div class="form-group">
+        <textarea id="orgOrchReq" class="modal-input" rows="3" style="width:100%;resize:vertical" placeholder="描述你想建立的组织 / 业务一一句话" data-i18n-placeholder="org.orchReqPh"></textarea>
+      </div>
+      <div class="org-toolbar" style="justify-content:flex-start;gap:8px">
+        <button id="orgOrchGen" class="send" data-i18n="org.orchGen">✨ 生成方案预览</button>
+        <span class="muted" id="orgOrchStatus" style="font-size:12px"></span>
+      </div>
+      <div class="form-group">
+        <div id="orgOrchPreview" class="org-orch-preview" data-i18n-placeholder="org.orchEmpty">（生成后在此展示方案预览）</div>
+      </div>
+      <div class="modal-actions">
+        <button id="orgOrchCancel" class="btn-ghost" data-i18n="org.cancel">取消</button>
+        <button id="orgOrchApply" class="send" disabled data-i18n="org.orchApply">确认并创建</button>
       </div>
     </div>
   </div>
