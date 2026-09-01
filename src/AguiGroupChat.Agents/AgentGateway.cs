@@ -85,6 +85,36 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 该运行后续的审批工具自动放行（不再打断），直到运行结束清除。</summary>
     private readonly ConcurrentDictionary<string, byte> _autoApprovedRuns = new(StringComparer.Ordinal);
 
+    /// <summary>对话内已批准执行的客户端技能：key = threadId|agentId，value = 已批准技能 id 集合 + 过期时间。
+    /// 同一问题（同一对话）里用户已同意过的客户端技能，后续再次需要时不再弹确认卡，直接按已批准执行（隧道在线时）。</summary>
+    private readonly ConcurrentDictionary<string, (long ExpiresAtMs, HashSet<string> Skills)> _approvedClientSkills = new(StringComparer.Ordinal);
+    private const long ApprovedSkillTtlMs = 30 * 60 * 1000; // 30 分钟过期
+
+    private static string ApprovedSkillKey(string threadId, string agentId) => threadId + "|" + agentId;
+
+    private HashSet<string> GetApprovedSkills(string threadId, string agentId)
+    {
+        var key = ApprovedSkillKey(threadId, agentId);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (_approvedClientSkills.TryGetValue(key, out var entry) && entry.ExpiresAtMs > now)
+            return entry.Skills;
+        _approvedClientSkills.TryRemove(key, out _);
+        return new HashSet<string>(StringComparer.Ordinal);
+    }
+
+    private void MarkSkillsApproved(string threadId, string agentId, IEnumerable<string> skillIds)
+    {
+        if (string.IsNullOrWhiteSpace(threadId) || string.IsNullOrWhiteSpace(agentId)) return;
+        var key = ApprovedSkillKey(threadId, agentId);
+        var set = GetApprovedSkills(threadId, agentId);
+        foreach (var s in skillIds)
+            if (!string.IsNullOrWhiteSpace(s)) set.Add(s);
+        _approvedClientSkills[key] = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + ApprovedSkillTtlMs, set);
+    }
+
+    private bool IsSkillApproved(string threadId, string agentId, string skillId)
+        => GetApprovedSkills(threadId, agentId).Contains(skillId, StringComparer.Ordinal);
+
     /// <summary>编排计划内「客户端技能」批量执行的等待器：key = interruptId。
     /// 计划在执行到多个需在本机执行的客户端技能时（ExecutionLocation=Client），把它们合并成一张
     /// 「本机一键执行全部」交互卡下发给前端；前端逐个执行并回传结果后，由 <see cref="ResolveInteractionAsync"/>
@@ -196,11 +226,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             _ = PurgeExpiredInteractions(); // 交互清理含异步桥接连接释放；定时器回调不等待
             PurgeExpiredSessionLocks();
+            PurgeExpiredApprovedSkills();
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "定时清理任务异常（已忽略）");
         }
+    }
+
+    /// <summary>清理超时的“已批准客户端技能”记忆（同一问题内免重复同意的内存缓存）。</summary>
+    private void PurgeExpiredApprovedSkills()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        foreach (var kv in _approvedClientSkills)
+            if (kv.Value.ExpiresAtMs <= now) _approvedClientSkills.TryRemove(kv.Key, out _);
     }
 
     /// <summary>清理超时未用的会话锁（群解散后残留泄漏防护）：无条件遍历，不依赖条目数阈值（Count>=512 阈值仅作兜底）。</summary>
@@ -1152,6 +1191,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (TunnelAvailable(context.AgentId, context.PreferredBridgeClient) && !_options.ClientToolTunnelRequireApproval)
         {
             var tunneled = new Dictionary<string, string>();
+            var approvedIds = new List<string>();
             foreach (var it in items)
             {
                 if (TryParseRunnerShell(it.ClientRunner, out var cmd, out var cwd, out var timeoutSec))
@@ -1165,19 +1205,50 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     tunneled[it.SkillId] = "（该技能非本机 shell，无法经隧道执行）";
                 }
+                approvedIds.Add(it.SkillId);
             }
+            MarkSkillsApproved(context.ThreadId, context.AgentId, approvedIds);
             _logger.LogInformation("客户端技能批量经内网隧道执行（免确认）：agent={AgentId} count={Count}", context.AgentId, items.Count);
             return tunneled;
         }
+
+        // 同一对话里用户已同意过的客户端技能：无需再次弹确认卡。内网隧道在线时直接经隧道执行取得结果并合并返回；
+        // 只把“尚未同意过”的技能下发给前端卡片确认（减少重复确认次数）。
+        var autoResults = new Dictionary<string, string>();
+        List<BatchClientItem>? cardItems = null;
+        if (context.ThreadId is { Length: > 0 } && TunnelAvailable(context.AgentId, context.PreferredBridgeClient))
+        {
+            foreach (var it in items)
+            {
+                if (IsSkillApproved(context.ThreadId, context.AgentId, it.SkillId)
+                    && TryParseRunnerShell(it.ClientRunner, out var aCmd, out var aCwd, out var aTimeoutSec))
+                {
+                    var r = await ExecuteTunnelAsync(
+                        context.AgentId, context.PreferredBridgeClient, aCmd!, aCwd, aTimeoutSec, it.Query,
+                        TimeSpan.FromSeconds(Math.Clamp(aTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                    autoResults[it.SkillId] = string.IsNullOrWhiteSpace(r) ? "（本机执行未返回结果 / 超时）" : r;
+                }
+                else
+                {
+                    (cardItems ??= new List<BatchClientItem>()).Add(it);
+                }
+            }
+        }
+        else
+        {
+            cardItems = items.ToList();
+        }
+        if (cardItems is null || cardItems.Count == 0)
+            return autoResults; // 全部技能已在此前同意过且已在本机执行，无需卡片
 
         var interruptId = "interrupt_" + IdGenerator.NewId();
         var runId = "run_" + IdGenerator.NewId();
         var root = _catalog.GetDefinition(context.AgentId);
         var tcs = new TaskCompletionSource<(bool Ok, Dictionary<string, string>? Results)>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _batchClientExecWaits[interruptId] = new BatchClientExec(gid, messageId, context.AgentId, context.PreferredBridgeClient, context.TriggerUserId, items, display.Count, tcs);
+        _batchClientExecWaits[interruptId] = new BatchClientExec(gid, messageId, context.AgentId, context.PreferredBridgeClient, context.TriggerUserId, cardItems, display.Count, tcs);
 
         // 批量交互卡要执行的全部技能（前端据此逐个执行；clientRunner 复用技能的 ClientRunner JSON）
-        var payload = items.Select(it => new
+        var payload = cardItems.Select(it => new
         {
             skillId = it.SkillId,
             name = it.Name,
@@ -1196,19 +1267,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 ToolCallId = "batch_" + interruptId,
                 ToolName = "本机一键执行全部",
                 ToolArguments = null,
-                Message = $"智能体「{root?.Nickname ?? context.AgentId}」请求你在本机执行 {items.Count} 个客户端技能（可一次全部执行）。",
+                Message = $"智能体「{root?.Nickname ?? context.AgentId}」请求你在本机执行 {cardItems.Count} 个客户端技能（可一次全部执行）。",
                 Kind = "client_tool_batch",
                 ClientRunner = JsonSerializer.Serialize(payload),
                 TargetMemberId = context.TriggerUserId,
                 Timestamp = _hub.Value.NowMs,
             }, ct: ct);
-            ClientToolTrace.Write($"BATCH-INVOKE interrupt={interruptId} count={items.Count} skills={string.Join(",", items.Select(i => i.SkillId))}");
+            ClientToolTrace.Write($"BATCH-INVOKE interrupt={interruptId} count={cardItems.Count} skills={string.Join(",", cardItems.Select(i => i.SkillId))}");
         }
         catch (Exception ex)
         {
             _batchClientExecWaits.TryRemove(interruptId, out _);
             _logger.LogWarning(ex, "批量客户端技能交互卡下发失败：group={GroupId}", gid);
-            return null;
+            return autoResults.Count > 0 ? autoResults : null;
         }
 
         // 阻塞等待前端回传（带交互 TTL 上限兜底，超时视为未执行）
@@ -1216,7 +1287,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             var tcsDone = await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(InteractionTtlMs), ct);
             _batchClientExecWaits.TryRemove(interruptId, out _);
-            return tcsDone.Ok ? tcsDone.Results : null;
+            if (tcsDone.Ok && tcsDone.Results is not null)
+            {
+                // 记录本批已同意执行的客户端技能：同一对话里后续再次需要时免确认（经隧道直跑）
+                MarkSkillsApproved(context.ThreadId, context.AgentId, cardItems.Select(c => c.SkillId));
+                foreach (var kv in autoResults) tcsDone.Results.TryAdd(kv.Key, kv.Value);
+                return tcsDone.Results;
+            }
+            return autoResults;
         }
         catch (TimeoutException)
         {
@@ -2571,6 +2649,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     toolResult = tr;
                     ClientToolResultStore.Put(pfc.Name, tr);
                 }
+                MarkSkillsApproved(pending.Context.ThreadId, pending.Context.AgentId, [pfc.Name]);
                 _logger.LogInformation("客户端技能经内网隧道执行（审批后）：agent={AgentId} tool={Tool}", pending.Context.AgentId, pfc.Name);
             }
 
@@ -2629,6 +2708,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         Timestamp = _hub.Value.NowMs,
                     }, ct: CancellationToken.None);
                     return;
+                }
+
+                // 已批准客户端技能记忆：该客户端技能在此对话里已获用户同意 → 免确认、继续自动执行（同一问题内不再重复弹卡）
+                if (nextApproval.ToolCall is FunctionCallContent nfc
+                    && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(nfc.Name, StringComparer.Ordinal)
+                    && IsSkillApproved(pending.Context.ThreadId, pending.Context.AgentId, nfc.Name))
+                {
+                    lastApproval = nextApproval;
+                    lastApproved = true;
+                    _logger.LogInformation("已同意技能自动放行：run={RunId} tool={Tool}", runId, nfc.Name);
+                    continue;
                 }
 
                 // 批量批准生效：自动批准本次运行后续的审批操作，不打断用户
