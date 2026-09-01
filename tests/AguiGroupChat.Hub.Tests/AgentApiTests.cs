@@ -82,8 +82,10 @@ public sealed class AgentApiServerFixture : IAsyncLifetime
             ["Persistence:Enabled"] = "false",
             // 建群 / 加成员等协议写接口测试走请求体身份回退（默认已改为强制令牌，这里显式关闭）
             ["Auth:RequireTokenOnRealTime"] = "false",
-            // 桥接端点仅系统管理员可配置：固定 heidi / grace 为管理员（首个注册用户在其他测试先注册时不一定是管理员）
-            ["Auth:AdminUserIds"] = "heidi,grace",
+            // 桥接端点仅系统管理员可配置：固定 heidi / grace / orch_admin 为管理员（首个注册用户在其他测试先注册时不一定是管理员）；
+            // 关闭 FirstUserIsAdmin 以避免「首个注册者自动成 admin」造成权限/顺序不确定
+            ["Auth:AdminUserIds"] = "heidi,grace,orch_admin",
+            ["Auth:FirstUserIsAdmin"] = "false",
         });
         HubApp.ConfigureServices(builder);
         builder.Services.AddAgentFramework(builder.Configuration);
@@ -861,10 +863,12 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
     [Fact]
     public async Task Orchestrate_Apply_CreatesAgentsSkillsAndConnections()
     {
-        var token = await RegisterAsync("orch_apply");
-        // mock 模板生成的固定方案：mgr + execA + execB + 两个技能
+        // mock 方案含一个 shell（client）技能；仅管理员可 apply（服务端强制）——用专用管理员账号 orch_admin
+        var token = await RegisterAsync("orch_admin");
+        // mock 模板生成的固定方案：mgr + execA + execB + 两个技能（skill_a=prompt, skill_b=shell/client/需审批）
         var preview = await AgentOrchestrator.GenerateAsync(
             new AgentOptions { Provider = "mock" }, "客户服务团队", NullLoggerFactory.Instance.CreateLogger("t"), CancellationToken.None);
+        Assert.Contains(preview.Skills, s => string.Equals(s.Kind, "shell", System.StringComparison.OrdinalIgnoreCase));
         var reqBody = new OrchestrateApplyRequest(
             preview.Title,
             preview.Agents.Select(a => new OrchestratedAgentHttp(a.AgentId, a.Nickname, a.Description, a.Instructions,
@@ -873,16 +877,18 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
                 s.Body, s.ExecutionLocation, s.RequiresApproval)).ToList());
 
         var res = await _client.SendAsync(ApplyRequest(token, reqBody));
-        if (!res.IsSuccessStatusCode)
-        {
-            var errb = await res.Content.ReadAsStringAsync();
-            throw new Xunit.Sdk.XunitException($"apply 失败 HTTP {res.StatusCode}: {errb}");
-        }
+        res.EnsureSuccessStatusCode();
 
         var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
         var skills = _fixture.App.Services.GetRequiredService<AgentSkillCatalog>();
-        // 技能落库
-        foreach (var s in preview.Skills) Assert.NotNull(skills.Get(s.SkillId!));
+        // 技能落库（含 shell 技能）
+        foreach (var s in preview.Skills)
+        {
+            var created = skills.Get(s.SkillId!);
+            Assert.NotNull(created);
+            if (string.Equals(s.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+                Assert.True(created!.RequiresApproval); // shell 强制需审批
+        }
         // 数字员工落库 + 连接（mock 模板：Agents[0]=主管(assignment 两个执行岗)，Agents[1]=执行岗A(escalation=主管)）
         var mgrId = preview.Agents[0].AgentId!;
         var execId = preview.Agents[1].AgentId!;
@@ -891,6 +897,26 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.Equal(execId, mgrDef.AssignmentIds[0]);
         Assert.Equal(mgrId, catalog.GetDefinition(execId)!.EscalationAgentId);
         Assert.Contains(mgrDef.SkillDefIds, sid => preview.Skills.Any(s => s.SkillId == sid));
+    }
+
+    [Fact]
+    public async Task Orchestrate_Apply_NonAdminWithShellSkill_Forbidden()
+    {
+        // 非管理员 apply 含 shell 技能的组织方案 → 403（Shell/HTTP 仅管理员可建，安全兜底）
+        var token = await RegisterAsync("orch_plain_" + Guid.NewGuid().ToString("N")[..6]);
+        var preview = await AgentOrchestrator.GenerateAsync(new AgentOptions { Provider = "mock" },
+            "客户服务团队", NullLoggerFactory.Instance.CreateLogger("t"), CancellationToken.None);
+        var reqBody = new OrchestrateApplyRequest(preview.Title,
+            preview.Agents.Select(a => new OrchestratedAgentHttp(a.AgentId, a.Nickname, a.Description, a.Instructions,
+                a.TriggerMode, a.SkillIds, a.AssignmentIds, a.EscalationAgentId, a.RelayToAgentId)).ToList(),
+            preview.Skills.Select(s => new OrchestratedSkillHttp(s.SkillId, s.Name, s.Description, s.Kind,
+                s.Body, s.ExecutionLocation, s.RequiresApproval)).ToList());
+
+        var res = await _client.SendAsync(ApplyRequest(token, reqBody));
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+        var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
+        // 没有任何数字员工被创建（整体拒绝）
+        Assert.Null(catalog.GetDefinition(preview.Agents[0].AgentId!));
     }
 }
 

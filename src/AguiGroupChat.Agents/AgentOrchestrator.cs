@@ -70,10 +70,10 @@ public static class AgentOrchestrator
             "- skillId：ASCII 且 ≤40。\n" +
             "- name：中文名。\n" +
             "- description：给模型的调用说明（何时调用/参数/返回，50~150 字）。\n" +
-            "- kind：prompt（推荐，纯提示词可执行）/ shell / http。\n" +
-            "- body：prompt 填模板文本；shell 填命令/脚本；http 填 {\"method\":\"GET\",\"url\":\"${query}\",\"headers\":{}}。\n" +
-            "- executionLocation：server（推荐）/ client。\n" +
-            "- requiresApproval：shell 一律 true；prompt 服务端可 false。\n\n" +
+            "- kind：按岗位职责<b>智能选择</b>——需要本机/系统操作（查电脑信息、执行命令、操作文件/磁盘等）用 <b>shell</b>；需要调用外部 HTTP 接口用 <b>http</b>；纯文本/知识/写作/流程模板用 <b>prompt</b>。不要一律 prompt。\n" +
+            "- body：prompt 填模板文本；shell 填命令/脚本（可跨平台，Windows 用 PowerShell）；http 填 {\"method\":\"GET\",\"url\":\"${query}\",\"headers\":{}}。\n" +
+            "- executionLocation：shell 用 <b>client</b>（在本机执行，需批准）；http/prompt 用 server（服务端）。\n" +
+            "- requiresApproval：shell 一律 true；http 一律 true；executionLocation=client 一律 true；纯 prompt 服务端可 false。\n\n" +
             "连接原则：给出 2~6 个数字员工；尽量形成「主管 → 若干执行岗」的层次；主管的 escalationAgentId 指向更上层或留空；\n" +
             "执行岗 assignmentIds 留空、escalationAgentId 指向主管。技能要贴合岗位职责，数量 1~6 个。\n\n" +
             "只输出如下 JSON：\n" +
@@ -129,7 +129,7 @@ public static class AgentOrchestrator
             Skills =
             [
                 new OrchestratedSkill { SkillId = skill1, Name = "A 类事务处理", Kind = "prompt", Description = $"处理与「{brief}」相关的 A 类事务。", Body = $"请针对与「{brief}」相关的 A 类事务，给出专业、可落地的处理建议。", ExecutionLocation = "server", RequiresApproval = false },
-                new OrchestratedSkill { SkillId = skill2, Name = "B 类事务处理", Kind = "prompt", Description = $"处理与「{brief}」相关的 B 类事务。", Body = $"请针对与「{brief}」相关的 B 类事务，给出专业、可落地的处理建议。", ExecutionLocation = "server", RequiresApproval = false },
+                new OrchestratedSkill { SkillId = skill2, Name = "本机信息速查", Kind = "shell", Description = $"获取本机基本信息与资源占用的运维速查（演示 skill 示例：读系统信息）。", Body = "$d=[Environment]::GetFolderPath('Desktop'); if(Test-Path $d){ Write-Output $d } else { Write-Output 'no-desk' }", ExecutionLocation = "client", RequiresApproval = true },
             ],
         };
     }
