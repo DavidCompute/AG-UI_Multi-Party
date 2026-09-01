@@ -1235,7 +1235,9 @@ async function generateOrchestration() {
     if (!res.ok || !data || !data.agents) { toast(t("org.orchGenFail", { err: errMsg(data, res.status) })); return; }
     orchestrationPreview = data;
     $("orgOrchPreview").textContent = formatOrchestrationPlan(data);
-    $("orgOrchStatus").textContent = t("org.orchGenDone");
+    // 方案含 shell/http 技能时，普通用户无法创建（仅管理员可建）——预览即提示，避免点确认才 403
+    const hasPrivilegedSkill = (data.skills || []).some((s) => (s.kind || "").toLowerCase() === "shell" || (s.kind || "").toLowerCase() === "http");
+    $("orgOrchStatus").textContent = (hasPrivilegedSkill ? t("org.orchNeedsAdmin") + " " : "") + t("org.orchGenDone");
     $("orgOrchApply").disabled = false;
   } catch (ex) {
     $("orgOrchPreview").textContent = "";

@@ -229,6 +229,7 @@ window.I18N_DICTS.en = {
   "org.orchGen": "✨ Generate preview",
   "org.orchGenIns": "Generating",
   "org.orchGenDone": "Preview ready - review then click Confirm & create",
+  "org.orchNeedsAdmin": "⚠️ This plan includes Shell/HTTP skills; only admins can create them",
   "org.orchGenFail": "Preview generation failed: {err}",
   "org.orchSecAgents": "Digital employees:",
   "org.orchSecSkills": "Skills to create:",

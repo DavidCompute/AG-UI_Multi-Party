@@ -229,6 +229,7 @@ window.I18N_DICTS.zh = {
   "org.orchGen": "✨ 生成方案预览",
   "org.orchGenIns": "生成中",
   "org.orchGenDone": "方案已生成，请核对后点击「确认并创建」",
+  "org.orchNeedsAdmin": "⚠️ 方案含 Shell/HTTP 技能，仅管理员可创建",
   "org.orchGenFail": "方案生成失败：{err}",
   "org.orchSecAgents": "数字员工岗位：",
   "org.orchSecSkills": "待创建技能：",
