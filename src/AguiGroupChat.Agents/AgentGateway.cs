@@ -1105,7 +1105,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         // 6) 递归综合答复：模型基于已收集结果作答；若发现不足，主动补查（客户端技能批量确认 / 服务端技能 / 指派下属），
         //    循环直到信息充分才给最终结论，不会中途停下问用户要不要继续。
-        var final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(), ct);
+        //    已执行能力集合以计划里实际激活过的所有技能（含服务端技能）与已指派的员工 id 为种子，
+        //    避免递归阶段再次拿同一技能/同一员工补查（“同一能力被调用两次”）。
+        var ranSkills = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var st in plan.Steps)
+            if (!string.IsNullOrWhiteSpace(st.Target))
+            {
+                if (st.Action == "skill") ranSkills.Add(st.Target);
+                else if (st.Action == "dispatch") ranSkills.Add(st.Target);
+            }
+        foreach (var v in clientSteps.Values) ranSkills.Add(v.SkillId);
+        var final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(),
+            ranSkills, ct);
         var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
         foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
@@ -1288,7 +1299,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// </summary>
     private async Task<string> ExecuteRecursiveAnswerAsync(
         AgentInvocationContext context, AgentDefinition root, string groupId, string messageId,
-        string input, string priorResults, CancellationToken ct)
+        string input, string priorResults, IEnumerable<string>? alreadyRanSkills, CancellationToken ct)
     {
         var db = _skillCatalog.Value;
         var agent = _catalog.GetOrCreate(root.AgentId);
@@ -1297,6 +1308,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var lastAnswer = "";
         var rounds = 0;
         const int MaxRecursiveRounds = 5; // 防死循环 / 打爆时长
+        // 已执行过的技能 id（含计划里已跑过的所有技能，客户端 + 服务端）：避免下一轮又拿同一技能补查，导致“同一技能被调用两次”
+        var executedSkills = new HashSet<string>(alreadyRanSkills ?? [], StringComparer.Ordinal);
+        // 已带回结果的能力（技能 / 分派员工都记录），补查时同样跳过，防止重复调用
+        var answeredTargets = new HashSet<string>(executedSkills, StringComparer.Ordinal);
 
         // 可用技能清单 + 可指派的直属下属，供模型判断“还能补查什么”
         var skillList = new List<string>();
@@ -1337,15 +1352,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 return string.IsNullOrWhiteSpace(lastAnswer) ? facts.ToString() : lastAnswer;
             }
 
-            // 执行本轮要补查的能力：客户端技能→批量；服务端技能→直接执行；分派→子员工
+            // 执行本轮要补查的能力：客户端技能→批量；服务端技能→直接执行；分派→子员工。已执行过的技能直接跳过（去重，防同一技能重复调用）。
             var gathered = new StringBuilder();
             var clientItems = new List<BatchClientItem>();
             foreach (var req in parsed.Gather)
             {
+                // 已在计划/上一轮带回结果的能力（技能或分派员工）直接跳过：防止“同一能力被调用两次”
+                if (!answeredTargets.Add(req.Target))
+                {
+                    var resolved = string.Equals(req.Kind, "skill", StringComparison.OrdinalIgnoreCase)
+                        ? (db?.Get(req.Target)?.Name ?? req.Target) : req.Target;
+                    gathered.AppendLine($"「{resolved}」已在上轮执行，直接复用其结果。");
+                    continue;
+                }
                 if (string.Equals(req.Kind, "skill", StringComparison.OrdinalIgnoreCase))
                 {
                     var skill = db?.Get(req.Target);
                     if (skill is null) { gathered.AppendLine($"技能「{req.Target}」不可用，已跳过。"); continue; }
+                    executedSkills.Add(req.Target);
                     if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client)
                         clientItems.Add(new BatchClientItem(skill.SkillId, skill.Name ?? skill.SkillId, skill.ClientRunner ?? "", req.Input ?? "", 0));
                     else
