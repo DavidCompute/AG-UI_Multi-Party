@@ -49,6 +49,8 @@ public static class HttpGroupApi
                         g.MemberCount,
                         g.OwnerId,
                         g.IsPrivate,
+                        kind = g.Kind,
+                        isSupportCircle = g.IsSupportCircle,
                         myRole = me?.Role,
                         myNickname = me?.Nickname,
                         // 活跃度排序 / 未读提示（前端按 lastMessageAt 降序展示，未读徽标）
@@ -87,6 +89,39 @@ public static class HttpGroupApi
                 req.OperatorId = identity; // 解散校验基于服务端身份：登录用户无法冒充群主解散
                 await hub.DisbandGroupAsync(req, ct);
                 return Results.Ok(new { ok = true });
+            }));
+
+        // 客服知聚发现：对所有用户可见（无需是成员）的客服知聚列表。
+        // 其它知聚保持成员可见（不在此列，避免泄露私有/公共群目录）。
+        group.MapGet("/discover", async (HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
+            => await RunAsync(async () =>
+            {
+                var (identity, error) = RequireIdentity(ctx, auth, authOptions);
+                if (identity is null) return error!;
+                var result = hub.Store.AllGroups()
+                    .Where(g => g.IsSupportCircle)
+                    .Select(g => new
+                    {
+                        g.GroupId,
+                        g.GroupName,
+                        g.GroupAvatar,
+                        g.MemberCount,
+                        g.OwnerId,
+                        isSupportCircle = true,
+                        kind = g.Kind,
+                        isMember = hub.Store.IsMember(g.GroupId, identity),
+                    })
+                    .ToList();
+                return Results.Ok(result);
+            }));
+
+        // 进入客服知聚：非成员自动加入（普通顾客身份），随后即可聊天；返回群信息。
+        group.MapPost("/{groupId}/enter", async (string groupId, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
+            => await RunAsync(async () =>
+            {
+                var (identity, error) = RequireIdentity(ctx, auth, authOptions);
+                if (identity is null) return error!;
+                return Results.Ok(await hub.EnterSupportCircleAsync(groupId, identity, ct));
             }));
 
         // ---- 群成员（协议 5.2）----
@@ -253,7 +288,10 @@ public static class HttpGroupApi
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
 
-                var messages = hub.Store.AllMessages(groupId).Where(m => !m.Recalled && !string.IsNullOrWhiteSpace(m.Content)).ToList();
+                // 可见性过滤：客服知聚中顾客只能基于自己可见的会话计算关联，避免经关联推断其它顾客的会话内容
+                var messages = hub.Store.AllMessages(groupId)
+                    .Where(m => !m.Recalled && !string.IsNullOrWhiteSpace(m.Content) && hub.CanSeeMessageAware(m, identity))
+                    .ToList();
                 var textByTopic = messages
                     .GroupBy(m => string.IsNullOrEmpty(m.TopicId) ? "main" : m.TopicId)
                     .ToDictionary(g => g.Key, g => string.Join(" ", g.Select(m => m.Content)), StringComparer.Ordinal);
@@ -295,7 +333,7 @@ public static class HttpGroupApi
                         statusCode: StatusCodes.Status403Forbidden);
                 var limit = Math.Clamp(count ?? 50, 1, 100);
                 var messages = hub.Store.MessagesBefore(groupId, before, limit, topicId)
-                    .Where(m => !m.Recalled && GroupHub.CanSeeMessage(m, identity))
+                    .Where(m => !m.Recalled && hub.CanSeeMessageAware(m, identity))
                     .Select(m => new SnapshotMessage
                     {
                         MessageId = m.MessageId,
@@ -354,7 +392,7 @@ public static class HttpGroupApi
                         statusCode: StatusCodes.Status403Forbidden);
                 var limit = Math.Clamp(count ?? 50, 1, 100);
                 var messages = hub.Store.MessagesBefore(groupId, before, limit)
-                    .Where(m => !m.Recalled && GroupHub.CanSeeMessage(m, identity))
+                    .Where(m => !m.Recalled && hub.CanSeeMessageAware(m, identity))
                     .Select(m => new SnapshotMessage
                     {
                         MessageId = m.MessageId,
@@ -389,7 +427,7 @@ public static class HttpGroupApi
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "缺少搜索关键词 q"));
                 var limit = Math.Clamp(count ?? 20, 1, 100);
                 var messages = hub.Store.SearchMessages(groupId, q.Trim(), string.IsNullOrWhiteSpace(topicId) ? null : topicId, limit)
-                    .Where(m => !m.Recalled && GroupHub.CanSeeMessage(m, identity))
+                    .Where(m => !m.Recalled && hub.CanSeeMessageAware(m, identity))
                     .Select(m => new SnapshotMessage
                     {
                         MessageId = m.MessageId,
@@ -486,7 +524,7 @@ public static class HttpGroupApi
                 var before = hub.Store.MessagesBefore(groupId, messageId, half, topic);
                 var after = hub.Store.MessagesAfter(groupId, messageId, half, topic);
                 var messages = before.Concat(new[] { target }).Concat(after)
-                    .Where(m => !m.Recalled && GroupHub.CanSeeMessage(m, identity))
+                    .Where(m => !m.Recalled && hub.CanSeeMessageAware(m, identity))
                     .Select(m => new SnapshotMessage
                     {
                         MessageId = m.MessageId,

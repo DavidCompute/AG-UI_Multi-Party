@@ -2200,8 +2200,24 @@ function openCreateModal() {
   $("createGroupPrivate").checked = false;
   $("createMemberSearch").value = "";
   $("createConfirm").disabled = false; // 允许创建仅含知聚主的知聚
+  // 知聚类型默认普通；私密仅对普通知聚可选
+  document.querySelectorAll('input[name="createGroupKind"]').forEach((r) => {
+    r.checked = r.value === "normal";
+    r.onchange = () => applyCreateKind();
+  });
+  applyCreateKind();
   $("createModal").classList.remove("hidden");
   $("createGroupName").focus();
+}
+
+/** 依据知聚类型开关私密选择：客服知聚不支持私密（对所有用户可见）。 */
+function applyCreateKind() {
+  const isSupport = document.querySelector('input[name="createGroupKind"]:checked')?.value === "support";
+  const privCheck = $("createGroupPrivate");
+  const privLabel = privCheck.closest(".modal-label");
+  if (privLabel) privLabel.style.display = isSupport ? "none" : "";
+  if (isSupport) privCheck.checked = false; // 客服知聚强制非私密
+  $("createSupportHint").classList.toggle("hidden", !isSupport);
 }
 
 /* ============ 知聚设置（知聚名 / 头像 / 私密） ============ */
@@ -2220,6 +2236,9 @@ function openGroupSettings() {
   $("gsDisbandBtn").style.display = me?.role === "owner" || g.ownerId === state.memberId ? "" : "none";
   $("gsGroupName").value = g.groupName || "";
   $("gsIsPrivate").checked = !!g.isPrivate;
+  // 客服知聚：私密开关隐藏且不可改（服务端强制非私密）
+  const gsPrivLabel = $("gsIsPrivate").closest(".modal-label");
+  if (gsPrivLabel) gsPrivLabel.style.display = g.isSupportCircle ? "none" : "";
   groupSettingsAvatar = null; // 未改动
   gsAvatarPicker.render(g.groupAvatar || "");
   $("groupSettingsModal").classList.remove("hidden");
@@ -2307,10 +2326,12 @@ async function createGroup() {
       btn.textContent = oldText;
     }
   }
+  const isSupport = document.querySelector('input[name="createGroupKind"]:checked')?.value === "support";
   const body = {
     groupName,
     ownerId: state.memberId,
-    isPrivate: $("createGroupPrivate").checked,
+    isPrivate: isSupport ? false : $("createGroupPrivate").checked,
+    kind: isSupport ? "support" : "normal", // 服务端 GroupKind 以 camelCase 字符串（JsonStringEnumConverter）解析
     memberIds: picked.map((m) => m.memberId),
     members: picked.map((m) => ({
       memberId: m.memberId, memberType: m.memberType, nickname: m.nickname,
@@ -2372,6 +2393,37 @@ async function loadGroups() {
   const res = await fetch(`/ag-ui/member/${state.memberId}/groups`);
   if (!res.ok) return;
   state.groups = await res.json();
+  // 客服知聚：对所有用户可见、可进入。把非成员也能看到的客服知聚并入侧栏（标记非成员），
+  // 已加入的以成员视角为准（保留 myRole / 未读，避免与成员列表重复或丢失身份）。
+  try {
+    const disc = await fetch('/ag-ui/group/discover');
+    if (disc.ok) {
+      const discovered = await disc.json();
+      const memberIds = new Set(state.groups.map((g) => g.groupId));
+      for (const d of discovered) {
+        if (memberIds.has(d.groupId)) continue;
+        state.groups.push({
+          groupId: d.groupId,
+          groupName: d.groupName,
+          groupAvatar: d.groupAvatar,
+          memberCount: d.memberCount,
+          ownerId: d.ownerId,
+          isPrivate: false,
+          isSupportCircle: true,
+          myRole: null,
+          myNickname: null,
+          isMember: false,
+          lastMessageAt: 0,
+          unreadCount: 0,
+          unreadByTopic: {},
+        });
+      }
+    }
+  } catch { /* 发现失败不阻塞成员列表 */ }
+  // 已加入的客服知聚补上成员标识（服务端 /member/{id}/groups 未返回 isMember，用存在性推断）
+  for (const g of state.groups) {
+    if (g.isSupportCircle && g.myRole) g.isMember = true;
+  }
   // 未读信息（活跃度 / 未读徽标）：服务端计算为准，实时事件在此基础上增量维护
   state.groupUnread.clear();
   for (const g of state.groups) {
@@ -3619,8 +3671,11 @@ function renderGroupList() {
     const unread = state.groupUnread.get(g.groupId)?.unreadCount || 0;
     const avatar = g.groupAvatar
       ? `<span class="group-avatar"><img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" /></span>`
-      : `<span class="icon">👥</span>`;
-    div.innerHTML = avatar + `<span>${g.isPrivate ? "🔒 " : ""}${escapeHtml(g.groupName)}</span>` +
+      : `<span class="icon">${g.isSupportCircle ? "🛟" : "👥"}</span>`;
+    // 客服知聚：明显的「客服知聚」标签；非成员在其右上角加「进入」小标
+    const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
+    const enterTag = g.isSupportCircle && !g.isMember ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
+    div.innerHTML = avatar + `<span>${g.isPrivate ? "🔒 " : ""}${escapeHtml(g.groupName)}</span>` + kindTag + enterTag +
       (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
     div.onclick = () => selectGroup(g.groupId);
@@ -3820,12 +3875,37 @@ function renderChatMeta() {
   const owner = room(g.groupId)?.members.find((m) => m.memberId === g.ownerId)
     || userDirectory.find((u) => u.memberId === g.ownerId);
   const ownerName = owner?.nickname || g.ownerId || "";
-  $("chatGroupMeta").textContent = `知聚主 ${ownerName} · 我的身份 ${g.myRole || ""}`;
+  let meta = `知聚主 ${ownerName} · 我的身份 ${g.myRole || ""}`;
+  if (g.isSupportCircle) {
+    // 客服知聚：客服（非普通）可见全部会话，顾客仅见自己的会话
+    meta += " · " + t("support.hint");
+  }
+  $("chatGroupMeta").textContent = meta;
 }
 
-function selectGroup(gid) {
+async function selectGroup(gid) {
   if (state.activeGroupId === gid) return;
   clearReplyTo(); // 切知聚时清除引用目标（引用属于原知聚上下文）
+  // 客服知聚：非成员进入前先「进入」（自动加入为顾客），否则无权限订阅 / 读历史
+  const pendingGroup = state.groups.find((x) => x.groupId === gid);
+  if (pendingGroup && pendingGroup.isSupportCircle && !pendingGroup.isMember) {
+    try {
+      const er = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/enter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (er.ok) {
+        await loadGroups(); // 进入后重新拉取成员列表（含身份 / 未读）
+      } else {
+        toast(t("support.enterFail"));
+        return;
+      }
+    } catch (ex) {
+      toast(t("support.enterFail", { err: ex.message }));
+      return;
+    }
+  }
   // 按知聚记忆 @ 选择：保存当前知聚，恢复目标知聚（无记忆则空）
   if (state.activeGroupId) {
     state.mentionMemory.set(state.activeGroupId, { ids: [...state.mentions], all: state.mentionAll });
@@ -3860,7 +3940,7 @@ function selectGroup(gid) {
   $("searchBtn").disabled = false; // 知聚内消息全文搜索（进入知聚后可用）
   $("discussBtn").disabled = false; // 多位数字员工讨论（进入知聚后可用）
   const g = state.groups.find((x) => x.groupId === gid);
-  $("chatGroupName").textContent = (g?.isPrivate ? "🔒 " : "") + (g?.groupName || "");
+  $("chatGroupName").textContent = (g?.isSupportCircle ? (t("support.badge") + " ") : (g?.isPrivate ? "🔒 " : "")) + (g?.groupName || "");
   renderChatMeta();
   state.subscribedGroups.add(gid);
   send({ type: "GROUP_SUBSCRIBE", groupIds: [gid], timestamp: Date.now() });

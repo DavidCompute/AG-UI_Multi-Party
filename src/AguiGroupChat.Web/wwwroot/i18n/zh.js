@@ -456,6 +456,15 @@ window.I18N_DICTS.zh = {
   "create.searchPh": "搜索成员（昵称 / ID）…",
   "create.cancel": "取消",
   "create.create": "创建",
+  "create.kindNormal": "普通知聚",
+  "create.kindSupport": "🛟 客服知聚",
+  "create.kindSupportHint": "客服知聚对所有用户可见、可进入：你拉入的成员均为客服（可看全部会话），普通用户进入后只能看到自己的会话。（客服知聚不支持私密）",
+
+  /* --- 客服知聚 --- */
+  "support.badge": "客服知聚",
+  "support.enter": "进入",
+  "support.enterFail": "进入客服知聚失败（{err}）",
+  "support.hint": "客服可见全部会话·顾客仅见自己的会话",
 
   /* --- 知聚设置 --- */
   "gs.title": "知聚设置",

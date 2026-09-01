@@ -681,6 +681,17 @@
         <input id="createGroupPrivate" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
         <span data-i18n="create.private">🔒 私密知聚</span>
       </div>
+      <div class="modal-label" style="margin-top:10px;display:flex;align-items:center;gap:12px">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="createGroupKind" value="normal" checked style="width:15px;height:15px;accent-color:#4f8cff" />
+          <span data-i18n="create.kindNormal">普通知聚</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="radio" name="createGroupKind" value="support" style="width:15px;height:15px;accent-color:#4f8cff" />
+          <span data-i18n="create.kindSupport">🛟 客服知聚</span>
+        </label>
+      </div>
+      <div id="createSupportHint" class="modal-label hidden" style="color:#8a5a00;font-size:12px" data-i18n="create.kindSupportHint">客服知聚对所有用户可见：你拉入的成员均为客服（可看全部会话），普通用户进入后只能看到自己的会话。(客服知聚不支持私密)</div>
       <div class="modal-label" data-i18n="create.chooseMembers">选择成员（知聚主自动加入，可勾选数字员工）</div>
       <input id="createMemberSearch" class="modal-input" data-i18n-placeholder="create.searchPh" />
       <div id="createMemberList" class="member-pick"></div>

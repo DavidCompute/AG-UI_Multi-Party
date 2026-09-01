@@ -53,7 +53,18 @@
 |memberCount|number|是|当前成员总数|
 |createTime|number|是|创建时间戳（毫秒级）|
 |isPrivate|boolean|否|是否私密群（默认 false）。私密群的语义记忆**仅允许在群内被检索到**：智能体在其他群触发（scope=agent/all）时排除私密群内容，本群内触发不受影响|
+|kind|enum|否|知聚类型：`normal`（默认，公有 / 私有按 isPrivate 区分）/ `support`（客服知聚，见 §2.1.1）。存储于 `extra.kind`|
+|isSupportCircle|boolean|否|是否客服知聚（等价 `kind == support`；冗余便于前端快速渲染）|
 |extra|object|否|业务自定义扩展字段|
+
+### 2.1.1 客服知聚（kind=support）
+
+**定位**：社群式 AI 客服 / 答疑群的落地形态，在公有 / 私有知聚之上扩展，用于「有客服团队接待的公开答疑」。
+
+- **客服团队**：创建者建群时拉入的成员（真人用户或数字员工，`Role=Admin`）视为**客服**，可看到**全部会话**；群创建者为客服兼群主（`Role=Owner`）。
+- **对所有人都可见、可进入**：客服知聚强制 `isPrivate=false`；非成员的用户可见该知聚并可直接 <b>进入</b>（自动加入为普通顾客 `Role=Normal`），无需邀请。普通知聚保持成员制，不可自行进入。
+- **会话隔离**：顾客发消息 → 仅该顾客与客服可见；客服回复某顾客 → 定向到该顾客；客服之间一般沟通 → 仅客服可见（不广播给顾客）。任一定向 / 私聊消息对非目标顾客均不可见。
+- 消息历史 / 快照 / 搜索按上述可见性过滤，实时扇出同样生效（见 §4 可见性规则）。
 
 ### 2\.2 群成员模型（GroupMember）
 
@@ -759,7 +770,9 @@ WS 上行示例（决策者身份取连接身份；等效 HTTP `POST /ag-ui/grou
 
 |接口|路径|核心参数|
 |---|---|---|
-|创建群组|`POST /ag-ui/group/create`|groupName、ownerId、isPrivate*、memberIds、members\[\]（可携带昵称 / 类型 / 头像）|
+|创建群组|`POST /ag-ui/group/create`|groupName、ownerId、kind*（normal/support）、isPrivate*、memberIds、members\[\]（可携带昵称 / 类型 / 头像）|
+|发现客服知聚|`GET /ag-ui/group/discover`|无需其它参数（需身份）：返回全部客服知聚（对所有用户可见、可进入），每项含 isMember 标记是否已是成员|
+|进入客服知聚|`POST /ag-ui/group/{groupId}/enter`|无 body；非成员自动加入为普通顾客（Role=Normal），随后即可订阅 / 读历史 / 聊天；普通知聚不可自行进入（403）|
 |更新群信息|`POST /ag-ui/group/update`|groupId、updateFields、groupInfo、operatorId|
 |解散群组|`POST /ag-ui/group/disband`|groupId、operatorId|
 |添加成员|`POST /ag-ui/group/member/add`|groupId、memberIds、operatorId、memberDetails\[\]|

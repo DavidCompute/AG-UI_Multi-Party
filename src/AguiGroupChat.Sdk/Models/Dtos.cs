@@ -162,6 +162,8 @@ public sealed class MemberGroupDto
     public int MemberCount { get; set; }
     public string? OwnerId { get; set; }
     public bool IsPrivate { get; set; }
+    public string? Kind { get; set; }
+    public bool IsSupportCircle { get; set; }
     public string? MyRole { get; set; }
     public string? MyNickname { get; set; }
     public long? LastMessageAt { get; set; }

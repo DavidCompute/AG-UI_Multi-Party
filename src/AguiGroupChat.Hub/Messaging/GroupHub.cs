@@ -133,6 +133,10 @@ public sealed class GroupHub : IDisposable
         {
             detailMap.TryGetValue(id, out var detail);
             var type = detail?.MemberType ?? ResolveMemberType(id);
+            var role = id == req.OwnerId ? GroupRole.Owner : GroupRole.Normal;
+            // 客服知聚：创建者拉入的团队成员（真人 / 数字员工）均为客服（可看全部会话）；
+            // 自动加入的普通用户为顾客（只能看到自己的会话），由 enter/auto-join 以 Normal 身份进入。
+            if (req.Kind == GroupKind.Support && id != req.OwnerId) role = GroupRole.Admin;
             return new GroupMember
             {
                 MemberId = id,
@@ -140,12 +144,17 @@ public sealed class GroupHub : IDisposable
                 Nickname = !string.IsNullOrWhiteSpace(detail?.Nickname) ? detail!.Nickname! : DefaultNickname(id),
                 // 未显式指定头像时回退到用户账号头像（智能体由前端随 MemberSeed 携带）
                 Avatar = detail?.Avatar ?? (type == MemberType.User ? _users.GetUserById(id)?.Avatar : null),
-                Role = id == req.OwnerId ? GroupRole.Owner : GroupRole.Normal,
+                Role = role,
                 // 按实际连接状态初始化（不能一律 Offline：在线成员入群应立即显示在线，否则分身互斥/状态点显示错误）
                 OnlineStatus = _connections.MemberConnectionCount(id) > 0 ? OnlineStatus.Online : OnlineStatus.Offline,
                 JoinTime = now,
             };
         }).ToList();
+
+        // 客服知聚不支持私密（需对所有用户可见、可进入）；显式覆盖 IsPrivate=false 防止误用
+        var isSupport = req.Kind == GroupKind.Support;
+        var extra = req.Extra is { } e ? new Dictionary<string, object?>(e) : new Dictionary<string, object?>();
+        extra["kind"] = isSupport ? "support" : "normal";
 
         var group = new Group
         {
@@ -153,10 +162,10 @@ public sealed class GroupHub : IDisposable
             GroupName = req.GroupName,
             GroupAvatar = req.GroupAvatar,
             OwnerId = req.OwnerId,
-            IsPrivate = req.IsPrivate,
+            IsPrivate = isSupport ? false : req.IsPrivate,
             MemberCount = members.Count,
             CreateTime = now,
-            Extra = req.Extra,
+            Extra = extra,
         };
 
         // 事务性建群：群 + 首批成员一次写入（数据库模式单事务、失败回滚，防半建状态）
@@ -397,6 +406,47 @@ public sealed class GroupHub : IDisposable
         await SyncTwinMembersOutAsync(groupId, [memberId], ct);
     }
 
+    /// <summary>进入客服知聚：客服知聚对所有用户可见、可进入；非成员进入即自动加入（以普通顾客身份）。
+    /// 普通知聚不支持自行进入（保持成员制）。返回群信息。</summary>
+    public async Task<Group> EnterSupportCircleAsync(string groupId, string memberId, CancellationToken ct = default)
+    {
+        var group = GetGroupOrThrow(groupId);
+        if (!group.IsSupportCircle)
+            throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "仅客服知聚可自行进入");
+        if (_store.IsMember(groupId, memberId))
+            return group; // 已是成员（客服或顾客）直接进入
+
+        var member = new GroupMember
+        {
+            MemberId = memberId,
+            MemberType = ResolveMemberType(memberId),
+            Nickname = _users.GetUserById(memberId)?.Nickname ?? (_users.GetUserById(memberId)?.Username) ?? memberId,
+            Avatar = _users.GetUserById(memberId)?.Avatar,
+            Role = GroupRole.Normal, // 自动进入者均为顾客：只能看到自己的会话，客服方可看到全部
+            OnlineStatus = _connections.MemberConnectionCount(memberId) > 0 ? OnlineStatus.Online : OnlineStatus.Offline,
+            JoinTime = NowMs,
+        };
+        if (!_store.AddMember(groupId, member))
+            return group;
+        group.MemberCount = _store.MemberCount(groupId);
+
+        await FanOutAsync(groupId, new GroupMemberJoinedEvent
+        {
+            GroupId = groupId,
+            Members = [member],
+            OperatorId = memberId,
+            Timestamp = NowMs,
+        }, ct: ct);
+        await NotifyMemberConnectionsAsync([memberId], new GroupCreatedEvent
+        {
+            GroupId = groupId,
+            GroupInfo = group,
+            Members = [member],
+            Timestamp = NowMs,
+        }, ct);
+        return group;
+    }
+
     public async Task<GroupMember> UpdateMemberAsync(GroupMemberUpdateRequest req, CancellationToken ct = default)
     {
         var group = GetGroupOrThrow(req.GroupId);
@@ -523,6 +573,10 @@ public sealed class GroupHub : IDisposable
             Content = req.Content ?? "", // 协议允许纯附件消息（正文可空），以空串落库满足非空 Content
             Timestamp = NowMs,
         };
+
+        // 客服知聚会话隔离：非客服成员只能看到自己的会话（与客服），客服可见全部。
+        // 此处由服务端强制施加，避免前端越权把消息标成 All 泄露到其他顾客。
+        ApplySupportCircleScoping(group, sender, msg);
 
         if (msg.ReplyToMessageId is not null && _store.GetMessage(group.GroupId, msg.ReplyToMessageId) is null)
             throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "引用的目标消息不存在或已撤回");
@@ -819,7 +873,7 @@ public sealed class GroupHub : IDisposable
         var group = GetGroupOrThrow(groupId);
         // 历史快照按查看者可见性过滤：定向 / 私聊消息只对发送者与目标成员可见（与实时扇出 ResolveRecipients 规则一致）
         var messages = _store.RecentMessages(groupId, _options.SnapshotMessageCount)
-            .Where(m => !m.Recalled && CanSeeMessage(m, viewerId))
+            .Where(m => !m.Recalled && CanSeeMessageAware(m, viewerId))
             .Select(m => new SnapshotMessage
             {
                 MessageId = m.MessageId,
@@ -1536,6 +1590,48 @@ public sealed class GroupHub : IDisposable
     ///   private   —— visibleMemberIds 命中者；为空时仅发送者本人。
     /// 发送者恒回显（发送者必为群成员）。
     /// </summary>
+    /// <summary>客服知聚的客服（支持团队）成员 id：群为客服知聚时返回 Role != Normal 的成员；否则空集。</summary>
+    private HashSet<string> SupportStaffIds(string groupId)
+    {
+        var group = _store.GetGroup(groupId);
+        if (group is null || !group.IsSupportCircle) return new HashSet<string>(StringComparer.Ordinal);
+        return _store.ListMembers(groupId)
+            .Where(m => m.Role != GroupRole.Normal)
+            .Select(m => m.MemberId)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private bool IsSupportStaff(string groupId, string memberId) => SupportStaffIds(groupId).Contains(memberId);
+
+    /// <summary>客服知聚的消息隔离：按发送者角色强制作用域，防止跨顾客会话泄露。</summary>
+    private void ApplySupportCircleScoping(Group group, GroupMember sender, GroupMessage msg)
+    {
+        if (!group.IsSupportCircle) return;
+        var isStaff = sender.Role != GroupRole.Normal;
+        if (isStaff)
+        {
+            if (msg.ReplyToMessageId is { } replyId
+                && _store.GetMessage(group.GroupId, replyId) is { } replied)
+            {
+                // 客服回复某顾客的消息 → 定向到该顾客（其它顾客不可见；客服恒可见全部）。
+                msg.Visibility = MessageVisibility.Private;
+                msg.VisibleMemberIds = new[] { replied.SenderId };
+            }
+            else
+            {
+                // 客服未带目标的一般消息 → 仅客服之间可见（默认不广播给顾客，严守“顾客只见自己的会话”）。
+                msg.Visibility = MessageVisibility.Private;
+                msg.VisibleMemberIds = SupportStaffIds(group.GroupId).ToArray();
+            }
+        }
+        else
+        {
+            // 顾客发出的消息 → 仅自己与客服可见（会话隔离）
+            msg.Visibility = MessageVisibility.Private;
+            msg.VisibleMemberIds = new[] { sender.MemberId };
+        }
+    }
+
     private HashSet<string> ResolveRecipients(
         string groupId,
         MessageVisibility visibility,
@@ -1558,17 +1654,28 @@ public sealed class GroupHub : IDisposable
                 recipients = memberIds;
                 break;
         }
+        // 客服知聚：客服（支持团队）恒可见全部会话，实时扇出一并覆盖
+        foreach (var staff in SupportStaffIds(groupId)) recipients.Add(staff);
         if (memberIds.Contains(senderId)) recipients.Add(senderId);
         return recipients;
     }
 
     /// <summary>
-    /// 某查看者能否看到该消息（历史 / 快照检索过滤用，与 <see cref="ResolveRecipients"/> 实时扇出规则保持一致）：
-    /// 发送者恒可见；全群可见（All）恒可见；mentioned 未 @ 或 @ 全体按全群处理；
-    /// private 未指定成员按全群处理；定向 / 私聊消息仅命中成员可见。
+    /// 客服知聚感知的可见性判定（实例：会按客服知聚中客服恒可见全部处理）。
+    /// 历史 / 快照检索过滤用，与 <see cref="ResolveRecipients"/> 实时扇出规则保持一致。
     /// </summary>
-    public static bool CanSeeMessage(GroupMessage m, string viewerId)
+    public bool CanSeeMessageAware(GroupMessage m, string viewerId)
     {
+        var staffSeesAll = SupportStaffIds(m.GroupId).Contains(viewerId);
+        return CanSeeMessageCore(m, viewerId, staffSeesAll);
+    }
+
+    /// <summary>无群上下文的核心可见性判定（staffSeesAll 为客服知聚中客服恒可见全部）。
+    /// 发送者恒可见；全群可见（All）恒可见；mentioned 未 @ 或 @ 全体按全群处理；
+    /// private 未指定成员按全群处理；定向 / 私聊消息仅命中成员可见。</summary>
+    public static bool CanSeeMessageCore(GroupMessage m, string viewerId, bool staffSeesAll)
+    {
+        if (staffSeesAll) return true;
         if (m.SenderId == viewerId) return true;
         return m.Visibility switch
         {
@@ -1580,6 +1687,10 @@ public sealed class GroupHub : IDisposable
             _ => false,
         };
     }
+
+    /// <summary>非客服感知的静态可见性判定（不带客服知聚的客服恒可见全部规则；用于无 GroupHub 实例的场景）。</summary>
+    public static bool CanSeeMessage(GroupMessage m, string viewerId)
+        => CanSeeMessageCore(m, viewerId, staffSeesAll: false);
 
     private Group GetGroupOrThrow(string groupId)
         => (_store.GetGroup(groupId) is { } g && !_disbanded.ContainsKey(groupId))

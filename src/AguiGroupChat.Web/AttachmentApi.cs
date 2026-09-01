@@ -67,11 +67,16 @@ public static class AttachmentApi
             // 撤回消息的附件不得再被访问（防撤回后仍可下载敏感文件）；定向 / 私聊消息仅命中成员可见，
             // 防止非成员通过附件 ID 枚举越权下载。CanSeeMessage 由另一任务改为 public static（当前若仍为
             // internal 会在构建期报错，主代理会在统一构建前先完成该改动，此处直接调用不做反射绕路）。
+            // 客服知聚：客服（Role != Normal）可见全部消息，因此附件也放行；非客服仍按消息可见性判定
             var allowed = groupStore.GroupsOf(userId)
-                .Any(g => groupStore.AllMessages(g.GroupId)
-                    .Any(m => !m.Recalled
-                        && m.Attachments.Any(a => a.AttachmentId == attachmentId)
-                        && GroupHub.CanSeeMessage(m, userId)));
+                .Any(g =>
+                {
+                    var isSupportStaff = g.IsSupportCircle && groupStore.GetMember(g.GroupId, userId) is { Role: not GroupRole.Normal };
+                    return groupStore.AllMessages(g.GroupId)
+                        .Any(m => !m.Recalled
+                            && m.Attachments.Any(a => a.AttachmentId == attachmentId)
+                            && (isSupportStaff || GroupHub.CanSeeMessage(m, userId)));
+                });
             // 头像附件放行：附件是任意用户 / 智能体（含分身）的头像或**群头像**时，已登录用户可访问——
             // 头像用于群成员 / 群列表 / 消息渲染，本身不含敏感信息；否则上传的头像因不属于任何群消息而被 403 拦截
             if (!allowed)

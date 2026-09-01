@@ -37,10 +37,10 @@ public sealed record GroupMessage
     public bool MentionAll { get; init; }
 
     /// <summary>可见范围：all / mentioned / private。</summary>
-    public MessageVisibility Visibility { get; init; } = MessageVisibility.All;
+    public MessageVisibility Visibility { get; set; } = MessageVisibility.All;
 
     /// <summary>定向可见成员列表，配合 private 使用。</summary>
-    public IReadOnlyList<string> VisibleMemberIds { get; init; } = [];
+    public IReadOnlyList<string> VisibleMemberIds { get; set; } = [];
 
     /// <summary>请求方所在客户端/机器（内网桥的 --client 标识，前端经同机回环自动发现带回）——
     /// 网关据此把客户端 shell 技能路由到该客户端的桥。请求上下文携带，非用户设置项。</summary>

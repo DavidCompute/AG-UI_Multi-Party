@@ -6,6 +6,17 @@ public enum MemberType { User, Agent }
 /// <summary>群角色：群主 / 管理员 / 普通成员（协议 2.2）。</summary>
 public enum GroupRole { Owner, Admin, Normal }
 
+/// <summary>知聚类型（在公有 / 私有之上扩展）。</summary>
+public enum GroupKind
+{
+    /// <summary>普通知聚（公有 / 私有，按 IsPrivate 区分可见与记忆作用域）。</summary>
+    Normal,
+
+    /// <summary>客服知聚：创建者拉客服团队（真人 + 数字员工，均视为客服）进入；
+    /// 其它用户可看到并进入，但非客服成员进入后只能看到自己的会话内容（客服可见全部）。</summary>
+    Support,
+}
+
 /// <summary>在线状态（协议 2.2）。</summary>
 public enum OnlineStatus { Online, Offline, Busy }
 

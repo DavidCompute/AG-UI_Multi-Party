@@ -13,6 +13,23 @@ public sealed class Group
     public string? GroupAvatar { get; set; }
 
     /// <summary>
+    /// 知聚类型（<see cref="GroupKind"/>）。存储于 <c>Extra["kind"]</c>（字符串化），
+    /// 既有的所有群存储均可透传 extra JSON，无需新增列 / 迁移。
+    /// </summary>
+    public GroupKind Kind
+    {
+        get => Extra is { } e && e.TryGetValue("kind", out var k) && k is string s && s == "support" ? GroupKind.Support : GroupKind.Normal;
+        set
+        {
+            if (Extra is null) return; // Extra 在初始值为 null 时不支持原地写入（由创建路径预置）
+            Extra["kind"] = value == GroupKind.Support ? "support" : "normal";
+        }
+    }
+
+    /// <summary>是否客服知聚（客服可见全部消息，非客服成员只见自己的会话）。</summary>
+    public bool IsSupportCircle => Kind == GroupKind.Support;
+
+    /// <summary>
     /// 是否私密群。私密群的语义记忆只允许在群内检索（智能体在其他群触发时
     /// 检索记忆会排除私密群；本群内触发不受影响）。
     /// </summary>

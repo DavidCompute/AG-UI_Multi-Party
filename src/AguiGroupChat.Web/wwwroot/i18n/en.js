@@ -456,6 +456,15 @@ window.I18N_DICTS.en = {
   "create.searchPh": "Search members (nickname / ID)…",
   "create.cancel": "Cancel",
   "create.create": "Create",
+  "create.kindNormal": "Normal circle",
+  "create.kindSupport": "🛟 Support circle",
+  "create.kindSupportHint": "Support circles are visible and enterable by all users: members you invite are support staff (who see all conversations), while regular users who enter only see their own conversation. (Support circles cannot be private)",
+
+  /* --- Support circle --- */
+  "support.badge": "Support",
+  "support.enter": "Enter",
+  "support.enterFail": "Failed to enter support circle ({err})",
+  "support.hint": "Staff see all conversations · Customers see only their own",
 
   /* --- 知聚设置 --- */
   "gs.title": "Group Settings",

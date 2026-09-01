@@ -14,6 +14,9 @@ public sealed class GroupCreateRequest
 
     /// <summary>是否私密群（私密群的记忆仅限群内检索）。</summary>
     public bool IsPrivate { get; set; }
+
+    /// <summary>知聚类型（<see cref="GroupKind"/>。为 Support 时创建「客服知聚」）。</summary>
+    public GroupKind Kind { get; set; } = GroupKind.Normal;
     public IReadOnlyList<MemberSeed>? Members { get; set; }
     public Dictionary<string, object?>? Extra { get; set; }
 }
