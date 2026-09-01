@@ -148,8 +148,15 @@
           <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
           <button id="agentImportBtn" class="chip-btn" data-i18n-title="agent.importTip">📥 <span data-i18n="agent.import">导入</span></button>
           <button id="agentExportAllBtn" class="chip-btn" data-i18n-title="agent.exportAllTip">📤 <span data-i18n="agent.exportAll">导出全部</span></button>
+          <button id="agentBatchBtn" class="chip-btn" data-i18n-title="agent.batchTitle">🗑️ <span data-i18n="agent.batch">批量删除</span></button>
           <button id="agentAddBtn" class="send" data-i18n="agent.add">＋ 新增数字员工</button>
           <input id="agentImportFile" type="file" accept=".json,application/json" class="hidden" />
+        </div>
+        <div id="agentBatchBar" class="agent-batch-bar hidden" style="display:flex;align-items:center;gap:12px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+          <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:12px"><input id="agentSelectAll" type="checkbox" style="width:14px;height:14px;accent-color:#4f8cff" /> <span data-i18n="agent.selectAll">全选</span></label>
+          <button id="agentBatchDelBtn" class="chip-btn danger" style="font-size:12px" data-i18n="agent.batchDel">🗑️ 删除所选</button>
+          <button id="agentBatchExit" class="chip-btn" style="font-size:12px" data-i18n="agent.batchExit">退出</button>
+          <span class="muted" id="agentBatchStatus" style="font-size:12px"></span>
         </div>
         <div class="agent-table">
           <div class="agent-table-head">

@@ -690,9 +690,12 @@ const TRIGGER_HINTS = {
 };
 let agentList = [];
 let editingAgentId = null;
+let agentBatchMode = false;   // 批量删除模式（行首出现勾选框）
+let selectedAgents = new Set(); // 批量删除所选 agentId
 
 async function openAgentModal() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  agentBatchMode = false; selectedAgents = new Set();
   // 一并刷新用户目录：创建者列优先显示昵称（别名），避免因目录未加载 / 已过期而回退到原始 ID
   await Promise.all([loadAgents(), loadKbs(), loadUserDirectory()]);
   $("agentModal").classList.remove("hidden");
@@ -732,6 +735,7 @@ function renderAgentList() {
     || (a.description || "").toLowerCase().includes(keyword));
 
   $("agentCount").textContent = agentList.length ? t("agent.count", { count: agentList.length }) : "";
+  updateAgentBatchStatus();
   el.innerHTML = "";
 
   if (!agentList.length) {
@@ -758,7 +762,8 @@ function renderAgentList() {
       : "";
     row.innerHTML = `
       <div class="agent-cell">
-        <div class="agent-name">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? `<span class="tag-lock" title="${escapeHtml(t("agent.privateTip"))}">🔒</span>` : ""}${(a.skills || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.skillsTip", { ids: (a.skills || []).map((s) => s.skillId).join(", ") }))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.kbTip", { ids: a.knowledgeBaseIds.join(", ") }))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
+        ${agentBatchMode && canManage ? `<input type="checkbox" class="agent-sel-cb" data-agent-id="${escapeHtml(a.agentId)}" ${selectedAgents.has(a.agentId) ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff;margin-right:6px;vertical-align:middle" />` : ""}
+        <div class="agent-name" style="display:inline-flex">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? `<span class="tag-lock" title="${escapeHtml(t("agent.privateTip"))}">🔒</span>` : ""}${(a.skills || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.skillsTip", { ids: (a.skills || []).map((s) => s.skillId).join(", ") }))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.kbTip", { ids: a.knowledgeBaseIds.join(", ") }))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
         <div class="agent-desc">${escapeHtml(a.description || "—")}</div>
       </div>
       <div class="agent-cell agent-cell-id"><code>${escapeHtml(a.agentId)}</code></div>
@@ -778,8 +783,53 @@ function renderAgentList() {
       row.querySelector('[data-act="edit"]').onclick = () => openAgentForm(a.agentId);
       row.querySelector('[data-act="del"]').onclick = (e) => confirmDeleteAgent(a, e.currentTarget);
     }
+    const selCb = row.querySelector(".agent-sel-cb");
+    if (selCb) selCb.onchange = () => { if (selCb.checked) selectedAgents.add(a.agentId); else selectedAgents.delete(a.agentId); updateAgentBatchStatus(); };
     el.appendChild(row);
   }
+}
+
+/* ============ 数字员工批量删除（勾选模式） ============ */
+
+function agentCanManage(a) { return !!a.ownerId && (state.isAdmin || a.ownerId === state.memberId); }
+
+function enterAgentBatchMode() {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  agentBatchMode = true;
+  selectedAgents = new Set();
+  $("agentBatchBar").classList.remove("hidden");
+  renderAgentList();
+}
+function exitAgentBatchMode() {
+  agentBatchMode = false;
+  selectedAgents = new Set();
+  $("agentBatchBar").classList.add("hidden");
+  renderAgentList();
+}
+function updateAgentBatchStatus() {
+  const manageable = (agentList || []).filter(agentCanManage).length;
+  const box = $("agentSelectAll");
+  const status = $("agentBatchStatus");
+  if (box) { box.checked = manageable > 0 && selectedAgents.size >= manageable; box.indeterminate = selectedAgents.size > 0 && selectedAgents.size < manageable; }
+  if (status) status.textContent = selectedAgents.size ? t("agent.batchSelected", { n: selectedAgents.size }) + (agentBatchMode ? ` / ${manageable}` : "") : "";
+}
+
+/** 批量删除所选数字员工（可管理项）：逐个经既有单删接口删除。 */
+async function batchDeleteAgents() {
+  const ids = [...selectedAgents];
+  if (!ids.length) { toast(t("agent.batchNone")); return; }
+  if (!await uiConfirm({ message: t("agent.batchDelConfirm", { n: ids.length }), danger: true })) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      const res = await fetch(`/ag-ui/agents/${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+      if (res.ok) ok++; else fail++;
+    } catch { fail++; }
+  }
+  selectedAgents = new Set();
+  toast(fail ? t("agent.batchPartial", { ok, fail }) : t("agent.batchDone", { n: ok }));
+  await loadAgents();
+  renderAgentList();
 }
 
 /* ============ 数字员工组织架构图（图形化编辑任务指派 / 问题提升；端口拖拽连线） ============ */
@@ -6794,8 +6844,17 @@ function init() {
 
   // ---- 数字员工管理 ----
   $("agentManageBtn").onclick = openAgentModal;
-  $("agentClose").onclick = () => $("agentModal").classList.add("hidden");
+  $("agentClose").onclick = () => { agentBatchMode = false; selectedAgents = new Set(); $("agentModal").classList.add("hidden"); };
   $("agentAddBtn").onclick = () => openAgentForm(null);
+  // 批量删除
+  $("agentBatchBtn").onclick = enterAgentBatchMode;
+  $("agentBatchExit").onclick = exitAgentBatchMode;
+  $("agentBatchDelBtn").onclick = batchDeleteAgents;
+  $("agentSelectAll").addEventListener("change", (e) => {
+    if (e.target.checked) selectedAgents = new Set((agentList || []).filter(agentCanManage).map((a) => a.agentId));
+    else selectedAgents = new Set();
+    renderAgentList();
+  });
   initCollapsibleSections(false); // 绑定数字员工表单可折叠分组的开合
   // 数字员工组织架构（全局入口，一个图标即可）：确保目录已加载后打开
   $("agentOrgBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } if (!agentList?.length) await loadAgents(); openOrgChart(); };
