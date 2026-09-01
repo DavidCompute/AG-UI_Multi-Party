@@ -1052,12 +1052,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var sb = new StringBuilder();
         var working = plan.Input;
         var hops = new List<ChainNode>();
+        // 本问内已执行能力（计划阶段）全局去重：同一技能/员工在一答里只真正执行一次
+        var capExecuted = new HashSet<string>(StringComparer.Ordinal);
         var clientSteps = new SortedDictionary<int, BatchClientItem>(); // planIndex(展示索) → 批量项
         for (var i = 0; i < plan.Steps.Count; i++)
         {
             var st = plan.Steps[i];
             if (st.Action != "skill" || !plan.Skills.TryGetValue(st.Target, out var csk)
                 || csk.ExecutionLocation != AgentSkillExecutionLocation.Client) continue;
+            // 同一技能在计划里出现多次 → 只保留第一次，避免重复执行
+            if (!capExecuted.Add(csk.SkillId)) continue;
             var cq = working;
             if (AgentGatewayHelpers.SkillRequiredInputs(csk).Contains("query", StringComparer.Ordinal))
             {
@@ -1076,6 +1080,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 if (_catalog.GetDefinition(step.Target) is not { } target
                     || !plan.Reached.Any(r => r.AgentId == step.Target)) continue;
+                // 同一员工在计划里出现多次 → 只指派一次，后续复用其结果
+                if (!capExecuted.Add("agent:" + step.Target)) continue;
                 var child = _catalog.GetOrCreate(step.Target);
                 var prompt = "你正被「" + (target.Nickname ?? step.Target) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：\n" + working
                     + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + sb : "")
@@ -1099,6 +1105,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             else if (step.Action == "skill")
             {
                 if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
+                // 同一服务端技能在计划里出现多次 → 只执行一次，后续复用其结果
+                if (!capExecuted.Add(skill.SkillId)) continue;
                 var skillQuery = working;
                 if (AgentGatewayHelpers.SkillRequiredInputs(skill).Contains("query", StringComparer.Ordinal))
                 {
@@ -1147,13 +1155,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         //    已执行能力集合以计划里实际激活过的所有技能（含服务端技能）与已指派的员工 id 为种子，
         //    避免递归阶段再次拿同一技能/同一员工补查（“同一能力被调用两次”）。
         var ranSkills = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var st in plan.Steps)
-            if (!string.IsNullOrWhiteSpace(st.Target))
-            {
-                if (st.Action == "skill") ranSkills.Add(st.Target);
-                else if (st.Action == "dispatch") ranSkills.Add(st.Target);
-            }
-        foreach (var v in clientSteps.Values) ranSkills.Add(v.SkillId);
+        foreach (var ck in capExecuted)
+        {
+            if (ck.StartsWith("agent:", StringComparison.Ordinal)) ranSkills.Add(ck["agent:".Length..]);
+            else ranSkills.Add(ck);
+        }
         var final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(),
             ranSkills, ct);
         var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
