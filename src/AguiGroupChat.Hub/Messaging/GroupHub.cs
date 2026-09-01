@@ -31,6 +31,13 @@ public sealed class GroupHub : IDisposable
     private readonly ITwinAgentSync? _twinSync;
     private readonly IGraphMemory? _graph;
     private readonly ConcurrentDictionary<string, byte> _disbanded = new();
+    // 客服知聚的非成员参与者（顾客）：key=groupId → 已进入的顾客 id 集合。顾客不是群成员，
+    // 各自拥有与客服团队的独立会话（顾客之间彼此隔离）。仅存于内存（会话参与非持久成员）。
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _supportCustomers = new(StringComparer.Ordinal);
+    // 顾客参与 TTL（30 分钟无交互自动回收），定时清理防止条目泄漏
+    private readonly ConcurrentDictionary<string, long> _supportCustomerTtl = new(StringComparer.Ordinal);
+    private const long SupportCustomerTtlMs = 30 * 60 * 1000;
+    private const string SupportCustKeySep = "|";
     private readonly ConcurrentDictionary<string, AgentStreamState> _agentStreams = new();
     // 智能体触发调用并发限制（防止语境智能体多 / 消息频繁时打爆模型与桥接服务）
     private readonly SemaphoreSlim _agentInvocationLimiter;
@@ -406,45 +413,62 @@ public sealed class GroupHub : IDisposable
         await SyncTwinMembersOutAsync(groupId, [memberId], ct);
     }
 
-    /// <summary>进入客服知聚：客服知聚对所有用户可见、可进入；非成员进入即自动加入（以普通顾客身份）。
-    /// 普通知聚不支持自行进入（保持成员制）。返回群信息。</summary>
+    /// <summary>进入客服知聚：客服知聚对所有用户可见、可进入。客服（成员）直接进入；
+    /// 非成员普通用户作为一个<b>顾客参与者</b>进入——<b>不加入成员</b>，但获得与本客服团队聊天的独立会话
+    /// （每位顾客的会话彼此隔离）。普通知聚不支持自行进入（保持成员制）。返回群信息。</summary>
     public async Task<Group> EnterSupportCircleAsync(string groupId, string memberId, CancellationToken ct = default)
     {
         var group = GetGroupOrThrow(groupId);
         if (!group.IsSupportCircle)
             throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "仅客服知聚可自行进入");
         if (_store.IsMember(groupId, memberId))
-            return group; // 已是成员（客服或顾客）直接进入
+            return group; // 客服（成员）直接进入
 
-        var member = new GroupMember
-        {
-            MemberId = memberId,
-            MemberType = ResolveMemberType(memberId),
-            Nickname = _users.GetUserById(memberId)?.Nickname ?? (_users.GetUserById(memberId)?.Username) ?? memberId,
-            Avatar = _users.GetUserById(memberId)?.Avatar,
-            Role = GroupRole.Normal, // 自动进入者均为顾客：只能看到自己的会话，客服方可看到全部
-            OnlineStatus = _connections.MemberConnectionCount(memberId) > 0 ? OnlineStatus.Online : OnlineStatus.Offline,
-            JoinTime = NowMs,
-        };
-        if (!_store.AddMember(groupId, member))
-            return group;
-        group.MemberCount = _store.MemberCount(groupId);
-
-        await FanOutAsync(groupId, new GroupMemberJoinedEvent
-        {
-            GroupId = groupId,
-            Members = [member],
-            OperatorId = memberId,
-            Timestamp = NowMs,
-        }, ct: ct);
-        await NotifyMemberConnectionsAsync([memberId], new GroupCreatedEvent
-        {
-            GroupId = groupId,
-            GroupInfo = group,
-            Members = [member],
-            Timestamp = NowMs,
-        }, ct);
+        // 非成员：登记为顾客参与者（不入成员表，不改变成员数与成员清单）
+        var groupCustomers = _supportCustomers.GetOrAdd(groupId, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
+        groupCustomers[memberId] = 0;
+        RefreshSupportCustomer(groupId, memberId);
         return group;
+    }
+
+    private static string SupportCustKey(string groupId, string memberId) => groupId + SupportCustKeySep + memberId;
+
+    private void RefreshSupportCustomer(string groupId, string memberId)
+        => _supportCustomerTtl[SupportCustKey(groupId, memberId)] = NowMs + SupportCustomerTtlMs;
+
+    /// <summary>是否为客服知聚的顾客参与者（非成员但已进入）。</summary>
+    public bool IsSupportCustomer(string groupId, string memberId)
+    {
+        if (!(_store.GetGroup(groupId)?.IsSupportCircle ?? false)) return false;
+        if (!_supportCustomers.TryGetValue(groupId, out var customers)) return false;
+        RefreshSupportCustomer(groupId, memberId); // 按需续期
+        return customers.ContainsKey(memberId);
+    }
+
+    /// <summary>能访问（订阅 / 读写 / 聊天）该客服知聚：客服成员或已进入的顾客参与者。普通知聚保持成员制。</summary>
+    public bool CanParticipate(string groupId, string userId)
+    {
+        var group = _store.GetGroup(groupId);
+        if (group is null) return false;
+        return _store.IsMember(groupId, userId)
+            || (group.IsSupportCircle && _supportCustomers.TryGetValue(groupId, out var customers) && customers.ContainsKey(userId));
+    }
+
+    /// <summary>周期清理超时未活动的客服顾客参与记录，防止长期不访问的条目泄漏。</summary>
+    private void PurgeExpiredSupportCustomers()
+    {
+        var now = NowMs;
+        foreach (var kv in _supportCustomerTtl)
+            if (kv.Value < now)
+            {
+                var key = kv.Key;
+                if (_supportCustomerTtl.TryRemove(key, out _))
+                {
+                    var sep = key.IndexOf(SupportCustKeySep, StringComparison.Ordinal);
+                    if (sep > 0 && _supportCustomers.TryGetValue(key[..sep], out var customers))
+                        customers.TryRemove(key[(sep + SupportCustKeySep.Length)..], out _);
+                }
+            }
     }
 
     public async Task<GroupMember> UpdateMemberAsync(GroupMemberUpdateRequest req, CancellationToken ct = default)
@@ -535,7 +559,8 @@ public sealed class GroupHub : IDisposable
     public async Task<GroupMessage> SendMessageAsync(GroupMessageSendRequest req, CancellationToken ct = default)
     {
         var group = GetGroupOrThrow(req.GroupId);
-        if (!_store.IsMember(group.GroupId, req.UserId!)) // 身份由 WS/HTTP 上层解析覆盖
+        var isCustomer = group.IsSupportCircle && !_store.IsMember(group.GroupId, req.UserId!) && IsSupportCustomer(group.GroupId, req.UserId!);
+        if (!_store.IsMember(group.GroupId, req.UserId!) && !isCustomer) // 身份由 WS/HTTP 上层解析覆盖
             throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "发送者不是群成员");
         var attachments = req.Attachments ?? [];
         if (string.IsNullOrWhiteSpace(req.Content) && attachments.Count == 0)
@@ -550,7 +575,11 @@ public sealed class GroupHub : IDisposable
         if (attachments.Count > MaxAttachmentsPerMessage)
             throw new AguiProtocolException(ErrorCodes.BadRequest, $"附件数量超过上限（{MaxAttachmentsPerMessage} 个）");
 
-        var sender = _store.GetMember(group.GroupId, req.UserId!)!;
+        // 发送者：客服为群成员（取成员行）；非成员顾客（客服知聚参与者）无成员行，合成发送者身份（Role=Normal 视为顾客）
+        var senderMembership = _store.GetMember(group.GroupId, req.UserId!);
+        var senderId = req.UserId!;
+        var senderType = isCustomer ? MemberType.User : senderMembership!.MemberType;
+        var senderNickname = senderMembership?.Nickname ?? _users.GetUserById(senderId)?.Nickname ?? _users.GetUserById(senderId)?.Username ?? ResolveMemberType(senderId) switch { MemberType.Agent => "智能体", _ => senderId };
         var topicId = string.IsNullOrWhiteSpace(req.TopicId) ? "main" : req.TopicId!;
         if (topicId != "main" && _store.GetTopic(group.GroupId, topicId) is null)
             throw new AguiProtocolException(ErrorCodes.GroupNotFound, "话题不存在");
@@ -560,9 +589,9 @@ public sealed class GroupHub : IDisposable
             GroupId = group.GroupId,
             TopicId = topicId,
             ThreadId = req.ThreadId ?? "thread_" + group.GroupId,
-            SenderId = sender.MemberId,
-            SenderType = sender.MemberType,
-            SenderNickname = sender.Nickname,
+            SenderId = senderId,
+            SenderType = senderType,
+            SenderNickname = senderNickname,
             ReplyToMessageId = req.ReplyToMessageId,
             Mentions = req.Mentions ?? [],
             MentionAll = req.MentionAll,
@@ -576,7 +605,7 @@ public sealed class GroupHub : IDisposable
 
         // 客服知聚会话隔离：非客服成员只能看到自己的会话（与客服），客服可见全部。
         // 此处由服务端强制施加，避免前端越权把消息标成 All 泄露到其他顾客。
-        ApplySupportCircleScoping(group, sender, msg);
+        ApplySupportCircleScoping(group, senderId, isStaff: !isCustomer, msg);
 
         if (msg.ReplyToMessageId is not null && _store.GetMessage(group.GroupId, msg.ReplyToMessageId) is null)
             throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "引用的目标消息不存在或已撤回");
@@ -628,9 +657,9 @@ public sealed class GroupHub : IDisposable
             ?? throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或已撤回");
         if (msg.Recalled)
             throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息已撤回");
-        // 操作者必须是当前群成员（退群 / 被移出者不能再操作群内消息）；管理员不受成员身份限制
+        // 操作者必须是当前参与者（客服成员或客服知聚的顾客参与者）；管理员不受参与身份限制
         if (!CanManage(req.OperatorId!, group)
-            && (msg.SenderId != req.OperatorId || !_store.IsMember(group.GroupId, req.OperatorId!)))
+            && (msg.SenderId != req.OperatorId || !CanParticipate(group.GroupId, req.OperatorId!)))
             throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "仅发送者本人（且仍在群内）或管理员可撤回消息");
         // 撤回时限：仅允许撤回发送 3 分钟内的消息（服务端强校验，前端按钮同步按时间隐藏）
         if (NowMs - msg.Timestamp > RecallWindowMs)
@@ -929,7 +958,8 @@ public sealed class GroupHub : IDisposable
     {
         var group = _store.GetGroup(groupId);
         if (group is null || _disbanded.ContainsKey(groupId)) return false;
-        if (!_store.IsMember(groupId, connection.MemberId)) return false;
+        // 客服知聚允许非成员的顾客参与者订阅（各自只见自己的会话）；普通知聚仅成员可订阅
+        if (!CanParticipate(groupId, connection.MemberId)) return false;
         return _connections.Subscribe(connection, groupId);
     }
 
@@ -1408,6 +1438,7 @@ public sealed class GroupHub : IDisposable
     /// </summary>
     private void CleanupOrphanStreams()
     {
+        try { PurgeExpiredSupportCustomers(); } catch { /* 参与回收失败不影响孤儿清理 */ }
         var now = NowMs;
         foreach (var kv in _agentStreams
             .Where(kv => now - kv.Value.CreatedAt >= OrphanStreamTimeoutMs
@@ -1604,18 +1635,26 @@ public sealed class GroupHub : IDisposable
     private bool IsSupportStaff(string groupId, string memberId) => SupportStaffIds(groupId).Contains(memberId);
 
     /// <summary>客服知聚的消息隔离：按发送者角色强制作用域，防止跨顾客会话泄露。</summary>
-    private void ApplySupportCircleScoping(Group group, GroupMember sender, GroupMessage msg)
+    private void ApplySupportCircleScoping(Group group, string senderId, bool isStaff, GroupMessage msg)
     {
         if (!group.IsSupportCircle) return;
-        var isStaff = sender.Role != GroupRole.Normal;
         if (isStaff)
         {
             if (msg.ReplyToMessageId is { } replyId
                 && _store.GetMessage(group.GroupId, replyId) is { } replied)
             {
                 // 客服回复某顾客的消息 → 定向到该顾客（其它顾客不可见；客服恒可见全部）。
-                msg.Visibility = MessageVisibility.Private;
-                msg.VisibleMemberIds = new[] { replied.SenderId };
+                if (replied.SenderId == senderId)
+                {
+                    // 客服之间的回复 → 仅客服可见（不发顾客）
+                    msg.Visibility = MessageVisibility.Private;
+                    msg.VisibleMemberIds = SupportStaffIds(group.GroupId).ToArray();
+                }
+                else
+                {
+                    msg.Visibility = MessageVisibility.Private;
+                    msg.VisibleMemberIds = new[] { replied.SenderId };
+                }
             }
             else
             {
@@ -1626,9 +1665,9 @@ public sealed class GroupHub : IDisposable
         }
         else
         {
-            // 顾客发出的消息 → 仅自己与客服可见（会话隔离）
+            // 顾客发出的消息 → 仅自己与客服可见（会话隔离，顾客之间彼此隔离）
             msg.Visibility = MessageVisibility.Private;
-            msg.VisibleMemberIds = new[] { sender.MemberId };
+            msg.VisibleMemberIds = new[] { senderId };
         }
     }
 
@@ -1654,8 +1693,11 @@ public sealed class GroupHub : IDisposable
                 recipients = memberIds;
                 break;
         }
-        // 客服知聚：客服（支持团队）恒可见全部会话，实时扇出一并覆盖
+        // 客服知聚：客服（支持团队）恒可见全部会话，实时扇出一并覆盖；
+        // 定向消息中的非成员顾客参与者也要收到（顾客不在此群成员表中）。
         foreach (var staff in SupportStaffIds(groupId)) recipients.Add(staff);
+        foreach (var vid in visibleMemberIds)
+            if (IsSupportCustomer(groupId, vid)) recipients.Add(vid);
         if (memberIds.Contains(senderId)) recipients.Add(senderId);
         return recipients;
     }

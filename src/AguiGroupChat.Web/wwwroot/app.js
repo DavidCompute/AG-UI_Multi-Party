@@ -2421,6 +2421,7 @@ async function loadGroups() {
         myRole: null,
         myNickname: null,
         isMember: false,
+        isEntered: !!d.hasEntered, // 已作为顾客参与者进入（非成员但可聊天）
         lastMessageAt: 0,
         unreadCount: 0,
         unreadByTopic: {},
@@ -3681,9 +3682,10 @@ function renderGroupList() {
     const avatar = g.groupAvatar
       ? `<span class="group-avatar"><img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" /></span>`
       : `<span class="icon">${g.isSupportCircle ? "🛟" : "👥"}</span>`;
-    // 客服知聚：明显的「客服知聚」标签；非成员在其右上角加「进入」小标
+    // 客服知聚：明显的「客服知聚」标签；非成员且未进入的顾客右上角加「进入」小标
     const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
-    const enterTag = g.isSupportCircle && !g.isMember ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
+    const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
+    const enterTag = needEnter ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
     div.innerHTML = avatar + `<span>${g.isPrivate ? "🔒 " : ""}${escapeHtml(g.groupName)}</span>` + kindTag + enterTag +
       (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
@@ -3895,9 +3897,9 @@ function renderChatMeta() {
 async function selectGroup(gid) {
   if (state.activeGroupId === gid) return;
   clearReplyTo(); // 切知聚时清除引用目标（引用属于原知聚上下文）
-  // 客服知聚：非成员进入前先「进入」（自动加入为顾客），否则无权限订阅 / 读历史
+  // 客服知聚：非成员进入前先「进入」（登记为顾客参与者，不加入成员）；已进入者直接打开
   const pendingGroup = state.groups.find((x) => x.groupId === gid);
-  if (pendingGroup && pendingGroup.isSupportCircle && !pendingGroup.isMember) {
+  if (pendingGroup && pendingGroup.isSupportCircle && !pendingGroup.isMember && !pendingGroup.isEntered) {
     try {
       const er = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/enter`, {
         method: "POST",

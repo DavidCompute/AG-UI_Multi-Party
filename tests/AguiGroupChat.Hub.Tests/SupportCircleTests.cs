@@ -32,15 +32,19 @@ public sealed class SupportCircleTests
     }
 
     [Fact]
-    public async Task Enter_SupportCircle_AutoJoinsNonMemberAsCustomer()
+    public async Task Enter_SupportCircle_RegistersCustomerAsParticipant_NotMember()
     {
         var f = new HubFixture();
         var g = await CreateSupportCircleAsync(f, "user_1", "user_staff");
 
         var returned = await f.Hub.EnterSupportCircleAsync(g.GroupId, "user_customer");
 
-        Assert.True(f.Store.IsMember(g.GroupId, "user_customer"));
-        Assert.Equal(GroupRole.Normal, f.Store.GetMember(g.GroupId, "user_customer")!.Role);
+        // 顾客不是群成员（成员表仅客服团队），成员数不因顾客进入而变化
+        Assert.False(f.Store.IsMember(g.GroupId, "user_customer"));
+        Assert.Equal(2, f.Store.MemberCount(g.GroupId)); // 创建者 + 客服
+        // 但已成为客服知聚参与者，可访问 / 聊天
+        Assert.True(f.Hub.IsSupportCustomer(g.GroupId, "user_customer"));
+        Assert.True(f.Hub.CanParticipate(g.GroupId, "user_customer"));
         Assert.Equal(g.GroupId, returned.GroupId);
     }
 

@@ -110,6 +110,7 @@ public static class HttpGroupApi
                         isSupportCircle = true,
                         kind = g.Kind,
                         isMember = hub.Store.IsMember(g.GroupId, identity),
+                        hasEntered = hub.IsSupportCustomer(g.GroupId, identity), // 已作为顾客参与者进入
                     })
                     .ToList();
                 return Results.Ok(result);
@@ -270,7 +271,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
                 return Results.Ok(hub.Store.ListTopics(groupId));
@@ -284,7 +285,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
 
@@ -328,7 +329,7 @@ public static class HttpGroupApi
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
                 if (topicId != "main" && hub.Store.GetTopic(groupId, topicId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "话题不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
                 var limit = Math.Clamp(count ?? 50, 1, 100);
@@ -360,7 +361,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
                 return Results.Ok(await hub.BuildSnapshotAsync(groupId, identity, ct));
@@ -372,7 +373,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
                 return Results.Ok(hub.Store.ListMembers(groupId));
@@ -387,7 +388,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
                 var limit = Math.Clamp(count ?? 50, 1, 100);
@@ -420,7 +421,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可搜索群消息"),
                         statusCode: StatusCodes.Status403Forbidden);
                 if (string.IsNullOrWhiteSpace(q))
@@ -513,7 +514,7 @@ public static class HttpGroupApi
                 if (identity is null) return error!;
                 if (hub.Store.GetGroup(groupId) is null)
                     return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
-                if (!hub.Store.IsMember(groupId, identity))
+                if (!hub.CanParticipate(groupId, identity))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内容"),
                         statusCode: StatusCodes.Status403Forbidden);
                 var target = hub.Store.GetMessage(groupId, messageId);
