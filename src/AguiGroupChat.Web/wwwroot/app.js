@@ -2389,37 +2389,46 @@ function setStatus(online, key) {
 
 /* ============ 知聚与成员加载 ============ */
 
-async function loadGroups() {
-  const res = await fetch(`/ag-ui/member/${state.memberId}/groups`);
-  if (!res.ok) return;
-  state.groups = await res.json();
-  // 客服知聚：对所有用户可见、可进入。把非成员也能看到的客服知聚并入侧栏（标记非成员），
-  // 已加入的以成员视角为准（保留 myRole / 未读，避免与成员列表重复或丢失身份）。
+/** 拉取对所有用户可见、可进入的客服知聚（发现列表）；失败返回空数组不抛。 */
+async function fetchDiscoveredSupportCircles() {
   try {
     const disc = await fetch('/ag-ui/group/discover');
-    if (disc.ok) {
-      const discovered = await disc.json();
-      const memberIds = new Set(state.groups.map((g) => g.groupId));
-      for (const d of discovered) {
-        if (memberIds.has(d.groupId)) continue;
-        state.groups.push({
-          groupId: d.groupId,
-          groupName: d.groupName,
-          groupAvatar: d.groupAvatar,
-          memberCount: d.memberCount,
-          ownerId: d.ownerId,
-          isPrivate: false,
-          isSupportCircle: true,
-          myRole: null,
-          myNickname: null,
-          isMember: false,
-          lastMessageAt: 0,
-          unreadCount: 0,
-          unreadByTopic: {},
-        });
-      }
+    if (!disc.ok) return [];
+    const arr = await disc.json();
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadGroups() {
+  const res = await fetch(`/ag-ui/member/${state.memberId}/groups`);
+  if (res.ok) state.groups = await res.json();
+  // 客服知聚发现不应被成员列表接口成败拖累：即使成员列表失败，也单独尝试把可见的客服知聚并入侧栏。
+  const discovered = await fetchDiscoveredSupportCircles();
+  if (discovered.length > 0) {
+    const memberIds = new Set((state.groups || []).map((g) => g.groupId));
+    for (const d of discovered) {
+      if (memberIds.has(d.groupId)) continue;
+      state.groups.push({
+        groupId: d.groupId,
+        groupName: d.groupName,
+        groupAvatar: d.groupAvatar,
+        memberCount: d.memberCount,
+        ownerId: d.ownerId,
+        isPrivate: false,
+        isSupportCircle: true,
+        myRole: null,
+        myNickname: null,
+        isMember: false,
+        lastMessageAt: 0,
+        unreadCount: 0,
+        unreadByTopic: {},
+      });
     }
-  } catch { /* 发现失败不阻塞成员列表 */ }
+  }
+  if (!res.ok) { renderGroupList(); return; } // 成员列表失败：仍渲染已发现的客服知聚后放弃本次刷新
+  if (!Array.isArray(state.groups)) state.groups = [];
   // 已加入的客服知聚补上成员标识（服务端 /member/{id}/groups 未返回 isMember，用存在性推断）
   for (const g of state.groups) {
     if (g.isSupportCircle && g.myRole) g.isMember = true;
