@@ -1011,6 +1011,15 @@ window.I18N_DICTS.zh = {
   "admin.disableTitle": "禁用账号（其会话将立即全部登出）",
   "admin.resetPwTitle": "重置密码（旧会话将全部登出）",
   "admin.noUsers": "暂无用户",
+  /* 平台角色（RBAC 分层） */
+  "admin.superOnly": "仅超级管理员可管理平台角色",
+  "admin.roleSelTitle": "设置平台角色（user / operator / admin / superadmin）",
+  "admin.roleConfirm": "确认把「{name}」的平台角色调整到所选值？",
+  "admin.roleSet": "已把 {name} 的平台角色设为 {role}",
+  "admin.roleName.user": "普通用户",
+  "admin.roleName.operator": "运维",
+  "admin.roleName.admin": "管理员",
+  "admin.roleName.superadmin": "超级管理员",
 
   /* --- 系统状态标签 --- */
   "status.uptime": "运行时长",

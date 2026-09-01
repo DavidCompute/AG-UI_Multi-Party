@@ -1013,6 +1013,15 @@ window.I18N_DICTS.en = {
   "admin.disableTitle": "Disable account (all its sessions will be logged out immediately)",
   "admin.resetPwTitle": "Reset password (old sessions will all be logged out)",
   "admin.noUsers": "No users",
+  /* Platform roles (RBAC layering) */
+  "admin.superOnly": "Only Super Admins can manage platform roles",
+  "admin.roleSelTitle": "Set platform role (user / operator / admin / superadmin)",
+  "admin.roleConfirm": "Set {name}'s platform role to the selected value?",
+  "admin.roleSet": "Set {name}'s platform role to {role}",
+  "admin.roleName.user": "User",
+  "admin.roleName.operator": "Operator",
+  "admin.roleName.admin": "Admin",
+  "admin.roleName.superadmin": "Super Admin",
 
   /* --- 系统状态标签 --- */
   "status.uptime": "Uptime",

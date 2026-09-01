@@ -1103,6 +1103,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .tag-user { background: rgba(128, 128, 128, .12); color: var(--muted, #888); }
 .tag-disabled { background: rgba(255, 107, 107, .12); color: var(--err, #ff6b6b); }
 .tag-active { background: rgba(52, 199, 123, .12); color: var(--ok, #34c77b); }
+.tag-operator { background: rgba(79, 140, 255, .14); color: var(--link, #4f8cff); }
+.tag-superadmin { background: rgba(180, 99, 255, .16); color: #b463ff; border: 1px solid currentColor; }
+.admin-role-sel { max-width: 96px; font-size: 11px; padding: 1px 4px; margin-right: 4px; border: 1px solid var(--border, rgba(127,140,180,.4)); border-radius: 6px; background: transparent; color: inherit; }
 .status-body { padding: 4px 0; }
 .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .status-cell { border: 1px solid var(--border, rgba(128,128,128,.25)); border-radius: 8px; padding: 10px 12px; }

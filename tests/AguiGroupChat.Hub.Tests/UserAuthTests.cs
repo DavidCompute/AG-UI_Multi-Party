@@ -167,6 +167,83 @@ public sealed class UserAuthServiceTests
     }
 }
 
+/// <summary>平台级 RBAC（SuperAdmin/Admin/Operator/User）判定与防呆测试。</summary>
+public sealed class PlatformRoleTests
+{
+    private static AuthService CreateAuth(AuthOptions? options = null)
+        => new(new InMemoryUserStore(), options ?? new AuthOptions(), TimeProvider.System, NullLogger<AuthService>.Instance);
+
+    [Fact]
+    public void FirstUser_IsSuperAdmin_ByDefault()
+    {
+        var auth = CreateAuth();
+        var user = auth.Register("alice", "secret1", null, null); // 首个账号：默认管理员 + 超级管理员（自举）
+        Assert.True(user.IsAdmin);
+        Assert.True(auth.IsAdmin(user.UserId));
+        Assert.True(auth.HasRole(user.UserId, PlatformRole.Admin));
+        Assert.Equal(PlatformRole.SuperAdmin, user.PlatformRole);
+        Assert.True(auth.HasRole(user.UserId, PlatformRole.SuperAdmin)); // 首次注册自举为超级管理员
+    }
+
+    [Fact]
+    public void SetRole_ToSuperAdmin_AndUser_GrantsAndRevokes()
+    {
+        var auth = CreateAuth();
+        _ = auth.Register("bob", "secret1", null, null);
+        var staff = auth.Register("staff", "secret1", null, null);
+        var backup = auth.Register("backup", "secret1", null, null);
+
+        // 授予 SuperAdmin
+        var up = auth.SetPlatformRole(staff.UserId, PlatformRole.SuperAdmin);
+        Assert.Equal(PlatformRole.SuperAdmin, up.PlatformRole);
+        Assert.True(auth.IsSuperAdmin(staff.UserId));
+        Assert.True(auth.HasRole(staff.UserId, PlatformRole.SuperAdmin));
+
+        // 再造一名 SuperAdmin，保证降级 staff 不会导致“最后一任”guard 拦截
+        auth.SetPlatformRole(backup.UserId, PlatformRole.SuperAdmin);
+
+        // 回收为普通用户（仍有 backup 在任，允许降级）
+        var down = auth.SetPlatformRole(staff.UserId, PlatformRole.User);
+        Assert.Equal(PlatformRole.User, down.PlatformRole);
+        Assert.False(auth.IsSuperAdmin(staff.UserId));
+        Assert.False(auth.HasRole(staff.UserId, PlatformRole.Admin));
+    }
+
+    [Fact]
+    public void SetRole_Admin_IsAdminFlagStaysTrue()
+    {
+        var auth = CreateAuth();
+        _ = auth.Register("root", "secret1", null, null);            // 首账号 → SuperAdmin
+        var staff = auth.Register("staff", "secret1", null, null);   // 普通用户
+        auth.SetPlatformRole(staff.UserId, PlatformRole.Admin);
+        Assert.True(auth.IsAdmin(staff.UserId)); // 显式 Admin 同步 IsAdmin 标记
+        Assert.True(auth.HasRole(staff.UserId, PlatformRole.Admin));
+    }
+
+    [Fact]
+    public void CannotDowngrade_LastSuperAdmin()
+    {
+        var auth = CreateAuth();
+        var super = auth.Register("super", "secret1", null, null);
+        auth.SetPlatformRole(super.UserId, PlatformRole.SuperAdmin);
+
+        var ex = Assert.Throws<AguiProtocolException>(() => auth.SetPlatformRole(super.UserId, PlatformRole.User));
+        Assert.Equal(ErrorCodes.GroupPermissionDenied, ex.ErrorCode);
+        // 仍保持 SuperAdmin
+        Assert.True(auth.IsSuperAdmin(super.UserId));
+    }
+
+    [Fact]
+    public void ConfigAdminUserIds_DeriveAdminEvenIfExplicitUser()
+    {
+        var auth = CreateAuth(new AuthOptions { AdminUserIds = "ops_mgr" });
+        var user = auth.Register("ops_mgr", "secret1", null, null);
+        // 即使显式角色是 User，命中配置名单仍推导为至少 Admin
+        Assert.True(auth.HasRole(user.UserId, PlatformRole.Admin));
+        Assert.True(auth.IsAdmin(user.UserId));
+    }
+}
+
 public sealed class UserDisplayNameTests
 {
     private static UserAccount Account(string userId, string username, string? nickname)

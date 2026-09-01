@@ -29,6 +29,8 @@ public static class HubApp
         // 存储提供器：memory（默认，进程内 + JSON 快照）或 postgres（PostgreSQL 落盘，禁用 JSON 快照）
         var storageOptions = builder.Configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
         builder.Services.AddSingleton(storageOptions);
+        // 静态加固保险箱：用服务端密钥对敏感字段（模型 API Key / TOTP 密钥）落盘时加密，防快照/库明文泄露
+        builder.Services.AddSingleton<SecretVault>();
         // 变更通知中心：各存储变更后通知持久化服务标记脏位
         var changeHub = new ChangeHub();
         builder.Services.AddSingleton(changeHub);

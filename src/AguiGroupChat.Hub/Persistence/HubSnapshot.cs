@@ -26,6 +26,9 @@ public sealed class HubSnapshot
 
     /// <summary>扩展区：name → JSON 值（如 agents 智能体定义列表），由上层注册读写回调。</summary>
     public Dictionary<string, JsonElement> Sections { get; set; } = [];
+
+    /// <summary>快照 HMAC-SHA256 签名（十六进制小写）。仅当配置了 <c>Persistence:SnapshotSigningKey</c> 时写入并校验。</summary>
+    public string? Signature { get; set; }
 }
 
 /// <summary>持久化的登录会话（令牌 + 身份 + 过期时间）。</summary>

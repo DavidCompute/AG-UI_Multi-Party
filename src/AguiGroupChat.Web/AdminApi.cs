@@ -31,6 +31,7 @@ public static class AdminApi
                 u.Nickname,
                 u.Avatar,
                 u.IsAdmin,
+                platformRole = WebIdentity.RoleName(u.PlatformRole),
                 u.IsDisabled,
                 u.PersonalMemoryEnabled,
                 u.CreatedAt,
@@ -40,6 +41,37 @@ public static class AdminApi
             });
             return Results.Ok(users);
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        // ---- 平台角色（RBAC 分层）：仅超级管理员可查询 / 授予 / 回收他人平台角色 ----
+        root.MapGet("/roles", (HttpContext ctx, AuthService auth, GroupHub hub) =>
+        {
+            // 展示每个账号的<b>生效</b>角色（显式角色与 IsAdmin/配置名单推导取较高者），供运营查看角色矩阵
+            var list = auth.ListUsers().Select(u => new
+            {
+                u.UserId,
+                u.Username,
+                explicitRole = WebIdentity.RoleName(u.PlatformRole),
+                effectiveRole = WebIdentity.RoleName(auth.ResolveRole(u.UserId)),
+                u.IsAdmin,
+                u.IsDisabled,
+            });
+            return Results.Ok(list);
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.SuperAdmin));
+
+        root.MapPost("/roles/{userId}", (string userId, AdminRoleHttpRequest req, HttpContext ctx, AuthService auth,
+            AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var me = WebIdentity.UserId(ctx)!;
+            if (!Enum.TryParse<PlatformRole>(req.Role, true, out var role))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "role 须为 user / operator / admin / superadmin"));
+            // 超级管理员不得用本接口把自己降级（自我降级应通过更高权限处理，避免最后一任致盲）；其余由 AuthService 防呆兜底
+            if (me == userId)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "不能通过本接口修改自己的平台角色（防止误伤最后一任管理员）"));
+            var updated = auth.SetPlatformRole(userId, role);
+            audit.Record("admin.user.role", me, auth.GetUser(me)?.Username, targetType: "user",
+                targetId: userId, detail: $"平台角色 → {role}");
+            return Results.Ok(new { ok = true, userId, explicitRole = WebIdentity.RoleName(updated.PlatformRole), role });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.SuperAdmin));
 
         root.MapPost("/users/{userId}/disabled", (string userId, AdminDisabledHttpRequest req, HttpContext ctx, AuthService auth, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
             Run(() =>
@@ -98,9 +130,9 @@ public static class AdminApi
                     graphEdges = gs?.EdgeCount ?? 0,                   // 当前图谱关系边数
                 },
             });
-        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 模型用量统计（最近 N 天按日汇总 + 配额配置）：仅管理员
+        // 模型用量统计（最近 N 天按日汇总 + 配额配置）：仅管理员及以上（含运维）
         root.MapGet("/usage", (int? days, HttpContext ctx, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
             return Results.Ok(new
@@ -108,9 +140,9 @@ public static class AdminApi
                 dailyQuotaPerUser = usage.DailyQuotaPerUser,
                 days = usage.GetDailySummary(days ?? 7),
             });
-        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 操作审计日志（4.3）：关键 / 敏感操作留痕，仅管理员。limit 最多 200。
+        // 操作审计日志（4.3）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。limit 最多 200。
         root.MapGet("/audit", (int? limit, HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
             return Results.Ok(new
@@ -118,31 +150,31 @@ public static class AdminApi
                 total = audit.Count,
                 entries = audit.Query(limit ?? 100),
             });
-        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 桥接端点健康度（3.1）：查看已配置外部 AG-UI 端点的实时/缓存连通状态，仅管理员。
+        // 桥接端点健康度（3.1）：查看已配置外部 AG-UI 端点的实时/缓存连通状态，仅管理员及以上（含运维）。
         root.MapGet("/bridge-health", async (bool? refresh, HttpContext ctx,
             AguiGroupChat.Agents.BridgeHealthService bridgeHealth, CancellationToken ct) =>
         {
             if (refresh == true)
                 return Results.Ok(await bridgeHealth.ProbeAllAsync(ct)); // 同步触发一次实时探测
             return Results.Ok(bridgeHealth.GetStatus());
-        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 桥接能力协商（3.2）：查看外部端点的能力（支持的工具 / 附件 / 审批类型），仅管理员。
+        // 桥接能力协商（3.2）：查看外部端点的能力（支持的工具 / 附件 / 审批类型），仅管理员及以上（含运维）。
         root.MapGet("/bridge-capabilities", async (bool? refresh, HttpContext ctx,
             AguiGroupChat.Agents.BridgeCapabilitiesService caps, CancellationToken ct) =>
         {
             if (refresh == true)
                 return Results.Ok((await caps.ProbeAllAsync(ct)).Select(r => new { r.AgentId, r.Endpoint, supportsProtocol = r.Cap.Discovered, r.Cap.SupportsTools, r.Cap.SupportsAttachments, r.Cap.ApprovalTypes }));
             return Results.Ok(caps.GetCached().Select(r => new { r.AgentId, r.Endpoint, supportsProtocol = r.Cap.Discovered, r.Cap.SupportsTools, r.Cap.SupportsAttachments, r.Cap.ApprovalTypes }));
-        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员。
+        // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员及以上（含运维）。
         root.MapGet("/metrics", (HttpContext ctx, AguiGroupChat.Agents.MetricsService metrics) =>
         {
             return Results.Ok(metrics.Snapshot());
-        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 运维配置只读快照（6.3 数据面，仅管理员）：集中展示散在各处 appsettings / .env 的关键参数，供治理与排障。
         root.MapGet("/config", (HttpContext ctx, AuthOptions authOptions, GroupChatOptions groupChat, StorageOptions storage,
@@ -213,3 +245,6 @@ public sealed record AdminDisabledHttpRequest(bool Disabled);
 
 /// <summary>管理员重置密码请求体。</summary>
 public sealed record AdminPasswordHttpRequest(string NewPassword);
+
+/// <summary>平台角色设置请求体（RBAC 分层，仅超级管理员）：role 取 user / operator / admin / superadmin。</summary>
+public sealed record AdminRoleHttpRequest(string Role);

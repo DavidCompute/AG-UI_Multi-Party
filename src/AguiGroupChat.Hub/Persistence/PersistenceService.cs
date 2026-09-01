@@ -81,6 +81,17 @@ public sealed class PersistenceService : IDisposable
             var snapshot = JsonSerializer.Deserialize<HubSnapshot>(json, AguiJson.Options);
             if (snapshot is null) return false;
 
+            // 签名校验（仅当配置了签名密钥时）：快照存在签名但校验失败 / 配置了密钥却无签名 → 视为损坏，拒绝恢复
+            var key = _options.SnapshotSigningKey;
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                if (!VerifySnapshotSignature(snapshot, key))
+                {
+                    BackupBadFile(path, "签名校验失败（密钥不匹配或已被篡改）");
+                    return false;
+                }
+            }
+
             RestoreUsers(snapshot.Users);
             _auth.RestoreSessions(snapshot.Sessions);
             RestoreGroups(snapshot.Groups);
@@ -103,9 +114,58 @@ public sealed class PersistenceService : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "持久化文件读取失败，将使用空状态启动：{Path}", path);
+            BackupBadFile(path, ex.Message);
             return false;
         }
+    }
+
+    /// <summary>载入失败时把原文件备份为 <c>xxx.bad-&lt;ts&gt;</c>，防止后续 Flush 以空状态覆盖仅存的一份数据。</summary>
+    private void BackupBadFile(string path, string reason)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var backup = path + ".bad-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+            File.Copy(path, backup, overwrite: false);
+            _logger.LogWarning("将原快照备份为 {Backup}（原因：{Reason}）。请人工核对后决定是否恢复。", backup, reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "快照损坏备份失败：{Path}", path);
+        }
+    }
+
+    /// <summary>配置密钥时计算快照 HMAC-SHA256：对序列化后的 JSON（Signature 置空）签名，十六进制小写写入 <c>snapshot.Signature</c>。</summary>
+    private static void ComputeSignature(HubSnapshot snapshot, string key)
+    {
+        snapshot.Signature = null;                       // 签名前先清空签名域
+        var json = JsonSerializer.Serialize(snapshot, AguiJson.Options);
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));
+        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(json));
+        snapshot.Signature = Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>校验快照签名：配置密钥且快照带签名时校验 HMAC 是否匹配。带签名但校验失败 / 配置密钥却无签名 → 无效。</summary>
+    private static bool VerifySnapshotSignature(HubSnapshot snapshot, string key)
+    {
+        if (string.IsNullOrWhiteSpace(snapshot.Signature))
+            return false; // 配置了密钥但快照无签名：不放行（防降级攻击）
+        var expected = snapshot.Signature;
+        snapshot.Signature = null;
+        string json;
+        try
+        {
+            json = JsonSerializer.Serialize(snapshot, AguiJson.Options);
+        }
+        catch
+        {
+            return false;
+        }
+        using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(key));
+        var hash = Convert.ToHexString(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(expected),
+            System.Text.Encoding.UTF8.GetBytes(hash));
     }
 
     /// <summary>有变更时立即快照写入（关闭前由 ApplicationStopping 调用一次）。</summary>
@@ -124,7 +184,7 @@ public sealed class PersistenceService : IDisposable
         try
         {
             var snapshot = BuildSnapshot();
-            var json = JsonSerializer.Serialize(snapshot, AguiJson.Options);
+            var json = SerializeAndSign(snapshot);
             var path = _options.FilePath!;
             var dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
@@ -150,6 +210,16 @@ public sealed class PersistenceService : IDisposable
         {
             Interlocked.Exchange(ref _flushInProgress, 0);
         }
+    }
+
+    /// <summary>序列化快照；配置签名密钥时附加 HMAC 签名后返回带签名的 JSON 文本。</summary>
+    private string SerializeAndSign(HubSnapshot snapshot)
+    {
+        var key = _options.SnapshotSigningKey;
+        if (string.IsNullOrWhiteSpace(key))
+            return JsonSerializer.Serialize(snapshot, AguiJson.Options);
+        ComputeSignature(snapshot, key);              // 就地写入 snapshot.Signature
+        return JsonSerializer.Serialize(snapshot, AguiJson.Options);
     }
 
     public void Dispose() => _timer?.Dispose();

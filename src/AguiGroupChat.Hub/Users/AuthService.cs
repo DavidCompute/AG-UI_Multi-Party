@@ -58,8 +58,11 @@ public sealed class AuthService
 
         var now = _time.GetUtcNow().ToUnixTimeMilliseconds();
         var (salt, hash) = PasswordHasher.Hash(password);
+        var firstUser = _options.FirstUserIsAdmin && _store.ListUsers().Count == 0; // 首个注册账号
         var isAdmin = IsConfiguredAdmin(username, memberId ?? "")
-            || (_options.FirstUserIsAdmin && _store.ListUsers().Count == 0); // 首个注册账号自动成为管理员
+            || firstUser; // 首个注册账号自动成为管理员
+        // 首次注册的账号默认授予超级管理员（全平台最高角色），否则新部署没人能管理平台角色
+        var platformRole = firstUser ? PlatformRole.SuperAdmin : PlatformRole.User;
         var user = new UserAccount
         {
             UserId = memberId ?? "user_" + IdGenerator.NewId(),
@@ -71,6 +74,8 @@ public sealed class AuthService
             CreatedAt = now,
             UpdatedAt = now,
             IsAdmin = isAdmin,
+            // 首个账号（默认自举）为超级管理员；其余注册账号显式平台角色为 User（IsAdmin/配置由 ResolveRole 推导）
+            PlatformRole = platformRole,
         };
         if (!_store.AddUser(user))
             throw new AguiProtocolException(ErrorCodes.UserExists, $"用户名「{username}」已被注册");
@@ -301,6 +306,59 @@ public sealed class AuthService
         if (user is not null && user.IsAdmin) return true;
         return IsConfiguredAdmin(user?.Username ?? "", userId);
     }
+
+    /// <summary>
+    /// 解析用户<b>生效</b>平台角色（RBAC 分层）：取「显式 <see cref="UserAccount.PlatformRole"/>」与
+    /// 「IsAdmin 标记 / Auth:AdminUserIds 配置 → 至少 Admin」两者的较高者。未登录 / 不存在返回 <see cref="PlatformRole.User"/>。
+    /// </summary>
+    public PlatformRole ResolveRole(string? userId)
+    {
+        if (string.IsNullOrEmpty(userId)) return PlatformRole.User;
+        var user = _store.GetUserById(userId);
+        var explicitRole = user?.PlatformRole ?? PlatformRole.User;
+        // 既有的 IsAdmin 标记 / 配置名单仍视为至少 Admin（向后兼容）；SuperAdmin 由显式角色独占
+        var adminDerived = (user is not null && user.IsAdmin)
+                           || IsConfiguredAdmin(user?.Username ?? "", userId);
+        return (PlatformRole)Math.Max((int)explicitRole,
+            (int)(adminDerived ? PlatformRole.Admin : PlatformRole.User));
+    }
+
+    /// <summary>用户生效角色是否至少达到 <paramref name="min"/>（RBAC 分层判定）。</summary>
+    public bool HasRole(string? userId, PlatformRole min) => ResolveRole(userId) >= min;
+
+    /// <summary>是否超级管理员（可管理平台角色 / 管理员名单）。</summary>
+    public bool IsSuperAdmin(string? userId) => ResolveRole(userId) >= PlatformRole.SuperAdmin;
+
+    /// <summary>
+    /// 设置某账号的<b>显式</b>平台角色（RBAC 分层，仅超级管理员调用）。
+    /// 防呆：禁止把账号平台角色降到低于其 IsAdmin 标记实际承担的管理要求（ResolveRole 仍会推导为至少 Admin）；
+    /// 禁止降级最后一名超级管理员（避免平台失去管理入口）。
+    /// </summary>
+    public UserAccount SetPlatformRole(string targetUserId, PlatformRole role)
+    {
+        var target = _store.GetUserById(targetUserId)
+            ?? throw new AguiProtocolException(ErrorCodes.UserNotFound, "用户不存在");
+        if (role is < PlatformRole.User or > PlatformRole.SuperAdmin)
+            throw new AguiProtocolException(ErrorCodes.BadRequest, "平台角色取值非法");
+        // 防呆：最后一名超级管理员不可被降级（否则平台无最高权限管理入口）
+        if (ResolveRole(targetUserId) >= PlatformRole.SuperAdmin
+            && role < PlatformRole.SuperAdmin
+            && IsLastSuperAdmin(targetUserId))
+            throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "不能降级最后一名超级管理员");
+
+        target.PlatformRole = role;
+        // 显式角色 >= Admin 时同步 IsAdmin 标记（保持整个系统的 IsAdmin 语义一致）；
+        // 降级到 User/Operator 时清除 IsAdmin 标记，除非命中 Auth:AdminUserIds 配置（配置仍由 ResolveRole 推导为 Admin，不硬改配置）。
+        target.IsAdmin = role >= PlatformRole.Admin || IsConfiguredAdmin(target.Username, target.UserId);
+        target.UpdatedAt = _time.GetUtcNow().ToUnixTimeMilliseconds();
+        _store.UpdateUser(target);
+        _logger.LogInformation("平台角色变更：{Target} → {Role}", targetUserId, role);
+        return target;
+    }
+
+    private bool IsLastSuperAdmin(string excludeUserId)
+        => _store.ListUsers().Where(u => u.UserId != excludeUserId).All(u => ResolveRole(u.UserId) < PlatformRole.SuperAdmin)
+           && ResolveRole(excludeUserId) >= PlatformRole.SuperAdmin;
 
     /// <summary>配置名单（Auth:AdminUserIds，逗号分隔的 userId / username）是否命中。大小写不敏感匹配用户名。</summary>
     private bool IsConfiguredAdmin(string username, string userId)

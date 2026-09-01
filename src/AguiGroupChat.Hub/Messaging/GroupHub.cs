@@ -486,7 +486,19 @@ public sealed class GroupHub : IDisposable
             if (!CanManage(req.OperatorId, group))
                 throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "仅群主或管理员可修改成员角色");
             if (req.MemberId == group.OwnerId)
-                throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "不能修改群主角色");
+                throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "不能修改群主角色（群主转让请用转让接口）");
+            // 角色合法值仅为 Normal / Admin：不允许把成员标为 Owner（Owner 由群主转让独占），
+            // 也不允许群管理员给他人或自己授予 / 回收 Admin（Admin 管理仅群主可操作，防管理员自治提权）
+            if (req.MemberInfo.TryGetValue("role", out var roleJe) && roleJe.ValueKind == JsonValueKind.String
+                && Enum.TryParse<GroupRole>(roleJe.GetString(), true, out var requestedRole)
+                && requestedRole == GroupRole.Owner)
+                throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "Owner 角色仅能通过群主转让得到，不支持在此修改");
+            // 设置 / 撤销 Admin：仅群主本人（防止一个管理员把另一个或自己捧成 Admin）
+            if (req.MemberInfo.TryGetValue("role", out var roleJe2) && roleJe2.ValueKind == JsonValueKind.String
+                && Enum.TryParse<GroupRole>(roleJe2.GetString(), true, out var r)
+                && r == GroupRole.Admin
+                && req.OperatorId != group.OwnerId)
+                throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "仅群主可授予 / 撤销群管理员角色");
         }
         if (fields.Contains("nickname", StringComparer.Ordinal) || fields.Contains("avatar", StringComparer.Ordinal))
         {
@@ -507,7 +519,8 @@ public sealed class GroupHub : IDisposable
             switch (field)
             {
                 case "role" when je.ValueKind == JsonValueKind.String
-                                && Enum.TryParse<GroupRole>(je.GetString(), true, out var role):
+                                && Enum.TryParse<GroupRole>(je.GetString(), true, out var role)
+                                && role != GroupRole.Owner:
                     member.Role = role;
                     updated["role"] = je;
                     break;
@@ -548,6 +561,59 @@ public sealed class GroupHub : IDisposable
             }, ct: ct);
         }
         return member;
+    }
+
+    /// <summary>
+    /// 群主转让（RBAC 群级）：仅当前群主可转让；目标须为群内非群主成员。
+    /// 转让后：目标成员成为 Owner，原群主降级为群管理员（Admin）保留管理权；群 OwnerId 与成员角色同步更新并广播。
+    /// </summary>
+    public async Task<Group> TransferOwnershipAsync(string groupId, string operatorId, string newOwnerId, CancellationToken ct = default)
+    {
+        var group = GetGroupOrThrow(groupId);
+        if (group.OwnerId != operatorId)
+            throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "仅群主可转让群主权限");
+        if (newOwnerId == operatorId)
+            throw new AguiProtocolException(ErrorCodes.BadRequest, "不能把群主转让给自己");
+        var target = _store.GetMember(group.GroupId, newOwnerId)
+            ?? throw new AguiProtocolException(ErrorCodes.GroupMemberNotExist, "目标成员不在群组内");
+        if (target.MemberType == MemberType.Agent)
+            throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "不能把群主转让给智能体");
+
+        group.OwnerId = newOwnerId; // 群主字段指向新群主
+        target.Role = GroupRole.Owner;
+        _store.UpdateMember(group.GroupId, target);
+        // 原群主降为管理员（保留管理权，避免转让后无人能管群），其余成员不受影响
+        GroupMember? oldOwner = null;
+        if (operatorId != newOwnerId)
+        {
+            oldOwner = _store.GetMember(group.GroupId, operatorId);
+            if (oldOwner is not null)
+            {
+                oldOwner.Role = GroupRole.Admin;
+                _store.UpdateMember(group.GroupId, oldOwner);
+            }
+        }
+        _store.UpdateGroup(group);
+        _changes?.Notify();
+
+        // 广播新群主与新群管理员（原群主）的角色变更
+        var ts = NowMs;
+        foreach (var role in new (string Mid, GroupRole Role)[] { (newOwnerId, GroupRole.Owner), (operatorId, GroupRole.Admin) })
+        {
+            if (role.Mid == operatorId && oldOwner is null) continue; // 原群主非群成员（异常态）才跳；正常恒为成员
+            var je = System.Text.Json.JsonSerializer.SerializeToElement(role.Role.ToString());
+            await FanOutAsync(group.GroupId, new GroupMemberUpdatedEvent
+            {
+                GroupId = group.GroupId,
+                MemberId = role.Mid,
+                UpdateFields = ["role"],
+                MemberInfo = new Dictionary<string, System.Text.Json.JsonElement> { ["role"] = je },
+                OperatorId = operatorId,
+                Timestamp = ts,
+            }, onlyTo: new HashSet<string> { role.Mid }, ct: ct);
+        }
+        _logger.LogInformation("群主转让：group={Group} {From} → {To}", groupId, operatorId, newOwnerId);
+        return group;
     }
 
     // ================= 群消息（协议 4.4 / 5.1） =================

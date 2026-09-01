@@ -43,6 +43,10 @@ public sealed class PersistenceServiceTests : IDisposable
     private PersistenceService CreateService(ChangeHub changes, IUserStore users, InMemoryGroupStore groups, AuthService auth, AgentRegistry registry)
         => new(users, groups, auth, registry, new PersistenceOptions { Enabled = true, FilePath = _file }, changes, NullLogger<PersistenceService>.Instance);
 
+    /// <summary>带签名密钥的持久化服务（验证快照签名：写入签名 → 重启校验通过）。</summary>
+    private PersistenceService CreateServiceSigned(ChangeHub changes, IUserStore users, InMemoryGroupStore groups, AuthService auth, AgentRegistry registry, string key)
+        => new(users, groups, auth, registry, new PersistenceOptions { Enabled = true, FilePath = _file, SnapshotSigningKey = key }, changes, NullLogger<PersistenceService>.Instance);
+
     [Fact]
     public void RoundTrip_UsersSessionsGroupsMessagesRegistry_AllRestored()
     {
@@ -147,6 +151,48 @@ public sealed class PersistenceServiceTests : IDisposable
     }
 
     [Fact]
+    public void SignedSnapshot_RoundTrips_AndRejectsTamper()
+    {
+        const string key = "test-signing-key";
+        // ---- 第一次：写入并落盘（带签名）----
+        var (changes, users, groups, auth, registry) = BuildStores();
+        var svc = CreateServiceSigned(changes, users, groups, auth, registry, key); // 先建服务（订阅变更），再搬数据
+        var user = auth.Register("bob", "secret1", "小波", null);
+        var token = auth.Login("bob", "secret1").Token; // 签发的会话随快照持久化
+        Assert.True(SaveAndClose(svc));
+
+        // 磁盘 JSON 应带签名域且非空
+        var raw = File.ReadAllText(_file);
+        Assert.Contains("\"signature\":\"", raw);
+
+        // ---- 模拟重启：正确密钥可恢复 ----
+        var (ch2, us2, gr2, au2, rg2) = BuildStores();
+        var svc2 = CreateServiceSigned(ch2, us2, gr2, au2, rg2, key);
+        Assert.True(svc2.Load());
+        Assert.Equal(user.UserId, au2.ValidateToken(token)?.UserId);
+
+        // ---- 篡改：改用户名应被签名拒绝 ----
+        var tampered = raw.Replace("\"username\":\"bob\"", "\"username\":\"mallory\"");
+        File.WriteAllText(_file, tampered);
+        var (ch3, us3, gr3, au3, rg3) = BuildStores();
+        var svc3 = CreateServiceSigned(ch3, us3, gr3, au3, rg3, key);
+        Assert.False(svc3.Load());
+        Assert.Empty(us3.ListUsers());
+
+        // ---- 换密钥：也应拒绝（防密钥轮换/伪造）----
+        var (ch4, us4, gr4, au4, rg4) = BuildStores();
+        var svc4 = CreateServiceSigned(ch4, us4, gr4, au4, rg4, "another-key");
+        Assert.False(svc4.Load());
+    }
+
+    /// <summary>写入数据并手动触发落盘（模拟一次生命周期结束）。</summary>
+    private static bool SaveAndClose(PersistenceService svc)
+    {
+        svc.Flush();
+        return true;
+    }
+
+    [Fact]
     public void Load_CorruptFile_ReturnsFalse_WithoutCrash()
     {
         File.WriteAllText(_file, "{ this is not valid json !!!");
@@ -156,6 +202,8 @@ public sealed class PersistenceServiceTests : IDisposable
 
         Assert.False(svc.Load());
         Assert.Empty(users.ListUsers());
+        // 损坏文件应被备份，防止静默用空态覆盖仅存的一份数据
+        Assert.NotEmpty(Directory.GetFiles(Path.GetTempPath(), Path.GetFileName(_file) + ".bad-*"));
     }
 
     [Fact]

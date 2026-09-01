@@ -14,4 +14,11 @@ public sealed class PersistenceOptions
 
     /// <summary>后台落盘间隔（秒）。变更后由该定时器合并写入。</summary>
     public int FlushIntervalSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// 快照签名密钥（可选，建议生产开启）：配置后（如 <c>Secrets:SnapshotSigningKey</c> / 环境变量
+    /// <c>SECRETS__SNAPSHOTSIGNINGKEY</c>），快照写入时附加 HMAC-SHA256 签名，加载时校验签名，
+    /// 防篡改提权 / 伪造（未配置时不签名、不校验，保持向后兼容）。
+    /// </summary>
+    public string? SnapshotSigningKey { get; set; }
 }

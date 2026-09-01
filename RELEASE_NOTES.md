@@ -1,3 +1,22 @@
+# AG-UI 群聊桌面版 —— 增补：RBAC 权限分层 + 安全加固
+# AG-UI Group Chat Desktop — Addendum: RBAC layering + security hardening
+
+## 新增（中文）
+- **平台级 RBAC 分层**：账号增加 `PlatformRole`（`user / operator / admin / superadmin`）。首个注册账号自举为超级管理员；新增 Operator（只读运维）角色；`GET|POST /ag-ui/admin/roles` 由超级管理员管理角色矩阵；`/status`、`/usage`、`/audit`、`/bridge-health`、`/bridge-capabilities`、`/metrics` 降为 Operator 可读。管理员控制台「用户管理」新增角色下拉（仅超级管理员可见）。
+- **群级 RBAC 收敛**：不允许把成员标为 Owner（Owner 仅群主转让得到）；授予/撤销群管理员仅群主可操作；新增 `POST /ag-ui/group/transfer-owner` 群主转让（转让后原群主降为 Admin）。
+- **频道级 RBAC 保持**：`canInvokeAgents` / `canApprove` 由群主/管理员按成员管理，默认全允许。
+- **安全加固**：HTTP API 移除 `?memberId=` 身份回退；客户端技能桥新增 `ClientTool:RequireAdmin` 部署开关（共享多用户部署建议开启）；模型 API Key / TOTP 密钥落盘加密（`SecretVault`）；快照可选 HMAC 签名并防静默清空。
+
+## New (English)
+- **Platform RBAC layering**: accounts gain a `PlatformRole` (`user / operator / admin / superadmin`). The first registered account self-bootstraps as Super Admin; a read-only `Operator` role is introduced; `GET|POST /ag-ui/admin/roles` lets a Super Admin manage the role matrix; `/status`, `/usage`, `/audit`, `/bridge-health`, `/bridge-capabilities`, `/metrics` are now readable by Operator+. The admin console's User Management gains a role dropdown (visible to Super Admin only).
+- **Group RBAC tightening**: members can no longer be marked `Owner` via member update (`Owner` is only obtained through ownership transfer); only the Owner may grant/revoke group admin; add `POST /ag-ui/group/transfer-owner` (the previous owner becomes a group admin after transfer).
+- **Channel RBAC preserved**: `canInvokeAgents` / `canApprove` per-member limits remain manageable by owner/admin, defaulting to allow.
+- **Security hardening**: HTTP APIs no longer trust a `?memberId=` identity fallback; the client-skill bridge gains a `ClientTool:RequireAdmin` deployment switch (recommended for shared multi-user deployments); model API keys & TOTP secrets are encrypted at rest via `SecretVault`; snapshots support optional HMAC signing and are protected from silent data loss.
+
+详情见 `docs/RBAC.md`。See `docs/RBAC.md` for details.
+
+---
+
 # AG-UI 群聊桌面版 1.0.103 发布说明
 # AG-UI Group Chat Desktop 1.0.103 Release Notes
 

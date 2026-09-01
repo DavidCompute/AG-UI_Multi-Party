@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using AguiGroupChat.Hub.Persistence;
 
 namespace AguiGroupChat.Hub.Users;
 
@@ -16,6 +17,7 @@ public sealed class TotpService
 {
     private readonly ConcurrentDictionary<string, UserTotp> _users = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _lastUsedWindow = new(StringComparer.Ordinal); // 防重放
+    private readonly SecretVault? _vault; // 静态加密（可选）：持久化 TOTP 密钥时加密落盘，防明文泄露
 
     // 登录 TOTP 校验失败限速：按用户计数，窗口内累计失败超限后临时拒绝（防对 6 位动态码的离线/在线暴力枚举）。
     // OWASP 建议 MFA 校验失败约 5 次即锁定；这里与口令锁定窗口错开（<see cref="AuthService"/> 只锁口令路径），
@@ -150,11 +152,22 @@ public sealed class TotpService
 
     // --------------- 持久化（扩展区「totpSecrets」） ---------------
 
-    public IReadOnlyList<KeyValuePair<string, UserTotp>> Snapshot() => _users.ToList();
+    public TotpService(SecretVault? vault = null) => _vault = vault;
+
+    /// <summary>快照：配置了静态加密时对 base32 密钥字段加密后输出（内存态仍为明文，供运行时校验）。</summary>
+    public IReadOnlyList<KeyValuePair<string, UserTotp>> Snapshot()
+        => _users.Select(kv => new KeyValuePair<string, UserTotp>(kv.Key,
+            new UserTotp(_vault?.Encrypt(kv.Value.SecretBase32) ?? kv.Value.SecretBase32, kv.Value.Enabled))).ToList();
+
+    /// <summary>恢复：配置了静态加密时对已加密的密钥字段解密回明文供运行时校验（兼容旧版未加密明文）。</summary>
     public void Restore(IEnumerable<KeyValuePair<string, UserTotp>> users)
     {
         _users.Clear();
-        foreach (var kv in users) if (!string.IsNullOrWhiteSpace(kv.Key)) _users[kv.Key] = kv.Value;
+        foreach (var kv in users)
+        {
+            if (string.IsNullOrWhiteSpace(kv.Key)) continue;
+            _users[kv.Key] = new UserTotp(_vault?.Decrypt(kv.Value.SecretBase32) ?? kv.Value.SecretBase32, kv.Value.Enabled);
+        }
     }
     public void Clear() => _users.Clear();
 }

@@ -3,6 +3,24 @@ namespace AguiGroupChat.Hub.Models;
 /// <summary>成员类型：用户 / 智能体（协议 2.2）。</summary>
 public enum MemberType { User, Agent }
 
+/// <summary>
+/// 平台级角色（系统管理员分层）：权限从低到高 ——
+///  <see cref="User"/> 普通用户；<see cref="Operator"/> 运维（只读系统状态 / 审计 / 用量 / 启停账号，无数据导出、模型配置、品牌、治理）；
+///  <see cref="Admin"/> 系统管理员（既有 IsAdmin 的完整管理权限 + 运维权限）；
+///  <see cref="SuperAdmin"/> 超级管理员（在 Admin 之上可管理管理员名单 / 授予或回收他人平台角色）。
+/// 向后兼容：账号 <see cref="AguiGroupChat.Hub.Users.UserAccount.IsAdmin"/> 为 true 或命中 Auth:AdminUserIds 时，其生效角色至少为 <see cref="Admin"/>。
+/// </summary>
+public enum PlatformRole { User = 0, Operator = 1, Admin = 2, SuperAdmin = 3 }
+
+/// <summary>平台角色名工具：对 API 输出 camelCase（user / operator / admin / superadmin）。</summary>
+public static class PlatformRoleUtil
+{
+    public static string Name(PlatformRole role)
+    {
+        var s = role.ToString();
+        return s.Length is 0 ? s : char.ToLowerInvariant(s[0]) + s[1..];
+    }
+}
 /// <summary>群角色：群主 / 管理员 / 普通成员（协议 2.2）。</summary>
 public enum GroupRole { Owner, Admin, Normal }
 

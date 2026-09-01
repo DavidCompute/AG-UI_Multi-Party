@@ -23,6 +23,7 @@ builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模
 builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4），持久化到扩展区「branding」
 builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员持久化运维旋钮，持久化到扩展区「configGovernance」
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
+builder.Services.AddSingleton(builder.Configuration.GetSection("ClientTool").Get<AguiGroupChat.Web.ClientToolOptions>() ?? new AguiGroupChat.Web.ClientToolOptions()); // 客户端技能本机桥配置（ClientTool 节：RequireAdmin 等）
 builder.Services.AddSingleton<NativeTunnelService>(); // 内网本机桥反向隧道（HTTP/SSE）路由 + 执行等待
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
 builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>())); // 隧道端点限流器

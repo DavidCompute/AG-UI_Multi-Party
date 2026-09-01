@@ -215,6 +215,7 @@ public static class UserApi
         avatar = user.Avatar,
         personalMemoryEnabled = user.PersonalMemoryEnabled,
         isAdmin = user.IsAdmin,
+        platformRole = PlatformRoleUtil.Name(user.PlatformRole),
         createdAt = user.CreatedAt,
     };
 
@@ -226,6 +227,7 @@ public static class UserApi
         avatar = login.User.Avatar,
         personalMemoryEnabled = login.User.PersonalMemoryEnabled,
         isAdmin = login.User.IsAdmin,
+        platformRole = PlatformRoleUtil.Name(login.User.PlatformRole),
         token = login.Token,
         expiresAt = login.ExpiresAt,
     };

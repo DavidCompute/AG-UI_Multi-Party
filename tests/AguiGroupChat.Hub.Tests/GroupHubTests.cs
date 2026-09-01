@@ -999,3 +999,101 @@ public sealed class GroupHubTests
         Assert.Equal("agent", start.GetProperty("senderType").GetString());
     }
 }
+
+/// <summary>群级 RBAC：角色白名单、Admin 授予权限收敛、群主转让。</summary>
+public sealed class GroupRoleRbacTests
+{
+    [Fact]
+    public async Task UpdateMember_RoleOwner_IsRejected()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "user_2");
+
+        // 不允许通过成员更新把普通成员标成 Owner（Owner 仅群主转让得到）
+        var ex = await Assert.ThrowsAsync<AguiProtocolException>(() => f.Hub.UpdateMemberAsync(new GroupMemberUpdateRequest
+        {
+            GroupId = group.GroupId,
+            MemberId = "user_2",
+            OperatorId = "user_1",
+            UpdateFields = ["role"],
+            MemberInfo = new() { ["role"] = JsonSerializer.SerializeToElement("owner") },
+        }));
+        Assert.Equal(ErrorCodes.GroupPermissionDenied, ex.ErrorCode);
+        Assert.Equal(GroupRole.Normal, f.Store.GetMember(group.GroupId, "user_2")!.Role);
+    }
+
+    [Fact]
+    public async Task UpdateMember_AdminGrantsAdminToAnother_IsRejected_OwnerCan()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "user_2", "user_3");
+        // 先让 owner 把 user_2 设为管理员
+        await f.Hub.UpdateMemberAsync(new GroupMemberUpdateRequest
+        {
+            GroupId = group.GroupId,
+            MemberId = "user_2",
+            OperatorId = "user_1",
+            UpdateFields = ["role"],
+            MemberInfo = new() { ["role"] = JsonSerializer.SerializeToElement("admin") },
+        });
+        Assert.Equal(GroupRole.Admin, f.Store.GetMember(group.GroupId, "user_2")!.Role);
+
+        // 群管理员把他人设成管理员 → 拒绝（仅群主可授予 / 撤销 Admin，防管理员自治提权）
+        var denied = await Assert.ThrowsAsync<AguiProtocolException>(() => f.Hub.UpdateMemberAsync(new GroupMemberUpdateRequest
+        {
+            GroupId = group.GroupId,
+            MemberId = "user_3",
+            OperatorId = "user_2",
+            UpdateFields = ["role"],
+            MemberInfo = new() { ["role"] = JsonSerializer.SerializeToElement("admin") },
+        }));
+        Assert.Equal(ErrorCodes.GroupPermissionDenied, denied.ErrorCode);
+        Assert.Equal(GroupRole.Normal, f.Store.GetMember(group.GroupId, "user_3")!.Role);
+
+        // 群主仍可授予
+        await f.Hub.UpdateMemberAsync(new GroupMemberUpdateRequest
+        {
+            GroupId = group.GroupId,
+            MemberId = "user_3",
+            OperatorId = "user_1",
+            UpdateFields = ["role"],
+            MemberInfo = new() { ["role"] = JsonSerializer.SerializeToElement("admin") },
+        });
+        Assert.Equal(GroupRole.Admin, f.Store.GetMember(group.GroupId, "user_3")!.Role);
+    }
+
+    [Fact]
+    public async Task TransferOwnership_OwnerCanTransfer_OldOwnerBecomesAdmin()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "user_2");
+
+        var updated = await f.Hub.TransferOwnershipAsync(group.GroupId, "user_1", "user_2");
+
+        Assert.Equal("user_2", updated.OwnerId);
+        Assert.Equal(GroupRole.Owner, f.Store.GetMember(group.GroupId, "user_2")!.Role);
+        Assert.Equal(GroupRole.Admin, f.Store.GetMember(group.GroupId, "user_1")!.Role); // 原群主降为管理员
+    }
+
+    [Fact]
+    public async Task TransferOwnership_NonOwner_IsRejected()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "user_2", "user_3");
+
+        var ex = await Assert.ThrowsAsync<AguiProtocolException>(() => f.Hub.TransferOwnershipAsync(group.GroupId, "user_3", "user_2"));
+        Assert.Equal(ErrorCodes.GroupPermissionDenied, ex.ErrorCode);
+        Assert.Equal("user_1", f.Store.GetGroup(group.GroupId)!.OwnerId); // 未变更
+    }
+
+    [Fact]
+    public async Task TransferOwnership_ToAgent_IsRejected()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+
+        var ex = await Assert.ThrowsAsync<AguiProtocolException>(() => f.Hub.TransferOwnershipAsync(group.GroupId, "user_1", "agent_a"));
+        Assert.Equal(ErrorCodes.GroupPermissionDenied, ex.ErrorCode);
+        Assert.Equal("user_1", f.Store.GetGroup(group.GroupId)!.OwnerId);
+    }
+}

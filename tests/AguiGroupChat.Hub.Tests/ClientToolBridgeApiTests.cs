@@ -38,7 +38,8 @@ public sealed class ClientToolBridgeFixture : IAsyncLifetime
         App = builder.Build();
         HubApp.MapEndpoints(App);
         App.MapSkillApi();
-        App.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥
+        App.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（默认 RequireAdmin=false）
+        App.MapClientToolBridgeApi("/ag-ui/client-tool-secure", new ClientToolOptions { RequireAdmin = true }); // 共享部署护栏端点（仅管理员）
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }
@@ -83,6 +84,35 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
         };
         var res = await _client.SendAsync(req);
         Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Shell_RequireAdmin_BlocksNonAdminAndAllowsAdmin()
+    {
+        // 共享部署护栏：开启 ClientTool:RequireAdmin 的端点，普通用户 403、管理员放行、未登录 401。
+        var adminTok = await RegisterAsync("admin_chief");        // Auth:AdminUserIds=admin_chief → 管理员
+        var actorTok = await RegisterAsync("nonadmin_run");       // 普通用户
+        const string securePath = "/ag-ui/client-tool-secure";     // 夹具映射的第二端点（RequireAdmin=true）
+
+        // 无 token → 401（先过身份解析，才轮到 admin 门禁）
+        using (var req = new HttpRequestMessage(HttpMethod.Post, securePath)
+        {
+            Content = JsonContent.Create(new { kind = "shell", command = "echo nope" }),
+        })
+            Assert.Equal(HttpStatusCode.Unauthorized, (await _client.SendAsync(req)).StatusCode);
+        // 普通用户 → 403
+        using (var req = Authed(HttpMethod.Post, securePath, actorTok))
+        {
+            req.Content = JsonContent.Create(new { kind = "shell", command = "echo nope" });
+            Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+        }
+        // 管理员 → 放行
+        using (var req = Authed(HttpMethod.Post, securePath, adminTok))
+        {
+            req.Content = JsonContent.Create(new { kind = "shell", command = "echo ok-from-admin" });
+            var res = await _client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        }
     }
 
     [Fact]

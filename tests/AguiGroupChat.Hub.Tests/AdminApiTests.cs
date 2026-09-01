@@ -4,6 +4,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub;
+using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Users;
 using AguiGroupChat.Web;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -312,6 +314,138 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         var normal = await RegisterAsync("cfg_normal_admin");
         using var denied = Authed(HttpMethod.Post, "/ag-ui/admin/config", normal.GetProperty("token").GetString()!);
         denied.Content = JsonContent.Create(new { sessionTtlHours = 24 });
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
+    }
+}
+
+/// <summary>
+/// 独立宿主（专属 fixture）：首个注册用户默认自举为管理员 + 超级管理员，用于确定性验证平台角色 HTTP 分层。
+/// </summary>
+public sealed class PlatformRoleApiServerFixture : IAsyncLifetime
+{
+    public WebApplication App { get; private set; } = null!;
+    public string HttpBase { get; private set; } = null!;
+    public string SuperAdminToken { get; private set; } = null!;
+
+    public async Task InitializeAsync()
+    {
+        var builder = HubApp.CreateBuilder([]);
+        builder.Environment.EnvironmentName = "Testing";
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["GroupChat:SeedSampleData"] = "false",
+            ["Agents:Provider"] = "mock",
+            ["Persistence:Enabled"] = "false",
+            ["Auth:RequireTokenOnRealTime"] = "false",
+            ["Auth:AdminUserIds"] = "",
+        });
+        HubApp.ConfigureServices(builder);
+        builder.Services.AddAgentFramework(builder.Configuration);
+        builder.Services.AddSingleton(new ConfigGovernanceState());
+        builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
+
+        App = builder.Build();
+        HubApp.MapEndpoints(App);
+        App.MapAdminApi();
+        App.MapConfigGovernanceApi();
+        await App.StartAsync();
+        HttpBase = App.Urls.First();
+
+        // 确定性自举：平台_root 为本应用首个注册账号 → 自动成为管理员 + 超级管理员（其它测试先行注册也不会影响本 fixture 的专属实例）
+        var auth = App.Services.GetRequiredService<AuthService>();
+        var super = auth.Register("platform_root", "secret1", "超级管理员", null);
+        Assert.Equal(PlatformRole.SuperAdmin, super.PlatformRole);
+        SuperAdminToken = auth.Login("platform_root", "secret1").Token;
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (App is not null) await App.DisposeAsync();
+    }
+}
+
+/// <summary>平台角色分层 HTTP 端到端验证：首账号自举为 SuperAdmin，可授予/回收；Operator / Admin / User 差异化访问。</summary>
+public sealed class PlatformRoleApiTests : IClassFixture<PlatformRoleApiServerFixture>
+{
+    private readonly PlatformRoleApiServerFixture _fixture;
+    private readonly HttpClient _client;
+
+    public PlatformRoleApiTests(PlatformRoleApiServerFixture fixture)
+    {
+        _fixture = fixture;
+        _client = new HttpClient { BaseAddress = new Uri(fixture.HttpBase) };
+    }
+
+    private async Task<JsonElement> RegisterAsync(string username, string password = "secret1")
+    {
+        var res = await _client.PostAsJsonAsync("/ag-ui/user/register", new { username, password, nickname = username });
+        res.EnsureSuccessStatusCode();
+        return await res.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    private static HttpRequestMessage Authed(HttpMethod method, string path, string token)
+    {
+        var req = new HttpRequestMessage(method, path);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return req;
+    }
+
+    [Fact]
+    public async Task FirstUser_IsSuperAdmin_AndCanManageRoles()
+    {
+        var superToken = _fixture.SuperAdminToken; // 平台_root（自举为 SuperAdmin）
+
+        // 注册一个普通用户
+        var staff = await RegisterAsync("staff_member");
+        var staffId = staff.GetProperty("userId").GetString()!;
+        Assert.Equal("user", staff.GetProperty("platformRole").GetString());
+
+        // 普通用户访问 `/roles` → 403
+        using (var denied = Authed(HttpMethod.Get, "/ag-ui/admin/roles", staff.GetProperty("token").GetString()!))
+            Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
+
+        // SuperAdmin 提升普通用户为 Operator（只读运维）
+        using var promote = Authed(HttpMethod.Post, $"/ag-ui/admin/roles/{staffId}", superToken);
+        promote.Content = JsonContent.Create(new { role = "operator" });
+        (await _client.SendAsync(promote)).EnsureSuccessStatusCode();
+
+        // Operator 可访问只读运维端点 /admin/usage，但不能访问管理写端点 /admin/users
+        var staffToken = staff.GetProperty("token").GetString()!;
+        using (var usage = Authed(HttpMethod.Get, "/ag-ui/admin/usage", staffToken))
+            Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(usage)).StatusCode);
+        using (var users = Authed(HttpMethod.Get, "/ag-ui/admin/users", staffToken))
+            Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(users)).StatusCode);
+
+        // SuperAdmin 查看角色矩阵
+        using var roles = Authed(HttpMethod.Get, "/ag-ui/admin/roles", superToken);
+        var roleList = (await (await _client.SendAsync(roles)).Content.ReadFromJsonAsync<JsonElement[]>() ?? []);
+        var staffRow = Assert.Single(roleList, r => r.GetProperty("userId").GetString() == staffId);
+        Assert.Equal("operator", staffRow.GetProperty("effectiveRole").GetString());
+
+        // SuperAdmin 把 Operator 再提升为 Admin，随后可访问管理写端点
+        using var promoteAdmin = Authed(HttpMethod.Post, $"/ag-ui/admin/roles/{staffId}", superToken);
+        promoteAdmin.Content = JsonContent.Create(new { role = "admin" });
+        (await _client.SendAsync(promoteAdmin)).EnsureSuccessStatusCode();
+        using var usersNow = Authed(HttpMethod.Get, "/ag-ui/admin/users", staffToken);
+        Assert.Equal(HttpStatusCode.OK, (await _client.SendAsync(usersNow)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Admin_CannotManageRoles()
+    {
+        var superToken = _fixture.SuperAdminToken;
+        // 由 SuperAdmin 授予一个 Admin
+        var admin = await RegisterAsync("admin_mgr");
+        var adminId = admin.GetProperty("userId").GetString()!;
+        using var promote = Authed(HttpMethod.Post, $"/ag-ui/admin/roles/{adminId}", superToken);
+        promote.Content = JsonContent.Create(new { role = "admin" });
+        (await _client.SendAsync(promote)).EnsureSuccessStatusCode();
+
+        // Admin 试图再授予他人 → 403（角色管理仅 SuperAdmin）
+        var normal = await RegisterAsync("normal_c");
+        using var denied = Authed(HttpMethod.Post, $"/ag-ui/admin/roles/{normal.GetProperty("userId").GetString()}", admin.GetProperty("token").GetString()!);
+        denied.Content = JsonContent.Create(new { role = "admin" });
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
 }

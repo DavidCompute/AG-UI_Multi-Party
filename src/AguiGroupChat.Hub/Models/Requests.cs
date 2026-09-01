@@ -136,6 +136,16 @@ public sealed class GroupTopicClearRequest
     public required string OperatorId { get; set; }
 }
 
+/// <summary>群主转让：仅当前群主可调用；目标须为群内非群主用户成员。转让后原群主降为群管理员。</summary>
+public sealed class GroupTransferOwnerRequest
+{
+    public required string GroupId { get; set; }
+    /// <summary>新群主（群内用户成员）。</summary>
+    public required string NewOwnerId { get; set; }
+    /// <summary>操作者（当前群主）。Http 面由鉴权身份解析覆盖。</summary>
+    public string? OperatorId { get; set; }
+}
+
 /// <summary>撤回群消息（Hub API / WS 上行）。</summary>
 public sealed class GroupMessageRecallRequest
 {

@@ -28,6 +28,8 @@ const state = {
   personalMemoryEnabled: false, // 当前用户是否开启个人记忆（资料弹窗可改）
   bridgeClient: null, // 本机回环自动发现的客户端/机器标识（内网桥 --client；仅请求上下文用，非用户设置项）
   isAdmin: false,   // 是否系统管理员（数据备份 / 模型配置等管理菜单仅管理员可见）
+  platformRole: "user", // 平台级角色（RBAC 分层）：user / operator / admin / superadmin
+  isSuperAdmin: false,  // 是否超级管理员（可管理平台角色）
   replyTo: null,    // 引用回复目标 { id, sender, content }（输入框上方引用条）
   ws: null,
   reconnectDelay: 1000,
@@ -321,6 +323,8 @@ function enterApp(data) {
   state.personalMemoryEnabled = !!data.personalMemoryEnabled;
   state.bridgeClient = null; // 不读用户资料；由本机回环自动发现（见 autoDiscoverClient）
   state.isAdmin = !!data.isAdmin; // 系统管理员：数据备份 / 模型配置等管理菜单仅管理员可见
+  state.platformRole = data.platformRole || (state.isAdmin ? "admin" : "user"); // RBAC：平台角色
+  state.isSuperAdmin = state.platformRole === "superadmin";
   storeAuth({ memberId: data.userId, token: data.token, nickname: data.nickname });
   state.topicMemory = loadTopicMemory(data.userId); // 恢复该用户的话题记忆
   pendingAutoEnterGroup = true; // 知聚列表加载完成后自动进入上次选择的知聚
@@ -417,8 +421,8 @@ async function tryRestoreSession() {
     const res = await fetch("/ag-ui/user/me", { headers: { Authorization: `Bearer ${auth.token}` } });
     if (!res.ok) { clearAuth(); showAuth(); return; } // 401（令牌失效）才清登录态
     const me = await res.json();
-    // 恢复会话时必须带上 isAdmin（/me 返回该字段）：否则管理菜单（备份 / 模型配置 / 用户管理 / 系统状态）会被隐藏
-    enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
+    // 恢复会话时必须带上 isAdmin / platformRole（/me 返回）：否则管理菜单（备份 / 模型配置 / 用户管理 / 系统状态 / 平台角色）会被隐藏
+    enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin, platformRole: me.platformRole || undefined });
   } catch {
     // 初次恢复失败：稍作退避重试一次（服务刚启动恢复快照时可能 503）
     try {
@@ -426,7 +430,7 @@ async function tryRestoreSession() {
       const retry = await fetch("/ag-ui/user/me", { headers: { Authorization: `Bearer ${auth.token}` } });
       if (!retry.ok) { clearAuth(); showAuth(); return; }
       const me = await retry.json();
-      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin });
+      enterApp({ userId: me.userId, token: auth.token, nickname: me.nickname || me.username, avatar: me.avatar || null, personalMemoryEnabled: !!me.personalMemoryEnabled, isAdmin: !!me.isAdmin, platformRole: me.platformRole || undefined });
     } catch {
       showAuth();
       $("authError").textContent = t("auth.err.restoreNetwork");
@@ -4253,13 +4257,23 @@ async function loadAdminUsers() {
     if (!res.ok) { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
     const meId = state.memberId;
     $("adminUserRows").innerHTML = (data || []).map((u) => {
-      const role = u.isAdmin ? `<span class="tag-admin">${t("admin.role")}</span>` : `<span class="tag-user">${t("admin.user")}</span>`;
+      const role = roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"));
       const status = u.isDisabled ? `<span class="tag-disabled">${t("admin.disabled")}</span>` : `<span class="tag-active">${t("admin.active")}</span>`;
       const self = u.userId === meId ? t("admin.me") : "";
-      const actions = u.userId === meId
-        ? `<span class="muted">${t("admin.currentAccount")}</span>`
-        : `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? t("admin.enableTitle") : t("admin.disableTitle")}">${u.isDisabled ? "🔓" : "🔒"}</button>`
+      let actions;
+      if (u.userId === meId) {
+        actions = `<span class="muted">${t("admin.currentAccount")}</span>`;
+      } else {
+        // 超级管理员可见「平台角色」下拉（RBAC）：可授予 / 回收 user / operator / admin / superadmin
+        const roleSel = state.isSuperAdmin
+          ? `<select class="admin-role-sel" data-op="role" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.roleSelTitle")}">
+              ${["user","operator","admin","superadmin"].map((r) => `<option value="${r}"${(u.platformRole||"user")===r?" selected":""}>${t("admin.roleName."+r)}</option>`).join("")}
+            </select>`
+          : "";
+        actions = roleSel
+          + `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? t("admin.enableTitle") : t("admin.disableTitle")}">${u.isDisabled ? "🔓" : "🔒"}</button>`
           + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.resetPwTitle")}">🔑</button>`;
+      }
       return `<tr>
         <td>${escapeHtml(u.username)}${self}</td>
         <td>${escapeHtml(u.nickname || "")}</td>
@@ -4271,6 +4285,12 @@ async function loadAdminUsers() {
       </tr>`;
     }).join("") || `<tr><td colspan="7" class="admin-empty">${t("admin.noUsers")}</td></tr>`;
   } catch { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
+}
+
+/** 平台角色徽章：user / operator / admin / superadmin → 带色标签。 */
+function roleBadge(r) {
+  const cls = r === "superadmin" ? "tag-superadmin" : (r === "admin" ? "tag-admin" : (r === "operator" ? "tag-operator" : "tag-user"));
+  return `<span class="${cls}">${t("admin.roleName." + (r || "user"))}</span>`;
 }
 
 /** 管理员操作：禁用 / 启用 / 重置密码（重置密码弹输入框）。 */
@@ -4304,6 +4324,22 @@ async function adminUserAction(op, uid, name) {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(errMsg(data, t("admin.resetPwFail", { err: res.status }))); return; }
     toast(t("admin.pwReset", { name }));
+  } else if (op === "role") {
+    // 平台角色（RBAC，仅超级管理员界面可触发）：授予 / 回收 user / operator / admin / superadmin
+    if (!state.isSuperAdmin) { toast(t("admin.superOnly")); return; }
+    if (!await uiConfirm({ message: t("admin.roleConfirm", { name }), danger: false })) return;
+    const sel = document.querySelector(`select[data-op="role"][data-uid="${cssEsc(uid)}"]`);
+    const role = sel ? sel.value : null;
+    if (!role) return;
+    const res = await fetch(`/ag-ui/admin/roles/${encodeURIComponent(uid)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ role }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("admin.opFail", { err: res.status }))); return; }
+    toast(t("admin.roleSet", { name, role: t("admin.roleName." + role) }));
+    await loadAdminUsers();
   }
 }
 
@@ -6510,6 +6546,11 @@ function init() {
   $("adminUserRows").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-op]");
     if (btn) adminUserAction(btn.dataset.op, btn.dataset.uid, btn.dataset.name);
+  });
+  // 平台角色（RBAC）：超级管理员在下拉中改选角色时确认并提交
+  $("adminUserRows").addEventListener("change", (e) => {
+    const sel = e.target.closest("select[data-op=role]");
+    if (sel) adminUserAction("role", sel.dataset.uid, sel.dataset.name);
   });
   $("adminTabUsers").onclick = () => switchAdminTab("users");
   $("adminTabUsage").onclick = () => switchAdminTab("usage");

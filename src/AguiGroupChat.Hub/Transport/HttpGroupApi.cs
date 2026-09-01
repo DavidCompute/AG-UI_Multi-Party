@@ -160,6 +160,17 @@ public static class HttpGroupApi
                 return Results.Ok(await hub.UpdateMemberAsync(req, ct));
             }));
 
+        // 群主转让（RBAC 群级）：仅当前群主可调用；转让后原群主降为群管理员。
+        group.MapPost("/transfer-owner", async (GroupTransferOwnerRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
+            => await RunAsync(async () =>
+            {
+                var (identity, error) = RequireIdentity(ctx, auth, authOptions, fallback: req.OperatorId);
+                if (identity is null) return error!;
+                req.OperatorId = identity; // 操作者 = 服务端解析身份，防冒充群主转让
+                var group = await hub.TransferOwnershipAsync(req.GroupId, req.OperatorId!, req.NewOwnerId, ct);
+                return Results.Ok(new { ok = true, ownerId = group.OwnerId });
+            }));
+
         // ---- 群消息（协议 5.1）----
         group.MapPost("/message/send", async (GroupMessageSendRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
             => await RunAsync(async () =>

@@ -48,7 +48,7 @@ public sealed class Group
     public bool IsPrivate { get; set; }
 
     /// <summary>群主成员 ID。</summary>
-    public required string OwnerId { get; init; }
+    public required string OwnerId { get; set; }
 
     /// <summary>当前成员总数。</summary>
     public int MemberCount { get; set; }

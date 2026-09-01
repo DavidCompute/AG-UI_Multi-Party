@@ -166,14 +166,23 @@ public static class SystemApi
         var state = services.GetRequiredService<ModelConfigState>();
         var options = services.GetRequiredService<AgentOptions>();
         var catalog = services.GetRequiredService<AgentCatalog>();
-        Func<object?> snapshot = () => state;
+        var vault = services.GetService<SecretVault>(); // 静态加固（可选）：模型 API Key 落盘时加密，防快照/库明文泄露
+        Func<object?> snapshot = () => new
+        {
+            IsConfigured = state.IsConfigured,
+            Endpoint = state.Endpoint,
+            // 仅加密敏感字段：ApiKey 落盘前经 SecretVault 加密，内存态保持明文供运行时使用
+            ApiKey = vault?.Encrypt(state.ApiKey) ?? state.ApiKey,
+            ThinkingMode = state.ThinkingMode,
+        };
         Action<JsonElement> restore = element =>
         {
             var saved = element.Deserialize<ModelConfigState>(AguiJson.Options);
             if (saved is null) return;
             state.IsConfigured = saved.IsConfigured;
             state.Endpoint = saved.Endpoint;
-            state.ApiKey = saved.ApiKey;
+            // 兼容旧版明文；新写入为加密值，解密回明文供运行时使用
+            state.ApiKey = vault?.Decrypt(saved.ApiKey) ?? saved.ApiKey;
             state.ThinkingMode = saved.ThinkingMode;
             ApplyModelConfig(options, state, catalog);
         };
