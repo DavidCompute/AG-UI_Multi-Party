@@ -17,8 +17,9 @@ public static class PlatformRoleUtil
 {
     public static string Name(PlatformRole role)
     {
-        var s = role.ToString();
-        return s.Length is 0 ? s : char.ToLowerInvariant(s[0]) + s[1..];
+        // 角色名统一为全小写（user / operator / admin / superadmin），与前端 i18n key 及 Enum.TryParse 一致；
+        // 不能用只小写首字母——SuperAdmin 会变成 superAdmin 而与约定不符。
+        return role.ToString().ToLowerInvariant();
     }
 }
 /// <summary>群角色：群主 / 管理员 / 普通成员（协议 2.2）。</summary>

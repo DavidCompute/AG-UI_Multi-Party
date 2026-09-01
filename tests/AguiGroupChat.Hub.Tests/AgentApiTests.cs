@@ -793,6 +793,15 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
 
     // ================= 辅助 =================
 
+    /// <summary>编排 apply 请求：以 HTTP JSON（camelCase）序列化 record，与服务端约定一致。</summary>
+    private HttpRequestMessage ApplyRequest(string token, OrchestrateApplyRequest body)
+    {
+        var msg = new HttpRequestMessage(HttpMethod.Post, "/ag-ui/agents/orchestrate/apply");
+        msg.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        msg.Content = JsonContent.Create(body, options: new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return msg;
+    }
+
     private async Task<string> RegisterAsync(string username)
     {
         var res = await _client.PostAsJsonAsync("/ag-ui/user/register", new { username, password = "secret1", nickname = username });
@@ -826,5 +835,96 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         });
         create.EnsureSuccessStatusCode();
         return (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+    }
+
+    // ================= 一键组织编排 =================
+
+    [Fact]
+    public async Task Orchestrate_Preview_ReturnsPlanWithoutPersisting()
+    {
+        var token = await RegisterAsync("orch_preview");
+        using var req = await _client.SendAsync(AuthMessage(HttpMethod.Post, "/ag-ui/agents/orchestrate", token,
+            new { requirement = "组建一个客户服务团队" }));
+        req.EnsureSuccessStatusCode();
+        var d = await req.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(d.GetProperty("orchestrated").GetBoolean());
+        var agents = d.GetProperty("agents");
+        Assert.True(agents.GetArrayLength() >= 1);
+        Assert.True(d.GetProperty("skills").GetArrayLength() >= 1);
+
+        // 未落库：生成后库里不应出现这些 agent / skill。取预览里第一个 agentId 校验不存在。
+        var firstAgent = agents[0].GetProperty("agentId").GetString()!;
+        var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
+        Assert.Null(catalog.GetDefinition(firstAgent));
+    }
+
+    [Fact]
+    public async Task Orchestrate_Apply_CreatesAgentsSkillsAndConnections()
+    {
+        var token = await RegisterAsync("orch_apply");
+        // mock 模板生成的固定方案：mgr + execA + execB + 两个技能
+        var preview = await AgentOrchestrator.GenerateAsync(
+            new AgentOptions { Provider = "mock" }, "客户服务团队", NullLoggerFactory.Instance.CreateLogger("t"), CancellationToken.None);
+        var reqBody = new OrchestrateApplyRequest(
+            preview.Title,
+            preview.Agents.Select(a => new OrchestratedAgentHttp(a.AgentId, a.Nickname, a.Description, a.Instructions,
+                a.TriggerMode, a.SkillIds, a.AssignmentIds, a.EscalationAgentId, a.RelayToAgentId)).ToList(),
+            preview.Skills.Select(s => new OrchestratedSkillHttp(s.SkillId, s.Name, s.Description, s.Kind,
+                s.Body, s.ExecutionLocation, s.RequiresApproval)).ToList());
+
+        var res = await _client.SendAsync(ApplyRequest(token, reqBody));
+        if (!res.IsSuccessStatusCode)
+        {
+            var errb = await res.Content.ReadAsStringAsync();
+            throw new Xunit.Sdk.XunitException($"apply 失败 HTTP {res.StatusCode}: {errb}");
+        }
+
+        var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
+        var skills = _fixture.App.Services.GetRequiredService<AgentSkillCatalog>();
+        // 技能落库
+        foreach (var s in preview.Skills) Assert.NotNull(skills.Get(s.SkillId!));
+        // 数字员工落库 + 连接（mock 模板：Agents[0]=主管(assignment 两个执行岗)，Agents[1]=执行岗A(escalation=主管)）
+        var mgrId = preview.Agents[0].AgentId!;
+        var execId = preview.Agents[1].AgentId!;
+        Assert.NotNull(catalog.GetDefinition(mgrId));
+        var mgrDef = catalog.GetDefinition(mgrId)!;
+        Assert.Equal(execId, mgrDef.AssignmentIds[0]);
+        Assert.Equal(mgrId, catalog.GetDefinition(execId)!.EscalationAgentId);
+        Assert.Contains(mgrDef.SkillDefIds, sid => preview.Skills.Any(s => s.SkillId == sid));
+    }
+}
+
+
+/// <summary>一键组织编排生成器（AgentOrchestrator）单元测试：mock 模式确定性模板与解析。</summary>
+public sealed class AgentOrchestratorTests
+{
+    [Fact]
+    public async Task Mock_GeneratesDeterministicOrgWithSkillsAndConnections()
+    {
+        var plan = await AgentOrchestrator.GenerateAsync(
+            new AgentOptions { Provider = "mock" }, "财务报销流程",
+            NullLoggerFactory.Instance.CreateLogger("orch"), CancellationToken.None);
+
+        Assert.False(string.IsNullOrWhiteSpace(plan.Title));
+        Assert.NotEmpty(plan.Agents);
+        Assert.NotEmpty(plan.Skills);
+        // 主管有向下指派两个执行岗；两个执行岗都向上提升到主管；技能引用都存在
+        var mgr = Assert.Single(plan.Agents, a => (a.AssignmentIds ?? []).Count > 0);
+        var execs = plan.Agents.Where(a => !string.IsNullOrEmpty(a.EscalationAgentId)).ToList();
+        Assert.NotEmpty(execs);
+        Assert.All(execs, e => Assert.Equal(mgr.AgentId, e.EscalationAgentId));
+        foreach (var a in plan.Agents)
+            foreach (var sid in a.SkillIds ?? [])
+                Assert.Contains(plan.Skills, s => s.SkillId == sid);
+    }
+
+    [Theory]
+    [InlineData("  ")]
+    [InlineData("x")]
+    public async Task ShortRequirement_Throws(string requirement)
+    {
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => AgentOrchestrator.GenerateAsync(
+            new AgentOptions { Provider = "mock" }, requirement, NullLoggerFactory.Instance.CreateLogger("t"), CancellationToken.None));
+        Assert.Contains("至少 2 个字符", ex.Message);
     }
 }

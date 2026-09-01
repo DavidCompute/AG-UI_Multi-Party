@@ -216,6 +216,156 @@ public static class AgentApi
             }
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 一键组织编排（预览，不落库）：根据一句话需求生成 数字员工组织架构 + 各岗位技能 + 岗位连接，供前端确认 ----
+        root.MapPost("/orchestrate", async (OrchestrateRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var requirement = (req.Requirement ?? "").Trim();
+            if (requirement.Length < 2)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请描述你要建立的组织 / 需求（至少 2 个字符）"));
+            if (requirement.Length > 500)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "需求描述最长 500 字符"));
+
+            try
+            {
+                var plan = await AgentOrchestrator.GenerateAsync(
+                    agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct);
+                return Results.Ok(new
+                {
+                    orchestrated = true,
+                    title = plan.Title,
+                    agents = plan.Agents.Select(a => new
+                    {
+                        agentId = a.AgentId,
+                        nickname = a.Nickname,
+                        description = a.Description,
+                        instructions = a.Instructions,
+                        triggerMode = a.TriggerMode ?? "mentioned",
+                        skillIds = a.SkillIds ?? [],
+                        assignmentIds = a.AssignmentIds ?? [],
+                        escalationAgentId = a.EscalationAgentId,
+                        relayToAgentId = a.RelayToAgentId,
+                    }),
+                    skills = plan.Skills.Select(s => new
+                    {
+                        skillId = s.SkillId,
+                        name = s.Name,
+                        description = s.Description,
+                        kind = s.Kind,
+                        body = s.Body,
+                        executionLocation = s.ExecutionLocation ?? "server",
+                        requiresApproval = s.RequiresApproval,
+                    }),
+                });
+            }
+            catch (OperationCanceledException) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成已取消或超时"), statusCode: StatusCodes.Status408RequestTimeout); }
+            catch (Exception ex) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成失败：" + ex.Message), statusCode: StatusCodes.Status400BadRequest); }
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 一键组织编排（确认后落库）：把 /orchestrate 返回并确认过的方案写入技能库 + 数字员工库，并建好连接 ----
+        //      幂等部署安全：全部先校验通过再造；失败则整体返回错误（不部分落库）。
+        root.MapPost("/orchestrate/apply", (OrchestrateApplyRequest req, HttpContext ctx, AuthService auth,
+            AgentCatalog catalog, AgentSkillCatalog skillCatalog) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var isAdmin = auth.IsAdmin(user.UserId);
+
+            // ---- 1. 校验技能 ----
+            var skills = req.Skills ?? [];
+            var skillIds = new HashSet<string>(StringComparer.Ordinal);
+            var builtSkills = new List<AgentSkillDefinition>(skills.Count);
+            foreach (var s in skills)
+            {
+                var id = AgentSkillDefinition.IsValidAsciiToolId((s.SkillId ?? "").Trim())
+                    ? (s.SkillId ?? "").Trim()
+                    : AgentSkillDefinition.ToAsciiToolId(s.SkillId ?? "", skillIds);
+                if (string.IsNullOrWhiteSpace(id))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "技能标识不能为空"));
+                if (!skillIds.Add(id))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"技能 ID 重复：{id}"));
+                if (string.IsNullOrWhiteSpace(s.Name) || string.IsNullOrWhiteSpace(s.Description) || string.IsNullOrWhiteSpace(s.Body))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"技能「{id}」缺少名称 / 描述 / 正文"));
+                var kind = Enum.TryParse<AgentSkillKind>(s.Kind, true, out var k) ? k : AgentSkillKind.Prompt;
+                // 权限：Shell / HTTP 技能仅管理员可建（与 SkillApi 一致），避免非管理员借编排批量生成任意命令执行技能
+                if ((kind is AgentSkillKind.Shell or AgentSkillKind.Http) && !isAdmin)
+                    return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可建技能类型 {kind}"), statusCode: StatusCodes.Status403Forbidden);
+                var execLoc = string.Equals(s.ExecutionLocation, "client", StringComparison.OrdinalIgnoreCase)
+                    ? AgentSkillExecutionLocation.Client : AgentSkillExecutionLocation.Server;
+                var requiresApproval = kind == AgentSkillKind.Shell || execLoc == AgentSkillExecutionLocation.Client
+                    || (s.RequiresApproval ?? true);
+                builtSkills.Add(new AgentSkillDefinition
+                {
+                    SkillId = id,
+                    Name = s.Name.Trim(),
+                    Description = s.Description.Trim(),
+                    Kind = kind,
+                    Body = s.Body ?? "",
+                    RequiresApproval = requiresApproval,
+                    ExecutionLocation = execLoc,
+                    OwnerId = user.UserId,
+                });
+            }
+
+            // ---- 2. 校验数字员工（含引用）。分两遍：先收集全部 ID（引用需全量可见），再校验字段与连接。 ----
+            var agents = req.Agents ?? [];
+            if (agents.Count == 0)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "方案里没有数字员工"));
+            var agentIds = new HashSet<string>(StringComparer.Ordinal);
+            // 2a. 收集全部 agentId（合法性 / 重复 / 与现存冲突）
+            foreach (var a in agents)
+            {
+                var id = (a.AgentId ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(id) || !System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_-]{1,64}$"))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 非法：{id}"));
+                if (id.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "twin_ 前缀为系统保留"));
+                if (catalog.GetDefinition(id) is not null)
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 已存在：{id}"));
+                if (string.IsNullOrWhiteSpace(a.Nickname))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{id}」缺少昵称"));
+                if (!agentIds.Add(id))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 重复：{id}"));
+            }
+            // 2b. 校验技能引用与连接目标（此时 agentIds 已含全部，引用顺序无关）
+            foreach (var a in agents)
+            {
+                var id = (a.AgentId ?? "").Trim();
+                foreach (var sid in a.SkillIds ?? [])
+                    if (!skillIds.Contains(sid))
+                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{id}」引用了未定义技能：{sid}"));
+                foreach (var dep in (a.AssignmentIds ?? []).Concat(new[] { a.EscalationAgentId, a.RelayToAgentId }).Where(x => !string.IsNullOrWhiteSpace(x)))
+                    if (!agentIds.Contains(dep!))
+                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{id}」的连接目标未定义：{dep}"));
+            }
+
+            // ---- 3. 落库（先技能后数字员工）----
+            foreach (var s in builtSkills)
+                skillCatalog.Upsert(s);
+            var created = new List<string>();
+            foreach (var a in agents)
+            {
+                var id = (a.AgentId ?? "").Trim();
+                var def = new AgentDefinition
+                {
+                    AgentId = id,
+                    Nickname = a.Nickname!.Trim(),
+                    Description = a.Description ?? "",
+                    Instructions = a.Instructions ?? "",
+                    TriggerMode = Enum.TryParse<AgentTriggerMode>(a.TriggerMode, true, out var tm) ? tm : AgentTriggerMode.Mentioned,
+                    SkillDefIds = (a.SkillIds ?? []).ToList(),
+                    AssignmentIds = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
+                    EscalationAgentId = string.IsNullOrWhiteSpace(a.EscalationAgentId) ? null : a.EscalationAgentId,
+                    RelayToAgentId = string.IsNullOrWhiteSpace(a.RelayToAgentId) ? null : a.RelayToAgentId,
+                    OwnerId = user.UserId,
+                };
+                catalog.Upsert(def);
+                created.Add(id);
+            }
+            return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList() });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 优化「管理下一层任务指派」提示词（需登录，组织架构图节点上调用）：
         //      依据该角色自身职责 + 其直接下一层下属，生成一段可追加到 Instructions 的指派指引，
         //      让“只看下一层”的多下级指派选得更准（不向上钻、不引入更深层叶子）。 ----
@@ -542,6 +692,21 @@ public static class AgentApi
 
 /// <summary>根据一句话简介生成角色设定的请求体。</summary>
 public sealed record GenerateInstructionsHttpRequest(string? Description);
+
+/// <summary>一键组织编排请求体：一句话描述要建立的组织 / 需求。</summary>
+public sealed record OrchestrateRequest(string? Requirement);
+
+/// <summary>一键组织编排：确认后提交的完整方案（前端把 /orchestrate 返回的预览原样回传，服务端校验后逐个落库）。</summary>
+public sealed record OrchestrateApplyRequest(string? Title, IReadOnlyList<OrchestratedAgentHttp>? Agents, IReadOnlyList<OrchestratedSkillHttp>? Skills);
+
+/// <summary>编排方案中的一个数字员工岗位。</summary>
+public sealed record OrchestratedAgentHttp(string? AgentId, string? Nickname, string? Description, string? Instructions,
+    string? TriggerMode, IReadOnlyList<string>? SkillIds, IReadOnlyList<string>? AssignmentIds,
+    string? EscalationAgentId, string? RelayToAgentId);
+
+/// <summary>编排方案中的一个技能定义。</summary>
+public sealed record OrchestratedSkillHttp(string? SkillId, string? Name, string? Description, string? Kind,
+    string? Body, string? ExecutionLocation, bool? RequiresApproval);
 
 /// <summary>创建 / 更新智能体的请求体（agentId 仅创建时可选，留空自动生成 agent_xxx）。</summary>
 public sealed record AgentUpsertHttpRequest(
