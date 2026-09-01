@@ -316,11 +316,31 @@ public sealed class AuthService
         if (string.IsNullOrEmpty(userId)) return PlatformRole.User;
         var user = _store.GetUserById(userId);
         var explicitRole = user?.PlatformRole ?? PlatformRole.User;
-        // 既有的 IsAdmin 标记 / 配置名单仍视为至少 Admin（向后兼容）；SuperAdmin 由显式角色独占
+        // 既有的 IsAdmin 标记 / 配置名单仍视为至少 Admin（向后兼容）；SuperAdmin 由显式角色或配置名单授予
         var adminDerived = (user is not null && user.IsAdmin)
                            || IsConfiguredAdmin(user?.Username ?? "", userId);
-        return (PlatformRole)Math.Max((int)explicitRole,
-            (int)(adminDerived ? PlatformRole.Admin : PlatformRole.User));
+        var superDerived = IsConfiguredSuperAdmin(user?.Username ?? "", userId);
+        var derived = superDerived ? PlatformRole.SuperAdmin
+                    : adminDerived ? PlatformRole.Admin
+                    : PlatformRole.User;
+        return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
+    }
+
+    /// <summary>配置名单（Auth:SuperAdminUserIds，逗号分隔的 userId / username）是否命中。</summary>
+    private bool IsConfiguredSuperAdmin(string username, string userId)
+        => IsConfiguredInList(_options.SuperAdminUserIds, username, userId);
+
+    /// <summary>解析逗号分隔名单（userId 精确匹配 / username 大小写不敏感匹配）。</summary>
+    private static bool IsConfiguredInList(string list, string username, string userId)
+    {
+        if (string.IsNullOrWhiteSpace(list)) return false;
+        foreach (var item in list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (item.Equals(userId, StringComparison.Ordinal)
+                || (!string.IsNullOrEmpty(username) && item.Equals(username, StringComparison.OrdinalIgnoreCase)))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>用户生效角色是否至少达到 <paramref name="min"/>（RBAC 分层判定）。</summary>
@@ -362,17 +382,7 @@ public sealed class AuthService
 
     /// <summary>配置名单（Auth:AdminUserIds，逗号分隔的 userId / username）是否命中。大小写不敏感匹配用户名。</summary>
     private bool IsConfiguredAdmin(string username, string userId)
-    {
-        var configured = _options.AdminUserIds ?? "";
-        if (string.IsNullOrWhiteSpace(configured)) return false;
-        foreach (var item in configured.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (item.Equals(userId, StringComparison.Ordinal)
-                || (!string.IsNullOrEmpty(username) && item.Equals(username, StringComparison.OrdinalIgnoreCase)))
-                return true;
-        }
-        return false;
-    }
+        => IsConfiguredInList(_options.AdminUserIds, username, userId);
 
     public IReadOnlyList<UserAccount> ListUsers() => _store.ListUsers();
 

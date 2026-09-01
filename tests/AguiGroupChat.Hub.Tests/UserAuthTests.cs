@@ -242,6 +242,19 @@ public sealed class PlatformRoleTests
         Assert.True(auth.HasRole(user.UserId, PlatformRole.Admin));
         Assert.True(auth.IsAdmin(user.UserId));
     }
+
+    [Fact]
+    public void ConfigSuperAdminUserIds_DeriveSuperAdmin()
+    {
+        // 第二个注册账号不是首账号；但命中 SuperAdmin 配置名单 → 生效角色为 SuperAdmin（供既有部署 bootstrap）
+        var auth = CreateAuth(new AuthOptions { SuperAdminUserIds = "ops_root" });
+        _ = auth.Register("first_regular", "secret1", null, null);
+        var user = auth.Register("ops_root", "secret1", null, null);
+        Assert.False(user.IsAdmin);                    // 非首账号，未标记 is_admin
+        Assert.Equal(PlatformRole.User, user.PlatformRole); // 显式角色仍为 User
+        Assert.True(auth.HasRole(user.UserId, PlatformRole.SuperAdmin)); // 生效角色由配置名单推导为 SuperAdmin
+        Assert.True(auth.IsSuperAdmin(user.UserId));
+    }
 }
 
 public sealed class UserDisplayNameTests

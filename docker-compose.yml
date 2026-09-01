@@ -98,6 +98,11 @@ services:
       GroupChat__SeedSampleData: ${SEED_SAMPLE_DATA:-true}
       # 实时连接 / 写接口强制令牌鉴权（默认 true：未携带有效 token 的连接与写请求一律 401；false 为旧客户端兼容回退）
       Auth__RequireTokenOnRealTime: ${REQUIRE_TOKEN_ON_REALTIME:-true}
+      # 超级管理员名单（逗号分隔 userId/username，RBAC 分层）：命中者生效角色至少为 SuperAdmin，
+      # 用于既有部署 bootstrap / 指定最高权限账号（管理平台角色）。留空则仅首个注册账号自举为 SuperAdmin。
+      Auth__SuperAdminUserIds: ${AUTH_SUPER_ADMIN_USER_IDS:-}
+      # 系统管理员名单（逗号分隔 userId/username，旧机制；命中者生效角色至少为 Admin）
+      Auth__AdminUserIds: ${AUTH_ADMIN_USER_IDS:-}
       # 存储：postgres（默认，含向量记忆）；memory 为内存 + JSON 快照
       Storage__Provider: ${STORAGE_PROVIDER:-postgres}
       Storage__ConnectionString: ${STORAGE_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${PG_DATABASE:-agui};Username=${PG_USER:-postgres};Password=${PG_PASSWORD:-agui}}

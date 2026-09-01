@@ -1,4 +1,5 @@
 using System.Data.Common;
+using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Users;
 
 namespace AguiGroupChat.Hub.Persistence.Relational;
@@ -20,8 +21,8 @@ public sealed class RelationalUserStore : IUserStore
             using var conn = _db.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO agui_users (user_id, username, password_hash, password_salt, nickname, avatar, created_at, updated_at, personal_memory_enabled, is_admin, is_disabled)
-                VALUES (@uid, @username, @hash, @salt, @nick, @avatar, @created, @updated, @personal, @isAdmin, @isDisabled)
+                INSERT INTO agui_users (user_id, username, password_hash, password_salt, nickname, avatar, created_at, updated_at, personal_memory_enabled, is_admin, is_disabled, platform_role)
+                VALUES (@uid, @username, @hash, @salt, @nick, @avatar, @created, @updated, @personal, @isAdmin, @isDisabled, @platformRole)
                 """;
             cmd.AddWithValue("uid", user.UserId);
             cmd.AddWithValue("username", user.Username);
@@ -34,6 +35,7 @@ public sealed class RelationalUserStore : IUserStore
             cmd.AddWithValue("personal", user.PersonalMemoryEnabled);
             cmd.AddWithValue("isAdmin", user.IsAdmin);
             cmd.AddWithValue("isDisabled", user.IsDisabled);
+            cmd.AddWithValue("platformRole", UserRoleToString(user.PlatformRole));
             cmd.ExecuteNonQuery();
             return true;
         }
@@ -71,7 +73,8 @@ public sealed class RelationalUserStore : IUserStore
         cmd.CommandText = """
             UPDATE agui_users
             SET password_hash = @hash, password_salt = @salt, nickname = @nick, avatar = @avatar,
-                personal_memory_enabled = @personal, is_admin = @isAdmin, is_disabled = @isDisabled, updated_at = @updated
+                personal_memory_enabled = @personal, is_admin = @isAdmin, is_disabled = @isDisabled,
+                platform_role = @platformRole, updated_at = @updated
             WHERE user_id = @uid
             """;
         cmd.AddWithValue("hash", user.PasswordHash);
@@ -81,6 +84,7 @@ public sealed class RelationalUserStore : IUserStore
         cmd.AddWithValue("personal", user.PersonalMemoryEnabled);
         cmd.AddWithValue("isAdmin", user.IsAdmin);
         cmd.AddWithValue("isDisabled", user.IsDisabled);
+        cmd.AddWithValue("platformRole", UserRoleToString(user.PlatformRole));
         cmd.AddWithValue("updated", user.UpdatedAt);
         cmd.AddWithValue("uid", user.UserId);
         return cmd.ExecuteNonQuery() > 0;
@@ -113,5 +117,30 @@ public sealed class RelationalUserStore : IUserStore
         PersonalMemoryEnabled = r.IsDBNull(8) ? false : r.GetBoolean(8),
         IsAdmin = r.IsDBNull(9) ? false : r.GetBoolean(9),
         IsDisabled = r.IsDBNull(10) ? false : r.GetBoolean(10),
+        PlatformRole = ReadPlatformRole(r),
+    };
+
+    /// <summary>读取平台角色列（旧表无该列时按 IsAdmin 推导为 Admin，兼容迁移前窗口）。</summary>
+    private static PlatformRole ReadPlatformRole(DbDataReader r)
+    {
+        try
+        {
+            var idx = r.GetOrdinal("platform_role");
+            if (idx < 0 || r.IsDBNull(idx)) return PlatformRole.User;
+            var s = r.GetString(idx);
+            if (Enum.TryParse<PlatformRole>(s, true, out var role)) return role;
+        }
+        catch (Exception ex) when (ex is InvalidCastException or IndexOutOfRangeException or System.ArgumentOutOfRangeException) { }
+        var adminIdx = r.GetOrdinal("is_admin");
+        return adminIdx >= 0 && !r.IsDBNull(adminIdx) && r.GetBoolean(adminIdx) ? PlatformRole.Admin : PlatformRole.User;
+    }
+
+    /// <summary>平台角色 → 存库字符串（user / operator / admin / superadmin）。</summary>
+    private static string UserRoleToString(PlatformRole role) => role switch
+    {
+        PlatformRole.Operator => "operator",
+        PlatformRole.Admin => "admin",
+        PlatformRole.SuperAdmin => "superadmin",
+        _ => "user",
     };
 }

@@ -30,6 +30,12 @@ public sealed class AuthOptions
     /// </summary>
     public string AdminUserIds { get; set; } = "";
 
+    /// <summary>
+    /// 超级管理员名单（逗号分隔的 userId 或 username，RBAC 分层）：命中者<b>生效角色至少为 SuperAdmin</b>，
+    /// 可用于既有部署/bootstrap：无需先用现职超级管理员即可把某人提升为最高角色（管理平台角色）。
+    /// </summary>
+    public string SuperAdminUserIds { get; set; } = "";
+
     /// <summary>首个注册账号自动成为管理员（默认开启：单机 / 桌面部署的首个用户即管理员）。</summary>
     public bool FirstUserIsAdmin { get; set; } = true;
 

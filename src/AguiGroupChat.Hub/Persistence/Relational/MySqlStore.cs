@@ -22,6 +22,8 @@ public sealed class MySqlStore : RelationalStore
         EnsureColumn("agui_groups", "is_private", "ALTER TABLE agui_groups ADD COLUMN is_private TINYINT(1) NOT NULL DEFAULT 0");
         EnsureColumn("agui_users", "personal_memory_enabled", "ALTER TABLE agui_users ADD COLUMN personal_memory_enabled TINYINT(1) NOT NULL DEFAULT 0");
         EnsureColumn("agui_users", "is_admin", "ALTER TABLE agui_users ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0");
+        EnsureColumn("agui_users", "is_disabled", "ALTER TABLE agui_users ADD COLUMN is_disabled TINYINT(1) NOT NULL DEFAULT 0");
+        EnsureColumn("agui_users", "platform_role", "ALTER TABLE agui_users ADD COLUMN platform_role VARCHAR(16) NOT NULL DEFAULT 'user'");
         EnsureColumn("agui_messages", "reasoning", "ALTER TABLE agui_messages ADD COLUMN reasoning MEDIUMTEXT NULL");
         EnsureColumn("agui_messages", "agent_chain", "ALTER TABLE agui_messages ADD COLUMN agent_chain MEDIUMTEXT NULL");
         EnsureColumn("agui_messages", "plan_json", "ALTER TABLE agui_messages ADD COLUMN plan_json MEDIUMTEXT NULL");
@@ -155,7 +157,8 @@ public sealed class MySqlStore : RelationalStore
             created_at BIGINT NOT NULL,
             updated_at BIGINT NOT NULL,
             personal_memory_enabled TINYINT(1) NOT NULL DEFAULT 0,
-            is_admin TINYINT(1) NOT NULL DEFAULT 0
+            is_admin TINYINT(1) NOT NULL DEFAULT 0,
+            platform_role VARCHAR(16) NOT NULL DEFAULT 'user'
         ) CHARACTER SET utf8mb4;
 
         CREATE TABLE IF NOT EXISTS agui_agent_registrations (

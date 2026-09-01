@@ -38,6 +38,7 @@ public sealed class SqliteStore : RelationalStore
         EnsureColumn("agui_users", "personal_memory_enabled", "ALTER TABLE agui_users ADD COLUMN personal_memory_enabled INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("agui_users", "is_admin", "ALTER TABLE agui_users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("agui_users", "is_disabled", "ALTER TABLE agui_users ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn("agui_users", "platform_role", "ALTER TABLE agui_users ADD COLUMN platform_role TEXT NOT NULL DEFAULT 'user'");
         EnsureColumn("agui_messages", "reasoning", "ALTER TABLE agui_messages ADD COLUMN reasoning TEXT");
         EnsureColumn("agui_messages", "agent_chain", "ALTER TABLE agui_messages ADD COLUMN agent_chain TEXT");
         EnsureColumn("agui_messages", "plan_json", "ALTER TABLE agui_messages ADD COLUMN plan_json TEXT");
@@ -157,7 +158,8 @@ public sealed class SqliteStore : RelationalStore
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             personal_memory_enabled INTEGER NOT NULL DEFAULT 0,
-            is_admin INTEGER NOT NULL DEFAULT 0
+            is_admin INTEGER NOT NULL DEFAULT 0,
+            platform_role TEXT NOT NULL DEFAULT 'user'
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_ci ON agui_users (LOWER(username));
 

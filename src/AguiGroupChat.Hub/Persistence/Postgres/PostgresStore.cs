@@ -132,12 +132,16 @@ public sealed class PostgresStore
                 created_at BIGINT NOT NULL,
                 updated_at BIGINT NOT NULL,
                 personal_memory_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                is_admin BOOLEAN NOT NULL DEFAULT FALSE
+                is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                platform_role TEXT NOT NULL DEFAULT 'user'
             );
             -- 旧库迁移（CREATE TABLE IF NOT EXISTS 不修改已有表）
             ALTER TABLE agui_users ADD COLUMN IF NOT EXISTS personal_memory_enabled BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE agui_users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE agui_users ADD COLUMN IF NOT EXISTS is_disabled BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE agui_users ADD COLUMN IF NOT EXISTS platform_role TEXT NOT NULL DEFAULT 'user';
+            -- 旧管理员账号（is_admin=true）同步标记为显式 admin 角色，保持 RBAC 生效角色语义
+            UPDATE agui_users SET platform_role = 'admin' WHERE is_admin = TRUE AND platform_role = 'user';
             -- 与内存实现一致：用户名唯一且大小写不敏感
             CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_ci ON agui_users (LOWER(username));
 

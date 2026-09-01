@@ -42,7 +42,7 @@ public static class UserApi
 
                 var user = auth.Register(req.Username, req.Password, req.Nickname, req.Avatar);
                 // 注册即登录：直接签发会话令牌，无需二次登录（失败锁定键同样按 IP + 用户名）
-                return Task.FromResult(Results.Ok(ToAuthResponse(
+                return Task.FromResult(Results.Ok(ToAuthResponse(auth,
                     auth.Login(user.Username, req.Password, ctx.Connection.RemoteIpAddress?.ToString()))));
             }));
 
@@ -65,7 +65,7 @@ public static class UserApi
                         throw new AguiProtocolException(ErrorCodes.UserBadCredentials, "需要动态验证码（TOTP）或验证码错误：请在登录请求携带 totpCode");
                     }
                 }
-                return Task.FromResult(Results.Ok(ToAuthResponse(result)));
+                return Task.FromResult(Results.Ok(ToAuthResponse(auth, result)));
             }));
 
         root.MapPost("/logout", (HttpContext ctx, AuthService auth) =>
@@ -78,7 +78,7 @@ public static class UserApi
         root.MapGet("/me", (HttpContext ctx, AuthService auth) =>
         {
             var user = RequireUser(ctx, auth);
-            return user is null ? Unauthorized() : Results.Ok(ToProfile(user));
+            return user is null ? Unauthorized() : Results.Ok(ToProfile(auth, user));
         });
 
         root.MapPost("/password", (HttpContext ctx, ChangePasswordHttpRequest req, AuthService auth) =>
@@ -99,7 +99,7 @@ public static class UserApi
                 // 昵称 / 头像变更同步到其所有群成员（显示名 / 头像），并广播 GROUP_MEMBER_UPDATED
                 await hub.SyncUserDisplayNameAsync(user.UserId);
                 await hub.SyncUserAvatarAsync(user.UserId);
-                return Results.Ok(ToProfile(updated));
+                return Results.Ok(ToProfile(auth, updated));
             }));
 
         // ---- 登录二次验证（TOTP，4.4）：状态 / 签发密钥 / 确认启用 / 停用 ----
@@ -207,7 +207,7 @@ public static class UserApi
         createdAt = user.CreatedAt,
     };
 
-    private static object ToProfile(UserAccount user) => new
+    private static object ToProfile(AuthService auth, UserAccount user) => new
     {
         userId = user.UserId,
         username = user.Username,
@@ -215,11 +215,12 @@ public static class UserApi
         avatar = user.Avatar,
         personalMemoryEnabled = user.PersonalMemoryEnabled,
         isAdmin = user.IsAdmin,
-        platformRole = PlatformRoleUtil.Name(user.PlatformRole),
+        // 返回<b>生效</b>平台角色（含 IsAdmin / AdminUserIds / SuperAdminUserIds 配置推导），前端据此判定 superadmin
+        platformRole = PlatformRoleUtil.Name(auth.ResolveRole(user.UserId)),
         createdAt = user.CreatedAt,
     };
 
-    private static object ToAuthResponse(LoginResult login) => new
+    private static object ToAuthResponse(AuthService auth, LoginResult login) => new
     {
         userId = login.User.UserId,
         username = login.User.Username,
@@ -227,7 +228,7 @@ public static class UserApi
         avatar = login.User.Avatar,
         personalMemoryEnabled = login.User.PersonalMemoryEnabled,
         isAdmin = login.User.IsAdmin,
-        platformRole = PlatformRoleUtil.Name(login.User.PlatformRole),
+        platformRole = PlatformRoleUtil.Name(auth.ResolveRole(login.User.UserId)),
         token = login.Token,
         expiresAt = login.ExpiresAt,
     };
