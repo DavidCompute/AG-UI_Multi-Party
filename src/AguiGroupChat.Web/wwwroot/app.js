@@ -1620,6 +1620,8 @@ let agentSkillPicks = [];    // 数字员工表单：可调用子数字员工（
 
 let skillList = [];      // 技能库 [{skillId,name,description,kind,body,parametersJson,interpreter,httpTimeoutSeconds,requiresApproval,ownerId}]
 let editingSkillId = null;
+let skillSearchQuery = "";  // 技能库搜索关键词（仅前端过滤）
+let selectedSkills = new Set(); // 技能批量删除所选 skillId
 
 /** 加载技能库列表。返回是否成功（登录态）。 */
 async function loadSkills() {
@@ -1641,11 +1643,19 @@ function renderSkillList() {
     return;
   }
   const kindLabel = { shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort") };
-  skillList.forEach((s) => {
+  const q = (skillSearchQuery || "").trim().toLowerCase();
+  const shown = q ? skillList.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.skillId || "").toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q) || (s.kind || "").toLowerCase().includes(q)) : skillList;
+  if (shown.length === 0) {
+    el.innerHTML = `<div class="kb-empty" data-i18n="skill.searchEmpty">无匹配技能</div>`;
+    return;
+  }
+  shown.forEach((s) => {
     const row = document.createElement("div");
     row.className = "skill-row skill-list-item";
     const canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId;
+    const checked = selectedSkills.has(s.skillId);
     row.innerHTML = `
+      <span class="skill-sel-col">${canManage ? `<input type="checkbox" class="skill-sel-cb" data-skill-id="${escapeHtml(s.skillId)}" ${checked ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff" />` : ""}</span>
       <span class="skill-name"><b>${escapeHtml(s.name)}</b><code>${escapeHtml(s.skillId)}</code></span>
       <span class="skill-kind tag-skill">${escapeHtml(kindLabel[s.kind] || s.kind)}</span>
       <span class="skill-desc">${escapeHtml(s.description || "—")}</span>
@@ -1653,18 +1663,34 @@ function renderSkillList() {
         <button class="icon-btn" data-skill-act="test" title="${escapeHtml(t("skill.testRun"))}">▶</button>
         ${canManage ? `<button class="icon-btn" data-skill-act="edit" title="${escapeHtml(t("skill.edit"))}">✏️</button><button class="icon-btn danger" data-skill-act="del" title="${escapeHtml(t("skill.del"))}">🗑️</button>` : ""}
       </span>`;
+    if (canManage) row.querySelector('[data-skill-act="edit"]').onclick = () => openSkillForm(s.skillId);
+    if (canManage) row.querySelector('[data-skill-act="del"]').onclick = () => deleteSkill(s.skillId);
+    const cb = row.querySelector(".skill-sel-cb");
+    if (cb) cb.onchange = () => { if (cb.checked) selectedSkills.add(s.skillId); else selectedSkills.delete(s.skillId); updateSkillBatchStatus(); };
     row.querySelector('[data-skill-act="test"]').onclick = () => testSkill(s.skillId);
-    if (canManage) {
-      row.querySelector('[data-skill-act="edit"]').onclick = () => openSkillForm(s.skillId);
-      row.querySelector('[data-skill-act="del"]').onclick = () => deleteSkill(s.skillId);
-    }
     el.appendChild(row);
   });
+  updateSkillBatchStatus();
+}
+
+/// <summary>刷新技能批量删除状态栏（选中数）与全选。</summary>
+function updateSkillBatchStatus() {
+  const box = $("skillSelectAll");
+  const status = $("skillBatchStatus");
+  if (box) {
+    const manageable = skillList.filter((s) => !s.ownerId || state.isAdmin || s.ownerId === state.memberId).length;
+    box.checked = manageable > 0 && selectedSkills.size >= manageable;
+    box.indeterminate = selectedSkills.size > 0 && selectedSkills.size < manageable;
+  }
+  if (status) status.textContent = selectedSkills.size ? t("skill.selectedCount", { n: selectedSkills.size }) : "";
 }
 
 /** 打开技能库弹窗。 */
 async function openSkillModal() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  skillSearchQuery = "";
+  selectedSkills = new Set();
+  const box = $("skillSearch"); if (box) box.value = "";
   showSkillListView();
   await loadSkills();
   renderSkillList();
@@ -1791,6 +1817,23 @@ async function deleteSkill(skillId) {
     toast(t("skill.deleted"));
     await loadSkills(); renderSkillList();
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
+
+/** 批量删除所选技能（可管理）：逐个经既有单删接口删除，权限与单删一致。 */
+async function batchDeleteSkills() {
+  const ids = [...selectedSkills];
+  if (!ids.length) { toast(t("skill.batchNone")); return; }
+  if (!await uiConfirm({ message: t("skill.batchDelConfirm", { n: ids.length }), danger: true })) return;
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}`, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+      if (res.ok) ok++; else fail++;
+    } catch { fail++; }
+  }
+  selectedSkills = new Set();
+  toast(fail ? t("skill.batchPartial", { ok, fail }) : t("skill.batchDone", { n: ok }));
+  await loadSkills(); renderSkillList();
 }
 
 /** 数字员工表单：可复用技能（技能库）多选回显渲染。 */
@@ -6767,6 +6810,13 @@ function init() {
   $("skillCloseBtn").onclick = () => $("skillModal").classList.add("hidden");
   $("skillAddBtn").onclick = () => openSkillForm(null);
   $("sfBack").onclick = showSkillListView;
+  $("skillSearch").addEventListener("input", (e) => { skillSearchQuery = e.target.value; renderSkillList(); });
+  $("skillSelectAll").addEventListener("change", (e) => {
+    if (e.target.checked) selectedSkills = new Set(skillList.filter((s) => !s.ownerId || state.isAdmin || s.ownerId === state.memberId).map((s) => s.skillId));
+    else selectedSkills = new Set();
+    renderSkillList();
+  });
+  $("skillBatchDelBtn").onclick = batchDeleteSkills;
   $("sfKind").addEventListener("change", syncSkillKind);
   $("sfExecutionLocation").addEventListener("change", syncSkillKind);
   $("sfSave").onclick = saveSkill;

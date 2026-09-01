@@ -378,7 +378,16 @@
       <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="skill.hint">定义<b>可复用技能</b>：<b>shell</b>（可执行命令/脚本）、<b>http</b>（调用外部接口）、<b>prompt</b>（提示词/流程模板）。技能存入技能库，可被任意数字员工反复挂载，也支持在技能管理界面手工维护或让智能体用自然语言创建。</p>
       <!-- 技能库列表 -->
       <div id="skillListView">
+        <div style="margin-bottom:8px">
+          <input id="skillSearch" class="modal-input agent-search" style="width:100%" data-i18n-placeholder="skill.search" />
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:12px"><input id="skillSelectAll" type="checkbox" style="width:14px;height:14px;accent-color:#4f8cff" /> <span data-i18n="skill.selectAll">全选</span></label>
+          <button id="skillBatchDelBtn" class="chip-btn danger" style="font-size:12px" data-i18n="skill.batchDel">🗑️ 删除所选</button>
+          <span class="muted" id="skillBatchStatus" style="font-size:12px"></span>
+        </div>
         <div class="skill-grid-head">
+          <span style="width:20px"></span>
           <span data-i18n="skill.col.name">名称 / ID</span>
           <span data-i18n="skill.col.kind">类型</span>
           <span data-i18n="skill.col.desc">描述</span>
