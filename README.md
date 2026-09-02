@@ -25,6 +25,7 @@
 - ✅ **运行时模型配置与初始化**：登录后可在界面填写 DeepSeek endpoint / apiKey（留空用官方端点与环境变量，`GET/POST /ag-ui/settings/model`），重启不丢；用户菜单「数据备份」内提供「初始化（清空一切）」（`POST /ag-ui/reset`，清空数据 + 浏览器缓存）
 - ✅ **桌面版多实例**：WPF / Avalonia 客户端共享同一后端进程（固定 5200），第一个实例启动 `--backend` 子进程、最后一个实例关闭才停后端；支持一次打开多个窗口
 - ✅ **思考模式（AG-UI 桥接）**：外部服务的 `REASONING_MESSAGE_CONTENT` 独立通道回灌，前端渲染可折叠「思考过程」块；工具调用简洁展示（「🔧 名称 调用中…」→ 完成后收起）
+- ✅ **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到**视觉模型**，图片以 base64 多模态内容喂给模型看图并作答；纯文本消息仍走常规 / 思考模型，行为不变。DeepSeek 下视觉模型默认 `deepseek-v4-flash-vision-exp`（可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关）；`mock` 提供方不支持视觉，图片消息按文本处理。图片直接从附件库按字节 + MIME 读取内联传入，无需另存文件；共享的群成员审批 / 发图片附件工作流不变。
 - ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先全量校验再落库，幂等不部分写入）；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
 - ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` 三类，`shell` / `http`（可执行任意命令 / 外部请求）**仅管理员可创建**，普通用户只能建纯提示词技能；本机（client 执行）的 shell 技能经内网隧道 / 前端在本机执行（`ClientRunner` 自动从命令体生成）；技能库支持搜索（前端过滤）与批量删除；`POST /ag-ui/skills/generate` 用自然语言生成技能定义
 - ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行
@@ -391,7 +392,7 @@ apiKey 不回显（仅提示是否已配置）。未配置过模型时，登录�
 再随 `GROUP_MESSAGE_SEND`（WS）或 `message/send`（HTTP）以 `attachments` 数组携带；事件与快照（`TEXT_MESSAGE_START` / `GROUP_STATE_SNAPSHOT`）同样携带，历史消息可完整渲染。
 智能体消费附件时：`text` 类（txt / md / json / csv 等）与 `document` 类办公文档（docx / xlsx / pptx / pdf）
 由服务端提取文本注入模型上下文（Word 取正文与表格段落、Excel 按工作表输出单元格、PowerPoint 取幻灯片文本、PDF 逐页提取；单文件截断 12K 字符），
-`image` / `binary` 类携带文件名 / 大小 / 下载地址供模型感知。
+`image` 类（png / jpg / jpeg / gif / webp / bmp）在**图片理解（视觉）**开启时由服务端按字节 + MIME 读取，以 base64 多模态内容内联喂给视觉模型看图作答（`mock` 提供方 / 关闭 `Agents:VisionEnabled` 则仅按文本处理）；其余 `binary` 类携带文件名 / 大小 / 下载地址供模型感知。
 上传文件落盘 `data/uploads/`（与持久化快照同根，Docker 命名卷一并持久化），单文件上限 20 MB、单次最多 9 个；旧格式 `.doc` / `.xls` / `.ppt` 不在支持范围，请另存为 OOXML 或 PDF 后上传。
 **安全加固**：上传仅允许白名单扩展名（图片 png/jpg/jpeg/gif/webp/bmp；文本 txt/md/json/csv/yml 等；文档 pdf/docx/xlsx/pptx；zip；**拒绝 html/js/css/svg/xml 等脚本类**）；
 下载需登录且调用者须为该附件所属群的成员，响应带 `X-Content-Type-Options: nosniff`，脚本类扩展名强制 `Content-Disposition: attachment` 下载（不内联渲染）；
@@ -656,6 +657,10 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 模型可在 `Agents:Model` 全局设置（如 `deepseek-reasoner`），或按智能体在 `Agents:Agents[i].Model` 单独覆盖。
 本地无密钥联调时把 `Agents:Provider` 改回 `mock` 即可。
+
+**图片理解（视觉）配置**：`Agents:VisionEnabled`（默认 `true`）为总开关，`Agents:VisionModel`（可选模型名，默认空）在带图片的消息中指定视觉模型。
+`VisionModel` 为空且提供方为 DeepSeek 时，自动选用默认视觉模型 `deepseek-v4-flash-vision-exp`；依赖已配置的模型 API Key（同 `Agents:ApiKey` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`）。
+二者也可用环境变量 `Agents__VisionEnabled` / `Agents__VisionModel` 等价覆盖（与 `AGENTS__APIKEY` 相同的映射约定）。`mock` 提供方不支持视觉，图片消息按文本处理。
 
 自定义网关时，在 `Program.cs` / `HubApp.ConfigureServices` 中替换 DI 注册：
 `builder.Services.AddSingleton<IAgentGateway, YourGateway>();`

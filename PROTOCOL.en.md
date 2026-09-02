@@ -112,7 +112,7 @@ An independent discussion thread within the group. The default topic `main` (the
 
 ### 2.5 Attachment Model (AttachmentInfo)
 
-Messages can carry attachments (images / documents / binary). `text` and `document` type attachments (plain text such as txt, md, source code, as well as office documents such as docx / xlsx / pptx / pdf) have their full text extracted by the server and injected into the agent context (truncated when too long); `image` / `binary` types only carry metadata for the model to perceive.
+Messages can carry attachments (images / documents / binary). `text` and `document` type attachments (plain text such as txt, md, source code, as well as office documents such as docx / xlsx / pptx / pdf) have their full text extracted by the server and injected into the agent context (truncated when too long); `image` type attachments (png / jpg / jpeg / gif / webp / bmp) are read by the server as bytes + MIME and fed inline as base64 multimodal content to a **vision model** for image understanding when it is enabled (when disabled, or on the `mock` provider, they only carry metadata and behave as text); other `binary` types carry metadata for the model to perceive.
 
 |Field|Type|Required|Description|
 |---|---|---|---|

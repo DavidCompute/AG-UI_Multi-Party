@@ -1,5 +1,21 @@
-# AG-UI 群聊桌面版 1.0.107 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.107 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.108 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.108 Release Notes (current desktop release)
+
+## 新增（中文）
+（提交 d14f210）
+- **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到视觉模型、以多模态 base64 内联看图作答；纯文本消息仍走常规 / 思考模型。视觉默认模型 `deepseek-v4-flash-vision-exp`（可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关；`mock` 提供方不支持视觉）。图片从附件库读取、无需另存文件，发图 / 审批协作流程不变。本期已构建 Windows 1.0.108 MSI。
+
+## New (English)
+(commit d14f210)
+- **Image understanding (vision)**: when a group message carries an image attachment, that turn is auto-routed to a vision model that sees the image (fed inline as base64 multimodal content); plain text messages keep the normal / thinking model. Default vision model `deepseek-v4-flash-vision-exp` (override with `Agents:VisionModel`; `Agents:VisionEnabled` defaults on as the master switch; the `mock` provider has no vision). The image is read from the attachment store — no extra file — and the image-upload / approval workflow is unchanged. A Windows 1.0.108 MSI was built for this release.
+
+**版本说明**：1.0.107 → 1.0.108 为点版本，主题为「图片理解（视觉）」，并已构建 Windows 1.0.108 MSI。
+**Version note**: 1.0.107 → 1.0.108 is a point release adding image understanding (vision); a Windows 1.0.108 MSI was built.
+
+---
+
+# AG-UI 群聊桌面版 1.0.107 发布说明
+# AG-UI Group Chat Desktop 1.0.107 Release Notes
 
 ## 新增（中文）
 （提交 b60b9c7）
