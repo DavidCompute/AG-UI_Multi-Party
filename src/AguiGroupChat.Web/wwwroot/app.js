@@ -1740,12 +1740,12 @@ async function saveAgent() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
-/// 离开数字员工编辑表单时的返回目标：从组织架构进入则回组织架构，否则回数字员工管理列表。
+/// 离开数字员工编辑表单时的返回目标：从组织架构进入则回组织架构（编辑表单在此之上，回组织架构后关闭组织架构即可回到数字员工管理列表），否则回列表。
 function returnFromAgentForm() {
   if (agentFormReturnFrom === "org") {
     agentFormReturnFrom = null;
-    $("agentModal").classList.add("hidden"); // 收起数字员工管理弹窗
-    openOrgChart();                          // 重绘组织架构（反映编辑后的昵称 / 连线）
+    showAgentListView(); // 让数字员工管理回到列表视图（它是组织架构的底层，关闭组织架构后回到这里）
+    openOrgChart();      // 重绘组织架构（反映编辑后的昵称 / 连线）；不收起数字员工管理弹窗
   } else {
     showAgentListView();
   }
