@@ -2306,14 +2306,29 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 记忆检索注入（群记忆 RAG + 个人记忆）已按 MSAGENT 标准迁移至
     /// <see cref="MemoryContextProvider"/>（AIContextProvider，经 Instructions 注入），此处不再拼接。
     /// </summary>
+    /// <summary>
+    /// 智能体上下文可见性过滤：普通知聚只注入全群可见（All）消息；客服知聚存在顾客隔离会话（消息为 Private 定向），
+    /// 需把<b>本次触发顾客自己的会话</b>纳入上下文（否则客服“忘了”该顾客之前的对话）。
+    /// 严格限定在触发者本人：只含发送者是触发者、或定向可见含触发者的消息，绝不混入其它顾客的私聊。
+    /// </summary>
+    public static bool IsVisibleForAgentContext(GroupMessage m, string triggerId, bool supportCircle)
+    {
+        if (!supportCircle) return m.Visibility == MessageVisibility.All;
+        return m.Visibility == MessageVisibility.All
+            || m.SenderId == triggerId                       // 顾客自己的消息
+            || (m.VisibleMemberIds?.Contains(triggerId) ?? false); // 定向回给该顾客的客服消息
+    }
+
     private async Task<string> BuildUserMessageAsync(AgentInvocationContext context, CancellationToken ct)
     {
         var sb = new StringBuilder();
 
-        // 仅注入全群可见消息：定向 / 私密消息不进入智能体上下文窗口（防私密内容泄漏）；按话题过滤（会话历史以话题为单位）
+        // 智能体上下文窗口：普通知聚只注入全群可见消息（All）；客服知聚补入本次触发顾客的隔离会话消息
+        // （含顾客自己的提问与客服定向回复，见 IsVisibleForAgentContext）。按话题过滤（会话历史以话题为单位）。
+        var supportCircle = _hub.Value.Store.GetGroup(context.GroupId)?.IsSupportCircle == true;
         var history = _hub.Value.Store.RecentMessages(context.GroupId, ContextWindowMessages, context.TopicId)
             .Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId && !string.IsNullOrWhiteSpace(m.Content)
-                && m.Visibility == MessageVisibility.All)
+                && IsVisibleForAgentContext(m, context.TriggerUserId, supportCircle))
             .ToList();
         if (history.Count > 0)
         {
@@ -2354,8 +2369,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             _changes?.Notify();
             history = _hub.Value.Store.MessagesBefore(context.GroupId, null, BridgeFullHistoryMax, context.TopicId);
         }
+        var supportCircle = _hub.Value.Store.GetGroup(context.GroupId)?.IsSupportCircle == true;
         var visible = history.Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId
-            && !string.IsNullOrWhiteSpace(m.Content) && m.Visibility == MessageVisibility.All).ToList();
+            && !string.IsNullOrWhiteSpace(m.Content) && IsVisibleForAgentContext(m, context.TriggerUserId, supportCircle)).ToList();
         var sb = new StringBuilder();
         if (visible.Count > 0)
         {

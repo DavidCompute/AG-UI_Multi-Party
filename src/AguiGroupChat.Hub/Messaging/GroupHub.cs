@@ -818,35 +818,49 @@ public sealed class GroupHub : IDisposable
     public async Task BroadcastTypingAsync(GroupTypingRequest req, CancellationToken ct = default)
     {
         var group = GetGroupOrThrow(req.GroupId);
+        // 客服知聚允许顾客参与者（非成员）也发 typing；普通知聚仍要求成员身份。
         var member = _store.GetMember(group.GroupId, req.MemberId!)
-            ?? throw new AguiProtocolException(ErrorCodes.GroupMemberNotExist, "成员不在群组内");
+            ?? (group.IsSupportCircle && IsSupportCustomer(group.GroupId, req.MemberId!)
+                ? null
+                : throw new AguiProtocolException(ErrorCodes.GroupMemberNotExist, "成员不在群组内"));
 
         // typing 节流：开始输入 1 秒内重复广播直接忽略（不扇出）；结束输入总是广播
         if (req.IsTyping)
         {
             var now = NowMs;
-            if (_lastTypingAt.TryGetValue(member.MemberId, out var last) && now - last < TypingThrottleMs)
+            if (_lastTypingAt.TryGetValue(req.MemberId!, out var last) && now - last < TypingThrottleMs)
                 return;
-            _lastTypingAt[member.MemberId] = now;
+            _lastTypingAt[req.MemberId!] = now;
         }
         else
         {
-            _lastTypingAt.TryRemove(member.MemberId, out _);
+            _lastTypingAt.TryRemove(req.MemberId!, out _);
         }
 
+        var isStaff = member is not null; // 群成员=客服；null=顾客参与者（客服知聚）
         var others = _store.ListMembers(group.GroupId)
-            .Where(m => m.MemberId != member.MemberId)
+            .Where(m => m.MemberId != req.MemberId!)
             .Select(m => m.MemberId)
             .ToHashSet();
+        if (group.IsSupportCircle && isStaff)
+        {
+            // 客服 / 数字员工输入 → 除其他客服外，也让已进入的顾客参与者看到（向等待中的顾客暴露“客服正在输入”）。
+            if (_supportCustomers.TryGetValue(group.GroupId, out var customers))
+                foreach (var cid in customers.Keys)
+                    others.Add(cid);
+        }
+        // 顾客参与者输入 → 收件人仅为客服（成员），顾客之间互相不可见（与消息隔离一致）。
 
-        await FanOutAsync(group.GroupId, new GroupTypingEvent
+        var evt = new GroupTypingEvent
         {
             GroupId = group.GroupId,
-            MemberId = member.MemberId,
-            MemberType = member.MemberType,
+            MemberId = req.MemberId!,
+            MemberType = member?.MemberType ?? MemberType.User,
             IsTyping = req.IsTyping,
             Timestamp = NowMs,
-        }, others, ct);
+        };
+
+        await FanOutAsync(group.GroupId, evt, others, ct);
     }
 
     public async Task BroadcastReadAsync(GroupReadRequest req, CancellationToken ct = default)

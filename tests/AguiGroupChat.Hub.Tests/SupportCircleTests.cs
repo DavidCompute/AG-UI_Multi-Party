@@ -1,5 +1,6 @@
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Agents;
 using System.Text.Json;
 using Xunit;
 
@@ -16,6 +17,69 @@ public sealed class SupportCircleTests
             Kind = GroupKind.Support,
             MemberIds = team,
         });
+
+    [Fact]
+    public async Task Typing_SupportCircle_CustomerAndStaffSeeEachOther_ButNotOtherCustomers()
+    {
+        var f = new HubFixture();
+        var g = await CreateSupportCircleAsync(f, "user_staff", "agent_support");
+        await f.Hub.EnterSupportCircleAsync(g.GroupId, "user_customer");
+        await f.Hub.EnterSupportCircleAsync(g.GroupId, "user_customer2");
+
+        var (cStaff, inStaff) = f.NewConnection("user_staff");
+        var (cCust, inCust) = f.NewConnection("user_customer");
+        var (cCust2, inCust2) = f.NewConnection("user_customer2");
+        await f.Hub.SubscribeAsync(cStaff, [g.GroupId]);
+        await f.Hub.SubscribeAsync(cCust, [g.GroupId]);
+        await f.Hub.SubscribeAsync(cCust2, [g.GroupId]);
+        f.Drain(inStaff); f.Drain(inCust); f.Drain(inCust2);
+
+        // 客服输入 → 顾客参与者应收到（之前被排除，看不到“客服正在输入”），且其它顾客也看到（客服对全体顾客可见）
+        await f.Hub.BroadcastTypingAsync(new GroupTypingRequest { GroupId = g.GroupId, MemberId = "user_staff", IsTyping = true });
+        Assert.Contains(f.Drain(inCust), e => IsTypingOf(e, "user_staff"));
+        Assert.Contains(f.Drain(inCust2), e => IsTypingOf(e, "user_staff"));
+
+        // 顾客输入 → 客服收到；其它顾客（隔离）不应收到该顾客的 typing
+        await f.Hub.BroadcastTypingAsync(new GroupTypingRequest { GroupId = g.GroupId, MemberId = "user_customer", IsTyping = true });
+        Assert.Contains(f.Drain(inStaff), e => IsTypingOf(e, "user_customer"));
+        Assert.DoesNotContain(f.Drain(inCust2), e => IsTypingOf(e, "user_customer"));
+    }
+
+    private static bool IsTypingOf(string json, string memberId)
+    {
+        if (HubFixture.TypeOf(json) != EventTypes.GroupTyping) return false;
+        var evt = JsonSerializer.Deserialize<JsonElement>(json);
+        return evt.GetProperty("memberId").GetString() == memberId;
+    }
+
+    [Fact]
+    public void AgentContext_SupportCircle_IncludesCustomerSession_ButNotOthers()
+    {
+        // 客服知聚：智能体上下文应包含“本次顾客自己的提问 + 定向回给该顾客的客服消息”，
+        // 但绝不混入其它顾客的私聊（隔离）。
+        GroupMessage Make(string id, string sender, string content, string? visibleTo)
+            => new()
+            {
+                MessageId = id, GroupId = "g", ThreadId = "g", SenderId = sender,
+                SenderType = MemberType.User, SenderNickname = sender, Content = content,
+                Timestamp = 1,
+                Visibility = visibleTo is null ? MessageVisibility.All : MessageVisibility.Private,
+                VisibleMemberIds = visibleTo is null ? [] : [visibleTo],
+            };
+        var custMsg = Make("m1", "custA", "我的电脑开不了机", "custA");            // 顾客自己的提问
+        var staffReply = Make("m2", "agent", "帮您检查一下", "custA");           // 定向回给该顾客的客服消息
+        var otherCust = Make("m3", "custB", "我的打印机坏了", "custB");         // 其它顾客的私聊
+
+        Assert.True(AgentGateway.IsVisibleForAgentContext(custMsg, "custA", supportCircle: true));   // 顾客自己的提问
+        Assert.True(AgentGateway.IsVisibleForAgentContext(staffReply, "custA", supportCircle: true)); // 定向回给该顾客的客服消息
+        Assert.False(AgentGateway.IsVisibleForAgentContext(otherCust, "custA", supportCircle: true)); // 其它顾客的私聊不进上下文
+
+        // 普通知聚仍只注入全群可见消息
+        var privateMsg = Make("m4", "x", "私聊", "y");
+        var publicMsg = Make("m5", "x", "公开", null);
+        Assert.False(AgentGateway.IsVisibleForAgentContext(privateMsg, "x", supportCircle: false));
+        Assert.True(AgentGateway.IsVisibleForAgentContext(publicMsg, "x", supportCircle: false));
+    }
 
     [Fact]
     public async Task Create_SupportCircle_MarksInvitedTeamAsStaffAndNotPrivate()
