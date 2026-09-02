@@ -475,11 +475,37 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             messageId = started.MessageId;
 
+            // 图片理解（视觉）：消息含图片且启用视觉时，切到视觉模型并以多模态（文本 + 图片 base64）喂给模型看图。
+            var hasImage = context.Attachments?.Any(a => a.Kind == "image"
+                || (a.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ?? false)) == true;
+            var visionModel = hasImage && _options.VisionEnabled
+                ? AgentCatalog.ResolveVisionModelName(_options, string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase))
+                : null;
+            var useVision = hasImage && !string.IsNullOrWhiteSpace(visionModel);
+
             var accumulated = "";
             var reasoningAccumulated = 0; // 思考过程累计长度（防推理模型思考过长撑爆消息 / 前端）
-            var userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, runCt));
+            ChatMessage userMessage;
+            if (useVision)
+            {
+                // 视觉智能体（带人设、无工具/记忆注入）走同一流式回灌管线；构建多模态 user message
+                var bareVision = _catalog.CreateBareVision(context.AgentId, visionModel!);
+                if (bareVision is not null) agent = bareVision;
+                var contents = new List<AIContent> { new TextContent(await BuildUserMessageAsync(context, runCt)) };
+                if (_attachmentStore is not null)
+                    foreach (var att in context.Attachments ?? [])
+                    {
+                        if (!(att.Kind == "image" || (att.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ?? false))) continue;
+                        var img = _attachmentStore.TryReadImageBytes(att.AttachmentId);
+                        if (img is { } i) contents.Add(new DataContent(i.Bytes, i.ContentType));
+                    }
+                userMessage = new ChatMessage(ChatRole.User, contents);
+            }
+            else
+            {
+                userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, runCt));
+            }
             var runOptions = new ChatClientAgentRunOptions();
-
             // 模型限流（429）/ 网关 5xx / 连接重置时指数退避重试：避免群聊中智能体偶发哑火。
             // 重试从头流式输出（清空累计跟踪与已广播的半截内容）；审批中断不触发重试（approval 置位后 break）。
             var attempt = 0;

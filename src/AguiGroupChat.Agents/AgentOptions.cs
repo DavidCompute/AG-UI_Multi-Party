@@ -34,6 +34,12 @@ public sealed class AgentOptions
     /// <summary>思考模式使用的模型名（留空时：DeepSeek 自动用 deepseek-reasoner，其余提供方回退默认模型）。</summary>
     public string? ThinkingModel { get; set; }
 
+    /// <summary>是否启用图片理解（视觉）：消息附含图片时，用 <see cref="VisionModel"/>（或 DeepSeek 默认视觉模型）以多模态喂给模型看图。默认开启。</summary>
+    public bool VisionEnabled { get; set; } = true;
+
+    /// <summary>视觉（图理解）模型名（留空时 DeepSeek 默认 <c>deepseek-v4-flash-vision-exp</c>）。仅在带图片的消息中使用。</summary>
+    public string? VisionModel { get; set; }
+
     /// <summary>
     /// 每个用户每日 token 用量配额（默认 0 = 不限）。超过配额的触发请求被拒绝（AGENT_QUOTA_EXCEEDED），
     /// 次日 0 点（UTC）自动恢复；定时任务（system 触发）与桥接调用不计入个人配额。

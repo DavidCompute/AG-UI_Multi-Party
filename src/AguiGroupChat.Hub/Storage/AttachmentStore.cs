@@ -209,6 +209,31 @@ public sealed class AttachmentStore
         return text.Length > MaxTextCharsPerFile ? text[..MaxTextCharsPerFile] : text;
     }
 
+    /// <summary>读取图片附件为原始字节 + MIME（供视觉模型以 data URI 传入）。id 非法 / 文件不存在 / 非图片返回 (null, null)。</summary>
+    public (byte[] Bytes, string ContentType)? TryReadImageBytes(string attachmentId)
+    {
+        var path = ResolvePath(attachmentId);
+        if (path is null) return null;
+        var ext = Path.GetExtension(path);
+        var mime = ext.ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            _ => null,
+        };
+        if (mime is null) return null;
+        try
+        {
+            var info = new FileInfo(path);
+            if (info.Length > MaxFileBytes) return null;
+            return (File.ReadAllBytes(path), mime);
+        }
+        catch (Exception) { return null; }
+    }
+
     /// <summary>判断附件是否可提取文本（纯文本或办公文档，供智能体上下文注入）。</summary>
     public static bool IsExtractable(AttachmentInfo attachment)
         => attachment.Kind is "text" or "document"

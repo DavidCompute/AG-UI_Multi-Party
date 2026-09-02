@@ -26,6 +26,8 @@ public sealed class AgentCatalog
     internal const string DeepSeekDefaultModel = "deepseek-chat";
     /// <summary>思考模式下 DeepSeek 使用的推理模型。</summary>
     internal const string DeepSeekReasonerModel = "deepseek-reasoner";
+    /// <summary>DeepSeek 视觉（图片理解）模型（需显式指定；deepseek-chat 不支持图片）。</summary>
+    internal const string DeepSeekVisionModel = "deepseek-v4-flash-vision-exp";
 
     private readonly AgentOptions _options;
     private readonly ILoggerFactory _loggerFactory;
@@ -158,6 +160,30 @@ public sealed class AgentCatalog
 
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
         var client = BuildOpenAIChatClient(_options, def, isDeepSeek);
+        return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
+    }
+
+    /// <summary>创建“视觉”裸 ChatClientAgent（不缓存）：用指定视觉模型 + 智能体人设，不带工具/记忆注入，
+    /// 用于对含图片的消息做一次看图理解（多模态 user message 走 <c>RunStreamingAsync</c>）。
+    /// mock 提供方不支持视觉，返回 null = 走普通文本。</summary>
+    public ChatClientAgent? CreateBareVision(string agentId, string visionModel)
+    {
+        if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase)) return null;
+        var def = GetDefinition(agentId)
+            ?? throw new InvalidOperationException($"智能体 {agentId} 未在 Agents 配置中声明");
+        var chatOptions = new ChatClientAgentOptions
+        {
+            Name = def.Nickname,
+            Description = def.Description,
+            ChatOptions = new Microsoft.Extensions.AI.ChatOptions
+            {
+                Instructions = def.Instructions,
+                Tools = null,
+            },
+            AIContextProviders = [],
+        };
+        var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, visionModel);
         return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
     }
 
@@ -394,12 +420,13 @@ public sealed class AgentCatalog
             ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
     }
 
-    /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。</summary>
-    internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition def, bool isDeepSeek)
+    /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。
+    /// <paramref name="modelOverride"/> 非空时强制用该模型（视觉等专用场景）。</summary>
+    internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition def, bool isDeepSeek, string? modelOverride = null)
     {
         // 思考模式（默认开启）：优先用推理模型（DeepSeek 官方 deepseek-reasoner；可经 Agents:ThinkingModel 覆盖）；
-        // 关闭时回退常规模型（智能体单独 Model → 全局 Model → DeepSeek 默认）。
-        var model = ResolveModelName(options, def, isDeepSeek);
+        // 关闭时回退常规模型（智能体单独 Model → 全局 Model → 提供方默认）。modelOverride 优先于这一切。
+        var model = modelOverride ?? ResolveModelName(options, def, isDeepSeek);
         var apiKey = options.ApiKey
             ?? throw new InvalidOperationException(
                 "Provider 非 mock 时必须配置 API Key（Agents:ApiKey / dotnet user-secrets / 环境变量 DEEPSEEK_API_KEY 或 OPENAI_API_KEY）");
@@ -420,6 +447,10 @@ public sealed class AgentCatalog
 
         return new ChatClient(model, credential, openAiOptions);
     }
+
+    /// <summary>解析视觉（图片理解）模型名：显式配置优先；DeepSeek 提供方自动用视觉模型；其余无则为 null（不支持图片）。</summary>
+    internal static string? ResolveVisionModelName(AgentOptions options, bool isDeepSeek)
+        => !string.IsNullOrWhiteSpace(options.VisionModel) ? options.VisionModel!.Trim() : (isDeepSeek ? DeepSeekVisionModel : null);
 
     private List<AITool> BuildTools(IEnumerable<string> requireApprovalNames)
     {
