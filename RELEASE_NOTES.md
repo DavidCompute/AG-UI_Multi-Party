@@ -1,5 +1,41 @@
-# AG-UI 群聊桌面版 1.0.105 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.105 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.107 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.107 Release Notes (current desktop release)
+
+## 新增（中文）
+（提交 b60b9c7）
+- **自动编排重名去重（自动改名避重）**：生成的数字员工 / 技能 id 与原库同名时，自动追加 `_2/_3` 改名继续保存，不再整体失败、不覆盖已有资产，并自动同步方案内引用（技能挂载、上下级连接、客服知聚成员、返回 id）。
+- **组织架构交互**：双击数字员工节点可直接打开编辑表单；组织关系连线同一对端点间的多条线会**横向错开**避免完全重叠；编辑返回上下文优化——从组织架构进入编辑，退出后回组织架构，再关闭回数字员工管理列表（从列表进入则回列表）。
+
+## New (English)
+(commit b60b9c7)
+- **Auto-rename on orchestration id collisions**: when a generated digital-employee / skill id collides with an existing library entry, it is auto-renamed with a `_2/_3` suffix and saved anyway — no more whole-apply failures, no overwriting existing assets — and all in-plan references (skill mounts, up/down connections, support-circle members, returned ids) are remapped to the final ids.
+- **Org-chart interactions**: double-clicking a digital-employee node now opens its edit form; edges connecting the same pair of endpoints are **laterally offset** so they no longer overlap; edit-return context is optimized — editing from the org chart returns to the org chart after exit, then closes back to the digital-employee list (editing from the list returns to the list).
+
+**版本说明**：1.0.106 → 1.0.107 为点版本，主题为「自动编排重名去重 + 组织架构交互」。全量 714 个单元 / 集成测试通过。
+**Version note**: 1.0.106 → 1.0.107 is a point release focused on auto-rename collision handling during orchestration and org-chart editing/rendering interactions. All 714 unit / integration tests pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.106 发布说明
+# AG-UI Group Chat Desktop 1.0.106 Release Notes
+
+## 新增（中文）
+（提交 386c7ee）
+- **客服知聚打字指示（typing）**：客服 / 数字员工输入时，顾客参与者能看到「客服正在输入」；顾客输入时客服能看到；顾客之间互不可见，与消息隔离一致（此前客服知聚里 typing 双向都不达）。
+- **智能体上下文作用域**：客服知聚的智能体上下文窗口现在会包含本次触发顾客的隔离会话（顾客自己的提问 + 定向回给该顾客的客服消息），客服能「记得」该顾客之前聊过的内容，不再像新对话一样重答；其他顾客的私聊不进上下文。
+
+## New (English)
+(commit 386c7ee)
+- **Support-circle typing indicators**: while a staff member / digital employee is typing, customer participants see “staff is typing”; while a customer types, staff see it; customers never see each other's typing, consistent with message isolation (previously typing was not delivered in either direction in support circles).
+- **Agent context scoping**: the support-circle agent context window now includes the triggering customer's isolated conversation (the customer's own questions plus staff replies directed to that customer), so staff can “remember” that customer's prior dialogue instead of answering as if it were a fresh chat; other customers' private chats stay out of context.
+
+**版本说明**：1.0.105 → 1.0.106 为点版本，主题为「客服知聚 typing 与智能体上下文修复」。全量 714 个单元 / 集成测试通过。
+**Version note**: 1.0.105 → 1.0.106 is a point release that fixes support-circle typing delivery and scopes the agent context to the triggering customer. All 714 unit / integration tests pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.105 发布说明
+# AG-UI Group Chat Desktop 1.0.105 Release Notes
 
 ## 新增（中文）
 - **客服知聚权限修复随本版首发**：普通顾客（参与者、非成员）可批准其触发的客服技能执行（此前会被「决策者不是群成员」拒绝）；网关仍强校验必须是触发者本人。本版桌面包首次实际包含该修复。（提交 4dd9e94）

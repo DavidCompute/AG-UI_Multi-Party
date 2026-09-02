@@ -4,7 +4,7 @@
 
 同一套桌面应用的另一 UI 壳：**Avalonia 12**（跨平台 XAML）+ 官方 **WebView 控件**
 （`Avalonia.Controls.WebView` / `NativeWebView`）——Windows 走 WebView2、**macOS 走 WKWebView**、
-Linux 走 WebKitGTK。当前版本 **1.0.104**（见 `src/AguiGroupChat.Desktop.Cross/AguiGroupChat.Desktop.Cross.csproj`）。功能与 Windows 版（`src/AguiGroupChat.Desktop`）一致，共享
+Linux 走 WebKitGTK。当前版本 **1.0.107**（见 `src/AguiGroupChat.Desktop.Cross/AguiGroupChat.Desktop.Cross.csproj`）。功能与 Windows 版（`src/AguiGroupChat.Desktop`）一致，共享
 `src/AguiGroupChat.Desktop.Core`（SQLite + sqlite-vec 记忆、LLamaSharp 本地 embedding）。注意**进程模型不同**：本版为
 **单实例进程内**宿主（`DesktopApp.Start` 直接进程内起 Kestrel）；Windows 版是「UI 实例 + `--backend` 后端子进程」的多实例共享架构。
 

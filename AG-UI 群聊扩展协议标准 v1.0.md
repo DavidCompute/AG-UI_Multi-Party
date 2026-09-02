@@ -64,6 +64,7 @@
 - **客服团队 = 群成员（全部）**：创建者建群时拉入的成员（真人用户或数字员工）即为客服，可看到**全部会话**；群创建者为客服兼群主（`Role=Owner`）。客服知聚的成员表仅含客服团队，没有普通顾客。
 - **对所有人都可见、可进入**：客服知聚强制 `isPrivate=false`；非成员用户可见该知聚并可直接 <b>进入</b>。进入**不会**把用户加入成员表——而是登记为一个<b>非成员顾客参与者</b>（带 30 分钟活动 TTL，不占用成员名额、不出现在成员清单），获得与本客服团队聊天的独立会话。普通知聚保持成员制，不可自行进入。
 - **会话隔离**：顾客发消息 → 仅该顾客与客服可见；客服回复某顾客 → 定向到该顾客；客服之间一般沟通 → 仅客服可见（不广播给顾客）。任一定向 / 私聊消息对非目标顾客均不可见（顾客之间彼此隔离）。
+- **智能体上下文作用域**：客服知聚中，智能体的上下文窗口除全群可见消息（`Visibility=all`）外，还会纳入<b>本次触发顾客自己的隔离会话</b>（该顾客的提问 + 定向回给该顾客的客服消息），但绝不混入其他顾客的私聊。普通知聚仍只注入 `Visibility=all` 的消息。
 - 消息历史 / 快照 / 搜索按上述可见性过滤，实时扇出同样生效（见 §4 可见性规则）。
 
 ### 2\.2 群成员模型（GroupMember）
@@ -388,6 +389,8 @@
 #### GROUP\_TYPING
 
 成员正在输入状态提示，可用于渲染 "对方正在输入"。
+
+<b>客服知聚的广播范围</b>：客服（成员）输入时，除其他客服外，还广播给<b>已进入的顾客参与者</b>；顾客参与者输入时仅广播给客服（顾客之间互相不可见，与消息隔离一致）。普通知聚仍只广播给群成员。
 
 ```json
 {
@@ -976,7 +979,7 @@ PUT /ag-ui/user/profile
 |优化下一层指派提示词|`POST /ag-ui/agents/{agentId}/optimize-assignment`|**组织架构「优化指派」**：按该数字员工的直接下一层（AssignmentIds）自动生成一段「管理下一层任务指派」指引（只依据下一层挑下游、不越级、无匹配则 NONE）；需登录，仅创建者/管理员；返回 `{ assignmentGuidance, subordinateCount }`|
 |一键组织编排（方案预览）|`POST /ag-ui/agents/orchestrate`|**一键组织编排**：根据一句话需求（`{ requirement }`，2–500 字）由模型生成组织方案（标题 + 岗位 + 每岗技能 + 岗位连接），作为<b>不落库的预览</b>返回（`{ orchestrated, title, agents[], skills[] }`）；需登录|
 |一键组织编排（SSE 流式）|`POST /ag-ui/agents/orchestrate/stream`|输入同上，按`data: `帧逐 token 转发模型输出为 SSE。事件 `type`：`token`（原始方案文本的增量 `delta`）、`progress`（节流的实时统计 `{agents, skills, rawLen}`）、`done`（从累计文本解析出的完整 `plan`）、`error`（`{message}`）；需登录|
-|一键组织编排（确认后落库）|`POST /ag-ui/agents/orchestrate/apply`|落库确认过的方案：body `{ title, agents[], skills[], createSupportCircle?, supportCircleName? }`。先全部校验、再造——保证<b>原子落库（全有或全无）</b>；`shell`/`http` 技能仅管理员。`createSupportCircle=true` 时额外把方案中的数字员工组建为一个<b>客服知聚</b>（§2.1.1）并注册触发规则，返回 `{ applied, title, agents[], skills[], supportCircleGroupId }`；需登录|
+|一键组织编排（确认后落库）|`POST /ag-ui/agents/orchestrate/apply`|落库确认过的方案：body `{ title, agents[], skills[], createSupportCircle?, supportCircleName? }`。先全部校验、再造——保证<b>原子落库（全有或全无）</b>；`shell`/`http` 技能仅管理员。<b>重名自动去重（方案 A）</b>：生成的数字员工 agentId 或技能 skillId 若与库中已有同名（或方案内同名），自动追加 `_2`/`_3` 改名继续保存，不整体失败、不覆盖已有资产，并自动同步方案内引用（数字员工的 SkillIds、上下级连接的 AssignmentIds / EscalationAgentId / RelayToAgentId、客服知聚成员、返回给前端的 ID）。`createSupportCircle=true` 时额外把方案中的数字员工组建为一个<b>客服知聚</b>（§2.1.1）并注册触发规则，返回 `{ applied, title, agents[], skills[], supportCircleGroupId }`；需登录|
 
 智能体定义字段：
 
@@ -1164,6 +1167,7 @@ WebSocket 连接上可直接上行以下事件（等效对应 HTTP 接口），�
 3. **关键词触发（keyword）**：服务端按配置的关键词匹配消息内容（大小写不敏感），命中后唤醒对应智能体
 
 4. **语境触发（contextual）**：服务端按最近消息上下文决策（`Agents:ContextMaxMessages` 条，默认 10），命中后唤醒对应智能体
+    - 语境发言决策（`ShouldSpeakAsync`）与普通知聚一致，仅以全群可见消息（`Visibility=all`）作为判断上下文；而在<b>客服知聚</b>中，<b>正式回复的上下文窗口</b>（`BuildUserMessageAsync`）除全群可见消息外，还会纳入本次触发顾客自己的隔离会话（其提问 + 定向给该顾客的客服消息），但绝不混入其他顾客的私聊（见 §2.1.1）。
 
 5. 智能体响应必须携带 `senderId` 与 `senderType`，前端据此渲染身份标识；智能体自身发送的消息不触发自身
 6. 智能体回复消息**不回显触发消息的 `mentions` / `mentionAll`**（提及仅用于触发，避免 @ 回显到正文）

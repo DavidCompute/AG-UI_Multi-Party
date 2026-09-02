@@ -72,6 +72,8 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **Automatic accumulation of important memory (1.3)**: one-click aggregation of "critical" conclusions in a group chat into the knowledge base — knowledge is accumulated as conversation happens, cutting manual organization cost.
 - **Cross-topic theme linking (5.1)**: a relation matrix showing "which other topics this theme was also discussed in", so multi-person collaboration never misses context.
 - **Recursive gather-and-answer loop (Plan C)**: while answering, if the gathered data is insufficient (e.g. still need disk / memory / services / logs), the digital employee <b>proactively keeps invoking skills / assigning subordinates</b> until the info is complete — <b>never stopping to ask "continue?"</b>; skill-only digital employees can also enter plan orchestration, ideal for multi-skill checks like "is there anything wrong with this PC?"
+- **Orchestration robustness / collision dedup (implemented)**: if an orchestrated digital employee / skill <b>clashes with an existing same-named entry</b>, it is auto-renamed with a `_2/_3` suffix and saved anyway — no more whole-apply failures and no overwriting existing assets; all in-plan references (skill mounts, up/down connections, support-circle members, returned ids) are remapped to the final ids, so re-running orchestration never bulldozes your existing team.
+- **Editable, visual org chart (implemented)**: <b>double-click a digital-employee node</b> on the org-chart canvas to open its edit form directly, no need to jump to the list page; multiple relationship edges between the same pair of endpoints are <b>laterally offset</b> so they no longer fully overlap, making connections clear at a glance; edit-return context follows the original entry point (from the chart returns to the chart, from the list returns to the list).
 
 ### 9. Governance & Compliance (The Hard Threshold for Enterprise Rollout)
 - **Differentiated approval policies (4.1)**: in addition to the global tool list, each digital employee can have an independent approval tool list; `approveAll` approves all remaining pending tools for the current task in one go.
@@ -120,6 +122,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **A support team serves everyone**: the creator invites humans + digital employees into the support team; staff see <b>all conversations</b> and can coordinate internally (without disturbing customers) to route / escalate cases.
 - **Each customer gets an isolated conversation**: a regular user who enters is <i>not a member</i> and holds a private conversation with the team — user A's content is never visible to user B, naturally satisfying client privacy and enabling a public-hall + one-to-one service model.
 - **Server-enforced isolation**: conversation visibility is enforced end-to-end (send / snapshot / history / search / attachments / realtime fan-out), so no client can leak a message to another customer.
+- **Support-circle experience (typing + agent context, implemented)**: while a staff member / digital employee types, customer participants see "staff is typing"; while a customer types, staff see it, and <b>customers never see each other's typing</b> (consistent with message isolation); the agent context window includes the triggering customer's isolated conversation, so staff <b>remember that customer's prior dialogue</b> instead of re-answering as a fresh chat, while other customers' private chats stay out of context.
 
 ---
 
@@ -132,7 +135,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 | Multi-client coverage | Web (Docker), Windows desktop (WPF + WebView2, multi-instance), cross-platform desktop (Avalonia) |
 | Extensible | Storage abstraction (IGroupStore / IUserStore) with built-in **memory / postgres / mysql / sqlite / redis** implementations, switchable in one click; `IAgentGateway` for custom gateways; digital employee directory / trigger rules / topics all managed at runtime |
 | Data security | Password PBKDF2, token auth, attachment whitelist, strict ownership validation for private group chats / private digital employees, HTML sandbox, SSRF protection, memory tiering and auto-forgetting, local-execution sandbox + token auth |
-| Quality assurance | **711 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & skill library / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end / support-circle conversation isolation) |
+| Quality assurance | **714 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & skill library / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end / support-circle conversation isolation) |
 
 ---
 
@@ -255,7 +258,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 
 ## 7. Next Steps & Roadmap
 
-> **Already shipped**: one-click organization orchestration (with SSE streaming generation) & one-click support-circle creation, support-circle conversation isolation, platform-role RBAC, and native-skill tunnel execution are all live; the following are directions to deepen next.
+> **Already shipped**: one-click organization orchestration (with SSE streaming generation) & one-click support-circle creation, support-circle conversation isolation, support-circle typing & agent context, auto-rename on orchestration id collisions, org-chart double-click edit & line de-overlap, platform-role RBAC, and native-skill tunnel execution are all live; the following are directions to deepen next.
 
 - **Multimodal advancement**: image / voice Q&A, audio & video meeting integration (voice messages, multi-image, and canvas annotations are already in as attachments; two-way voice dialogue and image Q&A are to be deepened);
 - **Deeper observability (6.1)**: metric visualization dashboards, OpenTelemetry integration, cross-replica diagnostics on Redis multi-replica;
