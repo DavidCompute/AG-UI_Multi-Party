@@ -1,5 +1,21 @@
-# AG-UI 群聊桌面版 1.0.104 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.104 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.105 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.105 Release Notes (current desktop release)
+
+## 新增（中文）
+- **客服知聚权限修复随本版首发**：普通顾客（参与者、非成员）可批准其触发的客服技能执行（此前会被「决策者不是群成员」拒绝）；网关仍强校验必须是触发者本人。本版桌面包首次实际包含该修复。（提交 4dd9e94）
+- **自动化验证工具增强**：`tools/ui-orchestrate-flow.mjs` 现在会一并清理编排创建的数字员工与技能，避免留下测试残留；技能删除带保护（仅删不再被现存数字员工引用的，避免误删用户团队同名的真实技能）。
+
+## New (English)
+- **Support-circle permission fix ships in this build**: ordinary customers (participants, non-members) can now approve the customer-service skill execution they triggered (previously rejected as “decider is not a group member”); the gateway still requires the approver to be the triggerer. This is the first desktop build to actually include the fix. (commit 4dd9e94)
+- **Automation tooling hardening**: `tools/ui-orchestrate-flow.mjs` now also deletes the digital employees and skills it creates during orchestration to avoid test residue; skill deletion is protected so it only removes skills no longer referenced by any remaining digital employee, avoiding accidental deletion of same-named real skills used by your teams.
+
+**版本说明**：1.0.104 → 1.0.105 为点版本，主题为「随本版正式带上客服知聚权限修复 + 文档与验证工具同步」。全量 711 个单元 / 集成测试通过。
+**Version note**: 1.0.104 → 1.0.105 is a point release that formally ships the support-circle permission fix along with doc and verification-tool updates. All 711 unit / integration tests pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.104 发布说明
+# AG-UI Group Chat Desktop 1.0.104 Release Notes
 
 ## 新增（中文）
 - **一键组织编排·生成过程可视化（方案 C）**：新增流式 SSE 端点 `POST /ag-ui/agents/orchestrate/stream`，DeepSeek 逐 token 流式吐出生成过程，前端实时展示原始生成文本，并基于已见 JSON 实时统计「已识别 N 名数字员工 / M 个技能」；生成结束下发完整结构化方案供确认。`AgentOrchestrator` 新增 `StreamTextAsync`（真实模型流式 / mock 分片模板）。
