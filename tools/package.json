@@ -1,0 +1,12 @@
+{
+  "name": "agui-tools",
+  "private": true,
+  "type": "module",
+  "description": "AG-UI 临时运维 / 验证脚本。仅 ui-orchestrate-flow.mjs（浏览器自动化）依赖 playwright；其余 .mjs 走纯 Node 内建 fetch/WebSocket，无需安装。",
+  "scripts": {
+    "ui:orch": "node ui-orchestrate-flow.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
