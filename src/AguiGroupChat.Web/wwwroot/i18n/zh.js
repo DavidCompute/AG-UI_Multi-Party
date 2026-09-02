@@ -47,6 +47,8 @@ window.I18N_DICTS.zh = {
   "notif.clear": "清空",
   "notif.clearAll": "清除全部通知",
   "notif.empty": "暂无通知",
+  "notif.skillErrorTitle": "技能执行失败",
+  "notif.skillErrorDetail": "{skill}：{msg}",
 
   /* --- 账户菜单 --- */
   "menu.profile": "修改资料",

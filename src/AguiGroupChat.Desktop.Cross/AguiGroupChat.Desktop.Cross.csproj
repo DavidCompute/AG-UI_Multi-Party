@@ -8,8 +8,8 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <RootNamespace>AguiGroupChat.Desktop.Cross</RootNamespace>
     <AssemblyName>AguiGroupChat.Desktop.Cross</AssemblyName>
-    <Version>1.0.109</Version>
-    <FileVersion>1.0.109.0</FileVersion>
+    <Version>1.0.111</Version>
+    <FileVersion>1.0.111.0</FileVersion>
     <!-- Windows exe / 任务栏图标 -->
     <ApplicationIcon>Assets\agui-icon.ico</ApplicationIcon>
   </PropertyGroup>

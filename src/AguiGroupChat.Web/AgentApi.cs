@@ -226,8 +226,8 @@ public static class AgentApi
             var requirement = (req.Requirement ?? "").Trim();
             if (requirement.Length < 2)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请描述你要建立的组织 / 需求（至少 2 个字符）"));
-            if (requirement.Length > 500)
-                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "需求描述最长 500 字符"));
+            if (requirement.Length > 5000)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "需求描述最长 5000 字符"));
 
             try
             {
@@ -273,8 +273,8 @@ public static class AgentApi
             var requirement = (req.Requirement ?? "").Trim();
             if (requirement.Length < 2)
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, "请描述你要建立的组织 / 需求（至少 2 个字符）"), statusCode: StatusCodes.Status400BadRequest);
-            if (requirement.Length > 500)
-                return Results.Json(new AguiError(ErrorCodes.BadRequest, "需求描述最长 500 字符"), statusCode: StatusCodes.Status400BadRequest);
+            if (requirement.Length > 5000)
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, "需求描述最长 5000 字符"), statusCode: StatusCodes.Status400BadRequest);
 
             var response = ctx.Response;
             response.ContentType = "text/event-stream; charset=utf-8";

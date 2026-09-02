@@ -18,7 +18,7 @@ public static class AgentOrchestrator
     {
         var req = (requirement ?? "").Trim();
         if (req.Length < 2) throw new InvalidOperationException("需求描述至少 2 个字符");
-        if (req.Length > 500) throw new InvalidOperationException("需求描述最长 500 字符");
+        if (req.Length > 5000) throw new InvalidOperationException("需求描述最长 5000 字符");
 
         if (string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
             return BuildTemplate(req);

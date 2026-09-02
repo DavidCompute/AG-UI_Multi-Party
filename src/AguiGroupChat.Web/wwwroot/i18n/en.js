@@ -47,6 +47,8 @@ window.I18N_DICTS.en = {
   "notif.clear": "Clear",
   "notif.clearAll": "Clear all notifications",
   "notif.empty": "No notifications",
+  "notif.skillErrorTitle": "Skill execution failed",
+  "notif.skillErrorDetail": "{skill}: {msg}",
 
   /* --- 账户菜单 --- */
   "menu.profile": "Edit Profile",

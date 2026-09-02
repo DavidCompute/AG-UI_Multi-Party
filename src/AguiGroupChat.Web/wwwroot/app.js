@@ -344,6 +344,7 @@ function enterApp(data) {
     renderMeAvatar();
     applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
     resetChatState();
+    hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
@@ -3723,7 +3724,9 @@ async function runClientTool(m) {
       result = `HTTP ${res.status}\n${text.slice(0, 4000)}`;
     }
   } catch (err) {
-    toast(t("itx.clientToolFail", { msg: err && err.message ? err.message : String(err) }));
+    const emsg = err && err.message ? err.message : String(err);
+    toast(t("itx.clientToolFail", { msg: emsg }));
+    notifySkillError(m.groupId, itx.toolName, emsg);
     return;
   }
   resolveInteraction(m, true, undefined, undefined, false, result);
@@ -3743,6 +3746,7 @@ async function runBatchClientTools(m) {
   try { items = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { items = null; }
   if (!Array.isArray(items) || items.length === 0) { toast(t("itx.batchNoSkill")); return; }
   const results = [];
+  const failures = []; // 失败的技能（供右上角通知备查）
   for (const item of items) {
     let out;
     try {
@@ -3751,7 +3755,12 @@ async function runBatchClientTools(m) {
       const kind = (cfg && cfg.kind) || "http";
       if (kind === "shell") {
         const command = (cfg.command || "").trim();
-        if (!command) { results.push({ skillId: item.skillId, output: "（本机技能缺少命令）" }); continue; }
+        if (!command) {
+          const errMsg = t("itx.clientToolNoCmd");
+          results.push({ skillId: item.skillId, output: "（" + errMsg + "）" });
+          failures.push({ skill: item.skillId, msg: errMsg });
+          continue;
+        }
         // 本机 shell 优先经内网反向隧道执行；这里回落到服务器端 /ag-ui/client-tool。
         const bridgeUrl = "/ag-ui/client-tool";
         const bridgeToken = state.token || "";
@@ -3774,9 +3783,13 @@ async function runBatchClientTools(m) {
       }
       results.push({ skillId: item.skillId, output: out });
     } catch (err) {
-      results.push({ skillId: item.skillId, output: "（本机执行失败：" + (err && err.message ? err.message : String(err)) + "）" });
+      const emsg = err && err.message ? err.message : String(err);
+      results.push({ skillId: item.skillId, output: "（本机执行失败：" + emsg + "）" });
+      failures.push({ skill: item.skillId, msg: emsg });
     }
   }
+  // 批次内单个技能失败 → 右上角通知逐一备查
+  for (const f of failures) notifySkillError(m.groupId, f.skill, f.msg);
   resolveInteraction(m, true, undefined, undefined, false, JSON.stringify(results));
 }
 
@@ -4058,8 +4071,60 @@ function addNotification(type, title, body, opts = {}) {
   if (document.hidden) showSystemNotification(title, body, opts.groupId);
 }
 
+/** 把一次“调用技能”失败记入右上角通知中心，并持久化到本地（刷新 / 重启可备查）。
+ *  skillLabel 为技能/工具名（如 shell/http 客户端技能、一键批次里的单项）；msg 为错误描述。
+ *  仅“error”型技能错误做持久化；其它临时通知只存活于当前会话（保持原语义）。 */
+function notifySkillError(groupId, skillLabel, msg) {
+  const skill = skillLabel || t("msg.toolCall");
+  const entry = {
+    id: "skill_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7),
+    type: "error",
+    title: t("notif.skillErrorTitle"),
+    body: t("notif.skillErrorDetail", { skill, msg: String(msg || "").slice(0, 300) }),
+    groupId: groupId || null,
+    topicId: null,
+    ts: Date.now(),
+    read: false,
+    icon: "⚠️",
+  };
+  // 并入当前会话通知中心
+  state.notifications.unshift(entry);
+  if (state.notifications.length > 100) state.notifications.pop();
+  renderNotifications();
+  if (document.hidden) showSystemNotification(entry.title, entry.body, groupId || "agui");
+  // 持久化到本用户本地存储（供刷新 / 下次登录备查）
+  if (state.memberId) {
+    try {
+      const list = skillErrorStore(state.memberId);
+      list.unshift(entry);
+      const cap = list.slice(0, 100);
+      localStorage.setItem(skillErrorKey(state.memberId), JSON.stringify(cap));
+    } catch { /* 存储不可用忽略 */ }
+  }
+}
+
+/* ---- 技能错误通知的本地持久化（按用户，备查用） ---- */
+function skillErrorKey(uid) { return "agui.skillError." + uid; }
+function skillErrorStore(uid) {
+  try { const raw = localStorage.getItem(skillErrorKey(uid)); return raw ? (JSON.parse(raw) || []) : []; }
+  catch { return []; }
+}
+
+/** 登录后把该用户此前记录的技能错误重新载入通知中心（去重、按 id），实现“备查”。 */
+function hydrateSkillErrors(uid) {
+  if (!uid) return;
+  const list = skillErrorStore(uid);
+  if (!Array.isArray(list) || list.length === 0) return;
+  const have = new Set(state.notifications.map((x) => x.id));
+  const missing = list.filter((x) => x && x.id && !have.has(x.id));
+  if (missing.length === 0) return;
+  state.notifications.unshift(...missing);
+  if (state.notifications.length > 100) state.notifications.splice(100);
+  renderNotifications();
+}
+
 function notifIcon(type) {
-  return ({ mention: "📣", approval: "🔐", message: "💬", reconnect: "🔌", info: "ℹ️" })[type] || "🔔";
+  return ({ mention: "📣", approval: "🔐", message: "💬", reconnect: "🔌", info: "ℹ️", error: "⚠️", skill: "🛠️" })[type] || "🔔";
 }
 
 /** 系统桌面通知（页面隐藏时的兜底）。 */
@@ -4128,6 +4193,8 @@ function hideNotifPanel() {
 function clearNotifications() {
   state.notifications = [];
   renderNotifications();
+  // 「清空」同时清除已持久化的技能错误备查记录（否则下次登录会重新载入）
+  if (state.memberId) { try { localStorage.removeItem(skillErrorKey(state.memberId)); } catch { /* 忽略 */ } }
 }
 
 /** 本地把某话题未读清零（进入知聚 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */

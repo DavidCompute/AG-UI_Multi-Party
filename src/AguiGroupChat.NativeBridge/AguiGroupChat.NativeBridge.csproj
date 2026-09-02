@@ -8,7 +8,7 @@
     <RootNamespace>AguiGroupChat.NativeBridge</RootNamespace>
     <AssemblyName>AguiGroupChat.NativeBridge</AssemblyName>
     <!-- 版本跟随主程序 -->
-    <Version>1.0.109</Version>
+    <Version>1.0.111</Version>
   </PropertyGroup>
 
   <ItemGroup>
