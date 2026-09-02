@@ -690,6 +690,7 @@ const TRIGGER_HINTS = {
 };
 let agentList = [];
 let editingAgentId = null;
+let agentFormReturnFrom = null; // 进入编辑的返回目标："org"=从组织架构进入（取消/保存后回组织架构）；null=从数字员工管理进入（回列表）
 let agentBatchMode = false;   // 批量删除模式（行首出现勾选框）
 let selectedAgents = new Set(); // 批量删除所选 agentId
 
@@ -780,7 +781,7 @@ function renderAgentList() {
       </div>`;
     row.querySelector('[data-act="export"]').onclick = () => exportAgents([a], `${a.agentId}.json`);
     if (canManage) {
-      row.querySelector('[data-act="edit"]').onclick = () => openAgentForm(a.agentId);
+      row.querySelector('[data-act="edit"]').onclick = () => { agentFormReturnFrom = null; openAgentForm(a.agentId); };
       row.querySelector('[data-act="del"]').onclick = (e) => confirmDeleteAgent(a, e.currentTarget);
     }
     const selCb = row.querySelector(".agent-sel-cb");
@@ -1024,9 +1025,10 @@ function openOrgChart() {
     // 「优化指派」：为该数字员工生成/管理下一层任务指派提示词；阻止按钮事件冒泡以免触发节点拖拽
     n.el.querySelector(".org-opt-btn").addEventListener("pointerdown", (e) => e.stopPropagation());
     n.el.querySelector(".org-opt-btn").addEventListener("click", (e) => { e.stopPropagation(); openOrgOptimize(n.agentId); });
-    // 双击数字员工节点 → 打开其编辑表单（先收起组织架构弹窗，再进入数字员工编辑视图）
+    // 双击数字员工节点 → 打开其编辑表单（先收起组织架构弹窗，再进入数字员工编辑视图；关闭编辑后回组织架构）
     n.el.addEventListener("dblclick", async (e) => {
       e.stopPropagation();
+      agentFormReturnFrom = "org"; // 从组织架构进入：取消 / 保存后回到组织架构
       $("orgModal").classList.add("hidden");
       await openAgentModal();   // 打开数字员工管理弹窗并刷新目录（id 存在与否以最新目录为准）
       openAgentForm(n.agentId);
@@ -1734,8 +1736,19 @@ async function saveAgent() {
     toast(editingAgentId ? t("agent.updated") : t("agent.created"));
     await loadAgents();
     await loadAgentDirectory();
-    showAgentListView();
+    returnFromAgentForm();
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
+
+/// 离开数字员工编辑表单时的返回目标：从组织架构进入则回组织架构，否则回数字员工管理列表。
+function returnFromAgentForm() {
+  if (agentFormReturnFrom === "org") {
+    agentFormReturnFrom = null;
+    $("agentModal").classList.add("hidden"); // 收起数字员工管理弹窗
+    openOrgChart();                          // 重绘组织架构（反映编辑后的昵称 / 连线）
+  } else {
+    showAgentListView();
+  }
 }
 
 let agentSkillDefIds = [];   // 数字员工表单：从技能库挂载的可复用技能 ID
@@ -6920,7 +6933,7 @@ function init() {
   // ---- 数字员工管理 ----
   $("agentManageBtn").onclick = openAgentModal;
   $("agentClose").onclick = () => { agentBatchMode = false; selectedAgents = new Set(); $("agentModal").classList.add("hidden"); };
-  $("agentAddBtn").onclick = () => openAgentForm(null);
+  $("agentAddBtn").onclick = () => { agentFormReturnFrom = null; openAgentForm(null); };
   // 批量删除
   $("agentBatchBtn").onclick = enterAgentBatchMode;
   $("agentBatchExit").onclick = exitAgentBatchMode;
@@ -7037,7 +7050,7 @@ function init() {
     } catch (ex) { toast(t("backup.importFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
-  $("afCancel").onclick = () => showAgentListView();
+  $("afCancel").onclick = returnFromAgentForm;
   $("afSave").onclick = saveAgent;
   // 根据一句话简介生成角色设定（身份定位 / 职责范围 / 回复风格），填充 Instructions
   $("afGenInstructionsBtn").onclick = async () => {
