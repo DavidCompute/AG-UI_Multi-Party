@@ -22,6 +22,7 @@ tools/screenshots/
 package-lock.json
 # node 依赖（如果有，勿入库）
 node_modules/
-# 本地大模型文件（运行时下载/生成，勿入库，超 GitHub 100MB 限制）
-**/models/
+# 本地大模型目录（运行时下载/生成，勿入库，超 GitHub 100MB 限制；*.gguf 已单独忽略）。
+# 注意：用精确路径而不是 `**/models/`（在 core.ignorecase=true 的 Windows 上会误伤 C# Models/ 源码目录）。
+src/AguiGroupChat.Desktop/models/
 *.gguf
