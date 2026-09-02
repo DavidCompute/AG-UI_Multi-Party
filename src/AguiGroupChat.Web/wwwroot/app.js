@@ -1024,23 +1024,32 @@ function openOrgChart() {
     // 「优化指派」：为该数字员工生成/管理下一层任务指派提示词；阻止按钮事件冒泡以免触发节点拖拽
     n.el.querySelector(".org-opt-btn").addEventListener("pointerdown", (e) => e.stopPropagation());
     n.el.querySelector(".org-opt-btn").addEventListener("click", (e) => { e.stopPropagation(); openOrgOptimize(n.agentId); });
+    // 双击数字员工节点 → 打开其编辑表单（先收起组织架构弹窗，再进入数字员工编辑视图）
+    n.el.addEventListener("dblclick", async (e) => {
+      e.stopPropagation();
+      $("orgModal").classList.add("hidden");
+      await openAgentModal();   // 打开数字员工管理弹窗并刷新目录（id 存在与否以最新目录为准）
+      openAgentForm(n.agentId);
+    });
   });
 
   // ---- 连线绘制（纵向布线：指派=源底→目标顶；提升=源顶→目标底） ----
-  function edgeParams(n, t, type) {
+  // lane：同一对端点（双向 / 多线）并行时给每条线不同的横向曲率偏移，避免完全重叠
+  function edgeParams(n, t, type, lane) {
+    const off = (lane || 0) === 0 ? 0 : ((lane % 2 === 1 ? 1 : -1) * Math.ceil(lane / 2) * 22);
     if (type === "assign") {
       const x1 = n.x + n.el.offsetWidth / 2, y1 = n.y + n.el.offsetHeight, x2 = t.x + t.el.offsetWidth / 2, y2 = t.y;
       const gap = Math.max(30, (y2 - y1) / 2);
-      const d = `M${x1} ${y1} C${x1} ${y1 + gap} ${x2} ${y2 - gap} ${x2} ${y2}`;
+      const d = `M${x1} ${y1} C${x1 + off} ${y1 + gap} ${x2 + off} ${y2 - gap} ${x2} ${y2}`;
       return { d, x1, y1, x2, y2 };
     }
     const x1 = n.x + n.el.offsetWidth / 2, y1 = n.y, x2 = t.x + t.el.offsetWidth / 2, y2 = t.y + t.el.offsetHeight;
     const gap = Math.max(30, (y1 - y2) / 2);
-    const d = `M${x1} ${y1} C${x1} ${y1 - gap} ${x2} ${y2 + gap} ${x2} ${y2}`;
+    const d = `M${x1} ${y1} C${x1 + off} ${y1 - gap} ${x2 + off} ${y2 + gap} ${x2} ${y2}`;
     return { d, x1, y1, x2, y2 };
   }
-  function drawEdge(src, tgt, type) {
-    const p = edgeParams(byId[src], byId[tgt], type);
+  function drawEdge(src, tgt, type, lane) {
+    const p = edgeParams(byId[src], byId[tgt], type, lane);
     // 透明宽命中路径：点击即删除该连线
     const hit = document.createElementNS(NS, "path");
     hit.setAttribute("d", p.d);
@@ -1060,10 +1069,22 @@ function openOrgChart() {
     defs.innerHTML = `<marker id="orgArrowAssign" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#a98bff"/></marker>`
       + `<marker id="orgArrowEsc" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#ff9b85"/></marker>`;
     svg.appendChild(defs);
+    // 收集全部有向边，按“归一化的端点对”分组：同一对端点间多条线（如 A→B 指派 + B→A 提升，或并行的双向关系）
+    // 各取不同 lane 让曲线铺开，避免完全重叠。
+    const edges = [];
     nodes.forEach((n) => {
-      n.assignmentIds.forEach((tgt) => { if (byId[tgt]) drawEdge(n.agentId, tgt, "assign"); });
-      if (n.escalationAgentId && byId[n.escalationAgentId]) drawEdge(n.agentId, n.escalationAgentId, "esc");
+      n.assignmentIds.forEach((tgt) => { if (byId[tgt]) edges.push({ src: n.agentId, tgt, type: "assign" }); });
+      if (n.escalationAgentId && byId[n.escalationAgentId]) edges.push({ src: n.agentId, tgt: n.escalationAgentId, type: "esc" });
     });
+    const laneByKey = new Map();
+    const counts = new Map();
+    edges.forEach((e) => {
+      const pair = e.src < e.tgt ? e.src + "|#|" + e.tgt : e.tgt + "|#|" + e.src; // 归一化：同对端点归一组
+      const lane = counts.get(pair) ?? 0;
+      counts.set(pair, lane + 1);
+      laneByKey.set(e.src + "|" + e.tgt + "|" + e.type, lane);
+    });
+    edges.forEach((e) => drawEdge(e.src, e.tgt, e.type, laneByKey.get(e.src + "|" + e.tgt + "|" + e.type) ?? 0));
   }
 
   // 点击连线删除
