@@ -41,6 +41,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>历史单条消息文本截断长度。</summary>
     private const int MaxContextCharsPerMessage = 500;
 
+    /// <summary>多轮视觉上下文：单轮最多喂入的当前附图数（超过则忽略附余，防 payload 过大）。</summary>
+    private const int MaxContextImages = 4;
+
+    /// <summary>多轮视觉上下文：跟随提问时一并回喂的“历史图片”最大数量（避免历史图反复全量拉取撑爆 payload）。</summary>
+    private const int MaxHistoryImages = 4;
+
+    /// <summary>多轮上下文：把历史消息里可提取文本的附件（docx/xlsx/pdf/txt）重新内联给模型的总字符预算，
+    /// 让“先传文档、隔一轮追问”在跨轮仍能用上文档内容。太小则后轮丢细节，太大则反复喂稿撑长 prefill。</summary>
+    private const int MaxHistoryInlineTextChars = 6000;
+
     /// <summary>思考过程总量截断（推理模型 reasoning_content 可能很长：防消息 / 前端 / 存储被撑爆）。</summary>
     private const int MaxReasoningTotalChars = 12000;
 
@@ -475,31 +485,29 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             messageId = started.MessageId;
 
-            // 图片理解（视觉）：消息含图片且启用视觉时，切到视觉模型并以多模态（文本 + 图片 base64）喂给模型看图。
-            var hasImage = context.Attachments?.Any(a => a.Kind == "image"
-                || (a.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ?? false)) == true;
-            var visionModel = hasImage && _options.VisionEnabled
+            // 图片理解（视觉）：消息或本话题最近带图历史里含图片、且启用视觉时，切到视觉模型多模态（文本 + 图 byte）喂模型。
+            // 多轮场景（先发图、后追问纯文本）：BuildVisionUserMessageAsync 会把最近窗口里带图的历史消息图片一并回喂，
+            // 使后续提问仍能“看到”先前那张图，而不是只能见图片的文本元数据。
+            var visionModel = _options.VisionEnabled
                 ? AgentCatalog.ResolveVisionModelName(_options, string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase))
                 : null;
-            var useVision = hasImage && !string.IsNullOrWhiteSpace(visionModel);
 
             var accumulated = "";
             var reasoningAccumulated = 0; // 思考过程累计长度（防推理模型思考过长撑爆消息 / 前端）
             ChatMessage userMessage;
-            if (useVision)
+            // 视觉模型可用时才尝试多模态组装；不可用（如 mock / 未配视觉）一律纯文本，行为与旧版一致。
+            if (!string.IsNullOrWhiteSpace(visionModel))
             {
-                // 视觉智能体（带人设、无工具/记忆注入）走同一流式回灌管线；构建多模态 user message
                 var bareVision = _catalog.CreateBareVision(context.AgentId, visionModel!);
-                if (bareVision is not null) agent = bareVision;
-                var contents = new List<AIContent> { new TextContent(await BuildUserMessageAsync(context, runCt)) };
-                if (_attachmentStore is not null)
-                    foreach (var att in context.Attachments ?? [])
-                    {
-                        if (!(att.Kind == "image" || (att.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ?? false))) continue;
-                        var img = _attachmentStore.TryReadImageBytes(att.AttachmentId);
-                        if (img is { } i) contents.Add(new DataContent(i.Bytes, i.ContentType));
-                    }
-                userMessage = new ChatMessage(ChatRole.User, contents);
+                if (bareVision is not null)
+                {
+                    (userMessage, var visionTurn) = await BuildVisionUserMessageAsync(context, runCt);
+                    if (visionTurn) agent = bareVision; // 本轮真的带图 → 用视觉模型；否则保持原模型
+                }
+                else
+                {
+                    userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, runCt));
+                }
             }
             else
             {
@@ -2368,6 +2376,33 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 block.AppendLine($"{who}：{text}");
             }
             sb.Append(UntrustedBoundary.Wrap(block.ToString())).AppendLine();
+
+            // 历史消息里“可提取文本”的附件（Word/Excel/PDF/txt…）跨轮重新内联，让后续追问仍能参考其内容。
+            // 注意：上下文是按触发重建的（无跨轮会话），若上一条带文档的消息正文已含摘要，这里仍把原文载回以防细节丢失；
+            // 预算限制 MaxHistoryInlineTextChars，并带文件归属标识，全部包上不可信边界。
+            if (_attachmentStore is not null)
+            {
+                var historyInjected = 0;
+                foreach (var m in history)
+                {
+                    if (m.Attachments is not { Count: > 0 }) continue;
+                    foreach (var att in m.Attachments)
+                    {
+                        if (!AttachmentStore.IsExtractable(att)) continue;
+                        var extracted = await _attachmentStore.TryReadTextAsync(att.AttachmentId, ct);
+                        if (string.IsNullOrEmpty(extracted)) continue;
+                        if (historyInjected >= MaxHistoryInlineTextChars) break;
+                        var who2 = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
+                        var remain = MaxHistoryInlineTextChars - historyInjected;
+                        var take = Math.Min(extracted.Length, remain);
+                        if (take <= 0) break;
+                        sb.Append($"\n\n[{who2} 上传的文档 {att.Name} 内容摘录]\n")
+                          .Append(UntrustedBoundary.Wrap(extracted[..take]));
+                        historyInjected += take;
+                    }
+                    if (historyInjected >= MaxHistoryInlineTextChars) break;
+                }
+            }
         }
 
         sb.Append(context.Content);
@@ -2440,6 +2475,67 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             sb.Append($"\n\n【附件：{att.Name}】（{att.Kind}，{AgentGatewayHelpers.FormatBytes(att.Size)}，{att.Url}）");
         }
     }
+
+    /// <summary>
+    /// 组装“视觉（多模态）”轮次的用户消息：文本（含当前消息 + 本话题最近滑动窗口的对话文本，BuildUserMessageAsync）作基底；
+    /// 然后把 <b>当前消息</b> 附图 与 <b>最近窗口里带图的历史消息</b> 的图片像素一并作为 DataContent 喂给视觉模型。
+    /// 这样“先发图、隔一轮再追问”的多轮对话，模型仍能看到先前那张图，而不是只能看到图片的文本元数据。
+    /// 返回 (message, hasImage)：hasImage=false 表示无任何可用图片（调用方回退普通文本模型）。
+    /// </summary>
+    private async Task<(ChatMessage Message, bool HasImage)> BuildVisionUserMessageAsync(AgentInvocationContext context, CancellationToken ct)
+    {
+        var contents = new List<AIContent>();
+        var addedImageIds = new HashSet<string>(StringComparer.Ordinal);
+        var addedImages = 0; // 总图片数上限（当前 + 历史）
+
+        // 1) 基底文本：含当前消息正文 / 当前附件文本→内联或元数据、以及话题最近对话文本。
+        var text = await BuildUserMessageAsync(context, ct);
+        var sb = new StringBuilder(text);
+
+        // 2) 当前消息附图：直接喂像素（BuildUserMessageAsync 已给过【附件：名】元数据行作指位）。
+        if (_attachmentStore is not null)
+            foreach (var att in context.Attachments ?? [])
+            {
+                if (!IsImage(att)) continue;
+                if (!addedImageIds.Add(att.AttachmentId) || addedImages++ >= (MaxContextImages + MaxHistoryImages)) continue;
+                var img = _attachmentStore.TryReadImageBytes(att.AttachmentId);
+                if (img is { } cur) contents.Add(new DataContent(cur.Bytes, cur.ContentType));
+            }
+
+        // 3) 最近窗口里带图的历史消息：与 BuildUserMessageAsync 同一过滤（提及/隐私/话题），回喂其图片像素，并在文本里补一句指位。
+        if (_attachmentStore is not null && addedImages < (MaxContextImages + MaxHistoryImages))
+        {
+            var supportCircle = _hub.Value.Store.GetGroup(context.GroupId)?.IsSupportCircle == true;
+            var recent = _hub.Value.Store.RecentMessages(context.GroupId, ContextWindowMessages, context.TopicId).ToList();
+            int historyImages = 0;
+            foreach (var m in recent)
+            {
+                if (m.Recalled || m.MessageId == context.TriggerMessageId
+                    || !IsVisibleForAgentContext(m, context.TriggerUserId, supportCircle)) continue;
+                // 纯附图消息正文为空：历史文本窗口可能缺该行，这里为图片单补一行指位
+                foreach (var att in m.Attachments ?? [])
+                {
+                    if (!IsImage(att) || !addedImageIds.Add(att.AttachmentId)) continue;
+                    if (historyImages >= MaxHistoryImages || addedImages++ >= (MaxContextImages + MaxHistoryImages)) break;
+                    var img = _attachmentStore.TryReadImageBytes(att.AttachmentId);
+                    if (img is not { } gi) { addedImageIds.Remove(att.AttachmentId); addedImages--; continue; }
+                    contents.Add(new DataContent(gi.Bytes, gi.ContentType));
+                    historyImages++;
+                    var who = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
+                    sb.Append($"\n\n（补充上下文：{who} 此前发过图片【{att.Name}】，请结合该图片理解本轮提问）");
+                }
+                if (historyImages >= MaxHistoryImages) break;
+            }
+        }
+
+        // 有图则文本作为第 0 段，后接各图片；无图则回落纯文本（调用方按 HasImage 决定用哪个模型）。
+        var hasImage = contents.OfType<DataContent>().Any();
+        contents.Insert(0, new TextContent(sb.ToString()));
+        return (new ChatMessage(ChatRole.User, contents), hasImage);
+    }
+
+    private static bool IsImage(AttachmentInfo a)
+        => a?.Kind == "image" || (a?.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ?? false);
 
     /// <summary>
     /// 语境发言决策（Contextual 模式）：把群最近消息作为上下文交给模型，
