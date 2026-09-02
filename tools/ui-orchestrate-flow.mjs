@@ -108,15 +108,21 @@ async function runOrchestrate(page) {
     try { const j = await applyResp.json(); msg += " — " + (j.message || j.error || JSON.stringify(j)); } catch {}
     throw new Error(`编排 apply 失败：${msg}`);
   }
+  const applyData = await applyResp.json().catch(() => null);
   await page.waitForFunction(
     () => document.getElementById("orgOrchModal")?.classList.contains("hidden"),
     undefined, { timeout: 20000 },
   );
   ok("创建成功（apply 200，弹窗已关闭）");
   await shot(page, "after-apply");
+  // 从 apply 响应里拿权威的「新建产物」清单，供清理用（服务端返回它实际创建的数字员工 / 技能 / 客服知聚）。
+  const createdAgentIds = applyData?.agents || [];
+  const createdSkillIds = applyData?.skills || [];
+  const gid = applyData?.supportCircleGroupId || null;
+  return { gid, createdAgentIds, createdSkillIds };
 }
 
-async function verifyViaApi(page) {
+async function verifyViaApi(page, applied = {}) {
   // 从会话里取 token，用 API 复核客服知聚是否可发现、成员是否客服
   const token = await page.evaluate(() => {
     const raw = sessionStorage.getItem("agui.auth") || localStorage.getItem("agui.auth");
@@ -124,16 +130,19 @@ async function verifyViaApi(page) {
   });
   if (!token) throw new Error("未从会话读取到 token");
 
+  // 优先用 apply 响应给出的客服知聚 groupId；否则从发现接口按名字找
+  let gid = applied.gid || null;
   const discover = await fetch(`${BASE_URL}/ag-ui/group/discover`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const circles = await discover.json();
-  const target = circles.find((c) => c.groupName === circleName);
+  const target = gid ? circles.find((c) => c.groupId === gid) : circles.find((c) => c.groupName === circleName);
   ok(`客服知聚发现接口返回 ${circles.length} 个客服知聚`);
-  if (!target) throw new Error(`未发现客服知聚「${circleName}」`);
-  ok(`客服知聚「${circleName}」可发现：groupId=${target.groupId}, isSupportCircle=${target.isSupportCircle}, kind=${target.kind}`);
+  if (!target) throw new Error(`未发现客服知聚「${circleName || gid}」`);
+  if (!gid) gid = target.groupId;
+  ok(`客服知聚「${target.groupName || target.groupId}」可发现：groupId=${target.groupId}, isSupportCircle=${target.isSupportCircle}, kind=${target.kind}`);
 
-  // 成员核验：4 个客服数字员工应 role=Admin（客服）+ 创建者为 Owner
+  // 成员核验：数字员工应 Role=Admin（客服）+ 创建者为 Owner
   const members = await (await fetch(`${BASE_URL}/ag-ui/group/${target.groupId}/members`, {
     headers: { Authorization: `Bearer ${token}` },
   })).json();
@@ -143,39 +152,56 @@ async function verifyViaApi(page) {
   const allSupport = agents.length > 0 && agents.every((m) => m.role === "admin");
   ok(`全员客服(role=admin)：${allSupport ? "✅" : "❌"}`);
 
-  // 数字员工目录应已包含刚编排创建的那几位（ID 由模型决定，非固定前缀）:
-  // 直接取客服知聚里的数字员工成员 ID 作为「应已创建」清单。
-  const createdIds = agents.map((m) => m.memberId);
+  // 数字员工目录应包含 apply 创建的（authoritative list）或客服知聚内的数字员工
+  const createdAgentIds = applied.createdAgentIds && applied.createdAgentIds.length
+    ? applied.createdAgentIds
+    : agents.map((m) => m.memberId);
   const agentsAll = await (await fetch(`${BASE_URL}/ag-ui/agents`, {
     headers: { Authorization: `Bearer ${token}` },
   })).json();
-  const present = createdIds.filter((id) => agentsAll.some((a) => a.agentId === id));
-  ok(`数字员工目录命中刚创建的数字员工：${present.length}/${createdIds.length} -> ${present.join(", ") || "(无)"}`);
-  if (present.length < createdIds.length)
-    throw new Error(`数字员工目录缺缺刚创建的数字员工（${createdIds.join(", ")}）`);
+  const present = createdAgentIds.filter((id) => agentsAll.some((a) => a.agentId === id));
+  ok(`数字员工目录命中刚创建的数字员工：${present.length}/${createdAgentIds.length} -> ${present.join(", ") || "(无)"}`);
+  if (present.length < createdAgentIds.length)
+    throw new Error(`数字员工目录缺少刚创建的数字员工（${createdAgentIds.join(", ")}）`);
 
-  return { gid: target.groupId, createdIds };
+  return { gid, createdAgentIds };
 }
 
-async function cleanup(page, gid, createdIds) {
+async function cleanup(page, { gid, createdAgentIds = [], createdSkillIds = [] }) {
   if (KEEP) { ok("KEEP=1，跳过清理（保留新建产物）"); return; }
   const token = await page.evaluate(() => {
     const raw = sessionStorage.getItem("agui.auth") || localStorage.getItem("agui.auth");
     return raw ? JSON.parse(raw).token : null;
   });
+  const auth = { Authorization: `Bearer ${token}` };
   // 解散客服知聚（服务端从 token 解析身份，operatorId 仍需按字段提供以满足绑定）
-  const disband = await fetch(`${BASE_URL}/ag-ui/group/disband`, {
-    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ groupId: gid, operatorId: USERNAME }),
-  });
-  if (!disband.ok) throw new Error(`解散客服知聚 ${gid} 失败: HTTP ${disband.status}（请手动清理残留）`);
-  ok(`已解散客服知聚：✅`);
+  if (gid) {
+    const disband = await fetch(`${BASE_URL}/ag-ui/group/disband`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...auth },
+      body: JSON.stringify({ groupId: gid, operatorId: USERNAME }),
+    });
+    if (!disband.ok) throw new Error(`解散客服知聚 ${gid} 失败: HTTP ${disband.status}（请手动清理残留）`);
+    ok(`已解散客服知聚：✅`);
+  }
   // 删除数字员工
-  for (const id of createdIds) {
+  for (const id of createdAgentIds) {
     const del = await fetch(`${BASE_URL}/ag-ui/agents/${encodeURIComponent(id)}`, {
-      method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      method: "DELETE", headers: auth,
     });
     ok(`删除数字员工 ${id}：${del.ok ? "✅" : `❌ ${del.status}`}`);
+  }
+  // 删除本次新建的技能：仅删「不再被任何现存数字员工引用」的，避免误删用户团队在多部署里同名的真实技能。
+  if (createdSkillIds.length) {
+    const agentsAll = await (await fetch(`${BASE_URL}/ag-ui/agents`, {
+      headers: auth,
+    })).json().catch(() => []);
+    const referenced = new Set();
+    for (const a of agentsAll) for (const sid of (a.skillDefIds || a.skillIds || [])) referenced.add(sid);
+    for (const sid of createdSkillIds) {
+      if (referenced.has(sid)) { ok(`技能 ${sid} 仍被其它数字员工引用，跳过删除`); continue; }
+      const del = await fetch(`${BASE_URL}/ag-ui/skills/${encodeURIComponent(sid)}`, { method: "DELETE", headers: auth });
+      ok(`删除技能 ${sid}：${del.ok ? "✅" : `❌ ${del.status}`}`);
+    }
   }
 }
 
@@ -188,9 +214,9 @@ try {
   page.setDefaultTimeout(15000);
 
   await login(page);
-  await runOrchestrate(page);
-  const { gid, createdIds } = await verifyViaApi(page);
-  await cleanup(page, gid, createdIds);
+  const applied = await runOrchestrate(page);
+  const verified = await verifyViaApi(page, applied);
+  await cleanup(page, { gid: verified.gid, createdAgentIds: verified.createdAgentIds, createdSkillIds: applied.createdSkillIds });
 
   console.log(`\n=== ✅ 端到端通过：界面点选 + API 核验均成功 ===\n`);
   console.log(`截图目录：${shots}\n`);
