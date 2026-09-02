@@ -905,10 +905,16 @@ public sealed class GroupHub : IDisposable
     public async Task<bool> ResolveAgentInteractionAsync(GroupInteractionResolveRequest req, CancellationToken ct = default)
     {
         var group = GetGroupOrThrow(req.GroupId);
-        if (!_store.IsMember(group.GroupId, req.MemberId!)) // 身份由 WS/HTTP 上层解析覆盖
+        // 客服知聚：普通顾客以「参与者」身份进入（不在成员表），但需能批准其触发客服执行技能（客服业务核心：
+        // 顾客 @ 客服 → 客服请求执行 → 顾客确认）。这里放行客服知聚的顾客参与者；普通知聚仍仅限群成员决策。
+        // 安全性不降：网关系在下方按 TargetMemberId（触发者）强校验，顾客只能批准自己触发的那次交互。
+        var isSupportCustomer = group.IsSupportCircle && IsSupportCustomer(group.GroupId, req.MemberId!);
+        if (!_store.IsMember(group.GroupId, req.MemberId!) && !isSupportCustomer) // 身份由 WS/HTTP 上层解析覆盖
             throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "决策者不是群成员");
-        // 频道级 RBAC（4.2）：被群限制为不可审批（CanApprove=false）的成员无法作出任何交互决策
-        if (!_store.GetMember(group.GroupId, req.MemberId!)!.CanApproveInteractions)
+        // 频道级 RBAC（4.2）：被群限制为不可审批（CanApprove=false）的成员无法作出任何交互决策；
+        // 顾客参与者无成员行（不受 RBAC 限制），由下方网关的触发者校验兜底，故此处只校验真实成员。
+        var member = _store.GetMember(group.GroupId, req.MemberId!);
+        if (member is not null && !member.CanApproveInteractions)
             return false; // 与「非触发者 / 已过期」一致地拒绝
         var resolved = await _agentGateway.ResolveInteractionAsync(req.InterruptId, req.MemberId!, req.Approved, req.Input, req.Payload, ct, approveAll: req.ApproveAll, toolResult: req.ToolResult);
         if (resolved)

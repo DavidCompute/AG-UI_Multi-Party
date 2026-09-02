@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Agents;
+using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
 using Microsoft.Agents.AI;
@@ -228,6 +229,37 @@ public sealed class HitlAgentFlowTests
         });
         Assert.False(fail);
         Assert.DoesNotContain(f.Drain(in1), e => HubFixture.TypeOf(e) == EventTypes.AgentInteractionResolved);
+    }
+
+    /// <summary>客服知聚：普通顾客（非成员参与者）应能批准其触发的技能交互（客服业务核心），不再因“非群成员”被拒。
+    /// 网关仍按触发者强校验；本测试用 Stub 网关验证成员资格校验已放行顾客参与者。</summary>
+    [Fact]
+    public async Task Hub_ResolveInteraction_SupportCircleCustomerParticipant_CanResolve()
+    {
+        var f = new HubFixture();
+        var gateway = new StubResolvingGateway { Resolved = true };
+        var hub = new GroupHub(f.Store, f.Users, f.Connections, f.Agents, f.Triggers, gateway, f.Options,
+            TimeProvider.System, NullLogger<GroupHub>.Instance);
+        var group = await hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "客服知聚", OwnerId = "user_staff", Kind = GroupKind.Support, MemberIds = ["agent_support"],
+        });
+        // 顾客以参与者身份进入（不在成员表）
+        await hub.EnterSupportCircleAsync(group.GroupId, "user_customer");
+        Assert.False(f.Store.IsMember(group.GroupId, "user_customer"));
+        Assert.True(hub.IsSupportCustomer(group.GroupId, "user_customer"));
+
+        // 顾客批准其触发的交互：应命中网关（不再抛“决策者不是群成员”）
+        var ok = await hub.ResolveAgentInteractionAsync(new GroupInteractionResolveRequest
+        {
+            GroupId = group.GroupId, InterruptId = "interrupt_customer", MemberId = "user_customer", Approved = true,
+        });
+        Assert.True(ok);
+
+        // 对照：普通知聚中的非成员仍被拒（成员制不受影响）
+        var normal = await hub.CreateGroupAsync(new GroupCreateRequest { GroupName = "普通群", OwnerId = "u2" });
+        await Assert.ThrowsAsync<AguiProtocolException>(async () => await hub.ResolveAgentInteractionAsync(
+            new GroupInteractionResolveRequest { GroupId = normal.GroupId, InterruptId = "x", MemberId = "stranger", Approved = true }));
     }
 
     /// <summary>网关替身：ResolveInteractionAsync 固定返回配置的结果。</summary>
