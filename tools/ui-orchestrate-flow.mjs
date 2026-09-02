@@ -44,23 +44,37 @@ const shot = async (page, name) => {
 
 async function login(page) {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
-  // 等登录层出现或已登录（隐藏）：两种情况都算已加载完成
-  await page.waitForSelector("#agentOrgBtn", { timeout: 15000 }); // 应用外壳已挂载
+  // 等登录层挂载（无论在哪态）
+  await page.waitForSelector("#authOverlay", { timeout: 15000 });
   const needLogin = await page.evaluate(() =>
-    !!document.getElementById("authOverlay") && !document.getElementById("authOverlay").classList.contains("hidden"));
+    !document.getElementById("authOverlay").classList.contains("hidden"));
   if (!needLogin) { ok("已在登录态（无需重新登录）"); return; }
   await page.fill("#authUsername", USERNAME);
   await page.fill("#authPassword", PASSWORD);
   await page.click("#authSubmit");
-  // 登录成功后 authOverlay 会隐藏
+  // 登录成功后 authOverlay 会隐藏，且顶部入口按钮出现
   await page.waitForFunction(() =>
     document.getElementById("authOverlay")?.classList.contains("hidden"), { timeout: 20000 });
+  await page.waitForSelector("#agentManageBtn", { state: "visible", timeout: 10000 });
+  // 首次登录可能自动弹出「模型配置」提示（未显式保存过配置）。它不影响用环境变量里的 key，
+  // 但会遮挡其它弹窗，这里点取消关掉，避免拦截后续点击。
+  const mcVisible = await page.evaluate(() => {
+    const el = document.getElementById("modelConfigModal");
+    return !!(el && !el.classList.contains("hidden"));
+  });
+  if (mcVisible) {
+    await page.click("#mcCancel");
+    ok("已关闭自动弹出的「模型配置」提示（使用环境变量中的 DeepSeek key）");
+  }
   ok(`已登录 ${USERNAME}`);
   await shot(page, "logged-in");
 }
 
 async function runOrchestrate(page) {
-  // 打开「一键组织编排」弹窗
+  // 数字员工管理入口（含工具栏与「一键编排」按钮）在 agentModal 里，先打开它
+  await page.waitForSelector("#agentManageBtn", { state: "visible", timeout: 10000 });
+  await page.click("#agentManageBtn");
+  await page.waitForSelector("#agentOrchBtn", { state: "visible", timeout: 15000 });
   await page.click("#agentOrchBtn");
   await page.waitForSelector("#orgOrchModal:not(.hidden)", { timeout: 10000 });
   ok("打开一键组织编排弹窗");
@@ -71,7 +85,7 @@ async function runOrchestrate(page) {
   await page.click("#orgOrchGen");
   await page.waitForFunction(
     () => (document.getElementById("orgOrchPreview")?.textContent || "").length > 50,
-    { timeout: 120000 }, // 真实模型生成需要时间
+    undefined, { timeout: 120000 }, // 真实模型生成需要时间
   );
   ok("方案已生成（预览区有内容）");
   await shot(page, "plan-preview");
@@ -82,13 +96,23 @@ async function runOrchestrate(page) {
   ok(`已勾选创建客服知聚，名称=${circleName}`);
   await shot(page, "support-circle-checked");
 
-  // 确认创建（apply）。成功后 modal 隐藏并 toast。
+  // 确认创建（apply）。先等网络响应，成功则 modal 隐藏；失败则抛出明确错误（DeepSeek 生成偶发失败）。
+  const applyRespP = page.waitForResponse(
+    (r) => r.url().endsWith("/ag-ui/agents/orchestrate/apply") && r.request().method() === "POST",
+    { timeout: 180000 },
+  );
   await page.click("#orgOrchApply");
+  const applyResp = await applyRespP;
+  if (!applyResp.ok()) {
+    let msg = `HTTP ${applyResp.status()}`;
+    try { const j = await applyResp.json(); msg += " — " + (j.message || j.error || JSON.stringify(j)); } catch {}
+    throw new Error(`编排 apply 失败：${msg}`);
+  }
   await page.waitForFunction(
     () => document.getElementById("orgOrchModal")?.classList.contains("hidden"),
-    { timeout: 120000 },
+    undefined, { timeout: 20000 },
   );
-  ok("创建成功（弹窗已关闭）");
+  ok("创建成功（apply 200，弹窗已关闭）");
   await shot(page, "after-apply");
 }
 
@@ -119,30 +143,35 @@ async function verifyViaApi(page) {
   const allSupport = agents.length > 0 && agents.every((m) => m.role === "admin");
   ok(`全员客服(role=admin)：${allSupport ? "✅" : "❌"}`);
 
-  // 数字员工目录应已包含刚创建的几个 cs_* 智能体
+  // 数字员工目录应已包含刚编排创建的那几位（ID 由模型决定，非固定前缀）:
+  // 直接取客服知聚里的数字员工成员 ID 作为「应已创建」清单。
+  const createdIds = agents.map((m) => m.memberId);
   const agentsAll = await (await fetch(`${BASE_URL}/ag-ui/agents`, {
     headers: { Authorization: `Bearer ${token}` },
   })).json();
-  const csIds = agentsAll.filter((a) => /^cs_/.test(a.agentId || "")).map((a) => a.agentId);
-  ok(`数字员工目录中 cs_* 智能体：${csIds.length} 个 -> ${csIds.join(", ")}`);
+  const present = createdIds.filter((id) => agentsAll.some((a) => a.agentId === id));
+  ok(`数字员工目录命中刚创建的数字员工：${present.length}/${createdIds.length} -> ${present.join(", ") || "(无)"}`);
+  if (present.length < createdIds.length)
+    throw new Error(`数字员工目录缺缺刚创建的数字员工（${createdIds.join(", ")}）`);
 
-  return { gid: target.groupId, csIds };
+  return { gid: target.groupId, createdIds };
 }
 
-async function cleanup(page, gid, csIds) {
+async function cleanup(page, gid, createdIds) {
   if (KEEP) { ok("KEEP=1，跳过清理（保留新建产物）"); return; }
   const token = await page.evaluate(() => {
     const raw = sessionStorage.getItem("agui.auth") || localStorage.getItem("agui.auth");
     return raw ? JSON.parse(raw).token : null;
   });
-  // 解散客服知聚（服务端从 token 解析身份，operatorId 仅为回退）
+  // 解散客服知聚（服务端从 token 解析身份，operatorId 仍需按字段提供以满足绑定）
   const disband = await fetch(`${BASE_URL}/ag-ui/group/disband`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ groupId: gid }),
+    body: JSON.stringify({ groupId: gid, operatorId: USERNAME }),
   });
-  ok(`已解散客服知聚：${disband.ok ? "✅" : `❌ ${disband.status}`}`);
+  if (!disband.ok) throw new Error(`解散客服知聚 ${gid} 失败: HTTP ${disband.status}（请手动清理残留）`);
+  ok(`已解散客服知聚：✅`);
   // 删除数字员工
-  for (const id of csIds) {
+  for (const id of createdIds) {
     const del = await fetch(`${BASE_URL}/ag-ui/agents/${encodeURIComponent(id)}`, {
       method: "DELETE", headers: { Authorization: `Bearer ${token}` },
     });
@@ -160,8 +189,8 @@ try {
 
   await login(page);
   await runOrchestrate(page);
-  const { gid, csIds } = await verifyViaApi(page);
-  await cleanup(page, gid, csIds);
+  const { gid, createdIds } = await verifyViaApi(page);
+  await cleanup(page, gid, createdIds);
 
   console.log(`\n=== ✅ 端到端通过：界面点选 + API 核验均成功 ===\n`);
   console.log(`截图目录：${shots}\n`);
