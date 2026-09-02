@@ -241,6 +241,9 @@ window.I18N_DICTS.zh = {
   "org.orchSupportNamePh": "客服知聚名称（可选）",
   "org.orchSupportCircleCreated": "已创建客服知聚「{name}」",
   "org.orchApplied": "已创建 {n} 个数字员工及其技能与连接",
+  "org.orchStreamWait": "正在连接模型，准备流式生成…",
+  "org.orchStreamProgress": "已识别 {agents} 名数字员工 / {skills} 个技能…生成中",
+  "org.orchGenEmpty": "模型未返回有效的组织方案，请重试",
 
   /* --- 技能库（可复用技能 shell / http / prompt） --- */
   "skill.toolbarBtn": "技能库",

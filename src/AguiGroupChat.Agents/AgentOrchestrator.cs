@@ -52,6 +52,55 @@ public static class AgentOrchestrator
         }
     }
 
+    /// <summary>流式生成组织方案文本：逐个 token 产出已到达的文本增量，供调用方实时转发（SSE）/ 展示生成过程。
+    /// 结束后把完整文本交给调用方 <see cref="Parse"/> 得到结构化方案。mock 模式无真实模型，整段模板拆几段产出。</summary>
+    public static async IAsyncEnumerable<string> StreamTextAsync(
+        AgentOptions options, string requirement, ILogger logger,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var req = (requirement ?? "").Trim();
+        if (string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
+        {
+            var text = JsonSerializer.Serialize(BuildTemplate(req));
+            const int chunk = 80;
+            for (var i = 0; i < text.Length; i += chunk)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return text.Substring(i, Math.Min(chunk, text.Length - i));
+                await Task.Yield();
+            }
+            yield break;
+        }
+
+        IChatClient client;
+        try
+        {
+            var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            client = AgentCatalog.BuildOpenAIChatClient(
+                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek).AsIChatClient();
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("组织编排需要可用的模型配置（" + ex.Message + "）", ex);
+        }
+
+        try
+        {
+            var prompt = BuildPrompt(req);
+            await foreach (var update in client.GetStreamingResponseAsync(
+                [new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct))
+            {
+                if (string.IsNullOrEmpty(update.Text)) continue;
+                yield return update.Text;
+            }
+            logger.LogInformation("组织编排流式文本已接收完毕：{Req}", Truncate(req));
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
     private static string BuildPrompt(string requirement)
     {
         return
@@ -81,7 +130,8 @@ public static class AgentOrchestrator
             "用户需求：" + requirement;
     }
 
-    private static OrchestrationPlan Parse(string text)
+    /// <summary>解析模型生成的 JSON 文本为结构化方案（供流式端点收尾使用）。失败抛明确异常。</summary>
+    public static OrchestrationPlan Parse(string text)
     {
         var start = text.IndexOf('{');
         var end = text.LastIndexOf('}');

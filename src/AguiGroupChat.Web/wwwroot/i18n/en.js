@@ -241,6 +241,9 @@ window.I18N_DICTS.en = {
   "org.orchSupportNamePh": "Support circle name (optional)",
   "org.orchSupportCircleCreated": "Support circle \"{name}\" created",
   "org.orchApplied": "Created {n} digital employees with skills and links",
+  "org.orchStreamWait": "Connecting to the model for streaming generation...",
+  "org.orchStreamProgress": "Seen {agents} digital employees / {skills} skills ... generating",
+  "org.orchGenEmpty": "The model returned no valid organization plan; please retry",
 
   /* --- Skill library (reusable skills shell / http / prompt) --- */
   "skill.toolbarBtn": "Skills",

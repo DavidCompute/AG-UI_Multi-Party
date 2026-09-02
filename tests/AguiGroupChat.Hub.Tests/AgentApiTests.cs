@@ -862,6 +862,39 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
     }
 
     [Fact]
+    public async Task Orchestrate_Stream_EmitsTokenProgressAndDoneEvents()
+    {
+        // 方案 C 流式端点：mock 模式应发 token（多段）/ progress（进度统计）/ done（含完整方案）三类 SSE 事件。
+        var token = await RegisterAsync("orch_stream");
+        using var req = await _client.SendAsync(AuthMessage(HttpMethod.Post, "/ag-ui/agents/orchestrate/stream", token,
+            new { requirement = "组建一个客户服务团队" }));
+        req.EnsureSuccessStatusCode();
+        var body = await req.Content.ReadAsStringAsync();
+
+        var tokens = new List<string>();
+        JsonElement? done = null;
+        var progressEvents = 0;
+        foreach (var block in body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        {
+            var dataLine = block.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("data:"));
+            if (string.IsNullOrEmpty(dataLine)) continue;
+            var msg = JsonSerializer.Deserialize<JsonElement>(dataLine[5..]);
+            switch (msg.GetProperty("type").GetString())
+            {
+                case "token": tokens.Add(msg.GetProperty("delta").GetString()!); break;
+                case "progress": progressEvents++; break;
+                case "done": done = msg.GetProperty("plan"); break;
+            }
+        }
+
+        Assert.NotEmpty(tokens);                       // 有流式 token
+        Assert.True(progressEvents >= 0);              // 进度事件可有可无（节流）
+        Assert.NotNull(done);                          // 一定有完成事件
+        Assert.True(done!.Value.GetProperty("agents").GetArrayLength() >= 1);
+        Assert.True(done!.Value.GetProperty("skills").GetArrayLength() >= 1);
+    }
+
+    [Fact]
     public async Task Orchestrate_Apply_CreatesAgentsSkillsAndConnections()
     {
         // mock 方案含一个 shell（client）技能；仅管理员可 apply（服务端强制）——用专用管理员账号 orch_admin
@@ -986,5 +1019,25 @@ public sealed class AgentOrchestratorTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => AgentOrchestrator.GenerateAsync(
             new AgentOptions { Provider = "mock" }, requirement, NullLoggerFactory.Instance.CreateLogger("t"), CancellationToken.None));
         Assert.Contains("至少 2 个字符", ex.Message);
+    }
+
+    [Fact]
+    public async Task StreamText_Mock_YieldsChunksThatParseToCompletePlan()
+    {
+        // 方案 C 流式：mock 模式把模板拆成多段产出；拼接后应能 Parse 出完整方案（供 SSE 端点收尾复用）。
+        var sb = new System.Text.StringBuilder();
+        var chunks = 0;
+        await foreach (var delta in AgentOrchestrator.StreamTextAsync(
+            new AgentOptions { Provider = "mock" }, "财务报销流程", NullLoggerFactory.Instance.CreateLogger("orch"), CancellationToken.None))
+        {
+            chunks++;
+            sb.Append(delta);
+        }
+
+        Assert.True(chunks > 1, "mock 流式应产出多段（模拟逐 token）");
+        var plan = AgentOrchestrator.Parse(sb.ToString());
+        Assert.False(string.IsNullOrWhiteSpace(plan.Title));
+        Assert.NotEmpty(plan.Agents);
+        Assert.NotEmpty(plan.Skills);
     }
 }

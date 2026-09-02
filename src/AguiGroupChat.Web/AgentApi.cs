@@ -6,6 +6,8 @@ using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Users;
 using Microsoft.Extensions.Logging;
+using System.Text;
+using System.Text.Json;
 
 namespace AguiGroupChat.Web;
 
@@ -262,6 +264,91 @@ public static class AgentApi
             catch (OperationCanceledException) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成已取消或超时"), statusCode: StatusCodes.Status408RequestTimeout); }
             catch (Exception ex) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成失败：" + ex.Message), statusCode: StatusCodes.Status400BadRequest); }
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 一键组织编排·流式（SSE）：逐 token 实时转发模型输出（方案 C），并实时统计已见岗位 / 技能，结束时下发完整方案 ----
+        root.MapPost("/orchestrate/stream", async (OrchestrateRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var requirement = (req.Requirement ?? "").Trim();
+            if (requirement.Length < 2)
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, "请描述你要建立的组织 / 需求（至少 2 个字符）"), statusCode: StatusCodes.Status400BadRequest);
+            if (requirement.Length > 500)
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, "需求描述最长 500 字符"), statusCode: StatusCodes.Status400BadRequest);
+
+            var response = ctx.Response;
+            response.ContentType = "text/event-stream; charset=utf-8";
+            response.Headers.CacheControl = "no-cache";
+            response.Headers.Connection = "keep-alive";
+            await response.Body.FlushAsync(ct);
+
+            var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+            async Task SendAsync(object payload, CancellationToken c)
+            {
+                var line = "data: " + JsonSerializer.Serialize(payload, json) + "\n\n";
+                var bytes = Encoding.UTF8.GetBytes(line);
+                await response.Body.WriteAsync(bytes, c);
+                await response.Body.FlushAsync(c);
+            }
+
+            try
+            {
+                var sb = new StringBuilder();
+                var lastProgressAt = 0L;
+                await foreach (var delta in AgentOrchestrator.StreamTextAsync(agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct))
+                {
+                    sb.Append(delta);
+                    await SendAsync(new { type = "token", delta }, ct);
+                    // 节流地实时统计已见岗位 / 技能（不依赖完整 JSON；出现 agentId/skillId 键即计入）
+                    var now = Environment.TickCount64;
+                    if (now - lastProgressAt > 120)
+                    {
+                        lastProgressAt = now;
+                        var raw = sb.ToString();
+                        await SendAsync(new
+                        {
+                            type = "progress",
+                            agents = CountKeys(raw, "agentId"),
+                            skills = CountKeys(raw, "skillId"),
+                            rawLen = raw.Length,
+                        }, ct);
+                    }
+                }
+
+                var plan = AgentOrchestrator.Parse(sb.ToString());
+                loggerFactory.CreateLogger("AgentOrchestrator").LogInformation(
+                    "已根据需求生成组织方案（{Agents} 名 / {Skills} 技能）：{Req}", plan.Agents.Count, plan.Skills.Count, requirement.Length > 60 ? requirement[..60] + "…" : requirement);
+                await SendAsync(new
+                {
+                    type = "done",
+                    plan = new
+                    {
+                        title = plan.Title,
+                        agents = plan.Agents.Select(a => new { agentId = a.AgentId, nickname = a.Nickname, description = a.Description, instructions = a.Instructions, triggerMode = a.TriggerMode ?? "mentioned", skillIds = a.SkillIds ?? [], assignmentIds = a.AssignmentIds ?? [], escalationAgentId = a.EscalationAgentId, relayToAgentId = a.RelayToAgentId }),
+                        skills = plan.Skills.Select(s => new { skillId = s.SkillId, name = s.Name, description = s.Description, kind = s.Kind, body = s.Body, executionLocation = s.ExecutionLocation ?? "server", requiresApproval = s.RequiresApproval }),
+                    },
+                }, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                try { await SendAsync(new { type = "error", message = "生成已取消或超时" }, CancellationToken.None); } catch { /* 连接已断忽略 */ }
+            }
+            catch (Exception ex)
+            {
+                try { await SendAsync(new { type = "error", message = "生成失败：" + ex.Message }, CancellationToken.None); } catch { /* 连接已断忽略 */ }
+            }
+            return Results.Empty;
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // 实时统计已见 JSON 里指定键的出现次数（用于流式进度提示）。
+        static int CountKeys(string raw, string key) => CountOccurrences(raw, "\"" + key + "\"");
+        static int CountOccurrences(string haystack, string needle)
+        {
+            if (string.IsNullOrEmpty(haystack) || string.IsNullOrEmpty(needle)) return 0;
+            var count = 0; var idx = 0;
+            while ((idx = haystack.IndexOf(needle, idx, StringComparison.Ordinal)) >= 0) { count++; idx += needle.Length; }
+            return count;
+        }
 
         // ---- 一键组织编排（确认后落库）：把 /orchestrate 返回并确认过的方案写入技能库 + 数字员工库，并建好连接 ----
         //      幂等部署安全：全部先校验通过再造；失败则整体返回错误（不部分落库）。

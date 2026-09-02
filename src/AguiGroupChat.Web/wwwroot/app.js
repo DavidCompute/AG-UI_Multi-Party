@@ -1268,32 +1268,82 @@ function openOrgOrchestrate() {
   $("orgOrchSupportName").value = "";
   $("orgOrchStatus").textContent = "";
   $("orgOrchApply").disabled = true;
+  $("orgOrchStream")?.classList.add("hidden");
   $("orgOrchModal").classList.remove("hidden");
 }
 
-/** 生成方案预览（不落库）。 */
+/** 生成方案预览（SSE 流式，方案 C：逐 token 实时展示生成过程 + 实时统计已见岗位/技能）。 */
 async function generateOrchestration() {
   const requirement = ($("orgOrchReq").value || "").trim();
   if (requirement.length < 2) { toast(t("org.orchReqShort")); return; }
   $("orgOrchGen").disabled = true;
+  $("orgOrchApply").disabled = true;
   $("orgOrchStatus").textContent = t("org.orchGenIns") + "…";
   $("orgOrchPreview").textContent = t("org.orchGenIns") + "…";
+
+  // 打开流式面板
+  const streamPanel = $("orgOrchStream");
+  streamPanel.classList.remove("hidden");
+  const metaEl = $("orgOrchStreamMeta");
+  const textEl = $("orgOrchStreamText");
+  metaEl.textContent = t("org.orchStreamWait");
+  textEl.textContent = "";
+
   try {
-    const res = await fetch("/ag-ui/agents/orchestrate", {
+    const res = await fetch("/ag-ui/agents/orchestrate/stream", {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({ requirement }),
     });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data || !data.agents) { toast(t("org.orchGenFail", { err: errMsg(data, res.status) })); return; }
-    orchestrationPreview = data;
-    $("orgOrchPreview").textContent = formatOrchestrationPlan(data);
-    // 方案含 shell/http 技能时，普通用户无法创建（仅管理员可建）——预览即提示，避免点确认才 403
-    const hasPrivilegedSkill = (data.skills || []).some((s) => (s.kind || "").toLowerCase() === "shell" || (s.kind || "").toLowerCase() === "http");
-    $("orgOrchStatus").textContent = (hasPrivilegedSkill ? t("org.orchNeedsAdmin") + " " : "") + t("org.orchGenDone");
-    $("orgOrchApply").disabled = false;
+    if (!res.ok || !res.body) {
+      let msg = `HTTP ${res.status}`;
+      try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
+      throw new Error(msg);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buf = "";
+    const processEvent = (data) => {
+      let msg;
+      try { msg = JSON.parse(data); } catch { return; }
+      if (msg.type === "token") {
+        textEl.textContent += msg.delta;
+        textEl.scrollTop = textEl.scrollHeight;
+      } else if (msg.type === "progress") {
+        metaEl.textContent = t("org.orchStreamProgress", { agents: msg.agents || 0, skills: msg.skills || 0 });
+        $("orgOrchPreview").textContent = metaEl.textContent + "…";
+      } else if (msg.type === "done") {
+        orchestrationPreview = msg.plan || null;
+        if (!orchestrationPreview || !Array.isArray(orchestrationPreview.agents) || orchestrationPreview.agents.length === 0)
+          throw new Error(t("org.orchGenEmpty"));
+        $("orgOrchPreview").textContent = formatOrchestrationPlan(orchestrationPreview);
+        const hasPrivilegedSkill = (orchestrationPreview.skills || []).some((s) => (s.kind || "").toLowerCase() === "shell" || (s.kind || "").toLowerCase() === "http");
+        $("orgOrchStatus").textContent = (hasPrivilegedSkill ? t("org.orchNeedsAdmin") + " " : "") + t("org.orchGenDone");
+        $("orgOrchApply").disabled = false;
+        streamPanel.classList.add("hidden");
+      } else if (msg.type === "error") {
+        throw new Error(msg.message || t("org.orchGenFail"));
+      }
+    };
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const dataLine = chunk.split("\n").find((l) => l.startsWith("data:"));
+        if (dataLine) processEvent(dataLine.slice(5).trim());
+      }
+    }
   } catch (ex) {
-    $("orgOrchPreview").textContent = "";
-    toast(t("org.orchGenFail", { err: ex.message }));
+    if (!$("orgOrchApply").disabled || !orchestrationPreview) {
+      // 未成功生成时报告失败；已生成完成（done 后抛错）不覆盖预览
+      toast(t("org.orchGenFail", { err: ex.message }));
+      $("orgOrchPreview").textContent = "";
+      $("orgOrchStatus").textContent = "";
+    }
   } finally {
     $("orgOrchGen").disabled = false;
   }

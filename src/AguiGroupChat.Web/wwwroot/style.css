@@ -1585,6 +1585,9 @@ button { white-space: nowrap; }
 .org-modal { width: 860px; max-width: 94vw; }
 .org-canvas-wrap { position: relative; overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: rgba(128,141,180,.04); min-height: 320px; }
 .org-orch-preview { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.6; background: rgba(128,141,180,.04); white-space: pre-wrap; color: var(--muted); }
+.org-orch-stream { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: rgba(15,20,36,.06); }
+.org-orch-stream-meta { padding: 6px 10px; font-size: 12px; color: #6f8cff; border-bottom: 1px dashed var(--border); }
+.org-orch-stream-text { margin: 0; padding: 8px 10px; max-height: 130px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
 .org-canvas { position: relative; width: 920px; height: 100%; }
 .org-svg { position: absolute; inset: 0; width: 920px; height: 100%; pointer-events: none; overflow: visible; z-index: 1; }
 .org-node {
