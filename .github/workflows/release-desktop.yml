@@ -1,0 +1,77 @@
+name: Release (Windows Desktop MSI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.0.108). Leave blank to read from project <Version>."
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-msi:
+    name: Build & publish Windows MSI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install WiX v4 tool
+        shell: pwsh
+        run: dotnet tool install -g wix --version "4.*"
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $override = "${{ github.event.inputs.version }}".Trim()
+          if ($override -ne "") {
+            "version=$override" >> $env:GITHUB_OUTPUT
+          } else {
+            $xml = [xml](Get-Content "src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj")
+            $v = $xml.Project.PropertyGroup.Version
+            if ([string]::IsNullOrWhiteSpace($v)) { throw "No <Version> found in csproj" }
+            "version=$v" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build MSI
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version "${{ steps.ver.outputs.version }}"
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agui-msi-${{ steps.ver.outputs.version }}
+          path: artifacts/wix/AguiGroupChat-Desktop-${{ steps.ver.outputs.version }}.msi
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          draft: true
+          generate_release_notes: false
+          files: artifacts/wix/AguiGroupChat-Desktop-${{ steps.ver.outputs.version }}.msi
+
+      - name: Publish GitHub Release (manual, draft)
+        if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          gh release create "v$ver" "artifacts/wix/AguiGroupChat-Desktop-$ver.msi" `
+            --draft `
+            --title "AG-UI GroupChat Desktop v$ver" `
+            --notes "Windows 安装包：AguiGroupChat-Desktop-$ver.msi"

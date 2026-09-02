@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & test (.NET 10) + i18n
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build Web + Desktop projects
+        run: |
+          dotnet build src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release --nologo
+          dotnet build src/AguiGroupChat.Web/AguiGroupChat.Web.csproj -c Release --nologo
+
+      - name: Run Hub tests
+        run: dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj -c Release --nologo --no-build
+
+      - name: Run Sdk tests
+        run: dotnet test tests/AguiGroupChat.Sdk.Tests/AguiGroupChat.Sdk.Tests.csproj -c Release --nologo --no-build
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: i18n key symmetry check
+        run: node .github/workflows/check-i18n-keys.js
+
+      - name: i18n orphan-key detection
+        run: node .github/workflows/check-orphan-keys.js
