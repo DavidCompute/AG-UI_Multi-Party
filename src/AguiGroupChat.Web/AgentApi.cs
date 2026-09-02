@@ -359,19 +359,20 @@ public static class AgentApi
             if (user is null) return Unauthorized();
             var isAdmin = auth.IsAdmin(user.UserId);
 
-            // ---- 1. 校验技能 ----
+            // ---- 1. 技能：自动去重（与原库同名 / 方案内同名时追加 _2/_3 改名，不覆盖已有资产），并记录原→新映射供数字员工引用重映射。 ----
             var skills = req.Skills ?? [];
-            var skillIds = new HashSet<string>(StringComparer.Ordinal);
+            var occupiedSkills = new HashSet<string>(skillCatalog.ListAll().Select(s => s.SkillId), StringComparer.Ordinal);
+            var skillIdMap = new Dictionary<string, string>(StringComparer.Ordinal); // 方案内每个技能原 id → 最终 id（agent.SkillIds 引用按此重映射）
             var builtSkills = new List<AgentSkillDefinition>(skills.Count);
             foreach (var s in skills)
             {
-                var id = AgentSkillDefinition.IsValidAsciiToolId((s.SkillId ?? "").Trim())
-                    ? (s.SkillId ?? "").Trim()
-                    : AgentSkillDefinition.ToAsciiToolId(s.SkillId ?? "", skillIds);
+                var orig = (s.SkillId ?? "").Trim();
+                var id = AgentSkillDefinition.IsValidAsciiToolId(orig)
+                    ? AgentSkillDefinition.ToAsciiToolId(orig, occupiedSkills)   // 合法 ASCII；与库/方案去重
+                    : AgentSkillDefinition.ToAsciiToolId(orig, occupiedSkills);  // 非法 → 清洗 + 去重
                 if (string.IsNullOrWhiteSpace(id))
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "技能标识不能为空"));
-                if (!skillIds.Add(id))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"技能 ID 重复：{id}"));
+                skillIdMap[orig] = id;   // 同一 orig 复用同一 final（同方案内重复 orig 最后映射，但 ToAsciiToolId 已保证不重复占位）
                 if (string.IsNullOrWhiteSpace(s.Name) || string.IsNullOrWhiteSpace(s.Description) || string.IsNullOrWhiteSpace(s.Body))
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"技能「{id}」缺少名称 / 描述 / 正文"));
                 var kind = Enum.TryParse<AgentSkillKind>(s.Kind, true, out var k) ? k : AgentSkillKind.Prompt;
@@ -396,45 +397,45 @@ public static class AgentApi
                 });
             }
 
-            // ---- 2. 校验数字员工（含引用）。分两遍：先收集全部 ID（引用需全量可见），再校验字段与连接。 ----
+            // ---- 2. 数字员工：同样自动去重（agentId 与原库同名 / 方案内同名时改名），并同步技能引用与上下级连接引用。 ----
             var agents = req.Agents ?? [];
             if (agents.Count == 0)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "方案里没有数字员工"));
-            var agentIds = new HashSet<string>(StringComparer.Ordinal);
-            // 2a. 收集全部 agentId（合法性 / 重复 / 与现存冲突）
+            var occupiedAgents = new HashSet<string>(catalog.ListDefinitions().Select(d => d.AgentId), StringComparer.Ordinal);
+            var agentIdMap = new Dictionary<string, string>(StringComparer.Ordinal); // 原 agentId → 最终 agentId
             foreach (var a in agents)
             {
-                var id = (a.AgentId ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(id) || !System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_-]{1,64}$"))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 非法：{id}"));
+                var orig = (a.AgentId ?? "").Trim();
+                var id = AgentSkillDefinition.ToAsciiToolId(orig, occupiedAgents, "agent"); // 清洗（含中文等） + 与原库/方案去重
                 if (id.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "twin_ 前缀为系统保留"));
-                if (catalog.GetDefinition(id) is not null)
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 已存在：{id}"));
+                    id = TwinService.AgentIdPrefix + "_" + id; // twin_ 前缀系统保留：规避
+                if (string.IsNullOrWhiteSpace(id))
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 非法：{orig}"));
                 if (string.IsNullOrWhiteSpace(a.Nickname))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{id}」缺少昵称"));
-                if (!agentIds.Add(id))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 重复：{id}"));
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{orig}」缺少昵称"));
+                agentIdMap[orig] = id;
             }
-            // 2b. 校验技能引用与连接目标（此时 agentIds 已含全部，引用顺序无关）
+            // 2b. 引用重映射 + 校验连接目标存在（经映射后）
             foreach (var a in agents)
             {
-                var id = (a.AgentId ?? "").Trim();
+                var finalId = agentIdMap[(a.AgentId ?? "").Trim()];
                 foreach (var sid in a.SkillIds ?? [])
-                    if (!skillIds.Contains(sid))
-                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{id}」引用了未定义技能：{sid}"));
+                    if (!skillIdMap.TryGetValue(sid, out _))
+                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{finalId}」引用了未定义技能：{sid}"));
                 foreach (var dep in (a.AssignmentIds ?? []).Concat(new[] { a.EscalationAgentId, a.RelayToAgentId }).Where(x => !string.IsNullOrWhiteSpace(x)))
-                    if (!agentIds.Contains(dep!))
-                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{id}」的连接目标未定义：{dep}"));
+                    if (!agentIdMap.TryGetValue(dep!, out _))
+                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{finalId}」的连接目标未定义：{dep}"));
             }
 
-            // ---- 3. 落库（先技能后数字员工）----
+            // ---- 3. 落库（先技能后数字员工，用最终去重后的 id / 引用）----
             foreach (var s in builtSkills)
                 skillCatalog.Upsert(s);
             var created = new List<string>();
             foreach (var a in agents)
             {
-                var id = (a.AgentId ?? "").Trim();
+                var id = agentIdMap[(a.AgentId ?? "").Trim()];
+                var remapSkill = (List<string>?)a.SkillIds?.Select(sid => skillIdMap[sid]).ToList();
+                var remapAssign = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(d => agentIdMap[d]).ToList();
                 var def = new AgentDefinition
                 {
                     AgentId = id,
@@ -442,10 +443,10 @@ public static class AgentApi
                     Description = a.Description ?? "",
                     Instructions = a.Instructions ?? "",
                     TriggerMode = Enum.TryParse<AgentTriggerMode>(a.TriggerMode, true, out var tm) ? tm : AgentTriggerMode.Mentioned,
-                    SkillDefIds = (a.SkillIds ?? []).ToList(),
-                    AssignmentIds = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
-                    EscalationAgentId = string.IsNullOrWhiteSpace(a.EscalationAgentId) ? null : a.EscalationAgentId,
-                    RelayToAgentId = string.IsNullOrWhiteSpace(a.RelayToAgentId) ? null : a.RelayToAgentId,
+                    SkillDefIds = remapSkill ?? [],
+                    AssignmentIds = remapAssign,
+                    EscalationAgentId = string.IsNullOrWhiteSpace(a.EscalationAgentId) ? null : agentIdMap[a.EscalationAgentId],
+                    RelayToAgentId = string.IsNullOrWhiteSpace(a.RelayToAgentId) ? null : agentIdMap[a.RelayToAgentId],
                     OwnerId = user.UserId,
                 };
                 catalog.Upsert(def);
@@ -466,7 +467,8 @@ public static class AgentApi
                     {
                         MemberId = id,
                         MemberType = MemberType.Agent,
-                        Nickname = agents.FirstOrDefault(x => x.AgentId == id)?.Nickname ?? id,
+                        // id 已是去重后的最终 agentId；从原始方案按映射回查昵称
+                        Nickname = agents.FirstOrDefault(a => agentIdMap[(a.AgentId ?? "").Trim()] == id)?.Nickname ?? id,
                     }).ToList(),
                 }, ct);
                 supportCircleGroupId = group.GroupId;

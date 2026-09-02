@@ -990,6 +990,41 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
             Assert.Equal(GroupRole.Admin, m!.Role); // 客服知聚的客服成员 Role=Admin
         }
     }
+
+    [Fact]
+    public async Task Orchestrate_Apply_CollidingIds_AreDeduplicatedWithSuffix_AndRefsRemapped()
+    {
+        // 自动编排去重：方案里技能/数字员工与原库同名时，追加 _2 改名继续保存（不覆盖、不失败），并把引用同步到新 id。
+        var token = await RegisterAsync("orch_dedup");
+        var skillCatalog = _fixture.App.Services.GetRequiredService<AgentSkillCatalog>();
+        var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
+        // 预置与方案冲突的资产
+        skillCatalog.Upsert(new AgentSkillDefinition { SkillId = "dup_skill", Name = "旧技能", Description = "d", Kind = AgentSkillKind.Prompt, Body = "b" });
+        catalog.Upsert(new AgentDefinition { AgentId = "dup_agent", Nickname = "旧员工", Instructions = "x", OwnerId = null });
+
+        var reqBody = new OrchestrateApplyRequest("团队",
+            [new OrchestratedAgentHttp("dup_agent", "新员工", "d", "i", "mentioned", ["dup_skill"], [], null, null)],
+            [new OrchestratedSkillHttp("dup_skill", "新技能", "d", "prompt", "body", "server", false)]);
+
+        var res = await _client.SendAsync(ApplyRequest(token, reqBody));
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+        var createdAgent = d.GetProperty("agents")[0].GetString()!;
+        var createdSkill = d.GetProperty("skills")[0].GetString()!;
+        Assert.Equal("dup_agent_2", createdAgent); // 与原库已有重名 → 改名避重
+        Assert.Equal("dup_skill_2", createdSkill);
+
+        // 原库资产未被覆盖（仍为原 id / 原名）
+        Assert.NotNull(skillCatalog.Get("dup_skill"));
+        Assert.Equal("旧技能", skillCatalog.Get("dup_skill")!.Name);
+        Assert.NotNull(catalog.GetDefinition("dup_agent"));
+        Assert.Equal("旧员工", catalog.GetDefinition("dup_agent")!.Nickname);
+
+        // 新落库的数字员工技能引用已同步到新技能 id
+        var def = catalog.GetDefinition(createdAgent)!;
+        Assert.Equal(["dup_skill_2"], def.SkillDefIds);
+        Assert.Equal("新员工", def.Nickname);
+    }
 }
 
 
