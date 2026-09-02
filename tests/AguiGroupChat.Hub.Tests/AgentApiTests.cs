@@ -1040,4 +1040,17 @@ public sealed class AgentOrchestratorTests
         Assert.NotEmpty(plan.Agents);
         Assert.NotEmpty(plan.Skills);
     }
+
+    [Fact]
+    public void Parse_ToleratesObjectBody_ForHttpSkill()
+    {
+        // 真实模型对 http 技能常把 body 写成 JSON 对象；Parse 应宽容处理成字符串而不抛错。
+        var json = """
+            {"title":"客户服务团队","agents":[{"agentId":"cs_a","nickname":"客服A","description":"d","instructions":"i","triggerMode":"mentioned","skillIds":["s1"],"assignmentIds":[],"escalationAgentId":null,"relayToAgentId":null}],"skills":[{"skillId":"s1","name":"查订单","description":"d","kind":"http","body":{"method":"GET","url":"${query}","headers":{}},"executionLocation":"server","requiresApproval":true}]}
+            """;
+        var plan = AgentOrchestrator.Parse(json);
+        var skill = Assert.Single(plan.Skills);
+        Assert.NotNull(skill.Body);
+        Assert.Contains("\"method\":\"GET\"", skill.Body); // 对象被归一化为紧凑 JSON 字符串
+    }
 }

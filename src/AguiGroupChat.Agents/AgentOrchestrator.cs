@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 
@@ -214,7 +215,41 @@ public sealed class OrchestratedSkill
     public string? Name { get; set; }
     public string? Description { get; set; }
     public string? Kind { get; set; }
+
+    /// <summary>技能体：模型有时把 prompt 写为字符串、把 http/shell 写为对象/数组。
+    /// 这里用 <see cref="FlexibleBodyConverter"/> 兼容成字符串（对象/数组/数值则序列化为紧凑 JSON 文本）。</summary>
+    [System.Text.Json.Serialization.JsonConverter(typeof(FlexibleBodyConverter))]
     public string? Body { get; set; }
     public string? ExecutionLocation { get; set; }
     public bool RequiresApproval { get; set; }
+}
+
+/// <summary>把技能 body 的 JSON 值宽松地读成字符串：字符串原样；对象 / 数组 / 数值 / 布尔序列化为紧凑 JSON 文本。
+/// 真实模型对 http/shell 技能常把 body 写成 JSON 对象，兼容后不报错（后续按字符串写入技能库）。</summary>
+public sealed class FlexibleBodyConverter : System.Text.Json.Serialization.JsonConverter<string?>
+{
+    public override string? Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case System.Text.Json.JsonTokenType.String:
+            case System.Text.Json.JsonTokenType.Null:
+                return reader.GetString();
+            case System.Text.Json.JsonTokenType.StartObject:
+            case System.Text.Json.JsonTokenType.StartArray:
+            {
+                using var doc = System.Text.Json.JsonDocument.ParseValue(ref reader);
+                return doc.RootElement.GetRawText();
+            }
+            default:
+                // 数值：转字符串（宽松容错，不追求精度）；布尔原样
+                if (reader.TryGetDouble(out var d)) return d.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (reader.TokenType == System.Text.Json.JsonTokenType.True) return "true";
+                if (reader.TokenType == System.Text.Json.JsonTokenType.False) return "false";
+                throw new System.Text.Json.JsonException("不支持的 body JSON 类型：" + reader.TokenType);
+        }
+    }
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, string? value, System.Text.Json.JsonSerializerOptions options)
+        => writer.WriteStringValue(value);
 }
