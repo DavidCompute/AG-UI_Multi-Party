@@ -514,6 +514,8 @@
 前端执行完毕经 `AGENT_INTERACTION_RESOLVE` 的 `toolResult` 回传结果：单个技能为结果文本；批量（`client_tool_batch`）为
 JSON 数组 `[{ "skillId": …, "output": … }, …]`。网关回灌模型继续作答（客户端技能可在浏览器/本机桥执行，见 README「客户端工具与本机工具桥」）。
 
+**内网隧道执行与审批**：当内网桥已为该智能体在线（`NativeTunnelService.HasTunnel`）时，客户端 shell 技能沿隧道推给那台内网机执行，而非下发前端浏览器。`NativeTunnel__Token`（或 appsettings `NativeTunnel:Token`）配置共享隧道令牌，逐 agent 专属令牌 `NativeTunnel:AgentTokens__<agentId>` 优先。`AgentOptions.ClientToolTunnelRequireApproval`（默认 `true`，环境变量 `AGENTS_CLIENT_TOOL_TUNNEL_REQUIRE_APPROVAL`）决定经隧道的客户端 shell 是否先中断等待触发者批准（批准后由 `ResumeRunAsync` 再经隧道执行）；`false` 且隧道在线时网关自动直通执行。在客服知聚中，触发者即发起交互的顾客参与者，因此顾客可批准其触发的技能执行（见 §2.1.1 / §4.5 `targetMemberId`）。
+
 **输入型恢复（AGENT_INTERACTION_RESOLVE → 桥接 resume）的答案格式约定**：不采用二维数组；恢复载荷为以 `inputField`（`responseSchema` 子段名，缺省 `answer`）为键的**单键 JSON 对象**——文本 / 单选为字符串，多选为该键下的 JSON 字符串数组；若前端按完整 `responseSchema` 提交，则以 `payload` 对象原样回传（多个字段各占一个键）：
 
 ```json
@@ -972,6 +974,9 @@ PUT /ag-ui/user/profile
 |删除智能体|`DELETE /ag-ui/agents/{agentId}`|移除定义、全部触发规则并从所有群退出；**私密智能体仅创建者可删除**（否则 403）|
 |群内注册触发|`POST /ag-ui/agents/register`|为指定群注册触发规则（triggerMode / keywords / override）|
 |优化下一层指派提示词|`POST /ag-ui/agents/{agentId}/optimize-assignment`|**组织架构「优化指派」**：按该数字员工的直接下一层（AssignmentIds）自动生成一段「管理下一层任务指派」指引（只依据下一层挑下游、不越级、无匹配则 NONE）；需登录，仅创建者/管理员；返回 `{ assignmentGuidance, subordinateCount }`|
+|一键组织编排（方案预览）|`POST /ag-ui/agents/orchestrate`|**一键组织编排**：根据一句话需求（`{ requirement }`，2–500 字）由模型生成组织方案（标题 + 岗位 + 每岗技能 + 岗位连接），作为<b>不落库的预览</b>返回（`{ orchestrated, title, agents[], skills[] }`）；需登录|
+|一键组织编排（SSE 流式）|`POST /ag-ui/agents/orchestrate/stream`|输入同上，按`data: `帧逐 token 转发模型输出为 SSE。事件 `type`：`token`（原始方案文本的增量 `delta`）、`progress`（节流的实时统计 `{agents, skills, rawLen}`）、`done`（从累计文本解析出的完整 `plan`）、`error`（`{message}`）；需登录|
+|一键组织编排（确认后落库）|`POST /ag-ui/agents/orchestrate/apply`|落库确认过的方案：body `{ title, agents[], skills[], createSupportCircle?, supportCircleName? }`。先全部校验、再造——保证<b>原子落库（全有或全无）</b>；`shell`/`http` 技能仅管理员。`createSupportCircle=true` 时额外把方案中的数字员工组建为一个<b>客服知聚</b>（§2.1.1）并注册触发规则，返回 `{ applied, title, agents[], skills[], supportCircleGroupId }`；需登录|
 
 智能体定义字段：
 
@@ -997,6 +1002,17 @@ PUT /ag-ui/user/profile
 |ownerId|string?|创建者 userId（appsettings 种子为 null = 系统级）|
 
 **导出 / 导入**：智能体管理的「📤 导出全部」/ 每行「导出」把配置导出为 JSON（`{version: 1, agents:[…]}`，字段同上，敏感令牌与 ownerId 不导出），前端「📥 导入」读取 JSON 后逐条调用 `POST /ag-ui/agents` 创建（归属当前登录用户，agentId 冲突自动改 ID 不覆盖）。另提供**全量数据包**接口（管理员）：`GET /ag-ui/export` 导出账号（含密码哈希 / 盐）+ 智能体定义与触发规则 + 群 / 话题 / 消息 + 附件为 zip；`POST /ag-ui/import/preview` 上传 zip 返回账号 / 智能体存在性检查与群清单，`POST /ag-ui/import` 按 `selectedGroupIds` 执行（账号按 username、智能体按 agentId 自动补齐，消息发送者 / 提及 / 可见列表按账号映射重写，附件还原）。
+
+**技能库（可复用技能目录，Hub 扩展）**：技能是一个全局可复用的目录（`AgentSkillDefinition`），任意数字员工经 `AgentDefinition.SkillDefIds` 按 ID 挂载引用（以工具名供模型调用）。技能分三类 `prompt` / `shell` / `http`；`shell` / `http`（可执行任意命令 / 外部请求）**仅管理员可创建**，普通用户只能建纯 `prompt` 技能，且非管理员不能把技能改/建为 `shell`/`http`。技能有 `executionLocation`：`server`（默认）/ `client`。客户端执行的 shell 技能在**本机**执行——前端浏览器，或当内网桥经隧道在线时沿反向隧道执行（§4.5）；`executionLocation=client` 且未显式提供 `clientRunner` 时，服务端对 shell 技能自动生成 `{"kind":"shell","command":…,"cwd":".","timeoutSec":30}` 运行配置，也可显式传入。`shell` 与 `client` 执行技能一律 `requiresApproval=true`。
+
+|接口|路径|说明|
+|---|---|---|
+|技能库列表|`GET /ag-ui/skills`|技能库全量（需登录）；技能正文 / 解释器 / HTTP 配置仅归属者或管理员可见（避免脚本 / 密钥泄露）|
+|自然语言生成技能|`POST /ag-ui/skills/generate`|输入一句话需求（`{ request, preferClient? }`），由大模型产出结构化技能定义 `{ skillId, name, kind, description, body, executionLocation, clientRunner, requiresApproval }` 供前端填入表单（无需手写命令 / JSON）|
+|新增技能|`POST /ag-ui/skills`|body 见 `SkillDefHttpRequest`；`shell`/`http` 仅管理员；skillId 留空自动生成 ASCII 工具名|
+|更新技能|`PUT /ag-ui/skills/{skillId}`|仅归属者或管理员；非管理员不能把技能改成 `shell`/`http`|
+|删除技能|`DELETE /ag-ui/skills/{skillId}`|仅归属者或管理员；系统技能（ownerId=null）只读|
+|试运行技能|`POST /ag-ui/skills/{skillId}/run`|手动试运行（无审批通道）：prompt 技能仅归属者/管理员；shell/http 与系统技能仅管理员，防任意命令执行|
 
 ### 5.8 知识库管理接口（Hub 扩展，RAG 知识文档）
 
@@ -1095,7 +1111,9 @@ PUT /ag-ui/user/profile
 |吊销会话|`POST /ag-ui/user/sessions/revoke`|吊销指定会话 |
 |吊销其它|`POST /ag-ui/user/sessions/revoke-others`|吊销除本会话外的全部会话|
 
-**细粒度 RBAC（4.2，频道级）**：群成员经 `extra["rbac"]` 携带 `GroupMemberPermissions`（`canInvokeAgents` 谁能 @ 智能体 / `canApprove` 谁能批准人机交互 / `canManageKnowledge` 谁能管理知识库）；字段显式置 false 时限制，null 跟随角色 / 管理员默认允许；`IsAdmin` / `AdminUserIds` 决定系统级管理员，可访问 §5.9 管理员接口。
+**细粒度 RBAC（4.2，频道级）**：群成员经 `extra["rbac"]` 携带 `GroupMemberPermissions`（`canInvokeAgents` 谁能 @ 智能体 / `canApprove` 谁能批准人机交互 / `canManageKnowledge` 谁能管理知识库）；字段显式置 false 时限制，null 跟随角色 / 管理员默认允许；`IsAdmin` / `AdminUserIds` 决定系统级管理员，可访问 §5.9 管理员接口。完整三层权限模型见 `docs/RBAC.md`。
+
+**平台角色（RBAC，平台级）**：账号有一个显式 `PlatformRole`（`user` / `operator` / `admin` / `superadmin`），叠加在既有 `IsAdmin` 标记与 `Auth:AdminUserIds` 之上（`AuthService.ResolveRole` 取两者较高者；`SuperAdmin` 仅能经显式角色获得）。**首个注册账号**自举为 `Admin` 与 `SuperAdmin`（否则无人能管理角色）。平台角色管理：`GET /ag-ui/admin/roles`（角色矩阵）、`POST /ag-ui/admin/roles/{userId}` body `{ "role": "user|operator|admin|superadmin" }`（授予 / 回收；**仅超级管理员**；不能改自己角色、不能降级最后一名超级管理员；设为 `admin`/`superadmin` 会同步 `IsAdmin` 标记）。
 
 **白标品牌与嵌入（6.4）**：
 
@@ -1199,6 +1217,14 @@ Hub 扩展错误码（用户 / 智能体管理）：
 |AGENT_NOT_FOUND|智能体不存在（未在目录中声明）|
 |AGENT_EXISTS|智能体 ID 已被占用|
 |AGENT_PERMISSION_DENIED|私密智能体仅创建者可操作（拉入群 / 编辑 / 删除，返回 403）|
+
+技能库扩展错误码：
+
+|错误标识|说明|
+|---|---|
+|SKILL_NOT_FOUND|技能不存在|
+|SKILL_EXISTS|技能 ID 已被占用|
+|SKILL_PERMISSION_DENIED|仅创建者 / 系统管理员可操作；`shell`/`http` 技能仅管理员（返回 403）|
 
 错误响应体统一为 `{"code": "...", "message": "..."}`（HTTP 状态码见各接口实现：401 / 403 / 404 / 409）。
 

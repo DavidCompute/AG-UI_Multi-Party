@@ -25,6 +25,12 @@ A group chat protocol hub implemented according to the *AG-UI Group Chat Extensi
 - ✅ **Runtime model configuration and initialization**: after login, you can fill in the DeepSeek endpoint / apiKey in the UI (leave empty to use the official endpoint and environment variables, `GET/POST /ag-ui/settings/model`), and it survives restarts; the user menu "Data Backup" provides "Initialize (clear everything)" (`POST /ag-ui/reset`, clears data + browser cache)
 - ✅ **Desktop multi-instance**: WPF / Avalonia clients share the same backend process (fixed 5200); the first instance starts the `--backend` child process, and the backend is only stopped when the last instance closes; multiple windows can be opened at once
 - ✅ **Thinking mode (AG-UI bridging)**: external services' `REASONING_MESSAGE_CONTENT` is fed back through a dedicated channel, and the frontend renders a collapsible "thinking process" block; tool calls are shown concisely ("🔧 name calling…" → collapsed after completion)
+- ✅ **One-click organization orchestration (`数字员工 → 一键编排`)**: type a one-line requirement → **SSE streaming** generates a plan (`POST /ag-ui/agents/orchestrate/stream`, displaying generation token-by-token in real time + live counts of seen roles / skills) → preview the digital-employee org chart + per-role skills + connections (downward assignment / upward escalation / relay) → confirm and apply to storage atomically (`POST /ag-ui/agents/orchestrate/apply`, full validation before creating, no partial writes); you can check "同时创建客服知聚" to turn the planned digital employees into a customer-service team group in one click
+- ✅ **Skill system (skill library)**: reusable skills come in `prompt` / `shell` / `http` — `shell` / `http` (can run arbitrary commands / external requests) can **only be created by admins**, ordinary users may create pure prompt skills; local (client-executed) shell skills run on the local machine via the intranet tunnel / frontend (`ClientRunner` is auto-generated from the command body); the skill library supports search (frontend filter) and bulk delete; `POST /ag-ui/skills/generate` creates a skill definition from natural language
+- ✅ **Support circle (customer-service group, `kind=support`)**: the creator pulls in humans / digital employees as the entire membership (agents who see **all conversations**); ordinary users enter as "participants" (**non-members**, no slot or member-list entry), each session isolated (customers cannot see each other; agent replies are directed to the specific customer); a customer can approve the skill executions they triggered
+- ✅ **Platform-level RBAC**: SuperAdmin / Admin / Operator / User; `Auth:SuperAdminUserIds` (or `POST /ag-ui/admin/roles/{userId}`, granted online by a SuperAdmin) bootstraps; the first registered account self-bootstraps to SuperAdmin → Admin (see `docs/RBAC.md`)
+- ✅ **Local skills executed over the tunnel**: `NativeTunnel__Token` configures the intranet bridge; `ClientToolTunnelRequireApproval` (default `true`) decides whether the local shell in a support circle / orchestration requires the triggerer's approval before executing over the tunnel
+- ✅ **Browser automation tool**: `tools/ui-orchestrate-flow.mjs` (Playwright drives the full "orchestrate → create support circle" flow with screenshots; see `tools/README-playwright.md`)
 
 ## Project Structure
 
@@ -48,6 +54,8 @@ tools/build-msi.ps1              # WiX v4 MSI installer build (perUser install t
 tools/download-embedding-model.ps1 # Manually fetch the embedding model (usable for the slim build without the bundled model; default nomic-embed-text-v1.5.Q8_0)
 tools/verify-hitl.mjs            # Human-in-the-loop (approval card) end-to-end verification script
 tools/verify-agent-import.mjs    # Agent bulk-import verification script
+tools/ui-orchestrate-flow.mjs    # Playwright browser automation: one-click orchestrate → create support circle full flow + screenshots (see tools/README-playwright.md)
+tools/README-playwright.md       # Install / run / exit-code notes for the orchestration automation
 ```
 
 ```mermaid
@@ -182,6 +190,9 @@ Configuration options are set in `.env` (see `.env.example`):
 | `AGENTS_ENABLE_TOOLS` | `true` | Whether to enable tool calls (enabled by default: built-in `get_current_time` without approval + `publish_announcement` requiring approval) |
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | Allow HTTP skills to reach <b>loopback / LAN / private</b> addresses (off by default = keep SSRF protection); set `true` if you must call on-prem / LAN endpoints |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | Tool names requiring **human-in-the-loop approval** (on match it is wrapped with `ApprovalRequiredAIFunction`: the run is interrupted when the model invokes it, a 🔐 approval card pops up in the chat, and only the requesting user can approve / reject) |
+| `AUTH_SUPER_ADMIN_USER_IDS` | empty | Super-admin list (comma-separated userId/username, platform-level RBAC): matches get at least **SuperAdmin** effective role; empty = only the first registered account self-bootstraps to SuperAdmin (see `docs/RBAC.md`) |
+| `AUTH_ADMIN_USER_IDS` | empty | System-admin list (comma-separated userId/username, legacy mechanism): matches get at least Admin (not SuperAdmin) |
+| `NATIVE_TUNNEL_TOKEN` | empty | Global intranet reverse-tunnel token: matched by the local bridge's `--tunnel-token`; leave empty if no tunnel is used |
 | `STORAGE_PROVIDER` | `postgres` | Storage mode: `postgres` (default, enterprise-grade persistence), `memory` (in-process + JSON snapshot), `sqlite` / `mysql` (single-file / MySQL persistence), `redis` (multi-replica shared, 6.2) |
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL database / user / password (effective when `STORAGE_PROVIDER=postgres`) |
 | `STORAGE_CONNECTION_STRING` | points to bundled postgres | Custom connection string (can point to an external PostgreSQL instance) |
@@ -237,7 +248,9 @@ For `GROUP_MESSAGE_SEND` / `GROUP_MESSAGE_RECALL` / `GROUP_TYPING` / `GROUP_MESS
 
 | API | Path | Key parameters |
 |---|---|---|
-| Create group | `POST /ag-ui/group/create` | groupName、ownerId、isPrivate*、memberIds、members*; if **groupName is empty, the group name can be auto-generated first** |
+| Create group | `POST /ag-ui/group/create` | groupName、ownerId、kind* (normal/support)、isPrivate*、memberIds、members*; if **groupName is empty, the group name can be auto-generated first** |
+| Discover support circles | `GET /ag-ui/group/discover` | Returns all support circles (visible & enterable by all users), each with isMember / hasEntered |
+| Enter a support circle | `POST /ag-ui/group/{groupId}/enter` | Agent members enter directly; non-members register as a **customer participant** (not added to the member table) with their own isolated session; ordinary groups cannot be self-entered (403) |
 | Auto-generate group name | `POST /ag-ui/group/generate-name` | memberNames (list of selected member nicknames, requires login): generates a 6-12 character group name from the model based on the members; the mock provider outputs a deterministic template |
 | Update group info | `POST /ag-ui/group/update` | groupId、updateFields、groupInfo、operatorId |
 | Disband group | `POST /ag-ui/group/disband` | groupId、operatorId |
@@ -269,6 +282,8 @@ For `GROUP_MESSAGE_SEND` / `GROUP_MESSAGE_RECALL` / `GROUP_TYPING` / `GROUP_MESS
 | Branding query | `GET /ag-ui/settings/branding` | Public: returns `{appName, logoUrl, primaryColor, forceDark, tagline}` (whitelabel 6.4: brand the login page / top bar / embedded pages) |
 | Branding save | `POST /ag-ui/settings/branding` | Admin only: set the app name / logo / brand primary color / force dark / tagline (persisted) |
 | Config governance | `POST /ag-ui/admin/config` | Admin only: write and persist runtime parameters online (session / group / message policy / tool switches / approval list / iframe origins), invalid values return 400 |
+| Platform role matrix | `GET /ag-ui/admin/roles` | SuperAdmin only: returns the role matrix of all accounts (explicitRole / effectiveRole / isAdmin / isDisabled) |
+| Grant / revoke platform role | `POST /ag-ui/admin/roles/{userId}` | SuperAdmin only: `{role: user|operator|admin|superadmin}`; cannot change your own role, cannot demote the last SuperAdmin (see `docs/RBAC.md`) |
 | Health check | `GET /ag-ui/health` | connections / groups counts |
 
 `*` = Hub extension field. Error responses are uniformly `{"code":"GROUP_XXX","message":"..."}`, with status-code mapping: 403 permission, 404 not found, 409 group full, 400 parameter error.
@@ -340,6 +355,24 @@ Avatars of both users and agents support local image upload (reusing `/ag-ui/upl
 avatar / nickname changes auto-sync to the member profiles of all the groups they belong to and broadcast `GROUP_MEMBER_UPDATED`.
 
 **Digital-employee org chart (graphically edit task assignment / escalation)**: the top-bar「🌐 Org chart」opens a visual canvas where you drag-link each digital employee's <b>assignment (downward, multiple)</b> and <b>escalation (upward, single)</b>. The "**Optimize dispatch**" <b>icon button</b> at each node's top-right auto-generates a "manage next-layer dispatch" guidance paragraph from that employee's <b>direct next layer</b> (`AssignmentIds`) - pick a subordinate based only on the next layer, no override, return NONE if none fits. The result can be previewed and then <b>appended to that role's Instructions</b> (`POST /ag-ui/agents/{agentId}/optimize-assignment`, login required, owner/admin only).
+
+**One-click organization orchestration (`数字员工 → 一键编排`)**: turn a "one-line requirement" directly into a <b>digital-employee org plan</b> — the role list, each role's mounted skills, and the connections between roles (downward assignment / upward escalation / relay):
+
+1. **Enter a requirement**: describe the organization to build (e.g. "create a customer-service team");
+2. **SSE streaming generation** (`POST /ag-ui/agents/orchestrate/stream`, login required): shows the model's generation token-by-token in real time, and live-counts the already-seen <b>roles (agentId)</b> and <b>skills (skillId)</b> (`orgOrchStream` panel); the full plan is delivered at the end;
+3. **Preview**: shows the generated digital employees (mounted skills / assigned subordinates / escalations) and the skill list, reviewable before applying;
+4. **Confirm & apply** (`POST /ag-ui/agents/orchestrate/apply`, login required): <b>validates everything first, then creates as a whole</b> (skills → digital employees); any failure returns an error with no partial writes; `shell/http` skills are admin-only (consistent with the skill library);
+5. **Optional "同时创建客服知聚"**: when checked, the planned digital employees are turned into a customer-service team group (`kind=support`) in one click, immediately serving customers.
+
+(The non-streaming preview endpoint `POST /ag-ui/agents/orchestrate` is retained.)
+
+**Support circle (customer-service group, `kind=support`)**: a new <b>customer-service team group</b> alongside public / private groups —
+
+- **The agent team = all members**: the humans / digital employees the creator pulls in are the agents (the creator is both agent and owner) and can see <b>all conversations</b>; agents can communicate internally without disturbing customers;
+- **Visible & enterable by everyone**: forced `isPrivate=false`; non-member users discover it via `GET /ag-ui/group/discover` and enter via `POST /ag-ui/group/{groupId}/enter` — registered as a <b>customer participant</b> with a 30-minute activity TTL (**non-member**, no slot, no member-list entry) with their <b>own isolated session</b> with the agent team; ordinary groups remain member-only and cannot be self-entered (403);
+- **Session isolation**: a customer's messages are visible only to that customer and the agents; an agent's reply to a customer is directed to that customer; general agent-to-agent communication is visible only to agents; any directed / private message is invisible to non-target customers — customers are fully isolated from one another;
+- **Customers can approve the agent skills they triggered**: when a customer @s an agent in their isolated session and that triggers a <b>client (local / tunnel) shell skill</b>, the approval card goes to that triggering customer, who approves / rejects it, and the skill runs over the tunnel and feeds back via the approval-resume path;
+- **Frontend**: the create dialog offers "normal group / 🛟 support circle"; the sidebar auto-lists enterable support circles (non-members see an enter badge); after entering, users chat directly as participants.
 
 **Data backup and initialization (user menu → Data Backup)**:
 
@@ -647,6 +680,11 @@ enter plan orchestration when @-mentioned. While answering, if the gathered resu
 <b>recursively invokes more skills / direct reports</b> until the info is complete — it never stops midway to ask
 “continue?”.
 
+**Optional tunnel direct-execution**: when an intranet bridge is online over the tunnel and `ClientToolTunnelRequireApproval=false`,
+the gateway skips this confirmation card and <b>runs the client skills locally over the tunnel one by one</b> and feeds the
+results back (equivalent to real-machine execution, no frontend confirmation needed); default `true` keeps the approval/confirmation,
+and after the triggerer approves, `ResumeRunAsync` executes over the tunnel (see "Security & edge cases" below).
+
 #### Generating a skill from natural language
 
 In the Skill Library, “New skill” → <b>🤖 Generate a skill from plain text</b>: describe the request (e.g. “check local
@@ -654,6 +692,15 @@ disk usage and report free space per partition”), optionally check “prefer l
 name / id / kind / description / command / execution location / ClientRunner, filled into the form for review before
 saving (no need to hand-write commands or JSON). Endpoint `POST /ag-ui/skills/generate` (login required); mock returns
 a deterministic template.
+
+#### Skill library (reusable skills: prompt / shell / http)
+
+The `🎯 Skill Library` button in the digital-employee management toolbar opens the global reusable skill catalog (management API `GET/POST/PUT/DELETE /ag-ui/skills`):
+
+- **Three kinds**: `prompt` (prompt / flow template, no external execution), `shell` (runnable command / script, runs in the dedicated sandbox `data/skillruns`), `http` (calls an external HTTP endpoint; body is a JSON config `{method,url,headers,body}`; supports `$QUERY` / `{{query}}` placeholders). Any digital employee mounts a reference via its "reusable skills (skill library)" checkbox (`SkillDefIds`); the model auto-invokes them when needed.
+- **Permissions**: creating / editing / trial-running `shell` / `http` skills is **admin-only** (they can trigger arbitrary commands / external requests; letting ordinary users create them would open an arbitrary-command-execution surface); ordinary users may only create `prompt` skills. Deleting a skill that is referenced by digital employees releases those references (seed skills are read-only; deleting them fails).
+- **Execution location & approval**: `ExecutionLocation = Server` (server sandbox) or `Client` (local / frontend / intranet tunnel); `shell` skills are forced to require approval (`RequiresApproval=true`), and `Client` execution always requires approval. Client-executed shell skills run on the local machine via the intranet tunnel / frontend — `ClientRunner` is auto-generated from the command body by `BuildClientRunner` (see the "Client-execution skills" section above).
+- **Search & bulk delete**: the search box at the top of the library filters by name / ID (frontend); check multiple rows and click `🗑️ Delete selected` to delete each through the existing per-ID delete endpoint in batch.
 
 #### NAT traversal: reverse tunnel (a local bridge with no public IP can still be called by the Hub)
 
@@ -706,6 +753,7 @@ injected as a user message (`[frontend tool] … completed by the intranet bridg
 - <b>Rate limiting</b>: `connect` and `result` carry an in-memory sliding-window limiter (default 120/min per IP for connect,
   600/min for result; tune via `NativeTunnel:ConnectRateLimitPerMinute` / `NativeTunnel:ResultRateLimitPerMinute`) to
   blunt brute-forcing / DDoS on the public endpoints.
+- <b>Approval required</b>: `AgentOptions.ClientToolTunnelRequireApproval` (default `true`, env var `AGENTS_CLIENT_TOOL_TUNNEL_REQUIRE_APPROVAL`) — when `true`, a client shell executed over the tunnel first interrupts and waits for the triggerer (including a support-circle customer participant) to approve, then `ResumeRunAsync` runs it over the tunnel; when `false`, the gateway auto-executes directly over the tunnel when it is online.
 - The desktop bridge (same-host loopback) needs no NAT traversal: it talks over loopback. `--tunnel` is meant for the
   “Docker + remote browser” scenario.
 
@@ -731,6 +779,7 @@ User-auth configuration (`appsettings.json` → `Auth` node):
 | `RequireTokenOnRealTime` | true | Whether the realtime channels (WS/SSE) and HTTP group-management write endpoints require a valid token (true: absent/invalid always get 401; false is a legacy-client/demo fallback) |
 | `AbsoluteSessionTtlDays` | 30 | Absolute session expiry days: a hard cap on top of sliding renewal (a stolen token expires even with continuous renewal) |
 | `AdminUserIds` | empty | System admin list (comma-separated userId or username, combined with the account's `IsAdmin` flag); admin operations such as export / import / reset / model config are admin-only |
+| `SuperAdminUserIds` | empty | Super-admin list (comma-separated userId/username): matches get at least **SuperAdmin** effective role (the highest platform-level RBAC role); empty = the first registered account self-bootstraps (see `docs/RBAC.md`) |
 | `FirstUserIsAdmin` | true | The first registered account automatically becomes an admin (for single-machine / desktop deployments, the first user is the admin) |
 | `AllowedOrigins` | empty | WS/SSE cross-site origin whitelist (comma-separated full Origins); empty = same-origin only (prevents CSWSH) |
 
@@ -879,7 +928,7 @@ In addition to vector memory, you can enable <b>graph memory</b> (`Memory.GraphE
 dotnet test AguiGroupChat.slnx
 ```
 
-603 test cases cover: group lifecycle, permission control, subscription and snapshot, visibility fan-out (all/mentioned/private), recall, kick/leave, online-status interplay, agent trigger rules (including contextual triggering and **in-group trigger modes overriding the role default**, **twin online pause**), MSAGENT gateway streaming feed-back (mock + incremental/accumulated text compatibility + contextual speaking decision + in-group trigger-mode effectiveness), **human-in-the-loop (approval interrupt producing ToolApprovalRequestContent, triggerer-only decisions, approval resuming the same session to execute the tool and feed back, `approveAll` one-shot approval)**, DeepSeek/API Key config resolution, **user management (register/login/change-password/profile/avatar sync/personal-memory switch/token/WS·SSE auth/multi-device sessions / TOTP two-factor)**, **agent runtime management (dynamic catalog add-edit-delete + avatar + private-agent permissions + agent-level differentiated approval + role handoff relay + market import + HTTP management APIs)**, **AI twin (enable/disable/trigger-mode change/public-group follow/sync)**, **semantic memory (pgvector write/retrieval/private-group isolation/disband-deletes-memory/personal memory/timeline replay/hybrid BM25 rerank/materialized knowledge base)**, **topics (create/delete/create-from-message/clear-topic-records/cross-topic subject linking)**, **approval and governance (fine-grained RBAC, operation audit logs, TOTP)**, **orchestration and scheduling (multi-step workflow pipeline, recurring scheduled tasks)**, **rich-media attachments (multi-image selection / voice audio kind / canvas annotation, audio not injected into text context)**, **whitelabel branding and embedding (6.4: public read + admin save + invalid primary color / dangerous Logo rejected + unauthorized 403)**, **config governance (6.3: admin online write / persistence + invalid values 400 / non-admin 403)**, **memory cross-instance sync (2.3: export / import round-trip + idempotent dedup + sinceMs incremental)**, **persistence (JSON snapshot round-trip + full-app restart recovery)**, **PostgreSQL storage** (groups/members/topics/message pagination/recall/in-place modifications/users/trigger rules/extension sections round-trip + full-app PG restart recovery, requires a local PG test database, `AGUI_PG_TEST_CONN` overrides the connection string), **MySQL storage** (same 11 cases, requires local MySQL 8.0.13+, `AGUI_MYSQL_TEST_CONN` overrides the connection string), **SQLite storage** (same 11 cases, single file, runs locally with zero deployment), with the corresponding cases auto-skipped when a database is not configured; plus full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
+711 test cases cover: group lifecycle, permission control, subscription and snapshot, visibility fan-out (all/mentioned/private), recall, kick/leave, online-status interplay, agent trigger rules (including contextual triggering and **in-group trigger modes overriding the role default**, **twin online pause**), MSAGENT gateway streaming feed-back (mock + incremental/accumulated text compatibility + contextual speaking decision + in-group trigger-mode effectiveness), **human-in-the-loop (approval interrupt producing ToolApprovalRequestContent, triggerer-only decisions, approval resuming the same session to execute the tool and feed back, `approveAll` one-shot approval)**, DeepSeek/API Key config resolution, **user management (register/login/change-password/profile/avatar sync/personal-memory switch/token/WS·SSE auth/multi-device sessions / TOTP two-factor)**, **agent runtime management (dynamic catalog add-edit-delete + avatar + private-agent permissions + agent-level differentiated approval + role handoff relay + market import + HTTP management APIs)**, **AI twin (enable/disable/trigger-mode change/public-group follow/sync)**, **semantic memory (pgvector write/retrieval/private-group isolation/disband-deletes-memory/personal memory/timeline replay/hybrid BM25 rerank/materialized knowledge base)**, **topics (create/delete/create-from-message/clear-topic-records/cross-topic subject linking)**, **approval and governance (fine-grained RBAC, operation audit logs, TOTP)**, **platform roles (SuperAdmin/Admin/Operator/User: `POST /ag-ui/admin/roles/{userId}` grant/revoke, no self-demotion, Admin cannot manage roles)**, **one-click organization orchestration (non-streaming + SSE streaming plan generation, apply with full validation, one-click support-circle creation)**, **support-circle session isolation (customer participants as non-members, isolated per-customer sessions, discover/enter endpoints)**, **skill library (prompt/shell/http kinds, shell/http admin-only, ClientRunner, natural-language generation)**, **intranet tunnel (`NativeTunnel__Token`, per-agent tokens, rate limiting, `ClientToolTunnelRequireApproval` approval path)**, **orchestration and scheduling (multi-step workflow pipeline, recurring scheduled tasks)**, **rich-media attachments (multi-image selection / voice audio kind / canvas annotation, audio not injected into text context)**, **whitelabel branding and embedding (6.4: public read + admin save + invalid primary color / dangerous Logo rejected + unauthorized 403)**, **config governance (6.3: admin online write / persistence + invalid values 400 / non-admin 403)**, **memory cross-instance sync (2.3: export / import round-trip + idempotent dedup + sinceMs incremental)**, **persistence (JSON snapshot round-trip + full-app restart recovery)**, **PostgreSQL storage** (groups/members/topics/message pagination/recall/in-place modifications/users/trigger rules/extension sections round-trip + full-app PG restart recovery, requires a local PG test database, `AGUI_PG_TEST_CONN` overrides the connection string), **MySQL storage** (same 11 cases, requires local MySQL 8.0.13+, `AGUI_MYSQL_TEST_CONN` overrides the connection string), **SQLite storage** (same 11 cases, single file, runs locally with zero deployment), with the corresponding cases auto-skipped when a database is not configured; plus full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
 
 **Agent tool / skill / knowledge-base specifics** (test count keeps growing per version; `dotnet test` is the source of truth): calculator (expression evaluation + injection/divide-by-zero/overlength rejection + exponent and unary-minus precedence), unit conversion (6 unit kinds + temperature offsets + category-mismatch rejection), tool registration (EnableTools/EnableWebTools switch combinations), attachment reading and group-memory retrieval tools (including AmbientContext injection), network-tool SSRF protection (private/loopback/cloud-metadata address rejection), end-to-end tool-call pipeline (mock model calls calculator → real execution → feed-back), skills (Skills) inter-agent invocation (API round-trip, empty-SkillId auto-generation and conflict dedup, invalid SkillId 400 / mount skip, cyclic-reference protection, end-to-end sub-agent invocation), **knowledge base (RAG knowledge documents: chunking, document vectorization into storage, retrieval hits, delete cascading, visibility, explicit degradation error without a vector store, MemoryContextProvider injecting bound knowledge bases)**.
 

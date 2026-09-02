@@ -23,6 +23,7 @@
 - **目标**：规划 → 拆解子任务 → 子智能体并行/顺序执行 → 聚合 → 输出最终回复，形成类似编码助手的 plan/agent 循环。一个复杂需求可由代码 + 文档 + 测试三个助手协作完成。
 - **落点模块**：`src/AguiGroupChat.Agents/`（会话与技能调用）、`AgentCatalog`（新事件：子任务状态）。
 - **增强（已实现）**：确定性编排计划（`CoordinatorPlanning`）支持「问题 → 定计划 → 依次激活」；计划内多个<b>客户端执行技能</b>合并成「本机一键执行全部」卡一次确认；综合阶段<b>递归补查</b>——发现信息不足时继续调技能/派下属补齐，直到信息充分才给结论；纯技能型数字员工也能进入计划编排。
+- **一键组织编排（已实现）**：`POST /ag-ui/agents/orchestrate` 根据一句话需求生成「数字员工组织架构 + 每岗技能 + 岗位连接」的<b>不落库预览</b>；`/orchestrate/stream` 以 SSE <b>逐 token 流式展示生成过程</b>并实时统计已见岗位/技能（事件 `token`/`progress`/`done`/`error`）；`/orchestrate/apply` 校验后<b>原子落库</b>技能 + 数字员工 + 连接，且可 `createSupportCircle=true` 把方案<b>一键组建为客服知聚</b>直接上线服务顾客。
 
 ### 1.2 角色间消息传递 / 交接（★★☆） ✅已实现（整轮角色交接）
 - **现状**：智能体把另一智能体当「工具」单次取用，无双向协作语义。
@@ -90,10 +91,14 @@
 - **现状**：角色 / 技能靠 JSON 文件手动导入（`tools/agents-starter.json`）。
 - **目标**：内置「行业角色 / 技能 / 知识库模板」下载市场，一键分发。
 - **落点模块**：`AgentApi`、前端「智能体管理」、复用 starter JSON 打包结构。
+- **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
 
 ---
 
 ## 四、人机协同与治理（★★★ 企业落地硬门槛）
+
+- **客服知聚顾客批准技能（已实现）**：在客服知聚（`kind=support`，见协议 §2.1.1）中，普通用户以<b>顾客参与者</b>身份进入（非成员），可批准<b>其本人触发</b>的客服技能执行——网关按 `targetMemberId`（触发者）强校验，顾客只能批自己那次交互（GroupHub `ResolveAgentInteractionAsync`），客服侧全员可见全部会话。
+- **本机技能隧道执行（已实现）**：客户端（`executionLocation=client`）shell 技能当内网桥经隧道在线时直接沿<b>反向隧道</b>在本机执行而非下发前端（`NativeTunnel__Token` 配置令牌；`ClientToolTunnelRequireApproval` 默认 `true` 决定是否需触发者审批）。
 
 ### 4.1 审批策略差异化（★★★） ✅已实现
 - **现状**：`Agents:RequireApprovalToolNames` 为全局名单（按工具名），粒度粗。
@@ -181,6 +186,8 @@
   - **白标品牌**：`GET/POST /ag-ui/settings/branding`（公开读 / 管理员写），配置应用名 + Logo + 品牌主色 + 强制深色 + 副标语，持久化到扩展区「branding」；前端以 CSS 变量注入主色、渲染登录页 / 顶栏 Logo 与应用名，管理菜单「白标设置」可在线编辑。
   - **iframe 嵌入**：`GroupChatOptions.AllowedFrameOrigins` 配置允许嵌入来源（CSP `frame-ancestors` 与 X-Frame-Options 相应放行，默认禁止）；前端自动检测 iframe / `?embed=1` 进入紧凑嵌入模式（隐藏无关按钮 / 副标题）。
 
+- **Playwright 自动化验证（已实现）**：`tools/ui-orchestrate-flow.mjs` 用 Playwright 自动跑「一键组织编排 → 建客服知聚」全链路并截图（`tools/README-playwright.md`），覆盖 SSE 流式生成、apply 落库、客服知聚进入与会话隔离的前端验证。
+
 ---
 
 ## 优先排期建议（★★★ 优先）
@@ -194,7 +201,7 @@
 | ★★☆ | 2.3 / 3.1 跨实例记忆同步 + 桥接重连 | 打通桌面/Web 孤岛，提升外部专家可靠性 |
 | ★☆☆ | 6.1 可观测性 | 提升运维与调优能力，成本较低 |
 
-> **里程碑建议**：路线图 1.1–6.4 已全部落地；后续按运营反馈迭代优化（如 Redis 分片 / Redis 集群、可观测性增强、更多企业合规），见主 README 与 MARKETING「下一步」展望。
+> **里程碑建议**：路线图 1.1–6.4 已全部落地，近期又新增<b>一键组织编排（含 SSE 流式生成）</b>、<b>客服知聚一键创建</b>、<b>本机技能隧道执行</b>、<b>顾客在客服知聚可批准技能</b>、<b>技能库搜索 / 批量删除</b>、<b>客服知聚（kind=support）</b>与<b>Playwright 自动化验证</b>；后续按运营反馈迭代优化（如 Redis 分片 / Redis 集群、可观测性增强、更多企业合规），见主 README 与 MARKETING「下一步」展望。
 
 ---
 

@@ -5,6 +5,7 @@
 `AguiGroupChat.Sdk` 是 AG-UI 群聊扩展协议 Hub 的官方 .NET 客户端 SDK，面向需要**把第三方应用接入 Hub** 的开发者。
 它封装了 Hub 暴露的全部对外能力，开发者无需关心 WebSocket / SSE / 鉴权等底层细节。
 
+- **当前版本**：`0.1.0`（见 `src/AguiGroupChat.Sdk/AguiGroupChat.Sdk.csproj` 的 `<Version>`）
 - **目标框架**：`net8.0` / `net10.0`（尽量宽的 TFM，.NET 8+ 应用可直接引用）
 - **零外部运行时依赖**：仅使用 BCL 内建的 `System.Net.Http.Json` 与 `System.Net.WebSockets.Client`
 - **接入方式**：HTTP 上行 API（请求 / 响应）+ 实时下行事件（WebSocket 全双工 / SSE 单向）
@@ -111,7 +112,7 @@ catch (AguiException ex)
 
 ### `AguiClient` 能力速览
 
-- **认证**：`RegisterAsync` / `LoginAsync` / `LogoutAsync` / `GetCurrentUserAsync` / `ChangePasswordAsync` / `UpdateProfileAsync` / `ListUsersAsync`
+- **认证**：`RegisterAsync` / `LoginAsync` / `LogoutAsync` / `GetCurrentUserAsync` / `ChangePasswordAsync` / `UpdateProfileAsync` / `ListUsersAsync` / `GetTotpStatusAsync`
 - **群组**：`CreateGroupAsync` / `UpdateGroupAsync` / `DisbandGroupAsync` / `GetGroupSnapshotAsync` / `GetGroupMembersAsync` / `GetMyGroupsAsync`
 - **话题 / 成员**：`CreateTopicAsync` / `DeleteTopicAsync` / `ClearTopicAsync` / `GetTopicsAsync` / `AddMembersAsync` / `RemoveMembersAsync` / `LeaveGroupAsync` / `UpdateMemberAsync`
 - **消息**：`SendMessageAsync` / `RecallMessageAsync` / `RegenerateMessageAsync` / `StopAgentRunAsync` / `SendTypingAsync` / `SendReadAsync` / `GetMessagesAsync` / `GetTopicMessagesAsync` / `SearchMessagesAsync` / `StartDiscussionAsync` / `ResolveInteractionAsync`

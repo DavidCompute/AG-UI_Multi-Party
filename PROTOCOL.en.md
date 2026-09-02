@@ -53,7 +53,18 @@ This standard is an extension of the native AG-UI (Agent-User Interface) protoco
 |memberCount|number|Yes|Current total number of members|
 |createTime|number|Yes|Creation timestamp (milliseconds)|
 |isPrivate|boolean|No|Whether the group is private (default false). For private groups, the semantic memory is **only retrievable within the group**: when agents are triggered in other groups (scope=agent/all) content of private groups is excluded, whereas triggering within the private group itself is unaffected|
+|kind|enum|No|Group chat kind: `normal` (default; public/private per isPrivate) / `support` (support circle, see §2.1.1). Stored in `extra.kind`|
+|isSupportCircle|boolean|No|Whether it is a support circle (equivalent to `kind == support`; redundant for fast frontend rendering)|
 |extra|object|No|Custom business extension fields|
+
+### 2.1.1 Support Circle (kind=support)
+
+**Positioning**: the concrete form of community-style AI customer service / FAQ group chats, extending on top of public/private circles, used for "public Q&A hosted by a support team".
+
+- **The support team = the group members (all)**: the members the creator pulls in when creating the group (real users or digital employees) are the support staff and can see **all conversations**; the group creator is both a support staff member and the owner (`Role=Owner`). The member list of a support circle contains only the support team, no ordinary customers.
+- **Visible and enterable by everyone**: a support circle is forced `isPrivate=false`; a non-member user can see the circle and directly **enter** it. Entering does **not** add the user to the member list — the user is registered as a **non-member customer participant** (with a 30-minute activity TTL, occupying no member slot and not appearing in the member list), gaining an isolated conversation with the support team. Ordinary circles keep membership-only semantics and cannot be self-entered.
+- **Conversation isolation**: a customer message → visible only to that customer and the staff; a staff reply to a customer → directed to that customer; internal staff communication → visible only to the staff (not broadcast to customers). Any directed / private message is invisible to non-target customers (customers are isolated from each other).
+- Message history / snapshot / search are filtered by the above visibility, and realtime fan-out applies as well (see §4 visibility rules). Note that in the protocol implementation a support circle is *one* logical group whose *member-staff* see all conversations and whose *customer participants* each see only their own session (see §5.2 `discover` / `enter`).
 
 ### 2.2 Group Member Model (GroupMember)
 
@@ -502,6 +513,14 @@ After the frontend finishes, it returns the result via `AGENT_INTERACTION_RESOLV
 (`client_tool_batch`) a JSON array `[{ "skillId": …, "output": … }, …]`. The gateway feeds it back to the model (client skills run on
 the browser / native bridge — see the README "client tools & native tool bridge").
 
+**Intranet-tunnel execution & approval**: when the intranet bridge is online for the agent (`NativeTunnelService.HasTunnel`), a client shell
+skill is pushed down the tunnel and executed on that intranet host instead of the frontend browser. `NativeTunnel__Token` (or appsettings
+`NativeTunnel:Token`) configures the shared tunnel token; per-agent tokens `NativeTunnel:AgentTokens__<agentId>` take precedence.
+`AgentOptions.ClientToolTunnelRequireApproval` (default `true`, env `AGENTS_CLIENT_TOOL_TUNNEL_REQUIRE_APPROVAL`) decides whether the
+client shell must first interrupt and wait for the triggerer's approval before running over the tunnel (`ResumeRunAsync` then executes
+over the tunnel); when `false` and the tunnel is online, the gateway auto-runs it directly. In a support circle the triggerer is the customer
+participant who raised the interaction, so a customer can approve the skill executions they triggered (see §2.1.1 / §4.5 `targetMemberId`).
+
 `questions` array element structure: `{ header?, question, options?: [{ label, description? }], multiple? }`.
 The frontend renders each question (single-choice radio / `multiple:true` multi-choice checkbox / text input when no options), and the answers are returned in question order.
 
@@ -761,7 +780,9 @@ After a successful send, the message is echoed and broadcast as the `TEXT_MESSAG
 
 |API|Path|Core parameters|
 |---|---|---|
-|Create group|`POST /ag-ui/group/create`|groupName、ownerId、isPrivate*、memberIds、members[] (may carry nickname / type / avatar)|
+|Create group|`POST /ag-ui/group/create`|groupName、ownerId、kind*（normal/support）、isPrivate*、memberIds、members[] (may carry nickname / type / avatar)|
+|Discover support circles|`GET /ag-ui/group/discover`|No other params (requires identity): returns all support circles (visible & enterable by every signed-in user), each entry carrying `isMember` (already a member) and `hasEntered` (already registered as a customer participant)|
+|Enter a support circle|`POST /ag-ui/group/{groupId}/enter`|No body; a staff member enters directly; a non-member is registered as a **customer participant** (not added to the member list) and can then subscribe / read history / send messages (isolated session); ordinary circles cannot be self-entered (403)|
 |Update group info|`POST /ag-ui/group/update`|groupId、updateFields、groupInfo、operatorId|
 |Disband group|`POST /ag-ui/group/disband`|groupId、operatorId|
 |Add member|`POST /ag-ui/group/member/add`|groupId、memberIds、operatorId、memberDetails[]|
@@ -961,6 +982,9 @@ The Agent Definition directory provides runtime management: it is seeded from th
 |Delete agent|`DELETE /ag-ui/agents/{agentId}`|Removes the definition、all trigger rules、and exits all groups；**private agents can only be deleted by their creator**（otherwise 403）|
 |Register in-group trigger|`POST /ag-ui/agents/register`|Registers trigger rules for a specified group（triggerMode / keywords / override）|
 |Optimize next-layer dispatch prompt|`POST /ag-ui/agents/{agentId}/optimize-assignment`|**Org-chart "Optimize dispatch"**：auto-generates a "manage next-layer dispatch" guidance paragraph from the employee's direct next layer (AssignmentIds) - pick a subordinate based only on the next layer, no override, return NONE if none fits；login required，owner/admin only；returns `{ assignmentGuidance, subordinateCount }`|
+|One-click organization orchestration (preview)|`POST /ag-ui/agents/orchestrate`|**One-click org orchestration**: given a one-sentence requirement (`{ requirement }`, 2–500 chars)，the model generates an org plan (title + posts + each post's skills + connections) and returns it as a **preview that is NOT persisted** (`{ orchestrated, title, agents[], skills[] }`)；login required|
+|One-click orchestration (SSE stream)|`POST /ag-ui/agents/orchestrate/stream`|Same input as above, but streams the model output token-by-token as SSE (`data: ` frames). Event `type`: `token` (incremental `delta` of the raw plan text), `progress` (throttled real-time stats `{agents, skills, rawLen}`), `done` (the finalized `plan` object pulled from the accumulated text), `error`（`{message}`）；login required|
+|One-click orchestration (apply/persist)|`POST /ag-ui/agents/orchestrate/apply`|Persists a confirmed plan: body `{ title, agents[], skills[], createSupportCircle?, supportCircleName? }`。Validates everything first, then writes skills + digital employees + connections **atomically (all-or-nothing)**；`shell`/`http` skills require admin. When `createSupportCircle=true` it additionally builds a **support circle** (§2.1.1) with those employees as the support team and registers their trigger rules, returning `{ applied, title, agents[], skills[], supportCircleGroupId }`；login required|
 
 Agent definition fields:
 
@@ -986,6 +1010,17 @@ Agent definition fields:
 |ownerId|string?|Creator userId（appsettings seed null = system-level）|
 
 **Export / import**: the "📤 Export All" / per-row "Export" of agent management exports the configuration as JSON (`{version: 1, agents:[…]}`，fields as above，sensitive tokens and ownerId are not exported)，and the frontend "📥 Import" reads the JSON and calls `POST /ag-ui/agents` one by one to create them（owned by the current logged-in user；on agentId conflict the ID is auto-renamed without overwriting）。Additionally there is a **full data package** API（administrator）：`GET /ag-ui/export` exports accounts（including password hash / salt）+ agent definitions and trigger rules + groups / topics / messages + attachments as a zip；`POST /ag-ui/import/preview` uploads a zip and returns an existence check of accounts / agents and a group manifest；`POST /ag-ui/import` executes per `selectedGroupIds`（accounts are auto-completed by username，agents by agentId；message senders / mentions / visible lists are rewritten according to the account mapping；attachments are restored）。
+
+**Skill library（reusable skill catalog，Hub extension）**: skills are a global, reusable catalog (`AgentSkillDefinition`) that any digital employee can mount by ID via `AgentDefinition.SkillDefIds`（referenced as tool names for the model）。Skills come in three kinds — `prompt` / `shell` / `http`；`shell` and `http`（can run arbitrary commands / external requests）**can only be created by admins**，ordinary users may create pure `prompt` skills；the `shell`/`http` kinds are also protected from being demoted or re-typed by non-admins. A skill has an `executionLocation` of `server` (default) or `client`。Client-executed shell skills run on the **local host** — either the frontend browser or, when an intranet bridge is online, over the reverse tunnel (§4.5). When `executionLocation=client` and no `clientRunner` is provided, the server auto-generates one (`{"kind":"shell","command":…,"cwd":".","timeoutSec":30}`) for shell skills; `clientRunner` can also be supplied explicitly. `shell` and `client`-executed skills are always `requiresApproval=true`.
+
+|API|Path|Description|
+|---|---|---|
+|Skill catalog list|`GET /ag-ui/skills`|Catalog of all skills (login)；body / interpreter / HTTP config visible only to the owner or admin（avoid leaking scripts / secrets）|
+|Generate skill from natural language|`POST /ag-ui/skills/generate`|Input a one-sentence requirement（`{ request, preferClient? }`）；the LLM produces a structured skill definition `{ skillId, name, kind, description, body, executionLocation, clientRunner, requiresApproval }` for the frontend to fill the form（no hand-written commands / JSON）|
+|Create skill|`POST /ag-ui/skills`|body per `SkillDefHttpRequest`；`shell`/`http` only for admins；skillId empty → auto-generated ASCII tool id|
+|Update skill|`PUT /ag-ui/skills/{skillId}`|Owner or admin only；`shell`/`http` cannot be created or re-typed by non-admins|
+|Delete skill|`DELETE /ag-ui/skills/{skillId}`|Owner or admin only；system skills（ownerId=null）read-only|
+|Run / test skill|`POST /ag-ui/skills/{skillId}/run`|Manual test of a skill（no-approval channel）prompt only for owner/admin；shell/http and system skills admin-only，avoid arbitrary command execution|
 
 ### 5.8 Knowledge Base Management APIs (Hub Extension, RAG Knowledge Documents)
 
@@ -1084,7 +1119,9 @@ The following are all Hub extension management-type APIs, expanding the capabili
 |Revoke session|`POST /ag-ui/user/sessions/revoke`|Revokes the specified session |
 |Revoke others|`POST /ag-ui/user/sessions/revoke-others`|Revokes all sessions except this one|
 
-**Fine-grained RBAC (4.2，channel-level)**：group members carry `GroupMemberPermissions` via `extra["rbac"]`（`canInvokeAgents` who can @ agents / `canApprove` who can approve human-machine interactions / `canManageKnowledge` who can manage knowledge bases）；when a field is explicitly set to false it is restricted，null follows the default of role / admin allowing；`IsAdmin` / `AdminUserIds` determine system-level admins，who can access the §5.9 admin APIs。
+**Fine-grained RBAC (4.2，channel-level)**：group members carry `GroupMemberPermissions` via `extra["rbac"]`（`canInvokeAgents` who can @ agents / `canApprove` who can approve human-machine interactions / `canManageKnowledge` who can manage knowledge bases）；when a field is explicitly set to false it is restricted，null follows the default of role / admin allowing；`IsAdmin` / `AdminUserIds` determine system-level admins，who can access the §5.9 admin APIs。See also `docs/RBAC.md` for the full three-layer permission model.
+
+**Platform roles（RBAC，平台级）**：an account has an explicit `PlatformRole`（`user` / `operator` / `admin` / `superadmin`）that layers on top of the legacy `IsAdmin` flag / `Auth:AdminUserIds`（`AuthService.ResolveRole` takes the higher of the two；`SuperAdmin` is only reachable via an explicit role）。The **first registered account** bootstraps itself as both `Admin` and `SuperAdmin`（otherwise nobody could manage roles）。Manage platform roles with `GET /ag-ui/admin/roles`（role matrix）and `POST /ag-ui/admin/roles/{userId}` with body `{ "role": "user|operator|admin|superadmin" }`（grant / revoke；**SuperAdmin only**；cannot change one's own role，cannot demote the last SuperAdmin；setting `admin`/`superadmin` also syncs the `IsAdmin` flag）。
 
 **White-label branding and embedding (6.4)**：
 
@@ -1188,6 +1225,14 @@ Hub extension error codes（user / agent management）：
 |AGENT_NOT_FOUND|The agent does not exist（not declared in the directory）|
 |AGENT_EXISTS|The agent ID is already taken|
 |AGENT_PERMISSION_DENIED|Private agents can be operated only by their creator（pull into group / edit / delete，returns 403）|
+
+Skill library extension error codes:
+
+|错误标识|说明|
+|---|---|
+|SKILL_NOT_FOUND|The skill does not exist|
+|SKILL_EXISTS|The skill ID is already taken|
+|SKILL_PERMISSION_DENIED|Only the creator / system admin may operate; `shell`/`http` skills only for admins（returns 403）|
 
 The error response body is uniformly `{"code": "...", "message": "..."}`（HTTP status codes are per the implementation of each API：401 / 403 / 404 / 409）。
 

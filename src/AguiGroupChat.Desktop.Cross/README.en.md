@@ -4,7 +4,7 @@
 
 Another UI shell for the same desktop app: **Avalonia 12** (cross-platform XAML) + the official **WebView control**
 (`Avalonia.Controls.WebView` / `NativeWebView`)—Windows uses WebView2, **macOS uses WKWebView**,
-Linux uses WebKitGTK. Features match the Windows version (`src/AguiGroupChat.Desktop`); both share
+Linux uses WebKitGTK. Current version **1.0.104** (see `src/AguiGroupChat.Desktop.Cross/AguiGroupChat.Desktop.Cross.csproj`). Features match the Windows version (`src/AguiGroupChat.Desktop`); both share
 `src/AguiGroupChat.Desktop.Core` (SQLite + sqlite-vec memory, LLamaSharp local embedding). Note the **different process model**: this version uses a
 **single-instance in-process** host (`DesktopApp.Start` starts Kestrel directly in-process); the Windows version is a multi-instance shared architecture of "UI instance + `--backend` backend child process".
 

@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.104 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.104 Release Notes (current desktop release)
+
+## 新增（中文）
+- **一键组织编排·生成过程可视化（方案 C）**：新增流式 SSE 端点 `POST /ag-ui/agents/orchestrate/stream`，DeepSeek 逐 token 流式吐出生成过程，前端实时展示原始生成文本，并基于已见 JSON 实时统计「已识别 N 名数字员工 / M 个技能」；生成结束下发完整结构化方案供确认。`AgentOrchestrator` 新增 `StreamTextAsync`（真实模型流式 / mock 分片模板）。
+- **编排 apply 可勾选「同时创建客服知聚」**：落库组织方案时可把方案里的数字员工作为客服团队建群（`GroupKind.Support`），并逐个注册触发规则（`@` 即可应答），直接把方案上线服务顾客。
+- **客服知聚权限修复**：普通顾客（参与者、非成员）现在可以批准其触发的客服技能执行——客服知聚的核心业务流程打通（此前会被「决策者不是群成员」拒绝）；网关仍强校验必须是触发者本人。
+
+## New (English)
+- **One-click org orchestration — generation process visualization (Plan C)**: new SSE endpoint `POST /ag-ui/agents/orchestrate/stream` streams DeepSeek's output token-by-token; the frontend shows the raw generation in real time and live counts of “N digital employees / M skills identified”; a complete structured plan is delivered when generation finishes for confirmation. `AgentOrchestrator` gains `StreamTextAsync` (streams for real models; chunked template for mock).
+- **Orchestrate apply can opt in to “create a support circle”**: when persisting the plan, the plan's digital employees can be assembled into a support circle (`GroupKind.Support`) with trigger rules registered per employee (@ triggers a reply), putting the plan online to serve customers immediately.
+- **Support-circle permission fix**: ordinary customers (participants, non-members) can now approve the customer-service skill execution they triggered — the core support-circle flow now works (it used to be rejected as “decider is not a group member”); the gateway still strictly requires the approver to be the triggerer themselves.
+
+## 修复（中文）
+- **本机 shell 技能经隧道执行修复**：通过编排 / 表单创建的本地（client 执行）shell 技能若未携带 `ClientRunner`，现在会自动从命令体生成（bfbce39），且网关执行时兜底从命令体合成——已有技能无需重建即可在本机经隧道执行（此前提示「该技能非本机 shell，无法经隧道执行」）。
+- **编排方案兼容真实模型的 `JSON 对象` 技能体**：http/shell 技能 body 常被模型写成 JSON 对象，解析时经 `FlexibleBodyConverter` 归一化为字符串（9d6b9e5）。
+
+## Fixed (English)
+- **Local shell skills now execute over the tunnel**: local (`client`) shell skills created via orchestration / form without a `ClientRunner` are now auto-derived from the command body (bfbce39), and the gateway synthesizes one at execution time as a fallback — existing skills work over the tunnel without re-creation (previously “this skill is not a local shell type, can't run over the tunnel”).
+- **Orchestration tolerates JSON-object skill bodies from real models**: http/shell skill bodies are often emitted as JSON objects; parsing now normalizes them to strings via `FlexibleBodyConverter` (9d6b9e5).
+
+## 工具（中文）
+- 新增 `tools/ui-orchestrate-flow.mjs`（Playwright）浏览器自动化：一键编排 → 建客服知聚 → API 核验 → 清理，见 `tools/README-playwright.md`。
+
+## Tools (English)
+- Added `tools/ui-orchestrate-flow.mjs` (Playwright) browser automation covering orchestrating → creating a support circle → API verification → cleanup; see `tools/README-playwright.md`.
+
+**测试**：全量 711 个单元 / 集成测试通过。
+**Tests**: all 711 unit / integration tests pass.
+
+---
+
 # AG-UI 群聊桌面版 —— 增补：RBAC 权限分层 + 安全加固
 # AG-UI Group Chat Desktop — Addendum: RBAC layering + security hardening
 

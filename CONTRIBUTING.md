@@ -78,8 +78,8 @@ dotnet run --project src/AguiGroupChat.Desktop
 # Cross-platform desktop (Avalonia 12, macOS / Linux / Windows)
 dotnet run --project src/AguiGroupChat.Desktop.Cross
 
-# Sample SDK client
-dotnet run --project samples/AguiGroupChat.Client -- --login zhangsan 123456 --groupIds group_001
+# Sample SDK client (demo accounts are no longer seeded — register a new one first)
+dotnet run --project samples/AguiGroupChat.Client -- --register alice 123456 --groupIds group_001
 ```
 
 ### Run the tests
@@ -88,7 +88,7 @@ dotnet run --project samples/AguiGroupChat.Client -- --login zhangsan 123456 --g
 dotnet test AguiGroupChat.slnx
 ```
 
-603 test cases cover group lifecycle, permission control, subscriptions, visibility fan-out, recall, agent trigger rules, streaming feedback, human-in-the-loop, user management, persistence (JSON / PostgreSQL / MySQL / SQLite), semantic memory, and full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
+711 test cases cover group lifecycle, permission control, RBAC, subscriptions, visibility fan-out, recall, agent trigger rules, streaming feedback, orchestration and skill library, human-in-the-loop, user management, persistence (JSON / PostgreSQL / MySQL / SQLite), semantic memory, and full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
 
 When tests need a database, override the connection strings via environment variables (`AGUI_PG_TEST_CONN`, `AGUI_MYSQL_TEST_CONN`); otherwise those cases are auto-skipped.
 

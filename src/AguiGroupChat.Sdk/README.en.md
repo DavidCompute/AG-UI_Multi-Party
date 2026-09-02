@@ -5,6 +5,7 @@
 `AguiGroupChat.Sdk` is the official .NET client SDK for the AG-UI Group Chat Hub, aimed at developers who need to **integrate third-party applications into the Hub**.
 It wraps all external capabilities exposed by the Hub, so developers don't have to deal with low-level details such as WebSocket / SSE / authentication.
 
+- **Current version**: `0.1.0` (see `<Version>` in `src/AguiGroupChat.Sdk/AguiGroupChat.Sdk.csproj`)
 - **Target frameworks**: `net8.0` / `net10.0` (a broad TFM, so .NET 8+ apps can reference it directly)
 - **Zero external runtime dependencies**: uses only `System.Net.Http.Json` and `System.Net.WebSockets.Client` built into the BCL
 - **Integration approach**: HTTP upstream API (request / response) + real-time downstream events (WebSocket full-duplex / SSE one-way)
@@ -111,7 +112,7 @@ catch (AguiException ex)
 
 ### `AguiClient` Capability Overview
 
-- **Auth**: `RegisterAsync` / `LoginAsync` / `LogoutAsync` / `GetCurrentUserAsync` / `ChangePasswordAsync` / `UpdateProfileAsync` / `ListUsersAsync`
+- **Auth**: `RegisterAsync` / `LoginAsync` / `LogoutAsync` / `GetCurrentUserAsync` / `ChangePasswordAsync` / `UpdateProfileAsync` / `ListUsersAsync` / `GetTotpStatusAsync`
 - **Groups**: `CreateGroupAsync` / `UpdateGroupAsync` / `DisbandGroupAsync` / `GetGroupSnapshotAsync` / `GetGroupMembersAsync` / `GetMyGroupsAsync`
 - **Topics / Members**: `CreateTopicAsync` / `DeleteTopicAsync` / `ClearTopicAsync` / `GetTopicsAsync` / `AddMembersAsync` / `RemoveMembersAsync` / `LeaveGroupAsync` / `UpdateMemberAsync`
 - **Messages**: `SendMessageAsync` / `RecallMessageAsync` / `RegenerateMessageAsync` / `StopAgentRunAsync` / `SendTypingAsync` / `SendReadAsync` / `GetMessagesAsync` / `GetTopicMessagesAsync` / `SearchMessagesAsync` / `StartDiscussionAsync` / `ResolveInteractionAsync`

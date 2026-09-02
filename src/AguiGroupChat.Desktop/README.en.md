@@ -2,8 +2,10 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows): it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
-personal memory, AI twin, attachments, topics, trigger modes, etc.), but with **all data and models stored locally**:
+A pure desktop application (Windows) **(current version 1.0.104)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+personal memory, AI twin, attachments, topics, trigger modes, etc.), but with **all data and models stored locally**; the service always runs on
+`http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
+skills marked as "client-execution" can run on this machine via the local bridge.
 
 - **Database**: SQLite (`data/agui.sqlite`); semantic memory uses **sqlite-vec** (`vec0` vector virtual table, shipped with `libs/vec0.dll`)
 - **Vector model**: **LLamaSharp** (the .NET implementation of llama.cpp) loads a GGUF embedding model locally, fully offline
@@ -26,6 +28,23 @@ personal memory, AI twin, attachments, topics, trigger modes, etc.), but with **
 dotnet build src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 ```
+
+### Building a release (win-x64 publish / MSI installer)
+
+Current version: **1.0.104** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+
+```bash
+# 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
+dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
+
+# 2. Build the MSI installer: outputs to artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
+#    e.g. for 1.0.104:
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.104
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.104.msi
+```
+
+> `tools/build-msi.ps1` first does a **forced fresh publish** (cleans Release intermediates to avoid reusing stale DLLs), strips non-Windows native runtimes,
+> bundles the VC++ runtime (app-local, no need to preinstall on the target machine), then produces the MSI with WiX; the MSI already bundles the local embedding model, so it is ready offline right after install.
 
 Once launched, a desktop window opens. Multiple instances share the same backend process: the local service **always runs on `http://127.0.0.1:5200`** (the first instance automatically starts a `--backend` child process). If port 5200 is occupied by another program, the first launch will prompt "Close the program occupying the port and try again."
 On first use, just register an account.

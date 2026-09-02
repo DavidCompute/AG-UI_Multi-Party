@@ -22,6 +22,7 @@ Existing foundation: trigger rules (mention / full / keyword / context), in-grou
 - **Goal**: planning → decomposition into subtasks → sub-agents executed in parallel / sequentially → aggregation → final reply, forming a plan/agent loop similar to a coding assistant. A complex requirement can be completed collaboratively by three assistants handling code + documentation + tests.
 - **Target module**: `src/AguiGroupChat.Agents/` (session and skill invocation), `AgentCatalog` (new event: subtask status).
 - **Enhancement (implemented)**: deterministic orchestration plan (`CoordinatorPlanning`) supports "question → build a plan → activate in sequence"; multiple <b>client-execution skills</b> inside a plan merge into one "run all locally" card after a single confirmation; the synthesis stage <b>recursively gathers more</b> (invoking more skills / direct reports when the info is insufficient) until the answer is complete; skill-only digital employees also enter plan orchestration.
+- **One-click organization orchestration (implemented)**: `POST /ag-ui/agents/orchestrate` turns a one-sentence requirement into a <b>non-persisted preview</b> of "digital-employee org chart + per-post skills + connections"; `/orchestrate/stream` streams the generation <b>token-by-token via SSE</b> with real-time stats of posts/skills seen so far (events `token`/`progress`/`done`/`error`); `/orchestrate/apply` validates then <b>atomically persists</b> skills + digital employees + connections, and with `createSupportCircle=true` can <b>one-click build them into a support circle</b> that goes live to serve customers.
 
 ### 1.2 Inter-Role Message Passing / Handoff (★★☆) ✅ Implemented (full-round-role handoff)
 - **Current state**: an agent uses another agent as a "tool" in a one-off call, with no bidirectional collaboration semantics.
@@ -88,10 +89,14 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
 - **Current state**: roles / skills are imported manually via JSON files (`tools/agents-starter.json`).
 - **Goal**: a built-in "industry roles / skills / knowledge base template" download marketplace for one-click distribution.
 - **Target module**: `AgentApi`, frontend "Agent Management", reusing the starter JSON packaging structure.
+- **Skill library search & bulk delete (implemented)**: the skill library now has reusable `prompt` / `shell` / `http` kinds (`shell`/`http` admin-created only), with <b>search by name / ID</b> (frontend filter) and <b>selected bulk delete</b>; `POST /ag-ui/skills/generate` produces a skill definition from natural language (no hand-written commands / JSON).
 
 ---
 
 ## IV. Human-Machine Collaboration & Governance (★★★ hard gate for enterprise adoption)
+
+- **Support-circle customer approval of skills (implemented)**: in a support circle (`kind=support`, protocol §2.1.1), an ordinary user enters as a <b>customer participant</b> (non-member) and can approve the service-skill executions <b>they themselves triggered</b> — the gateway enforces by `targetMemberId` (the triggerer), so a customer only approves their own interaction (GroupHub `ResolveAgentInteractionAsync`); staff see all conversations on their side.
+- **Native-skill tunnel execution (implemented)**: a client (`executionLocation=client`) shell skill runs on the local host via the <b>reverse tunnel</b> when the intranet bridge is online, instead of being dispatched to the frontend (`NativeTunnel__Token` configures the token; `ClientToolTunnelRequireApproval` defaults `true` deciding whether triggerer approval is required).
 
 ### 4.1 Differentiated Approval Policies (★★★) ✅ Implemented
 - **Current state**: `Agents:RequireApprovalToolNames` is a global list (by tool name), too coarse-grained.
@@ -179,6 +184,8 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
   - **Whitelabel branding**: `GET/POST /ag-ui/settings/branding` (public read / admin write), configures app name + Logo + brand primary color + forced dark mode + tagline, persisted to the "branding" extension area; the frontend injects the primary color via CSS variables and renders the login page / top-bar Logo and app name; the "Whitelabel Settings" entry in the admin menu allows online editing.
   - **iframe embedding**: `GroupChatOptions.AllowedFrameOrigins` configures allowed embed origins (CSP `frame-ancestors` and X-Frame-Options correspondingly relaxed, denied by default); the frontend auto-detects iframe / `?embed=1` to enter a compact embed mode (hiding irrelevant buttons / subtitle).
 
+- **Playwright automated verification (implemented)**: `tools/ui-orchestrate-flow.mjs` uses Playwright to run the full "one-click orchestrate → create support circle" flow with screenshots (`tools/README-playwright.md`), covering SSE streaming generation, apply persistence, and frontend verification of support-circle entry & session isolation.
+
 ---
 
 ## Prioritized Scheduling Recommendations (★★★ priority first)
@@ -192,7 +199,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
 | ★★☆ | 2.3 / 3.1 Cross-Instance Memory Sync + Bridge Reconnect | Bridges desktop/Web silos, improves external-expert reliability |
 | ★☆☆ | 6.1 Observability | Improves operations and tuning capability at low cost |
 
-> **Milestone note**: Roadmap items 1.1–6.4 are all delivered; subsequent iterations will refine based on operational feedback (e.g. Redis sharding / Redis cluster, observability enhancements, more enterprise compliance), see the main README and the "Next Steps" outlook in MARKETING.
+> **Milestone note**: Roadmap items 1.1–6.4 are all delivered; recent additions include <b>one-click organization orchestration (with SSE streaming generation)</b>, <b>one-click support-circle creation</b>, <b>native-skill tunnel execution</b>, <b>customers approving skills in a support circle</b>, <b>skill library search / bulk delete</b>, <b>support circles (`kind=support`)</b>, and <b>Playwright automated verification</b>; subsequent iterations will refine based on operational feedback (e.g. Redis sharding / Redis cluster, observability enhancements, more enterprise compliance), see the main README and the "Next Steps" outlook in MARKETING.
 
 ---
 

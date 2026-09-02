@@ -25,6 +25,12 @@
 - ✅ **运行时模型配置与初始化**：登录后可在界面填写 DeepSeek endpoint / apiKey（留空用官方端点与环境变量，`GET/POST /ag-ui/settings/model`），重启不丢；用户菜单「数据备份」内提供「初始化（清空一切）」（`POST /ag-ui/reset`，清空数据 + 浏览器缓存）
 - ✅ **桌面版多实例**：WPF / Avalonia 客户端共享同一后端进程（固定 5200），第一个实例启动 `--backend` 子进程、最后一个实例关闭才停后端；支持一次打开多个窗口
 - ✅ **思考模式（AG-UI 桥接）**：外部服务的 `REASONING_MESSAGE_CONTENT` 独立通道回灌，前端渲染可折叠「思考过程」块；工具调用简洁展示（「🔧 名称 调用中…」→ 完成后收起）
+- ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先全量校验再落库，幂等不部分写入）；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
+- ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` 三类，`shell` / `http`（可执行任意命令 / 外部请求）**仅管理员可创建**，普通用户只能建纯提示词技能；本机（client 执行）的 shell 技能经内网隧道 / 前端在本机执行（`ClientRunner` 自动从命令体生成）；技能库支持搜索（前端过滤）与批量删除；`POST /ag-ui/skills/generate` 用自然语言生成技能定义
+- ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行
+- ✅ **平台级 RBAC**：SuperAdmin / Admin / Operator / User 四档平台角色；`Auth:SuperAdminUserIds`（或 `POST /ag-ui/admin/roles/{userId}` 由超级管理员在线授予）bootstrap，首个注册账号自举为 SuperAdmin → Admin（详见 `docs/RBAC.md`）
+- ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
+- ✅ **浏览器自动化工具**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服知聚」全链路并截图，见 `tools/README-playwright.md`）
 
 ## 项目结构
 
@@ -49,6 +55,8 @@ tools/build-msi.ps1              # WiX v4 MSI 安装包构建（perUser 安装�
 tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑模型的瘦身版可用；默认 nomic-embed-text-v1.5.Q8_0）
 tools/verify-hitl.mjs            # 人机交互（审批卡片）端到端验证脚本
 tools/verify-agent-import.mjs    # 智能体批量导入验证脚本
+tools/ui-orchestrate-flow.mjs    # Playwright 浏览器自动化：一键组织编排 → 创建客服知聚全链路 + 截图（见 tools/README-playwright.md）
+tools/README-playwright.md       # 上述编排自动化的安装 / 运行 / 退出码说明
 ```
 
 ```mermaid
@@ -183,6 +191,9 @@ docker compose down
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
 | `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
+| `AUTH_SUPER_ADMIN_USER_IDS` | 空 | 超级管理员名单（逗号分隔 userId/username，平台级 RBAC）：命中者生效角色至少为 **SuperAdmin**；留空则仅首个注册账号自举为 SuperAdmin（见 `docs/RBAC.md`） |
+| `AUTH_ADMIN_USER_IDS` | 空 | 系统管理员名单（逗号分隔 userId/username，旧机制）：命中者生效角色至少为 Admin（不授予 SuperAdmin） |
+| `NATIVE_TUNNEL_TOKEN` | 空 | 内网穿透反向隧道全局令牌：内网本机桥 `--tunnel-token` 与之匹配；未配置隧道时留空 |
 | `STORAGE_PROVIDER` | `postgres` | 存储模式：`postgres`（默认，企业级落盘）、`memory`（进程内 + JSON 快照）、`sqlite` / `mysql`（单文件 / MySQL 落盘）、`redis`（多副本共享，6.2） |
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL 库名 / 用户 / 密码（`STORAGE_PROVIDER=postgres` 时生效） |
 | `STORAGE_CONNECTION_STRING` | 指向内置 postgres | 自定义连接串（可指向外部 PostgreSQL 实例） |
@@ -237,7 +248,9 @@ WebSocket 上行事件（`type` 判别）：`GROUP_SUBSCRIBE`、`GROUP_UNSUBSCRI
 
 | 接口 | 路径 | 核心参数 |
 |---|---|---|
-| 创建群组 | `POST /ag-ui/group/create` | groupName、ownerId、isPrivate*、memberIds、members*；**groupName 留空可先调群名自动生成** |
+| 创建群组 | `POST /ag-ui/group/create` | groupName、ownerId、kind*（normal/support）、isPrivate*、memberIds、members*；**groupName 留空可先调群名自动生成** |
+| 发现客服知聚 | `GET /ag-ui/group/discover` | 返回全部客服知聚（对所有用户可见、可进入），每项含 isMember / hasEntered |
+| 进入客服知聚 | `POST /ag-ui/group/{groupId}/enter` | 客服成员直接进入；非成员用户登记为**顾客参与者**（不加入成员表），获得独立会话；普通知聚不可自行进入（403） |
 | 群名自动生成 | `POST /ag-ui/group/generate-name` | memberNames（已选成员昵称列表，需登录）：按成员由模型生成 6-12 字群名，mock 提供方输出确定性模板 |
 | 更新群信息 | `POST /ag-ui/group/update` | groupId、updateFields、groupInfo、operatorId |
 | 解散群组 | `POST /ag-ui/group/disband` | groupId、operatorId |
@@ -269,6 +282,8 @@ WebSocket 上行事件（`type` 判别）：`GROUP_SUBSCRIBE`、`GROUP_UNSUBSCRI
 | 品牌查询 | `GET /ag-ui/settings/branding` | 公开：返回 `{appName, logoUrl, primaryColor, forceDark, tagline}`（白标 6.4：登录页 / 顶栏 / 嵌入页品牌化） |
 | 品牌保存 | `POST /ag-ui/settings/branding` | 仅管理员：设置应用名 / Logo / 品牌主色 / 强制深色 / 副标语（持久化） |
 | 配置治理 | `POST /ag-ui/admin/config` | 仅管理员：在线写入并持久化运行参数（会话 / 群 / 消息策略 / 工具开关 / 审批名单 / iframe 来源），非法值 400 |
+| 平台角色矩阵 | `GET /ag-ui/admin/roles` | 仅 SuperAdmin：返回全体账号角色矩阵（explicitRole / effectiveRole / isAdmin / isDisabled） |
+| 授予 / 回收平台角色 | `POST /ag-ui/admin/roles/{userId}` | 仅 SuperAdmin：`{role: user|operator|admin|superadmin}`；不能改自己、不能降级最后一名 SuperAdmin（见 `docs/RBAC.md`） |
 | 健康检查 | `GET /ag-ui/health` | connections / groups 计数 |
 
 `*` = Hub 扩展字段。错误响应统一为 `{"code":"GROUP_XXX","message":"..."}`，状态码映射：403 权限、404 不存在、409 群满、400 参数错误。
@@ -340,6 +355,24 @@ Web 界面支持**创建群**与**添加成员**：群列表右上角「＋」�
 头像 / 昵称变更会自动同步到其所在各群的成员资料并广播 `GROUP_MEMBER_UPDATED`。
 
 **数字员工组织架构（图形化编辑任务指派 / 问题提升）**：顶栏「🌐 组织架构」打开可视化画布，拖拽连线为各数字员工配置<b>任务指派（向下，可多）</b>与<b>问题提升（向上，唯一）</b>——每个节点右上角的「**优化指派**」图标按钮，按该数字员工的<b>直接下一层</b>（`AssignmentIds`）自动生成一段「管理下一层任务指派」指引：只依据下一层挑下游、不越级、无匹配则 NONE。生成结果可预览后<b>追加到该角色 Instructions</b>（`POST /ag-ui/agents/{agentId}/optimize-assignment`，需登录，仅创建者/管理员）。
+
+**一键组织编排（数字员工 → 一键编排）**：把「一句话需求」直接生成一套<b>数字员工组织架构方案</b>——岗位清单、每岗要挂载的技能、以及岗位之间连接（向下指派 / 向上提升 / 汇报中继）：
+
+1. **输入需求**：描述要建立的组织（如「组建一个客户服务团队」）；
+2. **SSE 流式生成**（`POST /ag-ui/agents/orchestrate/stream`，需登录）：逐 token 实时显示模型生成过程，并实时统计已见<b>岗位（agentId）</b> 与<b>技能（skillId）</b> 计数（`orgOrchStream` 面板）；生成结束下发完整方案；
+3. **预览**：展示生成的数字员工（含技能挂载 / 指派下级 / 提升上级）与技能清单，可检查微调；
+4. **确认落库**（`POST /ag-ui/agents/orchestrate/apply`，需登录）：**先全量校验再整体创建**（技能 → 数字员工），任何一步非法即整体返回错误、不部分落库；`shell/http` 技能仅管理员可建（与技能库一致）；
+5. **可选「同时创建客服知聚」**：勾选后把方案中的数字员工作为<b>客服团队</b>一键建群（`kind=support`），直接上线服务顾客。
+
+（非流式预览端点 `POST /ag-ui/agents/orchestrate` 亦保留。）
+
+**客服知聚（support circle，`kind=support`）**：在公有 / 私有知聚之外新增的<b>客服团队知聚</b>——
+
+- **客服团队 = 全部成员**：创建者建群时拉入的真人用户或数字员工即为客服（群创建者为客服兼群主），可看到<b>全部会话</b>；客服之间可内部沟通而不打扰顾客；
+- **对所有人可见、可进入**：强制 `isPrivate=false`；非成员用户经 `GET /ag-ui/group/discover` 发现、`POST /ag-ui/group/{groupId}/enter` 进入——登记为带 30 分钟活动 TTL 的<b>顾客参与者</b>（**非成员**，不占名额、不出现在成员清单），获得与客服团队聊天的<b>独立会话</b>；普通知聚保持成员制，不可自行进入（403）；
+- **会话隔离**：顾客消息仅该顾客与客服可见；客服回复某顾客定向到该顾客；客服间一般沟通仅客服可见；任一定向 / 私聊消息对非目标顾客不可见——顾客之间彼此完全隔离；
+- **顾客可批准其触发的客服技能执行**：顾客在独立会话 @ 客服触发 <b>客户端（本机 / 隧道）shell 技能</b>时，审批卡片发给该触发顾客，由其批准 / 拒绝后经批准恢复路径（隧道）执行并回灌；
+- **前端**：创建弹窗可选择「正常知聚 / 🛟 客服知聚」；侧栏自动展示可进入的客服知聚（非成员「进入」标），进入后作为参与者直接聊天。
 
 **数据备份与初始化（用户菜单 → 数据备份）**：
 
@@ -684,6 +717,10 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 所有结果回传后由数字员工<b>综合回归</b>给出结论。这样既保留了“问题 → 定计划 → 激活执行”的编排形态，
 又把“逐个确认”降为一次，适合多技能联查（系统、磁盘、内存、进程、网络、服务、事件日志等）。
 
+**隧道直通可选**：当内网桥经隧道在线且 `ClientToolTunnelRequireApproval=false` 时，网关会跳过这张确认卡，
+<b>直接经隧道在本机逐个执行</b>客户端技能并回灌（等价于真机执行，前端无需点确认）；默认 `true` 则保留审批/确认，
+触发者批准后由 `ResumeRunAsync` 再经隧道执行（见后文「安全与边界」）。
+
 #### 递归补查闭环（方案 C）
 
 数字员工在编排计划/综合阶段基于已收集结果作答时，若发现信息不足以完整回答用户问题（如还要看磁盘、内存、
@@ -700,6 +737,15 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 技能库「新增技能」顶部有 <b>🤖 用自然语言生成技能</b>：输入需求（如「检查本机磁盘使用情况，输出各分区剩余空间与使用率」），
 （可选勾选「优先本机执行」），大模型即产出名称 / ID / 类型 / 描述 / 命令 / 执行位置 / ClientRunner，自动填入表单供微调后保存。
 无需手写命令与 JSON。端点 `POST /ag-ui/skills/generate`（需登录）；mock 模式返回确定性模板。
+
+#### 技能库（可复用技能：prompt / shell / http）
+
+数字员工管理面板工具栏 `🎯 技能库` 打开全局可复用的技能目录（管理接口 `GET/POST/PUT/DELETE /ag-ui/skills`）：
+
+- **三种类型**：`prompt`（提示词 / 流程模板，无需外部执行）、`shell`（可执行命令 / 脚本，在专属沙箱 `data/skillruns` 运行）、`http`（调用外部 HTTP 接口，body 为 JSON 配置 `{method,url,headers,body}`，可用 `$QUERY` / `{{query}}` 占位）。任意数字员工经其表单的「可复用技能（技能库）」勾选挂载引用（`SkillDefIds`），模型需要时自动调用。
+- **权限**：`shell` / `http` 的技能**创建 / 修改 / 试运行仅系统管理员**（它们可能触发任意命令 / 外部请求，普通用户建立即任意命令执行面）；普通用户只能创建 `prompt` 技能。已被数字员工引用的技能删除时一并解除引用（种子技能只读，删除返回失败）。
+- **执行位置与审批**：`ExecutionLocation = Server`（服务端沙箱）或 `Client`（本机 / 前端 / 内网隧道执行）；`shell` 技能强制需批准（`RequiresApproval=true`），`Client` 执行一律强制需批准。本机（Client）执行的 shell 技能经内网隧道 / 前端在本机执行——`ClientRunner` 由 `BuildClientRunner` 自动从命令体生成（见上文「客户端工具」节）。
+- **搜索与批量删除**：技能库顶部搜索框按名称 / ID 前端过滤；勾选多行后 `🗑️ 删除所选` 逐一走既有单删接口批量删除。
 
 #### 内网穿透：反向隧道（本机桥无公网 IP 也能被 Hub 调用）
 
@@ -743,6 +789,7 @@ AguiGroupChat.NativeBridge.exe \
 - **令牌鉴权**：逐 agent 专属令牌（`NativeTunnel:AgentTokens__<agentId>`，或环境变量）优先，未配置时回落全局 `NativeTunnel:Token`；
   `POST /ag-ui/native-tunnel/result` 回传端点同样需要携带该 agent 的有效令牌（本机桥自动带上 `--agent/--tunnel-token`），防止伪造结果 / 无令牌刷接口。
 - **限流**：`connect` 与 `result` 端点带内存滑动窗口限流（默认单 IP `connect` 120 次/分、`result` 600 次/分，可在 `NativeTunnel:ConnectRateLimitPerMinute` / `NativeTunnel:ResultRateLimitPerMinute` 调整），抵御公网暴力猜令牌 / DDoS。
+- **执行需审批**：`AgentOptions.ClientToolTunnelRequireApproval`（默认 `true`，环境变量 `AGENTS_CLIENT_TOOL_TUNNEL_REQUIRE_APPROVAL`）——`true` 时经隧道的客户端 shell 先中断等触发者（含客服知聚的顾客参与者）批准，批准后 `ResumeRunAsync` 再经隧道执行；`false` 则网关在隧道在线时自动直通执行。
 - 桌面版本机桥（同机回环）不涉及内网穿透：本机桥与桌面壳同机，直接回环即可，`--tunnel` 是为「Docker + 远端浏览器」场景准备的。
 
 ## 配置（appsettings.json → `GroupChat` 节点）
@@ -767,6 +814,7 @@ AguiGroupChat.NativeBridge.exe \
 | `RequireTokenOnRealTime` | true | 实时通道（WS/SSE）与 HTTP 群管理写接口是否强制要求有效 token（true 时未携带 / 无效一律 401；false 为旧客户端 / 演示回退） |
 | `AbsoluteSessionTtlDays` | 30 | 会话绝对过期天数：滑动续期之上的硬上限（被盗令牌即使持续续期也会过期） |
 | `AdminUserIds` | 空 | 系统管理员名单（逗号分隔 userId 或 username，与账号 `IsAdmin` 标记叠加）；导出 / 导入 / 重置 / 模型配置等管理操作仅管理员可执行 |
+| `SuperAdminUserIds` | 空 | 超级管理员名单（逗号分隔 userId/username）：命中者生效角色至少为 **SuperAdmin**（平台级 RBAC 最高角色）；留空则首个注册账号自举（详见 `docs/RBAC.md`） |
 | `FirstUserIsAdmin` | true | 首个注册账号自动成为管理员（单机 / 桌面部署的首个用户即管理员） |
 | `AllowedOrigins` | 空 | WS/SSE 跨站来源白名单（逗号分隔完整 Origin）；空 = 仅允许同源（防 CSWSH） |
 
@@ -915,7 +963,7 @@ docker run -d --name agui-redis -p 6379:6379 redis:7
 dotnet test AguiGroupChat.slnx
 ```
 
-603 个用例覆盖：群生命周期、权限控制、订阅与快照、可见性扇出（all/mentioned/private）、撤回、踢出/退群、在线状态联动、智能体触发规则（含语境触发与**群内触发方式覆盖角色默认**、**分身在线暂停**）、MSAGENT 网关流式回灌（mock + 增量/累计文本兼容 + 语境发言决策 + 群内触发模式生效）、**人机交互（审批中断产出 ToolApprovalRequestContent、仅触发者可决策、批准后恢复同一会话执行工具并回灌、`approveAll` 一次性批准）**、DeepSeek/API Key 配置解析、**用户管理（注册/登录/改密/资料/头像同步/个人记忆开关/令牌/WS·SSE 鉴权/多设备会话 / TOTP 二次验证）**、**智能体运行时管理（动态目录增删改 + 头像 + 私密智能体权限 + 智能体级差异化审批 + 角色交接 relay + 市场导入 + HTTP 管理 API）**、**AI 分身（启用/停用/触发方式修改/公开群跟随/同步）**、**语义记忆（pgvector 写入/检索/私密群隔离/解散删记忆/个人记忆/时间线回放/混合 BM25 重排/沉淀知识库）**、**话题（新建/删除/按消息新建/清空话题记录/跨话题主题关联）**、**审批与治理（细粒度 RBAC、操作审计日志、TOTP）**、**编排与定时（多步工作流 pipeline、重复性定时任务）**、**富媒体附件（图片多选 / 语音 audio 类别 / 画布标注，音频不注入文本上下文）**、**白标品牌与嵌入（6.4：公开读取 + 管理员保存 + 非法主色 / 危险 Logo 拒绝 + 越权 403）**、**配置治理（6.3：管理员在线写入 / 持久化 + 非法值 400 / 非管理员 403）**、**记忆跨实例同步（2.3：导出 / 导入 round-trip + 幂等去重 + sinceMs 增量）**、**持久化（JSON 快照 round-trip + 全应用重启恢复）**、**PostgreSQL 存储**（群/成员/话题/消息分页/撤回/原地修改/用户/触发规则/扩展区 round-trip + 全应用 PG 重启恢复，需本地 PG 测试库，`AGUI_PG_TEST_CONN` 覆盖连接串）、**MySQL 存储**（同上 11 例，需本地 MySQL 8.0.13+，`AGUI_MYSQL_TEST_CONN` 覆盖连接串）、**SQLite 存储**（同上 11 例，单文件零部署本机即跑），未配置数据库时对应用例自动跳过；以及真实 Kestrel 上的 HTTP + WebSocket 全流程集成测试。
+711 个用例覆盖：群生命周期、权限控制、订阅与快照、可见性扇出（all/mentioned/private）、撤回、踢出/退群、在线状态联动、智能体触发规则（含语境触发与**群内触发方式覆盖角色默认**、**分身在线暂停**）、MSAGENT 网关流式回灌（mock + 增量/累计文本兼容 + 语境发言决策 + 群内触发模式生效）、**人机交互（审批中断产出 ToolApprovalRequestContent、仅触发者可决策、批准后恢复同一会话执行工具并回灌、`approveAll` 一次性批准）**、DeepSeek/API Key 配置解析、**用户管理（注册/登录/改密/资料/头像同步/个人记忆开关/令牌/WS·SSE 鉴权/多设备会话 / TOTP 二次验证）**、**智能体运行时管理（动态目录增删改 + 头像 + 私密智能体权限 + 智能体级差异化审批 + 角色交接 relay + 市场导入 + HTTP 管理 API）**、**AI 分身（启用/停用/触发方式修改/公开群跟随/同步）**、**语义记忆（pgvector 写入/检索/私密群隔离/解散删记忆/个人记忆/时间线回放/混合 BM25 重排/沉淀知识库）**、**话题（新建/删除/按消息新建/清空话题记录/跨话题主题关联）**、**审批与治理（细粒度 RBAC、操作审计日志、TOTP）**、**平台角色（SuperAdmin/Admin/Operator/User：`POST /ag-ui/admin/roles/{userId}` 授予 / 回收、不能自降级、Admin 不能管理角色）**、**一键组织编排（非流式 + SSE 流式方案生成、apply 全量校验后落库、客服知聚一键建群）**、**客服知聚会话隔离（顾客参与者非成员、各自独立会话、发现 / 进入接口）**、**技能库（prompt/shell/http 三类、shell/http 仅管理员、ClientRunner、自然语言生成）**、**内网隧道（`NativeTunnel__Token`、逐 agent 令牌、限流、`ClientToolTunnelRequireApproval` 批准路径）**、**编排与定时（多步工作流 pipeline、重复性定时任务）**、**富媒体附件（图片多选 / 语音 audio 类别 / 画布标注，音频不注入文本上下文）**、**白标品牌与嵌入（6.4：公开读取 + 管理员保存 + 非法主色 / 危险 Logo 拒绝 + 越权 403）**、**配置治理（6.3：管理员在线写入 / 持久化 + 非法值 400 / 非管理员 403）**、**记忆跨实例同步（2.3：导出 / 导入 round-trip + 幂等去重 + sinceMs 增量）**、**持久化（JSON 快照 round-trip + 全应用重启恢复）**、**PostgreSQL 存储**（群/成员/话题/消息分页/撤回/原地修改/用户/触发规则/扩展区 round-trip + 全应用 PG 重启恢复，需本地 PG 测试库，`AGUI_PG_TEST_CONN` 覆盖连接串）、**MySQL 存储**（同上 11 例，需本地 MySQL 8.0.13+，`AGUI_MYSQL_TEST_CONN` 覆盖连接串）、**SQLite 存储**（同上 11 例，单文件零部署本机即跑），未配置数据库时对应用例自动跳过；以及真实 Kestrel 上的 HTTP + WebSocket 全流程集成测试。
 
 **智能体工具 / 技能 / 知识库专项**（用例随版本持续增长，以 `dotnet test` 实测为准）：计算器（表达式求值 + 注入/除零/超长拒绝 + 幂与一元负号优先级）、单位换算（6 类单位 + 温度偏移 + 类别不一致拒绝）、工具注册（EnableTools/EnableWebTools 开关组合）、附件读取与群记忆检索工具（含 AmbientContext 注入）、网络工具 SSRF 防护（私网/环回/云元数据地址拒绝）、端到端工具调用链路（mock 模型调 calculator → 真实执行 → 回灌）、技能（Skills）智能体间调用（API 往返、空 SkillId 自动生成与冲突去重、非法 SkillId 400 / 挂载跳过、循环引用防护、端到端子代理调用）、**知识库（RAG 知识文档：切片、文档向量化入库、检索命中、删除级联、可见性、无向量存储时的明确降级错误、MemoryContextProvider 注入绑定知识库）**。
 

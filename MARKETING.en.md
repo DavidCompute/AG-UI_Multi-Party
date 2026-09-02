@@ -65,6 +65,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - Links in digital employee replies (including intranet addresses) are **visited by the backend** and returned — mixed content / intranet services that browsers cannot reach directly can still be viewed and downloaded; HTML is sandboxed against scripts, and downloads automatically carry the correct filename (including Chinese names).
 
 ### 8. Digital Employee Orchestration & Collaboration (From "Each Replies on Its Own" to "Collaborative Problem-Solving")
+- **One-click organization orchestration (product highlight, implemented)**: click "✨ Organization Orchestration" in the Digital Employee panel, type a <b>one-sentence requirement</b> (e.g. "build a 24/7 customer-support team"), and the model auto-generates a <b>digital-employee org chart + per-post skills + connections</b>; it supports <b>SSE streaming visualization</b> — the generation streams token-by-token in real time (`token`/`progress` with live stats of posts & skills seen), then `apply` persists the whole system in one click, and you can check <b>"create as a support circle"</b> to go live serving customers immediately.
 - **Multi-step workflows / orchestration (1.1)**: break a complex requirement into subtasks handled by multiple assistants (code + docs + tests) via "plan → decompose → execute in parallel / sequence → aggregate → output", forming an agent loop similar to a coding assistant.
 - **Role handoff (1.2)**: a digital employee can delegate a whole round to another role (`relayToAgentId`) for "relay replies / collaborative relays" rather than one-way calls.
 - **Scheduled / cron tasks (1.4)**: "on-duty digital employees" report / verify / nag on a 5-field cron schedule, managed visually in a frontend task panel.
@@ -75,6 +76,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 ### 9. Governance & Compliance (The Hard Threshold for Enterprise Rollout)
 - **Differentiated approval policies (4.1)**: in addition to the global tool list, each digital employee can have an independent approval tool list; `approveAll` approves all remaining pending tools for the current task in one go.
 - **Fine-grained RBAC (4.2)**: channel-level permissions — who can @ a digital employee (`canInvokeAgents`), who can approve human-in-the-loop actions (`canApprove`), who can manage the knowledge base (`canManageKnowledge`) — layered on top of system admins (`IsAdmin` / `AdminUserIds`).
+- **Platform roles (RBAC, product highlight)**: a four-tier platform role model `User / Operator / Admin / SuperAdmin` — Operator is read-only ops, Admin has full management, and only SuperAdmin can grant / revoke roles via `POST /ag-ui/admin/roles/{userId}` (no self-demotion, no demoting the last SuperAdmin); the first account bootstraps as admin and existing deployments migrate with no changes (see `docs/RBAC.md`).
 - **Operational audit logs (4.3)**: records key operations such as "who / when / approved which tool / import-export / reset"; exportable, meeting classified and compliance requirements.
 - **Session security (4.4)**: multi-device session viewing / revoking, optional second-factor login (TOTP), and `AllowedOrigins` configured from the UI.
 - **Configuration governance (6.3)**: admins adjust and persist runtime parameters online in the console's "Configuration Governance" tab (session validity, group chat / message policy, tool toggles / work tools / thinking mode / daily token quota, approval lists, iframe embed sources) without editing config or restarting.
@@ -113,6 +115,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **🤖 Generate a skill from plain text**: in the Skill Library, type a request (e.g. "check local disk usage and report free space per partition"), and the LLM produces name / kind / command / description / execution location / client-runner config, filled into the form for review then save — <b>no need to hand-write commands or JSON</b>, so even non-technical users can add capabilities to digital employees.
 
 ### 16. Support Circles (Public Reception + One-by-One Conversation Isolation)
+- **One-click support-circle creation (product highlight)**: check "create as a support circle" in One-click Organization Orchestration, and the orchestrated digital employees automatically form the support team with trigger rules registered — <b>one requirement directly stands up a public support hall</b> ready to receive customers, with no manual group building or recruiting.
 - **Public, enterable support / FAQ circles**: on top of public/private circles, a "support circle" is <b>visible and enterable by every signed-in user</b> with no invitation needed; other circles keep membership-only semantics.
 - **A support team serves everyone**: the creator invites humans + digital employees into the support team; staff see <b>all conversations</b> and can coordinate internally (without disturbing customers) to route / escalate cases.
 - **Each customer gets an isolated conversation**: a regular user who enters is <i>not a member</i> and holds a private conversation with the team — user A's content is never visible to user B, naturally satisfying client privacy and enabling a public-hall + one-to-one service model.
@@ -129,7 +132,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 | Multi-client coverage | Web (Docker), Windows desktop (WPF + WebView2, multi-instance), cross-platform desktop (Avalonia) |
 | Extensible | Storage abstraction (IGroupStore / IUserStore) with built-in **memory / postgres / mysql / sqlite / redis** implementations, switchable in one click; `IAgentGateway` for custom gateways; digital employee directory / trigger rules / topics all managed at runtime |
 | Data security | Password PBKDF2, token auth, attachment whitelist, strict ownership validation for private group chats / private digital employees, HTML sandbox, SSRF protection, memory tiering and auto-forgetting, local-execution sandbox + token auth |
-| Quality assurance | **679 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & role handoff / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end / support-circle conversation isolation) |
+| Quality assurance | **711 automated test cases** (group chat lifecycle / permissions / RBAC / audit / memory & timeline / memory cross-instance sync / Redis & three database storages / Redis shared sessions / bridge & reconnect / approvals / orchestration & skill library / schedule tasks / rich media attachments / whitelabel / configuration governance / end-to-end / support-circle conversation isolation) |
 
 ---
 
@@ -252,6 +255,8 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 
 ## 7. Next Steps & Roadmap
 
+> **Already shipped**: one-click organization orchestration (with SSE streaming generation) & one-click support-circle creation, support-circle conversation isolation, platform-role RBAC, and native-skill tunnel execution are all live; the following are directions to deepen next.
+
 - **Multimodal advancement**: image / voice Q&A, audio & video meeting integration (voice messages, multi-image, and canvas annotations are already in as attachments; two-way voice dialogue and image Q&A are to be deepened);
 - **Deeper observability (6.1)**: metric visualization dashboards, OpenTelemetry integration, cross-replica diagnostics on Redis multi-replica;
 - **Hybrid retrieval & RAG enhancement**: BM25 sparse retrieval blended with dense vectors, covering Chinese / code scenarios; switchable embedding providers on demand;
@@ -325,5 +330,10 @@ Check "🛠️ Work-type digital employee" for "Code Buddy", giving it a dedicat
 **Step 7 · Data sovereignty fallback & scaling**
 1. The "Data Backup" panel one-click exports a zip (accounts + digital employees + chat history + attachments + avatars) for offsite backup; on a new environment, one-click import (account passwords fully restored, existing accounts auto-update profiles, digital employees auto-completed, sender references auto-rewritten), or "System Initialization" returns to a fresh state in one click;
 2. For high availability, switch `Storage__Provider` to `redis` and `docker compose up --scale web=2`: multi-replica shared sessions and storage, **any login on any replica is valid**, and horizontal scaling linearly raises concurrency.
+
+**Step 8 · One-click orchestrate a digital-employee org + public support circle (product highlight)**
+1. An admin clicks "✨ Organization Orchestration" in the "🤖 Digital Employees" panel, types a one-liner like "build a 24/7 support team with a manager and two on-duty agents who can check orders and logistics" — the model <b>streams the org chart and per-post skills token-by-token via SSE</b>, with live counts of posts / skills in the top-right; on completion click "✅ Confirm & persist". Check "create as a support circle", and the orchestrated digital employees automatically line up and go live — a <b>public support circle visible and enterable by every signed-in user</b> appears on the left.
+2. A visitor enters and @mentions the on-duty agent "where is my order"; the agent answers by calling local / cloud skills and raises an approval card — the customer can approve the skill execution <b>they themselves triggered</b> right in the support circle; the staff side sees <b>all customer conversations</b> at one entry, with each customer isolated from the others.
+3. For division of labor click "Optimize next-layer dispatch" on the employee, or assign members platform roles `Admin/Operator/User/SuperAdmin` in User Management (grant/revoke superadmin-only).
 
 **Result**: from "one-command intranet deploy" to "multi-digital-employee daily collaboration", "governable organizational memory", "per-person approval with audit trails", "work-type digital employees running long tasks", and "portable, scalable data" — this complete **private, governable, collaborative, scalable** experience is exactly what a general SaaS assistant cannot deliver.
