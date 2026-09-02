@@ -198,7 +198,7 @@ public static class SkillApi
             RequiresApproval = requiresApproval,
             OwnerId = ownerId,
             ExecutionLocation = executionLocation,
-            ClientRunner = string.IsNullOrWhiteSpace(req.ClientRunner) ? null : req.ClientRunner.Trim(),
+            ClientRunner = AgentApi.BuildClientRunner(kind, executionLocation, req.Body ?? "", req.ClientRunner),
         }, null);
     }
 

@@ -391,6 +391,7 @@ public static class AgentApi
                     Body = s.Body ?? "",
                     RequiresApproval = requiresApproval,
                     ExecutionLocation = execLoc,
+                    ClientRunner = BuildClientRunner(kind, execLoc, s.Body ?? "", null),
                     OwnerId = user.UserId,
                 });
             }
@@ -601,6 +602,16 @@ public static class AgentApi
     /// <summary>某用户所属的群 ID 集合（用于知识库群级共享可见性判定）。</summary>
     private static IReadOnlySet<string> MemberGroupIds(GroupHub hub, string userId)
         => hub.Store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>客户端执行的 shell 技能需要可经内网隧道解析的 <c>ClientRunner</c> JSON；未显式提供时从技能正文（PowerShell）自动构造。
+    /// 否则技能虽 <c>executionLocation=client</c>，却因缺少运行配置无法经隧道/前端在本机执行（网关 TryParseRunnerShell 返回 false）。</summary>
+    internal static string? BuildClientRunner(AgentSkillKind kind, AgentSkillExecutionLocation loc, string body, string? explicitRunner)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitRunner)) return explicitRunner.Trim();
+        if (kind == AgentSkillKind.Shell && loc == AgentSkillExecutionLocation.Client && !string.IsNullOrWhiteSpace(body))
+            return JsonSerializer.Serialize(new { kind = "shell", command = body, cwd = ".", timeoutSec = 30 });
+        return null;
+    }
 
     /// <summary>知识库绑定归属校验：每个 KnowledgeBaseId 必须存在，且调用者被允许读取（系统级 / 自己 / 管理员 / 所属共享群成员）；
     /// 否则返回错误结果（防把他人私密知识库绑到自己的智能体上检索注入）。</summary>

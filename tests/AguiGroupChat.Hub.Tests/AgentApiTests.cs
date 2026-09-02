@@ -920,8 +920,13 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         {
             var created = skills.Get(s.SkillId!);
             Assert.NotNull(created);
-            if (string.Equals(s.Kind, "shell", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(s.Kind, "shell", System.StringComparison.OrdinalIgnoreCase))
+            {
                 Assert.True(created!.RequiresApproval); // shell 强制需审批
+                // 客户端执行的 shell 技能应自动获得可经隧道/前端解析的 ClientRunner（从正文构造），否则无法在本机执行
+                if (string.Equals(created.ExecutionLocation.ToString(), "Client", System.StringComparison.OrdinalIgnoreCase))
+                    Assert.False(string.IsNullOrWhiteSpace(created.ClientRunner));
+            }
         }
         // 数字员工落库 + 连接（mock 模板：Agents[0]=主管(assignment 两个执行岗)，Agents[1]=执行岗A(escalation=主管)）
         var mgrId = preview.Agents[0].AgentId!;

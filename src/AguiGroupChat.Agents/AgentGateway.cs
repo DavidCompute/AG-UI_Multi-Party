@@ -301,12 +301,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private bool TryParseClientShell(string toolName, out string? command, out string? cwd, out int? timeoutSec)
     {
         var skill = GetSkillById(toolName);
-        if (skill is null || string.IsNullOrWhiteSpace(skill.ClientRunner))
+        if (skill is null)
         {
             command = null; cwd = null; timeoutSec = null;
             return false;
         }
-        return TryParseRunnerShell(skill.ClientRunner, out command, out cwd, out timeoutSec);
+        var runner = EffectiveClientRunner(skill);
+        if (string.IsNullOrWhiteSpace(runner))
+        {
+            command = null; cwd = null; timeoutSec = null;
+            return false;
+        }
+        return TryParseRunnerShell(runner, out command, out cwd, out timeoutSec);
     }
 
     /// <summary>从一段 <c>ClientRunner</c> JSON 解析 shell 命令 / 工作目录 / 超时（供内网隧道对单技能 / 批量项执行）。
@@ -328,6 +334,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return !string.IsNullOrWhiteSpace(command);
         }
         catch { return false; }
+    }
+
+    /// <summary>客户端执行的 shell 技能实际要用的 <c>ClientRunner</c>：带显式 runner 用显式；
+    /// 否则（早期 / 编排创建的技能可能未写 runner）从技能正文（PowerShell）自动构造可经隧道 / 前端解析的 runner。
+    /// 避免「<c>executionLocation=client</c> 但缺 runner」导致本机无法执行。</summary>
+    private static string? EffectiveClientRunner(AgentSkillDefinition skill)
+    {
+        if (!string.IsNullOrWhiteSpace(skill.ClientRunner)) return skill.ClientRunner;
+        if (skill.Kind == AgentSkillKind.Shell
+            && skill.ExecutionLocation == AgentSkillExecutionLocation.Client
+            && !string.IsNullOrWhiteSpace(skill.Body))
+            return "{\"kind\":\"shell\",\"command\":" + JsonSerializer.Serialize(skill.Body) + ",\"cwd\":\".\",\"timeoutSec\":30}";
+        return null;
     }
 
     /// <summary>是否有桥能服务“该数字员工 + 该客户端”：优先按<paramref name="clientId"/>（机器）路由，否则按 agent/平台作用域。</summary>
@@ -592,7 +611,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     && _catalog.GetAgentClientToolNames(context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
 
                 var interruptId = "interrupt_" + IdGenerator.NewId();
-                var clientRunner = isClientTool ? GetSkillById(fc!.Name)?.ClientRunner : null;
+                var clientSkill = isClientTool ? GetSkillById(fc!.Name) : null;
+                var clientRunner = clientSkill is null ? null : EffectiveClientRunner(clientSkill);
                 _pendingInteractions[interruptId] = new PendingInteraction(
                     interruptId, context.GroupId, context.AgentId, runId, messageId,
                     context.TriggerUserId, context.TopicId, _hub.Value.NowMs, context,
@@ -1068,7 +1088,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 var clean = AgentGatewayHelpers.ExtractCleanValueForSkill(working);
                 if (!string.IsNullOrWhiteSpace(clean)) cq = clean;
             }
-            clientSteps[i] = new BatchClientItem(csk.SkillId, csk.Name ?? csk.SkillId, csk.ClientRunner ?? "", cq, i);
+            clientSteps[i] = new BatchClientItem(csk.SkillId, csk.Name ?? csk.SkillId, EffectiveClientRunner(csk) ?? "", cq, i);
         }
 
         // 3) 逐项执行 dispatch / 服务端技能（跳过客户端技能，留到批量阶段）& 按原顺序点亮
@@ -1455,7 +1475,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     if (skill is null) { gathered.AppendLine($"技能「{req.Target}」不可用，已跳过。"); continue; }
                     executedSkills.Add(req.Target);
                     if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client)
-                        clientItems.Add(new BatchClientItem(skill.SkillId, skill.Name ?? skill.SkillId, skill.ClientRunner ?? "", req.Input ?? "", 0));
+                        clientItems.Add(new BatchClientItem(skill.SkillId, skill.Name ?? skill.SkillId, EffectiveClientRunner(skill) ?? "", req.Input ?? "", 0));
                     else
                         gathered.AppendLine($"【{skill.Name ?? skill.SkillId}】\n" + (await _catalog.RunSkillAsync(skill, req.Input ?? "", ct)));
                 }
