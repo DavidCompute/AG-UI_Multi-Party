@@ -2051,6 +2051,12 @@ async function generateSkill() {
 async function testSkill(skillId) {
   const id = skillId || editingSkillId;
   if (!id) { toast(t("skill.err.saveFirst")); return; }
+  // 在编辑表单（skillFormView 可见）里跑 → 写 sfTestResult；否则（技能库列表 ▶ 或新增弹窗）写列表下方结果区
+  const inForm = !document.getElementById("skillFormView").classList.contains("hidden");
+  const out = inForm ? document.getElementById("sfTestResult") : document.getElementById("skillListTestResult");
+  if (!out) { toast(t("common.saveFail", { err: "缺少结果区" })); return; }
+  out.classList.remove("hidden");
+  out.textContent = `${t("skill.testRun")}…（${id}）`;
   // 按技能自动建议一个典型示例参数预填（试运行前先给用户一个能用/可改的输入）
   let suggestion = "";
   try {
@@ -2061,16 +2067,18 @@ async function testSkill(skillId) {
     if (s && typeof s.suggestion === "string") suggestion = s.suggestion;
   } catch { /* 建议失败不影响试运行 */ }
   const query = await uiPrompt({ title: t("skill.testRun"), message: t("skill.testQuery") + (suggestion ? " · " + t("skill.testSuggestLabel") : ""), defaultValue: suggestion });
-  if (query === null) return;
+  if (query === null) { out.classList.add("hidden"); out.textContent = ""; return; }
+  out.textContent = `${t("skill.testRun")}: ${escapeHtml(query)}…`;
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
       body: JSON.stringify({ query, clientId: state.bridgeClient || undefined }), // 本机桥默认路由到当前机器
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }
-    $("sfTestResult").textContent = `▶ ${t("skill.testResult")}\n${data.result || ""}`;
-  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); out.textContent = `${t("skill.testResult")}\n${t("common.saveFail", { err: errMsg(data, res.status) })}`; return; }
+    out.textContent = `▶ ${t("skill.testResult")}\n${data.result || ""}`;
+    out.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); out.textContent = `${t("skill.testResult")}\n${ex.message}`; }
 }
 
 /** 删除技能。 */
