@@ -30,12 +30,25 @@ public sealed class AgentCatalog
     internal const string DeepSeekVisionModel = "deepseek-v4-flash-vision-exp";
 
     /// <summary>“结构化/格式型”生成任务的模型选择：是否需要“思考”（用推理模型）。
-    /// 任务输出若会被机器按固定 JSON 或长度截取的短 token 解析，属于格式任务——
-    /// 推理模型(reasoner) 在“输出严格 JSON/代码/名称”这类任务上又慢又容易空返回或超时，
-    /// 因此一律强制用常规对话模型（deepseek-chat），即使全局 ThinkingMode 开着也不进入 reasoner。
-    /// 返回 null 表示“跟随全局思考模式”，供需要开放推理/创造的生成（人设、角色设定、指派引导等）不传 override。</summary>
+    /// 任务输出若会被机器按固定 JSON 或长度截取的短 token 解析，属格式任务——
+    /// 始终用常规对话模型（deepseek-chat/schema-fast）。与 <see cref="GenComplexity"/> 配合：
+    /// 复杂度仅决定是否在提示词里让它“先想后给”（见 <see cref="DeliberateFirstLine"/>），
+    /// 而不是真的切开 reasoner（reasoner 在严格 JSON/截短输出上又慢又易空/超时）。
+    /// 返回 null 表示“跟随全局思考模式”，供需要开放推理/创造的生成（如角色人设）不传 override。</summary>
     internal static string? StructuredFastModel(bool isDeepSeek)
         => isDeepSeek ? DeepSeekDefaultModel : null;
+
+    /// <summary>生成任务的复杂度分档（决定是否“先想后给”再产出最终结构）。
+    /// Simple：一句话/单一短 token（群名、示例入参、图谱抽等）——直接给格式答案，不做多余心理铺陈；
+    /// Medium：单一技能/代码等稍依赖设计权衡；
+    /// Complex：方案性强的 JSON（一键编排：岗位+技能+连接分工）——要求先把取舍/思路简述再给最终 JSON。
+    /// 分档只影响“提示词措辞”，不影响模型选择（结构化一律 fast，避免 reasoner 的慢/空）。</summary>
+    internal enum GenComplexity { Simple, Medium, Complex }
+
+    /// <summary>对复杂(需要先权衡）的结构化生成，附加的“先想后给”要求：在正文开头简述取舍，最终才给 JSON。</summary>
+    internal const string DeliberateFirstLine =
+        "请先看到需求后，用一到两句中文简述你在方案上的关键取舍（仅供我参考，不会写入保存结果）；" +
+        "随后在最后单独用一段输出唯一一份最终 JSON。你的最终 JSON 是最后一个以 { 开头、} 结尾的代码块。\n\n";
 
     private readonly AgentOptions _options;
     private readonly ILoggerFactory _loggerFactory;

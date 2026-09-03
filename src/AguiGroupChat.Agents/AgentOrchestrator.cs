@@ -106,8 +106,10 @@ public static class AgentOrchestrator
 
     private static string BuildPrompt(string requirement)
     {
-        return
-            "你是企业数字化组织架构设计师。根据用户的一句需求，设计一套「数字员工组织架构 + 各岗位技能 + 岗位连接」方案，只输出一个 JSON，不要任何其他文字。\n\n" +
+        var deliberate = AgentCatalog.DeliberateFirstLine;
+        return deliberate +
+            "你是企业数字化组织架构设计师。根据用户的一句需求，设计一套「数字员工组织架构 + 各岗位技能 + 岗位连接」方案；" +
+            "先按开头的“取舍概述”要求简述后，再只输出最终的一段 JSON（除简述外的成稿不要附其它文字）。\n\n" +
             "数字员工（agents）字段：\n" +
             "- agentId：ASCII 字母/数字/下划线/连字符（≤40）。\n" +
             "- nickname：中文角色名。\n" +
@@ -128,7 +130,7 @@ public static class AgentOrchestrator
             "- requiresApproval：shell 一律 true；http 一律 true；executionLocation=client 一律 true；纯 prompt 服务端可 false。\n\n" +
             "连接原则：给出 2~6 个数字员工；尽量形成「主管 → 若干执行岗」的层次；主管的 escalationAgentId 指向更上层或留空；\n" +
             "执行岗 assignmentIds 留空、escalationAgentId 指向主管。技能要贴合岗位职责，数量 1~6 个。\n\n" +
-            "只输出如下 JSON：\n" +
+            "只输出最终 JSON（如下结构，字段补齐、可加多余岗位/技能项；简述已在开头给出，最终成稿不再重复简述，也不要 ``` 围栏）：\n" +
             "{\"title\":\"<组织名>\",\"agents\":[{\"agentId\":\"\",\"nickname\":\"\",\"description\":\"\",\"instructions\":\"\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":null,\"relayToAgentId\":null}],\"skills\":[{\"skillId\":\"\",\"name\":\"\",\"description\":\"\",\"kind\":\"prompt\",\"body\":\"\",\"executionLocation\":\"server\",\"requiresApproval\":false}]}\n\n" +
             "用户需求：" + requirement;
     }

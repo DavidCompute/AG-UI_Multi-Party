@@ -89,7 +89,8 @@ public static class SkillDefinitionGenerator
             runSettings = "目标环境未明确上报，shell 技能请尽量兼顾 PowerShell 与 bash 或说明所需环境；dotnet 技能写跨平台 C# 源码。";
 
         return
-            "你是企业技能生成器。根据用户的自然语言需求，生成一份能直接保存的技能库配置。\n\n" +
+            AgentCatalog.DeliberateFirstLine +
+            "你是企业技能生成器。根据用户的自然语言需求，先给出取舍概述，再生成一份能直接保存的技能库配置。\n\n" +
             "技能类型（kind）可选：\n" + kinds +
             "执行位置（executionLocation）：server（在服务端执行为主）/ client（在本机/前端执行为主）" +
             (preferClient ? "。本次需求倾向在本机(client)执行。\n" : "。默认 server，仅当用户要针对本机操作时用 client。\n") +
