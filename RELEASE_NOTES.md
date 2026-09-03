@@ -1,5 +1,29 @@
-# AG-UI 群聊桌面版 1.0.108 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.108 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.116 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.116 Release Notes (current desktop release)
+
+## 新增（中文）
+- **新的技能类型 `dotnet`（C#）**：技能正文可写 C# 源码（含 `public static string Run(string input)` 入口），运行时经 Roslyn 编译后执行。服务端（`server`）执行的 dotnet 在 Hub 进程内的可回收 `AssemblyLoadContext` 中运行（受限引用白名单 + `AllowUnsafe=false` + 超时 / 输出上限）；独立桥 `AguiGroupChat.NativeBridge` 新增 `DotnetRunner`，能在本机执行 `kind=dotnet` 隧道任务（Source = C#），因此浏览器所在主机的客户端 dotnet 技能由本机桥运行——浏览器自身无法编译 C#，客户端 dotnet 需触发者批准后经桥执行。
+- **dotnet 权限模型（管理员建、人人可跑）**：`dotnet` 与 `shell`/`http` 同属特权桶——**仅系统管理员可创建 / 修改 / 删除**；自然语言生成 `/generate` 也只为系统管理员产出 `dotnet`。但**对现有 dotnet 技能的运行对全体登录用户开放**：任何登录用户可试运行服务端 dotnet、或经数字员工 / 客户端执行由本机桥运行，无需管理员。
+- **技能库“试运行”自动建议示例入参**：试运行前先经 `POST /ag-ui/skills/{skillId}/suggest` 由模型依据技能描述 / 正文自动推导并预填一段代表性的示例输入，再 `POST /run` 执行，降低试运行门槛。
+- **一键组织编排 apply 冒烟自测 + 自修复**：落库前先对服务端执行的技能做冒烟：`prompt` 用样例跑一次、`http` 仅静态校验 method/url（不外呼）、server shell 仅当 `Agents.SkillAutoTestServerShell`（`AGENTS_SKILL_AUTOTEST_SHELL`，默认 true）开启才盲跑，client / 隧道类跳过；失败项由大模型自动修复（最多 3 次）。apply 返回 `smoke[]`（`{skillId,skipped,ok,attempts,repaired,lastError}`），UI 在创建后于通知中心展示。
+- **Shell 脚本写盘 BOM 修复**：服务端 `SkillRunner` 曾以带 UTF-8 BOM 的方式写 shell 脚本，导致 bash 下即使是合法首条命令也会失败；现改为写入<b>无 BOM 的 UTF-8</b>。
+- docker-compose 新增暴露 `AGENTS_SKILL_AUTOTEST_SHELL`（对应选项 `Agents.SkillAutoTestServerShell`）。
+
+## New (English)
+- **New skill kind `dotnet` (C#)**：a skill body can be C# source exposing `public static string Run(string input)`，compiled at run time with Roslyn and executed. Server-side (`server`) dotnet runs inside the Hub process in a collectible `AssemblyLoadContext`（constrained reference allowlist + `AllowUnsafe=false` + timeout / output caps）；the standalone bridge `AguiGroupChat.NativeBridge` gains a `DotnetRunner` that can execute `kind=dotnet` tunnel tasks (Source = C#) on the local host, so client dotnet skills on the browser's host run via the bridge——a browser itself cannot compile C#，and client dotnet runs over the bridge after the triggerer approves.
+- **dotnet permission model（admin-create，everyone-can-run）**：`dotnet` shares the privileged bucket with `shell`/`http`——**only system admins can create / edit / delete**；natural-language `/generate` also yields `dotnet` only for system admins. But **running an existing dotnet skill is open to all logged-in users**：any user can trial-run a server dotnet skill，or have a client-executed one run over the native bridge，no admin needed just to run.
+- **Skill library “trial run” auto-suggests an example input**：before running，`POST /ag-ui/skills/{skillId}/suggest` has the model derive and pre-fill a representative example input from the skill description / body，then `POST /run` executes it.
+- **Orchestration apply now smoke-tests + self-repairs**：before persisting，server-executed skills are smoke-tested——`prompt` runs once against a sample，`http` is only config-linted (method / url validity，no outbound call)，server `shell` is blind-run only when `Agents.SkillAutoTestServerShell`（`AGENTS_SKILL_AUTOTEST_SHELL`，default true）is on，client / tunnel kinds are skipped; failures are auto-repaired by the model（up to 3 attempts）。Apply returns a `smoke[]`（`{skillId,skipped,ok,attempts,repaired,lastError}`）that the UI surfaces in the notification center after creation.
+- **Shell script BOM fix**：the server-side `SkillRunner` used to write shell scripts with a UTF-8 BOM，breaking even a valid first command under bash；scripts are now written as BOM-less UTF-8.
+- docker-compose now exposes `AGENTS_SKILL_AUTOTEST_SHELL`（option `Agents.SkillAutoTestServerShell`）。
+
+**版本说明**：1.0.116 为当前 Windows 桌面点版本，主题为「dotnet（C#）技能 + 试运行建议与编排冒烟自检」并包含 shell BOM 修复。
+**Version note**: 1.0.116 is the current Windows desktop point release, focused on dotnet (C#) skills, trial-run input suggestion & orchestration smoke/self-repair, plus the shell BOM fix.
+
+---
+
+# AG-UI 群聊桌面版 1.0.108 发布说明
+# AG-UI Group Chat Desktop 1.0.108 Release Notes
 
 ## 新增（中文）
 （提交 d14f210）

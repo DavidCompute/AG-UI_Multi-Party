@@ -26,8 +26,8 @@
 - ✅ **桌面版多实例**：WPF / Avalonia 客户端共享同一后端进程（固定 5200），第一个实例启动 `--backend` 子进程、最后一个实例关闭才停后端；支持一次打开多个窗口
 - ✅ **思考模式（AG-UI 桥接）**：外部服务的 `REASONING_MESSAGE_CONTENT` 独立通道回灌，前端渲染可折叠「思考过程」块；工具调用简洁展示（「🔧 名称 调用中…」→ 完成后收起）
 - ✅ **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到**视觉模型**，图片以 base64 多模态内容喂给模型看图并作答；纯文本消息仍走常规 / 思考模型，行为不变。DeepSeek 下视觉模型默认 `deepseek-v4-flash-vision-exp`（可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关）；`mock` 提供方不支持视觉，图片消息按文本处理。图片直接从附件库按字节 + MIME 读取内联传入，无需另存文件；共享的群成员审批 / 发图片附件工作流不变。
-- ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先全量校验再落库，幂等不部分写入）；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
-- ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` 三类，`shell` / `http`（可执行任意命令 / 外部请求）**仅管理员可创建**，普通用户只能建纯提示词技能；本机（client 执行）的 shell 技能经内网隧道 / 前端在本机执行（`ClientRunner` 自动从命令体生成）；技能库支持搜索（前端过滤）与批量删除；`POST /ag-ui/skills/generate` 用自然语言生成技能定义
+- ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先**对服务端执行的技能冒烟自测 + 大模型自动修复**（最多 3 次）再落库，幂等不部分写入）并返回 `smoke[]`，UI 在创建后的通知中心展示；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
+- ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` / `dotnet`（C#）四类——`shell` / `http` / `dotnet`（可执行命令 / 外部请求 / 运行 C# 源码）**仅系统管理员可创建 / 修改 / 删除**，普通用户只能建纯提示词技能；但**运行现有 `dotnet` 技能对全体登录用户开放**（可试运行服务端 dotnet，或经数字员工 / 客户端执行由本机桥运行，无需管理员）。本机（client 执行）的 shell / dotnet 技能经内网桥 / 前端在本机执行（浏览器无法编译 C#，dotnet 客户端技能在触发者批准后由本机桥 `DotnetRunner` 执行）；技能库支持搜索（前端过滤）与批量删除；技能库「试运行」会先**自动建议一段代表性入参示例**（`POST /ag-ui/skills/{skillId}/suggest`）再执行；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（`dotnet` 仅系统管理员可得）
 - ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行
 - ✅ **平台级 RBAC**：SuperAdmin / Admin / Operator / User 四档平台角色；`Auth:SuperAdminUserIds`（或 `POST /ag-ui/admin/roles/{userId}` 由超级管理员在线授予）bootstrap，首个注册账号自举为 SuperAdmin → Admin（详见 `docs/RBAC.md`）
 - ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
@@ -191,6 +191,7 @@ docker compose down
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
 | `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
+| `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | 一键编排 apply 的冒烟自测：是否对服务端执行的 `shell` 技能盲跑一次（有副作用，默认开；置 `false` 关闭）。映射选项 `Agents__SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
 | `AUTH_SUPER_ADMIN_USER_IDS` | 空 | 超级管理员名单（逗号分隔 userId/username，平台级 RBAC）：命中者生效角色至少为 **SuperAdmin**；留空则仅首个注册账号自举为 SuperAdmin（见 `docs/RBAC.md`） |
 | `AUTH_ADMIN_USER_IDS` | 空 | 系统管理员名单（逗号分隔 userId/username，旧机制）：命中者生效角色至少为 Admin（不授予 SuperAdmin） |
@@ -362,7 +363,7 @@ Web 界面支持**创建群**与**添加成员**：群列表右上角「＋」�
 1. **输入需求**：描述要建立的组织（如「组建一个客户服务团队」）；
 2. **SSE 流式生成**（`POST /ag-ui/agents/orchestrate/stream`，需登录）：逐 token 实时显示模型生成过程，并实时统计已见<b>岗位（agentId）</b> 与<b>技能（skillId）</b> 计数（`orgOrchStream` 面板）；生成结束下发完整方案；
 3. **预览**：展示生成的数字员工（含技能挂载 / 指派下级 / 提升上级）与技能清单，可检查微调；
-4. **确认落库**（`POST /ag-ui/agents/orchestrate/apply`，需登录）：**先全量校验再整体创建**（技能 → 数字员工），任何一步非法即整体返回错误、不部分落库；`shell/http` 技能仅管理员可建（与技能库一致）。<b>重名自动去重（方案 A）</b>：生成的数字员工 agentId 或技能 skillId 若与库中已有同名（或方案内同名），自动追加 `_2`/`_3` 改名继续保存，不再整体失败、也不覆盖已有资产，并自动同步方案内引用（数字员工的 SkillIds、上下级连接的 AssignmentIds / EscalationAgentId / RelayToAgentId、客服知聚成员、返回给前端的 ID）；
+4. **确认落库**（`POST /ag-ui/agents/orchestrate/apply`，需登录）：**先全量校验并冒烟自测再整体创建**——对方案里的每个技能做一次服务端冒烟测试，失败者由大模型自动修复（**最多 3 次**），通过后才落库（技能 → 数字员工）；`smoke[]` 逐条返回每个技能的测试结论，UI 在创建后于通知中心展示。冒烟粒度：`prompt` 技能用一段样例跑一次；`http` 技能只做配置静态校验（JSON 的 method / url 是否合法，**不做外呼**）；`server` 执行的 `shell` 技能仅当 `Agents.SkillAutoTestServerShell`（环境变量 `AGENTS_SKILL_AUTOTEST_SHELL`，默认 `true`）为 true 时才盲跑一次；client / 隧道类及其它类型直接跳过。`smoke` 项：`{skillId, skipped, ok, attempts, repaired, lastError}`。`shell`/`http`/`dotnet` 技能仅管理员可建（与技能库一致）。<b>重名自动去重（方案 A）</b>：生成的数字员工 agentId 或技能 skillId 若与库中已有同名（或方案内同名），自动追加 `_2`/`_3` 改名继续保存，不再整体失败、也不覆盖已有资产，并自动同步方案内引用（数字员工的 SkillIds、上下级连接的 AssignmentIds / EscalationAgentId / RelayToAgentId、客服知聚成员、返回给前端的 ID）；
 5. **可选「同时创建客服知聚」**：勾选后把方案中的数字员工作为<b>客服团队</b>一键建群（`kind=support`），直接上线服务顾客。
 
 （非流式预览端点 `POST /ag-ui/agents/orchestrate` 亦保留。）
@@ -667,11 +668,11 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 ### 客户端工具（客户端执行技能）与“本机工具桥”
 
-技能在定义时可选 `ExecutionLocation = Client`（连同 `kind=http/shell/prompt` 的 `ClientRunner` 配置），
-数字员工调用此类技能时会下发一张 `kind=client_tool` 交互卡。`http` 类由浏览器直接 fetch；`shell` 类需要<b>本机执行通道</b>——
+技能在定义时可选 `ExecutionLocation = Client`（连同 `kind=http/shell/prompt/dotnet` 的 `ClientRunner` 配置），
+数字员工调用此类技能时会下发一张 `kind=client_tool` 交互卡。`http` 类由浏览器直接 fetch；`shell` 与 `dotnet`（C#）类需要<b>本机执行通道</b>——
 在<b>聊天历史卡片内</b>确认后于本机执行并回传结果（不弹系统确认框），执行后卡片即时隐藏。
 
-纯浏览器 JS 无法直接运行本机 shell，因此 `shell` 类的客户端技能需要一个**本机执行通道**，项目提供两种（网页端<b>无需任何桥配置</b>）：
+纯浏览器 JS 无法直接运行本机 shell，也无法编译 C#，因此 `shell` / `dotnet` 类的客户端技能需要一个**本机执行通道**，项目提供两种（网页端<b>无需任何桥配置</b>）：
 
 - **服务器端桥**（默认回落）：`/ag-ui/client-tool`（`MapClientToolBridgeApi`），在**服务器/桌面壳**上执行。
   桌面版天然适用（桌面壳即本机）；但 **Docker + 浏览器在本机（如 aibook）**时，它会在 **Docker 容器**里执行，
@@ -680,7 +681,8 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 > 本机唯一标识用<b>随机 UUID</b>（默认持久化到 `%LocalAppData%\AguiGroupChat\bridge.id`，重启复用、跨机器唯一），
 > 避免机器名在某些环境重名/冲突；需要可读性时才用 `--client` 显式指定。
 - **内网反向隧道（首推，用于在本机拿真实结果）**：独立项目 `src/AguiGroupChat.NativeBridge` 以<b>隧道模式</b>跑在浏览器所在主机，
-  网关检测到该桥在线（平台级或逐员工）后，<b>自动经隧道把 shell 推给那台机器执行并回灌</b>，前端不需配置桥地址/令牌。
+  网关检测到该桥在线（平台级或逐员工）后，<b>自动经隧道把 shell / dotnet（C#）任务推给那台机器执行并回灌</b>，前端不需配置桥地址/令牌。
+     （`AguiGroupChat.NativeBridge` 内置 `DotnetRunner`，能本地执行 `kind=dotnet` 隧道任务；客户端 dotnet 技能由本机桥运行）。
 
 #### 让客户端 shell 技能在本机执行：内网反向隧道（推荐，无需网页配置）
 
@@ -743,15 +745,18 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 技能库「新增技能」顶部有 <b>🤖 用自然语言生成技能</b>：输入需求（如「检查本机磁盘使用情况，输出各分区剩余空间与使用率」），
 （可选勾选「优先本机执行」），大模型即产出名称 / ID / 类型 / 描述 / 命令 / 执行位置 / ClientRunner，自动填入表单供微调后保存。
-无需手写命令与 JSON。端点 `POST /ag-ui/skills/generate`（需登录）；mock 模式返回确定性模板。
+无需手写命令与 JSON。端点 `POST /ag-ui/skills/generate`（需登录）；mock 模式返回确定性模板。生成的类型受同一权限规则约束：系统管理员可能产出 `prompt` / `http` / `shell` / `dotnet`，其他人只会得到 `prompt` / `http` / `shell`。
 
-#### 技能库（可复用技能：prompt / shell / http）
+#### 技能库（可复用技能：prompt / shell / http / dotnet）
 
 数字员工管理面板工具栏 `🎯 技能库` 打开全局可复用的技能目录（管理接口 `GET/POST/PUT/DELETE /ag-ui/skills`）：
 
-- **三种类型**：`prompt`（提示词 / 流程模板，无需外部执行）、`shell`（可执行命令 / 脚本，在专属沙箱 `data/skillruns` 运行）、`http`（调用外部 HTTP 接口，body 为 JSON 配置 `{method,url,headers,body}`，可用 `$QUERY` / `{{query}}` 占位）。任意数字员工经其表单的「可复用技能（技能库）」勾选挂载引用（`SkillDefIds`），模型需要时自动调用。
-- **权限**：`shell` / `http` 的技能**创建 / 修改 / 试运行仅系统管理员**（它们可能触发任意命令 / 外部请求，普通用户建立即任意命令执行面）；普通用户只能创建 `prompt` 技能。已被数字员工引用的技能删除时一并解除引用（种子技能只读，删除返回失败）。
-- **执行位置与审批**：`ExecutionLocation = Server`（服务端沙箱）或 `Client`（本机 / 前端 / 内网隧道执行）；`shell` 技能强制需批准（`RequiresApproval=true`），`Client` 执行一律强制需批准。本机（Client）执行的 shell 技能经内网隧道 / 前端在本机执行——`ClientRunner` 由 `BuildClientRunner` 自动从命令体生成（见上文「客户端工具」节）。
+- **四种类型**：`prompt`（提示词 / 流程模板，无需外部执行）、`shell`（可执行命令 / 脚本，在专属沙箱 `data/skillruns` 运行，写盘脚本为<b>无 BOM 的 UTF-8</b>，避免 BOM 使 bash 下首条命令失败）、`http`（调用外部 HTTP 接口，body 为 JSON 配置 `{method,url,headers,body}`，可用 `$QUERY` / `{{query}}` 占位）、`dotnet`（C# 源码作为 body，含 `public static string Run(string input)` 方法，运行时经 Roslyn 编译执行）。任意数字员工经其表单的「可复用技能（技能库）」勾选挂载引用（`SkillDefIds`），模型需要时自动调用。
+- **dotnet（C#）技能的执行与权限**：`kind=dotnet` 的 body 为一段 C# 源码（含 `Run(string)` 入口），运行时用 Roslyn 编译后执行。`dotnet` 技能与 `shell`/`http` 同属一个<b>特权桶</b>——**仅系统管理员可创建 / 修改 / 删除**（普通用户不能建、也不能把它改/建为 `dotnet`），自然语言生成（`/generate`）也只为系统管理员产出 `dotnet`（否则生成 prompt / http / shell）。但**运行对全体登录用户开放**：任何登录用户都可试运行一个已有的 `dotnet` 技能（服务端执行），或经数字员工 / 客户端执行（`ExecutionLocation=Client`）让它在<b>触发者批准后由本机桥运行</b>——浏览器本身无法编译 C#，客户端 dotnet 只能跑在本机桥，无需管理员即可运行（而 `shell`/`http` 的试运行仍仅系统管理员）。已被数字员工引用的技能删除时一并解除引用（种子技能只读，删除返回失败）。
+- **服务端 dotnet 沙箱**：`ExecutionLocation=Server` 的 dotnet 技能在 Hub 进程内、可回收的 `AssemblyLoadContext` 中执行，带约束性的元数据引用自查白名单 + `AllowUnsafe=false` + 超时 / 输出上限，避免任意 / 不受控执行。
+- **本机桥 dotnet 执行**：独立桥 `AguiGroupChat.NativeBridge`（本机/内网/桌面桥 exe）内置 `DotnetRunner`，能经隧道执行 `kind=dotnet` 任务（body = C# 源码）——浏览器所在主机无需预编译即可在本地运行客户端 dotnet 技能。
+- **试运行自动建议示例入参**：“试运行”在真正执行前会先经 `POST /ag-ui/skills/{skillId}/suggest` 自动从技能描述 / 正文生成一段<b>代表性的示例输入</b>并填入，再 `POST /ag-ui/skills/{skillId}/run` 执行，降低试运行门槛。
+- **执行位置与审批**：`ExecutionLocation = Server`（服务端沙箱）或 `Client`（本机 / 前端 / 内网隧道执行）；`shell` 技能强制需批准（`RequiresApproval=true`），`Client` 执行（含 client `dotnet`——浏览器不能编译 C#，由本机桥运行）一律强制需批准。本机（Client）执行的 shell 技能经内网隧道 / 前端在本机执行——`ClientRunner` 由 `BuildClientRunner` 自动从命令体生成（见上文「客户端工具」节）。
 - **搜索与批量删除**：技能库顶部搜索框按名称 / ID 前端过滤；勾选多行后 `🗑️ 删除所选` 逐一走既有单删接口批量删除。
 
 #### 内网穿透：反向隧道（本机桥无公网 IP 也能被 Hub 调用）

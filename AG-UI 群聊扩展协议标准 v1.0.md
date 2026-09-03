@@ -979,7 +979,7 @@ PUT /ag-ui/user/profile
 |优化下一层指派提示词|`POST /ag-ui/agents/{agentId}/optimize-assignment`|**组织架构「优化指派」**：按该数字员工的直接下一层（AssignmentIds）自动生成一段「管理下一层任务指派」指引（只依据下一层挑下游、不越级、无匹配则 NONE）；需登录，仅创建者/管理员；返回 `{ assignmentGuidance, subordinateCount }`|
 |一键组织编排（方案预览）|`POST /ag-ui/agents/orchestrate`|**一键组织编排**：根据一句话需求（`{ requirement }`，2–500 字）由模型生成组织方案（标题 + 岗位 + 每岗技能 + 岗位连接），作为<b>不落库的预览</b>返回（`{ orchestrated, title, agents[], skills[] }`）；需登录|
 |一键组织编排（SSE 流式）|`POST /ag-ui/agents/orchestrate/stream`|输入同上，按`data: `帧逐 token 转发模型输出为 SSE。事件 `type`：`token`（原始方案文本的增量 `delta`）、`progress`（节流的实时统计 `{agents, skills, rawLen}`）、`done`（从累计文本解析出的完整 `plan`）、`error`（`{message}`）；需登录|
-|一键组织编排（确认后落库）|`POST /ag-ui/agents/orchestrate/apply`|落库确认过的方案：body `{ title, agents[], skills[], createSupportCircle?, supportCircleName? }`。先全部校验、再造——保证<b>原子落库（全有或全无）</b>；`shell`/`http` 技能仅管理员。<b>重名自动去重（方案 A）</b>：生成的数字员工 agentId 或技能 skillId 若与库中已有同名（或方案内同名），自动追加 `_2`/`_3` 改名继续保存，不整体失败、不覆盖已有资产，并自动同步方案内引用（数字员工的 SkillIds、上下级连接的 AssignmentIds / EscalationAgentId / RelayToAgentId、客服知聚成员、返回给前端的 ID）。`createSupportCircle=true` 时额外把方案中的数字员工组建为一个<b>客服知聚</b>（§2.1.1）并注册触发规则，返回 `{ applied, title, agents[], skills[], supportCircleGroupId }`；需登录|
+|一键组织编排（确认后落库）|`POST /ag-ui/agents/orchestrate/apply`|落库确认过的方案：body `{ title, agents[], skills[], createSupportCircle?, supportCircleName? }`。先**冒烟自测 + 全量校验**再落库——保证<b>原子落库（全有或全无）</b>；`shell`/`http`/`dotnet` 技能仅管理员。冒烟粒度：`prompt` 技能用一段代表性样例跑一次；`http` 技能只静态校验 body（JSON 的 method / url 合法性，<b>不发起外呼</b>）；server 执行的 `shell` 技能仅当 `Agents.SkillAutoTestServerShell`（环境变量 `AGENTS_SKILL_AUTOTEST_SHELL`，默认 `true`）为 true 时才盲跑一次；client / 隧道类及无执行体技能跳过。冒烟失败者由大模型自动修复（<b>最多 3 次</b>）。返回体在原有各集合字段外含 `smoke[]`：`{skillId, skipped, ok, attempts, repaired, lastError}`（前端于创建后在通知中心展示）。<b>重名自动去重（方案 A）</b>：生成的数字员工 agentId 或技能 skillId 若与库中已有同名（或方案内同名），自动追加 `_2`/`_3` 改名继续保存，不整体失败、不覆盖已有资产，并自动同步方案内引用（数字员工的 SkillIds、上下级连接的 AssignmentIds / EscalationAgentId / RelayToAgentId、客服知聚成员、返回给前端的 ID）。`createSupportCircle=true` 时额外把方案中的数字员工组建为一个<b>客服知聚</b>（§2.1.1）并注册触发规则，返回 `{ applied, title, agents[], skills[], supportCircleGroupId }`；需登录|
 
 智能体定义字段：
 
@@ -1006,16 +1006,17 @@ PUT /ag-ui/user/profile
 
 **导出 / 导入**：智能体管理的「📤 导出全部」/ 每行「导出」把配置导出为 JSON（`{version: 1, agents:[…]}`，字段同上，敏感令牌与 ownerId 不导出），前端「📥 导入」读取 JSON 后逐条调用 `POST /ag-ui/agents` 创建（归属当前登录用户，agentId 冲突自动改 ID 不覆盖）。另提供**全量数据包**接口（管理员）：`GET /ag-ui/export` 导出账号（含密码哈希 / 盐）+ 智能体定义与触发规则 + 群 / 话题 / 消息 + 附件为 zip；`POST /ag-ui/import/preview` 上传 zip 返回账号 / 智能体存在性检查与群清单，`POST /ag-ui/import` 按 `selectedGroupIds` 执行（账号按 username、智能体按 agentId 自动补齐，消息发送者 / 提及 / 可见列表按账号映射重写，附件还原）。
 
-**技能库（可复用技能目录，Hub 扩展）**：技能是一个全局可复用的目录（`AgentSkillDefinition`），任意数字员工经 `AgentDefinition.SkillDefIds` 按 ID 挂载引用（以工具名供模型调用）。技能分三类 `prompt` / `shell` / `http`；`shell` / `http`（可执行任意命令 / 外部请求）**仅管理员可创建**，普通用户只能建纯 `prompt` 技能，且非管理员不能把技能改/建为 `shell`/`http`。技能有 `executionLocation`：`server`（默认）/ `client`。客户端执行的 shell 技能在**本机**执行——前端浏览器，或当内网桥经隧道在线时沿反向隧道执行（§4.5）；`executionLocation=client` 且未显式提供 `clientRunner` 时，服务端对 shell 技能自动生成 `{"kind":"shell","command":…,"cwd":".","timeoutSec":30}` 运行配置，也可显式传入。`shell` 与 `client` 执行技能一律 `requiresApproval=true`。
+**技能库（可复用技能目录，Hub 扩展）**：技能是一个全局可复用的目录（`AgentSkillDefinition`），任意数字员工经 `AgentDefinition.SkillDefIds` 按 ID 挂载引用（以工具名供模型调用）。技能分三类 `prompt` / `shell` / `http`，另第 4 类 `dotnet`（C#）：其 body 为一段 C# 源码（含 `public static string Run(string input)` 入口），由服务端以 Roslyn 编译后执行。`shell` / `http` / `dotnet`（可执行任意命令 / 外部请求 / C# 源码）**仅管理员创建 / 修改 / 删除**，普通用户只能建纯 `prompt` 技能，不能把技能改/建为 `shell`/`http`/`dotnet`；但 **`dotnet` 技能的运行对全体登录用户开放**——任何登录用户都可试运行 / 让智能体调用服务端 `dotnet`，或经 `client` 执行让触发者批准后由本机桥运行（浏览器不能编译 C#，客户端 dotnet 由桥 `DotnetRunner` 在本机编译执行）；而 `shell` / `http` 的试运行仍仅管理员。服务端 `dotnet` 在 Hub 进程内的可回收 `AssemblyLoadContext` 中执行，带受限引用白名单 + `AllowUnsafe=false` + 超时 / 输出上限。技能有 `executionLocation`：`server`（默认）/ `client`。客户端执行的 shell 技能在**本机**执行——前端浏览器，或当内网桥经隧道在线时沿反向隧道执行（§4.5）；`executionLocation=client` 且未显式提供 `clientRunner` 时，服务端对 shell 技能自动生成 `{"kind":"shell","command":…,"cwd":".","timeoutSec":30}` 运行配置，也可显式传入。`shell` 与 `client` 执行技能一律 `requiresApproval=true`。
 
 |接口|路径|说明|
 |---|---|---|
 |技能库列表|`GET /ag-ui/skills`|技能库全量（需登录）；技能正文 / 解释器 / HTTP 配置仅归属者或管理员可见（避免脚本 / 密钥泄露）|
-|自然语言生成技能|`POST /ag-ui/skills/generate`|输入一句话需求（`{ request, preferClient? }`），由大模型产出结构化技能定义 `{ skillId, name, kind, description, body, executionLocation, clientRunner, requiresApproval }` 供前端填入表单（无需手写命令 / JSON）|
-|新增技能|`POST /ag-ui/skills`|body 见 `SkillDefHttpRequest`；`shell`/`http` 仅管理员；skillId 留空自动生成 ASCII 工具名|
-|更新技能|`PUT /ag-ui/skills/{skillId}`|仅归属者或管理员；非管理员不能把技能改成 `shell`/`http`|
+|自然语言生成技能|`POST /ag-ui/skills/generate`|输入一句话需求（`{ request, preferClient? }`），由大模型产出结构化技能定义 `{ skillId, name, kind, description, body, executionLocation, clientRunner, requiresApproval }` 供前端填入表单（无需手写命令 / JSON）；产出类型受同规则约束——`dotnet` 仅系统管理员可得（否则 prompt / http / shell）|
+|新增技能|`POST /ag-ui/skills`|body 见 `SkillDefHttpRequest`；`shell`/`http`/`dotnet` 仅管理员（系统管理员）；skillId 留空自动生成 ASCII 工具名|
+|更新技能|`PUT /ag-ui/skills/{skillId}`|仅归属者或管理员；非管理员不能把技能改成 `shell`/`http`/`dotnet`|
 |删除技能|`DELETE /ag-ui/skills/{skillId}`|仅归属者或管理员；系统技能（ownerId=null）只读|
-|试运行技能|`POST /ag-ui/skills/{skillId}/run`|手动试运行（无审批通道）：prompt 技能仅归属者/管理员；shell/http 与系统技能仅管理员，防任意命令执行|
+|建议试运行入参|`POST /ag-ui/skills/{skillId}/suggest`|试运行前自动建议一段<b>代表性示例入参</b>：由大模型依据技能描述 / 正文（`{ description?, body? }`）推导出样例输入供前端填入；需登录|
+|试运行技能|`POST /ag-ui/skills/{skillId}/run`|手动试运行（无审批通道）：前端会先经 `/suggest` 自动填入示例入参再调用。prompt 技能仅归属者/管理员；shell/http 与系统技能仅管理员，防任意命令执行；**`dotnet`（含系统技能）对全体登录用户开放**——服务端执行，`client` 执行的 dotnet 由本机桥 `DotnetRunner` 运行（浏览器无法编译 C#）|
 
 ### 5.8 知识库管理接口（Hub 扩展，RAG 知识文档）
 
