@@ -35,8 +35,12 @@ public static class SkillApi
             try
             {
                 var isAdmin = auth.IsAdmin(user.UserId);
+                var preferClient = req.PreferClient == true;
+                var runEnv = preferClient
+                    ? DescribeClientEnv(req.ClientOs)
+                    : DescribeServerEnv();
                 var gen = await SkillDefinitionGenerator.GenerateAsync(
-                    options, req.Request, req.PreferClient == true, isAdmin, loggerFactory.CreateLogger("SkillApi.Generate"), ct);
+                    options, req.Request, preferClient, isAdmin, loggerFactory.CreateLogger("SkillApi.Generate"), ct, runEnv);
                 return Results.Ok(new
                 {
                     generated = true,
@@ -48,6 +52,7 @@ public static class SkillApi
                     executionLocation = gen.ExecutionLocation,
                     clientRunner = gen.ClientRunner,
                     requiresApproval = gen.RequiresApproval,
+                    targetEnv = runEnv,
                 });
             }
             catch (OperationCanceledException) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成已取消或超时"), statusCode: StatusCodes.Status408RequestTimeout); }
@@ -121,9 +126,18 @@ public static class SkillApi
             var existing = catalog.Get(skillId);
             if (existing is null)
                 return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
-            // dotnet 技能：建立限管理员，但运行对任何登录用户开放（普通消息 / 试运行都能用，不须属主或管理员）
+            // dotnet 技能：（建立限管理员，运行面向任意登录用户）。
+            // server → 服务端 Roslyn 编译执行；client → 目标为本机（由该用户机器的本机桥/内网桥在其所在机器编译并访问本地资源），
+            // 技能库这里没有“目标机器”，无法本地执行 → 给出明确说明，让用户在数字员工场景（带桥）本机真实执行。
             if (existing.Kind == AgentSkillKind.Dotnet)
             {
+                if (existing.ExecutionLocation == AgentSkillExecutionLocation.Client)
+                {
+                    var hint = "【本机 dotnet 技能】目标为在本机（客户端）执行，需经你机器上的本机桥编译并访问本地资源，\n"
+                        + "技能库试运行无法凭空指定目标机器。请在一个挂载了本技能、且其机器已连接本机桥的数字员工对话中触发，由\n"
+                        + "系统在你本机经桥编译运行并回传真实结果。\n\n技能正文（C#）：\n" + (existing.Body ?? "") + "\n\n请求：" + (req.Query ?? "");
+                    return Results.Ok(new { skillId, result = hint, localOnly = true });
+                }
                 var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
                 return Results.Ok(new { skillId, result = dr });
             }
@@ -203,12 +217,12 @@ public static class SkillApi
             : AgentSkillExecutionLocation.Server;
         if (kind == AgentSkillKind.Dotnet)
         {
-            // .NET（C# 动态编译）技能：仅服务端执行、强制审批（动态代码面最高），不吃 client / 解释器
-            executionLocation = AgentSkillExecutionLocation.Server;
+            // .NET（C# 动态编译）技能：动态代码面最高 → 一律强制审批（安全兜底）。
+            // 执行位置遵循用户选择：server = 服务端 Roslyn 编译执行；client = 经内网本机桥在该用户机器/内网机编译执行（浏览器本身不能跑通用 C#）。
             requiresApproval = true;
         }
         if (executionLocation == AgentSkillExecutionLocation.Client)
-            requiresApproval = true; // 客户端执行（尤其 shell）属本机/外部副作用，一律需人工批准
+            requiresApproval = true; // 客户端执行（尤其 shell / dotnet）属本机/外部副作用，一律需人工批准
         if ((kind == AgentSkillKind.Shell || kind == AgentSkillKind.Dotnet) && string.IsNullOrWhiteSpace(req.Body))
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "该技能正文（shell 命令/脚本，或 C# 源码）不能为空")));
         if (kind == AgentSkillKind.Http && string.IsNullOrWhiteSpace(req.Body))
@@ -233,6 +247,35 @@ public static class SkillApi
 
     private static UserAccount? RequireUser(HttpContext ctx, AuthService auth) => AgentApi.RequireUser(ctx, auth);
 
+    // ---- 生成技能时的「目标运行环境」描述：优先按用户偏好/上报的浏览器系统；否则回退为服务端宿主系统。----
+    private static string NormalizeOs(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return "未知";
+        var v = s.Trim().ToLowerInvariant();
+        return v switch
+        {
+            "win" or "win32" or "windows" => "Windows",
+            "mac" or "macos" or "darwin" or "osx" => "macOS",
+            "linux" or "unix" => "Linux",
+            _ => v,
+        };
+    }
+
+    private static string DescribeServerEnv()
+        => "目标运行于服务端（宿主系统：" + (OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : "Linux") + "）";
+
+    private static string DescribeClientEnv(string? clientOs)
+    {
+        var os = NormalizeOs(clientOs);
+        return os switch
+        {
+            "Windows" => "目标运行于本机（浏览器所在系统：Windows，用 PowerShell 脚本）",
+            "macOS" => "目标运行于本机（浏览器所在系统：macOS，用 bash 脚本）",
+            "Linux" => "目标运行于本机（浏览器所在系统：Linux，用 bash 脚本）",
+            _ => "目标运行于本机（浏览器所在系统：未上报" + (string.IsNullOrWhiteSpace(clientOs) ? "" : "（" + clientOs + "）") + "）",
+        };
+    }
+
     private static IResult Unauthorized()
         => Results.Json(new AguiError(ErrorCodes.UserUnauthorized, "未登录或令牌无效"), statusCode: StatusCodes.Status401Unauthorized);
 }
@@ -254,5 +297,5 @@ public sealed record SkillDefHttpRequest(
 /// <summary>技能试运行请求体。</summary>
 public sealed record SkillRunHttpRequest(string Query = "");
 
-/// <summary>用自然语言生成技能配置的请求体。</summary>
-public sealed record SkillGenerateRequest(string Request, bool? PreferClient = null);
+/// <summary>用自然语言生成技能配置的请求体。ClientOs：客户端/本机执行时的浏览器所在系统（windows/macos/linux/other），供生成对应脚本；服务端执行时后端自行推断。</summary>
+public sealed record SkillGenerateRequest(string Request, bool? PreferClient = null, string? ClientOs = null);

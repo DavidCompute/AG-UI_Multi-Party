@@ -22,7 +22,7 @@ public sealed record GeneratedSkillDefinition(
 public static class SkillDefinitionGenerator
 {
     public static async Task<GeneratedSkillDefinition> GenerateAsync(
-        AgentOptions options, string request, bool preferClient, bool allowDotnet, ILogger logger, CancellationToken ct)
+        AgentOptions options, string request, bool preferClient, bool allowDotnet, ILogger logger, CancellationToken ct, string? runContextNote = null)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
         var req = request.Trim();
@@ -46,7 +46,7 @@ public static class SkillDefinitionGenerator
 
         try
         {
-            var prompt = BuildPrompt(req, preferClient, allowDotnet);
+            var prompt = BuildPrompt(req, preferClient, allowDotnet, runContextNote);
             var resp = await client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct);
             var text = resp.Text?.Trim();
             if (string.IsNullOrWhiteSpace(text))
@@ -61,23 +61,48 @@ public static class SkillDefinitionGenerator
         }
     }
 
-    private static string BuildPrompt(string request, bool preferClient, bool allowDotnet)
+    private static string BuildPrompt(string request, bool preferClient, bool allowDotnet, string? runContextNote)
     {
         string kinds = allowDotnet
-            ? "- prompt：提示词 / 流程模板（无外部执行）。body 填模板文本。\\n- http：HTTP 配置。\\n- shell：命令脚本。\\n- dotnet：C# 源码技能（body 为 C# 源码，须含 public static string Run(string input)；服务端或本机运行，仅由系统管理员创建的 dotnet 才能被保存）。\\n"
+            ? "- prompt：提示词 / 流程模板（无外部执行）。body 填模板文本。\\n- http：HTTP 配置。\\n- shell：命令脚本。\\n- dotnet：C# 源码技能（body 为 C# 源码，须含 public static string Run(string input)，可在客户端/本机或服务端编译运行）。\\n"
             : "- prompt：提示词 / 流程模板。body 填模板。\\n- http：HTTP 配置。\\n- shell：命令 / 脚本。\\n（dotnet 类型仅系统管理员可用，普通用户请勿返回。）\\n";
-        // 用真实换行承接下方目录，避免 C# 源码字符串里带裸换行造成编译错误
+        // runEnv + runSettings：runEnv 说明技能将运行的操作系统与 shell 约定；runSettings 进一步给出“目标执行位置”
+        // 与“应使用的脚本方言 / 运行方式”，让模型产出与目标平台匹配的可执行代码。
+        var target = runContextNote;
+        string runSummary;
+        if (string.IsNullOrEmpty(target))
+            runSummary = preferClient ? "本机运行（浏览器所在的用户机器，系统未知，脚本请尽量跨平台或采用常见 PowerShell/cmd 语法）"
+                : "服务端运行（" + OsLabel() + "）";
+        else
+            runSummary = target;
+        string runSettings;
+        if (runSummary.Contains("Windows"))
+            runSettings = "目标是 Windows，shell 技能正文请写 PowerShell / cmd 命令，不要写 bash 语法（无 bash）；dotnet 技能含 C# 源码不要依赖非 .NET 桥接工具。";
+        else if (runSummary.Contains("macOS") || runSummary.Contains("Linux"))
+            runSettings = "目标是 " + (runSummary.Contains("macOS") ? "macOS" : "Linux") + "，shell 技能正文请写 bash/sh 语法；dotnet 技能写跨平台 C# 源码。";
+        else
+            runSettings = "目标环境未明确上报，shell 技能请尽量兼顾 PowerShell 与 bash 或说明所需环境；dotnet 技能写跨平台 C# 源码。";
+
         return
-            "你是企业技能生成器。根据用户的自然语言需求，生成一份能直接保存的技能库配置。\\n\\n" +
-            "技能类型（kind）可选：" + kinds +
-            "执行位置（executionLocation）：server（服务端，默认）或 client（本机/前端）" + (preferClient ? "；本类需求倾向用 client。\n" : "。仅当用户要针对本机操作时才用 client。\n") +
+            "你是企业技能生成器。根据用户的自然语言需求，生成一份能直接保存的技能库配置。\n\n" +
+            "技能类型（kind）可选：\n" + kinds +
+            "执行位置（executionLocation）：server（在服务端执行为主）/ client（在本机/前端执行为主）" +
+            (preferClient ? "。本次需求倾向在本机(client)执行。\n" : "。默认 server，仅当用户要针对本机操作时用 client。\n") +
             (allowDotnet
-                ? "若需求合适（读 Excel/Word/DB/算这类需 .NET 库的能力），可用 kind=dotnet，正文是 C# 源码并须含 public static string Run(string input)，executionLocation 用 server 或 client。\n"
-                : "一律不要生成 kind=dotnet（非系统管理员无权建）。\n") +
-            "skillId 用 ASCII（字母/数字/_/-，≤40）。只输出如下 JSON：\\n" +
-            "{\"name\":\"中文名\",\"skillId\":\"id\",\"kind\":\"(按允许类型)\",\"description\":\"给模型的调用说明，50~150 字\",\"body\":\"正文\",\"executionLocation\":\"server|client\",\"clientRunner\":null,\"requiresApproval\":true}\\n\\n" +
+                ? "若需读/写本机 Excel/Word/文件/Registry 或调用 .NET 库这类需要本地能力的，应优先用 kind=dotnet。" +
+                  "dotnet 技能的正文是 C# 源码，须含 public static string Run(string input) 返回 string；" +
+                  (preferClient
+                    ? "本次目标是本机，executionLocation 请写 client（由本机桥在用户机器编译执行，可直接访问该机路径/文件）。\n"
+                    : "executionLocation 按“目标环境”选择：操作本机文件建议 client（本机桥执行），纯计算/服务端数据则 server（Roslyn 编译执行）。\n")
+                : "不要生成 kind=dotnet（非系统管理员无权建），也不要试图绕过。\n") +
+            "skillId 用 ASCII（字母/数字/_/-，≤40）。只输出如下 JSON：\n" +
+            "{\"name\":\"中文名\",\"skillId\":\"id\",\"kind\":\"(按允许类型)\",\"description\":\"给模型的调用说明，50~150 字\",\"body\":\"正文\",\"executionLocation\":\"server|client\",\"clientRunner\":null,\"requiresApproval\":true}\n\n" +
+            runSummary + "。\n" + runSettings + "\n\n" +
             "用户需求：" + request;
     }
+
+    private static string OsLabel() =>
+        OperatingSystem.IsWindows() ? "Windows" : (OperatingSystem.IsMacOS() ? "macOS" : "Linux");
 
     private static GeneratedSkillDefinition Parse(string text, bool allowDotnet)
     {

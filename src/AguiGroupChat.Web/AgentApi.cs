@@ -376,8 +376,8 @@ public static class AgentApi
                 if (string.IsNullOrWhiteSpace(s.Name) || string.IsNullOrWhiteSpace(s.Description) || string.IsNullOrWhiteSpace(s.Body))
                     return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"技能「{id}」缺少名称 / 描述 / 正文"));
                 var kind = Enum.TryParse<AgentSkillKind>(s.Kind, true, out var k) ? k : AgentSkillKind.Prompt;
-                // 权限：Shell / HTTP 技能仅管理员可建（与 SkillApi 一致），避免非管理员借编排批量生成任意命令执行技能
-                if ((kind is AgentSkillKind.Shell or AgentSkillKind.Http) && !isAdmin)
+                // 权限：Shell / HTTP / .NET(C#) 技能仅管理员可建（与 SkillApi 一致），避免非管理员借编排批量生成任意命令执行 / 任意代码执行技能
+                if ((kind is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet) && !isAdmin)
                     return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可建技能类型 {kind}"), statusCode: StatusCodes.Status403Forbidden);
                 var execLoc = string.Equals(s.ExecutionLocation, "client", StringComparison.OrdinalIgnoreCase)
                     ? AgentSkillExecutionLocation.Client : AgentSkillExecutionLocation.Server;

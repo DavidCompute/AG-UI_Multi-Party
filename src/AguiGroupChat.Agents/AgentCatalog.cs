@@ -358,7 +358,10 @@ public sealed class AgentCatalog
                 else if (skill.Kind == AgentSkillKind.Http)
                     desc += $"调用外部 HTTP 接口（Body JSON 定义 method/url/headers/body，可用 ${{query}} 占位）。需用户批准后执行。";
                 else if (skill.Kind == AgentSkillKind.Dotnet)
-                    desc += $"服务端 C# 技能（Roslyn 动态编译受限执行，正文含 public static string Run(string input)）。需用户批准后执行。";
+                    desc += (skill.ExecutionLocation == AgentSkillExecutionLocation.Client
+                                ? "本机 C# 技能（由本机桥在用户机器/内网机编译执行，正文含 public static string Run(string input)）。"
+                                : "服务端 C# 技能（Roslyn 动态编译受限执行，正文含 public static string Run(string input)）。")
+                            + "需用户批准后执行。";
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
                 var isClientSkill = skill.ExecutionLocation == AgentSkillExecutionLocation.Client;

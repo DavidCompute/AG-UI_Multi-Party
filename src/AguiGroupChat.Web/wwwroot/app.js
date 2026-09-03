@@ -1871,12 +1871,11 @@ function openSkillForm(skillId) {
   showSkillFormView();
 }
 
-/** 类型切换时联动：shell/ http 显示解释器 / 强制审批；客户端执行显示 ClientRunner 配置。 */
+/** 类型切换时联动：shell+http 显示解释器 / 强制审批；dotnet(shell/http 仿 client) 显示 ClientRunner 配置。 */
 function syncSkillKind() {
   const kind = $("sfKind").value;
-  // dotnet（C# 动态编译）：仅服务端执行、强制审批，无需解释器 / ClientRunner；正文即 C# 源码
+  // dotnet（C# 动态编译）：可在服务端 Roslyn 编译执行（server），也可经本机桥在其所在机器编译执行（client）；一律强制审批
   const isDotnet = kind === "dotnet";
-  if (isDotnet && $("sfExecutionLocation").value !== "server") $("sfExecutionLocation").value = "server";
   const isClientExec = $("sfExecutionLocation").value === "client";
   const showInterp = kind === "shell";
   $("sfInterpreterGroup").style.display = showInterp ? "" : "none";
@@ -1887,7 +1886,7 @@ function syncSkillKind() {
   $("sfBodyLabel").dataset.i18n = bodyKind;
   $("sfBodyLabel").textContent = t(bodyKind);
   // 客户端执行 → 显示 ClientRunner 配置；否则隐藏
-  $("sfClientRunnerGroup").style.display = $("sfExecutionLocation").value === "client" ? "" : "none";
+  $("sfClientRunnerGroup").style.display = isClientExec ? "" : "none";
 }
 
 /** 保存技能（新建 POST / 更新 PUT）。 */
@@ -1921,6 +1920,17 @@ async function saveSkill() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
+/** 探测浏览器（生成技能时的“本机/客户端”）所在操作系统：windows / macos / linux / other。 */
+function detectClientOs() {
+  const uad = (navigator.userAgentData && navigator.userAgentData.platform) || "";
+  const p = (uad || navigator.platform || "").toLowerCase();
+  const ua = (navigator.userAgent || "").toLowerCase();
+  if (/win/.test(p) || /windows/.test(ua)) return "windows";
+  if (/mac/.test(p) || /iphone|ipad|mac os/.test(ua)) return "macos";
+  if (/linux|android|x11/.test(p) || /linux|ubuntu|debian|android/.test(ua)) return "linux";
+  return "other";
+}
+
 /** 试运行技能（用当前表单定义或已存定义跑一次）。 */
 async function generateSkill() {
   const request = $("sgRequest").value.trim();
@@ -1929,7 +1939,7 @@ async function generateSkill() {
   try {
     const res = await fetch("/ag-ui/skills/generate", {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
-      body: JSON.stringify({ request, preferClient: $("sgPreferClient").checked }),
+      body: JSON.stringify({ request, preferClient: $("sgPreferClient").checked, clientOs: detectClientOs() }),
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(t("skill.gen.fail", { err: errMsg(data, res.status) })); return; }
