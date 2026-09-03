@@ -1421,6 +1421,18 @@ async function applyOrchestration() {
     if (!res.ok) { toast(t("org.orchApplyFail", { err: errMsg(data, res.status) })); $("orgOrchApply").disabled = false; return; }
     $("orgOrchModal").classList.add("hidden");
     toast((data.supportCircleGroupId ? t("org.orchSupportCircleCreated", { name: data.title || "" }) + " " : "") + t("org.orchApplied", { n: (data.agents || []).length }));
+    // 汇报技能自检结果（自测成功 / 修复过 / 失败待处理 / 跳过），便于用户留意未通过项
+    const smoke = Array.isArray(data.smoke) ? data.smoke : [];
+    if (smoke.length) {
+      const tested = smoke.filter((s) => !s.skipped);
+      const repaired = smoke.filter((s) => s.repaired).length;
+      const failed = smoke.filter((s) => !s.skipped && !s.ok && !s.repaired);
+      const lines = [`${t("org.orchSmokeTitle")}: ${t("org.orchSmokeCount", { ok: tested.filter((s) => s.ok).length, total: tested.length })}`];
+      if (repaired) lines.push(t("org.orchSmokeRepaired", { n: repaired }));
+      if (failed.length) lines.push(t("org.orchSmokeFailed", { n: failed.length }) + " " + failed.map((f) => (f.skillId || "")).join(", "));
+      addNotification("info", t("org.orchSmokeTitle"), lines.join(" · "), { icon: "🧪" });
+      if (failed.length) notifySkillError(null, failed.map((f) => f.skillId || "").join("/"), t("org.orchSmokeFailed", { n: failed.length }));
+    }
     orchestrationPreview = null;
     await loadAgents();
     await loadSkills();
@@ -1934,7 +1946,16 @@ async function generateSkill() {
 async function testSkill(skillId) {
   const id = skillId || editingSkillId;
   if (!id) { toast(t("skill.err.saveFirst")); return; }
-  const query = await uiPrompt({ title: t("skill.testRun"), message: t("skill.testQuery"), defaultValue: "你好" });
+  // 按技能自动建议一个典型示例参数预填（试运行前先给用户一个能用/可改的输入）
+  let suggestion = "";
+  try {
+    const s = await (await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/suggest`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: "{}",
+    })).json();
+    if (s && typeof s.suggestion === "string") suggestion = s.suggestion;
+  } catch { /* 建议失败不影响试运行 */ }
+  const query = await uiPrompt({ title: t("skill.testRun"), message: t("skill.testQuery") + (suggestion ? " · " + t("skill.testSuggestLabel") : ""), defaultValue: suggestion });
   if (query === null) return;
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {

@@ -127,6 +127,8 @@ services:
       NativeTunnel__ResultRateLimitPerMinute: ${NATIVE_TUNNEL_RESULT_RATE:-600}
       # 确定性编排计划（Coordinator Plan）：路由型数字员工先按组织/技能定计划再依次激活执行；默认开（可用环境变量覆盖）
       Agents__CoordinatorPlanning: ${AGENTS_COORDINATOR_PLANNING:-true}
+      # 编排自动生成技能后的“自检”：是否对 server 执行的 shell 也盲跑一次（有副作用，默认开；置 0 关闭）
+      Agents__SkillAutoTestServerShell: ${AGENTS_SKILL_AUTOTEST_SHELL:-true}
       # 图谱记忆（Graph RAG）：从群消息抽实体/关系建图，回复前按语义召回种子实体 + n 跳图遍历注入。默认关。
       Agents__Memory__GraphEnabled: ${MEMORY_GRAPH_ENABLED:-false}
       Agents__Memory__GraphTopK: ${MEMORY_GRAPH_TOP_K:-2}

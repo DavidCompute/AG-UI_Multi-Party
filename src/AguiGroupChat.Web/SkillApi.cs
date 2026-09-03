@@ -128,6 +128,22 @@ public static class SkillApi
             var result = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
             return Results.Ok(new { skillId, result });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 试运行参数建议：按技能的说明 / 正文 / 类型，让大模型给一个典型示例 query，供前端试运行时预填（权限同 /run）----
+        root.MapPost("/{skillId}/suggest", async (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AgentOptions options, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var existing = catalog.Get(skillId);
+            if (existing is null)
+                return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            if (existing.OwnerId is not null && existing.OwnerId != user.UserId && !auth.IsAdmin(user.UserId))
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅技能创建者或系统管理员可试运行"), statusCode: StatusCodes.Status403Forbidden);
+            if (existing.OwnerId is null && !auth.IsAdmin(user.UserId))
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅系统管理员可试运行系统技能"), statusCode: StatusCodes.Status403Forbidden);
+            var suggestion = await SkillQuerySuggester.SuggestAsync(options, existing, loggerFactory.CreateLogger("SkillApi.Suggest"), ct);
+            return Results.Ok(new { skillId, suggestion });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 
     /// <summary>Shell / HTTP 技能属特权类型：创建 / 修改 / 运行仅限管理员（及归属者试运行 prompt 由 /run 单独管控）。</summary>

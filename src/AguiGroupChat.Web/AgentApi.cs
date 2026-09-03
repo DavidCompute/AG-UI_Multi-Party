@@ -353,7 +353,7 @@ public static class AgentApi
         // ---- 一键组织编排（确认后落库）：把 /orchestrate 返回并确认过的方案写入技能库 + 数字员工库，并建好连接 ----
         //      幂等部署安全：全部先校验通过再造；失败则整体返回错误（不部分落库）。
         root.MapPost("/orchestrate/apply", async (OrchestrateApplyRequest req, HttpContext ctx, AuthService auth,
-            AgentCatalog catalog, AgentSkillCatalog skillCatalog, GroupHub hub, CancellationToken ct) =>
+            AgentCatalog catalog, AgentSkillCatalog skillCatalog, GroupHub hub, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -395,6 +395,35 @@ public static class AgentApi
                     ClientRunner = BuildClientRunner(kind, execLoc, s.Body ?? "", null),
                     OwnerId = user.UserId,
                 });
+            }
+
+            // ---- 1.5 技能生成自检：对 server 执行的 prompt / http（及开关开启时的 shell）做冒烟自测，失败用大模型按报错自动修复并复测。
+            //      client/本机技能始终跳过——服务端无法替本机评估结果。
+            //      shell 是否盲跑由 AgentOptions.SkillAutoTestServerShell（默认 true）控制。
+            var smokeResults = new List<object>();
+            if (builtSkills.Count > 0)
+            {
+                var autoFixer = new SkillAutoFixer(agentOptions, catalog, loggerFactory);
+                for (var i = 0; i < builtSkills.Count; i++)
+                {
+                    var def = builtSkills[i];
+                    var smoke = await autoFixer.VerifyOrRepairAsync(def, maxAttempts: 3, ct).ConfigureAwait(false);
+                    smokeResults.Add(new
+                    {
+                        skillId = def.SkillId,
+                        skipped = smoke.Skipped,
+                        ok = smoke.Ok,
+                        attempts = smoke.Attempts,
+                        repaired = smoke.CorrectedBody != null,
+                        lastError = smoke.LastError,
+                    });
+                    // 自测通过且模型给了修正版 → 用修正正文/描述覆盖，落库前保持 def 其余字段（kind/审批/执行位置）不变
+                    if (smoke.Ok && smoke.CorrectedBody != null)
+                    {
+                        def.Body = smoke.CorrectedBody;
+                        if (!string.IsNullOrWhiteSpace(smoke.CorrectedDescription)) def.Description = smoke.CorrectedDescription!;
+                    }
+                }
             }
 
             // ---- 2. 数字员工：同样自动去重（agentId 与原库同名 / 方案内同名时改名），并同步技能引用与上下级连接引用。 ----
@@ -486,7 +515,7 @@ public static class AgentApi
                     });
                 }
             }
-            return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList(), supportCircleGroupId });
+            return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList(), supportCircleGroupId, smoke = smokeResults });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 优化「管理下一层任务指派」提示词（需登录，组织架构图节点上调用）：

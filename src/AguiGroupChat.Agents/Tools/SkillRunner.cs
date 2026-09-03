@@ -18,6 +18,8 @@ internal sealed class SkillRunner
 {
     private const int MaxOutputChars = 12_000;      // 单次技能返回最大输出（防撑爆模型上下文）
     private const int DefaultHttpTimeoutSec = 30;
+    /// <summary>写 shell 脚本用无 BOM 的 UTF-8：带 BOM 会让 bash 把首行命令链错认成 $'\357\273\277echo'（command not found）。</summary>
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     private readonly ILogger _logger;
     private readonly string _sandboxRoot;           // 技能沙箱根（data/skillruns）
     private readonly bool _allowPrivateEndpoints;  // 是否放行本机 / 内网（默认 false → 保留 SSRF 防护）
@@ -86,21 +88,21 @@ internal sealed class SkillRunner
         {
             // 用显式解释器执行脚本文件（避免依赖可执行位 / shebang 解析差异）
             scriptPath = Path.Combine(dir, interpreter.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0] + "_run.sh");
-            File.WriteAllText(scriptPath, effective, Encoding.UTF8);
+            File.WriteAllText(scriptPath, effective, Utf8NoBom);
             fileName = interpreter.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
             args = "\"" + scriptPath + "\"";
         }
         else if (shebangInterp is not null)
         {
             scriptPath = Path.Combine(dir, "run");
-            File.WriteAllText(scriptPath, effective, Encoding.UTF8);
+            File.WriteAllText(scriptPath, effective, Utf8NoBom);
             fileName = "/bin/sh";
             args = "\"" + scriptPath + "\"";
         }
         else
         {
             // 无 shebang 无 interpreter：当 bash 脚本执行（多行命令）。为避免参数注入，查询经环境变量传递，不进命令行
-            File.WriteAllText(scriptPath, effective, Encoding.UTF8);
+            File.WriteAllText(scriptPath, effective, Utf8NoBom);
             fileName = "/bin/bash";
             args = "\"" + scriptPath + "\"";
         }

@@ -51,6 +51,11 @@ public sealed class AgentOptions
     /// group_memory_search / read_attachment，以及需 EnableWebTools 的网络工具）。供 TOOL_CALL_START / 人机交互演示。</summary>
     public bool EnableTools { get; set; }
 
+    /// <summary>自动编排技能自检：是否对 <b>server 执行的 shell 技能</b>也做盲跑自测（会真实执行一次该命令/脚本，
+    /// 有副作用风险，但可尽早暴露“生成技能不能跑”）。默认开启；client 本机 shell 无论如何不自动盲跑。
+    /// 关掉时（如：只想要 prompt/http 的无副作用自检）置 false。</summary>
+    public bool SkillAutoTestServerShell { get; set; } = true;
+
     /// <summary>是否启用网络类工具（web_search / read_url）。默认 false：本地工具零依赖、离线可用；
     /// 开启后工具可访问外网（搜索端点可配置）。</summary>
     public bool EnableWebTools { get; set; }
