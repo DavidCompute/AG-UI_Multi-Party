@@ -1470,20 +1470,33 @@ public sealed class GroupHub : IDisposable
         }, state.Recipients, ct);
     }
 
-    /// <summary>结束智能体应答（先把防抖窗口内的内容落库，再广播 TEXT_MESSAGE_END 并清理流式状态）。</summary>
-    public Task EndAgentMessageAsync(string groupId, string messageId, CancellationToken ct = default)
+    /// <summary>结束智能体应答（先把防抖窗口内的内容落库，再广播 TEXT_MESSAGE_END 并清理流式状态）。
+    /// <b>二次剥壳</b>：若组装好的整段正文其实就是内部协调 JSON（{"needsMore":…,…,"answer":…}），
+    /// 在这里统一把它替换成面向用户的 answer 后才落库 / 收尾广播（即便 JSON 早些被分块发出，也能在完结前纠正）。</summary>
+    public async Task EndAgentMessageAsync(string groupId, string messageId, CancellationToken ct = default)
     {
         if (!_agentStreams.TryRemove(messageId, out var state) || state.GroupId != groupId)
             throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或未开启流式灌入");
         FlushPendingContent(messageId); // 消息结束：防抖窗口内的内容立即写库（数据库模式）
         _pendingContent.TryRemove(messageId, out _);
         var msg = _store.GetMessage(groupId, messageId);
+        var raw = msg?.Content ?? "";
+        var cleaned = CleanCoordinationOut(raw);
+        if (msg is not null && !string.Equals(cleaned, raw, StringComparison.Ordinal))
+        {
+            // 整段正文是内部协调 JSON：只用 answer，改库 + 广播纠正后的全文，避免把决策 JSON 留给用户
+            msg.Content = cleaned;
+            _store.UpdateMessage(msg);
+            _changes?.Notify();
+            await FanOutAsync(groupId, new TextMessageResetEvent { MessageId = messageId, GroupId = groupId, Timestamp = NowMs }, state.Recipients, ct);
+            await FanOutAsync(groupId, new TextMessageContentEvent { MessageId = messageId, GroupId = groupId, Delta = cleaned }, state.Recipients, ct);
+        }
         if (_memory is not null && msg is not null)
         {
             // 智能体消息已完成（内容完整）：写入语义记忆（异步向量化，不阻塞广播）
             RememberMessage(msg);
         }
-        return FanOutAsync(groupId, new TextMessageEndEvent
+        await FanOutAsync(groupId, new TextMessageEndEvent
         {
             MessageId = messageId,
             GroupId = groupId,
@@ -1492,6 +1505,30 @@ public sealed class GroupHub : IDisposable
             PlanJson = msg?.PlanJson, // 任务计划（刷新后回显）
             Timestamp = NowMs,
         }, state.Recipients, ct);
+    }
+
+    /// <summary>二次剥壳：整段文本若本身就是内部协调 JSON（含布尔 needsMore + 字符串 answer），仅返回 answer；否则原样。</summary>
+    private static string CleanCoordinationOut(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start) return text;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(text.Substring(start, end - start + 1));
+            var r = doc.RootElement;
+            if (r.ValueKind != System.Text.Json.JsonValueKind.Object) return text;
+            var hasFlag = r.TryGetProperty("needsMore", out var flag)
+                && (flag.ValueKind == System.Text.Json.JsonValueKind.True || flag.ValueKind == System.Text.Json.JsonValueKind.False);
+            if (hasFlag && r.TryGetProperty("answer", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var ans = a.GetString();
+                if (!string.IsNullOrWhiteSpace(ans)) return ans.Trim();
+            }
+        }
+        catch { /* 非常规 JSON 原样返回 */ }
+        return text;
     }
 
     /// <summary>把防抖中的流式内容写库：以库内最新消息为准（保留最新话题等字段），仅替换文本。</summary>
