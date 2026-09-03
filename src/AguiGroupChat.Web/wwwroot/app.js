@@ -2051,12 +2051,11 @@ async function generateSkill() {
 async function testSkill(skillId) {
   const id = skillId || editingSkillId;
   if (!id) { toast(t("skill.err.saveFirst")); return; }
-  // 在编辑表单（skillFormView 可见）里跑 → 写 sfTestResult；否则（技能库列表 ▶ 或新增弹窗）写列表下方结果区
+  // 编辑表单里点试运行 → 结果就地显示在表单下方；技能库列表 ▶ 则用独立结果弹窗展示（更友好、一定可见）
   const inForm = !document.getElementById("skillFormView").classList.contains("hidden");
-  const out = inForm ? document.getElementById("sfTestResult") : document.getElementById("skillListTestResult");
-  if (!out) { toast(t("common.saveFail", { err: "缺少结果区" })); return; }
-  out.classList.remove("hidden");
-  out.textContent = `${t("skill.testRun")}…（${id}）`;
+  const out = inForm ? document.getElementById("sfTestResult") : null;
+  if (!inForm) document.getElementById("skillRunResultBody").textContent = "⚙️ " + t("skill.testRun") + "（" + id + "）…"; // 预置“运行中”文案
+  else if (out) out.textContent = "⚙️ " + t("skill.testRun") + "…（" + id + "）";
   // 按技能自动建议一个典型示例参数预填（试运行前先给用户一个能用/可改的输入）
   let suggestion = "";
   try {
@@ -2067,18 +2066,26 @@ async function testSkill(skillId) {
     if (s && typeof s.suggestion === "string") suggestion = s.suggestion;
   } catch { /* 建议失败不影响试运行 */ }
   const query = await uiPrompt({ title: t("skill.testRun"), message: t("skill.testQuery") + (suggestion ? " · " + t("skill.testSuggestLabel") : ""), defaultValue: suggestion });
-  if (query === null) { out.classList.add("hidden"); out.textContent = ""; return; }
-  out.textContent = `${t("skill.testRun")}: ${escapeHtml(query)}…`;
+  if (query === null) { return; }
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
       body: JSON.stringify({ query, clientId: state.bridgeClient || undefined }), // 本机桥默认路由到当前机器
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); out.textContent = `${t("skill.testResult")}\n${t("common.saveFail", { err: errMsg(data, res.status) })}`; return; }
-    out.textContent = `▶ ${t("skill.testResult")}\n${data.result || ""}`;
-    out.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); out.textContent = `${t("skill.testResult")}\n${ex.message}`; }
+    const text = res.ok ? `▶ ${t("skill.testResult")}\n${data && data.result || ""}`
+      : `${t("skill.testResult")}\n${t("common.saveFail", { err: errMsg(data, res.status) })}`;
+    if (!res.ok) toast(t("common.saveFail", { err: errMsg(data, res.status) }));
+    if (inForm) { if (out) out.textContent = text; }
+    else {
+      document.getElementById("skillRunResultBody").textContent = text;
+      document.getElementById("skillRunResultModal").classList.remove("hidden");
+    }
+  } catch (ex) {
+    toast(t("common.saveFail", { err: ex.message }));
+    if (!inForm) document.getElementById("skillRunResultBody").textContent = `${t("skill.testResult")}\n${ex.message}`;
+    else if (out) out.textContent = `${t("skill.testResult")}\n${ex.message}`;
+  }
 }
 
 /** 删除技能。 */
@@ -7165,6 +7172,11 @@ function init() {
     cancelLongTaskIfAny(); // 关闭技能库若仍有可取消的生成则中止，避免后台残留与锁未复位
     $("skillModal").classList.add("hidden");
   };
+  // 试运行·结果弹窗的关闭（按钮 / Esc）
+  const closeSkillRunResult = () => $("skillRunResultModal").classList.add("hidden");
+  $("skillRunResultClose").onclick = closeSkillRunResult;
+  $("skillRunResultModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSkillRunResult(); });
+  $("skillRunResultModal").addEventListener("click", (e) => { if (e.target === $("skillRunResultModal")) closeSkillRunResult(); });
   $("skillAddBtn").onclick = () => openSkillForm(null);
   $("sfBack").onclick = () => { if (longTaskBusy) { toast(t("common.busyLongTask")); return; } showSkillListView(); };
   $("skillSearch").addEventListener("input", (e) => { skillSearchQuery = e.target.value; renderSkillList(); });

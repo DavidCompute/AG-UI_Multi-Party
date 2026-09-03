@@ -288,6 +288,7 @@ window.I18N_DICTS.en = {
   "skill.testRun": "Test run",
   "skill.testQuery": "Enter a test request (to verify the skill execution):",
   "skill.testResult": "Test result:",
+  "skill.testResultTitle": "Test result",
   "skill.testSuggestLabel": "example auto-generated from the skill - you may edit",
   "skill.delConfirm": "Delete skill \"{name}\"?",
   "skill.deleted": "Skill deleted",

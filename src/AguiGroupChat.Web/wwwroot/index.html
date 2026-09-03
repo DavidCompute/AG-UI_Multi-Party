@@ -411,7 +411,6 @@
           <span class="skill-op-col" data-i18n="skill.col.ops">操作</span>
         </div>
         <div id="skillList" class="skill-list"></div>
-        <div id="skillListTestResult" class="skill-test-result muted hidden" style="margin-top:8px;font-size:12px;white-space:pre-wrap"></div>
         <div class="modal-actions">
           <button id="skillAddBtn" class="send" data-i18n="skill.add">＋ 新增技能</button>
           <button id="skillCloseBtn" class="btn-ghost" data-i18n="skill.close">关闭</button>
@@ -485,6 +484,17 @@
           <button id="sfSave" class="send" data-i18n="skill.form.save">保存技能</button>
         </div>
         <div class="skill-test-result muted" id="sfTestResult" style="margin-top:8px;font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 技能试运行·结果弹窗：从技能库列表点 ▶ 后在此清晰展示执行输出 -->
+  <div id="skillRunResultModal" class="modal-overlay hidden">
+    <div class="modal skill-modal" style="max-width:560px">
+      <div class="modal-title">🧪 <span data-i18n="skill.testResultTitle">试运行结果</span></div>
+      <pre id="skillRunResultBody" class="skill-test-result" style="white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;margin:4px 0 12px;font-size:12.5px;line-height:1.5"></pre>
+      <div class="modal-actions">
+        <button id="skillRunResultClose" class="send" data-i18n="ui.ok">确定</button>
       </div>
     </div>
   </div>

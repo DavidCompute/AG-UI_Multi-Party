@@ -288,6 +288,7 @@ window.I18N_DICTS.zh = {
   "skill.testRun": "试运行",
   "skill.testQuery": "输入试运行请求（测试技能执行效果）：",
   "skill.testResult": "试运行结果：",
+  "skill.testResultTitle": "试运行结果",
   "skill.testSuggestLabel": "已根据技能生成示例，可修改",
   "skill.delConfirm": "确认删除技能「{name}」？",
   "skill.deleted": "技能已删除",
