@@ -209,7 +209,8 @@ public sealed class NativeTunnelEndToEndTests
             GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
             AgentId: AgentHost, AgentNickname: "主机名助手", TriggerMessageId: "msg_trigger",
             TriggerUserId: "user_1", Content: "请问我电脑的主机名（hostname）是什么？请在本机执行技能查询。",
-            Mentions: [], MentionAll: false), CancellationToken.None);
+            Mentions: [], MentionAll: false,
+            PreferredBridgeClient: Environment.MachineName), CancellationToken.None);
 
         Assert.True(result.Accepted, "网关运行失败: " + result.ErrorCode);
 
@@ -294,7 +295,8 @@ public sealed class NativeTunnelEndToEndTests
             GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
             AgentId: AgentHost, AgentNickname: "主机名助手", TriggerMessageId: "msg_trigger",
             TriggerUserId: "user_1", Content: "请问我电脑的主机名（hostname）是什么？请在本机执行技能查询。",
-            Mentions: [], MentionAll: false), CancellationToken.None);
+            Mentions: [], MentionAll: false,
+            PreferredBridgeClient: Environment.MachineName), CancellationToken.None);
 
         Assert.Equal("AGENT_AWAITING_INTERACTION", result.ErrorCode); // 桥在线但仍需确认：运行进入“等待触发者决策”态
         var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
@@ -400,7 +402,8 @@ public sealed class NativeTunnelEndToEndTests
             GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
             AgentId: AgentPlan, AgentNickname: "体检助手", TriggerMessageId: "msg_trigger",
             TriggerUserId: "user_1", Content: "请对我的电脑做个体检，在本机查主机名和系统信息。",
-            Mentions: [], MentionAll: false), CancellationToken.None);
+            Mentions: [], MentionAll: false,
+            PreferredBridgeClient: Environment.MachineName), CancellationToken.None);
 
         Assert.True(result.Accepted, "网关运行失败: " + result.ErrorCode);
 

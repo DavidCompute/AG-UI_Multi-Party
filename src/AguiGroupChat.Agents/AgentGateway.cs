@@ -322,21 +322,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return skill?.Kind == AgentSkillKind.Dotnet ? (skill.Body ?? "") : null;
     }
 
-    /// <summary>经隧道执行本机 dotnet（C#）技能。请求<b>已带发起 clientId</b> 时绝不移到其它机器：只在
-    /// 该 clientId 的桥执行，匹配不到即返回 null（当作无可用桥）。仅当未上报 clientId（非浏览器发起的 agent/平台桥）
-    /// 才允许落到 agent/平台级桥。返回 null 表示无可用桥 / 超时。</summary>
+    /// <summary>执行本机 dotnet（C#）技能：只在发起请求的 clientId 那台上跑；该 client 不在线/未上报返回 null（无可用桥）。
+    /// 强调：绝不回落 agent/平台作用域桥，避免在“非发起用户所在机器”上执行。</summary>
     private async Task<string?> ExecuteTunnelDotnetAsync(
         string agentId, string? clientId, string source, string? query,
         TimeSpan waitTimeout, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(clientId))
-        {
-            if (_nativeTunnel.Value is { } c1 && c1.HasClient(clientId))
-                return await c1.ExecuteDotnetForClientAsync(clientId, source, query, waitTimeout, ct);
-            return null; // 发起的这台机器没有桥：绝不回落平台/其它机器
-        }
-        if (_nativeTunnel.Value?.HasTunnel(agentId) == true)
-            return await _nativeTunnel.Value.ExecuteDotnetAsync(agentId, source, query, waitTimeout, ct);
+        if (!string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value is { } t1 && t1.HasClient(clientId))
+            return await t1.ExecuteDotnetForClientAsync(clientId, source, query, waitTimeout, ct);
         return null;
     }
 
@@ -393,30 +386,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return null;
     }
 
-    /// <summary>是否能服务“该客户端技能”的执行。请求<b>带发起 clientId</b> 时：只认该 clientId 的桥
-    /// （由哪台浏览器发起就在哪台上跑，其它客户端不参与）；仅在<b>未上报</b> clientId（代理 / agent 附加桥）时
-    /// 才看 agent/平台作用域桥。</summary>
+    /// <summary>是否能执行该客户端技能。按 A 口径：绝不用 agent/平台桥兜底，<b>只能在发起请求的 clientId 那台上跑</b>——
+    /// clientId 非空且其桥在线才 true；若为空（发起它的浏览器未连接本机桥）一律 false（不再回落 agent/平台作用域）。</summary>
     private bool TunnelAvailable(string agentId, string? clientId)
-        => string.IsNullOrWhiteSpace(clientId)
-            ? _nativeTunnel.Value?.HasTunnel(agentId) == true
-            : _nativeTunnel.Value?.HasClient(clientId) == true;
+        => !string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value?.HasClient(clientId) == true;
 
-    /// <summary>经隧道执行客户端 shell。请求<b>已带发起 clientId</b> 时绝不移到其它机器：只在它上面执行，
-    /// 匹配不到即返回 null。仅当未上报 clientId（非浏览器发起的 agent/平台桥）才允许 agent/平台级桥。
-    /// 返回 null 表示无可用桥 / 超时。</summary>
+    /// <summary>执行客户端 shell：只在发起请求的 clientId 那台上跑；该 client 不在线/未上报返回 null（无可用桥）。
+    /// 强调：绝不回落 agent/平台作用域桥。</summary>
     private async Task<string?> ExecuteTunnelAsync(
         string agentId, string? clientId,
         string command, string? cwd, int? timeoutSec, string? query,
         TimeSpan waitTimeout, CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(clientId))
-        {
-            if (_nativeTunnel.Value is { } t && t.HasClient(clientId))
-                return await t.ExecuteForClientAsync(clientId, command, cwd, timeoutSec, query, waitTimeout, ct);
-            return null; // 发起的这台机器没有桥：绝不回落平台/其它机器
-        }
-        if (_nativeTunnel.Value?.HasTunnel(agentId) == true)
-            return await _nativeTunnel.Value.ExecuteAsync(agentId, command, cwd, timeoutSec, query, waitTimeout, ct);
+        if (!string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value is { } t && t.HasClient(clientId))
+            return await t.ExecuteForClientAsync(clientId, command, cwd, timeoutSec, query, waitTimeout, ct);
         return null;
     }
 
