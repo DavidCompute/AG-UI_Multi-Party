@@ -2065,7 +2065,7 @@ async function testSkill(skillId) {
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, clientId: state.bridgeClient || undefined }), // 本机桥默认路由到当前机器
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }

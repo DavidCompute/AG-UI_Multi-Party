@@ -123,19 +123,46 @@ public static class SkillApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
+            // 本机桥服务非必须：经 DI 取得即可（测试宿主可无该服务；无则本机 dotnet 回退为说明）
+            var nativeTunnel = ctx.RequestServices.GetService<NativeTunnelService>();
             var existing = catalog.Get(skillId);
             if (existing is null)
                 return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
             // dotnet 技能：（建立限管理员，运行面向任意登录用户）。
-            // server → 服务端 Roslyn 编译执行；client → 目标为本机（由该用户机器的本机桥/内网桥在其所在机器编译并访问本地资源），
-            // 技能库这里没有“目标机器”，无法本地执行 → 给出明确说明，让用户在数字员工场景（带桥）本机真实执行。
+            // server → 服务端 Roslyn 编译执行；client → 本机执行：优先按请求上报的 client（当前浏览器机器），
+            // 否则落到平台级桥（一座桥的机器即本机）在本机编译运行；无可用桥才给出说明。
             if (existing.Kind == AgentSkillKind.Dotnet)
             {
                 if (existing.ExecutionLocation == AgentSkillExecutionLocation.Client)
                 {
-                    var hint = "【本机 dotnet 技能】目标为在本机（客户端）执行，需经你机器上的本机桥编译并访问本地资源，\n"
-                        + "技能库试运行无法凭空指定目标机器。请在一个挂载了本技能、且其机器已连接本机桥的数字员工对话中触发，由\n"
-                        + "系统在你本机经桥编译运行并回传真实结果。\n\n技能正文（C#）：\n" + (existing.Body ?? "") + "\n\n请求：" + (req.Query ?? "");
+                    var source = existing.Body ?? "";
+                    var query = req.Query ?? "";
+                    var clientId = (req.ClientId ?? "").Trim();
+                    string? localResult = null;
+                    string via = "";
+                    if (nativeTunnel is not null)
+                    {
+                        // 1) 优先按上报的客户端（浏览器本机桥"/ag-ui/bridge/info" 的 client）路由
+                        if (clientId.Length > 0 && nativeTunnel.HasClient(clientId))
+                        {
+                            localResult = await nativeTunnel.ExecuteDotnetForClientAsync(
+                                clientId, source, query, TimeSpan.FromSeconds(160), ct);
+                            via = "client=" + clientId;
+                        }
+                        // 2) 否则若有平台级本机桥在线（即当前机器），直接在其上执行
+                        else if (nativeTunnel.HasTunnel(NativeTunnelService.PlatformWideScope))
+                        {
+                            localResult = await nativeTunnel.ExecuteDotnetAsync(
+                                NativeTunnelService.PlatformWideScope, source, query, TimeSpan.FromSeconds(160), ct);
+                            via = "平台级本机桥";
+                        }
+                    }
+                    if (!string.IsNullOrWhiteSpace(localResult))
+                        return Results.Ok(new { skillId, result = ("【本机 dotnet · 经本机桥执行】" + via + " 结果：\n" + localResult), localOnly = true });
+                    var hint = "当前没有可用于本机执行的桥在线，无法在本机执行这条 dotnet 技能。请确认：\n"
+                        + "1) 当前机器已启动本机桥：AguiGroupChat.NativeBridge --tunnel http://localhost:5200 --tunnel-token <令牌>；\n"
+                        + "2) 用当前机器的浏览器访问本机桥回环 http://127.0.0.1:17321/ag-ui/bridge/info 可读到 client 标识以自动绑定；\n"
+                        + "3) 或改在一个“其机器已连接本机桥”的数字员工对话里触发。\n\n技能正文（C#）：\n" + source + "\n\n请求：" + query;
                     return Results.Ok(new { skillId, result = hint, localOnly = true });
                 }
                 var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
@@ -294,8 +321,8 @@ public sealed record SkillDefHttpRequest(
     string? ExecutionLocation = null,
     string? ClientRunner = null);
 
-/// <summary>技能试运行请求体。</summary>
-public sealed record SkillRunHttpRequest(string Query = "");
+/// <summary>技能试运行请求体。ClientId：本机执行的机器标识（浏览器本机桥 /ag-ui/bridge/info 读取），用于把 client dotnet 送到当前机器执行。</summary>
+public sealed record SkillRunHttpRequest(string Query = "", string? ClientId = null);
 
 /// <summary>用自然语言生成技能配置的请求体。ClientOs：客户端/本机执行时的浏览器所在系统（windows/macos/linux/other），供生成对应脚本；服务端执行时后端自行推断。</summary>
 public sealed record SkillGenerateRequest(string Request, bool? PreferClient = null, string? ClientOs = null);
