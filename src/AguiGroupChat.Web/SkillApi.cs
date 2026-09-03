@@ -203,7 +203,21 @@ public static class SkillApi
                     + "或在连接了本机桥的数字员工里触发。\n\n命令正文：\n" + command + "\n\n请求：" + query;
                 return Results.Ok(new { skillId, result = shellHint, localOnly = true });
             }
-            // 系统技能无归属者：仅管理员可运行；归属技能：仅归属者或管理员可运行
+            // 任何仍带 ExecutionLocation=Client 的技能（http / prompt 等）试运行都不应落服务端跑——
+            // 它们应在其“本机/前端或桥所在机器”执行。这里既没有浏览器可驱动 http，也没有 dotnet/shell 的桥执行入口，
+            // 因此给明确指引而非静默用服务端 Runner（会与本机语境错位）。
+            if (existing.ExecutionLocation == AgentSkillExecutionLocation.Client)
+            {
+                var ownerGateOk = existing.OwnerId is not null ? (existing.OwnerId == user.UserId || auth.IsAdmin(user.UserId))
+                    : auth.IsAdmin(user.UserId);
+                if (!ownerGateOk)
+                    return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可试运行该技能"), statusCode: StatusCodes.Status403Forbidden);
+                var hintClient = "该技能标注为“本机(client)执行”，但 kind=" + existing.Kind + " 需要在其本机/前端或桥所在机器执行，\n"
+                    + "技能库试运行无法在当前宿主代为驱动。请在挂载了本技能、且其机器装有/连接本机桥的数字员工对话中触发，\n"
+                    + "由系统在你本机执行并回传；或把 executionLocation 改为 server 后在此试运行。\n\n正文：\n" + (existing.Body ?? "") + "\n\n请求：" + (req.Query ?? "");
+                return Results.Ok(new { skillId, result = hintClient, localOnly = true });
+            }
+            // 其余为 Server 执行技能：系统技能无归属者 → 仅管理员可试运行；归属技能 → 归属者或管理员可试运行
             if (existing.OwnerId is not null && existing.OwnerId != user.UserId && !auth.IsAdmin(user.UserId))
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅技能创建者或系统管理员可试运行"), statusCode: StatusCodes.Status403Forbidden);
             if (existing.OwnerId is null && !auth.IsAdmin(user.UserId))
