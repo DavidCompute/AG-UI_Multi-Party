@@ -1874,15 +1874,19 @@ function openSkillForm(skillId) {
 /** 类型切换时联动：shell/ http 显示解释器 / 强制审批；客户端执行显示 ClientRunner 配置。 */
 function syncSkillKind() {
   const kind = $("sfKind").value;
+  // dotnet（C# 动态编译）：仅服务端执行、强制审批，无需解释器 / ClientRunner；正文即 C# 源码
+  const isDotnet = kind === "dotnet";
+  if (isDotnet && $("sfExecutionLocation").value !== "server") $("sfExecutionLocation").value = "server";
+  const isClientExec = $("sfExecutionLocation").value === "client";
   const showInterp = kind === "shell";
   $("sfInterpreterGroup").style.display = showInterp ? "" : "none";
-  // 仅 shell 技能强制需审批（任意本机命令执行面最大）；HTTP / 提示词技能允许关闭以自动调用；
-  // 客户端执行（含 shell / http）同样强制审批（本机 / 外部副作用安全兜底）
-  $("sfRequiresApproval").disabled = (kind === "shell" || $("sfExecutionLocation").value === "client");
-  $("sfBodyLabel").dataset.i18n = kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell");
-  const label = t(kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell"));
-  $("sfBodyLabel").textContent = label;
-  // 客户端执行 → 显示 ClientRunner 配置；服务端 → 隐藏
+  // shell 与 dotnet（含客户端执行产物）强制需审批；其执行有副作用 / 动态代码
+  $("sfRequiresApproval").disabled = (kind === "shell" || isDotnet || isClientExec) ? true : false;
+  if (isDotnet) $("sfRequiresApproval").checked = true;
+  const bodyKind = isDotnet ? "skill.form.bodyDotnet" : (kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell"));
+  $("sfBodyLabel").dataset.i18n = bodyKind;
+  $("sfBodyLabel").textContent = t(bodyKind);
+  // 客户端执行 → 显示 ClientRunner 配置；否则隐藏
   $("sfClientRunnerGroup").style.display = $("sfExecutionLocation").value === "client" ? "" : "none";
 }
 

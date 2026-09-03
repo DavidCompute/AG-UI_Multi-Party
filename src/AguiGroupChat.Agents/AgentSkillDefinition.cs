@@ -7,6 +7,7 @@ namespace AguiGroupChat.Agents;
 ///   - <see cref="Shell"/>：一段可执行命令 / 脚本（bash / python / node 等），在技能专属沙箱内运行。
 ///   - <see cref="Http"/>：调用一个 HTTP(S) 接口（method + url + headers/body 模板）。
 ///   - <see cref="Prompt"/>：纯提示词 / 流程模板（无可执行代码，给宿主模型的一段指令，由模型自带推理 / 聚合）。
+///   - <see cref="Dotnet"/>：一段 C# 源码，服务端用 Roslyn 动态编译并以受限方式执行（仅管理员可建 / server 执行）。
 /// </summary>
 public enum AgentSkillKind
 {
@@ -18,6 +19,9 @@ public enum AgentSkillKind
 
     /// <summary>提示词 / 流程模板：无可执行代码，给模型的说明。</summary>
     Prompt,
+
+    /// <summary>C# 源码技能：Roslyn 动态编译 + 受限执行（管理员专属，仅服务端）。</summary>
+    Dotnet,
 }
 
 /// <summary>

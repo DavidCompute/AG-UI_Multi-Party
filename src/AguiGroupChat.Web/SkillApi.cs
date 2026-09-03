@@ -146,9 +146,9 @@ public static class SkillApi
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 
-    /// <summary>Shell / HTTP 技能属特权类型：创建 / 修改 / 运行仅限管理员（及归属者试运行 prompt 由 /run 单独管控）。</summary>
+    /// <summary>Shell / HTTP / .NET 技能属特权类型：创建 / 修改 / 运行仅限管理员（归属者试运行 prompt 由 /run 单独管控）。</summary>
     private static bool RequiresPrivilegedKind(string? kind)
-        => Enum.TryParse<AgentSkillKind>(kind, true, out var k) && k is AgentSkillKind.Shell or AgentSkillKind.Http;
+        => Enum.TryParse<AgentSkillKind>(kind, true, out var k) && k is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet;
 
     private static object ToDto(AgentSkillDefinition s, bool canReadBody)
     {
@@ -194,10 +194,16 @@ public static class SkillApi
             && req.ExecutionLocation is not null
             ? loc
             : AgentSkillExecutionLocation.Server;
+        if (kind == AgentSkillKind.Dotnet)
+        {
+            // .NET（C# 动态编译）技能：仅服务端执行、强制审批（动态代码面最高），不吃 client / 解释器
+            executionLocation = AgentSkillExecutionLocation.Server;
+            requiresApproval = true;
+        }
         if (executionLocation == AgentSkillExecutionLocation.Client)
             requiresApproval = true; // 客户端执行（尤其 shell）属本机/外部副作用，一律需人工批准
-        if (kind == AgentSkillKind.Shell && string.IsNullOrWhiteSpace(req.Body))
-            return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "shell 技能的正文（命令/脚本）不能为空")));
+        if ((kind == AgentSkillKind.Shell || kind == AgentSkillKind.Dotnet) && string.IsNullOrWhiteSpace(req.Body))
+            return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "该技能正文（shell 命令/脚本，或 C# 源码）不能为空")));
         if (kind == AgentSkillKind.Http && string.IsNullOrWhiteSpace(req.Body))
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "HTTP 技能的正文（JSON 配置）不能为空")));
 

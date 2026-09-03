@@ -357,6 +357,8 @@ public sealed class AgentCatalog
                     desc += $"可执行命令/脚本（在专属沙箱运行，命令正文见技能定义，可用 $QUERY 变量读取请求）。需用户批准后执行。";
                 else if (skill.Kind == AgentSkillKind.Http)
                     desc += $"调用外部 HTTP 接口（Body JSON 定义 method/url/headers/body，可用 ${{query}} 占位）。需用户批准后执行。";
+                else if (skill.Kind == AgentSkillKind.Dotnet)
+                    desc += $"服务端 C# 技能（Roslyn 动态编译受限执行，正文含 public static string Run(string input)）。需用户批准后执行。";
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
                 var isClientSkill = skill.ExecutionLocation == AgentSkillExecutionLocation.Client;
@@ -534,6 +536,8 @@ public sealed class AgentCatalog
             return "技能名不合法：仅允许字母/数字/下划线/连字符，最长 40 字符（如 risk_analyzer）。";
         if (!Enum.TryParse<AgentSkillKind>(kind, true, out var k) || kind is null or "")
             return "技能类型 kind 无效：仅支持 shell / http / prompt。";
+        if (k == AgentSkillKind.Dotnet)
+            return "dotnet（C# 动态编译）技能属于高危特权类型，需由系统管理员到技能库手动创建，智能体不能运行时自建。";
         var desc = (description ?? "").Trim();
         if (desc.Length == 0)
             return "请提供技能描述（何时调用、能获得什么）。";

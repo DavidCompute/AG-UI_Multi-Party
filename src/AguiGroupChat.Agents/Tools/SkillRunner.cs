@@ -23,12 +23,14 @@ internal sealed class SkillRunner
     private readonly ILogger _logger;
     private readonly string _sandboxRoot;           // 技能沙箱根（data/skillruns）
     private readonly bool _allowPrivateEndpoints;  // 是否放行本机 / 内网（默认 false → 保留 SSRF 防护）
+    private readonly DotnetSkillHost? _dotnet;     // .NET（C#）技能动态编译执行宿主
 
     public SkillRunner(string sandboxRoot, ILoggerFactory loggerFactory, bool allowPrivateEndpoints = false)
     {
         _sandboxRoot = Path.GetFullPath(Path.TrimEndingDirectorySeparator(sandboxRoot)) + Path.DirectorySeparatorChar;
         _logger = loggerFactory.CreateLogger<SkillRunner>();
         _allowPrivateEndpoints = allowPrivateEndpoints;
+        _dotnet = new DotnetSkillHost(_logger);
     }
 
     /// <summary>技能运行沙箱目录（按技能 ID 干净命名）。</summary>
@@ -47,6 +49,7 @@ internal sealed class SkillRunner
             {
                 AgentSkillKind.Shell => await RunShellAsync(skill, query, ct),
                 AgentSkillKind.Http => await RunHttpAsync(skill, query, ct),
+                AgentSkillKind.Dotnet => RunDotnetSkill(skill, query),
                 _ => RunPrompt(skill, query),
             };
         }
@@ -56,6 +59,13 @@ internal sealed class SkillRunner
             _logger.LogWarning(ex, "技能执行失败：{SkillId}", skill.SkillId);
             return "技能执行失败：" + ex.Message;
         }
+    }
+
+    // =============== .NET（C#）===============
+    private string RunDotnetSkill(AgentSkillDefinition skill, string query)
+    {
+        if (_dotnet is null) return ".NET 技能执行器不可用。";
+        return _dotnet.Run(skill.Body ?? "", query ?? "", CancellationToken.None);
     }
 
     // =============== Shell ===============
