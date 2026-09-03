@@ -147,32 +147,17 @@ public static class SkillApi
                         return Results.Ok(new { skillId, result = ("【本机 dotnet · 在桌面宿主机直接执行】\n" + hostDr), localOnly = true });
                     }
                     var clientId = (req.ClientId ?? "").Trim();
-                    string? localResult = null;
-                    string via = "";
-                    if (nativeTunnel is not null)
+                    if (nativeTunnel is not null && clientId.Length > 0 && nativeTunnel.HasClient(clientId))
                     {
-                        // 1) 优先按上报的客户端（浏览器本机桥"/ag-ui/bridge/info" 的 client）路由
-                        if (clientId.Length > 0 && nativeTunnel.HasClient(clientId))
-                        {
-                            localResult = await nativeTunnel.ExecuteDotnetForClientAsync(
-                                clientId, source, query, TimeSpan.FromSeconds(160), ct);
-                            via = "client=" + clientId;
-                        }
-                        // 2) 否则若有平台级本机桥在线（即当前机器），直接在其上执行
-                        else if (nativeTunnel.HasTunnel(NativeTunnelService.PlatformWideScope))
-                        {
-                            localResult = await nativeTunnel.ExecuteDotnetAsync(
-                                NativeTunnelService.PlatformWideScope, source, query, TimeSpan.FromSeconds(160), ct);
-                            via = "平台级本机桥";
-                        }
+                        // 客户端本机 dotnet 必须经“发起请求的这台浏览器所在机器”的本机桥执行
+                        var localResult = await nativeTunnel.ExecuteDotnetForClientAsync(
+                            clientId, source, query, TimeSpan.FromSeconds(160), ct);
+                        if (!string.IsNullOrWhiteSpace(localResult))
+                            return Results.Ok(new { skillId, result = ("【本机 dotnet · 经本机桥执行】client=" + clientId + " 结果：\n" + localResult), localOnly = true });
                     }
-                    if (!string.IsNullOrWhiteSpace(localResult))
-                        return Results.Ok(new { skillId, result = ("【本机 dotnet · 经本机桥执行】" + via + " 结果：\n" + localResult), localOnly = true });
-                    var hint = "当前没有可用于本机执行的桥在线，无法在本机执行这条 dotnet 技能。请确认：\n"
-                        + "1) 当前机器已启动本机桥：AguiGroupChat.NativeBridge --tunnel http://localhost:5200 --tunnel-token <令牌>；\n"
-                        + "2) 用当前机器的浏览器访问本机桥回环 http://127.0.0.1:17321/ag-ui/bridge/info 可读到 client 标识以自动绑定；\n"
-                        + "3) 或改在一个“其机器已连接本机桥”的数字员工对话里触发。\n\n技能正文（C#）：\n" + source + "\n\n请求：" + query;
-                    return Results.Ok(new { skillId, result = hint, localOnly = true });
+                    // 没有为该请求机器找到桥：明确报告，而非回退到可能并非请求机器的其它桥
+                    return Results.Ok(new { skillId, result = ("执行失败，没有安装桥：本客户端技能需在发起请求的浏览器所在机器执行，\n"
+                        + "但该机器未连接本机桥（找不到 client=" + (clientId.Length == 0 ? "（未上报）" : clientId) + "）。请在本机安装/启动 AguiGroupChat.NativeBridge 后重试。"), localOnly = true });
                 }
                 var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
                 return Results.Ok(new { skillId, result = dr });
@@ -195,29 +180,17 @@ public static class SkillApi
                     return Results.Ok(new { skillId, result = ("【本机 shell · 在桌面宿主机直接执行】\n" + hostOut), localOnly = true });
                 }
                 var clientIdShell = (req.ClientId ?? "").Trim();
-                string? shellLocal = null;
-                string shellVia = "";
-                if (nativeTunnel is not null)
+                if (nativeTunnel is not null && clientIdShell.Length > 0 && nativeTunnel.HasClient(clientIdShell))
                 {
-                    if (clientIdShell.Length > 0 && nativeTunnel.HasClient(clientIdShell))
-                    {
-                        shellLocal = await nativeTunnel.ExecuteForClientAsync(
-                            clientIdShell, command, null, 60, query, TimeSpan.FromSeconds(120), ct);
-                        shellVia = "client=" + clientIdShell;
-                    }
-                    else if (nativeTunnel.HasTunnel(NativeTunnelService.PlatformWideScope))
-                    {
-                        shellLocal = await nativeTunnel.ExecuteAsync(
-                            NativeTunnelService.PlatformWideScope, command, null, 60, query, TimeSpan.FromSeconds(120), ct);
-                        shellVia = "平台级本机桥";
-                    }
+                    // 客户端本机 shell 必须经“发起请求的这台浏览器所在机器”的本机桥执行
+                    var shellLocal = await nativeTunnel.ExecuteForClientAsync(
+                        clientIdShell, command, null, 60, query, TimeSpan.FromSeconds(120), ct);
+                    if (!string.IsNullOrWhiteSpace(shellLocal))
+                        return Results.Ok(new { skillId, result = ("【本机 shell · 经本机桥执行】client=" + clientIdShell + " 结果：\n" + shellLocal), localOnly = true });
                 }
-                if (!string.IsNullOrWhiteSpace(shellLocal))
-                    return Results.Ok(new { skillId, result = ("【本机 shell · 经本机桥执行】" + shellVia + " 结果：\n" + shellLocal), localOnly = true });
-                var shellHint = "当前没有可用于本机执行的桥，无法在本机试运行这条 client shell 技能。请先在本机启动本机桥\n"
-                    + "（AguiGroupChat.NativeBridge --tunnel http://localhost:5200 --tunnel-token <令牌>），\n"
-                    + "或在连接了本机桥的数字员工里触发。\n\n命令正文：\n" + command + "\n\n请求：" + query;
-                return Results.Ok(new { skillId, result = shellHint, localOnly = true });
+                // 该请求机器没有桥：明确报告，而非回退到可能并非请求机器的其它桥
+                return Results.Ok(new { skillId, result = ("执行失败，没有安装桥：本客户端 shell 技能需在发起请求的浏览器所在机器执行，\n"
+                    + "但该机器未连接本机桥（找不到 client=" + (clientIdShell.Length == 0 ? "（未上报）" : clientIdShell) + "）。请在本机安装/启动 AguiGroupChat.NativeBridge 后重试。"), localOnly = true });
             }
             // 任何仍带 ExecutionLocation=Client 的技能（http / prompt 等）试运行都不应落服务端跑——
             // 它们应在其“本机/前端或桥所在机器”执行。这里既没有浏览器可驱动 http，也没有 dotnet/shell 的桥执行入口，
