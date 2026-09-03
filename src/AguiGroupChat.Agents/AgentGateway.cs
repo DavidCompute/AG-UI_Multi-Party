@@ -1246,6 +1246,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             ranSkills, ct);
         var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
+        text = UnwrapCoordinationAnswer(text); // 防御：若模型把内部 JSON 决策原样当回复，剥出 user-facing answer
         foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
             await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
     }
@@ -1508,7 +1509,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (parsed is null)
             {
                 // 解析失败：把模型原文当作最终答复，结束递归（退化，避免卡死）
-                return string.IsNullOrWhiteSpace(text) ? facts.ToString() : text;
+                return string.IsNullOrWhiteSpace(text) ? facts.ToString() : UnwrapCoordinationAnswer(text);
             }
             if (!string.IsNullOrWhiteSpace(parsed.Answer))
                 lastAnswer = parsed.Answer.Trim();
@@ -1598,6 +1599,30 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
             return new RecursiveResponse(needsMore, gather, answer);
         }
+    }
+
+    /// <summary>防御：若模型的“最终归答文本”实际是内部协调 JSON（{"needsMore":…,"gather":…,"answer":…}）
+    /// 或其它仅含 answer 的包壳，剥出面向用户的 answer，避免把内部 JSON 原样回给用户。</summary>
+    private static string UnwrapCoordinationAnswer(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start) return text;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(text.Substring(start, end - start + 1));
+            var r = doc.RootElement;
+            if (!r.ValueKind.Equals(System.Text.Json.JsonValueKind.Object)) return text;
+            var isCoord = r.TryGetProperty("needsMore", out var nm) && (nm.ValueKind == System.Text.Json.JsonValueKind.True || nm.ValueKind == System.Text.Json.JsonValueKind.False);
+            if (isCoord && r.TryGetProperty("answer", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var ans = a.GetString();
+                if (!string.IsNullOrWhiteSpace(ans)) return ans.Trim();
+            }
+        }
+        catch { /* 非常规 JSON 就原样返回 */ }
+        return text;
     }
 
     /// <summary>递归补查时让某个直属下属就问题给结论（一次性 RunAsync，不递归下钻，避免无限深）。</summary>
