@@ -168,6 +168,41 @@ public static class SkillApi
                 var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
                 return Results.Ok(new { skillId, result = dr });
             }
+            // shell + client（本机执行技能）：试运行应经本机桥在本机（当前机器）执行，落到服务端 bash 会因缺 PowerShell 命令而 127。
+            if (existing.Kind == AgentSkillKind.Shell && existing.ExecutionLocation == AgentSkillExecutionLocation.Client)
+            {
+                bool isAdminShell = auth.IsAdmin(user.UserId);
+                bool byThisUser = existing.OwnerId is not null && (existing.OwnerId == user.UserId || isAdminShell);
+                bool systemByAdmin = existing.OwnerId is null && isAdminShell;
+                if (!byThisUser && !systemByAdmin)
+                    return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅技能创建者或系统管理员可试运行该本机技能"), statusCode: StatusCodes.Status403Forbidden);
+                var command = existing.Body ?? "";
+                var query = req.Query ?? "";
+                var clientIdShell = (req.ClientId ?? "").Trim();
+                string? shellLocal = null;
+                string shellVia = "";
+                if (nativeTunnel is not null)
+                {
+                    if (clientIdShell.Length > 0 && nativeTunnel.HasClient(clientIdShell))
+                    {
+                        shellLocal = await nativeTunnel.ExecuteForClientAsync(
+                            clientIdShell, command, null, 60, query, TimeSpan.FromSeconds(120), ct);
+                        shellVia = "client=" + clientIdShell;
+                    }
+                    else if (nativeTunnel.HasTunnel(NativeTunnelService.PlatformWideScope))
+                    {
+                        shellLocal = await nativeTunnel.ExecuteAsync(
+                            NativeTunnelService.PlatformWideScope, command, null, 60, query, TimeSpan.FromSeconds(120), ct);
+                        shellVia = "平台级本机桥";
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(shellLocal))
+                    return Results.Ok(new { skillId, result = ("【本机 shell · 经本机桥执行】" + shellVia + " 结果：\n" + shellLocal), localOnly = true });
+                var shellHint = "当前没有可用于本机执行的桥，无法在本机试运行这条 client shell 技能。请先在本机启动本机桥\n"
+                    + "（AguiGroupChat.NativeBridge --tunnel http://localhost:5200 --tunnel-token <令牌>），\n"
+                    + "或在连接了本机桥的数字员工里触发。\n\n命令正文：\n" + command + "\n\n请求：" + query;
+                return Results.Ok(new { skillId, result = shellHint, localOnly = true });
+            }
             // 系统技能无归属者：仅管理员可运行；归属技能：仅归属者或管理员可运行
             if (existing.OwnerId is not null && existing.OwnerId != user.UserId && !auth.IsAdmin(user.UserId))
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅技能创建者或系统管理员可试运行"), statusCode: StatusCodes.Status403Forbidden);
