@@ -42,6 +42,9 @@ public static class DesktopApp
         // 固定 Production：避免被引用的 Web 项目把 appsettings.Development.json 复制进输出后覆盖配置
         builder.Environment.EnvironmentName = "Production";
         builder.WebHost.UseUrls(baseUrl);
+        // 桌面版：Web 宿主即用户本机。标记 ClientTool:IsHostLocal，使 ExecutionLocation=Client 的 dotnet/shell 技能
+        // 能直接在宿主(本机)执行而不依赖独立的本机桥（详见 SkillApi/run 与 ClientToolOptions）。
+        builder.Configuration["ClientTool:IsHostLocal"] = "true";
         HubApp.ConfigureServices(builder);
         builder.Services.AddAgentFramework(builder.Configuration); // 覆盖 NoopAgentGateway 为真实网关
         builder.Services.AddSingleton<AgentScheduler>(); // 智能体定时任务（cron）调度器

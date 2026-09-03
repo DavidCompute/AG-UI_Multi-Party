@@ -123,8 +123,11 @@ public static class SkillApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
-            // 本机桥服务非必须：经 DI 取得即可（测试宿主可无该服务；无则本机 dotnet 回退为说明）
-            var nativeTunnel = ctx.RequestServices.GetService<NativeTunnelService>();
+            // 本机桥 / 桌面自托管标记：经 DI 取得（测试宿主可为空）。
+            // IsHostLocal=true 表示“宿主即用户本机”（桌面版），Client 技能可在 Web 宿主直接执行、无需独立本机桥。
+            var nativeTunnel = ctx.RequestServices.GetService<AguiGroupChat.Agents.NativeTunnelService>();
+            var hostLocal = ctx.RequestServices.GetService<ClientToolOptions>()?.IsHostLocal == true;
+            var hostEnv = ctx.RequestServices.GetService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
             var existing = catalog.Get(skillId);
             if (existing is null)
                 return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
@@ -137,6 +140,12 @@ public static class SkillApi
                 {
                     var source = existing.Body ?? "";
                     var query = req.Query ?? "";
+                    // 桌面版/自托管（宿主=用户本机）：直接在 Web 宿主上进程内跑 Roslyn，无需独立本机桥。
+                    if (hostLocal && hostEnv is not null)
+                    {
+                        var hostDr = await agents.RunSkillAsync(existing, query, ct);
+                        return Results.Ok(new { skillId, result = ("【本机 dotnet · 在桌面宿主机直接执行】\n" + hostDr), localOnly = true });
+                    }
                     var clientId = (req.ClientId ?? "").Trim();
                     string? localResult = null;
                     string via = "";
@@ -178,6 +187,13 @@ public static class SkillApi
                     return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅技能创建者或系统管理员可试运行该本机技能"), statusCode: StatusCodes.Status403Forbidden);
                 var command = existing.Body ?? "";
                 var query = req.Query ?? "";
+                // 桌面版/自托管（宿主=用户本机 Win）：直接在宿主上用 PowerShell 执行，无需独立本机桥。
+                if (hostLocal && hostEnv is not null)
+                {
+                    var root = Path.Combine(hostEnv.ContentRootPath, "data", "clienttoolruns", HostShell.SanitizeSegment(user.UserId));
+                    var hostOut = await HostShell.RunAsync(root, command, null, 60, query, ct);
+                    return Results.Ok(new { skillId, result = ("【本机 shell · 在桌面宿主机直接执行】\n" + hostOut), localOnly = true });
+                }
                 var clientIdShell = (req.ClientId ?? "").Trim();
                 string? shellLocal = null;
                 string shellVia = "";

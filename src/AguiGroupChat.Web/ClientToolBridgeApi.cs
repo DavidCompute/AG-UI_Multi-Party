@@ -17,6 +17,11 @@ public sealed class ClientToolOptions
 {
     /// <summary>是否仅系统管理员可调用本机桥（共享多用户部署置 true）。默认 false（单机 / 自托管场景）。</summary>
     public bool RequireAdmin { get; set; }
+
+    /// <summary>是否“宿主即用户本机”（桌面版自托管）。为 true 时，<c>ExecutionLocation=Client</c> 的 dotnet / shell 技能可
+    /// 直接在 Web 宿主上执行（无需独立本机桥）——只有桌面 / 自托管应置 true；Docker + 远端浏览器必须保持 false（其宿主非用户机器）。
+    /// 桌面版在其 <c>DesktopApp.Start</c> 里写入 <c>ClientTool:IsHostLocal=true</c>；Docker 环境默认 false。</summary>
+    public bool IsHostLocal { get; set; }
 }
 
 /// <summary>
@@ -96,80 +101,9 @@ public static class ClientToolBridgeApi
     }
 
     private static async Task<string> RunShellAsync(string rootDir, string command, string? cwd, int? timeoutSec, string? query, CancellationToken ct)
-    {
-        // 工作目录：默认沙箱根；允许相对子目录，但不允许逃逸到沙箱之外（路径穿越防御）
-        var workDir = rootDir;
-        if (!string.IsNullOrWhiteSpace(cwd) && cwd != ".")
-        {
-            var candidate = Path.GetFullPath(Path.Combine(rootDir, cwd));
-            if (candidate.StartsWith(rootDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                workDir = candidate;
-        }
-        Directory.CreateDirectory(workDir);
+        => await HostShell.RunAsync(rootDir, command, cwd, timeoutSec, query, ct);
 
-        // 命令落盘为脚本执行（与技能 shell 执行同款思路）：Unix 下 bash 脚本；Windows 下 PowerShell(UUID 生成目录内)。
-        string fileName, argsText;
-        if (OperatingSystem.IsWindows())
-        {
-            // PowerShell -EncodedCommand：命令经 base64(UTF-16LE) 编码传递，规避 cmd 引号 / 中文代码页问题；
-            // 前置强制控制台 UTF-8 输出，配合下方 UTF-8 解码保证中文结果不乱码。
-            var ps = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;" + command;
-            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(ps));
-            fileName = "powershell.exe";
-            argsText = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded;
-        }
-        else
-        {
-            var scriptPath = Path.Combine(workDir, "client_run.sh");
-            // UTF8Encoding(false) 无 BOM：带 BOM 的脚本首行会被 bash 当成 \xEF\xBB\xBF 前缀，命令变成 command not found
-            await File.WriteAllTextAsync(scriptPath, command, new UTF8Encoding(false), ct);
-            fileName = "/bin/bash";
-            argsText = "\"" + scriptPath + "\"";
-        }
-        var argvJson = JsonSerializer.Serialize(new { query = query ?? "" });
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = fileName,
-            Arguments = argsText,
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-        };
-        psi.Environment["QUERY"] = query ?? "";
-        psi.Environment["ARGV_JSON"] = argvJson;
-
-        var timeoutMs = Math.Clamp(timeoutSec.GetValueOrDefault(MaxTimeoutSec), 1, MaxTimeoutSec) * 1000;
-        using var proc = new Process { StartInfo = psi };
-        if (!proc.Start()) throw new InvalidOperationException("无法启动命令进程。");
-        var stdoutTask = proc.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = proc.StandardError.ReadToEndAsync(ct);
-        var completed = proc.WaitForExit(timeoutMs);
-        if (!completed) proc.Kill(entireProcessTree: true);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-        if (!completed) return "（客户端技能执行超时，已终止）";
-
-        var sb = new StringBuilder();
-        if (stdout.Length > 0) sb.AppendLine(stdout.TrimEnd());
-        if (stderr.Length > 0) sb.AppendLine("stderr: " + stderr.TrimEnd());
-        sb.AppendLine($"（退出码 {proc.ExitCode}）");
-        return Truncate(sb.ToString().TrimEnd());
-    }
-
-    private static string SanitizeSegment(string s)
-    {
-        var chars = s.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.').ToArray();
-        var v = new string(chars);
-        return string.IsNullOrWhiteSpace(v) ? "anonymous" : v;
-    }
-
-    private static string Truncate(string? s)
-        => string.IsNullOrWhiteSpace(s) ? "（命令无输出）" : (s.Length <= MaxOutputChars ? s : s[..MaxOutputChars] + "\n…（输出已截断）");
+    private static string SanitizeSegment(string s) => HostShell.SanitizeSegment(s);
 }
 
 /// <summary>客户端（shell）工具本机桥执行请求。</summary>
