@@ -1,5 +1,29 @@
-# AG-UI 群聊桌面版 1.0.116 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.116 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.117 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.117 Release Notes (current desktop release)
+
+## 新增（中文）
+- **本机(client)技能的“试运行”真正落到当前机器**：技能库试运行 `/run` 里，`ExecutionLocation=Client` 的 **dotnet(C#)** 与本机 **shell** 技能（如系统内置的 `服务状态`）会经<br>本机桥（优先按浏览器上报的 `clientId` 路由；否则落在平台级桥，即当前机器）在本机**真实编译/执行并回传结果**——不再误把 PowerShell 正文交给服务端 Linux bash 而报 `Get-Service: command not found`。（前置：本机已启动 `AguiGroupChat.NativeBridge`。）
+- **`/run` 对任何 Client 技能都不再回落服务端**：凡 `ExecutionLocation=Client`、但没有“进程内可直接执行”形态（http / prompt 标成 client 等）的边缘情形，试运行返回明确指引（请到挂载它的数字员工对话、由其本机桥/前端在本机执行，或改 return server 后再试），而不再静默用服务端 Runner 跑一个“名为客户端技能”的东西。
+- **技能库“试运行”结果展示升级为独立弹窗**：在技能库列表（或编辑表单）点 ▶ 后，结果出现在专门“试运行结果”弹窗（列表场景）或表单下方（编辑场景），不再写进不可见角落。
+- **生成工具的“要不要思考”改为按任务自动判定**：结构化/格式型生成（技能生成、一键编排、试运行建议入参、技能自测与修复、图谱抽取、群名等）一律用常规对话模型，不因全局“思考模式”切换到 reasoner（reasoner 对严格 JSON/短 token 又慢又易空/超时）；复杂方案型任务在常规模型上“先想后给”（先简述取舍再给最终 JSON）。角色人设、指派引导等开放型生成仍随全局思考模式。
+- **长任务并发保护与可“停止”**：技能生成 / 组织编排预览在跑时，其它可触发长生成的按钮置灰、防并发；只读生成任务提供“停止生成”（AbortController 取消，不写库，安全）；写库的“确认并创建(apply)”刻意不暴露停止以保数据完整性。
+- **修复“生成为空/很慢”**：技能/编排等 use `deepseek-reasoner`（思考模式开时）会慢慢至空——现在是仅对话等重要推理才走 reasoner，结构化工具用常规模型（实测技能生成数秒、一键编排 10s 内 done）。
+
+## New (English)
+- **Client-located skills now truly trial-run on the current machine**: in the skill-library trial run (`/run`), `ExecutionLocation=Client` **dotnet (C#)** and local **shell** skills (e.g. the built-in `服务状态`) are sent over the native bridge (prefer the reported `clientId`; else the platform bridge = the current machine) and really compile/execute locally and return results — no longer handing a PowerShell body to the server’s Linux bash (the `Get-Service: command not found` error). Prerequisite: run `AguiGroupChat.NativeBridge` on this machine.
+- **`/run` never server-runs a Client skill**: any `ExecutionLocation=Client` skill lacking an in-process executable form (e.g. http/prompt mislabelled client) now returns clear guidance instead of silently running server-side.
+- **Trial-run results shown in a dedicated result dialog** (list view) or under the edit form (editing view).
+- **“Thinking vs not” is now auto-decided by task**: structured/formatting generators (skill generation, one-click orchestration, trial-input suggestion, self-test & repair, graph/entity extraction, group naming) always use the regular chat model — they no longer fall into `deepseek-reasoner` just because global “thinking mode” is on (reasoner is slow and often empty on rigid JSON / short tokens). Complex plan-shaped tasks do a “deliberate-first-then-JSON” pass on the fast model, while persona/role/assignment-guidance generators still follow global thinking.
+- **Long-run concurrency guard + cancellable “Stop”**: while skill/orchestration previews generate, other long-trigger buttons are greyed out; read-only generation offers a Stop (AbortController; safe, writes nothing); the persisting “Confirm & create” is deliberately not cancellable to protect data integrity.
+- **Fixed “generation returns empty / too slow”**: structured tools use the fast model (measured: skill generation seconds; orchestration done in <10s).
+
+**版本说明**：1.0.117 为当前 Windows 桌面点版本，主题为「本机(client)技能的试运行真正落到当前机器 + 生成工具“按任务自动决定思考” + 长任务互斥/可取消 + 试运行结果独立弹窗」；已构建 Windows 1.0.117 MSI。本机桥桥日志改写入系统临时目录。
+**Version note**: 1.0.117 is the current Windows desktop point release, themed “Client-located trial runs land on the real current machine via the bridge; generators decide thinking type by task; long-run tasks gray out & are cancellable; trial results shown in a dialog”. A Windows 1.0.117 MSI was built. Native-bridge logs moved to the system temp directory.
+
+---
+
+# AG-UI 群聊桌面版 1.0.116 发布说明（1.0.117 之前的点版本）
+# AG-UI Group Chat Desktop 1.0.116 Release Notes (previous point release)
 
 ## 新增（中文）
 - **新的技能类型 `dotnet`（C#）**：技能正文可写 C# 源码（含 `public static string Run(string input)` 入口），运行时经 Roslyn 编译后执行。服务端（`server`）执行的 dotnet 在 Hub 进程内的可回收 `AssemblyLoadContext` 中运行（受限引用白名单 + `AllowUnsafe=false` + 超时 / 输出上限）；独立桥 `AguiGroupChat.NativeBridge` 新增 `DotnetRunner`，能在本机执行 `kind=dotnet` 隧道任务（Source = C#），因此浏览器所在主机的客户端 dotnet 技能由本机桥运行——浏览器自身无法编译 C#，客户端 dotnet 需触发者批准后经桥执行。
@@ -17,8 +41,8 @@
 - **Shell script BOM fix**：the server-side `SkillRunner` used to write shell scripts with a UTF-8 BOM，breaking even a valid first command under bash；scripts are now written as BOM-less UTF-8.
 - docker-compose now exposes `AGENTS_SKILL_AUTOTEST_SHELL`（option `Agents.SkillAutoTestServerShell`）。
 
-**版本说明**：1.0.116 为当前 Windows 桌面点版本，主题为「dotnet（C#）技能 + 试运行建议与编排冒烟自检」并包含 shell BOM 修复。
-**Version note**: 1.0.116 is the current Windows desktop point release, focused on dotnet (C#) skills, trial-run input suggestion & orchestration smoke/self-repair, plus the shell BOM fix.
+**版本说明**：1.0.116 是其上一桌面点版本，主题为「dotnet（C#）技能 + 试运行建议与编排冒烟自检」并包含 shell BOM 修复。
+**Version note**: 1.0.116 was the previous point release, recording dotnet (C#) skills, trial-run input suggestion & orchestration smoke/self-repair, plus the shell BOM fix.
 
 ---
 
