@@ -351,6 +351,31 @@ public sealed class AgentCatalog
             }
         }
 
+        // 组织方案草稿工具：仅供组织编排类智能体（挂载了 org_design 技能，能设计组织 / 团队方案）使用。
+        // 让它们能保存 / 取回 / 列本群草稿，跨话题、跨空档多轮续改方案文本；草稿不落库真组织。
+        if (tools is not null
+            && def.SkillDefIds is { Count: > 0 }
+            && def.SkillDefIds.Contains("org_design", StringComparer.OrdinalIgnoreCase))
+        {
+            var draftTools = new OrgDraftTools(_services, _loggerFactory);
+            var draftFuncs = new List<AITool>
+            {
+                AIFunctionFactory.Create(draftTools.SaveDraft, "org_draft_save",
+                    "把当前为某个组织/客服/办公团队设计的方案保存为本群草稿（slug 命名，同 slug 覆盖并升版本）。" +
+                    "当方案成熟、或即将被其它消息打断/翻篇前调用一次，确保可跨话题取回。参数：slug、title、content。"),
+                AIFunctionFactory.Create(draftTools.LoadDraft, "org_draft_load",
+                    "取回本群一份已保存的组织方案草稿全文（按 slug）。多轮/跨话题修改时，先 load 旧稿再基于其改进。参数：slug。"),
+                AIFunctionFactory.Create(draftTools.ListDrafts, "org_draft_list",
+                    "列出本群所有已保存的组织方案草稿（slug/标题/版本），供挑选要 load 或删除的那份。无需参数。"),
+                AIFunctionFactory.Create(draftTools.DeleteDraft, "org_draft_delete",
+                    "删除本群指定 slug 的组织方案草稿（不可恢复）。参数：slug。"),
+            };
+            var chatTools2 = (IList<AITool>)(chatOptions.ChatOptions.Tools ??= []);
+            foreach (var t in draftFuncs) chatTools2.Add(t);
+            _agentToolNames[agentId] = (_agentToolNames.TryGetValue(agentId, out var names2) ? names2.ToList() : [])
+                .Concat(draftFuncs.Select(t => t.Name)).Distinct().ToList();
+        }
+
         // 可复用技能（OpenClaw 风格）：把技能库中本智能体引用的技能逐个封装为 AIFunction 挂上。
         // shell / http / prompt 三类都经 SkillRunner 执行；需审批的技能用 ApprovalRequiredAIFunction 包装。
         if (def.SkillDefIds is { Count: > 0 } && _skillCatalog.Value is { } skillCatalog && _skillRunner.Value is { } runner)

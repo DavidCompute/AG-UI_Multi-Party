@@ -28,6 +28,7 @@
 - ✅ **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到**视觉模型**，图片以 base64 多模态内容喂给模型看图并作答；纯文本消息仍走常规 / 思考模型，行为不变。DeepSeek 下视觉模型默认 `deepseek-v4-flash-vision-exp`（可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关）；`mock` 提供方不支持视觉，图片消息按文本处理。图片直接从附件库按字节 + MIME 读取内联传入，无需另存文件；共享的群成员审批 / 发图片附件工作流不变。
 - ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先**对服务端执行的技能冒烟自测 + 大模型自动修复**（最多 3 次）再落库，幂等不部分写入）并返回 `smoke[]`，UI 在创建后的通知中心展示；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
 - ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` / `dotnet`（C#）四类——`shell` / `http` / `dotnet`（可执行命令 / 外部请求 / 运行 C# 源码）**仅系统管理员可创建 / 修改 / 删除**，普通用户只能建纯提示词技能；但**运行现有 `dotnet` 技能对全体登录用户开放**（可试运行服务端 dotnet，或经数字员工 / 客户端执行由本机桥运行，无需管理员）。本机（client 执行）的 shell / dotnet 技能经内网桥 / 前端在本机执行（浏览器无法编译 C#，dotnet 客户端技能在触发者批准后由本机桥 `DotnetRunner` 执行）；技能库支持搜索（前端过滤）与批量删除；技能库「试运行」会先**自动建议一段代表性入参示例**（`POST /ag-ui/skills/{skillId}/suggest`）再执行；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（`dotnet` 仅系统管理员可得）
+- ✅ **组织方案草稿（多轮续改，内置工具）**：组织构建类数字员工（挂载 `org_design` 技能的，如「组织架构构建师」）拥有草稿工具 `org_draft_save / org_draft_load / org_draft_list / org_draft_delete`。它们把正在打磨的组织 / 客服 / 办公团队方案以「英文 slug」存成本群草稿（版本自动递增），从而<b>跨话题、跨空档</b>（即使方案被挤出最近消息窗口）仍能取回旧稿继续多轮修改，再以同一 slug 覆盖升版。草稿库按「群」隔离、存入持久化扩展区 `orgDrafts`（Postgres 落 `agui_sections` / Memory 落 JSON 快照），重启不丢。**草稿永远只是“方案文本”，不自动落库创建真组织 / 技能**——真构建仍须管理员在「一键编排」中人工确认。
 - ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行
 - ✅ **平台级 RBAC**：SuperAdmin / Admin / Operator / User 四档平台角色；`Auth:SuperAdminUserIds`（或 `POST /ag-ui/admin/roles/{userId}` 由超级管理员在线授予）bootstrap，首个注册账号自举为 SuperAdmin → Admin（详见 `docs/RBAC.md`）
 - ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
@@ -39,7 +40,7 @@
 src/AguiGroupChat.Hub/           # 协议 Hub：入口与装配（Program.cs / HubApp.cs）、模型、存储、消息、传输、选项
 src/AguiGroupChat.Hub/Users/     # 用户管理：AuthService（注册/登录/会话/改密）、PasswordHasher（PBKDF2）、IUserStore、UserApi
 src/AguiGroupChat.Hub/Persistence/ # 持久化：PersistenceService（快照落盘/恢复）、ChangeHub、HubSnapshot DTO
-src/AguiGroupChat.Agents/        # MSAGENT 智能体网关：AgentGateway（IAgentGateway 实现）、AgentCatalog、MemoryContextProvider（RAG 注入）、KnowledgeBaseCatalog（知识库：文档切片向量 + 检索）、TwinService（用户分身 + ITwinAgentSync 钩子）、IAgentDefinitionStore（私密智能体归属）、MockChatClient、技能（AgentSkillCall 智能体间调用）；embedding 抽象（IEmbeddingProvider：HTTP / LLamaSharp 本地模型）；内置工具集（Tools/：calculator / unit_converter / group_memory_search / read_attachment / web_search / read_url）
+src/AguiGroupChat.Agents/        # MSAGENT 智能体网关：AgentGateway（IAgentGateway 实现）、AgentCatalog、MemoryContextProvider（RAG 注入）、KnowledgeBaseCatalog（知识库：文档切片向量 + 检索）、TwinService（用户分身 + ITwinAgentSync 钩子）、IAgentDefinitionStore（私密智能体归属）、MockChatClient、技能（AgentSkillCall 智能体间调用）；embedding 抽象（IEmbeddingProvider：HTTP / LLamaSharp 本地模型）；内置工具集（Tools/：calculator / unit_converter / group_memory_search / read_attachment / web_search / read_url / OrgDraftTools 组织方案草稿 save/load/list/delete）
 src/AguiGroupChat.Web/           # 演示 Web：组合根（Hub + Agents）+ 静态前端（index.html / app.js）+ TwinApi / AgentApi 等管理接口
 src/AguiGroupChat.Sdk/           # 第三方接入 SDK：AguiClient（HTTP 上行）+ AguiRealtimeClient（WS/SSE 下行）+ 强类型 Models
 src/AguiGroupChat.Desktop/       # 纯桌面版（Windows，WPF + WebView2）：SQLite + sqlite-vec 记忆、LLamaSharp 本地 embedding（bge-m3 模型，不入 git，MSI 内置 / 构建时用脚本下载）
@@ -482,6 +483,15 @@ public interface IAgentGateway
 | `group_memory_search` | 语义检索该智能体的历史记忆（同 RAG 的 Scope=agent，覆盖其所在的所有群），模型可主动回忆背景 | 否 |
 | `read_attachment` | 按附件 ID 读取上传文件文本（txt/md/json/csv 与 docx/xlsx/pptx/pdf） | 否 |
 | `publish_announcement` | 发布群公告（演示占位；默认需审批，人机交互 HITL） | **是** |
+
+**组织方案草稿工具（按智能体挂载）**：挂载了 `org_design` 技能的组织构建类数字员工（如「组织架构构建师」）额外获得以下工具——以「slug 命名草稿」在群内持久化编号的组织方案文本，便于跨话题 / 跨空档多轮续改；草稿只是方案文本，绝不自动落库真组织（见上文「一键编排」）：
+
+| 工具 | 说明 | 审批 |
+|---|---|---|
+| `org_draft_save(slug,title,content)` | 把当前方案存成本群草稿（同 slug 覆盖并升版本） | 否 |
+| `org_draft_load(slug)` | 取回本群指定 slug 的草稿全文（基于旧稿继续修改） | 否 |
+| `org_draft_list()` | 列出本群全部草稿（slug / 标题 / 版本） | 否 |
+| `org_draft_delete(slug)` | 删除本群指定 slug 草稿（不可恢复） | 否 |
 
 **网络工具（`Agents:EnableWebTools=true` 追加挂载，默认关，需外网）**：
 

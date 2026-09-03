@@ -32,6 +32,10 @@ public static class AgentHosting
         services.AddSingleton<KnowledgeBaseCatalog>(); // 知识库目录（文档切片向量 + 检索）
         services.AddSingleton<AgentSkillCatalog>(sp => new AgentSkillCatalog(
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(), options)); // 技能库（OpenClaw 风格可复用技能）
+        // 组织设计稿草稿库（数字员工跨话题多轮续改组织方案用）：内存权威 + ChangeHub 持久化
+        services.AddSingleton(sp => new OrgDraftStore(
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+            sp.GetService<AguiGroupChat.Hub.Persistence.ChangeHub>()));
         // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值取 Agents:DailyTokenQuotaPerUser）
         services.AddSingleton(sp => new AguiGroupChat.Hub.Agents.AgentUsageService(
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
@@ -340,6 +344,29 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("skills", snapshot, restore);
+        }
+    }
+
+    /// <summary>
+    /// 注册组织设计稿草稿库到持久化扩展区「orgDrafts」：memory 模式写入 JSON 快照（PersistenceService），
+    /// postgres 模式落库 agui_sections 表（ISectionStore）。
+    /// 须在应用构建后、状态恢复（InitializePersistence）之前调用（Web / 桌面组合根）。
+    /// </summary>
+    public static void RegisterOrgDraftPersistence(this IServiceProvider services)
+    {
+        var drafts = services.GetRequiredService<OrgDraftStore>();
+        Func<object?> snapshot = () => drafts.SnapshotAll();
+        Action<JsonElement> restore = element => drafts.RestoreAll(
+            element.Deserialize<List<OrgDraft>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("orgDrafts", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("orgDrafts", snapshot, restore);
         }
     }
 

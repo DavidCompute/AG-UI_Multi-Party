@@ -82,6 +82,7 @@ public static class DesktopApp
         app.Services.RegisterAgentPersistence();
         app.Services.RegisterKnowledgeBasePersistence();
         app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
+        app.Services.RegisterOrgDraftPersistence(); // 组织方案草稿（跨话题多轮续改）跨重启保持
         app.Services.RegisterSessionPersistence(); // 会话落库（哈希）：桌面重启后「保持登录」仍有效
         app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
         app.Services.RegisterModelConfigPersistence(); // 运行时模型配置跨重启保持
