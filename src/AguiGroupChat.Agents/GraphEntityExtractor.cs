@@ -59,8 +59,10 @@ public sealed class GraphEntityExtractor
     private async Task<GraphExtraction?> TryExtractWithLlmAsync(string text, CancellationToken ct)
     {
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+        // 实体/关系抽取要求“只输出严格 JSON”，属格式任务：即便全局思考模式开也不进 reasoner（慢+易空/超时，拖延图谱索引）
+        var ov = AgentCatalog.StructuredFastModel(isDeepSeek);
         using var client = AgentCatalog.BuildOpenAIChatClient(
-            _options, new AgentDefinition { AgentId = "graph_extractor", Nickname = "图谱抽取器" }, isDeepSeek).AsIChatClient();
+            _options, new AgentDefinition { AgentId = "graph_extractor", Nickname = "图谱抽取器" }, isDeepSeek, ov).AsIChatClient();
 
         var prompt =
             "你是知识图谱抽取器。从给定文本中抽取「实体-关系-实体」三元组，抽取原则：\n" +

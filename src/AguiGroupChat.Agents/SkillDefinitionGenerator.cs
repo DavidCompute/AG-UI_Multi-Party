@@ -36,8 +36,8 @@ public static class SkillDefinitionGenerator
         try
         {
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-            // 结构化 JSON/代码属确定性生成：无视思考模式、强制用 DeepSeek 常规对话模型（reasoner 慢且对结构化输出易空/超时）
-            var modelOverride = isDeepSeek ? "deepseek-chat" : null;
+            // 技能生成是“结构 JSON / 代码”格式任务：即使全局思考模式开也不进 reasoner（慢/易空）；见 AgentCatalog.StructuredFastModel
+            var modelOverride = AgentCatalog.StructuredFastModel(isDeepSeek);
             client = AgentCatalog.BuildOpenAIChatClient(
                 options, new AgentDefinition { AgentId = "skill_gen", Nickname = "技能生成器" }, isDeepSeek, modelOverride).AsIChatClient();
         }

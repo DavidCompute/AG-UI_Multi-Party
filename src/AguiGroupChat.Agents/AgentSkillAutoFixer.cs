@@ -97,7 +97,7 @@ public sealed class SkillAutoFixer
         try
         {
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-            var ov = isDeepSeek ? "deepseek-chat" : null; // 确定性短问答，强制常规模型
+            var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 自测短问答属格式任务
             using var client = AgentCatalog.BuildOpenAIChatClient(
                 _options, new AgentDefinition { AgentId = "skill_selfcheck", Nickname = "技能自测器" }, isDeepSeek, ov).AsIChatClient();
             var prompt =
@@ -192,7 +192,7 @@ public sealed class SkillAutoFixer
         try
         {
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-            var ov = isDeepSeek ? "deepseek-chat" : null; // 结构化改写，强制常规模型
+            var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 技能修正是结构化改写（JSON/脚本），不进 reasoner
             using var client = AgentCatalog.BuildOpenAIChatClient(
                 _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek, ov).AsIChatClient();
             var heading = def.Kind switch

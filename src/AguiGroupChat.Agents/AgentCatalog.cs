@@ -29,6 +29,14 @@ public sealed class AgentCatalog
     /// <summary>DeepSeek 视觉（图片理解）模型（需显式指定；deepseek-chat 不支持图片）。</summary>
     internal const string DeepSeekVisionModel = "deepseek-v4-flash-vision-exp";
 
+    /// <summary>“结构化/格式型”生成任务的模型选择：是否需要“思考”（用推理模型）。
+    /// 任务输出若会被机器按固定 JSON 或长度截取的短 token 解析，属于格式任务——
+    /// 推理模型(reasoner) 在“输出严格 JSON/代码/名称”这类任务上又慢又容易空返回或超时，
+    /// 因此一律强制用常规对话模型（deepseek-chat），即使全局 ThinkingMode 开着也不进入 reasoner。
+    /// 返回 null 表示“跟随全局思考模式”，供需要开放推理/创造的生成（人设、角色设定、指派引导等）不传 override。</summary>
+    internal static string? StructuredFastModel(bool isDeepSeek)
+        => isDeepSeek ? DeepSeekDefaultModel : null;
+
     private readonly AgentOptions _options;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IServiceProvider _services;

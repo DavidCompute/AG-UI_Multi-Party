@@ -29,8 +29,9 @@ public static class GroupNameGenerator
         try
         {
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 群名是 6-12 字短 token，属格式/创意轻量任务
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "group_name_gen", Nickname = "群名生成器" }, isDeepSeek).AsIChatClient();
+                options, new AgentDefinition { AgentId = "group_name_gen", Nickname = "群名生成器" }, isDeepSeek, ov).AsIChatClient();
         }
         catch (Exception ex)
         {

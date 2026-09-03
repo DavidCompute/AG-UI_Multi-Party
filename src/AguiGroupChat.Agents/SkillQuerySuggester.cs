@@ -24,7 +24,7 @@ public static class SkillQuerySuggester
         try
         {
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-            var ov = isDeepSeek ? "deepseek-chat" : null; // 短文本示例属确定性任务，强制常规模型
+            var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 单短字符串入参属格式任务
             using var client = AgentCatalog.BuildOpenAIChatClient(
                 options, new AgentDefinition { AgentId = "skill_suggester", Nickname = "技能参数建议" }, isDeepSeek, ov).AsIChatClient();
             var kindNote = kind switch
