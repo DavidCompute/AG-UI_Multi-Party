@@ -1,5 +1,23 @@
-# AG-UI 群聊桌面版 1.0.117 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.117 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.118 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.118 Release Notes (current desktop release)
+
+## 新增（中文）
+- **Client（本机）技能只在该“发起请求的用户所在机器”执行**：接受 A 口径——凡 `ExecutionLocation=Client` 的技能只能跑在提问者消息所附的本机桥那台机器（`msg.BridgeClient`）；该用户本机无桥 / 未上报一律返回“执行失败，没有安装桥”，不再回落任何 agent/平台级桥。桌面版（宿主即本机）直接执行，无桥限制。
+- **修复“内部协调 JSON 泄漏到聊天”**：把 `{"needsMore":…,…,"answer":…}` 这类协调 JSON 的剥壳铺到各最终答复出口；若模型把内部决策 JSON 原样当正文，只把 `answer` 给用户看。
+- 附带：本机/client 试运行结果独立弹窗显示、结果真落到当前机器（系列 1.0.117 已梳理的改进继续有效）。
+
+## New (English)
+- **Client (local) skills execute only on the requesting user’s machine**: under policy A, any `ExecutionLocation=Client` skill runs only on the bridge of the originator’s message (`msg.BridgeClient`); if that user has no bridge / didn’t report one, it returns “execution failed: no bridge installed” and never falls back to an agent/platform bridge. Desktop (host == the user machine) executes directly without a bridge.
+- **Stop internal coordination JSON from leaking into the chat**: unwrap `{"needsMore":…,…,"answer":…}` to just `answer` at every final-reply funnel; won’t affect normal prose.
+- Carried over: trial-run results shown in a dedicated dialog and really landing on the current machine (1.0.117 improvements).
+
+**版本说明**：1.0.118 为当前 Windows 桌面点版本，主题为「Client 技能只跑在发起用户那台机器（A 口径）+ 收尾剥离内部协调 JSON」；本机桥日志写系统临时目录。
+**Version note**: 1.0.118 is the current Windows desktop point release, themed “Client skills run only on the originating user’s machine (policy A) + strip internal coordination JSON from final replies”.
+
+---
+
+# AG-UI 群聊桌面版 1.0.117 发布说明（上一版本）
+# AG-UI Group Chat Desktop 1.0.117 Release Notes (previous point release)
 
 ## 新增（中文）
 - **本机(client)技能的“试运行”真正落到当前机器**：技能库试运行 `/run` 里，`ExecutionLocation=Client` 的 **dotnet(C#)** 与本机 **shell** 技能（如系统内置的 `服务状态`）会经<br>本机桥（优先按浏览器上报的 `clientId` 路由；否则落在平台级桥，即当前机器）在本机**真实编译/执行并回传结果**——不再误把 PowerShell 正文交给服务端 Linux bash 而报 `Get-Service: command not found`。（前置：本机已启动 `AguiGroupChat.NativeBridge`。）
@@ -17,8 +35,8 @@
 - **Long-run concurrency guard + cancellable “Stop”**: while skill/orchestration previews generate, other long-trigger buttons are greyed out; read-only generation offers a Stop (AbortController; safe, writes nothing); the persisting “Confirm & create” is deliberately not cancellable to protect data integrity.
 - **Fixed “generation returns empty / too slow”**: structured tools use the fast model (measured: skill generation seconds; orchestration done in <10s).
 
-**版本说明**：1.0.117 为当前 Windows 桌面点版本，主题为「本机(client)技能的试运行真正落到当前机器 + 生成工具“按任务自动决定思考” + 长任务互斥/可取消 + 试运行结果独立弹窗」；已构建 Windows 1.0.117 MSI。本机桥桥日志改写入系统临时目录。
-**Version note**: 1.0.117 is the current Windows desktop point release, themed “Client-located trial runs land on the real current machine via the bridge; generators decide thinking type by task; long-run tasks gray out & are cancellable; trial results shown in a dialog”. A Windows 1.0.117 MSI was built. Native-bridge logs moved to the system temp directory.
+**版本说明**：1.0.117 是其上一桌面点版本，主题为「本机(client)技能的试运行真正落到当前机器 + 生成工具“按任务自动决定思考” + 长任务互斥/可取消 + 试运行结果独立弹窗」；已构建 Windows 1.0.117 MSI。本机桥桥日志改写入系统临时目录。
+**Version note**: 1.0.117 is the previous point release themed “Client-located trial runs land on the real current machine via the bridge; generators decide thinking type by task; long-run tasks gray out & are cancellable; trial results shown in a dialog”. A Windows 1.0.117 MSI was built. Native-bridge logs moved to the system temp directory.
 
 ---
 
