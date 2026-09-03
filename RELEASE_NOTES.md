@@ -1,5 +1,21 @@
-# AG-UI 群聊桌面版 1.0.118 发布说明（当前桌面版）
-# AG-UI Group Chat Desktop 1.0.118 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.119 发布说明（当前桌面版）
+# AG-UI Group Chat Desktop 1.0.119 Release Notes (current desktop release)
+
+## 新增（中文）
+- **内部协调 JSON 的“整段二次剥壳”**：智能体消息收尾（EndAgentMessage）时把整段正文再归一一次——若它就是 {\"needsMore\":…,\"answer\":…} 协调 JSON，落库与广播前统一替换为用户可读的 answer；即便此前被拆成多段流式发给用户，也会在完结前被纠正。
+- 承上：Client（本机）技能只在该“发起请求的用户所在机器”执行（A 口径）、本机无桥报“执行失败，没有安装桥”；试运行结果独立弹窗、结果真正落到当前机器等系列改进持续有效。
+
+## New (English)
+- **Second-pass cleanup of coordination JSON at message end**: at agent-message End, if the whole content is an internal {\"needsMore\":…,\"answer\":…} object, it is rewritten to its user-facing answer before store/broadcast — even if earlier streamed in fragments.
+- Carried: Client (local) skills run only on the originating user’s machine (policy A); no bridge → “execution failed: no bridge installed”; trial results in a dialog and truly landing on the current machine.
+
+**版本说明**：1.0.119 为当前 Windows 桌面点版本，主题为「内部协调 JSON 整段二次剥壳（收尾归一）」，并包含 Client 技能 A 口径系列修复；已构建 Windows 1.0.119 MSI。本机桥日志写系统临时目录。
+**Version note**: 1.0.119 is the current Windows desktop point release, themed “second-pass whole-message cleanup of coordination JSON”, including the Client-skill policy-A series; a Windows 1.0.119 MSI was built.
+
+---
+
+# AG-UI 群聊桌面版 1.0.118 发布说明（上一版本）
+# AG-UI Group Chat Desktop 1.0.118 Release Notes (previous point release)
 
 ## 新增（中文）
 - **Client（本机）技能只在该“发起请求的用户所在机器”执行**：接受 A 口径——凡 `ExecutionLocation=Client` 的技能只能跑在提问者消息所附的本机桥那台机器（`msg.BridgeClient`）；该用户本机无桥 / 未上报一律返回“执行失败，没有安装桥”，不再回落任何 agent/平台级桥。桌面版（宿主即本机）直接执行，无桥限制。
@@ -11,8 +27,8 @@
 - **Stop internal coordination JSON from leaking into the chat**: unwrap `{"needsMore":…,…,"answer":…}` to just `answer` at every final-reply funnel; won’t affect normal prose.
 - Carried over: trial-run results shown in a dedicated dialog and really landing on the current machine (1.0.117 improvements).
 
-**版本说明**：1.0.118 为当前 Windows 桌面点版本，主题为「Client 技能只跑在发起用户那台机器（A 口径）+ 收尾剥离内部协调 JSON」；本机桥日志写系统临时目录。
-**Version note**: 1.0.118 is the current Windows desktop point release, themed “Client skills run only on the originating user’s machine (policy A) + strip internal coordination JSON from final replies”.
+**版本说明**：1.0.118 是其上一桌面点版本，主题为「Client 技能只跑在发起用户那台机器（A 口径）+ 收尾剥离内部协调 JSON」；本机桥日志写系统临时目录。
+**Version note**: 1.0.118 is the previous point release, themed “Client skills run only on the originating user’s machine (policy A) + strip internal coordination JSON from final replies”.
 
 ---
 
