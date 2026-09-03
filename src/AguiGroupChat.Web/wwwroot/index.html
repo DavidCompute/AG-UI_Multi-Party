@@ -366,6 +366,7 @@
       </div>
       <div class="org-toolbar" style="justify-content:flex-start;gap:8px">
         <button id="orgOrchGen" class="send" data-i18n="org.orchGen">✨ 生成方案预览</button>
+        <button id="orgOrchStop" class="btn-ghost danger hidden" data-i18n="msg.stopGenerating">停止生成</button>
         <span class="muted" id="orgOrchStatus" style="font-size:12px"></span>
       </div>
       <div class="form-group">
@@ -425,6 +426,7 @@
             <div class="skill-gen-row">
               <textarea id="sgRequest" class="modal-input agent-instructions" rows="3" style="flex:1;resize:vertical" maxlength="500" data-i18n-placeholder="skill.gen.requestPh"></textarea>
               <button id="sgGenerate" class="send" style="white-space:nowrap" data-i18n="skill.gen.generate">✨ 生成</button>
+              <button id="sgStopGen" class="btn-ghost danger hidden" style="white-space:nowrap" data-i18n="msg.stopGenerating">停止生成</button>
             </div>
             <label class="skill-gen-client"><input id="sgPreferClient" type="checkbox" /> <span data-i18n="skill.gen.preferClient">优先本机执行（查本机/桌面信息）</span></label>
             <p class="form-hint muted" style="padding:2px 0 6px" data-i18n="skill.gen.hint">生成结果会填入下方各字段，可再人工微调后保存。</p>

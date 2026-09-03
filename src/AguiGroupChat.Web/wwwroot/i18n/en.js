@@ -250,6 +250,9 @@ window.I18N_DICTS.en = {
   "org.orchStreamWait": "Connecting to the model for streaming generation...",
   "org.orchStreamProgress": "Seen {agents} digital employees / {skills} skills ... generating",
   "org.orchGenEmpty": "The model returned no valid organization plan; please retry",
+  "org.orchBusy": "Another generation task (organization orchestration / skill generation) is running; please wait",
+  "org.orchStopped": "Stopped this generation; nothing was written",
+  "org.orchStreamErr": "Generation aborted",
 
   /* --- Skill library (reusable skills shell / http / prompt) --- */
   "skill.toolbarBtn": "Skills",
@@ -266,6 +269,8 @@ window.I18N_DICTS.en = {
   "skill.gen.generating": "Generating…",
   "skill.gen.done": "Generated and filled into the form; you can tweak and save",
   "skill.gen.fail": "Skill generation failed: {err}",
+  "skill.gen.busy": "Another generation task (organization orchestration / skill generation) is running; please wait",
+  "skill.gen.stopped": "Stopped this generation; nothing was written",
   "skill.empty": "The skill library is empty. Click \"+ New Skill\" to create the first reusable skill.",
   "skill.search": "Search skills (name / ID / type / description)…",
   "skill.searchEmpty": "No matching skills",
@@ -858,6 +863,7 @@ window.I18N_DICTS.en = {
   /* --- 通用 --- */
   "common.loginFirst": "Please sign in first",
   "common.saving": "⏳ Saving…",
+  "common.busyLongTask": "A generation task is running; wait for it to finish or hit Stop first",
 
   /* --- 数字员工导出 / 导入 / 选择项 --- */
   "agent.exportNone": "No digital employees to export",

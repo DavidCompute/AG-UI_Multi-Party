@@ -1282,9 +1282,61 @@ async function applyOrgOptimize() {
 
 let orchestrationPreview = null;
 
+/* ---- 长任务（生成技能 / 生成组织方案）的并发保护与可用“停止”取消 ----
+ * 这些任务调用大模型、耗时数秒到数分钟，期间不应与其它长任务并发；
+ * 提供“停止”用 AbortController 取消只读的生成请求（不写库，安全）；
+ * 真正写库的“确认并创建（apply）”不纳入取消，避免半途落库破坏数据完整性。 */
+let longTaskBusy = false;          // 是否正有一个长任务在跑（用于互相置灰 + 拦截再次触发）
+let longTaskAbort = null;          // 当前长任务的 AbortController（可取消类）
+let longTaskCancellable = false;   // 当前长任务是否允许“停止”（只读生成 task=true；写库 apply=false）
+const LONG_TASK_TRIGGERS = ["agentOrchBtn", "agentOrgBtn", "agentSkillLibBtn", "afSkillLibManageBtn"];
+
+/** 长任务开始/结束：置灰所有可触发长任务的顶层按钮 + 相关打开入口，防止并发 & 中途误点。 */
+function setLongTaskUIBusy(busy) {
+  LONG_TASK_TRIGGERS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
+}
+
+/** 长任务入口的公共护栏：已有长任务在跑则拒绝并发触发。 */
+function longTaskGuard() {
+  if (longTaskBusy) { toast(t("common.busyLongTask")); return false; }
+  return true;
+}
+
+/** 发起一个长任务：置位全局忙标志 + 置灰其它长按钮。
+ * <paramref name>cancellable</paramref>：仅「只读的生成/预览」才可为 true（供“停止”取消，不破坏数据）；
+ * 会写库的 apply 传 false（不发中止句柄，避免取消半途破坏数据完整性）。 */
+function beginLongTask(cancellable = false) {
+  longTaskBusy = true;
+  longTaskCancellable = !!cancellable;
+  longTaskAbort = longTaskCancellable ? new AbortController() : null;
+  setLongTaskUIBusy(true);
+  return longTaskAbort;
+}
+
+/** 结束长任务并复位 UI（按钮、标志）。 */
+function endLongTask() {
+  longTaskBusy = false;
+  longTaskCancellable = false;
+  longTaskAbort = null;
+  setLongTaskUIBusy(false);
+}
+
+/** 供“停止 / 关闭弹窗”取消当前只读长任务用：仅当任务可取消时真正 abort。 */
+function cancelLongTaskIfAny() {
+  if (longTaskBusy && longTaskCancellable && longTaskAbort && !longTaskAbort.signal.aborted) {
+    longTaskAbort.abort();
+    return true;
+  }
+  return false;
+}
+
 /** 打开一键编排弹窗（需登录）。 */
 function openOrgOrchestrate() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  if (!longTaskGuard()) { toast(t("org.orchBusy")); return; }  // 已有长任务（生成技能等）在跑时暂不打开，避免并发生成
   orchestrationPreview = null;
   $("orgOrchPreview").textContent = t("org.orchEmpty");
   $("orgOrchReq").value = "";
@@ -1293,15 +1345,20 @@ function openOrgOrchestrate() {
   $("orgOrchStatus").textContent = "";
   $("orgOrchApply").disabled = true;
   $("orgOrchStream")?.classList.add("hidden");
+  $("orgOrchStop")?.classList.add("hidden");
   $("orgOrchModal").classList.remove("hidden");
+  $("orgOrchReq").focus();
 }
 
-/** 生成方案预览（SSE 流式，方案 C：逐 token 实时展示生成过程 + 实时统计已见岗位/技能）。 */
+/** 生成方案预览（SSE 流式，方案 C：逐 token 实时展示生成过程 + 实时统计已见岗位/技能）。可“停止”取消（不写库，安全）。 */
 async function generateOrchestration() {
   const requirement = ($("orgOrchReq").value || "").trim();
   if (requirement.length < 2) { toast(t("org.orchReqShort")); return; }
+  if (!longTaskGuard()) { toast(t("org.orchBusy")); return; }
+  const ctrl = beginLongTask(true); // 只读预览生成，可“停止”取消
   $("orgOrchGen").disabled = true;
   $("orgOrchApply").disabled = true;
+  $("orgOrchStop").classList.remove("hidden"); // 生成期间显示「停止生成」
   $("orgOrchStatus").textContent = t("org.orchGenIns") + "…";
   $("orgOrchPreview").textContent = t("org.orchGenIns") + "…";
 
@@ -1312,13 +1369,16 @@ async function generateOrchestration() {
   const textEl = $("orgOrchStreamText");
   metaEl.textContent = t("org.orchStreamWait");
   textEl.textContent = "";
+  let cancelled = false;
 
   try {
     const res = await fetch("/ag-ui/agents/orchestrate/stream", {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({ requirement }),
+      signal: ctrl.signal, // “停止”断开即可中断该只读预览（服务端捕获取消，不落库）
     });
     if (!res.ok || !res.body) {
+      if (ctrl.signal.aborted) { cancelled = true; return; }
       let msg = `HTTP ${res.status}`;
       try { const j = await res.json(); msg = j.message || j.error || msg; } catch {}
       throw new Error(msg);
@@ -1346,7 +1406,7 @@ async function generateOrchestration() {
         $("orgOrchApply").disabled = false;
         streamPanel.classList.add("hidden");
       } else if (msg.type === "error") {
-        throw new Error(msg.message || t("org.orchGenFail"));
+        throw new Error(msg.message || t("org.orchStreamErr"));
       }
     };
     for (;;) {
@@ -1361,15 +1421,24 @@ async function generateOrchestration() {
         if (dataLine) processEvent(dataLine.slice(5).trim());
       }
     }
+    if (ctrl.signal.aborted) cancelled = true;
   } catch (ex) {
-    if (!$("orgOrchApply").disabled || !orchestrationPreview) {
+    if (ctrl.signal.aborted) { cancelled = true; }
+    else if ($("orgOrchApply").disabled || !orchestrationPreview) {
       // 未成功生成时报告失败；已生成完成（done 后抛错）不覆盖预览
       toast(t("org.orchGenFail", { err: ex.message }));
       $("orgOrchPreview").textContent = "";
       $("orgOrchStatus").textContent = "";
     }
   } finally {
+    $("orgOrchStop").classList.add("hidden");
     $("orgOrchGen").disabled = false;
+    endLongTask();
+    if (cancelled) {
+      $("orgOrchGen").disabled = false;
+      orchestrationPreview = null;
+      toast(t("org.orchStopped"));
+    }
   }
 }
 
@@ -1394,9 +1463,13 @@ function formatOrchestrationPlan(p) {
   return lines.join("\n");
 }
 
-/** 确认并创建（apply 落库）；成功后刷新数字员工 / 技能 / 组织架构。 */
+/** 确认并创建（apply 落库）；成功后刷新数字员工 / 技能 / 组织架构。
+ * 此步会真实写库（技能/员工/连接），为保数据完整性不允许中途取消：
+ * 用 long-task 开关把其它长按钮置灰（禁止并发），并刻意不向其暴露 Stop。 */
 async function applyOrchestration() {
   if (!orchestrationPreview || !state.token) return;
+  if (!longTaskGuard()) { toast(t("org.orchBusy")); return; }
+  beginLongTask(); // 置忙：灰掉其它长逻辑按钮，合并生成期间禁点；注释：不给中止句柄 => apply 不可被“停止”打断
   $("orgOrchApply").disabled = true;
   $("orgOrchStatus").textContent = t("org.orchApplying") + "…";
   try {
@@ -1439,6 +1512,9 @@ async function applyOrchestration() {
   } catch (ex) {
     toast(t("org.orchApplyFail", { err: ex.message }));
     $("orgOrchApply").disabled = false;
+  } finally {
+    $("orgOrchApply").disabled = !orchestrationPreview; // 生成完成且有方案才可再创建；无方案则仍禁用
+    endLongTask(); // 记得复位全局广播开关
   }
 }
 
@@ -1839,6 +1915,7 @@ function updateSkillBatchStatus() {
 /** 打开技能库弹窗。 */
 async function openSkillModal() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  if (!longTaskGuard()) { toast(t("skill.gen.busy")); return; } // 已有长任务（组织编排等）在跑时暂不打开，避免并发生成
   skillSearchQuery = "";
   selectedSkills = new Set();
   const box = $("skillSearch"); if (box) box.value = "";
@@ -1931,17 +2008,24 @@ function detectClientOs() {
   return "other";
 }
 
-/** 试运行技能（用当前表单定义或已存定义跑一次）。 */
+/** 用自然语言生成技能并回填表单（可“停止”取消——只读生成，不写库，安全）。 */
 async function generateSkill() {
   const request = $("sgRequest").value.trim();
   if (!request) { toast(t("skill.gen.needRequest")); return; }
-  const btn = $("sgGenerate"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ " + t("skill.gen.generating");
+  if (!longTaskGuard()) { toast(t("skill.gen.busy")); return; }
+  const btn = $("sgGenerate");
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ " + t("skill.gen.generating");
+  const ctrl = beginLongTask(true); // 只读生成本机能填表单，允许“停止”取消
+  $("sgStopGen").classList.remove("hidden"); // 生成期间显示「停止生成」
+  let cancelled = false;
   try {
     const res = await fetch("/ag-ui/skills/generate", {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
       body: JSON.stringify({ request, preferClient: $("sgPreferClient").checked, clientOs: detectClientOs() }),
+      signal: ctrl.signal, // “停止”断开本次只读生成请求
     });
     const data = await res.json().catch(() => null);
+    if (ctrl.signal.aborted) { cancelled = true; return; }
     if (!res.ok) { toast(t("skill.gen.fail", { err: errMsg(data, res.status) })); return; }
     $("sfName").value = data.name || "";
     $("sfSkillId").value = data.skillId || "";
@@ -1953,8 +2037,15 @@ async function generateSkill() {
     $("sfRequiresApproval").checked = !!data.requiresApproval;
     syncSkillKind(); // 刷新正文标签 / 解释器 / ClientRunner 显隐
     toast(t("skill.gen.done"));
-  } catch (ex) { toast(t("skill.gen.fail", { err: ex.message })); }
-  finally { btn.disabled = false; btn.textContent = orig; }
+  } catch (ex) {
+    if (ctrl.signal.aborted) { cancelled = true; }
+    else toast(t("skill.gen.fail", { err: ex.message }));
+  } finally {
+    $("sgStopGen").classList.add("hidden");
+    btn.disabled = false; btn.textContent = orig;
+    endLongTask();
+    if (cancelled) { toast(t("skill.gen.stopped")); }
+  }
 }
 
 async function testSkill(skillId) {
@@ -7052,13 +7143,22 @@ function init() {
   $("agentOrchBtn").onclick = openOrgOrchestrate;
   $("orgOrchGen").onclick = generateOrchestration;
   $("orgOrchApply").onclick = applyOrchestration;
-  $("orgOrchCancel").onclick = () => $("orgOrchModal").classList.add("hidden");
+  // 「停止生成」取消本次只读预览（不写库，安全）；关闭弹窗时若有在跑的表单也一并中断，避免锁残留
+  $("orgOrchStop").onclick = cancelLongTaskIfAny;
+  const orgCloseAbort = () => {
+    cancelLongTaskIfAny();
+    $("orgOrchModal").classList.add("hidden");
+  };
+  $("orgOrchCancel").onclick = orgCloseAbort;
   $("orgOrchReq").addEventListener("keydown", (e) => { if (e.key === "Enter") generateOrchestration(); });
   // 技能库：工具条入口 + 弹窗内部动作
   $("agentSkillLibBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } await loadSkills(); openSkillModal(); };
-  $("skillCloseBtn").onclick = () => $("skillModal").classList.add("hidden");
+  $("skillCloseBtn").onclick = () => {
+    cancelLongTaskIfAny(); // 关闭技能库若仍有可取消的生成则中止，避免后台残留与锁未复位
+    $("skillModal").classList.add("hidden");
+  };
   $("skillAddBtn").onclick = () => openSkillForm(null);
-  $("sfBack").onclick = showSkillListView;
+  $("sfBack").onclick = () => { if (longTaskBusy) { toast(t("common.busyLongTask")); return; } showSkillListView(); };
   $("skillSearch").addEventListener("input", (e) => { skillSearchQuery = e.target.value; renderSkillList(); });
   $("skillSelectAll").addEventListener("change", (e) => {
     if (e.target.checked) selectedSkills = new Set(skillList.filter((s) => !s.ownerId || state.isAdmin || s.ownerId === state.memberId).map((s) => s.skillId));
@@ -7071,6 +7171,7 @@ function init() {
   $("sfSave").onclick = saveSkill;
   $("sfTest").onclick = () => testSkill(editingSkillId);
   $("sgGenerate").onclick = generateSkill;
+  $("sgStopGen").onclick = cancelLongTaskIfAny; // 停止本次技能生成（只读，安全）
   $("afSkillLibManageBtn").onclick = openSkillModal;
   // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);

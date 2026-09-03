@@ -250,6 +250,9 @@ window.I18N_DICTS.zh = {
   "org.orchStreamWait": "正在连接模型，准备流式生成…",
   "org.orchStreamProgress": "已识别 {agents} 名数字员工 / {skills} 个技能…生成中",
   "org.orchGenEmpty": "模型未返回有效的组织方案，请重试",
+  "org.orchBusy": "已有其它生成任务（技能生成/组织编排）进行中，请稍候",
+  "org.orchStopped": "已停止本次生成，未写入任何数据",
+  "org.orchStreamErr": "生成过程中止",
 
   /* --- 技能库（可复用技能 shell / http / prompt） --- */
   "skill.toolbarBtn": "技能库",
@@ -266,6 +269,8 @@ window.I18N_DICTS.zh = {
   "skill.gen.generating": "生成中…",
   "skill.gen.done": "已生成并填入表单，可微调后保存",
   "skill.gen.fail": "技能生成失败：{err}",
+  "skill.gen.busy": "已有其它生成任务（组织编排/技能生成）进行中，请稍候",
+  "skill.gen.stopped": "已停止本次生成，未写入任何数据",
   "skill.empty": "技能库为空，点「新增技能」创建第一个可复用技能。",
   "skill.search": "搜索技能（名称 / ID / 类型 / 描述）…",
   "skill.searchEmpty": "无匹配技能",
@@ -856,6 +861,7 @@ window.I18N_DICTS.zh = {
   /* --- 通用 --- */
   "common.loginFirst": "请先登录",
   "common.saving": "⏳ 保存中…",
+  "common.busyLongTask": "有生成类任务进行中，请等待完成或点“停止”后再操作",
 
   /* --- 数字员工导出 / 导入 / 选择项 --- */
   "agent.exportNone": "没有可导出的数字员工",
