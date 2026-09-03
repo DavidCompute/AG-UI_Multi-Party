@@ -36,8 +36,10 @@ public static class SkillDefinitionGenerator
         try
         {
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            // 结构化 JSON/代码属确定性生成：无视思考模式、强制用 DeepSeek 常规对话模型（reasoner 慢且对结构化输出易空/超时）
+            var modelOverride = isDeepSeek ? "deepseek-chat" : null;
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "skill_gen", Nickname = "技能生成器" }, isDeepSeek).AsIChatClient();
+                options, new AgentDefinition { AgentId = "skill_gen", Nickname = "技能生成器" }, isDeepSeek, modelOverride).AsIChatClient();
         }
         catch (Exception ex)
         {
@@ -47,7 +49,10 @@ public static class SkillDefinitionGenerator
         try
         {
             var prompt = BuildPrompt(req, preferClient, allowDotnet, runContextNote);
-            var resp = await client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct);
+            // 限制最大输出：技能正文是长代码/JSON，无上限会让 DeepSeek 产出冗长内容导致慢 / 返回空；给足余量并收拢输出
+            var opts = new Microsoft.Extensions.AI.ChatOptions { MaxOutputTokens = 2400 };
+            var resp = await client.GetResponseAsync(
+                [new ChatMessage(ChatRole.User, prompt)], opts, cancellationToken: ct);
             var text = resp.Text?.Trim();
             if (string.IsNullOrWhiteSpace(text))
                 throw new InvalidOperationException("技能生成返回为空，请重试");

@@ -97,8 +97,9 @@ public sealed class SkillAutoFixer
         try
         {
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            var ov = isDeepSeek ? "deepseek-chat" : null; // 确定性短问答，强制常规模型
             using var client = AgentCatalog.BuildOpenAIChatClient(
-                _options, new AgentDefinition { AgentId = "skill_selfcheck", Nickname = "技能自测器" }, isDeepSeek).AsIChatClient();
+                _options, new AgentDefinition { AgentId = "skill_selfcheck", Nickname = "技能自测器" }, isDeepSeek, ov).AsIChatClient();
             var prompt =
                 "以下是一个数字员工的“技能”。请把它当作给你的指令现场执行一次并给出<b>具体结果</b>（这是自测，直接作答）。\n" +
                 $"技能说明：{description}\n模板：\n{body}\n\n自测请求：请对一个小而典型的样例执行本技能并输出结果。";
@@ -191,8 +192,9 @@ public sealed class SkillAutoFixer
         try
         {
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            var ov = isDeepSeek ? "deepseek-chat" : null; // 结构化改写，强制常规模型
             using var client = AgentCatalog.BuildOpenAIChatClient(
-                _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek).AsIChatClient();
+                _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek, ov).AsIChatClient();
             var heading = def.Kind switch
             {
                 AgentSkillKind.Http => "该技能是 HTTP 配置：请只输出一段<b>合法 JSON 配置</b>作正文，形如 {\"method\":\"GET\",\"url\":\"...\",\"headers\":{},\"body\":null}；url 需 http/https 且真实可用（可含 ${query} 占位）。不要任何其它文字。",

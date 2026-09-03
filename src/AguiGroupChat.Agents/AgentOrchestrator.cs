@@ -27,8 +27,9 @@ public static class AgentOrchestrator
         try
         {
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            var ov = isDeepSeek ? "deepseek-chat" : null; // 确定性 JSON 任务：强制常规模型，不用 reasoner（慢/结构输出易空或超时）
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek).AsIChatClient();
+                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek, ov).AsIChatClient();
         }
         catch (Exception ex)
         {
@@ -77,8 +78,9 @@ public static class AgentOrchestrator
         try
         {
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            var ov2 = isDeepSeek ? "deepseek-chat" : null; // 同：流式也走常规模型，保证速度与有效 JSON
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek).AsIChatClient();
+                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek, ov2).AsIChatClient();
         }
         catch (Exception ex)
         {
