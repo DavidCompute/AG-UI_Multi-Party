@@ -24,6 +24,7 @@ public sealed class NativeTunnelClient
     private readonly string _token;
     private readonly string _client;
     private readonly ShellRunner _runner = new();
+    private readonly DotnetRunner _dotnet = new();
     private readonly CancellationTokenSource _quit = new();
 
     public NativeTunnelClient(string hubBase, string agent, string token, string? clientId = null)
@@ -121,8 +122,16 @@ public sealed class NativeTunnelClient
         string? output = null; string? errorLog = null;
         try
         {
-            output = await _runner.RunAsync(task.Command ?? "", task.Cwd, task.TimeoutSec, task.Query, ct).ConfigureAwait(false);
-            Console.WriteLine($"  [隧道] 任务 {task.TaskId} 执行完成（{Truncate(output ?? "")}）");
+            if (string.Equals(task.Kind, "dotnet", StringComparison.OrdinalIgnoreCase))
+            {
+                output = await _dotnet.RunAsync(task.Source ?? task.Command ?? "", task.Query ?? "", ct).ConfigureAwait(false);
+                Console.WriteLine($"  [隧道] 任务 {task.TaskId} (dotnet) 完成（{Truncate(output ?? "")}）");
+            }
+            else
+            {
+                output = await _runner.RunAsync(task.Command ?? "", task.Cwd, task.TimeoutSec, task.Query, ct).ConfigureAwait(false);
+                Console.WriteLine($"  [隧道] 任务 {task.TaskId} 执行完成（{Truncate(output ?? "")}）");
+            }
         }
         catch (Exception ex)
         {
@@ -150,6 +159,6 @@ public sealed class NativeTunnelClient
 
     private static string Truncate(string s) => s.Length <= 120 ? s : s[..120] + "…";
 
-    /// <summary>下行任务体（与 Hub 侧序列化字段对齐）。</summary>
-    private sealed record TunnelTask(string TaskId, string? Kind, string? Command, string? Cwd, int? TimeoutSec, string? Query);
+    /// <summary>下行任务体（与 Hub 侧序列化对齐）：Shell 用 Command/Cwd/TimeoutSec/Query；dotnet 用 Source(C#)+Query。</summary>
+    private sealed record TunnelTask(string TaskId, string? Kind, string? Command, string? Cwd, int? TimeoutSec, string? Query, string? Source);
 }

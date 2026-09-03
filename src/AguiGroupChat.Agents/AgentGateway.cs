@@ -306,6 +306,34 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return catalog.ListAll().FirstOrDefault(s => s.SkillId == toolName);
     }
 
+    /// <summary>该工具（客户端技能）是不是本机 dotnet（C#）类型：由桥在本机编译执行，浏览器无法直接运行任意 C#。</summary>
+    private bool IsClientDotnetSkill(string toolName)
+    {
+        var skill = GetSkillById(toolName);
+        return skill is not null
+            && skill.Kind == AgentSkillKind.Dotnet
+            && skill.ExecutionLocation == AgentSkillExecutionLocation.Client;
+    }
+
+    /// <summary>本机 dotnet 技能的 C# 源码（= 技能正文）。</summary>
+    private string? ClientDotnetSource(string toolName)
+    {
+        var skill = GetSkillById(toolName);
+        return skill?.Kind == AgentSkillKind.Dotnet ? (skill.Body ?? "") : null;
+    }
+
+    /// <summary>经隧道执行本机 dotnet（C#）技能并按“客户端优先、其次 agent/平台”路由选桥；无可用桥返回 null。</summary>
+    private async Task<string?> ExecuteTunnelDotnetAsync(
+        string agentId, string? clientId, string source, string? query,
+        TimeSpan waitTimeout, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value is { } t1 && t1.HasClient(clientId))
+            return await t1.ExecuteDotnetForClientAsync(clientId, source, query, waitTimeout, ct);
+        if (_nativeTunnel.Value?.HasTunnel(agentId) == true)
+            return await _nativeTunnel.Value.ExecuteDotnetAsync(agentId, source, query, waitTimeout, ct);
+        return null;
+    }
+
     /// <summary>从客户端执行技能的 <see cref="AgentSkillDefinition.ClientRunner"/>（JSON）解析 shell 命令 / 工作目录 / 超时，供内网隧道执行。
     /// 仅支持单技能对象（非批量数组）；解析失败返回 false。</summary>
     private bool TryParseClientShell(string toolName, out string? command, out string? cwd, out int? timeoutSec)
@@ -2815,6 +2843,32 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 }
                 MarkSkillsApproved(pending.Context.ThreadId, pending.Context.AgentId, [pfc.Name]);
                 _logger.LogInformation("客户端技能经内网隧道执行（审批后）：agent={AgentId} tool={Tool}", pending.Context.AgentId, pfc.Name);
+            }
+            else if (approved && lastApproval.ToolCall is FunctionCallContent dfc
+                && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(dfc.Name, StringComparer.Ordinal)
+                && TunnelAvailable(pending.Context.AgentId, pending.Context.PreferredBridgeClient)
+                && IsClientDotnetSkill(dfc.Name)
+                && ClientDotnetSource(dfc.Name) is { Length: > 0 } dnSource)
+            {
+                // 本机 dotnet（C#）技能：必须经本机桥（浏览器无法直接跑任意 C#）；批准后走隧道在桥所在主机编译执行
+                var dn = await ExecuteTunnelDotnetAsync(
+                    pending.Context.AgentId, pending.Context.PreferredBridgeClient, dnSource, null,
+                    TimeSpan.FromSeconds(160), runCt);
+                var dnResult = string.IsNullOrWhiteSpace(dn)
+                    ? "（本机 dotnet 经桥执行未返回结果 / 超时）" : dn;
+                toolResult = dnResult;
+                ClientToolResultStore.Put(dfc.Name, dnResult);
+                MarkSkillsApproved(pending.Context.ThreadId, pending.Context.AgentId, [dfc.Name]);
+                _logger.LogInformation("本机 dotnet 技能经隧道执行（审批后）：agent={AgentId} tool={Tool}", pending.Context.AgentId, dfc.Name);
+            }
+            else if (!approved && lastApproval.ToolCall is FunctionCallContent refc
+                     && IsClientDotnetSkill(refc.Name)
+                     && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(refc.Name, StringComparer.Ordinal))
+            {
+                // 用户拒绝运行本机 dotnet：给模型一个明确的拒绝结果，避免回退到前端试图“本机执行 C#”
+                toolResult = "（用户已拒绝在本机执行该 .NET dotnet 技能）";
+                ClientToolResultStore.Put(refc.Name, toolResult!);
+                lastApproved = false;
             }
 
             // 批量批准循环：同一 Session 连续流式；后续审批若命中“本次运行批量批准”自动批准，否则交还用户决策

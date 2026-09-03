@@ -34,8 +34,9 @@ public static class SkillApi
             if (string.IsNullOrWhiteSpace(req.Request)) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "需求描述不能为空"));
             try
             {
+                var isAdmin = auth.IsAdmin(user.UserId);
                 var gen = await SkillDefinitionGenerator.GenerateAsync(
-                    options, req.Request, req.PreferClient == true, loggerFactory.CreateLogger("SkillApi.Generate"), ct);
+                    options, req.Request, req.PreferClient == true, isAdmin, loggerFactory.CreateLogger("SkillApi.Generate"), ct);
                 return Results.Ok(new
                 {
                     generated = true,
@@ -120,6 +121,12 @@ public static class SkillApi
             var existing = catalog.Get(skillId);
             if (existing is null)
                 return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            // dotnet 技能：建立限管理员，但运行对任何登录用户开放（普通消息 / 试运行都能用，不须属主或管理员）
+            if (existing.Kind == AgentSkillKind.Dotnet)
+            {
+                var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
+                return Results.Ok(new { skillId, result = dr });
+            }
             // 系统技能无归属者：仅管理员可运行；归属技能：仅归属者或管理员可运行
             if (existing.OwnerId is not null && existing.OwnerId != user.UserId && !auth.IsAdmin(user.UserId))
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅技能创建者或系统管理员可试运行"), statusCode: StatusCodes.Status403Forbidden);

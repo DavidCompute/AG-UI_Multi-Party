@@ -125,9 +125,7 @@ public sealed class NativeTunnelService
         TimeSpan? waitTimeout, CancellationToken ct)
     {
         var taskId = "task_" + Interlocked.Increment(ref _seq).ToString("x") + "_" + Guid.NewGuid().ToString("N")[..8];
-        var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[taskId] = tcs;
-        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        return await PushAndWaitAsync(conn, taskId, () => System.Text.Json.JsonSerializer.Serialize(new
         {
             taskId,
             kind = "shell",
@@ -135,10 +133,52 @@ public sealed class NativeTunnelService
             cwd = cwd ?? ".",
             timeoutSec = timeoutSec ?? 30,
             query = query ?? (object?)null,
-        });
+        }), waitTimeout, ct);
+    }
+
+    /// <summary>向能服务该数字员工的内网桥下行一个「本机 dotnet(C#) 技能」任务并等待结果。</summary>
+    public Task<string?> ExecuteDotnetAsync(
+        string agentId, string source, string? query, TimeSpan? waitTimeout, CancellationToken ct)
+    {
+        TunnelConnection? conn =
+            (_byAgent.TryGetValue(agentId, out var own) ? own : null) ??
+            (_byAgent.TryGetValue(PlatformWideScope, out var wide) ? wide : null);
+        return conn is null ? Task.FromResult<string?>(null) : PushDotnetAsync(conn, source, query, waitTimeout, ct);
+    }
+
+    /// <summary>向指定客户端的桥下行「本机 dotnet(C#) 技能」任务并等待结果（按客户端路由）。</summary>
+    public Task<string?> ExecuteDotnetForClientAsync(
+        string clientId, string source, string? query, TimeSpan? waitTimeout, CancellationToken ct)
+    {
+        return _byClient.TryGetValue(clientId, out var conn)
+            ? PushDotnetAsync(conn, source, query, waitTimeout, ct)
+            : Task.FromResult<string?>(null);
+    }
+
+    private async Task<string?> PushDotnetAsync(
+        TunnelConnection conn, string source, string? query, TimeSpan? waitTimeout, CancellationToken ct)
+    {
+        var taskId = "task_" + Interlocked.Increment(ref _seq).ToString("x") + "_" + Guid.NewGuid().ToString("N")[..8];
+        return await PushAndWaitAsync(conn, taskId, () => System.Text.Json.JsonSerializer.Serialize(new
+        {
+            taskId,
+            kind = "dotnet",
+            source,
+            cwd = (string?)null,
+            timeoutSec = 30,
+            query = query ?? (object?)null,
+        }), waitTimeout, ct);
+    }
+
+    /// <summary>把串好的 payload 通过连接下行并等待其回填结果（超时 / 桥掉线返回 null）。</summary>
+    private async Task<string?> PushAndWaitAsync(
+        TunnelConnection conn, string taskId, Func<string> payloadText, TimeSpan? waitTimeout, CancellationToken ct)
+    {
+        var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pending[taskId] = tcs;
         try
         {
-            await conn.Push(payload, taskId, ct);
+            await conn.Push(payloadText(), taskId, ct);
         }
         catch
         {
