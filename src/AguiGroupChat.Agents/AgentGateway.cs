@@ -831,6 +831,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
 
             var finalText = sb.Length == 0 ? "（流水线未产出内容）" : sb.ToString().Trim();
+            finalText = UnwrapCoordinationAnswer(finalText); // 防内部协调 JSON 泄漏到用户
             foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText, 160)) // 分块广播，前端可像流式一样渐进渲染
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
@@ -921,7 +922,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 AgentGateway.AmbientContext.Value = prevAmbient;
             }
-            foreach (var chunk in AgentGatewayHelpers.ChunkReply(text, 160))
+            foreach (var chunk in AgentGatewayHelpers.ChunkReply(UnwrapCoordinationAnswer(text), 160)) // 防内部协调 JSON 泄漏到用户
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
@@ -1020,6 +1021,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 foreach (var name in prefixNames)
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
                 finalText ??= "（处理对象未返回内容）";
+                finalText = UnwrapCoordinationAnswer(finalText); // 防内部协调 JSON 泄漏到用户
                 foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText.Trim(), 160))
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
             }
