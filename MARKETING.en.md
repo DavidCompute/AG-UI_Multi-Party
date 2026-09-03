@@ -127,6 +127,25 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **Server-enforced isolation**: conversation visibility is enforced end-to-end (send / snapshot / history / search / attachments / realtime fan-out), so no client can leak a message to another customer.
 - **Support-circle experience (typing + agent context, implemented)**: while a staff member / digital employee types, customer participants see "staff is typing"; while a customer types, staff see it, and <b>customers never see each other's typing</b> (consistent with message isolation); the agent context window includes the triggering customer's isolated conversation, so staff <b>remember that customer's prior dialogue</b> instead of re-answering as a fresh chat, while other customers' private chats stay out of context.
 
+### 17. Diverse ways to communicate & collaborate (one product can hold many styles of use)
+- **Group deliberation**: humans + several digital employees + external experts in one room debate / triage / brainstorm—multi-party problems converge in the group instead of private back-and-forth forwarding.
+- **Topic threads**: within a space you open independent lines per topic, each with its own session, unread state and memory—long-lived collaboration never dissolves into a single scrolling feed.
+- **Role / task orchestration**: a complex request is auto-split among specialized digital employees (plan → run in parallel / sequence → aggregate → output), with a <b>recursive gather-and-answer</b> loop until the info is complete—no more “do you want me to continue?”.
+- **Directed one-to-one**: a private circle hosts “one-to-one, content stays in a small circle”; a support circle hosts “one-to-many reception, each customer an isolated session”—communication density and topic boundaries switch by circumstance while accounts / digital employees / memory stay unified. Free-form discussion and structured work both fit in one product.
+
+### 18. Digital employees: org structure × skills — why “build the skills into the roles”
+- The org chart decides “<b>who should take the task</b>”; skills decide “<b>whether that person can actually pull it off</b>”——only when bound together is the loop closed: structure without skills = titles that can't get work done; skills without structure = a toolbox nobody knows who should pick up.
+- One-click orchestration generates and manages “roles × per-role skills × up/down connections” together (assign-down / escalate-up / handoff), yielding a digital team that runs like a real company without separately maintaining employees and skills and glueing them.
+- <b>Why it pays off</b>: clear ownership (you know who to @ for a given problem), matched capability (the right person truly delivers), scalability (add a role to widen the capability surface without re-architecting the whole team), and auditability (every step shows who did it and with which skill).
+
+### 19. Which space to pick for what: Public / Private / Support
+| Space | Who may join | Memory & visibility | Typical scenario · how to choose |
+|---|---|---|---|
+| <b>Public circle</b> | membership (listed / invited) | memory shared within the circle, retrievable by its digital employees | department collaboration group, open classroom, internal Q&A — content is <b>meant to reach a wider audience</b> |
+| <b>Private circle</b> | invited members only | memory <b>retrievable only inside that circle</b>; other circles cannot trigger it (no lateral leakage) | sensitive meetings, contract review, focused one-to-one — content belongs <b>only to this small circle</b> and needs boundaries |
+| <b>Support circle</b> | visible & enterable by everyone, no invitation | <b>each customer has an isolated conversation</b>; staff see all, customers never see each other | website / community helpdesk, FAQ, order-logistics Q&A — content is “one-to-many external service” that must protect customer privacy |
+- <b>One-line rule of thumb</b>: choose Public to involve more people; Private to keep a safe, walled circle; and Support when you open your AI team outward as one-to-many reception while protecting each customer's privacy.
+
 ---
 
 ## 3. Technical Advantages
