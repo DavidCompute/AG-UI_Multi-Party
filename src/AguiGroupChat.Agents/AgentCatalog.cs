@@ -367,6 +367,21 @@ public sealed class AgentCatalog
             chatT3.Add(commitFunc);
             _agentToolNames[agentId] = (_agentToolNames.TryGetValue(agentId, out var names3) ? names3.ToList() : [])
                 .Append(commitFunc.Name).Distinct().ToList();
+
+            // 同角色的一键式首稿动作：复用网页「一键组织编排」同款单轮结构化生成（一次产出完整 JSON = 岗位+技能+连接，
+            // 杜绝自由对话把组织稿磨成只见 pure prompt 的软稿）。只生成不落库；落库仍走上面 org_commit（管理员闸）。
+            var draftTool = new Tools.OrgOneShotDraftTool(_options, _loggerFactory);
+            var draftFunc = AIFunctionFactory.Create(draftTool.Draft, "org_plan_draft",
+                "当用户要求『整支设计/构建/打造一支组织/团队，或让组织设计出一个更好、更完整的架构图』时，优先调用本工具：" +
+                "把用户刚才说的构建需求用（与网页一键编排同一套）单轮结构化生成，一次性产出『数字员工岗位清单 + 各岗 skillIds + " +
+                "每个技能(kind 按 shell/http/prompt/dotnet 智能选，executionLocation 按 server/client) + 岗位连接(assign/escalate)』" +
+                "的完整成稿 JSON。它比逐岗位手工打磨更快、且技能种类不只会是 prompt。" +
+                "用法：把用户对这支组织的一句话需求（分工/岗位/能力）作为 requirement 传入即可。拿到返回的成稿 JSON 后，" +
+                "用人类可读的概览逐岗位呈现给用户确认；用户明确认可（如说『就按这版落库』）后，再调用 org_commit 用同一段成稿 JSON 落库。" +
+                "注意：本工具仅生成预览不落库，不要在本工具返回后未经用户确认就直接落库。");
+            chatT3.Add(draftFunc);
+            _agentToolNames[agentId] = (_agentToolNames.TryGetValue(agentId, out var namesD) ? namesD.ToList() : [])
+                .Append(draftFunc.Name).Distinct().ToList();
         }
 
         // 可复用技能（OpenClaw 风格）：把技能库中本智能体引用的技能逐个封装为 AIFunction 挂上。
