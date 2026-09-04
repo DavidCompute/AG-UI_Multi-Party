@@ -1705,8 +1705,25 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (!string.IsNullOrWhiteSpace(ans)) return ans.Trim();
             }
         }
-        catch { /* 非常规 JSON 就原样返回 */ }
+        catch
+        {
+            // 模型常在 answer 里放了真实换行/未转义 → 整包解码失败：若文本仍像是协调 JSON 包壳，
+            // 用容错提取把 answer 正文剥出来，避免把 {needsMore,…} 整段 JSON 泄漏给用户。
+            if (LooksLikeCoordinationObject(text)
+                && ExtractRecursiveAnswerFallback(text) is { Answer: { Length: > 0 } ans2 }
+                && !string.IsNullOrWhiteSpace(ans2))
+                return ans2.Trim();
+        }
         return text;
+    }
+
+    /// <summary>粗略判断一段文本是否是“协调决策”样式的对象包壳（开头是 { 且含 answer/needsMore），用于解码失败时的容错回退。</summary>
+    private static bool LooksLikeCoordinationObject(string text)
+    {
+        var t = text?.TrimStart() ?? "";
+        if (!t.StartsWith('{')) return false;
+        return t.Contains("answer", System.StringComparison.OrdinalIgnoreCase)
+            || t.Contains("needsMore", System.StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>递归补查时让某个直属下属就问题给结论（一次性 RunAsync，不递归下钻，避免无限深）。</summary>

@@ -27,6 +27,7 @@ public sealed class AgentGatewayRecursiveParseFallbackTests
 
     private static object? Parse(string text) => Invoke("ParseRecursiveResponse", text);
     private static object? Fallback(string text) => Invoke("ExtractRecursiveAnswerFallback", text);
+    private static string Unwrap(string text) => (string)Invoke("UnwrapCoordinationAnswer", text)!;
 
     private static (bool NeedsMore, string? Answer, int Gather) Read(object? result)
     {
@@ -106,5 +107,42 @@ public sealed class AgentGatewayRecursiveParseFallbackTests
     {
         Assert.Null(Fallback("{\"needsMore\":false}"));
         Assert.Null(Fallback("garbage no braces"));
+    }
+
+    // ---- UnwrapCoordinationAnswer（普通 run / 编排计划的“最后一道防线”，同样要容错真实换行） ----
+
+    [Fact]
+    public void Unwrap_MultilineAnswer_ShowsOnlyAnswerBody()
+    {
+        // 高度还原用户贴的泄漏：answer 里大量真实换行 + 中文引号 + emoji → 整包 JsonDocument.Parse 必失败。
+        var body =
+            "您好，我已经帮您对电脑做了一次基础体检（开机启动项、系统服务与计划任务、本机基本状态），总体结论是：电脑没有严重问题，主要是一些启动项偏多，建议做优化。具体如下：\n"
+            + "\n1️⃣ 开机启动项偏多（这是最值得注意的点）\n"
+            + "- 第三方软件随开机自启（建议精简）：百度网盘、迅雷、Docker Desktop 等。\n"
+            + "👉 建议：日常不常用的软件可以关闭开机自启。\n"
+            + "\n📌 小结：电脑整体健康，无需报修；另外也提醒您留意磁盘剩余空间，建议定期清理。";
+        var text = "{\"needsMore\":false,\"gather\":[],\"answer\":\"" + body + "\"}";
+        var got = Unwrap(text);
+        Assert.DoesNotContain("needsMore", got);
+        Assert.DoesNotContain("gather", got);
+        Assert.Contains("开机启动项偏多", got);
+        Assert.Contains("建议定期清理", got);   // 不应因长度/换行丢失尾部
+        // 应保留正文里的真实换行成排版，而不该把整段 JSON 原样回给用户
+        Assert.StartsWith("您好", got.Trim());
+        Assert.DoesNotContain("}", got);
+    }
+
+    [Fact]
+    public void Unwrap_PlainChineseText_Unchanged()
+    {
+        const string plain = "好的，我来看看有没有明显问题的迹象。您的电脑开机还算正常。";
+        Assert.Equal(plain, Unwrap(plain));
+    }
+
+    [Fact]
+    public void Unwrap_ValidCoordJson_ReturnsAnswer()
+    {
+        var text = "{\"needsMore\":false,\"gather\":[],\"answer\":\"hello\"}";
+        Assert.Equal("hello", Unwrap(text));
     }
 }
