@@ -56,7 +56,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 ### 6. Data Sovereignty & Portability (No Data Lock-In)
 - Five storage options: **PostgreSQL (production / cloud), MySQL, SQLite (desktop standalone), Redis (multi-replica shared), JSON snapshots** — switchable in one click.
 - **Redis multi-replica horizontal scaling (6.2)**: `Storage:Provider=redis` shares all storage and login sessions across Redis — when horizontally scaling Docker replicas, "a write on one replica is immediately readable on the others, and the same login validates on any replica", enabling high availability and elastic scaling.
-- **One-click export / import**: accounts, digital employees, chat history, attachments, and **avatars** are packaged into a zip — migrate to any new environment (account passwords are fully restored; **existing accounts auto-update their profiles including avatars, while passwords are preserved**; digital employees are auto-completed; sender references are auto-rewritten).
+- **One-click export / import**: accounts, digital employees, chat history, attachments, and **avatars** are packaged into a zip — migrate to any new environment (account passwords are fully restored; **existing accounts auto-update their profiles including avatars, while passwords are preserved**; digital employees are auto-completed; sender references are auto-rewritten); the pack also carries the <b>skill library</b> and the <b>org-overwrite ledger</b>, so mounted skills and the “same team key keeps only the newest” semantics carry over.
 - **Desktop multi-instance**: one backend process, multiple windows sharing data; the service only stops when the last window is closed.
 - **Initialization (clear everything)**: return to a fresh state in one click (including browser cache) and reconfigure models.
 - **Runtime model configuration**: fill in the DeepSeek endpoint / apiKey directly in the UI (leave blank to use the official endpoint and environment variables); takes effect immediately and survives restarts.
@@ -199,7 +199,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 - **Memory governance meets data minimization & compliance**: configure retention days for auto-forgetting per confidentiality requirements, forget manually per group chat, and audit visually in the memory management UI — memory content, level, and expiry are all controllable and checkable;
 - **Private digital employees**: only the creator can use / pull into group chats / edit — ideal for personal dedicated advisors;
 - **Human-in-the-loop approvals**: classified operations (external publishing / data deletion) must be human-approved, fully traced;
-- Regularly **one-click export** data packs (accounts + digital employees + chat history + attachments + avatars) for offsite backup; **initialization** clears everything in one click.
+- Regularly **one-click export** data packs (accounts + digital employees + chat history + attachments + avatars) for offsite backup — the pack also carries the skill library and the org-overwrite ledger; **initialization** resets the skill library to its seed skills and clears the ledger in one click.
 
 **Value**: full AI collaboration capability within compliance red lines; data sovereignty, permission boundaries, approval traces, memory forgetting, and backup migration — all five requirements satisfied.
 
@@ -353,7 +353,7 @@ Ops runs `cp .env.example .env && docker compose up -d --build` on an intranet s
 Check "🛠️ Work-type digital employee" for "Code Buddy", giving it a dedicated workspace (`data/workspaces/code-bang/`). A member starts "organize this week's release list and generate a weekly report" in the group chat; it auto-creates a task to read / write files and run whitelisted commands, with the frontend "Task Center" showing **status / progress / result** in real time, and the message shows the **plan checklist + progress bar** written back from the workspace `PLAN.md`; read / delete operations go through in-group-chat approval too. Cross-dialogue continuity relies on the workspace `NOTES.md`, so nothing needs to be re-explained.
 
 **Step 7 · Data sovereignty fallback & scaling**
-1. The "Data Backup" panel one-click exports a zip (accounts + digital employees + chat history + attachments + avatars) for offsite backup; on a new environment, one-click import (account passwords fully restored, existing accounts auto-update profiles, digital employees auto-completed, sender references auto-rewritten), or "System Initialization" returns to a fresh state in one click;
+1. The "Data Backup" panel one-click exports a zip (accounts + digital employees + chat history + attachments + avatars, plus the skill library and org-overwrite ledger) for offsite backup; on a new environment, one-click import (account passwords fully restored, existing accounts auto-update profiles, digital employees auto-completed, sender references auto-rewritten), or "System Initialization" returns to a fresh state in one click;
 2. For high availability, switch `Storage__Provider` to `redis` and `docker compose up --scale web=2`: multi-replica shared sessions and storage, **any login on any replica is valid**, and horizontal scaling linearly raises concurrency.
 
 **Step 8 · One-click orchestrate a digital-employee org + public support circle (product highlight)**

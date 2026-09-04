@@ -658,7 +658,7 @@ WS 上行示例（决策者身份取连接身份；等效 HTTP `POST /ag-ui/grou
 }
 ```
 
-> `latestMessages` 元素实际还可能携带**可选字段**（旧客户端可忽略）：`senderNickname`、`replyToMessageId`、`attachments`、`reasoning`、`mentions`、`mentionAll`、`topicId`。
+> `latestMessages` 元素实际还可能携带**可选字段**（旧客户端可忽略）：`senderNickname`、`replyToMessageId`、`attachments`、`reasoning``mentions`、`mentionAll`、`topicId`、`senderType`（权威，历史 / 快照 / 话题 / 分页消息均返回：`Agent` = 数字员工或 AI 分身（`twin_*`），`User` = 真人；前端据此决定「重新回答」是否可用，不再只依 `agent_` 前缀推断）。
 
 成员为智能体时附带回显其群内生效触发规则：`triggerMode` / `keywords` / `isTriggerOverridden`（见 §6.2）；`topics` 为群内话题列表（不含默认 `main`，见 §2.4）。快照亦可经 `GET /ag-ui/group/{groupId}` 主动拉取（见 §5.4）。
 
@@ -1004,9 +1004,10 @@ PUT /ag-ui/user/profile
 |isPrivate|boolean|是否私密智能体（默认 false）：仅创建者（ownerId）可拉入群 / 编辑 / 删除，目录对其他用户隐藏|
 |ownerId|string?|创建者 userId（appsettings 种子为 null = 系统级）|
 
-**导出 / 导入**：智能体管理的「📤 导出全部」/ 每行「导出」把配置导出为 JSON（`{version: 1, agents:[…]}`，字段同上，敏感令牌与 ownerId 不导出），前端「📥 导入」读取 JSON 后逐条调用 `POST /ag-ui/agents` 创建（归属当前登录用户，agentId 冲突自动改 ID 不覆盖）。另提供**全量数据包**接口（管理员）：`GET /ag-ui/export` 导出账号（含密码哈希 / 盐）+ 智能体定义与触发规则 + 群 / 话题 / 消息 + 附件为 zip；`POST /ag-ui/import/preview` 上传 zip 返回账号 / 智能体存在性检查与群清单，`POST /ag-ui/import` 按 `selectedGroupIds` 执行（账号按 username、智能体按 agentId 自动补齐，消息发送者 / 提及 / 可见列表按账号映射重写，附件还原）。
+**导出 / 导入**：智能体管理的「📤 导出全部」/ 每行「导出」把配置导出为 JSON（`{version: 1, agents:[…]}`，字段同上，敏感令牌与 ownerId 不导出），前端「📥 导入」读取 JSON 后逐条调用 `POST /ag-ui/agents` 创建（归属当前登录用户，agentId 冲突自动改 ID 不覆盖）。另提供**全量数据包**接口（管理员）：`GET /ag-ui/export` 导出账号（含密码哈希 / 盐）+ 智能体定义与触发规则 + 群 / 话题 / 消息 + 附件为 zip；`POST /ag-ui/import/preview` 上传 zip 返回账号 / 智能体存在性检查与群清单，`POST /ag-ui/import` 按 `selectedGroupIds` 执行（账号按 username、智能体按 agentId 自动补齐，消息发送者 / 提及 / 可见列表按账号映射重写，附件还原）。导出 zip 的 `manifest.json` 另含 `skills`（技能库全量）与 `orgTeams`（组织覆盖簿记）两段，导入会对其缺失项做存在性补齐；AI 分身与技能目标子代理不导出。
 
 **技能库（可复用技能目录，Hub 扩展）**：技能是一个全局可复用的目录（`AgentSkillDefinition`），任意数字员工经 `AgentDefinition.SkillDefIds` 按 ID 挂载引用（以工具名供模型调用）。技能分三类 `prompt` / `shell` / `http`，另第 4 类 `dotnet`（C#）：其 body 为一段 C# 源码（含 `public static string Run(string input)` 入口），由服务端以 Roslyn 编译后执行。`shell` / `http` / `dotnet`（可执行任意命令 / 外部请求 / C# 源码）**仅管理员创建 / 修改 / 删除**，普通用户只能建纯 `prompt` 技能，不能把技能改/建为 `shell`/`http`/`dotnet`；但 **`dotnet` 技能的运行对全体登录用户开放**——任何登录用户都可试运行 / 让智能体调用服务端 `dotnet`，或经 `client` 执行让触发者批准后由本机桥运行（浏览器不能编译 C#，客户端 dotnet 由桥 `DotnetRunner` 在本机编译执行）；而 `shell` / `http` 的试运行仍仅管理员。服务端 `dotnet` 在 Hub 进程内的可回收 `AssemblyLoadContext` 中执行，带受限引用白名单 + `AllowUnsafe=false` + 超时 / 输出上限。技能有 `executionLocation`：`server`（默认）/ `client`。客户端执行的 shell 技能在**本机**执行——前端浏览器，或当内网桥经隧道在线时沿反向隧道执行（§4.5）；`executionLocation=client` 且未显式提供 `clientRunner` 时，服务端对 shell 技能自动生成 `{"kind":"shell","command":…,"cwd":".","timeoutSec":30}` 运行配置，也可显式传入。`shell` 与 `client` 执行技能一律 `requiresApproval=true`。
+另有一类<b>受控 `org_deploy`（组织落库）</b>：无普通执行体、可选作可复用技能之一，仅系统管理员在技能库手动建 / 改 / 删，数字员工运行期不能自建（同 `dotnet` 一类特权）；被挂载它的数字员工（如 `org_architect`）会把它作为「把最终组织稿整支落库 / 覆盖、同 teamKey 反复提交只留最新一版」的部署动作（经唯一共享引擎 apply、仅管理员放行），普通用户只出稿不写库。
 
 |接口|路径|说明|
 |---|---|---|
