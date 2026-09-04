@@ -403,6 +403,9 @@ public sealed class AgentCatalog
                             + "需用户批准后执行。";
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
+                // 组织角色“设计稿”技能（org_design）：把当前平台可用运行能力注入其描述，让构建师按职责挑 kind+executionLocation，而不是一律只产 prompt。
+                if (string.Equals(skill.SkillId, "org_design", StringComparison.OrdinalIgnoreCase) && skill.Kind == AgentSkillKind.Prompt)
+                    desc += "\n\n" + OrgDesignRunCapabilityNote();
                 // 受控”组织落库“技能：它不是可跑命令/prompt——把它作为该数字员工的一个部署动作挂载（经唯一官方引擎落库、仅管理员写）。
                 if (skill.Kind == AgentSkillKind.Org_deploy)
                 {
@@ -554,6 +557,24 @@ public sealed class AgentCatalog
     }
 
     private static string GetCurrentTime() => DateTimeOffset.UtcNow.ToString("O");
+
+    /// <summary>
+    /// 组织角色“设计稿”（org_design）当前平台实际可用的运行能力概览：
+    /// 让组织架构构建师按岗位职责选 kind + executionLocation，而非一律只产 prompt；
+    /// 特权型（server/client 的 shell / http / dotnet，以及受控 org_deploy 动作）仅管理员放行后落库，普通用户只出稿。
+    /// </summary>
+    private static string OrgDesignRunCapabilityNote()
+    {
+        var serverOs = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : "Linux";
+        return "【本平台可用技能运行方式】（为每个岗位按职责选 kind+executionLocation，切勿臆造平台不存在的能力）：\n"
+            + "- prompt：无需实际执行的提示词 / 流程模板（最稳妥，任何岗位都可用）。\n"
+            + "- http：调用对外 HTTP(S) 接口，由服务端执行（若岗位需访问本机 / 内网地址，需开启 Agents:AllowPrivateSkillEndpoints）。\n"
+            + $"- shell：执行命令；executionLocation=server 时在服务端沙箱（宿主 {serverOs}）执行；executionLocation=client 时在被触发用户的本机执行 —— 需触发者批准，浏览器 / 桌面壳 / 内网本机桥均可承载。\n"
+            + "- dotnet：C# 源码；executionLocation=server 时在服务端 Roslyn 受限沙箱编译执行；executionLocation=client 时由桌面壳 / 本机桥在本机编译执行（浏览器本身不能编译 C#）。\n"
+            + "- org_deploy：受控“把最终组织稿整支落库 / 覆盖”的部署动作，不作为普通岗位技能。\n"
+            + "权限：shell / http / dotnet 的创建，以及 org_deploy 均需系统管理员在技能库手动建 / 改 / 删；落库动作仅系统管理员在会话里明确放行后执行，普通用户只产出待审稿 JSON、绝不写库。\n"
+            + "设计每个岗位技能时：先用最贴合职责且无副作用的 kind（prompt/仅读 http），确需执行能力（shell/dotnet/client）时在最终稿里写清 kind + executionLocation，并在 agents 说明其将如何在本机或服务端运行。";
+    }
 
     /// <summary>演示用审批工具：发布群公告（真实业务可替换为发邮件 / 转账等敏感操作）。</summary>
     [Description("发布一条群公告（所有群成员可见，需用户批准后执行）")]
