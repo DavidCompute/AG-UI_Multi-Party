@@ -5736,17 +5736,29 @@ function isBlankAgentGhost(m) {
     && !(m.plan && m.plan.steps && m.plan.steps.length);
 }
 
-/** 是否「当前话题最后一条有效（数字员工）消息」（重新回答按钮的显示条件）。 */
+/** 消息发送者是否为“数字员工/分身”（后续待命 agent 回复）——不以 id 前缀硬编码缩窄：
+ *  优先看当前话题成员表中该成员类型（数字员工/分身统一 memberType=agent，含 org_architect/ops-lead/custom 等自定义 id）；
+ *  成员缺失（历史/已移出）时回退按 id 前缀（agent_/twin_）或构造时的 senderType 判断。 */
+function isAgentReplySender(m, r) {
+  if (!m) return false;
+  if (m.senderType === "agent") return true;                       // 构造时已判定（前缀命中 / 事件带类型）
+  const mem = r?.members?.find((x) => x.memberId === m.senderId);
+  if (mem) return mem.memberType === "agent";
+  return /^(agent_|twin_)/.test(String(m.senderId || ""));
+}
+
+/** 是否「当前话题最后一条有效（数字员工/分身生成的）消息」（重新回答按钮的显示条件）。 */
 function isLastAgentMsg(m, r) {
-  if (!m || m.sys || m.recalled || m.streaming || m.senderType !== "agent") return false;
+  if (!m || m.sys || m.recalled || m.streaming || !isAgentReplySender(m, r)) return false;
   if (!r) return false;
   const list = activeTopicMessages(r); // 消息均属于当前话题（渲染视图）
-  // 从末尾向前的最后一条“有意义的非系统消息”：空答幽灵（不可再回答）不参与，避免它压住真正能重新回答的上一条数字员工回复
+  // 从末尾向前的最后一条“有意义的非系统消息”：空答幽灵（不可参加）不参与；
+  // 以发送者是否为当前话题的数字员工/分身成员（或 agent 前缀/类型）为准，避免只认 agent_ 前缀把自定义 id / 分身漏掉
   for (let i = list.length - 1; i >= 0; i--) {
     const x = list[i];
     if (x.sys) continue;
-    if (x.senderType === "agent" && isBlankAgentGhost(x)) continue;
-    return x.id === m.id && x.senderType === "agent" && !x.recalled && !x.streaming;
+    if (isAgentReplySender(x, r) && isBlankAgentGhost(x)) continue;
+    return x.id === m.id && isAgentReplySender(m, r) && !x.recalled && !x.streaming;
   }
   return false;
 }
