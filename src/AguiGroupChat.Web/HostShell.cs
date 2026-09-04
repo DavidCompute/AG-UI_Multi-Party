@@ -27,6 +27,14 @@ public static class HostShell
         }
         Directory.CreateDirectory(workDir);
 
+        // 明显 Windows PowerShell 正文(如 $ErrorActionPreference/try{/Get-CimInstance 等)在非 Windows 宿主会被写成 .sh 交给 bash →
+        // 变成 “Not running in PowerShell / command not found / 退出码2” 一类的假报错。这里直接把 PS 内容拦掉并给可执行指示，
+        // 而不是用 bash 去“瞎跑”它。Windows 宿主仍走 PowerShell(下方正常分支)，不受影响。
+        if (!OperatingSystem.IsWindows() && LooksPowerShell(command))
+            return "【需要 PowerShell 环境】该命令是 Windows PowerShell 正文，但当前执行宿主不是 Windows(无 PowerShell)。"
+                + "请在本机的 Windows + PowerShell 环境(经 AguiGroupChat.NativeBridge / 桌面版宿主)执行它，"
+                + "不要在服务端/Linux 宿主把它当作脚本运行——否则只会出现假报错(Not running in PowerShell / command not found)。";
+
         string fileName, argsText;
         if (OperatingSystem.IsWindows())
         {
@@ -78,6 +86,29 @@ public static class HostShell
         if (stderr.Length > 0) sb.AppendLine("stderr: " + stderr.TrimEnd());
         sb.AppendLine($"（退出码 {proc.ExitCode}）");
         return Truncate(sb.ToString().TrimEnd());
+    }
+
+    /// <summary>粗略判断一段命令正文是否明显是 Windows PowerShell 语法(前几行出现 PS 惯用标记或含典型 cmdlet)。</summary>
+    private static bool LooksPowerShell(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return false;
+        var c = command.TrimStart();
+        if (c.StartsWith("#!", StringComparison.Ordinal)) return false; // bash shebang 优先
+        var head = 0;
+        foreach (var line in command.Split('\n'))
+        {
+            var t = line.Trim();
+            if (t.Length == 0) continue;
+            if (t.StartsWith("$ErrorActionPreference", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("try{", StringComparison.Ordinal)
+                || t.StartsWith("catch", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("param(", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (++head >= 3) break;
+        }
+        return command.Contains("SilentlyContinue", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("$PSVersionTable", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>把 userId 等做成可作目录名的安全分段。</summary>
