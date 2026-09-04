@@ -57,7 +57,9 @@ tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑�
 tools/verify-hitl.mjs            # 人机交互（审批卡片）端到端验证脚本
 tools/verify-agent-import.mjs    # 智能体批量导入验证脚本
 tools/ui-orchestrate-flow.mjs    # Playwright 浏览器自动化：一键组织编排 → 创建客服知聚全链路 + 截图（见 tools/README-playwright.md）
+tools/team-replace.mjs           # 团队级整批替换 / 反复覆盖（管理员）：删旧批 + 一键编排 apply 落新；加 `--name` 可对同一支反复改、始终只留最新一版（见 tools/README-team-replace.md）
 tools/README-playwright.md       # 上述编排自动化的安装 / 运行 / 退出码说明
+tools/README-team-replace.md     # 团队整批替换 / 反复修改同一支的操作与 plan.json 结构说明
 ```
 
 ```mermaid

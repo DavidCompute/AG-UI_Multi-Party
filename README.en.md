@@ -56,7 +56,9 @@ tools/download-embedding-model.ps1 # Manually fetch the embedding model (usable 
 tools/verify-hitl.mjs            # Human-in-the-loop (approval card) end-to-end verification script
 tools/verify-agent-import.mjs    # Agent bulk-import verification script
 tools/ui-orchestrate-flow.mjs    # Playwright browser automation: one-click orchestrate → create support circle full flow + screenshots (see tools/README-playwright.md)
+tools/team-replace.mjs           # Admin team batch replace / repeatable overwrite: delete old batch + apply new via one-click orchestration; add `--name` to keep re-editing the same team with only the latest version retained (see tools/README-team-replace.md)
 tools/README-playwright.md       # Install / run / exit-code notes for the orchestration automation
+tools/README-team-replace.md     # How-to for team batch replace / repeatedly re-editing the same team + plan.json structure
 ```
 
 ```mermaid
