@@ -47,11 +47,13 @@ public sealed class OrgOneShotDraftTool
                 DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             });
 
-            var summary = (plan.Title ?? "这支团队").Length == 0 ? "这支团队" : plan.Title;
+            var summary = string.IsNullOrWhiteSpace(plan.Title) ? "这支团队" : plan.Title;
             return $"已用「一键组织编排」同款引擎按你的需求产出一版组织初稿《{summary}》："
                 + $"{plan.Agents.Count} 个数字员工（{string.Join("、", plan.Agents.Select(a => a.Nickname ?? a.AgentId ?? ""))}），"
                 + $"{plan.Skills.Count} 个技能（含 shell/http/prompt 多种运行方式，非纯 prompt）。"
-                + "完整成稿 JSON 请照抄给用户确认（这就是最终稿，落库时 org_commit 的 planJson 用同一段）。以下是完整成稿 JSON：\n" + json;
+                + "输出下方是完整的成稿 JSON。请注意：这仅是预览初稿，**绝不直接落库**——先把概览用可读方式逐岗位呈现给用户；"
+                + "必须等用户在对话里明确认可（如说『就按这版落库/建好』）之后，才可用 org_commit 以同一段成稿 JSON、同一稳定 teamKey 落库。"
+                + "完整成稿 JSON：\n" + json;
         }
         catch (Exception ex)
         {

@@ -110,8 +110,9 @@ internal sealed class SkillRunner
             return "【不能在本服务端执行】该技能标注为\"本机(client)\"执行，需在发起请求的那台机器经本机桥(NativeBridge)/浏览器执行；"
                 + "服务端不会代为运行它（避免把 PowerShell/Windows 脚本当服务端脚本误跑）。请重新在挂载并启动了本机桥的机器触发该技能。";
 
-        // 若正文明显是 Windows PowerShell，但无 shebang/无显式解释器：这里（服务端 shell 执行器）不应默认当 bash 跑。
-        // 服务端宿主是 Windows 才用 powershell；非 Windows 直接明确报“缺 PowerShell 环境”，而不是产出 command not found。
+        // 若正文明显是 Windows PowerShell，但无 shebang/无显式解释器：SkillRunner 默认写 .sh 交给 /bin/bash，并不按宿主选 powershell。
+        // 非 Windows 宿主根本没有 PowerShell，直接把 PS 正文拦下给明确提示，而不是产出 command not found。
+        // 注：Windows 宿主下若确要把服务端 PS 技能跑起来，需要该技能显式 interpreter=powershell（而非依赖这里自动切换）。
         var trimmedBody = body.TrimStart();
         var looksPowerShell = !trimmedBody.StartsWith("#!", StringComparison.Ordinal)
             && (string.IsNullOrWhiteSpace(skill.Interpreter)

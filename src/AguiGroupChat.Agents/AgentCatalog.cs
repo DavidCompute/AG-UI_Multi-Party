@@ -376,9 +376,10 @@ public sealed class AgentCatalog
                 "把用户刚才说的构建需求用（与网页一键编排同一套）单轮结构化生成，一次性产出『数字员工岗位清单 + 各岗 skillIds + " +
                 "每个技能(kind 按 shell/http/prompt/dotnet 智能选，executionLocation 按 server/client) + 岗位连接(assign/escalate)』" +
                 "的完整成稿 JSON。它比逐岗位手工打磨更快、且技能种类不只会是 prompt。" +
-                "用法：把用户对这支组织的一句话需求（分工/岗位/能力）作为 requirement 传入即可。拿到返回的成稿 JSON 后，" +
-                "用人类可读的概览逐岗位呈现给用户确认；用户明确认可（如说『就按这版落库』）后，再调用 org_commit 用同一段成稿 JSON 落库。" +
-                "注意：本工具仅生成预览不落库，不要在本工具返回后未经用户确认就直接落库。");
+                "用法：把用户对这支组织的一句话需求（分工/岗位/能力）作为 requirement 传入即可。拿到返回的成稿 JSON 后，"
+                + "用人类可读的概览逐岗位呈现给用户确认；在用户明确认可（如说『就按这版落库』）<b>之前绝对不要调用 org_commit</b>——"
+                + "本工具只产出预览初稿不落库。用户明确说『就按这版落库/建好』后，才调用 org_commit 用同一段成稿 JSON 落库。"
+                + "注意：本工具仅生成预览不落库，不要在本工具返回后未经用户确认就直接落库。");
             chatT3.Add(draftFunc);
             _agentToolNames[agentId] = (_agentToolNames.TryGetValue(agentId, out var namesD) ? namesD.ToList() : [])
                 .Append(draftFunc.Name).Distinct().ToList();
