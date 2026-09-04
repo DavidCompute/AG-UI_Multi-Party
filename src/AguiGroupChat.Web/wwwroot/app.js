@@ -5721,14 +5721,28 @@ function displayTextOf(m) {
   return m.content || "";
 }
 
-/** 是否「当前话题最后一条消息且为数字员工消息」（重新回答按钮的显示条件）。 */
+/** 判断一条数字员工消息是不是无正文的“空答”幽灵（流式异常中断 / 仅有系统动作却未产出正文）；
+ *  这类前后缀消息不应作为“可重新回答的最后一条回答”的参照（避免它压住真正有内容的上一条数字员工回复的重新回答按钮）。 */
+function isBlankAgentGhost(m) {
+  if (!m || m.senderType !== "agent" || m.sys || m.recalled) return false;
+  const txt = String(displayTextOf(m) || "").trim();
+  return txt.length === 0
+    && !(m.attachments && m.attachments.length)
+    && !m.interaction
+    && !(m.toolCalls && m.toolCalls.length)
+    && !(m.plan && m.plan.steps && m.plan.steps.length);
+}
+
+/** 是否「当前话题最后一条有效（数字员工）消息」（重新回答按钮的显示条件）。 */
 function isLastAgentMsg(m, r) {
   if (!m || m.sys || m.recalled || m.streaming || m.senderType !== "agent") return false;
   if (!r) return false;
   const list = activeTopicMessages(r); // 消息均属于当前话题（渲染视图）
+  // 从末尾向前的最后一条“有意义的非系统消息”：空答幽灵（不可再回答）不参与，避免它压住真正能重新回答的上一条数字员工回复
   for (let i = list.length - 1; i >= 0; i--) {
     const x = list[i];
     if (x.sys) continue;
+    if (x.senderType === "agent" && isBlankAgentGhost(x)) continue;
     return x.id === m.id && x.senderType === "agent" && !x.recalled && !x.streaming;
   }
   return false;
