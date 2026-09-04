@@ -403,6 +403,14 @@ public sealed class AgentCatalog
                             + "需用户批准后执行。";
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
+                // 受控”组织落库“技能：它不是可跑命令/prompt——把它作为该数字员工的一个部署动作挂载（经唯一官方引擎落库、仅管理员写）。
+                if (skill.Kind == AgentSkillKind.OrgDeploy)
+                {
+                    var deploy = new OrgCommitTool(_services, _loggerFactory);
+                    defTools.Add(AIFunctionFactory.Create(deploy.Commit, toolName, desc));
+                    occupied.Add(toolName);
+                    continue;
+                }
                 var isClientSkill = skill.ExecutionLocation == AgentSkillExecutionLocation.Client;
                 // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；批准恢复时 MSAGENT 会执行这个占位函数，
                 // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
