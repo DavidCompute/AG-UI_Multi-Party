@@ -1869,7 +1869,7 @@ function renderSkillList() {
     el.innerHTML = `<div class="kb-empty" data-i18n="skill.empty">技能库为空，点「新增技能」创建第一个可复用技能。</div>`;
     return;
   }
-  const kindLabel = { shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort") };
+  const kindLabel = { shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort"), dotnet: t("skill.kind.dotnetShort"), org_deploy: t("skill.kind.orgDeployShort") };
   const q = (skillSearchQuery || "").trim().toLowerCase();
   const shown = q ? skillList.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.skillId || "").toLowerCase().includes(q) || (s.description || "").toLowerCase().includes(q) || (s.kind || "").toLowerCase().includes(q)) : skillList;
   if (shown.length === 0) {
@@ -1952,14 +1952,16 @@ function openSkillForm(skillId) {
 function syncSkillKind() {
   const kind = $("sfKind").value;
   // dotnet（C# 动态编译）：可在服务端 Roslyn 编译执行（server），也可经本机桥在其所在机器编译执行（client）；一律强制审批
+  const isOrgDeploy = kind === "org_deploy"; // 受控组织落库：无可执行正文，仅说明 / 约束
   const isDotnet = kind === "dotnet";
   const isClientExec = $("sfExecutionLocation").value === "client";
   const showInterp = kind === "shell";
   $("sfInterpreterGroup").style.display = showInterp ? "" : "none";
   // shell 与 dotnet（含客户端执行产物）强制需审批；其执行有副作用 / 动态代码
+  if (isOrgDeploy) { $("sfRequiresApproval").disabled = false; $("sfRequiresApproval").checked = false; }
   $("sfRequiresApproval").disabled = (kind === "shell" || isDotnet || isClientExec) ? true : false;
   if (isDotnet) $("sfRequiresApproval").checked = true;
-  const bodyKind = isDotnet ? "skill.form.bodyDotnet" : (kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell"));
+  const bodyKind = isDotnet ? "skill.form.bodyDotnet" : (isOrgDeploy ? "skill.form.bodyOrgDeploy" : (kind === "http" ? "skill.form.bodyHttp" : (kind === "prompt" ? "skill.form.bodyPrompt" : "skill.form.bodyShell")));
   $("sfBodyLabel").dataset.i18n = bodyKind;
   $("sfBodyLabel").textContent = t(bodyKind);
   // 客户端执行 → 显示 ClientRunner 配置；否则隐藏
@@ -1974,7 +1976,7 @@ async function saveSkill() {
   if (!desc) { toast(t("skill.err.descRequired")); return; }
   const kind = $("sfKind").value;
   const body = $("sfBody").value;
-  if (kind !== "prompt" && !body.trim()) { toast(t("skill.err.bodyRequired")); return; }
+  if (kind !== "prompt" && kind !== "org_deploy" && !body.trim()) { toast(t("skill.err.bodyRequired")); return; }
   const payload = {
     skillId: editingSkillId || $("sfSkillId").value.trim() || null,
     name, description: desc, kind, body,
@@ -2124,7 +2126,8 @@ function renderAgentSkillDefPicks() {
     const on = agentSkillDefIds.includes(s.skillId);
     const label = document.createElement("label");
     label.className = "kb-pick-item" + (on ? " on" : "");
-    label.innerHTML = `<input type="checkbox" value="${escapeHtml(s.skillId)}" ${on ? "checked" : ""} /> <span class="skill-kind tag-skill">${escapeHtml(s.kind)}</span> <b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code> <span class="kb-meta">${escapeHtml(s.description || "")}</span>`;
+    const kindTag = ({ shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort"), dotnet: t("skill.kind.dotnetShort"), org_deploy: t("skill.kind.orgDeployShort") })[(s.kind || "").toLowerCase()] || s.kind || s.skillId;
+    label.innerHTML = `<input type="checkbox" value="${escapeHtml(s.skillId)}" ${on ? "checked" : ""} /> <span class="skill-kind tag-skill">${escapeHtml(kindTag)}</span> <b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code> <span class="kb-meta">${escapeHtml(s.description || "")}</span>`;
     label.querySelector("input").addEventListener("change", (e) => {
       const id = e.target.value, check = e.target.checked;
       const i = agentSkillDefIds.indexOf(id);
