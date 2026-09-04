@@ -27,6 +27,24 @@ node tools/team-replace.mjs \
 - 删除在 apply 之前先进：**任何一个旧对象删失败，脚本会中止，不会落到一半**（不部分写入）。
 - 只删旧批（不改稿）：省略 `--agent-file`；只落新稿（不删旧）：省略 `--old`。
 
+## 反复修改同一支（推荐：`--name`，始终只留最新一版）
+
+想让一支团队“改一版 → 落一版”，且**库里始终只有最新那一版**（不改到满地都是新一批），用 `--name` 给团队起个 key：
+
+```bash
+# ① 首次建一支（内部记下这一版产生的对象 id）
+node tools/team-replace.mjs --base http://localhost:5200 --user david --pass 123456 \
+  --name my-team --agent-file ./v1.json
+
+# ② 再多轮改：同一 --name 会自动清掉上一版（含上一版为这支自建的技能），再按新稿落库
+node tools/team-replace.mjs --base http://localhost:5200 --user david --pass 123456 \
+  --name my-team --agent-file ./v2.json
+```
+
+- 每次“删上版→落新版”：数字员工会先被删除、再按最终稿整体重建；本支历史自建的技能也会被退役后再用**干净原始 id** 重建（不会累积出 `_2/_3`）。
+- 状态记录在 `tools/.team-state/<key>.json`，同一支反复覆盖只靠同一个 `--name`，无需你手工记得旧 id。
+- 若某版要把整支清掉（不留新版）：`node tools/team-replace.mjs --base … --name my-team`（不带 `--agent-file` 即只清不建）。
+
 ## plan.json 结构（apply 兼容）
 
 ```json
