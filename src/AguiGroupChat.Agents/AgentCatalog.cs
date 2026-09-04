@@ -351,6 +351,24 @@ public sealed class AgentCatalog
             }
         }
 
+        // 内置组织角色（挂载 org_design 方案技能的，如组织构建师/组织运营官）：追加受控落库工具 org_commit。
+        // 仅平台管理员触发才真正写入；普通用户调用只会拿到“请管理员放行”的说明，绝不写库。
+        if (tools is not null
+            && def.SkillDefIds is { Count: > 0 }
+            && def.SkillDefIds.Contains("org_design", StringComparer.OrdinalIgnoreCase))
+        {
+            var commitTool = new Tools.OrgCommitTool(_services, _loggerFactory);
+            var commitFunc = AIFunctionFactory.Create(commitTool.Commit, "org_commit",
+                "把已经磨好并得到认可的『最终组织稿』真正落库为这支组织（数字员工+技能+连接），并支持同一 teamKey 反复覆盖（库里始终只留最新一版）。" +
+                "仅平台管理员（群主/超管）真正写入；普通用户调用只会收到需管理员放行的说明。" +
+                "参数：teamKey（这支组织的稳定英文短钥匙）、planJson（最终稿 JSON，字段同 one-click apply：{ title, skills[], agents[], createSupportCircle? }）。" +
+                "请只在方案全部得到用户一一同意之后才发起；发起前不要为无关字词频繁调用。");
+            var chatT3 = (IList<AITool>)(chatOptions.ChatOptions.Tools ??= []);
+            chatT3.Add(commitFunc);
+            _agentToolNames[agentId] = (_agentToolNames.TryGetValue(agentId, out var names3) ? names3.ToList() : [])
+                .Append(commitFunc.Name).Distinct().ToList();
+        }
+
         // 可复用技能（OpenClaw 风格）：把技能库中本智能体引用的技能逐个封装为 AIFunction 挂上。
         // shell / http / prompt 三类都经 SkillRunner 执行；需审批的技能用 ApprovalRequiredAIFunction 包装。
         if (def.SkillDefIds is { Count: > 0 } && _skillCatalog.Value is { } skillCatalog && _skillRunner.Value is { } runner)

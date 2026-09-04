@@ -32,6 +32,9 @@ public static class AgentHosting
         services.AddSingleton<KnowledgeBaseCatalog>(); // 知识库目录（文档切片向量 + 检索）
         services.AddSingleton<AgentSkillCatalog>(sp => new AgentSkillCatalog(
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(), options)); // 技能库（OpenClaw 风格可复用技能）
+        // 组织角色专用：受控团队提交器 + 窄映射（key→该支对象），供“内置组织角色”反复覆盖落库（管理员放行）
+        services.AddSingleton<OrgTeamStore>();
+        services.AddSingleton<OrgTeamCommitter>();
         // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值取 Agents:DailyTokenQuotaPerUser）
         services.AddSingleton(sp => new AguiGroupChat.Hub.Agents.AgentUsageService(
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
@@ -253,6 +256,29 @@ public static class AgentHosting
         if (!string.IsNullOrWhiteSpace(options.ApiKey)) return;
         options.ApiKey = configuration["DEEPSEEK_API_KEY"]
             ?? configuration["OPENAI_API_KEY"];
+    }
+
+    /// <summary>
+    /// 注册组织团队窄映射到持久化扩展区「orgTeams」：保存内部组织角色反复覆盖时“该支上一版建了哪些对象”。
+    /// memory 模式写入 JSON 快照（PersistenceService），postgres 模式落库 agui_sections 表（ISectionStore）。
+    /// 须在应用构建后、初始化持久化之前调用（Web / 桌面组合根）。
+    /// </summary>
+    public static void RegisterOrgTeamPersistence(this IServiceProvider services)
+    {
+        var store = services.GetRequiredService<OrgTeamStore>();
+        Func<object?> snapshot = () => store.SnapshotAll();
+        Action<JsonElement> restore = element => store.RestoreAll(
+            element.Deserialize<List<OrgTeamRecord>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("orgTeams", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("orgTeams", snapshot, restore);
+        }
     }
 
     /// <summary>
