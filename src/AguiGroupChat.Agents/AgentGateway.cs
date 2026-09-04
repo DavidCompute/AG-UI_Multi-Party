@@ -306,6 +306,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return catalog.ListAll().FirstOrDefault(s => s.SkillId == toolName);
     }
 
+    /// <summary>该数字员工是否挂载了“受控组织落库（OrgDeploy）”类技能：此类技能是对话驱动的部署动作（先出稿 → 管理员确认 → function-call 落库），
+    /// 而非可在“编排计划/按查”里批量投给 SkillRunner 的执行技能，故有此挂载的数字员工应走普通带工具 run 而非计划路由。</summary>
+    private bool HasMountedOrgDeploy(AgentDefinition def)
+    {
+        var catalog = _skillCatalog.Value;
+        if (catalog is null || def.SkillDefIds is not { Count: > 0 }) return false;
+        foreach (var id in def.SkillDefIds)
+        {
+            if (catalog.Get(id) is { Kind: AgentSkillKind.Org_deploy })
+                return true;
+        }
+        return false;
+    }
+
     /// <summary>该工具（客户端技能）是不是本机 dotnet（C#）类型：由桥在本机编译执行，浏览器无法直接运行任意 C#。</summary>
     private bool IsClientDotnetSkill(string toolName)
     {
@@ -433,12 +447,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return new AgentInvocationResult(false, null, "AGENT_DECIDED_SILENT");
         }
 
-        // 任务指派 / 问题提升 / 技能型计划编排（组织化路由）：被显式 @（Mentioned）触发，且满足任一条件：
-        //   - 配置了「指派白名单」（向下指派）；
-        //   - 或配置了「提升目标」（向上提升）；
-        //   - 或开启了 CoordinatorPlanning 且挂了技能库技能（技能型智能体：被 @ 时也走「问题→定计划→多技能批量执行→综合回归」）。
+        // 任务指派 / 问题提升 / 技能型计划编排（组织化路由）……
         // 命中则进入组织化路由：先尝试构建编排计划（按组织/技能激活），失败再回退递归指派。
-        var isSkillPlanner = _options.CoordinatorPlanning && (def.SkillDefIds is { Count: > 0 });
+        //
+        // 例外：若该数字员工挂载了【受控组织落库（Org_deploy）】类技能，说明它是一个“对话驱动式部署员”：
+        // 需在多轮对话里经模型把挂载工具当 function-call 真实调用（先出稿→管理员确认→落库→写回），
+        // 而不是被当作一次性的“排查/技能批量执行/综合答复”。计划执行器只会把技能投给 SkillRunner（对
+        // OrgDeploy 无可执行体、也不向模型暴露工具），故这里把 isSkillPlanner 关掉，让它走下方普通 run、
+        // 让挂载的工具（org_deploy / org_commit）在模型手中真正可触发。
+        var isSkillPlanner = _options.CoordinatorPlanning && (def.SkillDefIds is { Count: > 0 }
+            && !HasMountedOrgDeploy(def));
         if (effectiveMode == AgentTriggerMode.Mentioned
             && (def.AssignmentIds is { Count: > 0 }
                 || !string.IsNullOrWhiteSpace(def.EscalationAgentId)
