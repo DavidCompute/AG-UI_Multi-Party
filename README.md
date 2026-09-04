@@ -755,6 +755,10 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 除下述**可执行**的 `prompt / shell / http / dotnet` 四类之外，技能库还含一类<b>受控 `org_deploy`（组织落库）</b>：仅系统管理员在技能库手动建 / 改 / 删，数字员工不能运行时自建；它不是一个可跑命令或流程，而是被挂载它的数字员工（如 `org_architect` 的 `SkillDefIds`）当作「把最终组织稿整支落库 / 覆盖、库里只留最新」的部署动作（经唯一共享引擎落库、仅管理员放行），普通用户只会拿到需管理员放行的说明、绝不写库。
 
+> 挂载 `org_design` 的组织角色（如 `org_architect`）还会自动多挂一个 <b>一键式组织初稿</b>动作 `org_plan_draft`：把用户那句话需求交给与「一键组织编排」同一生成引擎（`AgentOrchestrator`）一次产出整支结构化成稿 JSON（岗位 + 各岗 skillIds + 技能，kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client 选，含连接），避免整支被手写成只见 pure prompt 软稿。它<b>只出稿不落库</b>；须用户在对话里显式认可后用同一段成稿经既有 `org_commit`（仅管理员闸）落库。
+
+> <b>绝不以服务端 bash 误跑 client / PowerShell 技能</b>：服务端/宿主执行器对标注 `ExecutionLocation=Client` 的技能一律拒绝并给指引（应在本机经 NativeBridge / 该用户机器执行）；明显 Windows PowerShell 正文若落到<b>非 Windows</b>宿主（Docker/Linux 服务器、Mac/Linux 自托管），会得到“需 PowerShell 环境”的明确提示，而不是 `Not running in PowerShell / command not found / 退出码2` 之类的误导性报错。Windows 桌面自托管（宿主即本机）用 PowerShell 正常执行，不受影响。
+
 - **四种类型**：`prompt`（提示词 / 流程模板，无需外部执行）、`shell`（可执行命令 / 脚本，在专属沙箱 `data/skillruns` 运行，写盘脚本为<b>无 BOM 的 UTF-8</b>，避免 BOM 使 bash 下首条命令失败）、`http`（调用外部 HTTP 接口，body 为 JSON 配置 `{method,url,headers,body}`，可用 `$QUERY` / `{{query}}` 占位）、`dotnet`（C# 源码作为 body，含 `public static string Run(string input)` 方法，运行时经 Roslyn 编译执行）。任意数字员工经其表单的「可复用技能（技能库）」勾选挂载引用（`SkillDefIds`），模型需要时自动调用。
 - **dotnet（C#）技能的执行与权限**：`kind=dotnet` 的 body 为一段 C# 源码（含 `Run(string)` 入口），运行时用 Roslyn 编译后执行。`dotnet` 技能与 `shell`/`http` 同属一个<b>特权桶</b>——**仅系统管理员可创建 / 修改 / 删除**（普通用户不能建、也不能把它改/建为 `dotnet`），自然语言生成（`/generate`）也只为系统管理员产出 `dotnet`（否则生成 prompt / http / shell）。但**运行对全体登录用户开放**：任何登录用户都可试运行一个已有的 `dotnet` 技能（服务端执行），或经数字员工 / 客户端执行（`ExecutionLocation=Client`）让它在<b>触发者批准后由本机桥运行</b>——浏览器本身无法编译 C#，客户端 dotnet 只能跑在本机桥，无需管理员即可运行（而 `shell`/`http` 的试运行仍仅系统管理员）。已被数字员工引用的技能删除时一并解除引用（种子技能只读，删除返回失败）。
 - **服务端 dotnet 沙箱**：`ExecutionLocation=Server` 的 dotnet 技能在 Hub 进程内、可回收的 `AssemblyLoadContext` 中执行，带约束性的元数据引用自查白名单 + `AllowUnsafe=false` + 超时 / 输出上限，避免任意 / 不受控执行。

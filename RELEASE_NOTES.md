@@ -1,4 +1,19 @@
-# AG-UI 群聊桌面版 1.0.119 发布说明（当前桌面版）
+# AG-UI 群聊桌面版 —— 后续 Web 迭代（组织一键式出稿 / 协调 JSON 换行容错 / Client 技能不失真到服务端 bash）
+# AG-UI Group Chat Desktop — upcoming web iteration (one-shot org draft, multiline coordination-JSON fallback, client skills never mis-run as server bash)
+
+## 新增（中文）
+- **组织架构构建师走“一键式”结构化出稿**：挂 `org_design` 的组织角色（如 org_architect）多挂载一个 `org_plan_draft` 工具，复用与网页「一键组织编排」同一生成引擎（`AgentOrchestrator`），一次产出「岗位 + 各岗 skillIds + 技能(kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client) + 岗位连接」的整支成稿 JSON——避免整支被手写成只见 pure prompt 的软稿。只出稿不落库，须用户明确认可后再经既有 `org_commit`（仅管理员）落库。
+- **协调 JSON 的 answer 真实换行也剥得干净**：模型在 `answer` 里放真实换行/未转义内容导致整包 `JsonDocument.Parse` 失败时，收尾（`UnwrapCoordinationAnswer` / 递归补查解析）会走容错提取把正文剥出来，不再把 `{"needsMore":…,"answer":…}` 整段 JSON 泄漏/截断给用户；真实换行保留成正文排版。
+- **Client 技能绝不落到服务端当 bash 跑**：服务端执行器对 `ExecutionLocation=Client` 的技能一律拒跑并给指引（应经本机桥/该用户机器执行）；明显 Windows PowerShell 正文在非 Windows 宿主（Docker/Linux 服务器、非 Windows 本机宿主）直接报“需 PowerShell 环境”，而不是出现 `Not running in PowerShell / command not found / 退出码2` 这类误导性假报错。Windows 桌面自托管的 PowerShell 执行路径不受影响。
+
+## New (English)
+- **Org architect drafts a whole organization the one-shot way**: an org role mounted on `org_design` (e.g., org_architect) gains an `org_plan_draft` tool that reuses the same generator as the web one-click organization orchestration (`AgentOrchestrator`) — one structured pass yields the full team JSON (roles + per-role `skillIds` + skills where `kind` is picked shell/http/prompt/dotnet and `executionLocation` server/client + connections), instead of free-chat producing mostly pure-prompt drafts. It only drafts (no write); commit still goes through `org_commit` (admin-gated) after explicit user agreement.
+- **Tolerant unwrap when the coordination JSON has real newlines in answer**: when the `answer` contains genuine line breaks / unescaped content so whole-object `JsonDocument.Parse` fails, final-reply wrappers (`UnwrapCoordinationAnswer` / recursive parse) fall back to extracting the answer text instead of leaking or truncating `{"needsMore":…,"answer":…}`; real newlines are kept as line breaks.
+- **Client skills are never mis-run as server bash**: the server executors refuse `ExecutionLocation=Client` with clear guidance (run on the originating machine via NativeBridge/browser); obviously PowerShell bodies on a non-Windows host (Docker/Linux server, non-Windows self-host) return a clear “PowerShell environment required” instead of the misleading `Not running in PowerShell / command not found / exit code 2`. Windows desktop self-host PowerShell execution is unchanged.
+
+---
+
+# AG-UI 群聊桌面版 1.0.119 发布说明（受后端改动影响的既有桌面点版本）
 # AG-UI Group Chat Desktop 1.0.119 Release Notes (current desktop release)
 
 ## 新增（中文）
