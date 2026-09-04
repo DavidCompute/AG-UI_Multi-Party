@@ -1,4 +1,5 @@
 using AguiGroupChat.Agents;
+using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Users;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -31,7 +32,8 @@ public sealed class OrgCommitTool
         var ctx = AgentGateway.AmbientContext.Value;
         if (ctx is null) return "当前不在智能体运行上下文，无法落库组织。";
         var auth = _services.GetService<AuthService>();
-        var isAdmin = auth?.IsAdmin(ctx.TriggerUserId) ?? false;
+        // 以“生效平台角色 ≥ Admin（含 SuperAdmin）”为准：避免只认 IsAdmin 标记把超管挡在外面。
+        var isAdmin = auth != null && auth.ResolveRole(ctx.TriggerUserId) >= PlatformRole.Admin;
         if (!isAdmin)
             return "你当前没有写入组织的权限。已给出的是方案预览；如需真正落库，请平台管理员（本群的负责人/超管）把这份最终稿放行后再提交，本次不会写入任何数据。";
 

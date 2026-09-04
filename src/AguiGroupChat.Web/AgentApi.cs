@@ -526,7 +526,7 @@ public static class AgentApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
-            if (!auth.IsAdmin(user.UserId))
+            if (auth.ResolveRole(user.UserId) < PlatformRole.Admin)
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可查看组织落库映射"), statusCode: StatusCodes.Status403Forbidden);
             return Results.Ok(teams.All().Select(r => new { r.Key, r.Title, r.Agents, r.Skills, SupportCircleGroupId = r.SupportCircleGroupId, r.UpdatedAtMs }));
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
@@ -535,7 +535,7 @@ public static class AgentApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
-            if (!auth.IsAdmin(user.UserId))
+            if (auth.ResolveRole(user.UserId) < PlatformRole.Admin)
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可整支覆盖落库组织"), statusCode: StatusCodes.Status403Forbidden);
             string planJson;
             using (var reader = new StreamReader(ctx.Request.Body))
@@ -550,7 +550,7 @@ public static class AgentApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
-            if (!auth.IsAdmin(user.UserId))
+            if (auth.ResolveRole(user.UserId) < PlatformRole.Admin)
                 return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可删除托管团队"), statusCode: StatusCodes.Status403Forbidden);
             committer.Retire((key ?? "").Trim()); // 先把该 key 对象从库退役
             var existed = teams.Remove((key ?? "").Trim(), out _);
