@@ -755,7 +755,7 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 除下述**可执行**的 `prompt / shell / http / dotnet` 四类之外，技能库还含一类<b>受控 `org_deploy`（组织落库）</b>：仅系统管理员在技能库手动建 / 改 / 删，数字员工不能运行时自建；它不是一个可跑命令或流程，而是被挂载它的数字员工（如 `org_architect` 的 `SkillDefIds`）当作「把最终组织稿整支落库 / 覆盖、库里只留最新」的部署动作（经唯一共享引擎落库、仅管理员放行），普通用户只会拿到需管理员放行的说明、绝不写库。
 
-> 挂载 `org_design` 的组织角色（如 `org_architect`）还会自动多挂一个 <b>一键式组织初稿</b>动作 `org_plan_draft`：把用户那句话需求交给与「一键组织编排」同一生成引擎（`AgentOrchestrator`）一次产出整支结构化成稿 JSON（岗位 + 各岗 skillIds + 技能，kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client 选，含连接），避免整支被手写成只见 pure prompt 软稿。它<b>只出稿不落库</b>；须用户在对话里显式认可后用同一段成稿经既有 `org_commit`（仅管理员闸）落库。
+> 挂载 `org_design` 的组织角色（如 `org_architect`）还会自动多挂一个 <b>一键式组织初稿</b>动作 `org_plan_draft`：把用户那句话需求交给与「一键组织编排」同一生成引擎（`AgentOrchestrator`）一次产出整支结构化成稿 JSON（岗位 + 各岗 skillIds + 技能，kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client 选，含连接），避免整支被手写成只见 pure prompt 软稿。它<b>只出稿不落库</b>；须用户在对话里显式认可后用同一段成稿经既有 `org_commit`（仅管理员闸）落库（“组织架构构建师”的完整打造算法另见 `docs/org-architect-build.md`）。
 
 > <b>绝不以服务端 bash 误跑 client / PowerShell 技能</b>：服务端/宿主执行器对标注 `ExecutionLocation=Client` 的技能一律拒绝并给指引（应在本机经 NativeBridge / 该用户机器执行）；明显 Windows PowerShell 正文若落到<b>非 Windows</b>宿主（Docker/Linux 服务器、Mac/Linux 自托管），会得到“需 PowerShell 环境”的明确提示，而不是 `Not running in PowerShell / command not found / 退出码2` 之类的误导性报错。Windows 桌面自托管（宿主即本机）用 PowerShell 正常执行，不受影响。
 
