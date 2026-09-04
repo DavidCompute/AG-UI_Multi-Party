@@ -4176,22 +4176,28 @@ function updateDocTitle() {
   document.title = n > 0 ? `(${n}) ${t("brand.name")}` : t("brand.name");
 }
 
-/** 浏览器桌面通知：页面不可见且非当前视图的新消息才通知（站内徽标已覆盖可见场景）；自己发的消息不通知。 */
+/** 浏览器桌面通知（Web Notification）：只要登录着，任何非本人触发的新消息都在浏览器弹系统通知（前台与后台均弹）；自己发的消息不弹；没授权先请求一次。 */
 function notifyNewMessage(evt, m) {
   try {
-    if (!document.hidden) return; // 页面可见：站内未读徽标已提示，避免打扰
     if (evt.senderId === state.memberId) return;
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
       const n = new Notification(t("notif.messageFrom", { name: evt.senderNickname || evt.senderId }), {
-        body: String(m.content || "").slice(0, 100),
-        tag: evt.groupId,
+        body: String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 120),
+        tag: "group_" + evt.groupId, icon: "/agui-icon-256.png",
       });
-      n.onclick = () => { window.focus(); n.close(); };
+      n.onclick = () => { window.focus(); n.close(); handleSystemNotifyClick(evt.groupId); };
     } else if (Notification.permission === "default") {
-      Notification.requestPermission().catch(() => {}); // 浏览器可能要求用户手势，被忽略不影响功能
+      Notification.requestPermission().catch(() => {});
     }
   } catch { /* 通知失败忽略 */ }
+}
+
+/** 点击系统桌面通知后的统一动作：带群 id → 跳到去该知聚（若存在）并使发送者知聚已读落到群头。 */
+function handleSystemNotifyClick(groupId) {
+  if (!groupId || !(state.groups || []).some((g) => g.groupId === groupId)) return;
+  hideNotifPanel();
+  selectGroup(groupId);
 }
 
 /* ============ 应用内通知中心（5.4） ============ */
@@ -4211,8 +4217,8 @@ function addNotification(type, title, body, opts = {}) {
   state.notifications.unshift(n);
   if (state.notifications.length > 100) state.notifications.pop(); // 上限：仅保留最近 100 条
   renderNotifications();
-  // 页面隐藏时用系统桌面通知兜底（站内面板可见时不打扰）
-  if (document.hidden) showSystemNotification(title, body, opts.groupId);
+  // 系统桌面通知（Web Notification）：前台 / 后台都弹，仅未授权 + 忽略；点击跳去其来源知聚
+  showSystemNotification(title, body, opts.groupId || "agui");
 }
 
 /** 把一次“调用技能”失败记入右上角通知中心，并持久化到本地（刷新 / 重启可备查）。
@@ -4235,7 +4241,7 @@ function notifySkillError(groupId, skillLabel, msg) {
   state.notifications.unshift(entry);
   if (state.notifications.length > 100) state.notifications.pop();
   renderNotifications();
-  if (document.hidden) showSystemNotification(entry.title, entry.body, groupId || "agui");
+  showSystemNotification(entry.title, entry.body, groupId || "agui");
   // 持久化到本用户本地存储（供刷新 / 下次登录备查）
   if (state.memberId) {
     try {
@@ -4271,12 +4277,12 @@ function notifIcon(type) {
   return ({ mention: "📣", approval: "🔐", message: "💬", reconnect: "🔌", info: "ℹ️", error: "⚠️", skill: "🛠️" })[type] || "🔔";
 }
 
-/** 系统桌面通知（页面隐藏时的兜底）。 */
+/** 系统桌面通知（Web Notification）：前台 / 后台都弹；`tag` 传群 id（群 id）时点击跳到该知聚并关闭。 */
 function showSystemNotification(title, body, tag) {
   try {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
-    const n = new Notification(title, { body: String(body || "").slice(0, 100), tag: tag || "agui" });
-    n.onclick = () => { window.focus(); n.close(); };
+    const n = new Notification(title, { body: String(body || "").slice(0, 140), tag: tag || "agui", icon: "/agui-icon-256.png" });
+    n.onclick = () => { window.focus(); n.close(); if (tag && tag !== "agui") handleSystemNotifyClick(tag); };
   } catch { /* 忽略 */ }
 }
 
