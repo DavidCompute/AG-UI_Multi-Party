@@ -419,7 +419,7 @@ window.I18N_DICTS.en = {
   "backup.cancel": "Cancel",
   "backup.close": "Close",
   "backup.danger": "Danger Zone",
-  "backup.init": "🗑 Initialize (Wipe Everything)",
+  "backup.init": "Initialize (Wipe Everything)",
   "backup.initTip": "Delete all data and clear browser cache; cannot be undone",
   "backup.initExplain": "This will <b style=\"color:var(--err)\r\">delete all data</b>: accounts, digital employees, chat history, attachments, semantic memory and model config; all signed-in clients take effect immediately, and it also <b>clears the browser cache</b>. This cannot be undone. To keep your data, export it first above. Type <b>Confirm</b> to continue.",
   "backup.initTextPh": "Type \"Confirm\"",
