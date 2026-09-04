@@ -234,7 +234,7 @@ public static class SkillApi
 
     /// <summary>Shell / HTTP / .NET 技能属特权类型：创建 / 修改 / 运行仅限管理员（归属者试运行 prompt 由 /run 单独管控）。</summary>
     private static bool RequiresPrivilegedKind(string? kind)
-        => Enum.TryParse<AgentSkillKind>(kind, true, out var k) && k is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet;
+        => Enum.TryParse<AgentSkillKind>(kind, true, out var k) && k is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet or AgentSkillKind.OrgDeploy;
 
     private static object ToDto(AgentSkillDefinition s, bool canReadBody)
     {

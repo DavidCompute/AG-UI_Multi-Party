@@ -22,6 +22,13 @@ public enum AgentSkillKind
 
     /// <summary>C# 源码技能：Roslyn 动态编译受限执行（管理员建立）；executionLocation=server → 服务端编译；client → 本机桥在该用户机器/内网机编译执行。</summary>
     Dotnet,
+
+    /// <summary>
+    /// 受控「组织落库」技能：本身不可作为 prompt/shell/http/dotnet 执行；仅系统管理员可建/编辑/删除，
+    /// 被挂载它的数字员工作为“把一支组织直接部署到库”的能力（经唯一官方引擎落库、仅管理员放行）。
+    /// SkillRunner 不为此类提供普通执行体；运行期由 AgentCatalog 转换为受控部署动作。
+    /// </summary>
+    OrgDeploy,
 }
 
 /// <summary>

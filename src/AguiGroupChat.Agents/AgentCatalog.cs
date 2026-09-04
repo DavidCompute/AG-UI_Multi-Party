@@ -580,6 +580,8 @@ public sealed class AgentCatalog
             return "技能类型 kind 无效：仅支持 shell / http / prompt。";
         if (k == AgentSkillKind.Dotnet)
             return "dotnet（C# 动态编译）技能属于高危特权类型，需由系统管理员到技能库手动创建，智能体不能运行时自建。";
+        if (k == AgentSkillKind.OrgDeploy)
+            return "org_deploy（组织落库）技能属受控特权类型，需由系统管理员在技能库手动创建，智能体不能运行时自建。";
         var desc = (description ?? "").Trim();
         if (desc.Length == 0)
             return "请提供技能描述（何时调用、能获得什么）。";
