@@ -70,6 +70,30 @@ internal sealed class SkillRunner
 
     // =============== Shell ===============
 
+    /// <summary>粗略判断正文是否明显是 Windows PowerShell 语法（前几行出现 PS 惯用标记），用于“别把 PS 当 bash 跑”的安全判别。</summary>
+    private static bool LooksPowerShellBody(string body)
+    {
+        var head = new List<string>();
+        foreach (var line in body.Split('\n'))
+        {
+            var t = line.Trim();
+            if (t.Length == 0) continue;
+            head.Add(t);
+            if (head.Count >= 3) break;
+        }
+        foreach (var t in head)
+        {
+            if (t.StartsWith("$ErrorActionPreference", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("try{", StringComparison.Ordinal)
+                || t.StartsWith("catch", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("param(", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return body.Contains("SilentlyContinue", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("$PSVersionTable", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("Get-CimInstance", StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<string> RunShellAsync(AgentSkillDefinition skill, string query, CancellationToken ct)
     {
         var dir = SandboxDir(skill.SkillId);
@@ -78,6 +102,28 @@ internal sealed class SkillRunner
 
         // 把调用参数写入环境/输入：${query} 占位替换；同时写 args.env 供脚本读取
         var effective = body.Replace("${query}", query ?? "", StringComparison.Ordinal);
+
+        // 边界：客户端本机执行(ExecutionLocation=Client)技能只能在<b>发起请求那台机器</b>经本机桥/前端执行，
+        // 这里的 SkillRunner 是服务端/试运行执行器——任何一个 client 技能若流到这里都不该当作服务端命令跑（否则
+        // 会把 Windows PowerShell 脚本丢给服务端 bash/非本机，产生 `command not found` 一类的假报错）。明确拒绝并给指引。
+        if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client)
+            return "【不能在本服务端执行】该技能标注为\"本机(client)\"执行，需在发起请求的那台机器经本机桥(NativeBridge)/浏览器执行；"
+                + "服务端不会代为运行它（避免把 PowerShell/Windows 脚本当服务端脚本误跑）。请重新在挂载并启动了本机桥的机器触发该技能。";
+
+        // 若正文明显是 Windows PowerShell，但无 shebang/无显式解释器：这里（服务端 shell 执行器）不应默认当 bash 跑。
+        // 服务端宿主是 Windows 才用 powershell；非 Windows 直接明确报“缺 PowerShell 环境”，而不是产出 command not found。
+        var trimmedBody = body.TrimStart();
+        var looksPowerShell = !trimmedBody.StartsWith("#!", StringComparison.Ordinal)
+            && (string.IsNullOrWhiteSpace(skill.Interpreter)
+                || skill.Interpreter.Contains("powershell", StringComparison.OrdinalIgnoreCase)
+                || skill.Interpreter.Contains("pwsh", StringComparison.OrdinalIgnoreCase));
+        if (looksPowerShell && (LooksPowerShellBody(trimmedBody) || !string.IsNullOrWhiteSpace(skill.Interpreter)))
+        {
+            if (!OperatingSystem.IsWindows())
+                return "【需要 PowerShell 环境】该 shell 技能正文是 Windows PowerShell 语法，但当前服务端宿主不是 Windows，"
+                    + "没有 PowerShell 可执行它。请把它作为 \"本机(client)\" 技能、在 Windows 那台机器经本机桥执行；"
+                    + "或重写成服务端宿主可用(bash/PowerShell 依宿主)的脚本。";
+        }
 
         // 写出脚本文件（首行 shebang 优先；无则按 Interpreter 决定，否则 bash）
         var scriptPath = Path.Combine(dir, "run.sh");
