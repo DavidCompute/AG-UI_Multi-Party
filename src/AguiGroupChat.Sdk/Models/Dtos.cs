@@ -76,6 +76,7 @@ public sealed class SnapshotMessage
 {
     public string? MessageId { get; set; }
     public string? SenderId { get; set; }
+    public string? SenderType { get; set; }
     public string? SenderNickname { get; set; }
     public string? Content { get; set; }
     public string? TopicId { get; set; }

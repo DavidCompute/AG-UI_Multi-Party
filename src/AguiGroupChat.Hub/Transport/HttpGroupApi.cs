@@ -350,6 +350,7 @@ public static class HttpGroupApi
                     {
                         MessageId = m.MessageId,
                         SenderId = m.SenderId,
+                        SenderType = m.SenderType.ToString(),
                         SenderNickname = m.SenderNickname,
                         Content = m.Content,
                         TopicId = m.TopicId,
@@ -409,6 +410,7 @@ public static class HttpGroupApi
                     {
                         MessageId = m.MessageId,
                         SenderId = m.SenderId,
+                        SenderType = m.SenderType.ToString(),
                         SenderNickname = m.SenderNickname,
                         Content = m.Content,
                         TopicId = m.TopicId,
@@ -444,6 +446,7 @@ public static class HttpGroupApi
                     {
                         MessageId = m.MessageId,
                         SenderId = m.SenderId,
+                        SenderType = m.SenderType.ToString(),
                         SenderNickname = m.SenderNickname,
                         Content = m.Content,
                         TopicId = m.TopicId,
@@ -541,6 +544,7 @@ public static class HttpGroupApi
                     {
                         MessageId = m.MessageId,
                         SenderId = m.SenderId,
+                        SenderType = m.SenderType.ToString(),
                         SenderNickname = m.SenderNickname,
                         Content = m.Content,
                         TopicId = m.TopicId,

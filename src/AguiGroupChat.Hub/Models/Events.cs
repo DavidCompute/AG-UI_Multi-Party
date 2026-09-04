@@ -479,6 +479,8 @@ public sealed class SnapshotMessage
 {
     public required string MessageId { get; init; }
     public required string SenderId { get; init; }
+    /// <summary>发送者类别（权威，落库值）：Agent=数字员工/分身是可重新回答的 AI 回复；User=真人。前端据此判重新回答，不再靠 id 前缀猜。</summary>
+    public string? SenderType { get; init; }
     public required string SenderNickname { get; init; }
     public required string Content { get; init; }
     /// <summary>引用回复的目标消息 ID（前端展示 / 点击定位）。</summary>

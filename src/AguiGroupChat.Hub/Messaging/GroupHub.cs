@@ -993,6 +993,7 @@ public sealed class GroupHub : IDisposable
             {
                 MessageId = m.MessageId,
                 SenderId = m.SenderId,
+                SenderType = m.SenderType.ToString(),
                 SenderNickname = m.SenderNickname,
                 Content = m.Content,
                 TopicId = m.TopicId,
