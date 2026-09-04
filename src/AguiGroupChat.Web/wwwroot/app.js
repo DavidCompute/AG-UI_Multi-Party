@@ -3011,7 +3011,7 @@ function applySnapshot(evt) {
     if (seen.has(sm.messageId)) continue;
     const m = {
       id: sm.messageId, senderId: sm.senderId, senderNickname: sm.senderNickname,
-      senderType: sm.senderId?.startsWith("agent_") ? "agent" : "user",
+      senderType: isAgentGeneratedId(sm.senderId) ? "agent" : "user",
       content: sm.content, reasoning: sm.reasoning || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll, agentChain: sm.agentChain || null,
       topicId: sm.topicId || "main",
       timestamp: Number(sm.timestamp) || 0,
@@ -5502,11 +5502,14 @@ function resetVScroll() {
 /** 兼容入口：整表重建场景（快照 / 解散 / 切知聚）统一走虚拟滚动调度。 */
 function renderMessages() { scheduleVirtualRender(); }
 
+/** id 是否为“数字员工/分身生成的回复”（可重新回答：数字员工 agent_ 与 AI 分身 twin_）。 */
+function isAgentGeneratedId(id) { return /^(agent_|twin_)/.test(String(id || "")); }
+
 /** 快照 / 分页消息 → 前端消息对象。 */
 function snapshotToMessage(sm) {
   return {
     id: sm.messageId, senderId: sm.senderId, senderNickname: sm.senderNickname,
-    senderType: sm.senderId?.startsWith("agent_") ? "agent" : "user",
+    senderType: isAgentGeneratedId(sm.senderId) ? "agent" : "user",
     content: sm.content || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll,
     topicId: sm.topicId || "main", replyTo: sm.replyToMessageId || null,
     timestamp: Number(sm.timestamp) || 0,
