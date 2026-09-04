@@ -1602,7 +1602,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (start < 0 || end <= start) return null;
         JsonDocument? doc = null;
         try { doc = JsonDocument.Parse(text.Substring(start, end - start + 1)); }
-        catch { return null; }
+        catch { /* 模型常在 answer 里放了真实换行/未转义 → 整包 JSON 解码失败；走容错提取正文，避免把决策 JSON 泄漏给用户 */ }
+        if (doc is null) return ExtractRecursiveAnswerFallback(text);
         using (doc)
         {
             var rootEl = doc.RootElement;
@@ -1622,6 +1623,66 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
             return new RecursiveResponse(needsMore, gather, answer);
         }
+    }
+
+    /// <summary>容错回退：整包 JSON 解码失败（模型常把 answer 写成含真实换行/未转义 的纯文本）时，
+    /// 手工从文本里剥出 needsMore 与 answer 正文，避免把决策 JSON 原样泄漏给用户。
+    /// 提取结尾引号时跳过 \" 转义，避免在正文含双引号处被截断。</summary>
+    private static RecursiveResponse? ExtractRecursiveAnswerFallback(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var needsMore = false;
+        // needsMore：紧跟在冒号后的词是 true/false；找不到按 false（信息充分）处理，让答案直接可用
+        var nmIdx = text.IndexOf("needsMore", StringComparison.OrdinalIgnoreCase);
+        if (nmIdx >= 0)
+        {
+            var tail = text.Substring(nmIdx + "needsMore".Length);
+            var colon = tail.IndexOf(':');
+            if (colon >= 0)
+            {
+                var rest = tail.Substring(colon + 1).TrimStart();
+                if (rest.StartsWith("true", StringComparison.OrdinalIgnoreCase)) needsMore = true;
+                else if (rest.StartsWith("false", StringComparison.OrdinalIgnoreCase)) needsMore = false;
+            }
+        }
+
+        // answer：定位 "answer" 后的首个 :
+        var ansKey = "answer";
+        var keyIdx = text.IndexOf(ansKey, StringComparison.OrdinalIgnoreCase);
+        if (keyIdx < 0) return null;
+        var afterKey = text.Substring(keyIdx + ansKey.Length);
+        var ansColon = afterKey.IndexOf(':');
+        if (ansColon < 0) return null;
+        var valueStart = ansColon + 1;
+        // 跳过空白跳到 `"`
+        var str = afterKey.Substring(valueStart).TrimStart();
+        if (str.Length == 0 || str[0] != '"') return null;
+
+        // 从字符串末尾的方向找正文的结束引号：双引号若紧跟 \ 前缀则视为转义（跳开）；
+        // 正文结束引号即为最右侧那个未转义的 `"`。
+        var openQuote = 1; // 跳开头的 "
+        var closeQuote = -1;
+        for (int i = str.Length - 1; i >= openQuote; i--)
+        {
+            if (str[i] == '"' && !IsEscaped(str, i))
+            {
+                closeQuote = i;
+                break;
+            }
+        }
+        if (closeQuote < 0) return null;
+        var answer = str.Substring(openQuote, closeQuote - openQuote);
+        answer = answer.Replace("\\\"", "\"").Replace("\\\\", "\\").Replace("\\n", "\n").Replace("\\t", "\t");
+        return new RecursiveResponse(needsMore, [], answer.Trim());
+    }
+
+    /// <summary>判断 text[i] 是否是(被 \ 转义过的)引号 —— 即 text[i]=='"' 且往前数反斜杠个数为奇数。</summary>
+    private static bool IsEscaped(string s, int i)
+    {
+        if (i <= 0 || s[i] != '"') return false;
+        int backslashes = 0;
+        for (int j = i - 1; j >= 0 && s[j] == '\\'; j--) backslashes++;
+        return backslashes % 2 == 1;
     }
 
     /// <summary>防御：若模型的“最终归答文本”实际是内部协调 JSON（{"needsMore":…,"gather":…,"answer":…}）
