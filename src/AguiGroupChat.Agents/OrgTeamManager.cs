@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Hub.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace AguiGroupChat.Agents;
@@ -73,17 +75,25 @@ public sealed class OrgTeamStore
 public sealed class OrgTeamCommitter
 {
     private const int MaxTitle = 200;
+    private readonly IServiceProvider _services;
     private readonly AgentCatalog _catalog;
     private readonly AgentSkillCatalog _skills;
     private readonly OrgTeamStore _store;
+    private readonly AgentOptions _options;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
+    private readonly GroupHub? _hub;
 
-    public OrgTeamCommitter(AgentCatalog catalog, AgentSkillCatalog skills, OrgTeamStore store, ILoggerFactory loggerFactory)
+    public OrgTeamCommitter(IServiceProvider services, AgentCatalog catalog, AgentSkillCatalog skills, OrgTeamStore store, AgentOptions options, ILoggerFactory loggerFactory)
     {
+        _services = services;
         _catalog = catalog;
         _skills = skills;
         _store = store;
+        _options = options;
+        _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<OrgTeamCommitter>();
+        _hub = services.GetService<GroupHub>();
     }
 
     // plan JSON 轻量 DTO（对齐系统一键编排的输入字段，关键字小驼峰）
@@ -122,90 +132,48 @@ public sealed class OrgTeamCommitter
         try { plan = JsonSerializer.Deserialize<CommittedPlan>(planJson, JsonOpt); }
         catch (Exception ex) { return (false, "方案 JSON 无法解析：" + ex.Message); }
         if (plan is null || (plan.agents ?? []).Count == 0) return (false, "方案里没有数字员工。");
-        if (plan.createSupportCircle) return (false, "本受控通道当前不直接建客服知聚；请走“一键编排→确认建客服知聚”，或去掉 createSupportCircle 以纯团队形式落库。");
+        if (plan.createSupportCircle && _hub is null)
+            return (false, "当前环境未装配群服务，不能直接建客服知聚；请改用“一键编排→建客服知聚”，或先不带 createSupportCircle 建纯团队。");
 
-        // 全部校验通过前不被写入：先解析/校验，成功才 Retire+落
-        // 本 key 上一版对象即将被整体替换：占位集合剔除它们，使覆盖可复用干净的原始 id（不产生 _2）。
-        var selfBatch = _store.Get(key);
-        var selfAgents = selfBatch?.Agents is { } sa ? new HashSet<string>(sa, StringComparer.Ordinal) : null;
-        var selfSkills = selfBatch?.Skills is { } ss ? new HashSet<string>(ss, StringComparer.Ordinal) : null;
-        var newSkills = new List<(string id, AgentSkillDefinition def)>();
-        var usedSkill = new HashSet<string>(_skills.ListAll().Where(s => selfSkills is null || !selfSkills.Contains(s.SkillId)).Select(s => s.SkillId), StringComparer.Ordinal);
-        foreach (var s in plan.skills ?? [])
+        // 覆盖语义：先退役该 key 上一批（若曾建过），让官方唯一引擎用干净原始 id 整支（重新）建出来。
+        try { RetireOld(key); }
+        catch { /* 个别对象可能已被手动删：忽略，按现存不在场往下走 */ }
+
+        var skillSpecs = (plan.skills ?? []).Select(s => new OrgPlanSkill
         {
-            var name = (s.name ?? "").Trim();
-            var desc = (s.description ?? "").Trim();
-            var body = (s.body ?? "").Trim();
-            if (name.Length == 0 || desc.Length == 0 || body.Length == 0) return (false, $"技能「{name}」缺少名称/描述/正文。");
-            var kind = Enum.TryParse<AgentSkillKind>(s.kind, true, out var k) ? k : AgentSkillKind.Prompt;
-            if (!isAdmin && kind is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet)
-                return (false, $"技能类型 {kind} 仅系统管理员可建。");
-            // id 规范化 + 避让其余（非本团队）已占用
-            var raw = (s.skillId ?? "").Trim();
-            var id = AgentSkillDefinition.IsValidAsciiToolId(raw) ? raw : SanitizeId(raw, "skill");
-            id = AvailableId(id, usedSkill);
-            usedSkill.Add(id);
-            var execLoc = string.Equals(s.executionLocation, "client", StringComparison.OrdinalIgnoreCase) ? AgentSkillExecutionLocation.Client : AgentSkillExecutionLocation.Server;
-            var approvable = s.requiresApproval ?? true;
-            var reqApprove = kind == AgentSkillKind.Shell || execLoc == AgentSkillExecutionLocation.Client || approvable;
-            newSkills.Add((id, new AgentSkillDefinition { SkillId = id, Name = name.Substring(0, Math.Min(200, name.Length)), Description = desc, Kind = kind, Body = body, RequiresApproval = reqApprove, ExecutionLocation = execLoc, OwnerId = ownerId }));
+            SkillId = s.skillId, Name = s.name, Description = s.description, Kind = s.kind,
+            Body = s.body, ExecutionLocation = s.executionLocation, RequiresApproval = s.requiresApproval,
+        }).ToList();
+        var agentSpecs = (plan.agents ?? []).Select(a => new OrgPlanAgent
+        {
+            AgentId = a.agentId, Nickname = a.nickname, Description = a.description, Instructions = a.instructions,
+            TriggerMode = a.triggerMode, SkillIds = a.skillIds, AssignmentIds = a.assignmentIds,
+            EscalationAgentId = a.escalationAgentId, RelayToAgentId = a.relayToAgentId,
+        }).ToList();
+
+        OrgApplyResult result;
+        try
+        {
+            result = await OrgApplyEngine.ExecuteAsync(
+                ownerId: ownerId, isAdmin: true, skills: skillSpecs, agents: agentSpecs,
+                createSupportCircle: plan.createSupportCircle, supportCircleName: null, title: plan.title,
+                catalog: _catalog, skillCatalog: _skills, hub: _hub!, agentOptions: _options,
+                loggerFactory: _loggerFactory, ct: ct);
         }
-        var usedAgent = new HashSet<string>(_catalog.ListDefinitions().Where(d => selfAgents is null || !selfAgents.Contains(d.AgentId)).Select(d => d.AgentId), StringComparer.Ordinal);
-        var idMap = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var a in plan.agents!)
+        catch (OrgApplyException ex)
         {
-            var nick = (a.nickname ?? "").Trim();
-            if (nick.Length == 0) return (false, "存在缺少昵称的数字员工。");
-            var raw = (a.agentId ?? "").Trim();
-            var alt = SanitizeId((raw.Length > 0 ? raw : nick), "agent");
-            var id = AvailableId(alt, usedAgent);
-            usedAgent.Add(id);
-            idMap[raw.Length > 0 ? raw : nick] = id;
+            return (false, ex.Message);
         }
-        // 引用目标校验：所引技能必须先在本方案定义成数字员工内建技能，连接目标必须在本方案内
-        foreach (var a in plan.agents!)
+        catch (Exception ex)
         {
-            var nick = (a.nickname ?? "").Trim();
-            foreach (var sid in a.skillIds ?? [])
-                if (!newSkills.Any(ns => ns.id == sid))
-                    return (false, $"数字员工「{nick}」引用了未定义技能：{sid}");
-            foreach (var dep in (a.assignmentIds ?? []).Concat(new[] { a.escalationAgentId, a.relayToAgentId }).Where(x => !string.IsNullOrWhiteSpace(x)))
-                if (!idMap.ContainsKey(dep!))
-                    return (false, $"数字员工「{nick}」的连接目标未定义：{dep}");
+            _logger.LogError(ex, "org commit（经官方 apply 引擎）失败：key={Key}", key);
+            return (false, "落库失败（未写入）：" + ex.Message);
         }
 
-        // 校验通过后落库（覆盖模式先把上版退役）
-        RetireOld(key);
-        foreach (var (sid, def) in newSkills) _skills.Upsert(def);
-        var createdAgents = new List<string>();
-        foreach (var a in plan.agents!)
-        {
-            var nick = (a.nickname ?? "").Trim();
-            var raw = (a.agentId ?? "").Trim();
-            var origId = raw.Length > 0 ? raw : nick;
-            var finalId = idMap[origId.Length > 0 ? origId : nick];
-            createdAgents.Add(finalId);
-            var remapSkill = (a.skillIds ?? []).Where(sid => newSkills.Any(ns => ns.id == sid)).Select(sid => newSkills.First(ns => ns.id == sid).id).ToList();
-            var remapAssign = (a.assignmentIds ?? []).Where(x => idMap.ContainsKey(x)).Select(x => idMap[x]).ToList();
-            var def = new AgentDefinition
-            {
-                AgentId = finalId,
-                Nickname = nick.Substring(0, Math.Min(200, nick.Length)),
-                Description = a.description?.Trim() ?? "",
-                Instructions = a.instructions?.Trim() ?? "",
-                TriggerMode = Enum.TryParse<AgentTriggerMode>(a.triggerMode, true, out var tm) ? tm : AgentTriggerMode.Mentioned,
-                SkillDefIds = remapSkill,
-                AssignmentIds = remapAssign,
-                EscalationAgentId = string.IsNullOrWhiteSpace(a.escalationAgentId) ? null : (idMap.TryGetValue(a.escalationAgentId, out var ec) ? ec : null),
-                RelayToAgentId = string.IsNullOrWhiteSpace(a.relayToAgentId) ? null : (idMap.TryGetValue(a.relayToAgentId, out var rc) ? rc : null),
-                OwnerId = ownerId,
-            };
-            _catalog.Upsert(def);
-        }
         var title = (plan.title ?? "").Trim();
         if (title.Length > MaxTitle) title = title[..MaxTitle];
-        _store.Upsert(key, title, createdAgents, newSkills.Select(ns => ns.id).ToList(), null);
-        return (true, $"已把「{(title.Length > 0 ? title : "这支团队")}」整批落库更新到最新一版：数字员工 {string.Join(",", createdAgents)}；技能 {string.Join(",", newSkills.Select(ns => ns.id))}。库里只保留本批（key={key}）。");
+        _store.Upsert(key, title, result.Agents, result.Skills, result.SupportCircleGroupId);
+        return (true, $"已用官方一键编排引擎把「{(title.Length > 0 ? title : "这支团队")}」整批落库：数字员工 {string.Join(",", result.Agents)}；技能 {string.Join(",", result.Skills)}。库里只保留本批（key={key}）。");
     }
 
     private static string AvailableId(string preferred, HashSet<string> occupied)
