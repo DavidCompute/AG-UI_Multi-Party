@@ -136,6 +136,9 @@ public static class SystemApi
             sp.GetRequiredService<AgentCatalog>().RestoreAll([]);
             sp.GetRequiredService<AgentCatalog>().InvalidateAll();
             sp.GetRequiredService<KnowledgeBaseCatalog>().RestoreAll([]);
+            // 技能库 / 组织覆盖簿记：一并复位（技能按 appsettings 种子、组织覆盖簿记清空；DB sections 已在上面删表/洗净，重启也不复活）
+            sp.GetService<AgentSkillCatalog>()?.RestoreAll(System.Array.Empty<AgentSkillDefinition>()); // 只留守常种子技能；运行时自建/导入的技能一并清
+            sp.GetService<OrgTeamStore>()?.RestoreAll(System.Array.Empty<OrgTeamRecord>());
             sp.GetService<AgentGateway>()?.ClearBridgeCursors();
             sp.GetRequiredService<AttachmentStore>().ClearAll();
             sp.GetService<IMessageMemoryStore>()?.ClearAll();

@@ -43,11 +43,12 @@ public static class ExportImportApi
         // ---- 导出：全量数据 zip（账号 + 智能体定义/触发规则 + 群/话题/消息 + 附件文件）----
         root.MapGet("/export", (HttpContext ctx, AuthService auth, IGroupStore store,
             IUserStore userStore, AgentCatalog catalog, AgentRegistry registry, AttachmentStore attachments,
+            AgentSkillCatalog skillCatalog, OrgTeamStore orgTeams,
             AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
             var actorId = WebIdentity.UserId(ctx)!;
 
-            var manifest = BuildManifest(store, userStore, catalog, registry);
+            var manifest = BuildManifest(store, userStore, catalog, registry, skillCatalog, orgTeams);
             var bytes = BuildExportZip(manifest, store, userStore, catalog, attachments);
             var name = $"agui-data-export-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
             audit.Record("data.export", actorId, auth.GetUser(actorId)?.Username,
@@ -57,7 +58,7 @@ public static class ExportImportApi
 
         // ---- 导入预览：解析 zip 的 manifest，返回账号 / 智能体存在性检查与群清单 ----
         root.MapPost("/import/preview", async (HttpContext ctx,
-            AgentCatalog catalog, IUserStore userStore) =>
+            AgentCatalog catalog, IUserStore userStore, AgentSkillCatalog skillCatalog) =>
         {
             if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请上传导出的 zip 文件（表单字段 file）"));
@@ -91,13 +92,27 @@ public static class ExportImportApi
                     messageCount = g.Messages.Count,
                     avatar = g.Group.GroupAvatar,
                 }),
+                skills = manifest.Skills.Select(s => new
+                {
+                    skillId = s.SkillId,
+                    kind = s.Kind.ToString(),
+                    exists = skillCatalog.Contains(s.SkillId),
+                }),
+                orgTeams = manifest.OrgTeams.Select(t => new
+                {
+                    key = t.Key,
+                    title = t.Title,
+                    agents = t.Agents,
+                    skillsList = t.Skills,
+                }),
             });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // ---- 导入执行：selectedGroupIds 为 JSON 数组字符串（勾选的群，按导出 groupId）----
         root.MapPost("/import", async (HttpContext ctx, AuthService auth,
             IGroupStore store, IUserStore userStore, AgentCatalog catalog, AgentRegistry registry,
-            GroupHub hub, AttachmentStore attachments, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+            GroupHub hub, AttachmentStore attachments, AgentSkillCatalog skillCatalog, OrgTeamStore orgTeams,
+            AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
             var actorId = WebIdentity.UserId(ctx)!;
             if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
@@ -116,7 +131,7 @@ public static class ExportImportApi
 
             try
             {
-                var report = await ImportAsync(manifest, zip, selected, store, userStore, catalog, registry, hub, attachments);
+                var report = await ImportAsync(manifest, zip, selected, store, userStore, catalog, registry, hub, attachments, skillCatalog, orgTeams);
                 audit.Record("data.import", actorId, auth.GetUser(actorId)?.Username,
                     detail: $"导入数据包（勾选群 {selected.Count} 个 / 账号 {manifest.Accounts.Count} / 智能体 {manifest.Agents.Count}）");
                 return Results.Ok(report);
@@ -131,10 +146,15 @@ public static class ExportImportApi
 
     // ================= 导出 =================
 
-    private static ExportManifest BuildManifest(IGroupStore store, IUserStore userStore, AgentCatalog catalog, AgentRegistry registry)
+    private static ExportManifest BuildManifest(IGroupStore store, IUserStore userStore, AgentCatalog catalog, AgentRegistry registry, AgentSkillCatalog skillCatalog, OrgTeamStore orgTeams)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var manifest = new ExportManifest { ExportedAt = now };
+
+        // 技能库实体：库内全部技能（含会随数字员工 SkillDefIds 引用、需在目标侧还原的 org_design / org_deploy 等）
+        manifest.Skills = skillCatalog.ListAll().ToList();
+        // 组织覆盖簿记：key → 该批 agent/skill，跨机还原后“同一 key 覆盖只留最新”仍成立
+        manifest.OrgTeams = orgTeams.SnapshotAll().ToList();
 
         // 账号：全部（含密码哈希 / 盐，保证导入后原密码可直接登录）
         manifest.Accounts = userStore.ListUsers()
@@ -256,7 +276,7 @@ public static class ExportImportApi
 
     private static async Task<object> ImportAsync(ExportManifest manifest, ZipArchive zip, HashSet<string> selectedGroupIds,
         IGroupStore store, IUserStore userStore, AgentCatalog catalog, AgentRegistry registry,
-        GroupHub hub, AttachmentStore attachments)
+        GroupHub hub, AttachmentStore attachments, AgentSkillCatalog skillCatalog, OrgTeamStore orgTeams)
     {
         var accountMap = new Dictionary<string, string>(StringComparer.Ordinal);
         var accountsCreated = 0;
@@ -301,6 +321,18 @@ public static class ExportImportApi
         }
         string MapAccount(string id) => accountMap.TryGetValue(id, out var mapped) ? mapped : id;
 
+        // ---- 1.5 技能库实体（含 org_design / org_deploy 等，供下方数字员工 SkillDefIds 引用还原）：缺失则补齐 ----
+        var skillsCreated = 0;
+        foreach (var s in manifest.Skills)
+        {
+            if (string.IsNullOrWhiteSpace(s.SkillId)) continue;
+            if (!skillCatalog.Contains(s.SkillId))
+            {
+                skillCatalog.Upsert(s); // 与账号一致：已存在的技能不覆盖（目标侧沿用其库内定义）
+                skillsCreated++;
+            }
+        }
+
         // ---- 2. 智能体定义：按 agentId 检查；缺失则创建（OwnerId 走账号映射）----
         var agentsCreated = 0;
         var agentsSkipped = 0;
@@ -315,6 +347,16 @@ public static class ExportImportApi
             def.OwnerId = string.IsNullOrEmpty(def.OwnerId) ? null : MapAccount(def.OwnerId);
             catalog.Upsert(def);
             agentsCreated++;
+        }
+
+        // ---- 2.5 组织覆盖簿记（导出 key=该批 agent/skill）：缺失则还原 ----
+        var orgTeamsRestored = 0;
+        foreach (var rec in manifest.OrgTeams)
+        {
+            if (string.IsNullOrWhiteSpace(rec.Key)) continue;
+            if (orgTeams.Get(rec.Key) is not null) continue; // 不覆盖目标侧已存在簿记
+            orgTeams.Upsert(rec.Key, rec.Title, new List<string>(rec.Agents), new List<string>(rec.Skills), rec.SupportCircleGroupId);
+            orgTeamsRestored++;
         }
 
         // ---- 3. 附件文件还原（仅选中的群涉及的附件，避免还原无关文件）----
@@ -490,6 +532,8 @@ public static class ExportImportApi
             accountsUpdated,
             agentsCreated,
             agentsSkipped,
+            skillsCreated,
+            orgTeamsRestored,
             attachmentsRestored,
             attachmentsSkipped,
             groupsImported = imported,
@@ -586,6 +630,8 @@ public static class ExportImportApi
         public long ExportedAt { get; set; }
         public List<ExportAccount> Accounts { get; set; } = [];
         public List<ExportAgent> Agents { get; set; } = [];
+        public List<AgentSkillDefinition> Skills { get; set; } = [];       // 技能库实体（含 org_design / org_deploy 等），保证挂载引用可还原
+        public List<OrgTeamRecord> OrgTeams { get; set; } = [];             // 组织覆盖簿记（key→该批 agent/skill），保证“只留最新”语义跨机一致
         public List<ExportGroup> Groups { get; set; } = [];
     }
 
