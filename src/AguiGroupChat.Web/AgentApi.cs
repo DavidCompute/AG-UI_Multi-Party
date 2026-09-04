@@ -357,165 +357,32 @@ public static class AgentApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
-            var isAdmin = auth.IsAdmin(user.UserId);
-
-            // ---- 1. 技能：自动去重（与原库同名 / 方案内同名时追加 _2/_3 改名，不覆盖已有资产），并记录原→新映射供数字员工引用重映射。 ----
-            var skills = req.Skills ?? [];
-            var occupiedSkills = new HashSet<string>(skillCatalog.ListAll().Select(s => s.SkillId), StringComparer.Ordinal);
-            var skillIdMap = new Dictionary<string, string>(StringComparer.Ordinal); // 方案内每个技能原 id → 最终 id（agent.SkillIds 引用按此重映射）
-            var builtSkills = new List<AgentSkillDefinition>(skills.Count);
-            foreach (var s in skills)
+            var isAdmin = auth.ResolveRole(user.UserId) >= PlatformRole.Admin; // 生效角色≥Admin（含超管）
+            try
             {
-                var orig = (s.SkillId ?? "").Trim();
-                var id = AgentSkillDefinition.IsValidAsciiToolId(orig)
-                    ? AgentSkillDefinition.ToAsciiToolId(orig, occupiedSkills)   // 合法 ASCII；与库/方案去重
-                    : AgentSkillDefinition.ToAsciiToolId(orig, occupiedSkills);  // 非法 → 清洗 + 去重
-                if (string.IsNullOrWhiteSpace(id))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "技能标识不能为空"));
-                skillIdMap[orig] = id;   // 同一 orig 复用同一 final（同方案内重复 orig 最后映射，但 ToAsciiToolId 已保证不重复占位）
-                if (string.IsNullOrWhiteSpace(s.Name) || string.IsNullOrWhiteSpace(s.Description) || string.IsNullOrWhiteSpace(s.Body))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"技能「{id}」缺少名称 / 描述 / 正文"));
-                var kind = Enum.TryParse<AgentSkillKind>(s.Kind, true, out var k) ? k : AgentSkillKind.Prompt;
-                // 权限：Shell / HTTP / .NET(C#) 技能仅管理员可建（与 SkillApi 一致），避免非管理员借编排批量生成任意命令执行 / 任意代码执行技能
-                if ((kind is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet) && !isAdmin)
-                    return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可建技能类型 {kind}"), statusCode: StatusCodes.Status403Forbidden);
-                var execLoc = string.Equals(s.ExecutionLocation, "client", StringComparison.OrdinalIgnoreCase)
-                    ? AgentSkillExecutionLocation.Client : AgentSkillExecutionLocation.Server;
-                var requiresApproval = kind == AgentSkillKind.Shell || execLoc == AgentSkillExecutionLocation.Client
-                    || (s.RequiresApproval ?? true);
-                builtSkills.Add(new AgentSkillDefinition
+                var skills = (req.Skills ?? []).Select(s => new OrgPlanSkill
                 {
-                    SkillId = id,
-                    Name = s.Name.Trim(),
-                    Description = s.Description.Trim(),
-                    Kind = kind,
-                    Body = s.Body ?? "",
-                    RequiresApproval = requiresApproval,
-                    ExecutionLocation = execLoc,
-                    ClientRunner = BuildClientRunner(kind, execLoc, s.Body ?? "", null),
-                    OwnerId = user.UserId,
-                });
-            }
-
-            // ---- 1.5 技能生成自检：对 server 执行的 prompt / http（及开关开启时的 shell）做冒烟自测，失败用大模型按报错自动修复并复测。
-            //      client/本机技能始终跳过——服务端无法替本机评估结果。
-            //      shell 是否盲跑由 AgentOptions.SkillAutoTestServerShell（默认 true）控制。
-            var smokeResults = new List<object>();
-            if (builtSkills.Count > 0)
-            {
-                var autoFixer = new SkillAutoFixer(agentOptions, catalog, loggerFactory);
-                for (var i = 0; i < builtSkills.Count; i++)
+                    SkillId = s.SkillId, Name = s.Name, Description = s.Description, Kind = s.Kind,
+                    Body = s.Body, ExecutionLocation = s.ExecutionLocation, RequiresApproval = s.RequiresApproval,
+                }).ToList();
+                var agents = (req.Agents ?? []).Select(a => new OrgPlanAgent
                 {
-                    var def = builtSkills[i];
-                    var smoke = await autoFixer.VerifyOrRepairAsync(def, maxAttempts: 3, ct).ConfigureAwait(false);
-                    smokeResults.Add(new
-                    {
-                        skillId = def.SkillId,
-                        skipped = smoke.Skipped,
-                        ok = smoke.Ok,
-                        attempts = smoke.Attempts,
-                        repaired = smoke.CorrectedBody != null,
-                        lastError = smoke.LastError,
-                    });
-                    // 自测通过且模型给了修正版 → 用修正正文/描述覆盖，落库前保持 def 其余字段（kind/审批/执行位置）不变
-                    if (smoke.Ok && smoke.CorrectedBody != null)
-                    {
-                        def.Body = smoke.CorrectedBody;
-                        if (!string.IsNullOrWhiteSpace(smoke.CorrectedDescription)) def.Description = smoke.CorrectedDescription!;
-                    }
-                }
+                    AgentId = a.AgentId, Nickname = a.Nickname, Description = a.Description, Instructions = a.Instructions,
+                    TriggerMode = a.TriggerMode, SkillIds = a.SkillIds, AssignmentIds = a.AssignmentIds,
+                    EscalationAgentId = a.EscalationAgentId, RelayToAgentId = a.RelayToAgentId,
+                }).ToList();
+                var r = await OrgApplyEngine.ExecuteAsync(
+                    ownerId: user.UserId, isAdmin: isAdmin, skills, agents,
+                    req.CreateSupportCircle, req.SupportCircleName, req.Title,
+                    catalog, skillCatalog, hub, agentOptions, loggerFactory, ct);
+                return Results.Ok(new { applied = true, title = req.Title, agents = r.Agents, skills = r.Skills, supportCircleGroupId = r.SupportCircleGroupId, smoke = r.Smoke });
             }
-
-            // ---- 2. 数字员工：同样自动去重（agentId 与原库同名 / 方案内同名时改名），并同步技能引用与上下级连接引用。 ----
-            var agents = req.Agents ?? [];
-            if (agents.Count == 0)
-                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "方案里没有数字员工"));
-            var occupiedAgents = new HashSet<string>(catalog.ListDefinitions().Select(d => d.AgentId), StringComparer.Ordinal);
-            var agentIdMap = new Dictionary<string, string>(StringComparer.Ordinal); // 原 agentId → 最终 agentId
-            foreach (var a in agents)
+            catch (OrgApplyException ex)
             {
-                var orig = (a.AgentId ?? "").Trim();
-                var id = AgentSkillDefinition.ToAsciiToolId(orig, occupiedAgents, "agent"); // 清洗（含中文等） + 与原库/方案去重
-                if (id.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
-                    id = TwinService.AgentIdPrefix + "_" + id; // twin_ 前缀系统保留：规避
-                if (string.IsNullOrWhiteSpace(id))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工 ID 非法：{orig}"));
-                if (string.IsNullOrWhiteSpace(a.Nickname))
-                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{orig}」缺少昵称"));
-                agentIdMap[orig] = id;
+                return ex.Forbidden
+                    ? Results.Json(new AguiError(ex.Code, ex.Message), statusCode: StatusCodes.Status403Forbidden)
+                    : Results.BadRequest(new AguiError(ex.Code, ex.Message));
             }
-            // 2b. 引用重映射 + 校验连接目标存在（经映射后）
-            foreach (var a in agents)
-            {
-                var finalId = agentIdMap[(a.AgentId ?? "").Trim()];
-                foreach (var sid in a.SkillIds ?? [])
-                    if (!skillIdMap.TryGetValue(sid, out _))
-                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{finalId}」引用了未定义技能：{sid}"));
-                foreach (var dep in (a.AssignmentIds ?? []).Concat(new[] { a.EscalationAgentId, a.RelayToAgentId }).Where(x => !string.IsNullOrWhiteSpace(x)))
-                    if (!agentIdMap.TryGetValue(dep!, out _))
-                        return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"数字员工「{finalId}」的连接目标未定义：{dep}"));
-            }
-
-            // ---- 3. 落库（先技能后数字员工，用最终去重后的 id / 引用）----
-            foreach (var s in builtSkills)
-                skillCatalog.Upsert(s);
-            var created = new List<string>();
-            foreach (var a in agents)
-            {
-                var id = agentIdMap[(a.AgentId ?? "").Trim()];
-                var remapSkill = (List<string>?)a.SkillIds?.Select(sid => skillIdMap[sid]).ToList();
-                var remapAssign = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(d => agentIdMap[d]).ToList();
-                var def = new AgentDefinition
-                {
-                    AgentId = id,
-                    Nickname = a.Nickname!.Trim(),
-                    Description = a.Description ?? "",
-                    Instructions = a.Instructions ?? "",
-                    TriggerMode = Enum.TryParse<AgentTriggerMode>(a.TriggerMode, true, out var tm) ? tm : AgentTriggerMode.Mentioned,
-                    SkillDefIds = remapSkill ?? [],
-                    AssignmentIds = remapAssign,
-                    EscalationAgentId = string.IsNullOrWhiteSpace(a.EscalationAgentId) ? null : agentIdMap[a.EscalationAgentId],
-                    RelayToAgentId = string.IsNullOrWhiteSpace(a.RelayToAgentId) ? null : agentIdMap[a.RelayToAgentId],
-                    OwnerId = user.UserId,
-                };
-                catalog.Upsert(def);
-                created.Add(id);
-            }
-            // ---- 4. 可选：把这个方案的数字员工组建为一个客服知聚（Support circle）并注册触发规则，直接上线服务顾客 ----
-            string? supportCircleGroupId = null;
-            if (req.CreateSupportCircle)
-            {
-                var circleName = string.IsNullOrWhiteSpace(req.SupportCircleName) ? (req.Title ?? "客服组织") : req.SupportCircleName!.Trim();
-                var group = await hub.CreateGroupAsync(new GroupCreateRequest
-                {
-                    GroupName = circleName,
-                    OwnerId = user.UserId,
-                    Kind = GroupKind.Support,
-                    MemberIds = created,
-                    Members = created.Select(id => new MemberSeed
-                    {
-                        MemberId = id,
-                        MemberType = MemberType.Agent,
-                        // id 已是去重后的最终 agentId；从原始方案按映射回查昵称
-                        Nickname = agents.FirstOrDefault(a => agentIdMap[(a.AgentId ?? "").Trim()] == id)?.Nickname ?? id,
-                    }).ToList(),
-                }, ct);
-                supportCircleGroupId = group.GroupId;
-                // 方案里的数字员工作为客服，注册到客服知聚的触发规则（@ 即可应答）
-                foreach (var id in created)
-                {
-                    var def = catalog.GetDefinition(id);
-                    hub.RegisterAgent(new AgentRegisterRequest
-                    {
-                        AgentId = id,
-                        Nickname = def?.Nickname ?? id,
-                        GroupIds = [group.GroupId],
-                        TriggerMode = def?.TriggerMode ?? AgentTriggerMode.Mentioned,
-                        Keywords = def?.Keywords,
-                    });
-                }
-            }
-            return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList(), supportCircleGroupId, smoke = smokeResults });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 组织角色受控覆盖（管理员）：
