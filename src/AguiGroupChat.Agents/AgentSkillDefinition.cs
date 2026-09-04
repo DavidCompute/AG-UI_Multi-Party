@@ -27,8 +27,10 @@ public enum AgentSkillKind
     /// 受控「组织落库」技能：本身不可作为 prompt/shell/http/dotnet 执行；仅系统管理员可建/编辑/删除，
     /// 被挂载它的数字员工作为“把一支组织直接部署到库”的能力（经唯一官方引擎落库、仅管理员放行）。
     /// SkillRunner 不为此类提供普通执行体；运行期由 AgentCatalog 转换为受控部署动作。
+    /// 命名带下画线以稳定匹配技能库 wire 的 kind 字符串 "org_deploy"（如其它 kind 一样，枚举成员名=小写 wire 名），
+    /// 避免 Enum.TryParse("org_deploy") 因找不到同名成员而静默退化（否则会落成 Prompt / 失去特权闸）。
     /// </summary>
-    OrgDeploy,
+    Org_deploy,
 }
 
 /// <summary>

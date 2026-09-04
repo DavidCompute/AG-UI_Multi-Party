@@ -404,7 +404,7 @@ public sealed class AgentCatalog
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
                 // 受控”组织落库“技能：它不是可跑命令/prompt——把它作为该数字员工的一个部署动作挂载（经唯一官方引擎落库、仅管理员写）。
-                if (skill.Kind == AgentSkillKind.OrgDeploy)
+                if (skill.Kind == AgentSkillKind.Org_deploy)
                 {
                     var deploy = new OrgCommitTool(_services, _loggerFactory);
                     defTools.Add(AIFunctionFactory.Create(deploy.Commit, toolName, desc));
@@ -588,7 +588,7 @@ public sealed class AgentCatalog
             return "技能类型 kind 无效：仅支持 shell / http / prompt。";
         if (k == AgentSkillKind.Dotnet)
             return "dotnet（C# 动态编译）技能属于高危特权类型，需由系统管理员到技能库手动创建，智能体不能运行时自建。";
-        if (k == AgentSkillKind.OrgDeploy)
+        if (k == AgentSkillKind.Org_deploy)
             return "org_deploy（组织落库）技能属受控特权类型，需由系统管理员在技能库手动创建，智能体不能运行时自建。";
         var desc = (description ?? "").Trim();
         if (desc.Length == 0)

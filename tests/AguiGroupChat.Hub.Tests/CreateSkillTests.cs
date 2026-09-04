@@ -148,4 +148,65 @@ public sealed class CreateSkillTests
             Assert.Contains("正文", result);
         }
     }
+
+    [Theory]
+    [InlineData("dotnet")]
+    [InlineData("org_deploy")]
+    public void CreateSkill_AdminOnlyKind_RefusedAtRuntime(string kind)
+    {
+        // dotnet（C# 编译）与 org_deploy（组织落库）都只能由系统管理员在技能库建立，
+        // 智能体运行中即使自建（含传了正文）也直接被特权类型短路拒绝、绝不入库。
+        var sp = new ServiceCollection().AddSingleton(new AgentSkillCatalog(NullLoggerFactory.Instance)).BuildServiceProvider();
+        var catalog = new AgentCatalog(CreateOptions(), NullLoggerFactory.Instance, sp);
+        using (SetAmbient("agent_host"))
+        {
+            // org_deploy（组织落库）只能由系统管理员在技能库手动建立：智能体运行中无论传不传正文都不能自建成功/入库。
+            // （无论解析是落在“特权类型”短路还是其它校验，实质是绝不应返回『已创建』。）
+            var result = catalog.CreateSkillToolImpl("kind_probe", kind, "说明", "正文内容", null);
+            Assert.DoesNotContain("已创建", result);
+            if (kind == "org_deploy")
+                Assert.DoesNotContain("Prompt", result);   // 不应静默退化成普通 prompt 自建
+        }
+        Assert.Empty(catalog.GetDefinition("agent_host")!.SkillDefIds); // 未挂载
+    }
+
+    [Fact]
+    public void Agent_OrgDeploySkill_MountsAsDeployTool()
+    {
+        var skillCatalog = new AgentSkillCatalog(NullLoggerFactory.Instance);
+        skillCatalog.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "org_design", Name = "组织方案设计", Kind = AgentSkillKind.Prompt,
+            Description = "设计组织草案", Body = "你是组织构建师", RequiresApproval = false,
+        });
+        skillCatalog.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "org_deploy", Name = "组织落库", Kind = AgentSkillKind.Org_deploy,
+            Description = "把最终组织稿写库", Body = "", RequiresApproval = false,
+            ExecutionLocation = AgentSkillExecutionLocation.Server,
+        });
+        var sp = new ServiceCollection().AddSingleton(skillCatalog).BuildServiceProvider();
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            EnableTools = true,
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "org_arch", Nickname = "组织架构构建师", Description = "",
+                    OwnerId = "david",
+                    SkillDefIds = ["org_design", "org_deploy"],
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, sp);
+        var toolNames = catalog.GetAgentToolNames("org_arch");
+        // org_design → 受控组织落库工具 org_commit（既有硬编码分支）
+        Assert.Contains("org_commit", toolNames);
+        // org_deploy（kind=OrgDeploy）→ 以该技能 id 挂成的部署工具，而非 prompt 执行体
+        Assert.Contains("org_deploy", toolNames);
+        // OrgDeploy 工具不按“需审批的 prompt/命令”包装
+        Assert.DoesNotContain("org_deploy", catalog.GetAgentApprovalToolNames("org_arch"));
+    }
 }
