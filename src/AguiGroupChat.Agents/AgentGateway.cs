@@ -1096,7 +1096,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 if (d is null || catalog is null) return;
                 foreach (var refId in d.SkillDefIds ?? [])
-                    if (catalog.Get(refId) is { } def && !skills.ContainsKey(def.SkillId)) skills[def.SkillId] = def;
+                    // OrgDeploy（受控组织落库）是可对话 function-call 的部署动作，不是可批跑的排查技能：不进计划 inventory、不投给 SkillRunner。
+                    if (catalog.Get(refId) is { } def && def.Kind != AgentSkillKind.Org_deploy && !skills.ContainsKey(def.SkillId)) skills[def.SkillId] = def;
             }
             Collect(root);
             foreach (var r in reached) Collect(r);
@@ -1205,6 +1206,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             else if (step.Action == "skill")
             {
                 if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
+                // 重拾：OrgDeploy（受控落库）不是可批跑技能 —— 万一命中也不投给 SkillRunner（防御性跳过）
+                if (skill.Kind == AgentSkillKind.Org_deploy) continue;
                 // 同一服务端技能在计划里出现多次 → 只执行一次，后续复用其结果
                 if (!capExecuted.Add(skill.SkillId)) continue;
                 var skillQuery = working;
@@ -1502,7 +1505,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var skillList = new List<string>();
         var dispatchList = new List<string>();
         foreach (var sk in (root.SkillDefIds ?? []))
-            if (db?.Get(sk) is { } sd) skillList.Add($"{sd.SkillId}（{sd.Name ?? sd.SkillId}）：{(sd.Description ?? "").Replace("\n", " ")}");
+            if (db?.Get(sk) is { } sd && sd.Kind != AgentSkillKind.Org_deploy)
+                skillList.Add($"{sd.SkillId}（{sd.Name ?? sd.SkillId}）：{(sd.Description ?? "").Replace("\n", " ")}");
         foreach (var id in (root.AssignmentIds ?? []))
             if (_catalog.GetDefinition(id) is { } sub) dispatchList.Add($"{sub.Nickname ?? id}（id={id}）：{(sub.Description ?? "").Replace("\n", " ")}");
 
@@ -1554,6 +1558,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     var skill = db?.Get(req.Target);
                     if (skill is null) { gathered.AppendLine($"技能「{req.Target}」不可用，已跳过。"); continue; }
+                    if (skill.Kind == AgentSkillKind.Org_deploy) { gathered.AppendLine($"「{req.Target}」是受控落库动作，不走补查批量执行。"); continue; } // 防御：不投给 SkillRunner
                     executedSkills.Add(req.Target);
                     if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client)
                         clientItems.Add(new BatchClientItem(skill.SkillId, skill.Name ?? skill.SkillId, EffectiveClientRunner(skill) ?? "", req.Input ?? "", 0));
