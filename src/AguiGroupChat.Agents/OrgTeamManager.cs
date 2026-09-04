@@ -108,6 +108,9 @@ public sealed class OrgTeamCommitter
         }
     }
 
+    /// <summary>公开：把某 key 上一版在该库产生的对象一并退役。</summary>
+    public void Retire(string key) => RetireOld((key ?? "").Trim());
+
     /// <summary>把一份最终方案落地到库。覆盖=真——先退役该 key 上一版对象再重建。成功 true 返回 {agents/skills}；失败 false 带 message（部分失败已回滚=不写入）。</summary>
     public async Task<(bool ok, string message)> CommitAsync(string key, string planJson, string ownerId, bool isAdmin, CancellationToken ct = default)
     {
@@ -122,8 +125,12 @@ public sealed class OrgTeamCommitter
         if (plan.createSupportCircle) return (false, "本受控通道当前不直接建客服知聚；请走“一键编排→确认建客服知聚”，或去掉 createSupportCircle 以纯团队形式落库。");
 
         // 全部校验通过前不被写入：先解析/校验，成功才 Retire+落
+        // 本 key 上一版对象即将被整体替换：占位集合剔除它们，使覆盖可复用干净的原始 id（不产生 _2）。
+        var selfBatch = _store.Get(key);
+        var selfAgents = selfBatch?.Agents is { } sa ? new HashSet<string>(sa, StringComparer.Ordinal) : null;
+        var selfSkills = selfBatch?.Skills is { } ss ? new HashSet<string>(ss, StringComparer.Ordinal) : null;
         var newSkills = new List<(string id, AgentSkillDefinition def)>();
-        var usedSkill = new HashSet<string>(_skills.ListAll().Select(s => s.SkillId), StringComparer.Ordinal);
+        var usedSkill = new HashSet<string>(_skills.ListAll().Where(s => selfSkills is null || !selfSkills.Contains(s.SkillId)).Select(s => s.SkillId), StringComparer.Ordinal);
         foreach (var s in plan.skills ?? [])
         {
             var name = (s.name ?? "").Trim();
@@ -143,7 +150,7 @@ public sealed class OrgTeamCommitter
             var reqApprove = kind == AgentSkillKind.Shell || execLoc == AgentSkillExecutionLocation.Client || approvable;
             newSkills.Add((id, new AgentSkillDefinition { SkillId = id, Name = name.Substring(0, Math.Min(200, name.Length)), Description = desc, Kind = kind, Body = body, RequiresApproval = reqApprove, ExecutionLocation = execLoc, OwnerId = ownerId }));
         }
-        var usedAgent = new HashSet<string>(_catalog.ListDefinitions().Select(d => d.AgentId), StringComparer.Ordinal);
+        var usedAgent = new HashSet<string>(_catalog.ListDefinitions().Where(d => selfAgents is null || !selfAgents.Contains(d.AgentId)).Select(d => d.AgentId), StringComparer.Ordinal);
         var idMap = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var a in plan.agents!)
         {

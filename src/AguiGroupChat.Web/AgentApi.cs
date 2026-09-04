@@ -518,6 +518,45 @@ public static class AgentApi
             return Results.Ok(new { applied = true, title = req.Title, agents = created, skills = builtSkills.Select(s => s.SkillId).ToList(), supportCircleGroupId, smoke = smokeResults });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 组织角色受控覆盖（管理员）：
+        //      GET  /ag-ui/agents/org-teams                                  列出已托管团队映射（key→该支对象）
+        //      POST /ag-ui/agents/org-teams/{key}   body=最终稿 JSON(raw)   对某 key 整支覆盖落库，只留最新
+        //      仅平台管理员可调用；普通用户不会通过此通道写入。----
+        root.MapGet("/org-teams", (HttpContext ctx, AuthService auth, OrgTeamStore teams) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            if (!auth.IsAdmin(user.UserId))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可查看组织落库映射"), statusCode: StatusCodes.Status403Forbidden);
+            return Results.Ok(teams.All().Select(r => new { r.Key, r.Title, r.Agents, r.Skills, SupportCircleGroupId = r.SupportCircleGroupId, r.UpdatedAtMs }));
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        root.MapPost("/org-teams/{key}/apply", async (string key, HttpContext ctx, AuthService auth, OrgTeamCommitter committer, OrgTeamStore teams, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            if (!auth.IsAdmin(user.UserId))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可整支覆盖落库组织"), statusCode: StatusCodes.Status403Forbidden);
+            string planJson;
+            using (var reader = new StreamReader(ctx.Request.Body))
+                planJson = await reader.ReadToEndAsync();
+            var (ok, message) = await committer.CommitAsync((key ?? "").Trim(), planJson, user.UserId, true, ct);
+            if (!ok) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, message));
+            var rec = teams.Get((key ?? "").Trim());
+            return Results.Ok(new { applied = true, key = (key ?? "").Trim(), agents = rec?.Agents ?? [], skills = rec?.Skills ?? [], message });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        root.MapDelete("/org-teams/{key}", (string key, HttpContext ctx, AuthService auth, OrgTeamCommitter committer, OrgTeamStore teams) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            if (!auth.IsAdmin(user.UserId))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可删除托管团队"), statusCode: StatusCodes.Status403Forbidden);
+            committer.Retire((key ?? "").Trim()); // 先把该 key 对象从库退役
+            var existed = teams.Remove((key ?? "").Trim(), out _);
+            return existed ? Results.Ok(new { deleted = true, key = (key ?? "").Trim() }) : Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "托管团队不存在"));
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 优化「管理下一层任务指派」提示词（需登录，组织架构图节点上调用）：
         //      依据该角色自身职责 + 其直接下一层下属，生成一段可追加到 Instructions 的指派指引，
         //      让“只看下一层”的多下级指派选得更准（不向上钻、不引入更深层叶子）。 ----
