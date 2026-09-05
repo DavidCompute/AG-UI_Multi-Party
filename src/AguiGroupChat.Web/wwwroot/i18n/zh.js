@@ -781,7 +781,7 @@ window.I18N_DICTS.zh = {
   "msg.waitingConfirm": "⏳ 数字员工等待你的确认，确认后继续运行…",
   "msg.thinkingStreaming": "💭 思考中…",
   "msg.thinkingDone": "💭 思考过程",
-  "msg.chainTitle": "智能体调用链",
+  "msg.chainTitle": "知聚调用链",
   "msg.chainResult": "答复",
   "msg.chainSkill": "技能",
   "msg.chainAssign": "任务指派",

@@ -783,7 +783,7 @@ window.I18N_DICTS.en = {
   "msg.waitingConfirm": "⏳ Digital employee awaits your confirmation to continue…",
   "msg.thinkingStreaming": "💭 Thinking…",
   "msg.thinkingDone": "💭 Thought process",
-  "msg.chainTitle": "Agent call chain",
+  "msg.chainTitle": "Group call chain",
   "msg.chainResult": "Reply",
   "msg.chainSkill": "Skill",
   "msg.chainAssign": "Assignment",
