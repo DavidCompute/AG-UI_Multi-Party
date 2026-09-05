@@ -66,6 +66,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly AgentCatalog _catalog;
     private readonly Lazy<GroupHub> _hub;
     private readonly AgentOptions _options;
+    // 规范化（夹紧回退默认后）的执行期时序 / 重试 / TTL 覆盖（来源：Agents:Execution，默认与既有常量一致）
+    private readonly ExecutionOptions _execution;
     private readonly AttachmentStore? _attachmentStore;
     private readonly ILogger<AgentGateway> _logger;
     // 模型 token 用量统计与配额（可选：未注册用量存储时不统计）
@@ -79,16 +81,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
     private readonly BridgeCircuitBreaker _bridgeCircuit = new();
     // 每个线程（群）一个会话锁：并发流式写入同一群消息时串行化。
-    // 存储 (锁, 上次使用毫秒时间戳)，超时未用（30 分钟）自动清理，避免群解散后残留泄漏。
-    private const long SessionLockTtlMs = 30 * 60 * 1000;
-    private const int SessionLockMaxEntries = 512;
+    // 存储 (锁, 上次使用毫秒时间戳)，超时未用（30 分钟，可配置 SessionLockTtlMinutes）自动清理，避免群解散后残留泄漏。
+    // 条目上限（SessionLockMaxEntries，默认 512）与锁 TTL 均取自 _execution。
     private readonly ConcurrentDictionary<string, (SemaphoreSlim Lock, long LastUsedMs)> _sessionLocks = new(StringComparer.Ordinal);
 
-    /// <summary>单次模型 / 桥接流式调用的最长运行时间（分钟）：模型挂起时防止 Task 永久占用。</summary>
-    private const int StreamTimeoutMinutes = 5;
+    // 单次模型 / 桥接流式调用的最长运行时间（分钟）：模型挂起时防止 Task 永久占用（见 _execution.StreamTimeoutMinutes）。
 
-    /// <summary>待决策的人机交互（协议 4.5）：运行中断后保存会话与审批请求，等触发者决策后恢复。</summary>
-    private const long InteractionTtlMs = 10 * 60 * 1000;
+    // 待决策的人机交互（协议 4.5）：运行中断后保存会话与审批请求，等触发者决策后恢复
+    // （超时见 _execution.InteractionTtlMinutes，超时由周期定时器清理）。
     private readonly ConcurrentDictionary<string, PendingInteraction> _pendingInteractions = new(StringComparer.Ordinal);
 
     /// <summary>批量批准运行集：key = runId。用户对某运行选择「批准本次运行后续全部操作」后，
@@ -97,8 +97,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     /// <summary>对话内已批准执行的客户端技能：key = threadId|agentId，value = 已批准技能 id 集合 + 过期时间。
     /// 同一问题（同一对话）里用户已同意过的客户端技能，后续再次需要时不再弹确认卡，直接按已批准执行（隧道在线时）。</summary>
+    // 已批准技能过期时长见 _execution.ApprovedSkillTtlMinutes（默认 30 分钟）。
     private readonly ConcurrentDictionary<string, (long ExpiresAtMs, HashSet<string> Skills)> _approvedClientSkills = new(StringComparer.Ordinal);
-    private const long ApprovedSkillTtlMs = 30 * 60 * 1000; // 30 分钟过期
 
     private static string ApprovedSkillKey(string threadId, string agentId) => threadId + "|" + agentId;
 
@@ -119,7 +119,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var set = GetApprovedSkills(threadId, agentId);
         foreach (var s in skillIds)
             if (!string.IsNullOrWhiteSpace(s)) set.Add(s);
-        _approvedClientSkills[key] = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + ApprovedSkillTtlMs, set);
+        _approvedClientSkills[key] = (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + (long)_execution.ApprovedSkillTtlMinutes * 60 * 1000, set);
     }
 
     private bool IsSkillApproved(string threadId, string agentId, string skillId)
@@ -148,8 +148,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>周期清理定时器（60s）：清理超时未决策的交互（HITL 悬挂）+ 超时未用的会话锁（残留泄漏）。</summary>
     private readonly Timer _purgeTimer;
 
-    /// <summary>同一消息最多允许的审批轮数（防止外部服务异常导致恢复后反复中断的死循环）。</summary>
-    private const int MaxInteractionRounds = 5;
+    // 同一消息最多允许的审批轮数（见 _execution.MaxInteractionRounds，防止外部服务异常导致恢复后反复中断的死循环）。
 
     /// <summary>活跃运行注册表：runId → 取消令牌与归属（供「停止生成」中断当前流式调用；
     /// 触发者本人或同群管理员可停止）。</summary>
@@ -192,6 +191,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _catalog = catalog;
         _hub = new Lazy<GroupHub>(() => services.GetRequiredService<GroupHub>());
         _options = options;
+        // 执行期覆盖规范化：非法配置回退默认后赋给本地字段（保证后续各处取到的是已夹紧值，绝不用废值）。
+        _execution = (options.Execution ?? ExecutionOptions.Default).Normalize(_logger);
         _attachmentStore = attachmentStore;
         _logger = logger;
         _changes = services.GetService<ChangeHub>(); // 游标持久化脏位通知（可选：未注册持久化时不落盘）
@@ -258,7 +259,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         foreach (var kv in _sessionLocks)
         {
-            if (now - kv.Value.LastUsedMs > SessionLockTtlMs)
+            if (now - kv.Value.LastUsedMs > (long)_execution.SessionLockTtlMinutes * 60 * 1000)
                 _sessionLocks.TryRemove(kv.Key, out _);
         }
     }
@@ -500,7 +501,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         string? messageId = null;
         ToolApprovalRequestContent? approval = null;
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes)); // 模型挂起保护
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes)); // 模型挂起保护
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId); // 注册：支持「停止生成」
         var sessionLock = GetSessionLock(context.ThreadId);
@@ -561,7 +562,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 模型限流（429）/ 网关 5xx / 连接重置时指数退避重试：避免群聊中智能体偶发哑火。
             // 重试从头流式输出（清空累计跟踪与已广播的半截内容）；审批中断不触发重试（approval 置位后 break）。
             var attempt = 0;
-            const int MaxModelAttempts = 2;
+            // 模型重试次数上限取自 _execution.MaxModelAttempts（默认 2）
             while (true)
             {
                 try
@@ -665,7 +666,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
                     break; // 模型流正常完成（审批中断时 approval 已置位，由下方分支处理）
                 }
-                catch (Exception ex) when (AgentGatewayHelpers.IsRetryableModelError(ex) && attempt < MaxModelAttempts)
+                catch (Exception ex) when (AgentGatewayHelpers.IsRetryableModelError(ex) && attempt < _execution.MaxModelAttempts)
                 {
                     attempt++;
                     _logger.LogWarning(ex, "模型调用返回可重试错误，第 {Attempt} 次退避重试（agent={AgentId}）", attempt, context.AgentId);
@@ -772,7 +773,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
 
@@ -887,7 +888,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
         string? messageId = null;
@@ -969,7 +970,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
         string? messageId = null;
@@ -1059,9 +1060,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     // ---------- 确定性编排计划（Coordinator Plan）：问题 → 按组织架构/技能配置定计划 → 激活对应员工与能力执行 ----------
 
-    /// <summary>最多纳入计划的清单项 / 步骤数（防配置病态深链 / 打爆模型时长）。</summary>
-    private const int CoordinatorPlanMaxItems = 12;
-    private const int CoordinatorPlanMaxSteps = 8;
+    // 最多纳入计划的清单项 / 步骤数（防配置病态深链 / 打爆模型时长）；
+    // 运行时取自 _execution.CoordinatorPlanMaxItems / _execution.CoordinatorPlanMaxSteps。
 
     /// <summary>
     /// 构建一张编排计划（只规划、不执行）：把问题、可指派的组织下属、可调用技能显式列给路由模型，
@@ -1081,7 +1081,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (_catalog.GetDefinition(id) is { } d) queue.Enqueue(d);
             foreach (var s in root.Skills ?? [])
                 if (_catalog.GetDefinition(s.TargetAgentId) is { } d) queue.Enqueue(d);
-            while (queue.Count > 0 && reached.Count < CoordinatorPlanMaxItems)
+            while (queue.Count > 0 && reached.Count < _execution.CoordinatorPlanMaxItems)
             {
                 var d = queue.Dequeue();
                 if (!seen.Add(d.AgentId)) continue;
@@ -1107,7 +1107,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             var steps = await PlanCoordinatedAsync(context, root, input, reached, skills.Values.ToList(), ct);
             if (steps is null || steps.Count == 0) return null;
-            return new CoordinatedPlan(steps.Take(CoordinatorPlanMaxSteps).ToList(), reached, skills, input);
+            return new CoordinatedPlan(steps.Take(_execution.CoordinatorPlanMaxSteps).ToList(), reached, skills, input);
         }
         catch (Exception ex)
         {
@@ -1395,7 +1395,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 阻塞等待前端回传（带交互 TTL 上限兜底，超时视为未执行）
         try
         {
-            var tcsDone = await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds(InteractionTtlMs), ct);
+            var tcsDone = await tcs.Task.WaitAsync(TimeSpan.FromMilliseconds((long)_execution.InteractionTtlMinutes * 60_000), ct);
             _batchClientExecWaits.TryRemove(interruptId, out _);
             if (tcsDone.Ok && tcsDone.Results is not null)
             {
@@ -1461,7 +1461,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             + "<b>依赖顺序很重要</b>：如果一个技能<b>需要某个输入</b>（见技能后的【需要输入：…】），而这个输入由某位员工掌握，\n"
             + "你必须<b>先用一步 dispatch 该员工拿到输入值</b>，<b>再</b>在后续步骤里调用该技能——技能步骤会自动收到它前一步的结果作为输入。\n"
             + "例如：要“测 Exchange 连接”需先知道 OWA 地址，而地址由配置管理员提供，则应安排 [dispatch→配置管理员, skill→连接测试技能, answer]。\n"
-            + "只输出 JSON，不要任何其他文字：{\"steps\":[...]}，步骤 1~" + CoordinatorPlanMaxSteps + " 条。若问题与任何员工/技能都不相关，输出 {\"steps\":[]}。";
+            + "只输出 JSON，不要任何其他文字：{\"steps\":[...]}，步骤 1~" + _execution.CoordinatorPlanMaxSteps + " 条。若问题与任何员工/技能都不相关，输出 {\"steps\":[]}。";
         var session = await agent.CreateSessionAsync(ct);
         var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
         return AgentGatewayHelpers.ParsePlan(resp.Text);
@@ -1495,7 +1495,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var facts = new StringBuilder(string.IsNullOrWhiteSpace(priorResults) ? "（暂无可用的检查结果）" : priorResults.Trim());
         var lastAnswer = "";
         var rounds = 0;
-        const int MaxRecursiveRounds = 5; // 防死循环 / 打爆时长
+        // 递归补查轮次上限取自 _execution.MaxRecursiveRounds（默认 5，防死循环 / 打爆时长）
         // 已执行过的技能 id（含计划里已跑过的所有技能，客户端 + 服务端）：避免下一轮又拿同一技能补查，导致“同一技能被调用两次”
         var executedSkills = new HashSet<string>(alreadyRanSkills ?? [], StringComparer.Ordinal);
         // 已带回结果的能力（技能 / 分派员工都记录），补查时同样跳过，防止重复调用
@@ -1510,7 +1510,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         foreach (var id in (root.AssignmentIds ?? []))
             if (_catalog.GetDefinition(id) is { } sub) dispatchList.Add($"{sub.Nickname ?? id}（id={id}）：{(sub.Description ?? "").Replace("\n", " ")}");
 
-        while (rounds++ < MaxRecursiveRounds)
+        while (rounds++ < _execution.MaxRecursiveRounds)
         {
             var prompt = "你是「" + (root.Nickname ?? root.AgentId) + "」，正在回答用户的问题。\n\n"
                 + "用户问题：\n" + input + "\n\n"
@@ -1738,9 +1738,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex) { return "（指派执行失败：" + ex.Message + "）"; }
     }
 
-
-    /// <summary>指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底）。</summary>
-    private const int MaxRouteDepth = 4;
+    // 指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底），见 _execution.MaxRouteDepth。
 
     private enum RouteOutcome { Answer, CannotSolve }
 
@@ -1753,7 +1751,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         AgentInvocationContext context, string agentId, string input, HashSet<string> visited, int depth, CancellationToken ct)
     {
         var def = _catalog.GetDefinition(agentId);
-        if (def is null || depth > MaxRouteDepth || visited.Contains(agentId))
+        if (def is null || depth > _execution.MaxRouteDepth || visited.Contains(agentId))
             return (RouteOutcome.CannotSolve, "", []);
         visited.Add(agentId);
         var hops = new List<ChainNode>();
@@ -1917,7 +1915,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         IAguiBridgeClient? bridgeClient = null;
         var interactionPending = false; // 中断时保留桥接连接供恢复，不随本方法结束释放
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes)); // 外部服务挂起保护
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes)); // 外部服务挂起保护
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId); // 注册：支持「停止生成」
         // 与本地路径一致的会话锁：同一桥接智能体并发触发时串行化，防止同一桥接智能体多路连接外部服务
@@ -2183,7 +2181,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
             var runCt = timeoutCts.Token;
             var sessionLock = GetSessionLock(pending.Context.ThreadId);
             var acquired = false;
@@ -2748,12 +2746,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private SemaphoreSlim GetSessionLock(string threadId)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        if (_sessionLocks.Count >= SessionLockMaxEntries)
+        if (_sessionLocks.Count >= _execution.SessionLockMaxEntries)
         {
             // 兜底：条目超限时即时清理超时锁；常态清理由 60s 定时器完成（不依赖 Count）
             foreach (var kv in _sessionLocks)
             {
-                if (now - kv.Value.LastUsedMs > SessionLockTtlMs)
+                if (now - kv.Value.LastUsedMs > (long)_execution.SessionLockTtlMinutes * 60 * 1000)
                     _sessionLocks.TryRemove(kv.Key, out _);
             }
         }
@@ -2844,15 +2842,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
 
         // 多轮审批防护：外部服务异常时可能恢复后反复中断——超过最大轮数则终止运行（结束消息 + 广播错误）
-        if (pending.ResumeCount >= MaxInteractionRounds)
+        if (pending.ResumeCount >= _execution.MaxInteractionRounds)
         {
-            _logger.LogWarning("交互恢复超过最大轮数（{Max}），终止运行：interrupt={InterruptId}", MaxInteractionRounds, interruptId);
+            _logger.LogWarning("交互恢复超过最大轮数（{Max}），终止运行：interrupt={InterruptId}", _execution.MaxInteractionRounds, interruptId);
             _ = SafeEndAsync(pending.Context, pending.MessageId);
             await _hub.Value.BroadcastAsync(pending.GroupId, new RunErrorEvent
             {
                 GroupId = pending.GroupId,
                 ErrorCode = "AGENT_INTERACTION_LIMIT",
-                Message = $"智能体审批交互超过最大轮数（{MaxInteractionRounds}），运行已终止，请重新发起消息",
+                Message = $"智能体审批交互超过最大轮数（{_execution.MaxInteractionRounds}），运行已终止，请重新发起消息",
                 Timestamp = _hub.Value.NowMs,
             }, ct: CancellationToken.None);
             if (pending.BridgeClient is not null) await pending.BridgeClient.DisposeAsync();
@@ -2865,7 +2863,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 恢复任务与 HTTP 请求生命周期解耦：独立 5 分钟超时 CTS（请求断开 / 前端超时不影响恢复执行，
         // 避免恢复任务在 WaitAsync / 流式消费中被请求取消令牌中断）。
         // 注意：不能在方法末尾 using 释放——后台任务仍在使用该令牌，须等任务结束后再释放。
-        var resumeCts = new CancellationTokenSource(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        var resumeCts = new CancellationTokenSource(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
         _ = Task.Run(async () =>
         {
             var prev = AmbientContext.Value;
@@ -2937,7 +2935,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var messageId = pending.MessageId; // 复用中断时保留的消息（内容已清空，等待最终结果）
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
         var runCt = timeoutCts.Token;
         var sessionLock = GetSessionLock(pending.Context.ThreadId);
         var acquired = false;
@@ -3040,15 +3038,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
                 // 又需审批
                 resumeRounds++;
-                if (resumeRounds > MaxInteractionRounds)
+                if (resumeRounds > _execution.MaxInteractionRounds)
                 {
-                    _logger.LogWarning("交互恢复超过最大轮数（{Max}），终止运行：run={RunId}", MaxInteractionRounds, runId);
+                    _logger.LogWarning("交互恢复超过最大轮数（{Max}），终止运行：run={RunId}", _execution.MaxInteractionRounds, runId);
                     await SafeEndAsync(pending.Context, messageId);
                     await _hub.Value.BroadcastAsync(pending.GroupId, new RunErrorEvent
                     {
                         GroupId = pending.GroupId,
                         ErrorCode = "AGENT_INTERACTION_LIMIT",
-                        Message = $"智能体审批交互超过最大轮数（{MaxInteractionRounds}），运行已终止，请重新发起消息",
+                        Message = $"智能体审批交互超过最大轮数（{_execution.MaxInteractionRounds}），运行已终止，请重新发起消息",
                         Timestamp = _hub.Value.NowMs,
                     }, ct: CancellationToken.None);
                     return;
@@ -3163,7 +3161,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var now = _hub.Value.NowMs;
             foreach (var kv in _pendingInteractions)
             {
-                if (now - kv.Value.CreatedAtMs > InteractionTtlMs && _pendingInteractions.TryRemove(kv.Key, out var pending))
+                if (now - kv.Value.CreatedAtMs > (long)_execution.InteractionTtlMinutes * 60_000 && _pendingInteractions.TryRemove(kv.Key, out var pending))
                 {
                     // 交互超时未决策：消息仍处于“等待确认”状态（内容已清空），安全结束它
                     await SafeEndAsync(pending.Context, pending.MessageId);

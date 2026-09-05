@@ -83,6 +83,9 @@ public sealed class AgentOptions
     /// <summary>语义记忆（RAG）：群消息向量化存储，回复前按相似度检索注入上下文。仅 postgres 提供器 + pgvector 可用。</summary>
     public MemoryOptions Memory { get; set; } = new();
 
+    /// <summary>网关执行期及时序 / 重试 / TTL 设置（appsettings：<c>Agents:Execution</c>；默认与原生常量一致）。</summary>
+    public ExecutionOptions Execution { get; set; } = new();
+
     public List<AgentDefinition> Agents { get; set; } = [];
 
     /// <summary>技能库种子（appsettings 声明）：启动时若技能库为空则播种，与 <see cref="Agents"/> 同模式。</summary>
