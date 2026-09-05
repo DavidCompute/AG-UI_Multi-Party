@@ -527,6 +527,9 @@ public static class AgentApi
         d.EscalationAgentId,
         d.IsSkillTarget,
         d.SkillDefIds,
+        d.DisableBridge,
+        d.DisableRelay,
+        d.DisableOrgRoute,
     });
 
     /// <summary>定时任务 cron 表达式校验：非法返回 400 错误（调度器每分钟空转会刷警告日志）。</summary>
@@ -604,6 +607,10 @@ public static class AgentApi
             EscalationAgentId = string.IsNullOrWhiteSpace(req.EscalationAgentId) ? null : req.EscalationAgentId.Trim(),
             // 可复用技能（技能库引用）：去重保留定义顺序
             SkillDefIds = req.SkillDefIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [],
+            // 角色级阶段禁用覆盖（null = 跟随平台默认；仅放入请求时落库）
+            DisableBridge = req.DisableBridge,
+            DisableRelay = req.DisableRelay,
+            DisableOrgRoute = req.DisableOrgRoute,
         };
     }
 
@@ -802,7 +809,10 @@ public sealed record AgentUpsertHttpRequest(
     string? RelayToAgentId = null,
     IReadOnlyList<string>? AssignmentIds = null,
     string? EscalationAgentId = null,
-    IReadOnlyList<string>? SkillDefIds = null);
+    IReadOnlyList<string>? SkillDefIds = null,
+    bool? DisableBridge = null,
+    bool? DisableRelay = null,
+    bool? DisableOrgRoute = null);
 
 /// <summary>技能配置（把其他已注册智能体作为可调用子代理）。</summary>
 /// <param name="SkillId">技能标识（给模型的工具名，同一智能体内唯一）。</param>
