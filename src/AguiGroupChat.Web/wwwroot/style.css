@@ -929,7 +929,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .agent-modal {
   width: 960px; max-width: 94vw;
   display: flex; flex-direction: column; overflow: hidden;
-  /* 高度由内容决定：弹窗超高时由遮罩整体滚动（.modal-overlay 已支持），保证列表/表单有足够可视区域 */
+  /* 视口内固定高度：超过屏幕时整体限高、内部 #agentListView / #agentFormView 的内容容器内滚，
+     而不是让弹窗拔高到比屏幕还高、依赖遮罩整体滚动 */
+  max-height: calc(100vh - 48px);
 }
 .agent-modal .modal-title { flex: none; }
 .agent-modal .modal-actions { flex: none; }
@@ -966,8 +968,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
   font-size: 12px; color: var(--muted); flex: none;
 }
 .agent-table-body {
-  height: 500px; flex: none; /* 列表区域固定 500px，滚动条始终可见可操作 */
-  overflow-y: auto; min-height: 0;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* 列表区域随弹窗高度伸展并在超限时内滚（替代固定 500px，弹窗限高后不再撑出遮罩滚动） */
 }
 .agent-row { border-bottom: 1px solid var(--border); font-size: 13px; }
 .agent-row:last-child { border-bottom: none; }
@@ -1021,7 +1023,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .agent-empty-icon { font-size: 30px; }
 
 /* ---- 分组表单 ---- */
-.agent-form { max-height: 500px; flex: none; overflow-y: auto; padding-right: 4px; }
+.agent-form { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
 /* 滚动条常显（Windows 11 默认自动隐藏，内容多时无感知） */
 .agent-table-body, .agent-form { scrollbar-width: thin; }
 .agent-table-body::-webkit-scrollbar, .agent-form::-webkit-scrollbar { width: 8px; }
