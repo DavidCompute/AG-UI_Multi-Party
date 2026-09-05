@@ -172,6 +172,11 @@ select {
 .group-item:hover, .member-item:hover { background: var(--panel-2); }
 .group-item.active { background: rgba(79,140,255,.16); color: var(--accent-text); }
 .group-item .count { margin-left: auto; font-size: 12px; color: var(--muted); }
+/* 知聚名过长截断为省略号，悬浮 title 显示完整名称；右侧标签/未读/数量不被撑破 */
+.group-item .group-name {
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 .group-item .icon { font-size: 16px; }
 /* 客服知聚：蓝色标签 + 「进入」小标（非成员可见可进入） */
 .group-item .support-tag {

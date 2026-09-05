@@ -4163,9 +4163,13 @@ function renderGroupList() {
     const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
     const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
     const enterTag = needEnter ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
-    div.innerHTML = avatar + `<span>${g.isPrivate ? "🔒 " : ""}${escapeHtml(g.groupName)}</span>` + kindTag + enterTag +
+    div.innerHTML = avatar + `<span class="group-name"></span>` + kindTag + enterTag +
       (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
+    // 知聚名过长截断（ellipsis）；悬浮 title 显示完整名称（锁标记不入 tooltip）。
+    const groupNameEl = div.querySelector(".group-name");
+    groupNameEl.textContent = g.isPrivate ? "🔒 " + (g.groupName || "") : (g.groupName || "");
+    groupNameEl.title = g.groupName || "";
     div.onclick = () => selectGroup(g.groupId);
     el.appendChild(div);
   }
