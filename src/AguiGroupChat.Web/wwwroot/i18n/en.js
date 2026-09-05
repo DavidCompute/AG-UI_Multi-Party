@@ -700,6 +700,17 @@ window.I18N_DICTS.en = {
   "help.s10.2": "<b>Visible to mentioned members only</b>: only the members who are @'d can see it",
   "help.s10.3": "<b>Private</b>: only the currently selected members (double-clicked @ targets) can see it",
 
+  "help.s11": "🏗 Org building & support circles (new)",
+  "help.s11.1": "Org Architect: @<code>org_architect</code> in a group with one requirement and it drafts a whole structured plan using the same engine as “Digital Employees → One-click orchestration” (roles + per-role skills + connections; kinds picked to fit real duties across prompt / shell / http / dotnet and server or client execution), then walks you through it role by role.",
+  "help.s11.2": "Commit (system admin only): it writes the whole team (new employees + skills + connections) only after you explicitly say “apply this version” in the chat; ordinary users only get the draft and nothing is written. Overwriting the same teamKey keeps only the newest version; localized tweaks to an existing team are supported.",
+  "help.s11.3": "Support circle: members (staff / admin) see all conversations; ordinary users take part as “customer participants” (non-members, isolated threads). An agent’s reply goes back only to the customer who triggered it; customers may @-mention an agent, and execution-like skills ask for their approval.",
+  "help.s11.4": "Full details live in <code>docs/customer-service-and-org-builder.md</code>.",
+  "help.s12": "🎁 Other recent features (new)",
+  "help.s12.1": "Recursive “healthcheck” Q&A: an agent gathers more skills / reports until it has enough before concluding; long answers no longer leak internal <code>{needsMore,…}</code> JSON.",
+  "help.s12.2": "Client (local) skills run on the local machine via NativeBridge with the right interpreter (e.g. PowerShell), rather than being mis-run as server bash.",
+  "help.s12.3": "Desktop notifications: the browser supports Web Notification for both foreground and background.",
+  "help.s12.4": "Use “regenerate” on an agent message to have it answer anew (still works after a page refresh).",
+
   /* --- 通用 --- */
   "common.saveFail": "Save failed: {err}",
 
