@@ -322,6 +322,26 @@ public sealed class AgentDefinition
     public string? RelayToAgentId { get; set; }
 
     /// <summary>
+    /// **角色级覆盖：关闭本角色的桥接阶段（Bridge）**。
+    /// true = 即使全局 <see cref="ExecutionOptions.EnableBridge"/> 开启也跳过本角色的桥接执行；
+    /// null = 跟随平台默认（与旧状态等价）。用于持久化 JSON 兼容（未配置时即 null，旧 import/restart 不受影响）。
+    /// </summary>
+    public bool? DisableBridge { get; set; }
+
+    /// <summary>
+    /// **角色级覆盖：关闭本角色的中继 / 交接阶段（Relay）**。
+    /// true = 跳过本角色的 <see cref="RelayToAgentId"/> 整轮委托；null = 跟随平台 <see cref="ExecutionOptions.EnableRelay"/>。
+    /// </summary>
+    public bool? DisableRelay { get; set; }
+
+    /// <summary>
+    /// **角色级覆盖：关闭本角色的组织化路由阶段（org_route，指派 / 提升 / 协调）**。
+    /// true = 跳过本角色的组织化路由（即使全局 <see cref="ExecutionOptions.EnableOrgRoute"/> 开启）；
+    /// null = 跟随平台默认。关闭后该角色只落回普通流式兜底。
+    /// </summary>
+    public bool? DisableOrgRoute { get; set; }
+
+    /// <summary>
     /// **任务指派白名单（向下）**：本数字员工被 @ 时，若按自身系统提示词判定语境不属于自己，
     /// 可在<b>白名单内自动指派</b>给更合适的下游数字员工。指派方向由「白名单 + 系统提示词语境推断」自动决定。
     /// 判断<b>只看直接下一层</b>：每个节点仅依据自身直接下级的昵称/职责选择指派对象（不向上钻、不引入更深层叶子）。

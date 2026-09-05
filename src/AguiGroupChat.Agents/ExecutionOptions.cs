@@ -42,6 +42,36 @@ public sealed class ExecutionOptions
     /// <summary>同一消息最多允许的审批轮数（防外部服务异常导致反复中断的死循环）。</summary>
     public int MaxInteractionRounds { get; set; } = 5;
 
+    /// <summary>合法阶段 token 白名单（ExecutionOrder 只允许这些；语义见各入口方法注释）。</summary>
+    private static readonly string[] LegalTokens = [StageBridge, StagePipeline, StageRelay, StageOrgRoute, StageStreaming];
+
+    private const string StageBridge = "bridge";
+    private const string StagePipeline = "pipeline";
+    private const string StageRelay = "relay";
+    private const string StageOrgRoute = "org_route";
+    private const string StageStreaming = "streaming";
+
+    /// <summary>
+    /// 执行阶段分派顺序（网关 InvokeCoreAsync 的路由判定次序）。只允许白名单 token
+    /// （bridge / pipeline / relay / org_route / streaming）；规范化时剔除未知 token、去重、保留相对顺序，
+    /// 且恒含 streaming 并置最末（普通流式兜底）。缺省与既有硬编码 if 顺序完全一致。
+    /// </summary>
+    public string[] ExecutionOrder { get; set; } =
+        [StageBridge, StagePipeline, StageRelay, StageOrgRoute, StageStreaming];
+
+    /// <summary>平台级执行阶段开关（默认全开）。与角色的 <see cref="AgentDefinition.DisableBridge"/> 等
+    /// 角色级覆盖求并：任一侧关闭 ⇒ 跳过该阶段。</summary>
+    public bool EnableBridge { get; set; } = true;
+
+    /// <summary>平台级执行阶段开关（默认全开）。见 <see cref="EnableBridge"/>。</summary>
+    public bool EnablePipeline { get; set; } = true;
+
+    /// <summary>平台级执行阶段开关（默认全开）。见 <see cref="EnableBridge"/>。</summary>
+    public bool EnableRelay { get; set; } = true;
+
+    /// <summary>平台级执行阶段开关（默认全开；org_route 还须语义满足 Mentioned&amp;&amp;指派/提升/协调）。见 <see cref="EnableBridge"/>。</summary>
+    public bool EnableOrgRoute { get; set; } = true;
+
     /// <summary>出厂默认（与无关代码路径紧密绑定，回退必用同一值保证行为一致）。</summary>
     public static ExecutionOptions Default { get; } = new();
 
@@ -63,7 +93,67 @@ public sealed class ExecutionOptions
         MaxRecursiveRounds = Positive(MaxRecursiveRounds, Default.MaxRecursiveRounds, nameof(MaxRecursiveRounds), logger);
         MaxRouteDepth = Positive(MaxRouteDepth, Default.MaxRouteDepth, nameof(MaxRouteDepth), logger);
         MaxInteractionRounds = Positive(MaxInteractionRounds, Default.MaxInteractionRounds, nameof(MaxInteractionRounds), logger);
+        ExecutionOrder = NormalizeExecutionOrder(ExecutionOrder, Default.ExecutionOrder, logger);
         return this;
+    }
+
+    /// <summary>
+    /// 规范化执行阶段顺序：按白名单过滤（剔除未知 / 空 token）、去重且保留相对顺序、恒置 streaming 最末作兜底；
+    /// 拼错 / 重复 / 整表非法（过滤后无任何合法非流式阶段）均回退默认顺序并按需 warn。
+    /// </summary>
+    private static string[] NormalizeExecutionOrder(IEnumerable<string>? order, string[] fallback, ILogger? logger)
+    {
+        var raw = order as string[] ?? order?.ToArray();
+        if (raw is not { Length: > 0 })
+        {
+            logger?.LogWarning("Agents:Execution:ExecutionOrder 缺失或为空，已回退默认顺序");
+            return (string[])fallback.Clone();
+        }
+
+        var kept = new List<string>(raw.Length);
+        var sawStreaming = false;
+        foreach (var item in raw)
+        {
+            var token = item?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(token))
+            {
+                logger?.LogWarning("Agents:Execution:ExecutionOrder 含空项，已剔除");
+                continue;
+            }
+            if (!LegalTokens.Contains(token))
+            {
+                logger?.LogWarning("Agents:Execution:ExecutionOrder 含未知阶段 token「{Token}」（应为 bridge/pipeline/relay/org_route/streaming 之一），已剔除", token);
+                continue;
+            }
+            if (token == StageStreaming)
+            {
+                if (sawStreaming)
+                {
+                    logger?.LogWarning("Agents:Execution:ExecutionOrder 重复的 streaming 阶段，已去重");
+                }
+                sawStreaming = true;
+                continue; // streaming 统一置末处理；这里先跳过去重（避免中途重复保留）
+            }
+            if (!kept.Contains(token))
+            {
+                kept.Add(token);
+            }
+            else
+            {
+                logger?.LogWarning("Agents:Execution:ExecutionOrder 重复的阶段 token「{Token}」，已去重", token);
+            }
+        }
+
+        // 非流式阶段为空：整表非法，回退全默认顺序（杜绝只有 streaming 一个阶段的“跳过一切”误配置静默生效）。
+        if (kept.Count == 0)
+        {
+            logger?.LogWarning("Agents:Execution:ExecutionOrder 未含任何合法路由阶段，已回退默认顺序");
+            return (string[])fallback.Clone();
+        }
+
+        if (!sawStreaming) logger?.LogWarning("Agents:Execution:ExecutionOrder 未含 streaming 阶段，已自动补至末尾（普通流式恒为兜底）");
+        kept.Add(StageStreaming);
+        return kept.ToArray();
     }
 
     /// <summary>夹紧单个 >0 正整数：非法（≤0）则回退默认值并按需告警。</summary>

@@ -96,4 +96,88 @@ public sealed class ExecutionOptionsTests
         var exec = new ExecutionOptions { StreamTimeoutMinutes = -1 };
         Assert.Same(exec, exec.Normalize());
     }
+
+    // ---- Step B：可配执行分派顺序 + 平台 / 角色级开关 ----
+
+    [Fact]
+    public void Defaults_ValidExecutionOrder_AndAllSwitchesOn()
+    {
+        var d = ExecutionOptions.Default;
+        Assert.Equal(["bridge", "pipeline", "relay", "org_route", "streaming"], d.ExecutionOrder);
+        Assert.True(d.EnableBridge);
+        Assert.True(d.EnablePipeline);
+        Assert.True(d.EnableRelay);
+        Assert.True(d.EnableOrgRoute);
+    }
+
+    [Fact]
+    public void Normalize_KeepsValidOrder_Untouched()
+    {
+        var exec = new ExecutionOptions
+        {
+            EnablePipeline = false,
+            ExecutionOrder = ["relay", "pipeline", "org_route", "bridge", "streaming"],
+        };
+        exec.Normalize();
+        Assert.Equal(["relay", "pipeline", "org_route", "bridge", "streaming"], exec.ExecutionOrder);
+        Assert.False(exec.EnablePipeline); // 平台开关非白名单成员，保持原值
+        Assert.True(exec.EnableBridge);
+        Assert.True(exec.EnableRelay);
+        Assert.True(exec.EnableOrgRoute);
+    }
+
+    [Fact]
+    public void Normalize_Dedupes_AndStripsUnknownTokens()
+    {
+        var exec = new ExecutionOptions
+        {
+            ExecutionOrder = ["bridge", "bridge", "bogus", "org_route", "relay", "pipeline", ""],
+        };
+        exec.Normalize();
+        // 未知 / 空剔除；重复 bridge 去重一次；相对顺序保留；streaming 恒补至末尾。
+        Assert.Equal(["bridge", "org_route", "relay", "pipeline", "streaming"], exec.ExecutionOrder);
+    }
+
+    [Fact]
+    public void Normalize_AppendsStreamingAtEnd_WhenMissing()
+    {
+        var exec = new ExecutionOptions { ExecutionOrder = ["bridge", "org_route"] };
+        exec.Normalize();
+        Assert.Equal(["bridge", "org_route", "streaming"], exec.ExecutionOrder);
+    }
+
+    [Fact]
+    public void Normalize_MovesStreamingToEnd_IfSuppliedEarly()
+    {
+        var exec = new ExecutionOptions { ExecutionOrder = ["streaming", "bridge", "relay"] };
+        exec.Normalize();
+        Assert.Equal(["bridge", "relay", "streaming"], exec.ExecutionOrder);
+    }
+
+    [Fact]
+    public void Normalize_FallsBackToDefaultOrder_OnWholeInvalid()
+    {
+        // 全部是非白名单 token / 空 → 整表非法，回退全默认顺序。
+        var exec = new ExecutionOptions { ExecutionOrder = ["bogus", "", "wat"] };
+        exec.Normalize();
+        Assert.Equal(ExecutionOptions.Default.ExecutionOrder, exec.ExecutionOrder);
+    }
+
+    [Fact]
+    public void Normalize_FallsBackToDefaultOrder_OnEmptyOrder()
+    {
+        var exec = new ExecutionOptions { ExecutionOrder = [] };
+        exec.Normalize();
+        Assert.Equal(ExecutionOptions.Default.ExecutionOrder, exec.ExecutionOrder);
+    }
+
+    [Fact]
+    public void RoleLevelDisableOverrides_DefaultNull_MeaningFollowPlatform()
+    {
+        // 角色级覆盖与旧状态等价：null = 跟随平台，不影响持久化 / 旧 import / restart。
+        var def = new AgentDefinition { AgentId = "a", Nickname = "a", Description = "", Instructions = "" };
+        Assert.Null(def.DisableBridge);
+        Assert.Null(def.DisableRelay);
+        Assert.Null(def.DisableOrgRoute);
+    }
 }

@@ -424,46 +424,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (def is null)
             return new AgentInvocationResult(false, null, "AGENT_NOT_CONFIGURED");
 
-        // AG-UI 桥接角色：不经本地大模型，以 AG-UI 协议对接外部 AG-UI 服务，
-        // 外部服务的流式回复经群聊事件回灌。智能体端点与全局 AguiBridge:Endpoint 任一配置即走桥接。
-        if (!string.IsNullOrWhiteSpace(def.BridgeEndpoint) || !string.IsNullOrWhiteSpace(_options.AguiBridge?.Endpoint))
-            return await InvokeBridgeAsync(context, def, ct);
-
-        // 编排流水线（1.1）：配置了 Pipeline 的智能体不直接调本地大模型，而是按步骤依次调用子智能体
-        if (def.Pipeline is { Count: > 0 })
-            return await InvokePipelineAsync(context, def, ct);
-
-        // 角色交接（1.2）：配置了 RelayToAgentId 的智能体整轮委托给中继智能体（防止自环 / 接力环）
-        var relayTarget = def.RelayToAgentId;
-        if (!string.IsNullOrWhiteSpace(relayTarget) && relayTarget != def.AgentId
-            && _catalog.GetDefinition(relayTarget) is { RelayToAgentId: null or "" })
-            return await InvokeRelayAsync(context, def, relayTarget, ct);
-
-        // 语境触发（Contextual）：群内触发模式优先（可覆盖角色默认），先结合群上下文判断是否应该发言，
-        // 不发言则静默跳过（不发任何事件）
+        // 顺序可配的执行阶段分派（Step B）：默认 bridge→pipeline→relay→org_route→streaming，
+        // 由 _execution.ExecutionOrder 决定、可经平台开关 + 角色级覆盖禁用单个非兜底阶段。
+        // 命中阶段即返回其结果；全部阶段语义未命中（fallthrough）时落回下方普通流式兜底。
         var effectiveMode = context.TriggerMode ?? def.TriggerMode;
+        if (await DispatchRoutedStagesAsync(context, def, effectiveMode, ct) is { } routedResult)
+            return routedResult;
+
+        // 语境触发（Contextual）：下方普通流式 / 模型消费前先结合群上下文判断是否应发言，不发言则静默跳过
+        // （不发任何事件）。语境沉默只作用于最终落回模型这条路径——确定性阶段（bridge/pipeline/relay）
+        // 与组织化路由（需 Mentioned，非 Contextual）均不受影响，语义与原实现一致。
         if (effectiveMode == AgentTriggerMode.Contextual && !await ShouldSpeakAsync(context, def, ct))
         {
             _logger.LogInformation("智能体 {AgentId} 语境判断为保持沉默（group={GroupId}）", context.AgentId, context.GroupId);
             return new AgentInvocationResult(false, null, "AGENT_DECIDED_SILENT");
-        }
-
-        // 任务指派 / 问题提升 / 技能型计划编排（组织化路由）……
-        // 命中则进入组织化路由：先尝试构建编排计划（按组织/技能激活），失败再回退递归指派。
-        //
-        // 例外：若该数字员工挂载了【受控组织落库（Org_deploy）】类技能，说明它是一个“对话驱动式部署员”：
-        // 需在多轮对话里经模型把挂载工具当 function-call 真实调用（先出稿→管理员确认→落库→写回），
-        // 而不是被当作一次性的“排查/技能批量执行/综合答复”。计划执行器只会把技能投给 SkillRunner（对
-        // OrgDeploy 无可执行体、也不向模型暴露工具），故这里把 isSkillPlanner 关掉，让它走下方普通 run、
-        // 让挂载的工具（org_deploy / org_commit）在模型手中真正可触发。
-        var isSkillPlanner = _options.CoordinatorPlanning && (def.SkillDefIds is { Count: > 0 }
-            && !HasMountedOrgDeploy(def));
-        if (effectiveMode == AgentTriggerMode.Mentioned
-            && (def.AssignmentIds is { Count: > 0 }
-                || !string.IsNullOrWhiteSpace(def.EscalationAgentId)
-                || isSkillPlanner))
-        {
-            return await InvokeAssignmentEscalationAsync(context, ct);
         }
 
         var agent = _catalog.GetOrCreate(context.AgentId);
@@ -759,6 +733,73 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 IsTyping = false,
             }, CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// 顺序可配的非兜底路由阶段分派（Step B）。按 <see cref="ExecutionOptions.ExecutionOrder"/> 遍历阶段，
+    /// 每阶段在「平台开关开启 ∧ 未被子角色覆盖禁用 ∧ 语义就绪」时才处理，命中即走原分派方法返回其结果；
+    /// 其余情况该阶段返回 null 交由下一阶段。全部阶段都未命中时返回 null，由 <see cref="InvokeCoreAsync"/>
+    /// 落回普通流式兜底（恒在 <see cref="ExecutionOptions.ExecutionOrder"/> 最末）。
+    /// 各阶段的语义判定条件与原硬编码 if 完全一致；默认顺序与开关值即现状。<br/>
+    /// 语境沉默（Contextual &amp;&amp; ShouldSpeak false）不在此列：它不属于可编排阶段，仍由 <see cref="InvokeCoreAsync"/>
+    /// 在兜底前统一判断（此处只分派语义要求 Mentioned 的组织化路由，天然非 Contextual）。
+    /// </summary>
+    private async Task<AgentInvocationResult?> DispatchRoutedStagesAsync(
+        AgentInvocationContext context, AgentDefinition def, AgentTriggerMode effectiveMode, CancellationToken ct)
+    {
+        foreach (var token in _execution.ExecutionOrder)
+        {
+            switch (token)
+            {
+                // ① 桥接角色：不经本地大模型，以 AG-UI 协议对接外部 AG-UI 服务。
+                case "bridge":
+                    if (_execution.EnableBridge && def.DisableBridge is not true)
+                    {
+                        if (!string.IsNullOrWhiteSpace(def.BridgeEndpoint)
+                            || !string.IsNullOrWhiteSpace(_options.AguiBridge?.Endpoint))
+                            return await InvokeBridgeAsync(context, def, ct);
+                    }
+                    break;
+
+                // ② 编排流水线（1.1）：配置了 Pipeline 即依次调用子智能体。
+                case "pipeline":
+                    if (_execution.EnablePipeline && def.Pipeline is { Count: > 0 })
+                        return await InvokePipelineAsync(context, def, ct);
+                    break;
+
+                // ③ 角色交接（1.2）：RelayToAgentId 整轮委托（防自环 / 接力环，条件与原实现一致）。
+                case "relay":
+                    if (_execution.EnableRelay && def.DisableRelay is not true)
+                    {
+                        var relayTarget = def.RelayToAgentId;
+                        if (!string.IsNullOrWhiteSpace(relayTarget) && relayTarget != def.AgentId
+                            && _catalog.GetDefinition(relayTarget) is { RelayToAgentId: null or "" })
+                            return await InvokeRelayAsync(context, def, relayTarget, ct);
+                    }
+                    break;
+
+                // ④ 组织化路由（指派 / 提升 / 技能型计划编排）：仅 Mentioned 且存在指派 / 提升 / 协调才触发；
+                //    否则 fallthrough 交由下一阶段（默认落到普通流式）。协调开关照旧读 _options.CoordinatorPlanning，
+                //    isSkillPlanner 需配合本阶段开关才生效。
+                case "org_route":
+                    if (_execution.EnableOrgRoute && def.DisableOrgRoute is not true)
+                    {
+                        var isSkillPlanner = _options.CoordinatorPlanning
+                            && def.SkillDefIds is { Count: > 0 } && !HasMountedOrgDeploy(def);
+                        if (effectiveMode == AgentTriggerMode.Mentioned
+                            && (def.AssignmentIds is { Count: > 0 }
+                                || !string.IsNullOrWhiteSpace(def.EscalationAgentId)
+                                || isSkillPlanner))
+                            return await InvokeAssignmentEscalationAsync(context, ct);
+                    }
+                    break;
+
+                // ⑤ 普通流式（streaming）：规范化保证其恒置最末，由 InvokeCoreAsync 兜底处理，此处从不命中。
+                default:
+                    break;
+            }
+        }
+        return null;
     }
 
     /// <summary>
