@@ -193,7 +193,7 @@ docker compose down
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
 | `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
-| `AGENTS_EXECUTION_*` | 与代码缺省一致 | 网关**执行参数**默认集（`Agents:Execution`，子键按 `.`→`__` 映射如 `AGENTS__EXECUTION__STREAMTIMEOUTMINUTES`）：时序/重试/TTL、阶段开关与 `ExecutionOrder`。**多数情况无需在容器里设**——管理员只读此值为默认，运行期可在控制台「管理员 → 执行参数」页热改并持久化（`executionRuntime`），重启恢复。角色级按单数字员工在「编辑 → 执行阶段」关闭桥接/交接/组织路由。全部字段/默认/可配边界见 `docs/execution-configuration.md` |
+| `AGENTS_EXECUTION_*` | 不限 | 网关**执行参数**（`Agents:Execution`：时序/重试/TTL、阶段开关、`ExecutionOrder`）**默认与代码一致，无需容器配置**——首选在运行期于控制台「管理员 → 执行参数」页热改并持久化（`executionRuntime`，重启恢复）。若确要容器启动即用非默认值：`docker-compose.yml` `web.environment`（Docker 不透传未知键）需<b>显式补一行</b>，如 `Agents__Execution__StreamTimeoutMinutes: "8"`、`Agents__Execution__EnableOrgRoute: "false"`。角色级按单数字员工在「编辑 → 执行阶段」关闭桥接/交接/组织路由。字段/默认/可配边界见 `docs/execution-configuration.md` |
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | 一键编排 apply 的冒烟自测：是否对服务端执行的 `shell` 技能盲跑一次（有副作用，默认开；置 `false` 关闭）。映射选项 `Agents__SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
 | `AUTH_SUPER_ADMIN_USER_IDS` | 空 | 超级管理员名单（逗号分隔 userId/username，平台级 RBAC）：命中者生效角色至少为 **SuperAdmin**；留空则仅首个注册账号自举为 SuperAdmin（见 `docs/RBAC.md`） |

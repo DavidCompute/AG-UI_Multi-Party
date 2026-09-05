@@ -4856,6 +4856,18 @@ async function saveExecutionConfig() {
   finally { btn.disabled = false; btn.textContent = orig; }
 }
 
+/** 恢复出厂默认：拉 /defaults 出厂快照回填表单（不落库），再由用户点「保存」写回。 */
+async function resetExecutionConfig() {
+  try {
+    const res = await fetch("/ag-ui/admin/execution/defaults", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.execution) { toast(errMsg(d, "读取出厂默认失败（HTTP " + res.status + "）")); return; }
+    applyExec(d.execution);
+    toast(t("admin.execResetFilled"));
+    $("efSave").focus();
+  } catch (ex) { toast(t("admin.execLoadFail")); }
+}
+
 async function loadAdminUsers() {
   try {
     const res = await fetch("/ag-ui/admin/users", { headers: { Authorization: "Bearer " + state.token } });
@@ -7205,6 +7217,7 @@ function init() {
   $("cfgReload").onclick = loadConfigGovernance;
   $("efSave").onclick = saveExecutionConfig;
   $("efReload").onclick = loadExecutionConfig;
+  $("efReset").onclick = resetExecutionConfig;
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
   $("memSearchBtn").onclick = () => loadMemoryList(0);

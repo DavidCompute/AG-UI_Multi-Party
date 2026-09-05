@@ -648,6 +648,8 @@ window.I18N_DICTS.en = {
   "admin.exec.MaxInteractionRounds": "Max interaction rounds",
   "admin.execLoadFail": "Failed to load execution params",
   "admin.execSaved": "Execution params saved and applied",
+  "admin.execReset": "Restore defaults",
+  "admin.execResetFilled": "Defaults loaded — press Save to apply",
   "admin.close": "Close",
 
   /* --- 系统状态 --- */

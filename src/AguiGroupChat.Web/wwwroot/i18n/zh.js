@@ -646,6 +646,8 @@ window.I18N_DICTS.zh = {
   "admin.exec.MaxInteractionRounds": "最大交互轮数",
   "admin.execLoadFail": "执行参数读取失败",
   "admin.execSaved": "执行参数已保存并生效",
+  "admin.execReset": "恢复默认",
+  "admin.execResetFilled": "已回填出厂默认，确认后点「保存」生效",
   "admin.close": "关闭",
 
   /* --- 系统状态 --- */

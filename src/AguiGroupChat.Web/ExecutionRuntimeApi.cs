@@ -26,6 +26,10 @@ public static class ExecutionRuntimeApi
         root.MapGet("/", (ExecutionOptions exec) => Results.Ok(ToDto(exec)))
             .AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
+        // 读取出厂默认快照（只读，供前端“恢复默认”回填而不必复制清单）。写回仍走 POST / 并归一化。
+        root.MapGet("/defaults", () => Results.Ok(new { execution = ToDto(ExecutionOptions.Default) }))
+            .AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
         // 管理员写入运行时覆盖：字段可选，未给的原有效值保留；非法值会经 Normalize 回退默认，
         // 返回体即“修正后生效值”。改的是共享单例 ExecutionOptions → 网关下次调用即生效。
         root.MapPost("/", (ExecutionPatchReq req, ExecutionOptions exec, ChangeHub changes,
