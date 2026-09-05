@@ -38,9 +38,9 @@ graph TD
 | `Admin`（系统管理员） | 既有 `IsAdmin` 语义的完整管理 | Operator 全部 + 用户列表/禁用/重置密码、数据导入导出、模型配置、品牌白标、配置治理、系统初始化（`/reset`） |
 | `SuperAdmin`（超级管理员） | 最高角色 | Admin 全部 + **管理平台角色**（`GET|POST /ag-ui/admin/roles`：查看角色矩阵、授予/回收 user/operator/admin/superadmin） |
 
-**生效角色推导**：账号有一个「显式」`PlatformRole` 字段，同时受既有 `IsAdmin` 标记与 `Auth:AdminUserIds` 配置影响。`AuthService.ResolveRole` 取两者较高者——
+**生效角色推导**：账号有一个「显式」`PlatformRole` 字段，同时受既有 `IsAdmin` 标记与 `Auth:AdminUserIds` / `Auth:SuperAdminUserIds` 配置影响。`AuthService.ResolveRole` 取三者较高者——
 - 显式 `PlatformRole` 未设置（旧部署/旧快照）时，按 `IsAdmin=true` 或命中 `AdminUserIds` 推导为 **至少 `Admin`**；
-- `SuperAdmin` 只能通过显式角色获得（不能仅靠 `IsAdmin`）。
+- `SuperAdmin` 不能仅靠 `IsAdmin` 获得，但可经两种途径取得：**显式 `PlatformRole=superadmin`**，或**命中 `Auth:SuperAdminUserIds` 配置名单**（用于既有部署 / bootstrap，不写账号显式角色）。
 
 **自举**：首个注册账号默认同时成为 `Admin` 与 `SuperAdmin`（避免新部署无人能管理平台角色）。后续账号默认 `User`。
 
@@ -49,6 +49,7 @@ graph TD
 | 配置 | 说明 |
 |---|---|
 | `Auth:AdminUserIds` | 逗号分隔的 userId/username 名单；命中者**生效角色至少为 Admin**（即使显式角色为 User）。不授予 SuperAdmin。 |
+| `Auth:SuperAdminUserIds` | 逗号分隔的 userId/username 名单（**生效角色至少为 SuperAdmin**，平台最高角色）；用于既有部署 / bootstrap——无需先用现职超级管理员即可把某账号顶为最高角色。不作为账号显式角色存储。 |
 | `Auth:FirstUserIsAdmin` | 默认 `true`：首个注册账号自动成为管理员与超级管理员。 |
 | `PlatformRole`（账号字段） | 显式平台角色。经**超级管理员**用 `POST /ag-ui/admin/roles/{userId}` 设置；持久化随账号/快照保存。 |
 

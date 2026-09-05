@@ -75,8 +75,8 @@ realtime.On<GroupTypingEvent>(e      => Console.WriteLine($"[输入中] {e.Membe
 
 await realtime.ConnectAsync(["group_001", "group_002"], CancellationToken.None);
 // ConnectAsync 会自动订阅；之后也可增删：
-await realtime.SubscribeAsync(["group_003"], ct);
-await realtime.UnsubscribeAsync(["group_001"], ct);
+await realtime.SubscribeAsync(["group_003"], CancellationToken.None);
+await realtime.UnsubscribeAsync(["group_001"], CancellationToken.None);
 
 // WS 全双工：直接经实时通道上行（等效 HTTP 写接口）
 await realtime.SendMessageAsync(new GroupMessageSendRequest {

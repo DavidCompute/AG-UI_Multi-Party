@@ -64,8 +64,8 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.120
 | `Agents:ApiKey` | - | 对话模型密钥（`mock` 不需要）；也读环境变量 `DEEPSEEK_API_KEY` |
 | `Agents:EnableTools` | `true` | 工具调用：calculator 计算 / unit_converter 换算 / group_memory_search 记忆检索 / read_attachment 读附件 / publish_announcement 公告（需审批） |
 | `Agents:EnableWebTools` | `false` | 网络工具：web_search（搜索网页）/ read_url（读网页，防内网 SSRF）；开启需外网 |
-| `Agents:AllowPrivateSkillEndpoints` | `false` | 技能库 HTTP 是否放行<b>本机 / 内网 / 私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机 / 内网接口（如本地 Ollama / 内网 API）时置 `true` |
-| `Agents:CoordinatorPlanning` | `false` | 确定性编排计划：开启后路由型数字员工（配了指派白名单/提升目标，或<b>挂了技能</b>）收到问题时，先按<b>组织架构与技能配置</b>生成一张执行计划，再<b>依次激活</b>对应员工/技能并聚合答复；计划内的<b>客户端执行技能会合并成一张「本机一键执行全部」卡</b>，综合阶段<b>可递归补查</b>直到信息充分（不会中途问“要不要继续”）；计划失败自动回退到原有递归指派 |
+| `Agents:AllowPrivateSkillEndpoints` | `true` | 技能库 HTTP 是否放行<b>本机 / 内网 / 私网</b>地址（桌面随附默认开启：单用户本地宿主可直接调用本地 Ollama / 内网 API）；如需严格 SSRF 防护可改 `Agents:AllowPrivateSkillEndpoints=false`，此后 HTTP 技能拒绝内网目标 |
+| `Agents:CoordinatorPlanning` | `true` | 确定性编排计划：开启后路由型数字员工（配了指派白名单/提升目标，或<b>挂了技能</b>）收到问题时，先按<b>组织架构与技能配置</b>生成一张执行计划，再<b>依次激活</b>对应员工/技能并聚合答复；计划内的<b>客户端执行技能会合并成一张「本机一键执行全部」卡</b>，综合阶段<b>可递归补查</b>直到信息充分（不会中途问“要不要继续”）；计划失败自动回退到原有递归指派 |
 | `Agents:Memory:Enabled` | `true` | 语义记忆开关 |
 | `Agents:Memory:Provider` | `llama` | embedding 提供方：`llama`（本地 LLamaSharp）/ `http`（OpenAI 兼容端点） |
 | `Agents:Memory:LlamaModelPath` | `models/embedding.gguf` | 本地 GGUF 模型路径；缺失时也自动探测 `%LocalAppData%\AguiGroupChat\models\embedding.gguf`（老版本 perMachine 安装场景的兼容回退） |
