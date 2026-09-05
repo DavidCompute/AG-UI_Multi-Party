@@ -79,7 +79,43 @@ public static class AgentApi
             return Results.Ok(new { created = true, agentId, nickname = def.Nickname });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
-        // ---- 更新智能体（需登录）：同步已注册群内的触发规则（保留群内显式覆盖）----
+        // ---- 与数字员工开始/进入单聊（kind=direct）：幂等——首次为该 (用户, 数字员工) 建独立私有双人群，
+        //      已存在则直接复用并返回。不同用户与同一数字员工的单聊各自独立、互不可见（见 proto §2 单聊）。----
+        root.MapPost("/direct", async (DirectStartRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, GroupHub hub, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var agentId = (req?.AgentId ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(agentId))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "缺少要单聊的数字员工 agentId"));
+            if (agentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "AI 分身请经「修改资料 → AI 分身」启用，不提供单聊入口"));
+            var def = catalog.GetDefinition(agentId);
+            if (def is null || def.IsSkillTarget)
+                return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "数字员工不存在"));
+
+            Group group;
+            try
+            {
+                group = await hub.TryEnsureDirectChatAsync(user.UserId, agentId, def.Nickname, def.Avatar, ct);
+            }
+            catch (AguiProtocolException e)
+            {
+                return Results.Json(new AguiError(e.ErrorCode, e.Message), statusCode: e.ErrorCode switch
+                {
+                    ErrorCodes.GroupPermissionDenied => StatusCodes.Status403Forbidden,
+                    _ => StatusCodes.Status400BadRequest,
+                });
+            }
+            return Results.Ok(new
+            {
+                groupId = group.GroupId,
+                groupName = group.GroupName,
+                isDirect = true,
+                agentId,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog) =>
         {
             var user = WebIdentity.User(ctx, auth);
@@ -838,3 +874,6 @@ public sealed record AgentRegisterHttpRequest(
     string TriggerMode,
     IReadOnlyList<string>? Keywords,
     bool Override = false);
+
+/// <summary>「数字员工单聊」请求体：在数字员工列表点进入时由前端发起（幂等，按其 agentId 创建/复用独立私有单聊群）。</summary>
+public sealed record DirectStartRequest(string? AgentId);

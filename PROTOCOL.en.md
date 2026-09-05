@@ -53,7 +53,7 @@ This standard is an extension of the native AG-UI (Agent-User Interface) protoco
 |memberCount|number|Yes|Current total number of members|
 |createTime|number|Yes|Creation timestamp (milliseconds)|
 |isPrivate|boolean|No|Whether the group is private (default false). For private groups, the semantic memory is **only retrievable within the group**: when agents are triggered in other groups (scope=agent/all) content of private groups is excluded, whereas triggering within the private group itself is unaffected|
-|kind|enum|No|Group chat kind: `normal` (default; public/private per isPrivate) / `support` (support circle, see §2.1.1). Stored in `extra.kind`|
+|kind|enum|No|Group chat kind: `normal` (default; public/private per isPrivate) / `support` (support circle, see §2.1.1) / `direct` (digital-employee direct chat: a one-to-one private two-member group with that employee, `isPrivate` defaults true). Stored in `extra.kind`|
 |isSupportCircle|boolean|No|Whether it is a support circle (equivalent to `kind == support`; redundant for fast frontend rendering)|
 |extra|object|No|Custom business extension fields|
 

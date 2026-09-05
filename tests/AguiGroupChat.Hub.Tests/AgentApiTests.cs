@@ -330,6 +330,37 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.Equal("agent_docs", skill.GetProperty("targetAgentId").GetString());
     }
 
+    [Fact]
+    public async Task DirectChat_Start_IsIdempotent_AndIsolatedAcrossUsers()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var tokenA = await RegisterAsync("direct_a_" + suffix);
+        var agentId = "agent_direct_" + suffix;
+        await PostAgentAsync(tokenA, new { agentId, nickname = "单聊助手", triggerMode = "mentioned" });
+
+        async Task<string> StartAsync(string token)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/ag-ui/agents/direct") { Content = JsonContent.Create(new { agentId }) };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var res = await _client.SendAsync(req);
+            res.EnsureSuccessStatusCode();
+            var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(json.GetProperty("isDirect").GetBoolean());
+            return json.GetProperty("groupId").GetString()!;
+        }
+
+        // 同一用户重复进入 → 幂等返回同一群
+        var gA1 = await StartAsync(tokenA);
+        var gA2 = await StartAsync(tokenA);
+        Assert.Equal(gA1, gA2);
+        Assert.StartsWith("group_", gA1);
+
+        // 不同用户与同一数字员工 → 各自独立会话（群号不同）
+        var tokenB = await RegisterAsync("direct_b_" + suffix);
+        var gB = await StartAsync(tokenB);
+        Assert.NotEqual(gA1, gB);
+    }
+
     [Theory]
     [InlineData("技能分析")]      // 中文：OpenAI 工具名不允许
     [InlineData("skill docs")]    // 空格

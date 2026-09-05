@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text.Json;
 using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Infra;
@@ -195,6 +196,101 @@ public sealed class GroupHub : IDisposable
 
         _logger.LogInformation("群组已创建 {GroupId}（{Name}，{Count} 人）", groupId, req.GroupName, members.Count);
         return group;
+    }
+
+    // ================= 数字员工单聊（user ↔ agent 的 1:1 私有会话） =================
+
+    /// <summary>
+    /// 「数字员工列表 → 私聊」：幂等地为 (ownerId, agentId) 建立/复用一**个确定且彼此独立**的私有双人群（kind=direct）。
+    /// 不同用户与同一数字员工的单聊各自有独立群（互不可见），同一用户反复进入返回已存在群。
+    /// 群主 = 真人用户 ownerId；另一端 = 数字员工 agentId（注册 mentioned 触发规则；普通消息即视为对对端“直达”触发，见 TriggerAgents）。
+    /// 单聊默认私密（isPrivate=true），语义记忆仅在本私群内可被检索，隔离于其它群。</summary>
+    public async Task<Group> TryEnsureDirectChatAsync(string ownerId, string agentId, string? agentNickname, string? agentAvatar, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerId))
+            throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "缺少单聊发起者（ownerId）");
+        if (string.IsNullOrWhiteSpace(agentId))
+            throw new AguiProtocolException(ErrorCodes.BadRequest, "缺少单聊对象（agentId）");
+        if (string.Equals(ownerId, agentId, StringComparison.Ordinal))
+            throw new AguiProtocolException(ErrorCodes.BadRequest, "不能与自己单聊");
+
+        var groupId = DirectChatGroupId(ownerId, agentId);
+        if (_store.GetGroup(groupId) is { } existing)
+        {
+            // 幂等：群已存在但发起者不在其中（理论上只可能由极端 ID 冲突造成）→ 拒绝，不改写他人会话
+            if (!_store.IsMember(groupId, ownerId))
+                throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "该会话已存在且你不属于其中");
+            return existing;
+        }
+
+        EnsureCanAddAgents(ownerId, [agentId]);
+        var now = NowMs;
+        var ownerUser = _users.GetUserById(ownerId);
+        var members = new List<GroupMember>
+        {
+            new()
+            {
+                MemberId = ownerId,
+                MemberType = MemberType.User,
+                Nickname = ownerUser?.Nickname ?? ownerUser?.Username ?? DefaultNickname(ownerId),
+                Avatar = ownerUser?.Avatar,
+                Role = GroupRole.Owner,
+                OnlineStatus = _connections.MemberConnectionCount(ownerId) > 0 ? OnlineStatus.Online : OnlineStatus.Offline,
+                JoinTime = now,
+            },
+            new()
+            {
+                MemberId = agentId,
+                MemberType = MemberType.Agent, // 单聊对端只能是数字员工
+                Nickname = !string.IsNullOrWhiteSpace(agentNickname) ? agentNickname! : DefaultNickname(agentId),
+                Avatar = agentAvatar,
+                Role = GroupRole.Normal,
+                OnlineStatus = _connections.MemberConnectionCount(agentId) > 0 ? OnlineStatus.Online : OnlineStatus.Offline,
+                JoinTime = now,
+            },
+        };
+        var extra = new Dictionary<string, object?>(StringComparer.Ordinal) { ["kind"] = "direct" };
+        var group = new Group
+        {
+            GroupId = groupId,
+            // 私有双人单聊：名字直接用它展示的会话名（前端渲染时可用对端昵称覆盖显示标题）
+            GroupName = string.IsNullOrWhiteSpace(agentNickname) ? $"与数字员工 {agentId} 的单聊" : $"与 {agentNickname!.Trim()} 的单聊",
+            OwnerId = ownerId,
+            IsPrivate = true,
+            MemberCount = members.Count,
+            CreateTime = now,
+            Extra = extra,
+        };
+
+        // 事务性建群（失败回滚，防半建）：确定性群 ID 已存在即视为并发/幂等冲突
+        if (!_store.CreateGroupWithMembers(group, members))
+        {
+            var raced = _store.GetGroup(groupId);
+            if (raced is not null && _store.IsMember(groupId, ownerId))
+                return raced; // 同一时刻已建成：直接复用
+            throw new AguiProtocolException(ErrorCodes.GroupFull, "单聊创建失败，请重试");
+        }
+
+        // 注册该数字员工在本群的触发规则（默认 mentioned；群内显式覆盖保留语义）
+        RegisterAgent(new AgentRegisterRequest
+        {
+            AgentId = agentId,
+            Nickname = members[1].Nickname,
+            GroupIds = [groupId],
+            TriggerMode = AgentTriggerMode.Mentioned,
+        });
+
+        _changes?.Notify();
+        _logger.LogInformation("数字员工单聊已创建 {GroupId}（{Owner} ↔ {Agent}）", groupId, ownerId, agentId);
+        return group;
+    }
+
+    /// <summary>确定性单聊群 ID：由 (ownerId, agentId) 取 SHA-256 前 20 位十六进制，保证统一对幂等复用、不同用户之间独立。</summary>
+    internal static string DirectChatGroupId(string ownerId, string agentId)
+    {
+        var raw = string.Join("\u001F", ownerId, agentId);
+        var hash = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw)));
+        return "group_direct_" + hash[..20].ToLowerInvariant();
     }
 
     public async Task<Group> UpdateGroupAsync(GroupUpdateRequest req, CancellationToken ct = default)
@@ -1635,6 +1731,23 @@ public sealed class GroupHub : IDisposable
                 summoned.Add(twin.AgentId);
                 _logger.LogInformation("用户 {UserId} @ 自己召唤分身 {TwinId}（group={GroupId}，message={MessageId}）",
                     uid, twin.AgentId, msg.GroupId, msg.MessageId);
+            }
+        }
+
+        // 数字员工单聊直达（C1）：在 kind=direct 的两人私有单聊群里，真人群主发的任何普通消息都被视为
+        // 对另一端那唯一数字员工的“直达”触发（无需手动 @）；已在常规触发内的对端去掉，避免双重调用。
+        if (msg.SenderType != MemberType.Agent && _store.GetGroup(msg.GroupId)?.IsDirectChat == true)
+        {
+            var partnerRegs = _store.ListMembers(msg.GroupId)
+                .Where(m => m.MemberType == MemberType.Agent && m.MemberId != msg.SenderId)
+                .Select(m => _agents.ForGroupAgent(msg.GroupId, m.MemberId))
+                .Where(r => r is not null)
+                .Cast<AgentRegistration>()
+                .ToList();
+            foreach (var reg in partnerRegs)
+            {
+                triggered.RemoveAll(r2 => r2.AgentId == reg.AgentId);
+                InvokeAgentFor(reg, msg, mentioned: true, summoned: false); // 按“提及”语义必发言（C1：普通消息即对其直达）
             }
         }
 

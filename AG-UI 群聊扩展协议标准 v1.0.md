@@ -53,7 +53,7 @@
 |memberCount|number|是|当前成员总数|
 |createTime|number|是|创建时间戳（毫秒级）|
 |isPrivate|boolean|否|是否私密群（默认 false）。私密群的语义记忆**仅允许在群内被检索到**：智能体在其他群触发（scope=agent/all）时排除私密群内容，本群内触发不受影响|
-|kind|enum|否|知聚类型：`normal`（默认，公有 / 私有按 isPrivate 区分）/ `support`（客服知聚，见 §2.1.1）。存储于 `extra.kind`|
+|kind|enum|否|知聚类型：`normal`（默认，公有 / 私有按 isPrivate 区分）/ `support`（客服知聚，见 §2.1.1）/ `direct`（数字员工单聊：与该数字员工的一对一私有双人群，isPrivate 默认 true）。存储于 `extra.kind`|
 |isSupportCircle|boolean|否|是否客服知聚（等价 `kind == support`；冗余便于前端快速渲染）|
 |extra|object|否|业务自定义扩展字段|
 

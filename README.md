@@ -29,6 +29,7 @@
 - ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先**对服务端执行的技能冒烟自测 + 大模型自动修复**（最多 3 次）再落库，幂等不部分写入）并返回 `smoke[]`，UI 在创建后的通知中心展示；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
 - ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` / `dotnet`（C#）四类——`shell` / `http` / `dotnet`（可执行命令 / 外部请求 / 运行 C# 源码）**仅系统管理员可创建 / 修改 / 删除**，普通用户只能建纯提示词技能；但**运行现有 `dotnet` 技能对全体登录用户开放**（可试运行服务端 dotnet，或经数字员工 / 客户端执行由本机桥运行，无需管理员）。本机（client 执行）的 shell / dotnet 技能经内网桥 / 前端在本机执行（浏览器无法编译 C#，dotnet 客户端技能在触发者批准后由本机桥 `DotnetRunner` 执行）；技能库支持搜索（前端过滤）与批量删除；技能库「试运行」会先**自动建议一段代表性入参示例**（`POST /ag-ui/skills/{skillId}/suggest`）再执行；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（`dotnet` 仅系统管理员可得）
 - ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行（聊天规则与组织打造算法详述见 `docs/customer-service-and-org-builder.md`）
+- ✅ **数字员工单聊（`kind=direct`）**：从<b>数字员工管理列表</b>对该数字员工点「💬 私聊」，后端幂等地为该用户创建/复用与它的一对一<b>私有双人群</b>（`POST /ag-ui/agents/direct`）；不同用户与同一数字员工的单聊各自独立、互不可见（会话隔离），反复进入返回同一群（幂等）。单聊默认私密（`isPrivate=true`，语义记忆仅在本私群内可检索）。在单聊里发<b>普通（未 @）消息即视为对其直达触发</b>，无需手动 @（浏览器自动化用例 `tools/direct-chat-flow.mjs`，见 `tools/README-playwright.md`）
 - ✅ **平台级 RBAC**：SuperAdmin / Admin / Operator / User 四档平台角色；`Auth:SuperAdminUserIds`（或 `POST /ag-ui/admin/roles/{userId}` 由超级管理员在线授予）bootstrap，首个注册账号自举为 SuperAdmin → Admin（详见 `docs/RBAC.md`）
 - ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
 - ✅ **浏览器自动化工具**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服知聚」全链路并截图，见 `tools/README-playwright.md`）
@@ -57,6 +58,7 @@ tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑�
 tools/verify-hitl.mjs            # 人机交互（审批卡片）端到端验证脚本
 tools/verify-agent-import.mjs    # 智能体批量导入验证脚本
 tools/ui-orchestrate-flow.mjs    # Playwright 浏览器自动化：一键组织编排 → 创建客服知聚全链路 + 截图（见 tools/README-playwright.md）
+tools/direct-chat-flow.mjs       # Playwright 浏览器自动化：数字员工单聊（kind=direct）建/进入/复用 + 私密隔离与幂等核验（见 tools/README-playwright.md）
 tools/team-replace.mjs           # 团队级整批替换 / 反复覆盖（管理员）：删旧批 + 一键编排 apply 落新；加 `--name` 可对同一支反复改、始终只留最新一版（见 tools/README-team-replace.md）
 tools/README-playwright.md       # 上述编排自动化的安装 / 运行 / 退出码说明
 tools/README-team-replace.md     # 团队整批替换 / 反复修改同一支的操作与 plan.json 结构说明
@@ -318,7 +320,7 @@ HTTP API 的枚举字段（`memberType`/`role` 等）已配置字符串化（`us
 | 停用分身 | `POST /ag-ui/twin/disable` | 删除分身并退出全部群（需登录） |
 
 - 除注册 / 登录 / 用户目录外，均需携带令牌：`Authorization: Bearer <token>`（或 `?token=`）。
-- 密码以 **PBKDF2（SHA-256，10 万轮 + 随机盐）** 哈希存储，密码明文不落库；令牌为 32 字节随机数，存于进程内（`IUserStore`/会话均可替换为 Redis、数据库或 JWT）。
+- 密码以 **PBKDF2（SHA-256，10 万轮 + 随机盐）** 哈希存储，密码明文不落库；登录令牌为 32 字节随机数，**真实令牌仅驻留内存，落盘 / 入库一律存 SHA-256 哈希**（会话存储可按 `IUserStore` 替换为 Redis / 数据库 / JWT），并随持久化扩展区 `agui_sections` 跨重启保持（见下）。
 - 注册用户自动获得 `user_xxx` 身份，与群成员体系（memberId）直接复用，可被加入任意群。
 - 错误码：`USER_EXISTS`(409)、`USER_BAD_CREDENTIALS`(401)、`USER_UNAUTHORIZED`(401)、`USER_PASSWORD_INVALID`(400)、`USER_NOT_FOUND`(404)。
 - Web 前端启动进入登录 / 注册页，登录后右上角菜单可修改密码 / 资料 / 退出；登录页可勾选**「保持登录状态」**（除非退出登录，否则下次访问无需再次登录）；顶栏 **☀️ / 🌙** 按钮切换深色 / 浅色界面风格（选择持久化）。
@@ -398,7 +400,7 @@ apiKey 不回显（仅提示是否已配置）。未配置过模型时，登录�
 由服务端提取文本注入模型上下文（Word 取正文与表格段落、Excel 按工作表输出单元格、PowerPoint 取幻灯片文本、PDF 逐页提取；单文件截断 12K 字符），
 `image` 类（png / jpg / jpeg / gif / webp / bmp）在**图片理解（视觉）**开启时由服务端按字节 + MIME 读取，以 base64 多模态内容内联喂给视觉模型看图作答（`mock` 提供方 / 关闭 `Agents:VisionEnabled` 则仅按文本处理）；其余 `binary` 类携带文件名 / 大小 / 下载地址供模型感知。
 上传文件落盘 `data/uploads/`（与持久化快照同根，Docker 命名卷一并持久化），单文件上限 20 MB、单次最多 9 个；旧格式 `.doc` / `.xls` / `.ppt` 不在支持范围，请另存为 OOXML 或 PDF 后上传。
-**安全加固**：上传仅允许白名单扩展名（图片 png/jpg/jpeg/gif/webp/bmp；文本 txt/md/json/csv/yml 等；文档 pdf/docx/xlsx/pptx；zip；**拒绝 html/js/css/svg/xml 等脚本类**）；
+**安全加固**：上传仅允许白名单扩展名（图片 png/jpg/jpeg/gif/webp/bmp；音频（语音消息）mp3/wav/ogg/oga/m4a/aac/flac/opus/webm；文本 txt/md/json/csv/xml/yaml/toml 等；文档 pdf/docx/xlsx/pptx；zip），可执行 / 内联渲染脚本类 html/js/mjs/css/svg 等一律拒绝，防止同源存储型 XSS；
 下载需登录且调用者须为该附件所属群的成员，响应带 `X-Content-Type-Options: nosniff`，脚本类扩展名强制 `Content-Disposition: attachment` 下载（不内联渲染）；
 页面全局 CSP（`script-src 'self'` 等）+ `X-Frame-Options: DENY`。
 
@@ -497,7 +499,7 @@ public interface IAgentGateway
 mock 模式下对含「公告」「计算」「换算」的消息自动模拟工具调用流程。
 
 **知识库（Knowledge Base，RAG 知识文档）**：智能体可绑定若干<b>知识库</b>（`AgentDefinition.KnowledgeBaseIds`），
-知识库由用户创建并上传文档（txt/md/json/csv 与 docx/xlsx/pptx/pdf，复用附件文本提取）——文档切片（800 字符/片 + 100 重叠）
+知识库由用户创建并上传文档（txt/md/json/csv 与 docx/xlsx/pptx/pdf，复用附件文本提取）——文档切片（默认 4096 字符/片 + 512 重叠，可在 `Agents:Memory:KnowledgeChunkSize`/`KnowledgeChunkOverlap` 调整，换行 / 句末标点处切分）后向量化存入语义记忆向量表
 后向量化存入语义记忆向量表（GroupId 约定 `kb:{KbId}`，`sender_type='kb'`），回复前经 `MemoryContextProvider` 按绑定列表检索相关片段注入上下文，
 让智能体基于用户资料作答。**文档入库为异步处理**：上传后立即显示文档记录（`status=processing`），提取文本 / 切片 / 向量化在后台执行，
 前端每 2s 轮询状态——`ready`（已入库，显示切片数）或 `error`（显示失败原因）；处理中的文档可随时移除（丢弃未写入的向量），
@@ -723,7 +725,7 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 #### 编排计划中的客户端技能：本机一键执行全部
 
-数字员工在<b>编排计划</b>（`CoordinatorPlanning`，默认开启）里若一次规划出<b>多个需要在本机执行的客户端技能</b>
+数字员工在<b>编排计划</b>（`CoordinatorPlanning`，Docker 容器 / 桌面版随附默认开启，见配置表）里若一次规划出<b>多个需要在本机执行的客户端技能</b>
 （如 `ops_system_info` / `ops_disk_usage` / `ops_memory_cpu` …），网关会把它们合并成一张
 「💻 本机一键执行全部」确认卡：一次确认后，前端逐个通过本机桥执行并<b>逐条点亮计划卡</b>，
 所有结果回传后由数字员工<b>综合回归</b>给出结论。这样既保留了“问题 → 定计划 → 激活执行”的编排形态，

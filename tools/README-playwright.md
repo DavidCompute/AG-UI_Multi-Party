@@ -38,3 +38,24 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 - `1` = 任一步失败（控制台会打印失败原因，`screenshots/` 留有到失败前一步的截图）。
 
 > 前置：应用已用 Docker 部署在 `http://localhost:5200`，且账号密码有效（脚本里的 PASSWORD 与环境变量一致）。
+
+---
+
+## 数字员工单聊（kind=direct）UI 验证
+
+`direct-chat-flow.mjs` 验证“数字员工列表 → 💬 单聊 → 进入私有双人群并（可选）发普通消息即触发”这一新功能：
+
+1. 登录并创建一个临时数字员工；
+2. 在「数字员工管理」列表中该行点 💬（单聊），后端 `POST /ag-ui/agents/direct` 幂等建/复用彼此隔离的私有双人群；
+3. 管理窗关闭、前端切到该单聊；
+4. API 复核：该群出现在“我的知聚”、私密且成员数=2、且再次进入返回同一群（幂等）；
+5. 在聊天输入框发一条普通（不 @）消息，轮询是否有新的回复（C1 直达触发的可视化观测，属尽力而为）；
+6. 收尾解散单聊 + 删除临时数字员工（`KEEP=1` 可保留）。
+
+```bash
+cd tools && node direct-chat-flow.mjs                 # 有头（默认）
+cd tools && HEADLESS=1 node direct-chat-flow.mjs      # 无头
+```
+环境变量同上一脚本（`BASE_URL`/`USERNAME`/`PASSWORD`/`HEADLESS`/`KEEP`）。截图输出到 `tools/screenshots/`。
+
+> 前置：同样需要一个运行中的 Web 实例（如 `dotnet run --project src/AguiGroupChat.Web` 或对应 Docker）。若未配置 DeepSeek Key，请为单聊的对端用 `Agents:Provider=mock` 启动，便于第 5 步看到本地模拟回复。

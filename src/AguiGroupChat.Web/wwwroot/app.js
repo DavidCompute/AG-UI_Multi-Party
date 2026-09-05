@@ -799,9 +799,11 @@ function renderAgentList() {
       <div class="agent-cell agent-cell-owner">${agentOwnerName(a.ownerId)}</div>
       <div class="agent-cell agent-op-col">
         <button class="icon-btn" data-act="export" title="${escapeHtml(t("agent.exportTip"))}">📤</button>
+        <button class="icon-btn" data-act="chat" title="${escapeHtml(t("agent.chatTip"))}">💬</button>
         ${canManage ? `<button class="icon-btn" data-act="edit" title="${escapeHtml(t("agent.edit"))}">✏️</button><button class="icon-btn danger" data-act="del" title="${escapeHtml(t("agent.del"))}">🗑️</button>` : ""}
       </div>`;
     row.querySelector('[data-act="export"]').onclick = () => exportAgents([a], `${a.agentId}.json`);
+    row.querySelector('[data-act="chat"]').onclick = () => startDirectChat(a.agentId, a.nickname);
     if (canManage) {
       row.querySelector('[data-act="edit"]').onclick = () => { agentFormReturnFrom = null; openAgentForm(a.agentId); };
       row.querySelector('[data-act="del"]').onclick = (e) => confirmDeleteAgent(a, e.currentTarget);
@@ -809,6 +811,40 @@ function renderAgentList() {
     const selCb = row.querySelector(".agent-sel-cb");
     if (selCb) selCb.onchange = () => { if (selCb.checked) selectedAgents.add(a.agentId); else selectedAgents.delete(a.agentId); updateAgentBatchStatus(); };
     el.appendChild(row);
+  }
+}
+
+/* ============ 与数字员工单聊（kind=direct）：数字员工列表点 💬 → 建/复用双方独立私人群 → 直接进入 ============ */
+
+/**
+ * 在数字员工列表发起 / 进入单聊。后端 POST /ag-ui/agents/direct 幂等：为该 (当前用户, agentId)
+ * 建或复用**彼此隔离**的私有双人群（不同用户与同一数字员工的单聊各自独立互不可见）。
+ * 成功后刷新“我的知聚”并直接打开该群做普通聊天——私聊里发普通消息即对其直达触发（无需手动 @）。
+ */
+async function startDirectChat(agentId, nickname) {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  if (!agentId) return;
+  const btn = document.activeElement;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/ag-ui/agents/direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ agentId }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("agent.chatFail"))); return; }
+    const gid = data?.groupId;
+    if (!gid) { toast(t("agent.chatFail")); return; }
+    // 关掉管理窗，进入单聊会话（普通群流转；本群已在“我的知聚”内，订阅 + 打开由下方端口处理）
+    $("agentModal").classList.add("hidden");
+    await loadGroups();
+    await selectGroup(gid);
+    toast(t("agent.chatOpened", { name: nickname || data?.agentId || agentId }));
+  } catch {
+    toast(t("agent.chatFail"));
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

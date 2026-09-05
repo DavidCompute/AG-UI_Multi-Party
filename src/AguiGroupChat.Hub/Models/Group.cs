@@ -29,17 +29,30 @@ public sealed class Group
                 System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String => je.GetString(),
                 _ => k.ToString(),
             };
-            return s == "support" ? GroupKind.Support : GroupKind.Normal;
+            return s switch
+            {
+                "support" => GroupKind.Support,
+                "direct" => GroupKind.Direct,
+                _ => GroupKind.Normal,
+            };
         }
         set
         {
             if (Extra is null) return; // Extra 在初始值为 null 时不支持原地写入（由创建路径预置）
-            Extra["kind"] = value == GroupKind.Support ? "support" : "normal";
+            Extra["kind"] = value switch
+            {
+                GroupKind.Support => "support",
+                GroupKind.Direct => "direct",
+                _ => "normal",
+            };
         }
     }
 
     /// <summary>是否客服知聚（客服可见全部消息，非客服成员只见自己的会话）。</summary>
     public bool IsSupportCircle => Kind == GroupKind.Support;
+
+    /// <summary>是否单聊（用户 ↔ 数字员工的私有双人群）。单聊默认私密、不对外展示。</summary>
+    public bool IsDirectChat => Kind == GroupKind.Direct;
 
     /// <summary>
     /// 是否私密群。私密群的语义记忆只允许在群内检索（智能体在其他群触发时
