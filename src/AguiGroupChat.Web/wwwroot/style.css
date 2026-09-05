@@ -1652,13 +1652,35 @@ button { white-space: nowrap; }
 .agent-owner.me { color: var(--accent); font-weight: 600; }
 
 /* 技能库弹窗 */
-.skill-modal { width: 900px; max-width: 94vw; }
+/* 技能库/编辑弹窗：固定于视口内，超高由弹窗内部滚动（而非依赖遮罩整页滚） */
+.skill-modal {
+  width: 900px; max-width: 94vw;
+  display: flex; flex-direction: column;
+  max-height: calc(100vh - 48px); overflow: hidden;
+}
+.skill-modal .modal-title { flex: none; }
+.skill-modal > .form-hint { flex: none; }
+#skillListView {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#skillListView .skill-grid-head { flex: none; }
+#skillListView .skill-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+}
+#skillListView .modal-actions { flex: none; margin-top: 12px; }
+#skillFormView {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px;
+}
+#skillFormView .modal-actions {
+  position: sticky; bottom: 0; background: var(--panel); padding-top: 6px; z-index: 1;
+}
 .skill-grid-head {
   display: grid; grid-template-columns: 20px 1.2fr .7fr 2fr 90px; gap: 10px; padding: 8px 12px;
   font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 600;
 }
+/* 列表高度随弹窗填充（滚动见 #skillListView .skill-list） */
 .skill-sel-col { display: flex; align-items: flex-start; }
-.skill-list { max-height: 52vh; overflow-y: auto; }
 .skill-list-item {
   display: grid; grid-template-columns: 20px 1.2fr .7fr 2fr 90px; gap: 10px; align-items: center;
   padding: 10px 12px; border-bottom: 1px solid rgba(128,141,180,.12);
