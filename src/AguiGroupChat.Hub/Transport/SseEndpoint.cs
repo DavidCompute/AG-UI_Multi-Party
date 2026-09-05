@@ -100,29 +100,33 @@ public sealed class SseEndpoint
             return;
         }
 
+        // 独立的可取消源：链接 RequestAborted（客户端断开即终止），且能被 ConnectionManager 在会话吊销 / 禁用 / 改密时主动 Cancel。
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        connection.AbortSource = cts;
+
         context.Response.ContentType = "text/event-stream";
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers.Connection = "keep-alive";
-        await context.Response.Body.FlushAsync(context.RequestAborted);
+        await context.Response.Body.FlushAsync(cts.Token);
         _logger.LogInformation("SSE 连接建立: {ConnectionId} {MemberId}", connection.ConnectionId, memberId);
 
         try
         {
-            await _hub.OnMemberConnectedAsync(memberId, context.RequestAborted);
+            await _hub.OnMemberConnectedAsync(memberId, cts.Token);
             await channel.Writer.WriteAsync(AguiJson.Serialize(new GroupConnectedEvent
             {
                 ConnectionId = connection.ConnectionId,
                 MemberId = memberId,
                 Transport = "sse",
                 Timestamp = _hub.NowMs,
-            }), context.RequestAborted);
+            }), cts.Token);
 
             if (groupIds.Length > 0)
-                await _hub.SubscribeAsync(connection, groupIds, context.RequestAborted);
+                await _hub.SubscribeAsync(connection, groupIds, cts.Token);
 
-            await WriteLoopAsync(context.Response, channel, context.RequestAborted);
+            await WriteLoopAsync(context.Response, channel, cts.Token);
         }
-        catch (OperationCanceledException) { /* 客户端断开 */ }
+        catch (OperationCanceledException) { /* 客户端断开或服务端终止 */ }
         finally
         {
             _connections.Unregister(connection.ConnectionId);

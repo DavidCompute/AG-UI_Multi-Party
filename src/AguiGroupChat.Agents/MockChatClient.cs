@@ -68,6 +68,14 @@ public sealed class MockChatClient : IChatClient
     {
         var lastUserText = messages.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "";
 
+        // 协调计划的“递归补查/综合裁决”步骤：提示词要求模型只输出单行决策 JSON（判断信息是否已充分）、
+        // 充分时在 answer 里给出面向用户的最终答复。mock 直接判定充分并综合“已取回的事实”作答，
+        // 驱动“执行多个客户端技能 → 综合结论”端到端闭环；否则会让容错解析把内部指令片段当成最终答复泄漏给用户。
+        if (lastUserText.Contains("只输出这一行 JSON", StringComparison.Ordinal))
+        {
+            return [$"{{\"needsMore\":false,\"gather\":[],\"answer\":\"本机体检完成：主机名是 {System.Environment.MachineName}，系统信息已一并收集。\"}}"];
+        }
+
         // 语境发言决策（Contextual 模式）：按简单规则返回 YES/NO，便于本地演示与测试
         if (lastUserText.Contains("__AGUI_DECIDE__", StringComparison.Ordinal))
         {
@@ -137,6 +145,11 @@ public sealed class MockChatClient : IChatClient
     {
         if (!_enableTools) return null;
         var lastUserText = messages.LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "";
+
+        // 递归补查/综合裁决提示词（含“只输出这一行 JSON”）：不要在此处触发任何工具/技能调用，
+        // 应回到 BuildChunks 走决策 JSON 分支，避免 mock 把协调裁决误判为又一次客户端技能调用。
+        if (lastUserText.Contains("只输出这一行 JSON", StringComparison.Ordinal))
+            return null;
 
         // 交互决策恢复：批准 → 工具已在恢复阶段执行（历史含 FunctionResultContent）；拒绝 → 决策仍保留在消息中
         var results = messages.SelectMany(m => m.Contents).OfType<FunctionResultContent>().ToList();

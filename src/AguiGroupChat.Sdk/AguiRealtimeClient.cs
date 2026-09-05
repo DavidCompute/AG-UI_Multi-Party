@@ -41,7 +41,7 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
     private CancellationTokenSource? _cts;
     private readonly Dictionary<string, List<Delegate>> _handlers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<Action<AguiEvent>>> _rawHandlers = new(StringComparer.Ordinal);
-    private readonly object _sendLock = new();
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
     private int _disposed;
     private bool _stopRequested;
 
@@ -202,6 +202,7 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
         }
         _ws?.Dispose();
         _cts?.Dispose();
+        _sendGate.Dispose();
     }
 
     // ---------------- 发送 ----------------
@@ -209,17 +210,23 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
     private async Task SendEventAsync(string type, object payload, CancellationToken ct)
     {
         ThrowIfDisposed();
-        if (!IsWebSocket || _ws is null || _ws.State != WebSocketState.Open)
+        if (!IsWebSocket || _ws is null)
             throw new InvalidOperationException("WebSocket 未连接，无法上行事件");
-        lock (_sendLock)
+        var envelope = WithType(type, payload);
+        var bytes = Encoding.UTF8.GetBytes(AguiJson.Serialize(envelope));
+        // 全量串行化真正的网络发送：锁（SemaphoreSlim）须覆盖 SendAsync 本身，
+        // 否则两条并发上行会同时调用线程不安全的 ClientWebSocket.SendAsync（禁止并发发送）。
+        await _sendGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
             if (_ws.State != WebSocketState.Open)
                 throw new InvalidOperationException("WebSocket 已断开");
+            await _ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
         }
-        var envelope = WithType(type, payload);
-        var json = AguiJson.Serialize(envelope);
-        var bytes = Encoding.UTF8.GetBytes(json);
-        await _ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+        finally
+        {
+            _sendGate.Release();
+        }
     }
 
     private static object WithType(string type, object payload)
@@ -237,6 +244,7 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
     {
         var buffer = new byte[64 * 1024];
         var decoder = new UTF8Encoding(false, true).GetDecoder();
+        Exception? reason = null;
         try
         {
             while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
@@ -255,13 +263,14 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
                 Dispatch(sb.ToString());
             }
         }
-        catch (OperationCanceledException) { }
-        catch (WebSocketException ex) { if (!_stopRequested) Disconnected?.Invoke(ex); return; }
-        catch (Exception ex) { if (!_stopRequested) Disconnected?.Invoke(ex); return; }
+        catch (OperationCanceledException) { /* 主动关闭 / 取消：normal 断连，正常通知一次（ex=null） */ }
+        catch (WebSocketException ex) { reason = ex; }
+        catch (Exception ex) { reason = ex; }
         finally
         {
+            // 只通知一次：正常关闭 ex=null，意外断连带原因。避免 catch + finally 各触发一次造成“双回调”。
             if (!_stopRequested)
-                Disconnected?.Invoke(null);
+                Disconnected?.Invoke(reason);
         }
     }
 
@@ -282,6 +291,7 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
         var token = Token ?? _options.TokenProvider?.Invoke();
         if (!string.IsNullOrEmpty(token))
             client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        Exception? reason = null;
         try
         {
             await using var stream = await client.GetStreamAsync(uri, ct).ConfigureAwait(false);
@@ -300,12 +310,13 @@ public sealed class AguiRealtimeClient : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { if (!_stopRequested) Disconnected?.Invoke(ex); }
+        catch (OperationCanceledException) { /* 主动关闭 / 取消：normal 断连，正常通知一次（ex=null） */ }
+        catch (Exception ex) { reason = ex; }
         finally
         {
+            // 只通知一次：正常关闭 ex=null，意外断连带原因。避免 catch + finally 各触发一次造成“双回调”。
             if (!_stopRequested)
-                Disconnected?.Invoke(null);
+                Disconnected?.Invoke(reason);
         }
     }
 

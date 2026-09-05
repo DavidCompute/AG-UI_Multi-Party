@@ -7,6 +7,7 @@ using AguiGroupChat.Web;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Hosting;
 
 // 关闭出站 HTTP 请求的 W3C trace 传播（不附加 traceparent 头）：部分 API 网关（如 DeepSeek）
 // 对 traceparent 校验严格，曾出现带该头的请求被网关以 invalid header 拒绝（请求头被截断畸形）。
@@ -30,6 +31,9 @@ builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredS
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 200L * 1024 * 1024);
+// 关键：Kestrel 自身有独立于 multipart 解析的请求体上限（默认 30MB），仅在 FormOptions 放宽 200MB 仍会被 Kestrel
+// 以 413 先拦下——必须同步放宽 Kestrel.MaxRequestBodySize，>30MB 的 /import /upload 才真正可用。
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 200L * 1024 * 1024);
 
 // HTTP API 枚举字符串化（与协议 §2 一致）：请求/响应均接受 user/agent、owner/admin/normal 等字符串枚举。
 // 统一 camelCase（JsonStringEnumConverter 带 naming policy），与 WS 事件（AguiJson）序列化一致，

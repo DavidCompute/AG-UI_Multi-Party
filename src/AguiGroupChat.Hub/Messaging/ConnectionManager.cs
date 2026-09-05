@@ -137,6 +137,17 @@ public sealed class ConnectionManager
     public IReadOnlyList<HubConnection> ConnectionsOf(string memberId)
         => _connections.Values.Where(c => c.MemberId == memberId).ToList();
 
+    /// <summary>服务端主动终止某成员的全部活跃实时连接（禁用 / 改密 / 重置 / 登出后吊起“在线即可继续操作”的会话）。
+    /// 仅对已设置 <see cref="HubConnection.AbortSource"/> 的真实 WS/SSE 连接生效；测试替身（无该源）不受影响。</summary>
+    public void AbortConnectionsOf(string memberId)
+    {
+        if (string.IsNullOrEmpty(memberId)) return;
+        foreach (var c in ConnectionsOf(memberId))
+        {
+            try { c.AbortSource?.Cancel(); } catch { /* 已取消：忽略 */ }
+        }
+    }
+
     /// <summary>某成员当前活跃的连接数（用于在线状态判定）。</summary>
     public int MemberConnectionCount(string memberId)
         => _memberConnections.TryGetValue(memberId, out var c) ? c : 0;

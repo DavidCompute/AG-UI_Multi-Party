@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using AguiGroupChat.Hub.Infra;
+using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Persistence;
@@ -20,6 +21,8 @@ public sealed class AuthService
     private readonly ChangeHub? _changes;
     private readonly ILogger<AuthService> _logger;
     private readonly ISessionStore _sessions;
+    // 服务端主动终止实时连接（可选注入；为空时跳过——既有测试构造不依赖它）
+    private readonly ConnectionManager? _connections;
 
     // 登录失败限速：按「IP + 用户名」组合键计数，窗口内失败次数超限后临时拒绝（防暴力破解）。
     // 组合键防「同一 IP 刷不同用户名绕过单用户名限速」的 DoS；纯 username 维度会被分布式小号批量绕开。
@@ -31,7 +34,7 @@ public sealed class AuthService
     private static readonly string DummySalt = Convert.ToBase64String([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10]);
     private static readonly string DummyHash = Convert.ToBase64String([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30]);
 
-    public AuthService(IUserStore store, AuthOptions options, TimeProvider time, ILogger<AuthService> logger, ChangeHub? changes = null, ISessionStore? sessions = null)
+    public AuthService(IUserStore store, AuthOptions options, TimeProvider time, ILogger<AuthService> logger, ChangeHub? changes = null, ISessionStore? sessions = null, ConnectionManager? connections = null)
     {
         _store = store;
         _options = options;
@@ -39,6 +42,7 @@ public sealed class AuthService
         _logger = logger;
         _changes = changes;
         _sessions = sessions ?? new InMemorySessionStore();
+        _connections = connections;
     }
 
     /// <summary>
@@ -194,11 +198,17 @@ public sealed class AuthService
         return user;
     }
 
-    /// <summary>退出登录：吊销指定令牌。</summary>
+    /// <summary>退出登录：吊销指定令牌，并终止该账号已建立的实时连接（在线即登出）。</summary>
     public void Logout(string? token)
     {
-        if (!string.IsNullOrEmpty(token) && _sessions.Remove(HashToken(token)))
+        if (string.IsNullOrEmpty(token)) return;
+        var key = HashToken(token);
+        var session = _sessions.TryGet(key);
+        if (_sessions.Remove(key))
+        {
             _changes?.Notify();
+            if (session is not null) _connections?.AbortConnectionsOf(session.UserId);
+        }
     }
 
     /// <summary>修改密码：校验旧密码后更新，并吊销该用户全部旧会话（需重新登录）。</summary>
@@ -225,6 +235,8 @@ public sealed class AuthService
             _logger.LogInformation("用户 {UserId} 修改密码，已吊销 {Count} 个会话", userId, invalidated);
             _changes?.Notify();
         }
+        // 改密后立即使该账号已建实时连接掉线（其会话已全部吊销）
+        if (invalidated > 0) _connections?.AbortConnectionsOf(userId);
     }
 
     /// <summary>管理员禁用 / 启用账号：禁用时立即吊销该用户全部会话（在线即登出）。</summary>
@@ -270,6 +282,8 @@ public sealed class AuthService
             _logger.LogInformation("用户 {UserId} 已吊销 {Count} 个会话", userId, invalidated);
             _changes?.Notify();
         }
+        // 会话吊销（禁用 / 重置 / 改密沿用）后，该账号已建实时连接一并终止
+        if (invalidated > 0) _connections?.AbortConnectionsOf(userId);
     }
 
     /// <summary>更新资料（昵称 / 头像 / 个人记忆开关），返回更新后的账号。昵称 / 头像带长度上限防存储 DoS。</summary>

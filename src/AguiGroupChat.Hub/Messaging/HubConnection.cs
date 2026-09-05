@@ -18,6 +18,9 @@ public sealed class HubConnection
 
     public required Func<string, CancellationToken, Task> Sender { get; init; }
 
+    /// <summary>服务端取消源：吊销 / 禁用 / 改密等会话失效事件用它主动终止本连接（由端点设置，缺省为空=测试替身不断连）。</summary>
+    public CancellationTokenSource? AbortSource { get; set; }
+
     private readonly ConcurrentDictionary<string, byte> _subscribedGroups = new();
 
     public bool IsSubscribed(string groupId) => _subscribedGroups.ContainsKey(groupId);

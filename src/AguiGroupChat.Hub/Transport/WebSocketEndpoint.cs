@@ -106,6 +106,7 @@ public sealed class WebSocketEndpoint
         _logger.LogInformation("WebSocket 连接建立: {ConnectionId} {MemberId}", connection.ConnectionId, memberId);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        connection.AbortSource = cts; // 让 ConnectionManager 可在会话吊销 / 禁用 / 改密时主动终止本连接
         try
         {
             await _hub.OnMemberConnectedAsync(memberId, cts.Token);
