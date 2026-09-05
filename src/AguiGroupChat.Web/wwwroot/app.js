@@ -1775,6 +1775,10 @@ function openAgentForm(agentId) {
   $("afBridgeToken").value = "";
   $("afPersonalMemory").checked = !!a?.personalMemoryEnabled;
   $("afIsPrivate").checked = !!a?.isPrivate;
+  // 角色级执行阶段禁用覆盖（勾选 = 本角色禁用该阶段）
+  $("afDisableBridge").checked = !!a?.disableBridge;
+  $("afDisableRelay").checked = !!a?.disableRelay;
+  $("afDisableOrgRoute").checked = !!a?.disableOrgRoute;
   // 可复用技能（技能库）：回显挂载 + 异步加载技能库选项
   agentSkillDefIds = [...(a?.skillDefIds || [])];
   if (state.token && !skillList.length) loadSkills().then(() => renderAgentSkillDefPicks());
@@ -1827,6 +1831,10 @@ async function saveAgent() {
     escalationAgentId: (agentList.find((x) => x.agentId === editingAgentId)?.escalationAgentId) || null,
     // 可复用技能：技能库引用（SkillDefIds）
     skillDefIds: [...agentSkillDefIds],
+    // 角色级执行阶段禁用覆盖
+    disableBridge: $("afDisableBridge").checked,
+    disableRelay: $("afDisableRelay").checked,
+    disableOrgRoute: $("afDisableOrgRoute").checked,
   };
   if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）
@@ -4647,23 +4655,28 @@ async function openAdminModal() {
   switchAdminTab("users");
 }
 
-/** 管理员弹窗 tab 切换：用户管理 / 用量统计。 */
+/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 配置治理 / 执行参数。 */
 function switchAdminTab(tab) {
   const users = tab === "users";
   const usage = tab === "usage";
   const conf = tab === "config";
+  const exec = tab === "execution";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabConfig").classList.toggle("on", conf);
+  $("adminTabExec").classList.toggle("on", exec);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminConfigView").classList.toggle("hidden", !conf);
+  $("adminExecView").classList.toggle("hidden", !exec);
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsers();
   } else if (usage) {
     $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsage();
+  } else if (exec) {
+    loadExecutionConfig();
   } else {
     loadConfigGovernance();
   }
@@ -4763,6 +4776,82 @@ async function saveConfigGovernance() {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(errMsg(data, t("common.saveFail", { err: res.status }))); return; }
     toast(t("admin.configSaved"));
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+/* 执行参数（ExecutionOptions）：拉取 GET /ag-ui/admin/execution 回填表单。 */
+async function loadExecutionConfig() {
+  try {
+    const res = await fetch("/ag-ui/admin/execution", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { toast(errMsg(d, "执行参数读取失败（HTTP " + res.status + "）")); return; }
+    applyExec(d);
+  } catch { toast(t("admin.execLoadFail")); }
+}
+
+function applyExec(d) {
+  if (!d) return;
+  const num = (v) => (v === null || v === undefined ? "" : String(v));
+  setCfg("efStreamTimeoutMinutes", num(d.streamTimeoutMinutes));
+  setCfg("efMaxModelAttempts", num(d.maxModelAttempts));
+  setCfg("efInteractionTtlMinutes", num(d.interactionTtlMinutes));
+  setCfg("efSessionLockTtlMinutes", num(d.sessionLockTtlMinutes));
+  setCfg("efApprovedSkillTtlMinutes", num(d.approvedSkillTtlMinutes));
+  setCfg("efSessionLockMaxEntries", num(d.sessionLockMaxEntries));
+  setCfg("efCoordinatorPlanMaxItems", num(d.coordinatorPlanMaxItems));
+  setCfg("efCoordinatorPlanMaxSteps", num(d.coordinatorPlanMaxSteps));
+  setCfg("efMaxRecursiveRounds", num(d.maxRecursiveRounds));
+  setCfg("efMaxRouteDepth", num(d.maxRouteDepth));
+  setCfg("efMaxInteractionRounds", num(d.maxInteractionRounds));
+  setCfg("efExecutionOrder", (d.executionOrder || []).join(", "));
+  const el = $("efExecutionOrder");
+  el.placeholder = (d.executionOrder && d.executionOrder.length ? d.executionOrder : []).join(",") || "bridge,pipeline,relay,org_route,streaming";
+  setCfgBool("efEnableBridge", d.enableBridge);
+  setCfgBool("efEnablePipeline", d.enablePipeline);
+  setCfgBool("efEnableRelay", d.enableRelay);
+  setCfgBool("efEnableOrgRoute", d.enableOrgRoute);
+}
+
+/** 收集执行参数表单 → 请求体（POST 全量提交，供服务端 Normalize 后回填归一化值）。 */
+function collectExec() {
+  const order = ($("efExecutionOrder").value || "")
+    .split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
+  return {
+    streamTimeoutMinutes: numOrNull("efStreamTimeoutMinutes"),
+    maxModelAttempts: numOrNull("efMaxModelAttempts"),
+    interactionTtlMinutes: numOrNull("efInteractionTtlMinutes"),
+    sessionLockTtlMinutes: numOrNull("efSessionLockTtlMinutes"),
+    approvedSkillTtlMinutes: numOrNull("efApprovedSkillTtlMinutes"),
+    sessionLockMaxEntries: numOrNull("efSessionLockMaxEntries"),
+    coordinatorPlanMaxItems: numOrNull("efCoordinatorPlanMaxItems"),
+    coordinatorPlanMaxSteps: numOrNull("efCoordinatorPlanMaxSteps"),
+    maxRecursiveRounds: numOrNull("efMaxRecursiveRounds"),
+    maxRouteDepth: numOrNull("efMaxRouteDepth"),
+    maxInteractionRounds: numOrNull("efMaxInteractionRounds"),
+    executionOrder: order,
+    enableBridge: $("efEnableBridge").checked,
+    enablePipeline: $("efEnablePipeline").checked,
+    enableRelay: $("efEnableRelay").checked,
+    enableOrgRoute: $("efEnableOrgRoute").checked,
+  };
+}
+
+async function saveExecutionConfig() {
+  const btn = $("efSave");
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = t("common.saving");
+  try {
+    const res = await fetch("/ag-ui/admin/execution", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify(collectExec()),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("common.saveFail", { err: res.status }))); return; }
+    // 用服务端归一化后的生效值回填（会补 streaming 至末、剔除非法值）
+    applyExec(data && data.execution ? data.execution : null);
+    toast(t("admin.execSaved"));
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }
@@ -7111,8 +7200,11 @@ function init() {
   $("adminTabUsers").onclick = () => switchAdminTab("users");
   $("adminTabUsage").onclick = () => switchAdminTab("usage");
   $("adminTabConfig").onclick = () => switchAdminTab("config");
+  $("adminTabExec").onclick = () => switchAdminTab("execution");
   $("cfgSave").onclick = saveConfigGovernance;
   $("cfgReload").onclick = loadConfigGovernance;
+  $("efSave").onclick = saveExecutionConfig;
+  $("efReload").onclick = loadExecutionConfig;
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
   $("memSearchBtn").onclick = () => loadMemoryList(0);

@@ -312,6 +312,23 @@
             <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.isPrivateHint">（默认关闭。开启后仅创建者可将它拉进知聚，其他用户看不到也无法使用）</span>
           </div>
           </div>
+
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectExecStages" style="margin-top:8px"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.execStages">执行阶段（角色级禁用覆盖）</span></div>
+          <div class="form-section-body" id="afSectExecStages">
+          <p class="form-hint" style="margin-bottom:8px" data-i18n-html="agent.form.execStages.hint">可针对<b>本角色</b>单独关闭某一执行阶段（默认跟随平台「管理员 → 执行参数」中的平台级开关）。勾选＝本角色<b>禁用</b>该阶段。</p>
+          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="afDisableBridge" type="checkbox" />
+            <label for="afDisableBridge" style="margin:0;cursor:pointer" data-i18n="agent.form.disableBridge">🚫 禁用本角色的 AG-UI 桥接（bridge）</label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="afDisableRelay" type="checkbox" />
+            <label for="afDisableRelay" style="margin:0;cursor:pointer" data-i18n="agent.form.disableRelay">🚫 禁用本角色的交接委托（relay）</label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input id="afDisableOrgRoute" type="checkbox" />
+            <label for="afDisableOrgRoute" style="margin:0;cursor:pointer" data-i18n="agent.form.disableOrgRoute">🚫 禁用本角色的组织路由（org_route）</label>
+          </div>
+          </div>
         </div>
         <div class="modal-actions">
           <button id="afCancel" class="btn-ghost" data-i18n="agent.form.cancel">取消</button>
@@ -1030,6 +1047,7 @@
         <button id="adminTabUsers" class="chip-btn admin-tab on" data-i18n="admin.tabUsers">用户管理</button>
         <button id="adminTabUsage" class="chip-btn admin-tab" data-i18n="admin.tabUsage">用量统计</button>
         <button id="adminTabConfig" class="chip-btn admin-tab" data-i18n="admin.tabConfig">配置治理</button>
+        <button id="adminTabExec" class="chip-btn admin-tab" data-i18n="admin.tabExec">执行参数</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1069,6 +1087,33 @@
         <div class="modal-actions" style="padding-top:8px">
           <button id="cfgReload" class="btn-ghost" data-i18n="admin.reload">刷新</button>
           <button id="cfgSave" class="send" data-i18n="admin.save">保存</button>
+        </div>
+      </div>
+      <div id="adminExecView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="admin.execHint">调整数字员工<b>运行时执行参数</b>（时序 / 重试 / 轮次 / 阶段开关），保存后立即对后续调用生效并持久化（无需改配置 / 重启）。角色级禁用覆盖在「数字员工管理 → 编辑 → 执行阶段」中维护。</p>
+        <div class="form-group"><label data-i18n="admin.execOrder">执行阶段顺序（逗号分隔，白名单：bridge / pipeline / relay / org_route）</label><input id="efExecutionOrder" class="modal-input" placeholder="bridge,pipeline,relay,org_route,streaming" /></div>
+        <div class="config-checks">
+          <label class="cfg-check"><input id="efEnableBridge" type="checkbox" /> <span data-i18n="admin.execBridge">启用桥接阶段（bridge）</span></label>
+          <label class="cfg-check"><input id="efEnablePipeline" type="checkbox" /> <span data-i18n="admin.execPipeline">启用流水线阶段（pipeline）</span></label>
+          <label class="cfg-check"><input id="efEnableRelay" type="checkbox" /> <span data-i18n="admin.execRelay">启用交接阶段（relay）</span></label>
+          <label class="cfg-check"><input id="efEnableOrgRoute" type="checkbox" /> <span data-i18n="admin.execOrgRoute">启用组织路由阶段（org_route）</span></label>
+        </div>
+        <div class="config-grid">
+          <div class="form-group"><label data-i18n="admin.exec.StreamTimeoutMinutes">流式超时（分钟）</label><input id="efStreamTimeoutMinutes" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.MaxModelAttempts">单阶段最大模型尝试</label><input id="efMaxModelAttempts" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.InteractionTtlMinutes">交互 TTL（分钟）</label><input id="efInteractionTtlMinutes" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.SessionLockTtlMinutes">会话锁 TTL（分钟）</label><input id="efSessionLockTtlMinutes" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.ApprovedSkillTtlMinutes">已批技能授权 TTL（分钟）</label><input id="efApprovedSkillTtlMinutes" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.SessionLockMaxEntries">会话锁最大条目</label><input id="efSessionLockMaxEntries" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.CoordinatorPlanMaxItems">协调计划最大条目</label><input id="efCoordinatorPlanMaxItems" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.CoordinatorPlanMaxSteps">协调计划最大步骤</label><input id="efCoordinatorPlanMaxSteps" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.MaxRecursiveRounds">递归补查最大轮数</label><input id="efMaxRecursiveRounds" class="modal-input" type="number" min="0" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.MaxRouteDepth">组织路由最大深度</label><input id="efMaxRouteDepth" class="modal-input" type="number" min="0" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.MaxInteractionRounds">最大交互轮数</label><input id="efMaxInteractionRounds" class="modal-input" type="number" min="1" /></div>
+        </div>
+        <div class="modal-actions" style="padding-top:8px">
+          <button id="efReload" class="btn-ghost" data-i18n="admin.reload">刷新</button>
+          <button id="efSave" class="send" data-i18n="admin.save">保存</button>
         </div>
       </div>
       <div class="modal-actions">
