@@ -91,6 +91,79 @@ sequenceDiagram
 
 ---
 
+## 4) 组织化路由 → 计划 → 递归综合（分层细图 / Org routing → plan → recursive synthesize）
+
+```mermaid
+flowchart TD
+    cell["触发语义=提及 且 (有 AssignmentIds / EscalationAgentId 或策划可用)"]
+    cell --> cap{CoordinatorPlanning && 非组织落库员(未挂 org_deploy)?}
+    cap -- 否 --> fallback["回退：递归指派 / 提升 (ResolveRoute)"]
+    cap -- 是 --> build["BuildCoordinatedPlanAsync：列可达下属 + 可调技能 → 路由模型产出结构化 steps (最多 N 步)"]
+    build --> hasPlan{拿到计划?}
+    hasPlan -- 空/失败 --> fallback
+    hasPlan -- 有计划 --> startStream["广播计划卡(点亮待执行)"]
+
+    startStream --> step1{逐条 step.Action}
+    step1 -- dispatch --> subRun["子数字员工一次性 run，结果级联 return(不递归下钻，防无限深)"]
+    step1 -- 服务端技能 --> skRun["SkillRunner 执行(server 沙箱)；含 SkillAutoFixer 自修（至多 3 次）"]
+    step1 -- 客户端技能 --> batch["合并成「本机一键执行全部 / 浏览器或桥」→ 回传结果逐个点亮"]
+    subRun --> cascade(级联为下一 step 输入 working)
+    skRun --> cascade
+    batch --> cascade
+    cascade --> more{还有 step?}
+    more -- 是 --> step1
+    more -- 否 --> rs["最终·递归综合 ExecuteRecursiveAnswerAsync"]
+
+    rs --> enough{信息足够 needsMore=false?}
+    enough -- 否 --> pick{还需补查 skill / dispatch?}
+    pick -- 有 --> runMore["已执行集合去重 → 补查一轮"]
+    enough -- 是 --> done["给最终答复（正文 + 计划卡 + 思考 + 技能链 → EndAgentMessage）"]
+    fallback -- 解答/代答/无解:见回退提示 --> done
+```
+
+> 说明：递归补查有轮次上限（`MaxRecursiveRounds`）；“已执行技能/已带回结果的下属”会去重，避免同一技能被重复调用两次。客户端技能在本机执行也必须走批准/桥，服务端绝不当 bash 误跑此类 PowerShell 技能。
+
+---
+
+## 5) 驳回 / 超时 / 失败重试 分支（Reject · timeouts · retry branches）
+
+```mermaid
+flowchart TB
+    stream["模型流式循环 attempt loop (MaxModelAttempts 重试)"]
+    stream --> tr{流式抛异常?}
+    tr -- 否 --> done2["正常结束 / 审批中断 → 结束本 run 收尾"]
+    tr -- "可重试 429 / 5xx / 连接重置" --> backoff["ResetAgentContent 清半截 + 指数退避(1.5*attempt) 重试"]
+    tr -- 其它异常 --> describe["脱敏 DescribeModelError 写群错误事件(不改库)"]
+    backoff --> stream
+
+    done2 --> hitl{"遇需审批/客户端工具?"}
+    hitl -- 否 --> finish[完成广播：正文/计划/思考/链]
+    hitl -- 是 --> card["下发人机交互卡（仅触发者可决策）"]
+    card --> dec{谁、如何决策?}
+    dec -- 非触发者决策 --> reject0["一律拒绝：仅触发者可决"]
+    dec -- 触发者 批准 --> resume["恢复继续 ResumeRunAsync"]
+    dec -- 触发者 拒绝 --> reject["拒绝该工具：告诉模型并给出结果，执行类不改库；视内容结束或继续"]
+    dec -- 超时无决策(约 10 分钟 TTL) --> purge["周期清理 + 安全结束该消息(SafeEnd)"]
+
+    card -- 客户端批量 --> batchT{"批量执行"}
+    batchT -- 桥在线且免确认 --> tun["ExecuteForClientAsync 执行"]
+    batchT -- 其他 --> cf{等待前端回传}
+    cf -- 批准回传 --> tun
+    cf -- 超时/取消/未回传 --> timedOut["视为未执行：以“本机未执行/已取消”文本注入→仍可做综合"]
+    tun -- 桥超时/失败 --> tunfail["以‘未返回/超时’文案注入模型继续"]
+
+    subgraph extraRetry["其它失败上的自重试"]
+        orgCommit["org_commit 落库失败 → 按报错修 JSON 并用同一 teamKey 重试(至成功或明确原因)"]
+        skillAuto["服务端技能自检/运行失败 → SkillAutoFixer 至多 3 次"]
+        bridgeCC["桥接外部端点连续失败 → 熔断开短暂退避(AGENT_BRIDGE_BACKOFF)，不做无休止重连"]
+    end
+    finish --> extraRetry
+```
+
+> 关键常量/语义：模型流式 `StreamTimeoutMinutes=5` 挂起保护；人机交互 `InteractionTtlMs≈10 分钟`，超时由周期定时器清理；模型流可重试错误按 `MaxModelAttempts` 次指数退避；桥接失败走熔断退避；单次消息审批轮数有上限防死循环。驳回/超时都不会静默改库：执行类技能一律“已获批准才执行”，拒绝即不执行。
+
+---
+
 ## 一句话理解
 
 群消息被判定触达某数字员工 → 按“桥接 > 流水线 > 交接 > 语境沉默 > 组织化路由(计划→逐项→递归综合) > 普通流式(带工具+人机审批)”的顺序择一路径，最终把该角色的一次答复（正文 + 计划卡 + 思考 + 技能链）定向/全群地回灌本群。
