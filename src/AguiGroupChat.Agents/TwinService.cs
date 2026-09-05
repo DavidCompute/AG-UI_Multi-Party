@@ -50,8 +50,8 @@ public sealed class TwinService : ITwinAgentSync
     /// <summary>分身智能体 ID 前缀（系统保留：仅经 /ag-ui/twin 管理，不出现在智能体管理目录）。</summary>
     public const string AgentIdPrefix = "twin_";
 
-    /// <summary>触发模式字符串化：小写（与协议 / 前端一致，如 mentioned / allMessages）。</summary>
-    private static string ModeString(AgentTriggerMode mode) => mode.ToString().ToLowerInvariant();
+    /// <summary>触发模式线上小驼峰名（与前端 select / 协议一致，如 mentioned / allMessages）。</summary>
+    private static string ModeString(AgentTriggerMode mode) => TriggerModeWire.ToWire(mode);
 
     /// <summary>获取 / 创建该用户的互斥信号量并等待获取（方法体用 try/finally Release）。</summary>
     private static async Task<SemaphoreSlim> AcquireUserLockAsync(string userId, CancellationToken ct)

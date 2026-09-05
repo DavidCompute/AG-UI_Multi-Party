@@ -510,7 +510,7 @@ public static class AgentApi
         d.Description,
         d.Instructions,
         d.Avatar,
-        TriggerMode = d.TriggerMode.ToString().ToLowerInvariant(),
+        TriggerMode = AguiGroupChat.Agents.TriggerModeWire.ToWire(d.TriggerMode),
         d.Keywords,
         d.Schedule,
         d.Model,
