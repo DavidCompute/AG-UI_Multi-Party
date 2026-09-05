@@ -12,6 +12,29 @@ This page merges our two platform topics into one document in two big parts: **P
 
 # 大段 A · 客服知聚聊天规则 Support-Circle Chat Rules
 
+### 图 A1 · 顾客触发 → 审批 → 客服定向答复（时序） / A1 · Customer -> approve -> directed reply
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as 顾客 Customer
+    participant G as 网关 AgentGateway
+    participant A as 客服数字员工 Staff agent
+    participant R as ResolveRecipients
+
+    C->>G: @客服数字员工/发需求
+    Note over G: 顾客无成员行 → CanInvokeAgents RBAC 不拦
+    G->>A: TriggerMode=mentioned → 触发
+    A-->>G: 需审批的客服技能（如需本机执行/工具）
+    G-->>C: 审批卡（仅触发者可决定，TargetMemberId=顾客）
+    C-->>G: 批准/拒绝
+    G->>A: 结果回灌模型继续
+    A->>G: 完成答复（Visibility 继承自触发消息）
+    G->>R: ResolveRecipients(全体客服 + 该顾客)
+    R-->>C: 定向答复 Private+VisibleMemberIds=[该顾客]
+    Note over C: 其它顾客看不到；不被 @ 回显
+```
+
 ## 摘要一页看（Summary）
 
 | 维度 | 规则 |
@@ -39,6 +62,31 @@ This page merges our two platform topics into one document in two big parts: **P
 | Disband | owner only |
 
 ---
+
+### 图 A2 · 可见性 / 扇出边界（flow）- A2 · Visibility / fan-out boundary
+
+```mermaid
+flowchart TD
+    start["客服知聚 kind=support"]
+    start --> staff["客服成员 Role != Normal（含数字员工成员）"]
+    start --> cuA["顾客A 参与者 _supportCustomers"]
+    start --> cuB["顾客B 参与者"]
+
+    msg["任意发消息 / 答复"] --> scope["服务端 ApplySupportCircleScoping"]
+    scope -- 强制 Private + VisibleMemberIds --> fan["ResolveRecipients: 全体客服 + 命中目标顾客"]
+
+    staff -- 恒可见全部会话 --> fan
+    fan -- 定向仅到 --> onlyA["顾客A 本人"]
+    fan -- 定向仅到 --> onlyB["顾客B 本人"]
+    cuA -. 顾客之间互不可见 .-> onlyB
+
+    subgraph typing_rule["typing / unread / 订阅"]
+        t1["客服输入：其他客服 + 全部已进入顾客"]
+        t2["顾客输入：只给客服；顾客间互不可见"]
+    end
+    staff --> t1
+    cuA --> t2
+```
 
 ### A.0 底层：kind / IsSupportCircle
 
@@ -181,6 +229,29 @@ Ordinary groups: everyone equal. Support circle: a staff/admin cluster sees all;
 
 # 大段 B · 组织架构构建师的组织打造算法 Org-Architect Build Algorithm
 
+### 图 B1 · 组织 - 架构构建：整体算法（flow）- B1 · org-architect build flow
+
+```mermaid
+flowchart TD
+    trig(["用户 @org_architect 一句需求"])
+    trig --> route{"整支新组织 / 完整能力集?"}
+
+    route -- "否：仅个别岗位小改" --> d1["org_design 对话式逐条精致"]
+    route -- "是" --> d2["org_plan_draft → AgentOrchestrator 一键结构化出稿"]
+    d1 --> finalJ["同一结构的最终稿 JSON（title + agents[] + skills[]）"]
+    d2 --> finalJ
+
+    finalJ --> show["逐岗位可读概览呈现给用户"]
+    show --> ok{"用户明确认可?"}
+    ok -- "未认可" --> wait["改稿 / 继续打磨，不落库"]
+    ok -- "认可：管理员放行" --> commit["org_commit(teamKey, planJson)"]
+    commit --> engine["OrgApplyEngine 唯一引擎整支落库（见图 B2）"]
+
+    engine --> succ{"成功?"}
+    succ -- "成功" --> circle["可选：建客服知聚，把新数字员工拉入群（运转规则见大段 A）"]
+    succ -- "失败：按错修正，同一 teamKey 重试" --> commit
+```
+
 ## B.0 角色是谁、挂了什么（Who is it / what it carries)
 
 `org_architect`（组织架构构建师）是一位"组织角色/部署员"。库里挂 `skillDefIds=["org_design","org_deploy"]`；代码层（`AgentCatalog.Create`）给"挂 org_design 的组织角色"自动多挂两个原生工具：
@@ -225,6 +296,25 @@ Org roles aren’t treated as plan/batch executors; drafts are read-only for any
 ---
 
 ## B.3 OrgApplyEngine 落库算法（唯一引擎）
+
+### 图 B2 · OrgApplyEngine 落库流水线（flow）- B2 · write pipeline
+
+```mermaid
+flowchart LR
+    in["skills[] + agents[] + createSupportCircle?"] --> s1["技能归一：ASCII id 去重/自动后缀，记原→新映射"]
+    s1 --> s2["校验 name/desc/body；shell/http/dotnet 需管理员"]
+    s2 --> s3["executionLocation 规约 + 审批（client/shell 强制）"]
+    s3 --> s4["服务端技能冒烟 + SkillAutoFixer 自修复（至多3次）"]
+    s4 --> a1["数字员工 id 归一（去重/改名、twin_ 前缀保护）"]
+    a1 --> a2["校验 skillIds 引用与本批一致"]
+    a2 --> a3["校验连接目标指向本批员工"]
+    a3 --> w1["先 skillCatalog.Upsert 技能"]
+    w1 --> w2["再按映射 Upsert 数字员工（skillDefIds/连接重映射）"]
+    w2 --> opt{createSupportCircle?}
+    opt -- "是" --> group["CreateGroupAsync(GroupKind.Support)：建客服群+注册触发"]
+    opt -- "否" --> ret["返回 created agents/skills + smoke[]"]
+    group --> ret
+```
 
 1. 技能归一：合法 ASCII id、与库冲突自动追加后缀；记 `原→新` 映射供引用重映射；name/desc/body 非空；`shell/http/dotnet` 需 admin。
 2. executionLocation 规约 + 审批：`client`→Client 强制批准、`shell` 需批准；缺 clientRunner 自动生成。
