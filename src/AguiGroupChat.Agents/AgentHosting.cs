@@ -24,6 +24,13 @@ public static class AgentHosting
         var options = configuration.GetSection("Agents").Get<AgentOptions>() ?? new AgentOptions();
         ResolveApiKey(options, configuration);
         services.AddSingleton(options);
+        // 进程共享的执行期覆盖载体：先按 Agents:Execution 归一化注册为单实例，供管理侧将来 PATCH 改同一对象即让网关生效。
+        services.AddSingleton<ExecutionOptions>(sp =>
+        {
+            var exec = options.Execution ?? new ExecutionOptions();
+            return exec.Normalize(sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                .CreateLogger("Agents.Execution"));
+        });
         services.AddSingleton<MemoryContextProvider>(); // MSAGENT AIContextProvider：run 前记忆检索注入
         services.AddSingleton<IAgentDefinitionStore, AgentDefinitionStore>(); // 私密智能体归属查询（GroupHub 校验用）
         services.AddSingleton<TwinService>(); // 用户 AI 分身（人设生成 + 生命周期）

@@ -191,8 +191,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _catalog = catalog;
         _hub = new Lazy<GroupHub>(() => services.GetRequiredService<GroupHub>());
         _options = options;
-        // 执行期覆盖规范化：非法配置回退默认后赋给本地字段（保证后续各处取到的是已夹紧值，绝不用废值）。
-        _execution = (options.Execution ?? ExecutionOptions.Default).Normalize(_logger);
+        // 执行期覆盖：优先用进程共享的 ExecutionOptions 单例（管理侧热改同一对象即生效），未注册时用配置归一化副本。生
+        // 效值已由注册处/此处 Normalize 夹紧，保证后续各处取到的是已夹紧值，绝不用废值。
+
+        _execution = services.GetService(typeof(ExecutionOptions)) as ExecutionOptions
+            ?? (options.Execution ?? ExecutionOptions.Default).Normalize(_logger);
         _attachmentStore = attachmentStore;
         _logger = logger;
         _changes = services.GetService<ChangeHub>(); // 游标持久化脏位通知（可选：未注册持久化时不落盘）
