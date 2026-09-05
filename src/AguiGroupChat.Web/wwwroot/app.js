@@ -2390,15 +2390,6 @@ async function submitChangePassword() {
   } catch (ex) { toast(t("pw.changeFail", { err: ex.message })); }
 }
 
-// ---- 帮助弹窗 ----
-function openHelp() {
-  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
-  $("meMenu").classList.add("hidden");
-  hideNotifPanel && hideNotifPanel();
-  $("helpModal").classList.remove("hidden");
-}
-function closeHelp() { $("helpModal").classList.add("hidden"); }
-
 function openProfileModal() {
   $("pfNickname").value = $("meNickname").textContent;
   $("pfPersonalMemory").checked = !!state.personalMemoryEnabled;
@@ -7194,12 +7185,6 @@ function init() {
   // 资料 / 数字员工头像选择控件
   pfAvatarPicker = bindAvatarPicker("pfAvatarPreview", "pfAvatarFile", "pfAvatarUploadBtn", "pfAvatarClearBtn", "🧑", (url) => { profileAvatar = url; });
   afAvatarPicker = bindAvatarPicker("afAvatarPreview", "afAvatarFile", "afAvatarUploadBtn", "afAvatarClearBtn", "🤖", (url) => { agentAvatar = url; });
-
-  // ---- 帮助 ----
-  $("helpBtn").onclick = openHelp;
-  $("helpClose").onclick = closeHelp;
-  $("helpDone").onclick = closeHelp;
-  $("helpModal").addEventListener("click", (e) => { if (e.target === $("helpModal")) closeHelp(); });
 
   // ---- 数字员工管理 ----
   $("agentManageBtn").onclick = openAgentModal;
