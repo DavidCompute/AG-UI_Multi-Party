@@ -15,9 +15,9 @@ window.I18N_DICTS.zh = {
   "err.USER_BAD_CREDENTIALS": "用户名或密码错误",
   "err.USER_PASSWORD_INVALID": "旧密码不正确",
   "err.USER_UNAUTHORIZED": "未登录或令牌无效 / 已过期",
-  "err.AGENT_NOT_FOUND": "智能体不存在",
-  "err.AGENT_EXISTS": "智能体 ID 已被占用",
-  "err.AGENT_PERMISSION_DENIED": "私密智能体仅创建者可操作",
+  "err.AGENT_NOT_FOUND": "数字员工不存在",
+  "err.AGENT_EXISTS": "数字员工 ID 已被占用",
+  "err.AGENT_PERMISSION_DENIED": "私密数字员工仅创建者可操作",
   "err.unknown": "出错了（{code}）",
 
   /* --- 品牌 / 顶栏 --- */
@@ -258,7 +258,7 @@ window.I18N_DICTS.zh = {
   "skill.toolbarBtn": "技能库",
   "skill.title": "技能库",
   "skill.manage": "🎯 管理技能库",
-  "skill.hint": "定义<b>可复用技能</b>：<b>shell</b>（可执行命令/脚本）、<b>http</b>（调用外部接口）、<b>prompt</b>（提示词/流程模板）。技能存入技能库，可被任意数字员工反复挂载，也支持在技能管理界面手工维护或让智能体用自然语言创建。",
+  "skill.hint": "定义<b>可复用技能</b>：<b>shell</b>（可执行命令/脚本）、<b>http</b>（调用外部接口）、<b>prompt</b>（提示词/流程模板）。技能存入技能库，可被任意数字员工反复挂载，也支持在技能管理界面手工维护或让数字员工用自然语言创建。",
   "skill.gen.summary": "🤖 用自然语言生成技能",
   "skill.gen.request": "描述你想要的技能（做什么、输入/参数、返回什么）",
   "skill.gen.requestPh": "例：检查本机磁盘使用情况，输出各分区剩余空间与使用率",
@@ -333,7 +333,7 @@ window.I18N_DICTS.zh = {
   "skill.err.descRequired": "请填写技能描述",
   "skill.err.bodyRequired": "该类型的技能正文不能为空",
   "skill.err.saveFirst": "请先保存技能再试运行",
-  "agent.form.skillDefs.hint": "可复用技能（技能库，可跨数字员工复用）：在下方技能库创建维护，或让智能体用自然语言创建；勾选后本数字员工即可调用。",
+  "agent.form.skillDefs.hint": "可复用技能（技能库，可跨数字员工复用）：在下方技能库创建维护，或让数字员工用自然语言创建；勾选后本数字员工即可调用。",
   "agent.form.subAgents.hint": "可调用子数字员工（技能）：把其他数字员工挂为本角色可调用的技能——模型需要其领域能力时会自动调起；勾选后可为每项填一句调用说明。",
   "agent.form.subAgentDescPh": "调用说明：模型何时调用该子数字员工（可为空）",
 
