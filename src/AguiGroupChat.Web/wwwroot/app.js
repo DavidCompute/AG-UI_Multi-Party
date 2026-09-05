@@ -1981,7 +1981,6 @@ function openSkillForm(skillId) {
   sf("sfExecutionLocation").value = s?.executionLocation || "server";
   sf("sfClientRunner").value = s?.clientRunner || "";
   syncSkillKind();
-  sf("sfTestResult").textContent = "";
   showSkillFormView();
 }
 
