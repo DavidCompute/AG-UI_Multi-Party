@@ -5272,9 +5272,13 @@ function renderMembers() {
       : statusIcon;
     div.innerHTML = `
       ${avatarHtml}
-      <span>${escapeHtml(m.nickname || m.memberId)}</span>
+      <span class="member-name"></span>
       ${!isTwin && m.memberType === "agent" ? '<span class="tag-agent">AI</span>' : ""}
       <span class="role">${role}</span>`;
+    // 名称过长为截断（ellipsis）；悬浮 title 显示完整昵称（DOM 写入，用户内容安全）。
+    const nameEl = div.querySelector(".member-name");
+    nameEl.textContent = m.nickname || m.memberId;
+    nameEl.title = m.nickname || m.memberId;
     // 双击成员行 = @（选中为提及 / 私聊对象），再次双击取消；被 @ 的行高亮
     div.title = t("member.dblClickMention");
     div.classList.toggle("mentioned", state.mentions.has(m.memberId));

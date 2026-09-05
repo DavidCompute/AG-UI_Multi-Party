@@ -211,6 +211,11 @@ select {
 .dot.offline { background: #4a5468; }
 .dot.busy { background: var(--warn); }
 .member-item .role { font-size: 11px; color: var(--muted); margin-left: auto; }
+/* 成员昵称：过长截断为省略号，悬浮 title 显示完整名称；“AI”标签/角色/操作按钮保持在最右侧不被撑破 */
+.member-item .member-name {
+  flex: 0 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
 /* 双击成员行 = @：被选中的成员行高亮（优先级高于 hover） */
 .member-item.mentioned { background: rgba(79,140,255,.25); }
 .member-item.mentioned:hover { background: rgba(79,140,255,.28); }
