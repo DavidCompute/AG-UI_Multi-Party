@@ -28,7 +28,7 @@
 - ✅ **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到**视觉模型**，图片以 base64 多模态内容喂给模型看图并作答；纯文本消息仍走常规 / 思考模型，行为不变。DeepSeek 下视觉模型默认 `deepseek-v4-flash-vision-exp`（可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关）；`mock` 提供方不支持视觉，图片消息按文本处理。图片直接从附件库按字节 + MIME 读取内联传入，无需另存文件；共享的群成员审批 / 发图片附件工作流不变。
 - ✅ **一键组织编排（`数字员工 → 一键编排`）**：输入一句话需求 → **SSE 流式**生成方案（`POST /ag-ui/agents/orchestrate/stream`，逐 token 实时显示生成过程 + 实时统计已见岗位 / 技能）→ 预览数字员工组织架构 + 各岗位技能 + 岗位连接（向下指派 / 向上提升 / 汇报中继）→ 确认后整体落库（`POST /ag-ui/agents/orchestrate/apply`，先**对服务端执行的技能冒烟自测 + 大模型自动修复**（最多 3 次）再落库，幂等不部分写入）并返回 `smoke[]`，UI 在创建后的通知中心展示；可勾选「同时创建客服知聚」把方案数字员工作为客服团队一键建群上线
 - ✅ **技能系统（技能库）**：可复用技能分 `prompt` / `shell` / `http` / `dotnet`（C#）四类——`shell` / `http` / `dotnet`（可执行命令 / 外部请求 / 运行 C# 源码）**仅系统管理员可创建 / 修改 / 删除**，普通用户只能建纯提示词技能；但**运行现有 `dotnet` 技能对全体登录用户开放**（可试运行服务端 dotnet，或经数字员工 / 客户端执行由本机桥运行，无需管理员）。本机（client 执行）的 shell / dotnet 技能经内网桥 / 前端在本机执行（浏览器无法编译 C#，dotnet 客户端技能在触发者批准后由本机桥 `DotnetRunner` 执行）；技能库支持搜索（前端过滤）与批量删除；技能库「试运行」会先**自动建议一段代表性入参示例**（`POST /ag-ui/skills/{skillId}/suggest`）再执行；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（`dotnet` 仅系统管理员可得）
-- ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行（聊天规则详述见 `docs/support-circle-chat-rules.md`）
+- ✅ **客服知聚（support circle，`kind=support`）**：客服团队知聚，创建者拉入的真人 / 数字员工为全部成员（客服，可看全部会话）；普通用户以「参与者」身份进入（**非成员**，不占名额、不出现在成员清单），各自会话隔离（顾客之间彼此不可见，客服回复定向给顾客）；顾客可批准其触发的客服技能执行（聊天规则与组织打造算法详述见 `docs/customer-service-and-org-builder.md`）
 - ✅ **平台级 RBAC**：SuperAdmin / Admin / Operator / User 四档平台角色；`Auth:SuperAdminUserIds`（或 `POST /ag-ui/admin/roles/{userId}` 由超级管理员在线授予）bootstrap，首个注册账号自举为 SuperAdmin → Admin（详见 `docs/RBAC.md`）
 - ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
 - ✅ **浏览器自动化工具**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服知聚」全链路并截图，见 `tools/README-playwright.md`）
@@ -755,7 +755,7 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 除下述**可执行**的 `prompt / shell / http / dotnet` 四类之外，技能库还含一类<b>受控 `org_deploy`（组织落库）</b>：仅系统管理员在技能库手动建 / 改 / 删，数字员工不能运行时自建；它不是一个可跑命令或流程，而是被挂载它的数字员工（如 `org_architect` 的 `SkillDefIds`）当作「把最终组织稿整支落库 / 覆盖、库里只留最新」的部署动作（经唯一共享引擎落库、仅管理员放行），普通用户只会拿到需管理员放行的说明、绝不写库。
 
-> 挂载 `org_design` 的组织角色（如 `org_architect`）还会自动多挂一个 <b>一键式组织初稿</b>动作 `org_plan_draft`：把用户那句话需求交给与「一键组织编排」同一生成引擎（`AgentOrchestrator`）一次产出整支结构化成稿 JSON（岗位 + 各岗 skillIds + 技能，kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client 选，含连接），避免整支被手写成只见 pure prompt 软稿。它<b>只出稿不落库</b>；须用户在对话里显式认可后用同一段成稿经既有 `org_commit`（仅管理员闸）落库（“组织架构构建师”的完整打造算法另见 `docs/org-architect-build.md`）。
+> 挂载 `org_design` 的组织角色（如 `org_architect`）还会自动多挂一个 <b>一键式组织初稿</b>动作 `org_plan_draft`：把用户那句话需求交给与「一键组织编排」同一生成引擎（`AgentOrchestrator`）一次产出整支结构化成稿 JSON（岗位 + 各岗 skillIds + 技能，kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client 选，含连接），避免整支被手写成只见 pure prompt 软稿。它<b>只出稿不落库</b>；须用户在对话里显式认可后用同一段成稿经既有 `org_commit`（仅管理员闸）落库（“组织架构构建师”的完整打造算法见 `docs/customer-service-and-org-builder.md`）
 
 > <b>绝不以服务端 bash 误跑 client / PowerShell 技能</b>：服务端/宿主执行器对标注 `ExecutionLocation=Client` 的技能一律拒绝并给指引（应在本机经 NativeBridge / 该用户机器执行）；明显 Windows PowerShell 正文若落到<b>非 Windows</b>宿主（Docker/Linux 服务器、Mac/Linux 自托管），会得到“需 PowerShell 环境”的明确提示，而不是 `Not running in PowerShell / command not found / 退出码2` 之类的误导性报错。Windows 桌面自托管（宿主即本机）用 PowerShell 正常执行，不受影响。
 
