@@ -1829,6 +1829,14 @@ async function saveAgent() {
     // 任务指派 / 问题提升由「组织架构」入口维护，此处仅保留原值（编辑时沿用，新增为空）
     assignmentIds: [...((agentList.find((x) => x.agentId === editingAgentId)?.assignmentIds) || [])],
     escalationAgentId: (agentList.find((x) => x.agentId === editingAgentId)?.escalationAgentId) || null,
+    // 整轮交接 / 编排流水线 / 差异化审批由「一键编排 / 组织」等入口维护，普通编辑无对应控件——
+    // 为避免整表替换 PUT 在普通编辑时静默清空既有配置，下三字段仅在新增时置空、编辑时沿用原值。
+    relayToAgentId: (editingAgentId ? (agentList.find((x) => x.agentId === editingAgentId)?.relayToAgentId || null) : null),
+    pipeline: (() => {
+      const p = editingAgentId ? (agentList.find((x) => x.agentId === editingAgentId)?.pipeline || null) : null;
+      return p && p.length ? p.map((s) => ({ stepAgentId: s.stepAgentId, prompt: s.prompt ?? null })) : null;
+    })(),
+    requireApprovalToolNames: (editingAgentId ? (agentList.find((x) => x.agentId === editingAgentId)?.requireApprovalToolNames ?? null) : null),
     // 可复用技能：技能库引用（SkillDefIds）
     skillDefIds: [...agentSkillDefIds],
     // 角色级执行阶段禁用覆盖
