@@ -3,6 +3,7 @@
 
 > 依据当前代码（`.NET 10`）。总入口：群消息触发 `GroupHub`/`AgentTriggerService` 判定 → `AgentGateway.InvokeAsync` → `InvokeCoreAsync`；分派到若干执行路径后，结果以群内流式事件回灌。
 > Back code anchors: `src/AguiGroupChat.Agents/AgentGateway.cs`, `src/AguiGroupChat.Agents/AgentCatalog.cs`, `src/AguiGroupChat.Hub/Messaging/GroupHub.cs`, `src/AguiGroupChat.Hub/Agents/AgentTriggerService.cs`.
+> 想“改执行行为而不改代码”的旋钮清单与哪些仍码内固定见姊妹篇：[执行配置：可热改项 / 有效范围 / 能力矩阵](execution-configuration.md)。
 
 ---
 
