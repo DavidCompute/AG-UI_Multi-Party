@@ -155,6 +155,47 @@ public static class AgentApi
             return Results.Ok(new { updated = true, agentId, nickname = def.Nickname });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 恢复内置组织工具（仅系统管理员）：清库/初始化后把 org_architect + org_design + org_deploy 幂等补回 ----
+        root.MapPost("/restore-org-builder", (HttpContext ctx, AuthService auth, AgentCatalog catalog, AgentSkillCatalog skillCatalog,
+            ILoggerFactory loggerFactory) =>
+        {
+            var meUser = WebIdentity.User(ctx, auth);
+            if (meUser is null) return Results.Unauthorized();
+            if (auth.ResolveRole(meUser.UserId) < PlatformRole.Admin)
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "仅系统管理员可恢复内置组织工具"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var ownerId = meUser.UserId;
+
+            var log = loggerFactory.CreateLogger("AgentApi.OrgRestore");
+            var createdSkills = new List<string>();
+            if (skillCatalog.Get(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDesignSkillId) is null)
+            {
+                skillCatalog.Upsert(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgDesignSkill(ownerId));
+                createdSkills.Add(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDesignSkillId);
+            }
+            if (skillCatalog.Get(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDeploySkillId) is null)
+            {
+                skillCatalog.Upsert(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgDeploySkill(ownerId));
+                createdSkills.Add(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDeploySkillId);
+            }
+            var agent = catalog.GetDefinition(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgArchitectAgentId);
+            var createdAgent = false;
+            if (agent is null)
+            {
+                var def = AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgArchitectAgent(ownerId);
+                catalog.Upsert(def);
+                createdAgent = true;
+            }
+            log.LogInformation("恢复内置组织工具：agent={Agent} skills=[{Skills}] (owner={Owner})", createdAgent, string.Join(",", createdSkills), ownerId);
+            return Results.Ok(new
+            {
+                restored = true,
+                agent = createdAgent ? AguiGroupChat.Agents.OrgBuiltinSeeds.OrgArchitectAgentId : null,
+                skills = createdSkills,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+
         // ---- 删除智能体（需登录）：移除目录、触发规则，并从所有群退出；系统内置只读，仅创建者可删 ----
         root.MapDelete("/{agentId}", async (string agentId, HttpContext ctx, AuthService auth, AgentCatalog catalog, AgentRegistry registry, GroupHub hub, CancellationToken ct) =>
         {

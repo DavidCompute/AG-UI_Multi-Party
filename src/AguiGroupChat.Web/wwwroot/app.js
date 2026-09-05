@@ -695,8 +695,29 @@ let agentFormReturnFrom = null; // 进入编辑的返回目标："org"=从组织
 let agentBatchMode = false;   // 批量删除模式（行首出现勾选框）
 let selectedAgents = new Set(); // 批量删除所选 agentId
 
+async function restoreBuiltinOrgTools() {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  const btn = $("agentBuiltinRestoreOrgBtn");
+  btn.disabled = true;
+  try {
+    const resp = await fetch("/ag-ui/agents/restore-org-builder", { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) { toast(data ? (data.message || data.error?.message || errMsg(data)) : t("agent.restoreFail")); return; }
+    const created = [];
+    if (data && data.agent) created.push(data.agent);
+    if (data && Array.isArray(data.skills)) created.push(...data.skills);
+    toast(t("agent.restoreOk") + (created.length ? ": " + created.join(", ") : ""));
+    const wasOpen = !$("agentModal").classList.contains("hidden");
+    await loadAgents();
+    renderAgentList();
+    if (wasOpen) showAgentListView();
+  } catch (ex) { toast(t("agent.restoreFail")); }
+  finally { btn.disabled = false; }
+}
+
 async function openAgentModal() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  $("agentBuiltinRestoreOrgBtn")?.classList.toggle("hidden", !state.isAdmin);
   agentBatchMode = false; selectedAgents = new Set();
   // 一并刷新用户目录：创建者列优先显示昵称（别名），避免因目录未加载 / 已过期而回退到原始 ID
   await Promise.all([loadAgents(), loadKbs(), loadUserDirectory()]);
@@ -7188,6 +7209,7 @@ function init() {
 
   // ---- 数字员工管理 ----
   $("agentManageBtn").onclick = openAgentModal;
+  $("agentBuiltinRestoreOrgBtn").onclick = restoreBuiltinOrgTools;
   $("agentClose").onclick = () => { agentBatchMode = false; selectedAgents = new Set(); $("agentModal").classList.add("hidden"); };
   $("agentAddBtn").onclick = () => { agentFormReturnFrom = null; openAgentForm(null); };
   // 批量删除
