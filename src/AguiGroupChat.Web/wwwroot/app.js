@@ -2090,11 +2090,10 @@ async function generateSkill() {
 async function testSkill(skillId) {
   const id = skillId || editingSkillId;
   if (!id) { toast(t("skill.err.saveFirst")); return; }
-  // 编辑表单里点试运行 → 结果就地显示在表单下方；技能库列表 ▶ 则用独立结果弹窗展示（更友好、一定可见）
-  const inForm = !document.getElementById("skillFormView").classList.contains("hidden");
-  const out = inForm ? document.getElementById("sfTestResult") : null;
-  if (!inForm) document.getElementById("skillRunResultBody").textContent = "⚙️ " + t("skill.testRun") + "（" + id + "）…"; // 预置“运行中”文案
-  else if (out) out.textContent = "⚙️ " + t("skill.testRun") + "…（" + id + "）";
+  // 试运行结果一律在独立结果弹窗展示（更醒目、一定可见），不再在编辑表单下方就地显示
+  const resultBody = document.getElementById("skillRunResultBody");
+  const resultModal = document.getElementById("skillRunResultModal");
+  resultBody.textContent = "⚙️ " + t("skill.testRun") + "（" + id + "）…"; // 预置“运行中”文案
   // 按技能自动建议一个典型示例参数预填（试运行前先给用户一个能用/可改的输入）
   let suggestion = "";
   try {
@@ -2106,6 +2105,7 @@ async function testSkill(skillId) {
   } catch { /* 建议失败不影响试运行 */ }
   const query = await uiPrompt({ title: t("skill.testRun"), message: t("skill.testQuery") + (suggestion ? " · " + t("skill.testSuggestLabel") : ""), defaultValue: suggestion });
   if (query === null) { return; }
+  resultModal.classList.remove("hidden"); // 提前显示“运行中”
   try {
     const res = await fetch(`/ag-ui/skills/${encodeURIComponent(id)}/run`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
@@ -2115,15 +2115,10 @@ async function testSkill(skillId) {
     const text = res.ok ? `▶ ${t("skill.testResult")}\n${data && data.result || ""}`
       : `${t("skill.testResult")}\n${t("common.saveFail", { err: errMsg(data, res.status) })}`;
     if (!res.ok) toast(t("common.saveFail", { err: errMsg(data, res.status) }));
-    if (inForm) { if (out) out.textContent = text; }
-    else {
-      document.getElementById("skillRunResultBody").textContent = text;
-      document.getElementById("skillRunResultModal").classList.remove("hidden");
-    }
+    resultBody.textContent = text;
   } catch (ex) {
     toast(t("common.saveFail", { err: ex.message }));
-    if (!inForm) document.getElementById("skillRunResultBody").textContent = `${t("skill.testResult")}\n${ex.message}`;
-    else if (out) out.textContent = `${t("skill.testResult")}\n${ex.message}`;
+    resultBody.textContent = `${t("skill.testResult")}\n${ex.message}`;
   }
 }
 
