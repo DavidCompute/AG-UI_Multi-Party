@@ -103,6 +103,7 @@ app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班�
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
 app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
+app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions（时序/重试/TTL/阶段开关与顺序）
 
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();
@@ -116,6 +117,7 @@ app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置�
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
 app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
+app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

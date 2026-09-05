@@ -79,6 +79,7 @@ public static class DesktopApp
         app.MapScheduledTaskApi(); // 重复性定时任务（1.4）
         app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
+        app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions
         app.Services.RegisterAgentPersistence();
         app.Services.RegisterKnowledgeBasePersistence();
         app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
@@ -88,6 +89,7 @@ public static class DesktopApp
         app.Services.RegisterModelConfigPersistence(); // 运行时模型配置跨重启保持
         app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
         app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
+        app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();
