@@ -23,6 +23,19 @@ window.I18N_DICTS.en = {
   /* --- 品牌 / 顶栏 --- */
   "brand.name": "KnowGath",
   "brand.sub": "Microsoft Agent Framework digital-employee collaboration",
+
+  /* --- Help modal --- */
+  "help.title": "Help",
+  "help.close": "Close",
+  "help.loginRequired": "Please sign in first to view help",
+  "help.s1.t": "1. Using digital employees",
+  "help.s1.b": "<p>A digital employee is an agent with a persona / skills / knowledge, invited into a group to work with you.</p><ul><li><b>@-mention</b> to talk to it; managers/roles may also trigger on “all messages / keyword / context” (set in Digital Employees → add / edit).</li><li><b>Workflows & reports</b>: create “manager → executors” for complex tasks, assign/escalate via the org chart or the role editing page; the manager routes requests to suitable downstreams.</li><li><b>Scheduled reports</b>: set a Cron in the role to auto-report.</li><li><b>Regenerating</b>: hit “regenerate” on a message to ask that employee to answer anew.</li><li><b>In a support circle</b>, a customer can @-mention an agent; skills needing local/external execution ask for the triggerer’s approval first.</li></ul>",
+  "help.s2.t": "2. Building a team with the built-in “Org Architect”",
+  "help.s2.b": "<p>Find the employee carrying the org role (e.g. org_architect) in a group and tell it what team you need:</p><ul><li>It drafts a one-shot structured plan: roles + per-role skills + connections, picking kinds like shell/http/prompt/dotnet and server or client execution to fit real duties instead of pure-prompt skills.</li><li>It walks you through the draft role by role and only writes when you (a system admin) explicitly say “apply this version” in the chat — new employees + skills + connections.</li><li>Ordinary users only get a draft; nothing is written for them. Overwriting the same teamKey keeps only the newest version.</li><li>Localized tweaks to an existing team are supported too.</li></ul>",
+  "help.s3.t": "3. Support-circle chat rules",
+  "help.s3.b": "<ul><li><b>Two classes</b>: group members (staff/admin, see all conversations) and “customer participants” (non-members, no slot).</li><li><b>Isolation</b>: a customer only sees their own thread with the staff; customers never see each other; every message is scoped on the server.</li><li><b>Directed replies</b>: an agent’s reply goes only to the customer who triggered it.</li><li><b>Customers can trigger</b>: they may @-mention an agent; execution-like skills ask for their approval.</li><li>Full rules live in <code>docs/customer-service-and-org-builder.md</code>.</li></ul>",
+  "help.s4.t": "4. Recent / other features",
+  "help.s4.b": "<ul><li><b>One-click organization orchestration</b>: build “employees + skills + connections” from one sentence, optionally as a support circle.</li><li><b>Skill library</b>: reusable prompt / shell / http / dotnet / org_deploy skills with trial-run & auto-suggested sample input.</li><li><b>Editable org chart</b>: double-click to edit a node, drag to assign / escalate.</li><li><b>Recursive check-and-answer (“healthcheck” style)</b>: agents gather more skills/reports until enough, then conclude; long answers no longer leak internal JSON.</li><li><b>Client (local) skills</b>: run on your machine via NativeBridge with the right interpreter, never mis-run as server bash.</li><li><b>Desktop notifications</b>: Web Notification for foreground & background.</li><li>See repo <code>docs/</code> for details.</li></ul>",
   "topbar.theme": "Toggle theme (dark / light)",
   "theme.light": "Switched to light theme",
   "theme.dark": "Switched to dark theme",

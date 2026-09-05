@@ -27,6 +27,34 @@
     </div>
   </header>
 
+  <div id="helpModal" class="modal-overlay hidden" data-i18n-label="help.title">
+    <div class="modal help-modal">
+      <div class="modal-title">❓ <span data-i18n="help.title">使用帮助</span></div>
+      <button id="helpClose" class="modal-close" data-i18n-title="help.close">✕</button>
+      <div class="modal-body help-body">
+        <section class="help-section">
+          <h3 data-i18n="help.s1.t">① 数字员工怎么用</h3>
+          <div data-i18n-html="help.s1.b"></div>
+        </section>
+        <section class="help-section">
+          <h3 data-i18n="help.s2.t">② 自带“组织架构构建师”（org_architect）建一支组织</h3>
+          <div data-i18n-html="help.s2.b"></div>
+        </section>
+        <section class="help-section">
+          <h3 data-i18n="help.s3.t">③ 客服知聚（support circle）的聊天规则</h3>
+          <div data-i18n-html="help.s3.b"></div>
+        </section>
+        <section class="help-section">
+          <h3 data-i18n="help.s4.t">④ 其它近期新功能速览</h3>
+          <div data-i18n-html="help.s4.b"></div>
+        </section>
+      </div>
+      <div class="modal-actions">
+        <button id="helpDone" class="btn-ghost" data-i18n="help.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <div id="notifPanel" class="notif-panel hidden" role="region" data-i18n-label="topbar.notifications">
     <div class="notif-head">
       <span class="notif-title" data-i18n="notif.title">通知</span>

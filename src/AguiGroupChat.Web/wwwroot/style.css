@@ -1665,3 +1665,24 @@ button { white-space: nowrap; }
 .skill-kind { flex: none; font-size: 11px; }
 .skill-op-col { display: flex; gap: 6px; justify-content: flex-end; }
 .skill-test-result { white-space: pre-wrap; background: rgba(0,0,0,.25); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); }
+
+/* ================= 使用帮助弹窗（帮助） ================= */
+.help-modal { width: min(780px, 94vw); max-height: 86vh; }
+.help-modal { position: relative; }
+.help-modal .modal-title { padding-right: 36px; }
+.help-modal .modal-close {
+  position: absolute; top: 12px; right: 12px; background: none; border: none; cursor: pointer;
+  font-size: 16px; color: var(--muted); line-height: 1;
+}
+.help-modal .modal-close:hover { color: var(--text); }
+.help-body {
+  max-height: 60vh; overflow-y: auto; margin-top: 4px; padding-right: 8px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.help-section h3 { margin: 4px 0 6px; font-size: 14px; }
+.help-section { border-bottom: 1px dashed var(--border); padding-bottom: 8px; }
+.help-section:last-child { border-bottom: none; }
+.help-body ul { margin: 2px 0 0; padding-left: 18px; }
+.help-body li { margin: 3px 0; line-height: 1.5; }
+.help-body p { margin: 4px 0; line-height: 1.5; }
+.help-body code { background: var(--panel-2); border-radius: 4px; padding: 0 4px; font-size: 12px; }
