@@ -220,6 +220,13 @@ public sealed class GroupHub : IDisposable
             // 幂等：群已存在但发起者不在其中（理论上只可能由极端 ID 冲突造成）→ 拒绝，不改写他人会话
             if (!_store.IsMember(groupId, ownerId))
                 throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "该会话已存在且你不属于其中");
+            // 单聊头像跟随对端数字员工当前头像：复用旧群时把群头像同步为对端最新头像（首次无/换过头像也能回填）
+            if (!string.Equals(existing.GroupAvatar ?? "", agentAvatar ?? "", StringComparison.Ordinal))
+            {
+                existing.GroupAvatar = string.IsNullOrWhiteSpace(agentAvatar) ? null : agentAvatar;
+                _store.UpdateGroup(existing);
+                _changes?.Notify();
+            }
             return existing;
         }
 
@@ -255,6 +262,8 @@ public sealed class GroupHub : IDisposable
             GroupId = groupId,
             // 私有双人单聊：名字直接用它展示的会话名（前端渲染时可用对端昵称覆盖显示标题）
             GroupName = string.IsNullOrWhiteSpace(agentNickname) ? $"与数字员工 {agentId} 的单聊" : $"与 {agentNickname!.Trim()} 的单聊",
+            // 单聊头像 = 对端数字员工头像（前端侧栏直接用群头像渲染，使单聊显示对端本人头像）
+            GroupAvatar = string.IsNullOrWhiteSpace(agentAvatar) ? null : agentAvatar,
             OwnerId = ownerId,
             IsPrivate = true,
             MemberCount = members.Count,
@@ -2097,6 +2106,25 @@ public sealed class GroupHub : IDisposable
                 info["avatar"] = AguiJson.Element(avatar);
             }
             if (fields.Count == 0) continue;
+
+            // 数字员工换头像：同步它在单聊（kind=direct，且它非群主）中的“会话头像”= 群头像，
+            // 使侧栏/单聊列表始终显示对端本人最新头像（复用旧单聊时 TryEnsureDirectChat 也会回填一次）
+            if (group.IsDirectChat && group.OwnerId != agentId
+                && !string.Equals(group.GroupAvatar ?? "", avatar ?? "", StringComparison.Ordinal)
+                && member.Avatar == avatar)
+            {
+                group.GroupAvatar = string.IsNullOrWhiteSpace(avatar) ? null : avatar;
+                _store.UpdateGroup(group);
+                _changes?.Notify();
+                await FanOutAsync(group.GroupId, new GroupUpdatedEvent
+                {
+                    GroupId = group.GroupId,
+                    UpdateFields = ["groupAvatar"],
+                    GroupInfo = new Dictionary<string, JsonElement> { ["groupAvatar"] = AguiJson.Element(group.GroupAvatar) },
+                    OperatorId = agentId,
+                    Timestamp = NowMs,
+                }, ct: ct);
+            }
 
             _store.UpdateMember(group.GroupId, member); // 昵称 / 头像为原地修改，落库（数据库模式）
             _changes?.Notify();

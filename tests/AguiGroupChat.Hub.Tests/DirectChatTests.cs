@@ -69,6 +69,22 @@ public sealed class DirectChatTests
     }
 
     [Fact]
+    public async Task TryEnsureDirectChat_UsesAgentAvatarAsChatAvatar_AndRefreshesOnReenter()
+    {
+        var (hub, _) = CreateSut();
+
+        // 新建：单聊头像 = 对端数字员工头像（前端侧栏据此渲染，不再显示默认群图标）
+        var a = await hub.TryEnsureDirectChatAsync("user_1", "agent_avatar", "头像助手", "/files/att_x/avatar.png");
+        Assert.Equal("/files/att_x/avatar.png", a.GroupAvatar);
+        Assert.Equal(2, a.MemberCount);
+
+        // 对端换头像后再次进入：幂等分支把群头像同步为新头像
+        var again = await hub.TryEnsureDirectChatAsync("user_1", "agent_avatar", "头像助手", "/files/att_y/avatar2.png");
+        Assert.Equal(a.GroupId, again.GroupId);
+        Assert.Equal("/files/att_y/avatar2.png", hub.Store.GetGroup(a.GroupId)!.GroupAvatar);
+    }
+
+    [Fact]
     public async Task TryEnsureDirectChat_DifferentUsers_GetIsolatedGroups()
     {
         var (hub, _) = CreateSut();
