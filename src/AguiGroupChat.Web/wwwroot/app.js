@@ -4200,9 +4200,19 @@ function renderGroupList() {
     div.className = "group-item" + (g.groupId === state.activeGroupId ? " active" : "");
     const unread = state.groupUnread.get(g.groupId)?.unreadCount || 0;
     const fallbackIcon = g.isSupportCircle ? "🛟" : (g.kind === "direct" ? "💬" : "👥");
-    const avatar = g.groupAvatar
-      ? `<span class="group-avatar"><img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" /></span>`
-      : `<span class="icon">${fallbackIcon}</span>`;
+    const hasAvatar = !!g.groupAvatar;
+    // 私密知聚：🔒 角标嵌在头像内右下角（约占头像面积 1/4），不再放群名前缀
+    let avatar;
+    if (g.isPrivate) {
+      const inner = hasAvatar
+        ? `<img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" />`
+        : `<span class="icon">${fallbackIcon}</span>`;
+      avatar = `<span class="group-avatar-wrap"><span class="group-avatar">${inner}</span><span class="private-lock" title="${escapeHtml(t("list.private"))}">🔒</span></span>`;
+    } else {
+      avatar = hasAvatar
+        ? `<span class="group-avatar"><img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" /></span>`
+        : `<span class="icon">${fallbackIcon}</span>`;
+    }
     // 客服知聚：明显的「客服知聚」标签；非成员且未进入的顾客右上角加「进入」小标
     const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
     const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
@@ -4210,9 +4220,9 @@ function renderGroupList() {
     div.innerHTML = avatar + `<span class="group-name"></span>` + kindTag + enterTag +
       (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
-    // 知聚名过长截断（ellipsis）；悬浮 title 显示完整名称（锁标记不入 tooltip）。
+    // 知聚名过长截断（ellipsis）；悬浮 title 显示完整名称
     const groupNameEl = div.querySelector(".group-name");
-    groupNameEl.textContent = g.isPrivate ? "🔒 " + (g.groupName || "") : (g.groupName || "");
+    groupNameEl.textContent = g.groupName || "";
     groupNameEl.title = g.groupName || "";
     div.onclick = () => selectGroup(g.groupId);
     el.appendChild(div);

@@ -1719,3 +1719,18 @@ button { white-space: nowrap; }
   border: 1px solid var(--border); background: var(--panel-2);
   font-size: 13px; line-height: 1; vertical-align: middle;
 }
+
+/* ---- 群列表：私密知聚 🔒 角标嵌入头像（右下，约占头像面积 1/4） ---- */
+.group-item .group-avatar-wrap {
+  position: relative; display: inline-flex; flex: none;
+}
+.group-item .group-avatar { align-items: center; justify-content: center; }
+.group-item .group-avatar .icon { font-size: 16px; line-height: 1; }
+.private-lock {
+  position: absolute; right: -4px; bottom: -4px;
+  width: 12px; height: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; line-height: 1;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--panel);
+}

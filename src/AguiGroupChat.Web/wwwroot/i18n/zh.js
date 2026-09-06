@@ -893,6 +893,7 @@ window.I18N_DICTS.zh = {
 
   /* --- 知聚/成员列表 --- */
   "list.unread": "{count} 条未读",
+  "list.private": "私密知聚",
 
   /* --- 新消息通知 --- */
   "notif.messageFrom": "{name} 发来消息",

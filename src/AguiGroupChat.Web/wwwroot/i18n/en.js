@@ -895,6 +895,7 @@ window.I18N_DICTS.en = {
 
   /* --- 知聚/成员列表 --- */
   "list.unread": "{count} unread",
+  "list.private": "Private group",
 
   /* --- 新消息通知 --- */
   "notif.messageFrom": "{name} sent a message",
