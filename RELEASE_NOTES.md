@@ -1,7 +1,14 @@
-# AG-UI 群聊桌面版 —— 后续 Web 迭代（组织一键式出稿 / 协调 JSON 换行容错 / Client 技能不失真到服务端 bash）
-# AG-UI Group Chat Desktop — upcoming web iteration (one-shot org draft, multiline coordination-JSON fallback, client skills never mis-run as server bash)
+# AG-UI 群聊桌面版 1.0.120 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.120 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.120 为当前 Windows 桌面点版本（已构建 Windows 1.0.120 MSI）。本版本在既有 Web/桌面迭代之上并入最近的 Hub/协议更新：数字员工**单聊（kind=direct）**、**实时会话吊销/禁用/改密即时断线**、SDK 上行串行化与断连单次回调、上传/导入请求体放开到 200MB（Kestrel 同步放宽）。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
+**Version note**: 1.0.120 is the current Windows desktop point release (a Windows 1.0.120 MSI was built). On top of the previous web/desktop iteration it includes the latest Hub/protocol updates: digital-employee **direct chats (`kind=direct`)**, **immediate realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies (Kestrel limit raised accordingly). Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
 
 ## 新增（中文）
+- **数字员工单聊（kind=direct）**：数字员工管理列表每行新增「💬 私聊」——对该数字员工点一下即开始/复用与之的一对一**私有双人群**（`POST /ag-ui/agents/direct`，幂等）；不同用户与同一数字员工的单聊各自独立、互不可见（会话隔离）；单聊默认私密（`isPrivate=true`，语义记忆仅在本私群可检索）。在单聊里发**普通（未 @）消息即视为对其直达触发**，无需手动 @。Web 与桌面一致可用（Playwright 用例 `tools/direct-chat-flow.mjs` 已全绿）。
+- **实时会话吊销/禁用/改密即时断线**：登出、修改密码、管理员禁用或重置密码会**立即终止**该账号已建立的 WebSocket / SSE 实时连接（服务端主动关闭），不再等到断线才失效；会话在服务端吊销即刻生效。
+- **SDK 实时通道健壮性**：断连回调在异常断连时只触发一次（此前 WS/SSE 会先带异常、再带 null 触发两次）；上行 WebSocket 发送真正串行化（SemaphoreSlim 覆盖发送本身），避免并发发送竞态。
+- **上传 / 导入大包放行**：Kestrel 请求体上限与 FormOptions 同步放宽到 200MB（此前仅放宽表单解析，Kestrel 默认 30MB 仍会先拦大包），`/import`、`/upload` 大包可用。
 - **组织架构构建师走“一键式”结构化出稿**：挂 `org_design` 的组织角色（如 org_architect）多挂载一个 `org_plan_draft` 工具，复用与网页「一键组织编排」同一生成引擎（`AgentOrchestrator`），一次产出「岗位 + 各岗 skillIds + 技能(kind 按 shell/http/prompt/dotnet、executionLocation 按 server/client) + 岗位连接」的整支成稿 JSON——避免整支被手写成只见 pure prompt 的软稿。只出稿不落库，须用户明确认可后再经既有 `org_commit`（仅管理员）落库。
 - **协调 JSON 的 answer 真实换行也剥得干净**：模型在 `answer` 里放真实换行/未转义内容导致整包 `JsonDocument.Parse` 失败时，收尾（`UnwrapCoordinationAnswer` / 递归补查解析）会走容错提取把正文剥出来，不再把 `{"needsMore":…,"answer":…}` 整段 JSON 泄漏/截断给用户；真实换行保留成正文排版。
 - **Client 技能绝不落到服务端当 bash 跑**：服务端执行器对 `ExecutionLocation=Client` 的技能一律拒跑并给指引（应经本机桥/该用户机器执行）；明显 Windows PowerShell 正文在非 Windows 宿主（Docker/Linux 服务器、非 Windows 本机宿主）直接报“需 PowerShell 环境”，而不是出现 `Not running in PowerShell / command not found / 退出码2` 这类误导性假报错。Windows 桌面自托管的 PowerShell 执行路径不受影响。
@@ -9,6 +16,10 @@
 - **普通编辑不再误清交接/流水线**：因角色编辑 PUT 为整表替换，普通编辑页现在会沿用在“一键编排/组织”等处配置的整轮交接（`RelayToAgentId`）、编排流水线（`Pipeline`）与差异化审批名单（`RequireApprovalToolNames`），避免随手保存时被静默清空。
 
 ## New (English)
+- **Digital-employee direct chat (`kind=direct`)**: each digital employee row in the management list gains a “💬 chat” action — one click starts/reuses a one-to-one **private two-member group** with that employee (`POST /ag-ui/agents/direct`, idempotent); different users chatting with the same employee get isolated, mutually invisible sessions; direct chats are private by default (`isPrivate=true`, semantic memory only retrievable inside that private group). Inside the chat, **a plain (un-@) message means “talk to it” and triggers it directly** — no manual at-mention. Works identically in Web and desktop (Playwright flow `tools/direct-chat-flow.mjs` is green).
+- **Immediate realtime teardown on logout / disable / password reset**: logging out, changing the password, or an admin disabling/resetting an account now **terminates that account’s established WebSocket / SSE connections right away** (server-initiated close), instead of waiting for the next disconnect; session revocation takes effect immediately.
+- **SDK realtime robustness**: `Disconnected` now fires exactly once on an abnormal close (WS/SSE previously fired with the exception and then with `null`); WebSocket sends are fully serialized (a semaphore covers the actual `SendAsync`), removing concurrent-send races.
+- **Large upload/import bodies allowed**: the Kestrel request-body limit is raised to 200MB together with `FormOptions` (previously only the form parser was relaxed, so Kestrel’s 30MB default still rejected big bodies); big `/import` and `/upload` now work.
 - **Org architect drafts a whole organization the one-shot way**: an org role mounted on `org_design` (e.g., org_architect) gains an `org_plan_draft` tool that reuses the same generator as the web one-click organization orchestration (`AgentOrchestrator`) — one structured pass yields the full team JSON (roles + per-role `skillIds` + skills where `kind` is picked shell/http/prompt/dotnet and `executionLocation` server/client + connections), instead of free-chat producing mostly pure-prompt drafts. It only drafts (no write); commit still goes through `org_commit` (admin-gated) after explicit user agreement.
 - **Tolerant unwrap when the coordination JSON has real newlines in answer**: when the `answer` contains genuine line breaks / unescaped content so whole-object `JsonDocument.Parse` fails, final-reply wrappers (`UnwrapCoordinationAnswer` / recursive parse) fall back to extracting the answer text instead of leaking or truncating `{"needsMore":…,"answer":…}`; real newlines are kept as line breaks.
 - **Client skills are never mis-run as server bash**: the server executors refuse `ExecutionLocation=Client` with clear guidance (run on the originating machine via NativeBridge/browser); obviously PowerShell bodies on a non-Windows host (Docker/Linux server, non-Windows self-host) return a clear “PowerShell environment required” instead of the misleading `Not running in PowerShell / command not found / exit code 2`. Windows desktop self-host PowerShell execution is unchanged.
@@ -17,8 +28,8 @@
 
 ---
 
-# AG-UI 群聊桌面版 1.0.119 发布说明（受后端改动影响的既有桌面点版本）
-# AG-UI Group Chat Desktop 1.0.119 Release Notes (current desktop release)
+# AG-UI 群聊桌面版 1.0.119 发布说明（上一版本）
+# AG-UI Group Chat Desktop 1.0.119 Release Notes (previous point release)
 
 ## 新增（中文）
 - **内部协调 JSON 的“整段二次剥壳”**：智能体消息收尾（EndAgentMessage）时把整段正文再归一一次——若它就是 {\"needsMore\":…,\"answer\":…} 协调 JSON，落库与广播前统一替换为用户可读的 answer；即便此前被拆成多段流式发给用户，也会在完结前被纠正。
@@ -28,8 +39,8 @@
 - **Second-pass cleanup of coordination JSON at message end**: at agent-message End, if the whole content is an internal {\"needsMore\":…,\"answer\":…} object, it is rewritten to its user-facing answer before store/broadcast — even if earlier streamed in fragments.
 - Carried: Client (local) skills run only on the originating user’s machine (policy A); no bridge → “execution failed: no bridge installed”; trial results in a dialog and truly landing on the current machine.
 
-**版本说明**：1.0.119 为当前 Windows 桌面点版本，主题为「内部协调 JSON 整段二次剥壳（收尾归一）」，并包含 Client 技能 A 口径系列修复；已构建 Windows 1.0.119 MSI。本机桥日志写系统临时目录。
-**Version note**: 1.0.119 is the current Windows desktop point release, themed “second-pass whole-message cleanup of coordination JSON”, including the Client-skill policy-A series; a Windows 1.0.119 MSI was built.
+**版本说明**：1.0.119 为上一 Windows 桌面点版本（1.0.120 为当前），主题为「内部协调 JSON 整段二次剥壳（收尾归一）」，并包含 Client 技能 A 口径系列修复；已构建 Windows 1.0.119 MSI。本机桥日志写系统临时目录。
+**Version note**: 1.0.119 is the previous Windows desktop point release (1.0.120 is current), themed “second-pass whole-message cleanup of coordination JSON”, including the Client-skill policy-A series; a Windows 1.0.119 MSI was built. Native-bridge logs live in the system temp directory.
 
 ---
 
