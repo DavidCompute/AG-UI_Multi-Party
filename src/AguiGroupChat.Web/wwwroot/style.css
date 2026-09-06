@@ -1699,3 +1699,23 @@ button { white-space: nowrap; }
 .skill-kind { flex: none; font-size: 11px; }
 .skill-op-col { display: flex; gap: 6px; justify-content: flex-end; }
 .skill-test-result { white-space: pre-wrap; background: rgba(0,0,0,.25); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); }
+
+/* ---- 默认头像占位：无自定义头像时在圆形容器内居中显示类别 emoji，避免空白/不显示 ---- */
+.member-item .member-avatar,
+.mention-pick-item .member-avatar,
+.member-pick .pick-item .member-avatar {
+  align-items: center;
+  justify-content: center;
+}
+.avatar-ph { line-height: 1; }
+.member-item .member-avatar .avatar-ph,
+.mention-pick-item .member-avatar .avatar-ph,
+.member-pick .pick-item .member-avatar .avatar-ph {
+  font-size: 13px;
+}
+.agent-avatar-ph {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--panel-2);
+  font-size: 13px; line-height: 1; vertical-align: middle;
+}

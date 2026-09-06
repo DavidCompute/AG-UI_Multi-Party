@@ -782,7 +782,7 @@ function renderAgentList() {
     const canManage = !!a.ownerId && (state.isAdmin || a.ownerId === state.memberId);
     const avatarImg = a.avatar
       ? `<img class="agent-avatar" src="${escapeHtml(authedAssetUrl(a.avatar))}" alt="" onerror="this.remove()" />`
-      : "";
+      : `<span class="agent-avatar-ph">🤖</span>`;
     row.innerHTML = `
       <div class="agent-cell">
         ${agentBatchMode && canManage ? `<input type="checkbox" class="agent-sel-cb" data-agent-id="${escapeHtml(a.agentId)}" ${selectedAgents.has(a.agentId) ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff;margin-right:6px;vertical-align:middle" />` : ""}
@@ -2642,13 +2642,26 @@ async function autoDiscoverClient() {
 let createPickOptions = []; // 创建知聚弹窗的可选成员（打开时快照，供搜索过滤）
 let addPickOptions = [];    // 添加成员弹窗的可选成员
 
+/**
+ * 成员头像 HTML（状态图标叠加，大小写通用）：
+ * 有自定义头像 → 图片；没有（或空串）→ 默认占位字符（AI 分身 🪞 / 数字员工 🤖 / 用户 🧑），
+ * 避免“默认头像”位置空白不显示（覆盖成员列表 / 提及选择 / 成员勾选等多处）。
+ */
+function memberAvatarHtml(m, statusIconHtml) {
+  const isTwin = (m?.memberId || "").startsWith("twin_");
+  const ch = isTwin ? "🪞" : (m?.memberType === "agent" ? "🤖" : "🧑");
+  const has = !!m?.avatar && String(m.avatar).trim().length > 0;
+  const inner = has
+    ? `<img src="${escapeHtml(authedAssetUrl(m.avatar))}" alt="" onerror="this.remove()" />`
+    : `<span class="avatar-ph">${ch}</span>`;
+  return `<span class="member-avatar">${inner}${statusIconHtml || ""}</span>`;
+}
+
 /** 成员选择项 HTML：头像（状态图标叠加）+ 名称 + 副标题 + AI 标签。 */
 function pickItemHtml(m) {
   const isTwin = (m.memberId || "").startsWith("twin_");
   const statusIcon = memberStatusIconHtml(m);
-  const avatar = m.avatar
-    ? `<span class="member-avatar"><img src="${escapeHtml(authedAssetUrl(m.avatar))}" alt="" onerror="this.remove()" />${statusIcon}</span>`
-    : statusIcon;
+  const avatar = memberAvatarHtml(m, statusIcon);
   const sub = m.memberType === "agent"
     ? (isTwin ? t("member.twinTip") : `${t("agent.pickPrefix")} · ${TRIGGER_LABELS[m.triggerMode] || t("agent.form.trigger.mentioned")}`)
     : t("agent.pickUser");
@@ -4186,9 +4199,10 @@ function renderGroupList() {
     const div = document.createElement("div");
     div.className = "group-item" + (g.groupId === state.activeGroupId ? " active" : "");
     const unread = state.groupUnread.get(g.groupId)?.unreadCount || 0;
+    const fallbackIcon = g.isSupportCircle ? "🛟" : (g.kind === "direct" ? "💬" : "👥");
     const avatar = g.groupAvatar
       ? `<span class="group-avatar"><img src="${escapeHtml(authedAssetUrl(g.groupAvatar))}" alt="" onerror="this.remove()" /></span>`
-      : `<span class="icon">${g.isSupportCircle ? "🛟" : "👥"}</span>`;
+      : `<span class="icon">${fallbackIcon}</span>`;
     // 客服知聚：明显的「客服知聚」标签；非成员且未进入的顾客右上角加「进入」小标
     const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
     const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
@@ -5301,9 +5315,7 @@ function renderMembers() {
     const role = m.role === "owner" ? t("member.roleOwner") : m.role === "admin" ? t("member.roleAdmin") : "";
     // 头像（有则显示）：状态图标叠加到头像右下角；无头像时状态图标独立显示（16px 圆形）
     const statusIcon = memberStatusIconHtml(m);
-    const avatarHtml = m.avatar
-      ? `<span class="member-avatar"><img src="${escapeHtml(authedAssetUrl(m.avatar))}" alt="" onerror="this.remove()" />${statusIcon}</span>`
-      : statusIcon;
+    const avatarHtml = memberAvatarHtml(m, statusIcon);
     div.innerHTML = `
       ${avatarHtml}
       <span class="member-name"></span>
@@ -6272,9 +6284,7 @@ function showMentionPicker(query) {
     el.innerHTML = list.map((m, i) => {
       const isTwin = (m.memberId || "").startsWith("twin_");
       const statusIcon = memberStatusIconHtml(m);
-      const avatarHtml = m.avatar
-        ? `<span class="member-avatar"><img src="${escapeHtml(authedAssetUrl(m.avatar))}" alt="" onerror="this.remove()" />${statusIcon}</span>`
-        : statusIcon;
+      const avatarHtml = memberAvatarHtml(m, statusIcon);
       return `<div class="mention-pick-item ${i === mentionPickerIndex ? "active" : ""}" data-id="${escapeHtml(m.memberId)}">` +
         avatarHtml +
         `<span class="pick-name">${escapeHtml(m.nickname || m.memberId)}</span>` +
