@@ -69,6 +69,12 @@ public static class NativeTunnelApi
 
             var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("NativeTunnelApi");
             logger.LogInformation("内网桥经隧道注册：agent={Agent} bridge={Bridge}", agent, bridgeId);
+            // 客户端（机器）维度注册对按客户端路由至关重要（网关 TunnelAvailable 只认 _byClient）：
+            // 单独记一行便于定位“发起客户端查不到桥”类问题
+            if (clientConn is null)
+                logger.LogWarning("内网桥未按客户端注册（connect 未带 client 参数）：agent={Agent} bridge={Bridge}", agent, bridgeId);
+            else
+                logger.LogInformation("内网桥按客户端注册：client={Client} bridge={Bridge}", client.Trim(), bridgeId);
 
             // 从下行队列逐条写到 SSE
             async Task Pump()

@@ -38,8 +38,10 @@ public sealed class ClientToolBridgeFixture : IAsyncLifetime
         App = builder.Build();
         HubApp.MapEndpoints(App);
         App.MapSkillApi();
-        App.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（默认 RequireAdmin=false）
-        App.MapClientToolBridgeApi("/ag-ui/client-tool-secure", new ClientToolOptions { RequireAdmin = true }); // 共享部署护栏端点（仅管理员）
+        // 测试宿主=本机：IsHostLocal=true（桌面自托管语义，宿主可直接执行 shell）
+        App.MapClientToolBridgeApi("/ag-ui/client-tool", new ClientToolOptions { IsHostLocal = true }); // 客户端执行技能的 shell 本机桥（RequireAdmin=false）
+        App.MapClientToolBridgeApi("/ag-ui/client-tool-secure", new ClientToolOptions { RequireAdmin = true, IsHostLocal = true }); // 共享部署护栏端点（仅管理员，宿主=本机）
+        App.MapClientToolBridgeApi("/ag-ui/client-tool-server", new ClientToolOptions { IsHostLocal = false }); // Docker/共享 Web 宿主（容器/服务器≠用户本机）→ 拒绝代跑
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }
@@ -140,6 +142,35 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
 
         var res = await _client.SendAsync(req);
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Shell_NonHostLocalServer_RefusesRatherThanRunsOnServerHost()
+    {
+        // Docker / 共享 Web（IsHostLocal=false）：服务端容器/服务器不是用户本机，禁止代跑“本机技能”——
+        // 明确拒绝（409 + 错误码）而不是把 PowerShell 丢给服务端宿主产生“环境错位”的假结果。
+        var token = await RegisterAsync("host_not_local");
+        using var req = Authed(HttpMethod.Post, "/ag-ui/client-tool-server", token);
+        req.Content = JsonContent.Create(new { kind = "shell", command = "echo must-not-run-on-server" });
+
+        var res = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("CLIENT_TOOL_HOST_NOT_LOCAL", d.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Info_ReflectsHostLocalFlagPerEndpoint()
+    {
+        // 能力探测：桌面自托管端点 hostLocal=true（前端可直接交 /ag-ui/client-tool 执行）；
+        // Docker / 共享 Web 端点 hostLocal=false（前端应改走网关本机桥隧道路由，见 runClientTool / runBatchClientTools）。
+        var local = await _client.GetAsync("/ag-ui/client-tool/info");
+        local.EnsureSuccessStatusCode();
+        Assert.True((await local.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("hostLocal").GetBoolean());
+
+        var remote = await _client.GetAsync("/ag-ui/client-tool-server/info");
+        remote.EnsureSuccessStatusCode();
+        Assert.False((await remote.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("hostLocal").GetBoolean());
     }
 
     [Fact]

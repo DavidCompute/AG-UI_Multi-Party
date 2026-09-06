@@ -3904,8 +3904,29 @@ function clientToolSubstitute(template, args) {
   return template.replace(/\$\{(\w+)\}/g, (_m, k) => (k in vars ? vars[k] : _m));
 }
 
+/* 服务端是否“宿主即用户本机”（桌面版自托管）：true → 前端可直接把 shell 交同源 /ag-ui/client-tool 在宿主执行；
+ * false（Docker / 共享 Web）→ 服务端容器/服务器不是用户本机，禁止把 PowerShell 交给它代跑（会产生“执行环境错位”的假结果），
+ * 改为批准后由网关经本机桥(NativeBridge)反向隧道路由到发起请求的电脑在本机执行。 */
+let _serverHostLocalPromise = null;
+function serverHostLocal() {
+  if (!_serverHostLocalPromise) {
+    _serverHostLocalPromise = fetch("/ag-ui/client-tool/info", { method: "GET", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => !!(d && d.hostLocal))
+      .catch(() => false); // 探测失败按“非本机”保守处理：不把本机技能丢给服务端代跑
+  }
+  return _serverHostLocalPromise;
+}
+
+/* 决策前确保本机桥已发现：桥可能比页面晚启动 / 中途重启——未发现时重新回环探测一次并带回 client。 */
+async function ensureBridgeClient() {
+  if (!state.bridgeClient) await autoDiscoverClient();
+}
+
 /** 在客户端（浏览器 / 桌面壳）实际执行客户端技能，并把结果作为 toolResult 回传给后端回灌模型。
  *  kind=http → 浏览器 fetch；kind=shell → 经本机桥（桌面壳）执行；执行成功后 resolve 并携带 toolResult。
+ *  kind=shell 且服务端非“用户本机”（Docker / 共享 Web）时不在此执行（服务端容器≠用户本机，代跑会环境错位），
+ *  改为直接批准、由网关经本机桥(NativeBridge)反向隧道在发起请求的电脑执行。
  */
 async function runClientTool(m) {
   const itx = m.interaction;
@@ -3921,12 +3942,16 @@ async function runClientTool(m) {
   try {
     if (kind === "shell") {
       // 确认已由聊天历史内的卡片「▶ 在本机执行」按钮完成；此处仅执行
-      // 本机桥：配置了本机工具桥（Docker + 浏览器在本机）时用其地址+令牌，在本机执行 shell（结果来自浏览器所在主机）；
-      // 未配置则回落到服务器端 /ag-ui/client-tool（桌面壳 / 服务器即本机时）。请求参数：command、cwd、超时；${query} 占位经参数替换
       const command = clientToolSubstitute(cfg.command, itx.toolArguments).trim();
       if (!command) { toast(t("itx.clientToolNoCmd")); return; }
-      // 本机 shell 优先经内网反向隧道执行（网关检测到平台级/逐员工桥在线时自动路由，前端无需配置桥地址）；
-      // 这里回落到服务器端 /ag-ui/client-tool（桌面壳 / 服务器即本机时）。
+      // 服务端非“用户本机”（Docker / 共享 Web）：不在服务端容器代跑 PowerShell（执行环境错位会产生假结果），
+      // 直接批准、交由网关在批准后经本机桥(NativeBridge)反向隧道路由到发起请求的电脑在本机执行。
+      if (!(await serverHostLocal())) {
+        await ensureBridgeClient(); // 决策请求带上浏览器所在机器发现到的 client，供网关隧道路由（消息阶段未带也能补全）
+        resolveInteraction(m, true, undefined, undefined, false, undefined);
+        return;
+      }
+      // 桌面自托管（宿主=用户本机）：同源本机桥在宿主执行（结果来自本机）；未配置则回落到服务器端 /ag-ui/client-tool
       const res = await fetch("/ag-ui/client-tool", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.token || ""}` },
@@ -3956,9 +3981,11 @@ async function runClientTool(m) {
   resolveInteraction(m, true, undefined, undefined, false, result);
 }
 
-/** 编排计划「本机一键执行全部」（client_tool_batch）：解析 itx.clientRunner 里的技能数组，
- *  逐个通过本机桥执行，收集各技能结果后一次回传（toolResult = JSON 数组 [{skillId, output}]），
- *  后端据此点亮计划卡各步骤并继续综合。 */
+/** 编排计划「本机一键执行全部」（client_tool_batch）：解析 itx.clientRunner 里的技能数组，逐个执行并回传。
+ *  - shell 技能且服务端非“用户本机”（Docker / 共享 Web）：不经 /ag-ui/client-tool 代跑（服务端容器≠用户本机，会环境错位），
+ *    由网关在批准后经本机桥(NativeBridge)反向隧道在发起请求的电脑逐个执行；前端只负责批准并携带浏览器发现的 client。
+ *  - 其余（http 浏览器 fetch / 桌面自托管 shell）：前端逐个执行，结果作为 toolResult（JSON 数组 [{skillId, output}]）回传，
+ *    后端据此点亮计划卡各步骤并继续综合；混合批时网关用隧道结果补齐 shell 项。 */
 async function runBatchClientTools(m) {
   const itx = m.interaction;
   if (!itx || itx.resolved) return;
@@ -3969,52 +3996,62 @@ async function runBatchClientTools(m) {
   let items = null;
   try { items = itx.clientRunner ? JSON.parse(itx.clientRunner) : null; } catch { items = null; }
   if (!Array.isArray(items) || items.length === 0) { toast(t("itx.batchNoSkill")); return; }
-  const results = [];
+  const hostLocal = await serverHostLocal(); // 只探测一次：本批是否桌面自托管（宿主=用户本机）
+  const collected = []; // 前端实际执行的结果（http / 桌面自托管 shell）；隧道执行的 shell 项不入此数组
   const failures = []; // 失败的技能（供右上角通知备查）
   for (const item of items) {
-    let out;
-    try {
-      let cfg = null;
-      try { cfg = (item && item.runner) ? JSON.parse(item.runner) : null; } catch { cfg = null; }
-      const kind = (cfg && cfg.kind) || "http";
-      if (kind === "shell") {
-        const command = (cfg.command || "").trim();
-        if (!command) {
-          const errMsg = t("itx.clientToolNoCmd");
-          results.push({ skillId: item.skillId, output: "（" + errMsg + "）" });
-          failures.push({ skill: item.skillId, msg: errMsg });
-          continue;
-        }
-        // 本机 shell 优先经内网反向隧道执行；这里回落到服务器端 /ag-ui/client-tool。
-        const bridgeUrl = "/ag-ui/client-tool";
-        const bridgeToken = state.token || "";
-        const res = await fetch(bridgeUrl, {
+    let cfg = null;
+    try { cfg = (item && item.runner) ? JSON.parse(item.runner) : null; } catch { cfg = null; }
+    const kind = (cfg && cfg.kind) || "http";
+    if (kind === "shell") {
+      const command = (cfg.command || "").trim();
+      if (!command) {
+        const errMsg = t("itx.clientToolNoCmd");
+        collected.push({ skillId: item.skillId, output: "（" + errMsg + "）" });
+        failures.push({ skill: item.skillId, msg: errMsg });
+        continue;
+      }
+      // 服务端非“用户本机”（Docker / 共享 Web）：不在服务端容器代跑 PowerShell（执行环境错位会产生假结果），
+      // shell 项留给网关在批准后经本机桥隧道在本机执行；前端只批准并携带浏览器发现的 client。
+      if (!hostLocal) continue;
+      try {
+        // 桌面自托管（宿主=用户本机）：同源本机桥在宿主执行
+        const res = await fetch("/ag-ui/client-tool", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${bridgeToken}` },
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${state.token || ""}` },
           body: JSON.stringify({ kind: "shell", command, cwd: cfg.cwd || ".", timeoutSec: cfg.timeoutSec || 30, query: (item && item.query) || undefined }),
         });
         if (!res.ok) throw new Error((await res.text()).slice(0, 300) || res.statusText);
         const d = await res.json();
-        out = d.output || d.message || JSON.stringify(d);
-      } else {
+        collected.push({ skillId: item.skillId, output: d.output || d.message || JSON.stringify(d) });
+      } catch (err) {
+        const emsg = err && err.message ? err.message : String(err);
+        collected.push({ skillId: item.skillId, output: "（本机执行失败：" + emsg + "）" });
+        failures.push({ skill: item.skillId, msg: emsg });
+      }
+    } else {
+      try {
         const method = String(cfg.method || "GET").toUpperCase();
         const url = (cfg.url || "").trim();
         const headers = (cfg.headers && typeof cfg.headers === "object") ? cfg.headers : {};
         const rawBody = typeof cfg.body === "string" ? cfg.body : (cfg.body ? JSON.stringify(cfg.body) : undefined);
         const res = await fetch(url, { method, headers, body: (method === "GET" || method === "HEAD") ? undefined : rawBody });
         const text = await res.text();
-        out = `HTTP ${res.status}\n${text.slice(0, 4000)}`;
+        collected.push({ skillId: item.skillId, output: `HTTP ${res.status}\n${text.slice(0, 4000)}` });
+      } catch (err) {
+        const emsg = err && err.message ? err.message : String(err);
+        collected.push({ skillId: item.skillId, output: "（本机执行失败：" + emsg + "）" });
+        failures.push({ skill: item.skillId, msg: emsg });
       }
-      results.push({ skillId: item.skillId, output: out });
-    } catch (err) {
-      const emsg = err && err.message ? err.message : String(err);
-      results.push({ skillId: item.skillId, output: "（本机执行失败：" + emsg + "）" });
-      failures.push({ skill: item.skillId, msg: emsg });
     }
   }
   // 批次内单个技能失败 → 右上角通知逐一备查
   for (const f of failures) notifySkillError(m.groupId, f.skill, f.msg);
-  resolveInteraction(m, true, undefined, undefined, false, JSON.stringify(results));
+  // 决策：纯隧道批（Docker 下全部是 shell）不带 toolResult——网关批准后经本机桥隧道执行；
+  // 有前端执行结果（http / 桌面 shell）时以 JSON 数组回传，网关用隧道结果补齐未覆盖的 shell 项。
+  await ensureBridgeClient(); // 决策请求携带浏览器所在机器发现到的 client，供网关隧道路由（消息阶段未带也能补全）
+  if (collected.length > 0) resolveInteraction(m, true, undefined, undefined, false, JSON.stringify(collected));
+  else resolveInteraction(m, true, undefined, undefined, false, undefined);
 }
 
 /** 同步移除某消息内的审批/交互卡 DOM（点击执行 / 决策后调用），点击即消失，不等 rAF 重渲染。 */
@@ -4046,6 +4083,7 @@ function resolveInteraction(m, approved, inputText, payload, approveAll, toolRes
     toolResult: toolResult || undefined, // 客户端执行技能：前端回传执行结果，网关回灌模型继续
     approveAll: !!approveAll,
     memberId: state.memberId,
+    bridgeClient: state.bridgeClient || undefined, // 决策浏览器所在机器（回环自动发现）；网关据此把本机技能路由到该机器执行
   });
   // 发送成功后才本地置为已决策并隐藏卡片，避免断网时卡片消失而服务端交互悬挂
   itx.resolved = true;

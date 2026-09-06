@@ -49,9 +49,15 @@ public static class ClientToolBridgeApi
     public static void MapClientToolBridgeApi(this WebApplication app, string path = "/ag-ui/client-tool", ClientToolOptions? options = null)
     {
         // 默认行为：从 DI 取配置（Program.cs 注册的 ClientToolOptions 单例）；未注册（如测试夹具）或缺省时用默认；
-        // 测试也可显式传入覆写以固定 RequireAdmin 取值
+        // 测试也可显式传入覆写以固定 RequireAdmin / IsHostLocal 取值
         var effective = options ?? app.Services.GetService<ClientToolOptions>() ?? new ClientToolOptions();
         var root = app.MapGroup(path);
+
+        // 前端执行决策所需的能力探测：宿主是否为“用户本机”（桌面版自托管 → 前端可直接把 shell 交此端点跑）。
+        // Docker / 共享 Web（IsHostLocal=false）必须保持 false：其宿主（容器 / 服务器）不是发起请求的浏览器所在电脑，
+        // 前端应改走「审批后由网关经本机桥隧道」执行，而不是把 PowerShell 丢给服务端容器 bash 造成“环境错位”。
+        root.MapGet("/info", () => Results.Ok(new { hostLocal = effective.IsHostLocal, requireAdmin = effective.RequireAdmin }));
+
         root.MapPost("/", async (ClientToolRunRequest req, HttpContext ctx, IWebHostEnvironment env, ILoggerFactory loggerFactory, AuthService auth, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("AguiGroupChat.Web.ClientToolBridge");
@@ -72,6 +78,17 @@ public static class ClientToolBridgeApi
                 return Results.BadRequest(new { error = "缺少要执行的 shell 命令（command）" });
             if (req.Command.Length > MaxCommandChars)
                 return Results.BadRequest(new { error = $"shell 命令超过长度上限（{MaxCommandChars} 字符）" });
+
+            // 环境错位护栏：本端点只在“宿主即用户本机”（桌面版自托管 ClientTool:IsHostLocal=true）时才可在宿主执行。
+            // Docker / 共享 Web 部署（IsHostLocal=false）的宿主（容器 / 服务器）不是发起请求的浏览器所在电脑——
+            // 在这里执行会把 Windows PowerShell 正文丢给容器 bash / 远端 Linux，产出“需要 PowerShell 环境 / command not found”
+            // 一类的假结果并被回灌模型。明确拒绝，指引走本机桥(NativeBridge)隧道（由网关按发起请求的 client 路由到那台电脑）。
+            if (!effective.IsHostLocal)
+                return Results.Json(new AguiError(ErrorCodes.ClientToolHostNotLocal,
+                        "服务端不是用户本机（Docker / 共享部署），不能代为执行“本机(client)”技能："
+                        + "请在发起请求的电脑启动 AguiGroupChat.NativeBridge（本机桥）后重试，"
+                        + "系统会经反向隧道把该技能路由到这台电脑执行；禁止在服务端容器/服务器上执行本机技能。"),
+                    statusCode: StatusCodes.Status409Conflict);
 
             // 以请求者 userId 为沙箱隔离维度，避免不同账号写同一目录
             var userId = WebIdentity.UserId(ctx);

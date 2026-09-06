@@ -217,6 +217,10 @@ public sealed class GroupInteractionResolveRequest
     public string? ToolResult { get; set; }
     /// <summary>true = 对本次运行启用批量批准（后续同类审批自动放行，不再逐个打断）。仅批准（Approved=true）时生效。</summary>
     public bool ApproveAll { get; set; }
+    /// <summary>决策方浏览器所在客户端/机器（内网桥的 --client 标识，前端经同机回环自动发现携带）。
+    /// 网关据此刻画/补全“本机(client)技能”的路由目标——即使发起该次运行的消息未带上 bridgeClient（如页面早于桥上线），
+    /// 触发者决策时仍可把执行路由到其浏览器所在电脑的本机桥。</summary>
+    public string? BridgeClient { get; set; }
 }
 
 /// <summary>GROUP_SUBSCRIBE：客户端请求订阅指定群组（协议 4.6）。</summary>

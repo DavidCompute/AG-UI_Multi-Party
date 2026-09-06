@@ -52,8 +52,11 @@ public interface IAgentGateway
     /// 实现方校验 <paramref name="memberId"/> 必须是该交互请求的触发者（TargetMemberId），否则返回 false。
     /// 返回 false 表示交互请求不存在 / 已过期 / 非触发者。
     /// <paramref name="approveAll"/>：是否对<b>本次运行</b>启用批量批准——true 时，该 run 后续的审批工具自动放行（不再打断）。
+    /// <paramref name="toolResult"/>：kind=client_tool 交互前端执行后的结果回传。
+    /// <paramref name="clientId"/>：决策方浏览器所在客户端/机器标识（内网桥 --client，可空）——网关据此把
+    /// “本机(client)技能”路由到该机器执行，即使发起该次运行的消息未携带（页面早于桥上线等场景也可在决策时补全路由）。
     /// </summary>
-    Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null);
+    Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null, string? clientId = null);
 
     /// <summary>停止指定运行（「停止生成」）：取消进行中的模型 / 桥接流式调用。
     /// 命中并已取消返回 true；运行不存在 / 已结束 / 无权限返回 false。</summary>

@@ -421,6 +421,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return null;
     }
 
+    /// <summary>取函数调用参数里的 query 文本（供经隧道的 shell 技能做 ${query} 占位替换）；
+    /// 参数里没有 query 键时回退为紧凑 JSON（与前端 clientToolSubstitute 的取值口径一致）。</summary>
+    private static string? ApprovalArgsQuery(FunctionCallContent fc)
+    {
+        if (fc.Arguments is { Count: > 0 } args)
+        {
+            if (args.TryGetValue("query", out var q) && q is not null)
+                return q.ToString();
+            try { return System.Text.Json.JsonSerializer.Serialize(args, AguiJson.Options); } catch { /* 序列化失败回退 null */ }
+        }
+        return null;
+    }
+
     private async Task<AgentInvocationResult> InvokeCoreAsync(AgentInvocationContext context, CancellationToken ct)
     {
         var def = _catalog.GetDefinition(context.AgentId);
@@ -622,7 +635,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     {
                         await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
                         var tunnelResult = await ExecuteTunnelAsync(
-                            context.AgentId, context.PreferredBridgeClient, shellCmd!, shellCwd, shellTimeoutSec, null,
+                            context.AgentId, context.PreferredBridgeClient, shellCmd!, shellCwd, shellTimeoutSec, ApprovalArgsQuery(tfc),
                             TimeSpan.FromSeconds(Math.Clamp(shellTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
                         var resultText = string.IsNullOrWhiteSpace(tunnelResult)
                             ? (tunnelResult is null ? "（内网本机桥执行未返回结果 / 超时）" : "（内网本机执行无输出）")
@@ -659,6 +672,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 消息保持开启（不 End）：用户反馈后同一 AgentSession 继续运行，最终结果在运行结束时一次性返回。
             if (approval is not null)
             {
+                // 诊断：客户端技能需要在本机执行，但发起请求的 client 缺失 / 其桥不在线——这种情形下无人能真机执行，
+                // 审批后也只会落到服务端兜底/失败。记录原因便于定位“执行环境没对上用户电脑”的问题。
+                if (approval.ToolCall is FunctionCallContent diagFc
+                    && _catalog.GetAgentClientToolNames(context.AgentId).Contains(diagFc.Name, StringComparer.Ordinal)
+                    && !TunnelAvailable(context.AgentId, context.PreferredBridgeClient))
+                {
+                    _logger.LogWarning(
+                        "客户端技能 {Tool} 无法路由到发起客户端：PreferredBridgeClient={Client}（空=前端未发现本机桥；非空=该桥不在线/未注册）",
+                        diagFc.Name, context.PreferredBridgeClient ?? "(空)");
+                }
                 await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
                 var fc = approval.ToolCall as FunctionCallContent;
                 // 客户端执行技能：toolName 命中则标记 kind=client_tool，下发给前端执行（复用 HITL 通道下发 + 回传）；
@@ -2813,59 +2836,80 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 触发者决策后恢复被中断的运行：校验决策者必须是交互请求的 TargetMemberId（触发者），
     /// 把「批准 / 拒绝」作为 User 消息回灌同一 AgentSession，工具随之执行（或跳过），流式回复继续回灌群聊。
     /// </summary>
-    public async Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null)
+    public async Task<bool> ResolveInteractionAsync(string interruptId, string memberId, bool approved, string? input, JsonElement? payload, CancellationToken ct, bool approveAll = false, string? toolResult = null, string? clientId = null)
     {
         // 入口先做一次周期清理：定时器兜底外，决策前把已超时的交互先清掉，避免继续处理过期请求
         await PurgeExpiredInteractions();
 
         // 编排计划「客户端技能批量执行」的交互：不通过 PendingInteraction/ResumeRunAsync，而是直接
-        // 把前端回传的批量结果写入 TCS，让正在等待的计划方法恢复执行（再次校验触发者身份）。
+        // 把执行结果写入 TCS，让正在等待的计划方法恢复执行（再次校验触发者身份）。
         if (_batchClientExecWaits.TryGetValue(interruptId, out var batch))
         {
             if (!string.Equals(batch.TargetMemberId, memberId, StringComparison.Ordinal))
                 return false;
             if (!_batchClientExecWaits.TryRemove(interruptId, out batch))
                 return false;
+            // 决策时携带浏览器本机桥的 client → 以决策机器为准路由（发起该次运行的消息未带 bridgeClient 时在此补全）
+            var resolveClient = string.IsNullOrWhiteSpace(clientId) ? null : clientId.Trim();
+            if (!string.IsNullOrWhiteSpace(resolveClient)
+                && !string.Equals(batch.ClientId, resolveClient, StringComparison.Ordinal))
+            {
+                _logger.LogInformation("批量客户端技能按决策机器路由：interrupt={InterruptId} client={Client}", interruptId, resolveClient);
+                batch = batch with { ClientId = resolveClient };
+            }
             Dictionary<string, string>? results = null;
-            // 内网隧道在线（平台级 / 逐员工 / 逐客户端）且已批准 → 经隧道在桥所在主机逐个执行批量客户端 shell 技能（而非前端回传结果）
-            if (approved && TunnelAvailable(batch.AgentId, batch.ClientId))
+            if (approved)
             {
                 results = new Dictionary<string, string>(StringComparer.Ordinal);
-                foreach (var it in batch.Items)
+                // 前端回传结果先并入（http 等浏览器可直接执行的项）：JSON 数组 [{"skillId":..,"output":..}]
+                if (!string.IsNullOrWhiteSpace(toolResult))
                 {
-                    if (TryParseRunnerShell(it.ClientRunner, out var bCmd, out var bCwd, out var bTimeoutSec))
+                    try
                     {
-                        var br = await ExecuteTunnelAsync(
-                            batch.AgentId, batch.ClientId, bCmd!, bCwd, bTimeoutSec, it.Query,
-                            TimeSpan.FromSeconds(Math.Clamp(bTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
-                        results[it.SkillId] = string.IsNullOrWhiteSpace(br) ? "（本机执行未返回结果 / 超时）" : br;
+                        var arr = JsonSerializer.Deserialize<List<JsonElement>>(toolResult, AguiJson.Options) ?? [];
+                        foreach (var item in arr)
+                        {
+                            var sid = item.TryGetProperty("skillId", out var p) ? p.GetString() : null;
+                            var outp = item.TryGetProperty("output", out var op) ? op.GetString() : null;
+                            if (!string.IsNullOrWhiteSpace(sid)) results[sid] = outp ?? "（本机执行无输出）";
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        results[it.SkillId] = "（该技能非本机 shell，无法经隧道执行）";
+                        _logger.LogWarning(ex, "批量客户端技能回传解析失败：interrupt={InterruptId}", interruptId);
+                    }
+                }
+                // 内网隧道在线（按发起/决策客户端）且已批准 → 批量 shell 技能经隧道在桥所在主机逐个执行，优先于前端回传结果
+                if (TunnelAvailable(batch.AgentId, batch.ClientId))
+                {
+                    foreach (var it in batch.Items)
+                    {
+                        if (TryParseRunnerShell(it.ClientRunner, out var bCmd, out var bCwd, out var bTimeoutSec))
+                        {
+                            var br = await ExecuteTunnelAsync(
+                                batch.AgentId, batch.ClientId, bCmd!, bCwd, bTimeoutSec, it.Query,
+                                TimeSpan.FromSeconds(Math.Clamp(bTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                            results[it.SkillId] = string.IsNullOrWhiteSpace(br) ? "（本机执行未返回结果 / 超时）" : br;
+                        }
+                        else if (!results.ContainsKey(it.SkillId))
+                        {
+                            results[it.SkillId] = "（该技能非本机 shell，无法经隧道执行）";
+                        }
+                    }
+                }
+                else
+                {
+                    // 无可用隧道（发起/决策机器的本机桥未连接 / 未上报）：逐项补齐明确失败原因，避免静默留空让模型脑补成功
+                    foreach (var it in batch.Items)
+                    {
+                        if (results.ContainsKey(it.SkillId)) continue;
+                        results[it.SkillId] = TryParseRunnerShell(it.ClientRunner, out _, out _, out _)
+                            ? "（未能执行：发起请求/决策的电脑未连接本机桥 NativeBridge，无法路由到该机器执行本机技能。请在该电脑启动 AguiGroupChat.NativeBridge 后重新发起。）"
+                            : "（该技能非本机 shell，无法经隧道执行）";
                     }
                 }
             }
-            else if (approved && !string.IsNullOrWhiteSpace(toolResult))
-            {
-                try
-                {
-                    // 前端回传格式：JSON 数组 [{"skillId":..,"output":..}, ...]
-                    var arr = JsonSerializer.Deserialize<List<JsonElement>>(toolResult, AguiJson.Options) ?? [];
-                    results = new Dictionary<string, string>(StringComparer.Ordinal);
-                    foreach (var item in arr)
-                    {
-                        var sid = item.TryGetProperty("skillId", out var p) ? p.GetString() : null;
-                        var outp = item.TryGetProperty("output", out var op) ? op.GetString() : null;
-                        if (!string.IsNullOrWhiteSpace(sid)) results[sid] = outp ?? "（本机执行无输出）";
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "批量客户端技能回传解析失败：interrupt={InterruptId}", interruptId);
-                }
-            }
-            ClientToolTrace.Write($"BATCH-RESOLVE interrupt={interruptId} member={memberId} approved={approved} results={results?.Count ?? 0}");
+            ClientToolTrace.Write($"BATCH-RESOLVE interrupt={interruptId} member={memberId} approved={approved} tunneled={TunnelAvailable(batch.AgentId, batch.ClientId)} results={results?.Count ?? 0}");
             batch.Completion.TrySetResult((approved && results is not null, results));
             return true;
         }
@@ -2877,6 +2921,26 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return false; // 仅触发者可决策（群聊其他用户无权交互）
         if (!_pendingInteractions.TryRemove(interruptId, out pending))
             return false; // 并发下已被决策
+
+        // 决策时携带浏览器本机桥的 client → 作为“本机(client)技能”的路由目标：发起消息阶段若未携带（如页面早于桥上线）
+        // 或桥中途重启换了 client，触发者决策时仍可把执行路由到其浏览器所在电脑的本机桥。
+        var decisionClient = string.IsNullOrWhiteSpace(clientId) ? null : clientId.Trim();
+        if (!string.IsNullOrWhiteSpace(decisionClient)
+            && _nativeTunnel.Value?.HasClient(decisionClient) == true
+            && !string.Equals(pending.Context.PreferredBridgeClient, decisionClient, StringComparison.Ordinal))
+        {
+            pending = pending with { Context = pending.Context with { PreferredBridgeClient = decisionClient } };
+            _logger.LogInformation("交互决策按决策机器路由：interrupt={InterruptId} client={Client}", interruptId, decisionClient);
+        }
+        // 诊断：客户端技能已批准，但仍无已注册 client 可路由——审批后只会落失败/占位文本，记录便于定位“执行环境没对上用户电脑”的问题
+        if (approved
+            && pending.ApprovalRequest?.ToolCall is FunctionCallContent routeFc
+            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(routeFc.Name, StringComparer.Ordinal)
+            && !TunnelAvailable(pending.Context.AgentId, pending.Context.PreferredBridgeClient))
+        {
+            _logger.LogWarning("客户端技能 {Tool} 审批后仍无法路由到本机桥：PreferredBridgeClient={Client}（空=决策浏览器未发现本机桥；非空=该桥不在线/未注册）",
+                routeFc.Name, pending.Context.PreferredBridgeClient ?? "(空)");
+        }
 
         // 批量批准：用户对本次运行选择「批准本次运行后续全部操作」→ 记录 runId，恢复后后续审批自动放行
         if (approveAll && approved && !string.IsNullOrEmpty(pending.RunId))
@@ -3002,7 +3066,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 && TryParseClientShell(pfc.Name, out var rCmd, out var rCwd, out var rTimeoutSec))
             {
                 var tr = await ExecuteTunnelAsync(
-                    pending.Context.AgentId, pending.Context.PreferredBridgeClient, rCmd!, rCwd, rTimeoutSec, null,
+                    pending.Context.AgentId, pending.Context.PreferredBridgeClient, rCmd!, rCwd, rTimeoutSec, ApprovalArgsQuery(pfc),
                     TimeSpan.FromSeconds(Math.Clamp(rTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
                 if (!string.IsNullOrWhiteSpace(tr))
                 {
@@ -3037,6 +3101,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 toolResult = "（用户已拒绝在本机执行该 .NET dotnet 技能）";
                 ClientToolResultStore.Put(refc.Name, toolResult!);
                 lastApproved = false;
+            }
+            else if (approved && lastApproval.ToolCall is FunctionCallContent acfc
+                     && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(acfc.Name, StringComparer.Ordinal)
+                     && string.IsNullOrWhiteSpace(toolResult))
+            {
+                // 客户端技能已批准，但既无前端回传结果、也未能经隧道路由到本机桥（无可用 client）——给模型明确失败原因，
+                // 而不是回放占位文本（占位文本会让模型以为技能已在某处执行并脑补出“看似真实”的结果）。
+                toolResult = "（未能执行：发起请求/决策的电脑未连接本机桥 NativeBridge，无法路由到该机器执行该客户端技能。"
+                    + "请在该电脑启动 AguiGroupChat.NativeBridge 后重新发起该操作。）";
+                ClientToolResultStore.Put(acfc.Name, toolResult);
             }
 
             // 批量批准循环：同一 Session 连续流式；后续审批若命中“本次运行批量批准”自动批准，否则交还用户决策

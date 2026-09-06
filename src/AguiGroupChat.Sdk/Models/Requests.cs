@@ -179,6 +179,8 @@ public sealed class GroupInteractionResolveRequest
     public string? Input { get; set; }
     public JsonElement? Payload { get; set; }
     public bool ApproveAll { get; set; }
+    /// <summary>决策方浏览器所在客户端/机器（内网桥 --client，前端经同机回环自动发现携带）。</summary>
+    public string? BridgeClient { get; set; }
 }
 
 /// <summary>GROUP_SUBSCRIBE / GROUP_UNSUBSCRIBE 上行事件。</summary>

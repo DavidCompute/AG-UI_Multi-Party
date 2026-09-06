@@ -60,6 +60,9 @@ public static class ErrorCodes
 
     /// <summary>技能库：技能仅创建者或系统管理员可操作。</summary>
     public const string SkillPermissionDenied = "SKILL_PERMISSION_DENIED";
+
+    /// <summary>客户端技能本机桥：服务端宿主不是用户本机（Docker / 共享部署），拒绝代跑“本机(client)”技能。</summary>
+    public const string ClientToolHostNotLocal = "CLIENT_TOOL_HOST_NOT_LOCAL";
 }
 
 /// <summary>HTTP 上行错误响应体：{"code": "...", "message": "..."}。</summary>
