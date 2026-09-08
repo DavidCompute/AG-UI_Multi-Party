@@ -1234,6 +1234,12 @@ textarea:focus { outline: none; border-color: var(--accent); }
 
 /* ============ 管理员控制台 ============ */
 .admin-modal { width: 900px; max-width: 96vw; }
+/* 弹窗内容超高时自滚：限高 + 内部滚动条（避免超出视口后既无遮罩滚动也无内滚的“卡死感”） */
+.admin-modal {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
 .admin-modal .admin-table-wrap { max-height: 55vh; overflow: auto; }
 .admin-modal .admin-table td { white-space: nowrap; }
 /* 配置治理（6.3）：参数网格 / 开关行 */
