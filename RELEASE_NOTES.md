@@ -4,6 +4,21 @@
 **版本说明**：1.0.120 为当前 Windows 桌面点版本（已构建 Windows 1.0.120 MSI）。本版本在既有 Web/桌面迭代之上并入最近的 Hub/协议更新：数字员工**单聊（kind=direct）**、**实时会话吊销/禁用/改密即时断线**、SDK 上行串行化与断连单次回调、上传/导入请求体放开到 200MB（Kestrel 同步放宽）。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
 **Version note**: 1.0.120 is the current Windows desktop point release (a Windows 1.0.120 MSI was built). On top of the previous web/desktop iteration it includes the latest Hub/protocol updates: digital-employee **direct chats (`kind=direct`)**, **immediate realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies (Kestrel limit raised accordingly). Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
 
+## 开发中：企业合规（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
+# In development: Enterprise compliance (already live on the Web build; not yet in the 1.0.120 desktop installer)
+
+中文：
+- **账号注销与数据擦除**：「我的资料 → 危险操作 → 注销账户」（需密码确认，`DELETE /ag-ui/account`）与管理员「用户管理 → 彻底删除」（`DELETE /ag-ui/admin/users/{userId}`）。删除语义：创建的知聚在存在其他用户成员时**转让群主后自行退群**、否则**解散**；加入的他人知聚自行退群；其发言**语义记忆**与**个人知识库**物理删除；账号行 + 全部会话 + TOTP 清除（四种存储实现 `IUserStore.RemoveUser`）。防呆：最后一名超级管理员不可删；管理员不可经管理接口删除自己。
+- **审计日志检索 + CSV 导出**：`AuditLogService.Query` 支持操作者 / 操作名 / 目标 ID / 时间范围过滤；新增 `GET /ag-ui/admin/audit`（过滤查询）与 `GET /ag-ui/admin/audit.csv`（RFC 4180 + UTF-8 BOM 全量导出）；管理员控制台新增「审计日志」页签。
+- 详见 `docs/enterprise-compliance.md`。
+
+English:
+- **Account deletion & data erasure**: self-service “Delete account” in profile (password-confirmed, `DELETE /ag-ui/account`) and admin “permanently delete” in user management (`DELETE /ag-ui/admin/users/{userId}`). Semantics: groups the user owns are transferred (then they leave) when other user members exist, otherwise disbanded; groups they merely joined are left; their message **memories** and **personal knowledge bases** are physically erased; the account row, all sessions and TOTP are removed (four `IUserStore.RemoveUser` storage backends). Guards: the last super admin can never be deleted; admins cannot delete themselves via the admin API.
+- **Audit log search + CSV export**: `AuditLogService.Query` now filters by actor / action / targetId / time range; added `GET /ag-ui/admin/audit` (filtered query) and `GET /ag-ui/admin/audit.csv` (RFC 4180 + UTF-8 BOM full export); the Admin Console gains an “Audit Log” tab.
+- Details in `docs/enterprise-compliance.md`.
+
+---
+
 ## 新增（中文）
 - **数字员工单聊（kind=direct）**：数字员工管理列表每行新增「💬 私聊」——对该数字员工点一下即开始/复用与之的一对一**私有双人群**（`POST /ag-ui/agents/direct`，幂等）；不同用户与同一数字员工的单聊各自独立、互不可见（会话隔离）；单聊默认私密（`isPrivate=true`，语义记忆仅在本私群可检索）。在单聊里发**普通（未 @）消息即视为对其直达触发**，无需手动 @。Web 与桌面一致可用（Playwright 用例 `tools/direct-chat-flow.mjs` 已全绿）。
 - **实时会话吊销/禁用/改密即时断线**：登出、修改密码、管理员禁用或重置密码会**立即终止**该账号已建立的 WebSocket / SSE 实时连接（服务端主动关闭），不再等到断线才失效；会话在服务端吊销即刻生效。
