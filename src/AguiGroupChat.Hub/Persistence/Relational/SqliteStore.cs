@@ -215,5 +215,19 @@ public sealed class SqliteStore : RelationalStore
         );
         CREATE INDEX IF NOT EXISTS idx_tasks_user ON agui_tasks(user_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_tasks_group ON agui_tasks(group_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS agui_audit (
+            id TEXT PRIMARY KEY,
+            ts INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            actor_id TEXT NOT NULL,
+            actor_username TEXT NOT NULL,
+            group_id TEXT,
+            target_type TEXT,
+            target_id TEXT,
+            detail TEXT,
+            result TEXT NOT NULL DEFAULT 'ok'
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_ts ON agui_audit(ts);
         """;
 }

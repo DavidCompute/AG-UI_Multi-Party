@@ -85,6 +85,7 @@ public static class HubApp
         builder.Services.AddSingleton<IAgentRegistryStore, PostgresAgentRegistryStore>();
         builder.Services.AddSingleton<ISectionStore, PostgresSectionStore>();
         builder.Services.AddSingleton<IUsageStore, PostgresUsageStore>(); // 模型用量统计（按日聚合）
+        builder.Services.AddSingleton<IAuditStore>(sp => new PostgresAuditStore(sp.GetRequiredService<PostgresStore>())); // 审计独立表
         builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
     }
 
@@ -102,6 +103,7 @@ public static class HubApp
         builder.Services.AddSingleton<IAgentRegistryStore, RelationalAgentRegistryStore>();
         builder.Services.AddSingleton<ISectionStore, RelationalSectionStore>();
         builder.Services.AddSingleton<IUsageStore, RelationalUsageStore>(); // 模型用量统计（按日聚合）
+        builder.Services.AddSingleton<IAuditStore>(sp => new RelationalAuditStore(sp.GetRequiredService<RelationalStore>())); // 审计独立表
         builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
     }
 
@@ -205,6 +207,8 @@ public static class HubApp
     /// 须在应用构建后、状态恢复（InitializePersistence）之前调用。</summary>
     public static void RegisterAuditPersistence(this IServiceProvider services)
     {
+        // 数据库模式：审计已由专用表（IAuditStore）承载，无需再进 JSON 扩展区
+        if (services.GetService<IAuditStore>() is not null) return;
         var audit = services.GetService<AguiGroupChat.Hub.Infra.AuditLogService>();
         if (audit is null) return;
         Func<object?> snapshot = () => audit.Snapshot().Select(e => (object)e).ToList();

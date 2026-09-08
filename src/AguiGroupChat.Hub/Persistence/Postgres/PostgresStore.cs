@@ -38,7 +38,7 @@ public sealed class PostgresStore
         {
             "agui_graph_edges", "agui_graph_entities", "agui_message_memory", "agui_agent_registrations", "agui_group_reads",
             "agui_messages", "agui_topics", "agui_group_members", "agui_groups",
-            "agui_users", "agui_sections", "agui_usage", "agui_tasks",
+            "agui_users", "agui_sections", "agui_usage", "agui_tasks", "agui_audit",
         })
         {
             using var cmd = conn.CreateCommand();
@@ -197,6 +197,21 @@ public sealed class PostgresStore
             );
             CREATE INDEX IF NOT EXISTS idx_tasks_user ON agui_tasks(user_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_tasks_group ON agui_tasks(group_id, created_at);
+
+            -- 操作审计日志独立表（企业合规）：按时间序查询 / 导出 / 保留裁剪；启动与写入自愈建表
+            CREATE TABLE IF NOT EXISTS agui_audit (
+                id TEXT PRIMARY KEY,
+                ts BIGINT NOT NULL,
+                action TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                actor_username TEXT NOT NULL,
+                group_id TEXT,
+                target_type TEXT,
+                target_id TEXT,
+                detail TEXT,
+                result TEXT NOT NULL DEFAULT 'ok'
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_ts ON agui_audit(ts);
             """;
         cmd.ExecuteNonQuery();
 

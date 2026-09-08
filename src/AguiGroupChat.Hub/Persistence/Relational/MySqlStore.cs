@@ -213,5 +213,19 @@ public sealed class MySqlStore : RelationalStore
         ) CHARACTER SET utf8mb4;
         CREATE INDEX idx_tasks_user ON agui_tasks(user_id, created_at);
         CREATE INDEX idx_tasks_group ON agui_tasks(group_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS agui_audit (
+            id VARCHAR(64) PRIMARY KEY,
+            ts BIGINT NOT NULL,
+            action VARCHAR(64) NOT NULL,
+            actor_id VARCHAR(64) NOT NULL,
+            actor_username VARCHAR(128) NOT NULL,
+            group_id VARCHAR(64) NULL,
+            target_type VARCHAR(16) NULL,
+            target_id VARCHAR(64) NULL,
+            detail MEDIUMTEXT NULL,
+            result VARCHAR(16) NOT NULL DEFAULT 'ok'
+        ) CHARACTER SET utf8mb4;
+        CREATE INDEX idx_audit_ts ON agui_audit(ts);
         """;
 }
