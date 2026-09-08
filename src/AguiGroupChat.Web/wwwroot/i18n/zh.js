@@ -545,6 +545,9 @@ window.I18N_DICTS.zh = {
   "profile.twinSync": "同步到公开知聚",
   "profile.cancel": "取消",
   "profile.save": "保存",
+  "profile.deleteSection": "⚠️ 危险操作",
+  "profile.deleteDesc": "注销账户将删除本账号、全部会话与个人数据（创建的知聚将转让或解散、发言记忆与个人知识库一并清除），不可撤销。操作需输入登录密码确认。",
+  "profile.deleteBtn": "注销账户",
 
   /* --- 添加成员 --- */
   "am.title": "添加成员",
@@ -634,6 +637,7 @@ window.I18N_DICTS.zh = {
   "admin.tabMetrics": "运行指标",
   "admin.tabConfig": "配置治理",
   "admin.tabExec": "执行参数",
+  "admin.tabAudit": "审计日志",
   "admin.thUser": "用户名",
   "admin.thNick": "昵称",
   "admin.thRole": "角色",
@@ -684,6 +688,20 @@ window.I18N_DICTS.zh = {
   "admin.execSaved": "执行参数已保存并生效",
   "admin.execReset": "恢复默认",
   "admin.execResetFilled": "已回填出厂默认，确认后点「保存」生效",
+  "admin.auditHint": "展示关键 / 敏感操作留痕（服务重启后清空，容量上限 5000 条）。可按操作者 / 操作 / 目标过滤；导出 CSV（UTF-8，Excel 可直接打开）含全部命中记录。",
+  "admin.auditActorPh": "操作者…",
+  "admin.auditActionPh": "操作名…",
+  "admin.auditTargetPh": "目标 ID…",
+  "admin.auditSearch": "🔍 查询",
+  "admin.auditExport": "⬇ 导出 CSV",
+  "admin.auditEmpty": "暂无审计记录（或不符合过滤条件）",
+  "admin.thTime": "时间",
+  "admin.thAction": "操作",
+  "admin.thActor": "操作者",
+  "admin.thTarget": "目标",
+  "admin.thResult": "结果",
+  "admin.thDetail": "详情",
+  "admin.exportFail": "导出失败（{err}）",
   "admin.close": "关闭",
 
   /* --- 系统状态 --- */
@@ -1106,6 +1124,17 @@ window.I18N_DICTS.zh = {
   "pw.changed": "密码已修改，请重新登录",
   "pw.changeFail": "修改失败（{err}）",
 
+  /* --- 注销账户（企业合规 · 数据主体权利）--- */
+  "account.deleteTitle": "注销账户",
+  "account.deletePrompt": "请输入登录密码确认注销。该操作不可撤销：账号与全部个人数据将被删除，您创建的知聚将转让给其他成员或解散。",
+  "account.passwordPh": "登录密码",
+  "account.cancel": "取消",
+  "account.confirmDelete": "确认注销",
+  "account.pwRequired": "请输入登录密码",
+  "account.deleting": "注销中…",
+  "account.deleteFail": "注销失败（{err}）",
+  "account.deleted": "账号已注销，个人数据已删除",
+
   /* --- 知识库 --- */
   "kb.docDelConfirm": "移除该文档？其向量数据将被删除",
   "kb.docRemoved": "文档已移除",
@@ -1210,6 +1239,15 @@ window.I18N_DICTS.zh = {
   "admin.enableTitle": "启用账号",
   "admin.disableTitle": "禁用账号（其会话将立即全部登出）",
   "admin.resetPwTitle": "重置密码（旧会话将全部登出）",
+  "admin.deleteTitle": "彻底删除（数据擦除）",
+  "admin.deleteOk": "删除",
+  "admin.deleteReason": "管理员删除",
+  "admin.deleteFail": "删除失败（{err}）",
+  "admin.userDeleteTitle": "彻底删除「{name}」",
+  "admin.userDeleteConfirm": "彻底删除账号「{name}」？其创建的知聚将转让给其他成员或解散，发言记忆与个人知识库会被一并清除，不可恢复。",
+  "admin.userDeleteTypeName": "请输入该用户名以确认删除：",
+  "admin.userDeleteMismatch": "输入的用户名不匹配，已取消删除",
+  "admin.userDeleted": "已彻底删除 {name}（个人数据已擦除）",
   "admin.noUsers": "暂无用户",
   /* 平台角色（RBAC 分层） */
   "admin.superOnly": "仅超级管理员可管理平台角色",

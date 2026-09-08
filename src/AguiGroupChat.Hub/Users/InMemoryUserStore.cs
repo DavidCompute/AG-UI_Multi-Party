@@ -39,6 +39,14 @@ public sealed class InMemoryUserStore : IUserStore
 
     public IReadOnlyList<UserAccount> ListUsers() => _byId.Values.ToList();
 
+    public bool RemoveUser(string userId)
+    {
+        if (!_byId.TryRemove(userId, out var user)) return false;
+        if (user is not null) _byUsername.TryRemove(user.Username, out _);
+        _changes?.Notify();
+        return true;
+    }
+
     public void ClearAll()
     {
         _byId.Clear();

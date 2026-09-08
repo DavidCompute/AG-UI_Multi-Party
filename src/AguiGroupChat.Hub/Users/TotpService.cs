@@ -55,6 +55,13 @@ public sealed class TotpService
         return true;
     }
 
+    /// <summary>删除某用户的 TOTP 密钥与失败限速状态（账号注销 / 管理员彻底删除时调用，无需动态码）。</summary>
+    public void Remove(string userId)
+    {
+        _users.TryRemove(userId, out _);
+        _totpFailures.TryRemove(userId, out _);
+    }
+
     /// <summary>校验用户当前动态码（6 位，登录路径）。失败计入限速；锁定期间直接拒绝。</summary>
     public bool Verify(string userId, string code)
     {

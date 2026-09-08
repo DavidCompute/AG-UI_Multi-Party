@@ -30,6 +30,7 @@ builder.Services.AddSingleton<NativeBridgeIssuedTokenStore>(); // 安装包绑�
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
 builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>())); // 隧道端点限流器
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeBridgeDownload").Get<NativeBridgeDownloadOptions>() ?? new NativeBridgeDownloadOptions()); // 本机桥 Windows 安装包下载（Dir 等）
+builder.Services.AddSingleton<AccountErasureService>(); // 账号注销 / 数据擦除（企业合规）编排
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 200L * 1024 * 1024);
@@ -113,6 +114,7 @@ app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
+app.MapAccountApi(); // 账号注销（数据主体权利）：自助注销 + 数据擦除
 app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
 app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions（时序/重试/TTL/阶段开关与顺序）
 

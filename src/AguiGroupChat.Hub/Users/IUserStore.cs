@@ -12,6 +12,12 @@ public interface IUserStore
     bool UpdateUser(UserAccount user);
     IReadOnlyList<UserAccount> ListUsers();
 
+    /// <summary>
+    /// 删除用户账号（账号注销 / 管理员彻底删除的数据擦除收尾步骤）。返回是否确实删除；
+    /// 默认实现返回 false（未实现该能力的存储 / 测试替身自动兼容，账号删除前置清理需由存储上层完成）。
+    /// </summary>
+    bool RemoveUser(string userId) => false;
+
     /// <summary>清空全部账号（系统初始化用）。</summary>
     void ClearAll();
 }

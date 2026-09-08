@@ -545,6 +545,9 @@ window.I18N_DICTS.en = {
   "profile.twinSync": "Sync to Public Groups",
   "profile.cancel": "Cancel",
   "profile.save": "Save",
+  "profile.deleteSection": "⚠️ Danger Zone",
+  "profile.deleteDesc": "Delete this account and all personal data (groups you own will be transferred or disbanded; your message memories and personal knowledge bases are erased). This cannot be undone. Your sign-in password is required to confirm.",
+  "profile.deleteBtn": "Delete Account",
 
   /* --- 添加成员 --- */
   "am.title": "Add Member",
@@ -636,6 +639,7 @@ window.I18N_DICTS.en = {
   "admin.tabMetrics": "Runtime Metrics",
   "admin.tabConfig": "Config Governance",
   "admin.tabExec": "Execution Params",
+  "admin.tabAudit": "Audit Log",
   "admin.thUser": "Username",
   "admin.thNick": "Nickname",
   "admin.thRole": "Role",
@@ -686,6 +690,20 @@ window.I18N_DICTS.en = {
   "admin.execSaved": "Execution params saved and applied",
   "admin.execReset": "Restore defaults",
   "admin.execResetFilled": "Defaults loaded — press Save to apply",
+  "admin.auditHint": "Trail of sensitive / key operations (cleared on server restart; ring buffer capped at 5,000). Filter by actor / action / target; export CSV (UTF-8, opens directly in Excel) includes all matching records.",
+  "admin.auditActorPh": "Actor…",
+  "admin.auditActionPh": "Action…",
+  "admin.auditTargetPh": "Target ID…",
+  "admin.auditSearch": "🔍 Search",
+  "admin.auditExport": "⬇ Export CSV",
+  "admin.auditEmpty": "No audit records (or none match the filters)",
+  "admin.thTime": "Time",
+  "admin.thAction": "Action",
+  "admin.thActor": "Actor",
+  "admin.thTarget": "Target",
+  "admin.thResult": "Result",
+  "admin.thDetail": "Details",
+  "admin.exportFail": "Export failed ({err})",
   "admin.close": "Close",
 
   /* --- 系统状态 --- */
@@ -1108,6 +1126,17 @@ window.I18N_DICTS.en = {
   "pw.changed": "Password changed; please sign in again",
   "pw.changeFail": "Password change failed ({err})",
 
+  /* --- Delete account (data subject rights / compliance) --- */
+  "account.deleteTitle": "Delete Account",
+  "account.deletePrompt": "Enter your sign-in password to confirm. This cannot be undone: the account and all personal data will be deleted, and groups you own will be transferred to other members or disbanded.",
+  "account.passwordPh": "Sign-in password",
+  "account.cancel": "Cancel",
+  "account.confirmDelete": "Delete my account",
+  "account.pwRequired": "Please enter your sign-in password",
+  "account.deleting": "Deleting…",
+  "account.deleteFail": "Account deletion failed ({err})",
+  "account.deleted": "Account deleted and personal data erased",
+
   /* --- 知识库 --- */
   "kb.docDelConfirm": "Remove this document? Its vector data will be deleted",
   "kb.docRemoved": "Document removed",
@@ -1212,6 +1241,15 @@ window.I18N_DICTS.en = {
   "admin.enableTitle": "Enable account",
   "admin.disableTitle": "Disable account (all its sessions will be logged out immediately)",
   "admin.resetPwTitle": "Reset password (old sessions will all be logged out)",
+  "admin.deleteTitle": "Permanently delete (data erasure)",
+  "admin.deleteOk": "Delete",
+  "admin.deleteReason": "Deleted by admin",
+  "admin.deleteFail": "Delete failed ({err})",
+  "admin.userDeleteTitle": "Permanently delete \u201c{name}\u201d",
+  "admin.userDeleteConfirm": "Permanently delete account \u201c{name}\u201d? Groups they own will be transferred to other members or disbanded; their message memories and personal knowledge bases will be erased. This cannot be undone.",
+  "admin.userDeleteTypeName": "Type the username to confirm deletion:",
+  "admin.userDeleteMismatch": "Username does not match; deletion cancelled",
+  "admin.userDeleted": "Deleted {name} (personal data erased)",
   "admin.noUsers": "No users",
   /* Platform roles (RBAC layering) */
   "admin.superOnly": "Only Super Admins can manage platform roles",

@@ -777,9 +777,31 @@
         <div id="bridgeIssuedList" class="muted" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin-top:4px;background:var(--panel)"></div>
       </div>
       </div>
+      <!-- 注销账户（企业合规 · 数据主体权利）：删除账号与个人数据，不可恢复 -->
+      <div class="danger-zone" style="margin-top:16px;padding-top:12px">
+        <div class="form-section" data-i18n="profile.deleteSection">⚠️ 危险操作</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <p class="form-hint" style="margin:0;flex:1;min-width:220px" data-i18n="profile.deleteDesc">注销账户将删除本账号、全部会话与个人数据（创建的知聚将转让或解散、发言记忆与个人知识库一并清除），不可撤销。操作需输入登录密码确认。</p>
+          <button id="pfDeleteAccount" class="chip-btn danger" type="button" data-i18n="profile.deleteBtn">注销账户</button>
+        </div>
+      </div>
       <div class="modal-actions">
         <button id="pfCancel" class="btn-ghost" data-i18n="profile.cancel">取消</button>
         <button id="pfConfirm" class="send" data-i18n="profile.save">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 注销账户确认：需输入登录密码（密码框输入，避免明文） -->
+  <div id="deleteAccountModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title" data-i18n="account.deleteTitle">注销账户</div>
+      <p class="modal-label" data-i18n="account.deletePrompt">请输入登录密码确认注销。该操作不可撤销：账号与全部个人数据将被删除，您创建的知聚将转让给其他成员或解散。</p>
+      <input id="daPassword" class="modal-input" type="password" maxlength="128" autocomplete="current-password" data-i18n-placeholder="account.passwordPh" />
+      <p id="daError" class="form-hint" style="color:#e5484d;display:none;margin:8px 0 0"></p>
+      <div class="modal-actions">
+        <button id="daCancel" class="btn-ghost" data-i18n="account.cancel">取消</button>
+        <button id="daConfirm" class="chip-btn danger" data-i18n="account.confirmDelete">确认注销</button>
       </div>
     </div>
   </div>
@@ -1113,6 +1135,7 @@
         <button id="adminTabMetrics" class="chip-btn admin-tab" data-i18n="admin.tabMetrics">运行指标</button>
         <button id="adminTabConfig" class="chip-btn admin-tab" data-i18n="admin.tabConfig">配置治理</button>
         <button id="adminTabExec" class="chip-btn admin-tab" data-i18n="admin.tabExec">执行参数</button>
+        <button id="adminTabAudit" class="chip-btn admin-tab" data-i18n="admin.tabAudit">审计日志</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1216,6 +1239,23 @@
           <button id="efReload" class="btn-ghost" data-i18n="admin.reload">刷新</button>
           <button id="efReset" class="btn-ghost" data-i18n="admin.execReset">恢复默认</button>
           <button id="efSave" class="send" data-i18n="admin.save">保存</button>
+        </div>
+      </div>
+      <!-- 审计日志（企业合规）：关键 / 敏感操作留痕查询 + CSV 导出 -->
+      <div id="adminAuditView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n="admin.auditHint">展示关键 / 敏感操作留痕（服务重启后清空，容量上限 5000 条）。可按操作者 / 操作 / 目标过滤；导出 CSV（UTF-8，Excel 可直接打开）含全部命中记录。</p>
+        <div class="admin-audit-filter">
+          <input id="auditActor" class="modal-input" style="width:130px" data-i18n-placeholder="admin.auditActorPh" />
+          <input id="auditAction" class="modal-input" style="width:170px" data-i18n-placeholder="admin.auditActionPh" />
+          <input id="auditTarget" class="modal-input" style="width:170px" data-i18n-placeholder="admin.auditTargetPh" />
+          <button id="auditSearchBtn" class="chip-btn" type="button" data-i18n="admin.auditSearch">🔍 查询</button>
+          <button id="auditExportBtn" class="chip-btn" type="button" data-i18n="admin.auditExport">⬇ 导出 CSV</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="admin.thTime">时间</th><th data-i18n="admin.thAction">操作</th><th data-i18n="admin.thActor">操作者</th><th data-i18n="admin.thTarget">目标</th><th data-i18n="admin.thResult">结果</th><th data-i18n="admin.thDetail">详情</th></tr></thead>
+            <tbody id="adminAuditRows"></tbody>
+          </table>
         </div>
       </div>
       <div class="modal-actions">

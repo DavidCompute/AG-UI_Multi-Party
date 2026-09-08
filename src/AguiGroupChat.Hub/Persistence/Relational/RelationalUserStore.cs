@@ -101,6 +101,15 @@ public sealed class RelationalUserStore : IUserStore
         return list;
     }
 
+    public bool RemoveUser(string userId)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM agui_users WHERE user_id = @uid";
+        cmd.AddWithValue("uid", userId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
     public void ClearAll()
         => _db.ExecuteScript("DELETE FROM agui_users");
 

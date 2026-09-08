@@ -2937,6 +2937,51 @@ async function submitProfile() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
+/* ============ 注销账户（企业合规 · 数据主体权利） ============ */
+
+/** 打开注销确认弹窗（资料弹窗内「注销账户」）：清空输入与错误。 */
+function openDeleteAccountModal() {
+  $("daPassword").value = "";
+  $("daError").style.display = "none";
+  $("deleteAccountModal").classList.remove("hidden");
+  setTimeout(() => $("daPassword").focus(), 30);
+}
+
+function closeDeleteAccountModal() { $("deleteAccountModal").classList.add("hidden"); }
+
+/** 确认注销：提交密码执行账号注销 + 数据擦除；成功后清理本地登录态并回到登录页。 */
+async function submitDeleteAccount() {
+  const pw = $("daPassword").value;
+  if (!pw) { $("daError").textContent = t("account.pwRequired"); $("daError").style.display = ""; return; }
+  const btn = $("daConfirm");
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t("account.deleting");
+  try {
+    const res = await fetch("/ag-ui/account", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      $("daError").textContent = errMsg(data, t("account.deleteFail", { err: res.status }));
+      $("daError").style.display = "";
+      return;
+    }
+    closeDeleteAccountModal();
+    $("profileModal").classList.add("hidden");
+    toast(t("account.deleted"));
+    setTimeout(() => logout(), 600); // 清理本机桥连接与本地登录态，回到登录页
+  } catch (ex) {
+    $("daError").textContent = t("common.saveFail", { err: ex.message });
+    $("daError").style.display = "";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
 /* ============ 本机桥：同机回环发现 + 登录即连 / 登出即断 ============ */
 
 /** 最近一次成功访问到的本机桥回环地址（http(s)://127.0.0.1:port）。 */
@@ -5249,23 +5294,26 @@ async function openAdminModal() {
   startAdminMetricsPoll(); // 运行指标页每 8 秒自动刷新（管理员控制台打开期间）
 }
 
-/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数。 */
+/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数 / 审计日志。 */
 function switchAdminTab(tab) {
   const users = tab === "users";
   const usage = tab === "usage";
   const metrics = tab === "metrics";
   const conf = tab === "config";
   const exec = tab === "execution";
+  const audit = tab === "audit";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
   $("adminTabConfig").classList.toggle("on", conf);
   $("adminTabExec").classList.toggle("on", exec);
+  $("adminTabAudit").classList.toggle("on", audit);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
   $("adminConfigView").classList.toggle("hidden", !conf);
   $("adminExecView").classList.toggle("hidden", !exec);
+  $("adminAuditView").classList.toggle("hidden", !audit);
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsers();
@@ -5276,6 +5324,8 @@ function switchAdminTab(tab) {
     loadAdminMetrics();
   } else if (exec) {
     loadExecutionConfig();
+  } else if (audit) {
+    loadAdminAudit();
   } else {
     loadConfigGovernance();
   }
@@ -5586,7 +5636,8 @@ async function loadAdminUsers() {
           : "";
         actions = roleSel
           + `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? t("admin.enableTitle") : t("admin.disableTitle")}">${u.isDisabled ? "🔓" : "🔒"}</button>`
-          + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.resetPwTitle")}">🔑</button>`;
+          + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.resetPwTitle")}">🔑</button>`
+          + `<button class="chip-btn icon-btn" data-op="delete" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.deleteTitle")}">🗑️</button>`;
       }
       return `<tr>
         <td>${escapeHtml(u.username)}${self}</td>
@@ -5605,6 +5656,59 @@ async function loadAdminUsers() {
 function roleBadge(r) {
   const cls = r === "superadmin" ? "tag-superadmin" : (r === "admin" ? "tag-admin" : (r === "operator" ? "tag-operator" : "tag-user"));
   return `<span class="${cls}">${t("admin.roleName." + (r || "user"))}</span>`;
+}
+
+/** 审计日志查询（管理员控制台「审计」页）：按操作者 / 操作 / 目标过滤，展示最近 200 条。 */
+async function loadAdminAudit() {
+  const rows = $("adminAuditRows");
+  if (!rows) return;
+  rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  const q = new URLSearchParams();
+  const actor = ($("auditActor").value || "").trim();
+  const action = ($("auditAction").value || "").trim();
+  const target = ($("auditTarget").value || "").trim();
+  if (actor) q.set("actor", actor);
+  if (action) q.set("action", action);
+  if (target) q.set("targetId", target);
+  q.set("limit", "200");
+  try {
+    const res = await fetch(`/ag-ui/admin/audit?${q.toString()}`, { headers: { Authorization: "Bearer " + state.token } });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) { rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(errMsg(data, "HTTP " + res.status))}</td></tr>`; return; }
+    const entries = data.entries || [];
+    rows.innerHTML = entries.map((e) => `<tr>
+      <td class="nowrap muted">${fmtDateTime(Number(e.timestamp) || 0)}</td>
+      <td class="nowrap">${escapeHtml(e.action || "")}</td>
+      <td class="nowrap">${escapeHtml(e.actorUsername || e.actorId || "")}</td>
+      <td class="nowrap">${escapeHtml([e.targetType, e.targetId].filter(Boolean).join(":") || e.groupId || "-")}</td>
+      <td class="nowrap">${escapeHtml(e.result || "ok")}</td>
+      <td class="audit-detail">${escapeHtml(e.detail || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="admin-empty">${t("admin.auditEmpty")}</td></tr>`;
+  } catch { rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
+}
+
+/** 审计日志导出 CSV（UTF-8 BOM + RFC 4180 转义，按当前过滤条件导出全部命中记录）。 */
+async function exportAdminAuditCsv() {
+  const q = new URLSearchParams();
+  const actor = ($("auditActor").value || "").trim();
+  const action = ($("auditAction").value || "").trim();
+  const target = ($("auditTarget").value || "").trim();
+  if (actor) q.set("actor", actor);
+  if (action) q.set("action", action);
+  if (target) q.set("targetId", target);
+  try {
+    const res = await fetch(`/ag-ui/admin/audit.csv?${q.toString()}`, { headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) { toast(t("admin.exportFail", { err: res.status })); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `agui-audit-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch { toast(t("admin.sysNetErr")); }
 }
 
 /** 管理员操作：禁用 / 启用 / 重置密码（重置密码弹输入框）。 */
@@ -5638,6 +5742,20 @@ async function adminUserAction(op, uid, name) {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(errMsg(data, t("admin.resetPwFail", { err: res.status }))); return; }
     toast(t("admin.pwReset", { name }));
+  } else if (op === "delete") {
+    // 彻底删除（企业合规 · 数据擦除）：需确认 + 输入用户名二次核对；删除其创建的知聚（转让 / 解散）并清除个人数据
+    if (!await uiConfirm({ message: t("admin.userDeleteConfirm", { name }), danger: true, okText: t("admin.deleteOk") })) return;
+    const typed = await uiPrompt({ title: t("admin.userDeleteTitle", { name }), message: t("admin.userDeleteTypeName"), required: true });
+    if (typed === null) return;
+    if ((typed || "").trim() !== name) { toast(t("admin.userDeleteMismatch")); return; }
+    const res = await fetch(`/ag-ui/admin/users/${encodeURIComponent(uid)}?reason=${encodeURIComponent(t("admin.deleteReason"))}`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("admin.deleteFail", { err: res.status }))); return; }
+    toast(t("admin.userDeleted", { name }));
+    await loadAdminUsers();
   } else if (op === "role") {
     // 平台角色（RBAC，仅超级管理员界面可触发）：授予 / 回收 user / operator / admin / superadmin
     if (!state.isSuperAdmin) { toast(t("admin.superOnly")); return; }
@@ -8131,6 +8249,11 @@ function init() {
   $("adminTabMetrics").onclick = () => switchAdminTab("metrics");
   $("adminTabConfig").onclick = () => switchAdminTab("config");
   $("adminTabExec").onclick = () => switchAdminTab("execution");
+  $("adminTabAudit").onclick = () => switchAdminTab("audit");
+  $("auditSearchBtn").onclick = () => loadAdminAudit();
+  $("auditExportBtn").onclick = exportAdminAuditCsv;
+  ["auditActor", "auditAction", "auditTarget"].forEach((id) =>
+    $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); loadAdminAudit(); } }));
   $("metricsRefreshBtn").onclick = () => loadAdminMetrics();
   $("cfgSave").onclick = saveConfigGovernance;
   $("cfgReload").onclick = loadConfigGovernance;
@@ -8224,6 +8347,11 @@ function init() {
   $("pwNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitChangePassword(); } });
   $("pfCancel").onclick = () => $("profileModal").classList.add("hidden");
   $("pfConfirm").onclick = submitProfile;
+  // 注销账户（资料弹窗危险区）：需输入密码确认
+  $("pfDeleteAccount").onclick = openDeleteAccountModal;
+  $("daCancel").onclick = closeDeleteAccountModal;
+  $("daConfirm").onclick = submitDeleteAccount;
+  $("daPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitDeleteAccount(); } });
   $("pfTwinEnable").onclick = enableTwin;
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;

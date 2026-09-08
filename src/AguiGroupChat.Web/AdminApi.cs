@@ -15,6 +15,7 @@ namespace AguiGroupChat.Web;
 ///   GET  /ag-ui/admin/users —— 用户列表（禁用状态 / 管理员标记 / 注册时间）
 ///   POST /ag-ui/admin/users/{userId}/disabled —— 禁用 / 启用账号（禁用即吊销全部会话）
 ///   POST /ag-ui/admin/users/{userId}/password —— 重置密码（吊销全部会话）
+///   DELETE /ag-ui/admin/users/{userId} —— 彻底删除账号（数据擦除：群转让/解散 + 记忆 / 知识库清除）
 ///   GET  /ag-ui/admin/status —— 系统状态（连接数 / 群数 / 用户数 / 消息数 / 智能体数 / 进程信息）
 /// </summary>
 public static class AdminApi
@@ -142,14 +143,32 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 操作审计日志（4.3）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。limit 最多 200。
-        root.MapGet("/audit", (int? limit, HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        // 操作审计日志（4.3 / 企业合规）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。
+        // 支持过滤：actor（操作者用户名 / ID 子串）、action（操作名子串）、targetId、fromMs / toMs（UTC 毫秒）。limit 最多 200。
+        root.MapGet("/audit", (int? limit, string? actor, string? action, string? targetId, long? fromMs, long? toMs,
+            HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
             return Results.Ok(new
             {
                 total = audit.Count,
-                entries = audit.Query(limit ?? 100),
+                entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs),
             });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 审计日志导出 CSV（RFC 4180 转义 + UTF-8 BOM，Excel 可直接打开）：同 /audit 过滤条件，按时间正序，无 200 条上限。
+        root.MapGet("/audit.csv", (string? actor, string? action, string? targetId, long? fromMs, long? toMs,
+            HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var rows = audit.QueryAll(actor, action, targetId, fromMs, toMs);
+            var sb = new System.Text.StringBuilder(rows.Count * 160);
+            sb.AppendLine("id,timeUtc,timeMs,action,actorId,actorUsername,groupId,targetType,targetId,detail,result");
+            foreach (var e in rows) AppendCsvRow(sb, e);
+            var body = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+            var csv = new byte[body.Length + 3]; // 前置 UTF-8 BOM：Excel 打开中文不乱码
+            csv[0] = 0xEF; csv[1] = 0xBB; csv[2] = 0xBF;
+            Buffer.BlockCopy(body, 0, csv, 3, body.Length);
+            return Results.File(csv, "text/csv; charset=utf-8",
+                $"agui-audit-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.csv");
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 桥接端点健康度（3.1）：查看已配置外部 AG-UI 端点的实时/缓存连通状态，仅管理员及以上（含运维）。
@@ -231,6 +250,62 @@ public static class AdminApi
                 },
             });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        // ---- 账号彻底删除（企业合规 · 数据擦除）：管理员删除他人账号（不可删除自己——本人请走「注销账户」自助入口）----
+        root.MapDelete("/users/{userId}", async (string userId, HttpContext ctx,
+            [Microsoft.AspNetCore.Mvc.FromServices] AccountErasureService erasure,
+            [Microsoft.AspNetCore.Mvc.FromServices] AuthService auth, CancellationToken ct) =>
+        {
+            try
+            {
+                var me = WebIdentity.UserId(ctx)!;
+                if (me == userId)
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "不能经管理接口删除自己，请在「我的资料」使用「注销账户」（需密码确认）"));
+                var report = await erasure.EraseAsync(userId, me, ctx.Request.Query["reason"].ToString(), ct);
+                return Results.Ok(new
+                {
+                    ok = true,
+                    userId,
+                    accountRemoved = report.AccountRemoved,
+                    groupsHandled = report.GroupsHandled,
+                    memoriesErased = report.MemoriesErased,
+                    knowledgeBasesRemoved = report.KnowledgeBasesRemoved,
+                });
+            }
+            catch (AguiProtocolException ex) { return MapErasureError(ex); }
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+    }
+
+    /// <summary>账号删除的错误码 → HTTP 状态映射（404 用户不存在；403 权限 / 最后一名超管；其余 400）。</summary>
+    private static IResult MapErasureError(AguiProtocolException ex) => ex.ErrorCode switch
+    {
+        ErrorCodes.UserNotFound => Results.NotFound(new AguiError(ex.ErrorCode, ex.Message)),
+        ErrorCodes.GroupPermissionDenied or ErrorCodes.UserUnauthorized
+            => Results.Json(new AguiError(ex.ErrorCode, ex.Message), statusCode: StatusCodes.Status403Forbidden),
+        _ => Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)),
+    };
+
+    /// <summary>追加一条审计 CSV 行（RFC 4180：含分隔符 / 引号 / 换行的字段加引号包裹，内部引号双写）。</summary>
+    private static void AppendCsvRow(System.Text.StringBuilder sb, AguiGroupChat.Hub.Infra.AuditEntry e)
+    {
+        sb.Append(CsvField(e.Id)).Append(',');
+        sb.Append(CsvField(DateTimeOffset.FromUnixTimeMilliseconds(e.Timestamp).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))).Append(',');
+        sb.Append(e.Timestamp).Append(',');
+        sb.Append(CsvField(e.Action)).Append(',');
+        sb.Append(CsvField(e.ActorId)).Append(',');
+        sb.Append(CsvField(e.ActorUsername)).Append(',');
+        sb.Append(CsvField(e.GroupId)).Append(',');
+        sb.Append(CsvField(e.TargetType)).Append(',');
+        sb.Append(CsvField(e.TargetId)).Append(',');
+        sb.Append(CsvField(e.Detail)).Append(',');
+        sb.Append(CsvField(e.Result)).Append('\n');
+    }
+
+    private static string CsvField(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        var needsQuote = value.IndexOfAny([',', '"', '\r', '\n']) >= 0;
+        return needsQuote ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
     }
 
     private static IResult Run(Func<IResult> action)

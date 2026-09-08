@@ -286,6 +286,37 @@ public sealed class AuthService
         if (invalidated > 0) _connections?.AbortConnectionsOf(userId);
     }
 
+    /// <summary>吊销某用户的全部会话并终止其全部实时连接（账号注销 / 管理员删除前的第一步，防删除期间继续产生数据）。</summary>
+    public void RevokeAllSessions(string userId) => RevokeUserSessions(userId);
+
+    /// <summary>物理删除账号行（账号数据擦除最后一步；须先吊销会话并完成关联数据清理）。返回是否确实删除。</summary>
+    public bool DeleteAccountRow(string userId)
+    {
+        var removed = _store.RemoveUser(userId);
+        if (removed)
+        {
+            _logger.LogInformation("账号已删除 {UserId}", userId);
+            _changes?.Notify();
+        }
+        return removed;
+    }
+
+    /// <summary>
+    /// 账号注销 / 删除前置校验（防呆）：目标账号必须存在；最后一名超级管理员不可删除
+    /// （否则平台将失去最高管理入口，与角色降级 / 禁用接口的防呆一致）。
+    /// </summary>
+    public void EnsureUserCanBeRemoved(string userId)
+    {
+        var user = _store.GetUserById(userId)
+            ?? throw new AguiProtocolException(ErrorCodes.UserNotFound, "用户不存在");
+        if (ResolveRole(userId) >= PlatformRole.SuperAdmin && IsLastSuperAdmin(userId))
+            throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "不能删除最后一名超级管理员");
+    }
+
+    /// <summary>校验指定账号的登录密码（账号注销确认用：会话令牌外再要求持有密码，防误删 / 防会话劫持滥用）。</summary>
+    public bool VerifyPassword(string userId, string password)
+        => _store.GetUserById(userId) is { } u && PasswordHasher.Verify(password ?? "", u.PasswordSalt, u.PasswordHash);
+
     /// <summary>更新资料（昵称 / 头像 / 个人记忆开关），返回更新后的账号。昵称 / 头像带长度上限防存储 DoS。</summary>
     public UserAccount UpdateProfile(string userId, string? nickname, string? avatar, bool? personalMemoryEnabled = null)
     {

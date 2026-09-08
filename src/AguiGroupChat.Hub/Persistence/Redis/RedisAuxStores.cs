@@ -49,6 +49,17 @@ public sealed class RedisUserStore : IUserStore
         return values.Where(v => !v.IsNullOrEmpty).Select(v => RedisContext.Deserialize<UserAccount>(v!)!).ToList();
     }
 
+    public bool RemoveUser(string userId)
+    {
+        var db = _ctx.Db;
+        var key = RedisContext.UserKey(userId);
+        var user = RedisContext.Deserialize<UserAccount>(db.StringGet(key));
+        if (user is null) return false;
+        db.KeyDelete(key);
+        db.HashDelete(RedisContext.UserByNameKey, user.Username); // 用户名索引（同名互斥）一并摘除
+        return true;
+    }
+
     public void ClearAll()
     {
         // 先枚举用户 id 集合、再删除：若先删 UserByNameKey，后面就无法从它发现哪些 user:* key 需删除（泄漏用户 key）。

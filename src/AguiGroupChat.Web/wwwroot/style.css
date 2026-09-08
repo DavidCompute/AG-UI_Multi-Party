@@ -1184,6 +1184,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
 /* 运行指标（6.1）：卡片网格 / 双列表格 / 桥接健康点 */
 .admin-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0 10px; flex-wrap: wrap; }
 .admin-metrics-head .form-hint { margin: 0; flex: 1; }
+/* 审计日志过滤行 + 详情列（企业合规） */
+.admin-audit-filter { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; flex-wrap: wrap; }
+.admin-modal .admin-table td.audit-detail { white-space: normal; max-width: 340px; min-width: 160px; }
 .admin-metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .admin-metric-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
 .admin-metric-card.bad { border-color: rgba(229,83,75,.5); background: rgba(229,83,75,.06); }

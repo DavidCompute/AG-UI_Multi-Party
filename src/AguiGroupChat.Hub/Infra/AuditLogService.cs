@@ -44,22 +44,56 @@ public sealed class AuditLogService
         }
     }
 
-    /// <summary>查询最近 <paramref name="limit"/>（最多 200）条，按时间倒序。</summary>
-    public IReadOnlyList<AuditEntry> Query(int limit = 100)
+    /// <summary>
+    /// 查询审计日志（按时间倒序，最近优先）。支持可选过滤：操作者（userId / 用户名，大小写不敏感子串）、
+    /// 操作名（子串）、目标 ID（子串）、时间范围（[fromMs, toMs]，UTC 毫秒含端点）。limit 最多 200。
+    /// </summary>
+    public IReadOnlyList<AuditEntry> Query(int limit = 100, string? actor = null, string? action = null,
+        string? targetId = null, long? fromMs = null, long? toMs = null)
     {
         lock (_gate)
         {
             if (_entries.Count == 0) return System.Array.Empty<AuditEntry>();
-            var n = Math.Min(limit, Math.Min(_entries.Count, 200));
-            var arr = new AuditEntry[n];
-            var node = _entries.Last;
-            for (var i = 0; i < n && node is not null; i++, node = node.Previous) arr[i] = node.Value;
-            return arr;
+            if (limit <= 0) limit = 100;                       // 旧调用兼容：0 回退默认
+            limit = Math.Min(limit, Math.Min(_entries.Count, 200)); // 硬上限 200
+            // 从最新（链表尾）开始过滤；OrderByDescending 稳定排序：同毫秒突发按插入序保持最新在前
+            var query = _entries.Reverse()
+                .Where(e => Matches(e, actor, action, targetId, fromMs, toMs))
+                .OrderByDescending(e => e.Timestamp)
+                .Take(limit)
+                .ToArray();
+            return query;
         }
     }
 
+    /// <summary>是否命中全部过滤条件（null / 空串表示不限制）。</summary>
+    private static bool Matches(AuditEntry e, string? actor, string? action, string? targetId, long? fromMs, long? toMs)
+        => (string.IsNullOrWhiteSpace(actor)
+                || e.ActorId.Contains(actor, StringComparison.OrdinalIgnoreCase)
+                || e.ActorUsername.Contains(actor, StringComparison.OrdinalIgnoreCase))
+           && (string.IsNullOrWhiteSpace(action)
+                || e.Action.Contains(action, StringComparison.OrdinalIgnoreCase))
+           && (string.IsNullOrWhiteSpace(targetId)
+                || (e.TargetId?.Contains(targetId, StringComparison.OrdinalIgnoreCase) ?? false))
+           && (fromMs is null || e.Timestamp >= fromMs.Value)
+           && (toMs is null || e.Timestamp <= toMs.Value);
+
     /// <summary>当前累计条目数。</summary>
     public int Count { get { lock (_gate) return _entries.Count; } }
+
+    /// <summary>
+    /// 导出全部命中条目（按时间正序，供 CSV 导出）。同 <see cref="Query"/> 过滤条件，但不设 200 条上限
+    /// （环形缓冲总容量 5000，单次导出不会超过该值）。
+    /// </summary>
+    public IReadOnlyList<AuditEntry> QueryAll(string? actor = null, string? action = null,
+        string? targetId = null, long? fromMs = null, long? toMs = null)
+    {
+        lock (_gate)
+        {
+            return _entries.Where(e => Matches(e, actor, action, targetId, fromMs, toMs))
+                .OrderBy(e => e.Timestamp).ToArray();
+        }
+    }
 }
 
 /// <summary>单条审计记录。</summary>

@@ -49,6 +49,7 @@ public static class DesktopApp
         builder.Services.AddAgentFramework(builder.Configuration); // 覆盖 NoopAgentGateway 为真实网关
         builder.Services.AddSingleton<AgentScheduler>(); // 智能体定时任务（cron）调度器
         builder.Services.AddSingleton<AguiGroupChat.Hub.Persistence.MessageRetentionService>(); // 消息保留策略（按天清理历史）
+        builder.Services.AddSingleton<AccountErasureService>(); // 账号注销 / 数据擦除（企业合规）编排
         builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey）
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
         // HTTP API 枚举字符串化（与协议 §2 一致）
@@ -79,6 +80,7 @@ public static class DesktopApp
         app.MapScheduledTaskApi(); // 重复性定时任务（1.4）
         app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
+        app.MapAccountApi();    // 账号注销（数据主体权利）：自助注销 + 数据擦除
         app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions
         app.Services.RegisterAgentPersistence();
         app.Services.RegisterKnowledgeBasePersistence();
