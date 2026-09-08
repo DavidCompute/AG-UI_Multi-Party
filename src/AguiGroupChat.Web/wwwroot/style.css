@@ -350,6 +350,14 @@ select {
   visibility: hidden;
 }
 .msg:hover .topic-start-btn, .msg:hover .copy-btn, .msg:hover .regenerate-btn, .msg:hover .recall-btn { visibility: visible; }
+/* 消息 👍/👎 评价：常显轻量按钮；已评价态分别高亮（👍 绿 / 👎 红），保持置灰感但可再点切换 */
+.msg .head .fb-like, .msg .head .fb-dislike { font-size: 12px; padding: 0 3px; }
+.msg .head .fb-like.on { color: #5cb860; background: rgba(92, 184, 96, .14); }
+.msg .head .fb-like.on:hover { color: #5cb860; background: rgba(92, 184, 96, .22); }
+.msg .head .fb-dislike.on { color: #ff8a80; background: rgba(255, 138, 128, .12); }
+.msg .head .fb-dislike.on:hover { color: #ff8a80; background: rgba(255, 138, 128, .22); }
+/* 👎 原因标签行：内嵌于气泡正文下方（头像列缩进对齐），标签可多选后提交 */
+.fb-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; padding-top: 7px; border-top: 1px dashed var(--border); }
 .msg .content { font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; min-width: 0; }
 /* Markdown 渲染态：由 marked 输出块级 HTML，关闭 pre-wrap 避免多余换行 */
 .msg .content.md { white-space: normal; }

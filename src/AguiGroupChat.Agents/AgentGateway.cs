@@ -83,6 +83,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly Lazy<MetricsService?> _metrics;
     // 话题滚动小结（长话题接续记忆）：可选（未注册服务时不注入）
     private readonly Lazy<TopicSummaryStore?> _topicSummary;
+    // 消息反馈（👍/👎 偏好画像）：可选
+    private readonly Lazy<MessageFeedbackStore?> _feedback;
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
     private readonly BridgeCircuitBreaker _bridgeCircuit = new();
     // 每个线程（群）一个会话锁：并发流式写入同一群消息时串行化。
@@ -214,6 +216,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             services.GetService(typeof(MetricsService)) as MetricsService);
         _topicSummary = new Lazy<TopicSummaryStore?>(() =>
             services.GetService(typeof(TopicSummaryStore)) as TopicSummaryStore);
+        _feedback = new Lazy<MessageFeedbackStore?>(() =>
+            services.GetService(typeof(MessageFeedbackStore)) as MessageFeedbackStore);
         // HITL 悬挂清理与会话锁 TTL 清理改为独立定时器定期执行（不再依赖「新增交互时顺带清理」），
         // 保证即使没有新交互产生，超时未决策的交互 / 已解散群的残留会话锁也能被回收。
         _purgeTimer = new Timer(_ => PurgePeriodicCleanup(), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
@@ -2620,6 +2624,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
               .Append(topicSummary).AppendLine().AppendLine();
         }
 
+        // 用户偏好画像：该用户近期对“本群/本数字员工”回复点过 👎 时，注入改进提示（客服知聚同样适用）。
+        var feedbackHint = await MaybeBuildFeedbackHintAsync(context, ct);
+        if (feedbackHint is not null)
+        {
+            sb.Append("【该用户近期对回复的反馈（用于改进，请勿复述给用户）：】\n")
+              .Append(feedbackHint).AppendLine().AppendLine();
+        }
+
         var history = _hub.Value.Store.RecentMessages(context.GroupId, ContextWindowMessages, context.TopicId)
             .Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId && !string.IsNullOrWhiteSpace(m.Content)
                 && IsVisibleForAgentContext(m, context.TriggerUserId, supportCircle))
@@ -2759,6 +2771,54 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         finally
         {
             store.EndGenerate(context.GroupId, context.TopicId);
+        }
+    }
+
+    /// <summary>用户偏好画像：汇总该用户近期负面反馈（同群或同数字员工）为一段改进提示。
+    /// 纯函数便于单测：entries 为该用户全部反馈；只取 30 天内、命中本群或本数字员工的 👎。</summary>
+    internal static string? BuildFeedbackHint(IReadOnlyList<MessageFeedbackEntry> entries, string agentId, string groupId, long nowMs)
+    {
+        const long WindowMs = 30L * 24 * 3600 * 1000;
+        var relevant = (entries ?? [])
+            .Where(e => e.Value < 0
+                && (e.AgentId == agentId || e.GroupId == groupId)
+                && nowMs - e.CreatedAtMs <= WindowMs)
+            .OrderByDescending(e => e.CreatedAtMs)
+            .Take(6)
+            .ToList();
+        if (relevant.Count == 0) return null;
+
+        var tagCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var tag in relevant.SelectMany(e => e.Tags ?? []))
+            if (!string.IsNullOrWhiteSpace(tag)) tagCounts[tag] = tagCounts.GetValueOrDefault(tag) + 1;
+        var lines = new List<string>();
+        var topTags = string.Join("、", tagCounts.OrderByDescending(kv => kv.Value).Take(4).Select(kv => kv.Key));
+        if (topTags.Length > 0)
+            lines.Add("该用户近期点赞为 👎 的回复主要反映：" + topTags + "。请尽量避免这些问题。");
+        else
+            lines.Add($"该用户近期对 {relevant.Count} 条回复点了 👎，请在回答时更贴合其需求。");
+        foreach (var e in relevant.Take(2))
+        {
+            if (string.IsNullOrWhiteSpace(e.Snippet)) continue;
+            var snippet = e.Snippet.Length > 80 ? e.Snippet[..80] + "…" : e.Snippet;
+            lines.Add("· 曾被点 👎 的回复片段：" + snippet);
+        }
+        return string.Join("\n", lines);
+    }
+
+    private async Task<string?> MaybeBuildFeedbackHintAsync(AgentInvocationContext context, CancellationToken ct)
+    {
+        var store = _feedback.Value;
+        if (store is null || context.TriggerUserId is null) return null;
+        try
+        {
+            var entries = store.ByUser(context.TriggerUserId);
+            return BuildFeedbackHint(entries, context.AgentId, context.GroupId, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "读取用户反馈失败（忽略）");
+            return null;
         }
     }
 

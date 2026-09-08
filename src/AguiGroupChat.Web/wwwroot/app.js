@@ -3840,8 +3840,10 @@ function applyRecallLocal(groupId, messageId) {
       if (btn) btn.remove();
       const ib = msgEl.querySelector(".interaction-block");
       if (ib) ib.remove(); // 撤回：嵌入的审批卡片一并移除
-      // 撤回后头部操作按钮（复制 / 重新回答 / 撤回）一并隐藏
-      msgEl.querySelectorAll(".head .copy-btn, .head .regenerate-btn, .head .recall-btn")
+      const fbTags = msgEl.querySelector(".fb-tags");
+      if (fbTags) fbTags.remove(); // 撤回：收起未提交的 👎 原因标签行
+      // 撤回后头部操作按钮（复制 / 重新回答 / 撤回 / 评价）一并隐藏
+      msgEl.querySelectorAll(".head .copy-btn, .head .regenerate-btn, .head .recall-btn, .head .fb-like, .head .fb-dislike")
         .forEach((b) => b.remove());
     }
     return; // addSystemLine 已调度增量渲染（系统行追加）
@@ -6368,6 +6370,7 @@ function msgDom(m, r) {
   if (regenBtn) bindRegenerateButton(regenBtn, m);
   const recallBtn = div.querySelector(".recall-btn");
   if (recallBtn) bindRecallButton(recallBtn, m);
+  ensureFeedbackButtons(div, m); // 👍/👎（对数字员工回复评价）
   // 人机交互卡片的批准 / 拒绝按钮
   bindInteractionButtons(div, m);
   return div;
@@ -6472,6 +6475,88 @@ function bindCopyButton(btn, m) {
   };
 }
 
+/** 会话内已评价消息缓存：msgId → 1(👍) / -1(👎)，刷新重渲染时保持置灰。 */
+const ratedMsgs = new Map();
+/** 👎 可选原因标签（i18n key）。 */
+const FEEDBACK_TAG_KEYS = ["fb.tag.verbose", "fb.tag.offtopic", "fb.tag.tooshort", "fb.tag.source", "fb.tag.other"];
+
+/** 数字员工回复：头部补挂 👍 / 👎 评价按钮（已评价则置灰展示状态）。 */
+function ensureFeedbackButtons(msgEl, m) {
+  const head = msgEl?.querySelector(".head");
+  if (!head || !m || m.sys || m.recalled || m.streaming || m.senderType !== "agent") return;
+  if (head.querySelector(".fb-like") || head.querySelector(".fb-dislike")) return;
+  const state = ratedMsgs.get(m.id);
+  const like = document.createElement("button");
+  like.className = "fb-like" + (state === 1 ? " on" : "");
+  like.type = "button"; like.title = t("fb.likeTitle"); like.textContent = "👍";
+  like.onclick = (e) => { e.stopPropagation(); if (state === 1) return; sendMessageFeedback(m, 1, []); };
+  const dislike = document.createElement("button");
+  dislike.className = "fb-dislike" + (state === -1 ? " on" : "");
+  dislike.type = "button"; dislike.title = t("fb.dislikeTitle"); dislike.textContent = "👎";
+  dislike.onclick = (e) => { e.stopPropagation(); if (state === -1) return; openFeedbackTags(msgEl, m); };
+  head.appendChild(like);
+  head.appendChild(dislike);
+}
+
+/** 👎：弹出原因标签选择条（点击标签即提交，可再点一次取消该标签）。 */
+function openFeedbackTags(msgEl, m) {
+  closeFeedbackTags(msgEl);
+  const row = document.createElement("div");
+  row.className = "fb-tags";
+  const chosen = new Set();
+  FEEDBACK_TAG_KEYS.forEach((k) => {
+    const chip = document.createElement("button");
+    chip.type = "button"; chip.className = "chip-btn"; chip.textContent = t(k);
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      if (chosen.has(k)) { chosen.delete(k); chip.classList.remove("on"); }
+      else { chosen.add(k); chip.classList.add("on"); }
+    };
+    row.appendChild(chip);
+  });
+  const send = document.createElement("button");
+  send.type = "button"; send.className = "send"; send.textContent = t("fb.submit");
+  send.onclick = async (e) => {
+    e.stopPropagation();
+    const tags = FEEDBACK_TAG_KEYS.filter((k) => chosen.has(k)).map((k) => t(k));
+    await sendMessageFeedback(m, -1, tags);
+    closeFeedbackTags(msgEl);
+  };
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.className = "btn-ghost"; cancel.textContent = t("fb.cancel");
+  cancel.onclick = (e) => { e.stopPropagation(); closeFeedbackTags(msgEl); };
+  row.appendChild(send);
+  row.appendChild(cancel);
+  (msgEl.querySelector(".body") || msgEl).appendChild(row);
+}
+
+function closeFeedbackTags(msgEl) {
+  const el = msgEl ? msgEl.querySelector(".fb-tags") : document.querySelector(".fb-tags");
+  if (el) el.remove();
+}
+
+/** 提交评价：1=👍 / -1=👎（带原因标签）。 */
+async function sendMessageFeedback(m, value, tags) {
+  const gid = state.activeGroupId;
+  if (!gid || !state.token) return;
+  try {
+    const res = await fetch("/ag-ui/message-feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ groupId: gid, messageId: m.id, value, tags }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("fb.fail", { err: errMsg(d, res.status) })); return; }
+    ratedMsgs.set(m.id, value);
+    const msgEl = document.querySelector(`[data-mid="${cssEsc(m.id)}"]`);
+    if (msgEl) {
+      msgEl.querySelectorAll(".fb-like, .fb-dislike").forEach((b) => b.remove());
+      ensureFeedbackButtons(msgEl, m);
+    }
+    toast(value > 0 ? t("fb.thanksLike") : t("fb.thanksDislike"));
+  } catch (ex) { toast(t("fb.fail", { err: ex.message })); }
+}
+
 /** 绑定重新回答按钮：调 /ag-ui/group/message/regenerate（服务端校验最后一条数字员工消息 + 触发者 / 管理员权限）。 */
 function bindRegenerateButton(btn, m) {
   btn.onclick = async (e) => {
@@ -6526,6 +6611,7 @@ function attachHeadActions(msgEl, m, r) {
     bindRecallButton(btn, m);
     head.appendChild(btn);
   }
+  ensureFeedbackButtons(msgEl, m); // 流式结束后补挂 👍/👎
 }
 
 /** 绑定撤回按钮：确认后调 /ag-ui/group/message/recall（服务端校验本人 / 知聚主 / 管理员 + 3 分钟时限；撤回后内容隐藏并清除记忆）。 */

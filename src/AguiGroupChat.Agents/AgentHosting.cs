@@ -54,6 +54,8 @@ public static class AgentHosting
         services.AddSingleton<ScheduledTaskService>();
         // 话题滚动小结（长话题接续记忆）：内存持有 + 扩展区持久化
         services.AddSingleton<TopicSummaryStore>();
+        // 消息反馈（👍/👎）：内存持有 + 扩展区持久化
+        services.AddSingleton<MessageFeedbackStore>();
         // 桥接端点健康度（3.1）：周期 TCP 探测 + 管理员控制台查看
         services.AddSingleton<BridgeHealthService>();
         // 轻量运行指标（6.1）：进程内计数器，管理员控制台查看
@@ -348,6 +350,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("topicSummaries", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册消息反馈到持久化扩展区「msgFeedback」：重启后 👍/👎 记录不丢。</summary>
+    public static void RegisterMessageFeedbackPersistence(this IServiceProvider services)
+    {
+        var feedback = services.GetRequiredService<MessageFeedbackStore>();
+        Func<object?> snapshot = () => feedback.Snapshot().Select(e => (object)e).ToList();
+        Action<JsonElement> restore = element => feedback.Restore(
+            element.Deserialize<List<MessageFeedbackEntry>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("msgFeedback", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("msgFeedback", snapshot, restore);
         }
     }
 
