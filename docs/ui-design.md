@@ -179,7 +179,16 @@ topbar（品牌 + 顶栏操作）
 - 角色（Instructions 人设）；
 - 触发（提及/全量监听/关键词/语境 + 关键词 + 覆盖模型）；
 - 定时（Schedule cron，UTC 5 段）；桥接（外部 AG-UI 端点，仅管理员）；技能（挂载技能/子员工/知识库）；杂项
-  （个人记忆、私密智能体）；执行阶段（关闭本员工桥接/交接/组织路由）。
+  （个人记忆、私密智能体、**记忆拟人类型**）；执行阶段（关闭本员工桥接/交接/组织路由）。
+- 「记忆与权限 → 🧠 记忆类型（拟人召回）」区行为（`agent.form.memoryType.*`）：
+  - 预设下拉五档拟人：广记型 / 深记型 / 难录入型 / 存得住想不起型 / 快速遗忘型（默认“跟随平台”= 不单独配置）；
+    选中后下方同步展示该类型一句话说明（`#afMemoryTypeDesc`，key `agent.form.memoryType.desc.<type>`）。
+  - 口吻模式（`#afMemoryStyle`）：平实引述（recall，默认）/ 先概括要点再回应（digest）；人设口吻一句话（`#afMemoryPersona`）。
+  - 「高级微调」（`afSectMemMicro` 折叠区）：群/个人记忆 TopK 与相似度阈值四个数值框，留空 = 按该预设推算。
+  - 保存体 `memoryProfile`：未选类型为 `null`；否则为 `{memoryType, styleMode?, personaCard?, topK?, personalTopK?, minScore?, personalMinScore?}`。
+    后端归一（越界收敛到 1~24 / 1~16 / 0.05~0.92），类型 key 非法视为不配置。导出 JSON 随 `memoryProfile` 往返。
+  - 运行效果（见 Hub/网关实现）：`MemoryContextProvider` 每次回复前按类型解析单次检索的 TopK / 阈值 / 回忆提示分支，
+    并仅在确实注入了群/个人记忆时，把与类型相符的“召回口吻”软性说明置于记忆段落之前。
 - “技能与知识”区行为：
   - 可复用技能（技能库）每行 = 勾选挂载 + 右侧 `✏️ 查看 / 编辑` 入口（`openAgentSkillViewer`），点击直达技能库编辑器；
     编辑器内“返回 / 保存技能”会直接回到本表单（不进技能库列表），并刷新挂载列表。

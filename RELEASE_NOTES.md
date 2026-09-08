@@ -4,6 +4,17 @@
 **版本说明**：1.0.120 为当前 Windows 桌面点版本（已构建 Windows 1.0.120 MSI）。本版本在既有 Web/桌面迭代之上并入最近的 Hub/协议更新：数字员工**单聊（kind=direct）**、**实时会话吊销/禁用/改密即时断线**、SDK 上行串行化与断连单次回调、上传/导入请求体放开到 200MB（Kestrel 同步放宽）。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
 **Version note**: 1.0.120 is the current Windows desktop point release (a Windows 1.0.120 MSI was built). On top of the previous web/desktop iteration it includes the latest Hub/protocol updates: digital-employee **direct chats (`kind=direct`)**, **immediate realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies (Kestrel limit raised accordingly). Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
 
+## 开发中：数字员工「记忆拟人类型」（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
+# In development: Digital-employee memory personality types (already live on the Web build; not yet in the 1.0.120 desktop installer)
+
+中文：
+- **记忆拟人类型（按类型召回）**：编辑数字员工 →「记忆与权限」新增「🧠 记忆类型（拟人召回）」区——五档预设（广记型 / 深记型 / 难录入型 / 存得住想不起型 / 快速遗忘型）+ 口吻模式（平实引述 / 先概括要点）+ 人设口吻 + 高级微调（群/个人 TopK 与相似度阈值）。回复前按该员工类型执行抽取：调取群记忆 / 个人记忆的条数与阈值不同（经检索层真正生效），存得住想不起型在用户给回忆提示（「记得吗 / 上次 / 之前」）时临时放宽提取，快速遗忘型默认只见最近 21 天的记忆（不删落库数据）；注入记忆时附一句与类型相符的“召回口吻”软性说明（广记型提示用「我记得好像是…」式谨慎措辞，不凭空补全）。未配置 = 沿用平台全局，完全向后兼容。
+
+English:
+- **Memory personality types (type-driven recall)**: editing an employee → “Memory & Permissions” now has a “🧠 Memory type” section — five presets (Broad / Deep / Slow-to-learn / Stored-but-cue-dependent / Fast-forgetting) plus a recall/digest speaking style, an optional persona tone, and advanced tuning (group/personal TopK and similarity thresholds). Recall runs per type before every reply: hit counts and thresholds differ for group/personal memory (enforced at the store layer); the cue-dependent type temporarily widens retrieval when the user gives recall cues (“remember? / last time / before”), and fast-forgetting only sees memories from the last 21 days by default (stored data is never deleted); a type-consistent soft “recall tone” note accompanies injected memories (broad types hedge with “I think it was…” instead of inventing). Unset means platform-global behavior — fully backward compatible.
+
+---
+
 ## 开发中：企业合规（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
 # In development: Enterprise compliance (already live on the Web build; not yet in the 1.0.120 desktop installer)
 
