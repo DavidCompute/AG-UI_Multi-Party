@@ -2648,9 +2648,40 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
         }
 
+        AppendLanguageHint(sb, context.Content);
         sb.Append(context.Content);
         await AppendAttachmentsAsync(sb, context, ct);
         return sb.ToString();
+    }
+
+    /// <summary>多语言自适应：按触发消息的主导语言给模型补一句“用该语言回复”的提示。
+    /// 检测不到明确语种（纯数字 / 过短英文等）时不注入，避免误判。</summary>
+    internal static string? DetectReplyLanguageHint(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return null;
+        int cjk = 0, kana = 0, hangul = 0, latin = 0;
+        foreach (var ch in content)
+        {
+            if (ch >= '\u4E00' && ch <= '\u9FFF') cjk++;
+            else if (ch >= '\u3040' && ch <= '\u30FF') kana++;
+            else if (ch >= '\uAC00' && ch <= '\uD7A3') hangul++;
+            else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) latin++;
+        }
+        var letters = cjk + kana + hangul + latin;
+        if (letters <= 0) return null;
+        if (cjk > 0 && latin <= cjk * 3) return "（请用中文回复，提问者消息以中文为主。）";
+        if (kana >= 3 && kana * 10 >= letters * 3) return "（質問は日本語です。日本語で回答してください。）";
+        if (hangul >= 3 && hangul * 10 >= letters * 3) return "（질문이 한국어입니다. 한국어로 답변해 주세요.）";
+        if (latin >= 6 && latin * 10 >= letters * 6) return "(Answer in English - the requester wrote in English.)";
+        return null;
+    }
+
+    /// <summary>把语言提示拼到同一轮用户消息的正文前（先于 <paramref name="content"/>）。</summary>
+    private static void AppendLanguageHint(StringBuilder sb, string? content)
+    {
+        var hint = DetectReplyLanguageHint(content);
+        if (hint is null) return;
+        sb.Append(hint).AppendLine().AppendLine();
     }
 
     /// <summary>外部 AG-UI 桥接用户消息组装：会话首次建立（无增量游标）发送话题全部历史；
@@ -2690,6 +2721,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
             sb.Append(UntrustedBoundary.Wrap(block.ToString())).AppendLine();
         }
+        // 注意：桥接对外发送的是 AG-UI 协议原文（标准模式断言内容与触发消息完全一致），不做本地语言提示注入
         sb.Append(context.Content);
         await AppendAttachmentsAsync(sb, context, ct);
         return sb.ToString();
