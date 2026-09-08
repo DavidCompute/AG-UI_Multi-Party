@@ -70,6 +70,46 @@ public sealed class BridgeHealthTests
     }
 
     [Fact]
+    public async Task ConsecutiveFailuresAccumulateInDetail()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop(); // 端口不再监听 → 每次探测都失败
+
+        var svc = CreateService(new AgentDefinition
+        {
+            AgentId = "flaky",
+            Nickname = "抖动桥",
+            Instructions = "",
+            BridgeEndpoint = $"ws://127.0.0.1:{port}/ws",
+        });
+
+        await svc.ProbeAllAsync(CancellationToken.None); // 第 1 次失败
+        var second = Assert.Single(await svc.ProbeAllAsync(CancellationToken.None)); // 第 2 次失败
+        Assert.False(second.Up);
+        Assert.Equal(2, second.ConsecutiveFailures);
+        Assert.Contains("已连续失败 2 次", second.Detail);
+
+        // 恢复成功探测后连续失败清零（另一个可达端点，Same Set 逻辑验证）
+        var ok = new TcpListener(IPAddress.Loopback, 0);
+        ok.Start();
+        var okPort = ((IPEndPoint)ok.LocalEndpoint).Port;
+        _ = Task.Run(() => { try { ok.AcceptTcpClient(); } catch { /* 停止时忽略 */ } });
+        var svc2 = CreateService(new AgentDefinition
+        {
+            AgentId = "okagent",
+            Nickname = "正常桥",
+            Instructions = "",
+            BridgeEndpoint = $"ws://127.0.0.1:{okPort}/ws",
+        });
+        var hit = Assert.Single(await svc2.ProbeAllAsync(CancellationToken.None));
+        Assert.True(hit.Up);
+        Assert.Equal(0, hit.ConsecutiveFailures);
+        ok.Stop();
+    }
+
+    [Fact]
     public async Task Probe_GlobalEndpoint_PlusAgentEndpoints()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

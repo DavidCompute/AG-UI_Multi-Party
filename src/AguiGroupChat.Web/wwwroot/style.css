@@ -1199,6 +1199,16 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .bh-dot.up { background: #5cb860; }
 .bh-dot.down { background: #e5534b; }
 .bh-detail { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+/* 调用 / 失败趋势（B3） */
+.admin-trend-view { margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.admin-trend-view h4 { margin: 0 0 6px; font-size: 13px; color: var(--text); }
+.admin-trend-charts { display: flex; flex-direction: column; gap: 6px; }
+.trend-line { display: flex; align-items: center; gap: 10px; }
+.trend-label { flex: none; width: 64px; font-size: 11px; }
+.trend-label.ok { color: var(--muted); }
+.trend-line svg { flex: 1; height: 32px; min-width: 0; }
+.trend-line svg.good { color: #5cb860; }
+.trend-line svg.bad { color: #e5534b; }
 
 /* ============ 管理员控制台 ============ */
 .admin-modal { width: 900px; max-width: 96vw; }

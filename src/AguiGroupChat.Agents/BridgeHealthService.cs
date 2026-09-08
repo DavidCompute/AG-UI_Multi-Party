@@ -26,8 +26,9 @@ public sealed class BridgeHealthService : IDisposable
         _logger = logger;
     }
 
-    /// <summary>单条端点健康状态。</summary>
-    public sealed record EndpointHealth(string AgentId, string Endpoint, bool Up, long? LatencyMs, string Detail, long CheckedAt);
+    /// <summary>单条端点健康状态（含连续失败计数与最近可用/失败时刻，供看板识别抖动）。</summary>
+    public sealed record EndpointHealth(string AgentId, string Endpoint, bool Up, long? LatencyMs, string Detail, long CheckedAt,
+        int ConsecutiveFailures = 0, long LastOkMs = 0, long LastFailMs = 0);
 
     /// <summary>启动周期性探测（默认每 60 秒；应用就绪后调用）。</summary>
     public void Start(int intervalSeconds = 60)
@@ -110,8 +111,16 @@ public sealed class BridgeHealthService : IDisposable
 
     private void Set(string agentId, string endpoint, bool up, long? latencyMs, string detail, long checkedAt)
     {
-        _health[agentId] = new EndpointHealth(agentId, endpoint, up, latencyMs, detail, checkedAt);
-        _logger.LogInformation("桥接端点健康度：{AgentId} → {Endpoint} @ {Up}（{Latency}ms）", agentId, endpoint, up ? "UP" : "DOWN", latencyMs?.ToString() ?? "-");
+        var prev = _health.TryGetValue(agentId, out var p) ? p : null;
+        var consecutive = up ? 0 : (prev?.Up == false ? prev.ConsecutiveFailures + 1 : 1);
+        var lastOk = up ? checkedAt : (prev?.LastOkMs ?? 0);
+        var lastFail = up ? (prev?.LastFailMs ?? 0) : checkedAt;
+        // 连续失败让详情更直白（看板 Detail 列直接可见抖动）
+        if (!up && consecutive >= 2)
+            detail = $"{detail}（已连续失败 {consecutive} 次）";
+        _health[agentId] = new EndpointHealth(agentId, endpoint, up, latencyMs, detail, checkedAt, consecutive, lastOk, lastFail);
+        _logger.LogInformation("桥接端点健康度：{AgentId} → {Endpoint} @ {Up}（{Latency}ms，连续失败 {N} 次）",
+            agentId, endpoint, up ? "UP" : "DOWN", latencyMs?.ToString() ?? "-", consecutive);
     }
 
     public void Dispose() => Stop();

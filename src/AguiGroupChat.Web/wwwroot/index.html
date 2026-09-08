@@ -1138,6 +1138,14 @@
           <button id="metricsRefreshBtn" class="chip-btn" type="button" data-i18n="admin.metricsRefresh">↻ 刷新</button>
         </div>
         <div id="adminMetricCards" class="admin-metric-grid"></div>
+        <!-- 调用 / 失败趋势（B3：60s 采样环，展示近 4 小时） -->
+        <div id="adminTrendView" class="admin-trend-view hidden">
+          <h4 data-i18n="admin.trendTitle">调用 / 失败趋势（近 4 小时）</h4>
+          <div class="admin-trend-charts">
+            <div class="trend-line"><span class="trend-label ok" data-i18n="admin.trendAccepted">成功调用</span><svg id="trendAcceptedSvg" viewBox="0 0 800 48" preserveAspectRatio="none"></svg></div>
+            <div class="trend-line"><span class="trend-label bad" data-i18n="admin.trendFailed">桥接失败</span><svg id="trendFailedSvg" viewBox="0 0 800 48" preserveAspectRatio="none"></svg></div>
+          </div>
+        </div>
         <div class="admin-metric-cols">
           <div class="admin-metric-col">
             <h4 data-i18n="admin.metricByAgent">按数字员工调用</h4>

@@ -5285,6 +5285,38 @@ function stopAdminMetricsPoll() {
   if (adminMetricsTimer) { clearInterval(adminMetricsTimer); adminMetricsTimer = null; }
 }
 
+/** 画一条趋势折线（SVG，按最近区间增量）；无数据时留空。 */
+function renderTrendSvg(id, vals, good) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle("good", !!good);
+  el.classList.toggle("bad", !good);
+  if (!Array.isArray(vals) || vals.length < 2) { el.innerHTML = ""; return; }
+  const w = 800, h = 48;
+  const max = Math.max(1, ...vals);
+  const step = vals.length > 1 ? (w - 4) / (vals.length - 1) : 0;
+  const pts = vals.map((v, i) => `${(2 + i * step).toFixed(1)},${(h - 2 - ((v / max) * (h - 6))).toFixed(1)}`);
+  el.innerHTML = `<polyline points="${pts.join(" ")}" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+}
+
+/** 指标趋势：服务端每 60s 一个累计采样点，前端取最近 120 点差分后画“成功调用 / 桥接失败”两条折线。 */
+function renderMetricsTrend(d) {
+  const view = $("adminTrendView");
+  if (!view) return;
+  const trend = d?.trend || [];
+  const have = trend.length >= 2;
+  view.classList.toggle("hidden", !have);
+  if (!have) return;
+  const recent = trend.slice(-120);
+  const acc = []; const fai = [];
+  for (let i = 1; i < recent.length; i++) {
+    acc.push(Math.max(0, (Number(recent[i].accepted) || 0) - (Number(recent[i - 1].accepted) || 0)));
+    fai.push(Math.max(0, (Number(recent[i].bridgeFailures) || 0) - (Number(recent[i - 1].bridgeFailures) || 0)));
+  }
+  renderTrendSvg("trendAcceptedSvg", acc, true);
+  renderTrendSvg("trendFailedSvg", fai, false);
+}
+
 /** 运行指标（6.1）：进程内调用 / 桥接 / 记忆命中率 + 分数字员工计数 + 桥接端点健康。 */
 async function loadAdminMetrics() {
   const meta = $("adminMetricsMeta");
@@ -5320,6 +5352,7 @@ async function loadAdminMetrics() {
     byAgent.innerHTML = (d.byAgent || []).length
       ? d.byAgent.map((a) => `<tr><td>${escapeHtml(a.agentId)}</td><td>${Number(a.count || 0).toLocaleString()}</td></tr>`).join("")
       : `<tr><td colspan="2" class="admin-empty">${t("admin.metricsEmpty")}</td></tr>`;
+    renderMetricsTrend(d);
   } catch (ex) { if (meta) meta.textContent = t("admin.sysNetErr"); cards.innerHTML = ""; }
   try {
     const bh = await fetch("/ag-ui/admin/bridge-health", { headers: { Authorization: "Bearer " + state.token } });
