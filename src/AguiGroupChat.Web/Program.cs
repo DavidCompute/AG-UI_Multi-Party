@@ -131,6 +131,7 @@ app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+�
 app.Services.RegisterMessageFeedbackPersistence(); // 消息 👍/👎 反馈跨重启保持
 app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群→知识库 + 时间水位）跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
+app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）
 app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
 app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
 app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持

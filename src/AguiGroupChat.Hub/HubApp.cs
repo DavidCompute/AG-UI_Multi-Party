@@ -200,6 +200,22 @@ public static class HubApp
         else services.GetService<ISectionStore>()?.AddSection("totpSecrets", snapshot, restore);
     }
 
+    /// <summary>注册操作审计日志到持久化扩展区「auditLog」（企业合规：跨重启保留审计留痕）。
+    /// memory 模式写入核心 JSON 快照；数据库 / Redis 模式写入 <c>ISectionStore</c> 扩展区。
+    /// 须在应用构建后、状态恢复（InitializePersistence）之前调用。</summary>
+    public static void RegisterAuditPersistence(this IServiceProvider services)
+    {
+        var audit = services.GetService<AguiGroupChat.Hub.Infra.AuditLogService>();
+        if (audit is null) return;
+        Func<object?> snapshot = () => audit.Snapshot().Select(e => (object)e).ToList();
+        Action<JsonElement> restore = element => audit.Restore(
+            element.Deserialize<List<AguiGroupChat.Hub.Infra.AuditEntry>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null) persistence.AddSection("auditLog", snapshot, restore);
+        else services.GetService<ISectionStore>()?.AddSection("auditLog", snapshot, restore);
+    }
+
     /// <summary>
     /// 恢复持久化状态（须在各扩展区注册完成后调用，如智能体目录）。
     /// 返回是否已存在历史数据；无历史数据且开启示例数据时调用方应播种示例数据。

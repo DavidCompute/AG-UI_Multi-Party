@@ -43,4 +43,29 @@ public sealed class AuditLogTests
         var latest = log.Query(1)[0];
         Assert.Contains("i=5999", latest.Detail!);
     }
+
+    [Fact]
+    public void Snapshot_Restore_RoundTripsEntries_AndContinuesSequence()
+    {
+        var log = new AuditLogService();
+        log.Record("data.export", "user_1", "admin1", detail: "导出 1");
+        log.Record("admin.user.disable", "user_2", "admin2", targetType: "user", targetId: "user_9");
+        log.Record("user.account.delete", "user_1", "admin1", targetType: "user", targetId: "user_9", detail: "删除账号");
+
+        // 快照 → 新实例恢复（模拟服务重启后从持久化 section 恢复）
+        var fresh = new AuditLogService();
+        fresh.Restore(log.Snapshot());
+
+        Assert.Equal(3, fresh.Count);
+        var restored = fresh.Query(10);
+        Assert.Equal(3, restored.Count);
+        Assert.Equal("user.account.delete", restored[0].Action); // 最新在前
+        Assert.Equal("data.export", restored[2].Action);
+        Assert.Equal("删除账号", restored[0].Detail);
+
+        // 恢复后继续记录：序号推进，不产生重复 ID
+        fresh.Record("settings.model", "user_1", "admin1", detail: "改配置");
+        var ids = fresh.Query(10).Select(e => e.Id).ToHashSet();
+        Assert.Equal(4, ids.Count); // 4 条各不相同
+    }
 }

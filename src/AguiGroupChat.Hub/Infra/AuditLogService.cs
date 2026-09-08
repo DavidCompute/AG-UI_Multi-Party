@@ -3,10 +3,11 @@ using System.Collections.Concurrent;
 namespace AguiGroupChat.Hub.Infra;
 
 /// <summary>
-/// 操作审计日志（内存环形缓冲，4.3 审计）：记录关键/敏感操作（人机审批决策、导出 / 导入、
-/// 重置、模型配置变更、管理员禁用 / 重置密码等），供管理员控制台查询导出。
-/// 当下为<b>进程内内存</b>存储（服务重启即清空），满足会话内审计与合规留痕；
-/// 需要跨重启持久化的审计可后续接入 <c>agui_usage</c> / 扩展区（sections）或专用审计表。
+/// 操作审计日志（环形缓冲，4.3 审计）：记录关键/敏感操作（人机审批决策、导出 / 导入、
+/// 重置、模型配置变更、管理员禁用 / 重置密码 / 删除账号、平台角色变更等），供管理员控制台查询导出。
+/// 默认进程内环形存储（上限 <see cref="AuditLogService"/>），并注册持久化（<c>auditLog</c> 扩展区 /
+/// JSON 快照 section）——memory 单文件模式随核心快照持久化、数据库 / Redis 模式经 <c>ISectionStore</c> 落库，
+/// 服务重启后审计记录不再丢失。
 /// </summary>
 public sealed class AuditLogService
 {
@@ -80,6 +81,31 @@ public sealed class AuditLogService
 
     /// <summary>当前累计条目数。</summary>
     public int Count { get { lock (_gate) return _entries.Count; } }
+
+    /// <summary>导出全部审计条目（按时间正序 = 写入序），供持久化快照（memory JSON / 数据库扩展区）。</summary>
+    public IReadOnlyList<AuditEntry> Snapshot()
+    {
+        lock (_gate) return _entries.ToList();
+    }
+
+    /// <summary>从快照恢复审计条目（服务启动时）：清空既有后按序重建，序号推进到最大已有值避免 ID 冲突。
+    /// 超容量条目丢弃（与 Record 的环形缓冲语义一致）。</summary>
+    public void Restore(IEnumerable<AuditEntry> entries)
+    {
+        lock (_gate)
+        {
+            _entries.Clear();
+            long maxSeq = 0;
+            foreach (var e in entries)
+            {
+                if (e.Id is not null && e.Id.StartsWith("aud_", StringComparison.Ordinal)
+                    && long.TryParse(e.Id[4..], out var n) && n > maxSeq) maxSeq = n;
+                _entries.AddLast(e);
+                while (_entries.Count > Capacity) _entries.RemoveFirst();
+            }
+            _seq = Math.Max(_seq, maxSeq);
+        }
+    }
 
     /// <summary>
     /// 导出全部命中条目（按时间正序，供 CSV 导出）。同 <see cref="Query"/> 过滤条件，但不设 200 条上限
