@@ -100,6 +100,7 @@ public sealed class AgentApiServerFixture : IAsyncLifetime
         App.MapAttachmentApi(); // 附件上传 / 下载（头像等）
         App.MapGroupNameApi(); // 群名自动生成
         App.MapMentionSuggestApi(); // 输入时「建议 @ 谁」
+        App.MapPlanControlApi(); // 编排计划「暂停 / 继续」
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }

@@ -3724,7 +3724,7 @@ function onMessagePlan(evt) {
   const r = room(evt.groupId);
   const m = r.messages.find((x) => x.id === evt.messageId);
   if (!m || !Array.isArray(evt.steps) || evt.steps.length === 0) return;
-  m.plan = { title: evt.title || "", steps: evt.steps };
+  m.plan = { title: evt.title || "", steps: evt.steps, paused: !!evt.paused, triggerMemberId: evt.triggerMemberId || null };
   m._html = undefined; // 计划变化 → 渲染缓存失效
   if (state.activeGroupId !== evt.groupId) return;
   vscroll.force = true; // 计划追加 → 消息高度可能变化，强制重建窗口
@@ -3736,7 +3736,8 @@ function parsePlanJson(planJson) {
   if (!planJson) return null;
   try {
     const p = JSON.parse(planJson);
-    if (p && Array.isArray(p.steps) && p.steps.length) return { title: p.title || "", steps: p.steps };
+    if (p && Array.isArray(p.steps) && p.steps.length)
+      return { title: p.title || "", steps: p.steps, paused: !!p.paused, triggerMemberId: p.triggerMemberId || null };
     return null;
   } catch { return null; }
 }
@@ -4115,15 +4116,56 @@ function collectSchemaPayload(container) {
   return payload;
 }
 
-/** 任务计划可视化卡片：工作型数字员工消息结束时，把其工作区 PLAN.md 的步骤渲染为带勾选清单 + 进度条的计划卡。 */
-function renderPlanCard(plan) {
+/** 任务计划可视化卡片：工作型数字员工消息结束时，把其工作区 PLAN.md 的步骤渲染为带勾选清单 + 进度条的计划卡。
+ *  流式执行中且调用者为触发者（或群主/管理员）时展示「暂停 / 继续」控制；paused 状态由后端广播 / planJson 同步。 */
+function renderPlanCard(plan, m, r) {
   const steps = plan.steps || [];
   const done = steps.filter((s) => s.done).length;
   const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
-  return `<div class="plan-card-head">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : t("itx.planCardTitle")}<span class="plan-progress-txt">${done}/${steps.length}（${pct}%）</span></div>`
+  const paused = !!plan.paused;
+  const total = steps.length;
+  const myRole = r?.members?.find((x) => x.memberId === state.memberId)?.role;
+  const canControl = !!m && !!r && !m.recalled && !!m.streaming && total > 0 && done < total
+    && (state.memberId === plan.triggerMemberId || myRole === "owner" || myRole === "admin");
+  const stateLine = paused
+    ? `<span class="plan-state on">⏸ ${escapeHtml(t("plan.paused"))}</span>`
+    : (done < total && m?.streaming ? `<span class="plan-state">⏳ ${escapeHtml(t("plan.running"))}</span>` : "");
+  const act = paused
+    ? (canControl ? `<button class="chip-btn plan-resume-btn" type="button">▶ ${escapeHtml(t("plan.resume"))}</button>` : "")
+    : (canControl ? `<button class="chip-btn plan-pause-btn" type="button">⏸ ${escapeHtml(t("plan.pause"))}</button>` : "");
+  return `<div class="plan-card-head">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : t("itx.planCardTitle")}<span class="plan-progress-txt">${done}/${total}（${pct}%）</span>${stateLine}</div>`
     + `<div class="plan-progress"><div class="plan-progress-bar" style="width:${pct}%"></div></div>`
     + `<ul class="plan-steps">${steps.map((s) =>
-        `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>`;
+        `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>`
+    + (act ? `<div class="plan-actions">${act}</div>` : "");
+}
+
+/** 绑定计划卡「暂停 / 继续」按钮（渲染后由 msgDom 调用一次）。 */
+function bindPlanCardButtons(container, m) {
+  const pauseBtn = container.querySelector(".plan-pause-btn");
+  if (pauseBtn) pauseBtn.onclick = (e) => { e.stopPropagation(); setPlanPaused(m, true); };
+  const resumeBtn = container.querySelector(".plan-resume-btn");
+  if (resumeBtn) resumeBtn.onclick = (e) => { e.stopPropagation(); setPlanPaused(m, false); };
+}
+
+/** 暂停 / 继续编排计划：POST /ag-ui/plan/{pause|resume}；成功后乐观更新本地卡片状态。 */
+async function setPlanPaused(m, paused) {
+  const gid = state.activeGroupId;
+  if (!gid || !state.token || !m) return;
+  const action = paused ? "pause" : "resume";
+  try {
+    const res = await fetch(`/ag-ui/plan/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ groupId: gid, messageId: m.id }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("plan.fail", { err: errMsg(d, res.status) })); return; }
+    if (m.plan) { m.plan.paused = paused; m._html = undefined; }
+    vscroll.force = true;
+    scheduleVirtualRender();
+    toast(paused ? t("plan.pausedOk") : t("plan.resumedOk"));
+  } catch (ex) { toast(t("plan.fail", { err: ex.message })); }
 }
 
 /**
@@ -6354,7 +6396,7 @@ function msgDom(m, r) {
       <div class="content ${m.recalled ? "recalled" : ""} ${m.streaming ? "streaming" : ""} ${m.waiting ? "waiting" : ""}${clamp}${md}">${truncatedHint}${contentHtml}</div>
       ${interactionBlock}
       ${attachments && !m.recalled ? `<div class="attachments${imgGrid ? " img-grid" : ""}">${attachments}</div>` : ""}
-      ${m.plan && m.plan.steps && m.plan.steps.length && !m.recalled ? `<div class="plan-card">${renderPlanCard(m.plan)}</div>` : ""}
+      ${m.plan && m.plan.steps && m.plan.steps.length && !m.recalled ? `<div class="plan-card">${renderPlanCard(m.plan, m, r)}</div>` : ""}
       ${chainCard}
       ${toolCalls}
     </div>`;
@@ -6375,6 +6417,7 @@ function msgDom(m, r) {
   ensureFeedbackButtons(div, m); // 👍/👎（对数字员工回复评价）
   // 人机交互卡片的批准 / 拒绝按钮
   bindInteractionButtons(div, m);
+  bindPlanCardButtons(div, m); // 计划卡「暂停 / 继续」（流式执行中）
   return div;
 }
 

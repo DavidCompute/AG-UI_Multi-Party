@@ -56,6 +56,8 @@ public static class AgentHosting
         services.AddSingleton<TopicSummaryStore>();
         // 消息反馈（👍/👎）：内存持有 + 扩展区持久化
         services.AddSingleton<MessageFeedbackStore>();
+        // 编排计划暂停/继续控制：内存持有（单次计划执行生命周期，无需持久化）
+        services.AddSingleton<CoordinatedPlanControlStore>();
         // 桥接端点健康度（3.1）：周期 TCP 探测 + 管理员控制台查看
         services.AddSingleton<BridgeHealthService>();
         // 轻量运行指标（6.1）：进程内计数器，管理员控制台查看

@@ -85,6 +85,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly Lazy<TopicSummaryStore?> _topicSummary;
     // 消息反馈（👍/👎 偏好画像）：可选
     private readonly Lazy<MessageFeedbackStore?> _feedback;
+    // 编排计划暂停/继续控制：可选（未注册服务时计划照常一口气执行）
+    private readonly Lazy<CoordinatedPlanControlStore?> _planControl;
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
     private readonly BridgeCircuitBreaker _bridgeCircuit = new();
     // 每个线程（群）一个会话锁：并发流式写入同一群消息时串行化。
@@ -218,6 +220,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             services.GetService(typeof(TopicSummaryStore)) as TopicSummaryStore);
         _feedback = new Lazy<MessageFeedbackStore?>(() =>
             services.GetService(typeof(MessageFeedbackStore)) as MessageFeedbackStore);
+        _planControl = new Lazy<CoordinatedPlanControlStore?>(() =>
+            services.GetService(typeof(CoordinatedPlanControlStore)) as CoordinatedPlanControlStore);
         // HITL 悬挂清理与会话锁 TTL 清理改为独立定时器定期执行（不再依赖「新增交互时顺带清理」），
         // 保证即使没有新交互产生，超时未决策的交互 / 已解散群的残留会话锁也能被回收。
         _purgeTimer = new Timer(_ => PurgePeriodicCleanup(), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
@@ -1229,6 +1233,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (root is null) return;
         var gid = context.GroupId;
 
+        // 计划暂停/继续闸门：先登记（端点收到暂停请求时能定位到本计划），随执行结束/异常移除
+        var planGate = _planControl.Value?.Begin(messageId, gid, context.AgentId, context.TriggerUserId);
+        try
+        {
         // 1) 构造展示步骤（即时生效步 + 最终综合步），全部“待执行”
         var display = new List<PlanStepInfo>();
         foreach (var step in plan.Steps)
@@ -1277,6 +1285,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 3) 逐项执行 dispatch / 服务端技能（跳过客户端技能，留到批量阶段）& 按原顺序点亮
         for (var si = 0; si < plan.Steps.Count; si++)
         {
+            // 步骤边界：用户暂停过则挂起等待「继续」，恢复后接着执行剩余步骤
+            await PausePlanIfRequestedAsync(planGate, gid, messageId, display, ct);
             var step = plan.Steps[si];
             if (clientSteps.ContainsKey(si)) continue; // 客户端技能统一在批量阶段执行
             if (step.Action == "dispatch")
@@ -1330,6 +1340,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
 
         // 4) 批量执行客户端技能（若有）：合并下发一张「本机一键执行全部」交互卡，前端逐个执行、逐条回传、逐条点亮
+        await PausePlanIfRequestedAsync(planGate, gid, messageId, display, ct);
         if (clientSteps.Count > 0)
         {
             var results = await AwaitBatchClientExecAsync(context, gid, messageId, display, clientSteps.Values.ToList(), ct);
@@ -1348,7 +1359,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
         }
 
-        // 5) 综合答复制止（计划卡步骤全部点亮，先标记完成）
+        // 5) 综合答复制止（计划卡步骤全部点亮，先标记完成）；用户可在此前暂停，避免计划一口气冲到最终答复
+        await PausePlanIfRequestedAsync(planGate, gid, messageId, display, ct);
         display[^1] = new PlanStepInfo { Id = display[^1].Id, Text = display[^1].Text, Done = true };
         await BroadcastPlanAsync(gid, messageId, display, ct);
 
@@ -1372,13 +1384,38 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         text = UnwrapCoordinationAnswer(text); // 防御：若模型把内部 JSON 决策原样当回复，剥出 user-facing answer
         foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
             await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
+        }
+        finally
+        {
+            _planControl.Value?.End(messageId);
+        }
     }
 
-    private async Task BroadcastPlanAsync(string groupId, string messageId, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct)
+    /// <summary>步骤边界暂停闸门：网关在每步（含批量执行与综合答复）之前检查一次；
+    /// 用户已暂停 → 广播带「已暂停」状态的计划卡并挂起，直到用户点「继续」才恢复后续步骤。</summary>
+    private async Task PausePlanIfRequestedAsync(PlanGate? gate, string gid, string messageId,
+        IReadOnlyList<PlanStepInfo> display, CancellationToken ct)
+    {
+        if (gate is null || !gate.IsPaused) return;
+        try
+        {
+            await BroadcastPlanAsync(gid, messageId, display, ct,
+                paused: true, triggerMemberId: gate.TriggerUserId);
+            await gate.WaitWhilePausedAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // 用户停止生成 / 会话取消：不再继续步骤，交由上层收尾（闸门由 finally End 移除）
+        }
+    }
+
+    private async Task BroadcastPlanAsync(string groupId, string messageId, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct,
+        bool paused = false, string? triggerMemberId = null)
     {
         try
         {
-            await _hub.Value.BroadcastMessagePlanAsync(groupId, messageId, "执行计划", steps, ct);
+            await _hub.Value.BroadcastMessagePlanAsync(groupId, messageId, "执行计划", steps, ct,
+                paused: paused, triggerMemberId: triggerMemberId);
         }
         catch (Exception ex)
         {

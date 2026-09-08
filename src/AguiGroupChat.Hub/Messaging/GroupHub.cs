@@ -1523,8 +1523,10 @@ public sealed class GroupHub : IDisposable
     }
 
     /// <summary>广播工作型智能体的任务计划（TEXT_MESSAGE_PLAN）：消息结束时回附其工作区 PLAN.md 的结构化步骤（任务规划可视化）。
-    /// 按消息流可见范围扇出；消息不存在 / 未在流式状态下则静默跳过（计划可视化是增强，不应阻断主流程）。</summary>
-    public Task BroadcastMessagePlanAsync(string groupId, string messageId, string? title, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct = default)
+    /// 按消息流可见范围扇出；消息不存在 / 未在流式状态下则静默跳过（计划可视化是增强，不应阻断主流程）。
+    /// paused=true 时计划卡展示「已暂停」（前端据 TriggerMemberId 显示「继续」按钮）。</summary>
+    public Task BroadcastMessagePlanAsync(string groupId, string messageId, string? title, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct = default,
+        bool paused = false, string? triggerMemberId = null)
     {
         if (steps is null || steps.Count == 0) return Task.CompletedTask;
         if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
@@ -1532,7 +1534,7 @@ public sealed class GroupHub : IDisposable
         // 计划随消息落库（刷新 / 重开后历史消息仍可回显计划卡）。持久化是增强，失败不阻断主流程。
         try
         {
-            var planJson = AguiJson.Serialize(new { Title = title, Steps = steps });
+            var planJson = AguiJson.Serialize(new { Title = title, Steps = steps, Paused = paused, TriggerMemberId = triggerMemberId });
             var msg = _store.GetMessage(groupId, messageId);
             if (msg is not null)
             {
@@ -1551,6 +1553,8 @@ public sealed class GroupHub : IDisposable
             GroupId = groupId,
             Title = title,
             Steps = steps,
+            Paused = paused,
+            TriggerMemberId = triggerMemberId,
             Timestamp = NowMs,
         }, state.Recipients, ct);
     }

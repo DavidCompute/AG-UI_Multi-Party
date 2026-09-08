@@ -208,7 +208,8 @@ public sealed class TextMessageAttachmentsEvent
     public required long Timestamp { get; init; }
 }
 
-/// <summary>TEXT_MESSAGE_PLAN：工作型智能体消息结束时回附其工作区 PLAN.md 的结构化步骤计划（任务规划可视化）。</summary>
+/// <summary>TEXT_MESSAGE_PLAN：工作型智能体消息结束时回附其工作区 PLAN.md 的结构化步骤计划（任务规划可视化）。
+/// Paused=true 表示执行已由触发者暂停（计划卡展示「继续」）；TriggerMemberId 为发起计划的成员（仅其可暂停/继续）。</summary>
 public sealed class TextMessagePlanEvent
 {
     public string Type => EventTypes.TextMessagePlan;
@@ -218,6 +219,10 @@ public sealed class TextMessagePlanEvent
     public string? Title { get; init; }
     /// <summary>步骤清单（含完成状态）。</summary>
     public required IReadOnlyList<PlanStepInfo> Steps { get; init; }
+    /// <summary>是否处于暂停状态（暂停后等触发者点「继续」）。</summary>
+    public bool Paused { get; init; }
+    /// <summary>发起计划的成员 id（仅该成员可暂停/继续；群主/管理员后端额外放行）。</summary>
+    public string? TriggerMemberId { get; init; }
     public required long Timestamp { get; init; }
 }
 

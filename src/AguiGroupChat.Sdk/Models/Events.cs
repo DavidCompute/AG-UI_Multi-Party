@@ -158,6 +158,10 @@ public sealed class TextMessagePlanEvent : AguiEvent
     public string? GroupId { get; set; }
     public string? Title { get; set; }
     public IReadOnlyList<PlanStepInfo>? Steps { get; set; }
+    /// <summary>是否处于暂停状态（Paused=true 时计划卡展示「继续」）。</summary>
+    public bool Paused { get; set; }
+    /// <summary>发起计划的成员 id（仅其可暂停/继续）。</summary>
+    public string? TriggerMemberId { get; set; }
 }
 
 public sealed class PlanStepInfo
