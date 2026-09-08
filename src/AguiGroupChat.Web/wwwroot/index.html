@@ -777,12 +777,15 @@
         <div id="bridgeIssuedList" class="muted" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin-top:4px;background:var(--panel)"></div>
       </div>
       </div>
-      <!-- 注销账户（企业合规 · 数据主体权利）：删除账号与个人数据，不可恢复 -->
+      <!-- 注销账户（企业合规 · 数据主体权利）：导出本人数据 + 删除账号与个人数据，删除不可恢复 -->
       <div class="danger-zone" style="margin-top:16px;padding-top:12px">
         <div class="form-section" data-i18n="profile.deleteSection">⚠️ 危险操作</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
           <p class="form-hint" style="margin:0;flex:1;min-width:220px" data-i18n="profile.deleteDesc">注销账户将删除本账号、全部会话与个人数据（创建的知聚将转让或解散、发言记忆与个人知识库一并清除），不可撤销。操作需输入登录密码确认。</p>
-          <button id="pfDeleteAccount" class="chip-btn danger" type="button" data-i18n="profile.deleteBtn">注销账户</button>
+          <span style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="pfExportData" class="chip-btn" type="button" data-i18n="profile.exportBtn">⬇ 导出我的数据</button>
+            <button id="pfDeleteAccount" class="chip-btn danger" type="button" data-i18n="profile.deleteBtn">注销账户</button>
+          </span>
         </div>
       </div>
       <div class="modal-actions">

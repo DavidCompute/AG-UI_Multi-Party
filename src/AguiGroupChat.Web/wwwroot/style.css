@@ -350,8 +350,8 @@ select {
   visibility: hidden;
 }
 .msg:hover .topic-start-btn, .msg:hover .copy-btn, .msg:hover .regenerate-btn, .msg:hover .recall-btn { visibility: visible; }
-/* 消息 👍/👎 评价：常显轻量按钮；已评价态分别高亮（👍 绿 / 👎 红），保持置灰感但可再点切换 */
-.msg .head .fb-like, .msg .head .fb-dislike { font-size: 12px; padding: 0 3px; }
+/* 消息 👍/👎 评价：与其他头部操作按钮同款描边图标（SVG 14px），常显；已评价态分别高亮（👍 绿 / 👎 红） */
+.msg .head .fb-like svg, .msg .head .fb-dislike svg { width: 14px; height: 14px; display: block; }
 .msg .head .fb-like.on { color: #5cb860; background: rgba(92, 184, 96, .14); }
 .msg .head .fb-like.on:hover { color: #5cb860; background: rgba(92, 184, 96, .22); }
 .msg .head .fb-dislike.on { color: #ff8a80; background: rgba(255, 138, 128, .12); }

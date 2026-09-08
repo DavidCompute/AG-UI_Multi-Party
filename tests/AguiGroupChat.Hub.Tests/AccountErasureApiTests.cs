@@ -129,6 +129,41 @@ public sealed class AccountErasureApiTests : IClassFixture<AccountApiServerFixtu
     }
 
     [Fact]
+    public async Task ExportMyData_ReturnsOwnGroupsMessagesAndProfile()
+    {
+        var user = await RegisterAsync("portable_user");
+        var uid = user.GetProperty("userId").GetString()!;
+        var token = user.GetProperty("token").GetString()!;
+
+        // 建群 + 发一条本人消息
+        string gid;
+        using (var create = Authed(HttpMethod.Post, "/ag-ui/group/create", token))
+        {
+            create.Content = JsonContent.Create(new { groupName = "我的数据群", ownerId = uid });
+            var created = await _client.SendAsync(create);
+            created.EnsureSuccessStatusCode();
+            gid = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+        }
+        using (var send = Authed(HttpMethod.Post, "/ag-ui/group/message/send", token))
+        {
+            send.Content = JsonContent.Create(new { groupId = gid, userId = uid, content = "这是我要导出的发言内容" });
+            (await _client.SendAsync(send)).EnsureSuccessStatusCode();
+        }
+
+        using var req = Authed(HttpMethod.Get, "/ag-ui/account/export", token);
+        var res = await _client.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        Assert.Equal("application/json", res.Content.Headers.ContentType?.MediaType);
+        var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(uid, doc.GetProperty("account").GetProperty("userId").GetString());
+        Assert.Contains(doc.GetProperty("groups").EnumerateArray(),
+            g => g.GetProperty("groupId").GetString() == gid);
+        Assert.Contains(doc.GetProperty("messages").EnumerateArray(),
+            m => m.GetProperty("groupId").GetString() == gid
+                 && m.GetProperty("content").GetString() == "这是我要导出的发言内容");
+    }
+
+    [Fact]
     public async Task AdminDelete_TargetRemoved_AndAuditCsvExported()
     {
         var admin = await RegisterAsync("admin_chief");

@@ -548,6 +548,10 @@ window.I18N_DICTS.zh = {
   "profile.deleteSection": "⚠️ 危险操作",
   "profile.deleteDesc": "注销账户将删除本账号、全部会话与个人数据（创建的知聚将转让或解散、发言记忆与个人知识库一并清除），不可撤销。操作需输入登录密码确认。",
   "profile.deleteBtn": "注销账户",
+  "profile.exportBtn": "⬇ 导出我的数据",
+  "profile.exporting": "导出中…",
+  "profile.exported": "我的数据已导出",
+  "profile.exportFail": "导出失败（{err}）",
 
   /* --- 添加成员 --- */
   "am.title": "添加成员",

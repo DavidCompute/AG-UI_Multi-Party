@@ -548,6 +548,10 @@ window.I18N_DICTS.en = {
   "profile.deleteSection": "⚠️ Danger Zone",
   "profile.deleteDesc": "Delete this account and all personal data (groups you own will be transferred or disbanded; your message memories and personal knowledge bases are erased). This cannot be undone. Your sign-in password is required to confirm.",
   "profile.deleteBtn": "Delete Account",
+  "profile.exportBtn": "⬇ Export my data",
+  "profile.exporting": "Exporting…",
+  "profile.exported": "Your data has been exported",
+  "profile.exportFail": "Export failed ({err})",
 
   /* --- 添加成员 --- */
   "am.title": "Add Member",

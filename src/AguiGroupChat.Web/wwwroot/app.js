@@ -2949,6 +2949,31 @@ function openDeleteAccountModal() {
 
 function closeDeleteAccountModal() { $("deleteAccountModal").classList.add("hidden"); }
 
+/** 导出我的数据（数据可携权）：下载 JSON（账号 / 知聚 / 本人发言 / 记忆 / 知识库 / 数字员工 / 技能），供注销前留存或迁移。 */
+async function exportMyData() {
+  const btn = $("pfExportData");
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t("profile.exporting");
+  try {
+    const res = await fetch("/ag-ui/account/export", { headers: { Authorization: `Bearer ${state.token}` } });
+    if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, t("profile.exportFail", { err: res.status }))); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)/i.exec(cd);
+    a.download = m ? decodeURIComponent(m[1]) : `agui-my-data-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast(t("profile.exported"));
+  } catch (ex) { toast(t("profile.exportFail", { err: ex.message })); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
 /** 确认注销：提交密码执行账号注销 + 数据擦除；成功后清理本地登录态并回到登录页。 */
 async function submitDeleteAccount() {
   const pw = $("daPassword").value;
@@ -6544,6 +6569,8 @@ const ICONS = {
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>',
   recall: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
   reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>',
+  "thumbs-up": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>',
+  "thumbs-down": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.67 2.67 0 0 1 22 4.67v6.66a2.67 2.67 0 0 1-2.67 2.67H17"/></svg>',
   code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
 };
@@ -6806,11 +6833,13 @@ function ensureFeedbackButtons(msgEl, m) {
   const state = ratedMsgs.get(m.id);
   const like = document.createElement("button");
   like.className = "fb-like" + (state === 1 ? " on" : "");
-  like.type = "button"; like.title = t("fb.likeTitle"); like.textContent = "👍";
+  like.type = "button"; like.title = t("fb.likeTitle");
+  like.innerHTML = icon("thumbs-up");
   like.onclick = (e) => { e.stopPropagation(); if (state === 1) return; sendMessageFeedback(m, 1, []); };
   const dislike = document.createElement("button");
   dislike.className = "fb-dislike" + (state === -1 ? " on" : "");
-  dislike.type = "button"; dislike.title = t("fb.dislikeTitle"); dislike.textContent = "👎";
+  dislike.type = "button"; dislike.title = t("fb.dislikeTitle");
+  dislike.innerHTML = icon("thumbs-down");
   dislike.onclick = (e) => { e.stopPropagation(); if (state === -1) return; openFeedbackTags(msgEl, m); };
   head.appendChild(like);
   head.appendChild(dislike);
@@ -8347,7 +8376,8 @@ function init() {
   $("pwNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitChangePassword(); } });
   $("pfCancel").onclick = () => $("profileModal").classList.add("hidden");
   $("pfConfirm").onclick = submitProfile;
-  // 注销账户（资料弹窗危险区）：需输入密码确认
+  // 注销账户（资料弹窗危险区）：导出我的数据 + 需输入密码确认的注销
+  $("pfExportData").onclick = exportMyData;
   $("pfDeleteAccount").onclick = openDeleteAccountModal;
   $("daCancel").onclick = closeDeleteAccountModal;
   $("daConfirm").onclick = submitDeleteAccount;
