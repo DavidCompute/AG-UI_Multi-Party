@@ -153,6 +153,8 @@ public static class AgentHosting
         });
         // 自动遗忘维护服务（宿主自动启动；记忆 null 占位时内部跳过）
         services.AddHostedService<MemoryMaintenanceService>();
+        // 重要结论自动周期沉淀（记忆治理深化；记忆未启用 / 关闭时内部跳过）
+        services.AddHostedService<MemoryAutoConsolidationService>();
 
         if (provider == "postgres")
         {
@@ -371,6 +373,26 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("msgFeedback", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册自动沉淀水位到扩展区「autoMemoryConsolidation」：重启后不会把已沉淀过的关键记忆再写一遍。</summary>
+    public static void RegisterAutoConsolidationPersistence(this IServiceProvider services)
+    {
+        var auto = services.GetService<MemoryAutoConsolidationService>();
+        if (auto is null) return; // 语义记忆未启用（服务未注册）：无需持久化
+        Func<object?> snapshot = () => auto.SnapshotState();
+        Action<JsonElement> restore = element => auto.RestoreState(
+            element.Deserialize<List<AutoConsolidationRow>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("autoMemoryConsolidation", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("autoMemoryConsolidation", snapshot, restore);
         }
     }
 

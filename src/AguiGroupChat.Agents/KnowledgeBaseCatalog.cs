@@ -414,9 +414,21 @@ public sealed class KnowledgeBaseCatalog
     public async Task<(KbDocument? Doc, string? Error, int MemoryCount)> ConsolidateGroupMemoriesAsync(
         string groupId, string kbId, IMessageMemoryStore store, CancellationToken ct = default)
     {
-        if (GetKb(kbId) is null) return (null, "知识库不存在", 0);
+        var r = await ConsolidateGroupMemoriesSinceAsync(groupId, kbId, store, sinceMs: null, ct);
+        return (r.Doc, r.Error, r.MemoryCount);
+    }
 
-        // 收集该群全部记忆，筛选出「关键」级别（importance>=2）
+    /// <summary>
+    /// 增量版沉淀：只聚合<b>时间戳晚于 <paramref name="sinceMs"/></b>（或全部，当为 null）的关键级记忆。
+    /// 返回 (文档, 错误, 沉淀条数, 本次覆盖到的最新记忆时间戳 WatermarkMs)——自动周期沉淀用它做水位去重。
+    /// 无新记忆可沉淀时返回 (null, null, 0, null)（不产生空文档）。
+    /// </summary>
+    public async Task<(KbDocument? Doc, string? Error, int MemoryCount, long? WatermarkMs)> ConsolidateGroupMemoriesSinceAsync(
+        string groupId, string kbId, IMessageMemoryStore store, long? sinceMs, CancellationToken ct = default)
+    {
+        if (GetKb(kbId) is null) return (null, "知识库不存在", 0, null);
+
+        // 收集该群全部记忆，筛选出「关键」级别（importance>=2），可按时间水位增量
         var all = new List<MessageMemoryItem>();
         var offset = 0;
         while (!ct.IsCancellationRequested)
@@ -429,13 +441,16 @@ public sealed class KnowledgeBaseCatalog
         }
         var critical = all
             .Where(m => m.Importance >= MemoryImportance.Critical)
+            .Where(m => sinceMs is null || m.Timestamp > sinceMs.Value)
             .OrderBy(m => m.Timestamp)
             .ToList();
         if (critical.Count == 0)
-            return (null, "该群暂无标记为「关键」的记忆（可先在记忆管理中把重要结论设为「关键」后重试）", 0);
+            return sinceMs is null
+                ? (null, "该群暂无标记为「关键」的记忆（可先在记忆管理中把重要结论设为「关键」后重试）", 0, null)
+                : (null, null, 0, null); // 增量模式：无新记忆不是错误，不产生空文档
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"# 群关键结论沉淀");
+        sb.AppendLine("# 群关键结论沉淀");
         sb.AppendLine($"群：{groupId}；生成时间：{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}（UTC）。");
         sb.AppendLine();
         foreach (var topic in critical.GroupBy(m => string.IsNullOrEmpty(m.TopicId) ? "main" : m.TopicId))
@@ -449,9 +464,9 @@ public sealed class KnowledgeBaseCatalog
             sb.AppendLine();
         }
 
-        var name = $"群关键结论-{DateTime.Now:yyyyMMdd-HHmm}.md";
+        var name = $"群关键结论-{DateTime.Now:yyyyMMdd-HHmmss}.md";
         var (doc, error) = await AddTextDocumentAsync(kbId, name, sb.ToString(), ct);
-        return (doc, error, critical.Count);
+        return (doc, error, critical.Count, critical[^1].Timestamp);
     }
 
     // ================= 检索 =================

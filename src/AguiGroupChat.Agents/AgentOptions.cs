@@ -209,6 +209,12 @@ public sealed class MemoryOptions
     /// </summary>
     public int RetentionDays { get; set; }
 
+    /// <summary>重要结论自动周期沉淀（1.3）：把各知聚「关键」级记忆定期聚合为知识文档写入该知聚专属知识库。默认开。</summary>
+    public bool AutoConsolidateEnabled { get; set; } = true;
+
+    /// <summary>自动周期沉淀间隔（小时，>=1）。默认 12 小时跑一轮。</summary>
+    public int AutoConsolidateIntervalHours { get; set; } = 12;
+
     // ================= 图谱 RAG（Graph Memory） =================
 
     /// <summary>是否启用图谱记忆（从群消息抽实体/关系建图，回复前按图遍历检索注入）。默认关。</summary>

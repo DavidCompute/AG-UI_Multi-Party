@@ -90,6 +90,7 @@ public static class DesktopApp
         app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
         app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+正文）跨重启保持
         app.Services.RegisterMessageFeedbackPersistence(); // 消息 👍/👎 反馈跨重启保持
+        app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群→知识库 + 时间水位）跨重启保持
         app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
         app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
         var loaded = HubApp.InitializePersistence(app);

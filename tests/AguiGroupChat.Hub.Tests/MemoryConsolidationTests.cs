@@ -102,4 +102,75 @@ public sealed class MemoryConsolidationTests
         Assert.Contains("暂无标记为「关键」", error);
         Assert.Equal(0, count);
     }
+
+    // ============ 增量沉淀（sinceMs 水位，供自动周期沉淀去重） ============
+
+    [Fact]
+    public async Task ConsolidateSince_OnlyNewerCritical_ReturnsWatermark()
+    {
+        var (catalog, store, kbId) = Setup();
+        const string groupId = "group_inc";
+        store.Items.Add(new MessageMemoryItem("old1", groupId, "main", "user_1", "user", "已沉淀的老结论", 1, MemoryImportance.Critical, null));
+        store.Items.Add(new MessageMemoryItem("old2", groupId, "main", "user_2", "user", "第二条老结论", 2, MemoryImportance.Critical, null));
+        store.Items.Add(new MessageMemoryItem("new1", groupId, "main", "user_1", "user", "新增关键结论", 10, MemoryImportance.Critical, null));
+        store.Items.Add(new MessageMemoryItem("new2", groupId, "main", "user_1", "user", "再一条新结论", 20, MemoryImportance.Critical, null));
+
+        // 水位=2：只应沉淀时间戳晚于 2 的两条，返回的新水位应为 20
+        var (doc, error, count, watermark) = await catalog.ConsolidateGroupMemoriesSinceAsync(groupId, kbId, store, sinceMs: 2);
+        Assert.Null(error);
+        Assert.Equal(2, count);
+        Assert.NotNull(doc);
+        Assert.Equal(20, watermark);
+        await catalog.WaitForDocumentAsync(doc!.DocId);
+        Assert.Equal("ready", doc.Status);
+    }
+
+    [Fact]
+    public async Task ConsolidateSince_NoNewMemory_ReturnsNullWithoutError()
+    {
+        var (catalog, store, kbId) = Setup();
+        store.Items.Add(new MessageMemoryItem("old1", "group_inc", "main", "user_1", "user", "已沉淀结论", 1, MemoryImportance.Critical, null));
+
+        var (doc, error, count, watermark) = await catalog.ConsolidateGroupMemoriesSinceAsync("group_inc", kbId, store, sinceMs: 1);
+        Assert.Null(doc);
+        Assert.Null(error); // 增量模式无新记忆不是错误
+        Assert.Equal(0, count);
+        Assert.Null(watermark);
+    }
+
+    // ============ 自动周期沉淀服务（按群水位扫描） ============
+
+    [Fact]
+    public async Task AutoSweep_ConsolidatesNewCritical_ThenSkipsByWatermark()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest { GroupName = "自动沉淀群", OwnerId = "user_1", MemberIds = [] });
+        var (catalog, store, _) = Setup();
+        store.Items.Add(new MessageMemoryItem("a1", group.GroupId, "main", "user_1", "user", "结论甲：上线方案确定", 1, MemoryImportance.Critical, null));
+        store.Items.Add(new MessageMemoryItem("a2", group.GroupId, "main", "user_2", "user", "结论乙：预算确认", 2, MemoryImportance.Critical, null));
+        store.Items.Add(new MessageMemoryItem("a3", group.GroupId, "main", "user_1", "user", "普通闲聊", 3, MemoryImportance.Normal, null));
+
+        var options = new AgentOptions { Memory = new MemoryOptions { Enabled = true, AutoConsolidateEnabled = true, AutoConsolidateIntervalHours = 1 } };
+        // 服务与目录共用同一 MemStore 实例（服务用它读水位、目录用它切片向量化）
+        var svcSp = new ServiceCollection()
+            .AddSingleton<IMessageMemoryStore>(store)
+            .AddSingleton<IEmbeddingProvider>(new FakeEmbedding())
+            .BuildServiceProvider();
+        var svc = new MemoryAutoConsolidationService(f.Store, catalog, options, svcSp, NullLogger<MemoryAutoConsolidationService>.Instance);
+
+        // 第一轮：沉淀全部关键记忆（2 条），水位推进
+        var first = await svc.RunSweepAsync(CancellationToken.None);
+        Assert.Equal(1, first);
+        var rows = (System.Collections.IEnumerable)svc.SnapshotState();
+        var row = System.Linq.Enumerable.Cast<AutoConsolidationRow>(rows).Single();
+        Assert.Equal(group.GroupId, row.GroupId);
+        Assert.Equal(2, row.WatermarkMs);
+
+        // 第二轮：没有更新的关键记忆 → 不再产生文档
+        var second = await svc.RunSweepAsync(CancellationToken.None);
+        Assert.Equal(0, second);
+        await catalog.WaitForDocumentAsync(catalog.GetKb(row.KbId)!.Documents[0].DocId); // 确保后台向量化完成后再断言
+        var doc = Assert.Single(catalog.GetKb(row.KbId)!.Documents);
+        Assert.Equal("ready", doc.Status);
+    }
 }
