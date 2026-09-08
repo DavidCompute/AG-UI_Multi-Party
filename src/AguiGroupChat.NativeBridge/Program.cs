@@ -88,6 +88,7 @@ var runtime = new BridgeRuntime
         ? (Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? ".")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AguiGroupChat", "NativeBridge"),
 };
+runtime.LoadAllowedOrigin(); // 装载来源锁（登出后仍保留，防止待配置窗口被恶意网页抢占）
 
 // 模式 B：显式隧道参数（或启动时已有配置文件且含 SERVER/TOKEN）→ 启动即连（自启 / 手动）
 if (!string.IsNullOrWhiteSpace(tunnelHub) && !string.IsNullOrWhiteSpace(tunnelToken))
@@ -169,6 +170,9 @@ static async Task RunLoopbackServiceAsync(int port, bool useHttps, BridgeRuntime
     {
         var origin = ctx.Request.Headers.Origin.ToString();
         ctx.Response.Headers["Access-Control-Allow-Origin"] = string.IsNullOrEmpty(origin) ? "*" : origin;
+        // 已锁定的桥只接受同平台来源（首次配置前任意来源均可，见 BridgeRuntime.IsOriginAllowed）
+        if (!runtime.IsOriginAllowed(origin))
+            return Results.Json(new { error = "该本机桥已绑定到平台 " + runtime.AllowedOrigin + "，不允许其它来源重新配置；如需换绑请删除本机桥目录下的 allowed-origin.txt 后重试。" }, statusCode: StatusCodes.Status403Forbidden);
         try
         {
             // Web 默认大小写不敏感：前端发 camelCase { server, setupToken }
@@ -190,11 +194,13 @@ static async Task RunLoopbackServiceAsync(int port, bool useHttps, BridgeRuntime
         }
     });
 
-    // 登出时网页调用：断开隧道并清除本机保存的配置（重启不自连）
+    // 登出时网页调用：断开隧道并清除本机保存的配置（重启不自连）；仅接受已锁定平台来源
     app.MapPost("/ag-ui/bridge/teardown", (HttpContext ctx) =>
     {
         var origin = ctx.Request.Headers.Origin.ToString();
         ctx.Response.Headers["Access-Control-Allow-Origin"] = string.IsNullOrEmpty(origin) ? "*" : origin;
+        if (!runtime.IsOriginAllowed(origin))
+            return Results.Json(new { error = "来源不被允许：该本机桥已绑定到平台 " + runtime.AllowedOrigin + "。" }, statusCode: StatusCodes.Status403Forbidden);
         runtime.Disconnect();
         return Results.Ok(new { disconnected = true, configured = false, connected = false });
     });
@@ -228,6 +234,7 @@ public sealed class BridgeRuntime
     private Task? _tunnelTask;
     private string _server = "";
     private bool _hasConfigFile; // setup 已写盘（或启动来自已有配置）
+    private string _allowedOrigin = ""; // 已绑定平台的 authority（host[:port]，大小写不敏感），首次配置后锁定
 
     public bool IsConnected { get { lock (_lock) return _tunnelTask is { IsCompleted: false }; } }
 
@@ -241,18 +248,61 @@ public sealed class BridgeRuntime
 
     public string ServerUrl { get { lock (_lock) return _server; } }
 
-    /// <summary>静态连接（命令行 / 启动时已有完整配置）：连上但不改本机配置文件。</summary>
+    /// <summary>当前锁定的平台 authority（空 = 尚未锁定，首次配置仍对任意网页来源开放）。</summary>
+    public string AllowedOrigin { get { lock (_lock) return _allowedOrigin; } }
+
+    /// <summary>回环写端点（setup / teardown）的来源校验：无 Origin（CLI/本机脚本）放行；
+    /// 已锁定时仅接受同 authority（host:port，忽略 scheme）来源——防止已配置的桥被恶意网页改指向其它 Hub。
+    /// 首次配置前（未锁定）仍需接受任意来源，否则“新装 → 登录自动配置”无法完成。</summary>
+    public bool IsOriginAllowed(string? originHeader)
+    {
+        if (string.IsNullOrWhiteSpace(originHeader)) return true;
+        if (!Uri.TryCreate(originHeader.Trim(), UriKind.Absolute, out var o)) return true;
+        string locked;
+        lock (_lock) locked = _allowedOrigin;
+        return locked.Length == 0 || string.Equals(o.Authority, locked, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>启动时装载锁：优先读锁文件（登出 teardown 只删连接配置、保留锁）；
+    /// 否则从静态配置（--config 的 SERVER）推导，保证静态启动的桥同样受来源锁定保护。</summary>
+    public void LoadAllowedOrigin()
+    {
+        string? authority = null;
+        try
+        {
+            var f = AllowedOriginFile();
+            if (File.Exists(f)) authority = File.ReadAllText(f).Trim();
+        }
+        catch { /* 忽略读取失败 */ }
+        if (string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(ConfigPath) && File.Exists(ConfigPath))
+        {
+            foreach (var raw in File.ReadAllLines(ConfigPath))
+            {
+                var line = raw.Trim();
+                if (line.StartsWith("SERVER=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var v = line["SERVER=".Length..].Trim();
+                    if (Uri.TryCreate(v, UriKind.Absolute, out var u)) authority = u.Authority;
+                    break;
+                }
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(authority)) lock (_lock) _allowedOrigin = authority;
+    }
+
+    /// <summary>静态连接（命令行 / 启动时已有完整配置）：连上并把来源锁指向该服务器。</summary>
     public void Connect(string server, string token, string agentScope, string clientId)
     {
         lock (_lock)
         {
             _server = server.TrimEnd('/');
             _hasConfigFile = true;
+            LockOriginLocked(_server);
             StartTunnelLocked(server, token, agentScope, clientId);
         }
     }
 
-    /// <summary>网页 setup：把配置加密写盘（供重启自连）并立即连接。</summary>
+    /// <summary>网页 setup：把配置加密写盘（供重启自连）、锁定来源并立即连接。</summary>
     public void ConfigureAndConnect(string server, string setupToken)
     {
         lock (_lock)
@@ -268,11 +318,13 @@ public sealed class BridgeRuntime
             File.WriteAllText(ConfigFile(), cfgText);
             File.WriteAllText(KeyFile(), keyB64 + "\n");
             _hasConfigFile = true;
+            LockOriginLocked(_server);
             StartTunnelLocked(server, setupToken, AgentScope, ClientId);
         }
     }
 
-    /// <summary>登出断开：停止隧道并删除本机配置（重启回到“待配置”）。</summary>
+    /// <summary>登出断开：停止隧道并删除本机连接配置（重启回到“待配置”），但保留来源锁，
+    /// 避免登出后的待配置窗口被恶意网页抢占指向其它 Hub。</summary>
     public void Disconnect()
     {
         lock (_lock)
@@ -318,4 +370,20 @@ public sealed class BridgeRuntime
         : Path.Combine(ConfigDir, "bridge-config.txt");
 
     private string KeyFile() => Path.Combine(ConfigDir, "bridge.key");
+
+    private string AllowedOriginFile() => Path.Combine(ConfigDir, "allowed-origin.txt");
+
+    /// <summary>把来源锁指向 server 的 authority（host:port），并落盘（登出清配置后仍保留）。
+    /// 必须持 _lock 调用。</summary>
+    private void LockOriginLocked(string server)
+    {
+        if (!Uri.TryCreate(server.TrimEnd('/'), UriKind.Absolute, out var u)) return;
+        _allowedOrigin = u.Authority;
+        try
+        {
+            Directory.CreateDirectory(ConfigDir);
+            File.WriteAllText(AllowedOriginFile(), u.Authority);
+        }
+        catch { /* 锁写入失败不影响内存判定 */ }
+    }
 }
