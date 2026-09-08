@@ -19,11 +19,13 @@ public interface IMessageMemory
     void RemoveGroup(string groupId);
 
     /// <summary>按语义相似度检索历史记忆（端点不可用 / 未启用时返回空）。
-    /// groupId 为当前触发群；agentId 为该智能体，Scope=agent 时按它所在的所有群检索。</summary>
-    Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default);
+    /// groupId 为当前触发群；agentId 为该智能体，Scope=agent 时按它所在的所有群检索。
+    /// <paramref name="tuning"/>：按记忆拟人类型的单次覆盖（null 成员 = 沿用全局 TopK/MinScore）。</summary>
+    Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null);
 
-    /// <summary>按语义相似度检索某个人（用户或智能体）自己的历史发言（个人记忆），跨群且遵守私密群隔离。</summary>
-    Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default);
+    /// <summary>按语义相似度检索某个人（用户或智能体）自己的历史发言（个人记忆），跨群且遵守私密群隔离。
+    /// <paramref name="tuning"/>：按记忆拟人类型的单次覆盖（null 成员 = 沿用全局 PersonalTopK/PersonalMinScore）。</summary>
+    Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null);
 
     // ================= 记忆治理（分群分级 / 自动遗忘 / 可视化） =================
 

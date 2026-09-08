@@ -647,6 +647,24 @@ public static class AgentApi
             DisableBridge = req.DisableBridge,
             DisableRelay = req.DisableRelay,
             DisableOrgRoute = req.DisableOrgRoute,
+            // 记忆拟人特征：未知类型 / 缺失 = 不配置（召回沿用全局），越界微调值收敛到安全区间
+            MemoryProfile = BuildMemoryProfile(req.MemoryProfile),
+        };
+    }
+
+    /// <summary>构建记忆拟人特征（未知类型或全空返回 null = 沿用全局召回）。</summary>
+    private static MemoryProfile? BuildMemoryProfile(MemoryProfileHttpRequest? req)
+    {
+        if (req is null || !MemoryPersonalityTypes.IsKnown(req.MemoryType)) return null;
+        return new MemoryProfile
+        {
+            MemoryType = req.MemoryType!,
+            StyleMode = string.Equals(req.StyleMode, "digest", StringComparison.OrdinalIgnoreCase) ? "digest" : null,
+            PersonaCard = string.IsNullOrWhiteSpace(req.PersonaCard) ? null : req.PersonaCard.Trim(),
+            TopK = req.TopK is { } tk ? Math.Clamp(tk, 1, 24) : null,
+            PersonalTopK = req.PersonalTopK is { } ptk ? Math.Clamp(ptk, 1, 16) : null,
+            MinScore = req.MinScore is { } ms ? Math.Clamp(ms, 0.05, 0.92) : null,
+            PersonalMinScore = req.PersonalMinScore is { } pms ? Math.Clamp(pms, 0.05, 0.92) : null,
         };
     }
 
@@ -848,7 +866,26 @@ public sealed record AgentUpsertHttpRequest(
     IReadOnlyList<string>? SkillDefIds = null,
     bool? DisableBridge = null,
     bool? DisableRelay = null,
-    bool? DisableOrgRoute = null);
+    bool? DisableOrgRoute = null,
+    MemoryProfileHttpRequest? MemoryProfile = null);
+
+/// <summary>记忆拟人特征（编辑表单「记忆类型」）：字段全部可空，后端对未知类型 / 越界值做归一。</summary>
+/// <param name="MemoryType">预设 key：broad / deep / slowToLearn / cueDependent / fastForgetting；
+/// 未知或 null 视为不配置（沿用全局召回）。</param>
+/// <param name="StyleMode">口吻模式：recall / digest（缺省 recall）。</param>
+/// <param name="PersonaCard">人设卡片（一句话口吻说明，可空）。</param>
+/// <param name="TopK">微调：群记忆检索 TopK（1..24）。</param>
+/// <param name="PersonalTopK">微调：个人记忆检索 TopK（1..16）。</param>
+/// <param name="MinScore">微调：群记忆检索最小相似度阈值（0.05..0.92）。</param>
+/// <param name="PersonalMinScore">微调：个人记忆检索最小相似度阈值（0.05..0.92）。</param>
+public sealed record MemoryProfileHttpRequest(
+    string? MemoryType,
+    string? StyleMode = null,
+    string? PersonaCard = null,
+    int? TopK = null,
+    int? PersonalTopK = null,
+    double? MinScore = null,
+    double? PersonalMinScore = null);
 
 /// <summary>技能配置（把其他已注册智能体作为可调用子代理）。</summary>
 /// <param name="SkillId">技能标识（给模型的工具名，同一智能体内唯一）。</param>

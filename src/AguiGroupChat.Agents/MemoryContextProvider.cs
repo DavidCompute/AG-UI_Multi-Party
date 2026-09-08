@@ -64,48 +64,78 @@ public sealed class MemoryContextProvider : AIContextProvider
         try
         {
             var sb = new StringBuilder();
+            var memorySectionInjected = false; // 是否已注入群/个人记忆（决定是否在顶部附记忆类型口吻说明）
 
             // 检索 query（触发消息）统一按 MaxQueryChars 截断：群记忆 / 个人记忆 / 知识库同一长度，
             // 超长文本先截断再向量化（与 AgentMessageMemory 内部的截断一致，避免超长输入打爆 embedding）
             var maxQueryChars = Math.Max(1, _options.Memory.MaxQueryChars);
             var query = run.Content.Length > maxQueryChars ? run.Content[..maxQueryChars] : run.Content;
 
+            // 当前 run 的智能体定义（同一对象供个人记忆开关 / 知识库绑定 / 记忆拟人类型复用）
+            AgentDefinition? def = null;
+            try { def = _catalog.Value.GetDefinition(run.AgentId); }
+            catch (Exception ex) { _logger.LogDebug(ex, "读取智能体定义失败（按无定义处理）"); }
+
+            // 记忆拟人类型：配置了 MemoryProfile 才解析（null = 沿用全局检索参数，行为完全向后兼容）
+            MemoryProfileTuningResult? profileTuning = null;
+            if (def?.MemoryProfile is not null)
+            {
+                try { profileTuning = MemoryProfileTuning.Resolve(def.MemoryProfile, _options.Memory, query); }
+                catch (Exception ex) { _logger.LogDebug(ex, "记忆拟人类型解析失败（按全局参数检索）"); }
+            }
+
             // 群记忆（RAG）与个人记忆：依赖 IMessageMemory（需启用语义记忆）
             if (_memory is not null)
             {
                 // 群记忆（RAG）：按触发消息语义检索长期历史（默认覆盖该智能体所在的所有群）
                 IReadOnlyList<MessageMemoryHit> memories = [];
-                try { memories = await _memory.SearchAsync(run.GroupId, run.AgentId, query, ct); }
+                try
+                {
+                    memories = profileTuning is null
+                        ? await _memory.SearchAsync(run.GroupId, run.AgentId, query, ct)
+                        : await _memory.SearchAsync(run.GroupId, run.AgentId, query, ct, profileTuning.Tuning);
+                }
                 catch (Exception ex) { _logger.LogDebug(ex, "语义记忆检索异常"); }
-                memories = Dedupe(memories, run.TriggerMessageId, Math.Max(1, _options.Memory.TopK));
+                memories = FilterByType(memories, profileTuning, personal: false, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                var groupTopK = Math.Max(1, profileTuning?.Tuning.TopK ?? _options.Memory.TopK);
+                memories = Dedupe(memories, run.TriggerMessageId, groupTopK);
                 var memorySection = BuildMemorySection(memories, _options.Memory.MaxCharsPerMemory);
                 if (memorySection.Length > 0)
                 {
-                    _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条历史记忆（group={GroupId}）", run.AgentId, memories.Count, run.GroupId);
+                    _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条历史记忆（group={GroupId}，记忆类型={MemoryType}）", run.AgentId, memories.Count, run.GroupId, profileTuning?.MemoryType ?? "默认");
                     sb.Append(memorySection).AppendLine();
+                    memorySectionInjected = true;
                 }
 
                 // 个人记忆：需全局能力（PersonalTopK>0）+ 智能体开启 + 触发者用户开启（隐私），三重条件
                 if (_options.Memory.PersonalTopK > 0
-                    && _catalog.Value.GetDefinition(run.AgentId)?.PersonalMemoryEnabled == true
+                    && def?.PersonalMemoryEnabled == true
                     && _hub.Value.IsPersonalMemoryEnabled(run.TriggerUserId))
                 {
                     IReadOnlyList<MessageMemoryHit> personal = [];
-                    try { personal = await _memory.SearchPersonAsync(run.TriggerUserId, run.GroupId, query, ct); }
+                    try
+                    {
+                        personal = profileTuning is null
+                            ? await _memory.SearchPersonAsync(run.TriggerUserId, run.GroupId, query, ct)
+                            : await _memory.SearchPersonAsync(run.TriggerUserId, run.GroupId, query, ct, profileTuning.Tuning);
+                    }
                     catch (Exception ex) { _logger.LogDebug(ex, "个人记忆检索异常"); }
-                    personal = Dedupe(personal, run.TriggerMessageId, Math.Max(1, _options.Memory.PersonalTopK));
+                    personal = FilterByType(personal, profileTuning, personal: true, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                    var personalTopK = Math.Max(1, profileTuning?.Tuning.PersonalTopK ?? _options.Memory.PersonalTopK);
+                    personal = Dedupe(personal, run.TriggerMessageId, personalTopK);
                     var personSection = BuildPersonSection(run.TriggerUserId, personal, _options.Memory.MaxCharsPerMemory);
                     if (personSection.Length > 0)
                     {
                         _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条个人记忆（person={PersonId}）", run.AgentId, personal.Count, run.TriggerUserId);
                         sb.Append(personSection).AppendLine();
+                        memorySectionInjected = true;
                     }
                 }
             }
 
             // 知识库（RAG）：智能体绑定的知识文档，回复前按触发消息检索相关片段（独立于群记忆开关）
             if (_kbCatalog.Value is { } kbCatalog
-                && _catalog.Value.GetDefinition(run.AgentId)?.KnowledgeBaseIds is { Count: > 0 } kbIds)
+                && def?.KnowledgeBaseIds is { Count: > 0 } kbIds)
             {
                 IReadOnlyList<KnowledgeBaseCatalog.KbHit> kbHits = [];
                 try
@@ -155,7 +185,15 @@ public sealed class MemoryContextProvider : AIContextProvider
                 catch (Exception ex) { _logger.LogDebug(ex, "图谱检索注入异常（已跳过）"); }
             }
 
-            if (sb.Length > 0) aiContext.Instructions = sb.ToString();
+            if (sb.Length > 0)
+            {
+                var text = sb.ToString().TrimEnd();
+                // 记忆拟人类型：仅在确实注入了群/个人记忆时，把“召回口吻”软性说明放在最前（引导如何使用上方记忆，
+                // 不含事实、不重写内容；只有知识库 / 图谱注入时不加，避免误导）
+                aiContext.Instructions = memorySectionInjected && profileTuning?.RecallNote is { Length: > 0 } recallNote
+                    ? recallNote + "\n\n" + text
+                    : text;
+            }
         }
         catch (Exception ex)
         {
@@ -173,6 +211,23 @@ public sealed class MemoryContextProvider : AIContextProvider
             .OrderByDescending(m => m.Score)
             .Take(topK)
             .ToList();
+
+    /// <summary>按记忆拟人类型对已召回的命中做<b>二次约束</b>：
+    /// ① 快速遗忘型的“近期窗口”（只保留最近 N 天）；② 按该类型的相似度阈值再过滤一遍。
+    /// store 检索已按类型的 TopK/阈值执行，这里对最终进 prompt 的集合再兜底一次（测试替身等不经 store 的实现同样一致）。
+    /// 未配置类型（tuning 为 null）时原样返回，行为与全局完全一致。</summary>
+    private static IReadOnlyList<MessageMemoryHit> FilterByType(IReadOnlyList<MessageMemoryHit> hits, MemoryProfileTuningResult? tuning, bool personal, long nowMs)
+    {
+        if (tuning is null || hits.Count == 0) return hits;
+        IEnumerable<MessageMemoryHit> filtered = hits;
+        if (tuning.RecencyWindowDays is > 0)
+        {
+            var cutoff = nowMs - (long)tuning.RecencyWindowDays.Value * 86_400_000L;
+            filtered = filtered.Where(h => h.Timestamp >= cutoff);
+        }
+        var minScore = personal ? tuning.Tuning.PersonalMinScore ?? 0 : tuning.Tuning.MinScore ?? 0;
+        return filtered.Where(h => h.Score >= minScore).ToList();
+    }
 
     /// <summary>把检索命中的历史记忆排版为 prompt 段落（无命中返回空串）。供测试直接调用。
     /// 记忆内容来自历史消息（可能是用户输入，含 prompt injection 风险）：整段包上不可信边界。</summary>

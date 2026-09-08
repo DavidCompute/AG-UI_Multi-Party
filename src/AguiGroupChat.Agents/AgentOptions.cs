@@ -272,6 +272,65 @@ public sealed class AguiBridgeOptions
     public int ConnectTimeoutSeconds { get; set; } = 10;
 }
 
+/// <summary>数字员工「记忆拟人类型」预设 key（见 <see cref="MemoryProfile.MemoryType"/>）。</summary>
+public static class MemoryPersonalityTypes
+{
+    /// <summary>广记型：编码宽，记得多但细节容易混杂、可能张冠李戴。</summary>
+    public const string Broad = "broad";
+
+    /// <summary>深记型：记得少而久，一旦记住很久不忘（宁缺毋滥）。</summary>
+    public const string Deep = "deep";
+
+    /// <summary>难录入型：新信息难刻入，需要反复几次才记得住。</summary>
+    public const string SlowToLearn = "slowToLearn";
+
+    /// <summary>存得住、想不起型：信息存着但提取通道弱，见到提示才恍然大悟。</summary>
+    public const string CueDependent = "cueDependent";
+
+    /// <summary>快速遗忘型：痕迹衰减快，时间一长自动淡化，需要复盘。</summary>
+    public const string FastForgetting = "fastForgetting";
+
+    /// <summary>全部预设 key（按推荐展示顺序）。</summary>
+    public static readonly IReadOnlyList<string> All = [Broad, Deep, SlowToLearn, CueDependent, FastForgetting];
+
+    /// <summary>是否为已知预设 key。</summary>
+    public static bool IsKnown(string? key)
+        => key is not null && All.Contains(key, StringComparer.Ordinal);
+}
+
+/// <summary>
+/// 数字员工「记忆拟人特征」配置：决定该员工调取群记忆 / 个人记忆时的抽取行为（读取侧拟人）。
+/// <see cref="MemoryType"/> 为 <see cref="MemoryPersonalityTypes"/> 五档预设之一；
+/// 其余字段为可选微调，置空 = 跟随该预设在该平台全局检索参数下推算出的默认值。
+/// 记忆本体仍是知聚共享历史（写入侧不分型），本配置只影响“回忆”时的条数、阈值、提示分支与口吻。
+/// </summary>
+public sealed class MemoryProfile
+{
+    /// <summary>预设 key（broad / deep / slowToLearn / cueDependent / fastForgetting）。</summary>
+    public required string MemoryType { get; set; }
+
+    /// <summary>
+    /// 口吻模式：recall（默认，平实引述相关记忆）/ digest（先把相关记忆概括成要点再回答）。
+    /// 叙事重写（narrate）不做：防止把记忆内容改述时产生幻觉。
+    /// </summary>
+    public string? StyleMode { get; set; }
+
+    /// <summary>人设卡片：对该数字员工“回忆往事时的口吻 / 性格”的一句话补充（注入为软性提示，非硬约束）。</summary>
+    public string? PersonaCard { get; set; }
+
+    /// <summary>微调：群记忆检索 TopK（1..24，置空 = 预设默认）。</summary>
+    public int? TopK { get; set; }
+
+    /// <summary>微调：个人记忆检索 TopK（1..16，置空 = 预设默认）。</summary>
+    public int? PersonalTopK { get; set; }
+
+    /// <summary>微调：群记忆检索最小相似度阈值（0.05..0.92，置空 = 预设默认）。</summary>
+    public double? MinScore { get; set; }
+
+    /// <summary>微调：个人记忆检索最小相似度阈值（0.05..0.92，置空 = 预设默认）。</summary>
+    public double? PersonalMinScore { get; set; }
+}
+
 /// <summary>单个智能体的定义（协议 §6 触发规则 + MSAGENT 人设）。</summary>
 public sealed class AgentDefinition
 {
@@ -316,6 +375,15 @@ public sealed class AgentDefinition
     /// 是否开启个人记忆（默认关闭）。开启后，该智能体回复时会检索触发者本人的历史发言并注入上下文。
     /// </summary>
     public bool PersonalMemoryEnabled { get; set; }
+
+    /// <summary>
+    /// **记忆拟人特征（按类型抽取）**：该数字员工独有的记忆类型配置。
+    /// <c>null</c> = 未单独配置，调取记忆时沿用平台全局的检索参数（与历史行为完全一致）。
+    /// 配置后，<c>MemoryContextProvider</c> 每次回复前调取群记忆 / 个人记忆时按 <see cref="MemoryProfile.MemoryType"/>
+    /// 预设解析本次检索的 TopK / 相似度阈值 / 回忆提示分支，并注入一条与类型相符的“召回口吻”软性说明。
+    /// 记忆仍为知聚共享的历史记忆（写入面不分类型），本字段只影响<b>该员工如何回忆</b>。
+    /// </summary>
+    public MemoryProfile? MemoryProfile { get; set; }
 
     /// <summary>
     /// 是否私密智能体（默认关闭）。私密智能体仅创建者（<see cref="OwnerId"/>）可将其加入群。

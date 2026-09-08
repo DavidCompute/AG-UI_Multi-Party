@@ -289,18 +289,21 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
     }
 
     /// <summary>按语义相似度检索历史记忆（提供方不可用 / 未启用时返回空）。
-    /// Scope=agent（默认）时检索该智能体所在的所有群。</summary>
-    public async Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default)
+    /// Scope=agent（默认）时检索该智能体所在的所有群。
+    /// <paramref name="tuning"/>：数字员工记忆类型的单次检索覆盖（null 成员沿用全局 TopK/MinScore）。</summary>
+    public async Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
     {
         if (!_options.Enabled || string.IsNullOrWhiteSpace(query)) return [];
         try
         {
             var embedding = await _embedding.EmbedAsync(Truncate(query, _options.MaxQueryChars), ct);
             if (embedding is null || embedding.Length == 0) return [];
-            var hits = _store.Search(groupId, agentId, embedding, _options.TopK, _options.MinScore, _options.Scope);
+            var topK = Math.Max(1, tuning?.TopK ?? _options.TopK);
+            var minScore = tuning?.MinScore ?? _options.MinScore;
+            var hits = _store.Search(groupId, agentId, embedding, topK, minScore, _options.Scope);
             if (hits.Count > 0)
-                _logger.LogDebug("语义记忆检索命中 {Count} 条（agent={AgentId}，scope={Scope}）：{Snippets}",
-                    hits.Count, agentId, _options.Scope, string.Join(" | ", hits.Take(3).Select(h =>
+                _logger.LogDebug("语义记忆检索命中 {Count} 条（agent={AgentId}，scope={Scope}，topK={TopK}，minScore={MinScore:0.00}）：{Snippets}",
+                    hits.Count, agentId, _options.Scope, topK, minScore, string.Join(" | ", hits.Take(3).Select(h =>
                         (h.Content.Length > 40 ? h.Content[..40] + "…" : h.Content).ReplaceLineEndings(" "))));
             return _options.HybridSearch ? HybridRerank(hits, query) : hits;
         }
@@ -311,18 +314,21 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         }
     }
 
-    /// <summary>按语义相似度检索某个人（用户或智能体）自己的历史发言（个人记忆），跨群且遵守私密群隔离。</summary>
-    public async Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default)
+    /// <summary>按语义相似度检索某个人（用户或智能体）自己的历史发言（个人记忆），跨群且遵守私密群隔离。
+    /// <paramref name="tuning"/>：数字员工记忆类型的单次检索覆盖（null 成员沿用全局 PersonalTopK/PersonalMinScore）。</summary>
+    public async Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
     {
         if (!_options.Enabled || string.IsNullOrWhiteSpace(query)) return [];
         try
         {
             var embedding = await _embedding.EmbedAsync(Truncate(query, _options.MaxQueryChars), ct);
             if (embedding is null || embedding.Length == 0) return [];
-            var hits = _store.SearchPerson(personId, currentGroupId, embedding, _options.PersonalTopK, _options.PersonalMinScore);
+            var personalTopK = Math.Max(1, tuning?.PersonalTopK ?? _options.PersonalTopK);
+            var personalMinScore = tuning?.PersonalMinScore ?? _options.PersonalMinScore;
+            var hits = _store.SearchPerson(personId, currentGroupId, embedding, personalTopK, personalMinScore);
             if (hits.Count > 0)
-                _logger.LogDebug("个人记忆检索命中 {Count} 条（person={PersonId}）：{Snippets}",
-                    hits.Count, personId, string.Join(" | ", hits.Take(3).Select(h =>
+                _logger.LogDebug("个人记忆检索命中 {Count} 条（person={PersonId}，topK={TopK}，minScore={MinScore:0.00}）：{Snippets}",
+                    hits.Count, personId, personalTopK, personalMinScore, string.Join(" | ", hits.Take(3).Select(h =>
                         (h.Content.Length > 40 ? h.Content[..40] + "…" : h.Content).ReplaceLineEndings(" "))));
             return _options.HybridSearch ? HybridRerank(hits, query) : hits;
         }

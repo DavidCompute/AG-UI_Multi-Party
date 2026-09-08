@@ -223,9 +223,9 @@ public sealed class ToolsTests
         public void Remember(MessageMemoryEntry entry) { }
         public void Forget(string groupId, string messageId) { }
         public void RemoveGroup(string groupId) { }
-        public Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default)
+        public Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
             => Task.FromResult(Hits);
-        public Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default)
+        public Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
             => Task.FromResult<IReadOnlyList<MessageMemoryHit>>([]);
         public IReadOnlyList<MessageMemoryItem> ListMessages(string? groupId, string? senderId, string? keyword, int limit, int offset) => [];
         public long CountMessages(string? groupId, string? senderId, string? keyword) => 0;

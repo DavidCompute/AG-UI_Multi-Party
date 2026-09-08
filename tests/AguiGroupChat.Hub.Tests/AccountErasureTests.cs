@@ -114,9 +114,9 @@ public sealed class AccountErasureTests
             RemovedGroups.Add(groupId);
             Items.RemoveAll(i => i.GroupId == groupId);
         }
-        public Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default)
+        public Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
             => Task.FromResult<IReadOnlyList<MessageMemoryHit>>([]);
-        public Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default)
+        public Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
             => Task.FromResult<IReadOnlyList<MessageMemoryHit>>([]);
 
         public IReadOnlyList<MessageMemoryItem> ListMessages(string? groupId, string? senderId, string? keyword, int limit, int offset)

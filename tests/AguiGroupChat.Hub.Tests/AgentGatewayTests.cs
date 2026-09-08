@@ -746,17 +746,21 @@ public sealed class AgentGatewayTests
         Assert.Equal("msg_200", snap2["agent_bridge|thread_g"]);
     }
 
-    /// <summary>记录个人记忆检索调用次数的测试替身。</summary>
+    /// <summary>记录个人记忆检索调用次数与最近一次群记忆检索覆盖参数（供记忆类型链路断言）的测试替身。</summary>
     private sealed class CountingMemory : IMessageMemory
     {
         public int PersonSearches;
         public IReadOnlyList<MessageMemoryHit> GroupHits { get; set; } = [];
+        public MemoryRetrievalTuning? LastGroupTuning;
         public void Remember(MessageMemoryEntry entry) { }
         public void Forget(string groupId, string messageId) { }
         public void RemoveGroup(string groupId) { }
-        public Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default)
-            => Task.FromResult(GroupHits);
-        public Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default)
+        public Task<IReadOnlyList<MessageMemoryHit>> SearchAsync(string groupId, string agentId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
+        {
+            LastGroupTuning = tuning;
+            return Task.FromResult(GroupHits);
+        }
+        public Task<IReadOnlyList<MessageMemoryHit>> SearchPersonAsync(string personId, string currentGroupId, string query, CancellationToken ct = default, MemoryRetrievalTuning? tuning = null)
         {
             PersonSearches++;
             return Task.FromResult<IReadOnlyList<MessageMemoryHit>>([]);
@@ -869,6 +873,111 @@ public sealed class AgentGatewayTests
 #pragma warning restore MAAI001
             Assert.Contains("历史决策：用 WebSocket 推送", aiContext.Instructions);
             Assert.Contains("相关历史记忆", aiContext.Instructions);
+        }
+        finally { AgentGateway.AmbientContext.Value = prev; }
+    }
+
+    /// <summary>记忆拟人类型·深记型：Provider 把该类型解析出的阈值/条数传给检索，并在注入时附类型口吻说明，
+    /// 低相似度的“模糊记忆”被类型阈值过滤（宁可少说也不要讲错）。</summary>
+    [Fact]
+    public async Task MemoryProvider_DeepType_AppliesProfileTuningAndRecallNote()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Memory = new MemoryOptions { TopK = 5, MinScore = 0.25, PersonalTopK = 0 },
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "深记助手", Description = "测试", Instructions = "你是测试助手",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    MemoryProfile = new MemoryProfile { MemoryType = MemoryPersonalityTypes.Deep },
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).AddSingleton(catalog).BuildServiceProvider();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var memory = new CountingMemory
+        {
+            GroupHits =
+            [
+                new MessageMemoryHit("m_hi", "确定结论：采用 WebSocket 推送", "user_1", now, 0.8),
+                new MessageMemoryHit("m_lo", "低相似度模糊片段", "user_1", now, 0.2),
+            ],
+        };
+        var provider = new MemoryContextProvider(options, services, NullLogger<MemoryContextProvider>.Instance, memory);
+
+        var context = new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId, AgentId: "agent_a", AgentNickname: "深记助手",
+            TriggerMessageId: "msg_trigger", TriggerUserId: "user_1", Content: "推送方案", Mentions: [], MentionAll: false);
+
+        var prev = AgentGateway.AmbientContext.Value;
+        AgentGateway.AmbientContext.Value = context;
+        try
+        {
+            var testAgent = new ChatClientAgent(new MockChatClient(options.Agents[0]), options.Agents[0].Instructions,
+                options.Agents[0].Nickname, options.Agents[0].Description, null, NullLoggerFactory.Instance, services);
+#pragma warning disable MAAI001
+            var aiContext = await provider.InvokingAsync(new AIContextProvider.InvokingContext(testAgent, null, new AIContext()), CancellationToken.None);
+#pragma warning restore MAAI001
+            // 深记型解析：ceil(5×0.5)=3 条、阈值 0.25+0.12=0.37，覆盖参数被传给检索
+            Assert.NotNull(memory.LastGroupTuning);
+            Assert.Equal(3, memory.LastGroupTuning!.TopK);
+            Assert.Equal(0.37, memory.LastGroupTuning!.MinScore);
+            // 高相似度记忆保留、低分模糊记忆被类型阈值过滤（宁缺毋滥）
+            Assert.Contains("确定结论：采用 WebSocket 推送", aiContext.Instructions);
+            Assert.DoesNotContain("低相似度模糊片段", aiContext.Instructions);
+            // 注入段落前附上「深记型」的召回口吻软性说明
+            Assert.Contains("深记型", aiContext.Instructions);
+        }
+        finally { AgentGateway.AmbientContext.Value = prev; }
+    }
+
+    /// <summary>记忆拟人类型边界：未命中记忆时不注入口吻说明（说明只在确有记忆可引时才附，避免无的放矢）。</summary>
+    [Fact]
+    public async Task MemoryProvider_ProfileWithoutMemoryHits_NoRecallNote()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Memory = new MemoryOptions { TopK = 5, MinScore = 0.25 },
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "深记助手", Description = "测试", Instructions = "你是测试助手",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    MemoryProfile = new MemoryProfile { MemoryType = MemoryPersonalityTypes.Deep },
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).AddSingleton(catalog).BuildServiceProvider();
+        var memory = new CountingMemory(); // 无命中
+        var provider = new MemoryContextProvider(options, services, NullLogger<MemoryContextProvider>.Instance, memory);
+
+        var context = new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId, AgentId: "agent_a", AgentNickname: "深记助手",
+            TriggerMessageId: "msg_trigger", TriggerUserId: "user_1", Content: "推送方案", Mentions: [], MentionAll: false);
+
+        var prev = AgentGateway.AmbientContext.Value;
+        AgentGateway.AmbientContext.Value = context;
+        try
+        {
+            var testAgent = new ChatClientAgent(new MockChatClient(options.Agents[0]), options.Agents[0].Instructions,
+                options.Agents[0].Nickname, options.Agents[0].Description, null, NullLoggerFactory.Instance, services);
+#pragma warning disable MAAI001
+            var aiContext = await provider.InvokingAsync(new AIContextProvider.InvokingContext(testAgent, null, new AIContext()), CancellationToken.None);
+#pragma warning restore MAAI001
+            // 检索仍按类型覆盖执行，但没有任何命中可引 → 不注入口吻说明
+            Assert.NotNull(memory.LastGroupTuning);
+            Assert.True(string.IsNullOrEmpty(aiContext.Instructions));
         }
         finally { AgentGateway.AmbientContext.Value = prev; }
     }
