@@ -41,6 +41,27 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 ---
 
+## 企业合规界面回归（账号注销入口 / 评价按钮 / 管理员审计）
+
+`ui-regression-compliance.mjs` 覆盖近期合规相关界面改动（无需手工造号）：
+
+1. 普通用户：资料弹窗「危险操作」区显示「⬇ 导出我的数据」与「注销账户」；注销弹窗错误密码提示与取消；
+2. 消息 👍/👎 评价按钮默认隐藏、悬停消息可见（与复制/重新回答等头部按钮一致的悬停显隐）；
+3. 管理员：用户管理他人行出现「🗑️ 彻底删除」；控制台「审计日志」tab 打开渲染。
+
+```bash
+cd tools && node ui-regression-compliance.mjs                 # 有头，自建临时账号
+cd tools && HEADLESS=1 node ui-regression-compliance.mjs      # 无头
+# 已有实例非空时管理员不能自举：显式提供管理员账号即可跑管理员套件
+cd tools && ADMIN_USERNAME=admin ADMIN_PASSWORD=xxx node ui-regression-compliance.mjs
+```
+
+账号策略：新注册账号用临时唯一用户名（`uireg_<ts>` / `uiadmin_<ts>`，口令 `secret123`）；
+实例为空（首个注册者自动超管）时管理员套件自动启用；实例已有用户且未提供管理员账号时管理员套件自动跳过。
+收尾：管理员存在时删除自建普通账号；`KEEP=1` 保留全部临时产物。退出码 0 = 通过。截图输出 `tools/screenshots/uir-*`。
+
+---
+
 ## 数字员工单聊（kind=direct）UI 验证
 
 `direct-chat-flow.mjs` 验证“数字员工列表 → 💬 单聊 → 进入私有双人群并（可选）发普通消息即触发”这一新功能：
