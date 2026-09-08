@@ -42,6 +42,7 @@ public static class AccountApi
                     groupsHandled = report.GroupsHandled,
                     memoriesErased = report.MemoriesErased,
                     knowledgeBasesRemoved = report.KnowledgeBasesRemoved,
+                    messagesAnonymized = report.MessagesAnonymized,
                 });
             }
             catch (AguiProtocolException ex) { return MapError(ex); }

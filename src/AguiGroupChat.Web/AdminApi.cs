@@ -270,6 +270,7 @@ public static class AdminApi
                     groupsHandled = report.GroupsHandled,
                     memoriesErased = report.MemoriesErased,
                     knowledgeBasesRemoved = report.KnowledgeBasesRemoved,
+                    messagesAnonymized = report.MessagesAnonymized,
                 });
             }
             catch (AguiProtocolException ex) { return MapErasureError(ex); }

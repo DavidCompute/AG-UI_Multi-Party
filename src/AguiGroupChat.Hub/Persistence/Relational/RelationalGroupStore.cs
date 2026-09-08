@@ -564,6 +564,23 @@ public sealed class RelationalGroupStore : IGroupStore
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>账号注销数据擦除：匿名化该发送者的全部消息（正文 / 附件 / 提及 / 推理 / 链 / 计划清空，昵称改占位）。</summary>
+    public int AnonymizeSender(string senderId, string placeholderNickname)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE agui_messages
+            SET content = '', sender_nickname = @nick, mentions = @empty, mention_all = 0,
+                attachments = @empty, reasoning = NULL, agent_chain = NULL, plan_json = NULL
+            WHERE sender_id = @sender
+            """;
+        cmd.AddWithValue("nick", placeholderNickname);
+        cmd.AddWithValue("empty", "[]");
+        cmd.AddWithValue("sender", senderId);
+        return cmd.ExecuteNonQuery();
+    }
+
     /// <summary>启动时把所有成员的在线状态复位为 Offline（在线状态为连接态，重启后一律离线，与 JSON 快照恢复语义一致）。</summary>
     public void ResetAllOnlineStatuses()
     {

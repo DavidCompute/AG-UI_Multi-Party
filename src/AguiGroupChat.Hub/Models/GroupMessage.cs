@@ -24,17 +24,17 @@ public sealed record GroupMessage
     /// <summary>发送者类型：user / agent。</summary>
     public required MemberType SenderType { get; init; }
 
-    /// <summary>发送者群昵称，便于前端直接渲染。</summary>
-    public required string SenderNickname { get; init; }
+    /// <summary>发送者群昵称，便于前端直接渲染。（可写：账号注销匿名化时改写为占位昵称）</summary>
+    public required string SenderNickname { get; set; }
 
     /// <summary>引用回复的目标消息 ID。</summary>
     public string? ReplyToMessageId { get; init; }
 
-    /// <summary>@ 提及的成员 ID 列表。</summary>
-    public IReadOnlyList<string> Mentions { get; init; } = [];
+    /// <summary>@ 提及的成员 ID 列表。（可写：匿名化时清空）</summary>
+    public IReadOnlyList<string> Mentions { get; set; } = [];
 
-    /// <summary>是否 @ 全体成员。</summary>
-    public bool MentionAll { get; init; }
+    /// <summary>是否 @ 全体成员。（可写：匿名化时复位）</summary>
+    public bool MentionAll { get; set; }
 
     /// <summary>可见范围：all / mentioned / private。</summary>
     public MessageVisibility Visibility { get; set; } = MessageVisibility.All;

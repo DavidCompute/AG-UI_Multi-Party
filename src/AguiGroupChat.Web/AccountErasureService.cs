@@ -20,12 +20,15 @@ namespace AguiGroupChat.Web;
 ///     否则（仅剩智能体/本人）整群<b>解散</b>（物理删除该群全部消息 / 语义记忆 / 图谱）；
 ///   - 其<b>加入的他人知聚</b>：自行退群（不触及其他成员的发言、记忆与群本身）；
 ///   - 其全部<b>发言的语义记忆</b>物理删除；
-///   - 其<b>创建的个人知识库</b>连同文档向量 / 图谱物理删除。
-///   - 保留：他人群聊历史中该用户发送的消息正文（属共享群历史；如需彻底抹除可另行使用
-///     记忆治理 / 管理员介入），以及其创建的数字员工与技能（可能仍被他人群引用，删除会导致悬空成员）。
+///   - 其<b>创建的个人知识库</b>连同文档向量 / 图谱物理删除；
+///   - 现存群中该用户<b>发言的正文与附件等内容匿名化</b>（正文清空、昵称改「已注销用户」占位、附件 / 提及 /
+///     推理 / 技能链 / 计划清除——保留消息行与时间线，其余成员会话上下文不破坏，但其个人数据不再留存）。
+///   - 保留：其余用户发言、其创建的数字员工与技能（可能仍被他人群引用，删除会导致悬空成员；孤儿清理单独治理）。
 /// </summary>
 public sealed class AccountErasureService
 {
+    /// <summary>注销用户现存发言的占位昵称（消息行匿名化后展示，标识内容已按数据主体权利清除）。</summary>
+    public const string DeletedAccountNickname = "已注销用户";
     private readonly AuthService _auth;
     private readonly TotpService _totp;
     private readonly GroupHub _hub;
@@ -105,17 +108,21 @@ public sealed class AccountErasureService
             var kbsRemoved = _kbs.ListAll().Where(k => k.OwnerId == targetUserId)
                 .Count(k => _kbs.RemoveKb(k.KbId));
 
+            // 5b) 现存群中该用户的发言匿名化：正文 / 附件 / 提及 / 推理 / 链 / 计划清空、昵称改占位。
+            //     仅影响其本人消息（不触碰他人发言）；其拥有且已解散的群消息已被物理删除，不在此列。
+            var messagesAnonymized = _hub.Store.AnonymizeSender(targetUserId, DeletedAccountNickname);
+
             // 6) 删除账号行（4-6 步均成功才删除：半途失败时保留账号行（已停用）便于管理员恢复 / 重试）
             var accountRemoved = _auth.DeleteAccountRow(targetUserId);
 
             var operatorName = _auth.GetUser(operatorUserId)?.Username ?? operatorUserId;
             _audit.Record("user.account.delete", operatorUserId, operatorName, targetType: "user",
                 targetId: targetUserId,
-                detail: $"数据擦除：群处置 {groupsHandled} 个、记忆 {memoriesErased} 条、知识库 {kbsRemoved} 个{(string.IsNullOrWhiteSpace(reason) ? "" : $"；原因：{reason}")}");
+                detail: $"数据擦除：群处置 {groupsHandled} 个、记忆 {memoriesErased} 条、知识库 {kbsRemoved} 个、匿名化发言 {messagesAnonymized} 条{(string.IsNullOrWhiteSpace(reason) ? "" : $"；原因：{reason}")}");
 
-            _logger.LogInformation("账号数据擦除完成：target={UserId} operator={Operator}（群 {Groups} / 记忆 {Memories} / 知识库 {Kbs}）",
-                targetUserId, operatorUserId, groupsHandled, memoriesErased, kbsRemoved);
-            return new AccountErasureReport(accountRemoved, groupsHandled, memoriesErased, kbsRemoved);
+            _logger.LogInformation("账号数据擦除完成：target={UserId} operator={Operator}（群 {Groups} / 记忆 {Memories} / 知识库 {Kbs} / 匿名化发言 {Messages}）",
+                targetUserId, operatorUserId, groupsHandled, memoriesErased, kbsRemoved, messagesAnonymized);
+            return new AccountErasureReport(accountRemoved, groupsHandled, memoriesErased, kbsRemoved, messagesAnonymized);
         }
         catch (Exception ex)
         {
@@ -174,4 +181,5 @@ public sealed record AccountErasureReport(
     bool AccountRemoved,
     int GroupsHandled,
     int MemoriesErased,
-    int KnowledgeBasesRemoved);
+    int KnowledgeBasesRemoved,
+    int MessagesAnonymized = 0);

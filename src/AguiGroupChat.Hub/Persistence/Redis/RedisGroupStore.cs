@@ -214,6 +214,32 @@ public sealed class RedisGroupStore : IGroupStore
 
     public IReadOnlyList<GroupMessage> AllMessages(string groupId) => LoadMessages(groupId);
 
+    /// <summary>账号注销数据擦除：匿名化该发送者的全部消息（正文 / 附件 / 提及 / 推理 / 链 / 计划清空，昵称改占位）。</summary>
+    public int AnonymizeSender(string senderId, string placeholderNickname)
+    {
+        var server = _ctx.Mux.GetServer(_ctx.Mux.GetEndPoints()[0]);
+        var gids = server.Keys(pattern: "agui:group:*")
+            .Select(k => k.ToString()["agui:group:".Length..]).ToArray();
+        var affected = 0;
+        foreach (var gid in gids)
+        {
+            foreach (var msg in LoadMessages(gid).Where(m => m.SenderId == senderId))
+            {
+                msg.Content = "";
+                msg.SenderNickname = placeholderNickname;
+                msg.Mentions = [];
+                msg.MentionAll = false;
+                msg.Attachments = [];
+                msg.Reasoning = null;
+                msg.AgentChain = null;
+                msg.PlanJson = null;
+                UpdateMessage(msg);
+                affected++;
+            }
+        }
+        return affected;
+    }
+
     public IReadOnlyList<GroupMessage> RecentMessages(string groupId, int count, string? topicId = null)
     {
         var filtered = FilterByTopic(LoadMessages(groupId), topicId);

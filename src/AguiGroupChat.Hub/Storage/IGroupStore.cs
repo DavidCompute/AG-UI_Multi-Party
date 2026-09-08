@@ -65,6 +65,14 @@ public interface IGroupStore
     /// <summary>某群的全部消息（按时间序，含撤回），供持久化快照使用。</summary>
     IReadOnlyList<GroupMessage> AllMessages(string groupId);
 
+    /// <summary>
+    /// 账号注销数据擦除：把某发送者在<b>全部现存群</b>中的消息做<b>内容匿名化</b>——正文清空、
+    /// 附件 / 提及 / 推理 / 技能链 / 计划清空、发送者昵称改写为 <paramref name="placeholderNickname"/>。
+    /// 保留消息行与时间线结构（其余成员的会话上下文不被破坏）。返回受影响消息数。
+    /// 默认实现返回 0（测试替身无需感知；真实存储各自实现）。
+    /// </summary>
+    int AnonymizeSender(string senderId, string placeholderNickname) => 0;
+
     /// <summary>按关键词全文搜索群内消息（不区分大小写子串匹配），按时间倒序返回最多 limit 条；
     /// topicId 非空时限定话题；结果含已撤回消息（由调用方过滤）。</summary>
     IReadOnlyList<GroupMessage> SearchMessages(string groupId, string keyword, string? topicId, int limit);

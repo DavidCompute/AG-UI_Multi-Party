@@ -71,6 +71,27 @@ public sealed class AccountErasureTests
         }
 
         public void Dispose() => Hub.Dispose();
+
+        /// <summary>向指定群直接写入一条历史消息（SenderId/昵称自定义；用于断言匿名化）。</summary>
+        internal void SeedMessage(string messageId, string groupId, string senderId, string content, int attachments = 0)
+        {
+            Store.AddMessage(new GroupMessage
+            {
+                MessageId = messageId,
+                GroupId = groupId,
+                TopicId = "main",
+                ThreadId = "thread_" + groupId,
+                SenderId = senderId,
+                SenderType = MemberType.User,
+                SenderNickname = senderId,
+                Content = content,
+                Mentions = [],
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                Attachments = attachments > 0
+                    ? [new AttachmentInfo { AttachmentId = "att_" + messageId, Name = "f.txt", ContentType = "text/plain", Size = 0, Url = "/ag-ui/files/att_x/f.txt", Kind = "file" }]
+                    : [],
+            });
+        }
     }
 
     private sealed class FakeMemory : IMessageMemory
@@ -132,6 +153,11 @@ public sealed class AccountErasureTests
         h.Memory.Add("m_v2", g.GroupId, "user_2");
         h.Memory.Add("m_b1", g.GroupId, "user_3");
 
+        // 发言历史：victim 2 条（含附件）与 bystander 1 条（均保留在共享群）
+        h.SeedMessage("m_txt_v1", g.GroupId, "user_2", "受害者的敏感发言内容", attachments: 1);
+        h.SeedMessage("m_txt_v2", g.GroupId, "user_2", "另一条要清除的发言");
+        h.SeedMessage("m_txt_b1", g.GroupId, "user_3", "旁观者的发言应原样保留");
+
         var report = await h.Erasure.EraseAsync("user_2", "user_1", "测试注销");
 
         Assert.True(report.AccountRemoved);
@@ -140,6 +166,17 @@ public sealed class AccountErasureTests
         Assert.Contains("m_v1", h.Memory.Deleted);
         Assert.Contains("m_v2", h.Memory.Deleted);
         Assert.DoesNotContain("m_b1", h.Memory.Deleted); // 他人记忆不受影响
+
+        // 现存群中 victim 的发言被匿名化（正文 / 附件清空、昵称占位），bystander 发言原样保留
+        var victimMsg = Assert.Single(h.Store.AllMessages(g.GroupId), m => m.MessageId == "m_txt_v1");
+        Assert.Equal("", victimMsg.Content);
+        Assert.Equal(AccountErasureService.DeletedAccountNickname, victimMsg.SenderNickname);
+        Assert.Empty(victimMsg.Attachments);
+        Assert.Equal("", h.Store.AllMessages(g.GroupId).First(m => m.MessageId == "m_txt_v2").Content);
+        Assert.Equal(2, report.MessagesAnonymized);
+        var bystanderMsg = h.Store.AllMessages(g.GroupId).First(m => m.MessageId == "m_txt_b1");
+        Assert.Equal("旁观者的发言应原样保留", bystanderMsg.Content);
+        Assert.Equal("user_3", bystanderMsg.SenderNickname);
 
         // 共享群保留：群主仍是 owner、bystander 仍在，victim 已退群
         Assert.NotNull(h.Store.GetGroup(g.GroupId));

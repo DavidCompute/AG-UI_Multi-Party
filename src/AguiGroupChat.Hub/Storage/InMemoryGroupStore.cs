@@ -225,6 +225,32 @@ public sealed class InMemoryGroupStore : IGroupStore
         lock (list) return list.ToList();
     }
 
+    /// <summary>账号注销数据擦除：把该发送者在全部现存群的消息内容匿名化（正文/附件/提及/推理/链/计划清空，昵称改占位）。</summary>
+    public int AnonymizeSender(string senderId, string placeholderNickname)
+    {
+        var affected = 0;
+        foreach (var list in _messages.Values)
+        {
+            lock (list)
+            {
+                foreach (var m in list.Where(m => m.SenderId == senderId))
+                {
+                    m.Content = "";
+                    m.SenderNickname = placeholderNickname;
+                    m.Mentions = [];
+                    m.MentionAll = false;
+                    m.Attachments = [];
+                    m.Reasoning = null;
+                    m.AgentChain = null;
+                    m.PlanJson = null;
+                    affected++;
+                }
+            }
+        }
+        if (affected > 0) _changes?.Notify();
+        return affected;
+    }
+
     public IReadOnlyList<GroupMessage> SearchMessages(string groupId, string keyword, string? topicId, int limit)
     {
         if (string.IsNullOrWhiteSpace(keyword) || limit <= 0) return [];
