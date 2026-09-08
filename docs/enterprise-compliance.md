@@ -8,9 +8,10 @@
 
 | 场景 | 入口 | 说明 |
 | --- | --- | --- |
-| 用户本人注销 | 「我的资料」弹窗 → ⚠️ 危险操作 → **注销账户**（`DELETE /ag-ui/account`） | 需输入**登录密码**确认（防会话劫持 / 误删） |
-| 用户导出本人数据 | 「我的资料」弹窗 → ⚠️ 危险操作 → **⬇ 导出我的数据**（`GET /ag-ui/account/export`） | 注销前留存 / 迁移到新平台（见下节「个人数据导出」） |
+| 用户本人注销 | 「我的资料」弹窗 → ⚠️ 危险操作 → **注销账户**（`DELETE /ag-ui/account`） | 需输入**登录密码**确认（防会话劫持 / 误删）；若 30 天以上未导出过个人数据（服务端审计判定，跨设备一致），弹窗会提示<b>先导出留存</b>并可一键先导出 |
+| 用户导出本人数据 | 「我的资料」弹窗 → ⚠️ 危险操作 → **⬇ 导出我的数据**（`GET /ag-ui/account/export`） | 注销前留存 / 迁移到新平台（见下节「个人数据导出」）；`GET /ag-ui/account/export-guide` 供注销弹窗探测上次导出时间 |
 | 管理员删除他人 | 管理员控制台 → 用户管理 → 每行 🗑️（`DELETE /ag-ui/admin/users/{userId}`） | 需先确认 + 输入该用户名二次核对；不可删除自己（本人请走自助注销） |
+| 管理员孤儿盘点 | 管理员控制台 → **孤儿盘点**（`GET /ag-ui/admin/orphans`） | OwnerId 指向已注销账号的数字员工 / 技能清单：仍被引用的可**接管**到自己名下，未引用的可直接**删除** |
 
 ### 数据擦除语义（`AccountErasureService`，Web 编排，两端共用）
 
@@ -55,7 +56,15 @@
 - `knowledgeBases`：本人创建的知识库元数据 + 文档清单（不含向量）；
 - `agents` / `skills`：本人创建的数字员工与技能**完整定义**（可迁移到新平台）。
 
-每次导出在审计日志记录 `data.export`（detail 含各类数量）。
+每次导出在审计日志记录 `data.export`（detail 含各类数量）。注销弹窗打开时会经 `GET /ag-ui/account/export-guide`（取本人最近一次 `data.export` 审计）判断是否需要<b>先导出引导</b>。
+
+### 孤儿定义运营盘点（管理员）
+
+`GET /ag-ui/admin/orphans` 列出 OwnerId 指向已注销账号的数字员工 / 技能，并给出<b>引用上下文</b>（作为哪些现存知聚成员、被哪些现存定义中继 / 升级引用、被哪些数字员工挂载）。
+
+- `POST /ag-ui/admin/orphans/agents/{agentId}/adopt` 与 `POST /ag-ui/admin/orphans/skills/{skillId}/adopt`：把孤儿定义<b>接管到当前管理员</b>名下（之后可常规编辑 / 挂载 / 迁移）；
+- `DELETE /ag-ui/admin/orphans/agents/{agentId}`、`DELETE /ag-ui/admin/orphans/skills/{skillId}`：删除孤儿定义，带<b>安全闸</b>——仍被现存知聚成员或现存定义引用的返回 403（防止悬空），未引用的历史遗留可直接删除；
+- 管理员控制台新增「孤儿盘点」页签承载以上能力。
 
 ## 三、审计日志检索与 CSV 导出
 

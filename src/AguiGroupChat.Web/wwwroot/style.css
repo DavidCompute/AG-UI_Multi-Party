@@ -1188,6 +1188,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
 /* 审计日志过滤行 + 详情列（企业合规） */
 .admin-audit-filter { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; flex-wrap: wrap; }
 .admin-modal .admin-table td.audit-detail { white-space: normal; max-width: 340px; min-width: 160px; }
+/* 注销弹窗「建议先导出」引导条 + 孤儿盘点区块 */
+.da-guide { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 8px 10px; border: 1px solid rgba(229,83,75,.35); border-radius: 8px; background: rgba(229,83,75,.06); }
+.da-guide button { flex: none; }
+.orphan-block { margin-top: 12px; }
+.orphan-block h4 { margin: 0 0 6px; font-size: 13px; }
+.admin-modal .admin-table td.orphan-ref-detail { white-space: normal; max-width: 260px; min-width: 150px; }
 .admin-metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
 .admin-metric-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
 .admin-metric-card.bad { border-color: rgba(229,83,75,.5); background: rgba(229,83,75,.06); }

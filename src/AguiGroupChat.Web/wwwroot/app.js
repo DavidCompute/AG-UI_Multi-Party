@@ -2939,12 +2939,33 @@ async function submitProfile() {
 
 /* ============ 注销账户（企业合规 · 数据主体权利） ============ */
 
-/** 打开注销确认弹窗（资料弹窗内「注销账户」）：清空输入与错误。 */
-function openDeleteAccountModal() {
+/** 打开注销确认弹窗（资料弹窗内「注销账户」）：清空输入与错误，并探测上次导出时间以提示先备份。 */
+async function openDeleteAccountModal() {
   $("daPassword").value = "";
   $("daError").style.display = "none";
   $("deleteAccountModal").classList.remove("hidden");
+  await refreshDeleteGuide();
   setTimeout(() => $("daPassword").focus(), 30);
+}
+
+/** 注销引导：距上次「导出我的数据」超过 30 天（或从未导出）时提示先备份（以服务端审计为准，跨设备一致）。 */
+async function refreshDeleteGuide() {
+  const guide = $("daGuide");
+  if (!guide) return;
+  guide.classList.add("hidden");
+  $("daGuideText").textContent = "";
+  try {
+    const res = await fetch("/ag-ui/account/export-guide", { headers: { Authorization: `Bearer ${state.token}` } });
+    if (!res.ok) return;
+    const d = await res.json();
+    const last = Number(d.lastExportAtMs) || 0;
+    const day = 86400000;
+    if (d.exportedBefore && Date.now() - last < 30 * day) return; // 近期已导出：不打扰
+    $("daGuideText").textContent = d.exportedBefore
+      ? t("account.guideStale", { at: fmtDateTime(last) })
+      : t("account.guideNever");
+    guide.classList.remove("hidden");
+  } catch { /* 网络失败不阻断注销入口 */ }
 }
 
 function closeDeleteAccountModal() { $("deleteAccountModal").classList.add("hidden"); }
@@ -2970,6 +2991,9 @@ async function exportMyData() {
     a.remove();
     URL.revokeObjectURL(url);
     toast(t("profile.exported"));
+    if ($("deleteAccountModal") && !$("deleteAccountModal").classList.contains("hidden")) {
+      await refreshDeleteGuide(); // 导出成功后注销弹窗内的备份提示自动消失
+    }
   } catch (ex) { toast(t("profile.exportFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }
@@ -5319,7 +5343,7 @@ async function openAdminModal() {
   startAdminMetricsPoll(); // 运行指标页每 8 秒自动刷新（管理员控制台打开期间）
 }
 
-/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数 / 审计日志。 */
+/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数 / 审计日志 / 孤儿盘点。 */
 function switchAdminTab(tab) {
   const users = tab === "users";
   const usage = tab === "usage";
@@ -5327,18 +5351,21 @@ function switchAdminTab(tab) {
   const conf = tab === "config";
   const exec = tab === "execution";
   const audit = tab === "audit";
+  const orphans = tab === "orphans";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
   $("adminTabConfig").classList.toggle("on", conf);
   $("adminTabExec").classList.toggle("on", exec);
   $("adminTabAudit").classList.toggle("on", audit);
+  $("adminTabOrphans").classList.toggle("on", orphans);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
   $("adminConfigView").classList.toggle("hidden", !conf);
   $("adminExecView").classList.toggle("hidden", !exec);
   $("adminAuditView").classList.toggle("hidden", !audit);
+  $("adminOrphansView").classList.toggle("hidden", !orphans);
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsers();
@@ -5351,6 +5378,8 @@ function switchAdminTab(tab) {
     loadExecutionConfig();
   } else if (audit) {
     loadAdminAudit();
+  } else if (orphans) {
+    loadAdminOrphans();
   } else {
     loadConfigGovernance();
   }
@@ -5734,6 +5763,78 @@ async function exportAdminAuditCsv() {
     a.remove();
     URL.revokeObjectURL(url);
   } catch { toast(t("admin.sysNetErr")); }
+}
+
+/** 孤儿定义盘点（管理员「孤儿盘点」tab）：OwnerId 指向已注销账号的数字员工 / 技能清单。 */
+async function loadAdminOrphans() {
+  const agentRows = $("adminOrphanAgentRows");
+  const skillRows = $("adminOrphanSkillRows");
+  if (!agentRows) return;
+  agentRows.innerHTML = skillRows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  $("orphanAgentMeta").textContent = "";
+  $("orphanSkillMeta").textContent = "";
+  try {
+    const res = await fetch("/ag-ui/admin/orphans", { headers: { Authorization: "Bearer " + state.token } });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) { agentRows.innerHTML = `<tr><td colspan="5" class="admin-empty">${escapeHtml(errMsg(data, "HTTP " + res.status))}</td></tr>`; return; }
+    const agents = data.agents || [];
+    const skills = data.skills || [];
+    $("orphanAgentMeta").textContent = `（${agents.length}）`;
+    $("orphanSkillMeta").textContent = `（${skills.length}）`;
+    agentRows.innerHTML = agents.map((a) => {
+      const ref = [];
+      if ((a.memberGroups || []).length) ref.push(t("admin.orphanGroups", { n: a.memberGroups.length }));
+      if ((a.referencedBy || []).length) ref.push(t("admin.orphanRefBy", { n: a.referencedBy.length }));
+      const canDelete = ref.length === 0;
+      return `<tr>
+        <td class="nowrap">${escapeHtml(a.agentId)}</td>
+        <td>${escapeHtml(a.nickname || "")}</td>
+        <td>${a.isPrivate ? t("admin.orphanPrivate") : t("admin.orphanPublic")}</td>
+        <td class="orphan-ref-detail muted">${ref.length ? ref.join("、") : t("admin.orphanUnused")}</td>
+        <td class="nowrap">
+          <button class="chip-btn" data-orp="adopt" data-type="agent" data-id="${cssEsc(a.agentId)}" data-name="${cssEsc(a.nickname || a.agentId)}">${t("admin.orphanAdopt")}</button>
+          ${canDelete ? `<button class="chip-btn danger" data-orp="delete" data-type="agent" data-id="${cssEsc(a.agentId)}" data-name="${cssEsc(a.nickname || a.agentId)}">${t("admin.deleteOk")}</button>` : ""}
+        </td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5" class="admin-empty">${t("admin.orphanNone")}</td></tr>`;
+    skillRows.innerHTML = skills.map((s) => {
+      const used = s.usedBy || [];
+      const usedText = used.length ? t("admin.orphanUsedByCount", { n: used.length }) : t("admin.orphanUnused");
+      return `<tr>
+        <td class="nowrap">${escapeHtml(s.skillId)}</td>
+        <td>${escapeHtml(s.name || "")}</td>
+        <td class="nowrap">${escapeHtml(s.kind || "")}</td>
+        <td class="orphan-ref-detail muted">${usedText}</td>
+        <td class="nowrap">
+          <button class="chip-btn" data-orp="adopt" data-type="skill" data-id="${cssEsc(s.skillId)}" data-name="${cssEsc(s.name || s.skillId)}">${t("admin.orphanAdopt")}</button>
+          ${used.length === 0 ? `<button class="chip-btn danger" data-orp="delete" data-type="skill" data-id="${cssEsc(s.skillId)}" data-name="${cssEsc(s.name || s.skillId)}">${t("admin.deleteOk")}</button>` : ""}
+        </td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="5" class="admin-empty">${t("admin.orphanNone")}</td></tr>`;
+  } catch { agentRows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
+}
+
+/** 孤儿操作：接管（归属到当前管理员） / 删除（仅未被引用项；服务端有安全闸）。 */
+async function orphanAdminAction(op, type, id, name) {
+  const label = type === "agent" ? t("admin.orphanAgentType") : t("admin.orphanSkillType");
+  if (op === "adopt") {
+    if (!await uiConfirm({ message: t("admin.orphanAdoptConfirm", { name, label }) })) return;
+    const res = await fetch(`/ag-ui/admin/orphans/${type}s/${encodeURIComponent(id)}/adopt`, {
+      method: "POST", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, t("admin.orphanOpFail", { err: res.status }))); return; }
+    toast(t("admin.orphanAdopted", { name, label }));
+  } else {
+    if (!await uiConfirm({ message: t("admin.orphanDeleteConfirm", { name, label }), danger: true, okText: t("admin.deleteOk") })) return;
+    const res = await fetch(`/ag-ui/admin/orphans/${type}s/${encodeURIComponent(id)}`, {
+      method: "DELETE", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, t("admin.orphanOpFail", { err: res.status }))); return; }
+    toast(t("admin.orphanDeleted", { name, label }));
+  }
+  await loadAdminOrphans();
 }
 
 /** 管理员操作：禁用 / 启用 / 重置密码（重置密码弹输入框）。 */
@@ -8279,10 +8380,17 @@ function init() {
   $("adminTabConfig").onclick = () => switchAdminTab("config");
   $("adminTabExec").onclick = () => switchAdminTab("execution");
   $("adminTabAudit").onclick = () => switchAdminTab("audit");
+  $("adminTabOrphans").onclick = () => switchAdminTab("orphans");
   $("auditSearchBtn").onclick = () => loadAdminAudit();
   $("auditExportBtn").onclick = exportAdminAuditCsv;
   ["auditActor", "auditAction", "auditTarget"].forEach((id) =>
     $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); loadAdminAudit(); } }));
+  // 孤儿盘点：接管 / 删除（按钮事件委托）
+  ["adminOrphanAgentRows", "adminOrphanSkillRows"].forEach((id) =>
+    $(id).addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-orp]");
+      if (btn) orphanAdminAction(btn.dataset.orp, btn.dataset.type, btn.dataset.id, btn.dataset.name);
+    }));
   $("metricsRefreshBtn").onclick = () => loadAdminMetrics();
   $("cfgSave").onclick = saveConfigGovernance;
   $("cfgReload").onclick = loadConfigGovernance;
@@ -8379,6 +8487,7 @@ function init() {
   // 注销账户（资料弹窗危险区）：导出我的数据 + 需输入密码确认的注销
   $("pfExportData").onclick = exportMyData;
   $("pfDeleteAccount").onclick = openDeleteAccountModal;
+  $("daExportFirst").onclick = exportMyData; // 先导出（成功后自动收起提示条）
   $("daCancel").onclick = closeDeleteAccountModal;
   $("daConfirm").onclick = submitDeleteAccount;
   $("daPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitDeleteAccount(); } });

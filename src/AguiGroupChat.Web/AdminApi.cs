@@ -277,16 +277,184 @@ public static class AdminApi
             }
             catch (AguiProtocolException ex) { return MapErasureError(ex); }
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        // ---- 孤儿定义盘点（企业合规运营）：OwnerId 指向已注销账号的数字员工 / 技能 ----------------
+        root.MapGet("/orphans", (HttpContext ctx, AuthService auth, GroupHub hub,
+            AgentCatalog catalog, AgentSkillCatalog skills,
+            AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var userIds = auth.ListUsers().Select(u => u.UserId).ToHashSet(StringComparer.Ordinal);
+            var allDefs = catalog.ListDefinitions();
+            var skillUsedBy = BuildSkillUsage(allDefs);
+            var agentRefs = BuildAgentReferences(allDefs);
+
+            // 现存群中以数字员工身份出现的成员（agentId → 所在群名列表）
+            var memberGroups = hub.Store.AllGroups()
+                .SelectMany(g => hub.Store.ListMembers(g.GroupId)
+                    .Where(m => m.MemberType == MemberType.Agent)
+                    .Select(m => new { m.MemberId, GroupName = g.GroupName }))
+                .GroupBy(x => x.MemberId, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.GroupName).Distinct().ToList(), StringComparer.Ordinal);
+
+            var agents = allDefs
+                .Where(d => !userIds.Contains(d.OwnerId ?? ""))
+                .Select(d => new
+                {
+                    d.AgentId,
+                    d.Nickname,
+                    d.Description,
+                    ownerId = d.OwnerId,
+                    d.IsPrivate,
+                    memberGroups = memberGroups.TryGetValue(d.AgentId, out var mg) ? mg : [],
+                    referencedBy = agentRefs.TryGetValue(d.AgentId, out var rb) ? rb : [],
+                })
+                .OrderBy(a => a.AgentId)
+                .ToList();
+
+            var ownedSkills = skills.ListAll()
+                .Where(s => !userIds.Contains(s.OwnerId ?? ""))
+                .Select(s => new
+                {
+                    s.SkillId,
+                    s.Name,
+                    kind = s.Kind.ToString(),
+                    ownerId = s.OwnerId,
+                    usedBy = skillUsedBy.TryGetValue(s.SkillId, out var ub) ? ub : [],
+                })
+                .OrderBy(s => s.SkillId)
+                .ToList();
+
+            return Results.Ok(new { agents, skills = ownedSkills });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        // 接管：把孤儿定义的 OwnerId 改为当前管理员（可继续编辑 / 挂载，不再指向已注销账号）
+        root.MapPost("/orphans/agents/{agentId}/adopt", (string agentId, HttpContext ctx, AuthService auth,
+            AgentCatalog catalog, AgentSkillCatalog _, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+            OrphanRun(() =>
+            {
+                var me = WebIdentity.UserId(ctx)!;
+                var userIds = auth.ListUsers().Select(u => u.UserId).ToHashSet(StringComparer.Ordinal);
+                var def = catalog.GetDefinition(agentId)
+                    ?? throw new AguiProtocolException(ErrorCodes.AgentNotFound, "数字员工不存在");
+                if (userIds.Contains(def.OwnerId ?? ""))
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该数字员工仍属现存账号，无需接管（请走常规管理）");
+                var originalOwner = def.OwnerId;
+                def.OwnerId = me;
+                catalog.Upsert(def);
+                audit.Record("admin.orphan.adopt", me, auth.GetUser(me)?.Username, targetType: "agent", targetId: agentId,
+                    detail: $"接管孤儿数字员工（原 Owner {originalOwner}）");
+                return Results.Ok(new { ok = true, agentId });
+            })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        root.MapPost("/orphans/skills/{skillId}/adopt", (string skillId, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog skills, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+            OrphanRun(() =>
+            {
+                var me = WebIdentity.UserId(ctx)!;
+                var userIds = auth.ListUsers().Select(u => u.UserId).ToHashSet(StringComparer.Ordinal);
+                var def = skills.Get(skillId)
+                    ?? throw new AguiProtocolException(ErrorCodes.AgentNotFound, "技能不存在");
+                if (userIds.Contains(def.OwnerId ?? ""))
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该技能仍属现存账号，无需接管");
+                def.OwnerId = me;
+                skills.Upsert(def);
+                audit.Record("admin.orphan.adopt", me, auth.GetUser(me)?.Username, targetType: "skill", targetId: skillId);
+                return Results.Ok(new { ok = true, skillId });
+            })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        // 删除孤儿定义（安全闸：仅当不再被任何现存知聚成员 / 保留定义引用）
+        root.MapDelete("/orphans/agents/{agentId}", (string agentId, HttpContext ctx, AuthService auth,
+            GroupHub hub, AgentCatalog catalog, AgentRegistry registry,
+            AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+            OrphanRun(() =>
+            {
+                var me = WebIdentity.UserId(ctx)!;
+                var userIds = auth.ListUsers().Select(u => u.UserId).ToHashSet(StringComparer.Ordinal);
+                var def = catalog.GetDefinition(agentId)
+                    ?? throw new AguiProtocolException(ErrorCodes.AgentNotFound, "数字员工不存在");
+                if (userIds.Contains(def.OwnerId ?? ""))
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该数字员工仍属现存账号，请走常规管理删除");
+                var stillMember = hub.Store.AllGroups().Any(g => hub.Store.GetMember(g.GroupId, agentId)?.MemberType == MemberType.Agent);
+                if (stillMember)
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该数字员工仍是现存知聚的成员，删除会悬空知聚：请先接管并移除，或解散相关知聚");
+                var referenced = BuildAgentReferences(catalog.ListDefinitions()).TryGetValue(agentId, out var rb) && rb.Count > 0;
+                if (referenced)
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该数字员工仍被其他数字员工引用（交接 / 升级），请先接管调整引用");
+                catalog.Remove(agentId);
+                registry.Unregister(agentId, null);
+                audit.Record("admin.orphan.delete", me, auth.GetUser(me)?.Username, targetType: "agent", targetId: agentId);
+                return Results.Ok(new { ok = true, agentId });
+            })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        root.MapDelete("/orphans/skills/{skillId}", (string skillId, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog skills, AgentCatalog catalog,
+            AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+            OrphanRun(() =>
+            {
+                var me = WebIdentity.UserId(ctx)!;
+                var userIds = auth.ListUsers().Select(u => u.UserId).ToHashSet(StringComparer.Ordinal);
+                var def = skills.Get(skillId)
+                    ?? throw new AguiProtocolException(ErrorCodes.AgentNotFound, "技能不存在");
+                if (userIds.Contains(def.OwnerId ?? ""))
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该技能仍属现存账号，请走常规管理删除");
+                var used = BuildSkillUsage(catalog.ListDefinitions()).TryGetValue(skillId, out var ub) && ub.Count > 0;
+                if (used)
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied, "该技能仍被数字员工挂载，请先接管并解除挂载");
+                skills.Remove(skillId);
+                audit.Record("admin.orphan.delete", me, auth.GetUser(me)?.Username, targetType: "skill", targetId: skillId);
+                return Results.Ok(new { ok = true, skillId });
+            })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
-    /// <summary>账号删除的错误码 → HTTP 状态映射（404 用户不存在；403 权限 / 最后一名超管；其余 400）。</summary>
+    /// <summary>孤儿定义操作统一错误映射（异常 → 结构化响应，避免 500）。</summary>
+    private static IResult OrphanRun(Func<IResult> action)
+    {
+        try { return action(); }
+        catch (AguiProtocolException ex) { return MapErasureError(ex); }
+    }
+
+    /// <summary>账号删除 / 孤儿操作错误码 → HTTP 状态映射（404 目标不存在；403 权限不足 / 防呆；其余 400）。</summary>
     private static IResult MapErasureError(AguiProtocolException ex) => ex.ErrorCode switch
     {
-        ErrorCodes.UserNotFound => Results.NotFound(new AguiError(ex.ErrorCode, ex.Message)),
-        ErrorCodes.GroupPermissionDenied or ErrorCodes.UserUnauthorized
+        ErrorCodes.UserNotFound or ErrorCodes.AgentNotFound or ErrorCodes.GroupNotFound
+            => Results.NotFound(new AguiError(ex.ErrorCode, ex.Message)),
+        ErrorCodes.GroupPermissionDenied or ErrorCodes.UserUnauthorized or ErrorCodes.AgentPermissionDenied
             => Results.Json(new AguiError(ex.ErrorCode, ex.Message), statusCode: StatusCodes.Status403Forbidden),
         _ => Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)),
     };
+
+    /// <summary>现存数字员工定义中「中继 / 升级」引用图：agentId → 引用它的数字员工 id 列表（孤儿盘点用）。</summary>
+    private static Dictionary<string, List<string>> BuildAgentReferences(IReadOnlyList<AgentDefinition> defs)
+    {
+        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var d in defs)
+        {
+            AddRef(map, d.RelayToAgentId, d.AgentId);
+            AddRef(map, d.EscalationAgentId, d.AgentId);
+        }
+        return map;
+    }
+
+    private static void AddRef(Dictionary<string, List<string>> map, string? target, string source)
+    {
+        if (string.IsNullOrWhiteSpace(target) || target == source) return;
+        if (!map.TryGetValue(target!, out var list)) map[target!] = list = new List<string>();
+        list.Add(source);
+    }
+
+    /// <summary>现存数字员工挂载的技能使用图：skillId → 挂载它的数字员工 id 列表。</summary>
+    private static Dictionary<string, List<string>> BuildSkillUsage(IReadOnlyList<AgentDefinition> defs)
+    {
+        var map = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var d in defs)
+        {
+            foreach (var sid in d.SkillDefIds ?? [])
+                if (!string.IsNullOrWhiteSpace(sid)) AddRef(map, sid, d.AgentId);
+            foreach (var s in d.Skills ?? [])
+                if (!string.IsNullOrWhiteSpace(s.SkillId)) AddRef(map, s.SkillId, d.AgentId);
+        }
+        return map;
+    }
 
     /// <summary>追加一条审计 CSV 行（RFC 4180：含分隔符 / 引号 / 换行的字段加引号包裹，内部引号双写）。</summary>
     private static void AppendCsvRow(System.Text.StringBuilder sb, AguiGroupChat.Hub.Infra.AuditEntry e)

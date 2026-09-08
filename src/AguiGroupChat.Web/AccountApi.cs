@@ -167,6 +167,19 @@ public static class AccountApi
             return Results.File(bytes, "application/json; charset=utf-8",
                 $"agui-my-data-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.json");
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // ---- 注销引导：距上次「导出我的数据」是否过久（跨设备以服务端审计为准；供注销弹窗提示先备份）----
+        app.MapGet("/ag-ui/account/export-guide", (HttpContext ctx,
+            AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var userId = WebIdentity.UserId(ctx)!;
+            var last = audit.Query(1, actor: userId, action: "data.export").FirstOrDefault();
+            return Results.Ok(new
+            {
+                exportedBefore = last is not null,
+                lastExportAtMs = last?.Timestamp,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 
     /// <summary>分页读取某人全部语义记忆（上限 2000 条；跨全部群）。</summary>

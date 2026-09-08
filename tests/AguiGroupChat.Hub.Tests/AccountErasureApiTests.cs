@@ -129,6 +129,34 @@ public sealed class AccountErasureApiTests : IClassFixture<AccountApiServerFixtu
     }
 
     [Fact]
+    public async Task ExportGuide_ReflectsOwnExports()
+    {
+        var user = await RegisterAsync("guide_user");
+        var uid = user.GetProperty("userId").GetString()!;
+        var token = user.GetProperty("token").GetString()!;
+
+        // 尚未导出 → 引导提示「建议先导出」
+        using (var before = Authed(HttpMethod.Get, "/ag-ui/account/export-guide", token))
+        {
+            var d = await (await _client.SendAsync(before)).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.False(d.GetProperty("exportedBefore").GetBoolean());
+        }
+
+        // 导出一次 → 服务端审计记录 → 引导变为「已导出」
+        using (var ex = Authed(HttpMethod.Get, "/ag-ui/account/export", token))
+        {
+            (await _client.SendAsync(ex)).EnsureSuccessStatusCode();
+        }
+        using (var after = Authed(HttpMethod.Get, "/ag-ui/account/export-guide", token))
+        {
+            var d = await (await _client.SendAsync(after)).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(d.GetProperty("exportedBefore").GetBoolean());
+            Assert.True(d.GetProperty("lastExportAtMs").GetInt64() > 0);
+        }
+        _ = uid;
+    }
+
+    [Fact]
     public async Task ExportMyData_ReturnsOwnGroupsMessagesAndProfile()
     {
         var user = await RegisterAsync("portable_user");

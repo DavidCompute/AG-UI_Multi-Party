@@ -800,6 +800,10 @@
     <div class="modal">
       <div class="modal-title" data-i18n="account.deleteTitle">注销账户</div>
       <p class="modal-label" data-i18n="account.deletePrompt">请输入登录密码确认注销。该操作不可撤销：账号与全部个人数据将被删除，您创建的知聚将转让给其他成员或解散。</p>
+      <div id="daGuide" class="da-guide hidden">
+        <span id="daGuideText" class="form-hint" style="margin:0"></span>
+        <button id="daExportFirst" class="chip-btn" type="button" data-i18n="account.guideExport">⬇ 先导出我的数据</button>
+      </div>
       <input id="daPassword" class="modal-input" type="password" maxlength="128" autocomplete="current-password" data-i18n-placeholder="account.passwordPh" />
       <p id="daError" class="form-hint" style="color:#e5484d;display:none;margin:8px 0 0"></p>
       <div class="modal-actions">
@@ -1139,6 +1143,7 @@
         <button id="adminTabConfig" class="chip-btn admin-tab" data-i18n="admin.tabConfig">配置治理</button>
         <button id="adminTabExec" class="chip-btn admin-tab" data-i18n="admin.tabExec">执行参数</button>
         <button id="adminTabAudit" class="chip-btn admin-tab" data-i18n="admin.tabAudit">审计日志</button>
+        <button id="adminTabOrphans" class="chip-btn admin-tab" data-i18n="admin.tabOrphans">孤儿盘点</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1259,6 +1264,28 @@
             <thead><tr><th data-i18n="admin.thTime">时间</th><th data-i18n="admin.thAction">操作</th><th data-i18n="admin.thActor">操作者</th><th data-i18n="admin.thTarget">目标</th><th data-i18n="admin.thResult">结果</th><th data-i18n="admin.thDetail">详情</th></tr></thead>
             <tbody id="adminAuditRows"></tbody>
           </table>
+        </div>
+      </div>
+      <!-- 孤儿定义盘点（企业合规运营）：OwnerId 指向已注销账号的数字员工 / 技能 → 接管或删除 -->
+      <div id="adminOrphansView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="admin.orphanHint">以下定义属于<b>已注销账号</b>（注销时仍被引用的保留项，或历史遗留）：仍被现存知聚成员 / 数字员工引用的无法直接删除（防止悬空），可<b>接管</b>到自己名下后正常管理；未被引用的可直接删除。</p>
+        <div class="orphan-block">
+          <h4><span data-i18n="admin.orphanAgents">数字员工孤儿</span> <span id="orphanAgentMeta" class="muted"></span></h4>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th data-i18n="admin.thAgent">数字员工</th><th data-i18n="admin.thNick">昵称</th><th data-i18n="admin.thPrivate">私密</th><th data-i18n="admin.orphanRef">引用情况</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+              <tbody id="adminOrphanAgentRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="orphan-block">
+          <h4><span data-i18n="admin.orphanSkills">技能孤儿</span> <span id="orphanSkillMeta" class="muted"></span></h4>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th data-i18n="admin.thSkill">技能 ID</th><th data-i18n="admin.thName">名称</th><th data-i18n="admin.thKind">类型</th><th data-i18n="admin.orphanUsedBy">被挂载</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+              <tbody id="adminOrphanSkillRows"></tbody>
+            </table>
+          </div>
         </div>
       </div>
       <div class="modal-actions">
