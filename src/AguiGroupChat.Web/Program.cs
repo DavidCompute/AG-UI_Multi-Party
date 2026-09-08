@@ -105,6 +105,7 @@ app.MapNativeBridgeDownloadApi(); // 本机桥 Windows 安装包：登录用户�
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
 app.MapTopicSummaryApi(); // 话题滚动小结读取（长话题接续记忆）
 app.MapMessageFeedbackApi(); // 消息 👍/👎 反馈（偏好画像）
+app.MapMentionSuggestApi(); // 输入时「建议 @ 谁」（草稿对数字员工职责的本地评分）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
 app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化

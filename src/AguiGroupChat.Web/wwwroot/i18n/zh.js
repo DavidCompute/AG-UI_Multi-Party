@@ -883,6 +883,8 @@ window.I18N_DICTS.zh = {
   "fb.tag.tooshort": "太简短",
   "fb.tag.source": "缺依据/来源",
   "fb.tag.other": "其它问题",
+  "ms.hint": "可能要 @ 谁：",
+  "ms.dismiss": "本次草稿不再提示",
   "msg.recallFail": "撤回失败：{err}",
   "msg.recalled": "已撤回",
   "msg.recalledNotice": "一条消息已被撤回",

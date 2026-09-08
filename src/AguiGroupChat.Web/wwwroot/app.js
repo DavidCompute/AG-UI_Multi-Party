@@ -386,6 +386,7 @@ function resetChatState() {
   stopVoiceRecording();
   closeCanvasModal();
   hideMentionPicker();
+  hideMentionSuggest();
   renderMentionChips();
   renderAttachList();
 }
@@ -4966,6 +4967,7 @@ async function selectGroup(gid) {
   resetVScroll(); // 清空上一知聚的虚拟滚动状态与消息 DOM
   vscroll.stickBottom = true; // 切知聚后定位到最新消息（快照到达后由 renderMessages 生效）
   hideMentionPicker();
+  hideMentionSuggest();
   // 进入知聚不标记任何话题已读：话题栏先展示全部未读徽标，用户点击对应话题（或该话题收到新消息）后才已读
   $("mentionAllBtn").classList.toggle("on", state.mentionAll);
   renderMentionChips();
@@ -6854,6 +6856,7 @@ function pickMentionFromInput(member) {
   renderMentionChips();
   renderMembers();
   hideMentionPicker();
+  hideMentionSuggest(); // 已手动指定对象，不再提示
   $("input").focus();
 }
 
@@ -6884,6 +6887,94 @@ function moveMentionPicker(delta) {
   if (items.length === 0) return;
   mentionPickerIndex = (mentionPickerIndex + delta + items.length) % items.length;
   items.forEach((it, i) => it.classList.toggle("active", i === mentionPickerIndex));
+}
+
+/* ============ 输入时「建议 @ 谁」（智能 @ 推荐） ============ */
+
+let mentionSuggestTimer = null;
+let mentionSuggestSeq = 0;
+
+/** 输入内容变化（防抖 350ms）后，问后端该草稿可能对应群内哪个数字员工；无令牌 / 已 @ 过则不打扰。 */
+function scheduleMentionSuggest() {
+  clearTimeout(mentionSuggestTimer);
+  mentionSuggestSeq++;
+  const el = $("mentionSuggest");
+  const input = $("input");
+  if (!el || !input) return;
+  const gid = state.activeGroupId;
+  const text = input.value.trim();
+  const pickerOpen = !$("mentionPicker").hidden;
+  if (!gid || !state.token || text.length < 5 || state.mentionAll || state.mentions.size > 0 || pickerOpen) {
+    hideMentionSuggest();
+    return;
+  }
+  mentionSuggestTimer = setTimeout(() => queryMentionSuggest(gid, text), 350);
+}
+
+async function queryMentionSuggest(gid, text) {
+  const seq = ++mentionSuggestSeq;
+  try {
+    const res = await fetch("/ag-ui/mention-suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ groupId: gid, text }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || seq !== mentionSuggestSeq) return;
+    // 返回时草稿 / 知聚 / @ 状态已变化则丢弃（防竞态）
+    const input = $("input");
+    if (state.activeGroupId !== gid || !input || input.value.trim() !== text
+      || state.mentions.size > 0 || state.mentionAll || !$("mentionPicker").hidden) return;
+    renderMentionSuggest(d?.suggestions || []);
+  } catch { /* 网络抖动静默，不打断输入 */ }
+}
+
+/** 在输入框上方渲染建议条：点击某个 @ chip 即加入 mentions（用户可再手动增删）。 */
+function renderMentionSuggest(sugs) {
+  const el = $("mentionSuggest");
+  if (!el) return;
+  el.innerHTML = "";
+  if (!Array.isArray(sugs) || sugs.length === 0) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  const label = document.createElement("span");
+  label.className = "ms-label";
+  label.textContent = t("ms.hint");
+  el.appendChild(label);
+  for (const s of sugs) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip-btn ms-chip";
+    b.textContent = "@" + (s.nickname || s.agentId || "");
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (s.agentId && !state.mentions.has(s.agentId)) {
+        state.mentions.add(s.agentId);
+        renderMentionChips();
+        renderMembers();
+      }
+      hideMentionSuggest();
+      $("input").focus();
+    };
+    el.appendChild(b);
+  }
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "ms-close";
+  x.textContent = "✕";
+  x.title = t("ms.dismiss");
+  x.onclick = (e) => { e.stopPropagation(); hideMentionSuggest(); };
+  el.appendChild(x);
+}
+
+function hideMentionSuggest() {
+  clearTimeout(mentionSuggestTimer);
+  mentionSuggestTimer = null;
+  mentionSuggestSeq++;
+  const el = $("mentionSuggest");
+  if (el && !el.classList.contains("hidden")) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+  }
 }
 
 /* ============ 添加成员 ============ */
@@ -7072,6 +7163,7 @@ async function sendMessage() {
     clearReplyTo(); // 引用一次性消费：发送后清除引用条
     pendingAttachments = [];
     renderAttachList();
+    hideMentionSuggest(); // 发送后草稿清空，建议条一并收起
     // @ 选择保留（按知聚记忆）：连续对话无需每次重新 @；点输入框上方的 chips ✕ 可随时取消
     renderMentionChips();
     renderMembers();
@@ -8149,8 +8241,10 @@ function init() {
   // 浮层内按下鼠标不转移焦点（否则 textarea blur 会把浮层清掉，导致点击失效）
   $("mentionPicker").addEventListener("mousedown", (e) => e.preventDefault());
   msgInput.addEventListener("compositionstart", () => { composing = true; });
-  msgInput.addEventListener("compositionend", () => { composing = false; updateMentionPicker(); });
-  msgInput.addEventListener("input", (e) => { if (!composing && !e.isComposing) updateMentionPicker(); });
+  msgInput.addEventListener("compositionend", () => { composing = false; updateMentionPicker(); scheduleMentionSuggest(); });
+  msgInput.addEventListener("input", (e) => {
+    if (!composing && !e.isComposing) { updateMentionPicker(); scheduleMentionSuggest(); }
+  });
   // 点击输入框外部 = 取消：移除 @ 及后续输入（延迟等点击浮层项先于 blur 回调执行；浮层内 mousedown 已阻止 blur）
   msgInput.addEventListener("blur", () => setTimeout(cancelMentionPicker, 150));
   // 光标在输入框内移动（不触发 input）时同步浮层与快照位置

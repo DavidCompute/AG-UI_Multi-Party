@@ -885,6 +885,8 @@ window.I18N_DICTS.en = {
   "fb.tag.tooshort": "Too brief",
   "fb.tag.source": "Missing evidence/sources",
   "fb.tag.other": "Other issue",
+  "ms.hint": "Maybe mention:",
+  "ms.dismiss": "Dismiss for this draft",
   "msg.recallFail": "Recall failed: {err}",
   "msg.recalled": "Recalled",
   "msg.recalledNotice": "A message was recalled",
