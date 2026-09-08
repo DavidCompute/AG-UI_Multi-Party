@@ -1,0 +1,90 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!--
+    AG-UI 本机桥（NativeBridge）—— WiX v4 MSI 主配置
+    构建：tools/publish-nativebridge-msi.ps1（自包含 publish 后自动收集文件清单到 files.wxs）
+    依赖：dotnet tool install -g wix（版本 4.x）
+    形态：perUser 安装（无需管理员）；免装 .NET 运行时（win-x64 自包含）；
+         安装时注册 HKCU 开机自启（指向 run-hidden.vbs 隐藏启动本机桥）。
+         连接模型为“登录即连 / 登出即断”：桥以待配置模式启动（仅监听 127.0.0.1:17321），
+         用户登录平台网页后由页面在线下发 {server, setupToken}（见 /ag-ui/bridge/setup）。
+  -->
+
+  <Package Name="AG-UI 本机桥"
+           Manufacturer="AGUI GroupChat"
+           Version="$(var.Version)"
+           UpgradeCode="7c1d9f4e-2a83-4b56-9d0f-8e5a6b3c1d24"
+           Scope="perUser">
+
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 AG-UI 本机桥，请先卸载旧版本。" />
+
+    <!-- 控制面板「添加 / 删除程序」图标 -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <!-- 全部内容打进单个 MSI（EmbedCab） -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- 安装目录：%LocalAppData%\AguiGroupChat\NativeBridge（perUser：无需管理员、目录可写） -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="AguiGroupChat">
+        <Directory Id="BRIDGEDIR" Name="NativeBridge" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- 开始菜单目录（卸载时移除空目录） -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="AG-UI 本机桥" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="AG-UI 本机桥" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="AutostartAndShortcuts" />
+      <ComponentRef Id="ConfigTemplate" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Component Id="AutostartAndShortcuts" Directory="BRIDGEDIR" Guid="9d2e8c1a-4f6b-4a7d-9c3e-2b8f5a6d7e14">
+      <!-- 开机自启（当前用户）：HKCU Run → wscript 隐藏启动 run-hidden.vbs -->
+      <RegistryValue Root="HKCU"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="AguiGroupChatNativeBridge"
+                     Type="string"
+                     Value="wscript.exe &quot;[BRIDGEDIR]run-hidden.vbs&quot;"
+                     KeyPath="yes" />
+      <!-- 开始菜单快捷方式：前台启动（可看日志/排障） -->
+      <Shortcut Id="StartMenuShortcut"
+                Directory="ProgramMenuDir"
+                Name="AG-UI 本机桥"
+                Icon="AppIcon"
+                Target="[#StartBridgeBat]"
+                WorkingDirectory="BRIDGEDIR" />
+      <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
+    </Component>
+
+    <!-- bridge-config.txt / bridge.key 由“网页在线配置”在运行期写入：卸载时一并清除（含敏感令牌） -->
+    <Component Id="ConfigTemplate" Directory="BRIDGEDIR" Guid="6b5e9f2a-3c81-4d9a-b7f4-1e2c8d0a5b63">
+      <File Id="StartBridgeBat" KeyPath="yes" Source="$(var.PublishDir)\start-nativebridge.bat" />
+      <RemoveFile Id="RmvBridgeCfg" Name="bridge-config.txt" On="uninstall" />
+      <RemoveFile Id="RmvBridgeKey" Name="bridge.key" On="uninstall" />
+    </Component>
+
+    <!-- 品牌图标：MSI 产品 / 快捷方式图标 -->
+    <Icon Id="AppIcon" SourceFile="$(var.AppIcon)" />
+
+    <!-- 安装 / 升级：先结束可能在运行的旧桥（防文件占用），装完后隐藏启动新桥（登录网页后即被在线配置）；
+         卸载（或升级移除旧版）时同样先结束进程再删文件。均为 immediate + 用户身份、失败不中断。
+         注：必须与上述组件同处一个被 Feature 引用的 Fragment，否则孤立 Fragment 会被链接器丢弃。 -->
+    <CustomAction Id="StopBridgeBeforeInstall" Directory="BRIDGEDIR"
+                  ExeCommand="taskkill.exe /IM AguiGroupChat.NativeBridge.exe /F"
+                  Execute="immediate" Impersonate="yes" Return="ignore" />
+    <CustomAction Id="LaunchBridgeAfterInstall" Directory="BRIDGEDIR"
+                  ExeCommand="wscript.exe run-hidden.vbs"
+                  Execute="immediate" Impersonate="yes" Return="asyncNoWait" />
+    <InstallExecuteSequence>
+      <Custom Action="StopBridgeBeforeInstall" Before="InstallFiles" />
+      <Custom Action="LaunchBridgeAfterInstall" After="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

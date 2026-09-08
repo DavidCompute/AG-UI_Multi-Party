@@ -925,6 +925,19 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .avatar-edit-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avatar-edit-actions { display: flex; flex-direction: column; gap: 8px; }
 
+/* ================= 修改资料弹窗 ================= */
+.profile-modal {
+  width: 560px; max-width: 94vw;
+  display: flex; flex-direction: column; overflow: hidden;
+  max-height: calc(100vh - 48px);
+}
+.profile-modal .modal-title { flex: none; }
+.profile-modal .modal-actions { flex: none; }
+.profile-modal .profile-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 4px; /* 滚动条与内容间距，避免遮挡 label */
+}
+
 /* ================= 智能体管理弹窗 ================= */
 .agent-modal {
   width: 960px; max-width: 94vw;

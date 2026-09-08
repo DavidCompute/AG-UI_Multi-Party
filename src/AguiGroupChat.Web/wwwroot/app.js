@@ -348,8 +348,9 @@ function enterApp(data) {
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
-  // 打开/登录时自动发现本机回环桥的客户端标识（非用户设置，随消息请求携带，供按客户端路由）
-  autoDiscoverClient();
+  // 打开/登录时自动发现本机回环桥（记录客户端标识供按客户端路由）并“登录即连”：
+  // 桥未配置本平台 / 仍连着别处时自动断开并下发本平台配置（成功才提示一次）
+  autoDiscoverClient(true);
 }
 
 function resetChatState() {
@@ -388,8 +389,19 @@ function resetChatState() {
   renderAttachList();
 }
 
+let logoutInProgress = false; // 重入保护：服务端登出会踢 WS，WS 关闭又触发一次 logout → 只执行一次
 async function logout() {
+  if (logoutInProgress) return;
+  logoutInProgress = true;
   if (state.token) {
+    // 登出即断：先吊销本人在此平台领取的全部 setup 令牌（此时令牌仍有效，须先于 /user/logout 执行），
+    // 再让同机本机桥断开并清除本机配置；最后才登出（会吊销会话令牌）。
+    try {
+      await fetch("/ag-ui/native-bridge/download/setup-token/revoke", { method: "POST", headers: { Authorization: `Bearer ${state.token}` } });
+    } catch { /* 吊销失败不阻塞登出 */ }
+    try {
+      await postBridgeLocal("teardown");
+    } catch { /* 本机桥不可达则跳过 */ }
     try {
       await fetch("/ag-ui/user/logout", { method: "POST", headers: { Authorization: `Bearer ${state.token}` } });
     } catch { /* 登出失败不阻塞本地清理 */ }
@@ -411,6 +423,7 @@ async function logout() {
   state.visibility = "all";
   state.mentionAll = false;
   state.mentions = new Set();
+  logoutInProgress = false;
   showAuth();
 }
 
@@ -2540,56 +2553,32 @@ function openProfileModal() {
   if (state.token) {
     loadTwinStatus();
     loadBridgePackage();
+    autoDiscoverClient(); // 打开资料时顺带刷新本机桥状态 / 尝试连上本平台（登录时已自动执行）
+    renderBridgeLocalState();
   }
 }
 
 /* ============ 本机桥 Windows 安装包（下载 / 管理员上传） ============ */
 
-/** 最近一次拉取的管理员连接参数（供复制按钮使用，避免从 textarea 里二次截取）。 */
-let bridgeConnData = null;
-
-/** 下载文件路径：管理员填了 SERVER 覆盖则带 ?server=（下载包内置该地址 + 令牌）。 */
+/** 下载路径：通用 MSI 安装包（静态文件，不带 ?server= 注入；连接由登录后在线下发配置完成）。 */
 function bridgeDownloadPath() {
-  const srv = ($("bridgeServerInput") ? $("bridgeServerInput").value : "").trim();
-  return srv
-    ? "/ag-ui/native-bridge/download/file?server=" + encodeURIComponent(srv)
-    : "/ag-ui/native-bridge/download/file";
+  return "/ag-ui/native-bridge/download/file";
 }
 
-/** 刷新下载链接（追加会话令牌）；包内 SERVER 由后端按当前请求 / ?server= 注入。 */
+/** 刷新下载链接（追加会话令牌，供 <a> 直链鉴权）。 */
 function refreshBridgeDownloadHref() {
   const dl = $("bridgePkgDownload");
   if (!dl || dl.style.display === "none") return;
   dl.href = authedAssetUrl(bridgeDownloadPath());
 }
 
-/** （管理员）拉取连接参数：平台地址 + 令牌 + 现成命令 / 配置。 */
-async function loadBridgeConnection() {
-  try {
-    const srv = ($("bridgeServerInput") ? $("bridgeServerInput").value : "").trim();
-    const url = "/ag-ui/native-bridge/download/connection" + (srv ? "?server=" + encodeURIComponent(srv) : "");
-    const c = await fetch(url, { headers: { Authorization: `Bearer ${state.token}` } });
-    const cd = await c.json().catch(() => null);
-    if (c.ok && cd) {
-      bridgeConnData = cd;
-      $("bridgeConnText").value =
-        "# command\n" + (cd.command || "") +
-        "\n\n# bridge-config.txt\n" + (cd.configHint || "");
-    } else {
-      bridgeConnData = null;
-      $("bridgeConnText").value = "";
-    }
-  } catch { bridgeConnData = null; $("bridgeConnText").value = ""; }
-}
-
-/** 读取安装包信息 +（管理员）连接参数，刷新资料弹窗的本机桥区块。 */
+/** 读取安装包信息，刷新资料弹窗的本机桥区块。 */
 async function loadBridgePackage() {
   const dl = $("bridgePkgDownload");
   const meta = $("bridgePkgMeta");
   const empty = $("bridgePkgEmpty");
   const adminBox = $("bridgeAdminBox");
   if (!state.token) return;
-  bridgeConnData = null;
   try {
     const res = await fetch("/ag-ui/native-bridge/download/info", {
       headers: { Authorization: `Bearer ${state.token}` },
@@ -2610,10 +2599,9 @@ async function loadBridgePackage() {
   } catch {
     dl.style.display = "none"; meta.textContent = ""; empty.textContent = t("profile.bridgePkgEmpty");
   }
-  // 管理员：显示上传 + 连接参数（含令牌）；普通用户只显示下载（包内 SERVER 自动为当前地址、令牌为空）
+  // 管理员：显示上传与已签发连接令牌管理；普通用户只显示下载（通用 MSI，连接由登录后在线下发）
   adminBox.style.display = state.isAdmin ? "" : "none";
   if (state.isAdmin) {
-    await loadBridgeConnection();
     await loadBridgeIssued();
   }
 }
@@ -2695,14 +2683,6 @@ async function uploadBridgePackage() {
     btn.disabled = false;
     btn.textContent = t("profile.bridgeUploadBtn");
   }
-}
-
-/** 复制管理员连接参数：copyType = command | config。 */
-async function copyBridgeConnection(copyType) {
-  if (!bridgeConnData) { toast(t("profile.bridgeCopyFail")); return; }
-  const text = copyType === "config" ? (bridgeConnData.configHint || "") : (bridgeConnData.command || "");
-  const ok = await copyText(text);
-  toast(ok ? t("profile.bridgeCopied") : t("profile.bridgeCopyFail"));
 }
 
 /* ============ AI 分身 ============ */
@@ -2847,7 +2827,14 @@ async function submitProfile() {
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
-/* 读取同机回环桥信息（原始 fetch，无鉴权头避免 CORS 预检 / 不泄露会话令牌）。返回 { client, agentScope } 或 null。 */
+/* ============ 本机桥：同机回环发现 + 登录即连 / 登出即断 ============ */
+
+/** 最近一次成功访问到的本机桥回环地址（http(s)://127.0.0.1:port）。 */
+let bridgeLocalBase = null;
+/** 最近一次读到的本机桥状态快照（client/agentScope/configured/connected/server）。 */
+let bridgeLocalState = null;
+
+/* 读取同机回环桥信息（原始 fetch：不携带站点令牌，避免 CORS 预检 / 泄露会话令牌到本机）。成功返回完整字段，失败/无桥返回 null。 */
 async function readLoopbackBridgeInfo() {
   // 默认桥用 HTTP 回环（快、无证书问题）；若桥以 --local-https 起则 HTTPS 也能被发现。
   const tries = [["http", "17321"], ["https", "17321"]];
@@ -2856,23 +2843,127 @@ async function readLoopbackBridgeInfo() {
       const res = await _aguiFetch(`${scheme}://127.0.0.1:${port}/ag-ui/bridge/info`, { method: "GET", cache: "no-store" });
       if (!res.ok) continue;
       const d = await res.json().catch(() => null);
-      if (d && (d.client || d.agentScope)) return { client: d.client || "", agentScope: d.agentScope || "" };
+      if (d && (d.client || d.agentScope)) {
+        return {
+          base: `${scheme}://127.0.0.1:${port}`,
+          client: d.client || "",
+          agentScope: d.agentScope || "",
+          configured: d.configured,   // 旧版桥可能没有这些字段 → undefined（视作“已在运行，不打扰”）
+          connected: d.connected,
+          server: d.server || "",
+        };
+      }
     } catch { /* 不可达则试下一个 */ }
   }
   return null;
 }
 
-/* 💻 手动自动发现：读回环桥信息并填入「本机执行客户端」（仍需点保存）。 */
-/* （用户资料界面已移除该字段；自动发现改为打开/登录时自动执行，见 autoDiscoverClient。） */
+/** 同平台比较（忽略结尾斜杠 / host 大小写）：桥保存的 server 与当前页面地址是否同一平台。 */
+function isSamePlatform(a, b) {
+  if (!a || !b) return false;
+  try {
+    const ua = new URL(a), ub = new URL(b);
+    return ua.protocol === ub.protocol && ua.host === ub.host;
+  } catch { return a.replace(/\/+$/, "") === b.replace(/\/+$/, ""); }
+}
 
-/* 打开/登录时自动发现本机回环桥，把其客户端/机器标识存到内存 state.bridgeClient，随消息请求携带（非用户设置项，不落用户资料）。 */
-async function autoDiscoverClient() {
-  if (!state) return;
+/** 向本机桥回环发 POST（setup / teardown）；找不到可用的桥返回 null。 */
+async function postBridgeLocal(action, body) {
+  const tries = [];
+  if (bridgeLocalBase) tries.push(bridgeLocalBase);
+  for (const tt of [["http", "17321"], ["https", "17321"]]) tries.push(`${tt[0]}://127.0.0.1:${tt[1]}`);
+  const seen = new Set();
+  for (const base of tries) {
+    if (seen.has(base)) continue;
+    seen.add(base);
+    try {
+      const res = await _aguiFetch(`${base}/ag-ui/bridge/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agui-Bridge": "1" },
+        body: body ? JSON.stringify(body) : "{}",
+        cache: "no-store",
+      });
+      if (!res.ok) continue;
+      const d = await res.json().catch(() => null);
+      if (d) return d;
+    } catch { /* 不可达则试下一个 */ }
+  }
+  return null;
+}
+
+/* 打开/登录/发送本机技能时调用：发现同机回环桥并把其 client 记到 state.bridgeClient；
+   若桥尚未配置本平台、或仍连在别处 → 先断开旧配置，再领取一枚 setup 令牌在线下发，让桥连入“当前登录的服务器”。
+   返回 { ok, switched } 或 null（无桥/未登录）。showToast 为真时仅在实际重新配置成功后提示一次。 */
+async function autoDiscoverClient(showToast) {
+  if (!state || !state.token) return null;
   const info = await readLoopbackBridgeInfo();
-  if (!info || !info.client) { state.bridgeClient = null; return; } // 非同机/无桥：保持空，回落到 agent/平台作用域
+  if (!info || !info.client) {
+    state.bridgeClient = null; bridgeLocalBase = null; bridgeLocalState = null;
+    renderBridgeLocalState();
+    return null; // 非同机/无桥：保持空，回落到 agent/平台作用域
+  }
+  bridgeLocalBase = info.base;
   state.bridgeClient = info.client;
-  const scope = info.agentScope === "*" ? t("profile.bridgeDiscoverScopePlatform") : info.agentScope;
-  toast(t("profile.bridgeAutoConfigured", { client: info.client, scope: scope || "" }));
+  bridgeLocalState = info;
+  renderBridgeLocalState();
+
+  // 旧版桥（早于“在线配置”，info 缺 configured/connected）：只记录客户端，不打扰其既有连接
+  if (typeof info.configured !== "boolean" || typeof info.connected !== "boolean")
+    return { ok: true, switched: false, legacy: true };
+
+  const here = window.location.origin;
+  const onHere = isSamePlatform(info.server, here);
+  // 已连上本平台：无需任何动作
+  if (info.connected && onHere) return { ok: true, switched: false };
+
+  // 桥仍配置/连着别的平台 → 先断开并清掉旧配置，避免两台平台“抢桥”；仅配着本平台则不动配置直接换新令牌
+  const moving = !onHere && (info.configured || info.connected);
+  let errText = "";
+  try {
+    if (moving) await postBridgeLocal("teardown");
+    // 领新令牌并下发：幂等——已配本平台但未连上（如令牌曾被吊销/桥刚启动）也借此恢复
+    const res = await fetch("/ag-ui/native-bridge/download/setup-token", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.setupToken) { errText = (d && d.error) || `HTTP ${res.status}`; throw new Error(errText); }
+    const out = await postBridgeLocal("setup", { server: d.server, setupToken: d.setupToken });
+    if (!out || !out.accepted) { errText = t("profile.bridgeSetupRejected"); throw new Error(errText); }
+    bridgeLocalState = { ...bridgeLocalState, configured: true, connected: false, server: d.server };
+    setTimeout(renderBridgeLocalState, 1200); // 桥连接为异步：稍后刷新状态文本
+    if (showToast) toast(t("profile.bridgeConnectedToast", { client: info.client }));
+    return { ok: true, switched: true };
+  } catch (ex) {
+    const msg = (ex && ex.message) || errText || "";
+    console.warn("本机桥在线配置失败：", msg);
+    if (showToast) toast(t("profile.bridgeSetupFail", { err: msg || "?" }));
+    return { ok: false, error: msg };
+  }
+}
+
+/** 资料弹窗“本机桥连接状态”行渲染：无桥 / 待配置 / 连接中 / 已连接（或连着别的平台）。 */
+function renderBridgeLocalState() {
+  const el = $("bridgeLocalState");
+  const retry = $("bridgeLocalRetry");
+  if (!el) return;
+  if (!state.token) { el.textContent = ""; if (retry) retry.style.display = "none"; return; }
+  const info = bridgeLocalState;
+  if (retry) retry.style.display = "";
+  if (!info) {
+    el.textContent = t("profile.bridgeStatusNone");
+    return;
+  }
+  const here = window.location.origin;
+  if (info.connected) {
+    el.textContent = isSamePlatform(info.server, here)
+      ? t("profile.bridgeStatusConnected", { client: info.client })
+      : t("profile.bridgeStatusOther", { server: info.server || "", client: info.client });
+  } else if (info.configured) {
+    el.textContent = t("profile.bridgeStatusConnecting");
+  } else {
+    el.textContent = t("profile.bridgeStatusPending");
+  }
 }
 
 /* ============ 创建知聚 / 添加成员：成员选择弹窗（头像 + 搜索） ============ */
@@ -7650,14 +7741,9 @@ function init() {
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;
   $("pfTwinTrigger").addEventListener("change", updateTwinTrigger);
-  // 本机桥安装包：下载 / 管理员上传 / 复制连接参数
+  // 本机桥安装包：下载 / 管理员上传 / 已签发令牌吊销 + 本机桥重连
   $("bridgePkgUploadBtn").onclick = uploadBridgePackage;
-  $("bridgeConnCopy").onclick = () => copyBridgeConnection("command");
-  $("bridgeConnConfigCopy").onclick = () => copyBridgeConnection("config");
-  $("bridgeServerInput").addEventListener("input", () => {
-    refreshBridgeDownloadHref();
-    if (state.isAdmin) loadBridgeConnection(); // 连接参数文本同步用填写的服务器地址
-  });
+  $("bridgeLocalRetry").onclick = () => autoDiscoverClient(true);
   // 资料 / 数字员工头像选择控件
   pfAvatarPicker = bindAvatarPicker("pfAvatarPreview", "pfAvatarFile", "pfAvatarUploadBtn", "pfAvatarClearBtn", "🧑", (url) => { profileAvatar = url; });
   afAvatarPicker = bindAvatarPicker("afAvatarPreview", "afAvatarFile", "afAvatarUploadBtn", "afAvatarClearBtn", "🤖", (url) => { agentAvatar = url; });

@@ -232,22 +232,21 @@ topbar（品牌 + 顶栏操作）
 - 昵称、头像（上传/清除，预览即时，`bindAvatarPicker`）、个人记忆开关（🧠）、AI 分身状态管理
   （启用/触发方式/停用/同步公开群）。
 - 头像更换会同步到各群成员资料与实时事件。
-- 本机桥（#bridgeAdminBox 内的下载/上传区，所有登录用户可见）：“本机(client)”技能需在发起
-  请求的电脑运行本机桥。弹窗显示当前平台地址指引 + Windows 安装包下载按钮
-  （`#bridgePkgDownload`，直链 `/ag-ui/native-bridge/download/file`，支持 `?server=` 覆盖包内地址）；
-  管理员额外可见“上传/更新安装包（.zip）”（`#bridgePkgFile` + `#bridgePkgUploadBtn` →
-  `POST /ag-ui/native-bridge/download/upload`，仅管理员）、下载 SERVER 覆盖输入
-  （`#bridgeServerInput`，本机/内网访问时填对外地址再分发）、连接参数
-  （`#bridgeConnText` 展示 `/ag-ui/native-bridge/download/connection` 返回的
-  启动命令与 bridge-config 内容，`#bridgeConnCopy`/`#bridgeConnConfigCopy` 复制）。
-  下载为动态重打包：zip 内 bridge-config.txt 自动注入当前平台地址（SERVER）；管理员下载的包
-  将一枚<b>新签发的绑定型令牌</b>以 AES-256-GCM 加密写入（`TOKEN=enc:v1:…` + 同目录 `bridge.key`），
-  桥 `--config` 启动自动解密；该令牌在桥<b>首次连接时绑定 client 机器标识</b>，包被复制到其它
-  机器连接会被拒（`NativeTunnelApi` 鉴权经 `NativeBridgeIssuedTokenStore`）。同一弹窗提供
-  已签发令牌列表与吊销（`GET/POST /ag-ui/native-bridge/download/tokens[/revoke]`）。包内含
-  开机自启脚本 `install-autostart.bat`（复制到 `%LOCALAPPDATA%\AguiGroupChat\NativeBridge`、
-  注册 HKCU Run、以隐藏窗口启动）与 `uninstall-autostart.bat`。安全：普通用户下载的包令牌为空
-  （需向管理员索取填写）；连接令牌仅管理员经 connection 端点可见/注入。
+- 本机桥（#bridgeAdminBox 内的下载/状态区，所有登录用户可见）：“本机(client)”技能需在发起
+  请求的电脑运行本机桥。弹窗顶部为<b>本机桥连接状态行</b>（`#bridgeLocalState`：未检测到 /
+  待配置 / 连接中 / 已连接本平台（含 client）/ 仍连着另一平台），旁有“🔄 重新检测并连接”
+  （`#bridgeLocalRetry`）与 Windows 安装包（.msi）下载按钮 `#bridgePkgDownload`（直链
+  `/ag-ui/native-bridge/download/file`）；管理员额外可见“上传/更新安装包（.msi）”（`#bridgePkgFile`
+  + `#bridgePkgUploadBtn` → `POST /ag-ui/native-bridge/download/upload`，仅管理员）与已签发连接令牌
+  管理（`#bridgeIssuedList`，`GET/POST /ag-ui/native-bridge/download/tokens[/revoke]`，仅管理员）。
+- <b>连接模型（登录即连、登出即断）</b>：MSI 为通用安装包（免装 .NET 运行时；安装即注册 HKCU 开机
+  自启，桥以待配置模式启动，回环监听 127.0.0.1:17321）。用户登录/打开资料页时，前端自动发现同机
+  桥：若桥未配置本平台或仍连在别的平台，先经 `POST /ag-ui/bridge/teardown` 断开清旧配置，再领取
+  一枚 setup 令牌（`POST /ag-ui/native-bridge/download/setup-token`，note=`setup:{userId}`，每次领取
+  吊销旧令牌、绑定型、可吊销）并 `POST /ag-ui/bridge/setup {server, setupToken}` 下发本平台地址，
+  桥连入；登出时 `POST /ag-ui/native-bridge/download/setup-token/revoke` 吊销该用户全部 setup 令牌，
+  并 `POST /ag-ui/bridge/teardown` 让桥断开、清除本机配置。连接只在首次连入时经
+  `NativeTunnelApi` 鉴权绑定 client 机器标识，不涉及全站明文隧道令牌（网页/剪贴板/安装包内均不出现）。
 
 ### 7.2 修改密码（#pwModal）
 
@@ -324,7 +323,7 @@ apiKey 不回显，仅提示“已配置”。
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
-| 本机桥安装包 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload|connection`（仅管理员） |
+| 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |
 | 系统 | `/ag-ui/export|import|import/preview|reset` |
 
 完整契约以协议标准与 README 为准；界面只消费上述接口，语义（可见性/触发/权限）始终由服务端强校验。

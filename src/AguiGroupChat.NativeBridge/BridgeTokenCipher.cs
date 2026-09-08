@@ -16,6 +16,14 @@ public static class BridgeTokenCipher
 {
     private const string Prefix = "enc:v1:";
 
+    /// <summary>本地随机密钥加密（供网页在线 setup 落盘、安装包生成通用）：返回 enc:v1: 密文与 base64 密钥。</summary>
+    public static string EncryptToken(string token, out string keyBase64)
+    {
+        var key = RandomNumberGenerator.GetBytes(32);
+        keyBase64 = Convert.ToBase64String(key);
+        return Prefix + Convert.ToBase64String(Seal(key, token));
+    }
+
     /// <summary>解密 enc:v1: 密文。密钥优先取显式 base64 key，其次读 <paramref name="keyFile"/>（取首行 base64）。</summary>
     public static string? TryDecrypt(string value, string? keyBase64, string? keyFile, out string? error)
     {

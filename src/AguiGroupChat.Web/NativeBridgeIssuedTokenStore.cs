@@ -66,6 +66,19 @@ public sealed class NativeBridgeIssuedTokenStore
         }
     }
 
+    /// <summary>吊销某登录用户签发的全部令牌（登出时调用：该用户领到的 setup 令牌随之失效）。</summary>
+    public int RevokeAllForNote(string note)
+    {
+        if (string.IsNullOrWhiteSpace(note)) return 0;
+        lock (_lock)
+        {
+            var doomed = _byHash.Values.Where(e => string.Equals(e.Note, note, StringComparison.Ordinal)).Select(e => e.Hash).ToList();
+            foreach (var h in doomed) _byHash.Remove(h);
+            if (doomed.Count > 0) SaveLocked();
+            return doomed.Count;
+        }
+    }
+
     /// <summary>当前全部条目（按签发时间倒序），供管理员查看 / 吊销。</summary>
     public IReadOnlyList<Entry> List() => _byHash.Values.OrderByDescending(e => e.CreatedAtMs).ToList();
 
