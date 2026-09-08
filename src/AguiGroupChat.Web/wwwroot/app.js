@@ -508,9 +508,50 @@ async function openMemoryModal() {
   $("memKeyword").value = "";
   $("memForgetPanel").classList.add("hidden");
   $("memForgetHint").classList.toggle("hidden", !!state.isAdmin); // 非管理员提示遗忘仅作用于自己的记忆
+  $("memConsolidateBtn").disabled = false;
+  $("memConsolidateBtn").textContent = t("memory.consolidate");
   $("memoryModal").classList.remove("hidden");
   await loadMemoryGroups();
+  await loadMemoryKbs();
   await loadMemoryList(0);
+}
+
+/** 加载「当前用户可写」的知识库（系统级或本人创建 / 管理员）到沉淀目标下拉框。 */
+async function loadMemoryKbs() {
+  const sel = $("memKbSelect");
+  if (!sel) return;
+  try {
+    const res = await fetch("/ag-ui/kb", { headers: { Authorization: "Bearer " + (state.token || "") } });
+    const list = res.ok ? ((await res.json()) || []) : [];
+    const writable = list.filter((kb) => !kb.ownerId || kb.ownerId === state.memberId || state.isAdmin);
+    sel.innerHTML = `<option value="">${escapeHtml(t("memory.kbPh"))}</option>`
+      + (writable.length
+          ? writable.map((kb) => `<option value="${escapeHtml(kb.kbId)}">${escapeHtml(kb.name || kb.kbId)}${kb.ownerId ? "" : "（系统级）"}</option>`).join("")
+          : `<option value="" disabled>${escapeHtml(t("memory.kbEmpty"))}</option>`);
+  } catch { sel.innerHTML = `<option value="">${escapeHtml(t("memory.kbEmpty"))}</option>`; }
+}
+
+/** 一键沉淀：把所选知聚的「关键」级记忆自动聚合为知识库文档（POST /ag-ui/memory/consolidate）。 */
+async function consolidateGroupMemory() {
+  const groupId = $("memGroupSelect").value;
+  const kbId = $("memKbSelect").value;
+  if (!groupId) { toast(t("memory.kbNeedGroup")); return; }
+  if (!kbId) { toast(t("memory.kbNeedTarget")); return; }
+  const btn = $("memConsolidateBtn");
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = t("memory.consolidating");
+  try {
+    const res = await fetch("/ag-ui/memory/consolidate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + (state.token || "") },
+      body: JSON.stringify({ groupId, kbId }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("memory.consolidateFail", { err: res.status }))); return; }
+    toast(t("memory.consolidatedOk", { n: data?.memoryCount ?? 0, doc: data?.fileName || "" }));
+    loadMemoryGroups(); // 刷新各知聚记忆统计（沉淀后无结构性变化，主要保持一致性）
+  } catch (ex) { toast(t("memory.consolidateFail", { err: ex.message })); }
+  finally { btn.disabled = false; btn.textContent = orig; }
 }
 
 /* ============ 白标 / 品牌化（6.4）弹窗：应用名 / Logo / 主色 / 强制深色 ============ */
@@ -7986,6 +8027,7 @@ function init() {
   $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") loadMemoryList(0); });
   $("memGroupSelect").addEventListener("change", () => loadMemoryList(0));
   $("memForgetBtn").onclick = () => $("memForgetPanel").classList.toggle("hidden");
+  $("memConsolidateBtn").onclick = consolidateGroupMemory;
   $("memForgetCancel").onclick = () => $("memForgetPanel").classList.add("hidden");
   $("memForgetConfirm").onclick = async () => {
     const groupId = $("memGroupSelect").value;

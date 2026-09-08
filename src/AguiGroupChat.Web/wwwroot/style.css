@@ -454,6 +454,15 @@ select {
 /* ================= 记忆管理弹窗 ================= */
 .modal.memory-modal { width: 1500px; max-width: 96vw; }
 .memory-toolbar { display: flex; gap: 8px; margin: 4px 0 8px; flex-wrap: wrap; }
+/* 记忆 → 知识库沉淀行（选择目标库 + 一键聚合关键级记忆） */
+.memory-consolidate-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px;
+  border: 1px dashed rgba(79,140,255,.4); border-radius: 8px; padding: 6px 10px;
+  background: rgba(79,140,255,.05);
+}
+.mem-cons-label { font-size: 12px; color: var(--accent-text); font-weight: 600; white-space: nowrap; }
+.mem-cons-hint { font-size: 11px; color: var(--muted); }
+.memory-consolidate-row .chip-btn { white-space: nowrap; flex-shrink: 0; }
 .memory-forget-panel {
   display: flex; gap: 8px; align-items: center; margin: 0 0 10px;
   border: 1px solid rgba(240,166,58,.4); border-radius: 8px; padding: 8px 10px;
