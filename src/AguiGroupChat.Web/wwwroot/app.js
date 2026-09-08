@@ -1661,6 +1661,16 @@ function serializeAgent(a) {
     assignmentIds: (a.assignmentIds || []),
     escalationAgentId: a.escalationAgentId || null,
     skillDefIds: (a.skillDefIds || []),
+    // 记忆拟人类型：随导出 / 导入往返（导入者按需保留或自行调整）
+    memoryProfile: a.memoryProfile ? {
+      memoryType: a.memoryProfile.memoryType || null,
+      styleMode: a.memoryProfile.styleMode || null,
+      personaCard: a.memoryProfile.personaCard || null,
+      topK: a.memoryProfile.topK ?? null,
+      personalTopK: a.memoryProfile.personalTopK ?? null,
+      minScore: a.memoryProfile.minScore ?? null,
+      personalMinScore: a.memoryProfile.personalMinScore ?? null,
+    } : null,
   };
 }
 
@@ -1762,6 +1772,8 @@ async function importAgentsFromFile(file) {
       assignmentIds: (a.assignmentIds || []),
       escalationAgentId: a.escalationAgentId || null,
       skillDefIds: (a.skillDefIds || []),
+      // 记忆拟人类型（如需保留原设置则原样携带；未导出则保持默认）
+      memoryProfile: a.memoryProfile || null,
     };
     if (!body.nickname) { failed++; continue; }
     try {
@@ -1855,6 +1867,36 @@ function addAgentSectionState(key, state) {
   try { localStorage.setItem(AF_SECTION_KEY, JSON.stringify(s)); } catch { /* 存储不可用忽略 */ }
 }
 
+/** 记忆拟人类型：选项值与 i18n 说明后缀（动态 key 前缀在字典里以 agent.form.memoryType.desc.* 提供）。 */
+const MEMORY_TYPE_KEYS = ["broad", "deep", "slowToLearn", "cueDependent", "fastForgetting"];
+
+/** 切换预设时刷新下方的一段类型说明（未选 = 留空，跟随平台默认）。 */
+function syncMemoryTypeUi() {
+  const v = $("afMemoryType").value;
+  $("afMemoryTypeDesc").textContent = v ? t("agent.form.memoryType.desc." + v) : "";
+}
+
+/** 从表单读记忆拟人配置：未选类型返回 null（不单独配置，召回沿用平台全局）。 */
+function readMemoryProfileFromForm() {
+  const type = $("afMemoryType").value;
+  if (!type) return null;
+  const num = (el, lo, hi) => {
+    const raw = $(el).value.trim();
+    if (raw === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : null;
+  };
+  return {
+    memoryType: type,
+    styleMode: $("afMemoryStyle").value === "digest" ? "digest" : null,
+    personaCard: $("afMemoryPersona").value.trim() || null,
+    topK: num("afMemTopK", 1, 24),
+    personalTopK: num("afMemPersonalTopK", 1, 16),
+    minScore: num("afMemMinScore", 0.05, 0.92),
+    personalMinScore: num("afMemPersonalMinScore", 0.05, 0.92),
+  };
+}
+
 function openAgentForm(agentId) {
   editingAgentId = agentId || null;
   initCollapsibleSections(false);
@@ -1877,6 +1919,16 @@ function openAgentForm(agentId) {
   $("afBridgeToken").value = "";
   $("afPersonalMemory").checked = !!a?.personalMemoryEnabled;
   $("afIsPrivate").checked = !!a?.isPrivate;
+  // 记忆拟人类型（按类型召回）：回显预设 / 口吻 / 人设 / 微调（未配置 = 跟随平台默认）
+  const memProfile = a?.memoryProfile || null;
+  $("afMemoryType").value = (memProfile && ["broad", "deep", "slowToLearn", "cueDependent", "fastForgetting"].includes(memProfile.memoryType)) ? memProfile.memoryType : "";
+  $("afMemoryStyle").value = memProfile?.styleMode === "digest" ? "digest" : "recall";
+  $("afMemoryPersona").value = memProfile?.personaCard || "";
+  $("afMemTopK").value = memProfile?.topK ?? "";
+  $("afMemPersonalTopK").value = memProfile?.personalTopK ?? "";
+  $("afMemMinScore").value = memProfile?.minScore ?? "";
+  $("afMemPersonalMinScore").value = memProfile?.personalMinScore ?? "";
+  syncMemoryTypeUi();
   // 角色级执行阶段禁用覆盖（勾选 = 本角色禁用该阶段）
   $("afDisableBridge").checked = !!a?.disableBridge;
   $("afDisableRelay").checked = !!a?.disableRelay;
@@ -1948,6 +2000,8 @@ async function saveAgent() {
     disableBridge: $("afDisableBridge").checked,
     disableRelay: $("afDisableRelay").checked,
     disableOrgRoute: $("afDisableOrgRoute").checked,
+    // 记忆拟人类型（按类型召回）：未选类型 = null（不单独配置，沿用平台全局）
+    memoryProfile: readMemoryProfileFromForm(),
   };
   if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）
@@ -8711,6 +8765,8 @@ function init() {
   };
   $("afCancel").onclick = returnFromAgentForm;
   $("afSave").onclick = saveAgent;
+  // 记忆拟人类型：切换预设时刷新下方类型说明
+  $("afMemoryType").onchange = syncMemoryTypeUi;
   // 根据一句话简介生成角色设定（身份定位 / 职责范围 / 回复风格），填充 Instructions
   $("afGenInstructionsBtn").onclick = async () => {
     const desc = $("afDescription").value.trim();

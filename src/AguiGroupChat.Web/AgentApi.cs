@@ -566,6 +566,7 @@ public static class AgentApi
         d.DisableBridge,
         d.DisableRelay,
         d.DisableOrgRoute,
+        d.MemoryProfile,
     });
 
     /// <summary>定时任务 cron 表达式校验：非法返回 400 错误（调度器每分钟空转会刷警告日志）。</summary>

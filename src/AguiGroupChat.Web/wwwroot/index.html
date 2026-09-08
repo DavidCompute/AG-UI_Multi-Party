@@ -317,6 +317,60 @@
             <label for="afIsPrivate" style="margin:0;cursor:pointer" data-i18n="agent.form.isPrivate">🔒 私密数字员工</label>
             <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.isPrivateHint">（默认关闭。开启后仅创建者可将它拉进知聚，其他用户看不到也无法使用）</span>
           </div>
+
+          <!-- 记忆拟人类型（按类型召回）：五档拟人预设 + 口吻模式 + 人设 + 高级微调 -->
+          <div class="form-section" style="border:none;margin:16px 0 6px;padding:0 0 4px"><span data-i18n="agent.form.memoryType.title">🧠 记忆类型（拟人召回）</span></div>
+          <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.memoryType.desc">配置后，该数字员工调取<b>知聚共享历史记忆 / 个人记忆</b>时会按所选类型执行抽取：检索条数、相似度阈值、回忆提示分支与近期窗口都不同，并在引用记忆时带一句与类型相符的口吻说明。记忆本身仍由知聚共享落库，这里只影响<b>“它怎么回忆”</b>。</p>
+
+          <div class="form-group">
+            <label data-i18n="agent.form.memoryType.preset">记忆类型预设</label>
+            <select id="afMemoryType" class="modal-input">
+              <option value="" data-i18n="agent.form.memoryType.none">跟随平台默认（不单独配置）</option>
+              <option value="broad" data-i18n="agent.form.memoryType.broad">广记型（记得多、细节易混）</option>
+              <option value="deep" data-i18n="agent.form.memoryType.deep">深记型（记得少而久、宁缺毋滥）</option>
+              <option value="slowToLearn" data-i18n="agent.form.memoryType.slowToLearn">难录入型（新事难刻入、反复才记住）</option>
+              <option value="cueDependent" data-i18n="agent.form.memoryType.cueDependent">存得住想不起型（见提示才恍然大悟）</option>
+              <option value="fastForgetting" data-i18n="agent.form.memoryType.fastForgetting">快速遗忘型（旧事淡忘、近事清晰）</option>
+            </select>
+            <p id="afMemoryTypeDesc" class="form-hint" style="margin:6px 0 0;min-height:14px"></p>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label data-i18n="agent.form.memoryType.style">口吻模式</label>
+              <select id="afMemoryStyle" class="modal-input">
+                <option value="recall" data-i18n="agent.form.memoryType.style.recall">平实引述（默认）</option>
+                <option value="digest" data-i18n="agent.form.memoryType.style.digest">先概括要点再回应</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:2">
+              <label data-i18n="agent.form.memoryType.persona">人设口吻（可选）</label>
+              <input id="afMemoryPersona" class="modal-input" maxlength="120" data-i18n-placeholder="agent.form.memoryType.personaPh" />
+            </div>
+          </div>
+
+          <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectMemMicro" style="margin-top:8px"><span class="section-chevron">▼</span><span data-i18n="agent.form.memoryType.advanced">高级微调（可选，留空 = 按预设）</span></div>
+          <div class="form-section-body" id="afSectMemMicro">
+            <div class="form-row">
+              <div class="form-group">
+                <label data-i18n="agent.form.memoryType.topK">群记忆 TopK</label>
+                <input id="afMemTopK" type="number" min="1" max="24" step="1" class="modal-input" data-i18n-placeholder="agent.form.memoryType.topKPh" />
+              </div>
+              <div class="form-group">
+                <label data-i18n="agent.form.memoryType.personalTopK">个人记忆 TopK</label>
+                <input id="afMemPersonalTopK" type="number" min="1" max="16" step="1" class="modal-input" data-i18n-placeholder="agent.form.memoryType.topKPh" />
+              </div>
+              <div class="form-group">
+                <label data-i18n="agent.form.memoryType.minScore">群记忆阈值</label>
+                <input id="afMemMinScore" type="number" min="0.05" max="0.92" step="0.01" class="modal-input" data-i18n-placeholder="agent.form.memoryType.minScorePh" />
+              </div>
+              <div class="form-group">
+                <label data-i18n="agent.form.memoryType.personalMinScore">个人记忆阈值</label>
+                <input id="afMemPersonalMinScore" type="number" min="0.05" max="0.92" step="0.01" class="modal-input" data-i18n-placeholder="agent.form.memoryType.minScorePh" />
+              </div>
+            </div>
+            <p class="form-hint" data-i18n="agent.form.memoryType.advancedHint">阈值为相似度下限（0.05~0.92，越大越严格）；TopK 为最多引用的记忆条数。手动填写后优先于预设生效。</p>
+          </div>
           </div>
 
           <div class="form-section" data-collapse-default="closed" data-collapse-key="afSectExecStages" style="margin-top:8px"><span class="section-chevron">▼</span><span data-i18n="agent.form.section.execStages">执行阶段（角色级禁用覆盖）</span></div>
