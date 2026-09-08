@@ -465,8 +465,27 @@ public sealed class KnowledgeBaseCatalog
         }
 
         var name = $"群关键结论-{DateTime.Now:yyyyMMdd-HHmmss}.md";
-        var (doc, error) = await AddTextDocumentAsync(kbId, name, sb.ToString(), ct);
+        var content = await PolishOrRawAsync(sb.ToString(), ct);
+        var (doc, error) = await AddTextDocumentAsync(kbId, name, content, ct);
         return (doc, error, critical.Count, critical[^1].Timestamp);
+    }
+
+    /// <summary>沉淀文档可选「模型润色」：开启且具备模型条件时整理为结构化条目；任何失败回退原文（不阻断沉淀）。</summary>
+    private async Task<string> PolishOrRawAsync(string rawMarkdown, CancellationToken ct)
+    {
+        if (!_options.Memory.PolishConsolidation) return rawMarkdown;
+        try
+        {
+            var polisher = _services.GetService(typeof(ConclusionPolisher)) as ConclusionPolisher;
+            if (polisher is null) return rawMarkdown;
+            var polished = await polisher.PolishAsync(rawMarkdown, ct);
+            return string.IsNullOrWhiteSpace(polished) ? rawMarkdown : polished;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "沉淀文档润色失败（回退原文）");
+            return rawMarkdown;
+        }
     }
 
     // ================= 检索 =================

@@ -212,8 +212,12 @@ public sealed class MemoryOptions
     /// <summary>重要结论自动周期沉淀（1.3）：把各知聚「关键」级记忆定期聚合为知识文档写入该知聚专属知识库。默认开。</summary>
     public bool AutoConsolidateEnabled { get; set; } = true;
 
-    /// <summary>自动周期沉淀间隔（小时，>=1）。默认 12 小时跑一轮。</summary>
+    /// <summary>重要结论自动周期沉淀间隔（小时，>=1）。默认 12 小时跑一轮。</summary>
     public int AutoConsolidateIntervalHours { get; set; } = 12;
+
+    /// <summary>沉淀文档是否用模型润色（把原文拼接整理为结论/决策/待办结构化条目）。
+    /// mock / 未配置 API Key 时自动跳过（保持确定性原文），失败也回退原文。</summary>
+    public bool PolishConsolidation { get; set; } = true;
 
     // ================= 图谱 RAG（Graph Memory） =================
 

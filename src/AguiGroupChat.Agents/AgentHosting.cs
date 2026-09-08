@@ -62,6 +62,8 @@ public static class AgentHosting
         services.AddSingleton<BridgeHealthService>();
         // 轻量运行指标（6.1）：进程内计数器，管理员控制台查看
         services.AddSingleton<MetricsService>();
+        // 沉淀文档润色器（可选：mock / 无 Key 时跳过）
+        services.AddSingleton<ConclusionPolisher>();
         // 智能体 / 技能市场（3.3）：内置角色包一键导入
         services.AddSingleton<MarketplaceService>();
         // 桥接能力协商（3.2）：探测外部端点能力供管理员查看

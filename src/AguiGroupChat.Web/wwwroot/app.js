@@ -5235,6 +5235,7 @@ async function openAdminModal() {
   if (!state.isAdmin) { toast(t("admin.adminOnly")); return; }
   $("adminModal").classList.remove("hidden");
   switchAdminTab("users");
+  startAdminMetricsPoll(); // 运行指标页每 8 秒自动刷新（管理员控制台打开期间）
 }
 
 /** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数。 */
@@ -5267,6 +5268,21 @@ function switchAdminTab(tab) {
   } else {
     loadConfigGovernance();
   }
+}
+
+/** 运行指标页自动轮询（控制台打开期间每 8 秒刷新一次；离开页签仍轮询但仅在指标页签时拉数据）。 */
+let adminMetricsTimer = null;
+function startAdminMetricsPoll() {
+  if (adminMetricsTimer) return;
+  adminMetricsTimer = setInterval(() => {
+    const el = $("adminModal");
+    if (el && !el.classList.contains("hidden") && $("adminTabMetrics")?.classList.contains("on")) {
+      loadAdminMetrics();
+    }
+  }, 8000);
+}
+function stopAdminMetricsPoll() {
+  if (adminMetricsTimer) { clearInterval(adminMetricsTimer); adminMetricsTimer = null; }
 }
 
 /** 运行指标（6.1）：进程内调用 / 桥接 / 记忆命中率 + 分数字员工计数 + 桥接端点健康。 */
@@ -8056,7 +8072,7 @@ function init() {
   };
   // 管理员控制台：用户管理 + 系统状态
   $("meMenuAdmin").onclick = () => { $("meMenu").classList.add("hidden"); openAdminModal(); };
-  $("adminClose").onclick = () => $("adminModal").classList.add("hidden");
+  $("adminClose").onclick = () => { $("adminModal").classList.add("hidden"); stopAdminMetricsPoll(); };
   $("adminUserRows").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-op]");
     if (btn) adminUserAction(btn.dataset.op, btn.dataset.uid, btn.dataset.name);
