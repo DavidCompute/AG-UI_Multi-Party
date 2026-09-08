@@ -30,6 +30,47 @@ public sealed class HybridSearchTests
         Assert.True(two > one);
     }
 
+    // ============ 中文二元组分词（#3 中文场景强化） ============
+
+    [Fact]
+    public void Score_ChineseAdjacentBigram_RequiresCooccurrence()
+    {
+        // 连续成词 → 命中；同一批字被空格/标点拆散 → 不构成相邻二元组，词面不匹配（比逐字 unigram 更精准）
+        var adjacent = Bm25Ranker.Score("网络故障", "网络故障排查步骤说明");
+        var separated = Bm25Ranker.Score("网络故障", "网 络 故 障 排查步骤说明");
+        var punctuation = Bm25Ranker.Score("网络故障", "网、络、故、障，排查中");
+        Assert.True(adjacent > separated, "相邻成词的命中应显著高于同字拆分");
+        Assert.True(separated <= 0.5 + 1e-9, "无词项命中时回落到 Sigmoid 底（0.5）");
+        Assert.True(adjacent > punctuation);
+    }
+
+    [Fact]
+    public void Score_FiltersChineseFunctionBigrams()
+    {
+        // 纯功能词二元组不计入词项（去噪）：查询与正文都一样也不应产生假命中
+        Assert.Equal(0, Bm25Ranker.Score("这个 进行 需要", "这个方案需要进行评审"));
+    }
+
+    [Fact]
+    public void Relatedness_SharedMeaningfulChinese_DetectsAcrossPhrase()
+    {
+        var a = "会议结论：数据库使用 PostgreSQL 并开启缓存";
+        var b = "数据库选型与缓存方案已确定";
+        var rel = Bm25Ranker.Relatedness(a, b);
+        Assert.True(rel > 0, "共享“数据库/缓存”二元组应判为相关");
+        var low = Bm25Ranker.Relatedness(a, "今天食堂的菜很好吃");
+        Assert.Equal(0, low);
+    }
+
+    [Fact]
+    public void Score_AsciiAndDigits_UnchangedWholeWord()
+    {
+        var hit = Bm25Ranker.Score("PostgreSQL 15", "我们把数据库迁到 PostgreSQL 15 版本");
+        var miss = Bm25Ranker.Score("PostgreSQL 15", "MySQL 8 仍在服役");
+        Assert.True(hit > miss, "整词命中的分数应高于无词项命中");
+        Assert.True(miss <= 0.5 + 1e-9, "无词项命中时回落到 Sigmoid 底（0.5）");
+    }
+
     [Fact]
     public void FusedScore_ImportanceBoosts()
     {
