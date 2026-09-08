@@ -126,6 +126,10 @@ public sealed class AgentCatalog
     public Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
         => _skillRunner.Value is { } runner ? runner.InvokeAsync(skill, query, ct) : Task.FromResult("技能执行器不可用。");
 
+    /// <summary>仅编译校验一段 C#（dotnet）技能正文（不运行作者代码）：生成后自测 / 自动修复复测用。空串=编译通过。</summary>
+    public Task<string> CompileDotnetOnlyAsync(string body, CancellationToken ct = default)
+        => Task.FromResult(_skillRunner.Value is { } r ? r.CompileDotnetOnly(body) : ".NET 技能执行器不可用。");
+
     /// <summary>清空并整体恢复智能体定义（启动恢复用）：<b>常驻配置智能体（appsettings Agents:Agents）始终保留</b>，
     /// 持久化快照中的运行时定义按 agentId 覆盖（同 ID 以运行时的为准），不触发脏标记。</summary>
     public void RestoreAll(IEnumerable<AgentDefinition> definitions)

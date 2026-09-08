@@ -26,8 +26,10 @@ builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
 builder.Services.AddSingleton(builder.Configuration.GetSection("ClientTool").Get<AguiGroupChat.Web.ClientToolOptions>() ?? new AguiGroupChat.Web.ClientToolOptions()); // 客户端技能本机桥配置（ClientTool 节：RequireAdmin 等）
 builder.Services.AddSingleton<NativeTunnelService>(); // 内网本机桥反向隧道（HTTP/SSE）路由 + 执行等待
+builder.Services.AddSingleton<NativeBridgeIssuedTokenStore>(); // 安装包绑定型令牌签发器（首次连接绑定 client，防包复制滥用）
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
 builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>())); // 隧道端点限流器
+builder.Services.AddSingleton(builder.Configuration.GetSection("NativeBridgeDownload").Get<NativeBridgeDownloadOptions>() ?? new NativeBridgeDownloadOptions()); // 本机桥 Windows 安装包下载（Dir 等）
 // 数据导出 / 导入 zip 可能包含大量附件：放宽 multipart 请求体限制（默认 30MB 会拒绝大包）；
 // 200MB 为上限——更高的体积更可能用于撑爆内存 / 磁盘，导入侧另有 zip 炸弹防护（条目数 / 解压体积 / 单条目上限）
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 200L * 1024 * 1024);
@@ -99,6 +101,7 @@ app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能�
 app.MapSkillApi(); // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
 app.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（登录用户执行，沙箱 + 超时）
 app.MapNativeTunnelApi(); // 内网本机桥反向隧道入口（HTTP/SSE）：桥连入 + 结果回传
+app.MapNativeBridgeDownloadApi(); // 本机桥 Windows 安装包：登录用户下载 / 管理员上传 / 管理员查看连接参数
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）

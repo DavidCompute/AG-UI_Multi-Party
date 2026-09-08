@@ -37,11 +37,27 @@ public static class NativeTunnelApi
                 await ctx.Response.WriteAsync("请求过于频繁，请稍后再试", ct);
                 return;
             }
-            // 鉴权：逐 agent 专属令牌优先，未配置时用全局令牌；agent 必须配置了有效令牌
-            if (string.IsNullOrWhiteSpace(agent) || !options.HasTokenFor(agent) || !options.IsTokenValid(agent, token))
+            // 鉴权：1) 配置的全局/逐 agent 令牌（options）；2) 网页安装包签发的绑定型令牌
+            //    （NativeBridgeIssuedTokenStore：首次连接绑定 client，之后只认同一 client，防包复制到其它机器）。
+            //    agent 为空 / 令牌不匹配 → 401。
+            var issued = ctx.RequestServices.GetService<NativeBridgeIssuedTokenStore>();
+            var authorized = false;
+            var authError = "";
+            if (issued is not null)
+            {
+                var auth = issued.AuthorizeConnect(token, client);
+                if (auth.IsIssuedToken)
+                {
+                    authorized = auth.Allowed;
+                    authError = auth.Error ?? "";
+                }
+            }
+            if (!authorized && !string.IsNullOrWhiteSpace(agent) && options.HasTokenFor(agent) && options.IsTokenValid(agent, token))
+                authorized = true;
+            if (!authorized)
             {
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await ctx.Response.WriteAsync("未授权：隧道令牌不匹配", ct);
+                await ctx.Response.WriteAsync(authError.Length > 0 ? authError : "未授权：隧道令牌不匹配", ct);
                 return;
             }
 
@@ -116,9 +132,14 @@ public static class NativeTunnelApi
         {
             var service = ctx.RequestServices.GetRequiredService<NativeTunnelService>();
             var options = ctx.RequestServices.GetRequiredService<NativeTunnelOptions>();
-            // 鉴权：结果回传必须带该 agent 的令牌，防伪造结果 / 无 token 刷接口（内网隧道桥用同一令牌 POST）
-            if (string.IsNullOrWhiteSpace(req.TaskId)
-                || !options.HasTokenFor(req.Agent) || !options.IsTokenValid(req.Agent, req.Token))
+            // 鉴权：结果回传必须带有效令牌，防伪造结果 / 无 token 刷接口（内网隧道桥用同一令牌 POST）
+            // 1) 配置令牌（全局/逐 agent）；2) 网页安装包签发的绑定型令牌（NativeBridgeIssuedTokenStore）
+            var issued = ctx.RequestServices.GetService<NativeBridgeIssuedTokenStore>();
+            var configValid = !string.IsNullOrWhiteSpace(req.TaskId)
+                && options.HasTokenFor(req.Agent) && options.IsTokenValid(req.Agent, req.Token);
+            var issuedValid = issued is not null
+                && !string.IsNullOrWhiteSpace(req.TaskId) && issued.IsValidIssuedToken(req.Token);
+            if (!configValid && !issuedValid)
                 return Results.Json(new { error = "未授权：结果回传令牌无效" }, statusCode: StatusCodes.Status401Unauthorized);
             // 限流：单 IP 滑动窗口，防 DDoS
             var ipKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";

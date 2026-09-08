@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.Loader;
+using AguiGroupChat.SkillHosting;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Extensions.Logging;
@@ -16,8 +17,7 @@ namespace AguiGroupChat.Agents.Tools;
 /// 反射找到 <c>Run(string)</c> 入口执行，返回文本；执行强超时 + 截断；结束即卸载脚本程序集。
 ///
 /// 隔离与安全（尽力而为的受限沙箱）：
-///  - 编译期只引用经过白名单的元数据程序集（System.* 里安全常用子集；不接诊断进程 / 注册表 /
-///    COM / 不可信原生互操作等）。引用不到的 API = 编译失败 = 天然 API 白名单。
+///  - 编译期引用运行时共享框架的<b>全部程序集</b>（标准 BCL：System.Security.Cryptography / Registry(Windows) / IO / XML / 网络等开箱即用）。
 ///  - <see cref="OptimizationLevel"/> + AllowUnsafe=false，禁用不安全的指针 / 源生成危险互操作。
 ///  - 运行用新线程强超时、输出截断；结束后卸载 ALC。
 ///  注意：进程内受限执行并非 OS 级沙箱；调用方必须保证只有受信（系统管理员创建、server 执行）的技能进此。
@@ -30,29 +30,51 @@ internal sealed class DotnetSkillHost
 
     private readonly ILogger _logger;
     private readonly string _baseDir;
+    private readonly string _nugetCacheRoot;
+    private readonly Lazy<NuGetSkillReferenceResolver> _nugetRefs;
 
-    public DotnetSkillHost(ILogger logger)
+    public DotnetSkillHost(ILogger logger, string? nugetCacheRoot = null)
     {
         _logger = logger;
         var obj = typeof(object).Assembly.Location;
         _baseDir = Path.GetDirectoryName(obj) ?? AppContext.BaseDirectory;
+        // 缓存尽量落盘到服务端 data 下（由调用方 SkillRunner 传入）；缺省用系统可写目录
+        _nugetCacheRoot = string.IsNullOrWhiteSpace(nugetCacheRoot)
+            ? SkillHostingDefaults.NuGetCacheRoot()
+            : nugetCacheRoot;
+        _nugetRefs = new Lazy<NuGetSkillReferenceResolver>(() => new NuGetSkillReferenceResolver(_nugetCacheRoot));
     }
 
-    /// <summary>把一节 C# 源码当作技能执行，返回结果 / 报错文本。</summary>
+    /// <summary>把一节 C# 源码当作技能执行，返回结果 / 报错文本。
+    /// 支持正文顶部 <c>#r "nuget: 包名, 版本"</c> 声明 NuGet 引用（运行时在宿主下载还原到本地缓存）。</summary>
     public string Run(string source, string input, CancellationToken ct, int timeoutMs = DefaultTimeoutMs)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(source)) return ".NET 技能正文为空：请提供含 public static string Run(string input) 的 C# 源码。";
 
-            var (bytes, errors) = Compile(source);
+            // 1) 解析 #r nuget 指令并剔除出源码；有引用则先还原（首次会联网下载，结果按包/版本缓存复用）
+            var prep = PrepareSource(source, ct);
+            if (prep.Error is not null) return prep.Error;
+
+            var (bytes, errors) = Compile(prep.Cleaned, prep.ExtraRefs);
             if (bytes.Length == 0)
-                return ".NET 技能编译失败：\n" + string.Join("\n", errors.Take(14));
+            {
+                var errMsg = ".NET 技能编译失败：\n" + string.Join("\n", errors.Take(14));
+                return SkillCSharpNormalizer.AppendPlatformHint(errMsg, OperatingSystem.IsWindows());
+            }
 
             var alc = new AssemblyLoadContext("skill_" + Guid.NewGuid().ToString("N"), isCollectible: true);
             Assembly asm;
             try { asm = alc.LoadFromStream(new MemoryStream(bytes)); }
             catch (Exception ex) { TryUnloadLater(alc); return ".NET 技能加载失败：" + ex.Message; }
+
+            // 2) 把已还原的包程序集预载入同一可卸载 ALC，脚本方法引用第三方类型时才能解析（框架程序集已过滤不在此列）
+            foreach (var dll in prep.ExtraPaths)
+            {
+                try { alc.LoadFromAssemblyPath(dll); }
+                catch (Exception ex) { _logger.LogDebug(ex, "预载 NuGet 程序集失败（已忽略）：{Dll}", dll); }
+            }
 
             MethodInfo? run = FindRun(asm);
             if (run is null) { TryUnloadLater(alc); return ".NET 技能缺少入口：请在源码中提供 public static string Run(string)。"; }
@@ -84,14 +106,79 @@ internal sealed class DotnetSkillHost
         }
     }
 
-    private (byte[] Bytes, string[] Errors) Compile(string source)
+    /// <summary>仅编译校验（不运行作者代码）：生成后自检用。返回空串表示编译通过且存在 Run 入口；否则返回报错文本。</summary>
+    public string CompileOnly(string source, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(source)) return ".NET 技能正文为空：请提供含 public static string Run(string input) 的 C# 源码。";
+            var prep = PrepareSource(source, ct);
+            if (prep.Error is not null) return prep.Error;
+
+            var (bytes, errors) = Compile(prep.Cleaned, prep.ExtraRefs);
+            if (bytes.Length == 0)
+            {
+                var errMsg = ".NET 技能编译失败：\n" + string.Join("\n", errors.Take(14));
+                return SkillCSharpNormalizer.AppendPlatformHint(errMsg, OperatingSystem.IsWindows());
+            }
+
+            // 校验入口存在（加载元数据即可，不 Invoke）
+            var alc = new AssemblyLoadContext("skill_chk_" + Guid.NewGuid().ToString("N"), isCollectible: true);
+            try
+            {
+                var asm = alc.LoadFromStream(new MemoryStream(bytes));
+                foreach (var dll in prep.ExtraPaths)
+                {
+                    try { alc.LoadFromAssemblyPath(dll); } catch { /* 仅入口探测 */ }
+                }
+                return FindRun(asm) is null ? ".NET 技能缺少入口：请在源码中提供 public static string Run(string)。" : "";
+            }
+            finally
+            {
+                TryUnloadLater(alc);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, ".NET 技能编译校验失败");
+            return ".NET 技能编译校验失败：" + ex.Message;
+        }
+    }
+
+    /// <summary>共享准备：剔除 #r 指令、还原 NuGet 引用，产出待编译源码与引用（含路径）。Error 非空表示不可继续。</summary>
+    private (string Cleaned, List<MetadataReference> ExtraRefs, List<string> ExtraPaths, string? Error) PrepareSource(string source, CancellationToken ct)
+    {
+        var parsedRefs = SkillNuGetParser.ParseReferences(source);
+        var cleaned = parsedRefs.Count > 0 ? SkillNuGetParser.StripDirectives(source) : source;
+        // 顶层直接写方法的正文（未包 class）自动包成类，消除 CS0106/CS8805 类“需要可执行程序”的误编译
+        cleaned = SkillCSharpNormalizer.NormalizeForLibrary(cleaned);
+        var extraRefs = new List<MetadataReference>();
+        var extraPaths = new List<string>();
+        if (parsedRefs.Count > 0)
+        {
+            var restored = _nugetRefs.Value.ResolveAsync(parsedRefs, ct).GetAwaiter().GetResult();
+            if (restored.Error is not null)
+                return (cleaned, extraRefs, extraPaths,
+                    ".NET 技能 NuGet 引用还原失败：\n" + restored.Error
+                    + (restored.Log.Count > 0 ? "\n" + string.Join("\n", restored.Log.Take(10)) : ""));
+            foreach (var dll in restored.ReferencePaths)
+            {
+                try { extraRefs.Add(MetadataReference.CreateFromFile(dll)); extraPaths.Add(dll); }
+                catch (Exception ex) { _logger.LogWarning(ex, "NuGet 引用加载失败：{Dll}", dll); }
+            }
+        }
+        return (cleaned, extraRefs, extraPaths, null);
+    }
+
+    private (byte[] Bytes, string[] Errors) Compile(string source, IReadOnlyList<MetadataReference> extraRefs)
     {
         var code = Preamble + "\n" + StripUsingsSeparation(source);
         var tree = CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.CSharp12));
         var opt = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
             .WithOptimizationLevel(OptimizationLevel.Release)
             .WithAllowUnsafe(false);
-        var comp = CSharpCompilation.Create("skill_" + Guid.NewGuid().ToString("N"), new[] { tree }, AllowedReferences(), opt);
+        var comp = CSharpCompilation.Create("skill_" + Guid.NewGuid().ToString("N"), new[] { tree },
+            extraRefs.Count > 0 ? AllowedReferences().Concat(extraRefs) : AllowedReferences(), opt);
         using var ms = new MemoryStream();
         var emit = comp.Emit(ms);
         if (!emit.Success) return (Array.Empty<byte>(), emit.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()).ToArray());
@@ -130,14 +217,13 @@ internal sealed class DotnetSkillHost
 
     private IReadOnlyList<MetadataReference> AllowedReferences()
     {
-        var allow = AllowedAssemblyNames;
-        return _refCache.GetOrAdd("default", _ =>
+        return _refCache.GetOrAdd("all", _ =>
         {
             var list = new List<MetadataReference>();
             foreach (var p in Tpa())
             {
-                var n = Path.GetFileNameWithoutExtension(p);
-                if (n is not null && allow.Contains(n)) list.Add(MetadataReference.CreateFromFile(p));
+                if (string.IsNullOrWhiteSpace(Path.GetFileNameWithoutExtension(p))) continue;
+                try { list.Add(MetadataReference.CreateFromFile(p)); } catch { /* 单条失败跳过 */ }
             }
             if (list.Count == 0)
             {
@@ -145,23 +231,13 @@ internal sealed class DotnetSkillHost
                 if (Directory.Exists(_baseDir))
                     foreach (var f in Directory.GetFiles(_baseDir, "*.dll"))
                     {
-                        var n = Path.GetFileNameWithoutExtension(f);
-                        if (n is not null && allow.Contains(n)) list.Add(MetadataReference.CreateFromFile(f));
+                        if (string.IsNullOrWhiteSpace(Path.GetFileNameWithoutExtension(f))) continue;
+                        list.Add(MetadataReference.CreateFromFile(f));
                     }
             }
             return list;
         });
     }
-
-    private static HashSet<string> AllowedAssemblyNames { get; } = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "System.Private.CoreLib", "System.Runtime", "System.Console", "System.Runtime.Extensions",
-        "System.Threading", "System.Threading.Tasks", "System.Linq", "System.Linq.Parallel", "System.Linq.Expressions",
-        "System.Collections", "System.Collections.Concurrent", "System.Collections.NonGeneric",
-        "System.Text.RegularExpressions", "System.Globalization", "System.Memory",
-        "System.Net.Http", "System.Net.Primitives", "System.Net.WebClient",
-        "System.Text.Json", "System.ObjectModel", "netstandard",
-    };
 
     private static IEnumerable<string> Tpa()
     {

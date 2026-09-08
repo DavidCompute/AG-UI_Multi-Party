@@ -444,7 +444,6 @@
             <div class="skill-gen-row">
               <textarea id="sgRequest" class="modal-input agent-instructions" rows="3" style="flex:1;resize:vertical" maxlength="500" data-i18n-placeholder="skill.gen.requestPh"></textarea>
               <button id="sgGenerate" class="send" style="white-space:nowrap" data-i18n="skill.gen.generate">✨ 生成</button>
-              <button id="sgStopGen" class="btn-ghost danger hidden" style="white-space:nowrap" data-i18n="msg.stopGenerating">停止生成</button>
             </div>
             <label class="skill-gen-client"><input id="sgPreferClient" type="checkbox" /> <span data-i18n="skill.gen.preferClient">优先本机执行（查本机/桌面信息）</span></label>
             <p class="form-hint muted" style="padding:2px 0 6px" data-i18n="skill.gen.hint">生成结果会填入下方各字段，可再人工微调后保存。</p>
@@ -512,6 +511,7 @@
       <div class="modal-title">🧪 <span data-i18n="skill.testResultTitle">试运行结果</span></div>
       <pre id="skillRunResultBody" class="skill-test-result" style="white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;margin:4px 0 12px;font-size:12.5px;line-height:1.5"></pre>
       <div class="modal-actions">
+        <button id="skillRunFixApply" class="send hidden" style="margin-right:auto">✅</button>
         <button id="skillRunResultClose" class="send" data-i18n="ui.ok">确定</button>
       </div>
     </div>
@@ -732,6 +732,37 @@
         <button id="pfTwinDisable" class="chip-btn danger" type="button" style="display:none" data-i18n="profile.twinDisable">停用分身</button>
         <button id="pfTwinSync" class="chip-btn" type="button" style="display:none" data-i18n="profile.twinSync">同步到公开知聚</button>
         <span id="pfTwinStatus" class="muted"></span>
+      </div>
+
+      <!-- 本机桥：Windows 安装包下载（所有登录用户可见下载；管理员另有上传/连接参数） -->
+      <div class="form-section" data-i18n="profile.bridgeSection">💻 本机桥（本机技能执行）</div>
+      <div class="form-group">
+        <p class="form-hint" style="margin:0 0 6px" data-i18n="profile.bridgeHint">“本机(client)”技能需要在<b>发起请求的这台电脑</b>上运行本机桥才能执行。下载下方 Windows 安装包（免装 .NET 运行时），解压后双击 install-autostart.bat 即可注册开机自启并运行；包内 bridge-config.txt 会自动填好本平台地址（管理员下载的包内含连接令牌，普通用户请向管理员索取令牌后填入同一文件）。</p>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:26px">
+          <a id="bridgePkgDownload" class="chip-btn" download style="display:none;align-items:center;gap:4px;text-decoration:none" data-i18n="profile.bridgeDownload">⬇ 下载本机桥</a>
+          <span id="bridgePkgMeta" class="muted"></span>
+        </div>
+        <p id="bridgePkgEmpty" class="muted" style="margin:2px 0 0"></p>
+      </div>
+      <!-- 管理员专属：上传安装包 + 连接参数（含令牌）+ 下载 SERVER 覆盖 -->
+      <div id="bridgeAdminBox" class="form-group" style="display:none">
+        <label data-i18n="profile.bridgeAdminUpload">上传 / 更新安装包（.zip）</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="bridgePkgFile" type="file" accept=".zip" style="flex:1;font-size:12px" />
+          <button id="bridgePkgUploadBtn" class="chip-btn" type="button" data-i18n="profile.bridgeUploadBtn">上传</button>
+        </div>
+        <label style="margin-top:10px" data-i18n="profile.bridgeServerLabel">下载包内平台地址（SERVER）</label>
+        <input id="bridgeServerInput" class="modal-input" style="font-size:13px" data-i18n-placeholder="profile.bridgeServerPh" />
+        <p class="form-hint" style="margin:4px 0 0" data-i18n="profile.bridgeServerHint">默认取当前浏览器地址；若要从本机/内网下载后分发给客户机，请改填对外可达地址（含 http:// 与端口），下载的包会内置它。</p>
+        <label style="margin-top:10px" data-i18n="profile.bridgeConnTitle">连接参数（服务器地址 + 令牌，仅管理员可见）</label>
+        <textarea id="bridgeConnText" class="modal-input" rows="4" readonly style="font-family:Consolas,monospace;font-size:12px;resize:vertical"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+          <button id="bridgeConnCopy" class="chip-btn" type="button" data-i18n="profile.bridgeConnCopy">复制启动命令</button>
+          <button id="bridgeConnConfigCopy" class="chip-btn" type="button" data-i18n="profile.bridgeConnConfigCopy">复制配置内容</button>
+          <span class="muted" data-i18n="profile.bridgeConnWarn">⚠️ 令牌等同平台能力密钥：仅可发给可信用户；安装包内不含令牌</span>
+        </div>
+        <label style="margin-top:12px" data-i18n="profile.bridgeIssuedTitle">已签发安装包令牌（每次下载一枚，首次连接自动绑定该机器）</label>
+        <div id="bridgeIssuedList" class="muted" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin-top:4px;background:var(--panel)"></div>
       </div>
       <div class="modal-actions">
         <button id="pfCancel" class="btn-ghost" data-i18n="profile.cancel">取消</button>

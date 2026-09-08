@@ -52,7 +52,8 @@ public sealed class SkillAutoFixer
 
         bool server = def.ExecutionLocation == AgentSkillExecutionLocation.Server;
         bool shellEligible = _options.SkillAutoTestServerShell && _catalog is not null && def.Kind == AgentSkillKind.Shell;
-        bool selfTestable = server && (def.Kind == AgentSkillKind.Prompt || def.Kind == AgentSkillKind.Http || shellEligible);
+        bool dotnetEligible = _catalog is not null && def.Kind == AgentSkillKind.Dotnet; // C# 技能：编译校验（不运行作者代码，安全跨位置）
+        bool selfTestable = (server && (def.Kind == AgentSkillKind.Prompt || def.Kind == AgentSkillKind.Http || shellEligible)) || dotnetEligible;
         if (!selfTestable || Mock)
             return new SkillAutoFixResult(def.SkillId, Skipped: true, Ok: false, Attempts: 0, null, null, null);
 
@@ -85,11 +86,29 @@ public sealed class SkillAutoFixer
     /// <summary>按类型做一次冒烟，返回 (是否通过, 报错)。</summary>
     private async Task<(bool Ok, string? Error)> ProbeAsync(AgentSkillDefinition def, string body, string description, CancellationToken ct)
     {
+        if (def.Kind == AgentSkillKind.Dotnet)
+            return await DotnetCompileProbeAsync(body, ct).ConfigureAwait(false);
         if (def.Kind == AgentSkillKind.Http)
             return HttpLint(body);
         if (def.Kind == AgentSkillKind.Shell)
             return await ShellBlindRunAsync(def, body, ct).ConfigureAwait(false);
         return await PromptSelfTalkAsync(def, body, description, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>C# 技能自测：服务端 Roslyn <b>只编译不运行</b>（client 技能不得在服务端执行本机代码），
+    /// 同时校验入口 public static string Run(string) 存在。返回空串表示通过。</summary>
+    private async Task<(bool Ok, string? Error)> DotnetCompileProbeAsync(string body, CancellationToken ct)
+    {
+        if (_catalog is null) return (false, "技能执行器不可用，无法自测 dotnet 技能");
+        try
+        {
+            var err = await _catalog.CompileDotnetOnlyAsync(body, ct).ConfigureAwait(false);
+            return string.IsNullOrWhiteSpace(err) ? (true, null) : (false, err);
+        }
+        catch (Exception ex)
+        {
+            return (false, "dotnet 技能编译校验失败：" + ex.Message);
+        }
     }
 
     private async Task<(bool Ok, string? Error)> PromptSelfTalkAsync(AgentSkillDefinition def, string body, string description, CancellationToken ct)
@@ -197,6 +216,10 @@ public sealed class SkillAutoFixer
                 _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek, ov).AsIChatClient();
             var heading = def.Kind switch
             {
+                AgentSkillKind.Dotnet => "该技能是 C#（dotnet）技能：正文为 C# 源码，须<b>能编译通过</b>且含 public static string Run(string input) 入口，代码必须写在 class 内（形如 public class Skill {{ public static string Run(string input){{...}} }}，可含私有辅助方法）；不要把方法写在文件顶层、不要用顶层语句。"
+                    + "按报错修复 C# 语法 / 类型 / 引用。可用 .NET 自带 BCL（System.Security.Cryptography、System.IO、Microsoft.Win32.Registry(Windows)、System.Text、System.Xml、System.Net.Http 等，无需声明）；"
+                    + "若报错提示的命名空间确实来自第三方 NuGet 库（如 PdfSharp/Newtonsoft.Json），可在正文最顶部补写 #r \"nuget: 包名, 版本\"。"
+                    + "只输出修正后的完整 C# 源码，不要 ``` 围栏、不要任何解释。",
                 AgentSkillKind.Http => "该技能是 HTTP 配置：请只输出一段<b>合法 JSON 配置</b>作正文，形如 {\"method\":\"GET\",\"url\":\"...\",\"headers\":{},\"body\":null}；url 需 http/https 且真实可用（可含 ${query} 占位）。不要任何其它文字。",
                 AgentSkillKind.Shell => "该技能是 shell 命令 / 脚本：请修正为<b>可在该服务器环境直接运行、退出码为 0 且输出明确结果</b>的命令/脚本。注意避免过长，不依赖未安装程序（若确实需要可先说明）。只输出命令/脚本本身，不要 ``` 围栏、不要任何解释。",
                 _ => "该技能是提示词 / 流程模板：修正为结构清晰、可让执行的模型产出具体有用回答的分步指令 / 占位模板。",

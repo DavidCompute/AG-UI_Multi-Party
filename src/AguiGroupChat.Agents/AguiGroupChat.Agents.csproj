@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AguiGroupChat.Hub\AguiGroupChat.Hub.csproj" />
+    <ProjectReference Include="..\AguiGroupChat.SkillHosting\AguiGroupChat.SkillHosting.csproj" />
   </ItemGroup>
 
   <ItemGroup>

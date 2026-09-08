@@ -14,10 +14,15 @@ using Microsoft.Extensions.Logging;
 // 本桥不含旧版的「前端直接调用的客户端工具执行端点」。
 //
 // 用法:
+//   AguiGroupChat.NativeBridge --config bridge-config.txt
+//       或
 //   AguiGroupChat.NativeBridge --tunnel https://你的Hub域名 --tunnel-token <隧道令牌> \
 //       [--agent <数字员工id>] [--client <机器名>] [--local-port 17321] [--allowed-origin http://host:5200] [--local-https]
-//     --tunnel        公网 Hub 基址（必填，如 https://hub.example.com）
-//     --tunnel-token  与 Hub 侧 NativeTunnel:Token（或逐 agent 令牌）一致的令牌（必填）
+//     --config        读取同目录/指定 bridge-config.txt（key=value，# 注释行），内含 SERVER/TOKEN/AGENT/CLIENT/LOCAL_PORT；
+//                     TOKEN 可为 enc:v1: 密文（此时用同目录 bridge.key 或 --token-key 自动解密）
+//     --token-key     显式解密密钥（base64 32 字节）；缺省从 --config 同目录 bridge.key 读取
+//     --tunnel        公网 Hub 基址（可选；不配则取 --config 的 SERVER）
+//     --tunnel-token  隧道令牌（可选；不配则取 --config 的 TOKEN，支持 enc:v1: 密文）
 //     --agent         可选：不填 = 服务整个平台（scope=*）；填了只服务该数字员工
 //     --client        可选：本机标识（默认取本机名）——按“请求来自哪台客户端”路由到这台机器
 //     --local-port    可选：本机回环发现服务端口（默认 17321）；0 = 关闭回环发现
@@ -33,19 +38,52 @@ static string GetArg(string[] args, string key, string def)
     return def;
 }
 
-string tunnelHub = GetArg(args, "--tunnel", "");                      // 公网 Hub 基址（必填）
-string tunnelAgent = GetArg(args, "--agent", "").Trim();              // 绑定的数字员工 id（可选；空 = 平台级）
-string tunnelToken = GetArg(args, "--tunnel-token", "");              // Hub 侧隧道令牌（必填）
-string tunnelClient = GetArg(args, "--client", "").Trim();            // 本机标识（可选；默认用持久化的唯一编号）
-int localPort = int.TryParse(GetArg(args, "--local-port", "17321"), out var p) ? p : 17321;
+// 读 key=value 配置（# 注释、忽略空行），供 --config 使用。
+static Dictionary<string, string> LoadConfigFile(string path)
+{
+    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return map;
+    foreach (var raw in File.ReadAllLines(path))
+    {
+        var line = raw.Trim();
+        if (line.Length == 0 || line.StartsWith('#')) continue;
+        var eq = line.IndexOf('=');
+        if (eq <= 0) continue;
+        map[line[..eq].Trim()] = line[(eq + 1)..].Trim();
+    }
+    return map;
+}
+
+string configPath = GetArg(args, "--config", "").Trim();
+var cfg = LoadConfigFile(configPath);
+// 命令行显式参数优先；缺省回落配置值（SERVER/TOKEN/AGENT/CLIENT/LOCAL_PORT）
+string tunnelHub = GetArg(args, "--tunnel", cfg.GetValueOrDefault("SERVER", ""));     // 公网 Hub 基址
+string tunnelAgent = GetArg(args, "--agent", cfg.GetValueOrDefault("AGENT", "")).Trim(); // 绑定的数字员工 id
+string tunnelClient = GetArg(args, "--client", cfg.GetValueOrDefault("CLIENT", "")).Trim(); // 本机标识
+int localPort = int.TryParse(GetArg(args, "--local-port", cfg.GetValueOrDefault("LOCAL_PORT", "17321")), out var p) ? p : 17321;
 bool localHttps = GetArg(args, "--local-https", "") == "1";
 
-// 隧道必须指定 Hub 与令牌；缺一不可
+// 令牌：支持明文（历史）与 enc:v1: 密文（网页下载安装包默认格式）。密钥=同目录 bridge.key 或 --token-key
+string rawToken = GetArg(args, "--tunnel-token", cfg.GetValueOrDefault("TOKEN", ""));
+string tokenKeyBase64 = GetArg(args, "--token-key", "").Trim();
+string keyFile = string.IsNullOrEmpty(configPath) ? "" : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(configPath))!, "bridge.key");
+string tunnelToken = BridgeTokenCipher.TryDecrypt(rawToken, tokenKeyBase64, keyFile, out var tokenErr) ?? "";
+if (rawToken.StartsWith("enc:", StringComparison.Ordinal) && string.IsNullOrEmpty(tunnelToken))
+{
+    Console.Error.WriteLine($"令牌解密失败：{tokenErr}");
+    Console.Error.WriteLine("  — 需将解压包里的 bridge.key 与 bridge-config.txt 放在同一目录，或用 --token-key <base64> 显式传入。");
+    return 3;
+}
+
+// 隧道必须指定 Hub 与令牌；缺一不可（经命令行或 --config 提供）
 if (string.IsNullOrWhiteSpace(tunnelHub) || string.IsNullOrWhiteSpace(tunnelToken))
 {
-    Console.Error.WriteLine("用法: AguiGroupChat.NativeBridge --tunnel <Hub基址> --tunnel-token <隧道令牌> [--agent <数字员工id>] [--client <机器名>] [--local-port <端口>] [--local-https]");
-    Console.Error.WriteLine("  --tunnel        公网 Hub 基址（必填，如 https://hub.example.com）");
-    Console.Error.WriteLine("  --tunnel-token  与 Hub 侧 NativeTunnel:Token 一致的令牌（必填）");
+    Console.Error.WriteLine("用法: AguiGroupChat.NativeBridge --config bridge-config.txt");
+    Console.Error.WriteLine("   或: AguiGroupChat.NativeBridge --tunnel <Hub基址> --tunnel-token <令牌> [--agent <数字员工id>] [--client <机器名>] [--local-port <端口>]");
+    Console.Error.WriteLine("  --config        配置文件（key=value，# 注释；内含 SERVER/TOKEN/AGENT/CLIENT/LOCAL_PORT）");
+    Console.Error.WriteLine("  --token-key     显式解密密钥 base64（缺省读 --config 同目录 bridge.key）");
+    Console.Error.WriteLine("  --tunnel        公网 Hub 基址（如 https://hub.example.com）");
+    Console.Error.WriteLine("  --tunnel-token  隧道令牌（支持明文或 enc:v1: 加密格式）");
     Console.Error.WriteLine("  --agent         可选：不填=服务整个平台(*)；填了只服务该数字员工");
     Console.Error.WriteLine("  --client        可选：本机唯一标识（默认生成并持久化一个 UUID，避免机器名重名）——按请求来源路由到这台机器");
     Console.Error.WriteLine("  回环发现 : 1)本机浏览器读回环标识自动绑定“本机执行客户端”；2) --local-port <端口>(默认17321, 0关闭)；3) --local-https 用自签证书HTTPS（浏览器需信任）");

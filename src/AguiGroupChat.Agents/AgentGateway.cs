@@ -421,6 +421,30 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return null;
     }
 
+    private bool IsSupportGroup(string groupId)
+    {
+        try { return _hub.Value.IsSupportCircleGroup(groupId); } catch { return false; }
+    }
+
+    /// <summary>客服知聚双保险：本机(client)技能只允许在“发起请求的顾客”浏览器所在机器执行。
+    /// 该顾客 client 缺失/离线时记录告警——执行端按 A 口径不会在客服/服务器/其它机器跑（不回落）。</summary>
+    private void GuardSupportCircleClient(string groupId, string? clientId, string what)
+    {
+        if (!IsSupportGroup(groupId)) return;
+        bool ok = !string.IsNullOrWhiteSpace(clientId) && _nativeTunnel.Value?.HasClient(clientId) == true;
+        if (!ok)
+            _logger.LogWarning("客服知聚【本机技能只在请求顾客的机器执行】: {What} group={G} 未找到该顾客本机桥 client={C}（不会在客服/服务器/其它机器执行）",
+                what, groupId, clientId ?? "(空)");
+    }
+
+    /// <summary>顾客机不可达时给模型的明确失败文案（客服知聚强调“只在请求顾客的机器执行”）。</summary>
+    private string SupportClientUnavailableText(AgentInvocationContext ctx, string toolName)
+    {
+        if (!IsSupportGroup(ctx.GroupId))
+            return "（未能执行：发起请求/决策的电脑未连接本机桥 NativeBridge，无法路由到该机器执行该客户端技能。请在该电脑启动 AguiGroupChat.NativeBridge 后重新发起该操作。）";
+        return $"（未能执行：客服知聚的本机技能只能在发起请求的顾客电脑上执行，但该顾客电脑未连接本机桥 NativeBridge（client 缺失/离线）。请顾客在其电脑启动 AguiGroupChat.NativeBridge 后重新发起该操作。技能：{toolName}）";
+    }
+
     /// <summary>取函数调用参数里的 query 文本（供经隧道的 shell 技能做 ${query} 占位替换）；
     /// 参数里没有 query 键时回退为紧凑 JSON（与前端 clientToolSubstitute 的取值口径一致）。</summary>
     private static string? ApprovalArgsQuery(FunctionCallContent fc)
@@ -2857,6 +2881,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 _logger.LogInformation("批量客户端技能按决策机器路由：interrupt={InterruptId} client={Client}", interruptId, resolveClient);
                 batch = batch with { ClientId = resolveClient };
             }
+            GuardSupportCircleClient(batch.GroupId, batch.ClientId, "批量本机技能:" + batch.AgentId);
             Dictionary<string, string>? results = null;
             if (approved)
             {
@@ -2932,6 +2957,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             pending = pending with { Context = pending.Context with { PreferredBridgeClient = decisionClient } };
             _logger.LogInformation("交互决策按决策机器路由：interrupt={InterruptId} client={Client}", interruptId, decisionClient);
         }
+        // 客服知聚双保险：本机技能只允许在“发起请求的顾客”机器执行——client 缺失/离线时记录告警（A 口径不会跑别处）
+        if (pending.ApprovalRequest?.ToolCall is FunctionCallContent supFc
+            && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(supFc.Name, StringComparer.Ordinal))
+            GuardSupportCircleClient(pending.Context.GroupId, pending.Context.PreferredBridgeClient, "审批后:" + supFc.Name);
         // 诊断：客户端技能已批准，但仍无已注册 client 可路由——审批后只会落失败/占位文本，记录便于定位“执行环境没对上用户电脑”的问题
         if (approved
             && pending.ApprovalRequest?.ToolCall is FunctionCallContent routeFc
@@ -3108,8 +3137,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 // 客户端技能已批准，但既无前端回传结果、也未能经隧道路由到本机桥（无可用 client）——给模型明确失败原因，
                 // 而不是回放占位文本（占位文本会让模型以为技能已在某处执行并脑补出“看似真实”的结果）。
-                toolResult = "（未能执行：发起请求/决策的电脑未连接本机桥 NativeBridge，无法路由到该机器执行该客户端技能。"
-                    + "请在该电脑启动 AguiGroupChat.NativeBridge 后重新发起该操作。）";
+                toolResult = SupportClientUnavailableText(pending.Context, acfc.Name);
                 ClientToolResultStore.Put(acfc.Name, toolResult);
             }
 

@@ -220,6 +220,8 @@ public sealed class GroupHub : IDisposable
             // 幂等：群已存在但发起者不在其中（理论上只可能由极端 ID 冲突造成）→ 拒绝，不改写他人会话
             if (!_store.IsMember(groupId, ownerId))
                 throw new AguiProtocolException(ErrorCodes.GroupPermissionDenied, "该会话已存在且你不属于其中");
+            // 群仍带“已解散”内存墓碑（同进程内先解散后重建的确定性单聊）→ 清除，使该群立即可用
+            _disbanded.TryRemove(groupId, out _);
             // 单聊头像跟随对端数字员工当前头像：复用旧群时把群头像同步为对端最新头像（首次无/换过头像也能回填）
             if (!string.Equals(existing.GroupAvatar ?? "", agentAvatar ?? "", StringComparison.Ordinal))
             {
@@ -276,9 +278,15 @@ public sealed class GroupHub : IDisposable
         {
             var raced = _store.GetGroup(groupId);
             if (raced is not null && _store.IsMember(groupId, ownerId))
+            {
+                _disbanded.TryRemove(groupId, out _); // 同进程内刚解散又并发重建：清除墓碑，使重建群立即可用
                 return raced; // 同一时刻已建成：直接复用
+            }
             throw new AguiProtocolException(ErrorCodes.GroupFull, "单聊创建失败，请重试");
         }
+        // 同进程内该确定性单聊群曾被解散过（内存墓碑仍生效）→ 重建后必须清除墓碑，
+        // 否则订阅 / 快照 / 发消息都经 GetGroupOrThrow 判“群组不存在或已解散”，出现“点进单聊报 group_direct_xxx”的假死。
+        _disbanded.TryRemove(groupId, out _);
 
         // 注册该数字员工在本群的触发规则（默认 mentioned；群内显式覆盖保留语义）
         RegisterAgent(new AgentRegisterRequest
@@ -1985,6 +1993,13 @@ public sealed class GroupHub : IDisposable
         => (_store.GetGroup(groupId) is { } g && !_disbanded.ContainsKey(groupId))
             ? g
             : throw new AguiProtocolException(ErrorCodes.GroupNotFound, "群组不存在或已解散");
+
+    /// <summary>是否为客服知聚（顾客以参与者身份与客服团队会话的圈子）。供网关对“本机技能只能在请求顾客机器执行”做双保险校验。</summary>
+    public bool IsSupportCircleGroup(string groupId)
+    {
+        try { return _store.GetGroup(groupId)?.IsSupportCircle == true; }
+        catch { return false; }
+    }
 
     private bool CanManage(string operatorId, Group group)
     {

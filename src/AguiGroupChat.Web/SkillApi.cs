@@ -3,6 +3,7 @@ using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Users;
+using Microsoft.Extensions.Logging;
 
 namespace AguiGroupChat.Web;
 
@@ -27,7 +28,7 @@ public static class SkillApi
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 用自然语言生成技能配置（无需手填各字段）：输入需求，由大模型产出结构化技能定义，前端据此填入表单 ----
-        root.MapPost("/generate", async (SkillGenerateRequest req, HttpContext ctx, AuthService auth, AgentOptions options, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        root.MapPost("/generate", async (SkillGenerateRequest req, HttpContext ctx, AuthService auth, AgentOptions options, AgentCatalog catalog, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -41,18 +42,61 @@ public static class SkillApi
                     : DescribeServerEnv();
                 var gen = await SkillDefinitionGenerator.GenerateAsync(
                     options, req.Request, preferClient, isAdmin, loggerFactory.CreateLogger("SkillApi.Generate"), ct, runEnv);
+
+                var name = gen.Name;
+                var description = gen.Description;
+                var body = gen.Body;
+                object? selfTest = null;
+
+                // dotnet（C#）技能生成后自测：服务端只编译不运行，编译不过（或缺少 Run 入口）时让模型自动修正并复测，
+                // 前端拿到的正文已是可编译版本，保存后即可用（避免“生成完保存了却不能编译”）。
+                if (string.Equals(gen.Kind, "dotnet", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var fixer = new SkillAutoFixer(options, catalog, loggerFactory);
+                        var probeDef = new AgentSkillDefinition
+                        {
+                            SkillId = gen.SkillId ?? "generated",
+                            Name = gen.Name,
+                            Description = gen.Description,
+                            Kind = AgentSkillKind.Dotnet,
+                            Body = gen.Body,
+                            ExecutionLocation = gen.ExecutionLocation == "client"
+                                ? AgentSkillExecutionLocation.Client
+                                : AgentSkillExecutionLocation.Server,
+                            RequiresApproval = gen.RequiresApproval,
+                        };
+                        var smoke = await fixer.VerifyOrRepairAsync(probeDef, maxAttempts: 3, ct).ConfigureAwait(false);
+                        selfTest = new { skipped = smoke.Skipped, ok = smoke.Ok, attempts = smoke.Attempts, repaired = smoke.CorrectedBody != null, lastError = smoke.LastError };
+                        if (smoke.Ok && smoke.CorrectedBody is { Length: > 0 } fixedBody)
+                        {
+                            body = fixedBody;
+                            if (!string.IsNullOrWhiteSpace(smoke.CorrectedDescription)) description = smoke.CorrectedDescription!;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // 自测/修复失败不阻断返回草稿（正文仍可手动编辑）
+                        loggerFactory.CreateLogger("SkillApi.Generate").LogWarning(ex, "dotnet 技能生成后自测失败：{SkillId}", gen.SkillId);
+                        selfTest = new { skipped = true, ok = false, attempts = 0, repaired = false, lastError = "自测异常：" + ex.Message };
+                    }
+                }
+
                 return Results.Ok(new
                 {
                     generated = true,
                     skillId = gen.SkillId,
-                    name = gen.Name,
+                    name,
                     kind = gen.Kind,
-                    description = gen.Description,
-                    body = gen.Body,
+                    description,
+                    body,
                     executionLocation = gen.ExecutionLocation,
                     clientRunner = gen.ClientRunner,
                     requiresApproval = gen.RequiresApproval,
                     targetEnv = runEnv,
+                    selfTest,
                 });
             }
             catch (OperationCanceledException) { return Results.Json(new AguiError(ErrorCodes.BadRequest, "生成已取消或超时"), statusCode: StatusCodes.Status408RequestTimeout); }
@@ -119,7 +163,7 @@ public static class SkillApi
         // ---- 试运行技能（仅归属者或管理员；系统技能仅管理员）----
         //      /run 是无审批通道的手动执行，不能让它被任意登录用户触发 shell / HTTP；
         //      归属者运行自己建的 prompt 技能用于调试验证，shell / HTTP 则限定管理员与归属者。
-        root.MapPost("/{skillId}/run", async (string skillId, SkillRunHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AgentCatalog agents, CancellationToken ct) =>
+        root.MapPost("/{skillId}/run", async (string skillId, SkillRunHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AgentCatalog agents, AgentOptions options, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -131,6 +175,10 @@ public static class SkillApi
             var existing = catalog.Get(skillId);
             if (existing is null)
                 return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            // 试运行失败时若调用者可编辑该技能，则允许“一键应用自动修复后的正文”
+            var canEditThis = existing.OwnerId is not null
+                ? (auth.IsAdmin(user.UserId) || existing.OwnerId == user.UserId)
+                : auth.IsAdmin(user.UserId);
             // dotnet 技能：（建立限管理员，运行面向任意登录用户）。
             // server → 服务端 Roslyn 编译执行；client → 本机执行：优先按请求上报的 client（当前浏览器机器），
             // 否则落到平台级桥（一座桥的机器即本机）在本机编译运行；无可用桥才给出说明。
@@ -144,7 +192,8 @@ public static class SkillApi
                     if (hostLocal && hostEnv is not null)
                     {
                         var hostDr = await agents.RunSkillAsync(existing, query, ct);
-                        return Results.Ok(new { skillId, result = ("【本机 dotnet · 在桌面宿主机直接执行】\n" + hostDr), localOnly = true });
+                        var (txtA, fixA) = await TryDotnetAutoFixAsync(existing, hostDr, canEditThis, options, agents, loggerFactory, ct);
+                        return Results.Ok(new { skillId, result = ("【本机 dotnet · 在桌面宿主机直接执行】\n" + txtA), localOnly = true, autoFix = fixA });
                     }
                     var clientId = (req.ClientId ?? "").Trim();
                     if (nativeTunnel is not null && clientId.Length > 0 && nativeTunnel.HasClient(clientId))
@@ -153,14 +202,18 @@ public static class SkillApi
                         var localResult = await nativeTunnel.ExecuteDotnetForClientAsync(
                             clientId, source, query, TimeSpan.FromSeconds(160), ct);
                         if (!string.IsNullOrWhiteSpace(localResult))
-                            return Results.Ok(new { skillId, result = ("【本机 dotnet · 经本机桥执行】client=" + clientId + " 结果：\n" + localResult), localOnly = true });
+                        {
+                            var (txtB, fixB) = await TryDotnetAutoFixAsync(existing, localResult, canEditThis, options, agents, loggerFactory, ct);
+                            return Results.Ok(new { skillId, result = ("【本机 dotnet · 经本机桥执行】client=" + clientId + " 结果：\n" + txtB), localOnly = true, autoFix = fixB });
+                        }
                     }
                     // 没有为该请求机器找到桥：明确报告，而非回退到可能并非请求机器的其它桥
                     return Results.Ok(new { skillId, result = ("执行失败，没有安装桥：本客户端技能需在发起请求的浏览器所在机器执行，\n"
                         + "但该机器未连接本机桥（找不到 client=" + (clientId.Length == 0 ? "（未上报）" : clientId) + "）。请在本机安装/启动 AguiGroupChat.NativeBridge 后重试。"), localOnly = true });
                 }
                 var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
-                return Results.Ok(new { skillId, result = dr });
+                var (txtC, fixC) = await TryDotnetAutoFixAsync(existing, dr, canEditThis, options, agents, loggerFactory, ct);
+                return Results.Ok(new { skillId, result = txtC, autoFix = fixC });
             }
             // shell + client（本机执行技能）：试运行应经本机桥在本机（当前机器）执行，落到服务端 bash 会因缺 PowerShell 命令而 127。
             if (existing.Kind == AgentSkillKind.Shell && existing.ExecutionLocation == AgentSkillExecutionLocation.Client)
@@ -343,6 +396,38 @@ public static class SkillApi
 
     private static IResult Unauthorized()
         => Results.Json(new AguiError(ErrorCodes.UserUnauthorized, "未登录或令牌无效"), statusCode: StatusCodes.Status401Unauthorized);
+
+    /// <summary>C#（dotnet）技能试运行遇编译类失败时，自动让大模型修复正文并回传“一键应用”候选（不自动保存）。</summary>
+    private static async Task<(string Result, object? AutoFix)> TryDotnetAutoFixAsync(
+        AgentSkillDefinition skill, string runResult, bool canEdit,
+        AgentOptions options, AgentCatalog agents, ILoggerFactory loggerFactory, CancellationToken ct)
+    {
+        if (!canEdit) return (runResult, null);
+        var isCompileFailure = runResult.Contains(".NET 技能编译失败", StringComparison.Ordinal)
+            || runResult.Contains("NuGet 引用还原失败", StringComparison.Ordinal)
+            || runResult.Contains("缺少入口", StringComparison.Ordinal)
+            || runResult.Contains("编译校验失败", StringComparison.Ordinal);
+        if (!isCompileFailure) return (runResult, null);
+        if (string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase)) return (runResult, null);
+        try
+        {
+            var fixer = new SkillAutoFixer(options, agents, loggerFactory);
+            var smoke = await fixer.VerifyOrRepairAsync(skill, maxAttempts: 3, ct).ConfigureAwait(false);
+            if (smoke.CorrectedBody is { Length: > 0 } && !string.Equals(smoke.CorrectedBody, skill.Body, StringComparison.Ordinal))
+                return (runResult, new
+                {
+                    ok = smoke.Ok,
+                    attempts = smoke.Attempts,
+                    correctedBody = smoke.CorrectedBody,
+                    lastError = smoke.LastError,
+                });
+        }
+        catch (Exception ex)
+        {
+            loggerFactory.CreateLogger("SkillApi.Run").LogWarning(ex, "dotnet 技能试运行自动修复失败：{SkillId}", skill.SkillId);
+        }
+        return (runResult, null);
+    }
 }
 
 /// <summary>技能库请求体：技能定义字段（与 <see cref="AgentSkillDefinition"/> 对齐，SkillId 为可选新标识，更新时用 URL）。</summary>

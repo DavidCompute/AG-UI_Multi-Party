@@ -96,7 +96,8 @@ public static class SkillDefinitionGenerator
             (preferClient ? "。本次需求倾向在本机(client)执行。\n" : "。默认 server，仅当用户要针对本机操作时用 client。\n") +
             (allowDotnet
                 ? "若需读/写本机 Excel/Word/文件/Registry 或调用 .NET 库这类需要本地能力的，应优先用 kind=dotnet。" +
-                  "dotnet 技能的正文是 C# 源码，须含 public static string Run(string input) 返回 string；" +
+                  "dotnet 技能的正文是 C# 源码，须含 public static string Run(string input) 返回 string，且代码必须写在 class 内（形如 public class Skill {{ public static string Run(string input){{...}} }}），不要顶层语句、不要把方法写在文件顶层；" +
+                  "若需引用第三方 NuGet 库，在正文最顶部写一行 #r \"nuget: 包名, 版本\"（可多行，如 PdfSharp/Newtonsoft.Json），系统会在执行机器上联网还原。" +
                   (preferClient
                     ? "本次目标是本机，executionLocation 请写 client（由本机桥在用户机器编译执行，可直接访问该机路径/文件）。\n"
                     : "executionLocation 按“目标环境”选择：操作本机文件建议 client（本机桥执行），纯计算/服务端数据则 server（Roslyn 编译执行）。\n")

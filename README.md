@@ -54,6 +54,7 @@ tools/icon-gen/                  # 图标栅格化生成器：把 SVG 矢量图�
 tools/agents-starter.json        # 行业智能体包（25 个角色）：登录后在「智能体管理 → 导入 JSON」选择该文件即批量创建
 tools/agents-standin-demo.json   # 「任务指派 + 问题提升」演示智能体包：导入后在总前台@提问即可观察下行指派与上行提升（见 README）
 tools/build-msi.ps1              # WiX v4 MSI 安装包构建（perUser 安装到 %LocalAppData%\AguiGroupChat；剔除全平台运行库，捆绑 bge-m3 模型，MSI 约 580MB）
+tools/publish-nativebridge.ps1    # 本机桥 Windows 安装包构建（win-x64 自包含免装 .NET）：产出 zip（含开机自启脚本 + bridge-config.txt 模板），管理员在网页资料弹窗上传后供用户下载
 tools/download-embedding-model.ps1 # 手动获取 embedding 模型（不捆绑模型的瘦身版可用；默认 nomic-embed-text-v1.5.Q8_0）
 tools/verify-hitl.mjs            # 人机交互（审批卡片）端到端验证脚本
 tools/verify-agent-import.mjs    # 智能体批量导入验证脚本
@@ -700,6 +701,17 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
    dotnet publish src/AguiGroupChat.NativeBridge -c Release
    AguiGroupChat.NativeBridge.exe --tunnel https://你的Hub域名 --tunnel-token <隧道令牌>
    ```
+
+   <b>管理员也可在网页「修改资料 → 💻 本机桥」上传 / 让用户下载 Windows 安装包</b>：
+   下载由服务器按当前访问者动态重打包，包内 `bridge-config.txt` 已注入当前平台地址
+   （SERVER）；管理员下载的包内 TOKEN 为<b>加密存储</b>（AES-256-GCM 的 `enc:v1:` 密文 +
+   同目录 `bridge.key` 解密密钥），桥用 `--config bridge-config.txt` 启动时自动解密，
+   不以明文出现在配置文件；普通用户包令牌留空、向管理员索取后填入同一文件即可。
+   每次下载服务器<b>签发一枚“绑定型”令牌</b>：桥首次连接时自动绑定到那台机器的 client 标识，
+   包被复制到其它机器会被服务器拒绝（管理员可在同一弹窗查看/吊销已签发令牌）。
+   包内附带 `install-autostart.bat`（复制到 `%LOCALAPPDATA%\AguiGroupChat\NativeBridge`、
+   注册 HKCU 开机自启、以隐藏窗口运行）。目标电脑无需安装 .NET 运行时
+   （发布脚本 `tools/publish-nativebridge.ps1` 产出自包含 win-x64 zip 后由管理员上传到网页）。
 
 2. Hub 侧配置同一令牌：`NativeTunnel__Token`（或 appsettings `NativeTunnel:Token`）。网关检测到平台级/逐员工桥在线时，
    <b>直接经隧道把客户端 shell 推给那台内网机执行</b>，结果回灌模型继续作答——前端无需填桥地址、无需填令牌。

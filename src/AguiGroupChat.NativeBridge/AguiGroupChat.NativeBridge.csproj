@@ -16,6 +16,12 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <!-- dotnet(client) 技能：本机动态编译并运行一段 C#（受限引用 + 超时） -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+    <ProjectReference Include="..\AguiGroupChat.SkillHosting\AguiGroupChat.SkillHosting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 供测试项目访问 internal 成员（如 DotnetRunner 编译回归） -->
+    <InternalsVisibleTo Include="AguiGroupChat.Hub.Tests" />
   </ItemGroup>
 
 </Project>

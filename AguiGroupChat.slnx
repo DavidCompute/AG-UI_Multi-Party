@@ -10,6 +10,7 @@
     <Project Path="src/AguiGroupChat.Hub/AguiGroupChat.Hub.csproj" />
     <Project Path="src/AguiGroupChat.NativeBridge/AguiGroupChat.NativeBridge.csproj" />
     <Project Path="src/AguiGroupChat.Sdk/AguiGroupChat.Sdk.csproj" />
+    <Project Path="src/AguiGroupChat.SkillHosting/AguiGroupChat.SkillHosting.csproj" />
     <Project Path="src/AguiGroupChat.Web/AguiGroupChat.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">

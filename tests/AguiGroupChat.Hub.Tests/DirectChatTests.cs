@@ -85,6 +85,31 @@ public sealed class DirectChatTests
     }
 
     [Fact]
+    public async Task TryEnsureDirectChat_AfterDisband_RecreateClearsTombstone_AndIsUsable()
+    {
+        // 回归：确定性单聊群被解散后再次进入（同进程重建同 ID）——若不清除“已解散”内存墓碑，
+        // 订阅 / 快照 / 发消息都会判“群组不存在或已解散”，表现为“点进单聊报错 group_direct_xxx”。
+        var (hub, _) = CreateSut();
+
+        var a = await hub.TryEnsureDirectChatAsync("user_1", "agent_loop", "循环助手", null);
+        await hub.DisbandGroupAsync(new GroupDisbandRequest { GroupId = a.GroupId, OperatorId = "user_1" });
+        Assert.Null(hub.Store.GetGroup(a.GroupId)); // 解散已删存储行
+
+        // 再次进入：同一确定性 ID 重建；墓碑须被清除，随后发消息（走 GetGroupOrThrow）不再报已解散
+        var b = await hub.TryEnsureDirectChatAsync("user_1", "agent_loop", "循环助手", null);
+        Assert.Equal(a.GroupId, b.GroupId);
+        Assert.NotNull(hub.Store.GetGroup(b.GroupId));
+        Assert.True(hub.Store.IsMember(b.GroupId, "user_1"));
+
+        await hub.SendMessageAsync(new GroupMessageSendRequest
+        {
+            GroupId = b.GroupId,
+            UserId = "user_1",
+            Content = "解散后重建的会话应立即可用",
+        });
+    }
+
+    [Fact]
     public async Task TryEnsureDirectChat_DifferentUsers_GetIsolatedGroups()
     {
         var (hub, _) = CreateSut();

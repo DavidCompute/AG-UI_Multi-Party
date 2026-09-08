@@ -30,7 +30,9 @@ internal sealed class SkillRunner
         _sandboxRoot = Path.GetFullPath(Path.TrimEndingDirectorySeparator(sandboxRoot)) + Path.DirectorySeparatorChar;
         _logger = loggerFactory.CreateLogger<SkillRunner>();
         _allowPrivateEndpoints = allowPrivateEndpoints;
-        _dotnet = new DotnetSkillHost(_logger);
+        // NuGet 引用还原缓存放沙箱根的同级 data 目录（如 data/dotnetpkgs），随服务数据持久化
+        var dataRoot = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(_sandboxRoot)) ?? _sandboxRoot;
+        _dotnet = new DotnetSkillHost(_logger, Path.Combine(dataRoot, "dotnetpkgs"));
     }
 
     /// <summary>技能运行沙箱目录（按技能 ID 干净命名）。</summary>
@@ -66,6 +68,13 @@ internal sealed class SkillRunner
     {
         if (_dotnet is null) return ".NET 技能执行器不可用。";
         return _dotnet.Run(skill.Body ?? "", query ?? "", CancellationToken.None);
+    }
+
+    /// <summary>仅编译校验一段 C# 技能正文（不运行作者代码）：生成后自检 / 自动修复复测用。空串=通过。</summary>
+    internal string CompileDotnetOnly(string source)
+    {
+        if (_dotnet is null) return ".NET 技能执行器不可用。";
+        return _dotnet.CompileOnly(source ?? "", CancellationToken.None);
     }
 
     // =============== Shell ===============

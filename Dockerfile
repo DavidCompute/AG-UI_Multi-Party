@@ -11,6 +11,7 @@ WORKDIR /src
 COPY AguiGroupChat.slnx ./
 COPY src/AguiGroupChat.Hub/AguiGroupChat.Hub.csproj src/AguiGroupChat.Hub/
 COPY src/AguiGroupChat.Agents/AguiGroupChat.Agents.csproj src/AguiGroupChat.Agents/
+COPY src/AguiGroupChat.SkillHosting/AguiGroupChat.SkillHosting.csproj src/AguiGroupChat.SkillHosting/
 COPY src/AguiGroupChat.Web/AguiGroupChat.Web.csproj src/AguiGroupChat.Web/
 RUN dotnet restore src/AguiGroupChat.Web/AguiGroupChat.Web.csproj
 

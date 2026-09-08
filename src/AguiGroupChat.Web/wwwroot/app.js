@@ -2001,22 +2001,41 @@ async function openSkillModal() {
 function showSkillListView() { $("skillListView").classList.remove("hidden"); $("skillFormView").classList.add("hidden"); }
 function showSkillFormView() { $("skillListView").classList.add("hidden"); $("skillFormView").classList.remove("hidden"); }
 
-/** 打开技能表单编辑（skillId 为空 = 新建）。 */
+/** 打开技能表单编辑（skillId 为空 = 新建）。每次都从 skillList 重新装载，并清空上一份残留（含 AI 生成区的临时输入）。 */
 function openSkillForm(skillId) {
   editingSkillId = skillId || null;
   const s = skillId ? skillList.find((x) => x.skillId === skillId) : null;
   const sf = (id) => $(id);
-  sf("sfName").value = s?.name || "";
-  sf("sfSkillId").value = s?.skillId || "";
-  sf("sfSkillId").disabled = !!s; // 已存在技能 ID 不可改（工具名稳定）
-  sf("sfKind").value = s?.kind || "prompt";
-  sf("sfDescription").value = s?.description || "";
-  sf("sfInterpreter").value = s?.interpreter || "";
-  sf("sfBody").value = s?.body || "";
-  sf("sfRequiresApproval").checked = s?.requiresApproval !== false;
-  sf("sfExecutionLocation").value = s?.executionLocation || "server";
-  sf("sfClientRunner").value = s?.clientRunner || "";
-  syncSkillKind();
+  // 先整体清空再装载：确保新建/切换编辑时不会残留上一次的表单数据
+  sf("sfName").value = "";
+  sf("sfSkillId").value = "";
+  sf("sfSkillId").disabled = false;
+  sf("sfKind").value = "prompt";
+  sf("sfDescription").value = "";
+  sf("sfInterpreter").value = "";
+  sf("sfBody").value = "";
+  sf("sfRequiresApproval").checked = true;
+  sf("sfRequiresApproval").disabled = false;
+  sf("sfExecutionLocation").value = "server";
+  sf("sfClientRunner").value = "";
+  sf("sgRequest").value = ""; // AI 生成区的需求/偏好属上一份内容，不跨技能保留
+  const pref = $("sgPreferClient");
+  if (pref) pref.checked = false;
+
+  // 重新装载目标：编辑 → 取该技能字段；新建 → 保持上面的空默认
+  if (s) {
+    sf("sfName").value = s.name || "";
+    sf("sfSkillId").value = s.skillId || "";
+    sf("sfSkillId").disabled = true; // 已存在技能 ID 不可改（工具名稳定）
+    sf("sfKind").value = s.kind || "prompt";
+    sf("sfDescription").value = s.description || "";
+    sf("sfInterpreter").value = s.interpreter || "";
+    sf("sfBody").value = s.body || "";
+    sf("sfRequiresApproval").checked = s.requiresApproval !== false;
+    sf("sfExecutionLocation").value = s.executionLocation || "server";
+    sf("sfClientRunner").value = s.clientRunner || "";
+  }
+  syncSkillKind(); // 按当前类型刷新显隐 / 强制审批等联动状态
   showSkillFormView();
 }
 
@@ -2082,19 +2101,29 @@ function detectClientOs() {
   return "other";
 }
 
-/** 用自然语言生成技能并回填表单（可“停止”取消——只读生成，不写库，安全）。 */
+/** 用自然语言生成技能并回填表单：同一个按钮兼具“生成 / 停止”——生成中再点即停止（只读生成，不写库，安全）。 */
+function setSkillGenButton(busy) {
+  const btn = $("sgGenerate");
+  if (!btn) return;
+  btn.textContent = busy ? "⏳ " + t("msg.stopGenerating") : t("skill.gen.generate");
+  btn.classList.toggle("send", !busy);
+  btn.classList.toggle("btn-ghost", busy);
+  btn.classList.toggle("danger", busy);
+  btn.disabled = false;
+}
+
 async function generateSkill() {
+  // 生成中再次点击 = 停止本次生成（同按钮切换）
+  if (longTaskBusy && longTaskCancellable) { cancelLongTaskIfAny(); return; }
   const request = $("sgRequest").value.trim();
   if (!request) { toast(t("skill.gen.needRequest")); return; }
   if (!longTaskGuard()) { toast(t("skill.gen.busy")); return; }
-  const btn = $("sgGenerate");
-  btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ " + t("skill.gen.generating");
+  setSkillGenButton(true); // 变为「停止」外观（仍可点击以取消）
   const ctrl = beginLongTask(true); // 只读生成本机能填表单，允许“停止”取消
-  $("sgStopGen").classList.remove("hidden"); // 生成期间显示「停止生成」
   let cancelled = false;
   try {
     const res = await fetch("/ag-ui/skills/generate", {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + state.token },
       body: JSON.stringify({ request, preferClient: $("sgPreferClient").checked, clientOs: detectClientOs() }),
       signal: ctrl.signal, // “停止”断开本次只读生成请求
     });
@@ -2115,8 +2144,7 @@ async function generateSkill() {
     if (ctrl.signal.aborted) { cancelled = true; }
     else toast(t("skill.gen.fail", { err: ex.message }));
   } finally {
-    $("sgStopGen").classList.add("hidden");
-    btn.disabled = false; btn.textContent = orig;
+    setSkillGenButton(false); // 恢复「生成」外观
     endLongTask();
     if (cancelled) { toast(t("skill.gen.stopped")); }
   }
@@ -2128,6 +2156,9 @@ async function testSkill(skillId) {
   // 试运行结果一律在独立结果弹窗展示（更醒目、一定可见），不再在编辑表单下方就地显示
   const resultBody = document.getElementById("skillRunResultBody");
   const resultModal = document.getElementById("skillRunResultModal");
+  const fixBtn = document.getElementById("skillRunFixApply");
+  skillFixCandidate = null;
+  if (fixBtn) { fixBtn.classList.add("hidden"); fixBtn.onclick = null; }
   resultBody.textContent = "⚙️ " + t("skill.testRun") + "（" + id + "）…"; // 预置“运行中”文案
   // 按技能自动建议一个典型示例参数预填（试运行前先给用户一个能用/可改的输入）
   let suggestion = "";
@@ -2151,13 +2182,55 @@ async function testSkill(skillId) {
       : `${t("skill.testResult")}\n${t("common.saveFail", { err: errMsg(data, res.status) })}`;
     if (!res.ok) toast(t("common.saveFail", { err: errMsg(data, res.status) }));
     resultBody.textContent = text;
+    // C# 技能编译失败且服务端已让模型给出修复版 → 提供“一键应用修复”按钮
+    if (res.ok && data && data.autoFix && data.autoFix.correctedBody && fixBtn) {
+      skillFixCandidate = { skillId: id, body: data.autoFix.correctedBody };
+      fixBtn.textContent = "✅ " + t("skill.testApplyFix");
+      fixBtn.title = t("skill.testFixHint");
+      fixBtn.classList.remove("hidden");
+      fixBtn.onclick = applySkillFix;
+    }
   } catch (ex) {
     toast(t("common.saveFail", { err: ex.message }));
     resultBody.textContent = `${t("skill.testResult")}\n${ex.message}`;
   }
 }
 
-/** 删除技能。 */
+/** 待“一键应用”的自动修复候选（来自技能试运行 autoFix）。 */
+let skillFixCandidate = null;
+
+/** 把试运行失败后模型自动修复的正文一键保存到技能库。 */
+async function applySkillFix() {
+  const cand = skillFixCandidate;
+  if (!cand) return;
+  const s = (skillList || []).find((x) => x.skillId === cand.skillId);
+  if (!s) { toast(t("skill.testFixNoSkill")); return; }
+  try {
+    const payload = {
+      skillId: s.skillId, name: s.name, description: s.description, kind: s.kind, body: cand.body,
+      parametersJson: s.parametersJson || "", interpreter: s.interpreter || null,
+      httpTimeoutSeconds: s.httpTimeoutSeconds || 30, requiresApproval: s.requiresApproval !== false,
+      executionLocation: s.executionLocation || "server", clientRunner: s.clientRunner || null,
+    };
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(cand.skillId)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + state.token },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("common.saveFail"))); return; }
+    toast(t("skill.testFixApplied"));
+    const btn = document.getElementById("skillRunFixApply");
+    if (btn) { btn.classList.add("hidden"); btn.onclick = null; }
+    skillFixCandidate = null;
+    await loadSkills(); renderSkillList();
+    // 若编辑表单正开着同技能，就地回填修复正文
+    if (editingSkillId === cand.skillId) {
+      const bodyEl = document.getElementById("sfBody");
+      if (bodyEl) bodyEl.value = cand.body;
+    }
+  } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
+}
+
 async function deleteSkill(skillId) {
   if (!await uiConfirm({ message: t("skill.delConfirm", { name: skillId }) })) return;
   try {
@@ -2464,7 +2537,172 @@ function openProfileModal() {
   pfAvatarPicker.render(state.avatar || "");
   refreshTwinUi(null); // 默认未启用，随后异步查询
   $("profileModal").classList.remove("hidden");
-  if (state.token) loadTwinStatus();
+  if (state.token) {
+    loadTwinStatus();
+    loadBridgePackage();
+  }
+}
+
+/* ============ 本机桥 Windows 安装包（下载 / 管理员上传） ============ */
+
+/** 最近一次拉取的管理员连接参数（供复制按钮使用，避免从 textarea 里二次截取）。 */
+let bridgeConnData = null;
+
+/** 下载文件路径：管理员填了 SERVER 覆盖则带 ?server=（下载包内置该地址 + 令牌）。 */
+function bridgeDownloadPath() {
+  const srv = ($("bridgeServerInput") ? $("bridgeServerInput").value : "").trim();
+  return srv
+    ? "/ag-ui/native-bridge/download/file?server=" + encodeURIComponent(srv)
+    : "/ag-ui/native-bridge/download/file";
+}
+
+/** 刷新下载链接（追加会话令牌）；包内 SERVER 由后端按当前请求 / ?server= 注入。 */
+function refreshBridgeDownloadHref() {
+  const dl = $("bridgePkgDownload");
+  if (!dl || dl.style.display === "none") return;
+  dl.href = authedAssetUrl(bridgeDownloadPath());
+}
+
+/** （管理员）拉取连接参数：平台地址 + 令牌 + 现成命令 / 配置。 */
+async function loadBridgeConnection() {
+  try {
+    const srv = ($("bridgeServerInput") ? $("bridgeServerInput").value : "").trim();
+    const url = "/ag-ui/native-bridge/download/connection" + (srv ? "?server=" + encodeURIComponent(srv) : "");
+    const c = await fetch(url, { headers: { Authorization: `Bearer ${state.token}` } });
+    const cd = await c.json().catch(() => null);
+    if (c.ok && cd) {
+      bridgeConnData = cd;
+      $("bridgeConnText").value =
+        "# command\n" + (cd.command || "") +
+        "\n\n# bridge-config.txt\n" + (cd.configHint || "");
+    } else {
+      bridgeConnData = null;
+      $("bridgeConnText").value = "";
+    }
+  } catch { bridgeConnData = null; $("bridgeConnText").value = ""; }
+}
+
+/** 读取安装包信息 +（管理员）连接参数，刷新资料弹窗的本机桥区块。 */
+async function loadBridgePackage() {
+  const dl = $("bridgePkgDownload");
+  const meta = $("bridgePkgMeta");
+  const empty = $("bridgePkgEmpty");
+  const adminBox = $("bridgeAdminBox");
+  if (!state.token) return;
+  bridgeConnData = null;
+  try {
+    const res = await fetch("/ag-ui/native-bridge/download/info", {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { dl.style.display = "none"; meta.textContent = ""; empty.textContent = t("profile.bridgePkgEmpty"); return; }
+    if (d.available && d.fileName) {
+      dl.style.display = "inline-flex";
+      dl.download = d.fileName;
+      meta.textContent = (d.version ? "v" + d.version + " · " : "") + fmtBytes(d.sizeBytes || 0) + " · " + d.fileName;
+      empty.textContent = "";
+      refreshBridgeDownloadHref();
+    } else {
+      dl.style.display = "none";
+      meta.textContent = "";
+      empty.textContent = t("profile.bridgePkgEmpty");
+    }
+  } catch {
+    dl.style.display = "none"; meta.textContent = ""; empty.textContent = t("profile.bridgePkgEmpty");
+  }
+  // 管理员：显示上传 + 连接参数（含令牌）；普通用户只显示下载（包内 SERVER 自动为当前地址、令牌为空）
+  adminBox.style.display = state.isAdmin ? "" : "none";
+  if (state.isAdmin) {
+    await loadBridgeConnection();
+    await loadBridgeIssued();
+  }
+}
+
+/* ---------- 已签发安装包令牌（绑定型）管理 ---------- */
+
+/** 拉取管理员已签发的安装包令牌列表并渲染（含绑定状态 / 吊销按钮）。 */
+async function loadBridgeIssued() {
+  const box = $("bridgeIssuedList");
+  if (!box) return;
+  try {
+    const res = await fetch("/ag-ui/native-bridge/download/tokens", {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d?.entries) { box.textContent = t("profile.bridgeIssuedEmpty"); return; }
+    const rows = d.entries.map((e) => {
+      const status = e.bound
+        ? t("profile.bridgeIssuedBound", { client: e.client || "?" })
+        : t("profile.bridgeIssuedUnbound");
+      const time = e.createdAtMs ? " · " + new Date(e.createdAtMs).toLocaleString() : "";
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0";
+      const info = document.createElement("span");
+      info.style.cssText = "font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+      info.textContent = status + time;
+      const revoke = document.createElement("button");
+      revoke.type = "button";
+      revoke.className = "chip-btn danger";
+      revoke.textContent = t("profile.bridgeIssuedRevoke");
+      revoke.onclick = () => revokeBridgeToken(e.id);
+      row.appendChild(info);
+      row.appendChild(revoke);
+      return row;
+    });
+    box.replaceChildren(...rows);
+  } catch { box.textContent = t("profile.bridgeIssuedEmpty"); }
+}
+
+/** 吊销一枚已签发令牌（带确认）。 */
+async function revokeBridgeToken(id) {
+  if (!await uiConfirm({ message: t("profile.bridgeIssuedRevokeConfirm"), danger: true })) return;
+  try {
+    const res = await fetch("/ag-ui/native-bridge/download/tokens/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ id }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, t("profile.bridgeIssuedRevokeFail", { err: res.status }))); return; }
+    toast(t("profile.bridgeIssuedRevokeOk"));
+    loadBridgeIssued();
+  } catch (ex) { toast(t("profile.bridgeIssuedRevokeFail", { err: ex.message })); }
+}
+
+/** 管理员上传新的本机桥安装包 zip 并刷新列表。 */
+async function uploadBridgePackage() {
+  const input = $("bridgePkgFile");
+  const file = input && input.files && input.files[0];
+  if (!file) { toast(t("profile.bridgeUploadFail", { err: "no file" })); return; }
+  const btn = $("bridgePkgUploadBtn");
+  btn.disabled = true;
+  btn.textContent = t("profile.bridgeUploading");
+  try {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const res = await fetch("/ag-ui/native-bridge/download/upload", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${state.token}` },
+      body: form,
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, t("profile.bridgeUploadFail", { err: res.status }))); return; }
+    toast(t("profile.bridgeUploadOk", { name: d?.fileName || file.name }));
+    input.value = "";
+    loadBridgePackage();
+  } catch (ex) { toast(t("profile.bridgeUploadFail", { err: ex.message })); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = t("profile.bridgeUploadBtn");
+  }
+}
+
+/** 复制管理员连接参数：copyType = command | config。 */
+async function copyBridgeConnection(copyType) {
+  if (!bridgeConnData) { toast(t("profile.bridgeCopyFail")); return; }
+  const text = copyType === "config" ? (bridgeConnData.configHint || "") : (bridgeConnData.command || "");
+  const ok = await copyText(text);
+  toast(ok ? t("profile.bridgeCopied") : t("profile.bridgeCopyFail"));
 }
 
 /* ============ AI 分身 ============ */
@@ -7412,6 +7650,14 @@ function init() {
   $("pfTwinDisable").onclick = disableTwin;
   $("pfTwinSync").onclick = syncTwinGroups;
   $("pfTwinTrigger").addEventListener("change", updateTwinTrigger);
+  // 本机桥安装包：下载 / 管理员上传 / 复制连接参数
+  $("bridgePkgUploadBtn").onclick = uploadBridgePackage;
+  $("bridgeConnCopy").onclick = () => copyBridgeConnection("command");
+  $("bridgeConnConfigCopy").onclick = () => copyBridgeConnection("config");
+  $("bridgeServerInput").addEventListener("input", () => {
+    refreshBridgeDownloadHref();
+    if (state.isAdmin) loadBridgeConnection(); // 连接参数文本同步用填写的服务器地址
+  });
   // 资料 / 数字员工头像选择控件
   pfAvatarPicker = bindAvatarPicker("pfAvatarPreview", "pfAvatarFile", "pfAvatarUploadBtn", "pfAvatarClearBtn", "🧑", (url) => { profileAvatar = url; });
   afAvatarPicker = bindAvatarPicker("afAvatarPreview", "afAvatarFile", "afAvatarUploadBtn", "afAvatarClearBtn", "🤖", (url) => { agentAvatar = url; });
@@ -7469,8 +7715,7 @@ function init() {
   $("sfExecutionLocation").addEventListener("change", syncSkillKind);
   $("sfSave").onclick = saveSkill;
   $("sfTest").onclick = () => testSkill(editingSkillId);
-  $("sgGenerate").onclick = generateSkill;
-  $("sgStopGen").onclick = cancelLongTaskIfAny; // 停止本次技能生成（只读，安全）
+  $("sgGenerate").onclick = generateSkill; // 同按钮切换：空闲=生成；生成中点击=停止
   $("afSkillLibManageBtn").onclick = openSkillModal;
   // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);
