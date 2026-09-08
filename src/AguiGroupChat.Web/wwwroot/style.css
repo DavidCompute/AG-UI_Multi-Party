@@ -1458,11 +1458,11 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: inset 0
 /* ---- 聊天空态：未选群时显示友好的引导 ---- */
 #messages:empty::before {
   content: "🎙 选择一个群开始对话";
-  display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 15px; letter-spacing: .02em;
-  min-height: 100%; text-align: center;
+  text-align: center;
 }
-#messages:empty { display: flex; align-items: center; justify-content: center; min-height: 100%; }
+/* 空态只居中于可用区域（不撑满容器：min-height:100% 会把下方输入区顶出视口） */
+#messages:empty { display: flex; align-items: center; justify-content: center; min-height: 0; }
 
 /* 已选知聚但无消息时的空态提示（区别于上方「未选群」的占位引导） */
 .msg-empty-hint {
