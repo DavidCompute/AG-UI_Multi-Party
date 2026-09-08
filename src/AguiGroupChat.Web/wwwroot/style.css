@@ -346,11 +346,12 @@ select {
 .msg .stop-btn svg { width: 12px; height: 12px; }
 .msg .stop-btn:hover { color: #ff8a80; background: rgba(255, 138, 128, .12); }
 .msg .stop-btn:disabled { opacity: .45; cursor: default; }
-.msg .topic-start-btn, .msg .copy-btn, .msg .regenerate-btn, .msg .recall-btn {
+.msg .topic-start-btn, .msg .copy-btn, .msg .regenerate-btn, .msg .recall-btn, .msg .fb-like, .msg .fb-dislike {
   visibility: hidden;
 }
-.msg:hover .topic-start-btn, .msg:hover .copy-btn, .msg:hover .regenerate-btn, .msg:hover .recall-btn { visibility: visible; }
-/* 消息 👍/👎 评价：与其他头部操作按钮同款描边图标（SVG 14px），常显；已评价态分别高亮（👍 绿 / 👎 红） */
+.msg:hover .topic-start-btn, .msg:hover .copy-btn, .msg:hover .regenerate-btn, .msg:hover .recall-btn,
+.msg:hover .fb-like, .msg:hover .fb-dislike { visibility: visible; }
+/* 消息 👍/👎 评价：与其他头部操作按钮同款描边图标（SVG 14px）+ 悬停显隐；已评价态分别高亮（👍 绿 / 👎 红） */
 .msg .head .fb-like svg, .msg .head .fb-dislike svg { width: 14px; height: 14px; display: block; }
 .msg .head .fb-like.on { color: #5cb860; background: rgba(92, 184, 96, .14); }
 .msg .head .fb-like.on:hover { color: #5cb860; background: rgba(92, 184, 96, .22); }
