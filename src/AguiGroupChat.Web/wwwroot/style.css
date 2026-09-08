@@ -1467,7 +1467,7 @@ textarea:focus { outline: none; border-color: var(--accent); box-shadow: inset 0
 
 /* ---- 聊天空态：未选群时显示友好的引导 ---- */
 #messages:empty::before {
-  content: "🎙 选择一个群开始对话";
+  content: attr(data-empty);
   color: var(--muted); font-size: 15px; letter-spacing: .02em;
   text-align: center;
 }

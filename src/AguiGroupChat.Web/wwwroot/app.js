@@ -353,6 +353,15 @@ function enterApp(data) {
   autoDiscoverClient(true);
 }
 
+/** 空消息区引导文案：未选群 →「请选择知聚」；已选群但暂无消息 →「开始对话」（配合 CSS attr(data-empty)）。 */
+function refreshMessagesEmptyHint() {
+  const msgs = $("messages");
+  if (!msgs) return;
+  msgs.setAttribute("data-empty", state.activeGroupId
+    ? t("msg.emptyStart")
+    : t("chat.selectGroupTip"));
+}
+
 function resetChatState() {
   state.rooms.clear();
   state.msgIndex.clear();
@@ -389,6 +398,7 @@ function resetChatState() {
   hideMentionSuggest();
   renderMentionChips();
   renderAttachList();
+  refreshMessagesEmptyHint();
 }
 
 let logoutInProgress = false; // 重入保护：服务端登出会踢 WS，WS 关闭又触发一次 logout → 只执行一次
@@ -5032,6 +5042,7 @@ async function selectGroup(gid) {
   }
   state.activeGroupId = gid;
   state.activeTopicId = "main"; // 先主话题，随后按话题记忆恢复
+  refreshMessagesEmptyHint(); // 已选群：空态引导切换为「暂无消息，开始对话」
   // 记住用户最后选择的知聚（再次登录自动进入）
   try { localStorage.setItem(LastGroupKey(state.memberId), gid); } catch {}
   const mem = state.mentionMemory.get(gid);
@@ -8578,6 +8589,7 @@ function init() {
     applyBranding(branding);
     if (typeof updateDocTitle === "function") updateDocTitle();
     if (typeof setStatus === "function") setStatus(_connOnline, _connKey);
+    refreshMessagesEmptyHint(); // 空态引导文案跟随语言
   });
 
   // 搜索框右侧“×”清除按钮接线（放在各搜索 input 监听之后，清空时派发的 input 事件可触发过滤）
