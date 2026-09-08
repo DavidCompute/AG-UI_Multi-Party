@@ -5988,6 +5988,66 @@ async function startDiscussion() {
   finally { go.disabled = false; go.textContent = old; }
 }
 
+/** 全局智能检索：打开顶栏「全局搜索」弹窗。 */
+function openGlobalSearchModal() {
+  $("globalSearchModal").classList.remove("hidden");
+  $("gsResults").innerHTML = `<div class="gs-empty">${t("search.gsPrompt")}</div>`;
+  setTimeout(() => { $("gsKeyword").focus(); $("gsKeyword").select(); }, 30);
+}
+
+/** 全局搜索执行：跨知聚检索消息 / 记忆 / 知识库。 */
+async function runGlobalSearch() {
+  const q = $("gsKeyword").value.trim();
+  if (q.length < 2) { toast(t("search.needKeyword")); return; }
+  $("gsResults").innerHTML = `<div class="gs-spin">${t("search.searching")}</div>`;
+  try {
+    const res = await fetch(`/ag-ui/search?q=${encodeURIComponent(q)}&limit=60`, { headers: { Authorization: "Bearer " + (state.token || "") } });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) { $("gsResults").innerHTML = `<div class="gs-empty">${escapeHtml(errMsg(data, t("search.fail", { err: "HTTP " + res.status })))}</div>`; return; }
+    renderGlobalResults(data);
+  } catch { $("gsResults").innerHTML = `<div class="gs-empty">${t("search.networkErr")}</div>`; }
+}
+
+/** 渲染全局检索结果：消息 / 记忆 / 知识库三组；消息与记忆可点击跳转该知聚。 */
+function renderGlobalResults(data) {
+  const wrap = $("gsResults");
+  const msgs = data.messages || [];
+  const mems = data.memories || [];
+  const kbs = data.knowledgeBases || [];
+  if (!msgs.length && !mems.length && !kbs.length) { wrap.innerHTML = `<div class="gs-empty">${t("search.noMatch")}</div>`; return; }
+  const html = [];
+  const row = (hit, icon) => `<div class="gs-row" data-mid="${escapeHtml(hit.messageId || "")}" data-gid="${escapeHtml(hit.groupId || "")}" data-tid="${escapeHtml((hit.topicId || "main").replace(/"/g, ""))}">
+    <div class="gs-meta"><span>${icon} ${escapeHtml(hit.groupName || "")}${hit.senderNickname ? " · " + escapeHtml(hit.senderNickname) : ""}</span><span>${escapeHtml(fmtTime(hit.timestamp))}</span></div>
+    <div class="gs-snippet">${escapeHtml(hit.snippet || "")}</div></div>`;
+  if (msgs.length) {
+    html.push(`<div class="gs-section">${t("search.gsMsgs")}（${msgs.length}）</div>`);
+    html.push(...msgs.map((m) => row(m, "💬")));
+  }
+  if (mems.length) {
+    html.push(`<div class="gs-section">${t("search.gsMems")}（${mems.length}）</div>`);
+    html.push(...mems.map((m) => row(m, "🧠")));
+  }
+  if (kbs.length) {
+    html.push(`<div class="gs-section">${t("search.gsKbs")}（${kbs.length}）</div>`);
+    kbs.forEach((k) => html.push(`<div class="gs-row">
+      <div class="gs-meta"><span>📄 ${escapeHtml(k.name || k.kbId || "")}${k.kind === "chunk" ? " · " + t("search.gsChunk") : ""}</span></div>
+      <div class="gs-snippet">${escapeHtml(k.snippet || "")}</div></div>`));
+  }
+  wrap.innerHTML = html.join("");
+  wrap.querySelectorAll(".gs-row[data-gid]").forEach((el) => {
+    el.onclick = () => {
+      const { gid, mid, tid } = el.dataset;
+      $("globalSearchModal").classList.add("hidden");
+      if (!gid) return;
+      if (state.activeGroupId === gid) { jumpToSearchHit(mid, tid); return; }
+      selectGroup(gid).then(() => {
+        if (!mid) { selectTopic(tid).catch(() => {}); return; }
+        jumpToSearchHit(mid, tid);
+      }).catch(() => {});
+    };
+  });
+}
+
 function openSearchModal() {
   const gid = state.activeGroupId;
   if (!gid) return;
@@ -8812,6 +8872,10 @@ function init() {
   $("searchBtn").onclick = openSearchModal;
   $("searchClose").onclick = () => $("searchModal").classList.add("hidden");
   $("searchGo").onclick = doSearch;
+  // 全局智能检索（跨知聚）
+  $("globalSearchBtn").onclick = openGlobalSearchModal;
+  $("gsClose").onclick = () => $("globalSearchModal").classList.add("hidden");
+  $("gsKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runGlobalSearch(); } });
   $("searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doSearch(); } });
   // 话题进度小结（长话题接续记忆）
   $("topicSummaryBtn").onclick = openTopicSummary;

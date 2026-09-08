@@ -12,7 +12,8 @@
 - **我的数据导出（可携权）**：资料弹窗新增「⬇ 导出我的数据」（`GET /ag-ui/account/export`）——任意登录用户可把账号资料、知聚清单、本人发言（含附件元信息）、本人语义记忆、个人知识库元数据、本人创建的数字员工 / 技能完整定义导成一个 JSON 下载，供注销前留存 / 迁移。**注销弹窗带「先导出」引导**：距上次导出超过 30 天（以服务端审计为准，跨设备一致）时提示并一键先导出。
 - **孤儿定义运营盘点**：管理员控制台新增「孤儿盘点」页签（`GET /ag-ui/admin/orphans`）——列出 Owner 账号已注销的数字员工 / 技能及其引用上下文；未被引用可直接删除，仍被引用的可**接管**到自己名下再常规管理（删除有安全闸，防悬空知聚）。
 - **审计日志检索 + CSV 导出 + 独立表持久化**：`AuditLogService` 支持操作者 / 操作名 / 目标 ID / 时间范围过滤；`GET /ag-ui/admin/audit`（过滤查询）、`/ag-ui/admin/audit.csv`（RFC 4180 + UTF-8 BOM 全量导出）；管理员控制台「审计日志」页签；**数据库模式（PG/MySQL/SQLite）为独立表 `agui_audit`**（写入 / 检索 / 导出 / 保留裁剪全走 SQL，保留策略 5000 条，重启保留；memory / Redis 模式为持久化扩展区）。
-- **消息 👍/👎 按钮改版**：改用与复制 / 重新回答 / 撤回等头部按钮同款描边 SVG 图标（不再用 emoji 字符），已评价态保留 👍绿 / 👎红高亮。
+- **消息 👍/👎 按钮改版**：改用与复制 / 重新回答 / 撤回等头部按钮同款描边 SVG 图标（不再用 emoji 字符），并与其他头部按钮一致的「悬停消息才显示」，已评价态保留 👍绿 / 👎红高亮。
+- **全局智能检索**：顶栏「🔎 全局搜索」跨知聚一次检索消息 / 语义记忆 / 知识库（`GET /ag-ui/search?q=`），结果严格按可见性过滤（成员 / 客服 staff / 顾客参与者各见其当见，不泄露他人会话与定向消息），点击消息 / 记忆可跳转到所在知聚。
 - 详见 `docs/enterprise-compliance.md`。
 
 English:
@@ -20,7 +21,8 @@ English:
 - **My-data export (portability)**: a new “⬇ Export my data” action in the profile (`GET /ag-ui/account/export`) lets any signed-in user download a JSON file with their profile, group memberships, their own messages (incl. attachment metadata), their semantic memories, knowledge-base metadata, and full definitions of the employees / skills they created — to keep or migrate before deletion. The **delete-account dialog now nudges you to export first** when the last export is more than 30 days old (server-side audit, consistent across devices) with a one-click export.
 - **Orphan-definition inventory**: a new Admin Console “Orphan Inventory” tab (`GET /ag-ui/admin/orphans`) lists employees/skills whose owner account is gone, with their reference context; unreferenced ones can be deleted, referenced ones can be **adopted** into the current admin and managed normally (deletion is guarded to prevent orphaning groups).
 - **Audit log search + CSV export + dedicated-table persistence**: `AuditLogService` filters by actor / action / targetId / time range; `GET /ag-ui/admin/audit` (filtered query), `/ag-ui/admin/audit.csv` (RFC 4180 + UTF-8 BOM full export); Admin Console “Audit Log” tab; **database storage (PG/MySQL/SQLite) uses a dedicated `agui_audit` table** (SQL-backed write/search/export/retention pruning capped at 5,000 and surviving restarts; memory/Redis fall back to the persisted section).
-- **Message 👍/👎 restyle**: the like/dislike buttons now use the same outline SVG icon set as the copy / regenerate / recall head buttons (no longer raw emoji glyphs), keeping the 👍 green / 👎 red selected states.
+- **Message 👍/👎 restyle**: the like/dislike buttons now use the same outline SVG icon set as the copy / regenerate / recall head buttons (no longer raw emoji glyphs), keep the 👍 green / 👎 red selected states, and share the same hover-to-show behaviour.
+- **Global intelligent search**: the top-bar “🔎 Global Search” searches messages / semantic memories / knowledge bases across all your groups at once (`GET /ag-ui/search?q=`), with strict visibility scoping (members, support-circle staff and customer participants each see only what they may — no leaking of other customers’ sessions or directed messages); clicking a message / memory jumps into its group.
 - Details in `docs/enterprise-compliance.md`.
 
 ---

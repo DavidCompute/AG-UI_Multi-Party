@@ -111,6 +111,7 @@ app.MapPlanControlApi(); // 编排计划「暂停 / 继续」
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
 app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
+app.MapGlobalSearchApi(); // 全局智能检索（跨知聚搜索消息 / 记忆 / 知识库）
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态

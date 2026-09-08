@@ -77,6 +77,7 @@ public static class DesktopApp
         app.MapExportImportApi(); // 数据导出 / 导入（账号 + 智能体 + 聊天记录 + 附件）
         app.MapSystemApi();     // 模型配置（endpoint / apiKey）+ 初始化（清空一切）
         app.MapMemoryApi();     // 记忆治理：分群分级 / 自动遗忘 / 可视化
+        app.MapGlobalSearchApi(); // 全局智能检索（跨知聚搜索消息 / 记忆 / 知识库）
         app.MapScheduledTaskApi(); // 重复性定时任务（1.4）
         app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态

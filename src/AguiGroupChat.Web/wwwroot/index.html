@@ -18,6 +18,7 @@
       <button id="themeBtn" class="chip-btn" data-i18n-title="topbar.theme">☀️</button>
       <button id="helpBtn" class="chip-btn" data-i18n-title="topbar.help">❓ <span data-i18n="topbar.helpText">帮助</span></button>
       <button id="agentManageBtn" class="chip-btn" data-i18n-title="topbar.agents">🤖 <span data-i18n="topbar.agentsText">数字员工</span></button>
+      <button id="globalSearchBtn" class="chip-btn" data-i18n-title="topbar.globalSearch" type="button">🔎 <span data-i18n="search.globalBtn">全局搜索</span></button>
       <button id="notifBtn" class="chip-btn notif-btn" data-i18n-title="topbar.notifications" data-i18n-label="topbar.notifications" aria-haspopup="true" aria-expanded="false">🔔<span id="notifBadge" class="notif-badge hidden">0</span></button>
       <span id="meChip" class="me-chip hidden" data-i18n-title="topbar.account">
         <span id="meAvatar" class="me-avatar hidden"><img alt="" /></span>
@@ -1301,6 +1302,22 @@
       <div id="statusBody" class="status-body" data-i18n="status.loading">加载中…</div>
       <div class="modal-actions">
         <button id="statusClose" class="btn-ghost" data-i18n="status.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全局搜索（跨知聚检索消息 / 记忆 / 知识库） -->
+  <div id="globalSearchModal" class="modal-overlay hidden">
+    <div class="modal search-modal">
+      <div class="modal-title" data-i18n="search.title">🔎 全局搜索</div>
+      <p class="form-hint" style="margin:0 0 8px" data-i18n="search.hint">一次搜遍您所在知聚的消息、语义记忆与可读知识库（Enter 搜索）</p>
+      <span class="search-clear-wrap" style="width:100%">
+        <input id="gsKeyword" class="modal-input" maxlength="100" autocomplete="off" data-i18n-placeholder="search.placeholder" />
+        <button type="button" class="search-clear" data-clear-for="gsKeyword" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+      </span>
+      <div id="gsResults" class="gs-results"></div>
+      <div class="modal-actions">
+        <button id="gsClose" class="btn-ghost" data-i18n="ui.cancel">取消</button>
       </div>
     </div>
   </div>
