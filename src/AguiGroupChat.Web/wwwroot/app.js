@@ -1835,6 +1835,9 @@ function openAgentForm(agentId) {
   // 可调用子数字员工（Skills）：回显 + 渲染选择器
   agentSkillPicks = [...(a?.skills || [])].filter((s) => s && s.targetAgentId)
     .map((s) => ({ skillId: s.skillId || "", description: s.description || "", targetAgentId: s.targetAgentId }));
+  // 组织架构已连线（指派 / 提升 / 交接）的目标也属于本角色“可调用”：自动并入勾选并随保存生效，
+  // 使「组织架构」里已有的连接在本表单中正确呈现为已勾选。
+  mergeOrgLinkedSkillPicks(a);
   renderAgentSkillPicks();
   // 知识库：回显绑定
   agentKbIds = [...(a?.knowledgeBaseIds || [])];
@@ -1935,6 +1938,7 @@ let skillList = [];      // 技能库 [{skillId,name,description,kind,body,param
 let editingSkillId = null;
 let skillSearchQuery = "";  // 技能库搜索关键词（仅前端过滤）
 let selectedSkills = new Set(); // 技能批量删除所选 skillId
+let skillViewerReturnToAgent = false; // 从“数字员工表单 → ✏️ 查看/编辑技能”进入时：返回/保存后应直接回到该表单
 
 /** 加载技能库列表。返回是否成功（登录态）。 */
 async function loadSkills() {
@@ -2002,6 +2006,7 @@ function updateSkillBatchStatus() {
 async function openSkillModal() {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
   if (!longTaskGuard()) { toast(t("skill.gen.busy")); return; } // 已有长任务（组织编排等）在跑时暂不打开，避免并发生成
+  skillViewerReturnToAgent = false; // 从技能库工具栏/管理按钮正常打开：返回仍回技能库列表
   skillSearchQuery = "";
   selectedSkills = new Set();
   const box = $("skillSearch"); if (box) box.value = "";
@@ -2098,7 +2103,16 @@ async function saveSkill() {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(t("common.saveFail", { err: errMsg(data, res.status) })); return; }
     toast(editingSkillId ? t("skill.updated") : t("skill.created"));
-    await loadSkills(); renderSkillList();
+    await loadSkills();
+    if (skillViewerReturnToAgent) {
+      // 从数字员工表单进入：保存后直接回该表单并刷新技能挂载列表
+      skillViewerReturnToAgent = false;
+      showSkillListView();
+      $("skillModal").classList.add("hidden");
+      renderAgentSkillDefPicks();
+      return;
+    }
+    renderSkillList();
     showSkillListView();
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
@@ -2271,24 +2285,67 @@ async function batchDeleteSkills() {
   await loadSkills(); renderSkillList();
 }
 
-/** 数字员工表单：可复用技能（技能库）多选回显渲染。 */
+/** 数字员工表单：可复用技能（技能库）多选回显渲染。每行另带「查看 / 编辑」入口直达技能库编辑器。 */
 function renderAgentSkillDefPicks() {
   const el = $("afSkillDefList");
   el.innerHTML = "";
   (skillList || []).forEach((s) => {
     const on = agentSkillDefIds.includes(s.skillId);
-    const label = document.createElement("label");
-    label.className = "kb-pick-item" + (on ? " on" : "");
     const kindTag = ({ shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort"), dotnet: t("skill.kind.dotnetShort"), org_deploy: t("skill.kind.orgDeployShort") })[(s.kind || "").toLowerCase()] || s.kind || s.skillId;
-    label.innerHTML = `<input type="checkbox" value="${escapeHtml(s.skillId)}" ${on ? "checked" : ""} /> <span class="skill-kind tag-skill">${escapeHtml(kindTag)}</span> <b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code> <span class="kb-meta">${escapeHtml(s.description || "")}</span>`;
-    label.querySelector("input").addEventListener("change", (e) => {
+    // 行 = 左侧勾选区（label 整体可点）+ 右侧查看/编辑入口（按钮不放 label 内，避免点击按钮同时勾选）
+    const row = document.createElement("div");
+    row.className = "kb-pick-item" + (on ? " on" : "");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
+    const lab = document.createElement("label");
+    lab.style.cssText = "display:flex;align-items:center;gap:6px;flex:1;min-width:0;cursor:pointer;margin:0";
+    lab.innerHTML = `<input type="checkbox" value="${escapeHtml(s.skillId)}" ${on ? "checked" : ""} style="flex-shrink:0" /> <span class="skill-kind tag-skill">${escapeHtml(kindTag)}</span> <b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code> <span class="kb-meta">${escapeHtml(s.description || "")}</span>`;
+    lab.querySelector("input").addEventListener("change", (e) => {
       const id = e.target.value, check = e.target.checked;
       const i = agentSkillDefIds.indexOf(id);
       if (check && i < 0) agentSkillDefIds.push(id);
       if (!check && i >= 0) agentSkillDefIds.splice(i, 1);
       renderAgentSkillDefPicks();
     });
-    el.appendChild(label);
+    const view = document.createElement("button");
+    view.type = "button";
+    view.className = "chip-btn";
+    view.style.cssText = "flex:none;padding:2px 8px;font-size:12px;white-space:nowrap";
+    view.textContent = "✏️ " + t("agent.form.skillDef.view");
+    view.title = t("agent.form.skillDef.view");
+    view.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); openAgentSkillViewer(s.skillId); };
+    row.appendChild(lab);
+    row.appendChild(view);
+    el.appendChild(row);
+  });
+}
+
+/** 技能库“查看 / 编辑”入口：从数字员工表单直接打开指定技能到技能库编辑器。
+ *  返回 / 保存后直接回到该数字员工表单（不进技能库列表，避免“返回的页面不对”）。 */
+async function openAgentSkillViewer(skillId) {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  if (longTaskBusy) { toast(t("common.busyLongTask")); return; }
+  if (skillList.length === 0) await loadSkills();
+  if (!(skillList || []).some((x) => x.skillId === skillId)) { toast(t("skill.notFound")); return; }
+  skillViewerReturnToAgent = true;
+  showSkillFormView();
+  openSkillForm(skillId);
+  $("skillModal").classList.remove("hidden");
+}
+
+/** 组织架构定义的连接目标（AssignmentIds / EscalationAgentId / RelayToAgentId）若尚未在可调用技能中，
+ *  自动补一项（skillId 留空由后端生成），保证打开编辑时这些“可调用数字员工”正确显示为已勾选。 */
+function mergeOrgLinkedSkillPicks(a) {
+  const targets = new Set();
+  (a?.assignmentIds || []).forEach((id) => { if (id) targets.add(id); });
+  if (a?.escalationAgentId) targets.add(a.escalationAgentId);
+  if (a?.relayToAgentId) targets.add(a.relayToAgentId);
+  targets.forEach((tid) => {
+    if (agentSkillPicks.some((p) => p.targetAgentId === tid)) return;
+    const ag2 = (agentList || []).find((x) => x.agentId === tid);
+    const desc = ag2?.description || ag2?.nickname
+      ? `调用数字员工「${ag2?.nickname || tid}」${ag2?.description ? "（" + ag2.description + "）" : ""}处理相关事务。`
+      : `调用数字员工「${tid}」处理相关事务。`;
+    agentSkillPicks.push({ skillId: "", description: desc, targetAgentId: tid });
   });
 }
 
@@ -7577,6 +7634,28 @@ function uiPrompt(opts) {
 
 _bindUiDialogKeys(); // 绑定一次即可
 
+/* ============ 搜索框“×”清除 ============ */
+
+/** 为所有 .search-clear 按钮接线：输入非空时显示；点击清空并触发 input（各列表按 input 过滤），再回到输入框。 */
+function initSearchClears() {
+  document.querySelectorAll("button.search-clear").forEach((btn) => {
+    const input = btn.dataset.clearFor ? document.getElementById(btn.dataset.clearFor) : null;
+    if (!input) return;
+    const sync = () => { btn.style.display = input.value ? "flex" : "none"; };
+    input.addEventListener("input", sync);
+    input.addEventListener("change", sync);
+    // 阻止 mousedown 默认行为：避免点击 × 时输入框失焦（部分搜索浮层/成员选择会在失焦时收起）
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => {
+      input.value = "";
+      sync();
+      input.focus();
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    sync();
+  });
+}
+
 /* ============ 初始化 ============ */
 
 function init() {
@@ -7781,6 +7860,7 @@ function init() {
   $("agentSkillLibBtn").onclick = async () => { if (!state.token) { toast(t("agent.err.loginRequired")); return; } await loadSkills(); openSkillModal(); };
   $("skillCloseBtn").onclick = () => {
     cancelLongTaskIfAny(); // 关闭技能库若仍有可取消的生成则中止，避免后台残留与锁未复位
+    skillViewerReturnToAgent = false;
     $("skillModal").classList.add("hidden");
   };
   // 试运行·结果弹窗的关闭（按钮 / Esc）
@@ -7789,7 +7869,18 @@ function init() {
   $("skillRunResultModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSkillRunResult(); });
   $("skillRunResultModal").addEventListener("click", (e) => { if (e.target === $("skillRunResultModal")) closeSkillRunResult(); });
   $("skillAddBtn").onclick = () => openSkillForm(null);
-  $("sfBack").onclick = () => { if (longTaskBusy) { toast(t("common.busyLongTask")); return; } showSkillListView(); };
+  $("sfBack").onclick = () => {
+    if (longTaskBusy) { toast(t("common.busyLongTask")); return; }
+    if (skillViewerReturnToAgent) {
+      // 从数字员工表单进入：返回直接回该表单（丢弃本次技能编辑，不写库）
+      skillViewerReturnToAgent = false;
+      showSkillListView();
+      $("skillModal").classList.add("hidden");
+      renderAgentSkillDefPicks();
+      return;
+    }
+    showSkillListView();
+  };
   $("skillSearch").addEventListener("input", (e) => { skillSearchQuery = e.target.value; renderSkillList(); });
   $("skillSelectAll").addEventListener("change", (e) => {
     if (e.target.checked) selectedSkills = new Set(skillList.filter((s) => !s.ownerId || state.isAdmin || s.ownerId === state.memberId).map((s) => s.skillId));
@@ -8084,6 +8175,9 @@ function init() {
     if (typeof updateDocTitle === "function") updateDocTitle();
     if (typeof setStatus === "function") setStatus(_connOnline, _connKey);
   });
+
+  // 搜索框右侧“×”清除按钮接线（放在各搜索 input 监听之后，清空时派发的 input 事件可触发过滤）
+  initSearchClears();
 
   // 恢复上次会话（校验令牌），否则显示登录页
   tryRestoreSession();

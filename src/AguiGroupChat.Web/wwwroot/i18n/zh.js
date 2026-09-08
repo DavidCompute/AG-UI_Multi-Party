@@ -346,8 +346,10 @@ window.I18N_DICTS.zh = {
   "skill.err.descRequired": "请填写技能描述",
   "skill.err.bodyRequired": "该类型的技能正文不能为空",
   "skill.err.saveFirst": "请先保存技能再试运行",
-  "agent.form.skillDefs.hint": "可复用技能（技能库，可跨数字员工复用）：在下方技能库创建维护，或让数字员工用自然语言创建；勾选后本数字员工即可调用。",
-  "agent.form.subAgents.hint": "可调用子数字员工（技能）：把其他数字员工挂为本角色可调用的技能——模型需要其领域能力时会自动调起；勾选后可为每项填一句调用说明。",
+  "agent.form.skillDefs.hint": "可复用技能（技能库，可跨数字员工复用）：在下方技能库创建维护，或让数字员工用自然语言创建；勾选后本数字员工即可调用。每行右侧「✏️ 查看 / 编辑」可直达技能库打开该技能。",
+  "agent.form.skillDef.view": "查看 / 编辑技能",
+  "skill.notFound": "技能不存在或已被删除",
+  "agent.form.subAgents.hint": "可调用子数字员工（技能）：把其他数字员工挂为本角色可调用的技能——模型需要其领域能力时会自动调起；勾选后可为每项填一句调用说明。组织架构已连线（指派 / 提升 / 交接）的数字员工会自动勾选。",
   "agent.form.subAgentDescPh": "调用说明：模型何时调用该子数字员工（可为空）",
 
   /* --- 数字员工管理（本片迁移新增） --- */
@@ -773,6 +775,7 @@ window.I18N_DICTS.zh = {
 
   /* --- 通用 --- */
   "common.saveFail": "保存失败：{err}",
+  "common.clearSearch": "清空搜索",
 
   /* --- 通用网页内对话框（uiDialog）--- */
   "ui.confirm": "确认",

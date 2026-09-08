@@ -142,7 +142,10 @@
       <div id="agentListView">
         <div class="modal-title"><span data-i18n="agent.title">AI 角色管理</span> <span id="agentCount" class="count-badge"></span></div>
         <div class="agent-toolbar">
-          <input id="agentSearch" class="modal-input agent-search" data-i18n-placeholder="agent.search" />
+          <span class="agent-search search-clear-wrap" style="flex:1 1 100%;min-width:0">
+            <input id="agentSearch" class="modal-input" data-i18n-placeholder="agent.search" />
+            <button type="button" class="search-clear" data-clear-for="agentSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
           <button id="agentOrgBtn" class="chip-btn" data-i18n-title="agent.orgChart">🌐 <span data-i18n="agent.orgBtn">组织架构</span></button>
           <button id="agentOrchBtn" class="chip-btn" data-i18n-title="org.orchTitle">🛠️ <span data-i18n="org.orchBtn">一键编排</span></button>
           <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
@@ -414,7 +417,10 @@
       <!-- 技能库列表 -->
       <div id="skillListView">
         <div style="margin-bottom:8px">
-          <input id="skillSearch" class="modal-input agent-search" style="width:100%" data-i18n-placeholder="skill.search" />
+          <span class="search-clear-wrap" style="width:100%">
+            <input id="skillSearch" class="modal-input" data-i18n-placeholder="skill.search" />
+            <button type="button" class="search-clear" data-clear-for="skillSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
         </div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:12px"><input id="skillSelectAll" type="checkbox" style="width:14px;height:14px;accent-color:#4f8cff" /> <span data-i18n="skill.selectAll">全选</span></label>
@@ -669,7 +675,10 @@
         <select id="memGroupSelect" class="modal-input" style="flex:1;min-width:120px">
           <option value="" data-i18n="memory.allGroups">全部知聚</option>
         </select>
-        <input id="memKeyword" class="modal-input" data-i18n-placeholder="memory.searchPh" style="flex:2;min-width:140px" />
+        <span class="search-clear-wrap" style="flex:2;min-width:140px">
+          <input id="memKeyword" class="modal-input" data-i18n-placeholder="memory.searchPh" />
+          <button type="button" class="search-clear" data-clear-for="memKeyword" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+        </span>
         <button id="memSearchBtn" class="create-group-btn" data-i18n-title="memory.searchTip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button>
         <button id="memForgetBtn" class="create-group-btn" style="color:var(--warn)" data-i18n-title="memory.forgetTip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
       </div>
@@ -769,7 +778,10 @@
     <div class="modal">
       <div class="modal-title" data-i18n="am.title">添加成员</div>
       <div class="modal-label">选择要加入「<span id="addMemberGroupName"></span>」的成员</div>
-      <input id="addMemberSearch" class="modal-input" data-i18n-placeholder="am.searchPh" />
+      <span class="search-clear-wrap" style="width:100%">
+        <input id="addMemberSearch" class="modal-input" data-i18n-placeholder="am.searchPh" />
+        <button type="button" class="search-clear" data-clear-for="addMemberSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+      </span>
       <div id="addMemberList" class="member-pick"></div>
       <div class="modal-actions">
         <button id="addMemberCancel" class="btn-ghost" data-i18n="am.cancel">取消</button>
@@ -798,7 +810,10 @@
       </div>
       <div id="createSupportHint" class="modal-label hidden" style="color:#8a5a00;font-size:12px" data-i18n="create.kindSupportHint">客服知聚对所有用户可见：你拉入的成员均为客服（可看全部会话），普通用户进入后只能看到自己的会话。(客服知聚不支持私密)</div>
       <div class="modal-label" data-i18n="create.chooseMembers">选择成员（知聚主自动加入，可勾选数字员工）</div>
-      <input id="createMemberSearch" class="modal-input" data-i18n-placeholder="create.searchPh" />
+      <span class="search-clear-wrap" style="width:100%">
+        <input id="createMemberSearch" class="modal-input" data-i18n-placeholder="create.searchPh" />
+        <button type="button" class="search-clear" data-clear-for="createMemberSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+      </span>
       <div id="createMemberList" class="member-pick"></div>
       <div class="modal-actions">
         <button id="createCancel" class="btn-ghost" data-i18n="create.cancel">取消</button>
@@ -1034,7 +1049,10 @@
     <div class="modal search-modal">
       <div class="modal-title">🔍 <span data-i18n="search.titleText">搜索消息</span> · <span id="searchGroupName"></span></div>
       <div class="search-input-row">
-        <input id="searchInput" class="modal-input" data-i18n-placeholder="search.ph" maxlength="100" />
+        <span class="search-clear-wrap" style="flex:1">
+          <input id="searchInput" class="modal-input" data-i18n-placeholder="search.ph" maxlength="100" />
+          <button type="button" class="search-clear" data-clear-for="searchInput" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+        </span>
         <button id="searchGo" class="send" data-i18n="search.go">搜索</button>
       </div>
       <div id="searchResults" class="search-results"></div>

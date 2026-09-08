@@ -346,8 +346,10 @@ window.I18N_DICTS.en = {
   "skill.err.descRequired": "Please enter a skill description",
   "skill.err.bodyRequired": "This skill type requires a non-empty body",
   "skill.err.saveFirst": "Please save the skill before testing",
-  "agent.form.skillDefs.hint": "Reusable skills (skill library, reusable across digital employees): create/maintain them in the skill library below, or let an employee create them in natural language; tick to let this employee invoke them.",
-  "agent.form.subAgents.hint": "Callable sub employees (skills): attach other digital employees as callable skills of this role - the model auto-invokes one when it needs that employee's capability; tick one and optionally add a call description.",
+  "agent.form.skillDefs.hint": "Reusable skills (skill library, reusable across digital employees): create/maintain them in the skill library below, or let an employee create them in natural language; tick to let this employee invoke them. Use \"✏️ View / edit\" on each row to open that skill in the library.",
+  "agent.form.skillDef.view": "View / edit skill",
+  "skill.notFound": "Skill not found or already deleted",
+  "agent.form.subAgents.hint": "Callable sub employees (skills): attach other digital employees as callable skills of this role - the model auto-invokes one when it needs that employee's capability; tick one and optionally add a call description. Employees already linked in the org structure (assignment / escalation / handoff) are ticked automatically.",
   "agent.form.subAgentDescPh": "Call description: when the model should call this sub employee (optional)",
 
   /* --- 数字员工管理（本片迁移新增） --- */
@@ -775,6 +777,7 @@ window.I18N_DICTS.en = {
 
   /* --- 通用 --- */
   "common.saveFail": "Save failed: {err}",
+  "common.clearSearch": "Clear search",
 
   /* --- In-page dialog (uiDialog) --- */
   "ui.confirm": "Confirm",
