@@ -33,6 +33,8 @@ public sealed class AccountErasureTests
         public TotpService Totp { get; } = new();
         public FakeMemory Memory { get; } = new();
         public KnowledgeBaseCatalog Kbs { get; }
+        public AgentCatalog Catalog { get; }
+        public AgentSkillCatalog Skills { get; }
         public AuditLogService Audit { get; } = new();
         public AccountErasureService Erasure { get; }
 
@@ -45,10 +47,12 @@ public sealed class AccountErasureTests
                 NullLogger<GroupHub>.Instance, memory: Memory);
             Auth = new AuthService(Users, new AuthOptions(), TimeProvider.System,
                 NullLogger<AuthService>.Instance);
-            Kbs = new KnowledgeBaseCatalog(new AgentOptions(),
-                new ServiceCollection().BuildServiceProvider(), NullLoggerFactory.Instance);
+            var services = new ServiceCollection().BuildServiceProvider();
+            Kbs = new KnowledgeBaseCatalog(new AgentOptions(), services, NullLoggerFactory.Instance);
+            Catalog = new AgentCatalog(new AgentOptions(), NullLoggerFactory.Instance, services);
+            Skills = new AgentSkillCatalog(NullLoggerFactory.Instance, new AgentOptions());
             Erasure = new AccountErasureService(Auth, Totp, Hub, Kbs, Memory, Audit,
-                NullLogger<AccountErasureService>.Instance);
+                NullLogger<AccountErasureService>.Instance, Catalog, Skills, Agents);
         }
 
         public UserAccount AddUser(string id, string username, PlatformRole role = PlatformRole.User, string password = "secret123")
@@ -283,5 +287,49 @@ public sealed class AccountErasureTests
         Assert.False(h.Totp.IsEnabled("user_2"));               // TOTP 密钥清除
         Assert.Empty(h.Auth.SnapshotSessions());                // 全部会话吊销
         Assert.Equal("user.account.delete", h.Audit.Query(1).Single().Action);
+    }
+
+    [Fact]
+    public async Task Erase_RemovesUnreferencedOwnedAgentsAndSkills_KeepsReferencedOnes()
+    {
+        var h = new Harness();
+        h.AddUser("user_1", "admin");
+        h.AddUser("user_2", "victim");
+        h.AddUser("user_3", "heir");
+
+        // victim 拥有两个数字员工：agent_mine 未被引用（将被删）；agent_kept 是转让群成员（将保留）
+        h.Catalog.Upsert(new AgentDefinition { AgentId = "agent_mine", Nickname = "我的员工", OwnerId = "user_2" });
+        h.Catalog.Upsert(new AgentDefinition { AgentId = "agent_kept", Nickname = "驻场员工", OwnerId = "user_2", SkillDefIds = ["sk_kept"] });
+        // victim 拥有两个技能：sk_kept（被保留员工引用 → 保留）；sk_lone（无引用 → 删除）
+        h.Skills.Upsert(new AgentSkillDefinition { SkillId = "sk_kept", Name = "保留技能", OwnerId = "user_2" });
+        h.Skills.Upsert(new AgentSkillDefinition { SkillId = "sk_lone", Name = "孤儿技能", OwnerId = "user_2" });
+        // 触发注册（挂在将解散的群）→ 删除 agent_mine 时同步清空
+        h.Agents.Register(new AgentRegisterRequest { AgentId = "agent_mine", GroupIds = ["group_dead"] });
+
+        // victim 拥有的知聚：H 含用户成员 heir + agent_kept（转让保留）；D 只有 agent_mine（解散删除）
+        var gH = await HubFixture.CreateGroupAsync(h.Hub, "转让群", "user_2", "user_3");
+        h.Store.AddMember(gH.GroupId, new GroupMember
+        {
+            MemberId = "agent_kept", MemberType = MemberType.Agent, Nickname = "驻场员工",
+            Role = GroupRole.Normal, OnlineStatus = OnlineStatus.Offline,
+            JoinTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        });
+        var gD = await HubFixture.CreateGroupAsync(h.Hub, "解散群", "user_2", "agent_mine");
+
+        var report = await h.Erasure.EraseAsync("user_2", "user_1", "");
+
+        // 定义清理：未引用的 agent_mine 删除（触发注册同步清空）；agent_kept 因仍在转让群成员而保留
+        Assert.Null(h.Catalog.GetDefinition("agent_mine"));
+        Assert.NotNull(h.Catalog.GetDefinition("agent_kept"));
+        Assert.Empty(h.Agents.ForGroup("group_dead"));
+        Assert.Equal(1, report.AgentsRemoved);
+        // 技能：被保留员工引用的 sk_kept 保留；孤儿 sk_lone 删除
+        Assert.NotNull(h.Skills.Get("sk_kept"));
+        Assert.Null(h.Skills.Get("sk_lone"));
+        Assert.Equal(1, report.SkillsRemoved);
+        // 群：D 解散、H 转让给 heir 且 agent_kept 仍为成员（功能不悬空）
+        Assert.Null(h.Store.GetGroup(gD.GroupId));
+        Assert.Equal("user_3", h.Store.GetGroup(gH.GroupId)!.OwnerId);
+        Assert.True(h.Store.IsMember(gH.GroupId, "agent_kept"));
     }
 }

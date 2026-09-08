@@ -22,8 +22,10 @@ namespace AguiGroupChat.Web;
 ///   - 其全部<b>发言的语义记忆</b>物理删除；
 ///   - 其<b>创建的个人知识库</b>连同文档向量 / 图谱物理删除；
 ///   - 现存群中该用户<b>发言的正文与附件等内容匿名化</b>（正文清空、昵称改「已注销用户」占位、附件 / 提及 /
-///     推理 / 技能链 / 计划清除——保留消息行与时间线，其余成员会话上下文不破坏，但其个人数据不再留存）。
-///   - 保留：其余用户发言、其创建的数字员工与技能（可能仍被他人群引用，删除会导致悬空成员；孤儿清理单独治理）。
+///     推理 / 技能链 / 计划清除——保留消息行与时间线，其余成员会话上下文不破坏，但其个人数据不再留存）；
+///   - <b>其创建的数字员工 / 技能孤儿清理</b>：仍被现存群成员引用（或仍被保留定义引用）的定义保留
+///     （保证他人群功能不悬空），其余（随其解散的知聚、私密/分身等）连同触发注册一并删除。
+///   - 保留：其余用户发言。
 /// </summary>
 public sealed class AccountErasureService
 {
@@ -36,6 +38,10 @@ public sealed class AccountErasureService
     private readonly IMessageMemory? _memory;
     private readonly AuditLogService _audit;
     private readonly ILogger<AccountErasureService> _logger;
+    // 孤儿清理用（可选）：其创建的数字员工 / 技能定义与触发注册，未被现存群引用的删除、被引用的保留
+    private readonly AgentCatalog? _agentCatalog;
+    private readonly AgentSkillCatalog? _agentSkills;
+    private readonly AgentRegistry? _agentRegistry;
 
     public AccountErasureService(
         AuthService auth,
@@ -44,7 +50,10 @@ public sealed class AccountErasureService
         KnowledgeBaseCatalog kbs,
         IMessageMemory? memory,
         AuditLogService audit,
-        ILogger<AccountErasureService> logger)
+        ILogger<AccountErasureService> logger,
+        AgentCatalog? agentCatalog = null,
+        AgentSkillCatalog? agentSkills = null,
+        AgentRegistry? agentRegistry = null)
     {
         _auth = auth;
         _totp = totp;
@@ -53,6 +62,9 @@ public sealed class AccountErasureService
         _memory = memory;
         _audit = audit;
         _logger = logger;
+        _agentCatalog = agentCatalog;
+        _agentSkills = agentSkills;
+        _agentRegistry = agentRegistry;
     }
 
     /// <summary>
@@ -112,17 +124,21 @@ public sealed class AccountErasureService
             //     仅影响其本人消息（不触碰他人发言）；其拥有且已解散的群消息已被物理删除，不在此列。
             var messagesAnonymized = _hub.Store.AnonymizeSender(targetUserId, DeletedAccountNickname);
 
+            // 5c) 其创建的数字员工 / 技能孤儿清理：未被现存群引用（成员身份 / 保留定义的交接引用）的定义删除，
+            //     含分身（twin_*）；仍被引用的保留（保证他人知聚功能不悬空）。
+            var (agentsRemoved, skillsRemoved) = CleanupOrphanedDefinitions(targetUserId);
+
             // 6) 删除账号行（4-6 步均成功才删除：半途失败时保留账号行（已停用）便于管理员恢复 / 重试）
             var accountRemoved = _auth.DeleteAccountRow(targetUserId);
 
             var operatorName = _auth.GetUser(operatorUserId)?.Username ?? operatorUserId;
             _audit.Record("user.account.delete", operatorUserId, operatorName, targetType: "user",
                 targetId: targetUserId,
-                detail: $"数据擦除：群处置 {groupsHandled} 个、记忆 {memoriesErased} 条、知识库 {kbsRemoved} 个、匿名化发言 {messagesAnonymized} 条{(string.IsNullOrWhiteSpace(reason) ? "" : $"；原因：{reason}")}");
+                detail: $"数据擦除：群处置 {groupsHandled} 个、记忆 {memoriesErased} 条、知识库 {kbsRemoved} 个、匿名化发言 {messagesAnonymized} 条、清理数字员工 {agentsRemoved} / 技能 {skillsRemoved}{(string.IsNullOrWhiteSpace(reason) ? "" : $"；原因：{reason}")}");
 
-            _logger.LogInformation("账号数据擦除完成：target={UserId} operator={Operator}（群 {Groups} / 记忆 {Memories} / 知识库 {Kbs} / 匿名化发言 {Messages}）",
-                targetUserId, operatorUserId, groupsHandled, memoriesErased, kbsRemoved, messagesAnonymized);
-            return new AccountErasureReport(accountRemoved, groupsHandled, memoriesErased, kbsRemoved, messagesAnonymized);
+            _logger.LogInformation("账号数据擦除完成：target={UserId} operator={Operator}（群 {Groups} / 记忆 {Memories} / 知识库 {Kbs} / 匿名化发言 {Messages} / 清理数字员工 {Agents} 技能 {Skills}）",
+                targetUserId, operatorUserId, groupsHandled, memoriesErased, kbsRemoved, messagesAnonymized, agentsRemoved, skillsRemoved);
+            return new AccountErasureReport(accountRemoved, groupsHandled, memoriesErased, kbsRemoved, messagesAnonymized, agentsRemoved, skillsRemoved);
         }
         catch (Exception ex)
         {
@@ -140,6 +156,67 @@ public sealed class AccountErasureService
             .ThenBy(m => m.JoinTime)
             .ToList();
         return members.Count == 0 ? null : members[0].MemberId;
+    }
+
+    /// <summary>该用户创建的知聚 / 技能定义孤儿清理：仅删除<b>未被引用</b>的（现存群成员身份 / 任一现存定义的中继、
+    /// 升级引用），避免他人知聚因删除定义而悬空。同时清理被删数字员工的群内触发注册。返回 (删除智能体, 删除技能)。</summary>
+    private (int AgentsRemoved, int SkillsRemoved) CleanupOrphanedDefinitions(string userId)
+    {
+        if (_agentCatalog is null && _agentSkills is null) return (0, 0);
+
+        var allDefs = _agentCatalog?.ListDefinitions() ?? [];
+        if (allDefs.Count == 0 && _agentSkills is not null) return (0, RemoveOrphanSkills(userId));
+
+        // 现存群中以成员身份引用的智能体：删除会悬空他人知聚 → 保留
+        var memberAgentIds = _hub.Store.AllGroups()
+            .SelectMany(g => _hub.Store.ListMembers(g.GroupId))
+            .Where(m => m.MemberType == MemberType.Agent)
+            .Select(m => m.MemberId)
+            .ToHashSet(StringComparer.Ordinal);
+        // 被任一现存定义以「中继 / 升级」引用的智能体同样保留（避免链路悬空）
+        var referencedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var d in allDefs)
+        {
+            if (!string.IsNullOrWhiteSpace(d.RelayToAgentId)) referencedIds.Add(d.RelayToAgentId!);
+            if (!string.IsNullOrWhiteSpace(d.EscalationAgentId)) referencedIds.Add(d.EscalationAgentId!);
+        }
+
+        var agentsRemoved = 0;
+        if (_agentCatalog is not null)
+        {
+            foreach (var d in allDefs.Where(d => string.Equals(d.OwnerId, userId, StringComparison.Ordinal)).ToList())
+            {
+                if (memberAgentIds.Contains(d.AgentId) || referencedIds.Contains(d.AgentId)) continue; // 仍被引用 → 保留
+                if (_agentCatalog.Remove(d.AgentId)) agentsRemoved++;
+                _agentRegistry?.Unregister(d.AgentId, null); // 同步清空其全部群内触发注册（含被解散的知聚遗留）
+            }
+        }
+
+        var skillsRemoved = RemoveOrphanSkills(userId);
+        _logger.LogInformation("注销清理数字员工 / 技能：user={UserId} 删除智能体 {Agents} / 技能 {Skills}", userId, agentsRemoved, skillsRemoved);
+        return (agentsRemoved, skillsRemoved);
+    }
+
+    /// <summary>删除该用户创建且未被任何<b>现存</b>数字员工引用（SkillDefIds / Skills）的技能定义。</summary>
+    private int RemoveOrphanSkills(string userId)
+    {
+        if (_agentSkills is null) return 0;
+        var usedSkills = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var def in _agentCatalog?.ListDefinitions() ?? [])
+        {
+            foreach (var sid in def.SkillDefIds ?? [])
+                if (!string.IsNullOrWhiteSpace(sid)) usedSkills.Add(sid);
+            foreach (var s in def.Skills ?? [])
+                if (!string.IsNullOrWhiteSpace(s.SkillId)) usedSkills.Add(s.SkillId);
+        }
+
+        var removed = 0;
+        foreach (var s in _agentSkills.ListAll().Where(s => string.Equals(s.OwnerId, userId, StringComparison.Ordinal)).ToList())
+        {
+            if (usedSkills.Contains(s.SkillId)) continue;
+            if (_agentSkills.Remove(s.SkillId)) removed++;
+        }
+        return removed;
     }
 
     /// <summary>按发送者物理删除该用户的全部语义记忆（跨全部群）。删除为物理移除，后续条目前移：
@@ -182,4 +259,6 @@ public sealed record AccountErasureReport(
     int GroupsHandled,
     int MemoriesErased,
     int KnowledgeBasesRemoved,
-    int MessagesAnonymized = 0);
+    int MessagesAnonymized = 0,
+    int AgentsRemoved = 0,
+    int SkillsRemoved = 0);

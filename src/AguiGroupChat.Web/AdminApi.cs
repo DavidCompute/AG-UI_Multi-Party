@@ -271,6 +271,8 @@ public static class AdminApi
                     memoriesErased = report.MemoriesErased,
                     knowledgeBasesRemoved = report.KnowledgeBasesRemoved,
                     messagesAnonymized = report.MessagesAnonymized,
+                    agentsRemoved = report.AgentsRemoved,
+                    skillsRemoved = report.SkillsRemoved,
                 });
             }
             catch (AguiProtocolException ex) { return MapErasureError(ex); }

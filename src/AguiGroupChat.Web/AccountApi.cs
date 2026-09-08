@@ -43,6 +43,8 @@ public static class AccountApi
                     memoriesErased = report.MemoriesErased,
                     knowledgeBasesRemoved = report.KnowledgeBasesRemoved,
                     messagesAnonymized = report.MessagesAnonymized,
+                    agentsRemoved = report.AgentsRemoved,
+                    skillsRemoved = report.SkillsRemoved,
                 });
             }
             catch (AguiProtocolException ex) { return MapError(ex); }
