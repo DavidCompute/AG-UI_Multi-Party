@@ -51,6 +51,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 让“先传文档、隔一轮追问”在跨轮仍能用上文档内容。太小则后轮丢细节，太大则反复喂稿撑长 prefill。</summary>
     private const int MaxHistoryInlineTextChars = 6000;
 
+    /// <summary>话题滚动小结单次扫描消息数上限（从游标之后 / 首次话题尾部取数）。</summary>
+    private const int TopicSummaryScanLimit = 400;
+
     /// <summary>思考过程总量截断（推理模型 reasoning_content 可能很长：防消息 / 前端 / 存储被撑爆）。</summary>
     private const int MaxReasoningTotalChars = 12000;
 
@@ -78,6 +81,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly Lazy<NativeTunnelService?> _nativeTunnel;
     // 轻量运行指标（可选，6.1 可观测性）
     private readonly Lazy<MetricsService?> _metrics;
+    // 话题滚动小结（长话题接续记忆）：可选（未注册服务时不注入）
+    private readonly Lazy<TopicSummaryStore?> _topicSummary;
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
     private readonly BridgeCircuitBreaker _bridgeCircuit = new();
     // 每个线程（群）一个会话锁：并发流式写入同一群消息时串行化。
@@ -207,6 +212,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 轻量运行指标（可选，6.1）
         _metrics = new Lazy<MetricsService?>(() =>
             services.GetService(typeof(MetricsService)) as MetricsService);
+        _topicSummary = new Lazy<TopicSummaryStore?>(() =>
+            services.GetService(typeof(TopicSummaryStore)) as TopicSummaryStore);
         // HITL 悬挂清理与会话锁 TTL 清理改为独立定时器定期执行（不再依赖「新增交互时顺带清理」），
         // 保证即使没有新交互产生，超时未决策的交互 / 已解散群的残留会话锁也能被回收。
         _purgeTimer = new Timer(_ => PurgePeriodicCleanup(), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
@@ -2603,6 +2610,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 智能体上下文窗口：普通知聚只注入全群可见消息（All）；客服知聚补入本次触发顾客的隔离会话消息
         // （含顾客自己的提问与客服定向回复，见 IsVisibleForAgentContext）。按话题过滤（会话历史以话题为单位）。
         var supportCircle = _hub.Value.Store.GetGroup(context.GroupId)?.IsSupportCircle == true;
+
+        // 长话题滚动小结：把“较早对话”的自动摘要先注入（客服知聚跳过——顾客会话彼此隔离），
+        // 让 12 条滑动窗口之外的早期结论仍能进入模型视野。
+        var topicSummary = await MaybeGetTopicSummaryAsync(context, supportCircle, ct);
+        if (topicSummary is not null)
+        {
+            sb.Append("【本话题历史小结（自动生成，供回顾更早对话，不必向用户复述）：】\n")
+              .Append(topicSummary).AppendLine().AppendLine();
+        }
+
         var history = _hub.Value.Store.RecentMessages(context.GroupId, ContextWindowMessages, context.TopicId)
             .Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId && !string.IsNullOrWhiteSpace(m.Content)
                 && IsVisibleForAgentContext(m, context.TriggerUserId, supportCircle))
@@ -2682,6 +2699,67 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var hint = DetectReplyLanguageHint(content);
         if (hint is null) return;
         sb.Append(hint).AppendLine().AppendLine();
+    }
+
+    /// <summary>话题滚动小结：返回可注入的小结文本（有则注入；无则 null）。
+    /// 触发策略：距上次小结（watermark）新增消息达到阈值才生成/更新一次，否则仅回读既有小结。
+    /// 同话题并发只允许一个生成任务（TryBeginGenerate 防抖），失败不阻塞回复。</summary>
+    private async Task<string?> MaybeGetTopicSummaryAsync(AgentInvocationContext context, bool supportCircle, CancellationToken ct)
+    {
+        if (supportCircle || !_options.TopicSummaryEnabled) return null;
+        var store = _topicSummary.Value;
+        if (store is null) return null;
+        var existing = store.Get(context.GroupId, context.TopicId);
+
+        IReadOnlyList<GroupMessage> since;
+        if (existing is { WatermarkMessageId: not null }
+            && _hub.Value.Store.GetMessage(context.GroupId, existing.WatermarkMessageId) is not null)
+        {
+            since = _hub.Value.Store.MessagesAfter(context.GroupId, existing.WatermarkMessageId, TopicSummaryScanLimit, context.TopicId)
+                .Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId && !string.IsNullOrWhiteSpace(m.Content)
+                    && m.Visibility == MessageVisibility.All)
+                .ToList();
+        }
+        else
+        {
+            // 首次（或游标消息已被清空/删除）：取话题尾部最近一批作为本轮小结范围
+            since = _hub.Value.Store.RecentMessages(context.GroupId, TopicSummaryScanLimit, context.TopicId)
+                .Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId && !string.IsNullOrWhiteSpace(m.Content)
+                    && m.Visibility == MessageVisibility.All)
+                .ToList();
+        }
+        since = since.OrderBy(m => m.Timestamp).ThenBy(m => m.MessageId).ToList();
+
+        var threshold = Math.Max(6, _options.TopicSummaryTriggerCount);
+        if (since.Count < threshold) return existing?.Summary;
+        if (!store.TryBeginGenerate(context.GroupId, context.TopicId)) return existing?.Summary; // 已有同话题生成在跑
+
+        try
+        {
+            var messages = since.Select(m => (Who: m.SenderNickname ?? m.SenderId, Text: m.Content)).ToList();
+            var summary = await TopicSummaryGenerator.GenerateAsync(_options, existing?.Summary, messages, _logger, ct);
+            var newest = since[^1];
+            store.Put(new TopicSummaryRecord
+            {
+                GroupId = context.GroupId,
+                TopicId = context.TopicId,
+                Summary = summary,
+                WatermarkMessageId = newest.MessageId,
+                UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                MessageCount = (existing?.MessageCount ?? 0) + since.Count,
+            });
+            return summary;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "话题滚动小结生成失败（忽略，不影响回复）：group={GroupId} topic={TopicId}",
+                context.GroupId, context.TopicId);
+            return existing?.Summary;
+        }
+        finally
+        {
+            store.EndGenerate(context.GroupId, context.TopicId);
+        }
     }
 
     /// <summary>外部 AG-UI 桥接用户消息组装：会话首次建立（无增量游标）发送话题全部历史；

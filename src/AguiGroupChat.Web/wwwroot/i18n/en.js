@@ -978,6 +978,10 @@ window.I18N_DICTS.en = {
   /* --- 话题栏 / 话题操作 --- */
   "topic.mainText": "# General",
   "topic.mainTitle": "Main topic (default in group)",
+  "topic.summaryTip": "📌 View this topic's auto rolling summary (long-thread continuity memory)",
+  "topic.summaryTitle": "Topic progress summary",
+  "topic.summaryHint": "Once enough new messages accumulate, agents compress the earlier conversation into a rolling summary and use it when replying (so long threads still remember earlier conclusions). This shows the latest one.",
+  "topic.summaryEmpty": "(No summary yet. Keep discussing and triggering agents in this topic and one will be generated and shown here.)",
   "topic.creatorTitle": "Topic \"{name}\" · creator {creator}",
   "topic.unreadLabel": "unread messages",
   "topic.clearMainTitle": "Clear main-topic chat history (messages and memory deleted, topic kept)",

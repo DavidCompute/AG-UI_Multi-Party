@@ -52,6 +52,8 @@ public static class AgentHosting
         services.AddSingleton<IAgentGateway>(sp => sp.GetRequiredService<AgentGateway>());
         // 重复性定时任务（1.4）：调度器（AgentScheduler）每分钟轮询这些任务触发
         services.AddSingleton<ScheduledTaskService>();
+        // 话题滚动小结（长话题接续记忆）：内存持有 + 扩展区持久化
+        services.AddSingleton<TopicSummaryStore>();
         // 桥接端点健康度（3.1）：周期 TCP 探测 + 管理员控制台查看
         services.AddSingleton<BridgeHealthService>();
         // 轻量运行指标（6.1）：进程内计数器，管理员控制台查看
@@ -327,6 +329,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("scheduledTasks", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册话题滚动小结到持久化扩展区「topicSummaries」：重启后各话题小结与游标不丢。</summary>
+    public static void RegisterTopicSummaryPersistence(this IServiceProvider services)
+    {
+        var summaries = services.GetRequiredService<TopicSummaryStore>();
+        Func<object?> snapshot = () => summaries.Snapshot().Select(r => (object)r).ToList();
+        Action<JsonElement> restore = element => summaries.Restore(
+            element.Deserialize<List<TopicSummaryRecord>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("topicSummaries", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("topicSummaries", snapshot, restore);
         }
     }
 

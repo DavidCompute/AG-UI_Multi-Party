@@ -115,6 +115,16 @@ public sealed class AgentOptions
     /// （Docker 环境变量 <c>AGENTS_CLIENT_TOOL_TUNNEL_REQUIRE_APPROVAL</c>）
     /// </summary>
     public bool ClientToolTunnelRequireApproval { get; set; } = true;
+
+    /// <summary>
+    /// <b>话题滚动小结（长话题接续记忆）</b>：默认开。开启后，当话题自上次小结起新增消息达到
+    /// <see cref="TopicSummaryTriggerCount"/> 条时，下一次本地模型回复前会自动把“较早对话”滚动压缩成
+    /// 紧凑小结并随上下文注入（滑动窗口截掉早期内容后仍记得此前结论）。客服知聚不做（顾客会话隔离）。
+    /// </summary>
+    public bool TopicSummaryEnabled { get; set; } = true;
+
+    /// <summary>话题滚动小结触发阈值：距上次小结新增消息达到该数量才触发一次生成（成本控制）。</summary>
+    public int TopicSummaryTriggerCount { get; set; } = 20;
 }
 
 /// <summary>

@@ -366,6 +366,7 @@ function resetChatState() {
   $("groupSettingsBtn").disabled = true;
   $("searchBtn").disabled = true;
   $("discussBtn").disabled = true;
+  const ts0 = $("topicSummaryBtn"); if (ts0) ts0.classList.add("hidden");
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
   // 登出 / 切换身份：取消断线重连定时器；清理输入区残留（@ 选择 / @ 全体 / 草稿 / 待发送附件），防跨账号残留
   if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; }
@@ -3351,7 +3352,9 @@ async function loadGroups() {
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
+    const ts2 = $("topicSummaryBtn"); if (ts2) ts2.classList.add("hidden");
   }
+  resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
   // 登录后自动进入上次选择的知聚（一次性，手动刷新知聚列表不触发）
   if (pendingAutoEnterGroup && state.memberId && !state.activeGroupId) {
     pendingAutoEnterGroup = false;
@@ -4580,6 +4583,7 @@ function cleanupRoom(gid) {
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
     $("discussBtn").disabled = true;
+    const ts1 = $("topicSummaryBtn"); if (ts1) ts1.classList.add("hidden");
   }
 }
 
@@ -4969,6 +4973,7 @@ async function selectGroup(gid) {
   $("groupSettingsBtn").disabled = false;
   $("searchBtn").disabled = false; // 知聚内消息全文搜索（进入知聚后可用）
   $("discussBtn").disabled = false; // 多位数字员工讨论（进入知聚后可用）
+  const ts3 = $("topicSummaryBtn"); if (ts3) ts3.classList.remove("hidden"); // 话题进度小结（长话题接续记忆）
   const g = state.groups.find((x) => x.groupId === gid);
   $("chatGroupName").textContent = (g?.isSupportCircle ? (t("support.badge") + " ") : (g?.isPrivate ? "🔒 " : "")) + (g?.groupName || "");
   renderChatMeta();
@@ -5547,6 +5552,30 @@ function openSearchModal() {
   $("searchResults").innerHTML = `<div class="search-empty">${t("search.emptyHint")}</div>`;
   $("searchModal").classList.remove("hidden");
   $("searchInput").focus();
+}
+
+/** 打开“话题进度小结”弹窗：读取该话题最近一次自动生成的滚动小结。 */
+async function openTopicSummary() {
+  const gid = state.activeGroupId;
+  if (!gid || !state.token) return;
+  const topicId = state.activeTopicId || "main";
+  $("tsBody").textContent = t("topic.summaryEmpty");
+  $("tsHint").textContent = t("topic.summaryHint");
+  $("tsGroupName").textContent = $("chatGroupName").textContent || gid;
+  $("topicSummaryModal").classList.remove("hidden");
+  try {
+    const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/topic-summary?topicId=${encodeURIComponent(topicId)}`, {
+      headers: { Authorization: "Bearer " + (state.token || "") },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { $("tsBody").textContent = errMsg(d, t("topic.summaryEmpty")); return; }
+    if (!d.found || !d.summary) { $("tsBody").textContent = t("topic.summaryEmpty"); return; }
+    const at = d.updatedAtMs ? new Date(d.updatedAtMs).toLocaleString() : "";
+    $("tsHint").textContent = t("topic.summaryHint") + (at ? "（更新于 " + at + "，覆盖 " + (d.messageCount || 0) + " 条消息）" : "");
+    $("tsBody").textContent = d.summary;
+  } catch {
+    $("tsBody").textContent = t("topic.summaryEmpty");
+  }
 }
 
 async function doSearch() {
@@ -8136,6 +8165,11 @@ function init() {
   $("searchClose").onclick = () => $("searchModal").classList.add("hidden");
   $("searchGo").onclick = doSearch;
   $("searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doSearch(); } });
+  // 话题进度小结（长话题接续记忆）
+  $("topicSummaryBtn").onclick = openTopicSummary;
+  $("tsClose").onclick = () => $("topicSummaryModal").classList.add("hidden");
+  $("topicSummaryModal").addEventListener("click", (e) => { if (e.target === $("topicSummaryModal")) $("topicSummaryModal").classList.add("hidden"); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("topicSummaryModal").classList.contains("hidden")) $("topicSummaryModal").classList.add("hidden"); });
   // 多位数字员工讨论
   $("discussBtn").onclick = openDiscussModal;
   $("discussCancel").onclick = () => $("discussModal").classList.add("hidden");

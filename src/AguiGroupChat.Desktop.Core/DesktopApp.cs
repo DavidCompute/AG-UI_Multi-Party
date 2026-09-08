@@ -88,6 +88,7 @@ public static class DesktopApp
         app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
         app.Services.RegisterModelConfigPersistence(); // 运行时模型配置跨重启保持
         app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
+        app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+正文）跨重启保持
         app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
         app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
         var loaded = HubApp.InitializePersistence(app);

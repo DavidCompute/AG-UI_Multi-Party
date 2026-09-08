@@ -103,6 +103,7 @@ app.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（登�
 app.MapNativeTunnelApi(); // 内网本机桥反向隧道入口（HTTP/SSE）：桥连入 + 结果回传
 app.MapNativeBridgeDownloadApi(); // 本机桥 Windows 安装包：登录用户下载 / 管理员上传 / 管理员查看连接参数
 app.MapGroupNameApi(); // 群名自动生成（创建群不填名字时）
+app.MapTopicSummaryApi(); // 话题滚动小结读取（长话题接续记忆）
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
 app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
@@ -121,6 +122,7 @@ app.Services.RegisterSessionPersistence(); // 会话跨重启保持：桌面版 
 app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
 app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoint / apiKey）跨重启保持
 app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
+app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+正文）跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
 app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持

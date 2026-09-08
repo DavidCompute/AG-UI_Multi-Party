@@ -976,6 +976,10 @@ window.I18N_DICTS.zh = {
   /* --- 话题栏 / 话题操作 --- */
   "topic.mainText": "# 综合",
   "topic.mainTitle": "主话题（知聚默认）",
+  "topic.summaryTip": "📌 查看该话题的自动进度小结（长话题接续记忆）",
+  "topic.summaryTitle": "话题进度小结",
+  "topic.summaryHint": "数字员工会在话题新增消息达到一定量后，把较早对话自动压缩成小结并随回复使用（长话题也记得之前聊到哪）。这里展示最近一次生成的小结。",
+  "topic.summaryEmpty": "（暂无小结。继续在该话题讨论并触发数字员工后，会自动生成并在此展示。）",
   "topic.creatorTitle": "话题「{name}」· 创建者 {creator}",
   "topic.unreadLabel": "未读消息",
   "topic.clearMainTitle": "清空主话题聊天记录（消息与记忆一并删除，话题保留）",

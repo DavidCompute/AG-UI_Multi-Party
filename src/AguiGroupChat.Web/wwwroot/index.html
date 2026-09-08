@@ -66,6 +66,7 @@
         <span id="chatGroupMeta" class="muted"></span>
         <span class="chat-header-ops">
           <button id="searchBtn" class="chip-btn" data-i18n-title="chat.search" disabled>🔍</button>
+          <button id="topicSummaryBtn" class="chip-btn hidden" data-i18n-title="topic.summaryTip" title="📌 话题进度小结">📌</button>
           <button id="groupSettingsBtn" class="chip-btn" data-i18n-title="chat.settings" disabled>⚙</button>
         </span>
       </div>
@@ -1040,6 +1041,18 @@
       <div class="modal-actions">
         <button id="mmdSourceCopy" class="btn-ghost" data-i18n="mmd.copy">复制源码</button>
         <button id="mmdSourceClose" class="send" data-i18n="mmd.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 话题进度小结：查看该话题自动生成的滚动小结（长话题接续记忆） -->
+  <div id="topicSummaryModal" class="modal-overlay hidden">
+    <div class="modal" style="max-width:560px">
+      <div class="modal-title">📌 <span data-i18n="topic.summaryTitle">话题进度小结</span> · <span id="tsGroupName" class="muted" style="font-size:13px"></span></div>
+      <p class="form-hint" id="tsHint" style="margin:2px 0 8px" data-i18n="topic.summaryHint"></p>
+      <pre id="tsBody" style="white-space:pre-wrap;word-break:break-word;max-height:58vh;overflow:auto;margin:0 0 12px;font-size:13px;line-height:1.6;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 12px"></pre>
+      <div class="modal-actions">
+        <button id="tsClose" class="send" data-i18n="ui.ok">确定</button>
       </div>
     </div>
   </div>
