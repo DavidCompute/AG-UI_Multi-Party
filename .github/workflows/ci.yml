@@ -38,6 +38,13 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Frontend JS syntax check
+        shell: pwsh
+        run: |
+          node --check src/AguiGroupChat.Web/wwwroot/app.js
+          Get-ChildItem -Path src/AguiGroupChat.Web/wwwroot/i18n -Filter *.js | ForEach-Object { node --check $_.FullName }
+          Get-ChildItem -Path tools -Filter *.mjs | ForEach-Object { node --check $_.FullName }
+
       - name: i18n key symmetry check
         run: node .github/workflows/check-i18n-keys.js
 
