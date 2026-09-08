@@ -515,6 +515,25 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
         }
     }
 
+    public bool PromoteImportance(string messageId, int atLeast)
+    {
+        if (!_ready || !MemoryImportance.IsValid(atLeast)) return false;
+        try
+        {
+            using var conn = _db.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE agui_message_memory SET importance = MAX(importance, @imp) WHERE message_id = @mid";
+            cmd.AddWithValue("imp", atLeast);
+            cmd.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆单调升级失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
     public int SetExpiry(string? groupId, long? expiresAt, long nowMs)
     {
         if (!_ready) return 0;

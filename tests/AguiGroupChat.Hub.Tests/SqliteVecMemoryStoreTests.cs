@@ -46,6 +46,31 @@ public sealed class SqliteVecMemoryStoreTests
         => new(id, group, "main", sender, "user", content, v, ts);
 
     [Fact]
+    public void PromoteImportance_MonotonicUpgrade_NoDowngrade()
+    {
+        var (_, memory) = Create();
+        memory.Upsert(Rec("pm1", "g1", "u1", "用户点赞过的回复内容", [1, 0, 0, 0, 0, 0, 0, 0]));
+
+        // 普通(0) → 重要(1)
+        Assert.True(memory.PromoteImportance("pm1", MemoryImportance.Important));
+        var item = Assert.Single(memory.ListMessages("g1", null, null, 10, 0));
+        Assert.Equal(MemoryImportance.Important, item.Importance);
+
+        // 重要(1) → 关键(2)
+        Assert.True(memory.PromoteImportance("pm1", MemoryImportance.Critical));
+        item = Assert.Single(memory.ListMessages("g1", null, null, 10, 0));
+        Assert.Equal(MemoryImportance.Critical, item.Importance);
+
+        // 已关键后再次请求“至少重要”不应降级
+        Assert.True(memory.PromoteImportance("pm1", MemoryImportance.Important));
+        item = Assert.Single(memory.ListMessages("g1", null, null, 10, 0));
+        Assert.Equal(MemoryImportance.Critical, item.Importance);
+
+        // 不存在的消息返回 false
+        Assert.False(memory.PromoteImportance("pm_missing", MemoryImportance.Important));
+    }
+
+    [Fact]
     public void Upsert_Search_ReturnsSimilarHit_SortedByScore()
     {
         var (store, memory) = Create();

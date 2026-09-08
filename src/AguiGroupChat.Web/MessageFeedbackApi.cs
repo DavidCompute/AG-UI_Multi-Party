@@ -17,7 +17,8 @@ public static class MessageFeedbackApi
     public static void MapMessageFeedbackApi(this WebApplication app)
     {
         app.MapPost("/ag-ui/message-feedback", (MessageFeedbackHttpRequest req, HttpContext ctx,
-            IGroupStore groupStore, MessageFeedbackStore store, AguiGroupChat.Hub.Messaging.GroupHub hub) =>
+            IGroupStore groupStore, MessageFeedbackStore store, AguiGroupChat.Hub.Messaging.GroupHub hub,
+            AguiGroupChat.Hub.Agents.IMessageMemory? memory) =>
         {
             var userId = WebIdentity.UserId(ctx);
             if (userId is null)
@@ -50,6 +51,12 @@ public static class MessageFeedbackApi
                 Snippet = snippet,
                 CreatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             });
+            // 👍 反馈 = 该条回复对用户有用：把其语义记忆单调升到「重要」（已是关键级不降级），让同类回复在 RAG 里权重更高
+            if (req.Value > 0 && memory is not null)
+            {
+                try { memory.PromoteImportance(messageId, MemoryImportance.Important); }
+                catch { /* 记忆未启用 / 升级失败静默（评价本身已成功） */ }
+            }
             return Results.Ok(new { saved = true, value = req.Value });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }

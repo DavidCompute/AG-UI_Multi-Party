@@ -50,6 +50,10 @@ public interface IMessageMemoryStore
     /// <summary>调整单条记忆的级别（0 普通 / 1 重要 / 2 关键）。</summary>
     bool UpdateImportance(string messageId, int importance);
 
+    /// <summary>单调升级单条记忆级别到至少 <paramref name="atLeast"/>（保留已更高的等级；默认不实现返回 false）。
+    /// 用于「用户 👍 反馈自动提升有用回复的记忆权重」等自动场景。</summary>
+    bool PromoteImportance(string messageId, int atLeast) => false;
+
     /// <summary>把某群（或全部群）的记忆统一设置为过期时间（手动遗忘策略：保留最近 N 天时
     /// 把「更早的记忆」设为过去时间戳 → 立即失效；未来时间戳 = 延后遗忘）。返回受影响条数。</summary>
     int SetExpiry(string? groupId, long? expiresAt, long nowMs);

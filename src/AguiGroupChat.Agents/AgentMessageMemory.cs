@@ -173,6 +173,13 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         catch (Exception ex) { _logger.LogDebug(ex, "记忆分级失败：{MessageId}", messageId); return false; }
     }
 
+    public bool PromoteImportance(string messageId, int atLeast)
+    {
+        if (!_options.Enabled) return false;
+        try { return _store.PromoteImportance(messageId, atLeast); }
+        catch (Exception ex) { _logger.LogDebug(ex, "记忆单调升级失败：{MessageId}", messageId); return false; }
+    }
+
     /// <summary>手动遗忘：groupId 为空 = 全部群；retentionHours 为空 = 立即遗忘，否则保留最近 N 小时。</summary>
     public int ForgetGroup(string? groupId, double? retentionHours)
     {

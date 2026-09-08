@@ -328,7 +328,26 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "记忆分级失败：{MessageId}", messageId);
+            _logger.LogDebug(ex, "记忆分级失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
+    public bool PromoteImportance(string messageId, int atLeast)
+    {
+        if (!_ready || !MemoryImportance.IsValid(atLeast)) return false;
+        try
+        {
+            using var conn = _pg.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE agui_message_memory SET importance = GREATEST(importance, @imp) WHERE message_id = @mid";
+            cmd.Parameters.AddWithValue("imp", atLeast);
+            cmd.Parameters.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "记忆单调升级失败：{MessageId}", messageId);
             return false;
         }
     }

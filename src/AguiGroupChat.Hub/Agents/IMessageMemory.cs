@@ -45,6 +45,9 @@ public interface IMessageMemory
     /// <summary>调整单条记忆级别（0 普通 / 1 重要 / 2 关键）。</summary>
     bool UpdateImportance(string messageId, int importance);
 
+    /// <summary>单调升级单条记忆到至少 <paramref name="atLeast"/>（如 👍 反馈自动把有用回复升为重要，不降级已更高等级）。默认不实现。</summary>
+    bool PromoteImportance(string messageId, int atLeast) => false;
+
     /// <summary>手动遗忘：把某群（groupId 为空 = 全部群）记忆统一设过期；<paramref name="retentionHours"/> 为空表示立即遗忘。</summary>
     int ForgetGroup(string? groupId, double? retentionHours);
 
