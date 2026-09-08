@@ -1181,6 +1181,24 @@ textarea:focus { outline: none; border-color: var(--accent); }
 /* ============ 管理员控制台 tab（用户管理 / 用量统计） ============ */
 .admin-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
 .admin-tab.on { border-color: var(--accent, #4a9eff); color: var(--accent, #4a9eff); }
+/* 运行指标（6.1）：卡片网格 / 双列表格 / 桥接健康点 */
+.admin-metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 2px 0 10px; flex-wrap: wrap; }
+.admin-metrics-head .form-hint { margin: 0; flex: 1; }
+.admin-metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.admin-metric-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
+.admin-metric-card.bad { border-color: rgba(229,83,75,.5); background: rgba(229,83,75,.06); }
+.admin-metric-card.good { border-color: rgba(87,171,90,.4); }
+.am-label { font-size: 11px; color: var(--muted); }
+.am-value { font-size: 18px; font-weight: 700; margin: 2px 0; }
+.admin-metric-card.bad .am-value { color: #e5534b; }
+.am-sub { font-size: 11px; color: var(--muted); }
+.admin-metric-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+@media (max-width: 900px) { .admin-metric-cols { grid-template-columns: 1fr; } }
+.admin-metric-col h4 { margin: 4px 0 8px; font-size: 13px; color: var(--text); }
+.bh-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.bh-dot.up { background: #5cb860; }
+.bh-dot.down { background: #e5534b; }
+.bh-detail { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 
 /* ============ 管理员控制台 ============ */
 .admin-modal { width: 900px; max-width: 96vw; }

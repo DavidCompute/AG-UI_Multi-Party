@@ -1110,6 +1110,7 @@
       <div class="admin-tabs">
         <button id="adminTabUsers" class="chip-btn admin-tab on" data-i18n="admin.tabUsers">用户管理</button>
         <button id="adminTabUsage" class="chip-btn admin-tab" data-i18n="admin.tabUsage">用量统计</button>
+        <button id="adminTabMetrics" class="chip-btn admin-tab" data-i18n="admin.tabMetrics">运行指标</button>
         <button id="adminTabConfig" class="chip-btn admin-tab" data-i18n="admin.tabConfig">配置治理</button>
         <button id="adminTabExec" class="chip-btn admin-tab" data-i18n="admin.tabExec">执行参数</button>
       </div>
@@ -1128,6 +1129,34 @@
             <thead><tr><th data-i18n="admin.thDate">日期</th><th data-i18n="admin.thTotal">总 Token</th><th data-i18n="admin.thIn">输入</th><th data-i18n="admin.thOut">输出</th><th data-i18n="admin.thThink">思考</th><th data-i18n="admin.thCalls">调用次数</th></tr></thead>
             <tbody id="adminUsageRows"></tbody>
           </table>
+        </div>
+      </div>
+      <!-- 运行指标（6.1 可观测性）：进程内调用/桥接/记忆指标 + 桥接端点健康 + 分智能体计数 -->
+      <div id="adminMetricsView" class="hidden">
+        <div class="admin-metrics-head">
+          <p id="adminMetricsMeta" class="form-hint"></p>
+          <button id="metricsRefreshBtn" class="chip-btn" type="button" data-i18n="admin.metricsRefresh">↻ 刷新</button>
+        </div>
+        <div id="adminMetricCards" class="admin-metric-grid"></div>
+        <div class="admin-metric-cols">
+          <div class="admin-metric-col">
+            <h4 data-i18n="admin.metricByAgent">按数字员工调用</h4>
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead><tr><th data-i18n="admin.thAgent">数字员工</th><th data-i18n="admin.thCalls">调用次数</th></tr></thead>
+                <tbody id="adminByAgentRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="admin-metric-col">
+            <h4 data-i18n="admin.metricBridgeHealth">桥接端点健康</h4>
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead><tr><th data-i18n="admin.thAgent">数字员工</th><th data-i18n="admin.thStatus">状态</th><th data-i18n="admin.thLatency">延迟</th><th data-i18n="admin.thDetail">详情</th></tr></thead>
+                <tbody id="adminBridgeRows"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
       <div id="adminConfigView" class="hidden">

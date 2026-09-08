@@ -5237,18 +5237,21 @@ async function openAdminModal() {
   switchAdminTab("users");
 }
 
-/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 配置治理 / 执行参数。 */
+/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数。 */
 function switchAdminTab(tab) {
   const users = tab === "users";
   const usage = tab === "usage";
+  const metrics = tab === "metrics";
   const conf = tab === "config";
   const exec = tab === "execution";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
+  $("adminTabMetrics").classList.toggle("on", metrics);
   $("adminTabConfig").classList.toggle("on", conf);
   $("adminTabExec").classList.toggle("on", exec);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
+  $("adminMetricsView").classList.toggle("hidden", !metrics);
   $("adminConfigView").classList.toggle("hidden", !conf);
   $("adminExecView").classList.toggle("hidden", !exec);
   if (users) {
@@ -5257,11 +5260,62 @@ function switchAdminTab(tab) {
   } else if (usage) {
     $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsage();
+  } else if (metrics) {
+    loadAdminMetrics();
   } else if (exec) {
     loadExecutionConfig();
   } else {
     loadConfigGovernance();
   }
+}
+
+/** 运行指标（6.1）：进程内调用 / 桥接 / 记忆命中率 + 分数字员工计数 + 桥接端点健康。 */
+async function loadAdminMetrics() {
+  const meta = $("adminMetricsMeta");
+  const cards = $("adminMetricCards");
+  if (meta) meta.textContent = t("admin.metricsLoading");
+  try {
+    const res = await fetch("/ag-ui/admin/metrics", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { if (meta) meta.textContent = errMsg(d, "HTTP " + res.status); return; }
+    if (meta) {
+      meta.textContent = t("admin.metricsMeta", {
+        start: fmtTime(d.startedAtMs),
+        up: fmtDuration(Number(d.uptimeSeconds) || 0),
+      });
+    }
+    const bridgeCalls = Number(d.bridgeCalls) || 0;
+    const memSearches = (Number(d.memoryHitCount) || 0) + (Number(d.memoryEmptySearch) || 0);
+    const pct = (n, den) => den > 0 ? Math.round((n / den) * 1000) / 10 : 0;
+    const items = [
+      { label: t("admin.metricInvocations"), value: Number(d.invocations || 0).toLocaleString(), sub: "" },
+      { label: t("admin.metricAccepted"), value: Number(d.accepted || 0).toLocaleString(), sub: "", good: true },
+      { label: t("admin.metricRejected"), value: Number(d.rejected || 0).toLocaleString(), sub: "", bad: Number(d.rejected || 0) > 0 },
+      { label: t("admin.metricOutputChars"), value: Number(d.outputChars || 0).toLocaleString(), sub: "" },
+      { label: t("admin.metricBridgeFailures"), value: `${Number(d.bridgeFailures || 0).toLocaleString()} / ${bridgeCalls.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(Number(d.bridgeFailures || 0), bridgeCalls) }), bad: Number(d.bridgeFailures || 0) > 0 },
+      { label: t("admin.metricMemoryHits"), value: `${Number(d.memoryHitCount || 0).toLocaleString()} / ${memSearches.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(Number(d.memoryHitCount || 0), memSearches) }) },
+    ];
+    cards.innerHTML = items.map((it) => `<div class="admin-metric-card ${it.bad ? "bad" : it.good ? "good" : ""}">`
+      + `<div class="am-label">${escapeHtml(it.label)}</div>`
+      + `<div class="am-value">${escapeHtml(it.value)}</div>`
+      + (it.sub ? `<div class="am-sub">${escapeHtml(it.sub)}</div>` : "")
+      + `</div>`).join("");
+    const byAgent = $("adminByAgentRows");
+    byAgent.innerHTML = (d.byAgent || []).length
+      ? d.byAgent.map((a) => `<tr><td>${escapeHtml(a.agentId)}</td><td>${Number(a.count || 0).toLocaleString()}</td></tr>`).join("")
+      : `<tr><td colspan="2" class="admin-empty">${t("admin.metricsEmpty")}</td></tr>`;
+  } catch (ex) { if (meta) meta.textContent = t("admin.sysNetErr"); cards.innerHTML = ""; }
+  try {
+    const bh = await fetch("/ag-ui/admin/bridge-health", { headers: { Authorization: "Bearer " + state.token } });
+    const list = bh.ok ? ((await bh.json()) || []) : [];
+    const rows = $("adminBridgeRows");
+    rows.innerHTML = list.length
+      ? list.map((h) => `<tr><td>${escapeHtml(h.agentId || "")}</td>`
+        + `<td><span class="bh-dot ${h.up ? "up" : "down"}"></span>${escapeHtml(t(h.up ? "admin.metricUp" : "admin.metricDown"))}</td>`
+        + `<td>${h.latencyMs != null ? escapeHtml(h.latencyMs + " ms") : "—"}</td>`
+        + `<td class="bh-detail" title="${escapeHtml(h.endpoint || "")}">${escapeHtml(h.detail || (h.endpoint || ""))}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="admin-empty">${t("admin.metricsBridgeEmpty")}</td></tr>`;
+  } catch { $("adminBridgeRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
 }
 
 /** 用量统计：最近 7 天按日汇总 + 配额配置。 */
@@ -8014,8 +8068,10 @@ function init() {
   });
   $("adminTabUsers").onclick = () => switchAdminTab("users");
   $("adminTabUsage").onclick = () => switchAdminTab("usage");
+  $("adminTabMetrics").onclick = () => switchAdminTab("metrics");
   $("adminTabConfig").onclick = () => switchAdminTab("config");
   $("adminTabExec").onclick = () => switchAdminTab("execution");
+  $("metricsRefreshBtn").onclick = () => loadAdminMetrics();
   $("cfgSave").onclick = saveConfigGovernance;
   $("cfgReload").onclick = loadConfigGovernance;
   $("efSave").onclick = saveExecutionConfig;
