@@ -1,8 +1,29 @@
-# AG-UI 群聊桌面版 1.0.121 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.121 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.122 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.122 Release Notes (current Windows desktop release)
 
-**版本说明**：1.0.121 为当前 Windows 桌面点版本（已构建 Windows 1.0.121 MSI）。在 1.0.120（上一桌面包：数字员工单聊 kind=direct、实时会话吊销/禁用/改密即时断线、SDK 上行串行化与断连单次回调、200MB 上传/导入）之上，本版并入其后 Web 已推送的 Hub/协议更新：数字员工「记忆拟人类型」、组织构建自动按岗位配记忆人格、组织连接自动成对（指派+提升）、记忆管理按角色分层、企业合规（注销/数据擦除/导出/孤儿治理/审计）等——下方「已随 1.0.121 桌面安装包发布」各节即为本版相对 1.0.120 的新增。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
-**Version note**: 1.0.121 is the current Windows desktop point release (a Windows 1.0.121 MSI was built). On top of 1.0.120 (the previous desktop package: digital-employee **direct chats `kind=direct`**, **instant realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies) this build ships the Hub/protocol updates that have since gone live on Web: digital-employee **memory personality types**, org building **auto-assigning per-role memory personas**, org **assignment/escalation links auto-paired**, **role-tiered memory-management scope**, and **enterprise compliance** (account deletion & data erasure / data export / orphan governance / audit) — the sections below marked “shipped in the 1.0.121 desktop installer” are this release’s additions over 1.0.120. Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
+**版本说明**：1.0.122 为当前 Windows 桌面点版本（已构建 Windows 1.0.122 MSI），在 1.0.121 基础之上修正了编排/长稿稳定性的三个问题，全部 Web 已推送（Web 与桌面共用同一套 Hub/网关/前端）。
+**Version note**: 1.0.122 is the current Windows desktop point release (a Windows 1.0.122 MSI was built). On top of 1.0.121 it fixes three issues affecting orchestration & long-form stability, all already on the Web build (Web and desktop share the same Hub / gateway / frontend).
+
+## 编排长稿稳定性修复（1.0.122 核心）
+# Orchestration & long-form stability fixes (1.0.122 headline)
+
+中文：
+- **模型网络超时放大（不再“跑到一半被掐”）**：底层模型客户端默认仅在 100 秒内响应，思考模型（deepseek-reasoner）长思考/长稿生成时请求未完成就被中断，表现为“编排/指派路由进行中取消、出不来稿”。已把单次请求网络超时提到 15 分钟（真正的一次运行时限仍由执行配置的流式超时 `streamTimeoutMinutes` 控制）。
+- **多附件问答可用（不再“只认第一个”）**：一条消息可带多个附件，模型上下文现在会给「附件清单」（每个带 attachmentId + 注入状态）；可提取文本附件按“每文件 12K + 总 60K”逐文件注入（此前共享 24K 且先到先得，首个大文件会挤掉后续）；`read_attachment` 支持分段续读（startIndex/maxChars），长文档可被完整引用；历史追问回放预算同步放大到 24K。
+- **编排回复绝不空白（不再“只有计划卡、没有字”）**：综合答复拿不到可用文本时，回退到已收集的中间结果整理成一段可见回答，或给明确提示；递归补查每步都保证返回非空；取消/异常中断的收尾也会在上一条“正文为空”的消息上补一句说明。任何情况下都不再留下纯空白回复。
+
+English:
+- **Model network timeout enlarged**: the underlying model client only waited 100s, so a reasoning model (deepseek-reasoner) still thinking when long-form output is requested got cut off before the request finished — showing up as “orchestration / assignment routing gets cancelled, no draft”. The per-request network timeout is now 15 minutes (the true per-run limit is still governed by the execution stream timeout `streamTimeoutMinutes`).
+- **Multi-attachment Q&A works**: a message may carry multiple files and the model context now gets an “attachment inventory” (each with its own attachmentId + inlined status). Extractable text files are inlined per file (12K each within a 60K total, replacing a shared 24K served first-come-first-served that let the first big file crowd out the rest); `read_attachment` supports paginated reads (`startIndex`/`maxChars`) so long documents can be fully referenced; the historical follow-up inline budget is raised to 24K.
+- **Orchestration replies never arrive blank**: when the synthesized answer yields no usable text it now falls back to a readable summary of the collected intermediate results or a clear notice; the recursive gathering returns a non-empty value at every boundary; and cancelled / error teardowns stamp a brief note rather than leaving an empty-content bubble.
+
+---
+
+# AG-UI 群聊桌面版 1.0.121 发布说明（上一 Windows 桌面点版本）
+# AG-UI Group Chat Desktop 1.0.121 Release Notes (previous Windows desktop point release)
+
+**版本说明**：1.0.120 之后的上一桌面包为 1.0.121（已构建 Windows 1.0.121 MSI，含记忆拟人类型 / 组织构建自动配记忆人格 / 组织连接自动成对 / 记忆管理按角色分层 / 企业合规 / 单聊等等）。1.0.120 为再往上一版（单聊 kind=direct、实时会话吊销、SDK 上行串行化、200MB 上传/导入）。以下各节为此前的功能增量。
+**Version note**: The previous desktop package after 1.0.120 was 1.0.121 (a Windows 1.0.121 MSI was built, adding memory personality types / org auto-assigned memory personas / auto-paired assignment+escalation links / role-tiered memory scope / enterprise compliance / direct chats etc.); before that 1.0.120 (direct chats `kind=direct`, instant session teardown, SDK send serialization, 200MB upload/import). The sections below are the earlier feature increments.
 
 ## 组织构建连接自动成对（指派 + 提升）（已随 1.0.121 桌面安装包发布）
 # Org building auto-pairs assignment + escalation links (shipped in the 1.0.121 desktop installer)
