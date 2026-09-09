@@ -157,7 +157,6 @@
           <button id="agentExportAllBtn" class="chip-btn" data-i18n-title="agent.exportAllTip">📤 <span data-i18n="agent.exportAll">导出全部</span></button>
           <button id="agentBuiltinRestoreOrgBtn" class="chip-btn hidden" data-i18n-title="agent.restoreOrgTip">🛠️ <span data-i18n="agent.restoreOrg">恢复内置组织工具</span></button>
           <button id="agentBatchBtn" class="chip-btn" data-i18n-title="agent.batchTitle">🗑️ <span data-i18n="agent.batch">批量删除</span></button>
-          <button id="agentAddBtn" class="send" data-i18n="agent.add">＋ 新增数字员工</button>
           <input id="agentImportFile" type="file" accept=".json,application/json" class="hidden" />
         </div>
         <div id="agentBatchBar" class="agent-batch-bar hidden" style="display:flex;align-items:center;gap:12px;padding:6px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
@@ -178,6 +177,7 @@
           <div id="agentList" class="agent-table-body"></div>
         </div>
         <div class="modal-actions">
+          <button id="agentAddBtn" class="send" data-i18n="agent.add">＋ 新增数字员工</button>
           <button id="agentClose" class="btn-ghost" data-i18n="agent.close">关闭</button>
         </div>
       </div>
@@ -599,7 +599,6 @@
             <input id="kbSearch" class="modal-input" data-i18n-placeholder="kb.search" />
             <button type="button" class="search-clear" data-clear-for="kbSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
-          <button id="kbNewBtn" class="send" data-i18n="kb.create">＋ 创建知识库</button>
         </div>
         <div id="kbCreatePanel" class="kb-create hidden">
           <input id="kbName" class="modal-input" data-i18n-placeholder="kb.name.ph" maxlength="40" />
@@ -616,6 +615,7 @@
         <div id="kbListWrap" class="kb-list"></div>
       </div>
       <div class="modal-actions">
+        <button id="kbNewBtn" class="send" data-i18n="kb.create">＋ 创建知识库</button>
         <button id="kbCloseBtn" class="btn-ghost" data-i18n="kb.close">关闭</button>
       </div>
     </div>
