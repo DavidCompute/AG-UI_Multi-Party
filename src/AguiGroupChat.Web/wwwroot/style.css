@@ -910,6 +910,19 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .af-sel-row .icon-btn:hover { border-color: rgba(229,83,75,.55); color: #e5534b; }
 .af-sel-desc { margin: 2px 0 4px 8px; }
 .af-sel-desc .modal-input { font-size: 12.5px; }
+/* 已选行字号统一：名称与正文同号（13px，仅加粗区分），辅助信息 11~12px，与其他选择列表一致 */
+.af-sel-row { font-size: 13px; }
+.af-sel-row .sel-name { font-size: 13px; }
+.af-sel-row code { font-size: 11px; }
+.af-sel-row .sel-desc { font-size: 12px; }
+.af-sel-row .sel-doc { font-size: 11px; }
+/* 知识库管理弹窗：加宽 + 内容区纵横滚动（入口在 AI 角色管理工具栏） */
+.modal.kb-modal { width: min(900px, 96vw); max-width: none; display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.modal.kb-modal .modal-title,
+.modal.kb-modal .kb-create,
+.modal.kb-modal .modal-actions { flex: none; }
+.modal.kb-modal .kb-create { margin-bottom: 4px; }
+#kbListWrap { flex: 1 1 auto; min-height: 0; overflow: auto; margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); overscroll-behavior: contain; }
 .search-hit {
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
   background: var(--panel-2); transition: border-color .15s, background .15s;
