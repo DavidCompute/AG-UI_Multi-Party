@@ -1088,6 +1088,29 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.NotNull(def);
         Assert.Equal(MemoryPersonalityTypes.Deep, def!.MemoryProfile?.MemoryType);
     }
+
+    [Fact]
+    public async Task Orchestrate_Apply_AddsAssignmentsForLeaders_WhenOnlyEscalationGiven()
+    {
+        // 最终稿/编排只给“问题提升”（执行岗 escalation → 主管）而主管没有指派时，
+        // 落库引擎应自动把直接下级补进主管 assignmentIds（任务指派），形成成对连接。
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var token = await RegisterAsync("connfix_" + suffix);
+        var leadId = "conn_lead_" + suffix;
+        var execId = "conn_exec_" + suffix;
+        var reqBody = new OrchestrateApplyRequest("补连组织",
+            [
+                new OrchestratedAgentHttp(leadId, "主管", "统筹", "管理", "mentioned", [], null, null, null),
+                new OrchestratedAgentHttp(execId, "执行", "干活", "执行", "mentioned", [], null, leadId, null),
+            ],
+            Skills: null);
+
+        var res = await _client.SendAsync(ApplyRequest(token, reqBody));
+        res.EnsureSuccessStatusCode();
+        var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
+        var lead = catalog.GetDefinition(leadId)!;
+        Assert.Equal([execId], lead.AssignmentIds);
+    }
 }
 
 
@@ -1191,5 +1214,39 @@ public sealed class AgentOrchestratorTests
         Assert.Equal(MemoryPersonalityTypes.Deep, plan.Agents[0].MemoryProfile?.MemoryType);
         Assert.Equal(MemoryPersonalityTypes.Broad, plan.Agents[1].MemoryProfile?.MemoryType);
         Assert.Equal(MemoryPersonalityTypes.CueDependent, plan.Agents[2].MemoryProfile?.MemoryType);
+    }
+
+    [Fact]
+    public void Parse_InfersAssignmentsForLeaders_FromEscalations()
+    {
+        // 真实模型常只给“下级 → 提升到上级”，忘了给“上级 → 指派下级”：Parse 后应自动把直接下级
+        // 补进上级 assignmentIds（任务指派），形成双向连接，避免组织退化成纯上抛链。
+        var plan = AgentOrchestrator.Parse(
+            "{\"title\":\"客服组织\",\"agents\":[" +
+            "{\"agentId\":\"mgr\",\"nickname\":\"客服主管\",\"description\":\"统筹\",\"instructions\":\"管理团队\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":null}," +
+            "{\"agentId\":\"lead_a\",\"nickname\":\"一组组长\",\"description\":\"带一组\",\"instructions\":\"带组\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":\"mgr\"}," +
+            "{\"agentId\":\"cs_1\",\"nickname\":\"客服一\",\"description\":\"接线\",\"instructions\":\"接线\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":\"lead_a\"}," +
+            "{\"agentId\":\"cs_2\",\"nickname\":\"客服二\",\"description\":\"接线\",\"instructions\":\"接线\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":\"lead_a\"}" +
+            "],\"skills\":[]}");
+        var byId = plan.Agents.ToDictionary(a => a.AgentId!);
+        Assert.Equal(["lead_a"], byId["mgr"].AssignmentIds);
+        Assert.Equal(["cs_1", "cs_2"], byId["lead_a"].AssignmentIds);
+        // 叶子执行岗保持无指派
+        Assert.Empty(byId["cs_1"].AssignmentIds ?? []);
+        Assert.Empty(byId["cs_2"].AssignmentIds ?? []);
+    }
+
+    [Fact]
+    public void Parse_MergesDirectSubordinates_IntoExistingAssignments()
+    {
+        // 模型已显式指派但漏了某个直接下级：应并集补齐（去重、保留原顺序、追加按方案顺序），不覆盖已有指派。
+        var plan = AgentOrchestrator.Parse(
+            "{\"title\":\"t\",\"agents\":[" +
+            "{\"agentId\":\"mgr\",\"nickname\":\"主管\",\"description\":\"d\",\"instructions\":\"i\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[\"lead_b\"],\"escalationAgentId\":null}," +
+            "{\"agentId\":\"lead_a\",\"nickname\":\"组长A\",\"description\":\"d\",\"instructions\":\"i\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":\"mgr\"}," +
+            "{\"agentId\":\"lead_b\",\"nickname\":\"组长B\",\"description\":\"d\",\"instructions\":\"i\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":\"mgr\"}" +
+            "],\"skills\":[]}");
+        var mgr = plan.Agents.Single(a => a.AgentId == "mgr");
+        Assert.Equal(["lead_b", "lead_a"], mgr.AssignmentIds); // 原有 lead_b 保持在前，缺的 lead_a 按方案顺序追加
     }
 }

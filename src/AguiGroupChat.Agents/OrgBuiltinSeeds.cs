@@ -51,7 +51,8 @@ public static class OrgBuiltinSeeds
    - org_deploy 是“把整份最终稿落库/覆盖（同一 teamKey 只留最新）”的动作，不要把它当作某个普通岗位的执行技能来设置。
 3) 权限边界：prompt 任何人可出稿；http/shell/dotnet（建库）与 org_deploy 均需系统管理员建/改/删，本机(client)执行需触发者批准；普通用户只产出这份待审 JSON、绝不落库。不要在没有任何管理员放行时编造“已写库成功”。
 4) teamKey 全程稳定；agents 必须>=1 且每个都有 nickname；改动基于现状增量；请给足并闭合大括号，不截断、不占位省略。
-5) agents 每岗位的 memoryProfile 为<b>可选</b>记忆拟人 preset key：broad（记得多易混，适合大量往来一线/客服）、deep（记得少而久，适合统筹/主管）、slowToLearn（难录入、需重复，适合重复套路岗）、cueDependent（存得住想不起、见提示才想起，适合顾问/售后/客户成功）、fastForgetting（旧事淡忘，适合值班/速查）；只影响该员工日后如何回忆历史，不改变能力；拿不准就 null（沿用全局默认）。
+5) 连接方向必须成对给全，不要只给“问题提升”：<b>有直接下级的岗位</b>（主管/组长/经理…）在 assignmentIds 里列出它的全部直接下级 agentId（任务指派）；<b>非顶层岗位</b>把 escalationAgentId 指向直接上级（问题提升）；顶层主管 escalationAgentId 留空、叶子岗 assignmentIds 留空。凡是别人以它为 escalationAgentId 的岗位，它的 assignmentIds 必须包含那些下级，不能留空。
+6) agents 每岗位的 memoryProfile 为<b>可选</b>记忆拟人 preset key：broad（记得多易混，适合大量往来一线/客服）、deep（记得少而久，适合统筹/主管）、slowToLearn（难录入、需重复，适合重复套路岗）、cueDependent（存得住想不起、见提示才想起，适合顾问/售后/客户成功）、fastForgetting（旧事淡忘，适合值班/速查）；只影响该员工日后如何回忆历史，不改变能力；拿不准就 null（沿用全局默认）。
 输入需求/现有情况：
 {{query}}
 """;

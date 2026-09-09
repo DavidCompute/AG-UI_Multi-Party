@@ -103,6 +103,9 @@ public static class OrgApplyEngine
         }
 
         if (agents.Count == 0) throw new OrgApplyException(ErrorCodes.BadRequest, "方案里没有数字员工");
+        // 连接归一（兜底）：凡有下级以某岗位为向上提升目标，就把这些下级并入该岗位 assignmentIds（任务指派，只增不改、去重保序），
+        // 与 AgentOrchestrator.Parse 同规则——即使手写最终稿 / 旧方案只给“问题提升”链，落库后也是成对连接，组织不退化。
+        EnsureAssignmentsForLeaders(agents);
         var occupiedAgents = new HashSet<string>(catalog.ListDefinitions().Select(d => d.AgentId), StringComparer.Ordinal);
         var agentIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var a in agents)
@@ -177,5 +180,34 @@ public static class OrgApplyEngine
         if (kind == AgentSkillKind.Shell && loc == AgentSkillExecutionLocation.Client && !string.IsNullOrWhiteSpace(body))
             return JsonSerializer.Serialize(new { kind = "shell", command = body, cwd = ".", timeoutSec = 30 });
         return null;
+    }
+
+    /// <summary>把“提升到某岗位”的直接下级并入其 assignmentIds（任务指派）。只增不改：已有显式指派保留，缺失的直接下级按方案顺序追加。</summary>
+    internal static void EnsureAssignmentsForLeaders(IReadOnlyList<OrgPlanAgent> agents)
+    {
+        if (agents is null || agents.Count == 0) return;
+        var ids = agents.Where(a => !string.IsNullOrWhiteSpace(a.AgentId)).Select(a => a.AgentId!.Trim()).ToHashSet(StringComparer.Ordinal);
+        var direct = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var a in agents)
+        {
+            if (string.IsNullOrWhiteSpace(a.AgentId)) continue;
+            var up = (a.EscalationAgentId ?? "").Trim();
+            if (up.Length == 0 || string.Equals(up, a.AgentId, StringComparison.Ordinal) || !ids.Contains(up)) continue;
+            if (!direct.TryGetValue(up, out var list)) direct[up] = list = [];
+            list.Add(a.AgentId.Trim());
+        }
+        if (direct.Count == 0) return;
+        foreach (var a in agents)
+        {
+            if (string.IsNullOrWhiteSpace(a.AgentId) || !direct.TryGetValue(a.AgentId.Trim(), out var subs)) continue;
+            var existing = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList();
+            var seen = new HashSet<string>(existing, StringComparer.Ordinal);
+            var merged = new List<string>(existing.Count + subs.Count);
+            merged.AddRange(existing);
+            var changed = false;
+            foreach (var sub in subs)
+                if (seen.Add(sub)) { merged.Add(sub); changed = true; }
+            if (changed) a.AssignmentIds = merged;
+        }
     }
 }

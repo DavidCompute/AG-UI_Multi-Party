@@ -135,8 +135,12 @@ public static class AgentOrchestrator
             "- body：prompt 填模板文本；shell 填命令/脚本（可跨平台，Windows 用 PowerShell）；http 填 {\"method\":\"GET\",\"url\":\"${query}\",\"headers\":{}}。\n" +
             "- executionLocation：shell 用 <b>client</b>（在本机执行，需批准）；http/prompt 用 server（服务端）。\n" +
             "- requiresApproval：shell 一律 true；http 一律 true；executionLocation=client 一律 true；纯 prompt 服务端可 false。\n\n" +
-            "连接原则：给出 2~6 个数字员工；尽量形成「主管 → 若干执行岗」的层次；主管的 escalationAgentId 指向更上层或留空；\n" +
-            "执行岗 assignmentIds 留空、escalationAgentId 指向主管。技能要贴合岗位职责，数量 1~6 个。\n\n" +
+            "连接原则（务必同时给全<b>两个方向</b>的连接，不要只给“问题提升”）：\n" +
+            "- 有直接下级的岗位（主管/组长/经理…）必须在 assignmentIds 里列出它的<b>全部直接下级 agentId</b>——这是“任务指派”链（上级可把任务指派给下级）；\n" +
+            "- 非顶层的岗位把 escalationAgentId 指向自己的直接上级——这是“问题提升”链；\n" +
+            "- 顶层主管的 escalationAgentId 留空；叶子执行岗没有下级、assignmentIds 留空。\n" +
+            "要点：凡是<b>被别人设为 escalationAgentId 的岗位</b>，它的 assignmentIds 必须包含那些提升到它的下级，不能留空——否则只有“下级往上报问题”、没有“上级往下派任务”，组织不成立。\n" +
+            "技能要贴合岗位职责，数量 1~6 个。\n\n" +
             "只输出最终 JSON（如下结构，字段补齐、可加多余岗位/技能项；简述已在开头给出，最终成稿不再重复简述，也不要 ``` 围栏）：\n" +
             "{\"title\":\"<组织名>\",\"agents\":[{\"agentId\":\"\",\"nickname\":\"\",\"description\":\"\",\"instructions\":\"\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":null,\"relayToAgentId\":null,\"memoryProfile\":\"deep\"}],\"skills\":[{\"skillId\":\"\",\"name\":\"\",\"description\":\"\",\"kind\":\"prompt\",\"body\":\"\",\"executionLocation\":\"server\",\"requiresApproval\":false}]}\n\n" +
             "用户需求：" + requirement;
@@ -166,7 +170,41 @@ public static class AgentOrchestrator
         // 仍给不出 → null = 沿用全局召回（与旧行为一致，绝不因该字段失败）。
         foreach (var agent in plan.Agents)
             agent.MemoryProfile ??= SuggestMemoryProfile(agent);
+        // 连接归一：凡有下级岗位以某岗位为向上提升目标，就为该“上级”自动补全 assignmentIds（任务指派），
+        // 避免模型只给“问题提升”链、把组织生成成纯上抛结构；已显式指派过的上级保留原样，叶子不受影响。
+        InferAssignments(plan);
         return plan;
+    }
+
+    /// <summary>连接归一：反向按 escalationAgentId 找出每个岗位的直接下级，并把空白 assignmentIds 的“上级”补成这些下级。</summary>
+    private static void InferAssignments(OrchestrationPlan plan)
+    {
+        var ids = plan.Agents
+            .Where(a => !string.IsNullOrWhiteSpace(a.AgentId))
+            .Select(a => a.AgentId!)
+            .ToHashSet(StringComparer.Ordinal);
+        var direct = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var a in plan.Agents)
+        {
+            var up = (a.EscalationAgentId ?? "").Trim();
+            if (up.Length == 0 || string.Equals(up, a.AgentId, StringComparison.Ordinal) || !ids.Contains(up)) continue;
+            if (!direct.TryGetValue(up, out var list)) direct[up] = list = [];
+            list.Add(a.AgentId!);
+        }
+        foreach (var a in plan.Agents)
+        {
+            if (a.AgentId is null || !direct.TryGetValue(a.AgentId, out var subs)) continue;
+            // 把“提升到本岗位”的直接下级并入 assignmentIds（按方案顺序追加、去重保留原顺序），
+            // 这样即使模型显式指派漏掉了某个下级，落库前也会被补齐成“能指派全部直接下级”。
+            var existing = a.AssignmentIds ?? [];
+            var seen = new HashSet<string>(existing, StringComparer.Ordinal);
+            var merged = new List<string>(existing.Count + subs.Count);
+            merged.AddRange(existing);
+            var changed = false;
+            foreach (var sub in subs)
+                if (seen.Add(sub)) { merged.Add(sub); changed = true; }
+            if (changed) a.AssignmentIds = merged;
+        }
     }
 
     /// <summary>按岗位称呼 / 职责文本启发式推断合适记忆拟人 preset（模型漏填时的可读兜底）。无把握返回 null。</summary>
