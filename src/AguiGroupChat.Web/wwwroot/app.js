@@ -2680,44 +2680,64 @@ function renderAgentPickList() {
   if (!count) el.innerHTML = `<span class="form-hint">${t("agent.form.pick.noMatch")}</span>`;
 }
 
-/** 知识库管理弹窗：列表 + 上传文档 / 删除（仅自己创建的可管理）。 */
+/** 知识库管理弹窗：仿技能库的列表布局——工具栏搜索 + 表头网格 + 每库一行（名称/文档/描述/操作），
+ *  点击行或▸ 展开文档区；仅自己创建的库可上传 / 删除（与技能库管理模式一致）。 */
+let kbSearchQuery = "";   // 知识库搜索词（名称 / ID / 描述 / 文档名，仅前端过滤）
+let kbExpanded = new Set(); // 已展开文档区的知识库 kbId
+
 function renderKbModal() {
   const wrap = $("kbListWrap");
   wrap.innerHTML = "";
-  if (!kbList.length) {
-    wrap.innerHTML = `<div class="form-hint" style="padding:8px 0">${t("kb.noKb")}</div>`;
+  const q = kbSearchQuery.trim().toLowerCase();
+  const visible = (kbList || []).filter((kb) => {
+    if (!q) return true;
+    const hay = [kb.name, kb.kbId, kb.description || "", ...(kb.documents || []).map((d) => d.fileName || "")].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+  if (!visible.length) {
+    wrap.innerHTML = `<div class="kb-empty">${t(kbList.length ? "kb.noMatch" : "kb.noKb")}</div>`;
     return;
   }
-  kbList.forEach((kb) => {
+  const statusBadge = (d) => d.status === "processing"
+    ? `<span class="kb-status kb-status-proc">${t("kb.processing")}</span>`
+    : d.status === "error"
+      ? `<span class="kb-status kb-status-err" title="${escapeHtml(d.error || "")}">${t("kb.failed")}</span>`
+      : `<span class="kb-status kb-status-ok">${t("kb.chunks", { count: Number(d.chunkCount) || 0 })}</span>`;
+  visible.forEach((kb) => {
     const mine = kb.ownerId === state.memberId;
-    const docs = (kb.documents || []).map((d) => {
-      const st = d.status === "processing"
-        ? `<span class="kb-status kb-status-proc">${t("kb.processing")}</span>`
-        : d.status === "error"
-          ? `<span class="kb-status kb-status-err" title="${escapeHtml(d.error || "")}">${t("kb.failed")}</span>`
-          : `<span class="kb-status kb-status-ok">${t("kb.chunks", { count: Number(d.chunkCount) || 0 })}</span>`;
-      return `
-      <div class="kb-doc" style="display:flex;align-items:center;gap:6px;margin-top:4px">
-        <span style="flex:1;font-size:12px;color:#c9cdd6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${escapeHtml(d.fileName)}</span>${st}
-        ${mine ? `<button class="icon-btn kb-doc-del" data-kb="${escapeHtml(kb.kbId)}" data-doc="${escapeHtml(d.docId)}" title="${t("kb.removeDocTitle")}">🗑️</button>` : ""}
-      </div>`;
-    }).join("") || `<span class="form-hint">${t("kb.noDocs")}</span>`;
-    const box = document.createElement("div");
-    box.className = "kb-card";
-    box.style.cssText = "border:1px solid #3a3f4b;border-radius:8px;padding:10px;margin-bottom:10px";
-    box.innerHTML = `
-      <div style="display:flex;align-items:center;gap:6px">
-        <b style="flex:1">📚 ${escapeHtml(kb.name)}</b>
-        ${mine
-          ? `<button class="chip-btn kb-upload" data-kb="${escapeHtml(kb.kbId)}" type="button">${t("kb.uploadDoc")}</button>
-             <button class="icon-btn kb-del" data-kb="${escapeHtml(kb.kbId)}" title="${t("kb.delTitle")}">🗑️</button>`
-          : `<span class="form-hint">${t("kb.systemReadonly")}</span>`}
-      </div>
-      ${kb.description ? `<div class="form-hint">${escapeHtml(kb.description)}</div>` : ""}
-      <div class="kb-docs">${docs}</div>
-      ${mine ? `<input type="file" class="hidden kb-file" data-kb="${escapeHtml(kb.kbId)}" accept=".txt,.md,.docx,.xlsx,.pptx,.pdf,.json,.csv" />` : ""}`;
-    box.querySelectorAll(".kb-doc-del").forEach((btn) => {
-      btn.onclick = async () => {
+    const docs = kb.documents || [];
+    const exp = kbExpanded.has(kb.kbId);
+    const hasProc = docs.some((d) => d.status === "processing");
+    const arrow = exp ? "▾" : "▸";
+    let ops = `<button class="icon-btn kb-expand" data-kb="${escapeHtml(kb.kbId)}" title="${t("kb.toggleDocs")}" style="font-size:12px">${arrow}</button>`;
+    if (mine) {
+      ops += `<button class="chip-btn kb-upload" data-kb="${escapeHtml(kb.kbId)}" type="button" style="font-size:12px;padding:2px 8px">${t("kb.uploadDoc")}</button>`
+        + `<button class="icon-btn kb-del" data-kb="${escapeHtml(kb.kbId)}" title="${t("kb.delTitle")}">🗑️</button>`;
+    } else {
+      ops += `<span style="color:var(--muted);font-size:12px">${t("kb.systemReadonly")}</span>`;
+    }
+    const item = document.createElement("div");
+    item.className = "kb-list-item" + (exp ? " open" : "");
+    item.innerHTML = `
+      <div class="kb-row">
+        <div class="kb-name"><b>📚 ${escapeHtml(kb.name)}</b><code>${escapeHtml(kb.kbId)}</code></div>
+        <div class="kb-stat">${hasProc ? `<span class="kb-status kb-status-proc">${t("kb.processing")}</span>` : ""}<span>${t("agent.form.kb.docCount", { count: docs.length })}</span></div>
+        <div class="kb-desc-cell"${kb.description ? ` title="${escapeHtml(kb.description)}"` : ""}>${escapeHtml(kb.description || "")}</div>
+        <div class="kb-op-col">${ops}</div>
+      </div>`
+      + (exp ? `<div class="kb-docs">${docs.length
+          ? docs.map((d) => `<div class="kb-doc"><span>📄</span><span class="kb-doc-name" title="${escapeHtml(d.fileName)}">${escapeHtml(d.fileName)}</span>${statusBadge(d)}${mine ? `<button class="icon-btn kb-doc-del" data-kb="${escapeHtml(kb.kbId)}" data-doc="${escapeHtml(d.docId)}" title="${t("kb.removeDocTitle")}" style="width:22px;height:22px">🗑️</button>` : ""}</div>`).join("")
+          : `<div class="kb-empty" style="padding:8px 0">${t("kb.noDocs")}</div>`}</div>` : "")
+      + (mine ? `<input type="file" class="hidden kb-file" data-kb="${escapeHtml(kb.kbId)}" accept=".txt,.md,.docx,.xlsx,.pptx,.pdf,.json,.csv" />` : "");
+    // 整行点击展开 / 收起文档（按钮内部点击不冒泡触发）
+    const row = item.querySelector(".kb-row");
+    row.addEventListener("click", () => {
+      if (kbExpanded.has(kb.kbId)) kbExpanded.delete(kb.kbId); else kbExpanded.add(kb.kbId);
+      renderKbModal();
+    });
+    item.querySelectorAll(".kb-expand").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); row.click(); }));
+    item.querySelectorAll(".kb-doc-del").forEach((btn) => {
+      btn.addEventListener("click", async () => {
         if (!await uiConfirm({ message: t("kb.docDelConfirm"), danger: true })) return;
         const res = await fetch(`/ag-ui/kb/${btn.dataset.kb}/documents/${btn.dataset.doc}`, {
           method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
@@ -2726,38 +2746,53 @@ function renderKbModal() {
         if (!res.ok) { toast(errMsg(data, t("kb.docRemoveFail", { err: res.status }))); return; }
         toast(t("kb.docRemoved"));
         await loadKbs();
-      };
+      });
     });
-    const upBtn = box.querySelector(".kb-upload");
-    if (upBtn) upBtn.onclick = () => box.querySelector(".kb-file").click();
-    const fileInput = box.querySelector(".kb-file");
+    item.querySelectorAll(".kb-upload").forEach((upBtn) => {
+      upBtn.addEventListener("click", (e) => { e.stopPropagation(); item.querySelector(".kb-file")?.click(); });
+    });
+    const fileInput = item.querySelector(".kb-file");
     if (fileInput) fileInput.onchange = async (e) => {
       const file = e.target.files?.[0];
       e.target.value = "";
       if (file) await addKbDocument(fileInput.dataset.kb, file);
     };
-    const delBtn = box.querySelector(".kb-del");
-    if (delBtn) delBtn.onclick = async () => {
-      if (!await uiConfirm({ message: t("kb.delConfirm"), danger: true })) return;
-      const res = await fetch(`/ag-ui/kb/${delBtn.dataset.kb}`, {
-        method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
+    item.querySelectorAll(".kb-del").forEach((delBtn) => {
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!await uiConfirm({ message: t("kb.delConfirm"), danger: true })) return;
+        const res = await fetch(`/ag-ui/kb/${delBtn.dataset.kb}`, {
+          method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) { toast(errMsg(data, t("kb.delFail", { err: res.status }))); return; }
+        toast(t("kb.deleted"));
+        agentKbIds = agentKbIds.filter((x) => x !== delBtn.dataset.kb);
+        kbExpanded.delete(delBtn.dataset.kb);
+        renderKbPicks();
+        await loadKbs();
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) { toast(errMsg(data, t("kb.delFail", { err: res.status }))); return; }
-      toast(t("kb.deleted"));
-      agentKbIds = agentKbIds.filter((x) => x !== delBtn.dataset.kb);
-      renderKbPicks();
-      await loadKbs();
-    };
-    wrap.appendChild(box);
+    });
+    wrap.appendChild(item);
   });
 }
 
-/** 打开知识库管理弹窗并刷新列表。 */
+/** 打开知识库管理弹窗并刷新列表（重置搜索 / 收起创建面板）。 */
 async function openKbModal() {
+  const s = $("kbSearch"); if (s) { s.value = ""; kbSearchQuery = ""; }
+  toggleKbCreatePanel(false);
   $("kbModal").classList.remove("hidden");
   await loadKbs();
   startKbPolling();
+}
+
+/** 展开 / 收起知识库创建面板（force 可强制指定状态）。 */
+function toggleKbCreatePanel(force) {
+  const p = $("kbCreatePanel");
+  if (!p) return;
+  const show = force === undefined ? p.classList.contains("hidden") : force;
+  p.classList.toggle("hidden", !show);
+  if (show) $("kbName")?.focus();
 }
 
 /* 文档处理状态轮询：有 processing 文档时每 2s 刷新一次列表，全部完成自动停止。 */
@@ -8928,6 +8963,9 @@ function init() {
   // 知识库：管理弹窗（入口在「AI 角色管理」工具栏）+ 创建
   $("agentKbManageBtn").onclick = openKbModal;
   $("afKbAddBtn").onclick = () => openAgentPick("kb");
+  $("kbNewBtn").onclick = () => toggleKbCreatePanel();
+  $("kbCreateCancel").onclick = () => toggleKbCreatePanel(false);
+  $("kbSearch").addEventListener("input", () => { kbSearchQuery = $("kbSearch").value; renderKbModal(); });
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };
   $("kbCreateBtn").onclick = async () => {
     const name = $("kbName").value.trim();
@@ -8942,6 +8980,7 @@ function init() {
     toast(t("kb.created", { name: data.name }));
     $("kbName").value = "";
     $("kbDesc").value = "";
+    toggleKbCreatePanel(false);
     await loadKbs();
   };
   $("agentSearch").addEventListener("input", renderAgentList);

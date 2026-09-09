@@ -589,16 +589,32 @@
     </div>
   </div>
 
-  <!-- 知识库管理：创建知识库、上传文档（附件提取文本 + 向量化） -->
+  <!-- 知识库管理：创建知识库、上传文档（附件提取文本 + 向量化）；参考技能库的列表式布局 -->
   <div id="kbModal" class="modal-overlay hidden">
     <div class="modal kb-modal">
-      <div class="modal-title" data-i18n="kb.title">📚 知识库管理</div>
-      <div class="kb-create">
-        <input id="kbName" class="modal-input" data-i18n-placeholder="kb.name.ph" maxlength="40" />
-        <input id="kbDesc" class="modal-input" data-i18n-placeholder="kb.desc.ph" maxlength="120" style="margin-top:6px" />
-        <button id="kbCreateBtn" class="send" style="margin-top:6px" data-i18n="kb.create">＋ 创建知识库</button>
+      <div class="modal-title">📚 <span data-i18n="kb.title">知识库管理</span></div>
+      <div class="kb-view">
+        <div class="kb-toolbar">
+          <span class="search-clear-wrap" style="flex:1;min-width:160px">
+            <input id="kbSearch" class="modal-input" data-i18n-placeholder="kb.search" />
+            <button type="button" class="search-clear" data-clear-for="kbSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
+          <button id="kbNewBtn" class="send" data-i18n="kb.create">＋ 创建知识库</button>
+        </div>
+        <div id="kbCreatePanel" class="kb-create hidden">
+          <input id="kbName" class="modal-input" data-i18n-placeholder="kb.name.ph" maxlength="40" />
+          <input id="kbDesc" class="modal-input" data-i18n-placeholder="kb.desc.ph" maxlength="120" />
+          <button id="kbCreateBtn" class="send" data-i18n="kb.createOk">创建</button>
+          <button id="kbCreateCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
+        </div>
+        <div class="kb-grid-head">
+          <span data-i18n="kb.col.name">名称 / ID</span>
+          <span data-i18n="kb.col.docs">文档</span>
+          <span data-i18n="kb.col.desc">描述</span>
+          <span class="kb-op-col" data-i18n="kb.col.ops">操作</span>
+        </div>
+        <div id="kbListWrap" class="kb-list"></div>
       </div>
-      <div id="kbListWrap" class="kb-list"></div>
       <div class="modal-actions">
         <button id="kbCloseBtn" class="btn-ghost" data-i18n="kb.close">关闭</button>
       </div>

@@ -448,7 +448,15 @@ window.I18N_DICTS.en = {
   "kb.title": "Knowledge Base Management",
   "kb.name.ph": "Knowledge base name (e.g. Company Policies)",
   "kb.desc.ph": "One-line description (optional)",
-  "kb.create": "Create Knowledge Base",
+  "kb.create": "＋ Create Knowledge Base",
+  "kb.createOk": "Create",
+  "kb.search": "Search knowledge bases / docs…",
+  "kb.col.name": "Name / ID",
+  "kb.col.docs": "Docs",
+  "kb.col.desc": "Description",
+  "kb.col.ops": "Actions",
+  "kb.toggleDocs": "Expand / collapse docs",
+  "kb.noMatch": "No matching knowledge bases",
   "kb.close": "Close",
 
   /* --- 修改密码 --- */

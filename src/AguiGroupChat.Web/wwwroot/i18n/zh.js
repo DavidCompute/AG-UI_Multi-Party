@@ -449,6 +449,14 @@ window.I18N_DICTS.zh = {
   "kb.name.ph": "知识库名称（如：公司制度）",
   "kb.desc.ph": "一句话说明（可选）",
   "kb.create": "＋ 创建知识库",
+  "kb.createOk": "创建",
+  "kb.search": "搜索知识库 / 文档…",
+  "kb.col.name": "名称 / ID",
+  "kb.col.docs": "文档",
+  "kb.col.desc": "描述",
+  "kb.col.ops": "操作",
+  "kb.toggleDocs": "展开 / 收起文档",
+  "kb.noMatch": "没有匹配的知识库",
   "kb.close": "关闭",
 
   /* --- 修改密码 --- */

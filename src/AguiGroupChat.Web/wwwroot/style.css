@@ -914,13 +914,45 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .af-sel-row code { font-size: 11px; }
 .af-sel-row .sel-desc { font-size: 12px; }
 .af-sel-row .sel-doc { font-size: 11px; }
-/* 知识库管理弹窗：加宽 + 内容区纵横滚动（入口在 AI 角色管理工具栏） */
+/* 知识库管理弹窗：加宽，仿技能库的列表式布局（工具栏搜索 + 创建面板 + 网格表头 + 可展开文档区） */
 .modal.kb-modal { width: min(900px, 96vw); max-width: none; display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
 .modal.kb-modal .modal-title,
-.modal.kb-modal .kb-create,
+.modal.kb-modal .kb-view,
 .modal.kb-modal .modal-actions { flex: none; }
-.modal.kb-modal .kb-create { margin-bottom: 4px; }
-#kbListWrap { flex: 1 1 auto; min-height: 0; overflow: auto; margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); overscroll-behavior: contain; }
+.modal.kb-modal .kb-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; margin-top: 2px; }
+.kb-view .kb-toolbar { flex: none; display: flex; align-items: center; gap: 8px; }
+.kb-create {
+  flex: none; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0;
+  padding: 10px; border: 1px dashed var(--border); border-radius: 10px;
+}
+.kb-create .modal-input { flex: 1 1 150px; width: auto; }
+.kb-create .send,
+.kb-create .btn-ghost { flex: none; }
+.kb-grid-head {
+  flex: none; display: grid; grid-template-columns: 1.5fr .8fr 2.2fr 150px; gap: 10px;
+  align-items: center; padding: 8px 12px; margin-top: 10px;
+  font-size: 12px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border);
+}
+.kb-op-col { display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+#kbListWrap { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.kb-list-item { border-bottom: 1px solid rgba(128,141,180,.12); background: transparent; }
+.kb-list-item:hover { background: var(--panel-2); }
+.kb-list-item.open { background: rgba(79,140,255,.06); }
+.kb-row {
+  display: grid; grid-template-columns: 1.5fr .8fr 2.2fr 150px; gap: 10px;
+  align-items: center; padding: 9px 12px; cursor: pointer; min-width: 0;
+}
+.kb-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kb-name b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-name code { font-size: 10px; color: var(--muted); }
+.kb-stat { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); min-width: 0; }
+.kb-desc-cell { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kb-op-col .icon-btn { width: 26px; height: 26px; }
+.kb-docs { padding: 2px 12px 10px 34px; }
+.kb-doc { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; font-size: 12px; color: var(--text); }
+.kb-doc:hover { background: var(--panel-2); }
+.kb-doc .kb-doc-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.kb-empty { padding: 20px 12px; text-align: center; color: var(--muted); font-size: 13px; }
 .search-hit {
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
   background: var(--panel-2); transition: border-color .15s, background .15s;
