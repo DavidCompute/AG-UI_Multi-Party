@@ -55,23 +55,24 @@ public static class MemoryApi
             var global = MemoryGovernance.IsGlobalManager(auth, userId);
             var memberGroups = store.GroupsOf(userId).Select(g => g.GroupId).ToList();
 
-            // 数据范围：全局管理员可查任意（groupId 为空 = 全部）；非管理员只可查自己所在群
-            IReadOnlyList<string> scoped;
+            // 数据范围：全局管理员可查任意（groupId 为空 = 全部知聚，直接全量检索）；非管理员只可查自己所在群
+            List<MessageMemoryItem> items;
+            long total;
             if (global)
             {
-                scoped = string.IsNullOrWhiteSpace(groupId) ? [] : [groupId!];
+                items = memory.ListMessages(groupId, senderId, keyword, Math.Clamp(limit, 1, 500), Math.Max(0, offset)).ToList();
+                total = memory.CountMessages(groupId, senderId, keyword);
             }
             else
             {
                 if (!string.IsNullOrWhiteSpace(groupId) && !store.IsMember(groupId, userId))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看该群记忆"),
                         statusCode: StatusCodes.Status403Forbidden);
-                scoped = string.IsNullOrWhiteSpace(groupId)
+                var scoped = string.IsNullOrWhiteSpace(groupId)
                     ? memberGroups
                     : [groupId!];
+                (items, total) = ListScoped(memory, scoped, senderId, keyword, Math.Clamp(limit, 1, 500), Math.Max(0, offset));
             }
-
-            var (items, total) = ListScoped(memory, scoped, senderId, keyword, Math.Clamp(limit, 1, 500), Math.Max(0, offset));
             return Results.Ok(new
             {
                 total,
