@@ -180,7 +180,7 @@ window.I18N_DICTS.en = {
   "agent.form.skills.add": "Add skill",
   "agent.form.section.skill": "Skills & Knowledge",
   "agent.form.section.kb": "Knowledge Base (optional)",
-  "agent.form.kb.hint": "When a <b>knowledge base</b> is bound, the employee retrieves relevant docs (RAG) before replying. <b>Selected</b> bases are listed below; use “＋ Bind knowledge base” to tick them in the dialog; create/upload knowledge bases under “📚 Manage knowledge base”.",
+  "agent.form.kb.hint": "When a <b>knowledge base</b> is bound, the employee retrieves relevant docs (RAG) before replying. <b>Selected</b> bases are listed below; use “＋ Bind knowledge base” to tick them in the dialog; create/upload knowledge bases under “AI role management → 📚 Manage knowledge base”.",
   "agent.form.kb.manage": "📚 Manage Knowledge Base",
   "agent.kbBtn": "Knowledge Base",
   "agent.form.section.memory": "Memory & Permissions",
