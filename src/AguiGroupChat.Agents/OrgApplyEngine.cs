@@ -29,6 +29,9 @@ public sealed class OrgPlanAgent
     public string? Instructions { get; set; } public string? TriggerMode { get; set; }
     public IReadOnlyList<string>? SkillIds { get; set; } public IReadOnlyList<string>? AssignmentIds { get; set; }
     public string? EscalationAgentId { get; set; } public string? RelayToAgentId { get; set; }
+
+    /// <summary>该岗位的记忆拟人 preset。null = 不单独配置（沿用全局召回，向后兼容）。</summary>
+    public MemoryProfile? MemoryProfile { get; set; }
 }
 /// <summary>apply 执行结果。</summary>
 public sealed class OrgApplyResult
@@ -138,6 +141,8 @@ public static class OrgApplyEngine
                 EscalationAgentId = string.IsNullOrWhiteSpace(a.EscalationAgentId) ? null : agentIdMap[a.EscalationAgentId],
                 RelayToAgentId = string.IsNullOrWhiteSpace(a.RelayToAgentId) ? null : agentIdMap[a.RelayToAgentId],
                 OwnerId = ownerId,
+                // 记忆拟人：仅已知 preset 落库；未知/缺失 → null（沿用全局，避免把历史无该字段的方案写成某种默认）。
+                MemoryProfile = a.MemoryProfile is { } mp && MemoryPersonalityTypes.IsKnown(mp.MemoryType) ? mp : null,
             });
             created.Add(id);
         }

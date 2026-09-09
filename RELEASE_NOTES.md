@@ -4,6 +4,17 @@
 **版本说明**：1.0.120 为当前 Windows 桌面点版本（已构建 Windows 1.0.120 MSI）。本版本在既有 Web/桌面迭代之上并入最近的 Hub/协议更新：数字员工**单聊（kind=direct）**、**实时会话吊销/禁用/改密即时断线**、SDK 上行串行化与断连单次回调、上传/导入请求体放开到 200MB（Kestrel 同步放宽）。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
 **Version note**: 1.0.120 is the current Windows desktop point release (a Windows 1.0.120 MSI was built). On top of the previous web/desktop iteration it includes the latest Hub/protocol updates: digital-employee **direct chats (`kind=direct`)**, **immediate realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies (Kestrel limit raised accordingly). Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
 
+## 开发中：组织构建自动按岗位适配「记忆拟人类型」（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
+# In development: Org building auto-assigns per-role “memory personality” (already live on the Web build; not yet in the 1.0.120 desktop installer)
+
+中文：
+- **组织构建自动适配记忆拟人类型**：网页「一键组织编排」与内置组织架构构建师（`org_plan_draft`）产稿时，会按每个岗位的实际职责让模型挑选记忆拟人 preset（`memoryProfile`：broad/deep/slowToLearn/cueDependent/fastForgetting），随方案 JSON 一起预览，并在 apply / `org_commit` 落库后自动写入新创建的数字员工——统筹主管通常是 `deep` 深记型、高频客服/一线是 `broad` 广记型、需回想客户过往的顾问/售后是 `cueDependent` 存得住想不起型、值班/速查岗是 `fastForgetting`、重复套路岗是 `slowToLearn`。容错解析：模型写 preset key 字符串或 `{"memoryType":…}` 对象均可；未知/缺失不报错，缺失按岗位称呼/职责关键词启发式兜底，仍无把握则保持 `null`=沿用全局召回。**向后兼容**：历史方案/手写最终稿 JSON 没有该字段 → 解析为 null、原样落库。预览逐岗位回显「记忆: 🧠…」标签便于落库前核对。详见 `docs/memory-personality.md` §4.4。
+
+English:
+- **Org building now auto-assigns memory personalities**: one-click orchestration and the built-in org architect (`org_plan_draft`) ask the model to pick a memory-persona preset per role (`memoryProfile`: broad/deep/slowToLearn/cueDependent/fastForgetting) that is shown in the preview and written into each newly created employee on apply / `org_commit` — e.g. leads/deep, high-volume frontline/broad, account-success & after-sales/cueDependent, duty & quick-lookup/fastForgetting, repetitive routine/slowToLearn. Parsing is tolerant (preset-key string or `{"memoryType":…}` object); unknown/missing values never abort the build — missing falls back to role-keyword heuristics, otherwise stays `null` (platform-global recall, backward compatible; legacy plans / hand-written JSON without the field still parse and apply exactly as before). Preview rows show a “记忆:” tag per employee for verification before committing. See `docs/memory-personality.md` §4.4.
+
+---
+
 ## 开发中：数字员工「记忆拟人类型」（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
 # In development: Digital-employee memory personality types (already live on the Web build; not yet in the 1.0.120 desktop installer)
 

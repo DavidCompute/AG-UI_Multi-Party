@@ -1594,6 +1594,7 @@ function formatOrchestrationPlan(p) {
     const subs = (a.assignmentIds || []).join("、");
     const esc = a.escalationAgentId ? ` ↑${a.escalationAgentId}` : "";
     lines.push(` • ${a.nickname || a.agentId}（${a.agentId}）${esc}`);
+    if (a.memoryProfile && a.memoryProfile.memoryType) lines.push(`     记忆: ${t("agent.form.memoryType." + a.memoryProfile.memoryType) || a.memoryProfile.memoryType}`);
     if (a.skillIds && a.skillIds.length) lines.push(`     技能: ${a.skillIds.join("、")}`);
     if (subs) lines.push(`     指派下级: ${subs}`);
   });
@@ -1623,6 +1624,7 @@ async function applyOrchestration() {
           agentId: a.agentId, nickname: a.nickname, description: a.description, instructions: a.instructions,
           triggerMode: a.triggerMode || "mentioned", skillIds: a.skillIds || [], assignmentIds: a.assignmentIds || [],
           escalationAgentId: a.escalationAgentId || null, relayToAgentId: a.relayToAgentId || null,
+          memoryProfile: a.memoryProfile || null,
         })),
         skills: (orchestrationPreview.skills || []).map((s) => ({
           skillId: s.skillId, name: s.name, description: s.description, kind: s.kind, body: s.body,

@@ -258,6 +258,7 @@ flowchart TD
 1. `org_commit`：把最终组织稿整支落库/按 teamKey 覆盖；仅平台管理员能真写。
 2. `org_plan_draft`：一键式/结构化整支初稿（复用 `AgentOrchestrator`），只生成不落库。
 `org_design` 描述会注入「当前平台可用运行能力概览」（server/client、kind 选择、需管理员建/放行），避免一律 pure prompt。
+产稿会**按每个岗位的实际职责让模型挑一个记忆拟人 preset**（`memoryProfile`：broad/deep/slowToLearn/cueDependent/fastForgetting，缺省 null=沿用全局），随最终稿 JSON 一起预览并落库（容错解析见 `docs/memory-personality.md` §4.4）。
 
 ### B.0 notes
 
@@ -270,7 +271,8 @@ An org role mounted on `org_design` auto-gains native tools `org_commit` (admin-
 ```
 用户@org_architect 一句需求 / “就按这版落库”
  →(1)路由：整支新的/完整能力集 → org_plan_draft；个别岗位小改 → org_design逐条
- →(2)出稿：plan_draft=AgentOrchestrator.GenerateAsync(一句)→{title, agents[…], skills[…]};
+ →(2)出稿：plan_draft=AgentOrchestrator.GenerateAsync(一句)→{title, agents[…], skills[…]}
+          （agents 每岗位带可选 memoryProfile：按职责挑记忆拟人 preset，缺省 null=沿用全局）;
          design=靠注入的“运行能力”对话式攒同一结构最终稿 JSON
  →(3)呈现＋确认：逐岗位可读概览给用户；未获明确认可绝不落库
  →(4)管理员放行 → org_commit(teamKey, planJson)
@@ -280,7 +282,7 @@ An org role mounted on `org_design` auto-gains native tools `org_commit` (admin-
 
 ### B.1 Overall flow
 
-Route（whole build→plan_draft; small tweak→design) → draft (one-shot structured JSON or conversation) → present & confirm (never commit before explicit OK) → admin authorizes `org_commit(teamKey, planJson)` → `OrgApplyEngine` writes the whole team; on failure fix and retry under same `teamKey`.
+Route（whole build→plan_draft; small tweak→design) → draft (one-shot structured JSON or conversation, agents may carry an optional per-role `memoryProfile` persona preset, null = global) → present & confirm (never commit before explicit OK) → admin authorizes `org_commit(teamKey, planJson)` → `OrgApplyEngine` writes the whole team; on failure fix and retry under same `teamKey`.
 
 ---
 

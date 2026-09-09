@@ -325,6 +325,16 @@ public static class AgentApi
                         assignmentIds = a.AssignmentIds ?? [],
                         escalationAgentId = a.EscalationAgentId,
                         relayToAgentId = a.RelayToAgentId,
+                        memoryProfile = a.MemoryProfile is null ? null : new
+                        {
+                            memoryType = a.MemoryProfile.MemoryType,
+                            styleMode = a.MemoryProfile.StyleMode,
+                            personaCard = a.MemoryProfile.PersonaCard,
+                            topK = a.MemoryProfile.TopK,
+                            personalTopK = a.MemoryProfile.PersonalTopK,
+                            minScore = a.MemoryProfile.MinScore,
+                            personalMinScore = a.MemoryProfile.PersonalMinScore,
+                        },
                     }),
                     skills = plan.Skills.Select(s => new
                     {
@@ -401,7 +411,7 @@ public static class AgentApi
                     plan = new
                     {
                         title = plan.Title,
-                        agents = plan.Agents.Select(a => new { agentId = a.AgentId, nickname = a.Nickname, description = a.Description, instructions = a.Instructions, triggerMode = a.TriggerMode ?? "mentioned", skillIds = a.SkillIds ?? [], assignmentIds = a.AssignmentIds ?? [], escalationAgentId = a.EscalationAgentId, relayToAgentId = a.RelayToAgentId }),
+                        agents = plan.Agents.Select(a => new { agentId = a.AgentId, nickname = a.Nickname, description = a.Description, instructions = a.Instructions, triggerMode = a.TriggerMode ?? "mentioned", skillIds = a.SkillIds ?? [], assignmentIds = a.AssignmentIds ?? [], escalationAgentId = a.EscalationAgentId, relayToAgentId = a.RelayToAgentId, memoryProfile = a.MemoryProfile is null ? null : new { memoryType = a.MemoryProfile.MemoryType, styleMode = a.MemoryProfile.StyleMode, personaCard = a.MemoryProfile.PersonaCard, topK = a.MemoryProfile.TopK, personalTopK = a.MemoryProfile.PersonalTopK, minScore = a.MemoryProfile.MinScore, personalMinScore = a.MemoryProfile.PersonalMinScore } }),
                         skills = plan.Skills.Select(s => new { skillId = s.SkillId, name = s.Name, description = s.Description, kind = s.Kind, body = s.Body, executionLocation = s.ExecutionLocation ?? "server", requiresApproval = s.RequiresApproval }),
                     },
                 }, ct);
@@ -447,6 +457,7 @@ public static class AgentApi
                     AgentId = a.AgentId, Nickname = a.Nickname, Description = a.Description, Instructions = a.Instructions,
                     TriggerMode = a.TriggerMode, SkillIds = a.SkillIds, AssignmentIds = a.AssignmentIds,
                     EscalationAgentId = a.EscalationAgentId, RelayToAgentId = a.RelayToAgentId,
+                    MemoryProfile = BuildMemoryProfile(a.MemoryProfile), // 未知类型/越界归一；null = 沿用全局
                 }).ToList();
                 var r = await OrgApplyEngine.ExecuteAsync(
                     ownerId: user.UserId, isAdmin: isAdmin, skills, agents,
@@ -835,7 +846,7 @@ public sealed record OrchestrateApplyRequest(string? Title, IReadOnlyList<Orches
 /// <summary>编排方案中的一个数字员工岗位。</summary>
 public sealed record OrchestratedAgentHttp(string? AgentId, string? Nickname, string? Description, string? Instructions,
     string? TriggerMode, IReadOnlyList<string>? SkillIds, IReadOnlyList<string>? AssignmentIds,
-    string? EscalationAgentId, string? RelayToAgentId);
+    string? EscalationAgentId, string? RelayToAgentId, MemoryProfileHttpRequest? MemoryProfile = null);
 
 /// <summary>编排方案中的一个技能定义。</summary>
 public sealed record OrchestratedSkillHttp(string? SkillId, string? Name, string? Description, string? Kind,

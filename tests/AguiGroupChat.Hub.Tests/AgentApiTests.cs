@@ -888,6 +888,12 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.True(agents.GetArrayLength() >= 1);
         Assert.True(d.GetProperty("skills").GetArrayLength() >= 1);
 
+        // mock 模板每岗带记忆拟人 preset，预览回显 memoryProfile（供前端确认后随 apply 一并落库）
+        var mem0 = agents[0].GetProperty("memoryProfile");
+        Assert.Equal(JsonValueKind.Object, mem0.ValueKind);
+        var mt0 = mem0.GetProperty("memoryType").GetString();
+        Assert.True(MemoryPersonalityTypes.IsKnown(mt0));
+
         // 未落库：生成后库里不应出现这些 agent / skill。取预览里第一个 agentId 校验不存在。
         var firstAgent = agents[0].GetProperty("agentId").GetString()!;
         var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
@@ -939,7 +945,8 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         var reqBody = new OrchestrateApplyRequest(
             preview.Title,
             preview.Agents.Select(a => new OrchestratedAgentHttp(a.AgentId, a.Nickname, a.Description, a.Instructions,
-                a.TriggerMode, a.SkillIds, a.AssignmentIds, a.EscalationAgentId, a.RelayToAgentId)).ToList(),
+                a.TriggerMode, a.SkillIds, a.AssignmentIds, a.EscalationAgentId, a.RelayToAgentId,
+                MemoryProfile: a.MemoryProfile is null ? null : new MemoryProfileHttpRequest(a.MemoryProfile.MemoryType))).ToList(),
             preview.Skills.Select(s => new OrchestratedSkillHttp(s.SkillId, s.Name, s.Description, s.Kind,
                 s.Body, s.ExecutionLocation, s.RequiresApproval)).ToList());
 
@@ -969,6 +976,9 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.Equal(execId, mgrDef.AssignmentIds[0]);
         Assert.Equal(mgrId, catalog.GetDefinition(execId)!.EscalationAgentId);
         Assert.Contains(mgrDef.SkillDefIds, sid => preview.Skills.Any(s => s.SkillId == sid));
+        // 记忆拟人 preset 随编排落库：主管=deep（mock 模板确定性赋值）
+        Assert.NotNull(preview.Agents[0].MemoryProfile);
+        Assert.Equal(MemoryPersonalityTypes.Deep, mgrDef.MemoryProfile?.MemoryType);
     }
 
     [Fact]
@@ -1058,6 +1068,26 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.Equal(["dup_skill_2"], def.SkillDefIds);
         Assert.Equal("新员工", def.Nickname);
     }
+
+    [Fact]
+    public async Task OrgCommit_PersistsAgentMemoryProfile_FromPlanJsonPresetKey()
+    {
+        // 内置组织角色落库（org_commit → OrgTeamCommitter → OrgApplyEngine）：最终稿 JSON 里 memoryProfile 为 key 字符串
+        // 应透传落库为 AgentDefinition.MemoryProfile（deep），不是被静默丢掉。
+        var suffix = Guid.NewGuid().ToString("N")[..6];
+        var agentId = "memorg_" + suffix;
+        var skillId = "msk_" + suffix;
+        var committer = _fixture.App.Services.GetRequiredService<OrgTeamCommitter>();
+        var planJson = "{\"title\":\"记忆适配组织\",\"skills\":[{\"skillId\":\"" + skillId
+            + "\",\"name\":\"接待\",\"description\":\"接待模板\",\"kind\":\"prompt\",\"body\":\"请接待\",\"executionLocation\":\"server\",\"requiresApproval\":false}]"
+            + ",\"agents\":[{\"agentId\":\"" + agentId + "\",\"nickname\":\"客服主管\",\"description\":\"统筹客服团队\",\"instructions\":\"你负责统筹\",\"triggerMode\":\"mentioned\",\"skillIds\":[\"" + skillId + "\"],\"memoryProfile\":\"deep\"}]}";
+        var (ok, msg) = await committer.CommitAsync("key_" + suffix, planJson, "orch_admin", true, CancellationToken.None);
+        Assert.True(ok, msg);
+        var catalog = _fixture.App.Services.GetRequiredService<AgentCatalog>();
+        var def = catalog.GetDefinition(agentId);
+        Assert.NotNull(def);
+        Assert.Equal(MemoryPersonalityTypes.Deep, def!.MemoryProfile?.MemoryType);
+    }
 }
 
 
@@ -1125,5 +1155,41 @@ public sealed class AgentOrchestratorTests
         var skill = Assert.Single(plan.Skills);
         Assert.NotNull(skill.Body);
         Assert.Contains("\"method\":\"GET\"", skill.Body); // 对象被归一化为紧凑 JSON 字符串
+    }
+
+    [Fact]
+    public void Parse_AcceptsMemoryProfileAsStringOrObject_ToleratingUnknown()
+    {
+        // 记忆拟人 preset：模型写 key 字符串或 {memoryType,…} 对象都接受；未知 key / 残缺对象 = null（沿用全局，不中断解析）。
+        OrchestrationPlan P(string memJson) => AgentOrchestrator.Parse(
+            "{\"title\":\"t\",\"agents\":[{\"agentId\":\"a1\",\"nickname\":\"角色A\",\"description\":\"d\",\"instructions\":\"i\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"memoryProfile\":" + memJson + "}],\"skills\":[]}");
+        Assert.Equal(MemoryPersonalityTypes.Deep, P("\"deep\"").Agents[0].MemoryProfile?.MemoryType);
+        Assert.Equal(MemoryPersonalityTypes.SlowToLearn, P("{\"memoryType\":\"slowToLearn\"}").Agents[0].MemoryProfile?.MemoryType);
+        Assert.Equal(MemoryPersonalityTypes.Broad, P("{\"type\":\"broad\"}").Agents[0].MemoryProfile?.MemoryType);
+        Assert.Null(P("\"totally_unknown\"").Agents[0].MemoryProfile);
+        Assert.Null(P("{\"topK\":6}").Agents[0].MemoryProfile);
+    }
+
+    [Fact]
+    public void Parse_FillsHeuristicMemoryProfile_WhenModelOmitsIt_AndLeavesGenericNull()
+    {
+        // 模型漏填 memoryProfile 时的岗位启发式兜底（可读、不因漏填中断落库）：主管→deep；无把握岗位保持 null。
+        var plan = AgentOrchestrator.Parse(
+            "{\"title\":\"客服组织\",\"agents\":[{\"agentId\":\"cs_lead\",\"nickname\":\"客服主管\",\"description\":\"统筹客服团队\",\"instructions\":\"你负责管理客服\",\"triggerMode\":\"mentioned\",\"skillIds\":[]},{\"agentId\":\"g1\",\"nickname\":\"角色X\",\"description\":\"generic\",\"instructions\":\"do stuff\",\"triggerMode\":\"mentioned\",\"skillIds\":[]}],\"skills\":[]}");
+        Assert.Equal(MemoryPersonalityTypes.Deep, plan.Agents[0].MemoryProfile?.MemoryType);
+        Assert.Null(plan.Agents[1].MemoryProfile);
+    }
+
+    [Fact]
+    public async Task Mock_AssignsPresetMemoryProfilesByRole()
+    {
+        // mock 模板（确定性）：主管=深记（长期记牢关键决策）、执行岗A=广记（往来量大）、执行岗B=存得住想不起（凭提示回想具体事务）。
+        var plan = await AgentOrchestrator.GenerateAsync(
+            new AgentOptions { Provider = "mock" }, "组建客服团队",
+            NullLoggerFactory.Instance.CreateLogger("orch"), CancellationToken.None);
+        Assert.Equal(3, plan.Agents.Count);
+        Assert.Equal(MemoryPersonalityTypes.Deep, plan.Agents[0].MemoryProfile?.MemoryType);
+        Assert.Equal(MemoryPersonalityTypes.Broad, plan.Agents[1].MemoryProfile?.MemoryType);
+        Assert.Equal(MemoryPersonalityTypes.CueDependent, plan.Agents[2].MemoryProfile?.MemoryType);
     }
 }

@@ -154,6 +154,21 @@ flowchart LR
 - **导出 / 导入数字员工 JSON**（`serializeAgent` / `importAgentsFromFile`）带 `memoryProfile` 往返。
 - 系统内置数字员工（无 ownerId）只读，不在此开放配置。
 
+### 4.4 组织构建自动配型（一键编排 / org_architect）
+
+「一键组织编排」与内置「组织架构构建师」(`org_plan_draft`) 共用同一生成引擎 `AgentOrchestrator`：
+产稿时让模型**按每个岗位的实际职责挑选一个记忆拟人 preset**（`memoryProfile` 写为 key 字符串），
+随方案 JSON 一起预览；用户确认落库（apply / `org_commit`）后，新创建的数字员工<b>自带匹配其岗位的
+记忆类型</b>——例如统筹主管常为 `deep`、高频客服/一线为 `broad`、需回想客户过往的顾问/售后为
+`cueDependent`、值班/速查岗为 `fastForgetting`、重复套路岗为 `slowToLearn`。
+
+- 五档选择口径见 `AgentOrchestrator.BuildPrompt`；示例 JSON 结构含 `"memoryProfile":"deep"`。
+- **宽容解析**：模型可写 preset 字符串或 `{"memoryType":…}` 对象；未知 / 残缺 / 缺失都不报错——
+  缺失时按岗位称呼/职责关键词**启发式兜底**，仍无把握则保持 `null`（沿用全局，绝不因该字段中断整支落库）。
+- **预览可见**：编排预览逐岗位回显「记忆: 🧠深记型…」；apply 原样回传（web 路径经 `OrchestratedAgentHttp.MemoryProfile`，
+  内置角色路径经 `OrgTeamCommitter` 解析最终稿 JSON 的 `memoryProfile`），统一在 `OrgApplyEngine` 落库。
+- **向后兼容**：历史方案 / 手写最终稿 JSON 没有该字段 → 解析为 `null`，与旧行为完全一致。
+
 ---
 
 ## 5. 读取侧：按类型执行抽取

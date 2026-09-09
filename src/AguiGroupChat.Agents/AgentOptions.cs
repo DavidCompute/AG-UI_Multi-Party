@@ -296,6 +296,10 @@ public static class MemoryPersonalityTypes
     /// <summary>是否为已知预设 key。</summary>
     public static bool IsKnown(string? key)
         => key is not null && All.Contains(key, StringComparer.Ordinal);
+
+    /// <summary>按 preset key 构建记忆拟人配置；空 / 未知 key → null（= 不单独配置，召回沿用全局，向后兼容）。</summary>
+    public static MemoryProfile? FromKey(string? key)
+        => IsKnown(key) ? new MemoryProfile { MemoryType = key! } : null;
 }
 
 /// <summary>

@@ -31,7 +31,7 @@ public static class OrgBuiltinSeeds
 - org_design 产出后你先把它给用户核对行为；待用户或管理员说“就按这版落库”再调用 org_commit。
 中文、简洁、可执行。
 【整支构建优先走“一键式”】
-- 当用户要的是一支全新的组织／团队、或让你“设计／构建／打造一个完整组织架构”并给出（不仅个别岗位的）完整能力时，**优先调用 org_plan_draft（参数=用户那句话的构建需求）**，用它产出与网页“一键组织编排”同级别的结构化初稿 JSON：岗位 + 各岗 skillIds + 每个技能(kind 会按 shell/http/prompt/dotnet 智能选、executionLocation 按 server/client)+ 岗位连接。这能避免你把整支组织手写成全是 pure prompt 的软稿。
+- 当用户要的是一支全新的组织／团队、或让你“设计／构建／打造一个完整组织架构”并给出（不仅个别岗位的）完整能力时，**优先调用 org_plan_draft（参数=用户那句话的构建需求）**，用它产出与网页“一键组织编排”同级别的结构化初稿 JSON：岗位 + 各岗 skillIds + 每个技能(kind 会按 shell/http/prompt/dotnet 智能选、executionLocation 按 server/client)+ 岗位连接 + 每岗位按职责挑选的 memoryProfile（记忆拟人 preset）。这能避免你把整支组织手写成全是 pure prompt 的软稿。
 - 取到 org_plan_draft 返回后：用可读概览呈现给用户，逐项等用户/系统管理员认可（如“就按这版落库”）；认可后再用 org_commit 以同一段成稿 JSON、同一稳定 teamKey 落库。注意 org_plan_draft 只产稿不写库，别在用户确认前落库。
 - 若用户是对已有一支组织做局部小改（只动一两个岗位/技能），仍可按需用 org_design 逐条精致，不必每次整支重拟。
 """;
@@ -40,7 +40,7 @@ public static class OrgBuiltinSeeds
     public static readonly string OrgDesignBody =
 """
 你是组织架构设计引擎。把用户需求/修改意见整理成一份**可直接传 org_commit 的最终稿 JSON**，要求：
-1) 只输出一段可复制的 JSON（不要其它口水话），结构：{ "teamKey":"it_support", "title":"组织名", "skills":[{"skillId":"...","name":"...","description":"...","kind":"prompt|http|shell|dotnet","body":"...","executionLocation":"server|client","requiresApproval":...,"parametersJson":""}], "agents":[{"agentId":"...","nickname":"一线...","description":"...","instructions":"...","triggerMode":"mentioned","skillIds":[...],"assignmentIds":[],"escalationAgentId":"..."或null,"relayToAgentId":null}], "createSupportCircle":false }。
+1) 只输出一段可复制的 JSON（不要其它口水话），结构：{ "teamKey":"it_support", "title":"组织名", "skills":[{"skillId":"...","name":"...","description":"...","kind":"prompt|http|shell|dotnet","body":"...","executionLocation":"server|client","requiresApproval":...,"parametersJson":""}], "agents":[{"agentId":"...","nickname":"一线...","description":"...","instructions":"...","triggerMode":"mentioned","skillIds":[...],"assignmentIds":[],"escalationAgentId":"..."或null,"relayToAgentId":null,"memoryProfile":"deep或null(可选)"}], "createSupportCircle":false }。
 2) 为每个岗位按【职责+本平台可用运行能力】选 kind 与 executionLocation，不要一律 prompt：
    - 仅分析/建议/流程/结构化起草 → kind=prompt、executionLocation=server（最稳妥）。
    - 需要查询外部 HTTP(S) 接口（只读首选）→ kind=http、executionLocation=server。
@@ -51,6 +51,7 @@ public static class OrgBuiltinSeeds
    - org_deploy 是“把整份最终稿落库/覆盖（同一 teamKey 只留最新）”的动作，不要把它当作某个普通岗位的执行技能来设置。
 3) 权限边界：prompt 任何人可出稿；http/shell/dotnet（建库）与 org_deploy 均需系统管理员建/改/删，本机(client)执行需触发者批准；普通用户只产出这份待审 JSON、绝不落库。不要在没有任何管理员放行时编造“已写库成功”。
 4) teamKey 全程稳定；agents 必须>=1 且每个都有 nickname；改动基于现状增量；请给足并闭合大括号，不截断、不占位省略。
+5) agents 每岗位的 memoryProfile 为<b>可选</b>记忆拟人 preset key：broad（记得多易混，适合大量往来一线/客服）、deep（记得少而久，适合统筹/主管）、slowToLearn（难录入、需重复，适合重复套路岗）、cueDependent（存得住想不起、见提示才想起，适合顾问/售后/客户成功）、fastForgetting（旧事淡忘，适合值班/速查）；只影响该员工日后如何回忆历史，不改变能力；拿不准就 null（沿用全局默认）。
 输入需求/现有情况：
 {{query}}
 """;

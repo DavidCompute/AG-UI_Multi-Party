@@ -98,7 +98,7 @@ public sealed class OrgTeamCommitter
 
     // plan JSON 轻量 DTO（对齐系统一键编排的输入字段，关键字小驼峰）
     private sealed class CommittedSkill { public string? skillId { get; set; } = null; public string? name { get; set; } public string? description { get; set; } public string? kind { get; set; } public string? body { get; set; } public string? executionLocation { get; set; } public bool? requiresApproval { get; set; } }
-    private sealed class CommittedAgent { public string? agentId { get; set; } public string? nickname { get; set; } public string? description { get; set; } public string? instructions { get; set; } public string? triggerMode { get; set; } public List<string>? skillIds { get; set; } public List<string>? assignmentIds { get; set; } public string? escalationAgentId { get; set; } public string? relayToAgentId { get; set; } }
+    private sealed class CommittedAgent { public string? agentId { get; set; } public string? nickname { get; set; } public string? description { get; set; } public string? instructions { get; set; } public string? triggerMode { get; set; } public List<string>? skillIds { get; set; } public List<string>? assignmentIds { get; set; } public string? escalationAgentId { get; set; } public string? relayToAgentId { get; set; } public System.Text.Json.JsonElement? memoryProfile { get; set; } }
     private sealed class CommittedPlan { public string title { get; set; } = ""; public List<CommittedSkill>? skills { get; set; } public List<CommittedAgent>? agents { get; set; } public bool createSupportCircle { get; set; } = false; }
 
     /// <summary>移除某团队上一版在此库产生的数字员工与技能（仅删除由本记录登记的、仍存在的对象；404/不存在跳过）。</summary>
@@ -149,6 +149,7 @@ public sealed class OrgTeamCommitter
             AgentId = a.agentId, Nickname = a.nickname, Description = a.description, Instructions = a.instructions,
             TriggerMode = a.triggerMode, SkillIds = a.skillIds, AssignmentIds = a.assignmentIds,
             EscalationAgentId = a.escalationAgentId, RelayToAgentId = a.relayToAgentId,
+            MemoryProfile = ParseAgentMemoryProfile(a.memoryProfile),
         }).ToList();
 
         OrgApplyResult result;
@@ -174,6 +175,29 @@ public sealed class OrgTeamCommitter
         if (title.Length > MaxTitle) title = title[..MaxTitle];
         _store.Upsert(key, title, result.Agents, result.Skills, result.SupportCircleGroupId);
         return (true, $"已用官方一键编排引擎把「{(title.Length > 0 ? title : "这支团队")}」整批落库：数字员工 {string.Join(",", result.Agents)}；技能 {string.Join(",", result.Skills)}。库里只保留本批（key={key}）。");
+    }
+
+    /// <summary>解析组织最终稿里岗位的 memoryProfile：preset key 字符串或 {memoryType,…} 对象均兼容；未知/缺失 → null（沿用全局）。</summary>
+    private static MemoryProfile? ParseAgentMemoryProfile(System.Text.Json.JsonElement? raw)
+    {
+        if (raw is not { } el) return null;
+        if (el.ValueKind == System.Text.Json.JsonValueKind.String)
+            return MemoryPersonalityTypes.FromKey(el.GetString());
+        if (el.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            string? key = null;
+            foreach (var prop in el.EnumerateObject())
+            {
+                var name = prop.Name.ToLowerInvariant();
+                if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.String && (name is "memorytype" or "type" or "key"))
+                {
+                    key = prop.Value.GetString();
+                    break;
+                }
+            }
+            return MemoryPersonalityTypes.FromKey(key);
+        }
+        return null; // null / 数组 / 数值等防御性忽略
     }
 
     private static string AvailableId(string preferred, HashSet<string> occupied)

@@ -119,7 +119,14 @@ public static class AgentOrchestrator
             "- skillIds：本岗位要挂载的技能 ID 列表（引用下方 skills 里的 skillId）。\n" +
             "- assignmentIds：向下指派白名单（可把不归属自己的任务指派给哪个下级，填下级 agentId）。\n" +
             "- escalationAgentId：向上提升目标（通常是其上级 agentId）。\n" +
-            "- relayToAgentId：整轮交接目标（可选，较少用）。\n\n" +
+            "- relayToAgentId：整轮交接目标（可选，较少用）。\n" +
+            "- memoryProfile：按【该岗位实际的记忆需求】从五档拟人 preset 里选一个<b>key 字符串</b>（只影响它日后如何回忆知聚历史，不改变能力本身）：\n" +
+            "    broad 广记型（记得多、细节易混，适合要接收大量高频往来的一线/客服/信息岗）；\n" +
+            "    deep 深记型（记得少而久、宁缺毋滥，适合要长期记牢关键决定与重要上下文的统筹/主管岗）；\n" +
+            "    slowToLearn 难录入型（新信息需反复几次才刻入，适合重复性、按固定套路执行后再不会忘的岗位）；\n" +
+            "    cueDependent 存得住想不起型（见线索提示才想起，适合需记住客户/合作方过往偏好、常要顺着话题回想的顾问/售后/客户成功岗）；\n" +
+            "    fastForgetting 快速遗忘型（旧事淡忘、只清楚近期，适合只处理当下、不必背旧账的值班/速查岗）。\n" +
+            "    拿不准就 null（沿用全局默认召回）；不要在 memoryProfile 里塞对象或编造其它值。\n\n" +
             "技能（skills）字段：\n" +
             "- skillId：ASCII 且 ≤40。\n" +
             "- name：中文名。\n" +
@@ -131,7 +138,7 @@ public static class AgentOrchestrator
             "连接原则：给出 2~6 个数字员工；尽量形成「主管 → 若干执行岗」的层次；主管的 escalationAgentId 指向更上层或留空；\n" +
             "执行岗 assignmentIds 留空、escalationAgentId 指向主管。技能要贴合岗位职责，数量 1~6 个。\n\n" +
             "只输出最终 JSON（如下结构，字段补齐、可加多余岗位/技能项；简述已在开头给出，最终成稿不再重复简述，也不要 ``` 围栏）：\n" +
-            "{\"title\":\"<组织名>\",\"agents\":[{\"agentId\":\"\",\"nickname\":\"\",\"description\":\"\",\"instructions\":\"\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":null,\"relayToAgentId\":null}],\"skills\":[{\"skillId\":\"\",\"name\":\"\",\"description\":\"\",\"kind\":\"prompt\",\"body\":\"\",\"executionLocation\":\"server\",\"requiresApproval\":false}]}\n\n" +
+            "{\"title\":\"<组织名>\",\"agents\":[{\"agentId\":\"\",\"nickname\":\"\",\"description\":\"\",\"instructions\":\"\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":null,\"relayToAgentId\":null,\"memoryProfile\":\"deep\"}],\"skills\":[{\"skillId\":\"\",\"name\":\"\",\"description\":\"\",\"kind\":\"prompt\",\"body\":\"\",\"executionLocation\":\"server\",\"requiresApproval\":false}]}\n\n" +
             "用户需求：" + requirement;
     }
 
@@ -155,8 +162,32 @@ public static class AgentOrchestrator
         plan.Skills ??= [];
         if (plan.Agents.Count == 0 || plan.Agents.All(a => string.IsNullOrWhiteSpace(a.AgentId)))
             throw new InvalidOperationException("组织编排结果缺少数字员工");
+        // 记忆拟人 preset 归一：模型没给 / 给成未知值时，按岗位职责关键词启发式兜底（可读、不中断整支落库）；
+        // 仍给不出 → null = 沿用全局召回（与旧行为一致，绝不因该字段失败）。
+        foreach (var agent in plan.Agents)
+            agent.MemoryProfile ??= SuggestMemoryProfile(agent);
         return plan;
     }
+
+    /// <summary>按岗位称呼 / 职责文本启发式推断合适记忆拟人 preset（模型漏填时的可读兜底）。无把握返回 null。</summary>
+    private static MemoryProfile? SuggestMemoryProfile(OrchestratedAgent agent)
+    {
+        var hay = string.Concat(agent.Nickname, " ", agent.Description, " ", agent.Instructions);
+        foreach (var (keywords, preset) in MemoryRoleHeuristics)
+            if (keywords.Any(k => hay.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                return MemoryPersonalityTypes.FromKey(preset);
+        return null;
+    }
+
+    /// <summary>岗位职责 → 记忆拟人 preset 的启发式规则（越靠前优先；含中文与常见英文岗位词）。</summary>
+    private static readonly (string[] Keywords, string Preset)[] MemoryRoleHeuristics =
+    [
+        (["主管", "经理", "组长", "负责人", "总监", "队长", "室长", "科长", "manager", "supervisor", "leader", "director", "head of"], MemoryPersonalityTypes.Deep),
+        (["客服", "接待", "话务", "热线", "一线", "专员", "接线", "前台", "support", "reception", "hotline", "agent"], MemoryPersonalityTypes.Broad),
+        (["售后", "客户成功", "客户关系", "顾问", "维系", "销售", "商务", "account", "after-sales", "customer success", "consultant"], MemoryPersonalityTypes.CueDependent),
+        (["值班", "轮班", "临时", "速查", "oncall", "shift", "quick"], MemoryPersonalityTypes.FastForgetting),
+        (["培训", "带教", "教练", "教学", "训练", "新人", "coach", "trainer", "mentor"], MemoryPersonalityTypes.SlowToLearn),
+    ];
 
     private static string Truncate(string s) => s.Length <= 60 ? s : s[..60] + "…";
 
@@ -172,14 +203,15 @@ public static class AgentOrchestrator
         var skill2 = "skill_" + suffix + "_b";
         var brief = requirement.Length > 30 ? requirement[..30] + "…" : requirement;
 
+        // 确定性演示：主管=深记（长期记牢关键决策与分工）、执行岗A=广记（执行往来量大、记得多）、执行岗B=存得住想不起（凭提示回想具体事务）。
         return new OrchestrationPlan
         {
             Title = $"「{brief}」组织",
             Agents =
             [
-                new OrchestratedAgent { AgentId = manager, Nickname = "主管", Description = $"统筹「{brief}」", Instructions = $"你是一位数字员工主管，负责统筹「{brief}」相关工作，评判断语境并指派给合适的下一层执行岗。", TriggerMode = "mentioned", SkillIds = [skill1, skill2], AssignmentIds = [exec1, exec2], EscalationAgentId = null, RelayToAgentId = null },
-                new OrchestratedAgent { AgentId = exec1, Nickname = "执行岗A", Description = $"负责「{brief}」的部分执行", Instructions = $"你是执行岗A，负责完成「{brief}」相关工作，遇到不属于自己的任务应说明并上抛。", TriggerMode = "mentioned", SkillIds = [skill1], AssignmentIds = [], EscalationAgentId = manager, RelayToAgentId = null },
-                new OrchestratedAgent { AgentId = exec2, Nickname = "执行岗B", Description = $"负责「{brief}」的部分执行", Instructions = $"你是执行岗B，负责完成「{brief}」相关工作，遇到不属于自己的任务应说明并上抛。", TriggerMode = "mentioned", SkillIds = [skill2], AssignmentIds = [], EscalationAgentId = manager, RelayToAgentId = null },
+                new OrchestratedAgent { AgentId = manager, Nickname = "主管", Description = $"统筹「{brief}」", Instructions = $"你是一位数字员工主管，负责统筹「{brief}」相关工作，评判断语境并指派给合适的下一层执行岗。", TriggerMode = "mentioned", SkillIds = [skill1, skill2], AssignmentIds = [exec1, exec2], EscalationAgentId = null, RelayToAgentId = null, MemoryProfile = MemoryPersonalityTypes.FromKey(MemoryPersonalityTypes.Deep) },
+                new OrchestratedAgent { AgentId = exec1, Nickname = "执行岗A", Description = $"负责「{brief}」的部分执行", Instructions = $"你是执行岗A，负责完成「{brief}」相关工作，遇到不属于自己的任务应说明并上抛。", TriggerMode = "mentioned", SkillIds = [skill1], AssignmentIds = [], EscalationAgentId = manager, RelayToAgentId = null, MemoryProfile = MemoryPersonalityTypes.FromKey(MemoryPersonalityTypes.Broad) },
+                new OrchestratedAgent { AgentId = exec2, Nickname = "执行岗B", Description = $"负责「{brief}」的部分执行", Instructions = $"你是执行岗B，负责完成「{brief}」相关工作，遇到不属于自己的任务应说明并上抛。", TriggerMode = "mentioned", SkillIds = [skill2], AssignmentIds = [], EscalationAgentId = manager, RelayToAgentId = null, MemoryProfile = MemoryPersonalityTypes.FromKey(MemoryPersonalityTypes.CueDependent) },
             ],
             Skills =
             [
@@ -210,6 +242,54 @@ public sealed class OrchestratedAgent
     public List<string>? AssignmentIds { get; set; }
     public string? EscalationAgentId { get; set; }
     public string? RelayToAgentId { get; set; }
+
+    /// <summary>该岗位的记忆拟人 preset。模型 JSON 里写 key 字符串或 {memoryType,…} 对象均兼容（见 <see cref="OrchestratedMemoryProfileConverter"/>）；
+    /// null = 该岗位不单独配置、召回沿用全局（向后兼容）。序列化时始终写成 preset key 字符串，保证 org_commit 回读契约简单。</summary>
+    [System.Text.Json.Serialization.JsonConverter(typeof(OrchestratedMemoryProfileConverter))]
+    public MemoryProfile? MemoryProfile { get; set; }
+}
+
+/// <summary>
+/// 编排岗位 memoryProfile 的宽容解析 / 紧凑写出：
+/// 读——接受 null（不配置）、字符串（preset key）或对象（{"memoryType":"deep",…}，兼容模型改写/手工预览），
+///      只把已知 preset key 转成 <see cref="MemoryProfile"/>；未知 / 空一律返回 null（防御，不让编排解析失败）。
+/// 写——始终输出 preset key 字符串（不是完整对象），让 org_plan_draft 初稿 JSON 与 org_commit 解析的字段都最简。
+/// </summary>
+public sealed class OrchestratedMemoryProfileConverter : System.Text.Json.Serialization.JsonConverter<MemoryProfile?>
+{
+    public override MemoryProfile? Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case System.Text.Json.JsonTokenType.Null:
+                return null;
+            case System.Text.Json.JsonTokenType.String:
+                return MemoryPersonalityTypes.FromKey(reader.GetString());
+            case System.Text.Json.JsonTokenType.StartObject:
+            {
+                string? key = null;
+                using var doc = System.Text.Json.JsonDocument.ParseValue(ref reader);
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    var name = prop.Name.ToLowerInvariant();
+                    if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.String && (name is "memorytype" or "type" or "key"))
+                    {
+                        key = prop.Value.GetString();
+                        break;
+                    }
+                }
+                return MemoryPersonalityTypes.FromKey(key); // 对象里没有可用 memoryType 也按未配置处理
+            }
+            default:
+                return null; // 其它形态（数组 / 数值…）防御性忽略
+        }
+    }
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, MemoryProfile? value, System.Text.Json.JsonSerializerOptions options)
+    {
+        if (value is null) { writer.WriteNullValue(); return; }
+        writer.WriteStringValue(value.MemoryType);
+    }
 }
 
 /// <summary>一个可复用技能定义（由编排方案批量生成，供落地时写入技能库）。</summary>

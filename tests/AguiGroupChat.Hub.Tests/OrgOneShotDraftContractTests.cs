@@ -29,6 +29,7 @@ public sealed class OrgOneShotDraftContractTests
             {
                 AgentId = "mgr", Nickname = "主管", Description = "统筹", Instructions = "你是主管。",
                 TriggerMode = "mentioned", SkillIds = ["s_prompt", "s_shell"], AssignmentIds = ["a1"], EscalationAgentId = null, RelayToAgentId = null,
+                MemoryProfile = MemoryPersonalityTypes.FromKey(MemoryPersonalityTypes.Deep),
             },
         ],
         Skills =
@@ -57,8 +58,11 @@ public sealed class OrgOneShotDraftContractTests
             foreach (var prop in new[] { "agentId", "nickname", "description", "instructions", "triggerMode", "skillIds" })
                 Assert.True(a.TryGetProperty(prop, out _), "缺少 agents 字段 " + prop);
             // 可选键（可为 null 被省略）：但一旦出现，键名必须落在 OrgTeamCommitter 能解析的小驼峰集合内（防串线/残留 PascalCase）
-            var allowed = new[] { "agentId", "nickname", "description", "instructions", "triggerMode", "skillIds", "assignmentIds", "escalationAgentId", "relayToAgentId" };
+            var allowed = new[] { "agentId", "nickname", "description", "instructions", "triggerMode", "skillIds", "assignmentIds", "escalationAgentId", "relayToAgentId", "memoryProfile" };
             Assert.True(keys.IsSubsetOf(allowed), "agents 出现无法被 apply 解析的字段：" + string.Join(",", keys.Except(allowed)));
+            // 记忆拟人 preset 以 key 字符串形态写出（对象形态会让 org_commit 回读契约变复杂）
+            if (a.TryGetProperty("memoryProfile", out var mp))
+                Assert.Equal(JsonValueKind.String, mp.ValueKind);
         }
 
         var kinds = new HashSet<string>();
@@ -74,6 +78,9 @@ public sealed class OrgOneShotDraftContractTests
         // 同稿里应能容纳多种 kind（shell/http/prompt），不只会是 pure prompt —— 这是让构建强于自由软稿的关键
         Assert.True(kinds.Count >= 2);
         Assert.Contains("shell", kinds);
+        // 示例主管岗位带 deep 记忆拟人 preset（序列化为 key 字符串，供 org_commit 直接回读）
+        Assert.True(agents[0].TryGetProperty("memoryProfile", out var mgrMem));
+        Assert.Equal(MemoryPersonalityTypes.Deep, mgrMem.GetString());
     }
 
     [Fact]
