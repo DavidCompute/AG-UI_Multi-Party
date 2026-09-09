@@ -15,6 +15,17 @@ English:
 
 ---
 
+## 开发中：记忆管理按角色分层（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
+# In development: role-tiered memory-management scope (already live on the Web build; not yet in the 1.0.120 desktop installer)
+
+中文：
+- **记忆管理范围按角色划分**：平台管理员（Admin / SuperAdmin）跨全部知聚查看 / 治理任意记忆；知聚<b>群主 / 群管理员</b>可在其知聚内整群治理（对他人记忆分级 / 删除、整群遗忘、向该群导入记忆）；<b>普通成员</b>仅可查看所在知聚记忆，分级 / 删除 / 遗忘只作用于本人发言；Operator（只读运维）不因平台角色获得记忆治理特权。记忆列表逐条回传 `canManage`、`/memory/groups` 回传每群 `canManageAll`，记忆管理界面按所选知聚提示当前遗忘范围（整群 / 仅本人），并修复了非管理员“全部知聚”视图可能越权枚举其它知聚记忆的缺口（数据范围改为仅自己所在群）。
+
+English:
+- **Memory-management scope is now role-tiered**: platform admins (Admin / SuperAdmin) may view / govern memory across every group; a circle's <b>owner / admin</b> may govern the whole circle they manage (tier / delete others' memories, group-wide forgetting, importing into that group); <b>ordinary members</b> may only view memory of circles they belong to and may tier / delete / forget only their own posts; Operator (read-only ops) gains no memory-governance privilege. Each listed memory returns `canManage` and `/memory/groups` returns per-circle `canManageAll`; the memory UI hints the current forget scope per selected circle (whole circle / own posts only), and a former gap was closed where non-admins using the “all circles” view could enumerate other circles' memory (data scope is now restricted to their own circles).
+
+---
+
 ## 开发中：企业合规（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
 # In development: Enterprise compliance (already live on the Web build; not yet in the 1.0.120 desktop installer)
 

@@ -540,6 +540,8 @@ window.I18N_DICTS.zh = {
   "memory.forgetOk": "确认遗忘",
   "memory.cancel": "取消",
   "memory.nonAdmin": "非管理员：遗忘仅作用于<b>你自己的记忆</b>，不影响他人",
+  "memory.manageFlag": "🛡️",
+  "memory.scopeGroupManager": "你是该知聚的<b>群主 / 群管理员</b>：遗忘将作用于<b>该群全部记忆</b>（含他人记忆），请在下方选择保留范围后再操作。",
   "memory.close": "关闭",
 
   /* --- 任务中心 --- */

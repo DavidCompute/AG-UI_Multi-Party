@@ -540,6 +540,8 @@ window.I18N_DICTS.en = {
   "memory.forgetOk": "Confirm Forget",
   "memory.cancel": "Cancel",
   "memory.nonAdmin": "Non-admin: forgetting only affects <b>your own memory</b>, not others",
+  "memory.manageFlag": "🛡️",
+  "memory.scopeGroupManager": "You are the <b>owner / admin</b> of this circle: forgetting will affect <b>all memory in this circle</b> (including others'), pick the retention below before proceeding.",
   "memory.close": "Close",
 
   /* --- 任务中心 --- */

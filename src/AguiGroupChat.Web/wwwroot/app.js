@@ -512,16 +512,31 @@ function memorySenderName(m) {
   return id;
 }
 
+let memManageGroup = {};  // groupId → 当前用户是否可在该知聚整群治理（来自 /memory/groups.canManageAll）
+
+/** 按当前所选知聚 / 平台角色刷新「遗忘范围」提示（管理员整群；群主·群管理员该群整群；普通成员仅本人）。 */
+function syncMemForgetHint() {
+  const hint = $("memForgetHint");
+  if (!hint) return;
+  if (state.isAdmin) { hint.classList.add("hidden"); return; }
+  hint.classList.remove("hidden");
+  const gid = $("memGroupSelect").value;
+  hint.innerHTML = gid && memManageGroup[gid]
+    ? t("memory.scopeGroupManager")
+    : t("memory.nonAdmin");
+}
+
 /** 打开记忆管理弹窗：加载知聚统计 + 首屏条目。 */
 async function openMemoryModal() {
   $("memGroupSelect").value = "";
   $("memKeyword").value = "";
   $("memForgetPanel").classList.add("hidden");
-  $("memForgetHint").classList.toggle("hidden", !!state.isAdmin); // 非管理员提示遗忘仅作用于自己的记忆
+  syncMemForgetHint();
   $("memConsolidateBtn").disabled = false;
   $("memConsolidateBtn").textContent = t("memory.consolidate");
   $("memoryModal").classList.remove("hidden");
   await loadMemoryGroups();
+  syncMemForgetHint();
   await loadMemoryKbs();
   await loadMemoryList(0);
 }
@@ -604,12 +619,14 @@ async function saveBranding() {
   }
 }
 
-/** 各知聚记忆统计 → 知聚选择器 + 总条数。 */
+/** 各知聚记忆统计 → 知聚选择器 + 总条数（记录每群整群治理权）。 */
 async function loadMemoryGroups() {
   try {
     const res = await fetch("/ag-ui/memory/groups", { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(data)) { $("memTotal").textContent = ""; return; }
+    memManageGroup = {};
+    data.forEach((g) => { memManageGroup[g.groupId] = !!g.canManageAll; });
     const total = data.reduce((s, g) => s + (Number(g.count) || 0), 0); // 数值归一，防字符串拼接 / 注入
     $("memTotal").textContent = t("memory.totalCount", { count: total });
     const sel = $("memGroupSelect");
@@ -619,8 +636,10 @@ async function loadMemoryGroups() {
           const count = Number(g.count) || 0; // 服务端数值先 Number 归一再入 HTML
           const expiredCount = Number(g.expiredCount) || 0;
           const expired = expiredCount ? t("memory.expiredCount", { count: escapeHtml(expiredCount) }) : "";
-          return `<option value="${escapeHtml(g.groupId)}" ${g.groupId === current ? "selected" : ""}>${t("memory.groupOption", { name: escapeHtml(g.groupName), count: escapeHtml(count), expired })}</option>`;
+          const flag = g.canManageAll ? ` ${t("memory.manageFlag")}` : "";
+          return `<option value="${escapeHtml(g.groupId)}" ${g.groupId === current ? "selected" : ""}>${t("memory.groupOption", { name: escapeHtml(g.groupName), count: escapeHtml(count), expired })}${flag}</option>`;
         }).join("");
+    syncMemForgetHint();
   } catch { /* 忽略 */ }
 }
 
@@ -8681,7 +8700,7 @@ function init() {
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
   $("memSearchBtn").onclick = () => loadMemoryList(0);
   $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") loadMemoryList(0); });
-  $("memGroupSelect").addEventListener("change", () => loadMemoryList(0));
+  $("memGroupSelect").addEventListener("change", () => { loadMemoryList(0); syncMemForgetHint(); });
   $("memForgetBtn").onclick = () => $("memForgetPanel").classList.toggle("hidden");
   $("memConsolidateBtn").onclick = consolidateGroupMemory;
   $("memForgetCancel").onclick = () => $("memForgetPanel").classList.add("hidden");
