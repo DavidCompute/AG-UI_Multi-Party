@@ -217,6 +217,32 @@ public sealed class ToolsTests
         finally { Directory.Delete(dir, recursive: true); }
     }
 
+    [Fact]
+    public async Task ReadAttachment_LongDocument_ReadsInSegmentsAndCanContinue()
+    {
+        // 长文档（超过单文件 12000 字符上限）：首段默认返回 + startIndex 续读直到读完 + 超尾提示，供模型完整引用大附件。
+        var dir = Path.Combine(Path.GetTempPath(), "agui-tools-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var store = new AttachmentStore(dir);
+            var content = new string('A', 12_000) + new string('B', 12_000) + "ENDMARKER-" + Guid.NewGuid().ToString("N");
+            using var ms = new MemoryStream(Encoding.UTF8.GetBytes(content));
+            var info = store.Save("长文档.txt", "text/plain", ms, ms.Length);
+
+            var tools = new GroupContextTools(new ServiceCollection().AddSingleton(store).BuildServiceProvider(), new AgentOptions(), NullLoggerFactory.Instance);
+            var first = await tools.ReadAttachment(info.AttachmentId);
+            Assert.Contains(new string('A', 500), first);   // 首段正文
+            Assert.Contains("startIndex=12000", first);    // 提示可继续读取
+            var second = await tools.ReadAttachment(info.AttachmentId, 12_000);
+            Assert.Contains(new string('B', 500), second);  // 续读段正文
+            var tail = await tools.ReadAttachment(info.AttachmentId, 24_000);
+            Assert.Contains("ENDMARKER-", tail);           // 再续读到文件结尾
+            var beyond = await tools.ReadAttachment(info.AttachmentId, 999_999);
+            Assert.Contains("已到文件末尾", beyond);        // 超尾明确提示
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
     private sealed class FakeMemory : IMessageMemory
     {
         public IReadOnlyList<MessageMemoryHit> Hits { get; set; } = [];

@@ -49,7 +49,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     /// <summary>多轮上下文：把历史消息里可提取文本的附件（docx/xlsx/pdf/txt）重新内联给模型的总字符预算，
     /// 让“先传文档、隔一轮追问”在跨轮仍能用上文档内容。太小则后轮丢细节，太大则反复喂稿撑长 prefill。</summary>
-    private const int MaxHistoryInlineTextChars = 6000;
+    private const int MaxHistoryInlineTextChars = 24_000;
 
     /// <summary>话题滚动小结单次扫描消息数上限（从游标之后 / 首次话题尾部取数）。</summary>
     private const int TopicSummaryScanLimit = 400;
@@ -2902,27 +2902,71 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return sb.ToString();
     }
 
-    /// <summary>把可提取文本的附件内联到消息文本（docx/xlsx/pptx/pdf 等），其余携带元数据。</summary>
+    /// <summary>
+    /// 把消息附件组织成模型可<b>逐个引用</b>的附件区：先给出全部附件清单（编号 + 名称 + attachmentId + 注入状态），
+    /// 再把可提取文本按顺序内联。预算策略是“每文件各自的单文件上限 + 全局总预算”（参考主流聊天工具：多个文件都可被引用，
+    /// 未自动注入全文的附件可随时经 read_attachment 按 ID 读取/分段续读），避免首个大文件挤掉后续附件。
+    /// </summary>
     private async Task AppendAttachmentsAsync(StringBuilder sb, AgentInvocationContext context, CancellationToken ct)
     {
-        if (context.Attachments is not { Count: > 0 } attachments || _attachmentStore is null)
-            return;
-        var injected = 0;
+        if (context.Attachments is not { Count: > 0 } attachments || _attachmentStore is null) return;
+
+        // 1) 预读每个可提取附件的首段文本（单文件上限）与全文长度；不可提取/提取失败以 null 标记。
+        var entries = new List<(AttachmentInfo Att, string? Text, int Total)>(attachments.Count);
         foreach (var att in attachments)
         {
-            if (AttachmentStore.IsExtractable(att))
+            if (!AttachmentStore.IsExtractable(att))
             {
-                var text = await _attachmentStore.TryReadTextAsync(att.AttachmentId, ct);
-                if (text is not null && injected < AttachmentStore.MaxTextCharsTotal)
-                {
-                    var take = Math.Min(text.Length, AttachmentStore.MaxTextCharsTotal - injected);
-                    // 附件文本可能含恶意指令（prompt injection）：内联内容包上不可信边界
-                    sb.Append($"\n\n【附件：{att.Name}】\n").Append(UntrustedBoundary.Wrap(text[..take]));
-                    injected += take;
-                    continue;
-                }
+                entries.Add((att, null, 0));
+                continue;
             }
-            sb.Append($"\n\n【附件：{att.Name}】（{att.Kind}，{AgentGatewayHelpers.FormatBytes(att.Size)}，{att.Url}）");
+            var seg = await _attachmentStore.TryReadTextRangeAsync(att.AttachmentId, 0, AttachmentStore.MaxTextCharsPerFile, ct);
+            entries.Add(seg is { } s ? (att, s.Segment, s.TotalLength) : (att, null, 0));
+        }
+
+        // 2) 全局预算内顺序分配（每文件已由单文件上限截断，只有总预算耗尽才会截得更短）。
+        var remaining = AttachmentStore.MaxTextCharsTotal;
+        var takes = new int[entries.Count];
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var len = entries[i].Text?.Length ?? 0;
+            if (len == 0) { takes[i] = 0; continue; }
+            var take = Math.Min(len, remaining);
+            takes[i] = take;
+            remaining -= take;
+        }
+
+        // 3) 附件清单：让模型清楚“本条共 N 个附件、各自 attachmentId、哪些已注入正文、哪些需读取”。
+        sb.Append($"\n\n【本条消息共 {attachments.Count} 个附件（可对任意一个调用 read_attachment 读取正文）：】\n");
+        var imageSeen = 0;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var (att, text, total) = entries[i];
+            var take = takes[i];
+            string note;
+            if (IsImage(att))
+                note = ++imageSeen <= MaxContextImages + MaxHistoryImages
+                    ? "图片（已随本轮视觉上下文提供）"
+                    : "图片（本轮视觉数量已达上限，仅元数据）";
+            else if (text is null || text.Length == 0)
+                note = "无文本可提取（仅元数据）";
+            else if (take >= total)
+                note = "已注入全文";
+            else if (take >= text.Length)
+                note = $"已注入前 {take} 字符（全文 {total} 字符，如需其余内容请用 read_attachment 续读）";
+            else
+                note = $"已注入前 {take}/{total} 字符（如需完整内容请用 read_attachment 读取）";
+            sb.Append("· 附件").Append(i + 1).Append(". ").Append(att.Name)
+              .Append("（").Append(att.Kind).Append("，").Append(AgentGatewayHelpers.FormatBytes(att.Size))
+              .Append("，attachmentId=").Append(att.AttachmentId).Append("）：").Append(note).AppendLine();
+        }
+
+        // 4) 正文段（清单在先，正文在后；正文可能是用户上传内容，包上不可信边界）。
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var take = takes[i];
+            if (take <= 0 || entries[i].Text is not { Length: > 0 } text) continue;
+            sb.Append($"\n【附件 {i + 1}. {entries[i].Att.Name} 正文】\n").Append(UntrustedBoundary.Wrap(text[..take]));
         }
     }
 

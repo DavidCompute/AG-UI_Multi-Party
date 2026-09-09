@@ -545,7 +545,10 @@ public sealed class AgentCatalog
             "按语义检索该智能体的历史记忆（覆盖其所在的所有群）。**仅当记忆与当前问题高度相关时调用**；" +
             "结果已按 ≥0.40 相似度严格过滤、最多 3 条，返回为空即表示没有足够相关的历史记忆，切勿编造。参数：query 检索问题"));
         tools.Add(AIFunctionFactory.Create(contextTools.ReadAttachment, "read_attachment",
-            "按附件 ID 读取上传文件内容（支持 txt/md/json/csv 与 docx/xlsx/pptx/pdf）。附件 ID 形如 att_xxx，来自消息中的附件信息。参数：attachmentId"));
+            "按附件 ID 读取上传文件正文的片段（支持 txt/md/json/csv 与 docx/xlsx/pptx/pdf）。一条消息可带多个附件——"
+            + "需要综合多个附件作答时，请对每个需要参考的附件各调用一次（各附件 attachmentId 不同，见消息中的附件清单）。"
+            + "大文件默认每次返回一段，继续读取时把 startIndex 设为上次返回的结束偏移，直到读完为止。"
+            + "参数：attachmentId（必填，形如 att_xxx）；startIndex（可选，默认 0）；maxChars（可选，默认 12000）"));
 
         // 智能体自建可复用技能：模型用 create_skill 定义「能执行的功能 / 提示词模板」，存入技能库，当前智能体挂载引用。
         // 强制审批（不随 RequireApprovalToolNames 名单调整）：技能创建 / 更新属于敏感配置变更

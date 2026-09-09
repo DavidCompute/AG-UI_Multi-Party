@@ -1,6 +1,6 @@
 # 数字员工记忆：系统机制与「记忆拟人类型」特性说明
 
-> 适用版本：1.0.121+（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
+> 适用版本：1.0.121+（已随 1.0.121 Windows 桌面安装包发布）
 > 关联代码：`src/AguiGroupChat.Agents/`（AgentOptions / AgentMessageMemory / MemoryContextProvider /
 > MemoryProfileTuning / MemoryProfileWritePolicy）、`src/AguiGroupChat.Hub/Agents/`（IMessageMemory /
 > MemoryRetrievalTuning）、`src/AguiGroupChat.Web/AgentApi.cs`、`wwwroot`（编辑表单「记忆类型」）。

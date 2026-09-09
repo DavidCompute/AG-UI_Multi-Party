@@ -1,11 +1,11 @@
-# AG-UI 群聊桌面版 1.0.120 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.120 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.121 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.121 Release Notes (current Windows desktop release)
 
-**版本说明**：1.0.120 为当前 Windows 桌面点版本（已构建 Windows 1.0.120 MSI）。本版本在既有 Web/桌面迭代之上并入最近的 Hub/协议更新：数字员工**单聊（kind=direct）**、**实时会话吊销/禁用/改密即时断线**、SDK 上行串行化与断连单次回调、上传/导入请求体放开到 200MB（Kestrel 同步放宽）。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
-**Version note**: 1.0.120 is the current Windows desktop point release (a Windows 1.0.120 MSI was built). On top of the previous web/desktop iteration it includes the latest Hub/protocol updates: digital-employee **direct chats (`kind=direct`)**, **immediate realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies (Kestrel limit raised accordingly). Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
+**版本说明**：1.0.121 为当前 Windows 桌面点版本（已构建 Windows 1.0.121 MSI）。在 1.0.120（上一桌面包：数字员工单聊 kind=direct、实时会话吊销/禁用/改密即时断线、SDK 上行串行化与断连单次回调、200MB 上传/导入）之上，本版并入其后 Web 已推送的 Hub/协议更新：数字员工「记忆拟人类型」、组织构建自动按岗位配记忆人格、组织连接自动成对（指派+提升）、记忆管理按角色分层、企业合规（注销/数据擦除/导出/孤儿治理/审计）等——下方「已随 1.0.121 桌面安装包发布」各节即为本版相对 1.0.120 的新增。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
+**Version note**: 1.0.121 is the current Windows desktop point release (a Windows 1.0.121 MSI was built). On top of 1.0.120 (the previous desktop package: digital-employee **direct chats `kind=direct`**, **instant realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies) this build ships the Hub/protocol updates that have since gone live on Web: digital-employee **memory personality types**, org building **auto-assigning per-role memory personas**, org **assignment/escalation links auto-paired**, **role-tiered memory-management scope**, and **enterprise compliance** (account deletion & data erasure / data export / orphan governance / audit) — the sections below marked “shipped in the 1.0.121 desktop installer” are this release’s additions over 1.0.120. Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
 
-## 开发中：组织构建连接自动成对（指派 + 提升）（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
-# In development: Org building auto-pairs assignment + escalation links (already live on the Web build; not yet in the 1.0.120 desktop installer)
+## 组织构建连接自动成对（指派 + 提升）（已随 1.0.121 桌面安装包发布）
+# Org building auto-pairs assignment + escalation links (shipped in the 1.0.121 desktop installer)
 
 中文：
 - **组织构建连接自动成对（指派 + 提升）**：当编排方案 / 待落库最终稿只填了向上「问题提升」连接（`escalationAgentId`）、向下任务指派名册（`assignmentIds`）为空或不全时，系统会在**生成解析**（`AgentOrchestrator.Parse` → `InferAssignments`）与**共享落库引擎**（`OrgApplyEngine.EnsureAssignmentsForLeaders`）两处，自动把直接提升到该主管的下属并入其 `assignmentIds`——去重、保序、只增不改；生成器提示与内置 `org_design` 技能正文也已明确要求成对连接。净效果：无论经网页一键编排、内置组织架构构建师（`org_plan_draft`）还是 `org_commit` 建出的团队，都同时具备「主管向下指派 + 下属向上提升」双向连接，不会退化成单向提升链。**库中已有旧组织不回写**——重新生成 / 重新 apply 即生效（解析推断 / 并入既有名册 / 落库兜底的单元与集成测试已存在）。
@@ -15,8 +15,8 @@ English:
 
 ---
 
-## 开发中：组织构建自动按岗位适配「记忆拟人类型」（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
-# In development: Org building auto-assigns per-role “memory personality” (already live on the Web build; not yet in the 1.0.120 desktop installer)
+## 组织构建自动按岗位适配「记忆拟人类型」（已随 1.0.121 桌面安装包发布）
+# Org building auto-assigns per-role “memory personality” (shipped in the 1.0.121 desktop installer)
 
 中文：
 - **组织构建自动适配记忆拟人类型**：网页「一键组织编排」与内置组织架构构建师（`org_plan_draft`）产稿时，会按每个岗位的实际职责让模型挑选记忆拟人 preset（`memoryProfile`：broad/deep/slowToLearn/cueDependent/fastForgetting），随方案 JSON 一起预览，并在 apply / `org_commit` 落库后自动写入新创建的数字员工——统筹主管通常是 `deep` 深记型、高频客服/一线是 `broad` 广记型、需回想客户过往的顾问/售后是 `cueDependent` 存得住想不起型、值班/速查岗是 `fastForgetting`、重复套路岗是 `slowToLearn`。容错解析：模型写 preset key 字符串或 `{"memoryType":…}` 对象均可；未知/缺失不报错，缺失按岗位称呼/职责关键词启发式兜底，仍无把握则保持 `null`=沿用全局召回。**向后兼容**：历史方案/手写最终稿 JSON 没有该字段 → 解析为 null、原样落库。预览逐岗位回显「记忆: 🧠…」标签便于落库前核对。详见 `docs/memory-personality.md` §4.4。
@@ -26,8 +26,8 @@ English:
 
 ---
 
-## 开发中：数字员工「记忆拟人类型」（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
-# In development: Digital-employee memory personality types (already live on the Web build; not yet in the 1.0.120 desktop installer)
+## 数字员工「记忆拟人类型」（已随 1.0.121 桌面安装包发布）
+# Digital-employee memory personality types (shipped in the 1.0.121 desktop installer)
 
 中文：
 - **记忆拟人类型（按类型召回）**：编辑数字员工 →「记忆与权限」新增「🧠 记忆类型（拟人召回）」区——五档预设（广记型 / 深记型 / 难录入型 / 存得住想不起型 / 快速遗忘型）+ 口吻模式（平实引述 / 先概括要点）+ 人设口吻 + 高级微调（群/个人 TopK 与相似度阈值）。回复前按该员工类型执行抽取：调取群记忆 / 个人记忆的条数与阈值不同（经检索层真正生效），存得住想不起型在用户给回忆提示（「记得吗 / 上次 / 之前」）时临时放宽提取，快速遗忘型默认只见最近 21 天的记忆（不删落库数据）；注入记忆时附一句与类型相符的“召回口吻”软性说明（广记型提示用「我记得好像是…」式谨慎措辞，不凭空补全）。写入侧仅对本员工本人发言微调：<b>深记型</b>自动刻为「重要」记忆、<b>快速遗忘型</b>在开启自动遗忘时保留更短（其余写入无差别）。未配置 = 沿用平台全局，完全向后兼容。记忆特性专项说明：`docs/memory-personality.md`。
@@ -37,8 +37,8 @@ English:
 
 ---
 
-## 开发中：记忆管理按角色分层（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
-# In development: role-tiered memory-management scope (already live on the Web build; not yet in the 1.0.120 desktop installer)
+## 记忆管理按角色分层（已随 1.0.121 桌面安装包发布）
+# Role-tiered memory-management scope (shipped in the 1.0.121 desktop installer)
 
 中文：
 - **记忆管理范围按角色划分**：平台管理员（Admin / SuperAdmin）跨全部知聚查看 / 治理任意记忆；知聚<b>群主 / 群管理员</b>可在其知聚内整群治理（对他人记忆分级 / 删除、整群遗忘、向该群导入记忆）；<b>普通成员</b>仅可查看所在知聚记忆，分级 / 删除 / 遗忘只作用于本人发言；Operator（只读运维）不因平台角色获得记忆治理特权。记忆列表逐条回传 `canManage`、`/memory/groups` 回传每群 `canManageAll`，记忆管理界面按所选知聚提示当前遗忘范围（整群 / 仅本人），并修复了非管理员“全部知聚”视图可能越权枚举其它知聚记忆的缺口（数据范围改为仅自己所在群）。
@@ -48,8 +48,8 @@ English:
 
 ---
 
-## 开发中：企业合规（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
-# In development: Enterprise compliance (already live on the Web build; not yet in the 1.0.120 desktop installer)
+## 企业合规（已随 1.0.121 桌面安装包发布）
+# Enterprise compliance (shipped in the 1.0.121 desktop installer)
 
 中文：
 - **账号注销与数据擦除**：「我的资料 → 危险操作 → 注销账户」（需密码确认，`DELETE /ag-ui/account`）与管理员「用户管理 → 彻底删除」（`DELETE /ag-ui/admin/users/{userId}`）。删除语义：创建的知聚在存在其他用户成员时**转让群主后自行退群**、否则**解散**；加入的他人知聚自行退群；其发言**语义记忆**与**个人知识库**物理删除；**现存群中的发言匿名化**（正文 / 附件 / 提及 / 推理 / 链 / 计划清空、昵称改「已注销用户」，保留消息行与时间线）；**其创建的数字员工 / 技能孤儿清理**（不再被现存群引用的连同触发注册删除，仍被他人知聚引用的保留）；账号行 + 全部会话 + TOTP 清除（四种存储实现 `IUserStore.RemoveUser`）。防呆：最后一名超级管理员不可删；管理员不可经管理接口删除自己。
@@ -68,6 +68,17 @@ English:
 - **Message 👍/👎 restyle**: the like/dislike buttons now use the same outline SVG icon set as the copy / regenerate / recall head buttons (no longer raw emoji glyphs), keep the 👍 green / 👎 red selected states, and share the same hover-to-show behaviour.
 - **Global intelligent search**: the top-bar “🔎 Global Search” searches messages / semantic memories / knowledge bases across all your groups at once (`GET /ag-ui/search?q=`), with strict visibility scoping (members, support-circle staff and customer participants each see only what they may — no leaking of other customers’ sessions or directed messages); clicking a message / memory jumps into its group.
 - Details in `docs/enterprise-compliance.md`.
+
+---
+
+## 聊天多附件问答增强（已随 1.0.121 桌面安装包发布）
+# Multi-attachment Q&A enhancement for chat (shipped in the 1.0.121 desktop installer)
+
+中文：
+- **聊天多附件问答增强（让每个附件都能被引用）**：向数字员工提问时一条消息可带多达 9 个附件；模型上下文现在会收到一份“附件清单”——每个附件带编号与 `attachmentId`、并注明“已注入正文 / 仅元数据”，可对任意一个单独调用 `read_attachment` 读取。可提取文本的附件（txt/md/code/pdf/docx/xlsx/pptx）按“每文件 12K 字符 + 总预算 60K”逐文件注入（此前为共享 24K 且先到先得，首个大文件会挤掉后续附件，表现成“只认第一个附件”）；`read_attachment` 工具支持**分段续读**（`startIndex`/`maxChars`，返回结束偏移供下一次继续），长文档与未自动注入的附件都能被完整引用；历史追问自动回放的文档正文预算同步放大到 24K。图片走独立视觉通道（每轮上限不变）。
+
+English:
+- **Multi-attachment Q&A now references every file**: a single chat message may carry up to 9 attachments; the model context now gets an “attachment inventory” — every file numbered with its own `attachmentId` and its status (inlined vs. metadata-only), and any file can be read on demand via `read_attachment`. Extractable text files (txt/md/code/pdf/docx/xlsx/pptx) are inlined per file (12K chars each within a 60K total, instead of a shared 24K served first-come-first-served that let the first big file crowd out later attachments and look like “only the first file was used”). `read_attachment` now supports **paginated reads** (`startIndex` / `maxChars`, returning the end offset for the next call), so long documents and non-inlined attachments can be fully referenced; the historical follow-up inline budget is also raised to 24K. Images keep their separate vision channel (per-turn cap unchanged).
 
 ---
 
@@ -106,8 +117,8 @@ English:
 - **Second-pass cleanup of coordination JSON at message end**: at agent-message End, if the whole content is an internal {\"needsMore\":…,\"answer\":…} object, it is rewritten to its user-facing answer before store/broadcast — even if earlier streamed in fragments.
 - Carried: Client (local) skills run only on the originating user’s machine (policy A); no bridge → “execution failed: no bridge installed”; trial results in a dialog and truly landing on the current machine.
 
-**版本说明**：1.0.119 为上一 Windows 桌面点版本（1.0.120 为当前），主题为「内部协调 JSON 整段二次剥壳（收尾归一）」，并包含 Client 技能 A 口径系列修复；已构建 Windows 1.0.119 MSI。本机桥日志写系统临时目录。
-**Version note**: 1.0.119 is the previous Windows desktop point release (1.0.120 is current), themed “second-pass whole-message cleanup of coordination JSON”, including the Client-skill policy-A series; a Windows 1.0.119 MSI was built. Native-bridge logs live in the system temp directory.
+**版本说明**：1.0.119 为上一 Windows 桌面点版本（当前为 1.0.121），主题为「内部协调 JSON 整段二次剥壳（收尾归一）」，并包含 Client 技能 A 口径系列修复；已构建 Windows 1.0.119 MSI。本机桥日志写系统临时目录。
+**Version note**: 1.0.119 is a previous Windows desktop point release (current: 1.0.121), themed “second-pass whole-message cleanup of coordination JSON”, including the Client-skill policy-A series; a Windows 1.0.119 MSI was built. Native-bridge logs live in the system temp directory.
 
 ---
 

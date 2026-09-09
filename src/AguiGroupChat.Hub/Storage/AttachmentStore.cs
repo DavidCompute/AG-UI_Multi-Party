@@ -39,11 +39,11 @@ public sealed class AttachmentStore
     private static readonly System.Text.RegularExpressions.Regex AttachmentIdPattern = new(
         @"^att_[A-Za-z0-9_-]+$", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
-    /// <summary>文本类附件注入模型上下文的单文件截断长度。</summary>
+    /// <summary>文本类附件注入模型上下文的单文件截断长度（每个文件各自享有，避免首个大文件挤掉后续附件）。</summary>
     public const int MaxTextCharsPerFile = 12_000;
 
-    /// <summary>文本类附件注入模型上下文的总截断长度。</summary>
-    public const int MaxTextCharsTotal = 24_000;
+    /// <summary>文本类附件自动注入模型上下文的<b>总</b>字符预算（全部附件共享上限，超出部分仅给元数据、可经 read_attachment 按需读取）。</summary>
+    public const int MaxTextCharsTotal = 60_000;
 
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -207,6 +207,33 @@ public sealed class AttachmentStore
 
         if (text is null) return null;
         return text.Length > MaxTextCharsPerFile ? text[..MaxTextCharsPerFile] : text;
+    }
+
+    /// <summary>
+    /// 读取附件文本的<b>一个片段</b>（供 read_attachment 分片续读，使长文档可被完整引用）：
+    /// 返回 (片段, 全文长度)；start 超过全文末尾时返回空片段与全文长度。
+    /// 每次调用都会重新解析一次（文本直接读、办公文档走提取），适合按需少量续读。
+    /// </summary>
+    public async Task<(string Segment, int TotalLength)?> TryReadTextRangeAsync(string attachmentId, int start, int maxChars, CancellationToken ct = default)
+    {
+        var path = ResolvePath(attachmentId);
+        if (path is null) return null;
+        var ext = Path.GetExtension(path);
+        string? full = null;
+        if (TextExtensions.Contains(ext))
+        {
+            try { full = await File.ReadAllTextAsync(path, Encoding.UTF8, ct); }
+            catch (Exception) { return null; }
+        }
+        else if (DocumentExtensions.Contains(ext))
+        {
+            full = OfficeTextExtractor.Extract(path, ext);
+        }
+        if (full is null) return null;
+        start = Math.Max(0, start);
+        if (start >= full.Length) return (string.Empty, full.Length);
+        var count = Math.Min(maxChars > 0 ? maxChars : MaxTextCharsPerFile, full.Length - start);
+        return (full.Substring(start, count), full.Length);
     }
 
     /// <summary>读取图片附件为原始字节 + MIME（供视觉模型以 data URI 传入）。id 非法 / 文件不存在 / 非图片返回 (null, null)。</summary>
