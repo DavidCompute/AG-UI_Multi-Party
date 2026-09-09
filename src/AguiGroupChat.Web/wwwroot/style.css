@@ -1033,6 +1033,18 @@ textarea:focus { outline: none; border-color: var(--accent); }
   flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   padding-right: 4px; /* 滚动条与内容间距，避免遮挡 label */
 }
+/* 修改资料弹窗排版收敛：小标题不“像可点击”、提示词换行不挤、危险操作区不右对齐 */
+.profile-modal .form-section { cursor: default; }
+.profile-modal .form-section:hover { color: var(--muted); }
+.profile-modal label.pf-check {
+  display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0;
+  font-size: 13px; font-weight: 500; color: var(--text); cursor: pointer;
+}
+.profile-modal .danger-zone { display: block; }
+.profile-modal .danger-zone > div {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.profile-modal .danger-zone .danger-row-actions { flex: none; }
 
 /* ================= 智能体管理弹窗 ================= */
 .agent-modal {

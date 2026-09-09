@@ -826,10 +826,12 @@
         </div>
         <p class="form-hint" data-i18n="profile.avatarHint">选择本地图片上传（支持 jpg / png / gif / webp，建议正方形）</p>
       </div>
-      <div class="form-group" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input id="pfPersonalMemory" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
-        <label for="pfPersonalMemory" style="margin:0;cursor:pointer" data-i18n="profile.personalMemory">🧠 个人记忆</label>
-        <span style="color:#8a8f98;font-size:12px" data-i18n="profile.personalMemoryHint">（默认关闭。开启后，数字员工回复您时会参考您在其他对话中的历史发言，帮助了解您的偏好；关闭时您的发言不会被作为个人记忆读取）</span>
+      <div class="form-group" style="margin-top:14px">
+        <label class="pf-check">
+          <input id="pfPersonalMemory" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+          <span data-i18n="profile.personalMemory">🧠 个人记忆</span>
+        </label>
+        <p class="form-hint" style="margin-top:6px" data-i18n="profile.personalMemoryHint">（默认关闭。开启后，数字员工回复您时会参考您在其他对话中的历史发言，帮助了解您的偏好；关闭时您的发言不会被作为个人记忆读取）</p>
       </div>
 
       <div class="form-section" data-i18n="profile.twinSection">AI 分身</div>
