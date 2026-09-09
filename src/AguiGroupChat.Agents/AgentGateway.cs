@@ -1378,10 +1378,21 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             else ranSkills.Add(ck);
         }
         var final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(),
-            ranSkills, ct);
-        var text = string.IsNullOrWhiteSpace(final) ? sb.ToString() : final;
+            ranSkills, ct) ?? "";
+        // 空正文兜底：若综合答复也没产出可展示文本，绝不留下"只有计划卡、正文空白"的消息——
+        // 直接把已收集的关键中间结果整理成一段可见回答（并说明未做进一步综合的原因）。
+        var finalTrimmed = string.IsNullOrWhiteSpace(final) ? "" : final.Trim();
+        string text;
+        if (finalTrimmed.Length > 0)
+            text = finalTrimmed;
+        else if (!string.IsNullOrWhiteSpace(sb.ToString()))
+            text = sb.ToString().Trim();
+        else
+            text = "（本轮已按计划收集了各岗位的结果，但未汇总出可展示的最终文本。请让我基于现有结果再组织一次，或把问题拆细一点分开问，我会给出完整成稿。）";
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
         text = UnwrapCoordinationAnswer(text); // 防御：若模型把内部 JSON 决策原样当回复，剥出 user-facing answer
+        if (string.IsNullOrWhiteSpace(text.Trim()))
+            text = "（本轮协作已执行，但未产出可直接展示的正文。可让我按计划分步重试，或换一种更明确的问法。当前不存在可作答的遗漏步骤。）";
         foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
             await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
         }
@@ -1670,14 +1681,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (parsed is null)
             {
                 // 解析失败：把模型原文当作最终答复，结束递归（退化，避免卡死）
-                return string.IsNullOrWhiteSpace(text) ? facts.ToString() : UnwrapCoordinationAnswer(text);
+                return EnsureNonEmpty(string.IsNullOrWhiteSpace(text) ? facts.ToString() : UnwrapCoordinationAnswer(text),
+                    facts.ToString());
             }
             if (!string.IsNullOrWhiteSpace(parsed.Answer))
                 lastAnswer = parsed.Answer.Trim();
             if (!parsed.NeedsMore || parsed.Gather.Count == 0)
             {
-                // 信息充分：用模型给出的答案给最终答复
-                return string.IsNullOrWhiteSpace(lastAnswer) ? facts.ToString() : lastAnswer;
+                // 信息充分：用模型给出的答案给最终答复；即便 answer 为空也绝不回空串（用已收集 facts 兜底）
+                return EnsureNonEmpty(lastAnswer, facts.ToString());
             }
 
             // 执行本轮要补查的能力：客户端技能→批量；服务端技能→直接执行；分派→子员工。已执行过的技能直接跳过（去重，防同一技能重复调用）。
@@ -1726,7 +1738,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
 
         // 达到最大轮数仍未明确“信息充分”：用最近一次答案兜底
-        return string.IsNullOrWhiteSpace(lastAnswer) ? facts.ToString() : lastAnswer;
+        return EnsureNonEmpty(lastAnswer, facts.ToString());
+    }
+
+    /// <summary>优先级回退：若主文本为空则回退到二号文本；两者都空则给“无可用内容”占位，绝不向调用方回空（防空正文消息）。</summary>
+    private static string EnsureNonEmpty(string primary, string fallback)
+    {
+        var p = string.IsNullOrWhiteSpace(primary) ? "" : primary.Trim();
+        if (p.Length > 0) return p;
+        var f = string.IsNullOrWhiteSpace(fallback) ? "" : fallback.Trim();
+        return f.Length > 0 ? f : "（本次未能从已收集结果中汇总出可展示内容。请允许我基于现有结果重新组织一次，或换一种更明确的问法。）";
     }
 
     /// <summary>递归补查时指派的目标解析。</summary>
@@ -3580,8 +3601,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private async Task SafeEndAsync(AgentInvocationContext context, string? messageId)
     {
         if (messageId is null) return;
+        // 若这条消息跑完/中断后正文为空，绝不落成空白泡——先补一句“无法形成正文”的说明（仅当真没有内容时）。
+        await TryStampFallbackIfEmptyAsync(context.GroupId, messageId,
+            "（本轮回复未能生成可展示的正文，可能被中断或结果为空。请直接再说一次，或把要求拆细一点，我会重新给出成稿。）");
         try { await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, CancellationToken.None); }
         catch (Exception ex) { _logger.LogDebug(ex, "结束智能体消息失败：{MessageId}", messageId); }
+    }
+
+    /// <summary>收尾前的空正文兜底：仅当流式消息的正文仍为空时，先补一句可见说明，避免“只有卡、没有字”的空白回复。</summary>
+    private async Task TryStampFallbackIfEmptyAsync(string groupId, string messageId, string note)
+    {
+        try
+        {
+            var msg = _hub.Value.Store.GetMessage(groupId, messageId);
+            if (msg is null || !string.IsNullOrWhiteSpace(msg.Content)) return;
+            await _hub.Value.AppendAgentContentAsync(groupId, messageId, note, CancellationToken.None);
+            _logger.LogInformation("空正文兜底：智能体消息 {MessageId} 未产出内容，已附提示（group={GroupId}）", messageId, groupId);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "空正文兜底写入失败（忽略）：{MessageId}", messageId); }
     }
 
     /// <summary>
