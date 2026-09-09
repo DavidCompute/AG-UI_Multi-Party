@@ -2647,11 +2647,11 @@ function renderAgentPickList() {
       const on = agentSkillDefIds.includes(s.skillId);
       const row = document.createElement("label");
       row.className = "kb-pick-item" + (on ? " on" : "");
-      row.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;min-width:0";
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
       row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
         + `<span class="skill-kind tag-skill">${escapeHtml(skillKindTagFor(s))}</span>`
-        + `<b style="white-space:nowrap">${escapeHtml(s.name)}</b> <code style="white-space:nowrap">${escapeHtml(s.skillId)}</code>`
-        + (s.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.description)}</span>` : "");
+        + `<b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code>`
+        + (s.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(s.description)}</span>` : "");
       row.querySelector("input").addEventListener("change", (e) => agentPickToggle("skill", s.skillId, e.target.checked));
       el.appendChild(row);
       count++;
@@ -2663,11 +2663,11 @@ function renderAgentPickList() {
       const on = agentSkillPicks.some((p) => p.targetAgentId === ag.agentId);
       const row = document.createElement("label");
       row.className = "kb-pick-item" + (on ? " on" : "");
-      row.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;min-width:0";
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
       row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
         + `<span class="skill-kind tag-agent">AI</span>`
-        + `<b style="white-space:nowrap">${escapeHtml(ag.nickname || ag.agentId)}</b> <code style="white-space:nowrap">${escapeHtml(ag.agentId)}</code>`
-        + (ag.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(ag.description)}</span>` : "");
+        + `<b>${escapeHtml(ag.nickname || ag.agentId)}</b> <code>${escapeHtml(ag.agentId)}</code>`
+        + (ag.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(ag.description)}</span>` : "");
       row.querySelector("input").addEventListener("change", (e) => agentPickToggle("agent", ag.agentId, e.target.checked));
       el.appendChild(row);
       count++;
@@ -2679,11 +2679,11 @@ function renderAgentPickList() {
       const on = agentKbIds.includes(kb.kbId);
       const row = document.createElement("label");
       row.className = "kb-pick-item" + (on ? " on" : "");
-      row.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;min-width:0";
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
       row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
         + `<span>📚</span>`
-        + `<b style="white-space:nowrap">${escapeHtml(kb.name)}</b>`
-        + (kb.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(kb.description)}</span>` : "")
+        + `<b>${escapeHtml(kb.name)}</b>`
+        + (kb.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(kb.description)}</span>` : "")
         + ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.kb.docCount", { count: (kb.documents || []).length })}</span>`;
       row.querySelector("input").addEventListener("change", (e) => agentPickToggle("kb", kb.kbId, e.target.checked));
       el.appendChild(row);

@@ -882,6 +882,14 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .search-input-row .send { flex: none; }
 .search-results { max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .search-empty { padding: 18px 0; text-align: center; color: var(--muted); font-size: 13px; }
+/* 数字员工编辑：独立选取弹窗（技能 / 子数字员工 / 知识库）。加宽；候选行按内容自然宽度排布，
+   超宽时列表出现横向滚动条，不再把长名称 / 描述裁掉。 */
+.modal.pick-modal { width: min(920px, 96vw); max-width: none; }
+#agentPickList { overflow: auto; }
+#agentPickList label.kb-pick-item { width: max-content; min-width: 100%; box-sizing: border-box; white-space: nowrap; }
+#agentPickList label.kb-pick-item .kb-meta,
+#agentPickList label.kb-pick-item b,
+#agentPickList label.kb-pick-item code { white-space: nowrap; }
 .search-hit {
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
   background: var(--panel-2); transition: border-color .15s, background .15s;
