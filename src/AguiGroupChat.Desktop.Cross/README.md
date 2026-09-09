@@ -21,7 +21,7 @@ dotnet run --project src/AguiGroupChat.Desktop.Cross
 
 启动后弹出 Avalonia 窗口，本地服务运行在 `http://127.0.0.1:5200`（该端口被占用时由系统随机分配一个空闲端口），
 首次使用注册账号即可。功能与 Windows 版完全一致：群聊、智能体、人机交互审批、
-语义记忆 RAG、个人记忆、AI 分身、附件、话题、触发方式、AG-UI 桥接等。
+语义记忆 RAG、个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、AG-UI 桥接等。
 
 ## macOS 说明
 

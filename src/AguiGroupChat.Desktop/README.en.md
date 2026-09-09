@@ -3,7 +3,7 @@
 **English** | [简体中文](README.md)
 
 A pure desktop application (Windows) **(current version 1.0.120)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
-personal memory, AI twin, attachments, topics, trigger modes, etc.), but with **all data and models stored locally**; the service always runs on
+personal memory, AI twin, attachments, topics, trigger modes, memory personality types, etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
 

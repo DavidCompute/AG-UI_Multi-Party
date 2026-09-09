@@ -2,7 +2,7 @@
 
 **English** | [简体中文](ROADMAP.md)
 
-> ✅ mark = implemented; 🟡 = partially implemented. Currently completed: **1.1–1.4 / 2.1–2.4 / 3.1–3.3 / 4.1–4.4 / 5.1–5.4 / 6.1–6.4**;
+> ✅ mark = implemented; 🟡 = partially implemented. Currently completed: **1.1–1.4 / 2.1–2.5 / 3.1–3.3 / 4.1–4.4 / 5.1–5.4 / 6.1–6.4**;
 > all roadmap items are now implemented 🎉
 
 > This document plans the project's **future feature growth and refinement directions** and provides priority recommendations to inform scheduling and resource decisions.
@@ -72,6 +72,11 @@ Existing foundation: RAG (pgvector / sqlite-vec), personal memory, memory tierin
 - **Current state**: the knowledge base is "owner-only + system-level", and answers don't cite sources.
 - **Goal**: a collective knowledge base shared at the group / member level; answers cite referenced source documents for traceability.
 - **Target module**: `KnowledgeBaseApi.cs`, `KnowledgeBaseCatalog` (retrieval returns docId references).
+
+### 2.5 Digital-Employee Memory Personality Types / Type-Driven Recall (★☆☆ human-like experience) ✅ Implemented (1.0.121+)
+- **Current state**: every digital employee shares the same group semantic memory, and all employees "remember alike" (same global TopK / threshold).
+- **Goal**: different digital employees have different memory characteristics, and recall genuinely follows each one's profile for a more human feel.
+- **Implemented**: `AgentDefinition.MemoryProfile` (five presets + speaking style + persona + TopK/threshold tuning; `null` = legacy behavior); on the recall side `MemoryProfileTuning.Resolve` → a per-run `MemoryRetrievalTuning` override passed down to the store search, including the stored-but-cue-dependent recall-cue branch and the fast-forgetting 21-day recency window; on the write side `MemoryProfileWritePolicy` applies only to the employee's own posts (Deep posts auto-marked “Important”, Fast-forgetting posts kept shorter when auto-forget is on); edit UI under “Memory & Permissions → 🧠 Memory type”. Mechanics & debugging: `docs/memory-personality.md`.
 
 ---
 
@@ -204,7 +209,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
 | ★★☆ | 2.3 / 3.1 Cross-Instance Memory Sync + Bridge Reconnect | Bridges desktop/Web silos, improves external-expert reliability |
 | ★☆☆ | 6.1 Observability | Improves operations and tuning capability at low cost |
 
-> **Milestone note**: Roadmap items 1.1–6.4 are all delivered; recent additions include <b>one-click organization orchestration (with SSE streaming generation)</b>, <b>one-click support-circle creation</b>, <b>native-skill tunnel execution</b>, <b>customers approving skills in a support circle</b>, <b>skill library search / bulk delete</b>, <b>support circles (`kind=support`)</b>, <b>support-circle typing & agent context</b>, <b>auto-rename on orchestration id collisions</b>, <b>org-chart double-click edit & line de-overlap</b>, and <b>Playwright automated verification</b>; subsequent iterations will refine based on operational feedback (e.g. Redis sharding / Redis cluster, observability enhancements, more enterprise compliance), see the main README and the "Next Steps" outlook in MARKETING.
+> **Milestone note**: Roadmap items 1.1–6.4 are all delivered; recent additions include <b>one-click organization orchestration (with SSE streaming generation)</b>, <b>one-click support-circle creation</b>, <b>native-skill tunnel execution</b>, <b>customers approving skills in a support circle</b>, <b>skill library search / bulk delete</b>, <b>support circles (`kind=support`)</b>, <b>support-circle typing & agent context</b>, <b>auto-rename on orchestration id collisions</b>, <b>org-chart double-click edit & line de-overlap</b>, <b>digital-employee memory personality types (2.5)</b>, and <b>Playwright automated verification</b>; subsequent iterations will refine based on operational feedback (e.g. Redis sharding / Redis cluster, observability enhancements, more enterprise compliance, memory write-side repetition encoding / per-employee memory copies), see the main README and the "Next Steps" outlook in MARKETING.
 
 ---
 

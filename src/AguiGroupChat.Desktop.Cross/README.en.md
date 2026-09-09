@@ -21,7 +21,7 @@ dotnet run --project src/AguiGroupChat.Desktop.Cross
 
 Once launched, an Avalonia window opens and the local service runs on `http://127.0.0.1:5200` (if that port is occupied, the system assigns a free one at random).
 Register an account on first use. Features are fully identical to the Windows version: group chat, agents, human-in-the-loop approval,
-semantic memory RAG, personal memory, AI twin, attachments, topics, trigger modes, AG-UI bridging, etc.
+semantic memory RAG, personal memory, AI twin, attachments, topics, trigger modes, memory personality types, AG-UI bridging, etc.
 
 ## macOS Notes
 

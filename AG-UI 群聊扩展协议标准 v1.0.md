@@ -997,6 +997,7 @@ PUT /ag-ui/user/profile
 |bridgeEndpoint|string?|AG-UI 桥接端点 `http(s)://` 或 `ws(s)://`（见 §6.3 外部专家）|
 |bridgeMode / bridgeToken|string?|桥接方言（standard / hub）与认证令牌（编辑时令牌留空表示沿用原值，不回显）|
 |personalMemoryEnabled|boolean|是否开启个人记忆（默认 false）：开启后回复时检索触发者本人历史发言注入（还需触发者用户开启）|
+|memoryProfile|object?|**记忆拟人类型（1.0.121+）**：`{memoryType, styleMode?, personaCard?, topK?, personalTopK?, minScore?, personalMinScore?}`；`memoryType` ∈ `broad` / `deep` / `slowToLearn` / `cueDependent` / `fastForgetting`（缺失 / 未知 = 不配置，沿用全局），`styleMode` 为 `recall` / `digest`，数值微调越界自动收敛（TopK 1~24 / 1~16、阈值 0.05~0.92）。决定该员工调取群 / 个人记忆时的抽取参数（条数 / 阈值 / 回忆提示分支 / 近期窗口）与本人发言落库微调（详见 `docs/memory-personality.md`）|
 |skills|object\[\]?|技能（智能体间调用）：`[{skillId, description, targetAgentId}]`；skillId 给模型作工具名（仅字母/数字/下划线/连字符，**留空自动生成 `skill_<目标ID>`，冲突追加 `_2/_3`**），targetAgentId 为已注册智能体（含 AG-UI 桥接角色）；目标智能体单层展开、不能指向自身|
 |knowledgeBaseIds|string\[\]|绑定的知识库 ID 列表（见 §5.8）：回复前按这些知识库检索相关文档片段注入上下文（RAG 知识库）|
 |relayToAgentId|string?|**角色交接（1.2）**：非空时该智能体整轮委托给中继智能体（`agent_xxx`），外部调用者视角仍是原角色；中继不存在 / 形成接力环时回退本地处理|
