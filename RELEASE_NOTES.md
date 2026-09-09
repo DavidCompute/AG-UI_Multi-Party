@@ -4,6 +4,17 @@
 **版本说明**：1.0.120 为当前 Windows 桌面点版本（已构建 Windows 1.0.120 MSI）。本版本在既有 Web/桌面迭代之上并入最近的 Hub/协议更新：数字员工**单聊（kind=direct）**、**实时会话吊销/禁用/改密即时断线**、SDK 上行串行化与断连单次回调、上传/导入请求体放开到 200MB（Kestrel 同步放宽）。Web 与桌面共用同一套 Hub / 网关 / 前端，桌面版一并获得。
 **Version note**: 1.0.120 is the current Windows desktop point release (a Windows 1.0.120 MSI was built). On top of the previous web/desktop iteration it includes the latest Hub/protocol updates: digital-employee **direct chats (`kind=direct`)**, **immediate realtime-session teardown on logout / disable / password reset**, SDK send serialization with a single disconnect callback, and 200MB upload/import bodies (Kestrel limit raised accordingly). Since Web and desktop share the same Hub / gateway / frontend, the desktop build gains them too.
 
+## 开发中：组织构建连接自动成对（指派 + 提升）（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
+# In development: Org building auto-pairs assignment + escalation links (already live on the Web build; not yet in the 1.0.120 desktop installer)
+
+中文：
+- **组织构建连接自动成对（指派 + 提升）**：当编排方案 / 待落库最终稿只填了向上「问题提升」连接（`escalationAgentId`）、向下任务指派名册（`assignmentIds`）为空或不全时，系统会在**生成解析**（`AgentOrchestrator.Parse` → `InferAssignments`）与**共享落库引擎**（`OrgApplyEngine.EnsureAssignmentsForLeaders`）两处，自动把直接提升到该主管的下属并入其 `assignmentIds`——去重、保序、只增不改；生成器提示与内置 `org_design` 技能正文也已明确要求成对连接。净效果：无论经网页一键编排、内置组织架构构建师（`org_plan_draft`）还是 `org_commit` 建出的团队，都同时具备「主管向下指派 + 下属向上提升」双向连接，不会退化成单向提升链。**库中已有旧组织不回写**——重新生成 / 重新 apply 即生效（解析推断 / 并入既有名册 / 落库兜底的单元与集成测试已存在）。
+
+English:
+- **Org building auto-pairs assignment + escalation links**: when an orchestration plan / committed final draft only sets upward problem-escalation links (`escalationAgentId`) and leaves the downward task-assignment rosters (`assignmentIds`) empty or partial, the system auto-merges each leader’s direct subordinates (the agents that escalate to it) into that leader’s `assignmentIds` — deduplicated, order-preserving, additive-only — at two stages: generation parse (`AgentOrchestrator.Parse` → `InferAssignments`) and the shared persist engine (`OrgApplyEngine.EnsureAssignmentsForLeaders`). The generator prompt and the built-in `org_design` skill body now explicitly instruct paired connections. Net effect: any team created via one-click orchestration, the built-in org architect (`org_plan_draft`) or `org_commit` lands with both directions (managers assign downward AND subordinates escalate upward) and never degrades into a one-way escalation chain. Legacy orgs already in the catalog are untouched — regenerate / re-apply to benefit. Related unit/integration tests exist (parse inference, merge into existing rosters, apply-stage backstop).
+
+---
+
 ## 开发中：组织构建自动按岗位适配「记忆拟人类型」（Web 已随推送部署；尚未包含于 1.0.120 桌面安装包）
 # In development: Org building auto-assigns per-role “memory personality” (already live on the Web build; not yet in the 1.0.120 desktop installer)
 

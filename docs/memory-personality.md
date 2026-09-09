@@ -168,6 +168,7 @@ flowchart LR
 - **预览可见**：编排预览逐岗位回显「记忆: 🧠深记型…」；apply 原样回传（web 路径经 `OrchestratedAgentHttp.MemoryProfile`，
   内置角色路径经 `OrgTeamCommitter` 解析最终稿 JSON 的 `memoryProfile`），统一在 `OrgApplyEngine` 落库。
 - **向后兼容**：历史方案 / 手写最终稿 JSON 没有该字段 → 解析为 `null`，与旧行为完全一致。
+- **连接自动成对**：一键编排 / `org_architect` 建出的组织还会**自动成对连接**（与记忆拟人 preset 相互独立）——只填向上提升（`escalationAgentId`）时，解析与落库两处会把直接下级并入主管 `assignmentIds`，使团队「指派 + 提升」双向健全（详见 `docs/customer-service-and-org-builder.md` §B.1），因此配型总是落在结构完整的团队上。
 
 ---
 

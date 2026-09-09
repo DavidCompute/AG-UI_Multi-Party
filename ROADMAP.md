@@ -27,6 +27,8 @@
 - **自动编排重名去重（已实现）**：生成的数字员工 / 技能 id 与原库同名时自动追加 `_2/_3` 改名继续保存——不再整体失败、不覆盖已有资产，方案内引用（技能挂载、上下级连接、客服知聚成员、返回 id）同步映射到最终 id。
 - **组织架构可编辑可视化（已实现）**：组织架构画布**双击数字员工节点直接打开编辑表单**；同一对端点间的多条关系连线**横向错开**避免完全重叠；编辑返回上下文优化（从架构进入则退出回架构，从列表进入则回列表）。
 - **“组织架构构建师”走一键式出稿（已实现）**：挂 `org_design` 的组织角色（如 `org_architect`）另挂 `org_plan_draft`，复用「一键组织编排」同一引擎一次结构化产整支成稿（多 kind 技能、非纯 prompt），用户显式认可后再经 `org_commit` 落库。
+- **组织构建自动配记忆人格（已实现）**：「一键组织编排」与内置「组织架构构建师」（`org_plan_draft`）共用同一生成引擎；从一句话需求起草团队时，模型按岗位职责为每个角色自动挑选记忆拟人预设（`memoryProfile`：broad/deep/slowToLearn/cueDependent/fastForgetting），如主管/组长→deep、一线高量/客服→broad、售后/客户成功/顾问→cueDependent、值班/快速查档→fastForgetting、重复例行→slowToLearn；解析容错，缺失时启发式兜底，否则 null（平台全局，向后兼容）。预览中逐员工显示「记忆:」标签，经 `apply`/`org_commit` 落库后新员工随带匹配的记忆类型。
+- **组织连接自动成对（已实现）**：生成/提交的计划若只设向上上报（`escalationAgentId`）而缺向下分派名册（`assignmentIds`），系统会在解析侧（`AgentOrchestrator.InferAssignments`）与提交侧（`OrgApplyEngine.EnsureAssignmentsForLeaders`）把各上级的直接下属并入其 `assignmentIds`（去重、保序、只增不减）——生成团队始终双向连通（上级向下分派、下属向上上报），不会退化成单向问题上报链；构建提示词与 `org_design` 技能正文已明确要求成对连接；已建历史组织不受影响，重新生成/提交即可补齐。
 - **客户技能不误跑服务端 bash（已实现）**：`ExecutionLocation=Client` 技能与服务端/非 Windows 宿主下明显 PowerShell 正文得到“需本机/需 PowerShell 环境”的明确指引，不再出现 `Not running in PowerShell / command not found / 退出码2` 假报错。
 
 ### 1.2 角色间消息传递 / 交接（★★☆） ✅已实现（整轮角色交接）
@@ -81,7 +83,7 @@
 - **已实现**：`AgentDefinition.MemoryProfile`（五档预设 + 口吻 + 人设 + TopK/阈值微调，null=兼容旧行为）；
   读取侧 `MemoryProfileTuning.Resolve` → `MemoryRetrievalTuning` 单次覆盖传给 store 检索，含存得住想不起型的回忆提示分支与快速遗忘型的 21 天近期窗口；写入侧 `MemoryProfileWritePolicy`
   仅对该员工本人发言生效（深记型自动刻为「重要」记忆、快速遗忘型在开启自动遗忘时保留更短）；编辑 UI 见
-  「记忆与权限 → 🧠 记忆类型」。机制与调试详见 `docs/memory-personality.md`。
+  「记忆与权限 → 🧠 记忆类型」。机制与调试详见 `docs/memory-personality.md`。另：组织编排 / 组织架构构建师起草团队时已会按岗位自动配好合适预设，缺失 / 非法预设安全回退（null=全局，向后兼容），机制详见 `docs/memory-personality.md` §4.4。
 
 ---
 

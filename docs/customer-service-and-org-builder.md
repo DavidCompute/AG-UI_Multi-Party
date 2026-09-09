@@ -280,6 +280,8 @@ An org role mounted on `org_design` auto-gains native tools `org_commit` (admin-
      失败→按报错修正、同一 teamKey 重试（覆盖 keep-latest）
 ```
 
+**连接自动成对（已实现）**：当出稿 / 最终稿只填了「向上问题提升」连接（`escalationAgentId`）、向下任务指派名册（`assignmentIds`）为空或不全时，系统会在**生成解析**（`AgentOrchestrator.Parse` → `InferAssignments`）与**共享落库引擎**（`OrgApplyEngine.EnsureAssignmentsForLeaders`）两处，自动把直接提升到该主管的下属并入其 `assignmentIds`——去重、保序、只增不改；因此不论经网页一键编排 / `org_plan_draft` / `org_commit`，落库组织都同时具备「指派 + 提升」双向连接，不会退化成单向提升链。生成器提示与内置 `org_design` 技能正文也已明确要求成对连接；库中已有旧组织不回写（重新生成 / 重新 apply 即生效）。
+
 ### B.1 Overall flow
 
 Route（whole build→plan_draft; small tweak→design) → draft (one-shot structured JSON or conversation, agents may carry an optional per-role `memoryProfile` persona preset, null = global) → present & confirm (never commit before explicit OK) → admin authorizes `org_commit(teamKey, planJson)` → `OrgApplyEngine` writes the whole team; on failure fix and retry under same `teamKey`.
@@ -353,7 +355,7 @@ Normalize skills (dedupe/auto-suffix, require admin for shell/http/dotnet); norm
 
 组织架构构建师 = 路由 →（一键式/逐条）出稿 → 呈现等确认 → 管理员放行 → **唯一引擎整支落库/覆盖** →（可选建客服知聚，其运转规则见大段 A）。写库唯一、去重/引用/连接/自测都收敛在 `OrgApplyEngine`。
 
-Anchors：`AgentCatalog.Create`（挂 org_commit/org_plan_draft、注运行能力）；`AgentOrchestrator.cs`（一键初稿生成引擎）；`Tools/OrgOneShotDraftTool.cs`（org_plan_draft）；`Tools/OrgCommitTool.cs`（org_commit）；`OrgTeamManager.cs`(OrgTeamCommitter/OrgTeamStore)；`OrgApplyEngine.cs`（§B.3）；`AgentGateway`/`HasMountedOrgDeploy`。
+Anchors：`AgentCatalog.Create`（挂 org_commit/org_plan_draft、注运行能力）；`AgentOrchestrator.cs`（一键初稿生成引擎）；`Tools/OrgOneShotDraftTool.cs`（org_plan_draft）；`Tools/OrgCommitTool.cs`（org_commit）；`OrgTeamManager.cs`(OrgTeamCommitter/OrgTeamStore)；`OrgApplyEngine.cs`（§B.3）；`AgentGateway`/`HasMountedOrgDeploy`。连接自动成对（§B.1）：`AgentOrchestrator.Parse`→`InferAssignments`、`OrgApplyEngine.EnsureAssignmentsForLeaders`。
 
 Org-Architect = route → draft (structured/conversation) → confirm → admin’s `org_commit` → single `OrgApplyEngine` overwrite-write → (optional) support circle (rules: Part A). Anchors mirror code above.
 
