@@ -152,6 +152,7 @@
           <button id="agentOrgBtn" class="chip-btn" data-i18n-title="agent.orgChart">🌐 <span data-i18n="agent.orgBtn">组织架构</span></button>
           <button id="agentOrchBtn" class="chip-btn" data-i18n-title="org.orchTitle">🛠️ <span data-i18n="org.orchBtn">一键编排</span></button>
           <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
+          <button id="agentKbManageBtn" class="chip-btn" data-i18n-title="kb.title">📚 <span data-i18n="agent.kbBtn">管理知识库</span></button>
           <button id="agentImportBtn" class="chip-btn" data-i18n-title="agent.importTip">📥 <span data-i18n="agent.import">导入</span></button>
           <button id="agentExportAllBtn" class="chip-btn" data-i18n-title="agent.exportAllTip">📤 <span data-i18n="agent.exportAll">导出全部</span></button>
           <button id="agentBuiltinRestoreOrgBtn" class="chip-btn hidden" data-i18n-title="agent.restoreOrgTip">🛠️ <span data-i18n="agent.restoreOrg">恢复内置组织工具</span></button>
@@ -286,7 +287,7 @@
 
           <div class="form-group">
             <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.skillDefs.hint"><b>可复用技能（技能库）</b>：从<b>技能库</b>挂载可跨数字员工复用的技能（shell / http / prompt / dotnet）。技能在「技能库」里创建维护，或让数字员工用自然语言创建。</p>
-            <div id="afSkillDefList" class="kb-pick"></div>
+            <div id="afSkillDefList" class="af-sel-list"></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
               <button id="afSkillDefAddBtn" class="chip-btn" type="button" data-i18n="agent.form.skillDef.add">＋ 选取技能</button>
               <button id="afSkillLibManageBtn" class="chip-btn" type="button" data-i18n="skill.manage">🎯 管理技能库</button>
@@ -295,7 +296,7 @@
 
           <div class="form-group">
             <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.subAgents.hint"><b>可调用子数字员工（技能）</b>：把<b>其他数字员工</b>挂为本角色的可调用技能——模型需要其领域能力时会自动调起子数字员工。已选项目可为每项填一句调用说明。</p>
-            <div id="afSkillAgentList" class="kb-pick"></div>
+            <div id="afSkillAgentList" class="af-sel-list"></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
               <button id="afSkillAgentAddBtn" class="chip-btn" type="button" data-i18n="agent.form.subAgents.add">＋ 选取数字员工</button>
             </div>
@@ -304,10 +305,10 @@
           <div class="form-section" data-collapse-key="afSectKb" style="border:none;margin:14px 0 8px;padding:0 0 4px"><span data-i18n="agent.form.section.kb">知识库（可选）</span></div>
           <div class="form-group">
             <p class="form-hint" style="margin-bottom:8px" data-i18n-html="agent.form.kb.hint">绑定<b>知识库</b>后，数字员工回复前会检索其中的知识文档相关内容（RAG），基于您的资料作答。知识库在「📚 管理知识库」中创建并上传文档。</p>
-            <div id="afKbList" class="kb-pick"></div>
+            <p class="form-hint" style="margin-bottom:8px" data-i18n-html="agent.form.kb.hint">绑定<b>知识库</b>后，数字员工回复前会检索其中的知识文档相关内容（RAG），基于您的资料作答。<b>已选</b>罗列在下方，点「＋ 绑定知识库」在弹窗中勾选；知识库在「AI 角色管理 → 📚 管理知识库」中创建并上传文档。</p>
+            <div id="afKbList" class="af-sel-list"></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
               <button id="afKbAddBtn" class="chip-btn" type="button" data-i18n="agent.form.kb.add">＋ 绑定知识库</button>
-              <button id="afKbManageBtn" class="chip-btn" type="button" data-i18n="agent.form.kb.manage">📚 管理知识库</button>
             </div>
           </div>
           </div>

@@ -2418,18 +2418,16 @@ function renderAgentSkillDefPicks() {
   agentSkillDefIds.forEach((id) => {
     const s = (skillList || []).find((x) => x.skillId === id);
     const row = document.createElement("div");
-    row.className = "kb-pick-item on";
-    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
+    row.className = "af-sel-row";
     const info = document.createElement("span");
-    info.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden";
+    info.className = "sel-main";
     info.innerHTML =
-      `<span class="skill-kind tag-skill">${escapeHtml(skillKindTagFor(s) || id)}</span> <b style="white-space:nowrap">${escapeHtml(s?.name || id)}</b>`
-      + (s ? `<code style="white-space:nowrap">${escapeHtml(s.skillId)}</code>` : "")
-      + (s?.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.description)}</span>` : "");
+      `<span class="skill-kind tag-skill">${escapeHtml(skillKindTagFor(s) || id)}</span><b class="sel-name">${escapeHtml(s?.name || id)}</b>`
+      + (s ? `<code>${escapeHtml(s.skillId)}</code>` : "")
+      + (s?.description ? `<span class="sel-desc" title="${escapeHtml(s.description)}">${escapeHtml(s.description)}</span>` : "");
     const view = document.createElement("button");
     view.type = "button";
     view.className = "chip-btn";
-    view.style.cssText = "flex:none;padding:2px 8px;font-size:12px;white-space:nowrap";
     view.textContent = "✏️ " + t("agent.form.skillDef.view");
     view.title = t("agent.form.skillDef.view");
     view.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); openAgentSkillViewer(id); };
@@ -2485,19 +2483,18 @@ function renderAgentSkillPicks() {
   picks.forEach((pick) => {
     const ag = (agentList || []).find((x) => x.agentId === pick.targetAgentId);
     const row = document.createElement("div");
-    row.className = "kb-pick-item on";
-    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
+    row.className = "af-sel-row";
     const info = document.createElement("span");
-    info.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden";
+    info.className = "sel-main";
     info.innerHTML =
-      `<span class="skill-kind tag-agent">AI</span> <b style="white-space:nowrap">${escapeHtml(ag?.nickname || pick.targetAgentId)}</b> <code style="white-space:nowrap">${escapeHtml(pick.targetAgentId)}</code>`
-      + (ag?.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(ag.description)}</span>` : "");
+      `<span class="skill-kind tag-agent">AI</span><b class="sel-name">${escapeHtml(ag?.nickname || pick.targetAgentId)}</b><code>${escapeHtml(pick.targetAgentId)}</code>`
+      + (ag?.description ? `<span class="sel-desc" title="${escapeHtml(ag.description)}">${escapeHtml(ag.description)}</span>` : "");
     row.appendChild(info);
     row.appendChild(makeSelectedRemoveBtn(pick.targetAgentId, "agent"));
     el.appendChild(row);
     // 调用说明（仅对已选呈现，随输入实时保存到 agentSkillPicks）
     const descBox = document.createElement("div");
-    descBox.style.cssText = "margin:-2px 0 6px 22px";
+    descBox.className = "af-sel-desc";
     const ta = document.createElement("textarea");
     ta.className = "modal-input";
     ta.rows = 2;
@@ -2536,15 +2533,14 @@ function renderKbPicks() {
   agentKbIds.forEach((id) => {
     const kb = (kbList || []).find((x) => x.kbId === id);
     const row = document.createElement("div");
-    row.className = "kb-pick-item on";
-    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
+    row.className = "af-sel-row";
     const info = document.createElement("span");
-    info.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden";
+    info.className = "sel-main";
     const docCount = (kb?.documents || []).length;
     info.innerHTML =
-      `<span>📚</span> <b style="white-space:nowrap">${escapeHtml(kb?.name || id)}</b>`
-      + (kb?.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(kb.description)}</span>` : "")
-      + (kb ? ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.kb.docCount", { count: docCount })}</span>` : "");
+      `<span>📚</span><b class="sel-name">${escapeHtml(kb?.name || id)}</b>`
+      + (kb?.description ? `<span class="sel-desc" title="${escapeHtml(kb.description)}">${escapeHtml(kb.description)}</span>` : "")
+      + (kb ? `<span class="sel-doc">${t("agent.form.kb.docCount", { count: docCount })}</span>` : "");
     row.appendChild(info);
     row.appendChild(makeSelectedRemoveBtn(id, "kb"));
     el.appendChild(row);
@@ -8938,8 +8934,8 @@ function init() {
     } catch (ex) { toast(t("agent.form.genFail", { err: ex.message })); }
     finally { btn.disabled = false; btn.textContent = orig; }
   };
-  // 知识库：管理弹窗 + 创建
-  $("afKbManageBtn").onclick = openKbModal;
+  // 知识库：管理弹窗（入口在「AI 角色管理」工具栏）+ 创建
+  $("agentKbManageBtn").onclick = openKbModal;
   $("afKbAddBtn").onclick = () => openAgentPick("kb");
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };
   $("kbCreateBtn").onclick = async () => {

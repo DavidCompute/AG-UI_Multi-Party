@@ -182,6 +182,7 @@ window.I18N_DICTS.zh = {
   "agent.form.section.kb": "知识库（可选）",
   "agent.form.kb.hint": "绑定<b>知识库</b>后，数字员工回复前会检索其中的知识文档相关内容（RAG），基于您的资料作答。<b>已选</b>罗列在下方，点「＋ 绑定知识库」在弹窗中勾选；知识库在「📚 管理知识库」中创建并上传文档。",
   "agent.form.kb.manage": "📚 管理知识库",
+  "agent.kbBtn": "管理知识库",
   "agent.form.section.memory": "记忆与权限",
   "agent.form.personalMemory": "🧠 个人记忆",
   "agent.form.personalMemoryHint": "（默认关闭。开启后，该数字员工回复时会参考触发者本人的历史发言，了解其偏好；需触发者用户也开启个人记忆才生效）",

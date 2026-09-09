@@ -890,6 +890,26 @@ textarea:focus { outline: none; border-color: var(--accent); }
 #agentPickList label.kb-pick-item .kb-meta,
 #agentPickList label.kb-pick-item b,
 #agentPickList label.kb-pick-item code { white-space: nowrap; }
+/* 数字员工表单“已选”列表：与全局选择列表一致的卡片行（技能 / 子数字员工 / 知识库） */
+.af-sel-list { display: flex; flex-direction: column; gap: 6px; }
+.af-sel-row {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  padding: 6px 8px 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel-2); transition: border-color .15s, background .15s;
+}
+.af-sel-row:hover { border-color: var(--accent); }
+.af-sel-row .sel-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.af-sel-row .sel-main .skill-kind,
+.af-sel-row .sel-main > span { flex: none; }
+.af-sel-row .sel-name { font-weight: 600; white-space: nowrap; }
+.af-sel-row code { font-size: 11px; color: var(--muted); white-space: nowrap; flex: none; }
+.af-sel-row .sel-desc { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-sel-row .sel-doc { flex: none; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.af-sel-row .chip-btn { flex: none; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
+.af-sel-row .icon-btn { flex: none; width: 22px; height: 22px; }
+.af-sel-row .icon-btn:hover { border-color: rgba(229,83,75,.55); color: #e5534b; }
+.af-sel-desc { margin: 2px 0 4px 8px; }
+.af-sel-desc .modal-input { font-size: 12.5px; }
 .search-hit {
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
   background: var(--panel-2); transition: border-color .15s, background .15s;
