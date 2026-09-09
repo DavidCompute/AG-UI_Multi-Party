@@ -2046,6 +2046,7 @@ let editingSkillId = null;
 let skillSearchQuery = "";  // 技能库搜索关键词（仅前端过滤）
 let selectedSkills = new Set(); // 技能批量删除所选 skillId
 let skillViewerReturnToAgent = false; // 从“数字员工表单 → ✏️ 查看/编辑技能”进入时：返回/保存后应直接回到该表单
+let skillListLoaded = false;  // 技能库是否已成功加载（表单已选列表据此清理被删除的挂载）
 
 /** 加载技能库列表。返回是否成功（登录态）。 */
 async function loadSkills() {
@@ -2054,8 +2055,9 @@ async function loadSkills() {
     const res = await fetch("/ag-ui/skills", { headers: { Authorization: "Bearer " + state.token } });
     if (!res.ok) return false;
     skillList = await res.json();
+    skillListLoaded = true;
     return true;
-  } catch { return false; }
+  } catch { skillListLoaded = false; return false; }
 }
 
 /** 渲染技能库列表。 */
@@ -2393,35 +2395,47 @@ async function batchDeleteSkills() {
 }
 
 /** 数字员工表单：可复用技能（技能库）多选回显渲染。每行另带「查看 / 编辑」入口直达技能库编辑器。 */
+/** 技能类型短标签（UI 徽标 / 选择列表通用）。 */
+function skillKindTagFor(s) {
+  const map = { shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort"), dotnet: t("skill.kind.dotnetShort"), org_deploy: t("skill.kind.orgDeployShort") };
+  return map[(s?.kind || "").toLowerCase()] || s?.kind || s?.skillId || "";
+}
+
+/** 数字员工表单：技能库已挂载技能（仅罗列已选；备选经「＋ 选取技能」弹窗）。技能行带 ✏️ 查看/编辑 与 ✕ 移除。 */
 function renderAgentSkillDefPicks() {
   const el = $("afSkillDefList");
+  if (!el) return;
+  // 技能库已加载：清理已被删除 / 不可见的挂载引用（避免保存时引用已不存在的技能）
+  if (skillListLoaded) {
+    const valid = new Set((skillList || []).map((s) => s.skillId));
+    agentSkillDefIds = agentSkillDefIds.filter((id) => valid.has(id));
+  }
   el.innerHTML = "";
-  (skillList || []).forEach((s) => {
-    const on = agentSkillDefIds.includes(s.skillId);
-    const kindTag = ({ shell: t("skill.kind.shellShort"), http: t("skill.kind.httpShort"), prompt: t("skill.kind.promptShort"), dotnet: t("skill.kind.dotnetShort"), org_deploy: t("skill.kind.orgDeployShort") })[(s.kind || "").toLowerCase()] || s.kind || s.skillId;
-    // 行 = 左侧勾选区（label 整体可点）+ 右侧查看/编辑入口（按钮不放 label 内，避免点击按钮同时勾选）
+  if (!agentSkillDefIds.length) {
+    el.innerHTML = `<span class="form-hint">${t("agent.form.skillDef.empty")}</span>`;
+    return;
+  }
+  agentSkillDefIds.forEach((id) => {
+    const s = (skillList || []).find((x) => x.skillId === id);
     const row = document.createElement("div");
-    row.className = "kb-pick-item" + (on ? " on" : "");
+    row.className = "kb-pick-item on";
     row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
-    const lab = document.createElement("label");
-    lab.style.cssText = "display:flex;align-items:center;gap:6px;flex:1;min-width:0;cursor:pointer;margin:0";
-    lab.innerHTML = `<input type="checkbox" value="${escapeHtml(s.skillId)}" ${on ? "checked" : ""} style="flex-shrink:0" /> <span class="skill-kind tag-skill">${escapeHtml(kindTag)}</span> <b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code> <span class="kb-meta">${escapeHtml(s.description || "")}</span>`;
-    lab.querySelector("input").addEventListener("change", (e) => {
-      const id = e.target.value, check = e.target.checked;
-      const i = agentSkillDefIds.indexOf(id);
-      if (check && i < 0) agentSkillDefIds.push(id);
-      if (!check && i >= 0) agentSkillDefIds.splice(i, 1);
-      renderAgentSkillDefPicks();
-    });
+    const info = document.createElement("span");
+    info.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden";
+    info.innerHTML =
+      `<span class="skill-kind tag-skill">${escapeHtml(skillKindTagFor(s) || id)}</span> <b style="white-space:nowrap">${escapeHtml(s?.name || id)}</b>`
+      + (s ? `<code style="white-space:nowrap">${escapeHtml(s.skillId)}</code>` : "")
+      + (s?.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.description)}</span>` : "");
     const view = document.createElement("button");
     view.type = "button";
     view.className = "chip-btn";
     view.style.cssText = "flex:none;padding:2px 8px;font-size:12px;white-space:nowrap";
     view.textContent = "✏️ " + t("agent.form.skillDef.view");
     view.title = t("agent.form.skillDef.view");
-    view.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); openAgentSkillViewer(s.skillId); };
-    row.appendChild(lab);
+    view.onclick = (ev) => { ev.preventDefault(); ev.stopPropagation(); openAgentSkillViewer(id); };
+    row.appendChild(info);
     row.appendChild(view);
+    row.appendChild(makeSelectedRemoveBtn(id, "skill"));
     el.appendChild(row);
   });
 }
@@ -2456,53 +2470,42 @@ function mergeOrgLinkedSkillPicks(a) {
   });
 }
 
-/** 数字员工表单：可调用子数字员工（Skills）多选渲染 + 每项调用说明。
- *  选中某数字员工 = 把它作为本角色可调用技能（模型需要其能力时自动调起），
- *  skillId 留空由后端自动生成 skill_<目标ID>。 */
+/** 数字员工表单：可调用子数字员工（仅罗列已选；备选经「＋ 选取数字员工」弹窗）。
+ *  每项展示目标员工并允许填一句调用说明（skillId 留空由后端自动生成 skill_<目标ID>）。
+ *  组织架构已连线目标会自动并入（mergeOrgLinkedSkillPicks），移除不影响组织连线。 */
 function renderAgentSkillPicks() {
   const el = $("afSkillAgentList");
   if (!el) return;
   el.innerHTML = "";
-  const candidates = (agentList || []).filter((x) =>
-    x.agentId && x.agentId !== editingAgentId && !/^skill_/.test(x.agentId) && x.agentId !== "agent_" + editingAgentId);
-  if (!candidates.length) {
-    el.innerHTML = '<span class="form-hint">暂无可调用的数字员工（先新建其他数字员工）。</span>';
+  const picks = (agentSkillPicks || []).filter((p) => p && p.targetAgentId);
+  if (!picks.length) {
+    el.innerHTML = `<span class="form-hint">${t("agent.form.subAgents.empty")}</span>`;
     return;
   }
-  candidates.forEach((ag) => {
-    const existing = agentSkillPicks.find((p) => p.targetAgentId === ag.agentId);
-    const on = !!existing;
-    const label = document.createElement("label");
-    label.className = "kb-pick-item" + (on ? " on" : "");
-    label.style.cursor = "pointer";
-    label.innerHTML = `<input type="checkbox" value="${escapeHtml(ag.agentId)}" ${on ? "checked" : ""} /> <span class="skill-kind tag-agent">AI</span> <b>${escapeHtml(ag.nickname || ag.agentId)}</b> <code>${escapeHtml(ag.agentId)}</code> <span class="kb-meta">${escapeHtml(ag.description || "")}</span>`;
-    label.querySelector("input").addEventListener("change", (e) => {
-      const id = e.target.value, check = e.target.checked;
-      const i = agentSkillPicks.findIndex((p) => p.targetAgentId === id);
-      if (check && i < 0) {
-        const ag2 = (agentList || []).find((x) => x.agentId === id);
-        const desc = ag2?.description || ag2?.nickname
-          ? `调用数字员工「${ag2?.nickname || id}」${ag2?.description ? "（" + ag2.description + "）" : ""}处理相关事务。`
-          : `调用数字员工「${id}」处理相关事务。`;
-        agentSkillPicks.push({ skillId: "", description: desc, targetAgentId: id });
-      } else if (!check && i >= 0) {
-        agentSkillPicks.splice(i, 1);
-      }
-      renderAgentSkillPicks();
-    });
-    el.appendChild(label);
-    if (on && existing) {
-      const descBox = document.createElement("div");
-      descBox.style.cssText = "margin:-2px 0 6px 22px";
-      const ta = document.createElement("textarea");
-      ta.className = "modal-input";
-      ta.rows = 2;
-      ta.placeholder = t("agent.form.subAgentDescPh");
-      ta.value = existing.description || "";
-      ta.addEventListener("input", () => { existing.description = ta.value; });
-      descBox.appendChild(ta);
-      el.appendChild(descBox);
-    }
+  picks.forEach((pick) => {
+    const ag = (agentList || []).find((x) => x.agentId === pick.targetAgentId);
+    const row = document.createElement("div");
+    row.className = "kb-pick-item on";
+    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
+    const info = document.createElement("span");
+    info.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden";
+    info.innerHTML =
+      `<span class="skill-kind tag-agent">AI</span> <b style="white-space:nowrap">${escapeHtml(ag?.nickname || pick.targetAgentId)}</b> <code style="white-space:nowrap">${escapeHtml(pick.targetAgentId)}</code>`
+      + (ag?.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(ag.description)}</span>` : "");
+    row.appendChild(info);
+    row.appendChild(makeSelectedRemoveBtn(pick.targetAgentId, "agent"));
+    el.appendChild(row);
+    // 调用说明（仅对已选呈现，随输入实时保存到 agentSkillPicks）
+    const descBox = document.createElement("div");
+    descBox.style.cssText = "margin:-2px 0 6px 22px";
+    const ta = document.createElement("textarea");
+    ta.className = "modal-input";
+    ta.rows = 2;
+    ta.placeholder = t("agent.form.subAgentDescPh");
+    ta.value = pick.description || "";
+    ta.addEventListener("input", () => { pick.description = ta.value; });
+    descBox.appendChild(ta);
+    el.appendChild(descBox);
   });
 }
 
@@ -2521,32 +2524,173 @@ async function loadKbs() {
   } catch { /* 知识库不可用时表单不阻塞 */ }
 }
 
-/** 数字员工表单：知识库多选（选中项写入 agentKbIds）。 */
+/** 数字员工表单：知识库绑定（仅罗列已选；备选经「＋ 绑定知识库」弹窗）。 */
 function renderKbPicks() {
   const el = $("afKbList");
+  if (!el) return;
   el.innerHTML = "";
-  if (!kbList.length) {
-    el.innerHTML = '<span class="form-hint">暂无可用知识库，点「📚 管理知识库」创建后即可绑定</span>';
+  if (!agentKbIds.length) {
+    el.innerHTML = `<span class="form-hint">${t("agent.form.kb.empty")}</span>`;
     return;
   }
-  kbList.forEach((kb) => {
-    const label = document.createElement("label");
-    label.style.cssText = "display:flex;align-items:center;gap:6px;margin:4px 0;cursor:pointer";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = agentKbIds.includes(kb.kbId);
-    cb.style.cssText = "width:15px;height:15px;accent-color:#4f8cff";
-    cb.onchange = () => {
-      if (cb.checked) { if (!agentKbIds.includes(kb.kbId)) agentKbIds.push(kb.kbId); }
-      else agentKbIds = agentKbIds.filter((x) => x !== kb.kbId);
-    };
+  agentKbIds.forEach((id) => {
+    const kb = (kbList || []).find((x) => x.kbId === id);
+    const row = document.createElement("div");
+    row.className = "kb-pick-item on";
+    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid var(--border)";
     const info = document.createElement("span");
-    info.style.cssText = "color:#e6e6e6;font-size:13px";
-    info.textContent = `📚 ${kb.name}${kb.description ? " — " + kb.description : ""}（${(kb.documents || []).length} 篇文档）`;
-    label.appendChild(cb);
-    label.appendChild(info);
-    el.appendChild(label);
+    info.style.cssText = "flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden";
+    const docCount = (kb?.documents || []).length;
+    info.innerHTML =
+      `<span>📚</span> <b style="white-space:nowrap">${escapeHtml(kb?.name || id)}</b>`
+      + (kb?.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(kb.description)}</span>` : "")
+      + (kb ? ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.kb.docCount", { count: docCount })}</span>` : "");
+    row.appendChild(info);
+    row.appendChild(makeSelectedRemoveBtn(id, "kb"));
+    el.appendChild(row);
   });
+}
+
+/* ============ 数字员工编辑：独立选取弹窗（技能 / 子数字员工 / 知识库） ============ */
+
+/** 表单已选区“✕ 移除”按钮（技能 skill / 子数字员工 agent / 知识库 kb 通用）。 */
+function makeSelectedRemoveBtn(id, kind) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "icon-btn";
+  b.style.cssText = "flex:none;width:22px;height:22px;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center";
+  b.textContent = "✕";
+  b.title = t("agent.form.pick.remove");
+  b.onclick = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (kind === "skill") {
+      const i = agentSkillDefIds.indexOf(id);
+      if (i >= 0) { agentSkillDefIds.splice(i, 1); renderAgentSkillDefPicks(); }
+    } else if (kind === "agent") {
+      const i = agentSkillPicks.findIndex((p) => p.targetAgentId === id);
+      if (i >= 0) { agentSkillPicks.splice(i, 1); renderAgentSkillPicks(); }
+    } else if (kind === "kb") {
+      agentKbIds = agentKbIds.filter((x) => x !== id);
+      renderKbPicks();
+    }
+  };
+  return b;
+}
+
+/** 可调用子数字员工备选名单：排除自身 / 技能目标子代理（与旧版目录口径一致）。 */
+function subAgentCandidates() {
+  return (agentList || []).filter((x) =>
+    x.agentId && x.agentId !== editingAgentId && !/^skill_/.test(x.agentId) && x.agentId !== "agent_" + editingAgentId);
+}
+
+/** 可调用子数字员工的默认调用说明。 */
+function subAgentDefaultDesc(id) {
+  const ag = (agentList || []).find((x) => x.agentId === id);
+  return ag?.description || ag?.nickname
+    ? `调用数字员工「${ag?.nickname || id}」${ag?.description ? "（" + ag.description + "）" : ""}处理相关事务。`
+    : `调用数字员工「${id}」处理相关事务。`;
+}
+
+let agentPickKind = "";     // 选取弹窗当前种类：skill / agent / kb
+let agentPickQuery = "";    // 选取弹窗搜索词（仅前端过滤）
+
+/** 打开独立选取弹窗（skill=可复用技能 / agent=可调用子数字员工 / kb=知识库）。 */
+async function openAgentPick(kind) {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  agentPickKind = kind;
+  agentPickQuery = "";
+  const search = $("agentPickSearch");
+  if (search) search.value = "";
+  $("agentPickTitle").textContent = t({
+    skill: "agent.form.pick.title.skill", agent: "agent.form.pick.title.agent", kb: "agent.form.pick.title.kb",
+  }[kind] || "agent.form.pick.title.skill");
+  // 备选数据确保就绪（技能库 / 知识库可能尚未加载过）
+  try {
+    if (kind === "skill" && !skillList.length) await loadSkills();
+    else if (kind === "kb") await loadKbs();
+  } catch { /* 加载失败不阻塞弹窗，列表显示空态 */ }
+  $("agentPickModal").classList.remove("hidden");
+  renderAgentPickList();
+}
+
+/** 弹窗内勾选状态变更：同步 state 数组并刷新表单“已选”区 + 弹窗候选列表。 */
+function agentPickToggle(kind, id, on) {
+  if (kind === "skill") {
+    const i = agentSkillDefIds.indexOf(id);
+    if (on && i < 0) agentSkillDefIds.push(id);
+    else if (!on && i >= 0) agentSkillDefIds.splice(i, 1);
+    renderAgentSkillDefPicks();
+  } else if (kind === "agent") {
+    const i = agentSkillPicks.findIndex((p) => p.targetAgentId === id);
+    if (on && i < 0) { agentSkillPicks.push({ skillId: "", description: subAgentDefaultDesc(id), targetAgentId: id }); renderAgentSkillPicks(); }
+    else if (!on && i >= 0) { agentSkillPicks.splice(i, 1); renderAgentSkillPicks(); }
+  } else if (kind === "kb") {
+    if (on) { if (!agentKbIds.includes(id)) agentKbIds.push(id); }
+    else agentKbIds = agentKbIds.filter((x) => x !== id);
+    renderKbPicks();
+  }
+  renderAgentPickList();
+}
+
+/** 渲染选取弹窗候选列表（按搜索词过滤；勾选即生效）。 */
+function renderAgentPickList() {
+  const el = $("agentPickList");
+  if (!el) return;
+  el.innerHTML = "";
+  const q = agentPickQuery.trim().toLowerCase();
+  let count = 0;
+  if (agentPickKind === "skill") {
+    (skillList || []).forEach((s) => {
+      const hay = `${s.name} ${s.skillId} ${s.description || ""} ${s.kind || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const on = agentSkillDefIds.includes(s.skillId);
+      const row = document.createElement("label");
+      row.className = "kb-pick-item" + (on ? " on" : "");
+      row.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;min-width:0";
+      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+        + `<span class="skill-kind tag-skill">${escapeHtml(skillKindTagFor(s))}</span>`
+        + `<b style="white-space:nowrap">${escapeHtml(s.name)}</b> <code style="white-space:nowrap">${escapeHtml(s.skillId)}</code>`
+        + (s.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(s.description)}</span>` : "");
+      row.querySelector("input").addEventListener("change", (e) => agentPickToggle("skill", s.skillId, e.target.checked));
+      el.appendChild(row);
+      count++;
+    });
+  } else if (agentPickKind === "agent") {
+    subAgentCandidates().forEach((ag) => {
+      const hay = `${ag.nickname || ""} ${ag.agentId} ${ag.description || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const on = agentSkillPicks.some((p) => p.targetAgentId === ag.agentId);
+      const row = document.createElement("label");
+      row.className = "kb-pick-item" + (on ? " on" : "");
+      row.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;min-width:0";
+      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+        + `<span class="skill-kind tag-agent">AI</span>`
+        + `<b style="white-space:nowrap">${escapeHtml(ag.nickname || ag.agentId)}</b> <code style="white-space:nowrap">${escapeHtml(ag.agentId)}</code>`
+        + (ag.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(ag.description)}</span>` : "");
+      row.querySelector("input").addEventListener("change", (e) => agentPickToggle("agent", ag.agentId, e.target.checked));
+      el.appendChild(row);
+      count++;
+    });
+  } else if (agentPickKind === "kb") {
+    (kbList || []).forEach((kb) => {
+      const hay = `${kb.name} ${kb.kbId} ${kb.description || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const on = agentKbIds.includes(kb.kbId);
+      const row = document.createElement("label");
+      row.className = "kb-pick-item" + (on ? " on" : "");
+      row.style.cssText = "display:flex;align-items:center;gap:6px;padding:4px 2px;cursor:pointer;min-width:0";
+      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+        + `<span>📚</span>`
+        + `<b style="white-space:nowrap">${escapeHtml(kb.name)}</b>`
+        + (kb.description ? ` <span class="kb-meta" style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(kb.description)}</span>` : "")
+        + ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.kb.docCount", { count: (kb.documents || []).length })}</span>`;
+      row.querySelector("input").addEventListener("change", (e) => agentPickToggle("kb", kb.kbId, e.target.checked));
+      el.appendChild(row);
+      count++;
+    });
+  }
+  if (!count) el.innerHTML = `<span class="form-hint">${t("agent.form.pick.noMatch")}</span>`;
 }
 
 /** 知识库管理弹窗：列表 + 上传文档 / 删除（仅自己创建的可管理）。 */
@@ -8683,6 +8827,11 @@ function init() {
   $("sfTest").onclick = () => testSkill(editingSkillId);
   $("sgGenerate").onclick = generateSkill; // 同按钮切换：空闲=生成；生成中点击=停止
   $("afSkillLibManageBtn").onclick = openSkillModal;
+  // 数字员工表单：独立选取弹窗（已选才罗列在表单内）
+  $("afSkillDefAddBtn").onclick = () => openAgentPick("skill");
+  $("afSkillAgentAddBtn").onclick = () => openAgentPick("agent");
+  $("agentPickCloseBtn").onclick = () => { $("agentPickModal").classList.add("hidden"); agentPickKind = ""; };
+  $("agentPickSearch").addEventListener("input", () => { agentPickQuery = $("agentPickSearch").value; renderAgentPickList(); });
   // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);
   $("agentImportBtn").onclick = () => $("agentImportFile").click();
@@ -8791,6 +8940,7 @@ function init() {
   };
   // 知识库：管理弹窗 + 创建
   $("afKbManageBtn").onclick = openKbModal;
+  $("afKbAddBtn").onclick = () => openAgentPick("kb");
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };
   $("kbCreateBtn").onclick = async () => {
     const name = $("kbName").value.trim();
