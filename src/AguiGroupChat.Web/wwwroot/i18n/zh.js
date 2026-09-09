@@ -191,7 +191,7 @@ window.I18N_DICTS.zh = {
   "agent.form.isPrivateHint": "（默认关闭。开启后仅创建者可将它拉进知聚，其他用户看不到也无法使用）",
   "agent.form.isPrivate.hint": "（默认关闭）",
   "agent.form.memoryType.title": "🧠 记忆类型（拟人召回）",
-  "agent.form.memoryType.desc": "配置后，该数字员工调取<b>知聚共享历史记忆 / 个人记忆</b>时会按所选类型执行抽取：检索条数、相似度阈值、回忆提示分支与近期窗口都不同，并在引用记忆时带一句与类型相符的口吻说明。记忆本身仍由知聚共享落库，这里只影响<b>“它怎么回忆”</b>。",
+  "agent.form.memoryType.desc": "配置后，该数字员工调取<b>知聚共享历史记忆 / 个人记忆</b>时会按所选类型执行抽取：检索条数、相似度阈值、回忆提示分支与近期窗口都不同，并在引用记忆时带一句与类型相符的口吻说明。记忆本身仍由知聚共享落库——<b>深记型</b>本人发言会自动刻为「重要」记忆（更久、同分优先），<b>快速遗忘型</b>本人普通发言在开启自动遗忘时保留更短；其余类型不影响落库，只影响<b>“它怎么回忆”</b>。",
   "agent.form.memoryType.preset": "记忆类型预设",
   "agent.form.memoryType.none": "跟随平台默认（不单独配置）",
   "agent.form.memoryType.broad": "广记型（记得多、细节易混）",

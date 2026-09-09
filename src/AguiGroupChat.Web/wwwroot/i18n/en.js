@@ -191,7 +191,7 @@ window.I18N_DICTS.en = {
   "agent.form.isPrivateHint": "(default off. When on, only the creator can invite it into groups; others cannot see or use it)",
   "agent.form.isPrivate.hint": "(default off)",
   "agent.form.memoryType.title": "🧠 Memory Type (human-like recall)",
-  "agent.form.memoryType.desc": "Once set, when this employee recalls <b>shared group memory / personal memory</b> before replying, retrieval follows the selected type: hit count, similarity threshold, cue branch and recency window differ, and a personality-consistent wording hint accompanies the cited memories. Memories are still stored shared by the group; this only shapes <b>how it remembers</b>.",
+  "agent.form.memoryType.desc": "Once set, when this employee recalls <b>shared group memory / personal memory</b> before replying, retrieval follows the selected type: hit count, similarity threshold, cue branch and recency window differ, and a personality-consistent wording hint accompanies the cited memories. Memories are still stored shared by the group — <b>Deep</b> employees' own posts are auto-marked \u201cImportant\u201d (kept longer, ranked first at equal scores), while <b>Fast-forgetting</b> employees' own ordinary posts are kept shorter when auto-forget is on; other types do not affect storage and only shape <b>how it remembers</b>.",
   "agent.form.memoryType.preset": "Memory type preset",
   "agent.form.memoryType.none": "Follow platform default (no per-employee setting)",
   "agent.form.memoryType.broad": "Broad (remembers much, details may blur)",
