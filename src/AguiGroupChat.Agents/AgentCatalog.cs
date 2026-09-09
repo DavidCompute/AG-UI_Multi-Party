@@ -517,6 +517,10 @@ public sealed class AgentCatalog
         var openAiOptions = new OpenAIClientOptions
         {
             EnableDistributedTracing = false,
+            // 底层 Azure OpenAI SDK 默认网络超时仅 100 秒：思考模型（deepseek-reasoner）长思考/长稿生成时
+            // 请求尚未完成就被掐断（表现：编排/路由运行中“取消/超时、不出稿”），且会先于我们的流式超时生效。
+            // 这里调大到 15 分钟作“网络兜底”，真正的一次运行时限仍由执行配置的流式超时（streamTimeoutMinutes）控制。
+            NetworkTimeout = TimeSpan.FromMinutes(15),
         };
         if (endpoint is not null) openAiOptions.Endpoint = new Uri(endpoint);
 
