@@ -2470,6 +2470,8 @@ function mergeOrgLinkedSkillPicks(a) {
 
 /** 数字员工表单：可调用子数字员工（仅罗列已选；备选经「＋ 选取数字员工」弹窗）。
  *  每项展示目标员工并允许填一句调用说明（skillId 留空由后端自动生成 skill_<目标ID>）。
+/** 数字员工表单：可调用子数字员工（仅罗列已选；备选经「＋ 选取数字员工」弹窗）。
+ *  每行展示目标员工与自身简介（不必再重复填调用说明——系统会按昵称 / 简介自动生成对模型的调用描述）。
  *  组织架构已连线目标会自动并入（mergeOrgLinkedSkillPicks），移除不影响组织连线。 */
 function renderAgentSkillPicks() {
   const el = $("afSkillAgentList");
@@ -2492,17 +2494,6 @@ function renderAgentSkillPicks() {
     row.appendChild(info);
     row.appendChild(makeSelectedRemoveBtn(pick.targetAgentId, "agent"));
     el.appendChild(row);
-    // 调用说明（仅对已选呈现，随输入实时保存到 agentSkillPicks）
-    const descBox = document.createElement("div");
-    descBox.className = "af-sel-desc";
-    const ta = document.createElement("textarea");
-    ta.className = "modal-input";
-    ta.rows = 2;
-    ta.placeholder = t("agent.form.subAgentDescPh");
-    ta.value = pick.description || "";
-    ta.addEventListener("input", () => { pick.description = ta.value; });
-    descBox.appendChild(ta);
-    el.appendChild(descBox);
   });
 }
 

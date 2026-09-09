@@ -380,7 +380,7 @@ window.I18N_DICTS.en = {
   "agent.form.skillDefs.hint": "Reusable skills (skill library, reusable across digital employees): create/maintain them in the skill library, or let an employee create them in natural language. <b>Selected</b> ones are listed below; use “＋ Select skills” to tick them in the dialog; “✏️ View / edit” on a row opens that skill in the library.",
   "agent.form.skillDef.view": "View / edit skill",
   "skill.notFound": "Skill not found or already deleted",
-  "agent.form.subAgents.hint": "Callable sub employees (skills): attach other digital employees as callable skills of this role - the model auto-invokes one when it needs that employee's capability. <b>Selected</b> ones are listed below; use “＋ Select employees” to tick them in the dialog and optionally add a call description. Targets already linked in the org structure (assignment / escalation / handoff) appear in the selected area automatically.",
+  "agent.form.subAgents.hint": "Callable sub employees (skills): attach other digital employees as callable skills of this role - the model auto-invokes one when it needs that employee's capability. <b>Selected</b> ones are listed below; use “＋ Select employees” to tick them in the dialog — each row shows that employee's own intro, no extra call description needed. Targets already linked in the org structure (assignment / escalation / handoff) appear in the selected area automatically.",
   "agent.form.subAgentDescPh": "Call description: when the model should call this sub employee (optional)",
   "agent.form.skillDef.add": "＋ Select skills",
   "agent.form.skillDef.empty": "No reusable skills mounted yet — use “＋ Select skills” to mount some from the library.",

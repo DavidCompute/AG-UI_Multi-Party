@@ -908,8 +908,6 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .af-sel-row .chip-btn { flex: none; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
 .af-sel-row .icon-btn { flex: none; width: 22px; height: 22px; }
 .af-sel-row .icon-btn:hover { border-color: rgba(229,83,75,.55); color: #e5534b; }
-.af-sel-desc { margin: 2px 0 4px 8px; }
-.af-sel-desc .modal-input { font-size: 12.5px; }
 /* 已选行字号统一：名称与正文同号（13px，仅加粗区分），辅助信息 11~12px，与其他选择列表一致 */
 .af-sel-row { font-size: 13px; }
 .af-sel-row .sel-name { font-size: 13px; }
