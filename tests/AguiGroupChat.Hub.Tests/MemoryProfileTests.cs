@@ -185,21 +185,99 @@ public sealed class MemoryProfileTests
         Assert.Equal(0.25, store.LastGroupMinScore);
     }
 
+    // ================= 写入侧记忆拟人（AgentMessageMemory 写队列） =================
+
+    [Fact]
+    public async Task Write_DeepAuthor_AutoPromotesToImportant_NoExpiry()
+    {
+        var store = new CapturingStore();
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Memory = new MemoryOptions { Enabled = true, RetentionDays = 30 },
+        };
+        using var memory = new AgentMessageMemory(store, options, NullLogger<AgentMessageMemory>.Instance,
+            new FixedEmbeddingProvider(), authorId => Profile(MemoryPersonalityTypes.Deep));
+
+        memory.Remember(new MessageMemoryEntry("m1", "g1", "main", "agent_deep", "Agent", "深记型说出口的结论", 1_750_000_000_000));
+        var rec = await store.WaitForAsync("m1");
+        // 烙印深：自动升为「重要」→ 不随自动遗忘过期、同相似度检索优先
+        Assert.Equal(MemoryImportance.Important, rec!.Importance);
+        Assert.Null(rec.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task Write_FastForgettingAuthor_ShorterRetention_WhenAutoForgetOn()
+    {
+        var store = new CapturingStore();
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Memory = new MemoryOptions { Enabled = true, RetentionDays = 30 }, // 平台自动遗忘 30 天
+        };
+        using var memory = new AgentMessageMemory(store, options, NullLogger<AgentMessageMemory>.Instance,
+            new FixedEmbeddingProvider(), authorId => Profile(MemoryPersonalityTypes.FastForgetting));
+
+        memory.Remember(new MessageMemoryEntry("m2", "g1", "main", "agent_ff", "Agent", "快速遗忘型随口说的", 1_750_000_000_000));
+        var rec = await store.WaitForAsync("m2");
+        // 普通级 + 保留缩短到约全局 40%（ceil(30×0.4)=12 天）
+        Assert.Equal(MemoryImportance.Normal, rec!.Importance);
+        Assert.Equal(1_750_000_000_000 + 12L * 86_400_000L, rec.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task Write_FastForgettingAuthor_NoAutoForgetOff_KeepsGlobalBehaviour()
+    {
+        var store = new CapturingStore();
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Memory = new MemoryOptions { Enabled = true, RetentionDays = 0 }, // 全局未开自动遗忘
+        };
+        using var memory = new AgentMessageMemory(store, options, NullLogger<AgentMessageMemory>.Instance,
+            new FixedEmbeddingProvider(), authorId => Profile(MemoryPersonalityTypes.FastForgetting));
+
+        memory.Remember(new MessageMemoryEntry("m2", "g1", "main", "agent_ff", "Agent", "快速遗忘型随口说的", 1_750_000_000_000));
+        var rec = await store.WaitForAsync("m2");
+        Assert.Equal(MemoryImportance.Normal, rec!.Importance);
+        Assert.Null(rec.ExpiresAt); // 尊重平台“不自动遗忘”的运维选择
+    }
+
+    [Fact]
+    public async Task Write_NoProfile_OrUserSender_Unchanged()
+    {
+        var store = new CapturingStore();
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Memory = new MemoryOptions { Enabled = true, RetentionDays = 30 },
+        };
+        // 用户消息即使作者名命中了 deep 解析器也按普通落库（记忆拟人只作用于数字员工本人发言）
+        using var memory = new AgentMessageMemory(store, options, NullLogger<AgentMessageMemory>.Instance,
+            new FixedEmbeddingProvider(), authorId => Profile(MemoryPersonalityTypes.Deep));
+
+        memory.Remember(new MessageMemoryEntry("m3", "g1", "main", "agent_deep", "User", "用户消息不受数字员工记忆类型影响", 1_750_000_000_000));
+        var rec = await store.WaitForAsync("m3");
+        Assert.Equal(MemoryImportance.Normal, rec!.Importance);
+        Assert.Equal(1_750_000_000_000 + 30L * 86_400_000L, rec.ExpiresAt); // 仍按全局自动遗忘
+    }
+
     private sealed class FixedEmbeddingProvider : IEmbeddingProvider
     {
         public Task<float[]?> EmbedAsync(string text, CancellationToken ct = default) => Task.FromResult<float[]?>(new float[4]);
         public void Dispose() { }
     }
 
-    /// <summary>记录 store.Search / SearchPerson 收到 topK / minScore 的测试替身。</summary>
+    /// <summary>记录 store.Search / SearchPerson 收到 topK / minScore、以及 Upsert 落库记录的测试替身。</summary>
     private sealed class CapturingStore : IMessageMemoryStore
     {
         public int LastGroupTopK = -1;
         public double LastGroupMinScore = -1;
         public int LastPersonalTopK = -1;
         public double LastPersonalMinScore = -1;
+        public List<MessageMemoryRecord> Upserted { get; } = [];
         public void EnsureSchema() { }
-        public void Upsert(MessageMemoryRecord record) { }
+        public void Upsert(MessageMemoryRecord record) => Upserted.Add(record);
         public void Remove(string groupId, string messageId) { }
         public void RemoveGroup(string groupId) { }
         public void ClearAll() { }
@@ -222,5 +300,17 @@ public sealed class MemoryProfileTests
         public bool UpdateImportance(string messageId, int importance) => false;
         public int SetExpiry(string? groupId, long? expiresAt, long nowMs) => 0;
         public int PruneExpired(long nowMs) => 0;
+
+        /// <summary>轮询等待指定 messageId 落库（写队列异步消费）。</summary>
+        public async Task<MessageMemoryRecord?> WaitForAsync(string messageId)
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                var rec = Upserted.FirstOrDefault(r => r.MessageId == messageId);
+                if (rec is not null) return rec;
+                await Task.Delay(20);
+            }
+            return null;
+        }
     }
 }

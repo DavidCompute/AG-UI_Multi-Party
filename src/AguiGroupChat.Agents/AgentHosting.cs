@@ -150,8 +150,17 @@ public static class AgentHosting
                 logger.LogWarning("当前存储模式（{Provider}）不支持语义记忆，已禁用（向量存储初始化失败：sqlite-vec 仅支持 SQLite 存储提供器）", provider);
                 return null!;
             }
+            // 写入侧记忆拟人：按作者 agentId 解析其 MemoryProfile（深记自动刻深 / 快速遗忘短保留）。
+            // 注意惰性解析：不在记忆服务构造期就 GetService<AgentCatalog>()（某些集成宿主会在启动期互相装配导致死锁），
+            // 而是等第一条“数字员工本人发言”真正要落库时再取——写队列单消费者，缓存安全。
+            AgentCatalog? writeCatalog = null;
             return new AgentMessageMemory(store, options,
-                sp.GetRequiredService<ILogger<AgentMessageMemory>>(), sp.GetService<IEmbeddingProvider>());
+                sp.GetRequiredService<ILogger<AgentMessageMemory>>(), sp.GetService<IEmbeddingProvider>(),
+                agentId =>
+                {
+                    writeCatalog ??= sp.GetService<AgentCatalog>();
+                    return writeCatalog?.GetDefinition(agentId)?.MemoryProfile;
+                });
         });
         // 自动遗忘维护服务（宿主自动启动；记忆 null 占位时内部跳过）
         services.AddHostedService<MemoryMaintenanceService>();

@@ -20,6 +20,9 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
     private readonly MemoryOptions _options;
     private readonly IEmbeddingProvider _embedding;
     private readonly ILogger<AgentMessageMemory> _logger;
+    // 写入侧的“作者记忆拟人类型”解析：按消息作者 agentId 返回其 MemoryProfile（仅 SenderType=Agent 时使用）。
+    // null = 未装配解析器（测试 / 无数字员工目录场景），写入行为与旧版本完全一致。
+    private readonly Func<string, MemoryProfile?>? _authorProfileResolver;
     // embedding 并发上限：消息高峰时排队调用，避免打爆 embedding 服务（Ollama / llama.cpp 单线程推理时尤其需要）
     private readonly SemaphoreSlim _embeddingLimiter = new(4);
     // 记忆写入有界队列（容量 256，满则 DropWrite）：embedding 服务不可用 / 高峰时写入不阻塞调用方，
@@ -35,12 +38,13 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         });
     private readonly CancellationTokenSource _writeCts = new();
 
-    public AgentMessageMemory(IMessageMemoryStore store, AgentOptions options, ILogger<AgentMessageMemory> logger, IEmbeddingProvider? embeddingProvider = null)
+    public AgentMessageMemory(IMessageMemoryStore store, AgentOptions options, ILogger<AgentMessageMemory> logger, IEmbeddingProvider? embeddingProvider = null, Func<string, MemoryProfile?>? authorProfileResolver = null)
     {
         _store = store;
         _options = options.Memory;
         _logger = logger;
         _embedding = embeddingProvider ?? CreateDefaultProvider(options, logger);
+        _authorProfileResolver = authorProfileResolver;
         _logger.LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）",
             _options.Provider, _options.Provider == "llama" ? _options.LlamaModelPath : _options.EmbeddingModel,
             _options.EmbeddingDimensions, _options.Scope, _options.TopK);
@@ -97,9 +101,15 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 {
                     var embedding = await _embedding.EmbedAsync(entry.Content);
                     if (embedding is null || embedding.Length == 0) continue;
-                    var importance = MemoryImportance.Normal;
-                    long? expiresAt = null;
-                    if (_options.RetentionDays > 0)
+                    // 写入侧记忆拟人（仅对“数字员工本人的发言”按作者配置生效；用户消息 / 未配置一律维持旧行为）：
+                    // 深记型自动刻深为“重要”级（烙印深、不过期），快速遗忘型在平台自动遗忘开启时保留更短。
+                    var profile = _authorProfileResolver is not null
+                        && entry.SenderType.Equals("Agent", StringComparison.OrdinalIgnoreCase)
+                        ? _authorProfileResolver(entry.SenderId)
+                        : null;
+                    var importance = MemoryProfileWritePolicy.ImportanceFor(profile, MemoryImportance.Normal);
+                    long? expiresAt = MemoryProfileWritePolicy.ExpiryFor(profile, _options, entry.Timestamp);
+                    if (expiresAt is null && _options.RetentionDays > 0 && importance == MemoryImportance.Normal)
                     {
                         // 重要记忆（自动判定：AI 分身 / 智能体结论性发言等）不受自动遗忘影响；普通记忆按保留天数过期
                         expiresAt = entry.Timestamp + _options.RetentionDays * 86_400_000L;
