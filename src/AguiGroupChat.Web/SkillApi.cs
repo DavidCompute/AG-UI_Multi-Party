@@ -144,6 +144,8 @@ public static class SkillApi
             if (err is not null) return err;
             var skill = def!; // BuildDef 保证 err 非空时 def 为空、err 为空时 def 非空
             skill.SkillId = skillId; // ID 用 URL 的，不允许改名
+            // 用户经界面改过 → 不再是“原样内置版”，清掉版本标记：升级时不再用新正文覆盖用户改动
+            skill.BuiltinVersion = null;
             catalog.Upsert(skill);
             return Results.Ok(new { updated = true, skillId = skill.SkillId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());

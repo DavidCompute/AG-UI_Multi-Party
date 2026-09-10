@@ -40,7 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 官方镜像内置非 root 的 app 用户（APP_UID=1654，主组与其相同），显式切换并以该用户运行
-RUN mkdir -p /app/data && chown $APP_UID:$APP_UID /app/data
+# /app/docs 是内置 docx 技能的默认落盘目录（compose 中由 agui-docs 命名卷挂载）。
+# 命名卷首次创建时归 root，而容器以 app 运行 —— 必须预建并 chown，否则技能写入报 Permission denied。
+RUN mkdir -p /app/data /app/docs && chown $APP_UID:$APP_UID /app/data /app/docs
 USER $APP_UID
 
 COPY --from=build /app/publish ./

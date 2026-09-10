@@ -74,8 +74,15 @@ public static class BuiltinDocxSkills
             // 与 SkillApi.BuildDef 对 dotnet 技能的策略一致：动态代码面最高 → 一律强制人工审批
             RequiresApproval = true,
             OwnerId = null, // 系统内置（非某用户创建）
+            BuiltinVersion = Version, // 标记为“未改过的内置版” → 升级时可用新正文刷新
             Body = ReadResource(resourceSuffix),
         };
+
+    /// <summary>
+    /// 内置技能版本标识。<b>每次改动内置技能正文（改 generate.mjs 后重新生成）都应递增此值</b>，
+    /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
+    /// </summary>
+    public const string Version = "2026-09-10.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

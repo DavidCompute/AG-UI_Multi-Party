@@ -67,18 +67,67 @@ public sealed class BuiltinDocxSkillsTests
     [Fact]
     public void UserEditWinsOverBuiltinOnRestore()
     {
-        // 用户在界面上改过内置技能 → 快照里的版本优先（不把用户改动冲掉）
+        // 用户在界面上改过内置技能 → 快照里的版本优先，不被升级覆盖。
+        // 编辑过的特征：OwnerId 记录编辑器（非 null），BuiltinVersion 被置空。
         var c = NewCatalog();
         c.RestoreAll([
             new AgentSkillDefinition
             {
                 SkillId = "docx_gongwen", Name = "被我改过", Description = "自定义",
                 Kind = AgentSkillKind.Dotnet, Body = "public class Skill { public static string Run(string i)=>i; }",
+                BuiltinVersion = null,
+                OwnerId = "user_someone", // 用户编辑后记录的归属
             },
         ]);
         var s = c.Get("docx_gongwen")!;
         Assert.Equal("被我改过", s.Name);
         Assert.Equal("自定义", s.Description);
+    }
+
+    [Fact]
+    public void LegacyBuiltinSnapshot_IsRefreshedOnUpgrade()
+    {
+        // 关键回归：BuiltinVersion 字段上线前持久化的旧内置技能（无标记、OwnerId=null），
+        // 升级时必须用新正文刷新 —— 否则平台修好的实现（落盘目录/字体/命名）永远上不去。
+        // 本仓库真实踩到过：库里 docx_report 正文停在 44348 字符的旧版。
+        var c = NewCatalog();
+        c.RestoreAll([
+            new AgentSkillDefinition
+            {
+                SkillId = "docx_report", Name = "旧版", Description = "旧描述",
+                Kind = AgentSkillKind.Dotnet, Body = "旧正文",
+                BuiltinVersion = null, OwnerId = null, // 旧格式内置技能的特征
+            },
+        ]);
+        var s = c.Get("docx_report")!;
+        Assert.Contains("public class Skill", s.Body);            // 已刷新为新正文
+        Assert.NotEqual("旧正文", s.Body);
+        Assert.Equal(BuiltinDocxSkills.Version, s.BuiltinVersion); // 并补上新标记
+    }
+
+    [Fact]
+    public void SnapshotMatchingShippedBuiltin_IsKeptButReStamped()
+    {
+        // 正文未改但版本号是旧的 → 刷新为当前版本标记
+        var fresh = NewCatalog().Get("docx_report")!;
+        var c = NewCatalog();
+        c.RestoreAll([
+            new AgentSkillDefinition
+            {
+                SkillId = "docx_report", Name = fresh.Name, Description = fresh.Description,
+                Kind = fresh.Kind, Body = fresh.Body,
+                BuiltinVersion = "2026-01-01.0",
+            },
+        ]);
+        Assert.Equal(BuiltinDocxSkills.Version, c.Get("docx_report")!.BuiltinVersion);
+    }
+
+    [Fact]
+    public void BuiltinSeedCarriesVersionMarker()
+    {
+        // 播种时就该带版本标记，否则升级刷新逻辑永远不生效
+        var c = NewCatalog();
+        Assert.Equal(BuiltinDocxSkills.Version, c.Get("docx_gongwen")!.BuiltinVersion);
     }
 
     [Fact]

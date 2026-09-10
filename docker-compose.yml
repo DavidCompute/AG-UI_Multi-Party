@@ -87,9 +87,12 @@ services:
       Agents__EnableTools: ${AGENTS_ENABLE_TOOLS:-true}
       # 网络类工具 web_search / read_url（默认关闭：需外网；开启后可搜索互联网 / 读取网页）
       Agents__EnableWebTools: ${AGENTS_ENABLE_WEBTOOLS:-false}
-      # 内置「文档生成」技能（公义 / 通知公告 / 工作报告，Word .docx）：默认开启，新部署开箱即用。
+      # 内置「文档生成」技能（公文 / 通知公告 / 工作报告，Word .docx）：默认开启，新部署开箱即用。
       # 正文随程序集以嵌入资源分发；设 false 则不播种。图表渲染依赖系统字体（见 Dockerfile 的 fonts-*）。
       Agents__BuiltinDocxSkills: ${AGENTS_BUILTIN_DOCX_SKILLS:-true}
+      # 内置 docx 技能的默认落盘目录（不传 outputPath 时用）。对应下方 agui-docs 卷，
+      # 容器重建/升级不影响已有文件。取文件见该卷旁的注释。
+      AGUI_DOCX_OUT: ${AGUI_DOCX_OUT:-/app/docs}
       Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
       # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）
       # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
@@ -143,6 +146,13 @@ services:
     volumes:
       # memory 模式持久化快照 data/agui-state.json
       - agui-web-data:/app/data
+      # 内置「文档生成」技能（docx_*）的产出目录：独立命名卷，便于单独备份 / 取文件。
+      # 不传 outputPath 时文件落到这里（技能读环境变量 AGUI_DOCX_OUT）。
+      # 用 /app/docs 而非 /app/data/docs：避免嵌套挂载与父卷（agui-web-data）产生叠加语义。
+      # 取文件（任选其一）：
+      #   docker cp agui-group-chat-web:/app/docs/<文件名>.docx .
+      #   docker run --rm -v agui-docs:/d -v "$PWD/out:/out" alpine cp -r /d/. /out/
+      - agui-docs:/app/docs
       # Web 项目 appsettings.json 被 csproj 从发布输出移除（避免污染桌面端），这里只读挂载回容器：
       # 提供 Agents:Agents 种子智能体定义等默认配置；环境变量（Agents__*）优先级更高，仍可覆盖
       - ./src/AguiGroupChat.Web/appsettings.json:/app/appsettings.json:ro
@@ -171,6 +181,7 @@ services:
 
 volumes:
   agui-web-data:
+  agui-docs:
   agui-hub-data:
   agui-pg-data:
   agui-ollama-data:

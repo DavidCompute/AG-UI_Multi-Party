@@ -74,22 +74,47 @@ public sealed class AgentSkillCatalog
     {
         _skills.Clear();
         foreach (var s in _seeds) _skills.TryAdd(s.SkillId, s);
-        // 内置技能重放：与 appsettings 种子不同 —— 快照里的同名项优先（用户可编辑它）；
-        // 但如果用户在界面上删除了内置技能，快照里就没有它，这里会把它带回来。
-        // 这是有意为之：内置技能属“开箱即用”能力，删了重启就回来；要永久关闭请用
-        // Agents:BuiltinDocxSkills=false。（若要“删了就永久没了”，需另存一份删除墓碑，代价大于收益。）
+        // 内置技能重放。三个来源按优先级：
+        //   1) 随程序集发布的内置正文（本次版本）
+        //   2) 快照里用户改过的（Build 时已打上 BuiltinVersion = null → 视为用户自己的，不覆盖）
+        //
+        // 为什么不能简单“快照优先”：内置技能正文会随平台升级而修 bug（如落盘目录/字体/命名），
+        // 若旧快照永远压新正文，用户升级后仍跑旧实现（本仓库真实踩到过）。
+        // 因此改为：快照里那份若是“未改过的内置版”（带 BuiltinVersion），就用新正文刷新；
+        // 用户真正编辑过的（BuiltinVersion 已置空）仍以用户为准。
+        var freshBuiltins = new Dictionary<string, AgentSkillDefinition>(StringComparer.Ordinal);
         foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Definitions)
         {
             if (!_builtinSkills.Contains(d.SkillId)) continue;
-            _skills.TryAdd(d.SkillId,
-                AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description));
+            var def = AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description);
+            freshBuiltins[d.SkillId] = def;
         }
         foreach (var s in skills)
         {
             if (string.IsNullOrWhiteSpace(s.SkillId)) continue;
+            if (freshBuiltins.TryGetValue(s.SkillId, out var fresh) && IsUntouchedBuiltin(s))
+            {
+                _skills[s.SkillId] = fresh;
+                continue;
+            }
             _skills[s.SkillId] = s;
         }
+        // 快照里没有的（如被删过 / 首次上线）→ 补回内置
+        foreach (var kv in freshBuiltins) _skills.TryAdd(kv.Key, kv.Value);
         _logger.LogInformation("技能库恢复 {Count} 条（appsettings 种子 {SeedCount}，内置 {BuiltinCount}）",
             _skills.Count, _seeds.Count, _builtinSkills.Count);
     }
+
+    /// <summary>
+    /// 判断快照里那份内置技能是否“未被用户改过”，以决定升级时是否用新正文刷新。
+    /// <para>两种可判定为“未改过”的情形：</para>
+    /// <list type="item">
+    ///   <item>带 BuiltinVersion 标记（字段上线后的正常播种/刷新）；</item>
+    ///   <item>字段上线前就已持久化的旧内置技能：无 builtinVersion、且 OwnerId 为 null（平台内置）。
+    ///     这类当时没有任何编辑入口保留归属，因此视为未改过。</item>
+    /// </list>
+    /// <para>用户经界面编辑过的会写入 OwnerId（编辑器）且 BuiltinVersion 被置空，因此不会被误刷。</para>
+    /// </summary>
+    private static bool IsUntouchedBuiltin(AgentSkillDefinition snapshot)
+        => snapshot.BuiltinVersion is not null || snapshot.OwnerId is null;
 }

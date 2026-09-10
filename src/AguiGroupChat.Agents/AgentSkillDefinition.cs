@@ -108,6 +108,14 @@ public sealed class AgentSkillDefinition
     public string? OwnerId { get; set; }
 
     /// <summary>
+    /// 内置技能标记：非 null 表示“这条是随平台发布的内置技能，值为发布时的版本标识”。
+    /// 用途：升级时用<b>新正文刷新</b>旧快照里的内置技能（否则旧实现会被永久冻结）；
+    /// 用户在界面上编辑并保存后，该字段被置为 null，从此以用户版本为准，不再被升级覆盖。
+    /// 普通（非内置）技能恒为 null。
+    /// </summary>
+    public string? BuiltinVersion { get; set; }
+
+    /// <summary>
     /// <b>细粒度访问授权（2.9）</b>：允许在技能库列表看到 / 挂载到数字员工的<b>平台用户组</b>白名单（ug_xxx）。
     /// null / 空 = 不按用户组限制（当前向后兼容）；非空 = 除技能归属者 / 系统管理员外，仅命中名单的用户组可见可挂载。
     /// 与知识库的“群级共享”不同，这里是<b>平台用户组</b>维度。
