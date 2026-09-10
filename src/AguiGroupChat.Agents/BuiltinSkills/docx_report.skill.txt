@@ -79,8 +79,23 @@ public class Skill
         try
         {
             var built = Build(input ?? "");
+            // produce_file 标记：告诉平台“这个文件可以挂到对话里供下载”。
+            // 网关扫到这个标记后会用 AttachmentStore 挂号并挂到当前消息（att_xxx）。
+            // 用显式标记而非直接猜路径：避免把正文里偶然出现的任意路径误当产物。
+            var produce = "";
+            try
+            {
+                if (System.IO.File.Exists(built.Path))
+                {
+                    var fi = new System.IO.FileInfo(built.Path);
+                    produce = ",\"produce_file\":{\"path\":" + Js(built.Path)
+                        + ",\"name\":" + Js(fi.Name)
+                        + ",\"bytes\":" + fi.Length + "}";
+                }
+            }
+            catch { /* 标记失败不影响主返回 */ }
             return "{\"ok\":true,\"path\":" + Js(built.Path) + ",\"scene\":" + Js(SceneName)
-                + ",\"blocks\":" + built.Blocks + ",\"message\":" + Js("已生成 Word 文档：" + built.Path) + "}";
+                + ",\"blocks\":" + built.Blocks + produce + ",\"message\":" + Js("已生成 Word 文档：" + built.Path) + "}";
         }
         catch (Exception ex)
         {

@@ -526,6 +526,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var prevChain = SkillChainBuilder.Ambient.Value;
         SkillChainBuilder.Ambient.Value = new SkillChainBuilder();
         SkillChainBuilder.Ambient.Value.EnsureRoot(context.AgentId, def.Nickname ?? context.AgentId);
+        // 工具返回收集：技能产物（produce_file 标记）以工具真实返回为准，
+        // 不依赖模型在正文里原样复述 JSON（模型常改写成人话而丢掉标记）。
+        var prevToolResults = ToolResultCollector.Ambient.Value;
+        ToolResultCollector.Ambient.Value = new ToolResultCollector();
 
         string? messageId = null;
         ToolApprovalRequestContent? approval = null;
@@ -642,6 +646,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 foreach (var fr in update.Contents.OfType<FunctionResultContent>())
                 {
                     if (fr.Result is null) continue;
+                    // 同时收集原始工具返回：技能产物的 produce_file 标记以它为准，
+                    // 因为模型可能在正文里把 JSON 改写成自然语言而丢掉标记。
+                    ToolResultCollector.Ambient.Value?.Add(AgentGatewayHelpers.DescribeToolResult(fr.Result));
                     await _hub.Value.BroadcastAsync(context.GroupId, new ToolCallResultEvent
                     {
                         ToolCallId = fr.CallId ?? "tool_" + IdGenerator.NewId(),
@@ -791,6 +798,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (acquired) sessionLock.Release(); // 未获得锁时不 Release（避免 SemaphoreFullException）
             _activeRuns.TryRemove(runId, out _); // 运行结束 / 取消：注销停止能力
             SkillChainBuilder.Ambient.Value = prevChain; // 清理链构造器（恢复外层）
+            ToolResultCollector.Ambient.Value = prevToolResults; // 恢复外层工具返回收集器
             await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
             {
                 GroupId = context.GroupId,
@@ -2495,11 +2503,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>
     /// 工作型智能体产物回档：从已生成正文中提取 <c>attach_xxx</c>（publish_file 发布的附件 ID），
     /// 反查附件存储并把它们追加到智能体消息（TEXT_MESSAGE_ATTACHMENTS，前端渲染可下载附件卡片）。
-    /// 由于 MSAGENT 管道内部消化工具执行、不暴露 FunctionResultContent，只能靠正文引用回档附件。
+    /// <para>
+    /// 双来源：正文引用 + <see cref="FunctionResultContent"/>（工具真实返回）。
+    /// 为什么必须看工具返回：模型常把技能返回的 JSON <b>改写成人话</b>（如“已生成文档，位置 /tmp/x.docx”），
+    /// 结果里的 <c>produce_file</c> 标记就这样丢了 —— 曾导致技能确实生成了文件，用户却看不到下载入口。
+    /// 工具返回是权威且未经模型改写的，作为主来源；正文扫描保留以兼容 publish_file 的引用式产物。
+    /// </para>
     /// </summary>
     private async Task AttachPublishedProductsAsync(string groupId, string messageId, string content, CancellationToken ct)
     {
-        if (_attachmentStore is null || string.IsNullOrEmpty(content)) return;
+        if (_attachmentStore is null) return;
         try
         {
             var added = 0;
@@ -2515,13 +2528,163 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "publish_file 产物回档失败：{Att}", m.Value); }
             }
+            // 技能产物（如内置 docx 技能）：结果里带 produce_file 标记的文件入库为附件并挂到本条消息。
+            // 正文 + 本轮全部工具返回合并扫描（去重由下游按路径保证）。
+            var toolResults = ToolResultCollector.Ambient.Value?.Text ?? "";
+            added += await AttachSkillProducedFilesAsync(groupId, messageId, content + "\n" + toolResults, ct);
             if (added > 0)
-                _logger.LogInformation("工作型智能体产物回档：{Count} 个附件挂到消息 {MessageId}", added, messageId);
+                _logger.LogInformation("智能体产物回档：{Count} 个附件挂到消息 {MessageId}", added, messageId);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "publish_file 产物回档扫描失败（已忽略）");
+            _logger.LogDebug(ex, "产物回档扫描失败（已忽略）");
         }
+    }
+
+    /// <summary>
+    /// 把技能声明产出（结果文本里的 <c>produce_file</c> 标记）的文件登记为附件并挂到消息。
+    /// 为什么需要：技能（如内置 docx_*）把文件写到工作目录，仅返回路径；
+    /// 而前端下载走的是 <c>GET /ag-ui/files/{att_xxx}/{name}</c>，必须先进 AttachmentStore。
+    /// 用显式标记而非猜路径：避免把正文里偶然出现的路径误当产物。
+    /// 单个文件失败不影响其余，也不阻断主流程（产物回档是增强）。
+    /// </summary>
+    private async Task<int> AttachSkillProducedFilesAsync(string groupId, string messageId, string content, CancellationToken ct)
+    {
+        if (_attachmentStore is null) return 0;
+        var added = 0;
+        var done = new HashSet<string>(StringComparer.Ordinal); // 同一路径只挂一次（原样/还原两份候选会重复命中）
+        foreach (var json in ExtractProduceFileObjects(content))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("path", out var pEl) || pEl.ValueKind != System.Text.Json.JsonValueKind.String) continue;
+                var path = pEl.GetString();
+                if (string.IsNullOrWhiteSpace(path) || !done.Add(path)) continue;
+
+                // 读文件 → 白名单 → 尺寸校验 → 入库（AttachmentStore 内部会按白名单净化文件名）
+                if (!File.Exists(path)) { _logger.LogDebug("produce_file 路径不存在：{Path}", path); continue; }
+                // 扩展名白名单：技能（尤其 LLM 生成的）可能写出 .html/.svg 等可内联渲染文件，
+                // 直接入库会成为存储型 XSS 载体。上传端点有这道闸，回档路径同样必须有。
+                if (!AttachmentStore.IsAllowedUploadExtension(path))
+                {
+                    _logger.LogWarning("produce_file 扩展名不在允许下载白名单，已跳过：{Path}", path);
+                    continue;
+                }
+                var fi = new FileInfo(path);
+                if (fi.Length <= 0 || fi.Length > AttachmentStore.MaxFileBytes) { _logger.LogDebug("produce_file 尺寸超限：{Path}", path); continue; }
+                var name = fi.Name;
+                AttachmentInfo info;
+                using (var fs = File.OpenRead(path))
+                    info = _attachmentStore.Save(name, GuessContentType(name), fs, fi.Length);
+                _logger.LogInformation("技能产物入库为附件：{Att}（{Name}，{Bytes} 字节）", info.AttachmentId, name, fi.Length);
+
+                await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [info], ct);
+                added++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "produce_file 处理失败（已忽略）");
+            }
+        }
+        return added;
+    }
+
+    /// <summary>
+    /// 从正文里抽出全部 <c>produce_file</c> 对象 JSON。
+    /// 不用单一正则搞定：正文里的引号常被 JSON 转义（<c>\"produce_file\"</c>）且对象内部还有嵌套花括号，
+    /// 正则很容易误判。这里分两步：先定位标记，再做花括号配对截取，最后交 JsonDocument 严格解析。
+    /// </summary>
+    internal static IEnumerable<string> ExtractProduceFileObjects(string content)
+    {
+        const string key = "produce_file";
+        var idx = 0;
+        while (true)
+        {
+            var at = content.IndexOf(key, idx, StringComparison.Ordinal);
+            if (at < 0) yield break;
+            idx = at + key.Length;
+
+            // 从标记往后找第一个 '{'（中间可能隔着 ": 、转义反斜杠等）
+            var open = content.IndexOf('{', idx);
+            if (open < 0) yield break;
+            // 标记与 '{' 之间不该出现另一个 key（防跨对象误接）
+            if (content.IndexOf(key, idx, StringComparison.Ordinal) is var nk && nk >= 0 && nk < open) continue;
+
+            // 花括号配对。关键：转义的引号也算引号边界 —— 否则同一份内容里
+            // 真实引号（如开头的 {"ok"）会开启字符串态、后续 \u0022 又无法关闭它，
+            // 使结尾的 } 被当成字符串内容而配不出对象（本仓库真实踩到）。
+            var depth = 0;
+            var inStr = false;
+            var end = -1;
+            for (var i = open; i < content.Length; i++)
+            {
+                var c = content[i];
+                if (c == '\\')
+                {
+                    // \" 与 \u0022 都代表一个引号字符：成对翻转字符串态
+                    if (i + 1 < content.Length && content[i + 1] == '"')
+                    {
+                        inStr = !inStr;
+                        i++;
+                        continue;
+                    }
+                    if (i + 5 < content.Length && (content[i + 1] is 'u' or 'U')
+                        && content.Substring(i + 2, 4) == "0022")
+                    {
+                        inStr = !inStr;
+                        i += 5;
+                        continue;
+                    }
+                    i++; // 其他转义（\n、\\ 等）成对跳过，不参与结构判定
+                    continue;
+                }
+                if (c == '"') { inStr = !inStr; continue; }
+                if (inStr) continue;
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0) { end = i; break; }
+                }
+            }
+            if (end < 0) yield break;
+
+            var obj = content.Substring(open, end - open + 1);
+            idx = end + 1;
+            // 正文里的对象常被整体转义，两种写法都要试，由调用方去重：
+            //   - 反斜杠引号（"）：JSON 字符串里内嵌 JSON 的常见形式；
+            //   - \u0022 等 Unicode 转义：.NET JsonSerializer 序列化字符串时的默认输出
+            //     （写转义器把引号转成 \u0022），技能工具返回即属此类。
+            // 不做这一步时，花括号能配对但内部引号不是真引号，JsonDocument 解析必失败 —— 标记就丢了。
+            yield return obj;
+            var unescaped = obj.Replace("\\\"", "\"");
+            if (!string.Equals(unescaped, obj, StringComparison.Ordinal)) yield return unescaped;
+            var decoded = System.Text.RegularExpressions.Regex.Replace(obj, @"\\u([0-9a-fA-F]{4})",
+                m => ((char)Convert.ToInt32(m.Groups[1].Value, 16)).ToString());
+            if (!string.Equals(decoded, obj, StringComparison.Ordinal)
+                && !string.Equals(decoded, unescaped, StringComparison.Ordinal)) yield return decoded;
+        }
+    }
+
+    /// <summary>按扩展名猜测 MIME（仅覆盖常见可下载类型，其余走默认）。</summary>
+    private static string GuessContentType(string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".pdf" => "application/pdf",
+            ".csv" => "text/csv",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            ".json" => "application/json",
+            ".zip" => "application/zip",
+            _ => "application/octet-stream",
+        };
     }
 
 
@@ -3348,6 +3511,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var runCt = timeoutCts.Token;
         var sessionLock = GetSessionLock(pending.Context.ThreadId);
         var acquired = false;
+        // 恢复运行是独立的异步流（由决策请求触发），需自建工具返回收集器：
+        // 首轮那个作用域已随中断返回而结束，此处不重建则收集不到本轮技能产物。
+        var prevToolResults = ToolResultCollector.Ambient.Value;
+        ToolResultCollector.Ambient.Value = new ToolResultCollector();
         try
         {
             // WaitAsync 移入 try：未获锁就取消/超时时走 catch + finally，不会对未获取的锁 Release（避免 SemaphoreFullException）
@@ -3439,6 +3606,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         var rd = r.Length > remaining ? r[..remaining] : r;
                         reasoningAccumulated += rd.Length;
                         await AppendReasoningAsync(pending.GroupId, messageId, rd, runCt);
+                    }
+                    // 工具返回收集：技能产物（produce_file 标记）以工具真实返回为准，
+                    // 不经模型改写。（批准后技能在本轮才真正执行，故结果出现在恢复流里。）
+                    foreach (var fr in update.Contents.OfType<FunctionResultContent>())
+                    {
+                        if (fr.Result is null) continue;
+                        ToolResultCollector.Ambient.Value?.Add(AgentGatewayHelpers.DescribeToolResult(fr.Result));
                     }
                     foreach (var apr in update.Contents.OfType<ToolApprovalRequestContent>())
                     {
@@ -3537,6 +3711,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         finally
         {
             if (acquired) sessionLock.Release(); // 未获得锁时不 Release（避免 SemaphoreFullException）
+            ToolResultCollector.Ambient.Value = prevToolResults; // 恢复外层工具返回收集器
         }
     }
 

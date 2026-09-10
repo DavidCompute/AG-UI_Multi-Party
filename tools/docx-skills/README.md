@@ -124,23 +124,31 @@ docker cp agui-group-chat-web:/app/docs/关于开展平台试运行工作的通�
 docker run --rm -v agui-group-chat_agui-docs:/d -v "$PWD/out:/out" alpine cp -r /d/. /out/
 ```
 
-> ⚠️ **生成的文件目前不会出现在前端消息里，无法直接下载**。
-> 原因是技能执行链没有注入 `AttachmentStore`，技能无法把产物注册为附件（`att_xxx`），
-> 而前端下载正是经 `GET /ag-ui/files/{attachmentId}/{fileName}` 走的。
-> 现阶段请用上面的命令取文件；要“生成即可在聊天区点击下载”，需做平台侧改造（见下）。
+> ✅ **生成的文件会随消息一起出现在前端，可直接点击下载**（已实现，见下节）。
+> 上面的 `docker cp` 仅作为运维取件手段保留。
 
-### 下载到前端需要什么（尚未实现）
+### 下载到前端（已打通）
 
-平台已有下载链路：`AttachmentStore.Save()` → `att_xxx` → 消息附件 → 前端 `<a>` 下载。
+技能执行链没有 `AttachmentStore`（不把存储耦合进技能沙箱），所以走的是**产物回档**：
 
-`AgentGateway.AttachPublishedProductsAsync` 也会**正则扫描助手正文中的 `att_xxx`** 自动挂到消息。
+1. 技能返回体里带显式标记（`produce_file`）：
+   ```json
+   {"ok":true,"path":"/app/docs/报告.docx","produce_file":{"path":"/app/docs/报告.docx","name":"报告.docx","bytes":2640}}
+   ```
+2. 网关 `AgentGateway.AttachSkillProducedFilesAsync` 扫描该标记 → 读文件 → 白名单 / 尺寸校验
+   → `AttachmentStore.Save()` 得到 `att_xxx` → 挂到当前消息（`TEXT_MESSAGE_ATTACHMENTS`）。
+3. 前端渲染下载卡片，走 `GET /ag-ui/files/{attachmentId}/{fileName}`。
 
-**断点**：`SkillRunner` / `DotnetSkillHost` 未注入 `AttachmentStore`，所以技能拿到不 `att_xxx`。
-打通做法（需改 C#，属平台改造）：
+**两个关键坑（都已修，改这块务必留意）**：
 
-1. 把 `AttachmentStore`（或其接口）注入技能执行链；
-2. 技能返回 `att_xxx`（或新增“发布产物”约定，如返回体带 `attachmentId`）；
-3. 依赖现有的正文扫描或直接调 `AppendAgentAttachmentsAsync`，把产物挂到当前消息。
+- **必须看工具的原始返回，不能只看正文**：模型经常把技能返回的 JSON 改写成自然语言
+  （“已生成文档，位置 /tmp/x.docx”），标记就此丢失 —— 表现为“技能确实生成了文件，用户却看不到下载入口”。
+  因此网关用 `ToolResultCollector` 单独收集 `FunctionResultContent`（权威、未经模型改写）作为主来源。
+- **两种引号转义都要认**：工具返回经 `JsonSerializer.Serialize` 后引号会写成 `\u0022`（不是 `\"`），
+  `ExtractProduceFileObjects` 必须把两种形式都还原，否则花括号配对成功但 JSON 解析失败，标记同样丢掉。
+
+**安全闸**：入库前校验扩展名白名单（`AttachmentStore.IsAllowedUploadExtension`）。
+技能（尤其 LLM 生成的）可能写出 `.html`/`.svg` 等可内联渲染文件，直接入库会成为存储型 XSS 载体。
 
 ## 自动编排（一键组织编排 / 组织架构构建师）
 
@@ -336,6 +344,10 @@ fonts-noto-cjk      # 中文（图表中文标签必需）
 - ❌ 不支持套用用户上传的现成模板（平台技能无法携带/读取模板资产）
 - ❌ 不支持 XSD 校验闸（无后置校验钩子）
 - ✅ 目录 / 图片 / 图表已支持；TOC 需在 Word 里更新一次域（正常行为）
+- ✅ 产物直接落为附件，可在聊天区点击下载
+- ⚠️ 若模型在调用时自作主张传了 `outputPath`（不由 `AGUI_DOCX_OUT` 接管），文件会落在该路径：
+  虽仍能下载（标记里的路径就是实际路径），但该目录若是容器内非挂载路径，重建后即丢。
+  提示词里最好明确「不要传 outputPath」，让技能落在卷内的默认目录。
 
 如需模板套用与校验闸，需要平台先支持「技能携带伴生资产文件」，属平台改造。
 

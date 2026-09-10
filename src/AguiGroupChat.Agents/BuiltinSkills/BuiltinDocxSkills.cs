@@ -82,7 +82,7 @@ public static class BuiltinDocxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文（改 generate.mjs 后重新生成）都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-10.1";
+    public const string Version = "2026-09-10.2";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)
