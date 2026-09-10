@@ -1,5 +1,34 @@
-# AG-UI 群聊桌面版 1.0.122 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.122 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.123 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.123 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.123 为当前 Windows 桌面版本。在 1.0.122 基础上：**用户分组（按组细粒度授权）正式进入桌面安装包**，并修复了一轮严格代码审核发现的问题（弹窗层级导致操作卡死、用户分组创建时间持久化丢失、技能目标准入判定顺序、单聊复用路径绕过准入、白名单 id 无校验）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.123 is the current Windows desktop release. On top of 1.0.122 it brings **user groups (group-based fine-grained authorization) into the desktop installer** and fixes a round of issues found in a strict code review (a stacking bug that hung dialogs, loss of a group's creation timestamp across restarts, the skill-target access check ordering, the direct-chat reuse path bypassing admission, and unvalidated allowlist ids). Web and desktop share the same Hub / gateway / frontend.
+
+## 代码审核修复（1.0.123 核心）
+# Code-review fixes (1.0.123 headline)
+
+中文：
+- **弹窗不再被遮住而卡死（回归修复）**：通用确认框 `uiConfirm` / 输入框 `uiPrompt` 没有自己的层级，从「知识库管理」里删除文档时确认框会被画到该弹窗**底下** —— 用户看不到、`await` 也永不返回，界面直接卡住。现为确认框单独指定层级（高于二级弹窗、低于 toast）。
+- **用户分组的创建时间不再丢失**：该字段被标了 `[JsonIgnore]`，永远不会落盘，重启后一律归零；三种持久化模式（内存 / PostgreSQL / Redis）均受影响。已修正，并把原先“看似在测、实则测不到”的持久化用例改为走真实生产路径且断言该字段。
+- **技能目标准入判定顺序**：访问策略把管理员放行排在“技能目标永不直接可见”之前，对技能子代理会返回“可访问”。虽然现有调用点都另外挡了一层、尚无可实际触发的越权，但这是安全原语里的 fail-open 隐患，已调整顺序并加回归测试。
+- **单聊复用路径补上准入**：此前只在“创建”会话时校验用户组白名单，复用已存在会话时直接返回 —— 用户被移出白名单组后仍能继续单聊。现将准入校验前置，创建与复用两条路径同权。**行为变化**：被移出白名单组的用户，其已有单聊会立即失效。
+- **白名单 id 增加校验**：数字员工 / 技能的“允许访问的用户组”此前接受任意字符串，写错一个 id（或漏 `ug_` 前缀）会让该资源**静默对所有人不可见**且保存不报错；现在保存即拦下。
+- **目录可见性与单聊准入统一为同一份策略**：数字员工目录曾自行重写一遍可见性规则（与准入策略是两份实现，已经开始漂移）；现已统一调用同一策略，并加组合测试把两者钉死。
+- **删除分组前给出影响提示**：新增影响预检（该分组被哪些数字员工 / 技能引用），删除确认会列出具体资源与成员数，避免运维误删后有人突然失去访问。
+
+English:
+- **Dialogs no longer render behind the caller and hang**: the generic confirm/prompt dialog had no z-index of its own, so confirming a document deletion inside the knowledge-base manager drew it underneath that dialog — invisible, and its promise never resolved, freezing the UI. It now has an explicit layer above second-level dialogs and below the toast.
+- **A user group's creation timestamp survives restarts**: the field was marked `[JsonIgnore]`, so it was never persisted and always restored as zero, in memory, PostgreSQL and Redis alike. Fixed, and the persistence test that only appeared to cover it now drives the real production path and asserts the field.
+- **Skill-target access check ordering**: the policy tested the admin bypass before the “skill targets are never directly visible” rule, answering true for a skill sub-agent. Every current caller also guards separately, so nothing was exploitable, but it was a fail-open ordering hazard in a security primitive; reordered with a regression test.
+- **Direct chat validates on the reuse path too**: admission was only checked when creating the conversation, so a user dropped from an allowlist group kept it by reopening the existing one. The check now precedes both paths. **Behaviour change**: an existing direct chat stops working as soon as its user is removed from the group.
+- **Allowlist ids are validated**: the “allowed user groups” list on employees and skills accepted any string, so a single typo could silently hide a resource from everyone while saving without error. Invalid ids are now rejected on save.
+- **Catalog visibility and direct-chat admission share one policy**: the employee catalog re-implemented the visibility rule instead of using the shared policy (two implementations that had already drifted). It now delegates to the same policy, pinned by a combinatorial test.
+- **Group deletion reports its impact**: a new impact check lists which employees and skills reference a group, so the delete confirmation shows exactly what and how many users would lose access before it happens.
+
+---
+
+# AG-UI 群聊桌面版 1.0.122 发布说明
+# AG-UI Group Chat Desktop 1.0.122 Release Notes
 
 **版本说明**：1.0.122 为当前 Windows 桌面点版本（已构建 Windows 1.0.122 MSI），在 1.0.121 基础之上修正了编排/长稿稳定性的三个问题，全部 Web 已推送（Web 与桌面共用同一套 Hub/网关/前端）。
 **Version note**: 1.0.122 is the current Windows desktop point release (a Windows 1.0.122 MSI was built). On top of 1.0.121 it fixes three issues affecting orchestration & long-form stability, all already on the Web build (Web and desktop share the same Hub / gateway / frontend).
@@ -19,8 +48,8 @@ English:
 
 ---
 
-## 开发中：用户分组与按组授权（细粒度访问控制）（Web 已随推送部署；尚未包含于 1.0.122 桌面安装包）
-# In development: User groups & group-based authorization (fine-grained access) (already live on the Web build; not yet in the 1.0.122 desktop installer)
+## 用户分组与按组授权（细粒度访问控制）（已包含于 1.0.123 桌面安装包）
+# User groups & group-based authorization (fine-grained access) (included in the 1.0.123 desktop installer)
 
 中文：
 - **用户分组（用户组 / 组织单元）**：管理员控制台新增「用户分组」页签（`GET/POST/DELETE /ag-ui/usergroups`，另有 `/mine` 供登录用户查自己所属组）。把**平台账号**编组（与“群聊知聚”是不同概念），用于按组授权。持久化于扩展区 `userGroups`，重启不丢。
@@ -36,8 +65,8 @@ English:
 
 ---
 
-# AG-UI 群聊桌面版 1.0.121 发布说明（上一 Windows 桌面点版本）
-# AG-UI Group Chat Desktop 1.0.121 Release Notes (previous Windows desktop point release)
+# AG-UI 群聊桌面版 1.0.121 发布说明
+# AG-UI Group Chat Desktop 1.0.121 Release Notes
 
 **版本说明**：1.0.120 之后的上一桌面包为 1.0.121（已构建 Windows 1.0.121 MSI，含记忆拟人类型 / 组织构建自动配记忆人格 / 组织连接自动成对 / 记忆管理按角色分层 / 企业合规 / 单聊等等）。1.0.120 为再往上一版（单聊 kind=direct、实时会话吊销、SDK 上行串行化、200MB 上传/导入）。以下各节为此前的功能增量。
 **Version note**: The previous desktop package after 1.0.120 was 1.0.121 (a Windows 1.0.121 MSI was built, adding memory personality types / org auto-assigned memory personas / auto-paired assignment+escalation links / role-tiered memory scope / enterprise compliance / direct chats etc.); before that 1.0.120 (direct chats `kind=direct`, instant session teardown, SDK send serialization, 200MB upload/import). The sections below are the earlier feature increments.
