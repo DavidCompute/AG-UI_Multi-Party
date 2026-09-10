@@ -84,6 +84,9 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Release $tag already exists; uploading MSI over it."
             gh release upload $tag "$msi" --repo $repo --clobber
+            # 既有的 release 可能是旧逻辑留下来的草稿：仅上传附件不会改变草稿状态，
+            # 这里显式取消草稿，确保重跑后一定是已发布状态
+            gh release edit $tag --repo $repo --draft=false
           } else {
             Write-Host "Creating release $tag."
             gh release create $tag "$msi" --repo $repo `
