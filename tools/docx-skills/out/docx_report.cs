@@ -873,22 +873,88 @@ public class Skill
             if (!full.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)) full += ".docx";
             return full;
         }
-        var tmp = Path.Combine(Path.GetTempPath(), "agui-docx");
-        Directory.CreateDirectory(tmp);
-        return Path.Combine(tmp, Slug(title) + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".docx");
+        // 缺省落盘：以标题为文件名（中文保留），落到默认输出目录；同名则追加序号避免覆盖
+        var outDir = DefaultOutputDir();
+        Directory.CreateDirectory(outDir);
+        return UniquePath(outDir, SafeFileNameFromTitle(title));
     }
 
-    private static string Slug(string s)
+    /// <summary>默认输出目录：AGUI_DOCX_OUT 环境变量 > 用户主目录/agui-docx > 临时目录/agui-docx。</summary>
+    private static string DefaultOutputDir()
     {
-        var b = new StringBuilder();
-        foreach (var c in s ?? "")
+        var configured = Environment.GetEnvironmentVariable("AGUI_DOCX_OUT");
+        if (!string.IsNullOrWhiteSpace(configured))
         {
-            if (char.IsLetterOrDigit(c)) b.Append(c);
-            else if (b.Length > 0 && b[b.Length - 1] != '_') b.Append('_');
-            if (b.Length >= 32) break;
+            try
+            {
+                var d = Path.GetFullPath(configured.Trim());
+                Directory.CreateDirectory(d);
+                return d;
+            }
+            catch { /* 配置路径不可用 → 回退默认 */ }
         }
-        var r = b.ToString().Trim('_');
-        return r.Length == 0 ? "document" : r;
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(home))
+            {
+                var d = Path.Combine(home, "agui-docx");
+                Directory.CreateDirectory(d);
+                return d;
+            }
+        }
+        catch { /* 无主目录 → 回退临时目录 */ }
+        var tmp = Path.Combine(Path.GetTempPath(), "agui-docx");
+        Directory.CreateDirectory(tmp);
+        return tmp;
+    }
+
+    /// <summary>
+    /// 把标题转成安全的文件名（保留中文）：仅剔除文件系统非法字符与控制字符，
+    /// 合并空白，限长 80 字符。与之前不同：不再把中文换成下划线，也不强加时间戳。
+    /// </summary>
+    private static string SafeFileNameFromTitle(string title)
+    {
+        var raw = Safe(title).Trim();
+        var b = new StringBuilder();
+        foreach (var c in raw)
+        {
+            if (char.IsControl(c)) continue;
+            if (c is '/' or '\\' or ':' or '*' or '?' or '"' or '<' or '>' or '|') { b.Append('_'); continue; }
+            b.Append(c);
+        }
+        var name = b.ToString();
+        // 合并连续空白为单个空格
+        var sb = new StringBuilder();
+        var lastSpace = false;
+        foreach (var c in name)
+        {
+            var isSpace = char.IsWhiteSpace(c);
+            if (isSpace && lastSpace) continue;
+            sb.Append(isSpace ? ' ' : c);
+            lastSpace = isSpace;
+        }
+        name = sb.ToString().Trim().TrimEnd('.'); // Windows 不允许结尾点号
+        if (name.Length == 0) name = "document";
+        if (name.Length > 80) name = name.Substring(0, 80).TrimEnd();
+        // 保留设备名兼容
+        var upper = name.ToUpperInvariant();
+        if (upper is "CON" or "PRN" or "AUX" or "NUL" || upper.StartsWith("COM") || upper.StartsWith("LPT"))
+            name = "_" + name;
+        return name;
+    }
+
+    /// <summary>同名时追加 _2 / _3 … 直到不冲突。</summary>
+    private static string UniquePath(string dir, string baseName)
+    {
+        var candidate = Path.Combine(dir, baseName + ".docx");
+        if (!File.Exists(candidate)) return candidate;
+        for (int i = 2; i < 1000; i++)
+        {
+            candidate = Path.Combine(dir, $"{baseName}_{i}.docx");
+            if (!File.Exists(candidate)) return candidate;
+        }
+        return Path.Combine(dir, $"{baseName}_{DateTime.Now:yyyyMMdd_HHmmss}.docx");
     }
 
     private static string Safe(string s) => (s ?? "").Replace("\r\n", "\n").Replace("\r", "\n");
