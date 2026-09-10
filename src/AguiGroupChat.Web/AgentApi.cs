@@ -41,13 +41,14 @@ public static class AgentApi
         });
 
         // ---- 新增智能体（需登录）----
-        root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentSkillCatalog skillCatalog) =>
+        root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentSkillCatalog skillCatalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
+            var isAdminUser = auth.IsAdmin(user.UserId);
             var skillError = ValidateSkills(req.Skills);
             if (skillError is not null) return skillError;
-            var skillDefError = ValidateSkillDefIds(req.SkillDefIds, skillCatalog);
+            var skillDefError = ValidateSkillDefIds(req.SkillDefIds, skillCatalog, ugStore, user.UserId, isAdminUser);
             if (skillDefError is not null) return skillDefError;
             var scheduleError = ValidateSchedule(req.Schedule);
             if (scheduleError is not null) return scheduleError;
@@ -127,7 +128,7 @@ public static class AgentApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
-        root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog) =>
+        root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -136,7 +137,7 @@ public static class AgentApi
                     "AI 分身请通过「修改资料 → AI 分身」管理，不支持在此编辑"), statusCode: StatusCodes.Status403Forbidden);
             var skillError = ValidateSkills(req.Skills);
             if (skillError is not null) return skillError;
-            var skillDefError = ValidateSkillDefIds(req.SkillDefIds, skillCatalog);
+            var skillDefError = ValidateSkillDefIds(req.SkillDefIds, skillCatalog, ugStore, user.UserId, auth.IsAdmin(user.UserId));
             if (skillDefError is not null) return skillDefError;
             var scheduleError = ValidateSchedule(req.Schedule);
             if (scheduleError is not null) return scheduleError;
@@ -797,15 +798,24 @@ public static class AgentApi
         return null;
     }
 
-    /// <summary>校验可复用技能引用（<see cref="AgentUpsertHttpRequest.SkillDefIds">）：每个引用的技能必须在技能库中存在。</summary>
-    private static IResult? ValidateSkillDefIds(IReadOnlyList<string>? skillDefIds, AgentSkillCatalog catalog)
+    /// <summary>校验可复用技能引用（<see cref="AgentUpsertHttpRequest.SkillDefIds">）：每个引用的技能必须存在，
+    /// 且当技能设置了用户组白名单时，挂载者须是技能归属者 / 系统管理员 / 命中任一组（细粒度授权）。</summary>
+    private static IResult? ValidateSkillDefIds(IReadOnlyList<string>? skillDefIds, AgentSkillCatalog catalog,
+        AguiGroupChat.Agents.UserGroups.UserGroupStore? groups = null, string? userId = null, bool isAdmin = false)
     {
         if (skillDefIds is null) return null;
         foreach (var id in skillDefIds)
         {
             if (string.IsNullOrWhiteSpace(id)) continue;
-            if (catalog.Get(id) is null)
+            var skill = catalog.Get(id);
+            if (skill is null)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"引用的技能不存在于技能库：{id}"));
+            if (skill.AllowedUserGroupIds is { Count: > 0 } allow
+                && skill.OwnerId != userId && !isAdmin
+                && !(groups is not null && userId is not null && groups.UserInAny(userId, allow)))
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied,
+                    $"技能「{skill.Name}」仅允许特定用户分组成员挂载（你的账号不在其允许的用户组内）"),
+                    statusCode: StatusCodes.Status403Forbidden);
         }
         return null;
     }

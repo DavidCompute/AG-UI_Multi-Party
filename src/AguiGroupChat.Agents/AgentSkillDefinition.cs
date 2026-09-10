@@ -107,6 +107,13 @@ public sealed class AgentSkillDefinition
     /// <summary>创建者 userId（系统内置为 null）。</summary>
     public string? OwnerId { get; set; }
 
+    /// <summary>
+    /// <b>细粒度访问授权（2.9）</b>：允许在技能库列表看到 / 挂载到数字员工的<b>平台用户组</b>白名单（ug_xxx）。
+    /// null / 空 = 不按用户组限制（当前向后兼容）；非空 = 除技能归属者 / 系统管理员外，仅命中名单的用户组可见可挂载。
+    /// 与知识库的“群级共享”不同，这里是<b>平台用户组</b>维度。
+    /// </summary>
+    public List<string>? AllowedUserGroupIds { get; set; }
+
     /// <summary>技能名 / 智能体工具名的合法模式（OpenAI 工具名：字母数字下划线连字符）。</summary>
     private static readonly Regex ToolNamePattern = new("^[a-zA-Z0-9_-]{1,64}$", RegexOptions.Compiled);
 

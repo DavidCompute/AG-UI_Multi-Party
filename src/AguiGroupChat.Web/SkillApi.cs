@@ -19,12 +19,16 @@ public static class SkillApi
         var root = app.MapGroup("/ag-ui/skills");
 
         // ---- 技能库列表（需登录；技能正文 / 解释器 / HTTP 配置仅归属者或管理员可见，避免脚本/密钥泄露）----
-        root.MapGet("/", (HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
+        root.MapGet("/", (HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AguiGroupChat.Agents.UserGroups.UserGroupStore groups) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var isAdmin = auth.IsAdmin(user.UserId);
-            return Results.Ok(catalog.ListAll().Select(s => ToDto(s, s.OwnerId == user.UserId || isAdmin)));
+            var visible = catalog.ListAll()
+                // 细粒度授权：设了用户组白名单的技能，非归属者/管理员需命中任一组才可见
+                .Where(s => s.AllowedUserGroupIds is not { Count: > 0 } allow
+                    || s.OwnerId == user.UserId || isAdmin || groups.UserInAny(user.UserId, allow));
+            return Results.Ok(visible.Select(s => ToDto(s, s.OwnerId == user.UserId || isAdmin)));
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 用自然语言生成技能配置（无需手填各字段）：输入需求，由大模型产出结构化技能定义，前端据此填入表单 ----
@@ -299,6 +303,8 @@ public static class SkillApi
             ["requiresApproval"] = s.RequiresApproval,
             ["executionLocation"] = s.ExecutionLocation.ToString().ToLowerInvariant(),
             ["ownerId"] = s.OwnerId,
+            // 细粒度访问授权：允许访问的技能用户组白名单（null = 不限制）
+            ["allowedUserGroupIds"] = s.AllowedUserGroupIds is { Count: > 0 } ? s.AllowedUserGroupIds : null,
         };
         if (canReadBody)
         {
@@ -360,6 +366,8 @@ public static class SkillApi
             OwnerId = ownerId,
             ExecutionLocation = executionLocation,
             ClientRunner = AgentApi.BuildClientRunner(kind, executionLocation, req.Body ?? "", req.ClientRunner),
+            // 细粒度访问授权：允许挂载/可见的技能用户组白名单（空 = 不限制，向后兼容）
+            AllowedUserGroupIds = req.AllowedUserGroupIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() is { Count: > 0 } glist ? glist : null,
         }, null);
     }
 
@@ -442,7 +450,8 @@ public sealed record SkillDefHttpRequest(
     int? HttpTimeoutSeconds,
     bool? RequiresApproval,
     string? ExecutionLocation = null,
-    string? ClientRunner = null);
+    string? ClientRunner = null,
+    IReadOnlyList<string>? AllowedUserGroupIds = null);
 
 /// <summary>技能试运行请求体。ClientId：本机执行的机器标识（浏览器本机桥 /ag-ui/bridge/info 读取），用于把 client dotnet 送到当前机器执行。</summary>
 public sealed record SkillRunHttpRequest(string Query = "", string? ClientId = null);
