@@ -881,6 +881,8 @@ window.I18N_DICTS.en = {
 
   /* --- 通用 --- */
   "common.saveFail": "Save failed: {err}",
+  "common.save": "Save",
+  "common.cancel": "Cancel",
   "common.clearSearch": "Clear search",
 
   /* --- In-page dialog (uiDialog) --- */
@@ -1446,6 +1448,6 @@ window.I18N_DICTS.en = {
 
   "admin.ugUnknownUser": "Cannot resolve member username(s): {who}",
   "admin.thMembers": "Members",
-  "admin.thDesc": "Description",
   "agent.form.allowedGroupTitle": "🔐 Allowed user groups (empty = no restriction)"
+
 };

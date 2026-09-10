@@ -5765,7 +5765,7 @@ async function saveUserGroup() {
   const memberUserIds = userNames.map((n) => rev[n]).filter(Boolean);
   const id = $("ugIdField").value;
   const res = await apiRaw("POST", "/ag-ui/usergroups", { groupId: id || null, name, description: $("ugDescField").value.trim() || null, memberUserIds });
-  if (!res.ok) { const d = await res.json().catch(() => null); toast(t("admin.saveFail", { err: String((d && d.message) || res.status) })); return; }
+  if (!res.ok) { const d = await res.json().catch(() => null); toast(t("common.saveFail", { err: String((d && d.message) || res.status) })); return; }
   $("ugPanel").classList.add("hidden");
   toast(id ? t("admin.ugSaved") : t("admin.ugCreated"));
   loadUserGroups();

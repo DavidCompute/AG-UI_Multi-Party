@@ -879,6 +879,8 @@ window.I18N_DICTS.zh = {
 
   /* --- 通用 --- */
   "common.saveFail": "保存失败：{err}",
+  "common.save": "保存",
+  "common.cancel": "取消",
   "common.clearSearch": "清空搜索",
 
   /* --- 通用网页内对话框（uiDialog）--- */
