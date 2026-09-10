@@ -1928,6 +1928,12 @@ function renderAgentAllowGroups() {
   });
 }
 
+/** 切换预设时刷新下方的一段类型说明（未选 = 留空，跟随平台默认）。 */
+function syncMemoryTypeUi() {
+  const v = $("afMemoryType").value;
+  $("afMemoryTypeDesc").textContent = v ? t("agent.form.memoryType.desc." + v) : "";
+}
+
 /** 从表单读记忆拟人配置：未选类型返回 null（不单独配置，召回沿用平台全局）。 */
 function readMemoryProfileFromForm() {
   const type = $("afMemoryType").value;
