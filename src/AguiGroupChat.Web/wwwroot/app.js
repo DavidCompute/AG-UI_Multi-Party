@@ -5593,6 +5593,7 @@ function switchAdminTab(tab) {
   const exec = tab === "execution";
   const audit = tab === "audit";
   const orphans = tab === "orphans";
+  const usergroups = tab === "usergroups";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
@@ -5600,6 +5601,7 @@ function switchAdminTab(tab) {
   $("adminTabExec").classList.toggle("on", exec);
   $("adminTabAudit").classList.toggle("on", audit);
   $("adminTabOrphans").classList.toggle("on", orphans);
+  $("adminTabUserGroups").classList.toggle("on", usergroups);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
@@ -5607,6 +5609,8 @@ function switchAdminTab(tab) {
   $("adminExecView").classList.toggle("hidden", !exec);
   $("adminAuditView").classList.toggle("hidden", !audit);
   $("adminOrphansView").classList.toggle("hidden", !orphans);
+  $("adminUserGroupsView").classList.toggle("hidden", !usergroups);
+  if (usergroups) { loadUserGroups(); }
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
     loadAdminUsers();
@@ -5640,6 +5644,106 @@ function startAdminMetricsPoll() {
 function stopAdminMetricsPoll() {
   if (adminMetricsTimer) { clearInterval(adminMetricsTimer); adminMetricsTimer = null; }
 }
+
+/* ============ 用户分组（细粒度授权）后台页签 ============ */
+let userGroupCache = [];
+let userLineCache = new Map(); // userId -> username（成员以用户名展示/编辑）
+
+async function apiRaw(method, url, body) {
+  const opts = { method, headers: { Authorization: `Bearer ${state.token || ""}` } };
+  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  return await fetch(url, opts);
+}
+
+/** 拉一次用户目录（用户名→userId），用于成员编辑框补全展示；无需保序。 */
+async function ensureUserCache() {
+  if (userLineCache.size === 0) {
+    try {
+      const users = (await apiRaw("GET", "/ag-ui/admin/users")).ok
+        ? await (await apiRaw("GET", "/ag-ui/admin/users")).json() : [];
+      users.forEach((u) => { if (u.userId && u.username) userLineCache.set(u.userId, u.username); });
+    } catch (e) { /* 非管理员获一份空即可 */ }
+  }
+}
+
+async function loadUserGroups() {
+  const tbody = $("adminUserGroupRows");
+  tbody.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await apiRaw("GET", "/ag-ui/usergroups");
+    if (!res.ok) throw new Error((await res.json()).message || res.status);
+    userGroupCache = await res.json();
+    if (userGroupCache.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.ugEmpty")}</td></tr>`;
+      return;
+    }
+    await ensureUserCache();
+    tbody.innerHTML = userGroupCache.map((g) => {
+      const memTokens = (g.memberUserIds || []).map((id) => userLineCache.get(id) || id);
+      return `<tr data-ugid="${escapeHtml(g.groupId)}">
+        <td><b>${escapeHtml(g.name)}</b><div class="muted">${escapeHtml(g.groupId)}</div></td>
+        <td>${escapeHtml(g.description || "")}</td>
+        <td>${memTokens.length ? escapeHtml(memTokens.join("，")) : `<span class="muted">${t("admin.ugNone")}</span>`}</td>
+        <td>
+          <button class="icon-btn" data-ugact="edit" title="${t("admin.ugEdit")}">✎</button>
+          <button class="icon-btn danger" data-ugact="del" title="${t("admin.ugDel")}">🗑</button>
+        </td></tr>`;
+    }).join("");
+    tbody.querySelectorAll("button[data-ugact]").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const g = userGroupCache.find((x) => x.groupId === btn.closest("tr").dataset.ugid);
+        if (!g) return;
+        btn.dataset.ugact === "edit" ? showUgEntry(g) : deleteUserGroup(g);
+      };
+    });
+  } catch (ex) { tbody.innerHTML = `<tr><td colspan="4" class="admin-empty">${escapeHtml(t("admin.ugLoadFail", { err: String(ex && ex.message || ex) }))}</td></tr>`; }
+}
+
+function showUgEntry(group) {
+  $("ugPanel").classList.remove("hidden");
+  $("ugIdField").value = group ? (group.groupId || "") : "";
+  $("ugNameField").value = group ? (group.name || "") : "";
+  $("ugDescField").value = group ? (group.description || "") : "";
+  const mem = (group && group.memberUserIds || []).map((id) => userLineCache.get(id) || id);
+  $("ugMembersField").value = mem.join("\n");
+  $("ugNameField").focus();
+}
+
+async function saveUserGroup() {
+  const name = $("ugNameField").value.trim();
+  if (!name) { toast(t("admin.ugNameReq")); return; }
+  // 每行一个 username，前端不转换 userId：交给后端解析到 userId 需用户名-用户目录；但后端只认 userId。
+  // 故这里把 username 转 userId（userLineCache 反向要反向索引）。
+  const userNames = $("ugMembersField").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const rev = {};
+  Array.from(userLineCache.entries()).forEach(([id0, name0]) => { rev[name0] = id0; });
+  const unknown = userNames.filter((n) => !rev[n]);
+  if (unknown.length) { toast(t("admin.ugUnknownUser", { who: unknown.slice(0, 8).join("、") })); return; }
+  const memberUserIds = userNames.map((n) => rev[n]).filter(Boolean);
+  const id = $("ugIdField").value;
+  const res = await apiRaw("POST", "/ag-ui/usergroups", { groupId: id || null, name, description: $("ugDescField").value.trim() || null, memberUserIds });
+  if (!res.ok) { const d = await res.json().catch(() => null); toast(t("admin.saveFail", { err: String((d && d.message) || res.status) })); return; }
+  $("ugPanel").classList.add("hidden");
+  toast(id ? t("admin.ugSaved") : t("admin.ugCreated"));
+  loadUserGroups();
+}
+
+async function deleteUserGroup(g) {
+  if (!confirm(t("admin.ugDelConfirm", { name: g.name || g.groupId }))) return;
+  const res = await apiRaw("DELETE", `/ag-ui/usergroups/${encodeURIComponent(g.groupId)}`);
+  if (!res.ok) { const d = await res.json().catch(() => null); toast(String((d && d.message) || res.status)); return; }
+  toast(t("admin.ugDeleted"));
+  loadUserGroups();
+}
+
+function bindUserGroupConsole() {
+  $("adminTabUserGroups").onclick = () => switchAdminTab("usergroups");
+  $("ugAddBtn").onclick = async () => { await ensureUserCache(); showUgEntry(null); };
+  $("ugSaveBtn").onclick = saveUserGroup;
+  $("ugCancelBtn").onclick = () => $("ugPanel").classList.add("hidden");
+}
+
 
 /** 画一条趋势折线（SVG，按最近区间增量）；无数据时留空。 */
 function renderTrendSvg(id, vals, good) {
@@ -8682,6 +8786,7 @@ function init() {
   $("adminTabExec").onclick = () => switchAdminTab("execution");
   $("adminTabAudit").onclick = () => switchAdminTab("audit");
   $("adminTabOrphans").onclick = () => switchAdminTab("orphans");
+  bindUserGroupConsole(); // 细粒度授权：用户分组后台页签
   $("auditSearchBtn").onclick = () => loadAdminAudit();
   $("auditExportBtn").onclick = exportAdminAuditCsv;
   ["auditActor", "auditAction", "auditTarget"].forEach((id) =>

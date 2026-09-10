@@ -1424,5 +1424,29 @@ window.I18N_DICTS.en = {
   "mmd.viewSource": "View Mermaid source (selectable to copy)",
   "mmd.copySource": "Copy Mermaid source",
   "mmd.copied": "Mermaid source copied",
-  "mmd.copyFail": "Copy failed, please select manually to copy"
+
+  "mmd.copyFail": "Copy failed, please select manually to copy",
+
+
+  /* User groups (fine-grained authorization) */
+  "admin.tabUserGroups": "User Groups",
+  "admin.usergroupHint": "Organize <b>platform accounts</b> into groups; assign a digital employee \u201cAllowed user groups\u201d from its edit form to make it group-restricted. <b>Creator and system admin always pass</b>; a public employee with no group list stays open to everyone.",
+  "admin.ugAdd": "＋ New group",
+  "admin.ugEdit": "Edit members",
+  "admin.ugDel": "Delete group",
+  "admin.ugEmpty": "No user groups yet. Click \u201cNew group\u201d to create one.",
+  "admin.ugNone": "(none)",
+  "admin.ugMembersHint": "Members (one username per line; can add later)",
+  "admin.ugNameReq": "Group name required",
+  "admin.ugCreated": "Group created",
+  "admin.ugSaved": "Group saved",
+  "admin.ugDeleted": "Group deleted",
+  "admin.ugDelConfirm": "Delete group \u201c{name}\u201d? Removed groups become harmless (ignored) references.",
+  "admin.ugLoadFail": "Failed to load groups: {err}",
+
+  "admin.ugUnknownUser": "Cannot resolve member username(s): {who}",
+  "admin.thMembers": "Members",
+
+  "admin.thDesc": "Description"
+
 };

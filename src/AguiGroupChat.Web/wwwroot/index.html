@@ -1242,6 +1242,7 @@
         <button id="adminTabExec" class="chip-btn admin-tab" data-i18n="admin.tabExec">执行参数</button>
         <button id="adminTabAudit" class="chip-btn admin-tab" data-i18n="admin.tabAudit">审计日志</button>
         <button id="adminTabOrphans" class="chip-btn admin-tab" data-i18n="admin.tabOrphans">孤儿盘点</button>
+        <button id="adminTabUserGroups" class="chip-btn admin-tab" data-i18n="admin.tabUserGroups">用户分组</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1384,6 +1385,29 @@
               <tbody id="adminOrphanSkillRows"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+      <!-- 用户分组（细粒度授权）：平台把账号编组，供数字员工等资源按组授权访问 -->
+      <div id="adminUserGroupsView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="admin.usergroupHint">将<b>平台账号</b>编组（组织单元）；在数字员工编辑里给员工指定「允许访问的用户组」即完成按组授权。<b>创建者与系统管理员始终可访问</b>；公开数字员工若未限定组则所有人可用。</p>
+        <div class="admin-toolbar">
+          <button id="ugAddBtn" class="chip-btn" type="button" data-i18n="admin.ugAdd">＋ 新建分组</button>
+        </div>
+        <div id="ugPanel" class="ug-panel hidden">
+          <input id="ugIdField" type="hidden" />
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="ugNameField" class="modal-input" placeholder="分组名称" style="min-width:220px" />
+            <input id="ugDescField" class="modal-input" placeholder="说明（可选）" style="min-width:260px;flex:1" />
+          </div>
+          <p class="form-hint" style="margin:6px 0 2px" data-i18n="admin.ugMembersHint">成员（每行一个用户名；空可先建组后补）</p>
+          <textarea id="ugMembersField" class="modal-input" rows="3" style="width:100%;resize:vertical"></textarea>
+          <div style="margin-top:6px"><button id="ugSaveBtn" class="chip-btn primary" type="button" data-i18n="common.save">保存</button> <button id="ugCancelBtn" class="chip-btn" type="button" data-i18n="common.cancel">取消</button></div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>名称</th><th>说明</th><th data-i18n="admin.thMembers">成员</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+            <tbody id="adminUserGroupRows"></tbody>
+          </table>
         </div>
       </div>
       <div class="modal-actions">

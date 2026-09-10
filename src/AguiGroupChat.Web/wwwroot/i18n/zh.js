@@ -1422,5 +1422,23 @@ window.I18N_DICTS.zh = {
   "mmd.viewSource": "查看 Mermaid 源码（可选中复制）",
   "mmd.copySource": "复制 Mermaid 源码",
   "mmd.copied": "已复制 Mermaid 源码",
-  "mmd.copyFail": "复制失败，请手动选择复制"
+  "mmd.copyFail": "复制失败，请手动选择复制",
+
+  /* 用户分组（细粒度授权） */
+  "admin.tabUserGroups": "用户分组",
+  "admin.usergroupHint": "将<b>平台账号</b>编组（组织单元）；在数字员工编辑里给员工指定「允许访问的用户组」即完成按组授权。<b>创建者与系统管理员始终可访问</b>；公开数字员工若未限定组则所有人可用。",
+  "admin.ugAdd": "＋ 新建分组",
+  "admin.ugEdit": "编辑成员",
+  "admin.ugDel": "删除分组",
+  "admin.ugEmpty": "还没有用户分组，点「新建分组」创建。",
+  "admin.ugNone": "（无）",
+  "admin.ugMembersHint": "成员（每行一个用户名；可先建组后补）",
+  "admin.ugNameReq": "请输入分组名称",
+  "admin.ugCreated": "分组已创建",
+  "admin.ugSaved": "分组已保存",
+  "admin.ugDeleted": "分组已删除",
+  "admin.ugDelConfirm": "确认删除分组「{name}”？此操作不会自动为您从引用它的数字员工上移除该组白名单引用（无效引用将被忽略）。",
+  "admin.ugLoadFail": "分组加载失败：{err}",
+  "admin.ugUnknownUser": "无法识别成员用户名：{who}",
+  "admin.thMembers": "成员"
 };
