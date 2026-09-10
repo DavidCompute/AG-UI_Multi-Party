@@ -1440,5 +1440,6 @@ window.I18N_DICTS.zh = {
   "admin.ugDelConfirm": "确认删除分组「{name}”？此操作不会自动为您从引用它的数字员工上移除该组白名单引用（无效引用将被忽略）。",
   "admin.ugLoadFail": "分组加载失败：{err}",
   "admin.ugUnknownUser": "无法识别成员用户名：{who}",
-  "admin.thMembers": "成员"
+  "admin.thMembers": "成员",
+  "agent.form.allowedGroupTitle": "🔐 允许访问的用户组（留空 = 不设限）"
 };

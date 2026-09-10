@@ -1446,7 +1446,6 @@ window.I18N_DICTS.en = {
 
   "admin.ugUnknownUser": "Cannot resolve member username(s): {who}",
   "admin.thMembers": "Members",
-
-  "admin.thDesc": "Description"
-
+  "admin.thDesc": "Description",
+  "agent.form.allowedGroupTitle": "🔐 Allowed user groups (empty = no restriction)"
 };

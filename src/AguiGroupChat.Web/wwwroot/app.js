@@ -1692,6 +1692,7 @@ function serializeAgent(a) {
       minScore: a.memoryProfile.minScore ?? null,
       personalMinScore: a.memoryProfile.personalMinScore ?? null,
     } : null,
+    allowedGroupIds: (a.allowedGroupIds && a.allowedGroupIds.length) ? [...a.allowedGroupIds] : null,
   };
 }
 
@@ -1891,10 +1892,40 @@ function addAgentSectionState(key, state) {
 /** 记忆拟人类型：选项值与 i18n 说明后缀（动态 key 前缀在字典里以 agent.form.memoryType.desc.* 提供）。 */
 const MEMORY_TYPE_KEYS = ["broad", "deep", "slowToLearn", "cueDependent", "fastForgetting"];
 
-/** 切换预设时刷新下方的一段类型说明（未选 = 留空，跟随平台默认）。 */
-function syncMemoryTypeUi() {
-  const v = $("afMemoryType").value;
-  $("afMemoryTypeDesc").textContent = v ? t("agent.form.memoryType.desc." + v) : "";
+/** 数字员工可访问的用户组白名单（Array<groupId>，编辑态；空数组/未配置 = 不设限）。 */
+let agentAllowedGroupIds = [];
+let allUserGroupsCache = []; // [{groupId,name,...}]
+
+/** 管理员打开数字员工编辑时，拉取/渲染“允许访问的用户组”多选（非管理员隐藏该能力以免误解）。 */
+async function loadAllowGroupOptions() {
+  const wrap = $("afGroupAllowWrap");
+  if (!wrap) return;
+  if (!state.isAdmin) { wrap.style.display = "none"; return; }
+  try {
+    const res = await apiRaw("GET", "/ag-ui/usergroups");
+    if (!res.ok) throw new Error(String(res.status));
+    allUserGroupsCache = (await res.json()) || [];
+    if (!allUserGroupsCache.length) { wrap.style.display = "none"; return; }
+    wrap.style.display = "block";
+    renderAgentAllowGroups();
+  } catch { wrap.style.display = "none"; }
+}
+
+function renderAgentAllowGroups() {
+  const el = $("afAllowGroupList");
+  if (!el) return;
+  el.innerHTML = allUserGroupsCache.map((g) => {
+    const on = (agentAllowedGroupIds || []).includes(g.groupId);
+    return `<label class="allow-chip" style="display:flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" class="afAllowGrp" data-gid="${escapeHtml(g.groupId)}" ${on ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff"/> ${escapeHtml(g.name)}</label>`;
+  }).join("");
+  el.querySelectorAll("input.afAllowGrp").forEach((cb) => {
+    cb.onchange = () => {
+      const gid = cb.dataset.gid;
+      if (cb.checked) { if (!agentAllowedGroupIds.includes(gid)) agentAllowedGroupIds.push(gid); }
+      else agentAllowedGroupIds = agentAllowedGroupIds.filter((x) => x !== gid);
+    };
+  });
 }
 
 /** 从表单读记忆拟人配置：未选类型返回 null（不单独配置，召回沿用平台全局）。 */
@@ -1971,6 +2002,9 @@ function openAgentForm(agentId) {
   // 私密数字员工仅创建者或系统管理员可编辑（种子数字员工无 ownerId，登录即可编辑）
   const canEditPrivate = !a?.isPrivate || !a?.ownerId || state.isAdmin || a.ownerId === state.memberId;
   $("afIsPrivate").disabled = !canEditPrivate;
+  // 访问授权：回显允许访问的用户组白名单并（管理员）渲染勾选；清为已编辑时根据勾选变化在下一次 loadAgents 更新
+  agentAllowedGroupIds = [...(a?.allowedGroupIds || [])];
+  loadAllowGroupOptions();
   syncTriggerForm();
   $("agentListView").classList.add("hidden");
   $("agentFormView").classList.remove("hidden");
@@ -2023,6 +2057,8 @@ async function saveAgent() {
     disableOrgRoute: $("afDisableOrgRoute").checked,
     // 记忆拟人类型（按类型召回）：未选类型 = null（不单独配置，沿用平台全局）
     memoryProfile: readMemoryProfileFromForm(),
+    // 细粒度访问授权：允许访问的用户组白名单（空数组 = 不设限）
+    allowedGroupIds: agentAllowedGroupIds && agentAllowedGroupIds.length ? [...agentAllowedGroupIds] : null,
   };
   if (!body.nickname) { toast(t("agent.err.nicknameRequired")); return; }
   // 定时任务 cron 表达式：5 段（分 时 日 月 周），非法拒绝（后端同样校验）

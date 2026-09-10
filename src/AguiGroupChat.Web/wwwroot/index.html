@@ -327,6 +327,12 @@
             <span style="color:#8a8f98;font-size:12px" data-i18n="agent.form.isPrivateHint">（默认关闭。开启后仅创建者可将它拉进知聚，其他用户看不到也无法使用）</span>
           </div>
 
+          <div class="form-group" id="afGroupAllowWrap" style="display:none">
+            <label data-i18n="agent.form.allowedGroupTitle">🔐 允许访问的用户组（留空 = 不设限）</label>
+            <p class="form-hint" style="margin:0 0 6px">勾选后，仅属于这些<b>平台用户组</b>的成员可看到 / 单聊 / 拉入此数字员工；创建者与系统管理员始终可访问。该能力需先到「管理员控制台 → 用户分组」建组。</p>
+            <div id="afAllowGroupList" class="pick-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+          </div>
+
           <!-- 记忆拟人类型（按类型召回）：五档拟人预设 + 口吻模式 + 人设 + 高级微调 -->
           <div class="form-section" style="border:none;margin:16px 0 6px;padding:0 0 4px"><span data-i18n="agent.form.memoryType.title">🧠 记忆类型（拟人召回）</span></div>
           <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.memoryType.desc">配置后，该数字员工调取<b>知聚共享历史记忆 / 个人记忆</b>时会按所选类型执行抽取：检索条数、相似度阈值、回忆提示分支与近期窗口都不同，并在引用记忆时带一句与类型相符的口吻说明。记忆本身仍由知聚共享落库，这里只影响<b>“它怎么回忆”</b>。</p>

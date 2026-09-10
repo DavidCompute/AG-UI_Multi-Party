@@ -31,6 +31,7 @@ public sealed class GroupHub : IDisposable
     private readonly IAgentDefinitionStore? _agentDefinitions;
     private readonly ITwinAgentSync? _twinSync;
     private readonly IGraphMemory? _graph;
+    private readonly IUserGroupService? _userGroups;
     private readonly ConcurrentDictionary<string, byte> _disbanded = new();
     // 客服知聚的非成员参与者（顾客）：key=groupId → 已进入的顾客 id 集合。顾客不是群成员，
     // 各自拥有与客服团队的独立会话（顾客之间彼此隔离）。仅存于内存（会话参与非持久成员）。
@@ -85,7 +86,8 @@ public sealed class GroupHub : IDisposable
         IMessageMemory? memory = null,
         IAgentDefinitionStore? agentDefinitions = null,
         ITwinAgentSync? twinSync = null,
-        IGraphMemory? graph = null)
+        IGraphMemory? graph = null,
+        IUserGroupService? userGroups = null)
     {
         _store = store;
         _users = users;
@@ -101,6 +103,7 @@ public sealed class GroupHub : IDisposable
         _agentDefinitions = agentDefinitions;
         _twinSync = twinSync;
         _graph = graph;
+        _userGroups = userGroups;
         _agentInvocationLimiter = new SemaphoreSlim(Math.Max(1, options.MaxConcurrentAgentInvocations));
         // 孤儿流兜底定时器：周期清理 End 丢失 / 智能体进程崩溃的流式消息（方法内 try/catch，Timer 随 Dispose 释放）
         _orphanTimer = new Timer(_ => CleanupOrphanStreams(), null, OrphanCleanupIntervalMs, OrphanCleanupIntervalMs);
@@ -377,6 +380,7 @@ public sealed class GroupHub : IDisposable
     {
         var group = GetGroupOrThrow(req.GroupId);
         EnsureCanManage(req.OperatorId, group);
+        EnsureCanAddAgents(req.OperatorId, req.MemberIds); // 拉入也走准入：私密归属 / 用户组白名单
         return await AddMembersCoreAsync(group, req.OperatorId, req.MemberIds, req.MemberDetails, ct);
     }
 
@@ -2177,8 +2181,9 @@ public sealed class GroupHub : IDisposable
         => _users.GetUserById(userId)?.PersonalMemoryEnabled ?? false;
 
     /// <summary>
-    /// 私密智能体归属校验：仅创建者可将其加入群；种子（无 OwnerId）智能体不受限。
-    /// 未注入 IAgentDefinitionStore（如仅协议 Hub）时不校验，保持兼容。
+    /// 数字员工准入校验（拉入群 / 单聊）：私密仅创建者；公开但配置了「允许访问的用户组」白名单时，
+    /// 需该 id 是创建者本人 <b>或</b> operator 命中任一允许的用户组；未配置白名单不限。
+    /// 未注入 IAgentDefinitionStore（如仅协议 Hub）时不校验，保持兼容；_userGroups 缺省时不开启组限制。
     /// </summary>
     private void EnsureCanAddAgents(string operatorId, IReadOnlyList<string> memberIds)
     {
@@ -2186,9 +2191,19 @@ public sealed class GroupHub : IDisposable
         foreach (var id in memberIds)
         {
             var def = _agentDefinitions.GetDefinition(id);
-            if (def?.IsPrivate == true && def.OwnerId != operatorId)
+            if (def is null) continue;
+            if (def.IsPrivate == true && def.OwnerId != operatorId)
                 throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied,
                     $"私密智能体「{def.Nickname}」仅创建者可将其加入群");
+            if (def.AllowedGroupIds is { Count: > 0 } allow)
+            {
+                // 公开但限制用户组：创建者本人或命中任一组可加入
+                var ok = def.OwnerId == operatorId
+                    || (_userGroups is not null && _userGroups.UserInAnyGroup(operatorId, allow));
+                if (!ok)
+                    throw new AguiProtocolException(ErrorCodes.AgentPermissionDenied,
+                        $"数字员工「{def.Nickname}」仅允许特定用户分组成员访问（你的账号不在其允许的用户组内）");
+            }
         }
     }
 

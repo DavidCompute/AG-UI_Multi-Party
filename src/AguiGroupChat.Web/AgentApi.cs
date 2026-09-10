@@ -589,6 +589,8 @@ public static class AgentApi
         d.DisableRelay,
         d.DisableOrgRoute,
         d.MemoryProfile,
+        // 细粒度访问授权：允许访问的用户组白名单（ug_xxx；编辑表单据此回显勾选，目录行可用于展示受限）
+        allowedGroupIds = d.AllowedGroupIds is { Count: > 0 } ? d.AllowedGroupIds : null,
     });
 
     /// <summary>定时任务 cron 表达式校验：非法返回 400 错误（调度器每分钟空转会刷警告日志）。</summary>

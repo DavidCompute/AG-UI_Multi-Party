@@ -44,6 +44,8 @@ public static class AgentHosting
         services.AddSingleton<OrgTeamCommitter>();
         // 用户分组 / 组织单元目录（细粒度授权）：持久化经 RegisterUserGroupsPersistence 落扩展区 userGroups
         services.AddSingleton<AguiGroupChat.Agents.UserGroups.UserGroupStore>();
+        // 供 Hub 层做准入门校验的只读桥接（避免 Hub 反向依赖 Agents 目录）
+        services.AddSingleton<AguiGroupChat.Hub.Agents.IUserGroupService, UserGroupService>();
         // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值取 Agents:DailyTokenQuotaPerUser）
         services.AddSingleton(sp => new AguiGroupChat.Hub.Agents.AgentUsageService(
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
