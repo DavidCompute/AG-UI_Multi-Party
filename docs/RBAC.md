@@ -1,6 +1,6 @@
 # RBAC 权限分层运维文档（User Permissions & Role-Based Access Control）
 
-本文档描述 AG-UI Multi-Party 的权限模型与运维配置。覆盖**平台级 / 群级 / 频道级**三层，以及对应的配置项、接口与安全建议。
+本文档描述 AG-UI Multi-Party 的权限模型与运维配置。覆盖**平台级 / 群级 / 频道级 / 用户组（细粒度）**四层，以及对应的配置项、接口与安全建议。
 
 > 版本：随 1.0.103 及之后版本提供。既有部署可原位升级，无需数据迁移。
 
@@ -109,3 +109,19 @@ graph TD
 - **既有部署升级**：无需迁移。老快照/数据库无 `PlatformRole` 字段时自动按 `IsAdmin`/`AdminUserIds` 推导为至少 Admin；如需 SuperAdmin，用任意现有 Admin 先登录后在 `/admin/roles` 提升（或首次注册的新账号自举）。
 - **共享多用户部署**：务必设置 `ClientTool:RequireAdmin=true`；按最小权限原则只给 Operator/只读账号，Admin/SuperAdmin 数量最小化；`Auth:RequireTokenOnRealTime` 保持 `true`。
 - **前端**：管理员控制台门户按生效角色显示——User 无管理菜单；Operator 显示只读运维菜单；Admin/SuperAdmin 显示完整管理菜单；角色下拉仅 SuperAdmin 可见。
+
+---
+
+## 6. 用户分组与按组授权（细粒度访问控制）
+
+在平台角色 / 群角色 / 频道级之外，新增第四层：**用户分组（用户组 / 组织单元）→ 资源白名单**。
+
+- **用户分组（UserGroup，`ug_xxx`）**：对**平台账号**编组（与“群聊/知聚”是不同概念）。由**系统管理员**在「管理员控制台 → 用户分组」维护（建 / 改 / 删组 + 成员）。
+  - `GET /ag-ui/usergroups`（管理员：全量含成员）、`GET /ag-ui/usergroups/mine`（登录用户：我所属组的 id/名）、`POST /ag-ui/usergroups`（建/改）、`DELETE /ag-ui/usergroups/{groupId}`（删）。
+- **资源白名单**：资源对象携带“允许访问的用户组 id 列表”，为空 = 不按用户组限制（向后兼容）。目前覆盖：
+  - **数字员工** `AgentDefinition.AllowedGroupIds`：组限制下，非创建者/非管理员需命中任一组才能**看到 / 单聊 / 拉入/建群**；未配置白名单 = 全员可用；私密仍仅创建者（白名单不放开私密）。列表 `GET /ag-ui/agents`、单聊 `POST /ag-ui/agents/direct`、建群 / 加成员均会拒非授权用户（403 `AGENT_PERMISSION_DENIED`）。
+  - **技能库** `AgentSkillDefinition.AllowedUserGroupIds`：列表对非归属者/非管理员隐藏受限技能；挂载到数字员工（`SkillDefIds`）会拒非授权用户（403 `SKILL_PERMISSION_DENIED`）。
+  - **知识库**：已有 `SharedGroupIds`（**群级共享**）语义，与本层互补（前者按“知聚成员”，后者按“平台用户组”）。
+- **判定优先级（数字员工）**：系统管理员 → 全放行；创建者 → 全放行；私密且非创建者 → 拒；公开且无白名单 → 放行；公开且有白名单 → 需命中任一组。
+- **持久化**：用户分组随扩展区 `userGroups`（`agui_sections` / JSON 快照 / Redis）持久化，重启不丢；资源上的白名单随各自定义持久化（agents / skills / kb）。
+- **边界**：记忆 / 话题属于“知聚内会话数据”，继承群可见性隔离（私密群仅本群可检索；客服知聚顾客会话彼此隔离），不单独按用户组授权；如需对记忆/代码库再做组级隔离，可在同一机制上继续扩展。

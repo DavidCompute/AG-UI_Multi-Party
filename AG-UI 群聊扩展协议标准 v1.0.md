@@ -1004,6 +1004,7 @@ PUT /ag-ui/user/profile
 |requireApprovalToolNames|string\[\]?|**智能体级审批策略（4.1）**：非空则用本名单决定哪些工具需审批，否则回退全局 `Agents:RequireApprovalToolNames`；`approveAll` 可一次性批准当前 run 后续全部待审批工具|
 |isPrivate|boolean|是否私密智能体（默认 false）：仅创建者（ownerId）可拉入群 / 编辑 / 删除，目录对其他用户隐藏|
 |ownerId|string?|创建者 userId（appsettings 种子为 null = 系统级）|
+|allowedGroupIds|string\[\]?|**细粒度访问授权（2.9）**：允许访问（看到 / 单聊 / 拉入建群）本数字员工的**平台用户组** id 列表（`ug_xxx`，见「用户分组」）。缺失 / 空 = 不按用户组限制（向后兼容）；非空 = 除创建者 / 系统管理员外，仅命中任一列出用户组的用户可用；私密仍仅创建者（白名单不放开私密）。服务端在目录列表 / 单聊 / 建群 / 加成员四个关口校验；技能库同名机制为 `allowedUserGroupIds`（详见 `docs/RBAC.md` §6）|
 
 **导出 / 导入**：智能体管理的「📤 导出全部」/ 每行「导出」把配置导出为 JSON（`{version: 1, agents:[…]}`，字段同上，敏感令牌与 ownerId 不导出），前端「📥 导入」读取 JSON 后逐条调用 `POST /ag-ui/agents` 创建（归属当前登录用户，agentId 冲突自动改 ID 不覆盖）。另提供**全量数据包**接口（管理员）：`GET /ag-ui/export` 导出账号（含密码哈希 / 盐）+ 智能体定义与触发规则 + 群 / 话题 / 消息 + 附件为 zip；`POST /ag-ui/import/preview` 上传 zip 返回账号 / 智能体存在性检查与群清单，`POST /ag-ui/import` 按 `selectedGroupIds` 执行（账号按 username、智能体按 agentId 自动补齐，消息发送者 / 提及 / 可见列表按账号映射重写，附件还原）。导出 zip 的 `manifest.json` 另含 `skills`（技能库全量）与 `orgTeams`（组织覆盖簿记）两段，导入会对其缺失项做存在性补齐；AI 分身与技能目标子代理不导出。
 

@@ -19,6 +19,23 @@ English:
 
 ---
 
+## 开发中：用户分组与按组授权（细粒度访问控制）（Web 已随推送部署；尚未包含于 1.0.122 桌面安装包）
+# In development: User groups & group-based authorization (fine-grained access) (already live on the Web build; not yet in the 1.0.122 desktop installer)
+
+中文：
+- **用户分组（用户组 / 组织单元）**：管理员控制台新增「用户分组」页签（`GET/POST/DELETE /ag-ui/usergroups`，另有 `/mine` 供登录用户查自己所属组）。把**平台账号**编组（与“群聊知聚”是不同概念），用于按组授权。持久化于扩展区 `userGroups`，重启不丢。
+- **数字员工按组授权**：`AgentDefinition.AllowedGroupIds`——在数字员工编辑表单新增「🔐 允许访问的用户组」多选。未配置 = 全员可用（向后兼容）；配置后仅命中白名单的用户组成员可**看到 / 单聊 / 拉入/建群**（创建者与系统管理员始终放行）。服务端在目录列表、单聊、建群、加成员四个关口统一拦截（403 `AGENT_PERMISSION_DENIED`）。
+- **技能库按组授权**：`AgentSkillDefinition.AllowedUserGroupIds`——受限技能对非归属者/非管理员隐藏，挂载到数字员工时非授权用户拒绝（403 `SKILL_PERMISSION_DENIED`）。知识库已有“群级共享”语义，与本机制互补。
+- 详见 `docs/RBAC.md` §6。
+
+English:
+- **User groups (organizational units)**: a new “User Groups” tab in the admin console (`GET/POST/DELETE /ag-ui/usergroups`, plus `/mine` for a signed-in user's own groups) to organize **platform accounts** (a different concept from chat groups) for group-based authorization. Persisted in the `userGroups` section across restarts.
+- **Group-based agent authorization**: `AgentDefinition.AllowedGroupIds` — the agent edit form gains an “🔐 Allowed user groups” multi-select. Empty = open to everyone (backward compatible); when set, only members of the listed groups may **see / direct-chat / add to a circle** (creator and system admins always pass). Enforced server-side at the catalog list, direct chat, group create and member add (403 `AGENT_PERMISSION_DENIED`).
+- **Group-based skill authorization**: `AgentSkillDefinition.AllowedUserGroupIds` — restricted skills are hidden from non-owners/admins and cannot be mounted onto an agent by unauthorized users (403 `SKILL_PERMISSION_DENIED`). Knowledge bases already model group-based sharing, complementing this mechanism.
+- Details in `docs/RBAC.md` §6.
+
+---
+
 # AG-UI 群聊桌面版 1.0.121 发布说明（上一 Windows 桌面点版本）
 # AG-UI Group Chat Desktop 1.0.121 Release Notes (previous Windows desktop point release)
 

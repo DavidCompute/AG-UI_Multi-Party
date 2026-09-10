@@ -88,7 +88,7 @@ dotnet run --project samples/AguiGroupChat.Client -- --register alice 123456 --g
 dotnet test AguiGroupChat.slnx
 ```
 
-870 Hub + 6 SDK (876) automated test cases cover group lifecycle, permission control, RBAC, audit, memory & memory personality types, subscriptions, visibility fan-out, recall, agent trigger rules, streaming feedback, orchestration and skill library, human-in-the-loop, user management, persistence (JSON / PostgreSQL / MySQL / SQLite), semantic memory, and full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
+885 Hub + 6 SDK (891) automated test cases cover group lifecycle, permission control, RBAC (incl. user groups), audit, memory & memory personality types, subscriptions, visibility fan-out, recall, agent trigger rules, streaming feedback, orchestration and skill library, human-in-the-loop, user management, persistence (JSON / PostgreSQL / MySQL / SQLite), semantic memory, and full HTTP + WebSocket end-to-end integration tests on a real Kestrel.
 
 When tests need a database, override the connection strings via environment variables (`AGUI_PG_TEST_CONN`, `AGUI_MYSQL_TEST_CONN`); otherwise those cases are auto-skipped.
 
