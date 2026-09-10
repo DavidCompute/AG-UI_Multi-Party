@@ -5737,7 +5737,9 @@ function stopAdminMetricsPoll() {
 
 /* ============ 用户分组（细粒度授权）后台页签 ============ */
 let userGroupCache = [];
-let userLineCache = new Map(); // userId -> username（成员以用户名展示/编辑）
+let userDirectoryCache = [];   // [{userId, username, nickname, avatar}] —— 成员选择器的数据源
+let userGroupMemberPick = new Set(); // 弹窗内本次选中的 userId
+let ugMemberQuery = "";
 
 async function apiRaw(method, url, body) {
   const opts = { method, headers: { Authorization: `Bearer ${state.token || ""}` } };
@@ -5745,15 +5747,19 @@ async function apiRaw(method, url, body) {
   return await fetch(url, opts);
 }
 
-/** 拉一次用户目录（用户名→userId），用于成员编辑框补全展示；无需保序。 */
-async function ensureUserCache() {
-  if (userLineCache.size === 0) {
-    try {
-      const users = (await apiRaw("GET", "/ag-ui/admin/users")).ok
-        ? await (await apiRaw("GET", "/ag-ui/admin/users")).json() : [];
-      users.forEach((u) => { if (u.userId && u.username) userLineCache.set(u.userId, u.username); });
-    } catch (e) { /* 非管理员获一份空即可 */ }
-  }
+/** 拉一次用户目录（供成员勾选；仅管理员可调，失败则空表）。 */
+async function ensureUserDirectory() {
+  if (userDirectoryCache.length) return;
+  try {
+    const res = await apiRaw("GET", "/ag-ui/admin/users");
+    if (res.ok) userDirectoryCache = (await res.json()) || [];
+  } catch { /* 忽略：选择器显示空态 */ }
+}
+
+/** 取用户展示名（昵称优先 / 用户名 / id）。 */
+function userDisplayName(id) {
+  const u = userDirectoryCache.find((x) => x.userId === id);
+  return u ? (u.nickname || u.username || id) : id;
 }
 
 async function loadUserGroups() {
@@ -5763,17 +5769,18 @@ async function loadUserGroups() {
     const res = await apiRaw("GET", "/ag-ui/usergroups");
     if (!res.ok) throw new Error((await res.json()).message || res.status);
     userGroupCache = await res.json();
+    await ensureUserDirectory();
     if (userGroupCache.length === 0) {
       tbody.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.ugEmpty")}</td></tr>`;
       return;
     }
-    await ensureUserCache();
     tbody.innerHTML = userGroupCache.map((g) => {
-      const memTokens = (g.memberUserIds || []).map((id) => userLineCache.get(id) || id);
+      const names = (g.memberUserIds || []).map((id) => userDisplayName(id));
+      const shown = names.slice(0, 6).join("，") + (names.length > 6 ? ` … +${names.length - 6}` : "");
       return `<tr data-ugid="${escapeHtml(g.groupId)}">
         <td><b>${escapeHtml(g.name)}</b><div class="muted">${escapeHtml(g.groupId)}</div></td>
         <td>${escapeHtml(g.description || "")}</td>
-        <td>${memTokens.length ? escapeHtml(memTokens.join("，")) : `<span class="muted">${t("admin.ugNone")}</span>`}</td>
+        <td>${names.length ? escapeHtml(shown) : `<span class="muted">${t("admin.ugNone")}</span>`}</td>
         <td>
           <button class="icon-btn" data-ugact="edit" title="${t("admin.ugEdit")}">✎</button>
           <button class="icon-btn danger" data-ugact="del" title="${t("admin.ugDel")}">🗑</button>
@@ -5784,37 +5791,71 @@ async function loadUserGroups() {
         e.stopPropagation();
         const g = userGroupCache.find((x) => x.groupId === btn.closest("tr").dataset.ugid);
         if (!g) return;
-        btn.dataset.ugact === "edit" ? showUgEntry(g) : deleteUserGroup(g);
+        btn.dataset.ugact === "edit" ? openUserGroupModal(g) : deleteUserGroup(g);
       };
     });
   } catch (ex) { tbody.innerHTML = `<tr><td colspan="4" class="admin-empty">${escapeHtml(t("admin.ugLoadFail", { err: String(ex && ex.message || ex) }))}</td></tr>`; }
 }
 
-function showUgEntry(group) {
-  $("ugPanel").classList.remove("hidden");
+/** 打开新增 / 编辑用户分组弹窗（成员用勾选，不手输）。 */
+async function openUserGroupModal(group) {
+  await ensureUserDirectory();
   $("ugIdField").value = group ? (group.groupId || "") : "";
+  $("ugModalTitle").textContent = group ? t("admin.ugEditTitle") : t("admin.ugNewTitle");
   $("ugNameField").value = group ? (group.name || "") : "";
   $("ugDescField").value = group ? (group.description || "") : "";
-  const mem = (group && group.memberUserIds || []).map((id) => userLineCache.get(id) || id);
-  $("ugMembersField").value = mem.join("\n");
+  userGroupMemberPick = new Set(group?.memberUserIds || []);
+  ugMemberQuery = "";
+  const search = $("ugMemberSearch");
+  if (search) search.value = "";
+  renderUgMemberList();
+  $("ugModal").classList.remove("hidden");
   $("ugNameField").focus();
+}
+
+/** 渲染弹窗内成员勾选列表（搜索过滤 + 勾选人数提示）。 */
+function renderUgMemberList() {
+  const el = $("ugMemberList");
+  if (!el) return;
+  const q = ugMemberQuery.trim().toLowerCase();
+  const list = (userDirectoryCache || []).filter((u) => {
+    if (!q) return true;
+    return `${u.username || ""} ${u.nickname || ""} ${u.userId}`.toLowerCase().includes(q);
+  });
+  const countEl = $("ugMemberCount");
+  if (countEl) countEl.textContent = t("admin.ugMemberSel", { n: userGroupMemberPick.size });
+  el.innerHTML = "";
+  if (!list.length) { el.innerHTML = `<span class="form-hint">${t("admin.ugMemberNoMatch")}</span>`; return; }
+  list.forEach((u) => {
+    const on = userGroupMemberPick.has(u.userId);
+    const row = document.createElement("label");
+    row.className = "kb-pick-item" + (on ? " on" : "");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
+    row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+      + `<b>${escapeHtml(u.nickname || u.username || u.userId)}</b>`
+      + ` <code>${escapeHtml(u.username || u.userId)}</code>`
+      + (u.isDisabled ? ` <span class="kb-meta">${escapeHtml(t("admin.disabled"))}</span>` : "");
+    row.querySelector("input").addEventListener("change", (e) => {
+      if (e.target.checked) userGroupMemberPick.add(u.userId); else userGroupMemberPick.delete(u.userId);
+      const c = $("ugMemberCount");
+      if (c) c.textContent = t("admin.ugMemberSel", { n: userGroupMemberPick.size });
+    });
+    el.appendChild(row);
+  });
 }
 
 async function saveUserGroup() {
   const name = $("ugNameField").value.trim();
   if (!name) { toast(t("admin.ugNameReq")); return; }
-  // 每行一个 username，前端不转换 userId：交给后端解析到 userId 需用户名-用户目录；但后端只认 userId。
-  // 故这里把 username 转 userId（userLineCache 反向要反向索引）。
-  const userNames = $("ugMembersField").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const rev = {};
-  Array.from(userLineCache.entries()).forEach(([id0, name0]) => { rev[name0] = id0; });
-  const unknown = userNames.filter((n) => !rev[n]);
-  if (unknown.length) { toast(t("admin.ugUnknownUser", { who: unknown.slice(0, 8).join("、") })); return; }
-  const memberUserIds = userNames.map((n) => rev[n]).filter(Boolean);
   const id = $("ugIdField").value;
-  const res = await apiRaw("POST", "/ag-ui/usergroups", { groupId: id || null, name, description: $("ugDescField").value.trim() || null, memberUserIds });
+  const res = await apiRaw("POST", "/ag-ui/usergroups", {
+    groupId: id || null,
+    name,
+    description: $("ugDescField").value.trim() || null,
+    memberUserIds: [...userGroupMemberPick],
+  });
   if (!res.ok) { const d = await res.json().catch(() => null); toast(t("common.saveFail", { err: String((d && d.message) || res.status) })); return; }
-  $("ugPanel").classList.add("hidden");
+  $("ugModal").classList.add("hidden");
   toast(id ? t("admin.ugSaved") : t("admin.ugCreated"));
   loadUserGroups();
 }
@@ -5829,9 +5870,10 @@ async function deleteUserGroup(g) {
 
 function bindUserGroupConsole() {
   $("adminTabUserGroups").onclick = () => switchAdminTab("usergroups");
-  $("ugAddBtn").onclick = async () => { await ensureUserCache(); showUgEntry(null); };
+  $("ugAddBtn").onclick = () => openUserGroupModal(null);
   $("ugSaveBtn").onclick = saveUserGroup;
-  $("ugCancelBtn").onclick = () => $("ugPanel").classList.add("hidden");
+  $("ugCancelBtn").onclick = () => $("ugModal").classList.add("hidden");
+  $("ugMemberSearch").addEventListener("input", () => { ugMemberQuery = $("ugMemberSearch").value; renderUgMemberList(); });
 }
 
 

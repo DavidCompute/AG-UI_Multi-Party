@@ -646,6 +646,35 @@
     </div>
   </div>
 
+  <!-- 用户分组：新增 / 编辑（独立弹窗；成员用勾选选择，不手输） -->
+  <div id="ugModal" class="modal-overlay hidden">
+    <div class="modal pick-modal">
+      <div class="modal-title" id="ugModalTitle" data-i18n="admin.ugNewTitle">新建用户分组</div>
+      <input id="ugIdField" type="hidden" />
+      <div class="form-group">
+        <label data-i18n="admin.ugName">分组名称</label>
+        <input id="ugNameField" class="modal-input" maxlength="80" data-i18n-placeholder="admin.ugNamePh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.ugDesc">说明（可选）</label>
+        <input id="ugDescField" class="modal-input" maxlength="200" data-i18n-placeholder="admin.ugDescPh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.ugMembers">成员</label>
+        <span class="search-clear-wrap" style="width:100%">
+          <input id="ugMemberSearch" class="modal-input" data-i18n-placeholder="admin.ugMemberSearchPh" />
+          <button type="button" class="search-clear" data-clear-for="ugMemberSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+        </span>
+        <p class="form-hint" style="margin:4px 0"><span id="ugMemberCount"></span></p>
+        <div id="ugMemberList" class="member-pick" style="max-height:42vh;overflow:auto"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="ugCancelBtn" class="btn-ghost" type="button" data-i18n="common.cancel">取消</button>
+        <button id="ugSaveBtn" class="send" type="button" data-i18n="common.save">保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 修改密码 -->
   <div id="pwModal" class="modal-overlay hidden">
     <div class="modal">
@@ -1402,19 +1431,9 @@
         <div class="admin-toolbar">
           <button id="ugAddBtn" class="chip-btn" type="button" data-i18n="admin.ugAdd">＋ 新建分组</button>
         </div>
-        <div id="ugPanel" class="ug-panel hidden">
-          <input id="ugIdField" type="hidden" />
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <input id="ugNameField" class="modal-input" placeholder="分组名称" style="min-width:220px" />
-            <input id="ugDescField" class="modal-input" placeholder="说明（可选）" style="min-width:260px;flex:1" />
-          </div>
-          <p class="form-hint" style="margin:6px 0 2px" data-i18n="admin.ugMembersHint">成员（每行一个用户名；空可先建组后补）</p>
-          <textarea id="ugMembersField" class="modal-input" rows="3" style="width:100%;resize:vertical"></textarea>
-          <div style="margin-top:6px"><button id="ugSaveBtn" class="chip-btn primary" type="button" data-i18n="common.save">保存</button> <button id="ugCancelBtn" class="chip-btn" type="button" data-i18n="common.cancel">取消</button></div>
-        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>名称</th><th>说明</th><th data-i18n="admin.thMembers">成员</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+            <thead><tr><th data-i18n="admin.ugName">名称</th><th data-i18n="admin.ugDesc">说明</th><th data-i18n="admin.thMembers">成员</th><th data-i18n="admin.thOps">操作</th></tr></thead>
             <tbody id="adminUserGroupRows"></tbody>
           </table>
         </div>
