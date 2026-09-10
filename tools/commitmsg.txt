@@ -1,0 +1,19 @@
+Add a .NET Markdown-to-Word skill with tests
+
+Reimplement the Markdown -> .docx conversion that the shell skill
+docx_report_2 attempted with python3 and python-docx. The server image
+has no Python, so that skill could only ever fail with exit code 127.
+The .NET version runs on the platform's own runtime and needs no
+external interpreter.
+
+It takes the Markdown as a JSON field rather than a file path, which
+suits how the skill is actually invoked from chat, and returns a
+produce_file marker so the result becomes a downloadable attachment.
+
+Tests compile and run the real skill source through DotnetSkillHost,
+the same path production uses, and assert the output is a valid docx.
+
+Also fix test isolation: setting AGUI_DOCX_OUT mutates the process, so
+env-var-mutating tests now share a non-parallel collection. Without it
+the full suite failed intermittently, which had gone unnoticed because
+a single run of the new tests always passed.

@@ -18,6 +18,7 @@ namespace AguiGroupChat.Hub.Tests;
 /// 尺寸 → 白名单 → Save），并<b>直接跑真技能</b>产出真文件，保证不是自说自话。
 /// 标记解析本身由 <see cref="SkillProducedFileMarkerTests"/> 覆盖生产实现。
 /// </summary>
+[Collection(EnvVarCollection.Name)] // 改 AGUI_DOCX_OUT（进程级）→ 必须串行，避免污染并行用例
 public sealed class SkillProducedFileAttachmentTests
 {
     /// <summary>与 AgentGateway.AttachSkillProducedFilesAsync 一致的候选提取（复用生产解析）。</summary>
