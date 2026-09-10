@@ -12,6 +12,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 内置 docx 场景技能正文（作为嵌入资源而非 C# 字面量：单个 ~45KB，三个合计 137KB，
+         写成字符串常量会让源码不可读、diff 不可维护）。
+         后缀用 .cs.txt 而非 .cs —— 否则 SDK 会把它们当成待编译源码（技能正文含 #r，非普通 C#）。 -->
+    <!-- 内置 docx 场景技能正文（作为嵌入资源而非 C# 字面量：单个 ~45KB，三个合计 137KB，
+         写成字符串常量会让源码不可读、diff 不可维护）。
+         文件名用 *.skill.txt：不要用 *.cs.txt —— MSBuild 会把 .cs.txt 里的 cs 当成
+         文化区后缀（Culture=cs），嵌入名被改写成 ...docx_gongwen.txt 并归入卫星资源，
+         运行时就按名字找不到了。 -->
+    <EmbeddedResource Include="BuiltinSkills/*.skill.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 供测试项目访问 internal 成员（如 AgentGateway.ComputeTextDelta） -->
     <InternalsVisibleTo Include="AguiGroupChat.Hub.Tests" />
   </ItemGroup>

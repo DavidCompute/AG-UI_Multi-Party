@@ -29,8 +29,14 @@ ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 
 # 持久化快照目录：compose 中挂载命名卷 agui-web-data
-# 安装 curl 供健康检查使用（官方镜像不内置，Ubuntu 24.04 经 apt 获取）
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# 安装 curl（健康检查用，官方镜像不内置）与字体：
+#   dotnet:aspnet 运行镜像默认<b>不含任何系统字体</b>，而 docx 内置技能的图表/文本渲染依赖字体
+#   （ImageSharp 取系统字体；缺字体会直接报“未发现可用字体”）。
+#   fonts-dejavu-core 提供基础拉丁字形；fonts-noto-cjk 提供中文（图表中文标签必需）。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        fonts-dejavu-core \
+        fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # 官方镜像内置非 root 的 app 用户（APP_UID=1654，主组与其相同），显式切换并以该用户运行

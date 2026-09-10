@@ -92,6 +92,13 @@ public sealed class AgentOptions
     public List<AgentSkillDefinition> Skills { get; set; } = [];
 
     /// <summary>
+    /// 是否播种内置「文档生成」技能（公义 / 通知公告 / 工作报告；Word .docx）。
+    /// <c>null</c>（默认）= 开启。设 <c>false</c> 则不播种（适合不需要文档能力的部署）。
+    /// 正文随程序集以嵌入资源分发，不依赖外部文件；已存在同名技能时不会被覆盖。
+    /// </summary>
+    public bool? BuiltinDocxSkills { get; set; }
+
+    /// <summary>
     /// 是否允许 HTTP 技能访问<b>本机 / 内网 / 私网</b>地址（默认 false）。
     /// 默认开 SSRF 防护：HTTP 技能拒绝本机 / 私网 / 链路本地地址（127.0.0.1、10/8、172.16/12、192.168/16、169.254/16 等）
     /// 防止技能把服务端当作跳板访问内网。确需调用本机 / 内网接口（如本地 Ollama / 内网 API）时设为 true 放行；

@@ -97,6 +97,18 @@
 **错误处理**：文件不存在 → `图片文件不存在：<路径>`；格式不支持 → `不支持的图片格式：<ext>`。
 两者都返回 `"ok":false` + 可读原因，模型可据此改用其它路径或告知用户。
 
+## 开箱即用（内置技能）
+
+这三个技能已作为**内置技能随平台分发**：新部署启动即具备，无需手工导入。
+
+- 实现：正文以**嵌入资源**随 `AguiGroupChat.Agents` 分发，启动时由 `BuiltinDocxSkills` 播种。
+- **可关闭**：`Agents:BuiltinDocxSkills=false`（默认 true）。
+- **不覆盖用户改动**：若同名技能已被改过（快照里有），以快照为准。
+- **删除后会回来**：界面删除后重启会重新播种（属于“开箱即用”能力的语义）。
+  要永久关闭请用上面的配置，而不是删除。
+
+因此 `import.mjs` 现在主要用于：**把改过的技能重新推上去**、或导入到不开内置的部署。
+
 ## 导入到技能库
 
 生成物可直接导入平台，无需手工粘贴：
@@ -134,10 +146,11 @@ node tools/docx-skills/import.mjs --base http://localhost:5200 --token <令牌>
 
 ```
 tools/docx-skills/
-├── generate.mjs    ← 共享内核 + 场景配置（唯一需要维护的地方）
-├── import.mjs      ← 导入脚本（把 out/ 下的技能推进平台技能库）
+├── generate.mjs     ← 共享内核 + 场景配置（唯一需要维护的地方）
+├── sync-builtin.mjs ← 同步到平台内置副本（嵌入资源）
+├── import.mjs       ← 导入脚本（把 out/ 下的技能推进技能库）
 ├── README.md
-└── out/            ← 生成物，请勿手改
+└── out/             ← 生成物，请勿手改
     ├── docx_gongwen.cs
     ├── docx_notice.cs
     └── docx_report.cs
@@ -146,7 +159,7 @@ tools/docx-skills/
 ## 生成方式
 
 **不要直接手改 `out/` 下的文件** —— 它们由生成器产出。
-共享的 OpenXML 管线（styles / 段落 / 表格 / 页脚 / JSON 解析）只在 `generate.mjs` 里写一次，
+共享的 OpenXML 管线（styles / 段落 / 表格 / 页脚 / 图片 / 图表 / JSON 解析）只在 `generate.mjs` 里写一次，
 场景之间只差一组排版常量：
 
 ```bash
@@ -154,6 +167,20 @@ node tools/docx-skills/generate.mjs
 ```
 
 改共享内核 → 重新生成 → 三个技能同时获得修复，不会出现「改了公文忘了通知」的漂移。
+
+### ⚠️ 改完记得同步到内置副本
+
+平台内置版是 `out/` 的一份**拷贝**（作为嵌入资源分发）。改了生成器后必须同步，否则
+「界面上的技能」与「新部署自带的技能」会不一致：
+
+```bash
+node tools/docx-skills/generate.mjs
+node tools/docx-skills/sync-builtin.mjs   # 把生成物同步到内置副本（嵌入资源）
+```
+
+`sync-builtin.mjs` 会对比并只拷贝有变化的文件，同时统一 LF。
+（内置目录下文件名须为 `*.skill.txt`：MSBuild 会把 `*.cs.txt` 里的 `cs` 当成文化区后缀，
+嵌入名被改写导致运行时找不到；脚本已代你处理命名。）
 
 ## 实测验证
 
@@ -184,6 +211,21 @@ Roslyn 编译 → ALC 装载 → 反射调用 `Run`），并逐项核对产物�
 | 页码 | 有 | 无 | 有 |
 
 ## 依赖说明
+
+### 运行时依赖：系统字体（容易漏！）
+
+图表与文本渲染依赖**系统字体**。官方 `dotnet:aspnet` 运行镜像**不含任何字体**，
+所以 Dockerfile 必须装：
+
+```dockerfile
+fonts-dejavu-core   # 基础拉丁字形
+fonts-noto-cjk      # 中文（图表中文标签必需）
+```
+
+**不装会怎样**：图表报 `图表需要至少一种系统字体，但当前环境未发现可用字体`。
+（本机直接跑通常不会碰到 —— Windows/macOS 自带字体，只有精简容器会中招。）
+
+### 技能依赖：NuGet 包
 
 技能声明三个 NuGet 包（钉住相容版本）：
 

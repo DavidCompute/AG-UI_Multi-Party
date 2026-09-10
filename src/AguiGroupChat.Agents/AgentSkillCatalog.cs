@@ -15,6 +15,7 @@ public sealed class AgentSkillCatalog
     private readonly ILogger<AgentSkillCatalog> _logger;
     private readonly ConcurrentDictionary<string, AgentSkillDefinition> _skills = new(StringComparer.Ordinal);
     private readonly List<AgentSkillDefinition> _seeds = []; // appsettings 种子，常驻（恢复/删除不丢）
+    private readonly List<string> _builtinSkills = []; // 内置技能 id（正文来自嵌入资源；恢复时重放，但不阻止用户在界面删除）
 
     public AgentSkillCatalog(ILoggerFactory loggerFactory, AgentOptions? options = null)
     {
@@ -25,6 +26,17 @@ public sealed class AgentSkillCatalog
             if (string.IsNullOrWhiteSpace(s.SkillId)) continue;
             if (!_skills.TryAdd(s.SkillId, s)) continue;
             _seeds.Add(s);
+        }
+        // 内置「文档生成」技能（公义 / 通知公告 / 工作报告）：正文随程序集分发，开箱即用
+        if (AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.IsEnabled(options?.BuiltinDocxSkills))
+        {
+            foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Definitions)
+            {
+                if (!_skills.TryAdd(d.SkillId,
+                        AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description)))
+                    continue;
+                _builtinSkills.Add(d.SkillId);
+            }
         }
         if (_seeds.Count > 0)
             _logger.LogInformation("技能库播种 {Count} 条（来自 AgentOptions.Skills）", _seeds.Count);
@@ -62,11 +74,22 @@ public sealed class AgentSkillCatalog
     {
         _skills.Clear();
         foreach (var s in _seeds) _skills.TryAdd(s.SkillId, s);
+        // 内置技能重放：与 appsettings 种子不同 —— 快照里的同名项优先（用户可编辑它）；
+        // 但如果用户在界面上删除了内置技能，快照里就没有它，这里会把它带回来。
+        // 这是有意为之：内置技能属“开箱即用”能力，删了重启就回来；要永久关闭请用
+        // Agents:BuiltinDocxSkills=false。（若要“删了就永久没了”，需另存一份删除墓碑，代价大于收益。）
+        foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Definitions)
+        {
+            if (!_builtinSkills.Contains(d.SkillId)) continue;
+            _skills.TryAdd(d.SkillId,
+                AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description));
+        }
         foreach (var s in skills)
         {
             if (string.IsNullOrWhiteSpace(s.SkillId)) continue;
             _skills[s.SkillId] = s;
         }
-        _logger.LogInformation("技能库恢复 {Count} 条（种子 {SeedCount}）", _skills.Count, _seeds.Count);
+        _logger.LogInformation("技能库恢复 {Count} 条（appsettings 种子 {SeedCount}，内置 {BuiltinCount}）",
+            _skills.Count, _seeds.Count, _builtinSkills.Count);
     }
 }
