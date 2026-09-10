@@ -27,15 +27,12 @@ public static class AgentApi
             var user = RequireUser(ctx, auth);
             var admin = user is not null && auth.IsAdmin(user.UserId);
             var defs = catalog.ListDefinitions()
-                .Where(d => !d.IsSkillTarget)
                 // AI 分身（twin_*）由用户经「修改资料 → AI 分身」自我管理，不出现在智能体管理 / 成员勾选目录
                 .Where(d => !d.AgentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
-                // 可见性：创建者始终可见（可回列表编辑）；管理员可见全部；
-                // 其余：私密 → 不可见；公开且未配置组白名单 → 全员（含匿名）；公开但配置了用户组白名单 → 需命中任一允许组。
-                .Where(d =>
-                    (user is not null && (admin || d.OwnerId == user.UserId))
-                    || (!d.IsPrivate
-                        && (d.AllowedGroupIds is not { Count: > 0 } || (user is not null && groups.UserInAny(user.UserId, d.AllowedGroupIds)))))
+                // 可见性统一由 AgentAccessPolicy 判定（与单聊 / 拉入同一份规则，避免两份实现漂移）：
+                // 技能目标不出目录；未登录仅公开且未限定组；登录后 创建者/管理员可见 + 组白名单。
+                .Where(d => AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(
+                    groups, admin, user?.UserId, d))
                 .ToList();
             return Results.Ok(ToDtos(defs));
         });
@@ -58,6 +55,8 @@ public static class AgentApi
             if (relayError is not null) return relayError;
             var routeError = ValidateRouting(req.AssignmentIds, req.EscalationAgentId, catalog);
             if (routeError is not null) return routeError;
+            var allowedGroupError = ValidateAllowedGroupIds(req.AllowedGroupIds, ugStore);
+            if (allowedGroupError is not null) return allowedGroupError;
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库（防跨用户检索他人私密知识库）
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
@@ -147,6 +146,8 @@ public static class AgentApi
             if (relayError is not null) return relayError;
             var routeError = ValidateRouting(req.AssignmentIds, req.EscalationAgentId, catalog);
             if (routeError is not null) return routeError;
+            var allowedGroupError = ValidateAllowedGroupIds(req.AllowedGroupIds, ugStore);
+            if (allowedGroupError is not null) return allowedGroupError;
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
@@ -721,6 +722,26 @@ public static class AgentApi
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "流水线步骤的子智能体不能为空"));
             if (catalog.GetDefinition(s.StepAgentId.Trim()) is null)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"流水线步骤智能体未注册：{s.StepAgentId.Trim()}"));
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 校验「允许访问的用户组」白名单：id 必须真实存在（防手写错 id 导致员工静默对所有人不可见）。
+    /// 与分组创建侧的 ug_ 前缀校验保持一致；空/空缺视为不限制。
+    /// </summary>
+    private static IResult? ValidateAllowedGroupIds(IReadOnlyList<string>? allowedGroupIds,
+        AguiGroupChat.Agents.UserGroups.UserGroupStore groups)
+    {
+        if (allowedGroupIds is null) return null;
+        foreach (var raw in allowedGroupIds)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var id = raw.Trim();
+            if (!id.StartsWith("ug_", StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"用户分组 ID 需以 ug_ 开头：{id}"));
+            if (groups.Get(id) is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"引用的用户分组不存在：{id}"));
         }
         return null;
     }

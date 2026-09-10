@@ -156,6 +156,34 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
     }
 
     [Fact]
+    public async Task Create_WithUnknownAllowedGroup_IsRejected()
+    {
+        // 回归：允许访问的用户组白名单曾不做任何校验，写错 id（或漏 ug_ 前缀）会让该数字员工
+        // 静默对所有人不可见，且保存时不报错。现在保存即拦下。
+        var token = await RegisterAsync("carol_groups");
+
+        // 不存在的分组 id
+        var unknown = await PostAgentAsync(token, new
+        {
+            agentId = "agent_ug_bad",
+            nickname = "白名单校验",
+            triggerMode = "mentioned",
+            allowedGroupIds = new[] { "ug_does_not_exist" },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+
+        // 缺少 ug_ 前缀
+        var badPrefix = await PostAgentAsync(token, new
+        {
+            agentId = "agent_ug_bad2",
+            nickname = "白名单校验2",
+            triggerMode = "mentioned",
+            allowedGroupIds = new[] { "rnd" },
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, badPrefix.StatusCode);
+    }
+
+    [Fact]
     public async Task Create_AutoAgentId_AndDuplicateIdConflict()
     {
         var token = await RegisterAsync("bob");
@@ -1285,6 +1313,65 @@ public sealed class UserGroupAuthorizerUnitTests
         Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "hr", agent));   // 组外不可见
         Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, true, "hr", agent));     // 管理员全局可见
         Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "boss", agent));  // owner 免组限制
+    }
+
+    [Fact]
+    public void CanSeeInCatalog_MatchesCanAccessForSignedInUsers()
+    {
+        // 目录可见性（列表 / 成员勾选）与单聊准入必须同源：这是防止两份实现漂移的钉子。
+        var store = NewStore();
+        store.Upsert(new AguiGroupChat.Agents.UserGroups.UserGroup
+        {
+            GroupId = "ug_rnd", Name = "研发组", MemberUserIds = ["dev_a"],
+        });
+        var limited = new AguiGroupChat.Agents.AgentDefinition
+        {
+            AgentId = "a1", Nickname = "受限", OwnerId = "boss", AllowedGroupIds = ["ug_rnd"],
+        };
+        var priv = new AguiGroupChat.Agents.AgentDefinition
+        {
+            AgentId = "a2", Nickname = "私密", OwnerId = "boss", IsPrivate = true,
+        };
+        var open = new AguiGroupChat.Agents.AgentDefinition { AgentId = "a3", Nickname = "公开" };
+        var skillTarget = new AguiGroupChat.Agents.AgentDefinition
+        {
+            AgentId = "st", Nickname = "技能子代理", IsSkillTarget = true,
+        };
+
+        foreach (var def in new[] { limited, priv, open, skillTarget })
+        {
+            foreach (var who in new[] { "dev_a", "hr", "boss", "admin_u" })
+            {
+                foreach (var isAdmin in new[] { false, true })
+                {
+                    // 已登录用户的目录可见性应与 CanAccess 完全一致
+                    Assert.Equal(
+                        AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, isAdmin, who, def),
+                        AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(store, isAdmin, who, def));
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void CanSeeInCatalog_AnonymousSeesOnlyOpenPublicAgents()
+    {
+        var store = NewStore();
+        var open = new AguiGroupChat.Agents.AgentDefinition { AgentId = "a3", Nickname = "公开" };
+        var priv = new AguiGroupChat.Agents.AgentDefinition { AgentId = "a2", Nickname = "私密", IsPrivate = true, OwnerId = "boss" };
+        var limited = new AguiGroupChat.Agents.AgentDefinition
+        {
+            AgentId = "a1", Nickname = "受限", OwnerId = "boss", AllowedGroupIds = ["ug_rnd"],
+        };
+        var skillTarget = new AguiGroupChat.Agents.AgentDefinition { AgentId = "st", Nickname = "技能子代理", IsSkillTarget = true };
+
+        // 目录是登录前也可浏览的公开面：匿名可见「公开且未限定组」，其余一律不可见
+        Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(store, false, null, open));
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(store, false, null, priv));
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(store, false, null, limited));
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(store, false, null, skillTarget));
+        // 匿名不因 isAdmin 参数而放行
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanSeeInCatalog(store, true, null, priv));
     }
 
     [Fact]

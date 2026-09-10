@@ -109,14 +109,14 @@ public static class SkillApi
 
         // ---- 新增技能（需登录；Shell / HTTP 技能的创建仅限管理员——它们的执行可能触发任意命令 / 外部请求，
         //      普通用户只能创建纯提示词技能，避免「自建 shell 技能自 run」的任意命令执行面）----
-        root.MapPost("/", (SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
+        root.MapPost("/", (SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
             var isAdmin = auth.IsAdmin(user.UserId);
             if (RequiresPrivilegedKind(req.Kind) && !isAdmin)
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可创建 {req.Kind} 技能"), statusCode: StatusCodes.Status403Forbidden);
-            var (def, err) = BuildDef(req, ownerId: user.UserId, authorAdmin: isAdmin);
+            var (def, err) = BuildDef(req, ownerId: user.UserId, authorAdmin: isAdmin, groups: ugStore);
             if (err is not null) return err;
             var skill = def!; // BuildDef 保证 err 非空时 def 为空、err 为空时 def 非空
             if (catalog.Contains(skill.SkillId))
@@ -126,7 +126,7 @@ public static class SkillApi
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 更新技能（技能归属者或系统管理员）；Shell / HTTP 技能非管理员不可改（含把 Prompt 改成 Shell 提权）----
-        root.MapPut("/{skillId}", (string skillId, SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
+        root.MapPut("/{skillId}", (string skillId, SkillDefHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -140,7 +140,7 @@ public static class SkillApi
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可编辑该技能"), statusCode: StatusCodes.Status403Forbidden);
             if (RequiresPrivilegedKind(req.Kind) && !isAdmin)
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可把技能改为 {req.Kind} 类型"), statusCode: StatusCodes.Status403Forbidden);
-            var (def, err) = BuildDef(req, ownerId: existing.OwnerId, authorAdmin: isAdmin);
+            var (def, err) = BuildDef(req, ownerId: existing.OwnerId, authorAdmin: isAdmin, groups: ugStore);
             if (err is not null) return err;
             var skill = def!; // BuildDef 保证 err 非空时 def 为空、err 为空时 def 非空
             skill.SkillId = skillId; // ID 用 URL 的，不允许改名
@@ -318,7 +318,8 @@ public static class SkillApi
         return dto;
     }
 
-    private static (AgentSkillDefinition? Def, IResult? Err) BuildDef(SkillDefHttpRequest req, string? ownerId, bool authorAdmin)
+    private static (AgentSkillDefinition? Def, IResult? Err) BuildDef(SkillDefHttpRequest req, string? ownerId, bool authorAdmin,
+        AguiGroupChat.Agents.UserGroups.UserGroupStore? groups = null)
     {
         var rawId = (req.SkillId ?? "").Trim();
         var id = AgentSkillDefinition.IsValidAsciiToolId(rawId)
@@ -351,6 +352,19 @@ public static class SkillApi
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "该技能正文（shell 命令/脚本，或 C# 源码）不能为空")));
         if (kind == AgentSkillKind.Http && string.IsNullOrWhiteSpace(req.Body))
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "HTTP 技能的正文（JSON 配置）不能为空")));
+        // 允许挂载的用户组白名单：id 必须真实存在（防手写错 id 导致技能静默对所有人不可挂载）
+        if (groups is not null && req.AllowedUserGroupIds is { Count: > 0 } rawGroups)
+        {
+            foreach (var raw in rawGroups)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var gid = raw.Trim();
+                if (!gid.StartsWith("ug_", StringComparison.OrdinalIgnoreCase))
+                    return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"用户分组 ID 需以 ug_ 开头：{gid}")));
+                if (groups.Get(gid) is null)
+                    return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"引用的用户分组不存在：{gid}")));
+            }
+        }
 
         return (new AgentSkillDefinition
         {

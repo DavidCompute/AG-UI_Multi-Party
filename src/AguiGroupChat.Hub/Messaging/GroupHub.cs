@@ -217,6 +217,11 @@ public sealed class GroupHub : IDisposable
         if (string.Equals(ownerId, agentId, StringComparison.Ordinal))
             throw new AguiProtocolException(ErrorCodes.BadRequest, "不能与自己单聊");
 
+        // 准入校验前置：创建与复用两条路径必须同权。若仅校验创建路径，用户被移出白名单组后
+        // 复用旧单聊群仍可继续会话（fail-open）；而 HTTP 层虽也校验，本方法为 public Hub API，
+        // 不能依赖调用方。校验是只读且幂等的，对已存在的合法会话无副作用。
+        EnsureCanAddAgents(ownerId, [agentId]);
+
         var groupId = DirectChatGroupId(ownerId, agentId);
         if (_store.GetGroup(groupId) is { } existing)
         {
@@ -235,7 +240,6 @@ public sealed class GroupHub : IDisposable
             return existing;
         }
 
-        EnsureCanAddAgents(ownerId, [agentId]);
         var now = NowMs;
         var ownerUser = _users.GetUserById(ownerId);
         var members = new List<GroupMember>

@@ -1,4 +1,5 @@
 using AguiGroupChat.Hub.Agents;
+using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
@@ -107,6 +108,88 @@ public sealed class DirectChatTests
             UserId = "user_1",
             Content = "解散后重建的会话应立即可用",
         });
+    }
+
+    /// <summary>带准入依赖的 SUT：可注入智能体定义与用户组，用于验证单聊的组白名单准入。</summary>
+    private static GroupHub CreateGuardedSut(IAgentDefinitionStore defs, IUserGroupService groups)
+    {
+        var options = new GroupChatOptions
+        {
+            MaxGroupMembers = 50,
+            MessageHistoryLimit = 200,
+            SnapshotMessageCount = 50,
+        };
+        return new GroupHub(
+            new InMemoryGroupStore(options.MessageHistoryLimit),
+            new InMemoryUserStore(),
+            new ConnectionManager(),
+            new AgentRegistry(),
+            new AgentTriggerService(new AgentRegistry()),
+            new RecordingGateway(),
+            options,
+            TimeProvider.System,
+            NullLogger<GroupHub>.Instance,
+            agentDefinitions: defs,
+            userGroups: groups);
+    }
+
+    private sealed class StubDefs(AgentDefinitionInfo info) : IAgentDefinitionStore
+    {
+        public AgentDefinitionInfo? GetDefinition(string agentId) => agentId == info.AgentId ? info : null;
+    }
+
+    private sealed class StubGroups(params string[] members) : IUserGroupService
+    {
+        public bool UserInAnyGroup(string userId, IReadOnlyList<string>? groupIds)
+            => groupIds is { Count: > 0 } && groupIds.Contains("ug_rnd") && members.Contains(userId);
+
+        public IReadOnlyList<string> GroupsOfUser(string userId)
+            => members.Contains(userId) ? ["ug_rnd"] : [];
+    }
+
+    [Fact]
+    public async Task TryEnsureDirectChat_CreatePath_RejectsUserOutsideAllowlist()
+    {
+        // 组白名单内的数字员工，白名单外用户首次单聊 → 拒绝
+        var defs = new StubDefs(new AgentDefinitionInfo("agent_g", "受限助手", false, "boss", ["ug_rnd"]));
+        var hub = CreateGuardedSut(defs, new StubGroups("dev_a"));
+
+        await Assert.ThrowsAsync<AguiProtocolException>(
+            () => hub.TryEnsureDirectChatAsync("outsider", "agent_g", "受限助手", null));
+        // 白名单内成员可以建
+        var ok = await hub.TryEnsureDirectChatAsync("dev_a", "agent_g", "受限助手", null);
+        Assert.True(hub.Store.IsMember(ok.GroupId, "dev_a"));
+    }
+
+    [Fact]
+    public async Task TryEnsureDirectChat_ReusePath_AlsoEnforcesAllowlist()
+    {
+        // 回归：复用已存在会话的分支曾早于准入校验返回，导致用户被移出白名单后仍能继续单聊（fail-open）。
+        // 这里用「白名单可切换」的桩模拟“先合法、后移出”：
+        var defs = new StubDefs(new AgentDefinitionInfo("agent_g", "受限助手", false, "boss", ["ug_rnd"]));
+        var online = new HashSet<string>(StringComparer.Ordinal);
+        var groups = new SwitchableGroups(online);
+        var hub = CreateGuardedSut(defs, groups);
+
+        online.Add("dev_a");
+        var first = await hub.TryEnsureDirectChatAsync("dev_a", "agent_g", "受限助手", null);
+        // 幂等复用：仍在白名单 → 正常返回同一会话
+        var again = await hub.TryEnsureDirectChatAsync("dev_a", "agent_g", "受限助手", null);
+        Assert.Equal(first.GroupId, again.GroupId);
+
+        // 被移出白名单后：即使会话已存在，也必须拒绝（不能靠复用绕过）
+        online.Remove("dev_a");
+        await Assert.ThrowsAsync<AguiProtocolException>(
+            () => hub.TryEnsureDirectChatAsync("dev_a", "agent_g", "受限助手", null));
+    }
+
+    private sealed class SwitchableGroups(HashSet<string> members) : IUserGroupService
+    {
+        public bool UserInAnyGroup(string userId, IReadOnlyList<string>? groupIds)
+            => groupIds is { Count: > 0 } && groupIds.Contains("ug_rnd") && members.Contains(userId);
+
+        public IReadOnlyList<string> GroupsOfUser(string userId)
+            => members.Contains(userId) ? ["ug_rnd"] : [];
     }
 
     [Fact]

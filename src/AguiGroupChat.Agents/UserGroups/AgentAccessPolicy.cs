@@ -34,4 +34,23 @@ public static class AgentAccessPolicy
     /// <summary>为“拉入/注册触发/启单聊”保留的强校验：CanAccess 之外，仍是仅 owner（+admin）可见。</summary>
     public static bool CanAccess(string? callerUserId, bool isAdmin, string? ownerIdOfAgent)
         => callerUserId is not null && (isAdmin || ownerIdOfAgent is null || ownerIdOfAgent == callerUserId);
+
+    /// <summary>
+    /// 目录（数字员工列表 / 成员勾选）可见性判定。与 <see cref="CanAccess"/> 同源，但多一条匿名规则：
+    /// 未登录者仍可看到「公开且未限定用户组」的数字员工（目录是登录前也可浏览的公开面）。
+    /// 供目录列表与单聊入口共用，避免同一授权规则出现两份实现而漂移。
+    /// </summary>
+    /// <param name="callerUserId">登录用户 id；匿名传 null。</param>
+    public static bool CanSeeInCatalog(
+        UserGroupStore groups,
+        bool isAdmin,
+        string? callerUserId,
+        AgentDefinition def)
+    {
+        // 技能目标（系统自生成的子代理）不出现在目录中
+        if (def.IsSkillTarget) return false;
+        if (callerUserId is null)
+            return !def.IsPrivate && def.AllowedGroupIds is not { Count: > 0 };
+        return CanAccess(groups, isAdmin, callerUserId, def);
+    }
 }
