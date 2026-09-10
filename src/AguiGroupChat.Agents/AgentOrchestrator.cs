@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
@@ -13,8 +14,25 @@ namespace AguiGroupChat.Agents;
 /// </summary>
 public static class AgentOrchestrator
 {
+    /// <summary>
+    /// 技能库中可复用技能的轻量投影（供编排提示词列举）。只带模型判断所需的最小信息：
+    /// id / 名称 / 用途说明 / 类型 —— 不带正文（正文进提示词会很长且无用）。
+    /// </summary>
+    public sealed record ReusableSkill(string SkillId, string Name, string Description, string Kind);
+
+    /// <summary>从技能库构造可复用技能清单（只列非内置的也能列；内置的同样可复用）。</summary>
+    public static IReadOnlyList<ReusableSkill> ToReusableSkills(IEnumerable<AgentSkillDefinition>? skills)
+        => (skills ?? [])
+            .Where(s => !string.IsNullOrWhiteSpace(s.SkillId))
+            // org_deploy / org_design 属构建师自身的工具，不应被编排挂到普通岗位
+            .Where(s => s.Kind != AgentSkillKind.Org_deploy)
+            .Where(s => !string.Equals(s.SkillId, "org_design", StringComparison.OrdinalIgnoreCase))
+            .Select(s => new ReusableSkill(s.SkillId, s.Name ?? s.SkillId, s.Description ?? "", s.Kind.ToString().ToLowerInvariant()))
+            .ToList();
     /// <summary>生成组织方案。真实模型走 OpenAI 兼容接口；mock 走确定性模板。</summary>
-    public static async Task<OrchestrationPlan> GenerateAsync(AgentOptions options, string requirement, ILogger logger, CancellationToken ct)
+    /// <param name="reusableSkills">技能库中可复用的现成技能（可为空）。编排优先引用它们，避免重复造轮子。</param>
+    public static async Task<OrchestrationPlan> GenerateAsync(AgentOptions options, string requirement, ILogger logger, CancellationToken ct,
+        IReadOnlyList<ReusableSkill>? reusableSkills = null)
     {
         var req = (requirement ?? "").Trim();
         if (req.Length < 2) throw new InvalidOperationException("需求描述至少 2 个字符");
@@ -38,7 +56,7 @@ public static class AgentOrchestrator
 
         try
         {
-            var prompt = BuildPrompt(req);
+            var prompt = BuildPrompt(req, reusableSkills);
             var resp = await client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct);
             var text = resp.Text?.Trim();
             if (string.IsNullOrWhiteSpace(text))
@@ -58,7 +76,8 @@ public static class AgentOrchestrator
     /// 结束后把完整文本交给调用方 <see cref="Parse"/> 得到结构化方案。mock 模式无真实模型，整段模板拆几段产出。</summary>
     public static async IAsyncEnumerable<string> StreamTextAsync(
         AgentOptions options, string requirement, ILogger logger,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
+        IReadOnlyList<ReusableSkill>? reusableSkills = null)
     {
         var req = (requirement ?? "").Trim();
         if (string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
@@ -89,7 +108,7 @@ public static class AgentOrchestrator
 
         try
         {
-            var prompt = BuildPrompt(req);
+            var prompt = BuildPrompt(req, reusableSkills);
             await foreach (var update in client.GetStreamingResponseAsync(
                 [new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct))
             {
@@ -104,7 +123,7 @@ public static class AgentOrchestrator
         }
     }
 
-    private static string BuildPrompt(string requirement)
+    private static string BuildPrompt(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills = null)
     {
         var deliberate = AgentCatalog.DeliberateFirstLine;
         return deliberate +
@@ -141,9 +160,39 @@ public static class AgentOrchestrator
             "- 顶层主管的 escalationAgentId 留空；叶子执行岗没有下级、assignmentIds 留空。\n" +
             "要点：凡是<b>被别人设为 escalationAgentId 的岗位</b>，它的 assignmentIds 必须包含那些提升到它的下级，不能留空——否则只有“下级往上报问题”、没有“上级往下派任务”，组织不成立。\n" +
             "技能要贴合岗位职责，数量 1~6 个。\n\n" +
-            "只输出最终 JSON（如下结构，字段补齐、可加多余岗位/技能项；简述已在开头给出，最终成稿不再重复简述，也不要 ``` 围栏）：\n" +
+            BuildReusableSkillsSection(reusableSkills) +
+            "只输出最终 JSON（如下结构，字段补齐、可加多余岗位/技能项；简述已在开头给出，最终成稿不再重复简述，也不要 " + Fence() + " 围栏）：\n" +
             "{\"title\":\"<组织名>\",\"agents\":[{\"agentId\":\"\",\"nickname\":\"\",\"description\":\"\",\"instructions\":\"\",\"triggerMode\":\"mentioned\",\"skillIds\":[],\"assignmentIds\":[],\"escalationAgentId\":null,\"relayToAgentId\":null,\"memoryProfile\":\"deep\"}],\"skills\":[{\"skillId\":\"\",\"name\":\"\",\"description\":\"\",\"kind\":\"prompt\",\"body\":\"\",\"executionLocation\":\"server\",\"requiresApproval\":false}]}\n\n" +
             "用户需求：" + requirement;
+    }
+
+    /// <summary>测试钩子：暴露提示词构造，便于断言“可复用技能清单确实进了提示词”。勿在生产路径调用。</summary>
+    internal static string BuildPromptForTest(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills)
+        => BuildPrompt(requirement, reusableSkills);
+
+    /// <summary>围栏字符（避免在源码里字面书写三重反引号）。</summary>
+    private static string Fence() => new string((char)96, 3);
+
+    /// <summary>
+    /// 可复用技能清单段落：列出技能库中现成技能，要求模型<b>优先引用</b>（直接写进 skillIds，
+    /// 不需要在 skills 里重复定义），只有库里确实没有合适能力时才自建。
+    /// </summary>
+    private static string BuildReusableSkillsSection(IReadOnlyList<ReusableSkill>? reusableSkills)
+    {
+        if (reusableSkills is null || reusableSkills.Count == 0) return "";
+
+        var sb = new StringBuilder();
+        sb.Append("【技能库中已有的可复用技能】（优先复用；直接把这些 skillId 写进岗位的 skillIds，<b>不要</b>在 skills 里重复定义）：\n");
+        foreach (var s in reusableSkills.Take(40))
+        {
+            var desc = s.Description.Length > 120 ? s.Description.Substring(0, 120) + "…" : s.Description;
+            sb.Append("- ").Append(s.SkillId).Append("（").Append(s.Name).Append("，kind=").Append(s.Kind).Append("）：").Append(desc).Append('\n');
+        }
+        sb.Append("\n复用规则（很重要）：\n");
+        sb.Append("- 若某岗位的职责能被上面的技能覆盖（如“生成 Word 文档/公文/报告”对应 docx_* 技能），**必须直接引用它**，不要另建 prompt 技能。\n");
+        sb.Append("- 引用写在 skillIds 里；skills 数组里<b>只放</b>库中没有、需要新造的技能。\n");
+        sb.Append("- 若 skills 里新造的技能与上面某个已有技能同 id，视为重复，应改为直接引用。\n\n");
+        return sb.ToString();
     }
 
     /// <summary>解析模型生成的 JSON 文本为结构化方案（供流式端点收尾使用）。失败抛明确异常。</summary>

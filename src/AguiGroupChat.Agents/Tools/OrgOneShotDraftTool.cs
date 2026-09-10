@@ -17,11 +17,13 @@ public sealed class OrgOneShotDraftTool
 {
     private readonly AgentOptions _options;
     private readonly ILogger _logger;
+    private readonly AgentSkillCatalog? _skillCatalog;
 
-    public OrgOneShotDraftTool(AgentOptions options, ILoggerFactory loggerFactory)
+    public OrgOneShotDraftTool(AgentOptions options, ILoggerFactory loggerFactory, AgentSkillCatalog? skillCatalog = null)
     {
         _options = options;
         _logger = loggerFactory.CreateLogger<OrgOneShotDraftTool>();
+        _skillCatalog = skillCatalog;
     }
 
     /// <summary>
@@ -38,7 +40,9 @@ public sealed class OrgOneShotDraftTool
 
         try
         {
-            var plan = await AgentOrchestrator.GenerateAsync(_options, requirement.Trim(), _logger, CancellationToken.None);
+            // 也带上技能库里的现成可复用技能：让构建师优先引用（与网页一键编排同一口径）
+            var reusable = AgentOrchestrator.ToReusableSkills(_skillCatalog?.ListAll());
+            var plan = await AgentOrchestrator.GenerateAsync(_options, requirement.Trim(), _logger, CancellationToken.None, reusable);
 
             // 与 org_commit 期望的 one-click apply 相一致的字段名（agentId/skillIds/... 小驼峰）
             var json = JsonSerializer.Serialize(plan, new JsonSerializerOptions

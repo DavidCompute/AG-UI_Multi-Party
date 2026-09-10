@@ -57,12 +57,28 @@ public static class OrgApplyEngine
         ILoggerFactory loggerFactory, CancellationToken ct)
     {
         // ---- 1. 技能：去重 + 记录原→新映射，供数字员工引用重映射 (保持官方语义) ----
-        var occupiedSkills = new HashSet<string>(skillCatalog.ListAll().Select(s => s.SkillId), StringComparer.Ordinal);
+        // 库内已有的可复用技能：方案可直接引用（写在 skillIds），无需在 skills 里重复定义。
+        // 约定：<b>库内优先</b>——若方案又自建了同 id 技能，以库内那份为准（跳过自建），避免“同名两份、行为不一致”。
+        var librarySkills = skillCatalog.ListAll()
+            .Where(s => !string.IsNullOrWhiteSpace(s.SkillId))
+            .ToDictionary(s => s.SkillId, StringComparer.Ordinal);
+        var occupiedSkills = new HashSet<string>(librarySkills.Keys, StringComparer.Ordinal);
         var skillIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
         var builtSkills = new List<AgentSkillDefinition>(skills.Count);
+        var reusedSkills = new List<string>();
         foreach (var s in skills)
         {
             var orig = (s.SkillId ?? "").Trim();
+            // 「引用库内现成技能」与「方案自建同名技能」要区分开：
+            //   - 空正文 = 纯引用（如模型按指引直接挂 docx_report，只列 id/名称/描述）→ 复用库内那份，不重建；
+            //   - 有正文 = 真的造一个新技能，即使与库内同名也按既有语义改名避重（dup_skill → dup_skill_2），不覆盖。
+            var isEmptyReference = string.IsNullOrWhiteSpace(s.Body);
+            if (isEmptyReference && librarySkills.ContainsKey(orig))
+            {
+                skillIdMap[orig] = orig;
+                reusedSkills.Add(orig);
+                continue;
+            }
             var id = AgentSkillDefinition.IsValidAsciiToolId(orig)
                 ? AgentSkillDefinition.ToAsciiToolId(orig, occupiedSkills)
                 : AgentSkillDefinition.ToAsciiToolId(orig, occupiedSkills);
@@ -121,8 +137,9 @@ public static class OrgApplyEngine
         foreach (var a in agents)
         {
             var finalId = agentIdMap[(a.AgentId ?? "").Trim()];
+            // 引用的技能必须“要么在本次建出的技能里、要么是库内现成技能的空正文直接引用”
             foreach (var sid in a.SkillIds ?? [])
-                if (!skillIdMap.TryGetValue(sid, out _))
+                if (!skillIdMap.TryGetValue(sid, out _) && !librarySkills.ContainsKey(sid))
                     throw new OrgApplyException(ErrorCodes.BadRequest, $"数字员工「{finalId}」引用了未定义技能：{sid}");
             foreach (var dep in (a.AssignmentIds ?? []).Concat(new[] { a.EscalationAgentId, a.RelayToAgentId }).Where(x => !string.IsNullOrWhiteSpace(x)))
                 if (!agentIdMap.TryGetValue(dep!, out _))
@@ -134,7 +151,13 @@ public static class OrgApplyEngine
         foreach (var a in agents)
         {
             var id = agentIdMap[(a.AgentId ?? "").Trim()];
-            var remapSkill = (List<string>?)a.SkillIds?.Select(sid => skillIdMap[sid]).ToList();
+            // 技能引用重映射：本次新建的技能走 skillIdMap（可能被改名避让）；
+            // 直接引用库内技能的则不映射，原 id 落库（库内优先）。
+            var remapSkill = (List<string>?)a.SkillIds?
+                .Where(sid => !string.IsNullOrWhiteSpace(sid))
+                .Select(sid => skillIdMap.TryGetValue(sid, out var mapped) ? mapped : sid)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
             var remapAssign = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(d => agentIdMap[d]).ToList();
             catalog.Upsert(new AgentDefinition
             {

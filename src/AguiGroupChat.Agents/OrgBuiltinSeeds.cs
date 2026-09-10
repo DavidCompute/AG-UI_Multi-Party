@@ -53,6 +53,7 @@ public static class OrgBuiltinSeeds
 4) teamKey 全程稳定；agents 必须>=1 且每个都有 nickname；改动基于现状增量；请给足并闭合大括号，不截断、不占位省略。
 5) 连接方向必须成对给全，不要只给“问题提升”：<b>有直接下级的岗位</b>（主管/组长/经理…）在 assignmentIds 里列出它的全部直接下级 agentId（任务指派）；<b>非顶层岗位</b>把 escalationAgentId 指向直接上级（问题提升）；顶层主管 escalationAgentId 留空、叶子岗 assignmentIds 留空。凡是别人以它为 escalationAgentId 的岗位，它的 assignmentIds 必须包含那些下级，不能留空。
 6) agents 每岗位的 memoryProfile 为<b>可选</b>记忆拟人 preset key：broad（记得多易混，适合大量往来一线/客服）、deep（记得少而久，适合统筹/主管）、slowToLearn（难录入、需重复，适合重复套路岗）、cueDependent（存得住想不起、见提示才想起，适合顾问/售后/客户成功）、fastForgetting（旧事淡忘，适合值班/速查）；只影响该员工日后如何回忆历史，不改变能力；拿不准就 null（沿用全局默认）。
+7) <b>优先复用技能库里的现成技能</b>：若某个岗位的职责能被平台已有的可复用技能覆盖（如「生成 Word 文档/公文/报告」对应 docx_gongwen / docx_notice / docx_report），直接把这些 skillId 写进该岗位的 skillIds，<b>并在 skills 数组里把该技能按原 skillId 原样列一份</b>（可仅填 skillId/name/description/kind，body 留空即可）；只有库里确实没有合适能力时，才新造 prompt/shell/http/dotnet 技能。不要为「写文档」这类已具备的能力另造一个只能写字的 prompt 技能。
 输入需求/现有情况：
 {{query}}
 """;

@@ -309,7 +309,7 @@ public static class AgentApi
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 一键组织编排（预览，不落库）：根据一句话需求生成 数字员工组织架构 + 各岗位技能 + 岗位连接，供前端确认 ----
-        root.MapPost("/orchestrate", async (OrchestrateRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        root.MapPost("/orchestrate", async (OrchestrateRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, AguiGroupChat.Agents.AgentSkillCatalog skillCatalog, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -322,7 +322,8 @@ public static class AgentApi
             try
             {
                 var plan = await AgentOrchestrator.GenerateAsync(
-                    agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct);
+                    agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct,
+                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll()));
                 return Results.Ok(new
                 {
                     orchestrated = true,
@@ -366,7 +367,7 @@ public static class AgentApi
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 一键组织编排·流式（SSE）：逐 token 实时转发模型输出（方案 C），并实时统计已见岗位 / 技能，结束时下发完整方案 ----
-        root.MapPost("/orchestrate/stream", async (OrchestrateRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        root.MapPost("/orchestrate/stream", async (OrchestrateRequest req, HttpContext ctx, AuthService auth, AgentOptions agentOptions, AguiGroupChat.Agents.AgentSkillCatalog skillCatalog, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -395,7 +396,8 @@ public static class AgentApi
             {
                 var sb = new StringBuilder();
                 var lastProgressAt = 0L;
-                await foreach (var delta in AgentOrchestrator.StreamTextAsync(agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct))
+                await foreach (var delta in AgentOrchestrator.StreamTextAsync(agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct,
+                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll())))
                 {
                     sb.Append(delta);
                     await SendAsync(new { type = "token", delta }, ct);

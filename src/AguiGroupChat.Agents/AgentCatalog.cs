@@ -5,6 +5,7 @@ using AguiGroupChat.Agents.Tools;
 using AguiGroupChat.Hub.Persistence;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAI.Chat;
@@ -374,7 +375,7 @@ public sealed class AgentCatalog
 
             // 同角色的一键式首稿动作：复用网页「一键组织编排」同款单轮结构化生成（一次产出完整 JSON = 岗位+技能+连接，
             // 杜绝自由对话把组织稿磨成只见 pure prompt 的软稿）。只生成不落库；落库仍走上面 org_commit（管理员闸）。
-            var draftTool = new Tools.OrgOneShotDraftTool(_options, _loggerFactory);
+            var draftTool = new Tools.OrgOneShotDraftTool(_options, _loggerFactory, _services.GetService<AgentSkillCatalog>());
             var draftFunc = AIFunctionFactory.Create(draftTool.Draft, "org_plan_draft",
                 "当用户要求『整支设计/构建/打造一支组织/团队，或让组织设计出一个更好、更完整的架构图』时，优先调用本工具：" +
                 "把用户刚才说的构建需求用（与网页一键编排同一套）单轮结构化生成，一次性产出『数字员工岗位清单 + 各岗 skillIds + " +
