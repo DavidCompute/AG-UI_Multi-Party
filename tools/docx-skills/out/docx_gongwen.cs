@@ -1,10 +1,12 @@
 #r "nuget: DocumentFormat.OpenXml, 3.2.0"
+#r "nuget: SixLabors.ImageSharp, 2.1.5"
+#r "nuget: SixLabors.ImageSharp.Drawing, 1.0.0"
 
 // ============================================================================
 // docx_gongwen —— 公文（党政机关公文格式，参照 GB/T 9704-2012）
 //
 // 【何时使用】生成通知、通报、请示、批复、报告等公文正文时使用。三号仿宋正文、黑体层次标题、22pt 小标宋大标题、固定行距。
-// 【可用内容块】heading / paragraph / numbered / bullets / table / image / toc / pageBreak
+// 【可用内容块】heading / paragraph / numbered / bullets / table / image / chart / toc / pageBreak
 //
 // 入口：public static string Run(string input) -> JSON
 //   input = {
@@ -31,11 +33,20 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Drawing.Processing;
 using System;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+// 图表库与 OpenXML 存在同名类型（Color / PointF 等）：显式起别名，避开 CS0104 二义性
+using ImgColor = SixLabors.ImageSharp.Color;
+using ImgPointF = SixLabors.ImageSharp.PointF;
+using ImgRect = SixLabors.ImageSharp.Drawing.RectangularPolygon;
+using ImgEllipse = SixLabors.ImageSharp.Drawing.EllipsePolygon;
 
 public class Skill
 {
@@ -203,6 +214,12 @@ public class Skill
             var p = BuildImagePara(main, im);
             if (p != null) { body.AppendChild(p); return true; }
         }
+        // 图表：用 ImageSharp 渲成 PNG 再按图片嵌入（避开 DrawingML ChartPart 的 schema 风险）
+        if (s.TryGetProperty("chart", out var ch) && ch.ValueKind == JsonValueKind.Object)
+        {
+            var p = BuildChartPara(main, ch);
+            if (p != null) { body.AppendChild(p); return true; }
+        }
         return false;
     }
 
@@ -347,13 +364,290 @@ public class Skill
         var r4 = new Run(new RunProperties(
                 new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman", EastAsia = FontBody },
                 new FontSize { Val = SizeSmall.ToString() },
-                new Color { Val = "808080" },
+                new DocumentFormat.OpenXml.Wordprocessing.Color { Val = "808080" },
                 new Italic()),
             new Text("（目录将在 Word 中更新域后生成：全选后按 F9）") { Space = SpaceProcessingModeValues.Preserve });
         var r5 = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
 
         p.AppendChild(r1); p.AppendChild(r2); p.AppendChild(r3); p.AppendChild(r4); p.AppendChild(r5);
         return p;
+    }
+
+    // ===== 图表（柱状 / 折线 / 饼图）=====
+    // 用 ImageSharp 渲成 PNG，再沿用图片嵌入路径 —— 不发 ChartPart（避开 DrawingML 图表 schema 风险，
+    // 也不会在旧版 Word 里显示为“不可读内容”）。图表缩放/居中/图题与图片一致。
+    private static Paragraph? BuildChartPara(MainDocumentPart main, JsonElement ch)
+    {
+        var kind = (Str(ch, "type") ?? "bar").ToLowerInvariant();
+        var categories = new List<string>();
+        if (ch.TryGetProperty("categories", out var cat) && cat.ValueKind == JsonValueKind.Array)
+            foreach (var c in cat.EnumerateArray()) categories.Add(c.ValueKind == JsonValueKind.String ? c.GetString() ?? "" : c.ToString());
+
+        // series: [{ name, values: [...] }]，也容忍 values 直接写在顶层
+        var series = new List<(string Name, double[] Values)>();
+        if (ch.TryGetProperty("series", out var sr) && sr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var one in sr.EnumerateArray())
+            {
+                if (one.ValueKind != JsonValueKind.Object) continue;
+                var nm = Str(one, "name") ?? "";
+                series.Add((nm, ReadNumbers(one, "values")));
+            }
+        }
+        if (series.Count == 0) series.Add(("", ReadNumbers(ch, "values")));
+        if (series.All(s => s.Values.Length == 0)) throw new InvalidOperationException("图表缺少数据：请提供 series[].values 或 values");
+        if (categories.Count == 0)
+        {
+            int max = series.Max(s => s.Values.Length);
+            for (int i = 0; i < max; i++) categories.Add((i + 1).ToString());
+        }
+
+        var title = Str(ch, "title");         // 图内标题（可选）
+        var yLabel = Str(ch, "yLabel");        // Y 轴单位（可选）
+        var caption = Str(ch, "caption");      // 图题（可选）
+
+        int pxW = 900, pxH = 480;
+        if (ch.TryGetProperty("pixelWidth", out var pw) && pw.ValueKind == JsonValueKind.Number) pxW = Math.Max(320, Math.Min(2400, pw.GetInt32()));
+        if (ch.TryGetProperty("pixelHeight", out var ph) && ph.ValueKind == JsonValueKind.Number) pxH = Math.Max(200, Math.Min(1600, ph.GetInt32()));
+
+        var png = kind switch
+        {
+            "pie" => RenderPie(pxW, pxH, title, categories, series[0].Values),
+            "line" => RenderLine(pxW, pxH, title, yLabel, categories, series),
+            _ => RenderBar(pxW, pxH, title, yLabel, categories, series),
+        };
+
+        var imagePart = main.AddImagePart(ImagePartType.Png);
+        using (var ms = new MemoryStream(png)) imagePart.FeedData(ms);
+        var relId = main.GetIdOfPart(imagePart);
+
+        double widthCm = 14.0;
+        if (ch.TryGetProperty("widthCm", out var wc) && wc.ValueKind == JsonValueKind.Number) widthCm = wc.GetDouble();
+        widthCm = Math.Max(3.0, Math.Min(24.0, widthCm));
+        long cx = (long)Math.Round(widthCm * 360000.0);
+        long cy = (long)Math.Round(cx * (double)pxH / pxW);
+
+        return ImageDrawingParagraph(relId, cx, cy, caption, Str(ch, "alt") ?? title);
+    }
+
+    private static double[] ReadNumbers(JsonElement o, string name)
+    {
+        if (!o.TryGetProperty(name, out var v) || v.ValueKind != JsonValueKind.Array) return Array.Empty<double>();
+        var list = new List<double>();
+        foreach (var x in v.EnumerateArray())
+        {
+            if (x.ValueKind == JsonValueKind.Number) list.Add(x.GetDouble());
+            else if (x.ValueKind == JsonValueKind.String && double.TryParse(x.GetString(), out var d)) list.Add(d);
+        }
+        return list.ToArray();
+    }
+
+    // 配色（低饱和，打印友好）
+    private static readonly string[] Palette =
+        { "#4F81BD", "#C0504D", "#9BBB59", "#8064A2", "#4BACC6", "#F79646", "#2C4D75", "#772C2A" };
+
+    private static readonly string[] FontCandidates =
+        { "Microsoft YaHei", "SimHei", "SimSun", "Arial", "DejaVu Sans" };
+
+    private static readonly object _fontLock = new object();
+    private static SixLabors.Fonts.FontFamily? _fontFamily;
+
+    /// <summary>取一个可用的无衬线字体（含 CJK 覆盖）；找不到则抛出可读错误。</summary>
+    private static SixLabors.Fonts.Font Family(float size)
+    {
+        lock (_fontLock)
+        {
+            if (_fontFamily is null)
+            {
+                foreach (var name in FontCandidates)
+                {
+                    if (SixLabors.Fonts.SystemFonts.TryGet(name, out var f)) { _fontFamily = f; break; }
+                }
+                if (_fontFamily is null && SixLabors.Fonts.SystemFonts.Collection.Families.Any())
+                    _fontFamily = SixLabors.Fonts.SystemFonts.Collection.Families.First();
+                if (_fontFamily is null)
+                    throw new InvalidOperationException("图表需要至少一种系统字体，但当前环境未发现可用字体。");
+            }
+            return _fontFamily.Value.CreateFont(size);
+        }
+    }
+
+    private static byte[] RenderBar(int w, int h, string? title, string? yLabel, List<string> cats, List<(string Name, double[] Values)> series)
+    {
+        using var img = new Image<Rgba32>(w, h);
+        int padL = 78, padR = 28, padT = title is null ? 36 : 64, padB = 64;
+        double maxV = Math.Max(0.0001, series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max());
+        img.Mutate(x =>
+        {
+            x.Fill(ImgColor.White);
+            if (title is not null) x.DrawText(title, Family(24f), ImgColor.Black, new ImgPointF(padL, 22));
+
+            // Y 轴刻度 + 网格
+            int ticks = 4;
+            for (int i = 0; i <= ticks; i++)
+            {
+                float y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
+                x.DrawLine(ImgColor.FromRgba(210, 210, 210, 255), 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
+                var label = (maxV * i / ticks).ToString("0.##");
+                x.DrawText(label, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, y - 9));
+            }
+            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
+            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
+            if (!string.IsNullOrWhiteSpace(yLabel)) x.DrawText(yLabel!, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, padT - 20));
+
+            int nc = cats.Count;
+            int ns = series.Count;
+            double slot = (w - padL - padR) / (double)Math.Max(1, nc);
+            double barW = Math.Max(4, slot * 0.72 / ns);
+
+            for (int c = 0; c < nc; c++)
+            {
+                for (int s = 0; s < ns; s++)
+                {
+                    double v = c < series[s].Values.Length ? series[s].Values[c] : 0;
+                    if (v < 0) v = 0;
+                    float bh = (float)((h - padT - padB) * (v / maxV));
+                    float bx = (float)(padL + slot * c + slot * 0.14 + barW * s);
+                    float by = h - padB - bh;
+                    var color = ImgColor.ParseHex(Palette[(ns > 1 ? s : c) % Palette.Length]);
+                    if (bh > 0.5f) x.Fill(color, new ImgRect(bx, by, (float)barW, bh));
+                }
+                // X 轴类别标签（居中于 slot；过长截断）
+                var lab = cats[c].Length > 8 ? cats[c].Substring(0, 8) + "…" : cats[c];
+                var tw = SixLabors.Fonts.TextMeasurer.MeasureBounds(lab, new SixLabors.Fonts.TextOptions(Family(13f))).Width;
+                x.DrawText(lab, Family(13f), ImgColor.Black, new ImgPointF((float)(padL + slot * c + slot / 2 - tw / 2), h - padB + 8));
+            }
+
+            // 图例（多系列才显示）
+            if (ns > 1)
+            {
+                float lx = padL;
+                float ly = padT - 24;
+                for (int s = 0; s < ns; s++)
+                {
+                    var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
+                    var color = ImgColor.ParseHex(Palette[s % Palette.Length]);
+                    x.Fill(color, new ImgRect(lx, ly, 14, 14));
+                    x.DrawText(nm, Family(13f), ImgColor.Black, new ImgPointF(lx + 19, ly - 2));
+                    lx += 19 + SixLabors.Fonts.TextMeasurer.MeasureBounds(nm, new SixLabors.Fonts.TextOptions(Family(13f))).Width + 22;
+                }
+            }
+        });
+        using var outMs = new MemoryStream();
+        img.SaveAsPng(outMs);
+        return outMs.ToArray();
+    }
+
+    private static byte[] RenderLine(int w, int h, string? title, string? yLabel, List<string> cats, List<(string Name, double[] Values)> series)
+    {
+        using var img = new Image<Rgba32>(w, h);
+        int padL = 78, padR = 28, padT = title is null ? 36 : 64, padB = 64;
+        var all = series.SelectMany(s => s.Values).DefaultIfEmpty(0).ToList();
+        double minV = Math.Min(0, all.Min());
+        double maxV = Math.Max(0.0001, all.Max());
+        if (maxV - minV < 0.0001) maxV = minV + 1;
+
+        img.Mutate(x =>
+        {
+            x.Fill(ImgColor.White);
+            if (title is not null) x.DrawText(title, Family(24f), ImgColor.Black, new ImgPointF(padL, 22));
+
+            int ticks = 4;
+            for (int i = 0; i <= ticks; i++)
+            {
+                float y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
+                x.DrawLine(ImgColor.FromRgba(210, 210, 210, 255), 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
+                var label = (minV + (maxV - minV) * i / ticks).ToString("0.##");
+                x.DrawText(label, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, y - 9));
+            }
+            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
+            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
+            if (!string.IsNullOrWhiteSpace(yLabel)) x.DrawText(yLabel!, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, padT - 20));
+
+            int nc = cats.Count;
+            double slot = (w - padL - padR) / (double)Math.Max(1, nc - 1 == 0 ? 1 : nc - 1);
+            for (int s = 0; s < series.Count; s++)
+            {
+                var color = ImgColor.ParseHex(Palette[s % Palette.Length]);
+                var pts = new List<PointF>();
+                for (int c = 0; c < cats.Count; c++)
+                {
+                    double v = c < series[s].Values.Length ? series[s].Values[c] : minV;
+                    float px = nc == 1 ? padL + (w - padL - padR) / 2f : (float)(padL + slot * c);
+                    float py = (float)(h - padB - (h - padT - padB) * ((v - minV) / (maxV - minV)));
+                    pts.Add(new ImgPointF(px, py));
+                }
+                for (int i = 1; i < pts.Count; i++) x.DrawLine(color, 2.4f, pts[i - 1], pts[i]);
+                for (int i = 0; i < pts.Count; i++) x.Fill(color, new ImgEllipse(pts[i].X, pts[i].Y, 4f));
+            }
+            for (int c = 0; c < cats.Count; c++)
+            {
+                var lab = cats[c].Length > 8 ? cats[c].Substring(0, 8) + "…" : cats[c];
+                float px = nc == 1 ? padL + (w - padL - padR) / 2f : (float)(padL + slot * c);
+                var tw = SixLabors.Fonts.TextMeasurer.MeasureBounds(lab, new SixLabors.Fonts.TextOptions(Family(13f))).Width;
+                x.DrawText(lab, Family(13f), ImgColor.Black, new ImgPointF(px - tw / 2, h - padB + 8));
+            }
+            if (series.Count > 1)
+            {
+                float lx = padL; float ly = padT - 24;
+                for (int s = 0; s < series.Count; s++)
+                {
+                    var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
+                    x.Fill(ImgColor.ParseHex(Palette[s % Palette.Length]), new ImgRect(lx, ly, 14, 14));
+                    x.DrawText(nm, Family(13f), ImgColor.Black, new ImgPointF(lx + 19, ly - 2));
+                    lx += 19 + SixLabors.Fonts.TextMeasurer.MeasureBounds(nm, new SixLabors.Fonts.TextOptions(Family(13f))).Width + 22;
+                }
+            }
+        });
+        using var outMs = new MemoryStream();
+        img.SaveAsPng(outMs);
+        return outMs.ToArray();
+    }
+
+    private static byte[] RenderPie(int w, int h, string? title, List<string> cats, double[] values)
+    {
+        using var img = new Image<Rgba32>(w, h);
+        double total = values.Where(v => v > 0).Sum();
+        if (total <= 0) throw new InvalidOperationException("饼图数据全部为 0，无法绘制。");
+
+        img.Mutate(x =>
+        {
+            x.Fill(ImgColor.White);
+            if (title is not null) x.DrawText(title, Family(24f), ImgColor.Black, new ImgPointF(24, 18));
+
+            float cy = h / 2f + 10, cx = w * 0.34f;
+            float r = Math.Min(w * 0.30f, h * 0.40f);
+            // 角度用度（PathBuilder.AddArc 的 startAngle/sweepAngle 为度）
+            float startDeg = -90f;
+            for (int i = 0; i < values.Length; i++)
+            {
+                double v = values[i] <= 0 ? 0 : values[i];
+                if (v == 0) continue;
+                float sweepDeg = (float)(360.0 * (v / total));
+                var pb = new SixLabors.ImageSharp.Drawing.PathBuilder();
+                pb.AddArc(new ImgPointF(cx, cy), r, r, 0f, startDeg, sweepDeg);
+                x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), pb.Build());
+                startDeg += sweepDeg;
+            }
+            // 外圈描边
+            x.Draw(ImgColor.Black, 1f, new ImgEllipse(cx, cy, r));
+
+            // 图例
+            float lx = w * 0.68f, ly = h * 0.30f;
+            for (int i = 0; i < cats.Count; i++)
+            {
+                double v = i < values.Length ? Math.Max(0, values[i]) : 0;
+                var pct = (v / total * 100).ToString("0.#") + "%";
+                var nm = cats[i] + "  " + pct;
+                if (nm.Length > 22) nm = nm.Substring(0, 22) + "…";
+                x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), new ImgRect(lx, ly, 14, 14));
+                x.DrawText(nm, Family(14f), ImgColor.Black, new ImgPointF(lx + 20, ly - 3));
+                ly += 24;
+            }
+        });
+        using var outMs = new MemoryStream();
+        img.SaveAsPng(outMs);
+        return outMs.ToArray();
     }
 
     // ===== 图片（内联）=====
@@ -400,18 +694,24 @@ public class Skill
         long cx = (long)Math.Round(widthCm * 360000.0);
         long cy = pxW > 0 && pxH > 0 ? (long)Math.Round(cx * (double)pxH / pxW) : (long)Math.Round(cx * 0.75);
 
+        return ImageDrawingParagraph(relId, cx, cy, Str(im, "caption"), Str(im, "alt"));
+    }
+
+    /// <summary>把已嵌入的图片部件包成一个居中段落（可带图题与替代文本）。</summary>
+    private static Paragraph ImageDrawingParagraph(string relId, long cx, long cy, string? caption, string? alt)
+    {
         var drawing = new Drawing(
             new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline(
                 new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = cx, Cy = cy },
                 new DocumentFormat.OpenXml.Drawing.Wordprocessing.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
-                new DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties { Id = NextDrawingId(), Name = "Picture " + relId },
+                new DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties { Id = NextDrawingId(), Name = "Picture " + relId, Description = string.IsNullOrWhiteSpace(alt) ? null : Safe(alt!) },
                 new DocumentFormat.OpenXml.Drawing.Wordprocessing.NonVisualGraphicFrameDrawingProperties(
                     new DocumentFormat.OpenXml.Drawing.GraphicFrameLocks { NoChangeAspect = true }),
                 new DocumentFormat.OpenXml.Drawing.Graphic(
                     new DocumentFormat.OpenXml.Drawing.GraphicData(
                         new DocumentFormat.OpenXml.Drawing.Pictures.Picture(
                             new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualPictureProperties(
-                                new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualDrawingProperties { Id = 0U, Name = Path.GetFileName(full) },
+                                new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualDrawingProperties { Id = 0U, Name = "image" },
                                 new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualPictureDrawingProperties()),
                             new DocumentFormat.OpenXml.Drawing.BlipFill(
                                 new DocumentFormat.OpenXml.Drawing.Blip { Embed = relId },
@@ -424,9 +724,7 @@ public class Skill
                     { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
             { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U });
 
-        var caption = Str(im, "caption");
-        var ppr = new ParagraphProperties(new Justification { Val = JustificationValues.Center });
-        var p = new Paragraph(ppr);
+        var p = new Paragraph(new ParagraphProperties(new Justification { Val = JustificationValues.Center }));
         p.AppendChild(new Run(drawing));
         if (!string.IsNullOrWhiteSpace(caption))
         {
@@ -434,14 +732,7 @@ public class Skill
             p.AppendChild(new Run(new RunProperties(
                     new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman", EastAsia = FontBody },
                     new FontSize { Val = SizeSmall.ToString() }),
-                new Text(Safe(caption)) { Space = SpaceProcessingModeValues.Preserve }));
-        }
-        if (Str(im, "alt") is { } alt && !string.IsNullOrWhiteSpace(alt))
-        {
-            if (p.Elements<Run>().FirstOrDefault()?.GetFirstChild<Drawing>() is { } dr
-                && dr.GetFirstChild<DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline>() is { } inl
-                && inl.GetFirstChild<DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties>() is { } dp)
-                dp.Description = Safe(alt); // 可访问性：图片替代文本
+                new Text(Safe(caption!)) { Space = SpaceProcessingModeValues.Preserve }));
         }
         return p;
     }
