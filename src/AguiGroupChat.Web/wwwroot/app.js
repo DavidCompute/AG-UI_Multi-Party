@@ -1894,37 +1894,50 @@ const MEMORY_TYPE_KEYS = ["broad", "deep", "slowToLearn", "cueDependent", "fastF
 
 /** 数字员工可访问的用户组白名单（Array<groupId>，编辑态；空数组/未配置 = 不设限）。 */
 let agentAllowedGroupIds = [];
-let allUserGroupsCache = []; // [{groupId,name,...}]
+let allUserGroupsCache = []; // [{groupId,name,...}] —— 管理员可拿全量（含成员）
+let userGroupListLoaded = false;
 
-/** 管理员打开数字员工编辑时，拉取/渲染“允许访问的用户组”多选（非管理员隐藏该能力以免误解）。 */
+/** 管理员打开数字员工编辑时，拉取用户组备选并渲染“已选”（非管理员隐藏该区，避免误解）。 */
 async function loadAllowGroupOptions() {
   const wrap = $("afGroupAllowWrap");
   if (!wrap) return;
   if (!state.isAdmin) { wrap.style.display = "none"; return; }
+  wrap.style.display = "block";
   try {
-    const res = await apiRaw("GET", "/ag-ui/usergroups");
-    if (!res.ok) throw new Error(String(res.status));
-    allUserGroupsCache = (await res.json()) || [];
-    if (!allUserGroupsCache.length) { wrap.style.display = "none"; return; }
-    wrap.style.display = "block";
-    renderAgentAllowGroups();
-  } catch { wrap.style.display = "none"; }
+    if (!userGroupListLoaded) {
+      const res = await apiRaw("GET", "/ag-ui/usergroups");
+      if (res.ok) { allUserGroupsCache = (await res.json()) || []; userGroupListLoaded = true; }
+    }
+  } catch { /* 加载失败：已选区仍展示（名称回退到 id） */ }
+  renderAllowGroupPicks();
 }
 
-function renderAgentAllowGroups() {
+/** 表单内「已选用户组」罗列（与技能 / 知识库一致：仅列已选，备选在弹窗中勾选）。 */
+function renderAllowGroupPicks() {
   const el = $("afAllowGroupList");
   if (!el) return;
-  el.innerHTML = allUserGroupsCache.map((g) => {
-    const on = (agentAllowedGroupIds || []).includes(g.groupId);
-    return `<label class="allow-chip" style="display:flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" class="afAllowGrp" data-gid="${escapeHtml(g.groupId)}" ${on ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff"/> ${escapeHtml(g.name)}</label>`;
-  }).join("");
-  el.querySelectorAll("input.afAllowGrp").forEach((cb) => {
-    cb.onchange = () => {
-      const gid = cb.dataset.gid;
-      if (cb.checked) { if (!agentAllowedGroupIds.includes(gid)) agentAllowedGroupIds.push(gid); }
-      else agentAllowedGroupIds = agentAllowedGroupIds.filter((x) => x !== gid);
-    };
+  // 已加载备选时清理已删除 / 不可见的引用
+  if (userGroupListLoaded) {
+    const valid = new Set((allUserGroupsCache || []).map((g) => g.groupId));
+    agentAllowedGroupIds = agentAllowedGroupIds.filter((id) => valid.has(id));
+  }
+  el.innerHTML = "";
+  if (!agentAllowedGroupIds.length) {
+    el.innerHTML = `<span class="form-hint">${t("agent.form.allowedGroupEmpty")}</span>`;
+    return;
+  }
+  agentAllowedGroupIds.forEach((gid) => {
+    const g = (allUserGroupsCache || []).find((x) => x.groupId === gid);
+    const row = document.createElement("div");
+    row.className = "af-sel-row";
+    const info = document.createElement("span");
+    info.className = "sel-main";
+    info.innerHTML = `<span class="skill-kind tag-agent">👥</span><b class="sel-name">${escapeHtml(g?.name || gid)}</b>`
+      + `<code>${escapeHtml(gid)}</code>`
+      + (g?.memberUserIds?.length ? `<span class="sel-desc">${t("agent.form.allowedGroupMembers", { n: g.memberUserIds.length })}</span>` : "");
+    row.appendChild(info);
+    row.appendChild(makeSelectedRemoveBtn(gid, "usergroup"));
+    el.appendChild(row);
   });
 }
 
@@ -2623,6 +2636,9 @@ function makeSelectedRemoveBtn(id, kind) {
     } else if (kind === "kb") {
       agentKbIds = agentKbIds.filter((x) => x !== id);
       renderKbPicks();
+    } else if (kind === "usergroup") {
+      agentAllowedGroupIds = agentAllowedGroupIds.filter((x) => x !== id);
+      renderAllowGroupPicks();
     }
   };
   return b;
@@ -2642,8 +2658,17 @@ function subAgentDefaultDesc(id) {
     : `调用数字员工「${id}」处理相关事务。`;
 }
 
-let agentPickKind = "";     // 选取弹窗当前种类：skill / agent / kb
+let agentPickKind = "";     // 选取弹窗当前种类：skill / agent / kb / usergroup
 let agentPickQuery = "";    // 选取弹窗搜索词（仅前端过滤）
+
+/** 选取弹窗用：拉取用户组备选（管理员全量）。 */
+async function loadUserGroupsForPick() {
+  try {
+    const res = await apiRaw("GET", "/ag-ui/usergroups");
+    if (res.ok) { allUserGroupsCache = (await res.json()) || []; userGroupListLoaded = true; }
+  } catch { /* 忽略：列表显示空态 */ }
+  renderAllowGroupPicks();
+}
 
 /** 打开独立选取弹窗（skill=可复用技能 / agent=可调用子数字员工 / kb=知识库）。 */
 async function openAgentPick(kind) {
@@ -2654,11 +2679,13 @@ async function openAgentPick(kind) {
   if (search) search.value = "";
   $("agentPickTitle").textContent = t({
     skill: "agent.form.pick.title.skill", agent: "agent.form.pick.title.agent", kb: "agent.form.pick.title.kb",
+    usergroup: "agent.form.pick.title.usergroup",
   }[kind] || "agent.form.pick.title.skill");
-  // 备选数据确保就绪（技能库 / 知识库可能尚未加载过）
+  // 备选数据确保就绪（技能库 / 知识库 / 用户组可能尚未加载过）
   try {
     if (kind === "skill" && !skillList.length) await loadSkills();
     else if (kind === "kb") await loadKbs();
+    else if (kind === "usergroup") await loadUserGroupsForPick();
   } catch { /* 加载失败不阻塞弹窗，列表显示空态 */ }
   $("agentPickModal").classList.remove("hidden");
   renderAgentPickList();
@@ -2679,6 +2706,10 @@ function agentPickToggle(kind, id, on) {
     if (on) { if (!agentKbIds.includes(id)) agentKbIds.push(id); }
     else agentKbIds = agentKbIds.filter((x) => x !== id);
     renderKbPicks();
+  } else if (kind === "usergroup") {
+    if (on) { if (!agentAllowedGroupIds.includes(id)) agentAllowedGroupIds.push(id); }
+    else agentAllowedGroupIds = agentAllowedGroupIds.filter((x) => x !== id);
+    renderAllowGroupPicks();
   }
   renderAgentPickList();
 }
@@ -2736,6 +2767,23 @@ function renderAgentPickList() {
         + (kb.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(kb.description)}</span>` : "")
         + ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.kb.docCount", { count: (kb.documents || []).length })}</span>`;
       row.querySelector("input").addEventListener("change", (e) => agentPickToggle("kb", kb.kbId, e.target.checked));
+      el.appendChild(row);
+      count++;
+    });
+  } else if (agentPickKind === "usergroup") {
+    (allUserGroupsCache || []).forEach((g) => {
+      const hay = `${g.name || ""} ${g.groupId} ${g.description || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const on = agentAllowedGroupIds.includes(g.groupId);
+      const row = document.createElement("label");
+      row.className = "kb-pick-item" + (on ? " on" : "");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
+      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+        + `<span>👥</span>`
+        + `<b>${escapeHtml(g.name || g.groupId)}</b> <code>${escapeHtml(g.groupId)}</code>`
+        + (g.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(g.description)}</span>` : "")
+        + (g.memberUserIds ? ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.allowedGroupMembers", { n: (g.memberUserIds || []).length })}</span>` : "");
+      row.querySelector("input").addEventListener("change", (e) => agentPickToggle("usergroup", g.groupId, e.target.checked));
       el.appendChild(row);
       count++;
     });
@@ -9131,6 +9179,9 @@ function init() {
   // 知识库：管理弹窗（入口在「AI 角色管理」工具栏）+ 创建
   $("agentKbManageBtn").onclick = openKbModal;
   $("afKbAddBtn").onclick = () => openAgentPick("kb");
+  // 数字员工表单：允许访问的用户组（弹窗选取，与技能 / 知识库一致）
+  const afAllowGroupAddBtn = $("afAllowGroupAddBtn");
+  if (afAllowGroupAddBtn) afAllowGroupAddBtn.onclick = () => openAgentPick("usergroup");
   $("kbNewBtn").onclick = () => toggleKbCreatePanel();
   $("kbCreateCancel").onclick = () => toggleKbCreatePanel(false);
   $("kbSearch").addEventListener("input", () => { kbSearchQuery = $("kbSearch").value; renderKbModal(); });

@@ -329,8 +329,11 @@
 
           <div class="form-group" id="afGroupAllowWrap" style="display:none">
             <label data-i18n="agent.form.allowedGroupTitle">🔐 允许访问的用户组（留空 = 不设限）</label>
-            <p class="form-hint" style="margin:0 0 6px">勾选后，仅属于这些<b>平台用户组</b>的成员可看到 / 单聊 / 拉入此数字员工；创建者与系统管理员始终可访问。该能力需先到「管理员控制台 → 用户分组」建组。</p>
-            <div id="afAllowGroupList" class="pick-list" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            <p class="form-hint" style="margin:0 0 8px" data-i18n-html="agent.form.allowedGroupHint">不勾选 = 不设限（所有人可用）；勾选后，仅属于这些<b>平台用户组</b>的成员可看到 / 单聊 / 拉入此数字员工，创建者与系统管理员始终可访问。用户组在「管理员控制台 → 用户分组」中创建。</p>
+            <div id="afAllowGroupList" class="af-sel-list"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              <button id="afAllowGroupAddBtn" class="chip-btn" type="button" data-i18n="agent.form.allowedGroupAdd">＋ 选取用户组</button>
+            </div>
           </div>
 
           <!-- 记忆拟人类型（按类型召回）：五档拟人预设 + 口吻模式 + 人设 + 高级微调 -->
