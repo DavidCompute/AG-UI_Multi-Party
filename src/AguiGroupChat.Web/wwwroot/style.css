@@ -854,6 +854,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
    这些弹窗在 DOM 中位于 #adminModal 之前，若同为 z-20 会被后者盖住而无法点击；
    这里抬高到控制台之上（仍低于 toast 的 z-100），保证后开的弹窗始终在最顶层可操作。 */
 .modal-overlay.modal-over-console { z-index: 60; }
+/* 通用确认 / 输入对话框（uiConfirm / uiPrompt）：会被从任意弹窗内唤起（含 z-60 的二级弹窗，
+   如知识库管理里删除文档），因此必须位于所有普通弹窗之上；仍低于 toast 的 z-100。 */
+.modal-overlay.ui-dialog-overlay { z-index: 80; }
 /* 通用隐藏工具类：视图切换（agentFormView 等）依赖此规则 */
 .hidden { display: none !important; }
 .modal {

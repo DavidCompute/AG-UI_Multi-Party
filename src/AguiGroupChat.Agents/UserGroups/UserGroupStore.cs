@@ -75,9 +75,11 @@ public sealed class UserGroupStore
         {
             if (string.IsNullOrWhiteSpace(payload)) return;
             var trimmed = payload.TrimStart();
+            // 两分支必须与 SnapshotJson 的写出格式一致（camelCase）；用默认 options 会因
+            // PropertyNameCaseInsensitive=false 而无法把 "groups" 绑到 Groups，导致静默丢失整份载荷。
             IEnumerable<UserGroup>? els = trimmed.StartsWith('[')
-                ? JsonSerializer.Deserialize<List<UserGroup>>(payload)
-                : (JsonSerializer.Deserialize<UserGroupsSnapshot>(payload)?.Groups ?? [])
+                ? JsonSerializer.Deserialize<List<UserGroup>>(payload, JsonOpt)
+                : (JsonSerializer.Deserialize<UserGroupsSnapshot>(payload, JsonOpt)?.Groups ?? [])
                     .Select(FromElement);
             if (els is null) return;
             RestoreAll(els.Where(g => !string.IsNullOrWhiteSpace(g.GroupId)).ToList());
@@ -103,6 +105,8 @@ public sealed class UserGroupStore
     private static readonly JsonSerializerOptions JsonOpt = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // 反序列化需大小写不敏感，否则读不回自己写出的 camelCase 字段
+        PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 }

@@ -22,8 +22,8 @@ public static class AgentAccessPolicy
         AgentDefinition def)
     {
         if (callerUserId is null) return false;
+        if (def.IsSkillTarget) return false;                       // 技能目标永不直接可见（先于 admin：管理员也不得直连技能子代理）
         if (isAdmin) return true;                                  // 管理员全局可见
-        if (def.IsSkillTarget) return false;                       // 技能目标永不直接可见
         if (def.OwnerId is not null && def.OwnerId == callerUserId) return true; // 创建者始终可管自己创建的数字员工（编辑/单聊/列表）
         if (def.IsPrivate) return false;                           // 非 own 且私密：不可见
         var allowed = def.AllowedGroupIds;

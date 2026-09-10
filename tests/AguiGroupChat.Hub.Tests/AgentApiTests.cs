@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Agents;
+using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Web;
@@ -1287,6 +1288,21 @@ public sealed class UserGroupAuthorizerUnitTests
     }
 
     [Fact]
+    public void SkillTarget_IsDeniedEvenForAdmin()
+    {
+        // 技能目标（系统自生成的子代理）永不直接可见/可单聊：即便管理员也不放行。
+        // 回归：策略内 IsSkillTarget 必须排在 isAdmin 之前，否则管理员会被判为可访问。
+        var store = NewStore();
+        var skillTarget = new AguiGroupChat.Agents.AgentDefinition
+        {
+            AgentId = "st1", Nickname = "技能子代理", IsSkillTarget = true, OwnerId = "boss",
+        };
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, true, "admin_u", skillTarget));
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "admin_u", skillTarget));
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "boss", skillTarget));
+    }
+
+    [Fact]
     public void PersistenceSnapshot_RoundTrips()
     {
         var store = NewStore();
@@ -1294,11 +1310,44 @@ public sealed class UserGroupAuthorizerUnitTests
         {
             GroupId = "ug_os", Name = "运维组", MemberUserIds = ["op1"], CreatedAtMs = 5,
         });
-        var json = System.Text.Json.JsonSerializer.Serialize(store.Snapshot());
+        // 走与 AgentHosting.RegisterUserGroupsPersistence 完全一致的生产路径：
+        // Snapshot() -> AguiJson.Options 序列化 -> 反序列化 -> RestoreAll。
+        // （此前这里走 RestoreSection 裸数组分支，不能代表线上行为，且未断言时间戳。）
+        var element = AguiJson.Element(store.Snapshot());
         var fresh = NewStore();
-        fresh.RestoreSection("[" + json.Substring(1, json.Length - 2) + "]");
+        fresh.RestoreAll(element.Deserialize<List<AguiGroupChat.Agents.UserGroups.UserGroup>>(AguiJson.Options) ?? []);
         var got = fresh.Get("ug_os");
         Assert.NotNull(got);
         Assert.Equal(["op1"], got!.MemberUserIds);
+        Assert.Equal(5, got.CreatedAtMs);
+    }
+
+    [Fact]
+    public void RestoreSection_AcceptsBothPayloadShapes()
+    {
+        // SnapshotJson 写出 {groups:[...]}（camelCase）；RestoreSection 两个分支都必须能读回它。
+        // 回归：{groups:[...]} 分支曾用默认 options（大小写敏感）而读到 null，整份载荷静默丢失。
+        var store = NewStore();
+        store.Upsert(new AguiGroupChat.Agents.UserGroups.UserGroup
+        {
+            GroupId = "ug_shaped", Name = "形态组", MemberUserIds = ["m1"], CreatedAtMs = 9,
+        });
+        var payload = store.SnapshotJson();
+
+        var fromObject = NewStore();
+        fromObject.RestoreSection(payload);
+        var a = fromObject.Get("ug_shaped");
+        Assert.NotNull(a);
+        Assert.Equal(["m1"], a!.MemberUserIds);
+        Assert.Equal(9, a.CreatedAtMs);
+
+        // 裸数组形态（首字符 '['）亦应可用
+        var bare = new AguiGroupChat.Agents.UserGroups.UserGroupStore();
+        bare.RestoreSection(
+            "[{\"groupId\":\"ug_shaped\",\"name\":\"形态组\",\"description\":\"\",\"memberUserIds\":[\"m1\"],\"createdAtMs\":9}]");
+        var b = bare.Get("ug_shaped");
+        Assert.NotNull(b);
+        Assert.Equal(["m1"], b!.MemberUserIds);
+        Assert.Equal(9, b.CreatedAtMs);
     }
 }

@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Text.Json.Serialization;
 using AguiGroupChat.Hub.Users;
 
 namespace AguiGroupChat.Agents.UserGroups;
@@ -23,8 +21,7 @@ public sealed class UserGroup
     /// <summary>组成员 userId 列表（可为空）。成员可在多个组中。</summary>
     public List<string> MemberUserIds { get; set; } = [];
 
-    /// <summary>创建时间。</summary>
-    [JsonIgnore]
+    /// <summary>创建时间（毫秒）。参与持久化往返：勿加 [JsonIgnore]，否则重启后归零。</summary>
     public long CreatedAtMs { get; set; }
 }
 
