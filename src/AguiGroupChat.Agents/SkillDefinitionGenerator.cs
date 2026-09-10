@@ -87,6 +87,15 @@ public static class SkillDefinitionGenerator
             runSettings = "目标是 " + (runSummary.Contains("macOS") ? "macOS" : "Linux") + "，shell 技能正文请写 bash/sh 语法；dotnet 技能写跨平台 C# 源码。";
         else
             runSettings = "目标环境未明确上报，shell 技能请尽量兼顾 PowerShell 与 bash 或说明所需环境；dotnet 技能写跨平台 C# 源码。";
+        // 可用运行时清单：明确告诉模型沙箱里到底装了什么、缺什么。没有这一段时，
+        // 模型会因为“处理 Word/图片/JSON 用 Python 很常规”而写出 python3 脚本，
+        // 但服务端容器根本没装 Python → command not found / 退出码 127。
+        //
+        // 关键：必须按<b>目标执行位置</b>选清单。
+        //   server → 平台沙箱（本进程所在的容器/宿主），能力固定、可枚举；
+        //   client → 用户那台机器，能力未知（用户装了什么就有什么），不能拿容器清单去限制它。
+        // 早先把容器清单无条件拼接，会让“本机技能”被错误地告知“没有 pwsh/python”，反而生成出错的方案。
+        var sandbox = SkillSandboxCapabilities.Describe(preferClient);
 
         return
             AgentCatalog.DeliberateFirstLine +
@@ -105,11 +114,16 @@ public static class SkillDefinitionGenerator
             "skillId 用 ASCII（字母/数字/_/-，≤40）。只输出如下 JSON：\n" +
             "{\"name\":\"中文名\",\"skillId\":\"id\",\"kind\":\"(按允许类型)\",\"description\":\"给模型的调用说明，50~150 字\",\"body\":\"正文\",\"executionLocation\":\"server|client\",\"clientRunner\":null,\"requiresApproval\":true}\n\n" +
             runSummary + "。\n" + runSettings + "\n\n" +
+            sandbox + "\n\n" +
             "用户需求：" + request;
     }
 
     private static string OsLabel() =>
         OperatingSystem.IsWindows() ? "Windows" : (OperatingSystem.IsMacOS() ? "macOS" : "Linux");
+
+    /// <summary>测试入口：暴露组装好的生成提示词，便于断言“沙箱能力清单确实带上了”。</summary>
+    internal static string BuildPromptForTest(string request, bool preferClient, bool allowDotnet, string? runContextNote = null)
+        => BuildPrompt(request, preferClient, allowDotnet, runContextNote);
 
     private static GeneratedSkillDefinition Parse(string text, bool allowDotnet)
     {

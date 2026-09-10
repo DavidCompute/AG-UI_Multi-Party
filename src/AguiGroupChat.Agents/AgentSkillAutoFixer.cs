@@ -221,12 +221,22 @@ public sealed class SkillAutoFixer
                     + "若报错提示的命名空间确实来自第三方 NuGet 库（如 PdfSharp/Newtonsoft.Json），可在正文最顶部补写 #r \"nuget: 包名, 版本\"。"
                     + "只输出修正后的完整 C# 源码，不要 ``` 围栏、不要任何解释。",
                 AgentSkillKind.Http => "该技能是 HTTP 配置：请只输出一段<b>合法 JSON 配置</b>作正文，形如 {\"method\":\"GET\",\"url\":\"...\",\"headers\":{},\"body\":null}；url 需 http/https 且真实可用（可含 ${query} 占位）。不要任何其它文字。",
-                AgentSkillKind.Shell => "该技能是 shell 命令 / 脚本：请修正为<b>可在该服务器环境直接运行、退出码为 0 且输出明确结果</b>的命令/脚本。注意避免过长，不依赖未安装程序（若确实需要可先说明）。只输出命令/脚本本身，不要 ``` 围栏、不要任何解释。",
+                AgentSkillKind.Shell => "该技能是 shell 命令 / 脚本：请修正为<b>可在该服务器环境直接运行、退出码为 0 且输出明确结果</b>的命令/脚本。注意避免过长。"
+                    + "修正时必须先看报错里的「command not found / 退出码 127」类线索：那说明原文调用了环境里不存在的命令，"
+                    + "<b>不要靠假设“装一下就有”来修，也不要只是换个写法继续用同一个不存在的命令</b>。"
+                    + "仅可使用沙箱确认可用的命令（bash/sh + coreutils + perl + curl + dotnet 等）。"
+                    + "若该技能的实现<b>本质上必须依赖 Python / Node / PowerShell / jq / git / 文档转换工具</b>（这些沙箱都没有，也装不了），"
+                    + "就不要硬修 shell 了 —— 改为该技能是一个 shell 脚本，其正文只写一句清晰的提示，告知该需求需改用 kind=dotnet 实现（C# 由平台自带 .NET 运行，不依赖外部命令）。"
+                    + "只输出命令/脚本本身，不要 ``` 围栏、不要任何解释。",
                 _ => "该技能是提示词 / 流程模板：修正为结构清晰、可让执行的模型产出具体有用回答的分步指令 / 占位模板。",
             };
             var prompt =
                 "你是技能修复器。下面这个自动生成的技能自测失败，请按报错修复它的正文（id 与 kind 保持不变）：\n" +
                 $"技能ID：{def.SkillId}\n技能类型 kind：{def.Kind}\n技能说明：{description}\n技能正文：\n```\n{body}\n```\n自测报错：{lastError}\n\n" +
+                // 把沙箱真实能力也带给修复器：否则它会用“常规合理但本机没有”的方案再来一遍，
+                // 修复多轮仍跑不通（实测：python3 缺失的技能反复修成 python3）。
+                // 按目标执行位置分流：client 技能在用户机器跑，不能套服务端容器清单。
+                SkillSandboxCapabilities.Describe(def.ExecutionLocation == AgentSkillExecutionLocation.Client) + "\n\n" +
                 heading + "\n请只输出修正后的技能正文。";
             var resp = await client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct);
             var txt = (resp.Text ?? "").Trim();
