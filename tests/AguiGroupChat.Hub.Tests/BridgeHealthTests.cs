@@ -49,18 +49,14 @@ public sealed class BridgeHealthTests
     [Fact]
     public async Task ProbeUnreachableEndpoint_MarksDown()
     {
-        // 查找一个未监听的端口：先监听拿到端口，再关闭它
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-
+        // 同样改用确定性失败（非法 URL），不依赖“端口关闭后一定连不上”：
+        // 端口可能被系统或并行用例重新占用，使探测偶然成功。
         var svc = CreateService(new AgentDefinition
         {
             AgentId = "ext",
             Nickname = "外部专家",
             Instructions = "",
-            BridgeEndpoint = $"http://127.0.0.1:{port}/",
+            BridgeEndpoint = "not-a-valid-url",
         });
 
         var status = await svc.ProbeAllAsync(CancellationToken.None);
@@ -72,20 +68,21 @@ public sealed class BridgeHealthTests
     [Fact]
     public async Task ConsecutiveFailuresAccumulateInDetail()
     {
-        var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop(); // 端口不再监听 → 每次探测都失败
-
+        // 用「非法 URL」触发确定性失败：探测在该分支直接判 DOWN，不碰 socket。
+        // （此前用「先监听拿端口再关闭」制造不可达，但端口可能被系统/其它测试重新占用，
+        //  导致探测偶然成功而使本用例间歇失败。）
         var svc = CreateService(new AgentDefinition
         {
             AgentId = "flaky",
             Nickname = "抖动桥",
             Instructions = "",
-            BridgeEndpoint = $"ws://127.0.0.1:{port}/ws",
+            BridgeEndpoint = "not-a-valid-url",
         });
 
-        await svc.ProbeAllAsync(CancellationToken.None); // 第 1 次失败
+        var first = Assert.Single(await svc.ProbeAllAsync(CancellationToken.None)); // 第 1 次失败
+        Assert.False(first.Up);
+        Assert.Equal(1, first.ConsecutiveFailures);
+
         var second = Assert.Single(await svc.ProbeAllAsync(CancellationToken.None)); // 第 2 次失败
         Assert.False(second.Up);
         Assert.Equal(2, second.ConsecutiveFailures);
