@@ -1455,6 +1455,7 @@ window.I18N_DICTS.zh = {
   "admin.ugSaved": "分组已保存",
   "admin.ugDeleted": "分组已删除",
   "admin.ugDelConfirm": "确认删除分组「{name}”？此操作不会自动为您从引用它的数字员工上移除该组白名单引用（无效引用将被忽略）。",
+  "admin.ugDelImpact": "确认删除分组「{name}”？组内有 {members} 名成员，该组被 {count} 个资源引用（数字员工 / 技能）。删除后这些资源的对应用户将失去访问（引用会变为无效，按无权限处理）。",
   "admin.ugLoadFail": "分组加载失败：{err}",
   "admin.ugUnknownUser": "无法识别成员用户名：{who}",
   "admin.thMembers": "成员",

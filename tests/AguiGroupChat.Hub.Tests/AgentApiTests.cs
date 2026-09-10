@@ -102,6 +102,7 @@ public sealed class AgentApiServerFixture : IAsyncLifetime
         App.MapGroupNameApi(); // 群名自动生成
         App.MapMentionSuggestApi(); // 输入时「建议 @ 谁」
         App.MapPlanControlApi(); // 编排计划「暂停 / 继续」
+        App.MapUserGroupApi(); // 用户分组（含变更影响预检）
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }
@@ -153,6 +154,52 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         Assert.Equal("QA 助手", agent.GetProperty("nickname").GetString());
         Assert.Equal("keyword", agent.GetProperty("triggerMode").GetString());
         Assert.Equal("bug", agent.GetProperty("keywords")[0].GetString());
+    }
+
+    [Fact]
+    public async Task GroupImpact_ListsReferencingAgentsAndSkipsUnreferenced()
+    {
+        // 变更影响预检：删除分组 / 移出成员前，运维需要知道哪些数字员工会被影响（fail-closed）。
+        var admin = await AdminTokenAsync(); // 夹具固定 grace 等为管理员
+        var client = ClientWith(admin);
+
+        var gid = "ug_impact_" + Guid.NewGuid().ToString("N")[..6];
+        var created = await client.PostAsJsonAsync("/ag-ui/usergroups", new
+        {
+            groupId = gid, name = "影响预检组", memberUserIds = new[] { "user_x" },
+        });
+        created.EnsureSuccessStatusCode();
+
+        // 建一个引用该组白名单的数字员工
+        var agentId = "agent_impact_" + Guid.NewGuid().ToString("N")[..6];
+        var mk = await client.PostAsJsonAsync("/ag-ui/agents", new
+        {
+            agentId, nickname = "受影响助手", triggerMode = "mentioned",
+            allowedGroupIds = new[] { gid },
+        });
+        mk.EnsureSuccessStatusCode();
+
+        var impact = await client.GetFromJsonAsync<JsonElement>($"/ag-ui/usergroups/{gid}/impact");
+        Assert.Equal(gid, impact.GetProperty("groupId").GetString());
+        Assert.Equal(1, impact.GetProperty("memberCount").GetInt32());
+        Assert.True(impact.GetProperty("affectsAccess").GetBoolean());
+        var agentIds = impact.GetProperty("agents").EnumerateArray()
+            .Select(a => a.GetProperty("agentId").GetString()).ToList();
+        Assert.Contains(agentId, agentIds);
+
+        // 新建一个未被任何资源引用的组：affectsAccess 应为 false（删除它不会影响任何人）
+        var lonely = "ug_lonely_" + Guid.NewGuid().ToString("N")[..6];
+        (await client.PostAsJsonAsync("/ag-ui/usergroups", new
+        {
+            groupId = lonely, name = "无人引用组", memberUserIds = new[] { "user_y" },
+        })).EnsureSuccessStatusCode();
+        var lonelyImpact = await client.GetFromJsonAsync<JsonElement>($"/ag-ui/usergroups/{lonely}/impact");
+        Assert.False(lonelyImpact.GetProperty("affectsAccess").GetBoolean());
+        Assert.Empty(lonelyImpact.GetProperty("agents").EnumerateArray());
+
+        // 不存在的分组 → 404
+        var missing = await client.GetAsync($"/ag-ui/usergroups/ug_nope_{Guid.NewGuid():N}/impact");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
     [Fact]
@@ -873,6 +920,21 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         return (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
     }
 
+    /// <summary>
+    /// 以夹具内置管理员（Auth:AdminUserIds）取得令牌：夹具跨用例共享，同名账号可能已被别的用例注册，
+    /// 因此注册失败（409）时退回登录，避免用例间顺序依赖。
+    /// </summary>
+    private async Task<string> AdminTokenAsync(string adminName = "grace")
+    {
+        var reg = await _client.PostAsJsonAsync("/ag-ui/user/register",
+            new { username = adminName, password = "secret1", nickname = adminName });
+        if (reg.IsSuccessStatusCode)
+            return (await reg.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+        var login = await _client.PostAsJsonAsync("/ag-ui/user/login", new { username = adminName, password = "secret1" });
+        login.EnsureSuccessStatusCode();
+        return (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+    }
+
     private async Task<(string Token, string UserId)> RegisterUserAsync(string username)
     {
         var res = await _client.PostAsJsonAsync("/ag-ui/user/register", new { username, password = "secret1", nickname = username });
@@ -886,6 +948,14 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
         using var req = new HttpRequestMessage(HttpMethod.Post, "/ag-ui/agents") { Content = JsonContent.Create(body) };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return await _client.SendAsync(req);
+    }
+
+    /// <summary>带该 token 的客户端：用于调用需要鉴权的非智能体接口（如用户分组）。</summary>
+    private HttpClient ClientWith(string token)
+    {
+        var c = new HttpClient { BaseAddress = new Uri(_fixture.HttpBase) };
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return c;
     }
 
     private async Task<string> CreateGroupWithAgentAsync(string agentId, string nickname, string groupName, string? avatar = null)

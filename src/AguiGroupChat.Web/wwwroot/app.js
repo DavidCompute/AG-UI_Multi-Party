@@ -5861,7 +5861,27 @@ async function saveUserGroup() {
 }
 
 async function deleteUserGroup(g) {
-  if (!confirm(t("admin.ugDelConfirm", { name: g.name || g.groupId }))) return;
+  // 先取变更影响：该组被哪些数字员工 / 技能引用（fail-closed：删除后引用者会失去对应用户的访问）。
+  let impact = null;
+  try {
+    const r = await apiRaw("GET", `/ag-ui/usergroups/${encodeURIComponent(g.groupId)}/impact`);
+    if (r.ok) impact = await r.json();
+  } catch { /* 预检失败不阻塞删除，退化为普通确认 */ }
+
+  let msg = t("admin.ugDelConfirm", { name: g.name || g.groupId });
+  if (impact && impact.affectsAccess) {
+    const refs = [
+      ...(impact.agents || []).map((a) => `• 🧑💼 ${a.nickname || a.agentId}`),
+      ...(impact.skills || []).map((s) => `• 🛠️ ${s.name || s.skillId}`),
+    ].slice(0, 8).join("\n");
+    msg = t("admin.ugDelImpact", {
+      name: g.name || g.groupId,
+      members: String(impact.memberCount || 0),
+      count: String((impact.agents || []).length + (impact.skills || []).length),
+    }) + (refs ? `\n\n${refs}` : "");
+  }
+
+  if (!await uiConfirm({ message: msg, danger: true })) return;
   const res = await apiRaw("DELETE", `/ag-ui/usergroups/${encodeURIComponent(g.groupId)}`);
   if (!res.ok) { const d = await res.json().catch(() => null); toast(String((d && d.message) || res.status)); return; }
   toast(t("admin.ugDeleted"));

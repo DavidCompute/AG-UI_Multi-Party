@@ -1459,6 +1459,7 @@ window.I18N_DICTS.en = {
   "admin.ugSaved": "Group saved",
   "admin.ugDeleted": "Group deleted",
   "admin.ugDelConfirm": "Delete group \u201c{name}\u201d? Removed groups become harmless (ignored) references.",
+  "admin.ugDelImpact": "Delete group \u201c{name}\u201d? It has {members} member(s) and is referenced by {count} resource(s) (employees / skills). Deleting it revokes access for those users \u2014 the references become invalid and are treated as no permission.",
   "admin.ugLoadFail": "Failed to load groups: {err}",
 
   "admin.ugUnknownUser": "Cannot resolve member username(s): {who}",

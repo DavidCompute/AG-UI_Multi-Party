@@ -78,13 +78,55 @@ public static class UserGroupApi
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // 删除分组（不级联删除资源上的白名单项；资源会让出该组授权为无效引用由访问判定天然忽略）
-        root.MapDelete("/{groupId}", (string groupId, HttpContext ctx, AuthService auth, UserGroupStore groups) =>
+        root.MapDelete("/{groupId}", (string groupId, HttpContext ctx, AuthService auth, UserGroupStore groups, ILoggerFactory lf) =>
         {
             var guard = AdminOnly(ctx, auth);
             if (guard is not null) return guard;
-            var removed = groups.Remove(groupId.Trim());
+            var id = groupId.Trim();
+            var existing = groups.Get(id);
+            var removed = groups.Remove(id);
             if (!removed) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "分组不存在"));
-            return Results.Ok(new { deleted = true, groupId });
+            lf.CreateLogger("UserGroupApi").LogInformation("删除用户分组：{GroupId} name={Name}", id, existing?.Name);
+            return Results.Ok(new { deleted = true, groupId = id });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // 变更影响预检（仅管理员）：某分组被哪些数字员工 / 技能引用。
+        // 用于前端在「删除分组」或「移出成员」前告知运维：该操作会让谁失去访问（fail-closed）。
+        root.MapGet("/{groupId}/impact", (string groupId, HttpContext ctx, AuthService auth,
+            UserGroupStore groups, AguiGroupChat.Agents.AgentCatalog agents, AguiGroupChat.Agents.AgentSkillCatalog skills) =>
+        {
+            var guard = AdminOnly(ctx, auth);
+            if (guard is not null) return guard;
+            var id = groupId.Trim();
+            var group = groups.Get(id);
+            if (group is null) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "分组不存在"));
+
+            // 引用该组白名单的数字员工（排除技能目标与 AI 分身，它们不出现在可选面）
+            var affectedAgents = agents.ListDefinitions()
+                .Where(d => !d.IsSkillTarget
+                    && !d.AgentId.StartsWith(AguiGroupChat.Agents.TwinService.AgentIdPrefix, StringComparison.Ordinal)
+                    && d.AllowedGroupIds is { Count: > 0 } allow
+                    && allow.Contains(id, StringComparer.Ordinal))
+                .Select(d => new { d.AgentId, d.Nickname })
+                .ToList();
+
+            var affectedSkills = skills.ListAll()
+                .Where(s => s.AllowedUserGroupIds is { Count: > 0 } allow
+                    && allow.Contains(id, StringComparer.Ordinal))
+                .Select(s => new { s.SkillId, s.Name })
+                .ToList();
+
+            var memberCount = group.MemberUserIds?.Count ?? 0;
+            return Results.Ok(new
+            {
+                groupId = id,
+                name = group.Name,
+                memberCount,
+                agents = affectedAgents,
+                skills = affectedSkills,
+                // 是否会产生“无人可用”的硬后果：有成员且有引用时才真正影响他人生效范围
+                affectsAccess = memberCount > 0 && (affectedAgents.Count > 0 || affectedSkills.Count > 0),
+            });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 
