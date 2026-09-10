@@ -113,7 +113,7 @@ public class Skill
                 foreach (var s in secs.EnumerateArray())
                 {
                     if (s.ValueKind != JsonValueKind.Object) continue;
-                    if (AppendBlock(body, s)) blocks++;
+                    if (AppendBlock(main, body, s)) blocks++;
                 }
             }
 
@@ -125,11 +125,26 @@ public class Skill
     }
 
     // ===== 内容块派发（各场景可用块一致，保证行为可预期）=====
-    private static bool AppendBlock(Body body, JsonElement s)
+    private static bool AppendBlock(MainDocumentPart main, Body body, JsonElement s)
     {
         if (s.TryGetProperty("pageBreak", out var pb) && pb.ValueKind == JsonValueKind.True)
         {
             body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page })));
+            return true;
+        }
+        // 目录（TOC 域）：依赖 Heading1/2/3 的 outlineLvl；打开后需 F9 更新域（Word 会提示）
+        if (s.TryGetProperty("toc", out var toc) && (toc.ValueKind == JsonValueKind.True || toc.ValueKind == JsonValueKind.Object))
+        {
+            int depth = 3;
+            string? tocTitle = null;
+            if (toc.ValueKind == JsonValueKind.Object)
+            {
+                if (toc.TryGetProperty("depth", out var dp) && dp.ValueKind == JsonValueKind.Number) depth = Math.Max(1, Math.Min(3, dp.GetInt32()));
+                tocTitle = Str(toc, "title");
+            }
+            if (!string.IsNullOrWhiteSpace(tocTitle)) body.AppendChild(HeadingPara(Safe(tocTitle), 1));
+            body.AppendChild(TocPara(depth));
+            body.AppendChild(new Paragraph(new Run(new Break { Type = BreakValues.Page }))); // 目录后另起页
             return true;
         }
         var heading = Str(s, "heading");
@@ -172,6 +187,11 @@ public class Skill
         {
             var t = BuildTable(tb);
             if (t != null) { body.AppendChild(t); return true; }
+        }
+        if (s.TryGetProperty("image", out var im) && im.ValueKind == JsonValueKind.Object)
+        {
+            var p = BuildImagePara(main, im);
+            if (p != null) { body.AppendChild(p); return true; }
         }
         return false;
     }
@@ -301,6 +321,169 @@ public class Skill
         var p = new Paragraph(ppr);
         p.AppendChild(RunWith(text, FontBody, SizeSmall, false));
         return p;
+    }
+
+    // ===== 目录（TOC 域）=====
+    // 用复杂域：begin → instrText → separate → 占位提示 → end。
+    // 打开文档时 Word 可能提示“更新域”；也可 Ctrl+A → F9 刷新。
+    private static Paragraph TocPara(int depth)
+    {
+        var p = new Paragraph(new ParagraphProperties(
+            new SpacingBetweenLines { Line = LineBody.ToString(), LineRule = LineSpacingRuleValues.Exact }));
+
+        var r1 = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
+        var r2 = new Run(new FieldCode(" TOC \\o \"1-" + depth + "\" \\h \\z \\u ") { Space = SpaceProcessingModeValues.Preserve });
+        var r3 = new Run(new FieldChar { FieldCharType = FieldCharValues.Separate });
+        var r4 = new Run(new RunProperties(
+                new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman", EastAsia = FontBody },
+                new FontSize { Val = SizeSmall.ToString() },
+                new Color { Val = "808080" },
+                new Italic()),
+            new Text("（目录将在 Word 中更新域后生成：全选后按 F9）") { Space = SpaceProcessingModeValues.Preserve });
+        var r5 = new Run(new FieldChar { FieldCharType = FieldCharValues.End });
+
+        p.AppendChild(r1); p.AppendChild(r2); p.AppendChild(r3); p.AppendChild(r4); p.AppendChild(r5);
+        return p;
+    }
+
+    // ===== 图片（内联）=====
+    // 从本地文件读入并嵌入；支持 widthCm 控制宽度（按原图比例缩放）。
+    // 支持的格式：png / jpg / jpeg / gif / bmp / tiff。
+    private static Paragraph? BuildImagePara(MainDocumentPart main, JsonElement im)
+    {
+        var file = Str(im, "path");
+        if (string.IsNullOrWhiteSpace(file)) return null;
+        var full = Path.GetFullPath(Safe(file));
+        if (!File.Exists(full)) throw new FileNotFoundException("图片文件不存在：" + full);
+
+        var ext = Path.GetExtension(full).ToLowerInvariant().TrimStart('.');
+        var contentType = ext switch
+        {
+            "png" => "image/png",
+            "jpg" or "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            "tif" or "tiff" => "image/tiff",
+            _ => throw new NotSupportedException("不支持的图片格式：." + ext + "（支持 png/jpg/jpeg/gif/bmp/tiff）"),
+        };
+
+        var bytes = File.ReadAllBytes(full);
+        var imagePart = main.AddImagePart(contentType switch
+        {
+            "image/png" => ImagePartType.Png,
+            "image/jpeg" => ImagePartType.Jpeg,
+            "image/gif" => ImagePartType.Gif,
+            "image/bmp" => ImagePartType.Bmp,
+            _ => ImagePartType.Tiff,
+        });
+        using (var ms = new MemoryStream(bytes)) imagePart.FeedData(ms);
+        var relId = main.GetIdOfPart(imagePart);
+
+        var (pxW, pxH) = TryReadPixelSize(bytes, ext);
+        double widthCm = 14.0; // 默认宽（A4 正文宽约 15.9cm）
+        if (im.TryGetProperty("widthCm", out var wc) && wc.ValueKind == JsonValueKind.Number) widthCm = wc.GetDouble();
+        else if (im.TryGetProperty("widthPercent", out var wp) && wp.ValueKind == JsonValueKind.Number)
+            widthCm = Math.Max(1, Math.Min(100, wp.GetDouble())) / 100.0 * 15.9;
+        widthCm = Math.Max(1.0, Math.Min(24.0, widthCm));
+
+        // EMU: 1 cm = 360000 EMU
+        long cx = (long)Math.Round(widthCm * 360000.0);
+        long cy = pxW > 0 && pxH > 0 ? (long)Math.Round(cx * (double)pxH / pxW) : (long)Math.Round(cx * 0.75);
+
+        var drawing = new Drawing(
+            new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline(
+                new DocumentFormat.OpenXml.Drawing.Wordprocessing.Extent { Cx = cx, Cy = cy },
+                new DocumentFormat.OpenXml.Drawing.Wordprocessing.EffectExtent { LeftEdge = 0L, TopEdge = 0L, RightEdge = 0L, BottomEdge = 0L },
+                new DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties { Id = NextDrawingId(), Name = "Picture " + relId },
+                new DocumentFormat.OpenXml.Drawing.Wordprocessing.NonVisualGraphicFrameDrawingProperties(
+                    new DocumentFormat.OpenXml.Drawing.GraphicFrameLocks { NoChangeAspect = true }),
+                new DocumentFormat.OpenXml.Drawing.Graphic(
+                    new DocumentFormat.OpenXml.Drawing.GraphicData(
+                        new DocumentFormat.OpenXml.Drawing.Pictures.Picture(
+                            new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualPictureProperties(
+                                new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualDrawingProperties { Id = 0U, Name = Path.GetFileName(full) },
+                                new DocumentFormat.OpenXml.Drawing.Pictures.NonVisualPictureDrawingProperties()),
+                            new DocumentFormat.OpenXml.Drawing.BlipFill(
+                                new DocumentFormat.OpenXml.Drawing.Blip { Embed = relId },
+                                new DocumentFormat.OpenXml.Drawing.Stretch(new DocumentFormat.OpenXml.Drawing.FillRectangle())),
+                            new DocumentFormat.OpenXml.Drawing.Pictures.ShapeProperties(
+                                new DocumentFormat.OpenXml.Drawing.Transform2D(
+                                    new DocumentFormat.OpenXml.Drawing.Offset { X = 0L, Y = 0L },
+                                    new DocumentFormat.OpenXml.Drawing.Extents { Cx = cx, Cy = cy }),
+                                new DocumentFormat.OpenXml.Drawing.PresetGeometry(new DocumentFormat.OpenXml.Drawing.AdjustValueList()) { Preset = DocumentFormat.OpenXml.Drawing.ShapeTypeValues.Rectangle })))
+                    { Uri = "http://schemas.openxmlformats.org/drawingml/2006/picture" }))
+            { DistanceFromTop = 0U, DistanceFromBottom = 0U, DistanceFromLeft = 0U, DistanceFromRight = 0U });
+
+        var caption = Str(im, "caption");
+        var ppr = new ParagraphProperties(new Justification { Val = JustificationValues.Center });
+        var p = new Paragraph(ppr);
+        p.AppendChild(new Run(drawing));
+        if (!string.IsNullOrWhiteSpace(caption))
+        {
+            p.AppendChild(new Run(new Break()));
+            p.AppendChild(new Run(new RunProperties(
+                    new RunFonts { Ascii = "Times New Roman", HighAnsi = "Times New Roman", EastAsia = FontBody },
+                    new FontSize { Val = SizeSmall.ToString() }),
+                new Text(Safe(caption)) { Space = SpaceProcessingModeValues.Preserve }));
+        }
+        if (Str(im, "alt") is { } alt && !string.IsNullOrWhiteSpace(alt))
+        {
+            if (p.Elements<Run>().FirstOrDefault()?.GetFirstChild<Drawing>() is { } dr
+                && dr.GetFirstChild<DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline>() is { } inl
+                && inl.GetFirstChild<DocumentFormat.OpenXml.Drawing.Wordprocessing.DocProperties>() is { } dp)
+                dp.Description = Safe(alt); // 可访问性：图片替代文本
+        }
+        return p;
+    }
+
+    private static int _drawingId;
+    private static uint NextDrawingId() => (uint)System.Threading.Interlocked.Increment(ref _drawingId);
+
+    // 从文件头读像素尺寸（仅 png / gif / bmp / jpeg）；读不到返回 (0,0)，由调用方按 4:3 估算。
+    private static (int W, int H) TryReadPixelSize(byte[] b, string ext)
+    {
+        try
+        {
+            if (ext == "png" && b.Length > 24 && b[0] == 0x89 && b[1] == 0x50)
+            {
+                int w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+                int h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+                return (w, h);
+            }
+            if (ext == "gif" && b.Length > 10 && b[0] == 0x47 && b[1] == 0x49)
+                return (b[6] | (b[7] << 8), b[8] | (b[9] << 8));
+            if (ext == "bmp" && b.Length > 26 && b[0] == 0x42 && b[1] == 0x4D)
+            {
+                int w = BitConverter.ToInt32(b, 18);
+                int h = Math.Abs(BitConverter.ToInt32(b, 22));
+                return (w, h);
+            }
+            if ((ext == "jpg" || ext == "jpeg") && b.Length > 4 && b[0] == 0xFF && b[1] == 0xD8)
+                return ReadJpegSize(b);
+        }
+        catch { /* 读不出就交给调用方估算 */ }
+        return (0, 0);
+    }
+
+    private static (int W, int H) ReadJpegSize(byte[] b)
+    {
+        int i = 2;
+        while (i + 9 < b.Length)
+        {
+            if (b[i] != 0xFF) { i++; continue; }
+            int marker = b[i + 1];
+            if (marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7)) { i += 2; continue; }
+            int len = (b[i + 2] << 8) | b[i + 3];
+            // SOF0..SOF15（除 DHT=C4 / JPG=C8 / DAC=CC）
+            if (marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8 && marker != 0xCC)
+            {
+                int h = (b[i + 5] << 8) | b[i + 6];
+                int w = (b[i + 7] << 8) | b[i + 8];
+                return (w, h);
+            }
+            i += 2 + len;
+        }
+        return (0, 0);
     }
 
     // ===== 表格：三线表（表头加粗 + 跨页重复表头）=====
@@ -464,7 +647,7 @@ const SCENES = [
     closing: null, // 公文结尾语差异大（特此通知/特此报告/当否请示），交给调用方在 sections 里写
     title: "公文（党政机关公文格式，参照 GB/T 9704-2012）",
     when: "生成通知、通报、请示、批复、报告等公文正文时使用。三号仿宋正文、黑体层次标题、22pt 小标宋大标题、固定行距。",
-    blocks: "heading / paragraph / numbered / bullets / table / pageBreak",
+    blocks: "heading / paragraph / numbered / bullets / table / image / toc / pageBreak",
     // GB/T 9704：A4，上37mm 下35mm 左28mm 右26mm（约值）；正文三号(16pt)仿宋；固定行距 28pt
     cfg: {
       fontTitle: "方正小标宋简体", fontHeading: "黑体", fontBody: "仿宋_GB2312",
@@ -480,7 +663,7 @@ const SCENES = [
     sceneName: "notice",
     title: "通知 / 公告 / 说明（简洁单页优先）",
     when: "生成对外通知、公告、事项说明、操作指引等短文档时使用。标题醒目、正文不缩进、层次精简、优先单页呈现。",
-    blocks: "heading / paragraph / bullets / numbered / quote / table / pageBreak",
+    blocks: "heading / paragraph / bullets / numbered / quote / table / image / toc / pageBreak",
     cfg: {
       fontTitle: "微软雅黑", fontHeading: "微软雅黑", fontBody: "宋体",
       sizeTitle: 40, sizeH1: 30, sizeH2: 26, sizeH3: 24, sizeBody: 24, sizeSmall: 20,
@@ -495,7 +678,7 @@ const SCENES = [
     sceneName: "report",
     title: "工作报告 / 总结 / 方案（通用书面报告）",
     when: "生成工作总结、调研报告、实施方案、情况汇报等需要分章节和数据的文档时使用。宋体正文、黑体标题、首行缩进、支持数据表格。",
-    blocks: "heading / paragraph / bullets / numbered / quote / table / pageBreak",
+    blocks: "heading / paragraph / bullets / numbered / quote / table / image / toc / pageBreak",
     cfg: {
       fontTitle: "黑体", fontHeading: "黑体", fontBody: "宋体",
       sizeTitle: 36, sizeH1: 30, sizeH2: 26, sizeH3: 24, sizeBody: 24, sizeSmall: 20,
