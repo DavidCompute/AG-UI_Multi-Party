@@ -599,7 +599,7 @@
   </div>
 
   <!-- 知识库管理：创建知识库、上传文档（附件提取文本 + 向量化）；参考技能库的列表式布局 -->
-  <div id="kbModal" class="modal-overlay hidden">
+  <div id="kbModal" class="modal-overlay modal-over-console hidden">
     <div class="modal kb-modal">
       <div class="modal-title">📚 <span data-i18n="kb.title">知识库管理</span></div>
       <div class="kb-view">
@@ -631,7 +631,7 @@
   </div>
 
   <!-- 数字员工编辑：独立选取弹窗（可复用技能 / 可调用子数字员工 / 知识库）。表单内只罗列“已选”，备选在此弹窗内勾选。 -->
-  <div id="agentPickModal" class="modal-overlay hidden">
+  <div id="agentPickModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">
       <div class="modal-title" id="agentPickTitle"></div>
       <p class="form-hint" style="margin:0 0 8px" data-i18n="agent.form.pick.tip">勾选即生效：所选内容会实时显示到表单「已选」区；再次点击可取消勾选。备选很多时可用搜索过滤。</p>
@@ -647,7 +647,7 @@
   </div>
 
   <!-- 用户分组：新增 / 编辑（独立弹窗；成员用勾选选择，不手输） -->
-  <div id="ugModal" class="modal-overlay hidden">
+  <div id="ugModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">
       <div class="modal-title" id="ugModalTitle" data-i18n="admin.ugNewTitle">新建用户分组</div>
       <input id="ugIdField" type="hidden" />

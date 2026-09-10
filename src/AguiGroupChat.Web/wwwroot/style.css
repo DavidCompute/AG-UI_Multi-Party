@@ -850,6 +850,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
   padding: 24px 0;
 }
 .modal-overlay.hidden { display: none; }
+/* 二级弹窗：由「管理员控制台」等一级弹窗内再打开的弹窗（用户分组 / 选取 / 知识库等）。
+   这些弹窗在 DOM 中位于 #adminModal 之前，若同为 z-20 会被后者盖住而无法点击；
+   这里抬高到控制台之上（仍低于 toast 的 z-100），保证后开的弹窗始终在最顶层可操作。 */
+.modal-overlay.modal-over-console { z-index: 60; }
 /* 通用隐藏工具类：视图切换（agentFormView 等）依赖此规则 */
 .hidden { display: none !important; }
 .modal {
