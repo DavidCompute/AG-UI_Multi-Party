@@ -97,6 +97,52 @@
 **错误处理**：文件不存在 → `图片文件不存在：<路径>`；格式不支持 → `不支持的图片格式：<ext>`。
 两者都返回 `"ok":false` + 可读原因，模型可据此改用其它路径或告知用户。
 
+## 导入到技能库
+
+生成物可直接导入平台，无需手工粘贴：
+
+```bash
+node tools/docx-skills/import.mjs --base http://localhost:5200 --user <管理员> --pass <密码>
+# 或使用令牌：
+node tools/docx-skills/import.mjs --base http://localhost:5200 --token <令牌>
+```
+
+可选参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--only docx_gongwen,docx_report` | 只导入部分技能 |
+| `--dry-run` | 只打印将要导入的内容，不调用接口 |
+| `--force` | 已存在则改为更新（PUT），否则跳过 |
+
+导入后：**AI 角色管理 → 🎯 技能库** 可见；挂载到数字员工的「技能与知识」里即可使用。
+
+> ⚠️ `dotnet` 技能**仅系统管理员可创建**（平台安全策略），且**每次执行都需人工审批**。
+> 若导入报 403，请换管理员账号或 `--token`。
+
+### 一个重要区别：种子技能 vs 导入技能
+
+平台有两类技能：
+
+- **种子技能**：写在 `appsettings.json` 的 `Agents:Skills` 里，**常驻不可删**。
+- **运行时技能**：经 API 导入，随技能库持久化，**可在界面删除**。
+
+本工具走**运行时导入**（第二类）。原因：这三个技能正文各约 45KB，
+塞进 appsettings 需整段 JSON 转义，不可维护；且会在每次恢复时与快照叠加。
+
+## 文件说明
+
+```
+tools/docx-skills/
+├── generate.mjs    ← 共享内核 + 场景配置（唯一需要维护的地方）
+├── import.mjs      ← 导入脚本（把 out/ 下的技能推进平台技能库）
+├── README.md
+└── out/            ← 生成物，请勿手改
+    ├── docx_gongwen.cs
+    ├── docx_notice.cs
+    └── docx_report.cs
+```
+
 ## 生成方式
 
 **不要直接手改 `out/` 下的文件** —— 它们由生成器产出。
