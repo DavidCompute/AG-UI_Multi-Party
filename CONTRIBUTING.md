@@ -150,6 +150,28 @@ The Web frontend is fully localized. **This is important** — the i18n CI check
   ```
 - **Translation courtesy:** a contribution in English is always welcome already; if you are able, please also provide the simplified Chinese translation for any new or changed keys. This is appreciated but **not** a blocker — a correct English submission with Chinese translation is the ideal, whereas English-only is perfectly acceptable.
 
+## Releasing (maintainers)
+
+Desktop installers are built and published automatically by the `Release (Windows Desktop MSI)` workflow (`.github/workflows/release-desktop.yml`). To cut a release:
+
+1. **Bump the version** in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` (`<Version>`) and commit it to `main`.
+2. **Tag the commit and push the tag**:
+   ```bash
+   git tag v1.0.123
+   git push origin v1.0.123
+   ```
+   The tag must match the project `<Version>` (without the leading `v`). The workflow fails fast on a mismatch so an installer is never published under the wrong version number.
+
+That's it — the workflow builds the MSI via `tools/build-msi.ps1` and creates a **published** GitHub Release named `v<version>` with the `.msi` attached. Re-running the workflow for an existing tag just replaces the attached MSI, so it is safe to retry.
+
+To build an installer locally without publishing, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.123
+```
+
+You can also trigger the workflow manually from the Actions tab (`Run workflow`), leaving the `version` input blank to use the value from the csproj.
+
 ## Code Style
 
 - **Keep it simple and minimal.** Prefer the smallest, clearest change that solves the problem. Do not refactor unrelated code.
