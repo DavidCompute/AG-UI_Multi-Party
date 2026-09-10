@@ -22,14 +22,20 @@ public static class AgentApi
         var root = app.MapGroup("/ag-ui/agents");
 
         // ---- 目录（登录可见自己创建的私密智能体；匿名 / 他人不可见私密智能体；技能目标与 AI 分身不暴露）----
-        root.MapGet("/", (HttpContext ctx, AuthService auth, AgentCatalog catalog) =>
+        root.MapGet("/", (HttpContext ctx, AuthService auth, AgentCatalog catalog, AguiGroupChat.Agents.UserGroups.UserGroupStore groups) =>
         {
             var user = RequireUser(ctx, auth);
+            var admin = user is not null && auth.IsAdmin(user.UserId);
             var defs = catalog.ListDefinitions()
                 .Where(d => !d.IsSkillTarget)
                 // AI 分身（twin_*）由用户经「修改资料 → AI 分身」自我管理，不出现在智能体管理 / 成员勾选目录
                 .Where(d => !d.AgentId.StartsWith(TwinService.AgentIdPrefix, StringComparison.Ordinal))
-                .Where(d => !d.IsPrivate || (user is not null && (auth.IsAdmin(user.UserId) || d.OwnerId == user.UserId)))
+                // 可见性：创建者始终可见（可回列表编辑）；管理员可见全部；
+                // 其余：私密 → 不可见；公开且未配置组白名单 → 全员（含匿名）；公开但配置了用户组白名单 → 需命中任一允许组。
+                .Where(d =>
+                    (user is not null && (admin || d.OwnerId == user.UserId))
+                    || (!d.IsPrivate
+                        && (d.AllowedGroupIds is not { Count: > 0 } || (user is not null && groups.UserInAny(user.UserId, d.AllowedGroupIds)))))
                 .ToList();
             return Results.Ok(ToDtos(defs));
         });
@@ -81,7 +87,7 @@ public static class AgentApi
 
         // ---- 与数字员工开始/进入单聊（kind=direct）：幂等——首次为该 (用户, 数字员工) 建独立私有双人群，
         //      已存在则直接复用并返回。不同用户与同一数字员工的单聊各自独立、互不可见（见 proto §2 单聊）。----
-        root.MapPost("/direct", async (DirectStartRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, GroupHub hub, CancellationToken ct) =>
+        root.MapPost("/direct", async (DirectStartRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, GroupHub hub, AguiGroupChat.Agents.UserGroups.UserGroupStore groups, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -93,6 +99,11 @@ public static class AgentApi
             var def = catalog.GetDefinition(agentId);
             if (def is null || def.IsSkillTarget)
                 return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, "数字员工不存在"));
+            // 细粒度授权：该用户未被允许访问（私密非 owner / 命中组白名单外的登录用户）→ 403，避免绕过列表直接单聊
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (!AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(groups, isAdmin, user.UserId, def))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "你无权与此数字员工开始单聊（未在你的可访问范围内）"),
+                    statusCode: StatusCodes.Status403Forbidden);
 
             Group group;
             try
@@ -661,6 +672,8 @@ public static class AgentApi
             DisableOrgRoute = req.DisableOrgRoute,
             // 记忆拟人特征：未知类型 / 缺失 = 不配置（召回沿用全局），越界微调值收敛到安全区间
             MemoryProfile = BuildMemoryProfile(req.MemoryProfile),
+            // 细粒度用户组白名单：（编辑留空 = 清除限制；创建默认 null = 不限制向后兼容）
+            AllowedGroupIds = req.AllowedGroupIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() is { Count: > 0 } list ? list : null,
         };
     }
 
@@ -879,7 +892,8 @@ public sealed record AgentUpsertHttpRequest(
     bool? DisableBridge = null,
     bool? DisableRelay = null,
     bool? DisableOrgRoute = null,
-    MemoryProfileHttpRequest? MemoryProfile = null);
+    MemoryProfileHttpRequest? MemoryProfile = null,
+    IReadOnlyList<string>? AllowedGroupIds = null);
 
 /// <summary>记忆拟人特征（编辑表单「记忆类型」）：字段全部可空，后端对未知类型 / 越界值做归一。</summary>
 /// <param name="MemoryType">预设 key：broad / deep / slowToLearn / cueDependent / fastForgetting；

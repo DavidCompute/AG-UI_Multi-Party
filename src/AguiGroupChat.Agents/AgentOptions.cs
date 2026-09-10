@@ -396,6 +396,14 @@ public sealed class AgentDefinition
     public bool IsPrivate { get; set; }
 
     /// <summary>
+    /// <b>细粒度访问授权（用户组白名单，2.9）</b>：允许<u>访问 / 单聊 / 拉入群</u>本数字员工的<b>平台用户组</b> id 列表
+    /// （UserGroupStore，ug_xxx）。<c>null</c> / 空列表 = 不按用户组限制（沿用既有可见性：公开 / 私密 rule）；
+    /// 非空 = 除既有 owner / 系统管理员放行外，仅当请求方所属的用户组命中列表才可见可用。与 <see cref="IsPrivate"/> 叠加：
+    /// 若同时私密，仍仅创建者可拉入 / 可达（组白名单不放开私密绑定）。
+    /// </summary>
+    public List<string>? AllowedGroupIds { get; set; }
+
+    /// <summary>
     /// 智能体级**差异化审批策略**（人机交互 HITL）：本智能体需要审批的工具名列表
     /// （覆盖全局 <see cref="AgentOptions.RequireApprovalToolNames"/>）。
     /// 空 = 跟随全局名单；非空 = 仅对本智能体这套名单生效（可替换全局，例如本智能体的

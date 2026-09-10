@@ -116,6 +116,7 @@ app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班�
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
 app.MapAccountApi(); // 账号注销（数据主体权利）：自助注销 + 数据擦除
+app.MapUserGroupApi(); // 用户分组 / 组织单元（细粒度授权：管理员建组 + 组→数字员工白名单）
 app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
 app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions（时序/重试/TTL/阶段开关与顺序）
 
@@ -124,6 +125,7 @@ app.Services.RegisterAgentPersistence();
 app.Services.RegisterKnowledgeBasePersistence();
 app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
 app.Services.RegisterOrgTeamPersistence(); // 内置组织角色“多支各留最新”窄映射跨重启保持
+app.Services.RegisterUserGroupsPersistence(); // 用户分组目录跨重启保持（细粒度授权数据）
 app.Services.RegisterSessionPersistence(); // 会话跨重启保持：桌面版 / 服务重启后「保持登录」仍有效
 app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
 app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoint / apiKey）跨重启保持

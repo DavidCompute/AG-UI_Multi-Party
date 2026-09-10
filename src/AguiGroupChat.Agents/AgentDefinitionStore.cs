@@ -12,6 +12,8 @@ public sealed class AgentDefinitionStore : IAgentDefinitionStore
     public AgentDefinitionInfo? GetDefinition(string agentId)
     {
         var def = _catalog.GetDefinition(agentId);
-        return def is null ? null : new AgentDefinitionInfo(def.AgentId, def.Nickname, def.IsPrivate, def.OwnerId);
+        return def is null ? null
+            : new AgentDefinitionInfo(def.AgentId, def.Nickname, def.IsPrivate, def.OwnerId,
+                def.AllowedGroupIds is { Count: > 0 } ? new List<string>(def.AllowedGroupIds) : null);
     }
 }

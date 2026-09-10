@@ -751,7 +751,6 @@ public sealed class AgentApiIntegrationTests : IClassFixture<AgentApiServerFixtu
     }
 
     // ================= 一句话简介 → 角色设定生成 =================
-
     [Fact]
     public async Task GenerateInstructions_WithDescription_ReturnsStructuredPrompt()
     {
@@ -1248,5 +1247,58 @@ public sealed class AgentOrchestratorTests
             "],\"skills\":[]}");
         var mgr = plan.Agents.Single(a => a.AgentId == "mgr");
         Assert.Equal(["lead_b", "lead_a"], mgr.AssignmentIds); // 原有 lead_b 保持在前，缺的 lead_a 按方案顺序追加
+    }
+}
+
+/// <summary>用户组白名单访问判定（细粒度授权）的纯单元验证。</summary>
+public sealed class UserGroupAuthorizerUnitTests
+{
+    private static AguiGroupChat.Agents.UserGroups.UserGroupStore NewStore() => new();
+
+    [Fact]
+    public void UnsetAllowlist_FallsBackToVisibility()
+    {
+        var store = NewStore();
+        var pub = new AguiGroupChat.Agents.AgentDefinition { AgentId = "a", Nickname = "公开" };
+        // 未配置 AllowedGroupIds：任何登录用户（即使无组）都可访问
+        Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "u" , pub));
+        var priv = new AguiGroupChat.Agents.AgentDefinition { AgentId = "b", Nickname = "私密", IsPrivate = true, OwnerId = "owner" };
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "other", priv));
+        Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "owner", priv));
+    }
+
+    [Fact]
+    public void GroupLimited_OnlyMembersAndAdminAndOwner()
+    {
+        var store = NewStore();
+        store.Upsert(new AguiGroupChat.Agents.UserGroups.UserGroup
+        {
+            GroupId = "ug_rnd", Name = "研发组", MemberUserIds = ["dev_a", "qa_b"],
+        });
+        var agent = new AguiGroupChat.Agents.AgentDefinition
+        {
+            AgentId = "a1", Nickname = "受限", OwnerId = "boss",
+            AllowedGroupIds = ["ug_rnd"],
+        };
+        Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "dev_a", agent)); // 组内成员可见
+        Assert.False(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "hr", agent));   // 组外不可见
+        Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, true, "hr", agent));     // 管理员全局可见
+        Assert.True(AguiGroupChat.Agents.UserGroups.AgentAccessPolicy.CanAccess(store, false, "boss", agent));  // owner 免组限制
+    }
+
+    [Fact]
+    public void PersistenceSnapshot_RoundTrips()
+    {
+        var store = NewStore();
+        store.Upsert(new AguiGroupChat.Agents.UserGroups.UserGroup
+        {
+            GroupId = "ug_os", Name = "运维组", MemberUserIds = ["op1"], CreatedAtMs = 5,
+        });
+        var json = System.Text.Json.JsonSerializer.Serialize(store.Snapshot());
+        var fresh = NewStore();
+        fresh.RestoreSection("[" + json.Substring(1, json.Length - 2) + "]");
+        var got = fresh.Get("ug_os");
+        Assert.NotNull(got);
+        Assert.Equal(["op1"], got!.MemberUserIds);
     }
 }

@@ -42,6 +42,8 @@ public static class AgentHosting
         // 组织角色专用：受控团队提交器 + 窄映射（key→该支对象），供“内置组织角色”反复覆盖落库（管理员放行）
         services.AddSingleton<OrgTeamStore>();
         services.AddSingleton<OrgTeamCommitter>();
+        // 用户分组 / 组织单元目录（细粒度授权）：持久化经 RegisterUserGroupsPersistence 落扩展区 userGroups
+        services.AddSingleton<AguiGroupChat.Agents.UserGroups.UserGroupStore>();
         // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值取 Agents:DailyTokenQuotaPerUser）
         services.AddSingleton(sp => new AguiGroupChat.Hub.Agents.AgentUsageService(
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
@@ -304,6 +306,31 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("orgTeams", snapshot, restore);
+        }
+    }
+
+    /// <summary>
+    /// 注册用户组目录到持久化扩展区「userGroups」：用于对账号做权限编组并据此细化资源可见/可用控制
+    /// （例如 UserGroupStore + AgentDefinition.AllowedGroupIds）。memory 模式写入 JSON 快照（PersistenceService），
+    /// postgres 模式落库 agui_sections 表（ISectionStore）。
+    /// 须在应用构建后、状态恢复（InitializePersistence）之前调用（Web / 桌面组合根）。
+    /// </summary>
+    public static void RegisterUserGroupsPersistence(this IServiceProvider services)
+    {
+        var store = services.GetService<AguiGroupChat.Agents.UserGroups.UserGroupStore>();
+        if (store is null) return;
+        Func<object?> snapshot = store.Snapshot;
+        Action<JsonElement> restore = element => store.RestoreAll(
+            element.Deserialize<List<AguiGroupChat.Agents.UserGroups.UserGroup>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("userGroups", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("userGroups", snapshot, restore);
         }
     }
 

@@ -12,4 +12,5 @@ public interface IAgentDefinitionStore
 
 /// <summary>智能体归属信息（轻量投影）。</summary>
 /// <param name="OwnerId">创建者 userId（种子 / appsettings 声明为 null = 系统级）。</param>
-public sealed record AgentDefinitionInfo(string AgentId, string Nickname, bool IsPrivate, string? OwnerId);
+/// <param name="AllowedGroupIds">细粒度用户组白名单（ug_xxx）：null/空=不按用户组限制；非空=仅命中名单的用户组可访问/单聊/拉入。</param>
+public sealed record AgentDefinitionInfo(string AgentId, string Nickname, bool IsPrivate, string? OwnerId, IReadOnlyList<string>? AllowedGroupIds = null);
