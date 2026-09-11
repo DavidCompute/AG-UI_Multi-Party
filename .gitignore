@@ -19,6 +19,11 @@ backup/
 tools/extract-report.json
 # 浏览器自动化截图 / lockfile（运行产物，勿入库）
 tools/screenshots/
+# 端到端测试脚本的临时状态 / 日志（每次运行重新生成，勿入库）
+tools/.e2e_state.json
+tools/.e2e_run.log
+tools/.wsdebug.txt
+tools/.tok.txt
 package-lock.json
 # node 依赖（如果有，勿入库）
 node_modules/

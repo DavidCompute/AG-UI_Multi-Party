@@ -179,6 +179,39 @@ public static class AgentOrchestrator
             "- 非顶层的岗位把 escalationAgentId 指向自己的直接上级——这是“问题提升”链；\n" +
             "- 顶层主管的 escalationAgentId 留空；叶子执行岗没有下级、assignmentIds 留空。\n" +
             "要点：凡是<b>被别人设为 escalationAgentId 的岗位</b>，它的 assignmentIds 必须包含那些提升到它的下级，不能留空——否则只有“下级往上报问题”、没有“上级往下派任务”，组织不成立。\n" +
+            // 交付闭环：这是编排最容易被忽略、后果最实的一点 ——
+            // 早先提示词只描述“岗位 + 技能 + 连接”，没要求团队能真正把东西交到用户手上，
+            // 于是常出现：用户明确要 Word，团队里却没有任何一个能产出 .docx 的岗位；
+            // 或把“出报表”写成只能生成文字描述的 prompt 技能。用户最终拿不到东西。
+            "【交付闭环（很重要，必须满足）】\n" +
+            "- 先判断：用户的需求里<b>最终要让用户拿到什么</b>（一份 Word / Excel / PDF / PPT 文件、一份可直接用的成品等）。\n" +
+            "- 队伍里<b>必须至少有一个岗位真正具备产出该交付物的能力</b>，且它的技能能实际执行（dotnet / shell / http），" +
+            "而不是只能“写出文字描述”的 prompt 技能。\n" +
+            "    · <b>要 Word 就优先直接引用内置技能 docx_report / docx_gongwen / docx_notice</b>（它们已能真产出 .docx），\n" +
+            "      把它们写进交付岗的 skillIds，<b>不要</b>自己再造一个只能写固定文字的“文档生成”技能 —— 实测踩到：\n" +
+            "      模型自造了 docx_build_dotnet（正文只 new Text(\"交付稿\") 写死一行字）与 docx_pack_shell（只 ls 列目录），\n" +
+            "      既产不出真内容、也不知产物如何交付，结果反复重试直到触发平台的交互轮数保护而终止。\n" +
+            "    · 仅当内置技能确实不满足需求（如需特殊版式/其他格式）才新造，且自造的产出技能<b>必须真正把内容写进文件</b>。\n" +
+            "    · xlsx / pptx / pdf 同理：先看技能库里有没有现成的，没有才新造能真写文件的 dotnet 技能。\n" +
+            "    · <b>禁止</b>用“只能生成文字”的 prompt 技能冒充交付能力；也<b>不要</b>造只打印目录 / 只写占位文字的空壳技能。\n" +
+            "- 该交付岗应是<b>交付链末端</b>（叶子岗、无 assignmentIds）：上游出内容 → 它负责生成文件。\n" +
+            "- 交付岗的 instructions 要写清楚：<b>用户直接要求交付文件时，应当直接产出文件，不要因为“未走完内部审批”而拒交</b>；" +
+            "内部质检 / 签核只能作为“会在文件里标注待核实项”这类非阻断手段，不能变成拿不到文件的理由。\n" +
+            // 实测踩到：模型把“内部流程”写成了对用户的准入门槛 ——
+            // 交付岗人设写成“仅接收主笔签发的定稿版本生成 .docx，不接受未过合规的稿件”，
+            // 结果用户直接要 Word 时，该岗位不生成文件，反问用户要定稿 / 合规结论，用户啥也拿不到。
+            "- 交付岗的 instructions <b>严禁</b>出现把内部流程当成交付前提的写法。具体禁止这类句子：\n" +
+            "    · “仅接收…才生成 / 仅接收…才导出”（如“仅接收主笔签发的定稿版本生成 .docx”）；\n" +
+            "    · “不接受未过合规的稿件 / 未过审不出文件 / 没有定稿我不出文件”；\n" +
+            "    · “须先经…审批 / 先确认…后再生成”（把审批当成交付前置条件）。\n" +
+            "  正确写法：<b>拿到任何可用材料就先出一版文件</b>（材料不完整时也要出，并在文内列入“待确认项”），" +
+            "仅在确实一点材料都没有时才回报缺少什么。例如可写：\n" +
+            "    · “根据现有材料直接整理为 .docx；材料不完整时在附页列出待确认项，不以等待定稿为由不出文件。”\n" +
+            "- 上述“直接交付”只约束<b>交付岗自己</b>：其它岗位（主笔 / 合规 / 审核）仍可各司其职，" +
+            "但它们的规矩不能变成交付岗拒交的理由。\n" +
+            "- 上游岗位的 instructions 里说明“定稿后交 X 岗导出文件”，让交付链路在职责描述上也是通的。\n" +
+            "- <b>技能要一次性把活干完</b>：要交付的岗位不需要再编“归档 / 打包 / 列清单”之类的小步骤技能，\n" +
+            "  一个能产出文件的技能就够；多而无用的执行技能只会让链路反复停下来等审批。\n" +
             "技能要贴合岗位职责，数量 1~6 个。\n\n" +
             BuildReusableSkillsSection(reusableSkills) +
             "只输出最终 JSON（如下结构，字段补齐、可加多余岗位/技能项；简述已在开头给出，最终成稿不再重复简述，也不要 " + Fence() + " 围栏）：\n" +
@@ -186,7 +219,123 @@ public static class AgentOrchestrator
             "用户需求：" + requirement;
     }
 
-    /// <summary>测试钩子：暴露提示词构造，便于断言“可复用技能清单确实进了提示词”。勿在生产路径调用。</summary>
+    /// <summary>
+    /// 检查方案的<b>交付闭环</b>：用户要的交付物，队伍里是否真有人能产出。
+    ///
+    /// <para>
+    /// 为什么单独做一次校验（而不是只靠提示词）：提示词只能“尽量引导”，模型仍会波动 ——
+    /// 实测同样需求，有时产出带交付岗，有时全是 prompt 技能、没人能出文件。
+    /// 这里做确定性检查，把问题<b>提前暴露在前端预览</b>，而不是等用户拿到一团文字才发现。
+    /// </para>
+    ///
+    /// 判定口径（与 <c>WantedDeliverable</c> 一致的词表）：
+    /// 需求里提到 word/docx/文档/文稿 → 需有 docx_ 开头的技能；excel/xlsx/表格 → xlsx_；ppt → pptx_；pdf → pdf_。
+    /// 注：新造技能也计入（模型可能自建产出能力）；只看 skillId 前缀，不解析正文。
+    /// </summary>
+    /// <returns>缺失交付能力的提醒文案；无问题返回 null。</returns>
+    public static string? DetectDeliveryGap(OrchestrationPlan plan, string requirement)
+    {
+        var req = (requirement ?? "").ToLowerInvariant();
+        bool Has(params string[] keys) => keys.Any(k => req.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+        string? prefix = null;
+        string label = "";
+        if (Has("word", "docx", ".doc", "文档", "文稿")) { prefix = "docx_"; label = "Word 文档"; }
+        else if (Has("excel", "xlsx", "表格", "电子表")) { prefix = "xlsx_"; label = "Excel 表格"; }
+        else if (Has("ppt", "pptx", "演示文稿", "幻灯片")) { prefix = "pptx_"; label = "演示文稿"; }
+        else if (Has("pdf")) { prefix = "pdf_"; label = "PDF 文档"; }
+        if (prefix is null) return null; // 需求本身不要文件，不检查
+
+        // 全方案检索：岗位挂了匹配技能，或 skills 里定义了匹配技能（供岗位引用）
+        var hit = plan.Agents.Any(a => (a.SkillIds ?? []).Any(id => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+                  || plan.Skills.Any(s => (s.SkillId ?? "").StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        if (hit) return null;
+
+        return $"用户需要交付{label}，但本方案没有任何岗位具备产出 {label} 的能力（无 {prefix}* 技能）——"
+             + $"照此落库后用户将拿不到文件。请重新编排，或先到「技能库」确认已有可用的 {prefix}* 技能（如内置 docx_report）。";
+    }
+
+    /// <summary>
+    /// 检查方案里是否含有<b>空壳交付技能</b>：名字像能产出文件，实现却写不出真内容。
+    ///
+    /// <para>
+    /// 实测踩到：模型为满足“要 Word”自造了 <c>docx_build_dotnet</c>，正文只 <c>new Text("交付稿")</c> 写死一行字，
+    /// 且不返回 produce_file 标记；另有 <c>docx_pack_shell</c> 只有 97 字符、内容就是 <c>ls</c> 列目录。
+    /// 它们既产不出内容、产物也无法交付，模型只能反复重试，最终触发交互轮数保护而终止。
+    /// </para>
+    ///
+    /// 判据（宁可漏报不可误报，只抓特征明显的）：
+    /// 名字命中交付前缀，且（正文过短 或 正文里出现明显的占位 / 空壳痕迹）。
+    /// </summary>
+    public static string? DetectHollowDeliverySkill(OrchestrationPlan plan)
+    {
+        string[] prefixes = ["docx_", "xlsx_", "pptx_", "pdf_"];
+        var hollow = new List<string>();
+
+        foreach (var s in plan.Skills)
+        {
+            var id = s.SkillId ?? "";
+            if (!prefixes.Any(p => id.StartsWith(p, StringComparison.OrdinalIgnoreCase))) continue;
+
+            var body = s.Body ?? "";
+            var kind = (s.Kind ?? "").ToLowerInvariant();
+            // prompt 类型的“文档生成”技能本质产不出文件
+            if (kind == "prompt") { hollow.Add(id); continue; }
+            // 正文过短：不可能真写出一个有内容的文档
+            if (body.Trim().Length < 200) { hollow.Add(id); continue; }
+            // 明显空壳痕迹
+            if (body.Contains("交付稿\")", StringComparison.Ordinal) && !body.Contains("sections", StringComparison.OrdinalIgnoreCase))
+            { hollow.Add(id); continue; }
+        }
+
+        if (hollow.Count == 0) return null;
+        return "本方案含有疑似空洞的交付技能：" + string.Join("、", hollow)
+             + " —— 它们看起来能产出文件，实际写不出真内容（正文过短 / 是 prompt 类型 / 只写占位文字）。"
+             + "建议改为直接引用内置 docx_report 等成熟技能，否则用户拿不到可用的交付物。";
+    }
+
+    /// <summary>
+    /// 检查<b>交付岗是否被写成了“流程门卫”</b>：把内部流程（等定稿、等合规、等审批）当成对用户的准入条件。
+    ///
+    /// <para>
+    /// 实测踩到：编排出的“Word 交付专员”人设写成
+    /// “仅接收主笔签发的定稿版本生成 .docx，不接受未过合规的稿件”——
+    /// 于是用户直接要文件时，它不出文件，反问用户要定稿与合规结论，用户啥也拿不到。
+    /// 根因是编排器把“岗位规矩”写成了“交付前置条件”，本方法做确定性检查并给出修正建议。
+    /// </para>
+    ///
+    /// 判定口径（只限挂了交付前缀技能的岗位，宁可漏报不可误报）：
+    /// instructions / description 里出现“仅接收…才 / 不接受… / 须先…后才 / 未过…不出”这类阻断式表述。
+    /// </summary>
+    /// <returns>命中的问题描述；无问题返回 null。</returns>
+    public static string? DetectDeliveryGatekeeper(OrchestrationPlan plan)
+    {
+        string[] prefixes = ["docx_", "xlsx_", "pptx_", "pdf_"];
+        // 阻断式表述：把“前置条件”写成了“不出文件的理由”
+        string[] blockers =
+        [
+            "仅接收", "不接受未", "未过合规", "未过审", "须先经", "需先经", "必须先经",
+            "定稿后才", "定稿后再", "审核通过后", "审批通过后", "确认后再", "通过后才",
+        ];
+        var hits = new List<string>();
+        foreach (var a in plan.Agents)
+        {
+            if (!(a.SkillIds ?? []).Any(id => prefixes.Any(p => id.StartsWith(p, StringComparison.OrdinalIgnoreCase))))
+                continue; // 只检查真正具备交付能力的岗位
+            var text = (a.Instructions ?? "") + "\n" + (a.Description ?? "");
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            var found = blockers.FirstOrDefault(b => text.Contains(b, StringComparison.Ordinal));
+            if (found is not null) hits.Add($"{a.AgentId}（命中“{found}”）");
+        }
+
+        if (hits.Count == 0) return null;
+        return "交付岗被写成了“流程门卫”：" + string.Join("、", hits)
+             + " —— 把内部流程（等定稿 / 等合规 / 等审批）当成了对用户的交付前提，"
+             + "照此落库后用户直接要文件时会被反问要定稿，拿不到东西。"
+             + "请改成：拿到可用材料就先出文件，材料不完整时在文内列入“待确认项”，不以等待定稿为由不出文件。";
+    }
+
+    /// <summary>测试钩子：暴露提示词构造，便于断言“可复用技能列表确实进了提示词”。勿在生产路径调用。</summary>
     internal static string BuildPromptForTest(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills, bool allowDotnet = true)
         => BuildPrompt(requirement, reusableSkills, allowDotnet);
 

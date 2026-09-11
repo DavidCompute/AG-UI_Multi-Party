@@ -135,10 +135,12 @@ async def step4_start(token):
     }, token=token)
 
     REQ = "打造一个ai产品文案推广的团队（只负责推广文案相关事宜)，我要最终形成word文档"
-    st, res = call("POST", "/ag-ui/group/message/send", {"groupId": gid, "content": REQ}, token=token)
-    print(f"  已发送请求（{st}）：{REQ}")
 
-    text = await wait_for_reply(token, gid, timeout=600)
+    async def send():
+        st, res = call("POST", "/ag-ui/group/message/send", {"groupId": gid, "content": REQ}, token=token)
+        print(f"  已发送请求（{st}）：{REQ}")
+
+    text = await wait_for_reply(token, gid, timeout=600, send=send)
     if text:
         print("\n  --- 构建师回复（前 1500 字）---")
         print("  " + text[:1500].replace("\n", "\n  "))
@@ -148,49 +150,145 @@ async def step4_start(token):
 
 # ---------------------------------------------------------------- 工具：等回复
 
-async def wait_for_reply(token, gid, timeout=600, baseline=None):
-    """订阅群，等智能体回复稳定（无新内容 8 秒）后返回其正文。"""
+async def wait_for_reply(token, gid, timeout=600, baseline=None, auto_approve=True, send=None):
+    """订阅群，等智能体回复稳定（无新内容 8 秒）后返回其正文。
+
+    send: 可选的 (async) 发送回调。**先把 WS 订阅建好再发消息**——否则交互事件
+    （AGENT_INTERACTION_REQUEST）可能在订阅前就广播出去，脚本接不到，
+    带审批的交付技能就永远停在交互卡上（实测踩到）。
+
+    auto_approve: 收到 AGENT_INTERACTION_REQUEST 时自动批准（并选“本次运行都批准”），
+    让带审批的交付技能（如内置 docx_report）能真正跑完。
+    """
     st, res = call("GET", "/ag-ui/group/" + gid + "/messages?count=50", token=token)
     msgs = res.get("messages", res) if isinstance(res, dict) else res
     if baseline is None:
         baseline = {m.get("messageId") for m in (msgs or [])}
 
     my_uid = load_state().get("userId")
-    update = {"__last": ""}
-    update["__last"] = ""
-    hb = [time.time()]
+    update = {"__last": time.time()}
+
+    async def approve(iid, run_id):
+        st, res = call("POST", "/ag-ui/group/interaction/resolve", {
+            "groupId": gid, "interruptId": iid, "memberId": my_uid,
+            "approved": True, "approveAll": True,
+        }, token=token)
+        print(f"    [自动批准] interrupt={iid} run={run_id} → {st} {str(res)[:120]}")
 
     async with websockets.connect(f"{WS}?memberId={my_uid}&token={token}") as ws:
         await ws.send(json.dumps({"type": "GROUP_SUBSCRIBE", "groupIds": [gid]}))
+        await asyncio.sleep(0.5)  # 等订阅确认，避免首发事件漏收
+        if send is not None:
+            await send()
+
         deadline = time.time() + timeout
         text = ""
+        approved = set()
+        agent_msg_ids = set()
+        saw_agent = False          # 是否已看到智能体开始作答（在此之前不适用静默结束）
+        quiet_need = 45.0          # 静默多久才算“说完了”；思考型模型会在 reasoning 间隙长时间静默
         while time.time() < deadline:
             try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=10)
+                raw = await asyncio.wait_for(ws.recv(), timeout=5)
             except asyncio.TimeoutError:
-                # 无新事件：若已有内容且静默够久，认为说完了
-                if text and time.time() - update["__last"] > 8:
+                # 无新事件：已看到智能体、有正文、且静默够久 → 认为本轮说完
+                if saw_agent and text and time.time() - update["__last"] > quiet_need:
                     break
                 continue
-            except Exception:
+            except Exception as e:
+                if os.environ.get("E2E_DEBUG_WS"):
+                    print(f"    [WS] 连接异常退出: {type(e).__name__}: {e}")
                 break
             try:
                 ev = json.loads(raw)
             except Exception:
                 continue
             t = ev.get("type", "")
+            if os.environ.get("E2E_DEBUG_WS"):
+                print(f"    [WS] {t} len={len(raw)}")
+                if t in ("TEXT_MESSAGE_START", "TEXT_MESSAGE_END", "AGENT_INTERACTION_REQUEST"):
+                    print(f"         {raw[:500]}")
+            p = ev.get("payload") or ev
+            if t == "TEXT_MESSAGE_START":
+                # 只跟踪【数字员工本轮新开的那条消息】；
+                # 用户自己发的消息也会回音 TEXT_MESSAGE_START/END，
+                # 不过滤会在用户消息 END 时就误判“回复结束”（实测踩到）。
+                sender = p.get("senderId") or p.get("agentId") or p.get("memberId") or ""
+                mid = p.get("messageId") or ev.get("messageId")
+                role = str(p.get("senderType") or p.get("role") or "").lower()
+                if sender == my_uid or role == "user":
+                    continue
+                if mid:
+                    agent_msg_ids.add(mid)
+                    saw_agent = True
+                    update["__last"] = time.time()
             if t == "TEXT_MESSAGE_CONTENT":
-                d = (ev.get("delta") or ev.get("payload", {}).get("delta") or "")
+                mid = p.get("messageId") or ev.get("messageId")
+                # 必须已看到“智能体自己的消息开始”才收正文：
+                # 用户自己发的那条也会回音 START/CONTENT/END，不拦就会把用户提问当成回复。
+                if not agent_msg_ids or (mid and mid not in agent_msg_ids):
+                    continue
+                d = (ev.get("delta") or p.get("delta") or "")
                 if d:
                     text += d
                     update["__last"] = time.time()
             elif t == "TEXT_MESSAGE_END":
+                mid = p.get("messageId") or ev.get("messageId")
+                if not agent_msg_ids or (mid and mid not in agent_msg_ids):
+                    continue  # 用户消息的 END，不代表智能体回完
                 if text:
                     break
+            elif t in ("TEXT_MESSAGE_REASONING", "TOOL_CALL_START", "TOOL_CALL_RESULT", "GROUP_TYPING"):
+                update["__last"] = time.time()  # 仍在干活：刷新静默计时，不要误判结束
             elif t in ("AGENT_INTERACTION_REQUEST",):
-                # 需要审批/输入：记录但继续等（本步骤通常不需要）
                 update["__last"] = time.time()
+                iid = p.get("interruptId") or ev.get("interruptId")
+                if auto_approve and iid and iid not in approved:
+                    approved.add(iid)
+                    await approve(iid, p.get("runId") or ev.get("runId"))
+        if os.environ.get("E2E_DEBUG_WS"):
+            print(f"    [WS] 订阅循环结束 textLen={len(text)} agentMsgs={len(agent_msg_ids)} elapsed={int(time.time()-(deadline-timeout))}s")
         return text.strip()
+
+
+# ---------------------------------------------------------------- 工具：后台自动批准
+
+async def _auto_approve_loop(token, gid, stop: asyncio.Event):
+    """后台订阅群，把收到的 AGENT_INTERACTION_REQUEST 全部批准（含“本次运行都批准”）。
+
+    为什么需要：交付类技能（内置 docx_report）是 dotnet → 强制人工审批。
+    而思考型模型的思考过程可能长达数分钟，交互卡可能比 step8 的订阅窗口晚到；
+    若没人批准，运行就永远停在卡上，产物永远不会生成。
+    """
+    my_uid = load_state().get("userId")
+    approved = set()
+    try:
+        async with websockets.connect(f"{WS}?memberId={my_uid}&token={token}") as ws:
+            await ws.send(json.dumps({"type": "GROUP_SUBSCRIBE", "groupIds": [gid]}))
+            while not stop.is_set():
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=3)
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    return
+                try:
+                    ev = json.loads(raw)
+                except Exception:
+                    continue
+                if ev.get("type") != "AGENT_INTERACTION_REQUEST":
+                    continue
+                iid = ev.get("interruptId")
+                if not iid or iid in approved:
+                    continue
+                approved.add(iid)
+                st, res = call("POST", "/ag-ui/group/interaction/resolve", {
+                    "groupId": gid, "interruptId": iid, "memberId": my_uid,
+                    "approved": True, "approveAll": True,
+                }, token=token)
+                print(f"    [后台批准] interrupt={iid} → {st} {str(res)[:100]}")
+    except Exception as e:
+        print(f"    [后台批准] 退出: {type(e).__name__}: {e}")
 
 
 # ---------------------------------------------------------------- 步骤 5
@@ -206,10 +304,11 @@ async def step5_commit(token):
     msgs = res.get("messages", res) if isinstance(res, dict) else res
     baseline = {m.get("messageId") for m in (msgs or [])}
 
-    st, res = call("POST", "/ag-ui/group/message/send", {"groupId": gid, "content": "落库"}, token=token)
-    print("  已发送「落库」:", st)
+    async def send():
+        st, res = call("POST", "/ag-ui/group/message/send", {"groupId": gid, "content": "落库"}, token=token)
+        print("  已发送「落库」:", st)
 
-    text = await wait_for_reply(token, gid, timeout=900, baseline=baseline)
+    text = await wait_for_reply(token, gid, timeout=900, baseline=baseline, send=send)
     if text:
         print("\n  --- 落库回复（前 1200 字）---")
         print("  " + text[:1200].replace("\n", "\n  "))
@@ -302,6 +401,14 @@ async def step8_ask_with_attachment(token):
         "nickname": load_state().get("targetNickname") or "", "override": True,
     }, token=token)
 
+    # 先记下【上传前】的基线：上传的 MARKETING.md 本身也是“本轮新增附件”，
+    # 必须排除掉，否则会被误判为交付产物（旧脚本踩过类似的坑）。
+    st, res = call("GET", "/ag-ui/group/" + gid + "/messages?count=50", token=token)
+    pre = res.get("messages", res) if isinstance(res, dict) else res
+    save_state(step8Baseline=sorted({m.get("messageId") for m in (pre or [])}))
+    save_state(step8BaselineAtts=sorted(
+        a.get("url") for m in (pre or []) for a in (m.get("attachments") or []) if a.get("url")))
+
     # 上传附件
     st, res = upload_file(ATTACH, token)
     if st != 200:
@@ -309,20 +416,23 @@ async def step8_ask_with_attachment(token):
         return None
     att = res["attachments"][0]
     print(f"  附件已上传：{att['name']}（{att['size']} 字节）→ {att['url']}")
-    save_state(uploadedAttachment=att)
+    save_state(uploadedAttachment=att, uploadedAttachmentUrl=att.get("url"))
 
+    # 上传后的消息集合作为“本次新消息”基线
     st, res = call("GET", "/ag-ui/group/" + gid + "/messages?count=50", token=token)
     msgs = res.get("messages", res) if isinstance(res, dict) else res
     baseline = {m.get("messageId") for m in (msgs or [])}
     save_state(step8Baseline=sorted(baseline))
 
     QUESTION = '根据附件帮我写“知聚”市场推广文案，我需要word文档'
-    st, res = call("POST", "/ag-ui/group/message/send", {
-        "groupId": gid, "content": QUESTION, "attachments": [att],
-    }, token=token)
-    print(f"  已发送（{st}）：{QUESTION}")
 
-    text = await wait_for_reply(token, gid, timeout=900, baseline=baseline)
+    async def send():
+        st, res = call("POST", "/ag-ui/group/message/send", {
+            "groupId": gid, "content": QUESTION, "attachments": [att],
+        }, token=token)
+        print(f"  已发送（{st}）：{QUESTION}")
+
+    text = await wait_for_reply(token, gid, timeout=1200, baseline=baseline, send=send)
     if text:
         print("\n  --- 回复（前 1500 字）---")
         print("  " + text[:1500].replace("\n", "\n  "))
@@ -355,43 +465,70 @@ def upload_file(path, token):
 
 # ---------------------------------------------------------------- 步骤 9
 
-def step9_verify(token):
+async def step9_verify(token):
     step(9, "检查 Word 文档并给出下载链接")
     gid = load_state().get("workGroupId")
     if not gid:
         print("  找不到工作群，请先跑步骤 8")
         return False
 
-    st, res = call("GET", "/ag-ui/group/" + gid + "/messages?count=50", token=token)
-    msgs = res.get("messages", res) if isinstance(res, dict) else res
-    # 只看【本次请求之后】新增的消息，否则会把历史轮次的旧附件误当本次成果（实测踩到）。
-    base = set(load_state().get("step8Baseline") or [])
-    new = [m for m in (msgs or []) if m.get("messageId") not in base] if base else (msgs or [])
-    hits = [m for m in new if m.get("attachments")]
-    if not hits:
+    base_urls = set(load_state().get("step8BaselineAtts") or [])
+    if load_state().get("uploadedAttachmentUrl"):
+        base_urls.add(load_state()["uploadedAttachmentUrl"])
+
+    def new_attachments(msgs):
+        """本轮新增的附件（排除发送前已有的）——交付产物可能挂在既有消息上。"""
+        return [a for m in (msgs or []) for a in (m.get("attachments") or [])
+                if a.get("url") and a["url"] not in base_urls]
+
+    # 交付技能（如内置 docx_report）会弹审批；step8 里若因为模型思考太久、
+    # 交互卡比订阅窗口晚到，这里再挂一个后台补批准任务，保证流程总能跑完。
+    approve_stop = asyncio.Event()
+    approve_task = asyncio.create_task(_auto_approve_loop(token, gid, approve_stop))
+
+    msgs = None
+    atts = []
+    try:
+        for i in range(144):  # 最多 12 分钟
+            st, res = call("GET", "/ag-ui/group/" + gid + "/messages?count=50", token=token)
+            msgs = res.get("messages", res) if isinstance(res, dict) else res
+            atts = new_attachments(msgs)
+            if atts:
+                break
+            print(f"    ...等待交付产物（{(i+1)*5}s）")
+            await asyncio.sleep(5)
+    finally:
+        approve_stop.set()
+        try:
+            await asyncio.wait_for(approve_task, timeout=5)
+        except Exception:
+            approve_task.cancel()
+
+    if not atts:
         print("  ✗ 本次未产生附件")
+        base = set(load_state().get("step8Baseline") or [])
+        new = [m for m in (msgs or []) if m.get("messageId") not in base] if base else (msgs or [])
         print("  本次新消息：")
         for m in new[-4:]:
             print("    -", (m.get("content") or "")[:220].replace("\n", " "))
         return False
 
     ok = False
-    for m in hits:
-        for att in m["attachments"]:
-            if att.get("contentType", "").startswith("application/vnd.openxmlformats-officedocument.wordprocessingml"):
-                st, body = call("GET", att["url"], token=token, raw=True)
-                size = len(body) if isinstance(body, bytes) else 0
-                is_zip = isinstance(body, bytes) and body[:2] == b"PK"
-                print(f"\n  ✓ Word 附件：{att['name']}（{att['size']} 字节）")
-                print(f"    下载地址：{BASE}{att['url']}")
-                print(f"    下载校验：HTTP {st}，{size} 字节，合法 docx={is_zip}")
-                if st == 200 and is_zip:
-                    import io, zipfile, re
-                    z = zipfile.ZipFile(io.BytesIO(body))
-                    xml = z.read("word/document.xml").decode("utf-8")
-                    texts = [t for t in re.findall(r"<w:t[^>]*>([^<]*)</w:t>", xml) if t.strip()]
-                    print(f"    文档段落数：{len(texts)}，开头：{texts[:5]}")
-                    ok = True
+    for att in atts:
+        if att.get("contentType", "").startswith("application/vnd.openxmlformats-officedocument.wordprocessingml"):
+            st, body = call("GET", att["url"], token=token, raw=True)
+            size = len(body) if isinstance(body, bytes) else 0
+            is_zip = isinstance(body, bytes) and body[:2] == b"PK"
+            print(f"\n  ✓ Word 附件：{att['name']}（{att['size']} 字节）")
+            print(f"    下载地址：{BASE}{att['url']}")
+            print(f"    下载校验：HTTP {st}，{size} 字节，合法 docx={is_zip}")
+            if st == 200 and is_zip:
+                import io, zipfile, re
+                z = zipfile.ZipFile(io.BytesIO(body))
+                xml = z.read("word/document.xml").decode("utf-8")
+                texts = [t for t in re.findall(r"<w:t[^>]*>([^<]*)</w:t>", xml) if t.strip()]
+                print(f"    文档段落数：{len(texts)}，开头：{texts[:5]}")
+                ok = True
     if not ok:
         print("\n  ✗ 附件中没有 Word 文档")
     return ok
@@ -420,7 +557,7 @@ async def main():
         step7_pick_member(token)
     if args.start <= 8:
         await step8_ask_with_attachment(token)
-    ok = step9_verify(token)
+    ok = await step9_verify(token)
 
     print("\n" + "=" * 72)
     print("端到端结果：", "通过 ✓" if ok else "未通过 ✗")

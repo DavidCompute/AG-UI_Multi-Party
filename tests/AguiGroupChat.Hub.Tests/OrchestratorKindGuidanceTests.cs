@@ -69,7 +69,10 @@ public sealed class OrchestratorKindGuidanceTests
     {
         var admin = AgentOrchestrator.BuildPromptForTest("做一个推广组", null, allowDotnet: true);
         Assert.Contains("优先选它", admin);
-        Assert.DoesNotContain("禁止", admin.Replace("禁则将", "XX"));
+        // 管理员分支不应出现“禁止返回 kind=dotnet”的权限限制（注意：提示词其他小节也可能出现“禁止”，
+        // 所以只断言这一句权限提示本身，不要用宽泛的词去判）
+        Assert.DoesNotContain("禁止</b>返回 kind=dotnet", admin);
+        Assert.DoesNotContain("仅系统管理员可建，本次调用者无权", admin);
     }
 
     [Fact]

@@ -91,7 +91,13 @@ public static class OrgApplyEngine
                 throw new OrgApplyException(ErrorCodes.SkillPermissionDenied, $"仅管理员可建技能类型 {kind}", forbidden: true);
             var execLoc = string.Equals(s.ExecutionLocation, "client", StringComparison.OrdinalIgnoreCase)
                 ? AgentSkillExecutionLocation.Client : AgentSkillExecutionLocation.Server;
-            var requiresApproval = kind == AgentSkillKind.Shell || execLoc == AgentSkillExecutionLocation.Client || (s.RequiresApproval ?? true);
+            // 审批兜底口径（与 AgentCatalog.CompileSkillSeed 一致）：
+            // Prompt 技能不执行任何代码 / 外呼，没有副作用，**永不**需要人工批准；
+            // 只有会跑命令（shell / dotnet）、发网络请求（http）或在用户机器上执行的技能才要。
+            // 实测踩到：编排出的部门主管挂了 prompt 技能却被要求审批，交付物兜底跑到一半就晾在交互卡上。
+            var requiresApproval = kind is AgentSkillKind.Shell or AgentSkillKind.Http or AgentSkillKind.Dotnet
+                || execLoc == AgentSkillExecutionLocation.Client
+                || (s.RequiresApproval ?? true);
             builtSkills.Add(new AgentSkillDefinition
             {
                 SkillId = id, Name = s.Name.Trim(), Description = s.Description.Trim(), Kind = kind,

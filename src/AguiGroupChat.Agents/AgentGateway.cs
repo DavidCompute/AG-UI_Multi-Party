@@ -186,7 +186,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         string? InputField = null,           // kind=input 型中断：外部服务 responseSchema 的输入字段名（恢复时以其为键回传用户输入）
         JsonElement? ResponseSchema = null,  // kind=input 型中断：完整 responseSchema（前端渲染表单 / 恢复时规范化 payload）
         IReadOnlyList<BridgeQuestion>? Questions = null, // 外部 question 工具的结构化问题（前端逐题渲染选项）
-        int ResumeCount = 0);                // 已恢复轮数（多轮审批防护：超过 MaxInteractionRounds 强制结束）
+        int ResumeCount = 0,                 // 已恢复轮数（多轮审批防护：超过 MaxInteractionRounds 强制结束）
+        bool SuppressMessage = false);       // 交付物兜底：本 run 的消息由外层统一落定，恢复/结束时不再重复开消息
 
     /// <summary>
     /// 以 IServiceProvider 惰性解析 GroupHub，避免 DI 循环依赖
@@ -1129,8 +1130,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 为什么需要：实测踩到 —— 用户带附件要 Word，链路把活派来派去（排版员→总监→组长→写手），
             // 最后写手只把稿子**当文本贴了出来**，没人调 docx_* 技能，用户拿不到文件。
             // “任务被派来派去却没人负责最终交付物”是组织协作的典型断点。
-            if (plan is null && finalText is { Length: > 0 } && !string.IsNullOrWhiteSpace(context.Content))
-                await TrySatisfyDeliveryAsync(context, input, hops, runCt);
+            var wantDelivery = plan is null && finalText is { Length: > 0 } && !string.IsNullOrWhiteSpace(context.Content)
+                && WantedDeliverable(context.Content) is not null;
 
             var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
             {
@@ -1157,13 +1158,31 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 var prefixNames = hops.Where(h => !string.IsNullOrWhiteSpace(h.AgentId)).Select(h => h.AgentNickname).ToList();
                 foreach (var name in prefixNames)
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
+
+                if (wantDelivery)
+                {
+                    // 交付物兜底：交付岗直接产出文件（正文 + 下载卡片），不再贴一遍链路里的过程稿，
+                    // 避免用户看到两段互相矛盾的内容。兜底失败则回退到原文本回答。
+                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, runCt, runId, messageId);
+                    if (delivery.MessageId is { } mid) messageId = mid;
+                    if (delivery.AwaitingInteraction)
+                    {
+                        // 已下交互卡：消息保持开启，等用户决策后由 ResumeRunAsync 继续追加最终结果
+                        _logger.LogInformation("指派/提升路由因交付物兜底中断等待交互：run={RunId} interruptTarget={Target}", runId, context.TriggerUserId);
+                        return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
+                    }
+                }
+
                 finalText ??= "（处理对象未返回内容）";
                 finalText = UnwrapCoordinationAnswer(finalText); // 防内部协调 JSON 泄漏到用户
+                var replyId = messageId!;
                 foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText.Trim(), 160))
-                    await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
+                    await _hub.Value.AppendAgentContentAsync(context.GroupId, replyId, chunk, runCt);
             }
 
-            await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
+            // 运行完成：产物回档挂在外层这条消息上（交付物兜底也已在其上追加）
+            await AttachPublishedProductsAsync(context.GroupId, messageId!, finalText ?? "", runCt);
+            await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId!, runCt);
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
@@ -2143,35 +2162,60 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <para>
     /// 副作用：在<b>当前这条消息</b>上继续追加内容（不另开消息），因此产物回档会自然挂到本条消息上，
     /// 前端直接出下载卡片。
+    ///
+    /// <para>
+    /// 实现要点（实测踩坑）：这里<b>不能</b>再走一次 <see cref="InvokeCoreAsync"/>。兜底发生时外层
+    /// <c>InvokeAssignmentEscalationAsync</c> 正持有本会话的 <c>sessionLock</c>，而 <see cref="InvokeCoreAsync"/>
+    /// 会再取同一把锁 → 直接死锁（表现就是“没有工具调用、没有审批、没有结束、没有错误”的彻底卡死）。
+    /// 同时外层尚未 <c>PublishAgentMessageStartAsync</c>，若内层自行开消息，产物附件也挂不到用户看到的那条消息上。
+    /// 因此改为<b>在本方法内联跑一次流式</b>：复用外层 <paramref name="messageId"/> 追加正文，
+    /// 审批则复用既有 <c>_pendingInteractions</c> 机制挂在外层同一个 run 上，由 <see cref="ResumeRunAsync"/> 继续。
     /// </para>
     /// </summary>
-    private async Task TrySatisfyDeliveryAsync(
-        AgentInvocationContext context, string input, List<ChainNode> hops, CancellationToken ct)
+    private async Task<DeliveryOutcome> TrySatisfyDeliveryAsync(
+        AgentInvocationContext context, string input, List<ChainNode> hops, CancellationToken ct,
+        string runId, string? messageId)
     {
         try
         {
             // 1) 用户是否要文件？从原始消息判定（不要看链路正文，那是回答内容）
             var want = WantedDeliverable(context.Content);
-            if (want is null) return;
+            if (want is null) return new DeliveryOutcome(messageId, false);
 
             // 2) 链路上已经调过这个技能 / 已有产物 → 不重复做
             var usedSkillIds = hops.Where(h => h.Kind == "skill").Select(h => h.AgentId).ToHashSet(StringComparer.Ordinal);
-            if (usedSkillIds.Any(id => id.StartsWith(want.Value.SkillPrefix, StringComparison.OrdinalIgnoreCase))) return;
+            if (usedSkillIds.Any(id => id.StartsWith(want.Value.SkillPrefix, StringComparison.OrdinalIgnoreCase)))
+                return new DeliveryOutcome(messageId, false);
 
             // 3) 在可达组织范围内找一位挂了匹配技能的同事
             var candidate = FindDeliverableOwner(context, want.Value.SkillPrefix);
             if (candidate is null)
             {
                 _logger.LogDebug("交付物兜底：组织内无匹配技能的岗位（需要 {Prefix}*）", want.Value.SkillPrefix);
-                return;
+                return new DeliveryOutcome(messageId, false);
             }
 
             _logger.LogInformation("交付物兜底：用户要求 {Kind}，由 {AgentId} 产出交付文件", want.Value.Label, candidate.AgentId);
 
             // 4) 让该同事真实跑一次（完整流式路径：工具调用 + 审批 + 产物回档均在官方管道内完成）。
             //    这里的“派单”只是把交付要求显式告知，不伪造对话历史。
-            var deliver = $"用户要求交付 {want.Value.Label} 文件。请调用你的对应技能，把要交付的内容生成为文件后简短回报。\n\n【用户原始请求】\n{context.Content}";
+            //    提示词必须把“先出文件”放在最前，并把“不得因流程拒交”写进去：
+            //      · 否则模型会先去调自己挂的规划/文案类技能（实测：先调 copy_plan 弹审批，Word 一直没生成）；
+            //      · 若岗位人设被写成“仅接收定稿才出文件”，它还会反问用户要定稿、空手而回
+            //        （实测：word_delivery 回“我需要先跟你对齐交付流程…否则我不会出文件”）。
+            var wantSkill = DeliverableSkillFor(candidate, want.Value.SkillPrefix);
+            var hardRule = "\n\n【硬性要求】用户是直接向你要这份文件的，你必须现在就产出文件："
+                + "不要反问用户要定稿/合规结论/审批结果，不要以“流程未走完”为由拒交；"
+                + "材料不完整也先出稿，把不确定的地方在文件里列为待确认项。";
+            var deliver = wantSkill is null
+                ? $"用户要求交付 {want.Value.Label} 文件。请直接调用你的文件生成技能，把交付内容生成为文件后简短回报。" + hardRule
+                  + $"\n\n【用户原始请求】\n{context.Content}"
+                : $"用户要求交付 {want.Value.Label} 文件。**第一步就直接调用技能 {wantSkill}**（不要先做规划/分析/汇报，不要调用其它技能），"
+                  + $"把交付内容生成为文件后简短回报。" + hardRule
+                  + $"\n\n【用户原始请求】\n{context.Content}";
             var prev = AmbientContext.Value;
+            var prevChain = SkillChainBuilder.Ambient.Value;
+            var prevToolResults = ToolResultCollector.Ambient.Value;
             try
             {
                 // 用 with 派生：保留群 / 话题 / 触发者 / 可见性 / 附件等全部上下文，只换执行者与内容
@@ -2184,16 +2228,166 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     TriggerMode = AgentTriggerMode.AllMessages,
                 };
                 AmbientContext.Value = sub;
-                await InvokeStreamingOnlyAsync(sub, ct);
+                // 兜底执行也要参与链路可视化与产物收集（与外层作用域隔离，避免污染原链）
+                SkillChainBuilder.Ambient.Value = new SkillChainBuilder();
+                SkillChainBuilder.Ambient.Value.EnsureRoot(candidate.AgentId, candidate.Nickname ?? candidate.AgentId);
+                ToolResultCollector.Ambient.Value = new ToolResultCollector();
+                var interrupt = await RunDeliveryStreamAsync(sub, candidate, runId, messageId, ct);
+                if (interrupt is not null)
+                {
+                    return new DeliveryOutcome(messageId, true); // 已挂交互卡，正文待用户决策后由 ResumeRunAsync 继续
+                }
                 hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
             }
-            finally { AmbientContext.Value = prev; }
+            finally
+            {
+                AmbientContext.Value = prev;
+                SkillChainBuilder.Ambient.Value = prevChain;
+                ToolResultCollector.Ambient.Value = prevToolResults;
+            }
         }
         catch (Exception ex)
         {
             // 兜底失败不影响已给出的回答
             _logger.LogDebug(ex, "交付物兜底失败（已忽略）");
         }
+        return new DeliveryOutcome(messageId, false);
+    }
+
+    /// <summary>交付物兜底结果：可能保持原消息，也可能因审批中断而由恢复流接管。</summary>
+    private readonly record struct DeliveryOutcome(string? MessageId, bool AwaitingInteraction);
+
+    /// <summary>
+    /// 交付物兜底的“内联流式”：在<b>外层已开启的那条消息</b>上让交付岗真实跑一次模型循环
+    /// （工具调用 / 技能产物 / 审批全部走官方管道）。返回非 null 表示期间触发了审批中断，
+    /// 调用方应停止追加正文并把本次 run 交还给 <see cref="ResumeRunAsync"/>。
+    ///
+    /// <para>与外层共享 <c>sessionLock</c> 与 <c>_activeRuns[runId]</c>，因此不再单独建锁 / 注册 run。</para>
+    /// </summary>
+    private async Task<ToolApprovalRequestContent?> RunDeliveryStreamAsync(
+        AgentInvocationContext context, AgentDefinition def, string runId, string? messageId, CancellationToken ct)
+    {
+        var visionModel = _options.VisionEnabled
+            ? AgentCatalog.ResolveVisionModelName(_options, string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase))
+            : null;
+        var agent = _catalog.GetOrCreate(context.AgentId);
+        var session = await GetOrCreateSessionAsync(context, agent, ct);
+        await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
+
+        var accumulated = "";
+        var reasoningAccumulated = 0;
+        ChatMessage userMessage;
+        if (!string.IsNullOrWhiteSpace(visionModel))
+        {
+            var bareVision = _catalog.CreateBareVision(context.AgentId, visionModel!);
+            if (bareVision is not null)
+            {
+                (userMessage, var visionTurn) = await BuildVisionUserMessageAsync(context, ct);
+                if (visionTurn) agent = bareVision;
+            }
+            else userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, ct));
+        }
+        else
+        {
+            userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, ct));
+        }
+
+        ToolApprovalRequestContent? approval = null;
+        await foreach (var update in agent.RunStreamingAsync(userMessage, session, new ChatClientAgentRunOptions(), ct))
+        {
+            if (update.Text is { Length: > 0 } text)
+            {
+                var delta = ComputeTextDelta(accumulated, text);
+                if (delta.Length > 0)
+                {
+                    if (messageId is not null)
+                        await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, delta, ct);
+                    accumulated += delta;
+                }
+            }
+            foreach (var rc in update.Contents.OfType<TextReasoningContent>())
+            {
+                if (rc.Text is not { Length: > 0 } r) continue;
+                if (reasoningAccumulated >= MaxReasoningTotalChars) continue;
+                var remaining = MaxReasoningTotalChars - reasoningAccumulated;
+                var rd = r.Length > remaining ? r[..remaining] : r;
+                reasoningAccumulated += rd.Length;
+                if (messageId is not null)
+                    await AppendReasoningAsync(context.GroupId, messageId, rd, ct);
+            }
+            foreach (var callFc in update.Contents.OfType<FunctionCallContent>())
+            {
+                await _hub.Value.BroadcastAsync(context.GroupId, new ToolCallStartEvent
+                {
+                    ToolCallId = callFc.CallId ?? "tool_" + IdGenerator.NewId(),
+                    ToolCallName = callFc.Name,
+                    ToolArguments = callFc.Arguments is { Count: > 0 } ? JsonSerializer.Serialize(callFc.Arguments) : null,
+                    ParentMessageId = messageId,
+                    GroupId = context.GroupId,
+                    TriggerUserId = context.TriggerUserId,
+                    Timestamp = _hub.Value.NowMs,
+                }, ct: ct);
+            }
+            foreach (var fr in update.Contents.OfType<FunctionResultContent>())
+            {
+                if (fr.Result is null) continue;
+                ToolResultCollector.Ambient.Value?.Add(AgentGatewayHelpers.DescribeToolResult(fr.Result));
+                await _hub.Value.BroadcastAsync(context.GroupId, new ToolCallResultEvent
+                {
+                    ToolCallId = fr.CallId ?? "tool_" + IdGenerator.NewId(),
+                    ParentMessageId = messageId,
+                    GroupId = context.GroupId,
+                    Result = AgentGatewayHelpers.DescribeToolResult(fr.Result),
+                    Timestamp = _hub.Value.NowMs,
+                }, ct: ct);
+            }
+            foreach (var apr in update.Contents.OfType<ToolApprovalRequestContent>())
+            {
+                approval = apr;
+                break;
+            }
+            if (approval is not null) break;
+        }
+
+        if (approval is null) return null;
+
+        // 审批中断：复用外层 runId（不另开 run），先把这次兜底已追加的正文清掉，保持“决策前正文为空”的一致体验
+        if (messageId is not null)
+            await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, ct);
+        var fc = approval.ToolCall as FunctionCallContent;
+        var isClientTool = fc is not null
+            && _catalog.GetAgentClientToolNames(context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
+        var interruptId = "interrupt_" + IdGenerator.NewId();
+        var clientSkill = isClientTool ? GetSkillById(fc!.Name) : null;
+        var clientRunner = clientSkill is null ? null : EffectiveClientRunner(clientSkill);
+        _pendingInteractions[interruptId] = new PendingInteraction(
+            interruptId, context.GroupId, context.AgentId, runId,
+            messageId ?? "", context.TriggerUserId, context.TopicId, _hub.Value.NowMs, context,
+            ExternalInterruptId: null,
+            ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
+            Agent: agent, Session: session, ApprovalRequest: approval,
+            BridgeClient: null, SuppressMessage: true);
+        await PurgeExpiredInteractions();
+        await _hub.Value.BroadcastAsync(context.GroupId, new AgentInteractionRequestEvent
+        {
+            GroupId = context.GroupId,
+            MessageId = messageId ?? "",
+            ThreadId = context.ThreadId,
+            RunId = runId,
+            InterruptId = interruptId,
+            ToolCallId = fc?.CallId ?? "tool_" + IdGenerator.NewId(),
+            ToolName = fc?.Name ?? "unknown",
+            ToolArguments = fc?.Arguments is { } args ? JsonSerializer.SerializeToElement(args) : null,
+            Message = isClientTool
+                ? $"智能体「{def.Nickname}」请求你在本机执行客户端技能「{fc?.Name}」"
+                : $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？",
+            Kind = isClientTool ? "client_tool" : "approval",
+            ClientRunner = clientRunner,
+            TargetMemberId = context.TriggerUserId,
+            Timestamp = _hub.Value.NowMs,
+        }, ct: ct);
+        _logger.LogInformation("交付物兜底触发交互中断：agent={AgentId} interrupt={InterruptId}", context.AgentId, interruptId);
+        return approval;
     }
 
     /// <summary>用户要的交付物类型（技能前缀用于在组织里匹配）。识别不出来返回 null。</summary>
@@ -2247,6 +2441,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return fallback;
     }
 
+    /// <summary>取该岗位身上第一个匹配交付前缀的技能 ID（用于把兜底提示词直接指向它）。取不到返回 null。</summary>
+    private string? DeliverableSkillFor(AgentDefinition def, string prefix)
+    {
+        if (def.SkillDefIds is not { Count: > 0 }) return null;
+        foreach (var id in def.SkillDefIds)
+            if (!string.IsNullOrWhiteSpace(id) && id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return id;
+        return null;
+    }
+
     private bool HasSkillWithPrefix(AgentDefinition def, string prefix)
     {
         if (def.SkillDefIds is not { Count: > 0 }) return false;
@@ -2257,25 +2460,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (!string.IsNullOrWhiteSpace(id) && id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
         }
         return false;
-    }
-
-    /// <summary>直接走普通流式路径（跳过组织化路由阶段），用于交付物兜底，避免再进“找对人”循环。</summary>
-    private async Task InvokeStreamingOnlyAsync(AgentInvocationContext context, CancellationToken ct)
-    {
-        var prev = AmbientContext.Value;
-        AmbientContext.Value = context;
-        try
-        {
-            // 复用 InvokeCoreAsync 的兜底段：把 org_route 临时置为禁用语义最直接的做法是不经 DispatchRoutedStagesAsync。
-            // 这里通过一个开关式上下文标记实现“只跑流式”：见 InvokeCoreAsync 对该标记的判断。
-            _streamingOnly.Value = true;
-            await InvokeCoreAsync(context, ct);
-        }
-        finally
-        {
-            _streamingOnly.Value = false;
-            AmbientContext.Value = prev;
-        }
     }
 
     // 交付物兜底专用：AsyncLocal 标记“本次调用只走流式阶段”（避免再次命中 org_route 造成递归）
@@ -3935,7 +4119,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     ExternalInterruptId: null,
                     ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
                     Agent: agent, Session: session, ApprovalRequest: nextApproval,
-                    BridgeClient: null, ResumeCount: pending.ResumeCount + resumeRounds);
+                    BridgeClient: null, ResumeCount: pending.ResumeCount + resumeRounds,
+                    SuppressMessage: pending.SuppressMessage);
                 await PurgeExpiredInteractions();
                 await _hub.Value.BroadcastAsync(pending.GroupId, new AgentInteractionRequestEvent
                 {
@@ -3959,7 +4144,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 运行完成
             _autoApprovedRuns.TryRemove(runId, out _); // 批量批准随运行结束失效
             await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, runCt);
-            await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);
+            // 交付物兜底：正文已由兜底流写入，这里只修正媒体/链路的挂载并把消息收尾
+            if (!pending.SuppressMessage)
+                await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);
+            else
+                await EndSuppressedMessageAsync(pending.GroupId, messageId, runCt);
         }
         catch (Exception ex)
         {
@@ -4042,6 +4231,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             "（本轮回复未能生成可展示的正文，可能被中断或结果为空。请直接再说一次，或把要求拆细一点，我会重新给出成稿。）");
         try { await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, CancellationToken.None); }
         catch (Exception ex) { _logger.LogDebug(ex, "结束智能体消息失败：{MessageId}", messageId); }
+    }
+
+    /// <summary>交付物兜底的消息收尾：该消息由外层指派/提升路由开启（外层已返回），
+    /// 所以这里只做空正文保护与结束，不重复发事件。</summary>
+    private async Task EndSuppressedMessageAsync(string groupId, string messageId, CancellationToken ct)
+    {
+        await TryStampFallbackIfEmptyAsync(groupId, messageId,
+            "（交付环节未能生成文件，请再说一次或把要求拆细一点。）");
+        try { await _hub.Value.EndAgentMessageAsync(groupId, messageId, ct); }
+        catch (Exception ex) { _logger.LogDebug(ex, "结束交付物兜底消息失败：{MessageId}", messageId); }
     }
 
     /// <summary>收尾前的空正文兜底：仅当流式消息的正文仍为空时，先补一句可见说明，避免“只有卡、没有字”的空白回复。</summary>

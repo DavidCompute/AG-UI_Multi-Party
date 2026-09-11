@@ -329,6 +329,10 @@ public static class AgentApi
                 {
                     orchestrated = true,
                     title = plan.Title,
+                    // 交付闭环校验：需求要文件但没人能产出 / 有空洞交付技能 / 交付岗是“流程门卫”时提前告知
+                    deliveryWarning = AgentOrchestrator.DetectDeliveryGap(plan, requirement)
+                                      ?? AgentOrchestrator.DetectHollowDeliverySkill(plan)
+                                      ?? AgentOrchestrator.DetectDeliveryGatekeeper(plan),
                     agents = plan.Agents.Select(a => new
                     {
                         agentId = a.AgentId,
@@ -427,6 +431,10 @@ public static class AgentApi
                     plan = new
                     {
                         title = plan.Title,
+                        // 交付闭环校验：与 /orchestrate 一致（含空洞交付技能 / 流程门卫检测）
+                        deliveryWarning = AgentOrchestrator.DetectDeliveryGap(plan, requirement)
+                                          ?? AgentOrchestrator.DetectHollowDeliverySkill(plan)
+                                          ?? AgentOrchestrator.DetectDeliveryGatekeeper(plan),
                         agents = plan.Agents.Select(a => new { agentId = a.AgentId, nickname = a.Nickname, description = a.Description, instructions = a.Instructions, triggerMode = a.TriggerMode ?? "mentioned", skillIds = a.SkillIds ?? [], assignmentIds = a.AssignmentIds ?? [], escalationAgentId = a.EscalationAgentId, relayToAgentId = a.RelayToAgentId, memoryProfile = a.MemoryProfile is null ? null : new { memoryType = a.MemoryProfile.MemoryType, styleMode = a.MemoryProfile.StyleMode, personaCard = a.MemoryProfile.PersonaCard, topK = a.MemoryProfile.TopK, personalTopK = a.MemoryProfile.PersonalTopK, minScore = a.MemoryProfile.MinScore, personalMinScore = a.MemoryProfile.PersonalMinScore } }),
                         skills = plan.Skills.Select(s => new { skillId = s.SkillId, name = s.Name, description = s.Description, kind = s.Kind, body = s.Body, executionLocation = s.ExecutionLocation ?? "server", requiresApproval = s.RequiresApproval }),
                     },
