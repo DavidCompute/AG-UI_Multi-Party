@@ -26,6 +26,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -48,24 +49,33 @@ public class Skill
         try
         {
             JsonElement root;
-            try
+            string markdown;
+            string titleOverride;
+            string author;
+            string dateText;
+            string requested;
+
+            // 参数解析：优先按 JSON 对象解。
+            // 容错动机：模型有时不按 JSON 传，而是把上下文里的不可信内容包装标记、
+            // XML 标签或裸文本当参数（实测得到过 "<untrusted_content>" 字面量）。
+            // 技能层做防御性解析，比直接报错让整条链路失败要好。
+            if (TryParseJson(input, out root))
             {
-                using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(input) ? "{}" : input);
-                root = doc.RootElement.Clone();
+                markdown = Str(root, "markdown");
+                titleOverride = Str(root, "title");
+                author = Str(root, "author");
+                dateText = Str(root, "date");
+                requested = Str(root, "outputPath");
             }
-            catch (Exception ex)
+            else
             {
-                return Err("参数不是合法 JSON：" + ex.Message);
+                markdown = ExtractMarkdownFallback(input);
+                titleOverride = ""; author = ""; dateText = ""; requested = "";
             }
 
-            var markdown = Str(root, "markdown");
             if (string.IsNullOrWhiteSpace(markdown))
-                return Err("缺少 markdown 字段：请把要导出的 Markdown 正文放在 markdown 字段里。");
-
-            var titleOverride = Str(root, "title");
-            var author = Str(root, "author");
-            var dateText = Str(root, "date");
-            var requested = Str(root, "outputPath");
+                return Err("缺少 markdown 字段：请把要导出的 Markdown 正文放在 markdown 字段里，"
+                    + "形如 {\"markdown\":\"# 标题\\n\\n正文\"}。");
 
             var lines = markdown.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
 
@@ -314,6 +324,70 @@ public class Skill
     private static string Str(JsonElement root, string name)
         => root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? "" : "";
+
+    /// <summary>尝试当 JSON 对象解析；非法 / 非对象返回 false。</summary>
+    private static bool TryParseJson(string? input, out JsonElement root)
+    {
+        root = default;
+        var s = (input ?? "").Trim();
+        if (s.Length == 0 || (s[0] != '{' && s[0] != '[')) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(s);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+            root = doc.RootElement.Clone();
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// 兼底解析：参数不是合法 JSON 时，尽量从文本里救出 Markdown 正文。
+    ///
+    /// <para>
+    /// 为什么需要：两重现实原因。
+    /// 其一，模型有时不按 JSON 传参，而把上下文里的包装标记或 XML 标签当参数
+    /// （实测碰到过模型直接传字面量 <c>&lt;untrusted_content&gt;</c>）。
+    /// 其二，<b>编排计划路径</b>会把整段用户消息上下文（含「以下是群最近对话」与不可信边界包装）
+    /// 原样投给技能，而纯排版转换只应处理用户真正要导出的那段内容。
+    /// 对纯排版技能而言，把正文救出来远比报错或把聊天记录写进交付文档有价值。
+    /// </para>
+    ///
+    /// 处理：剥掉包装标记与平台前言；若整体不是 Markdown（没有 # / ## / - / 1. 等），
+    /// 把每行当普通段落交给排版（也能出一份可读的文档，而不是报错）。
+    /// </summary>
+    private static string ExtractMarkdownFallback(string? input)
+    {
+        var s = input ?? "";
+        // 剥离平台注入的外部内容边界标记（原样出现时会让整段变成非法 JSON）
+        s = s.Replace("<untrusted_content>", "", StringComparison.Ordinal)
+             .Replace("</untrusted_content>", "", StringComparison.Ordinal);
+
+        // 剥掉残余的简单 XML/HTML 标签（只去标签本身，保留标签内文字）；
+        // 顺手还原被转义的 &lt; &gt; &amp;，避免写进文档变成乱码
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"</?[A-Za-z_][A-Za-z0-9_.:-]*(\s[^<>]*)?/?>", "");
+        s = s.Replace("&lt;", "<").Replace("&gt;", ">").Replace("&amp;", "&").Replace("&quot;", "\"");
+
+        var lines = s.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+        var kept = new List<string>();
+        foreach (var l in lines)
+        {
+            var t = l.Trim();
+            // 丢弃平台的边界说明行 / 对话历史前言（不是用户要导出的正文）
+            if (t.StartsWith("（以上为外部来源内容", StringComparison.Ordinal)) continue;
+            if (t.StartsWith("以下是群", StringComparison.Ordinal)) continue;
+            if (t.StartsWith("以下是话题", StringComparison.Ordinal)) continue;
+            kept.Add(l);
+        }
+
+        // 去掉首尾空行与 Markdown 代码围栏（用户常用 ``` 包住要转换的内容）
+        while (kept.Count > 0 && kept[0].Trim().Length == 0) kept.RemoveAt(0);
+        while (kept.Count > 0 && kept[kept.Count - 1].Trim().Length == 0) kept.RemoveAt(kept.Count - 1);
+        if (kept.Count > 0 && kept[0].TrimStart().StartsWith("```", StringComparison.Ordinal)) kept.RemoveAt(0);
+        if (kept.Count > 0 && kept[kept.Count - 1].Trim().StartsWith("```", StringComparison.Ordinal)) kept.RemoveAt(kept.Count - 1);
+
+        return string.Join("\n", kept).Trim();
+    }
 
     /// <summary>输出路径：显式 outputPath 优先；否则落默认目录（AGUI_DOCX_OUT > 用户主目录/agui-docx > 临时目录/agui-docx）。</summary>
     private static string ResolveOutputPath(string? requested, string title)

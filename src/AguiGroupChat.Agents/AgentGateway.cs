@@ -1336,8 +1336,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     var clean = AgentGatewayHelpers.ExtractCleanValueForSkill(skillQuery);
                     if (!string.IsNullOrWhiteSpace(clean)) skillQuery = clean;
                 }
+                // 声明了 cleanInput 的技能（转换 / 排版类）：只要用户本次那句原文，
+                // 不要把整段群上下文（历史对话 + 不可信边界包装）投给它 ——
+                // 否则会把聊天记录当正文写进交付文档（实测踩到：导出 303 段的「文档」全是历史消息）。
+                if (AgentGatewayHelpers.WantsCleanInput(skill))
+                {
+                    var raw = AgentGatewayHelpers.ExtractLatestUserUtterance(plan.Input);
+                    if (!string.IsNullOrWhiteSpace(raw)) skillQuery = raw;
+                }
                 var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
                 _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, AgentGatewayHelpers.TruncateForChain(skillQuery));
+                // 编排路径的技能产物同样需要回档：技能返回值里的 produce_file 标记要入库为附件，
+                // 否则「计划里调了 docx 技能、用户却拿不到文件」——这条路径不经过模型正文，
+                // 产物只存在于 res 里，不处理就彻底丢了。
+                await AttachSkillProducedFilesAsync(gid, messageId, res, ct);
                 if (!hops.Any(h => h.AgentId == skill.SkillId))
                     hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = AgentGatewayHelpers.TruncateForChain(res) });
                 sb.Clear().Append(res);
