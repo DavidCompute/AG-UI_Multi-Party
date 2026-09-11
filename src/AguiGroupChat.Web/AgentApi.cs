@@ -217,30 +217,33 @@ public static class AgentApi
 
             var log = loggerFactory.CreateLogger("AgentApi.OrgRestore");
             var createdSkills = new List<string>();
-            if (skillCatalog.Get(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDesignSkillId) is null)
+            var refreshedSkills = new List<string>();
+            // “恢复内置组织工具”的语义是“回到内置默认”：存在则刷新为最新内置正文，否则创建。
+            // 早先只在缺失时创建，升级后已存在的旧定义（如构建师旧的“无法确认管理员身份就不落库”指令）
+            // 永远不会被更新 —— 用户点了恢复却仍旧按旧行为跑（实测踩到）。
+            void RestoreSkill(AgentSkillDefinition def)
             {
-                skillCatalog.Upsert(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgDesignSkill(ownerId));
-                createdSkills.Add(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDesignSkillId);
+                var existed = skillCatalog.Get(def.SkillId) is not null;
+                skillCatalog.Upsert(def);
+                if (existed) refreshedSkills.Add(def.SkillId); else createdSkills.Add(def.SkillId);
             }
-            if (skillCatalog.Get(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDeploySkillId) is null)
-            {
-                skillCatalog.Upsert(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgDeploySkill(ownerId));
-                createdSkills.Add(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgDeploySkillId);
-            }
-            var agent = catalog.GetDefinition(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgArchitectAgentId);
-            var createdAgent = false;
-            if (agent is null)
-            {
-                var def = AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgArchitectAgent(ownerId);
-                catalog.Upsert(def);
-                createdAgent = true;
-            }
-            log.LogInformation("恢复内置组织工具：agent={Agent} skills=[{Skills}] (owner={Owner})", createdAgent, string.Join(",", createdSkills), ownerId);
+            RestoreSkill(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgDesignSkill(ownerId));
+            RestoreSkill(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgDeploySkill(ownerId));
+
+            var existingAgent = catalog.GetDefinition(AguiGroupChat.Agents.OrgBuiltinSeeds.OrgArchitectAgentId);
+            var existedAgent = existingAgent is not null;
+            // 刷新为内置最新指令；保留原有触发规则 / 其它非指令字段由 Upsert 自行处理
+            catalog.Upsert(AguiGroupChat.Agents.OrgBuiltinSeeds.BuildDefaultOrgArchitectAgent(ownerId));
+            var refreshedAgent = existedAgent;
+            log.LogInformation("恢复内置组织工具：agentCreated={Created} agentRefreshed={Refreshed} created=[{CreatedSkills}] refreshed=[{RefreshedSkills}] (owner={Owner})",
+                !existedAgent, refreshedAgent, string.Join(",", createdSkills), string.Join(",", refreshedSkills), ownerId);
             return Results.Ok(new
             {
                 restored = true,
-                agent = createdAgent ? AguiGroupChat.Agents.OrgBuiltinSeeds.OrgArchitectAgentId : null,
+                agent = AguiGroupChat.Agents.OrgBuiltinSeeds.OrgArchitectAgentId,
+                agentRefreshed = refreshedAgent,
                 skills = createdSkills,
+                skillsRefreshed = refreshedSkills,
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 

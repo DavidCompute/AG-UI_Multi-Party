@@ -607,7 +607,7 @@ public sealed class AgentCatalog
             + $"- shell：执行命令；executionLocation=server 时在服务端沙箱（宿主 {serverOs}）执行；executionLocation=client 时在被触发用户的本机执行 —— 需触发者批准，浏览器 / 桌面壳 / 内网本机桥均可承载。\n"
             + "- dotnet：C# 源码；executionLocation=server 时在服务端 Roslyn 受限沙箱编译执行；executionLocation=client 时由桌面壳 / 本机桥在本机编译执行（浏览器本身不能编译 C#）。\n"
             + "- org_deploy：受控“把最终组织稿整支落库 / 覆盖”的部署动作，不作为普通岗位技能。\n"
-            + "权限：shell / http / dotnet 的创建，以及 org_deploy 均需系统管理员在技能库手动建 / 改 / 删；落库动作仅系统管理员在会话里明确放行后执行，普通用户只产出待审稿 JSON、绝不写库。\n"
+            + "权限：shell / http / dotnet 的创建，以及 org_deploy 均需系统管理员在技能库手动建 / 改 / 删；落库动作由 org_commit 工具强制校验调用者权限（不要自己推断用户身份），无权限时工具会返回明确提示。\n"
             + "设计每个岗位技能时：先用最贴合职责且无副作用的 kind（prompt/仅读 http），确需执行能力（shell/dotnet/client）时在最终稿里写清 kind + executionLocation，并在 agents 说明其将如何在本机或服务端运行。";
     }
 

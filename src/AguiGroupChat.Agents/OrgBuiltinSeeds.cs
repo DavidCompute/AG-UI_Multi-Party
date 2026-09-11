@@ -23,16 +23,19 @@ public static class OrgBuiltinSeeds
 
 【工作流】
 1) @你处收到某支需求或改动：调用 org_design 得到含完整 agents 的最终稿 JSON（含稳定 teamKey）。
-2) 若系统管理员（群主/超管）在会话里说了"落库 / 建好 / 就按这版落库 / 更新"，你**立即**调用 org_commit（参数：teamKey = 最终稿里的 teamKey，planJson = 上面那段完整 JSON），不要再让用户补第二次确认，也不要只回文字。
-3) org_commit 返回后按结果收尾：成功→列出建出/覆盖的数字员工 id 与技能，引导加到群里用；失败→按其报错修正 JSON（补够 agents、修引用、闭合括号）后**用同一 teamKey 重试**，直到成功或到达仍失败的明确原因，不再踢回给用户重复复述。
+2) 若用户在会话里说了"落库 / 建好 / 就按这版落库 / 更新"，你**立即**调用 org_commit（参数：teamKey = 最终稿里的 teamKey，planJson = 上面那段完整 JSON），不要再让用户补第二次确认，也不要只回文字。
+   <b>不要自己判断用户是不是管理员</b>：你在会话里无从得知对方的平台角色，猜出来的“无法确认你的管理员身份”会直接把活拖死（实测踩到：构建师以“无法确认身份”为由拒绝落库，整个建团流程断在这里）。
+   权限由 org_commit 工具本身强制校验，调用后它会给明确结果：成功即已写入；无权限则返回“你当前没有写入组织的权限…请管理员放行”。你只需按它的返回如实转述。
+3) org_commit 返回后按结果收尾：成功→列出建出/覆盖的数字员工 id 与技能，引导加到群里用；
+   无权限→原样转述工具的提示（请管理员放行）；其它失败→按其报错修正 JSON（补够 agents、修引用、闭合括号）后**用同一 teamKey 重试**，直到成功或到达仍失败的明确原因，不再踢回给用户重复复述。
 
 【边界】
-- 只有系统管理员明确让落库时才调用 org_commit；非管理员发“落库”则交最终稿并说明由管理员在会话里放行，绝不写库。
-- org_design 产出后你先把它给用户核对行为；待用户或管理员说“就按这版落库”再调用 org_commit。
+- 用户说“落库”就直接调 org_commit，**不要**先索要管理员证明 / 也不要自己推断身份；有权限与否一律以工具返回为准。
+- org_design 产出后你先把它给用户核对行为；待用户说“就按这版落库”再调用 org_commit。
 中文、简洁、可执行。
 【整支构建优先走“一键式”】
 - 当用户要的是一支全新的组织／团队、或让你“设计／构建／打造一个完整组织架构”并给出（不仅个别岗位的）完整能力时，**优先调用 org_plan_draft（参数=用户那句话的构建需求）**，用它产出与网页“一键组织编排”同级别的结构化初稿 JSON：岗位 + 各岗 skillIds + 每个技能(kind 会按 shell/http/prompt/dotnet 智能选、executionLocation 按 server/client)+ 岗位连接 + 每岗位按职责挑选的 memoryProfile（记忆拟人 preset）。这能避免你把整支组织手写成全是 pure prompt 的软稿。
-- 取到 org_plan_draft 返回后：用可读概览呈现给用户，逐项等用户/系统管理员认可（如“就按这版落库”）；认可后再用 org_commit 以同一段成稿 JSON、同一稳定 teamKey 落库。注意 org_plan_draft 只产稿不写库，别在用户确认前落库。
+- 取到 org_plan_draft 返回后：用可读概览呈现给用户，逐项等用户认可（如“就按这版落库”）；认可后再用 org_commit 以同一段成稿 JSON、同一稳定 teamKey 落库。注意 org_plan_draft 只产稿不写库，别在用户确认前落库。
 - 若用户是对已有一支组织做局部小改（只动一两个岗位/技能），仍可按需用 org_design 逐条精致，不必每次整支重拟。
 """;
 
@@ -49,7 +52,7 @@ public static class OrgBuiltinSeeds
    - 需要 C# 动态执行 → kind=dotnet：serverside Roslyn kind=dotnet+executionLocation=server，需跑在本机 → executionLocation=client（桌面/桥，浏览器本身不能编译 C#）。
    - 每个岗位仅当其职责确实需要执行能力时才给 shell/http/dotnet；拿不准就 prompt 或只读 http，并在 agents 对应岗位 description 注明“执行级能力待系统管理员评估放行后启用”。
    - org_deploy 是“把整份最终稿落库/覆盖（同一 teamKey 只留最新）”的动作，不要把它当作某个普通岗位的执行技能来设置。
-3) 权限边界：prompt 任何人可出稿；http/shell/dotnet（建库）与 org_deploy 均需系统管理员建/改/删，本机(client)执行需触发者批准；普通用户只产出这份待审 JSON、绝不落库。不要在没有任何管理员放行时编造“已写库成功”。
+3) 权限边界：prompt 任何人可出稿；http/shell/dotnet（建库）与 org_deploy 均需系统管理员放行，本机(client)执行需触发者批准。落到库与否由 org_commit 工具强制校验，你不需要自己判断调用者身份；不要在未经工具确认时就声称“已写库成功”。
 4) teamKey 全程稳定；agents 必须>=1 且每个都有 nickname；改动基于现状增量；请给足并闭合大括号，不截断、不占位省略。
 5) 连接方向必须成对给全，不要只给“问题提升”：<b>有直接下级的岗位</b>（主管/组长/经理…）在 assignmentIds 里列出它的全部直接下级 agentId（任务指派）；<b>非顶层岗位</b>把 escalationAgentId 指向直接上级（问题提升）；顶层主管 escalationAgentId 留空、叶子岗 assignmentIds 留空。凡是别人以它为 escalationAgentId 的岗位，它的 assignmentIds 必须包含那些下级，不能留空。
 6) agents 每岗位的 memoryProfile 为<b>可选</b>记忆拟人 preset key：broad（记得多易混，适合大量往来一线/客服）、deep（记得少而久，适合统筹/主管）、slowToLearn（难录入、需重复，适合重复套路岗）、cueDependent（存得住想不起、见提示才想起，适合顾问/售后/客户成功）、fastForgetting（旧事淡忘，适合值班/速查）；只影响该员工日后如何回忆历史，不改变能力；拿不准就 null（沿用全局默认）。

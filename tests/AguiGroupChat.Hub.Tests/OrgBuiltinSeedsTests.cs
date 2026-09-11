@@ -39,4 +39,17 @@ public sealed class OrgBuiltinSeedsTests
         Assert.False(string.IsNullOrWhiteSpace(sk.Description));
         Assert.DoesNotContain("cc kind test", sk.Description); // 方案 B：不再把测试残留固化为默认文案
     }
+
+    [Fact]
+    public void ArchitectInstructions_DoNotAskModelToJudgeAdminIdentity()
+    {
+        // 实测踩到：构建师以“本群对话里我无法确认你的管理员身份，所以不会擅自写库”为由拒绝落库，
+        // 整个建团流程断在这里。根因是指令让它去“预判身份”，而它在会话里无从得知。
+        // 正确口径：直接调 org_commit，由工具强制校验权限、按工具返回如实转述。
+        var text = OrgBuiltinSeeds.OrgArchitectInstructions;
+        Assert.Contains("不要自己判断用户是不是管理员", text);
+        Assert.Contains("权限由 org_commit 工具本身强制校验", text);
+        // 不得再留“非管理员发落库就交稿不写库”这类让模型自行推断的旧口令
+        Assert.DoesNotContain("非管理员发", text);
+    }
 }

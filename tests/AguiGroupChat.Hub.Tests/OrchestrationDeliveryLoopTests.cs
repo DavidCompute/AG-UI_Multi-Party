@@ -209,4 +209,198 @@ public sealed class OrchestrationDeliveryLoopTests
         // 要给出“正确写法”，否则模型只会删掉禁止句、留下空泛人设
         Assert.Contains("直接交付", prompt);
     }
+
+    // ---------- 计划阶段：dotnet 交付技能的输入识别与空输入保护 ----------
+
+    [Fact]
+    public void DotnetDeliverySkill_IsFlaggedAsNeedingUpstreamInput()
+    {
+        // 实测踩到：docx_report / md_to_docx 的参数走 JSON 函数签名，
+        // 正文里没有 ${xxx} 占位符，旧口径 RequiredUpstreamInputs 会把它当成“无需输入”，
+        // 于是规划器把它排在产出岗之前，导出的 Word 只有标题。
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "md_to_docx", Kind = AgentSkillKind.Dotnet,
+            Name = "Markdown 转 Word 文档(.docx)",
+            Description = "把已定稿的稿件排版导出为 Word .docx 文件，生成后可直接下载。",
+            Body = "public class Skill { public static string Run(string input) { return \"{}\"; } }",
+        };
+
+        var inputs = AgentGatewayHelpers.RequiredUpstreamInputs(skill);
+        Assert.NotEmpty(inputs);
+    }
+
+    [Fact]
+    public void PromptSkill_IsNotFlaggedAsNeedingUpstreamInput()
+    {
+        // prompt 技能不产出文件，不该被当成交付环节；避免把它也强拉到链末
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "marketing_copy_prompt", Kind = AgentSkillKind.Prompt,
+            Name = "市场推广文案撰写模板",
+            Description = "给出推广文案的写作框架与要点。",
+        };
+
+        Assert.Empty(AgentGatewayHelpers.RequiredUpstreamInputs(skill));
+    }
+
+    [Fact]
+    public void ShellSkillWithPlaceholder_StillReportsPlaceholderName()
+    {
+        // 原有口径不能丢：有 ${query} 的技能仍按占位符名上报
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "check_disk", Kind = AgentSkillKind.Shell,
+            Description = "检查磁盘占用。",
+            Body = "df -h ${query}",
+        };
+
+        Assert.Equal(["query"], AgentGatewayHelpers.RequiredUpstreamInputs(skill));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("（未返回内容）")]
+    [InlineData("(未返回内容)")]
+    [InlineData("（无）")]
+    [InlineData("（空）")]
+    [InlineData("——")]
+    [InlineData("。")]
+    public void LooksLikeEmptyInput_DetectsPlaceholdersAndPunctuationOnly(string? text)
+    {
+        // 上游返回空时，网关把字面量“（未返回内容）”继续往下传，后续技能会照着它生成空壳文件
+        Assert.True(AgentGatewayHelpers.LooksLikeEmptyInput(text));
+    }
+
+    [Fact]
+    public void LooksLikeEmptyInput_PassesRealContent()
+    {
+        var text = "# 知聚市场推广文案\n\n## 一、投放基线\n\n- 受众：技术决策者";
+        Assert.False(AgentGatewayHelpers.LooksLikeEmptyInput(text));
+    }
+
+    [Fact]
+    public void PlanPrompt_RequiresDeliverySkillsAfterProducingRoles()
+    {
+        // 规划器提示词必须把“先产出、后导出”写成硬规则，
+        // 否则模型会把 docx_report 排在执笔岗之前，拿到空输入。
+        var prompt = AgentGateway.BuildPlannerPromptText("协调员", "写一份推广文案并导出 Word", "- [技能] docx_report：导出 Word");
+        Assert.Contains("交付类技能必须排在产出内容之后", prompt);
+        Assert.Contains("导出 / 排版 / 转换", prompt);
+    }
+
+    [Theory]
+    [InlineData("（请用中文回复，提问者消息以中文为主。）")]
+    [InlineData("（質問は日本語です。日本語で回答してください。）")]
+    [InlineData("（无）")]
+    public void PlatformPreambleLines_AreRecognized(string line)
+    {
+        // 实测踩到：docx_gongwen 收到的输入就是这句语言提示，长度超过 2 字但根本不是正文，
+        // 技能拿去当 JSON 解析 → JsonReaderException。
+        Assert.True(AgentGatewayHelpers.IsPlatformPreambleLine(line));
+        Assert.True(AgentGatewayHelpers.LooksLikeEmptyInput(line));
+    }
+
+    [Fact]
+    public void LanguageHint_IsStrippedFromLatestUserUtterance()
+    {
+        // 真实平台消息形状：语言提示 → 群历史 → 用户本次发言（无边界标记）
+        var platform = "（请用中文回复，提问者消息以中文为主。）\n"
+                     + "以下是群最近对话：\n"
+                     + "David：先前的闲聊\n"
+                     + "内容负责人：一版旧稿\n"
+                     + "帮我写一份推广文案";
+        var utterance = AgentGatewayHelpers.ExtractLatestUserUtterance(platform);
+
+        Assert.NotNull(utterance);
+        Assert.DoesNotContain("请用中文回复", utterance);
+        Assert.Contains("帮我写一份推广文案", utterance);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("（未返回内容）")]
+    [InlineData("（请用中文回复，提问者消息以中文为主。）")]
+    [InlineData("写完了")]
+    public void LooksTooThinForDelivery_RejectsPreambleAndShortText(string? text)
+    {
+        // 交付类技能的输入闸门：短句 / 前言都生成不出有意义的文件，必须先走兼底
+        Assert.True(AgentGatewayHelpers.LooksTooThinForDelivery(text));
+    }
+
+    [Fact]
+    public void LooksTooThinForDelivery_PassesSubstantialCopy()
+    {
+        var text = "# 知聚市场推广文案\n\n## 一、投放基线\n\n" + new string('字', 200);
+        Assert.False(AgentGatewayHelpers.LooksTooThinForDelivery(text));
+    }
+
+    // ---------- 文档生成技能：识别与“不自动直调” ----------
+
+    [Theory]
+    [InlineData("docx_gongwen", "公文生成（Word）", "生成规范排版的党政机关公文 Word 文档")]
+    [InlineData("docx_report", "工作报告生成（Word）", "生成工作报告 / 工作总结类 Word 文档，支持分章节")]
+    [InlineData("docx_notice", "通知生成（Word）", "生成通知类的 Word 文档")]
+    [InlineData("md_to_docx", "Markdown 转 Word 文档(.docx)", "把已定稿的稿件排版导出为 Word .docx 文件")]
+    public void DocumentGenerators_AreRecognized(string id, string name, string desc)
+    {
+        // 这些技能的入参是结构化 JSON，必须由模型当工具调用构造；
+        // 计划路径直接调它们会塑出空壳文档（实测：Word 只有标题）。
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = id, Name = name, Description = desc,
+            Kind = AgentSkillKind.Dotnet, Body = "public class S { }"
+        };
+        Assert.True(AgentGatewayHelpers.IsDocumentGenerator(skill));
+        // 同时必须被认作“需要上游输入”，否则计划里它不会被排在产出岗之后
+        Assert.NotEmpty(AgentGatewayHelpers.RequiredUpstreamInputs(skill));
+    }
+
+    [Fact]
+    public void PromptSkill_IsNotADocumentGenerator()
+    {
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "marketing_copy_prompt", Kind = AgentSkillKind.Prompt,
+            Description = "给出推广文案的写作框架，提到 Word 文档但自己不产文件。"
+        };
+        Assert.False(AgentGatewayHelpers.IsDocumentGenerator(skill));
+    }
+
+    [Theory]
+    [InlineData("docx_report", "docx_", true)]
+    [InlineData("md_to_docx", "docx_", true)]   // 后缀式命名：只判 StartsWith 会漏掉
+    [InlineData("promo_docs/export_docx", "docx_", true)]
+    [InlineData("make_xlsx", "xlsx_", true)]
+    [InlineData("marketing_copy_prompt", "docx_", false)]
+    [InlineData("check_disk", "docx_", false)]
+    public void DeliverablePrefix_MatchesPrefixAndSuffixNaming(string id, string prefix, bool expected)
+    {
+        Assert.Equal(expected, AgentGatewayHelpers.SkillMatchesDeliverablePrefix(id, prefix));
+    }
+
+    [Fact]
+    public void DeliveryPrompt_RequiresCompleteContentAndNamesTheSkill()
+    {
+        // 实测踩到：交付兑底只给“标题 + 目录”的骨架，用户拿到的 Word 只有标题。
+        // 提示词必须同时要求：①点名要调的技能；②内容逐节填满；③不得因流程拒交。
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "根据附件写推广文案，我要 word");
+
+        Assert.Contains("docx_report", prompt);
+        Assert.Contains("内容必须完整", prompt);
+        Assert.Contains("sections", prompt);
+        Assert.Contains("绝不允许只传标题", prompt);
+        Assert.Contains("为由拒交", prompt);
+    }
+
+    [Fact]
+    public void DeliveryPrompt_WithoutKnownSkill_StillDemandsContent()
+    {
+        var prompt = AgentGateway.BuildDeliveryPrompt("Excel 表格", null, "整理成表格");
+        Assert.Contains("文件生成技能", prompt);
+        Assert.Contains("内容必须完整", prompt);
+    }
 }

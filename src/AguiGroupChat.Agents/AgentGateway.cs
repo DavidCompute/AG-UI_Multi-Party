@@ -1149,7 +1149,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (plan is not null)
             {
                 // 编排计划：随消息流逐项激活 & 逐条点亮计划卡（TEXT_MESSAGE_PLAN 前端渲染）
-                await ExecuteCoordinatedPlanAsync(context, plan, messageId, runCt);
+                var planNeedsDelivery = await ExecuteCoordinatedPlanAsync(context, plan, messageId, runCt);
+                // 计划跳过了文档生成技能（它的入参是结构化 JSON，必须由模型当工具构造）：
+                // 这里补一次交付兑底 —— 完整流式，让模型自己调技能并回档产物。
+                // 不这么做就会退化为“计划跑了、用户仍拿不到文件”。
+                if (planNeedsDelivery && WantedDeliverable(context.Content) is not null)
+                {
+                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, runCt, runId, messageId);
+                    if (delivery.MessageId is { } pmid) messageId = pmid;
+                    if (delivery.AwaitingInteraction)
+                    {
+                        _logger.LogInformation("编排计划因交付兑底中断等待交互：run={RunId} interruptTarget={Target}", runId, context.TriggerUserId);
+                        return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
+                    }
+                }
             }
             else
             {
@@ -1275,11 +1288,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 每完成一条即把该步标记完成并<b>重新广播计划卡</b>（前端逐条点亮），中间步骤产出作为下一步输入；
     /// 最后综合各步给最终答复并广播计划完成。任一异常都优雅收尾（不再阻断消息）。
     /// </summary>
-    private async Task ExecuteCoordinatedPlanAsync(AgentInvocationContext context, CoordinatedPlan plan, string messageId, CancellationToken ct)
+    /// <returns>
+    /// 是否因“跳过了文档生成类技能”而需要外层再跑一次交付兑底。
+    /// 这类技能的入参是结构化 JSON，必须由模型当工具调用才能构造，
+    /// 计划路径按纯文本直接调它只会塑出空壳文档（实测：Word 只有标题）。
+    /// </returns>
+    private async Task<bool> ExecuteCoordinatedPlanAsync(AgentInvocationContext context, CoordinatedPlan plan, string messageId, CancellationToken ct)
     {
         var root = _catalog.GetDefinition(context.AgentId);
-        if (root is null) return;
+        if (root is null) return false;
         var gid = context.GroupId;
+        var needsDelivery = false; // 计划里跳过了交付类技能 → 交给外层交付兑底
 
         // 计划暂停/继续闸门：先登记（端点收到暂停请求时能定位到本计划），随执行结束/异常移除
         var planGate = _planControl.Value?.Begin(messageId, gid, context.AgentId, context.TriggerUserId);
@@ -1319,6 +1338,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var st = plan.Steps[i];
             if (st.Action != "skill" || !plan.Skills.TryGetValue(st.Target, out var csk)
                 || csk.ExecutionLocation != AgentSkillExecutionLocation.Client) continue;
+            // 客户端执行的文档生成技能同样不在此直接跑（同样是结构化 JSON 入参）：
+            // 留给交付兑底走完整流式，让模型构造参数后经本机桥执行。
+            if (AgentGatewayHelpers.IsDocumentGenerator(csk)) { needsDelivery = true; continue; }
             // 同一技能在计划里出现多次 → 只保留第一次，避免重复执行
             if (!capExecuted.Add(csk.SkillId)) continue;
             var cq = working;
@@ -1368,6 +1390,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
                 // 重拾：OrgDeploy（受控落库）不是可批跑技能 —— 万一命中也不投给 SkillRunner（防御性跳过）
                 if (skill.Kind == AgentSkillKind.Org_deploy) continue;
+                // 文档生成类技能（docx_* / md_to_docx / xlsx_* …）：**不能在计划路径里直接调**。
+                // 它们的入参是结构化 JSON（{title, sections:[…]}），必须由模型当工具调用构造；
+                // 计划路径只会把一段纯文本（群上下文 / 平台前言）塑给它 → JsonReaderException 或空壳文档
+                // （实测：用户拿到只有标题的 Word）。这里跳过，标记为“需交付兑底”，
+                // 由外层走完整流式让模型自己构造 JSON 调技能。
+                if (AgentGatewayHelpers.IsDocumentGenerator(skill))
+                {
+                    needsDelivery = true;
+                    _logger.LogInformation("计划步骤为文档生成技能，改走交付兑底（避免纯文本塑入）：skill={SkillId}", skill.SkillId);
+                    if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
+                    await BroadcastPlanAsync(gid, messageId, display, ct);
+                    continue;
+                }
                 // 同一服务端技能在计划里出现多次 → 只执行一次，后续复用其结果
                 if (!capExecuted.Add(skill.SkillId)) continue;
                 var skillQuery = working;
@@ -1384,6 +1419,36 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     var raw = AgentGatewayHelpers.ExtractLatestUserUtterance(plan.Input);
                     if (!string.IsNullOrWhiteSpace(raw)) skillQuery = raw;
                 }
+
+                // 输入兑底（交付闭环）：转换 / 导出类技能拿到空输入 / 过薄输入时，绝不能就此生成空壳文件。
+                //
+                // 实测踩到两次：
+                //   ① 计划把 docx_report 排在执笔岗之前，上游返回空，网关把字面量“（未返回内容）”传下去；
+                //   ② docx_gongwen 收到的是“（请用中文回复，提问者消息以中文为主。）”——平台语言提示，
+                //      它非空且超过 2 字，旧阈值放过了，结果技能报 JsonReaderException。
+                // 这里统一用“过薄”判定；不达标就先试“从本群已产出内容里取最像正文的一段”，
+                // 取不到则<b>不调技能</b>、如实播报原因（宁可没文件，也不给用户一个空壳）。
+                if (AgentGatewayHelpers.RequiredUpstreamInputs(skill).Count > 0
+                    && AgentGatewayHelpers.LooksTooThinForDelivery(skillQuery))
+                {
+                    var salvaged = FindUpstreamContent(context);
+                    if (!string.IsNullOrWhiteSpace(salvaged))
+                    {
+                        skillQuery = salvaged;
+                        _logger.LogInformation("交付技能收到空输入，已从群内上游产出兑底：skill={SkillId} len={Len}", skill.SkillId, salvaged.Length);
+                    }
+                    else
+                    {
+                        var why = $"（未能生成文件：没有可供转换的正文内容（上游未产出定稿），技能 {skill.SkillId} 未执行。请先在群里要素材/定稿，或把要排版的内容直接发给我。）";
+                        _logger.LogWarning("交付技能无可用输入且群内无上游产出，已跳过执行：skill={SkillId}", skill.SkillId);
+                        sb.Clear().Append(why);
+                        working = why;
+                        if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
+                        await BroadcastPlanAsync(gid, messageId, display, ct);
+                        continue;
+                    }
+                }
+
                 var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
                 _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, AgentGatewayHelpers.TruncateForChain(skillQuery));
                 // 编排路径的技能产物同样需要回档：技能返回值里的 produce_file 标记要入库为附件，
@@ -1460,6 +1525,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             _planControl.Value?.End(messageId);
         }
+        return needsDelivery;
     }
 
     /// <summary>步骤边界暂停闸门：网关在每步（含批量执行与综合答复）之前检查一次；
@@ -1629,6 +1695,45 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
+    /// <summary>
+    /// 从本群已有消息里找“最像正文”的上游产出，用于交付技能的空输入兑底。
+    ///
+    /// <para>
+    /// 场景：计划把导出技能排在了产出岗之前，或产出岗本轮返回为空，
+    /// 但群里其实已经有内容（如上一轮“内容负责人”已经写好的定稿）。
+    /// 这时宁可拿它继续交付，也不应给用户一个空白 Word 或一句“无法生成”。
+    /// </para>
+    ///
+    /// 选取口径（宁缺勿滥）：取最近 N 条消息中最长的一条，且长度需达下限；
+    /// 排除本管道自己播报的进度文案 / 兜底提示，避免把“未返回内容”又取回来。
+    /// </summary>
+    private string? FindUpstreamContent(AgentInvocationContext context)
+    {
+        const int MinChars = 120; // 低于此长度基本不是可交付的正稿
+        try
+        {
+            var msgs = _hub.Value.Store.RecentMessages(context.GroupId, 30, context.TopicId);
+            var best = "";
+            foreach (var m in msgs)
+            {
+                if (m.Recalled) continue;
+                if (m.MessageId == context.TriggerMessageId) continue; // 不要拿用户本次提问当正文
+                var body = m.Content;
+                if (string.IsNullOrWhiteSpace(body)) continue;
+                if (AgentGatewayHelpers.LooksTooThinForDelivery(body)) continue;
+                if (body.Contains("未能生成文件", StringComparison.Ordinal)
+                    || body.Contains("没有可供转换", StringComparison.Ordinal)) continue;
+                if (body.Length > best.Length) best = body;
+            }
+            if (best.Length >= MinChars) return best;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "交付空输入兑底：读取群消息失败");
+        }
+        return null;
+    }
+
     private string BuildPlanInventory(AgentDefinition root, IReadOnlyList<AgentDefinition> reached, IReadOnlyList<AgentSkillDefinition> skills)
     {
         var sb = new StringBuilder();
@@ -1641,8 +1746,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             sb.Append("- [技能] ").Append(s.SkillId).Append("｜").Append(s.Name ?? s.SkillId).Append("：")
               .Append((s.Description ?? "").ReplaceLineEndings(" "));
-            // 技能需要的外部输入（body 里的 ${query}/${xxx} 占位符）→ 提示计划先拿到该值再调用它
-            var inputs = AgentGatewayHelpers.SkillRequiredInputs(s);
+            // 技能需要的外部输入 → 提示计划先拿到该值再调用它。
+            // 用 RequiredUpstreamInputs 而非 SkillRequiredInputs：后者只看正文里的 ${xxx} 占位符，
+            // 而 dotnet / shell 类技能（如 docx_report / md_to_docx）的入参在函数签名里、正文无占位符，
+            // 用旧口径会把它们误判为“无需输入”，于是规划器把它们排在产出岗之前，导出只有标题的空文档（实测踩到）。
+            var inputs = AgentGatewayHelpers.RequiredUpstreamInputs(s);
             if (inputs.Count > 0)
                 sb.Append("【需要输入：").Append(string.Join("、", inputs)).Append("】");
             sb.AppendLine();
@@ -1652,13 +1760,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return sb.ToString();
     }
 
-    private async Task<List<PlanStep>?> PlanCoordinatedAsync(AgentInvocationContext context, AgentDefinition root, string input,
-        IReadOnlyList<AgentDefinition> reached, IReadOnlyList<AgentSkillDefinition> skills, CancellationToken ct)
+    /// <summary>测试钩子：拼装规划器提示词的正文部分（不依赖真实目录）。勿在生产路径调用。</summary>
+    internal static string BuildPlannerPromptText(string rootName, string input, string inventory)
     {
-        var agent = _catalog.GetOrCreate(root.AgentId);
-        var inventory = BuildPlanInventory(root, reached, skills);
-        var prompt =
-            "你是群聊的协调员「" + (root.Nickname ?? root.AgentId) + "」。\n\n"
+        return "你是群聊的协调员「" + rootName + "」。\n\n"
             + "用户问题：\n" + input + "\n\n"
             + "你掌握的组织分工与技能如下（只能从中选，不能造）：\n" + inventory + "\n\n"
             + "请针对该问题制定一张<b>执行计划</b>：\n"
@@ -1671,7 +1776,28 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             + "<b>依赖顺序很重要</b>：如果一个技能<b>需要某个输入</b>（见技能后的【需要输入：…】），而这个输入由某位员工掌握，\n"
             + "你必须<b>先用一步 dispatch 该员工拿到输入值</b>，<b>再</b>在后续步骤里调用该技能——技能步骤会自动收到它前一步的结果作为输入。\n"
             + "例如：要“测 Exchange 连接”需先知道 OWA 地址，而地址由配置管理员提供，则应安排 [dispatch→配置管理员, skill→连接测试技能, answer]。\n"
-            + "只输出 JSON，不要任何其他文字：{\"steps\":[...]}，步骤 1~" + _execution.CoordinatorPlanMaxSteps + " 条。若问题与任何员工/技能都不相关，输出 {\"steps\":[]}。";
+            // 交付顺序：导出 / 排版类是“把已有内容转成文件”，必须先有内容。
+            // 实测踩到：docx_report 被排在执笔岗之前执行，输入为空 → 导出的 Word 只有一个标题、正文全空。
+            + "<b>交付类技能必须排在产出内容之后（很重要）</b>：\n"
+            + "- “导出 / 排版 / 转换 / 生成 Word・Excel・PDF・PPT”类技能（如 docx_report、md_to_docx），\n"
+            + "  它的活是<b>把已有内容转成文件</b>，所以<b>必须排在能产出该内容的员工之后</b>；\n"
+            + "  绝不能把它排在第一个、也不能排在任何产出内容的 dispatch 之前。\n"
+            + "- 正确顺序：先 dispatch 产出岗位（写作 / 分析 / 整理 / 规划）→ 再把它的产出交给交付技能转成文件 → answer。\n"
+            + "- 若用户既要内容又要文件，且组织里只有一个岗位能干这两件事，则规划顺序上也必须先产出、后导出。\n"
+            + "只输出 JSON，不要任何其他文字：{\"steps\":[…]}}，步骤 1~" + PlanMaxStepsPlaceholder + " 条。若问题与任何员工/技能都不相关，输出 {\"steps\":[]}。";
+    }
+
+    /// <summary>规划器提示词里的最大步数（测试钩子用固定值，生产路径由执行配置覆盖）。</summary>
+    private const int PlanMaxStepsPlaceholder = 8;
+
+    private async Task<List<PlanStep>?> PlanCoordinatedAsync(AgentInvocationContext context, AgentDefinition root, string input,
+        IReadOnlyList<AgentDefinition> reached, IReadOnlyList<AgentSkillDefinition> skills, CancellationToken ct)
+    {
+        var agent = _catalog.GetOrCreate(root.AgentId);
+        var inventory = BuildPlanInventory(root, reached, skills);
+        // 提示词统一由 BuildPlannerPromptText 拼装（测试可断言“交付顺序”硬规则在不在）
+        var prompt = BuildPlannerPromptText(root.Nickname ?? root.AgentId, input, inventory)
+            .Replace(PlanMaxStepsPlaceholder.ToString(), _execution.CoordinatorPlanMaxSteps.ToString());
         var session = await agent.CreateSessionAsync(ct);
         var resp = await agent.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
         return AgentGatewayHelpers.ParsePlan(resp.Text);
@@ -1716,7 +1842,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var dispatchList = new List<string>();
         foreach (var sk in (root.SkillDefIds ?? []))
             if (db?.Get(sk) is { } sd && sd.Kind != AgentSkillKind.Org_deploy)
+            {
+                // 文档生成类技能不进补查清单：它们的入参是结构化 JSON，
+                // 递归补查只会把“已掌握的检查结果”一段纯文本塑进去（JsonReaderException / 空壳文档）。
+                // 文件交付由计划后的交付兑底（完整流式）负责。
+                if (AgentGatewayHelpers.IsDocumentGenerator(sd)) continue;
                 skillList.Add($"{sd.SkillId}（{sd.Name ?? sd.SkillId}）：{(sd.Description ?? "").Replace("\n", " ")}");
+            }
         foreach (var id in (root.AssignmentIds ?? []))
             if (_catalog.GetDefinition(id) is { } sub) dispatchList.Add($"{sub.Nickname ?? id}（id={id}）：{(sub.Description ?? "").Replace("\n", " ")}");
 
@@ -2184,7 +2316,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             // 2) 链路上已经调过这个技能 / 已有产物 → 不重复做
             var usedSkillIds = hops.Where(h => h.Kind == "skill").Select(h => h.AgentId).ToHashSet(StringComparer.Ordinal);
-            if (usedSkillIds.Any(id => id.StartsWith(want.Value.SkillPrefix, StringComparison.OrdinalIgnoreCase)))
+            if (usedSkillIds.Any(id => AgentGatewayHelpers.SkillMatchesDeliverablePrefix(id, want.Value.SkillPrefix)))
                 return new DeliveryOutcome(messageId, false);
 
             // 3) 在可达组织范围内找一位挂了匹配技能的同事
@@ -2204,15 +2336,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             //      · 若岗位人设被写成“仅接收定稿才出文件”，它还会反问用户要定稿、空手而回
             //        （实测：word_delivery 回“我需要先跟你对齐交付流程…否则我不会出文件”）。
             var wantSkill = DeliverableSkillFor(candidate, want.Value.SkillPrefix);
-            var hardRule = "\n\n【硬性要求】用户是直接向你要这份文件的，你必须现在就产出文件："
-                + "不要反问用户要定稿/合规结论/审批结果，不要以“流程未走完”为由拒交；"
-                + "材料不完整也先出稿，把不确定的地方在文件里列为待确认项。";
-            var deliver = wantSkill is null
-                ? $"用户要求交付 {want.Value.Label} 文件。请直接调用你的文件生成技能，把交付内容生成为文件后简短回报。" + hardRule
-                  + $"\n\n【用户原始请求】\n{context.Content}"
-                : $"用户要求交付 {want.Value.Label} 文件。**第一步就直接调用技能 {wantSkill}**（不要先做规划/分析/汇报，不要调用其它技能），"
-                  + $"把交付内容生成为文件后简短回报。" + hardRule
-                  + $"\n\n【用户原始请求】\n{context.Content}";
+            var deliver = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content);
             var prev = AmbientContext.Value;
             var prevChain = SkillChainBuilder.Ambient.Value;
             var prevToolResults = ToolResultCollector.Ambient.Value;
@@ -2390,6 +2514,28 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return approval;
     }
 
+    /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。</summary>
+    internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent)
+    {
+        var hardRule = "\n\n【硬性要求】用户是直接向你要这份文件的，你必须现在就产出文件："
+            + "不要反问用户要定稿/合规结论/审批结果，不要以“流程未走完”为由拒交；"
+            + "材料不完整也先出稿，把不确定的地方在文件里列为待确认项。";
+        // 内容完整性：交付类技能的入参是结构化 sections，模型很容易只给“标题 + 副标题 + 作者”就收工
+        // （实测踩到多次：Word 只有标题 / 只有 3 段，sections 是空的）。
+        // 因此提示词必须把“先把正文写出来、再逐节填进 sections”写成硬要求。
+        var contentRule = "\n\n【内容必须完整（很重要）】产出后用户拿到的应该是一份可直接交付的完整成稿，不是提纲或骨架："
+            + "先把你应该写的内容完整组织好，再逐节写进技能的 sections 参数——"
+            + "它们接收 heading(level 1-3) / paragraph / bullets / numbered / quote / table({headers,rows}) / toc 等结构；"
+            + "**每一节都要有实质正文（段落 / 列表 / 表格），绝不允许只传标题、副标题、作者就收工**（那样文档里会没有任何内容）。"
+            + "若组织里同时有能直接吃 Markdown 正文的导出技能，优先用它（把完整 Markdown 正文交给它转换）。";
+        return skillId is null
+            ? $"用户要求交付 {label} 文件。请直接调用你的文件生成技能，把完整内容生成为文件后简短回报。" + hardRule + contentRule
+              + $"\n\n【用户原始请求】\n{userContent}"
+            : $"用户要求交付 {label} 文件。请调用文档生成技能 {skillId}，把完整内容生成为文件后简短回报"
+              + $"（不要先反问用户要材料，也不要调用其它无关技能）。" + hardRule + contentRule
+              + $"\n\n【用户原始请求】\n{userContent}";
+    }
+
     /// <summary>用户要的交付物类型（技能前缀用于在组织里匹配）。识别不出来返回 null。</summary>
     private static (string SkillPrefix, string Label)? WantedDeliverable(string? userText)
     {
@@ -2446,7 +2592,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     {
         if (def.SkillDefIds is not { Count: > 0 }) return null;
         foreach (var id in def.SkillDefIds)
-            if (!string.IsNullOrWhiteSpace(id) && id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return id;
+            if (AgentGatewayHelpers.SkillMatchesDeliverablePrefix(id, prefix)) return id;
         return null;
     }
 
@@ -2457,7 +2603,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (catalog is null) return false;
         foreach (var id in def.SkillDefIds)
         {
-            if (!string.IsNullOrWhiteSpace(id) && id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+            // 前缀式（docx_report）与后缀式（md_to_docx）都算：只判 StartsWith 会漏掉后者，
+            // 于是“用户要 Word、团队里确实有人能产 Word”却找不到交付人（实测踩到）。
+            if (AgentGatewayHelpers.SkillMatchesDeliverablePrefix(id, prefix)) return true;
         }
         return false;
     }

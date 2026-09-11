@@ -140,6 +140,136 @@ internal static class AgentGatewayHelpers
         => System.Text.RegularExpressions.Regex.Matches(skill.Body ?? "", @"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
             .Select(m => m.Groups[1].Value).Where(v => !string.IsNullOrWhiteSpace(v)).Distinct().ToList();
 
+    /// <summary>
+    /// 该技能是否<b>必须拿到上游产出才能正确执行</b>（供规划器排定“先产出、后转换”的依赖顺序）。
+    ///
+    /// <para>
+    /// 为什么需要单独判别：<see cref="SkillRequiredInputs"/> 只看正文里的 <c>${xxx}</c> 占位符，
+    /// 而 <b>dotnet / shell 类技能的入参是函数签名或 stdin，正文里根本没有占位符</b> —— 
+    /// 于是规划器标不出【需要输入：…】，“先拿到输入再调该技能”的依赖规则对它们彻底失效。
+    /// 实测踩到：docx_report / md_to_docx 被排在执笔岗<b>之前</b>执行，拿到空输入，
+    /// 导出的 Word 就一个标题、正文全空。
+    /// </para>
+    ///
+    /// 判据（宁漏勿误，只抓特征明显的）：
+    /// 1) 有 <c>${xxx}</c> 占位符 → 需要输入（原口径）；
+    /// 2) 转换 / 导出 / 排版类技能（kind=dotnet/shell 且描述里出现“导出/排版/转换/生成…文档”类词）→ 需要输入；
+    /// 3) 描述里显式说到入参（Markdown / 正文 / 文本 / 内容 / 稿件 / input）→ 需要输入。
+    /// </summary>
+    internal static List<string> RequiredUpstreamInputs(AgentSkillDefinition skill)
+    {
+        var declared = SkillRequiredInputs(skill);
+        if (declared.Count > 0) return declared;
+
+        // 只对“真会执行”的技能判定：prompt 技能不产生文件，排错顺序也不会有可下载产物丢失
+        if (skill.Kind is not (AgentSkillKind.Dotnet or AgentSkillKind.Shell)) return [];
+
+        // 文档生成器（docx_* / md_to_docx / *xlsx* …）：它的活就是把内容转成文件，必然需要内容。
+        // 实测踩到：旧口径只认「生成文档 / 生成文件」连写，而内置技能描述写的是
+        // “生成规范排版的党政机关公文 Word 文档”，一个都没命中，于是守卫失效。
+        if (IsDocumentGenerator(skill)) return ["content"];
+
+        var text = ((skill.SkillId ?? "") + " " + (skill.Name ?? "") + " " + (skill.Description ?? ""))
+            .ToLowerInvariant();
+
+        // 其它导出 / 排版 / 转换类
+        string[] convertKeys =
+        [
+            "导出", "排版", "转换", "转成", "生成文档", "生成文件",
+            "export", "convert", "render",
+        ];
+        if (convertKeys.Any(k => text.Contains(k, StringComparison.Ordinal))) return ["content"];
+        if (text.Contains("markdown", StringComparison.Ordinal)) return ["content"];
+        return [];
+    }
+
+    /// <summary>
+    /// 判断一段技能输入是否“实际上是空的”——包括网关自己填的兑底文案。
+    ///
+    /// <para>
+    /// 为什么不能只判 <c>IsNullOrWhiteSpace</c>：上游岗位返回空时，
+    /// ExecuteCoordinatedPlanAsync 会把字面量 <c>（未返回内容）</c> 当作结果继续往下传，
+    /// 于是后续技能收到一个“看着非空、实际无内容”的占位串，会照着它生成空壳文件。
+    /// 实测踩到：docx_report query=（未返回内容） → 导出的 Word 只有标题。
+    /// </para>
+    /// </summary>
+    internal static bool LooksLikeEmptyInput(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        var t = text.Trim();
+        // 网关自己的兑底文案，以及常见等价写法
+        string[] placeholders =
+        [
+            "（未返回内容）", "(未返回内容)", "（无）", "(无)",
+            "（未返回）", "（无内容）", "（空）", "（无可用内容）",
+        ];
+        if (placeholders.Any(p => string.Equals(t, p, StringComparison.Ordinal))) return true;
+        // 纯平台前言（语言提示等）→ 不是可排版的正稿。
+        // 实测踩到：docx_gongwen 收到的输入是“（请用中文回复，提问者消息以中文为主。）”，
+        // 它长度过短但非空，旧口径放过了，于是技能报 JsonReaderException。
+        if (IsPlatformPreambleLine(t)) return true;
+        // 去掉标点与空白后仍很短 → 基本不可能是一份可排版的正稿
+        var core = new string(t.Where(c => !char.IsWhiteSpace(c) && !"（）()【】[]，,。.：:；;！!？?—-‒–".Contains(c)).ToArray());
+        return core.Length < 2;
+    }
+
+    /// <summary>
+    /// 该输入是否“不像是可排版 / 可交付的正文”（过短或全是前言）。
+    ///
+    /// <para>
+    /// 比 <see cref="LooksLikeEmptyInput"/> 更严：额外要求达到一个最小长度。
+    /// 用于交付类技能的输入闸门——它们拿到一小段闲聊句也生成不出有意义的文件，
+    /// 不如直接用群里已有的产出去兑底（或如实播报原因）。
+    /// </para>
+    /// </summary>
+    internal static bool LooksTooThinForDelivery(string? text, int minChars = 120)
+        => LooksLikeEmptyInput(text) || (text?.Trim().Length ?? 0) < minChars;
+
+    /// <summary>
+    /// 该技能是否是“文档生成器”（把内容落成 Word/Excel/PPT/PDF 文件）。
+    ///
+    /// <para>
+    /// 为什么需要它：这类技能的入参是<b>结构化 JSON</b>（如 <c>{title, sections:[...]}</c>），
+    /// 必须由<b>模型当工具调用</b>才能正确构造。而编排计划路径按“纯文本进、纯文本出”直接调技能，
+    /// 会把一段群上下文/前言原样塑给它 → JsonReaderException / 导出空壳文档。
+    /// 因此计划路径应跳过这类技能，改由交付兑底（完整流式）让模型自己构造 JSON 并调用。
+    /// </para>
+    ///
+    /// 判据（宁漏勿误）：
+    /// 1) 可执行类技能（dotnet/shell），且
+    /// 2) 技能 id 或描述里出现文档产出特征（docx / xlsx / pptx / pdf / Word 文档 / Excel …）。
+    /// </summary>
+    internal static bool IsDocumentGenerator(AgentSkillDefinition skill)
+    {
+        if (skill.Kind is not (AgentSkillKind.Dotnet or AgentSkillKind.Shell)) return false;
+        var text = ((skill.SkillId ?? "") + " " + (skill.Name ?? "") + " " + (skill.Description ?? ""))
+            .ToLowerInvariant();
+        return text.Contains("docx", StringComparison.Ordinal)
+            || text.Contains("xlsx", StringComparison.Ordinal)
+            || text.Contains("pptx", StringComparison.Ordinal)
+            || text.Contains("pdf", StringComparison.Ordinal)
+            || text.Contains("word 文档", StringComparison.Ordinal)
+            || text.Contains("excel", StringComparison.Ordinal)
+            || text.Contains("演示文稿", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 技能 id 是否匹配某交付前缀（docx_ / xlsx_ / pptx_ / pdf_）。
+    ///
+    /// <para>
+    /// 不能只判 <c>StartsWith</c>：内置技能有 <c>docx_report</c>（前缀式），
+    /// 但编排出的常见命名是 <c>md_to_docx</c>（后缀式）—— 只判前缀会漏掉它，
+    /// 于是“用户要 Word、团队里确实有人能产 Word”却找不到交付人。
+    /// </para>
+    /// </summary>
+    internal static bool SkillMatchesDeliverablePrefix(string? skillId, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(skillId)) return false;
+        if (skillId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        var ext = prefix.TrimEnd('_'); // docx / xlsx / pptx / pdf
+        return skillId.Contains(ext, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>从“上一步输出”（可能含解释性文字）中提取技能可用的纯净输入。</summary>
     internal static string? ExtractCleanValueForSkill(string? text)
     {
@@ -210,12 +340,30 @@ internal static class AgentGatewayHelpers
             if (t.StartsWith("以下是群", StringComparison.Ordinal)
                 || t.StartsWith("以下是话题", StringComparison.Ordinal)) { skippedPreamble = true; continue; }
             if (t.StartsWith("（以上为外部来源内容", StringComparison.Ordinal)) continue;
+            // 平台前言：语言提示、附件说明等纯元信息行，不是用户内容。
+            // 实测踩到：规划器把整段 plan.Input 当正文投给排版技能，
+            // 而它的开头就是“（请用中文回复，提问者消息以中文为主。）”，
+            // 技能拿到后报 JsonReaderException / 导出空壳文档。
+            if (IsPlatformPreambleLine(t)) continue;
             // 历史消息行：直到出现非“某人：内容”形式的行为止
             if (skippedPreamble && kept.Count == 0 && LooksLikeHistoryLine(t)) continue;
             kept.Add(l);
         }
         var joined = string.Join("\n", kept).Trim();
         return joined.Length > 0 ? StripAttachmentSections(joined) : null;
+    }
+
+    /// <summary>平台自己加的前言行（语言提示 / 附件说明 / 时间戳等），不是用户或上游的业务内容。</summary>
+    internal static bool IsPlatformPreambleLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return false;
+        var t = line.Trim();
+        // 语言提示：由 AgentGateway.DetectReplyLanguageHint 生成
+        if (t.StartsWith("（请用中文回复", StringComparison.Ordinal)) return true;
+        if (t.StartsWith("（質問は日本語です", StringComparison.Ordinal)) return true;
+        if (t.StartsWith("（질문이 한국어입니다", StringComparison.Ordinal)) return true;
+        if (t is "（无）" or "(无)") return true;
+        return false;
     }
 
     /// <summary>粗判是否形如「说话人：内容」的对话历史行（说话人短、不含空格与 Markdown 标记）。</summary>
