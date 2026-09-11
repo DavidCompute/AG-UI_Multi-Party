@@ -12,6 +12,8 @@ using AguiGroupChat.Hub.Users;
 using AguiGroupChat.Web;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -258,9 +260,39 @@ public sealed class PersistenceIntegrationTests
         HubApp.MapEndpoints(app);
         app.MapAgentApi();
         app.Services.RegisterAgentPersistence();
+        // 与生产配置对齐：本测试验证「重启后会话令牌仍有效 / 智能体保留」，
+        // 而会话与智能体定义都存在<b>扩展区</b>（不在核心快照里）。
+        // 早先只注册 AgentPersistence，重启后令牌直接 401（测试偶发失败的真实原因）。
+        app.Services.RegisterSessionPersistence();
         HubApp.InitializePersistence(app);
         await app.StartAsync();
-        return (app, app.Urls.First());
+        return (app, ResolveBoundBaseUrl(app));
+    }
+
+    /// <summary>
+    /// 取 Kestrel <b>实际绑定</b>的基地址。
+    ///
+    /// <para>
+    /// 不能用 <c>app.Urls.First()</c>：配了 <c>http://127.0.0.1:0</c>（系统分配端口）时，
+    /// 该属性在绑定完成前可能仍返回带 <c>:0</c> 的模板值，后续请求就打到错误地址拿到 404。
+    /// 本测试曾因此偶发失败（全量并行跑时更容易命中）。改从
+    /// <see cref="IServerAddressesFeature"/> 取，它在 StartAsync 后携带真实端口。
+    /// </para>
+    /// </summary>
+    private static string ResolveBoundBaseUrl(WebApplication app)
+    {
+        var feature = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>();
+        var addr = feature?.Addresses.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a) && !a.EndsWith(":0", StringComparison.Ordinal))
+                   ?? feature?.Addresses.FirstOrDefault()
+                   ?? app.Urls.First();
+        // 兜底：万一仍是 :0（极端竞态），轮询到真实端口出现为止
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (addr.EndsWith(":0", StringComparison.Ordinal) && DateTime.UtcNow < deadline)
+        {
+            Thread.Sleep(50);
+            addr = feature?.Addresses.FirstOrDefault(a => !a.EndsWith(":0", StringComparison.Ordinal)) ?? addr;
+        }
+        return addr;
     }
 
     [Fact]
@@ -297,8 +329,11 @@ public sealed class PersistenceIntegrationTests
                 agentReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 (await client1.SendAsync(agentReq)).EnsureSuccessStatusCode();
 
-                // 显式冲刷，保证落盘后再“重启”
+                // 显式冲刷，保证落盘后再“重启”。
+                // 注意：必须同时冲 <b>sections</b> —— 智能体定义存在扩展区（非核心快照），
+                // 只冲 PersistenceService 会漏掉它，重启后 agents 为空（本测试曾因此偶发失败）。
                 app1.Services.GetRequiredService<PersistenceService>().Flush();
+                app1.Services.GetService<ISectionStore>()?.Flush();
             }
             finally
             {

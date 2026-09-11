@@ -483,7 +483,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 由 _execution.ExecutionOrder 决定、可经平台开关 + 角色级覆盖禁用单个非兜底阶段。
         // 命中阶段即返回其结果；全部阶段语义未命中（fallthrough）时落回下方普通流式兜底。
         var effectiveMode = context.TriggerMode ?? def.TriggerMode;
-        if (await DispatchRoutedStagesAsync(context, def, effectiveMode, ct) is { } routedResult)
+        // 交付物兜底会以“只跑流式”标记调用，避免再次命中 org_route 形成递归。
+        if (!_streamingOnly.Value
+            && await DispatchRoutedStagesAsync(context, def, effectiveMode, ct) is { } routedResult)
             return routedResult;
 
         // 语境触发（Contextual）：下方普通流式 / 模型消费前先结合群上下文判断是否应发言，不发言则静默跳过
@@ -1079,6 +1081,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// </summary>
     private async Task<AgentInvocationResult> InvokeAssignmentEscalationAsync(AgentInvocationContext context, CancellationToken ct)
     {
+        // 先做纯路由决策（不产生任何事件）。若决策结果是「本级该自答、但它挂了可执行技能」，
+        // 不能在这里用轻量路径草草回答：必须 return null 落回普通流式，让它拿到工具 / 审批 / 产物回档。
+        // 实测踩到：编排出的团队里「文案交付排版员」挂了 docx_report，用户带附件要 Word，
+        // 轻量路径只回了一句表态、技能从未被调用、产物也拿不到下载。
+        if (await ShouldDelegateRouteToStreamingAsync(context, ct))
+        {
+            _logger.LogInformation("组织化路由交由完整执行（岗位挂有可执行技能且判定应自答）：agent={AgentId}", context.AgentId);
+            return null!;
+        }
+
         var runId = "run_" + IdGenerator.NewId();
         _logger.LogInformation("智能体 {AgentId} 进入指派/提升路由（run={RunId}，group={GroupId}）", context.AgentId, runId, context.GroupId);
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
@@ -1110,6 +1122,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
             if (outcome == RouteOutcome.CannotSolve)
                 finalText = "（该问题不在我可解决的范围内，且没有可指派的同事或可提升的上级，暂时无法解决。请直接联系处理该问题的负责人。）";
+
+            // 交付物兜底：用户明确要文件（Word/excel/...），而整条指派/提升链只产出了文本、没生成文件时，
+            // 找一个挂了对应技能的同事真正做一次。
+            //
+            // 为什么需要：实测踩到 —— 用户带附件要 Word，链路把活派来派去（排版员→总监→组长→写手），
+            // 最后写手只把稿子**当文本贴了出来**，没人调 docx_* 技能，用户拿不到文件。
+            // “任务被派来派去却没人负责最终交付物”是组织协作的典型断点。
+            if (plan is null && finalText is { Length: > 0 } && !string.IsNullOrWhiteSpace(context.Content))
+                await TrySatisfyDeliveryAsync(context, input, hops, runCt);
 
             var started = await _hub.Value.PublishAgentMessageStartAsync(new AgentMessageStartInput
             {
@@ -1920,6 +1941,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     // 指派/提升路由的最大层数（防配置病态深链 / 打爆模型时长的兑底），见 _execution.MaxRouteDepth。
 
+    /// <summary>路由结局。</summary>
     private enum RouteOutcome { Answer, CannotSolve }
 
     /// <summary>
@@ -2001,6 +2023,29 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>
+    /// 该岗位是否挂了<b>可执行</b>技能（需要真实执行、可能产出文件 / 副作用）。
+    ///
+    /// <para>
+    /// 用于决定路由自答走轻量回答还是完整流式：
+    /// prompt / org_deploy 不算可执行（前者是一段模板，后者是受控落库动作）；
+    /// dotnet / shell / http 均算 —— 它们必须经完整路径才能拿到工具调用、审批与产物回档。
+    /// </para>
+    /// </summary>
+    private bool HasExecutableSkill(AgentDefinition def)
+    {
+        if (def.SkillDefIds is not { Count: > 0 }) return false;
+        var catalog = _skillCatalog.Value;
+        if (catalog is null) return false;
+        foreach (var id in def.SkillDefIds)
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (catalog.Get(id) is not { } sk) continue;
+            if (sk.Kind is AgentSkillKind.Dotnet or AgentSkillKind.Shell or AgentSkillKind.Http) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// 任务指派目标<b>排序</b>：在 <paramref name="candidates"/>（白名单）里按匹配度从高到低输出一个或多个
     /// 候选下游数字员工（可逗号分隔返回多个，供上层做递归探测回退）；都不合适输出 NONE。
     /// 返回候选 agentId 的已排序列表（保证都在 <paramref name="candidates"/> 内）。
@@ -2031,6 +2076,210 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             .Split([',', '，'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return choices.Where(c => candidates.Contains(c)).ToList();
     }
+
+    /// <summary>
+    /// 预判：组织化路由是否应当「交由完整流式路径」处理。
+    ///
+    /// <para>
+    /// 条件：① 本岗位挂了可执行技能（dotnet / shell / http）；② 路由最终会把任务落在本岗位自答（而非派给下级）。
+    /// 二者同时成立时，轻量路由回答（无工具、无审批、无产物回档）干不了活，应落回普通流式。
+    /// </para>
+    ///
+    /// <para>
+    /// 实现上只做「决策」不做「执行」：不广播计划卡、不建消息、不改上下文，
+    /// 因此重复一次路由决策是安全的（多花一次轻量模型调用，换取叶子执行岗能真正干活）。
+    /// 只在「本岗无下级可派」或「有下级但下级无人接单且本岗该自答」时才转为委派。
+    /// </para>
+    /// </summary>
+    private async Task<bool> ShouldDelegateRouteToStreamingAsync(AgentInvocationContext context, CancellationToken ct)
+    {
+        var def = _catalog.GetDefinition(context.AgentId);
+        if (def is null) return false;
+        if (!HasExecutableSkill(def)) return false;
+
+        // 配了编排计划时走 ExecuteCoordinatedPlanAsync（那条路径已含技能执行与产物回档），不需转。
+        if (_options.CoordinatorPlanning) return false;
+
+        // 快速通道：配了可派下级时，先不做任何模型调用。
+        // 只有「本岗是叶子（无下级）或下级全不行」才值得花一次预判；
+        // 绝大多数有下级的场景会返回 false，从而保持原路由行为与原开销。
+        var candidates = (def.AssignmentIds ?? [])
+            .Where(id => !string.IsNullOrWhiteSpace(id)
+                && !string.Equals(id, def.AgentId, StringComparison.Ordinal)
+                && _catalog.GetDefinition(id) is not null)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        try
+        {
+            var input = await BuildUserMessageAsync(context, ct);
+            if (candidates.Count > 0)
+            {
+                var ranked = await RankAssignTargetsAsync(context, def, candidates, input, ct);
+                if (ranked.Count > 0) return false; // 派得出去，走原路由
+            }
+
+            // 无下级可派（或下级都不接）：轮到自己。该自答就转完整执行。
+            return await ShouldSpeakAsync(context, def, ct);
+        }
+        catch (Exception ex)
+        {
+            // 预判失败不阻断主流程：退回原路由行为（宁可轻量回答，也不能把消息卡死）
+            _logger.LogDebug(ex, "路由转委派预判失败（回退原路由）：agent={AgentId}", context.AgentId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 交付物兜底：用户明确要文件，而指派 / 提升链只回了文本时，找一位挂了对应技能的同事真正生成一次。
+    ///
+    /// <para>
+    /// 设计取舍：不改变原有“找对人”的路由语义（该派还是派、该提升还是提升），
+    /// 只在链尾发现“**用户要文件、却没人产出文件**”时补一次真实交付。
+    /// 选人口径：在可触达的组织范围内（本岗 + 下级 + 提升链）找挂了匹配技能的岗位；
+    /// 找不到就不插手（宁可没文件，也不能乱调技能）。
+    /// </para>
+    ///
+    /// <para>
+    /// 副作用：在<b>当前这条消息</b>上继续追加内容（不另开消息），因此产物回档会自然挂到本条消息上，
+    /// 前端直接出下载卡片。
+    /// </para>
+    /// </summary>
+    private async Task TrySatisfyDeliveryAsync(
+        AgentInvocationContext context, string input, List<ChainNode> hops, CancellationToken ct)
+    {
+        try
+        {
+            // 1) 用户是否要文件？从原始消息判定（不要看链路正文，那是回答内容）
+            var want = WantedDeliverable(context.Content);
+            if (want is null) return;
+
+            // 2) 链路上已经调过这个技能 / 已有产物 → 不重复做
+            var usedSkillIds = hops.Where(h => h.Kind == "skill").Select(h => h.AgentId).ToHashSet(StringComparer.Ordinal);
+            if (usedSkillIds.Any(id => id.StartsWith(want.Value.SkillPrefix, StringComparison.OrdinalIgnoreCase))) return;
+
+            // 3) 在可达组织范围内找一位挂了匹配技能的同事
+            var candidate = FindDeliverableOwner(context, want.Value.SkillPrefix);
+            if (candidate is null)
+            {
+                _logger.LogDebug("交付物兜底：组织内无匹配技能的岗位（需要 {Prefix}*）", want.Value.SkillPrefix);
+                return;
+            }
+
+            _logger.LogInformation("交付物兜底：用户要求 {Kind}，由 {AgentId} 产出交付文件", want.Value.Label, candidate.AgentId);
+
+            // 4) 让该同事真实跑一次（完整流式路径：工具调用 + 审批 + 产物回档均在官方管道内完成）。
+            //    这里的“派单”只是把交付要求显式告知，不伪造对话历史。
+            var deliver = $"用户要求交付 {want.Value.Label} 文件。请调用你的对应技能，把要交付的内容生成为文件后简短回报。\n\n【用户原始请求】\n{context.Content}";
+            var prev = AmbientContext.Value;
+            try
+            {
+                // 用 with 派生：保留群 / 话题 / 触发者 / 可见性 / 附件等全部上下文，只换执行者与内容
+                var sub = context with
+                {
+                    AgentId = candidate.AgentId,
+                    AgentNickname = candidate.Nickname,
+                    Content = deliver,
+                    // 直接走流式：置 AllMessages 并配合 _streamingOnly，避免又回到“找对人”循环
+                    TriggerMode = AgentTriggerMode.AllMessages,
+                };
+                AmbientContext.Value = sub;
+                await InvokeStreamingOnlyAsync(sub, ct);
+                hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
+            }
+            finally { AmbientContext.Value = prev; }
+        }
+        catch (Exception ex)
+        {
+            // 兜底失败不影响已给出的回答
+            _logger.LogDebug(ex, "交付物兜底失败（已忽略）");
+        }
+    }
+
+    /// <summary>用户要的交付物类型（技能前缀用于在组织里匹配）。识别不出来返回 null。</summary>
+    private static (string SkillPrefix, string Label)? WantedDeliverable(string? userText)
+    {
+        if (string.IsNullOrWhiteSpace(userText)) return null;
+        var t = userText.ToLowerInvariant();
+        bool Has(params string[] keys) => keys.Any(k => t.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+        // 文档类：中英文都要认（用户常直接写 “word文档” / “docx”）
+        if (Has("word", "docx", "文档", "文稿", ".doc")) return ("docx_", "Word 文档");
+        if (Has("excel", "xlsx", "表格", "电子表")) return ("xlsx_", "Excel 表格");
+        if (Has("ppt", "pptx", "演示文稿", "幻灯片")) return ("pptx_", "演示文稿");
+        if (Has("pdf")) return ("pdf_", "PDF 文档");
+        return null;
+    }
+
+    /// <summary>
+    /// 在可达组织范围内（本岗 → 下级（递归）→ 提升链（递归））找第一位挂了
+    /// <paramref name="skillPrefix"/> 开头技能的同事。
+    /// 只沿组织连接走，不全局搜库 —— 保持“团队自己的事自己干”的语义。
+    /// </summary>
+    private AgentDefinition? FindDeliverableOwner(AgentInvocationContext context, string skillPrefix)
+    {
+        var root = _catalog.GetDefinition(context.AgentId);
+        if (root is null) return null;
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<AgentDefinition>();
+        queue.Enqueue(root);
+        AgentDefinition? fallback = null;
+
+        while (queue.Count > 0 && visited.Count < 60)
+        {
+            var d = queue.Dequeue();
+            if (!visited.Add(d.AgentId)) continue;
+
+            if (HasSkillWithPrefix(d, skillPrefix))
+            {
+                // 优先选“只有交付能力、不主管别人”的岗位（真正的执行岗）；否则记住作为备选
+                if (d.AssignmentIds is not { Count: > 0 }) return d;
+                fallback ??= d;
+            }
+
+            foreach (var sub in (d.AssignmentIds ?? []).Concat([d.EscalationAgentId]))
+            {
+                if (string.IsNullOrWhiteSpace(sub) || visited.Contains(sub)) continue;
+                if (_catalog.GetDefinition(sub) is { } sd) queue.Enqueue(sd);
+            }
+        }
+        return fallback;
+    }
+
+    private bool HasSkillWithPrefix(AgentDefinition def, string prefix)
+    {
+        if (def.SkillDefIds is not { Count: > 0 }) return false;
+        var catalog = _skillCatalog.Value;
+        if (catalog is null) return false;
+        foreach (var id in def.SkillDefIds)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>直接走普通流式路径（跳过组织化路由阶段），用于交付物兜底，避免再进“找对人”循环。</summary>
+    private async Task InvokeStreamingOnlyAsync(AgentInvocationContext context, CancellationToken ct)
+    {
+        var prev = AmbientContext.Value;
+        AmbientContext.Value = context;
+        try
+        {
+            // 复用 InvokeCoreAsync 的兜底段：把 org_route 临时置为禁用语义最直接的做法是不经 DispatchRoutedStagesAsync。
+            // 这里通过一个开关式上下文标记实现“只跑流式”：见 InvokeCoreAsync 对该标记的判断。
+            _streamingOnly.Value = true;
+            await InvokeCoreAsync(context, ct);
+        }
+        finally
+        {
+            _streamingOnly.Value = false;
+            AmbientContext.Value = prev;
+        }
+    }
+
+    // 交付物兜底专用：AsyncLocal 标记“本次调用只走流式阶段”（避免再次命中 org_route 造成递归）
+    private static readonly AsyncLocal<bool> _streamingOnly = new();
 
     /// <summary>让单个数字员工就指派/提升请求实际作答（模型一次 run），返回最终文本。</summary>
     private async Task<string> RunRouteAnswerAsync(AgentInvocationContext context, string agentId, string input, CancellationToken ct)

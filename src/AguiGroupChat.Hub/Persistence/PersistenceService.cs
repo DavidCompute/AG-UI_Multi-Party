@@ -28,6 +28,8 @@ public sealed class PersistenceService : IDisposable
     private Timer? _timer;
     private bool _dirty; // 脏位：全部读写经 Volatile.Read / Volatile.Write（见 Flush / MarkDirty）
     private int _flushInProgress;
+    /// <summary>显式 Flush 等待“上一轮落盘”的上限：超时则放弃本轮（宁可少写一次，也不能把关闭/请求卡死）。</summary>
+    private const long FlushWaitTimeoutMs = 5_000;
 
     public PersistenceService(
         IUserStore users,
@@ -172,8 +174,24 @@ public sealed class PersistenceService : IDisposable
     public void Flush()
     {
         if (!IsEnabled) return;
-        // 已有落盘进行中：本轮让位（脏位由进行中那轮保留，清位只发生在真正干活的那一轮，防并发丢变更）
-        if (Interlocked.Exchange(ref _flushInProgress, 1) == 1) return;
+
+        // 已有落盘进行中：不能直接让位返回。
+        // 那轮已经<b>读过快照</b>了，本轮的变更不在里面；直接 return 会让调用方误以为已落盘，
+        // 重启后读到旧数据（本仓库真实踩到：显式 Flush 与后台定时刷盘撞车 → agents 丢失）。
+        // 正确做法：等它写完，再判断脏位重刷一次；带超时兜底防死等。
+        var spinner = new SpinWait();
+        var deadline = Environment.TickCount64 + FlushWaitTimeoutMs;
+        while (Interlocked.CompareExchange(ref _flushInProgress, 1, 0) == 1)
+        {
+            if (Environment.TickCount64 > deadline)
+            {
+                _logger.LogWarning("等待上一轮落盘超时（{Ms}ms），本轮放弃：{Path}", FlushWaitTimeoutMs, _options.FilePath);
+                return;
+            }
+            spinner.SpinOnce(); // 落盘含文件 IO：短暂自旋后交还时间片
+            if (spinner.NextSpinWillYield) Thread.Sleep(1);
+        }
+
         // 先原子清位再干活：清位后若有新变更会重新置脏，由下一轮定时器再写，数据不丢（去掉结尾的读-清双检）
         if (Interlocked.Exchange(ref _dirty, false) == false)
         {
