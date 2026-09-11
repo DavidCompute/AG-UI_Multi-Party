@@ -31,8 +31,10 @@ public static class AgentOrchestrator
             .ToList();
     /// <summary>生成组织方案。真实模型走 OpenAI 兼容接口；mock 走确定性模板。</summary>
     /// <param name="reusableSkills">技能库中可复用的现成技能（可为空）。编排优先引用它们，避免重复造轮子。</param>
+    /// <param name="allowDotnet">调用者是否有权建 dotnet 技能（仅系统管理员）。false 时提示词会引导模型避开它，
+    /// 否则模型选了 dotnet 会在落库阶段直接被权限校验拒掉（见 OrgApplyEngine）。</param>
     public static async Task<OrchestrationPlan> GenerateAsync(AgentOptions options, string requirement, ILogger logger, CancellationToken ct,
-        IReadOnlyList<ReusableSkill>? reusableSkills = null)
+        IReadOnlyList<ReusableSkill>? reusableSkills = null, bool allowDotnet = true)
     {
         var req = (requirement ?? "").Trim();
         if (req.Length < 2) throw new InvalidOperationException("需求描述至少 2 个字符");
@@ -56,7 +58,7 @@ public static class AgentOrchestrator
 
         try
         {
-            var prompt = BuildPrompt(req, reusableSkills);
+            var prompt = BuildPrompt(req, reusableSkills, allowDotnet);
             var resp = await client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct);
             var text = resp.Text?.Trim();
             if (string.IsNullOrWhiteSpace(text))
@@ -77,7 +79,7 @@ public static class AgentOrchestrator
     public static async IAsyncEnumerable<string> StreamTextAsync(
         AgentOptions options, string requirement, ILogger logger,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct,
-        IReadOnlyList<ReusableSkill>? reusableSkills = null)
+        IReadOnlyList<ReusableSkill>? reusableSkills = null, bool allowDotnet = true)
     {
         var req = (requirement ?? "").Trim();
         if (string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
@@ -108,7 +110,7 @@ public static class AgentOrchestrator
 
         try
         {
-            var prompt = BuildPrompt(req, reusableSkills);
+            var prompt = BuildPrompt(req, reusableSkills, allowDotnet);
             await foreach (var update in client.GetStreamingResponseAsync(
                 [new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct))
             {
@@ -123,9 +125,25 @@ public static class AgentOrchestrator
         }
     }
 
-    private static string BuildPrompt(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills = null)
+    private static string BuildPrompt(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills = null, bool allowDotnet = true)
     {
         var deliberate = AgentCatalog.DeliberateFirstLine;
+        // kind 引导按权限分支：dotnet 仅系统管理员可建（OrgApplyEngine 会校验），
+        // 非管理员编排时必须引导模型避开，否则选了 dotnet 会在落库时被直接拒掉。
+        var kindLines = allowDotnet
+            ? "- kind：按岗位职责<b>智能选择</b>：\n" +
+              "    dotnet：需要生成/处理文档（Word/Excel/PDF）、图片、加解密、解析结构化数据、读写文件等「要真干活」的能力——" +
+              "<b>优先选它</b>。正文为 C# 源码，须含 public class Skill { public static string Run(string input) }，" +
+              "可用平台自带 .NET 运行时与 BCL，必要时在首行写 #r \"nuget: 包名, 版本\" 联网还原第三方库。executionLocation 固定 server。\n" +
+              "    shell：只能在目标机器上用 <b>bash + coreutils + curl + perl</b> 完成的事（文本处理、文件操作、HTTP 调用）。" +
+              SkillSandboxCapabilities.Describe() + "\n" +
+              "    http：调用外部 HTTP 接口。\n" +
+              "    prompt：纯文本/知识/写作/流程模板（没有外部执行）。\n" +
+              "禁则将文档处理、图片处理、复杂计算等本应用 dotnet 的活写成 shell。\n"
+            : "- kind：按岗位职责<b>智能选择</b>——需要本机/系统操作（查电脑信息、执行命令、操作文件/磁盘等）用 <b>shell</b>；" +
+              "需要调用外部 HTTP 接口用 <b>http</b>；纯文本/知识/写作/流程模板用 <b>prompt</b>。不要一律 prompt。\n" +
+              "（dotnet 类型仅系统管理员可建，本次调用者无权，<b>禁止</b>返回 kind=dotnet，也不要试图绕过。）\n" +
+              "- shell 只能使用目标机器上确实存在的命令：" + SkillSandboxCapabilities.Describe() + "\n";
         return deliberate +
             "你是企业数字化组织架构设计师。根据用户的一句需求，设计一套「数字员工组织架构 + 各岗位技能 + 岗位连接」方案；" +
             "先按开头的“取舍概述”要求简述后，再只输出最终的一段 JSON（除简述外的成稿不要附其它文字）。\n\n" +
@@ -150,10 +168,12 @@ public static class AgentOrchestrator
             "- skillId：ASCII 且 ≤40。\n" +
             "- name：中文名。\n" +
             "- description：给模型的调用说明（何时调用/参数/返回，50~150 字）。\n" +
-            "- kind：按岗位职责<b>智能选择</b>——需要本机/系统操作（查电脑信息、执行命令、操作文件/磁盘等）用 <b>shell</b>；需要调用外部 HTTP 接口用 <b>http</b>；纯文本/知识/写作/流程模板用 <b>prompt</b>。不要一律 prompt。\n" +
-            "- body：prompt 填模板文本；shell 填命令/脚本（可跨平台，Windows 用 PowerShell）；http 填 {\"method\":\"GET\",\"url\":\"${query}\",\"headers\":{}}。\n" +
-            "- executionLocation：shell 用 <b>client</b>（在本机执行，需批准）；http/prompt 用 server（服务端）。\n" +
-            "- requiresApproval：shell 一律 true；http 一律 true；executionLocation=client 一律 true；纯 prompt 服务端可 false。\n\n" +
+            kindLines +
+            "- body：prompt 填模板文本；dotnet 填完整可编译的 C# 源码（不要围栏）；shell 填命令/脚本（Linux 用 bash/sh）；" +
+            "http 填 {\"method\":\"GET\",\"url\":\"${query}\",\"headers\":{}}。\n" +
+            "- executionLocation：dotnet 用 <b>server</b>（服务端编译执行，可直接产出文件）；" +
+            "shell 用 <b>client</b>（在本机执行，需批准）；http/prompt 用 server。\n" +
+            "- requiresApproval：shell 一律 true；dotnet 一律 true；http 一律 true；executionLocation=client 一律 true；纯 prompt 服务端可 false。\n\n" +
             "连接原则（务必同时给全<b>两个方向</b>的连接，不要只给“问题提升”）：\n" +
             "- 有直接下级的岗位（主管/组长/经理…）必须在 assignmentIds 里列出它的<b>全部直接下级 agentId</b>——这是“任务指派”链（上级可把任务指派给下级）；\n" +
             "- 非顶层的岗位把 escalationAgentId 指向自己的直接上级——这是“问题提升”链；\n" +
@@ -167,8 +187,8 @@ public static class AgentOrchestrator
     }
 
     /// <summary>测试钩子：暴露提示词构造，便于断言“可复用技能清单确实进了提示词”。勿在生产路径调用。</summary>
-    internal static string BuildPromptForTest(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills)
-        => BuildPrompt(requirement, reusableSkills);
+    internal static string BuildPromptForTest(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills, bool allowDotnet = true)
+        => BuildPrompt(requirement, reusableSkills, allowDotnet);
 
     /// <summary>围栏字符（避免在源码里字面书写三重反引号）。</summary>
     private static string Fence() => new string((char)96, 3);

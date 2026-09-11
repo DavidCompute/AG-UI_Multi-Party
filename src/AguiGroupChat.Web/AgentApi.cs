@@ -323,7 +323,8 @@ public static class AgentApi
             {
                 var plan = await AgentOrchestrator.GenerateAsync(
                     agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct,
-                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll()));
+                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll()),
+                    allowDotnet: auth.IsAdmin(user.UserId));
                 return Results.Ok(new
                 {
                     orchestrated = true,
@@ -397,7 +398,7 @@ public static class AgentApi
                 var sb = new StringBuilder();
                 var lastProgressAt = 0L;
                 await foreach (var delta in AgentOrchestrator.StreamTextAsync(agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct,
-                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll())))
+                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll()), allowDotnet: auth.IsAdmin(user.UserId)))
                 {
                     sb.Append(delta);
                     await SendAsync(new { type = "token", delta }, ct);
