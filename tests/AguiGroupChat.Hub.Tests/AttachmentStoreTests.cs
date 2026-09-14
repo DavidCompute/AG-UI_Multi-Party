@@ -4,9 +4,6 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
-using PdfSharp.Drawing;
-using PdfSharp.Fonts;
-using PdfSharp.Pdf;
 using Xunit;
 using WText = DocumentFormat.OpenXml.Wordprocessing.Text;
 using WRun = DocumentFormat.OpenXml.Wordprocessing.Run;
@@ -15,7 +12,7 @@ using SText = DocumentFormat.OpenXml.Spreadsheet.Text;
 namespace AguiGroupChat.Hub.Tests;
 
 /// <summary>
-/// 附件存储与办公文档文本提取测试：用 OpenXml / PDFsharp 现场生成 docx / xlsx / pdf，
+/// 附件存储与办公文档文本提取测试：用 OpenXml 现场生成 docx / xlsx / pptx，并手写一份最小 PDF，
 /// 验证分类（document）与 TryReadTextAsync 的文本提取链路。
 /// </summary>
 public sealed class AttachmentStoreTests : IDisposable
@@ -254,19 +251,43 @@ public sealed class AttachmentStoreTests : IDisposable
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// 手写一份最小 PDF 夹具（base-14 Helvetica，无需字体解析器）。
+    ///
+    /// <para>
+    /// <b>为什么不用 PDFsharp 现场渲染</b>：设置 <c>GlobalFontSettings</c> / 渲染文字会初始化 PDFsharp
+    /// 的<b>进程级</b>字体工厂，并<b>永久冻结</b>字体解析器插槽（PDFsharp 只允许设置一次）。
+    /// 而内置 PDF 技能（pdf_doc）必须安装自己的解析器才能嵌入中文字体 —— 同一进程里被抢先冻结后
+    /// 就再也装不上，实测会让整个 PdfDocSkillTests 连锁失败。附件存储用例只关心“从 PDF 里能提取出文本”，
+    /// 手写夹具更确定、也把这份全局状态留给真正需要它的用例。
+    /// </para>
+    /// </summary>
     private static byte[] CreatePdf()
     {
-        GlobalFontSettings.UseWindowsFontsUnderWindows = true; // PDFsharp 6 跨平台默认无字体解析器，Windows 下启用系统字体
-        using var ms = new MemoryStream();
-        using (var doc = new PdfDocument())
+        const string content = "BT /F1 14 Tf 72 742 Td (AGUI PDF Attachment Test 2026) Tj ET\n";
+        var bodies = new List<string>
         {
-            var page = doc.AddPage();
-            using (var gfx = XGraphics.FromPdfPage(page))
-            {
-                gfx.DrawString("AGUI PDF Attachment Test 2026", new XFont("Arial", 14), XBrushes.Black, new XPoint(72, 100));
-            }
-            doc.Save(ms);
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                + "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+            $"<< /Length {Encoding.ASCII.GetByteCount(content)} >>\nstream\n{content}endstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        };
+
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.4\n");
+        var offsets = new List<int>();
+        for (var i = 0; i < bodies.Count; i++)
+        {
+            offsets.Add(Encoding.ASCII.GetByteCount(sb.ToString()));
+            sb.Append(i + 1).Append(" 0 obj\n").Append(bodies[i]).Append("\nendobj\n");
         }
-        return ms.ToArray();
+        var xrefPos = Encoding.ASCII.GetByteCount(sb.ToString());
+        sb.Append("xref\n0 ").Append(bodies.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (var off in offsets) sb.Append(off.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size ").Append(bodies.Count + 1).Append(" /Root 1 0 R >>\n")
+          .Append("startxref\n").Append(xrefPos).Append("\n%%EOF\n");
+        return Encoding.ASCII.GetBytes(sb.ToString());
     }
 }

@@ -31,7 +31,9 @@ public sealed class PptxDeckSkillTests
 
     private static DotnetSkillHost NewHost()
         => new(NullLogger<DotnetSkillHost>.Instance,
-            Path.Combine(Path.GetTempPath(), "agui-pptx-" + Guid.NewGuid().ToString("N")));
+            // NuGet 缓存根必须<b>全进程共用一个</b>：若按用例新建（GUID 目录），每个用例都会把
+            // DocumentFormat.OpenXml / ImageSharp 等依赖全量重下一次 —— 实测跑久了会吃掉上百 GB 磁盘。
+            Path.Combine(Path.GetTempPath(), "agui-pptx-skill-nuget-cache"));
 
     private static string TempDir()
     {
