@@ -1,8 +1,31 @@
-# AG-UI 群聊桌面版 1.0.123 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.123 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.124 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.124 Release Notes (current Windows desktop release)
 
-**版本说明**：1.0.123 为当前 Windows 桌面版本。在 1.0.122 基础上：**用户分组（按组细粒度授权）正式进入桌面安装包**，并修复了一轮严格代码审核发现的问题（弹窗层级导致操作卡死、用户分组创建时间持久化丢失、技能目标准入判定顺序、单聊复用路径绕过准入、白名单 id 无校验）。Web 与桌面共用同一套 Hub/网关/前端。
-**Version note**: 1.0.123 is the current Windows desktop release. On top of 1.0.122 it brings **user groups (group-based fine-grained authorization) into the desktop installer** and fixes a round of issues found in a strict code review (a stacking bug that hung dialogs, loss of a group's creation timestamp across restarts, the skill-target access check ordering, the direct-chat reuse path bypassing admission, and unvalidated allowlist ids). Web and desktop share the same Hub / gateway / frontend.
+**版本说明**：1.0.124 为当前 Windows 桌面版本。在 1.0.123 基础上新增**内置 PowerPoint 生成技能**，并让**一键编排 / 组织架构构建师自动适配**它；同时修正了交付物判定的优先级错误。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.124 is the current Windows desktop release. On top of 1.0.123 it adds a **built-in PowerPoint generation skill** and makes **one-click orchestration / the org architect adapt to it automatically**, plus a fix to the deliverable-detection precedence. Web and desktop share the same Hub / gateway / frontend.
+
+## 内置 PPT 生成 + 编排适配（1.0.124 核心）
+# Built-in PPT generation + orchestration adaptation (1.0.124 headline)
+
+中文：
+- **内置 `pptx_deck` 演示文稿技能（开箱即用）**：与内置 Word 技能同一条 Roslyn 链路，**纯 .NET（DocumentFormat.OpenXml）**，不依赖 Node / Python / 外部解释器。按页型组织——封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 引言 / 图片 / 图表 / 小结 / 结束页，任意页可带演讲者备注；六套主题预设或自定义配色与字体、16:9 宽屏、除封面外每页页码徽标。图表（柱 / 折线 / 饼 / 环形）**渲成 PNG 再按图片嵌入**而非发 ChartPart（沿用内置 Word 技能的决策，避开 DrawingML 图表兼容性风险）。产物带 `produce_file` 标记 → 网关自动登记为附件，**前端可直接下载**。可由 `Agents:BuiltinPptxSkills` 关闭播种。
+- **编排自动适配内置产出技能**：编排提示词与「可复用技能」小节现在都点名——要 PPT / 演示文稿就**直接引用 `pptx_deck`**，要 Word 就引 `docx_report`/`docx_gongwen`/`docx_notice`，并明令**不要**为这些已有能力另造只能写字的 prompt 空壳；内置 `org_design` 技能的复用规则同步更新。预览侧 `DetectDeliveryGap` 在点名该格式时也会**直接给出内置技能名**，模型与用户都有可引用的对象。
+- **交付物判定改为「明确格式词优先、中文泛称靠后」（重要修正）**：此前先判中文泛称「表格」，于是「做份 PPT，含一张对比表格」被判成 **Excel 交付** —— 找不到 xlsx 技能后兜底**静默放弃**，用户拿不到文件。现明确格式词（pptx / xlsx / docx / pdf）优先，中文泛称（「文档」→ docx、「表格」→ xlsx）作兜底，且兜底内部仍保持「文档」优先，含糊表述（如「写份文档，里面含一张表格」）的判定与历史一致。
+- **治理旧代码**：新造交付技能与内置技能同 id 时视为重复（应改为直接引用），该规则原本只对 docx 表述，现同时覆盖 pptx。
+
+English:
+- **Built-in `pptx_deck` presentation skill (works out of the box)**: same Roslyn path and **pure .NET (DocumentFormat.OpenXml)** as the built-in Word skills — no Node, Python or external interpreter. Organised by slide type: cover, toc, section, content, two-column, table, KPI, quote, image, chart, summary and end, each optionally carrying speaker notes; six theme presets or explicit colors and fonts, 16:9 widescreen, a page badge on every page but the cover. Charts (bar / line / pie / doughnut) are **rendered to PNG and embedded as pictures** rather than emitted as ChartParts — the same call the Word skills make to avoid DrawingML chart compatibility risk. The output carries the `produce_file` marker, so the gateway registers it as an attachment that **downloads straight from the frontend**. Can be turned off with `Agents:BuiltinPptxSkills`.
+- **Orchestration adapts to the built-in producers**: both the orchestration prompt and its reusable-skills section now name them — for a deck, **reference `pptx_deck` directly**; for Word, `docx_report` / `docx_gongwen` / `docx_notice` — and explicitly forbid inventing text-only prompt shells for capabilities that already exist. The built-in `org_design` skill's reuse rules were updated to match, and the preview's `DetectDeliveryGap` **names the built-in skill** so both the model and the user have something concrete to reference.
+- **Deliverable detection now prefers explicit format words over generic Chinese nouns (important fix)**: it tested the loose noun “表格” first, so “make a PPT with a comparison table” was classified as an **Excel** deliverable — the fallback then found no spreadsheet skill and **gave up silently**, leaving the user with no file. Explicit format words (pptx / xlsx / docx / pdf) now win, with generic nouns (“文档” → docx, “表格” → xlsx) as the fallback; inside that fallback “文档” still comes first so ambiguous phrasing such as “write a document containing a table” resolves exactly as before.
+- **Old rule brought in line**: a newly invented delivery skill sharing an id with a built-in one is treated as a duplicate that should have been a direct reference; that rule previously only said docx, and now covers pptx too.
+
+---
+
+# AG-UI 群聊桌面版 1.0.123 发布说明
+# AG-UI Group Chat Desktop 1.0.123 Release Notes
+
+**版本说明**：1.0.123 为 Windows 桌面版本。在 1.0.122 基础上：**用户分组（按组细粒度授权）正式进入桌面安装包**，并修复了一轮严格代码审核发现的问题（弹窗层级导致操作卡死、用户分组创建时间持久化丢失、技能目标准入判定顺序、单聊复用路径绕过准入、白名单 id 无校验）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.123 is a Windows desktop release. On top of 1.0.122 it brings **user groups (group-based fine-grained authorization) into the desktop installer** and fixes a round of issues found in a strict code review (a stacking bug that hung dialogs, loss of a group's creation timestamp across restarts, the skill-target access check ordering, the direct-chat reuse path bypassing admission, and unvalidated allowlist ids). Web and desktop share the same Hub / gateway / frontend.
 
 ## 代码审核修复（1.0.123 核心）
 # Code-review fixes (1.0.123 headline)
