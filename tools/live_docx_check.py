@@ -77,7 +77,8 @@ before = call("GET", f"/ag-ui/group/{gid}/messages?count=50", token=token)[1]
 before = before.get("messages", before) if isinstance(before, dict) else before
 base_atts = {a.get("url") for m in (before or []) for a in (m.get("attachments") or []) if a.get("url")}
 
-QUESTION = "请写一份 300 字左右的“知聚”平台简介，并导出为 Word 文档。"
+QUESTION = os.environ.get("E2E_QUESTION", "请写一份 300 字左右的“知聚”平台简介，并导出为 Word 文档。")
+ATTACH = os.environ.get("E2E_ATTACH")  # 可选：先上传该文件并随消息附上
 
 # 后台自动批准：docx 技能是 dotnet，强制人工审批；没人批准就永远停在交互卡上，
 # 看起来像“没产出文件”，容易误判（实测踩到）。
@@ -126,7 +127,33 @@ uid = token_uid.get("userId") if isinstance(token_uid, dict) else None
 if uid:
     threading.Thread(target=_auto_approve_bg, args=(uid,), daemon=True).start()
 
-st, res = call("POST", "/ag-ui/group/message/send", {"groupId": gid, "content": QUESTION}, token=token)
+# 可选附件：与用户实际场景一致（上传后随消息携带）
+atts = []
+if ATTACH and os.path.exists(ATTACH):
+    boundary = "----aguiLive" + str(int(time.time()))
+    with open(ATTACH, "rb") as f:
+        content = f.read()
+    fname = os.path.basename(ATTACH)
+    body = b""
+    body += ("--" + boundary + "\r\n").encode()
+    body += (f'Content-Disposition: form-data; name="file"; filename="{fname}"\r\n').encode("utf-8")
+    body += b"Content-Type: text/markdown\r\n\r\n" + content
+    body += ("\r\n--" + boundary + "--\r\n").encode()
+    req = urllib.request.Request(BASE + "/ag-ui/upload", data=body, method="POST")
+    req.add_header("Content-Type", "multipart/form-data; boundary=" + boundary)
+    req.add_header("Authorization", "Bearer " + token)
+    up = json.loads(urllib.request.urlopen(req, timeout=180).read())
+    atts = up.get("attachments", [])
+    print(f"附件已上传：{[a.get('name') for a in atts]}")
+    # 本次自己上传的附件也不算交付产物（否则会把 MARKETING.md 当成产出）
+    for a in atts:
+        if a.get("url"):
+            base_atts.add(a["url"])
+
+payload = {"groupId": gid, "content": QUESTION}
+if atts:
+    payload["attachments"] = atts
+st, res = call("POST", "/ag-ui/group/message/send", payload, token=token)
 print(f"已发送（{st}）：{QUESTION}")
 
 for i in range(120):  # 最多 10 分钟

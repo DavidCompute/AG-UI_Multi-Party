@@ -26,9 +26,11 @@ public static class BuiltinDocxSkills
             "当用户要求「拟一份通知」「起草公文」「写个请示/批复」，或明确要求产出 .docx 公文时调用。" +
             "三号仿宋正文、黑体层次标题、22pt 小标宋大标题、固定行距 28pt、A4 公文页边距、页脚页码。" +
             "参数为 JSON：title(标题)、subtitle/author/date(可选)、outputPath(可选，.docx 落盘路径)、" +
-            "sections 数组，每项可以是 heading(小节标题,level 1-3) / paragraph(段落) / numbered(编号列表) / " +
-            "bullets(项目符号) / table({headers,rows}) / image({path,widthCm,caption,alt}) / " +
-            "chart({type:bar|line|pie,categories,series|values,title,caption}) / toc(目录) / pageBreak。" +
+            "sections 数组，每项是<b>单键对象：键名即块类型</b>（不要用 {type:'heading',text:'…'} 这种写法）：" +
+            "{\"heading\":\"一、小节\",\"level\":1} / {\"paragraph\":\"段落\"} / {\"numbered\":[\"其一\"]} / " +
+            "{\"bullets\":[\"要点一\"]} / {\"quote\":\"引用文字\"} / {\"table\":{\"headers\":[],\"rows\":[[]]}} / " +
+            "{\"image\":{\"path\":\"\",\"widthCm\":12,\"caption\":\"\"}} / " +
+            "{\"chart\":{\"type\":\"bar|line|pie\",\"categories\":[],\"series\":[],\"title\":\"\"}} / {\"toc\":true} / {\"pageBreak\":true}。" +
             "返回 JSON 含生成的 docx 文件路径，请据实告知用户文件位置，不要编造正文内容。"
         ),
         (
@@ -39,7 +41,10 @@ public static class BuiltinDocxSkills
             "当用户要求「写个通知」「出个公告」「说明一下并给我文档」，且不需要公文体例时调用。" +
             "微软雅黑标题与正文、不缩进、行距紧凑、无页码。" +
             "参数为 JSON：title、subtitle/author/date(可选)、outputPath(可选)、sections 数组，" +
-            "每项可为 heading / paragraph / bullets / numbered / quote(引用强调) / table / image / chart / toc / pageBreak。" +
+            "每项是<b>单键对象：键名即块类型</b>（不要用 {type:'heading',text:'…'}）：" +
+            "{\"heading\":\"一、小节\",\"level\":1} / {\"paragraph\":\"段落\"} / {\"bullets\":[\"要点\"]} / " +
+            "{\"numbered\":[\"其一\"]} / {\"quote\":\"引用\"} / {\"table\":{\"headers\":[],\"rows\":[[]]}} / " +
+            "{\"image\":{...}} / {\"chart\":{...}} / {\"toc\":true} / {\"pageBreak\":true}。" +
             "返回 JSON 含生成的 docx 文件路径。"
         ),
         (
@@ -50,8 +55,10 @@ public static class BuiltinDocxSkills
             "当用户要求「写份工作总结」「出个报告/方案」「把数据整理成报告」，或内容需要分章节、含表格或图表时调用。" +
             "黑体标题 + 宋体正文、首行缩进 2 字符、行距 20pt、页脚页码。" +
             "参数为 JSON：title、subtitle/author/date(可选)、outputPath(可选)、sections 数组，" +
-            "每项可为 heading(level 1-3) / paragraph / bullets / numbered / quote / table({headers,rows}) / " +
-            "image({path,widthCm,caption}) / chart({type:bar|line|pie,title,categories,series,values,caption}) / toc(目录) / pageBreak。" +
+            "每项是<b>单键对象：键名即块类型</b>（不要用 {type:'heading',text:'…'}）：" +
+            "{\"heading\":\"一、小节\",\"level\":1} / {\"paragraph\":\"段落\"} / {\"bullets\":[\"要点\"]} / " +
+            "{\"numbered\":[\"其一\"]} / {\"quote\":\"引用\"} / {\"table\":{\"headers\":[],\"rows\":[[]]}} / " +
+            "{\"image\":{...}} / {\"chart\":{...}} / {\"toc\":true} / {\"pageBreak\":true}。" +
             "返回 JSON 含生成的 docx 文件路径。"
         ),
     ];
@@ -82,7 +89,7 @@ public static class BuiltinDocxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文（改 generate.mjs 后重新生成）都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-10.2";
+    public const string Version = "2026-09-14.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

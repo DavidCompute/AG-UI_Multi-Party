@@ -270,6 +270,97 @@ internal static class AgentGatewayHelpers
         return skillId.Contains(ext, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// 文档生成技能的入参校验：正文为空时返回“怎么改”的提示（非 null = 拒绝执行），合格返回 null。
+    ///
+    /// <para>
+    /// 为什么在工具层拦：模型经常把正文写在聊天里、却只给工具传 title/subtitle，
+    /// 于是用户拿到的 Word 只有标题（实测多次）。在<b>真实执行那一刻</b>校验，
+    /// 无论走流式还是审批恢复路径都能拦住，并把可执行的纠正话术回给模型让它重试。
+    /// </para>
+    ///
+    /// 口径（宁放行勿误拦）：
+    /// - 入参不是 JSON（如 md_to_docx 直接吃 Markdown 正文）→ 不拦，交技能自己处理；
+    /// - JSON 里正文类字段（markdown/content/body/text）非空 → 放行；
+    /// - JSON 里 sections 是非空数组 → 放行；
+    /// - JSON 解析失败 → 不拦（让技能给出真实报错，避免我们掩盖问题）。
+    /// </summary>
+    internal static string? ValidateDocumentSkillInput(AgentSkillDefinition skill, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return RejectText(skill);
+        var t = query.Trim();
+        if (!t.StartsWith('{')) return null; // 非 JSON：可能是纯 Markdown 正文 / 平台占位，不拦
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(t);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+
+            // 1) 正文类字符串字段非空 → 放行
+            foreach (var key in new[] { "markdown", "content", "body", "text" })
+                if (root.TryGetProperty(key, out var v)
+                    && v.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(v.GetString()))
+                    return null;
+
+            // 2) sections 非空数组 → 还要看每项的<b>形状</b>对不对
+            if (root.TryGetProperty("sections", out var sec))
+            {
+                if (sec.ValueKind != System.Text.Json.JsonValueKind.Array) return RejectText(skill);
+                if (sec.GetArrayLength() == 0) return RejectText(skill);
+                // 实测踩到：模型用了“合理但错误”的 {type,text} 形状：
+                //   { "type": "heading", "text": "一、简介" }
+                // 本类技能的约定是<b>键名即类型</b>：{ "heading": "一、简介", "level": 1 }。
+                // 形状不对时技能一个块也不认识，结果就是“只有标题”的空壳文档。
+                if (!HasRecognizedSectionShape(sec)) return WrongShapeText(skill);
+                return null;
+            }
+
+            // 3) 既无正文也无 sections：只有 title 一类的“封面”调用 → 拦
+            return RejectText(skill);
+        }
+        catch
+        {
+            return null; // 解析失败：交技能报真实错误
+        }
+    }
+
+    /// <summary>拒绝执行时回给模型的可执行提示（要说清怎么改，否则模型只会重复同样调用）。</summary>
+    private static string RejectText(AgentSkillDefinition skill)
+        => $"（未生成文件：技能 {skill.SkillId} 的入参里没有正文，照此生成的文档将只有标题。"
+         + "请把你刚才写在回复里的正文内容，逐节填进 sections 数组——"
+         + "每项形如 {\"heading\":\"一、小节\",\"level\":1}、{\"paragraph\":\"正文段落\"}、{\"bullets\":[\"要点一\",\"要点二\"]}、"
+         + "{\"table\":{\"headers\":[\"列1\",\"列2\"],\"rows\":[[\"a\",\"b\"]]}}，然后重新调用本技能。）";
+
+    /// <summary>本类文档技能的可用内容块键（键名即类型）。</summary>
+    private static readonly string[] SectionKeys =
+        ["heading", "paragraph", "bullets", "numbered", "quote", "table", "image", "chart", "toc", "pageBreak"];
+
+    /// <summary>sections 里是否至少有一项用了约定的键名（而不是 {type,text} 一类自创形状）。</summary>
+    private static bool HasRecognizedSectionShape(System.Text.Json.JsonElement sections)
+    {
+        foreach (var item in sections.EnumerateArray())
+        {
+            if (item.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+            foreach (var key in SectionKeys)
+                if (item.TryGetProperty(key, out _)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>形状不对时回给模型的提示：直接给出正确与错误的对照，模型才能一次改对。</summary>
+    private static string WrongShapeText(AgentSkillDefinition skill)
+        => $"（未生成文件：技能 {skill.SkillId} 的 sections 形状不对，其中的块不会被识别，生成的文档会没有正文。"
+         + "本技能的约定是<b>键名即类型</b>，不要用 {\"type\":\"...\",\"text\":\"...\"} 这种写法。正确示例："
+         + "{\"sections\":["
+         + "{\"heading\":\"一、平台简介\",\"level\":1},"
+         + "{\"paragraph\":\"正文段落…\"},"
+         + "{\"bullets\":[\"要点一\",\"要点二\"]},"
+         + "{\"numbered\":[\"其一\",\"其二\"]},"
+         + "{\"quote\":\"引用/强调文字\"},"
+         + "{\"table\":{\"headers\":[\"列1\",\"列2\"],\"rows\":[[\"a\",\"b\"]]}}"
+         + "]}。请把正文按这个形状重写后重新调用本技能。）";
+
     /// <summary>从“上一步输出”（可能含解释性文字）中提取技能可用的纯净输入。</summary>
     internal static string? ExtractCleanValueForSkill(string? text)
     {

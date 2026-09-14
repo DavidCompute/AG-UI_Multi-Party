@@ -443,6 +443,12 @@ public sealed class AgentCatalog
                     continue;
                 }
                 var isClientSkill = skill.ExecutionLocation == AgentSkillExecutionLocation.Client;
+                // 文档生成技能（docx_* / md_to_docx …）：执行前先校验入参。
+                // 模型常把正文写在聊天里、却只给工具传 title/subtitle，于是用户拿到的 Word 只有标题。
+                // 在这里拦住并返回“怎么改”的提示，模型会在同一轮里补全重试 ——
+                // 关键在于它在<b>真实执行时</b>生效，所以流式路径与审批恢复路径都能拦住。
+                // 客户端执行技能不经服务端，跳过。
+                var needsDocInputCheck = !isClientSkill && AgentGatewayHelpers.IsDocumentGenerator(skill);
                 // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；批准恢复时 MSAGENT 会执行这个占位函数，
                 // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
                 var func = isClientSkill
@@ -452,7 +458,18 @@ public sealed class AgentCatalog
                         ClientToolTrace.Write($"STUB-INVOKE tool={toolName} read={(v is null ? "NULL" : $"len={v.Length} first={v.Substring(0, Math.Min(60, v.Length))}")}");
                         return Task.FromResult(v ?? "客户端执行（本技能不在服务端运行，需前端执行并回传结果）");
                     }, toolName, desc)
-                    : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct), toolName, desc);
+                    : needsDocInputCheck
+                        ? AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) =>
+                        {
+                            // 入参不合格时不执行（不生成空壳文件），把可执行的纠正提示回给模型
+                            if (AgentGatewayHelpers.ValidateDocumentSkillInput(skill, query) is { } why)
+                            {
+                                _logger.LogWarning("文档技能入参校验未通过，已拒绝执行：skill={SkillId}", skill.SkillId);
+                                return Task.FromResult(why);
+                            }
+                            return runner.InvokeAsync(skill, query, ct);
+                        }, toolName, desc)
+                        : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct), toolName, desc);
                 // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
                 var needsApproval = skill.RequiresApproval || isClientSkill;
                 var wrapped = needsApproval ? new ApprovalRequiredAIFunction(func) : func;

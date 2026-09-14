@@ -1,4 +1,5 @@
 using AguiGroupChat.Agents;
+using AguiGroupChat.Agents.BuiltinSkills;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -449,5 +450,105 @@ public sealed class OrchestrationDeliveryLoopTests
         var (hasFile, blocks) = AgentGateway.ParseDeliveryResult("我已经完成了导出。");
         Assert.False(hasFile);
         Assert.Equal(0, blocks);
+    }
+
+    // ---------- 文档技能入参校验（拦住“只有标题”的空壳文档） ----------
+
+    private static AgentSkillDefinition DocxSkill() => new()
+    {
+        SkillId = "docx_notice", Name = "通知生成（Word）", Kind = AgentSkillKind.Dotnet,
+        Description = "生成通知类的 Word 文档", Body = "public class S { }",
+    };
+
+    [Fact]
+    public void DocInput_RejectedWhenOnlyTitleProvided()
+    {
+        // 实测踩到：模型把正文写在聊天里，只给工具传 title/subtitle，用户拿到的 Word 只有标题。
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), "{\"title\":\"知聚平台简介\",\"subtitle\":\"副标题\"}");
+        Assert.NotNull(why);
+        Assert.Contains("sections", why);
+        Assert.Contains("只有标题", why);
+    }
+
+    [Fact]
+    public void DocInput_RejectedWhenSectionsEmpty()
+    {
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), "{\"title\":\"T\",\"sections\":[]}");
+        Assert.NotNull(why);
+    }
+
+    [Fact]
+    public void DocInput_AcceptedWhenSectionsHaveContent()
+    {
+        var ok = AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(),
+            "{\"title\":\"T\",\"sections\":[{\"heading\":\"一、简介\"},{\"paragraph\":\"正文\"}]}");
+        Assert.Null(ok);
+    }
+
+    [Fact]
+    public void DocInput_AcceptedForMarkdownStylePayload()
+    {
+        // md_to_docx 这类吃 markdown 的技能：正文非空就放行
+        var ok = AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), "{\"markdown\":\"# 标题\\n正文\"}");
+        Assert.Null(ok);
+    }
+
+    [Fact]
+    public void DocInput_NotBlockedWhenInputIsPlainMarkdown()
+    {
+        // 非 JSON（直接吃 Markdown 正文）不拦：交给技能自己处理
+        Assert.Null(AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), "# 知聚平台简介\n\n正文内容"));
+    }
+
+    [Fact]
+    public void DocInput_NotBlockedWhenJsonIsMalformed()
+    {
+        // 解析不了就不拦：让技能报真实错误，不要掩盖问题
+        Assert.Null(AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), "{不是合法 JSON"));
+    }
+
+    [Fact]
+    public void DocInput_RejectedForTypeTextShapeInsteadOfKeyAsType()
+    {
+        // 实测踩到（真实入参）：模型用了 {type,text} 这种“合理但错误”的形状，
+        // 技能一个块都不识别 → 用户拿到的 Word 只有标题（2741 字节 / 3 段）。
+        var bad = "{\"title\":\"知聚平台简介\",\"sections\":["
+                + "{\"type\":\"quote\",\"text\":\"一句话定位…\"},"
+                + "{\"type\":\"heading\",\"level\":1,\"text\":\"一、平台简介\"},"
+                + "{\"type\":\"paragraph\",\"text\":\"知聚是…\"}]}";
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), bad);
+
+        Assert.NotNull(why);
+        Assert.Contains("键名即类型", why);
+        Assert.Contains("\"paragraph\"", why);  // 提示里要给出正确形状
+    }
+
+    [Fact]
+    public void DocInput_AcceptedForKeyAsTypeShape()
+    {
+        var good = "{\"title\":\"T\",\"sections\":["
+                 + "{\"heading\":\"一、简介\",\"level\":1},"
+                 + "{\"paragraph\":\"正文\"},"
+                 + "{\"bullets\":[\"要点\"]},"
+                 + "{\"table\":{\"headers\":[\"a\"],\"rows\":[[\"b\"]]}}]}";
+        Assert.Null(AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), good));
+    }
+
+    [Fact]
+    public void DocxSkillDescriptions_DocumentTheKeyAsTypeShape()
+    {
+        // 描述必须把形状写清楚，否则模型会自创 {type,text} 形状（实测）
+        foreach (var d in BuiltinDocxSkills.Definitions)
+        {
+            Assert.Contains("键名即块类型", d.Description);
+            Assert.Contains("type:'heading'", d.Description);
+            Assert.Contains("\"paragraph\"", d.Description);
+        }
+    }
+
+    [Fact]
+    public void DocInput_RejectedWhenQueryIsEmpty()
+    {
+        Assert.NotNull(AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), null));
     }
 }
