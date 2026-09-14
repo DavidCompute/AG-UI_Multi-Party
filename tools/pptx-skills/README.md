@@ -107,13 +107,31 @@ node tools/pptx-skills/sync-builtin.mjs
 
 1. 覆盖 12 种页型的 11 页演示稿能产出，且 `produce_file` 标记与页数正确；
 2. zip 结构完整（`[Content_Types].xml` / `presentation.xml` / 母版 / 版式 / 每页 `slideN.xml`）；
-3. **通过 OpenXML 官方 schema 校验**（`OpenXmlValidator`，错误为 0 —— 保证 PowerPoint 能正常打开）；
-4. `themeColors` / `fontTitle` 覆盖确实写进了 XML；
-5. `slides` 为空时报可读错误；演讲者备注写进 `notesSlides`。
+3. **通过 OpenXML 官方 schema 校验**（`OpenXmlValidator`，错误为 0）；
+4. **OPC 跨部件必备关系齐备**（`Package_HasAllRequiredCrossPartRelationships`：母版有主题、版式回指母版、有备注页就有备注母版并由 presentation 关联、备注页回指幻灯片）——见下方“为什么单靠 schema 校验不够”；
+5. `themeColors` / `fontTitle` 覆盖确实写进了 XML；
+6. `slides` 为空时报可读错误；演讲者备注写进 `notesSlides`。
 
 ```bash
+# 单测
 dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filter "FullyQualifiedName~PptxDeckSkillTests"
+# 独立结构检查（对照 OOXML 必备部件规则，不依赖 .NET）
+python tools/verify_office_package.py 某个.pptx
 ```
+
+### 为什么单靠 schema 校验不够（重要）
+
+`OpenXmlValidator` 只校验**单个部件内部的 schema**，**不校验跨部件的必备关系**。而 PowerPoint 报“需要修复”
+最常见的原因恰恰是**包结构缺部件/缺关系**，校验器一条都不报。实测踩到：
+
+- 幻灯片母版**没有关联主题部件**（theme）：`p:sldMaster` 必须拥有主题（颜色/字体由它提供）；
+- 有 `notesSlide` **却没有 `notesMaster`**：规范要求备注页关联备注母版，且 `presentation.xml` 要有
+  `notesMasterIdLst`；
+- 版式**没有回指母版**的关系。
+
+这三处当时都被 `OpenXmlValidator` 放行，但**每一份产物**用 PowerPoint 打开都会提示修复。
+修复后可用 `tools/verify_office_package.py` 独立复核（它按 OOXML 规则查必备部件与关系）。
+教训：**写 OOXML 生成器时，除了 schema 校验，一定要单独验证包的部件与关系完整性。**
 
 ## 平台约束（写这类技能必读）
 
@@ -124,6 +142,9 @@ dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filte
   `(x, y, w, h, startAngle, sweepAngle, rotationAngle)`；`EllipsePolygon` 用 `(PointF, float)` 最稳。
 - 平台预置 `using` 不含 `System.IO`，需自行 `using`（本文件已含）。
 - 换行统一 `\n`；正文由同步脚本统一处理。
+- **包结构三件套别忘了**（详见上方“为什么单靠 schema 校验不够”）：① 幻灯片母版挂主题；
+  ② 有备注页必须有备注母版并由 `presentation.xml` 关联；③ 版式回指母版。缺任一项，OpenXML 校验器不报错，
+  但 PowerPoint 会判“需要修复”。
 
 ## 已知边界
 

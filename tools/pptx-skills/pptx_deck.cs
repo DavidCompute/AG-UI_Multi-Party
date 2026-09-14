@@ -62,6 +62,7 @@ using System.Text;
 using System.Text.Json;
 // 命名空间别名：避免与 OpenXML 类型重名（Color / PointF 等）
 using P = DocumentFormat.OpenXml.Presentation;
+using A = DocumentFormat.OpenXml.Drawing;
 using ImgColor = SixLabors.ImageSharp.Color;
 using ImgPointF = SixLabors.ImageSharp.PointF;
 using ImgRect = SixLabors.ImageSharp.Drawing.RectangularPolygon;
@@ -218,12 +219,27 @@ public class Skill
         {
             var presPart = doc.AddPresentationPart();
 
-            // 母版 + 版式（PPTX 的必备骨架：没有它 PowerPoint 打不开）
+            // 母版 + 版式 + 主题（PPTX 的必备骨架：没有它们 PowerPoint 会判“需要修复”）
             var masterPart = presPart.AddNewPart<SlideMasterPart>();
             var layoutPart = masterPart.AddNewPart<SlideLayoutPart>();
             layoutPart.SlideLayout = new P.SlideLayout(LayoutXml());
+            // 版式必须回指其母版（ECMA-376：slideLayout 需关联 slideMaster），缺了会被判结构不完整
+            layoutPart.AddPart(masterPart);
             masterPart.SlideMaster = new P.SlideMaster(MasterXml(masterPart.GetIdOfPart(layoutPart)));
+            // 母版必须挂一份主题：主题颜色/字体由它提供，没有主题的 sldMaster 是不合法的
+            AttachTheme(masterPart, theme);
             layoutPart.SlideLayout.Save();
+
+            // 备注母版：只要有任一页带备注（notesSlide）就<b>必须</b>有它，并由 presentation 与每张备注页分别关联。
+            // 实测踩到：只建 notesSlide 不建 notesMaster 时，OpenXML 校验器不报错，但 PowerPoint 打开时会要求修复。
+            NotesMasterPart? notesMasterPart = null;
+            if (slides.Any(s => !string.IsNullOrWhiteSpace(Str(s, "notes"))))
+            {
+                notesMasterPart = presPart.AddNewPart<NotesMasterPart>();
+                notesMasterPart.NotesMaster = new P.NotesMaster(NotesMasterXml());
+                AttachTheme(notesMasterPart, theme);
+                notesMasterPart.NotesMaster.Save();
+            }
 
             var ids = new List<string>();
             for (var i = 0; i < slides.Count; i++)
@@ -235,14 +251,15 @@ public class Skill
                 var xml = RenderSlide(el, ctx);
                 sp.Slide = new P.Slide(xml);
                 var notes = Str(el, "notes");
-                if (!string.IsNullOrWhiteSpace(notes)) AttachNotes(sp, notes!);
+                if (!string.IsNullOrWhiteSpace(notes)) AttachNotes(sp, notes!, notesMasterPart);
                 sp.Slide.Save();
                 ids.Add(presPart.GetIdOfPart(sp));
             }
             count = ids.Count;
 
             presPart.Presentation = new P.Presentation(
-                PresentationXml(presPart.GetIdOfPart(masterPart), ids));
+                PresentationXml(presPart.GetIdOfPart(masterPart), ids,
+                    notesMasterPart is null ? null : presPart.GetIdOfPart(notesMasterPart)));
             presPart.Presentation.Save();
         }
 
@@ -833,9 +850,21 @@ public class Skill
     }
 
     // ===== 演讲者备注 =====
-    private static void AttachNotes(SlidePart slide, string text)
+    /// <summary>
+    /// 给一页挂上备注。
+    ///
+    /// <para>
+    /// <b>必须同时关联备注母版</b>：notesSlide 是一个独立部件，规范上需关联 notesMaster，
+    /// 且 presentation 里要有 notesMasterIdLst。只建 notesSlide 不建 notesMaster 时，
+    /// OpenXML 校验器不报错，但 PowerPoint 打开会弹出“需要修复”（实测踩到）。
+    /// </para>
+    /// </summary>
+    private static void AttachNotes(SlidePart slide, string text, NotesMasterPart? notesMaster)
     {
         var notesPart = slide.AddNewPart<NotesSlidePart>();
+        if (notesMaster is not null) notesPart.AddPart(notesMaster);
+        // 备注页回指它所属的幻灯片（PowerPoint / python-pptx 产物均有此关系，保持一致）
+        notesPart.AddPart(slide);
         var xml = new StringBuilder();
         xml.Append("<p:notes xmlns:a=\"").Append(NS_A).Append("\" xmlns:r=\"").Append(NS_R)
            .Append("\" xmlns:p=\"").Append(NS_P).Append("\">")
@@ -950,7 +979,101 @@ public class Skill
              + "</a:rPr><a:t>" + Xml(text) + "</a:t></a:r>";
     }
 
-    // ===== 包骨架（母版 / 版式 / 演示文稿）=====
+    // ===== 包骨架（母版 / 版式 / 主题 / 备注母版 / 演示文稿）=====
+
+    /// <summary>给母版（幻灯片母版 / 备注母版）挂一份主题部件：主题颜色与字体由它提供，母版必须有关联主题。</summary>
+    private static void AttachTheme(OpenXmlPartContainer holder, Theme t)
+    {
+        var themePart = holder.AddNewPart<ThemePart>();
+        themePart.Theme = new A.Theme(ThemeXml(t));
+        themePart.Theme.Save();
+    }
+
+    /// <summary>
+    /// 主题 XML（clrScheme / fontScheme / fmtScheme）。
+    /// <para>
+    /// 三个子方案都是 schema 要求的，且 fmtScheme 下的 fillStyleLst / lnStyleLst / effectStyleLst /
+    /// bgFillStyleLst <b>各需至少 3 项</b>，否则会被校验器（与 PowerPoint）判为非法。
+    /// </para>
+    /// </summary>
+    private static string ThemeXml(Theme t)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<a:theme xmlns:a=\"").Append(NS_A).Append("\" name=\"知聚主题\">")
+          .Append("<a:themeElements>")
+          .Append("<a:clrScheme name=\"知聚配色\">")
+          .Append("<a:dk1><a:sysClr val=\"windowText\" lastClr=\"000000\"/></a:dk1>")
+          .Append("<a:lt1><a:sysClr val=\"window\" lastClr=\"FFFFFF\"/></a:lt1>")
+          .Append("<a:dk2>").Append(Srgb(t.Text)).Append("</a:dk2>")
+          .Append("<a:lt2>").Append(Srgb(t.Light)).Append("</a:lt2>")
+          .Append("<a:accent1>").Append(Srgb(t.Primary)).Append("</a:accent1>")
+          .Append("<a:accent2>").Append(Srgb(t.Secondary)).Append("</a:accent2>")
+          .Append("<a:accent3>").Append(Srgb(t.Accent)).Append("</a:accent3>")
+          .Append("<a:accent4>").Append(Srgb(t.Light)).Append("</a:accent4>")
+          .Append("<a:accent5>").Append(Srgb(t.Secondary)).Append("</a:accent5>")
+          .Append("<a:accent6>").Append(Srgb(t.Primary)).Append("</a:accent6>")
+          .Append("<a:hlink>").Append(Srgb("0563C1")).Append("</a:hlink>")
+          .Append("<a:folHlink>").Append(Srgb("954F72")).Append("</a:folHlink>")
+          .Append("</a:clrScheme>")
+          .Append("<a:fontScheme name=\"知聚字体\">")
+          .Append("<a:majorFont><a:latin typeface=\"").Append(Xml(t.FontTitle)).Append("\"/>")
+          .Append("<a:ea typeface=\"").Append(Xml(t.FontTitle)).Append("\"/><a:cs typeface=\"\"/></a:majorFont>")
+          .Append("<a:minorFont><a:latin typeface=\"").Append(Xml(t.FontBody)).Append("\"/>")
+          .Append("<a:ea typeface=\"").Append(Xml(t.FontBody)).Append("\"/><a:cs typeface=\"\"/></a:minorFont>")
+          .Append("</a:fontScheme>")
+          .Append("<a:fmtScheme name=\"知聚样式\">")
+          .Append("<a:fillStyleLst>")
+          .Append(SolidFill("FFFFFF")).Append(SolidFill(t.Light)).Append(SolidFill(t.Primary))
+          .Append("</a:fillStyleLst>")
+          .Append("<a:lnStyleLst>")
+          .Append(Line(t.Primary)).Append(Line(t.Secondary)).Append(Line(t.Accent))
+          .Append("</a:lnStyleLst>")
+          .Append("<a:effectStyleLst>")
+          .Append("<a:effectStyle><a:effectLst/></a:effectStyle>")
+          .Append("<a:effectStyle><a:effectLst/></a:effectStyle>")
+          .Append("<a:effectStyle><a:effectLst/></a:effectStyle>")
+          .Append("</a:effectStyleLst>")
+          .Append("<a:bgFillStyleLst>")
+          .Append(SolidFill("FFFFFF")).Append(SolidFill(t.Light)).Append(SolidFill(t.Primary))
+          .Append("</a:bgFillStyleLst>")
+          .Append("</a:fmtScheme>")
+          .Append("</a:themeElements>")
+          .Append("<a:objectDefaults/><a:extraClrSchemeLst/>")
+          .Append("</a:theme>");
+        return sb.ToString();
+    }
+
+    private static string Srgb(string hex) => "<a:srgbClr val=\"" + Xml(hex) + "\"/>";
+
+    private static string SolidFill(string hex)
+        => "<a:solidFill>" + Srgb(hex) + "</a:solidFill>";
+
+    private static string Line(string hex)
+        => "<a:ln w=\"6350\" cap=\"flat\" cmpd=\"sng\" algn=\"ctr\">" + SolidFill(hex) + "<a:prstDash val=\"solid\"/></a:ln>";
+
+    /// <summary>
+    /// 备注母版 XML：提供备注页使用的占位符（主体文字），与 notesSlide 里 type="body" idx="1" 对应。
+    /// </summary>
+    private static string NotesMasterXml()
+    {
+        var sb = new StringBuilder();
+        sb.Append("<p:notesMaster xmlns:a=\"").Append(NS_A).Append("\" xmlns:r=\"").Append(NS_R)
+          .Append("\" xmlns:p=\"").Append(NS_P).Append("\">")
+          .Append("<p:cSld><p:bg><p:bgPr>").Append(SolidFill("FFFFFF"))
+          .Append("<a:effectLst/></p:bgPr></p:bg>")
+          .Append("<p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>")
+          // 备注文字占位符（与 notesSlide 的 ph type=body idx=1 对应）
+          .Append("<p:sp><p:nvSpPr><p:cNvPr id=\"2\" name=\"Notes Placeholder\"/>")
+          .Append("<p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>")
+          .Append("<p:nvPr><p:ph type=\"body\" idx=\"1\"/></p:nvPr></p:nvSpPr><p:spPr/>")
+          .Append("<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>")
+          .Append("</p:spTree></p:cSld>")
+          .Append("<p:clrMap bg1=\"lt1\" tx1=\"dk1\" bg2=\"lt2\" tx2=\"dk2\" accent1=\"accent1\" accent2=\"accent2\" ")
+          .Append("accent3=\"accent3\" accent4=\"accent4\" accent5=\"accent5\" accent6=\"accent6\" hlink=\"hlink\" folHlink=\"folHlink\"/>")
+          .Append("<p:notesStyle/>")
+          .Append("</p:notesMaster>");
+        return sb.ToString();
+    }
     private static string MasterXml(string layoutRelId)
     {
         var sb = new StringBuilder();
@@ -978,13 +1101,16 @@ public class Skill
         return sb.ToString();
     }
 
-    private static string PresentationXml(string masterRelId, List<string> slideRelIds)
+    private static string PresentationXml(string masterRelId, List<string> slideRelIds, string? notesMasterRelId)
     {
         var sb = new StringBuilder();
         sb.Append("<p:presentation xmlns:a=\"").Append(NS_A).Append("\" xmlns:r=\"").Append(NS_R)
           .Append("\" xmlns:p=\"").Append(NS_P).Append("\">")
-          .Append("<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"").Append(masterRelId).Append("\"/></p:sldMasterIdLst>")
-          .Append("<p:sldIdLst>");
+          .Append("<p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"").Append(masterRelId).Append("\"/></p:sldMasterIdLst>");
+        // 元素顺序是 schema 固定的：sldMasterIdLst → notesMasterIdLst → sldIdLst → sldSz → notesSz
+        if (!string.IsNullOrWhiteSpace(notesMasterRelId))
+            sb.Append("<p:notesMasterIdLst><p:notesMasterId r:id=\"").Append(notesMasterRelId).Append("\"/></p:notesMasterIdLst>");
+        sb.Append("<p:sldIdLst>");
         var id = 256;
         foreach (var rid in slideRelIds)
             sb.Append("<p:sldId id=\"").Append(id++).Append("\" r:id=\"").Append(rid).Append("\"/>");

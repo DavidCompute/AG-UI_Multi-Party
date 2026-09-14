@@ -221,4 +221,61 @@ public sealed class PptxDeckSkillTests
         }
         finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
     }
+
+    /// <summary>
+    /// OPC 包的<b>跨部件必备关系</b>必须齐备——这是 PowerPoint 判「需要修复」的典型来源，
+    /// 而 OpenXmlValidator 只校验单部件 schema，<b>完全盖不到</b>（实测踩到：
+    /// 只建 notesSlide 不建 notesMaster、母版不挂主题时，校验器 0 错误，PowerPoint 仍要求修复）。
+    /// </summary>
+    [Fact]
+    public void Package_HasAllRequiredCrossPartRelationships()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "结构完整性",
+                slides = new object[]
+                {
+                    new { type = "cover", title = "封面", notes = "备注一" },
+                    new { type = "content", title = "要点", bullets = new[] { "甲" }, notes = "备注二" },
+                    new { type = "end", title = "谢谢" },
+                },
+            });
+            var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            using var parsed = JsonDocument.Parse(result);
+            Assert.True(parsed.RootElement.GetProperty("ok").GetBoolean(), result);
+            var path = parsed.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            using var pres = PresentationDocument.Open(path, false);
+            var presPart = pres.PresentationPart!;
+
+            // 1) 幻灯片母版必须挂主题（主题提供颜色与字体，无主题的 sldMaster 不合法）
+            var master = presPart.SlideMasterParts.First();
+            Assert.NotNull(master.ThemePart);
+
+            // 2) 版式必须回指其母版
+            var layout = master.SlideLayoutParts.First();
+            Assert.NotNull(layout.SlideMasterPart);
+
+            // 3) 有备注页 → 必须有备注母版，且由 presentation 与每个备注页分别关联
+            var slides = presPart.SlideParts.ToList();
+            var notesSlides = slides.Select(s => s.NotesSlidePart).Where(n => n is not null).ToList();
+            Assert.NotEmpty(notesSlides);
+            Assert.NotNull(presPart.NotesMasterPart);
+            Assert.NotNull(presPart.NotesMasterPart!.ThemePart);
+            foreach (var n in notesSlides)
+            {
+                Assert.NotNull(n!.NotesMasterPart);
+                // 备注页回指它所属的幻灯片
+                Assert.NotNull(n.SlidePart);
+            }
+
+            // 4) presentation.xml 里要有 notesMasterIdLst（仅建部件不够）
+            Assert.Single(pres.PresentationPart!.Presentation.NotesMasterIdList!.ChildElements);
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
 }
