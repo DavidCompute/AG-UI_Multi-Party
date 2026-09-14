@@ -33,10 +33,15 @@ EXPOSE 8080
 #   dotnet:aspnet 运行镜像默认<b>不含任何系统字体</b>，而 docx 内置技能的图表/文本渲染依赖字体
 #   （ImageSharp 取系统字体；缺字体会直接报“未发现可用字体”）。
 #   fonts-dejavu-core 提供基础拉丁字形；fonts-noto-cjk 提供中文（图表中文标签必需）。
+#   fonts-droid-fallback 供内置 PDF 技能（pdf_doc）使用：PDF 必须把字体嵌进文件，
+#   而 PDFsharp 只对 glyf(TrueType 轮廓)字体做子集化 —— fonts-noto-cjk 是 CFF/OTTO，
+#   整份字体塞进 PDF 会让一页中文文档变成 13MB+；DroidSansFallbackFull.ttf 是 glyf，
+#   实测同样一页只 46KB。它是 Apache-2.0，无授权顾虑（见 tools/pdf-skills/README.md）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         fonts-dejavu-core \
         fonts-noto-cjk \
+        fonts-droid-fallback \
     && rm -rf /var/lib/apt/lists/*
 
 # 官方镜像内置非 root 的 app 用户（APP_UID=1654，主组与其相同），显式切换并以该用户运行
