@@ -47,6 +47,38 @@ public sealed class DeliveryFallbackTests
     }
 
     [Theory]
+    [InlineData("做一份 PPT")]
+    [InlineData("帮我出一套演示文稿")]
+    [InlineData("做成幻灯片")]
+    [InlineData("导成 pptx 给我")]
+    public void DetectsPptDeliveryRequest(string text)
+    {
+        var want = Wanted(text);
+        Assert.NotNull(want);
+        Assert.Equal("pptx_", want!.Value.SkillPrefix);
+    }
+
+    [Theory]
+    [InlineData("做一份《知聚平台介绍》的 PPT，8 页：封面、目录、一张对比表格、柱状图、小结")]
+    [InlineData("生成一份演示文稿，里面要有一个表格")]
+    public void PptWithTableSlides_IsPptNotExcel(string text)
+    {
+        // 真实踩到：提到“表格”的 PPT 请求被判成 Excel 交付，于是去找 xlsx 技能、找不到就静默放弃，
+        // 用户什么也没拿到。PPT 里的“表格”是页内元素，不是要交付 Excel。
+        Assert.Equal("pptx_", Wanted(text)!.Value.SkillPrefix);
+    }
+
+    [Theory]
+    [InlineData("把数据整理成表格")]
+    [InlineData("给我个表")]
+    public void PlainTableRequest_IsStillExcel(string text)
+    {
+        // 反向保护：没有明确 ppt/word 信号时，“表格”仍应按 Excel 处理
+        var want = Wanted(text);
+        if (want is not null) Assert.Equal("xlsx_", want.Value.SkillPrefix);
+    }
+
+    [Theory]
     [InlineData("帮我看看这段代码有没有问题")]
     [InlineData("总结一下今天的会议")]
     [InlineData("")]

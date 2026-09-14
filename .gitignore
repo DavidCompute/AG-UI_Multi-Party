@@ -32,3 +32,4 @@ node_modules/
 src/AguiGroupChat.Desktop/models/
 *.gguf
 tools/.live.log
+tools/.pptxverify.log

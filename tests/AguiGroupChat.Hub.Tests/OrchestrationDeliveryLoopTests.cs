@@ -551,4 +551,72 @@ public sealed class OrchestrationDeliveryLoopTests
     {
         Assert.NotNull(AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(), null));
     }
+
+    // ---------- pptx 技能：正文在 slides（type 区分页型），与 docx 的 sections 不同口径 ----------
+
+    private static AgentSkillDefinition PptxSkill() => new()
+    {
+        SkillId = "pptx_deck", Name = "演示文稿生成（PPT）", Kind = AgentSkillKind.Dotnet,
+        Description = "生成 PowerPoint 演示文稿（.pptx），含封面、目录、内容页等。", Body = "public class S { }",
+    };
+
+    [Fact]
+    public void Pptx_IsRecognizedAsPresentationSkill()
+    {
+        Assert.True(AgentGatewayHelpers.IsPresentationSkill(PptxSkill()));
+        Assert.False(AgentGatewayHelpers.IsPresentationSkill(DocxSkill()));
+    }
+
+    [Fact]
+    public void Pptx_AcceptedWhenSlidesHaveTypes()
+    {
+        var ok = AgentGatewayHelpers.ValidateDocumentSkillInput(PptxSkill(),
+            "{\"title\":\"T\",\"slides\":[{\"type\":\"cover\",\"title\":\"封面\"},{\"type\":\"content\",\"title\":\"要点\",\"bullets\":[\"甲\"]}]}");
+        Assert.Null(ok);
+    }
+
+    [Fact]
+    public void Pptx_RejectedWhenSlidesMissing()
+    {
+        // 把 docx 的 sections 形状用在 pptx 上 → 该拦（否则产出空壳 PPT）
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(PptxSkill(),
+            "{\"title\":\"T\",\"sections\":[{\"heading\":\"一\"}]}");
+        Assert.NotNull(why);
+        Assert.Contains("slides", why);
+    }
+
+    [Fact]
+    public void Pptx_RejectedWhenSlidesEmpty()
+    {
+        Assert.NotNull(AgentGatewayHelpers.ValidateDocumentSkillInput(PptxSkill(), "{\"slides\":[]}"));
+    }
+
+    [Fact]
+    public void Pptx_RejectedWhenNoSlideHasType()
+    {
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(PptxSkill(),
+            "{\"slides\":[{\"title\":\"封面\"},{\"title\":\"正文\"}]}");
+        Assert.NotNull(why);
+        Assert.Contains("type", why);
+    }
+
+    [Fact]
+    public void Pptx_RejectedForDocxShapeSoTheTwoConventionsDoNotMix()
+    {
+        // 反向：docx 技能收到 slides 也要拦（防止模型把两套约定搞反）
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(DocxSkill(),
+            "{\"title\":\"T\",\"slides\":[{\"type\":\"content\"}]}");
+        Assert.NotNull(why);
+        Assert.Contains("sections", why);
+    }
+
+    [Fact]
+    public void ParseDeliveryResult_ReadsSlidesForPptx()
+    {
+        // pptx 技能报 slides（页数）；厚度判定要认得它，否则会被当成“0 内容”
+        var (hasFile, content) = AgentGateway.ParseDeliveryResult(
+            "{\"ok\":true,\"slides\":9,\"produce_file\":{\"path\":\"/x.pptx\"}}");
+        Assert.True(hasFile);
+        Assert.Equal(9, content);
+    }
 }

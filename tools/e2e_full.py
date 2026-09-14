@@ -129,7 +129,7 @@ async def step4_start(token):
     print(f"  单聊群：{gid}")
 
     # 注册触发规则（全量监听，确保一定触发）
-    call("POST", "/ag-ui/agent/register", {
+    call("POST", "/ag-ui/agents/register", {
         "agentId": builder["agentId"], "groupId": gid, "triggerMode": "AllMessages",
         "nickname": builder.get("nickname") or "", "override": True,
     }, token=token)
@@ -396,7 +396,7 @@ async def step8_ask_with_attachment(token):
     save_state(workGroupId=gid)
     print(f"  单聊群：{gid}")
 
-    call("POST", "/ag-ui/agent/register", {
+    call("POST", "/ag-ui/agents/register", {
         "agentId": agent_id, "groupId": gid, "triggerMode": "AllMessages",
         "nickname": load_state().get("targetNickname") or "", "override": True,
     }, token=token)

@@ -38,6 +38,17 @@ public sealed class AgentSkillCatalog
                 _builtinSkills.Add(d.SkillId);
             }
         }
+        // 内置「PPT 生成」技能（演示文稿）：同上，开箱即用
+        if (AguiGroupChat.Agents.BuiltinSkills.BuiltinPptxSkills.IsEnabled(options?.BuiltinPptxSkills))
+        {
+            foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinPptxSkills.Definitions)
+            {
+                if (!_skills.TryAdd(d.SkillId,
+                        AguiGroupChat.Agents.BuiltinSkills.BuiltinPptxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description)))
+                    continue;
+                _builtinSkills.Add(d.SkillId);
+            }
+        }
         if (_seeds.Count > 0)
             _logger.LogInformation("技能库播种 {Count} 条（来自 AgentOptions.Skills）", _seeds.Count);
     }
@@ -87,6 +98,12 @@ public sealed class AgentSkillCatalog
         {
             if (!_builtinSkills.Contains(d.SkillId)) continue;
             var def = AguiGroupChat.Agents.BuiltinSkills.BuiltinDocxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description);
+            freshBuiltins[d.SkillId] = def;
+        }
+        foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinPptxSkills.Definitions)
+        {
+            if (!_builtinSkills.Contains(d.SkillId)) continue;
+            var def = AguiGroupChat.Agents.BuiltinSkills.BuiltinPptxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description);
             freshBuiltins[d.SkillId] = def;
         }
         foreach (var s in skills)

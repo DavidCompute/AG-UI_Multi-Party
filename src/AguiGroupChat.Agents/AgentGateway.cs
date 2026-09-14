@@ -2410,15 +2410,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     }
 
                     var (hasFile, blocks) = DeliveryResult();
-                    if (hasFile && blocks >= MinDeliveryBlocks)
+                    // 阈值按交付物类型取：ppt 看页数，其它（docx/xlsx/pdf）看内容块数
+                    var minContent = want.Value.SkillPrefix.StartsWith("pptx", StringComparison.OrdinalIgnoreCase)
+                        ? MinDeliverySlides : MinDeliveryBlocks;
+                    if (hasFile && blocks >= minContent)
                     {
                         hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
                         return new DeliveryOutcome(messageId, false);
                     }
-                    // 有文件但只有封面（blocks 过小）：宁可留一份薄文件，也别让用户什么都没有
+                    // 有文件但内容过薄（如只有封面）：宁可留一份薄文件，也别让用户什么都没有
                     if (hasFile) keptFile = true;
-                    _logger.LogWarning("交付兑底未达标：agent={AgentId} hasFile={HasFile} blocks={Blocks}（阈值 {Min}）",
-                        candidate.AgentId, hasFile, blocks, MinDeliveryBlocks);
+                    _logger.LogWarning("交付兑底未达标：agent={AgentId} hasFile={HasFile} 内容量={Blocks}（阈值 {Min}）",
+                        candidate.AgentId, hasFile, blocks, minContent);
                 }
                 if (keptFile)
                 {
@@ -2612,19 +2615,31 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return ParseDeliveryResult(ToolResultCollector.Ambient.Value?.Text);
     }
 
-    /// <summary>测试钩子：从技能返回文本解析“是否有产物 / 内容块数”。</summary>
+    /// <summary>测试钩子：从技能返回文本解析“是否有产物 / 内容量”。</summary>
     internal static (bool HasFile, int Blocks) ParseDeliveryResult(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return (false, 0);
         var hasFile = text.Contains("produce_file", StringComparison.OrdinalIgnoreCase);
-        var max = 0;
-        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"""blocks""\s*:\s*(\d+)"))
-            if (int.TryParse(m.Groups[1].Value, out var v) && v > max) max = v;
+        // docx 类技能报 blocks（内容块数）；pptx 类报 slides（页数）。两者语义相同（内容量），
+        // 取最大值即“这份产物到底做了多少东西”。
+        var max = Math.Max(MaxJsonInt(text, "blocks"), MaxJsonInt(text, "slides"));
         return (hasFile, max);
     }
 
-    /// <summary>交付文档的最少内容块数：低于它视为“只有封面、没有正文”，会重试一次。</summary>
+    /// <summary>从文本里取某个数字字段的最大值（技能返回 JSON 可能有多个/多份）。</summary>
+    private static int MaxJsonInt(string text, string field)
+    {
+        var max = 0;
+        var pattern = "\"" + field + "\"\\s*:\\s*(\\d+)";
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, pattern))
+            if (int.TryParse(m.Groups[1].Value, out var v) && v > max) max = v;
+        return max;
+    }
+
+    /// <summary>交付文档的最少内容量：低于它视为“只有封面、没有正文”，会重试一次。
+    /// docx 按内容块数（低于 5 基本只有封面）；ppt 按页数（低于 3 撑不起一场演示）。</summary>
     private const int MinDeliveryBlocks = 5;
+    private const int MinDeliverySlides = 3;
 
     /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。</summary>
     internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent, bool retryNoToolCall = false)
@@ -2661,11 +2676,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var t = userText.ToLowerInvariant();
         bool Has(params string[] keys) => keys.Any(k => t.Contains(k, StringComparison.OrdinalIgnoreCase));
 
-        // 文档类：中英文都要认（用户常直接写 “word文档” / “docx”）
-        if (Has("word", "docx", "文档", "文稿", ".doc")) return ("docx_", "Word 文档");
-        if (Has("excel", "xlsx", "表格", "电子表")) return ("xlsx_", "Excel 表格");
-        if (Has("ppt", "pptx", "演示文稿", "幻灯片")) return ("pptx_", "演示文稿");
+        // ① 明确的格式词（含扩展名与英文名）优先：它们指向唯一的交付物类型。
+        //    pptx 必须排在“表格”之前 —— 一份 PPT 里的“表格”是<b>页内元素</b>，不是要交付 Excel。
+        //    实测踩到：一句“做份 PPT…含一张对比表格”被判成 Excel 交付，
+        //    于是去找 xlsx 技能、找不到就静默放弃，用户什么也没拿到。
+        if (Has("pptx", "powerpoint", "ppt", "幻灯片", "演示文稿")) return ("pptx_", "演示文稿");
+        if (Has("xlsx", "excel", "电子表格", "工作簿")) return ("xlsx_", "Excel 表格");
+        if (Has("docx", "word", ".doc", "文稿")) return ("docx_", "Word 文档");
         if (Has("pdf")) return ("pdf_", "PDF 文档");
+
+        // ② 中文泛称（容易与页内元素 / 普通名词混淆）放最后
+        if (Has("表格")) return ("xlsx_", "Excel 表格");
+        if (Has("文档")) return ("docx_", "Word 文档");
         return null;
     }
 

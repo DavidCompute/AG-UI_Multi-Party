@@ -296,6 +296,10 @@ internal static class AgentGatewayHelpers
             var root = doc.RootElement;
             if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
 
+            // 演示文稿技能：正文在 slides 里（每页靠 type 区分），与 docx 的 sections 不同口径
+            if (IsPresentationSkill(skill))
+                return ValidateSlidesInput(skill, root);
+
             // 1) 正文类字符串字段非空 → 放行
             foreach (var key in new[] { "markdown", "content", "body", "text" })
                 if (root.TryGetProperty(key, out var v)
@@ -323,6 +327,44 @@ internal static class AgentGatewayHelpers
         {
             return null; // 解析失败：交技能报真实错误
         }
+    }
+
+    /// <summary>是否是演示文稿（.pptx）生成技能：它的正文在 slides 里，校验口径与 docx 不同。</summary>
+    internal static bool IsPresentationSkill(AgentSkillDefinition skill)
+    {
+        var id = skill.SkillId ?? "";
+        if (id.StartsWith("pptx_", StringComparison.OrdinalIgnoreCase)) return true;
+        var text = (id + " " + (skill.Name ?? "") + " " + (skill.Description ?? "")).ToLowerInvariant();
+        return text.Contains("pptx", StringComparison.Ordinal) || text.Contains("演示文稿", StringComparison.Ordinal)
+            || text.Contains("幻灯片", StringComparison.Ordinal);
+    }
+
+    /// <summary>演示文稿技能的 slides 校验：必须是非空数组，且每页能认出 type。</summary>
+    private static string? ValidateSlidesInput(AgentSkillDefinition skill, System.Text.Json.JsonElement root)
+    {
+        if (!root.TryGetProperty("slides", out var slides)
+            || slides.ValueKind != System.Text.Json.JsonValueKind.Array
+            || slides.GetArrayLength() == 0)
+            return $"（未生成演示文稿：技能 {skill.SkillId} 的入参里没有 slides，一份没有页的 PPT 没有意义。"
+                 + "请把内容整理成 slides 数组，例如 "
+                 + "{\"slides\":[{\"type\":\"cover\",\"title\":\"标题\"},"
+                 + "{\"type\":\"content\",\"title\":\"要点\",\"bullets\":[\"要点一\",\"要点二\"]},"
+                 + "{\"type\":\"summary\",\"title\":\"小结\",\"bullets\":[\"…\"]}]}，然后重新调用本技能。）";
+
+        // 页型用的是 type 字段（与 docx 的“键名即类型”不同，这里显式要求 type）
+        var typed = 0;
+        foreach (var s in slides.EnumerateArray())
+        {
+            if (s.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+            if (s.TryGetProperty("type", out var ty)
+                && ty.ValueKind == System.Text.Json.JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(ty.GetString()))
+                typed++;
+        }
+        if (typed == 0)
+            return $"（未生成演示文稿：技能 {skill.SkillId} 的 slides 里没有一页带 type，无法判断页型。"
+                 + "请给每页加 type：cover / toc / section / content / twoCol / table / kpi / quote / image / chart / summary / end。）";
+        return null;
     }
 
     /// <summary>拒绝执行时回给模型的可执行提示（要说清怎么改，否则模型只会重复同样调用）。</summary>

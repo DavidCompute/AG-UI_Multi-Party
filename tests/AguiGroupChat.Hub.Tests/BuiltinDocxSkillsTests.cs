@@ -145,10 +145,13 @@ public sealed class BuiltinDocxSkillsTests
     public void CatalogAcceptsExternalAppend()
     {
         // 与既有技能共存：播种不应影响别的技能
+        // 注：不断言“总条数”这个绝对值——每新增一个内置技能它就会失效（实测踩到）。
+        // 断言“内置仍在 + 新加的也在 + 数量确实增加了”才是这条用例的本意。
         var c = NewCatalog();
+        var before = c.ListAll().Count;
         c.Upsert(new AgentSkillDefinition { SkillId = "skill_x", Name = "别的", Kind = AgentSkillKind.Prompt });
         Assert.NotNull(c.Get("skill_x"));
         Assert.NotNull(c.Get("docx_report"));
-        Assert.Equal(4, c.ListAll().Count);
+        Assert.Equal(before + 1, c.ListAll().Count);
     }
 }
