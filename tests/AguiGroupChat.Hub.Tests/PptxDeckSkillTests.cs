@@ -4,6 +4,7 @@ using AguiGroupChat.Agents.Tools;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
 using Microsoft.Extensions.Logging.Abstractions;
+using SixLabors.Fonts;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -277,5 +278,73 @@ public sealed class PptxDeckSkillTests
             Assert.Single(pres.PresentationPart!.Presentation.NotesMasterIdList!.ChildElements);
         }
         finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// 图表字体必须<b>真的含中文字形</b>。
+    ///
+    /// <para>
+    /// 真实踩到：图表字体原先只按“族名命中候选名单”就选定，而容器里前几位候选
+    /// （Microsoft YaHei / SimHei / SimSun / Arial）都不存在，第一个命中的是
+    /// <c>DejaVu Sans</c>（纯拉丁），于是图表的中文标题 / 分类标签 / 系列名全变缺字（乱码），
+    /// 英文坐标数字却正常。修复后改为“命中还要验字形覆盖”，本用例钉住这条不变式。
+    /// </para>
+    ///
+    /// 未装了中文字体的环境（精简容器）会没有中文字体可用，此时跳过而不是误报失败。
+    /// </summary>
+    [Fact]
+    public void ChartFont_MustHaveChineseGlyphs()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "图表字体",
+                slides = new object[]
+                {
+                    new
+                    {
+                        type = "chart", title = "图表字体", chartType = "bar",
+                        categories = new[] { "第一季度", "第二季度" },
+                        series = new object[] { new { name = "活跃团队", values = new[] { 10.0, 20.0 } } },
+                        yLabel = "团队数",
+                    },
+                },
+            });
+            var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+
+            // 技能会报出实际选中的图表字体
+            var font = doc.RootElement.GetProperty("chartFont").GetString();
+            var cjk = doc.RootElement.GetProperty("chartFontCjk").GetBoolean();
+            Assert.False(string.IsNullOrWhiteSpace(font));
+
+            var anyCjkFontInstalled = SystemFonts.Collection.Families.Any(CanRenderCjk);
+            if (!anyCjkFontInstalled)
+                return; // 环境里确实没有中文字体：不是本用例要考的问题
+            Assert.True(cjk,
+                $"环境里有含中文字形的字体，但图表选了「{font}」（无中文字形）——图表中文会缺字。");
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>与技能内同一口径的字形覆盖判定。</summary>
+    private static bool CanRenderCjk(SixLabors.Fonts.FontFamily family)
+    {
+        try
+        {
+            var font = family.CreateFont(16);
+            foreach (var ch in "知聚平台中数据报告")
+            {
+                if (!font.TryGetGlyphs(new SixLabors.Fonts.Unicode.CodePoint(ch), out var glyphs)
+                    || glyphs is null || glyphs.Count == 0)
+                    return false;
+            }
+            return true;
+        }
+        catch { return false; }
     }
 }

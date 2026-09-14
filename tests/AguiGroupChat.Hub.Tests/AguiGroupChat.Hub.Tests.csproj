@@ -11,6 +11,9 @@
     <PackageReference Include="AGUI.Abstractions" Version="0.0.5" />
     <!-- pptx 技能产物要做 OpenXML schema 校验（保证 PowerPoint 能打开），本测试项目需要该 SDK -->
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <!-- 技能内图表用 ImageSharp 渲染，其字体库为 SixLabors.Fonts；
+         本测试项目用它<b>独立</b>校验"图表选中的字体真的含中文字形"（不然只能信技能自报） -->
+    <PackageReference Include="SixLabors.Fonts" Version="1.0.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.1" />

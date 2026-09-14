@@ -33,3 +33,6 @@ src/AguiGroupChat.Desktop/models/
 *.gguf
 tools/.live.log
 tools/.pptxverify.log
+# Python 脚本运行产物（导入 tools/ 下的 .py 时会生成，勿入库）
+__pycache__/
+*.pyc

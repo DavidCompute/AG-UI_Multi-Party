@@ -145,6 +145,13 @@ python tools/verify_office_package.py 某个.pptx
 - **包结构三件套别忘了**（详见上方“为什么单靠 schema 校验不够”）：① 幻灯片母版挂主题；
   ② 有备注页必须有备注母版并由 `presentation.xml` 关联；③ 版式回指母版。缺任一项，OpenXML 校验器不报错，
   但 PowerPoint 会判“需要修复”。
+- **图表字体必须验字形覆盖，不能只按“族名命中”就选定**：图表是 ImageSharp 渲成的 PNG，字形缺失时
+  ImageSharp 会画出**空心方框（notdef）**——用户看到的就是“中文乱码”。实测踩到：候选名单前几位
+  （Microsoft YaHei / SimHei / SimSun / Arial）在 Linux 容器里都不存在，第一个命中的是 `DejaVu Sans`
+  （**纯拉丁**），于是图表的中文标题 / 分类标签 / 系列名全变空框，而英文坐标数字正常，很易误判为“渲染错乱”。
+  现在选中候选后会用 `Font.TryGetGlyphs` 逐个验常用汉字，只采用**真的含中文字形**的字体
+  （容器里会正确选到 `Noto Sans CJK SC`），并在返回 JSON 里报出 `chartFont` / `chartFontCjk` 便于排障。
+  **新增/调整字体名单时请保留字形验证**——否则在服务器上会静默回退到拉丁字体。
 
 ## 已知边界
 

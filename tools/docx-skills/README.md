@@ -307,6 +307,23 @@ fonts-noto-cjk      # 中文（图表中文标签必需）
 **不装会怎样**：图表报 `图表需要至少一种系统字体，但当前环境未发现可用字体`。
 （本机直接跑通常不会碰到 —— Windows/macOS 自带字体，只有精简容器会中招。）
 
+### ⚠️ 装了字体还不够：必须挑到“含中文字形”的那一款
+
+只有 `fonts-dejavu-core`（或任何一个纯拉丁字体）时，图表**不会报错**，而是把中文全部画成
+**空心方框（notdef）**——用户看到的就是“中文乱码/一串方框”，而英文坐标数字正常，极易误判为渲染错乱。
+
+实测踩到：图表字体原先只按“族名命中候选名单”就选定，容器里前几位候选
+（Microsoft YaHei / SimHei / SimSun / Arial）都不存在，第一个命中的是 `DejaVu Sans`（**纯拉丁**），
+于是中文标题 / 分类标签 / 系列名全变空框。
+
+现已在共享内核里改成：命中候选后还要用 `Font.TryGetGlyphs` 逐个验常用汉字，
+只采用**真的含中文字形**的字体；名单里也补上了 Linux/macOS 的常见中文字体族名
+（`Noto Sans CJK SC` / `Source Han Sans SC` / `WenQuanYi Micro Hei` / `Droid Sans Fallback` / `PingFang SC` 等）。
+容器里现在会正确选到 `Noto Sans CJK SC`。生成的文档会返回 `chartFont` / `chartFontCjk` 两个字段便于排障。
+
+（注意：`fonts-noto-cjk` 是 CFF/OTTO 字体。它对图表渲染没问题，问题只在“有没有被选中”。
+修改字体名单时请保留字形验证，否则在服务器上会静默回退到拉丁字体。）
+
 ### 技能依赖：NuGet 包
 
 技能声明三个 NuGet 包（钉住相容版本）：

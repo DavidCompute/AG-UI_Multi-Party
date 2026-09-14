@@ -95,7 +95,12 @@ public class Skill
             }
             catch { /* 标记失败不影响主返回 */ }
             return "{\"ok\":true,\"path\":" + Js(built.Path) + ",\"scene\":" + Js(SceneName)
-                + ",\"blocks\":" + built.Blocks + produce + ",\"message\":" + Js("已生成 Word 文档：" + built.Path) + "}";
+                + ",\"blocks\":" + built.Blocks + produce
+                // 图表字体报出来：若环境没有中文字体，图表中文会缺字（乱码），有地儿排障
+                + ",\"chartFont\":" + Js(ChartFontName) + ",\"chartFontCjk\":" + (ChartFontHasCjk ? "true" : "false")
+                + ",\"message\":" + Js("已生成 Word 文档：" + built.Path
+                    + (ChartFontHasCjk ? "" : "（提示：当前环境未找到含中文字形的字体，图表中文可能缺字/乱码；"
+                        + "可在容器里安装 fonts-noto-cjk / fonts-droid-fallback 后重启）")) + "}";
         }
         catch (Exception ex)
         {
@@ -464,29 +469,88 @@ public class Skill
         { "#4F81BD", "#C0504D", "#9BBB59", "#8064A2", "#4BACC6", "#F79646", "#2C4D75", "#772C2A" };
 
     private static readonly string[] FontCandidates =
-        { "Microsoft YaHei", "SimHei", "SimSun", "Arial", "DejaVu Sans" };
+    {
+        // 中文字体优先（Windows / macOS / Linux 各发行版的常见族名与中文名）
+        "Microsoft YaHei", "微软雅黑", "SimHei", "黑体", "SimSun", "宋体", "DengXian", "等线", "KaiTi", "楷体",
+        "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans SC", "Noto Sans CJK",
+        "Source Han Sans SC", "Source Han Sans CN", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+        "Droid Sans Fallback", "AR PL UMing CN", "AR PL UKai CN", "文泉驿微米黑",
+        "PingFang SC", "Hiragino Sans GB", "STHeiti", "Heiti SC",
+        // 纯拉丁字体（仅当上面都没命中时）：能出图，但中文会缺字
+        "Arial", "Helvetica", "Liberation Sans", "DejaVu Sans",
+    };
 
     private static readonly object _fontLock = new object();
     private static SixLabors.Fonts.FontFamily? _fontFamily;
+    private static string _fontName = "";
+    private static bool _fontCjk;
 
-    /// <summary>取一个可用的无衬线字体（含 CJK 覆盖）；找不到则抛出可读错误。</summary>
+    /// <summary>所选图表字体族名与是否含中文字形（供返回信息与排障用）。</summary>
+    internal static string ChartFontName => _fontName;
+    internal static bool ChartFontHasCjk => _fontCjk;
+
+    /// <summary>
+    /// 取一个可用的无衬线字体（优先含 CJK 覆盖）；找不到则抛出可读错误。
+    ///
+    /// <para>
+    /// <b>关键：不能只按“族名命中”就选定</b>。实测踩到——容器里（Linux）前几候选
+    /// （Microsoft YaHei / SimHei / SimSun / Arial）都不存在，名单里第一个存在的是
+    /// <c>DejaVu Sans</c>（纯拉丁字体），于是图表里的中文标题、分类标签、系列名全部缺字，
+    /// 表现为乱码/空白，而英文坐标数字正常。因此命中后必须验字形覆盖。
+    /// </para>
+    /// </summary>
     private static SixLabors.Fonts.Font Family(float size)
     {
         lock (_fontLock)
         {
-            if (_fontFamily is null)
-            {
-                foreach (var name in FontCandidates)
-                {
-                    if (SixLabors.Fonts.SystemFonts.TryGet(name, out var f)) { _fontFamily = f; break; }
-                }
-                if (_fontFamily is null && SixLabors.Fonts.SystemFonts.Collection.Families.Any())
-                    _fontFamily = SixLabors.Fonts.SystemFonts.Collection.Families.First();
-                if (_fontFamily is null)
-                    throw new InvalidOperationException("图表需要至少一种系统字体，但当前环境未发现可用字体。");
-            }
-            return _fontFamily.Value.CreateFont(size);
+            if (_fontFamily is null) PickFamily();
+            return _fontFamily!.Value.CreateFont(size);
         }
+    }
+
+    private static void PickFamily()
+    {
+        // 1) 候选名单里第一个真的含中文字形的
+        foreach (var name in FontCandidates)
+            if (SixLabors.Fonts.SystemFonts.TryGet(name, out var f) && CanRenderCjk(f))
+            {
+                _fontFamily = f; _fontName = name; _fontCjk = true; return;
+            }
+        // 2) 名单没命中，但系统里有中文字体（族名未知，如容器的 Noto Sans CJK SC）
+        foreach (var f in SixLabors.Fonts.SystemFonts.Collection.Families)
+            if (CanRenderCjk(f))
+            {
+                _fontFamily = f; _fontName = f.Name; _fontCjk = true; return;
+            }
+        // 3) 没有中文字体：退回第一个可用字体（能出图，中文会缺字）
+        foreach (var name in FontCandidates)
+            if (SixLabors.Fonts.SystemFonts.TryGet(name, out var f))
+            {
+                _fontFamily = f; _fontName = name; _fontCjk = false; return;
+            }
+        if (SixLabors.Fonts.SystemFonts.Collection.Families.Any())
+        {
+            var f = SixLabors.Fonts.SystemFonts.Collection.Families.First();
+            _fontFamily = f; _fontName = f.Name; _fontCjk = false; return;
+        }
+        throw new InvalidOperationException("图表需要至少一种系统字体，但当前环境未发现可用字体。");
+    }
+
+    /// <summary>该字体族是否真的含中文字形（取样常用汉字，避免“只有标点/符号”的假阳性）。</summary>
+    private static bool CanRenderCjk(SixLabors.Fonts.FontFamily family)
+    {
+        try
+        {
+            var font = family.CreateFont(16);
+            foreach (var ch in "知聚平台中数据报告")
+            {
+                if (!font.TryGetGlyphs(new SixLabors.Fonts.Unicode.CodePoint(ch), out var glyphs)
+                    || glyphs is null || glyphs.Count == 0)
+                    return false;
+            }
+            return true;
+        }
+        catch { return false; }
     }
 
     private static byte[] RenderBar(int w, int h, string? title, string? yLabel, List<string> cats, List<(string Name, double[] Values)> series)
