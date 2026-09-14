@@ -1,8 +1,44 @@
-# AG-UI 群聊桌面版 1.0.125 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.125 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.126 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.126 Release Notes (current Windows desktop release)
 
-**版本说明**：1.0.125 为当前 Windows 桌面版本。在 1.0.124 基础上新增**内置 Excel 生成技能**（`xlsx_book`）与**内置 PDF 生成技能**（`pdf_doc`），并把两者接入编排交付闭环；同时修正了 PDFsharp 字体解析器（进程级全局）被抢先占用导致内置 PDF 技能失效、以及测试间泄露该全局状态的问题。Web 与桌面共用同一套 Hub/网关/前端。
-**Version note**: 1.0.125 is the current Windows desktop release. On top of 1.0.124 it adds a **built-in Excel generation skill** (`xlsx_book`) and a **built-in PDF generation skill** (`pdf_doc`), wires both into the orchestration delivery loop, and fixes both the process-wide PDFsharp font-resolver conflict that could disable the built-in PDF skill and the test that leaked that global state. Web and desktop share the same Hub / gateway / frontend.
+**版本说明**：1.0.126 为当前 Windows 桌面版本。修复了一个严重缺陷：**内置 PPT 技能生成的 .pptx 会被 PowerPoint 判为“需要修复”才能打开**。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.126 is the current Windows desktop release. It fixes a serious defect: **the built-in PPT skill produced .pptx files that PowerPoint demanded to repair before opening**. Web and desktop share the same Hub / gateway / frontend.
+
+## 修复：PPT 产物需要“修复”才能打开（1.0.126 核心）
+# Fix: PPT output needed repairing before it opened (1.0.126 headline)
+
+中文：
+- **根因：OOXML 包缺了必备部件与关系**。生成的 .pptx 里：
+  1. **幻灯片母版没有关联主题部件**（`p:sldMaster` 必须拥有主题—— 颜色/字体由它提供）；
+  2. 只要有一页带演讲者备注，包里就会出现 `notesSlide`，**却没有对应的 `notesMaster`**，`presentation.xml` 也缺 `notesMasterIdLst`；
+  3. 版式（`slideLayout`）没有回指其母版的关系。
+  这三处都会让 PowerPoint 弹“需要修复”。修复方式：生成时补上主题部件（含完整的 `clrScheme` / `fontScheme` / `fmtScheme`，且 fmtScheme 四个子列表各至少 3 项）、按需创建备注母版并由 presentation 与每个备注页分别关联、版式回指母版；另补齐备注页回指幻灯片的反关系。
+- **为什么以前没被发现（教训）**：`OpenXmlValidator` 只校验**单个部件内部的 schema**，**完全不校验跨部件的必备关系**。上述三处缺漏它全部放行（错误 0），所以单测一直是“绿的”。
+  同时该缺陷**与备注无关的那部分一直都在**——也就是说**之前生成的所有 .pptx 都需要修复**，与是否使用备注、图表无关。
+- **新增两层防回归**：
+  - 单测新增 `Package_HasAllRequiredCrossPartRelationships`，直接用 OpenXML SDK 断言包的跨部件关系（母版有主题、版式回指母版、有备注页就有备注母版、`presentation.xml` 含 `notesMasterIdLst`、备注页回指幻灯片）；
+  - 新增独立工具 `tools/verify_office_package.py`，不依赖 .NET，按 OOXML 规则逐个检查 pptx / docx / xlsx 的部件与关系完整性（并报了未声明 content type、悬空关系）。
+- **验证**：上述两处修复**先临时关掉**确认新测试与结构检查都会失败（已实测），恢复后再跑——全量 **1153 个用例全绿**；产物另经**独立复验**：OpenXML schema 校验 0 错误、`tools/verify_office_package.py` 结构完整、`python-pptx`（另一套实现）能打开并正确读出 8 页与全部中文备注、各部件内 `cNvPr id` 无重复、无悬空关系。
+
+English:
+- **Root cause: the OOXML package was missing required parts and relationships.** In the generated .pptx:
+  1. the **slide master had no theme part** (a `p:sldMaster` must own a theme — colours and fonts come from it);
+  2. as soon as any slide carried speaker notes the package contained `notesSlide` parts **with no `notesMaster`**, and `presentation.xml` lacked `notesMasterIdLst`;
+  3. the slide layout **did not point back at its master**.
+  All three make PowerPoint offer to repair the file. The fix adds the theme part (complete `clrScheme` / `fontScheme` / `fmtScheme`, with at least three entries in each of the four format lists), creates the notes master on demand and relates it from both the presentation and every notes slide, points the layout back at its master, and adds the inverse notes-slide-to-slide relationship.
+- **Why this went unnoticed (the lesson)**: `OpenXmlValidator` only validates **the schema inside a single part** — it does **not** check the required **cross-part** relationships. It passed all three omissions with zero errors, so the unit tests stayed green. Note also that the **non-notes part of the defect was always present**: every .pptx generated before this fix needed repairing, whether or not notes or charts were used.
+- **Two new layers against regression**:
+  - a unit test, `Package_HasAllRequiredCrossPartRelationships`, asserting the cross-part relations through the OpenXML SDK (master has a theme, layout points back at the master, notes slides imply a notes master, `presentation.xml` carries `notesMasterIdLst`, notes slides point back at their slide);
+  - a standalone tool, `tools/verify_office_package.py`, which needs no .NET and checks the parts and relationships of pptx / docx / xlsx against the OOXML rules (it also reports undeclared content types and dangling relationship targets).
+- **Verification**: both fixes were **temporarily disabled first** to confirm the new test and the structure check do fail (measured), then restored — the full suite is **1153 green**; the output was additionally **independently verified**: zero OpenXML schema errors, structurally complete per `tools/verify_office_package.py`, openable by `python-pptx` (a different implementation) with all 8 slides and every Chinese note read back correctly, no duplicate `cNvPr` ids within any part, and no dangling relationships.
+
+---
+
+# AG-UI 群聊桌面版 1.0.125 发布说明
+# AG-UI Group Chat Desktop 1.0.125 Release Notes
+
+**版本说明**：1.0.125 为 Windows 桌面版本。在 1.0.124 基础上新增**内置 Excel 生成技能**（`xlsx_book`）与**内置 PDF 生成技能**（`pdf_doc`），并把两者接入编排交付闭环；同时修正了 PDFsharp 字体解析器（进程级全局）被抢先占用导致内置 PDF 技能失效、以及测试间泄露该全局状态的问题。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.125 is a Windows desktop release. On top of 1.0.124 it adds a **built-in Excel generation skill** (`xlsx_book`) and a **built-in PDF generation skill** (`pdf_doc`), wires both into the orchestration delivery loop, and fixes both the process-wide PDFsharp font-resolver conflict that could disable the built-in PDF skill and the test that leaked that global state. Web and desktop share the same Hub / gateway / frontend.
 
 ## 内置 Excel + PDF 生成，交付技能矩阵齐备（1.0.125 核心）
 # Built-in Excel + PDF generation, completing the producer matrix (1.0.125 headline)
