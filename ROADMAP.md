@@ -29,6 +29,7 @@
 - **“组织架构构建师”走一键式出稿（已实现）**：挂 `org_design` 的组织角色（如 `org_architect`）另挂 `org_plan_draft`，复用「一键组织编排」同一引擎一次结构化产整支成稿（多 kind 技能、非纯 prompt），用户显式认可后再经 `org_commit` 落库。
 - **组织构建自动配记忆人格（已实现）**：「一键组织编排」与内置「组织架构构建师」（`org_plan_draft`）共用同一生成引擎；从一句话需求起草团队时，模型按岗位职责为每个角色自动挑选记忆拟人预设（`memoryProfile`：broad/deep/slowToLearn/cueDependent/fastForgetting），如主管/组长→deep、一线高量/客服→broad、售后/客户成功/顾问→cueDependent、值班/快速查档→fastForgetting、重复例行→slowToLearn；解析容错，缺失时启发式兜底，否则 null（平台全局，向后兼容）。预览中逐员工显示「记忆:」标签，经 `apply`/`org_commit` 落库后新员工随带匹配的记忆类型。
 - **组织连接自动成对（已实现）**：生成/提交的计划若只设向上上报（`escalationAgentId`）而缺向下分派名册（`assignmentIds`），系统会在解析侧（`AgentOrchestrator.InferAssignments`）与提交侧（`OrgApplyEngine.EnsureAssignmentsForLeaders`）把各上级的直接下属并入其 `assignmentIds`（去重、保序、只增不减）——生成团队始终双向连通（上级向下分派、下属向上上报），不会退化成单向问题上报链；构建提示词与 `org_design` 技能正文已明确要求成对连接；已建历史组织不受影响，重新生成/提交即可补齐。
+- **编排交付闭环适配内置产出技能（已实现）**：编排提示词与可复用技能小节都会点名「要 PPT / 演示文稿 → 直接引用内置 `pptx_deck`」「要 Word → 引 `docx_report`/`docx_gongwen`/`docx_notice`」，并明令<b>不要</b>为这些已有能力另造只能写字的 prompt 空壳；预览侧 `DetectDeliveryGap` / `DetectHollowDeliverySkill` 会提前给出 `deliveryWarning`。交付物判定口径统一为**明确格式词优先、中文泛称靠后**，因此「做份 PPT，含一张对比表格」判为演示文稿交付（而非 Excel），不会再因先撞上「表格」而误报缺 `xlsx_` 技能。
 - **客户技能不误跑服务端 bash（已实现）**：`ExecutionLocation=Client` 技能与服务端/非 Windows 宿主下明显 PowerShell 正文得到“需本机/需 PowerShell 环境”的明确指引，不再出现 `Not running in PowerShell / command not found / 退出码2` 假报错。
 
 ### 1.2 角色间消息传递 / 交接（★★☆） ✅已实现（整轮角色交接）

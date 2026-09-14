@@ -68,6 +68,57 @@ public sealed class OrchestrationDeliveryLoopTests
         Assert.Null(AgentOrchestrator.DetectDeliveryGap(plan, "帮我分析一下这个市场的竞争格局"));
     }
 
+    // ---------- 演示文稿（pptx）交付的编排适配 ----------
+
+    [Fact]
+    public void PptWithTable_IsClassifiedAsPptNotExcel()
+    {
+        // 真实踩到：先判“表格”会把“做份 PPT，含对比表格”判成 Excel 交付，
+        // 于是本函数因为“没有 xlsx_ 技能”而误报，真正的 pptx 交付能力反而被忽略。
+        var plan = Plan(("writer", ["copywriting"]));
+        var warn = AgentOrchestrator.DetectDeliveryGap(
+            plan, "做一份《知聚平台介绍》的 PPT，含一张对比表格与一个柱状图");
+
+        Assert.NotNull(warn);
+        Assert.Contains("演示文稿", warn);
+        Assert.Contains("pptx_", warn);
+    }
+
+    [Fact]
+    public void NoGap_WhenTeamAlreadyHasPptxSkill()
+    {
+        var plan = Plan(("writer", ["copywriting"]), ("deck", ["pptx_deck"]));
+        Assert.Null(AgentOrchestrator.DetectDeliveryGap(plan, "做一份产品介绍 PPT"));
+    }
+
+    [Fact]
+    public void VagueDocWithTable_StaysWordNotExcel()
+    {
+        // 含糊表述没提任何明确格式词：兜底需与历史口径一致——“文档”优先当 Word，
+        // 否则“写份文档，内含表格”会因为先撞上“表格”而被要求有 xlsx_ 技能（误报）。
+        var plan = Plan(("writer", ["docx_report"]));
+        Assert.Null(AgentOrchestrator.DetectDeliveryGap(plan, "写份文档，里面含一张表格"));
+    }
+
+    [Fact]
+    public void GapHint_NamesTheBuiltinPptxSkill()
+    {
+        var plan = Plan(("writer", ["copywriting"]));
+        var warn = AgentOrchestrator.DetectDeliveryGap(plan, "帮我做一套演示文稿");
+
+        Assert.NotNull(warn);
+        Assert.Contains("pptx_deck", warn); // 点名内置技能，模型/用户才有可直接引用的对象
+    }
+
+    [Fact]
+    public void Prompt_TellsModelToReuseBuiltinPptxSkill()
+    {
+        // 编排提示词必须像 docx 那样点名 pptx_deck，否则模型会自造空壳 PPT 技能
+        var prompt = AgentOrchestrator.BuildPromptForTest("做一个产品发布 PPT，最终要 pptx 文件", null);
+        Assert.Contains("pptx_deck", prompt);
+        Assert.Contains("要 PPT / 演示文稿", prompt);
+    }
+
     [Fact]
     public void Prompt_TellsModelToGuaranteeDelivery()
     {
