@@ -1,8 +1,53 @@
-# AG-UI 群聊桌面版 1.0.126 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.126 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.127 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.127 Release Notes (current Windows desktop release)
 
-**版本说明**：1.0.126 为当前 Windows 桌面版本。修复了一个严重缺陷：**内置 PPT 技能生成的 .pptx 会被 PowerPoint 判为“需要修复”才能打开**。Web 与桌面共用同一套 Hub/网关/前端。
-**Version note**: 1.0.126 is the current Windows desktop release. It fixes a serious defect: **the built-in PPT skill produced .pptx files that PowerPoint demanded to repair before opening**. Web and desktop share the same Hub / gateway / frontend.
+**版本说明**：1.0.127 为当前 Windows 桌面版本。修复了 **Word / PPT 图表里的中文显示为乱码**（实际是空心方框）的问题。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.127 is the current Windows desktop release. It fixes **Chinese text in Word / PPT charts rendering as garbled characters** (in fact hollow notdef boxes). Web and desktop share the same Hub / gateway / frontend.
+
+## 修复：图表中文变乱码（1.0.127 核心）
+# Fix: Chinese in charts rendered as garbage (1.0.127 headline)
+
+中文：
+- **根因：图表字体只按“族名命中”就选定，结果选到了纯拉丁字体**。图表是 ImageSharp 渲成的 PNG。
+  字体候选名单原为 `Microsoft YaHei / SimHei / SimSun / Arial / DejaVu Sans`——在 Linux 容器里前四个
+  都不存在，第一个命中的是 **`DejaVu Sans`（纯拉丁字体）**。字形缺失时 ImageSharp 会把每个汉字画成
+  **空心方框（notdef）**，于是图表的中文标题 / 分类标签 / 系列名全变方框，而英文坐标数字正常——
+  看上去很像“字体渲染错乱”，实际是选错了字体。
+- **修复：命中候选后必须验字形覆盖**。现在会用一个常用汉字取样串逐个调 `Font.TryGetGlyphs`，
+  只采用**真的含中文字形**的字体；候选名单也补上了 Linux / macOS 的常见中文字体族名
+  （`Noto Sans CJK SC`、`Source Han Sans SC`、`WenQuanYi Micro Hei`、`Droid Sans Fallback`、`PingFang SC` 等）；
+  第二步还会遍历系统全部字体族找中文字形（应对未知族名）。容器里现在正确选到 `Noto Sans CJK SC`。
+  真的一个中文字体都没有时，不再静默出方框，而是把提示写进返回的 `message`。
+- **可排障**：PPT / Word 技能的返回 JSON 新增 `chartFont` 与 `chartFontCjk`，一眼能看出图表用的是哪款字体、是否含中文字形。
+- **影响范围**：内置 PPT（`pptx_deck`）与三个 Word 技能（`docx_gongwen` / `docx_notice` / `docx_report`）共用同一套图表渲染，三者的图表中文都受影响，已一并修复（Word 侧改在生成器共享内核 `tools/docx-skills/generate.mjs`，再重新生成三份技能）。
+- **验证（改前 / 改后逐一取数）**：
+  - 容器内实际选中字体：修复前 `DejaVu Sans` → 修复后 **`Noto Sans CJK SC`**（`chartFontCjk: true`）；
+  - 把修复前实际产出的 pptx 取回，抽出图表 PNG 逐像素分析：标签带**每行恒为 24 个深色像素**——
+    这是 **16 个空心方框**（4 个标签 × 4 个字，只有边框有墨）的特征；修复后同一区域逐行着墨为
+    `111/85/116/52/70/48/56/67/38/68/66`，是真实汉字的笔画分布；
+  - 把标签带降采样成文本图目视对比：修复前是 4 个空心方框轮廓，修复后是 4 簇互不相同的汉字笔画；
+  - Word 产物同样确认：图表标签区为 3 簇真实汉字笔画（非方框）。
+- **防回归**：新增单测 `ChartFont_MustHaveChineseGlyphs`——用 `SixLabors.Fonts` **独立**校验“所选字体真的含中文字形”（不只信技能自报）；环境里确实没有中文字体时跳过而非误报失败。
+
+English:
+- **Root cause: the chart font was chosen on family-name match alone, so a Latin-only font won.** Charts are PNGs rendered with ImageSharp. The candidate list was `Microsoft YaHei / SimHei / SimSun / Arial / DejaVu Sans` — none of the first four exists in the Linux container, so the first hit was **`DejaVu Sans`, a Latin-only font**. With no glyph for a character ImageSharp draws a **hollow notdef box**, so every Chinese chart title, category label and series name became a box while the Latin axis numbers looked fine — which reads like broken rendering but is really the wrong font being picked.
+- **Fix: verify glyph coverage after a name match.** The picker now walks a sample string of common Chinese characters through `Font.TryGetGlyphs` and only accepts a face that **actually has them**; the candidate list gained the usual Linux / macOS CJK family names (`Noto Sans CJK SC`, `Source Han Sans SC`, `WenQuanYi Micro Hei`, `Droid Sans Fallback`, `PingFang SC`, …); a second pass scans every installed family for CJK coverage, covering unknown names. The container now picks `Noto Sans CJK SC`. When no CJK font exists at all it no longer silently emits boxes: the hint goes into the returned `message`.
+- **Diagnosable**: the PPT and Word skills now return `chartFont` and `chartFontCjk`, so it is immediately visible which face the charts used and whether it carries Chinese glyphs.
+- **Scope**: the built-in PPT skill (`pptx_deck`) and the three Word skills (`docx_gongwen` / `docx_notice` / `docx_report`) share one chart renderer, so all four were affected and all four are fixed (on the Word side in the generator's shared kernel, `tools/docx-skills/generate.mjs`, then regenerated).
+- **Verification (measured before and after)**:
+  - face actually selected in the container: `DejaVu Sans` before → **`Noto Sans CJK SC`** after (`chartFontCjk: true`);
+  - the deck produced by the *old* build was fetched and its chart PNG analysed pixel by pixel: the label band held **a constant 24 dark pixels per row**, the signature of **16 hollow boxes** (4 labels × 4 characters, only the outlines inked); after the fix the same band reads `111/85/116/52/70/48/56/67/38/68/66` — the stroke distribution of real glyphs;
+  - downsampling the label band into a text picture shows four hollow box outlines before and four distinct clusters of Chinese strokes after;
+  - the Word output was confirmed the same way: three clusters of real strokes, not boxes.
+- **Regression guard**: a new unit test, `ChartFont_MustHaveChineseGlyphs`, uses `SixLabors.Fonts` to **independently** check that the selected face really carries Chinese glyphs (rather than trusting the skill's own report); it skips instead of failing on an environment that genuinely has no CJK font.
+
+---
+
+# AG-UI 群聊桌面版 1.0.126 发布说明
+# AG-UI Group Chat Desktop 1.0.126 Release Notes
+
+**版本说明**：1.0.126 为 Windows 桌面版本。修复了一个严重缺陷：**内置 PPT 技能生成的 .pptx 会被 PowerPoint 判为“需要修复”才能打开**。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.126 is a Windows desktop release. It fixes a serious defect: **the built-in PPT skill produced .pptx files that PowerPoint demanded to repair before opening**. Web and desktop share the same Hub / gateway / frontend.
 
 ## 修复：PPT 产物需要“修复”才能打开（1.0.126 核心）
 # Fix: PPT output needed repairing before it opened (1.0.126 headline)
