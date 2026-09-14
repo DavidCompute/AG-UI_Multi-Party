@@ -403,4 +403,51 @@ public sealed class OrchestrationDeliveryLoopTests
         Assert.Contains("文件生成技能", prompt);
         Assert.Contains("内容必须完整", prompt);
     }
+
+    [Fact]
+    public void DeliveryPrompt_RetryTellsModelItDidNotCallTheTool()
+    {
+        // 实测踩到：主管链路下交付岗只回“已完成 Word 导出”而没调工具（群历史里已有它自己的类似发言），
+        // 用户拿不到文件。第二次尝试必须把“上次没真调工具 / 别信历史里的已完成”说清楚。
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "写简介并导出", retryNoToolCall: true);
+
+        Assert.Contains("并没有真正调用工具", prompt);
+        Assert.Contains("不要相信对话历史", prompt);
+        Assert.Contains("docx_report", prompt);
+    }
+
+    [Fact]
+    public void DeliveryPrompt_FirstAttemptHasNoRetryWording()
+    {
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "写简介并导出");
+        Assert.DoesNotContain("并没有真正调用工具", prompt);
+    }
+
+    [Fact]
+    public void DeliveryResult_ReadsBlocksAndProduceFileMarker()
+    {
+        // 内置 docx 技能返回 { ok, scene, path, blocks, produce_file, message }：
+        // 用 blocks 区分“真出了文档”与“只出了一张封面”（实测踩到 blocks=4 的封面文档）。
+        var thick = "{\"ok\":true,\"path\":\"/app/docs/a.docx\",\"blocks\":12,\"produce_file\":{\"path\":\"/app/docs/a.docx\"}}";
+        var (hasFile, blocks) = AgentGateway.ParseDeliveryResult(thick);
+        Assert.True(hasFile);
+        Assert.Equal(12, blocks);
+    }
+
+    [Fact]
+    public void DeliveryResult_CoverOnlyDocumentHasLowBlocks()
+    {
+        var cover = "{\"ok\":true,\"path\":\"/app/docs/b.docx\",\"blocks\":4,\"produce_file\":{\"path\":\"/app/docs/b.docx\"}}";
+        var (hasFile, blocks) = AgentGateway.ParseDeliveryResult(cover);
+        Assert.True(hasFile);
+        Assert.True(blocks < 5, "只有封面的文档应低于交付阈值");
+    }
+
+    [Fact]
+    public void DeliveryResult_NoToolCallHasNoFile()
+    {
+        var (hasFile, blocks) = AgentGateway.ParseDeliveryResult("我已经完成了导出。");
+        Assert.False(hasFile);
+        Assert.Equal(0, blocks);
+    }
 }

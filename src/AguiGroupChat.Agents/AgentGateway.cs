@@ -1097,7 +1097,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        // 指派/提升是一条多阶段流水线：计划 → 逐步执行（多次模型调用）→ 递归补查 → 交付兑底。
+        // 用单次流式的预算（StreamTimeoutMinutes）盖整条链会中途截断：实测走主管时，
+        // 计划+递归已经把 5 分钟用完，轮到“真正出文件”的那一步预算刚好耗尽。
+        // 这里给整条链留更宽的总预算；交付兑底内部还会再开一份自己的预算。
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(Math.Max(_execution.StreamTimeoutMinutes * 3, 15)));
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
         string? messageId = null;
@@ -1155,7 +1159,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 // 不这么做就会退化为“计划跑了、用户仍拿不到文件”。
                 if (planNeedsDelivery && WantedDeliverable(context.Content) is not null)
                 {
-                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, runCt, runId, messageId);
+                    // 传外层原始 ct（而非 runCt）：runCt 的时间预算可能已被计划/递归消耗待尽，
+                    // 交付兑底内部会基于它另开一份新预算。
+                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, ct, runId, messageId);
                     if (delivery.MessageId is { } pmid) messageId = pmid;
                     if (delivery.AwaitingInteraction)
                     {
@@ -1176,7 +1182,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     // 交付物兜底：交付岗直接产出文件（正文 + 下载卡片），不再贴一遍链路里的过程稿，
                     // 避免用户看到两段互相矛盾的内容。兜底失败则回退到原文本回答。
-                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, runCt, runId, messageId);
+                    // 同样传外层原始 ct（见上），让交付拿到自己的完整时间预算。
+                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, ct, runId, messageId);
                     if (delivery.MessageId is { } mid) messageId = mid;
                     if (delivery.AwaitingInteraction)
                     {
@@ -1193,9 +1200,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, replyId, chunk, runCt);
             }
 
-            // 运行完成：产物回档挂在外层这条消息上（交付物兜底也已在其上追加）
-            await AttachPublishedProductsAsync(context.GroupId, messageId!, finalText ?? "", runCt);
-            await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId!, runCt);
+            // 运行完成：产物回档挂在外层这条消息上（交付物兜底也已在其上追加）。
+            // 收尾用独立短超时：计划 + 递归 + 交付可能已把 runCt 的预算用尽，
+            // 不能因为“预算到点”就把已经生成好的产物丢掉（那样用户拿不到文件）。
+            using var finalCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            await AttachPublishedProductsAsync(context.GroupId, messageId!, finalText ?? "", finalCts.Token);
+            await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId!, finalCts.Token);
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
@@ -1502,8 +1512,21 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (ck.StartsWith("agent:", StringComparison.Ordinal)) ranSkills.Add(ck["agent:".Length..]);
             else ranSkills.Add(ck);
         }
-        var final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(),
-            ranSkills, ct) ?? "";
+        // 计划里跳过了文档生成技能（且这正是用户要的交付物）时，不再跑递归补查：
+        //   ① 交付兑底才是真正产出文件的那一步，递归补查只会先耗掉时间预算（实测：轮到交付时预算已尽）；
+        //   ② 递归阶段会把“已完成导出”之类的话写进群历史，反而让交付岗以为自己已经做完了、不再调工具。
+        // 直接交外层走交付兑底，更确定、也更快。
+        string final;
+        if (needsDelivery)
+        {
+            _logger.LogInformation("计划已跳过文档生成技能且用户要文件，跳过递归补查、直接进入交付兑底");
+            final = "";
+        }
+        else
+        {
+            final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(),
+                ranSkills, ct) ?? "";
+        }
         // 空正文兜底：若综合答复也没产出可展示文本，绝不留下"只有计划卡、正文空白"的消息——
         // 直接把已收集的关键中间结果整理成一段可见回答（并说明未做进一步综合的原因）。
         var finalTrimmed = string.IsNullOrWhiteSpace(final) ? "" : final.Trim();
@@ -2305,9 +2328,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// </para>
     /// </summary>
     private async Task<DeliveryOutcome> TrySatisfyDeliveryAsync(
-        AgentInvocationContext context, string input, List<ChainNode> hops, CancellationToken ct,
+        AgentInvocationContext context, string input, List<ChainNode> hops, CancellationToken outerCt,
         string runId, string? messageId)
     {
+        // 交付兑底必须有自己的时间预算：外层（计划 + 递归补查）常常已经把那份预算用得差不多，
+        // 若共用同一个 token，轮到真正要出文件时它已被取消 → 模型调用瞬时被取消、静默失败。
+        // 实测踩到：直接找交付岗 30s 就出文件；走主管（计划+递归补查多轮）却总是拿不到文件。
+        using var deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
+        deliveryCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        var ct = deliveryCts.Token;
         try
         {
             // 1) 用户是否要文件？从原始消息判定（不要看链路正文，那是回答内容）
@@ -2356,12 +2385,52 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 SkillChainBuilder.Ambient.Value = new SkillChainBuilder();
                 SkillChainBuilder.Ambient.Value.EnsureRoot(candidate.AgentId, candidate.Nickname ?? candidate.AgentId);
                 ToolResultCollector.Ambient.Value = new ToolResultCollector();
-                var interrupt = await RunDeliveryStreamAsync(sub, candidate, runId, messageId, ct);
-                if (interrupt is not null)
+
+                // 最多试两次：模型可能“只回文字、没调工具”或“只出了一张封面”就宣称交付完成。
+                // 常见诱因：群历史里已经有它自己“已完成导出”的发言（尤其计划阶段的产物），
+                // 它据此以为已经做完了（实测踩到：主管链路下交付岗只回“已完成 Word 导出”，用户没有文件）。
+                // 第二次在提示词里明确指出“上一次没有真正调用工具 / 内容不完整”。
+                var keptFile = false;
+                for (var attempt = 0; attempt < 2; attempt++)
                 {
-                    return new DeliveryOutcome(messageId, true); // 已挂交互卡，正文待用户决策后由 ResumeRunAsync 继续
+                    if (attempt > 0)
+                    {
+                        var retryPrompt = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content, retryNoToolCall: true);
+                        sub = sub with { Content = retryPrompt };
+                        AmbientContext.Value = sub;
+                        ToolResultCollector.Ambient.Value = new ToolResultCollector();
+                        _logger.LogWarning("交付兑底未达标（无文件或内容过薄），第二次尝试：agent={AgentId}", candidate.AgentId);
+                    }
+
+                    var interrupt = await RunDeliveryStreamAsync(sub, candidate, runId, messageId, ct);
+                    if (interrupt is not null)
+                    {
+                        // 已挂交互卡：正文待用户决策后由 ResumeRunAsync 继续；产物回档也在那边完成
+                        return new DeliveryOutcome(messageId, true);
+                    }
+
+                    var (hasFile, blocks) = DeliveryResult();
+                    if (hasFile && blocks >= MinDeliveryBlocks)
+                    {
+                        hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
+                        return new DeliveryOutcome(messageId, false);
+                    }
+                    // 有文件但只有封面（blocks 过小）：宁可留一份薄文件，也别让用户什么都没有
+                    if (hasFile) keptFile = true;
+                    _logger.LogWarning("交付兑底未达标：agent={AgentId} hasFile={HasFile} blocks={Blocks}（阈值 {Min}）",
+                        candidate.AgentId, hasFile, blocks, MinDeliveryBlocks);
                 }
-                hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
+                if (keptFile)
+                {
+                    // 两次都偏薄，但至少有文件：接受它（产物已回档），不再给用户“什么都没有”
+                    hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
+                    return new DeliveryOutcome(messageId, false);
+                }
+                // 两次都没产出文件：不谎报，明确告知用户（产物缺失才是真问题）
+                _logger.LogWarning("交付兑底两次均未产出文件：agent={AgentId} skill={Skill}", candidate.AgentId, wantSkill);
+                if (messageId is not null)
+                    await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId,
+                        $"（未能生成 {want.Value.Label} 文件：交付环节没有真正调用文件生成技能。请再说一次，或把要写的内容直接发给我。）", ct);
             }
             finally
             {
@@ -2372,8 +2441,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
         catch (Exception ex)
         {
-            // 兜底失败不影响已给出的回答
-            _logger.LogDebug(ex, "交付物兜底失败（已忽略）");
+            // 兜底失败不影响已给出的回答。但必须记到 Warning：此前用 Debug，
+            // “交付岗不是本群成员”这类真问题被完全淹没，表现为“用户就是拿不到文件”且毫无线索。
+            _logger.LogWarning(ex, "交付物兑底失败（已忽略，用户可能拿不到文件）：agent={AgentId}", context.AgentId);
         }
         return new DeliveryOutcome(messageId, false);
     }
@@ -2396,7 +2466,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             : null;
         var agent = _catalog.GetOrCreate(context.AgentId);
         var session = await GetOrCreateSessionAsync(context, agent, ct);
-        await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
+        // typing 是纯展示性的：交付兑底换了一位执行岗，而它不一定是本单聊群的成员
+        // （实测踩到：群是为主管建的，代表交付岗广播 typing 会抛 GroupMemberNotExist，
+        //  异常被外层 catch 吞掉，整个交付静默不执行、用户拿不到文件）。尽力而为。
+        try
+        {
+            await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "交付物流：typing 广播失败（忽略）agent={AgentId}", context.AgentId);
+        }
 
         var accumulated = "";
         var reasoningAccumulated = 0;
@@ -2514,9 +2594,47 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return approval;
     }
 
-    /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。</summary>
-    internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent)
+    /// <summary>
+    /// 本次兜底运行产出的文件及其<b>内容块数</b>（技能返回值里的 <c>produce_file</c> 与 <c>blocks</c>）。
+    ///
+    /// <para>
+    /// 为什么不能只看模型正文：模型常把“已完成导出”写进正文而根本没调工具 ——
+    /// 用户拿着这句话去找文件却什么也没有（实测踩到）。以工具真实返回为准。
+    /// </para>
+    ///
+    /// <para>
+    /// 为什么还要看 blocks：文件确实生了、但只有标题与副标题（blocks = 4）也是失败交付 ——
+    /// 用 blocks 才能区分“真出了文档”与“只出了一张封面”（实测踩到多次）。
+    /// </para>
+    /// </summary>
+    private static (bool HasFile, int Blocks) DeliveryResult()
     {
+        return ParseDeliveryResult(ToolResultCollector.Ambient.Value?.Text);
+    }
+
+    /// <summary>测试钩子：从技能返回文本解析“是否有产物 / 内容块数”。</summary>
+    internal static (bool HasFile, int Blocks) ParseDeliveryResult(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return (false, 0);
+        var hasFile = text.Contains("produce_file", StringComparison.OrdinalIgnoreCase);
+        var max = 0;
+        foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"""blocks""\s*:\s*(\d+)"))
+            if (int.TryParse(m.Groups[1].Value, out var v) && v > max) max = v;
+        return (hasFile, max);
+    }
+
+    /// <summary>交付文档的最少内容块数：低于它视为“只有封面、没有正文”，会重试一次。</summary>
+    private const int MinDeliveryBlocks = 5;
+
+    /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。</summary>
+    internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent, bool retryNoToolCall = false)
+    {
+        // 第二次尝试：明确告诉模型“你上一次只说了话、没调工具”，把“历史里那句话说过了”的错觉打掉。
+        var retryLead = retryNoToolCall
+            ? "【重要】你上一次只回复了文字、**并没有真正调用工具**，用户因此没有拿到文件。"
+              + "不要再说“已完成”，也不要相信对话历史里任何“已完成导出”的说法——那些都不是真的。"
+              + "现在必须真正调用工具。\n\n"
+            : "";
         var hardRule = "\n\n【硬性要求】用户是直接向你要这份文件的，你必须现在就产出文件："
             + "不要反问用户要定稿/合规结论/审批结果，不要以“流程未走完”为由拒交；"
             + "材料不完整也先出稿，把不确定的地方在文件里列为待确认项。";
@@ -2528,12 +2646,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             + "它们接收 heading(level 1-3) / paragraph / bullets / numbered / quote / table({headers,rows}) / toc 等结构；"
             + "**每一节都要有实质正文（段落 / 列表 / 表格），绝不允许只传标题、副标题、作者就收工**（那样文档里会没有任何内容）。"
             + "若组织里同时有能直接吃 Markdown 正文的导出技能，优先用它（把完整 Markdown 正文交给它转换）。";
-        return skillId is null
+        return retryLead + (skillId is null
             ? $"用户要求交付 {label} 文件。请直接调用你的文件生成技能，把完整内容生成为文件后简短回报。" + hardRule + contentRule
               + $"\n\n【用户原始请求】\n{userContent}"
             : $"用户要求交付 {label} 文件。请调用文档生成技能 {skillId}，把完整内容生成为文件后简短回报"
               + $"（不要先反问用户要材料，也不要调用其它无关技能）。" + hardRule + contentRule
-              + $"\n\n【用户原始请求】\n{userContent}";
+              + $"\n\n【用户原始请求】\n{userContent}");
     }
 
     /// <summary>用户要的交付物类型（技能前缀用于在组织里匹配）。识别不出来返回 null。</summary>

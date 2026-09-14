@@ -56,9 +56,13 @@ if "--run" not in sys.argv:
 
 target = sys.argv[sys.argv.index("--run") + 1]
 match = next((a for a, _ in cands if a.get("agentId") == target), None)
-if not match:
-    print(f"未找到候选：{target}")
-    sys.exit(1)
+if match is None:
+    # 允许直接指定任意岗位（如无技能的主管）：验证“主管 → 指派 → 交付”整条链
+    match = next((a for a in (agents or []) if a.get("agentId") == target), None)
+    if match is None:
+        print(f"未找到岗位：{target}")
+        sys.exit(1)
+    print(f"（{target} 自身无文档技能 —— 正好用来验证主管指派链路）")
 
 st, res = call("POST", "/ag-ui/agents/direct", {"agentId": target}, token=token)
 gid = res["groupId"]
