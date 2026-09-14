@@ -2409,10 +2409,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         return new DeliveryOutcome(messageId, true);
                     }
 
-                    var (hasFile, blocks) = DeliveryResult();
-                    // 阈值按交付物类型取：ppt 看页数，其它（docx/xlsx/pdf）看内容块数
-                    var minContent = want.Value.SkillPrefix.StartsWith("pptx", StringComparison.OrdinalIgnoreCase)
-                        ? MinDeliverySlides : MinDeliveryBlocks;
+                    var (hasFile, blocks) = DeliveryResult(want.Value.SkillPrefix);
+                    // 阈值按交付物类型取：ppt 看页数、excel 看数据行数、pdf/docx 看内容块数
+                    var minContent = MinContentFor(want.Value.SkillPrefix);
                     if (hasFile && blocks >= minContent)
                     {
                         hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
@@ -2610,21 +2609,46 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 用 blocks 才能区分“真出了文档”与“只出了一张封面”（实测踩到多次）。
     /// </para>
     /// </summary>
-    private static (bool HasFile, int Blocks) DeliveryResult()
+    private static (bool HasFile, int Blocks) DeliveryResult(string? skillPrefix)
     {
-        return ParseDeliveryResult(ToolResultCollector.Ambient.Value?.Text);
+        return ParseDeliveryResult(ToolResultCollector.Ambient.Value?.Text, skillPrefix);
     }
 
     /// <summary>测试钩子：从技能返回文本解析“是否有产物 / 内容量”。</summary>
-    internal static (bool HasFile, int Blocks) ParseDeliveryResult(string? text)
+    internal static (bool HasFile, int Blocks) ParseDeliveryResult(string? text, string? skillPrefix = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return (false, 0);
         var hasFile = text.Contains("produce_file", StringComparison.OrdinalIgnoreCase);
-        // docx 类技能报 blocks（内容块数）；pptx 类报 slides（页数）。两者语义相同（内容量），
-        // 取最大值即“这份产物到底做了多少东西”。
-        var max = Math.Max(MaxJsonInt(text, "blocks"), MaxJsonInt(text, "slides"));
-        return (hasFile, max);
+        // 度量口径<b>按交付物类型分别选</b>，不能混着取最大值：各技能报的字段语义不同，
+        // 混取会让“一张三行的表”因为 sheets=1 而被当成内容丰富（或反之误报很薄）。
+        var amount = MetricFor(skillPrefix) switch
+        {
+            "slides" => MaxJsonInt(text, "slides"), // pptx：页数
+            "rows" => MaxJsonInt(text, "rows"),     // xlsx：数据行数（一张表通常只有 1~3 张，页数口径会永远不达标）
+            "blocks" => MaxJsonInt(text, "blocks"), // docx / pdf：内容块数（pdf 另报 pages）
+            // 未知类型（旧调用点 / 测试钩子）：取各类度量最大，保持历史口径
+            _ => new[] { "blocks", "slides", "pages", "rows" }.Max(f => MaxJsonInt(text, f)),
+        };
+        return (hasFile, amount);
     }
+
+    /// <summary>某交付前缀对应的“内容量”度量字段；空前缀 = 未知类型，返回 <c>auto</c>。</summary>
+    private static string MetricFor(string? skillPrefix)
+    {
+        var p = skillPrefix ?? "";
+        if (p.Length == 0) return "auto";
+        if (p.StartsWith("pptx", StringComparison.OrdinalIgnoreCase)) return "slides";
+        if (p.StartsWith("xlsx", StringComparison.OrdinalIgnoreCase)) return "rows";
+        return "blocks";
+    }
+
+    /// <summary>某交付前缀的最低内容量：低于它视为“只有空壳”，会重试一次。</summary>
+    private static int MinContentFor(string? skillPrefix) => MetricFor(skillPrefix) switch
+    {
+        "slides" => MinDeliverySlides,
+        "rows" => MinDeliveryRows,
+        _ => MinDeliveryBlocks,
+    };
 
     /// <summary>从文本里取某个数字字段的最大值（技能返回 JSON 可能有多个/多份）。</summary>
     private static int MaxJsonInt(string text, string field)
@@ -2637,9 +2661,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>交付文档的最少内容量：低于它视为“只有封面、没有正文”，会重试一次。
-    /// docx 按内容块数（低于 5 基本只有封面）；ppt 按页数（低于 3 撑不起一场演示）。</summary>
+    /// docx / pdf 按内容块数（低于 5 基本只有封面）；ppt 按页数（低于 3 撑不起一场演示）；
+    /// excel 按数据行数（低于 3 行基本只有表头）。</summary>
     private const int MinDeliveryBlocks = 5;
     private const int MinDeliverySlides = 3;
+    private const int MinDeliveryRows = 3;
 
     /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。</summary>
     internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent, bool retryNoToolCall = false)

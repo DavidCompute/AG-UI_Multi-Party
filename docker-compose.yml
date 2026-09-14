@@ -90,8 +90,15 @@ services:
       # 内置「文档生成」技能（公文 / 通知公告 / 工作报告，Word .docx）：默认开启，新部署开箱即用。
       # 正文随程序集以嵌入资源分发；设 false 则不播种。图表渲染依赖系统字体（见 Dockerfile 的 fonts-*）。
       Agents__BuiltinDocxSkills: ${AGENTS_BUILTIN_DOCX_SKILLS:-true}
-      # 内置 docx 技能的默认落盘目录（不传 outputPath 时用）。对应下方 agui-docs 卷，
-      # 容器重建/升级不影响已有文件。取文件见该卷旁的注释。
+      # 内置「演示文稿生成」技能（pptx_deck）、「Excel 生成」技能（xlsx_book）、
+      # 「PDF 生成」技能（pdf_doc）：同样默认开启。
+      # 注：pdf_doc 需系统含中文字形的 glyf 字体（见 Dockerfile 的 fonts-droid-fallback），
+      # 否则会把整份字体嵌进 PDF 导致产物 10MB+（可用 AGUI_PDF_FONT 指定字体）。
+      Agents__BuiltinPptxSkills: ${AGENTS_BUILTIN_PPTX_SKILLS:-true}
+      Agents__BuiltinXlsxSkills: ${AGENTS_BUILTIN_XLSX_SKILLS:-true}
+      Agents__BuiltinPdfSkills: ${AGENTS_BUILTIN_PDF_SKILLS:-true}
+      # 内置文档类技能的默认落盘目录（不传 outputPath 时用）；xlsx / pdf 未单独配置时沿用此项。
+      # 对应下方 agui-docs 卷，容器重建/升级不影响已有文件。取文件见该卷旁的注释。
       AGUI_DOCX_OUT: ${AGUI_DOCX_OUT:-/app/docs}
       Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
       # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）

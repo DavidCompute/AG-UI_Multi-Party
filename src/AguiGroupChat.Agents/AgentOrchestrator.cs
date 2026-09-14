@@ -194,6 +194,10 @@ public static class AgentOrchestrator
             "    · 仅当内置技能确实不满足需求（如需特殊版式/其他格式）才新造，且自造的产出技能<b>必须真正把内容写进文件</b>。\n" +
             "    · <b>要 PPT / 演示文稿就优先直接引用内置技能 pptx_deck</b>（封面/目录/章节分隔/内容/两栏/表格/" +
             "      指标卡/引言/图片/图表/小结/结束页等页型已齐备，支持主题配色与字体），把它写进交付岗的 skillIds。\n" +
+            "    · <b>要 Excel / 表格就优先直接引用内置技能 xlsx_book</b>（多工作表、列定义与数字格式、" +
+            "      合计行、冻结窗格与筛选、公式优先），把它写进交付岗的 skillIds。\n" +
+            "    · <b>要 PDF 就优先直接引用内置技能 pdf_doc</b>（设计令牌驱动的封面/目录/标题/正文/列表/表格/图表等，" +
+            "      输出为可打印的 PDF），把它写进交付岗的 skillIds。\n" +
             "    · xlsx / pdf 同理：先看技能库里有没有现成的，没有才新造能真写文件的 dotnet 技能。\n" +
             "    · <b>禁止</b>用“只能生成文字”的 prompt 技能冒充交付能力；也<b>不要</b>造只打印目录 / 只写占位文字的空壳技能。\n" +
             "- 该交付岗应是<b>交付链末端</b>（叶子岗、无 assignmentIds）：上游出内容 → 它负责生成文件。\n" +
@@ -230,10 +234,12 @@ public static class AgentOrchestrator
     /// 这里做确定性检查，把问题<b>提前暴露在前端预览</b>，而不是等用户拿到一团文字才发现。
     /// </para>
     ///
+    /// <remarks>
     /// 判定口径（与 <c>WantedDeliverable</c> 一致：<b>明确格式词优先、中文泛称靠后</b>）：
     /// 需求里提到 ppt/pptx/演示文稿/幻灯片 → 需有 pptx_；xlsx/excel → xlsx_；word/docx → docx_；pdf → pdf_；
     /// 都没命中时再看中文泛称：「文档」→ docx_、「表格」→ xlsx_。
     /// 注：新造技能也计入（模型可能自建产出能力）；只看 skillId 前缀，不解析正文。
+    /// </remarks>
     /// </summary>
     /// <returns>缺失交付能力的提醒文案；无问题返回 null。</returns>
     public static string? DetectDeliveryGap(OrchestrationPlan plan, string requirement)
@@ -264,7 +270,9 @@ public static class AgentOrchestrator
         var builtin = prefix switch
         {
             "pptx_" => "pptx_deck",
+            "xlsx_" => "xlsx_book",
             "docx_" => "docx_report",
+            "pdf_" => "pdf_doc",
             _ => null,
         };
         var hint = builtin is null ? $"（如内置 {prefix}* 技能）" : $"（可直接引用内置 {builtin}）";
@@ -308,7 +316,7 @@ public static class AgentOrchestrator
         if (hollow.Count == 0) return null;
         return "本方案含有疑似空洞的交付技能：" + string.Join("、", hollow)
              + " —— 它们看起来能产出文件，实际写不出真内容（正文过短 / 是 prompt 类型 / 只写占位文字）。"
-             + "建议改为直接引用内置 docx_report（Word）、pptx_deck（PPT）等成熟技能，否则用户拿不到可用的交付物。";
+             + "建议改为直接引用内置 docx_report（Word）、pptx_deck（PPT）、xlsx_book（Excel）、pdf_doc（PDF）等成熟技能，否则用户拿不到可用的交付物。";
     }
 
     /// <summary>
@@ -375,7 +383,8 @@ public static class AgentOrchestrator
             sb.Append("- ").Append(s.SkillId).Append("（").Append(s.Name).Append("，kind=").Append(s.Kind).Append("）：").Append(desc).Append('\n');
         }
         sb.Append("\n复用规则（很重要）：\n");
-        sb.Append("- 若某岗位的职责能被上面的技能覆盖（如“生成 Word 文档/公文/报告”对应 docx_*、“做 PPT/演示文稿”对应 pptx_deck），**必须直接引用它**，不要另建 prompt 技能。\n");
+        sb.Append("- 若某岗位的职责能被上面的技能覆盖（如“生成 Word 文档/公文/报告”对应 docx_*、“做 PPT/演示文稿”对应 pptx_deck、" +
+                  "“做 Excel/表格/报表”对应 xlsx_book、“出 PDF 报告”对应 pdf_doc），**必须直接引用它**，不要另建 prompt 技能。\n");
         sb.Append("- 引用写在 skillIds 里；skills 数组里<b>只放</b>库中没有、需要新造的技能。\n");
         sb.Append("- 若 skills 里新造的技能与上面某个已有技能同 id，视为重复，应改为直接引用。\n\n");
         return sb.ToString();

@@ -49,6 +49,28 @@ public sealed class AgentSkillCatalog
                 _builtinSkills.Add(d.SkillId);
             }
         }
+        // 内置「Excel 生成」技能（多工作表 / 公式优先 / 财务配色）：同上，开箱即用
+        if (AguiGroupChat.Agents.BuiltinSkills.BuiltinXlsxSkills.IsEnabled(options?.BuiltinXlsxSkills))
+        {
+            foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinXlsxSkills.Definitions)
+            {
+                if (!_skills.TryAdd(d.SkillId,
+                        AguiGroupChat.Agents.BuiltinSkills.BuiltinXlsxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description)))
+                    continue;
+                _builtinSkills.Add(d.SkillId);
+            }
+        }
+        // 内置「PDF 生成」技能（设计令牌驱动的打印级文档）：同上，开箱即用
+        if (AguiGroupChat.Agents.BuiltinSkills.BuiltinPdfSkills.IsEnabled(options?.BuiltinPdfSkills))
+        {
+            foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinPdfSkills.Definitions)
+            {
+                if (!_skills.TryAdd(d.SkillId,
+                        AguiGroupChat.Agents.BuiltinSkills.BuiltinPdfSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description)))
+                    continue;
+                _builtinSkills.Add(d.SkillId);
+            }
+        }
         if (_seeds.Count > 0)
             _logger.LogInformation("技能库播种 {Count} 条（来自 AgentOptions.Skills）", _seeds.Count);
     }
@@ -104,6 +126,18 @@ public sealed class AgentSkillCatalog
         {
             if (!_builtinSkills.Contains(d.SkillId)) continue;
             var def = AguiGroupChat.Agents.BuiltinSkills.BuiltinPptxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description);
+            freshBuiltins[d.SkillId] = def;
+        }
+        foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinXlsxSkills.Definitions)
+        {
+            if (!_builtinSkills.Contains(d.SkillId)) continue;
+            var def = AguiGroupChat.Agents.BuiltinSkills.BuiltinXlsxSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description);
+            freshBuiltins[d.SkillId] = def;
+        }
+        foreach (var d in AguiGroupChat.Agents.BuiltinSkills.BuiltinPdfSkills.Definitions)
+        {
+            if (!_builtinSkills.Contains(d.SkillId)) continue;
+            var def = AguiGroupChat.Agents.BuiltinSkills.BuiltinPdfSkills.Build(d.SkillId, d.ResourceSuffix, d.Name, d.Description);
             freshBuiltins[d.SkillId] = def;
         }
         foreach (var s in skills)

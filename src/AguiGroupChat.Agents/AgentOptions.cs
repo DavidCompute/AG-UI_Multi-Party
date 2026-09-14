@@ -106,6 +106,21 @@ public sealed class AgentOptions
     public bool? BuiltinPptxSkills { get; set; }
 
     /// <summary>
+    /// 是否播种<b>内置 Excel 生成</b>技能（<c>xlsx_book</c>：多工作表、公式优先、财务配色、数字格式、合计行）。
+    /// <c>null</c>（默认）= 开启。设 <c>false</c> 则不播种（适合不需要电子表格能力的部署）。
+    /// 正文随程序集以嵌入资源分发；已存在同名技能时不会被覆盖。
+    /// </summary>
+    public bool? BuiltinXlsxSkills { get; set; }
+
+    /// <summary>
+    /// 是否播种<b>内置 PDF 生成</b>技能（<c>pdf_doc</c>：设计令牌驱动的报告 / 方案 / 简历等打印级 PDF）。
+    /// <c>null</c>（默认）= 开启。设 <c>false</c> 则不播种（适合不需要 PDF 能力的部署）。
+    /// 正文随程序集以嵌入资源分发；已存在同名技能时不会被覆盖。
+    /// 生成依赖系统<b>含中文字形的 glyf 字体</b>（见 Dockerfile 的 fonts-droid-fallback）。
+    /// </summary>
+    public bool? BuiltinPdfSkills { get; set; }
+
+    /// <summary>
     /// 是否允许 HTTP 技能访问<b>本机 / 内网 / 私网</b>地址（默认 false）。
     /// 默认开 SSRF 防护：HTTP 技能拒绝本机 / 私网 / 链路本地地址（127.0.0.1、10/8、172.16/12、192.168/16、169.254/16 等）
     /// 防止技能把服务端当作跳板访问内网。确需调用本机 / 内网接口（如本地 Ollama / 内网 API）时设为 true 放行；

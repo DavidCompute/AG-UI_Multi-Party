@@ -300,6 +300,14 @@ internal static class AgentGatewayHelpers
             if (IsPresentationSkill(skill))
                 return ValidateSlidesInput(skill, root);
 
+            // 电子表格技能：正文在 sheets 里（每张表靠 columns/headers + rows 承载数据）
+            if (IsSpreadsheetSkill(skill))
+                return ValidateSheetsInput(skill, root);
+
+            // PDF 技能：正文在 blocks 里（或直接给 markdown）
+            if (IsPdfSkill(skill))
+                return ValidatePdfInput(skill, root);
+
             // 1) 正文类字符串字段非空 → 放行
             foreach (var key in new[] { "markdown", "content", "body", "text" })
                 if (root.TryGetProperty(key, out var v)
@@ -328,6 +336,130 @@ internal static class AgentGatewayHelpers
             return null; // 解析失败：交技能报真实错误
         }
     }
+
+    /// <summary>是否是 PDF 生成技能（pdf_doc）：正文在 blocks 里（或 markdown），与 docx 的 sections 不同口径。
+    /// <para>只认 <b>技能 id / 名称</b>里的 pdf 信号，<b>不看描述</b>：很多技能描述里会顺带提“可导出 PDF”，
+    /// 若按描述匹配会把它们错当 PDF 技能、用 blocks 口径去卡它们（而它们其实吃 sections）。</para></summary>
+    internal static bool IsPdfSkill(AgentSkillDefinition skill)
+    {
+        var id = skill.SkillId ?? "";
+        if (id.Contains("pdf", StringComparison.OrdinalIgnoreCase)) return true;
+        var name = skill.Name ?? "";
+        return name.Contains("pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>是否是电子表格生成技能（xlsx_book）：正文在 sheets 里。
+    /// <para>同 <see cref="IsPdfSkill"/>：只认 id / 名称，不看描述。</para></summary>
+    internal static bool IsSpreadsheetSkill(AgentSkillDefinition skill)
+    {
+        var id = skill.SkillId ?? "";
+        if (id.StartsWith("xlsx_", StringComparison.OrdinalIgnoreCase)) return true;
+        var name = skill.Name ?? "";
+        return id.Contains("xlsx", StringComparison.OrdinalIgnoreCase)
+            || id.Contains("excel", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Excel", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("电子表格", StringComparison.Ordinal)
+            || name.Contains("工作簿", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 电子表格技能的 sheets 校验：必须有非空 sheets，且每张表能看出列（columns/headers）或数据行。
+    /// <para>
+    /// 为什么要拦：模型很容易只给 <c>{title:"报表"}</c> 就收工，产物是一张只有工作簿名的空表，
+    /// 用户拿到手的“报表”没有任何数据（与 docx 只有标题是同一类失败）。
+    /// 另：<c>action=analyze</c> 是读取/分析已有文件，不产出文件，不适用本校验。
+    /// </para>
+    /// </summary>
+    private static string? ValidateSheetsInput(AgentSkillDefinition skill, System.Text.Json.JsonElement root)
+    {
+        // 读取 / 分析模式：入参是 path，本就不产出文件，放行。
+        if (root.TryGetProperty("action", out var act)
+            && act.ValueKind == System.Text.Json.JsonValueKind.String
+            && string.Equals(act.GetString(), "analyze", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (!root.TryGetProperty("sheets", out var sheets)
+            || sheets.ValueKind != System.Text.Json.JsonValueKind.Array
+            || sheets.GetArrayLength() == 0)
+            return $"（未生成表格：技能 {skill.SkillId} 的入参里没有 sheets，一张没有工作表的 Excel 没有意义。"
+                 + "请把数据整理成 sheets 数组，例如 "
+                 + "{\"sheets\":[{\"name\":\"销售明细\","
+                 + "\"columns\":[{\"header\":\"月份\",\"type\":\"text\"},{\"header\":\"金额\",\"type\":\"currency\"}],"
+                 + "\"rows\":[[\"1月\",12000],[\"2月\",15000]],\"totals\":true}]}，然后重新调用本技能。"
+                 + "注意：算出来的列要写 Excel 公式（如 \"=B2-C2\"、\"=SUM(B2:B4)\"），不要写死数值。）";
+
+        var usable = 0;
+        foreach (var s in sheets.EnumerateArray())
+        {
+            if (s.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+            var hasCols = s.TryGetProperty("columns", out var cols)
+                          && cols.ValueKind == System.Text.Json.JsonValueKind.Array
+                          && cols.GetArrayLength() > 0;
+            var hasHeaders = s.TryGetProperty("headers", out var hs)
+                             && hs.ValueKind == System.Text.Json.JsonValueKind.Array
+                             && hs.GetArrayLength() > 0;
+            var hasRows = s.TryGetProperty("rows", out var rows)
+                          && rows.ValueKind == System.Text.Json.JsonValueKind.Array
+                          && rows.GetArrayLength() > 0;
+            if ((hasCols || hasHeaders) && hasRows) usable++;
+        }
+        if (usable == 0)
+            return $"（未生成表格：技能 {skill.SkillId} 的 sheets 里没有一张表同时给出列定义与数据行，"
+                 + "产物会是一张空表。请给每张表写 columns（或 headers）与 rows，例如 "
+                 + "{\"name\":\"汇总\",\"headers\":[\"指标\",\"金额\"],\"rows\":[[\"总收入\",\"=SUM(明细!B2:B9)\"]]}。）";
+        return null;
+    }
+
+    /// <summary>
+    /// PDF 技能的入参校验：<c>blocks</c> 非空且能认出块类型，或直接给 <c>markdown</c> 正文。
+    /// <para>为什么拦：只给 title/subtitle 会产出一份“只有封面”的 PDF（实测 docx 同类失败）。</para>
+    /// </summary>
+    private static string? ValidatePdfInput(AgentSkillDefinition skill, System.Text.Json.JsonElement root)
+    {
+        // 1) 直接给 Markdown/正文 → 放行（技能自己做 REFORMAT 排版）
+        foreach (var key in new[] { "markdown", "content", "body", "text" })
+            if (root.TryGetProperty(key, out var v)
+                && v.ValueKind == System.Text.Json.JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(v.GetString()))
+                return null;
+
+        // 2) blocks 非空数组 → 还要看每项有 type（否则一块也认不出来）
+        if (root.TryGetProperty("blocks", out var blocks))
+        {
+            if (blocks.ValueKind != System.Text.Json.JsonValueKind.Array || blocks.GetArrayLength() == 0)
+                return PdfRejectText(skill);
+            var typed = 0;
+            foreach (var b in blocks.EnumerateArray())
+            {
+                if (b.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                if (b.TryGetProperty("type", out var ty)
+                    && ty.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(ty.GetString()))
+                    typed++;
+            }
+            if (typed == 0) return PdfWrongShapeText(skill);
+            return null;
+        }
+
+        // 3) 只有 title 一类的“封面”调用 → 拦
+        return PdfRejectText(skill);
+    }
+
+    /// <summary>PDF 技能拒绝执行时回给模型的可执行提示。</summary>
+    private static string PdfRejectText(AgentSkillDefinition skill)
+        => $"（未生成文件：技能 {skill.SkillId} 的入参里没有正文，照此生成的 PDF 只有封面。"
+         + "请把你刚才写在回复里的正文，逐块填进 blocks 数组——"
+         + "每项形如 {\"type\":\"h1\",\"text\":\"一、小节\"}、{\"type\":\"p\",\"text\":\"正文段落\"}、"
+         + "{\"type\":\"list\",\"items\":[\"要点一\",\"要点二\"]}、"
+         + "{\"type\":\"table\",\"headers\":[\"列1\",\"列2\"],\"rows\":[[\"a\",\"b\"]]}；"
+         + "也可以直接把整篇 Markdown 交给 markdown 参数，然后重新调用本技能。）";
+
+    /// <summary>PDF 技能 blocks 形状不对时的提示（给出正确块类型清单）。</summary>
+    private static string PdfWrongShapeText(AgentSkillDefinition skill)
+        => $"（未生成文件：技能 {skill.SkillId} 的 blocks 里没有一块带 type，这些块不会被识别。"
+         + "请给每块加 type：h1 / h2 / h3 / p / list / callout / quote / table / image / chart / code /"
+         + "divider / caption / pagebreak / spacer / kpi / toc。例如 "
+         + "{\"blocks\":[{\"type\":\"h1\",\"text\":\"一、平台简介\"},{\"type\":\"p\",\"text\":\"正文…\"}]}。）";
 
     /// <summary>是否是演示文稿（.pptx）生成技能：它的正文在 slides 里，校验口径与 docx 不同。</summary>
     internal static bool IsPresentationSkill(AgentSkillDefinition skill)

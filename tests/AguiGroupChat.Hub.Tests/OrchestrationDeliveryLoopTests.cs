@@ -670,4 +670,213 @@ public sealed class OrchestrationDeliveryLoopTests
         Assert.True(hasFile);
         Assert.Equal(9, content);
     }
+
+    // ---------- xlsx 技能：正文在 sheets（列定义 + 数据行），与 docx/pptx 又不同 ----------
+
+    private static AgentSkillDefinition XlsxSkill() => new()
+    {
+        SkillId = "xlsx_book", Name = "表格生成（Excel）", Kind = AgentSkillKind.Dotnet,
+        Description = "生成 Excel 工作簿（.xlsx），含多工作表、公式与数字格式。", Body = "public class S { }",
+    };
+
+    [Fact]
+    public void Xlsx_IsRecognizedAsSpreadsheetSkill()
+    {
+        Assert.True(AgentGatewayHelpers.IsSpreadsheetSkill(XlsxSkill()));
+        Assert.False(AgentGatewayHelpers.IsSpreadsheetSkill(DocxSkill()));
+        Assert.False(AgentGatewayHelpers.IsSpreadsheetSkill(PptxSkill()));
+    }
+
+    [Fact]
+    public void Xlsx_AcceptedWhenSheetsHaveColumnsAndRows()
+    {
+        var ok = AgentGatewayHelpers.ValidateDocumentSkillInput(XlsxSkill(),
+            "{\"title\":\"经营分析\",\"sheets\":[{\"name\":\"明细\","
+            + "\"columns\":[{\"header\":\"月份\"},{\"header\":\"金额\"}],"
+            + "\"rows\":[[\"1月\",12000],[\"2月\",15000]]}]}");
+        Assert.Null(ok);
+    }
+
+    [Fact]
+    public void Xlsx_AcceptedForHeadersShorthand()
+    {
+        var ok = AgentGatewayHelpers.ValidateDocumentSkillInput(XlsxSkill(),
+            "{\"sheets\":[{\"headers\":[\"指标\",\"金额\"],\"rows\":[[\"总收入\",100]]}]}");
+        Assert.Null(ok);
+    }
+
+    [Fact]
+    public void Xlsx_RejectedWhenSheetsMissing()
+    {
+        // 只给 title → 产物是一张空表（与 docx 只有标题是同一类失败）
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(XlsxSkill(), "{\"title\":\"报表\"}");
+        Assert.NotNull(why);
+        Assert.Contains("sheets", why);
+    }
+
+    [Fact]
+    public void Xlsx_RejectedWhenSheetsEmpty()
+    {
+        Assert.NotNull(AgentGatewayHelpers.ValidateDocumentSkillInput(XlsxSkill(), "{\"sheets\":[]}"));
+    }
+
+    [Fact]
+    public void Xlsx_RejectedWhenSheetHasNoRows()
+    {
+        // 只有列定义没有数据行 → 仍是空表
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(XlsxSkill(),
+            "{\"sheets\":[{\"name\":\"明细\",\"columns\":[{\"header\":\"月份\"}],\"rows\":[]}]}");
+        Assert.NotNull(why);
+        Assert.Contains("数据行", why);
+    }
+
+    [Fact]
+    public void Xlsx_AnalyzeMode_IsNotTreatedAsDelivery()
+    {
+        // analyze 是读取/分析已有文件，不产出文件，不该被“空壳”闸门拦住
+        Assert.Null(AgentGatewayHelpers.ValidateDocumentSkillInput(XlsxSkill(),
+            "{\"action\":\"analyze\",\"path\":\"/app/docs/已有.xlsx\"}"));
+    }
+
+    [Fact]
+    public void Xlsx_DeliveryThickness_CountsRowsNotBlocks()
+    {
+        // xlsx 报的是 sheets/rows/columns，没有 blocks。若沿用块数口径会永远算 0 → 无谓重试。
+        var text = "{\"ok\":true,\"sheets\":2,\"rows\":14,\"columns\":5,"
+                 + "\"produce_file\":{\"path\":\"/app/docs/a.xlsx\"}}";
+        var (hasFile, content) = AgentGateway.ParseDeliveryResult(text, "xlsx_");
+        Assert.True(hasFile);
+        Assert.Equal(14, content);
+    }
+
+    [Fact]
+    public void Xlsx_DeliveryThickness_OneRowTableCountsAsThin()
+    {
+        var text = "{\"ok\":true,\"sheets\":1,\"rows\":1,\"produce_file\":{\"path\":\"/a.xlsx\"}}";
+        var (hasFile, content) = AgentGateway.ParseDeliveryResult(text, "xlsx_");
+        Assert.True(hasFile);
+        Assert.True(content < 3, "只有表头 / 一行的表应低于交付阈值");
+    }
+
+    [Fact]
+    public void Pptx_MetricIsNotPollutedByRowsInTheSamePayload()
+    {
+        // 度量按类型选：一份 pptx 结果里即使出现 rows 字段，也不该被拿来做厚度判定
+        var text = "{\"ok\":true,\"slides\":2,\"rows\":99,\"produce_file\":{\"path\":\"/a.pptx\"}}";
+        var (_, content) = AgentGateway.ParseDeliveryResult(text, "pptx_");
+        Assert.Equal(2, content);
+    }
+
+    // ---------- pdf 技能：正文在 blocks（或直接给 markdown） ----------
+
+    private static AgentSkillDefinition PdfSkill() => new()
+    {
+        SkillId = "pdf_doc", Name = "PDF 文档生成", Kind = AgentSkillKind.Dotnet,
+        Description = "生成打印级 PDF（报告 / 方案 / 简历），含封面、目录与多种内容块。", Body = "public class S { }",
+    };
+
+    [Fact]
+    public void Pdf_IsRecognizedAsPdfSkill()
+    {
+        Assert.True(AgentGatewayHelpers.IsPdfSkill(PdfSkill()));
+        Assert.False(AgentGatewayHelpers.IsPdfSkill(DocxSkill()));
+        Assert.False(AgentGatewayHelpers.IsPdfSkill(XlsxSkill()));
+    }
+
+    [Fact]
+    public void Pdf_IsNotInferredFromDescriptionAlone()
+    {
+        // 很多技能描述里会顺带提“可导出 PDF”；若按描述匹配，会把吃 sections 的技能
+        // 错当 PDF 技能、用 blocks 口径去卡它。只认 id / 名称。
+        var docxLike = new AgentSkillDefinition
+        {
+            SkillId = "report_export", Name = "报告导出", Kind = AgentSkillKind.Dotnet,
+            Description = "把内容导出为规范排版的 Word 文档，也可另存为 PDF。", Body = "public class S { }",
+        };
+        Assert.False(AgentGatewayHelpers.IsPdfSkill(docxLike));
+    }
+
+    [Fact]
+    public void Pdf_AcceptedWhenBlocksHaveTypes()
+    {
+        var ok = AgentGatewayHelpers.ValidateDocumentSkillInput(PdfSkill(),
+            "{\"title\":\"白皮书\",\"blocks\":[{\"type\":\"h1\",\"text\":\"一、概述\"},"
+            + "{\"type\":\"p\",\"text\":\"正文…\"}]}");
+        Assert.Null(ok);
+    }
+
+    [Fact]
+    public void Pdf_AcceptedForMarkdownPayload()
+    {
+        Assert.Null(AgentGatewayHelpers.ValidateDocumentSkillInput(PdfSkill(),
+            "{\"markdown\":\"# 标题\\n\\n正文\"}"));
+    }
+
+    [Fact]
+    public void Pdf_RejectedWhenBlocksMissing()
+    {
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(PdfSkill(), "{\"title\":\"白皮书\"}");
+        Assert.NotNull(why);
+        Assert.Contains("blocks", why);
+    }
+
+    [Fact]
+    public void Pdf_RejectedWhenNoBlockHasType()
+    {
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(PdfSkill(),
+            "{\"blocks\":[{\"text\":\"没有 type\"}]}");
+        Assert.NotNull(why);
+        Assert.Contains("type", why);
+    }
+
+    [Fact]
+    public void Pdf_DeliveryThickness_UsesBlocks()
+    {
+        var text = "{\"ok\":true,\"pages\":5,\"blocks\":18,\"produce_file\":{\"path\":\"/a.pdf\"}}";
+        var (hasFile, content) = AgentGateway.ParseDeliveryResult(text, "pdf_");
+        Assert.True(hasFile);
+        Assert.Equal(18, content);
+    }
+
+    // ---------- 编排：要 Excel / PDF 时点名内置技能 ----------
+
+    [Fact]
+    public void NoGap_WhenTeamAlreadyHasXlsxSkill()
+    {
+        var plan = Plan(("writer", ["copywriting"]), ("book", ["xlsx_book"]));
+        Assert.Null(AgentOrchestrator.DetectDeliveryGap(plan, "把数据整理成一张 Excel 表"));
+    }
+
+    [Fact]
+    public void NoGap_WhenTeamAlreadyHasPdfSkill()
+    {
+        var plan = Plan(("writer", ["copywriting"]), ("printer", ["pdf_doc"]));
+        Assert.Null(AgentOrchestrator.DetectDeliveryGap(plan, "给我出一份 PDF 报告"));
+    }
+
+    [Fact]
+    public void GapHint_NamesTheBuiltinXlsxSkill()
+    {
+        var plan = Plan(("writer", ["copywriting"]));
+        var warn = AgentOrchestrator.DetectDeliveryGap(plan, "整理成 Excel 表发我");
+        Assert.NotNull(warn);
+        Assert.Contains("xlsx_book", warn);
+    }
+
+    [Fact]
+    public void GapHint_NamesTheBuiltinPdfSkill()
+    {
+        var plan = Plan(("writer", ["copywriting"]));
+        var warn = AgentOrchestrator.DetectDeliveryGap(plan, "要一份 pdf 交付稿");
+        Assert.NotNull(warn);
+        Assert.Contains("pdf_doc", warn);
+    }
+
+    [Fact]
+    public void Prompt_TellsModelToReuseBuiltinXlsxAndPdfSkills()
+    {
+        var prompt = AgentOrchestrator.BuildPromptForTest("做一个团队，最终要 excel 和 pdf", null);
+        Assert.Contains("xlsx_book", prompt);
+        Assert.Contains("pdf_doc", prompt);
+    }
 }
