@@ -1,5 +1,62 @@
-# AG-UI 群聊桌面版 1.0.128 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.128 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.129 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.129 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.129 为当前 Windows 桌面版本。修复了**内置产出技能（Word / PPT）的图表**两个缺陷：① **内容一多就画出画布**（长标题、多系列、多分类、大数值）；② **饼图其实一直没画出来**（扇区被填成了几乎没面积的“弓形”）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.129 is the current Windows desktop release. It fixes two defects in the **chart renderers** of the built-in authoring skills (Word / PPT): (1) **content spilling outside the canvas** with long titles, many series, many categories or large values; and (2) **pie charts that were effectively never drawn** (slices were filled as near-zero-area circular *segments*). Web and desktop share the same Hub / gateway / frontend.
+
+## 修复一：图表内容过多会越界（1.0.129）
+# Fix 1: charts spilling outside the canvas (1.0.129)
+
+中文：
+- **现象**：图表标题很长、系列/分类很多、数值位数很大时，文字与图例会被画出画布边界（ImageSharp 会静默裁到边框，于是贴着边就是最后的痕迹）。
+- **根因**：渲染器全程使用**固定坐标**——标题直接画在 `x=8`、Y 轴刻度写死左边距、图例一行横向累加 x 坐标、分类标签按字符数而不按实际槽宽判断是否挤压。内容一多，锚点就跑到画布外。
+- **修复（两侧一致）**：
+  - 标题按可用宽度**先缩字号再裁剪**；
+  - Y 轴刻度文案**先量宽**，据此推左边距（钳在 72–200px）并**右对齐**到轴线左侧；
+  - 图例按宽度**换行**（最多 3 行），每项按宽裁剪，放不下的补“…等 N 项”，且**把图例占用的行数提前计入顶部留白**；
+  - 分类标签按**槽宽**裁剪，过密时**隔位显示**（`stride = ceil(52 / slot)`），绘制起点用 `ClampX` 夹在绘图区内；
+  - 饼图图例同样按宽裁剪、按高限行数并补“…等 N 项”。
+  - 另外 PPT 的**页面正文**（`content` 页型）新增“内容太多整体缩字号”：先整理要点 → 估算高度定缩放（下限 0.6）→ 再生 XML。
+- **实测（逐像素求墨迹包围盒，画布 1400×800 / 900×480）**：
+
+  | 图 | 修复前 | 修复后（PPT） | 修复后（Word） |
+  |---|---|---|---|
+  | 柱状 | 右侧贴边 `R0` | `L20 T25 R35 B51` | `L18 T23 R27 B42` |
+  | 折线 | 右侧贴边 `R0` | `L20 T25 R35 B51` | `L18 T23 R24 B42` |
+  | 饼图 | 墨迹铺到 `(0,0)-(1399,799)` | `L40 T23 R40 B26` | `L24 T19 R23 B29` |
+
+English:
+- **Symptom**: with a very long title, many series/categories, or many-digit values, text and legends were drawn past the canvas edge (ImageSharp silently clips at the border, so “hugging the edge” is the tell-tale sign).
+- **Root cause**: the renderer used **fixed coordinates throughout** — the title was drawn at a hard-coded `x=8`, the Y-axis left padding was constant, the legend accumulated x across a single row, and category labels decided “too crowded?” by character count rather than actual slot width.
+- **Fix (identical on both sides)**: titles shrink-then-clip to the available width; Y-axis tick labels are measured first to derive the left padding (clamped to 72–200px) and are **right-aligned** against the axis; legends **wrap** by width (max 3 rows), clip per item, and fall back to “…and N more”, with their row count **folded into the top padding**; category labels are clipped to the **slot** width, **thinned** when crowded (`stride = ceil(52 / slot)`) and clamped into the plot area; pie legends clip by width and cap rows the same way. PowerPoint `content` slides also gained *shrink-to-fit body text* (estimate height → pick a scale, floor 0.6 → emit XML).
+- **Measured** (per-pixel ink bounding box, canvases 1400×800 / 900×480): as in the table above; before the fix the bar and line charts hugged the right edge (`R0`) and the pie's ink covered `(0,0)-(1399,799)`.
+
+## 修复二：饼图一直没被真正画出来（1.0.129）
+# Fix 2: pie charts were never actually drawn (1.0.129)
+
+中文：
+- **现象**：饼图区域**整片留白**，只在圆盘外缘留一圈极细的弧线（远看就是“这张图没画”）。
+- **根因**：`PathBuilder.AddArc` **只是往当前图形里追加一段弧**——它既不会先移到圆心，也不会自动补上两条半径。代码只做 `AddArc` + `Fill`，于是路径被当成「弧 + 弦」围成的**弓形**来填充，面积远小于扇形：40 项饼图只剩 **0.8%** 的彩色像素。
+  - PPT 侧还有一种更糟的形态：误用了 `AddArc` 的 7 参重载（它的前两个参数同样是**圆心**，不是包围盒左上角），算出**半径翻倍的巨大圆**，墨迹直接铺满整张画布（连 `(0,0)` 都被填上）。
+- **修复**：不再依赖 `AddArc` 的重载语义，改为显式围出扇形——`MoveTo(圆心)` → 沿弧 `LineTo` 走一圈 → `CloseFigure()`，用每 2° 一段的多边形逼近（弦高远小于 1px，肉眼不可见）。Word / PPT 两侧统一。
+- **实测（彩色像素占比，真圆盘应占画布约 27%）**：PPT 饼图从 **0.8% → 28.8%**；Word 饼图从 **0.8% → 26.8%**。
+- **回归测试**：新增 `ChartOverflowTests`，把 200 字标题 + 30 个 20 字分类 + 4 个长名系列 + 40 项饼图图例跑过**真实** `DotnetSkillHost`，从产物里抠出图表 PNG，用自带的纯 C# PNG 解码器**逐像素求墨迹包围盒**断言四周留空边；并另加两条**饼图实心度**断言（彩色像素占比 ≥ 20%）。
+  仅断言“没越界”是不够的——扇区画坏时整张图仍全在画布内，越界断言一律通过。
+  已实测：把两侧的修复分别回退后，对应测试**确实失败**（PPT 饼图墨迹回到 `(0,0)-(1399,799)`、柱/折线回到 `R0`；饼图实心度回到 0.8% / 17.3% / 13.7%）。
+- **全量单测**：**1157 通过 / 1 失败**。唯一失败的是既有的 `TwinTriggerTests`（用 `Task.Delay(200)` 等异步触发派发，全量并行跑时会偶发超时；单独跑通过），**与本次改动无关**，未在本次修复。
+
+English:
+- **Symptom**: the pie area was **blank**, with only a hairline arc along the rim — effectively “the chart wasn't drawn”.
+- **Root cause**: `PathBuilder.AddArc` only *appends an arc to the current figure* — it neither moves to the centre nor adds the two radii. The code did `AddArc` + `Fill`, so the path was filled as the circular **segment** cut off by the arc and its chord, whose area is far smaller than the wedge: a 40-item pie kept only **0.8%** coloured pixels. On the PowerPoint side there was an even worse variant: the 7-argument `AddArc` overload was used (its first two arguments are also the **centre**, not the bounding-box corner), producing a circle of **double radius** that flooded the entire canvas (even `(0,0)` was painted).
+- **Fix**: stop relying on `AddArc` overload semantics and build the wedge explicitly — `MoveTo(centre)` → walk the arc with `LineTo` → `CloseFigure()`, using a polygon approximation at 2° per step (sagitta far below 1px). Applied identically to the Word and PPT renderers.
+- **Measured** (share of coloured pixels; a real disk covers ≈27% of the canvas): the PPT pie went **0.8% → 28.8%** and the Word pie **0.8% → 26.8%**.
+- **Regression tests**: the new `ChartOverflowTests` runs a stress payload (200-character title, 30 categories of 20 characters, 4 long-named series, a 40-item pie legend) through the **real** `DotnetSkillHost`, extracts the chart PNGs from the produced package and asserts, with a hand-written pure-C# PNG decoder, that the **per-pixel ink bounding box** still leaves margin on all four sides. Two further assertions cover **pie solidity** (coloured share ≥ 20%): checking “nothing is out of bounds” alone is not enough, because a broken slice still sits entirely inside the canvas. Verified by reverting each side's fix in turn — the corresponding tests **do** fail (PPT pie ink back to `(0,0)-(1399,799)`, bar/line back to `R0`; solidity back to 0.8% / 17.3% / 13.7%).
+- **Full suite**: **1157 passed / 1 failed**. The single failure is the pre-existing `TwinTriggerTests` (it waits on async trigger dispatch via `Task.Delay(200)` and occasionally times out under full parallel load; it passes in isolation). It is **unrelated to this change** and was left untouched.
+
+---
+
+# AG-UI 群聊桌面版 1.0.128 发布说明
+# AG-UI Group Chat Desktop 1.0.128 Release Notes
 
 **版本说明**：1.0.128 为当前 Windows 桌面版本。修复了**图表里的标点符号方向错误**（破折号 `—` 变成竖线、`（）「」【】《》` 被旋转 90°）。Web 与桌面共用同一套 Hub/网关/前端。
 **Version note**: 1.0.128 is the current Windows desktop release. It fixes **punctuation rendered with the wrong orientation in charts** (an em dash `—` came out as a vertical bar, `（）「」【】《》` were rotated 90°). Web and desktop share the same Hub / gateway / frontend.
