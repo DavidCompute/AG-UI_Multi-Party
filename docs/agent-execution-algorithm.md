@@ -113,7 +113,13 @@ flowchart TD
     batch --> cascade
     cascade --> more{还有 step?}
     more -- 是 --> step1
-    more -- 否 --> rs["最终·递归综合 ExecuteRecursiveAnswerAsync"]
+    more -- 否 --> nd{计划里跳过了文档生成类技能?<br/>needsDelivery}
+    nd -- 否 --> rs["最终·递归综合 ExecuteRecursiveAnswerAsync"]
+    nd -- 是 --> deliver["交付兑底 TrySatisfyDeliveryAsync：找挂了匹配文件技能的同事，完整流式让它自己调技能并回档产物"]
+    deliver --> dhandled{交付接手了吗?}
+    dhandled -- 已出文件 / 已挂审批卡 --> done
+    dhandled -- 静默放弃 --> planNote["补发计划说明（如实告知跳过了哪些步及原因）"]
+    planNote --> done
 
     rs --> enough{信息足够 needsMore=false?}
     enough -- 否 --> pick{还需补查 skill / dispatch?}
@@ -123,6 +129,8 @@ flowchart TD
 ```
 
 > 说明：递归补查有轮次上限（`MaxRecursiveRounds`）；“已执行技能/已带回结果的下属”会去重，避免同一技能被重复调用两次。客户端技能在本机执行也必须走批准/桥，服务端绝不当 bash 误跑此类 PowerShell 技能。
+>
+> 交付分支（1.0.137 修正）：文档生成技能的入参是结构化 JSON，必须由模型当工具调用构造，计划路径按纯文本直接调它只会塑出空壳文档，因此计划里跳过它并标记 `needsDelivery`，改由交付兑底完整流式产出。交付物类型优先取用户那句里的格式词，用户没提格式词时回退用**计划点名的文件技能**（否则“希望有一些插图”这类迭代请求会因判不出交付物而直接放弃）；计划内各步产出会作为正文素材（`upstreamDraft`）一并交给交付岗。计划侧那段“说明”在交付收尾时暂不发，只有交付**静默放弃**（没认出交付物 / 找不到能做的岗位）时才补发，避免空消息，也避免两条自相矛盾的说明叠在同一条消息里。
 
 ---
 
@@ -179,4 +187,5 @@ In one sentence: once a message touches a digital employee, the runtime picks a 
 - 总入口与 ambient/桥退避：`AgentGateway.InvokeAsync`。
 - 分派(s开关)：`InvokeCoreAsync`（桥 `InvokeBridgeAsync` / 流水线 `InvokePipelineAsync` / 交接 `InvokeRelayAsync` / 语言沉默 / 策划指派 `InvokeAssignmentEscalationAsync` / 普通流式）。
 - 组织化路由/计划/递归综合/计划卡广播：`BuildCoordinatedPlanAsync` / `ExecuteCoordinatedPlanAsync` / `ExecuteRecursiveAnswerAsync` / `RecordStandinChain`。
+- 交付兑底与交付物类型判定：`TrySatisfyDeliveryAsync` / `RunDeliveryStreamAsync` / `WantedDeliverable` / `DeliverableFromSkillId` / `BuildDeliveryPrompt` / `BuildNoOutputFallback`。
 - 普通 run：`agent.RunStreamingAsync`、审批 (`HITL`) 恢复 `ResumeRunAsync`、暂停清理 `ResolveInteractionAsync`、批量客户端 `AwaitBatchClientExecAsync`。

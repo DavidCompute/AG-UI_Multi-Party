@@ -1153,20 +1153,34 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (plan is not null)
             {
                 // 编排计划：随消息流逐项激活 & 逐条点亮计划卡（TEXT_MESSAGE_PLAN 前端渲染）
-                var planNeedsDelivery = await ExecuteCoordinatedPlanAsync(context, plan, messageId, runCt);
+                var planOutcome = await ExecuteCoordinatedPlanAsync(context, plan, messageId, runCt);
                 // 计划跳过了文档生成技能（它的入参是结构化 JSON，必须由模型当工具构造）：
                 // 这里补一次交付兑底 —— 完整流式，让模型自己调技能并回档产物。
                 // 不这么做就会退化为“计划跑了、用户仍拿不到文件”。
-                if (planNeedsDelivery && WantedDeliverable(context.Content) is not null)
+                if (planOutcome.NeedsDelivery)
                 {
                     // 传外层原始 ct（而非 runCt）：runCt 的时间预算可能已被计划/递归消耗待尽，
                     // 交付兑底内部会基于它另开一份新预算。
-                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, ct, runId, messageId);
+                    // 同时把计划内已产出的内容一并传过去：交付岗直接拿它当正文素材，
+                    // 不必从用户那句原始请求从零重写（否则前面各岗位的产出全白做）。
+                    // 交付物类型优先听用户那句话；用户没提格式词时（如“希望有一些插图”）
+                    // 回退用计划点名的文件技能，否则会直接放弃交付 —— 实测就是“什么都没给”。
+                    var delivery = await TrySatisfyDeliveryAsync(context, input, hops, ct, runId, messageId,
+                        planOutcome.Collected, planOutcome.DeliverySkillId);
                     if (delivery.MessageId is { } pmid) messageId = pmid;
                     if (delivery.AwaitingInteraction)
                     {
                         _logger.LogInformation("编排计划因交付兑底中断等待交互：run={RunId} interruptTarget={Target}", runId, context.TriggerUserId);
                         return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
+                    }
+                    // 交付根本没发生（没认出交付物 / 找不到能做的岗位 / 空异常）：
+                    // 这时才把计划侧那段“为什么没内容”的说明补上，否则用户只看到一条空消息。
+                    if (ShouldAppendPlanText(delivery.AwaitingInteraction, delivery.Handled, planOutcome.PlanText))
+                    {
+                        _logger.LogWarning("交付兑底未接手，补发计划说明以免空消息：run={RunId} len={Len}",
+                            runId, planOutcome.PlanText.Length);
+                        foreach (var chunk in AgentGatewayHelpers.ChunkReply(planOutcome.PlanText, 160))
+                            await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId!, chunk, runCt);
                     }
                 }
             }
@@ -1299,16 +1313,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 最后综合各步给最终答复并广播计划完成。任一异常都优雅收尾（不再阻断消息）。
     /// </summary>
     /// <returns>
-    /// 是否因“跳过了文档生成类技能”而需要外层再跑一次交付兑底。
-    /// 这类技能的入参是结构化 JSON，必须由模型当工具调用才能构造，
-    /// 计划路径按纯文本直接调它只会塑出空壳文档（实测：Word 只有标题）。
+    /// 本次计划的执行情况：是否需要外层再跑一次交付兑底，以及计划内实际产出的内容。
+    /// 后者供交付兑底当正文素材（否则它只能从用户原始请求从零重写，等于把前面各岗位的产出全丢掉）。
+    /// “需要兑底”指的是计划跳过了文档生成类技能——这类技能的入参是结构化 JSON，必须由模型当工具调用
+    /// 才能构造，计划路径按纯文本直接调它只会塑出空壳文档（实测：Word 只有标题）。
     /// </returns>
-    private async Task<bool> ExecuteCoordinatedPlanAsync(AgentInvocationContext context, CoordinatedPlan plan, string messageId, CancellationToken ct)
+    private async Task<CoordinatedPlanOutcome> ExecuteCoordinatedPlanAsync(AgentInvocationContext context, CoordinatedPlan plan, string messageId, CancellationToken ct)
     {
         var root = _catalog.GetDefinition(context.AgentId);
-        if (root is null) return false;
+        if (root is null) return new CoordinatedPlanOutcome(false, "", null, "");
         var gid = context.GroupId;
         var needsDelivery = false; // 计划里跳过了交付类技能 → 交给外层交付兑底
+        var collectedOut = "";     // 计划内已产出的内容（交付兑底的素材）
+        var planTextOut = "";       // 本计划本该展示的正文（见下方：需交付时暂不发）
+        // 计划里被跳过的文档生成技能 id：外层交付兑底据此确定要出哪种文件。
+        // 必要性（实测）：用户接着说“希望有一些插图”这类话时，句子里没有任何格式词，
+        // 而交付判断原先只看当前这句 → 判不出交付物 → 直接放弃；上一步说“我希望ppt是绿色的”能成功，
+        // 只因句子里恰好有“ppt”。计划已经点名了要用哪个文件技能，就该听计划的。
+        string? skippedDeliverySkill = null;
 
         // 计划暂停/继续闸门：先登记（端点收到暂停请求时能定位到本计划），随执行结束/异常移除
         var planGate = _planControl.Value?.Begin(messageId, gid, context.AgentId, context.TriggerUserId);
@@ -1337,9 +1359,28 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 2) 分拣：客户端执行技能（ExecutionLocation=Client，需本机执行）与非客户端步骤（dispatch / 服务端技能）。
         //    客户端技能统一合并成「本机一键执行全部」批处理（一次确认，逐个执行、逐条点亮），
         //    其余步骤照旧循序执行、结果级联。
+        // 累计缓冲：每一步产出的摘要。**千万不要 Clear**——它要供后续步骤参考（“前序已产出”），
+        // 也是“未汇总出最终文本”时的兜底展示内容。
+        // 实测踩到：原先是单槽（每步 Clear 后重写），于是最后一步没产出时，
+        // 先前各岗位的成果全被丢掉，兜底文案宣称“已收集各岗位结果”却一个字都没有。
         var sb = new StringBuilder();
+        // 被跳过的步骤与原因：兜底时要如实说明跳了什么、为什么，不要再笼统道歉
+        var skipNotes = new List<string>();
+        // 真正跑过（指派 / 技能 / 批量客户端技能）的步骤数：用于兜底时区分
+        // “一步都没跑”与“跑了但没有任何可展示产出”，不再写死“已收集各岗位结果”
+        var stepsRan = 0;
         var working = plan.Input;
         var hops = new List<ChainNode>();
+
+        void Remember(string label, string? content)
+        {
+            if (string.IsNullOrWhiteSpace(content)) return;
+            if (sb.Length > 0) sb.Append("\n\n");
+            sb.Append("【").Append(label).Append("】\n").Append(content!.Trim());
+        }
+
+        // 拼进 prompt 的“前序”要有上限（累计后会变长，不能无限撑大下游提示）
+        static string Tail(string s, int max) => s.Length <= max ? s : "…（前文从前略）\n" + s.Substring(s.Length - max);
         // 本问内已执行能力（计划阶段）全局去重：同一技能/员工在一答里只真正执行一次
         var capExecuted = new HashSet<string>(StringComparer.Ordinal);
         var clientSteps = new SortedDictionary<int, BatchClientItem>(); // planIndex(展示索) → 批量项
@@ -1350,7 +1391,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 || csk.ExecutionLocation != AgentSkillExecutionLocation.Client) continue;
             // 客户端执行的文档生成技能同样不在此直接跑（同样是结构化 JSON 入参）：
             // 留给交付兑底走完整流式，让模型构造参数后经本机桥执行。
-            if (AgentGatewayHelpers.IsDocumentGenerator(csk)) { needsDelivery = true; continue; }
+            if (AgentGatewayHelpers.IsDocumentGenerator(csk))
+            {
+                needsDelivery = true;
+                skippedDeliverySkill ??= csk.SkillId;
+                skipNotes.Add($"第{i + 1}步「{csk.Name ?? csk.SkillId}」：文档生成技能不在此阶段执行，改由交付环节直接生成文件");
+                continue;
+            }
             // 同一技能在计划里出现多次 → 只保留第一次，避免重复执行
             if (!capExecuted.Add(csk.SkillId)) continue;
             var cq = working;
@@ -1372,12 +1419,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (step.Action == "dispatch")
             {
                 if (_catalog.GetDefinition(step.Target) is not { } target
-                    || !plan.Reached.Any(r => r.AgentId == step.Target)) continue;
+                    || !plan.Reached.Any(r => r.AgentId == step.Target))
+                {
+                    skipNotes.Add($"第{si + 1}步 指派：目标员工不可用，或不在本计划可指派范围内");
+                    continue;
+                }
                 // 同一员工在计划里出现多次 → 只指派一次，后续复用其结果
-                if (!capExecuted.Add("agent:" + step.Target)) continue;
+                if (!capExecuted.Add("agent:" + step.Target))
+                {
+                    skipNotes.Add($"第{si + 1}步 指派「{target.Nickname ?? step.Target}」：同一员工本轮已指派过，直接复用其前序结果");
+                    continue;
+                }
                 var child = _catalog.GetOrCreate(step.Target);
                 var prompt = "你正被「" + (target.Nickname ?? step.Target) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：\n" + working
-                    + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + sb : "")
+                    + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + Tail(sb.ToString(), 6000) : "")
                     + "\n\n只输出本步结论，不要复述前序内容。";
                 var session = await child.CreateSessionAsync(ct);
                 var prev = AgentGateway.AmbientContext.Value;
@@ -1385,10 +1440,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 try
                 {
                     var resp = await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
+                    stepsRan++;
                     var stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（未返回内容）" : resp.Text.Trim();
                     if (!hops.Any(h => h.AgentId == step.Target))
                         hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = AgentGatewayHelpers.TruncateForChain(working), Result = AgentGatewayHelpers.TruncateForChain(stepOut) });
-                    sb.Clear().Append(stepOut);
+                    Remember(target.Nickname ?? step.Target, stepOut);
                     working = stepOut;
                 }
                 finally { AgentGateway.AmbientContext.Value = prev; }
@@ -1397,9 +1453,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
             else if (step.Action == "skill")
             {
-                if (!plan.Skills.TryGetValue(step.Target, out var skill)) continue;
+                if (!plan.Skills.TryGetValue(step.Target, out var skill))
+                {
+                    skipNotes.Add($"第{si + 1}步 技能调用：计划里没有该技能的定义");
+                    continue;
+                }
                 // 重拾：OrgDeploy（受控落库）不是可批跑技能 —— 万一命中也不投给 SkillRunner（防御性跳过）
-                if (skill.Kind == AgentSkillKind.Org_deploy) continue;
+                if (skill.Kind == AgentSkillKind.Org_deploy)
+                {
+                    skipNotes.Add($"第{si + 1}步「{skill.Name ?? skill.SkillId}」：落库类技能不在本阶段执行");
+                    continue;
+                }
                 // 文档生成类技能（docx_* / md_to_docx / xlsx_* …）：**不能在计划路径里直接调**。
                 // 它们的入参是结构化 JSON（{title, sections:[…]}），必须由模型当工具调用构造；
                 // 计划路径只会把一段纯文本（群上下文 / 平台前言）塑给它 → JsonReaderException 或空壳文档
@@ -1408,13 +1472,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 if (AgentGatewayHelpers.IsDocumentGenerator(skill))
                 {
                     needsDelivery = true;
+                    skippedDeliverySkill ??= skill.SkillId;
+                    skipNotes.Add($"第{si + 1}步「{skill.Name ?? skill.SkillId}」：文档生成技能不在此阶段执行，改由交付环节直接生成文件");
                     _logger.LogInformation("计划步骤为文档生成技能，改走交付兑底（避免纯文本塑入）：skill={SkillId}", skill.SkillId);
                     if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
                     await BroadcastPlanAsync(gid, messageId, display, ct);
                     continue;
                 }
                 // 同一服务端技能在计划里出现多次 → 只执行一次，后续复用其结果
-                if (!capExecuted.Add(skill.SkillId)) continue;
+                if (!capExecuted.Add(skill.SkillId))
+                {
+                    skipNotes.Add($"第{si + 1}步「{skill.Name ?? skill.SkillId}」：同一技能本轮已执行过，直接复用其前序结果");
+                    continue;
+                }
                 var skillQuery = working;
                 if (AgentGatewayHelpers.SkillRequiredInputs(skill).Contains("query", StringComparer.Ordinal))
                 {
@@ -1451,7 +1521,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     {
                         var why = $"（未能生成文件：没有可供转换的正文内容（上游未产出定稿），技能 {skill.SkillId} 未执行。请先在群里要素材/定稿，或把要排版的内容直接发给我。）";
                         _logger.LogWarning("交付技能无可用输入且群内无上游产出，已跳过执行：skill={SkillId}", skill.SkillId);
-                        sb.Clear().Append(why);
+                        Remember(skill.Name ?? skill.SkillId, why);
                         working = why;
                         if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
                         await BroadcastPlanAsync(gid, messageId, display, ct);
@@ -1460,6 +1530,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 }
 
                 var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
+                stepsRan++;
                 _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, AgentGatewayHelpers.TruncateForChain(skillQuery));
                 // 编排路径的技能产物同样需要回档：技能返回值里的 produce_file 标记要入库为附件，
                 // 否则「计划里调了 docx 技能、用户却拿不到文件」——这条路径不经过模型正文，
@@ -1467,13 +1538,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 await AttachSkillProducedFilesAsync(gid, messageId, res, ct);
                 if (!hops.Any(h => h.AgentId == skill.SkillId))
                     hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = AgentGatewayHelpers.TruncateForChain(res) });
-                sb.Clear().Append(res);
+                Remember(skill.Name ?? skill.SkillId, res);
                 working = res;
                 if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
                 await BroadcastPlanAsync(gid, messageId, display, ct);
             }
         }
 
+        // 4) 批量执行客户端技能（若有）
         // 4) 批量执行客户端技能（若有）：合并下发一张「本机一键执行全部」交互卡，前端逐个执行、逐条回传、逐条点亮
         await PausePlanIfRequestedAsync(planGate, gid, messageId, display, ct);
         if (clientSteps.Count > 0)
@@ -1485,9 +1557,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 var item = kv.Value;
                 var outText = (results is not null && results.TryGetValue(item.SkillId, out var r) && !string.IsNullOrWhiteSpace(r))
                     ? r : "（本机执行未返回结果 / 已取消）";
+                if (results is not null && results.ContainsKey(item.SkillId)) stepsRan++;
                 if (!hops.Any(h => h.AgentId == item.SkillId))
                     hops.Add(new ChainNode { Kind = "skill", AgentId = item.SkillId, AgentNickname = item.Name, Query = AgentGatewayHelpers.TruncateForChain(item.Query), Result = AgentGatewayHelpers.TruncateForChain(outText) });
-                sb.Clear().Append(outText);
+                Remember(item.Name, outText);
                 working = outText;
                 if (idx < display.Count) display[idx] = new PlanStepInfo { Id = display[idx].Id, Text = display[idx].Text, Done = true };
                 await BroadcastPlanAsync(gid, messageId, display, ct);
@@ -1527,29 +1600,88 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             final = await ExecuteRecursiveAnswerAsync(context, root, gid, messageId, plan.Input, sb.ToString(),
                 ranSkills, ct) ?? "";
         }
-        // 空正文兜底：若综合答复也没产出可展示文本，绝不留下"只有计划卡、正文空白"的消息——
-        // 直接把已收集的关键中间结果整理成一段可见回答（并说明未做进一步综合的原因）。
+        // 空正文兜底：若综合答复也没产出可展示文本，绝不留下"只有计划卡、正文空白"的消息。
+        // 三级降级，且每级都要说实话：
+        //   ① 有汇总文本 → 直接用；
+        //   ② 无汇总但有计划内产出 → 把已收集的中间结果摊给用户；
+        //   ③ 两者皆空 → 按实际执行情况说明（原先这里写死“已按计划收集了各岗位的结果”，
+        //      而恰恰在一步都没跑时它也这么说，用户拿到一句空话却无从判断下一步怎么做）。
         var finalTrimmed = string.IsNullOrWhiteSpace(final) ? "" : final.Trim();
+        var collected = sb.ToString().Trim();
+        collectedOut = collected; // 交给交付兑底当素材（即使 final 为空也不能丢）
         string text;
         if (finalTrimmed.Length > 0)
+        {
             text = finalTrimmed;
-        else if (!string.IsNullOrWhiteSpace(sb.ToString()))
-            text = sb.ToString().Trim();
+        }
+        else if (collected.Length > 0)
+        {
+            _logger.LogInformation("无最终汇总文本，回退展示计划内产出：steps={Steps} ran={Ran} collectedLen={Len} needsDelivery={Needs}",
+                plan.Steps.Count, stepsRan, collected.Length, needsDelivery);
+            text = collected;
+        }
         else
-            text = "（本轮已按计划收集了各岗位的结果，但未汇总出可展示的最终文本。请让我基于现有结果再组织一次，或把问题拆细一点分开问，我会给出完整成稿。）";
+        {
+            // 走到这里说明：既没有汇总文本，计划内也没留下任何产出。触发原因通常是每步都被跳过，
+            // 或全部步骤执行后返回了空。原实现此处无任何日志，线上根本无法定位（已踩过）。
+            _logger.LogWarning(
+                "计划无任何可展示产出，进入如实兜底：steps={Steps} ran={Ran} needsDelivery={Needs} skips=[{Skips}] input={Input}",
+                plan.Steps.Count, stepsRan, needsDelivery, string.Join(" | ", skipNotes),
+                AgentGatewayHelpers.TruncateForChain(plan.Input));
+            text = BuildNoOutputFallback(stepsRan, skipNotes);
+        }
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
         text = UnwrapCoordinationAnswer(text); // 防御：若模型把内部 JSON 决策原样当回复，剥出 user-facing answer
         if (string.IsNullOrWhiteSpace(text.Trim()))
             text = "（本轮协作已执行，但未产出可直接展示的正文。可让我按计划分步重试，或换一种更明确的问法。当前不存在可作答的遗漏步骤。）";
-        foreach (var chunk in AgentGatewayHelpers.ChunkReply(text.Trim(), 160))
-            await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
+        text = text.Trim();
+        planTextOut = text;
+        // 交给交付兑底收尾时不在这里发正文：交付成了就由它给正文＋下载卡片，
+        // 而计划这段“什么都没跑”的说明叠在交付结果前面只会让用户困惑（实测就这么出现过）。
+        // 因此把文本回传给调用方，由它在“交付真没发生”时再补上。
+        if (!needsDelivery)
+            foreach (var chunk in AgentGatewayHelpers.ChunkReply(text, 160))
+                await _hub.Value.AppendAgentContentAsync(gid, messageId, chunk, ct);
         }
         finally
         {
             _planControl.Value?.End(messageId);
         }
-        return needsDelivery;
+        return new CoordinatedPlanOutcome(needsDelivery, collectedOut, skippedDeliverySkill, planTextOut);
     }
+
+    /// <summary>编排计划执行结果：<paramref name="NeedsDelivery"/> 是否需要外层交付兑底；
+    /// <paramref name="Collected"/> 计划内各步实际产出（带岗位/技能标签），供交付兑底当正文素材；
+    /// <paramref name="DeliverySkillId"/> 计划里被跳过的文档生成技能（用于确定交付物类型）；
+    /// <paramref name="PlanText"/> 本计划本该展示的正文（需交付时暂不发，由调用方在交付未发生时补发）。</summary>
+    private readonly record struct CoordinatedPlanOutcome(
+        bool NeedsDelivery, string Collected, string? DeliverySkillId, string PlanText);
+
+    /// <summary>计划阶段既无汇总文本、又无任何计划内产出时的如实兜底文案。
+    /// 区分“一步都没跑”与“跑了但没产出”，并列出被跳过的步骤及原因，
+    /// 避免旧实现那句写死的“已按计划收集了各岗位的结果”在什么都没跑时误导用户。
+    /// 测试钩子（internal）。</summary>
+    internal static string BuildNoOutputFallback(int stepsRan, IReadOnlyList<string> skipNotes)
+    {
+        var sb = new StringBuilder();
+        if (stepsRan == 0)
+            sb.Append("（本轮计划里的步骤没有一步真正执行，因此没有可汇总的结果。）");
+        else
+            sb.Append("（本轮实际执行了 ").Append(stepsRan).Append(" 个步骤，但它们都没有返回可展示的内容。）");
+        if (skipNotes.Count > 0)
+        {
+            sb.Append("\n\n跳过的步骤：");
+            foreach (var n in skipNotes) sb.Append("\n- ").Append(n);
+        }
+        sb.Append("\n\n可以告诉我需要生成的具体内容（标题 / 要点 / 目标文档类型），或换个更明确的问法，我直接出成稿。");
+        return sb.ToString();
+    }
+
+    /// <summary>交付兑底未能接手时，是否需要把计划侧那段说明补发给用户（否则消息是空的）。
+    /// 断言这条不变式：交付已经给了用户可见结果 / 正在等审批 → 不补（避免两条自相矛盾的说明叠在一起）；
+    /// 交付静默放过了 → 必须补。测试钩子（internal）。</summary>
+    internal static bool ShouldAppendPlanText(bool awaitingInteraction, bool handled, string? planText)
+        => !awaitingInteraction && !handled && !string.IsNullOrWhiteSpace(planText);
 
     /// <summary>步骤边界暂停闸门：网关在每步（含批量执行与综合答复）之前检查一次；
     /// 用户已暂停 → 广播带「已暂停」状态的计划卡并挂起，直到用户点「继续」才恢复后续步骤。</summary>
@@ -2326,10 +2458,21 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 因此改为<b>在本方法内联跑一次流式</b>：复用外层 <paramref name="messageId"/> 追加正文，
     /// 审批则复用既有 <c>_pendingInteractions</c> 机制挂在外层同一个 run 上，由 <see cref="ResumeRunAsync"/> 继续。
     /// </para>
+    ///
+    /// <para>
+    /// <paramref name="upstreamDraft"/>：组织内其他岗位已产出的内容。交付类技能只需要“正文素材”，
+    /// 而计划阶段的各岗位产出就在手边；不传进去的话，交付岗只能照着用户那句原始请求从零重新构思，
+    /// 这就是“计划跑了半小时、终稿却与前面成果无关”的根因。
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="deliverableSkillHint"/>：计划里已点名的文件生成技能。用户那句没带格式词
+    /// （如“希望有一些插图”）时，靠它才能知道要出什么文件；否则交付得直接放弃、用户什么都拿不到。
+    /// </para>
     /// </summary>
     private async Task<DeliveryOutcome> TrySatisfyDeliveryAsync(
         AgentInvocationContext context, string input, List<ChainNode> hops, CancellationToken outerCt,
-        string runId, string? messageId)
+        string runId, string? messageId, string? upstreamDraft = null, string? deliverableSkillHint = null)
     {
         // 交付兑底必须有自己的时间预算：外层（计划 + 递归补查）常常已经把那份预算用得差不多，
         // 若共用同一个 token，轮到真正要出文件时它已被取消 → 模型调用瞬时被取消、静默失败。
@@ -2339,8 +2482,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var ct = deliveryCts.Token;
         try
         {
-            // 1) 用户是否要文件？从原始消息判定（不要看链路正文，那是回答内容）
-            var want = WantedDeliverable(context.Content);
+            // 1) 用户是否要文件？优先看原始消息；没格式词时退回看计划点名的文件技能。
+            //   （后者覆盖“接着改一下 / 再加点插图”这类不带格式词的迭代请求）
+            var want = WantedDeliverable(context.Content) ?? DeliverableFromSkillId(deliverableSkillHint);
             if (want is null) return new DeliveryOutcome(messageId, false);
 
             // 2) 链路上已经调过这个技能 / 已有产物 → 不重复做
@@ -2365,7 +2509,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             //      · 若岗位人设被写成“仅接收定稿才出文件”，它还会反问用户要定稿、空手而回
             //        （实测：word_delivery 回“我需要先跟你对齐交付流程…否则我不会出文件”）。
             var wantSkill = DeliverableSkillFor(candidate, want.Value.SkillPrefix);
-            var deliver = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content);
+            var deliver = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content, upstreamDraft: upstreamDraft);
             var prev = AmbientContext.Value;
             var prevChain = SkillChainBuilder.Ambient.Value;
             var prevToolResults = ToolResultCollector.Ambient.Value;
@@ -2395,7 +2539,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     if (attempt > 0)
                     {
-                        var retryPrompt = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content, retryNoToolCall: true);
+                        var retryPrompt = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content, retryNoToolCall: true, upstreamDraft: upstreamDraft);
                         sub = sub with { Content = retryPrompt };
                         AmbientContext.Value = sub;
                         ToolResultCollector.Ambient.Value = new ToolResultCollector();
@@ -2406,7 +2550,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     if (interrupt is not null)
                     {
                         // 已挂交互卡：正文待用户决策后由 ResumeRunAsync 继续；产物回档也在那边完成
-                        return new DeliveryOutcome(messageId, true);
+                        return new DeliveryOutcome(messageId, true, true);
                     }
 
                     var (hasFile, blocks) = DeliveryResult(want.Value.SkillPrefix);
@@ -2415,7 +2559,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     if (hasFile && blocks >= minContent)
                     {
                         hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
-                        return new DeliveryOutcome(messageId, false);
+                        return new DeliveryOutcome(messageId, false, true);
                     }
                     // 有文件但内容过薄（如只有封面）：宁可留一份薄文件，也别让用户什么都没有
                     if (hasFile) keptFile = true;
@@ -2426,13 +2570,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     // 两次都偏薄，但至少有文件：接受它（产物已回档），不再给用户“什么都没有”
                     hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
-                    return new DeliveryOutcome(messageId, false);
+                    return new DeliveryOutcome(messageId, false, true);
                 }
                 // 两次都没产出文件：不谎报，明确告知用户（产物缺失才是真问题）
                 _logger.LogWarning("交付兑底两次均未产出文件：agent={AgentId} skill={Skill}", candidate.AgentId, wantSkill);
                 if (messageId is not null)
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId,
                         $"（未能生成 {want.Value.Label} 文件：交付环节没有真正调用文件生成技能。请再说一次，或把要写的内容直接发给我。）", ct);
+                return new DeliveryOutcome(messageId, false, true);
             }
             finally
             {
@@ -2450,8 +2595,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return new DeliveryOutcome(messageId, false);
     }
 
-    /// <summary>交付物兜底结果：可能保持原消息，也可能因审批中断而由恢复流接管。</summary>
-    private readonly record struct DeliveryOutcome(string? MessageId, bool AwaitingInteraction);
+    /// <summary>交付物兜底结果：可能保持原消息，也可能因审批中断而由恢复流接管。
+    /// <paramref name="Handled"/> = 本次兜底已经给出用户可见的结果（出文件 / 已下交互卡 / 已明确报失败）；
+    /// 为 false 表示它静默放过了（没认出交付物 / 找不到能做的岗位 / 空异常），
+    /// 此时调用方需要把计划侧原本不该发的说明补上，否则用户看到一条空消息。</summary>
+    private readonly record struct DeliveryOutcome(string? MessageId, bool AwaitingInteraction, bool Handled = false);
 
     /// <summary>
     /// 交付物兜底的“内联流式”：在<b>外层已开启的那条消息</b>上让交付岗真实跑一次模型循环
@@ -2667,8 +2815,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private const int MinDeliverySlides = 3;
     private const int MinDeliveryRows = 3;
 
-    /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。</summary>
-    internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent, bool retryNoToolCall = false)
+    /// <summary>交付兑底提示词里“上游已产出素材”的上限。计划各步产出可能很长，
+    /// 取尾部（靠后的步通常是汇总/定稿），避免把下游上下文撑爆。</summary>
+    internal const int MaxUpstreamDraftChars = 12000;
+
+    /// <summary>测试钩子：交付兑底提示词（含“不得流程拒交”与“内容必须完整”两条硬要求）。
+    /// <paramref name="upstreamDraft"/> 为组织内已产出的内容：交付岗应当直接拿它当正文素材。</summary>
+    internal static string BuildDeliveryPrompt(string label, string? skillId, string userContent,
+        bool retryNoToolCall = false, string? upstreamDraft = null)
     {
         // 第二次尝试：明确告诉模型“你上一次只说了话、没调工具”，把“历史里那句话说过了”的错觉打掉。
         var retryLead = retryNoToolCall
@@ -2687,16 +2841,42 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             + "它们接收 heading(level 1-3) / paragraph / bullets / numbered / quote / table({headers,rows}) / toc 等结构；"
             + "**每一节都要有实质正文（段落 / 列表 / 表格），绝不允许只传标题、副标题、作者就收工**（那样文档里会没有任何内容）。"
             + "若组织里同时有能直接吃 Markdown 正文的导出技能，优先用它（把完整 Markdown 正文交给它转换）。";
+        // 组织内已产出的内容：直接当正文素材，不要让模型重新构思一遍。
+        // 实测踩到：计划阶段各岗位已写好稿子，交付岗却只盯着用户那句原始请求重写，
+        // 于是终稿与前面成果对不上，用户还白等了整个计划的时间。
+        var draft = string.IsNullOrWhiteSpace(upstreamDraft)
+            ? ""
+            : "\n\n【组织内已产出的内容（这是你的正文素材，直接据此编写并补全，不要重新构思一遍）】\n"
+              + (upstreamDraft.Trim().Length <= MaxUpstreamDraftChars
+                  ? upstreamDraft.Trim()
+                  : "…（前文从前略）\n" + upstreamDraft.Trim()[^MaxUpstreamDraftChars..]);
         return retryLead + (skillId is null
             ? $"用户要求交付 {label} 文件。请直接调用你的文件生成技能，把完整内容生成为文件后简短回报。" + hardRule + contentRule
-              + $"\n\n【用户原始请求】\n{userContent}"
+              + $"\n\n【用户原始请求】\n{userContent}" + draft
             : $"用户要求交付 {label} 文件。请调用文档生成技能 {skillId}，把完整内容生成为文件后简短回报"
               + $"（不要先反问用户要材料，也不要调用其它无关技能）。" + hardRule + contentRule
-              + $"\n\n【用户原始请求】\n{userContent}");
+              + $"\n\n【用户原始请求】\n{userContent}" + draft);
     }
 
-    /// <summary>用户要的交付物类型（技能前缀用于在组织里匹配）。识别不出来返回 null。</summary>
-    private static (string SkillPrefix, string Label)? WantedDeliverable(string? userText)
+    /// <summary>
+    /// 由文件生成技能 id 反推交付物类型（前缀 + 展示名）。
+    /// 用于「用户那句话没带格式词、但计划已经点名要调哪个文件技能」的场景：
+    /// 实测：上一步“我希望ppt是绿色的”能出文件（句子里恰好有 ppt），
+    /// 下一步“希望有一些插图”同样意图却什么都没拿到 —— 只因交付判断只读当前那句话。
+    /// 认不出来返回 null（不插手）。
+    /// </summary>
+    internal static (string SkillPrefix, string Label)? DeliverableFromSkillId(string? skillId)
+    {
+        if (string.IsNullOrWhiteSpace(skillId)) return null;
+        if (AgentGatewayHelpers.SkillMatchesDeliverablePrefix(skillId, "pptx_")) return ("pptx_", "演示文稿");
+        if (AgentGatewayHelpers.SkillMatchesDeliverablePrefix(skillId, "xlsx_")) return ("xlsx_", "Excel 表格");
+        if (AgentGatewayHelpers.SkillMatchesDeliverablePrefix(skillId, "pdf_")) return ("pdf_", "PDF 文档");
+        if (AgentGatewayHelpers.SkillMatchesDeliverablePrefix(skillId, "docx_")) return ("docx_", "Word 文档");
+        return null;
+    }
+
+    /// <summary>用户要的交付物类型（技能前缀用于在组织里匹配）。识别不出来返回 null。测试钩子（internal）。</summary>
+    internal static (string SkillPrefix, string Label)? WantedDeliverable(string? userText)
     {
         if (string.IsNullOrWhiteSpace(userText)) return null;
         var t = userText.ToLowerInvariant();

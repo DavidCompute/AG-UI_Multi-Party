@@ -879,4 +879,141 @@ public sealed class OrchestrationDeliveryLoopTests
         Assert.Contains("xlsx_book", prompt);
         Assert.Contains("pdf_doc", prompt);
     }
+
+    // ---------- 计划空答复兜底：必须说实话，不能宣称“已收集各岗位结果” ----------
+
+    [Fact]
+    public void PlanFallback_NoStepRan_SaysSoAndListsSkips()
+    {
+        // 实测踩到：计划里每一步都被跳过（例如只有一步“调 pptx 技能”，它被改走交付兑底），
+        // 旧实现却固定回“本轮已按计划收集了各岗位的结果，但未汇总出可展示的最终文本”——
+        // 用户拿到的是一句与事实不符的空话，也不知道下一步该怎么做。
+        var text = AgentGateway.BuildNoOutputFallback(0,
+            ["第1步「PPT 生成」：文档生成技能不在此阶段执行，改由交付环节直接生成文件"]);
+
+        Assert.Contains("没有一步真正执行", text);
+        Assert.Contains("第1步「PPT 生成」", text);
+        Assert.DoesNotContain("已按计划收集了各岗位的结果", text);
+        Assert.DoesNotContain("已按计划收集各岗位", text);
+    }
+
+    [Fact]
+    public void PlanFallback_StepsRanButProducedNothing_ReportsTheCount()
+    {
+        // 区分“一步都没跑”与“跑了但没有任何产出”：后者不能说自己什么都没做
+        var text = AgentGateway.BuildNoOutputFallback(2, []);
+
+        Assert.Contains("2 个步骤", text);
+        Assert.DoesNotContain("没有一步真正执行", text);
+        Assert.DoesNotContain("已按计划收集了各岗位的结果", text);
+    }
+
+    [Fact]
+    public void PlanFallback_OffersANextStepInsteadOfJustApologizing()
+    {
+        var text = AgentGateway.BuildNoOutputFallback(0, []);
+        Assert.Contains("告诉我需要生成的具体内容", text);
+    }
+
+    // ---------- 交付兑底拿到计划内产出（否则从用户原始请求从零重写） ----------
+
+    [Fact]
+    public void DeliveryPrompt_UsesUpstreamDraftAsSourceMaterial()
+    {
+        // 实测踩到：计划阶段各岗位已写好稿子，交付岗却只看着用户那句原始请求重写，
+        // 终稿与前面成果对不上，用户还白等了整个计划的时间。
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "帮我写推广文案，要 word",
+            upstreamDraft: "【文案写手】\n知聚是一个多智能体协作平台……");
+
+        Assert.Contains("组织内已产出的内容", prompt);
+        Assert.Contains("知聚是一个多智能体协作平台", prompt);
+        Assert.Contains("不要重新构思一遍", prompt);
+        Assert.Contains("docx_report", prompt);
+    }
+
+    [Fact]
+    public void DeliveryPrompt_WithoutDraft_HasNoDraftSection()
+    {
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "写简介并导出");
+        Assert.DoesNotContain("组织内已产出的内容", prompt);
+    }
+
+    [Fact]
+    public void DeliveryPrompt_DraftIsTruncatedToKeepPromptBounded()
+    {
+        // 计划各步产出可能很长：必须截断（取尾部，靠后的步通常是汇总/定稿），否则撑爆下游上下文
+        var huge = new string('甲', AgentGateway.MaxUpstreamDraftChars + 5000) + "尾部标记";
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "要 word", upstreamDraft: huge);
+
+        Assert.Contains("尾部标记", prompt);
+        Assert.Contains("前文从前略", prompt);
+        Assert.True(prompt.Length < AgentGateway.MaxUpstreamDraftChars + 3000,
+            $"提示词应被截断，实际长度 {prompt.Length}");
+    }
+
+    [Fact]
+    public void DeliveryPrompt_RetryAlsoCarriesTheDraft()
+    {
+        // 第二次尝试同样要用上素材，否则重试等于从零再来一遍
+        var prompt = AgentGateway.BuildDeliveryPrompt("Word 文档", "docx_report", "要 word",
+            retryNoToolCall: true, upstreamDraft: "【文案写手】\n完整初稿内容");
+
+        Assert.Contains("并没有真正调用工具", prompt);
+        Assert.Contains("完整初稿内容", prompt);
+    }
+
+    // ---------- 交付物类型：用户那句没格式词时听计划的 ----------
+
+    [Theory]
+    [InlineData("pptx_deck", "pptx_", "演示文稿")]
+    [InlineData("xlsx_book", "xlsx_", "Excel 表格")]
+    [InlineData("pdf_doc", "pdf_", "PDF 文档")]
+    [InlineData("docx_report", "docx_", "Word 文档")]
+    [InlineData("md_to_docx", "docx_", "Word 文档")] // 后缀式命名也要认
+    [InlineData("copywriting", null, null)]           // 不是文件技能 → 不插手
+    [InlineData("", null, null)]
+    [InlineData(null, null, null)]
+    public void DeliverableFromSkillId_MapsPlanSkillToDeliverable(string? skillId, string? prefix, string? label)
+    {
+        // 实测踩到：单聊里接着说“希望有一些插图”，句中没有格式词 → 交付判断直接放弃 → 用户什么都没拿到；
+        // 而前一句“我希望ppt是绿色的”能出文件，只因句子里恰好有“ppt”。
+        // 计划已经点名了文件技能，就该据它确定交付物。
+        var got = AgentGateway.DeliverableFromSkillId(skillId);
+        if (prefix is null)
+        {
+            Assert.Null(got);
+            return;
+        }
+        Assert.NotNull(got);
+        Assert.Equal(prefix, got!.Value.SkillPrefix);
+        Assert.Equal(label, got.Value.Label);
+    }
+
+    [Fact]
+    public void WantedDeliverable_ReturnsNullForIterationWithoutFormatWord()
+    {
+        // 记录缺陷现场：这句本身确实判不出交付物 —— 所以必须靠计划里的技能补齐，
+        // 而不能再依赖 WantedDeliverable(context.Content) 作为“要不要交付”的唯一判据。
+        Assert.Null(AgentGateway.WantedDeliverable("希望有一些插图"));
+        Assert.NotNull(AgentGateway.WantedDeliverable("我希望ppt是绿色的ai风格"));
+    }
+
+    // ---------- 计划说明什么时候补发（不能与交付结果叠成两条矛盾说明） ----------
+
+    [Fact]
+    public void PlanText_AppendedWhenDeliverySilentlyGaveUp()
+    {
+        // 交付没接手，且计划侧本来就不准备发正文 → 不补就是一条空消息（用户反馈的正是这个）
+        Assert.True(AgentGateway.ShouldAppendPlanText(awaitingInteraction: false, handled: false, planText: "（说明）"));
+    }
+
+    [Theory]
+    [InlineData(false, true, "（说明）")]   // 交付已给用户结果 → 不能再叠一段“什么都没跑”
+    [InlineData(true, false, "（说明）")]    // 正在等审批：正文已清空，会由恢复流接管
+    [InlineData(false, false, "")]           // 没东西可补
+    [InlineData(false, false, null)]
+    public void PlanText_NotAppendedWhenItWouldConfuse(bool awaiting, bool handled, string? planText)
+    {
+        Assert.False(AgentGateway.ShouldAppendPlanText(awaiting, handled, planText));
+    }
 }
