@@ -321,11 +321,18 @@ PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
 
 ## 已知边界
 
-- 图表是**图片**，不可在 PowerPoint 内改数据（见上）。
-- 不支持从模板/既有 pptx 编辑（只做从零生成）；不支持动画、切换、SmartArt、母版多版式。
+- 图表**默认是图片**，不可在 PowerPoint 内改数据；需要可改数据请用原生图表（`*-native`，见上）。
+- **不做任意编辑既有 pptx**：支持的是「读取文本」（`action:read`）与「套模板重出一份」（`template`），
+  不是在 XML 层改既有页的版式/内容。
+- 不支持动画、切换、SmartArt、母版多版式。
+- 没有图标字体/图标素材：`iconRows` 的 `icon` 只能填 1~2 个字（或省略用序号）。
+- 没有半出血图 / 图左文右这类图文混排版式：`image` 页是整块图。
+- 原生图表只支持 `bar` / `line` / `pie`（scatter / bubble / radar 不支持）。
 - `image` 页的图片走 ImageSharp 读取以计算等比尺寸；ImageSharp 不支持的格式（如 svg/emf）会报可读错误。
 - 表格列宽均分（不按内容自适应），列多时字号不会自动再缩。
 - 自适应用的是**每条内容的宽度估算**（按字号 × 字符数的近似量），不是真实排版度量：
   极端混排（大量全角/半角、超长英文单词）下仍可能留白过多或裁得略早。
-- 正文缩字号只覆盖了 `content` 页型；`twoCol` / `summary` / `toc` / `quote` 等页型仍在用固定高度的文本框。
+- 正文缩字号已覆盖 `content` / `summary` / `stats` / `grid` / `timeline` / `iconRows`；
+  `toc` / `twoCol` / `table` / `kpi` 仍在用固定高度的文本框。
 - 图表图例最多 3 行，超出以“…等 N 项”代替（不是分页）。
+- `action:read` 只取文本，不还原版式与图片；页码徽标（如 `02`）也会作为文本被取出，属噪声。
