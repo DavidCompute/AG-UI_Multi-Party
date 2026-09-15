@@ -1,5 +1,39 @@
-# AG-UI 群聊桌面版 1.0.131 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.131 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.132 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.132 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.132 为当前 Windows 桌面版本。修复了套模板返回的页数不对（`keepTemplateSlides` 时只报新生成页数，3 页报成 1，看着像丢了页），并校正了 PPT 技能文档里已过时的能力描述。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.132 is the current Windows desktop release. It fixes a wrong slide count returned when authoring from a template (`keepTemplateSlides` reported only the newly generated slides, so a 3-page result read as 1 and looked like the template pages had been dropped), and corrects capability statements in the PPT skill docs that had gone stale. Web and desktop share the same Hub / gateway / frontend.
+
+## 修复：套模板返回的页数（1.0.132）
+# Fix: slide count returned by template runs (1.0.132)
+
+中文：
+- **现象**：用 `keepTemplateSlides: true` 套模板时，返回的 `slides` 只是**本次新生成的页数**。
+  一份 3 页的稿子（2 页模板 + 1 页新增）会报成 `1`，调用方/用户会以为模板原有页丢了。
+- **修复**：改为返回**整份稿子的总页数**（`SlideIdLst` 里的实际条目数），并补了 `keepTemplateSlides` 这条路径的回归测试（之前它没有被任何用例覆盖）。
+- 实测：`模板 2 页 + 追加 1 页` → 返回 `slides=3`，产物里 3 个 `slideN.xml`，模板页与新页都在。
+
+English:
+- **Symptom**: with `keepTemplateSlides: true` the returned `slides` was only the number of **newly generated** slides. A 3-page deck (2 template + 1 new) reported `1`, making it look like the template pages had been dropped.
+- **Fix**: report the **total** number of slides in the deck (the actual `SlideIdLst` entries), and add regression coverage for the `keepTemplateSlides` path (it had none).
+- **Measured**: a 2-page template plus 1 appended page now returns `slides=3`, with three `slideN.xml` parts in the package and both the template and new slides present.
+
+## 文档校正：PPT 技能的能力描述
+# Docs: corrected capability statements for the PPT skill
+
+中文：把 `tools/pptx-skills/README.md` 的「已知边界」改成与实现一致：
+- 原文写「**不支持从模板/既有 pptx 编辑**」——已不准确（现在支持 `action:read` 读取文本与 `template` 套模板重出）；
+  改为明确“**不支持在 XML 层任意编辑既有页**”。
+- 原文写「图表是图片，**不可**在 PowerPoint 内改数据」——补上原生图表选项。
+- 顺带补齐之前没写清的边界：无图标素材、无图文混排版式、原生图表只支持 bar/line/pie、
+  缩字号实际覆盖哪些页型、`action:read` 会把页码徽标当文本取出。
+
+English: `tools/pptx-skills/README.md`'s "known limits" now match the implementation: "cannot edit from a template or an existing pptx" was no longer accurate (`action: read` and `template` exist) and now says arbitrary XML-level editing of existing slides is not supported; "charts are images, not editable in PowerPoint" now mentions the native chart option; and previously unstated limits were added (no icon assets, no mixed text/image layouts, native charts limited to bar/line/pie, which slide types actually shrink text, and that `action: read` surfaces the page-number badge as text).
+
+---
+
+# AG-UI 群聊桌面版 1.0.131 发布说明
+# AG-UI Group Chat Desktop 1.0.131 Release Notes
 
 **版本说明**：1.0.131 为当前 Windows 桌面版本。修复了 1.0.130 新引入的**套模板会丢掉模板底色**（深色模板产出变成白底）。Web 与桌面共用同一套 Hub/网关/前端。
 **Version note**: 1.0.131 is the current Windows desktop release. It fixes a defect introduced in 1.0.130 where **authoring from a template lost the template's background colour** (a dark template came out light). Web and desktop share the same Hub / gateway / frontend.
