@@ -849,10 +849,10 @@ public sealed class PptxDeckSkillTests
             using var zip = ZipFile.OpenRead(outPath);
             // 只有一套版本 / 主题：证明用的是模板的，不是我们又新建了一套
             // （主题的存放路径跟创建方式有关：SDK 会放在 ppt/slideMasters/theme/ 下，所以按名字匹配）
-            Assert.Single(zip.Entries.Where(e => e.FullName.StartsWith("ppt/slideMasters/slideMaster", StringComparison.Ordinal)
-                                              && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
-            Assert.Single(zip.Entries.Where(e => e.FullName.Contains("/theme", StringComparison.Ordinal)
-                                              && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
+            Assert.Single(zip.Entries, e => e.FullName.StartsWith("ppt/slideMasters/slideMaster", StringComparison.Ordinal)
+                                         && e.FullName.EndsWith(".xml", StringComparison.Ordinal));
+            Assert.Single(zip.Entries, e => e.FullName.Contains("/theme", StringComparison.Ordinal)
+                                         && e.FullName.EndsWith(".xml", StringComparison.Ordinal));
             Assert.Equal(2, zip.Entries.Count(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
                                                  && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
 
@@ -873,6 +873,57 @@ public sealed class PptxDeckSkillTests
 
             // 配色应来自模板（business-authority 的 accent1 = 2B2D42 作为 primary）
             Assert.Equal("2B2D42", r.RootElement.GetProperty("palette").GetProperty("primary").GetString());
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// 套深色底模板不能变成白底。
+    ///
+    /// <para>
+    /// 实测踩到：底色原本只读主题色板的 lt1，而 lt1 几乎总是 sysClr(window)（永远是白），
+    /// 于是拿一份 tech-night 深色模板出稿，产出来却是白底。
+    /// 真正的底色写在母版/幻灯片的 &lt;p:bg&gt; 里，要从那里读。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TemplateMode_KeepsDarkTemplateBackground()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            using var t = RunRaw(JsonSerializer.Serialize(new
+            {
+                title = "深色模板",
+                theme = "tech-night",
+                slides = new object[] { new { type = "cover", title = "深色模板封面" } },
+            }));
+            var templatePath = t.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            var outPath = Path.Combine(outDir, "深色套模板.pptx");
+            using var r = RunRaw(JsonSerializer.Serialize(new
+            {
+                title = "深色套模板",
+                template = templatePath,
+                outputPath = outPath,
+                slides = new object[] { new { type = "cover", title = "深色套模板" } },
+            }));
+            Assert.True(r.RootElement.GetProperty("ok").GetBoolean(),
+                r.RootElement.GetProperty("message").GetString());
+            Assert.Equal("000814", r.RootElement.GetProperty("palette").GetProperty("bg").GetString());
+
+            using var zip = ZipFile.OpenRead(outPath);
+            // 不要写死 slide1.xml：模板旧的 slide 部件删掉后，SDK 不会回收名字，新页可能是 slide2.xml
+            var slideEntries = zip.Entries
+                .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                         && e.FullName.EndsWith(".xml", StringComparison.Ordinal)).ToList();
+            Assert.Single(slideEntries);
+            using var sr = new StreamReader(slideEntries[0].Open());
+            var xml = sr.ReadToEnd();
+            Assert.Contains("<p:bg>", xml);
+            Assert.Contains("000814", xml);
+            Assert.DoesNotContain("val=\"FFFFFF\"/></a:solidFill><a:effectLst/></p:bgPr>", xml);
         }
         finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
     }

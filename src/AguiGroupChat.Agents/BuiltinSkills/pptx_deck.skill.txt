@@ -777,7 +777,7 @@ public class Skill
     /// <see cref="EnsureContrast"/> 类守卫——宁可颜色略有出入，也不能出现看不清的字。
     /// </para>
     /// </summary>
-    private static Theme? ThemeFromTemplate(SlideMasterPart? master)
+    private static Theme? ThemeFromTemplate(SlideMasterPart? master, string? slideBgHint = null)
     {
         var themePart = master?.ThemePart;
         var elements = themePart?.Theme?.ThemeElements;
@@ -800,7 +800,11 @@ public class Skill
         t.Secondary = Hex(accent2, t.Secondary);
         t.Accent = Hex(accent3, t.Primary);
         t.Light = Hex(lt2, t.Light);
-        t.Bg = Hex(lt1, "FFFFFF");
+        // 底色不能只读 lt1（主题色板里的 lt1 几乎总是 sysClr(window)，永远是白）。
+        // 真正生效的是“幻灯片自己的 <p:bg> → 母版的 <p:bg> → lt1”这个优先级：
+        // OOXML 里页背景会覆盖母版背景。实测踩到：反着取就会读到母版那份白底，
+        // 于是拿深色模板出稿反而得到白底。
+        t.Bg = slideBgHint ?? BackgroundHex(master) ?? Hex(lt1, "FFFFFF");
         t.Text = Hex(dk2, "333333");
         t.FontTitle = elements.FontScheme?.MajorFont?.LatinFont?.Typeface?.Value is { Length: > 0 } mt ? mt : t.FontTitle;
         t.FontBody = elements.FontScheme?.MinorFont?.LatinFont?.Typeface?.Value is { Length: > 0 } bt ? bt : t.FontBody;
@@ -821,6 +825,36 @@ public class Skill
         t.OnAccent = OnColor(t.Accent, t.Bg);
         t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
         return t;
+    }
+
+    /// <summary>从模板第一张幻灯片取底色（有些模板的底色只做在页上、不做在母版上）。</summary>
+    private static string? FirstSlideBackgroundHex(PresentationPart presPart)
+    {
+        try
+        {
+            foreach (var id in presPart.Presentation.SlideIdList?.Elements<P.SlideId>() ?? [])
+            {
+                var rel = id.RelationshipId?.Value;
+                if (rel is null || presPart.GetPartById(rel) is not SlidePart sp) continue;
+                var hex = sp.Slide?.CommonSlideData?.Background
+                    ?.Descendants<A.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+                if (!string.IsNullOrWhiteSpace(hex)) return hex;
+            }
+        }
+        catch { /* 取不到就当没有 */ }
+        return null;
+    }
+
+    /// <summary>从母版的背景填充里取底色；取不到返回 null（调用方回退到主题色板的 lt1）。</summary></summary>
+    private static string? BackgroundHex(SlideMasterPart? master)
+    {
+        try
+        {
+            var hex = master?.SlideMaster?.CommonSlideData?.Background
+                ?.Descendants<A.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+            return string.IsNullOrWhiteSpace(hex) ? null : hex;
+        }
+        catch { return null; }
     }
 
     /// <summary>
@@ -857,7 +891,7 @@ public class Skill
             // 模板里没显式给主题时，用模板自己的配色（这就是“套模板”的意义）
             if (Str(root, "theme") is null && !root.TryGetProperty("themeColors", out _))
             {
-                var fromTemplate = ThemeFromTemplate(master);
+                var fromTemplate = ThemeFromTemplate(master, FirstSlideBackgroundHex(presPart));
                 if (fromTemplate is not null)
                 {
                     theme.Primary = fromTemplate.Primary; theme.Secondary = fromTemplate.Secondary;
