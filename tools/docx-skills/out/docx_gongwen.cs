@@ -1,6 +1,12 @@
 #r "nuget: DocumentFormat.OpenXml, 3.2.0"
 #r "nuget: SixLabors.ImageSharp, 2.1.5"
 #r "nuget: SixLabors.ImageSharp.Drawing, 1.0.0"
+// 【必须显式钉到 1.0.1，不要删】图表文字用 ImageSharp 渲染，而 ImageSharp 2.1.5 对
+// SixLabors.Fonts 的依赖是 “>= 1.0.0”，NuGet 解析器取最低满足版 → 会落到 1.0.0。
+// 而 1.0.0 的 shaping 会对 CJK 字体错误地套用竖排(vert)字形替换：破折号“—”被画成竖线、
+// “（）「」【】《》”被旋转 90°（实测：同一字体用 FreeType/PIL 渲染是横排正确的，
+// 所以不是字体问题）。升到 1.0.1 即修复（仍为 Apache-2.0）。
+#r "nuget: SixLabors.Fonts, 1.0.1"
 
 // ============================================================================
 // docx_gongwen —— 公文（党政机关公文格式，参照 GB/T 9704-2012）

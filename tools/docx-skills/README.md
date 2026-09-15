@@ -324,6 +324,23 @@ fonts-noto-cjk      # 中文（图表中文标签必需）
 （注意：`fonts-noto-cjk` 是 CFF/OTTO 字体。它对图表渲染没问题，问题只在“有没有被选中”。
 修改字体名单时请保留字形验证，否则在服务器上会静默回退到拉丁字体。）
 
+### ⚠️ 另一个坑：标点被画成竖排（`SixLabors.Fonts` 必须钉 1.0.1）
+
+图表里的破折号 `—` `–` 被画成**竖线**，`（）「」『』【】《》` 被**旋转 90°**，而汉字与
+`、。：；！？` 正常——看起来像“部分符号方向错了”。
+
+根因**不在字体**：同一份字体（wqy-microhei.ttc）用 FreeType/PIL 渲染是横排正确的，
+容器里 7 种中文字体（Noto Sans/Serif CJK、WQY Micro Hei/Zen Hei、AR PL UMing/UKai、
+Droid Sans Fallback）在 ImageSharp 下**全部**如此，所以是库的 shaping 问题：
+**`SixLabors.Fonts` 1.0.0 错误地对 CJK 字体套用了竖排（`vert`）字形替换。**
+
+而 ImageSharp 2.1.5 对 `SixLabors.Fonts` 的依赖是 `>= 1.0.0`，平台的 NuGet 解析器取
+**最低满足版**，于是默认落到 1.0.0。**显式声明 `#r "nuget: SixLabors.Fonts, 1.0.1"` 即修复**
+（1.0.1 仍为 Apache-2.0，不受 Six Labors 从 2.0 起的 Split License 影响）。
+
+该声明写在 `tools/docx-skills/generate.mjs` 的共享 banner 里，会带进三份场景技能；
+**不要当成“多余引用”删掉**（单测 `ChartSkill_PinsSixLaborsFontsAtLeast101` 会拦住）。
+
 ### 技能依赖：NuGet 包
 
 技能声明三个 NuGet 包（钉住相容版本）：

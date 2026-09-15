@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using AguiGroupChat.Agents.BuiltinSkills;
 using AguiGroupChat.Agents.Tools;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
@@ -329,6 +330,41 @@ public sealed class PptxDeckSkillTests
                 $"环境里有含中文字形的字体，但图表选了「{font}」（无中文字形）——图表中文会缺字。");
         }
         finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// 图表技能必须把 <c>SixLabors.Fonts</c> 钉在 1.0.1+。
+    ///
+    /// <para>
+    /// 真实踩到：图表文字里的横线被画成<b>竖线</b>（破折号“—”变竖向），`（）「」【】《》`
+    /// 被旋转 90°。根因不在字体——同一份字体用 FreeType/PIL 渲染是横排正确的 ——
+    /// 而是 <b>SixLabors.Fonts 1.0.0 的 shaping 错误地对 CJK 字体套用了竖排（vert）字形替换</b>。
+    /// ImageSharp 2.1.5 对它的依赖是 “&gt;= 1.0.0”，NuGet 解析器取最低满足版，于是默认落到 1.0.0。
+    /// 显式钉 1.0.1 即修复（仍为 Apache-2.0）。
+    /// </para>
+    ///
+    /// 本用例钉住这个声明：否则别人清理“看起来多余”的引用时，缺陷会静默回归。
+    /// </summary>
+    [Fact]
+    public void ChartSkill_PinsSixLaborsFontsAtLeast101()
+    {
+        foreach (var (label, source) in new[]
+                 {
+                     ("pptx_deck", SkillSource()),
+                     ("docx_report", BuiltinDocxSkills.Build("docx_report", "docx_report.skill.txt", "x", "x").Body!),
+                 })
+        {
+            var directives = AguiGroupChat.SkillHosting.SkillNuGetParser.ParseReferences(source);
+            var fonts = directives.Where(d => d.PackageId.Equals("SixLabors.Fonts", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.True(fonts.Count > 0, $"{label} 未显式引用 SixLabors.Fonts（会解析到 1.0.0，导致图表标点被竖排替换）");
+            foreach (var d in fonts)
+            {
+                Assert.NotNull(d.Version);
+                var v = Version.Parse(d.Version!);
+                Assert.True(v >= new Version(1, 0, 1),
+                    $"{label} 把 SixLabors.Fonts 钉在 {d.Version}，低于 1.0.1：图表里的“—（）「」” 会被错误地竖排渲染。");
+            }
+        }
     }
 
     /// <summary>与技能内同一口径的字形覆盖判定。</summary>

@@ -142,6 +142,14 @@ python tools/verify_office_package.py 某个.pptx
   `(x, y, w, h, startAngle, sweepAngle, rotationAngle)`；`EllipsePolygon` 用 `(PointF, float)` 最稳。
 - 平台预置 `using` 不含 `System.IO`，需自行 `using`（本文件已含）。
 - 换行统一 `\n`；正文由同步脚本统一处理。
+- **图表里的 `SixLabors.Fonts` 必须钉在 `1.0.1`（不要删）**：ImageSharp 2.1.5 对它的依赖是
+  `>= 1.0.0`，NuGet 解析器取**最低满足版**，会落到 1.0.0。**而 1.0.0 的 shaping 会对 CJK 字体
+  错误地套用竖排（`vert`）字形替换** —— 破折号 `—` `–` 被画成**竖线**，`（）「」『』【】《》`
+  被旋转 90°（而正文汉字与 `、。：；！？` 正常，所以看起来像“部分符号方向错了”）。
+  实测：**同一份字体用 FreeType/PIL 渲染是横排正确的**，所以不是字体、也不是我们的排版代码
+  （图表代码里没有任何旋转）。显式声明 `#r "nuget: SixLabors.Fonts, 1.0.1"` 即修复（仍为 Apache-2.0，
+  不受 Six Labors 从 2.0 起的 Split License 影响）。回归由单测
+  `ChartSkill_PinsSixLaborsFontsAtLeast101` 钉住。
 - **包结构三件套别忘了**（详见上方“为什么单靠 schema 校验不够”）：① 幻灯片母版挂主题；
   ② 有备注页必须有备注母版并由 `presentation.xml` 关联；③ 版式回指母版。缺任一项，OpenXML 校验器不报错，
   但 PowerPoint 会判“需要修复”。
