@@ -1,3 +1,46 @@
+# AG-UI 群聊桌面版 1.0.139 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.139 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.139 为当前 Windows 桌面版本。PPT 技能新增**自动插图**：一类是**示意图**（金字塔 / 漏斗 / 四象限 / 循环闭环 / 层叠架构），用形状把关系画出来；另一类是**程序化题图**，图片缺失时自动按主题配色生成。**全程不需要用户提供任何图片素材、不联网、无版权问题**（产物里零图片文件）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.139 is the current Windows desktop release. The PPT skill can now **illustrate itself**: diagram pages (pyramid / funnel / quadrant / cycle / stack) draw relationships with shapes, and a procedural hero image is generated from the theme palette whenever an image is missing. **No user-supplied assets, no network, no licensing concerns** (the output contains zero image files). Web and desktop share the same Hub / gateway / frontend.
+
+## PPT：自动插图（1.0.139）
+# PPT: automatic illustrations (1.0.139)
+
+中文：
+- **示意图页型（新）**：`pyramid`（3~6 层，顶层最窄，斜边**连续**）/ `funnel`（顶层最宽 + 右侧数值列）/
+  `matrix`（四象限 + 轴名与轴端标签）/ `cycle`（3~6 步环形闭环 + 切向箭头 + 中心标题）/ `stack`（纵向分层条）。
+  全部用 DrawingML 预设几何（`trapezoid`/`rect`/`ellipse`/`triangle`/`parallelogram`）拼出来，
+  **不写自定义几何、不依赖外部素材、不联网**。
+- **程序化题图**：新增 `hero` 页型；且 `image` 页与封面在图片缺失/未提供时**自动降级为题图**
+  ——以前只能画一块纯色，看着就是一页色块。题图用标题作种子（**确定性**，重导出不会变），
+  只用实色（无渐变）、透明度用 `a:alpha`、颜色全部取自动调色板。
+- **不假称有图**：降级时页面上写明“（图片不存在，已自动生成题图）”，返回 `warnings` 也如实报。
+- **让模型主动用**：技能描述里写清了“当用户说要有插图/别只有文字时，就用这些页型”，
+  并强调轮换版式。实测（真实单聊）：一句“用示意图表达分层推进/转化漏斗/优先级取舍/迭代闭环，
+  开头一页纯视觉题图” → 产出 6 页（hero + 金字塔 + 漏斗 + 四象限 + 闭环 + 小结），
+  **产物里图片文件数为 0**，且自检报“无占位符 / 空页 / 越界”。
+- **两个实测踩到的坑（都已钉回归）**：
+  ① 题图最初用“旋转矩形”做斜带，旋转后的包围盒超出给定矩形 → 形状画到画布外（自检报 overflow），
+  现在改用 `parallelogram`（自带斜边、不靠旋转），圆/点阵全部限位；
+  ② `cycle` 一度写成 `Math.Max(3, items.Count)`，只给 1~2 项时 `n` 被抬到 3 而 `items` 没那么多 →
+  数组越界崩溃（被“每个页型都真的接通了”那个用例抳到，它只给 1 项）。
+- 测试：新增 18 个用例（示意图形状特征 / 6 项上限不越界 / 题图确定性 / 缺图降级 / layout 别名），
+  全量 **1294 通过**；实盘 35 页 × 3 套调色板/风格组合**形状全部在版面内** + OPC 结构完整。
+- **局限（实话）**：这是**图形**而不是**照片**。要有照片级插图，必须接一个文生图服务
+  （平台目前没有这个能力，默认 provider 也不提供）。
+
+English:
+- **Diagram pages (new)**: `pyramid` (3-6 layers, narrowest on top, **continuous slanted sides**), `funnel` (widest on top plus a value column), `matrix` (quadrants with axis labels), `cycle` (3-6 step ring with tangential arrows and a centre caption) and `stack` (vertical layers). All are built from DrawingML preset geometry (`trapezoid`/`rect`/`ellipse`/`triangle`/`parallelogram`) — **no custom geometry, no external assets, no network**.
+- **Procedural hero image**: a new `hero` page type, and `image` pages / covers now **fall back to generated art** when the picture is missing or absent — previously they drew a flat colour block, which reads as exactly that. The art is seeded by the title (**deterministic**, so re-exporting a deck does not change the cover), uses solid colours only (no gradients), expresses transparency via `a:alpha`, and takes every colour from the active palette.
+- **It does not pretend there is an image**: the slide says the picture was missing and generated art was used, and the response reports it in `warnings`.
+- **The model reaches for them by default**: the tool description now says to use these page types when a user asks for illustrations or “not just text”, and to rotate layouts. Verified end to end in a real single chat: one request for diagrams covering layering, a funnel, prioritisation and a loop produced 6 pages (hero + pyramid + funnel + quadrant + cycle + summary) with **zero image files** in the output, and QA reported no placeholders, empty slides or overflow.
+- **Two bugs the new tests caught**: ① the hero art originally used rotated rectangles for diagonal bands, whose rotated bounding box exceeded the given rect and drew shapes off-canvas (QA reported overflow); it now uses `parallelogram`, which is slanted without rotation, and circles/dot grids are clamped. ② `cycle` computed `Math.Max(3, items.Count)`, so 1-2 items lifted the count to 3 while the item list stayed short, crashing on an out-of-range index (caught by the “every page type is actually wired” case, which supplies a single item).
+- Tests: 18 new cases (shape signatures per diagram, six-item upper bound staying inside the canvas, deterministic hero art, missing-image fallback, layout aliases); **1294 passing** in total. Live checks render 35 pages across 3 palette/style combos with every shape inside the canvas and a complete OPC structure.
+- **Honest limitation**: these are **graphics, not photographs**. Photo-grade illustrations require a text-to-image service, which the platform does not have today.
+
+---
+
 # AG-UI 群聊桌面版 1.0.138 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.138 Release Notes (current Windows desktop release)
 
