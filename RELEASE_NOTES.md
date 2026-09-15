@@ -1,3 +1,43 @@
+# AG-UI 群聊桌面版 1.0.137 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.137 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.137 为当前 Windows 桌面版本。修复**编排计划“空答复”缺陷**：计划里每一步都被跳过时（典型场景：单聊里接着说“希望有一些插图”），用户以前只会收到一句写死的“已按计划收集了各岗位的结果，但未汇总出可展示的最终文本”，既与事实不符、也拿不到文件。现在交付判断会参考计划点名的文件技能、并把计划内的产出当素材交给交付岗，直接出成品；万一交付确实没接手，兜底文案也会如实说明哪些步骤被跳过、为什么。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.137 is the current Windows desktop release. It fixes the **"empty coordinated-plan reply" defect**. When every plan step was skipped (typically a single-chat follow-up such as "希望有一些插图"), users used to get only the hard-coded line "…collected each role's results but no final text could be assembled" — untrue, and no file. Delivery detection now consults the document skill the plan named, and the plan's own output is handed to the delivery agent as source material, so a real file is produced. If delivery genuinely does not take over, the fallback text honestly states which steps were skipped and why. Web and desktop share the same Hub / gateway / frontend.
+
+## 编排计划空答复修复（1.0.137）
+# Empty coordinated-plan reply fix (1.0.137)
+
+中文：
+- **累计缓冲不再被覆盖**：每一步的产出改为**追加**到“前序已产出”，先前是每步 `Clear()` 重写 ——
+  最后一步没产出时，前面各岗位的成果会被整体丢掉，而兜底文案却声称“已收集各岗位结果”。
+  拼进下游提示词时按 6000 字符截断，避免累计后撑大上下文。
+- **交付物类型不再只看用户那一句**：实测单聊里“我希望ppt是绿色的”能出文件（句子里恰好有 `ppt`），
+  紧接着的“希望有一些插图”同样意图却什么都没拿到 —— 因为交付判断只读当前这句话。
+  现在用户没提格式词时，回退用**计划里点名的文件技能**（`pptx_` / `xlsx_` / `pdf_` / `docx_`）确定交付物。
+- **交付岗拿到正文素材**：计划的各步产出随 `upstreamDraft` 一起交给交付兑底（上限 12000 字符，取尾部），
+  不再只盯着用户那句原始请求从零重写（否则前面的产出等于白做）。
+- **兜底文案改成说实话**：区分“一步都没跑”与“跑了但没有任何产出”，并列出被跳过的步骤与原因、
+  给出可行的下一步；不再在什么都没跑时说“已收集各岗位结果”。
+- **不再叠两条自相矛盾的说明**：交给交付收尾时，计划侧那段说明暂不发；
+  只有交付**确实静默放弃**（没认出交付物 / 找不到能做的岗位 / 空异常）时才补发，避免用户看到空消息。
+- **补上诊断日志**（原先该分支完全没有日志，线上无法定位）：
+  `计划无任何可展示产出，进入如实兜底：steps=… ran=… needsDelivery=… skips=[…] input=…`。
+- 单测：编排/交付相关新增 21 个用例，全量 **1237 通过**。
+- 实盘复验（容器 `agui-group-chat-web`）：原先只回一句兜底文案的“希望有一些插图”，
+  现在产出 26 页带插图的 PPT；继续“再加一页团队介绍”“改成蓝色科技风”均正常出稿（30 页 / 32 页）。
+
+English:
+- **The cumulative buffer no longer overwrites itself**: each step's output is **appended** to "prior output" instead of `Clear()`-ing the buffer every step. Previously, when the last step produced nothing, every earlier role's work was dropped — while the fallback text still claimed results had been collected. The buffer is capped at 6000 chars when fed into downstream prompts.
+- **Deliverable type no longer depends only on the user's sentence**: in a single chat, "我希望ppt是绿色的" produced a file (it happens to contain `ppt`), while the follow-up "希望有一些插图" — same intent — produced nothing, because delivery detection only read the current message. When the user names no format, the **document skill the plan named** (`pptx_` / `xlsx_` / `pdf_` / `docx_`) now decides the deliverable.
+- **The delivery agent receives source material**: the plan's per-step output is passed along as `upstreamDraft` (capped at 12000 chars, tail-kept) instead of the agent rewriting everything from the user's one-line request.
+- **The fallback text tells the truth**: it distinguishes "no step ran at all" from "steps ran but produced nothing", lists the skipped steps with reasons, and offers a concrete next step — no more claiming results were collected when nothing ran.
+- **No more two contradictory explanations in one message**: when handing off to delivery, the plan-side note is withheld and only emitted if delivery **genuinely gave up silently** (no deliverable recognised / no capable owner / empty exception), so users never see a blank message.
+- **Diagnostics added** (this branch previously logged nothing, making it undiagnosable in production): `计划无任何可展示产出，进入如实兜底：steps=… ran=… needsDelivery=… skips=[…] input=…`.
+- Tests: 21 new orchestration/delivery cases; **1237 passing** in total.
+- Live re-verification (container `agui-group-chat-web`): the exact message that used to return only the fallback line ("希望有一些插图") now yields a 26-page illustrated PPT; follow-ups ("再加一页团队介绍", "改成蓝色科技风") produce 30- and 32-page decks.
+
+---
+
 # AG-UI 群聊桌面版 1.0.136 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.136 Release Notes (current Windows desktop release)
 
