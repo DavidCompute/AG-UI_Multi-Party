@@ -48,6 +48,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # /app/docs 是内置 docx 技能的默认落盘目录（compose 中由 agui-docs 命名卷挂载）。
 # 命名卷首次创建时归 root，而容器以 app 运行 —— 必须预建并 chown，否则技能写入报 Permission denied。
 RUN mkdir -p /app/data /app/docs && chown $APP_UID:$APP_UID /app/data /app/docs
+
+# ---------- 可选：版面预览工具（默认不装）----------
+# LibreOffice（pptx/docx → pdf）+ poppler（pdf → png，并且 pdftotext 能抽文本）
+# 用途：把产物渲成图做「肉眼版式校验」与自动检查（见 tools/preview-pptx.py）。
+#
+# 为什么默认不装：这是开发/QA 能力，不是运行时依赖，而它会拉进 131 个包、给镜像加上数百 MB。
+# 需要时显式开启：compose 里设 AGUI_PREVIEW_TOOLS=true，或
+#   docker compose build --build-arg AGUI_PREVIEW_TOOLS=true web
+#
+# 为什么值得装：渲染走的是**另一套渲染器**（LibreOffice），能拦住我们自己检不到的：
+#   文字溢出文本框、字体/字形缺失、以及“PowerPoint 提示需要修复”这类版本兼容问题。
+ARG AGUI_PREVIEW_TOOLS=false
+RUN if [ "$AGUI_PREVIEW_TOOLS" = "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            libreoffice-impress \
+            poppler-utils \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 USER $APP_UID
 
 COPY --from=build /app/publish ./

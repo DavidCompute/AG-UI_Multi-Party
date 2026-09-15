@@ -353,6 +353,51 @@ node tools/pptx-skills/sync-builtin.mjs
 
 改动正文后，还应递增 `BuiltinPptxSkills.Version`，让已部署实例在升级时刷新旧快照。
 
+## 版面预览：把产物渲成图（LibreOffice）
+
+我们自己的生成器与自检只能验证**我们写出的 XML**，验不了“别的渲染器看到的是什么”。
+把产物丢给 LibreOffice 渲一遍，相当于请了**第二个独立裁判**，能拦住我们拦不住的：
+
+- **文字溢出文本框**：我们按字号×字数估算高度，估错了自己看不出来，渲出来就露馅；
+- **字体/字形缺失**：容器里没某个字体时，渲出的图会变成方块/空白；
+- **版本兼容性**：包结构有问题时 LibreOffice 直接打不开——比“PowerPoint 提示需要修复”早一步被抳住。
+
+渲染工具不属于运行时依赖，所以**默认不装**（会多 131 个包、镜像大数百 MB）。开启：
+
+```bash
+# .env 里设 AGUI_PREVIEW_TOOLS=true，然后重建
+AGUI_PREVIEW_TOOLS=true   # 默认 false
+docker compose build web && docker compose up -d web
+```
+
+用法（本机装了 soffice + pdftoppm 时自动走本机，不依赖容器）：
+
+```bash
+# 渲一份“全部页型与全部 variant”的样张——做版式回归时最常用
+python tools/preview-pptx.py --sample
+
+# 渲任意产物（可从容器拉：docker cp agui-group-chat-web:/app/docs/x.pptx .）
+python tools/preview-pptx.py x.pptx --pages 1-6 --dpi 130
+
+# 自动检查（不靠眼睛）：页数 / 空白页 / 关键词是否真的渲染出来
+python tools/preview-pptx.py --sample --check --expect "版式样张,环形仪表,雷达图"
+```
+
+`--check` 做三件事（都是“无需人眼”的部分）：
+
+1. **页数**对得上（也能发现整份文件打不开）；
+2. **每页都有内容**（不是空白页）——测“墨迹”时要**先取全图出现最多的颜色当底色**再比，
+   否则浅彩色底（如 `CAF0F8`）会把整页都当成墨迹，检查就没意义了；
+3. **关键词真的渲染出来了**（用 `pdftotext` 抽文本）——这条能拦住字体缺失/内容被裁掉。
+
+> `--margins`（检查内容是否贴边/溢出）**默认不开**：封面、章节页、`bleed`、背景图页
+> 本来就是满版设计，会天然贴到四条边；开了之后误报会淹没真问题。
+>
+> 产物落在 `tools/.preview/<名字>/`（已 gitignore），同时写出 `report.txt` 便于回看。
+
+> 提醒：这套工具的价值一半在**自动检查**，另一半在**给人看图**——
+> 生成物是不是好看、版式是不是贴切，仍然得人扫一眼。
+
 ## 实测验证
 
 `tests/AguiGroupChat.Hub.Tests/PptxDeckSkillTests.cs` 走**真实执行链路**

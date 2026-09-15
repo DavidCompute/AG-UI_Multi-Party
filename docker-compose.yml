@@ -57,6 +57,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 版面预览工具（LibreOffice + poppler）：只在需要把 pptx/docx 渲成 PNG 肉眼校验时开；
+      # 开它会让镜像变大约数百 MB，所以默认 false。见 Dockerfile 里那段注释。
+      args:
+        AGUI_PREVIEW_TOOLS: ${AGUI_PREVIEW_TOOLS:-false}
     image: agui-group-chat-web:latest
     container_name: agui-group-chat-web
     restart: unless-stopped
