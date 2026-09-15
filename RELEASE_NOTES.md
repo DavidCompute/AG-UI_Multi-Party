@@ -1,5 +1,64 @@
-# AG-UI 群聊桌面版 1.0.129 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.129 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.130 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.130 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.130 为当前 Windows 桌面版本。PPT 产出能力大改造：**18 套设计级调色板 + 4 种版式风格 + 4 种新页型**（设计系统移植），新增**原生可编辑图表**（可在 PowerPoint 里改数据）、**读取既有 pptx** 与**套用户模板出稿**。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.130 is the current Windows desktop release. A major upgrade of the deck authoring skill: **18 design-grade palettes, 4 layout styles and 4 new slide types** (ported design system), plus **native editable charts** (editable in PowerPoint), **reading existing decks** and **authoring from a user-supplied template**. Web and desktop share the same Hub / gateway / frontend.
+
+## 设计系统：18 套调色板 + 4 种版式风格 + 4 种新页型
+# Design system: 18 palettes, 4 layout styles, 4 new slide types
+
+中文：
+- **18 套命名调色板**（医疗/年报/学术/母婴/科技发布/教育统计/ESG/时尚/美食/奢侈品/云AI/旅行/快消/金融科技…）。每套只给 5 个色值，**角色（主色/底色/强调/浅底）由亮度与彩度推导**，18 套共用一条规则——而不是逐套手调。
+- **两个推导规则是实盘翻车倒逼出来的**：① 底色必须先保证是“面”——`education-charts` 的最亮色是亮黄 `E9C46A`，直接当底色就是一张黄底幻灯片，现在会把彩度压下来（`F6E7C3` 奶油底）；② 强调色必须与主色**色相拉开**——`forest-eco` 原本选中 `3A5A40`，与主色 `344E41` 色相差仅 4°，强调线等于白画。
+- **WCAG 可读性兜底**：正文 ≥4.5:1、主/副/强调 ≥3.0:1，并保证强调色上至少黑或白有一个能读清（它是页码徽标/序号圆的底色）。
+- **`style`（与主题正交）**：`sharp` / `soft` / `rounded` / `pill`，只动页边距、间距、圆角，可与任意主题自由组合（如 `tech-night` + `pill`）。
+- **4 种新页型**：`stats`（大数字看板）、`grid`（2/3 列网格卡）、`timeline`（序号圆 + 连接线）、`iconRows`（彩色圆图标行）；`content` 页还可用 `"layout":"grid"` 这类别名。
+- **验证**：把上面两条推导规则分别回退后，18 套里 **6 套失败**（包括我原本没发现的 `luxury-mysterious`/`coastal-coral`/`art-food`/`vibrant-tech`）。
+
+English:
+- **18 named palettes** (healthcare, annual reports, academic, mother-and-baby, tech launches, education/statistics, ESG, fashion, food, luxury, cloud/AI, travel, FMCG, fintech, ...). Each supplies only **five colours**; the roles (primary / background / accent / light surface) are **derived from luminance and chroma**, so a single rule has to hold for all 18 instead of being hand-tuned per palette.
+- **Two of those rules exist because the live run failed**: (1) the background must read as a *surface* — `education-charts`' brightest colour is a bright yellow `E9C46A`, which as a slide background is simply a yellow page; chroma is now pushed down (`F6E7C3`). (2) The accent must be **hue-separated** from the primary — `forest-eco` had picked `3A5A40`, only 4° away from the primary `344E41`, making every accent rule invisible.
+- **WCAG guards**: body text ≥ 4.5:1, primary/secondary/accent ≥ 3.0:1, and the accent is adjusted so that at least one of black/white is readable on it (it backs the page-number badge and timeline nodes).
+- **`style`, orthogonal to the theme**: `sharp` / `soft` / `rounded` / `pill`, moving only margins, spacing and corner radii; freely combinable with any theme (e.g. `tech-night` + `pill`).
+- **Four new slide types**: `stats` (large callouts), `grid` (2–3 column cards), `timeline` (numbered nodes on a connector) and `iconRows`; `content` also accepts a `"layout"` alias.
+- **Verification**: reverting either derivation rule makes **6 of the 18 palettes fail** — including four I had not spotted while writing them.
+
+## 原生可编辑图表（可选）
+# Native editable charts (opt-in)
+
+中文：
+- 默认仍渲成 PNG（兼容性最好），但需要“拿回去继续改数据”时，把 `chartType` 写成 `bar-native` / `line-native` / `pie-native`（或 `chartData:"native"`）即可生成**真正的 DrawingML 图表**，并**嵌入一份数据工作簿**（否则“编辑数据”拿不到表格）。
+- `doughnut` 暂不支持原生，会**降级为图片**，并在返回 JSON 的 `nativeChartFallback` 里如实说明（不静默降级）；`nativeCharts` 报出实际生成了几张。
+- **实测踩到一个真缺陷**：图表调色板常量带 `#`（ImageSharp 接受），但 `srgbClr/@val` 是 `xsd:hexBinary`，带 `#` 就不合法——OpenXmlValidator 直接报错。现已在输出层统一去 `#`。
+- 单测覆盖：部件存在、关系存在、嵌入工作簿可打开、ChartSpace 缓存值与输入一致、整包过 schema 校验。**仍建议发布前用 PowerPoint 真开一次**——这是本项目唯一无法靠自动化完全覆盖的风险点。
+
+English:
+- Charts stay rasterised by default (best compatibility). When the user needs to keep editing the data, `chartType: "bar-native" / "line-native" / "pie-native"` (or `chartData: "native"`) produces a **real DrawingML chart** with an **embedded data workbook** (without it, “Edit Data” has no table).
+- `doughnut` is not supported natively and **falls back to an image**, reported honestly in `nativeChartFallback` (never silent); `nativeCharts` reports how many were produced.
+- **A real defect surfaced here**: the chart palette constants carry a leading `#` (ImageSharp accepts it), but `srgbClr/@val` is `xsd:hexBinary` and rejects it — OpenXmlValidator flagged it immediately. Normalised at the output layer.
+- Covered by tests: parts exist, relationships exist, the embedded workbook opens, the ChartSpace cache matches the input, and the whole package passes schema validation. **Still open a file in PowerPoint once before shipping** — it is the one risk this project cannot fully automate.
+
+## 读取既有 pptx 与套用户模板出稿
+# Reading existing decks and authoring from a template
+
+中文：
+- **读取**：`{ "action": "read", "path": "att_xxx" }` → 按放映顺序返回每页文本（含备注）。只取文本，不还原版式与图片。
+- **套模板**：`template` 传入既有 .pptx → **先复制再改副本，绝不写原件**（`template` 与 `outputPath` 相同时直接报错）；保留模板的母版/版式，并从其主题读出配色与字体；默认清空模板原有页（`keepTemplateSlides:true` 则追加）。
+- **清空要连部件一起删**：只删 `SlideId` 的话 `ppt/slides/slideN.xml` 还会留在包里（占体积、文本仍能被搜到），实测表现为“看着像清空失败”。
+- **用户上传的文件怎么传给技能**：模型只看得到附件 ID（`att_xxx`）、看不到服务器路径，而技能吃的是路径。平台现在在调用 .NET 技能前把入参里的 `att_xxx` 换成真实路径（`SkillRunner.ResolveAttachments`）；解析不到的 ID 原样保留（技能会报「找不到文件」），解析器抛异常也不会把调用搞挂。
+- **实盘已验**：真的 `POST /ag-ui/upload` 拿到 `att_63007e4ffb1348f5`，再用它做 `read`（读回 2 页）与 `template`（出 3 页、母版/主题各 1 套、模板配色 `2B2D42` 生效、模板旧页已清）。
+
+English:
+- **Read**: `{ "action": "read", "path": "att_xxx" }` returns each slide's text (plus notes) in show order. Text only — layouts and images are not reconstructed.
+- **Template**: pass an existing `.pptx` as `template` → the file is **copied first and only the copy is modified**; using the same path for `template` and `outputPath` is rejected outright. The template's master/layouts are kept and its theme colours and fonts are read; template slides are cleared by default (`keepTemplateSlides: true` appends instead).
+- **Clearing must delete the parts too**: removing only the `SlideId` leaves `ppt/slides/slideN.xml` in the package (dead weight, and the text is still findable), which in practice looks like “the clear didn't work”.
+- **How an uploaded file reaches a skill**: the model only sees the attachment id (`att_xxx`), never a server path, while skills consume paths. The platform now rewrites `att_xxx` in the arguments before invoking a .NET skill (`SkillRunner.ResolveAttachments`). Unresolvable ids pass through unchanged (the skill reports “file not found”), and a throwing resolver cannot break the call.
+- **Verified live**: a real `POST /ag-ui/upload` returned `att_63007e4ffb1348f5`, which was then used for `read` (2 slides back) and `template` (3 slides out, exactly one master and one theme, the template's `2B2D42` palette in effect, and the template's old slide cleared).
+
+---
+
+# AG-UI 群聊桌面版 1.0.129 发布说明
+# AG-UI Group Chat Desktop 1.0.129 Release Notes
 
 **版本说明**：1.0.129 为当前 Windows 桌面版本。修复了**内置产出技能（Word / PPT）的图表**两个缺陷：① **内容一多就画出画布**（长标题、多系列、多分类、大数值）；② **饼图其实一直没画出来**（扇区被填成了几乎没面积的“弓形”）。Web 与桌面共用同一套 Hub/网关/前端。
 **Version note**: 1.0.129 is the current Windows desktop release. It fixes two defects in the **chart renderers** of the built-in authoring skills (Word / PPT): (1) **content spilling outside the canvas** with long titles, many series, many categories or large values; and (2) **pie charts that were effectively never drawn** (slices were filled as near-zero-area circular *segments*). Web and desktop share the same Hub / gateway / frontend.
