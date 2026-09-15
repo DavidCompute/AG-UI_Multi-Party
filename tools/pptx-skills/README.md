@@ -115,13 +115,68 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 - 除封面与结束页外，每页统一：页面底色 → 标题 → 标题下强调线 → 内容 → **右下角页码徽标**。
 - 表格用「表头填主色 + 隔行浅色」自绘，不依赖主题部件里的表格样式（兼容性最好）。
 
-## 图表：为什么不发 ChartPart
+## 图表：图片（默认）还是原生可编辑
 
-与内置 docx 技能同口径：**用 ImageSharp 把图表渲成 PNG，再按图片嵌入**。
-DrawingML 图表的 `ChartPart` schema 复杂，容易产出旧版 PowerPoint 打不开、或提示「不可读内容」的文件。
-渲成图片视觉可控、兼容性最好；代价是图表不可在 PowerPoint 里直接改数据（要改请改 JSON 重新生成）。
+**默认渲成 PNG**（与内置 docx 技能同口径）：DrawingML 图表的 `ChartPart` schema 复杂，
+容易产出旧版 PowerPoint 打不开、或提示「不可读内容」的文件；渲成图片视觉可控、兼容性最好。
+代价是图表不可在 PowerPoint 里直接改数据。
+
+**需要“拿回去继续改数据”时**，把 `chartType` 写成 `bar-native` / `line-native` / `pie-native`
+（或顶层 `chartData:"native"`），就会产出真正的 `ChartPart`：
+
+- 同时**嵌入一份数据工作簿**（`SpreadsheetDocument` 生成），否则「编辑数据」拿不到表格；
+- 支持 `bar` / `line` / `pie`；`doughnut` 等会自动降级为图片，并在返回 JSON 的
+  `nativeChartFallback` 里**如实说明**（不静默降级）；
+- 返回 JSON 的 `nativeCharts` 报出实际生成了几张原生图表。
+
+> **为什么默认不开**：ChartSpace 的子元素顺序是 schema 强制的（如 `catAx` 必须
+> `axId→scaling→delete→axPos…`），顺序错了 PowerPoint 就报“需要修复”，而单部件校验器不一定拦得住。
+> 实测已踩到一个：图表调色板常量带 `#`（ImageSharp 接受），但 `srgbClr/@val` 是 `xsd:hexBinary`，
+> 带 `#` 就不合法——现在在输出层统一去 `#`（`BareHex`）。
+>
+> 单测会验证部件存在、关系存在、嵌入工作簿可打开、ChartSpace 缓存值与输入一致、整包过 schema 校验；
+> **但仍建议发布前用 PowerPoint 真开一次**——这是本项目唯一无法靠自动化完全覆盖的风险点。
 
 图表渲染失败（如容器缺字体）时会**降级为要点页**列出数据，不让整页失败。
+
+## 读取既有 pptx / 套模板
+
+### 读取（`action: "read"`）
+
+```json
+{ "action": "read", "path": "/app/docs/某份.pptx" }
+```
+
+按放映顺序返回每页文本：`slideTexts[]`（逐页 `texts[]` + `notes`）与拼好的 `text`。
+只取文本，**不还原版式与图片**（返回里也这么写）。用途：「把这份 PPT 改一改 / 总结一下 / 照着它再出一份」。
+
+### 套模板（`template`）
+
+```json
+{ "title": "Q3 汇报", "template": "/app/docs/公司模板.pptx",
+  "outputPath": "/app/docs/Q3汇报.pptx",
+  "slides": [ { "type": "cover", "title": "Q3 汇报" } ] }
+```
+
+- **绝不写原件**：先把模板复制到 `outputPath`，再改副本；`template` 与 `outputPath` 相同时直接报错。
+- 保留模板的**母版 / 版式**，并从其主题读出**配色与字体**（未显式传 `theme`/`themeColors` 时生效）。
+- 默认**清空模板原有页面**（只借它的“皮”）；传 `"keepTemplateSlides": true` 则追加在后面。
+- 清空时会**连同幻灯片部件一起删除**：只删 `SlideId` 的话 `ppt/slides/slideN.xml` 还会留在包里
+  （占体积、文本仍能被搜到），实测表现为“看着像清空失败”。
+- 模板取色不一定合口味，所以取出后仍过一遍可读性守卫（见上）。
+
+### 用户上传的文件怎么传给技能
+
+模型只看得到附件 ID（`att_xxx`），看不到服务器路径，而技能吃的是**路径**。
+平台在调用 **dotnet 技能**前会把入参里形如 `att_xxx` 的字符串换成真实路径
+（`SkillRunner.ResolveAttachments`，解析器由 `AgentCatalog` 从 `AttachmentStore` 注入）：
+
+```json
+{ "action": "read", "path": "att_1a2b3c4d" }
+{ "template": "att_1a2b3c4d", "slides": [ … ] }
+```
+
+解析不到的 ID 原样保留（技能会报「找不到文件」），解析器抛异常也不会把调用搞挂。
 
 ## 落盘与下载
 
@@ -189,6 +244,8 @@ python tools/verify_office_package.py 某个.pptx
 PYTHONIOENCODING=utf-8 python tools/verify_chart_geometry.py
 # 实盘设计系统（18 套调色板 / 4 种 style / 新页型：回显配色 + 版面不越界 + 包结构）
 PYTHONIOENCODING=utf-8 python tools/verify_design_system_live.py
+# 实盘读取/套模板/原生图表（真上传取 att_xxx，再作 path/template 传给技能）
+PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
 ```
 
 > **为什么需要 `check-skill.py`**：技能正文是由 DotnetSkillHost 在**运行时**用 Roslyn 编译的，

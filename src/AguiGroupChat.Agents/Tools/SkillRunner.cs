@@ -24,12 +24,22 @@ internal sealed class SkillRunner
     private readonly string _sandboxRoot;           // 技能沙箱根（data/skillruns）
     private readonly bool _allowPrivateEndpoints;  // 是否放行本机 / 内网（默认 false → 保留 SSRF 防护）
     private readonly DotnetSkillHost? _dotnet;     // .NET（C#）技能动态编译执行宿主
+    private readonly Func<string, string?>? _resolveAttachment; // att_xxx → 服务器路径（可空）
 
-    public SkillRunner(string sandboxRoot, ILoggerFactory loggerFactory, bool allowPrivateEndpoints = false)
+    /// <summary>附件 ID 形态：<c>att_</c> + 至少 6 位字母数字。</summary>
+    private static readonly Regex AttachmentToken = new(@"\batt_[A-Za-z0-9]{6,}\b", RegexOptions.Compiled);
+
+    /// <param name="resolveAttachment">
+    /// 可选的附件解析器（<c>att_xxx</c> → 服务器上的真实文件路径）。
+    /// 模型只能看到附件 ID、看不到服务器路径，没有它「用我上传的模板/文档」到技能那一步就断了。
+    /// </param>
+    public SkillRunner(string sandboxRoot, ILoggerFactory loggerFactory, bool allowPrivateEndpoints = false,
+        Func<string, string?>? resolveAttachment = null)
     {
         _sandboxRoot = Path.GetFullPath(Path.TrimEndingDirectorySeparator(sandboxRoot)) + Path.DirectorySeparatorChar;
         _logger = loggerFactory.CreateLogger<SkillRunner>();
         _allowPrivateEndpoints = allowPrivateEndpoints;
+        _resolveAttachment = resolveAttachment;
         // NuGet 引用还原缓存放沙箱根的同级 data 目录（如 data/dotnetpkgs），随服务数据持久化
         var dataRoot = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(_sandboxRoot)) ?? _sandboxRoot;
         _dotnet = new DotnetSkillHost(_logger, Path.Combine(dataRoot, "dotnetpkgs"));
@@ -51,7 +61,7 @@ internal sealed class SkillRunner
             {
                 AgentSkillKind.Shell => await RunShellAsync(skill, query, ct),
                 AgentSkillKind.Http => await RunHttpAsync(skill, query, ct),
-                AgentSkillKind.Dotnet => RunDotnetSkill(skill, query),
+                AgentSkillKind.Dotnet => RunDotnetSkill(skill, ResolveAttachments(query ?? "")),
                 _ => RunPrompt(skill, query),
             };
         }
@@ -64,6 +74,32 @@ internal sealed class SkillRunner
     }
 
     // =============== .NET（C#）===============
+
+    /// <summary>
+    /// 把入参里形如 <c>att_xxx</c> 的附件 ID 换成服务器上的真实文件路径。
+    ///
+    /// <para>
+    /// 只对 dotnet 技能做替换：它们才是“吃文件路径”的技能（docx / pptx / xlsx / pdf）。
+    /// 解析不到的 ID 原样保留，让技能自己报「找不到文件」—— 比默默变成别的意思安全。
+    /// </para>
+    /// </summary>
+    private string ResolveAttachments(string query)
+    {
+        if (_resolveAttachment is null || string.IsNullOrEmpty(query)) return query;
+        try
+        {
+            return AttachmentToken.Replace(query, m =>
+            {
+                try { return _resolveAttachment(m.Value) ?? m.Value; }
+                catch { return m.Value; }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "附件 ID 解析失败，按原样传递。");
+            return query;
+        }
+    }
     private string RunDotnetSkill(AgentSkillDefinition skill, string query)
     {
         if (_dotnet is null) return ".NET 技能执行器不可用。";

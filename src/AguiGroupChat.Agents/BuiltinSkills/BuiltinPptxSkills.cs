@@ -36,6 +36,9 @@ public static class BuiltinPptxSkills
             "当用户要求「做个 PPT」「出一套幻灯片 / 演示文稿」「把这份内容讲成一页页」「路演/汇报材料」时调用。" +
             "16:9 宽屏、统一主题配色与字体、除封面外每页带页码徽标；每页可附演讲者备注。" +
             "参数为 JSON：title(必填)、subtitle/author/date(可选)、" +
+            "action(\"read\" + path：只读取既有 pptx 的文本，不生成文件)、" +
+            "template(既有 .pptx 路径：沿用该模板的母版/版式/配色出稿，不动原件)、" +
+            "keepTemplateSlides(true 则保留模板原有页，默认清空只借其皮)、" +
             "style(sharp|soft|rounded|pill，可选，默认 soft；只影响页边距/间距/圆角，与 theme 正交)、" +
             "theme 可选以下 18 套命名调色板（按场景挑，比历史主题更好看）：" +
             "modern-wellness(医疗/健康/瑜伽)、business-authority(年报/金融/政企)、" +
@@ -69,6 +72,10 @@ public static class BuiltinPptxSkills
             "{\"type\":\"summary\",\"title\":\"小结\",\"bullets\":[…] } / " +
             "{\"type\":\"end\",\"title\":\"谢谢\",\"subtitle\":\"…\"}。" +
             "content 页也可用 \"layout\":\"timeline|grid|stats|iconRows\" 指定子类型。" +
+            "图表默认为图片（不可在 PowerPoint 里改数据）；若用户需要“能编辑数据”的图表，" +
+            "把 chartType 写成 \"bar-native\" / \"line-native\" / \"pie-native\"（或顶层 chartData:\"native\"），" +
+            "会生成原生可编辑图表（环形图暂不支持原生，会自动降级为图片并在返回里说明）。" +
+            "用户上传的文件以其附件 ID（att_xxx）传入 path/template 即可，平台会解析成真实路径。" +
             "注意：设计规范建议**不要每页都用同一种版式**，请在大纲阶段就为每页选定合适的页型并轮换。" +
             "任何一页都可加 \"notes\"（写入演讲者备注）。" +
             "返回 JSON 含生成的 .pptx 文件路径与 slides 页数，请据实告知用户，不要编造正文内容。"

@@ -30,6 +30,9 @@
 //     "theme": "business|tech|warm|minimal|dark|vivid",   // 可选，历史主题（默认 business）
 //              // 或 18 套命名调色板（推荐，按场景挑），详见下方 PALETTES
 //     "style": "sharp|soft|rounded|pill",                  // 可选，版式风格，默认 soft
+//     "action": "read", "path": "…pptx",                  // 可选：只读取既有 pptx 的文本，不生成文件
+//     "template": "…pptx",                                 // 可选：套用该模板的母版/版式/配色出稿（不动原件）
+//     "keepTemplateSlides": true,                          // 可选：保留模板原有页（默认清空，只借其皮）
 //     "themeColors": { "primary":"1F3864", "secondary":"2E5C9A", "accent":"C8A24A",
 //                      "light":"E8EEF7", "bg":"FFFFFF", "text":"333333" },  // 可选，覆盖预设
 //     "fontTitle": "微软雅黑",                  // 可选
@@ -54,10 +57,20 @@
 //     image    图片      title, path, caption
 //     chart    图表      title, chartType:"bar|line|pie|doughnut", categories:[…],
 //                        series:[ {name,values:[…]} ], yLabel, caption
+//                        chartType 加 "-native" 后缀 → 生成原生可编辑图表（DrawingML ChartPart）
+//                        支持 bar/line/pie（doughnut 会自动降级为图片并在返回里说明）
 //     summary  小结      title, bullets:[…]
 //     end      结束页    title, subtitle
 //   content 还可用 "layout":"timeline|grid|stats|iconRows" 直接指定子类型。
 //   任何页都可带 "notes"（备注文字），写入演讲者备注。
+//
+//   【图表：图片 vs 原生】默认渲染成 PNG（视觉可控、兼容性最好，但不可在 PowerPoint 里改数据）。
+//   对“要拿回去继续改数据”的场景可用原生图表（ChartPart + 嵌入数据工作簿）。
+//   取舍：原生图表的 schema 严格得多（子元素顺序错就报“需要修复”），所以默认不开。
+//
+//   【套模板】template 传入既有 .pptx：复制到 outputPath 后再改副本（绝不写原件），
+//   沿用模板的母版/版式，并从其主题读出配色与字体；默认清空模板原有页面（只借皮），
+//   传 keepTemplateSlides:true 则追加在其后。
 //
 //   PALETTES（theme 的命名调色板，18 套；每套 5 色，角色由亮度/彩度自动分配）：
 //     modern-wellness  business-authority  nature-outdoors  vintage-academic
@@ -93,6 +106,8 @@ using System.Text.Json;
 // 命名空间别名：避免与 OpenXML 类型重名（Color / PointF 等）
 using P = DocumentFormat.OpenXml.Presentation;
 using A = DocumentFormat.OpenXml.Drawing;
+using C = DocumentFormat.OpenXml.Drawing.Charts;
+using SS = DocumentFormat.OpenXml.Spreadsheet;
 using ImgColor = SixLabors.ImageSharp.Color;
 using ImgPointF = SixLabors.ImageSharp.PointF;
 using ImgRect = SixLabors.ImageSharp.Drawing.RectangularPolygon;
@@ -143,6 +158,11 @@ public class Skill
     [ThreadStatic] private static Metrics? _currentMetrics;
     private static Metrics _m => _currentMetrics ?? (_currentMetrics = MetricsFor("soft"));
 
+    /// <summary>本次生成里用了几张原生图表（回显给调用方）。</summary>
+    [ThreadStatic] private static int _nativeCharts;
+    /// <summary>请求了原生图表、但该图型不支持时的降级原因（不静默降级，写进返回 JSON）。</summary>
+    [ThreadStatic] private static string? _nativeFallback;
+
     private static Metrics MetricsFor(string style)
     {
         // soft 的各项与历史常量完全一致（默认风格 = 换风格前的观感，保证老调用方观感不变）
@@ -192,6 +212,7 @@ public class Skill
     private const string NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const string NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main";
     private const string NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private const string NS_C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
     // ===== 主题 =====
     private sealed class Theme
@@ -493,6 +514,10 @@ public class Skill
     {
         try
         {
+            // 读取模式：不生成文件，只把既有 pptx 的内容读回来
+            var readPath = ExtractReadPath(input);
+            if (readPath is not null) return ReadDeck(readPath);
+
             var built = Build(input ?? "");
             // produce_file 标记：告诉平台“这个文件可挂到对话里供下载”。
             // 网关扫到后用 AttachmentStore 挂号并挂到当前消息（att_xxx）。
@@ -516,6 +541,9 @@ public class Skill
                 // 单测也靠它断言可读性底线（不必去解 XML）。
                 + ",\"style\":" + Js(_m.Name)
                 + ",\"palette\":" + PaletteJson(_currentTheme)
+                // 原生图表用量与降级原因：调了却没用上必须说清楚，不能静默降级
+                + ",\"nativeCharts\":" + _nativeCharts
+                + ",\"nativeChartFallback\":" + (_nativeFallback is null ? "null" : Js(_nativeFallback))
                 + ",\"message\":" + Js("已生成演示文稿：" + built.Path
                     + (ChartFontHasCjk ? "" : "（提示：当前环境未找到含中文字形的字体，图表中的中文可能显示为缺字/乱码；"
                         + "可在容器里安装 fonts-noto-cjk / fonts-droid-fallback 后重启）")) + "}";
@@ -525,6 +553,20 @@ public class Skill
             return "{\"ok\":false,\"scene\":" + Js(SceneName)
                 + ",\"message\":" + Js("生成失败：" + ex.GetType().Name + "：" + ex.Message) + "}";
         }
+    }
+
+    /// <summary>若 <c>action=read</c> 则返回待读文件路径，否则 null。解析失败一律当“不是读取”处理，不影响生成路径。</summary>
+    private static string? ExtractReadPath(string input)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(ExtractJson(input));
+            var root = doc.RootElement;
+            if (!string.Equals((Str(root, "action") ?? "").Trim(), "read", StringComparison.OrdinalIgnoreCase))
+                return null;
+            return Str(root, "path") ?? Str(root, "template") ?? "";
+        }
+        catch { return null; }
     }
 
     // ===== 构建 =====
@@ -537,6 +579,8 @@ public class Skill
         _currentTheme = theme;
         // 版式风格（sharp|soft|rounded|pill）：与主题正交，只影响页边距/间距/圆角
         _currentMetrics = MetricsFor(Str(root, "style") ?? "soft");
+        _nativeCharts = 0;
+        _nativeFallback = null;
         var title = Str(root, "title") ?? "演示文稿";
         var subtitle = Str(root, "subtitle");
         var author = Str(root, "author");
@@ -551,6 +595,12 @@ public class Skill
             throw new InvalidOperationException("slides 为空：请提供至少一页（如 cover / content / summary）。");
 
         var path = ResolveOutputPath(root, title);
+
+        // 套模板：保留模板的母版/版式/主题，把我们的内容渲染进去（改副本，不动原件）
+        var templatePath = Str(root, "template");
+        if (!string.IsNullOrWhiteSpace(templatePath))
+            return BuildFromTemplate(root, slides, path, theme, templatePath!.Trim());
+
         var count = 0;
 
         using (var doc = PresentationDocument.Create(path, PresentationDocumentType.Presentation))
@@ -633,6 +683,238 @@ public class Skill
             using var ms = new MemoryStream(png);
             part.FeedData(ms);
             return Part.GetIdOfPart(part);
+        }
+
+        /// <summary>
+        /// 挂一个原生图表部件（DrawingML ChartPart），返回关系 id。
+        ///
+        /// <para>
+        /// 同时嵌入一份数据工作簿：没它 PowerPoint 仍能显示（缓存值在），
+        /// 但「编辑数据」拿不到表格；有了它才是真正“可改数据”的图表。
+        /// </para>
+        /// </summary>
+        public string AddChart(string chartSpaceXml, byte[] workbook)
+        {
+            var chartPart = Part.AddNewPart<ChartPart>();
+            chartPart.ChartSpace = new C.ChartSpace(chartSpaceXml);
+            var data = chartPart.AddEmbeddedPackagePart(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            using (var ms = new MemoryStream(workbook)) data.FeedData(ms);
+            return Part.GetIdOfPart(chartPart);
+        }
+    }
+
+    // ===== 读取 / 套模板（Phase 4）=====
+
+    /// <summary>
+    /// 读取既有 pptx：按放映顺序取出每页的文本。
+    ///
+    /// <para>
+    /// 用途是“把这份 PPT 改一改 / 总结一下 / 照着它再出一份”——先把内容取回来才能谈后续。
+    /// 只取文本，不做版式还原：我们不承诺“无损读取”，返回里也如实标注。
+    /// </para>
+    /// </summary>
+    private static string ReadDeck(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return "{\"ok\":false,\"action\":\"read\",\"message\":" + Js("找不到文件：" + (path ?? "（未提供 path）")) + "}";
+        try
+        {
+            using var doc = PresentationDocument.Open(path, false);
+            var presPart = doc.PresentationPart;
+            if (presPart?.Presentation is null)
+                return "{\"ok\":false,\"action\":\"read\",\"message\":" + Js("不是有效的 .pptx（缺少 presentation.xml）") + "}";
+
+            var sb = new StringBuilder();
+            var slidesJson = new StringBuilder();
+            var index = 0;
+            foreach (var id in presPart.Presentation.SlideIdList?.Elements<P.SlideId>() ?? [])
+            {
+                var relId = id.RelationshipId?.Value;
+                if (relId is null || presPart.GetPartById(relId) is not SlidePart sp) continue;
+                var texts = sp.Slide.Descendants<A.Text>()
+                    .Select(x => (x.Text ?? "").Trim())
+                    .Where(s => s.Length > 0)
+                    .ToList();
+                index++;
+                var joined = string.Join("\n", texts);
+                sb.Append("【第 ").Append(index).Append(" 页】\n").Append(joined).Append("\n\n");
+                if (slidesJson.Length > 0) slidesJson.Append(',');
+                slidesJson.Append("{\"index\":").Append(index)
+                    .Append(",\"notes\":").Append(Js(ReadNotes(sp)))
+                    .Append(",\"texts\":[")
+                    .Append(string.Join(",", texts.Select(Js))).Append("]}");
+            }
+            return "{\"ok\":true,\"action\":\"read\",\"scene\":" + Js(SceneName)
+                + ",\"source\":" + Js(path)
+                + ",\"slides\":" + index
+                + ",\"slideTexts\":[" + slidesJson + "]"
+                + ",\"text\":" + Js(sb.ToString().TrimEnd())
+                + ",\"message\":" + Js("已读取 " + index + " 页（仅文本，不包含版式与图片）") + "}";
+        }
+        catch (Exception ex)
+        {
+            return "{\"ok\":false,\"action\":\"read\",\"scene\":" + Js(SceneName)
+                + ",\"message\":" + Js("读取失败：" + ex.GetType().Name + "：" + ex.Message) + "}";
+        }
+    }
+
+    private static string ReadNotes(SlidePart sp)
+    {
+        try
+        {
+            return string.Join("\n", sp.NotesSlidePart?.NotesSlide?.Descendants<A.Text>()
+                .Select(x => (x.Text ?? "").Trim()).Where(s => s.Length > 0) ?? []);
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// 从模板的主题里读配色（accent1..3 / lt1 / lt2 / dk2）与字体。
+    ///
+    /// <para>
+    /// 取色不一定是模板作者的原意（各家的主题用法不一），所以取出后仍会过一遍
+    /// <see cref="EnsureContrast"/> 类守卫——宁可颜色略有出入，也不能出现看不清的字。
+    /// </para>
+    /// </summary>
+    private static Theme? ThemeFromTemplate(SlideMasterPart? master)
+    {
+        var themePart = master?.ThemePart;
+        var elements = themePart?.Theme?.ThemeElements;
+        if (elements is null) return null;
+
+        string? Val(OpenXmlElement? c)
+            => (c as A.Color2Type)?.RgbColorModelHex?.Val?.Value
+            ?? (c as A.Color2Type)?.SystemColor?.LastColor?.Value;
+
+        var cs = elements.ColorScheme;
+        var t = new Theme();
+        var accent1 = Val(cs?.Accent1Color);
+        var accent2 = Val(cs?.Accent2Color);
+        var accent3 = Val(cs?.Accent3Color);
+        var lt1 = Val(cs?.Light1Color);
+        var lt2 = Val(cs?.Light2Color);
+        var dk2 = Val(cs?.Dark2Color);
+
+        t.Primary = Hex(accent1, t.Primary);
+        t.Secondary = Hex(accent2, t.Secondary);
+        t.Accent = Hex(accent3, t.Primary);
+        t.Light = Hex(lt2, t.Light);
+        t.Bg = Hex(lt1, "FFFFFF");
+        t.Text = Hex(dk2, "333333");
+        t.FontTitle = elements.FontScheme?.MajorFont?.LatinFont?.Typeface?.Value is { Length: > 0 } mt ? mt : t.FontTitle;
+        t.FontBody = elements.FontScheme?.MinorFont?.LatinFont?.Typeface?.Value is { Length: > 0 } bt ? bt : t.FontBody;
+
+        // 模板配色不可信：过一遍可读性守卫（模板用“主色当底”的玩法差异很大）
+        if (RelLum(t.Bg) > 0.5)
+        {
+            t.Text = EnsureContrast(t.Text, t.Bg, 4.5);
+            t.Primary = EnsureContrast(t.Primary, t.Bg, 4.5);
+        }
+        else
+        {
+            t.Text = EnsureContrast(t.Text, t.Bg, 4.5);
+            t.Primary = EnsureContrast(t.Primary, t.Bg, 4.5);
+        }
+        t.Secondary = EnsureContrast(Mix(t.Primary, t.Bg, 0.25), t.Bg, 3.0);
+        t.Accent = EnsureReadableUnder(EnsureContrast(t.Accent, t.Bg, 3.0), 4.5);
+        t.OnAccent = OnColor(t.Accent, t.Bg);
+        t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
+        return t;
+    }
+
+    /// <summary>
+    /// 套模板出稿：保留模板的母版 / 版式 / 主题，把我们的内容渲染进去。
+    ///
+    /// <para>
+    /// 不修改用户上传的原件——先复制到输出路径再改副本。
+    /// 默认清空模板原有的幻灯片（只借它的“皮”），传 <c>keepTemplateSlides:true</c> 则追加在后面。
+    /// </para>
+    /// </summary>
+    private static (int Slides, string Path) BuildFromTemplate(JsonElement root, List<JsonElement> slides,
+        string path, Theme theme, string templatePath)
+    {
+        if (!File.Exists(templatePath))
+            throw new InvalidOperationException("模板文件不存在：" + templatePath);
+        if (string.Equals(Path.GetFullPath(templatePath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("模板路径与输出路径相同，会覆盖原件；请指定不同的 outputPath。");
+
+        var keep = root.TryGetProperty("keepTemplateSlides", out var kv) && kv.ValueKind == JsonValueKind.True;
+
+        var src = Path.GetFullPath(templatePath);
+        var dst = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+        File.Copy(src, dst, true);   // 改副本，不动原件
+
+        using (var doc = PresentationDocument.Open(dst, true))
+        {
+            var presPart = doc.PresentationPart
+                ?? throw new InvalidOperationException("模板缺少 presentation.xml，不是有效的 .pptx。");
+            var master = presPart.SlideMasterParts.FirstOrDefault();
+            var layout = master?.SlideLayoutParts.FirstOrDefault()
+                ?? throw new InvalidOperationException("模板里没有可用的版式（slideLayout）。");
+
+            // 模板里没显式给主题时，用模板自己的配色（这就是“套模板”的意义）
+            if (Str(root, "theme") is null && !root.TryGetProperty("themeColors", out _))
+            {
+                var fromTemplate = ThemeFromTemplate(master);
+                if (fromTemplate is not null)
+                {
+                    theme.Primary = fromTemplate.Primary; theme.Secondary = fromTemplate.Secondary;
+                    theme.Accent = fromTemplate.Accent; theme.Light = fromTemplate.Light;
+                    theme.Bg = fromTemplate.Bg; theme.Text = fromTemplate.Text;
+                    theme.OnAccent = fromTemplate.OnAccent; theme.OnPrimary = fromTemplate.OnPrimary;
+                    theme.FontTitle = fromTemplate.FontTitle; theme.FontBody = fromTemplate.FontBody;
+                }
+            }
+            _currentTheme = theme;
+
+            var pres = presPart.Presentation;
+            var idList = pres.SlideIdList ??= new P.SlideIdList();
+            if (!keep)
+            {
+                // 只借皮：把模板原有页面连同它们的部件一起删掉。
+                // 【别只删 SlideId】只解除引用的话，ppt/slides/slideN.xml 还留在包里（仍占体积、
+                // 文本仍可被搜到），实测产物里会同时存在模板的旧页——看着像“清空失败”。
+                foreach (var id in idList.Elements<P.SlideId>().ToList())
+                {
+                    var rel = id.RelationshipId?.Value;
+                    var part = rel is null ? null : presPart.GetPartById(rel);
+                    id.Remove();
+                    if (part is not null) presPart.DeletePart(part);
+                }
+            }
+            var nextId = idList.Elements<P.SlideId>()
+                .Select(x => x.Id?.Value ?? 0u).DefaultIfEmpty(255u).Max() + 1;
+
+            var title = Str(root, "title") ?? "演示文稿";
+            var total = slides.Count;
+            var added = 0;
+            for (var i = 0; i < total; i++)
+            {
+                var el = slides[i];
+                var sp = presPart.AddNewPart<SlidePart>();
+                sp.AddPart(layout);
+                var ctx = new SlideCtx(sp, theme, i + 1, total, title,
+                    Str(root, "subtitle"), Str(root, "author"), Str(root, "date"));
+                sp.Slide = new P.Slide(RenderSlide(el, ctx));
+                var notes = Str(el, "notes");
+                if (!string.IsNullOrWhiteSpace(notes))
+                {
+                    var notesMaster = presPart.NotesMasterPart;
+                    AttachNotes(sp, notes!, notesMaster);
+                }
+                sp.Slide.Save();
+                idList.Append(new P.SlideId { Id = nextId++, RelationshipId = presPart.GetIdOfPart(sp) });
+                added++;
+            }
+            if (!keep)
+            {
+                // 清完后要把 sldIdLst 留在 presentation 里（空列表比缺元素更稳）
+                pres.SlideIdList = idList;
+            }
+            pres.Save();
+            return (added, dst);
         }
     }
 
@@ -1396,10 +1678,187 @@ public class Skill
     }
 
     // ---- 图表（渲成 PNG 再嵌入）----
+    // ---- 原生图表（DrawingML ChartPart，可在 PowerPoint 里改数据）----
+
+    /// <summary>支持原生图表的图型；其余（如 doughnut）仍走 ImageSharp 渲图。</summary>
+    private static bool SupportsNativeChart(string kind) => kind is "bar" or "line" or "pie";
+
+    /// <summary>
+    /// 数据工作簿（xlsx），挂在 ChartPart 下供 PowerPoint「编辑数据」用。
+    ///
+    /// <para>
+    /// <b>没有它图表仍能显示</b>（缓存值写在 ChartSpace 里），但“编辑数据”拿不到表格；
+    /// 既然做原生图表的卖点就是“可改数据”，就必须一并嵌入。
+    /// 第 1 行：分类 / 各系列名；第 2..n+1 行：分类值 / 各系列数值。
+    /// </para>
+    /// </summary>
+    private static byte[] DataWorkbook(List<string> cats, List<(string Name, double[] Values)> series)
+    {
+        using var ms = new MemoryStream();
+        using (var doc = SpreadsheetDocument.Create(ms, SpreadsheetDocumentType.Workbook, true))
+        {
+            var wb = doc.AddWorkbookPart();
+            wb.Workbook = new SS.Workbook();
+            var ws = wb.AddNewPart<WorksheetPart>();
+
+            var head = new SS.Row();
+            head.Append(InlineCell("A1", "分类"));
+            for (var s = 0; s < series.Count; s++)
+                head.Append(InlineCell(ColName(s + 1) + "1",
+                    series[s].Name.Length > 0 ? series[s].Name : "系列" + (s + 1)));
+            var sheetData = new SS.SheetData(head);
+
+            for (var i = 0; i < cats.Count; i++)
+            {
+                var row = new SS.Row();
+                row.Append(InlineCell("A" + (i + 2), cats[i]));
+                for (var s = 0; s < series.Count; s++)
+                    row.Append(NumberCell(ColName(s + 1) + (i + 2),
+                        i < series[s].Values.Length ? series[s].Values[i] : 0));
+                sheetData.Append(row);
+            }
+
+            ws.Worksheet = new SS.Worksheet(sheetData);
+            ws.Worksheet.Save();
+            wb.Workbook.Append(new SS.Sheets(new SS.Sheet
+            {
+                Id = wb.GetIdOfPart(ws), SheetId = 1, Name = "Sheet1",
+            }));
+            wb.Workbook.Save();
+        }
+        return ms.ToArray();
+    }
+
+    private static string ColName(int i) => ((char)('A' + i)).ToString();
+
+    private static SS.Cell InlineCell(string reference, string text)
+        => new()
+        {
+            CellReference = reference,
+            DataType = SS.CellValues.InlineString,
+            InlineString = new SS.InlineString(new SS.Text(text ?? "")),
+        };
+
+    private static SS.Cell NumberCell(string reference, double v)
+        => new()
+        {
+            CellReference = reference,
+            CellValue = new SS.CellValue(v.ToString("R", System.Globalization.CultureInfo.InvariantCulture)),
+        };
+
+    /// <summary>
+    /// 构造 ChartSpace XML。
+    ///
+    /// <para>
+    /// <b>子元素顺序是 schema 强制的</b>（比如 catAx 必须 axId→scaling→delete→axPos…），
+    /// 顺序错了 PowerPoint 就会报“需要修复”，而这类错误单部件校验器不一定拦得住——
+    /// 改这里请对照 ECMA-376 的 CT_* 定义，不要“看着差不多”就挪。
+    /// </para>
+    /// </summary>
+    private static string ChartSpaceXml(string kind, string? title, List<string> cats,
+        List<(string Name, double[] Values)> series, Theme t)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<c:chartSpace xmlns:c=\"").Append(NS_C).Append("\" xmlns:a=\"").Append(NS_A)
+          .Append("\" xmlns:r=\"").Append(NS_R).Append("\"><c:chart>");
+        if (!string.IsNullOrWhiteSpace(title))
+            sb.Append("<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang=\"zh-CN\" sz=\"1400\" b=\"0\">")
+              .Append("<a:solidFill>").Append(Rgb(t.Primary)).Append("</a:solidFill>")
+              .Append("<a:latin typeface=\"").Append(Xml(t.FontTitle)).Append("\"/>")
+              .Append("<a:ea typeface=\"").Append(Xml(t.FontTitle)).Append("\"/></a:rPr>")
+              .Append("<a:t>").Append(Xml(title!)).Append("</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title>");
+        sb.Append("<c:autoTitleDeleted val=\"0\"/><c:plotArea><c:layout/>");
+
+        var legend = series.Count > 1 || kind == "pie";
+        switch (kind)
+        {
+            case "line":
+                sb.Append("<c:lineChart><c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>");
+                for (var i = 0; i < series.Count; i++) sb.Append(SerXml(i, cats, series[i], line: true));
+                sb.Append("<c:marker val=\"0\"/><c:axId val=\"111111111\"/><c:axId val=\"222222222\"/></c:lineChart>");
+                break;
+            case "pie":
+                sb.Append("<c:pieChart><c:varyColors val=\"1\"/>");
+                sb.Append(SerXml(0, cats, series[0], line: false));
+                sb.Append("<c:firstSliceAng val=\"0\"/></c:pieChart>");
+                break;
+            default: // bar
+                sb.Append("<c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>");
+                for (var i = 0; i < series.Count; i++) sb.Append(SerXml(i, cats, series[i], line: false));
+                sb.Append("<c:gapWidth val=\"90\"/><c:axId val=\"111111111\"/><c:axId val=\"222222222\"/></c:barChart>");
+                break;
+        }
+
+        if (kind != "pie")
+        {
+            sb.Append("<c:catAx><c:axId val=\"111111111\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>")
+              .Append("<c:delete val=\"0\"/><c:axPos val=\"b\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"222222222\"/>")
+              .Append("<c:crosses val=\"autoZero\"/><c:auto val=\"1\"/><c:lblAlgn val=\"ctr\"/><c:lblOffset val=\"100\"/></c:catAx>");
+            sb.Append("<c:valAx><c:axId val=\"222222222\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling>")
+              .Append("<c:delete val=\"0\"/><c:axPos val=\"l\"/><c:majorGridlines/>")
+              .Append("<c:numFmt formatCode=\"General\" sourceLinked=\"1\"/><c:tickLblPos val=\"nextTo\"/>")
+              .Append("<c:crossAx val=\"111111111\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"between\"/></c:valAx>");
+        }
+
+        sb.Append("</c:plotArea>");
+        if (legend) sb.Append("<c:legend><c:legendPos val=\"b\"/><c:overlay val=\"0\"/></c:legend>");
+        sb.Append("<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/></c:chart></c:chartSpace>");
+        return sb.ToString();
+    }
+
+    /// <summary>一条系列（idx/order/tx/spPr/cat/val，顺序固定）。</summary>
+    private static string SerXml(int idx, List<string> cats, (string Name, double[] Values) s, bool line)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<c:ser><c:idx val=\"").Append(idx).Append("\"/><c:order val=\"").Append(idx).Append("\"/>");
+        sb.Append("<c:tx><c:strRef><c:f>Sheet1!$").Append(ColName(idx + 1)).Append("$1</c:f>")
+          .Append("<c:strCache><c:ptCount val=\"1\"/><c:pt idx=\"0\"><c:v>").Append(Xml(s.Name)).Append("</c:v></c:pt></c:strCache></c:strRef></c:tx>");
+        sb.Append("<c:spPr><a:solidFill>").Append(Rgb(Palette[idx % Palette.Length]))
+          .Append("</a:solidFill><a:ln>").Append(SolidFill(Palette[idx % Palette.Length])).Append("</a:ln></c:spPr>");
+        if (line) sb.Append("<c:marker><c:symbol val=\"none\"/></c:marker>");
+
+        sb.Append("<c:cat><c:strRef><c:f>Sheet1!$A$2:$A$").Append(cats.Count + 1)
+          .Append("</c:f><c:strCache><c:ptCount val=\"").Append(cats.Count).Append("\"/>");
+        for (var i = 0; i < cats.Count; i++)
+            sb.Append("<c:pt idx=\"").Append(i).Append("\"><c:v>").Append(Xml(cats[i])).Append("</c:v></c:pt>");
+        sb.Append("</c:strCache></c:strRef></c:cat>");
+
+        sb.Append("<c:val><c:numRef><c:f>Sheet1!$").Append(ColName(idx + 1)).Append("$2:$")
+          .Append(ColName(idx + 1)).Append("$").Append(s.Values.Length + 1)
+          .Append("</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"")
+          .Append(s.Values.Length).Append("\"/>");
+        for (var i = 0; i < s.Values.Length; i++)
+            sb.Append("<c:pt idx=\"").Append(i).Append("\"><c:v>")
+              .Append(s.Values[i].ToString("R", System.Globalization.CultureInfo.InvariantCulture)).Append("</c:v></c:pt>");
+        sb.Append("</c:numCache></c:numRef></c:val>");
+        if (line) sb.Append("<c:smooth val=\"0\"/>");
+        sb.Append("</c:ser>");
+        return sb.ToString();
+    }
+
+    /// <summary>幻灯片上的图表占位框（graphicFrame + c:chart r:id）。</summary>
+    private static string NativeChartFrame(int id, string relId, long x, long y, long cx, long cy)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id=\"").Append(id).Append("\" name=\"Chart ").Append(id).Append("\"/>")
+          .Append("<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>")
+          .Append("<p:xfrm><a:off x=\"").Append(x).Append("\" y=\"").Append(y)
+          .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></p:xfrm>")
+          .Append("<a:graphic><a:graphicData uri=\"").Append(NS_C).Append("\">")
+          .Append("<c:chart xmlns:c=\"").Append(NS_C).Append("\" xmlns:r=\"").Append(NS_R)
+          .Append("\" r:id=\"").Append(relId).Append("\"/></a:graphicData></a:graphic></p:graphicFrame>");
+        return sb.ToString();
+    }
+
     private static string ChartBody(JsonElement el, SlideCtx ctx)
     {
         var t = ctx.Theme;
-        var kind = (Str(el, "chartType") ?? Str(el, "type2") ?? "bar").Trim().ToLowerInvariant();
+        var kindRaw = (Str(el, "chartType") ?? Str(el, "type2") ?? "bar").Trim().ToLowerInvariant();
+        // 原生图表可以写 chartType:"bar-native"，也可以顶层写 chartData:"native"
+        var nativeBySuffix = kindRaw.EndsWith("-native", StringComparison.Ordinal);
+        var kind = nativeBySuffix ? kindRaw[..^"-native".Length] : kindRaw;
+        var wantNative = nativeBySuffix
+            || string.Equals((Str(el, "chartData") ?? "").Trim(), "native", StringComparison.OrdinalIgnoreCase);
         var categories = StringList(el, "categories");
         var series = new List<(string Name, double[] Values)>();
         if (el.TryGetProperty("series", out var sv) && sv.ValueKind == JsonValueKind.Array)
@@ -1423,6 +1882,25 @@ public class Skill
         var yLabel = Str(el, "yLabel");
         var caption = Str(el, "caption");
         var dark = IsDarkBg(t);
+
+        var availHn = BodyH - (string.IsNullOrWhiteSpace(caption) ? 0 : 457200);
+
+        // 原生图表：交给 PowerPoint 自己画，用户可在里面改数据（代价是 schema 风险，故默认不开）
+        if (wantNative && SupportsNativeChart(kind))
+        {
+            var relId = ctx.AddChart(
+                ChartSpaceXml(kind, title, categories, series, t),
+                DataWorkbook(categories, series));
+            _nativeCharts++;
+            var native = new StringBuilder();
+            native.Append(NativeChartFrame(ctx.NextId(), relId, MX, BodyY, CW, availHn));
+            if (!string.IsNullOrWhiteSpace(caption))
+                native.Append(TextBox(ctx.NextId(), MX, BodyY + availHn, CW, 365760,
+                    Para(caption!, 1100, t.Secondary, align: "ctr")));
+            return native.ToString();
+        }
+        if (wantNative && !SupportsNativeChart(kind))
+            _nativeFallback = kind;   // 记下来，返回 JSON 里如实说明降级了
 
         const int pxW = 1400, pxH = 800;
         byte[] png;
@@ -1557,7 +2035,20 @@ public class Skill
         return sb.ToString();
     }
 
-    private static string Rgb(string hex) => "<a:srgbClr val=\"" + hex + "\"/>";
+    private static string Rgb(string hex) => "<a:srgbClr val=\"" + BareHex(hex) + "\"/>";
+
+    /// <summary>
+    /// 去掉可选的前导 <c>#</c>。
+    ///
+    /// <para>
+    /// 图表调色板常量带 <c>#</c>（ImageSharp 的 <c>ParseHex</c> 接受），但 DrawingML 的
+    /// <c>srgbClr/@val</c> 是 xsd:hexBinary，带 <c>#</c> 就不合法。实测踩到：
+    /// 原生图表的系列填充写成 <c>#4F81BD</c>，OpenXmlValidator 直接报“不是合法 hexBinary”。
+    /// 在输出层统一归一化，比要求每个调用点都记得去 <c>#</c> 可靠。
+    /// </para>
+    /// </summary>
+    private static string BareHex(string hex)
+        => string.IsNullOrEmpty(hex) || hex[0] != '#' ? hex : hex.Substring(1);
 
     private static string TextBox(int id, long x, long y, long cx, long cy, string paras, string anchor = "t")
     {
@@ -1588,7 +2079,7 @@ public class Skill
         else
             sb.Append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
         sb.Append("<a:solidFill>");
-        if (alpha < 100) sb.Append("<a:srgbClr val=\"").Append(fill).Append("\"><a:alpha val=\"").Append(alpha * 1000).Append("\"/></a:srgbClr>");
+        if (alpha < 100) sb.Append("<a:srgbClr val=\"").Append(BareHex(fill)).Append("\"><a:alpha val=\"").Append(alpha * 1000).Append("\"/></a:srgbClr>");
         else sb.Append(Rgb(fill));
         sb.Append("</a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>")
           .Append("<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>");
@@ -1719,7 +2210,7 @@ public class Skill
         return sb.ToString();
     }
 
-    private static string Srgb(string hex) => "<a:srgbClr val=\"" + Xml(hex) + "\"/>";
+    private static string Srgb(string hex) => "<a:srgbClr val=\"" + Xml(BareHex(hex)) + "\"/>";
 
     private static string SolidFill(string hex)
         => "<a:solidFill>" + Srgb(hex) + "</a:solidFill>";

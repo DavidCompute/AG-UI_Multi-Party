@@ -100,7 +100,9 @@ public sealed class AgentCatalog
             is { } p
             ? Path.Combine(p.FullName, "skillruns")
             : Path.Combine(contentRoot, "data", "skillruns");
-        _skillRunner = new Lazy<SkillRunner?>(() => new SkillRunner(skillRunRoot, _loggerFactory, allowPrivateEndpoints: _options.AllowPrivateSkillEndpoints));
+        _skillRunner = new Lazy<SkillRunner?>(() => new SkillRunner(skillRunRoot, _loggerFactory,
+            allowPrivateEndpoints: _options.AllowPrivateSkillEndpoints,
+            resolveAttachment: ResolveAttachmentPath));
     }
 
     public AgentDefinition? GetDefinition(string agentId)
@@ -133,6 +135,19 @@ public sealed class AgentCatalog
     /// </summary>
     public Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
         => _skillRunner.Value is { } runner ? runner.InvokeAsync(skill, query, ct) : Task.FromResult("技能执行器不可用。");
+
+    /// <summary>
+    /// 附件 ID → 服务器上的真实文件路径（<c>att_xxx</c>）。
+    ///
+    /// <para>
+    /// 模型只能拿到附件 ID，而 docx/pptx/xlsx/pdf 这些技能吃的是<b>路径</b>。
+    /// 没有这层解析，“用我上传的模板/文档出一份稿”这类需求走到技能那一步就断了。
+    /// 未部署附件存储（如测试宿主）时返回 null，技能会照旧给出可读错误。
+    /// </para>
+    /// </summary>
+    private string? ResolveAttachmentPath(string attachmentId)
+        => (_services.GetService(typeof(AguiGroupChat.Hub.Storage.AttachmentStore))
+            as AguiGroupChat.Hub.Storage.AttachmentStore)?.ResolvePath(attachmentId);
 
     /// <summary>仅编译校验一段 C#（dotnet）技能正文（不运行作者代码）：生成后自测 / 自动修复复测用。空串=编译通过。</summary>
     public Task<string> CompileDotnetOnlyAsync(string body, CancellationToken ct = default)

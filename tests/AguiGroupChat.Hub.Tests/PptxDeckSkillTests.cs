@@ -391,6 +391,7 @@ public sealed class PptxDeckSkillTests
         try
         {
             var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            File.WriteAllText(Path.Combine(Path.GetTempPath(), "pptx-skill-last-result.json"), result);
             Assert.DoesNotContain("编译失败", result);
             var doc = JsonDocument.Parse(result);
             Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
@@ -636,6 +637,260 @@ public sealed class PptxDeckSkillTests
         Assert.True(errors.Count == 0,
             "新页型产物未通过 OpenXML schema 校验：\n" +
             string.Join("\n", errors.Take(10).Select(e => e.Description + " @ " + e.Path?.XPath)));
+    }
+
+    // ===== 原生图表（ChartPart）=====
+
+    /// <summary>
+    /// 原生图表必须产出真正的 ChartPart + 嵌入数据工作簿，且通过 schema 校验。
+    ///
+    /// <para>
+    /// 这是本项目风险最高的一类改动：DrawingML 图表的子元素顺序是 schema 强制的，
+    /// 顺序错了 PowerPoint 就报“需要修复”，而这类错误单部件校验器未必拦得住（曾经踩过）。
+    /// 所以这里把能做的不依赖 PowerPoint 的检查全做上：部件存在、关系存在、嵌入工作簿是合法 xlsx、
+    /// ChartSpace 通过 OpenXmlValidator、且缓存值与输入一致。
+    /// </para>
+    ///
+    /// <para>仍然需要在 Windows 上用 PowerPoint 真开一次做人工验收（见 README “原生图表”一节）。</para>
+    /// </summary>
+    [Fact]
+    public void NativeCharts_ProduceEditableChartParts()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            title = "原生图表检查",
+            theme = "education-charts",
+            slides = new object[]
+            {
+                new { type = "cover", title = "原生图表检查" },
+                new { type = "chart", title = "活跃团队", chartType = "bar-native",
+                      categories = new[] { "Q1", "Q2", "Q3" },
+                      series = new object[] { new { name = "团队数", values = new[] { 120.0, 260.0, 430.0 } } } },
+                new { type = "chart", title = "增长", chartType = "line-native",
+                      categories = new[] { "一月", "二月" },
+                      series = new object[] { new { name = "环比", values = new[] { 1.5, 2.25 } } } },
+                new { type = "chart", title = "占比", chartType = "pie-native",
+                      categories = new[] { "甲", "乙" },
+                      series = new object[] { new { name = "占比", values = new[] { 70.0, 30.0 } } } },
+            },
+        });
+
+        var (path, doc) = RenderDeck(json);
+        Assert.Equal(3, doc.RootElement.GetProperty("nativeCharts").GetInt32());
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("nativeChartFallback").ValueKind);
+
+        using var zip = ZipFile.OpenRead(path);
+        // SDK 把图表部件放在 ppt/slides/charts/ 下（OPC 路径本身任意，靠 content-type + 关系认）
+        var chartParts = zip.Entries
+            .Where(e => e.FullName.StartsWith("ppt/slides/charts/chart", StringComparison.Ordinal)
+                     && e.FullName.EndsWith(".xml", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, chartParts.Count);
+
+        // 每张图都要有嵌入数据工作簿（否则“编辑数据”拿不到表格）
+        var embedded = zip.Entries
+            .Where(e => e.FullName.Contains("/charts/embeddings/", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, embedded.Count);
+        foreach (var e in embedded)
+        {
+            using var s = e.Open();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            ms.Position = 0;
+            // 嵌入工作簿必须是可打开的 xlsx
+            using var wb = SpreadsheetDocument.Open(ms, false);
+            var sheet = wb.WorkbookPart!.WorksheetParts.First().Worksheet;
+            Assert.NotNull(sheet);
+        }
+
+        // 幻灯片上要有指向 chart 的 graphicData，否则图表只是个空框
+        var slide2 = zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml");
+        using (var r = new StreamReader(slide2.Open()))
+        {
+            var xml = r.ReadToEnd();
+            Assert.Contains("drawingml/2006/chart", xml);
+            Assert.Contains("r:id=", xml);
+        }
+
+        // ChartSpace 的缓存值确实写进去了（不依赖 PowerPoint 就能看出数据对错）
+        using (var r = new StreamReader(zip.Entries.First(e =>
+                   e.FullName.StartsWith("ppt/slides/charts/chart1.xml", StringComparison.Ordinal)).Open()))
+        {
+            var xml = r.ReadToEnd();
+            Assert.Contains("团队数", xml);
+            Assert.Contains("430", xml);     // 最后一个缓存值
+            Assert.Contains("Sheet1!", xml); // 数据源引用
+        }
+
+        // 包整体仍然通过 schema 校验（新增 ChartPart 不能把整包弄非法）
+        using var ppt = PresentationDocument.Open(path, false);
+        var errors = new OpenXmlValidator().Validate(ppt).ToList();
+        Assert.True(errors.Count == 0,
+            "原生图表产物未通过 schema 校验：\n" +
+            string.Join("\n", errors.Take(10).Select(e => e.Description + " @ " + e.Path?.XPath)));
+    }
+
+    /// <summary>不支持原生的图型（如 doughnut）要如实降级到渲图，并在返回里说明。</summary>
+    [Fact]
+    public void NativeChart_UnsupportedKind_FallsBackAndSaysSo()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            title = "降级检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "降级检查" },
+                new { type = "chart", title = "环形图", chartType = "doughnut-native",
+                      categories = new[] { "甲", "乙" },
+                      series = new object[] { new { name = "占比", values = new[] { 60.0, 40.0 } } } },
+            },
+        });
+
+        var (path, doc) = RenderDeck(json);
+        Assert.Equal(0, doc.RootElement.GetProperty("nativeCharts").GetInt32());
+        Assert.Equal("doughnut", doc.RootElement.GetProperty("nativeChartFallback").GetString());
+        // 降级后仍然出了图表（PNG），不是空页
+        using var zip = ZipFile.OpenRead(path);
+        Assert.Contains(zip.Entries, e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
+    }
+
+    // ===== 读取既有 pptx / 套模板 =====
+
+    private static JsonDocument RunRaw(string json)
+    {
+        var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+        Assert.DoesNotContain("编译失败", result);
+        return JsonDocument.Parse(result);
+    }
+
+    /// <summary>读取模式：把既有 pptx 的文本按页读回来。</summary>
+    [Fact]
+    public void ReadAction_ReturnsPerSlideText()
+    {
+        var (srcPath, _) = RenderDeck(MiniDeck("\"theme\":\"forest-eco\""));
+        Assert.True(File.Exists(srcPath));
+
+        var json = JsonSerializer.Serialize(new { action = "read", path = srcPath });
+        using var doc = RunRaw(json);
+
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), "读取应成功");
+        Assert.Equal("read", doc.RootElement.GetProperty("action").GetString());
+        Assert.Equal(2, doc.RootElement.GetProperty("slides").GetInt32());
+
+        var text = doc.RootElement.GetProperty("text").GetString()!;
+        Assert.Contains("配色检查", text);
+        Assert.Contains("第一条要点", text);
+
+        // 逐页文本也要给出来，便于模型按页处理
+        var perSlide = doc.RootElement.GetProperty("slideTexts");
+        Assert.Equal(2, perSlide.GetArrayLength());
+        Assert.Contains("第二条要点", perSlide[1].GetProperty("texts").EnumerateArray().Select(x => x.GetString()));
+    }
+
+    /// <summary>读取一个不存在的路径要给出可读错误，而不是抛异常 / 假装成功。</summary>
+    [Fact]
+    public void ReadAction_MissingFile_FailsReadably()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "不存在的文件-" + Guid.NewGuid().ToString("N") + ".pptx");
+        using var doc = RunRaw(JsonSerializer.Serialize(new { action = "read", path = missing }));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("找不到文件", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    /// <summary>
+    /// 套模板出稿：保留模板的母版 / 版式 / 主题，把我们的内容渲染进去。
+    ///
+    /// <para>
+    /// 关键断言是“<b>不动原件</b>”和“<b>只有一套母版</b>”——
+    /// 前者是用户资产安全，后者能证明我们真的用上了模板而不是又自己拼了一套。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TemplateMode_ReusesTemplateMasterAndLeavesTheOriginalUntouched()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            // 先用技能自己生成一份当作“用户模板”
+            var templateJson = JsonSerializer.Serialize(new
+            {
+                title = "公司模板",
+                theme = "business-authority",
+                slides = new object[]
+                {
+                    new { type = "cover", title = "公司模板封面" },
+                    new { type = "content", title = "模板原有页", bullets = new[] { "这页默认应该被清掉" } },
+                },
+            });
+            using var t = RunRaw(templateJson);
+            var templatePath = t.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+            var before = File.ReadAllBytes(templatePath);
+
+            var outPath = Path.Combine(outDir, "套模板产物.pptx");
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "套模板产物",
+                template = templatePath,
+                outputPath = outPath,
+                slides = new object[]
+                {
+                    new { type = "cover", title = "套模板产物", subtitle = "沿用模板的皮" },
+                    new { type = "content", title = "新内容页", bullets = new[] { "内容来自这次请求" } },
+                },
+            });
+            using var r = RunRaw(json);
+            Assert.True(r.RootElement.GetProperty("ok").GetBoolean(),
+                r.RootElement.GetProperty("message").GetString());
+            Assert.Equal(2, r.RootElement.GetProperty("slides").GetInt32());
+
+            // 原件必须一字未改
+            Assert.Equal(before, File.ReadAllBytes(templatePath));
+
+            using var zip = ZipFile.OpenRead(outPath);
+            // 只有一套版本 / 主题：证明用的是模板的，不是我们又新建了一套
+            // （主题的存放路径跟创建方式有关：SDK 会放在 ppt/slideMasters/theme/ 下，所以按名字匹配）
+            Assert.Single(zip.Entries.Where(e => e.FullName.StartsWith("ppt/slideMasters/slideMaster", StringComparison.Ordinal)
+                                              && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
+            Assert.Single(zip.Entries.Where(e => e.FullName.Contains("/theme", StringComparison.Ordinal)
+                                              && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
+            Assert.Equal(2, zip.Entries.Count(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                                                 && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
+
+            var all = string.Join("\n", zip.Entries
+                .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal) && e.FullName.EndsWith(".xml", StringComparison.Ordinal))
+                .Select(e => { using var sr = new StreamReader(e.Open()); return sr.ReadToEnd(); }));
+            Assert.Contains("套模板产物", all);
+            Assert.Contains("内容来自这次请求", all);
+            // 默认不保留模板原有页
+            Assert.DoesNotContain("这页默认应该被清掉", all);
+
+            // 仍然通过 schema 校验
+            using var ppt = PresentationDocument.Open(outPath, false);
+            var errors = new OpenXmlValidator().Validate(ppt).ToList();
+            Assert.True(errors.Count == 0,
+                "套模板产物未通过 schema 校验：\n" +
+                string.Join("\n", errors.Take(10).Select(e => e.Description + " @ " + e.Path?.XPath)));
+
+            // 配色应来自模板（business-authority 的 accent1 = 2B2D42 作为 primary）
+            Assert.Equal("2B2D42", r.RootElement.GetProperty("palette").GetProperty("primary").GetString());
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>模板路径与输出路径相同时必须报错：否则会覆盖用户的原件。</summary>
+    [Fact]
+    public void TemplateMode_SamePathAsTemplate_IsRejected()
+    {
+        var (srcPath, _) = RenderDeck(MiniDeck("\"theme\":\"minimal\""));
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            title = "覆盖测试",
+            template = srcPath,
+            outputPath = srcPath,
+            slides = new object[] { new { type = "cover", title = "x" } },
+        }));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("会覆盖原件", doc.RootElement.GetProperty("message").GetString());
     }
 
     /// <summary>与技能内同一口径的字形覆盖判定。</summary>
