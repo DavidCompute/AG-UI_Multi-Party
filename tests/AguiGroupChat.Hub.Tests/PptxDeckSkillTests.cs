@@ -1280,6 +1280,63 @@ public sealed class PptxDeckSkillTests
         ["path"] = Path.Combine(Path.GetTempPath(), "不存在的图片-" + Guid.NewGuid().ToString("N") + ".png"),
     };
 
+    // ===== 内置图标 =====
+
+    /// <summary>
+    /// 内置图标：名字认得出→画成 PNG 嵌进去（不再是“1~2 个字”）；认不出→回退成文字，不能变成空白。
+    /// 同时确认图标没画出彩色圆。
+    /// </summary>
+    [Fact]
+    public void IconRows_RendersBuiltInIconsAsImages()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            title = "图标检查",
+            theme = "forest-eco",
+            slides = new object[]
+            {
+                new { type = "cover", title = "图标检查" },
+                new { type = "iconRows", title = "图标", items = new object[]
+                    {
+                        new { icon = "check", title = "甲", text = "说明甲" },
+                        new { icon = "star",  title = "乙", text = "说明乙" },
+                        new { icon = "9",     title = "丙", text = "说明丙" },   // 不是图标名
+                    } },
+            },
+        });
+
+        var (path, _) = RenderDeck(json);
+        using var zip = ZipFile.OpenRead(path);
+        var media = zip.Entries
+            .Where(e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal)
+                     && e.FullName.EndsWith(".png", StringComparison.Ordinal)).ToList();
+        // 两个图标名 → 两张 PNG；第三个不是图标名，不应该也画图
+        Assert.Equal(2, media.Count);
+
+        // 每张图标 PNG 都要是合法的 PNG（首 8 字节签名）
+        foreach (var e in media)
+        {
+            using var s = e.Open();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            var b = ms.ToArray();
+            Assert.True(b.Length > 100, "图标 PNG 太小：" + b.Length);
+            Assert.Equal(0x89, b[0]);
+            Assert.Equal((byte)'P', b[1]);
+        }
+
+        // 未知名字仍然以文字回退（不能变成空白）
+        using (var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open()))
+        {
+            var slide = sr.ReadToEnd();
+            Assert.Contains("9", slide);
+            Assert.Contains("说明甲", slide);
+        }
+
+        // 图标不能画出圆外
+        Assert.True(ShapesOutsideCanvas(path).Count == 0);
+    }
+
     /// <summary>与技能内同一口径的字形覆盖判定。</summary>
     private static bool CanRenderCjk(SixLabors.Fonts.FontFamily family)
     {

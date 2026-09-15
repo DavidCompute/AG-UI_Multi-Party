@@ -72,6 +72,9 @@ public static class BuiltinPptxSkills
             "{\"type\":\"summary\",\"title\":\"小结\",\"bullets\":[…] } / " +
             "{\"type\":\"end\",\"title\":\"谢谢\",\"subtitle\":\"…\"}。" +
             "content 页也可用 \"layout\":\"timeline|grid|stats|iconRows\" 指定子类型。" +
+            "iconRows 的 icon 可直接用内置图标名（会画成真正的图标，比填字好看）：" +
+            "check|cross|arrow|star|dot|warn|lock|user|chart|clock|gear|bulb；" +
+            "填其它内容则当作 1~2 个字的短标记（或省略→用序号）。" +
             "图表默认为图片（不可在 PowerPoint 里改数据）；若用户需要“能编辑数据”的图表，" +
             "把 chartType 写成 \"bar-native\" / \"line-native\" / \"pie-native\"（或顶层 chartData:\"native\"），" +
             "会生成原生可编辑图表（环形图暂不支持原生，会自动降级为图片并在返回里说明）。" +
@@ -108,7 +111,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-15.2";
+    public const string Version = "2026-09-16.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

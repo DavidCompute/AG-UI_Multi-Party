@@ -27,6 +27,17 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | `grid` | 网格卡片（2/3 列，左侧色条） | `title` `items[{title,text}]` `cols` |
 | `timeline` | 时间轴 / 流程（序号圆 + 连接线，最多 6 步） | `title` `items[{title,detail}]` |
 | `iconRows` | 图标行（彩色圆 + 标题 + 说明，最多 6 行） | `title` `items[{icon,title,text}]` |
+
+### 内置图标（`iconRows` 的 `icon`）
+
+填内置图标名会画成**真正的图标**（ImageSharp 画的 PNG，颜色自动跟主题的“圆底色上的字”色）：
+
+`check` `cross` `arrow` `star` `dot` `warn` `lock` `user` `chart` `clock` `gear` `bulb`
+
+填其它内容则当作 1~2 个字的短标记；省略则用序号。
+
+> 为什么自己画而不是用图标字体：技能是**单个编译单元**，不能携带字体/素材文件，
+> 也不能假设宿主装了某个图标字体；ImageSharp 已为图表引入，画几个几何图形是顺手的事。
 | `quote` | 引言/金句 | `text` `cite` |
 | `image` | 配图 | `title` `path` `caption` |
 | `chart` | 图表（柱/折线/饼/环形） | `title` `chartType` `categories[]` `series[{name,values}]` `yLabel` |
