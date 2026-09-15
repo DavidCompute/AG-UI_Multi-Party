@@ -923,7 +923,6 @@ public class Skill
 
             var title = Str(root, "title") ?? "演示文稿";
             var total = slides.Count;
-            var added = 0;
             for (var i = 0; i < total; i++)
             {
                 var el = slides[i];
@@ -940,7 +939,6 @@ public class Skill
                 }
                 sp.Slide.Save();
                 idList.Append(new P.SlideId { Id = nextId++, RelationshipId = presPart.GetIdOfPart(sp) });
-                added++;
             }
             if (!keep)
             {
@@ -948,7 +946,10 @@ public class Skill
                 pres.SlideIdList = idList;
             }
             pres.Save();
-            return (added, dst);
+            // 返回**整份稿子的总页数**，不是本次新生成的页数：
+            // keepTemplateSlides=true 时两者不同，报“新生成的页数”会让调用方/用户以为丢了页。
+            var totalSlides = idList.Elements<P.SlideId>().Count();
+            return (totalSlides, dst);
         }
     }
 

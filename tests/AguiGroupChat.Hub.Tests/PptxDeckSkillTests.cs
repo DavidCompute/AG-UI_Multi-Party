@@ -928,6 +928,61 @@ public sealed class PptxDeckSkillTests
         finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
     }
 
+    /// <summary>
+    /// keepTemplateSlides=true：保留模板原有页，把新页追加在后面，且 <c>slides</c> 报的是**整份稿子的总页数**。
+    ///
+    /// <para>
+    /// 报“本次新生成的页数”是个陷阱：调用方/用户会以为模板原有页丢了（实测确实报成 1 而实际 3 页）。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TemplateMode_KeepTemplateSlides_AppendsAndReportsTotal()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            using var t = RunRaw(JsonSerializer.Serialize(new
+            {
+                title = "保留模板",
+                theme = "minimal",
+                slides = new object[]
+                {
+                    new { type = "cover", title = "模板封面页" },
+                    new { type = "content", title = "模板第二页", bullets = new[] { "应被保留" } },
+                },
+            }));
+            var templatePath = t.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            var outPath = Path.Combine(outDir, "保留产物.pptx");
+            using var r = RunRaw(JsonSerializer.Serialize(new
+            {
+                title = "保留产物",
+                template = templatePath,
+                outputPath = outPath,
+                keepTemplateSlides = true,
+                slides = new object[] { new { type = "content", title = "追加的新页", bullets = new[] { "新增内容" } } },
+            }));
+            Assert.True(r.RootElement.GetProperty("ok").GetBoolean(),
+                r.RootElement.GetProperty("message").GetString());
+            Assert.Equal(3, r.RootElement.GetProperty("slides").GetInt32());   // 2 + 1，不是 1
+
+            using var zip = ZipFile.OpenRead(outPath);
+            var slides = zip.Entries
+                .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                         && e.FullName.EndsWith(".xml", StringComparison.Ordinal)).ToList();
+            Assert.Equal(3, slides.Count);
+            var joined = string.Join("\n", slides.Select(e =>
+            {
+                using var sr = new StreamReader(e.Open());
+                return sr.ReadToEnd();
+            }));
+            Assert.Contains("模板第二页", joined);   // 模板原有页保留
+            Assert.Contains("新增内容", joined);     // 新页追加
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
     /// <summary>模板路径与输出路径相同时必须报错：否则会覆盖用户的原件。</summary>
     [Fact]
     public void TemplateMode_SamePathAsTemplate_IsRejected()
