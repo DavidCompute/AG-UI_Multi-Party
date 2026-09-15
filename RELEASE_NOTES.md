@@ -1,8 +1,53 @@
-# AG-UI 群聊桌面版 1.0.127 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.127 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.128 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.128 Release Notes (current Windows desktop release)
 
-**版本说明**：1.0.127 为当前 Windows 桌面版本。修复了 **Word / PPT 图表里的中文显示为乱码**（实际是空心方框）的问题。Web 与桌面共用同一套 Hub/网关/前端。
-**Version note**: 1.0.127 is the current Windows desktop release. It fixes **Chinese text in Word / PPT charts rendering as garbled characters** (in fact hollow notdef boxes). Web and desktop share the same Hub / gateway / frontend.
+**版本说明**：1.0.128 为当前 Windows 桌面版本。修复了**图表里的标点符号方向错误**（破折号 `—` 变成竖线、`（）「」【】《》` 被旋转 90°）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.128 is the current Windows desktop release. It fixes **punctuation rendered with the wrong orientation in charts** (an em dash `—` came out as a vertical bar, `（）「」【】《》` were rotated 90°). Web and desktop share the same Hub / gateway / frontend.
+
+## 修复：图表标点被竖排渲染（1.0.128 核心）
+# Fix: chart punctuation rendered vertically (1.0.128 headline)
+
+中文：
+- **现象**：图表里的横线类与括号类标点方向错误——破折号 `—` `–` 被画成**竖线**，`（）「」『』【】《》`
+  被**旋转 90°**；而汉字与 `、。：；！？` 一切正常，所以看起来像“部分符号方向错了”。
+- **根因不在字体，也不在我们的排版代码**：图表代码里**没有任何旋转**（所有文字都水平绘制）。
+  把容器里的字体文件取出来用 **FreeType/PIL** 渲染，同一份字体是**横排正确**的；
+  而容器里**7 种中文字体全部**在 ImageSharp 下出错（Noto Sans/Serif CJK、WQY Micro Hei/Zen Hei、
+  AR PL UMing/UKai、Droid Sans Fallback）—— 所以是库的问题：
+  **`SixLabors.Fonts` 1.0.0 的 shaping 错误地对 CJK 字体套用了竖排（`vert`）字形替换。**
+  而它与平台选的字体无关、与备注/页型无关：只要图表文字里出现这批标点就会出现。
+- **为何一直命中**：技能只声明了 `SixLabors.ImageSharp 2.1.5`，它对 `SixLabors.Fonts` 的依赖是
+  `>= 1.0.0`，而平台的 NuGet 解析器取**最低满足版** —— 于是每次都落到有缺陷的 1.0.0。
+- **修复**：在技能里**显式钉住 `#r "nuget: SixLabors.Fonts, 1.0.1"`**（Word 侧写在生成器的共享 banner，
+  会带进三份场景技能），并加了单测 `ChartSkill_PinsSixLaborsFontsAtLeast101` 拦住被当作“多余引用”而清理掉。
+  1.0.1 仍为 **Apache-2.0**，不受 Six Labors 从 2.0 起改用 Split License 的影响（这也是没升到 ImageSharp 3.x 的原因）。
+- **验证（逐层取数）**：
+  - **独立渲染器对照**：同一份 `wqy-microhei.ttc`，PIL/FreeType 得到 `—` 46×4（横）、`（` 18×43（高瘦）
+    → 证明字体本身正确；
+  - **库版本受控对比**：同一份字体、同一段诊断代码，`SixLabors.Fonts` **1.0.0 得到 `—` 4×49（竖）**，
+    **1.0.1 得到 44×4（横）**；`（` 从 42×12（扁宽）变为 17×43（高瘦）；`「` `【` `《` 同样恢复正常；
+  - **端到端（真实 pptx 技能产物）**：把图表分类标签设为单个 `—`，量其墨迹包围盒为 **11×1（宽高比 11.0，横向 ✓）**；
+    标签设为 `（）` 得到 **9×14（高>宽，方向正确 ✓）**；另设 `XX` 作对照；
+  - 全量单测 **1154 全绿**；把修复行删掉后新单测确实失败（已实测）。
+
+English:
+- **Symptom**: dashes and brackets in charts came out with the wrong orientation — an em dash `—` `–` was drawn as a **vertical bar**, and `（）「」『』【】《》` were **rotated 90°** — while Chinese characters and `、。：；！？` looked fine, so it read as “some symbols have the wrong direction”.
+- **The font is not at fault, and neither is our layout code**: there is **no rotation anywhere** in the chart renderer (every string is drawn horizontally). Rendering the container's own font files through **FreeType/PIL** gives the correct horizontal shapes, while **all seven** CJK fonts present (Noto Sans/Serif CJK, WQY Micro Hei/Zen Hei, AR PL UMing/UKai, Droid Sans Fallback) misbehave under ImageSharp — so the problem is in the library: **`SixLabors.Fonts` 1.0.0 wrongly applies the vertical (`vert`) glyph substitutions to CJK fonts.** It has nothing to do with which font is picked, nor with notes or slide type: any chart text containing this punctuation is affected.
+- **Why it always bit us**: the skill declared only `SixLabors.ImageSharp 2.1.5`, whose dependency on `SixLabors.Fonts` is `>= 1.0.0`, and the platform's NuGet resolver takes the **lowest satisfying version** — so it landed on the defective 1.0.0 every time.
+- **Fix**: explicitly pin `#r "nuget: SixLabors.Fonts, 1.0.1"` in the skills (on the Word side it lives in the generator's shared banner, which flows into all three scene skills), with a unit test, `ChartSkill_PinsSixLaborsFontsAtLeast101`, to stop it being cleaned up as a “redundant reference”. 1.0.1 is still **Apache-2.0**, unaffected by Six Labors moving to the Split License at 2.0 — which is also why this does not upgrade to ImageSharp 3.x.
+- **Verification (measured layer by layer)**:
+  - **independent renderer as control**: the same `wqy-microhei.ttc` through PIL/FreeType yields `—` 46×4 (horizontal) and `（` 18×43 (tall) — the font itself is correct;
+  - **controlled library-version comparison**: same font, same diagnostic code — `SixLabors.Fonts` **1.0.0 gives `—` 4×49 (vertical)** while **1.0.1 gives 44×4 (horizontal)**; `（` goes from 42×12 (flat) to 17×43 (tall); `「` `【` `《` likewise return to normal;
+  - **end to end, through the real pptx skill**: with a single `—` as the only chart category label, the label ink measures **11×1 (aspect 11.0, horizontal ✓)**; with `（）` it measures **9×14 (taller than wide, correct ✓)**; `XX` was measured as a control;
+  - the full suite is **1154 green**, and deleting the fix line does make the new test fail (measured).
+
+---
+
+# AG-UI 群聊桌面版 1.0.127 发布说明
+# AG-UI Group Chat Desktop 1.0.127 Release Notes
+
+**版本说明**：1.0.127 为 Windows 桌面版本。修复了 **Word / PPT 图表里的中文显示为乱码**（实际是空心方框）的问题。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.127 is a Windows desktop release. It fixes **Chinese text in Word / PPT charts rendering as garbled characters** (in fact hollow notdef boxes). Web and desktop share the same Hub / gateway / frontend.
 
 ## 修复：图表中文变乱码（1.0.127 核心）
 # Fix: Chinese in charts rendered as garbage (1.0.127 headline)
