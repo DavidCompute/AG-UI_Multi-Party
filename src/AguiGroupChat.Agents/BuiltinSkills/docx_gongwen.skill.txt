@@ -557,33 +557,158 @@ public class Skill
         catch { return false; }
     }
 
+    // ===== 文本适配：内容太多时不能越界 =====
+
+    /// <summary>按可用宽度裁剪文本（超宽则逐字回退并加省略号）。</summary>
+    private static string FitText(string? text, float size, double maxWidth)
+    {
+        if (string.IsNullOrEmpty(text) || maxWidth < 10) return "";
+        if (MeasureText(text!, size) <= maxWidth) return text!;
+        for (var n = text!.Length - 1; n > 0; n--)
+        {
+            var cand = text.Substring(0, n) + "…";
+            if (MeasureText(cand, size) <= maxWidth) return cand;
+        }
+        return "";
+    }
+
+    /// <summary>先缩小字号直到放得下（不低于 minSize），仍放不下再裁剪。返回裁剪后的文本与实际字号。</summary>
+    private static (string Text, float Size) FitTextShrink(string? text, float size, double maxWidth, float minSize)
+    {
+        if (string.IsNullOrEmpty(text)) return ("", size);
+        var s = size;
+        while (s > minSize && MeasureText(text!, s) > maxWidth) s -= 1f;
+        return (FitText(text, s, maxWidth), s);
+    }
+
+    private static double MeasureText(string text, float size)
+        => SixLabors.Fonts.TextMeasurer.MeasureBounds(text, new SixLabors.Fonts.TextOptions(Family(size))).Width;
+
+    /// <summary>把 x 夹在 [min,max]，保证绘制起点不越界。</summary>
+    private static float ClampX(float v, float min, float max)
+        => max < min ? min : (v < min ? min : (v > max ? max : v));
+
+    private sealed class LegendItem
+    {
+        public string Text = "";
+        public float X;
+        public float Y;
+        public int ColorIndex;
+    }
+
+    private sealed class LegendLayout
+    {
+        public List<LegendItem> Items = new List<LegendItem>();
+        public int Rows;
+        public int Hidden;
+    }
+
+    /// <summary>
+    /// 图例排版：按可用宽度换行，最多 maxRows 行；放不下的计入 Hidden。
+    ///
+    /// <para>
+    /// 原实现是一行横向累加 x，系列一多就直接画出画布右边（典型“内容太多越界”）。
+    /// </para>
+    /// </summary>
+    private static LegendLayout LayoutLegend(List<(string Name, double[] Values)> series, double availW, float size, int maxRows)
+    {
+        var layout = new LegendLayout();
+        if (availW < 60) { layout.Hidden = series.Count; return layout; }
+        float x = 0;
+        int row = 0;
+        for (int s = 0; s < series.Count; s++)
+        {
+            var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
+            var text = FitText(nm, size, Math.Min(220, availW - 42));
+            if (text.Length == 0) text = "系列" + (s + 1);
+            float itemW = 19 + (float)MeasureText(text, size) + 20;
+            if (x > 0 && x + itemW > availW) { row++; x = 0; }
+            if (row >= maxRows) { layout.Hidden = series.Count - s; break; }
+            layout.Items.Add(new LegendItem { Text = text, X = x, Y = row * 22f, ColorIndex = s });
+            x += itemW;
+        }
+        layout.Rows = layout.Items.Count == 0 ? 0 : row + 1;
+        return layout;
+    }
+
+    /// <summary>画图例，并在被截断时补一个“…”提示（不谎报系列数）。</summary>
+    private static void DrawLegend(IImageProcessingContext x, LegendLayout legend, float left, float top,
+        double availW, SixLabors.Fonts.Font font, ImgColor fg, ImgColor muted)
+    {
+        foreach (var it in legend.Items)
+        {
+            var col = ImgColor.ParseHex(Palette[it.ColorIndex % Palette.Length]);
+            x.Fill(col, new ImgRect(left + it.X, top + it.Y, 14, 14));
+            x.DrawText(it.Text, font, fg, new ImgPointF(left + it.X + 19, top + it.Y - 3));
+        }
+        if (legend.Hidden > 0 && legend.Rows > 0)
+        {
+            var last = legend.Items[legend.Items.Count - 1];
+            var hint = "…等 " + (legend.Items.Count + legend.Hidden) + " 项";
+            var hx = left + last.X + 19 + (float)MeasureText(last.Text, 13f) + 20;
+            var hw = (float)MeasureText(hint, 13f);
+            if (hx + hw <= left + availW) x.DrawText(hint, Family(13f), muted, new ImgPointF(hx, top + last.Y));
+        }
+    }
+
+    /// <summary>图表标题：先缩字号（不低于 16）再裁剪，长标题不越出画布右边。</summary>
+    private static void DrawChartTitle(IImageProcessingContext x, string? title, float left, float top, double availW)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return;
+        var fit = FitTextShrink(title, 24f, availW, 16f);
+        if (fit.Text.Length == 0) return;
+        x.DrawText(fit.Text, Family(fit.Size), ImgColor.Black, new ImgPointF(left, top));
+    }
+
     private static byte[] RenderBar(int w, int h, string? title, string? yLabel, List<string> cats, List<(string Name, double[] Values)> series)
     {
         using var img = new Image<Rgba32>(w, h);
-        int padL = 78, padR = 28, padT = title is null ? 36 : 64, padB = 64;
+        var fg = ImgColor.Black;
+        var grid = ImgColor.FromRgba(210, 210, 210, 255);
+        var muted = ImgColor.FromRgba(90, 90, 90, 255);
         double maxV = Math.Max(0.0001, series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max());
+        const int padR = 28, padB = 64;
+
+        // 刻度文案先算出来：左边距按“最宽的刻度”留，否则大数字会压到绘图区（越界）
+        const int ticks = 4;
+        var tickTexts = new string[ticks + 1];
+        for (int i = 0; i <= ticks; i++) tickTexts[i] = (maxV * i / ticks).ToString("0.##");
+        double tickW = tickTexts.Max(s => MeasureText(s, 13f));
+        int padL = (int)Math.Min(170, Math.Max(66, tickW + 26));
+
+        // 图例先排版（含换行），据此预留顶部高度：既不把绘图区挤没，也不会自身越界
+        var legendSeries = series.Count > 1 ? series : new List<(string Name, double[] Values)>();
+        var legend = LayoutLegend(legendSeries, w - padL - padR, 13f, 3);
+        int padT = (title is null ? 36 : 64) + legend.Rows * 22;
+
         img.Mutate(x =>
         {
             x.Fill(ImgColor.White);
-            if (title is not null) x.DrawText(title, Family(24f), ImgColor.Black, new ImgPointF(padL, 22));
+            DrawChartTitle(x, title, padL, 22, w - padL - padR);
 
             // Y 轴刻度 + 网格
-            int ticks = 4;
             for (int i = 0; i <= ticks; i++)
             {
                 float y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
-                x.DrawLine(ImgColor.FromRgba(210, 210, 210, 255), 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
-                var label = (maxV * i / ticks).ToString("0.##");
-                x.DrawText(label, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, y - 9));
+                x.DrawLine(grid, 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
+                // 右对齐到轴线左侧，不再固定 x=6
+                x.DrawText(tickTexts[i], Family(13f), muted,
+                    new ImgPointF((float)(padL - 8 - MeasureText(tickTexts[i], 13f)), y - 9));
             }
-            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
-            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
-            if (!string.IsNullOrWhiteSpace(yLabel)) x.DrawText(yLabel!, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, padT - 20));
+            x.DrawLine(fg, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
+            x.DrawLine(fg, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
+            if (!string.IsNullOrWhiteSpace(yLabel))
+                x.DrawText(FitText(yLabel, 13f, w - padL - padR), Family(13f), muted,
+                    new ImgPointF(padL, Math.Max(6, padT - 22)));
+            if (legend.Rows > 0)
+                DrawLegend(x, legend, padL, padT - legend.Rows * 22f, w - padL - padR, Family(13f), fg, muted);
 
             int nc = cats.Count;
             int ns = series.Count;
             double slot = (w - padL - padR) / (double)Math.Max(1, nc);
             double barW = Math.Max(4, slot * 0.72 / ns);
+            // 分类太密时隔位显示，避免标签叠成一团
+            int stride = Math.Max(1, (int)Math.Ceiling(52.0 / Math.Max(1.0, slot)));
 
             for (int c = 0; c < nc; c++)
             {
@@ -597,25 +722,13 @@ public class Skill
                     var color = ImgColor.ParseHex(Palette[(ns > 1 ? s : c) % Palette.Length]);
                     if (bh > 0.5f) x.Fill(color, new ImgRect(bx, by, (float)barW, bh));
                 }
-                // X 轴类别标签（居中于 slot；过长截断）
-                var lab = cats[c].Length > 8 ? cats[c].Substring(0, 8) + "…" : cats[c];
-                var tw = SixLabors.Fonts.TextMeasurer.MeasureBounds(lab, new SixLabors.Fonts.TextOptions(Family(13f))).Width;
-                x.DrawText(lab, Family(13f), ImgColor.Black, new ImgPointF((float)(padL + slot * c + slot / 2 - tw / 2), h - padB + 8));
-            }
-
-            // 图例（多系列才显示）
-            if (ns > 1)
-            {
-                float lx = padL;
-                float ly = padT - 24;
-                for (int s = 0; s < ns; s++)
-                {
-                    var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
-                    var color = ImgColor.ParseHex(Palette[s % Palette.Length]);
-                    x.Fill(color, new ImgRect(lx, ly, 14, 14));
-                    x.DrawText(nm, Family(13f), ImgColor.Black, new ImgPointF(lx + 19, ly - 2));
-                    lx += 19 + SixLabors.Fonts.TextMeasurer.MeasureBounds(nm, new SixLabors.Fonts.TextOptions(Family(13f))).Width + 22;
-                }
+                // X 轴类别标签：按槽宽裁剪（而不是按字符数），起点夹在绘图区内
+                if (c % stride != 0) continue;
+                var lab = FitText(cats[c], 13f, slot * stride * 0.96);
+                if (lab.Length == 0) continue;
+                float tw = (float)MeasureText(lab, 13f);
+                float lx = ClampX((float)(padL + slot * c + slot / 2 - tw / 2), padL, (float)(w - padR - tw));
+                x.DrawText(lab, Family(13f), fg, new ImgPointF(lx, h - padB + 8));
             }
         });
         using var outMs = new MemoryStream();
@@ -626,31 +739,48 @@ public class Skill
     private static byte[] RenderLine(int w, int h, string? title, string? yLabel, List<string> cats, List<(string Name, double[] Values)> series)
     {
         using var img = new Image<Rgba32>(w, h);
-        int padL = 78, padR = 28, padT = title is null ? 36 : 64, padB = 64;
+        var fg = ImgColor.Black;
+        var grid = ImgColor.FromRgba(210, 210, 210, 255);
+        var muted = ImgColor.FromRgba(90, 90, 90, 255);
         var all = series.SelectMany(s => s.Values).DefaultIfEmpty(0).ToList();
         double minV = Math.Min(0, all.Min());
         double maxV = Math.Max(0.0001, all.Max());
         if (maxV - minV < 0.0001) maxV = minV + 1;
+        const int padR = 28, padB = 64;
+
+        // 刻度文案先算出来：左边距按“最宽的刻度”留，否则大数字会压到绘图区（越界）
+        const int ticks = 4;
+        var tickTexts = new string[ticks + 1];
+        for (int i = 0; i <= ticks; i++) tickTexts[i] = (minV + (maxV - minV) * i / ticks).ToString("0.##");
+        double tickW = tickTexts.Max(s => MeasureText(s, 13f));
+        int padL = (int)Math.Min(170, Math.Max(66, tickW + 26));
+        var legendSeries = series.Count > 1 ? series : new List<(string Name, double[] Values)>();
+        var legend = LayoutLegend(legendSeries, w - padL - padR, 13f, 3);
+        int padT = (title is null ? 36 : 64) + legend.Rows * 22;
 
         img.Mutate(x =>
         {
             x.Fill(ImgColor.White);
-            if (title is not null) x.DrawText(title, Family(24f), ImgColor.Black, new ImgPointF(padL, 22));
+            DrawChartTitle(x, title, padL, 22, w - padL - padR);
 
-            int ticks = 4;
             for (int i = 0; i <= ticks; i++)
             {
                 float y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
-                x.DrawLine(ImgColor.FromRgba(210, 210, 210, 255), 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
-                var label = (minV + (maxV - minV) * i / ticks).ToString("0.##");
-                x.DrawText(label, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, y - 9));
+                x.DrawLine(grid, 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
+                x.DrawText(tickTexts[i], Family(13f), muted,
+                    new ImgPointF((float)(padL - 8 - MeasureText(tickTexts[i], 13f)), y - 9));
             }
-            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
-            x.DrawLine(ImgColor.Black, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
-            if (!string.IsNullOrWhiteSpace(yLabel)) x.DrawText(yLabel!, Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(6, padT - 20));
+            x.DrawLine(fg, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
+            x.DrawLine(fg, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
+            if (!string.IsNullOrWhiteSpace(yLabel))
+                x.DrawText(FitText(yLabel, 13f, w - padL - padR), Family(13f), muted,
+                    new ImgPointF(padL, Math.Max(6, padT - 22)));
+            if (legend.Rows > 0)
+                DrawLegend(x, legend, padL, padT - legend.Rows * 22f, w - padL - padR, Family(13f), fg, muted);
 
             int nc = cats.Count;
-            double slot = (w - padL - padR) / (double)Math.Max(1, nc - 1 == 0 ? 1 : nc - 1);
+            double slot = nc <= 1 ? (w - padL - padR) : (w - padL - padR) / (double)(nc - 1);
+            int stride = Math.Max(1, (int)Math.Ceiling(52.0 / Math.Max(1.0, slot)));
             for (int s = 0; s < series.Count; s++)
             {
                 var color = ImgColor.ParseHex(Palette[s % Palette.Length]);
@@ -667,21 +797,14 @@ public class Skill
             }
             for (int c = 0; c < cats.Count; c++)
             {
-                var lab = cats[c].Length > 8 ? cats[c].Substring(0, 8) + "…" : cats[c];
+                // 按槽宽裁剪 + 隔位显示 + 起点夹在绘图区内
+                if (c % stride != 0) continue;
+                var lab = FitText(cats[c], 13f, slot * stride * 0.96);
+                if (lab.Length == 0) continue;
                 float px = nc == 1 ? padL + (w - padL - padR) / 2f : (float)(padL + slot * c);
-                var tw = SixLabors.Fonts.TextMeasurer.MeasureBounds(lab, new SixLabors.Fonts.TextOptions(Family(13f))).Width;
-                x.DrawText(lab, Family(13f), ImgColor.Black, new ImgPointF(px - tw / 2, h - padB + 8));
-            }
-            if (series.Count > 1)
-            {
-                float lx = padL; float ly = padT - 24;
-                for (int s = 0; s < series.Count; s++)
-                {
-                    var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
-                    x.Fill(ImgColor.ParseHex(Palette[s % Palette.Length]), new ImgRect(lx, ly, 14, 14));
-                    x.DrawText(nm, Family(13f), ImgColor.Black, new ImgPointF(lx + 19, ly - 2));
-                    lx += 19 + SixLabors.Fonts.TextMeasurer.MeasureBounds(nm, new SixLabors.Fonts.TextOptions(Family(13f))).Width + 22;
-                }
+                float tw = (float)MeasureText(lab, 13f);
+                float lx = ClampX(px - tw / 2, padL, (float)(w - padR - tw));
+                x.DrawText(lab, Family(13f), fg, new ImgPointF(lx, h - padB + 8));
             }
         });
         using var outMs = new MemoryStream();
@@ -698,36 +821,60 @@ public class Skill
         img.Mutate(x =>
         {
             x.Fill(ImgColor.White);
-            if (title is not null) x.DrawText(title, Family(24f), ImgColor.Black, new ImgPointF(24, 18));
+            DrawChartTitle(x, title, 24, 18, w - 48);
 
             float cy = h / 2f + 10, cx = w * 0.34f;
             float r = Math.Min(w * 0.30f, h * 0.40f);
-            // 角度用度（PathBuilder.AddArc 的 startAngle/sweepAngle 为度）
+            // 角度用度
             float startDeg = -90f;
             for (int i = 0; i < values.Length; i++)
             {
                 double v = values[i] <= 0 ? 0 : values[i];
                 if (v == 0) continue;
                 float sweepDeg = (float)(360.0 * (v / total));
+                // 扇形必须由「圆心 → 沿弧走一圈 → 回圆心」围成。
+                // 【几何易错，勿改】PathBuilder.AddArc 只是往当前图形里追加一段弧：它既不先移到圆心，
+                // 也不会自动补上两条半径。只写 AddArc（哪怕再补 CloseFigure）得到的是「弧 + 弦」
+                // 围成的弓形，面积几乎为 0——实测 40 项饼图只剩贴外缘的一圈发丝线，圆盘内部整片留白。
+                // 这里用多边形逼近（每 2° 一段，弦高远小于 1px）显式围出扇形。
+                int steps = Math.Max(2, (int)Math.Ceiling(Math.Abs(sweepDeg) / 2f));
                 var pb = new SixLabors.ImageSharp.Drawing.PathBuilder();
-                pb.AddArc(new ImgPointF(cx, cy), r, r, 0f, startDeg, sweepDeg);
+                pb.MoveTo(new ImgPointF(cx, cy));
+                for (int s = 0; s <= steps; s++)
+                {
+                    float ang = (startDeg + sweepDeg * s / steps) * (float)Math.PI / 180f;
+                    pb.LineTo(new ImgPointF(cx + r * (float)Math.Cos(ang), cy + r * (float)Math.Sin(ang)));
+                }
+                pb.CloseFigure();
                 x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), pb.Build());
                 startDeg += sweepDeg;
             }
             // 外圈描边
             x.Draw(ImgColor.Black, 1f, new ImgEllipse(cx, cy, r));
 
-            // 图例
-            float lx = w * 0.68f, ly = h * 0.30f;
-            for (int i = 0; i < cats.Count; i++)
+            // 图例：每项按可用宽度裁剪、按可用高度限制行数；放不下的补“…等 N 项”
+            // （原实现 lx 固定、ly 逐行 +24 递增，分类一多就画出画布底部/右边）
+            float lx = w * 0.68f;
+            double availW = w - lx - 20;
+            const float rowH = 24f;
+            float top = Math.Max(56f, h * 0.16f);
+            int n = Math.Min(cats.Count, values.Length);
+            int maxRows = Math.Max(1, (int)Math.Floor((h - top - 34) / rowH));
+            int shown = Math.Min(n, maxRows);
+            for (int i = 0; i < shown; i++)
             {
-                double v = i < values.Length ? Math.Max(0, values[i]) : 0;
+                double v = Math.Max(0, values[i]);
                 var pct = (v / total * 100).ToString("0.#") + "%";
                 var nm = cats[i] + "  " + pct;
-                if (nm.Length > 22) nm = nm.Substring(0, 22) + "…";
+                float ly = top + i * rowH;
                 x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), new ImgRect(lx, ly, 14, 14));
-                x.DrawText(nm, Family(14f), ImgColor.Black, new ImgPointF(lx + 20, ly - 3));
-                ly += 24;
+                x.DrawText(FitText(nm, 14f, availW - 22), Family(14f), ImgColor.Black, new ImgPointF(lx + 20, ly - 3));
+            }
+            if (shown < n)
+            {
+                var more = "…等 " + n + " 项";
+                float ly = top + shown * rowH;
+                x.DrawText(FitText(more, 13f, availW - 22), Family(13f), ImgColor.FromRgba(90, 90, 90, 255), new ImgPointF(lx + 20, ly));
             }
         });
         using var outMs = new MemoryStream();

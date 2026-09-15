@@ -484,10 +484,43 @@ public class Skill
     }
 
     // ---- 正文：项目符号 ----
+
+    /// <summary>
+    /// 「内容太多不越界」的统一处理：按正文区高度估算占用，放不下就<b>整体缩字号与行距</b>。
+    ///
+    /// <para>
+    /// 实测踩到：本类文本框是固定高度、且没有 autofit，要点一多/一长就直接溢出正文区，
+    /// 进而画出页面底部（越界）。这里先量一下再排版。
+    /// </para>
+    /// </summary>
+    private static double FitScaleFor(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> paras, long boxH)
+    {
+        var need = EstimateHeightEmu(paras, CW - 342900, boxH);
+        if (need <= boxH) return 1.0;
+        // 下限 0.6：再小就看不清了，宁可字号小一点也不要溢出页面
+        return Math.Max(0.6, (double)boxH / need);
+    }
+
+    /// <summary>估算一组段落排版后的总高度（EMU）。CJK 按 1 em、ASCII 按 0.55 em 估宽。</summary>
+    private static long EstimateHeightEmu(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> paras, long availW, long boxH)
+    {
+        if (availW < 100000) availW = 100000;
+        long total = 0;
+        foreach (var (text, size, spaceBefore, lineSpacing) in paras)
+        {
+            var em = 0.0;
+            foreach (var ch in text) em += ch < 0x2E80 ? 0.55 : 1.0;
+            var widthEmu = em * size * 127.0;                       // 1pt = 12700 EMU，size 以百分之一磅计
+            var lines = Math.Max(1, (int)Math.Ceiling(widthEmu / availW));
+            total += (long)(lines * size * 127.0 * (lineSpacing <= 0 ? 1.25 : lineSpacing / 100.0))
+                + spaceBefore * 127L;
+        }
+        return total;
+    }
+
     private static string BulletBody(JsonElement el, SlideCtx ctx, bool accent)
     {
         var t = ctx.Theme;
-        var paras = new StringBuilder();
         var items = StringList(el, "bullets");
         if (items.Count == 0)
         {
@@ -496,25 +529,50 @@ public class Skill
         }
         if (items.Count == 0) items.Add("（本页暂无要点）");
 
+        // 先把「要排什么」整理成数据，再估算高度决定字号缩放，最后才生成 XML（内容太多就缩，不越界）
+        var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>();
+        var shapes = new List<(bool TwoLine, string Label, string Detail)>();
         foreach (var raw in items)
         {
             // 支持「小标题：说明」的两行结构，让内容页更有层次
             var parts = SplitLabel(raw);
-            var color = accent ? t.Primary : t.Text;
             if (parts is null)
             {
-                paras.Append(Para(raw, 1700, color, align: "l", bullet: "•", spaceBefore: 10, lineSpacing: 125, marL: 342900));
+                shapes.Add((false, raw, ""));
+                plan.Add((raw, 1700, 10, 1.25));
             }
             else
             {
-                paras.Append(Para(parts.Value.Label, 1800, t.Primary, bold: true, align: "l",
-                    bullet: "•", spaceBefore: 12, lineSpacing: 120, marL: 342900));
-                paras.Append(Para(parts.Value.Detail, 1500, t.Secondary, align: "l",
-                    lineSpacing: 125, marL: 342900));
+                shapes.Add((true, parts.Value.Label, parts.Value.Detail));
+                plan.Add((parts.Value.Label, 1800, 12, 1.20));
+                plan.Add((parts.Value.Detail, 1500, 0, 1.25));
+            }
+        }
+        var scale = FitScaleFor(plan, BodyH);
+
+        var paras = new StringBuilder();
+        foreach (var s in shapes)
+        {
+            var color = accent ? t.Primary : t.Text;
+            if (!s.TwoLine)
+            {
+                paras.Append(Para(s.Label, Scaled(1700, scale), color, align: "l", bullet: "•",
+                    spaceBefore: 10, lineSpacing: (int)Math.Round(125 * scale), marL: 342900));
+            }
+            else
+            {
+                paras.Append(Para(s.Label, Scaled(1800, scale), t.Primary, bold: true, align: "l",
+                    bullet: "•", spaceBefore: 12, lineSpacing: (int)Math.Round(120 * scale), marL: 342900));
+                paras.Append(Para(s.Detail, Scaled(1500, scale), t.Secondary, align: "l",
+                    lineSpacing: (int)Math.Round(125 * scale), marL: 342900));
             }
         }
         return TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t");
     }
+
+    /// <summary>按缩放系数调整字号（size 以百分之一磅计），并守住可读下限（≈12pt）。</summary>
+    private static int Scaled(int size, double scale)
+        => Math.Max(1200, (int)Math.Round(size * scale));
 
     private static (string Label, string Detail)? SplitLabel(string raw)
     {
@@ -1228,28 +1286,138 @@ public class Skill
         catch { return false; }
     }
 
+    // ===== 文本适配：内容太多时不能越界 =====
+
+    /// <summary>按可用宽度裁剪文本（超宽则逐字回退并加省略号）。</summary>
+    private static string FitText(string? text, float size, double maxWidth)
+    {
+        if (string.IsNullOrEmpty(text) || maxWidth < 10) return "";
+        if (MeasureText(text!, size) <= maxWidth) return text!;
+        for (var n = text!.Length - 1; n > 0; n--)
+        {
+            var cand = text.Substring(0, n) + "…";
+            if (MeasureText(cand, size) <= maxWidth) return cand;
+        }
+        return "";
+    }
+
+    /// <summary>先缩小字号直到放得下（不低于 minSize），仍放不下再裁剪。返回裁剪后的文本与实际字号。</summary>
+    private static (string Text, float Size) FitTextShrink(string? text, float size, double maxWidth, float minSize)
+    {
+        if (string.IsNullOrEmpty(text)) return ("", size);
+        var s = size;
+        while (s > minSize && MeasureText(text!, s) > maxWidth) s -= 1f;
+        return (FitText(text, s, maxWidth), s);
+    }
+
+    private static double MeasureText(string text, float size)
+        => SixLabors.Fonts.TextMeasurer.MeasureBounds(text, new SixLabors.Fonts.TextOptions(Family(size))).Width;
+
+    /// <summary>把 x 夹在 [min,max]，保证绘制起点不越界。</summary>
+    private static float ClampX(float v, float min, float max)
+        => max < min ? min : (v < min ? min : (v > max ? max : v));
+
+    private sealed class LegendItem
+    {
+        public string Text = "";
+        public float X;
+        public float Y;
+        public int ColorIndex;
+    }
+
+    private sealed class LegendLayout
+    {
+        public List<LegendItem> Items = new();
+        public int Rows;
+        public int Hidden;
+    }
+
+    /// <summary>
+    /// 图例排版：按可用宽度<b>换行</b>，最多 maxRows 行；放不下的计入 Hidden。
+    /// <para>
+    /// 原实现是一行横向累加 x，系列一多就直接画出画布右边（典型“内容太多越界”）。
+    /// </para>
+    /// </summary>
+    private static LegendLayout LayoutLegend(List<(string Name, double[] Values)> series, double availW, float size, int maxRows)
+    {
+        var layout = new LegendLayout();
+        if (availW < 60) { layout.Hidden = series.Count; return layout; }
+        float x = 0;
+        var row = 0;
+        for (var s = 0; s < series.Count; s++)
+        {
+            var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
+            var text = FitText(nm, size, Math.Min(240, availW - 44));
+            if (text.Length == 0) text = "系列" + (s + 1);
+            var itemW = 20 + (float)MeasureText(text, size) + 24;
+            if (x > 0 && x + itemW > availW) { row++; x = 0; }
+            if (row >= maxRows) { layout.Hidden = series.Count - s; break; }
+            layout.Items.Add(new LegendItem { Text = text, X = x, Y = row * 24f, ColorIndex = s });
+            x += itemW;
+        }
+        layout.Rows = layout.Items.Count == 0 ? 0 : row + 1;
+        return layout;
+    }
+
+    /// <summary>画图例，并在被截断时补一个“…”提示（不谎报系列数）。</summary>
+    private static void DrawLegend(IImageProcessingContext x, LegendLayout legend, float left, float top,
+        double availW, SixLabors.Fonts.Font font, ImgColor fg, ImgColor muted)
+    {
+        foreach (var it in legend.Items)
+        {
+            var col = ImgColor.ParseHex(Palette[it.ColorIndex % Palette.Length]);
+            x.Fill(col, new ImgRect(left + it.X, top + it.Y, 15, 15));
+            x.DrawText(it.Text, font, fg, new ImgPointF(left + it.X + 20, top + it.Y - 3));
+        }
+        if (legend.Hidden > 0 && legend.Rows > 0)
+        {
+            var last = legend.Items[legend.Items.Count - 1];
+            var hint = "…等 " + (legend.Items.Count + legend.Hidden) + " 项";
+            var hx = left + last.X + 20 + (float)MeasureText(last.Text, 14f) + 22;
+            var hw = (float)MeasureText(hint, 13f);
+            if (hx + hw <= left + availW) x.DrawText(hint, Family(13f), muted, new ImgPointF(hx, top + last.Y));
+        }
+    }
+
     private static byte[] RenderBar(int w, int h, string? title, string? yLabel, List<string> cats,
         List<(string Name, double[] Values)> series, bool dark, Theme t)
     {
         using var img = new Image<Rgba32>(w, h);
         var fg = dark ? ImgColor.White : ImgColor.Black;
         var muted = dark ? ImgColor.FromRgba(170, 178, 190, 255) : ImgColor.FromRgba(90, 90, 90, 255);
-        int padL = 92, padR = 36, padT = title is null ? 40 : 78, padB = 76;
         var maxV = Math.Max(0.0001, series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max());
+        const int padR = 36, padB = 76;
+
+        // 刻度文案先算出来：左边距按“最宽的刻度”留，否则大数字会压到绘图区（越界）
+        const int ticks = 4;
+        var tickTexts = new string[ticks + 1];
+        for (var i = 0; i <= ticks; i++) tickTexts[i] = (maxV * i / ticks).ToString("0.##");
+        var tickW = tickTexts.Max(s => MeasureText(s, 13f));
+        var padL = (int)Math.Min(200, Math.Max(72, tickW + 30));
+
+        // 图例先排版（含换行），据此预留顶部高度：既不把绘图区挤没，也不会自身越界
+        var legend = LayoutLegend(series, w - padL - padR, 14f, 3);
+        var padT = (title is null ? 40 : 74) + legend.Rows * 24;
 
         img.Mutate(x =>
         {
             x.Fill(dark ? ImgColor.FromRgba(13, 17, 23, 255) : ImgColor.White);
-            if (title is not null) x.DrawText(title, Family(26f), fg, new ImgPointF(padL, 24));
+            if (!string.IsNullOrWhiteSpace(title))
+                x.DrawText(FitText(title, 26f, w - padL - padR), Family(26f), fg, new ImgPointF(padL, 24));
 
-            const int ticks = 4;
             for (var i = 0; i <= ticks; i++)
             {
                 var y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
                 x.DrawLine(muted, 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
-                x.DrawText((maxV * i / ticks).ToString("0.##"), Family(13f), muted, new ImgPointF(8, y - 9));
+                // 右对齐到轴线左侧，不再固定 x=8
+                x.DrawText(tickTexts[i], Family(13f), muted,
+                    new ImgPointF((float)(padL - 10 - MeasureText(tickTexts[i], 13f)), y - 9));
             }
-            if (!string.IsNullOrWhiteSpace(yLabel)) x.DrawText(yLabel!, Family(13f), muted, new ImgPointF(8, padT - 22));
+            if (!string.IsNullOrWhiteSpace(yLabel))
+                x.DrawText(FitText(yLabel, 13f, w - padL - padR), Family(13f), muted,
+                    new ImgPointF(padL, Math.Max(6, padT - 22)));
+
+            if (legend.Rows > 0) DrawLegend(x, legend, padL, padT - legend.Rows * 24f, w - padL - padR, Family(14f), fg, muted);
 
             int nc = cats.Count, ns = series.Count;
             double slot = (w - padL - padR) / (double)Math.Max(1, nc);
@@ -1265,20 +1433,14 @@ public class Skill
                     var by = h - padB - bh;
                     if (bh > 0.5f) x.Fill(ImgColor.ParseHex(Palette[(ns > 1 ? s : c) % Palette.Length]), new ImgRect(bx, by, (float)barW, bh));
                 }
-                var lab = cats[c].Length > 8 ? cats[c].Substring(0, 8) + "…" : cats[c];
-                var tw = SixLabors.Fonts.TextMeasurer.MeasureBounds(lab, new SixLabors.Fonts.TextOptions(Family(14f))).Width;
-                x.DrawText(lab, Family(14f), fg, new ImgPointF((float)(padL + slot * c + slot / 2 - tw / 2), h - padB + 10));
-            }
-            if (ns > 1)
-            {
-                float lx = padL, ly = padT - 28;
-                for (var s = 0; s < ns; s++)
-                {
-                    var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
-                    x.Fill(ImgColor.ParseHex(Palette[s % Palette.Length]), new ImgRect(lx, ly, 15, 15));
-                    x.DrawText(nm, Family(14f), fg, new ImgPointF(lx + 20, ly - 3));
-                    lx += 20 + SixLabors.Fonts.TextMeasurer.MeasureBounds(nm, new SixLabors.Fonts.TextOptions(Family(14f))).Width + 24;
-                }
+                // 分类标签：按槽宽裁剪（而不是按字符数），并在分类太多时隔位显示，避免叠成一团
+                var stride = Math.Max(1, (int)Math.Ceiling(52.0 / slot));
+                if (c % stride != 0) continue;
+                var lab = FitText(cats[c], 14f, slot * stride * 0.96);
+                if (lab.Length == 0) continue;
+                var tw = (float)MeasureText(lab, 14f);
+                var lx = ClampX((float)(padL + slot * c + slot / 2 - tw / 2), padL, (float)(w - padR - tw));
+                x.DrawText(lab, Family(14f), fg, new ImgPointF(lx, h - padB + 10));
             }
         });
         return ToPng(img);
@@ -1290,24 +1452,36 @@ public class Skill
         using var img = new Image<Rgba32>(w, h);
         var fg = dark ? ImgColor.White : ImgColor.Black;
         var muted = dark ? ImgColor.FromRgba(170, 178, 190, 255) : ImgColor.FromRgba(90, 90, 90, 255);
-        int padL = 92, padR = 36, padT = title is null ? 40 : 78, padB = 76;
         var maxV = Math.Max(0.0001, series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max());
+        const int padR = 36, padB = 76;
+
+        const int ticks = 4;
+        var tickTexts = new string[ticks + 1];
+        for (var i = 0; i <= ticks; i++) tickTexts[i] = (maxV * i / ticks).ToString("0.##");
+        var tickW = tickTexts.Max(s => MeasureText(s, 13f));
+        var padL = (int)Math.Min(200, Math.Max(72, tickW + 30));
+        var legend = LayoutLegend(series, w - padL - padR, 14f, 3);
+        var padT = (title is null ? 40 : 74) + legend.Rows * 24;
 
         img.Mutate(x =>
         {
             x.Fill(dark ? ImgColor.FromRgba(13, 17, 23, 255) : ImgColor.White);
-            if (title is not null) x.DrawText(title, Family(26f), fg, new ImgPointF(padL, 24));
+            if (!string.IsNullOrWhiteSpace(title))
+                x.DrawText(FitText(title, 26f, w - padL - padR), Family(26f), fg, new ImgPointF(padL, 24));
 
-            const int ticks = 4;
             for (var i = 0; i <= ticks; i++)
             {
                 var y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
                 x.DrawLine(muted, 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
-                x.DrawText((maxV * i / ticks).ToString("0.##"), Family(13f), muted, new ImgPointF(8, y - 9));
+                x.DrawText(tickTexts[i], Family(13f), muted,
+                    new ImgPointF((float)(padL - 10 - MeasureText(tickTexts[i], 13f)), y - 9));
             }
-            if (!string.IsNullOrWhiteSpace(yLabel)) x.DrawText(yLabel!, Family(13f), muted, new ImgPointF(8, padT - 22));
+            if (!string.IsNullOrWhiteSpace(yLabel))
+                x.DrawText(FitText(yLabel, 13f, w - padL - padR), Family(13f), muted,
+                    new ImgPointF(padL, Math.Max(6, padT - 22)));
             x.DrawLine(fg, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
             x.DrawLine(fg, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
+            if (legend.Rows > 0) DrawLegend(x, legend, padL, padT - legend.Rows * 24f, w - padL - padR, Family(14f), fg, muted);
 
             int nc = cats.Count;
             double slot = (w - padL - padR) / (double)Math.Max(1, nc);
@@ -1328,20 +1502,13 @@ public class Skill
             }
             for (var c = 0; c < nc; c++)
             {
-                var lab = cats[c].Length > 8 ? cats[c].Substring(0, 8) + "…" : cats[c];
-                var tw = SixLabors.Fonts.TextMeasurer.MeasureBounds(lab, new SixLabors.Fonts.TextOptions(Family(14f))).Width;
-                x.DrawText(lab, Family(14f), fg, new ImgPointF((float)(padL + slot * c + slot / 2 - tw / 2), h - padB + 10));
-            }
-            if (series.Count > 1)
-            {
-                float lx = padL, ly = padT - 28;
-                for (var s = 0; s < series.Count; s++)
-                {
-                    var nm = string.IsNullOrEmpty(series[s].Name) ? "系列" + (s + 1) : series[s].Name;
-                    x.Fill(ImgColor.ParseHex(Palette[s % Palette.Length]), new ImgRect(lx, ly, 15, 15));
-                    x.DrawText(nm, Family(14f), fg, new ImgPointF(lx + 20, ly - 3));
-                    lx += 20 + SixLabors.Fonts.TextMeasurer.MeasureBounds(nm, new SixLabors.Fonts.TextOptions(Family(14f))).Width + 24;
-                }
+                var stride = Math.Max(1, (int)Math.Ceiling(52.0 / slot));
+                if (c % stride != 0) continue;
+                var lab = FitText(cats[c], 14f, slot * stride * 0.96);
+                if (lab.Length == 0) continue;
+                var tw = (float)MeasureText(lab, 14f);
+                var lx = ClampX((float)(padL + slot * c + slot / 2 - tw / 2), padL, (float)(w - padR - tw));
+                x.DrawText(lab, Family(14f), fg, new ImgPointF(lx, h - padB + 10));
             }
         });
         return ToPng(img);
@@ -1353,16 +1520,22 @@ public class Skill
         using var img = new Image<Rgba32>(w, h);
         var fg = dark ? ImgColor.White : ImgColor.Black;
         var bg = dark ? ImgColor.FromRgba(13, 17, 23, 255) : ImgColor.White;
+        var muted = dark ? ImgColor.FromRgba(170, 178, 190, 255) : ImgColor.FromRgba(90, 90, 90, 255);
         img.Mutate(x =>
         {
             x.Fill(bg);
-            if (title is not null) x.DrawText(title, Family(26f), fg, new ImgPointF(40, 22));
+            if (!string.IsNullOrWhiteSpace(title))
+                x.DrawText(FitText(title, 26f, w - 80), Family(26f), fg, new ImgPointF(40, 22));
 
             var positives = values.Select(v => Math.Max(0, v)).ToArray();
             var total = positives.Sum();
-            if (total <= 0) { x.DrawText("（无正数数据）", Family(20f), fg, new ImgPointF(60, h / 2f)); return; }
+            if (total <= 0)
+            {
+                x.DrawText(FitText("（无正数数据）", 20f, w - 80), Family(20f), fg, new ImgPointF(60, h / 2f));
+                return;
+            }
 
-            var size = Math.Min(h - 150, w / 2 - 60);
+            var size = Math.Max(40, Math.Min(h - 150, w / 2 - 60));
             var cx = 70 + size / 2f;
             var cy = h / 2f + 22;
             var radius = size / 2f;
@@ -1371,11 +1544,19 @@ public class Skill
             {
                 if (positives[i] <= 0) continue;
                 var sweep = (float)(360.0 * positives[i] / total);
-                // 用 PathBuilder 画真正的扇区（旋转椭圆只会得到交叠的圆，不是扇形）
+                // 扇形必须由「圆心 → 沿弧走一圈 → 回圆心」围成。
+                // 【几何易错，勿改】PathBuilder.AddArc 只是往当前图形里追加一段弧：它既不先移到圆心，
+                // 也不会自动补上两条半径。只写 AddArc + CloseFigure 得到的是「弧 + 弦」围成的弓形，
+                // 面积几乎为 0——实测 40 项饼图只剩贴外缘的一圈发丝线，圆盘内部整片留白（看着像没画）。
+                // 这里用多边形逼近（每 2° 一段；320px 半径下弦高约 0.05px，肉眼不可见）显式围出扇形。
+                var steps = Math.Max(2, (int)Math.Ceiling(Math.Abs(sweep) / 2f));
                 var pb = new SixLabors.ImageSharp.Drawing.PathBuilder();
-                pb.AddLine(cx, cy, cx + radius * (float)Math.Cos(start * Math.PI / 180),
-                    cy + radius * (float)Math.Sin(start * Math.PI / 180));
-                pb.AddArc(cx - radius, cy - radius, radius * 2, radius * 2, start, sweep, 0f);
+                pb.MoveTo(new ImgPointF(cx, cy));
+                for (var s = 0; s <= steps; s++)
+                {
+                    var ang = (start + sweep * s / steps) * (float)Math.PI / 180f;
+                    pb.LineTo(new ImgPointF(cx + radius * (float)Math.Cos(ang), cy + radius * (float)Math.Sin(ang)));
+                }
                 pb.CloseFigure();
                 x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), pb.Build());
                 start += sweep;
@@ -1383,16 +1564,28 @@ public class Skill
             if (doughnut)
                 x.Fill(bg, new ImgEllipse(new ImgPointF(cx, cy), radius * 0.55f));
 
-            // 图例
-            var lx = w / 2f + 40;
-            var ly = 100f;
-            for (var i = 0; i < cats.Count && i < positives.Length; i++)
+            // 图例：按可用宽度裁剪文案、按可用高度限制行数；放不下的不再硬画到画布外
+            var legendX = w / 2f + 40;
+            var availW = w - legendX - 24;
+            var rowH = 30f;
+            var maxRows = Math.Max(1, (int)((h - 110 - 24) / rowH));
+            var n = Math.Min(cats.Count, positives.Length);
+            var shown = Math.Min(n, maxRows);
+            var labSize = shown > 10 ? 13f : 15f;
+            for (var i = 0; i < shown; i++)
             {
-                var pct = total > 0 ? positives[i] / total * 100 : 0;
-                x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), new ImgRect(lx, ly, 16, 16));
+                var pct = positives[i] / total * 100;
+                var ly = 100f + i * rowH;
+                x.Fill(ImgColor.ParseHex(Palette[i % Palette.Length]), new ImgRect(legendX, ly, 16, 16));
                 var label = cats[i] + "  " + positives[i].ToString("0.##") + "（" + pct.ToString("0.#") + "%）";
-                x.DrawText(label, Family(15f), fg, new ImgPointF(lx + 24, ly - 3));
-                ly += 30;
+                x.DrawText(FitText(label, labSize, availW - 28), Family(labSize), fg, new ImgPointF(legendX + 24, ly - 3));
+            }
+            if (shown < n)
+            {
+                var more = "…等 " + n + " 项";
+                var ly = 100f + shown * rowH;
+                if (ly + 18 < h)
+                    x.DrawText(FitText(more, 13f, availW - 28), Family(13f), muted, new ImgPointF(legendX + 24, ly));
             }
         });
         return ToPng(img);

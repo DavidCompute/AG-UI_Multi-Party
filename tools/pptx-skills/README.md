@@ -111,13 +111,28 @@ node tools/pptx-skills/sync-builtin.mjs
 4. **OPC 跨部件必备关系齐备**（`Package_HasAllRequiredCrossPartRelationships`：母版有主题、版式回指母版、有备注页就有备注母版并由 presentation 关联、备注页回指幻灯片）——见下方“为什么单靠 schema 校验不够”；
 5. `themeColors` / `fontTitle` 覆盖确实写进了 XML；
 6. `slides` 为空时报可读错误；演讲者备注写进 `notesSlides`。
+7. **图表不越界**（`ChartOverflowTests`，报告落在临时目录 `pptx-chart-bbox.txt`）：200 字标题 +
+   30 个 20 字分类 + 4 个长名系列 + 40 项饼图图例的压力输入，从产物里抠出图表 PNG，
+   用自带的纯 C# PNG 解码器**逐像素求墨迹包围盒**，断言四周仍留空边。实测修复前柱/折线图
+   右侧贴边（`R0`）、饼图墨迹铺到 `(0,0)-(1399,799)`；修复后为 `L20 T25 R35 B51` /
+   （饼图）`L40 T23 R40 B26`（画布 1400×800）。
+8. **饼图真的是实心圆盘**（`Pptx_PieChart_DrawsFilledDisk`）：断言彩色像素占比 ≥ 20%
+   （真圆盘约 29%）。仅靠“没越界”拦不住画坏的扇区（见下方几何坑）。
 
 ```bash
 # 单测
-dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filter "FullyQualifiedName~PptxDeckSkillTests"
+dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filter "FullyQualifiedName~PptxDeckSkillTests|FullyQualifiedName~ChartOverflowTests"
 # 独立结构检查（对照 OOXML 必备部件规则，不依赖 .NET）
 python tools/verify_office_package.py 某个.pptx
+# 实盘图表几何（真容器 + 真的 Roslyn 编译执行，量像素；见下）
+PYTHONIOENCODING=utf-8 python tools/verify_chart_geometry.py
 ```
+
+`tools/verify_chart_geometry.py` 不经模型，直接打 `/ag-ui/skills/{id}/run` 试运行通路，
+对产物里的每张图表 PNG 量两件事：**墨迹包围盒四周是否留边**（越界检查）与
+**彩色像素占比**（饼图圆盘应约 27%；只查越界拦不住“填成弓形”的坏扇区）。
+实盘实测（容器，字体 `Noto Sans CJK SC`）：柱/折线 `L20 T26 R35 B51`、
+压力饼图 `L41 T24 R62 B26` 实心度 `28.96%`、4 项饼图 PPT `28.81%` / Word `26.81%`，全部通过。
 
 ### 为什么单靠 schema 校验不够（重要）
 
@@ -138,8 +153,26 @@ python tools/verify_office_package.py 某个.pptx
 - 技能正文里 `#r "nuget: ..."` 的版本号是**提示**非强制（写 3.2.0 实际会还原到 3.5.x）。
 - **`PresentationDocumentType` 在根命名空间 `DocumentFormat.OpenXml`**，不在 `Packaging`（3.x 的变化）；
   `PresentationDocument` / `SlidePart` / `SlideMasterPart` 等仍在 `Packaging`。
-- `SixLabors.ImageSharp.Drawing` 的 `PathBuilder.AddArc` **没有 6 参重载**，用 7 参
-  `(x, y, w, h, startAngle, sweepAngle, rotationAngle)`；`EllipsePolygon` 用 `(PointF, float)` 最稳。
+- `SixLabors.ImageSharp.Drawing` 的 `PathBuilder.AddArc` 重载很容易看错：
+  `AddArc(PointF center, rx, ry, rotation, startAngle, sweepAngle)` 与
+  `AddArc(float x, float y, rx, ry, startAngle, sweepAngle, rotation)` 的**前两个参数都是圆心**，
+  不是包围盒左上角；也**没有** `(x, y, w, h, …)` 那种“包围盒 + 宽高”的语义。
+  搞错会算出巨大圆形并铺满/冲出画布（实测饼图墨迹铺到 `(0,0)`）。
+  **本仓库的饼图已不再用 `AddArc`**，改用 `MoveTo` + `LineTo` 显式围扇形（见下）。
+  `EllipsePolygon` 用 `(PointF, float)` 最稳。
+- **饼图扇区必须自己围「圆心 → 弧 → 圆心」**：`PathBuilder.AddArc` 只是往当前图形里追加一段弧，
+  既不先移到圆心也不补两条半径。只写 `AddArc`（哪怕再加 `CloseFigure`）得到的是「弧 + 弦」
+  围成的**弓形**，面积远小于扇形——4 项饼图约 14%、40 项时只剩 0.8% 的彩色像素，
+  看着就像整张图没画。正确做法：`MoveTo(圆心)` → 沿弧 `LineTo` 走一圈 → `CloseFigure()`；
+  本仓库用每 2° 一段的多边形逼近（弦高远小于 1px，肉眼不可见）。
+  回归测试：`Pptx_PieChart_DrawsFilledDisk`。
+- **图表要按可用空间自适应，不能信任固定坐标**：长标题/多系列/多分类/大数值都会让文字与图例
+  画出画布。本仓库的做法：标题先缩字号再不超宽裁剪；Y 轴刻度文案先量宽再定左边距
+  （钳在 72–200px）并**右对齐**到轴线左侧；图例按宽度**换行**（最多 3 行）、每项按宽裁剪、
+  放不下的补“…等 N 项”，并将**占用的行数提前计入顶部留白**；分类标签按**槽宽**裁剪、
+  过密时**隔位显示**（`stride = ceil(52/slot)`），起点用 `ClampX` 夹在绘图区内。
+- **页面正文也会缩**：`BulletBody` 先把要点整理成数据 → 按字数估算高度定缩放（下限 0.6）
+  → 再生 XML，避免要点过多时直接溢出页面。
 - 平台预置 `using` 不含 `System.IO`，需自行 `using`（本文件已含）。
 - 换行统一 `\n`；正文由同步脚本统一处理。
 - **图表里的 `SixLabors.Fonts` 必须钉在 `1.0.1`（不要删）**：ImageSharp 2.1.5 对它的依赖是
@@ -167,3 +200,7 @@ python tools/verify_office_package.py 某个.pptx
 - 不支持从模板/既有 pptx 编辑（只做从零生成）；不支持动画、切换、SmartArt、母版多版式。
 - `image` 页的图片走 ImageSharp 读取以计算等比尺寸；ImageSharp 不支持的格式（如 svg/emf）会报可读错误。
 - 表格列宽均分（不按内容自适应），列多时字号不会自动再缩。
+- 自适应用的是**每条内容的宽度估算**（按字号 × 字符数的近似量），不是真实排版度量：
+  极端混排（大量全角/半角、超长英文单词）下仍可能留白过多或裁得略早。
+- 正文缩字号只覆盖了 `content` 页型；`twoCol` / `summary` / `toc` / `quote` 等页型仍在用固定高度的文本框。
+- 图表图例最多 3 行，超出以“…等 N 项”代替（不是分页）。
