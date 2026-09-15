@@ -1353,4 +1353,701 @@ public sealed class PptxDeckSkillTests
         }
         catch { return false; }
     }
+
+    // ====================================================================
+    // 版式变体 / 图文混排 / 进度仪表 / 新图表 / 字体配对 / QA / 原地编辑
+    // ====================================================================
+
+    /// <summary>一份 16×16 的真 PNG（红底蓝块），用于图文混排用例。</summary>
+    private const string TinyPngBase64 =
+        "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAL0lEQVR4nGM8YWPDQApgIkk1AxkaWOCsMJsePOpWHSmhl5OYRjUQAUgOJcbBl/gA3ngFoWwd6YkAAAAASUVORK5CYII=";
+
+    /// <summary>把内置小 PNG 写到临时目录，返回路径（图片类用例的输入）。</summary>
+    private static string TinyPng(string name = "tiny.png")
+    {
+        var dir = TempDir();
+        var path = Path.Combine(dir, name);
+        File.WriteAllBytes(path, Convert.FromBase64String(TinyPngBase64));
+        return path;
+    }
+
+    /// <summary>
+    /// 所有版式变体都要能出稿、且不越界。
+    ///
+    /// <para>
+    /// 设计文档里每个页型给了多种排法（封面 4 种、章节 3 种、目录 3 种、小结 3 种）。
+    /// 变体是“枚举”出来的，漏一个 case 就会静默回落到默认版式（以前 twoCol 就这么死过），
+    /// 所以这里把每一个变体都摆上去，断言不发 warnings、且 QA 不报越界。
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("cover", "left", "left")]
+    [InlineData("cover", "center", "center")]
+    [InlineData("cover", "image", "image")]
+    [InlineData("cover", "split", "split")]
+    [InlineData("section", "number", "number")]
+    [InlineData("section", "bar", "bar")]
+    [InlineData("section", "full", "full")]
+    [InlineData("toc", "list", "list")]
+    [InlineData("toc", "grid", "grid")]
+    [InlineData("toc", "sidebar", "sidebar")]
+    [InlineData("summary", "list", "list")]
+    [InlineData("summary", "cta", "cta")]
+    [InlineData("summary", "split", "split")]
+    public void EveryVariant_RendersWithoutOverflow(string type, string variant, string _)
+    {
+        var img = TinyPng();
+        var expectedTitle = type switch { "toc" => "目录", "summary" => "小结", _ => "变体标题" };
+        var slide = type switch
+        {
+            "cover" => new { type, title = expectedTitle, subtitle = "副标题", author = "知聚", date = "2026-09", variant, path = img },
+            "section" => new { type, title = expectedTitle, subtitle = "一句话说明", variant } as object,
+            "toc" => (object)new
+            {
+                type, title = expectedTitle, variant,
+                items = new[] { "一、产品概览", "二、核心能力", "三、交付流程", "四、总结展望" },
+            },
+            _ => new
+            {
+                type, title = expectedTitle, variant,
+                bullets = new[] { "要点一：已经完成", "要点二：正在推进" },
+                items = new[] { "确认试点范围", "排期联调", "上线评估" },
+                actions = new[] { "确认试点", "排期联调" },
+                contact = "team@example.com",
+            },
+        };
+
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "变体检查",
+            theme = "pure-tech-blue",
+            slides = new object[] { new { type = "cover", title = "变体检查" }, slide },
+        }));
+
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+        Assert.True(ShapesOutsideCanvas(path).Count == 0,
+            type + "/" + variant + " 有形状画出画布：" + string.Join("; ", ShapesOutsideCanvas(path)));
+        // 该变体确实渲染出了自己的内容（漏 case 会静默回落成默认版式）
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        Assert.Contains(expectedTitle, sr.ReadToEnd());
+    }
+
+    /// <summary>
+    /// 同一页型的各个变体必须真的<b>长得不一样</b>。
+    ///
+    /// <para>
+    /// 上一个用例只断言“标题在”——而一个没实现的变体会<b>静默回落</b>到默认版式，标题照样在：
+    /// 以前 <c>case "twoCol"</c> 写成驼峰就永远匹配不上、两栏页型从没生效过，而这类断言拦不住。
+    /// 所以这里把同页型的全部变体放一起，直接比较生成的页面 XML 是否两两不同。
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("cover", "left,center,image,split")]
+    [InlineData("section", "number,bar,full")]
+    [InlineData("toc", "list,grid,sidebar")]
+    [InlineData("summary", "list,cta,split")]
+    public void VariantsOfSameType_ProduceDifferentPages(string type, string variantsCsv)
+    {
+        var variants = variantsCsv.Split(',');
+        var img = TinyPng();
+        var slides = new List<object> { new { type = "cover", title = "变体对比" } };
+        foreach (var v in variants)
+        {
+            slides.Add(type switch
+            {
+                "cover" => new { type, title = "同一标题", variant = v, path = img } as object,
+                "section" => (object)new { type, title = "同一标题", variant = v },
+                "toc" => new
+                {
+                    type, title = "同一标题", variant = v,
+                    items = new[] { "一、甲", "二、乙", "三、丙" },
+                },
+                _ => new
+                {
+                    type, title = "同一标题", variant = v,
+                    bullets = new[] { "甲项", "乙项" },
+                    items = new[] { "行动甲", "行动乙" },
+                    contact = "a@b.c",
+                },
+            });
+        }
+
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new { title = "变体对比", theme = "forest-eco", slides }));
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+
+        using var zip = ZipFile.OpenRead(path);
+        var pages = new List<string>();
+        // slide2..slideN 对应各变体
+        for (var i = 2; i <= variants.Length + 1; i++)
+        {
+            using var sr = new StreamReader(zip.Entries.First(e => e.FullName == $"ppt/slides/slide{i}.xml").Open());
+            // 页码徽标带页号（02/03/…），每页必然不同——先把它抹平，否则比的是页号不是版式
+            pages.Add(System.Text.RegularExpressions.Regex.Replace(sr.ReadToEnd(), "<a:t>\\d{2}</a:t>", "<a:t>NN</a:t>"));
+        }
+        Assert.Equal(variants.Length, pages.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    /// <summary>
+    /// 图文混排：图左文右 / 文左图右 / 半出血叠字 / 图廊。
+    /// 以前只有“整页一张图”，报告类幻灯片最常用的左图右文做不到。
+    /// </summary>
+    [Theory]
+    [InlineData("left")]
+    [InlineData("right")]
+    [InlineData("bleed")]
+    [InlineData("gallery")]
+    public void ImageLayouts_EmbedPictureAndTextWithoutOverflow(string variant)
+    {
+        var img = TinyPng("a.png");
+        var img2 = TinyPng("b.png");
+        var slide = variant == "gallery"
+            ? (object)new
+            {
+                type = "image", title = "图廊", variant,
+                images = new object[] { new { path = img, caption = "第一张" }, new { path = img2, caption = "第二张" } },
+            }
+            : new
+            {
+                type = "image", title = "图文混排", variant, path = img,
+                heading = "小标题", bullets = new[] { "左文右图", "图片按框裁切" },
+            };
+
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "图文检查",
+            slides = new object[] { new { type = "cover", title = "图文检查" }, slide },
+        }));
+
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+        Assert.True(ShapesOutsideCanvas(path).Count == 0,
+            variant + " 有形状画出画布：" + string.Join("; ", ShapesOutsideCanvas(path)));
+        using var zip = ZipFile.OpenRead(path);
+        // 图被真的嵌进包里（不是只画了个占位框）
+        Assert.Contains(zip.Entries, e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        var xml = sr.ReadToEnd();
+        Assert.Contains("<p:pic>", xml);
+        if (variant != "bleed") Assert.Contains("图", xml);
+    }
+
+    /// <summary>图片缺失时要如实报 warning 并画占位块，不能静默生成一页空白。</summary>
+    [Fact]
+    public void ImageLayout_MissingFile_WarnsAndDrawsPlaceholder()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "不存在-" + Guid.NewGuid().ToString("N") + ".png");
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "缺图检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "缺图检查" },
+                new { type = "image", title = "缺图", variant = "left", path = missing },
+            },
+        }));
+
+        var warnings = doc.RootElement.GetProperty("warnings").EnumerateArray().Select(x => x.GetString()!).ToList();
+        Assert.Contains(warnings, w => w.Contains("图片不存在"));
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        Assert.Contains("图片不存在", sr.ReadToEnd());
+    }
+
+    /// <summary>进度页（横条）：标签、数值、完成度条都要在，且不越界。</summary>
+    [Fact]
+    public void ProgressPage_RendersLabelsValuesAndBars()
+    {
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "进度检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "进度检查" },
+                new { type = "progress", title = "项目进度", items = new object[]
+                    {
+                        new { label = "需求确认", value = 100 },
+                        new { label = "开发", value = 72 },
+                        new { label = "测试", value = 35.5 },
+                    } },
+            },
+        }));
+
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        var xml = sr.ReadToEnd();
+        Assert.Contains("需求确认", xml);
+        Assert.Contains("100%", xml);
+        Assert.Contains("72%", xml);
+        Assert.Contains("35.5%", xml);
+        Assert.True(ShapesOutsideCanvas(path).Count == 0);
+        Assert.Equal(0, doc.RootElement.GetProperty("qa").GetProperty("issueCount").GetInt32());
+    }
+
+    /// <summary>
+    /// 环形仪表：必须是<b>环</b>（中心镂空）而不是实心饼。
+    /// 与饼图“实心扇区”那个坑同源——几何画错时“看着像画了”，只有量像素能发现。
+    /// </summary>
+    [Fact]
+    public void ProgressRing_IsHollowRingNotDisk()
+    {
+        var (path, _) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "环形检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "环形检查" },
+                new { type = "progress", title = "环形仪表", variant = "ring", items = new object[]
+                    {
+                        new { label = "覆盖率", value = 86 },
+                        new { label = "可用率", value = 62 },
+                    } },
+            },
+        }));
+
+        using var zip = ZipFile.OpenRead(path);
+        var media = zip.Entries.Where(e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, media.Count); // 两个环
+        foreach (var e in media)
+        {
+            var ink = PngInkRatio(e);
+            Assert.True(ink > 0.05, "环形太稀：" + ink);
+            Assert.True(ink < 0.45, "环形看起来是实心饼：" + ink);
+        }
+    }
+
+    /// <summary>散点图：按 x/y 两个数值轴画点（分类轴折线图表达不了相关性）。</summary>
+    [Fact]
+    public void ScatterChart_RendersPointsAndTitles()
+    {
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "散点检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "散点检查" },
+                new { type = "chart", title = "投入与收益", chartType = "scatter", xLabel = "投入(人日)", yLabel = "收益",
+                    series = new object[]
+                    {
+                        new { name = "试点", points = new object[] { new[] { 1.0, 2.0 }, new[] { 2.0, 3.5 }, new[] { 3.0, 4.0 }, new[] { 5.0, 7.0 } } },
+                        new { name = "对照", points = new object[] { new[] { 1.0, 1.2 }, new[] { 3.0, 2.2 }, new[] { 5.0, 3.1 } } },
+                    } },
+            },
+        }));
+
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+        using var zip = ZipFile.OpenRead(path);
+        var chart = zip.Entries.First(e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
+        Assert.True(PngInkRatio(chart) > 0.02, "散点图几乎没画出东西");
+    }
+
+    /// <summary>散点图给了错了入参（只有 values）要报可读错误，而不是假装出了一张空图。</summary>
+    [Fact]
+    public void ScatterChart_WithoutPoints_FailsReadably()
+    {
+        var json = JsonSerializer.Serialize(new
+        {
+            title = "散点缺数据",
+            slides = new object[]
+            {
+                new { type = "cover", title = "散点缺数据" },
+                new { type = "chart", title = "散点", chartType = "scatter", categories = new[] { "A" },
+                    series = new object[] { new { name = "s", values = new[] { 1.0 } } } },
+            },
+        });
+        using var doc = RunRaw(json);
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("散点图缺少数据", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    /// <summary>雷达图：多维对比（把 categories 当各维度轴）。</summary>
+    [Fact]
+    public void RadarChart_RendersAxesAndLabels()
+    {
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "雷达检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "雷达检查" },
+                new { type = "chart", title = "能力雷达", chartType = "radar",
+                    categories = new[] { "协作", "记忆", "交付", "安全", "生态" },
+                    series = new object[]
+                    {
+                        new { name = "知聚", values = new[] { 9.0, 8.0, 9.0, 7.0, 8.0 } },
+                        new { name = "基座", values = new[] { 6.0, 5.0, 4.0, 7.0, 6.0 } },
+                    } },
+            },
+        }));
+
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+        using var zip = ZipFile.OpenRead(path);
+        var chart = zip.Entries.First(e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
+        Assert.True(PngInkRatio(chart) > 0.02, "雷达图几乎没画出东西");
+    }
+
+    /// <summary>
+    /// 命名字体配对：只换拉丁字面，<c>a:ea</c>（汉字）必须仍然是中文字体。
+    /// 否则拿 Georgia 去排汉字会整段掉到 fallback。
+    /// </summary>
+    [Fact]
+    public void FontPair_SetsLatinFacesAndKeepsEastAsianFont()
+    {
+        var (path, doc) = RenderDeck(MiniDeck("\"theme\":\"forest-eco\",\"fontPair\":\"georgia-calibri\""));
+
+        var fonts = doc.RootElement.GetProperty("fonts");
+        Assert.Equal("Georgia", fonts.GetProperty("title").GetString());
+        Assert.Equal("Calibri", fonts.GetProperty("body").GetString());
+        Assert.Equal("georgia-calibri", fonts.GetProperty("pair").GetString());
+
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        var xml = sr.ReadToEnd();
+        Assert.Contains("typeface=\"Georgia\"", xml);            // 标题：拉丁用配对字体
+        Assert.Contains("typeface=\"Calibri\"", xml);            // 正文：拉丁用配对字体
+        Assert.Contains("typeface=\"微软雅黑\"", xml);            // 东亚：仍是中文字体
+        // 汉字不能落在 Georgia 上
+        Assert.DoesNotContain("<a:ea typeface=\"Georgia\"", xml);
+    }
+
+    /// <summary>显式给了中文字体（fontTitle:"宋体"）时，a:ea 要跟着它，而不是被默认值盖掉。</summary>
+    [Fact]
+    public void CjkFont_FollowsExplicitChineseFontFace()
+    {
+        var (path, doc) = RenderDeck(MiniDeck("\"fontTitle\":\"宋体\""));
+        Assert.Equal("宋体", doc.RootElement.GetProperty("fonts").GetProperty("cjk").GetString());
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        Assert.Contains("<a:ea typeface=\"宋体\"", sr.ReadToEnd());
+    }
+
+    /// <summary>
+    /// 「标题下强调线」默认不画（设计规范把它列为 AI 生成稿的典型特征），
+    /// 传 titleRule:true 才加回来。
+    /// </summary>
+    [Fact]
+    public void TitleRule_OffByDefault_OnWhenRequested()
+    {
+        string SlideOfThisDeck(string extra)
+        {
+            var (path, _) = RenderDeck(MiniDeck(extra));
+            using var zip = ZipFile.OpenRead(path);
+            using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+            return sr.ReadToEnd();
+        }
+
+        // 那条线是唯一 cx=838200 / cy=45720 的矩形
+        bool HasRule(string xml) => xml.Contains("cx=\"838200\"") && xml.Contains("cy=\"45720\"");
+
+        Assert.False(HasRule(SlideOfThisDeck("\"theme\":\"forest-eco\"")), "默认不应画标题下强调线");
+        Assert.True(HasRule(SlideOfThisDeck("\"theme\":\"forest-eco\",\"titleRule\":true")), "titleRule:true 时应画出来");
+    }
+
+    // ---- 出稿后自检（QA）----
+
+    /// <summary>占位符与“空正文”必须被自检抓到——否则模型会把它当成完成的稿子交出去。</summary>
+    [Fact]
+    public void Qa_FlagsPlaceholdersAndEmptyBody()
+    {
+        var (_, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "自检检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "自检检查" },
+                new { type = "content", title = "没写正文的页" },
+                new { type = "content", title = "占位符页", bullets = new[] { "TODO: 补充数据" } },
+            },
+        }));
+
+        var qa = doc.RootElement.GetProperty("qa");
+        Assert.True(qa.GetProperty("ok").GetBoolean());
+        var kinds = qa.GetProperty("issues").EnumerateArray()
+            .Select(i => i.GetProperty("kind").GetString()!).ToList();
+        Assert.Contains("emptyBody", kinds);
+        Assert.Contains("placeholder", kinds);
+    }
+
+    /// <summary>自检通过时不能乱报（正常稿子的 issueCount 必须是 0）。</summary>
+    [Fact]
+    public void Qa_PassesOnAHealthyDeck()
+    {
+        var (_, doc) = RenderDeck(FullDeckJson());
+        var qa = doc.RootElement.GetProperty("qa");
+        Assert.Equal(0, qa.GetProperty("issueCount").GetInt32());
+        Assert.Equal(11, qa.GetProperty("slides").GetInt32());
+    }
+
+    /// <summary>action=qa：只自检既有文件，不生成新文件。</summary>
+    [Fact]
+    public void QaAction_InspectsExistingFile()
+    {
+        var (srcPath, _) = RenderDeck(MiniDeck("\"theme\":\"forest-eco\""));
+        using var doc = RunRaw(JsonSerializer.Serialize(new { action = "qa", path = srcPath }));
+
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("qa", doc.RootElement.GetProperty("action").GetString());
+        Assert.Equal(2, doc.RootElement.GetProperty("slides").GetInt32());
+        // 外部文件不知道页型 → 不做“只有标题”判定（封面天然只有一句话，误报会淹没真问题）
+        var kinds = doc.RootElement.GetProperty("issues").EnumerateArray()
+            .Select(i => i.GetProperty("kind").GetString()!).ToList();
+        Assert.DoesNotContain("titleOnly", kinds);
+    }
+
+    // ---- 原地编辑既有 pptx ----
+
+    /// <summary>
+    /// 编辑既有稿：删页 / 重排 / 复制页 / 替换文字 / 追加新页。
+    /// 以前只能“读文本”和“套模板重出一份”，用户说“把第 3 页删掉”是做不到的。
+    /// </summary>
+    [Fact]
+    public void Edit_DeleteReorderDuplicateReplaceAndAppend()
+    {
+        var (src, _) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "待编辑稿",
+            slides = new object[]
+            {
+                new { type = "cover", title = "原始封面" },
+                new { type = "content", title = "第二页", bullets = new[] { "待替换文字", "保留这项" } },
+                new { type = "content", title = "第三页", bullets = new[] { "第三页内容" } },
+                new { type = "content", title = "第四页", bullets = new[] { "第四页内容" } },
+                new { type = "end", title = "谢谢" },
+            },
+        }));
+        var outPath = Path.Combine(TempDir(), "edited.pptx");
+
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            action = "edit", path = src, outputPath = outPath,
+            ops = new object[]
+            {
+                new { op = "reorder", order = new[] { 1, 3, 2, 4, 5 } },
+                new { op = "replaceText", slides = new[] { 3 }, map = new Dictionary<string, string> { ["待替换文字"] = "已替换文字" } },
+                new { op = "duplicate", slide = 1, count = 1 },
+                new { op = "delete", slides = new[] { 5 } },
+                new { op = "append", slides = new object[] { new { type = "content", title = "新追加的页", bullets = new[] { "由 append 生成" } } } },
+            },
+        }));
+
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), doc.RootElement.GetProperty("message").GetString());
+        Assert.True(File.Exists(outPath));
+        Assert.True(File.Exists(src), "原文件必须还在");
+        Assert.True(ShapesOutsideCanvas(outPath).Count == 0);
+
+        // 用 read 把结果读回来核对页序与内容。逐步推演（页号均为“当时”的顺序）：
+        //   初始：1 封面 | 2 第二页 | 3 第三页 | 4 第四页 | 5 谢谢
+        //   reorder[1,3,2,4,5] → 封面 | 第三页 | 第二页 | 第四页 | 谢谢
+        //   duplicate 第1页      → 封面 | 封面副本 | 第三页 | 第二页 | 第四页 | 谢谢
+        //   delete [5]           → 封面 | 封面副本 | 第三页 | 第二页 | 谢谢
+        //   append               → … | 新追加的页（共 6 页）
+        using var back = RunRaw(JsonSerializer.Serialize(new { action = "read", path = outPath }));
+        Assert.Equal(6, back.RootElement.GetProperty("slides").GetInt32());
+        var perSlide = back.RootElement.GetProperty("slideTexts").EnumerateArray().ToList();
+        List<string> TextsOf(int i) => perSlide[i].GetProperty("texts").EnumerateArray()
+            .Select(x => x.GetString()!).ToList();
+
+        Assert.Contains("原始封面", TextsOf(0));
+        Assert.Contains("原始封面", TextsOf(1));            // duplicate 出来的副本
+        Assert.Contains("第三页内容", TextsOf(2));          // reorder 生效：第三页排到了第二页前面
+        var fourth = TextsOf(3);
+        Assert.Contains("已替换文字", fourth);                 // replaceText 生效
+        Assert.DoesNotContain("待替换文字", fourth);
+        Assert.Contains("谢谢", TextsOf(4));
+        Assert.Contains("由 append 生成", TextsOf(5));        // append 加在末尾
+        // 被删掉的页真的没了（不是只解了引用、slideN.xml 还留在包里）
+        var all = back.RootElement.GetProperty("text").GetString()!;
+        Assert.DoesNotContain("第四页内容", all);
+        Assert.Equal(6, ZipFile.OpenRead(outPath).Entries
+            .Count(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                     && e.FullName.EndsWith(".xml", StringComparison.Ordinal)));
+    }
+
+    /// <summary>编辑输出路径与源文件相同时必须拒绝（不能把用户原件改了）。</summary>
+    [Fact]
+    public void Edit_RefusesToOverwriteTheSourceFile()
+    {
+        var (src, _) = RenderDeck(MiniDeck("\"theme\":\"forest-eco\""));
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            action = "edit", path = src, outputPath = src,
+            ops = new object[] { new { op = "delete", slides = new[] { 2 } } },
+        }));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("会覆盖原件", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    /// <summary>不能把页删光（一份零页的 pptx 是坏文件）；错误要说清楚。</summary>
+    [Fact]
+    public void Edit_RefusesToDeleteEverySlide()
+    {
+        var (src, _) = RenderDeck(MiniDeck("\"theme\":\"forest-eco\""));
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            action = "edit", path = src, outputPath = Path.Combine(TempDir(), "o.pptx"),
+            ops = new object[] { new { op = "delete", slides = new[] { 1, 2 } } },
+        }));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("至少保留一页", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    /// <summary>
+    /// 含原生图表的页不能复制：图表与内嵌工作簿的克隆会破坏包结构，
+    /// 宁可明确报错，也不要产出“需要修复”的文件。
+    /// </summary>
+    [Fact]
+    public void Edit_DuplicatingChartSlide_ReportsClearError()
+    {
+        var (src, _) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "图表复制",
+            slides = new object[]
+            {
+                new { type = "cover", title = "图表复制" },
+                new { type = "chart", title = "原生图表", chartType = "bar-native",
+                    categories = new[] { "A", "B" }, series = new object[] { new { name = "s", values = new[] { 1.0, 2.0 } } } },
+            },
+        }));
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            action = "edit", path = src, outputPath = Path.Combine(TempDir(), "o.pptx"),
+            ops = new object[] { new { op = "duplicate", slide = 2, count = 1 } },
+        }));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("不支持复制含图表页", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    /// <summary>分页出稿：页号越界要报可读错误。</summary>
+    [Fact]
+    public void Edit_OutOfRangeSlideNumber_FailsReadably()
+    {
+        var (src, _) = RenderDeck(MiniDeck("\"theme\":\"forest-eco\""));
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            action = "edit", path = src, outputPath = Path.Combine(TempDir(), "o.pptx"),
+            ops = new object[] { new { op = "delete", slides = new[] { 9 } } },
+        }));
+        Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("页号越界", doc.RootElement.GetProperty("message").GetString());
+    }
+
+    /// <summary>
+    /// 全部内置图标都要真画出东西。
+    ///
+    /// <para>
+    /// 图标是按名字 <c>switch</c> 画的：名字写错/漏 case 会得到一张<b>全透明</b>的 PNG，
+    /// 圆里看起来空空的，而“文件生成成功”这件事完全看不出异常。所以逐个量墨迹占比。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AllDocumentedIcons_ProduceNonBlankPngs()
+    {
+        var icons = new[]
+        {
+            "check", "cross", "arrow", "star", "dot", "warn", "lock", "user", "chart", "clock", "gear", "bulb",
+            "money", "target", "rocket", "shield", "layers", "globe", "network", "cloud",
+            "database", "mail", "phone", "calendar", "flag", "search", "edit", "file",
+            "pie", "link", "eye", "heart", "key", "crown", "map", "cpu",
+            "package", "award", "briefcase", "users", "code", "gauge", "filter", "refresh", "download",
+        };
+
+        var slides = new List<object> { new { type = "cover", title = "图标全量" } };
+        for (var i = 0; i < icons.Length; i += 6)
+        {
+            var page = icons.Skip(i).Take(6)
+                .Select(ic => (object)new { icon = ic, title = ic, text = "说明" }).ToArray();
+            slides.Add(new { type = "iconRows", title = "图标 " + (i / 6 + 1), items = page });
+        }
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new { title = "图标全量", theme = "forest-eco", slides }));
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+
+        using var zip = ZipFile.OpenRead(path);
+        var media = zip.Entries
+            .Where(e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal)
+                     && e.FullName.EndsWith(".png", StringComparison.Ordinal)).ToList();
+        Assert.Equal(icons.Length, media.Count);   // 每个名字都真画了一张图（没回落到文字）
+        foreach (var e in media)
+        {
+            var ink = PngInkRatio(e);
+            Assert.True(ink > 0.02, e.FullName + " 几乎是空白（墨迹 " + ink.ToString("P1") + "）");
+        }
+    }
+
+    /// <summary>
+    /// 量一张 PNG 的墨迹（不透明像素）占比。只处理我们自己生成的 8bit RGBA / 非隔行 PNG。
+    /// 用途：把“画了个空白图标/空心环”这类几何错误变成可断言的数字。
+    /// </summary>
+    private static double PngInkRatio(ZipArchiveEntry entry)
+    {
+        using var s = entry.Open();
+        using var ms = new MemoryStream();
+        s.CopyTo(ms);
+        var png = ms.ToArray();
+        Assert.Equal(0x89, png[0]);
+
+        int pos = 8, width = 0, height = 0, colorType = 0;
+        var idat = new MemoryStream();
+        while (pos + 8 <= png.Length)
+        {
+            var len = (png[pos] << 24) | (png[pos + 1] << 16) | (png[pos + 2] << 8) | png[pos + 3];
+            var type = System.Text.Encoding.ASCII.GetString(png, pos + 4, 4);
+            var data = pos + 8;
+            if (type == "IHDR")
+            {
+                width = (png[data] << 24) | (png[data + 1] << 16) | (png[data + 2] << 8) | png[data + 3];
+                height = (png[data + 4] << 24) | (png[data + 5] << 16) | (png[data + 6] << 8) | png[data + 7];
+                colorType = png[data + 9];
+                Assert.Equal(0, png[data + 12]); // 非隔行
+            }
+            else if (type == "IDAT") idat.Write(png, data, len);
+            else if (type == "IEND") break;
+            pos = data + len + 4;
+        }
+        Assert.Equal(6, colorType); // 我们生成的都是 RGBA8
+
+        idat.Position = 0;
+        using var inflated = new ZLibStream(idat, CompressionMode.Decompress);
+        using var rawMs = new MemoryStream();
+        inflated.CopyTo(rawMs);
+        var raw = rawMs.ToArray();
+
+        var channels = 4;
+        var stride = width * channels;
+        var prev = new byte[stride];
+        var cur = new byte[stride];
+        var p = 0;
+        var opaque = 0;
+        for (var y = 0; y < height; y++)
+        {
+            var filter = raw[p++];
+            Array.Copy(raw, p, cur, 0, stride);
+            p += stride;
+            for (var i = 0; i < stride; i++)
+            {
+                int a = i >= channels ? cur[i - channels] : 0;
+                int b = prev[i];
+                int c = i >= channels ? prev[i - channels] : 0;
+                cur[i] = filter switch
+                {
+                    0 => cur[i],
+                    1 => (byte)(cur[i] + a),
+                    2 => (byte)(cur[i] + b),
+                    3 => (byte)(cur[i] + (a + b) / 2),
+                    _ => (byte)(cur[i] + PaethFilter(a, b, c)),
+                };
+            }
+            for (var x = 0; x < width; x++)
+                if (cur[x * channels + 3] > 32) opaque++;
+            Array.Copy(cur, prev, stride);
+        }
+        return (double)opaque / (width * height);
+    }
+
+    private static int PaethFilter(int a, int b, int c)
+    {
+        var p = a + b - c;
+        var pa = Math.Abs(p - a);
+        var pb = Math.Abs(p - b);
+        var pc = Math.Abs(p - c);
+        return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+    }
 }

@@ -30,6 +30,10 @@ CONTAINER = os.environ.get("AGUI_CONTAINER", "agui-group-chat-web")
 
 SLIDE_W, SLIDE_H = 12192000, 6858000
 
+# 图文混排类用例要一个真实存在的图片路径。用容器里自带的图标（只读，不依赖用户数据）：
+# /app/docs 里是用户真实产物，不能拿去当测试素材。
+IMG = os.environ.get("AGUI_IMG", "/app/wwwroot/agui-icon-256.png")
+
 
 def post(path, body, token=None):
     req = urllib.request.Request(BASE + path, data=json.dumps(body).encode(), method="POST")
@@ -85,6 +89,41 @@ def deck(palette, style):
              "series": [{"name": "占比", "values": [55.0, 35.0, 10.0]}]},
             {"type": "summary", "title": "小结", "bullets": ["配色：命名调色板", "版式：style 控制留白与圆角"]},
             {"type": "end", "title": "谢谢", "subtitle": "欢迎提问"},
+
+            # ---- 本轮对齐参考实现后新增的能力（每个变体都过一遍，防“静默回落成默认版式”）----
+            {"type": "cover", "title": "居中封面", "subtitle": palette, "variant": "center"},
+            {"type": "cover", "title": "左文右图封面", "subtitle": palette,
+             "variant": "split", "path": IMG},
+            {"type": "cover", "title": "背景图封面", "variant": "image", "path": IMG},
+            {"type": "toc", "title": "目录·卡片", "variant": "grid",
+             "items": ["一、产品概览", "二、核心能力", "三、交付流程", "四、总结展望"]},
+            {"type": "toc", "title": "目录·侧栏", "variant": "sidebar",
+             "items": ["一、产品概览", "二、核心能力", "三、交付流程"]},
+            {"type": "section", "title": "二、分段", "variant": "bar"},
+            {"type": "section", "title": "三、分段", "variant": "full"},
+            {"type": "progress", "title": "项目进度", "items": [
+                {"label": "需求确认", "value": 100}, {"label": "开发", "value": 72},
+                {"label": "测试", "value": 35}]},
+            {"type": "progress", "title": "完成度", "variant": "ring", "items": [
+                {"label": "覆盖率", "value": 86}, {"label": "可用率", "value": 62}]},
+            {"type": "image", "title": "图左文右", "variant": "left", "path": IMG,
+             "heading": "界面一览", "bullets": ["入口：单聊与知聚", "能力：交付与记忆"]},
+            {"type": "image", "title": "半出血图文", "variant": "bleed", "path": IMG,
+             "bullets": ["文字叠在主色蒙层上", "右半页铺满整高图"]},
+            {"type": "image", "title": "图廊", "variant": "gallery",
+             "images": [{"path": IMG, "caption": "第一张"}, {"path": IMG, "caption": "第二张"}]},
+            {"type": "chart", "title": "散点图", "chartType": "scatter", "xLabel": "投入", "yLabel": "收益",
+             "series": [{"name": "试点", "points": [[1, 2], [2, 3.5], [3, 4], [5, 7]]},
+                        {"name": "对照", "points": [[1, 1.2], [3, 2.2], [5, 3.1]]}]},
+            {"type": "chart", "title": "雷达图", "chartType": "radar",
+             "categories": ["协作", "记忆", "交付", "安全", "生态"],
+             "series": [{"name": "知聚", "values": [9, 8, 9, 7, 8]},
+                        {"name": "基座", "values": [6, 5, 4, 7, 6]}]},
+            {"type": "summary", "title": "下一步", "variant": "cta",
+             "items": ["确认试点范围", "排期联调", "上线评估"], "contact": "team@example.com"},
+            {"type": "summary", "title": "回顾与行动", "variant": "split",
+             "bullets": ["协作：多角色会商", "记忆：长期可治理"],
+             "actions": ["确认试点", "排期联调"], "contact": "team@example.com"},
         ],
     }
 

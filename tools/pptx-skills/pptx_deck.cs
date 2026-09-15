@@ -30,7 +30,17 @@
 //     "theme": "business|tech|warm|minimal|dark|vivid",   // 可选，历史主题（默认 business）
 //              // 或 18 套命名调色板（推荐，按场景挑），详见下方 PALETTES
 //     "style": "sharp|soft|rounded|pill",                  // 可选，版式风格，默认 soft
+//     "fontPair": "georgia-calibri",                       // 可选，命名字体配对（只换拉丁字面）
+//     "fontCjk": "微软雅黑",                                // 可选，东亚字体（汉字走它）
+//     "titleRule": true,                                   // 可选，加上“标题下强调线”（默认不加）
 //     "action": "read", "path": "…pptx",                  // 可选：只读取既有 pptx 的文本，不生成文件
+//     "action": "qa", "path": "…pptx",                    // 可选：只自检（占位符/空页/只有标题/越界）
+//     "action": "edit", "path": "…", "outputPath": "…",   // 可选：改既有 pptx 的结构（见下方 OPS）
+//       "ops": [ {"op":"delete","slides":[3]},
+//                {"op":"reorder","order":[1,3,2]},
+//                {"op":"duplicate","slide":2,"count":2},
+//                {"op":"replaceText","slides":[1,2],"map":{"旧":"新"}},
+//                {"op":"append","slides":[ {"type":"content",…} ]} ]
 //     "template": "…pptx",                                 // 可选：套用该模板的母版/版式/配色出稿（不动原件）
 //     "keepTemplateSlides": true,                          // 可选：保留模板原有页（默认清空，只借其皮）
 //     "themeColors": { "primary":"1F3864", "secondary":"2E5C9A", "accent":"C8A24A",
@@ -41,28 +51,40 @@
 //     "slides": [ … ]                          // 必填，见下
 //   }
 //
-//   slides 每项是 { "type": "…", … }，type 取值：
+//   slides 每项是 { "type": "…", … }，type 取值（大多可用 "variant" 换版式）：
 //     cover    封面      title, subtitle, author, date
-//     toc      目录      title, items:[ "…" ]
-//     section  章节分隔  title, subtitle
+//                        variant: left(默认) | center | image(背景图+蒙层) | split(左文右图)
+//     toc      目录      title, items:[ "…" ], variant: list(默认) | grid | sidebar
+//     section  章节分隔  title, subtitle, variant: number(默认) | bar | full
 //     content  要点页    title, bullets:[ "…" ], note
 //     twoCol   两栏      title, left:{heading,bullets:[…]}, right:{heading,bullets:[…]}
-//     table    表格      title, headers:[…], rows:[[…]]
+//     table    表格      title, headers:[…], rows:[[…]]（过长自动分页，不丢行）
 //     kpi      指标卡    title, items:[ {value,label} ]
 //     stats    大数字    title, items:[ {value,label} ], cols
+//     progress 进度/仪表 title, items:[ {label,value} ], max(默认 100),
+//                        variant: bar(默认，横向进度条) | ring(环形仪表)
 //     grid     网格卡    title, items:[ {title,text} ], cols:2|3
 //     timeline 时间轴    title, items:[ {title,detail} ]（最多 6 步）
 //     iconRows 图标行    title, items:[ {icon,title,text} ]（最多 6 行）
 //     quote    引言      text, cite
-//     image    图片      title, path, caption
-//     chart    图表      title, chartType:"bar|line|pie|doughnut", categories:[…],
-//                        series:[ {name,values:[…]} ], yLabel, caption
+//     image    配图      title, path, caption
+//                        variant: full(默认) | left(图左文右) | right(文左图右) |
+//                                 bleed(半出血+叠字，自包含标题) | gallery(images:[{path,caption}] 2~4 张)
+//                        left/right/bleed 可配 heading/bullets 写文字侧
+//     chart    图表      title, chartType:"bar|line|pie|doughnut|scatter|radar", categories:[…],
+//                        series:[ {name,values:[…]} ], yLabel, xLabel, caption
+//                        散点图：series:[ {name,points:[[x,y],…]} ]
 //                        chartType 加 "-native" 后缀 → 生成原生可编辑图表（DrawingML ChartPart）
-//                        支持 bar/line/pie（doughnut 会自动降级为图片并在返回里说明）
+//                        支持 bar/line/pie（其余会自动降级为图片并在返回里说明）
 //     summary  小结      title, bullets:[…]
+//                        variant: list(默认) | cta(items:[行动项], contact) | split(bullets+actions+contact)
 //     end      结束页    title, subtitle
-//   content 还可用 "layout":"timeline|grid|stats|iconRows" 直接指定子类型。
+//   content 还可用 "layout":"timeline|grid|stats|iconRows|progress" 直接指定子类型。
 //   任何页都可带 "notes"（备注文字），写入演讲者备注。
+//
+//   【出稿后自检】生成/编辑完会自动跑一遍 QA（占位符、空页、只有标题、形状越界），
+//   结果在返回 JSON 的 qa 字段；降级行为（如图片缺失改用占位块）在 warnings 里。
+//   两者都是“不静默降级”的产物：调用方应看它们，别直接把有问题的稿子交出去。
 //
 //   【图表：图片 vs 原生】默认渲染成 PNG（视觉可控、兼容性最好，但不可在 PowerPoint 里改数据）。
 //   对“要拿回去继续改数据”的场景可用原生图表（ChartPart + 嵌入数据工作簿）。
@@ -160,6 +182,25 @@ public class Skill
 
     /// <summary>本次生成里用了几张原生图表（回显给调用方）。</summary>
     [ThreadStatic] private static int _nativeCharts;
+    /// <summary>本次请求是否要画“标题下强调线”（默认 false，见 SlideTitle 的说明）。</summary>
+    [ThreadStatic] private static bool _titleRule;
+    /// <summary>本次生成的降级/提示信息（如图片缺失改成色块）。不静默降级，随返回 JSON 报出。</summary>
+    [ThreadStatic] private static List<string>? _warnings;
+
+    private static void Warn(string message)
+    {
+        (_warnings ??= new List<string>()).Add(message);
+    }
+
+    /// <summary>
+    /// 页型变体：优先读 <c>variant</c>，其次读 <c>layout</c>（content 页历史上用 layout 指定子类型），
+    /// 都没有则用该页型的默认变体。
+    /// </summary>
+    private static string VariantOf(JsonElement el, string fallback)
+    {
+        var v = (Str(el, "variant") ?? Str(el, "layout") ?? "").Trim().ToLowerInvariant();
+        return v.Length == 0 ? fallback : v;
+    }
     /// <summary>请求了原生图表、但该图型不支持时的降级原因（不静默降级，写进返回 JSON）。</summary>
     [ThreadStatic] private static string? _nativeFallback;
 
@@ -225,6 +266,10 @@ public class Skill
         public string Text = "333333";
         public string FontTitle = "微软雅黑";
         public string FontBody = "微软雅黑";
+        /// <summary>东亚字体（<c>a:ea</c>）：汉字/CJK 符号走它。与拉丁字面分开，才能做“标题 Georgia + 正文 Calibri + 中文微软雅黑”这类配对。</summary>
+        public string FontCjk = "微软雅黑";
+        /// <summary>生效的命名字体配对（回显给调用方/排障）；非配对时为 null。</summary>
+        public string? FontPair;
         /// <summary>画在 Accent 底色上的文字色（页码徽标）。</summary>
         public string OnAccent = "FFFFFF";
         /// <summary>画在 Primary 底色上的次要文字色（章节页副标题）。</summary>
@@ -278,9 +323,75 @@ public class Skill
             t.OnAccent = OnColor(t.Accent, t.Bg);
             t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
         }
-        t.FontTitle = Str(root, "fontTitle") ?? t.FontTitle;
-        t.FontBody = Str(root, "fontBody") ?? t.FontBody;
+        // 命名字体配对（参考 design-system.md 的 Font Pairings）：只换拉丁字母的字面，
+        // 中文仍走 FontCjk——否则拿 Georgia 去排汉字会整段掉到 fallback（甚至缺字）。
+        if (Str(root, "fontPair") is { Length: > 0 } pairName)
+        {
+            var pair = FontPair(pairName);
+            if (pair is { } p)
+            {
+                t.FontTitle = p.Title;
+                t.FontBody = p.Body;
+                t.FontPair = p.Name;
+            }
+        }
+        if (Str(root, "fontTitle") is { Length: > 0 } ft) { t.FontTitle = ft.Trim(); t.FontPair = null; }
+        if (Str(root, "fontBody") is { Length: > 0 } fb) { t.FontBody = fb.Trim(); t.FontPair = null; }
+        // 显式给了中文字体就听它的；否则认“看起来就是中文字体”的入参，再退到默认。
+        // 注意取值顺序：先看标题字体，命中就不再看正文字体——
+        // 否则 fontTitle:"宋体" 会被默认的正文字体（微软雅黑）反手盖掉（实测踩到）。
+        if (Str(root, "fontCjk") is { Length: > 0 } fc) t.FontCjk = fc.Trim();
+        else if (LooksCjkFont(t.FontTitle)) t.FontCjk = t.FontTitle;
+        else if (LooksCjkFont(t.FontBody)) t.FontCjk = t.FontBody;
         return t;
+    }
+
+    /// <summary>
+    /// 命名字体配对（移植自 MiniMax pptx-generator 的 design-system.md「Font Pairings」）。
+    /// 只给“标题字体 + 正文字体”两个拉丁字面；中文字面统一走 <see cref="Theme.FontCjk"/>。
+    ///
+    /// <para>
+    /// 设计文档明确要求“别一路 Arial 到底”——标题选有性格的字面、正文配干净的字面。
+    /// 但服务器（Linux 容器）通常没有 Georgia / Calibri 这些字体，因此：
+    /// 这些只影响 PPT 里写入的<b>字体名</b>，在装了字体的 PowerPoint/Windows 上才看得到差异；
+    /// 图表（服务端渲成 PNG）仍然只用容器里真实存在的字体。
+    /// </para>
+    /// </summary>
+    private static (string Name, string Title, string Body)? FontPair(string name)
+    {
+        var key = (name ?? "").Trim().ToLowerInvariant().Replace('_', '-').Replace(' ', '-');
+        return key switch
+        {
+            "yahei" or "default" or "none" => ("yahei", "微软雅黑", "微软雅黑"),
+            "georgia-calibri" => ("georgia-calibri", "Georgia", "Calibri"),
+            "cambria-calibri" => ("cambria-calibri", "Cambria", "Calibri"),
+            "calibri-light" or "calibri-calibrilight" => ("calibri-light", "Calibri", "Calibri Light"),
+            "trebuchet-calibri" => ("trebuchet-calibri", "Trebuchet MS", "Calibri"),
+            "arial-black-arial" => ("arial-black-arial", "Arial Black", "Arial"),
+            "impact-arial" => ("impact-arial", "Impact", "Arial"),
+            "palatino-garamond" => ("palatino-garamond", "Palatino Linotype", "Garamond"),
+            "consolas-calibri" => ("consolas-calibri", "Consolas", "Calibri"),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// 这个字体名是否“本身就是中文字体”。用于自动把 <c>a:ea</c>（东亚字体）指向它——
+    /// 否则用户传 <c>fontTitle:"宋体"</c> 时，中文会被 FontCjk 的默认值（微软雅黑）盖掉，
+    /// 属于把用户的显式选择弄丢。
+    /// </summary>
+    private static bool LooksCjkFont(string face)
+    {
+        var f = (face ?? "").Trim();
+        if (f.Length == 0) return false;
+        foreach (var mark in new[] { "宋", "黑", "楷", "隶", "雅黑", "明体", "等线", "圆" })
+            if (f.Contains(mark, StringComparison.Ordinal)) return true;
+        var lower = f.ToLowerInvariant();
+        foreach (var mark in new[] { "yahei", "simsun", "simhei", "kaiti", "fangsong", "dengxian",
+            "microsoft jhenghei", "mingliu", "meiryo", "yu gothic", "ms gothic", "noto sans cjk",
+            "noto serif cjk", "noto sans sc", "noto serif sc", "source han", "pingfang" })
+            if (lower.Contains(mark, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     /// <summary>历史主题名（保持原有观感，不要改这些色值——老调用方依赖它们）。</summary>
@@ -517,8 +628,23 @@ public class Skill
             // 读取模式：不生成文件，只把既有 pptx 的内容读回来
             var readPath = ExtractReadPath(input);
             if (readPath is not null) return ReadDeck(readPath);
+            // 自检模式：只检查既有 pptx（不生成）
+            var qaPath = ExtractActionPath(input, "qa");
+            if (qaPath is not null) return QaDeck(qaPath);
+            // 编辑模式：改既有 pptx 的结构（删页/复制/重排/替文字/追加），不重新生成
+            if (ExtractActionPath(input, "edit") is { } editPath)
+            {
+                using var editDoc = JsonDocument.Parse(ExtractJson(input));
+                var er = editDoc.RootElement;
+                _warnings = new List<string>();
+                return EditDeck(er, editPath, Str(er, "outputPath"));
+            }
 
             var built = Build(input ?? "");
+            // 出稿后立刻自检（占位符 / 空页 / 只有标题 / 越界）。
+            // 这一步以前不存在——“模型声称写完了”与“文件里真有内容”是两件事。
+            var qaJson = "null";
+            try { qaJson = QaDeck(built.Path, built.Types); } catch { /* 自检失败不影响交付 */ }
             // produce_file 标记：告诉平台“这个文件可挂到对话里供下载”。
             // 网关扫到后用 AttachmentStore 挂号并挂到当前消息（att_xxx）。
             var produce = "";
@@ -541,6 +667,14 @@ public class Skill
                 // 单测也靠它断言可读性底线（不必去解 XML）。
                 + ",\"style\":" + Js(_m.Name)
                 + ",\"palette\":" + PaletteJson(_currentTheme)
+                // 字体：回显实际写入的标题/正文/东亚字面，配了字体配对时一并报出
+                + ",\"fonts\":{\"title\":" + Js(_currentTheme?.FontTitle ?? "")
+                + ",\"body\":" + Js(_currentTheme?.FontBody ?? "")
+                + ",\"cjk\":" + Js(_currentTheme?.FontCjk ?? "")
+                + ",\"pair\":" + (_currentTheme?.FontPair is null ? "null" : Js(_currentTheme!.FontPair!)) + "}"
+                // 降级/提示（如图片缺失改用色块）：不静默降级，调用方/用户能看见
+                + ",\"warnings\":[" + string.Join(",", (_warnings ?? []).Select(Js)) + "]"
+                + ",\"qa\":" + qaJson
                 // 原生图表用量与降级原因：调了却没用上必须说清楚，不能静默降级
                 + ",\"nativeCharts\":" + _nativeCharts
                 + ",\"nativeChartFallback\":" + (_nativeFallback is null ? "null" : Js(_nativeFallback))
@@ -556,21 +690,415 @@ public class Skill
     }
 
     /// <summary>若 <c>action=read</c> 则返回待读文件路径，否则 null。解析失败一律当“不是读取”处理，不影响生成路径。</summary>
-    private static string? ExtractReadPath(string input)
+    private static string? ExtractReadPath(string input) => ExtractActionPath(input, "read");
+
+    /// <summary>若 <c>action</c> 等于给定值，返回其 <c>path</c>（或 <c>template</c>）；否则 null。</summary>
+    private static string? ExtractActionPath(string input, string action)
     {
         try
         {
             using var doc = JsonDocument.Parse(ExtractJson(input));
             var root = doc.RootElement;
-            if (!string.Equals((Str(root, "action") ?? "").Trim(), "read", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals((Str(root, "action") ?? "").Trim(), action, StringComparison.OrdinalIgnoreCase))
                 return null;
             return Str(root, "path") ?? Str(root, "template") ?? "";
         }
         catch { return null; }
     }
 
+    /// <summary>
+    /// 出稿后的自检（QA）：验证“拿到的那份 pptx”本身没问题，而不只是“我们写好了 XML”。
+    ///
+    /// <para>
+    /// 设计规范（pitfalls.md 的 QA Process）把「抽取文本 → 列问题 → 修 → 复验」定为必需步骤，
+    /// 但以往这完全靠模型自觉——模型不自查，用户就会拿到“只有标题”“还留着占位符”的稿子。
+    /// 这里把能机器判定的部分做成代码兜底：
+    /// </para>
+    /// <list type="number">
+    /// <item>占位符/未填内容（xxxx / lorem / TODO / 占位 / 待补充…）；</item>
+    /// <item>空页（除页码外没有任何文字）；</item>
+    /// <item>只有标题页（内容页里只剩标题+页码，正文漏了）；</item>
+    /// <item>越界（形状/文字框画到画布外）。</item>
+    /// </list>
+    /// </summary>
+    private static string QaDeck(string? path, IReadOnlyList<string>? pageTypes = null)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return "{\"ok\":false,\"action\":\"qa\",\"message\":" + Js("找不到文件：" + (path ?? "（未提供 path）")) + "}";
+        try
+        {
+            using var doc = PresentationDocument.Open(path, false);
+            var presPart = doc.PresentationPart;
+            if (presPart?.Presentation is null)
+                return "{\"ok\":false,\"action\":\"qa\",\"message\":" + Js("不是有效的 .pptx（缺少 presentation.xml）") + "}";
+
+            var issues = new StringBuilder();
+            var issueCount = 0;
+            var slideNo = 0;
+            var emptyPages = 0;
+            foreach (var id in presPart.Presentation.SlideIdList?.Elements<P.SlideId>() ?? [])
+            {
+                var relId = id.RelationshipId?.Value;
+                if (relId is null || presPart.GetPartById(relId) is not SlidePart sp) continue;
+                slideNo++;
+                var type = pageTypes is not null && slideNo - 1 < pageTypes.Count ? pageTypes[slideNo - 1] : null;
+                var texts = sp.Slide.Descendants<A.Text>()
+                    .Select(x => (x.Text ?? "").Trim()).Where(s => s.Length > 0).ToList();
+
+                void Issue(string kind, string detail)
+                {
+                    issueCount++;
+                    if (issues.Length > 0) issues.Append(',');
+                    issues.Append("{\"slide\":").Append(slideNo).Append(",\"kind\":").Append(Js(kind))
+                        .Append(",\"detail\":").Append(Js(detail)).Append('}');
+                }
+
+                foreach (var tx in texts)
+                    if (PlaceholderHit(tx) is { } why) Issue("placeholder", why + "：“" + Trim60(tx) + "”");
+
+                // 自动填充的“空状态”文案（如要点为空时的“（本页暂无要点）”）说明模型没给内容，
+                // 虽然它让文件“看上去有字”，但对用户等同于空白：单独报出来。
+                foreach (var tx in texts)
+                    if (tx.Contains("本页暂无", StringComparison.Ordinal) || tx.Contains("暂无内容", StringComparison.Ordinal))
+                        Issue("emptyBody", "正文是自动填充的空状态文案，实际没有内容：“" + Trim60(tx) + "”");
+
+                // 页码徽标形如 “01”/“12”，不算内容
+                var meaningful = texts.Where(x => !(x.Length == 2 && x.All(char.IsDigit))).ToList();
+                // 有图/图表/原图表的页，内容本就在图片里（图上文字抽不出来）——不能当“只有标题”。
+                // 实测踩到：散点图/雷达图页被误报 titleOnly。
+                var hasVisual = sp.Slide.Descendants<P.Picture>().Any()
+                    || sp.Slide.Descendants<P.GraphicFrame>().Any();
+                if (meaningful.Count == 0)
+                {
+                    emptyPages++;
+                    Issue("empty", "该页除页码外没有任何文字");
+                }
+                // 只有在<b>知道页型</b>时才判“只有标题”：外部文件没有页型信息，
+                // 封面/结束页天然只有一句话，误报会淹没真问题。
+                else if (meaningful.Count == 1 && type is not null && IsBodyPage(type) && !hasVisual)
+                {
+                    Issue("titleOnly", "内容页只找到标题、没有正文：“" + Trim60(meaningful[0]) + "”");
+                }
+
+                foreach (var child in sp.Slide.CommonSlideData?.ShapeTree?.Elements() ?? [])
+                {
+                    var xfrm = child.Descendants<A.Transform2D>().FirstOrDefault();
+                    if (xfrm is null) continue;
+                    var ox = xfrm.Offset?.X?.Value ?? 0;
+                    var oy = xfrm.Offset?.Y?.Value ?? 0;
+                    var cx = xfrm.Extents?.Cx?.Value ?? 0;
+                    var cy = xfrm.Extents?.Cy?.Value ?? 0;
+                    if (cx <= 0 || cy <= 0) continue;
+                    if (ox < 0 || oy < 0 || ox + cx > W || oy + cy > H)
+                        Issue("overflow", $"形状画到画布外：x={ox} y={oy} w={cx} h={cy}（画布 {W}×{H}）");
+                }
+            }
+
+            return "{\"ok\":true,\"action\":\"qa\",\"scene\":" + Js(SceneName)
+                + ",\"source\":" + Js(path) + ",\"slides\":" + slideNo
+                + ",\"emptySlides\":" + emptyPages
+                + ",\"issueCount\":" + issueCount
+                + ",\"issues\":[" + issues + "]"
+                + ",\"message\":" + Js(issueCount == 0
+                    ? "自检通过：未发现占位符 / 空页 / 越界（共 " + slideNo + " 页）"
+                    : "自检发现 " + issueCount + " 个问题（共 " + slideNo + " 页），详见 issues") + "}";
+        }
+        catch (Exception ex)
+        {
+            return "{\"ok\":false,\"action\":\"qa\",\"scene\":" + Js(SceneName)
+                + ",\"message\":" + Js("自检失败：" + ex.GetType().Name + "：" + ex.Message) + "}";
+        }
+    }
+
+    /// <summary>这页是不是“本该有正文”的页型（封面/分隔/结束/引言/整图这种只有一块文字的页不算）。</summary>
+    private static bool IsBodyPage(string? type)
+        => type is null || type is "content" or "twocol" or "table" or "kpi" or "stats" or "grid"
+            or "cards" or "timeline" or "iconrows" or "chart" or "summary" or "toc" or "progress";
+
+    /// <summary>占位符/未填内容的检出。命中返回原因，未命中返回 null。</summary>
+    private static string? PlaceholderHit(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0) return null;
+        var lower = t.ToLowerInvariant();
+        foreach (var w in new[] { "lorem", "ipsum", "placeholder", "click to add", "xxxtitle", "yourtext" })
+            if (lower.Contains(w, StringComparison.Ordinal)) return "疑似占位符（" + w + "）";
+        foreach (var w in new[] { "占位", "待补充", "待填", "示例文本", "此处输入", "请填写" })
+            if (t.Contains(w, StringComparison.Ordinal)) return "疑似占位符（" + w + "）";
+        if (lower.Contains("todo", StringComparison.Ordinal) || lower.Contains("fixme", StringComparison.Ordinal))
+            return "疑似未完成标记";
+        // “xxxx” 或 “XXX”——但排除正常的罗马数字/型号（长度<=2 不算）
+        if (t.Length >= 3 && t.All(c => c is 'x' or 'X' or '×')) return "疑似占位符（xxx）";
+        return null;
+    }
+
+    private static string Trim60(string s) => s.Length <= 60 ? s : s.Substring(0, 60) + "…";
+
+    // ===== 原地编辑既有 pptx（action:"edit"）=====
+
+    /// <summary>
+    /// 改既有 pptx 的<b>结构</b>：删页 / 复制页 / 重排 / 替文字 / 追加新页。
+    ///
+    /// <para>
+    /// 以前只能“读文本”与“套模板重出一份”，用户拿着现成的稿子说“把第 5 页删了、第 2 页换到最前面”
+    /// 是做不到的。这里按参考实现（editing.md 的 XML 工作流）把常用结构操作补齐。
+    /// </para>
+    ///
+    /// <para>
+    /// 铁律：<b>绝不改原件</b>——先把 <c>path</c> 复制到 <c>outputPath</c> 再在副本上动刀。
+    /// 操作的页号一律是 1 起算的<b>当前顺序</b>，逐个 op 顺序执行。
+    /// </para>
+    /// </summary>
+    private static string EditDeck(JsonElement root, string path, string? outPath)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return "{\"ok\":false,\"action\":\"edit\",\"message\":" + Js("找不到文件：" + (path ?? "（未提供 path）")) + "}";
+        if (string.IsNullOrWhiteSpace(outPath))
+        {
+            var dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? ".";
+            outPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(path) + "_edited.pptx");
+        }
+        if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(outPath!), StringComparison.OrdinalIgnoreCase))
+            return "{\"ok\":false,\"action\":\"edit\",\"message\":" + Js("输出路径与源文件相同，会覆盖原件；请指定不同的 outputPath。") + "}";
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath!))!);
+            File.Copy(path, outPath!, true);
+
+            var applied = new List<string>();
+            using (var doc = PresentationDocument.Open(outPath!, true))
+            {
+                var presPart = doc.PresentationPart
+                    ?? throw new InvalidOperationException("不是有效的 .pptx（缺少 presentation.xml）。");
+                _currentTheme = ResolveTheme(root);
+                _currentMetrics = MetricsFor(Str(root, "style") ?? "soft");
+
+                if (!root.TryGetProperty("ops", out var opsEl) || opsEl.ValueKind != JsonValueKind.Array)
+                    throw new InvalidOperationException("缺少 ops：请给出要做的操作数组，如 [{\"op\":\"delete\",\"slides\":[3]}]。");
+
+                foreach (var op in opsEl.EnumerateArray())
+                {
+                    var kind = (Str(op, "op") ?? "").Trim().ToLowerInvariant();
+                    switch (kind)
+                    {
+                        case "delete":
+                            applied.Add(DeleteSlides(presPart, IntList(op, "slides")));
+                            break;
+                        case "reorder":
+                            applied.Add(ReorderSlides(presPart, IntList(op, "order")));
+                            break;
+                        case "duplicate":
+                            applied.Add(DuplicateSlide(presPart, IntOf(op, "slide", 1),
+                                Math.Max(1, IntOf(op, "count", 1))));
+                            break;
+                        case "replacetext":
+                            applied.Add(ReplaceSlideText(presPart, op));
+                            break;
+                        case "append":
+                            applied.Add(AppendSlides(presPart, op));
+                            break;
+                        default:
+                            throw new InvalidOperationException("不支持的 op：" + kind
+                                + "（可用：delete / reorder / duplicate / replaceText / append）");
+                    }
+                }
+                presPart.Presentation.Save();
+            }
+
+            var qaJson = "null";
+            try { qaJson = QaDeck(outPath!); } catch { /* 自检失败不影响交付 */ }
+
+            var produce = "";
+            try
+            {
+                var fi = new FileInfo(outPath!);
+                produce = ",\"produce_file\":{\"path\":" + Js(fi.FullName) + ",\"name\":" + Js(fi.Name)
+                    + ",\"bytes\":" + fi.Length + "}";
+            }
+            catch { /* 标记失败不影响主返回 */ }
+
+            return "{\"ok\":true,\"action\":\"edit\",\"scene\":" + Js(SceneName)
+                + ",\"source\":" + Js(path) + ",\"path\":" + Js(outPath)
+                + ",\"applied\":[" + string.Join(",", applied.Select(Js)) + "]"
+                + ",\"warnings\":[" + string.Join(",", (_warnings ?? []).Select(Js)) + "]"
+                + ",\"qa\":" + qaJson + produce
+                + ",\"message\":" + Js("已编辑：" + outPath + "（原文件未动）") + "}";
+        }
+        catch (Exception ex)
+        {
+            return "{\"ok\":false,\"action\":\"edit\",\"scene\":" + Js(SceneName)
+                + ",\"message\":" + Js("编辑失败：" + ex.GetType().Name + "：" + ex.Message) + "}";
+        }
+    }
+
+    /// <summary>当前顺序的幻灯片（1 起算），返回 (SlideId, SlidePart) 列表。</summary>
+    private static List<(P.SlideId Id, SlidePart Part)> OrderedSlides(PresentationPart presPart)
+    {
+        var list = new List<(P.SlideId, SlidePart)>();
+        foreach (var id in presPart.Presentation.SlideIdList?.Elements<P.SlideId>() ?? [])
+        {
+            var relId = id.RelationshipId?.Value;
+            if (relId is null || presPart.GetPartById(relId) is not SlidePart sp) continue;
+            list.Add((id, sp));
+        }
+        return list;
+    }
+
+    private static List<int> IntList(JsonElement o, string name)
+    {
+        var result = new List<int>();
+        if (o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array)
+            foreach (var it in v.EnumerateArray())
+            {
+                if (it.ValueKind == JsonValueKind.Number && it.TryGetInt32(out var i)) result.Add(i);
+                else if (it.ValueKind == JsonValueKind.String && int.TryParse(it.GetString(), out var s)) result.Add(s);
+            }
+        return result;
+    }
+
+    private static string DeleteSlides(PresentationPart presPart, List<int> slides)
+    {
+        var ordered = OrderedSlides(presPart);
+        if (slides.Count == 0) throw new InvalidOperationException("delete 缺少 slides（1 起算的页号数组）。");
+        var left = ordered.Count - slides.Distinct().Count();
+        if (left < 1) throw new InvalidOperationException("不能删完整份演文稿（至少保留一页）。");
+        // 从后往前删，避免前面的删除把后面的页号错位
+        foreach (var no in slides.Distinct().OrderByDescending(x => x))
+        {
+            if (no < 1 || no > ordered.Count)
+                throw new InvalidOperationException($"页号越界：{no}（当前共 {ordered.Count} 页）。");
+            var (id, part) = ordered[no - 1];
+            id.Remove();
+            presPart.DeletePart(part);   // 连同 slideN.xml 一起删，不只解引用
+        }
+        return $"删除 {slides.Distinct().Count()} 页（共 {ordered.Count} 页 → {left} 页）";
+    }
+
+    private static string ReorderSlides(PresentationPart presPart, List<int> order)
+    {
+        var ordered = OrderedSlides(presPart);
+        if (order.Count != ordered.Count)
+            throw new InvalidOperationException($"reorder 需要给出全部页的新顺序（当前 {ordered.Count} 页，收到 {order.Count} 个）。");
+        if (order.Distinct().Count() != order.Count || order.Any(x => x < 1 || x > ordered.Count))
+            throw new InvalidOperationException("reorder 的 order 必须是 1..N 的一个排列。");
+        var list = presPart.Presentation.SlideIdList!;
+        foreach (var id in ordered.Select(o => o.Id)) id.Remove();
+        foreach (var no in order) list.Append(ordered[no - 1].Id);
+        return "重排为 [" + string.Join(",", order) + "]";
+    }
+
+    /// <summary>
+    /// 复制一页（连同它引用的图片一起克隆，并重写关系 id）。
+    ///
+    /// <para>
+    /// <b>只支持图片类关系</b>：图表页复制需要一并克隆 ChartPart 与它嵌入的数据工作簿、
+    /// 并重写图表内部的 r:id——很容易产出“需要修复”的文件，因此宁可明确报错，也不静默破坏。
+    /// 备注页不跟着复制（会报 warning）。
+    /// </para>
+    /// </summary>
+    private static string DuplicateSlide(PresentationPart presPart, int slideNo, int count)
+    {
+        var ordered = OrderedSlides(presPart);
+        if (slideNo < 1 || slideNo > ordered.Count)
+            throw new InvalidOperationException($"页号越界：{slideNo}（当前共 {ordered.Count} 页）。");
+        var source = ordered[slideNo - 1].Part;
+        foreach (var child in source.Parts)
+        {
+            if (child.OpenXmlPart is ChartPart)
+                throw new InvalidOperationException("不支持复制含图表页的页（图表与内嵌工作簿的克隆会破坏包结构）；"
+                    + "请改为用 append 重新生成该页。");
+            if (child.OpenXmlPart is not ImagePart && child.OpenXmlPart is not SlideLayoutPart)
+                Warn("复制页时未带上部件：" + child.OpenXmlPart.GetType().Name);
+        }
+
+        var list = presPart.Presentation.SlideIdList!;
+        var nextId = list.Elements<P.SlideId>().Select(x => x.Id?.Value ?? 0u).DefaultIfEmpty(255u).Max() + 1;
+        var anchor = ordered[slideNo - 1].Id;
+        for (var n = 0; n < count; n++)
+        {
+            var clone = presPart.AddNewPart<SlidePart>();
+            if (source.SlideLayoutPart is { } layout) clone.AddPart(layout);
+            clone.Slide = new P.Slide(source.Slide.OuterXml);
+            foreach (var blip in clone.Slide.Descendants<A.Blip>().ToList())
+            {
+                var oldId = blip.Embed?.Value;
+                if (oldId is null) continue;
+                if (source.GetPartById(oldId) is not ImagePart img) continue;
+                var newImg = clone.AddImagePart(img.ContentType);
+                using (var s = img.GetStream()) newImg.FeedData(s);
+                blip.Embed = clone.GetIdOfPart(newImg);
+            }
+            clone.Slide.Save();
+            var newSlideId = new P.SlideId { Id = nextId++, RelationshipId = presPart.GetIdOfPart(clone) };
+            anchor.InsertAfterSelf(newSlideId);
+            anchor = newSlideId;
+        }
+        return $"复制第 {slideNo} 页 {count} 份";
+    }
+
+    /// <summary>逐页替换文本：<c>map</c> 是「旧→新」；<c>slides</c> 限定范围（缺省=全部页）。</summary>
+    private static string ReplaceSlideText(PresentationPart presPart, JsonElement op)
+    {
+        if (!op.TryGetProperty("map", out var mapEl) || mapEl.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("replaceText 缺少 map，如 {\"旧文案\":\"新文案\"}。");
+        var pairs = new List<(string From, string To)>();
+        foreach (var p in mapEl.EnumerateObject())
+            if (p.Value.ValueKind == JsonValueKind.String) pairs.Add((p.Name, p.Value.GetString() ?? ""));
+        if (pairs.Count == 0) throw new InvalidOperationException("replaceText 的 map 为空。");
+
+        var ordered = OrderedSlides(presPart);
+        var scope = IntList(op, "slides");
+        var targets = scope.Count == 0
+            ? Enumerable.Range(1, ordered.Count).ToList()
+            : scope;
+        var hits = 0;
+        foreach (var no in targets)
+        {
+            if (no < 1 || no > ordered.Count)
+                throw new InvalidOperationException($"页号越界：{no}（当前共 {ordered.Count} 页）。");
+            var sp = ordered[no - 1].Part;
+            foreach (var t in sp.Slide.Descendants<A.Text>())
+            {
+                var text = t.Text ?? "";
+                var replaced = text;
+                foreach (var (from, to) in pairs) replaced = replaced.Replace(from, to, StringComparison.Ordinal);
+                if (replaced != text) { t.Text = replaced; hits++; }
+            }
+            sp.Slide.Save();
+        }
+        return $"替换文本 {hits} 处（{pairs.Count} 组规则，{targets.Count} 页）";
+    }
+
+    /// <summary>把新页追加到末尾（用本技能的渲染器画，沿用既有稿的版式）。</summary>
+    private static string AppendSlides(PresentationPart presPart, JsonElement op)
+    {
+        if (!op.TryGetProperty("slides", out var sv) || sv.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("append 缺少 slides。");
+        var layout = presPart.SlideMasterParts.FirstOrDefault()?.SlideLayoutParts.FirstOrDefault()
+            ?? throw new InvalidOperationException("该稿没有可用版式（slideLayout），无法追加新页。");
+        var list = presPart.Presentation.SlideIdList ??= new P.SlideIdList();
+        var nextId = list.Elements<P.SlideId>().Select(x => x.Id?.Value ?? 0u).DefaultIfEmpty(255u).Max() + 1;
+        var added = 0;
+        foreach (var el in sv.EnumerateArray())
+        {
+            if (el.ValueKind != JsonValueKind.Object) continue;
+            var sp = presPart.AddNewPart<SlidePart>();
+            sp.AddPart(layout);
+            var ctx = new SlideCtx(sp, _currentTheme ?? new Theme(), added + 1, sv.GetArrayLength(),
+                Str(el, "title") ?? "", null, null, null);
+            sp.Slide = new P.Slide(RenderSlide(el, ctx));
+            var notes = Str(el, "notes");
+            if (!string.IsNullOrWhiteSpace(notes) && presPart.NotesMasterPart is { } nm) AttachNotes(sp, notes!, nm);
+            sp.Slide.Save();
+            list.Append(new P.SlideId { Id = nextId++, RelationshipId = presPart.GetIdOfPart(sp) });
+            added++;
+        }
+        return $"追加 {added} 页";
+    }
+
     // ===== 构建 =====
-    private static (int Slides, string Path) Build(string input)
+    private static (int Slides, string Path, List<string>? Types) Build(string input)
     {
         using var reqDoc = JsonDocument.Parse(ExtractJson(input));
         var root = reqDoc.RootElement;
@@ -581,6 +1109,8 @@ public class Skill
         _currentMetrics = MetricsFor(Str(root, "style") ?? "soft");
         _nativeCharts = 0;
         _nativeFallback = null;
+        _titleRule = root.TryGetProperty("titleRule", out var trEl) && trEl.ValueKind == JsonValueKind.True;
+        _warnings = new List<string>();
         var title = Str(root, "title") ?? "演示文稿";
         var subtitle = Str(root, "subtitle");
         var author = Str(root, "author");
@@ -598,13 +1128,20 @@ public class Skill
         // 必须在渲染前拆——RenderSlide 一次只出一页，页型自己开不了新页。
         var pageJson = new List<string>();
         foreach (var s in slides) pageJson.AddRange(ExpandTableSlide(s));
+        // 自检时要知道每页本来的页型（才能判“内容页只剩标题”），这里同步记下来
+        var pageTypes = pageJson.Select(PageTypeOf).ToList();
 
         var path = ResolveOutputPath(root, title);
 
         // 套模板：保留模板的母版/版式/主题，把我们的内容渲染进去（改副本，不动原件）
         var templatePath = Str(root, "template");
         if (!string.IsNullOrWhiteSpace(templatePath))
-            return BuildFromTemplate(root, pageJson, path, theme, templatePath!.Trim());
+        {
+            var fromTemplate = BuildFromTemplate(root, pageJson, path, theme, templatePath!.Trim());
+            // 保留模板原有页时，序号与 types 对不上 → 不做依赖页型的自检（宁可少报，也不要错报）
+            var keep = root.TryGetProperty("keepTemplateSlides", out var kv) && kv.ValueKind == JsonValueKind.True;
+            return (fromTemplate.Slides, fromTemplate.Path, keep ? null : pageTypes);
+        }
 
         var count = 0;
 
@@ -657,7 +1194,18 @@ public class Skill
             presPart.Presentation.Save();
         }
 
-        return (count, path);
+        return (count, path, pageTypes);
+    }
+
+    /// <summary>取一页的页型（已归一为小写）；缺失时当 content 处理。</summary>
+    private static string PageTypeOf(string pageJson)
+    {
+        try
+        {
+            using var d = JsonDocument.Parse(pageJson);
+            return (Str(d.RootElement, "type") ?? "content").Trim().ToLowerInvariant();
+        }
+        catch { return "content"; }
     }
 
     /// <summary>单张幻灯片的渲染上下文（部件引用 / 主题 / 序号 / 全局标题信息）。</summary>
@@ -814,6 +1362,10 @@ public class Skill
         t.Text = Hex(dk2, "333333");
         t.FontTitle = elements.FontScheme?.MajorFont?.LatinFont?.Typeface?.Value is { Length: > 0 } mt ? mt : t.FontTitle;
         t.FontBody = elements.FontScheme?.MinorFont?.LatinFont?.Typeface?.Value is { Length: > 0 } bt ? bt : t.FontBody;
+        // 模板若把东亚字体单独指定了，就用它（很多中文模板是 “Arial + 微软雅黑” 这种搭配）
+        var templateEa = elements.FontScheme?.MinorFont?.EastAsianFont?.Typeface?.Value;
+        if (templateEa is { Length: > 0 }) t.FontCjk = templateEa;
+        else if (LooksCjkFont(t.FontBody)) t.FontCjk = t.FontBody;
 
         // 模板配色不可信：过一遍可读性守卫（模板用“主色当底”的玩法差异很大）
         if (RelLum(t.Bg) > 0.5)
@@ -905,6 +1457,7 @@ public class Skill
                     theme.Bg = fromTemplate.Bg; theme.Text = fromTemplate.Text;
                     theme.OnAccent = fromTemplate.OnAccent; theme.OnPrimary = fromTemplate.OnPrimary;
                     theme.FontTitle = fromTemplate.FontTitle; theme.FontBody = fromTemplate.FontBody;
+                    theme.FontCjk = fromTemplate.FontCjk;
                 }
             }
             _currentTheme = theme;
@@ -997,6 +1550,8 @@ public class Skill
             case "quote":
                 return QuoteSlide(el, ctx);
             case "image":
+                // 半出血图文页自包含（标题叠在图上），不走通用“标题 + 正文”骨架
+                if (VariantOf(el, "full") is "bleed" or "half") return ImageBleed(el, ctx);
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
                 shapes.Add(ImageBody(el, ctx));
                 break;
@@ -1021,9 +1576,13 @@ public class Skill
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
                 shapes.Add(ChartBody(el, ctx));
                 break;
+            case "progress":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(ProgressBody(el, ctx));
+                break;
             case "summary":
                 shapes.Add(SlideTitle(Str(el, "title") ?? "小结", ctx));
-                shapes.Add(BulletBody(el, ctx, accent: true));
+                shapes.Add(SummaryBody(el, ctx));
                 break;
             default: // content（可用 layout 指定子类型，省得模型记多个 type）
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
@@ -1032,6 +1591,7 @@ public class Skill
                     "timeline" or "process" or "steps" => TimelineBody(el, ctx),
                     "grid" or "cards" => GridBody(el, ctx),
                     "stats" or "callouts" or "numbers" => StatsBody(el, ctx),
+                    "progress" or "bars" or "gauge" => ProgressBody(el, ctx),
                     "iconrows" or "icon-rows" or "rows" => IconRowsBody(el, ctx),
                     _ => BulletBody(el, ctx, accent: false),
                 });
@@ -1047,7 +1607,27 @@ public class Skill
     }
 
     // ---- 封面 ----
+    /// <summary>
+    /// 封面：按 <c>variant</c> 选版式（design-system/slide-types 里封面给了多种排法）。
+    /// <list type="bullet">
+    /// <item><c>left</c>（默认）：左色块 + 右侧标题，稳重。</item>
+    /// <item><c>center</c>：居中标题，留白最大，适合演讲/发布会。</item>
+    /// <item><c>image</c>：整页背景图 + 半透明蒙层 + 居中标题（需 <c>path</c>）。</item>
+    /// <item><c>split</c>：左文右图，适合产品/企业介绍。</item>
+    /// </list>
+    /// </summary>
     private static string CoverSlide(JsonElement el, SlideCtx ctx)
+    {
+        return VariantOf(el, "left") switch
+        {
+            "center" => CoverCenter(el, ctx),
+            "image" => CoverImageBg(el, ctx),
+            "split" => CoverSplit(el, ctx),
+            _ => CoverLeft(el, ctx),
+        };
+    }
+
+    private static string CoverLeft(JsonElement el, SlideCtx ctx)
     {
         var t = ctx.Theme;
         var shapes = new List<string>();
@@ -1079,6 +1659,107 @@ public class Skill
         return SlideXml(t.Bg, shapes);
     }
 
+    /// <summary>居中封面：无图片依赖，靠留白与字号对比做焦点。</summary>
+    private static string CoverCenter(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Bg) };
+        // 顶部与底部的细色带：不加标题下划线，但保留一点“设计感”"
+        shapes.Add(Rect(ctx.NextId(), W - 2743200, 0, 2743200, 114300, t.Accent));
+        shapes.Add(Rect(ctx.NextId(), 0, H - 114300, W, 114300, t.Primary));
+
+        var title = Str(el, "title") ?? ctx.Title;
+        var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
+        var author = Str(el, "author") ?? ctx.Author;
+        var date = Str(el, "date") ?? ctx.Date;
+
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(title, 4400, t.Primary, align: "ctr", lineSpacing: 105));
+        if (!string.IsNullOrWhiteSpace(subtitle))
+            paras.Append(Para(subtitle!, 1800, t.Secondary, align: "ctr", spaceBefore: 18, lineSpacing: 130));
+        var meta = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(author)) meta.Append(Para(author!.Trim(), 1400, t.Text, align: "ctr"));
+        if (!string.IsNullOrWhiteSpace(date)) meta.Append(Para(date!.Trim(), 1400, t.Secondary, align: "ctr", spaceBefore: 4));
+        if (meta.Length > 0) paras.Append(meta.ToString());
+
+        shapes.Add(TextBox(ctx.NextId(), MX, 1714500, CW, 3429000, paras.ToString(), anchor: "ctr"));
+        return SlideXml(t.Bg, shapes);
+    }
+
+    /// <summary>背景图封面：整页图 + 半透明蒙层，保证标题在任何图上都读得清。</summary>
+    private static string CoverImageBg(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var path = Str(el, "path");
+        var shapes = new List<string>();
+        var hasImg = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+        if (hasImg)
+        {
+            shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, W, H), 0, 0, W, H));
+            // 蒙层：主色 45% 透明 —— 文字对比度靠它守住，不能省
+            shapes.Add(Rect(ctx.NextId(), 0, 0, W, H, t.Primary, alpha: 55));
+        }
+        else
+        {
+            shapes.Add(Rect(ctx.NextId(), 0, 0, W, H, t.Primary));
+            if (!string.IsNullOrWhiteSpace(path)) Warn("封面背景图不存在，已改用主色底：" + path);
+        }
+        var onImg = hasImg ? t.OnPrimary : t.Bg;
+
+        var title = Str(el, "title") ?? ctx.Title;
+        var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(title, 4400, t.Bg, align: "ctr", lineSpacing: 105));
+        if (!string.IsNullOrWhiteSpace(subtitle))
+            paras.Append(Para(subtitle!, 1800, onImg, align: "ctr", spaceBefore: 18, lineSpacing: 130));
+        var author = Str(el, "author") ?? ctx.Author;
+        var date = Str(el, "date") ?? ctx.Date;
+        if (!string.IsNullOrWhiteSpace(author) || !string.IsNullOrWhiteSpace(date))
+            paras.Append(Para(string.Join("　·　", new[] { (author ?? "").Trim(), (date ?? "").Trim() }
+                .Where(s => s.Length > 0)), 1400, onImg, align: "ctr", spaceBefore: 24));
+        shapes.Add(TextBox(ctx.NextId(), MX, 1714500, CW, 3429000, paras.ToString(), anchor: "ctr"));
+        return SlideXml(hasImg ? t.Bg : t.Primary, shapes);
+    }
+
+    /// <summary>左文右图封面（非对称布局）：右半页铺满图，左半页放标题与元信息。</summary>
+    private static string CoverSplit(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Bg) };
+        var imgW = W * 5 / 12;
+        var imgX = W - imgW;
+        var path = Str(el, "path");
+        var hasImg = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+        if (hasImg)
+            shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, H), imgX, 0, imgW, H));
+        else
+        {
+            shapes.Add(Rect(ctx.NextId(), imgX, 0, imgW, H, t.Primary));
+            shapes.Add(Rect(ctx.NextId(), imgX - 114300, 0, 114300, H, t.Accent));
+            if (!string.IsNullOrWhiteSpace(path)) Warn("封面右图不存在，已改用主色块：" + path);
+        }
+
+        var textW = imgX - MX - 457200;
+        var title = Str(el, "title") ?? ctx.Title;
+        var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(title, 3600, t.Primary, lineSpacing: 105));
+        if (!string.IsNullOrWhiteSpace(subtitle))
+            paras.Append(Para(subtitle!, 1700, t.Secondary, spaceBefore: 14, lineSpacing: 130));
+        shapes.Add(TextBox(ctx.NextId(), MX, 1900000, textW, 2743200, paras.ToString(), anchor: "t"));
+
+        var author = Str(el, "author") ?? ctx.Author;
+        var date = Str(el, "date") ?? ctx.Date;
+        if (!string.IsNullOrWhiteSpace(author) || !string.IsNullOrWhiteSpace(date))
+        {
+            var meta = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(author)) meta.Append(Para(author!.Trim(), 1400, t.Text));
+            if (!string.IsNullOrWhiteSpace(date)) meta.Append(Para(date!.Trim(), 1400, t.Secondary, spaceBefore: 4));
+            shapes.Add(TextBox(ctx.NextId(), MX, H - 1371600, textW, 762000, meta.ToString(), anchor: "b"));
+        }
+        return SlideXml(t.Bg, shapes);
+    }
+
     // ---- 结束页 ----
     private static string EndSlide(JsonElement el, SlideCtx ctx)
     {
@@ -1094,7 +1775,21 @@ public class Skill
     }
 
     // ---- 章节分隔 ----
+    /// <summary>
+    /// 章节分隔：<c>variant</c> = <c>number</c>（默认，满页主色 + 大序号）|
+    /// <c>bar</c>（浅底 + 左侧色块序号，克制）| <c>full</c>（满页主色 + 超大透明序号水印，强烈）。
+    /// </summary>
     private static string SectionSlide(JsonElement el, SlideCtx ctx)
+    {
+        return VariantOf(el, "number") switch
+        {
+            "bar" => SectionBar(el, ctx),
+            "full" => SectionFull(el, ctx),
+            _ => SectionNumber(el, ctx),
+        };
+    }
+
+    private static string SectionNumber(JsonElement el, SlideCtx ctx)
     {
         var t = ctx.Theme;
         var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Primary) };
@@ -1107,6 +1802,48 @@ public class Skill
         if (!string.IsNullOrWhiteSpace(sub))
             paras.Append(Para(sub!, 1600, t.OnPrimary, align: "l", spaceBefore: 12));
         shapes.Add(TextBox(ctx.NextId(), MX + 1524000, 1600200, CW - 1524000, 2286000, paras.ToString(), anchor: "t"));
+        shapes.Add(PageBadge(ctx));
+        return SlideXml(t.Primary, shapes);
+    }
+
+    /// <summary>左侧色块分隔：与内容页同底色，靠一块主色矩形与大序号做转场，比满页色简洁。</summary>
+    private static string SectionBar(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var blockW = W / 4;
+        var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Bg) };
+        shapes.Add(Rect(ctx.NextId(), 0, 0, blockW, H, t.Primary));
+        shapes.Add(Rect(ctx.NextId(), blockW, 0, 76200, H, t.Accent));
+        shapes.Add(TextBox(ctx.NextId(), 0, 0, blockW, H,
+            Para(ctx.Index.ToString("00"), 6000, t.Accent, bold: true, align: "ctr", font: t.FontTitle),
+            anchor: "ctr"));
+
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(Str(el, "title") ?? "", 3400, t.Primary, lineSpacing: 110));
+        var sub = Str(el, "subtitle");
+        if (!string.IsNullOrWhiteSpace(sub))
+            paras.Append(Para(sub!, 1600, t.Secondary, align: "l", spaceBefore: 14));
+        shapes.Add(TextBox(ctx.NextId(), blockW + 76200 + MX, 2057400, W - blockW - 76200 - MX * 2, 2743200,
+            paras.ToString(), anchor: "ctr"));
+        shapes.Add(PageBadge(ctx));
+        return SlideXml(t.Bg, shapes);
+    }
+
+    /// <summary>满页色 + 超大序号水印：序号用低透明度画在上部，标题压在下部（两者不重叠才能读）。</summary>
+    private static string SectionFull(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Primary) };
+        // 水印序号：同底色的低透明度大字（用 a:alpha，不要用颜色编透明度）
+        shapes.Add(TextBox(ctx.NextId(), MX, 0, CW, 4114800,
+            Para(ctx.Index.ToString("00"), 20000, t.Bg, bold: true, align: "ctr",
+                font: t.FontTitle, alpha: 22), anchor: "ctr"));
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(Str(el, "title") ?? "", 4000, t.Bg, align: "ctr", lineSpacing: 110));
+        var sub = Str(el, "subtitle");
+        if (!string.IsNullOrWhiteSpace(sub))
+            paras.Append(Para(sub!, 1700, t.OnPrimary, align: "ctr", spaceBefore: 16));
+        shapes.Add(TextBox(ctx.NextId(), MX, 4114800, CW, 2057400, paras.ToString(), anchor: "ctr"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Primary, shapes);
     }
@@ -1130,14 +1867,23 @@ public class Skill
     }
 
     // ---- 通用标题 ----
+    /// <summary>
+    /// 页标题：左对齐标题 + （可选）标题下短线 + 右下角页码徽标。
+    ///
+    /// <para>
+    /// <b>默认不画“标题下强调线”</b>：设计规范（pptx-generator · pitfalls.md）把它列为
+    /// 「AI 生成稿的典型特征」，要求用留白或背景色来做层级，而不是加一条线。
+    /// 想要旧观感的调用方可以传 <c>"titleRule": true</c> 把线加回来。
+    /// </para>
+    /// </summary>
     private static string SlideTitle(string text, SlideCtx ctx)
     {
         var t = ctx.Theme;
         var shapes = new StringBuilder();
         shapes.Append(TextBox(ctx.NextId(), MX, TitleY, CW, TitleH,
             ParaTitle(text, 2800, t.Primary, lineSpacing: 100)));
-        // 标题下强调线
-        shapes.Append(Rect(ctx.NextId(), MX, TitleY + TitleH + 57150, 838200, 45720, t.Accent));
+        if (_titleRule)
+            shapes.Append(Rect(ctx.NextId(), MX, TitleY + TitleH + 57150, 838200, 45720, t.Accent));
         return shapes.ToString();
     }
 
@@ -1273,7 +2019,21 @@ public class Skill
     }
 
     // ---- 目录 ----
+    /// <summary>
+    /// 目录：<c>variant</c> = <c>list</c>（默认，编号竖列）| <c>grid</c>（两列卡片）| <c>sidebar</c>（左侧色条 + 行）。
+    /// 项数多时优选 grid（两列能多放一倍），项少时 list 更清晰。
+    /// </summary>
     private static string TocBody(JsonElement el, SlideCtx ctx)
+    {
+        return VariantOf(el, "list") switch
+        {
+            "grid" or "cards" => TocGrid(el, ctx),
+            "sidebar" or "nav" => TocSidebar(el, ctx),
+            _ => TocList(el, ctx),
+        };
+    }
+
+    private static string TocList(JsonElement el, SlideCtx ctx)
     {
         var t = ctx.Theme;
         var items = StringList(el, "items");
@@ -1290,6 +2050,152 @@ public class Skill
                 align: "l", spaceBefore: (int)Math.Round(14 * scale), lineSpacing: (int)Math.Round(120 * scale)));
         }
         return TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t");
+    }
+
+    /// <summary>两列卡片目录：每张卡 = 主色序号 + 标题，卡底用浅色，适合 4~8 个章节。</summary>
+    private static string TocGrid(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = StringList(el, "items");
+        if (items.Count == 0) return BulletBody(el, ctx, accent: false);
+
+        var cols = items.Count <= 2 ? 1 : 2;
+        var rows = (int)Math.Ceiling(items.Count / (double)cols);
+        var gap = _m.Gap;
+        var cardW = (CW - gap * (cols - 1)) / cols;
+        var cardH = Math.Min((long)(BodyH - gap * (rows - 1)) / Math.Max(1, rows), BodyH);
+        var plan = items.Select(it => (Text: it, Size: 1700, SpaceBefore: 0, LineSpacing: 1.20)).ToList();
+        var scale = ScaleForHeight(plan, cardW - _m.Pad * 2 - 900000, cardH - _m.Pad);
+        var sb = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var c = i % cols; var r = i / cols;
+            var x = MX + c * (cardW + gap);
+            var y = BodyY + r * (cardH + gap);
+            sb.Append(Rect(ctx.NextId(), x, y, cardW, cardH, t.Light, radius: true));
+            // 左侧序号块
+            sb.Append(Rect(ctx.NextId(), x, y, 57150, cardH, t.Accent));
+            sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y, cardW - _m.Pad * 2, cardH,
+                Para((i + 1).ToString("00"), Scaled(3000, scale), t.Accent, bold: true, align: "l", font: t.FontTitle)
+                + Para(items[i], Scaled(1700, scale), t.Text, align: "l", spaceBefore: 6, lineSpacing: 120),
+                anchor: "ctr"));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>侧栏目录：左侧一条主色竖条 + 逐行“序号 标题”，清爽、适合 3~5 个章节。</summary>
+    private static string TocSidebar(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = StringList(el, "items");
+        if (items.Count == 0) return BulletBody(el, ctx, accent: false);
+
+        var barW = 76200;
+        var sb = new StringBuilder();
+        sb.Append(Rect(ctx.NextId(), MX, BodyY, barW, BodyH, t.Accent));
+        var textX = MX + barW + _m.Gap;
+        var textW = CW - barW - _m.Gap;
+        var plan = items.Select(it => (Text: it, Size: 1800, SpaceBefore: 16, LineSpacing: 1.20)).ToList();
+        var scale = ScaleForHeight(plan, textW - 800000, BodyH);
+        var paras = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            paras.Append(Para((i + 1).ToString("00"), Scaled(1600, scale), t.Accent, bold: true, align: "l",
+                spaceBefore: (int)Math.Round((i == 0 ? 0 : 16) * scale)));
+            paras.Append(Para(items[i], Scaled(1800, scale), t.Text, align: "l", spaceBefore: 2,
+                lineSpacing: (int)Math.Round(120 * scale)));
+        }
+        sb.Append(TextBox(ctx.NextId(), textX, BodyY, textW, BodyH, paras.ToString(), anchor: "t"));
+        return sb.ToString();
+    }
+
+    // ---- 小结 / 收尾 ----
+    /// <summary>
+    /// 小结页：<c>variant</c> = <c>list</c>（默认，要点回顾）| <c>cta</c>（下一步行动，大号序号）|
+    /// <c>split</c>（左回顾 / 右行动 + 联系方式）。
+    /// 行动项与联系方式可用顶层 <c>items</c>（或 <c>bullets</c>）与 <c>contact</c> 字段。
+    /// </summary>
+    private static string SummaryBody(JsonElement el, SlideCtx ctx)
+    {
+        return VariantOf(el, "list") switch
+        {
+            "cta" or "next" or "actions" => SummaryCta(el, ctx),
+            "split" or "recap" => SummarySplit(el, ctx),
+            _ => BulletBody(el, ctx, accent: true),
+        };
+    }
+
+    private static string SummaryCta(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = StringList(el, "items");
+        if (items.Count == 0) items = StringList(el, "bullets");
+        if (items.Count == 0) return BulletBody(el, ctx, accent: true);
+
+        var contactH = string.IsNullOrWhiteSpace(Str(el, "contact")) ? 0 : 685800;
+        var availH = BodyH - contactH;
+        var rowH = Math.Min(availH / items.Count, 1143000);
+        var totalH = rowH * items.Count;
+        var y0 = BodyY + Math.Max(0, (availH - totalH) / 2);
+
+        var sb = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var y = y0 + i * rowH;
+            var numW = 914400;
+            sb.Append(Rect(ctx.NextId(), MX, y + 68580, 45720, rowH - 137160, t.Accent));
+            sb.Append(TextBox(ctx.NextId(), MX + 152400, y, numW, rowH,
+                Para((i + 1).ToString("00"), 3200, t.Accent, bold: true, align: "l", font: t.FontTitle),
+                anchor: "ctr"));
+            sb.Append(TextBox(ctx.NextId(), MX + numW + 152400, y, CW - numW - 152400, rowH,
+                Para(items[i], 1800, t.Primary, align: "l", lineSpacing: 120), anchor: "ctr"));
+        }
+        var contact = Str(el, "contact");
+        if (!string.IsNullOrWhiteSpace(contact))
+            sb.Append(TextBox(ctx.NextId(), MX, BodyY + availH, CW, 457200,
+                Para(contact!.Trim(), 1400, t.Secondary, align: "l"), anchor: "b"));
+        return sb.ToString();
+    }
+
+    private static string SummarySplit(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var gap = _m.Gap;
+        var colW = (CW - gap) / 2;
+        var sb = new StringBuilder();
+
+        // 左：回顾要点（浅底卡片）。直接按目标色出段落，不做事后字符串替换。
+        var bullets = StringList(el, "bullets");
+        if (bullets.Count == 0) bullets = StringList(el, "items");
+        var plan = bullets.Select(b => (Text: b, Size: 1650, SpaceBefore: 10, LineSpacing: 1.25)).ToList();
+        var scale = ScaleForHeight(plan, colW - _m.Pad * 2 - _m.Gap, BodyH - _m.Pad * 2);
+        var lp = new StringBuilder();
+        if (bullets.Count == 0) lp.Append(Para("（本页暂无回顾要点）", 1500, t.Secondary));
+        foreach (var b in bullets)
+            lp.Append(Para(b, Scaled(1650, scale), t.Text, align: "l", bullet: "•",
+                spaceBefore: (int)Math.Round(10 * scale), lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+        sb.Append(Rect(ctx.NextId(), MX, BodyY, colW, BodyH, t.Light, radius: true));
+        sb.Append(TextBox(ctx.NextId(), MX + _m.Pad, BodyY + _m.Pad, colW - _m.Pad * 2, BodyH - _m.Pad * 2,
+            lp.ToString(), anchor: "t"));
+
+        // 右：下一步 / 联系方式（主色卡片，文字一律用底色/反色，保证深底上可读）
+        var rightX = MX + colW + gap;
+        var actions = StringList(el, "actions");
+        if (actions.Count == 0) actions = StringList(el, "next");
+        var rp = new StringBuilder();
+        rp.Append(ParaTitle(Str(el, "rightTitle") ?? "下一步", 2000, t.Bg));
+        var rplan = actions.Select(a => (Text: a, Size: 1600, SpaceBefore: 12, LineSpacing: 1.25)).ToList();
+        var rscale = ScaleForHeight(rplan, colW - _m.Pad * 2, BodyH - _m.Pad * 2 - 762000);
+        for (var i = 0; i < actions.Count; i++)
+            rp.Append(Para((i + 1) + ". " + actions[i], Scaled(1600, rscale), t.Bg, align: "l",
+                spaceBefore: (int)Math.Round(12 * rscale), lineSpacing: (int)Math.Round(125 * rscale)));
+        var contact = Str(el, "contact");
+        if (!string.IsNullOrWhiteSpace(contact))
+            rp.Append(Para(contact!.Trim(), 1400, t.OnPrimary, align: "l", spaceBefore: 20));
+        sb.Append(Rect(ctx.NextId(), rightX, BodyY, colW, BodyH, t.Primary, radius: true));
+        sb.Append(TextBox(ctx.NextId(), rightX + _m.Pad, BodyY + _m.Pad, colW - _m.Pad * 2, BodyH - _m.Pad * 2,
+            rp.ToString(), anchor: "t"));
+        return sb.ToString();
     }
 
     // ---- 两栏 ----
@@ -1656,6 +2562,15 @@ public class Skill
         return "";
     }
 
+    /// <summary>取数值字段（接受数字与数字字符串），缺失/非法时用 fallback。</summary>
+    private static double NumOf(JsonElement o, string name, double fallback)
+    {
+        if (!o.TryGetProperty(name, out var v)) return fallback;
+        if (v.ValueKind == JsonValueKind.Number) return v.GetDouble();
+        if (v.ValueKind == JsonValueKind.String && double.TryParse(v.GetString(), out var d)) return d;
+        return fallback;
+    }
+
     private static int IntOf(JsonElement o, string name, int fallback)
     {
         if (o.ValueKind == JsonValueKind.Object && o.TryGetProperty(name, out var v))
@@ -1876,9 +2791,19 @@ public class Skill
     /// <summary>内置图标名。在彩色圆里画的几何图形，<b>不依赖任何图标字体/素材文件</b>。</summary>
     private static readonly string[] IconNames =
     {
+        // 基础语义（最初 12 个）
         "check", "cross", "arrow", "star", "dot", "warn",
         "lock", "user", "chart", "clock", "gear", "bulb",
+        // 业务语义扩充（归一化坐标绘制，见 RenderIcon）
+        "money", "target", "rocket", "shield", "layers", "globe", "network", "cloud",
+        "database", "mail", "phone", "calendar", "flag", "search", "edit", "file",
+        "pie", "link", "eye", "heart", "key", "crown", "map", "cpu",
+        "package", "award", "briefcase", "users", "code", "gauge", "filter", "refresh", "download",
     };
+
+    /// <summary>两点半径的椭圆：<c>ImgEllipse(center, rx, ry)</c> 在 ImageSharp.Drawing 1.0 里不存在，得用 SizeF。</summary>
+    private static ImgEllipse Ell(ImgPointF center, float rx, float ry)
+        => new ImgEllipse(center, new SixLabors.ImageSharp.SizeF(rx, ry));
 
     private static bool IsIconName(string s) => IconNames.Contains(s.Trim().ToLowerInvariant());
 
@@ -1890,6 +2815,20 @@ public class Skill
     /// ImageSharp 已经为图表引入了，画几个几何图形是顺手的事；颜色还能直接跟着主题走。
     /// </para>
     /// </summary>
+    /// <summary>
+    /// 画一个内置图标（透明底 PNG）。
+    ///
+    /// <para>
+    /// 为什么自己画而不是用图标字体/react-icons：技能是<b>单个编译单元</b>，
+    /// 既不能携带字体/素材文件，也不能假设宿主装了某个图标库；而 ImageSharp 已为图表引入，
+    /// 画几何图形是顺手的事。
+    /// </para>
+    ///
+    /// <para>
+    /// 老图标（check/cross/... 12 个）用原始像素坐标手调过，保持原样；
+    /// 新增图标统一用<b>归一化坐标</b>（<c>N(x,y)</c>，0~1）写，少算错、也好维护。
+    /// </para>
+    /// </summary>
     private static byte[] RenderIcon(string name, int px, string color)
     {
         using var img = new Image<Rgba32>(px, px);
@@ -1898,6 +2837,12 @@ public class Skill
         var m = px * 0.26f;                       // 内边距
         var e = px - m;                           // 内边距终点
         var mid = px / 2f;
+
+        // 归一化坐标下的辅助量（0~1）
+        ImgPointF N(float nx, float ny) => new ImgPointF(px * nx, px * ny);
+        SixLabors.ImageSharp.Drawing.IPath NP(params (float X, float Y)[] pts)
+            => Poly(pts.Select(p => N(p.X, p.Y)).ToArray());
+
         img.Mutate(x =>
         {
             switch ((name ?? "").Trim().ToLowerInvariant())
@@ -1955,9 +2900,191 @@ public class Skill
                             new ImgPointF(mid + (float)(r1 * Math.Cos(ang)), mid + (float)(r1 * Math.Sin(ang))));
                     }
                     break;
-                default: // bulb
+                case "bulb":
                     x.Draw(c, t, new ImgEllipse(new ImgPointF(mid, px * 0.42f), px * 0.26f));
                     x.Fill(c, new ImgRect(px * 0.40f, px * 0.72f, px * 0.20f, px * 0.14f));
+                    break;
+
+                // ===== 以下为归一化坐标新增（0~1），覆盖常见业务语义 =====
+                case "money":
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.5f), px * 0.33f));
+                    x.DrawLine(c, t, N(0.36f, 0.38f), N(0.5f, 0.52f));
+                    x.DrawLine(c, t, N(0.64f, 0.38f), N(0.5f, 0.52f));
+                    x.DrawLine(c, t, N(0.5f, 0.52f), N(0.5f, 0.70f));
+                    x.DrawLine(c, t, N(0.39f, 0.58f), N(0.61f, 0.58f));
+                    break;
+                case "target":
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.5f), px * 0.34f));
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.5f), px * 0.22f));
+                    x.Fill(c, new ImgEllipse(N(0.5f, 0.5f), px * 0.09f));
+                    break;
+                case "rocket":
+                    x.Fill(c, NP((0.50f, 0.16f), (0.66f, 0.54f), (0.34f, 0.54f)));
+                    x.Fill(c, NP((0.34f, 0.54f), (0.22f, 0.72f), (0.34f, 0.70f)));
+                    x.Fill(c, NP((0.66f, 0.54f), (0.78f, 0.72f), (0.66f, 0.70f)));
+                    x.Fill(c, NP((0.46f, 0.58f), (0.54f, 0.58f), (0.50f, 0.84f)));
+                    break;
+                case "shield":
+                    x.Fill(c, NP((0.5f, 0.16f), (0.80f, 0.28f), (0.80f, 0.52f), (0.5f, 0.84f), (0.20f, 0.52f), (0.20f, 0.28f)));
+                    break;
+                case "layers":
+                    x.Fill(c, NP((0.50f, 0.18f), (0.86f, 0.36f), (0.50f, 0.54f), (0.14f, 0.36f)));
+                    x.Draw(c, t, NP((0.14f, 0.52f), (0.50f, 0.70f), (0.86f, 0.52f)));
+                    x.Draw(c, t, NP((0.14f, 0.68f), (0.50f, 0.86f), (0.86f, 0.68f)));
+                    break;
+                case "globe":
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.5f), px * 0.34f));
+                    x.DrawLine(c, t, N(0.16f, 0.5f), N(0.84f, 0.5f));
+                    x.Draw(c, t, Ell(N(0.5f, 0.5f), px * 0.15f, px * 0.34f));
+                    break;
+                case "network":
+                    x.Fill(c, new ImgEllipse(N(0.5f, 0.22f), px * 0.10f));
+                    x.Fill(c, new ImgEllipse(N(0.24f, 0.74f), px * 0.10f));
+                    x.Fill(c, new ImgEllipse(N(0.76f, 0.74f), px * 0.10f));
+                    x.DrawLine(c, t, N(0.46f, 0.30f), N(0.28f, 0.66f));
+                    x.DrawLine(c, t, N(0.54f, 0.30f), N(0.72f, 0.66f));
+                    x.DrawLine(c, t, N(0.34f, 0.74f), N(0.66f, 0.74f));
+                    break;
+                case "cloud":
+                    x.Fill(c, new ImgEllipse(N(0.36f, 0.52f), px * 0.16f));
+                    x.Fill(c, new ImgEllipse(N(0.53f, 0.44f), px * 0.20f));
+                    x.Fill(c, new ImgEllipse(N(0.70f, 0.54f), px * 0.15f));
+                    x.Fill(c, new ImgRect(px * 0.28f, px * 0.52f, px * 0.46f, px * 0.17f));
+                    break;
+                case "database":
+                    x.Fill(c, new ImgRect(px * 0.22f, px * 0.30f, px * 0.56f, px * 0.46f));
+                    x.Draw(c, t, Ell(N(0.5f, 0.30f), px * 0.28f, px * 0.10f));
+                    x.DrawLine(c, t, N(0.22f, 0.48f), N(0.78f, 0.48f));
+                    x.DrawLine(c, t, N(0.22f, 0.62f), N(0.78f, 0.62f));
+                    break;
+                case "mail":
+                    x.Draw(c, t, new ImgRect(px * 0.14f, px * 0.28f, px * 0.72f, px * 0.44f));
+                    x.DrawLine(c, t, N(0.14f, 0.28f), N(0.50f, 0.55f));
+                    x.DrawLine(c, t, N(0.50f, 0.55f), N(0.86f, 0.28f));
+                    break;
+                case "phone":
+                    x.Draw(c, t, new ImgRect(px * 0.30f, px * 0.14f, px * 0.40f, px * 0.72f));
+                    x.Fill(c, new ImgEllipse(N(0.50f, 0.78f), px * 0.05f));
+                    break;
+                case "calendar":
+                    x.Draw(c, t, new ImgRect(px * 0.16f, px * 0.26f, px * 0.68f, px * 0.58f));
+                    x.DrawLine(c, t, N(0.16f, 0.42f), N(0.84f, 0.42f));
+                    x.DrawLine(c, t, N(0.34f, 0.14f), N(0.34f, 0.30f));
+                    x.DrawLine(c, t, N(0.66f, 0.14f), N(0.66f, 0.30f));
+                    break;
+                case "flag":
+                    x.DrawLine(c, t, N(0.28f, 0.14f), N(0.28f, 0.88f));
+                    x.Fill(c, NP((0.30f, 0.16f), (0.80f, 0.30f), (0.30f, 0.46f)));
+                    break;
+                case "search":
+                    x.Draw(c, t, new ImgEllipse(N(0.44f, 0.42f), px * 0.25f));
+                    x.DrawLine(c, t, N(0.62f, 0.60f), N(0.84f, 0.82f));
+                    break;
+                case "edit":
+                    x.Fill(c, NP((0.24f, 0.76f), (0.34f, 0.66f), (0.66f, 0.20f), (0.80f, 0.30f), (0.46f, 0.78f)));
+                    x.DrawLine(c, t, N(0.24f, 0.76f), N(0.46f, 0.78f));
+                    break;
+                case "file":
+                    x.Draw(c, t, NP((0.26f, 0.14f), (0.60f, 0.14f), (0.76f, 0.32f), (0.76f, 0.86f), (0.26f, 0.86f)));
+                    x.DrawLine(c, t, N(0.58f, 0.14f), N(0.58f, 0.34f));
+                    x.DrawLine(c, t, N(0.58f, 0.34f), N(0.76f, 0.34f));
+                    break;
+                case "pie":
+                    x.Fill(c, Poly(N(0.5f, 0.5f), N(0.5f, 0.16f),
+                        N(0.74f, 0.24f), N(0.84f, 0.5f), N(0.74f, 0.76f), N(0.5f, 0.84f)));
+                    x.DrawLine(c, t, N(0.5f, 0.5f), N(0.5f, 0.16f));
+                    x.DrawLine(c, t, N(0.5f, 0.5f), N(0.84f, 0.5f));
+                    break;
+                case "link":
+                    x.Draw(c, t, Ell(N(0.36f, 0.50f), px * 0.16f, px * 0.10f));
+                    x.Draw(c, t, Ell(N(0.64f, 0.50f), px * 0.16f, px * 0.10f));
+                    x.DrawLine(c, t, N(0.46f, 0.5f), N(0.54f, 0.5f));
+                    break;
+                case "eye":
+                    x.Draw(c, t, NP((0.14f, 0.50f), (0.34f, 0.28f), (0.66f, 0.28f), (0.86f, 0.50f),
+                        (0.66f, 0.72f), (0.34f, 0.72f)));
+                    x.Fill(c, new ImgEllipse(N(0.5f, 0.5f), px * 0.10f));
+                    break;
+                case "heart":
+                    x.Fill(c, new ImgEllipse(N(0.37f, 0.38f), px * 0.16f));
+                    x.Fill(c, new ImgEllipse(N(0.63f, 0.38f), px * 0.16f));
+                    x.Fill(c, NP((0.21f, 0.42f), (0.79f, 0.42f), (0.50f, 0.84f)));
+                    break;
+                case "key":
+                    x.Draw(c, t, new ImgEllipse(N(0.34f, 0.34f), px * 0.16f));
+                    x.DrawLine(c, t, N(0.45f, 0.45f), N(0.82f, 0.82f));
+                    x.DrawLine(c, t, N(0.70f, 0.70f), N(0.62f, 0.78f));
+                    x.DrawLine(c, t, N(0.80f, 0.80f), N(0.72f, 0.88f));
+                    break;
+                case "crown":
+                    x.Fill(c, NP((0.16f, 0.72f), (0.16f, 0.30f), (0.34f, 0.48f), (0.50f, 0.24f),
+                        (0.66f, 0.48f), (0.84f, 0.30f), (0.84f, 0.72f)));
+                    break;
+                case "map":
+                    x.Fill(c, new ImgEllipse(N(0.5f, 0.38f), px * 0.22f));
+                    x.Fill(c, NP((0.31f, 0.47f), (0.69f, 0.47f), (0.50f, 0.86f)));
+                    x.Fill(c, new ImgEllipse(N(0.5f, 0.38f), px * 0.09f));
+                    break;
+                case "cpu":
+                    x.Draw(c, t, new ImgRect(px * 0.26f, px * 0.26f, px * 0.48f, px * 0.48f));
+                    x.Fill(c, new ImgRect(px * 0.42f, px * 0.42f, px * 0.16f, px * 0.16f));
+                    for (var i = 0; i < 3; i++)
+                    {
+                        var o = 0.34f + i * 0.16f;
+                        x.DrawLine(c, t, N(o, 0.12f), N(o, 0.26f));
+                        x.DrawLine(c, t, N(o, 0.74f), N(o, 0.88f));
+                        x.DrawLine(c, t, N(0.12f, o), N(0.26f, o));
+                        x.DrawLine(c, t, N(0.74f, o), N(0.88f, o));
+                    }
+                    break;
+                case "package":
+                    x.Draw(c, t, new ImgRect(px * 0.18f, px * 0.34f, px * 0.64f, px * 0.50f));
+                    x.DrawLine(c, t, N(0.18f, 0.34f), N(0.50f, 0.46f));
+                    x.DrawLine(c, t, N(0.82f, 0.34f), N(0.50f, 0.46f));
+                    x.DrawLine(c, t, N(0.50f, 0.46f), N(0.50f, 0.84f));
+                    break;
+                case "award":
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.40f), px * 0.24f));
+                    x.Fill(c, NP((0.36f, 0.58f), (0.50f, 0.58f), (0.42f, 0.88f)));
+                    x.Fill(c, NP((0.50f, 0.58f), (0.64f, 0.58f), (0.58f, 0.88f)));
+                    break;
+                case "briefcase":
+                    x.Draw(c, t, new ImgRect(px * 0.14f, px * 0.36f, px * 0.72f, px * 0.44f));
+                    x.Draw(c, t, new ImgRect(px * 0.38f, px * 0.22f, px * 0.24f, px * 0.14f));
+                    x.DrawLine(c, t, N(0.14f, 0.52f), N(0.86f, 0.52f));
+                    break;
+                case "users":
+                    x.Fill(c, new ImgEllipse(N(0.38f, 0.34f), px * 0.13f));
+                    x.Fill(c, new ImgEllipse(N(0.38f, 0.78f), px * 0.24f));
+                    x.Draw(c, t, new ImgEllipse(N(0.70f, 0.36f), px * 0.11f));
+                    x.Draw(c, t, new ImgEllipse(N(0.74f, 0.78f), px * 0.20f));
+                    break;
+                case "code":
+                    x.DrawLine(c, t, N(0.36f, 0.26f), N(0.16f, 0.50f));
+                    x.DrawLine(c, t, N(0.16f, 0.50f), N(0.36f, 0.74f));
+                    x.DrawLine(c, t, N(0.64f, 0.26f), N(0.84f, 0.50f));
+                    x.DrawLine(c, t, N(0.84f, 0.50f), N(0.64f, 0.74f));
+                    break;
+                case "gauge":
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.56f), px * 0.32f));
+                    x.Fill(c, new ImgRect(px * 0.24f, px * 0.52f, px * 0.52f, px * 0.30f));
+                    x.DrawLine(c, t, N(0.5f, 0.56f), N(0.70f, 0.34f));
+                    break;
+                case "filter":
+                    x.Fill(c, NP((0.14f, 0.18f), (0.86f, 0.18f), (0.58f, 0.52f), (0.58f, 0.86f),
+                        (0.42f, 0.78f), (0.42f, 0.52f)));
+                    break;
+                case "refresh":
+                    x.Draw(c, t, new ImgEllipse(N(0.5f, 0.5f), px * 0.30f));
+                    x.Fill(c, NP((0.62f, 0.12f), (0.92f, 0.26f), (0.66f, 0.40f)));
+                    break;
+                case "download":
+                    x.DrawLine(c, t, N(0.5f, 0.14f), N(0.5f, 0.62f));
+                    x.DrawLine(c, t, N(0.30f, 0.44f), N(0.5f, 0.62f));
+                    x.DrawLine(c, t, N(0.70f, 0.44f), N(0.5f, 0.62f));
+                    x.DrawLine(c, t, N(0.20f, 0.82f), N(0.80f, 0.82f));
+                    break;
+                default: // 其它名字 → 当作短标记（1~2 字），不画图标
                     break;
             }
         });
@@ -1971,6 +3098,20 @@ public class Skill
         pb.MoveTo(pts[0]);
         for (var i = 1; i < pts.Length; i++) pb.LineTo(pts[i]);
         pb.CloseFigure();
+        return pb.Build();
+    }
+
+    /// <summary>
+    /// 开放折线路径（<b>不</b>闭合）。描边它就能得到一段“弧”——
+    /// 环形进度必须用这个：若用“中心→弧→中心”的封闭扇形再拿底色挖内圆，
+    /// 内圆会被填成<b>不透明底色</b>，在非该色的页面上就是一个白饼（实测踩到：
+    /// 墨迹占比 0.65，看着是实心饼；而 PNG 本该中心透明）。
+    /// </summary>
+    private static SixLabors.ImageSharp.Drawing.IPath PolyOpen(params ImgPointF[] pts)
+    {
+        var pb = new SixLabors.ImageSharp.Drawing.PathBuilder();
+        pb.MoveTo(pts[0]);
+        for (var i = 1; i < pts.Length; i++) pb.LineTo(pts[i]);
         return pb.Build();
     }
 
@@ -1988,28 +3129,49 @@ public class Skill
     }
 
     // ---- 图片 ----
+    /// <summary>
+    /// 配图页：<c>variant</c> = <c>full</c>（默认，整块图居中）| <c>left</c>（图左文右）|
+    /// <c>right</c>（文左图右）| <c>bleed</c>（半出血图 + 文字叠在上面）|
+    /// <c>gallery</c>（图廊，2~4 张）。
+    ///
+    /// <para>
+    /// 参考 slide-types.md 的 Mixed Media / Image Showcase：
+    /// 只有“整页一张图”不够——报告类幻灯片大量需要“左文右图”这种图文混排。
+    /// </para>
+    /// </summary>
     private static string ImageBody(JsonElement el, SlideCtx ctx)
+    {
+        return VariantOf(el, "full") switch
+        {
+            "left" => ImageSide(el, ctx, imageFirst: true),
+            "right" => ImageSide(el, ctx, imageFirst: false),
+            "gallery" or "grid" => ImageGallery(el, ctx),
+            _ => ImageFull(el, ctx),
+        };
+    }
+
+    /// <summary>图片缺失时的占位（不静默略过：报 warning，页面上也画出可见提示）。</summary>
+    private static string ImageMissing(JsonElement el, SlideCtx ctx, string? path, long x, long y, long cx, long cy, bool radius)
+    {
+        var t = ctx.Theme;
+        var msg = string.IsNullOrWhiteSpace(path) ? "（未提供 path，无法插入图片）" : "（图片不存在：" + path + "）";
+        if (!string.IsNullOrWhiteSpace(path)) Warn("图片不存在，已改用占位块：" + path);
+        return Rect(ctx.NextId(), x, y, cx, cy, t.Light, radius: radius)
+             + TextBox(ctx.NextId(), x, y, cx, cy, Para(msg, 1300, t.Secondary, align: "ctr"), anchor: "ctr");
+    }
+
+    private static string ImageFull(JsonElement el, SlideCtx ctx)
     {
         var path = Str(el, "path");
         var caption = Str(el, "caption");
         var availH = BodyH - (string.IsNullOrWhiteSpace(caption) ? 0 : 457200);
-
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            var t = ctx.Theme;
-            var msg = string.IsNullOrWhiteSpace(path)
-                ? "（未提供 path，无法插入图片）"
-                : "（图片不存在：" + path + "）";
-            return Rect(ctx.NextId(), MX, BodyY, CW, availH, ctx.Theme.Light, radius: true)
-                 + TextBox(ctx.NextId(), MX, BodyY, CW, availH,
-                        Para(msg, 1500, t.Secondary, align: "ctr"), anchor: "ctr");
-        }
+            return ImageMissing(el, ctx, path, MX, BodyY, CW, availH, radius: true);
 
-        byte[] bytes;
-        int pxW, pxH;
+        byte[] bytes; int pxW, pxH;
         try
         {
-            using var img = SixLabors.ImageSharp.Image.Load(path!);
+            using var img = Image.Load(path!);
             pxW = img.Width; pxH = img.Height;
         }
         catch (Exception ex)
@@ -2027,11 +3189,135 @@ public class Skill
 
         var rel = ctx.AddImage(File.ReadAllBytes(path!));
         var shapes = new StringBuilder();
-        shapes.Append(Picture(ctx.NextId(), rel, x, y, cx, cy));
+        shapes.Append(Picture(ctx.NextId(), rel, x, y, cx, cy, radius: true));
         if (!string.IsNullOrWhiteSpace(caption))
             shapes.Append(TextBox(ctx.NextId(), MX, BodyY + availH, CW, 365760,
                 Para(caption!, 1200, ctx.Theme.Secondary, align: "ctr")));
         return shapes.ToString();
+    }
+
+    /// <summary>图文混排：一半图（按框裁切，不变形）+ 一半文字要点。</summary>
+    private static string ImageSide(JsonElement el, SlideCtx ctx, bool imageFirst)
+    {
+        var t = ctx.Theme;
+        var gap = _m.Gap;
+        var imgW = CW * 52 / 100;
+        var textW = CW - imgW - gap;
+        var imgX = imageFirst ? MX : MX + textW + gap;
+        var textX = imageFirst ? MX + imgW + gap : MX;
+
+        var sb = new StringBuilder();
+        var path = Str(el, "path");
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            sb.Append(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, BodyH), imgX, BodyY, imgW, BodyH, radius: true));
+        else
+            sb.Append(ImageMissing(el, ctx, path, imgX, BodyY, imgW, BodyH, radius: true));
+
+        // 文字侧：可选小标题 + 要点
+        var paras = new StringBuilder();
+        var heading = Str(el, "heading");
+        if (!string.IsNullOrWhiteSpace(heading))
+            paras.Append(Para(heading!.Trim(), 1900, t.Primary, bold: true, align: "l", font: t.FontTitle));
+        var items = StringList(el, "bullets");
+        if (items.Count == 0) items = StringList(el, "items");
+        var text = Str(el, "text");
+        if (items.Count == 0 && !string.IsNullOrWhiteSpace(text)) items.Add(text!);
+        var caption = Str(el, "caption");
+        if (items.Count == 0 && !string.IsNullOrWhiteSpace(caption)) items.Add(caption!);
+
+        var plan = items.Select(b => (Text: b, Size: 1600, SpaceBefore: 12, LineSpacing: 1.25)).ToList();
+        var availH = BodyH - (string.IsNullOrWhiteSpace(heading) ? 0 : 762000);
+        var scale = ScaleForHeight(plan, textW - _m.Gap, availH);
+        if (items.Count == 0) paras.Append(Para("（未提供文字内容）", 1500, t.Secondary));
+        foreach (var b in items)
+            paras.Append(Para(b, Scaled(1600, scale), t.Text, align: "l", bullet: "•",
+                spaceBefore: (int)Math.Round(12 * scale), lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+        sb.Append(TextBox(ctx.NextId(), textX, BodyY, textW, BodyH, paras.ToString(), anchor: "t"));
+
+        if (!string.IsNullOrWhiteSpace(caption) && items.Count > 0)
+            sb.Append(Footnote(caption!, ctx));
+        return sb.ToString();
+    }
+
+    /// <summary>图廊：2~4 张图平铺（每张按单元格裁切），可带逐张说明。</summary>
+    private static string ImageGallery(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var shots = new List<(string Path, string Caption)>();
+        if (el.TryGetProperty("images", out var arrEl) && arrEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var it in arrEl.EnumerateArray())
+            {
+                if (it.ValueKind == JsonValueKind.String) shots.Add((it.GetString() ?? "", ""));
+                else if (it.ValueKind == JsonValueKind.Object)
+                    shots.Add((Str(it, "path") ?? "", Str(it, "caption") ?? ""));
+            }
+        }
+        if (shots.Count == 0 && Str(el, "path") is { Length: > 0 } single)
+        {
+            shots.Add((single, Str(el, "caption") ?? ""));
+        }
+        if (shots.Count == 0)
+            return ImageMissing(el, ctx, null, MX, BodyY, CW, BodyH, radius: true);
+        shots = shots.Take(4).ToList();
+
+        var cols = shots.Count == 1 ? 1 : 2;
+        var rows = (int)Math.Ceiling(shots.Count / (double)cols);
+        var gap = _m.Gap;
+        var cellW = (CW - gap * (cols - 1)) / cols;
+        var cellH = (BodyH - gap * (rows - 1)) / rows;
+        var capH = shots.Any(s => s.Caption.Length > 0) ? 365760 : 0;
+        var imgH = cellH - capH;
+
+        var sb = new StringBuilder();
+        for (var i = 0; i < shots.Count; i++)
+        {
+            var c = i % cols; var r = i / cols;
+            var x = MX + c * (cellW + gap);
+            var y = BodyY + r * (cellH + gap);
+            var (p, cap) = shots[i];
+            if (!string.IsNullOrWhiteSpace(p) && File.Exists(p))
+                sb.Append(Picture(ctx.NextId(), AddCoverImage(ctx, p, cellW, imgH), x, y, cellW, imgH, radius: true));
+            else
+                sb.Append(ImageMissing(el, ctx, p, x, y, cellW, imgH, radius: true));
+            if (cap.Length > 0)
+                sb.Append(TextBox(ctx.NextId(), x, y + imgH, cellW, capH,
+                    Para(cap, 1200, t.Secondary, align: "ctr"), anchor: "ctr"));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 半出血图文页（自包含：不经通用标题）。右半页铺满整高图，左侧深色蒙层上放标题与要点。
+    /// 适合产品截图、场景图配说明。
+    /// </summary>
+    private static string ImageBleed(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var imgW = W * 6 / 12;
+        var imgX = W - imgW;
+        var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Primary) };
+        var path = Str(el, "path");
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, H), imgX, 0, imgW, H));
+        else
+            shapes.Add(ImageMissing(el, ctx, path, imgX, 0, imgW, H, radius: false));
+
+        var textW = imgX - MX * 2;
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(Str(el, "title") ?? "", 3400, t.Bg, lineSpacing: 108));
+        var items = StringList(el, "bullets");
+        if (items.Count == 0) items = StringList(el, "items");
+        var text = Str(el, "text");
+        if (items.Count == 0 && !string.IsNullOrWhiteSpace(text)) items.Add(text!);
+        var plan = items.Select(b => (Text: b, Size: 1600, SpaceBefore: 12, LineSpacing: 1.25)).ToList();
+        var scale = ScaleForHeight(plan, textW - _m.Gap, 2743200);
+        foreach (var b in items)
+            paras.Append(Para(b, Scaled(1600, scale), t.OnPrimary, align: "l", bullet: "•",
+                spaceBefore: (int)Math.Round(12 * scale), lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+        shapes.Add(TextBox(ctx.NextId(), MX, 1371600, textW, 4114800, paras.ToString(), anchor: "ctr"));
+        shapes.Add(PageBadge(ctx));
+        return SlideXml(t.Primary, shapes);
     }
 
     // ---- 图表（渲成 PNG 再嵌入）----
@@ -2227,7 +3513,9 @@ public class Skill
             }
         }
         if (series.Count == 0) series.Add(("", ReadNumbers(el, "values")));
-        if (series.All(s => s.Values.Length == 0))
+        var isScatter = kind == "scatter";
+        // 散点图的数据在 series[].points 里，不走 categories+values；不能拿“values 为空”把它拦下去
+        if (!isScatter && series.All(s => s.Values.Length == 0))
             throw new InvalidOperationException("图表缺少数据：请提供 series[].values 或 values。");
         if (categories.Count == 0)
         {
@@ -2241,6 +3529,19 @@ public class Skill
         var dark = IsDarkBg(t);
 
         var availHn = BodyH - (string.IsNullOrWhiteSpace(caption) ? 0 : 457200);
+        const int pxW = 1400, pxH = 800;
+
+        // 散点图：入参是 series[].points:[[x,y],…]（或 [{x,y}]），与柱/折线的 categories+values 不同构，
+        // 所以在上面的“缺数据”校验之前就先分流出去。
+        if (isScatter)
+        {
+            var pts = ReadPointSeries(el);
+            if (pts.Count == 0 || pts.All(p => p.Ys.Length == 0))
+                throw new InvalidOperationException("散点图缺少数据：请提供 series[].points，如 [[1,2],[3,4]]。");
+            if (wantNative) _nativeFallback = kind;   // 原生散点图的 schema 另有一套，先只出图
+            var sparkPng = RenderScatter(pxW, pxH, title, yLabel, Str(el, "xLabel"), pts, dark, t);
+            return ImageChartFrame(ctx, sparkPng, caption, availHn);
+        }
 
         // 原生图表：交给 PowerPoint 自己画，用户可在里面改数据（代价是 schema 风险，故默认不开）
         if (wantNative && SupportsNativeChart(kind))
@@ -2259,7 +3560,6 @@ public class Skill
         if (wantNative && !SupportsNativeChart(kind))
             _nativeFallback = kind;   // 记下来，返回 JSON 里如实说明降级了
 
-        const int pxW = 1400, pxH = 800;
         byte[] png;
         try
         {
@@ -2268,6 +3568,7 @@ public class Skill
                 "pie" => RenderPie(pxW, pxH, title, categories, series[0].Values, dark, t),
                 "doughnut" => RenderPie(pxW, pxH, title, categories, series[0].Values, dark, t, doughnut: true),
                 "line" => RenderLine(pxW, pxH, title, yLabel, categories, series, dark, t),
+                "radar" => RenderRadar(pxW, pxH, title, categories, series, dark, t),
                 _ => RenderBar(pxW, pxH, title, yLabel, categories, series, dark, t),
             };
         }
@@ -2289,6 +3590,13 @@ public class Skill
         }
 
         var availH = BodyH - (string.IsNullOrWhiteSpace(caption) ? 0 : 457200);
+        return ImageChartFrame(ctx, png, caption, availH);
+    }
+
+    /// <summary>把渲好的图表 PNG 按可用区域等比居中嵌入，可选下方图注。图片型图表的公共收尾。</summary>
+    private static string ImageChartFrame(SlideCtx ctx, byte[] png, string? caption, long availH)
+    {
+        const int pxW = 1400, pxH = 800;
         var scale = Math.Min((double)CW / pxW, (double)availH / pxH);
         var cx = (long)(pxW * scale);
         var cy = (long)(pxH * scale);
@@ -2300,8 +3608,329 @@ public class Skill
         shapes.Append(Picture(ctx.NextId(), rel, x, y, cx, cy));
         if (!string.IsNullOrWhiteSpace(caption))
             shapes.Append(TextBox(ctx.NextId(), MX, BodyY + availH, CW, 365760,
-                Para(caption!, 1200, t.Secondary, align: "ctr")));
+                Para(caption!, 1200, ctx.Theme.Secondary, align: "ctr")));
         return shapes.ToString();
+    }
+
+    /// <summary>散点图的数据源：<c>series[].points</c>，支持 <c>[[x,y],…]</c> 与 <c>[{x,y},…]</c> 两种写法。</summary>
+    private static List<(string Name, double[] Xs, double[] Ys)> ReadPointSeries(JsonElement el)
+    {
+        var result = new List<(string Name, double[] Xs, double[] Ys)>();
+        if (!el.TryGetProperty("series", out var sv) || sv.ValueKind != JsonValueKind.Array) return result;
+        foreach (var one in sv.EnumerateArray())
+        {
+            if (one.ValueKind != JsonValueKind.Object) continue;
+            var name = Str(one, "name") ?? "";
+            var xs = new List<double>();
+            var ys = new List<double>();
+            if (one.TryGetProperty("points", out var pv) && pv.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var p in pv.EnumerateArray())
+                {
+                    if (p.ValueKind == JsonValueKind.Array)
+                    {
+                        var pair = p.EnumerateArray().ToList();
+                        if (pair.Count >= 2 && pair[0].ValueKind == JsonValueKind.Number && pair[1].ValueKind == JsonValueKind.Number)
+                        {
+                            xs.Add(pair[0].GetDouble()); ys.Add(pair[1].GetDouble());
+                        }
+                    }
+                    else if (p.ValueKind == JsonValueKind.Object
+                        && p.TryGetProperty("x", out var pxe) && pxe.ValueKind == JsonValueKind.Number
+                        && p.TryGetProperty("y", out var pye) && pye.ValueKind == JsonValueKind.Number)
+                    {
+                        xs.Add(pxe.GetDouble()); ys.Add(pye.GetDouble());
+                    }
+                }
+            }
+            if (xs.Count > 0) result.Add((name, xs.ToArray(), ys.ToArray()));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 散点图：X/Y 均为数值轴，直接按数据范围线性映射，不做分类分槽。
+    /// 适合“相关性 / 分布”这类表达（分类轴折线图讲不了这个）。
+    /// </summary>
+    private static byte[] RenderScatter(int w, int h, string? title, string? yLabel, string? xLabel,
+        List<(string Name, double[] Xs, double[] Ys)> series, bool dark, Theme t)
+    {
+        using var img = new Image<Rgba32>(w, h);
+        var fg = dark ? ImgColor.White : ImgColor.Black;
+        var muted = dark ? ImgColor.FromRgba(170, 178, 190, 255) : ImgColor.FromRgba(90, 90, 90, 255);
+
+        var minX = series.SelectMany(s => s.Xs).DefaultIfEmpty(0).Min();
+        var maxX = series.SelectMany(s => s.Xs).DefaultIfEmpty(1).Max();
+        var minY = series.SelectMany(s => s.Ys).DefaultIfEmpty(0).Min();
+        var maxY = series.SelectMany(s => s.Ys).DefaultIfEmpty(1).Max();
+        if (maxX - minX < 1e-9) { maxX = minX + 1; }
+        if (maxY - minY < 1e-9) { maxY = minY + 1; }
+
+        const int padR = 36, padB = 76, ticks = 4;
+        var tickTexts = new string[ticks + 1];
+        for (var i = 0; i <= ticks; i++) tickTexts[i] = (minY + (maxY - minY) * i / ticks).ToString("0.##");
+        var tickW = tickTexts.Max(s => MeasureText(s, 13f));
+        var padL = (int)Math.Min(200, Math.Max(72, tickW + 30));
+        var legendSeries = series.Select(s => (s.Name, s.Ys)).ToList();
+        var legend = LayoutLegend(legendSeries, w - padL - padR, 14f, 3);
+        var padT = (title is null ? 40 : 74) + legend.Rows * 24;
+
+        img.Mutate(x =>
+        {
+            x.Fill(dark ? ImgColor.FromRgba(13, 17, 23, 255) : ImgColor.White);
+            if (!string.IsNullOrWhiteSpace(title))
+                x.DrawText(FitText(title, 26f, w - padL - padR), Family(26f), fg, new ImgPointF(padL, 24));
+            for (var i = 0; i <= ticks; i++)
+            {
+                var y = h - padB - (float)((h - padT - padB) * i / (double)ticks);
+                x.DrawLine(muted, 1f, new ImgPointF(padL, y), new ImgPointF(w - padR, y));
+                x.DrawText(tickTexts[i], Family(13f), muted,
+                    new ImgPointF((float)(padL - 10 - MeasureText(tickTexts[i], 13f)), y - 9));
+            }
+            if (!string.IsNullOrWhiteSpace(yLabel))
+                x.DrawText(FitText(yLabel, 13f, w - padL - padR), Family(13f), muted,
+                    new ImgPointF(padL, Math.Max(6, padT - 22)));
+            x.DrawLine(fg, 1.6f, new ImgPointF(padL, padT), new ImgPointF(padL, h - padB));
+            x.DrawLine(fg, 1.6f, new ImgPointF(padL, h - padB), new ImgPointF(w - padR, h - padB));
+            if (legend.Rows > 0) DrawLegend(x, legend, padL, padT - legend.Rows * 24f, w - padL - padR, Family(14f), fg, muted);
+
+            for (var s = 0; s < series.Count; s++)
+            {
+                var color = ImgColor.ParseHex(Palette[s % Palette.Length]);
+                var xs = series[s].Xs; var ys = series[s].Ys;
+                for (var i = 0; i < xs.Length && i < ys.Length; i++)
+                {
+                    var px = (float)(padL + (w - padL - padR) * ((xs[i] - minX) / (maxX - minX)));
+                    var py = (float)(h - padB - (h - padT - padB) * ((ys[i] - minY) / (maxY - minY)));
+                    x.Fill(color, new ImgEllipse(new ImgPointF(px, py), 5.5f));
+                }
+            }
+            // X 轴刻度只给首/中/末三个，避免与 Y 轴文案撞车
+            if (!string.IsNullOrWhiteSpace(xLabel))
+                x.DrawText(FitText(xLabel, 13f, w - padL - padR), Family(13f), muted,
+                    new ImgPointF(padL, h - padB + 34));
+            for (var i = 0; i <= 2; i++)
+            {
+                var v = minX + (maxX - minX) * i / 2.0;
+                var lab = v.ToString("0.##");
+                var px = (float)(padL + (w - padL - padR) * i / 2.0 - MeasureText(lab, 13f) / 2);
+                x.DrawText(lab, Family(13f), muted,
+                    new ImgPointF(ClampX(px, padL, w - padR - (float)MeasureText(lab, 13f)), h - padB + 10));
+            }
+        });
+        return ToPng(img);
+    }
+
+    /// <summary>
+    /// 雷达图（蜘蛛图）：<c>categories</c> 是各条轴，每条 series 给一组值。
+    /// 适合“多维能力对比”（如几套方案在 5 个维度上的得分）。
+    /// </summary>
+    private static byte[] RenderRadar(int w, int h, string? title, List<string> cats,
+        List<(string Name, double[] Values)> series, bool dark, Theme t)
+    {
+        using var img = new Image<Rgba32>(w, h);
+        var fg = dark ? ImgColor.White : ImgColor.Black;
+        var muted = dark ? ImgColor.FromRgba(170, 178, 190, 255) : ImgColor.FromRgba(90, 90, 90, 255);
+        var n = Math.Max(3, cats.Count);
+        var maxV = Math.Max(0.0001, series.SelectMany(s => s.Values).DefaultIfEmpty(0).Max());
+
+        var legend = LayoutLegend(series, w - 80, 14f, 3);
+        var padT = (title is null ? 30 : 66) + legend.Rows * 24;
+        var cx = w / 2f;
+        var cy = padT + (h - padT - 44) / 2f;
+        // 半径同时受宽高限制，并给轴标签留出文字余地
+        var radius = Math.Min((w - 120) / 2f, (h - padT - 44) / 2f) * 0.86f;
+
+        ImgPointF At(int i, double frac)
+        {
+            var ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+            return new ImgPointF(cx + (float)(radius * frac * Math.Cos(ang)),
+                cy + (float)(radius * frac * Math.Sin(ang)));
+        }
+
+        img.Mutate(x =>
+        {
+            x.Fill(dark ? ImgColor.FromRgba(13, 17, 23, 255) : ImgColor.White);
+            if (!string.IsNullOrWhiteSpace(title))
+                x.DrawText(FitText(title, 26f, w - 80), Family(26f), fg, new ImgPointF(40, 22));
+            // 同心网格 + 轴线
+            for (var ring = 1; ring <= 4; ring++)
+            {
+                var pts = Enumerable.Range(0, n).Select(i => At(i, ring / 4.0)).ToArray();
+                x.Draw(muted, 1f, Poly(pts));
+            }
+            for (var i = 0; i < n; i++) x.DrawLine(muted, 1f, new ImgPointF(cx, cy), At(i, 1.0));
+
+            for (var s = 0; s < series.Count; s++)
+            {
+                var color = ImgColor.ParseHex(Palette[s % Palette.Length]);
+                var vals = series[s].Values;
+                var pts = Enumerable.Range(0, n)
+                    .Select(i => At(i, Math.Clamp(i < vals.Length ? vals[i] / maxV : 0, 0, 1))).ToArray();
+                x.Draw(color, 2.6f, Poly(pts));
+                foreach (var p in pts) x.Fill(color, new ImgEllipse(p, 4.5f));
+            }
+
+            // 轴标签：放在轴的延长线上，再按边界夹住，避免画到画布外
+            for (var i = 0; i < n; i++)
+            {
+                var lab = FitText(cats[i], 14f, (float)(radius * 0.7));
+                if (lab.Length == 0) continue;
+                var p = At(i, 1.16);
+                var tw = (float)MeasureText(lab, 14f);
+                var lx = ClampX(p.X - tw / 2, 8, w - 8 - tw);
+                var ly = Math.Clamp(p.Y - 9, 4, h - 24);
+                x.DrawText(lab, Family(14f), fg, new ImgPointF(lx, ly));
+            }
+            if (legend.Rows > 0) DrawLegend(x, legend, 40, padT - legend.Rows * 24f, w - 80, Family(14f), fg, muted);
+        });
+        return ToPng(img);
+    }
+
+    // ---- 进度 / 仪表 ----
+    /// <summary>
+    /// 进度页：<c>variant</c> = <c>bar</c>（默认，横向进度条）| <c>ring</c>（环形仪表）。
+    /// <c>items:[{label, value}]</c>，<c>max</c> 默认为 100（可直接给百分数）。
+    ///
+    /// <para>
+    /// 对应设计文档里的 “SVG bar / progress / ring” —— 进度、完成度、占比这类表达，
+    /// 用数字卡片（kpi）说不清“已走到哪”，用条形/环形才直观。
+    /// </para>
+    /// </summary>
+    private static string ProgressBody(JsonElement el, SlideCtx ctx)
+    {
+        return VariantOf(el, "bar") is "ring" or "donut" or "gauge"
+            ? ProgressRing(el, ctx)
+            : ProgressBar(el, ctx);
+    }
+
+    private static List<(string Label, double Value)> ProgressItems(JsonElement el)
+    {
+        var items = new List<(string Label, double Value)>();
+        if (el.TryGetProperty("items", out var iv) && iv.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var it in iv.EnumerateArray())
+            {
+                if (it.ValueKind != JsonValueKind.Object) continue;
+                var label = Str(it, "label") ?? "";
+                var value = 0.0;
+                if (it.TryGetProperty("value", out var vv))
+                {
+                    if (vv.ValueKind == JsonValueKind.Number) value = vv.GetDouble();
+                    else if (vv.ValueKind == JsonValueKind.String
+                        && double.TryParse(vv.GetString()?.Trim().TrimEnd('%'), out var parsed)) value = parsed;
+                }
+                if (label.Length == 0 && value == 0) continue;
+                items.Add((label, value));
+            }
+        }
+        return items;
+    }
+
+    private static string ProgressBar(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = ProgressItems(el);
+        if (items.Count == 0) return BulletBody(el, ctx, accent: false);
+        var max = Math.Max(1e-6, NumOf(el, "max", 100));
+
+        var rowH = Math.Min(BodyH / items.Count, 1143000);
+        var totalH = rowH * items.Count;
+        var y0 = BodyY + Math.Max(0, (BodyH - totalH) / 2);
+        var labelW = CW * 30 / 100;
+        var valueW = 1000000L;
+        var barX = MX + labelW + _m.Gap;
+        var barW = CW - labelW - valueW - _m.Gap * 2;
+        var barH = Sz(190500);
+
+        var sb = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var y = y0 + i * rowH;
+            var frac = Math.Clamp(items[i].Value / max, 0, 1);
+            var trackY = y + (rowH - barH) / 2;
+            sb.Append(TextBox(ctx.NextId(), MX, y, labelW, rowH,
+                Para(items[i].Label, 1600, t.Text, align: "l", lineSpacing: 120), anchor: "ctr"));
+            sb.Append(Rect(ctx.NextId(), barX, trackY, barW, barH, t.Light, radius: true));
+            var fillW = (long)(barW * frac);
+            if (fillW > 0) sb.Append(Rect(ctx.NextId(), barX, trackY, Math.Max(fillW, barH), barH, t.Accent, radius: true));
+            sb.Append(TextBox(ctx.NextId(), barX + barW + _m.Gap, y, valueW, rowH,
+                Para(FormatProgress(items[i].Value), 1600, t.Primary, bold: true, align: "r"), anchor: "ctr"));
+        }
+        var caption = Str(el, "caption");
+        if (!string.IsNullOrWhiteSpace(caption)) sb.Append(Footnote(caption!, ctx));
+        return sb.ToString();
+    }
+
+    private static string ProgressRing(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = ProgressItems(el).Take(4).ToList();
+        if (items.Count == 0) return BulletBody(el, ctx, accent: false);
+        var max = Math.Max(1e-6, NumOf(el, "max", 100));
+
+        // 环形：内容区居中排一行，每个环下面跟一个标签
+        var labelH = 685800L;
+        var d = Math.Min((BodyH - labelH), CW / items.Count - _m.Gap);
+        var cellW = CW / items.Count;
+        var ringPx = 320;
+        var dark = IsDarkBg(t);
+        var sb = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var frac = Math.Clamp(items[i].Value / max, 0, 1);
+            var x = MX + cellW * i + (cellW - d) / 2;
+            var y = BodyY + Math.Max(0, (BodyH - labelH - d) / 2);
+            var png = RenderRing(ringPx, frac, dark, t);
+            sb.Append(Picture(ctx.NextId(), ctx.AddImage(png), x, y, d, d));
+            sb.Append(TextBox(ctx.NextId(), MX + cellW * i, y + d + Sz(68580), cellW, labelH,
+                Para(FormatProgress(items[i].Value), 1800, t.Primary, bold: true, align: "ctr", lineSpacing: 110)
+                + Para(items[i].Label, 1400, t.Secondary, align: "ctr", spaceBefore: 4, lineSpacing: 115),
+                anchor: "t"));
+        }
+        var caption = Str(el, "caption");
+        if (!string.IsNullOrWhiteSpace(caption)) sb.Append(Footnote(caption!, ctx));
+        return sb.ToString();
+    }
+
+    private static string FormatProgress(double v)
+        => Math.Abs(v - Math.Round(v)) < 0.05 ? Math.Round(v).ToString("0") + "%" : v.ToString("0.#") + "%";
+
+    /// <summary>
+    /// 画一个环形进度（透明底 PNG）：底环 + 按比例的前景弧。
+    /// 弧用多边形逼近（每 3° 一段），与饼图同一个理由——ImageSharp.Drawing 没有 DrawArc，
+    /// 而 PathBuilder.AddArc 的语义很容易用错（详见 README 的“几何坑”）。
+    /// </summary>
+    private static byte[] RenderRing(int px, double frac, bool dark, Theme t)
+    {
+        using var img = new Image<Rgba32>(px, px);
+        var track = ImgColor.ParseHex(BareHex(dark ? "2A3242" : t.Light));
+        // 前景色用主题强调色（调色板已过可读性守卫，深色底上也是亮的）
+        var fg = ImgColor.ParseHex(BareHex(t.Accent));
+        var thick = px * 0.11f;
+        var r = px * 0.40f;
+        var mid = px / 2f;
+
+        img.Mutate(x =>
+        {
+            x.Draw(track, thick, new ImgEllipse(new ImgPointF(mid, mid), r));
+            if (frac <= 0.001) return;
+            if (frac >= 0.999)
+            {
+                x.Draw(fg, thick, new ImgEllipse(new ImgPointF(mid, mid), r));
+                return;
+            }
+            // 按比例描出一段弧（保持中心透明）
+            var steps = Math.Max(6, (int)(frac * 120));
+            var pts = new ImgPointF[steps + 1];
+            for (var i = 0; i <= steps; i++)
+            {
+                var ang = -Math.PI / 2 + 2 * Math.PI * frac * i / steps;
+                pts[i] = new ImgPointF(mid + (float)(r * Math.Cos(ang)), mid + (float)(r * Math.Sin(ang)));
+            }
+            x.Draw(fg, thick, PolyOpen(pts));
+        });
+        return ToPng(img);
     }
 
     private static string BuildBullets(List<string> items, int sz, string color, string boldColor)
@@ -2456,25 +4085,56 @@ public class Skill
         return sb.ToString();
     }
 
-    private static string Picture(int id, string relId, long x, long y, long cx, long cy)
+    private static string Picture(int id, string relId, long x, long y, long cx, long cy, bool radius = false)
     {
         var sb = new StringBuilder();
-        sb.Append("<p:pic><p:nvPicPr><p:cNvPr id=\"").Append(id).Append("\" name=\"Picture ").Append(id).Append("\"/>")
-          .Append("<p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>")
+        sb.Append("<p:pic><p:nvPicPr><p:cNvPr id=\"").Append(id).Append("\" name=\"Picture ").Append(id).Append("\"/>").Append("<p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>")
           .Append("<p:blipFill><a:blip r:embed=\"").Append(relId).Append("\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>")
           .Append("<p:spPr><a:xfrm><a:off x=\"").Append(x).Append("\" y=\"").Append(y)
-          .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>")
-          .Append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>");
+          .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>");
+        if (radius)
+            sb.Append("<a:prstGeom prst=\"roundRect\"><a:avLst><a:gd name=\"adj\" fmla=\"val ").Append(_m.Radius)
+              .Append("\"/></a:avLst></a:prstGeom>");
+        else
+            sb.Append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
+        sb.Append("</p:spPr></p:pic>");
         return sb.ToString();
     }
 
+    /// <summary>
+    /// 把图片裁成目标框比例（cover 语义）后嵌为 PNG，返回关系 id。
+    ///
+    /// <para>
+    /// 为何不在 PPT 里拉伸：<c>blipFill/a:stretch</c> 会把图拉满给定矩形，
+    /// 目标比例与原图不同时就会<b>变形</b>（半出血图、封面背景图都是非等比框）。
+    /// 服务端先按 cover 裁一刀，观感才对，也避免在 PPT 里配 <c>srcRect</c> 那套繁琐计算。
+    /// </para>
+    /// </summary>
+    private static string AddCoverImage(SlideCtx ctx, string path, long boxW, long boxH)
+    {
+        using var img = Image.Load(path);
+        var target = (double)boxW / Math.Max(1, boxH);
+        var w = img.Width; var h = img.Height;
+        var cur = (double)w / h;
+        var crop = cur > target
+            ? new Rectangle((w - (int)Math.Round(h * target)) / 2, 0, Math.Max(1, (int)Math.Round(h * target)), h)
+            : new Rectangle(0, (h - (int)Math.Round(w / target)) / 2, w, Math.Max(1, (int)Math.Round(w / target)));
+        // 限像素规模：超高分辨率原图会让 pptx 变得很大，而幻灯片并不需要那么多像素
+        const int maxW = 1920;
+        var outW = Math.Min(maxW, crop.Width);
+        var outH = Math.Max(1, (int)Math.Round(outW * (double)crop.Height / crop.Width));
+        using var ms = new MemoryStream();
+        img.Clone(x => x.Crop(crop).Resize(outW, outH)).SaveAsPng(ms);
+        return ctx.AddImage(ms.ToArray());
+    }
+
     /// <summary>标题段落：走主题的标题字体（fontTitle）。</summary>
-    private static string ParaTitle(string text, int sz, string color, string align = "l", int lineSpacing = 0)
-        => Para(text, sz, color, bold: true, align: align, font: _currentTheme?.FontTitle, lineSpacing: lineSpacing);
+    private static string ParaTitle(string text, int sz, string color, string align = "l", int lineSpacing = 0, int alpha = 100)
+        => Para(text, sz, color, bold: true, align: align, font: _currentTheme?.FontTitle, lineSpacing: lineSpacing, alpha: alpha);
 
     private static string Para(string text, int sz, string color, bool bold = false, string align = "l",
         string? bullet = null, string? font = null, int spaceBefore = 0,
-        int lineSpacing = 0, int marL = 0)
+        int lineSpacing = 0, int marL = 0, int alpha = 100)
     {
         var sb = new StringBuilder();
         sb.Append("<a:p><a:pPr algn=\"").Append(align).Append("\"");
@@ -2487,19 +4147,25 @@ public class Skill
         else
             sb.Append("<a:buNone/>");
         sb.Append("</a:pPr>");
-        sb.Append(Run(text, sz, color, bold, font));
+        sb.Append(Run(text, sz, color, bold, font, alpha));
         sb.Append("</a:p>");
         return sb.ToString();
     }
 
-    private static string Run(string text, int sz, string color, bool bold, string? font)
+    private static string Run(string text, int sz, string color, bool bold, string? font, int alpha = 100)
     {
         // font 未显式指定时，落到“当前主题的正文字体”——
         // 这样 json 里的 fontBody 覆盖才会真正生效（实测踩到：解析了主题却没用到）。
-        var face = Xml(font ?? _currentTheme?.FontBody ?? "微软雅黑");
+        var latin = Xml(font ?? _currentTheme?.FontBody ?? "微软雅黑");
+        // 东亚字体单独给：否则配了 Georgia 这类拉丁字体时，汉字会整段落到 fallback（甚至缺字）。
+        var ea = Xml(_currentTheme?.FontCjk ?? "微软雅黑");
+        // 透明度只能用 a:alpha 子元素，不能在色值里编（与 pitfalls.md 的约束一致）
+        var fill = alpha >= 100
+            ? Rgb(color)
+            : "<a:srgbClr val=\"" + BareHex(color) + "\"><a:alpha val=\"" + alpha * 1000 + "\"/></a:srgbClr>";
         return "<a:r><a:rPr lang=\"zh-CN\" altLang=\"en-US\" sz=\"" + sz + "\" b=\"" + (bold ? 1 : 0) + "\" dirty=\"0\">"
-             + "<a:solidFill>" + Rgb(color) + "</a:solidFill>"
-             + "<a:latin typeface=\"" + face + "\"/><a:ea typeface=\"" + face + "\"/>"
+             + "<a:solidFill>" + fill + "</a:solidFill>"
+             + "<a:latin typeface=\"" + latin + "\"/><a:ea typeface=\"" + ea + "\"/>"
              + "</a:rPr><a:t>" + Xml(text) + "</a:t></a:r>";
     }
 
@@ -2541,9 +4207,9 @@ public class Skill
           .Append("</a:clrScheme>")
           .Append("<a:fontScheme name=\"知聚字体\">")
           .Append("<a:majorFont><a:latin typeface=\"").Append(Xml(t.FontTitle)).Append("\"/>")
-          .Append("<a:ea typeface=\"").Append(Xml(t.FontTitle)).Append("\"/><a:cs typeface=\"\"/></a:majorFont>")
+          .Append("<a:ea typeface=\"").Append(Xml(t.FontCjk)).Append("\"/><a:cs typeface=\"\"/></a:majorFont>")
           .Append("<a:minorFont><a:latin typeface=\"").Append(Xml(t.FontBody)).Append("\"/>")
-          .Append("<a:ea typeface=\"").Append(Xml(t.FontBody)).Append("\"/><a:cs typeface=\"\"/></a:minorFont>")
+          .Append("<a:ea typeface=\"").Append(Xml(t.FontCjk)).Append("\"/><a:cs typeface=\"\"/></a:minorFont>")
           .Append("</a:fontScheme>")
           .Append("<a:fmtScheme name=\"知聚样式\">")
           .Append("<a:fillStyleLst>")
