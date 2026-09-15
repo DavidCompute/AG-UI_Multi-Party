@@ -1,5 +1,49 @@
-# AG-UI 群聊桌面版 1.0.133 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.133 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.134 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.134 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.134 为当前 Windows 桌面版本。PPT 长表格改为**自动分页**（不再“只显示前几行”）；Word 修复了**图片宽度不受正文区限制**（显式传 20/24cm 会画到页边距外）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.134 is the current Windows desktop release. Long PPT tables are now **split across pages** instead of showing only the first few rows, and Word no longer lets an **image exceed the text area** (an explicit 20/24 cm width used to run past the margins). Web and desktop share the same Hub / gateway / frontend.
+
+## PPT：长表格自动分页
+# PPT: long tables are split across pages
+
+中文：
+- **之前**：一页幻灯片只能放几行，超出的行不画，末行提示「… 另有 N 行未显示」。诚实，但用户拿不到全部数据。
+- **现在**：在**渲染之前**先按“字号下限下一页能放几行”切块，每块出一页 table 页，标题带「（n/m）」；
+  **每一行都在**，不再有截断提示（若某页仍装不下，截断提示仍作为兼底保留）。
+- 为什么在渲染前拆：`RenderSlide` 一次只出一页，页型自己开不了新页；所以 `Build` 先把超长表格展开成多页再逐页渲染。
+- **实测**（实盘容器）：30 行 × 5 列 × 60 字的表 → 自动分成 5 页；回归用例额外校验
+  **30 行一行不少**、无截断提示、形状仍全在版面内。
+
+English:
+- **Before**: only a few rows fitted on one slide, the rest were omitted with an “…and N more rows” line. Honest, but the user never got the full data.
+- **Now**: rows are chunked **before rendering** by how many fit at the font floor, and each chunk becomes its own table slide with a “(n/m)” title. **Every row is present** and the truncation notice is gone (it remains only as a safety net for pathological cells).
+- Why split before rendering: `RenderSlide` produces exactly one slide, so a page type cannot open another page itself; `Build` therefore expands oversized tables into multiple pages first.
+- **Measured** (live container): a 30-row × 5-column × 60-character table becomes 5 pages; the regression additionally checks that **all 30 rows survive**, that no truncation notice appears, and that every shape stays inside the canvas.
+
+## Word：图片不再越出页边距
+# Word: images no longer exceed the margins
+
+中文：
+- **根因**：图片宽度只被卡在 `≤24cm`，而 A4 正文宽约 **15.9cm** —— 显式传 `widthCm:20/24`
+  （或传一张很宽的图配合 `widthPercent`）就会画到页边距外。实测：24cm = 8640000 EMU，正文宽仅 5731510 EMU。
+- **修复**：图片等比缩到**正文区内**，上限由**当前页面的实际尺寸与页边距**算出（不写死 15.9cm），
+  同时限制高度不超正文高。缩到正文宽即止，不会顺手缩得更小。
+- **附带确认**：Word 侧**不需要**“正文缩字号”——Word 是流式排版（段落自然分页、表格行自动长高），
+  不存在“撑出页面”。新增回归 `HugeBodyText_IsNotClipped` 用 300 条要点确认一字不少，
+  把这个判断钉成可验证的事实（而不是拍脑袋不加）。
+- 回退取证：去掉夹取后，该回归报「图片宽 8640000 EMU 超过了正文宽 5731510 EMU」。
+
+English:
+- **Root cause**: image width was only capped at `≤ 24 cm` while A4 text width is about **15.9 cm**, so an explicit `widthCm: 20/24` (or a wide image with `widthPercent`) drew past the margins. Measured: 24 cm = 8,640,000 EMU against a text width of 5,731,510 EMU.
+- **Fix**: images scale down proportionally to fit the **text area**, with the limit derived from the **actual page size and margins** (no hard-coded 15.9 cm), and height capped to the text height too. Scaling stops as soon as the width fits, so images are never shrunk more than necessary.
+- **Also confirmed**: Word does **not** need body-text shrinking — it reflows (paragraphs paginate, table rows grow), so nothing can “spill out of the page”. The new `HugeBodyText_IsNotClipped` regression asserts that all 300 bullet points survive, turning that judgement into a verifiable fact rather than an assumption.
+- Revert evidence: removing the clamp makes that regression report “image width 8640000 EMU exceeds text width 5731510 EMU”.
+
+---
+
+# AG-UI 群聊桌面版 1.0.133 发布说明
+# AG-UI Group Chat Desktop 1.0.133 Release Notes
 
 **版本说明**：1.0.133 为当前 Windows 桌面版本。修复了 PPT 技能里三个**一直存在、且从不报错**的缺陷：① 「缩字号」实际上是死代码（内容一多就直接溢出正文区）；② **`twoCol` 页型从未生效**（每页都静默变成要点页）；③ 表格行高写死，长文本会撑出页面。Web 与桌面共用同一套 Hub/网关/前端。
 **Version note**: 1.0.133 is the current Windows desktop release. It fixes three long-standing defects in the PPT skill that **never reported an error**: (1) the shrink-to-fit logic was effectively dead code (content overflowed the body area instead); (2) the **`twoCol` page type never took effect** (every such slide silently became a bullet page); (3) table row heights were fixed, so long cell text pushed the table off the page. Web and desktop share the same Hub / gateway / frontend.
