@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.130 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.130 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.131 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.131 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.131 为当前 Windows 桌面版本。修复了 1.0.130 新引入的**套模板会丢掉模板底色**（深色模板产出变成白底）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.131 is the current Windows desktop release. It fixes a defect introduced in 1.0.130 where **authoring from a template lost the template's background colour** (a dark template came out light). Web and desktop share the same Hub / gateway / frontend.
+
+## 修复：套模板丢掉模板底色（1.0.131）
+# Fix: template authoring lost the template's background (1.0.131)
+
+中文：
+- **现象**：拿一份深色底模板出稿，产物却变成白底——配色看起来“只借了一半”。
+- **两层原因，都是“读错了地方”**：
+  1. 底色原本只读主题色板的 `lt1`，而 `lt1` 几乎总是 `sysClr(window)`，即**永远是白**。
+     真正生效的底色写在 `<p:bg>` 里，得从那里读。
+  2. 修正后仍不对：**母版也有一份 `<p:bg>`（白底）**，而代码写成
+     `母版 ?? 幻灯片 ?? lt1`，于是在母版的白色上就短路了，根本轮不到幻灯片那一层。
+     按 OOXML 的优先级应该是 **幻灯片 → 母版 → `lt1`**（页背景覆盖母版背景）。
+- **修复**：按上述优先级取色，并在母版 / 首张幻灯片两处都读 `<p:bg>`。
+- **实测**：`tech-night`（底 `000814`）作模板 → 产物 `bg=000814`、`primary=FFD60A`，与模板一致；
+  之前是 `bg=FFFFFF`、`primary=806B05`（被守卫调暗过的橄榄绿）。
+- 全量单测 **1201 全绿**；新增回归 `TemplateMode_KeepsDarkTemplateBackground`（外加母版白底时也会失败）。
+
+English:
+- **Symptom**: authoring from a dark template produced a light deck — the styling looked only half-adopted.
+- **Two layers of the same mistake, both “reading the wrong place”**:
+  1. The background was taken from the theme's `lt1`, which is almost always `sysClr(window)` — i.e. **always white**. The background that actually applies lives in `<p:bg>`.
+  2. After that fix it was still wrong: the **master also carries a `<p:bg>` (white)**, and the code read `master ?? slide ?? lt1`, so it short-circuited on the master's white and never consulted the slide. OOXML precedence is **slide → master → `lt1`** (a slide's background overrides the master's).
+- **Fix**: honour that precedence, reading `<p:bg>` from both the master and the first slide.
+- **Measured**: a `tech-night` template (background `000814`) now yields `bg=000814`, `primary=FFD60A`, matching the template; previously `bg=FFFFFF`, `primary=806B05` (an olive that the readability guard had darkened).
+- Full suite **1201 green**; new regression `TemplateMode_KeepsDarkTemplateBackground` (it also fails if the master's white background is preferred again).
+
+---
+
+# AG-UI 群聊桌面版 1.0.130 发布说明
+# AG-UI Group Chat Desktop 1.0.130 Release Notes
 
 **版本说明**：1.0.130 为当前 Windows 桌面版本。PPT 产出能力大改造：**18 套设计级调色板 + 4 种版式风格 + 4 种新页型**（设计系统移植），新增**原生可编辑图表**（可在 PowerPoint 里改数据）、**读取既有 pptx** 与**套用户模板出稿**。Web 与桌面共用同一套 Hub/网关/前端。
 **Version note**: 1.0.130 is the current Windows desktop release. A major upgrade of the deck authoring skill: **18 design-grade palettes, 4 layout styles and 4 new slide types** (ported design system), plus **native editable charts** (editable in PowerPoint), **reading existing decks** and **authoring from a user-supplied template**. Web and desktop share the same Hub / gateway / frontend.
