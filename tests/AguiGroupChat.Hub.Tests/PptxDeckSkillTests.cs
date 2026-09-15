@@ -1076,7 +1076,9 @@ public sealed class PptxDeckSkillTests
         });
 
         var (path, doc) = RenderDeck(json);
-        Assert.Equal(5, doc.RootElement.GetProperty("slides").GetInt32());
+        // 页数不再固定：超长表格会被自动拆页（这就是本次新增的能力），所以断言 >= 基础页数
+        var pages = doc.RootElement.GetProperty("slides").GetInt32();
+        Assert.True(pages >= 5, $"至少应有 5 页（封面/目录/两栏/表格/kpi），实际 {pages}");
 
         var bad = ShapesOutsideCanvas(path);
         Assert.True(bad.Count == 0,
@@ -1114,16 +1116,78 @@ public sealed class PptxDeckSkillTests
             }
 
             const long bodyY = 1524000, bodyH = 4495800;   // soft 风格下的正文区
-            // slide2 = 目录（题面 18pt=1800）
-            Assert.True(BodySizes("ppt/slides/slide2.xml", bodyY, bodyH).Min() < 1800,
+
+            // 页序会因为自动拆页而变，所以按内容找页，不写死 slideN
+            string SlideContaining(string marker)
+            {
+                foreach (var e in zip.Entries.Where(x => x.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                                                      && x.FullName.EndsWith(".xml", StringComparison.Ordinal)))
+                {
+                    using var sr = new StreamReader(e.Open());
+                    if (sr.ReadToEnd().Contains(marker)) return e.FullName;
+                }
+                Assert.True(false, $"没有找到包含「{marker}」的页");
+                return "";
+            }
+
+            // 目录（题面 18pt=1800）——压力输入下必然需要缩字号
+            Assert.True(BodySizes(SlideContaining("第1章"), bodyY, bodyH).Min() < 1800,
                 "目录项这久多还没有缩字号：内容会溢出正文区");
-            // slide3 = 两栏（题面：小标题 19pt / 要点 15pt）
-            Assert.True(BodySizes("ppt/slides/slide3.xml", bodyY, bodyH).Min() < 1500,
+            // 两栏（题面：小标题 19pt / 要点 15pt）
+            Assert.True(BodySizes(SlideContaining("方案一"), bodyY, bodyH).Min() < 1500,
                 "两栏要点这久多还没有缩字号");
-            // slide5 = 指标卡（题面：数字 32pt / 标签 13pt）
-            Assert.True(BodySizes("ppt/slides/slide5.xml", bodyY, bodyH).Min() < 1300,
+            // 指标卡（题面：数字 32pt / 标签 13pt）
+            Assert.True(BodySizes(SlideContaining("23.45%"), bodyY, bodyH).Min() < 1300,
                 "指标卡标签这久长还没有缩字号");
         }
+    }
+
+    /// <summary>
+    /// 超长表格自动拆页：不再“只显示前几行 + 说还有 N 行”，而是真的分到多页。
+    ///
+    /// <para>
+    /// 断言包括：页数变多、每页标题带「（n/m）」、**每一行都还在**（拆页不能丢数据）、
+    /// 且不存在「另有 N 行未显示」这类截断提示。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void LongTable_IsSplitAcrossPagesWithoutLosingRows()
+    {
+        const int rowCount = 30;
+        var json = JsonSerializer.Serialize(new
+        {
+            title = "长表拆页",
+            slides = new object[]
+            {
+                new { type = "cover", title = "长表拆页" },
+                new { type = "table", title = "明细",
+                      headers = new[] { "序", "名称", "说明" },
+                      rows = Enumerable.Range(1, rowCount)
+                          .Select(i => new[] { $"R{i}", $"项目{i}", "这是一段较长的说明文字，用来把单元格塞满以触发换行" }).ToArray() },
+            },
+        });
+
+        var (path, doc) = RenderDeck(json);
+        var pages = doc.RootElement.GetProperty("slides").GetInt32();
+        Assert.True(pages > 2, $"30 行表应该被拆成多页，实际总页数 {pages}");
+
+        using var zip = ZipFile.OpenRead(path);
+        var tablePages = zip.Entries
+            .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                     && e.FullName.EndsWith(".xml", StringComparison.Ordinal))
+            .Select(e => { using var sr = new StreamReader(e.Open()); return sr.ReadToEnd(); })
+            .Where(x => x.Contains("明细")).ToList();
+        Assert.True(tablePages.Count > 1, "应该有多张续表");
+
+        var all = string.Join("\n", tablePages);
+        // 拆页必须覆盖到每一行（不能丢数据），也不能再出现截断提示
+        for (var i = 1; i <= rowCount; i++)
+            Assert.Contains($"R{i}", all);
+        Assert.DoesNotContain("行未显示", all);
+        // 标题要能看出是续表
+        Assert.Contains("（1/", all);
+
+        Assert.True(ShapesOutsideCanvas(path).Count == 0, "拆页后的表格仍在画布外");
     }
 
     /// <summary>

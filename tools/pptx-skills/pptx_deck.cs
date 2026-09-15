@@ -594,12 +594,17 @@ public class Skill
         if (slides.Count == 0)
             throw new InvalidOperationException("slides 为空：请提供至少一页（如 cover / content / summary）。");
 
+        // 表格自动分页：过长的表格页在这里拆成多页。
+        // 必须在渲染前拆——RenderSlide 一次只出一页，页型自己开不了新页。
+        var pageJson = new List<string>();
+        foreach (var s in slides) pageJson.AddRange(ExpandTableSlide(s));
+
         var path = ResolveOutputPath(root, title);
 
         // 套模板：保留模板的母版/版式/主题，把我们的内容渲染进去（改副本，不动原件）
         var templatePath = Str(root, "template");
         if (!string.IsNullOrWhiteSpace(templatePath))
-            return BuildFromTemplate(root, slides, path, theme, templatePath!.Trim());
+            return BuildFromTemplate(root, pageJson, path, theme, templatePath!.Trim());
 
         var count = 0;
 
@@ -630,12 +635,13 @@ public class Skill
             }
 
             var ids = new List<string>();
-            for (var i = 0; i < slides.Count; i++)
+            for (var i = 0; i < pageJson.Count; i++)
             {
-                var el = slides[i];
+                using var elDoc = JsonDocument.Parse(pageJson[i]);
+                var el = elDoc.RootElement;
                 var sp = presPart.AddNewPart<SlidePart>();
                 sp.AddPart(layoutPart); // 每张幻灯片必须挂一个版式
-                var ctx = new SlideCtx(sp, theme, i + 1, slides.Count, title, subtitle, author, dateText);
+                var ctx = new SlideCtx(sp, theme, i + 1, pageJson.Count, title, subtitle, author, dateText);
                 var xml = RenderSlide(el, ctx);
                 sp.Slide = new P.Slide(xml);
                 var notes = Str(el, "notes");
@@ -865,7 +871,7 @@ public class Skill
     /// 默认清空模板原有的幻灯片（只借它的“皮”），传 <c>keepTemplateSlides:true</c> 则追加在后面。
     /// </para>
     /// </summary>
-    private static (int Slides, string Path) BuildFromTemplate(JsonElement root, List<JsonElement> slides,
+    private static (int Slides, string Path) BuildFromTemplate(JsonElement root, List<string> pageJson,
         string path, Theme theme, string templatePath)
     {
         if (!File.Exists(templatePath))
@@ -922,10 +928,11 @@ public class Skill
                 .Select(x => x.Id?.Value ?? 0u).DefaultIfEmpty(255u).Max() + 1;
 
             var title = Str(root, "title") ?? "演示文稿";
-            var total = slides.Count;
+            var total = pageJson.Count;
             for (var i = 0; i < total; i++)
             {
-                var el = slides[i];
+                using var elDoc = JsonDocument.Parse(pageJson[i]);
+                var el = elDoc.RootElement;
                 var sp = presPart.AddNewPart<SlidePart>();
                 sp.AddPart(layout);
                 var ctx = new SlideCtx(sp, theme, i + 1, total, title,
@@ -1328,11 +1335,11 @@ public class Skill
         return shapes.ToString();
     }
 
-    // ---- 表格 ----
-    private static string TableBody(JsonElement el, SlideCtx ctx)
+    // ---- 表格自动分页 ----
+
+    /// <summary>读 rows 二维数组（TableBody 与分页共用同一套读法，避免两处口径不一致）。</summary>
+    private static List<List<string>> ReadRows(JsonElement el)
     {
-        var t = ctx.Theme;
-        var headers = StringList(el, "headers");
         var rows = new List<List<string>>();
         if (el.TryGetProperty("rows", out var rv) && rv.ValueKind == JsonValueKind.Array)
         {
@@ -1345,6 +1352,90 @@ public class Skill
                 if (row.Count > 0) rows.Add(row);
             }
         }
+        return rows;
+    }
+
+    /// <summary>
+    /// 一页最多放几行表体。按**字号下限**保守估算，口径与 TableBody 一致。
+    /// 保守取值的好处是每页切得少一些、实际渲染时不必被压到下限（先切满再压字号反而难看）。
+    /// </summary>
+    private static int TableRowsPerPage(int cols, List<List<string>> rows)
+    {
+        if (cols <= 0) return Math.Max(1, rows.Count);
+        var colW = CW / cols;
+        var cellMarH = Sz(91440);
+        var cellMarV = Sz(45720);
+        const double s = 0.70;
+        var sz = Math.Max(1000, (int)Math.Round(1300 * s));
+        var lineH = (long)(sz * 127.0 * 1.10);
+        var avail = Math.Max(100000.0, colW - 2 * cellMarH);
+        var used = (long)(457200 * s);          // 表头行
+        var fit = 0;
+        foreach (var row in rows)
+        {
+            var lines = 1;
+            for (var c = 0; c < cols; c++)
+            {
+                var em = 0.0;
+                foreach (var ch in c < row.Count ? row[c] : "") em += ch < 0x2E80 ? 0.55 : 1.0;
+                lines = Math.Max(lines, (int)Math.Ceiling(em * sz * 127.0 / avail));
+            }
+            var h = Math.Max((long)(Sz(320000) * s), lines * lineH + 2 * cellMarV);
+            if (used + h > BodyH) break;
+            used += h;
+            fit++;
+        }
+        return Math.Max(1, fit);
+    }
+
+    /// <summary>
+    /// 把一页展开成 1..n 页（目前只有过长的表格页会拆）。返回**JSON 字符串**列表。
+    ///
+    /// <para>
+    /// 为什么在渲染前拆：<c>RenderSlide</c> 一次只出一页（返回一个 slide 的 XML），
+    /// 页型自己没法“再开一页”。所以在 <see cref="Build"/> 进入渲染前先把超长表格切块，
+    /// 每块变成一页正常的 table 页（标题带“（n/m）”，方便一眼看出是续表）。
+    /// </para>
+    /// </summary>
+    private static List<string> ExpandTableSlide(JsonElement el)
+    {
+        var single = new List<string> { el.GetRawText() };
+        if (!string.Equals((Str(el, "type") ?? "").Trim(), "table", StringComparison.OrdinalIgnoreCase))
+            return single;
+        var rows = ReadRows(el);
+        if (rows.Count == 0) return single;
+        var headers = StringList(el, "headers");
+        var cols = Math.Max(headers.Count, rows.Max(r => r.Count));
+        var perPage = TableRowsPerPage(cols, rows);
+        if (rows.Count <= perPage) return single;
+
+        var pages = (rows.Count + perPage - 1) / perPage;
+        var baseTitle = Str(el, "title") ?? "";
+        var result = new List<string>(pages);
+        for (var p = 0; p < pages; p++)
+        {
+            var chunk = rows.Skip(p * perPage).Take(perPage).ToList();
+            var sb = new StringBuilder("{\"type\":\"table\",\"title\":");
+            sb.Append(Js(baseTitle + "（" + (p + 1) + "/" + pages + "）"));
+            sb.Append(",\"headers\":[").Append(string.Join(",", headers.Select(Js))).Append(']');
+            sb.Append(",\"rows\":[");
+            sb.Append(string.Join(",", chunk.Select(r => "[" + string.Join(",", r.Select(Js)) + "]")));
+            sb.Append(']');
+            // 备注只挂第一页，不重复到每一页
+            var notes = Str(el, "notes");
+            if (p == 0 && !string.IsNullOrWhiteSpace(notes)) sb.Append(",\"notes\":").Append(Js(notes!));
+            sb.Append('}');
+            result.Add(sb.ToString());
+        }
+        return result;
+    }
+
+    // ---- 表格 ----
+    private static string TableBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var headers = StringList(el, "headers");
+        var rows = ReadRows(el);
         var cols = Math.Max(headers.Count, rows.Count == 0 ? 0 : rows.Max(r => r.Count));
         if (cols == 0) return BulletBody(el, ctx, accent: false);
 

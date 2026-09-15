@@ -94,14 +94,26 @@
 
 从**本地文件路径**读入并嵌入（内联、居中、按原图比例缩放）。
 
+```json
+{ "image": { "path": "/app/docs/a.png", "widthCm": 14, "caption": "图 1" } }
+```
+
 - `path`：必填，图片绝对/相对路径
 - `widthCm`：图片宽度（厘米，默认 14，范围 1–24）；也可用 `widthPercent`（相对正文宽度 %）
 - `caption` / `alt`：可选，图题 / 替代文本（`alt` 写入 `docPr descr`，利于可访问性）
 - 支持格式：**png / jpg / jpeg / gif / bmp / tiff**
 - 像素尺寸从文件头解析（PNG/GIF/BMP/JPEG）以保证比例正确；解析不到时按 4:3 估算
+- **图会被等比缩到正文区内**：既不宽过正文宽，也不高过正文高。上限由**当前页面的实际尺寸与页边距**
+  算出（不写死 15.9cm）——实测踩到：原先只把 `widthCm` 卡在 ≤24cm，而 A4 正文宽约 15.9cm，
+  传 20/24 就会画到页边距外（实测 24cm = 8640000 EMU vs 正文宽 5731510 EMU）。
+  回归：`DocxImageFitTests.OversizedImage_IsScaledIntoTheTextArea`。
 
 **错误处理**：文件不存在 → `图片文件不存在：<路径>`；格式不支持 → `不支持的图片格式：<ext>`。
 两者都返回 `"ok":false` + 可读原因，模型可据此改用其它路径或告知用户。
+
+> **为什么 Word 侧不做「正文缩字号」**：Word 是**流式排版**——段落自然分页、表格行自动长高，
+> 不存在“撑出页面”这回事，给它缩字号只会让正文无谓变小。PPT 才需要，因为它的文本框是固定高度。
+> 回归：`DocxImageFitTests.HugeBodyText_IsNotClipped`（300 条要点一字不少）。
 
 ### 文件命名与落盘
 

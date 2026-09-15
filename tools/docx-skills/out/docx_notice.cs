@@ -917,6 +917,17 @@ public class Skill
         long cx = (long)Math.Round(widthCm * 360000.0);
         long cy = pxW > 0 && pxH > 0 ? (long)Math.Round(cx * (double)pxH / pxW) : (long)Math.Round(cx * 0.75);
 
+        // 等比缩到**正文区内**：图不能宽过正文宽，也不能高过正文高。
+        // 实测踩到：上面只把 widthCm 卡在 ≤24cm，而 A4 正文宽只有约 15.9cm ——
+        // 传 widthCm:20/24（或传一张很宽的图 + widthPercent）就会画到页边距外。
+        // 上限从**当前页面的实际尺寸与页边距**算，不写死 15.9。
+        var fitK = Math.Min(1.0, Math.Min((double)TextWidthEmu / cx, (double)TextHeightEmu / cy));
+        if (fitK < 1.0)
+        {
+            cx = Math.Max(1, (long)Math.Round(cx * fitK));
+            cy = Math.Max(1, (long)Math.Round(cy * fitK));
+        }
+
         return ImageDrawingParagraph(relId, cx, cy, Str(im, "caption"), Str(im, "alt"));
     }
 
@@ -1065,6 +1076,14 @@ public class Skill
     }
 
     // ===== 页面 =====
+
+    /// <summary>
+    /// 正文可用宽/高（EMU）。由**实际页面尺寸与页边距**算出，不要写死。
+    /// 注意单位：PageWidth/页边距是 twip（1/20 pt），图片的 cx/cy 是 EMU，1 twip = 635 EMU。
+    /// </summary>
+    private static long TextWidthEmu => Math.Max(1, (PageWidth - MarginLeft - MarginRight) * 635L);
+    private static long TextHeightEmu => Math.Max(1, (PageHeight - MarginTop - MarginBottom) * 635L);
+
     private static SectionProperties SectionProps(string? footerRefId)
     {
         var sect = new SectionProperties();
