@@ -1,3 +1,59 @@
+# AG-UI 群聊桌面版 1.0.138 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.138 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.138 为当前 Windows 桌面版本。PPT 技能全面对齐参考实现（MiniMax pptx-generator）的能力面：**版式变体、图文混排、散点/雷达图、进度与环形仪表页、字体配对、出稿后自检、原地编辑既有稿**。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.138 is the current Windows desktop release. The PPT skill is now feature-aligned with the reference implementation (MiniMax pptx-generator): **layout variants, mixed text+image pages, scatter/radar charts, progress and ring gauges, font pairings, post-generation QA, and in-place editing of existing decks**. Web and desktop share the same Hub / gateway / frontend.
+
+## PPT：版式、图文、图表、QA 与编辑（1.0.138）
+# PPT: layouts, media, charts, QA and editing (1.0.138)
+
+中文：
+- **版式变体**（同一个页型多种排法，`variant`）：封面 `left/center/image/split`、目录 `list/grid/sidebar`、
+  章节页 `number/bar/full`、小结 `list/cta/split`。变体是**枚举**实现的，因此单测逐个变体对比页面 XML——
+  未实现的变体会**静默回落**成默认版式（以前 `twoCol` 就这么死过），光看“标题在不在”拦不住。
+- **图文混排**：`image` 页新增 `left`(图左文右) / `right`(文左图右) / `bleed`(半出血+叠字) /
+  `gallery`(2~4 张图廊)。图片按框**裁切（cover）**而不是拉伸，否则非等比框会变形；
+  图片缺失不再静默空白，而是报 `warnings` 并在页上画占位块。
+- **图表**：新增 `scatter`（散点，按 x/y 数值轴）与 `radar`（雷达，多维对比）；
+  `doughnut/scatter/radar` 请求原生图表时**如实说明降级**（不静默降级）。
+- **进度 / 仪表页（新页型 `progress`）**：`bar` 横向进度条 / `ring` 环形仪表。
+  进度、完成度、占比这类表达用数字卡片（kpi）说不清“已走到哪”。
+- **图标 12 → 45 个**：新增 `money` `target` `rocket` `shield` `layers` `globe` `network` `cloud`
+  `database` `mail` `phone` `calendar` `flag` `search` `edit` `file` `pie` `link` `eye` `heart` `key`
+  `crown` `map` `cpu` `package` `award` `briefcase` `users` `code` `gauge` `filter` `refresh` `download`。
+- **字体**：`fontPair` 命名字体配对（georgia-calibri / cambria-calibri / trebuchet-calibri / …）+ `fontCjk`；
+  **拉丁字面与中文字面分开写**（`a:latin` / `a:ea`）——拿 Georgia 去排汉字会整段落到 fallback。
+- **去掉“标题下强调线”**：设计规范把它列为 AI 生成稿的典型特征，现在**默认不画**，
+  需要旧观感的传 `titleRule: true`。
+- **出稿后自检（QA）**：生成与编辑都会自动跑一遍（返回 `qa` 字段；也可 `action:"qa"` 单独跑）——
+  查占位符 / 空页 / “只有标题” / 自动填充的空状态文案 / 形状越界。两个防误报细节：
+  有图/图表的页不算“只有标题”；外部文件不知道页型时不做这项判定。
+- **原地编辑既有稿（`action:"edit"`）**：删页 / 重排 / 复制页 / 替换文字 / 追加新页。
+  **绝不改原件**（先复制到 `outputPath`），输出与原件相同时直接报错，不能删光、页号越界报可读错误；
+  含图表的页**不支持复制**（需克隆 ChartPart 与内嵌工作簿，容易产出“需要修复”的文件——宁可报错也不破坏）。
+- **两个实测踩到的坑**（都已钉回归）：
+  ① 环形仪表被画成**实心饼**（用底色填内圆挖空 → 中心变成了不透明底色），改用开放折线描边画弧；
+  ② `fontTitle:"宋体"` 被默认的正文字体反手盖掉，导致汉字不走宋体。
+- 测试：新增 39 个用例，全量 **1276 通过**；实盘 27 页 × 3 套调色板/风格组合**形状全部在版面内** + OPC 结构完整；
+  真实单聊 e2e：一次请求产出 8 页（居中封面 / 卡片目录 / 进度条 / 雷达图 / CTA 收尾），模型回报“自检通过：0 空页、0 占位符、0 越界”。
+- 新增本地工具 `tools/run-skill.py`：在本地“编译 + 运行”一份技能（不依赖容器），改渲染代码时迭代快得多。
+
+English:
+- **Layout variants** (several排法 per page type, via `variant`): cover `left/center/image/split`, TOC `list/grid/sidebar`, section `number/bar/full`, summary `list/cta/split`. Variants are **enumerated in code**, so tests compare the generated page XML pairwise — an unimplemented variant **silently falls back** to the default layout (as `twoCol` once did), which a "is the title there?" assertion cannot catch.
+- **Mixed text + image**: the `image` page gains `left`, `right`, `bleed` (half-bleed image with overlaid text) and `gallery` (2-4 images). Pictures are **cover-cropped** to the frame instead of stretched (a non-proportional frame would distort); a missing file no longer yields a silent blank — it reports a `warning` and draws a placeholder.
+- **Charts**: adds `scatter` (numeric x/y axes) and `radar` (multi-dimension comparison); requesting native charts for `doughnut/scatter/radar` **states the fallback** rather than degrading silently.
+- **Progress / gauge page (new `progress` type)**: `bar` or `ring`. Progress and completion ratios cannot be expressed by a KPI number card.
+- **Icons: 12 → 45** (adds `money`, `rocket`, `shield`, `gauge`, `users`, `code`, …).
+- **Fonts**: `fontPair` presets plus `fontCjk`; **Latin and East-Asian typefaces are now written separately** (`a:latin` / `a:ea`) — using Georgia for CJK dropped whole runs to fallback.
+- **No more accent line under titles**: the design guide calls it a hallmark of AI-generated slides, so it is **off by default** (`titleRule: true` restores it).
+- **Post-generation QA**: generation and editing both run it automatically (`qa` in the response; also available as `action:"qa"`) — placeholders, empty slides, title-only slides, auto-filled empty-state text and shapes outside the canvas. Two false-positive guards: slides containing images/charts don't count as title-only, and external files skip that check (page types unknown).
+- **In-place editing (`action:"edit"`)**: delete / reorder / duplicate / replace text / append. It **never touches the original** (copies to `outputPath` first), refuses to write over the source, refuses to delete every slide, and reports out-of-range page numbers readably. Duplicating a slide that contains a chart is **not supported** (it would require cloning the ChartPart and its embedded workbook — an error beats a corrupt file).
+- **Two bugs found by testing** (both pinned by regressions): ① the ring gauge rendered as a **solid pie** (carving the centre with the background colour made it opaque), now drawn as a stroked open arc; ② `fontTitle:"宋体"` was overwritten by the default body font, so CJK never used it.
+- Tests: 39 new cases, **1276 passing** in total; live checks render 27 pages across 3 palette/style combos with **every shape inside the canvas** and a complete OPC structure; a real single-chat run produced an 8-page deck (centred cover / card TOC / progress bars / radar chart / CTA close) and the model reported "self-check passed: 0 empty, 0 placeholders, 0 overflow".
+- New local tool `tools/run-skill.py`: compile and run a skill body locally (no container) for much faster iteration on rendering code.
+
+---
+
 # AG-UI 群聊桌面版 1.0.137 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.137 Release Notes (current Windows desktop release)
 
