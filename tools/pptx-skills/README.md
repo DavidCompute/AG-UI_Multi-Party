@@ -10,7 +10,7 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 
 | skillId | 名称 | 说明 |
 |---|---|---|
-| `pptx_deck` | 演示文稿生成（PPT） | 封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 引言 / 图片 / 图表 / 小结 / 结束页 |
+| `pptx_deck` | 演示文稿生成（PPT） | 封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 大数字 / 网格卡 / 时间轴 / 图标行 / 引言 / 图片 / 图表 / 小结 / 结束页 |
 
 ## 页面类型（slides[].type）
 
@@ -23,11 +23,18 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | `twoCol` | 两栏对比 | `title` `left{heading,bullets}` `right{…}` |
 | `table` | 表格 | `title` `headers[]` `rows[][]` |
 | `kpi` | 指标卡（一行最多 4 张） | `title` `items[{value,label}]` |
+| `stats` | 大数字看板（无卡片底，数字更大） | `title` `items[{value,label}]` `cols` |
+| `grid` | 网格卡片（2/3 列，左侧色条） | `title` `items[{title,text}]` `cols` |
+| `timeline` | 时间轴 / 流程（序号圆 + 连接线，最多 6 步） | `title` `items[{title,detail}]` |
+| `iconRows` | 图标行（彩色圆 + 标题 + 说明，最多 6 行） | `title` `items[{icon,title,text}]` |
 | `quote` | 引言/金句 | `text` `cite` |
 | `image` | 配图 | `title` `path` `caption` |
 | `chart` | 图表（柱/折线/饼/环形） | `title` `chartType` `categories[]` `series[{name,values}]` `yLabel` |
 | `summary` | 小结 | `title` `bullets[]` |
 | `end` | 结束页 | `title` `subtitle` |
+
+`content` 页还可用 `"layout":"timeline|grid|stats|iconRows"` 直接指定子类型（少记几个 type）。
+`items` 里的字符串项会被当作第一个字段（允许 `items:["要点一", …]` 这种简写）。
 
 任何一页都可加 `notes`，写入**演讲者备注**。
 
@@ -40,12 +47,64 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
   "bullets": ["协作：多角色同场会商", "记忆：RAG 长期记忆并可治理", "交付：直接产出可下载文件"] }
 ```
 
-## 主题
+> 设计规范建议**不要每页都用同一种版式**。提纲阶段就为每页选定合适的页型并轮换，
+> 同一份演示稿里连续三页都是 `content` 会显得很平。
 
-`theme` 预设：`business`（默认）/ `tech` / `warm` / `minimal` / `dark` / `vivid`。
+## 主题与版式风格
 
-也可用 `themeColors` 逐项覆盖：`primary`（标题/主色）、`secondary`（辅色/正文强调）、`accent`（强调色）、
+### 18 套命名调色板（推荐）
+
+移植自 MiniMax pptx-generator 的 `design-system.md`。每套只给 **5 个色值**，
+**角色（主色/底色/强调/浅底/正文）由亮度与彩度自动推出**（见 `DeriveTheme`）——
+调色板是“设计语言”、角色映射是“渲染规则”，分开才好在 18 套上一致地成立。
+
+| theme | 适用场景 |
+|---|---|
+| `modern-wellness` | 医疗 / 健康 / 咨询 / 护肤 / 瑜伽 |
+| `business-authority` | 年报 / 财务分析 / 企业介绍 / 政府 |
+| `nature-outdoors` | 户外装备 / 环保 / 农业 / 历史文化 |
+| `vintage-academic` | 学术讲座 / 历史回顾 / 博物馆 / 老字号 |
+| `soft-creative` | 母婴 / 甜品 / 女装 / 幼教 |
+| `bohemian` | 婚礼策划 / 家居 / 有机食品 / 慢生活 |
+| `vibrant-tech` | 体育赛事 / 健身房 / 创业路演 / 青年教育 |
+| `craft-artisan` | 咖啡馆 / 手作 / 传统文化 / 烘焙 |
+| `tech-night` | 科技发布 / 天文 / 夜间经济 / 豪华汽车（**深色底**） |
+| `education-charts` | 统计报告 / 教育 / 市场分析 / 通用商务 |
+| `forest-eco` | 景观设计 / ESG / 双碳 / 植物 |
+| `elegant-fashion` | 高级时装 / 画廊 / 美妆 / 杂志风 |
+| `art-food` | 美食纪录 / 艺术展 / 民族风 / 复古餐厅 |
+| `luxury-mysterious` | 珠宝 / 酒店管理 / 高端咨询 / 心理 |
+| `pure-tech-blue` | 云 / AI / 水务海洋 / 医院 / 洁净能源 |
+| `coastal-coral` | 旅行 / 夏日活动 / 饮品 / 海洋 |
+| `vibrant-orange-mint` | 儿童活动 / 促销海报 / 快消 / 社媒 |
+| `platinum-white-gold` | Agent 产品 / 企业官网 / 金融科技 / 奢侈品牌 |
+
+也可以用历史主题名 `business`（默认）/ `tech` / `warm` / `minimal` / `dark` / `vivid`
+（**色值原样保留**，老调用方产出不变），或用 `themeColors` 逐项覆盖：
+`primary`（标题/主色）、`secondary`（辅色/层级说明）、`accent`（强调色/徽标底）、
 `light`（浅底/卡片）、`bg`（页面底色）、`text`（正文色）；另有 `fontTitle` / `fontBody`。
+
+> 深色主题（如 `tech-night`、`dark`）的 `primary` 取**亮色**——它同时用作深色底上的标题色与反色块填充。
+
+### 4 种版式风格（`style`，与主题正交）
+
+同一套内容只换圆角与留白就能变成 4 种气质；它**只影响页边距 / 间距 / 圆角**，
+与 `theme` 可自由组合（如 `tech-night` + `pill`）。
+
+| style | 气质 | 圆角 | 页边距 | 适用 |
+|---|---|---|---|---|
+| `sharp` | 几何、高密度、严谨 | 直角 | 0.65" | 数据报表 / 表格 |
+| `soft`（默认） | 适度圆角、舒适留白 | 0.05" | 0.92" | 通用商务 |
+| `rounded` | 大圆角、舒展 | 0.15" | 1.10" | 产品介绍 / 市场 |
+| `pill` | 胶囊圆角、大留白 | 0.30" | 1.33" | 品牌发布 / 高端 |
+
+### 可读性兜底（18 套都过 WCAG）
+
+调色板是从设计文档搬进来的，色值本身不保证“当正文色看得清”——比如某套的次深色是饱和红、
+某套全是浅粉。所以派生后统一过一道兜底：正文 ≥ 4.5:1、主色/副色/强调 ≥ 3.0:1，
+并额外把强调色调到“黑或白至少一个能读清”（它是页码徽标/序号圆的底色）。
+18 套逐对断言的钉子见单测 `NamedPalette_RendersAndKeepsTextReadable`；
+实际生效的色值会回显在返回 JSON 的 `palette` 字段里，便于排障。
 
 > 深色主题（如 `dark`）的 `primary` 取**亮色**——它同时用作深色底上的标题色与反色块填充。
 
@@ -122,11 +181,20 @@ node tools/pptx-skills/sync-builtin.mjs
 ```bash
 # 单测
 dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filter "FullyQualifiedName~PptxDeckSkillTests|FullyQualifiedName~ChartOverflowTests"
+# 技能正文的本地编译自检（技能不在任何 csproj 里，只有运行时才编译）
+python tools/check-skill.py tools/pptx-skills/pptx_deck.cs
 # 独立结构检查（对照 OOXML 必备部件规则，不依赖 .NET）
 python tools/verify_office_package.py 某个.pptx
 # 实盘图表几何（真容器 + 真的 Roslyn 编译执行，量像素；见下）
 PYTHONIOENCODING=utf-8 python tools/verify_chart_geometry.py
+# 实盘设计系统（18 套调色板 / 4 种 style / 新页型：回显配色 + 版面不越界 + 包结构）
+PYTHONIOENCODING=utf-8 python tools/verify_design_system_live.py
 ```
+
+> **为什么需要 `check-skill.py`**：技能正文是由 DotnetSkillHost 在**运行时**用 Roslyn 编译的，
+> `dotnet build` 看不到它们。改完只能靠跑测试间接发现编译错误，而且报错被包在测试失败里。
+> 该脚本用 .NET 10 的 file-based app 在本地先编一遍（`#r "nuget: …"` 转成 `#:package …@…`），
+> 几秒就能拿到和运行时一致的 CS 错误。
 
 `tools/verify_chart_geometry.py` 不经模型，直接打 `/ag-ui/skills/{id}/run` 试运行通路，
 对产物里的每张图表 PNG 量两件事：**墨迹包围盒四周是否留边**（越界检查）与

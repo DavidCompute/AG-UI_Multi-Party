@@ -111,9 +111,42 @@ public sealed class BuiltinPptxSkillsTests
     {
         // 描述必须把页型列全，否则模型会自创页型 / 漏页型（实测踩到过同类问题）
         var desc = NewCatalog().Get("pptx_deck")!.Description;
-        foreach (var type in new[] { "cover", "toc", "section", "content", "twoCol", "table", "kpi", "quote", "image", "chart", "summary", "end" })
+        foreach (var type in new[]
+                 {
+                     "cover", "toc", "section", "content", "twoCol", "table", "kpi",
+                     "stats", "grid", "timeline", "iconRows", "quote", "image", "chart", "summary", "end",
+                 })
             Assert.Contains($"\"{type}\"", desc);
         Assert.Contains("themeColors", desc);
         Assert.Contains("notes", desc);
+        Assert.Contains("style", desc);
+    }
+
+    /// <summary>
+    /// 描述里列出的命名调色板必须**真的能解析**，且 18 套一套不少。
+    ///
+    /// <para>
+    /// 这条钉子防的是“文档与实现漂移”：描述里写了 `forest-eco`、技能里却叫 `forest`，
+    /// 模型会兴高采烈地传一个静默回落到默认主题的名字。两边逐字比对最省心。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Description_ListsEveryNamedPalette()
+    {
+        var desc = NewCatalog().Get("pptx_deck")!.Description;
+        var source = BuiltinPptxSkills.Build("pptx_deck", "pptx_deck.skill.txt", "x", "x").Body!;
+
+        // 从技能源码里的 Palettes 表抽出真实存在的名字
+        var start = source.IndexOf("Palettes =", StringComparison.Ordinal);
+        Assert.True(start > 0, "技能源码里找不到 Palettes 表（名字改过了？）");
+        var end = source.IndexOf("];", start, StringComparison.Ordinal);
+        Assert.True(end > start, "Palettes 表没有找到结束的 ]");
+        var table = source.Substring(start, end - start);
+        var names = System.Text.RegularExpressions.Regex.Matches(table, @"\(""([a-z0-9-]+)"",")
+            .Select(m => m.Groups[1].Value).ToList();
+
+        Assert.Equal(18, names.Count);
+        foreach (var n in names)
+            Assert.True(desc.Contains(n), $"技能描述里没有列出命名调色板 {n}");
     }
 }

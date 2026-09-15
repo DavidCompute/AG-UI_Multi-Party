@@ -31,11 +31,23 @@ public static class BuiltinPptxSkills
             "pptx_deck.skill.txt",
             "演示文稿生成（PPT）",
             "生成完整的 PowerPoint 演示文稿（.pptx）：封面、目录、章节分隔、内容页、两栏对比、" +
-            "表格、指标卡（KPI）、引言页、配图页、图表（柱状/折线/饼图/环形图）、小结与结束页。" +
+            "表格、指标卡（KPI）、大数字看板、网格卡片、时间轴/流程、图标行、引言页、配图页、" +
+            "图表（柱状/折线/饼图/环形图）、小结与结束页。" +
             "当用户要求「做个 PPT」「出一套幻灯片 / 演示文稿」「把这份内容讲成一页页」「路演/汇报材料」时调用。" +
             "16:9 宽屏、统一主题配色与字体、除封面外每页带页码徽标；每页可附演讲者备注。" +
             "参数为 JSON：title(必填)、subtitle/author/date(可选)、" +
-            "theme(business|tech|warm|minimal|dark|vivid，可选)、" +
+            "style(sharp|soft|rounded|pill，可选，默认 soft；只影响页边距/间距/圆角，与 theme 正交)、" +
+            "theme 可选以下 18 套命名调色板（按场景挑，比历史主题更好看）：" +
+            "modern-wellness(医疗/健康/瑜伽)、business-authority(年报/金融/政企)、" +
+            "nature-outdoors(户外/环保/农业)、vintage-academic(学术/历史/博物馆)、" +
+            "soft-creative(母婴/甜品/幼教)、bohemian(婚礼/家居/有机)、" +
+            "vibrant-tech(体育/健身房/创业路演)、craft-artisan(咖啡/手作/烘焙)、" +
+            "tech-night(科技发布/天文/夜间经济，深色底)、education-charts(统计报告/教育/市场分析)、" +
+            "forest-eco(景观/ESG/双碳)、elegant-fashion(时装/画廊/美妆)、" +
+            "art-food(美食/展览/复古)、luxury-mysterious(珠宝/酒店/高端咨询/心理)、" +
+            "pure-tech-blue(云/AI/水务/洁净能源)、coastal-coral(旅行/夏日活动/饮品)、" +
+            "vibrant-orange-mint(儿童活动/快消/社交媒体)、platinum-white-gold(金融科技/品牌官网)；" +
+            "也可用历史主题 business|tech|warm|minimal|dark|vivid；" +
             "themeColors({primary,secondary,accent,light,bg,text}，可选，覆盖预设)、" +
             "fontTitle/fontBody(可选)、outputPath(可选，.pptx 落盘路径)、" +
             "slides 数组（必填，至少一页）。slides 每项形如 " +
@@ -46,12 +58,18 @@ public static class BuiltinPptxSkills
             "{\"type\":\"twoCol\",\"title\":\"…\",\"left\":{\"heading\":\"…\",\"bullets\":[…]},\"right\":{…}} / " +
             "{\"type\":\"table\",\"title\":\"…\",\"headers\":[…],\"rows\":[[…]]} / " +
             "{\"type\":\"kpi\",\"title\":\"…\",\"items\":[{\"value\":\"98%\",\"label\":\"可用性\"}]} / " +
+            "{\"type\":\"stats\",\"title\":\"…\",\"items\":[{\"value\":\"3×\",\"label\":\"效率提升\"}],\"cols\":3} / " +
+            "{\"type\":\"grid\",\"title\":\"…\",\"items\":[{\"title\":\"…\",\"text\":\"…\"}],\"cols\":2} / " +
+            "{\"type\":\"timeline\",\"title\":\"…\",\"items\":[{\"title\":\"需求\",\"detail\":\"…\"}]} / " +
+            "{\"type\":\"iconRows\",\"title\":\"…\",\"items\":[{\"icon\":\"1\",\"title\":\"…\",\"text\":\"…\"}]} / " +
             "{\"type\":\"quote\",\"text\":\"…\",\"cite\":\"…\"} / " +
             "{\"type\":\"chart\",\"title\":\"…\",\"chartType\":\"bar|line|pie|doughnut\",\"categories\":[…]," +
             "\"series\":[{\"name\":\"…\",\"values\":[…]}],\"yLabel\":\"…\"} / " +
             "{\"type\":\"image\",\"title\":\"…\",\"path\":\"…\",\"caption\":\"…\"} / " +
             "{\"type\":\"summary\",\"title\":\"小结\",\"bullets\":[…] } / " +
             "{\"type\":\"end\",\"title\":\"谢谢\",\"subtitle\":\"…\"}。" +
+            "content 页也可用 \"layout\":\"timeline|grid|stats|iconRows\" 指定子类型。" +
+            "注意：设计规范建议**不要每页都用同一种版式**，请在大纲阶段就为每页选定合适的页型并轮换。" +
             "任何一页都可加 \"notes\"（写入演讲者备注）。" +
             "返回 JSON 含生成的 .pptx 文件路径与 slides 页数，请据实告知用户，不要编造正文内容。"
         ),
@@ -83,7 +101,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-14.1";
+    public const string Version = "2026-09-15.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

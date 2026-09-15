@@ -27,7 +27,9 @@
 //     "subtitle": "副标题",                     // 可选
 //     "author": "作者/团队",                    // 可选
 //     "date": "2026-09",                       // 可选
-//     "theme": "business|tech|warm|minimal|dark|vivid",   // 可选，默认 business
+//     "theme": "business|tech|warm|minimal|dark|vivid",   // 可选，历史主题（默认 business）
+//              // 或 18 套命名调色板（推荐，按场景挑），详见下方 PALETTES
+//     "style": "sharp|soft|rounded|pill",                  // 可选，版式风格，默认 soft
 //     "themeColors": { "primary":"1F3864", "secondary":"2E5C9A", "accent":"C8A24A",
 //                      "light":"E8EEF7", "bg":"FFFFFF", "text":"333333" },  // 可选，覆盖预设
 //     "fontTitle": "微软雅黑",                  // 可选
@@ -44,13 +46,35 @@
 //     twoCol   两栏      title, left:{heading,bullets:[…]}, right:{heading,bullets:[…]}
 //     table    表格      title, headers:[…], rows:[[…]]
 //     kpi      指标卡    title, items:[ {value,label} ]
+//     stats    大数字    title, items:[ {value,label} ], cols
+//     grid     网格卡    title, items:[ {title,text} ], cols:2|3
+//     timeline 时间轴    title, items:[ {title,detail} ]（最多 6 步）
+//     iconRows 图标行    title, items:[ {icon,title,text} ]（最多 6 行）
 //     quote    引言      text, cite
 //     image    图片      title, path, caption
 //     chart    图表      title, chartType:"bar|line|pie|doughnut", categories:[…],
 //                        series:[ {name,values:[…]} ], yLabel, caption
 //     summary  小结      title, bullets:[…]
 //     end      结束页    title, subtitle
+//   content 还可用 "layout":"timeline|grid|stats|iconRows" 直接指定子类型。
 //   任何页都可带 "notes"（备注文字），写入演讲者备注。
+//
+//   PALETTES（theme 的命名调色板，18 套；每套 5 色，角色由亮度/彩度自动分配）：
+//     modern-wellness  business-authority  nature-outdoors  vintage-academic
+//     soft-creative    bohemian            vibrant-tech     craft-artisan
+//     tech-night(深底) education-charts    forest-eco       elegant-fashion
+//     art-food         luxury-mysterious   pure-tech-blue   coastal-coral
+//     vibrant-orange-mint                 platinum-white-gold
+//   选法：医疗/健康→modern-wellness，年报/金融→business-authority，
+//   学术/历史→vintage-academic，户外/农业→nature-outdoors，母婴/甜品→soft-creative，
+//   婚礼/家居→bohemian，体育/路演→vibrant-tech，咖啡/手作→craft-artisan，
+//   科技发布/天文→tech-night，统计/教育→education-charts，ESG/环保→forest-eco，
+//   时尚/艺术→elegant-fashion，美食/展览→art-food，珠宝/高端咨询→luxury-mysterious，
+//   云/AI/医疗→pure-tech-blue，旅行/饮品→coastal-coral，活动/快消→vibrant-orange-mint，
+//   金融科技/品牌官网→platinum-white-gold。
+//
+//   STYLE：sharp（数据密集/严谨）| soft（通用，默认）| rounded（产品/市场）| pill（品牌/发布）。
+//   它只影响页边距/间距/圆角，与 theme 正交，可自由组合（如 tech-night + pill）。
 //   返回 = { ok, scene, path, slides, produce_file:{path,name,bytes}, message }
 // ============================================================================
 
@@ -81,15 +105,89 @@ public class Skill
     // ===== 16:9 几何（EMU；1 英寸 = 914400）=====
     private const long W = 12192000;      // 13.333"
     private const long H = 6858000;       // 7.5"
-    private const long MX = 838200;       // 左右安全边距 0.916"
-    private const long CW = W - 2 * MX;   // 内容宽
-    private const long TitleY = 457200;
-    private const long TitleH = 762000;
-    private const long BodyY = 1524000;
-    private const long BodyH = H - BodyY - 838200;
-    private const long BadgeW = 457200;
-    private const long BadgeX = W - MX - BadgeW;
-    private const long BadgeY = H - 685800;
+
+    // 版式度量由 style 决定（见 MetricsFor）。这里是属性而不是 const，
+    // 于是所有渲染代码不用改就能跟着 style 走——换风格只需要换一次 _m。
+    private static long MX => _m.Mx;
+    private static long CW => W - 2 * _m.Mx;   // 内容宽
+    private static long TitleY => _m.TitleY;
+    private static long TitleH => _m.TitleH;
+    private static long BodyY => _m.BodyY;
+    private static long BodyH => _m.BodyH;
+    private static long BadgeW => _m.BadgeW;
+    private static long BadgeX => W - _m.Mx - _m.BadgeW;
+    private static long BadgeY => _m.BadgeY;
+
+    /// <summary>
+    /// 版式度量：把页边距 / 标题位 / 正文区 / 内边距 / 元素间距 / 圆角收在一处，
+    /// 由 <c>style</c>（sharp|soft|rounded|pill）一次性选定。
+    ///
+    /// <para>
+    /// 移植自 MiniMax pptx-generator 的 design-system.md「Style Recipes」：
+    /// 同一套内容换圆角与留白就能变成 4 种气质（紧密严谨 ↔ 通透高端）。
+    /// 它给的是 10"×5.625" 画布的英寸值，这里按 13.333"/10" 等比换算到本技能的 16:9 画布。
+    /// </para>
+    /// </summary>
+    private sealed class Metrics
+    {
+        public long Mx, TitleY, TitleH, BodyY, BodyH, BadgeW, BadgeY;
+        public long Pad;   // 容器内边距（卡片 / 两栏 / 表格单元格）
+        public long Gap;   // 元素间距
+        public int Radius; // roundRect 的 adj 值（0..50000，50000 为半圆/胶囊）
+        /// <summary>内部细碎尺寸的等比系数（以 soft 的 Pad 为 1）。</summary>
+        public double Scale = 1.0;
+        /// <summary>规范化后的风格名（回显给调用方/排障）。</summary>
+        public string Name = "soft";
+    }
+
+    [ThreadStatic] private static Metrics? _currentMetrics;
+    private static Metrics _m => _currentMetrics ?? (_currentMetrics = MetricsFor("soft"));
+
+    private static Metrics MetricsFor(string style)
+    {
+        // soft 的各项与历史常量完全一致（默认风格 = 换风格前的观感，保证老调用方观感不变）
+        var m = new Metrics
+        {
+            Mx = 838200, TitleY = 457200, TitleH = 762000,
+            BodyY = 1524000, BodyH = H - 1524000 - 838200,
+            BadgeW = 457200, BadgeY = H - 685800,
+            Pad = 228600, Gap = 342900, Radius = 12000,
+        };
+        switch ((style ?? "").Trim().ToLowerInvariant())
+        {
+            case "sharp": // 数据密集、严谨：窄边距 + 直角
+                m.Mx = 594360; m.TitleY = 388620; m.TitleH = 685800;
+                m.BodyY = 1280160; m.BodyH = H - 1280160 - 640080;
+                m.BadgeW = 411480; m.BadgeY = H - 640080;
+                m.Pad = 152400; m.Gap = 182880; m.Radius = 0;
+                break;
+            case "rounded": // 产品介绍 / 市场：大圆角 + 舒展
+                m.Mx = 1005840; m.TitleY = 502920; m.TitleH = 800100;
+                m.BodyY = 1645920; m.BodyH = H - 1645920 - 914400;
+                m.BadgeW = 502920; m.BadgeY = H - 731520;
+                m.Pad = 304800; m.Gap = 304800; m.Radius = 25000;
+                break;
+            case "pill": // 品牌发布 / 高端：胶囊圆角 + 大留白
+                m.Mx = 1219200; m.TitleY = 548640; m.TitleH = 838200;
+                m.BodyY = 1783080; m.BodyH = H - 1783080 - 1005840;
+                m.BadgeW = 548640; m.BadgeY = H - 800100;
+                m.Pad = 381000; m.Gap = 381000; m.Radius = 40000;
+                break;
+            default: break; // soft = 默认值
+        }
+        m.Scale = m.Pad / 228600.0; // 以 soft 为基准；内部零碎尺寸跟着等比缩放
+        m.Name = (style ?? "").Trim().ToLowerInvariant() switch
+        {
+            "sharp" => "sharp",
+            "rounded" => "rounded",
+            "pill" => "pill",
+            _ => "soft",
+        };
+        return m;
+    }
+
+    /// <summary>把内部零碎尺寸按当前 style 等比缩放（soft 下恒等）。</summary>
+    private static long Sz(long v) => (long)Math.Round(v * _m.Scale);
 
     private const string NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main";
     private const string NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -106,17 +204,71 @@ public class Skill
         public string Text = "333333";
         public string FontTitle = "微软雅黑";
         public string FontBody = "微软雅黑";
+        /// <summary>画在 Accent 底色上的文字色（页码徽标）。</summary>
+        public string OnAccent = "FFFFFF";
+        /// <summary>画在 Primary 底色上的次要文字色（章节页副标题）。</summary>
+        public string OnPrimary = "E8EEF7";
     }
 
-    /// <summary>当前渲染所用的主题（Run 是同步单次调用；用 ThreadStatic 避免并发时串台）。</summary>
+    /// <summary>
+    /// 18 套命名调色板（移植自 MiniMax pptx-generator 的 design-system.md）。
+    /// 每套只给 5 个色值 + 是否深色底，<b>“谁当主色/底色”由亮度与彩度推出</b>（见 DeriveTheme）：
+    /// 调色板是「设计语言」，角色映射是「渲染规则」，分开才好在 18 套上一致地成立。
+    /// </summary>
+    private static readonly (string Name, string C1, string C2, string C3, string C4, string C5, bool Dark)[] Palettes =
+    [
+        ("modern-wellness",      "006D77", "83C5BE", "EDF6F9", "FFDDD2", "E29578", false),
+        ("business-authority",   "2B2D42", "8D99AE", "EDF2F4", "EF233C", "D90429", false),
+        ("nature-outdoors",      "606C38", "283618", "FEFAE0", "DDA15E", "BC6C25", false),
+        ("vintage-academic",     "780000", "C1121F", "FDF0D5", "003049", "669BBC", false),
+        ("soft-creative",        "CDB4DB", "FFC8DD", "FFAFCC", "BDE0FE", "A2D2FF", false),
+        ("bohemian",             "CCD5AE", "E9EDC9", "FEFAE0", "FAEDCD", "D4A373", false),
+        ("vibrant-tech",         "8ECAE6", "219EBC", "023047", "FFB703", "FB8500", false),
+        ("craft-artisan",        "7F5539", "A68A64", "EDE0D4", "656D4A", "414833", false),
+        ("tech-night",           "000814", "001D3D", "003566", "FFC300", "FFD60A", true),
+        ("education-charts",     "264653", "2A9D8F", "E9C46A", "F4A261", "E76F51", false),
+        ("forest-eco",           "DAD7CD", "A3B18A", "588157", "3A5A40", "344E41", false),
+        ("elegant-fashion",      "EDAFB8", "F7E1D7", "DEDBD2", "B0C4B1", "4A5759", false),
+        ("art-food",             "335C67", "FFF3B0", "E09F3E", "9E2A2B", "540B0E", false),
+        ("luxury-mysterious",    "22223B", "4A4E69", "9A8C98", "C9ADA7", "F2E9E4", false),
+        ("pure-tech-blue",       "03045E", "0077B6", "00B4D8", "90E0EF", "CAF0F8", false),
+        ("coastal-coral",        "0081A7", "00AFB9", "FDFCDC", "FED9B7", "F07167", false),
+        ("vibrant-orange-mint",  "FF9F1C", "FFBF69", "FFFFFF", "CBF3F0", "2EC4B6", false),
+        ("platinum-white-gold",  "0A0A0A", "0070F3", "D4AF37", "F5F5F5", "FFFFFF", false),
+    ];
+
     [ThreadStatic] private static Theme? _currentTheme;
 
     private static Theme ResolveTheme(JsonElement root)
     {
+        var t = LegacyTheme((Str(root, "theme") ?? "business").Trim().ToLowerInvariant())
+            ?? FromPalette((Str(root, "theme") ?? "business").Trim().ToLowerInvariant())
+            ?? LegacyTheme("business")!;
+        // themeColors 覆盖（逐项）
+        if (root.TryGetProperty("themeColors", out var tc) && tc.ValueKind == JsonValueKind.Object)
+        {
+            t.Primary = Hex(Str(tc, "primary"), t.Primary);
+            t.Secondary = Hex(Str(tc, "secondary"), t.Secondary);
+            t.Accent = Hex(Str(tc, "accent"), t.Accent);
+            t.Light = Hex(Str(tc, "light"), t.Light);
+            t.Bg = Hex(Str(tc, "bg"), t.Bg);
+            t.Text = Hex(Str(tc, "text"), t.Text);
+            // 用户改过颜色后，原来的“底色上的字”可能已经看不清，重算一次
+            t.OnAccent = OnColor(t.Accent, t.Bg);
+            t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
+        }
+        t.FontTitle = Str(root, "fontTitle") ?? t.FontTitle;
+        t.FontBody = Str(root, "fontBody") ?? t.FontBody;
+        return t;
+    }
+
+    /// <summary>历史主题名（保持原有观感，不要改这些色值——老调用方依赖它们）。</summary>
+    private static Theme? LegacyTheme(string name)
+    {
         var t = new Theme();
-        var name = (Str(root, "theme") ?? "business").Trim().ToLowerInvariant();
         switch (name)
         {
+            case "business": break; // 即默认值
             case "tech":
                 t.Primary = "0B2545"; t.Secondary = "1B6CA8"; t.Accent = "00C2A8";
                 t.Light = "E6F4F1"; t.Bg = "FFFFFF"; t.Text = "2B2B2B"; break;
@@ -133,21 +285,197 @@ public class Skill
             case "vivid":
                 t.Primary = "2B2D42"; t.Secondary = "8D99AE"; t.Accent = "EF233C";
                 t.Light = "EDEDED"; t.Bg = "FFFFFF"; t.Text = "2B2D42"; break;
-            default: break; // business = 默认值
+            default: return null;
         }
-        // themeColors 覆盖（逐项）
-        if (root.TryGetProperty("themeColors", out var tc) && tc.ValueKind == JsonValueKind.Object)
-        {
-            t.Primary = Hex(Str(tc, "primary"), t.Primary);
-            t.Secondary = Hex(Str(tc, "secondary"), t.Secondary);
-            t.Accent = Hex(Str(tc, "accent"), t.Accent);
-            t.Light = Hex(Str(tc, "light"), t.Light);
-            t.Bg = Hex(Str(tc, "bg"), t.Bg);
-            t.Text = Hex(Str(tc, "text"), t.Text);
-        }
-        t.FontTitle = Str(root, "fontTitle") ?? t.FontTitle;
-        t.FontBody = Str(root, "fontBody") ?? t.FontBody;
+        // 历史主题一律保持原样：徽标用底色作字（这是改造前的行为，不要“顺手改好”）。
+        // 只补一个 OnPrimary：章节页副标题原本用 Light 画在主色底上，这里确认它看得清。
+        t.OnAccent = t.Bg;
+        t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
         return t;
+    }
+
+    private static Theme? FromPalette(string name)
+    {
+        foreach (var p in Palettes)
+            if (p.Name == name) return DeriveTheme(p.C1, p.C2, p.C3, p.C4, p.C5, p.Dark);
+        return null;
+    }
+
+    /// <summary>
+    /// 把调色板的 5 个色值分成角色：最深=primary（标题），最亮=bg（底色），
+    /// 最花=accent（强调线/徽标），次亮=light（卡片底），secondary 取 primary 的浅色版以形成层级。
+    ///
+    /// <para>
+    /// 最后统一过一道<b>可读性兜底</b>：调色板里难免有“很浅的次要色”或“很亮的黄”，
+    /// 直接用会出现看不清的字。宁可把颜色调暗/调亮，也不能出现看不清——这条由
+    /// 单测 <c>PptxDeckSkillTests.AllPalettes_KeepTextReadable</c> 对 18 套逐对断言。
+    /// </para>
+    /// </summary>
+    private static Theme DeriveTheme(string c1, string c2, string c3, string c4, string c5, bool dark)
+    {
+        var all = new[] { c1, c2, c3, c4, c5 }.Select(Normalize).ToArray();
+        var byLum = all.OrderBy(RelLum).ToArray(); // 暗 → 亮
+        var t = new Theme();
+        if (dark)
+        {
+            t.Bg = byLum[0]; t.Primary = byLum[4]; t.Light = byLum[1];
+            t.Text = "E8ECF1";
+        }
+        else
+        {
+            // 底色必须是“面”，不能是个饱和色：实测 education-charts 的最亮色是
+            // E9C46A（亮黄），直接当底色会做出一张黄底幻灯片。这里把彩度压下来。
+            t.Bg = Surface(byLum[4]);
+            t.Primary = byLum[0]; t.Light = byLum[3];
+            t.Text = "333333";
+        }
+        // secondary：primary 往底色方向混一点，形成「主/次」层级（两个模式下方向都正确）
+        t.Secondary = EnsureContrast(Mix(t.Primary, t.Bg, 0.25), t.Bg, 3.0);
+        t.Accent = EnsureContrast(AccentFor(all, t.Bg, t.Primary), t.Bg, 3.0);
+        // 强调色同时是“色块底”（页码徽标/序号圆）：必须至少一种文字色能在它上面读清楚。
+        // 实测踩到：不调的话像 BC6C25 / CC7F16 这种中间调，白字 3.9、黑字 4.4，两边都不达标。
+        t.Accent = EnsureReadableUnder(t.Accent, 4.5);
+        t.Text = EnsureContrast(t.Text, t.Bg, 4.5);
+        t.Primary = EnsureContrast(t.Primary, t.Bg, 4.5);
+        t.OnAccent = OnColor(t.Accent, t.Bg);
+        t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
+        return t;
+    }
+
+    /// <summary>
+    /// 把候选底色压成“底色”：往白里混直到彩度降到可当背景的程度。
+    /// 保留一点调色板的色相（比纯白更有味道），但不会是一条亮黄/亮橙。
+    /// </summary>
+    private static string Surface(string color)
+    {
+        if (Chroma(color) <= 0.25) return color;
+        for (var t = 0.1; t <= 0.91; t += 0.1)
+        {
+            var s = Mix(color, "FFFFFF", t);
+            if (Chroma(s) <= 0.25) return s;
+        }
+        return "FFFFFF";
+    }
+
+    // ---- 颜色工具（WCAG 相对亮度）----
+
+    private static string Normalize(string hex)
+        => hex.Trim().TrimStart('#').ToUpperInvariant();
+
+    private static int[] RgbOf(string hex)
+        => [Convert.ToInt32(hex.Substring(0, 2), 16), Convert.ToInt32(hex.Substring(2, 2), 16), Convert.ToInt32(hex.Substring(4, 2), 16)];
+
+    private static double RelLum(string hex)
+    {
+        var c = RgbOf(hex);
+        double Ch(int v) { var s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        return 0.2126 * Ch(c[0]) + 0.7152 * Ch(c[1]) + 0.0722 * Ch(c[2]);
+    }
+
+    /// <summary>WCAG 对比度（1~21）。</summary>
+    private static double Contrast(string a, string b)
+    {
+        var la = RelLum(a); var lb = RelLum(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    /// <summary>线性混色：t=0 得到 a，t=1 得到 b。</summary>
+    private static string Mix(string a, string b, double t)
+    {
+        var ca = RgbOf(a); var cb = RgbOf(b);
+        var sb = new StringBuilder(6);
+        for (var i = 0; i < 3; i++)
+            sb.Append(((int)Math.Round(ca[i] + (cb[i] - ca[i]) * t)).ToString("X2"));
+        return sb.ToString();
+    }
+
+    /// <summary>把 fg 朝黑/白方向调，直到与 bg 的对比度达标（WCAG）。</summary>
+    private static string EnsureContrast(string fg, string bg, double min)
+    {
+        if (Contrast(fg, bg) >= min) return fg;
+        var target = RelLum(bg) > 0.5 ? "000000" : "FFFFFF";
+        for (var t = 0.1; t <= 1.0001; t += 0.1)
+        {
+            var c = Mix(fg, target, t);
+            if (Contrast(c, bg) >= min) return c;
+        }
+        return target;
+    }
+
+    /// <summary>
+    /// 把颜色调到「黑或白至少有一个能在其上达到 min 对比度」。
+    /// 用于既是“色块底”又要承载文字的颜色（强调色）。中间调（如 BC6C25）朝黑调深。
+    /// </summary>
+    private static string EnsureReadableUnder(string color, double min)
+    {
+        double Best(string c) => Math.Max(Contrast(c, "FFFFFF"), Contrast(c, "1A1A1A"));
+        if (Best(color) >= min) return color;
+        for (var t = 0.05; t <= 1.0001; t += 0.05)
+        {
+            var c = Mix(color, "000000", t);
+            if (Best(c) >= min) return c;
+        }
+        return "000000";
+    }
+
+    /// <summary>该底色上最易读的文字色：优先用给定色（保持主题感），对比不够就取黑/白里更好的那个。</summary>
+    private static string OnColor(string bg, string preferred)
+        => Contrast(preferred, bg) >= 4.5 ? preferred
+         : (Contrast("FFFFFF", bg) >= Contrast("1A1A1A", bg) ? "FFFFFF" : "1A1A1A");
+
+    /// <summary>彩度（HSI 意义上的饱和度）：用来挑“最花”的那个色做强调色。</summary>
+    private static double Chroma(string hex)
+    {
+        var c = RgbOf(hex);
+        var mx = c.Max(); var mn = c.Min();
+        return mx == 0 ? 0 : (mx - mn) / (double)mx;
+    }
+
+    /// <summary>HSL 色相（0~360）；灰阶无色相，返回 0。</summary>
+    private static double Hue(string hex)
+    {
+        var c = RgbOf(hex);
+        double r = c[0] / 255.0, g = c[1] / 255.0, b = c[2] / 255.0;
+        var mx = Math.Max(r, Math.Max(g, b));
+        var mn = Math.Min(r, Math.Min(g, b));
+        var d = mx - mn;
+        if (d < 1e-6) return 0;
+        double h;
+        if (mx == r) h = ((g - b) / d) % 6;
+        else if (mx == g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h *= 60;
+        return h < 0 ? h + 360 : h;
+    }
+
+    private static double HueDistance(double a, double b)
+    {
+        var d = Math.Abs(a - b) % 360;
+        return d > 180 ? 360 - d : d;
+    }
+
+    /// <summary>
+    /// 挑强调色：优先“与主色色相明显不同”的候选。
+    ///
+    /// <para>
+    /// 只按彩度挑会选出跟主色几乎同色的强调色——实测 forest-eco 选中了 3A5A40，
+    /// 与主色 344E41 放在一起根本看不出差别，强调线/序号圆就白做了。
+    /// </para>
+    /// </summary>
+    private static string AccentFor(string[] colors, string bg, string primary)
+    {
+        var pool = colors.Where(c => c != bg && c != primary).ToList();
+        if (pool.Count == 0) pool = colors.ToList();
+
+        var ph = Hue(primary);
+        var distinct = pool.Where(c => HueDistance(Hue(c), ph) >= 30).ToList();
+        if (distinct.Count > 0) pool = distinct;
+
+        // 能在底色上看得见才考虑（否则强调线等于没画）
+        var readable = pool.Where(c => Contrast(c, bg) >= 2.0).ToList();
+        if (readable.Count > 0) pool = readable;
+
+        return pool.OrderByDescending(Chroma).First();
     }
 
     private static string Hex(string? v, string fallback)
@@ -158,13 +486,7 @@ public class Skill
     }
 
     /// <summary>深色底上正文用亮色；用于判断某主题的 bg 是否为深色。</summary>
-    private static bool IsDarkBg(Theme t)
-    {
-        int r = Convert.ToInt32(t.Bg.Substring(0, 2), 16);
-        int g = Convert.ToInt32(t.Bg.Substring(2, 2), 16);
-        int b = Convert.ToInt32(t.Bg.Substring(4, 2), 16);
-        return (r * 299 + g * 587 + b * 114) / 1000 < 128;
-    }
+    private static bool IsDarkBg(Theme t) => RelLum(t.Bg) < 0.5;
 
     // ===== 入口 =====
     public static string Run(string input)
@@ -190,6 +512,10 @@ public class Skill
                 + ",\"slides\":" + built.Slides + produce
                 // 图表字体报出来：容器里若没有中文字体，图表中文会缺字（乱码），有这个字段好排障
                 + ",\"chartFont\":" + Js(ChartFontName) + ",\"chartFontCjk\":" + (ChartFontHasCjk ? "true" : "false")
+                // 回显实际生效的配色与版式：用户/排障能直接看到“到底用了哪套色”。
+                // 单测也靠它断言可读性底线（不必去解 XML）。
+                + ",\"style\":" + Js(_m.Name)
+                + ",\"palette\":" + PaletteJson(_currentTheme)
                 + ",\"message\":" + Js("已生成演示文稿：" + built.Path
                     + (ChartFontHasCjk ? "" : "（提示：当前环境未找到含中文字形的字体，图表中的中文可能显示为缺字/乱码；"
                         + "可在容器里安装 fonts-noto-cjk / fonts-droid-fallback 后重启）")) + "}";
@@ -209,6 +535,8 @@ public class Skill
 
         var theme = ResolveTheme(root);
         _currentTheme = theme;
+        // 版式风格（sharp|soft|rounded|pill）：与主题正交，只影响页边距/间距/圆角
+        _currentMetrics = MetricsFor(Str(root, "style") ?? "soft");
         var title = Str(root, "title") ?? "演示文稿";
         var subtitle = Str(root, "subtitle");
         var author = Str(root, "author");
@@ -348,6 +676,23 @@ public class Skill
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
                 shapes.Add(ImageBody(el, ctx));
                 break;
+            case "timeline":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(TimelineBody(el, ctx));
+                break;
+            case "grid":
+            case "cards":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(GridBody(el, ctx));
+                break;
+            case "stats":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(StatsBody(el, ctx));
+                break;
+            case "iconrows":   // 注意：type 已 ToLowerInvariant，case 必须全小写
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(IconRowsBody(el, ctx));
+                break;
             case "chart":
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
                 shapes.Add(ChartBody(el, ctx));
@@ -356,9 +701,16 @@ public class Skill
                 shapes.Add(SlideTitle(Str(el, "title") ?? "小结", ctx));
                 shapes.Add(BulletBody(el, ctx, accent: true));
                 break;
-            default: // content
+            default: // content（可用 layout 指定子类型，省得模型记多个 type）
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
-                shapes.Add(BulletBody(el, ctx, accent: false));
+                shapes.Add((Str(el, "layout") ?? "").Trim().ToLowerInvariant() switch
+                {
+                    "timeline" or "process" or "steps" => TimelineBody(el, ctx),
+                    "grid" or "cards" => GridBody(el, ctx),
+                    "stats" or "callouts" or "numbers" => StatsBody(el, ctx),
+                    "iconrows" or "icon-rows" or "rows" => IconRowsBody(el, ctx),
+                    _ => BulletBody(el, ctx, accent: false),
+                });
                 break;
         }
 
@@ -429,7 +781,7 @@ public class Skill
         paras.Append(ParaTitle(Str(el, "title") ?? "", 3600, t.Bg, lineSpacing: 110));
         var sub = Str(el, "subtitle");
         if (!string.IsNullOrWhiteSpace(sub))
-            paras.Append(Para(sub!, 1600, t.Light, align: "l", spaceBefore: 12));
+            paras.Append(Para(sub!, 1600, t.OnPrimary, align: "l", spaceBefore: 12));
         shapes.Add(TextBox(ctx.NextId(), MX + 1524000, 1600200, CW - 1524000, 2286000, paras.ToString(), anchor: "t"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Primary, shapes);
@@ -471,7 +823,7 @@ public class Skill
         var sb = new StringBuilder();
         sb.Append(Rect(ctx.NextId(), BadgeX, BadgeY, BadgeW, BadgeW, t.Accent, radius: true));
         sb.Append(TextBox(ctx.NextId(), BadgeX, BadgeY, BadgeW, BadgeW,
-            Para(ctx.Index.ToString("00"), 1100, t.Bg, bold: true, align: "ctr"), anchor: "ctr"));
+            Para(ctx.Index.ToString("00"), 1100, t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
         return sb.ToString();
     }
 
@@ -479,7 +831,7 @@ public class Skill
     {
         var t = ctx.Theme;
         var color = IsDarkBg(t) ? t.Light : "7A7A7A";
-        return TextBox(ctx.NextId(), MX, H - 1097280, CW - BadgeW - 228600, 365760,
+        return TextBox(ctx.NextId(), MX, H - 1097280, CW - BadgeW - _m.Pad, 365760,
             Para(text, 1100, color, align: "l"));
     }
 
@@ -495,7 +847,7 @@ public class Skill
     /// </summary>
     private static double FitScaleFor(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> paras, long boxH)
     {
-        var need = EstimateHeightEmu(paras, CW - 342900, boxH);
+        var need = EstimateHeightEmu(paras, CW - _m.Gap, boxH);
         if (need <= boxH) return 1.0;
         // 下限 0.6：再小就看不清了，宁可字号小一点也不要溢出页面
         return Math.Max(0.6, (double)boxH / need);
@@ -557,14 +909,14 @@ public class Skill
             if (!s.TwoLine)
             {
                 paras.Append(Para(s.Label, Scaled(1700, scale), color, align: "l", bullet: "•",
-                    spaceBefore: 10, lineSpacing: (int)Math.Round(125 * scale), marL: 342900));
+                    spaceBefore: 10, lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
             }
             else
             {
                 paras.Append(Para(s.Label, Scaled(1800, scale), t.Primary, bold: true, align: "l",
-                    bullet: "•", spaceBefore: 12, lineSpacing: (int)Math.Round(120 * scale), marL: 342900));
+                    bullet: "•", spaceBefore: 12, lineSpacing: (int)Math.Round(120 * scale), marL: (int)_m.Gap));
                 paras.Append(Para(s.Detail, Scaled(1500, scale), t.Secondary, align: "l",
-                    lineSpacing: (int)Math.Round(125 * scale), marL: 342900));
+                    lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
             }
         }
         return TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t");
@@ -605,7 +957,7 @@ public class Skill
     private static string TwoColBody(JsonElement el, SlideCtx ctx)
     {
         var t = ctx.Theme;
-        var gap = 342900;
+        var gap = _m.Gap;
         var colW = (CW - gap) / 2;
         var shapes = new StringBuilder();
 
@@ -628,7 +980,7 @@ public class Skill
             foreach (var b in bullets)
                 inner.Append(Para(b, 1500, t.Text, align: "l", bullet: "•",
                     spaceBefore: 10, lineSpacing: 125, marL: 285750));
-            shapes.Append(TextBox(ctx.NextId(), x + 228600, BodyY + 228600, colW - 457200, BodyH - 457200,
+            shapes.Append(TextBox(ctx.NextId(), x + _m.Pad, BodyY + _m.Pad, colW - 2 * _m.Pad, BodyH - 2 * _m.Pad,
                 inner.ToString(), anchor: "t"));
         }
         return shapes.ToString();
@@ -748,8 +1100,250 @@ public class Skill
             inner.Append(Para(items[i].Value, 3200, t.Primary, bold: true, align: "ctr", lineSpacing: 100, font: t.FontTitle));
             if (items[i].Label.Length > 0)
                 inner.Append(Para(items[i].Label, 1300, t.Secondary, align: "ctr", spaceBefore: 6, lineSpacing: 115));
-            shapes.Append(TextBox(ctx.NextId(), x + 91440, y + 342900, cardW - 182880, cardH - 457200,
+            shapes.Append(TextBox(ctx.NextId(), x + Sz(91440), y + _m.Pad, cardW - Sz(182880), cardH - Sz(457200),
                 inner.ToString(), anchor: "ctr"));
+        }
+        return shapes.ToString();
+    }
+
+    // ---- 条目读取（新页型共用）----
+
+    /// <summary>
+    /// 从 <c>items</c> 里按候选键依次取字段（如 value/label、title/text、icon）。
+    /// 字符串项直接当第一个字段（允许 <c>items: ["要点一", …]</c> 这种简写）。
+    /// </summary>
+    private static List<(string V1, string V2, string V3)> Items(
+        JsonElement el, string[] k1, string[] k2, string[] k3)
+    {
+        var list = new List<(string, string, string)>();
+        if (!el.TryGetProperty("items", out var iv) || iv.ValueKind != JsonValueKind.Array) return list;
+        foreach (var it in iv.EnumerateArray())
+        {
+            if (it.ValueKind == JsonValueKind.String)
+            {
+                var s = (it.GetString() ?? "").Trim();
+                if (s.Length > 0) list.Add((s, "", ""));
+                continue;
+            }
+            if (it.ValueKind != JsonValueKind.Object) continue;
+            var v1 = PickKey(it, k1);
+            var v2 = PickKey(it, k2);
+            var v3 = PickKey(it, k3);
+            if (v1.Length == 0 && v2.Length == 0 && v3.Length == 0) continue;
+            list.Add((v1, v2, v3));
+        }
+        return list;
+    }
+
+    private static string PickKey(JsonElement o, string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            var v = Str(o, k);
+            if (!string.IsNullOrWhiteSpace(v)) return v!.Trim();
+        }
+        return "";
+    }
+
+    private static int IntOf(JsonElement o, string name, int fallback)
+    {
+        if (o.ValueKind == JsonValueKind.Object && o.TryGetProperty(name, out var v))
+        {
+            if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)) return i;
+            if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out var s)) return s;
+        }
+        return fallback;
+    }
+
+    /// <summary>把一组段落估高并按可用高度给出缩放（下限 0.6）。</summary>
+    private static double ScaleForHeight(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> plan, long availW, long availH)
+    {
+        if (availH <= 0) return 0.6;
+        var need = EstimateHeightEmu(plan, availW, availH);
+        return need <= availH ? 1.0 : Math.Max(0.6, (double)availH / need);
+    }
+
+    // ---- 大数字看板（stat callouts）----
+
+    /// <summary>
+    /// 大号数字 + 小标签。与 <c>kpi</c> 的区别：不加卡片底、数字更大（移植自 design-system.md
+    /// 的 “Large stat callouts 60-72pt” 与 “Large stat callouts (big numbers with small labels below)”。
+    /// </summary>
+    private static string StatsBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = Items(el, ["value"], ["label", "text", "detail"], []);
+        if (items.Count == 0) return BulletBody(el, ctx, accent: false);
+
+        var cols = Math.Max(1, Math.Min(items.Count, IntOf(el, "cols", items.Count <= 3 ? items.Count : 3)));
+        var rowsN = (items.Count + cols - 1) / cols;
+        var cellW = (CW - _m.Gap * (cols - 1)) / cols;
+        var cellH = (BodyH - _m.Gap * (rowsN - 1)) / rowsN;
+        var ruleH = Sz(285750);                       // 数字上方的强调线占用的高度
+        var availH = Math.Max(Sz(228600), cellH - ruleH);
+
+        // 数字很大（48pt）且单元格窄，先按最长的一条估高再统一缩放（全页一致，不逐个变字号）
+        var scale = 1.0;
+        foreach (var it in items)
+        {
+            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
+                { (it.V1, 4800, 0, 1.05), (it.V2, 1400, 8, 1.15) };
+            scale = Math.Min(scale, ScaleForHeight(plan, cellW, availH));
+        }
+
+        var shapes = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var x = MX + (cellW + _m.Gap) * (i % cols);
+            var y = BodyY + (cellH + _m.Gap) * (i / cols);
+            var inner = new StringBuilder();
+            inner.Append(Para(items[i].V1, Scaled(4800, scale), t.Accent, bold: true, align: "l",
+                lineSpacing: (int)Math.Round(95 * scale), font: t.FontTitle));
+            if (items[i].V2.Length > 0)
+                inner.Append(Para(items[i].V2, Scaled(1400, scale), t.Text, align: "l", spaceBefore: 8,
+                    lineSpacing: (int)Math.Round(115 * scale)));
+            shapes.Append(Rect(ctx.NextId(), x, y, Sz(685800), Sz(45720), t.Accent));
+            shapes.Append(TextBox(ctx.NextId(), x, y + ruleH, cellW, availH, inner.ToString(), anchor: "t"));
+        }
+        return shapes.ToString();
+    }
+
+    // ---- 时间轴 / 流程 ----
+
+    /// <summary>横向分步：序号圆 + 连接线 + 标题/说明。最多 6 步（再多横向排不下，请拆页）。</summary>
+    private static string TimelineBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var all = Items(el, ["title", "label", "step"], ["detail", "text", "desc"], []);
+        if (all.Count == 0) return BulletBody(el, ctx, accent: false);
+        var steps = all.Take(6).ToList();
+        var n = steps.Count;
+
+        var slotW = (CW - _m.Gap * (n - 1)) / n;
+        var ring = Math.Min(Sz(685800), slotW - Sz(45720));
+        var cy = BodyY + Math.Min(BodyH / 3, Sz(914400));      // 圆心
+        var textTop = cy + ring / 2 + _m.Gap;
+        var textH = Math.Max(Sz(457200), BodyY + BodyH - textTop);
+
+        var scale = 1.0;
+        foreach (var s in steps)
+        {
+            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
+                { (s.V1, 1600, 0, 1.10), (s.V2, 1250, 6, 1.15) };
+            scale = Math.Min(scale, ScaleForHeight(plan, slotW, textH));
+        }
+
+        var shapes = new StringBuilder();
+        // 连接线：圆心高度，首尾各留半个槽宽
+        if (n > 1)
+            shapes.Append(Rect(ctx.NextId(), MX + slotW / 2, cy - Sz(22860), CW - slotW, Sz(45720), t.Light));
+
+        for (var i = 0; i < n; i++)
+        {
+            var x = MX + (slotW + _m.Gap) * i;
+            var cxc = x + slotW / 2;
+            shapes.Append(Ellipse(ctx.NextId(), cxc - ring / 2, cy - ring / 2, ring, ring, t.Accent));
+            shapes.Append(TextBox(ctx.NextId(), cxc - ring / 2, cy - ring / 2, ring, ring,
+                Para((i + 1).ToString("00"), Scaled(1500, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+
+            var txt = new StringBuilder();
+            txt.Append(Para(steps[i].V1, Scaled(1600, scale), t.Primary, bold: true, align: "ctr",
+                lineSpacing: (int)Math.Round(110 * scale)));
+            if (steps[i].V2.Length > 0)
+                txt.Append(Para(steps[i].V2, Scaled(1250, scale), t.Text, align: "ctr", spaceBefore: 6,
+                    lineSpacing: (int)Math.Round(115 * scale)));
+            shapes.Append(TextBox(ctx.NextId(), x, textTop, slotW, textH, txt.ToString(), anchor: "t"));
+        }
+        return shapes.ToString();
+    }
+
+    // ---- 网格卡片 ----
+
+    /// <summary>N 列网格卡片（cols 2~3）。适合并列要点、能力矩阵、方案对比。</summary>
+    private static string GridBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var cards = Items(el, ["title", "heading", "label"], ["text", "detail", "desc"], []);
+        if (cards.Count == 0) return BulletBody(el, ctx, accent: false);
+
+        var cols = Math.Max(2, Math.Min(IntOf(el, "cols", 2), 3));
+        var rowsN = (cards.Count + cols - 1) / cols;
+        var cardW = (CW - _m.Gap * (cols - 1)) / cols;
+        var cardH = (BodyH - _m.Gap * (rowsN - 1)) / rowsN;
+        var availW = cardW - 2 * _m.Pad;
+        var availH = cardH - 2 * _m.Pad;
+
+        var shapes = new StringBuilder();
+        for (var i = 0; i < cards.Count; i++)
+        {
+            var x = MX + (cardW + _m.Gap) * (i % cols);
+            var y = BodyY + (cardH + _m.Gap) * (i / cols);
+            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
+                { (cards[i].V1, 1700, 0, 1.10), (cards[i].V2, 1300, 8, 1.20) };
+            var scale = ScaleForHeight(plan, availW, availH);
+
+            var inner = new StringBuilder();
+            if (cards[i].V1.Length > 0)
+                inner.Append(Para(cards[i].V1, Scaled(1700, scale), t.Primary, bold: true, align: "l",
+                    lineSpacing: (int)Math.Round(110 * scale)));
+            if (cards[i].V2.Length > 0)
+                inner.Append(Para(cards[i].V2, Scaled(1300, scale), t.Text, align: "l", spaceBefore: 8,
+                    lineSpacing: (int)Math.Round(120 * scale)));
+
+            shapes.Append(Rect(ctx.NextId(), x, y, cardW, cardH, t.Light, radius: true));
+            shapes.Append(Rect(ctx.NextId(), x, y, Sz(45720), cardH, t.Accent));   // 左侧色条
+            shapes.Append(TextBox(ctx.NextId(), x + _m.Pad, y + _m.Pad, availW, availH, inner.ToString(), anchor: "t"));
+        }
+        return shapes.ToString();
+    }
+
+    // ---- 图标行 ----
+
+    /// <summary>
+    /// 图标行：彩色圆 + 短标（1~2 字）+ 标题 + 说明。
+    /// 本技能不携带图标字体/图标素材，所以“图标”由调用方给极短文字（如 “✓” “1” “A”），
+    /// 缺省时用序号——总比画一个空框好。
+    /// </summary>
+    private static string IconRowsBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var all = Items(el, ["title", "heading", "label"], ["text", "detail", "desc"], ["icon", "badge", "mark"]);
+        if (all.Count == 0) return BulletBody(el, ctx, accent: false);
+        var rows = all.Take(6).ToList();
+        var n = rows.Count;
+
+        var rowH = (BodyH - _m.Gap * (n - 1)) / n;
+        var ring = Math.Min(Sz(609600), rowH);
+        var textX = ring + _m.Pad;
+        var textW = CW - textX;
+        var availH = rowH - Sz(114300);
+
+        var scale = 1.0;
+        foreach (var r in rows)
+        {
+            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
+                { (r.V1, 1600, 0, 1.10), (r.V2, 1300, 6, 1.20) };
+            scale = Math.Min(scale, ScaleForHeight(plan, textW, availH));
+        }
+
+        var shapes = new StringBuilder();
+        for (var i = 0; i < n; i++)
+        {
+            var y = BodyY + (rowH + _m.Gap) * i;
+            // 圆：文字色用 OnAccent（与页码徽标同一套“底色上的字”规则）
+            shapes.Append(Ellipse(ctx.NextId(), MX, y, ring, ring, t.Accent));
+            var mark = rows[i].V3.Length > 0 ? rows[i].V3 : (i + 1).ToString();
+            shapes.Append(TextBox(ctx.NextId(), MX, y, ring, ring,
+                Para(mark, Scaled(1800, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+
+            var inner = new StringBuilder();
+            if (rows[i].V1.Length > 0)
+                inner.Append(Para(rows[i].V1, Scaled(1600, scale), t.Primary, bold: true, align: "l",
+                    lineSpacing: (int)Math.Round(110 * scale)));
+            if (rows[i].V2.Length > 0)
+                inner.Append(Para(rows[i].V2, Scaled(1300, scale), t.Text, align: "l", spaceBefore: 6,
+                    lineSpacing: (int)Math.Round(120 * scale)));
+            shapes.Append(TextBox(ctx.NextId(), MX + textX, y + Sz(57150), textW, availH, inner.ToString(), anchor: "t"));
         }
         return shapes.ToString();
     }
@@ -882,12 +1476,12 @@ public class Skill
         {
             var parts = SplitLabel(it);
             if (parts is null)
-                paras.Append(Para(it, sz, color, align: "l", bullet: "•", spaceBefore: 10, lineSpacing: 125, marL: 342900));
+                paras.Append(Para(it, sz, color, align: "l", bullet: "•", spaceBefore: 10, lineSpacing: 125, marL: (int)_m.Gap));
             else
             {
                 paras.Append(Para(parts.Value.Label, sz + 100, boldColor, bold: true, align: "l",
-                    bullet: "•", spaceBefore: 12, lineSpacing: 120, marL: 342900));
-                paras.Append(Para(parts.Value.Detail, sz - 100, color, align: "l", lineSpacing: 125, marL: 342900));
+                    bullet: "•", spaceBefore: 12, lineSpacing: 120, marL: (int)_m.Gap));
+                paras.Append(Para(parts.Value.Detail, sz - 100, color, align: "l", lineSpacing: 125, marL: (int)_m.Gap));
             }
         }
         return paras.ToString();
@@ -989,13 +1583,27 @@ public class Skill
           .Append("<p:spPr><a:xfrm><a:off x=\"").Append(x).Append("\" y=\"").Append(y)
           .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>");
         if (radius)
-            sb.Append("<a:prstGeom prst=\"roundRect\"><a:avLst><a:gd name=\"adj\" fmla=\"val 12000\"/></a:avLst></a:prstGeom>");
+            sb.Append("<a:prstGeom prst=\"roundRect\"><a:avLst><a:gd name=\"adj\" fmla=\"val ").Append(_m.Radius)
+              .Append("\"/></a:avLst></a:prstGeom>");
         else
             sb.Append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
         sb.Append("<a:solidFill>");
         if (alpha < 100) sb.Append("<a:srgbClr val=\"").Append(fill).Append("\"><a:alpha val=\"").Append(alpha * 1000).Append("\"/></a:srgbClr>");
         else sb.Append(Rgb(fill));
         sb.Append("</a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>")
+          .Append("<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>");
+        return sb.ToString();
+    }
+
+    /// <summary>椭圆（cx==cy 即正圆）：用来做时间轴的序号节点 / 图标圆。</summary>
+    private static string Ellipse(int id, long x, long y, long cx, long cy, string fill)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<p:sp><p:nvSpPr><p:cNvPr id=\"").Append(id).Append("\" name=\"Ellipse ").Append(id).Append("\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>")
+          .Append("<p:spPr><a:xfrm><a:off x=\"").Append(x).Append("\" y=\"").Append(y)
+          .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>")
+          .Append("<a:prstGeom prst=\"ellipse\"><a:avLst/></a:prstGeom>")
+          .Append("<a:solidFill>").Append(Rgb(fill)).Append("</a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>")
           .Append("<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>");
         return sb.ToString();
     }
@@ -1728,6 +2336,20 @@ public class Skill
 
     private static string? Str(JsonElement o, string name)
         => o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>回显实际生效的配色（含“底色上的字”两个派生色）。</summary>
+    private static string PaletteJson(Theme? t)
+    {
+        if (t is null) return "null";
+        return "{\"primary\":" + Js(t.Primary)
+             + ",\"secondary\":" + Js(t.Secondary)
+             + ",\"accent\":" + Js(t.Accent)
+             + ",\"light\":" + Js(t.Light)
+             + ",\"bg\":" + Js(t.Bg)
+             + ",\"text\":" + Js(t.Text)
+             + ",\"onAccent\":" + Js(t.OnAccent)
+             + ",\"onPrimary\":" + Js(t.OnPrimary) + "}";
+    }
 
     private static string Js(string s)
     {
