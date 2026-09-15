@@ -109,14 +109,23 @@ async def main():
     interrupts = []
     async with websockets.connect(f"{WS}?memberId={uid}&token={token}") as ws:
         await ws.send(json.dumps({"type": "GROUP_SUBSCRIBE", "groupIds": [gid]}))
-        deadline = time.time() + 900
+        # 不要“收到第一条 TEXT_MESSAGE_END 就退出”：主管/代处理链路会先发一条
+        # “（X 代为处理）”，真正的结果在后续消息里；而且技能需要审批时，
+        # 卡还没批就退出去 → 运行会一直挂在那里直到超时（实测踩到）。
+        # 改成“空闲多少秒没有事件才算结束”。
+        deadline = time.time() + 1800
+        last_event = time.time()
         while time.time() < deadline:
             try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                raw = await asyncio.wait_for(ws.recv(), timeout=15)
             except asyncio.TimeoutError:
+                if time.time() - last_event > 180:
+                    print(f"[结束] 已空闲 {int(time.time() - last_event)}s，视为本轮结束")
+                    break
                 continue
             except Exception:
                 break
+            last_event = time.time()
             try:
                 ev = json.loads(raw)
             except Exception:
@@ -131,8 +140,13 @@ async def main():
                     "approved": True, "approveAll": True,
                 }, token=token)
                 continue
-            if t == "TEXT_MESSAGE_END":
-                break
+            if t == "TEXT_MESSAGE_CONTENT":
+                delta = ev.get("delta") or ""
+                if delta:
+                    print("  · " + delta.replace("\n", " ")[:120])
+            elif t == "TEXT_MESSAGE_END":
+                print("[消息结束]")
+    print(f"[本轮] 共批准 {len(interrupts)} 次")
 
     # 等落库后再读一次最终消息
     await asyncio.sleep(3)

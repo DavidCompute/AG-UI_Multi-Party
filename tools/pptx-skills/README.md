@@ -18,7 +18,7 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 
 | skillId | 名称 | 说明 |
 |---|---|---|
-| `pptx_deck` | 演示文稿生成（PPT） | 封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 大数字 / 进度仪表 / 网格卡 / 时间轴 / 图标行 / 引言 / 配图（含图文混排） / 图表 / 小结 / 结束页；支持读取既有稿、套模板、出稿后自检、原地编辑既有稿 |
+| `pptx_deck` | 演示文稿生成（PPT） | 封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 大数字 / 进度仪表 / **示意图（金字塔 / 漏斗 / 四象限 / 循环 / 层叠）** / 网格卡 / 时间轴 / 图标行 / 引言 / 配图（含图文混排） / **自动生成的题图** / 图表 / 小结 / 结束页；支持读取既有稿、套模板、出稿后自检、原地编辑既有稿 |
 
 ## 页面类型（slides[].type）与版式变体（variant）
 
@@ -36,6 +36,12 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | `kpi` | 指标卡（一行最多 4 张） | — | `title` `items[{value,label}]` |
 | `stats` | 大数字看板（无卡片底） | — | `title` `items[{value,label}]` `cols` |
 | `progress` | 进度 / 仪表 | `bar`(默认) / `ring`(环形) | `title` `items[{label,value}]` `max`(默认 100) |
+| `pyramid` | 金字塔 / 分层（3~6 层，顶层最窄） | — | `title` `items[{title,text}]` |
+| `funnel` | 漏斗 / 收敛（3~6 层，顶层最宽） | — | `title` `items[{title,text}]` |
+| `matrix` | 四象限 | — | `title` `xTitle` `yTitle` `xLeft` `xRight` `items[左上,右上,左下,右下]` |
+| `cycle` | 环形闭环（3~6 步） | — | `title` `center` `items[{title,text}]` |
+| `stack` | 层叠架构（纵向分层条） | — | `title` `items[{title,text}]` |
+| `hero` | 自动生成的题图（整页） | — | `title` `subtitle` |
 | `grid` | 网格卡片（2/3 列，左侧色条） | — | `title` `items[{title,text}]` `cols` |
 | `timeline` | 时间轴 / 流程（最多 6 步） | — | `title` `items[{title,detail}]` |
 | `iconRows` | 图标行（最多 6 行） | — | `title` `items[{icon,title,text}]` |
@@ -45,7 +51,7 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | `summary` | 小结 / 收尾 | `list`(默认) / `cta`(行动项) / `split`(左回顾右行动) | `title` `bullets[]` `items[]` `actions[]` `contact` |
 | `end` | 结束页 | — | `title` `subtitle` |
 
-`content` 页可用 `"layout":"timeline|grid|stats|iconRows|progress"` 指定子类型（少记几个 type）。
+`content` 页可用 `"layout":"timeline|grid|stats|iconRows|progress|pyramid|funnel|matrix|cycle|stack"` 指定子类型（少记几个 type）。
 `items` 里的字符串项会被当作第一个字段（允许 `items:["要点一", …]` 这种简写）。
 
 任何一页都可加 `notes`，写入**演讲者备注**。
@@ -169,6 +175,45 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 - 表格用「表头填主色 + 隔行浅色」自绘，不依赖主题部件里的表格样式（兼容性最好）。
 - **图片按框裁切（cover 语义）**：图片型页与图文混排页的框不一定是原图比例，
   服务端先用 ImageSharp 裁到目标比例再嵌（`AddCoverImage`）——直接拉伸会变形。
+
+## 插图：不需要用户提供任何素材
+
+两类“插图”都是**自己生成的**，不依赖任何外部图片或联网：
+
+### 1）示意图（关系图）
+
+商务稿里最常被叫做“插图”的其实是这个：用形状把**关系**画出来。全部用 DrawingML
+预设几何拼（`trapezoid` / `rect` / `ellipse` / `triangle` / `parallelogram`），不写自定义几何，
+因此产出确定、在任何渲染器里都能开。
+
+| 页型 | 画什么 | 适合 |
+|---|---|---|
+| `pyramid` | 梯形堆叠，顶层最窄（斜边**连续**：本层下边刚好接下一层上边） | 分层策略 / 成熟度模型 / 价值层级 |
+| `funnel` | 梯形堆叠，顶层最宽 + 右侧数值列 | 转化率 / 逐步筛选 |
+| `matrix` | 2×2 卡片 + 轴名与轴端标签 | 优先级 / 取舍 / 分类 |
+| `cycle` | 环 + 均匀分布的节点圆 + **切向旋转的三角箭头**（中心可写一句话） | 迭代 / PDCA / 闭环 |
+| `stack` | 纵向分层长条，层名在左、要点在右 | 技术架构 / 能力分层 |
+
+### 2）程序化题图（抽象视觉）
+
+`hero` 页型，以及 **`image` / 封面在图片缺失或未提供时**的自动降级：
+按主题配色生成一张抽象图（斜带 + 大圆 + 点阵）。
+
+- **零素材、零联网、无版权问题**，颜色跟着 `theme` 走；
+- **确定性**：用标题作种子（不是 `Random`），所以同一份稿子重导出封面不会变；
+  （回归：`GeneratedHeroArt_IsDeterministic`）
+- 设计约束：只用实色（无渐变）、透明度只用 `a:alpha`、颜色全部取自动调色板；
+- **不假称有图**：页面上会写“（图片不存在，已自动生成题图）”，返回 `warnings` 也如实说。
+
+> 局限（实话）：这是**图形**不是**照片**。要有照片级插图必须接一个文生图服务（见下面“平台约束”里的说明）。
+
+### 两个实测踩到的坑
+
+- **题图最初用“旋转矩形”做斜带，形状画到了画布外**：旋转后的包围盒会超出给定矩形，
+  自检直接报 `overflow`（x=-3230879…）。现在斜带改用 `parallelogram`（自带斜边、不靠旋转），
+  圆与点阵也全部限位在框内。回归：`DiagramPages_MaxItems_StayInsideCanvas`。
+- **`cycle` 一度写成 `Math.Max(3, items.Count)`**：只给 1~2 项时 `n` 被抬到 3，
+  但 `items` 里没那么多 → `rows[i]` 越界崩溃。被“每个页型都真的接通了”那个用例抳到（它只给 1 项）。
 
 ## 图表
 
@@ -419,13 +464,18 @@ python tools/preview-pptx.py --sample --check --expect "版式样张,环形仪�
 9. **45 个内置图标都真画出东西**（`AllDocumentedIcons_ProduceNonBlankPngs`）：名字写错/漏 case
    只会得到一张**全透明 PNG**（圆里空空的），而“生成成功”看不出来——所以逐个量墨迹占比。
 10. **环形仪表是环不是饼**（`ProgressRing_IsHollowRingNotDisk`）：量墨迹占比（上界 0.45）。
-11. **同页型的各变体真的长得不一样**（`VariantsOfSameType_ProduceDifferentPages`）：
-   把变体的页面 XML 两两比较（先把页码徽标抹平，否则比的是页号）；
-   没实现的变体会**静默回落**到默认版式，光看“标题在不在”拦不住。
-12. **字体配对不会把汉字丢给拉丁字体**（`FontPair_SetsLatinFacesAndKeepsEastAsianFont` /
+11. **示意图真画出了自己的图形**（`DiagramPages_DrawTheirOwnShapes`）：断言到 `prstGeom`——
+   金字塔/漏斗要出现 `trapezoid`、循环要出现 `triangle`、题图要出现 `parallelogram`；
+   “标题在不在”拦不住静默回落。另加 `DiagramPages_MaxItems_StayInsideCanvas`（6 项上限不越界）
+  与 `GeneratedHeroArt_IsDeterministic`（同一标题两次生成完全一致）。
+12. **缺图自动出题图**（`MissingImage_FallsBackToGeneratedArt`）：页上无 `<p:pic>`、但有题图形状，
+   且返回 `warnings` 如实说明。
+13. **同页型的各变体真的长得不一样**（`VariantsOfSameType_ProduceDifferentPages`）：
+   把变体的页面 XML 两两比较（先把页码徽标抹平，否则比的是页号）。
+14. **字体配对不会把汉字丢给拉丁字体**（`FontPair_SetsLatinFacesAndKeepsEastAsianFont` /
    `CjkFont_FollowsExplicitChineseFontFace`）。
-13. **出稿自检**（`Qa_FlagsPlaceholdersAndEmptyBody` / `Qa_PassesOnAHealthyDeck`）。
-14. **原地编辑**（`Edit_DeleteReorderDuplicateReplaceAndAppend` 等）：删/重排/复制/替文字/追加，
+15. **出稿自检**（`Qa_FlagsPlaceholdersAndEmptyBody` / `Qa_PassesOnAHealthyDeck`）。
+16. **原地编辑**（`Edit_DeleteReorderDuplicateReplaceAndAppend` 等）：删/重排/复制/替文字/追加，
    并用 `action:read` 把结果读回来逐页核对；另验证“不得覆盖原件”“不得删光”“图表页复制要报错”。
 
 ```bash

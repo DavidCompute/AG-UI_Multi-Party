@@ -1211,6 +1211,8 @@ public sealed class PptxDeckSkillTests
         {
             "cover", "toc", "section", "twoCol", "table", "kpi", "stats",
             "grid", "timeline", "iconRows", "quote", "image", "chart", "summary", "end",
+            // 进度与示意（插图）页型：漏写 case 会静默回落成默认要点页，这个用例就是拦它
+            "progress", "pyramid", "funnel", "matrix", "cycle", "stack", "hero",
         };
 
         string Build(IEnumerable<string> typeNames)
@@ -1970,6 +1972,187 @@ public sealed class PptxDeckSkillTests
             var ink = PngInkRatio(e);
             Assert.True(ink > 0.02, e.FullName + " 几乎是空白（墨迹 " + ink.ToString("P1") + "）");
         }
+    }
+
+    // ====================================================================
+    // 自动插图：示意图页型 + 程序化题图
+    // ====================================================================
+
+    /// <summary>
+    /// 五种示意图各自要画出自己的**图形特征**（预设几何），而不是回落成要点页。
+    ///
+    /// <para>
+    /// 断言到 <c>prstGeom</c> 是因为“标题在不在”拦不住静默回落；
+    /// 而金字塔/漏斗的斜边靠 <c>trapezoid</c>、循环靠 <c>triangle</c> 旋转、
+    /// 题图靠 <c>parallelogram</c>——这些形状名就是“这个页型真的画了图”的证据。
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("pyramid", "trapezoid")]
+    [InlineData("funnel", "trapezoid")]
+    [InlineData("matrix", "rect")]
+    [InlineData("cycle", "triangle")]
+    [InlineData("stack", "rect")]
+    [InlineData("hero", "parallelogram")]
+    public void DiagramPages_DrawTheirOwnShapes(string type, string expectedPrst)
+    {
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "示意图检查",
+            theme = "pure-tech-blue",
+            slides = new object[]
+            {
+                new { type = "cover", title = "示意图检查" },
+                new
+                {
+                    type, title = "示意图", center = "闭环", xTitle = "难度", yTitle = "价值",
+                    items = new object[]
+                    {
+                        new { title = "甲", text = "说明甲", detail = "细项甲" },
+                        new { title = "乙", text = "说明乙", detail = "细项乙" },
+                        new { title = "丙", text = "说明丙", detail = "细项丙" },
+                    },
+                },
+            },
+        }));
+
+        Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+        Assert.Equal(0, doc.RootElement.GetProperty("qa").GetProperty("issueCount").GetInt32());
+        Assert.True(ShapesOutsideCanvas(path).Count == 0,
+            type + " 有形状画出画布：" + string.Join("; ", ShapesOutsideCanvas(path)));
+
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        Assert.Contains($"prst=\"{expectedPrst}\"", sr.ReadToEnd());
+    }
+
+    /// <summary>
+    /// 示意图装满上限项数（6 项）时仍不得越界。
+    /// 实测踩到：题图最初用旋转矩形做斜带、圆也不限位，形状直接画到画布外（自检报 overflow）。
+    /// </summary>
+    [Theory]
+    [InlineData("pyramid")]
+    [InlineData("funnel")]
+    [InlineData("cycle")]
+    [InlineData("stack")]
+    [InlineData("hero")]
+    public void DiagramPages_MaxItems_StayInsideCanvas(string type)
+    {
+        var items = Enumerable.Range(1, 6)
+            .Select(i => (object)new { title = "第" + i + "层", text = "说明" + i, detail = "细项" + i }).ToArray();
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "上限检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "上限检查" },
+                new { type, title = "上限检查", center = "闭环", items },
+            },
+        }));
+
+        Assert.Equal(0, doc.RootElement.GetProperty("qa").GetProperty("issueCount").GetInt32());
+        Assert.True(ShapesOutsideCanvas(path).Count == 0,
+            type + " 有形状画出画布：" + string.Join("; ", ShapesOutsideCanvas(path)));
+    }
+
+    /// <summary>
+    /// 没有真图时不再只画一块纯色（或写“图片不存在”），而是**自动生成题图**：
+    /// 页面里应该没有 &lt;p:pic&gt;，但有题图的形状；且如实报告用了自动题图。
+    /// </summary>
+    [Fact]
+    public void MissingImage_FallsBackToGeneratedArt()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "缺图-" + Guid.NewGuid().ToString("N") + ".png");
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "缺图检查",
+            theme = "forest-eco",
+            slides = new object[]
+            {
+                new { type = "cover", title = "缺图检查" },
+                new { type = "image", title = "配图页", variant = "full", path = missing },
+                new { type = "cover", title = "背景图封面", variant = "image", path = missing },
+            },
+        }));
+
+        var warnings = doc.RootElement.GetProperty("warnings").EnumerateArray().Select(x => x.GetString()!).ToList();
+        Assert.Contains(warnings, w => w.Contains("自动生成的题图"));
+
+        using var zip = ZipFile.OpenRead(path);
+        string Slide(int n)
+        {
+            using var sr = new StreamReader(zip.Entries.First(e => e.FullName == $"ppt/slides/slide{n}.xml").Open());
+            return sr.ReadToEnd();
+        }
+        foreach (var n in new[] { 2, 3 })
+        {
+            var xml = Slide(n);
+            Assert.DoesNotContain("<p:pic>", xml);            // 没有真图
+            Assert.Contains("prst=\"parallelogram\"", xml);  // 但有题图
+            Assert.Contains("<a:alpha", xml);                 // 题图靠透明度做层次
+        }
+    }
+
+    /// <summary>
+    /// 题图要**确定性**：同一个标题每次生成的图必须一模一样。
+    /// （用 Random 而不是种子的话，用户每次重导出同一份稿子都会拿到不同的封面。）
+    /// </summary>
+    [Fact]
+    public void GeneratedHeroArt_IsDeterministic()
+    {
+        string HeroOf()
+        {
+            var (path, _) = RenderDeck(JsonSerializer.Serialize(new
+            {
+                title = "确定性检查",
+                slides = new object[]
+                {
+                    new { type = "cover", title = "确定性检查" },
+                    new { type = "hero", title = "固定标题", subtitle = "固定副标题" },
+                },
+            }));
+            using var zip = ZipFile.OpenRead(path);
+            using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+            return sr.ReadToEnd();
+        }
+
+        var first = HeroOf();
+        var second = HeroOf();
+        // 形状 id 从 2 开始递增，两次生成完全一致
+        Assert.Equal(first, second);
+    }
+
+    /// <summary>内容页可用 layout 直接指定示意图子类型（与 timeline/grid 那套别名一致）。</summary>
+    [Theory]
+    [InlineData("pyramid", "trapezoid")]
+    [InlineData("funnel", "trapezoid")]
+    [InlineData("matrix", "rect")]
+    [InlineData("cycle", "triangle")]
+    [InlineData("stack", "rect")]
+    public void ContentLayoutAlias_ReachesDiagramTypes(string layout, string expectedPrst)
+    {
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "别名检查",
+            slides = new object[]
+            {
+                new { type = "cover", title = "别名检查" },
+                new
+                {
+                    type = "content", title = "别名页", layout,
+                    items = new object[]
+                    {
+                        new { title = "甲", text = "说明甲" },
+                        new { title = "乙", text = "说明乙" },
+                        new { title = "丙", text = "说明丙" },
+                    },
+                },
+            },
+        }));
+        Assert.Equal(0, doc.RootElement.GetProperty("qa").GetProperty("issueCount").GetInt32());
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        Assert.Contains($"prst=\"{expectedPrst}\"", sr.ReadToEnd());
     }
 
     /// <summary>

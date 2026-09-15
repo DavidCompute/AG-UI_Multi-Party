@@ -124,6 +124,32 @@ def deck(palette, style):
             {"type": "summary", "title": "回顾与行动", "variant": "split",
              "bullets": ["协作：多角色会商", "记忆：长期可治理"],
              "actions": ["确认试点", "排期联调"], "contact": "team@example.com"},
+
+            # ---- 自动插图：示意图（形状画出来的关系图）与程序化题图 ----
+            {"type": "pyramid", "title": "成熟度分层", "items": [
+                {"title": "L4 自组织", "text": "团队自主编排"},
+                {"title": "L3 可度量", "text": "指标驱动"},
+                {"title": "L2 可管理", "text": "流程固化"},
+                {"title": "L1 初始", "text": "各自为战"}]},
+            {"type": "funnel", "title": "转化漏斗", "items": [
+                {"title": "触达", "text": "10,000"}, {"title": "注册", "text": "3,200"},
+                {"title": "激活", "text": "1,100"}, {"title": "付费", "text": "260"}]},
+            {"type": "matrix", "title": "优先级取舍", "xTitle": "实现难度 →", "yTitle": "价值 ↑",
+             "xLeft": "低", "xRight": "高", "items": [
+                {"title": "速赢", "text": "高价值低成本"}, {"title": "攻坚", "text": "高价值高成本"},
+                {"title": "顺手", "text": "低价值低成本"}, {"title": "缓做", "text": "低价值高成本"}]},
+            {"type": "cycle", "title": "迭代闭环", "center": "持续改进", "items": [
+                {"title": "计划", "text": "定目标"}, {"title": "执行", "text": "落动作"},
+                {"title": "检查", "text": "看结果"}, {"title": "改进", "text": "再一轮"}]},
+            {"type": "stack", "title": "能力架构", "items": [
+                {"title": "交互层", "text": "单聊 / 知聚 / 审批卡"},
+                {"title": "编排层", "text": "组织架构·计划·递归综合"},
+                {"title": "能力层", "text": "技能库·知识库·记忆"},
+                {"title": "底座", "text": "AG-UI 协议·PG·Ollama"}]},
+            {"type": "hero", "title": "自动生成的题图", "subtitle": "零素材、零联网、颜色跟主题"},
+            # 图片缺失时自动出题图（并报 warnings），用来验证降级路径真的能出图
+            {"type": "cover", "title": "缺图封面", "variant": "image"},
+            {"type": "image", "title": "缺图图文", "variant": "left"},
         ],
     }
 

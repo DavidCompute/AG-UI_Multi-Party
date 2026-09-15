@@ -63,6 +63,17 @@
 //     stats    大数字    title, items:[ {value,label} ], cols
 //     progress 进度/仪表 title, items:[ {label,value} ], max(默认 100),
 //                        variant: bar(默认，横向进度条) | ring(环形仪表)
+//     pyramid  金字塔    title, items:[ {title,text} ]（3~6 层，顶层最窄）
+//                        适合：分层策略 / 成熟度模型 / 价值层级
+//     funnel   漏斗      title, items:[ {title,text} ]（3~6 层，顶层最宽；text 放数值）
+//                        适合：转化率 / 逐步筛选
+//     matrix   四象限    title, xTitle, yTitle, xLeft, xRight, items:[左上,右上,左下,右下]
+//                        适合：优先级 / 取舍 / 分类
+//     cycle    循环闭环  title, center, items:[ {title,text} ]（3~6 步）
+//                        适合：迭代 / PDCA / 闭环流程
+//     stack    层叠架构  title, items:[ {title,text} ]
+//                        适合：技术架构 / 能力分层
+//     hero     自动题图  title, subtitle（整页程序生成的抽象图）
 //     grid     网格卡    title, items:[ {title,text} ], cols:2|3
 //     timeline 时间轴    title, items:[ {title,detail} ]（最多 6 步）
 //     iconRows 图标行    title, items:[ {icon,title,text} ]（最多 6 行）
@@ -71,6 +82,7 @@
 //                        variant: full(默认) | left(图左文右) | right(文左图右) |
 //                                 bleed(半出血+叠字，自包含标题) | gallery(images:[{path,caption}] 2~4 张)
 //                        left/right/bleed 可配 heading/bullets 写文字侧
+//                        **图片缺失/未提供时自动生成题图，并报 warnings**
 //     chart    图表      title, chartType:"bar|line|pie|doughnut|scatter|radar", categories:[…],
 //                        series:[ {name,values:[…]} ], yLabel, xLabel, caption
 //                        散点图：series:[ {name,points:[[x,y],…]} ]
@@ -79,8 +91,16 @@
 //     summary  小结      title, bullets:[…]
 //                        variant: list(默认) | cta(items:[行动项], contact) | split(bullets+actions+contact)
 //     end      结束页    title, subtitle
-//   content 还可用 "layout":"timeline|grid|stats|iconRows|progress" 直接指定子类型。
+//   content 还可用 "layout":"timeline|grid|stats|iconRows|progress|pyramid|funnel|matrix|cycle|stack" 指定子类型。
 //   任何页都可带 "notes"（备注文字），写入演讲者备注。
+//
+//   【插图：不需要用户提供任何素材】
+//     一类是**示意图**（pyramid / funnel / matrix / cycle / stack）：用 DrawingML 预设几何
+//       （trapezoid / rect / ellipse / triangle / parallelogram）把“分层·收敛·取舍·闭环·架构”
+//       这些**关系**画出来 —— 商务稿里最常被叫做“插图”的其实是这个；
+//     另一类是**程序化题图**（hero 页型，以及 image/cover 缺图时的降级）：按主题配色生成一张
+//       抽象图，零素材、零联网、无版权问题，且**确定性**（同一标题每次生成的图一样）。
+//     设计约束：只用实色（无渐变）、透明度只用 a:alpha，颜色全部取自动调色板。
 //
 //   【出稿后自检】生成/编辑完会自动跑一遍 QA（占位符、空页、只有标题、形状越界），
 //   结果在返回 JSON 的 qa 字段；降级行为（如图片缺失改用占位块）在 warnings 里。
@@ -813,7 +833,8 @@ public class Skill
     /// <summary>这页是不是“本该有正文”的页型（封面/分隔/结束/引言/整图这种只有一块文字的页不算）。</summary>
     private static bool IsBodyPage(string? type)
         => type is null || type is "content" or "twocol" or "table" or "kpi" or "stats" or "grid"
-            or "cards" or "timeline" or "iconrows" or "chart" or "summary" or "toc" or "progress";
+            or "cards" or "timeline" or "iconrows" or "chart" or "summary" or "toc" or "progress"
+            or "pyramid" or "funnel" or "matrix" or "cycle" or "stack";
 
     /// <summary>占位符/未填内容的检出。命中返回原因，未命中返回 null。</summary>
     private static string? PlaceholderHit(string text)
@@ -1580,6 +1601,28 @@ public class Skill
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
                 shapes.Add(ProgressBody(el, ctx));
                 break;
+            case "pyramid":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(PyramidBody(el, ctx));
+                break;
+            case "funnel":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(FunnelBody(el, ctx));
+                break;
+            case "matrix":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(MatrixBody(el, ctx));
+                break;
+            case "cycle":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(CycleBody(el, ctx));
+                break;
+            case "stack":
+                shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
+                shapes.Add(StackBody(el, ctx));
+                break;
+            case "hero":
+                return HeroSlide(el, ctx);
             case "summary":
                 shapes.Add(SlideTitle(Str(el, "title") ?? "小结", ctx));
                 shapes.Add(SummaryBody(el, ctx));
@@ -1592,6 +1635,11 @@ public class Skill
                     "grid" or "cards" => GridBody(el, ctx),
                     "stats" or "callouts" or "numbers" => StatsBody(el, ctx),
                     "progress" or "bars" or "gauge" => ProgressBody(el, ctx),
+                    "pyramid" or "layers" or "levels" => PyramidBody(el, ctx),
+                    "funnel" => FunnelBody(el, ctx),
+                    "matrix" or "quadrant" => MatrixBody(el, ctx),
+                    "cycle" or "loop" => CycleBody(el, ctx),
+                    "stack" or "architecture" => StackBody(el, ctx),
                     "iconrows" or "icon-rows" or "rows" => IconRowsBody(el, ctx),
                     _ => BulletBody(el, ctx, accent: false),
                 });
@@ -1691,6 +1739,7 @@ public class Skill
     {
         var t = ctx.Theme;
         var path = Str(el, "path");
+        var title = Str(el, "title") ?? ctx.Title;
         var shapes = new List<string>();
         var hasImg = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
         if (hasImg)
@@ -1701,12 +1750,12 @@ public class Skill
         }
         else
         {
-            shapes.Add(Rect(ctx.NextId(), 0, 0, W, H, t.Primary));
-            if (!string.IsNullOrWhiteSpace(path)) Warn("封面背景图不存在，已改用主色底：" + path);
+            // 没给背景图 → 用自动生成的题图（以前是一块纯色，看着就是一页色块）
+            shapes.Add(HeroArt(ctx, 0, 0, W, H, title));
+            if (!string.IsNullOrWhiteSpace(path)) Warn("封面背景图不存在，已改用自动生成的题图：" + path);
         }
-        var onImg = hasImg ? t.OnPrimary : t.Bg;
+        var onImg = hasImg ? t.OnPrimary : t.Light;
 
-        var title = Str(el, "title") ?? ctx.Title;
         var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
         var paras = new StringBuilder();
         paras.Append(ParaTitle(title, 4400, t.Bg, align: "ctr", lineSpacing: 105));
@@ -1729,18 +1778,18 @@ public class Skill
         var imgW = W * 5 / 12;
         var imgX = W - imgW;
         var path = Str(el, "path");
+        var title = Str(el, "title") ?? ctx.Title;
         var hasImg = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
         if (hasImg)
             shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, H), imgX, 0, imgW, H));
         else
         {
-            shapes.Add(Rect(ctx.NextId(), imgX, 0, imgW, H, t.Primary));
-            shapes.Add(Rect(ctx.NextId(), imgX - 114300, 0, 114300, H, t.Accent));
-            if (!string.IsNullOrWhiteSpace(path)) Warn("封面右图不存在，已改用主色块：" + path);
+            // 右图缺位 → 自动生成题图（与 image/split 版式同一份视觉语言）
+            shapes.Add(HeroArt(ctx, imgX, 0, imgW, H, title));
+            if (!string.IsNullOrWhiteSpace(path)) Warn("封面右图不存在，已改用自动生成的题图：" + path);
         }
 
         var textW = imgX - MX - 457200;
-        var title = Str(el, "title") ?? ctx.Title;
         var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
         var paras = new StringBuilder();
         paras.Append(ParaTitle(title, 3600, t.Primary, lineSpacing: 105));
@@ -3128,6 +3177,382 @@ public class Skill
         return Poly(pts);
     }
 
+    // ---- 示意图（金字塔 / 漏斗 / 四象限 / 循环 / 层叠）----
+    //
+    // “插图”在商务稿里多半指这类**示意图**:不靠照片，而是用形状把关系画出来。
+    // 全部用 DrawingML 预设几何（trapezoid / rect / ellipse / triangle）拼出来，
+    // 不写自定义几何（custGeom）、不需要任何外部素材、不用联网，因此产出确定、无版权问题。
+
+    /// <summary>
+    /// 任意 DrawingML 预设几何形状。<paramref name="rot"/> 单位是 1/60000 度（顺时针）；
+    /// <paramref name="adj"/> 是形状调整值（如梯形斜边收进量）。
+    /// </summary>
+    private static string Preset(int id, string prst, long x, long y, long cx, long cy, string? fill,
+        int rot = 0, string? adj = null, string? line = null, long lineW = 0, int alpha = 100)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<p:sp><p:nvSpPr><p:cNvPr id=\"").Append(id).Append("\" name=\"Shape ").Append(id).Append("\"/>").Append("<p:cNvSpPr/><p:nvPr/></p:nvSpPr>")
+          .Append("<p:spPr><a:xfrm");
+        if (rot != 0) sb.Append(" rot=\"").Append(rot).Append("\"");
+        sb.Append("><a:off x=\"").Append(x).Append("\" y=\"").Append(y).Append("\"/><a:ext cx=\"")
+          .Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>")
+          .Append("<a:prstGeom prst=\"").Append(prst).Append("\">");
+        if (adj is null) sb.Append("<a:avLst/>");
+        else sb.Append("<a:avLst><a:gd name=\"adj\" fmla=\"val ").Append(adj).Append("\"/></a:avLst>");
+        sb.Append("</a:prstGeom>");
+        // fill == null → 只描边不填充（如循环图的环）
+        if (fill is null) sb.Append("<a:noFill/>");
+        else
+        {
+            sb.Append("<a:solidFill>");
+            if (alpha < 100) sb.Append("<a:srgbClr val=\"").Append(BareHex(fill)).Append("\"><a:alpha val=\"").Append(alpha * 1000).Append("\"/></a:srgbClr>");
+            else sb.Append(Rgb(fill));
+            sb.Append("</a:solidFill>");
+        }
+        if (line is null) sb.Append("<a:ln><a:noFill/></a:ln>");
+        else sb.Append("<a:ln w=\"").Append(lineW <= 0 ? 12700 : lineW).Append("\"><a:solidFill>")
+                  .Append(Rgb(line)).Append("</a:solidFill></a:ln>");
+        sb.Append("</p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>");
+        return sb.ToString();
+    }
+
+    /// <summary>画在 <paramref name="fill"/> 底色上的可读文字色（黑或白）。</summary>
+    private static string OnFill(string fill) => OnColor(fill, "FFFFFF");
+
+    /// <summary>示意图的层颜色：相邻层用主色/强调色交替，保证层次看得清又不花。</summary>
+    private static string LayerColor(Theme t, int i) => i % 2 == 0 ? t.Primary : t.Accent;
+
+    /// <summary>
+    /// 梯形层的 adj 值：OOXML 的 trapezoid 把“斜边收进量”定义为 <c>min(w,h) * adj / 100000</c>。
+    /// 想让上下两层刚好衔接（斜边连续），收进量就是上下宽度差的一半。
+    /// </summary>
+    private static string SlopeAdj(long w, long h, long inset)
+    {
+        var basis = Math.Max(1, Math.Min(w, h));
+        var adj = (long)Math.Round(inset * 100000.0 / basis);
+        return Math.Max(0, Math.Min(50000, adj)).ToString();
+    }
+
+    /// <summary>金字塔 / 分层（3~6 层，顶层最窄）：适合“分层策略 / 成熟度模型 / 价值层级”。</summary>
+    private static string PyramidBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var rows = Items(el, ["title", "label", "name"], ["text", "detail", "desc"], []);
+        if (rows.Count == 0) return BulletBody(el, ctx, accent: false);
+        var n = Math.Min(rows.Count, 6);
+
+        var layerH = Math.Min(BodyH / n, BodyH);
+        var y0 = BodyY + (BodyH - layerH * n) / 2;
+        // 顶层 46% 宽 → 底层 100% 宽，等差递增
+        const double topRatio = 0.46;
+        var sb = new StringBuilder();
+        for (var i = 0; i < n; i++)
+        {
+            var frac = n == 1 ? 1.0 : topRatio + (1 - topRatio) * i / (n - 1);
+            var wNext = i + 1 < n ? topRatio + (1 - topRatio) * (i + 1) / (n - 1) : frac;
+            var w = (long)(CW * frac);
+            var wb = (long)(CW * wNext);
+            var x = MX + (CW - w) / 2;
+            var y = y0 + i * layerH;
+            var gap = Sz(22860);
+            var cy = layerH - gap;
+            // 斜边连续：本层下边要接到下一层上边
+            var adj = SlopeAdj(w, cy, Math.Max(0, (wb - w) / 2));
+            var fill = LayerColor(t, i);
+            sb.Append(Preset(ctx.NextId(), "trapezoid", x, y, w, cy, fill, adj: adj));
+            var label = rows[i].V1;
+            var detail = rows[i].V2;
+            var inner = new StringBuilder();
+            inner.Append(Para(label, 1600, OnFill(fill), bold: true, align: "ctr", lineSpacing: 110));
+            if (detail.Length > 0)
+                inner.Append(Para(detail, 1200, OnFill(fill), align: "ctr", spaceBefore: 4, lineSpacing: 115));
+            sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y, w - _m.Pad * 2, cy, inner.ToString(), anchor: "ctr"));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>漏斗（3~6 层，顶层最宽）：适合“转化率 / 逐步筛选 / 收敛流程”。</summary>
+    private static string FunnelBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var rows = Items(el, ["title", "label", "name"], ["text", "detail", "value"], []);
+        if (rows.Count == 0) return BulletBody(el, ctx, accent: false);
+        var n = Math.Min(rows.Count, 6);
+
+        var layerH = Math.Min(BodyH / n, BodyH);
+        var y0 = BodyY + (BodyH - layerH * n) / 2;
+        var rightW = CW * 26 / 100;                 // 右侧放数值/说明
+        var areaW = CW - rightW - _m.Gap;
+        var x0 = MX;
+        const double bottomRatio = 0.34;
+        var sb = new StringBuilder();
+        for (var i = 0; i < n; i++)
+        {
+            var frac = n == 1 ? 1.0 : 1.0 - (1 - bottomRatio) * i / (n - 1);
+            var fracNext = i + 1 < n ? 1.0 - (1 - bottomRatio) * (i + 1) / (n - 1) : frac;
+            var w = (long)(areaW * frac);
+            var wn = (long)(areaW * fracNext);
+            var x = x0 + (areaW - w) / 2;
+            var y = y0 + i * layerH;
+            var cy = layerH - Sz(22860);
+            var adj = SlopeAdj(w, cy, Math.Max(0, (w - wn) / 2));
+            var fill = LayerColor(t, i);
+            sb.Append(Preset(ctx.NextId(), "trapezoid", x, y, w, cy, fill, adj: adj));
+            sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y, w - _m.Pad * 2, cy,
+                Para(rows[i].V1, 1500, OnFill(fill), bold: true, align: "ctr", lineSpacing: 110), anchor: "ctr"));
+            var detail = rows[i].V2;
+            if (detail.Length > 0)
+                sb.Append(TextBox(ctx.NextId(), x0 + areaW + _m.Gap, y, rightW, cy,
+                    Para(detail, 1500, t.Text, align: "l", lineSpacing: 120), anchor: "ctr"));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 四象限矩阵：适合“优先级 / 取舍 / 分类”。
+    /// 轴名用 <c>xTitle</c>/<c>yTitle</c>，轴端用 <c>xLeft</c>/<c>xRight</c>/<c>yTop</c>/<c>yBottom</c>；
+    /// <c>items</c> 按阅读顺序（左上→右上→左下→右下）对应四个象限。
+    /// </summary>
+    private static string MatrixBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var rows = Items(el, ["title", "label", "name"], ["text", "detail", "desc"], []);
+        var gap = _m.Gap;
+        var axisW = Sz(457200);
+        var gridX = MX + axisW;
+        var gridY = BodyY + Sz(274320);
+        var gridW = CW - axisW;
+        var gridH = BodyH - Sz(274320);
+        var cellW = (gridW - gap) / 2;
+        var cellH = (gridH - gap) / 2;
+
+        var sb = new StringBuilder();
+        // 四个象限：左上/右上用浅底，左下/右下深浅交替，便于区分
+        for (var i = 0; i < 4; i++)
+        {
+            var c = i % 2;
+            var r = i / 2;
+            var x = gridX + c * (cellW + gap);
+            var y = gridY + r * (cellH + gap);
+            sb.Append(Rect(ctx.NextId(), x, y, cellW, cellH, i is 0 or 3 ? t.Light : t.Bg, radius: true,
+                alpha: 100));
+            sb.Append(Rect(ctx.NextId(), x, y, Sz(45720), cellH, t.Accent));
+            if (i < rows.Count)
+            {
+                var inner = new StringBuilder();
+                if (rows[i].V1.Length > 0)
+                    inner.Append(Para(rows[i].V1, 1700, t.Primary, bold: true, align: "l", lineSpacing: 110));
+                if (rows[i].V2.Length > 0)
+                    inner.Append(Para(rows[i].V2, 1300, t.Text, align: "l", spaceBefore: 8, lineSpacing: 122));
+                sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y + _m.Pad, cellW - _m.Pad * 2, cellH - _m.Pad * 2,
+                    inner.ToString(), anchor: "ctr"));
+            }
+        }
+        // 轴名与轴端标签
+        var yTitle = Str(el, "yTitle");
+        if (!string.IsNullOrWhiteSpace(yTitle))
+            sb.Append(TextBox(ctx.NextId(), MX, gridY - Sz(274320), axisW, Sz(274320),
+                Para(yTitle!, 1200, t.Secondary, align: "l"), anchor: "b"));
+        var xTitle = Str(el, "xTitle");
+        if (!string.IsNullOrWhiteSpace(xTitle))
+            sb.Append(TextBox(ctx.NextId(), gridX, gridY + gridH, gridW, Sz(274320),
+                Para(xTitle!, 1200, t.Secondary, align: "ctr"), anchor: "t"));
+        var xl = Str(el, "xLeft");
+        var xr = Str(el, "xRight");
+        if (!string.IsNullOrWhiteSpace(xl) || !string.IsNullOrWhiteSpace(xr))
+            sb.Append(TextBox(ctx.NextId(), gridX, gridY + gridH, gridW, Sz(228600),
+                Para((xl ?? "") + "　　" + (xr ?? ""), 1100, t.Secondary, align: "ctr"), anchor: "t"));
+        return sb.ToString();
+    }
+
+    /// <summary>环形循环（3~6 步）：适合“迭代 / PDCA / 闭环流程”。中心可用 <c>center</c> 写一句话。</summary>
+    private static string CycleBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var rows = Items(el, ["title", "label", "name"], ["text", "detail", "desc"], []);
+        if (rows.Count == 0) return BulletBody(el, ctx, accent: false);
+        // 不能写成 Math.Max(3, …)：只给了 1~2 项时会把 n 抬到 3，但 items 里没那么多，
+        // 后面 rows[i] 直接越界（实测被“每个页型都真的接通了”那个用例抳到）。
+        var n = Math.Min(rows.Count, 6);
+
+        var d = Math.Min(BodyH, CW) * 68 / 100;      // 环直径
+        var cx = MX + CW / 2;
+        var cy = BodyY + BodyH / 2;
+        var radius = d / 2;
+        var nodeD = d * 34 / 100;                    // 节点圆直径
+        var sb = new StringBuilder();
+
+        // 环：只描边不填充。没它的时候整页只有几个圆点，显得很空（实测墨迹占比仅 3.3%）。
+        sb.Append(Preset(ctx.NextId(), "ellipse", cx - radius, cy - radius, d, d, null,
+            line: t.Light, lineW: Sz(19050)));
+
+        // 节点圆均匀分布（12 点方向起步），节点之间放一个切向箭头表示“继续往下走”
+        for (var i = 0; i < n; i++)
+        {
+            var ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+            var nx = cx + (long)(radius * Math.Cos(ang));
+            var ny = cy + (long)(radius * Math.Sin(ang));
+            var fill = i % 2 == 0 ? t.Primary : t.Accent;
+            sb.Append(Ellipse(ctx.NextId(), nx - nodeD / 2, ny - nodeD / 2, nodeD, nodeD, fill));
+            var inner = new StringBuilder();
+            inner.Append(Para(rows[i].V1, 1400, OnFill(fill), bold: true, align: "ctr", lineSpacing: 106));
+            sb.Append(TextBox(ctx.NextId(), nx - nodeD / 2, ny - nodeD / 2, nodeD, nodeD,
+                inner.ToString(), anchor: "ctr"));
+
+            // 说明文字：放在节点外侧的放射方向，按需要夹在画布内
+            var detail = rows[i].V2;
+            if (detail.Length > 0)
+            {
+                var boxW = Sz(1905000);
+                var boxH = Sz(457200);
+                var ox = cx + (long)(radius * 1.30 * Math.Cos(ang)) - boxW / 2;
+                var oy = cy + (long)(radius * 1.30 * Math.Sin(ang)) - boxH / 2;
+                ox = Math.Max(MX, Math.Min(W - MX - boxW, ox));
+                oy = Math.Max(BodyY, Math.Min(BodyY + BodyH - boxH, oy));
+                sb.Append(TextBox(ctx.NextId(), ox, oy, boxW, boxH,
+                    Para(detail, 1200, t.Secondary, align: "ctr", lineSpacing: 115), anchor: "ctr"));
+            }
+
+            // 箭头：放在两个节点之间的环上，按切线方向旋转
+            var mid = ang + Math.PI / n;
+            var ax = cx + (long)(radius * Math.Cos(mid));
+            var ay = cy + (long)(radius * Math.Sin(mid));
+            var arrow = d * 9 / 100;
+            var rotDeg = (mid + Math.PI / 2) * 180.0 / Math.PI + 90;   // 三角形默认朝上
+            sb.Append(Preset(ctx.NextId(), "triangle", ax - arrow / 2, ay - arrow / 2, arrow, arrow,
+                t.Accent, rot: (int)Math.Round(rotDeg * 60000)));
+        }
+
+        var center = Str(el, "center");
+        if (!string.IsNullOrWhiteSpace(center))
+            sb.Append(TextBox(ctx.NextId(), cx - radius * 45 / 100, cy - d * 12 / 100, radius * 90 / 100, d * 24 / 100,
+                Para(center!, 1600, t.Primary, bold: true, align: "ctr", lineSpacing: 115), anchor: "ctr"));
+        return sb.ToString();
+    }
+
+    /// <summary>层叠架构（纵向分层条）：适合“技术架构 / 能力分层 / 从下到上的支撑关系”。</summary>
+    private static string StackBody(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var rows = Items(el, ["title", "label", "name"], ["text", "detail", "desc"], []);
+        if (rows.Count == 0) return BulletBody(el, ctx, accent: false);
+        var n = Math.Min(rows.Count, 6);
+
+        var gap = Sz(114300);
+        var barH = Math.Min((BodyH - gap * (n - 1)) / n, BodyH);
+        var totalH = barH * n + gap * (n - 1);
+        var y0 = BodyY + (BodyH - totalH) / 2;
+        var labelW = CW * 24 / 100;
+        var sb = new StringBuilder();
+        for (var i = 0; i < n; i++)
+        {
+            var y = y0 + i * (barH + gap);
+            var fill = LayerColor(t, i);
+            sb.Append(Rect(ctx.NextId(), MX, y, CW, barH, fill, radius: true));
+            sb.Append(TextBox(ctx.NextId(), MX + _m.Pad, y, labelW, barH,
+                Para(rows[i].V1, 1600, OnFill(fill), bold: true, align: "l", lineSpacing: 110), anchor: "ctr"));
+            if (rows[i].V2.Length > 0)
+                sb.Append(TextBox(ctx.NextId(), MX + labelW + _m.Pad, y, CW - labelW - _m.Pad * 2, barH,
+                    Para(rows[i].V2, 1300, OnFill(fill), align: "l", lineSpacing: 118), anchor: "ctr"));
+        }
+        return sb.ToString();
+    }
+
+    // ---- 自动生成的题图（零素材、零联网）----
+
+    /// <summary>
+    /// 按主题配色**程序化生成**的抽象题图：用于封面/章节页/配图位没有真图时的位置。
+    ///
+    /// <para>
+    /// 为什么值得有：以前“没提供图片”就只能画一块纯色（或写“图片不存在”），
+    /// 于是稿子看起来还是“一页色块”。题图用形状拼出一个稳定的抽象构图，
+    /// **不靠任何外部素材、不联网、无版权问题**，而且颜色跟着主题走。
+    /// </para>
+    ///
+    /// <para>
+    /// 设计约束：只用实色（无渐变，符合 design-system.md 的硬规则）；
+    /// 透明度只用 <c>a:alpha</c>；构图由种子确定 —— 同一标题每次生成的图一样，
+    /// 不会“每次重导出都不一样”。
+    /// </para>
+    /// </summary>
+    private static string HeroArt(SlideCtx ctx, long x, long y, long cx, long cy, string seed)
+    {
+        var t = ctx.Theme;
+        var dark = IsDarkBg(t);
+        var baseFill = dark ? t.Primary : t.Secondary;
+        var sb = new StringBuilder();
+        sb.Append(Rect(ctx.NextId(), x, y, cx, cy, baseFill));
+
+        // 确定性伪随机：用种子字符串算一个稳定的数列（不依赖 Random，避免每次导出都不一样）
+        var h = 17;
+        foreach (var ch in seed ?? "") h = (h * 31 + ch) & 0x7fffffff;
+        int Next(int mod) { h = (h * 1103515245 + 12345) & 0x7fffffff; return (int)(h % mod); }
+
+        // 所有形状都必须**完全落在传入矩形内**：这块图有时只占半页（split 版式），
+        // 一旦画出边界，既会被自检报 overflow，也会在别人打开时“跑到页面外”。
+        // （最初版本用旋转矩形做斜带、圆也不限位，自检抳到了——见 README 的实测记录。）
+        var x2 = x + cx;
+        var y2 = y + cy;
+
+        // 1) 两条斜带：用 parallelogram 自带斜边，**不靠旋转**（旋转后的包围盒会超框）
+        for (var i = 0; i < 2; i++)
+        {
+            var bw = cx * (45 + Next(35)) / 100;
+            var bh = Math.Max(1, cy * (10 + Next(8)) / 100);
+            var bx = x + cx * Next(40) / 100;
+            var by = y + cy * (i == 0 ? 14 + Next(20) : 58 + Next(20)) / 100;
+            bx = Math.Min(bx, x2 - bw);
+            if (by + bh > y2) by = y2 - bh;
+            sb.Append(Preset(ctx.NextId(), "parallelogram", bx, by, bw, bh,
+                i == 0 ? t.Accent : t.Light, adj: "30000", alpha: i == 0 ? 65 : 50));
+        }
+
+        // 2) 几个大圆：中心与半径都限位在框内（可以贴边，但不能越界）
+        for (var i = 0; i < 3; i++)
+        {
+            var d = Math.Max(1, Math.Min(cx, cy) * (42 + Next(34)) / 100);
+            var r = d / 2;
+            var minCx = x + r;
+            var maxCx = x2 - r;
+            var minCy = y + r;
+            var maxCy = y2 - r;
+            var ccx = maxCx > minCx ? minCx + (long)((maxCx - minCx) * (Next(100) / 100.0)) : x + cx / 2;
+            var ccy = maxCy > minCy ? minCy + (long)((maxCy - minCy) * (Next(100) / 100.0)) : y + cy / 2;
+            sb.Append(Ellipse(ctx.NextId(), ccx - r, ccy - r, d, d,
+                i % 2 == 0 ? t.Accent : t.Light, alpha: 26 + i * 9));
+        }
+
+        // 3) 点阵：右下角一片小圆点（给“科技/数据”的感觉）
+        var step = Math.Max(1, Math.Min(cx, cy) / 16);
+        var dot = Math.Max(1, step / 6);
+        var cols = (int)Math.Min(9, Math.Max(1, cx / step - 1));
+        var rows = (int)Math.Min(5, Math.Max(1, cy / step - 1));
+        for (var r = 0; r < rows; r++)
+            for (var c = 0; c < cols; c++)
+            {
+                var dx = x2 - (cols - c) * step;
+                var dy = y2 - (rows - r) * step;
+                sb.Append(Ellipse(ctx.NextId(), dx, dy, dot, dot, t.Light, alpha: 55));
+            }
+        return sb.ToString();
+    }
+
+    /// <summary>题图页：整页自动生成的抽象图，可叠标题与副标题。</summary>
+    private static string HeroSlide(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var title = Str(el, "title") ?? ctx.Title;
+        var shapes = new List<string> { HeroArt(ctx, 0, 0, W, H, title) };
+        var paras = new StringBuilder();
+        paras.Append(ParaTitle(title, 3800, t.Bg, align: "l", lineSpacing: 106));
+        var sub = Str(el, "subtitle") ?? ctx.Subtitle;
+        if (!string.IsNullOrWhiteSpace(sub))
+            paras.Append(Para(sub!, 1600, t.OnPrimary, align: "l", spaceBefore: 14, lineSpacing: 128));
+        shapes.Add(TextBox(ctx.NextId(), MX, 2457450, CW * 70 / 100, 2286000, paras.ToString(), anchor: "ctr"));
+        shapes.Add(PageBadge(ctx));
+        return SlideXml(t.Bg, shapes);
+    }
+
     // ---- 图片 ----
     /// <summary>
     /// 配图页：<c>variant</c> = <c>full</c>（默认，整块图居中）| <c>left</c>（图左文右）|
@@ -3150,14 +3575,20 @@ public class Skill
         };
     }
 
-    /// <summary>图片缺失时的占位（不静默略过：报 warning，页面上也画出可见提示）。</summary>
+    /// <summary>图片缺失时：不静默略过——记 warning，并改用<b>自动生成的题图</b>（比一块纯色好看，也不假称有图）。</summary>
     private static string ImageMissing(JsonElement el, SlideCtx ctx, string? path, long x, long y, long cx, long cy, bool radius)
     {
         var t = ctx.Theme;
-        var msg = string.IsNullOrWhiteSpace(path) ? "（未提供 path，无法插入图片）" : "（图片不存在：" + path + "）";
-        if (!string.IsNullOrWhiteSpace(path)) Warn("图片不存在，已改用占位块：" + path);
-        return Rect(ctx.NextId(), x, y, cx, cy, t.Light, radius: radius)
-             + TextBox(ctx.NextId(), x, y, cx, cy, Para(msg, 1300, t.Secondary, align: "ctr"), anchor: "ctr");
+        if (!string.IsNullOrWhiteSpace(path))
+            Warn("图片不存在，已改用自动生成的题图：" + path);
+        else
+            Warn("未提供图片 path，已改用自动生成的题图");
+        var msg = string.IsNullOrWhiteSpace(path)
+            ? "（未提供 path，已自动生成题图）"
+            : "（图片不存在，已自动生成题图）";
+        return HeroArt(ctx, x, y, cx, cy, path ?? ctx.Title)
+             + TextBox(ctx.NextId(), x, y + cy - Sz(457200), cx, Sz(457200),
+                Para(msg, 1100, t.Light, align: "ctr", alpha: 80), anchor: "b");
     }
 
     private static string ImageFull(JsonElement el, SlideCtx ctx)
@@ -4072,15 +4503,18 @@ public class Skill
         return sb.ToString();
     }
 
-    /// <summary>椭圆（cx==cy 即正圆）：用来做时间轴的序号节点 / 图标圆。</summary>
-    private static string Ellipse(int id, long x, long y, long cx, long cy, string fill)
+    /// <summary>椭圆（cx==cy 即正圆）：用来做时间轴的序号节点 / 图标圆 / 题图里的圆。</summary>
+    private static string Ellipse(int id, long x, long y, long cx, long cy, string fill, int alpha = 100)
     {
         var sb = new StringBuilder();
         sb.Append("<p:sp><p:nvSpPr><p:cNvPr id=\"").Append(id).Append("\" name=\"Ellipse ").Append(id).Append("\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>")
           .Append("<p:spPr><a:xfrm><a:off x=\"").Append(x).Append("\" y=\"").Append(y)
           .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>")
           .Append("<a:prstGeom prst=\"ellipse\"><a:avLst/></a:prstGeom>")
-          .Append("<a:solidFill>").Append(Rgb(fill)).Append("</a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>")
+          .Append("<a:solidFill>");
+        if (alpha < 100) sb.Append("<a:srgbClr val=\"").Append(BareHex(fill)).Append("\"><a:alpha val=\"").Append(alpha * 1000).Append("\"/></a:srgbClr>");
+        else sb.Append(Rgb(fill));
+        sb.Append("</a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>")
           .Append("<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>");
         return sb.ToString();
     }

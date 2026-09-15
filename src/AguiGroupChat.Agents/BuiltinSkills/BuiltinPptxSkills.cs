@@ -31,10 +31,16 @@ public static class BuiltinPptxSkills
             "pptx_deck.skill.txt",
             "演示文稿生成（PPT）",
             "生成完整的 PowerPoint 演示文稿（.pptx）：封面、目录、章节分隔、内容页、两栏对比、" +
-            "表格、指标卡（KPI）、大数字看板、网格卡片、时间轴/流程、图标行、引言页、配图页（含图文混排）、" +
-            "图表（柱状/折线/饼图/环形图/散点图/雷达图）、进度条与环形仪表页、小结与结束页。" +
+            "表格、指标卡（KPI）、大数字看板、进度条与环形仪表、网格卡片、时间轴/流程、图标行、引言页、" +
+            "**示意图（金字塔 / 漏斗 / 四象限 / 循环闭环 / 层叠架构）**、配图页（含图文混排）、" +
+            "图表（柱状/折线/饼图/环形图/散点图/雷达图）、自动生成题图、小结与结束页。" +
             "当用户要求「做个 PPT」「出一套幻灯片 / 演示文稿」「把这份内容讲成一页页」「路演/汇报材料」「改改这份 PPT」时调用。" +
             "16:9 宽屏、统一主题配色与字体、除封面外每页带页码徽标；每页可附演讲者备注。" +
+            "【插图】不需要用户提供任何图片素材：示意图页型用形状把关系画出来（分层/收敛/取舍/闭环/架构），" +
+            "需要“配图”时若没有真图（path 缺失或文件不存在），会自动按主题配色生成一张抽象题图（零素材、零联网、无版权问题），" +
+            "并在返回 warnings 里如实说明。**当用户说“要有插图/别只有文字/要好看一点”时，就用这些页型而不是堆文字。**" +
+            "【版式多样性】设计规范要求不要每页同一种版式，请主动轮换：示意/图/表/卡/时间轴交替，" +
+            "同一份稿子里连续三页都是 content 会显得很平。" +
             "参数为 JSON：title(必填)、subtitle/author/date(可选)、" +
             "action(\"read\"+path：读取既有 pptx 的文本；\"qa\"+path：只自检不生成；" +
             "\"edit\"+path+ops：改动既有 pptx 的结构：删页/复制页/重排/替换文字/追加新页)、" +
@@ -61,7 +67,7 @@ public static class BuiltinPptxSkills
             "outputPath(可选，.pptx 落盘路径)、" +
             "slides 数组（必填，至少一页）。slides 每项形如 " +
             "{\"type\":\"cover\",\"title\":\"…\",\"variant\":\"left|center|image|split\"}" +
-            "（image/split 配 \"path\" 放图，image 是整页背景图+蒙层） / " +
+            "（image/split 配 \"path\" 放图；无图时自动生成题图） / " +
             "{\"type\":\"toc\",\"title\":\"目录\",\"items\":[\"一、…\"],\"variant\":\"list|grid|sidebar\"} / " +
             "{\"type\":\"section\",\"title\":\"一、…\",\"subtitle\":\"…\",\"variant\":\"number|bar|full\"} / " +
             "{\"type\":\"content\",\"title\":\"…\",\"bullets\":[\"要点\"]} / " +
@@ -70,7 +76,19 @@ public static class BuiltinPptxSkills
             "{\"type\":\"kpi\",\"title\":\"…\",\"items\":[{\"value\":\"98%\",\"label\":\"可用性\"}]} / " +
             "{\"type\":\"stats\",\"title\":\"…\",\"items\":[{\"value\":\"3×\",\"label\":\"效率提升\"}],\"cols\":3} / " +
             "{\"type\":\"progress\",\"title\":\"…\",\"items\":[{\"label\":\"开发\",\"value\":72}]," +
-            "\"max\":100,\"variant\":\"bar|ring\"}(进度/完成度/占比用这个，别用数字卡) / " +
+            "\"max\":100,\"variant\":\"bar|ring\"}(进度/完成度/占比用这个) / " +
+            "{\"type\":\"pyramid\",\"title\":\"…\",\"items\":[{\"title\":\"顶层\",\"text\":\"说明\"},…]}" +
+            "（3~6 层，顶层最窄；适合分层策略/成熟度模型/价值层级） / " +
+            "{\"type\":\"funnel\",\"title\":\"…\",\"items\":[{\"title\":\"触达\",\"text\":\"10000\"},…]}" +
+            "（3~6 层，顶层最宽；适合转化率/逐步筛选，text 放数值） / " +
+            "{\"type\":\"matrix\",\"title\":\"…\",\"xTitle\":\"难度\",\"yTitle\":\"价值\"," +
+            "\"xLeft\":\"低\",\"xRight\":\"高\",\"items\":[左上,右上,左下,右下]}" +
+            "（四象限；适合优先级/取舍/分类） / " +
+            "{\"type\":\"cycle\",\"title\":\"…\",\"center\":\"持续改进\"," +
+            "\"items\":[{\"title\":\"计划\",\"text\":\"定目标\"},…]}" +
+            "（3~6 步环形闭环；适合迭代/PDCA） / " +
+            "{\"type\":\"stack\",\"title\":\"…\",\"items\":[{\"title\":\"交互层\",\"text\":\"…\"},…]}" +
+            "（纵向分层条；适合技术架构/能力分层） / " +
             "{\"type\":\"grid\",\"title\":\"…\",\"items\":[{\"title\":\"…\",\"text\":\"…\"}],\"cols\":2} / " +
             "{\"type\":\"timeline\",\"title\":\"…\",\"items\":[{\"title\":\"需求\",\"detail\":\"…\"}]} / " +
             "{\"type\":\"iconRows\",\"title\":\"…\",\"items\":[{\"icon\":\"rocket\",\"title\":\"…\",\"text\":\"…\"}]} / " +
@@ -81,10 +99,12 @@ public static class BuiltinPptxSkills
             "{\"type\":\"image\",\"title\":\"…\",\"path\":\"…\",\"caption\":\"…\"," +
             "\"variant\":\"full|left|right|bleed|gallery\"}(left/right 是图文混排；bleed 半出血+叠字；" +
             "gallery 用 images:[{path,caption}] 放 2~4 张；left/right/bleed 可配 bullets 写文字侧) / " +
+            "{\"type\":\"hero\",\"title\":\"…\",\"subtitle\":\"…\"}" +
+            "（整页自动生成的抽象题图，适合章节引导页/无素材时的视觉休息页） / " +
             "{\"type\":\"summary\",\"title\":\"小结\",\"bullets\":[…],\"variant\":\"list|cta|split\"}" +
             "（cta 用 items 写行动项、contact 写联系方式；split 用 bullets+actions+contact） / " +
             "{\"type\":\"end\",\"title\":\"谢谢\",\"subtitle\":\"…\"}。" +
-            "content 页也可用 \"layout\":\"timeline|grid|stats|iconRows|progress\" 指定子类型。" +
+            "content 页也可用 \"layout\":\"timeline|grid|stats|iconRows|progress|pyramid|funnel|matrix|cycle|stack\" 指定子类型。" +
             "iconRows 的 icon 可直接用内置图标名（会画成真正的图标，比填字好看）：" +
             "check|cross|arrow|star|dot|warn|lock|user|chart|clock|gear|bulb|" +
             "money|target|rocket|shield|layers|globe|network|cloud|database|mail|phone|calendar|" +
@@ -95,10 +115,9 @@ public static class BuiltinPptxSkills
             "把 chartType 写成 \"bar-native\" / \"line-native\" / \"pie-native\"（或顶层 chartData:\"native\"），" +
             "会生成原生可编辑图表（环形/散点/雷达暂不支持原生，会自动降级为图片并在返回里说明）。" +
             "用户上传的文件以其附件 ID（att_xxx）传入 path/template 即可，平台会解析成真实路径。" +
-            "注意：设计规范建议**不要每页都用同一种版式**，请在大纲阶段就为每页选定合适的页型与 variant 并轮换。" +
             "任何一页都可加 \"notes\"（写入演讲者备注）。" +
             "返回 JSON 含生成的 .pptx 文件路径与 slides 页数，另带 qa（出稿后自检：占位符/空页/只有标题/越界）" +
-            "与 warnings（如图片缺失改用占位块）；**若 qa 报了问题，请先修内容再重新生成，不要直接把有问题的稿子交给用户**。" +
+            "与 warnings（如图片缺失改用自动题图）；**若 qa 报了问题，请先修内容再重新生成，不要直接把有问题的稿子交给用户**。" +
             "请据实告知用户产物路径，不要编造正文内容。"
         ),
     ];
@@ -129,7 +148,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-16.2";
+    public const string Version = "2026-09-16.3";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)
