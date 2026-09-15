@@ -1,3 +1,34 @@
+# AG-UI 群聊桌面版 1.0.136 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.136 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.136 为当前 Windows 桌面版本。PPT 新增** 12 个内置图标**：`iconRows` 的 `icon` 可以直接填图标名，画成真正的图标（不再只能是 1~2 个字）。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.136 is the current Windows desktop release. It adds **12 built-in icons** to PPT: `iconRows` can now take an icon name and renders an actual icon instead of being limited to one or two characters. Web and desktop share the same Hub / gateway / frontend.
+
+## 内置图标（1.0.136）
+# Built-in icons (1.0.136)
+
+中文：
+- 可用：`check` `cross` `arrow` `star` `dot` `warn` `lock` `user` `chart` `clock` `gear` `bulb`。
+- 画法：用 ImageSharp 直接画成 PNG（透明底），颜色取主题的 OnAccent，所以**自动跟主题配色走**；
+  图标放在彩色圆内并留出内边距，不贴边。
+- **为什么自己画而不是用图标字体**：技能是**单个编译单元**，既不能携带字体/素材文件，
+  也不能假设宿主装了某个图标字体；而 ImageSharp 已经为图表引入了，画几个几何图形是顺手的事。
+- **不认识的名字仍然回退成文字**（原来那个 1~2 字的行为保留），不会变成空白。
+- 单测：`IconRows_RendersBuiltInIconsAsImages`（两个图标名→两张合法 PNG、第三个名字以文字回退、图标不出圆）。
+  PPT 相关 65 个用例全绿。
+- 踩到的小坑：本版本 ImageSharp.Drawing **没有** `DrawLines` / `DrawArc`，折线要拆成多次 `DrawLine`，
+  锁梁改用圆环代替（视觉上仍是挂锁）。
+
+English:
+- Available: `check`, `cross`, `arrow`, `star`, `dot`, `warn`, `lock`, `user`, `chart`, `clock`, `gear`, `bulb`.
+- Rendering: drawn directly as transparent PNGs via ImageSharp, coloured with the theme's OnAccent so they **follow the palette automatically**; each sits inside the coloured circle with padding.
+- **Why draw them instead of using an icon font**: a skill is a **single compilation unit** — it cannot ship font/asset files, nor assume the host has a given icon font. ImageSharp is already pulled in for charts, so a few geometric shapes come for free.
+- **Unknown names still fall back to text** (the previous one-or-two-character behaviour), never to a blank.
+- Covered by `IconRows_RendersBuiltInIconsAsImages` (two icon names yield two valid PNGs, a third name falls back to text, icons stay within the circle); 65 PPT-related cases green.
+- Minor snag: this version of ImageSharp.Drawing has **no** `DrawLines` or `DrawArc`, so polylines are split into repeated `DrawLine` calls and the padlock shackle became a ring (still reads as a padlock).
+
+---
+
 # AG-UI 群聊桌面版 1.0.135 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.135 Release Notes (current Windows desktop release)
 

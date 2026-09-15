@@ -1844,8 +1844,20 @@ public class Skill
             // 圆：文字色用 OnAccent（与页码徽标同一套“底色上的字”规则）
             shapes.Append(Ellipse(ctx.NextId(), MX, y, ring, ring, t.Accent));
             var mark = rows[i].V3.Length > 0 ? rows[i].V3 : (i + 1).ToString();
-            shapes.Append(TextBox(ctx.NextId(), MX, y, ring, ring,
-                Para(mark, Scaled(1800, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+            if (IsIconName(mark))
+            {
+                // 内置图标：在圆里画一张 PNG（颜色跟主题走）。比“1~2 个字”像样得多。
+                var iconPx = Math.Min((int)(ring / 12700), 256);
+                var png = RenderIcon(mark, Math.Max(48, iconPx), t.OnAccent);
+                var inset = ring / 5;               // 图标不贴圆边
+                shapes.Append(Picture(ctx.NextId(), ctx.AddImage(png),
+                    MX + inset, y + inset, ring - 2 * inset, ring - 2 * inset));
+            }
+            else
+            {
+                shapes.Append(TextBox(ctx.NextId(), MX, y, ring, ring,
+                    Para(mark, Scaled(1800, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+            }
 
             var inner = new StringBuilder();
             if (rows[i].V1.Length > 0)
@@ -1857,6 +1869,122 @@ public class Skill
             shapes.Append(TextBox(ctx.NextId(), MX + textX, y + Sz(57150), textW, availH, inner.ToString(), anchor: "t"));
         }
         return shapes.ToString();
+    }
+
+    // ---- 内置图标 ----
+
+    /// <summary>内置图标名。在彩色圆里画的几何图形，<b>不依赖任何图标字体/素材文件</b>。</summary>
+    private static readonly string[] IconNames =
+    {
+        "check", "cross", "arrow", "star", "dot", "warn",
+        "lock", "user", "chart", "clock", "gear", "bulb",
+    };
+
+    private static bool IsIconName(string s) => IconNames.Contains(s.Trim().ToLowerInvariant());
+
+    /// <summary>
+    /// 把内置图标画成 PNG（透明底 + 指定颜色）。
+    ///
+    /// <para>
+    /// 为什么自己画：技能是**单个编译单元**，既不能携带字体/素材文件，也不能假设宿主装了某个图标字体。
+    /// ImageSharp 已经为图表引入了，画几个几何图形是顺手的事；颜色还能直接跟着主题走。
+    /// </para>
+    /// </summary>
+    private static byte[] RenderIcon(string name, int px, string color)
+    {
+        using var img = new Image<Rgba32>(px, px);
+        var c = ImgColor.ParseHex(BareHex(color));
+        var t = px * 0.11f;                       // 线宽
+        var m = px * 0.26f;                       // 内边距
+        var e = px - m;                           // 内边距终点
+        var mid = px / 2f;
+        img.Mutate(x =>
+        {
+            switch ((name ?? "").Trim().ToLowerInvariant())
+            {
+                case "check":
+                    x.DrawLine(c, t, new ImgPointF(m, mid), new ImgPointF(px * 0.42f, e));
+                    x.DrawLine(c, t, new ImgPointF(px * 0.42f, e), new ImgPointF(e, m));
+                    break;
+                case "cross":
+                    x.DrawLine(c, t, new ImgPointF(m, m), new ImgPointF(e, e));
+                    x.DrawLine(c, t, new ImgPointF(e, m), new ImgPointF(m, e));
+                    break;
+                case "arrow":
+                    x.DrawLine(c, t, new ImgPointF(m, mid), new ImgPointF(e, mid));
+                    x.DrawLine(c, t, new ImgPointF(px * 0.62f, m), new ImgPointF(e, mid));
+                    x.DrawLine(c, t, new ImgPointF(px * 0.62f, e), new ImgPointF(e, mid));
+                    break;
+                case "star":
+                    x.Fill(c, Star(px * 0.5f, px * 0.44f));
+                    break;
+                case "dot":
+                    x.Fill(c, new ImgEllipse(new ImgPointF(mid, mid), px * 0.22f));
+                    break;
+                case "warn":
+                    x.Fill(c, Poly(new ImgPointF(mid, m), new ImgPointF(e, e), new ImgPointF(m, e)));
+                    break;
+                case "lock":
+                    x.Fill(c, new ImgRect(m, px * 0.46f, e - m, px * 0.34f));
+                    // 锁梁：本版本的 ImageSharp.Drawing 没有 DrawArc，用一个环代替（视觉上就是一个挂锁）
+                    x.Draw(c, t, new ImgEllipse(new ImgPointF(mid, px * 0.44f), px * 0.18f));
+                    break;
+                case "user":
+                    x.Fill(c, new ImgEllipse(new ImgPointF(mid, px * 0.35f), px * 0.16f));
+                    x.Fill(c, new ImgEllipse(new ImgPointF(mid, px * 0.92f), px * 0.28f));
+                    break;
+                case "chart":
+                    x.Fill(c, new ImgRect(m, px * 0.55f, px * 0.14f, e - px * 0.55f));
+                    x.Fill(c, new ImgRect(px * 0.43f, px * 0.38f, px * 0.14f, e - px * 0.38f));
+                    x.Fill(c, new ImgRect(px * 0.62f, px * 0.22f, px * 0.14f, e - px * 0.22f));
+                    break;
+                case "clock":
+                    x.Draw(c, t, new ImgEllipse(new ImgPointF(mid, mid), px * 0.34f));
+                    x.DrawLine(c, t, new ImgPointF(mid, mid), new ImgPointF(mid, px * 0.30f));
+                    x.DrawLine(c, t, new ImgPointF(mid, mid), new ImgPointF(px * 0.68f, mid));
+                    break;
+                case "gear":
+                    x.Draw(c, t, new ImgEllipse(new ImgPointF(mid, mid), px * 0.26f));
+                    for (var i = 0; i < 8; i++)
+                    {
+                        var ang = i * Math.PI / 4.0;
+                        var r0 = px * 0.30;
+                        var r1 = px * 0.40;
+                        x.DrawLine(c, t,
+                            new ImgPointF(mid + (float)(r0 * Math.Cos(ang)), mid + (float)(r0 * Math.Sin(ang))),
+                            new ImgPointF(mid + (float)(r1 * Math.Cos(ang)), mid + (float)(r1 * Math.Sin(ang))));
+                    }
+                    break;
+                default: // bulb
+                    x.Draw(c, t, new ImgEllipse(new ImgPointF(mid, px * 0.42f), px * 0.26f));
+                    x.Fill(c, new ImgRect(px * 0.40f, px * 0.72f, px * 0.20f, px * 0.14f));
+                    break;
+            }
+        });
+        return ToPng(img);
+    }
+
+    /// <summary>多边形填充路径（自己围，见饼图那个坑：闭合靠 CloseFigure，不靠“路径没闭合就自动补”）。</summary>
+    private static SixLabors.ImageSharp.Drawing.IPath Poly(params ImgPointF[] pts)
+    {
+        var pb = new SixLabors.ImageSharp.Drawing.PathBuilder();
+        pb.MoveTo(pts[0]);
+        for (var i = 1; i < pts.Length; i++) pb.LineTo(pts[i]);
+        pb.CloseFigure();
+        return pb.Build();
+    }
+
+    /// <summary>五角星（外顶点 5 个、内顶点 5 个交替）。</summary>
+    private static SixLabors.ImageSharp.Drawing.IPath Star(float cx, float r)
+    {
+        var pts = new ImgPointF[10];
+        for (var i = 0; i < 10; i++)
+        {
+            var rr = i % 2 == 0 ? r : r * 0.42f;
+            var ang = -Math.PI / 2 + i * Math.PI / 5.0;
+            pts[i] = new ImgPointF(cx + (float)(rr * Math.Cos(ang)), cx + (float)(rr * Math.Sin(ang)));
+        }
+        return Poly(pts);
     }
 
     // ---- 图片 ----
