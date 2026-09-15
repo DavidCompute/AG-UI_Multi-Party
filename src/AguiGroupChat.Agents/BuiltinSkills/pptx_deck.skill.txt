@@ -975,7 +975,7 @@ public class Skill
                 shapes.Add(SlideTitle(Str(el, "title") ?? "目录", ctx));
                 shapes.Add(TocBody(el, ctx));
                 break;
-            case "twoCol":
+            case "twocol":     // 注意：type 已 ToLowerInvariant，case 必须全小写
                 shapes.Add(SlideTitle(Str(el, "title") ?? "", ctx));
                 shapes.Add(TwoColBody(el, ctx));
                 break;
@@ -1170,7 +1170,18 @@ public class Skill
         return Math.Max(0.6, (double)boxH / need);
     }
 
-    /// <summary>估算一组段落排版后的总高度（EMU）。CJK 按 1 em、ASCII 按 0.55 em 估宽。</summary>
+    /// <summary>
+    /// 估算一组段落排版后的总高度（EMU）。CJK 按 1 em、ASCII 按 0.55 em 估宽。
+    ///
+    /// <para>
+    /// <b>行距单位是「倍率」</b>（1.25 = 1.25 倍行距），与所有调用方传的值一致。
+    /// 实测踩过：这里原本写成 <c>lineSpacing / 100.0</c>（当成百分数），
+    /// 而调用方一律传 1.25 这种倍率——于是估出来的高度只有真实值的 1%，
+    /// <c>need &lt;= boxH</c> 永远成立、缩放系数永远是 1.0，
+    /// 也就是说<b>「缩字号」一直是死代码</b>（正文一多就直接溢出，没人发现）。
+    /// 这里同时兼容传入百分数（&gt;5 视为百分数）以防以后有人写 125。
+    /// </para>
+    /// </summary>
     private static long EstimateHeightEmu(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> paras, long availW, long boxH)
     {
         if (availW < 100000) availW = 100000;
@@ -1181,8 +1192,8 @@ public class Skill
             foreach (var ch in text) em += ch < 0x2E80 ? 0.55 : 1.0;
             var widthEmu = em * size * 127.0;                       // 1pt = 12700 EMU，size 以百分之一磅计
             var lines = Math.Max(1, (int)Math.Ceiling(widthEmu / availW));
-            total += (long)(lines * size * 127.0 * (lineSpacing <= 0 ? 1.25 : lineSpacing / 100.0))
-                + spaceBefore * 127L;
+            var mult = lineSpacing <= 0 ? 1.25 : (lineSpacing > 5 ? lineSpacing / 100.0 : lineSpacing);
+            total += (long)(lines * size * 127.0 * mult) + spaceBefore * 127L;
         }
         return total;
     }
@@ -1261,11 +1272,15 @@ public class Skill
         var items = StringList(el, "items");
         if (items.Count == 0) return BulletBody(el, ctx, accent: false);
 
+        // 目录项一多/一长就会撑出正文区（本类文本框是固定高度、无 autofit），先估高再缩
+        var plan = items.Select(it => (Text: it, Size: 1800, SpaceBefore: 14, LineSpacing: 1.20)).ToList();
+        var scale = ScaleForHeight(plan, CW - _m.Gap, BodyH);
+
         var paras = new StringBuilder();
         for (var i = 0; i < items.Count; i++)
         {
-            paras.Append(Para((i + 1).ToString("00") + "   " + items[i], 1800, t.Text,
-                align: "l", spaceBefore: 14, lineSpacing: 120));
+            paras.Append(Para((i + 1).ToString("00") + "   " + items[i], Scaled(1800, scale), t.Text,
+                align: "l", spaceBefore: (int)Math.Round(14 * scale), lineSpacing: (int)Math.Round(120 * scale)));
         }
         return TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t");
     }
@@ -1291,13 +1306,23 @@ public class Skill
             // 栏底卡片
             shapes.Append(Rect(ctx.NextId(), x, BodyY, colW, BodyH, t.Light, radius: true));
             var inner = new StringBuilder();
-            if (!string.IsNullOrWhiteSpace(heading))
-                inner.Append(Para(heading!, 1900, t.Primary, bold: true, align: "l", lineSpacing: 110));
             if (bullets.Count == 0) bullets.Add("（空）");
+            // 两栏是「小标题 + 要点」，要点一多就溢出卡片：先估高再缩（两栏各自算，栏内保持一致）
+            var availW = colW - 2 * _m.Pad;
+            var availH = BodyH - 2 * _m.Pad;
+            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>();
+            if (!string.IsNullOrWhiteSpace(heading)) plan.Add((heading!, 1900, 0, 1.10));
+            foreach (var b in bullets) plan.Add((b, 1500, 10, 1.25));
+            var scale = ScaleForHeight(plan, availW, availH);
+
+            if (!string.IsNullOrWhiteSpace(heading))
+                inner.Append(Para(heading!, Scaled(1900, scale), t.Primary, bold: true, align: "l",
+                    lineSpacing: (int)Math.Round(110 * scale)));
             foreach (var b in bullets)
-                inner.Append(Para(b, 1500, t.Text, align: "l", bullet: "•",
-                    spaceBefore: 10, lineSpacing: 125, marL: 285750));
-            shapes.Append(TextBox(ctx.NextId(), x + _m.Pad, BodyY + _m.Pad, colW - 2 * _m.Pad, BodyH - 2 * _m.Pad,
+                inner.Append(Para(b, Scaled(1500, scale), t.Text, align: "l", bullet: "•",
+                    spaceBefore: (int)Math.Round(10 * scale), lineSpacing: (int)Math.Round(125 * scale),
+                    marL: (int)_m.Gap));
+            shapes.Append(TextBox(ctx.NextId(), x + _m.Pad, BodyY + _m.Pad, availW, availH,
                 inner.ToString(), anchor: "t"));
         }
         return shapes.ToString();
@@ -1323,12 +1348,61 @@ public class Skill
         var cols = Math.Max(headers.Count, rows.Count == 0 ? 0 : rows.Max(r => r.Count));
         if (cols == 0) return BulletBody(el, ctx, accent: false);
 
-        var rowCount = rows.Count + (headers.Count > 0 ? 1 : 0);
         var colW = CW / cols;
         var headerH = 457200L;
-        var rowH = Math.Min(571500L, (BodyH - headerH) / Math.Max(1, rows.Count));
-        // 行高不足时压缩字号的阈值：行数太多就给表体留最小高度，超出部分靠查看器滚动
-        if (rows.Count > 0 && rowH < 320000L) rowH = 320000L;
+        const int headerSz = 1500, cellSz = 1300;
+        var cellMarH = Sz(91440);                       // 与 TableCell 的 marL/marR 一致
+        var cellMarV = Sz(45720);                       // 与 marT/marB 一致
+        var minRowH = Sz(320000);
+
+        // 行高要按“最长那一列折几行”算，而不是写死一个高度：写死时长文本会被卡在行内/撑出表格。
+        int LinesFor(string text, int size)
+        {
+            var em = 0.0;
+            foreach (var ch in text) em += ch < 0x2E80 ? 0.55 : 1.0;
+            var avail = Math.Max(100000.0, colW - 2 * cellMarH);
+            return Math.Max(1, (int)Math.Ceiling(em * size * 127.0 / avail));
+        }
+
+        long RowH(int r, double s)   // TableCell 用 lineSpacing=110 → 约 1.10 倍行距
+        {
+            var sz = Math.Max(1000, (int)Math.Round(cellSz * s));
+            var lineH = (long)(sz * 127.0 * 1.10);
+            var lines = 1;
+            for (var c = 0; c < cols; c++)
+                lines = Math.Max(lines, LinesFor(c < rows[r].Count ? rows[r][c] : "", sz));
+            return Math.Max((long)(minRowH * s), lines * lineH + 2 * cellMarV);
+        }
+
+        // 字号下限 0.70（约 9pt）：再小就不如不显示
+        const double minScale = 0.70;
+        var scale = 1.0;
+        for (var i = 0; i < 4 && scale > minScale; i++)
+        {
+            long total = (long)(headerH * scale);
+            for (var r = 0; r < rows.Count; r++) total += RowH(r, scale);
+            if (total <= BodyH) break;
+            scale = Math.Max(minScale, scale * ((double)BodyH / total));
+        }
+        var hdrH = (long)(headerH * scale);
+        var szHeader = Math.Max(1000, (int)Math.Round(headerSz * scale));
+        var szCell = Math.Max(1000, (int)Math.Round(cellSz * scale));
+        var lineHCell = (long)(szCell * 127.0 * 1.10);
+
+        // 缩到下限还装不下时，**减少行数并明说**：
+        // 一张幻灯片本来就装不下“30 行 × 每格折 4 行”这种东西，硬画出去只会得到看不见的表。
+        // 宁可只显示能显示的行 + 一行“另有 N 行未显示”，也不静默丢数据。
+        var noteH = Math.Max((long)(minRowH * scale), lineHCell + 2 * cellMarV);
+        var shownRows = rows.Count;
+        var used = hdrH;
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var h = RowH(r, scale);
+            var reserve = r < rows.Count - 1 ? noteH : 0;   // 先给“未显示”提示行留位
+            if (used + h + reserve > BodyH && r > 0) { shownRows = r; break; }
+            used += h;
+        }
+        var truncated = shownRows < rows.Count;
 
         var tbl = new StringBuilder();
         // 斑马纹 + 表头底色：不用内置表格样式（依赖 theme 部件），直接给单元格上色，兼容性最好
@@ -1336,30 +1410,45 @@ public class Skill
         for (var c = 0; c < cols; c++) tbl.Append("<a:gridCol w=\"").Append(colW).Append("\"/>");
         tbl.Append("</a:tblGrid>");
 
+        var tableH = 0L;
         if (headers.Count > 0)
         {
-            tbl.Append("<a:tr h=\"").Append(headerH).Append("\">");
+            tbl.Append("<a:tr h=\"").Append(hdrH).Append("\">");
             for (var c = 0; c < cols; c++)
             {
                 var text = c < headers.Count ? headers[c] : "";
-                tbl.Append(TableCell(text, 1500, t.Bg, t.Primary, bold: true, colW));
+                tbl.Append(TableCell(text, szHeader, t.Bg, t.Primary, bold: true, colW));
             }
             tbl.Append("</a:tr>");
+            tableH += hdrH;
         }
-        for (var r = 0; r < rows.Count; r++)
+        for (var r = 0; r < shownRows; r++)
         {
-            tbl.Append("<a:tr h=\"").Append(rowH).Append("\">");
+            var rh = RowH(r, scale);
+            tbl.Append("<a:tr h=\"").Append(rh).Append("\">");
             var fill = r % 2 == 1 ? t.Light : t.Bg;
             for (var c = 0; c < cols; c++)
             {
                 var text = c < rows[r].Count ? rows[r][c] : "";
-                tbl.Append(TableCell(text, 1300, t.Text, fill, bold: false, colW));
+                tbl.Append(TableCell(text, szCell, t.Text, fill, bold: false, colW));
             }
             tbl.Append("</a:tr>");
+            tableH += rh;
+        }
+        if (truncated)
+        {
+            // 明说还有多少行没显示（不静默丢数据）
+            var note = $"… 另有 {rows.Count - shownRows} 行未显示（本页共 {rows.Count} 行，完整数据请拆页或改用附件）";
+            tbl.Append("<a:tr h=\"").Append(noteH).Append("\">");
+            for (var c = 0; c < cols; c++)
+            {
+                var text = c == 0 ? note : "";
+                tbl.Append(TableCell(text, szCell, t.Secondary, t.Light, bold: false, colW));
+            }
+            tbl.Append("</a:tr>");
+            tableH += noteH;
         }
         tbl.Append("</a:tbl>");
-
-        var tableH = headerH + rowH * rows.Count;
         var frame = new StringBuilder();
         frame.Append("<p:graphicFrame><p:nvGraphicFramePr>")
              .Append("<p:cNvPr id=\"").Append(ctx.NextId()).Append("\" name=\"Table\"/>")
@@ -1405,6 +1494,18 @@ public class Skill
         var cardH = Math.Min(2057400L, (BodyH - gap * (rowsCount - 1)) / rowsCount);
         var shapes = new StringBuilder();
 
+        // 卡片内是「大数字 + 说明」，数字字号很大，说明文字一长/一多就会溢出卡片。
+        // 所有卡片共用一个缩放系数，避免同一排卡片字号不一样。
+        var availW = cardW - Sz(182880);
+        var availH = cardH - Sz(457200);
+        var scale = 1.0;
+        foreach (var it in items)
+        {
+            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
+                { (it.Value, 3200, 0, 1.00), (it.Label, 1300, 6, 1.15) };
+            scale = Math.Min(scale, ScaleForHeight(plan, availW, availH));
+        }
+
         for (var i = 0; i < items.Count; i++)
         {
             var row = i / n;
@@ -1414,10 +1515,12 @@ public class Skill
             shapes.Append(Rect(ctx.NextId(), x, y, cardW, cardH, t.Light, radius: true));
             shapes.Append(Rect(ctx.NextId(), x, y, cardW, 45720, t.Accent));
             var inner = new StringBuilder();
-            inner.Append(Para(items[i].Value, 3200, t.Primary, bold: true, align: "ctr", lineSpacing: 100, font: t.FontTitle));
+            inner.Append(Para(items[i].Value, Scaled(3200, scale), t.Primary, bold: true, align: "ctr",
+                lineSpacing: (int)Math.Round(100 * scale), font: t.FontTitle));
             if (items[i].Label.Length > 0)
-                inner.Append(Para(items[i].Label, 1300, t.Secondary, align: "ctr", spaceBefore: 6, lineSpacing: 115));
-            shapes.Append(TextBox(ctx.NextId(), x + Sz(91440), y + _m.Pad, cardW - Sz(182880), cardH - Sz(457200),
+                inner.Append(Para(items[i].Label, Scaled(1300, scale), t.Secondary, align: "ctr",
+                    spaceBefore: 6, lineSpacing: (int)Math.Round(115 * scale)));
+            shapes.Append(TextBox(ctx.NextId(), x + Sz(91440), y + _m.Pad, availW, availH,
                 inner.ToString(), anchor: "ctr"));
         }
         return shapes.ToString();

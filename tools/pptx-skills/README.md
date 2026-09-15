@@ -300,6 +300,13 @@ PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
   → 再生 XML，避免要点过多时直接溢出页面。
 - 平台预置 `using` 不含 `System.IO`，需自行 `using`（本文件已含）。
 - 换行统一 `\n`；正文由同步脚本统一处理。
+- **页型的 `case` 字面量必须全小写**：`RenderSlide` 先做了 `type.ToLowerInvariant()`，
+  写成 `case "twoCol"` 就永远匹配不上，会**静默回落**成默认要点页（实测踩到：两栏页型从来没生效过）。
+  回归由单测 `EveryDocumentedSlideType_IsActuallyWired` 钉住（把每种页型与“不存在的页型”产出对比）。
+- **`EstimateHeightEmu` 的 `lineSpacing` 单位是「倍率」**（1.25 = 1.25 倍行距），不是百分数。
+  实测踩到：这里曾写成 `/100.0`，而调用方一律传倍率 → 估出来的高度只有真实值的 1%，
+  `need <= boxH` 永远成立、缩放系数永远是 1.0，**「缩字号」实际上是死代码**。
+  改估算公式时请同步核对所有调用方传的单位。
 - **图表里的 `SixLabors.Fonts` 必须钉在 `1.0.1`（不要删）**：ImageSharp 2.1.5 对它的依赖是
   `>= 1.0.0`，NuGet 解析器取**最低满足版**，会落到 1.0.0。**而 1.0.0 的 shaping 会对 CJK 字体
   错误地套用竖排（`vert`）字形替换** —— 破折号 `—` `–` 被画成**竖线**，`（）「」『』【】《》`
@@ -332,7 +339,10 @@ PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
 - 表格列宽均分（不按内容自适应），列多时字号不会自动再缩。
 - 自适应用的是**每条内容的宽度估算**（按字号 × 字符数的近似量），不是真实排版度量：
   极端混排（大量全角/半角、超长英文单词）下仍可能留白过多或裁得略早。
-- 正文缩字号已覆盖 `content` / `summary` / `stats` / `grid` / `timeline` / `iconRows`；
-  `toc` / `twoCol` / `table` / `kpi` 仍在用固定高度的文本框。
+- 正文缩字号已覆盖**全部页型**（`content` / `summary` / `toc` / `twoCol` / `table` / `kpi` /
+  `stats` / `grid` / `timeline` / `iconRows`）。
+- **表格装不下时会减行并明说**：缩到字号下限（约 9pt）仍装不下的行不画出去，
+  末行换成「… 另有 N 行未显示」。一张幻灯片本来就装不下「30 行 × 每格折 4 行」这种东西，
+  硬画出去只会得到看不见的表；宁可少显示 + 告诉你少了多少。
 - 图表图例最多 3 行，超出以“…等 N 项”代替（不是分页）。
 - `action:read` 只取文本，不还原版式与图片；页码徽标（如 `02`）也会作为文本被取出，属噪声。

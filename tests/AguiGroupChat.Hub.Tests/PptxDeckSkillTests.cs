@@ -999,6 +999,223 @@ public sealed class PptxDeckSkillTests
         Assert.Contains("会覆盖原件", doc.RootElement.GetProperty("message").GetString());
     }
 
+    // ===== 页型级越界防护 =====
+
+    /// <summary>把每页所有形状的右/下边界与画布比对，返回越界描述（空 = 没越界）。</summary>
+    private static List<string> ShapesOutsideCanvas(string path)
+    {
+        const long W = 12192000, H = 6858000, Slack = 1000;
+        // a:off / a:ext 无论挂在 a:xfrm 还是 p:xfrm 下，都在 drawingml 命名空间
+        System.Xml.Linq.XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        var bad = new List<string>();
+        using var zip = ZipFile.OpenRead(path);
+        foreach (var e in zip.Entries.Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                                              && e.FullName.EndsWith(".xml", StringComparison.Ordinal)))
+        {
+            using var sr = new StreamReader(e.Open());
+            var doc = System.Xml.Linq.XDocument.Parse(sr.ReadToEnd());
+            // 注意：形状的 xfrm 在 drawingml 命名空间（p:spPr/a:xfrm），
+            // 但表格/图表的 graphicFrame 用的是 <p:xfrm>（presentation 命名空间）——
+            // 只找 a:xfrm 会整个漏掉表格，实测踩到：表格早已画出页面，检查却“通过”。
+            // 按 local name 匹配，两种都覆盖。
+            foreach (var xfrm in doc.Descendants().Where(x => x.Name.LocalName == "xfrm"))
+            {
+                var off = xfrm.Element(a + "off");
+                var ext = xfrm.Element(a + "ext");
+                if (off is null || ext is null) continue;
+                var x = long.Parse(off.Attribute("x")!.Value);
+                var y = long.Parse(off.Attribute("y")!.Value);
+                var cx = long.Parse(ext.Attribute("cx")!.Value);
+                var cy = long.Parse(ext.Attribute("cy")!.Value);
+                if (x < 0 || y < 0 || x + cx > W + Slack || y + cy > H + Slack)
+                    bad.Add($"{e.FullName}: x={x} y={y} cx={cx} cy={cy} → 右={x + cx} 下={y + cy}");
+            }
+        }
+        return bad;
+    }
+
+    /// <summary>
+    /// 页型级的「内容太多不越界」：目录 / 两栏 / 表格 / 指标卡。
+    ///
+    /// <para>
+    /// 这四类原本都是固定高度文本框，内容一多就画出页面。此用例将它们全部压满
+    /// （长条目、长单元格、多行），断言每页所有形状仍在画布内。
+    /// 表格尤其狠：“行高写死 + 单元格文字换行”组合会让真个表撑出页面。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void StressPages_KeepEveryShapeInsideCanvas()
+    {
+        var longLine = new string('字', 60);
+        var json = JsonSerializer.Serialize(new
+        {
+            title = "页型越界压力测试",
+            theme = "education-charts",
+            slides = new object[]
+            {
+                new { type = "cover", title = "页型越界压力测试" },
+                // 目录：20 项、每项 60 字
+                new { type = "toc", title = "目录",
+                      items = Enumerable.Range(1, 20).Select(i => $"第{i}章 {longLine}").ToArray() },
+                // 两栏：每栏 15 条长要点
+                new { type = "twoCol", title = "对比",
+                      left = new { heading = "方案一 " + longLine,
+                                   bullets = Enumerable.Range(1, 15).Select(i => $"要点{i} {longLine}").ToArray() },
+                      right = new { heading = "方案二 " + longLine,
+                                    bullets = Enumerable.Range(1, 15).Select(i => $"要点{i} {longLine}").ToArray() } },
+                // 表格：30 行 × 5 列，单元格都是长文本
+                new { type = "table", title = "明细",
+                      headers = new[] { "维度", longLine, longLine, longLine, longLine },
+                      rows = Enumerable.Range(1, 30)
+                          .Select(i => new[] { $"行{i}", longLine, longLine, longLine, longLine }).ToArray() },
+                // 指标卡：4 张，标签长到确实装不下（不极端就不会触发缩字号，断言也就失去意义）
+                new { type = "kpi", title = "指标",
+                      items = Enumerable.Range(1, 4)
+                          .Select(i => new { value = $"{i}23.45%", label = "标签" + new string('字', 120) }).ToArray() },
+            },
+        });
+
+        var (path, doc) = RenderDeck(json);
+        Assert.Equal(5, doc.RootElement.GetProperty("slides").GetInt32());
+
+        var bad = ShapesOutsideCanvas(path);
+        Assert.True(bad.Count == 0,
+            "有形状画出了画布（内容太多未自适应）：\n" + string.Join("\n", bad.Take(12)));
+
+        // 上面那条只盖到“形状本身越界”（表格的 graphicFrame 高度是算出来的，能被抓到）。
+        // 而 toc / twoCol / kpi 是**固定高度的文本框**：内容撑出去时文本框的 xfrm 仍在界内，
+        // 几何检查看不见。所以另镐一条：**缩字号必须真的发生了**。
+        // 拿“题面字号”当基准，压力输入下应该出现明显更小的 sz。
+        using (var zip = ZipFile.OpenRead(path))
+        {
+            System.Xml.Linq.XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+            System.Xml.Linq.XNamespace p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+
+            // 只取**正文区**那一个形状里的字号。
+            // 【别对整个页面取 min】页面上还有标题（28pt）、强调线、右下角页码徽标（11pt），
+            // 拿全页 min 永远是 1100（徽标），于是不管有没有缩字号都会“通过”——实测踩过。
+            long[] BodySizes(string entry, long bodyY, long bodyH)
+            {
+                using var sr = new StreamReader(zip.Entries.First(e => e.FullName == entry).Open());
+                var doc = System.Xml.Linq.XDocument.Parse(sr.ReadToEnd());
+                var sizes = new List<long>();
+                foreach (var sp in doc.Descendants(p + "sp"))
+                {
+                    var off = sp.Descendants(a + "off").FirstOrDefault();
+                    if (off is null) continue;
+                    var y = long.Parse(off.Attribute("y")!.Value);
+                    if (y < bodyY || y > bodyY + bodyH) continue;
+                    foreach (System.Text.RegularExpressions.Match m in
+                             System.Text.RegularExpressions.Regex.Matches(sp.ToString(), "sz=\"(\\d+)\""))
+                        sizes.Add(long.Parse(m.Groups[1].Value));
+                }
+                Assert.NotEmpty(sizes);
+                return sizes.ToArray();
+            }
+
+            const long bodyY = 1524000, bodyH = 4495800;   // soft 风格下的正文区
+            // slide2 = 目录（题面 18pt=1800）
+            Assert.True(BodySizes("ppt/slides/slide2.xml", bodyY, bodyH).Min() < 1800,
+                "目录项这久多还没有缩字号：内容会溢出正文区");
+            // slide3 = 两栏（题面：小标题 19pt / 要点 15pt）
+            Assert.True(BodySizes("ppt/slides/slide3.xml", bodyY, bodyH).Min() < 1500,
+                "两栏要点这久多还没有缩字号");
+            // slide5 = 指标卡（题面：数字 32pt / 标签 13pt）
+            Assert.True(BodySizes("ppt/slides/slide5.xml", bodyY, bodyH).Min() < 1300,
+                "指标卡标签这久长还没有缩字号");
+        }
+    }
+
+    /// <summary>
+    /// 每个**对外声明的**页型都真的接上了渲染器，而不是静默回落到默认要点页。
+    ///
+    /// <para>
+    /// 实测踩到：`case "twoCol"` 写成了驼峰，而分发前 type 已 <c>ToLowerInvariant()</c>，
+    /// 于是 <b>twoCol 从来没生效过</b> —— 每一页都静默变成要点页，文档里却写着支持两栏。
+    /// 这类“类型没接上”的 bug 不会报错、不会崩，只会默默给你错的东西。
+    /// </para>
+    ///
+    /// <para>
+    /// 做法：拿同一批内容分别以“真实页型”和“不存在的页型”各出一份，
+    /// 逐页比 XML——两者一模一样就说明这个页型根本没接上（content 本来就走默认，故排除）。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void EveryDocumentedSlideType_IsActuallyWired()
+    {
+        var types = new[]
+        {
+            "cover", "toc", "section", "twoCol", "table", "kpi", "stats",
+            "grid", "timeline", "iconRows", "quote", "image", "chart", "summary", "end",
+        };
+
+        string Build(IEnumerable<string> typeNames)
+            => JsonSerializer.Serialize(new
+            {
+                title = "页型分发检查",
+                slides = typeNames.Select(SlideOf).ToArray(),
+            });
+
+        var (realPath, realDoc) = RenderDeck(Build(types));
+        var (fallbackPath, fallbackDoc) = RenderDeck(
+            Build(types.Select(_ => "definitely-not-a-page-type")));
+        Assert.Equal(types.Length, realDoc.RootElement.GetProperty("slides").GetInt32());
+
+        static string[] Slides(string path)
+        {
+            using var zip = ZipFile.OpenRead(path);
+            return zip.Entries
+                .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                         && e.FullName.EndsWith(".xml", StringComparison.Ordinal))
+                .OrderBy(e => e.FullName.Length).ThenBy(e => e.FullName, StringComparer.Ordinal)
+                .Select(e => { using var sr = new StreamReader(e.Open()); return sr.ReadToEnd(); })
+                .ToArray();
+        }
+
+        var real = Slides(realPath);
+        var fallback = Slides(fallbackPath);
+        Assert.Equal(types.Length, real.Length);
+        Assert.Equal(types.Length, fallback.Length);
+
+        var notWired = new List<string>();
+        for (var i = 0; i < types.Length; i++)
+            if (real[i] == fallback[i]) notWired.Add(types[i]);
+
+        Assert.True(notWired.Count == 0,
+            "下列页型没有接上渲染器（与“不存在的页型”产出完全相同，即静默回落到了默认要点页）："
+            + string.Join(", ", notWired));
+    }
+
+    /// <summary>一份“什么字段都给了”的幻灯片，用于把差异**只留在 type 上**。</summary>
+    private static Dictionary<string, object?> SlideOf(string type) => new()
+    {
+        ["type"] = type,
+        ["title"] = "标题",
+        ["subtitle"] = "副标题",
+        ["text"] = "引言正文",
+        ["cite"] = "出处",
+        ["items"] = new object[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["value"] = "1", ["label"] = "标签", ["title"] = "小标题",
+                ["detail"] = "说明", ["text"] = "正文", ["icon"] = "1",
+            },
+        },
+        ["bullets"] = new object[] { "要点一", "要点二" },
+        ["left"] = new Dictionary<string, object?> { ["heading"] = "左栏", ["bullets"] = new object[] { "左一" } },
+        ["right"] = new Dictionary<string, object?> { ["heading"] = "右栏", ["bullets"] = new object[] { "右一" } },
+        ["headers"] = new object[] { "列一", "列二" },
+        ["rows"] = new object[] { new object[] { "a", "b" } },
+        ["categories"] = new object[] { "甲", "乙" },
+        ["series"] = new object[]
+        {
+            new Dictionary<string, object?> { ["name"] = "系列", ["values"] = new object[] { 1.0, 2.0 } },
+        },
+        ["chartType"] = "bar",
+        ["path"] = Path.Combine(Path.GetTempPath(), "不存在的图片-" + Guid.NewGuid().ToString("N") + ".png"),
+    };
+
     /// <summary>与技能内同一口径的字形覆盖判定。</summary>
     private static bool CanRenderCjk(SixLabors.Fonts.FontFamily family)
     {
