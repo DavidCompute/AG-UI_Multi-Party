@@ -1,5 +1,55 @@
-# AG-UI 群聊桌面版 1.0.132 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.132 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.133 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.133 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.133 为当前 Windows 桌面版本。修复了 PPT 技能里三个**一直存在、且从不报错**的缺陷：① 「缩字号」实际上是死代码（内容一多就直接溢出正文区）；② **`twoCol` 页型从未生效**（每页都静默变成要点页）；③ 表格行高写死，长文本会撑出页面。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.133 is the current Windows desktop release. It fixes three long-standing defects in the PPT skill that **never reported an error**: (1) the shrink-to-fit logic was effectively dead code (content overflowed the body area instead); (2) the **`twoCol` page type never took effect** (every such slide silently became a bullet page); (3) table row heights were fixed, so long cell text pushed the table off the page. Web and desktop share the same Hub / gateway / frontend.
+
+## 修复一：「缩字号」是死代码（1.0.133）
+# Fix 1: shrink-to-fit was dead code (1.0.133)
+
+中文：
+- **现象**：PPT 内容一多就溢出正文区/页面——这就是你最早报的「内容太多会越界」。
+- **根因**：高度估算函数把 `lineSpacing` 当成**百分数**（`/100.0`），而所有调用方传的都是**倍率**（`1.25`）。
+  于是估出来的高度只有真实值的约 1%，`need <= boxH` 永远成立、缩放系数永远是 `1.0`——
+  **“缩字号”这一整套逻辑从来没执行过**。它不报错、不影响打开，只是默默什么都没做。
+- **修复**：统一为倍率（并兼容 `>5` 视为百分数，防止后来人写 `125`）。
+  同时**补全页型覆盖**：`toc` / `twoCol` / `table` / `kpi` 之前根本没有调用过缩字号，现已全部接上。
+- **表格额外处理**：行高改为按“最长那一列折几行”计算；缩到字号下限（约 9pt）仍装不下的行
+  不画出去，末行换成「… 另有 N 行未显示」——一张幻灯片本来装不下「30 行 × 每格折 4 行」，
+  硬画出去只会得到看不见的表；宁可少显示并告诉你少了多少。
+- **实测**（实盘、真容器）：30 行 × 5 列 × 60 字的表 → 显示 6 行 + 「… 另有 24 行未显示」；
+  20 项目录 / 每栅15 条两栏 / 4 张超长标签指标卡 → **全部形状仍在版面内**。
+- 回退取证：把估算公式改回 `/100.0`，新增回归确实失败。
+
+English:
+- **Symptom**: PPT content overflowed the body area and the page as soon as there was enough of it.
+- **Root cause**: the height estimator treated `lineSpacing` as a **percentage** (`/100.0`) while every caller passes a **multiplier** (`1.25`). The estimated height came out at roughly 1% of reality, so `need <= boxH` always held and the scale was always `1.0` — **the entire shrink-to-fit path had never run**. No error, no corruption, it simply did nothing.
+- **Fix**: settle on the multiplier convention (still tolerating `> 5` as a percentage, in case someone writes `125`). Slide-type coverage was also completed: `toc` / `twoCol` / `table` / `kpi` never even called the shrink logic and now do.
+- **Table handling**: row height is now derived from how many lines the widest cell wraps to; rows that still do not fit at the font floor (~9pt) are omitted and the last row becomes “…and N more rows”. A slide cannot hold 30 rows of four-line cells; drawing them anyway just produces an unreadable table.
+- **Measured** (live container): a 30-row × 5-column × 60-character table shows 6 rows plus “…and 24 more rows”; a 20-item TOC, two 15-bullet columns and four oversized KPI labels all keep **every shape inside the canvas**.
+- Revert evidence: restoring the `/100.0` formula does make the new regression fail.
+
+## 修复二：`twoCol` 页型从未生效（1.0.133）
+# Fix 2: the `twoCol` page type never took effect (1.0.133)
+
+中文：
+- **现象**：文档里写着支持两栏，实际每一页都变成普通的要点页——不报错、不崩，就是静默给你错的东西。
+- **根因**：分发前对 `type` 做了 `ToLowerInvariant()`，而 `case` 写成了驼峰 `"twoCol"`，
+  于是**永远匹配不上**，落入 `default` 分支（默认要点页）。
+- **修复**：改为全小写 `"twocol"`；并加了回归 `EveryDocumentedSlideType_IsActuallyWired`——
+  把**每种对外声明的页型**与“不存在的页型”各出一份，逐页比 XML，一样就说明没接上（会直接点名是哪个页型）。
+  回退取证：把 `case` 改回驼峰，该回归报「未接上：twoCol」。
+
+English:
+- **Symptom**: two-column slides were documented but every one of them came out as an ordinary bullet page — no error, no crash, just silently wrong output.
+- **Root cause**: `type` is lower-cased before dispatch, while the `case` label was written as `"twoCol"`, so it never matched and fell through to `default` (the bullet page).
+- **Fix**: use the lower-case `"twocol"`, and add the regression `EveryDocumentedSlideType_IsActuallyWired` — it renders **every documented page type** and the same content with a non-existent type, compares the slides pairwise, and names any type whose output is identical (i.e. never wired).
+- Revert evidence: restoring the camel-case label makes that regression report “not wired: twoCol”.
+
+---
+
+# AG-UI 群聊桌面版 1.0.132 发布说明
+# AG-UI Group Chat Desktop 1.0.132 Release Notes
 
 **版本说明**：1.0.132 为当前 Windows 桌面版本。修复了套模板返回的页数不对（`keepTemplateSlides` 时只报新生成页数，3 页报成 1，看着像丢了页），并校正了 PPT 技能文档里已过时的能力描述。Web 与桌面共用同一套 Hub/网关/前端。
 **Version note**: 1.0.132 is the current Windows desktop release. It fixes a wrong slide count returned when authoring from a template (`keepTemplateSlides` reported only the newly generated slides, so a 3-page result read as 1 and looked like the template pages had been dropped), and corrects capability statements in the PPT skill docs that had gone stale. Web and desktop share the same Hub / gateway / frontend.
