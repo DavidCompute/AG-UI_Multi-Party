@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.135 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.135 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.135 为当前 Windows 桌面版本。**设计系统下沉到 Excel 与 PDF**：两个技能原先没有任何主题概念（xlsx 只有一个写死的表头蓝，pdf 只有 8 个语义 role），现在与 PPT 共享同一套 **18 个命名调色板**。Web 与桌面共用同一套 Hub/网关/前端。
+**Version note**: 1.0.135 is the current Windows desktop release. The **design system now reaches Excel and PDF**: neither skill had any theme concept (xlsx had a single hard-coded header blue, pdf had eight semantic roles), and both now share the same **18 named palettes** as PPT. Web and desktop share the same Hub / gateway / frontend.
+
+## 18 套命名调色板：xlsx / pdf（1.0.135）
+# 18 named palettes for xlsx and pdf (1.0.135)
+
+中文：
+- **xlsx**：新增 `theme`，可取 18 个名字之一，也可直接给十六进制主色（`"theme":"#2F6B4F"`）。
+  品牌色只控**表头底 / 表头上的字 / 合计行底色与合计线**；**输入蓝与跨表引用绿刻意不变**——
+  那是 Excel 多年的约定（表头用「最深色 + 对比度更高的黑白字」保证反白字始终看得清）。
+- **pdf**：新增 `palette`，与既有的 `docType`（8 种版式）、`accentRole`（8 种语义角色）共存；
+  `palette` 只给品牌三色（主色/底色/强调色），`AccentDark`/`AccentLight`/`Panel`/`Rule`/`Muted`
+  继续由既有派生逻辑展开，不另造一套规则。
+- **优先级**：`palette` → `accentRole` → `accent` → `colors`，显式单项始终覆盖，
+  **不传则产出与改造前完全一致**（有单测钉住 xlsx 的 `FF1F3864` / `FFF2F2F2`）。
+- **踩到的真缺陷**：xlsx 默认字色原是 `FF000000`（8 位 ARGB），我把主题色存成 6 位后直接写进去，
+  变成 `rgb="000000"` —— SpreadsheetML 的 `rgb` 要求 ARGB，于是**schema 校验失败**（被既有测试当场抓住）。
+  现统一补 `FF` 前缀，默认值仍逐字节等同改造前。
+- 另一处沿用 pptx 的教训：pdf 的底色过一道 `Surface` 兜底，否则 `education-charts` 的最亮色是亮黄 `E9C46A`，
+  会得到一张黄底文档。
+- 单测：`PalettePortTests`（8 个用例）+ 全量 **1215 全绿**；回退取证：把 `theme` 参数短路掉，3 个用例立刻失败。
+
+English:
+- **xlsx** gained `theme`, accepting any of the 18 names or a bare hex brand colour (`"theme": "#2F6B4F"`). It drives only the **header fill / header text / total-row fill and rule**; the **input-blue and cross-sheet-green stay put**, being long-standing Excel conventions. The header pairs the palette's darkest colour with whichever of black/white contrasts more, so reversed text is always legible.
+- **pdf** gained `palette`, coexisting with the existing `docType` (8 layouts) and `accentRole` (8 roles). It supplies only the brand three (primary / background / accent); `AccentDark`, `AccentLight`, `Panel`, `Rule` and `Muted` keep flowing from the existing derivation rather than a second set of rules.
+- **Precedence**: `palette` → `accentRole` → `accent` → `colors`, so explicit single values always win, and **omitting it reproduces the previous output byte for byte** (a test pins xlsx's `FF1F3864` / `FFF2F2F2`).
+- **A real defect surfaced**: xlsx's default font colour was `FF000000` (8-digit ARGB); storing theme colours as 6 digits and writing them straight through produced `rgb="000000"`, which SpreadsheetML rejects as ARGB — **schema validation failed** and the existing test caught it immediately. Colours are now normalised to ARGB, with defaults still byte-identical to before.
+- The same lesson as pptx was applied to pdf: backgrounds pass through a `Surface` guard, otherwise `education-charts`' brightest colour (a bright yellow `E9C46A`) would produce a yellow-paged document.
+- Tests: `PalettePortTests` (8 cases) plus a full **1215 green**; revert evidence: short-circuiting the `theme` parameter makes three cases fail at once.
+
+---
+
 # AG-UI 群聊桌面版 1.0.134 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.134 Release Notes (current Windows desktop release)
 
