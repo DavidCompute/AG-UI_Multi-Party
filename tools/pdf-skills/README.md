@@ -333,6 +333,27 @@ dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --nolog
 8. **颜色检查不能直接搜 PDF 原文**：内容流是 FlateDecode 压缩的，要用
    `page.Contents.Elements.GetDictionary(i).Stream.UnfilteredValue` 解压后再看（测试里就这么验强调色）。
 
+## 配色（设计系统：18 套命名调色板）
+
+原有的 `docType`（8 种版式）与 `accentRole`（8 种语义角色）不变；新增 `palette`，
+一次给出品牌三色，其余（`AccentDark` / `AccentLight` / `Panel` / `Rule` / `Muted`）
+继续由既有的派生逻辑展开——不另造一套规则。
+
+```json
+{ "title": "季度报告", "docType": "report", "palette": "education-charts", "markdown": "# …" }
+```
+
+18 个名字与 pptx / xlsx 完全一致（`modern-wellness` / `business-authority` / `tech-night` /
+`education-charts` / `forest-eco` / `coastal-coral` / `platinum-white-gold` …）。
+
+优先级：`palette`（品牌三色）→ `accentRole` → `accent` → `colors`，**后三者的显式单项始终覆盖 palette**，
+所以旧调用方不受影响。
+
+> 底色过一道 `Surface` 兜底：调色板里最亮色可能是亮黄（如 `education-charts` 的 `E9C46A`），
+> 直接当文档底色会很难看——彩度超标就往白里混。这个坑在 pptx 侧已经踩过。
+
+回归：`PalettePortTests`。
+
 ## 已知边界
 
 - ❌ **不做 FILL（填表单域）**：PDFsharp **不支持 AcroForm 填写**，遇到「把这份 PDF 表单填好」这类需求

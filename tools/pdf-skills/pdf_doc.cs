@@ -324,6 +324,84 @@ public class Skill
         ["luxury"] = "6B4E2E",    // 高端 → 棕金
     };
 
+    /// <summary>
+    /// 18 套命名调色板（与 pptx / xlsx 同一套，来自 design-system.md）。
+    ///
+    /// <para>
+    /// 这里只给“品牌三色”：主色（封面/标题）、底色、强调色；其余（AccentDark / AccentLight /
+    /// Panel / Rule / Muted）继续由下方既有逻辑从这三色派生——不重复造一套派生规则。
+    /// </para>
+    /// </summary>
+    private static readonly (string Name, string C1, string C2, string C3, string C4, string C5, bool Dark)[] PdfPalettes =
+    [
+        ("modern-wellness",      "006D77", "83C5BE", "EDF6F9", "FFDDD2", "E29578", false),
+        ("business-authority",   "2B2D42", "8D99AE", "EDF2F4", "EF233C", "D90429", false),
+        ("nature-outdoors",      "606C38", "283618", "FEFAE0", "DDA15E", "BC6C25", false),
+        ("vintage-academic",     "780000", "C1121F", "FDF0D5", "003049", "669BBC", false),
+        ("soft-creative",        "CDB4DB", "FFC8DD", "FFAFCC", "BDE0FE", "A2D2FF", false),
+        ("bohemian",             "CCD5AE", "E9EDC9", "FEFAE0", "FAEDCD", "D4A373", false),
+        ("vibrant-tech",         "8ECAE6", "219EBC", "023047", "FFB703", "FB8500", false),
+        ("craft-artisan",        "7F5539", "A68A64", "EDE0D4", "656D4A", "414833", false),
+        ("tech-night",           "000814", "001D3D", "003566", "FFC300", "FFD60A", true),
+        ("education-charts",     "264653", "2A9D8F", "E9C46A", "F4A261", "E76F51", false),
+        ("forest-eco",           "DAD7CD", "A3B18A", "588157", "3A5A40", "344E41", false),
+        ("elegant-fashion",      "EDAFB8", "F7E1D7", "DEDBD2", "B0C4B1", "4A5759", false),
+        ("art-food",             "335C67", "FFF3B0", "E09F3E", "9E2A2B", "540B0E", false),
+        ("luxury-mysterious",    "22223B", "4A4E69", "9A8C98", "C9ADA7", "F2E9E4", false),
+        ("pure-tech-blue",       "03045E", "0077B6", "00B4D8", "90E0EF", "CAF0F8", false),
+        ("coastal-coral",        "0081A7", "00AFB9", "FDFCDC", "FED9B7", "F07167", false),
+        ("vibrant-orange-mint",  "FF9F1C", "FFBF69", "FFFFFF", "CBF3F0", "2EC4B6", false),
+        ("platinum-white-gold",  "0A0A0A", "0070F3", "D4AF37", "F5F5F5", "FFFFFF", false),
+    ];
+
+    private static double RelLumP(string hex)
+    {
+        var c = RgbP(hex);
+        double Ch(int v) { var s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        return 0.2126 * Ch(c[0]) + 0.7152 * Ch(c[1]) + 0.0722 * Ch(c[2]);
+    }
+
+    private static int[] RgbP(string hex) =>
+        [Convert.ToInt32(hex.Substring(0, 2), 16), Convert.ToInt32(hex.Substring(2, 2), 16), Convert.ToInt32(hex.Substring(4, 2), 16)];
+
+    private static double ContrastP(string a, string b)
+    {
+        var la = RelLumP(a); var lb = RelLumP(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    /// <summary>该底色上最易读的文字色（黑或白）。</summary>
+    private static string OnColorP(string bg)
+        => ContrastP("FFFFFF", bg) >= ContrastP("1A1A1A", bg) ? "FFFFFF" : "1A1A1A";
+
+    private static double ChromaP(string hex)
+    {
+        var c = RgbP(hex);
+        var mx = c.Max(); var mn = c.Min();
+        return mx == 0 ? 0 : (mx - mn) / (double)mx;
+    }
+
+    /// <summary>把亮色压成“底色”：彩度超标就往白里混（否则会得到一张亮黄底的文档）。</summary>
+    private static string SurfaceP(string color)
+    {
+        if (ChromaP(color) <= 0.25) return color;
+        for (var t = 0.1; t <= 0.91; t += 0.1)
+        {
+            var s = Mix(color, "FFFFFF", t);
+            if (ChromaP(s) <= 0.25) return s;
+        }
+        return "FFFFFF";
+    }
+
+    /// <summary>强调色：优先选“在底色上看得见”且彩度最高的那个（不选已当底色/主色的）。</summary>
+    private static string AccentFrom(string[] all, string bg, params string[] exclude)
+    {
+        var pool = all.Where(c => c != bg && !exclude.Contains(c) && ContrastP(c, bg) >= 2.0).ToList();
+        if (pool.Count == 0) pool = all.Where(c => c != bg).ToList();
+        if (pool.Count == 0) pool = all.ToList();
+        return pool.OrderByDescending(ChromaP).First();
+    }
+
     private static string NormalizeDocType(string raw)
     {
         var s = (raw ?? "").Trim().ToLowerInvariant();
@@ -369,6 +447,28 @@ public class Skill
             default: // report
                 t.Label = "报告"; t.Accent = "1F3864";
                 t.CoverBg = "1F3864"; t.CoverInk = "FFFFFF"; break;
+        }
+
+        // 命名调色板（设计系统）：一次给出品牌主色 / 底色 / 强调色，其余交给下面既有的派生逻辑。
+        // 放在 docType 之后、accentRole / accent / colors 之前 —— 显式指定的单项始终优先。
+        var palName = (Str(root, "palette") ?? "").Trim().ToLowerInvariant();
+        if (palName.Length > 0)
+        {
+            foreach (var p in PdfPalettes)
+            {
+                if (p.Name != palName) continue;
+                var all = new[] { p.C1, p.C2, p.C3, p.C4, p.C5 }
+                    .Select(c => c.TrimStart('#').ToUpperInvariant()).ToArray();
+                var byLum = all.OrderBy(RelLumP).ToArray();
+                var primary = byLum[0];
+                t.Dark = p.Dark;
+                t.Bg = p.Dark ? primary : SurfaceP(byLum[4]);
+                t.Ink = p.Dark ? "E8ECF1" : "1F1F1F";
+                t.Accent = AccentFrom(all, t.Bg, primary);
+                t.CoverBg = p.Dark ? t.Bg : primary;
+                t.CoverInk = OnColorP(t.CoverBg);
+                break;
+            }
         }
 
         // 强调色：语义角色 → 显式覆盖

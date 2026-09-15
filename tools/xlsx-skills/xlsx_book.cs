@@ -139,7 +139,7 @@ public class Skill
             throw new InvalidOperationException("输出路径不可写：" + ex.Message);
         }
 
-        var styles = new StyleBook(Str(root, "fontName") ?? "微软雅黑");
+        var styles = new StyleBook(Str(root, "fontName") ?? "微软雅黑", ResolveXlsxTheme(root));
         var totalRows = 0;
         var maxCols = 0;
         foreach (var m in models)
@@ -838,18 +838,139 @@ public class Skill
     }
 
     // ===== 样式表（动态登记 numFmt / xf）=====
+    // ===== 配色（设计系统：18 套命名调色板）=====
+
+    /// <summary>
+    /// 表格配色。默认值与改造前完全一致（不传 theme 就是原来的观感）。
+    ///
+    /// <para>
+    /// 哪些东西由品牌色控制、哪些不控，是个取舍：<b>表头底 / 合计线 / 正文色</b>跟着 palette 走
+    /// （这是“看起来是不是这家公司的表”的部分）；而<b>输入蓝、跨表引用绿</b>是 Excel 多年的约定，
+    /// 与品牌无关，保持固定——把它们也染成品牌色反而会让熟表格的人看错。
+    /// </para>
+    /// </summary>
+    private sealed class XlsxTheme
+    {
+        public string Header = "1F3864";    // 表头底色
+        public string OnHeader = "FFFFFF";  // 表头上的字
+        public string Band = "F2F2F2";      // 合计行底色
+        public string Rule = "808080";      // 合计行上框线
+        public string Ink = "000000";       // 正文
+    }
+
+    /// <summary>18 套命名调色板（与 pptx 同一套，来自 design-system.md）。每套只给 5 色，角色由亮度/彩度推出。</summary>
+    private static readonly (string Name, string C1, string C2, string C3, string C4, string C5, bool Dark)[] XlsxPalettes =
+    [
+        ("modern-wellness",      "006D77", "83C5BE", "EDF6F9", "FFDDD2", "E29578", false),
+        ("business-authority",   "2B2D42", "8D99AE", "EDF2F4", "EF233C", "D90429", false),
+        ("nature-outdoors",      "606C38", "283618", "FEFAE0", "DDA15E", "BC6C25", false),
+        ("vintage-academic",     "780000", "C1121F", "FDF0D5", "003049", "669BBC", false),
+        ("soft-creative",        "CDB4DB", "FFC8DD", "FFAFCC", "BDE0FE", "A2D2FF", false),
+        ("bohemian",             "CCD5AE", "E9EDC9", "FEFAE0", "FAEDCD", "D4A373", false),
+        ("vibrant-tech",         "8ECAE6", "219EBC", "023047", "FFB703", "FB8500", false),
+        ("craft-artisan",        "7F5539", "A68A64", "EDE0D4", "656D4A", "414833", false),
+        ("tech-night",           "000814", "001D3D", "003566", "FFC300", "FFD60A", true),
+        ("education-charts",     "264653", "2A9D8F", "E9C46A", "F4A261", "E76F51", false),
+        ("forest-eco",           "DAD7CD", "A3B18A", "588157", "3A5A40", "344E41", false),
+        ("elegant-fashion",      "EDAFB8", "F7E1D7", "DEDBD2", "B0C4B1", "4A5759", false),
+        ("art-food",             "335C67", "FFF3B0", "E09F3E", "9E2A2B", "540B0E", false),
+        ("luxury-mysterious",    "22223B", "4A4E69", "9A8C98", "C9ADA7", "F2E9E4", false),
+        ("pure-tech-blue",       "03045E", "0077B6", "00B4D8", "90E0EF", "CAF0F8", false),
+        ("coastal-coral",        "0081A7", "00AFB9", "FDFCDC", "FED9B7", "F07167", false),
+        ("vibrant-orange-mint",  "FF9F1C", "FFBF69", "FFFFFF", "CBF3F0", "2EC4B6", false),
+        ("platinum-white-gold",  "0A0A0A", "0070F3", "D4AF37", "F5F5F5", "FFFFFF", false),
+    ];
+
+    private static XlsxTheme ResolveXlsxTheme(JsonElement root)
+    {
+        var th = new XlsxTheme();
+        var raw = (Str(root, "theme") ?? "").Trim();
+        if (raw.Length == 0) return th;              // 不传 = 保持改造前的观感
+
+        // 也允许直接给一个十六进制主色：theme: "#2F6B4F"
+        var direct = HexOrNull(raw);
+        if (direct is not null) return WithHeader(th, direct);
+
+        var key = raw.ToLowerInvariant();
+        if (string.Equals(key, "business", StringComparison.Ordinal))
+            return WithHeader(th, "1F3864");         // 历史默认名
+        foreach (var p in XlsxPalettes)
+            if (p.Name == key)
+            {
+                var all = new[] { p.C1, p.C2, p.C3, p.C4, p.C5 }
+                    .Select(c => c.TrimStart('#').ToUpperInvariant()).ToArray();
+                // 表头用“最深色”：它最经得起反白字，也最像公司色
+                var darkest = all.OrderBy(RelLumX).First();
+                return WithHeader(th, darkest);
+            }
+        return th;                                    // 认不出就安安静静用默认
+    }
+
+    /// <summary>6 位 RGB → 8 位 ARGB（SpreadsheetML 的 font.rgb / fill.fgColor 都是 ARGB）。</summary>
+    private static string ArgB(string hex)
+        => hex.Length == 8 ? hex : "FF" + hex;
+
+    private static XlsxTheme WithHeader(XlsxTheme th, string header)
+    {
+        th.Header = header;
+        th.OnHeader = OnColorX(header);              // 表头字保证看得清
+        th.Band = MixX(header, "FFFFFF", 0.92);      // 合计行：主色的极淡版
+        th.Rule = MixX(header, "FFFFFF", 0.62);      // 合计线：主色的中淡版
+        th.Ink = "1A1A1A";                           // 正文保持深灰（跟着品牌色走反而难读）
+        return th;
+    }
+
+    // ---- 颜色工具（WCAG 相对亮度）----
+
+    private static string? HexOrNull(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return null;
+        var s = v.Trim().TrimStart('#').ToUpperInvariant();
+        return s.Length == 6 && s.All(Uri.IsHexDigit) ? s : null;
+    }
+
+    private static int[] RgbX(string hex) =>
+        [Convert.ToInt32(hex.Substring(0, 2), 16), Convert.ToInt32(hex.Substring(2, 2), 16), Convert.ToInt32(hex.Substring(4, 2), 16)];
+
+    private static double RelLumX(string hex)
+    {
+        var c = RgbX(hex);
+        double Ch(int v) { var s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        return 0.2126 * Ch(c[0]) + 0.7152 * Ch(c[1]) + 0.0722 * Ch(c[2]);
+    }
+
+    private static double ContrastX(string a, string b)
+    {
+        var la = RelLumX(a); var lb = RelLumX(b);
+        return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+    }
+
+    private static string MixX(string a, string b, double t)
+    {
+        var ca = RgbX(a); var cb = RgbX(b);
+        var sb = new StringBuilder(6);
+        for (var i = 0; i < 3; i++) sb.Append(((int)Math.Round(ca[i] + (cb[i] - ca[i]) * t)).ToString("X2"));
+        return sb.ToString();
+    }
+
+    /// <summary>该底色上最易读的文字色（表头反白字的根据）。</summary>
+    private static string OnColorX(string bg)
+        => ContrastX("FFFFFF", bg) >= ContrastX("1A1A1A", bg) ? "FFFFFF" : "1A1A1A";
+
     private sealed class StyleBook
     {
         private readonly string _font;
+        private readonly XlsxTheme _t;
         private readonly List<string> _numFmtXml = new();
         private readonly Dictionary<string, int> _numFmtIds = new(StringComparer.Ordinal);
         private readonly List<string> _xfXml = new();
         private readonly Dictionary<string, int> _xfIds = new(StringComparer.Ordinal);
         private int _nextNumFmtId = 164; // 164 起为自定义 numFmt（内置 0~163）
 
-        public StyleBook(string fontName)
+        public StyleBook(string fontName, XlsxTheme theme)
         {
             _font = Xml(fontName);
+            _t = theme;
             _xfIds["0|0|0|0|"] = 0;
             _xfXml.Add("<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>");
         }
@@ -895,26 +1016,28 @@ public class Skill
             foreach (var f in _numFmtXml) sb.Append(f);
             sb.Append("</numFmts>");
 
-            // 0 默认 / 1 表头(白粗) / 2 输入(蓝) / 3 计算(黑) / 4 跨表(绿) / 5 合计(黑粗)
+            // 0 默认 / 1 表头(反色) / 2 输入(蓝) / 3 计算(黑) / 4 跨表(绿) / 5 合计(黑粗)
+            // 输入蓝 / 跨表绿是 Excel 长期约定（与品牌无关），保持固定；品牌色体现在表头底与合计线。
+            // 【单位】font 的 rgb 需要 8 位 ARGB；主题色存的是 6 位 RGB，这里补 FF 前缀。
             sb.Append("<fonts count=\"6\">")
-              .Append(Font(false, ColorCalc))
-              .Append(Font(true, "FFFFFFFF"))
+              .Append(Font(false, ArgB(_t.Ink)))
+              .Append(Font(true, ArgB(_t.OnHeader)))
               .Append(Font(false, ColorInput))
-              .Append(Font(false, ColorCalc))
+              .Append(Font(false, ArgB(_t.Ink)))
               .Append(Font(false, ColorCross))
-              .Append(Font(true, ColorCalc))
+              .Append(Font(true, ArgB(_t.Ink)))
               .Append("</fonts>");
 
             sb.Append("<fills count=\"4\">")
               .Append("<fill><patternFill patternType=\"none\"/></fill>")
               .Append("<fill><patternFill patternType=\"gray125\"/></fill>")
-              .Append("<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF1F3864\"/><bgColor indexed=\"64\"/></patternFill></fill>")
-              .Append("<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FFF2F2F2\"/><bgColor indexed=\"64\"/></patternFill></fill>")
+              .Append("<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF").Append(_t.Header).Append("\"/><bgColor indexed=\"64\"/></patternFill></fill>")
+              .Append("<fill><patternFill patternType=\"solid\"><fgColor rgb=\"FF").Append(_t.Band).Append("\"/><bgColor indexed=\"64\"/></patternFill></fill>")
               .Append("</fills>");
 
             sb.Append("<borders count=\"2\">")
               .Append("<border><left/><right/><top/><bottom/><diagonal/></border>")
-              .Append("<border><left/><right/><top style=\"thin\"><color rgb=\"FF808080\"/></top><bottom/><diagonal/></border>")
+              .Append("<border><left/><right/><top style=\"thin\"><color rgb=\"FF").Append(_t.Rule).Append("\"/></top><bottom/><diagonal/></border>")
               .Append("</borders>");
 
             sb.Append("<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>");

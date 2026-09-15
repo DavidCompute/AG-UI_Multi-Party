@@ -22,6 +22,15 @@ import tempfile
 
 R_NUGET = re.compile(r'#r "nuget:\s*([^,]+),\s*([^"]+)"')
 
+# 平台通过 TPA（可信程序集）仓库直接提供、**技能正文里故意不写 #r** 的包。
+# 例：pdf 技能靠平台自带的 PDFsharp，避免一次多余联网还原（有单测钉住这一点：
+# SkillSource_UsesTpaProvidedPdfSharp_WithoutNuGetDirective）。本地自检时得把它补上，
+# 否则整个文件都是“找不到类型 PdfSharp/*”。版本取 Agents 项目的锁定版本。
+TPA_PACKAGES = [
+    # (判定用命名空间, 包坐标)
+    ("using PdfSharp", "#:package PDFsharp@6.2.4"),
+]
+
 MAIN_SHIM = """
 public static class __CheckMain
 {
@@ -31,7 +40,22 @@ public static class __CheckMain
 
 
 def convert(src: str) -> str:
-    return R_NUGET.sub(lambda m: "#:package %s@%s" % (m.group(1).strip(), m.group(2).strip()), src)
+    body = R_NUGET.sub(lambda m: "#:package %s@%s" % (m.group(1).strip(), m.group(2).strip()), src)
+    extra = []
+    for probe, pkg in TPA_PACKAGES:
+        if probe not in body:
+            continue
+        name = pkg.split("@")[0].split(":", 1)[1]          # '#:package PDFsharp@6.2.4' -> 'PDFsharp'
+        declared = re.search(r'#(?:r "nuget:\s*%s[, ]|:package %s@)' % (re.escape(name), re.escape(name)),
+                             body, re.IGNORECASE)
+        if not declared:
+            extra.append(pkg)
+    if extra:
+        # `#:` 指令必须在 using 之前
+        idx = body.find("\nusing ")
+        block = "\n".join(extra) + "\n"
+        body = (body[:idx + 1] + block + body[idx + 1:]) if idx > 0 else (block + body)
+    return body
 
 
 def check(path: pathlib.Path) -> tuple[bool, str]:

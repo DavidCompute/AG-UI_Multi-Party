@@ -1126,7 +1126,7 @@ public sealed class PptxDeckSkillTests
                     using var sr = new StreamReader(e.Open());
                     if (sr.ReadToEnd().Contains(marker)) return e.FullName;
                 }
-                Assert.True(false, $"没有找到包含「{marker}」的页");
+                Assert.Fail($"没有找到包含「{marker}」的页");
                 return "";
             }
 

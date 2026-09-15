@@ -283,6 +283,26 @@ dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filte
 
 （`BuiltinXlsxSkillsTests` 依赖以上接线才能编译 / 通过。）
 
+## 配色（设计系统：18 套命名调色板）
+
+不传 `theme` 时与改造前完全一致（表头底 `FF1F3864`、合计行底 `FFF2F2F2`）。
+传 `theme` 可用与 pptx / pdf 同一套 18 个名字（`modern-wellness` / `business-authority` /
+`tech-night` / `education-charts` / `forest-eco` / `platinum-white-gold` …），也可以直接给一个十六进制主色
+（如 `"theme": "#2F6B4F"`）。
+
+品牌色只控**这些**（其余「是什么就是什么」）：
+
+| 位置 | 来源 |
+|---|---|
+| 表头底色 | 该套调色板的**最深色**（最经得起反白字） |
+| 表头上的字 | 黑/白里对比更高的那个（保证看得清） |
+| 合计行底色 / 合计线 | 主色的极淡版 / 中淡版 |
+
+> **输入蓝 `FF0000FF` 与跨表引用绿 `FF00B050` 不跟着品牌色变**——它们是 Excel 多年的约定，
+> 染成品牌色反而会让熟表格的人看错。这是刻意取舍，不是漏了。
+
+回归：`PalettePortTests`（不传 theme 保持原样、传了则表头换色且反白字对比度达标）。
+
 ## 已知边界
 
 - ❌ **不做图表**（柱状 / 折线 / 饼图等）：不发 `ChartPart`（DrawingML 图表 schema 复杂、旧版 Office 易报“不可读内容”）。
