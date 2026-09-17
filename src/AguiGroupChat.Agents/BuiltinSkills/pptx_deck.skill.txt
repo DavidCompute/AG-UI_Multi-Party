@@ -34,7 +34,7 @@
 //     "fontCjk": "微软雅黑",                                // 可选，东亚字体（汉字走它）
 //     "titleRule": true,                                   // 可选，加上“标题下强调线”（默认不加）
 //     "action": "read", "path": "…pptx",                  // 可选：只读取既有 pptx 的文本，不生成文件
-//     "action": "qa", "path": "…pptx",                    // 可选：只自检（占位符/空页/只有标题/越界）
+//     "action": "qa", "path": "…pptx",                    // 可选：只自检（占位符/空页/只有标题/越界/文字放不进框）
 //     "action": "edit", "path": "…", "outputPath": "…",   // 可选：改既有 pptx 的结构（见下方 OPS）
 //       "ops": [ {"op":"delete","slides":[3]},
 //                {"op":"reorder","order":[1,3,2]},
@@ -56,7 +56,7 @@
 //                        variant: left(默认) | center | image(背景图+蒙层) | split(左文右图)
 //     toc      目录      title, items:[ "…" ], variant: list(默认) | grid | sidebar
 //     section  章节分隔  title, subtitle, variant: number(默认) | bar | full
-//     content  要点页    title, bullets:[ "…" ], note
+//     content  要点页    title, bullets:[ "…" ], note（要点过多自动分页，不丢条）
 //     twoCol   两栏      title, left:{heading,bullets:[…]}, right:{heading,bullets:[…]}
 //     table    表格      title, headers:[…], rows:[[…]]（过长自动分页，不丢行）
 //     kpi      指标卡    title, items:[ {value,label} ]
@@ -102,9 +102,17 @@
 //       抽象图，零素材、零联网、无版权问题，且**确定性**（同一标题每次生成的图一样）。
 //     设计约束：只用实色（无渐变）、透明度只用 a:alpha，颜色全部取自动调色板。
 //
-//   【出稿后自检】生成/编辑完会自动跑一遍 QA（占位符、空页、只有标题、形状越界），
-//   结果在返回 JSON 的 qa 字段；降级行为（如图片缺失改用占位块）在 warnings 里。
-//   两者都是“不静默降级”的产物：调用方应看它们，别直接把有问题的稿子交出去。
+//   【出稿后自检】生成/编辑完会自动跑一遍 QA（占位符、空页、只有标题、形状越界、
+//   **文字放不进自己的框**），结果在返回 JSON 的 qa 字段；降级行为（如图片缺失改用占位块、
+//   文字过多已截断）在 warnings 里。两者都是“不静默降级”的产物：调用方应看它们，
+//   别直接把有问题的稿子交出去。
+//
+//   【文字溢出：为什么这件事要自己算】
+//     每页的标题与正文都按**真实字形量宽 + 真实行高**估行数，装不下就缩字号；
+//     缩到下限（12pt）仍装不下时：要点页（content / summary·list·split / toc）**自动分页**，
+//     表格过长按行切页，结构固定的框（卡片 / 示意图层 / 封面 / 图注）**截断 + Warn**。
+//     不依赖 <a:normAutofit/>：LibreOffice 会替我们缩、PowerPoint 打开时却不会重算，
+//     依赖它就会出现“我方看着正常、用户那边溢出”。详见 README 的「文字溢出」一节。
 //
 //   【图表：图片 vs 原生】默认渲染成 PNG（视觉可控、兼容性最好，但不可在 PowerPoint 里改数据）。
 //   对“要拿回去继续改数据”的场景可用原生图表（ChartPart + 嵌入数据工作簿）。
@@ -812,6 +820,20 @@ public class Skill
                     if (ox < 0 || oy < 0 || ox + cx > W || oy + cy > H)
                         Issue("overflow", $"形状画到画布外：x={ox} y={oy} w={cx} h={cy}（画布 {W}×{H}）");
                 }
+
+                // 文字是否装得进**自己的框**（卡片 / 示意图层 / 叠字最容易出这种问题）。
+                // 只在我们自己排的稿子上判：外部文件既不知道页型，也不知道我们的排版规则。
+                if (type is not null)
+                    foreach (var tb in TextBoxesOf(sp.Slide))
+                    {
+                        if (tb.W <= 0 || tb.H <= 0) continue;
+                        var need = BlockHeightEmu(tb.Plan, tb.W);
+                        // 留 2% 或 2pt 的余量：四舍五入与渲染器的细微差别不该报成问题
+                        if (need > tb.H + Math.Max(25400, tb.H / 50))
+                            Issue("textOverflow", "文字放不进自己的框：按真实字形需要 "
+                                + Math.Round(need / 12700.0) + "pt，框高只有 " + Math.Round(tb.H / 12700.0)
+                                + "pt：“" + Trim60(tb.Text) + "”");
+                    }
             }
 
             return "{\"ok\":true,\"action\":\"qa\",\"scene\":" + Js(SceneName)
@@ -828,6 +850,61 @@ public class Skill
             return "{\"ok\":false,\"action\":\"qa\",\"scene\":" + Js(SceneName)
                 + ",\"message\":" + Js("自检失败：" + ex.GetType().Name + "：" + ex.Message) + "}";
         }
+    }
+
+    /// <summary>一个文本框的自检信息：框大小 + 里面文字的排版参数（由 XML 反推，不是跟着渲染时那份数据）。</summary>
+    private readonly struct BoxAudit
+    {
+        public readonly long W, H;
+        public readonly List<ParaPlan> Plan;
+        public readonly string Text;
+        public BoxAudit(long w, long h, List<ParaPlan> plan, string text) { W = w; H = h; Plan = plan; Text = text; }
+    }
+
+    /// <summary>
+    /// 把一页里所有文本框的「框大小 + 文字排版参数」读出来（用于自检）。
+    ///
+    /// <para>
+    /// 刻意从 <b>写出来的 XML</b> 反推，而不是复用渲染时手里的那个 plan：
+    /// 这样它验的是“文件里真的写了什么”，能拦住“排版算对了但没写进 XML”这类错位
+    /// （与表格自检同一个道理）。
+    /// </para>
+    /// </summary>
+    private static List<BoxAudit> TextBoxesOf(P.Slide slide)
+    {
+        var list = new List<BoxAudit>();
+        foreach (var sp in slide.Descendants<P.Shape>())
+        {
+            var body = sp.TextBody;
+            if (body is null) continue;
+            var xfrm = sp.ShapeProperties?.Transform2D;
+            if (xfrm?.Extents is null) continue;
+            var plan = new List<ParaPlan>();
+            var all = new StringBuilder();
+            foreach (var p in body.Elements<A.Paragraph>())
+            {
+                var props = p.ParagraphProperties;
+                var marL = props?.LeftMargin?.Value is { } ml ? (long)ml : 0L;
+                var spacing = props?.LineSpacing?.GetFirstChild<A.SpacingPercent>()?.Val?.Value is { } pct
+                    ? (int)Math.Round(pct / 1000.0) : 100;
+                var spaceBefore = props?.SpaceBefore?.GetFirstChild<A.SpacingPoints>()?.Val?.Value is { } sb
+                    ? (int)Math.Round(sb / 100.0) : 0;
+                var text = new StringBuilder();
+                var size = 0;
+                var bold = false;
+                foreach (var r in p.Elements<A.Run>())
+                {
+                    text.Append(r.Text?.Text ?? "");
+                    var sz = r.RunProperties?.FontSize?.Value;
+                    if (sz is { } v && v > size) { size = v; bold = r.RunProperties?.Bold?.Value ?? false; }
+                }
+                all.Append(text);
+                if (text.Length > 0 && size > 0) plan.Add(P(text.ToString(), size, spaceBefore, spacing, marL, bold));
+            }
+            if (plan.Count == 0) continue;
+            list.Add(new BoxAudit(xfrm.Extents.Cx?.Value ?? 0, xfrm.Extents.Cy?.Value ?? 0, plan, all.ToString()));
+        }
+        return list;
     }
 
     /// <summary>这页是不是“本该有正文”的页型（封面/分隔/结束/引言/整图这种只有一块文字的页不算）。</summary>
@@ -1087,6 +1164,17 @@ public class Skill
                 if (replaced != text) { t.Text = replaced; hits++; }
             }
             sp.Slide.Save();
+            // 换上去的文字可能比原来长得多 → 复核一遍「还放不放得进原文本框」。
+            // 不自动改版式（替文字本就是不重排的轻量操作），但**不能静默**：如实报出来，
+            // 否则用户会得到一份“文字压在别的元素上”的稿子而不知道原因。
+            foreach (var tb in TextBoxesOf(sp.Slide))
+            {
+                if (tb.W <= 0 || tb.H <= 0) continue;
+                var need = BlockHeightEmu(tb.Plan, tb.W);
+                if (need > tb.H + Math.Max(25400, tb.H / 50))
+                    Warn($"第 {no} 页替换文字后放不进原文本框（需要 {Math.Round(need / 12700.0)}pt，"
+                        + $"框高 {Math.Round(tb.H / 12700.0)}pt）：“{Trim60(tb.Text)}”");
+            }
         }
         return $"替换文本 {hits} 处（{pairs.Count} 组规则，{targets.Count} 页）";
     }
@@ -1145,10 +1233,12 @@ public class Skill
         if (slides.Count == 0)
             throw new InvalidOperationException("slides 为空：请提供至少一页（如 cover / content / summary）。");
 
-        // 表格自动分页：过长的表格页在这里拆成多页。
-        // 必须在渲染前拆——RenderSlide 一次只出一页，页型自己开不了新页。
+        // 两个自动分页：先按表格行数拆表，再按「要点装不下」拆要点页（顺序有讲究：
+        // 要点页拆分不涉及表格，两者互不干扰，但都必须在渲染前做完——RenderSlide 一次只出一页）。
         var pageJson = new List<string>();
-        foreach (var s in slides) pageJson.AddRange(ExpandTableSlide(s));
+        foreach (var s in slides)
+            foreach (var one in ExpandTableSlide(s))
+                pageJson.AddRange(ExpandOverflowSlide(one));
         // 自检时要知道每页本来的页型（才能判“内容页只剩标题”），这里同步记下来
         var pageTypes = pageJson.Select(PageTypeOf).ToList();
 
@@ -1690,11 +1780,10 @@ public class Skill
 
         var left = W / 3 + 685800;
         var rightW = W - left - MX;
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(title, 4000, t.Primary, lineSpacing: 105));
+        var txts = new List<Txt> { T(title, 4000, t.Primary, bold: true, titleFont: true, spacing: 105) };
         if (!string.IsNullOrWhiteSpace(subtitle))
-            paras.Append(Para(subtitle!, 1800, t.Secondary, spaceBefore: 12, lineSpacing: 130));
-        shapes.Add(TextBox(ctx.NextId(), left, 1900000, rightW, 2600000, paras.ToString(), anchor: "t"));
+            txts.Add(T(subtitle, 1800, t.Secondary, spaceBefore: 12, spacing: 130));
+        shapes.Add(FitBox(ctx.NextId(), left, 1900000, rightW, 2600000, txts, "封面标题"));
 
         if (!string.IsNullOrWhiteSpace(author) || !string.IsNullOrWhiteSpace(date))
         {
@@ -1721,16 +1810,12 @@ public class Skill
         var author = Str(el, "author") ?? ctx.Author;
         var date = Str(el, "date") ?? ctx.Date;
 
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(title, 4400, t.Primary, align: "ctr", lineSpacing: 105));
+        var txts = new List<Txt> { T(title, 4400, t.Primary, bold: true, align: "ctr", titleFont: true, spacing: 105) };
         if (!string.IsNullOrWhiteSpace(subtitle))
-            paras.Append(Para(subtitle!, 1800, t.Secondary, align: "ctr", spaceBefore: 18, lineSpacing: 130));
-        var meta = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(author)) meta.Append(Para(author!.Trim(), 1400, t.Text, align: "ctr"));
-        if (!string.IsNullOrWhiteSpace(date)) meta.Append(Para(date!.Trim(), 1400, t.Secondary, align: "ctr", spaceBefore: 4));
-        if (meta.Length > 0) paras.Append(meta.ToString());
-
-        shapes.Add(TextBox(ctx.NextId(), MX, 1714500, CW, 3429000, paras.ToString(), anchor: "ctr"));
+            txts.Add(T(subtitle, 1800, t.Secondary, align: "ctr", spaceBefore: 18, spacing: 130));
+        if (!string.IsNullOrWhiteSpace(author)) txts.Add(T(author, 1400, t.Text, align: "ctr"));
+        if (!string.IsNullOrWhiteSpace(date)) txts.Add(T(date, 1400, t.Secondary, align: "ctr", spaceBefore: 4));
+        shapes.Add(FitBox(ctx.NextId(), MX, 1714500, CW, 3429000, txts, "封面标题", "ctr"));
         return SlideXml(t.Bg, shapes);
     }
 
@@ -1757,16 +1842,15 @@ public class Skill
         var onImg = hasImg ? t.OnPrimary : t.Light;
 
         var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(title, 4400, t.Bg, align: "ctr", lineSpacing: 105));
+        var txts = new List<Txt> { T(title, 4400, t.Bg, bold: true, align: "ctr", titleFont: true, spacing: 105) };
         if (!string.IsNullOrWhiteSpace(subtitle))
-            paras.Append(Para(subtitle!, 1800, onImg, align: "ctr", spaceBefore: 18, lineSpacing: 130));
+            txts.Add(T(subtitle, 1800, onImg, align: "ctr", spaceBefore: 18, spacing: 130));
         var author = Str(el, "author") ?? ctx.Author;
         var date = Str(el, "date") ?? ctx.Date;
         if (!string.IsNullOrWhiteSpace(author) || !string.IsNullOrWhiteSpace(date))
-            paras.Append(Para(string.Join("　·　", new[] { (author ?? "").Trim(), (date ?? "").Trim() }
+            txts.Add(T(string.Join("　·　", new[] { (author ?? "").Trim(), (date ?? "").Trim() }
                 .Where(s => s.Length > 0)), 1400, onImg, align: "ctr", spaceBefore: 24));
-        shapes.Add(TextBox(ctx.NextId(), MX, 1714500, CW, 3429000, paras.ToString(), anchor: "ctr"));
+        shapes.Add(FitBox(ctx.NextId(), MX, 1714500, CW, 3429000, txts, "封面标题", "ctr"));
         return SlideXml(hasImg ? t.Bg : t.Primary, shapes);
     }
 
@@ -1791,11 +1875,10 @@ public class Skill
 
         var textW = imgX - MX - 457200;
         var subtitle = Str(el, "subtitle") ?? ctx.Subtitle;
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(title, 3600, t.Primary, lineSpacing: 105));
+        var txts = new List<Txt> { T(title, 3600, t.Primary, bold: true, titleFont: true, spacing: 105) };
         if (!string.IsNullOrWhiteSpace(subtitle))
-            paras.Append(Para(subtitle!, 1700, t.Secondary, spaceBefore: 14, lineSpacing: 130));
-        shapes.Add(TextBox(ctx.NextId(), MX, 1900000, textW, 2743200, paras.ToString(), anchor: "t"));
+            txts.Add(T(subtitle, 1700, t.Secondary, spaceBefore: 14, spacing: 130));
+        shapes.Add(FitBox(ctx.NextId(), MX, 1900000, textW, 2743200, txts, "封面标题"));
 
         var author = Str(el, "author") ?? ctx.Author;
         var date = Str(el, "date") ?? ctx.Date;
@@ -1814,12 +1897,11 @@ public class Skill
     {
         var t = ctx.Theme;
         var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Primary) };
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(Str(el, "title") ?? "谢谢", 4000, t.Bg, align: "ctr"));
         var sub = Str(el, "subtitle");
+        var txts = new List<Txt> { T(Str(el, "title") ?? "谢谢", 4000, t.Bg, bold: true, align: "ctr", titleFont: true) };
         if (!string.IsNullOrWhiteSpace(sub))
-            paras.Append(Para(sub!, 1600, t.Accent, align: "ctr", spaceBefore: 16));
-        shapes.Add(TextBox(ctx.NextId(), MX, 2286000, CW, 2286000, paras.ToString(), anchor: "ctr"));
+            txts.Add(T(sub, 1600, t.Accent, align: "ctr", spaceBefore: 16));
+        shapes.Add(FitBox(ctx.NextId(), MX, 2286000, CW, 2286000, txts, "结束页", "ctr"));
         return SlideXml(t.Primary, shapes);
     }
 
@@ -1845,12 +1927,11 @@ public class Skill
         // 大号序号
         shapes.Add(TextBox(ctx.NextId(), MX, 1371600, 1524000, 1524000,
             Para(ctx.Index.ToString("00"), 7200, t.Accent, bold: true, align: "l", font: t.FontTitle)));
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(Str(el, "title") ?? "", 3600, t.Bg, lineSpacing: 110));
+        var paras = new List<Txt> { T(Str(el, "title"), 3600, t.Bg, bold: true, titleFont: true, spacing: 110) };
         var sub = Str(el, "subtitle");
         if (!string.IsNullOrWhiteSpace(sub))
-            paras.Append(Para(sub!, 1600, t.OnPrimary, align: "l", spaceBefore: 12));
-        shapes.Add(TextBox(ctx.NextId(), MX + 1524000, 1600200, CW - 1524000, 2286000, paras.ToString(), anchor: "t"));
+            paras.Add(T(sub, 1600, t.OnPrimary, spaceBefore: 12));
+        shapes.Add(FitBox(ctx.NextId(), MX + 1524000, 1600200, CW - 1524000, 2286000, paras, "章节标题"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Primary, shapes);
     }
@@ -1867,13 +1948,12 @@ public class Skill
             Para(ctx.Index.ToString("00"), 6000, t.Accent, bold: true, align: "ctr", font: t.FontTitle),
             anchor: "ctr"));
 
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(Str(el, "title") ?? "", 3400, t.Primary, lineSpacing: 110));
+        var paras = new List<Txt> { T(Str(el, "title"), 3400, t.Primary, bold: true, titleFont: true, spacing: 110) };
         var sub = Str(el, "subtitle");
         if (!string.IsNullOrWhiteSpace(sub))
-            paras.Append(Para(sub!, 1600, t.Secondary, align: "l", spaceBefore: 14));
-        shapes.Add(TextBox(ctx.NextId(), blockW + 76200 + MX, 2057400, W - blockW - 76200 - MX * 2, 2743200,
-            paras.ToString(), anchor: "ctr"));
+            paras.Add(T(sub, 1600, t.Secondary, spaceBefore: 14));
+        shapes.Add(FitBox(ctx.NextId(), blockW + 76200 + MX, 2057400, W - blockW - 76200 - MX * 2, 2743200,
+            paras, "章节标题", "ctr"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Bg, shapes);
     }
@@ -1887,12 +1967,11 @@ public class Skill
         shapes.Add(TextBox(ctx.NextId(), MX, 0, CW, 4114800,
             Para(ctx.Index.ToString("00"), 20000, t.Bg, bold: true, align: "ctr",
                 font: t.FontTitle, alpha: 22), anchor: "ctr"));
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(Str(el, "title") ?? "", 4000, t.Bg, align: "ctr", lineSpacing: 110));
+        var paras = new List<Txt> { T(Str(el, "title"), 4000, t.Bg, bold: true, align: "ctr", titleFont: true, spacing: 110) };
         var sub = Str(el, "subtitle");
         if (!string.IsNullOrWhiteSpace(sub))
-            paras.Append(Para(sub!, 1700, t.OnPrimary, align: "ctr", spaceBefore: 16));
-        shapes.Add(TextBox(ctx.NextId(), MX, 4114800, CW, 2057400, paras.ToString(), anchor: "ctr"));
+            paras.Add(T(sub, 1700, t.OnPrimary, align: "ctr", spaceBefore: 16));
+        shapes.Add(FitBox(ctx.NextId(), MX, 4114800, CW, 2057400, paras, "章节标题", "ctr"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Primary, shapes);
     }
@@ -1903,11 +1982,10 @@ public class Skill
         var t = ctx.Theme;
         var shapes = new List<string>();
         shapes.Add(Rect(ctx.NextId(), MX, 1143000, 57150, 2743200, t.Accent));
-        var paras = new StringBuilder();
-        paras.Append(Para(Str(el, "text") ?? "", 2600, t.Primary, align: "l", lineSpacing: 130, font: t.FontTitle));
+        // 引言是自由文本，长短完全看调用方 —— 必须量高后缩字号，否则一段长引言直接溢出框外
+        var txts = new List<Txt> { T(Str(el, "text"), 2600, t.Primary, titleFont: true, spacing: 130) };
+        shapes.Add(FitBox(ctx.NextId(), MX + 457200, 1143000, CW - 457200, 2743200, txts, "引言", "ctr"));
         var cite = Str(el, "cite");
-        var box = TextBox(ctx.NextId(), MX + 457200, 1143000, CW - 457200, 2743200, paras.ToString(), anchor: "ctr");
-        shapes.Add(box);
         if (!string.IsNullOrWhiteSpace(cite))
             shapes.Add(TextBox(ctx.NextId(), MX + 457200, 4000500, CW - 457200, 457200,
                 Para("— " + cite!.Trim(), 1400, t.Secondary, align: "l")));
@@ -1929,10 +2007,14 @@ public class Skill
     {
         var t = ctx.Theme;
         var shapes = new StringBuilder();
-        shapes.Append(TextBox(ctx.NextId(), MX, TitleY, CW, TitleH,
-            ParaTitle(text, 2800, t.Primary, lineSpacing: 100)));
+        // 标题框可以长到正文区上缘：长标题折两行本来就该允许，但绝不能顶进正文里
+        var availH = Math.Max(TitleH, BodyY - TitleY - Sz(57150));
+        var txts = new List<Txt> { T(text, 2800, t.Primary, bold: true, titleFont: true, spacing: 100) };
+        var fit = FitTexts(txts, CW, availH, "页标题");
+        var usedH = Math.Max(TitleH, fit.UsedH);
+        shapes.Append(TextBox(ctx.NextId(), MX, TitleY, CW, usedH, fit.Xml));
         if (_titleRule)
-            shapes.Append(Rect(ctx.NextId(), MX, TitleY + TitleH + 57150, 838200, 45720, t.Accent));
+            shapes.Append(Rect(ctx.NextId(), MX, TitleY + usedH + 57150, 838200, 45720, t.Accent));
         return shapes.ToString();
     }
 
@@ -1950,60 +2032,418 @@ public class Skill
     {
         var t = ctx.Theme;
         var color = IsDarkBg(t) ? t.Light : "7A7A7A";
-        return TextBox(ctx.NextId(), MX, H - 1097280, CW - BadgeW - _m.Pad, 365760,
-            Para(text, 1100, color, align: "l"));
+        // 脚注常被用来放数据来源/补充说明，一长就会跑到页码徽标那一行：量高后缩/截断
+        return FitBox(ctx.NextId(), MX, H - 1097280, CW - BadgeW - _m.Pad, Sz(457200),
+            [T(text, 1100, color)], "脚注/图注");
     }
 
-    // ---- 正文：项目符号 ----
+    // ===== 版面文字度量：真实字形量宽 + 真实行高，「排不进框就缩，缩不动就分页/截断」 =====
+    //
+    // 为什么要有这一套（实测踩坑记录，详见 README 的「文字溢出」一节）：
+    //   最初用「字数 × 字号」估算高度，有三处与真实排版不符 ——
+    //     ① 行高系数当成 1.0，而 CJK 字体的自然行高是 1.27（微软雅黑）~1.45 em（Noto Sans CJK SC）；
+    //     ② 段前距的单位算小了 100 倍（plan 里存的是「磅」，估算时却按「百分之一磅」乘）；
+    //     ③ 粗体、左缩进（marL）与 CJK/拉丁混排的真实字宽都没算。
+    //   三者叠加，估出来的高度常常不到真实值的一半 —— 「缩字号」因此几乎从不触发。
+    //   以前样张看着还行，是因为文件里带着 <a:normAutofit/>：**LibreOffice 会替我们缩**；
+    //   而 PowerPoint 打开时并不重算 autofit（PptxGenJS 的 shrinkText 被抱怨“编辑一下才生效”是同一个坑），
+    //   用户看到的才是真身 —— 文字溢出自己的框（卡片 / 示意图层里尤其明显）。
+    //   所以现在：自己按真实字形量、自己缩；缩到下限还放不下就**分页或截断并报警**，
+    //   不再把「装得下」这件事推给渲染器。
 
-    /// <summary>
-    /// 「内容太多不越界」的统一处理：按正文区高度估算占用，放不下就<b>整体缩字号与行距</b>。
-    ///
-    /// <para>
-    /// 实测踩到：本类文本框是固定高度、且没有 autofit，要点一多/一长就直接溢出正文区，
-    /// 进而画出页面底部（越界）。这里先量一下再排版。
-    /// </para>
-    /// </summary>
-    private static double FitScaleFor(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> paras, long boxH)
-    {
-        var need = EstimateHeightEmu(paras, CW - _m.Gap, boxH);
-        if (need <= boxH) return 1.0;
-        // 下限 0.6：再小就看不清了，宁可字号小一点也不要溢出页面
-        return Math.Max(0.6, (double)boxH / need);
-    }
+    private const int MinFontSize = 1200;   // 缩字号的下限（12pt）：再小就不如不显示
+    // 行距的下限：**不要压到 100% 以下**。
+    // 实测踩到：spcPct < 100% 时行框比字体本身还矮，汉字与全角标点的**墨迹会越出行框**
+    // （标题首行会冒到框上面去，渲染图上就是“顶到页边”）。缩放时行距最多缩到设计值的 100% 就不再压。
+    private const int MinSpacingPct = 100;
+    // 折行判定的容量余量：我们的量宽与渲染器的实际排版有 ~1.6% 的差
+    // （实测：30 个汉字 @27.16pt = 814.8pt，我们判“刚好放得下”，LibreOffice 却折了一行，
+    //  标题因此从下边冒出去；带“ / ”分隔的混合标题同理）。
+    // 2% 是权衡后的取值：刚好盖住这个偏差（见上），而又不会把“离边界还有 4%”的
+    // 表格单元格（实测 24 字 @10.5pt）挤成两行 —— 后者会让行高白翻一倍、每页少装一半的行。
+    private const double LineFitSlack = 0.98;
 
-    /// <summary>
-    /// 估算一组段落排版后的总高度（EMU）。CJK 按 1 em、ASCII 按 0.55 em 估宽。
-    ///
-    /// <para>
-    /// <b>行距单位是「倍率」</b>（1.25 = 1.25 倍行距），与所有调用方传的值一致。
-    /// 实测踩过：这里原本写成 <c>lineSpacing / 100.0</c>（当成百分数），
-    /// 而调用方一律传 1.25 这种倍率——于是估出来的高度只有真实值的 1%，
-    /// <c>need &lt;= boxH</c> 永远成立、缩放系数永远是 1.0，
-    /// 也就是说<b>「缩字号」一直是死代码</b>（正文一多就直接溢出，没人发现）。
-    /// 这里同时兼容传入百分数（&gt;5 视为百分数）以防以后有人写 125。
-    /// </para>
-    /// </summary>
-    private static long EstimateHeightEmu(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> paras, long availW, long boxH)
+    /// <summary>一段要排进文本框的文字（<b>量高的输入</b>）：字号 / 段前距 / 行距 / 缩进 / 粗体都要如实交上来。</summary>
+    private struct ParaPlan
     {
-        if (availW < 100000) availW = 100000;
-        long total = 0;
-        foreach (var (text, size, spaceBefore, lineSpacing) in paras)
+        public string Text;
+        public int Size;         // 字号（百分之一磅）
+        public int SpaceBefore;  // 段前距（磅，与 <see cref="Para"/> 的 spaceBefore 同一单位）
+        public int Spacing;      // 行距百分数（125 = 125%）
+        public long MarL;        // 左缩进（EMU）：会吃掉可用宽度
+        public bool Bold;
+
+        public ParaPlan(string? text, int size, int spaceBefore, int spacing, long marL, bool bold)
         {
+            Text = text ?? ""; Size = size; SpaceBefore = spaceBefore;
+            Spacing = spacing <= 0 ? 100 : spacing; MarL = marL; Bold = bold;
+        }
+    }
+
+    /// <summary>构造一段待排文字（字段默认值在这里，调用点才写不长）。</summary>
+    private static ParaPlan P(string? text, int size, int spaceBefore = 0, int spacing = 100, long marL = 0, bool bold = false)
+        => new ParaPlan(text, size, spaceBefore, spacing, marL, bold);
+
+    /// <summary>缩放后的有效字号：不低于 12pt（但本来就更小的设计字号不会被抬上去）。</summary>
+    private static int EffSize(int size, double scale)
+        => Math.Max(Math.Min(size, MinFontSize), (int)Math.Round(size * scale));
+
+    /// <summary>缩放后的有效行距（百分数）：不低于 80%。</summary>
+    private static int EffSpacing(int pct, double scale)
+        => Math.Max(MinSpacingPct, (int)Math.Round((pct <= 0 ? 100 : pct) * scale));
+
+    /// <summary>段前距按同一比例缩放（缩字号时不至于留下突兀的大空档）。</summary>
+    private static int EffSpaceBefore(int points, double scale)
+        => Math.Max(0, (int)Math.Round(points * scale));
+
+    private static readonly Dictionary<(string Text, int Size, bool Bold), long> _widthCache = new();
+    private static double _lineHeightEm;
+
+    /// <summary>
+    /// 字体自然行高（em 倍数）：100% 行距下「一行文字」占的高度。
+    ///
+    /// <para>
+    /// 这是整个估算里最关键的系数，也是最初错得最离谱的地方（当成 1.0）。
+    /// 实测（容器 LibreOffice + Noto Sans CJK SC，见 README 的标定记录）：17pt / 行距 125% 的
+    /// 两行间距是 30.92pt = 17 × 1.25 × <b>1.455</b>，即自然行高 ≈ 1.46 em。
+    /// 微软雅黑这类 Windows 中文字体约 1.27 em —— 比容器字体小，所以取容器字体的实测值会
+    /// **偏保守**（在 PowerPoint 里更宽裕，绝不至于溢出）。
+    /// 这里直接从字体度量算，并留 2% 余量；算不出来时退回 1.46。
+    /// </para>
+    /// </summary>
+    private static double LineHeightEm()
+    {
+        if (_lineHeightEm > 0) return _lineHeightEm;
+        lock (_fontLock)
+        {
+            if (_lineHeightEm > 0) return _lineHeightEm;
             var em = 0.0;
-            foreach (var ch in text) em += ch < 0x2E80 ? 0.55 : 1.0;
-            var widthEmu = em * size * 127.0;                       // 1pt = 12700 EMU，size 以百分之一磅计
-            var lines = Math.Max(1, (int)Math.Ceiling(widthEmu / availW));
-            var mult = lineSpacing <= 0 ? 1.25 : (lineSpacing > 5 ? lineSpacing / 100.0 : lineSpacing);
-            total += (long)(lines * size * 127.0 * mult) + spaceBefore * 127L;
+            try
+            {
+                // 1.0.1 的字体度量在 HorizontalMetrics 上（FontMetrics 本身没有 Ascender/Descender/LineGap）
+                var m = Family(20f).FontMetrics;
+                if (m.UnitsPerEm > 0)
+                    em = (m.HorizontalMetrics.Ascender - m.HorizontalMetrics.Descender
+                        + m.HorizontalMetrics.LineGap) / (double)m.UnitsPerEm;
+            }
+            catch { /* 度量取不到就退回经验值 */ }
+            if (em <= 0) em = 1.46;
+            // 至少按 1.45 em 算：技能既可能在容器里跑（Noto Sans CJK SC，1.45），
+            // 也可能在开发机 / 本机桥上跑（微软雅黑，1.27）。取大值 → 容器渲染一定不会溢出，
+            // 而用户机器上的行高更小，只会更宽松。宁可略松，也不要在别的环境下溢出。
+            _lineHeightEm = Math.Max(1.45, em * 1.02);
+            return _lineHeightEm;
+        }
+    }
+
+    /// <summary>真实字形量宽（EMU）。用渲染图表时挑的那套「确认含中文字形」的字体，粗体另取字面。</summary>
+    private static long MeasuredWidthEmu(string text, int size, bool bold)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        var key = (text, size, bold);
+        lock (_fontLock)
+        {
+            if (_widthCache.TryGetValue(key, out var hit)) return hit;
+            if (_widthCache.Count > 20000) _widthCache.Clear();
+            long emu;
+            try
+            {
+                var pt = size / 100f;
+                var font = bold ? BoldFont(pt) : Family(pt);
+                var w = SixLabors.Fonts.TextMeasurer.MeasureAdvance(
+                    text, new SixLabors.Fonts.TextOptions(font)).Width;
+                emu = (long)Math.Ceiling(w * 12700 * WidthSafety(text));
+            }
+            catch
+            {
+                // 度量失败也要能排版：退回「CJK 1em / ASCII 0.55em」的老办法
+                var em = 0.0;
+                foreach (var ch in text) em += ch < 0x2E80 ? 0.55 : 1.0;
+                emu = (long)Math.Ceiling(em * size * 127.0 * WidthSafety(text));
+            }
+            _widthCache[key] = emu;
+            return emu;
+        }
+    }
+
+    /// <summary>
+    /// 量宽余量：<b>只给拉丁字母留</b>。
+    ///
+    /// <para>
+    /// 汉字的 advance 就是 1 em（Noto Sans CJK SC 与微软雅黑完全一致），量出来就是真值，
+    /// 再乘个安全系数反而会把「刚好放下」的文字判成多一行 —— 实测踩到：
+    /// 一段 149 字的引言在 26pt 下正好 5 行，加了 3% 余量后估成 6 行，字号被白白缩掉四分之一。
+    /// 拉丁字母在不同字体间差得多（Calibri / Arial / Noto Sans 相差 5% 上下），所以那一部分才留余量。
+    /// </para>
+    /// </summary>
+    private static double WidthSafety(string text)
+    {
+        var latin = 0;
+        var cjk = 0;
+        foreach (var ch in text)
+        {
+            if (ch >= 0x2E80) cjk++;
+            else if (ch > ' ') latin++;
+        }
+        if (latin == 0) return 1.0;
+        return cjk == 0 ? 1.05 : 1.03;
+    }
+
+    /// <summary>
+    /// 贪心折行后的行数：CJK 逐字可断，拉丁按词断。
+    ///
+    /// <para>
+    /// 这是「量得准」的另一半 —— 最初按 <c>总宽 / 可用宽</c> 直接除，遇到拉丁单词、标点、
+    /// 混排时会明显低估行数（例如一行结尾刚好放不下一个长单词时，真实排版会把它整段挪到下一行）。
+    /// </para>
+    /// </summary>
+    private static int WrappedLines(string text, int size, bool bold, long availW)
+    {
+        if (string.IsNullOrEmpty(text)) return 1;
+        if (availW < 100000) availW = 100000;
+        // 折行判定用略窄的容量（见 LineFitSlack）
+        availW = (long)(availW * LineFitSlack);
+
+        // CJK 上下文里的空格要按“全角空格”（≥0.5em）算，不能按 SixLabors 量出来的窄空格（~0.25em）：
+        // 实测跏到 —— 一个带 3 组“ / ”分隔的标题里 6 个空格就差了 1.5em，恰好让“刚好放得下”的标题
+        // 在 LibreOffice 里多折一行。这里把差值补上（连**快路径**也要补，否则整串量宽直接判“放得下”。
+        // 实测就是漏在这里：快路径没走下方的逐词循环，空格修正根本没生效）。
+        var hasCjk = false;
+        foreach (var ch in text) if (ch >= 0x2E80) { hasCjk = true; break; }
+        var measuredSpace = hasCjk ? MeasuredWidthEmu(" ", size, bold) : 0;
+        var cjkSpace = hasCjk ? Math.Max(measuredSpace, (long)(size * 127.0 * 0.5)) : 0;
+        var raw = MeasuredWidthEmu(text, size, bold);
+        if (hasCjk && cjkSpace > measuredSpace)
+        {
+            var spaces = 0;
+            foreach (var ch in text) if (ch == ' ') spaces++;
+            raw += spaces * (cjkSpace - measuredSpace);
+        }
+        if (raw <= availW) return 1;
+
+        var lines = 1;
+        long cur = 0;
+        var i = 0;
+        while (i < text.Length)
+        {
+            var ch = text[i];
+            if (ch == '\n') { lines++; cur = 0; i++; continue; }
+            if (ch == '\r') { i++; continue; }
+            var len = TokenLength(text, i);
+            var token = text.Substring(i, len);
+            i += len;
+            var w = ch == ' ' && hasCjk ? cjkSpace : MeasuredWidthEmu(token, size, bold);
+            if (ch == ' ')
+            {
+                // 空格只在行内占位：行尾的空格不能把行撑开
+                cur += w;
+                continue;
+            }
+            if (cur > 0 && cur + w > availW) { lines++; cur = w; }
+            else cur += w;
+        }
+        return lines;
+    }
+
+    /// <summary>取一个「断行单元」：拉丁文/数字/半角符号按词（连成一片），其余逐字。</summary>
+    private static int TokenLength(string text, int start)
+    {
+        var ch = text[start];
+        if (ch >= 0x2E80) return 1;                       // CJK：逐字可断
+        var i = start;
+        while (i < text.Length && text[i] < 0x2E80 && text[i] != ' ' && text[i] != '\n' && text[i] != '\r') i++;
+        return i > start ? i - start : 1;
+    }
+
+    /// <summary>一组段落按给定缩放排版后的总高度（EMU）。</summary>
+    private static long BlockHeightEmu(List<ParaPlan> plan, long availW, double scale = 1.0)
+    {
+        var lh = LineHeightEm();
+        long total = 0;
+        foreach (var p in plan)
+        {
+            if (p.Text.Length == 0) continue;
+            var sz = EffSize(p.Size, scale);
+            var pct = EffSpacing(p.Spacing, scale);
+            var w = availW - p.MarL;
+            var lines = WrappedLines(p.Text, sz, p.Bold, w);
+            total += (long)(lines * sz * 127.0 * lh * (pct / 100.0))
+                   + EffSpaceBefore(p.SpaceBefore, scale) * 12700L;
         }
         return total;
     }
 
-    private static string BulletBody(JsonElement el, SlideCtx ctx, bool accent)
+    /// <summary>
+    /// 把一组段落排进「可用宽 × 可用高」的缩放系数（≤1；下限见 <see cref="FloorScale"/>）。
+    ///
+    /// <para>
+    /// 为什么用<b>二分</b>而不是一步除（<c>availH / need</c>）：高度对缩放不是线性的 ——
+    /// 字号一缩，**折行数也会变少**。实测踩到：3 行 28pt 的标题在 79pt 的标题区里放不下，
+    /// 一步除给出 0.65，而其实缩到 0.85 就只剩 2 行、完全放得下 —— 标题被白白缩成了 18pt。
+    /// 高度对缩放是单调不减的（字号大则行更高、行数也不会变少），所以二分求「放得下的最大缩放」是安全的。
+    /// </para>
+    ///
+    /// <para>
+    /// 返回 1.0 表示原样放得下；返回值处的实际高度请用 <see cref="BlockHeightEmu"/> 复核，
+    /// <b>大于可用高就说明「缩到下限也放不下」</b>，调用方要分页或截断。
+    /// </para>
+    /// </summary>
+    private static double FitScale(List<ParaPlan> plan, long availW, long availH, double minScale = 0.6)
+    {
+        if (plan.Count == 0 || availH <= 0) return 1.0;
+        if (FitsBox(plan, availW, availH, 1.0)) return 1.0;
+        var floor = FloorScale(plan, minScale);
+        if (!FitsBox(plan, availW, availH, floor)) return floor;   // 缩到下限也放不下
+        var lo = floor;      // 放得下
+        var hi = 1.0;        // 放不下
+        for (var i = 0; i < 12; i++)
+        {
+            var mid = (lo + hi) / 2;
+            if (FitsBox(plan, availW, availH, mid)) lo = mid; else hi = mid;
+        }
+        return lo;
+    }
+
+    /// <summary>缩放下限：既守住设计上的 minScale，也保证没有哪一段被抬到 12pt 以上（否则估算会对不上）。</summary>
+    private static double FloorScale(List<ParaPlan> plan, double minScale)
+    {
+        var f = minScale;
+        foreach (var p in plan)
+            if (p.Size > MinFontSize) f = Math.Max(f, MinFontSize / (double)p.Size);
+        return Math.Min(1.0, f);
+    }
+
+    /// <summary>这组段落在这个缩放下放得下吗。</summary>
+    private static bool FitsBox(List<ParaPlan> plan, long availW, long availH, double scale)
+        => BlockHeightEmu(plan, availW, scale) <= availH;
+
+    /// <summary>
+    /// 一段要排进文本框的文字（给 <see cref="FitBox"/> 用）：文本 + 版式参数放在一起，
+    /// 于是「量高 → 缩字号 → 装不下就截断」只有一处实现，所有页型共用同一套规则。
+    /// </summary>
+    private sealed class Txt
+    {
+        public string Text = "";
+        public int Size = 1700;
+        public int SpaceBefore;      // 磅
+        public int Spacing = 100;    // 行距百分数
+        public bool Bold;
+        public bool TitleFont;       // 走主题的标题字体
+        public long MarL;
+        public string? Color;        // 缺省用主题正文色
+        public string Align = "l";
+        public string? Bullet;
+        public int Alpha = 100;
+
+        public ParaPlan Plan() => P(Text, Size, SpaceBefore, Spacing, MarL, Bold);
+
+        public string Xml(double scale)
+            => Para(Text, EffSize(Size, scale), Color ?? _currentTheme?.Text ?? "333333", Bold, Align, Bullet,
+                TitleFont ? _currentTheme?.FontTitle : null,
+                EffSpaceBefore(SpaceBefore, scale), EffSpacing(Spacing, scale), (int)MarL, Alpha);
+    }
+
+    /// <summary>构造一段待排文字（参数全给名字，调用点才一眼看得清）。</summary>
+    private static Txt T(string? text, int size, string? color = null, bool bold = false, string align = "l",
+        int spaceBefore = 0, int spacing = 100, long marL = 0, string? bullet = null,
+        bool titleFont = false, int alpha = 100)
+        => new Txt
+        {
+            Text = text ?? "", Size = size, Color = color, Bold = bold, Align = align,
+            SpaceBefore = spaceBefore, Spacing = spacing, MarL = marL, Bullet = bullet,
+            TitleFont = titleFont, Alpha = alpha,
+        };
+
+    /// <summary>
+    /// 把一组段落排进固定大小的文本框：真实字形量高 → 缩字号 → 装不下就截断并报警。
+    ///
+    /// <para>
+    /// 卡片、示意图层、叠字、封面这类<b>结构固定的框</b>用这个：它们不能像要点页那样分页，
+    /// 但可以缩字号、也可以少写一点。无论哪种，都不允许文字画出自己的框。
+    /// </para>
+    /// </summary>
+    private static string FitBox(int id, long x, long y, long cx, long cy, List<Txt> txts, string where,
+        string anchor = "t")
+    {
+        var fit = FitTexts(txts, cx, cy, where);
+        return TextBox(id, x, y, cx, cy, fit.Xml, anchor: anchor);
+    }
+
+    /// <summary>排版结果：段落 XML、生效缩放、实际占用高度（EMU）。</summary>
+    private static (string Xml, double Scale, long UsedH) FitTexts(List<Txt> txts, long availW, long availH, string where)
+    {
+        var scale = FitScale(txts.Select(t => t.Plan()).ToList(), availW, availH);
+        TrimToFit(txts, availW, availH, scale, where);
+        var sb = new StringBuilder();
+        foreach (var t in txts) if (t.Text.Length > 0) sb.Append(t.Xml(scale));
+        var used = Math.Min(availH, BlockHeightEmu(txts.Select(t => t.Plan()).ToList(), availW, scale));
+        return (sb.ToString(), scale, Math.Max(0, used));
+    }
+
+    /// <summary>
+    /// 缩到下限仍放不下时：按「还能放几行」截断，并 <see cref="Warn"/> 说清楚。
+    ///
+    /// <para>
+    /// 为什么不一味缩字号：12pt 以下就不能读了。结构固定的框又不能分页，
+    /// 那就<b>少写一点、并明确说出来</b>，绝不让文字压到隔壁卡片上
+    /// （实测：示意图层的说明文字一长就糊到下一层，比少写几个字难看得多）。
+    /// </para>
+    /// </summary>
+    private static void TrimToFit(List<Txt> txts, long availW, long availH, double scale, string where)
+    {
+        if (FitsBox(txts.Select(t => t.Plan()).ToList(), availW, availH, scale)) return;
+        var lh = LineHeightEm();
+        long used = 0;
+        for (var i = 0; i < txts.Count; i++)
+        {
+            if (txts[i].Text.Length == 0) continue;
+            var p = txts[i].Plan();
+            var sz = EffSize(p.Size, scale);
+            var pitch = sz * 127.0 * lh * (EffSpacing(p.Spacing, scale) / 100.0);
+            var before = EffSpaceBefore(p.SpaceBefore, scale) * 12700L;
+            var w = availW - p.MarL;
+            var h = (long)(WrappedLines(p.Text, sz, p.Bold, w) * pitch) + before;
+            if (used + h <= availH) { used += h; continue; }
+
+            var room = availH - used - before;
+            var keep = room <= 0 ? 0 : (int)(room / pitch);
+            var original = txts[i].Text;
+            txts[i].Text = keep <= 0 ? "" : TruncateToLines(original, sz, p.Bold, w, keep);
+            var dropped = original.Length - txts[i].Text.Length;
+            for (var j = i + 1; j < txts.Count; j++)
+            {
+                dropped += txts[j].Text.Length;
+                txts[j].Text = "";
+            }
+            if (dropped > 0)
+                Warn("“" + where + "”内容太多，已按版面截掉约 " + dropped + " 个字（缩到下限仍放不下；请精简该处文字或改用要点页/分页）");
+            return;
+        }
+    }
+
+    /// <summary>把一段文字截到最多 <paramref name="maxLines"/> 行（末尾加省略号）；截不下就返回空串。</summary>
+    private static string TruncateToLines(string text, int size, bool bold, long availW, int maxLines)
+    {
+        if (maxLines <= 0) return "";
+        if (WrappedLines(text, size, bold, availW) <= maxLines) return text;
+        var lo = 0;
+        var hi = text.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) / 2;
+            var cand = text.Substring(0, mid) + "…";
+            if (WrappedLines(cand, size, bold, availW) <= maxLines) lo = mid;
+            else hi = mid - 1;
+        }
+        return lo <= 0 ? "" : text.Substring(0, lo).TrimEnd() + "…";
+    }
+
+    // ---- 正文：项目符号 ----
+
+    private static string BulletBody(JsonElement el, SlideCtx ctx, bool accent, List<string>? only = null)
     {
         var t = ctx.Theme;
-        var items = StringList(el, "bullets");
+        var items = only ?? StringList(el, "bullets");
         if (items.Count == 0)
         {
             var p = Str(el, "text");
@@ -2011,50 +2451,86 @@ public class Skill
         }
         if (items.Count == 0) items.Add("（本页暂无要点）");
 
-        // 先把「要排什么」整理成数据，再估算高度决定字号缩放，最后才生成 XML（内容太多就缩，不越界）
-        var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>();
-        var shapes = new List<(bool TwoLine, string Label, string Detail)>();
-        foreach (var raw in items)
-        {
-            // 支持「小标题：说明」的两行结构，让内容页更有层次
-            var parts = SplitLabel(raw);
-            if (parts is null)
-            {
-                shapes.Add((false, raw, ""));
-                plan.Add((raw, 1700, 10, 1.25));
-            }
-            else
-            {
-                shapes.Add((true, parts.Value.Label, parts.Value.Detail));
-                plan.Add((parts.Value.Label, 1800, 12, 1.20));
-                plan.Add((parts.Value.Detail, 1500, 0, 1.25));
-            }
-        }
-        var scale = FitScaleFor(plan, BodyH);
+        // 先把「要排什么」整理成数据，再按真实字形量高决定缩放，最后才生成 XML（内容太多就缩，不越界）
+        var plan = BulletPlan(items, _m.Gap);
+        var scale = FitScale(plan, CW, BodyH);
 
         var paras = new StringBuilder();
-        foreach (var s in shapes)
+        foreach (var raw in items)
         {
             var color = accent ? t.Primary : t.Text;
-            if (!s.TwoLine)
+            // 支持「小标题：说明」的两行结构，让内容页更有层次
+            if (SplitLabel(raw) is { } parts)
             {
-                paras.Append(Para(s.Label, Scaled(1700, scale), color, align: "l", bullet: "•",
-                    spaceBefore: 10, lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+                paras.Append(Para(parts.Label, EffSize(1800, scale), t.Primary, bold: true, align: "l",
+                    bullet: "•", spaceBefore: EffSpaceBefore(12, scale), lineSpacing: EffSpacing(120, scale),
+                    marL: (int)_m.Gap));
+                paras.Append(Para(parts.Detail, EffSize(1500, scale), t.Secondary, align: "l",
+                    lineSpacing: EffSpacing(125, scale), marL: (int)_m.Gap));
             }
             else
             {
-                paras.Append(Para(s.Label, Scaled(1800, scale), t.Primary, bold: true, align: "l",
-                    bullet: "•", spaceBefore: 12, lineSpacing: (int)Math.Round(120 * scale), marL: (int)_m.Gap));
-                paras.Append(Para(s.Detail, Scaled(1500, scale), t.Secondary, align: "l",
-                    lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+                paras.Append(Para(raw, EffSize(1700, scale), color, align: "l", bullet: "•",
+                    spaceBefore: EffSpaceBefore(10, scale), lineSpacing: EffSpacing(125, scale),
+                    marL: (int)_m.Gap));
             }
         }
         return TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t");
     }
 
-    /// <summary>按缩放系数调整字号（size 以百分之一磅计），并守住可读下限（≈12pt）。</summary>
-    private static int Scaled(int size, double scale)
-        => Math.Max(1200, (int)Math.Round(size * scale));
+    /// <summary>要点页的排版计划：与 <see cref="BulletBody"/> 用的是<b>同一套规则</b>（分页时也要用它）。</summary>
+    private static List<ParaPlan> BulletPlan(List<string> items, long marL)
+    {
+        var plan = new List<ParaPlan>();
+        foreach (var raw in items)
+        {
+            if (SplitLabel(raw) is { } parts)
+            {
+                plan.Add(P(parts.Label, 1800, 12, 120, marL, bold: true));
+                plan.Add(P(parts.Detail, 1500, 0, 125, marL));
+            }
+            else plan.Add(P(raw, 1700, 10, 125, marL));
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// 条目型页型的排版计划（分页判定与渲染<b>必须</b>用同一套规则，否则拆出来的页会与预期不符）。
+    /// </summary>
+    private static List<ParaPlan> ItemsPlan(string type, List<string> items)
+        => type == "toc"
+            // 目录渲染出来的是「01   标题」这一串（序号占宽），量高必须按同一串量
+            ? items.Select((it, i) => P((i + 1).ToString("00") + "   " + it, 1800, 14, 120)).ToList()
+            : BulletPlan(items, _m.Gap);
+
+    /// <summary>单条目的排版计划（分页用；目录的序号前缀用等宽的 “00” 占位）。</summary>
+    private static List<ParaPlan> SingleItemPlan(string type, string item)
+        => type == "toc" ? [P("00   " + item, 1800, 14, 120)] : BulletPlan([item], _m.Gap);
+
+    /// <summary>
+    /// 一页能放下几条条目（按「缩到下限」算）。
+    ///
+    /// <para>
+    /// 用于<b>分页</b>：一条要点很长、或条数太多时，与其把整页缩到 12pt（甚至缩不下而溢出），
+    /// 不如按能放下的条数拆成多页（与表格「过长自动分页」同一口径：宁可多一页，不丢内容）。
+    /// </para>
+    /// </summary>
+    private static int ItemsPerPage(List<string> items, List<ParaPlan> allPlan, Func<string, List<ParaPlan>> planOf,
+        long availW, long availH)
+    {
+        if (items.Count == 0) return 1;
+        var floor = FloorScale(allPlan, 0.6);
+        long used = 0;
+        var n = 0;
+        foreach (var it in items)
+        {
+            var h = BlockHeightEmu(planOf(it), availW, floor);
+            if (n > 0 && used + h > availH) break;
+            used += h;
+            n++;
+        }
+        return Math.Max(1, Math.Min(n, items.Count));
+    }
 
     private static (string Label, string Detail)? SplitLabel(string raw)
     {
@@ -2088,15 +2564,16 @@ public class Skill
         var items = StringList(el, "items");
         if (items.Count == 0) return BulletBody(el, ctx, accent: false);
 
-        // 目录项一多/一长就会撑出正文区（本类文本框是固定高度、无 autofit），先估高再缩
-        var plan = items.Select(it => (Text: it, Size: 1800, SpaceBefore: 14, LineSpacing: 1.20)).ToList();
-        var scale = ScaleForHeight(plan, CW - _m.Gap, BodyH);
+        // 目录项一多/一长就会撑出正文区，先按真实字形量高再缩
+        // 注意：量的是**带序号前缀的那串文字**（“01   目录”），否则量出来的行数比真实少
+        var plan = ItemsPlan("toc", items);
+        var scale = FitScale(plan, CW, BodyH);
 
         var paras = new StringBuilder();
         for (var i = 0; i < items.Count; i++)
         {
-            paras.Append(Para((i + 1).ToString("00") + "   " + items[i], Scaled(1800, scale), t.Text,
-                align: "l", spaceBefore: (int)Math.Round(14 * scale), lineSpacing: (int)Math.Round(120 * scale)));
+            paras.Append(Para((i + 1).ToString("00") + "   " + items[i], EffSize(1800, scale), t.Text,
+                align: "l", spaceBefore: EffSpaceBefore(14, scale), lineSpacing: EffSpacing(120, scale)));
         }
         return TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t");
     }
@@ -2113,8 +2590,8 @@ public class Skill
         var gap = _m.Gap;
         var cardW = (CW - gap * (cols - 1)) / cols;
         var cardH = Math.Min((long)(BodyH - gap * (rows - 1)) / Math.Max(1, rows), BodyH);
-        var plan = items.Select(it => (Text: it, Size: 1700, SpaceBefore: 0, LineSpacing: 1.20)).ToList();
-        var scale = ScaleForHeight(plan, cardW - _m.Pad * 2 - 900000, cardH - _m.Pad);
+        var plan = items.Select(it => P(it, 1700, 0, 120)).ToList();
+        var scale = FitScale(plan, cardW - _m.Pad * 2, cardH - _m.Pad);
         var sb = new StringBuilder();
         for (var i = 0; i < items.Count; i++)
         {
@@ -2124,10 +2601,11 @@ public class Skill
             sb.Append(Rect(ctx.NextId(), x, y, cardW, cardH, t.Light, radius: true));
             // 左侧序号块
             sb.Append(Rect(ctx.NextId(), x, y, 57150, cardH, t.Accent));
-            sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y, cardW - _m.Pad * 2, cardH,
-                Para((i + 1).ToString("00"), Scaled(3000, scale), t.Accent, bold: true, align: "l", font: t.FontTitle)
-                + Para(items[i], Scaled(1700, scale), t.Text, align: "l", spaceBefore: 6, lineSpacing: 120),
-                anchor: "ctr"));
+            // 卡里是「大序号 + 标题」两段：一起量（以前只量标题，序号那一行白占高度）
+            sb.Append(FitBox(ctx.NextId(), x + _m.Pad, y, cardW - _m.Pad * 2, cardH,
+                [T((i + 1).ToString("00"), EffSize(3000, scale), t.Accent, bold: true, titleFont: true),
+                 T(items[i], EffSize(1700, scale), t.Text, spaceBefore: 6, spacing: 120)],
+                "目录卡片 " + (i + 1), "ctr"));
         }
         return sb.ToString();
     }
@@ -2144,17 +2622,14 @@ public class Skill
         sb.Append(Rect(ctx.NextId(), MX, BodyY, barW, BodyH, t.Accent));
         var textX = MX + barW + _m.Gap;
         var textW = CW - barW - _m.Gap;
-        var plan = items.Select(it => (Text: it, Size: 1800, SpaceBefore: 16, LineSpacing: 1.20)).ToList();
-        var scale = ScaleForHeight(plan, textW - 800000, BodyH);
-        var paras = new StringBuilder();
+        // 每项是「大序号 + 标题」两段：量的时候要一起量（只量标题会低估一半）
+        var txts = new List<Txt>();
         for (var i = 0; i < items.Count; i++)
         {
-            paras.Append(Para((i + 1).ToString("00"), Scaled(1600, scale), t.Accent, bold: true, align: "l",
-                spaceBefore: (int)Math.Round((i == 0 ? 0 : 16) * scale)));
-            paras.Append(Para(items[i], Scaled(1800, scale), t.Text, align: "l", spaceBefore: 2,
-                lineSpacing: (int)Math.Round(120 * scale)));
+            txts.Add(T((i + 1).ToString("00"), 1600, t.Accent, bold: true, spaceBefore: i == 0 ? 0 : 16));
+            txts.Add(T(items[i], 1800, t.Text, spaceBefore: 2, spacing: 120));
         }
-        sb.Append(TextBox(ctx.NextId(), textX, BodyY, textW, BodyH, paras.ToString(), anchor: "t"));
+        sb.Append(FitBox(ctx.NextId(), textX, BodyY, textW, BodyH, txts, "侧栏目录"));
         return sb.ToString();
     }
 
@@ -2196,13 +2671,13 @@ public class Skill
             sb.Append(TextBox(ctx.NextId(), MX + 152400, y, numW, rowH,
                 Para((i + 1).ToString("00"), 3200, t.Accent, bold: true, align: "l", font: t.FontTitle),
                 anchor: "ctr"));
-            sb.Append(TextBox(ctx.NextId(), MX + numW + 152400, y, CW - numW - 152400, rowH,
-                Para(items[i], 1800, t.Primary, align: "l", lineSpacing: 120), anchor: "ctr"));
+            sb.Append(FitBox(ctx.NextId(), MX + numW + 152400, y, CW - numW - 152400, rowH,
+                [T(items[i], 1800, t.Primary, spacing: 120)], "小结行动项 " + (i + 1), "ctr"));
         }
         var contact = Str(el, "contact");
         if (!string.IsNullOrWhiteSpace(contact))
-            sb.Append(TextBox(ctx.NextId(), MX, BodyY + availH, CW, 457200,
-                Para(contact!.Trim(), 1400, t.Secondary, align: "l"), anchor: "b"));
+            sb.Append(FitBox(ctx.NextId(), MX, BodyY + availH, CW, 457200,
+                [T(contact, 1400, t.Secondary)], "小结联系方式", "b"));
         return sb.ToString();
     }
 
@@ -2216,34 +2691,25 @@ public class Skill
         // 左：回顾要点（浅底卡片）。直接按目标色出段落，不做事后字符串替换。
         var bullets = StringList(el, "bullets");
         if (bullets.Count == 0) bullets = StringList(el, "items");
-        var plan = bullets.Select(b => (Text: b, Size: 1650, SpaceBefore: 10, LineSpacing: 1.25)).ToList();
-        var scale = ScaleForHeight(plan, colW - _m.Pad * 2 - _m.Gap, BodyH - _m.Pad * 2);
-        var lp = new StringBuilder();
-        if (bullets.Count == 0) lp.Append(Para("（本页暂无回顾要点）", 1500, t.Secondary));
-        foreach (var b in bullets)
-            lp.Append(Para(b, Scaled(1650, scale), t.Text, align: "l", bullet: "•",
-                spaceBefore: (int)Math.Round(10 * scale), lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+        var availW = colW - _m.Pad * 2;
+        var availH = BodyH - _m.Pad * 2;
+        var lt = bullets.Select(b => T(b, 1650, t.Text, bullet: "•", spaceBefore: 10, spacing: 125, marL: _m.Gap)).ToList();
+        if (lt.Count == 0) lt.Add(T("（本页暂无回顾要点）", 1500, t.Secondary));
         sb.Append(Rect(ctx.NextId(), MX, BodyY, colW, BodyH, t.Light, radius: true));
-        sb.Append(TextBox(ctx.NextId(), MX + _m.Pad, BodyY + _m.Pad, colW - _m.Pad * 2, BodyH - _m.Pad * 2,
-            lp.ToString(), anchor: "t"));
+        sb.Append(FitBox(ctx.NextId(), MX + _m.Pad, BodyY + _m.Pad, availW, availH, lt, "小结回顾"));
 
         // 右：下一步 / 联系方式（主色卡片，文字一律用底色/反色，保证深底上可读）
         var rightX = MX + colW + gap;
         var actions = StringList(el, "actions");
         if (actions.Count == 0) actions = StringList(el, "next");
-        var rp = new StringBuilder();
-        rp.Append(ParaTitle(Str(el, "rightTitle") ?? "下一步", 2000, t.Bg));
-        var rplan = actions.Select(a => (Text: a, Size: 1600, SpaceBefore: 12, LineSpacing: 1.25)).ToList();
-        var rscale = ScaleForHeight(rplan, colW - _m.Pad * 2, BodyH - _m.Pad * 2 - 762000);
+        var rt = new List<Txt> { T(Str(el, "rightTitle") ?? "下一步", 2000, t.Bg, bold: true, titleFont: true) };
         for (var i = 0; i < actions.Count; i++)
-            rp.Append(Para((i + 1) + ". " + actions[i], Scaled(1600, rscale), t.Bg, align: "l",
-                spaceBefore: (int)Math.Round(12 * rscale), lineSpacing: (int)Math.Round(125 * rscale)));
+            rt.Add(T((i + 1) + ". " + actions[i], 1600, t.Bg, spaceBefore: 12, spacing: 125));
         var contact = Str(el, "contact");
         if (!string.IsNullOrWhiteSpace(contact))
-            rp.Append(Para(contact!.Trim(), 1400, t.OnPrimary, align: "l", spaceBefore: 20));
+            rt.Add(T(contact, 1400, t.OnPrimary, spaceBefore: 20));
         sb.Append(Rect(ctx.NextId(), rightX, BodyY, colW, BodyH, t.Primary, radius: true));
-        sb.Append(TextBox(ctx.NextId(), rightX + _m.Pad, BodyY + _m.Pad, colW - _m.Pad * 2, BodyH - _m.Pad * 2,
-            rp.ToString(), anchor: "t"));
+        sb.Append(FitBox(ctx.NextId(), rightX + _m.Pad, BodyY + _m.Pad, availW, availH, rt, "小结行动项"));
         return sb.ToString();
     }
 
@@ -2257,7 +2723,6 @@ public class Skill
 
         foreach (var (name, x) in new[] { ("left", MX), ("right", MX + colW + gap) })
         {
-            var paras = new StringBuilder();
             string? heading = null;
             var bullets = new List<string>();
             if (el.TryGetProperty(name, out var col) && col.ValueKind == JsonValueKind.Object)
@@ -2267,25 +2732,17 @@ public class Skill
             }
             // 栏底卡片
             shapes.Append(Rect(ctx.NextId(), x, BodyY, colW, BodyH, t.Light, radius: true));
-            var inner = new StringBuilder();
             if (bullets.Count == 0) bullets.Add("（空）");
-            // 两栏是「小标题 + 要点」，要点一多就溢出卡片：先估高再缩（两栏各自算，栏内保持一致）
+            // 两栏是「小标题 + 要点」，要点一多就溢出卡片：按真实字形量高再缩，实在放不下就截断并报警
             var availW = colW - 2 * _m.Pad;
             var availH = BodyH - 2 * _m.Pad;
-            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>();
-            if (!string.IsNullOrWhiteSpace(heading)) plan.Add((heading!, 1900, 0, 1.10));
-            foreach (var b in bullets) plan.Add((b, 1500, 10, 1.25));
-            var scale = ScaleForHeight(plan, availW, availH);
-
+            var txts = new List<Txt>();
             if (!string.IsNullOrWhiteSpace(heading))
-                inner.Append(Para(heading!, Scaled(1900, scale), t.Primary, bold: true, align: "l",
-                    lineSpacing: (int)Math.Round(110 * scale)));
+                txts.Add(T(heading, 1900, t.Primary, bold: true, spacing: 110));
             foreach (var b in bullets)
-                inner.Append(Para(b, Scaled(1500, scale), t.Text, align: "l", bullet: "•",
-                    spaceBefore: (int)Math.Round(10 * scale), lineSpacing: (int)Math.Round(125 * scale),
-                    marL: (int)_m.Gap));
-            shapes.Append(TextBox(ctx.NextId(), x + _m.Pad, BodyY + _m.Pad, availW, availH,
-                inner.ToString(), anchor: "t"));
+                txts.Add(T(b, 1500, t.Text, bullet: "•", spaceBefore: 10, spacing: 125, marL: _m.Gap));
+            shapes.Append(FitBox(ctx.NextId(), x + _m.Pad, BodyY + _m.Pad, availW, availH, txts,
+                name == "left" ? "左栏" : "右栏"));
         }
         return shapes.ToString();
     }
@@ -2322,19 +2779,15 @@ public class Skill
         var cellMarV = Sz(45720);
         const double s = 0.70;
         var sz = Math.Max(1000, (int)Math.Round(1300 * s));
-        var lineH = (long)(sz * 127.0 * 1.10);
-        var avail = Math.Max(100000.0, colW - 2 * cellMarH);
+        var lineH = (long)(sz * 127.0 * LineHeightEm() * 1.10);
+        var avail = Math.Max(100000L, colW - 2 * cellMarH);
         var used = (long)(457200 * s);          // 表头行
         var fit = 0;
         foreach (var row in rows)
         {
             var lines = 1;
             for (var c = 0; c < cols; c++)
-            {
-                var em = 0.0;
-                foreach (var ch in c < row.Count ? row[c] : "") em += ch < 0x2E80 ? 0.55 : 1.0;
-                lines = Math.Max(lines, (int)Math.Ceiling(em * sz * 127.0 / avail));
-            }
+                lines = Math.Max(lines, WrappedLines(c < row.Count ? row[c] : "", sz, bold: false, avail));
             var h = Math.Max((long)(Sz(320000) * s), lines * lineH + 2 * cellMarV);
             if (used + h > BodyH) break;
             used += h;
@@ -2385,6 +2838,102 @@ public class Skill
         return result;
     }
 
+    /// <summary>
+    /// 把「要点装不下」的一页拆成多页（与表格分页同一口径：宁可多一页，不丢内容）。
+    ///
+    /// <para>
+    /// 触发条件是<b>缩到下限（12pt / 行距 80%）仍然装不下</b>：
+    /// 再缩就不能读了，而直接截断会丢内容。要点页（content / summary / toc）的正文本来就是
+    /// 平行的条目，拆页天然安全；标题带「（n/m）」，一眼能看出是续表。
+    /// </para>
+    ///
+    /// <para>
+    /// 只处理<b>默认要点版式</b>：容器类页型（grid / kpi / timeline / 示意图…）的条目是嵌在固定卡片里的，
+    /// 拆页反而会把版式弄乱 —— 它们走 <see cref="FitBox"/> 的「缩 + 截断 + 报警」。
+    /// </para>
+    /// </summary>
+    private static List<string> ExpandOverflowSlide(string pageJson)
+    {
+        var single = new List<string> { pageJson };
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(pageJson); }
+        catch { return single; }
+
+        using (doc)
+        {
+            var el = doc.RootElement;
+            var type = (Str(el, "type") ?? "content").Trim().ToLowerInvariant();
+            if (type is not ("content" or "summary" or "toc")) return single;
+            // 换了版式（如 content + layout:grid）就不拆：那些页型的条目在固定卡里
+            if (type == "content" && !string.IsNullOrWhiteSpace(Str(el, "layout"))) return single;
+            var variant = VariantOf(el, "list");
+            // summary 的 split 版式只拆**左侧回顾栏**（右边的行动项跟到最后一页去）
+            var splitSummary = type == "summary" && variant is "split" or "recap";
+            if (type == "toc" && variant != "list") return single;
+            if (type == "summary" && !splitSummary && variant != "list") return single;
+
+            var key = type == "toc" ? "items" : "bullets";
+            var items = StringList(el, key);
+            if (items.Count == 0) items = StringList(el, type == "toc" ? "bullets" : "items");
+            if (items.Count < 2) return single;
+
+            // 拆页要按**这个版式真正的可用空间**算：split 的左栏只有半页宽
+            var availW = CW;
+            var availH = BodyH;
+            List<ParaPlan> allPlan;
+            Func<string, List<ParaPlan>> planOf;
+            if (splitSummary)
+            {
+                availW = (CW - _m.Gap) / 2 - _m.Pad * 2;
+                availH = BodyH - _m.Pad * 2;
+                allPlan = items.Select(b => P(b, 1650, 10, 125, _m.Gap)).ToList();
+                planOf = b => [P(b, 1650, 10, 125, _m.Gap)];
+            }
+            else
+            {
+                allPlan = ItemsPlan(type, items);
+                planOf = it => SingleItemPlan(type, it);
+            }
+            var perPage = ItemsPerPage(items, allPlan, planOf, availW, availH);
+            if (perPage >= items.Count) return single;
+
+            var pages = (items.Count + perPage - 1) / perPage;
+            var baseTitle = Str(el, "title") ?? (type == "toc" ? "目录" : "");
+            var note = Str(el, "note");
+            var result = new List<string>(pages);
+            for (var p = 0; p < pages; p++)
+            {
+                var chunk = items.Skip(p * perPage).Take(perPage).ToList();
+                var sb = new StringBuilder("{\"type\":").Append(Js(type));
+                sb.Append(",\"title\":").Append(Js(baseTitle + "（" + (p + 1) + "/" + pages + "）"));
+                sb.Append(',').Append(Js(key)).Append(":[").Append(string.Join(",", chunk.Select(Js))).Append(']');
+                if (splitSummary)
+                {
+                    sb.Append(",\"variant\":\"split\"");
+                    // 行动项与联系方式只在最后一页出现（回顾栏说完了再收尾）
+                    if (p == pages - 1)
+                    {
+                        var actions = StringList(el, "actions");
+                        if (actions.Count == 0) actions = StringList(el, "next");
+                        if (actions.Count > 0)
+                            sb.Append(",\"actions\":[").Append(string.Join(",", actions.Select(Js))).Append(']');
+                        var rt = Str(el, "rightTitle");
+                        if (!string.IsNullOrWhiteSpace(rt)) sb.Append(",\"rightTitle\":").Append(Js(rt!));
+                        var ct = Str(el, "contact");
+                        if (!string.IsNullOrWhiteSpace(ct)) sb.Append(",\"contact\":").Append(Js(ct!));
+                    }
+                }
+                // 备注与脚注只挂第一页，不重复到每一页
+                if (p == 0 && !string.IsNullOrWhiteSpace(note)) sb.Append(",\"note\":").Append(Js(note!));
+                var notes = Str(el, "notes");
+                if (p == 0 && !string.IsNullOrWhiteSpace(notes)) sb.Append(",\"notes\":").Append(Js(notes!));
+                sb.Append('}');
+                result.Add(sb.ToString());
+            }
+            return result;
+        }
+    }
+
     // ---- 表格 ----
     private static string TableBody(JsonElement el, SlideCtx ctx)
     {
@@ -2402,18 +2951,17 @@ public class Skill
         var minRowH = Sz(320000);
 
         // 行高要按“最长那一列折几行”算，而不是写死一个高度：写死时长文本会被卡在行内/撑出表格。
+        // 用真实字形量行数（与其它页型同一套度量），单元格里的全角/半角混排才不会估错。
         int LinesFor(string text, int size)
         {
-            var em = 0.0;
-            foreach (var ch in text) em += ch < 0x2E80 ? 0.55 : 1.0;
-            var avail = Math.Max(100000.0, colW - 2 * cellMarH);
-            return Math.Max(1, (int)Math.Ceiling(em * size * 127.0 / avail));
+            var avail = Math.Max(100000L, colW - 2 * cellMarH);
+            return WrappedLines(text, size, bold: false, avail);
         }
 
-        long RowH(int r, double s)   // TableCell 用 lineSpacing=110 → 约 1.10 倍行距
+        long RowH(int r, double s)   // TableCell 用 lineSpacing=110 → 110% 行距
         {
             var sz = Math.Max(1000, (int)Math.Round(cellSz * s));
-            var lineH = (long)(sz * 127.0 * 1.10);
+            var lineH = (long)(sz * 127.0 * LineHeightEm() * 1.10);
             var lines = 1;
             for (var c = 0; c < cols; c++)
                 lines = Math.Max(lines, LinesFor(c < rows[r].Count ? rows[r][c] : "", sz));
@@ -2422,31 +2970,43 @@ public class Skill
 
         // 字号下限 0.70（约 9pt）：再小就不如不显示
         const double minScale = 0.70;
+        long FitTotal(double s)
+        {
+            long total = (long)(headerH * s);
+            for (var r = 0; r < rows.Count; r++) total += RowH(r, s);
+            return total;
+        }
         var scale = 1.0;
         for (var i = 0; i < 4 && scale > minScale; i++)
         {
-            long total = (long)(headerH * scale);
-            for (var r = 0; r < rows.Count; r++) total += RowH(r, scale);
+            var total = FitTotal(scale);
             if (total <= BodyH) break;
             scale = Math.Max(minScale, scale * ((double)BodyH / total));
         }
         var hdrH = (long)(headerH * scale);
         var szHeader = Math.Max(1000, (int)Math.Round(headerSz * scale));
         var szCell = Math.Max(1000, (int)Math.Round(cellSz * scale));
-        var lineHCell = (long)(szCell * 127.0 * 1.10);
+        var lineHCell = (long)(szCell * 127.0 * LineHeightEm() * 1.10);
 
-        // 缩到下限还装不下时，**减少行数并明说**：
-        // 一张幻灯片本来就装不下“30 行 × 每格折 4 行”这种东西，硬画出去只会得到看不见的表。
-        // 宁可只显示能显示的行 + 一行“另有 N 行未显示”，也不静默丢数据。
+        // 只有“缩到下限仍装不下”时才减少行数**并明说**：
+        //   一张幻灯片本来就装不下“30 行 × 每格折 4 行”这种东西，硬画出去只会得到看不见的表；
+        //   宁可显示能显示的行 + 一行“另有 N 行未显示”，也不静默丢数据。
+        //
+        // 注意（实测踩坑）：早先的写法是**无条件**给提示行预留一行高度，而已经按“全部行装得下”
+        // 选好了缩放 —— 于是每页最后一行都被换成“另有 1 行未显示”，超长表格的自动拆页也就白拆了
+        // （行数没丢在切块里，却丢在渲染阶段）。现在改成：先看全部行放得下吗，放不下才留提示行。
         var noteH = Math.Max((long)(minRowH * scale), lineHCell + 2 * cellMarV);
         var shownRows = rows.Count;
-        var used = hdrH;
-        for (var r = 0; r < rows.Count; r++)
+        if (FitTotal(scale) > BodyH)
         {
-            var h = RowH(r, scale);
-            var reserve = r < rows.Count - 1 ? noteH : 0;   // 先给“未显示”提示行留位
-            if (used + h + reserve > BodyH && r > 0) { shownRows = r; break; }
-            used += h;
+            var used2 = hdrH;
+            for (var r = 0; r < rows.Count; r++)
+            {
+                var h = RowH(r, scale);
+                var reserve = r < rows.Count - 1 ? noteH : 0;   // 先给“未显示”提示行留位
+                if (used2 + h + reserve > BodyH && r > 0) { shownRows = r; break; }
+                used2 += h;
+            }
         }
         var truncated = shownRows < rows.Count;
 
@@ -2547,9 +3107,8 @@ public class Skill
         var scale = 1.0;
         foreach (var it in items)
         {
-            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
-                { (it.Value, 3200, 0, 1.00), (it.Label, 1300, 6, 1.15) };
-            scale = Math.Min(scale, ScaleForHeight(plan, availW, availH));
+            var plan = new List<ParaPlan> { P(it.Value, 3200, 0, 100), P(it.Label, 1300, 6, 115) };
+            scale = Math.Min(scale, FitScale(plan, availW, availH));
         }
 
         for (var i = 0; i < items.Count; i++)
@@ -2561,11 +3120,11 @@ public class Skill
             shapes.Append(Rect(ctx.NextId(), x, y, cardW, cardH, t.Light, radius: true));
             shapes.Append(Rect(ctx.NextId(), x, y, cardW, 45720, t.Accent));
             var inner = new StringBuilder();
-            inner.Append(Para(items[i].Value, Scaled(3200, scale), t.Primary, bold: true, align: "ctr",
-                lineSpacing: (int)Math.Round(100 * scale), font: t.FontTitle));
+            inner.Append(Para(items[i].Value, EffSize(3200, scale), t.Primary, bold: true, align: "ctr",
+                lineSpacing: EffSpacing(100, scale), font: t.FontTitle));
             if (items[i].Label.Length > 0)
-                inner.Append(Para(items[i].Label, Scaled(1300, scale), t.Secondary, align: "ctr",
-                    spaceBefore: 6, lineSpacing: (int)Math.Round(115 * scale)));
+                inner.Append(Para(items[i].Label, EffSize(1300, scale), t.Secondary, align: "ctr",
+                    spaceBefore: EffSpaceBefore(6, scale), lineSpacing: EffSpacing(115, scale)));
             shapes.Append(TextBox(ctx.NextId(), x + Sz(91440), y + _m.Pad, availW, availH,
                 inner.ToString(), anchor: "ctr"));
         }
@@ -2630,14 +3189,6 @@ public class Skill
         return fallback;
     }
 
-    /// <summary>把一组段落估高并按可用高度给出缩放（下限 0.6）。</summary>
-    private static double ScaleForHeight(List<(string Text, int Size, int SpaceBefore, double LineSpacing)> plan, long availW, long availH)
-    {
-        if (availH <= 0) return 0.6;
-        var need = EstimateHeightEmu(plan, availW, availH);
-        return need <= availH ? 1.0 : Math.Max(0.6, (double)availH / need);
-    }
-
     // ---- 大数字看板（stat callouts）----
 
     /// <summary>
@@ -2661,9 +3212,8 @@ public class Skill
         var scale = 1.0;
         foreach (var it in items)
         {
-            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
-                { (it.V1, 4800, 0, 1.05), (it.V2, 1400, 8, 1.15) };
-            scale = Math.Min(scale, ScaleForHeight(plan, cellW, availH));
+            var plan = new List<ParaPlan> { P(it.V1, 4800, 0, 105), P(it.V2, 1400, 8, 115) };
+            scale = Math.Min(scale, FitScale(plan, cellW, availH));
         }
 
         var shapes = new StringBuilder();
@@ -2672,11 +3222,11 @@ public class Skill
             var x = MX + (cellW + _m.Gap) * (i % cols);
             var y = BodyY + (cellH + _m.Gap) * (i / cols);
             var inner = new StringBuilder();
-            inner.Append(Para(items[i].V1, Scaled(4800, scale), t.Accent, bold: true, align: "l",
-                lineSpacing: (int)Math.Round(95 * scale), font: t.FontTitle));
+            inner.Append(Para(items[i].V1, EffSize(4800, scale), t.Accent, bold: true, align: "l",
+                lineSpacing: EffSpacing(95, scale), font: t.FontTitle));
             if (items[i].V2.Length > 0)
-                inner.Append(Para(items[i].V2, Scaled(1400, scale), t.Text, align: "l", spaceBefore: 8,
-                    lineSpacing: (int)Math.Round(115 * scale)));
+                inner.Append(Para(items[i].V2, EffSize(1400, scale), t.Text, align: "l", spaceBefore: EffSpaceBefore(8, scale),
+                    lineSpacing: EffSpacing(115, scale)));
             shapes.Append(Rect(ctx.NextId(), x, y, Sz(685800), Sz(45720), t.Accent));
             shapes.Append(TextBox(ctx.NextId(), x, y + ruleH, cellW, availH, inner.ToString(), anchor: "t"));
         }
@@ -2703,9 +3253,8 @@ public class Skill
         var scale = 1.0;
         foreach (var s in steps)
         {
-            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
-                { (s.V1, 1600, 0, 1.10), (s.V2, 1250, 6, 1.15) };
-            scale = Math.Min(scale, ScaleForHeight(plan, slotW, textH));
+            var plan = new List<ParaPlan> { P(s.V1, 1600, 0, 110), P(s.V2, 1250, 6, 115) };
+            scale = Math.Min(scale, FitScale(plan, slotW, textH));
         }
 
         var shapes = new StringBuilder();
@@ -2719,14 +3268,14 @@ public class Skill
             var cxc = x + slotW / 2;
             shapes.Append(Ellipse(ctx.NextId(), cxc - ring / 2, cy - ring / 2, ring, ring, t.Accent));
             shapes.Append(TextBox(ctx.NextId(), cxc - ring / 2, cy - ring / 2, ring, ring,
-                Para((i + 1).ToString("00"), Scaled(1500, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+                Para((i + 1).ToString("00"), EffSize(1500, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
 
             var txt = new StringBuilder();
-            txt.Append(Para(steps[i].V1, Scaled(1600, scale), t.Primary, bold: true, align: "ctr",
-                lineSpacing: (int)Math.Round(110 * scale)));
+            txt.Append(Para(steps[i].V1, EffSize(1600, scale), t.Primary, bold: true, align: "ctr",
+                lineSpacing: EffSpacing(110, scale)));
             if (steps[i].V2.Length > 0)
-                txt.Append(Para(steps[i].V2, Scaled(1250, scale), t.Text, align: "ctr", spaceBefore: 6,
-                    lineSpacing: (int)Math.Round(115 * scale)));
+                txt.Append(Para(steps[i].V2, EffSize(1250, scale), t.Text, align: "ctr", spaceBefore: EffSpaceBefore(6, scale),
+                    lineSpacing: EffSpacing(115, scale)));
             shapes.Append(TextBox(ctx.NextId(), x, textTop, slotW, textH, txt.ToString(), anchor: "t"));
         }
         return shapes.ToString();
@@ -2753,17 +3302,16 @@ public class Skill
         {
             var x = MX + (cardW + _m.Gap) * (i % cols);
             var y = BodyY + (cardH + _m.Gap) * (i / cols);
-            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
-                { (cards[i].V1, 1700, 0, 1.10), (cards[i].V2, 1300, 8, 1.20) };
-            var scale = ScaleForHeight(plan, availW, availH);
+            var plan = new List<ParaPlan> { P(cards[i].V1, 1700, 0, 110), P(cards[i].V2, 1300, 8, 120) };
+            var scale = FitScale(plan, availW, availH);
 
             var inner = new StringBuilder();
             if (cards[i].V1.Length > 0)
-                inner.Append(Para(cards[i].V1, Scaled(1700, scale), t.Primary, bold: true, align: "l",
-                    lineSpacing: (int)Math.Round(110 * scale)));
+                inner.Append(Para(cards[i].V1, EffSize(1700, scale), t.Primary, bold: true, align: "l",
+                    lineSpacing: EffSpacing(110, scale)));
             if (cards[i].V2.Length > 0)
-                inner.Append(Para(cards[i].V2, Scaled(1300, scale), t.Text, align: "l", spaceBefore: 8,
-                    lineSpacing: (int)Math.Round(120 * scale)));
+                inner.Append(Para(cards[i].V2, EffSize(1300, scale), t.Text, align: "l", spaceBefore: EffSpaceBefore(8, scale),
+                    lineSpacing: EffSpacing(120, scale)));
 
             shapes.Append(Rect(ctx.NextId(), x, y, cardW, cardH, t.Light, radius: true));
             shapes.Append(Rect(ctx.NextId(), x, y, Sz(45720), cardH, t.Accent));   // 左侧色条
@@ -2796,9 +3344,8 @@ public class Skill
         var scale = 1.0;
         foreach (var r in rows)
         {
-            var plan = new List<(string Text, int Size, int SpaceBefore, double LineSpacing)>
-                { (r.V1, 1600, 0, 1.10), (r.V2, 1300, 6, 1.20) };
-            scale = Math.Min(scale, ScaleForHeight(plan, textW, availH));
+            var plan = new List<ParaPlan> { P(r.V1, 1600, 0, 110), P(r.V2, 1300, 6, 120) };
+            scale = Math.Min(scale, FitScale(plan, textW, availH));
         }
 
         var shapes = new StringBuilder();
@@ -2820,16 +3367,16 @@ public class Skill
             else
             {
                 shapes.Append(TextBox(ctx.NextId(), MX, y, ring, ring,
-                    Para(mark, Scaled(1800, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+                    Para(mark, EffSize(1800, scale), t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
             }
 
             var inner = new StringBuilder();
             if (rows[i].V1.Length > 0)
-                inner.Append(Para(rows[i].V1, Scaled(1600, scale), t.Primary, bold: true, align: "l",
-                    lineSpacing: (int)Math.Round(110 * scale)));
+                inner.Append(Para(rows[i].V1, EffSize(1600, scale), t.Primary, bold: true, align: "l",
+                    lineSpacing: EffSpacing(110, scale)));
             if (rows[i].V2.Length > 0)
-                inner.Append(Para(rows[i].V2, Scaled(1300, scale), t.Text, align: "l", spaceBefore: 6,
-                    lineSpacing: (int)Math.Round(120 * scale)));
+                inner.Append(Para(rows[i].V2, EffSize(1300, scale), t.Text, align: "l", spaceBefore: EffSpaceBefore(6, scale),
+                    lineSpacing: EffSpacing(120, scale)));
             shapes.Append(TextBox(ctx.NextId(), MX + textX, y + Sz(57150), textW, availH, inner.ToString(), anchor: "t"));
         }
         return shapes.ToString();
@@ -3262,11 +3809,12 @@ public class Skill
             sb.Append(Preset(ctx.NextId(), "trapezoid", x, y, w, cy, fill, adj: adj));
             var label = rows[i].V1;
             var detail = rows[i].V2;
-            var inner = new StringBuilder();
-            inner.Append(Para(label, 1600, OnFill(fill), bold: true, align: "ctr", lineSpacing: 110));
+            // 梯形是上窄下宽：能容下文字的是**较窄那条边**，按它算可用宽度才不会压到斜边外
+            var innerW = Math.Min(w, wb) - _m.Pad * 2;
+            var txts = new List<Txt> { T(label, 1600, OnFill(fill), bold: true, align: "ctr", spacing: 110) };
             if (detail.Length > 0)
-                inner.Append(Para(detail, 1200, OnFill(fill), align: "ctr", spaceBefore: 4, lineSpacing: 115));
-            sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y, w - _m.Pad * 2, cy, inner.ToString(), anchor: "ctr"));
+                txts.Add(T(detail, 1200, OnFill(fill), align: "ctr", spaceBefore: 4, spacing: 115));
+            sb.Append(FitBox(ctx.NextId(), x + _m.Pad, y, innerW, cy, txts, "金字塔第 " + (i + 1) + " 层", "ctr"));
         }
         return sb.ToString();
     }
@@ -3298,12 +3846,14 @@ public class Skill
             var adj = SlopeAdj(w, cy, Math.Max(0, (w - wn) / 2));
             var fill = LayerColor(t, i);
             sb.Append(Preset(ctx.NextId(), "trapezoid", x, y, w, cy, fill, adj: adj));
-            sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y, w - _m.Pad * 2, cy,
-                Para(rows[i].V1, 1500, OnFill(fill), bold: true, align: "ctr", lineSpacing: 110), anchor: "ctr"));
+            var shapeW = Math.Min(w, wn) - _m.Pad * 2;
+            sb.Append(FitBox(ctx.NextId(), x + _m.Pad, y, shapeW, cy,
+                [T(rows[i].V1, 1500, OnFill(fill), bold: true, align: "ctr", spacing: 110)],
+                "漏斗第 " + (i + 1) + " 层", "ctr"));
             var detail = rows[i].V2;
             if (detail.Length > 0)
-                sb.Append(TextBox(ctx.NextId(), x0 + areaW + _m.Gap, y, rightW, cy,
-                    Para(detail, 1500, t.Text, align: "l", lineSpacing: 120), anchor: "ctr"));
+                sb.Append(FitBox(ctx.NextId(), x0 + areaW + _m.Gap, y, rightW, cy,
+                    [T(detail, 1500, t.Text, spacing: 120)], "漏斗数值列 " + (i + 1), "ctr"));
         }
         return sb.ToString();
     }
@@ -3339,29 +3889,31 @@ public class Skill
             sb.Append(Rect(ctx.NextId(), x, y, Sz(45720), cellH, t.Accent));
             if (i < rows.Count)
             {
-                var inner = new StringBuilder();
+                var txts = new List<Txt>();
                 if (rows[i].V1.Length > 0)
-                    inner.Append(Para(rows[i].V1, 1700, t.Primary, bold: true, align: "l", lineSpacing: 110));
+                    txts.Add(T(rows[i].V1, 1700, t.Primary, bold: true, spacing: 110));
                 if (rows[i].V2.Length > 0)
-                    inner.Append(Para(rows[i].V2, 1300, t.Text, align: "l", spaceBefore: 8, lineSpacing: 122));
-                sb.Append(TextBox(ctx.NextId(), x + _m.Pad, y + _m.Pad, cellW - _m.Pad * 2, cellH - _m.Pad * 2,
-                    inner.ToString(), anchor: "ctr"));
+                    txts.Add(T(rows[i].V2, 1300, t.Text, spaceBefore: 8, spacing: 122));
+                sb.Append(FitBox(ctx.NextId(), x + _m.Pad, y + _m.Pad, cellW - _m.Pad * 2, cellH - _m.Pad * 2,
+                    txts, "四象限 " + (i + 1), "ctr"));
             }
         }
         // 轴名与轴端标签
         var yTitle = Str(el, "yTitle");
         if (!string.IsNullOrWhiteSpace(yTitle))
-            sb.Append(TextBox(ctx.NextId(), MX, gridY - Sz(274320), axisW, Sz(274320),
-                Para(yTitle!, 1200, t.Secondary, align: "l"), anchor: "b"));
+            // 宽度给足整幅内容区：这里只有 21pt 的竖向空间，若把宽度限成轴宽（36pt），
+            // “业务价值”这种 4 字标签会被折成两行而溢出（实测被自检的 textOverflow 抳到）。
+            sb.Append(FitBox(ctx.NextId(), MX, gridY - Sz(274320), CW, Sz(274320),
+                [T(yTitle, 1200, t.Secondary)], "纵轴名称", "b"));
         var xTitle = Str(el, "xTitle");
         if (!string.IsNullOrWhiteSpace(xTitle))
-            sb.Append(TextBox(ctx.NextId(), gridX, gridY + gridH, gridW, Sz(274320),
-                Para(xTitle!, 1200, t.Secondary, align: "ctr"), anchor: "t"));
+            sb.Append(FitBox(ctx.NextId(), gridX, gridY + gridH, gridW, Sz(274320),
+                [T(xTitle, 1200, t.Secondary, align: "ctr")], "横轴名称", "t"));
         var xl = Str(el, "xLeft");
         var xr = Str(el, "xRight");
         if (!string.IsNullOrWhiteSpace(xl) || !string.IsNullOrWhiteSpace(xr))
-            sb.Append(TextBox(ctx.NextId(), gridX, gridY + gridH, gridW, Sz(228600),
-                Para((xl ?? "") + "　　" + (xr ?? ""), 1100, t.Secondary, align: "ctr"), anchor: "t"));
+            sb.Append(FitBox(ctx.NextId(), gridX, gridY + gridH, gridW, Sz(228600),
+                [T((xl ?? "") + "　　" + (xr ?? ""), 1100, t.Secondary, align: "ctr")], "轴端标签", "t"));
         return sb.ToString();
     }
 
@@ -3394,10 +3946,12 @@ public class Skill
             var ny = cy + (long)(radius * Math.Sin(ang));
             var fill = i % 2 == 0 ? t.Primary : t.Accent;
             sb.Append(Ellipse(ctx.NextId(), nx - nodeD / 2, ny - nodeD / 2, nodeD, nodeD, fill));
-            var inner = new StringBuilder();
-            inner.Append(Para(rows[i].V1, 1400, OnFill(fill), bold: true, align: "ctr", lineSpacing: 106));
-            sb.Append(TextBox(ctx.NextId(), nx - nodeD / 2, ny - nodeD / 2, nodeD, nodeD,
-                inner.ToString(), anchor: "ctr"));
+            // 圆内可用宽度是内接正方形（≈ 直径 × 0.707），不按直径算，否则文字会顶出圆外
+            var inW = (long)(nodeD * 0.72);
+            var inH = (long)(nodeD * 0.72);
+            sb.Append(FitBox(ctx.NextId(), nx - inW / 2, ny - inH / 2, inW, inH,
+                [T(rows[i].V1, 1400, OnFill(fill), bold: true, align: "ctr", spacing: 106)],
+                "闭环节点 " + (i + 1), "ctr"));
 
             // 说明文字：放在节点外侧的放射方向，按需要夹在画布内
             var detail = rows[i].V2;
@@ -3409,8 +3963,8 @@ public class Skill
                 var oy = cy + (long)(radius * 1.30 * Math.Sin(ang)) - boxH / 2;
                 ox = Math.Max(MX, Math.Min(W - MX - boxW, ox));
                 oy = Math.Max(BodyY, Math.Min(BodyY + BodyH - boxH, oy));
-                sb.Append(TextBox(ctx.NextId(), ox, oy, boxW, boxH,
-                    Para(detail, 1200, t.Secondary, align: "ctr", lineSpacing: 115), anchor: "ctr"));
+                sb.Append(FitBox(ctx.NextId(), ox, oy, boxW, boxH,
+                    [T(detail, 1200, t.Secondary, align: "ctr", spacing: 115)], "闭环说明 " + (i + 1), "ctr"));
             }
 
             // 箭头：放在两个节点之间的环上，按切线方向旋转
@@ -3425,8 +3979,8 @@ public class Skill
 
         var center = Str(el, "center");
         if (!string.IsNullOrWhiteSpace(center))
-            sb.Append(TextBox(ctx.NextId(), cx - radius * 45 / 100, cy - d * 12 / 100, radius * 90 / 100, d * 24 / 100,
-                Para(center!, 1600, t.Primary, bold: true, align: "ctr", lineSpacing: 115), anchor: "ctr"));
+            sb.Append(FitBox(ctx.NextId(), cx - radius * 45 / 100, cy - d * 12 / 100, radius * 90 / 100, d * 24 / 100,
+                [T(center, 1600, t.Primary, bold: true, align: "ctr", spacing: 115)], "闭环中心", "ctr"));
         return sb.ToString();
     }
 
@@ -3449,11 +4003,11 @@ public class Skill
             var y = y0 + i * (barH + gap);
             var fill = LayerColor(t, i);
             sb.Append(Rect(ctx.NextId(), MX, y, CW, barH, fill, radius: true));
-            sb.Append(TextBox(ctx.NextId(), MX + _m.Pad, y, labelW, barH,
-                Para(rows[i].V1, 1600, OnFill(fill), bold: true, align: "l", lineSpacing: 110), anchor: "ctr"));
+            sb.Append(FitBox(ctx.NextId(), MX + _m.Pad, y, labelW, barH,
+                [T(rows[i].V1, 1600, OnFill(fill), bold: true, spacing: 110)], "分层架构层名 " + (i + 1), "ctr"));
             if (rows[i].V2.Length > 0)
-                sb.Append(TextBox(ctx.NextId(), MX + labelW + _m.Pad, y, CW - labelW - _m.Pad * 2, barH,
-                    Para(rows[i].V2, 1300, OnFill(fill), align: "l", lineSpacing: 118), anchor: "ctr"));
+                sb.Append(FitBox(ctx.NextId(), MX + labelW + _m.Pad, y, CW - labelW - _m.Pad * 2, barH,
+                    [T(rows[i].V2, 1300, OnFill(fill), spacing: 118)], "分层架构说明 " + (i + 1), "ctr"));
         }
         return sb.ToString();
     }
@@ -3543,12 +4097,11 @@ public class Skill
         var t = ctx.Theme;
         var title = Str(el, "title") ?? ctx.Title;
         var shapes = new List<string> { HeroArt(ctx, 0, 0, W, H, title) };
-        var paras = new StringBuilder();
-        paras.Append(ParaTitle(title, 3800, t.Bg, align: "l", lineSpacing: 106));
         var sub = Str(el, "subtitle") ?? ctx.Subtitle;
+        var txts = new List<Txt> { T(title, 3800, t.Bg, titleFont: true, spacing: 106) };
         if (!string.IsNullOrWhiteSpace(sub))
-            paras.Append(Para(sub!, 1600, t.OnPrimary, align: "l", spaceBefore: 14, lineSpacing: 128));
-        shapes.Add(TextBox(ctx.NextId(), MX, 2457450, CW * 70 / 100, 2286000, paras.ToString(), anchor: "ctr"));
+            txts.Add(T(sub, 1600, t.OnPrimary, spaceBefore: 14, spacing: 128));
+        shapes.Add(FitBox(ctx.NextId(), MX, 2457450, CW * 70 / 100, 2286000, txts, "题图标题", "ctr"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Bg, shapes);
     }
@@ -3656,13 +4209,13 @@ public class Skill
         var caption = Str(el, "caption");
         if (items.Count == 0 && !string.IsNullOrWhiteSpace(caption)) items.Add(caption!);
 
-        var plan = items.Select(b => (Text: b, Size: 1600, SpaceBefore: 12, LineSpacing: 1.25)).ToList();
+        var plan = items.Select(b => P(b, 1600, 12, 125, _m.Gap)).ToList();
         var availH = BodyH - (string.IsNullOrWhiteSpace(heading) ? 0 : 762000);
-        var scale = ScaleForHeight(plan, textW - _m.Gap, availH);
+        var scale = FitScale(plan, textW, availH);
         if (items.Count == 0) paras.Append(Para("（未提供文字内容）", 1500, t.Secondary));
         foreach (var b in items)
-            paras.Append(Para(b, Scaled(1600, scale), t.Text, align: "l", bullet: "•",
-                spaceBefore: (int)Math.Round(12 * scale), lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+            paras.Append(Para(b, EffSize(1600, scale), t.Text, align: "l", bullet: "•",
+                spaceBefore: EffSpaceBefore(12, scale), lineSpacing: EffSpacing(125, scale), marL: (int)_m.Gap));
         sb.Append(TextBox(ctx.NextId(), textX, BodyY, textW, BodyH, paras.ToString(), anchor: "t"));
 
         if (!string.IsNullOrWhiteSpace(caption) && items.Count > 0)
@@ -3712,8 +4265,8 @@ public class Skill
             else
                 sb.Append(ImageMissing(el, ctx, p, x, y, cellW, imgH, radius: true));
             if (cap.Length > 0)
-                sb.Append(TextBox(ctx.NextId(), x, y + imgH, cellW, capH,
-                    Para(cap, 1200, t.Secondary, align: "ctr"), anchor: "ctr"));
+                sb.Append(FitBox(ctx.NextId(), x, y + imgH, cellW, capH,
+                    [T(cap, 1200, t.Secondary, align: "ctr")], "图廊图注", "ctr"));
         }
         return sb.ToString();
     }
@@ -3736,16 +4289,19 @@ public class Skill
 
         var textW = imgX - MX * 2;
         var paras = new StringBuilder();
-        paras.Append(ParaTitle(Str(el, "title") ?? "", 3400, t.Bg, lineSpacing: 108));
+        var titleTx = Str(el, "title") ?? "";
         var items = StringList(el, "bullets");
         if (items.Count == 0) items = StringList(el, "items");
         var text = Str(el, "text");
         if (items.Count == 0 && !string.IsNullOrWhiteSpace(text)) items.Add(text!);
-        var plan = items.Select(b => (Text: b, Size: 1600, SpaceBefore: 12, LineSpacing: 1.25)).ToList();
-        var scale = ScaleForHeight(plan, textW - _m.Gap, 2743200);
+        // 标题 + 要点一起量高：以前只缩要点、不管标题，标题一长就顶出叠字区
+        var plan = new List<ParaPlan> { P(titleTx, 3400, 0, 108, 0, bold: true) };
+        plan.AddRange(items.Select(b => P(b, 1600, 12, 125, _m.Gap)));
+        var scale = FitScale(plan, textW, 4114800);
+        paras.Append(ParaTitle(titleTx, EffSize(3400, scale), t.Bg, lineSpacing: EffSpacing(108, scale)));
         foreach (var b in items)
-            paras.Append(Para(b, Scaled(1600, scale), t.OnPrimary, align: "l", bullet: "•",
-                spaceBefore: (int)Math.Round(12 * scale), lineSpacing: (int)Math.Round(125 * scale), marL: (int)_m.Gap));
+            paras.Append(Para(b, EffSize(1600, scale), t.OnPrimary, align: "l", bullet: "•",
+                spaceBefore: EffSpaceBefore(12, scale), lineSpacing: EffSpacing(125, scale), marL: (int)_m.Gap));
         shapes.Add(TextBox(ctx.NextId(), MX, 1371600, textW, 4114800, paras.ToString(), anchor: "ctr"));
         shapes.Add(PageBadge(ctx));
         return SlideXml(t.Primary, shapes);
@@ -4280,8 +4836,8 @@ public class Skill
             var y = y0 + i * rowH;
             var frac = Math.Clamp(items[i].Value / max, 0, 1);
             var trackY = y + (rowH - barH) / 2;
-            sb.Append(TextBox(ctx.NextId(), MX, y, labelW, rowH,
-                Para(items[i].Label, 1600, t.Text, align: "l", lineSpacing: 120), anchor: "ctr"));
+            sb.Append(FitBox(ctx.NextId(), MX, y, labelW, rowH,
+                [T(items[i].Label, 1600, t.Text, spacing: 120)], "进度标签 " + (i + 1), "ctr"));
             sb.Append(Rect(ctx.NextId(), barX, trackY, barW, barH, t.Light, radius: true));
             var fillW = (long)(barW * frac);
             if (fillW > 0) sb.Append(Rect(ctx.NextId(), barX, trackY, Math.Max(fillW, barH), barH, t.Accent, radius: true));
@@ -4314,10 +4870,10 @@ public class Skill
             var y = BodyY + Math.Max(0, (BodyH - labelH - d) / 2);
             var png = RenderRing(ringPx, frac, dark, t);
             sb.Append(Picture(ctx.NextId(), ctx.AddImage(png), x, y, d, d));
-            sb.Append(TextBox(ctx.NextId(), MX + cellW * i, y + d + Sz(68580), cellW, labelH,
-                Para(FormatProgress(items[i].Value), 1800, t.Primary, bold: true, align: "ctr", lineSpacing: 110)
-                + Para(items[i].Label, 1400, t.Secondary, align: "ctr", spaceBefore: 4, lineSpacing: 115),
-                anchor: "t"));
+            sb.Append(FitBox(ctx.NextId(), MX + cellW * i, y + d + Sz(68580), cellW, labelH,
+                [T(FormatProgress(items[i].Value), 1800, t.Primary, bold: true, align: "ctr", spacing: 110),
+                 T(items[i].Label, 1400, t.Secondary, align: "ctr", spaceBefore: 4, spacing: 115)],
+                "环形标签 " + (i + 1), "t"));
         }
         var caption = Str(el, "caption");
         if (!string.IsNullOrWhiteSpace(caption)) sb.Append(Footnote(caption!, ctx));
@@ -4772,6 +5328,25 @@ public class Skill
         {
             if (_fontFamily is null) PickFamily();
             return _fontFamily!.Value.CreateFont(size);
+        }
+    }
+
+    /// <summary>
+    /// 粗体字面：量宽用。
+    ///
+    /// <para>
+    /// 粗体会把拉丁字母撑宽（汉字advance 宽度基本不变），量宽时不区分就会低估行数 ——
+    /// 而本技能的正文里粗体用得很多（要点小标题、卡片标题、示意图层名全是粗体）。
+    /// 族里没有粗体字面时 CreateFont 会退到最接近的一档，量出来至少不会偏小。
+    /// </para>
+    /// </summary>
+    private static SixLabors.Fonts.Font BoldFont(float size)
+    {
+        lock (_fontLock)
+        {
+            if (_fontFamily is null) PickFamily();
+            try { return _fontFamily!.Value.CreateFont(size, SixLabors.Fonts.FontStyle.Bold); }
+            catch { return _fontFamily!.Value.CreateFont(size); }
         }
     }
 

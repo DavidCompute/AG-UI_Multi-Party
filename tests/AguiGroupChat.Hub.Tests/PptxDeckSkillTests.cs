@@ -999,6 +999,151 @@ public sealed class PptxDeckSkillTests
         Assert.Contains("会覆盖原件", doc.RootElement.GetProperty("message").GetString());
     }
 
+    // ===== 文字溢出：量准 + 缩字号 + 分页 / 截断 =====
+
+    /// <summary>
+    /// 文字过多时的处理链条：**先缩字号，缩到下限还放不下就分页（不丢内容）**。
+    ///
+    /// <para>
+    /// 实测踩过的根因：估算高度的公式把行高系数当成 1.0、段前距的单位算小了 100 倍，
+    /// 结果“缩字号”几乎从不触发，文字直接溢出自己的框 —— 以前之所以看起来尚可，
+    /// 是因为文件里的 <c>&lt;a:normAutofit/&gt;</c> 让 LibreOffice 替我们缩了，
+    /// 而 PowerPoint 打开时并不重算 autofit。
+    /// </para>
+    ///
+    /// <para>
+    /// 本用例把 20 条长要点顶上去：必须拆成多页（页数 > 输入页数）、每一条都不能丢、
+    /// 标题带「（n/m）」，并且自检不得报 <c>textOverflow</c>。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void TooManyBullets_PaginateInsteadOfOverflowing()
+    {
+        var bullets = Enumerable.Range(1, 20)
+            .Select(i => $"第 {i} 条要点：平台治理需要统一账号体系权限模型与审计日志，"
+                       + "覆盖组织架构的全部层级，确保任何一次权限变更都能追溯到操作人、时间与影响范围。")
+            .ToArray();
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "要点分页",
+            slides = new object[]
+            {
+                new { type = "cover", title = "要点分页" },
+                new { type = "content", title = "二十条要点", bullets },
+            },
+        }));
+
+        var qa = doc.RootElement.GetProperty("qa");
+        Assert.Equal(0, qa.GetProperty("issueCount").GetInt32());
+        var slides = qa.GetProperty("slides").GetInt32();
+        Assert.True(slides > 2, "20 条长要点应该拆成多页，实际只有 " + slides + " 页");
+        Assert.True(ShapesOutsideCanvas(path).Count == 0);
+
+        // 不丢内容：每条要点都能在产物里找到，且续页标题带「（n/m）」
+        using var back = RunRaw(JsonSerializer.Serialize(new { action = "read", path }));
+        var all = back.RootElement.GetProperty("text").GetString()!;
+        for (var i = 1; i <= 20; i++)
+            Assert.Contains("第 " + i + " 条要点", all);
+        Assert.Contains("（1/", all);
+    }
+
+    /// <summary>
+    /// 超长标题不能顶进正文区：要么缩字号、要么扩大标题框，并且自检不报 textOverflow。
+    /// （以前标题是写死 28pt、框写死 60pt，长标题直接盖到正文上。）
+    /// </summary>
+    [Fact]
+    public void LongTitle_ShrinksAndStaysOutOfTheBody()
+    {
+        var longTitle = "这是一个刻意写得非常非常长以至于在标题区域一行放不下并且需要折成两行才能完整显示的内容页标题，用来验证标题自动缩放";
+        var (path, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "长标题",
+            slides = new object[]
+            {
+                new { type = "cover", title = "长标题" },
+                new { type = "content", title = longTitle, bullets = new[] { "要点一" } },
+            },
+        }));
+
+        Assert.Equal(0, doc.RootElement.GetProperty("qa").GetProperty("issueCount").GetInt32());
+        Assert.True(ShapesOutsideCanvas(path).Count == 0);
+
+        using var zip = ZipFile.OpenRead(path);
+        using var sr = new StreamReader(zip.Entries.First(e => e.FullName == "ppt/slides/slide2.xml").Open());
+        var xml = sr.ReadToEnd();
+        // 标题确实被缩过（原始设计字号是 2800 = 28pt）
+        Assert.DoesNotContain("sz=\"2800\"", xml);
+        Assert.True(System.Text.RegularExpressions.Regex.Matches(xml, "sz=\"(\\d+)\"").Count > 0);
+    }
+
+    /// <summary>
+    /// 卡片 / 示意图层这类**结构固定的框**不能分页，就退成“缩到下限 + 截断 + 报警”：
+    /// 必须<b>明说</b>截掉了多少字（不静默丢内容），且自检不报 textOverflow。
+    /// </summary>
+    [Fact]
+    public void OverlongCardText_IsTrimmedWithAVisibleWarning()
+    {
+        var longText = string.Concat(Enumerable.Repeat(
+            "平台治理需要统一账号体系权限模型与审计日志覆盖组织架构的全部层级。", 8));
+        var (_, doc) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "卡片截断",
+            slides = new object[]
+            {
+                new { type = "cover", title = "卡片截断" },
+                new
+                {
+                    type = "matrix", title = "四象限",
+                    items = new object[]
+                    {
+                        new { title = "左上", text = longText },
+                        new { title = "右上", text = longText },
+                        new { title = "左下", text = longText },
+                        new { title = "右下", text = longText },
+                    },
+                },
+            },
+        }));
+
+        Assert.Equal(0, doc.RootElement.GetProperty("qa").GetProperty("issueCount").GetInt32());
+        var warnings = doc.RootElement.GetProperty("warnings").EnumerateArray()
+            .Select(x => x.GetString()!).ToList();
+        Assert.Contains(warnings, w => w.Contains("四象限 1") && w.Contains("截掉"));
+    }
+
+    /// <summary>
+    /// 替换文字变长时要如实报警：<c>replaceText</c> 不重排版（这是既定边界），
+    /// 但用户不能拿到一份“文字压到别的元素上”的稿子却不知道原因。
+    /// </summary>
+    [Fact]
+    public void ReplaceText_ThatNoLongerFits_WarnsInsteadOfSilence()
+    {
+        var (src, _) = RenderDeck(JsonSerializer.Serialize(new
+        {
+            title = "替换文字",
+            slides = new object[]
+            {
+                new { type = "cover", title = "替换文字" },
+                new { type = "content", title = "要点", bullets = new[] { "短文案" } },
+            },
+        }));
+        var longText = string.Concat(Enumerable.Repeat("替换之后这段话变得非常长非常长非常长。", 30));
+        using var doc = RunRaw(JsonSerializer.Serialize(new
+        {
+            action = "edit", path = src, outputPath = Path.Combine(TempDir(), "edited.pptx"),
+            ops = new object[]
+            {
+                new { op = "replaceText", slides = new[] { 2 }, map = new Dictionary<string, string> { ["短文案"] = longText } },
+            },
+        }));
+
+        Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(),
+            doc.RootElement.GetProperty("message").GetString());
+        var warnings = doc.RootElement.GetProperty("warnings").EnumerateArray()
+            .Select(x => x.GetString()!).ToList();
+        Assert.Contains(warnings, w => w.Contains("放不进原文本框"));
+    }
+
     // ===== 页型级越界防护 =====
 
     /// <summary>把每页所有形状的右/下边界与画布比对，返回越界描述（空 = 没越界）。</summary>

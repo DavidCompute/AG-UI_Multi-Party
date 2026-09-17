@@ -28,9 +28,9 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | type | 用途 | variant | 关键字段 |
 |---|---|---|---|
 | `cover` | 封面 | `left`(默认) / `center` / `image`(背景图+蒙层) / `split`(左文右图) | `title` `subtitle` `author` `date` `path` |
-| `toc` | 目录 | `list`(默认) / `grid`(两列卡片) / `sidebar`(侧栏) | `title` `items[]` |
+| `toc` | 目录（过长自动分页） | `list`(默认) / `grid`(两列卡片) / `sidebar`(侧栏) | `title` `items[]` |
 | `section` | 章节分隔 | `number`(默认) / `bar`(左侧色块) / `full`(水印序号) | `title` `subtitle` |
-| `content` | 要点页 | 见下方 `layout` | `title` `bullets[]` |
+| `content` | 要点页（过长自动分页） | 见下方 `layout` | `title` `bullets[]` |
 | `twoCol` | 两栏对比 | — | `title` `left{heading,bullets}` `right{…}` |
 | `table` | 表格（过长自动分页） | — | `title` `headers[]` `rows[][]` |
 | `kpi` | 指标卡（一行最多 4 张） | — | `title` `items[{value,label}]` |
@@ -48,13 +48,17 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | `quote` | 引言/金句 | — | `text` `cite` |
 | `image` | 配图 / 图文混排 | `full`(默认) / `left`(图左文右) / `right`(文左图右) / `bleed`(半出血叠字) / `gallery`(2~4 张) | `title` `path` `caption` `heading` `bullets[]` `images[{path,caption}]` |
 | `chart` | 图表（见下方图表节） | — | `title` `chartType` `categories[]` `series[]` `yLabel` `xLabel` |
-| `summary` | 小结 / 收尾 | `list`(默认) / `cta`(行动项) / `split`(左回顾右行动) | `title` `bullets[]` `items[]` `actions[]` `contact` |
+| `summary` | 小结 / 收尾（`list` 过长自动分页） | `list`(默认) / `cta`(行动项) / `split`(左回顾右行动) | `title` `bullets[]` `items[]` `actions[]` `contact` |
 | `end` | 结束页 | — | `title` `subtitle` |
 
 `content` 页可用 `"layout":"timeline|grid|stats|iconRows|progress|pyramid|funnel|matrix|cycle|stack"` 指定子类型（少记几个 type）。
 `items` 里的字符串项会被当作第一个字段（允许 `items:["要点一", …]` 这种简写）。
 
 任何一页都可加 `notes`，写入**演讲者备注**。
+
+> **不必为“怕溢出”而把要点拆得很碎**：每页的标题与正文都按真实字形量高自动缩字号，
+> 要点页/表格装不下会**自动分页**（不丢内容），卡片类装不下会**截断并在 `warnings` 里说明**。
+> 详见下方「文字溢出」一节。
 
 ### 内置图标（`iconRows` 的 `icon`）
 
@@ -296,13 +300,17 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 | `emptyBody` | 正文是**自动填充的空状态文案**（如“（本页暂无要点）”）——看着有字，实际没内容 |
 | `titleOnly` | 内容页只剩标题、没有正文（**仅当知道页型时才判**，见下） |
 | `overflow` | 形状/文字框画到画布外 |
+| `textOverflow` | **文字装不进自己的文本框**（按真实字形量高；卡片 / 示意图层 / 叠字最容易出这种问题） |
 
 **生成与编辑都会自动跑一遍**（结果在返回的 `qa` 字段），因为“模型声称写完了”与“文件里真有内容”是两件事。
 
-两个“不误报”的细节（都是实测踩出来的）：
+三个“不误报”的细节（都是实测踩出来的）：
 
 - **有图/图表的页不算 `titleOnly`**：图上文字本来抽不出来（散点图/雷达图页曾被误报）。
-- **外部文件（`action:qa`）不判 `titleOnly`**：没有页型信息，而封面/结束页天然只有一句话，误报会淹没真问题。
+- **外部文件（`action:qa`）不判 `titleOnly` 也不判 `textOverflow`**：没有页型信息，而且外部文件的
+  字体/行距/是否 autofit 都不归我们管，拿我们的排版规则去判只会误报。
+- **`textOverflow` 留 2%（或 2pt）余量**：四舍五入与渲染器的细微差别不该报成问题。
+- `replaceText` 把文字改长后会单独复核一次，放不进就进 `warnings`（提文字本就不重排版，但不静默）。
 
 ### 原地编辑（`action: "edit"`）
 
@@ -387,6 +395,9 @@ tools/pptx-skills/
 
 内置副本：`src/AguiGroupChat.Agents/BuiltinSkills/pptx_deck.skill.txt`
 
+配套工具（`tools/`）：`preview-pptx.py`（渲成图 + 自动检查）、`verify-pptx-textfit.py`（文字是否真的
+装进框，见下）、`run-skill.py` / `check-skill.py`（本地编译/运行技能）。
+
 ### ⚠️ 改完记得同步到内置副本
 
 ```bash
@@ -403,7 +414,8 @@ node tools/pptx-skills/sync-builtin.mjs
 我们自己的生成器与自检只能验证**我们写出的 XML**，验不了“别的渲染器看到的是什么”。
 把产物丢给 LibreOffice 渲一遍，相当于请了**第二个独立裁判**，能拦住我们拦不住的：
 
-- **文字溢出文本框**：我们按字号×字数估算高度，估错了自己看不出来，渲出来就露馅；
+- **文字溢出文本框**：我们按真实字形量高，但字体不完全一致、渲染器也可能有自己的行高算法，
+  所以要用「另一个渲染器」复核一遍（见下方「文字溢出」一节里的 `verify-pptx-textfit.py`）；
 - **字体/字形缺失**：容器里没某个字体时，渲出的图会变成方块/空白；
 - **版本兼容性**：包结构有问题时 LibreOffice 直接打不开——比“PowerPoint 提示需要修复”早一步被抳住。
 
@@ -443,6 +455,103 @@ python tools/preview-pptx.py --sample --check --expect "版式样张,环形仪�
 > 提醒：这套工具的价值一半在**自动检查**，另一半在**给人看图**——
 > 生成物是不是好看、版式是不是贴切，仍然得人扫一眼。
 
+## 文字溢出：根因、标定与自动处理（重要）
+
+“文字溢出自己的框”是这份技能栽得最深的坑，值得单独记一笔。
+
+### 根因：三个单位/系数错了，而渲染器一直在替我们兜底
+
+最初的“量高”是用「字数 × 字号」估的，三处与真实排版不符：
+
+1. **行高系数当成 1.0**：而 CJK 字体的自然行高是 1.27（微软雅黑）~1.45 em（`Noto Sans CJK SC`）；
+2. **段前距单位小了 100 倍**：plan 里存的是「磅」，估算处却按「百分之一磅」乘；
+3. **粗体、左缩进（`marL`）与 CJK/拉丁混排的真实字宽都没算**。
+
+三者叠加，估出来的高度常常不到真实值的一半 —— 所以「缩字号」几乎从不触发。
+以前样张看着还行，是因为每个文本框都带着 `<a:normAutofit/>`：**LibreOffice 会替我们缩**；
+而 **PowerPoint 打开时并不重算 autofit**（PptxGenJS 的 `shrinkText` 被抱怨“编辑一下才生效”是同一个坑），
+用户看到的才是真身 —— 文字溢出自己的框。
+
+### 标定：用真实渲染反推行高与宽度
+
+拿容器里的 LibreOffice 渲一遍并用 `pdftotext -bbox` 量行位（实测记录）：
+
+| 输入 | 量到 | 结论 |
+|---|---|---|
+| 17pt / 行距 125% 的两行间距 | 30.92pt | 自然行高 = 30.92/(17×1.25) = **1.455 em** |
+| 26pt / 行距 130% 的引言行高 | 行框 37.7pt | 37.7/26 = **1.448 em**（与上一条一致） |
+| 47 个汉字 @17pt | 799pt | 汉字 advance 就是 **1.0 em**，可用宽 801pt 正好放 47 字 |
+| 段前距 10pt 的两段间距 | 40.93pt = 30.92 + 10 | `spcBef` 是**在行高之上叠加**的（单位是磅） |
+
+据此：`行高 = 字号 × max(1.45, 实测) × 行距倍率`，量宽则**区分 CJK 与拉丁**——
+汉字不需要余量（两个字体都是 1 em，加了反而把“刚好放下”判成多一行），
+拉丁字母保留 5%（不同字体间差得多）。
+
+还有两个只能靠实测发现的量宽细节：
+
+- **CJK 上下文里的空格要按 0.5 em 算**。SixLabors 量出来只有约 0.25 em，而真实排版里中文空格接近全角，
+  实测差出 1.5 em ——「A / B」这类带斜杠空格的标题因此会**多折一行**。
+- **这个修正必须同时打在折行的快、慢两条路径上**。`WrappedLines` 对“原样文本”有一条不做逐字量宽的快路径，
+  只改慢路径的话修正根本不生效（第一版就是这么漏的）；反过来把快路径整个删掉也不对——
+  宽容量会随之变化，表格单元格会被判成多一行、每页少装一行。
+
+### 处理链条：缩字号 → 分页 → 截断并报警
+
+1. **缩字号**：`FitScale` 用**二分**求“放得下的最大缩放”。为什么不是一步除 `availH/need`——
+   高度对缩放不是线性的（字号一缩，折行数也会变少）：实测一个 3 行 28pt 的标题，一步除给出 0.65，
+   而缩到 0.85 就只剩 2 行、完全放得下，白缩掉了三分之一。
+   下限 12pt、行距不低于 100%（`spcPct < 100%` 时行框比字体矮，汉字墨迹会**越出行框**、顶到框外）。
+2. **分页**（缩到下限仍放不下）：`content` / `summary`（`list` 与 `split`）/ `toc` 按能放下的条数拆页，
+   标题带「（n/m）」，**不丢内容**；表格过长仍按行切页。与表格分页同一口径。
+3. **截断 + Warn**（结构固定的框不能分页：卡片 / 示意图层 / 封面 / 图注）：按“还能放几行”截断，
+   并在 `warnings` 里**说清楚截掉了多少字**——不静默丢内容。
+4. **自检**：`qa` 里新增 `textOverflow`（见上），从**写出来的 XML** 反推框与字号再复核一遍，
+   能拦住“排版算对了但没写进 XML”这类错位。
+
+### 独立复核：`tools/verify-pptx-textfit.py`
+
+自家人验自家人不算验。这个工具把产物先**摘掉 `<a:normAutofit/>`**再交给 LibreOffice 渲染，
+于是“渲染器替我们兜底”这条路被断掉——渲染出来的版式完全由我们写进去的字号决定；
+再把 `pdftotext -bbox` 的每个词按中心点归到对应的文本框，检查它有没有越界。
+
+```bash
+# 生成一份“长标题 / 长引言 / 长卡片 / 超多要点”的压力样张并检查
+python tools/verify-pptx-textfit.py --stress
+# 检查任意产物（--keep-autofit 可做对照）
+python tools/verify-pptx-textfit.py x.pptx
+```
+
+两个刻意的判定约定：
+
+- **上/左边框放宽到 6pt**：汉字的**字形墨迹**本来就会略微超出首行行框（全角标点尤其明显），
+  几磅的“越出”在渲染图上看不出来；**下/右边界才严格（1.5pt）**——那才是“压到别人身上”。
+- **表格/图表里的文字不计入**（它们在 `GraphicFrame`/图片里，不在文本框内），只报个数。
+
+工具本身也踩过两个坑，改它之前先看这里：
+
+- **归位要三种匹配**：① 完整包含该词的框 → 通过；② 否则按**中心点**找框；③ 中心点落在所有框之外时，
+  认**比该词还窄/矮且与之相交**的框。“文字居中溢出一个小框”这种最该被抓住的情形，
+  只看中心点会被判成“未匹配”而静默放过。
+- **反向验证手法**：把某类节点的框在样张里改窄到 20pt，旧版工具会报“通过”——说明那种情形没被覆盖；
+  修好匹配逻辑后必须能报出来。同理，压测样张里要**故意**包含长标题 / 长引言 / 超长卡片 / 20 条要点，
+  否则“全绿”没有意义。
+
+当前状态：`--stress`（本机字体）与 `--live`（容器字体 `Noto Sans CJK SC`）各跑一遍，均 **14 页、0 越界 / 0 页外文字**。
+两个环境都要跑：本机是微软雅黑、线上是 Noto Sans CJK SC，行高相差约 14%，本机通过不代表线上通过。
+
+### 踩坑：这些做法试过，别再来一遍
+
+改 `FitScale` / `WrappedLines` / `TableBody` 之前请读这几条，它们都是**当时看着“更保险”、实测反而更差**的选择：
+
+| 做法 | 为什么不能这么做 |
+|---|---|
+| 把折行容量**整体放宽**（加大 `LineFitSlack`）来盖住渲染器差异 | 本来放得下的内容被多算一行：引言行数变多、表格行高翻倍 |
+| “**最后一行几乎填满就多算一行**”（早期试过的 `LastLineFullRatio`） | 粒度太粗：24 字 @10.5pt 的表格单元格被判成两行、行高翻倍，30 行表从 4 页变 5 页**且仍丢行** |
+| 表格 `TableBody` **无条件**给“另有 N 行未显示”预留一行高度 | 拆页切好的每一页，最后一行都会在渲染阶段被换成提示行。必须改成“**全部行放得下就不留**”，且 `TableRowsPerPage` 与 `TableBody` 两边口径必须一致 |
+
+`LineFitSlack = 0.98` 这个值是**取舍后的结果**：留 2% 余量是为了盖住约 1.6% 的量宽偏差，
+再放宽就会开始产生上面第一行的副作用。它和「CJK 空格按 0.5 em」是**两件事**，不要用其中一个去顶替另一个。
+
 ## 实测验证
 
 `tests/AguiGroupChat.Hub.Tests/PptxDeckSkillTests.cs` 走**真实执行链路**
@@ -476,7 +585,11 @@ python tools/preview-pptx.py --sample --check --expect "版式样张,环形仪�
    `CjkFont_FollowsExplicitChineseFontFace`）。
 15. **出稿自检**（`Qa_FlagsPlaceholdersAndEmptyBody` / `Qa_PassesOnAHealthyDeck`）。
 16. **原地编辑**（`Edit_DeleteReorderDuplicateReplaceAndAppend` 等）：删/重排/复制/替文字/追加，
-   并用 `action:read` 把结果读回来逐页核对；另验证“不得覆盖原件”“不得删光”“图表页复制要报错”。
+    并用 `action:read` 把结果读回来逐页核对；另验证“不得覆盖原件”“不得删光”“图表页复制要报错”。
+17. **文字过多不溢出**（`TooManyBullets_PaginateInsteadOfOverflowing` / `LongTitle_ShrinksAndStaysOutOfTheBody` /
+    `OverlongCardText_IsTrimmedWithAVisibleWarning` / `ReplaceText_ThatNoLongerFits_WarnsInsteadOfSilence`）：
+    20 条长要点必须**拆成多页且一条不丢**（标题带「（n/m）」）、超长标题必须缩字号且不顶进正文、
+    卡片文字放不下必须**截断 + 报警**、`replaceText` 改长后必须进 `warnings`；四者都要求 `qa.issueCount == 0`。
 
 ```bash
 # 单测
@@ -488,6 +601,8 @@ python tools/check-skill.py tools/pptx-skills/pptx_deck.cs
 python tools/run-skill.py tools/pptx-skills/pptx_deck.cs --json '{"title":"T","slides":[{"type":"cover"}]}'
 # 独立结构检查（对照 OOXML 必备部件规则，不依赖 .NET）
 python tools/verify_office_package.py 某个.pptx
+# 文字是否真的装进自己的框（摘掉 autofit 后交给 LibreOffice 渲，再按词对框）
+python tools/verify-pptx-textfit.py --stress
 # 实盘图表几何（真容器 + 真的 Roslyn 编译执行，量像素；见下）
 PYTHONIOENCODING=utf-8 python tools/verify_chart_geometry.py
 # 实盘设计系统（18 套调色板 / 4 种 style / 页型：回显配色 + 版面不越界 + 包结构）
@@ -544,17 +659,19 @@ PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
   （钳在 72–200px）并**右对齐**到轴线左侧；图例按宽度**换行**（最多 3 行）、每项按宽裁剪、
   放不下的补“…等 N 项”，并将**占用的行数提前计入顶部留白**；分类标签按**槽宽**裁剪、
   过密时**隔位显示**（`stride = ceil(52/slot)`），起点用 `ClampX` 夹在绘图区内。
-- **页面正文也会缩**：`BulletBody` 先把要点整理成数据 → 按字数估算高度定缩放（下限 0.6）
-  → 再生 XML，避免要点过多时直接溢出页面。
+- **页面正文与标题都会缩**：所有文本框都走同一套「真实字形量高 → 二分求缩放」
+  （`FitTexts` / `FitBox`），放不下再分页或截断。**新加页型时请用 `FitBox` 而不是裸的
+  `TextBox`**，否则该页的文字就不会自适应（这是最容易被遗漏的一处）。
 - 平台预置 `using` 不含 `System.IO`，需自行 `using`（本文件已含）。
 - 换行统一 `\n`；正文由同步脚本统一处理。
 - **页型的 `case` 字面量必须全小写**：`RenderSlide` 先做了 `type.ToLowerInvariant()`，
   写成 `case "twoCol"` 就永远匹配不上，会**静默回落**成默认要点页（实测踩到：两栏页型从来没生效过）。
   回归由单测 `EveryDocumentedSlideType_IsActuallyWired` 钉住（把每种页型与“不存在的页型”产出对比）。
-- **`EstimateHeightEmu` 的 `lineSpacing` 单位是「倍率」**（1.25 = 1.25 倍行距），不是百分数。
-  实测踩到：这里曾写成 `/100.0`，而调用方一律传倍率 → 估出来的高度只有真实值的 1%，
-  `need <= boxH` 永远成立、缩放系数永远是 1.0，**「缩字号」实际上是死代码**。
-  改估算公式时请同步核对所有调用方传的单位。
+- **量高的单位约定（改公式时必看）**：`ParaPlan.SpaceBefore` 是**磅**（与 `Para` 的
+  `spaceBefore` 同一单位，写 XML 时×100），`Spacing` 是**行距百分数**（125 = 125%，与 `Para` 的
+  `lineSpacing` 同一单位）；**行高 = 字号 × `LineHeightEm()` × 行距**。
+  实测踩过：估算时把段前距当成「百分之一磅」（小了 100 倍）、把行高系数当成 1.0（小了 30%~45%），
+  两项叠加让「缩字号」几乎从不触发。**改估算公式请同步核对所有调用方传的单位。**
 - **图表里的 `SixLabors.Fonts` 必须钉在 `1.0.1`（不要删）**：ImageSharp 2.1.5 对它的依赖是
   `>= 1.0.0`，NuGet 解析器取**最低满足版**，会落到 1.0.0。**而 1.0.0 的 shaping 会对 CJK 字体
   错误地套用竖排（`vert`）字形替换** —— 破折号 `—` `–` 被画成**竖线**，`（）「」『』【】《》`
@@ -587,14 +704,23 @@ PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
 - `image` 的 `bleed` 是“右侧半出血 + 左侧叠字”，不支持任意方向的出血/挖空。
 - `image` 页的图片走 ImageSharp 读取以计算尺寸与裁剪；Sprite 不支持的格式（如 svg/emf）会报可读错误。
 - 表格列宽均分（不按内容自适应），列多时字号不会自动再缩。
-- 自适应用的是**每条内容的宽度估算**（按字号 × 字符数的近似量），不是真实排版度量：
-  极端混排（大量全角/半角、超长英文单词）下仍可能留白过多或裁得略早。
-- 正文缩字号已覆盖**全部页型**（`content` / `summary` / `toc` / `twoCol` / `table` / `kpi` /
-  `stats` / `grid` / `timeline` / `iconRows` / `progress`）。
+- 自适应用的是**真实字形度量**（`SixLabors.Fonts` 量宽 + 从字体度量取行高），已是当前环境能做到的
+  最好近似；仍**不是**目标渲染器的真实排版度量（字体不同则行位有零点几到一磅的差别），
+  所以刻意取“偏保守”的一侧（行高至少按 1.45 em 算、拉丁字母留 5% 余量）。
+- 行高按**容器字体**（`Noto Sans CJK SC`，1.45 em）标定：在 PowerPoint（微软雅黑，约 1.27 em）
+  里会更宽松 —— 宁可略松，也不要在别的环境下溢出。这个系数写在 `LineHeightEm()` 里，
+  真要在某个环境上精调，改那一个常量即可。
+- 自检（QA）是**文本/几何级**的：它抳不住“内容写得不对/不切题”这类语义问题。
+  文字是否装进框**现在能抳住**（`textOverflow`，按真实字形量高）；
+  但它仍是**我们的度量**，不是“把产物渲成图再看一遍”——后者请用 `verify-pptx-textfit.py`。
 - **表格过长会自动分页**：在渲染前先按“字号下限下一页能放几行”切块，每块出一页 table 页，
   标题带「（n/m）」；**不丢行**。万一某页仍装不下（极端单元格），末行会换成
   「… 另有 N 行未显示」——总之不静默丢数据。
+- **要点页过长也会自动分页**（`content` / `summary` 的 `list` 与 `split` / `toc`）：标题带「（n/m）」，不丢条。
+- **结构固定的框**（卡片 / 示意图层 / 封面 / 图注 / 两栏）缩到 12pt 仍放不下时会**截断**，
+  并在 `warnings` 里报出截掉的字数。想要完整内容请改用要点页（会自动分页）或精简文案。
 - 图表图例最多 3 行，超出以“…等 N 项”代替（不是分页）。
 - `action:read` 只取文本，不还原版式与图片；页码徽标（如 `02`）也会作为文本被取出，属噪声。
-- 自检（QA）是**文本/几何级**的：它抳不住“内容写得不对/不切题”这类语义问题，也抳不住
-  “文字溢出自己的文本框”（没有真实排版度量）——它只保证没有占位符、没有空页、没有画出画布。
+- 自检（QA）是**文本/几何级**的：它抳不住“内容写得不对/不切题”这类语义问题。
+  文字是否装进框**现在能抳住**（`textOverflow`，按真实字形量高）；
+  但它仍是**我们的度量**，不是“把产物渲成图再看一遍”——后者请用 `verify-pptx-textfit.py`。
