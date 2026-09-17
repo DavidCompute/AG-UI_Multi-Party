@@ -1,3 +1,63 @@
+# AG-UI 群聊桌面版 1.0.140 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.140 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.140 为当前 Windows 桌面版本。这一版修掉两个「内容凭空消失」的问题：PPT 里**文字压出自己的框**（PowerPoint 打开时才看得出来），以及某种路由下数字员工先回一句「（X 代为处理）」、**之后整条消息再无正文**。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.140 is the current Windows desktop release. It fixes two ways content silently went missing: **text spilling out of its own box** in decks (only visible once PowerPoint opens the file), and a routing path where an agent replied with a single “(handled by X)” line and **nothing else**. Web and desktop share the same Hub / gateway / frontend.
+
+## PPT：文字不再压出框（1.0.140）
+# PPT: text no longer spills out of its box (1.0.140)
+
+中文：
+- **根因不是「某处字号写大了」**，而是我们的「量高」从一开始就算不出真实高度：行高系数当成 1.0（真实是 1.27~1.45 em）、
+  段前距的单位小了 100 倍、粗体 / 左缩进 / 中英混排的真实字宽都没算。三项叠加，估出来的高度常常不到真实值的一半——
+  于是**「缩字号」几乎从不触发**。
+- **以前为什么看不出来**：每个文本框都带着 `<a:normAutofit/>`，LibreOffice 打开时会**替我们缩**；
+  但 **PowerPoint 打开时并不重算 autofit**，用户看到的就是溢出后的样子。
+- **标定**（容器里渲染 + `pdftotext -bbox` 实测）：自然行高 = **1.455 em**；`spcBef` 是在行高之上叠加的磅值；
+  汉字 advance 正好 **1.0 em**（所以汉字不留余量、拉丁保留 5%）。修正后 `FitScale` 用**二分**求「放得下的最大缩放」，
+  下限 12pt、行距不低于 100%（行距低于 100% 时汉字墨迹会冒出行框）。
+- **装不下就分页，不丢内容**：要点页 / 小结 / 目录按能放下的条数**自动拆页**（标题带「（n/m）」），表格按行切页；
+  结构固定的框（卡片 / 示意图层 / 封面 / 图注）会截断，并在 `warnings` 里**说清楚截掉了多少字**。
+- **出稿自检新增 `textOverflow`**：从写出的 XML 反推框与字号再复核一遍；`replaceText` 改长后单独复核并进 `warnings`。
+- **独立复核工具 `tools/verify-pptx-textfit.py`（新）**：先把产物里的 `<a:normAutofit/>` **摘掉**再交给 LibreOffice 渲染
+  （「渲染器替我们兜底」这条路被断掉），再用 `pdftotext -bbox` 逐词查越界。本机字体与容器字体（`Noto Sans CJK SC`）各跑一遍：
+  **14 页、0 越界 / 0 页外文字**。
+- 顺带修掉两个真 bug：四象限纵轴名（36pt 宽的框里塞 4 个字会折行溢出）、目录卡片序号行没计入高度。
+- 测试：全量 **1303 通过**（新增分页 / 截断 / 测量 / 自检用例）。
+
+English:
+- **The root cause was not “a font size written too large”** — our height measurement could never produce the real height: the line-height factor was treated as 1.0 (it is really 1.27–1.45 em), the space-before value was off by a factor of 100, and bold text, left indent and mixed CJK/Latin advance widths were not accounted for. Together these made the estimate less than half the true height, so **shrink-to-fit almost never fired**.
+- **Why it used to look fine**: every text box carried `<a:normAutofit/>`, so LibreOffice **shrank the text for us**; **PowerPoint does not recompute autofit when opening**, which is the version users saw — overflowing.
+- **Calibration** (render in the container, measure with `pdftotext -bbox`): natural line height is **1.455 em**; `spcBef` adds on top of the line height; a CJK glyph advances exactly **1.0 em** (so CJK gets no slack, Latin keeps 5%). `FitScale` now **binary-searches** for the largest scale that fits, floored at 12pt with line spacing never below 100% (below that, glyph ink escapes the line box).
+- **When it still does not fit, paginate instead of dropping content**: bullet / summary / TOC pages **split across slides** by how many items fit (titles carry “(n/m)”) and tables split by row; fixed boxes (cards, diagram layers, cover, captions) trim and **say in `warnings` how much was cut**.
+- **QA now reports `textOverflow`**: the written XML is re-read to re-check boxes against font sizes; `replaceText` re-checks after lengthening a run.
+- **Independent checker `tools/verify-pptx-textfit.py` (new)**: it strips `<a:normAutofit/>` from the product **before** rendering with LibreOffice — closing the “renderer covers for us” escape hatch — then flags every word whose `pdftotext -bbox` box escapes its own text box. Run against local fonts and the container font (`Noto Sans CJK SC`): **14 slides, 0 overflows, 0 words off-slide**.
+- Two real bugs fixed along the way: the quadrant page’s vertical axis label (four characters in a 36pt-wide box wrapped and overflowed) and the TOC card’s index line not being counted towards its height.
+- Tests: **1303 passing** overall (new pagination / trimming / measurement / QA cases).
+
+## 「代为处理」之后没有正文（1.0.140）
+# Nothing after “handled by X” (1.0.140)
+
+中文：
+- **现象**：与某位数字员工单聊，只收到一句「（X 代为处理）」，此后再无内容——无报错、无审批卡，技能也从未执行。
+- **根因有两层**：① 路由判断见到「确定性计划」就直接走计划路径，理由写的是「计划能干活」；
+  但**文档生成类技能在计划里是被刻意跳过的**（结构化 JSON 入参必须由模型当工具构造），
+  只挂这类技能的叶子岗位因此落到**轻量自答路径**——那条路径**没有工具、也不处理审批**，
+  模型返回的是一个审批请求而不是正文，于是正文为空。
+  ② 兜底只兜 `null`（`??=`），**兜不住空串 / 空白串**，剥壳后变空也一样漏掉，整条消息就只剩前缀。
+- **修法**：新增 `PlanPathCanDoTheWork(def)` —— 有可派下级、或本岗有「非文档生成 / 非落库」技能才算计划能干活；
+  **只挂文档生成技能的叶子**回落到完整流式路径。轻量自答为空而本岗有可执行技能时，**在同一条消息、同一个 run 内补跑一次完整流式**（复用既有审批机制）。
+  三处收尾统一按 `IsNullOrWhiteSpace` 判空并补上可展示的兜底文案。
+- **验证**：新增 5 个用例（含两个反向保护：有计划技能 / 有下级时**不应**回落到流式），
+  并用 `MockChatClient` 的触发词稳定复现「模型什么都不回」；改回旧逻辑确认用例失败后再恢复。
+  实盘复测两条单聊：8 页图示版 PPT、16 条长要点 + 四象限 + 12 行表格的详版 PPT，均正常出稿（前者**以前就是空回复**）。
+
+English:
+- **Symptom**: in a direct chat with a digital employee the only content received was a single “(handled by X)” line — no error, no approval card, and the skill never ran.
+- **Two root causes**: ① the routing check short-circuited to the plan path whenever deterministic planning was on, on the assumption that “the plan can do the work”; but **document-generation skills are deliberately skipped inside the plan** (their structured JSON arguments must be built by the model as a tool call), so a leaf agent holding only such skills landed on the **lightweight self-answer path** — which **has no tools and does not handle approvals**, so the model returned an approval request instead of prose and the body came back empty. ② The fallback only covered `null` (`??=`), **not empty or whitespace strings**, and unwrapping a coordinated answer could leave it empty too, so the message was reduced to its prefix.
+- **Fix**: a new `PlanPathCanDoTheWork(def)` only lets the plan path run when the agent can delegate downward or holds a skill that is neither document generation nor record-keeping; **a leaf holding only document skills falls back to the full streaming path**. When the lightweight self-answer comes back empty but the agent has an executable skill, the full streaming path is **re-run inside the same message and the same run** (reusing the existing approval machinery). All three closing paths now test `IsNullOrWhiteSpace` and add a displayable fallback.
+- **Verification**: 5 new cases (including two guards asserting the streaming fallback does **not** kick in when plan-eligible skills or subordinates exist), plus a `MockChatClient` trigger that deterministically reproduces “the model returns nothing”; reverting the fix was confirmed to fail the cases before restoring it. Two end-to-end chats re-ran cleanly: an 8-slide illustrated deck and a text-heavy deck (16 long bullets + quadrant + 12-row table) — the former **used to be an empty reply**.
+
 # AG-UI 群聊桌面版 1.0.139 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.139 Release Notes (current Windows desktop release)
 
