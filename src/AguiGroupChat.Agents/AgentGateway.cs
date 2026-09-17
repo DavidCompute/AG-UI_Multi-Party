@@ -61,6 +61,23 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private const int MaxBridgeAccumulatedChars = 50000;
 
     /// <summary>
+    /// “这一轮没产出可展示正文”的统一兜底文案。
+    ///
+    /// <para>
+    /// 为什么必须有：正文为空的运行会留下一条**只有前缀**（“（X 代为处理）”）甚至**完全空白**的消息 ——
+    /// 用户既看不到结论、也看不到失败原因，更不知道下一步该做什么（实测跏到多次：与「ppt生成助手」的单聊里
+    /// 只有一句「（ppt生成助手 代为处理）」，之后再无任何内容、连错误也没有）。
+    /// </para>
+    ///
+    /// <para>
+    /// 普通流式 / 指派提升 / 交互恢复三处收尾都读它，口径务必一致；
+    /// 判空一定要用 <c>IsNullOrWhiteSpace</c>：<c>??=</c> 兜不住**空串**（实测就是这么漏的）。
+    /// </para>
+    /// </summary>
+    private const string EmptyReplyFallback =
+        "（本轮没有产出可展示的正文。可以换一种更明确的问法，或把任务拆成更小的步骤让我重试。）";
+
+    /// <summary>
     /// 当前 run 的业务上下文（AsyncLocal ambient，与 MSAGENT 内部 AgentRunContext 机制同构）。
     /// <see cref="MemoryContextProvider"/>（AIContextProvider）在 InvokingAsync 中读取它完成记忆检索注入。
     /// </summary>
@@ -773,8 +790,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
             }
 
-            await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
+            var attached = await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
             await AttachAgentChainAsync(context, messageId, runCt);
+            // 空正文兜底：模型这一轮既没给正文、也没产出文件时，不要留一条**完全空白**的消息
+            // （前端就是一只空气泡，用户不知道发生了什么）。与指派/提升、计划两条路径同一口径。
+            if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
+                await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, EmptyReplyFallback, runCt);
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
             return new AgentInvocationResult(true, runId, null);
         }
@@ -949,8 +970,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 input = stepOut;
             }
 
-            var finalText = sb.Length == 0 ? "（流水线未产出内容）" : sb.ToString().Trim();
+            // 空正文兜底：`sb.Length == 0` 拦不住**空白串**（下游 Trim 之后就是空消息）
+            var finalText = sb.ToString().Trim();
+            if (finalText.Length == 0) finalText = "（流水线未产出内容）";
             finalText = UnwrapCoordinationAnswer(finalText); // 防内部协调 JSON 泄漏到用户
+            if (string.IsNullOrWhiteSpace(finalText)) finalText = EmptyReplyFallback;
             foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText, 160)) // 分块广播，前端可像流式一样渐进渲染
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
@@ -1192,6 +1216,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 foreach (var name in prefixNames)
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, $"（{name} 代为处理）\n", runCt);
 
+                var handled = false;
                 if (wantDelivery)
                 {
                     // 交付物兜底：交付岗直接产出文件（正文 + 下载卡片），不再贴一遍链路里的过程稿，
@@ -1199,6 +1224,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     // 同样传外层原始 ct（见上），让交付拿到自己的完整时间预算。
                     var delivery = await TrySatisfyDeliveryAsync(context, input, hops, ct, runId, messageId);
                     if (delivery.MessageId is { } mid) messageId = mid;
+                    handled = delivery.Handled;
                     if (delivery.AwaitingInteraction)
                     {
                         // 已下交互卡：消息保持开启，等用户决策后由 ResumeRunAsync 继续追加最终结果
@@ -1207,8 +1233,30 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     }
                 }
 
-                finalText ??= "（处理对象未返回内容）";
+                // 轻量自答没拿到正文、而本岗挂着可执行技能 → 极可能是“这一步本该调工具/技能”
+                // （需审批的技能在非流式 run 里只会返回一个审批请求，而不是正文）。
+                // 轻量路径不处理审批，继续下去只会给用户一句「（X 代为处理）」；别把不可能完成的工作
+                // 留在没工具的路径上，改走一次**在途完整流式**（与交付兜底同一条管道：
+                // 工具调用 / 审批卡 / 产物回档都齐），必要时交回 ResumeRunAsync 继续。
+                if (!handled && string.IsNullOrWhiteSpace(finalText)
+                    && _catalog.GetDefinition(context.AgentId) is { } selfDef && HasExecutableSkill(selfDef))
+                {
+                    _logger.LogWarning("指派/提升轻量自答未产出正文，改走完整流式：agent={AgentId} run={RunId}", context.AgentId, runId);
+                    var (interrupt, streamed) = await RunDeliveryStreamAsync(context, selfDef, runId, messageId, runCt);
+                    if (interrupt is not null)
+                    {
+                        _logger.LogInformation("轻量自答补跑因审批中断等待交互：run={RunId} interruptTarget={Target}", runId, context.TriggerUserId);
+                        return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
+                    }
+                    finalText = streamed;
+                }
+
+                // 空正文兜底（两道）：① `??=` 只兜 null，**兜不住空串/空白**；
+                // ② UnwrapCoordinationAnswer 把内部 JSON 包壳剥完后也可能变空。
+                // 两道都不做就会出现“只有（X 代为处理）的静默消息”——实测踩到过。
+                if (string.IsNullOrWhiteSpace(finalText)) finalText = EmptyReplyFallback;
                 finalText = UnwrapCoordinationAnswer(finalText); // 防内部协调 JSON 泄漏到用户
+                if (string.IsNullOrWhiteSpace(finalText)) finalText = EmptyReplyFallback;
                 var replyId = messageId!;
                 foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText.Trim(), 160))
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, replyId, chunk, runCt);
@@ -2384,6 +2432,36 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>
+    /// 编排计划路径对本岗位是否“干得了活”：有可派下级 → 能（计划会派单）；
+    /// 自己挂了**计划真会执行**的技能（非文档生成 / 非落库类） → 能（计划会调它）。
+    ///
+    /// <para>
+    /// 两者都不成立 = 只挂文档生成技能的叶子岗位：计划注定产不出东西，应回落完整流式。
+    /// 技能库拿不到时返回 true（保守：保持原行为，不放宽路由）。
+    /// </para>
+    /// </summary>
+    private bool PlanPathCanDoTheWork(AgentDefinition def)
+    {
+        if ((def.AssignmentIds ?? []).Any(id => !string.IsNullOrWhiteSpace(id)
+                && !string.Equals(id, def.AgentId, StringComparison.Ordinal)
+                && _catalog.GetDefinition(id) is not null))
+            return true;
+
+        var catalog = _skillCatalog.Value;
+        if (catalog is null) return true;
+        foreach (var id in def.SkillDefIds ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            if (catalog.Get(id) is not { } s) continue;
+            // 落库类技能不进计划 inventory（与 isSkillPlanner 的口径一致）。
+            if (s.Kind == AgentSkillKind.Org_deploy) continue;
+            // 文档生成技能在计划里只会被跳过（改交交付兜底），不算“计划干得了的活”。
+            if (!AgentGatewayHelpers.IsDocumentGenerator(s)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// 预判：组织化路由是否应当「交由完整流式路径」处理。
     ///
     /// <para>
@@ -2403,8 +2481,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (def is null) return false;
         if (!HasExecutableSkill(def)) return false;
 
-        // 配了编排计划时走 ExecuteCoordinatedPlanAsync（那条路径已含技能执行与产物回档），不需转。
-        if (_options.CoordinatorPlanning) return false;
+        // 配了编排计划时，正常情况下走 ExecuteCoordinatedPlanAsync（那条路径已含技能执行与产物回档），不需转。
+        //
+        // 但“配了计划”≠“计划干得了这个岗位的活”：若本岗是**没有可派下级的叶子**，且自己的技能
+        // **全是文档生成类**（docx_* / pptx_* / md_to_docx …）—— 这类技能被计划路径**刻意跳过**
+        // （它们的入参是结构化 JSON，必须由模型当工具构造），计划就产不出任何东西；
+        // 若就此返回 false，任务会落到轻量自答路径：那条路径没有工具、也不处理审批，
+        // 模型这一轮返回的是**审批请求**而不是正文 → 正文为空。
+        // 实测就是「与 ppt生成助手 的单聊」里那条只回「（ppt生成助手 代为处理）」、
+        // 技能从未执行、也没有审批卡与任何错误的请求。这种情况应当交回完整流式（工具 / 审批 / 产物回档）。
+        if (_options.CoordinatorPlanning && PlanPathCanDoTheWork(def)) return false;
 
         // 快速通道：配了可派下级时，先不做任何模型调用。
         // 只有「本岗是叶子（无下级）或下级全不行」才值得花一次预判；
@@ -2546,7 +2632,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         _logger.LogWarning("交付兑底未达标（无文件或内容过薄），第二次尝试：agent={AgentId}", candidate.AgentId);
                     }
 
-                    var interrupt = await RunDeliveryStreamAsync(sub, candidate, runId, messageId, ct);
+                    var interrupt = (await RunDeliveryStreamAsync(sub, candidate, runId, messageId, ct)).Interrupt;
                     if (interrupt is not null)
                     {
                         // 已挂交互卡：正文待用户决策后由 ResumeRunAsync 继续；产物回档也在那边完成
@@ -2603,12 +2689,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     /// <summary>
     /// 交付物兜底的“内联流式”：在<b>外层已开启的那条消息</b>上让交付岗真实跑一次模型循环
-    /// （工具调用 / 技能产物 / 审批全部走官方管道）。返回非 null 表示期间触发了审批中断，
-    /// 调用方应停止追加正文并把本次 run 交还给 <see cref="ResumeRunAsync"/>。
+    /// （工具调用 / 技能产物 / 审批全部走官方管道）。
+    ///
+    /// <para>
+    /// 返回 <c>Interrupt</c> 非 null 表示期间触发了审批中断，调用方应停止追加正文并把本次 run
+    /// 交还给 <see cref="ResumeRunAsync"/>；<c>Text</c> 是本轮累计写进消息的正文
+    /// （空 = 本轮什么都没产出，调用方需自行兜底一句人话）。
+    /// </para>
     ///
     /// <para>与外层共享 <c>sessionLock</c> 与 <c>_activeRuns[runId]</c>，因此不再单独建锁 / 注册 run。</para>
     /// </summary>
-    private async Task<ToolApprovalRequestContent?> RunDeliveryStreamAsync(
+    private async Task<(ToolApprovalRequestContent? Interrupt, string Text)> RunDeliveryStreamAsync(
         AgentInvocationContext context, AgentDefinition def, string runId, string? messageId, CancellationToken ct)
     {
         var visionModel = _options.VisionEnabled
@@ -2703,7 +2794,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (approval is not null) break;
         }
 
-        if (approval is null) return null;
+        if (approval is null) return (null, accumulated);
 
         // 审批中断：复用外层 runId（不另开 run），先把这次兜底已追加的正文清掉，保持“决策前正文为空”的一致体验
         if (messageId is not null)
@@ -2741,7 +2832,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             Timestamp = _hub.Value.NowMs,
         }, ct: ct);
         _logger.LogInformation("交付物兜底触发交互中断：agent={AgentId} interrupt={InterruptId}", context.AgentId, interruptId);
-        return approval;
+        return (approval, accumulated);
     }
 
     /// <summary>
@@ -3449,9 +3540,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 工具返回是权威且未经模型改写的，作为主来源；正文扫描保留以兼容 publish_file 的引用式产物。
     /// </para>
     /// </summary>
-    private async Task AttachPublishedProductsAsync(string groupId, string messageId, string content, CancellationToken ct)
+    private async Task<int> AttachPublishedProductsAsync(string groupId, string messageId, string content, CancellationToken ct)
     {
-        if (_attachmentStore is null) return;
+        if (_attachmentStore is null) return 0;
         try
         {
             var added = 0;
@@ -3473,11 +3564,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             added += await AttachSkillProducedFilesAsync(groupId, messageId, content + "\n" + toolResults, ct);
             if (added > 0)
                 _logger.LogInformation("智能体产物回档：{Count} 个附件挂到消息 {MessageId}", added, messageId);
+            return added;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "产物回档扫描失败（已忽略）");
         }
+        return 0;
     }
 
     /// <summary>
@@ -4637,7 +4730,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             // 运行完成
             _autoApprovedRuns.TryRemove(runId, out _); // 批量批准随运行结束失效
-            await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, runCt);
+            var attached = await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, runCt);
+            // 空正文兜底：交互前通常已清空过正文（ResetAgentContentAsync），若恢复后又什么都没产出，
+            // 消息会变成完全空白 —— 与其它路径同一口径，补一句人话。
+            if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
+                await _hub.Value.AppendAgentContentAsync(pending.GroupId, messageId, EmptyReplyFallback, runCt);
             // 交付物兜底：正文已由兜底流写入，这里只修正媒体/链路的挂载并把消息收尾
             if (!pending.SuppressMessage)
                 await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);

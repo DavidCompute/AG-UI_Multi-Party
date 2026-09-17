@@ -76,6 +76,204 @@ public sealed class AgentGatewayTests
         return new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
     }
 
+    /// <summary>
+    /// 模型这一轮没产出任何正文时，消息绝不能只剩一句「（X 代为处理）」甚至完全空白。
+    ///
+    /// <para>
+    /// 回归背景（真实场景）：「与 ppt生成助手 的单聊」里，用户要一份 PPT，收到的唯一内容就是
+    /// <c>（ppt生成助手 代为处理）</c> —— 之后再无任何内容、没有报错、没有审批卡，技能也从未执行。
+    /// 根因之一就写在这里的断言里：轻量自答路径里模型返回的是**审批请求**而不是正文，正文因此是空串，
+    /// 而原来的 <c>finalText ??= …</c> 只兜 null、<b>兜不住空串</b>，于是整条消息就只剩前缀。
+    /// </para>
+    ///
+    /// <para>
+    /// mock 侧的 <c>__AGUI_EMPTY_REPLY__</c> 把这个场景变成确定性的（真实模型只是偶发）。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Invoke_RouteAnswerIsEmpty_StillRepliesWithFallback()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
+            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "空答助手" }],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var gateway = CreateGateway(f, out _);
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "空答助手", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "帮我看看这个 __AGUI_EMPTY_REPLY__", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "运行失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        Assert.Equal(EmptyReplyFallbackForTest, stored!.Content.Trim());
+    }
+
+    /// <summary>
+    /// 同上，走的是**指派/提升路由**那条分支：空正文 + 只剩前缀的消息也不算“有回复”。
+    /// （这条路径以前用的是 <c>finalText ??= "（处理对象未返回内容）"</c>，空串直接漏过去。）
+    /// </summary>
+    [Fact]
+    public async Task Invoke_AssignmentRouteAnswerIsEmpty_StillRepliesWithFallback()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a"],
+            Members = [new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "空答主管" }],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents = [ new AgentDefinition
+            {
+                AgentId = "agent_a", Nickname = "空答主管", Description = "测试", Instructions = "你是空答主管",
+                TriggerMode = AgentTriggerMode.Mentioned,
+                // 配了指派目标但那个员工不存在（组织配置变更后的残留）：路由会进来、却没人能接，
+                // 最终落到「本级自答」——正是我们要压的那条轻量路径。
+                AssignmentIds = ["ghost_agent"],
+            } ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "空答主管", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "帮我看看这个 __AGUI_EMPTY_REPLY__", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "运行失败: " + result.ErrorCode);
+        var events = f.Drain(inbox).Select(HubFixture.Parse).ToList();
+        var start = events.First(e => e.GetProperty("type").GetString() == EventTypes.TextMessageStart);
+        var messageId = start.GetProperty("messageId").GetString()!;
+        var stored = f.Store.GetMessage(group.GroupId, messageId);
+        Assert.NotNull(stored);
+        // 不能只有前缀：必须再有一句“本轮没产出正文”的人话
+        Assert.Contains("代为处理", stored!.Content);
+        Assert.Contains(EmptyReplyFallbackForTest, stored.Content);
+    }
+
+    /// <summary>
+    /// 只挂**文档生成技能**的叶子岗位应当交回完整流式，而不是留在「指派/提升路由」里。
+    ///
+    /// <para>
+    /// 回归背景（真实场景）：单聊里的「ppt生成助手」只挂了内置 <c>pptx_deck</c>，开了编排计划后
+    /// <c>isSkillPlanner</c> 成立 → 进路由；而 <c>ShouldDelegateRouteToStreamingAsync</c> 以前见到
+    /// “配了 CoordinatorPlanning”就直接 return false（理由：计划路径能干活）。
+    /// 但文档生成技能在计划里是**被刻意跳过**的（结构化 JSON 入参必须由模型当工具构造），
+    /// 于是任务落在轻量自答上：那条路径没有工具、也不处理审批，模型只返回一个审批请求而没正文
+    /// → 用户只收到一句「（ppt生成助手 代为处理）」，技能从未执行。
+    /// </para>
+    ///
+    /// <para>
+    /// 这里直接断言**路由决策**（而不是走完整请求）：mock 模型在计划分支里总能产出一个步骤，
+    /// 端到端跑下来两条路径的产物长得很像，断言不到真正的差别（实测：改回旧逻辑也照样“通过”）。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task RouteDecision_DocSkillOnlyLeaf_DelegatesToStreaming()
+    {
+        var f = new HubFixture();
+        var (gateway, ctx) = await RouteDecisionFixture(f, "pptx_deck", "生成 .pptx 演示文稿", hasSubordinate: false);
+        Assert.True(await ShouldDelegateRouteAsync(gateway, ctx),
+            "只挂文档生成技能的叶子岗位应走完整流式（否则会落到没有工具/审批的轻量自答）");
+    }
+
+    /// <summary>反向保护：本岗自己的技能**真能在计划里跑**（非文档生成）时，不要轻易放弃计划路径。</summary>
+    [Fact]
+    public async Task RouteDecision_PlanEligibleSkill_KeepsPlanPath()
+    {
+        var f = new HubFixture();
+        var (gateway, ctx) = await RouteDecisionFixture(f, "host_probe", "采集主机信息", hasSubordinate: false);
+        Assert.False(await ShouldDelegateRouteAsync(gateway, ctx));
+    }
+
+    /// <summary>反向保护：有可派下级时，计划路径能派单，不应因“本岗技能不可入计划”就放弃路由。</summary>
+    [Fact]
+    public async Task RouteDecision_WithSubordinate_KeepsPlanPath()
+    {
+        var f = new HubFixture();
+        var (gateway, ctx) = await RouteDecisionFixture(f, "pptx_deck", "生成 .pptx 演示文稿", hasSubordinate: true);
+        Assert.False(await ShouldDelegateRouteAsync(gateway, ctx));
+    }
+
+    private static async Task<(AgentGateway Gateway, AgentInvocationContext Ctx)> RouteDecisionFixture(
+        HubFixture f, string skillId, string skillDescription, bool hasSubordinate)
+    {
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            CoordinatorPlanning = true,
+            Agents = [
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "岗位", Description = "d", Instructions = "i",
+                    TriggerMode = AgentTriggerMode.Mentioned, SkillDefIds = [skillId],
+                    AssignmentIds = hasSubordinate ? ["agent_sub"] : [],
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_sub", Nickname = "下级", Description = "d", Instructions = "i",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+            ],
+        };
+        using var lf = NullLoggerFactory.Instance;
+        var skillCatalog = new AgentSkillCatalog(lf, options);
+        skillCatalog.Upsert(new AgentSkillDefinition
+        {
+            SkillId = skillId, Name = skillId, Kind = AgentSkillKind.Dotnet, Description = skillDescription,
+            Body = "x", ExecutionLocation = AgentSkillExecutionLocation.Server, RequiresApproval = true,
+        });
+        var services = new ServiceCollection().AddSingleton(f.Hub).AddSingleton(skillCatalog).BuildServiceProvider();
+        var catalog = new AgentCatalog(options, lf, services);
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, NullLogger<AgentGateway>.Instance);
+
+        // 路由决策内部会读群存储（拼上下文 / 语境判断），因此必须给一个真实存在的群。
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "u", MemberIds = ["agent_a", "agent_sub"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "岗位" },
+                new MemberSeed { MemberId = "agent_sub", MemberType = MemberType.Agent, Nickname = "下级" },
+            ],
+        });
+        var ctx = new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "t", AgentId: "agent_a", AgentNickname: "岗位",
+            TriggerMessageId: "m", TriggerUserId: "u", Content: "帮我做一份产品介绍 PPT",
+            Mentions: [], MentionAll: false, TriggerMode: AgentTriggerMode.Mentioned);
+        return (gateway, ctx);
+    }
+
+    private static async Task<bool> ShouldDelegateRouteAsync(AgentGateway gateway, AgentInvocationContext ctx)
+    {
+        var mi = typeof(AgentGateway).GetMethod("ShouldDelegateRouteToStreamingAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(mi);
+        return await (Task<bool>)mi!.Invoke(gateway, [ctx, CancellationToken.None])!;
+    }
+
+    /// <summary>与 <c>AgentGateway.EmptyReplyFallback</c> 保持一致的断言口径（常量是 private）。</summary>
+    private const string EmptyReplyFallbackForTest =
+        "（本轮没有产出可展示的正文。可以换一种更明确的问法，或把任务拆成更小的步骤让我重试。）";
+
     [Fact]
     public async Task Invoke_RelayToAgent_StreamsRelayReplyAsHost()
     {

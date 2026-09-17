@@ -128,6 +128,11 @@ public sealed class MockChatClient : IChatClient
             || lastUserText.Contains("只输出该值本身", StringComparison.Ordinal))
             return ["Exchange OWA 服务器地址是 https://mail.example.com/owa，请用它测试。"];
 
+        // 空答复演习（测试 / 演示用）：模拟“模型这一轮只产出思考、没有正文”的情形，
+        // 用于钉住“空答复必须有兜底文案、不能静默”这条防线（线上真实模型偶发）。
+        // 放在路由 / 计划等决策分支**之后**：决策提示里带这个词时仍按决策语义回答。
+        if (lastUserText.Contains("__AGUI_EMPTY_REPLY__", StringComparison.Ordinal)) return [];
+
         var text = $"收到！关于「{lastUserText}」，作为「{_agent.Nickname}」我的建议如下：\n\n" +
                    "1. 明确需求边界与验收标准，避免范围蔓延；\n" +
                    "2. 拆分里程碑，先交付可验证的最小闭环；\n" +
