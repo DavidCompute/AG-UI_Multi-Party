@@ -459,6 +459,8 @@ window.I18N_DICTS.zh = {
 
   /* --- 知识库管理 --- */
   "kb.title": "知识库管理",
+  "kb.newTitle": "新建知识库",
+  "kb.createHint": "创建后在列表里展开该库、点「上传文档」加入资料（支持 txt / md / docx / xlsx / pptx / pdf / json / csv）；文档会自动提取文本并向量化，数字员工回复前检索其中的内容。",
   "kb.name.ph": "知识库名称（如：公司制度）",
   "kb.desc.ph": "一句话说明（可选）",
   "kb.create": "＋ 创建知识库",
@@ -474,6 +476,8 @@ window.I18N_DICTS.zh = {
 
   /* --- 图库管理 --- */
   "imgLib.title": "图库管理",
+  "imgLib.newTitle": "新建图库",
+  "imgLib.createHint": "创建后在列表里展开该库、点「上传图片」加入素材（支持 png / jpg / jpeg / gif / bmp / webp，可多选）；系统会自动生成图片描述并向量化，供 PPT / Word / PDF 出稿时按语义配图。",
   "imgLib.name.ph": "图库名称（如：产品宣传图）",
   "imgLib.desc.ph": "一句话说明（可选）",
   "imgLib.create": "＋ 创建图库",

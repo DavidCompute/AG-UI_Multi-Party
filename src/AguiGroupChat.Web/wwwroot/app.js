@@ -2959,22 +2959,86 @@ function renderKbModal() {
   });
 }
 
-/** 打开知识库管理弹窗并刷新列表（重置搜索 / 收起创建面板）。 */
+/* ============ 「新建知识库 / 新建图库」共用弹窗 ============
+ * 为何做成独立弹窗：新增有两个输入（名称 + 说明），内联在搜索框与列表之间既不醒目、
+ * 列表长时还会被顶出视野；两者共用同一个弹窗后交互完全一致。
+ * 弹窗本身带 ui-dialog-overlay（z-index 80），所以从 z-60 的管理弹窗里唤起也在最上层。
+ * 失败时**保留已填内容**（改名重试不用重打），成功才关闭并刷新列表。 */
+let libCreateKind = null;   // "kb" | "imglib"
+
+const LIB_CREATE = {
+  kb: {
+    titleKey: "kb.newTitle", namePh: "kb.name.ph", descPh: "kb.desc.ph", hintKey: "kb.createHint",
+    okKey: "kb.createOk", needNameKey: "kb.needName", createdKey: "kb.created", failKey: "kb.createFail",
+    post: "/ag-ui/kb", reload: () => loadKbs(),
+  },
+  imglib: {
+    titleKey: "imgLib.newTitle", namePh: "imgLib.name.ph", descPh: "imgLib.desc.ph", hintKey: "imgLib.createHint",
+    okKey: "imgLib.createOk", needNameKey: "imgLib.needName", createdKey: "imgLib.created", failKey: "imgLib.createFail",
+    post: "/ag-ui/image-libs", reload: () => loadImageLibs(),
+  },
+};
+
+function openLibCreateDialog(kind) {
+  const cfg = LIB_CREATE[kind];
+  if (!cfg) return;
+  libCreateKind = kind;
+  $("libCreateName").value = "";
+  $("libCreateDesc").value = "";
+  renderLibCreateTexts();
+  $("libCreateModal").classList.remove("hidden");
+  $("libCreateName").focus();
+}
+
+/** 只刷文案（标题 / 占位符 / 说明 / 按钮），不动已填内容 —— 供打开时与语言切换时共用。 */
+function renderLibCreateTexts() {
+  const cfg = LIB_CREATE[libCreateKind];
+  if (!cfg) return;
+  $("libCreateTitle").textContent = t(cfg.titleKey);
+  const name = $("libCreateName");
+  const desc = $("libCreateDesc");
+  // 占位符走 data-i18n-placeholder 而不是直接写 placeholder：语言切换时 i18n 运行时会跟着重刷
+  name.setAttribute("data-i18n-placeholder", cfg.namePh);
+  desc.setAttribute("data-i18n-placeholder", cfg.descPh);
+  name.placeholder = t(cfg.namePh);
+  desc.placeholder = t(cfg.descPh);
+  $("libCreateHint").textContent = t(cfg.hintKey);
+  $("libCreateOk").textContent = t(cfg.okKey);
+}
+
+function closeLibCreateDialog() {
+  libCreateKind = null;
+  $("libCreateModal").classList.add("hidden");
+}
+
+async function submitLibCreate() {
+  const cfg = LIB_CREATE[libCreateKind];
+  if (!cfg) return;
+  const name = $("libCreateName").value.trim();
+  if (!name) { toast(t(cfg.needNameKey)); $("libCreateName").focus(); return; }
+  const btn = $("libCreateOk");
+  btn.disabled = true;
+  try {
+    const res = await fetch(cfg.post, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ name, description: $("libCreateDesc").value.trim() || null }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t(cfg.failKey, { err: res.status }))); return; }
+    toast(t(cfg.createdKey, { name: data.name }));
+    closeLibCreateDialog();
+    await cfg.reload();
+  } finally { btn.disabled = false; }
+}
+
+/** 打开知识库管理弹窗并刷新列表（重置搜索 / 收起新增弹窗）。 */
 async function openKbModal() {
   const s = $("kbSearch"); if (s) { s.value = ""; kbSearchQuery = ""; }
-  toggleKbCreatePanel(false);
+  closeLibCreateDialog();
   $("kbModal").classList.remove("hidden");
   await loadKbs();
   startKbPolling();
-}
-
-/** 展开 / 收起知识库创建面板（force 可强制指定状态）。 */
-function toggleKbCreatePanel(force) {
-  const p = $("kbCreatePanel");
-  if (!p) return;
-  const show = force === undefined ? p.classList.contains("hidden") : force;
-  p.classList.toggle("hidden", !show);
-  if (show) $("kbName")?.focus();
 }
 
 /* 文档处理状态轮询：有 processing 文档时每 2s 刷新一次列表，全部完成自动停止。 */
@@ -3142,19 +3206,10 @@ function renderImgLibModal() {
 
 async function openImgLibModal() {
   const s = $("imgLibSearch"); if (s) { s.value = ""; imgLibSearchQuery = ""; }
-  toggleImgLibCreatePanel(false);
+  closeLibCreateDialog();
   $("imgLibModal").classList.remove("hidden");
   await loadImageLibs();
   startImgLibPolling();
-}
-
-/** 展开 / 收起图库创建面板（force 可强制指定状态）。 */
-function toggleImgLibCreatePanel(force) {
-  const p = $("imgLibCreatePanel");
-  if (!p) return;
-  const show = force === undefined ? p.classList.contains("hidden") : force;
-  p.classList.toggle("hidden", !show);
-  if (show) $("imgLibName")?.focus();
 }
 
 /* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */
@@ -9517,49 +9572,27 @@ function init() {
   // 数字员工表单：允许访问的用户组（弹窗选取，与技能 / 知识库一致）
   const afAllowGroupAddBtn = $("afAllowGroupAddBtn");
   if (afAllowGroupAddBtn) afAllowGroupAddBtn.onclick = () => openAgentPick("usergroup");
-  $("kbNewBtn").onclick = () => toggleKbCreatePanel();
-  $("kbCreateCancel").onclick = () => toggleKbCreatePanel(false);
+  $("kbNewBtn").onclick = () => openLibCreateDialog("kb");
   $("kbSearch").addEventListener("input", () => { kbSearchQuery = $("kbSearch").value; renderKbModal(); });
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };
-  $("kbCreateBtn").onclick = async () => {
-    const name = $("kbName").value.trim();
-    if (!name) { toast(t("kb.needName")); return; }
-    const res = await fetch("/ag-ui/kb", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ name, description: $("kbDesc").value.trim() || null }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(errMsg(data, t("kb.createFail", { err: res.status }))); return; }
-    toast(t("kb.created", { name: data.name }));
-    $("kbName").value = "";
-    $("kbDesc").value = "";
-    toggleKbCreatePanel(false);
-    await loadKbs();
-  };
   // 图库：管理弹窗（入口在「AI 角色管理」工具栏）+ 创建 + 绑定（与知识库一致）
   $("agentImgLibManageBtn").onclick = openImgLibModal;
   $("afImgLibAddBtn").onclick = () => openAgentPick("imglib");
-  $("imgLibNewBtn").onclick = () => toggleImgLibCreatePanel();
-  $("imgLibCreateCancel").onclick = () => toggleImgLibCreatePanel(false);
+  $("imgLibNewBtn").onclick = () => openLibCreateDialog("imglib");
   $("imgLibSearch").addEventListener("input", () => { imgLibSearchQuery = $("imgLibSearch").value; renderImgLibModal(); });
   $("imgLibCloseBtn").onclick = () => { $("imgLibModal").classList.add("hidden"); stopImgLibPolling(); renderImgLibPicks(); };
-  $("imgLibCreateBtn").onclick = async () => {
-    const name = $("imgLibName").value.trim();
-    if (!name) { toast(t("imgLib.needName")); return; }
-    const res = await fetch("/ag-ui/image-libs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-      body: JSON.stringify({ name, description: $("imgLibDesc").value.trim() || null }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(errMsg(data, t("imgLib.createFail", { err: res.status }))); return; }
-    toast(t("imgLib.created", { name: data.name }));
-    $("imgLibName").value = "";
-    $("imgLibDesc").value = "";
-    toggleImgLibCreatePanel(false);
-    await loadImageLibs();
-  };
+  // 「新建知识库 / 新建图库」弹窗：确认 / 取消 / 点遮罩关闭 / Esc 关闭 / 回车提交
+  $("libCreateOk").onclick = submitLibCreate;
+  $("libCreateCancel").onclick = closeLibCreateDialog;
+  $("libCreateModal").addEventListener("click", (e) => { if (e.target === $("libCreateModal")) closeLibCreateDialog(); });
+  ["libCreateName", "libCreateDesc"].forEach((id) => $(id).addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); submitLibCreate(); }
+  }));
+  // 捕获阶段抢 Esc：否则同一次按键会先把下层的管理弹窗（z-60）也关掉（uiConfirm 也是这么做的）
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || $("libCreateModal").classList.contains("hidden")) return;
+    e.preventDefault(); e.stopPropagation(); closeLibCreateDialog();
+  }, true);
   $("agentSearch").addEventListener("input", renderAgentList);
   $("afTriggerMode").addEventListener("change", syncTriggerForm);
   $("afInstructions").addEventListener("keydown", (e) => {
@@ -9730,6 +9763,8 @@ function init() {
     if (typeof updateDocTitle === "function") updateDocTitle();
     if (typeof setStatus === "function") setStatus(_connOnline, _connKey);
     refreshMessagesEmptyHint(); // 空态引导文案跟随语言
+    // 「新建知识库 / 新建图库」弹窗正开着时，它的标题/按钮/占位符不在静态 DOM 的扫描范围内，得自己重刷
+    if (!$("libCreateModal").classList.contains("hidden")) renderLibCreateTexts();
   });
 
   // 搜索框右侧“×”清除按钮接线（放在各搜索 input 监听之后，清空时派发的 input 事件可触发过滤）

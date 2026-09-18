@@ -234,15 +234,23 @@ topbar（品牌 + 顶栏操作）
   解释器/需审批开关；试运行（`#sfTest`）结果弹 `#skillRunResultModal`；shell 始终需审批；
   client 技能在本机桥执行，需发起用户批准。
 - `#kbModal`（知识库）：创建/管理知识库、上传文档，文档异步向量化入库（状态轮询）。
-- `#imgLibModal`（图库 `modal kb-modal`）：与知识库**同构**的列表式布局——工具栏搜索（带 “×” 清除）+
-  创建面板（`#imgLibCreatePanel`：名称 + 一句话说明）+ 四列表格头（名称/ID · 图片 · 描述 · 操作）+
-  列表 `#imgLibListWrap`（弹窗高度受 `max-height: calc(100vh - 48px)` 约束，列表区独立纵横滚动）。
+- `#imgLibModal`（图库 `modal kb-modal`）：与知识库**同构**的列表式布局——工具栏搜索（带 “×” 清除）+ 四列表格头（名称/ID · 图片 · 描述 · 操作）+ 列表 `#imgLibListWrap`（弹窗高度受 `max-height: calc(100vh - 48px)` 约束，列表区独立纵横滚动）。
   - 行点击（或 `▸`）展开/收起该库的**缩略图网格** `#imglib-grid`（`repeat(auto-fill, minmax(160px,1fr))`）；
     每张卡片 = 缩略图 + 文件名/像素尺寸/处理状态 + 可编辑描述输入框 `保存描述` + `🗑️` 移除。
   - 上传：仅库创建者可见 `📤 上传图片`（多选），走 `/ag-ui/upload` → 登记进图库；
     上传后由视觉模型异步写描述并向量化，状态 `processing` 时前端每 3s 轮询该弹窗直到 `ready`。
   - 非创建者（含系统级库）只读：显示“系统知识库（只读）”同类提示，无上传/删除按钮。
   - 样式口径：缩略图卡片风格与知识库文档列表一致（同一边框 / 圆角 / hover 高亮），文案全部走 i18n（`imgLib.*`）。
+- 「新建知识库 / 新建图库」**共用一个弹窗** `#libCreateModal`（`modal ui-dialog lib-create-modal`，两个管理弹窗底部的
+  `＋ 创建…` 按钮分别以 `kind='kb' | 'imglib'` 打开）：
+  - 为何不做成管理弹窗里的内联展开：新增有两个输入（名称 + 说明），夹在搜索框与列表之间既不醒目、
+    列表长时还会被顶出视野；做成独立弹窗后两处体验完全一致。
+  - 层级：带 `ui-dialog-overlay`（`z-index:80`），高于管理弹窗的 `z-index:60`，所以从管理弹窗里唤起也在最上层。
+  - 交互：打开即聚焦名称；`Enter` 提交；`Esc` / 取消 / 点遮罩关闭（`Esc` 在**捕获阶段**处理，
+    避免同一次按键把下层的管理弹窗也一起关掉）；名称为空时提示且**不关弹窗**；创建失败**保留已填内容**便于改名重试。
+  - 文案随类型切换：标题/占位符/说明/按钮由 `renderLibCreateTexts()` 统一刷新（占位符改写 `data-i18n-placeholder`，
+    所以语言切换时运行时也会重刷；`i18nchanged` 监听保证弹窗开着时切语言即时生效，且**不碰已填内容**）。
+  - 文案 key：`kb.newTitle` / `kb.createHint` / `imgLib.newTitle` / `imgLib.createHint`，其余复用各自的 `*.name.ph` / `*.desc.ph` / `*.createOk`。
 
 ---
 

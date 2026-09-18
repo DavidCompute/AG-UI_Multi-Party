@@ -619,12 +619,6 @@
             <button type="button" class="search-clear" data-clear-for="kbSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
         </div>
-        <div id="kbCreatePanel" class="kb-create hidden">
-          <input id="kbName" class="modal-input" data-i18n-placeholder="kb.name.ph" maxlength="40" />
-          <input id="kbDesc" class="modal-input" data-i18n-placeholder="kb.desc.ph" maxlength="120" />
-          <button id="kbCreateBtn" class="send" data-i18n="kb.createOk">创建</button>
-          <button id="kbCreateCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
-        </div>
         <div class="kb-grid-head">
           <span data-i18n="kb.col.name">名称 / ID</span>
           <span data-i18n="kb.col.docs">文档</span>
@@ -651,12 +645,6 @@
             <button type="button" class="search-clear" data-clear-for="imgLibSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
         </div>
-        <div id="imgLibCreatePanel" class="kb-create hidden">
-          <input id="imgLibName" class="modal-input" data-i18n-placeholder="imgLib.name.ph" maxlength="40" />
-          <input id="imgLibDesc" class="modal-input" data-i18n-placeholder="imgLib.desc.ph" maxlength="120" />
-          <button id="imgLibCreateBtn" class="send" data-i18n="imgLib.createOk">创建</button>
-          <button id="imgLibCreateCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
-        </div>
         <div class="kb-grid-head">
           <span data-i18n="imgLib.col.name">名称 / ID</span>
           <span data-i18n="imgLib.col.images">图片</span>
@@ -668,6 +656,25 @@
       <div class="modal-actions">
         <button id="imgLibNewBtn" class="send" data-i18n="imgLib.create">＋ 创建图库</button>
         <button id="imgLibCloseBtn" class="btn-ghost" data-i18n="kb.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 「新建知识库 / 新建图库」共用的新增弹窗。
+       为何单独做一个弹窗而不是在管理弹窗里内联展开：新增夹在搜索框与列表之间既不醒目、
+       也会把列表顶下去（列表长时还会被滚出视野）；两者共用同一套交互 → 体验完全一致。
+       z-index 用 ui-dialog-overlay（80）：它从 z-60 的管理弹窗里唤起，必须在其之上。 -->
+  <div id="libCreateModal" class="modal-overlay ui-dialog-overlay hidden">
+    <div class="modal ui-dialog lib-create-modal">
+      <div class="modal-title" id="libCreateTitle"></div>
+      <div class="lib-create-body">
+        <input id="libCreateName" class="modal-input" maxlength="40" />
+        <input id="libCreateDesc" class="modal-input" maxlength="120" />
+        <p class="form-hint" id="libCreateHint"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="libCreateOk" class="send"></button>
+        <button id="libCreateCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
       </div>
     </div>
   </div>

@@ -459,6 +459,8 @@ window.I18N_DICTS.en = {
 
   /* --- 知识库管理 --- */
   "kb.title": "Knowledge Base Management",
+  "kb.newTitle": "New Knowledge Base",
+  "kb.createHint": "Once created, expand it in the list and use “Upload document” to add material (txt / md / docx / xlsx / pptx / pdf / json / csv). Documents are text-extracted and vectorised so employees retrieve them before answering.",
   "kb.name.ph": "Knowledge base name (e.g. Company Policies)",
   "kb.desc.ph": "One-line description (optional)",
   "kb.create": "＋ Create Knowledge Base",
@@ -474,6 +476,8 @@ window.I18N_DICTS.en = {
 
   /* --- 图库管理 --- */
   "imgLib.title": "Image Library",
+  "imgLib.newTitle": "New Image Library",
+  "imgLib.createHint": "Once created, expand it in the list and use “Upload images” to add pictures (png / jpg / jpeg / gif / bmp / webp, multi-select). Descriptions are generated and vectorised so PPT / Word / PDF deliverables can be illustrated by semantic search.",
   "imgLib.name.ph": "Library name (e.g. Product shots)",
   "imgLib.desc.ph": "One-line description (optional)",
   "imgLib.create": "＋ Create Image Library",
