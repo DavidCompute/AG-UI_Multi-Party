@@ -1,3 +1,55 @@
+# AG-UI 群聊桌面版 1.0.141 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.141 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.141 为当前 Windows 桌面版本。这一版新增**图库**：把公司自己的图片传上去，数字员工出稿（PPT / Word / PDF）时按语义**自动配图**，**不依赖外网**。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.141 is the current Windows desktop release. It adds an **image library**: upload your own pictures once, and digital employees then **illustrate PPT / Word / PDF deliverables by semantic search** — **with no internet dependency**. Web and desktop share the same Hub / gateway / frontend.
+
+## 图库：自有图片，语义配图，不出网（1.0.141）
+# Image library: your own pictures, semantic matching, fully offline (1.0.141)
+
+中文：
+- **要解决什么**：此前 PPT 的 `imageQuery` 只能去 Wikimedia 找照片。内网 / 合规场景里外网往往不可达，
+  而且“公司自己有一批品牌图 / 产品图，数字员工配图时自己挑”才是真实需求。
+- **怎么用**：`AI 角色管理 → 🖼️ 管理图库` 建库并上传图片（可多选）；上传后**视觉模型自动写中文描述**
+  （描述里附检索要素，失败则退回文件名 + 手填描述），描述 + 标签 + 文件名一起向量化。
+  出稿时在需要图的位置写 `imageQuery`（关键词）即可，库内命中就用本地图片直接嵌入 —— **不需要署名**，
+  因为那是你自己上传的图。
+- **三个内置文档技能都接通**，但口径按能力分开：
+  - **PPT**（`pptx_deck`）：先查图库，未命中再回落 Wikimedia，都没有则降级为题图；
+  - **Word**（`docx_*`）：只走图库（`{"image":{"imageQuery":"…"}}`），取不到就**跳过这张图**并在 `warnings` 说明；
+  - **PDF**（`pdf_doc`）：只走图库，且只嵌 **PNG/JPEG**（PDFsharp 的限制）；只命中 WebP 时**宁可跳过并告知**
+    “建议换成 PNG/JPEG”，也不硬塞 —— 硬塞会生成打不开的 PDF。
+- **岗位可以绑定图库**（表单「图库（可选）」）：绑了 = 该岗位出稿**只用这几个库**（典型：对外宣讲岗只准用已审核的品牌图库）；
+  不绑 = 用触发者本人可读的全部图库。**绑定的库全被删时不注入**（按“无图库”降级），而**不是**静默放宽成该用户全部图库。
+- **安全设计（两条硬线）**：① 平台只往技能入参里注入一个**检索范围句柄**，技能**不自报图库 ID** ——
+  入参是模型生成的，能自报就能让模型写个别人的 ID 把别人的图读出来；② `/ag-ui/images/search` 的
+  **服务器本地路径只回给进程内自令牌**，登录用户只拿元数据与 `/raw` 地址。图库向量也**不参与群记忆检索**。
+- **三个入口都注入**（聊天单聊/知聚/编排、技能库「试运行」、桌面宿主直跑）：
+  顺手补掉一个口径缺口 —— 原先只有聊天路径注入，于是「聊天里能配图、界面上手动试运行却一张图都没有」。
+- **顺手修掉一个真 bug**：图库允许上传 WebP，而 Word 只认 png/jpg/gif/bmp/tiff。
+  现在按**文件头**判定并把认不出的重编成 PNG（旧实现按扩展名，遇到改过名的图会报“不支持的图片格式”并让整篇文档失败）。
+- **界面**：管理弹窗与知识库同构（搜索 + 创建 + 展开缩略图网格 + 逐图改描述 + 多图上传 + 处理中状态轮询 + 删图/删库），
+  数字员工表单新增「图库（可选）」绑定区（只罗列已选、新增走弹窗勾选），列表带 🖼️ 计数徽标；中英文案齐全。
+- **实测（容器内真实链路）**：上传一张日落城市天际线图 → 视觉模型写出“11 栋建筑 / 日落 / 渐变天空 / 平涂矢量”等要素
+  → 检索命中 **0.777** → 经平台跑 `docx_report`（带 `imageQuery`）→ 产物含嵌入图片、`warnings` 为空，
+  日志可见 `已为文档技能注入图库检索范围：skill=docx_report libs=1`。
+- 测试：新增 14 个（回环链路用假平台端点真跑一遍：句柄 + 自令牌 + 路径 + 嵌入 + 各类降级；绑定语义：收窄/不绑取全部/绑定失效不放宽/非文档技能不动/非 JSON 不动），
+  全量 **1343 通过**。
+
+English:
+- **What it solves**: `imageQuery` on decks previously only searched Wikimedia. On intranets (and for compliance) the internet is often unreachable, and “we have our own brand/product shots — let the employee pick” is the real requirement.
+- **How to use it**: create a library under `AI role management → 🖼️ Image library` and upload pictures (multi-select). A **vision model writes a Chinese description** (with search facets; on failure the filename plus your caption is used), and description + tags + filename are vectorised. Then just write `imageQuery` where a picture is wanted — a library hit embeds the local file and needs **no attribution**, because it is your own image.
+- **All three built-in document skills are wired up**, with deliberately different policies: **PPT** tries the library first, then Wikimedia, then generated art; **Word** uses the library only (a miss **skips that image** and explains itself in `warnings`); **PDF** uses the library only and embeds **PNG/JPEG only**, skipping rather than force-fitting a WebP (which would produce an unopenable PDF) and telling you to convert it.
+- **Positions can bind libraries** (the new “Image library (optional)” form section): bound = that role may illustrate from **those libraries only** (e.g. a public-facing role restricted to approved brand assets); unbound = every library the triggering user can read. If every bound library is deleted, **nothing is injected** rather than silently widening to all of the user's libraries.
+- **Security (two hard rules)**: the platform injects only a **search-scope handle**, never library IDs — the skill input is model-generated, so self-declared IDs would let a model read someone else's pictures; and the **server-side file path is returned only to the in-process self token**, while logged-in users get metadata and `/raw` URLs. Library vectors are **excluded from group-memory retrieval**.
+- **All three entry points inject the scope** (chat, the skill-library “Run” button and the desktop host), closing a gap where illustrations worked in chat but not when test-running the skill from the UI.
+- **A real bug fixed along the way**: the library accepts WebP while Word only embeds png/jpg/gif/bmp/tiff. Detection is now by **file signature** with re-encoding to PNG for anything else (the old code trusted the extension, so a renamed file failed the whole document).
+- **UI**: the management dialog mirrors the knowledge-base one (search, create, expandable thumbnail grids, per-image caption editing, multi-file upload, processing-state polling, delete image/library); the agent form gains an “Image library (optional)” binding section (lists only what is selected, adds via a picker dialog) and the list shows a 🖼️ count badge. Chinese and English strings are complete.
+- **Verified live in the container**: upload a sunset-skyline picture → the vision model describes it (11 buildings, sunset, gradient sky, flat vector) → semantic search scores **0.777** → run `docx_report` through the platform with `imageQuery` → the output contains the embedded image with empty `warnings`, and the log shows `已为文档技能注入图库检索范围：skill=docx_report libs=1`.
+- Tests: 14 new cases (the loopback chain exercised against a fake platform endpoint — handle, self token, path, embedding and every degradation path; plus binding semantics: narrowed to bound, all readable when unbound, no widening when bindings are gone, non-document skills untouched, non-JSON input untouched); **1343 passing** in total.
+
+---
+
 # AG-UI 群聊桌面版 1.0.140 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.140 Release Notes (current Windows desktop release)
 
