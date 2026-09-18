@@ -473,7 +473,7 @@ window.I18N_DICTS.en = {
   "kb.close": "Close",
 
   /* --- 图库管理 --- */
-  "imgLib.title": "🖼️ Image Library",
+  "imgLib.title": "Image Library",
   "imgLib.name.ph": "Library name (e.g. Product shots)",
   "imgLib.desc.ph": "One-line description (optional)",
   "imgLib.create": "＋ Create Image Library",

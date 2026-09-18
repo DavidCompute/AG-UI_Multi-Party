@@ -458,7 +458,7 @@ window.I18N_DICTS.zh = {
   "agent.form.trigger.contextual.hint": "由模型结合知聚上下文自主判断是否发言",
 
   /* --- 知识库管理 --- */
-  "kb.title": "📚 知识库管理",
+  "kb.title": "知识库管理",
   "kb.name.ph": "知识库名称（如：公司制度）",
   "kb.desc.ph": "一句话说明（可选）",
   "kb.create": "＋ 创建知识库",
@@ -473,7 +473,7 @@ window.I18N_DICTS.zh = {
   "kb.close": "关闭",
 
   /* --- 图库管理 --- */
-  "imgLib.title": "🖼️ 图库管理",
+  "imgLib.title": "图库管理",
   "imgLib.name.ph": "图库名称（如：产品宣传图）",
   "imgLib.desc.ph": "一句话说明（可选）",
   "imgLib.create": "＋ 创建图库",
