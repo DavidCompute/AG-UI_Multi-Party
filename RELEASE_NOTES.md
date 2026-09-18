@@ -1,3 +1,43 @@
+# AG-UI 群聊桌面版 1.0.145 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.145 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.145 修的是**“图库里明明有这个人的照片，PPT 上也写着他的名字，却没配上”**。根因是模型看不到图库里有什么，只会按页面主题写关键词；现在配上图不再只看模型给的关键词：**图库命中不够确定时，会拿“本页文字”再查一次图库，谁分高用谁（自有素材优先于通用网图）**。顺带修掉两处会让人误判的静默行为：无外网时“离网熔断”把图库一起挡掉、以及配上图后仍报“已降级为题图”。
+**Version note**: 1.0.145 fixes **“the library has this person's photo, the slide spells their name, and yet no photo matched”**. The model cannot see what is inside the library and only writes topical keywords; matching now also consults the **page's own text** and prefers the higher-scoring hit (your own assets beat generic web photos). Two misleading silent behaviours were fixed as well: an offline circuit-breaker that also blocked the *library*, and a downgrade warning that was reported even after a photo was successfully matched.
+
+## 配图不认识人：拿“本页文字”再查一次图库（1.0.145）
+# Illustrations did not know people by name (1.0.145)
+
+中文：
+- **现象**：图库里的描述就是人名（“刘佳俊”），幻灯片上也写着“高效习惯优秀进步奖 · 刘佳俊”，却没配上图 —— 用户的原话是“明明里面有一些图片的描述是有人名，并且 ppt 上也有人名，为什么不能自动配图？”。
+- **根因**：模型**看不到图库内容**，只能按这一页的主题写关键词。实测（公司人员生活照库，bge-m3）：
+  | 检索词 | 结果 |
+  |---|---|
+  | `刘佳俊`（名字直查） | `1刘佳俊.png` **0.8808** ✅ |
+  | `员工 颁奖 舞台`（模型会写的那种） | 要么空手，要么靠那张合影描述里的“舞台/宴会厅”蹭到 **0.68** —— 配上的是**不相干的一家三口宴会合影** |
+  也就是说：机制没问题，问题是“关键词里没有那个名字”。
+- **修法（三步，都在 `ImagePathOf`）**：
+  1. **本页文字兜底**：模型关键词完全没命中，或只配到 Wikimedia 的通用网图 → 拿**本页文字**再查一次图库。
+  2. **分数择优**：图库命中**低于 0.78**（可信线，不是“能不能用”的底线 0.6）时，同样拿本页文字再比一次，**谁分高用谁** —— 0.68 那张输给 0.88 的本人照。
+  3. **自有素材优先**：只要图库能配上，就不用通用网图。
+- **边界（都是刻意定的）**：本页文字=标题 / 副标题 / 正文，**截断 120 字**（BM25 按查询词项数摊薄，太长反而糊掉关键的那个名字）；二次尝试**只查图库不出网**（中文页面文字丢给 Wikimedia 既没结果又白耗取图预算）；落选的候选会从 `images[]` 里去掉（清单不列没进稿子的图）；配上图**不报**降级警告。
+- **顺带修掉两处“静默 / 假消息”**：
+  1. 无外网环境中，第一页取图失败会置“离网熔断”，而那条短路写在**图库检索之前** → 从第二页起**连图库都不会再查**（内网部署反而一张自有图都用不上）。现在离网只跳过网络，图库照查。
+  2. 降级警告改为由调用方在**确认两次都没配上**之后才报（之前二次尝试配上图了，仍会报“已改用自动生成的题图”）。
+- **验证**：真实图库端到端（`tools/verify_name_illustration.py`，不硬编码名字，从库里挑一个“像人名”的描述来构造页面）：
+  页面写“· 刘佳俊” + 关键词“员工 颁奖 舞台” → 命中 **`1刘佳俊.png`**（query = 本页文字）；对照组（页面与库无关）→ 不配图且有 warning。
+  另一个老脚本 `tools/verify_image_recall_and_sizes.py` 三项也全过（无意义词不误配、正常词命中且产物 <6MB、改描述按新描述命中 0.9073）。
+  新增 2 个回归（本页文字兜底 / 低分命中被顶掉），全量 **1349 通过**。
+
+English:
+- **Symptom**: library captions are literally people's names (“刘佳俊”), the slide says “高效习惯优秀进步奖 · 刘佳俊”, and still no photo matched.
+- **Root cause**: the model **cannot see what is in the library** and only writes topical keywords. Measured on the real library (bge-m3): searching the bare name hits `1刘佳俊.png` at **0.8808** ✅, while `员工 颁奖 舞台` (what the model actually writes) either returns nothing or rides the words “舞台/宴会厅” in a *different* caption to **0.68** — embedding an unrelated family photo. The mechanism was fine; the keyword simply did not contain the name.
+- **Fix (three steps, all in `ImagePathOf`)**: (1) if the model's keywords miss entirely — or only fetch a generic Wikimedia photo — search the library again with **the page's own text**; (2) if a library hit scores **below 0.78** (a *confidence* bar, distinct from the 0.6 usability bar), compare against the page-text hit and **keep the higher score** (the 0.68 family photo loses to the 0.88 portrait); (3) library hits always beat generic web photos.
+- **Deliberate limits**: page text is title/subtitle/body **truncated to 120 chars** (BM25 divides by term count, so a long string blurs the one name that matters); the second attempt is **library-only, never the network** (Chinese page text returns nothing from Wikimedia and burns the photo budget); losing candidates are removed from `images[]` so the list never claims a photo that is not in the deck; no downgrade warning when a photo *was* matched.
+- **Two misleading silent behaviours fixed**: (1) offline deployments set a circuit-breaker on the first failed fetch *before* the library was consulted, so from page two on **the library was never queried at all** — the breaker now only skips the network; (2) the downgrade warning is now emitted by the caller only after *both* attempts fail (it used to claim “fell back to generated art” even when the page-text retry had matched).
+- **Verified**: live end-to-end against the real library (`tools/verify_name_illustration.py`, which hardcodes no names — it picks a person-like caption from the library itself): page text “· 刘佳俊” with keyword “员工 颁奖 舞台” now yields **`1刘佳俊.png`**; the control case (unrelated page) embeds nothing and warns. The earlier harness `tools/verify_image_recall_and_sizes.py` still passes all three checks. 2 new regression tests, **1349 passing** overall.
+
+---
+
 # AG-UI 群聊桌面版 1.0.144 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.144 Release Notes (current Windows desktop release)
 
