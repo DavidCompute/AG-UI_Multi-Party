@@ -1,3 +1,47 @@
+# AG-UI 群聊桌面版 1.0.142 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.142 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.142 为当前 Windows 桌面版本。这一版是两处界面打磨：**新建知识库 / 新建图库改为独立弹窗**（两处体验完全一致），以及**弹窗标题图标不再重复**（修前会看到「📚 📚 知识库管理」）。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.142 is the current Windows desktop release. Two UI refinements: **creating a knowledge base or an image library now uses a proper dialog** (identical in both places), and **dialog titles no longer repeat their icon** (they used to read “📚 📚 Knowledge Base Management”). Web and desktop share the same Hub / gateway / frontend.
+
+## 新建库走弹窗（1.0.142）
+# Library creation moves into a dialog (1.0.142)
+
+中文：
+- **为何改**：原本“＋ 创建知识库 / ＋ 创建图库”是在管理弹窗里**内联展开**一小块输入区，夹在搜索框与列表之间：
+  不醒目，列表一长还会被顶出视野；而且与其它“新增类操作走弹窗”的口径不一致。
+- **现在**：两处共用一个「新建」弹窗（`#libCreateModal`），由各自弹窗底部的 `＋ 创建…` 按钮打开。
+  打开即聚焦名称输入框；`Enter` 提交；`Esc` / 取消 / 点遮罩关闭；名称为空时提示且**不关窗**；
+  创建失败**保留已填内容**（改名重试不用重打）。
+- **层级**：弹窗带 `ui-dialog-overlay`（`z-index:80`），高于管理弹窗的 `60` —— 从管理弹窗里唤起也在最上层、可正常输入（同类问题之前在一次“新建分组”上报过）。
+  `Esc` 在**捕获阶段**处理，所以只关新建弹窗，不会把下层的管理弹窗一起关掉。
+- **两处完全一致**：知识库与图库的标题、占位符、按钮文案随类型切换；说明文案分则告知创建后怎么用（上传文档 / 上传图片）。
+  弹窗开着时切语言，标题/按钮/占位符**即时跟随**，且不动已填内容。
+
+English:
+- **Why**: “Create knowledge base / Create image library” used to expand an **inline input strip** inside the manager dialog, squeezed between the search box and the list — easy to miss, pushed out of view by a long list, and inconsistent with the “new item = dialog” convention used elsewhere.
+- **Now**: both share one dialog (`#libCreateModal`) opened by the `＋ Create …` button at the bottom of each manager. Focus lands on the name field, `Enter` submits, `Esc` / Cancel / backdrop click closes; an empty name warns without closing, and a failed request **keeps what you typed** so a rename-and-retry is one keystroke.
+- **Stacking**: the dialog carries `ui-dialog-overlay` (`z-index:80`), above the manager dialog's `60`, so it is operable on top when opened from inside it (the same class of bug was reported once for “new user group”). `Esc` is handled in the **capture phase**, so it closes only the create dialog and leaves the manager open.
+- **Identical in both places**: title, placeholders and buttons switch with the kind, and the hint explains what to do after creating (upload documents / upload images). Switching language while the dialog is open updates title, buttons and placeholders **immediately** without touching your input.
+
+## 弹窗标题图标不再重复（1.0.142）
+# Dialog titles no longer repeat their icon (1.0.142)
+
+中文：
+- **现象**：图库管理标题显示为「🖼️ 🖼️ 图库管理」；知识库那处其实一直是「📚 📚 知识库管理」，只是一直没被注意到。
+- **根因**：标题的图标写在了 HTML（译文字面）里，而 i18n 值里**又带了一个**。i18n 运行时是**整体替换**元素文本
+  （fallback 会被替掉、不会叠加），所以规则应是「**图标放 HTML、i18n 只放文字**」—— 这也正是其它弹窗标题一贯的口径。
+- **修法**：去掉 `kb.title` / `imgLib.title` 里的开头图标，图标留在标记里；并写脚本把“值以 emoji 开头且在元素前紧邻同一个字面 emoji”的用法全扫一遍，确认无其它重复点。
+- 顺带删掉因内联面板下线而失效的 `.kb-create` 样式。
+
+English:
+- **Symptom**: the image-library title read “🖼️ 🖼️ Image Library”; the knowledge-base one had actually read “📚 📚 Knowledge Base Management” all along, just unnoticed.
+- **Root cause**: the title's icon lives in the markup, and the translation value carried a second copy. The i18n runtime **replaces** an element's text (the fallback is overwritten, not appended), so the rule is **icon in the markup, plain text in i18n** — which is what every other dialog title already does.
+- **Fix**: strip the leading icon from `kb.title` / `imgLib.title`, keep it in the markup, and audit every value that starts with an emoji while a literal copy of that emoji sits right before the element — no other duplicates remain.
+- The now-dead `.kb-create` styles were removed along with the inline panels.
+
+---
+
 # AG-UI 群聊桌面版 1.0.141 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.141 Release Notes (current Windows desktop release)
 
