@@ -1,3 +1,44 @@
+# AG-UI 群聊桌面版 1.0.143 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.143 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.143 为当前 Windows 桌面版本。这一版把 **PPT 的配色重做了一遍**：18 套命名调色板逐套重算角色（底色 / 标题 / 强调 / 卡片面），修掉了“中间调铺满卡片”“鲜艳色被洗成土色”“强调色与主色糊在一起”这三类观感问题；未指定 theme 时的默认也换成更好看的一套。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.143 is the current Windows desktop release. It reworks **deck colour**. All 18 named palettes have their roles (background / title / accent / card surface) derived again, fixing three things that made decks look cheap — saturated mid-tones tiling whole slides, vivid hues washed into mud, and accents indistinguishable from the title colour. The default when no `theme` is given also moves to a better-looking palette. Web and desktop share the same Hub / gateway / frontend.
+
+## PPT 配色重做（1.0.143）
+# Deck colour rework (1.0.143)
+
+中文：
+- **为什么改**：原来的角色推导用“往黑/白里混”（sRGB 线性混色）来满足可读性，代价是颜色失真：
+  `vibrant-orange-mint` 的鲜明橙 FF9F1C 被洗成脏芥末 CC7F16、`modern-wellness` 的 E29578 被洗成灰褐 B57760。
+  更明显的是**卡片面**：它直接取“调色板次亮色”，而那个色常常是个中间调饱和色
+  （`education-charts` 的橙 F4A261、`art-food` 的琥珀 E09F3E、`nature-outdoors` 的茶色 DDA15E）——
+  铺满卡片后整份稿子就是一片色块，观感很廉价。
+- **现在（五条规则）**：
+  1. **调色全在 HSL 空间做**：只改亮度、保色相与饱和，目标饱和从“感知彩度”推——鲜艳的仍鲜艳、柔和的仍柔和；
+  2. **底线同时成立**：正文/主色 ≥ **7:1**（以前 4.5，投影下会发灰）、副色与强调 vs 底色 ≥ 3:1、
+     徽标字 vs 强调 ≥ 4.5:1、强调与主色 ≥ 2.2:1（色相拉开 40° 时 ≥ 1.5:1）；
+  3. **卡片面必须是“面”**：彩度 ≤ 0.30 且与底色能看出层次，不合格就按主色合成一层淡调（5~14% 饱和）；
+  4. **强调色选“最鲜艳且分得开”的**，而不是“第一个能修合格的”——实测 `vintage-academic` 会挑到一个
+     与深蓝主色一样暗的 990000，而不艳一点的 C1121F 明显更好看；
+  5. **未写 `theme` 时默认 `business-authority`**（以前默认历史主题 `business`：白底+金强调，
+     而金色在白底上只有 2.41:1，强调线/徽标本来就弱）。**显式写 `theme:"business"` 仍是原来那套**，老调用方不受影响。
+- **效果举例（改前 → 改后）**：`modern-wellness` 强调色 B57760（灰褐）→ CC7756（陶土）；
+  `coastal-coral` D8665D（暗砖）→ DF7067（珊瑚）；`nature-outdoors` E9BA90（浅杏，对底色只有 1.68）→ D86A09（烤橙）；
+  `vintage-academic` 暗红 990000 → C1121F；`tech-night` 灰蓝 → 005AB8（深底上更亮、与黄主色互补）；
+  `education-charts` 卡片从亮橙 F4A261 → 淡灰面；`art-food` 从琥珀 E09F3E → 淡米面。
+- **钉住它的测试**：`NamedPalette_RendersAndKeepsTextReadable` 从“能读就行”扩到整套设计底线
+  （7:1、卡片面彩度、主色不发灰、强调色得是点色、强调与主色分得开），18 套逐对跑。
+- 测试：全量 **1343 通过**。
+
+English:
+- **Why**: role derivation satisfied readability by **mixing towards black or white in sRGB**, which distorts colour — `vibrant-orange-mint`'s vivid orange FF9F1C became a dingy mustard CC7F16, and `modern-wellness`'s E29578 turned into grey-brown B57760. Worse, **card surfaces** reused the palette's second-lightest colour, which is usually a saturated mid-tone (`education-charts` orange F4A261, `art-food` amber E09F3E, `nature-outdoors` tan DDA15E): across a deck that reads as slabs of colour and looks cheap.
+- **Now (five rules)**: (1) all colour maths happens in **HSL** — only lightness moves, hue and saturation are kept, and target saturation comes from perceptual chroma, so vivid stays vivid and muted stays muted; (2) **all floors hold at once** — body and title text ≥ **7:1** (was 4.5, which greys out on a projector), secondary and accent vs background ≥ 3:1, badge text on the accent ≥ 4.5:1, accent vs primary ≥ 2.2:1 (or ≥ 1.5:1 when hues are 40°+ apart); (3) **card surfaces must look like surfaces** — chroma ≤ 0.30 and visibly stepped from the background, otherwise a pale tint of the primary is synthesised; (4) **the accent is the most vivid candidate that separates well from the primary**, not the first one that can be fixed (`vintage-academic` used to pick a maroon 990000 as dark as its navy title, where the slightly softer C1121F looks far better); (5) **with no `theme`, the default is now `business-authority`** (it used to be the legacy `business` theme whose gold on white only reached 2.41:1). **An explicit `theme:"business"` still yields the old look**, so existing callers are unaffected.
+- **Concrete before → after**: `modern-wellness` accent B57760 (grey-brown) → CC7756 (terracotta); `coastal-coral` D8665D (dull brick) → DF7067 (coral); `nature-outdoors` E9BA90 (pale apricot at 1.68:1 on its background) → D86A09 (burnt orange); `vintage-academic` 990000 → C1121F; `tech-night` grey-blue → 005AB8 (brighter on the dark backdrop, complementary to the yellow title); `education-charts` cards F4A261 (orange) → a pale grey surface; `art-food` E09F3E (amber) → a pale sand surface.
+- **Pinned by tests**: `NamedPalette_RendersAndKeepsTextReadable` grew from “readable is enough” to the full design floor (7:1, surface chroma, title not grey, accent must be a point colour, accent separates from primary), run across all 18 palettes.
+- Tests: **1343 passing** in total.
+
+---
+
 # AG-UI 群聊桌面版 1.0.142 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.142 Release Notes (current Windows desktop release)
 
