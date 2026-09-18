@@ -56,6 +56,28 @@ public sealed class AgentOptions
     /// 关掉时（如：只想要 prompt/http 的无副作用自检）置 false。</summary>
     public bool SkillAutoTestServerShell { get; set; } = true;
 
+    /// <summary>
+    /// 用户自建 .NET 技能的执行预算（毫秒）。默认 10000。
+    ///
+    /// <para>
+    /// 为何要可配：这个值时是按“纯 CPU 技能”定的经验值，用户技能的正文不受我们控制，
+    /// 拖长只会白占线程（宿主是<b>同步阻塞等待</b>），所以默认保持原值。
+    /// </para>
+    /// </summary>
+    public int DotnetSkillTimeoutMs { get; set; } = 10_000;
+
+    /// <summary>
+    /// 内置文档类技能（docx / pptx / xlsx / pdf，即 <c>BuiltinVersion</c> 非空的自带技能）的执行预算。
+    /// 默认 60000。
+    ///
+    /// <para>
+    /// 为什么要单独给一个更长的值：这些技能除了排版还会<b>联网</b>——PPT 的 <c>imageQuery</c>
+    /// 要去 Wikimedia Commons 检索并下载照片（每张几百 KB）。实测 3 张照片就会撞上 10 秒上限，
+    /// 而超时的结果是<b>整份稿子都没有</b>（比降级成题图差得多）。
+    /// </para>
+    /// </summary>
+    public int BuiltinSkillTimeoutMs { get; set; } = 60_000;
+
     /// <summary>是否启用网络类工具（web_search / read_url）。默认 false：本地工具零依赖、离线可用；
     /// 开启后工具可访问外网（搜索端点可配置）。</summary>
     public bool EnableWebTools { get; set; }
@@ -514,6 +536,16 @@ public sealed class AgentDefinition
     /// 让智能体基于用户上传的知识文档作答（RAG 知识库）。
     /// </summary>
     public List<string> KnowledgeBaseIds { get; set; } = [];
+
+    /// <summary>
+    /// 绑定的图库 ID 列表（<see cref="ImageLibraryCatalog"/> 管理）：文档技能配图时只从这些图库里取图。
+    ///
+    /// <para>
+    /// 留空 = 用**触发者本人可读**的图库（默认行为）。绑了库就只能用这几个 —— 岗位用图更要可控
+    /// （如“对外宣讲岗”只准用已审核的品牌图库）。
+    /// </para>
+    /// </summary>
+    public List<string> ImageLibraryIds { get; set; } = [];
 
     /// <summary>
     /// **编排流水线（Pipeline，1.1）**：非空时本智能体不直接调用本地大模型，而是按步骤<b>依次</b>调用

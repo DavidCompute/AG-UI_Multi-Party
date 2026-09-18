@@ -41,8 +41,10 @@ using SixLabors.ImageSharp.Drawing.Processing;
 using System;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 // 图表库与 OpenXML 存在同名类型（Color / PointF 等）：显式起别名，避开 CS0104 二义性
 using ImgColor = SixLabors.ImageSharp.Color;
 using ImgPointF = SixLabors.ImageSharp.PointF;
@@ -99,6 +101,7 @@ public class Skill
                 + ",\"blocks\":" + built.Blocks + produce
                 // 图表字体报出来：若环境没有中文字体，图表中文会缺字（乱码），有地儿排障
                 + ",\"chartFont\":" + Js(ChartFontName) + ",\"chartFontCjk\":" + (ChartFontHasCjk ? "true" : "false")
+                + ImageWarningsJson()
                 + ",\"message\":" + Js("已生成 Word 文档：" + built.Path
                     + (ChartFontHasCjk ? "" : "（提示：当前环境未找到含中文字形的字体，图表中文可能缺字/乱码；"
                         + "可在容器里安装 fonts-noto-cjk / fonts-droid-fallback 后重启）")) + "}";
@@ -120,6 +123,11 @@ public class Skill
         var author = Str(root, "author");
         var dateText = Str(root, "date");
         var path = ResolveOutputPath(Str(root, "outputPath"), title);
+        // 平台注入的图库检索范围句柄 + 配图来源策略（详见 ResolveQueryImage）
+        _imgScopeId = Str(root, "imageScopeId") ?? Str(root, "image_scope_id");
+        _imgSource = (Str(root, "imageSource") ?? Str(root, "image_source")
+            ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE") ?? "").Trim();
+        _imgWarnings = new System.Collections.Generic.List<string>();
 
         int blocks = 0;
         using (var wd = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document))
@@ -866,26 +874,27 @@ public class Skill
 
     // ===== 图片（内联）=====
     // 从本地文件读入并嵌入；支持 widthCm 控制宽度（按原图比例缩放）。
-    // 支持的格式：png / jpg / jpeg / gif / bmp / tiff。
+    // 支持的格式：png / jpg / jpeg / gif / bmp / tiff；其它能解码的（如 WebP）自动重编成 PNG。
     private static Paragraph? BuildImagePara(MainDocumentPart main, JsonElement im)
     {
         var file = Str(im, "path");
-        if (string.IsNullOrWhiteSpace(file)) return null;
+        if (string.IsNullOrWhiteSpace(file))
+        {
+            // 没给本地 path 但有 imageQuery：按关键词查团队图库拿一张（拿不到就跳过这张图 + 记 warning）。
+            var q = ImageQueryOf(im);
+            if (q.Length == 0) return null;
+            var hit = ResolveQueryImage(q, out var why);
+            if (hit is null)
+            {
+                WarnImage("配图检索未成功，已跳过该图：关键词“" + q + "”（" + (why ?? "未知原因") + "）");
+                return null;
+            }
+            file = hit;
+        }
         var full = Path.GetFullPath(Safe(file));
         if (!File.Exists(full)) throw new FileNotFoundException("图片文件不存在：" + full);
 
-        var ext = Path.GetExtension(full).ToLowerInvariant().TrimStart('.');
-        var contentType = ext switch
-        {
-            "png" => "image/png",
-            "jpg" or "jpeg" => "image/jpeg",
-            "gif" => "image/gif",
-            "bmp" => "image/bmp",
-            "tif" or "tiff" => "image/tiff",
-            _ => throw new NotSupportedException("不支持的图片格式：." + ext + "（支持 png/jpg/jpeg/gif/bmp/tiff）"),
-        };
-
-        var bytes = File.ReadAllBytes(full);
+        var (bytes, contentType) = NormalizeImage(File.ReadAllBytes(full));
         var imagePart = main.AddImagePart(contentType switch
         {
             "image/png" => ImagePartType.Png,
@@ -897,7 +906,7 @@ public class Skill
         using (var ms = new MemoryStream(bytes)) imagePart.FeedData(ms);
         var relId = main.GetIdOfPart(imagePart);
 
-        var (pxW, pxH) = TryReadPixelSize(bytes, ext);
+        var (pxW, pxH) = TryReadPixelSize(bytes, ExtForContentType(contentType));
         double widthCm = 14.0; // 默认宽（A4 正文宽约 15.9cm）
         if (im.TryGetProperty("widthCm", out var wc) && wc.ValueKind == JsonValueKind.Number) widthCm = wc.GetDouble();
         else if (im.TryGetProperty("widthPercent", out var wp) && wp.ValueKind == JsonValueKind.Number)
@@ -921,6 +930,36 @@ public class Skill
 
         return ImageDrawingParagraph(relId, cx, cy, Str(im, "caption"), Str(im, "alt"));
     }
+
+    /// <summary>
+    /// 把图片字节规范成 Word 认得的格式（png/jpeg/gif/bmp/tiff）；其余能解码的（如 WebP）
+    /// 用 ImageSharp 重编成 PNG —— 本技能已因图表引用 ImageSharp，不增加依赖。
+    ///
+    /// <para>以<b>文件头</b>判定而不是扩展名：图库里的文件可能是改过名的（.webp 里装的是 JPEG）。</para>
+    /// </summary>
+    private static (byte[] Bytes, string ContentType) NormalizeImage(byte[] b)
+    {
+        if (b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return (b, "image/png");
+        if (b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return (b, "image/jpeg");
+        if (b.Length > 3 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) return (b, "image/gif");
+        if (b.Length > 2 && b[0] == 0x42 && b[1] == 0x4D) return (b, "image/bmp");
+        if (b.Length > 4 && ((b[0] == 0x49 && b[1] == 0x49 && b[2] == 0x2A) || (b[0] == 0x4D && b[1] == 0x4D && b[2] == 0x00)))
+            return (b, "image/tiff");
+        using var img = Image.Load(b);
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return (ms.ToArray(), "image/png");
+    }
+
+    /// <summary>内容类型 → 扩展名（供像素尺寸解析器按格式分支）。</summary>
+    private static string ExtForContentType(string contentType) => contentType switch
+    {
+        "image/jpeg" => "jpeg",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        "image/tiff" => "tiff",
+        _ => "png",
+    };
 
     /// <summary>把已嵌入的图片部件包成一个居中段落（可带图题与替代文本）。</summary>
     private static Paragraph ImageDrawingParagraph(string relId, long cx, long cy, string? caption, string? alt)
@@ -964,6 +1003,114 @@ public class Skill
 
     private static int _drawingId;
     private static uint NextDrawingId() => (uint)System.Threading.Interlocked.Increment(ref _drawingId);
+
+    // ===== 配图（imageQuery → 团队图库）=====
+    // 平台在调用文档技能前，会往入参里注入一个「图库检索范围句柄」（root.imageScopeId），
+    // 回调地址走进程环境变量 AGUI_SELF_BASE / AGUI_SELF_TOKEN（技能与平台同进程，读得到）。
+    // 技能只带句柄、不带图库 ID —— 入参由模型生成，若能自报图库 ID 就能越权读别人的图。
+    // 没有句柄 = 当前没有可用图库，此时跳过配图并记 warning，而不是让整篇稿子生成失败。
+    [ThreadStatic] private static string? _imgScopeId;
+    [ThreadStatic] private static string? _imgSource;
+    [ThreadStatic] private static System.Collections.Generic.Dictionary<string, string?>? _imgCache;
+    [ThreadStatic] private static System.Collections.Generic.List<string>? _imgWarnings;
+
+    private const string SelfBaseEnv = "AGUI_SELF_BASE";
+    private const string SelfTokenEnv = "AGUI_SELF_TOKEN";
+    private const int ImgSearchTimeoutSec = 10;
+
+    /// <summary>本图块的检索关键词（没有则空串）。</summary>
+    private static string ImageQueryOf(JsonElement im)
+        => (Str(im, "imageQuery") ?? Str(im, "image_query"))?.Trim() ?? "";
+
+    private static void WarnImage(string message)
+        => (_imgWarnings ??= new System.Collections.Generic.List<string>()).Add(message);
+
+    private static string ImageWarningsJson()
+        => _imgWarnings is { Count: > 0 }
+            ? ",\"warnings\":[" + string.Join(",", _imgWarnings.Select(Js)) + "]"
+            : "";
+
+    /// <summary>
+    /// 按关键词查<b>团队图库</b>，命中则返回服务器上的本地图片路径。
+    ///
+    /// <para>
+    /// 技能与平台同进程，但拿不到平台的 DI 容器，所以是回环 HTTP 回调 <c>/ag-ui/images/search</c>：
+    /// 带上平台注入的句柄 + 自令牌，换回「服务器本地路径」，再由本技能直接嵌进文档
+    /// （平台在该接口里已按句柄做过图库可读性鉴权）。
+    /// </para>
+    ///
+    /// <para>失败一律返回 null 并给出原因：配图失败不该让整份稿子出不来。</para>
+    /// </summary>
+    private static string? ResolveQueryImage(string query, out string? why)
+    {
+        why = null;
+        var key = (query ?? "").Trim();
+        if (key.Length == 0) { why = "关键词为空"; return null; }
+        if (string.Equals(_imgSource, "network", StringComparison.OrdinalIgnoreCase))
+        {
+            why = "已配置为不使用图库（imageSource=network），而本技能只从图库配图";
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(_imgScopeId))
+        {
+            why = "当前没有可用的图库（平台未注入检索范围）";
+            return null;
+        }
+        _imgCache ??= new System.Collections.Generic.Dictionary<string, string?>(StringComparer.Ordinal);
+        if (_imgCache.TryGetValue(key, out var cached)) return cached;
+
+        var baseUrl = Environment.GetEnvironmentVariable(SelfBaseEnv);
+        var token = Environment.GetEnvironmentVariable(SelfTokenEnv);
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token))
+        {
+            why = "未拿到平台回调地址（AGUI_SELF_BASE / AGUI_SELF_TOKEN 未注入）";
+            return null;
+        }
+
+        string? path = null;
+        var body = "{\"query\":" + Js(key) + ",\"scopeHandle\":" + Js(_imgScopeId!) + ",\"topK\":3}";
+        var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, out var httpWhy);
+        if (json is null) why = httpWhy ?? "平台未返回内容";
+        else
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("images", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var img in arr.EnumerateArray())
+                    {
+                        var p = Str(img, "path");
+                        if (!string.IsNullOrWhiteSpace(p) && File.Exists(p)) { path = p; break; }
+                    }
+                    if (path is null) why = "图库里没有匹配的图片";
+                }
+                else why = "平台返回格式异常";
+            }
+            catch (Exception ex) { why = "平台返回解析失败：" + ex.Message; }
+        }
+        _imgCache[key] = path;
+        return path;
+    }
+
+    /// <summary>POST JSON 并读回响应体（技能入口是同步签名，故这里同步等待）。失败返回 null 并给出原因。</summary>
+    private static string? HttpPostJson(string url, string body, string token, out string? why)
+    {
+        why = null;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(ImgSearchTimeoutSec) };
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            // 头部名就是常量本身：服务端 SelfApi.IsSelf 读的正是同名的请求头
+            req.Headers.TryAddWithoutValidation(SelfTokenEnv, token);
+            using var resp = Task.Run(() => http.SendAsync(req, HttpCompletionOption.ResponseContentRead))
+                .GetAwaiter().GetResult();
+            if (!resp.IsSuccessStatusCode) { why = "平台返回 HTTP " + (int)resp.StatusCode; return null; }
+            return Task.Run(() => resp.Content.ReadAsStringAsync()).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) { why = ex.GetType().Name + "：" + ex.Message; return null; }
+    }
 
     // 从文件头读像素尺寸（仅 png / gif / bmp / jpeg）；读不到返回 (0,0)，由调用方按 4:3 估算。
     private static (int W, int H) TryReadPixelSize(byte[] b, string ext)
@@ -1247,7 +1394,7 @@ const SCENES = [
     closing: null, // 公文结尾语差异大（特此通知/特此报告/当否请示），交给调用方在 sections 里写
     title: "公文（党政机关公文格式，参照 GB/T 9704-2012）",
     when: "生成通知、通报、请示、批复、报告等公文正文时使用。三号仿宋正文、黑体层次标题、22pt 小标宋大标题、固定行距。",
-    blocks: "heading / paragraph / numbered / bullets / table / image / chart / toc / pageBreak",
+    blocks: "heading / paragraph / numbered / bullets / table / image(path|imageQuery) / chart / toc / pageBreak",
     // GB/T 9704：A4，上37mm 下35mm 左28mm 右26mm（约值）；正文三号(16pt)仿宋；固定行距 28pt
     cfg: {
       fontTitle: "方正小标宋简体", fontHeading: "黑体", fontBody: "仿宋_GB2312",
@@ -1263,7 +1410,7 @@ const SCENES = [
     sceneName: "notice",
     title: "通知 / 公告 / 说明（简洁单页优先）",
     when: "生成对外通知、公告、事项说明、操作指引等短文档时使用。标题醒目、正文不缩进、层次精简、优先单页呈现。",
-    blocks: "heading / paragraph / bullets / numbered / quote / table / image / chart / toc / pageBreak",
+    blocks: "heading / paragraph / bullets / numbered / quote / table / image(path|imageQuery) / chart / toc / pageBreak",
     cfg: {
       fontTitle: "微软雅黑", fontHeading: "微软雅黑", fontBody: "宋体",
       sizeTitle: 40, sizeH1: 30, sizeH2: 26, sizeH3: 24, sizeBody: 24, sizeSmall: 20,
@@ -1278,7 +1425,7 @@ const SCENES = [
     sceneName: "report",
     title: "工作报告 / 总结 / 方案（通用书面报告）",
     when: "生成工作总结、调研报告、实施方案、情况汇报等需要分章节和数据的文档时使用。宋体正文、黑体标题、首行缩进、支持数据表格。",
-    blocks: "heading / paragraph / bullets / numbered / quote / table / image / chart / toc / pageBreak",
+    blocks: "heading / paragraph / bullets / numbered / quote / table / image(path|imageQuery) / chart / toc / pageBreak",
     cfg: {
       fontTitle: "黑体", fontHeading: "黑体", fontBody: "宋体",
       sizeTitle: 36, sizeH1: 30, sizeH2: 26, sizeH3: 24, sizeBody: 24, sizeSmall: 20,
@@ -1378,10 +1525,19 @@ function render(scene) {
 //       { "bullets": ["要点一", "要点二"] },
 //       { "quote": "引用/强调文字" },
 //       { "table": { "headers": ["列1","列2"], "rows": [["a","b"]] } },
+//       { "image": { "path": "/data/a.png", "widthCm": 14, "caption": "图 1" } },
+//       { "image": { "imageQuery": "现代化机房 服务器机柜", "caption": "图 2" } },
 //       { "pageBreak": true }
 //     ]
 //   }
-//   返回 = { ok, scene, path, blocks, message }
+//   返回 = { ok, scene, path, blocks, chartFont, chartFontCjk, warnings?, message }
+//
+// 【配图（image）】
+//   给 path = 直接用服务器上的本地图片文件（不存在会报错）。
+//   给 imageQuery = 按关键词从平台「图库」语义检索一张图（用户自己上传的图片，不依赖外网）。
+//     平台调用本技能时会注入检索范围句柄（root.imageScopeId），技能拿它回调平台换取
+//     服务器本地路径；库内没有匹配、或当前没有可用图库时，**该图被跳过**并在返回的
+//     warnings 里说明原因 —— 配图失败不会让整篇稿子出不来。
 //
 // 【注意】
 //   1) 平台预置 using 不含 System.IO —— 用到 Path/Directory/File 必须自行 using System.IO;（已含）。

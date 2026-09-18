@@ -1,7 +1,9 @@
 using System.ClientModel;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Text.Json;
 using AguiGroupChat.Agents.Tools;
+using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Persistence;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -102,7 +104,9 @@ public sealed class AgentCatalog
             : Path.Combine(contentRoot, "data", "skillruns");
         _skillRunner = new Lazy<SkillRunner?>(() => new SkillRunner(skillRunRoot, _loggerFactory,
             allowPrivateEndpoints: _options.AllowPrivateSkillEndpoints,
-            resolveAttachment: ResolveAttachmentPath));
+            resolveAttachment: ResolveAttachmentPath,
+            dotnetTimeoutMs: _options.DotnetSkillTimeoutMs,
+            builtinTimeoutMs: _options.BuiltinSkillTimeoutMs));
     }
 
     public AgentDefinition? GetDefinition(string agentId)
@@ -135,6 +139,92 @@ public sealed class AgentCatalog
     /// </summary>
     public Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
         => _skillRunner.Value is { } runner ? runner.InvokeAsync(skill, query, ct) : Task.FromResult("技能执行器不可用。");
+
+    /// <summary>
+    /// 给文档技能注入「图库检索范围句柄」（技能据此回调平台做图库语义检索）。
+    ///
+    /// <para>
+    /// 只注入<b>句柄</b>，不注入图库 ID：范围由平台此刻登记（<b>触发者本人可读</b>的图库），
+    /// 技能回调时带上句柄即可。这是必须的 —— 技能入参是模型生成的，天生不可信，
+    /// 若让技能自报图库 ID，任何用户都能让模型写个别人的 ID 把别人的图读出来。
+    /// </para>
+    ///
+    /// <para>非文档技能、无图库、入参不是 JSON 对象时一律原样返回，不影响技能执行。</para>
+    /// </summary>
+    private string WithImageScope(string query, AgentSkillDefinition skill)
+    {
+        var ctx = AgentGateway.AmbientContext.Value;
+        return WithImageScope(query, skill, ctx?.TriggerUserId, ctx?.AgentId);
+    }
+
+    /// <summary>
+    /// 供<b>无触发消息</b>的入口（技能库「试运行」、桌面宿主直跑）显式注入图库范围：
+    /// 这些路径上没有 ambient 上下文，拿不到触发者，只能由调用方把当前登录用户传进来。
+    /// </summary>
+    public string PrepareDocumentSkillInput(AgentSkillDefinition skill, string query, string? triggerUserId)
+        => WithImageScope(query, skill, triggerUserId, null);
+
+    /// <summary>
+    /// 同 <see cref="WithImageScope(string, AgentSkillDefinition)"/>，但触发者与岗位由调用方显式给出
+    /// （<c>internal</c> 供测试钉住「绑定图库 → 检索范围」的语义；产品代码走 ambient 上下文那条）。
+    /// </summary>
+    internal string WithImageScope(string query, AgentSkillDefinition skill, string? userId, string? agentId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(query)) return query;
+            if (!AgentGatewayHelpers.IsDocumentGenerator(skill)) return query;
+            var libs = _services.GetService<ImageLibraryCatalog>();
+            if (libs is null) return query;
+
+            // 范围选择：岗位**绑定了图库就只用绑定的**（岗位用图更可控，如对外宣讲岗只准用已审核品牌图库）；
+            // 没绑 = 用触发者本人可读的全部图库。
+            var bound = agentId is { } aid ? GetDefinition(aid)?.ImageLibraryIds : null;
+            var boundIds = bound?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [];
+            IReadOnlyList<string> ids;
+            if (boundIds.Count > 0)
+            {
+                var missing = boundIds.Where(id => libs.GetLibrary(id) is null).ToList();
+                if (missing.Count > 0)
+                    _logger.LogWarning("岗位绑定的图库已不存在（已跳过）：agent={AgentId} missing={Missing}",
+                        agentId, string.Join(",", missing));
+                ids = boundIds.Where(id => libs.GetLibrary(id) is not null).ToList();
+            }
+            else
+            {
+                var hub = _services.GetService<AguiGroupChat.Hub.Messaging.GroupHub>();
+                var memberGroups = userId is null || hub is null
+                    ? new HashSet<string>(StringComparer.Ordinal)
+                    : hub.Store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
+                ids = libs.ListLibraries(userId, memberGroups, isAdmin: false).Select(l => l.LibId).ToList();
+            }
+            if (ids.Count == 0)
+            {
+                // 一个可用图库都没有：不注入，技能直接走图库之外的路径（不报错、不堆 warnings）
+                _logger.LogInformation("文档技能无可用图库可注入：skill={SkillId} user={User}", skill.SkillId, userId ?? "（未知触发者）");
+                return query;
+            }
+
+            var handle = libs.RegisterSearchScope(ids, agentId);
+            using var doc = JsonDocument.Parse(query);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return query;
+            var dict = new Dictionary<string, object?>();
+            foreach (var p in doc.RootElement.EnumerateObject())
+                dict[p.Name] = JsonSerializer.Deserialize<object?>(p.Value.GetRawText());
+            dict["imageScopeId"] = handle;
+            var rewritten = JsonSerializer.Serialize(dict, AguiJson.Options);
+            _logger.LogInformation("已为文档技能注入图库检索范围：skill={SkillId} user={User} libs={Count}",
+                skill.SkillId, userId ?? "（未知触发者）", ids.Count);
+            return rewritten;
+        }
+        catch (Exception ex)
+        {
+            // 注入失败绝不能把技能执行带坏：原样入参交回去，技能自己会降级（图库取不到就回落）。
+            // 但**要报出来** —— 图库静默不生效是最难查的一类问题。
+            _logger.LogWarning(ex, "注入图库检索范围失败（按无图库处理）：skill={SkillId}", skill.SkillId);
+            return query;
+        }
+    }
 
     /// <summary>
     /// 附件 ID → 服务器上的真实文件路径（<c>att_xxx</c>）。
@@ -208,6 +298,30 @@ public sealed class AgentCatalog
 
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
         var client = BuildOpenAIChatClient(_options, def, isDeepSeek);
+        return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
+    }
+
+    /// <summary>
+    /// 系统级“看图”裸 agent（图库上传后自动生成图片描述用）。
+    ///
+    /// <para>
+    /// 与 <see cref="CreateBareVision"/> 的区别只有一点：<b>不要求已存在某个智能体定义</b>——
+    /// 上传图片的后台任务没有“当前智能体”可借，而把任意一个用户的智能体拿来当人设也不合适。
+    /// 人设指令无关紧要（调用方会自己给完整提示词），这里只关心模型本身。
+    /// </para>
+    /// </summary>
+    public ChatClientAgent? CreateSystemVision(string visionModel)
+    {
+        if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase)) return null;
+        var chatOptions = new ChatClientAgentOptions
+        {
+            Name = "image-caption",
+            Description = "Image captioning",
+            ChatOptions = new Microsoft.Extensions.AI.ChatOptions { Instructions = "你是图像描述助手。", Tools = null },
+            AIContextProviders = [],
+        };
+        var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+        var client = BuildOpenAIChatClient(_options, null, isDeepSeek, visionModel);
         return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
     }
 
@@ -482,9 +596,10 @@ public sealed class AgentCatalog
                                 _logger.LogWarning("文档技能入参校验未通过，已拒绝执行：skill={SkillId}", skill.SkillId);
                                 return Task.FromResult(why);
                             }
-                            return runner.InvokeAsync(skill, query, ct);
+                            return runner.InvokeAsync(skill, WithImageScope(query, skill), ct);
                         }, toolName, desc)
-                        : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) => runner.InvokeAsync(skill, query, ct), toolName, desc);
+                        : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) =>
+                            runner.InvokeAsync(skill, WithImageScope(query, skill), ct), toolName, desc);
                 // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
                 var needsApproval = skill.RequiresApproval || isClientSkill;
                 var wrapped = needsApproval ? new ApprovalRequiredAIFunction(func) : func;
@@ -524,20 +639,21 @@ public sealed class AgentCatalog
             _loggerFactory, _services);
     }
 
-    /// <summary>解析实际使用的模型名（思考模式开启时优先推理模型；否则智能体 Model → 全局 Model → 提供方默认）。</summary>
-    internal static string ResolveModelName(AgentOptions options, AgentDefinition def, bool isDeepSeek)
+    /// <summary>解析实际使用的模型名（思考模式开启时优先推理模型；否则智能体 Model → 全局 Model → 提供方默认）。
+    /// <paramref name="def"/> 允许为 null（系统级看图 / 图片描述等后台场景没有智能体可借）。</summary>
+    internal static string ResolveModelName(AgentOptions options, AgentDefinition? def, bool isDeepSeek)
     {
         var model = options.ThinkingMode
             ? options.ThinkingModel ?? (isDeepSeek ? DeepSeekReasonerModel : null)
             : null;
-        return model ?? def.Model ?? options.Model
+        return model ?? def?.Model ?? options.Model
             ?? (isDeepSeek ? DeepSeekDefaultModel : null)
             ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
     }
 
     /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。
     /// <paramref name="modelOverride"/> 非空时强制用该模型（视觉等专用场景）。</summary>
-    internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition def, bool isDeepSeek, string? modelOverride = null)
+    internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition? def, bool isDeepSeek, string? modelOverride = null)
     {
         // 思考模式（默认开启）：优先用推理模型（DeepSeek 官方 deepseek-reasoner；可经 Agents:ThinkingModel 覆盖）；
         // 关闭时回退常规模型（智能体单独 Model → 全局 Model → 提供方默认）。modelOverride 优先于这一切。

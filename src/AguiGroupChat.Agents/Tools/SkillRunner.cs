@@ -24,6 +24,8 @@ internal sealed class SkillRunner
     private readonly string _sandboxRoot;           // 技能沙箱根（data/skillruns）
     private readonly bool _allowPrivateEndpoints;  // 是否放行本机 / 内网（默认 false → 保留 SSRF 防护）
     private readonly DotnetSkillHost? _dotnet;     // .NET（C#）技能动态编译执行宿主
+    private readonly int _dotnetTimeoutMs;         // 用户自建 .NET 技能的执行预算
+    private readonly int _builtinTimeoutMs;        // 内置文档类技能的执行预算（可能联网取图，给得更宽）
     private readonly Func<string, string?>? _resolveAttachment; // att_xxx → 服务器路径（可空）
 
     /// <summary>附件 ID 形态：<c>att_</c> + 至少 6 位字母数字。</summary>
@@ -34,12 +36,14 @@ internal sealed class SkillRunner
     /// 模型只能看到附件 ID、看不到服务器路径，没有它「用我上传的模板/文档」到技能那一步就断了。
     /// </param>
     public SkillRunner(string sandboxRoot, ILoggerFactory loggerFactory, bool allowPrivateEndpoints = false,
-        Func<string, string?>? resolveAttachment = null)
+        Func<string, string?>? resolveAttachment = null, int dotnetTimeoutMs = 10_000, int builtinTimeoutMs = 60_000)
     {
         _sandboxRoot = Path.GetFullPath(Path.TrimEndingDirectorySeparator(sandboxRoot)) + Path.DirectorySeparatorChar;
         _logger = loggerFactory.CreateLogger<SkillRunner>();
         _allowPrivateEndpoints = allowPrivateEndpoints;
         _resolveAttachment = resolveAttachment;
+        _dotnetTimeoutMs = dotnetTimeoutMs;
+        _builtinTimeoutMs = builtinTimeoutMs;
         // NuGet 引用还原缓存放沙箱根的同级 data 目录（如 data/dotnetpkgs），随服务数据持久化
         var dataRoot = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(_sandboxRoot)) ?? _sandboxRoot;
         _dotnet = new DotnetSkillHost(_logger, Path.Combine(dataRoot, "dotnetpkgs"));
@@ -103,7 +107,11 @@ internal sealed class SkillRunner
     private string RunDotnetSkill(AgentSkillDefinition skill, string query)
     {
         if (_dotnet is null) return ".NET 技能执行器不可用。";
-        return _dotnet.Run(skill.Body ?? "", query ?? "", CancellationToken.None);
+        // 内置技能给更长的预算：它们除了排版还会联网（PPT 的 imageQuery 要检索并下载照片），
+        // 实测 3 张照片就会撞上 10 秒；而超时的后果是**整份稿子都没有**（比降级为题图差得多）。
+        // 用户自建技能仍用短预算：正文不受我们控制，拖长只会白占线程（宿主是同步等待）。
+        var timeout = skill.BuiltinVersion is null ? _dotnetTimeoutMs : _builtinTimeoutMs;
+        return _dotnet.Run(skill.Body ?? "", query ?? "", CancellationToken.None, timeout);
     }
 
     /// <summary>仅编译校验一段 C# 技能正文（不运行作者代码）：生成后自检 / 自动修复复测用。空串=通过。</summary>

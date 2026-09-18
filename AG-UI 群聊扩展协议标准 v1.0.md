@@ -1026,6 +1026,29 @@ PUT /ag-ui/user/profile
 智能体可绑定知识库（`AgentDefinition.knowledgeBaseIds`），回复前按绑定列表检索知识文档相关片段注入上下文。
 知识库由用户创建并上传文档（txt/md/json/csv 与 docx/xlsx/pptx/pdf，复用附件文本提取）：文档切片后向量化存入语义记忆向量表（GroupId 约定 `kb:{KbId}`）。切片默认按窗口 4096 字符 + 重叠 512 字符，可经 `Agents:Memory:KnowledgeChunkSize` / `KnowledgeChunkOverlap` 配置；切分沿换行 / 句末标点收尾（避免句子中间硬切切断语义），相邻切片携带重叠尾部降低边界信息丢失。依赖向量存储与 embedding（pgvector / sqlite-vec + llama / http），不可用时文档入库返回 400 明确错误。
 
+### 5.8b 图库管理接口（Hub 扩展，文档技能配图的图片来源）
+
+图库是**用户上传图片**的集合，让文档技能（PPT / Word / PDF）的配图**不依赖外网**（内网部署里 Wikimedia 通常不可达）。
+一张图一个向量（不分片）：上传后由**视觉模型自动生成中文描述**（`Agents:VisionEnabled`，失败则用文件名 + 手填描述），
+描述 + 标签 + 文件名向量化存入同一张向量表（GroupId 约定 `img:{LibId}`、`sender_type='img'`），与知识库一样**不参与群记忆检索**。
+图片文件落 `data/images/{libId}/{assetId}{ext}`。入库为异步处理：上传立即返回 `status=processing`，前端轮询 `ready` / `error`。
+
+|接口|路径|说明|
+|---|---|
+|创建图库|`POST /ag-ui/image-libs`|`{ name, description?, sharedGroupIds? }`；群级共享需为群成员|
+|可见列表|`GET /ag-ui/image-libs`|系统级 + 自己创建的 + 群共享 + 管理员，含图片清单|
+|删除图库|`DELETE /ag-ui/image-libs/{libId}`|仅创建者或管理员；系统级仅管理员|
+|上传图片|`POST /ag-ui/image-libs/{libId}/assets`|`{ attachmentId, fileName?, caption?, tags? }`（先经 `POST /ag-ui/upload`）|
+|改描述|`PUT /ag-ui/image-libs/{libId}/assets/{assetId}`|改了会**重新向量化**（检索依据就是描述）|
+|删图片|`DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`|同时删向量与文件|
+|读原图|`GET /ag-ui/image-libs/{libId}/assets/{assetId}/raw`|需登录且可读该图库|
+|语义检索|`POST /ag-ui/images/search`|`{ query, topK?, minScore?, scopeHandle? }`；见下|
+
+**检索端的身份与范围（安全关键）**：该端点接受两种身份 —— 登录用户（前端调试、只能查自己可读的图库）与
+**平台自令牌**（内置技能回调，`AGUI_SELF_BASE` / `AGUI_SELF_TOKEN` 于启动时注入进程环境变量）。
+技能**只带平台登记的「范围句柄」（`scopeHandle`）**、不自报图库 ID —— 技能入参由模型生成，自报 ID 即可越权读别人的图库。
+服务器本地路径（`path`）**仅回给自令牌**（技能要拿它直接嵌入文件）；登录用户只拿元数据与 `/raw` 地址。
+
 **文档入库为异步处理**：`POST /ag-ui/kb/{kbId}/documents` 立即返回 `status=processing` 的文档记录（提取文本 / 切片 / 向量化在后台执行，避免上传请求长时间阻塞）；前端轮询知识库列表观察状态变化——`processing`（处理中）→ `ready`（已入库，chunkCount>0）或 `error`（失败，error 字段为原因）。处理中文档可随时移除（后台丢弃未写入的向量）；服务重启导致处理中断的文档恢复为 `error`。
 
 |接口|路径|说明|

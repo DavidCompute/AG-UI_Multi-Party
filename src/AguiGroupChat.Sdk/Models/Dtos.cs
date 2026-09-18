@@ -143,6 +143,7 @@ public sealed class AgentDefinitionDto
     public string? OwnerId { get; set; }
     public IReadOnlyList<string>? Skills { get; set; }
     public IReadOnlyList<string>? KnowledgeBaseIds { get; set; }
+    public IReadOnlyList<string>? ImageLibraryIds { get; set; }
     public IReadOnlyList<string>? RequireApprovalToolNames { get; set; }
     public object? Pipeline { get; set; }
     public string? RelayToAgentId { get; set; }

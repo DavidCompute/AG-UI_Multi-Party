@@ -614,8 +614,10 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
             };
             // 私密群记忆隔离：私密群的记忆仅允许在当前触发群（本群）内被检索到
             const string privacy = " AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)";
-            // 知识库行（sender_type='kb'）仅在其专属检索（groupId=kb:{id}）中读取，普通群记忆一律排除
-            const string kbFilter = " AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%')";
+            // 知识库行（sender_type='kb'）仅在其专属检索（groupId=kb:{id}）中读取，普通群记忆一律排除；
+            // 图库行（sender_type='img'）同理——它们是“图片描述”的向量，不属于任何群聊记忆。
+            const string kbFilter = " AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%')"
+                                  + " AND (m.sender_type <> 'img' OR m.group_id LIKE 'img:%')";
             using var conn = OpenVec();
             if (_vecEnabled)
             {
@@ -716,7 +718,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
             SELECT m.message_id, m.content, m.sender_id, m.timestamp, m.embedding, m.importance, m.expires_at, m.group_id
             FROM agui_message_memory m
             LEFT JOIN agui_groups g ON g.group_id = m.group_id
-            WHERE m.recalled = 0 AND m.embedding IS NOT NULL AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%'){groupFilter}{privacy}{senderFilter}
+            WHERE m.recalled = 0 AND m.embedding IS NOT NULL AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%') AND (m.sender_type <> 'img' OR m.group_id LIKE 'img:%'){groupFilter}{privacy}{senderFilter}
               AND (m.expires_at IS NULL OR m.expires_at > @now)
             """;
         if (scopeKey is not ("group" or "all")) cmd.Parameters.AddWithValue("agent", agentId);

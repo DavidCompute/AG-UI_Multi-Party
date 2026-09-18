@@ -74,11 +74,12 @@
 //     stack    层叠架构  title, items:[ {title,text} ]
 //                        适合：技术架构 / 能力分层
 //     hero     自动题图  title, subtitle（整页程序生成的抽象图）
+//     credits  图片来源  title, items:[…]（用了联网照片时自动追加；见上方「照片」一节）
 //     grid     网格卡    title, items:[ {title,text} ], cols:2|3
 //     timeline 时间轴    title, items:[ {title,detail} ]（最多 6 步）
 //     iconRows 图标行    title, items:[ {icon,title,text} ]（最多 6 行）
 //     quote    引言      text, cite
-//     image    配图      title, path, caption
+//     image    配图      title, path（本地文件）或 imageQuery（联网检索）, caption
 //                        variant: full(默认) | left(图左文右) | right(文左图右) |
 //                                 bleed(半出血+叠字，自包含标题) | gallery(images:[{path,caption}] 2~4 张)
 //                        left/right/bleed 可配 heading/bullets 写文字侧
@@ -101,6 +102,40 @@
 //     另一类是**程序化题图**（hero 页型，以及 image/cover 缺图时的降级）：按主题配色生成一张
 //       抽象图，零素材、零联网、无版权问题，且**确定性**（同一标题每次生成的图一样）。
 //     设计约束：只用实色（无渐变）、透明度只用 a:alpha，颜色全部取自动调色板。
+//
+//   【照片：用 imageQuery 联网取图（Wikimedia Commons）】
+//     要用**真照片**（而不是示意图/题图）时，在需要图的位置写：
+//       "imageQuery": "modern office meeting room"      // 检索关键词
+//     凡是有图的位置都支持它：cover(variant image/split) / section(variant full) /
+//       image(全部版式，含 gallery 的每张) / content。给了 path 就用 path（本地文件优先），
+//       没有 path 才去检索。
+//     content 页带 imageQuery（或 path）时**自动变成“文左图右”**，所以不必为了配图改用别的页型。
+//
+//   【配图顺序：先团队图库，再网络（不依赖外网的路子）】
+//     平台有「图库」时，会在调用本技能前注入一个检索范围句柄（入参 imageScopeId），
+//     技能据此回调 /ag-ui/images/search 做语义检索：
+//       ① 命中 → 直接用平台返回的**本地文件路径**嵌入（自有素材，**不需要 CC 署名**）；
+//       ② 未命中 → 回落 Wikimedia Commons（CC 素材，会附「图片来源」页）；
+//       ③ 都没有 → 退回自动生成的题图（不假称有图）。
+//     imageSource 控制走哪条路（入参优先，其次环境变量 AGUI_IMAGE_SOURCE）：
+//       auto（默认）/ library（仅图库，**彻底不出网**，内网部署用这个）/ network（仅网络）。
+//
+//   【照片：关键词怎么写（实测结论，不是猜的）】
+//     Commons 是**档案库**而不是商业图库，检索质量几乎全看关键词：
+//       · 用 **2~4 个能看得见的具体名词**：“modern office meeting room” / “glass office building” /
+//         “handshake business” / “city skyline sunset” —— 实测前两个都直接顶到 Unsplash 导入的 CC0 会议室、
+//         以及真正的现代玻璃幕墙楼；
+//       · **不要用抽象词/动词**（teamwork / collaboration / together / growth）：
+//         实测 “teamwork” 的头两条是 Teamwork-icon.jpg 与 Teamwork.com-Logo-200.png；
+//         “business people working together” 的第一条是 1920 年书里的插图；
+//       · 词太多会**搜不到结果**：五个词以上的 “office desk laptop notebook business” 返回空。
+//     代码侧的兵庖（都要有，因为关键词拦不住所有坏命中）：
+//       ① 宽 < 1200px 跳过（800px 铺满一页明显发虚）；
+//       ② 长宽比超出 0.55~2.2 跳过 —— 定框裁切后全景图只剩中间一条；
+//       ③ 标题含 logo / icon / wordmark / flag of 的跳过；
+//       ④ 分类含书刊扫描（Internet Archive Book Images 等）的跳过；
+//       ⑤ 许可含 non-free / fair use 的跳过；
+//       ⑥ 限流（HTTP 429 / 服务不可用）退避 2 秒重试一次。
 //
 //   【出稿后自检】生成/编辑完会自动跑一遍 QA（占位符、空页、只有标题、形状越界、
 //   **文字放不进自己的框**），结果在返回 JSON 的 qa 字段；降级行为（如图片缺失改用占位块、
@@ -151,8 +186,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 // 命名空间别名：避免与 OpenXML 类型重名（Color / PointF 等）
 using P = DocumentFormat.OpenXml.Presentation;
 using A = DocumentFormat.OpenXml.Drawing;
@@ -703,10 +741,22 @@ public class Skill
                 // 降级/提示（如图片缺失改用色块）：不静默降级，调用方/用户能看见
                 + ",\"warnings\":[" + string.Join(",", (_warnings ?? []).Select(Js)) + "]"
                 + ",\"qa\":" + qaJson
+                // 用到的联网照片：署名依据（也可让调用方自行在正文里再标一次）。
+                // 只要有照片，稿末就会多一页「图片来源」——那是许可要求，不是可选渲染。
+                + ",\"images\":[" + string.Join(",", Photos.Select(p =>
+                    "{\"query\":" + Js(p.Query) + ",\"source\":" + Js(p.Source) + ",\"title\":" + Js(p.FileName)
+                    + ",\"library\":" + Js(p.LibraryName) + ",\"caption\":" + Js(p.Caption)
+                    + ",\"author\":" + Js(p.Author) + ",\"license\":" + Js(p.License)
+                    + ",\"page\":" + Js(p.PageUrl) + "}")) + "]"
                 // 原生图表用量与降级原因：调了却没用上必须说清楚，不能静默降级
                 + ",\"nativeCharts\":" + _nativeCharts
                 + ",\"nativeChartFallback\":" + (_nativeFallback is null ? "null" : Js(_nativeFallback))
                 + ",\"message\":" + Js("已生成演示文稿：" + built.Path
+                    + (LibraryPhotoCount > 0 ? "（其中 " + LibraryPhotoCount + " 张来自团队图库）" : "")
+                    + (NetworkPhotoCount > 0
+                        ? "（已按关键词从 Wikimedia Commons 取回 " + NetworkPhotoCount + " 张照片，并在稿末附上「图片来源」页；"
+                          + "这是 CC 许可的署名要求，请随稿一起保留）"
+                        : "")
                     + (ChartFontHasCjk ? "" : "（提示：当前环境未找到含中文字形的字体，图表中的中文可能显示为缺字/乱码；"
                         + "可在容器里安装 fonts-noto-cjk / fonts-droid-fallback 后重启）")) + "}";
         }
@@ -1220,6 +1270,16 @@ public class Skill
         _nativeFallback = null;
         _titleRule = root.TryGetProperty("titleRule", out var trEl) && trEl.ValueKind == JsonValueKind.True;
         _warnings = new List<string>();
+        // 联网配图的会话状态：缓存 / 署名清单 / 熔断 / 端点覆盖
+        _photoCache = new Dictionary<string, Photo?>(StringComparer.OrdinalIgnoreCase);
+        _photos = new List<Photo>();
+        _photoOffline = false;
+        _photoBudgetWarned = false;
+        _photoDeadline = Environment.TickCount64 + PhotoBudgetSec * 1000L;
+        // 配图来源策略：入参优先，其次环境变量（部署级一次性配置：内网部署设 library 彻底不出网）
+        _imageSource = (Str(root, "imageSource") ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE") ?? "").Trim();
+        _imageScopeId = Str(root, "imageScopeId") ?? Str(root, "image_scope_id");
+        _photoApi = Str(root, "imageSearchApi") ?? Environment.GetEnvironmentVariable(PhotoApiEnvVar);
         var title = Str(root, "title") ?? "演示文稿";
         var subtitle = Str(root, "subtitle");
         var author = Str(root, "author");
@@ -1239,6 +1299,15 @@ public class Skill
         foreach (var s in slides)
             foreach (var one in ExpandTableSlide(s))
                 pageJson.AddRange(ExpandOverflowSlide(one));
+
+        // 联网配图：把整份稿子里的 imageQuery 都检索/下载到位（同时填好署名清单）。
+        // 要点页在拆页阶段可能已经查过一次（要定版式），这里是补上“其余页型 + 追加署名页”。
+        PreResolvePhotos(pageJson);
+        // 署名页也要走**同一套拆页**：40 张照片的清单绝不可能装在一页里。
+        // （之前这里是 pageJson.Add(...)，没拆页 —— 压测 40 张时全部挤在一页、溢出框外，已修）
+        // 只有**网络照片**才需要署名：图库里的图是团队自有素材。
+        if (NetworkPhotoCount > 0) pageJson.AddRange(ExpandOverflowSlide(CreditsPageJson()));
+
         // 自检时要知道每页本来的页型（才能判“内容页只剩标题”），这里同步记下来
         var pageTypes = pageJson.Select(PageTypeOf).ToList();
 
@@ -1341,13 +1410,37 @@ public class Skill
 
         public int NextId() => _shapeId++;
 
-        /// <summary>把 PNG 作为图片挂进本页，返回关系 id（供 &lt;a:blip r:embed&gt; 引用）。</summary>
-        public string AddImage(byte[] png)
+        /// <summary>
+        /// 把一张位图作为图片挂进本页，返回关系 id（供 &lt;a:blip r:embed&gt; 引用）。
+        /// 按<b>魔数</b>判类型：JPEG 照片若被标成 PNG，PowerPoint 会报“图片不可读”，
+        /// 而联网配图（Wikimedia Commons）大多就是 JPEG。
+        /// </summary>
+        public string AddImage(byte[] bytes)
         {
-            var part = Part.AddImagePart(ImagePartType.Png);
-            using var ms = new MemoryStream(png);
+            var part = AddPartOfDetectedType(bytes);
+            using var ms = new MemoryStream(bytes);
             part.FeedData(ms);
             return Part.GetIdOfPart(part);
+        }
+
+        /// <summary>
+        /// 不能一律当 PNG：<c>[Content_Types].xml</c> 里声明的类型与实际内容不一致时
+        /// PowerPoint 会报“图片不可读”。按魔数选类型，支持 OOXML 认识的全部常见位图；
+        /// 认不出的（如 WebP）保持旧行为当 PNG 处理，不新增失败路径。
+        /// （注：<c>ImagePartType</c> 是静态类，其成员类型不方便做返回类型，所以直接在此分支。）
+        /// </summary>
+        private ImagePart AddPartOfDetectedType(byte[] bytes)
+        {
+            if (IsPng(bytes)) return Part.AddImagePart(ImagePartType.Png);
+            if (IsJpeg(bytes)) return Part.AddImagePart(ImagePartType.Jpeg);
+            if (bytes.Length > 3 && bytes[0] == (byte)'G' && bytes[1] == (byte)'I' && bytes[2] == (byte)'F')
+                return Part.AddImagePart(ImagePartType.Gif);
+            if (bytes.Length > 2 && bytes[0] == (byte)'B' && bytes[1] == (byte)'M')
+                return Part.AddImagePart(ImagePartType.Bmp);
+            if (bytes.Length > 4 && ((bytes[0] == 0x49 && bytes[1] == 0x49 && bytes[2] == 0x2A)
+                || (bytes[0] == 0x4D && bytes[1] == 0x4D && bytes[2] == 0x00)))
+                return Part.AddImagePart(ImagePartType.Tiff);
+            return Part.AddImagePart(ImagePartType.Png);
         }
 
         /// <summary>
@@ -1713,6 +1806,9 @@ public class Skill
                 break;
             case "hero":
                 return HeroSlide(el, ctx);
+            case "credits":
+                // 用了联网照片时由程序自动追加的「图片来源」页（署名是许可要求，不由模型决定）
+                return CreditsSlide(el, ctx);
             case "summary":
                 shapes.Add(SlideTitle(Str(el, "title") ?? "小结", ctx));
                 shapes.Add(SummaryBody(el, ctx));
@@ -1731,6 +1827,11 @@ public class Skill
                     "cycle" or "loop" => CycleBody(el, ctx),
                     "stack" or "architecture" => StackBody(el, ctx),
                     "iconrows" or "icon-rows" or "rows" => IconRowsBody(el, ctx),
+                    // 没写 layout 但带了图（path / imageQuery）→ 自动变成“文左图右”：
+                    // 这样模型只要在要点页上多写一个 imageQuery 就能页页有图，不必改记别的页型。
+                    // 只看“图真的拿到手了没有”，检索失败就老老实实地走纯要点版式，
+                    // 不把半页白白交给一张降级题图。
+                    _ when HasUsablePhoto(el) => ImageSide(el, ctx, imageFirst: false),
                     _ => BulletBody(el, ctx, accent: false),
                 });
                 break;
@@ -1823,10 +1924,11 @@ public class Skill
     private static string CoverImageBg(JsonElement el, SlideCtx ctx)
     {
         var t = ctx.Theme;
-        var path = Str(el, "path");
+        var requested = Str(el, "path");
+        var path = ImagePathOf(el);
         var title = Str(el, "title") ?? ctx.Title;
         var shapes = new List<string>();
-        var hasImg = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+        var hasImg = path is not null;
         if (hasImg)
         {
             shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, W, H), 0, 0, W, H));
@@ -1837,7 +1939,7 @@ public class Skill
         {
             // 没给背景图 → 用自动生成的题图（以前是一块纯色，看着就是一页色块）
             shapes.Add(HeroArt(ctx, 0, 0, W, H, title));
-            if (!string.IsNullOrWhiteSpace(path)) Warn("封面背景图不存在，已改用自动生成的题图：" + path);
+            if (!string.IsNullOrWhiteSpace(requested)) Warn("封面背景图不存在，已改用自动生成的题图：" + requested);
         }
         var onImg = hasImg ? t.OnPrimary : t.Light;
 
@@ -1861,16 +1963,17 @@ public class Skill
         var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Bg) };
         var imgW = W * 5 / 12;
         var imgX = W - imgW;
-        var path = Str(el, "path");
+        var requested = Str(el, "path");
+        var path = ImagePathOf(el);
         var title = Str(el, "title") ?? ctx.Title;
-        var hasImg = !string.IsNullOrWhiteSpace(path) && File.Exists(path);
+        var hasImg = path is not null;
         if (hasImg)
             shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, H), imgX, 0, imgW, H));
         else
         {
             // 右图缺位 → 自动生成题图（与 image/split 版式同一份视觉语言）
             shapes.Add(HeroArt(ctx, imgX, 0, imgW, H, title));
-            if (!string.IsNullOrWhiteSpace(path)) Warn("封面右图不存在，已改用自动生成的题图：" + path);
+            if (!string.IsNullOrWhiteSpace(requested)) Warn("封面右图不存在，已改用自动生成的题图：" + requested);
         }
 
         var textW = imgX - MX - 457200;
@@ -1963,6 +2066,14 @@ public class Skill
     {
         var t = ctx.Theme;
         var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Primary) };
+        // 有配图（path 或 imageQuery）就用满页照片 + 主色蒙层：分隔页是全稿最值得放图的页型之一，
+        // 蒙层与背景图封面同一手法（对比度靠它守住）。
+        var path = ImagePathOf(el);
+        if (path is not null)
+        {
+            shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path, W, H), 0, 0, W, H));
+            shapes.Add(Rect(ctx.NextId(), 0, 0, W, H, t.Primary, alpha: 62));
+        }
         // 水印序号：同底色的低透明度大字（用 a:alpha，不要用颜色编透明度）
         shapes.Add(TextBox(ctx.NextId(), MX, 0, CW, 4114800,
             Para(ctx.Index.ToString("00"), 20000, t.Bg, bold: true, align: "ctr",
@@ -2498,14 +2609,22 @@ public class Skill
     /// 条目型页型的排版计划（分页判定与渲染<b>必须</b>用同一套规则，否则拆出来的页会与预期不符）。
     /// </summary>
     private static List<ParaPlan> ItemsPlan(string type, List<string> items)
-        => type == "toc"
+        => type switch
+        {
             // 目录渲染出来的是「01   标题」这一串（序号占宽），量高必须按同一串量
-            ? items.Select((it, i) => P((i + 1).ToString("00") + "   " + it, 1800, 14, 120)).ToList()
-            : BulletPlan(items, _m.Gap);
+            "toc" => items.Select((it, i) => P((i + 1).ToString("00") + "   " + it, 1800, 14, 120)).ToList(),
+            "credits" => CreditPlan(items),
+            _ => BulletPlan(items, _m.Gap),
+        };
 
     /// <summary>单条目的排版计划（分页用；目录的序号前缀用等宽的 “00” 占位）。</summary>
     private static List<ParaPlan> SingleItemPlan(string type, string item)
-        => type == "toc" ? [P("00   " + item, 1800, 14, 120)] : BulletPlan([item], _m.Gap);
+        => type switch
+        {
+            "toc" => [P("00   " + item, 1800, 14, 120)],
+            "credits" => CreditPlan([item]),
+            _ => BulletPlan([item], _m.Gap),
+        };
 
     /// <summary>
     /// 一页能放下几条条目（按「缩到下限」算）。
@@ -2863,7 +2982,7 @@ public class Skill
         {
             var el = doc.RootElement;
             var type = (Str(el, "type") ?? "content").Trim().ToLowerInvariant();
-            if (type is not ("content" or "summary" or "toc")) return single;
+            if (type is not ("content" or "summary" or "toc" or "credits")) return single;
             // 换了版式（如 content + layout:grid）就不拆：那些页型的条目在固定卡里
             if (type == "content" && !string.IsNullOrWhiteSpace(Str(el, "layout"))) return single;
             var variant = VariantOf(el, "list");
@@ -2872,7 +2991,7 @@ public class Skill
             if (type == "toc" && variant != "list") return single;
             if (type == "summary" && !splitSummary && variant != "list") return single;
 
-            var key = type == "toc" ? "items" : "bullets";
+            var key = type is "toc" or "credits" ? "items" : "bullets";
             var items = StringList(el, key);
             if (items.Count == 0) items = StringList(el, type == "toc" ? "bullets" : "items");
             if (items.Count < 2) return single;
@@ -2880,6 +2999,11 @@ public class Skill
             // 拆页要按**这个版式真正的可用空间**算：split 的左栏只有半页宽
             var availW = CW;
             var availH = BodyH;
+            // 带配图的要点页会渲染成“文左图右”（见 RenderSlide 的默认分支）：正文只有半页宽，
+            // 拆页必须按这个宽度算，否则拆出来的页在半栏里依旧放不下。
+            // 这里会真的去检索一次（结果进缓存，后续 PreResolvePhotos / 渲染都直接命中）——
+            // 必须先知道“图到底拿没拿到”才能决定版式，所以顺序上把它放在拆页里是故意的。
+            if (type == "content" && HasUsablePhoto(el)) availW = CW * 48 / 100 - _m.Gap;
             List<ParaPlan> allPlan;
             Func<string, List<ParaPlan>> planOf;
             if (splitSummary)
@@ -2907,6 +3031,14 @@ public class Skill
                 var sb = new StringBuilder("{\"type\":").Append(Js(type));
                 sb.Append(",\"title\":").Append(Js(baseTitle + "（" + (p + 1) + "/" + pages + "）"));
                 sb.Append(',').Append(Js(key)).Append(":[").Append(string.Join(",", chunk.Select(Js))).Append(']');
+                // 续页不再带配图：同一张照片连着两页出现反而像出错（拆页前的字段本来就被丢掉了，
+                // 除 path/imageQuery 外还有可能被丢掉的展示字段，一并在这里补回）
+                if (p == 0)
+                {
+                    var q = ImageQueryOf(el);
+                    if (q.Length > 0) sb.Append(",\"imageQuery\":").Append(Js(q));
+                    else if (Str(el, "path") is { Length: > 0 } pp) sb.Append(",\"path\":").Append(Js(pp));
+                }
                 if (splitSummary)
                 {
                     sb.Append(",\"variant\":\"split\"");
@@ -4106,6 +4238,661 @@ public class Skill
         return SlideXml(t.Bg, shapes);
     }
 
+    // ---- 联网配图（Wikimedia Commons）----
+    //
+    // 为什么要联网取图：示意图与题图都是**图形**，不是照片。用户要“每页配一张符合内容的图”时
+    // 指的是照片级画面，那只能来自图库。选 Commons 的理由：**免密钥**、素材全部是自由许可
+    // （CC0 / CC BY / CC BY-SA / PD）、有稳定的公开 API。代价是**必须署名**：只要用了检索来的
+    // 照片，就自动在稿末追加「图片来源」页（见 CreditsSlide）—— 这是合规要求，不是可选装饰。
+    //
+    // 失败一律降级：无网络 / 无结果 / 格式不认 → 退回自动题图 + Warn，绝不让一次联网失败
+    // 把整份稿子拖垮。另外做了**熔断**：第一次连接级失败后本轮不再尝试 ——
+    // 否则“离线环境 + 每页一张图”会变成每页一次超时，十页的稿子要等几分钟。
+
+    private const string CommonsSearchApi = "https://commons.wikimedia.org/w/api.php";
+
+    /// <summary>
+    /// 环境变量 <c>AGUI_PHOTO_API</c>：把检索端点改成自建代理 / 镜像（入参 <c>imageSearchApi</c> 优先于它）。
+    ///
+    /// <para>
+    /// 为何必须留这个口子：Wikimedia 在部分网络里不可达 —— 实测本环境容器能访问 example.com（200）
+    /// 与 api.nuget.org（302），但 en.wikipedia.org 与 upload.wikimedia.org 都返回 000（被拦）。
+    /// 这类部署要么给容器配 <c>HTTPS_PROXY</c>（HttpClient 会读该环境变量），要么把端点指到镜像。
+    /// </para>
+    /// </summary>
+    private const string PhotoApiEnvVar = "AGUI_PHOTO_API";
+    private const string PhotoUserAgent = "AguiGroupChat-PptxDeck/1.0 (slide illustration; Wikimedia Commons API)";
+    private const int PhotoSearchTimeoutSec = 8;
+    private const int PhotoDownloadTimeoutSec = 12;
+    /// <summary>
+    /// 一次生成里花在取图上的总时间上限（秒）。
+    ///
+    /// <para>
+    /// 为何要有：技能执行有<b>硬预算</b>（内置技能默认 60 秒，见 AgentOptions.BuiltinSkillTimeoutMs），
+    /// 而超时的后果是**整份稿子都没有**，比“剩下几页降级为题图”差得多。
+    /// 所以取图自己先封顶，把剩下的时间留给排版与落盘。
+    /// </para>
+    /// </summary>
+    private const int PhotoBudgetSec = 35;
+    private const long PhotoMaxBytes = 12L * 1024 * 1024;
+    /// <summary>向图库请求的缩略图宽度：原图常常几十 MB，而幻灯片用不到那么多像素。</summary>
+    private const int PhotoWidth = 1600;
+    /// <summary>「图片来源」页的字号：比正文小，长 URL 也能一行放下。</summary>
+    private const int CreditSize = 1050;
+
+    /// <summary>一张检索来的照片：本地缓存文件 + 署名所需的元数据。</summary>
+    private sealed class Photo
+    {
+        public string Path = "";
+        public string FileName = "";
+        public string Author = "";
+        public string License = "";
+        public string PageUrl = "";
+        public string Query = "";
+        /// <summary>来源：<c>library</c>（团队图库，自有素材、不需署名）| <c>commons</c>（Wikimedia，CC 需署名）。</summary>
+        public string Source = "commons";
+        /// <summary>来自图库时的图库名（回显与排障用）。</summary>
+        public string LibraryName = "";
+        /// <summary>来自图库时的图片描述（视觉模型生成，方便校对“配得对不对”）。</summary>
+        public string Caption = "";
+
+        /// <summary>「图片来源」页里的一行。顺序按“最该留住的排前面”：截断时先丢链接而不是先丢作者。</summary>
+        public string CreditLine()
+        {
+            var sb = new StringBuilder(FileName);
+            sb.Append(" — ").Append(Author.Length > 0 ? Author : "（未标注作者）");
+            sb.Append(" — ").Append(License.Length > 0 ? License : "Wikimedia Commons");
+            if (PageUrl.Length > 0) sb.Append(" — ").Append(PageUrl);
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>同一关键词一份的检索缓存（关键词 → 照片；null = 查过了、没有）。</summary>
+    [ThreadStatic] private static Dictionary<string, Photo?>? _photoCache;
+    /// <summary>本次生成用到的照片（按原页面去重），用于生成「图片来源」页与返回 JSON。</summary>
+    [ThreadStatic] private static List<Photo>? _photos;
+    /// <summary>检索端点覆盖（离线部署 / 自建代理 / 测试注入）。</summary>
+    [ThreadStatic] private static string? _photoApi;
+    /// <summary>熔断：连接级失败后不再逐页重试。</summary>
+    [ThreadStatic] private static bool _photoOffline;
+    /// <summary>取图总时间预算的截止点（Environment.TickCount64）。</summary>
+    [ThreadStatic] private static long _photoDeadline;
+    /// <summary>预算耗尽的提示只报一次。</summary>
+    [ThreadStatic] private static bool _photoBudgetWarned;
+    /// <summary>配图来源策略：auto（默认，先图库后网络）| library（仅图库，不出网）| network（仅网络）。</summary>
+    [ThreadStatic] private static string? _imageSource;
+    /// <summary>平台注入的图库检索范围句柄（没有 = 没有可用的图库，直接走网络）。</summary>
+    [ThreadStatic] private static string? _imageScopeId;
+
+    private const string SelfBaseEnv = "AGUI_SELF_BASE";
+    private const string SelfTokenEnv = "AGUI_SELF_TOKEN";
+    private const int LibrarySearchTimeoutSec = 10;
+
+    /// <summary>是否允许联网取图（imageSource=library 时彻底不出网，内网部署用）。</summary>
+    private static bool NetworkImagesAllowed
+        => !string.Equals(_imageSource, "library", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>是否允许查团队图库（imageSource=network 时只走网络）。</summary>
+    private static bool LibraryImagesAllowed
+        => !string.Equals(_imageSource, "network", StringComparison.OrdinalIgnoreCase);
+
+    private static List<Photo> Photos => _photos ??= new List<Photo>();
+
+    private static string PhotoCacheDir()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "agui-commons-photos");
+        try { Directory.CreateDirectory(dir); } catch { /* 建不了就用临时目录本身 */ }
+        return dir;
+    }
+
+    /// <summary>
+    /// 按关键词从 Wikimedia Commons 取一张可自由使用的照片，下载到本地缓存后返回。
+    /// 失败（无网络 / 无结果 / 格式不认）一律返回 null —— 调用方降级为题图并记 warning。
+    /// </summary>
+    private static Photo? ResolvePhoto(string query)
+    {
+        var key = (query ?? "").Trim();
+        if (key.Length == 0) return null;
+        _photoCache ??= new Dictionary<string, Photo?>(StringComparer.OrdinalIgnoreCase);
+        if (_photoCache.TryGetValue(key, out var hit)) return hit;   // 命中缓存不受预算限制
+        if (_photoOffline) return null;
+        if (_photoDeadline > 0 && Environment.TickCount64 > _photoDeadline)
+        {
+            if (!_photoBudgetWarned)
+            {
+                _photoBudgetWarned = true;
+                Warn("配图已用完全部时间预算（" + PhotoBudgetSec + " 秒），其余配图改用自动生成的题图");
+            }
+            return null;
+        }
+
+        Photo? photo = null;
+        var reasons = new List<string>();
+        // ① 团队图库优先：命中就是自有素材（不需要 CC 署名），也完全不依赖外网
+        if (LibraryImagesAllowed)
+        {
+            try
+            {
+                photo = ResolveFromLibrary(key, out var libWhy);
+                if (photo is null && libWhy is not null) reasons.Add("图库：" + libWhy);
+            }
+            catch (Exception ex) { reasons.Add("图库：" + ex.GetType().Name + "：" + ex.Message); }
+        }
+        // ② 库内没有（或没图库）→ 回落网络；imageSource=library 时彻底不出网
+        if (photo is null && NetworkImagesAllowed)
+        {
+            try
+            {
+                photo = SearchAndDownload(key, out var netWhy);
+                if (photo is null) reasons.Add("网络：" + (netWhy ?? "未找到合适的图片"));
+            }
+            catch (Exception ex) { reasons.Add("网络：" + ex.GetType().Name + "：" + ex.Message); }
+        }
+        else if (photo is null)
+        {
+            reasons.Add("已配置为仅用团队图库（imageSource=library），不联网取图");
+        }
+
+        if (photo is null)
+        {
+            var why = reasons.Count > 0 ? string.Join("；", reasons) : "未找到合适的图片";
+            Warn("配图检索未成功，已改用自动生成的题图：关键词“" + key + "”（" + why + "）【端点：" + PhotoEndpoint() + "】");
+            if (reasons.Any(r => r.Contains("无法连接", StringComparison.Ordinal))) _photoOffline = true;
+        }
+        else if (!Photos.Any(p => string.Equals(p.Path, photo.Path, StringComparison.OrdinalIgnoreCase)))
+        {
+            Photos.Add(photo);
+        }
+        _photoCache[key] = photo;
+        return photo;
+    }
+
+    /// <summary>
+    /// 查<b>团队图库</b>：技能经回环 HTTP 调平台的 <c>/ag-ui/images/search</c>，拿回一张图片的**本地路径**。
+    ///
+    /// <para>
+    /// 句柄（<c>imageScopeId</c>）由平台在调用本技能前注入，技能只带句柄、不带图库 ID ——
+    /// 入参是模型生成的，若能自报图库 ID 就能越权读别人的图。没有句柄 = 没有可用图库，静默跳过。
+    /// </para>
+    ///
+    /// <para>取不到返回 null 并给出原因（原因会汇总进 warnings，不静默）。</para>
+    /// </summary>
+    private static Photo? ResolveFromLibrary(string query, out string? why)
+    {
+        why = null;
+        var scope = _imageScopeId;
+        if (string.IsNullOrWhiteSpace(scope)) return null;   // 没注入句柄：环境里没有图库，不必报错
+        var baseUrl = Environment.GetEnvironmentVariable(SelfBaseEnv);
+        var token = Environment.GetEnvironmentVariable(SelfTokenEnv);
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token))
+        {
+            why = "未拿到平台回调地址（AGUI_SELF_BASE / AGUI_SELF_TOKEN 未注入）";
+            return null;
+        }
+
+        var body = "{\"query\":" + Js(query) + ",\"scopeHandle\":" + Js(scope!) + ",\"topK\":3}";
+        var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, LibrarySearchTimeoutSec, out why);
+        if (json is null) return null;
+
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("images", out var arr) || arr.ValueKind != JsonValueKind.Array)
+        {
+            why = "平台返回格式异常";
+            return null;
+        }
+        foreach (var img in arr.EnumerateArray())
+        {
+            var path = Str(img, "path");
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
+            return new Photo
+            {
+                Path = path!,
+                FileName = Str(img, "fileName") ?? Path.GetFileName(path!),
+                Source = "library",
+                LibraryName = Str(img, "libName") ?? "",
+                Caption = Str(img, "caption") ?? "",
+                Query = query,
+            };
+        }
+        why = "图库里没有匹配的图片";
+        return null;
+    }
+
+    /// <summary>POST JSON 并读回响应体（与 GET 同一套超时/限流重试策略）。</summary>
+    private static string? HttpPostJson(string url, string jsonBody, string token, int timeoutSec, out string? why)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var text = HttpPostOnce(url, jsonBody, token, timeoutSec, out why, out var retryable);
+            if (text is not null) return text;
+            if (!retryable || attempt >= 2) return null;
+            Thread.Sleep(2000);
+        }
+    }
+
+    private static string? HttpPostOnce(string url, string jsonBody, string token, int timeoutSec,
+        out string? why, out bool retryable)
+    {
+        why = null;
+        retryable = false;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSec) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd(PhotoUserAgent);
+            using var content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            req.Headers.TryAddWithoutValidation(SelfTokenEnv, token);
+            using var resp = Task.Run(() => http.SendAsync(req, HttpCompletionOption.ResponseContentRead))
+                .GetAwaiter().GetResult();
+            if (!resp.IsSuccessStatusCode)
+            {
+                var code = (int)resp.StatusCode;
+                why = "平台返回 HTTP " + code;
+                retryable = code is 429 or 503;
+                return null;
+            }
+            var text = Task.Run(() => resp.Content.ReadAsStringAsync()).GetAwaiter().GetResult();
+            return text;
+        }
+        catch (Exception ex)
+        {
+            why = ex.GetType().Name + "：" + ex.Message;
+            retryable = ex is TaskCanceledException or TimeoutException;
+            return null;
+        }
+    }
+
+    private static string PhotoEndpoint()
+        => string.IsNullOrWhiteSpace(_photoApi) ? CommonsSearchApi : _photoApi!;
+
+    /// <summary>
+    /// 检索 + 下载。按 Commons 给出的相关性顺序逐个试：前面几张可能格式/尺寸不合意，
+    /// 换一张比直接放弃好。
+    /// </summary>
+    private static Photo? SearchAndDownload(string query, out string? why)
+    {
+        why = null;
+        var api = PhotoEndpoint();
+        var url = api + (api.Contains('?', StringComparison.Ordinal) ? "&" : "?")
+            + "action=query&format=json&formatversion=1&generator=search&gsrnamespace=6&gsrlimit=10"
+            + "&gsrsearch=" + Uri.EscapeDataString(query + " filetype:bitmap")
+            + "&prop=imageinfo&iiprop=url%7Cmime%7Csize%7Cextmetadata&iiurlwidth=" + PhotoWidth;
+
+        var json = HttpGetText(url, PhotoSearchTimeoutSec, out var netWhy);
+        if (json is null) { why = netWhy; return null; }
+
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("query", out var q)
+            || !q.TryGetProperty("pages", out var pages) || pages.ValueKind != JsonValueKind.Object)
+        { why = "Wikimedia 检索没有返回可用结果"; return null; }
+
+        // generator=search 返回的是对象（不是按序数组），靠每条自带的 index 还原相关性顺序
+        var candidates = new List<(int Index, JsonElement El)>();
+        foreach (var p in pages.EnumerateObject())
+        {
+            if (p.Value.ValueKind != JsonValueKind.Object) continue;
+            var idx = p.Value.TryGetProperty("index", out var ix) && ix.TryGetInt32(out var iv) ? iv : int.MaxValue;
+            candidates.Add((idx, p.Value));
+        }
+        candidates.Sort((a, b) => a.Index.CompareTo(b.Index));
+
+        foreach (var (_, cand) in candidates)
+        {
+            if (!cand.TryGetProperty("imageinfo", out var info) || info.ValueKind != JsonValueKind.Array
+                || info.GetArrayLength() == 0) continue;
+            var ii = info[0];
+            var mime = Str(ii, "mime") ?? "";
+            if (mime is not ("image/jpeg" or "image/png")) continue;
+            var w = Num(ii, "width"); var h = Num(ii, "height");
+            // 太小的图放到整页会糊：实测 800px 宽的图铺一页就能看出虚，提到 1200 才有底。
+            if (w < 1200 || h <= 0) continue;
+            var ar = (double)w / h;
+            // 极端长宽比在“定框裁切（cover）”后只剩中间一条：9000x3600 的全景铺到 16:9 页上
+            // 等于把中间 60% 拉满，画面已经不可用了。两端都挡。
+            if (ar is < 0.55 or > 2.2) continue;
+            var title = Str(cand, "title") ?? "";                       // “File:Sunset.jpg”
+            var fileName = title.StartsWith("File:", StringComparison.OrdinalIgnoreCase) ? title.Substring(5) : title;
+            // 标题里已写明是 logo / 图标 / 旗帜徽章的，不是照片：实测“teamwork”这类抽象词
+            // 会把 Teamwork-icon.jpg、Teamwork.com-Logo-200.png 排在前面。
+            if (LooksLikeNonPhoto(fileName)) continue;
+            var license = MetaValue(ii, "LicenseShortName");
+            if (IsNonFree(license)) continue;
+            // 书刊扫描件：Commons 的相关性排序常把 1920~30 年代的插图排在前面
+            // （实测搜 “business people working together” 第一张就是 1920 年的书里插图）。
+            if (IsArchivalScan(MetaValue(ii, "Categories"))) continue;
+            // 历史档案照：实测 “meeting room” 抳到 1968 年白宫会议的新闻照（Public domain），
+            // 放进商务稿里很出戏。分类里的早期年份是档素材的可靠信号。
+            if (HasEarlyYear(MetaValue(ii, "Categories"))) continue;
+            var src = Str(ii, "thumburl") ?? Str(ii, "url");
+            if (string.IsNullOrWhiteSpace(src)) continue;
+
+            var bytes = HttpGetBytes(src!, PhotoDownloadTimeoutSec, out var dlWhy);
+            if (bytes is null) { why = dlWhy; continue; }
+            if (!IsJpeg(bytes) && !IsPng(bytes)) { why = "图库返回的不是 JPEG/PNG"; continue; }
+
+            var ext = mime == "image/png" ? ".png" : ".jpg";
+            var file = Path.Combine(PhotoCacheDir(), CacheKey(query) + "_" + CacheKey(fileName) + ext);
+            try { File.WriteAllBytes(file, bytes); }
+            catch (Exception ex) { why = "写入缓存失败：" + ex.Message; continue; }
+
+            return new Photo
+            {
+                Path = file,
+                FileName = fileName.Length > 0 ? fileName : "（未命名图片）",
+                Author = MetaValue(ii, "Artist"),
+                License = license,
+                PageUrl = Str(ii, "descriptionurl") ?? "",
+                Query = query,
+            };
+        }
+        why ??= "图库里没有尺寸/格式合适的照片";
+        return null;
+    }
+
+    /// <summary>Commons 的数值字段（可能是数字，也可能是字符串）。</summary>
+    private static int Num(JsonElement el, string name)
+    {
+        if (!el.TryGetProperty(name, out var v)) return 0;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
+        if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), out var s)) return s;
+        return 0;
+    }
+
+    /// <summary>标题就写明不是照片的（logo / 图标 / 旗帜徽章 / 地图）：这类在“定框裁切”下毫无意义。</summary>
+    private static bool LooksLikeNonPhoto(string fileName)
+    {
+        foreach (var w in new[] { "logo", "icon", "wordmark", "coat of arms", "flag of", "signature" })
+            if (fileName.Contains(w, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    /// <summary>书刊/档案扫描件：Commons 上这类内容量极大，且常被相关性排序排到前面。</summary>
+    private static bool IsArchivalScan(string categories)
+        => categories.Contains("Internet Archive Book Images", StringComparison.OrdinalIgnoreCase)
+        || categories.Contains("Book scans", StringComparison.OrdinalIgnoreCase)
+        || categories.Contains("Scanned books", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 分类里出现 20 世纪及更早的年份（≤1999）→ 基本是历史/档案素材。
+    ///
+    /// <para>
+    /// 为何不用“标题里的年份”：相机直出文件名如 <c>IMG_1912.jpg</c> 会被误杀；
+    /// 而分类是人工维护的（如“1968 in Washington, D.C.”），误杀面小得多。
+    /// 当代照片同样会被归入年份分类，但那是 2000 年以后，不会命中。
+    /// </para>
+    /// </summary>
+    private static bool HasEarlyYear(string categories)
+    {
+        if (categories.Length == 0) return false;
+        var digits = 0;
+        var value = 0;
+        foreach (var ch in categories)
+        {
+            if (ch is >= '0' and <= '9')
+            {
+                digits++;
+                value = value * 10 + (ch - '0');
+                if (digits > 4) { digits = 0; value = 0; }   // 超过 4 位就不是年份
+                continue;
+            }
+            if (digits == 4 && value <= 1999) return true;
+            digits = 0;
+            value = 0;
+        }
+        return digits == 4 && value <= 1999;
+    }
+
+    /// <summary>Commons 的 extmetadata：值藏在 { "value": "…" } 里，且作者字段常带 HTML。</summary>
+    private static string MetaValue(JsonElement imageInfo, string key)
+    {
+        if (imageInfo.ValueKind != JsonValueKind.Object
+            || !imageInfo.TryGetProperty("extmetadata", out var meta) || meta.ValueKind != JsonValueKind.Object
+            || !meta.TryGetProperty(key, out var v) || v.ValueKind != JsonValueKind.Object) return "";
+        return StripHtml(Str(v, "value") ?? "").Trim();
+    }
+
+    /// <summary>Commons 上不该出现非自由素材，但万一混进来一张，宁可不配图也不惹授权风险。</summary>
+    private static bool IsNonFree(string license)
+        => license.Contains("fair use", StringComparison.OrdinalIgnoreCase)
+        || license.Contains("non-free", StringComparison.OrdinalIgnoreCase)
+        || license.Contains("nonfree", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>署名行里不能带 HTML 标签（Commons 的作者字段常是 &lt;a&gt;…&lt;/a&gt;）。</summary>
+    private static string StripHtml(string html)
+    {
+        var sb = new StringBuilder(html.Length);
+        var inTag = false;
+        foreach (var ch in html)
+        {
+            if (ch == '<') { inTag = true; continue; }
+            if (ch == '>') { inTag = false; continue; }
+            if (!inTag) sb.Append(ch);
+        }
+        return DecodeEntities(sb.ToString()).Replace('\n', ' ').Replace('\r', ' ').Trim();
+    }
+
+    /// <summary>只解最常见的几个实体：引 System.Net.WebUtility 没必要，自己替换更稳。</summary>
+    private static string DecodeEntities(string s)
+        => s.Replace("&amp;", "&").Replace("&lt;", "<").Replace("&gt;", ">")
+            .Replace("&quot;", "\"").Replace("&#39;", "'").Replace("&apos;", "'").Replace("&nbsp;", " ");
+
+    /// <summary>缓存文件名：只留单词字符与 CJK，再加一段稳定短哈希防撞。</summary>
+    private static string CacheKey(string s)
+    {
+        var sb = new StringBuilder(48);
+        foreach (var ch in s)
+        {
+            if (char.IsLetterOrDigit(ch) && sb.Length < 32) sb.Append(ch);
+        }
+        // FNV-1a：只要稳定、不用于安全，不引 System.Security.Cryptography（那个引用在受限宿主里会缺）
+        ulong h = 14695981039346656037UL;
+        foreach (var ch in s) { h ^= ch; h *= 1099511628211UL; }
+        return sb.Length == 0 ? h.ToString("x16") : sb + "_" + h.ToString("x8");
+    }
+
+    /// <summary>
+    /// 带一次退避重试的 GET。重试只针对**限流与超时**：Commons 对密集请求会返回 429
+    /// （探测时实测触发过），而匿名调用配额不大，一次 2 秒退避就够；仍失败则如实降级，不无休止重试。
+    /// </summary>
+    private static byte[]? HttpGetBytes(string url, int timeoutSec, out string? why)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var bytes = HttpGetOnce(url, timeoutSec, out why, out var retryable);
+            if (bytes is not null) return bytes;
+            if (!retryable || attempt >= 2) return null;
+            Thread.Sleep(2000);
+        }
+    }
+
+    private static byte[]? HttpGetOnce(string url, int timeoutSec, out string? why, out bool retryable)
+    {
+        why = null;
+        retryable = false;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSec) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd(PhotoUserAgent);
+            // 同步等待要包到 Task.Run 里：宿主的调用线程可能带 SynchronizationContext，
+            // 直接 GetAwaiter().GetResult() 有死锁风险（宿主里是同步反射调用 Run）。
+            using var resp = Task.Run(() => http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+                .GetAwaiter().GetResult();
+            if (!resp.IsSuccessStatusCode)
+            {
+                var code = (int)resp.StatusCode;
+                why = "请求失败 HTTP " + code;
+                retryable = code is 429 or 503;
+                return null;
+            }
+            if (resp.Content.Headers.ContentLength is { } len && len > PhotoMaxBytes)
+            { why = "图片过大（" + (len / 1024 / 1024) + "MB）"; return null; }
+            var bytes = Task.Run(() => resp.Content.ReadAsByteArrayAsync()).GetAwaiter().GetResult();
+            if (bytes.Length == 0) { why = "图片内容为空"; return null; }
+            if (bytes.LongLength > PhotoMaxBytes) { why = "图片过大"; return null; }
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            // 连接类失败也要把**真实异常**写出来：只报“连不上”时无法区分
+            // “端点写错了 / DNS 解析不了 / 需要代理”，而排障时正是要这个。
+            var detail = ex.GetType().Name + "：" + ex.Message;
+            if (ex.InnerException is { } inner) detail += " ＜ " + inner.GetType().Name + "：" + inner.Message;
+            retryable = ex is TaskCanceledException or TimeoutException;
+            why = IsNetworkError(ex)
+                ? "无法连接图库（" + detail
+                  + "；Wikimedia 在部分网络不可达，可给服务配 HTTPS_PROXY，或用 AGUI_PHOTO_API 指向镜像）"
+                : detail;
+            return null;
+        }
+    }
+
+    private static string? HttpGetText(string url, int timeoutSec, out string? why)
+    {
+        var bytes = HttpGetBytes(url, timeoutSec, out why);
+        return bytes is null ? null : Encoding.UTF8.GetString(bytes);
+    }
+
+    private static bool IsNetworkError(Exception ex)
+        => ex is HttpRequestException or TaskCanceledException or OperationCanceledException
+        || ex.InnerException is not null && IsNetworkError(ex.InnerException);
+
+    private static bool IsJpeg(byte[] b) => b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF;
+    private static bool IsPng(byte[] b) => b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47;
+
+    /// <summary>本页配图的检索关键词（没有则空串）。</summary>
+    private static string ImageQueryOf(JsonElement el)
+        => (Str(el, "imageQuery") ?? Str(el, "image_query"))?.Trim() ?? "";
+
+    /// <summary>
+    /// 把任意可解码的图片规范成 OOXML 认得的字节：平台只认 PNG/JPEG/GIF/BMP/TIFF，
+    /// WebP（图库上传允许）与其它格式被错标类型时 PowerPoint 会报“图片不可读”。
+    /// 认不出的走 ImageSharp 重编成 PNG（它支持 WebP 解码）。
+    /// </summary>
+    private static byte[] NormalizeImageBytes(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        if (IsPng(bytes) || IsJpeg(bytes) || IsGif(bytes) || IsBmp(bytes) || IsTiff(bytes)) return bytes;
+        using var img = Image.Load(bytes);
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static bool IsGif(byte[] b) => b.Length > 3 && b[0] == (byte)'G' && b[1] == (byte)'I' && b[2] == (byte)'F';
+    private static bool IsBmp(byte[] b) => b.Length > 2 && b[0] == (byte)'B' && b[1] == (byte)'M';
+    private static bool IsTiff(byte[] b) => b.Length > 4
+        && ((b[0] == 0x49 && b[1] == 0x49 && b[2] == 0x2A) || (b[0] == 0x4D && b[1] == 0x4D && b[2] == 0x00));
+
+    /// <summary>
+    /// 取本页要放的图的<b>本地路径</b>：显式 path 优先（文件存在才用）；
+    /// 否则用 imageQuery 去图库检索并下载。都没有（或检索失败）返回 null，由调用方降级。
+    /// </summary>
+    private static string? ImagePathOf(JsonElement el)
+    {
+        var path = Str(el, "path");
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
+        var q = ImageQueryOf(el);
+        if (q.Length == 0) return null;
+        return ResolvePhoto(q)?.Path;
+    }
+
+    /// <summary>本页是否真的拿到了图（渲染前用它决定版式，避免“检索失败还占掉半页”）。</summary>
+    private static bool HasUsablePhoto(JsonElement el) => ImagePathOf(el) is not null;
+
+    /// <summary>
+    /// 配图预解析：把整份稿子里所有 imageQuery 先检索并下载到本地（同时填好署名清单）。
+    ///
+    /// <para>
+    /// 为何要在渲染前做：① 拆页要按“这页到底有没有图”决定版式与可用宽度（带图的要点页只有半页宽）；
+    /// ② 「图片来源」页必须在渲染前追加到页列表里；③ 检索失败要在同一处统一降级并报 warning。
+    /// </para>
+    /// </summary>
+    private static void PreResolvePhotos(IEnumerable<string> pageJson)
+    {
+        foreach (var pj in pageJson)
+        {
+            try
+            {
+                using var d = JsonDocument.Parse(pj);
+                WalkImageQueries(d.RootElement);
+            }
+            catch { /* 解析不了就跳过：渲染阶段还会再试一次 */ }
+        }
+    }
+
+    private static void WalkImageQueries(JsonElement el)
+    {
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var p in el.EnumerateObject())
+                {
+                    if (p.Value.ValueKind == JsonValueKind.String
+                        && (p.NameEquals("imageQuery") || p.NameEquals("image_query")))
+                    {
+                        var q = (p.Value.GetString() ?? "").Trim();
+                        if (q.Length > 0) ResolvePhoto(q);
+                    }
+                    else WalkImageQueries(p.Value);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var it in el.EnumerateArray()) WalkImageQueries(it);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 「图片来源」页的页面 JSON（多张时按能放下多少条自动拆页，走与要点页同一套分页）。
+    ///
+    /// <para>只列<b>网络照片</b>（Wikimedia 的 CC 素材）—— 图库里的图是团队自有素材，没有署名义务。</para>
+    /// </summary>
+    private static string CreditsPageJson()
+    {
+        var credits = Photos.Where(p => p.Source != "library").ToList();
+        var sb = new StringBuilder("{\"type\":\"credits\",\"title\":")
+            .Append(Js("图片来源 · Image credits（Wikimedia Commons）"))
+            .Append(",\"items\":[");
+        for (var i = 0; i < credits.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append(Js(credits[i].CreditLine()));
+        }
+        return sb.Append("]}").ToString();
+    }
+
+    /// <summary>需要 CC 署名的照片数（决定是否追加「图片来源」页）。</summary>
+    private static int NetworkPhotoCount => Photos.Count(p => p.Source != "library");
+
+    /// <summary>来自团队图库的照片数（回显用）。</summary>
+    private static int LibraryPhotoCount => Photos.Count(p => p.Source == "library");
+
+    /// <summary>
+    /// 「图片来源」页。CC BY / CC BY-SA 照片**必须署名**（标题 + 作者 + 许可 + 原页面），
+    /// 所以只要用了检索来的照片就自动追加一页 —— 不放在模型可控的输入里，避免被“省略”掉。
+    /// 条目可能很长（带 URL），所以这里**不用项目符号的“小标题：说明”拆分**，也不截断。
+    /// </summary>
+    private static string CreditsSlide(JsonElement el, SlideCtx ctx)
+    {
+        var t = ctx.Theme;
+        var items = StringList(el, "items");
+        var paras = new StringBuilder();
+        foreach (var it in items)
+            paras.Append(Para(it, CreditSize, t.Secondary, align: "l", bullet: "•",
+                spaceBefore: 8, lineSpacing: 115, marL: (int)_m.Gap));
+        if (items.Count == 0) paras.Append(Para("（本页应有图片来源，但清单为空）", CreditSize, t.Secondary));
+        return SlideXml(t.Bg,
+        [
+            SlideTitle(Str(el, "title") ?? "图片来源", ctx),
+            TextBox(ctx.NextId(), MX, BodyY, CW, BodyH, paras.ToString(), anchor: "t"),
+            PageBadge(ctx),
+        ]);
+    }
+
+    /// <summary>署名行的排版计划：与 <see cref="CreditsSlide"/> 同字号同间距（分页才判得准）。</summary>
+    private static List<ParaPlan> CreditPlan(List<string> items)
+        => items.Select(it => P(it, CreditSize, 8, 115, _m.Gap)).ToList();
+
     // ---- 图片 ----
     /// <summary>
     /// 配图页：<c>variant</c> = <c>full</c>（默认，整块图居中）| <c>left</c>（图左文右）|
@@ -4132,25 +4919,39 @@ public class Skill
     private static string ImageMissing(JsonElement el, SlideCtx ctx, string? path, long x, long y, long cx, long cy, bool radius)
     {
         var t = ctx.Theme;
-        if (!string.IsNullOrWhiteSpace(path))
+        var query = ImageQueryOf(el);
+        string msg;
+        string seed;
+        if (query.Length > 0)
+        {
+            // 检索失败的具体原因 ResolvePhoto 已经记过，这里只说结果，不把同一件事报两遍
+            msg = "（未取到配图，已自动生成题图）";
+            seed = query;
+        }
+        else if (!string.IsNullOrWhiteSpace(path))
+        {
             Warn("图片不存在，已改用自动生成的题图：" + path);
+            msg = "（图片不存在，已自动生成题图）";
+            seed = path!;
+        }
         else
+        {
             Warn("未提供图片 path，已改用自动生成的题图");
-        var msg = string.IsNullOrWhiteSpace(path)
-            ? "（未提供 path，已自动生成题图）"
-            : "（图片不存在，已自动生成题图）";
-        return HeroArt(ctx, x, y, cx, cy, path ?? ctx.Title)
+            msg = "（未提供 path，已自动生成题图）";
+            seed = ctx.Title;
+        }
+        return HeroArt(ctx, x, y, cx, cy, seed)
              + TextBox(ctx.NextId(), x, y + cy - Sz(457200), cx, Sz(457200),
                 Para(msg, 1100, t.Light, align: "ctr", alpha: 80), anchor: "b");
     }
 
     private static string ImageFull(JsonElement el, SlideCtx ctx)
     {
-        var path = Str(el, "path");
+        var path = ImagePathOf(el);
         var caption = Str(el, "caption");
         var availH = BodyH - (string.IsNullOrWhiteSpace(caption) ? 0 : 457200);
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-            return ImageMissing(el, ctx, path, MX, BodyY, CW, availH, radius: true);
+        if (path is null)
+            return ImageMissing(el, ctx, Str(el, "path"), MX, BodyY, CW, availH, radius: true);
 
         byte[] bytes; int pxW, pxH;
         try
@@ -4171,7 +4972,7 @@ public class Skill
         var x = MX + (CW - cx) / 2;
         var y = BodyY + (availH - cy) / 2;
 
-        var rel = ctx.AddImage(File.ReadAllBytes(path!));
+        var rel = ctx.AddImage(NormalizeImageBytes(path!));
         var shapes = new StringBuilder();
         shapes.Append(Picture(ctx.NextId(), rel, x, y, cx, cy, radius: true));
         if (!string.IsNullOrWhiteSpace(caption))
@@ -4191,11 +4992,11 @@ public class Skill
         var textX = imageFirst ? MX + imgW + gap : MX;
 
         var sb = new StringBuilder();
-        var path = Str(el, "path");
-        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            sb.Append(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, BodyH), imgX, BodyY, imgW, BodyH, radius: true));
+        var path = ImagePathOf(el);
+        if (path is not null)
+            sb.Append(Picture(ctx.NextId(), AddCoverImage(ctx, path, imgW, BodyH), imgX, BodyY, imgW, BodyH, radius: true));
         else
-            sb.Append(ImageMissing(el, ctx, path, imgX, BodyY, imgW, BodyH, radius: true));
+            sb.Append(ImageMissing(el, ctx, Str(el, "path"), imgX, BodyY, imgW, BodyH, radius: true));
 
         // 文字侧：可选小标题 + 要点
         var paras = new StringBuilder();
@@ -4234,7 +5035,8 @@ public class Skill
             {
                 if (it.ValueKind == JsonValueKind.String) shots.Add((it.GetString() ?? "", ""));
                 else if (it.ValueKind == JsonValueKind.Object)
-                    shots.Add((Str(it, "path") ?? "", Str(it, "caption") ?? ""));
+                    // 图廊每张都可用 imageQuery 检索；取不到就保留原 path 以便报警文案说得清
+                    shots.Add((ImagePathOf(it) ?? Str(it, "path") ?? "", Str(it, "caption") ?? ""));
             }
         }
         if (shots.Count == 0 && Str(el, "path") is { Length: > 0 } single)
@@ -4281,11 +5083,11 @@ public class Skill
         var imgW = W * 6 / 12;
         var imgX = W - imgW;
         var shapes = new List<string> { Rect(ctx.NextId(), 0, 0, W, H, t.Primary) };
-        var path = Str(el, "path");
-        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path!, imgW, H), imgX, 0, imgW, H));
+        var path = ImagePathOf(el);
+        if (path is not null)
+            shapes.Add(Picture(ctx.NextId(), AddCoverImage(ctx, path, imgW, H), imgX, 0, imgW, H));
         else
-            shapes.Add(ImageMissing(el, ctx, path, imgX, 0, imgW, H, radius: false));
+            shapes.Add(ImageMissing(el, ctx, Str(el, "path"), imgX, 0, imgW, H, radius: false));
 
         var textW = imgX - MX * 2;
         var paras = new StringBuilder();
@@ -5114,8 +5916,30 @@ public class Skill
         var outW = Math.Min(maxW, crop.Width);
         var outH = Math.Max(1, (int)Math.Round(outW * (double)crop.Height / crop.Width));
         using var ms = new MemoryStream();
-        img.Clone(x => x.Crop(crop).Resize(outW, outH)).SaveAsPng(ms);
+        using (var processed = img.Clone(x => x.Crop(crop).Resize(outW, outH)))
+        {
+            // 照片（JPEG）仍存回 JPEG：PNG 是无损的，一张 1600px 的照片压成 PNG 会胀到十几 MB，
+            // 而这份 pptx 是要发给用户下载的。截图类（PNG）保持 PNG，避免文字边缘变脏。
+            // 类型看文件头自己判：ImageSharp 2.x 在 Image.Metadata 上不给 DecodedImageFormat。
+            if (LooksLikeJpeg(path))
+                processed.SaveAsJpeg(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 85 });
+            else
+                processed.SaveAsPng(ms);
+        }
         return ctx.AddImage(ms.ToArray());
+    }
+
+    /// <summary>只看文件头 3 个字节判 JPEG（FFD8FF）——不依赖图像库的元数据 API。</summary>
+    private static bool LooksLikeJpeg(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            Span<byte> head = stackalloc byte[4];
+            var n = fs.Read(head);
+            return n >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF;
+        }
+        catch { return false; }
     }
 
     /// <summary>标题段落：走主题的标题字体（fontTitle）。</summary>

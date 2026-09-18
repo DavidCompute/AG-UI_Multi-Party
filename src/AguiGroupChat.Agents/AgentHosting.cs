@@ -37,6 +37,21 @@ public static class AgentHosting
         services.AddSingleton<ITwinAgentSync>(sp => sp.GetRequiredService<TwinService>()); // 分身跟随钩子（GroupHub）
         services.AddSingleton<AgentCatalog>();
         services.AddSingleton<KnowledgeBaseCatalog>(); // 知识库目录（文档切片向量 + 检索）
+        // 图库目录（图片描述向量 + 检索）：让文档技能配图不依赖外网（内网也能用公司自己的图）。
+        // 目录取附件根的同级 images（如 data/uploads → data/images），与上传件同属一个数据卷，
+        // 不另立一套根目录规矩；拿不到附件存储（单元测试等）时才退回默认路径。
+        services.AddSingleton(sp =>
+        {
+            var uploads = sp.GetService<AguiGroupChat.Hub.Storage.AttachmentStore>();
+            var uploadsRoot = uploads is null ? null : Path.TrimEndingDirectorySeparator(uploads.Root);
+            var imagesRoot = uploadsRoot is null
+                ? Path.Combine(AppContext.BaseDirectory, "data", "images")
+                : Path.Combine(Path.GetDirectoryName(uploadsRoot) ?? uploadsRoot, "images");
+            return new ImageLibraryCatalog(options, sp,
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+                imagesRoot,
+                sp.GetService<AguiGroupChat.Hub.Persistence.ChangeHub>());
+        });
         services.AddSingleton<AgentSkillCatalog>(sp => new AgentSkillCatalog(
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(), options)); // 技能库（OpenClaw 风格可复用技能）
         // 组织角色专用：受控团队提交器 + 窄映射（key→该支对象），供“内置组织角色”反复覆盖落库（管理员放行）
@@ -456,6 +471,30 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("kb", snapshot, restore);
+        }
+    }
+
+    /// <summary>
+    /// 注册图库目录到持久化扩展区「images」：memory 模式写入 JSON 快照（PersistenceService），
+    /// postgres 模式落库 agui_sections 表（ISectionStore）。图片描述向量存记忆存储（GroupId=img:{LibId}），
+    /// 图片文件本身在磁盘（data/images，随数据卷持久化）。
+    /// 须在应用构建后、状态恢复（InitializePersistence）之前调用（Web / 桌面组合根）。
+    /// </summary>
+    public static void RegisterImageLibraryPersistence(this IServiceProvider services)
+    {
+        var catalog = services.GetRequiredService<ImageLibraryCatalog>();
+        Func<object?> snapshot = () => catalog.ListAll();
+        Action<JsonElement> restore = element => catalog.RestoreAll(
+            element.Deserialize<List<ImageLibrary>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("images", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("images", snapshot, restore);
         }
     }
 

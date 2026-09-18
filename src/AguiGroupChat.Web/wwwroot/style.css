@@ -960,6 +960,26 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .kb-doc:hover { background: var(--panel-2); }
 .kb-doc .kb-doc-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .kb-empty { padding: 20px 12px; text-align: center; color: var(--muted); font-size: 13px; }
+/* 图库管理弹窗：沿用知识库的列表骨架，展开后换成缩略图网格（可改描述 / 删图 / 上传） */
+.modal.kb-modal #imgLibListWrap { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.imglib-docs { padding: 2px 12px 10px 12px; }
+.imglib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; padding: 4px 0 6px; }
+.imglib-card {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2);
+  transition: border-color .15s;
+}
+.imglib-card:hover { border-color: var(--accent); }
+.imglib-thumb {
+  display: block; width: 100%; height: 104px; object-fit: cover; border-radius: 6px;
+  background: var(--panel); border: 1px solid rgba(128,141,180,.18);
+}
+.imglib-meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; color: var(--muted); }
+.imglib-meta .imglib-file { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imglib-dim { flex: none; }
+.imglib-cap { width: 100%; box-sizing: border-box; font-size: 12px; padding: 4px 8px; }
+.imglib-ops { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.imglib-ops .icon-btn { width: 22px; height: 22px; }
 .search-hit {
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
   background: var(--panel-2); transition: border-color .15s, background .15s;

@@ -1,9 +1,14 @@
 using System.IO.Compression;
+using System.Net;
 using System.Text.Json;
 using AguiGroupChat.Agents.BuiltinSkills;
 using AguiGroupChat.Agents.Tools;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Validation;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SixLabors.Fonts;
 using Xunit;
@@ -2378,4 +2383,404 @@ public sealed class PptxDeckSkillTests
         var pc = Math.Abs(p - c);
         return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
     }
+
+    // ================= 联网配图（Wikimedia Commons） =================
+
+    /// <summary>
+    /// 一张真实可解码的小 JPEG（565 字节）。
+    ///
+    /// <para>
+    /// 为何不现场用 ImageSharp 生成：本测试项目没有直接引 ImageSharp（只引了 SixLabors.Fonts），
+    /// 而“能够解码的 JPEG 字节”才是这里要验的东西（技能要按魔数判定类型并原样存回 JPEG）。
+    /// </para>
+    /// </summary>
+    private const string TinyJpegHex =
+        "ffd8ffe000104a46494600010100000100010000ffdb004300"
+        + "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        + "c00011080018002003012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0b"
+        + "ffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f0"
+        + "2433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778"
+        + "797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9da"
+        + "e1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9fa"
+        + "ffc4001f0100030101010101010101010000000000000102030405060708090a0b"
+        + "ffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d1"
+        + "0a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a828384"
+        + "85868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7"
+        + "e8e9eaf2f3f4f5f6f7f8f9fa"
+        + "ffda000c03010002110311003f00f7fa28a2803fffd9";
+
+    private static byte[] TinyJpegBytes() => Convert.FromHexString(TinyJpegHex);
+
+    /// <summary>
+    /// 桩图库：模拟 Wikimedia Commons 的 <c>action=query&amp;generator=search</c> 响应。
+    ///
+    /// <para>
+    /// 为何一定要用本地桩而不是真外网：① 测试不能依赖“这台机器能访问 Wikimedia”——
+    /// 实测本环境能访问 example.com / api.nuget.org，但 en.wikipedia.org 与 upload.wikimedia.org
+    /// 一律连不上（被网络策略拦）；② 真外网会让用例变慢且不稳定。
+    /// </para>
+    ///
+    /// <para>
+    /// 桩数据刻意混入两个“不该被选中”的条目：太小的图（100px）、非自由许可（Non-free fair use），
+    /// 用来验证筛选真的生效（只取 1920px 的 CC BY-SA 那张）。
+    /// </para>
+    /// </summary>
+    private sealed class StubPhotoLibrary : IAsyncDisposable
+    {
+        private readonly WebApplication _app;
+        public string ApiUrl { get; set; } = "";
+        /// <summary>置 true 后桩返回 HTTP 500（验证降级链路）。</summary>
+        public bool Fail { get; set; }
+        /// <summary>置 n 后，搜索端点前 n 次返回 429（验证限流退避重试）。</summary>
+        public int Fail429Times;
+        /// <summary>检索次数：验证熔断（失败后不再逐页重试）与缓存（同一关键词只查一次）。</summary>
+        public int Searches;
+
+        private StubPhotoLibrary(WebApplication app) { _app = app; }
+
+        public static async Task<StubPhotoLibrary> StartAsync()
+        {
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.Logging.ClearProviders();
+            var app = builder.Build();
+            var stub = new StubPhotoLibrary(app);
+
+            app.Run(async ctx =>
+            {
+                var path = ctx.Request.Path.Value ?? "";
+                if (path.StartsWith("/photo", StringComparison.Ordinal))
+                {
+                    ctx.Response.ContentType = "image/jpeg";
+                    await ctx.Response.Body.WriteAsync(TinyJpegBytes());
+                    return;
+                }
+                if (path != "/api.php") { ctx.Response.StatusCode = 404; return; }
+                Interlocked.Increment(ref stub.Searches);
+                if (stub.Fail) { ctx.Response.StatusCode = 500; return; }
+                // 限流：前 N 次返回 429（技能应当退避 2 秒重试一次）
+                while (true)
+                {
+                    var left = Volatile.Read(ref stub.Fail429Times);
+                    if (left <= 0) break;
+                    if (Interlocked.CompareExchange(ref stub.Fail429Times, left - 1, left) == left)
+                    {
+                        ctx.Response.StatusCode = 429;
+                        return;
+                    }
+                }
+
+                var q = ctx.Request.Query["gsrsearch"].ToString().Replace(" filetype:bitmap", "").Trim();
+                var baseUrl = "http://127.0.0.1:" + ctx.Connection.LocalPort;
+                var name = "Photo of " + q + ".jpg";
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync(JsonSerializer.Serialize(new
+                {
+                    query = new
+                    {
+                        // 顺序很要紧：**坏候选排在前面**（index 1~5），用来证明筛选链真的在干活——
+                        // 只要有一道筛选漏了，选中的就会是下面这几张，而不是最后那张正常照片。
+                        pages = new Dictionary<string, object>
+                        {
+                            // ① 书刊扫描件：实测搜 “business people working together” 排第一的就是这类
+                            ["11"] = Hit(baseUrl, 1, "File:Book scan 1920 illustration.jpg", "image/jpeg", 2288, 1716,
+                                "CC0", "Jane Doe",
+                                "Photos uploaded from Flickr by Fæ using a script|Files from Internet Archive Book Images Flickr stream"),
+                            // ② 全景图：定框裁切后只剩中间一条（ar=2.5）
+                            ["12"] = Hit(baseUrl, 2, "File:City panorama 9000.jpg", "image/jpeg", 9000, 3600,
+                                "CC BY-SA 4.0", "Jane Doe", "Panoramas"),
+                            // ③ 图标 / Logo：实测 “teamwork” 的头两条就是这类
+                            ["13"] = Hit(baseUrl, 3, "File:Teamwork-icon.jpg", "image/jpeg", 1280, 1280,
+                                "CC BY-SA 4.0", "Jane Doe", "Icons"),
+                            // ④ 尺寸过小：铺满一页会发虚
+                            ["14"] = Hit(baseUrl, 4, "File:Too small.png", "image/png", 100, 80,
+                                "CC0", "Jane Doe", ""),
+                            // ⑤ 非自由许可：尺寸合格也不该选
+                            ["15"] = Hit(baseUrl, 5, "File:Not free.jpg", "image/jpeg", 1920, 1080,
+                                "Non-free fair use", "Jane Doe", ""),
+                            // ⑥ 历史档案照：实测搜 “meeting room” 抳到过 1968 年的白宫会议新闻照
+                            ["17"] = Hit(baseUrl, 7, "File:Cabinet Room meeting February 1968.jpg", "image/jpeg", 3000, 2000,
+                                "Public domain", "Jane Doe", "1968 in Washington, D.C.|Cabinet meetings"),
+                            // ⑦ 合格的那张（写进响应的 title 就是它，所以断言能直接认出“选对了”）
+                            ["16"] = Hit(baseUrl, 6, "File:" + name, "image/jpeg", 1920, 1280,
+                                "CC BY-SA 4.0", "Jane Doe", "Office buildings"),
+                        },
+                    },
+                }));
+            });
+
+            await app.StartAsync();
+            stub.ApiUrl = app.Urls.First().TrimEnd('/') + "/api.php";
+            return stub;
+        }
+
+        /// <summary>造一条与 Wikimedia Commons <c>imageinfo</c> 同构的命中（字段名刻意保持一致）。</summary>
+        private static object Hit(string baseUrl, int index, string title, string mime, int w, int h,
+            string license, string artist, string categories)
+            => new
+            {
+                pageid = 100 + index,
+                index,
+                title,
+                imageinfo = new object[]
+                {
+                    new
+                    {
+                        mime,
+                        width = w,
+                        height = h,
+                        thumburl = baseUrl + "/photo.jpg",
+                        url = baseUrl + "/photo.jpg",
+                        descriptionurl = "https://commons.wikimedia.org/wiki/File:"
+                                         + Uri.EscapeDataString(title.Substring(5).Replace(' ', '_')),
+                        extmetadata = new Dictionary<string, object>
+                        {
+                            ["LicenseShortName"] = new { value = license },
+                            // 作者字段刻意带 HTML：署名时要剥成纯文本，不能把 <a href> 写进幻灯片
+                            ["Artist"] = new { value = "<a href=\"//commons.wikimedia.org/wiki/User:Jane\">" + artist + "</a>" },
+                            ["Categories"] = new { value = categories },
+                        },
+                    },
+                },
+            };
+
+        public async ValueTask DisposeAsync() => await _app.DisposeAsync();
+    }
+
+    private static string PhotoDeckJson(string apiUrl, int contentPages = 1)
+    {
+        var slides = new List<object>
+        {
+            new { type = "cover", variant = "split", title = "配图验证",
+                  subtitle = "每页一张符合内容的照片", imageQuery = "team meeting" },
+            new { type = "section", variant = "full", title = "一、现状", imageQuery = "team meeting" },
+        };
+        for (var i = 0; i < contentPages; i++)
+        {
+            slides.Add(new
+            {
+                type = "content",
+                title = contentPages == 1 ? "协作方式" : "主题 " + (i + 1).ToString("00"),
+                bullets = new[] { "把单聊式 AI 升级为多角色协作空间", "每个岗位有自己的记忆特征" },
+                imageQuery = "topic number " + (i + 1).ToString("00") + " landscape",
+            });
+        }
+        slides.Add(new { type = "content", title = "纯文字页（无配图）", bullets = new[] { "这一页不该有图", "用来对照" } });
+        slides.Add(new { type = "end", title = "谢谢" });
+        return JsonSerializer.Serialize(new
+        {
+            title = "配图验证",
+            theme = "tech",
+            imageSearchApi = apiUrl,
+            slides,
+        });
+    }
+
+    private static List<string> SlideXmls(string path)
+    {
+        using var zip = ZipFile.OpenRead(path);
+        return zip.Entries
+            .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.Ordinal)
+                     && e.FullName.EndsWith(".xml", StringComparison.Ordinal))
+            .OrderBy(e => int.Parse(new string(e.FullName.Where(char.IsDigit).ToArray())))
+            .Select(e =>
+            {
+                using var r = new StreamReader(e.Open());
+                return r.ReadToEnd();
+            }).ToList();
+    }
+
+    /// <summary>
+    /// 用 imageQuery 把 Commons 照片嵌进稿子：图真的进了 pptx、每张都有署名、
+    /// content 页自动变成“文左图右”、没写 imageQuery 的页不受影响。
+    /// </summary>
+    [Fact]
+    public async Task PhotoQuery_EmbedsPhotoAndCreditsPage()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        try
+        {
+            var result = NewHost().Run(SkillSource(), PhotoDeckJson(lib.ApiUrl), CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            var root = doc.RootElement;
+            var path = root.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            // images[]：署名依据必须回传（调用方要靠它判断“这稿用了外图”）。
+            // 2 张：封面与分隔页共用 “team meeting”，要点页自己一个关键词 —— 正好也验证了“逐页匹配”。
+            var images = root.GetProperty("images");
+            Assert.Equal(2, images.GetArrayLength());
+            Assert.All(images.EnumerateArray(), im =>
+            {
+                Assert.Equal("Jane Doe", im.GetProperty("author").GetString());
+                Assert.Equal("CC BY-SA 4.0", im.GetProperty("license").GetString());
+                Assert.Contains("commons.wikimedia.org", im.GetProperty("page").GetString());
+            });
+            var queries = images.EnumerateArray().Select(im => im.GetProperty("query").GetString()).ToList();
+            Assert.Contains("team meeting", queries);
+            Assert.Contains("topic number 01 landscape", queries);
+            Assert.Empty(root.GetProperty("warnings").EnumerateArray());
+
+            // 页数 = 封面 + 分隔 + 1 要点页 + 1 纯文字页 + 结束页 + 图片来源页
+            var slides = SlideXmls(path);
+            Assert.Equal(6, slides.Count);
+            var credit = slides[^1];
+            Assert.Contains("图片来源", credit);
+            Assert.Contains("Jane Doe", credit);            // 作者（且 HTML 标签已剥掉）
+            Assert.DoesNotContain("<a href", credit);
+            Assert.Contains("CC BY-SA 4.0", credit);
+            Assert.Contains("commons.wikimedia.org", credit);
+            Assert.Contains("Photo of team meeting.jpg", credit);
+            Assert.Contains("Photo of topic number 01 landscape.jpg", credit);
+            // 筛选链真的在干活：桩数据把 5 张“不该选”的排在前面（index 1~5），
+            // 任何一道筛选漏了，下面这些就会被写进署名页
+            foreach (var bad in new[] { "Book scan 1920 illustration", "City panorama 9000",
+                                        "Teamwork-icon", "Too small.png", "Not free.jpg",
+                                        "Cabinet Room meeting February 1968" })
+                Assert.DoesNotContain(bad, credit);
+
+            // 照片真的嵌进去了：媒体部件是 JPEG，且内容类型表里声明了 jpeg
+            using (var zip = ZipFile.OpenRead(path))
+            {
+                Assert.Contains(zip.Entries, e => e.FullName == "ppt/media/image.jpg");
+                var ct = zip.Entries.First(e => e.FullName == "[Content_Types].xml");
+                using var r = new StreamReader(ct.Open());
+                Assert.Contains("jpeg", r.ReadToEnd(), StringComparison.OrdinalIgnoreCase);
+            }
+
+            // 封面 / 分隔 / 带 imageQuery 的要点页：各一张图
+            Assert.Equal(1, CountBlips(slides[0]));
+            Assert.Equal(1, CountBlips(slides[1]));
+            Assert.Equal(1, CountBlips(slides[2]));
+            Assert.Contains("协作方式", slides[2]);         // 图有了，文字也没丢（文左图右）
+            // 没写 imageQuery 的页不受影响
+            Assert.Equal(0, CountBlips(slides[3]));
+            Assert.Contains("这一页不该有图", slides[3]);
+            Assert.Equal(0, CountBlips(slides[4]));
+
+            // 同一关键词只查一次（封面与分隔页共用）
+            Assert.Equal(2, lib.Searches);
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>图库不可用（HTTP 500）时：降级为题图 + warnings，不崩且不追加署名页。</summary>
+    [Fact]
+    public async Task PhotoQuery_WhenLibraryFails_DegradesWithoutBreaking()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        lib.Fail = true;
+        try
+        {
+            var result = NewHost().Run(SkillSource(), PhotoDeckJson(lib.ApiUrl), CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            var root = doc.RootElement;
+            var path = root.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            Assert.Empty(root.GetProperty("images").EnumerateArray());
+            var warnings = root.GetProperty("warnings").EnumerateArray().Select(w => w.GetString()!).ToList();
+            Assert.Contains(warnings, w => w.Contains("配图检索未成功"));
+            // 降级也要说清楚为什么，别让用户对着题图猜
+            Assert.Contains(warnings, w => w.Contains("HTTP 500"));
+            // 没拿到图 → 不追加「图片来源」页（不能凭空署名）
+            Assert.Equal(5, SlideXmls(path).Count);
+            // 熔断/缓存：3 处 imageQuery（两个关键词）→ 只查 2 次，不逐页重试
+            Assert.Equal(2, lib.Searches);
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>AGUI_PHOTO_API 环境变量（离线部署把端点指向镜像/代理的入口）。</summary>
+    [Fact]
+    public async Task PhotoQuery_UsesEnvEndpointWhenInputOmitsIt()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        Environment.SetEnvironmentVariable("AGUI_PHOTO_API", lib.ApiUrl);
+        try
+        {
+            var deck = JsonSerializer.Serialize(new
+            {
+                title = "环境变量端点",
+                slides = new object[]
+                {
+                    new { type = "cover", variant = "split", title = "环境变量端点", imageQuery = "office teamwork" },
+                    new { type = "end", title = "谢谢" },
+                },
+            });
+            var result = NewHost().Run(SkillSource(), deck, CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            Assert.Equal(1, doc.RootElement.GetProperty("images").GetArrayLength());
+            Assert.Equal(1, lib.Searches);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AGUI_PHOTO_API", null);
+            Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null);
+        }
+    }
+
+    /// <summary>
+    /// 署名页的自动分页：照片多到一页放不下时必须拆页，而且**一条都不能漏**
+    /// （漏掉就等于没有署名）。这里刻意用 12 张・12 个不同关键词。
+    /// </summary>
+    [Fact]
+    public async Task PhotoQuery_ManyPhotos_CreditsPaginateWithoutLosingEntries()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        try
+        {
+            var result = NewHost().Run(SkillSource(), PhotoDeckJson(lib.ApiUrl, contentPages: 12), CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            var path = doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+            // 12 个要点页各一个关键词 + 封面/分隔页共用的 “team meeting”
+            Assert.Equal(13, doc.RootElement.GetProperty("images").GetArrayLength());
+
+            var slides = SlideXmls(path);
+            var credits = slides.Where(s => s.Contains("图片来源", StringComparison.Ordinal)).ToList();
+            Assert.True(credits.Count >= 2, "12 张照片的署名页应当拆页，实际 " + credits.Count + " 页");
+            var all = string.Join("\n", slides);
+            Assert.Contains("Photo of team meeting.jpg", all);
+            for (var i = 1; i <= 12; i++)
+                Assert.Contains("Photo of topic number " + i.ToString("00") + " landscape.jpg", all);
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// 限流（HTTP 429）退避重试：Commons 对密集请求会限流（探测真实 API 时实测触发过），
+    /// 一次退避重试就能救回来，不应该把这一页白白降级成题图。
+    /// </summary>
+    [Fact]
+    public async Task PhotoQuery_RetriesOnceOnRateLimit()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        lib.Fail429Times = 1;   // 第一次搜索返回 429
+        try
+        {
+            var result = NewHost().Run(SkillSource(), PhotoDeckJson(lib.ApiUrl), CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            Assert.Equal(2, doc.RootElement.GetProperty("images").GetArrayLength());
+            Assert.Empty(doc.RootElement.GetProperty("warnings").EnumerateArray());
+            // 2 个关键词：其中一个被限流过一次 → 共 3 次搜索请求（首次 429 + 重试 1 次）
+            Assert.Equal(3, lib.Searches);
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    private static int CountBlips(string slideXml)
+        => slideXml.Split("<a:blip", StringSplitOptions.None).Length - 1;
 }

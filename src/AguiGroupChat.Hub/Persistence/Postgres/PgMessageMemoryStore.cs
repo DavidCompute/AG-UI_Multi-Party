@@ -421,6 +421,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                   AND m.embedding IS NOT NULL
                   AND (m.expires_at IS NULL OR m.expires_at > @now)
                   AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%')
+                  AND (m.sender_type <> 'img' OR m.group_id LIKE 'img:%')
                   AND 1 - (m.embedding <=> @q::vector) >= @minScore{groupFilter}
                   AND (m.group_id = @gid OR COALESCE(g.is_private, FALSE) = FALSE)
                 ORDER BY m.embedding <=> @q::vector, m.importance DESC

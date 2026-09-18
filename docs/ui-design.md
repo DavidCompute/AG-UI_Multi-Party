@@ -164,9 +164,10 @@ topbar（品牌 + 顶栏操作）
 ### 4.1 列表视图（#agentListView）
 
 - 工具栏：搜索 `#agentSearch` 独占整行（右侧带 “×” 清除，输入后点击即清空并恢复列表），其下为
-  `#agentOrgBtn`（组织架构图）、`#agentOrchBtn`（一键编排）、`#agentSkillLibBtn`（技能库）、导入 JSON
+  `#agentOrgBtn`（组织架构图）、`#agentOrchBtn`（一键编排）、`#agentSkillLibBtn`（技能库）、
+  `#agentKbManageBtn`（📚 管理知识库）、`#agentImgLibManageBtn`（🖼️ 管理图库）、导入 JSON
   `#agentImportBtn`、导出全部、恢复内置组织工具（管理员）、批量删除模式 `#agentBatchBtn`、新增 `#agentAddBtn`。
-- 行（`renderAgentList`）：头像/占位 + 昵称 + AI 标签 + 🔒(私密) + 🧩技能数 + 📚知识库数 + 描述 +
+- 行（`renderAgentList`）：头像/占位 + 昵称 + AI 标签 + 🔒(私密) + 🧩技能数 + 📚知识库数 + 🖼️图库数 + 描述 +
   id + 触发方式标签 + 桥接标签 + 关键词 + 模型 + 创建者（系统/我/他人）+ 行操作：
   - `📤` 导出单条 JSON；
   - `💬` **单聊**（与数字员工 1:1，见 §4.4）；
@@ -198,6 +199,10 @@ topbar（品牌 + 顶栏操作）
     编辑器内“返回 / 保存技能”会直接回到本表单（不进技能库列表），并刷新挂载列表。
   - “可调用子数字员工”除手工勾选外，**组织架构已连线（指派 / 提升 / 交接）的目标自动并入勾选**（保存后作为可调用技能生效），
     保证「组织架构」里定义的连接在表单中一致呈现；取消勾选仅移除以子技能方式调用，不影响组织连线。
+  - “图库（可选）”（`#afImgLibList` / `#afImgLibAddBtn`）：只罗列**已绑定**的图库（名称 + 图片数 + 移除），
+    新增走独立选取弹窗（`agentPickKind='imglib'`，与技能 / 知识库同一套交互）。
+    绑定语义：绑了 = 该岗位出稿配图**只用这几个图库**（如对外宣讲岗只准用已审核品牌图库）；不绑 = 用触发者本人可读的全部图库。
+    绑定的库全部被删时**不注入**（按“无图库”降级），**不会**静默放宽成该用户全部图库（回归：`AgentImageScopeBindingTests`）。
 - 折叠状态记忆 `agui.agentFormSections`。保存走 PUT（全量），携带既有交接/流水线/审批名单不丢失。
 - 界面约定：全部搜索输入框（数字员工 / 技能库 / 记忆 / 成员选择 / 消息搜索）右侧均有 “×” 一键清空（`common.clearSearch`）。
 
@@ -222,13 +227,22 @@ topbar（品牌 + 顶栏操作）
 
 ---
 
-## 5. 技能库 / 知识库（数字员工子能力）
+## 5. 技能库 / 知识库 / 图库（数字员工子能力）
 
 - `#skillModal`：列表/表单双视图。列表支持搜索、多选批量删除、新建（`#skillAddBtn`）、“自然语言生成技能”。
 - 技能表单：名称/SkillId/类型（prompt/shell/http/dotnet）/描述/正文/执行位置（server/client）/
   解释器/需审批开关；试运行（`#sfTest`）结果弹 `#skillRunResultModal`；shell 始终需审批；
   client 技能在本机桥执行，需发起用户批准。
 - `#kbModal`（知识库）：创建/管理知识库、上传文档，文档异步向量化入库（状态轮询）。
+- `#imgLibModal`（图库 `modal kb-modal`）：与知识库**同构**的列表式布局——工具栏搜索（带 “×” 清除）+
+  创建面板（`#imgLibCreatePanel`：名称 + 一句话说明）+ 四列表格头（名称/ID · 图片 · 描述 · 操作）+
+  列表 `#imgLibListWrap`（弹窗高度受 `max-height: calc(100vh - 48px)` 约束，列表区独立纵横滚动）。
+  - 行点击（或 `▸`）展开/收起该库的**缩略图网格** `#imglib-grid`（`repeat(auto-fill, minmax(160px,1fr))`）；
+    每张卡片 = 缩略图 + 文件名/像素尺寸/处理状态 + 可编辑描述输入框 `保存描述` + `🗑️` 移除。
+  - 上传：仅库创建者可见 `📤 上传图片`（多选），走 `/ag-ui/upload` → 登记进图库；
+    上传后由视觉模型异步写描述并向量化，状态 `processing` 时前端每 3s 轮询该弹窗直到 `ready`。
+  - 非创建者（含系统级库）只读：显示“系统知识库（只读）”同类提示，无上传/删除按钮。
+  - 样式口径：缩略图卡片风格与知识库文档列表一致（同一边框 / 圆角 / hover 高亮），文案全部走 i18n（`imgLib.*`）。
 
 ---
 
@@ -341,6 +355,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
+| 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`/ag-ui/image-libs`（创建/删除/图片）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
 | 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |
 | 系统 | `/ag-ui/export|import|import/preview|reset` |

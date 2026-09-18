@@ -68,6 +68,9 @@ public sealed class AttachmentStore
 
     private readonly string _root;
 
+    /// <summary>附件根目录（供其它持久化目录（如图库 data/images）与它对齐到同一个数据根）。</summary>
+    public string Root => _root;
+
     public AttachmentStore(string rootDirectory)
     {
         _root = rootDirectory;

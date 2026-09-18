@@ -29,7 +29,8 @@ public static class BuiltinDocxSkills
             "sections 数组，每项是<b>单键对象：键名即块类型</b>（不要用 {type:'heading',text:'…'} 这种写法）：" +
             "{\"heading\":\"一、小节\",\"level\":1} / {\"paragraph\":\"段落\"} / {\"numbered\":[\"其一\"]} / " +
             "{\"bullets\":[\"要点一\"]} / {\"quote\":\"引用文字\"} / {\"table\":{\"headers\":[],\"rows\":[[]]}} / " +
-            "{\"image\":{\"path\":\"\",\"widthCm\":12,\"caption\":\"\"}} / " +
+            "{\"image\":{\"path\":\"\",\"widthCm\":12,\"caption\":\"\"}} 或 {\"image\":{\"imageQuery\":\"检索关键词\",\"caption\":\"\"}}" +
+            "（imageQuery = 从平台「图库」按语义自动配图，推荐；带 imageQuery 时不要再写 path） / " +
             "{\"chart\":{\"type\":\"bar|line|pie\",\"categories\":[],\"series\":[],\"title\":\"\"}} / {\"toc\":true} / {\"pageBreak\":true}。" +
             "返回 JSON 含生成的 docx 文件路径，请据实告知用户文件位置，不要编造正文内容。"
         ),
@@ -44,7 +45,7 @@ public static class BuiltinDocxSkills
             "每项是<b>单键对象：键名即块类型</b>（不要用 {type:'heading',text:'…'}）：" +
             "{\"heading\":\"一、小节\",\"level\":1} / {\"paragraph\":\"段落\"} / {\"bullets\":[\"要点\"]} / " +
             "{\"numbered\":[\"其一\"]} / {\"quote\":\"引用\"} / {\"table\":{\"headers\":[],\"rows\":[[]]}} / " +
-            "{\"image\":{...}} / {\"chart\":{...}} / {\"toc\":true} / {\"pageBreak\":true}。" +
+            "{\"image\":{...}}（可写 imageQuery 从平台图库自动配图） / {\"chart\":{...}} / {\"toc\":true} / {\"pageBreak\":true}。" +
             "返回 JSON 含生成的 docx 文件路径。"
         ),
         (
@@ -58,7 +59,7 @@ public static class BuiltinDocxSkills
             "每项是<b>单键对象：键名即块类型</b>（不要用 {type:'heading',text:'…'}）：" +
             "{\"heading\":\"一、小节\",\"level\":1} / {\"paragraph\":\"段落\"} / {\"bullets\":[\"要点\"]} / " +
             "{\"numbered\":[\"其一\"]} / {\"quote\":\"引用\"} / {\"table\":{\"headers\":[],\"rows\":[[]]}} / " +
-            "{\"image\":{...}} / {\"chart\":{...}} / {\"toc\":true} / {\"pageBreak\":true}。" +
+            "{\"image\":{...}}（可写 imageQuery 从平台图库自动配图） / {\"chart\":{...}} / {\"toc\":true} / {\"pageBreak\":true}。" +
             "返回 JSON 含生成的 docx 文件路径。"
         ),
     ];
@@ -89,7 +90,7 @@ public static class BuiltinDocxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文（改 generate.mjs 后重新生成）都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-15.2";
+    public const string Version = "2026-09-18.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

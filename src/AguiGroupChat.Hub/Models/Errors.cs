@@ -63,6 +63,14 @@ public static class ErrorCodes
 
     /// <summary>客户端技能本机桥：服务端宿主不是用户本机（Docker / 共享部署），拒绝代跑“本机(client)”技能。</summary>
     public const string ClientToolHostNotLocal = "CLIENT_TOOL_HOST_NOT_LOCAL";
+
+    // ---- 图库（用户上传图片，文档技能按语义检索自动配图）----
+
+    /// <summary>图库 / 图片不存在。</summary>
+    public const string ImageLibraryNotFound = "IMAGE_LIBRARY_NOT_FOUND";
+
+    /// <summary>图库仅创建者或系统管理员可改动（群共享为只读）。</summary>
+    public const string ImageLibraryPermissionDenied = "IMAGE_LIBRARY_PERMISSION_DENIED";
 }
 
 /// <summary>HTTP 上行错误响应体：{"code": "...", "message": "..."}。</summary>

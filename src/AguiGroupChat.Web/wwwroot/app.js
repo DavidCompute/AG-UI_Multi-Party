@@ -805,7 +805,7 @@ async function openAgentModal() {
   $("agentBuiltinRestoreOrgBtn")?.classList.toggle("hidden", !state.isAdmin);
   agentBatchMode = false; selectedAgents = new Set();
   // 一并刷新用户目录：创建者列优先显示昵称（别名），避免因目录未加载 / 已过期而回退到原始 ID
-  await Promise.all([loadAgents(), loadKbs(), loadUserDirectory()]);
+  await Promise.all([loadAgents(), loadKbs(), loadImageLibs(), loadUserDirectory()]);
   $("agentModal").classList.remove("hidden");
   showAgentListView();
 }
@@ -871,7 +871,7 @@ function renderAgentList() {
     row.innerHTML = `
       <div class="agent-cell">
         ${agentBatchMode && canManage ? `<input type="checkbox" class="agent-sel-cb" data-agent-id="${escapeHtml(a.agentId)}" ${selectedAgents.has(a.agentId) ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff;margin-right:6px;vertical-align:middle" />` : ""}
-        <div class="agent-name" style="display:inline-flex">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? `<span class="tag-lock" title="${escapeHtml(t("agent.privateTip"))}">🔒</span>` : ""}${(a.skills || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.skillsTip", { ids: (a.skills || []).map((s) => s.skillId).join(", ") }))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.kbTip", { ids: a.knowledgeBaseIds.join(", ") }))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}</div>
+        <div class="agent-name" style="display:inline-flex">${avatarImg}<b>${escapeHtml(a.nickname)}</b><span class="tag-agent">AI</span>${a.isPrivate ? `<span class="tag-lock" title="${escapeHtml(t("agent.privateTip"))}">🔒</span>` : ""}${(a.skills || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.skillsTip", { ids: (a.skills || []).map((s) => s.skillId).join(", ") }))}">🧩 ${a.skills.length}</span>` : ""}${(a.knowledgeBaseIds || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.kbTip", { ids: a.knowledgeBaseIds.join(", ") }))}">📚 ${a.knowledgeBaseIds.length}</span>` : ""}${(a.imageLibraryIds || []).length ? `<span class="tag-skill" title="${escapeHtml(t("agent.imgLibTip", { ids: a.imageLibraryIds.join(", ") }))}">🖼️ ${a.imageLibraryIds.length}</span>` : ""}</div>
         <div class="agent-desc">${escapeHtml(a.description || "—")}</div>
       </div>
       <div class="agent-cell agent-cell-id"><code>${escapeHtml(a.agentId)}</code></div>
@@ -1678,6 +1678,7 @@ function serializeAgent(a) {
     personalMemoryEnabled: !!a.personalMemoryEnabled,
     isPrivate: !!a.isPrivate,
     knowledgeBaseIds: (a.knowledgeBaseIds || []),
+    imageLibraryIds: (a.imageLibraryIds || []),
     skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
     assignmentIds: (a.assignmentIds || []),
     escalationAgentId: a.escalationAgentId || null,
@@ -1790,6 +1791,7 @@ async function importAgentsFromFile(file) {
       personalMemoryEnabled: !!a.personalMemoryEnabled,
       isPrivate: !!a.isPrivate,
       knowledgeBaseIds: (a.knowledgeBaseIds || []),
+      imageLibraryIds: (a.imageLibraryIds || []),
       skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
       assignmentIds: (a.assignmentIds || []),
       escalationAgentId: a.escalationAgentId || null,
@@ -2018,6 +2020,9 @@ function openAgentForm(agentId) {
   // 知识库：回显绑定
   agentKbIds = [...(a?.knowledgeBaseIds || [])];
   renderKbPicks();
+  // 图库：回显绑定
+  agentImgLibIds = [...(a?.imageLibraryIds || [])];
+  renderImgLibPicks();
   // 私密数字员工仅创建者或系统管理员可编辑（种子数字员工无 ownerId，登录即可编辑）
   const canEditPrivate = !a?.isPrivate || !a?.ownerId || state.isAdmin || a.ownerId === state.memberId;
   $("afIsPrivate").disabled = !canEditPrivate;
@@ -2054,6 +2059,7 @@ async function saveAgent() {
     personalMemoryEnabled: $("afPersonalMemory").checked,
     isPrivate: $("afIsPrivate").checked,
     knowledgeBaseIds: [...agentKbIds],
+    imageLibraryIds: [...agentImgLibIds],
     // 可调用子数字员工（Skills）：由表单「可调用子数字员工」勾选维护，skillId 留空后端自动生成
     skills: [...agentSkillPicks].filter((s) => s && s.targetAgentId)
       .map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId })),
@@ -2614,6 +2620,46 @@ function renderKbPicks() {
   });
 }
 
+let imgLibList = [];   // 可见图库 [{libId,name,description,ownerId,assets}]
+let agentImgLibIds = []; // 数字员工表单当前选中的图库 ID
+
+/** 加载可见图库列表并刷新表单多选 / 管理弹窗。 */
+async function loadImageLibs() {
+  try {
+    const res = await fetch("/ag-ui/image-libs", { headers: { Authorization: `Bearer ${state.token}` } });
+    if (res.ok) {
+      imgLibList = (await res.json()).libraries || [];
+      renderImgLibPicks();
+      if (!$("imgLibModal").classList.contains("hidden")) renderImgLibModal();
+    }
+  } catch { /* 图库不可用时表单不阻塞 */ }
+}
+
+/** 数字员工表单：图库绑定（仅罗列已选；备选经「＋ 绑定图库」弹窗）。 */
+function renderImgLibPicks() {
+  const el = $("afImgLibList");
+  if (!el) return;
+  el.innerHTML = "";
+  if (!agentImgLibIds.length) {
+    el.innerHTML = `<span class="form-hint">${t("agent.form.imglib.empty")}</span>`;
+    return;
+  }
+  agentImgLibIds.forEach((id) => {
+    const lib = (imgLibList || []).find((x) => x.libId === id);
+    const row = document.createElement("div");
+    row.className = "af-sel-row";
+    const info = document.createElement("span");
+    info.className = "sel-main";
+    info.innerHTML =
+      `<span>🖼️</span><b class="sel-name">${escapeHtml(lib?.name || id)}</b>`
+      + (lib?.description ? `<span class="sel-desc" title="${escapeHtml(lib.description)}">${escapeHtml(lib.description)}</span>` : "")
+      + (lib ? `<span class="sel-doc">${t("agent.form.imglib.count", { count: (lib.assets || []).length })}</span>` : "");
+    row.appendChild(info);
+    row.appendChild(makeSelectedRemoveBtn(id, "imglib"));
+    el.appendChild(row);
+  });
+}
+
 /* ============ 数字员工编辑：独立选取弹窗（技能 / 子数字员工 / 知识库） ============ */
 
 /** 表单已选区“✕ 移除”按钮（技能 skill / 子数字员工 agent / 知识库 kb 通用）。 */
@@ -2636,6 +2682,9 @@ function makeSelectedRemoveBtn(id, kind) {
     } else if (kind === "kb") {
       agentKbIds = agentKbIds.filter((x) => x !== id);
       renderKbPicks();
+    } else if (kind === "imglib") {
+      agentImgLibIds = agentImgLibIds.filter((x) => x !== id);
+      renderImgLibPicks();
     } else if (kind === "usergroup") {
       agentAllowedGroupIds = agentAllowedGroupIds.filter((x) => x !== id);
       renderAllowGroupPicks();
@@ -2679,12 +2728,13 @@ async function openAgentPick(kind) {
   if (search) search.value = "";
   $("agentPickTitle").textContent = t({
     skill: "agent.form.pick.title.skill", agent: "agent.form.pick.title.agent", kb: "agent.form.pick.title.kb",
-    usergroup: "agent.form.pick.title.usergroup",
+    imglib: "agent.form.pick.title.imglib", usergroup: "agent.form.pick.title.usergroup",
   }[kind] || "agent.form.pick.title.skill");
-  // 备选数据确保就绪（技能库 / 知识库 / 用户组可能尚未加载过）
+  // 备选数据确保就绪（技能库 / 知识库 / 图库 / 用户组可能尚未加载过）
   try {
     if (kind === "skill" && !skillList.length) await loadSkills();
     else if (kind === "kb") await loadKbs();
+    else if (kind === "imglib") await loadImageLibs();
     else if (kind === "usergroup") await loadUserGroupsForPick();
   } catch { /* 加载失败不阻塞弹窗，列表显示空态 */ }
   $("agentPickModal").classList.remove("hidden");
@@ -2706,6 +2756,10 @@ function agentPickToggle(kind, id, on) {
     if (on) { if (!agentKbIds.includes(id)) agentKbIds.push(id); }
     else agentKbIds = agentKbIds.filter((x) => x !== id);
     renderKbPicks();
+  } else if (kind === "imglib") {
+    if (on) { if (!agentImgLibIds.includes(id)) agentImgLibIds.push(id); }
+    else agentImgLibIds = agentImgLibIds.filter((x) => x !== id);
+    renderImgLibPicks();
   } else if (kind === "usergroup") {
     if (on) { if (!agentAllowedGroupIds.includes(id)) agentAllowedGroupIds.push(id); }
     else agentAllowedGroupIds = agentAllowedGroupIds.filter((x) => x !== id);
@@ -2767,6 +2821,23 @@ function renderAgentPickList() {
         + (kb.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(kb.description)}</span>` : "")
         + ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.kb.docCount", { count: (kb.documents || []).length })}</span>`;
       row.querySelector("input").addEventListener("change", (e) => agentPickToggle("kb", kb.kbId, e.target.checked));
+      el.appendChild(row);
+      count++;
+    });
+  } else if (agentPickKind === "imglib") {
+    (imgLibList || []).forEach((lib) => {
+      const hay = `${lib.name} ${lib.libId} ${lib.description || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) return;
+      const on = agentImgLibIds.includes(lib.libId);
+      const row = document.createElement("label");
+      row.className = "kb-pick-item" + (on ? " on" : "");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
+      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+        + `<span>🖼️</span>`
+        + `<b>${escapeHtml(lib.name)}</b>`
+        + (lib.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(lib.description)}</span>` : "")
+        + ` <span class="kb-meta" style="white-space:nowrap">${t("agent.form.imglib.count", { count: (lib.assets || []).length })}</span>`;
+      row.querySelector("input").addEventListener("change", (e) => agentPickToggle("imglib", lib.libId, e.target.checked));
       el.appendChild(row);
       count++;
     });
@@ -2947,6 +3018,208 @@ async function addKbDocument(kbId, file) {
     await loadKbs();
     startKbPolling();
   } catch (ex) { toast(t("kb.docProcessFail", { err: ex.message })); }
+}
+
+/* ============ 图库管理弹窗（仿知识库：创建 / 上传 / 缩略图网格 / 改描述 / 轮询状态） ============ */
+let imgLibSearchQuery = "";
+let imgLibExpanded = new Set();   // 已展开图片区的图库 libId
+
+/** 图库管理弹窗：每库一行（名称 / 图片数 / 描述 / 操作），展开后是缩略图网格。
+ *  仅自己创建的库可上传 / 删除（与知识库、技能库的管理模式一致）。 */
+function renderImgLibModal() {
+  const wrap = $("imgLibListWrap");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const q = imgLibSearchQuery.trim().toLowerCase();
+  const visible = (imgLibList || []).filter((lib) => {
+    if (!q) return true;
+    const hay = [lib.name, lib.libId, lib.description || "", ...(lib.assets || []).map((a) => a.fileName || "")].join(" ").toLowerCase();
+    return hay.includes(q);
+  });
+  if (!visible.length) {
+    wrap.innerHTML = `<div class="kb-empty">${t(imgLibList.length ? "imgLib.noMatch" : "imgLib.noLib")}</div>`;
+    return;
+  }
+  const assetBadge = (a) => a.status === "processing"
+    ? `<span class="kb-status kb-status-proc">${t("imgLib.processing")}</span>`
+    : a.status === "error"
+      ? `<span class="kb-status kb-status-err" title="${escapeHtml(a.error || "")}">${t("kb.failed")}</span>`
+      : "";
+  visible.forEach((lib) => {
+    const mine = lib.ownerId === state.memberId;
+    const assets = lib.assets || [];
+    const exp = imgLibExpanded.has(lib.libId);
+    const hasProc = assets.some((a) => a.status === "processing");
+    let ops = `<button class="icon-btn imglib-expand" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.toggleImages")}" style="font-size:12px">${exp ? "▾" : "▸"}</button>`;
+    if (mine) {
+      ops += `<button class="chip-btn imglib-upload" data-lib="${escapeHtml(lib.libId)}" type="button" style="font-size:12px;padding:2px 8px">${t("imgLib.upload")}</button>`
+        + `<button class="icon-btn imglib-del" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.delTitle")}">🗑️</button>`;
+    } else {
+      ops += `<span style="color:var(--muted);font-size:12px">${t("kb.systemReadonly")}</span>`;
+    }
+    const grid = assets.length
+      ? `<div class="imglib-grid">${assets.map((a) => `
+          <div class="imglib-card">
+            <img class="imglib-thumb" src="${escapeHtml(authedAssetUrl(a.url) || "")}" alt="" loading="lazy" onerror="this.style.display='none'" />
+            <div class="imglib-meta">
+              <span class="imglib-file" title="${escapeHtml(a.fileName)}">${escapeHtml(a.fileName)}</span>
+              ${a.width && a.height ? `<span class="imglib-dim">${a.width}×${a.height}</span>` : ""}
+              ${assetBadge(a)}
+            </div>
+            <input class="modal-input imglib-cap" data-lib="${escapeHtml(lib.libId)}" data-asset="${escapeHtml(a.assetId)}"
+                   value="${escapeHtml(a.caption || "")}" placeholder="${t("imgLib.caption.ph")}" maxlength="400" />
+            ${mine ? `<div class="imglib-ops">
+              <button class="chip-btn imglib-save" data-lib="${escapeHtml(lib.libId)}" data-asset="${escapeHtml(a.assetId)}" type="button" style="font-size:12px;padding:2px 8px">${t("imgLib.saveCaption")}</button>
+              <button class="icon-btn imglib-asset-del" data-lib="${escapeHtml(lib.libId)}" data-asset="${escapeHtml(a.assetId)}" title="${t("imgLib.removeImageTitle")}" style="width:22px;height:22px">🗑️</button>
+            </div>` : ""}
+          </div>`).join("")}</div>`
+      : `<div class="kb-empty" style="padding:8px 0">${t("imgLib.noImages")}</div>`;
+    const item = document.createElement("div");
+    item.className = "kb-list-item" + (exp ? " open" : "");
+    item.innerHTML = `
+      <div class="kb-row">
+        <div class="kb-name"><b>🖼️ ${escapeHtml(lib.name)}</b><code>${escapeHtml(lib.libId)}</code></div>
+        <div class="kb-stat">${hasProc ? `<span class="kb-status kb-status-proc">${t("imgLib.processing")}</span>` : ""}<span>${t("agent.form.imglib.count", { count: assets.length })}</span></div>
+        <div class="kb-desc-cell"${lib.description ? ` title="${escapeHtml(lib.description)}"` : ""}>${escapeHtml(lib.description || "")}</div>
+        <div class="kb-op-col">${ops}</div>
+      </div>`
+      + (exp ? `<div class="kb-docs imglib-docs">${grid}</div>` : "")
+      + (mine ? `<input type="file" class="hidden imglib-file" data-lib="${escapeHtml(lib.libId)}" accept=".png,.jpg,.jpeg,.gif,.bmp,.webp" multiple />` : "");
+    const row = item.querySelector(".kb-row");
+    row.addEventListener("click", () => {
+      if (imgLibExpanded.has(lib.libId)) imgLibExpanded.delete(lib.libId); else imgLibExpanded.add(lib.libId);
+      renderImgLibModal();
+    });
+    item.querySelectorAll(".imglib-expand").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); row.click(); }));
+    // 缩略图网格 / 描述输入 / 按钮：点它们不应触发整行展开收起
+    item.querySelectorAll(".imglib-docs").forEach((d) => d.addEventListener("click", (e) => e.stopPropagation()));
+    item.querySelectorAll(".imglib-save").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const input = item.querySelector(`.imglib-cap[data-asset="${btn.dataset.asset}"]`);
+        await saveImageCaption(btn.dataset.lib, btn.dataset.asset, input ? input.value : "", btn);
+      });
+    });
+    item.querySelectorAll(".imglib-asset-del").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!await uiConfirm({ message: t("imgLib.removeImageConfirm"), danger: true })) return;
+        const res = await fetch(`/ag-ui/image-libs/${btn.dataset.lib}/assets/${btn.dataset.asset}`, {
+          method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) { toast(errMsg(data, t("imgLib.removeImageFail", { err: res.status }))); return; }
+        toast(t("imgLib.imageRemoved"));
+        await loadImageLibs();
+      });
+    });
+    item.querySelectorAll(".imglib-upload").forEach((upBtn) => {
+      upBtn.addEventListener("click", (e) => { e.stopPropagation(); item.querySelector(".imglib-file")?.click(); });
+    });
+    const fileInput = item.querySelector(".imglib-file");
+    if (fileInput) fileInput.onchange = async (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (files.length) await addImageAssets(fileInput.dataset.lib, files);
+    };
+    item.querySelectorAll(".imglib-del").forEach((delBtn) => {
+      delBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!await uiConfirm({ message: t("imgLib.delConfirm"), danger: true })) return;
+        const res = await fetch(`/ag-ui/image-libs/${delBtn.dataset.lib}`, {
+          method: "DELETE", headers: { Authorization: `Bearer ${state.token}` },
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) { toast(errMsg(data, t("imgLib.delFail", { err: res.status }))); return; }
+        toast(t("imgLib.deleted"));
+        agentImgLibIds = agentImgLibIds.filter((x) => x !== delBtn.dataset.lib);
+        imgLibExpanded.delete(delBtn.dataset.lib);
+        renderImgLibPicks();
+        await loadImageLibs();
+      });
+    });
+    wrap.appendChild(item);
+  });
+}
+
+async function openImgLibModal() {
+  const s = $("imgLibSearch"); if (s) { s.value = ""; imgLibSearchQuery = ""; }
+  toggleImgLibCreatePanel(false);
+  $("imgLibModal").classList.remove("hidden");
+  await loadImageLibs();
+  startImgLibPolling();
+}
+
+/** 展开 / 收起图库创建面板（force 可强制指定状态）。 */
+function toggleImgLibCreatePanel(force) {
+  const p = $("imgLibCreatePanel");
+  if (!p) return;
+  const show = force === undefined ? p.classList.contains("hidden") : force;
+  p.classList.toggle("hidden", !show);
+  if (show) $("imgLibName")?.focus();
+}
+
+/* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */
+let imgLibPollTimer = null;
+
+function stopImgLibPolling() {
+  if (imgLibPollTimer) { clearInterval(imgLibPollTimer); imgLibPollTimer = null; }
+}
+
+function startImgLibPolling() {
+  stopImgLibPolling();
+  imgLibPollTimer = setInterval(async () => {
+    try {
+      const hasProcessing = imgLibList.some((lib) => (lib.assets || []).some((a) => a.status === "processing"));
+      if (!hasProcessing) { stopImgLibPolling(); return; }
+      await loadImageLibs();
+    } catch { /* 轮询失败下次继续 */ }
+  }, 2000);
+}
+
+/** 上传图片到图库（可多选）：先经 /ag-ui/upload 取 attachmentId，再登记进图库（后台生成描述 + 向量化）。 */
+async function addImageAssets(libId, files) {
+  let ok = 0;
+  for (const file of files) {
+    try {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      const up = await fetch("/ag-ui/upload", { method: "POST", body: form, headers: { Authorization: `Bearer ${state.token}` } });
+      const ups = await up.json().catch(() => null);
+      const atts = Array.isArray(ups?.attachments) ? ups.attachments : null;
+      if (!up.ok || !atts || !atts.length) { toast(t("imgLib.uploadFail", { name: file.name })); continue; }
+      const res = await fetch(`/ag-ui/image-libs/${libId}/assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify({ attachmentId: atts[0].attachmentId, fileName: file.name }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { toast(errMsg(data, t("imgLib.addFail", { err: res.status }))); continue; }
+      ok++;
+    } catch (ex) {
+      toast(t("imgLib.addFail", { err: ex.message }));
+    }
+  }
+  if (ok) toast(t("imgLib.uploaded", { count: ok }));
+  await loadImageLibs();
+  startImgLibPolling();
+}
+
+/** 保存图片描述（改了会重新向量化 —— 检索依据就是描述）。 */
+async function saveImageCaption(libId, assetId, caption, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`/ag-ui/image-libs/${libId}/assets/${assetId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ caption }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("imgLib.captionFail", { err: res.status }))); return; }
+    toast(t("imgLib.captionSaved"));
+    await loadImageLibs();
+    startImgLibPolling();
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function deleteAgent(agent) {
@@ -9263,6 +9536,29 @@ function init() {
     $("kbDesc").value = "";
     toggleKbCreatePanel(false);
     await loadKbs();
+  };
+  // 图库：管理弹窗（入口在「AI 角色管理」工具栏）+ 创建 + 绑定（与知识库一致）
+  $("agentImgLibManageBtn").onclick = openImgLibModal;
+  $("afImgLibAddBtn").onclick = () => openAgentPick("imglib");
+  $("imgLibNewBtn").onclick = () => toggleImgLibCreatePanel();
+  $("imgLibCreateCancel").onclick = () => toggleImgLibCreatePanel(false);
+  $("imgLibSearch").addEventListener("input", () => { imgLibSearchQuery = $("imgLibSearch").value; renderImgLibModal(); });
+  $("imgLibCloseBtn").onclick = () => { $("imgLibModal").classList.add("hidden"); stopImgLibPolling(); renderImgLibPicks(); };
+  $("imgLibCreateBtn").onclick = async () => {
+    const name = $("imgLibName").value.trim();
+    if (!name) { toast(t("imgLib.needName")); return; }
+    const res = await fetch("/ag-ui/image-libs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ name, description: $("imgLibDesc").value.trim() || null }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("imgLib.createFail", { err: res.status }))); return; }
+    toast(t("imgLib.created", { name: data.name }));
+    $("imgLibName").value = "";
+    $("imgLibDesc").value = "";
+    toggleImgLibCreatePanel(false);
+    await loadImageLibs();
   };
   $("agentSearch").addEventListener("input", renderAgentList);
   $("afTriggerMode").addEventListener("change", syncTriggerForm);

@@ -86,6 +86,7 @@ public static class DesktopApp
         app.MapUserGroupApi();      // 用户分组 / 组织单元（细粒度授权）
         app.Services.RegisterAgentPersistence();
         app.Services.RegisterKnowledgeBasePersistence();
+        app.Services.RegisterImageLibraryPersistence();
         app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
         app.Services.RegisterOrgTeamPersistence(); // 内置组织角色“多支各留最新”窄映射跨重启保持
         app.Services.RegisterUserGroupsPersistence(); // 用户分组目录跨重启保持（细粒度授权数据）

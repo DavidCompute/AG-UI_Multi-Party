@@ -1034,6 +1034,27 @@ There is also a controlled <b>`org_deploy` (org write-to-store)</b> kind: it has
 Agents can bind knowledge bases (`AgentDefinition.knowledgeBaseIds`); before replying, relevant document fragments are retrieved from the bound list and injected into the context.
 Knowledge bases are created by users who upload documents (txt/md/json/csv and docx/xlsx/pptx/pdf, reusing attachment text extraction); after slicing, documents are vectorized and stored in the semantic memory vector table (GroupId convention `kb:{KbId}`). Slicing defaults to a 4096-char window with 512 chars of overlap, configurable via `Agents:Memory:KnowledgeChunkSize` / `KnowledgeChunkOverlap`; cuts are placed at line breaks or sentence-ending punctuation (avoiding splitting mid-sentence), and adjacent slices share an overlapping tail to reduce boundary information loss. It depends on vector storage and embedding (pgvector / sqlite-vec + llama / http); when unavailable, document ingestion returns 400 with a clear error.
 
+### 5.8b Image Library APIs (Hub Extension, the image source for document skills)
+
+An image library is a collection of **user-uploaded pictures** so that document skills (PPT / Word / PDF) can illustrate decks **without the internet** (Wikimedia is usually unreachable on an intranet).
+One vector per image (no chunking): after upload a **vision model writes a Chinese description** (`Agents:VisionEnabled`; on failure the filename plus the user's caption is used), and description + tags + filename are vectorised into the same vector table (GroupId convention `img:{LibId}`, `sender_type='img'`) — like the knowledge base it is **excluded from group-memory retrieval**.
+Files live under `data/images/{libId}/{assetId}{ext}`. Ingestion is asynchronous: upload returns `status=processing` immediately and the frontend polls for `ready` / `error`.
+
+|API|Path|Notes|
+|---|---|
+|Create library|`POST /ag-ui/image-libs`|`{ name, description?, sharedGroupIds? }`; sharing to a group requires membership|
+|Visible list|`GET /ag-ui/image-libs`|system-level + own + group-shared + admin, including the asset list|
+|Delete library|`DELETE /ag-ui/image-libs/{libId}`|creator or admin only; system-level is admin-only|
+|Upload image|`POST /ag-ui/image-libs/{libId}/assets`|`{ attachmentId, fileName?, caption?, tags? }` (after `POST /ag-ui/upload`)|
+|Edit caption|`PUT /ag-ui/image-libs/{libId}/assets/{assetId}`|triggers **re-vectorisation** (the caption is what retrieval matches)|
+|Delete image|`DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`|removes vector and file|
+|Read original|`GET /ag-ui/image-libs/{libId}/assets/{assetId}/raw`|login required, plus read access to that library|
+|Semantic search|`POST /ag-ui/images/search`|`{ query, topK?, minScore?, scopeHandle? }`; see below|
+
+**Identity and scope at the search endpoint (security-critical)**: it accepts two identities — a logged-in user (frontend debugging; can only search libraries they may read) and the **platform self token** (built-in skills calling back; `AGUI_SELF_BASE` / `AGUI_SELF_TOKEN` are injected into the process environment at startup).
+Skills carry **only the platform-registered search-scope handle (`scopeHandle`)** and never declare library IDs — skill input is model-generated, so self-declared IDs would allow reading someone else's library.
+Server-local paths (`path`) are returned **only to the self token** (the skill embeds the file directly); logged-in users get metadata plus a `/raw` URL.
+
 **Document ingestion is asynchronous**: `POST /ag-ui/kb/{kbId}/documents` immediately returns a document record with `status=processing` (text extraction / slicing / vectorization run in the background, avoiding long blocking of the upload request); the frontend polls the knowledge base list to observe status changes — `processing`（in progress）→ `ready`（ingested，chunkCount>0）or `error`（failed，error field is the reason）。A document being processed can be removed at any time（background discards the not-yet-written vectors）；documents whose processing was interrupted by a server restart revert to `error`。
 
 |API|Path|Description|

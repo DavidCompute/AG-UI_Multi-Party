@@ -89,6 +89,7 @@ public static class OrgBuiltinSeeds
             OwnerId = ownerId,
             Skills = [],
             KnowledgeBaseIds = [],
+            ImageLibraryIds = [],
             RequireApprovalToolNames = [],
             Pipeline = null,
             RelayToAgentId = null,

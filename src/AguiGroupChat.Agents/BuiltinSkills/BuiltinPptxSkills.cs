@@ -33,12 +33,27 @@ public static class BuiltinPptxSkills
             "生成完整的 PowerPoint 演示文稿（.pptx）：封面、目录、章节分隔、内容页、两栏对比、" +
             "表格、指标卡（KPI）、大数字看板、进度条与环形仪表、网格卡片、时间轴/流程、图标行、引言页、" +
             "**示意图（金字塔 / 漏斗 / 四象限 / 循环闭环 / 层叠架构）**、配图页（含图文混排）、" +
+            "**联网真照片（imageQuery，见下）**、" +
             "图表（柱状/折线/饼图/环形图/散点图/雷达图）、自动生成题图、小结与结束页。" +
             "当用户要求「做个 PPT」「出一套幻灯片 / 演示文稿」「把这份内容讲成一页页」「路演/汇报材料」「改改这份 PPT」时调用。" +
             "16:9 宽屏、统一主题配色与字体、除封面外每页带页码徽标；每页可附演讲者备注。" +
             "【插图】不需要用户提供任何图片素材：示意图页型用形状把关系画出来（分层/收敛/取舍/闭环/架构），" +
             "需要“配图”时若没有真图（path 缺失或文件不存在），会自动按主题配色生成一张抽象题图（零素材、零联网、无版权问题），" +
             "并在返回 warnings 里如实说明。**当用户说“要有插图/别只有文字/要好看一点”时，就用这些页型而不是堆文字。**" +
+            "【真照片：imageQuery】用户说要“照片/实景图/每页配图”，或希望画面更像真实场景时，" +
+            "在需要图的位置写 \"imageQuery\": \"关键词\"，工具会按顺序找图：① 先用平台的**团队图库**" +
+            "（用户自己上传的图片，语义检索，命中就不需要署名）② 图库里没有再到 Wikimedia Commons（免密钥、自由许可）检索并嵌入照片；" +
+            "cover(variant image/split)、section(variant full)、image（含 gallery 每张）、content 都支持；" +
+            "**content 页写了 imageQuery 会自动变成“文左图右”**；给了 path 则优先用本地文件。" +
+            "**关键词写法直接决定成图好坏（实测结论）**：用 **2~4 个能看得见的具体名词**，" +
+            "如 \"modern office meeting room\"、\"glass office building\"、\"handshake business\"、\"city skyline sunset\"；" +
+            "**不要用抽象词或动词**（teamwork / collaboration / together / growth / success）——" +
+            "实测这些词会搜到 Logo、图标、甚至 1920 年代书里的插图；词太多（5 个以上）会搜不到任何结果。" +
+            "要“现代商务感”就把 modern / interior / exterior 这类词带上；图廊（gallery）里每一张请给**不同**关键词。" +
+            "用了检索照片时会**自动在稿末追加一页「图片来源」**（CC 许可要求署名，必须保留，不要删）；" +
+            "命中团队图库的图不需要署名。" +
+            "取不到图时会降级为自动题图并在 warnings 说明，不会失败。" +
+            "注意：若部署网络访问不了 Wikimedia（如未配代理的内网），此功能会自动降级；此时不要反复重试。" +
             "【版式多样性】设计规范要求不要每页同一种版式，请主动轮换：示意/图/表/卡/时间轴交替，" +
             "同一份稿子里连续三页都是 content 会显得很平。" +
             "参数为 JSON：title(必填)、subtitle/author/date(可选)、" +
@@ -65,9 +80,10 @@ public static class BuiltinPptxSkills
             "fontTitle/fontBody/fontCjk(可选，逐项覆盖)、" +
             "titleRule(true 才画“标题下强调线”；默认不画——那是 AI 生成稿的典型特征)、" +
             "outputPath(可选，.pptx 落盘路径)、" +
+            "imageSearchApi(可选，覆盖照片检索端点；也可用环境变量 AGUI_PHOTO_API 指向镜像/代理)、" +
             "slides 数组（必填，至少一页）。slides 每项形如 " +
             "{\"type\":\"cover\",\"title\":\"…\",\"variant\":\"left|center|image|split\"}" +
-            "（image/split 配 \"path\" 放图；无图时自动生成题图） / " +
+            "（image/split 配 \"path\" 或 \"imageQuery\" 放图；无图时自动生成题图） / " +
             "{\"type\":\"toc\",\"title\":\"目录\",\"items\":[\"一、…\"],\"variant\":\"list|grid|sidebar\"} / " +
             "{\"type\":\"section\",\"title\":\"一、…\",\"subtitle\":\"…\",\"variant\":\"number|bar|full\"} / " +
             "{\"type\":\"content\",\"title\":\"…\",\"bullets\":[\"要点\"]} / " +
@@ -96,9 +112,10 @@ public static class BuiltinPptxSkills
             "{\"type\":\"chart\",\"title\":\"…\",\"chartType\":\"bar|line|pie|doughnut|scatter|radar\"," +
             "\"categories\":[…],\"series\":[{\"name\":\"…\",\"values\":[…]}],\"yLabel\":\"…\"}" +
             "（散点图用 series[].points:[[x,y],…]；雷达图用 categories 当各维度轴） / " +
-            "{\"type\":\"image\",\"title\":\"…\",\"path\":\"…\",\"caption\":\"…\"," +
+            "{\"type\":\"image\",\"title\":\"…\",\"path\":\"…\",\"imageQuery\":\"…\",\"caption\":\"…\"," +
             "\"variant\":\"full|left|right|bleed|gallery\"}(left/right 是图文混排；bleed 半出血+叠字；" +
-            "gallery 用 images:[{path,caption}] 放 2~4 张；left/right/bleed 可配 bullets 写文字侧) / " +
+            "gallery 用 images:[{path|imageQuery,caption}] 放 2~4 张；left/right/bleed 可配 bullets 写文字侧；" +
+            "path 与 imageQuery 二选一，path 优先) / " +
             "{\"type\":\"hero\",\"title\":\"…\",\"subtitle\":\"…\"}" +
             "（整页自动生成的抽象题图，适合章节引导页/无素材时的视觉休息页） / " +
             "{\"type\":\"summary\",\"title\":\"小结\",\"bullets\":[…],\"variant\":\"list|cta|split\"}" +
@@ -156,7 +173,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-17.4";
+    public const string Version = "2026-09-18.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

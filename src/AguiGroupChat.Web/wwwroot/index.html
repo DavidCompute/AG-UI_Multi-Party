@@ -153,6 +153,7 @@
           <button id="agentOrchBtn" class="chip-btn" data-i18n-title="org.orchTitle">🛠️ <span data-i18n="org.orchBtn">一键编排</span></button>
           <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
           <button id="agentKbManageBtn" class="chip-btn" data-i18n-title="kb.title">📚 <span data-i18n="agent.kbBtn">管理知识库</span></button>
+          <button id="agentImgLibManageBtn" class="chip-btn" data-i18n-title="imgLib.title">🖼️ <span data-i18n="agent.imgLibBtn">管理图库</span></button>
           <button id="agentImportBtn" class="chip-btn" data-i18n-title="agent.importTip">📥 <span data-i18n="agent.import">导入</span></button>
           <button id="agentExportAllBtn" class="chip-btn" data-i18n-title="agent.exportAllTip">📤 <span data-i18n="agent.exportAll">导出全部</span></button>
           <button id="agentBuiltinRestoreOrgBtn" class="chip-btn hidden" data-i18n-title="agent.restoreOrgTip">🛠️ <span data-i18n="agent.restoreOrg">恢复内置组织工具</span></button>
@@ -308,6 +309,15 @@
             <div id="afKbList" class="af-sel-list"></div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
               <button id="afKbAddBtn" class="chip-btn" type="button" data-i18n="agent.form.kb.add">＋ 绑定知识库</button>
+            </div>
+          </div>
+
+          <div class="form-section" data-collapse-key="afSectImgLib" style="border:none;margin:14px 0 8px;padding:0 0 4px"><span data-i18n="agent.form.section.imglib">图库（可选）</span></div>
+          <div class="form-group">
+            <p class="form-hint" style="margin-bottom:8px" data-i18n-html="agent.form.imglib.hint">绑定<b>图库</b>后，该数字员工出稿时的配图（PPT 的 <code>imageQuery</code>）<b>只从这个图库取</b>；不绑则用你本人可读的全部图库。图库在「AI 角色管理 → 🖼️ 管理图库」中创建并上传图片。</p>
+            <div id="afImgLibList" class="af-sel-list"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              <button id="afImgLibAddBtn" class="chip-btn" type="button" data-i18n="agent.form.imglib.add">＋ 绑定图库</button>
             </div>
           </div>
           </div>
@@ -626,6 +636,38 @@
       <div class="modal-actions">
         <button id="kbNewBtn" class="send" data-i18n="kb.create">＋ 创建知识库</button>
         <button id="kbCloseBtn" class="btn-ghost" data-i18n="kb.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 图库管理：创建图库、上传图片（视觉模型自动生成描述 + 向量化）；缩略图网格布局 -->
+  <div id="imgLibModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal kb-modal">
+      <div class="modal-title">🖼️ <span data-i18n="imgLib.title">图库管理</span></div>
+      <div class="kb-view">
+        <div class="kb-toolbar">
+          <span class="search-clear-wrap" style="flex:1;min-width:160px">
+            <input id="imgLibSearch" class="modal-input" data-i18n-placeholder="imgLib.search" />
+            <button type="button" class="search-clear" data-clear-for="imgLibSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
+        </div>
+        <div id="imgLibCreatePanel" class="kb-create hidden">
+          <input id="imgLibName" class="modal-input" data-i18n-placeholder="imgLib.name.ph" maxlength="40" />
+          <input id="imgLibDesc" class="modal-input" data-i18n-placeholder="imgLib.desc.ph" maxlength="120" />
+          <button id="imgLibCreateBtn" class="send" data-i18n="imgLib.createOk">创建</button>
+          <button id="imgLibCreateCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
+        </div>
+        <div class="kb-grid-head">
+          <span data-i18n="imgLib.col.name">名称 / ID</span>
+          <span data-i18n="imgLib.col.images">图片</span>
+          <span data-i18n="imgLib.col.desc">描述</span>
+          <span class="kb-op-col" data-i18n="kb.col.ops">操作</span>
+        </div>
+        <div id="imgLibListWrap" class="kb-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="imgLibNewBtn" class="send" data-i18n="imgLib.create">＋ 创建图库</button>
+        <button id="imgLibCloseBtn" class="btn-ghost" data-i18n="kb.close">关闭</button>
       </div>
     </div>
   </div>

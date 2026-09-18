@@ -169,6 +169,8 @@ public static class SkillApi
         // ---- 试运行技能（仅归属者或管理员；系统技能仅管理员）----
         //      /run 是无审批通道的手动执行，不能让它被任意登录用户触发 shell / HTTP；
         //      归属者运行自己建的 prompt 技能用于调试验证，shell / HTTP 则限定管理员与归属者。
+        //      【图库】服务器直跑的文档技能（docx/pdf/pptx）也走图库注入：否则界面里手动试运行
+        //      一份带 imageQuery 的稿子会一张图都配不到（而聊天路径是好的，很难想到差别在入口）。
         root.MapPost("/{skillId}/run", async (string skillId, SkillRunHttpRequest req, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog, AgentCatalog agents, AgentOptions options, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var user = WebIdentity.User(ctx, auth);
@@ -197,7 +199,7 @@ public static class SkillApi
                     // 桌面版/自托管（宿主=用户本机）：直接在 Web 宿主上进程内跑 Roslyn，无需独立本机桥。
                     if (hostLocal && hostEnv is not null)
                     {
-                        var hostDr = await agents.RunSkillAsync(existing, query, ct);
+                        var hostDr = await agents.RunSkillAsync(existing, agents.PrepareDocumentSkillInput(existing, query, user.UserId), ct);
                         var (txtA, fixA) = await TryDotnetAutoFixAsync(existing, hostDr, canEditThis, options, agents, loggerFactory, ct);
                         return Results.Ok(new { skillId, result = ("【本机 dotnet · 在桌面宿主机直接执行】\n" + txtA), localOnly = true, autoFix = fixA });
                     }
@@ -217,7 +219,7 @@ public static class SkillApi
                     return Results.Ok(new { skillId, result = ("执行失败，没有安装桥：本客户端技能需在发起请求的浏览器所在机器执行，\n"
                         + "但该机器未连接本机桥（找不到 client=" + (clientId.Length == 0 ? "（未上报）" : clientId) + "）。请在本机安装/启动 AguiGroupChat.NativeBridge 后重试。"), localOnly = true });
                 }
-                var dr = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
+                var dr = await agents.RunSkillAsync(existing, agents.PrepareDocumentSkillInput(existing, req.Query ?? "", user.UserId), ct);
                 var (txtC, fixC) = await TryDotnetAutoFixAsync(existing, dr, canEditThis, options, agents, loggerFactory, ct);
                 return Results.Ok(new { skillId, result = txtC, autoFix = fixC });
             }

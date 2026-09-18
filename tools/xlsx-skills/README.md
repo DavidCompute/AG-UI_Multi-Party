@@ -266,7 +266,8 @@ dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --filte
 1. **预置 using 不含 `System.IO`** —— 用到 `Path` / `Directory` / `File` 必须自己写 `using System.IO;`（已含）。
 2. **`#r "nuget: 包, 版本"` 的版本号是提示，不是锁** —— 实测写 `3.2.0` 会还原到 `3.5.x`。
 3. **入口必须是 `public static string Run(string input)`**（同步，不接受 `Task<string>`）。
-4. **10 秒执行上限 & 12,000 字符输出上限** —— 本技能只返回摘要（路径 / sheet 数 / 行数），不回灌表格数据。
+4. **执行上限与 12,000 字符输出上限** —— 内置文档类技能 **60 秒**（`Agents:BuiltinSkillTimeoutMs`），
+   自建 .NET 技能 10 秒；本技能只返回摘要（路径 / sheet 数 / 行数），不回灌表格数据。
 5. **`dotnet` 技能一律强制人工审批**（平台安全策略）。
 6. SpreadsheetML 的类型名（`Cell` / `Row` / `Font` / `Color` …）极易与自定义类型重名，
    正文用 `using S = DocumentFormat.OpenXml.Spreadsheet;` 别名，**改代码时勿删别名**。

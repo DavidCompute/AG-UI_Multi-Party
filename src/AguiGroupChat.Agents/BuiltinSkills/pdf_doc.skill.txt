@@ -35,7 +35,7 @@
 //     callout     kind:"info|warn|success|danger", title, text
 //     quote       text, cite
 //     table       headers:[…], rows:[[…]], caption
-//     image       path, caption, widthMm
+//     image       path（本地文件，PNG/JPEG）或 imageQuery（从平台「图库」语义检索配图）, caption, widthMm
 //     chart       chartType:"bar|line|pie|doughnut", title, categories:[…],
 //                 series:[{name,values:[…]}], yLabel, heightMm, caption
 //     code        code, language
@@ -55,8 +55,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 public class Skill
 {
@@ -144,8 +146,17 @@ public class Skill
 
             var docType = NormalizeDocType(Str(root, "docType") ?? Str(root, "documentType") ?? "report");
             var t = TokensFor(docType, root);
+            // 平台注入的图库检索范围句柄 + 配图来源策略（详见 ResolveQueryImage）
+            _imgScopeId = Str(root, "imageScopeId") ?? Str(root, "image_scope_id");
+            _imgSource = (Str(root, "imageSource") ?? Str(root, "image_source")
+                ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE") ?? "").Trim();
+            _imgWarnings = new List<string>();
 
             var blocks = ParseBlocks(root, warnings);
+            warnings.AddRange(_imgWarnings);
+            // 配图没换到本地文件（无图库 / 库内无匹配）的 image 块：直接剔除，
+            // 否则渲染阶段会抛“image 块缺少 path”把整份 PDF 带坏。
+            blocks.RemoveAll(x => x.Type == "image" && string.IsNullOrWhiteSpace(x.Path));
             if (blocks.Count == 0)
                 throw new InvalidOperationException(
                     "没有可排版的内容：请提供 blocks 数组（如 [{\"type\":\"h1\",\"text\":\"标题\"},{\"type\":\"p\",\"text\":\"正文\"}]），"
@@ -2070,6 +2081,18 @@ public class Skill
         b.Cite = Str(el, "cite") ?? Str(el, "source");
         b.Kind = Str(el, "kind") ?? Str(el, "variant") ?? Str(el, "tone") ?? Str(el, "level");
         b.Path = Str(el, "path") ?? Str(el, "src") ?? Str(el, "image") ?? Str(el, "url");
+        // 图库配图：只给了关键词（imageQuery）时先把它换成本地路径；换不到就置空，由渲染前剔除。
+        if (b.Type == "image" && string.IsNullOrWhiteSpace(b.Path))
+        {
+            var q = (Str(el, "imageQuery") ?? Str(el, "image_query"))?.Trim() ?? "";
+            if (q.Length > 0)
+            {
+                var hit = ResolveQueryImage(q, out var why);
+                if (hit is null)
+                    _imgWarnings?.Add("配图检索未成功，已跳过该图：关键词“" + q + "”（" + (why ?? "未知原因") + "）");
+                else b.Path = hit;
+            }
+        }
         b.ChartType = Str(el, "chartType") ?? Str(el, "chart");
         b.YLabel = Str(el, "yLabel") ?? Str(el, "unit");
         b.Language = Str(el, "language") ?? Str(el, "lang");
@@ -2583,5 +2606,119 @@ public class Skill
         }
         b.Append("\"");
         return b.ToString();
+    }
+
+    // ===== 配图（imageQuery → 团队图库）=====
+    // 平台在调用文档技能前，会往入参里注入一个「图库检索范围句柄」（root.imageScopeId），
+    // 回调地址走进程环境变量 AGUI_SELF_BASE / AGUI_SELF_TOKEN（技能与平台同进程，读得到）。
+    // 技能只带句柄、不带图库 ID —— 入参由模型生成，若能自报图库 ID 就能越权读别人的图。
+    //
+    // 与 Word/PPT 技能的差别：PDFsharp 只能嵌 PNG / JPEG，所以**只从候选里挑这两类**，
+    // 其余格式（如图库允许上传的 WebP）跳过并在 warnings 里说清楚。
+    [ThreadStatic] private static string? _imgScopeId;
+    [ThreadStatic] private static string? _imgSource;
+    [ThreadStatic] private static Dictionary<string, string?>? _imgCache;
+    [ThreadStatic] private static List<string>? _imgWarnings;
+
+    private const string SelfBaseEnv = "AGUI_SELF_BASE";
+    private const string SelfTokenEnv = "AGUI_SELF_TOKEN";
+    private const int ImgSearchTimeoutSec = 10;
+
+    /// <summary>
+    /// 按关键词查<b>团队图库</b>，命中则返回服务器上的本地图片路径（只接受 PNG / JPEG）。
+    ///
+    /// <para>
+    /// 技能与平台同进程，但拿不到平台的 DI 容器，所以是回环 HTTP 回调 <c>/ag-ui/images/search</c>：
+    /// 带上平台注入的句柄 + 自令牌，换回「服务器本地路径」，再由本技能直接嵌进 PDF
+    /// （平台在该接口里已按句柄做过图库可读性鉴权）。
+    /// </para>
+    ///
+    /// <para>失败一律返回 null 并给出原因：配图失败不该让整份稿子出不来。</para>
+    /// </summary>
+    private static string? ResolveQueryImage(string query, out string? why)
+    {
+        why = null;
+        var key = (query ?? "").Trim();
+        if (key.Length == 0) { why = "关键词为空"; return null; }
+        if (string.Equals(_imgSource, "network", StringComparison.OrdinalIgnoreCase))
+        {
+            why = "已配置为不使用图库（imageSource=network），而本技能只从图库配图";
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(_imgScopeId))
+        {
+            why = "当前没有可用的图库（平台未注入检索范围）";
+            return null;
+        }
+        _imgCache ??= new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (_imgCache.TryGetValue(key, out var cached)) return cached;
+
+        var baseUrl = Environment.GetEnvironmentVariable(SelfBaseEnv);
+        var token = Environment.GetEnvironmentVariable(SelfTokenEnv);
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token))
+        {
+            why = "未拿到平台回调地址（AGUI_SELF_BASE / AGUI_SELF_TOKEN 未注入）";
+            return null;
+        }
+
+        string? path = null;
+        var body = "{\"query\":" + Js(key) + ",\"scopeHandle\":" + Js(_imgScopeId!) + ",\"topK\":3}";
+        var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, out var httpWhy);
+        if (json is null) why = httpWhy ?? "平台未返回内容";
+        else
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("images", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    var sawUnsupported = false;
+                    foreach (var img in arr.EnumerateArray())
+                    {
+                        var p = Str(img, "path");
+                        if (string.IsNullOrWhiteSpace(p) || !File.Exists(p)) continue;
+                        if (!IsPdfEmbeddable(p, Str(img, "contentType"))) { sawUnsupported = true; continue; }
+                        path = p;
+                        break;
+                    }
+                    if (path is null)
+                        why = sawUnsupported
+                            ? "图库命中项不是 PNG/JPEG（PDF 只嵌 PNG/JPEG），建议换成 PNG/JPEG 后重试"
+                            : "图库里没有匹配的图片";
+                }
+                else why = "平台返回格式异常";
+            }
+            catch (Exception ex) { why = "平台返回解析失败：" + ex.Message; }
+        }
+        _imgCache[key] = path;
+        return path;
+    }
+
+    /// <summary>PDFsharp 只能嵌 PNG / JPEG；先看平台给的内容类型，没有再看扩展名。</summary>
+    private static bool IsPdfEmbeddable(string path, string? contentType)
+    {
+        var ct = (contentType ?? "").Trim().ToLowerInvariant();
+        if (ct.Length > 0) return ct == "image/png" || ct == "image/jpeg";
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext == ".png" || ext == ".jpg" || ext == ".jpeg";
+    }
+
+    /// <summary>POST JSON 并读回响应体（技能入口是同步签名，故这里同步等待）。失败返回 null 并给出原因。</summary>
+    private static string? HttpPostJson(string url, string body, string token, out string? why)
+    {
+        why = null;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(ImgSearchTimeoutSec) };
+            using var content = new StringContent(body, Encoding.UTF8, "application/json");
+            using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+            // 头部名就是常量本身：服务端 SelfApi.IsSelf 读的正是同名的请求头
+            req.Headers.TryAddWithoutValidation(SelfTokenEnv, token);
+            using var resp = Task.Run(() => http.SendAsync(req, HttpCompletionOption.ResponseContentRead))
+                .GetAwaiter().GetResult();
+            if (!resp.IsSuccessStatusCode) { why = "平台返回 HTTP " + (int)resp.StatusCode; return null; }
+            return Task.Run(() => resp.Content.ReadAsStringAsync()).GetAwaiter().GetResult();
+        }
+        catch (Exception ex) { why = ex.GetType().Name + "：" + ex.Message; return null; }
     }
 }

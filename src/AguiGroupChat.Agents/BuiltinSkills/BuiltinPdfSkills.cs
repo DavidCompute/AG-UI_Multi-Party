@@ -58,7 +58,9 @@ public static class BuiltinPdfSkills
             "{\"type\":\"callout\",\"kind\":\"info|warn|success|danger\",\"title\":\"重点\",\"text\":\"…\"} / " +
             "{\"type\":\"quote\",\"text\":\"…\",\"cite\":\"出处\"} / " +
             "{\"type\":\"table\",\"headers\":[\"维度\",\"说明\"],\"rows\":[[\"成本\",\"低\"]],\"caption\":\"表 1\"} / " +
-            "{\"type\":\"image\",\"path\":\"/app/docs/a.png\",\"caption\":\"图 1\",\"widthMm\":120} / " +
+            "{\"type\":\"image\",\"path\":\"/app/docs/a.png\",\"caption\":\"图 1\",\"widthMm\":120} 或 " +
+            "{\"type\":\"image\",\"imageQuery\":\"现代化机房 服务器机柜\",\"caption\":\"图 1\",\"widthMm\":120}" +
+            "（imageQuery = 从平台「图库」按语义检索自动配图，推荐；带 imageQuery 时不要再写 path；PDF 只嵌 PNG/JPEG） / " +
             "{\"type\":\"chart\",\"chartType\":\"bar|line|pie|doughnut\",\"title\":\"增长趋势\",\"categories\":[\"Q1\",\"Q2\"]," +
             "\"series\":[{\"name\":\"营收\",\"values\":[120,260]}],\"yLabel\":\"万元\",\"heightMm\":170} / " +
             "{\"type\":\"code\",\"language\":\"csharp\",\"code\":\"var x = 1;\"} / " +
@@ -97,7 +99,7 @@ public static class BuiltinPdfSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-15.2";
+    public const string Version = "2026-09-18.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

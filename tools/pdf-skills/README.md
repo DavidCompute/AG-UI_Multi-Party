@@ -106,7 +106,7 @@
 | `callout` | `kind`(info\|warn\|success\|danger), `title`, `text` | 高亮框：左侧色条 + 浅底 |
 | `quote` | `text`, `cite` | 引用：左侧强调条 + 斜体 + 出处右对齐 |
 | `table` | `headers[]`, `rows[][]`, `caption` | 表头填强调色 + 隔行浅底 + 跨页自动重绘表头 |
-| `image` | `path`, `caption`, `widthMm` | PNG/JPEG（PDFsharp 原生支持）；缺失/不支持会报可读错误 |
+| `image` | `path` 或 `imageQuery`, `caption`, `widthMm` | `path` = 服务器本地文件；`imageQuery` = 从平台「图库」语义检索自动配图。两者都只嵌 **PNG/JPEG**（PDFsharp 原生支持）；`path` 缺失会报错，`imageQuery` 取不到则**跳过该块**并在 `warnings` 说明 |
 | `chart` | `chartType`(bar\|line\|pie\|doughnut), `title`, `categories[]`, `series[{name,values[]}]`, `yLabel`, `heightMm`, `caption` | **矢量绘制**，不进位图 |
 | `code` | `code`, `language` | 浅底代码块，跨页续框，右上角语言标 |
 | `divider` | — | 细分割线 |
@@ -225,8 +225,31 @@ SkiaSharp 依赖**原生二进制**（`libSkiaSharp.so` 等），而平台的技
 ### 图片嵌入
 
 图片用 `XImage.FromStream(...)`，PDFsharp 6.2 原生支持 **PNG**（内置 `ImportedImagePng`/BigGustave）
-与 **JPEG**，无需额外包。测试里实证了一张 PNG 被嵌入（PDF 内可见 `/Subtype /Image`）。
-文件缺失 / 格式不支持会给可读错误。
+与 **JPEG**，无需额外包。测试里实证了一张 PNG 被嵌入（PDF 内可见 `/Subtype/Image`）。
+文件缺失会给可读错误。
+
+### 图库配图（`imageQuery`）
+
+除 `path` 外还可以写 `imageQuery`（如 `{"type":"image","imageQuery":"城市天际线 黄昏"}`）：
+从平台「图库」（用户自己上传的图片，语义检索）取一张嵌入，**不依赖外网**。链路：
+
+1. 平台在调用文档技能前，按**触发者本人可读的图库**（岗位**绑定了就只用绑定的**）登记一个「检索范围句柄」，
+   把 `imageScopeId` 注入技能入参；聊天（单聊/知聚/编排）、技能库「试运行」、桌面宿主直跑三条路径都注入；
+2. 技能带句柄回环调 `POST /ag-ui/images/search`（进程内自令牌 `AGUI_SELF_TOKEN`，启动时注入），
+   拿回**服务器本地路径**；
+3. 技能直接嵌入该文件。
+
+技能**只带句柄、不自报图库 ID**：入参是模型生成的，若能自报 ID 就能越权读别人的图。
+该端点也只对自令牌返回路径（登录用户只拿元数据）。
+
+**两个刻意的差异（与 docx / pptx 不同）**：
+
+- **只走图库**，没有 Wikimedia 回落（要真照片请用 PPT 技能）；
+- **只嵌 PNG/JPEG**，所以候选里只挑这两类：只命中 WebP 时会**跳过该块**并在 `warnings` 里
+  明说“建议换成 PNG/JPEG”（不硬塞 —— 那会生成打不开的 PDF，比少一张图糟得多）。
+
+取不到图（无图库 / 库内无匹配 / 格式不对）一律**跳过该块 + 记 `warnings`**，不会让整份 PDF 出不来
+（回归：`ImageQueryResolveTests`，用假平台端点把整条回环链路真跑一遍）。
 
 ## 落盘与下载
 
@@ -321,7 +344,8 @@ dotnet test tests/AguiGroupChat.Hub.Tests/AguiGroupChat.Hub.Tests.csproj --nolog
 1. **预置 using 不含 `System.IO`** —— 平台 Preamble 只给 `System`/`Linq`/`Text.Json`/`Net.Http` 等。
    用到 `Path`/`Directory`/`File` 必须自己写 `using System.IO;`（本文件已含）。
 2. **入口必须是 `public static string Run(string input)`**（同步，不支持 `Task<string>`）。
-3. **10 秒执行上限 & 12,000 字符输出上限** —— 超时只计 `Run` 执行，不含还原与编译；
+3. **执行上限与 12,000 字符输出上限** —— 超时只计 `Run` 执行，不含还原与编译；
+   内置文档类技能是 **60 秒**（`Agents:BuiltinSkillTimeoutMs`），自建 .NET 技能是 10 秒；
    技能只返回路径与摘要，不回灌正文。本技能带目录时要**渲染两趟**（先测页号再正式渲染），
    长文档请留意这点。
 4. **`dotnet` 技能仅管理员可建，且一律强制人工审批**（平台安全策略）。

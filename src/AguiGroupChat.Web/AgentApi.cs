@@ -38,7 +38,7 @@ public static class AgentApi
         });
 
         // ---- 新增智能体（需登录）----
-        root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentSkillCatalog skillCatalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
+        root.MapPost("/", (AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, ImageLibraryCatalog imageLibs, GroupHub hub, AgentSkillCatalog skillCatalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -60,6 +60,9 @@ public static class AgentApi
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库（防跨用户检索他人私密知识库）
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
+            // 图库归属校验（同一道门）：只能绑定自己读得到的图库，防把他人私密图库绑上来取图
+            var imgError = ValidateImageLibraryAccess(req, imageLibs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
+            if (imgError is not null) return imgError;
             // 桥接端点 SSRF 防护：创建时即校验 scheme / 内网地址（空 = 不用桥接；网关调用时还会二次校验）；
             // 桥接端点会把服务端作为内网代理并携带令牌，仅系统管理员可配置
             if (!string.IsNullOrWhiteSpace(req.BridgeEndpoint))
@@ -127,7 +130,7 @@ public static class AgentApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
-        root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
+        root.MapPut("/{agentId}", async (string agentId, AgentUpsertHttpRequest req, HttpContext ctx, AuthService auth, AgentCatalog catalog, KnowledgeBaseCatalog kbs, ImageLibraryCatalog imageLibs, GroupHub hub, AgentRegistry registry, CancellationToken ct, AgentSkillCatalog skillCatalog, AguiGroupChat.Agents.UserGroups.UserGroupStore ugStore) =>
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
@@ -151,6 +154,9 @@ public static class AgentApi
             // 知识库归属校验：只能绑定系统级/自己/所属共享群/管理员可读的知识库
             var kbError = ValidateKbAccess(req, kbs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
             if (kbError is not null) return kbError;
+            // 图库归属校验（同一道门）
+            var imgError = ValidateImageLibraryAccess(req, imageLibs, user.UserId, MemberGroupIds(hub, user.UserId), auth.IsAdmin(user.UserId));
+            if (imgError is not null) return imgError;
             // 桥接端点 SSRF 防护：编辑时同样校验（空 = 沿用 / 清除；网关调用时还会二次校验）；
             // 桥接端点仅系统管理员可配置（新增或变更端点时校验，纯清除不限制）
             if (!string.IsNullOrWhiteSpace(req.BridgeEndpoint))
@@ -594,6 +600,7 @@ public static class AgentApi
         d.OwnerId,
         d.Skills,
         d.KnowledgeBaseIds,
+        d.ImageLibraryIds,
         d.RequireApprovalToolNames,
         d.Pipeline,
         d.RelayToAgentId,
@@ -651,6 +658,25 @@ public static class AgentApi
         return null;
     }
 
+    /// <summary>图库绑定归属校验（与知识库同一道门）：每个 ImageLibraryId 必须存在，
+    /// 且调用者被允许读取（系统级 / 自己 / 管理员 / 所属共享群成员）。</summary>
+    private static IResult? ValidateImageLibraryAccess(AgentUpsertHttpRequest req, ImageLibraryCatalog libs, string userId, IReadOnlySet<string>? memberGroupIds, bool isAdmin)
+    {
+        var ids = req.ImageLibraryIds
+            ?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList();
+        if (ids is null || ids.Count == 0) return null;
+        foreach (var id in ids)
+        {
+            var lib = libs.GetLibrary(id);
+            if (lib is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"图库不存在：{id}"));
+            if (!libs.CanRead(lib, userId, memberGroupIds, isAdmin))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "不能绑定未共享给你的图库（仅系统级 / 自己 / 所属共享群 / 管理员可绑定）"),
+                    statusCode: StatusCodes.Status403Forbidden);
+        }
+        return null;
+    }
+
     private static AgentDefinition BuildDefinition(string agentId, AgentUpsertHttpRequest req, string? existingToken = null, string? ownerId = null)
     {
         var mode = Enum.TryParse<AgentTriggerMode>(req.TriggerMode, true, out var m)
@@ -676,6 +702,7 @@ public static class AgentApi
             OwnerId = ownerId,
             Skills = BuildSkills(req.Skills),
             KnowledgeBaseIds = req.KnowledgeBaseIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [],
+            ImageLibraryIds = req.ImageLibraryIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [],
             RequireApprovalToolNames = req.RequireApprovalToolNames
                 ?.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim()).Distinct().ToList() ?? [],
             Pipeline = BuildPipeline(req.Pipeline),
@@ -930,6 +957,7 @@ public sealed record AgentUpsertHttpRequest(
     bool? IsPrivate = null,
     IReadOnlyList<AgentSkillHttpRequest>? Skills = null,
     IReadOnlyList<string>? KnowledgeBaseIds = null,
+    IReadOnlyList<string>? ImageLibraryIds = null,
     IReadOnlyList<string>? RequireApprovalToolNames = null,
     IReadOnlyList<AgentPipelineStepHttpRequest>? Pipeline = null,
     string? RelayToAgentId = null,

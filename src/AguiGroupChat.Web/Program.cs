@@ -99,6 +99,7 @@ app.MapAttachmentApi(); // 附件上传 / 下载（消息附件）
 app.MapLinkProxyApi(); // 链接代理：智能体回复中的 http/https 链接由 Hub 代访后返回前端
 app.MapExportImportApi(); // 数据导出 / 导入：账号 + 智能体 + 聊天记录（含附件）
 app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
+app.MapImageLibraryApi(); // 图库：上传图片 + 语义检索（文档技能配图不依赖外网）
 app.MapSkillApi(); // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
 app.MapClientToolBridgeApi(); // 客户端执行技能的 shell 本机桥（登录用户执行，沙箱 + 超时）
 app.MapNativeTunnelApi(); // 内网本机桥反向隧道入口（HTTP/SSE）：桥连入 + 结果回传
@@ -123,6 +124,7 @@ app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 E
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();
 app.Services.RegisterKnowledgeBasePersistence();
+app.Services.RegisterImageLibraryPersistence();
 app.Services.RegisterSkillPersistence(); // 技能库（可复用技能定义）跨重启保持
 app.Services.RegisterOrgTeamPersistence(); // 内置组织角色“多支各留最新”窄映射跨重启保持
 app.Services.RegisterUserGroupsPersistence(); // 用户分组目录跨重启保持（细粒度授权数据）
@@ -149,6 +151,8 @@ AgentHosting.RegisterAgentTriggerRules(
     app.Services.GetRequiredService<GroupHub>(),
     app.Services.GetRequiredService<AgentOptions>());
 
+// 应用就绪后发布平台自调用端点（技能 → 平台图库检索）：技能与平台同进程，经环境变量拿到回环地址与令牌
+app.Lifetime.ApplicationStarted.Register(() => SelfApi.Publish(app));
 // 应用就绪后启动定时任务调度器（智能体 Schedule cron 到点触发）
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AgentScheduler>().Start());
 // 应用就绪后启动桥接端点健康度周期探测（3.1）
