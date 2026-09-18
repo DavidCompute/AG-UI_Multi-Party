@@ -218,6 +218,33 @@ public sealed class ImageLibraryTests
         Assert.Single(hits);
     }
 
+    /// <summary>
+    /// 关键词兜底**不得**在零词面重叠时也召回。
+    ///
+    /// <para>
+    /// 钉住一个真实 bug：<see cref="AguiGroupChat.Agents.Bm25Ranker.Score"/> 是 sigmoid 归一化，
+    /// 零重叠也返回 0.5；而兜底原本写的是“bm25 &gt; 0 才算命中” → 等于不筛，
+    /// 于是<b>任何</b>查询都能把整个图库以 0.5 分召回：表现为“无意义关键词也配上了一张任意照片”，
+    /// 并且 minScore 形同虚设（0.5 &gt; 默认 0.25）。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Search_KeywordRecall_IgnoresZeroOverlap()
+    {
+        var (catalog, store, _) = NewCatalog();
+        var lib = catalog.CreateLibrary("公司图库", "", "user_1");
+        await AddImageAsync(catalog, lib.LibId, "people.png", "年度优秀员工颁奖合影，舞台红毯，五个人举着奖杯");
+        store.VectorSearchReturnsEmpty = true;   // 向量这条路空手，只剩关键词兜底
+
+        // 毫无词面交集的查询：不该“命中”任何图
+        var hits = await catalog.SearchAsync([lib.LibId], "qzxv-不存在-9987", topK: 3, minScore: 0.25);
+        Assert.Empty(hits);
+
+        // 真有词面交集的查询：兜底仍然要能把它捞回来（别把功能一起修没了）
+        var real = await catalog.SearchAsync([lib.LibId], "颁奖合影", topK: 3, minScore: 0.9);
+        Assert.Single(real);
+    }
+
     [Fact]
     public async Task Search_ScopedToOneLibrary()
     {

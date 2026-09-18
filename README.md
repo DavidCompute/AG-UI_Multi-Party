@@ -411,6 +411,7 @@ apiKey 不回显（仅提示是否已配置）。未配置过模型时，登录�
 由服务端提取文本注入模型上下文（Word 取正文与表格段落、Excel 按工作表输出单元格、PowerPoint 取幻灯片文本、PDF 逐页提取；单文件截断 12K 字符），
 `image` 类（png / jpg / jpeg / gif / webp / bmp）在**图片理解（视觉）**开启时由服务端按字节 + MIME 读取，以 base64 多模态内容内联喂给视觉模型看图作答（`mock` 提供方 / 关闭 `Agents:VisionEnabled` 则仅按文本处理）；其余 `binary` 类携带文件名 / 大小 / 下载地址供模型感知。
 上传文件落盘 `data/uploads/`（与持久化快照同根，Docker 命名卷一并持久化），单文件上限 20 MB、单次最多 9 个；旧格式 `.doc` / `.xls` / `.ppt` 不在支持范围，请另存为 OOXML 或 PDF 后上传。
+**技能产物**（我们自己生成的文件）走单独的上限 **64 MB**，并带一道可诊断性保障：超限 / 扩展名不在白名单 / 文件为空时不挂到对话，但会打 **Warning** 日志（以前这里是 Debug 级 + 静默 continue，于是“回复说文件生成了、对话里却没有下载入口”在线上根本查不到——实测踩到 21MB / 31MB 两份 PPT）。
 **安全加固**：上传仅允许白名单扩展名（图片 png/jpg/jpeg/gif/webp/bmp；音频（语音消息）mp3/wav/ogg/oga/m4a/aac/flac/opus/webm；文本 txt/md/json/csv/xml/yaml/toml 等；文档 pdf/docx/xlsx/pptx；zip），可执行 / 内联渲染脚本类 html/js/mjs/css/svg 等一律拒绝，防止同源存储型 XSS；
 下载需登录且调用者须为该附件所属群的成员，响应带 `X-Content-Type-Options: nosniff`，脚本类扩展名强制 `Content-Disposition: attachment` 下载（不内联渲染）；
 页面全局 CSP（`script-src 'self'` 等）+ `X-Frame-Options: DENY`。

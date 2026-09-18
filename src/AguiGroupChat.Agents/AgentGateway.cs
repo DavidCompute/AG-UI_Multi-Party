@@ -3605,11 +3605,25 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     continue;
                 }
                 var fi = new FileInfo(path);
-                if (fi.Length <= 0 || fi.Length > AttachmentStore.MaxFileBytes) { _logger.LogDebug("produce_file 尺寸超限：{Path}", path); continue; }
+                if (fi.Length <= 0)
+                {
+                    _logger.LogWarning("produce_file 是空文件，未挂到对话：{Path}", path);
+                    continue;
+                }
+                // 产物**不是**用户上传件，所以用更宽的上限（带插图的稿子天然大）。
+                // 超限必须**报出来**：以前这里是 Debug 级 + 静默 continue，
+                // 于是“回复里说有文件、对话里却没有下载卡片”，线上完全查不到原因（实测踩到 21MB / 31MB 两份 PPT）。
+                if (fi.Length > AttachmentStore.MaxProducedFileBytes)
+                {
+                    _logger.LogWarning("produce_file 超过产物上限（{Bytes} 字节 > {Max} MB），未挂到对话：{Path}",
+                        fi.Length, AttachmentStore.MaxProducedFileBytes / 1024 / 1024, path);
+                    continue;
+                }
                 var name = fi.Name;
                 AttachmentInfo info;
                 using (var fs = File.OpenRead(path))
-                    info = _attachmentStore.Save(name, GuessContentType(name), fs, fi.Length);
+                    info = _attachmentStore.Save(name, GuessContentType(name), fs, fi.Length,
+                        AttachmentStore.MaxProducedFileBytes);
                 _logger.LogInformation("技能产物入库为附件：{Att}（{Name}，{Bytes} 字节）", info.AttachmentId, name, fi.Length);
 
                 await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [info], ct);

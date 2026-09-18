@@ -537,7 +537,11 @@ public sealed class ImageLibraryCatalog
             foreach (var it in store.ListMessages(ImgGroupPrefix + libId, null, null, cap, 0))
             {
                 var bm25 = Bm25Ranker.Score(query, it.Content);
-                if (bm25 <= 0.0) continue;
+                // 必须用“> 零重叠基准分”判定真有词面命中：Score() 是 sigmoid 归一化，
+                // **零词面重叠也返回 0.5**（sigmoid(0)）。原先写的是“> 0”，等于不筛 ——
+                // 于是任何查询都会把整个图库以 0.5 分召回：表现为“无意义关键词也配上了一张任意照片”、
+                // 而且 minScore 形同虚设（0.5 > 默认 0.25）。
+                if (bm25 <= Bm25Ranker.ZeroOverlapScore) continue;
                 if (BuildHit(lib, it.MessageId, bm25) is { } h) scored.Add(h);
             }
         }

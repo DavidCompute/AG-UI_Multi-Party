@@ -61,6 +61,17 @@ public static partial class Bm25Ranker
             yield return run.ToString(i, 2);
     }
 
+    /// <summary>零词面重叠时的分值（sigmoid(0) = 0.5）。
+    ///
+    /// <para>
+    /// 这个基准值对<b>融合排序</b>（<see cref="FusedScore"/>）是有用的中性起点，
+    /// 但“关键词召回兜底”那类场景下必须用<b>“&gt; 此值”</b>来判定“真有词面命中”——
+    /// 写成“&gt; 0”就等于不筛（零重叠也返回 0.5），会把全库内容以 0.5 分当成命中。
+    /// 实测踩到：图库检索里无意义关键词也能“命中”任意图片，知识库里任何提问都能“命中”上百条不相干切片。
+    /// </para>
+    /// </summary>
+    public const double ZeroOverlapScore = 0.5;
+
     /// <summary>对 query 与一段 text 计算简化 BM25 分数并经 Sigmoid 归一化到 [0,1]。</summary>
     public static double Score(string query, string text)
     {

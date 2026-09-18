@@ -219,6 +219,33 @@ public sealed class KnowledgeBaseTests
         Assert.Contains(hits, h => h.Content.Contains("专享福利假", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// 关键词兜底**不得**在零词面重叠时也召回。
+    ///
+    /// <para>
+    /// 钉住一个真实 bug：<see cref="AguiGroupChat.Agents.Bm25Ranker.Score"/> 是 sigmoid 归一化，
+    /// 零重叠也返回 0.5；而兜底原本写的是“bm25 &gt; 0” → 等于不筛，
+    /// 于是任何提问都把全库最近 120 条切片当成“关键词命中”，把无关内容当引用塞进 RAG 上下文。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Search_KeywordRecall_IgnoresZeroOverlap()
+    {
+        var text = "员工手册：报销流程需在费用发生后 15 日内提交，附发票与审批单。\n年假按入职年限计算。";
+        var (catalog, store, kbId, attId) = SetupKb(text);
+        var (doc, _) = await catalog.AddDocumentAsync(kbId, attId);
+        await catalog.WaitForDocumentAsync(doc!.DocId);
+        store.VectorSearchReturnsEmpty = true;   // 只剩关键词兜底
+
+        // 毫无词面交集的提问：不该命中任何切片
+        var none = await catalog.SearchAsync([kbId], "qzxv-不存在-9987", topK: 3, minScore: 0.9);
+        Assert.Empty(none);
+
+        // 真有词面交集的提问：兜底仍要能捞回来
+        var hits = await catalog.SearchAsync([kbId], "报销流程", topK: 3, minScore: 0.9);
+        Assert.Contains(hits, h => h.Content.Contains("报销", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task RemoveDocument_DeletesVectors()
     {

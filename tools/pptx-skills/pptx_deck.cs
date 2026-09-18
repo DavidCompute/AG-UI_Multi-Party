@@ -1690,10 +1690,92 @@ public class Skill
         /// </summary>
         public string AddImage(byte[] bytes)
         {
-            var part = AddPartOfDetectedType(bytes);
-            using var ms = new MemoryStream(bytes);
+            var prepared = PrepareImageBytes(bytes);
+            var part = AddPartOfDetectedType(prepared);
+            using var ms = new MemoryStream(prepared);
             part.FeedData(ms);
             return Part.GetIdOfPart(part);
+        }
+
+        /// <summary>嵌入前要不要瘦身的字节阀值：小于它的原样用（不重编）。</summary>
+        private const int ImageSlimBytes = 1_200_000;
+
+        /// <summary>嵌入图片的单边像素上限（1920 已超过 16:9 满屏所需）。</summary>
+        private const int ImageMaxPx = 1920;
+
+        /// <summary>已瘦身结果的缓存（同一张图会嵌到多页，不必反复解码重编）。</summary>
+        [ThreadStatic] private static Dictionary<string, byte[]>? _slimCache;
+
+        /// <summary>
+        /// 嵌入前给位图“瘦身”：最长边压到 1920px，照片重编为 JPEG q85（可能带透明通道的保 PNG）。
+        ///
+        /// <para>
+        /// 为何要做：图库里的图是**原图**——一张 12MP 手机照就是 3~12MB，四张就能把 .pptx 顶到 21~31MB，
+        /// 而平台对附件有大小上限，超了的产物**挂不到对话里**：用户看到的是“回复说文件生成了、
+        /// 对话里却没有下载入口”（实测踩到 21.3MB / 31.2MB 两份）。而幻灯片根本用不到那么大。
+        /// </para>
+        ///
+        /// <para>已经够小的原样返回；重编反而更大的也用原图；解码失败不阻断出稿（当原图用）。</para>
+        /// </summary>
+        private static byte[] PrepareImageBytes(byte[] bytes)
+        {
+            if (bytes.Length <= ImageSlimBytes) return bytes;
+            try
+            {
+                _slimCache ??= new Dictionary<string, byte[]>(StringComparer.Ordinal);
+                // 指纹用“长度 + 头 32 字节”：同一张图会嵌到多页，命中缓存就不必反复解码重编
+                var key = bytes.Length + ":" + Convert.ToHexString(bytes.AsSpan(0, Math.Min(32, bytes.Length)));
+                if (_slimCache.TryGetValue(key, out var hit)) return hit;
+
+                byte[] result;
+                using (var img = Image.Load(bytes))
+                {
+                    var max = Math.Max(img.Width, img.Height);
+                    if (max > ImageMaxPx)
+                    {
+                        var scale = (double)ImageMaxPx / max;
+                        img.Mutate(x => x.Resize(Math.Max(1, (int)Math.Round(img.Width * scale)),
+                                                 Math.Max(1, (int)Math.Round(img.Height * scale))));
+                    }
+                    using var ms = new MemoryStream();
+                    // 只有**真的用了透明度**才保 PNG：图库里很多是“截图 / 照片型 PNG”，
+                    // 按容器格式一律保 PNG 的话 1920px 的照片仍有 3MB —— 等于没瘦（实测踩到 3.7MB 的 PNG 未被压小）。
+                    if (MayHaveAlpha(bytes) && HasTransparency(img)) img.SaveAsPng(ms);
+                    else img.SaveAsJpeg(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 85 });
+                    var slim = ms.ToArray();
+                    result = slim.Length < bytes.Length ? slim : bytes;
+                }
+                _slimCache[key] = result;
+                return result;
+            }
+            catch { return bytes; }
+        }
+
+        /// <summary>可能带透明通道的格式（PNG/GIF/BMP）：还得再看真用没用（见 HasTransparency）。</summary>
+        private static bool MayHaveAlpha(byte[] b)
+            => IsPng(b)
+            || (b.Length > 3 && b[0] == (byte)'G' && b[1] == (byte)'I' && b[2] == (byte)'F')
+            || (b.Length > 2 && b[0] == (byte)'B' && b[1] == (byte)'M');
+
+        /// <summary>逐像素查是否真的存在 A&lt;255。只有“真的透明”才保 PNG —— 否则照片型 PNG 瘦不下来。</summary>
+        private static bool HasTransparency(Image img)
+        {
+            try
+            {
+                using var rgba = img.CloneAs<Rgba32>();
+                var found = false;
+                rgba.ProcessPixelRows(acc =>
+                {
+                    for (var y = 0; y < acc.Height && !found; y++)
+                    {
+                        var row = acc.GetRowSpan(y);
+                        for (var x = 0; x < row.Length; x++)
+                            if (row[x].A < 255) { found = true; break; }
+                    }
+                });
+                return found;
+            }
+            catch { return true; }   // 查不了就当有透明（宁可大一点也不丢透明）
         }
 
         /// <summary>
@@ -4602,6 +4684,20 @@ public class Skill
     private const string SelfTokenEnv = "AGUI_SELF_TOKEN";
     private const int LibrarySearchTimeoutSec = 10;
 
+    /// <summary>
+    /// 图库检索的分数门槛（传给平台 <c>/ag-ui/images/search</c> 的 <c>minScore</c>）。
+    ///
+    /// <para>
+    /// 为何要显式指定：平台默认 0.25 太松，而实测（公司生活照库 18 张，bge-m3）无意义关键词的
+    /// 最高分能到 <b>0.44~0.55</b>（“qzxv-不存在-9987”→2Vivi.png 0.4412；“一只在雪地里的猫”→0.5475），
+    /// 而真实命中是 <b>0.62~0.84</b>（“团队协作 会议”→0.8225、“城市 日落”→0.8411）。
+    /// 用 0.25 就会把不相干的人物照当作“命中”嵌进幻灯片 —— 比降级成题图差得多。
+    /// </p>
+    ///
+    /// <para>阈值以下不静默：走降级路径并报 warnings（关键词写出来，用户能自己改词重试）。</para>
+    /// </summary>
+    private const double LibraryMinScore = 0.60;
+
     /// <summary>是否允许联网取图（imageSource=library 时彻底不出网，内网部署用）。</summary>
     private static bool NetworkImagesAllowed
         => !string.Equals(_imageSource, "library", StringComparison.OrdinalIgnoreCase);
@@ -4704,7 +4800,8 @@ public class Skill
             return null;
         }
 
-        var body = "{\"query\":" + Js(query) + ",\"scopeHandle\":" + Js(scope!) + ",\"topK\":3}";
+        var body = "{\"query\":" + Js(query) + ",\"scopeHandle\":" + Js(scope!) + ",\"topK\":3,\"minScore\":"
+                 + LibraryMinScore.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}";
         var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, LibrarySearchTimeoutSec, out why);
         if (json is null) return null;
 

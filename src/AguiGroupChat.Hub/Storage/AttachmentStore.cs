@@ -12,8 +12,20 @@ namespace AguiGroupChat.Hub.Storage;
 /// </summary>
 public sealed class AttachmentStore
 {
-    /// <summary>单文件大小上限（20 MB）。</summary>
+    /// <summary>单文件大小上限（20 MB）—— <b>用户上传</b>的上限（不可信输入，从严）。</summary>
     public const long MaxFileBytes = 20 * 1024 * 1024;
+
+    /// <summary>
+    /// <b>技能产物</b>（我们自己生成的文件）的大小上限（64 MB）：比上传宽松。
+    ///
+    /// <para>
+    /// 为何不与上传同一个值：产物不是不可信输入，而**带插图的稿子天然就大** ——
+    /// 实测一份 19 页、4 张图库照片的 PPT 是 21MB、另一份 31MB。
+    /// 以前两者共用 20MB，超过一点点的产物就**静默**不挂到对话里，
+    /// 用户看到的现象是“回复说文件生成了、却没有下载入口”（而且那处判定只打 Debug 日志，线上查不到）。
+    /// </para>
+    /// </summary>
+    public const long MaxProducedFileBytes = 64 * 1024 * 1024;
 
     /// <summary>
     /// 允许上传的扩展名白名单（大小写不敏感）：图片 + 文本 / 办公文档 / 压缩包。
@@ -77,11 +89,12 @@ public sealed class AttachmentStore
         Directory.CreateDirectory(_root);
     }
 
-    /// <summary>保存上传文件，返回附件元信息。</summary>
-    public AttachmentInfo Save(string fileName, string contentType, Stream content, long size)
+    /// <summary>保存上传文件，返回附件元信息（<paramref name="maxBytes"/> 可放宽产物路径的上限）。</summary>
+    public AttachmentInfo Save(string fileName, string contentType, Stream content, long size,
+        long maxBytes = MaxFileBytes)
     {
-        if (size > MaxFileBytes)
-            throw new InvalidOperationException($"附件大小超过上限（{MaxFileBytes / 1024 / 1024} MB）");
+        if (size > maxBytes)
+            throw new InvalidOperationException($"附件大小超过上限（{maxBytes / 1024 / 1024} MB）");
         var safeName = SanitizeFileName(fileName);
         var id = "att_" + IdGenerator.NewId();
         var dir = Path.Combine(_root, id);

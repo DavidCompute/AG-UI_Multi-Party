@@ -597,7 +597,10 @@ public sealed class KnowledgeBaseCatalog
             foreach (var it in items)
             {
                 var bm25 = Bm25Ranker.Score(query, it.Content);
-                if (bm25 <= 0.0) continue; // 无任何查询词命中，跳过（避免大量弱相关噪音）
+                // “> 零重叠基准分”才是“真有词面命中”：Score() 零重叠也返回 0.5（sigmoid(0)），
+                // 写“> 0”等于不筛 —— 那样任何提问都会把全库最近 120 条切片当成“关键词命中”，
+                // 既抬高无关内容在答案里的噪声，又让“词面命中”这个信号失去意义。
+                if (bm25 <= Bm25Ranker.ZeroOverlapScore) continue;
                 scored.Add(new KbHit(kbId, kb.Name, it.SenderId, it.Content, bm25));
             }
         }
