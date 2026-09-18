@@ -27,8 +27,9 @@
 //     "subtitle": "副标题",                     // 可选
 //     "author": "作者/团队",                    // 可选
 //     "date": "2026-09",                       // 可选
-//     "theme": "business|tech|warm|minimal|dark|vivid",   // 可选，历史主题（默认 business）
+//     "theme": "business|tech|warm|minimal|dark|vivid",   // 可选，历史主题（老面孔，样式弱）
 //              // 或 18 套命名调色板（推荐，按场景挑），详见下方 PALETTES
+//              // 不写 = business-authority（命名调色板里最稳的一套）
 //     "style": "sharp|soft|rounded|pill",                  // 可选，版式风格，默认 soft
 //     "fontPair": "georgia-calibri",                       // 可选，命名字体配对（只换拉丁字面）
 //     "fontCjk": "微软雅黑",                                // 可选，东亚字体（汉字走它）
@@ -371,11 +372,24 @@ public class Skill
 
     [ThreadStatic] private static Theme? _currentTheme;
 
+    /// <summary>
+    /// 未指定 <c>theme</c> 时的默认调色板。
+    ///
+    /// <para>
+    /// 以前默认落到历史主题 business（白底 + 金强调）：那是改造前的老面孔，
+    /// 而且金色在白底上对比度只有 2.41——强调线/徽标本来就弱。改成一整套命名调色板后，
+    /// 默认出稿的层级（近白底 + 深藏青标题 + 鲜明红强调 + 石板蓝卡片）明显更好。
+    /// <b>显式写 theme:"business" 仍然得到原来那套</b>（历史主题的观感不变）。
+    /// </para>
+    /// </summary>
+    private const string DefaultTheme = "business-authority";
+
     private static Theme ResolveTheme(JsonElement root)
     {
-        var t = LegacyTheme((Str(root, "theme") ?? "business").Trim().ToLowerInvariant())
-            ?? FromPalette((Str(root, "theme") ?? "business").Trim().ToLowerInvariant())
-            ?? LegacyTheme("business")!;
+        var requested = (Str(root, "theme") ?? DefaultTheme).Trim().ToLowerInvariant();
+        var t = LegacyTheme(requested)
+            ?? FromPalette(requested)
+            ?? FromPalette(DefaultTheme)!;
         // themeColors 覆盖（逐项）
         if (root.TryGetProperty("themeColors", out var tc) && tc.ValueKind == JsonValueKind.Object)
         {
@@ -501,12 +515,20 @@ public class Skill
 
     /// <summary>
     /// 把调色板的 5 个色值分成角色：最深=primary（标题），最亮=bg（底色），
-    /// 最花=accent（强调线/徽标），次亮=light（卡片底），secondary 取 primary 的浅色版以形成层级。
+    /// 最花=accent（强调线/徽标），light=卡片面（见 <see cref="CardSurface"/>），
+    /// secondary 取 primary 的中间调以形成层级。
     ///
     /// <para>
     /// 最后统一过一道<b>可读性兜底</b>：调色板里难免有“很浅的次要色”或“很亮的黄”，
     /// 直接用会出现看不清的字。宁可把颜色调暗/调亮，也不能出现看不清——这条由
     /// 单测 <c>PptxDeckSkillTests.AllPalettes_KeepTextReadable</c> 对 18 套逐对断言。
+    /// </para>
+    ///
+    /// <para>
+    /// <b>为何调色都在 HSL 空间做</b>：原先的可读性兜底是“往黑/白里混”（sRGB 线性混色），
+    /// 会把鲜艳色洗成土色 —— 实测 vibrant-orange-mint 的 FF9F1C（鲜明橙）被洗成 CC7F16（脏芥末），
+    /// modern-wellness 的 E29578 被洗成 B57760（灰褐）。现在只改 HSL 的亮度、保色相与饱和（必要时抬饱和），
+    /// 调出来是“同色相更深/更浅的一版”，而不是另一种脏颜色。
     /// </para>
     /// </summary>
     private static Theme DeriveTheme(string c1, string c2, string c3, string c4, string c5, bool dark)
@@ -516,28 +538,194 @@ public class Skill
         var t = new Theme();
         if (dark)
         {
-            t.Bg = byLum[0]; t.Primary = byLum[4]; t.Light = byLum[1];
+            t.Bg = byLum[0];
+            t.Primary = byLum[4];
             t.Text = "E8ECF1";
+            // 深色主题的“面”：调色板里比底色亮一点、又还在暗部的那个（如 tech-night 的 003566），
+            // 没有就按主色合成一层暗调。
+            // 注：这里不能用 Chroma 筛（深色算出来的彩度几乎都是 1.0，筛不出东西）。
+            t.Light = all.Where(c => c != t.Bg && c != t.Primary && RelLum(c) <= 0.20)
+                         .OrderByDescending(RelLum).FirstOrDefault()
+                      ?? FromHsl(Hue(t.Primary), Math.Clamp(ToHsl(t.Primary).S * 0.35, 0.06, 0.30), 0.15);
         }
         else
         {
             // 底色必须是“面”，不能是个饱和色：实测 education-charts 的最亮色是
             // E9C46A（亮黄），直接当底色会做出一张黄底幻灯片。这里把彩度压下来。
             t.Bg = Surface(byLum[4]);
-            t.Primary = byLum[0]; t.Light = byLum[3];
-            t.Text = "333333";
+            // 标题色宁深勿浅（7:1 是正文级 AAA），但不把鲜艳色洗成灰
+            t.Primary = EnsureContrastHsl(byLum[0], t.Bg, 7.0, minSat: 0.22);
         }
-        // secondary：primary 往底色方向混一点，形成「主/次」层级（两个模式下方向都正确）
-        t.Secondary = EnsureContrast(Mix(t.Primary, t.Bg, 0.25), t.Bg, 3.0);
-        t.Accent = EnsureContrast(AccentFor(all, t.Bg, t.Primary), t.Bg, 3.0);
-        // 强调色同时是“色块底”（页码徽标/序号圆）：必须至少一种文字色能在它上面读清楚。
-        // 实测踩到：不调的话像 BC6C25 / CC7F16 这种中间调，白字 3.9、黑字 4.4，两边都不达标。
-        t.Accent = EnsureReadableUnder(t.Accent, 4.5);
-        t.Text = EnsureContrast(t.Text, t.Bg, 4.5);
-        t.Primary = EnsureContrast(t.Primary, t.Bg, 4.5);
+
+        // 强调色：在底色上看得见 + 能承载小字 + 与主色分得开（三条底线，见 PickAccent）
+        t.Accent = PickAccent(all, t.Bg, t.Primary);
+        // 卡片 / 面板底：与底色同族的一层“面”，不能拿调色板里随便一个中间调
+        if (!dark) t.Light = CardSurface(all, t);
+        // 副标题 / 次要标签：主色的干净中间调
+        t.Secondary = SecondaryOf(t);
+        // 正文色：跟主色同一色相的近黑（不是死灰），再保证 7:1
+        t.Text = EnsureContrastHsl(BodyInk(t), t.Bg, 7.0);
+
         t.OnAccent = OnColor(t.Accent, t.Bg);
         t.OnPrimary = EnsureContrast(t.Light, t.Primary, 3.0);
         return t;
+    }
+
+    /// <summary>
+    /// 卡片 / 面板底：**不能是调色板里随便一个中间调**。
+    ///
+    /// <para>
+    /// 实测：education-charts 的次亮色是 F4A261（橙）、art-food 是 E09F3E（琥珀）、
+    /// nature-outdoors 是 DDA15E（茶色）—— 直接拿去铺卡片，整份稿子就是一片橙/茶色色块，观感很廉价。
+    /// 所以只收“像个面”的候选：彩度够低（≤0.30）且与底色能看出层次（≥1.08）；
+    /// 一个都没有（或层次太弱）就按主色合成一层淡调（保住色相、压到 5~14% 饱和）。
+    /// </para>
+    /// </summary>
+    private static string CardSurface(string[] all, Theme t)
+    {
+        var picked = all.Where(c => c != t.Bg && c != t.Primary && c != t.Accent)
+            .Where(c => Chroma(c) <= 0.30 && Contrast(c, t.Bg) >= 1.08)
+            .OrderByDescending(RelLum).FirstOrDefault();
+        if (picked is { } p) return p;
+        var (h, s, _) = ToHsl(t.Primary);
+        var tint = s <= 0.06
+            ? FromHsl(0, 0, 0.95)
+            : FromHsl(h, Math.Clamp(s * 0.26, 0.05, 0.14), 0.95);
+        return Contrast(tint, t.Bg) >= 1.08 ? tint : Mix(t.Bg, t.Primary, 0.10);
+    }
+
+    /// <summary>副标题 / 次要标签色：主色的“干净中间调”（保色相、亮度提到中间），并保证在底色上 ≥3。</summary>
+    private static string SecondaryOf(Theme t)
+    {
+        var (h, s, _) = ToHsl(t.Primary);
+        if (s <= 0.06) return EnsureContrastHsl(Mix(t.Primary, t.Bg, 0.35), t.Bg, 3.0);
+        return EnsureContrastHsl(FromHsl(h, Math.Clamp(s * 0.90, 0.20, 0.65), 0.48), t.Bg, 3.0, minSat: 0.20);
+    }
+
+    /// <summary>正文色：跟主色同一色相的近黑（H 不动、饱和压到 5~12%）。比死板的 333333 更有主题感，又不抢标题。</summary>
+    private static string BodyInk(Theme t)
+    {
+        var (h, s, _) = ToHsl(t.Primary);
+        return s <= 0.06 ? "1F1F1F" : FromHsl(h, Math.Clamp(s * 0.35, 0.05, 0.12), 0.16);
+    }
+
+    /// <summary>
+    /// 挑强调色：必须同时满足三条 —— ① 在底色上看得见（≥3）；② 能承载小字（黑或白 ≥4.5，页码徽标就是小字）；
+    /// ③ 与主色分得开（≥2.2，否则强调线/序号圆就糊在主色里）。
+    ///
+    /// <para>
+    /// 优先用调色板里“色相与主色拉开 40° 以上”的颜色（按艳度排序）；都不合格就退到主色的补色，
+    /// 保证任意一套调色板都能得到一条看得见的强调线。
+    /// </para>
+    ///
+    /// <para>
+    /// 为何不分开做“先保证可见、再保证承载字”：实测踩到 —— 只为了“黑字能读”把强调色提亮，
+    /// 它在浅底色上直接消失了（nature-outdoors 的琥珀被提成 E9BA90，对底色对比只剩 1.68）。
+    /// 三条必须<b>同时</b>成立，且只做最小改动。
+    /// </para>
+    /// </summary>
+    private static string PickAccent(string[] all, string bg, string primary)
+    {
+        var pool = all.Where(c => c != bg && c != primary).ToList();
+        if (pool.Count == 0) pool = all.ToList();
+        var ph = Hue(primary);
+        // 先看“色相与主色拉开”再看艳度，但**不是第一个合格就用**：
+        // 实测踩到 vintage-academic：最深的 780000 稍徽改一点就合格（990000），
+        // 于是拿到一个与深蓝主色几乎一样暗的暗红斑；而稍不艳一点的 C1121F 明显更好看。
+        // 所以把所有“能修合格”的候选都评一遍，取艳度高、与主色分得开的那个。
+        var ordered = pool
+            .OrderByDescending(c => (HueDistance(Hue(c), ph) >= 40 ? 1 : 0) * 100 + Chroma(c) * 60)
+            .ToList();
+        string? bestAccent = null;
+        var bestScore = double.MinValue;
+        foreach (var c in ordered)
+        {
+            var fixedAccent = FixAccent(c, bg, primary);
+            if (!IsUsableAccent(fixedAccent, bg, primary)) continue;
+            var score = Vividness(fixedAccent)
+                + Math.Min(Contrast(fixedAccent, primary), 6.0) * 0.10
+                // 同色相但明暗不同也算“看得出区别”，但不如色相拉开：所以给“色相拉开”更高的权重，
+                // 否则会出现“青底青强调色”这种把调色板的点色丢掉的结果（modern-wellness / coastal-coral）。
+                + (HueDistance(Hue(fixedAccent), ph) >= 40 ? 0.25 : 0);
+            if (score > bestScore) { bestScore = score; bestAccent = fixedAccent; }
+        }
+        if (bestAccent is not null) return bestAccent;
+        // 兜底：主色补色（色相 +150°、高饱和），保证与主色一定分得开
+        var l = ToHsl(primary).L < 0.5 ? 0.58 : 0.42;
+        return FixAccent(FromHsl(ph + 150, 0.72, l), bg, primary);
+    }
+
+    /// <summary>艳度（0~1）：既远离灰、也远离纯黑/纯白 —— 中亮度的饱和色最像“点色”。</summary>
+    private static double Vividness(string hex)
+    {
+        var (_, s, l) = ToHsl(hex);
+        return s * (1 - Math.Abs(2 * l - 1));
+    }
+
+    /// <summary>强调色的三条底线是否同时成立。</summary>
+    private static bool IsUsableAccent(string accent, string bg, string primary)
+        => Contrast(accent, bg) >= 3.0
+        && Math.Max(Contrast(accent, "FFFFFF"), Contrast(accent, "1A1A1A")) >= 4.5
+        && AccentSeparated(accent, primary);
+
+    /// <summary>
+    /// 强调色与主色是否“看得出不是同一个色”：明暗拉开 2.2 以上；
+    /// 色相已经拉开 40° 以上时 1.5 就够（一条蓝强调线在深橄榄主色上，本来就认得出来）。
+    /// </summary>
+    private static bool AccentSeparated(string accent, string primary)
+    {
+        var c = Contrast(accent, primary);
+        return c >= 2.2 || (HueDistance(Hue(accent), Hue(primary)) >= 40 && c >= 1.5);
+    }
+
+    /// <summary>
+    /// 把颜色微调成合格强调色：保色相、只动亮度（必要时抬饱和）。
+    ///
+    /// <para>
+    /// 亮度按 <b>1% 细扫</b>、取“改动最小”的合格解：实测粗步长（4%）会直接跨过那唯一的可行区间，
+    /// 于是退到补色，出现“深蓝底上的荧光绿”这种离谱强调色（soft-creative：底色偏浅又压着极深的主色，
+    /// 可行区间只剩很窄一段）。一个合格解都没有时，取“违规最小”的那个，而不是原样返回一个
+    /// 对底色几乎不可见的颜色。
+    /// </para>
+    /// </summary>
+    private static string FixAccent(string color, string bg, string primary)
+    {
+        if (IsUsableAccent(color, bg, primary)) return color;
+        var (h, _, l) = ToHsl(color);
+        // 目标饱和度从**感知彩度**（max-min/max）推，而不是直接用 HSL 饱和度：
+        // 浅色（如 FFDDD2）的 HSL 饱和度是 1.0，照它降亮度会把一个柔和色调变成荧光橙。
+        // 这样鲜艳的源色仍然鲜艳、柔和的源色仍然柔和（各套调色板的“性格”得以保留）。
+        var sat = Math.Clamp(Chroma(color) * 1.15, 0.35, 0.95);
+        string? exact = null;    // 完全合格、且改动最小的解
+        string? best = null;     // 没有合格解时“违规最小”的退而求其次
+        var exactShift = double.MaxValue;
+        var bestShift = double.MaxValue;
+        var bestViolation = double.MaxValue;
+        for (var tgt = 0.08; tgt <= 0.921; tgt += 0.01)
+        {
+            var cand = FromHsl(h, sat, tgt);
+            var shift = Math.Abs(tgt - l);
+            if (IsUsableAccent(cand, bg, primary))
+            {
+                if (shift < exactShift) { exactShift = shift; exact = cand; }
+                continue;
+            }
+            var v = AccentViolation(cand, bg, primary);
+            if (v < bestViolation - 1e-9 || (Math.Abs(v - bestViolation) <= 1e-9 && shift < bestShift))
+            { bestViolation = v; bestShift = shift; best = cand; }
+        }
+        return exact ?? best ?? color;
+    }
+
+    /// <summary>强调色违规量（三条底线差多少）：用于“找不到完全合格解时选最接近的那个”。</summary>
+    private static double AccentViolation(string accent, string bg, string primary)
+    {
+        var v = Math.Max(0, 3.0 - Contrast(accent, bg));
+        v += Math.Max(0, 4.5 - Math.Max(Contrast(accent, "FFFFFF"), Contrast(accent, "1A1A1A")));
+        var sep = Contrast(accent, primary);
+        var sepOk = AccentSeparated(accent, primary);
+        if (!sepOk) v += Math.Max(0, (HueDistance(Hue(accent), Hue(primary)) >= 40 ? 1.5 : 2.2) - sep);
+        return v;
     }
 
     /// <summary>
@@ -587,7 +775,9 @@ public class Skill
         return sb.ToString();
     }
 
-    /// <summary>把 fg 朝黑/白方向调，直到与 bg 的对比度达标（WCAG）。</summary>
+    /// <summary>把 fg 朝黑/白方向调，直到与 bg 的对比度达标（WCAG）。
+    /// 注：这是 sRGB 线性混色，会把鲜艳色洗淡；<b>调色板路径一律用 <see cref="EnsureContrastHsl"/></b>，
+    /// 这个只保留给历史主题与 themeColors 覆盖用（观感要与改造前一致）。</summary>
     private static string EnsureContrast(string fg, string bg, double min)
     {
         if (Contrast(fg, bg) >= min) return fg;
@@ -620,6 +810,89 @@ public class Skill
     private static string OnColor(string bg, string preferred)
         => Contrast(preferred, bg) >= 4.5 ? preferred
          : (Contrast("FFFFFF", bg) >= Contrast("1A1A1A", bg) ? "FFFFFF" : "1A1A1A");
+
+    // ---- 颜色工具（HSL：改亮度但保色相/饱和 —— sRGB 混色会把鲜艳色洗成土色）----
+
+    /// <summary>HEX → HSL（H 0~360，S/L 0~1）。灰阶 H 返回 0。</summary>
+    private static (double H, double S, double L) ToHsl(string hex)
+    {
+        var c = RgbOf(hex);
+        double r = c[0] / 255.0, g = c[1] / 255.0, b = c[2] / 255.0;
+        var mx = Math.Max(r, Math.Max(g, b));
+        var mn = Math.Min(r, Math.Min(g, b));
+        var l = (mx + mn) / 2.0;
+        var d = mx - mn;
+        if (d < 1e-9) return (0, 0, l);
+        var s = l > 0.5 ? d / (2.0 - mx - mn) : d / (mx + mn);
+        double h;
+        if (mx == r) h = ((g - b) / d) % 6;
+        else if (mx == g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h *= 60;
+        if (h < 0) h += 360;
+        return (h, s, l);
+    }
+
+    /// <summary>HSL → HEX（各分量自动夹到合法区间）。</summary>
+    private static string FromHsl(double h, double s, double l)
+    {
+        h = ((h % 360) + 360) % 360;
+        s = Math.Clamp(s, 0, 1);
+        l = Math.Clamp(l, 0, 1);
+        var c = (1 - Math.Abs(2 * l - 1)) * s;
+        var x = c * (1 - Math.Abs((h / 60.0) % 2 - 1));
+        var m = l - c / 2;
+        double r, g, b;
+        if (h < 60) { r = c; g = x; b = 0; }
+        else if (h < 120) { r = x; g = c; b = 0; }
+        else if (h < 180) { r = 0; g = c; b = x; }
+        else if (h < 240) { r = 0; g = x; b = c; }
+        else if (h < 300) { r = x; g = 0; b = c; }
+        else { r = c; g = 0; b = x; }
+        string B(double v) => ((int)Math.Round(Math.Clamp(v + m, 0, 1) * 255)).ToString("X2");
+        return B(r) + B(g) + B(b);
+    }
+
+    /// <summary>
+    /// 只调亮度（保色相/饱和）直到与底色的对比度达标 —— 调出来是“同色相更深/更浅的一版”。
+    ///
+    /// <para>
+    /// <paramref name="minSat"/> 只在原色<b>本来就带色</b>时抬高饱和：否则给纯黑/纯灰（如
+    /// platinum-white-gold 的 0A0A0A）硬加饱和色相，会把“黑白金”那套的标题染成暗红。
+    /// </para>
+    /// </summary>
+    private static string EnsureContrastHsl(string fg, string bg, double min, double minSat = 0)
+    {
+        if (Contrast(fg, bg) >= min) return fg;
+        var (h, s, l) = ToHsl(fg);
+        if (s > 0.06 && s < minSat) s = minSat;
+        var dir = RelLum(bg) > 0.5 ? -1 : 1;   // 底色亮 → 把前景压暗；底色暗 → 往前景抬亮
+        for (var step = 1; step <= 24; step++)
+        {
+            var nl = l + dir * step * 0.035;
+            if (nl < 0 || nl > 1) break;
+            var cand = FromHsl(h, s, nl);
+            if (Contrast(cand, bg) >= min) return cand;
+        }
+        return dir < 0 ? "000000" : "FFFFFF";
+    }
+
+    /// <summary>
+    /// 强调色要承载小字（页码徽标）：黑或白至少一个达到 min。
+    /// 在 HSL 里试几个亮度（先试“变浅”——深色字压上去更清楚），而不是 sRGB 混黑。
+    /// </summary>
+    private static string EnsureReadableUnderHsl(string color, double min)
+    {
+        double Best(string c) => Math.Max(Contrast(c, "FFFFFF"), Contrast(c, "1A1A1A"));
+        if (Best(color) >= min) return color;
+        var (h, s, _) = ToHsl(color);
+        foreach (var tgt in new[] { 0.74, 0.68, 0.80, 0.60, 0.54, 0.48, 0.42, 0.36, 0.30 })
+        {
+            var c = FromHsl(h, Math.Max(s, 0.55), tgt);
+            if (Best(c) >= min) return c;
+        }
+        return EnsureReadableUnder(color, min);
+    }
 
     /// <summary>彩度（HSI 意义上的饱和度）：用来挑“最花”的那个色做强调色。</summary>
     private static double Chroma(string hex)
@@ -2142,7 +2415,8 @@ public class Skill
     private static string Footnote(string text, SlideCtx ctx)
     {
         var t = ctx.Theme;
-        var color = IsDarkBg(t) ? t.Light : "7A7A7A";
+        // 深色主题下 Light 是“面”（很深），拿来当字色会看不见 —— 保色相抬亮到能读
+        var color = IsDarkBg(t) ? EnsureContrastHsl(t.Light, t.Bg, 3.0, minSat: 0.10) : "7A7A7A";
         // 脚注常被用来放数据来源/补充说明，一长就会跑到页码徽标那一行：量高后缩/截断
         return FitBox(ctx.NextId(), MX, H - 1097280, CW - BadgeW - _m.Pad, Sz(457200),
             [T(text, 1100, color)], "脚注/图注");

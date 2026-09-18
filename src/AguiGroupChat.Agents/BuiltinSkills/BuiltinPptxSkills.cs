@@ -72,7 +72,7 @@ public static class BuiltinPptxSkills
             "art-food(美食/展览/复古)、luxury-mysterious(珠宝/酒店/高端咨询/心理)、" +
             "pure-tech-blue(云/AI/水务/洁净能源)、coastal-coral(旅行/夏日活动/饮品)、" +
             "vibrant-orange-mint(儿童活动/快消/社交媒体)、platinum-white-gold(金融科技/品牌官网)；" +
-            "也可用历史主题 business|tech|warm|minimal|dark|vivid；" +
+            "不写 theme 时默认 business-authority；也可用历史主题 business|tech|warm|minimal|dark|vivid（老面孔，样式弱一点）；" +
             "themeColors({primary,secondary,accent,light,bg,text}，可选，覆盖预设)、" +
             "fontPair(命名字体配对：yahei(默认)|georgia-calibri|cambria-calibri|calibri-light|" +
             "trebuchet-calibri|arial-black-arial|impact-arial|palatino-garamond|consolas-calibri；" +
@@ -173,7 +173,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-18.1";
+    public const string Version = "2026-09-18.2";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

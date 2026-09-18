@@ -490,11 +490,11 @@ public sealed class PptxDeckSkillTests
         var p = doc.RootElement.GetProperty("palette");
         string C(string k) => p.GetProperty(k).GetString()!;
 
-        // 正文 4.5（AA 标准正文），标题/副标题/强调线 3.0（大字号/非文本元素的 AA 阈值）
-        Assert.True(Contrast(C("text"), C("bg")) >= 4.5,
-            $"{palette}：正文色 {C("text")} 在底色 {C("bg")} 上对比度只有 {Contrast(C("text"), C("bg")):F2}");
-        Assert.True(Contrast(C("primary"), C("bg")) >= 4.5,
-            $"{palette}：主色 {C("primary")} 在底色 {C("bg")} 上对比度只有 {Contrast(C("primary"), C("bg")):F2}");
+        // 正文 / 标题 7:1（AAA 正文级）：幻灯片是投影/压图看的，4.5 只是及格线，看起来会发灰。
+        Assert.True(Contrast(C("text"), C("bg")) >= 7.0,
+            $"{palette}：正文色 {C("text")} 在底色 {C("bg")} 上对比度只有 {Contrast(C("text"), C("bg")):F2}（要求 ≥7）");
+        Assert.True(Contrast(C("primary"), C("bg")) >= 7.0,
+            $"{palette}：主色 {C("primary")} 在底色 {C("bg")} 上对比度只有 {Contrast(C("primary"), C("bg")):F2}（要求 ≥7）");
         Assert.True(Contrast(C("secondary"), C("bg")) >= 3.0,
             $"{palette}：副色 {C("secondary")} 在底色 {C("bg")} 上对比度只有 {Contrast(C("secondary"), C("bg")):F2}");
         Assert.True(Contrast(C("accent"), C("bg")) >= 3.0,
@@ -513,12 +513,32 @@ public sealed class PptxDeckSkillTests
         Assert.True(bgChroma <= 0.30 || bgLum <= 0.10,
             $"{palette}：底色 {C("bg")} 彩度 {bgChroma:F2}、亮度 {bgLum:F3}，不像背景色（应该接近白/黑）");
 
-        // 强调色必须与主色“看得出来不是同一个颜色”：色相拉开 或 明暗拉开。
+        // 强调色必须与主色“看得出来不是同一个颜色”：色相拉开 40° 且不比 1.5 更近，或明暗拉开 2.2。
         // 实测踩到：forest-eco 选出 3A5A40，与主色 344E41 色相差 4°、对比度 1.11，强调线等于白画。
         var apContrast = Contrast(C("accent"), C("primary"));
         var apHue = HueDistance(Hue(C("accent")), Hue(C("primary")));
-        Assert.True(apHue >= 30 || apContrast >= 2.0,
+        Assert.True(apContrast >= 2.2 || (apHue >= 40 && apContrast >= 1.5),
             $"{palette}：强调色 {C("accent")} 与主色 {C("primary")} 色相差 {apHue:F0}°、对比度 {apContrast:F2}，基本糊在一起");
+
+        // 卡片/面板底（light）必须是“面”：不能拿调色板里那个中间调饱和色直接铺（实测：
+        // education-charts 的橙 F4A261、art-food 的琥珀 E09F3E 铺满卡片，整份稿子一片色块，观感廉价）。
+        if (bgLum > 0.20)
+        {
+            Assert.True(Chroma(C("light")) <= 0.32,
+                $"{palette}：卡片面 {C("light")} 彩度 {Chroma(C("light")):F2} 偏高，看起来是一块颜色而不是一个面");
+            var surfaceContrast = Contrast(C("light"), C("bg"));
+            Assert.True(surfaceContrast >= 1.06 && surfaceContrast <= 3.2,
+                $"{palette}：卡片面 {C("light")} 与底色 {C("bg")} 对比度 {surfaceContrast:F2}，要么看不出卡片、要么太重");
+        }
+
+        // 主色不能是“发灰”的色：标题发灰是观感差的主要来源之一（近黑除外）。
+        if (RelLum(C("primary")) > 0.05)
+            Assert.True(Chroma(C("primary")) >= 0.15,
+                $"{palette}：主色 {C("primary")} 彩度 {Chroma(C("primary")):F2} 偏低，标题会发灰");
+
+        // 强调色要是“点色”，不是另一个灰。
+        Assert.True(Chroma(C("accent")) >= 0.35,
+            $"{palette}：强调色 {C("accent")} 彩度 {Chroma(C("accent")):F2} 偏低，做不了点色");
     }
 
     /// <summary>历史主题名必须继续可用（老调用方不能因为这次改造而产出变化/报错）。</summary>
