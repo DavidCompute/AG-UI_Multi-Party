@@ -48,7 +48,7 @@ public sealed class ImageQueryResolveTests
     {
         private readonly TcpListener _listener;
         private readonly Thread _thread;
-        private readonly string _response;
+        private readonly Func<string, string> _respond;
 
         private volatile string? _path;
         private volatile string? _tokenHeader;
@@ -58,10 +58,15 @@ public sealed class ImageQueryResolveTests
         public string? LastPath => _path;
         public string? LastTokenHeader => _tokenHeader;
         public string? LastBody => _body;
+        /// <summary>按时间顺序记下每一次请求体（验证“二次尝试”这类多次调用）。</summary>
+        public List<string> Bodies { get; } = [];
 
-        public FakeSelfApi(string response)
+        public FakeSelfApi(string response) : this(_ => response) { }
+
+        /// <summary>可依据请求体决定响应（验证“不同关键词给不同结果”这类场景）。</summary>
+        public FakeSelfApi(Func<string, string> respond)
         {
-            _response = response;
+            _respond = respond;
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
             BaseUrl = "http://127.0.0.1:" + ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -108,8 +113,9 @@ public sealed class ImageQueryResolveTests
             var bytes = all.ToArray();
             if (headEnd > 0 && need > 0 && bytes.Length - headEnd >= need)
                 _body = Encoding.UTF8.GetString(bytes, headEnd, need);
+            if (_body is { } captured) lock (Bodies) Bodies.Add(captured);
 
-            var payload = Encoding.UTF8.GetBytes(_response);
+            var payload = Encoding.UTF8.GetBytes(_respond(_body ?? ""));
             var head = Encoding.ASCII.GetBytes(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: "
                 + payload.Length + "\r\nConnection: close\r\n\r\n");
@@ -149,13 +155,18 @@ public sealed class ImageQueryResolveTests
         public void Dispose() => _listener.Stop();
     }
 
-    /// <summary>平台检索接口的成功响应（只有自令牌才拿得到的 path 字段在这里一定有）。</summary>
-    private static string ImagesJson(string path, string contentType, string caption = "团队会议 白板 讨论")
+    /// <summary>
+    /// 平台检索接口的成功响应（只有自令牌才拿得到的 path 字段在这里一定有）。
+    ///
+    /// <para>默认 score 用“可信命中”的量级（实测真实命中 0.84~0.88），
+    /// 这样默认路径只需一次检索；要验证“低分命中会被本页文字顶掉”时显式传低分。</para>
+    /// </summary>
+    private static string ImagesJson(string path, string contentType, string caption = "团队会议 白板 讨论", double score = 0.87)
         => JsonSerializer.Serialize(new
         {
             query = "团队会议",
             count = 1,
-            images = new[] { new { assetId = "asset_1", libId = "lib_1", libName = "宣传图库", fileName = Path.GetFileName(path), caption, contentType, score = 0.71, width = 4, height = 4, path } },
+            images = new[] { new { assetId = "asset_1", libId = "lib_1", libName = "宣传图库", fileName = Path.GetFileName(path), caption, contentType, score, width = 4, height = 4, path } },
         });
 
     private static string EmptyImagesJson() => JsonSerializer.Serialize(new { query = "x", count = 0, images = Array.Empty<object>() });
@@ -221,6 +232,24 @@ public sealed class ImageQueryResolveTests
             return doc;
         }
         finally { Environment.SetEnvironmentVariable("AGUI_PDF_OUT", null); }
+    }
+
+    private static string PptxSource() => BuiltinPptxSkills.Build("pptx_deck", "pptx_deck.skill.txt", "x", "x").Body!;
+
+    private static JsonDocument RunPptx(object payload, out string path)
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var result = NewHost("pptx").Run(PptxSource(), JsonSerializer.Serialize(payload), CancellationToken.None, 240_000);
+            Assert.DoesNotContain("编译失败", result);
+            var doc = ParseResult(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            path = doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+            return doc;
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
     }
 
     private static void WithSelfEndpoint(FakeSelfApi api, Action body)
@@ -490,6 +519,107 @@ public sealed class ImageQueryResolveTests
                 var warnings = PhotoWarnings(doc);
                 Assert.Single(warnings);
                 Assert.Contains("没有匹配的图片", warnings[0]);
+            }
+        });
+    }
+
+    /// <summary>
+    /// PPT：模型关键词取不到图时，要用**本页自己的文字**再查一次图库。
+    ///
+    /// <para>
+    /// 实测场景：图库里的描述就是人名（“刘佳俊”），而模型只知道“这页讲颁奖”，写的是
+    /// <c>imageQuery:"员工 颁奖 舞台"</c> → 不命中 → 以前直接降级成题图，用户看到的就是
+    /// “明明库里有这个人的图、PPT 上也写着他的名字，却没配上”。
+    /// </para>
+    ///
+    /// <para>这里用假平台端点模拟“通用词不命中、人名命中”，并断言两次请求真的都发了。</para>
+    /// </summary>
+    [Fact]
+    public void Pptx_ImageQuery_FallsBackToPageText()
+    {
+        var dir = TempDir();
+        var portrait = WriteTinyPng(dir, "liujiajun.png");
+        using var api = new FakeSelfApi(body =>
+            body.Contains("刘佳俊", StringComparison.Ordinal)
+                ? ImagesJson(portrait, "image/png", "刘佳俊")
+                : EmptyImagesJson());
+        WithSelfEndpoint(api, () =>
+        {
+            var payload = new
+            {
+                title = "颁奖典礼",
+                imageScopeId = "iscope_pptx_test",
+                slides = new object[]
+                {
+                    new { type = "image", title = "高效习惯优秀进步奖 · 刘佳俊", imageQuery = "员工 颁奖 舞台" },
+                },
+            };
+            var doc = RunPptx(payload, out var path);
+            using (doc)
+            {
+                // 第一次用模型给的关键词（不命中），第二次用本页文字（带人名，命中）
+                lock (api.Bodies)
+                {
+                    Assert.Equal(2, api.Bodies.Count);
+                    Assert.Contains("员工 颁奖 舞台", api.Bodies[0]);
+                    Assert.Contains("刘佳俊", api.Bodies[1]);
+                }
+                // 结果：真的嵌进去了，而且 images[] 里能看到用的是本页文字这条
+                using (var zip = ZipFile.OpenRead(path))
+                    Assert.Contains(zip.Entries, e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
+                var used = doc.RootElement.GetProperty("images");
+                Assert.Equal(1, used.GetArrayLength());
+                Assert.Equal("library", used[0].GetProperty("source").GetString());
+                Assert.Contains("刘佳俊", used[0].GetProperty("query").GetString());
+                // 配上图了就不能再报“已改用题图”（那是假消息）
+                var warnings = doc.RootElement.GetProperty("warnings").EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+                Assert.DoesNotContain(warnings, w => w.Contains("已改用自动生成的题图", StringComparison.Ordinal));
+            }
+        });
+    }
+
+    /// <summary>
+    /// PPT：图库命中的分很低时（只是刚刚过门槛），不该就这么算数 —— 要用<b>本页文字</b>再比一次，谁分高用谁。
+    ///
+    /// <para>
+    /// 实测就是这么翻车的：模型写“员工 颁奖 舞台”，图库那张合影靠描述里的“舞台/宴会厅”蹭到 0.6~0.7，
+    /// 于是配了一张不相干的合影；而本页写着“· 刘佳俊”，用它能直查到 0.88。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Pptx_ImageQuery_LowScoreLibraryHit_LosesToPageText()
+    {
+        var dir = TempDir();
+        var wrong = WriteTinyPng(dir, "family.png");
+        var right = WriteTinyPng(dir, "liujiajun.png");
+        using var api = new FakeSelfApi(body =>
+            body.Contains("刘佳俊", StringComparison.Ordinal)
+                ? ImagesJson(right, "image/png", "刘佳俊", 0.88)
+                : ImagesJson(wrong, "image/png", "一家三口在宴会厅合影，背景有舞台", 0.68));
+        WithSelfEndpoint(api, () =>
+        {
+            var payload = new
+            {
+                title = "颁奖典礼",
+                imageScopeId = "iscope_pptx_test",
+                slides = new object[]
+                {
+                    new { type = "image", title = "高效习惯优秀进步奖 · 刘佳俊", imageQuery = "员工 颁奖 舞台" },
+                },
+            };
+            var doc = RunPptx(payload, out var path);
+            using (doc)
+            {
+                // 两次检索：低分关键词一次、本页文字一次
+                lock (api.Bodies) Assert.Equal(2, api.Bodies.Count);
+                // 只用高分那张：落选的那张不该留在“用到的照片”清单里（否则清单在说谎）
+                var used = doc.RootElement.GetProperty("images");
+                Assert.Equal(1, used.GetArrayLength());
+                Assert.Equal("liujiajun.png", used[0].GetProperty("title").GetString());
+                Assert.Equal("刘佳俊", used[0].GetProperty("caption").GetString());
+                Assert.Contains("刘佳俊", used[0].GetProperty("query").GetString());
+                using var zip = ZipFile.OpenRead(path);
+                Assert.Contains(zip.Entries, e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
             }
         });
     }

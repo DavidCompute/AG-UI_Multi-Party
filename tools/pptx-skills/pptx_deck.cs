@@ -1019,6 +1019,7 @@ public class Skill
                 + ",\"images\":[" + string.Join(",", Photos.Select(p =>
                     "{\"query\":" + Js(p.Query) + ",\"source\":" + Js(p.Source) + ",\"title\":" + Js(p.FileName)
                     + ",\"library\":" + Js(p.LibraryName) + ",\"caption\":" + Js(p.Caption)
+                    + ",\"score\":" + p.Score.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
                     + ",\"author\":" + Js(p.Author) + ",\"license\":" + Js(p.License)
                     + ",\"page\":" + Js(p.PageUrl) + "}")) + "]"
                 // 原生图表用量与降级原因：调了却没用上必须说清楚，不能静默降级
@@ -4651,6 +4652,8 @@ public class Skill
         public string LibraryName = "";
         /// <summary>来自图库时的图片描述（视觉模型生成，方便校对“配得对不对”）。</summary>
         public string Caption = "";
+        /// <summary>平台检索给出的相似度得分（图库才有；网图记 0）—— 用于在多个候选间择优。</summary>
+        public double Score;
 
         /// <summary>「图片来源」页里的一行。顺序按“最该留住的排前面”：截断时先丢链接而不是先丢作者。</summary>
         public string CreditLine()
@@ -4716,16 +4719,31 @@ public class Skill
     }
 
     /// <summary>
-    /// 按关键词从 Wikimedia Commons 取一张可自由使用的照片，下载到本地缓存后返回。
-    /// 失败（无网络 / 无结果 / 格式不认）一律返回 null —— 调用方降级为题图并记 warning。
+    /// 取一张图：① 团队图库（自有素材，不需署名）→ ② Wikimedia Commons（可自由使用）。
+    /// 下载到本地缓存后返回；都取不到（无图库 / 无结果 / 无网络）返回 null —— 调用方降级为题图并记 warning。
+    ///
+    /// <para>
+    /// <paramref name="libraryOnly"/>：只查团队图库、不出网（用于 <see cref="ImagePathOf"/> 的二次尝试）。
+    /// <paramref name="label"/>：失败信息里这串字的叫法（模型给的叫“关键词”，本页文字就叫“本页文字”）。
+    /// <paramref name="warn"/>：没配上时的降级提示（<b>不写进 warnings</b>）—— 由调用方决定报不报：
+    /// 见 <see cref="ImagePathOf"/>，二次尝试配上图时就不能再报“已降级为题图”（那是假消息）。
+    /// </para>
     /// </summary>
-    private static Photo? ResolvePhoto(string query)
+    private static Photo? ResolvePhoto(string query, bool libraryOnly, string label, out string? warn)
     {
+        warn = null;
         var key = (query ?? "").Trim();
         if (key.Length == 0) return null;
         _photoCache ??= new Dictionary<string, Photo?>(StringComparer.OrdinalIgnoreCase);
-        if (_photoCache.TryGetValue(key, out var hit)) return hit;   // 命中缓存不受预算限制
-        if (_photoOffline) return null;
+        // 缓存键带上模式：
+        // “仅图库”试过的结果不能当作“图库+网络”的结果（否则同一串文字先被二次尝试缓存成 null，后面就不再联网了）
+        var cacheKey = (libraryOnly ? "L|" : "A|") + key;
+        if (_photoCache.TryGetValue(cacheKey, out var hit)) return hit;   // 命中缓存不受预算限制（提示已在首次报过）
+        // 离网标记只代表“外网取不到图”：团队图库走的是本机回环回调（不需要外网），
+        // 所以只要图库还可用，就不能因为这个标记直接放弃 —— 否则在无外网部署里，
+        // 第一页把标记置上之后，后续所有页连图库都不会再查了。
+        var allowNet = NetworkImagesAllowed && !libraryOnly && !_photoOffline;
+        if (!allowNet && !LibraryImagesAllowed) return null;
         if (_photoDeadline > 0 && Environment.TickCount64 > _photoDeadline)
         {
             if (!_photoBudgetWarned)
@@ -4748,8 +4766,10 @@ public class Skill
             }
             catch (Exception ex) { reasons.Add("图库：" + ex.GetType().Name + "：" + ex.Message); }
         }
-        // ② 库内没有（或没图库）→ 回落网络；imageSource=library 时彻底不出网
-        if (photo is null && NetworkImagesAllowed)
+        // ② 库内没有（或没图库）→ 回落网络；imageSource=library 时彻底不出网；
+        //    二次尝试（libraryOnly）不走网络：那是“用本页文字”的补充尝试，把中文页面文字丢给
+        //    Wikimedia 既不会有结果、也会白耗预算。
+        if (photo is null && allowNet)
         {
             try
             {
@@ -4758,7 +4778,7 @@ public class Skill
             }
             catch (Exception ex) { reasons.Add("网络：" + ex.GetType().Name + "：" + ex.Message); }
         }
-        else if (photo is null)
+        else if (photo is null && !libraryOnly && !NetworkImagesAllowed)
         {
             reasons.Add("已配置为仅用团队图库（imageSource=library），不联网取图");
         }
@@ -4766,14 +4786,14 @@ public class Skill
         if (photo is null)
         {
             var why = reasons.Count > 0 ? string.Join("；", reasons) : "未找到合适的图片";
-            Warn("配图检索未成功，已改用自动生成的题图：关键词“" + key + "”（" + why + "）【端点：" + PhotoEndpoint() + "】");
+            warn = "配图检索未成功，已改用自动生成的题图：" + label + "“" + key + "”（" + why + "）【端点：" + PhotoEndpoint() + "】";
             if (reasons.Any(r => r.Contains("无法连接", StringComparison.Ordinal))) _photoOffline = true;
         }
         else if (!Photos.Any(p => string.Equals(p.Path, photo.Path, StringComparison.OrdinalIgnoreCase)))
         {
             Photos.Add(photo);
         }
-        _photoCache[key] = photo;
+        _photoCache[cacheKey] = photo;
         return photo;
     }
 
@@ -4823,6 +4843,7 @@ public class Skill
                 LibraryName = Str(img, "libName") ?? "",
                 Caption = Str(img, "caption") ?? "",
                 Query = query,
+                Score = NumOf(img, "score", 0),
             };
         }
         why = "图库里没有匹配的图片";
@@ -5155,8 +5176,23 @@ public class Skill
         && ((b[0] == 0x49 && b[1] == 0x49 && b[2] == 0x2A) || (b[0] == 0x4D && b[1] == 0x4D && b[2] == 0x00));
 
     /// <summary>
-    /// 取本页要放的图的<b>本地路径</b>：显式 path 优先（文件存在才用）；
-    /// 否则用 imageQuery 去图库检索并下载。都没有（或检索失败）返回 null，由调用方降级。
+    /// 取本页要放的图的<b>本地路径</b>：显式 path 优先（文件存在才用）；否则用 imageQuery 检索。
+    ///
+    /// <para>
+    /// <b>二次尝试</b>：模型写的关键词取不到图时，改用<b>本页自己的文字</b>再查一次图库。
+    /// 为何需要：模型不知道图库里到底有什么 —— 实测图库描述常常就是<b>人名 / 产品名</b>
+    /// （“刘佳俊”“黄敏谊”），而模型只会写“员工 颁奖 舞台”这种通用词，于是永远配不上。
+    /// 而页面上往往就写着那个人名（“高效习惯优秀进步奖 · 刘佳俊”），与描述<b>词面</b>能对上
+    /// （靠关键词召回那条路，实测用名字直接检索能到 0.88）。
+    /// </para>
+    ///
+    /// <para>
+    /// <b>怎么选</b>：先按模型的关键词查（图库 → 网络）；如果图库那张不够可信
+    /// （低于 <see cref="LibraryConfidentScore"/>），再用本页文字查一次图库，<b>谁分高用谁</b>——
+    /// 图库命中永远优先于网图（自有素材优先）。都没有才降级为题图。
+    /// 二次尝试**只查图库不出网**（中文页面文字丢给 Wikimedia 不会有结果、还白耗预算）；
+    /// 配上图时不报 warning（报“已降级为题图”就是假消息），两次都没配上则两条原因都报出来。
+    /// </para>
     /// </summary>
     private static string? ImagePathOf(JsonElement el)
     {
@@ -5164,7 +5200,97 @@ public class Skill
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
         var q = ImageQueryOf(el);
         if (q.Length == 0) return null;
-        return ResolvePhoto(q)?.Path;
+        var first = ResolvePhoto(q, libraryOnly: false, label: "关键词", out var firstWarn);
+        var best = first;
+        // 二次尝试：见上方 summary。条件是“第一次没配上 / 只配到网图 / 图库那张不够可信”。
+        var pageText = PageTextOf(el);
+        string? altWarn = null;
+        if (pageText.Length >= 2 && !string.Equals(pageText, q, StringComparison.Ordinal)
+            && (best is null || best.Source != "library" || best.Score < LibraryConfidentScore))
+        {
+            var alt = ResolvePhoto(pageText, libraryOnly: true, label: "本页文字", out altWarn);
+            if (BetterPhoto(best, alt)) best = alt;
+            // 落选的候选从“用到的照片”里去掉，免得 images[] 里列着没进稿子的图
+            if (best is not null && first is not null && !ReferenceEquals(best, first)
+                && !string.Equals(best.Path, first.Path, StringComparison.OrdinalIgnoreCase))
+                Photos.Remove(first);
+        }
+
+        if (best is null)
+        {
+            // 两次都没配上：两条原因都报出来（只报关键词那条，会让人以为根本没试过本页文字）
+            if (firstWarn is not null) Warn(firstWarn);
+            if (altWarn is not null) Warn(altWarn);
+        }
+        return best?.Path;
+    }
+
+    /// <summary>
+    /// 图库命中的“可信分”。低于它时，会再拿<b>本页文字</b>查一次图库，谁分高用谁。
+    ///
+    /// <para>
+    /// 为何门槛不贴着 <see cref="LibraryMinScore"/>（0.6）：那是“能不能用”的底线，这条是“够不够确定”。
+    /// 实测图库自动生成的描述很长（含一堆“检索词：…”），通用词（“员工 颁奖 舞台”）也能靠“舞台/宴会厅”
+    /// 蹭过 0.6，配出来的是不相干的合影 —— 实测就碰上过。真实命中在 0.84 以上（人名直查）。
+    /// </para>
+    /// </summary>
+    private const double LibraryConfidentScore = 0.78;
+
+    /// <summary>两张候选谁更该用：自有素材优先于网图，同源则分高者胜（<paramref name="alt"/> 为空表示不换）。</summary>
+    private static bool BetterPhoto(Photo? cur, Photo? alt)
+    {
+        if (alt is null) return false;
+        if (cur is null) return true;
+        if (alt.Source == "library" && cur.Source != "library") return true;   // 自有素材优先
+        if (alt.Source != "library" && cur.Source == "library") return false;
+        return alt.Score > cur.Score;
+    }
+
+    /// <summary>
+    /// 本页自己的文字（标题 / 副标题 / 正文文字，上限 <see cref="PageTextMaxChars"/>）。
+    ///
+    /// <para>
+    /// 用于配图的二次尝试（见 <see cref="ImagePathOf"/>），也用于“人名是否能配上”这类场景。
+    /// 截断到 120 字：BM25 会把得分按查询词项数摊薄，文字太长反而糊掉真正关键的那个名字。
+    /// </para>
+    /// </summary>
+    private static string PageTextOf(JsonElement el)
+    {
+        var sb = new StringBuilder();
+        CollectText(el, sb);
+        var s = sb.ToString().Trim();
+        return s.Length <= PageTextMaxChars ? s : s[..PageTextMaxChars];
+    }
+
+    private const int PageTextMaxChars = 120;
+
+    /// <summary>递归收集页面文字；跳过结构化字段（type/layout/variant/path/imageQuery）免得把参数名当正文。</summary>
+    private static void CollectText(JsonElement el, StringBuilder sb)
+    {
+        if (sb.Length >= PageTextMaxChars) return;
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.String:
+                var v = el.GetString();
+                if (!string.IsNullOrWhiteSpace(v))
+                {
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(v!.Trim());
+                }
+                break;
+            case JsonValueKind.Object:
+                foreach (var p in el.EnumerateObject())
+                {
+                    if (p.NameEquals("imageQuery") || p.NameEquals("image_query") || p.NameEquals("path")
+                        || p.NameEquals("variant") || p.NameEquals("layout") || p.NameEquals("type")
+                        || p.NameEquals("imageSource") || p.NameEquals("imageScopeId")) continue;
+                    CollectText(p.Value, sb);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var it in el.EnumerateArray()) CollectText(it, sb);
+                break;
+        }
     }
 
     /// <summary>本页是否真的拿到了图（渲染前用它决定版式，避免“检索失败还占掉半页”）。</summary>
@@ -5185,6 +5311,10 @@ public class Skill
             try
             {
                 using var d = JsonDocument.Parse(pj);
+                // 先按“页面级”解析一次：版式决策（HasUsablePhoto）与渲染看到的是同一个结果，
+                // 二次尝试（用本页文字再查图库）也在这条路上生效。
+                ImagePathOf(d.RootElement);
+                // 页内嵌套的图（如 gallery 的 images[]）：每条用自己的文字解析
                 WalkImageQueries(d.RootElement);
             }
             catch { /* 解析不了就跳过：渲染阶段还会再试一次 */ }
@@ -5202,7 +5332,11 @@ public class Skill
                         && (p.NameEquals("imageQuery") || p.NameEquals("image_query")))
                     {
                         var q = (p.Value.GetString() ?? "").Trim();
-                        if (q.Length > 0) ResolvePhoto(q);
+                        if (q.Length > 0)
+                        {
+                            ResolvePhoto(q, libraryOnly: false, label: "关键词", out var wn);
+                            if (wn is not null) Warn(wn);
+                        }
                     }
                     else WalkImageQueries(p.Value);
                 }
