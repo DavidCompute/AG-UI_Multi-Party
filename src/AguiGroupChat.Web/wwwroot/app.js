@@ -3104,16 +3104,25 @@ function renderImgLibModal() {
     wrap.innerHTML = `<div class="kb-empty">${t(imgLibList.length ? "imgLib.noMatch" : "imgLib.noLib")}</div>`;
     return;
   }
-  const assetBadge = (a) => a.status === "processing"
-    ? `<span class="kb-status kb-status-proc">${t("imgLib.processing")}</span>`
-    : a.status === "error"
-      ? `<span class="kb-status kb-status-err" title="${escapeHtml(a.error || "")}">${t("kb.failed")}</span>`
-      : "";
+  // 向量化状态：**完成也要有明确提示** —— 以前只在处理中/失败时才有徐标，
+  // 用户无法判断“我改的描述到底生效了没、这张图能不能被匹配”。
+  const assetBadge = (a) => {
+    if (a.status === "processing")
+      return `<span class="kb-status kb-status-proc" title="${escapeHtml(t("imgLib.badge.procTip"))}">${t("imgLib.processing")}</span>`;
+    if (a.status === "error")
+      return `<span class="kb-status kb-status-err" title="${escapeHtml(a.error || "")}">${t("kb.failed")}</span>`;
+    // ready 但没描述：向量是“文件名 + 标签”的，检索几乎找不到 —— 这比“失败”更隐蔽，必须说出来
+    if (!(a.caption || "").trim())
+      return `<span class="kb-status kb-status-proc" title="${escapeHtml(t("imgLib.badge.noCapTip"))}">${t("imgLib.badge.noCap")}</span>`;
+    return `<span class="kb-status kb-status-ok" title="${escapeHtml(t("imgLib.badge.okTip"))}">${t("imgLib.badge.ok")}</span>`;
+  };
   visible.forEach((lib) => {
     const mine = lib.ownerId === state.memberId;
     const assets = lib.assets || [];
     const exp = imgLibExpanded.has(lib.libId);
     const hasProc = assets.some((a) => a.status === "processing");
+    // 收起时也能一眼看出“还有几张没就绪”（否则要把每张展开逐个看）
+    const notReady = assets.filter((a) => a.status !== "ready").length;
     let ops = `<button class="icon-btn imglib-expand" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.toggleImages")}" style="font-size:12px">${exp ? "▾" : "▸"}</button>`;
     if (mine) {
       ops += `<button class="chip-btn imglib-upload" data-lib="${escapeHtml(lib.libId)}" type="button" style="font-size:12px;padding:2px 8px">${t("imgLib.upload")}</button>`
@@ -3143,7 +3152,11 @@ function renderImgLibModal() {
     item.innerHTML = `
       <div class="kb-row">
         <div class="kb-name"><b>🖼️ ${escapeHtml(lib.name)}</b><code>${escapeHtml(lib.libId)}</code></div>
-        <div class="kb-stat">${hasProc ? `<span class="kb-status kb-status-proc">${t("imgLib.processing")}</span>` : ""}<span>${t("agent.form.imglib.count", { count: assets.length })}</span></div>
+        <div class="kb-stat">${hasProc
+          ? `<span class="kb-status kb-status-proc" title="${escapeHtml(t("imgLib.badge.procTip"))}">${t("imgLib.processing")}</span>`
+          : notReady > 0
+            ? `<span class="kb-status kb-status-proc" title="${escapeHtml(t("imgLib.badge.pendingTip"))}">${t("imgLib.badge.pending", { count: notReady })}</span>`
+            : ""}<span>${t("agent.form.imglib.count", { count: assets.length })}</span></div>
         <div class="kb-desc-cell"${lib.description ? ` title="${escapeHtml(lib.description)}"` : ""}>${escapeHtml(lib.description || "")}</div>
         <div class="kb-op-col">${ops}</div>
       </div>`
@@ -3258,9 +3271,13 @@ async function addImageAssets(libId, files) {
   startImgLibPolling();
 }
 
-/** 保存图片描述（改了会重新向量化 —— 检索依据就是描述）。 */
+/** 保存图片描述（改了会重新向量化 —— 检索依据就是描述）。
+ *
+ * <p>PUT 会在**向量化完成后**才返回（后端 `UpdateAssetAsync` 里 `await task`），
+ * 所以按钮上直接显示“向量化中…”：用户能明白这一下要等一下，且返回即可用。</p> */
 async function saveImageCaption(libId, assetId, caption, btn) {
-  if (btn) btn.disabled = true;
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = t("imgLib.vectorizing"); }
   try {
     const res = await fetch(`/ag-ui/image-libs/${libId}/assets/${assetId}`, {
       method: "PUT",
@@ -3273,7 +3290,7 @@ async function saveImageCaption(libId, assetId, caption, btn) {
     await loadImageLibs();
     startImgLibPolling();
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) { btn.disabled = false; btn.textContent = label || t("imgLib.saveCaption"); }
   }
 }
 
