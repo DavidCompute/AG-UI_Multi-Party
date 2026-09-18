@@ -1,3 +1,37 @@
+# AG-UI 群聊桌面版 1.0.146 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.146 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.146 把图库图片的**向量化状态**明明白白显示出来：以前只有“识别中/失败”才有徐标，一旦就绪就什么都不显示，用户无从判断“我改的描述到底生效了没、这张图能不能被匹配”。现在每张图都常驻一个状态：`⏳ 识别中…` / `✅ 已向量化` / `⚠ 仅按文件名匹配` / `❌ 失败`，图库行收起时也会提示「⚠ n 张未就绪」，保存描述时按钮显示「⏳ 向量化中…」（该请求要等重新向量化完成才返回，按钮恢复即可用）。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.146 makes an image's **vectorization state** visible. Previously a badge appeared only while processing or after a failure, so once an asset was ready nothing was shown and users could not tell whether a description edit had taken effect or whether the image could be matched at all. Every image now carries `⏳ Analyzing…` / `✅ Vectorized` / `⚠ Filename only` / `❌ Failed`; a collapsed library reports “n not ready”, and saving a description shows “⏳ Vectorizing…” (that request only returns once re-vectorization is done, so the button coming back is the completion signal). Web and desktop share the same Hub / gateway / frontend.
+
+## 图库：向量化完成/未完成都有提示（1.0.146）
+# Image library: vectorization status is now visible (1.0.146)
+
+中文：
+- **问题**：图片只有“⏳ 识别中…”与“❌ 失败”两种徐标，`ready` 时**什么都不显示**。
+  于是“改完描述到底生效了没”“这张图到底能不能被语义匹配上”只能靠猜。
+- **四种状态都常驻显示**（`assetBadge`，文案与悬浮说明走 i18n）：
+  | 状态 | 徐标 | 含义 |
+  |---|---|---|
+  | `processing` | ⏳ 识别中… | 正在写描述并向量化；**这期间这张图暂时搜不到** |
+  | `ready` 且有描述 | ✅ 已向量化 | 可被语义检索命中；改描述保存后立即重新向量化并覆盖旧向量 |
+  | `ready` 但无描述 | ⚠ 仅按文件名匹配 | 向量只含文件名/标签，实际找不到（未配置视觉模型时上传即此态）—— 提醒补描述 |
+  | `error` | ❌ 失败 | 悬浮看原因（如 embedding 不可用）；修好前不会被检索命中 |
+- **图库行**（收起态）有未就绪图片时显示 `⚠ n 张未就绪`，全部就绪则不显示（处理中时显示 `⏳ 识别中…`）—— 不用逐库展开也能看出进度。
+- **保存描述时按钮显示 `⏳ 向量化中…` 并禁用**：这个 PUT 在后端会 `await` 重新向量化（同一 assetId 覆盖写），所以按钮恢复＝新描述已生效。
+- **验证**：新增浏览器端到端脚本 `tools/ui-imglib-vector-status.mjs`（Playwright），真实图库**只读**，
+  所有写操作都在临时图库里做并在结束时删掉；实测覆盖：四种徐标均可见、上传后先「⏳ 识别中…」再「✅ 已向量化」、
+  行内“未就绪”提示的出现与消失、保存时按钮忙态、描述存空→「⚠ 仅按文件名匹配」，全部通过。
+
+English:
+- **Problem**: only “⏳ Analyzing…” and “❌ Failed” badges existed — a `ready` image showed nothing, so there was no way to tell whether an edited description had taken effect or whether the image could be matched at all.
+- **All four states are now always visible** (i18n text + tooltips): ⏳ Analyzing (and **unsearchable meanwhile**), ✅ Vectorized, ⚠ Filename only (ready but no description, so it will not be found; this is what an upload looks like with no vision model configured), ❌ Failed with the reason on hover.
+- **Collapsed library rows** report `⚠ n not ready` (and `⏳ Analyzing…` while processing), so progress is visible without expanding each library.
+- **Saving a description** shows a disabled “⏳ Vectorizing…” button: the PUT awaits re-vectorization server-side (upsert under the same assetId), so the button returning means the new description is live.
+- **Verified** by a new Playwright end-to-end script, `tools/ui-imglib-vector-status.mjs`. Real libraries are read-only; every write happens in a throwaway library it deletes at the end. Covered: all four badges render, upload goes Analyzing → Vectorized, the row-level “not ready” hint appears and clears, the save-button busy state, and empty description → “Filename only”. All passing.
+
+---
+
 # AG-UI 群聊桌面版 1.0.145 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.145 Release Notes (current Windows desktop release)
 
