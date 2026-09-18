@@ -1,3 +1,58 @@
+# AG-UI 群聊桌面版 1.0.144 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.144 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.144 为当前 Windows 桌面版本。这一版修的是**“东西明明生成了，你却拿不到 / 配错了”**两类问题：带插图的稿子超过附件上限后**静默不挂到对话**（表现为没有下载入口），以及**关键词召回兜底实际上没在筛**（无意义关键词也能“命中”任意图片、任何提问都能把全库切片当成 RAG 命中）。同时把 PPT 嵌入图片瘦身，避免稿子再撞上体积上限。
+**Version note**: 1.0.144 is the current Windows desktop release. It fixes two “it was produced but you never got it / got the wrong thing” problems: illustrated decks silently exceeding the attachment cap (so no download card appeared), and the keyword-recall fallback that never actually filtered (arbitrary images matched any keyword, and any question matched arbitrary knowledge-base chunks). Decks also slim embedded images now, so they stop hitting the size cap.
+
+## 产物挂不上对话 / 附件上限（1.0.144）
+# Attachments that never arrived (1.0.144)
+
+中文：
+- **现象**：单聊里数字员工说文件已生成，但对话里没有下载卡片 —— 有时有、有时没有。
+- **根因**：带插图的稿子把图库照片**按原图嵌入**（一张 12MP 手机照 3~12MB），四张就把 .pptx 顶到
+  **21.3MB / 31.2MB**，超过附件 20MB 上限 → 产物**不挂到对话**。而那条判定当时用 **Debug** 级日志 + 静默 `continue`，
+  线上完全看不到原因（实测那份 31MB 的稿子就是这样“消失”的）。
+- **修法（两头）**：
+  1. **技能侧瘦身**：嵌入前把图最长边压到 1920px、照片重编 JPEG q85；
+     **只有真的存在透明像素**才保 PNG（逐像素查 A&lt;255）—— 图库里很多“截图/照片型 PNG”，
+     按容器格式一律保 PNG 的话 1920px 仍有 3MB，等于没瘦（实测：3.7MB 的 PNG 未被压小）；
+     已经 ≤ 1.2MB 的图原样嵌（不重编、不丢像素）。
+  2. **平台侧上限与可诊断性**：产物走独立上限 **64MB**（产物是我们自己生成的文件，不是不可信上传件），
+     并且**超限/空文件/扩展名不在白名单一律打 Warning** —— 同样的错下次能一眼查到。
+- **并已找回本机那两份产物**（文件本体一直在服务器上，只是没挂到对话）：`dist/recovered/` 下。
+
+English:
+- **Symptom**: the employee says the file is ready, but no download card shows up — sometimes it does, sometimes it does not.
+- **Root cause**: illustrated decks embedded library photos **at original size** (one 12 MP phone shot is 3–12 MB), so four of them pushed a .pptx to **21.3 MB / 31.2 MB** — past the 20 MB attachment cap, so the file was never attached. That check logged at **Debug** and then silently `continue`d, making the cause invisible in production (that is how a 31 MB deck “vanished”).
+- **Fixed on both ends**: (1) the skill slims images before embedding — longest side 1920 px, photos re-encoded as JPEG q85, PNG kept **only when the pixels actually use transparency** (a 1920 px screenshot-style PNG stays 3 MB otherwise, so format-based decisions do not slim anything), and images already ≤ 1.2 MB pass through untouched; (2) produced files get their own **64 MB** cap (they are our own output, not untrusted uploads) and every skip is now a **Warning**.
+- **The two files from this machine were recovered** into `dist/recovered/` — they were always on the server, just never attached.
+
+## 关键词召回兜底其实没在筛（1.0.144）
+# The keyword fallback never filtered anything (1.0.144)
+
+中文：
+- **根因**：`Bm25Ranker.Score` 是 sigmoid 归一化，**零词面重叠也返回 0.5**（sigmoid(0)）；
+  而图库与知识库的“关键词召回兜底”都写的是 `if (bm25 <= 0) continue;` —— 等于不筛。
+- **影响**：任何查询都拿全库以 0.5 分召回，所以 ① `minScore` 形同虚设（0.5 &gt; 默认 0.25）；
+  ② 无意义关键词也能“命中”任意照片，于是 PPT 会把不相干的人物照当“配图”嵌进去；
+  ③ 知识库那边任何提问都能把全库最近 120 条切片当成“关键词命中”塞进 RAG 上下文。
+- **修法**：新增 `Bm25Ranker.ZeroOverlapScore`（=0.5）并注明语义，两处兜底改为 `<= ZeroOverlapScore` 跳过。
+  另外给 PPT 的图库检索显式设门槛 **minScore 0.6**（实测：无意义词 0.44~0.55，真实命中 0.62~0.84），
+  阈值以下**不静默**：降级为题图并报 warnings（关键词写出来，用户可自己改词重试）。
+- **关于“改了图片描述能不能按新描述匹配”**：能。已实测：把某图描述改成“紫罗兰色潜水艇在珊瑚礁间穿行”后，
+  用该词组检索命中它 **0.9073**（排第一），而旧描述短语不再强命中它。改描述会**重新向量化并按同一 assetId 覆盖**旧向量。
+- 测试：新增 4 个（大图瘦身 / 小图原样 / 图库与知识库的“零重叠不得召回”），全量 **1347 通过**；
+  另外用真实图库与真实模型跑了三项端到端验证（脚本 `tools/verify_image_recall_and_sizes.py`）。
+
+English:
+- **Root cause**: `Bm25Ranker.Score` is sigmoid-normalised, so **zero term overlap still returns 0.5** (sigmoid(0)), while both the image-library and knowledge-base keyword fallbacks tested `if (bm25 <= 0) continue;` — i.e. no filtering at all.
+- **Impact**: every query recalled the whole corpus at 0.5, so (1) `minScore` was meaningless (0.5 > the 0.25 default), (2) arbitrary photos “matched” nonsense keywords — a deck would paste an unrelated portrait as its illustration, and (3) in the knowledge base any question pulled the nearest 120 chunks into the RAG context as “keyword hits”.
+- **Fixed** by adding `Bm25Ranker.ZeroOverlapScore` (= 0.5) with documented semantics and using it in both fallbacks, plus an explicit **minScore 0.6** for the deck skill's library search (measured: nonsense keywords 0.44–0.55, real matches 0.62–0.84). Below the threshold nothing is silent — it degrades to generated art and reports a warning naming the keyword.
+- **On “does editing an image description affect matching?”** — yes. Verified live: after setting a caption to a nonsense-but-unique phrase, searching that phrase hits the image at **0.9073** (ranked first), and the old phrase no longer matches it. Editing re-vectorises and **overwrites** the vector under the same assetId.
+- Tests: 4 new cases (big image slimmed, small image untouched, and “zero overlap must not recall” for both the image library and the knowledge base), **1347 passing** in total, plus a live three-part end-to-end check (`tools/verify_image_recall_and_sizes.py`).
+
+---
+
 # AG-UI 群聊桌面版 1.0.143 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.143 Release Notes (current Windows desktop release)
 
