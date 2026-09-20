@@ -1,3 +1,48 @@
+# AG-UI 群聊桌面版 1.0.150 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.150 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.150 两件事：① 库设置弹窗里加了 **🔍 试检索**（用当前档位当场试一次，看到会召回哪些 + 分数与片段预览，调严格度不再靠猜；知识库与图库都可用）；② 修了一个**在试用时被它自己暴露的真 bug** —— **词面兜底与语义门槛不同量纲**：BM25 的 sigmoid 分零重叠就给 0.5，于是“只与文档共用一个常用词”的提问也看着像 0.54，比向量路给无关内容的分（~0.41）还高，**能盖过任何档位**（实测：问“公司食堂今天中午吃什么”、文档里恰好有“公司”二字 → 0.537，连“严格”都拦不住）。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.150 does two things: (1) the library-settings dialog gains **🔍 Test retrieval**, which runs the currently selected preset on the spot so you can see what it recalls (scores plus snippet previews) instead of guessing; (2) it fixes a **real bug the feature itself exposed** — the **word-overlap channel and the semantic gate were on different scales**: a BM25 sigmoid score returns 0.5 even with zero term overlap, so a question that merely *shares one common word* with a document also looks like 0.54, outranking what the vector channel gives to unrelated content (~0.41) and thus **beating every preset** (measured: asking “公司食堂今天中午吃什么” against a document containing “公司” → 0.537, which even “strict” could not stop).
+
+## 试检索 + 词面分与语义分对齐量纲（1.0.150）
+# Test retrieval, and putting BM25 on the same scale (1.0.150)
+
+中文：
+- **🔍 试检索**（库设置弹窗内，图库 / 知识库共用）：输入一句提问 / 关键词，用**当前选中的档位**当场检索，
+  列出命中项的**分数 + 文件名 + 片段预览**（片段截断 200 字），并回显“按当前档位（x）召回 n 条”；
+  换档位自动重测；重新打开弹窗清掉上次结果。端点：图库复用 `/ag-ui/images/search`（限定本库），
+  知识库新增 `POST /ag-ui/kb/{kbId}/search`（只回片段预览；门槛可临时指定＝“先试再存”；权限与“能不能读该库”一致）。
+- **真 bug：词面兜底与语义门槛不同量纲**。BM25 是 sigmoid 归一化，**零词面重叠也给 0.5**，
+  所以“只共用一个常用词”的无关提问会拿到 ~0.54，**看着比真实命中还高**，任何 `minScore` 都拦不住它。
+  实测（真实文档 + bge-m3，同一个知识库）：
+  | 查询 | 修正前接口分 | 纯向量分 |
+  |---|---|---|
+  | 真实提问（答案在文档里） | 0.7471 | 0.6987 |
+  | **只共用一个常用词**（“公司食堂今天中午吃什么”） | **0.537** | 0.4090 |
+  | 罕见号 ORION-7788 | 0.7087 | 0.4187 |
+  | 零词面交集 | 0.2754 | 0.2754 |
+- **修法**：词面命中先经 `Bm25Ranker.ToSimilarity`（零重叠 → 0，与余弦同量纲）再接一条**固定底线 0.35**
+  （不随库的严格度变 —— 这条路的职责是笛住向量表示不好的**罕罕见词 / 专有号**，不该被语义门槛一票否决）：
+  罕见号（换算后 0.417）仍能过 → 兜底没被修没；只共用一个常用词（0.074）→ 任何档位都不再算命中。
+- **实测验证**（`tools/verify_kb_strictness.py` + `tools/ui-kb-strictness.mjs`，均在临时库里做、结束删库）：
+  真实提问能召回；只共用常用词的提问在**严格档 0 条**（修正前是 1 条）；罕见号在**严格档仍召回**；
+  零词面交集时**接口分与 psql 独立计算完全一致**（0.2924 = 0.2924，证明向量路量纲没被改坏）；
+  界面：试检索能出结果、分数为 `\d.\d\d`、无关提问 0 条 + 解释文案、档位越严命中数不增、换档自动重测、
+  重新打开清空结果、`Esc` 关闭不穿透。
+- **修正一处旧说明**：1.0.148 / 1.0.149 的发布说明里写的“关键词词面命中不套这个门槛”**已被本版取代** ——
+  现在词面命中要换算量纲并过固定底线 0.35（回归：`Bm25SimilarityScaleTests` 四条）。
+- **测试**：新增 5 个（量纲换算 4 + 试检索端点 1），全量 **1369 通过**。
+
+English:
+- **🔍 Test retrieval** (inside the library-settings dialog, shared by image libraries and knowledge bases): type a question or keyword and it searches **with the currently selected preset**, listing each hit's **score + file name + snippet preview** (truncated to 200 chars) and reporting “at <preset>: n hit(s)”; changing the preset re-runs it and reopening the dialog clears stale results. Endpoints: image libraries reuse `/ag-ui/images/search` (scoped with `libraryIds`); knowledge bases gained `POST /ag-ui/kb/{kbId}/search` (snippet previews only; a temporary gate can be passed so you can try before saving; same read permission as the library).
+- **A real bug: BM25 and the semantic gate were on different scales.** BM25 is sigmoid-normalised, so **zero term overlap still returns 0.5** — a question that merely shares one common word gets ~0.54, *looking better than a real hit* and beating every `minScore`. Measured on real data (bge-m3, one knowledge base): real question **0.7471** vs vector-only 0.6987; **one shared common word 0.537** vs 0.4090; rare code `ORION-7788` 0.7087 vs 0.4187; no overlap 0.2754 both ways.
+- **Fix**: overlap hits are converted with `Bm25Ranker.ToSimilarity` (zero overlap → 0, same scale as cosine) and then must clear a **fixed floor of 0.35** (independent of the library's strictness, because that channel exists to rescue **rare terms / codes** the embedding handles poorly and should not be vetoed by a semantic gate): the rare code (0.417 after conversion) still passes — the rescue survives — while sharing a single common word (0.074) no longer counts at any preset.
+- **Verified live** (`tools/verify_kb_strictness.py` + `tools/ui-kb-strictness.mjs`, both on a throwaway knowledge base): a real question is recalled; the common-word question returns **0 chunks at strict** (it returned 1 before); the rare code is still recalled **even at strict**; and with no word overlap the **API score matches an independent psql computation exactly** (0.2924 = 0.2924, proving the vector scale was not disturbed). In the UI: the probe returns rows with `\d.\d\d` scores, an unrelated question yields 0 rows plus the explanatory line, stricter presets never return more, changing the preset re-runs automatically, reopening clears results, and `Esc` closes without leaking.
+- **One correction**: the “word-overlap hits are not gated” wording in the 1.0.148 / 1.0.149 notes is **superseded** — overlap hits are now converted and must clear the fixed 0.35 floor (regressions: four cases in `Bm25SimilarityScaleTests`).
+- **Tests**: 5 new cases (four on the scale conversion plus one on the test-retrieval endpoint), **1369 passing** overall.
+
+---
+
 # AG-UI 群聊桌面版 1.0.149 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.149 Release Notes (current Windows desktop release)
 
