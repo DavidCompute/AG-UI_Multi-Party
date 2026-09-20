@@ -185,36 +185,61 @@ try {
   await sleep(250);
   check("全部就绪后行内不再报“未就绪”", !/未就绪|not ready/.test(statReady), statReady);
 
-  // ---------- 3) 保存描述：按钮「⏳ 向量化中…」→ 徽标「✅ 已向量化」 ----------
+  // ---------- 3) 保存描述：按钮「⏳ 向量化中…」→ 徐标「✅ 已向量化」 ----------
+  // 注意：列表每 2s 会重渲染一次（状态轮询），所以**每次操作前重新取 locator 并校验写入结果**，
+  // 否则可能填到已被替换掉的旧输入框上（表现为“保存了但值没变”，曾经误判为功能 bug）。
+  const fillCaption = async (text) => {
+    for (let i = 0; i < 3; i++) {
+      const inp = probeItem.locator(".imglib-card").first().locator(".imglib-cap");
+      await inp.fill(text);
+      if ((await inp.inputValue()) === text) return true;
+      await sleep(300);
+    }
+    return false;
+  };
+  const saveCaption = () => probeItem.locator(".imglib-card").first().locator(".imglib-save").first();
+  const waitBadge = async (re, timeoutMs = 20000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const b = (await badgesOf(probeItem))[0] || "";
+      if (re.test(b)) return b;
+      await sleep(200);
+    }
+    return (await badgesOf(probeItem))[0] || "";
+  };
+  // 填充 + 点击 + 等徐标，作为一个**整体**重试：
+  // 上一次保存的响应回来时会把列表重渲染，可能让刚填的值被服务器旧值覆盖，
+  // 于是这一个“保存”实际发的是旧值（徐标就不会变）——重试一次就好了。
+  const saveAndWait = async (text, re, tries = 3) => {
+    for (let i = 0; i < tries; i++) {
+      await fillCaption(text);
+      await saveCaption().click();
+      const b = await waitBadge(re, 8000);
+      if (re.test(b)) return b;
+      await sleep(500);
+    }
+    return (await badgesOf(probeItem))[0] || "";
+  };
+
   const probeCard = probeItem.locator(".imglib-card").first();
-  const capInput = probeCard.locator(".imglib-cap");
-  const saveBtn = probeCard.locator(".imglib-save").first();
-  if (!await saveBtn.count()) {
+  if (!await probeCard.locator(".imglib-save").count()) {
     check("临时库可写（保存按钮可见）", false, "当前账号对临时库无写权限");
   } else {
-    await capInput.fill("自动化验证：蓝色潜水艇在珊瑚礁间穿行");
-    const clicking = saveBtn.click();
+    check("写入描述成功（填完回读一致）", await fillCaption("自动化验证：蓝色潜水艇在珊瑚礁间穿行"));
+    const btn = saveCaption();
+    const clicking = btn.click();
     let sawBusy = false;
     for (let i = 0; i < 100; i++) {
-      if (/向量化中|Vectorizing/.test((await saveBtn.textContent()) || "")) { sawBusy = true; break; }
+      if (/向量化中|Vectorizing/.test((await btn.textContent()) || "")) { sawBusy = true; break; }
       await sleep(80);
     }
     await clicking;
     check("保存时按钮提示「⏳ 向量化中…」（未完成有提示）", sawBusy);
-    await sleep(400);
-    const afterBadge = (await badgesOf(probeItem))[0] || "";
-    check("保存返回后徽标为「✅ 已向量化」（完成有提示）", READY.test(afterBadge), afterBadge);
+    const afterBadge = await waitBadge(READY);
+    check("保存返回后徐标为「✅ 已向量化」（完成有提示）", READY.test(afterBadge), afterBadge);
 
     // ---------- 4) 描述存空 → 「⚠ 仅按文件名匹配」 ----------
-    await capInput.fill("");
-    await saveBtn.click();
-    // 轮询等徐标变成“仅按文件名匹配”（PUT 要等重新向量化 + 列表重拉，固定 sleep 不可靠）
-    let emptyBadge = "";
-    for (let i = 0; i < 60; i++) {
-      emptyBadge = (await badgesOf(probeItem))[0] || "";
-      if (FILENAME_ONLY.test(emptyBadge)) break;
-      await sleep(200);
-    }
+    const emptyBadge = await saveAndWait("", FILENAME_ONLY);
     check("描述存空时提示「⚠ 仅按文件名匹配」", FILENAME_ONLY.test(emptyBadge), emptyBadge);
   }
 

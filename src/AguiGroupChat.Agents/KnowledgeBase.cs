@@ -34,8 +34,9 @@ public sealed class KnowledgeBase
     ///
     /// <para>
     /// 生效位置：<see cref="KnowledgeBaseCatalog.SearchAsync"/> 在**每个库**上分别用它过滤向量命中
-    /// （库设了就用库的，否则用调用方传的）。关键词词面命中（BM25 兜底）不套这个门槛 ——
-    /// 词都对上了是另一种信号，分尺不同。
+    /// （库设了就用库的，否则用调用方传的）。词面兜底不直接套这个门槛：BM25 分先换算到同一量纲
+    /// （<see cref="Bm25Ranker.ToSimilarity"/>）再过一条**固定底线**（<see cref="Bm25Ranker.KeywordSimilarityFloor"/>），
+    /// 笛住罕罕见词 / 专有号，不让“恰好共用一个常用词”蒙混过关。
     /// </para>
     /// </summary>
     public double? MinScore { get; set; }

@@ -597,6 +597,13 @@ Commons 是**档案库**而不是商业图库，检索质量几乎全看关键�
 知识库里任何提问都能把全库最近 120 条切片当成“关键词命中”塞进 RAG 上下文。
 现在两处都用 `Bm25Ranker.ZeroOverlapScore`（=0.5）判定，回归见 `ImageLibraryTests` / `KnowledgeBaseTests` 的 `*_IgnoresZeroOverlap`。
 
+**1.0.150 又往前修了一步：光判 0.5 基准不够，还得换量纲。**
+BM25 的 sigmoid 分与余弦相似度**不可直接比**：零重叠 = 0.5，于是“只共用一个常用词”也看着像 0.54，
+比向量路给无关内容的分（~0.41）还高，能盖过一切门槛（实测：提问“公司食堂今天中午吃什么”，
+而描述里恰好有“公司”二字 → 0.537，连“严格”档都拦不住）。
+现在词面命中先经 `Bm25Ranker.ToSimilarity`（零重叠 → 0）再过一条固定底线 `KeywordSimilarityFloor = 0.35`：
+罕罕见词 / 专有号（实测 0.42）仍能笛住，只共用一个常用词（0.07）不算命中（回归：`Bm25SimilarityScaleTests`）。
+
 ## 落盘与下载
 
 不传 `outputPath` 时，文件名取 `title`（保留中文），输出目录按顺序取：

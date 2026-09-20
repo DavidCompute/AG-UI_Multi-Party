@@ -66,11 +66,8 @@ public static class KnowledgeBaseApi
         root.MapGet("/", (HttpContext ctx, AuthService auth, KnowledgeBaseCatalog catalog, GroupHub hub) =>
         {
             var user = AgentApi.RequireUser(ctx, auth);
-            var isAdmin = user is not null && auth.IsAdmin(user.UserId);
-            var memberGroupIds = user is null
-                ? new HashSet<string>(StringComparer.Ordinal)
-                : hub.Store.GroupsOf(user.UserId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
-            var kbs = catalog.ListKbs(user?.UserId, memberGroupIds, isAdmin)
+            var scope = Scope(ctx, auth, hub, user?.UserId);
+            var kbs = catalog.ListKbs(user?.UserId, scope.MemberGroupIds, scope.IsAdmin)
                 .Select(k => new
                 {
                     k.KbId,
@@ -79,13 +76,52 @@ public static class KnowledgeBaseApi
                     k.OwnerId,
                     k.SharedGroupIds,
                     k.UpdatedAtMs,
-                    canManage = user is not null && catalog.CanWrite(k, user.UserId, isAdmin),
+                    canManage = user is not null && catalog.CanWrite(k, user.UserId, scope.IsAdmin),
                     // 检索严格度（null = 未设置，沿用全局 Agents:Memory:MinScore）；界面用它回显下拉
                     k.MinScore,
                     Documents = k.Documents.Select(d => new { d.DocId, d.FileName, d.ChunkCount, d.Status, d.Error, d.AddedAtMs }),
                 });
             return Results.Ok(kbs);
         });
+
+        // ---- 试检索（登录用户；给「库设置」调严格度用：立刻看到这个档位能召回什么）----
+        //     门槛优先取请求里的值（可以“先试不同档位、再决定保存”），否则取本库的，再否则平台默认。
+        //     只回**片段预览**（截断），不回整片正文；权限与“能不能读这个库”一致。
+        root.MapPost("/{kbId}/search", async (string kbId, KbSearchRequest req, HttpContext ctx, AuthService auth,
+            KnowledgeBaseCatalog catalog, GroupHub hub, CancellationToken ct) =>
+        {
+            var user = AgentApi.RequireUser(ctx, auth);
+            if (user is null) return AgentApi.Unauthorized();
+            var kb = catalog.GetKb(kbId);
+            if (kb is null) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, $"知识库不存在：{kbId}"));
+            var scope = Scope(ctx, auth, hub, user.UserId);
+            if (!catalog.CanRead(kb, user.UserId, scope.MemberGroupIds, scope.IsAdmin))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "无权检索该知识库"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (string.IsNullOrWhiteSpace(req.Query))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "query 不能为空"));
+
+            var gate = req.MinScore is { } v and > 0 and < 1
+                ? v
+                : kb.MinScore ?? KnowledgeBaseCatalog.StandardStrictness;
+            var topK = Math.Clamp(req.TopK ?? 5, 1, 20);
+            var hits = await catalog.SearchAsync([kb.KbId], req.Query.Trim(), topK, gate, ct);
+            return Results.Ok(new
+            {
+                query = req.Query.Trim(),
+                kbId = kb.KbId,
+                minScore = gate,
+                count = hits.Count,
+                hits = hits.Select(h => new
+                {
+                    h.KbId,
+                    h.KbName,
+                    h.FileName,
+                    score = Math.Round(h.Score, 4),
+                    snippet = h.Content.Length > 200 ? h.Content[..200] + "…" : h.Content,
+                }),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 删除知识库（仅创建者；删除后其向量一并清除，绑定它的智能体检索为空）----
         root.MapDelete("/{kbId}", (string kbId, HttpContext ctx, AuthService auth, KnowledgeBaseCatalog catalog) =>
@@ -135,6 +171,16 @@ public static class KnowledgeBaseApi
             return Results.Ok(new { removed = true, kbId, docId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
+
+    /// <summary>当前调用者的可见范围（成员群 + 是否管理员），与列表 / 可读性判定同一口径。</summary>
+    private static (HashSet<string> MemberGroupIds, bool IsAdmin) Scope(HttpContext ctx, AuthService auth, GroupHub hub, string? userId)
+    {
+        var isAdmin = userId is not null && auth.IsAdmin(userId);
+        var memberGroupIds = userId is null
+            ? new HashSet<string>(StringComparer.Ordinal)
+            : hub.Store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
+        return (memberGroupIds, isAdmin);
+    }
 }
 
 /// <summary>创建知识库请求。<c>minScore</c> = 检索严格度（可选，0.10~0.80）。</summary>
@@ -143,6 +189,9 @@ public sealed record KbCreateRequest(string Name, string? Description, IReadOnly
 
 /// <summary>更新知识库设置：<c>minScore</c> = 检索严格度（0.10~0.80；null = 恢复为“沿用调用方传的值”）。</summary>
 public sealed record KbUpdateRequest(double? MinScore = null);
+
+/// <summary>库设置里的「试检索」：<c>minScore</c> 可临时指定（先试不同档位再决定保存）。</summary>
+public sealed record KbSearchRequest(string Query, int? TopK = null, double? MinScore = null);
 
 /// <summary>添加文档请求：attachmentId 来自附件上传（POST /ag-ui/upload）。</summary>
 public sealed record KbAddDocumentRequest(string AttachmentId);

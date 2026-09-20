@@ -629,11 +629,14 @@ public sealed class KnowledgeBaseCatalog
             foreach (var it in items)
             {
                 var bm25 = Bm25Ranker.Score(query, it.Content);
-                // “> 零重叠基准分”才是“真有词面命中”：Score() 零重叠也返回 0.5（sigmoid(0)），
-                // 写“> 0”等于不筛 —— 那样任何提问都会把全库最近 120 条切片当成“关键词命中”，
-                // 既抬高无关内容在答案里的噪声，又让“词面命中”这个信号失去意义。
-                if (bm25 <= Bm25Ranker.ZeroOverlapScore) continue;
-                scored.Add(new KbHit(kbId, kb.Name, it.SenderId, it.Content, bm25));
+                // “> 零重叠基准分”才算真有词面命中：Score() 零重叠也返回 0.5（sigmoid(0)）。
+                // 更要紧的是**量纲**：直接拿 sigmoid 分当相似度，“只共用一个常用词”也有 0.54，
+                // 会看着比向量路给无关内容的分（0.41）还高，从而盖过一切阈值（实测踩过）。
+                var sim = Bm25Ranker.ToSimilarity(bm25);
+                // 词面路另有一条固定底线（不随库的语义严格度变）：笛住罕罕见词 / 专有号，
+                // 不让“恰好共用一个常用词”的无关切片进来。
+                if (sim < Bm25Ranker.KeywordSimilarityFloor) continue;
+                scored.Add(new KbHit(kbId, kb.Name, it.SenderId, it.Content, sim));
             }
         }
         return scored.OrderByDescending(h => h.Score).Take(topK).ToList();

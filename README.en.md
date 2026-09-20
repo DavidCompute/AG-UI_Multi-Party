@@ -536,6 +536,8 @@ Image order (PPT): library hit → Wikimedia fallback → generated art; `AGUI_I
 
 **Search strictness is per library** (`PUT /ag-ui/image-libs/{libId}`; in the UI, the `⚙️` on each row under “🖼️ Manage image libraries”): the strictness lives on the **library**, and **the library wins when set** (looser or stricter than the skill's 0.6); when unset the skill's value applies. Why per library: short name/tag captions score high for topical keywords (tighten it or you get wrong picks), while long-sentence captions score low for heading-style queries (0.62 measured — loosen it so they match). Three presets: 0.5 loose / 0.6 standard (recommended) / 0.72 strict.
 
+**The library-settings dialog includes “🔍 Test retrieval”**: try the **currently selected preset** right there and see exactly what it retrieves (scores plus snippet previews), so tuning is no longer guesswork; changing the preset re-runs it automatically. Knowledge bases use `POST /ag-ui/kb/{kbId}/search` for the same thing, also returning snippet previews only.
+
 **Skills (curated, inter-agent invocation, Microsoft Agent Framework)**: each agent can configure a `Skills` list, attaching <b>other registered agents</b>
 (including AG-UI bridged external experts) as callable sub-agents — when the model needs expertise in that domain, it automatically invokes the sub-agent (executing one run via the framework's `AgentSession`),
 and brings its answer back into the current reply. Configuration fields: `skillId` (the tool name exposed to the model, unique within the agent, **auto-generated as `skill_<targetID>` when empty,

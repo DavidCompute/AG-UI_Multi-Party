@@ -3260,6 +3260,60 @@ const LIB_SET_KINDS = {
 let libSetKind = null;      // "imglib" | "kb"
 let libSetTarget = null;    // 正在设置的库 ID
 
+/* 试检索：直接在弹窗里看“当前选中的这个档位会召回什么”——调档位不再是盲猜。
+ * 图库走已有的 /ag-ui/images/search（登录用户可调，用 libraryIds 限定本库）；
+ * 知识库走 /ag-ui/kb/{id}/search（新增，只回片段预览）。 */
+const LIB_SET_PROBE = {
+  imglib: (id, query, minScore) => ({
+    url: "/ag-ui/images/search",
+    body: { query, topK: 5, minScore, libraryIds: [id] },
+    pick: (d) => (d.images || []).map((x) => ({ name: x.fileName, score: x.score, snippet: x.caption })),
+  }),
+  kb: (id, query, minScore) => ({
+    url: `/ag-ui/kb/${id}/search`,
+    body: { query, topK: 5, minScore },
+    pick: (d) => (d.hits || []).map((x) => ({ name: x.fileName, score: x.score, snippet: x.snippet })),
+  }),
+};
+
+async function runLibSetProbe() {
+  const cfg = LIB_SET_KINDS[libSetKind];
+  const spec0 = LIB_SET_PROBE[libSetKind];
+  if (!cfg || !spec0 || !libSetTarget) return;
+  const input = $("libSetProbeQuery");
+  const q = (input.value || "").trim();
+  const box = $("libSetProbeResult");
+  if (!q) { toast(t("libSet.probeNeedQuery")); input.focus(); return; }
+  // 用**当前下拉里选中的档位**试（不管存没存）——这样能“先试、再决定保存”
+  const minScore = Number($("libSetStrictness").value) || Number(cfg.def);
+  const btn = $("libSetProbeBtn");
+  btn.disabled = true;
+  box.innerHTML = `<div class="kb-empty" style="padding:6px 0">${t("libSet.probing")}</div>`;
+  try {
+    const spec = spec0(libSetTarget, q, minScore);
+    const res = await fetch(spec.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify(spec.body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      box.innerHTML = `<div class="kb-empty" style="padding:6px 0">${escapeHtml(errMsg(data, t("libSet.probeFail", { err: res.status })))}</div>`;
+      $("libSetProbeGate").textContent = "";
+      return;
+    }
+    const rows = spec.pick(data);
+    $("libSetProbeGate").textContent = t("libSet.probeGate", { value: minScore, count: rows.length });
+    box.innerHTML = rows.length
+      ? rows.map((r) => `<div class="lib-set-probe-hit"><span class="score">${Number(r.score || 0).toFixed(2)}</span>`
+          + `<span class="name" title="${escapeHtml(r.name || "")}">${escapeHtml(r.name || "")}</span>`
+          + `<span class="snippet" title="${escapeHtml(r.snippet || "")}">${escapeHtml(r.snippet || "")}</span></div>`).join("")
+      : `<div class="kb-empty" style="padding:6px 0">${t("libSet.probeNone")}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function openLibSettings(kind, id) {
   const cfg = LIB_SET_KINDS[kind];
   if (!cfg) return;
@@ -3287,6 +3341,10 @@ function openLibSettings(kind, id) {
     sel.appendChild(o);
   }
   sel.value = cur > 0 ? String(cur) : cfg.def;
+  // 每次打开都清掉上一次的试检索结果（免得看着旧结果做决定）
+  $("libSetProbeQuery").value = "";
+  $("libSetProbeResult").innerHTML = "";
+  $("libSetProbeGate").textContent = "";
   $("libSetModal").classList.remove("hidden");
   sel.focus();
 }
@@ -9702,6 +9760,14 @@ function init() {
   $("libSetOk").onclick = saveLibSettings;
   $("libSetCancel").onclick = closeLibSettings;
   $("libSetModal").addEventListener("click", (e) => { if (e.target === $("libSetModal")) closeLibSettings(); });
+  $("libSetProbeBtn").onclick = (e) => { e.preventDefault(); runLibSetProbe(); };
+  $("libSetProbeQuery").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); runLibSetProbe(); }
+  });
+  // 换档位就重试（已经有查询时）：调严格度的即时反馈
+  $("libSetStrictness").addEventListener("change", () => {
+    if (($("libSetProbeQuery").value || "").trim()) runLibSetProbe();
+  });
   $("imgLibSearch").addEventListener("input", () => { imgLibSearchQuery = $("imgLibSearch").value; renderImgLibModal(); });
   $("imgLibCloseBtn").onclick = () => { $("imgLibModal").classList.add("hidden"); stopImgLibPolling(); renderImgLibPicks(); };
   // 「新建知识库 / 新建图库」弹窗：确认 / 取消 / 点遮罩关闭 / Esc 关闭 / 回车提交

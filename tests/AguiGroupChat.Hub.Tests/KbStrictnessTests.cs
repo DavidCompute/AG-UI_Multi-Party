@@ -261,4 +261,67 @@ public sealed class KbStrictnessApiTests : IClassFixture<KbStrictnessApiFixture>
             Assert.Equal(HttpStatusCode.NotFound, putRes.StatusCode);
         }
     }
+
+    /// <summary>
+    /// 「试检索」端点（库设置里调严格度用）：返回命中片段与分数，且**按请求里临时给的门槛**算
+    /// —— 这样界面能“先试不同档位、再决定保存”。
+    /// </summary>
+    [Fact]
+    public async Task ProbeSearch_ReturnsHits_AndHonoursTheTemporaryGate()
+    {
+        var stamp = Guid.NewGuid().ToString("N")[..6];
+        var owner = await RegisterAsync("kb_probe_" + stamp);
+
+        using var create = Authed(HttpMethod.Post, "/ag-ui/kb", owner);
+        create.Content = JsonContent.Create(new { name = "试检索验证库-" + stamp, description = "x" });
+        var createRes = await _client.SendAsync(create);
+        createRes.EnsureSuccessStatusCode();
+        var kbId = (await createRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("kbId").GetString()!;
+
+        // 空库：能检索（不报错），但 0 条（空库不该被当成错误）
+        using (var probe = Authed(HttpMethod.Post, $"/ag-ui/kb/{kbId}/search", owner))
+        {
+            probe.Content = JsonContent.Create(new { query = "报销流程", topK = 5, minScore = 0.25 });
+            var res = await _client.SendAsync(probe);
+            res.EnsureSuccessStatusCode();
+            var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(0, d.GetProperty("count").GetInt32());
+            Assert.Equal(0.25, d.GetProperty("minScore").GetDouble(), 3);
+        }
+
+        // 门槛：请求里给的优先（界面试档位靠它）
+        using (var probe = Authed(HttpMethod.Post, $"/ag-ui/kb/{kbId}/search", owner))
+        {
+            probe.Content = JsonContent.Create(new { query = "报销流程", minScore = 0.4 });
+            var res = await _client.SendAsync(probe);
+            res.EnsureSuccessStatusCode();
+            Assert.Equal(0.4, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("minScore").GetDouble(), 3);
+        }
+
+        // 没给就用本库自己的（隔了层解析，别只看请求回显）
+        using (var put = Authed(HttpMethod.Put, $"/ag-ui/kb/{kbId}", owner))
+        {
+            put.Content = JsonContent.Create(new { minScore = 0.55 });
+            (await _client.SendAsync(put)).EnsureSuccessStatusCode();
+        }
+        using (var probe = Authed(HttpMethod.Post, $"/ag-ui/kb/{kbId}/search", owner))
+        {
+            probe.Content = JsonContent.Create(new { query = "报销流程" });
+            var res = await _client.SendAsync(probe);
+            res.EnsureSuccessStatusCode();
+            Assert.Equal(0.55, (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("minScore").GetDouble(), 3);
+        }
+
+        // 空查询 → 400；未登录 → 401
+        using (var probe = Authed(HttpMethod.Post, $"/ag-ui/kb/{kbId}/search", owner))
+        {
+            probe.Content = JsonContent.Create(new { query = "  " });
+            Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(probe)).StatusCode);
+        }
+        using (var probe = new HttpRequestMessage(HttpMethod.Post, $"/ag-ui/kb/{kbId}/search"))
+        {
+            probe.Content = JsonContent.Create(new { query = "报销流程" });
+            Assert.Equal(HttpStatusCode.Unauthorized, (await _client.SendAsync(probe)).StatusCode);
+        }
+    }
 }

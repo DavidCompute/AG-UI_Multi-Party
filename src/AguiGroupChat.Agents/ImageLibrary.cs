@@ -40,7 +40,8 @@ public sealed class ImageLibrary
     ///
     /// <para>
     /// 生效位置：<c>/ag-ui/images/search</c> 在**每个库**上分别用它过滤向量命中（库设了就用库的，否则用请求里的）。
-    /// 关键词词面命中（BM25 兜底）不套这个门槛 —— 它本来就是“词都对上了”的另一种信号，分尺不同。
+    /// 词面兜底不直接套这个门槛：BM25 分先换算到同一量纲（<see cref="Bm25Ranker.ToSimilarity"/>）
+    /// 再过一条固定底线（<see cref="Bm25Ranker.KeywordSimilarityFloor"/>）。
     /// </para>
     /// </summary>
     public double? MinScore { get; set; }

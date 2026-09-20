@@ -46,12 +46,21 @@ DOC = """# 知聚平台内部说明（严格度验证用）
 
 ## 四、交付与部署
 支持 Docker 一键部署与 Windows 桌面安装包（本地数据、离线可用）。
+
+## 五、项目代号
+本平台内部项目代号 ORION-7788，仅供内部文档引用。
 """
 
 RELATED = "知聚平台有什么创新点"
 LOOSELY_RELATED = "数字员工的组织架构是怎么协作的"
-UNRELATED = "公司食堂今天中午吃什么"
+COMMON_WORD_ONLY = "公司食堂今天中午吃什么"   # 只与文档共用一个常用词“公司”（词面兜底曾经会把它当成命中）
+DISTINCTIVE = "ORION-7788 是什么"             # 罕见号：词面兜底应当仍能召回来
+NO_OVERLAP = "紫罗兰色潜水艇在珊瑚礁间穿行"    # 零词面交集：两边都只走向量路
+UNRELATED = COMMON_WORD_ONLY
 NONSENSE = "qzxv-不存在-9987"
+# 旧 BM25 sigmoid 分给“只共用一个常用词”的典型值（0.537）；修正后它换成量纲化分（0.07），
+# 所以“标准档带回的命中分”应当在余弦量纲里（< 0.5），而不是那 0.54 的假高。
+Bm25_LIKE = 0.5
 
 
 def check(label, cond, extra=""):
@@ -146,27 +155,64 @@ try:
     s_rel, s_loose_rel = top_score(group, RELATED), top_score(group, LOOSELY_RELATED)
     s_unrel, s_nonsense = top_score(group, UNRELATED), top_score(group, NONSENSE)
     for name, q, s in (("真实提问", RELATED, s_rel), ("语义相关", LOOSELY_RELATED, s_loose_rel),
-                       ("无关提问", UNRELATED, s_unrel), ("乱码提问", NONSENSE, s_nonsense)):
+                       ("只共用常用词“公司”", COMMON_WORD_ONLY, s_unrel), ("乱码提问", NONSENSE, s_nonsense)):
         print(f"   {name}：{q} -> {s}")
-    check("真实提问分数明显高于无关提问（否则这套档位不成立）",
+    check("真实提问的向量分明显高于只共用常用词的那条（否则这套档位不成立）",
           s_rel is not None and s_unrel is not None and s_rel > s_unrel,
           f"{s_rel} vs {s_unrel}")
     check("无关提问高于“不筛”的下限 0.10（所以收紧是有意义的）",
           s_unrel is not None and s_unrel > 0.10, str(s_unrel))
 
-    # ── B) 按库门槛的实际效果（同一向量 + 同一门槛）──
-    print("\n== B) 库严格度改变实际召回（同一公式、同一门槛）==")
-    call("PUT", f"/ag-ui/kb/{kb_id}", {"minScore": 0.40}, t=token)   # 严格
-    # 直接用真实查询算“严格档下召回到几条”
-    vec_unrel = "[" + ",".join(f"{x:.6f}" for x in embed(UNRELATED)) + "]"
-    out_u, _ = psql(f"SELECT count(*) FROM agui_message_memory WHERE group_id='{group}' AND embedding IS NOT NULL "
-                    f"AND 1-(embedding <=> '{vec_unrel}'::vector) >= 0.40")
-    call("PUT", f"/ag-ui/kb/{kb_id}", {"minScore": 0.15}, t=token)   # 宽松
-    out_u_loose, _ = psql(f"SELECT count(*) FROM agui_message_memory WHERE group_id='{group}' AND embedding IS NOT NULL "
-                          f"AND 1-(embedding <=> '{vec_unrel}'::vector) >= 0.15")
-    print(f"   无关提问在 严格0.40 下召回 {out_u} 条，在 宽松0.15 下召回 {out_u_loose} 条")
-    check("严格档挡住了无关提问的切片", out_u == "0", out_u)
-    check("宽松档把同一切片放了进来（说明门槛真的在起作用）", int(out_u_loose) >= 1, out_u_loose)
+    # ── B) 按库门槛的实际效果（走**平台自己的试检索接口**，不再靠 psql 验算）──
+    print("\n== B) 库严格度改变实际召回（走 /ag-ui/kb/{id}/search）==")
+    MIN_STANDARD, MIN_STRICT = 0.25, 0.40
+
+    def probe(q, gate):
+        _, d = call("POST", f"/ag-ui/kb/{kb_id}/search", {"query": q, "topK": 5, "minScore": gate}, t=token)
+        return d
+
+    d_real = probe(RELATED, MIN_STANDARD)
+    print(f"   真实提问（标准 {MIN_STANDARD}）：{d_real.get('count')} 条，分 {[h['score'] for h in (d_real.get('hits') or [])][:2]}")
+    check("真实提问能召回", (d_real.get("count") or 0) >= 1, str(d_real)[:200])
+
+    # 只共用一个常用词：**严格档不该退回它**；标准档（= 平台默认 0.25）会带回一条“弱相关”的向量命中
+    # —— 那是默认档应有的宽松行为（实测：无关提问的向量分 0.31~0.39 ，恰好能过 0.25），所以这里只钉严格档。
+    d_common_std = probe(COMMON_WORD_ONLY, MIN_STANDARD)
+    d_common_strict = probe(COMMON_WORD_ONLY, MIN_STRICT)
+    std_scores = [h["score"] for h in (d_common_std.get("hits") or [])]
+    print(f"   只共用常用词“公司”：（标准 {MIN_STANDARD}）→ {d_common_std.get('count')} 条 {std_scores}；"
+          f"（严格 {MIN_STRICT}）→ {d_common_strict.get('count')} 条")
+    check("只共用一个常用词的无关提问：严格档不召回（词面兜底不再蒙混过关）",
+          d_common_strict.get("count") == 0, str(d_common_strict)[:200])
+    check("标准档（平台默认 0.25）确实更宽松（它带回的是弱相关向量命中，不是词面那 0.54）",
+          (d_common_std.get("count") or 0) >= 0 and all(s < Bm25_LIKE for s in std_scores),
+          f"{std_scores}")
+
+    # 罕见号：词面兜底的意义所在 —— 即使严格档也要能召回来
+    d_code = probe(DISTINCTIVE, MIN_STRICT)
+    print(f"   罕见号 ORION-7788（严格 {MIN_STRICT}）→ {d_code.get('count')} 条，分 {[h['score'] for h in (d_code.get('hits') or [])][:2]}")
+    check("罕见号即使在严格档也能召回来（兜底没被修没）", (d_code.get("count") or 0) >= 1, str(d_code)[:200])
+
+    # 零词面交集：两边都只走向量路 → 接口分数应与 psql 独立算的一致（交叉核对量纲没被改坏）
+    d_vec = probe(NO_OVERLAP, 0.05)
+    if d_vec.get("count"):
+        api_score = float(d_vec["hits"][0]["score"])
+        psql_score = top_score(group, NO_OVERLAP)
+        print(f"   零词面交集：接口 {api_score} / psql {psql_score}")
+        check("零词面交集时接口分与 psql 独立计算一致（±0.01）",
+              psql_score is not None and abs(api_score - psql_score) <= 0.01, f"api={api_score} psql={psql_score}")
+    check("接口返回的门槛与请求一致（界面靠它回显）",
+          abs(float(d_real.get("minScore", 0)) - MIN_STANDARD) < 1e-9, str(d_real.get("minScore")))
+    if d_real.get("count"):
+        check("片段预览已截断（不把整片正文丢给前端）", len(d_real["hits"][0].get("snippet") or "") <= 201,
+              str(len(d_real["hits"][0].get("snippet") or "")))
+
+    # 保存后再试：不带 minScore 时应当用**库里存的值**
+    call("PUT", f"/ag-ui/kb/{kb_id}", {"minScore": MIN_STRICT}, t=token)
+    _, d_saved = call("POST", f"/ag-ui/kb/{kb_id}/search", {"query": COMMON_WORD_ONLY}, t=token)
+    check("不传 minScore 时用库里存的门槛（0.40）且因此 0 条",
+          abs(float(d_saved.get("minScore", 0)) - MIN_STRICT) < 1e-9 and d_saved.get("count") == 0,
+          str(d_saved)[:200])
 
     # ── C) 接口持久化与隔离 ──
     print("\n== C) 接口持久化与隔离 ==")

@@ -691,6 +691,18 @@
         <label class="form-hint" for="libSetStrictness" style="display:block;margin:0 0 4px" data-i18n="libSet.strictness"></label>
         <select id="libSetStrictness" class="modal-input"></select>
         <p class="form-hint" id="libSetHint"></p>
+        <!-- 试检索：用**当前选中的档位**立即试一次，调档位不再是盲猜 -->
+        <div class="lib-set-probe">
+          <span class="search-clear-wrap" style="width:100%">
+            <input id="libSetProbeQuery" class="modal-input" data-i18n-placeholder="libSet.probePh" />
+            <button type="button" class="search-clear" data-clear-for="libSetProbeQuery" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
+          <div class="lib-set-probe-bar">
+            <button id="libSetProbeBtn" class="chip-btn" type="button" data-i18n="libSet.probeBtn"></button>
+            <span class="form-hint" id="libSetProbeGate" style="margin:0"></span>
+          </div>
+          <div id="libSetProbeResult" class="lib-set-probe-result"></div>
+        </div>
       </div>
       <div class="modal-actions">
         <button id="libSetOk" class="send" data-i18n="common.save"></button>

@@ -569,12 +569,13 @@ public sealed class ImageLibraryCatalog
             foreach (var it in store.ListMessages(ImgGroupPrefix + libId, null, null, cap, 0))
             {
                 var bm25 = Bm25Ranker.Score(query, it.Content);
-                // 必须用“> 零重叠基准分”判定真有词面命中：Score() 是 sigmoid 归一化，
-                // **零词面重叠也返回 0.5**（sigmoid(0)）。原先写的是“> 0”，等于不筛 ——
-                // 于是任何查询都会把整个图库以 0.5 分召回：表现为“无意义关键词也配上了一张任意照片”、
-                // 而且 minScore 形同虚设（0.5 > 默认 0.25）。
-                if (bm25 <= Bm25Ranker.ZeroOverlapScore) continue;
-                if (BuildHit(lib, it.MessageId, bm25) is { } h) scored.Add(h);
+                // 必须换算到“与余弦相似度同一量纲”再比：Score() 是 sigmoid 归一化，
+                // **零词面重叠也返回 0.5**（sigmoid(0)）。直接拿它当相似度的话，
+                // “只共用一个常用词”也有 0.54，于是任何门槛（包括“严格”）都拦不住它（实测踩过）。
+                var sim = Bm25Ranker.ToSimilarity(bm25);
+                // 词面路另有一条固定底线（不随库的语义严格度变）：笛住罕罕见词，不让常用词蒙混进来。
+                if (sim < Bm25Ranker.KeywordSimilarityFloor) continue;
+                if (BuildHit(lib, it.MessageId, sim) is { } h) scored.Add(h);
             }
         }
         return scored;

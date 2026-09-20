@@ -72,6 +72,37 @@ public static partial class Bm25Ranker
     /// </summary>
     public const double ZeroOverlapScore = 0.5;
 
+    /// <summary>
+    /// 词面命中在“与余弦相似度同一量纲”下的一条固定底线。
+    ///
+    /// <para>
+    /// 为何需要：向量分与 BM25 分最终会**一起排序、一起过门槛**，但两者不同尺 ——
+    /// BM25 的 sigmoid 零重叠就给 0.5，所以“只共用一个常用词”也看着像 0.54 的相似度，
+    /// 任何按相似度设的门槛都拦不住它。实测（真实文档 + bge-m3）：
+    /// 只共用常用词“公司” → 量纲化后 **0.07**；命中罕罕见号 ORION-7788 → **0.42**；真实提问向量分 0.70。
+    /// </para>
+    ///
+    /// <para>
+    /// 所以词面路用这条固定底线（不随库的“语义严格度”变）：
+    /// 它的存在意义就是笛住向量表示不好的<b>罕罕见词 / 专有号</b>，
+    /// 那是强证据、不该被更严的语义门槛一票否决；而“只共用一个常用词”任何档位都不算命中。
+    /// </para>
+    /// </summary>
+    public const double KeywordSimilarityFloor = 0.35;
+
+    /// <summary>
+    /// 把 <see cref="Score"/> 的 sigmoid 分换算到“与余弦相似度同一量纲”的 0~1：
+    /// 基准是 <see cref="ZeroOverlapScore"/>（= 0.5 = 零词面重叠），所以 (b - 0.5) / 0.5。
+    ///
+    /// <para>
+    /// 不换算的后果（实测踩过）：知识库里问“公司食堂今天中午吃什么”，而文档里恰好有“公司”二字 →
+    /// BM25 给 0.537，看着比向量路给无关内容的分（0.41）还高，于是它总能在合并排序里胜出，
+    /// 而且任何门槛（包括“严格”）都拦不住它。
+    /// </para>
+    /// </summary>
+    public static double ToSimilarity(double sigmoidScore)
+        => Math.Clamp((sigmoidScore - ZeroOverlapScore) / (1 - ZeroOverlapScore), 0, 1);
+
     /// <summary>对 query 与一段 text 计算简化 BM25 分数并经 Sigmoid 归一化到 [0,1]。</summary>
     public static double Score(string query, string text)
     {

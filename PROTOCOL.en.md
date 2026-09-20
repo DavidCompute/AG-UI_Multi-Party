@@ -1075,7 +1075,8 @@ Server-local paths (`path`) are returned **only to the self token** (the skill e
 **Search strictness (`minScore`, 1.0.149+)**: every knowledge base may carry its own similarity gate. When an agent retrieves its bound knowledge bases, `KnowledgeBaseCatalog.SearchAsync` resolves it **per library**: **the library's value wins when set, otherwise the global `Agents:Memory:MinScore` (default 0.25)**.
 Why per library: short-item/catalogue-style documents score high for any question (tighten the gate), while long prose scores low for a one-line question (loosen it, or nothing is recalled).
 Measured (real document + bge-m3): unrelated questions 0.31-0.38, real hits 0.41-0.71 — a narrower margin than image libraries, hence the smaller steps (UI presets: loose 0.15 / standard 0.25 / strict 0.40).
-**Word-overlap hits (the BM25 fallback) are not gated by it** — matching words is a different signal on a different scale.
+**Test retrieval**: `POST /ag-ui/kb/{kbId}/search` (`{query, topK?, minScore?}`) lets the UI show the effect while you tune the setting; it returns **snippet previews** only (truncated to 200 chars) and accepts a temporary gate (try before saving), with the same read permission as the library.
+**Word-overlap units**: as for image libraries above — converted to the same scale and required to clear the fixed 0.35 floor, independent of the preset.
 
 System-level knowledge bases（ownerId=null）are visible but read-only to all users（modification not exposed）。
 
