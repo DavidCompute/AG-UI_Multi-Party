@@ -1,3 +1,71 @@
+# AG-UI 群聊桌面版 1.0.152 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.152 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.152 把「在线查看」接到了**技能库试运行**上 —— 以前在技能库点 ▶ 试运行内置文档技能（`docx_report` / `pptx_deck` / `xlsx_book` / `pdf_doc`），结果弹窗里只有一段文本，**文件确实生成了却拿不到**（只看得见一行路径）。现在试运行结果多出「📦 本次产出」区：可**直接下载**、也可**在线查看**（复用 1.0.151 的文档阅读器）。服务端把结果里的 `produce_file` 标记按与聊天回档**同一实现**校验入库，并登记归属——**产出者本人**可读 / 可下载 / 可预览，他人仍 403。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.152 brings **online viewing to skill library trial runs** — before this, clicking ▶ on a built-in document skill (`docx_report` / `pptx_deck` / `xlsx_book` / `pdf_doc`) produced a result modal containing nothing but text, so **the file was generated but unreachable** (you could only see a path). Trial-run results now carry a **📦 Produced this run** section whose files are **directly downloadable** and **viewable online** (reusing the 1.0.151 document reader). The server validates the `produce_file` marker out of the result with **the same implementation the chat recall path uses**, registers the files, and records ownership — the **producer** can read / download / preview them while everyone else still gets 403. Web and desktop share the same Hub / gateway / frontend.
+
+## 技能试运行产出回档（1.0.152）
+# Trial runs now recall their output files (1.0.152)
+
+中文：
+- **问题**：技能库「试运行」的结果只有文本。内置 docx / pptx / xlsx / pdf 技能是把文件写到**服务端磁盘**的，
+  返回里只有一行路径 —— 用户看得到路径、拿不到稿子，也无法预览（而同样一个技能在聊天里是能拿到下载卡片的，很难想到差别在入口）。
+- **做法**：`POST /ag-ui/skills/{skillId}/run` 现在返回 `attachments[]`。服务端从结果文本里解析 `produce_file` 标记，
+  按与聊天回档**同一实现**校验（扩展名白名单 / 非空 / 产物尺寸上限）后入库为附件。
+- **收口成一处（顺便消重）**：解析 + 校验 + 入库抽到 `ProducedFileMarker`（聊天路径与试运行共用），
+  网关原来的那份内联实现删掉 —— 两条路共用一套实现，才不会一边修好另一边漂移。既有源码扫描守卫（“回档路径必须带白名单”）
+  同步改成断言“网关确实走那个收口 + 收口里有白名单与尺寸上限”，并且此它更严（多钉了一条不得绕过）。
+- **权限：产出者本人**。试运行产物不属于任何知聚消息，而附件校验要求“命中你能访问的知聚里某条未撤回消息”，
+  直接回给前端就是个 403（自己的东西自己看不了）。新增 `SkillRunArtifactStore` 只记「这个附件是哪个用户试运行产出的」，
+  因此**产出者本人**可读 / 可下载 / 可预览，**他人仍 403**（不是所有人可读 —— 试运行稿件可能含未公开内容）。
+  登记持久化到扩展区（重启后旧链接仍有效），按保留期 7 天（与预览缓存同口径）与每人 50 条裁剪，随「清空一切」一并清。
+- **未收集的路径**：本机桥 / 客户端执行的试运行**不**收集产物 —— 文件在用户自己机器上，服务端读不到
+  （强行扫只会把服务端上的同名无关文件当产物）。
+- **界面**：结果弹窗新增产出区（`#skillRunResultArtifacts`），每行 = 文件名 + 「⬇ 下载」+（办公文档才有的）「👁 在线查看」；
+  每次重跑先清空上一次的产出（否则两次结果会混排）。在线查看沿用同一个预览弹窗，
+  因此它被抬到 `ui-dialog-overlay`（z-80）：要从技能结果弹窗之上弹出来，且 `Esc` 只收预览、不连下层一起关。
+- **实测验证（真实部署 + 真实内置技能 + 真实浏览器）**：
+  - `node tools/verify_doc_preview.mjs` —— **35 项全过**（含新增 7 项试运行项）：真实试运行 `docx_report` 返回 `attachments=1`，
+    地址为站内可下载链接；预览 200 + `%PDF` + 1 页；产出者可下载（200）；未登录 401。
+  - `HEADLESS=1 node tools/ui-skill-run-artifacts.mjs`（新增 Playwright 脚本）—— **14 项全过**：产出区列出文件、
+    下载直链带令牌、点「👁 在线查看」子窗载入 `blob:` PDF（可视区 **1058×485**）、`Esc` 只收预览弹窗
+    （技能结果弹窗仍在）、`Esc` 后 blob 已回收、重跑先清空上一次产出。
+  - 回归测试 **新增 10 个**（产物归属 9：仅产出者可读 / 过期裁剪 / 每人超量裁剪 / 快照恢复 round-trip / 清空；
+    预览端点 1：试运行产物仅产出者可预览可下载），全量 **1405 通过**。
+
+English:
+- **The problem**: the skill library's trial-run result was text only. Built-in docx / pptx / xlsx / pdf skills write their file to
+  **server disk** and return just a path — so the user could see the path but not obtain the document, and could not preview it
+  (while the very same skill does produce a downloadable card when run in chat, which makes the difference hard to guess).
+- **The fix**: `POST /ag-ui/skills/{skillId}/run` now returns `attachments[]`. The server parses the `produce_file` marker out of the
+  result text and registers the files as attachments using **the same implementation as the chat recall path**
+  (extension allow-list / non-empty / produced-file size cap).
+- **One shared implementation (removing duplication)**: parsing, validation and storage moved into `ProducedFileMarker` (used by both the
+  chat path and trial runs) and the gateway's former inline copy was deleted — one implementation for both paths, so fixing one cannot leave
+  the other behind. The existing source-scanning guard (“the recall path must carry the allow-list”) now asserts that the gateway really goes
+  through that chokepoint **and** that the chokepoint holds the allow-list plus the size cap, which is strictly stronger (it also pins that the
+  gateway cannot bypass it).
+- **Permission: the producer only.** A trial-run artifact belongs to no group message, while attachment access requires “hits an unrecalled
+  message in a group you can access” — so handing it back to the frontend would just 403 (you cannot open your own file). A new
+  `SkillRunArtifactStore` records which user produced which attachment, so **only the producer** can read / download / preview it while
+  **everyone else still gets 403** (this is not world-readable — trial-run drafts may contain non-public content). The mapping is persisted to
+  the extension area (links survive a restart) and pruned at 7 days (same as the preview cache) and 50 entries per user, and it is cleared by
+  “reset everything”.
+- **Paths not collected**: trial runs executed over the native bridge / on the client are **not** recalled — the file lives on the user's own
+  machine and the server cannot read it (scanning anyway would only risk picking up a same-named unrelated server file).
+- **UI**: the result modal gained an artifacts section (`#skillRunResultArtifacts`) where each row is the file name plus “⬇ Download” and,
+  for office documents, “👁 View online”; re-running clears the previous run's artifacts first (otherwise the two runs would interleave).
+  Online viewing reuses the same preview modal, which is therefore raised to `ui-dialog-overlay` (z-80) so it can appear above the skill result
+  modal, with `Esc` closing only the preview and not the modal underneath.
+- **Verified live (real deployment, real built-in skill, real browser)**:
+  - `node tools/verify_doc_preview.mjs` — **35/35 pass** (including 7 new trial-run assertions): a real `docx_report` run returns
+    `attachments=1` with an in-app downloadable URL; preview gives 200 + `%PDF` + 1 page; the producer can download (200); unauthenticated 401.
+  - `HEADLESS=1 node tools/ui-skill-run-artifacts.mjs` (new Playwright script) — **14/14 pass**: the artifacts section lists the file, the download
+    link carries the session token, clicking “👁 View online” loads a `blob:` PDF in the child modal (**1058×485** visible area), `Esc` closes only the
+    preview (the skill result modal stays), the blob is revoked afterwards, and re-running clears the previous artifacts.
+  - **10 new regression tests** (9 for artifact ownership: producer-only read, expiry pruning, per-user overflow pruning, snapshot round-trip,
+    clear-all; plus 1 for the preview endpoint: a trial-run artifact is previewable and downloadable only by its producer); full suite **1405 passing**.
+
 # AG-UI 群聊桌面版 1.0.151 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.151 Release Notes (current Windows desktop release)
 
