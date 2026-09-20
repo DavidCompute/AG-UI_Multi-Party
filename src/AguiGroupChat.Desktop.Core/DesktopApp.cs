@@ -52,6 +52,11 @@ public static class DesktopApp
         builder.Services.AddSingleton<AccountErasureService>(); // 账号注销 / 数据擦除（企业合规）编排
         builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey）
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
+        builder.Services.AddSingleton<AguiGroupChat.Web.SkillRunArtifactStore>(); // 技能试运行产物归属（产出者本人可读 / 下载 / 预览）
+        // 办公文档「在线查看」：docx / xlsx / pptx 转 PDF 后内联渲染。
+        // 桌面机装了 LibreOffice 就可用（自动探测 C:\Program Files\LibreOffice\...）；没装只会让
+        // 「在线查看」按钮不可用（提示下载后用本地应用打开），不影响其它功能。
+        builder.Services.AddDocumentPreview(Path.Combine(builder.Environment.ContentRootPath, "data", AguiGroupChat.Web.OfficePreviewConverter.CacheDirectoryName));
         // HTTP API 枚举字符串化（与协议 §2 一致）
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase)));
 
@@ -100,6 +105,7 @@ public static class DesktopApp
         app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
         app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）
         app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
+        app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();

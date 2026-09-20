@@ -2,6 +2,7 @@ using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
+using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Hub.Users;
 using Microsoft.Extensions.Logging;
 
@@ -175,6 +176,22 @@ public static class SkillApi
         {
             var user = WebIdentity.User(ctx, auth);
             if (user is null) return Unauthorized();
+            // 【试运行产物】内置文档类技能（docx / pptx / xlsx / pdf）把文件写到服务端磁盘，
+            // 但试运行结果原本只有一段文本 —— 用户既看不到也拿不到产出的稿子。
+            // 这里把结果文本里的 produce_file 标记入库为附件（与聊天路径**同一实现**），
+            // 登记归属（产出者本人可读）后随响应回给前端，前端就能给下载 / 在线查看入口。
+            var runAttachmentStore = ctx.RequestServices.GetService<AttachmentStore>();
+            var runArtifacts = ctx.RequestServices.GetService<SkillRunArtifactStore>();
+            var artifactLogger = loggerFactory.CreateLogger("SkillRunArtifacts");
+            // 只扫**服务端执行**的路径：本机桥执行的产物落在用户自己机器上，服务端读不到
+            // （扫了也只会 File.Exists 落空，却可能把服务端上的同名无关文件当产物）。
+            object[] CollectArtifacts(string text)
+            {
+                if (runAttachmentStore is null) return [];
+                var files = ProducedFileMarker.SaveAll(text, runAttachmentStore, artifactLogger);
+                foreach (var f in files) runArtifacts?.Register(f.AttachmentId, user.UserId);
+                return files.Cast<object>().ToArray();
+            }
             // 本机桥 / 桌面自托管标记：经 DI 取得（测试宿主可为空）。
             // IsHostLocal=true 表示“宿主即用户本机”（桌面版），Client 技能可在 Web 宿主直接执行、无需独立本机桥。
             var nativeTunnel = ctx.RequestServices.GetService<AguiGroupChat.Agents.NativeTunnelService>();
@@ -201,7 +218,8 @@ public static class SkillApi
                     {
                         var hostDr = await agents.RunSkillAsync(existing, agents.PrepareDocumentSkillInput(existing, query, user.UserId), ct);
                         var (txtA, fixA) = await TryDotnetAutoFixAsync(existing, hostDr, canEditThis, options, agents, loggerFactory, ct);
-                        return Results.Ok(new { skillId, result = ("【本机 dotnet · 在桌面宿主机直接执行】\n" + txtA), localOnly = true, autoFix = fixA });
+                        var textA = "【本机 dotnet · 在桌面宿主机直接执行】\n" + txtA;
+                        return Results.Ok(new { skillId, result = textA, localOnly = true, autoFix = fixA, attachments = CollectArtifacts(textA) });
                     }
                     var clientId = (req.ClientId ?? "").Trim();
                     if (nativeTunnel is not null && clientId.Length > 0 && nativeTunnel.HasClient(clientId))
@@ -221,7 +239,7 @@ public static class SkillApi
                 }
                 var dr = await agents.RunSkillAsync(existing, agents.PrepareDocumentSkillInput(existing, req.Query ?? "", user.UserId), ct);
                 var (txtC, fixC) = await TryDotnetAutoFixAsync(existing, dr, canEditThis, options, agents, loggerFactory, ct);
-                return Results.Ok(new { skillId, result = txtC, autoFix = fixC });
+                return Results.Ok(new { skillId, result = txtC, autoFix = fixC, attachments = CollectArtifacts(txtC) });
             }
             // shell + client（本机执行技能）：试运行应经本机桥在本机（当前机器）执行，落到服务端 bash 会因缺 PowerShell 命令而 127。
             if (existing.Kind == AgentSkillKind.Shell && existing.ExecutionLocation == AgentSkillExecutionLocation.Client)
@@ -238,7 +256,8 @@ public static class SkillApi
                 {
                     var root = Path.Combine(hostEnv.ContentRootPath, "data", "clienttoolruns", HostShell.SanitizeSegment(user.UserId));
                     var hostOut = await HostShell.RunAsync(root, command, null, 60, query, ct);
-                    return Results.Ok(new { skillId, result = ("【本机 shell · 在桌面宿主机直接执行】\n" + hostOut), localOnly = true });
+                    var textH = "【本机 shell · 在桌面宿主机直接执行】\n" + hostOut;
+                    return Results.Ok(new { skillId, result = textH, localOnly = true, attachments = CollectArtifacts(textH) });
                 }
                 var clientIdShell = (req.ClientId ?? "").Trim();
                 if (nativeTunnel is not null && clientIdShell.Length > 0 && nativeTunnel.HasClient(clientIdShell))
@@ -273,7 +292,7 @@ public static class SkillApi
             if (existing.OwnerId is null && !auth.IsAdmin(user.UserId))
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅系统管理员可试运行系统技能"), statusCode: StatusCodes.Status403Forbidden);
             var result = await agents.RunSkillAsync(existing, req.Query ?? "", ct);
-            return Results.Ok(new { skillId, result });
+            return Results.Ok(new { skillId, result, attachments = CollectArtifacts(result) });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 试运行参数建议：按技能的说明 / 正文 / 类型，让大模型给一个典型示例 query，供前端试运行时预填（权限同 /run）----

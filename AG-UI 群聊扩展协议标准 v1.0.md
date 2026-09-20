@@ -1027,7 +1027,7 @@ PUT /ag-ui/user/profile
 |更新技能|`PUT /ag-ui/skills/{skillId}`|仅归属者或管理员；非管理员不能把技能改成 `shell`/`http`/`dotnet`|
 |删除技能|`DELETE /ag-ui/skills/{skillId}`|仅归属者或管理员；系统技能（ownerId=null）只读|
 |建议试运行入参|`POST /ag-ui/skills/{skillId}/suggest`|试运行前自动建议一段<b>代表性示例入参</b>：由大模型依据技能描述 / 正文（`{ description?, body? }`）推导出样例输入供前端填入；需登录|
-|试运行技能|`POST /ag-ui/skills/{skillId}/run`|手动试运行（无审批通道）：前端会先经 `/suggest` 自动填入示例入参再调用。prompt 技能仅归属者/管理员；shell/http 与系统技能仅管理员，防任意命令执行；**`dotnet`（含系统技能）对全体登录用户开放**——服务端执行，`client` 执行的 dotnet 由本机桥 `DotnetRunner` 运行（浏览器无法编译 C#）|
+|试运行技能|`POST /ag-ui/skills/{skillId}/run`|手动试运行（无审批通道）：前端会先经 `/suggest` 自动填入示例入参再调用。prompt 技能仅归属者/管理员；shell/http 与系统技能仅管理员，防任意命令执行；**`dotnet`（含系统技能）对全体登录用户开放**——服务端执行，`client` 执行的 dotnet 由本机桥 `DotnetRunner` 运行（浏览器无法编译 C#）。**返回体含 `attachments[]`：本次试运行生出的文件**（内置 docx / xlsx / pptx / pdf 等技能把文件写到服务端磁盘，原本只有一段文本、用户拿不到稿子）——服务端从 `result` 里解析 `produce_file` 标记，按与聊天回档**同一实现**校验（扩展名白名单 / 非空 / 产物尺寸上限）后入库为附件，并登记归属：**产出者本人可读**（`/ag-ui/files`、`/ag-ui/preview` 均放行，他人仍 403），前端据此给出「⬇ 下载」与「👁 在线查看」。本机桥 / 客户端执行的路径**不**收集（产物在用户自己机器上，服务端读不到）|
 
 ### 5.8 知识库管理接口（Hub 扩展，RAG 知识文档）
 

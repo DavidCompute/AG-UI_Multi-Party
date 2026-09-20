@@ -2378,6 +2378,7 @@ async function testSkill(skillId) {
   skillFixCandidate = null;
   if (fixBtn) { fixBtn.classList.add("hidden"); fixBtn.onclick = null; }
   resultBody.textContent = "⚙️ " + t("skill.testRun") + "（" + id + "）…"; // 预置“运行中”文案
+  renderSkillRunArtifacts([]); // 清掉上一次试运行的产出（否则会跟本次结果混在一起）
   // 按技能自动建议一个典型示例参数预填（试运行前先给用户一个能用/可改的输入）
   let suggestion = "";
   try {
@@ -2400,6 +2401,7 @@ async function testSkill(skillId) {
       : `${t("skill.testResult")}\n${t("common.saveFail", { err: errMsg(data, res.status) })}`;
     if (!res.ok) toast(t("common.saveFail", { err: errMsg(data, res.status) }));
     resultBody.textContent = text;
+    renderSkillRunArtifacts(res.ok && Array.isArray(data && data.attachments) ? data.attachments : []);
     // C# 技能编译失败且服务端已让模型给出修复版 → 提供“一键应用修复”按钮
     if (res.ok && data && data.autoFix && data.autoFix.correctedBody && fixBtn) {
       skillFixCandidate = { skillId: id, body: data.autoFix.correctedBody };
@@ -2411,6 +2413,58 @@ async function testSkill(skillId) {
   } catch (ex) {
     toast(t("common.saveFail", { err: ex.message }));
     resultBody.textContent = `${t("skill.testResult")}\n${ex.message}`;
+    renderSkillRunArtifacts([]);
+  }
+}
+
+/**
+ * 渲染技能试运行的产出文件（服务端把结果文本里的 produce_file 标记入库为附件后回传）。
+ * 为什么要它：内置 docx / xlsx / pptx / pdf 技能会把文件写到服务端磁盘，而试运行结果原本只有一段文本 ——
+ * 用户看得到路径却拿不到稿子。这里给出「⬇ 下载」与「👁 在线查看」（仅办公文档类），与消息附件同一套体验。
+ */
+function renderSkillRunArtifacts(atts) {
+  const box = document.getElementById("skillRunResultArtifacts");
+  if (!box) return;
+  box.innerHTML = "";
+  box.classList.toggle("hidden", !atts.length);
+  if (!atts.length) return;
+
+  const title = document.createElement("div");
+  title.className = "skill-run-artifacts-title";
+  title.textContent = t("skill.testArtifacts");
+  box.appendChild(title);
+
+  for (const att of atts) {
+    const href = authedAssetUrl(att.url);
+    if (!href) continue; // 非法 URL 不给入口
+    const row = document.createElement("div");
+    row.className = "skill-run-artifact";
+    const name = document.createElement("span");
+    name.className = "skill-run-artifact-name";
+    name.textContent = `📄 ${att.name || ""}`;
+    name.title = att.name || "";
+    row.appendChild(name);
+
+    const dl = document.createElement("a");
+    dl.className = "skill-run-artifact-btn";
+    dl.href = href;
+    dl.target = "_blank";
+    dl.rel = "noopener";
+    dl.textContent = `⬇ ${t("msg.attachmentDownload")}`;
+    row.appendChild(dl);
+
+    // 办公文档 / PDF：多给一个弹窗内阅读入口（与消息附件一致）
+    const pvId = previewableAttId(att);
+    if (pvId) {
+      const pv = document.createElement("button");
+      pv.type = "button";
+      pv.className = "skill-run-artifact-btn";
+      pv.textContent = `👁 ${t("msg.preview")}`;
+      pv.title = t("msg.previewTip");
+      pv.onclick = () => openDocPreview(pvId, att.name || "");
+      row.appendChild(pv);
+    }
+    box.appendChild(row);
   }
 }
 

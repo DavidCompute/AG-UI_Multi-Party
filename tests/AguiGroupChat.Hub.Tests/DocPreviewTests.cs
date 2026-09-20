@@ -411,6 +411,7 @@ public sealed class DocPreviewApiServerFixture : IAsyncLifetime
         builder.Services.AddSingleton(new AttachmentStore(Path.Combine(TempRoot, "uploads")));
         builder.Services.AddDocumentPreview(Path.Combine(TempRoot, "preview"));
         builder.Services.AddSingleton<ISofficeRunner>(Runner);
+        builder.Services.AddSingleton<SkillRunArtifactStore>(); // 技能试运行产物归属（附件访问校验的一路放行）
 
         App = builder.Build();
         HubApp.MapEndpoints(App);
@@ -580,6 +581,37 @@ public sealed class DocPreviewApiTests : IClassFixture<DocPreviewApiServerFixtur
         Assert.Equal(callsBefore, _fixture.Runner.Calls); // PDF 不必过转换器
     }
 
+    [Fact]
+    public async Task Preview_TrialRunArtifact_IsReadableOnlyByItsProducer()
+    {
+        // 技能库试运行产出的稿子不属于任何知聚消息：登记归属前谁都无权（403），
+        // 登记后**产出者本人**可读 / 可下载（否则用户自己刚生成的稿子点开就是无权访问），他人仍不可读。
+        var owner = await RegisterAsync("pv_art_owner");
+        var other = await RegisterAsync("pv_art_other");
+        var att = await UploadAsync(owner.Token, "试运行稿子.docx");
+        var attId = att.GetProperty("attachmentId").GetString()!;
+        var artifacts = _fixture.App.Services.GetRequiredService<SkillRunArtifactStore>();
+
+        var before = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}", owner.Token));
+        Assert.Equal(HttpStatusCode.Forbidden, before.StatusCode);
+
+        artifacts.Register(attId, owner.UserId);
+
+        var asOwner = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}", owner.Token));
+        Assert.Equal(HttpStatusCode.OK, asOwner.StatusCode);
+        Assert.Equal("application/pdf", asOwner.Content.Headers.ContentType?.MediaType);
+
+        var asOther = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}", other.Token));
+        Assert.Equal(HttpStatusCode.Forbidden, asOther.StatusCode);
+
+        // 下载端点共用同一段校验：他人下载同样 403
+        var name = Uri.EscapeDataString("试运行稿子.docx");
+        var dlOther = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/files/{attId}/{name}", other.Token));
+        Assert.Equal(HttpStatusCode.Forbidden, dlOther.StatusCode);
+        var dlOwner = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/files/{attId}/{name}", owner.Token));
+        Assert.Equal(HttpStatusCode.OK, dlOwner.StatusCode);
+    }
+
     // ================= 辅助 =================
 
     private static HttpRequestMessage Authed(HttpMethod method, string path, string token, object? body = null)
@@ -619,18 +651,24 @@ public sealed class DocPreviewApiTests : IClassFixture<DocPreviewApiServerFixtur
         create.EnsureSuccessStatusCode();
         var groupId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
 
-        using var form = new MultipartFormDataContent();
-        form.Add(new ByteArrayContent(content ?? Encoding.UTF8.GetBytes("预览用的假文档内容")), "file", fileName);
-        using var upload = new HttpRequestMessage(HttpMethod.Post, "/ag-ui/upload") { Content = form };
-        upload.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        var up = await _client.SendAsync(upload);
-        up.EnsureSuccessStatusCode();
-        var attachment = (await up.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("attachments")[0];
+        var attachment = await UploadAsync(token, fileName, content);
 
         var send = await _client.SendAsync(Authed(HttpMethod.Post, "/ag-ui/group/message/send", token,
             new { groupId, userId, content = "带附件的消息", attachments = new[] { attachment } }));
         send.EnsureSuccessStatusCode();
 
         return (token, groupId, attachment.GetProperty("attachmentId").GetString()!);
+    }
+
+    /// <summary>只上传一个附件（不建群、不发消息）——用于「不属于任何消息的试运行产物」用例。</summary>
+    private async Task<JsonElement> UploadAsync(string token, string fileName, byte[]? content = null)
+    {
+        using var form = new MultipartFormDataContent();
+        form.Add(new ByteArrayContent(content ?? Encoding.UTF8.GetBytes("预览用的假文档内容")), "file", fileName);
+        using var upload = new HttpRequestMessage(HttpMethod.Post, "/ag-ui/upload") { Content = form };
+        upload.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var up = await _client.SendAsync(upload);
+        up.EnsureSuccessStatusCode();
+        return (await up.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("attachments")[0];
     }
 }

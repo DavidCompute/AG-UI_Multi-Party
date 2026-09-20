@@ -27,6 +27,7 @@ builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<
 builder.Services.AddSingleton(builder.Configuration.GetSection("ClientTool").Get<AguiGroupChat.Web.ClientToolOptions>() ?? new AguiGroupChat.Web.ClientToolOptions()); // 客户端技能本机桥配置（ClientTool 节：RequireAdmin 等）
 builder.Services.AddSingleton<NativeTunnelService>(); // 内网本机桥反向隧道（HTTP/SSE）路由 + 执行等待
 builder.Services.AddSingleton<NativeBridgeIssuedTokenStore>(); // 安装包绑定型令牌签发器（首次连接绑定 client，防包复制滥用）
+builder.Services.AddSingleton<SkillRunArtifactStore>(); // 技能试运行产物归属（产出者本人可读 / 下载 / 预览）
 // 办公文档「在线查看」：docx / xlsx / pptx 用 LibreOffice 转 PDF 后缓存，前端弹窗内联渲染。
 // 缓存放 data/preview（跟 attachments 同一个数据根，容器重建不丢；丢了也只是重转一次）。
 builder.Services.AddDocumentPreview(
@@ -146,6 +147,7 @@ app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（
 app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
 app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
 app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
+app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

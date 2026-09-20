@@ -152,6 +152,41 @@ async function main() {
     check("不支持类型 400 用例（zip 上传）", false, `上传失败 ${zipUp.status}`);
   }
 
+  // ---- 技能库试运行产物：产出文件应可下载 + 可在线查看（产出者本人）----
+  console.log("\n—— 技能试运行产物（真实内置 docx 技能）——");
+  const skills = await (await api("/ag-ui/skills/", { token })).json();
+  const docxSkill = (skills || []).find((s) => s.skillId === "docx_report") || (skills || []).find((s) => /^docx_/.test(s.skillId || ""));
+  if (!docxSkill) {
+    check("找到内置 docx 技能", false, "技能库中没有 docx_* 技能");
+  } else {
+    const run = await api(`/ag-ui/skills/${encodeURIComponent(docxSkill.skillId)}/run`, {
+      method: "POST", token, body: { query: "写一份 2026 年第一季度工作总结，小标题两级，包含三个要点" },
+    });
+    const runBody = await run.json().catch(() => ({}));
+    const atts = Array.isArray(runBody.attachments) ? runBody.attachments : [];
+    check(`试运行 ${docxSkill.skillId} 成功`, run.status === 200, `状态 ${run.status}`);
+    check("试运行响应带回产出附件", atts.length > 0, `attachments=${atts.length}`);
+    check("产出附件是可下载的站内地址",
+      atts.length > 0 && /^\/ag-ui\/files\/att_[A-Za-z0-9_-]+\//.test(atts[0].url || ""), atts[0]?.url || "(无)");
+
+    if (atts.length > 0) {
+      const attId = atts[0].attachmentId;
+      // 产物不属于任何知聚消息，因此这条 200 验的是「试运行产物归属」放行规则
+      const pv = await api(`/ag-ui/preview/${attId}`, { token });
+      const pvBuf = Buffer.from(await pv.arrayBuffer());
+      const pvOk = pvBuf.subarray(0, 4).toString("latin1") === "%PDF";
+      check("试运行产物可在线查看（200 + PDF）",
+        pv.status === 200 && pv.headers.get("content-type")?.startsWith("application/pdf") && pvOk,
+        `状态 ${pv.status}，${pvBuf.length} 字节，${pvOk ? "%PDF ✓" : "非 PDF"}`);
+      check("试运行产物含可见页（页数 ≥1）", pdfPageCount(pvBuf) >= 1, `${pdfPageCount(pvBuf)} 页`);
+
+      const dl = await api(atts[0].url, { token });
+      check("试运行产物可下载（产出者本人）", dl.status === 200, `状态 ${dl.status}`);
+      const anon = await api(`/ag-ui/preview/${attId}`);
+      check("未登录不能看试运行产物 → 401", anon.status === 401, `状态 ${anon.status}`);
+    }
+  }
+
   // 清理：解散临时知聚（附件与缓存留盘，缓存 7 天自然过期）
   const disband = await api("/ag-ui/group/disband", {
     method: "POST", token, body: { groupId, operatorId: userId },

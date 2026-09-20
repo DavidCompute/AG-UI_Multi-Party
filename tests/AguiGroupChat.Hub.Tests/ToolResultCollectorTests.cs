@@ -61,7 +61,7 @@ public sealed class ToolResultCollectorTests
     {
         // 回归：工具返回是「持 JSON 字符串的 JsonElement」时，DescribeToolResult 的
         // JsonSerializer.Serialize 会把内层引号写成 \u0022（不是 \"）—— .NET 默认写转义器的行为。
-        // 早期 ExtractProduceFileObjects 只处理 \"，导致花括号能配对但 JsonDocument 解析失败，
+        // 早期 ProducedFileMarker.ExtractObjects 只处理 \"，导致花括号能配对但 JsonDocument 解析失败，
         // 标记丢失、技能产物不生成附件。
         var content = "{" + U0022 + "ok" + U0022 + ":true," + U0022 + "produce_file" + U0022 + ":{"
             + U0022 + "path" + U0022 + ":" + U0022 + "/app/docs/report.docx" + U0022 + ","
@@ -94,7 +94,7 @@ public sealed class ToolResultCollectorTests
     private static List<string> ExtractPaths(string content)
     {
         var found = new List<string>();
-        foreach (var json in AgentGateway.ExtractProduceFileObjects(content))
+        foreach (var json in ProducedFileMarker.ExtractObjects(content))
         {
             try
             {

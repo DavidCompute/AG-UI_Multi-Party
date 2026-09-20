@@ -25,7 +25,7 @@ public sealed class SkillProducedFileAttachmentTests
     private static List<string> ExtractPaths(string content)
     {
         var found = new List<string>();
-        foreach (var json in AgentGateway.ExtractProduceFileObjects(content))
+        foreach (var json in ProducedFileMarker.ExtractObjects(content))
         {
             try
             {

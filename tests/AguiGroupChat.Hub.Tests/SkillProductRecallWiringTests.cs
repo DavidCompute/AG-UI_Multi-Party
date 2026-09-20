@@ -21,13 +21,27 @@ public sealed class SkillProductRecallWiringTests
 {
     private static string GatewaySource()
     {
+        var dir = SourceRoot();
+        var path = Path.Combine(dir, "src", "AguiGroupChat.Agents", "AgentGateway.cs");
+        Assert.True(File.Exists(path), "找不到 AgentGateway.cs：" + path);
+        return File.ReadAllText(path);
+    }
+
+    private static string ProducedFileMarkerSource()
+    {
+        var dir = SourceRoot();
+        var path = Path.Combine(dir, "src", "AguiGroupChat.Agents", "ProducedFileMarker.cs");
+        Assert.True(File.Exists(path), "找不到 ProducedFileMarker.cs：" + path);
+        return File.ReadAllText(path);
+    }
+
+    private static string SourceRoot()
+    {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "AguiGroupChat.slnx")))
             dir = dir.Parent;
         Assert.NotNull(dir);
-        var path = Path.Combine(dir!.FullName, "src", "AguiGroupChat.Agents", "AgentGateway.cs");
-        Assert.True(File.Exists(path), "找不到 AgentGateway.cs：" + path);
-        return File.ReadAllText(path);
+        return dir!.FullName;
     }
 
     [Fact]
@@ -65,12 +79,23 @@ public sealed class SkillProductRecallWiringTests
     [Fact]
     public void RecallPath_ChecksExtensionWhitelist()
     {
-        // 回档路径必须自带白名单校验（Save 本身不校验，上传端点的闸门到不了这里）
-        var src = GatewaySource();
-        var at = src.IndexOf("private async Task<int> AttachSkillProducedFilesAsync", StringComparison.Ordinal);
+        // 回档路径必须自带白名单校验（Save 本身不校验，上传端点的闸门到不了这里）。
+        // 解析与入库现在收口在 ProducedFileMarker.SaveAll（聊天回档与技能库试运行**共用**同一实现，
+        // 否则两条路会漂移），所以这里断言两件事：
+        //   ① 网关的回档方法确实走那个收口（而不是自己另写一份）；
+        //   ② 那个收口里确实有白名单与产物尺寸上限。
+        var gateway = GatewaySource();
+        var at = gateway.IndexOf("private async Task<int> AttachSkillProducedFilesAsync", StringComparison.Ordinal);
         Assert.True(at >= 0);
-        var body = src.Substring(at, Math.Min(3000, src.Length - at));
-        Assert.Contains("IsAllowedUploadExtension", body);
+        var body = gateway.Substring(at, Math.Min(1200, gateway.Length - at));
+        Assert.Contains("ProducedFileMarker.SaveAll(", body);
+
+        var marker = ProducedFileMarkerSource();
+        var saver = marker.IndexOf("public static IReadOnlyList<AttachmentInfo> SaveAll(", StringComparison.Ordinal);
+        Assert.True(saver >= 0, "找不到 ProducedFileMarker.SaveAll");
+        var saverBody = marker.Substring(saver, Math.Min(3000, marker.Length - saver));
+        Assert.Contains("IsAllowedUploadExtension", saverBody);
+        Assert.Contains("MaxProducedFileBytes", saverBody); // 超限要报出来，不能静默丢弃
     }
 
     private static int CountOccurrences(string haystack, string needle)

@@ -331,6 +331,7 @@ window.I18N_DICTS.zh = {
   "skill.testRun": "试运行",
   "skill.testQuery": "输入试运行请求（测试技能执行效果）：",
   "skill.testResult": "试运行结果：",
+  "skill.testArtifacts": "📦 本次产出（可下载 / 可在线查看）",
   "skill.testResultTitle": "试运行结果",
   "skill.testSuggestLabel": "已根据技能生成示例，可修改",
   "skill.testApplyFix": "应用修复后的正文",

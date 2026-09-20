@@ -123,7 +123,9 @@ public static class AttachmentApi
         if (path is null)
             return (null, Results.NotFound(new AguiError(ErrorCodes.GroupMessageNotFound, "附件不存在或已删除")));
 
-        if (!CanAccessAttachment(attachmentId, userId, groupStore, auth, catalog, hub))
+        // 试运行产物归属：可选服务（精简宿主可能没注册），取不到就退化为“不额外放行”
+        var runArtifacts = ctx.RequestServices.GetService<SkillRunArtifactStore>();
+        if (!CanAccessAttachment(attachmentId, userId, groupStore, auth, catalog, hub, runArtifacts))
             return (null, Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "无权访问该附件"),
                 statusCode: StatusCodes.Status403Forbidden));
 
@@ -147,10 +149,13 @@ public static class AttachmentApi
     /// 客服知聚：客服（成员）可见全部消息附件；非成员顾客参与者仅可下载自己会话内可见的消息附件。
     /// 头像附件放行：附件是任意用户 / 智能体（含分身）的头像或**群头像**时，已登录用户可访问——
     /// 头像用于群成员 / 群列表 / 消息渲染，本身不含敏感信息；否则上传的头像因不属于任何群消息而被 403 拦截。
+    /// 试运行产物放行：技能库试运行产出的稿子不属于任何消息，但**产出者本人**应当能看 / 下载（见 <see cref="SkillRunArtifactStore"/>）。
     /// </summary>
     private static bool CanAccessAttachment(string attachmentId, string userId, IGroupStore groupStore,
-        AuthService auth, AgentCatalog catalog, AguiGroupChat.Hub.Messaging.GroupHub hub)
+        AuthService auth, AgentCatalog catalog, AguiGroupChat.Hub.Messaging.GroupHub hub,
+        SkillRunArtifactStore? runArtifacts = null)
     {
+        if (runArtifacts?.IsOwnedBy(attachmentId, userId) == true) return true;
         var accessibleGroups = groupStore.GroupsOf(userId).ToList();
         // 补充尚未成为成员的客服知聚（顾客参与者），以便其下载自己会话内的附件
         foreach (var g in groupStore.AllGroups())

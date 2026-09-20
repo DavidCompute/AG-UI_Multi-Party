@@ -33,6 +33,7 @@
 - **客户技能不误跑服务端 bash（已实现）**：`ExecutionLocation=Client` 技能与服务端/非 Windows 宿主下明显 PowerShell 正文得到“需本机/需 PowerShell 环境”的明确指引，不再出现 `Not running in PowerShell / command not found / 退出码2` 假报错。
 - **内置产出技能矩阵已齐备（已实现）**：Word（`docx_gongwen` / `docx_notice` / `docx_report`）、Excel（`xlsx_book`：多工作表、公式优先、数字格式、合计行、冻结窗格与自动筛选、财务配色惯例，另有 `analyze` 模式读取已有工作簿并回报结构摘要）、PPT（`pptx_deck`）、PDF（`pdf_doc`：设计令牌驱动多文档类型与封面版式、内容块体系、Markdown 重排路由、中文字体自动探测并子集嵌入）。均为随程序集分发的 `dotnet` 内置技能，开箱即用；可分别用 `Agents:BuiltinDocxSkills` / `BuiltinPptxSkills` / `BuiltinXlsxSkills` / `BuiltinPdfSkills` 关闭播种。
 - **交付物在线查看（已实现）**：消息里带 docx / xlsx / pptx 等办公文档附件的，卡片旁多一个「👁 在线查看」→ 服务端 LibreOffice 转 PDF 后**内联**返回（`GET /ag-ui/preview/{attachmentId}`），前端宽幅弹窗 iframe 直接阅读，不用下载、不用装本地 Office（PDF 附件直通不转换）。权限与下载**同一套校验**（401 / 403 / 已撤回不可读 / 404），转换产物按「附件 ID + 源文件指纹」缓存 7 天（实测首次 docx≈2.5s / xlsx≈1.7s / 4.4MB-16 页 pptx≈5.3s，二次≈15ms），并发串行 + 120s 超时；服务端未装 LibreOffice 时降级 503 并提示可下载后用本地应用打开。
+- **技能库试运行同样回档产物（已实现）**：`POST /ag-ui/skills/{skillId}/run` 返回 `attachments[]`（本次生出的文件），产物按与聊天回档**同一实现**校验入库并登记归属（产出者本人可读 / 可下载 / 可在线查看，他人 403）；产物不属于任何知聚消息，因此另设 `SkillRunArtifactStore`（持久化到扩展区，7 天 / 每人 50 条裁剪）。本机桥 / 客户端执行的试运行不回档（产物在用户自己机器上）。
 
 ### 1.2 角色间消息传递 / 交接（★★☆） ✅已实现（整轮角色交接）
 - **现状**：智能体把另一智能体当「工具」单次取用，无双向协作语义。

@@ -6,14 +6,14 @@ namespace AguiGroupChat.Hub.Tests;
 
 /// <summary>
 /// 技能产物（produce_file 标记）→ 附件回档：让「技能生成的文件」能在前端直接下载。
-/// 直接测生产实现 <see cref="AgentGateway.ExtractProduceFileObjects"/>（不复制一份逻辑，避免两处漂移）。
+/// 直接测生产实现 <see cref="ProducedFileMarker.ExtractObjects"/>（不复制一份逻辑，避免两处漂移）。
 /// </summary>
 public sealed class SkillProducedFileMarkerTests
 {
     private static List<string> Paths(string content)
     {
         var found = new List<string>();
-        foreach (var json in AgentGateway.ExtractProduceFileObjects(content))
+        foreach (var json in ProducedFileMarker.ExtractObjects(content))
         {
             try
             {

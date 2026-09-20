@@ -720,6 +720,19 @@ select {
 }
 .doc-preview-error { color: #e5534b; }
 .doc-preview-frame { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+
+/* ---- 技能试运行的产出文件（下载 / 在线查看）---- */
+.skill-run-artifacts { border-top: 1px solid var(--border); padding-top: 8px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+.skill-run-artifacts-title { font-size: 12.5px; color: var(--muted); }
+.skill-run-artifact { display: flex; align-items: center; gap: 8px; }
+.skill-run-artifact-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.skill-run-artifact-btn {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  font-size: 12.5px; color: var(--accent); text-decoration: none; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 9px; white-space: nowrap; font-family: inherit;
+}
+.skill-run-artifact-btn:hover { border-color: var(--accent); }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* 输入区录音中 / 画布标注模态 */

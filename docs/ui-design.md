@@ -160,9 +160,10 @@ topbar（品牌 + 顶栏操作）
 | `Esc` 在**捕获阶段**处理，且弹窗已隐藏时直接返回 | 不与下层弹窗（如库设置）争抢，不穿透 |
 | 为每一页单独的按键绑定都在 `msgDom` 末尾（`bindDocPreviewButtons`） | 消息用字符串拼 HTML + 插入后绑定，不走事件委派 |
 
-**入口判定**（`previewableAttId()`）：扩展名命中 `pdf/docx?/xlsx?/pptx?/odt/ods/odp/rtf`，
+| 入口判定 | `previewableAttId()`：扩展名命中 `pdf/docx?/xlsx?/pptx?/odt/ods/odp/rtf`，
 且能解出站内附件 ID（`att_xxx`：取 `attachmentId`，外部桥接附件从 `url` 里解析）——
-外部直链附件拿不到站内 ID，不给入口。
+外部直链附件拿不到站内 ID，不给入口。 |
+| 可从**两个**入口唤起 | ① 消息附件卡片旁（§2.2）；② 技能库「试运行」结果弹窗的产出区（§5）。因此它用 `ui-dialog-overlay`（z-80）而不是普通 z-20：要从 z-20 的弹窗之上弹出来 |
 
 ---
 
@@ -261,6 +262,18 @@ topbar（品牌 + 顶栏操作）
 - 技能表单：名称/SkillId/类型（prompt/shell/http/dotnet）/描述/正文/执行位置（server/client）/
   解释器/需审批开关；试运行（`#sfTest`）结果弹 `#skillRunResultModal`；shell 始终需审批；
   client 技能在本机桥执行，需发起用户批准。
+- **试运行结果里的产出区 `#skillRunResultArtifacts`**（`.skill-run-artifact` 行）：
+  内置 docx / xlsx / pptx / pdf 等 `dotnet` 技能会把文件写到**服务端磁盘**，而结果文本里只有一行路径 ——
+  以前用户看得到路径却拿不到稿子。现在服务端把 `produce_file` 标记入库为附件并随响应返回 `attachments[]`
+  （与聊天回档**同一实现**：扩展名白名单 / 非空 / 产物尺寸上限），前端把它渲染成可操作的产出行：
+  - `⬇ 下载`：站内附件直链（`authedAssetUrl` 带会话令牌），点开即下载原件；
+  - `👁 在线查看`：仅办公文档 / PDF 类出现，复用 §2.5 的文档预览弹窗（弹窗 z-index 用
+    `ui-dialog-overlay`（80），因为它是从 z-20 的技能结果弹窗里唤起的，必须在其之上；
+    `Esc` 在捕获阶段只收起预览弹窗，不会把下层的技能结果弹窗一起关掉）；
+  - 每次试运行**先清空上一次的产出**，否则两次结果会混排。
+  - 能拿到的前提是**产出者本人**：试运行产物不属于任何知聚消息，服务端另记一份归属
+    （`SkillRunArtifactStore`，持久化到扩展区，保留 7 天 / 每人 50 条），因此自己能看到、别人看不到；
+    本机桥 / 客户端执行的试运行不回档（产物在用户自己机器上，服务端读不到）。
 - `#kbModal`（知识库）：创建/管理知识库、上传文档，文档异步向量化入库（状态轮询）。
   行操作：`📤 上传文档` / `⚙️ 库设置` / `🗑️ 删除知识库`（均仅创建者可见）。
   `⚙️` 与图库**共用同一个设置弹窗** `#libSetModal`（见下），只是档位与说明按库类型不同。
@@ -425,6 +438,7 @@ apiKey 不回显，仅提示“已配置”。
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
 | 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（docx / xlsx / pptx → PDF 内联；`?token=` 授权；权限同 `/files`；转换产物带缓存）|
+| 技能库试运行 | `POST /ag-ui/skills/{skillId}/run`（返回 `attachments[]` = 本次产出的文件；产物归属记在产出者名下，本人可下载 / 可预览）|
 | 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`POST /ag-ui/kb/{kbId}/search`（试检索，只回片段预览）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌；库设置里的试检索也走它） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
 | 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |

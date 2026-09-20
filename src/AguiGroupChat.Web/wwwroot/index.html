@@ -601,6 +601,9 @@
     <div class="modal skill-modal" style="max-width:560px">
       <div class="modal-title">🧪 <span data-i18n="skill.testResultTitle">试运行结果</span></div>
       <pre id="skillRunResultBody" class="skill-test-result" style="white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;margin:4px 0 12px;font-size:12.5px;line-height:1.5"></pre>
+      <!-- 本次试运行的产出文件（内置 docx / xlsx / pptx / pdf 技能会写入服务端磁盘）：
+           结果文本里只有一行路径，这里把它们变成真的可下载 / 可在线查看的入口。 -->
+      <div id="skillRunResultArtifacts" class="skill-run-artifacts hidden"></div>
       <div class="modal-actions">
         <button id="skillRunFixApply" class="send hidden" style="margin-right:auto">✅</button>
         <button id="skillRunResultClose" class="send" data-i18n="ui.ok">确定</button>
@@ -716,7 +719,7 @@
        为何不把 iframe.src 直接指向接口：那样 iframe 会把 JSON 错误页（401/403/503/500）静默渲染出来，
        用户只看到一片空白；取 Blob 能拿到真实状态码，从而给出准确的错因提示。
        为此 CSP 需要放行 frame-src blob:（见 Program.cs 的响应头中间件）。 -->
-  <div id="docPreviewModal" class="modal-overlay hidden">
+  <div id="docPreviewModal" class="modal-overlay ui-dialog-overlay hidden">
     <div class="modal doc-preview-modal">
       <div class="modal-title doc-preview-head">
         <span class="doc-preview-name" id="docPreviewName"></span>
