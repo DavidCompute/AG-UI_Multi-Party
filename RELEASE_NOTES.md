@@ -1,3 +1,37 @@
+# AG-UI 群聊桌面版 1.0.147 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.147 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.147 把 **Word / PDF 的配图**提到 PPT 的水平 —— 以前它们“门槛没传（平台按 0.25 兜底，等于不筛）+ 没有二次尝试”，所以**更容易配错图、也配不上人名**。现在三者同口径：**显式门槛 0.6 + 上下文候选逐个查（图自己的 caption → 最近的标题 → 前面最近的文字块）+ 谁分高用谁**，并在返回里回显“用了哪条检索词、哪张图、多少分”。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.147 brings **Word/PDF illustration up to the PPT level**. They previously sent no `minScore` (the platform falls back to 0.25 — no filtering at all) and had no second attempt, so they were *more* likely to embed an unrelated photo and could not match a person by name. All three now share one mechanism: an explicit **0.6 gate**, **context candidates tried one by one** (the image's own caption → nearest heading → preceding text block) with **highest score wins**, and a response echo of *which query won, which file, what score*.
+
+## Word / PDF 配图：门槛与上下文候选（1.0.147）
+# Word/PDF illustration: a real gate plus context candidates (1.0.147)
+
+中文：
+- **原病**：两处技能发的检索请求是 `{"query":…,"scopeHandle":…,"topK":3}` —— **没传 `minScore`**，平台按 **0.25** 兜底，
+  而实测无意义关键词能到 **0.44~0.55**、真实命中才是 0.62~0.88。于是“关键词不相关也能蹭过门槛”，
+  把不相干的照片嵌进稿子；又因为没有“用本页/上下文文字再查一次”，**人名永远配不上**。
+- **修法（与 PPT 1.0.145 同口径）**：
+  1. **显式门槛**：请求里带 `minScore: 0.6`，阈值以下不静默（跳过该图 + `warnings` 写清原因）；
+  2. **上下文候选**：关键词命中不够确定（< 0.78）或没命中时，依次用 **图自己的 caption/alt → 最近的标题 → 前面最近的文字块**
+     各查一次，**取分数最高者**；一旦某个候选 ≥ 0.78 就停（最多再查 3 次）；
+  3. **分开查，不拼串**（实测踩到）：把“caption + 标题 + 正文”拼成一句去查，关键的那个名字会被旁边的词稀释 ——
+     人名直查 **0.88**，拼串只有 **0.63**，标题单独查 **0.62** 反而能用；
+  4. **回显**：返回 JSON 多了 `images[{query,fileName,score}]`（图库**原始文件名**，不是服务器存储名 `asset_xxx.png`）；
+     失败时 `warnings` 里**两条原因都写出来**（关键词 + 上下文），并保留“用的是哪条关键词”。
+- **实测**（真实图库 + 真实模型，`tools/verify_docx_pdf_image_match.py`）：
+  正文标题写“高效习惯优秀进步奖 · 刘佳俊”、模型只给“员工 颁奖 舞台” → 最终嵌入的**就是 `1刘佳俊.png`**
+  （**按嵌入字节与图库文件逐字节比对**，不是只信它自己报的）；对照组（无关页）不配图且有告警。PDF 同理。
+- **测试**：新增 3 个（低分命中输给上下文 / 已足够确定就不多查 / PDF 同场景），全量 **1352 通过**。
+
+English:
+- **The bug**: both skills sent `{"query":…,"scopeHandle":…,"topK":3}` with **no `minScore`**, so the platform fell back to **0.25** while measured nonsense keywords score **0.44–0.55** (real hits: 0.62–0.88). Irrelevant keywords slipped through the gate and unrelated photos got embedded — and with no second attempt, a page naming a person never matched.
+- **The fix (same mechanism as PPT in 1.0.145)**: (1) an explicit **`minScore: 0.6`**, with nothing silent below it (the image is skipped and the reason names the keyword); (2) when the keyword hit is uncertain (below 0.78) or missing, **context candidates** — the image's own caption/alt, the nearest heading, the preceding text block — are queried in turn and the **highest score wins**, stopping as soon as one reaches 0.78 (at most 3 extra lookups); (3) candidates are queried **separately, never concatenated**: combining caption+heading+body dilutes the name that matters (0.88 for the bare name versus 0.63 combined, while the heading alone still scores 0.62); (4) responses now carry **`images[{query,fileName,score}]`** using the library's **original file name**, and a failed match reports both reasons (keyword and context).
+- **Verified live** against the real library (`tools/verify_docx_pdf_image_match.py`): a heading “... · 刘佳俊” with the keyword “员工 颁奖 舞台” now embeds **`1刘佳俊.png`**, proven by **byte-comparing the embedded image against the library file**; the unrelated control case embeds nothing and warns. PDF behaves the same.
+- **Tests**: 3 new cases, **1352 passing** overall.
+
+---
+
 # AG-UI 群聊桌面版 1.0.146 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.146 Release Notes (current Windows desktop release)
 
