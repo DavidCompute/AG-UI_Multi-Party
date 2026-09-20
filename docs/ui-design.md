@@ -234,6 +234,8 @@ topbar（品牌 + 顶栏操作）
   解释器/需审批开关；试运行（`#sfTest`）结果弹 `#skillRunResultModal`；shell 始终需审批；
   client 技能在本机桥执行，需发起用户批准。
 - `#kbModal`（知识库）：创建/管理知识库、上传文档，文档异步向量化入库（状态轮询）。
+  行操作：`📤 上传文档` / `⚙️ 库设置` / `🗑️ 删除知识库`（均仅创建者可见）。
+  `⚙️` 与图库**共用同一个设置弹窗** `#libSetModal`（见下），只是档位与说明按库类型不同。
 - `#imgLibModal`（图库 `modal kb-modal`）：与知识库**同构**的列表式布局——工具栏搜索（带 “×” 清除）+ 四列表格头（名称/ID · 图片 · 描述 · 操作）+ 列表 `#imgLibListWrap`（弹窗高度受 `max-height: calc(100vh - 48px)` 约束，列表区独立纵横滚动）。
   - 行点击（或 `▸`）展开/收起该库的**缩略图网格** `#imglib-grid`（`repeat(auto-fill, minmax(160px,1fr))`）；
     每张卡片 = 缩略图 + 文件名/像素尺寸/**向量化状态徐标** + 可编辑描述输入框 `保存描述` + `🗑️` 移除。
@@ -248,12 +250,16 @@ topbar（品牌 + 顶栏操作）
     处理中时行内直接显示 `⏳ 识别中…`，因此不必逐库展开也能一眼看出进度。
   - 四个徐标的悬浮说明（为何要看到完成态 / 为何“仅按文件名”也等于搜不到）均走 i18n（`imgLib.badge.*`）。
   - **行操作**（仅创建者可见）：`📤 上传图片` / `⚙️ 图库设置` / `🗑️ 删除图库`。
-    `⚙️` 打开 `#imgLibSetModal`（`ui-dialog-overlay`，浮于管理弹窗之上）：**检索严格度**下拉三档
+    `⚙️` 打开 `#libSetModal`（`ui-dialog-overlay`，浮于管理弹窗之上）：**检索严格度**下拉三档
     —— 宽松 `0.5` / 标准 `0.6`（推荐）/ 严格 `0.72`，下方一段说明为何要按库调。
     未设置时按“标准 0.6”回显（各文档技能默认传的就是它，行为一致）；
     接口手工设的非预设值（如 0.65）会临时插一个“自定义”选项回显 —— **否则一保存就会被默默改回 0.6**。
     交互：`Enter` 无意义（仅下拉）、`Esc` / 取消 / 点遮罩关闭（`Esc` 在捕获阶段处理，避免连下层管理弹窗一起关）。
-    文案 key：`imgLib.setTitle|setBtnTip|setStrictness|setLoose|setStandard|setStrict|setCustom|setHint|setSaved|setFail`。
+    文案 key：`libSet.*`（图库 / 知识库共用；档位与说明由 JS 按 `LIB_SET_KINDS` 填）。
+- **`#libSetModal`（库设置，图库 / 知识库共用）**：只做一件事——**检索严格度**。
+  为何共用：两个库类型的区别只在“档位取值”与“说明文案”，交互完全一致；共用后不会出现两套走样的弹窗。
+  知识库三档为 宽松 `0.15` / 标准 `0.25`（= 平台默认）/ 严格 `0.40`（实测：无关提问 0.31~0.38、真实命中 0.41~0.71）。
+  未设置时知识库回显“标准 0.25”；同一个“自定义值回显”规则避免一保存就被改掉。
   - 上传：仅库创建者可见 `📤 上传图片`（多选），走 `/ag-ui/upload` → 登记进图库；
     上传后由视觉模型异步写描述并向量化，状态 `processing` 时前端**每 2s 轮询**该弹窗直到全部 `ready`（无处理中则自动停止）。
   - 保存描述：`PUT /ag-ui/image-libs/{libId}/assets/{assetId}` **会在重新向量化完成后才返回**（后端 `await task`），
@@ -382,7 +388,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
-| 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌） |
+| 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
 | 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |
 | 系统 | `/ag-ui/export|import|import/preview|reset` |

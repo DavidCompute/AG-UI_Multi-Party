@@ -512,9 +512,14 @@ vectorized into the semantic-memory vector table (GroupId convention `kb:{KbId}`
 so the agent answers based on the user-provided material. **Document ingestion is asynchronous**: after upload the document record is shown immediately (`status=processing`); text extraction / chunking / vectorization run in the background,
 and the frontend polls the status every 2s — `ready` (stored, showing the chunk count) or `error` (showing the failure reason); a document being processed can be removed at any time (dropping not-yet-written vectors);
 a document whose processing was interrupted by a service restart reverts to `error` and must be re-uploaded. **Knowledge base vectors do not participate in group-memory retrieval** (both group-memory RAG and `group_memory_search` exclude `sender_type='kb'`, reading only through the bound path).
-Management APIs: `POST/GET/DELETE /ag-ui/kb`、`POST/DELETE /ag-ui/kb/{kbId}/documents(/docId)`
+Management APIs: `POST/GET/DELETE /ag-ui/kb`、`PUT /ag-ui/kb/{kbId}` (library settings: search strictness)、`POST/DELETE /ag-ui/kb/{kbId}/documents(/docId)`
 (creator-only management; system-level knowledge bases are read-only); they depend on the vector store and embedding (the same stack as semantic memory: pgvector / sqlite-vec + llama / http embedding);
 when unavailable, document ingestion returns an explicit error.
+
+**Search strictness is per knowledge base** (`PUT /ag-ui/kb/{kbId}`; in the UI the `⚙️` on each row under “📚 Manage knowledge bases”): the gate lives on the **knowledge base**, and **the library wins when set** — when unset the global `Agents:Memory:MinScore` (default 0.25) applies, so unset libraries behave exactly as before.
+Why per library: short-item/catalogue-style documents score high for any question (tighten it), while long prose scores low for a one-line question (loosen it or nothing is recalled).
+Measured (real document + bge-m3): unrelated questions **0.31-0.38**, real hits **0.41-0.71** (a narrower margin than image libraries, hence smaller steps).
+Presets: loose 0.15 / standard 0.25 (= platform default) / strict 0.40. Image libraries use the same mechanism (presets 0.5 / 0.6 / 0.72; measured noise ≤0.55, real hits 0.62-0.88).
 
 **Image library (the source of images for the document skills)**: a collection of user-uploaded images so that **illustration no longer depends on the internet** (Wikimedia is usually unreachable on an intranet).
 It mirrors the knowledge base but stores pictures: uploads go through the same `/ag-ui/upload` (same image whitelist and 20 MB cap);

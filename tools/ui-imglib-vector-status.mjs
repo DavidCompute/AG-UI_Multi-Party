@@ -68,6 +68,11 @@ try {
   };
   console.log("已登录 " + USERNAME);
 
+  const waitListRendered = () => page.waitForFunction(() => {
+    const w = document.getElementById("imgLibListWrap");
+    // 列表区要么有库行，要么已渲染出空态文案（否则可能只是还没 load 完）
+    return !!w && (!!w.querySelector(".kb-list-item") || w.textContent.trim().length > 0);
+  }, { timeout: 20000 });
   const openLibModal = async () => {
     if (await page.locator("#imgLibModal.hidden").count()) {
       await page.waitForSelector("#agentManageBtn", { state: "visible", timeout: 20000 });
@@ -81,6 +86,7 @@ try {
       await page.click("#agentImgLibManageBtn");
       await page.waitForSelector("#imgLibModal:not(.hidden)", { timeout: 10000 });
     }
+    await waitListRendered();
   };
   const itemOf = (name) => page.locator("#imgLibListWrap .kb-list-item").filter({ hasText: name }).first();
   const expand = async (item) => {
@@ -91,13 +97,14 @@ try {
   };
   const badgesOf = async (item) => (await item.locator(".imglib-meta .kb-status").allTextContents()).map((x) => x.trim());
 
-  // ---------- 1) 真实图库（只读）：每张图都要有状态徽标 ----------
+  // ---------- 1) 真实图库（只读）：每张图都要有状态徐标 ----------
   await openLibModal();
   const libCount = await page.locator("#imgLibListWrap .kb-list-item").count();
   for (let i = 0; i < libCount; i++) {
     const item = page.locator("#imgLibListWrap .kb-list-item").nth(i);
     await expand(item);
   }
+  if (libCount > 0) await sleep(300);   // 展开后等缩略图网格渲染
   const cards = await page.locator(".imglib-card").count();
   const badges = await page.locator(".imglib-card .imglib-meta .kb-status").allTextContents();
   console.log("真实图库 " + libCount + " 个，图片卡片 " + cards + " 张");
@@ -201,8 +208,13 @@ try {
     // ---------- 4) 描述存空 → 「⚠ 仅按文件名匹配」 ----------
     await capInput.fill("");
     await saveBtn.click();
-    await sleep(600);
-    const emptyBadge = (await badgesOf(probeItem))[0] || "";
+    // 轮询等徐标变成“仅按文件名匹配”（PUT 要等重新向量化 + 列表重拉，固定 sleep 不可靠）
+    let emptyBadge = "";
+    for (let i = 0; i < 60; i++) {
+      emptyBadge = (await badgesOf(probeItem))[0] || "";
+      if (FILENAME_ONLY.test(emptyBadge)) break;
+      await sleep(200);
+    }
     check("描述存空时提示「⚠ 仅按文件名匹配」", FILENAME_ONLY.test(emptyBadge), emptyBadge);
   }
 
@@ -216,26 +228,26 @@ try {
   check("图库行上有 ⚙️ 设置入口", await gear.count() > 0);
   if (await gear.count() > 0) {
     await gear.click();
-    await page.waitForSelector("#imgLibSetModal:not(.hidden)", { timeout: 5000 });
+    await page.waitForSelector("#libSetModal:not(.hidden)", { timeout: 5000 });
     check("⚙️ 打开设置弹窗（浮在管理弹窗之上）", true);
-    check("弹窗标题带图库名", ((await page.locator("#imgLibSetTitle").textContent()) || "").includes(probeLibName));
+    check("弹窗标题带图库名", ((await page.locator("#libSetTitle").textContent()) || "").includes(probeLibName));
     check("未设置时回显为「标准（0.6）」（技能默认值）",
-          await page.locator("#imgLibSetStrictness").inputValue() === "0.6",
-          await page.locator("#imgLibSetStrictness").inputValue());
-    await page.selectOption("#imgLibSetStrictness", "0.72");
-    await page.click("#imgLibSetOk");
-    await page.waitForSelector("#imgLibSetModal.hidden", { state: "hidden", timeout: 8000 });
+          await page.locator("#libSetStrictness").inputValue() === "0.6",
+          await page.locator("#libSetStrictness").inputValue());
+    await page.selectOption("#libSetStrictness", "0.72");
+    await page.click("#libSetOk");
+    await page.waitForSelector("#libSetModal.hidden", { state: "hidden", timeout: 8000 });
     const saved = await apiJson("GET", "/ag-ui/image-libs");
     const mine = (saved.body?.libraries || []).find((l) => l.libId === probeLibId);
     check("保存后接口回读为 0.72", Math.abs((mine?.minScore ?? 0) - 0.72) < 1e-9, String(mine?.minScore));
     // 再打开：应按已保存值回显（否则一保存就被默默改回 0.6）
     await setItem.locator(".imglib-set").first().click();
-    await page.waitForSelector("#imgLibSetModal:not(.hidden)", { timeout: 5000 });
+    await page.waitForSelector("#libSetModal:not(.hidden)", { timeout: 5000 });
     check("重新打开时回显已保存的 0.72",
-          await page.locator("#imgLibSetStrictness").inputValue() === "0.72",
-          await page.locator("#imgLibSetStrictness").inputValue());
-    await page.click("#imgLibSetCancel");
-    await page.waitForSelector("#imgLibSetModal.hidden", { state: "hidden", timeout: 5000 });
+          await page.locator("#libSetStrictness").inputValue() === "0.72",
+          await page.locator("#libSetStrictness").inputValue());
+    await page.click("#libSetCancel");
+    await page.waitForSelector("#libSetModal.hidden", { state: "hidden", timeout: 5000 });
   }
 
   // ---------- 5) 清理：删掉临时图库（不碰真实数据）----------

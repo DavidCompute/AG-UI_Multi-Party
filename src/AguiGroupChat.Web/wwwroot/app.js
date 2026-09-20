@@ -2894,6 +2894,7 @@ function renderKbModal() {
     let ops = `<button class="icon-btn kb-expand" data-kb="${escapeHtml(kb.kbId)}" title="${t("kb.toggleDocs")}" style="font-size:12px">${arrow}</button>`;
     if (mine) {
       ops += `<button class="chip-btn kb-upload" data-kb="${escapeHtml(kb.kbId)}" type="button" style="font-size:12px;padding:2px 8px">${t("kb.uploadDoc")}</button>`
+        + `<button class="icon-btn kb-set" data-kb="${escapeHtml(kb.kbId)}" title="${escapeHtml(t("libSet.titleAttr"))}">⚙️</button>`
         + `<button class="icon-btn kb-del" data-kb="${escapeHtml(kb.kbId)}" title="${t("kb.delTitle")}">🗑️</button>`;
     } else {
       ops += `<span style="color:var(--muted);font-size:12px">${t("kb.systemReadonly")}</span>`;
@@ -2932,6 +2933,9 @@ function renderKbModal() {
     });
     item.querySelectorAll(".kb-upload").forEach((upBtn) => {
       upBtn.addEventListener("click", (e) => { e.stopPropagation(); item.querySelector(".kb-file")?.click(); });
+    });
+    item.querySelectorAll(".kb-set").forEach((setBtn) => {
+      setBtn.addEventListener("click", (e) => { e.stopPropagation(); openLibSettings("kb", setBtn.dataset.kb); });
     });
     const fileInput = item.querySelector(".kb-file");
     if (fileInput) fileInput.onchange = async (e) => {
@@ -3126,7 +3130,7 @@ function renderImgLibModal() {
     let ops = `<button class="icon-btn imglib-expand" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.toggleImages")}" style="font-size:12px">${exp ? "▾" : "▸"}</button>`;
     if (mine) {
       ops += `<button class="chip-btn imglib-upload" data-lib="${escapeHtml(lib.libId)}" type="button" style="font-size:12px;padding:2px 8px">${t("imgLib.upload")}</button>`
-        + `<button class="icon-btn imglib-set" data-lib="${escapeHtml(lib.libId)}" title="${escapeHtml(t("imgLib.setBtnTip"))}">⚙️</button>`
+        + `<button class="icon-btn imglib-set" data-lib="${escapeHtml(lib.libId)}" title="${escapeHtml(t("libSet.titleAttr"))}">⚙️</button>`
         + `<button class="icon-btn imglib-del" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.delTitle")}">🗑️</button>`;
     } else {
       ops += `<span style="color:var(--muted);font-size:12px">${t("kb.systemReadonly")}</span>`;
@@ -3193,7 +3197,7 @@ function renderImgLibModal() {
       upBtn.addEventListener("click", (e) => { e.stopPropagation(); item.querySelector(".imglib-file")?.click(); });
     });
     item.querySelectorAll(".imglib-set").forEach((setBtn) => {
-      setBtn.addEventListener("click", (e) => { e.stopPropagation(); openImgLibSettings(setBtn.dataset.lib); });
+      setBtn.addEventListener("click", (e) => { e.stopPropagation(); openLibSettings("imglib", setBtn.dataset.lib); });
     });
     const fileInput = item.querySelector(".imglib-file");
     if (fileInput) fileInput.onchange = async (e) => {
@@ -3221,60 +3225,95 @@ function renderImgLibModal() {
   });
 }
 
-/* ============ 图库设置（检索严格度） ============
+/* ============ 库设置（检索严格度，图库 / 知识库共用） ============
  *
- * 为何要按库调：图库描述风格差别很大 ——
- *   描述是**短人名 / 标签**时，通用关键词得分普遍偏高，门槛要收紧（否则容易配错）；
- *   描述是**长句**时，标题式查询得分普遍偏低（实测 0.62），门槛要放松才配得上。
- * 所以严格度存在**图库**上：库设了就以库为准，没设就沿用技能传的值（各文档技能默认 0.6）。
+ * 为何要按库调：不同库的“得分尺度”差很多 ——
+ *   图库：描述是**短人名 / 标签**时通用关键词得分普遍偏高（该收紧）；是**长句**时标题式查询偏低（该放松）。
+ *   知识库：文档是短条目 / 目录型时一句话提问得分偏高（该收紧）；是长篇论述时提问得分偏低（该放松）。
+ * 严格度存在**库**上：库设了就以库为准，没设就沿用调用方传的值（知识库即全局 Agents:Memory:MinScore=0.25）。
+ *
+ * 档位取值都是实测出来的：
+ *   图库（真实图库 + bge-m3）：无意义词 ≤0.55、真实命中 0.62~0.88 → 0.5 / 0.6 / 0.72；
+ *   知识库（真实文档 + 同一模型，1 片长文）：无关提问 0.31~0.38、真实命中 0.41~0.71 → 0.15 / 0.25 / 0.40
+ *   （知识库的真实/噪声分离度比图库窄，所以档位间距也小）。
  */
-let imgLibSetTarget = null;   // 正在设置的图库 libId
-const IMG_STRICT_PRESETS = ["0.5", "0.6", "0.72"];
+const LIB_SET_KINDS = {
+  imglib: {
+    presets: ["0.5", "0.6", "0.72"],
+    list: () => imgLibList,
+    idOf: (x) => x.libId,
+    url: (id) => `/ag-ui/image-libs/${id}`,
+    reload: () => loadImageLibs(),
+    def: "0.6",
+    hintKey: "libSet.hintImage",
+  },
+  kb: {
+    presets: ["0.15", "0.25", "0.4"],
+    list: () => kbList,
+    idOf: (x) => x.kbId,
+    url: (id) => `/ag-ui/kb/${id}`,
+    reload: () => loadKbs(),
+    def: "0.25",
+    hintKey: "libSet.hintKb",
+  },
+};
+let libSetKind = null;      // "imglib" | "kb"
+let libSetTarget = null;    // 正在设置的库 ID
 
-function openImgLibSettings(libId) {
-  const lib = (imgLibList || []).find((x) => x.libId === libId);
+function openLibSettings(kind, id) {
+  const cfg = LIB_SET_KINDS[kind];
+  if (!cfg) return;
+  const lib = (cfg.list() || []).find((x) => cfg.idOf(x) === id);
   if (!lib) return;
-  imgLibSetTarget = libId;
-  $("imgLibSetTitle").textContent = t("imgLib.setTitle", { name: lib.name });
-  const sel = $("imgLibSetStrictness");
-  // 先移除上一次为“自定义值”临时加的选项（接口手工设的非预设值）
-  [...sel.options].filter((o) => o.dataset.custom).forEach((o) => o.remove());
+  libSetKind = kind;
+  libSetTarget = id;
+  $("libSetTitle").textContent = t("libSet.title", { name: lib.name || id });
+  $("libSetHint").textContent = t(cfg.hintKey);
+  const sel = $("libSetStrictness");
+  sel.innerHTML = "";
+  const tiers = ["loose", "standard", "strict"];
+  cfg.presets.forEach((v, i) => {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = `${t("libSet." + tiers[i])}（${v}）— ${t("libSet." + tiers[i] + "Tip")}`;
+    sel.appendChild(o);
+  });
   const cur = Number(lib.minScore);
-  if (cur > 0 && !IMG_STRICT_PRESETS.includes(String(cur))) {
+  if (cur > 0 && !cfg.presets.includes(String(cur))) {
+    // 接口手工设的非预设值也要能回显 —— 否则一保存就被默默改成默认档
     const o = document.createElement("option");
     o.value = String(cur);
-    o.dataset.custom = "1";
-    o.textContent = t("imgLib.setCustom", { value: cur });
+    o.textContent = t("libSet.custom", { value: cur });
     sel.appendChild(o);
   }
-  // 未设置（null）按“标准”回显：各文档技能默认传的就是 0.6，实际行为就是标准
-  sel.value = cur > 0 ? String(cur) : "0.6";
-  $("imgLibSetModal").classList.remove("hidden");
+  sel.value = cur > 0 ? String(cur) : cfg.def;
+  $("libSetModal").classList.remove("hidden");
   sel.focus();
 }
 
-function closeImgLibSettings() {
-  imgLibSetTarget = null;
-  $("imgLibSetModal").classList.add("hidden");
+function closeLibSettings() {
+  libSetKind = null;
+  libSetTarget = null;
+  $("libSetModal").classList.add("hidden");
 }
 
-async function saveImgLibSettings() {
-  const libId = imgLibSetTarget;
-  if (!libId) return;
-  const minScore = Number($("imgLibSetStrictness").value) || 0.6;
-  const btn = $("imgLibSetOk");
+async function saveLibSettings() {
+  const cfg = LIB_SET_KINDS[libSetKind];
+  if (!cfg || !libSetTarget) return;
+  const minScore = Number($("libSetStrictness").value) || Number(cfg.def);
+  const btn = $("libSetOk");
   btn.disabled = true;
   try {
-    const res = await fetch(`/ag-ui/image-libs/${libId}`, {
+    const res = await fetch(cfg.url(libSetTarget), {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
       body: JSON.stringify({ minScore }),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) { toast(errMsg(data, t("imgLib.setFail", { err: res.status }))); return; }
-    toast(t("imgLib.setSaved"));
-    closeImgLibSettings();
-    await loadImageLibs();
+    if (!res.ok) { toast(errMsg(data, t("libSet.fail", { err: res.status }))); return; }
+    toast(t("libSet.saved"));
+    closeLibSettings();
+    await cfg.reload();
   } finally {
     btn.disabled = false;
   }
@@ -9659,10 +9698,10 @@ function init() {
   $("agentImgLibManageBtn").onclick = openImgLibModal;
   $("afImgLibAddBtn").onclick = () => openAgentPick("imglib");
   $("imgLibNewBtn").onclick = () => openLibCreateDialog("imglib");
-  // 「图库设置」弹窗：保存 / 取消 / 点遮罩 / Esc 关闭
-  $("imgLibSetOk").onclick = saveImgLibSettings;
-  $("imgLibSetCancel").onclick = closeImgLibSettings;
-  $("imgLibSetModal").addEventListener("click", (e) => { if (e.target === $("imgLibSetModal")) closeImgLibSettings(); });
+  // 「库设置」弹窗（图库 / 知识库共用）：保存 / 取消 / 点遮罩 / Esc 关闭
+  $("libSetOk").onclick = saveLibSettings;
+  $("libSetCancel").onclick = closeLibSettings;
+  $("libSetModal").addEventListener("click", (e) => { if (e.target === $("libSetModal")) closeLibSettings(); });
   $("imgLibSearch").addEventListener("input", () => { imgLibSearchQuery = $("imgLibSearch").value; renderImgLibModal(); });
   $("imgLibCloseBtn").onclick = () => { $("imgLibModal").classList.add("hidden"); stopImgLibPolling(); renderImgLibPicks(); };
   // 「新建知识库 / 新建图库」弹窗：确认 / 取消 / 点遮罩关闭 / Esc 关闭 / 回车提交
@@ -9677,10 +9716,10 @@ function init() {
     if (e.key !== "Escape" || $("libCreateModal").classList.contains("hidden")) return;
     e.preventDefault(); e.stopPropagation(); closeLibCreateDialog();
   }, true);
-  // 图库设置弹窗同理：捕获阶段处理，避免同一次 Esc 把下层的图库管理弹窗也关掉
+  // 库设置弹窗同理：捕获阶段处理，避免同一次 Esc 把下层的库管理弹窗也关掉
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || $("imgLibSetModal").classList.contains("hidden")) return;
-    e.preventDefault(); e.stopPropagation(); closeImgLibSettings();
+    if (e.key !== "Escape" || $("libSetModal").classList.contains("hidden")) return;
+    e.preventDefault(); e.stopPropagation(); closeLibSettings();
   }, true);
   $("agentSearch").addEventListener("input", renderAgentList);
   $("afTriggerMode").addEventListener("change", syncTriggerForm);

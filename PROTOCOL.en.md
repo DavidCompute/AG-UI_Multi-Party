@@ -1065,11 +1065,17 @@ Server-local paths (`path`) are returned **only to the self token** (the skill e
 
 |API|Path|Description|
 |---|---|---|
-|Create knowledge base|`POST /ag-ui/kb`|body：`{name, description?}`；login required；returns kbId（`kb_xxx`）|
-|Knowledge base list|`GET /ag-ui/kb`|System-level（ownerId=null）+ those created by the current user；document manifest includes `{docId, fileName, chunkCount, status, error, addedAtMs}`|
+|Create knowledge base|`POST /ag-ui/kb`|body：`{name, description?, minScore?}`；login required；returns kbId（`kb_xxx`）|
+|Knowledge base list|`GET /ag-ui/kb`|System-level（ownerId=null）+ those created by the current user；includes `minScore` and the document manifest `{docId, fileName, chunkCount, status, error, addedAtMs}`|
+|Knowledge base settings|`PUT /ag-ui/kb/{kbId}`|body：`{minScore?}` = **search strictness**（0.10-0.80，clamped；null restores “follow the caller's value”）；creator or admin only|
 |Delete knowledge base|`DELETE /ag-ui/kb/{kbId}`|Creator only（403 on unauthorized）；clears the whole document vectors together|
 |Add document|`POST /ag-ui/kb/{kbId}/documents`|body：`{attachmentId}`（upload first via `POST /ag-ui/upload`）；immediately returns `{docId, fileName, chunkCount, status, error}`（status=processing），with slicing and vectorization completing in the background|
 |Remove document|`DELETE /ag-ui/kb/{kbId}/documents/{docId}`|Deletes the document's slice vectors（a document being processed can be removed directly）|
+
+**Search strictness (`minScore`, 1.0.149+)**: every knowledge base may carry its own similarity gate. When an agent retrieves its bound knowledge bases, `KnowledgeBaseCatalog.SearchAsync` resolves it **per library**: **the library's value wins when set, otherwise the global `Agents:Memory:MinScore` (default 0.25)**.
+Why per library: short-item/catalogue-style documents score high for any question (tighten the gate), while long prose scores low for a one-line question (loosen it, or nothing is recalled).
+Measured (real document + bge-m3): unrelated questions 0.31-0.38, real hits 0.41-0.71 — a narrower margin than image libraries, hence the smaller steps (UI presets: loose 0.15 / standard 0.25 / strict 0.40).
+**Word-overlap hits (the BM25 fallback) are not gated by it** — matching words is a different signal on a different scale.
 
 System-level knowledge bases（ownerId=null）are visible but read-only to all users（modification not exposed）。
 

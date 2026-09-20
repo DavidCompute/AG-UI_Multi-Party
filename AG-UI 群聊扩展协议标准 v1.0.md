@@ -1061,11 +1061,21 @@ PUT /ag-ui/user/profile
 
 |接口|路径|说明|
 |---|---|---|
-|创建知识库|`POST /ag-ui/kb`|body：`{name, description?}`；需登录；返回 kbId（`kb_xxx`）|
-|知识库列表|`GET /ag-ui/kb`|系统级（ownerId=null）+ 当前用户创建的；文档清单含 `{docId, fileName, chunkCount, status, error, addedAtMs}`|
+|创建知识库|`POST /ag-ui/kb`|body：`{name, description?, minScore?}`；需登录；返回 kbId（`kb_xxx`）|
+|知识库列表|`GET /ag-ui/kb`|系统级（ownerId=null）+ 当前用户创建的；含 `minScore`（检索严格度）与文档清单 `{docId, fileName, chunkCount, status, error, addedAtMs}`|
+|知识库设置|`PUT /ag-ui/kb/{kbId}`|body：`{minScore?}` = **检索严格度**（0.10~0.80，夹紧；null = 恢复“沿用调用方传的值”）；仅创建者或管理员|
 |删除知识库|`DELETE /ag-ui/kb/{kbId}`|仅创建者（403 越权）；连同全部文档向量一并清除|
 |添加文档|`POST /ag-ui/kb/{kbId}/documents`|body：`{attachmentId}`（先经 `POST /ag-ui/upload` 上传）；立即返回 `{docId, fileName, chunkCount, status, error}`（status=processing），后台完成切片向量化|
 |移除文档|`DELETE /ag-ui/kb/{kbId}/documents/{docId}`|删除文档切片向量（处理中的文档可直接移除）|
+
+**检索严格度（`minScore`，1.0.149+）**：每个知识库可以有自己的相似度门槛。
+智能体回复前检索绑定知识库时，`KnowledgeBaseCatalog.SearchAsync` 在**每个库**上分别解析：
+**库设了就用库的，否则用全局 `Agents:Memory:MinScore`（默认 0.25）**。
+为何要按库调：文档是**短条目 / 目录型**时，通用提问的相似度普遍偏高（门槛要收紧）；
+是**长篇论述**时，一句话提问与其中某段的相似度普遍偏低（门槛要放松才召得回）。
+实测（真实文档 + bge-m3）：无关提问 **0.31~0.38**、真实命中 **0.41~0.71** —— 分离度比图库窄，所以档位间距也小
+（界面三档：宽松 0.15 / 标准 0.25 / 严格 0.40）。
+**关键词词面命中（BM25 兜底）不套这个门槛** —— 词都对上了是另一种信号，分尺不同。
 
 系统级知识库（ownerId=null）对所有用户可见但只读（不开放修改）。
 

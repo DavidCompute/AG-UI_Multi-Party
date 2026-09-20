@@ -493,6 +493,36 @@ public sealed class KnowledgeBaseCatalog
     /// <summary>检索结果条目。</summary>
     public sealed record KbHit(string KbId, string KbName, string FileName, string Content, double Score);
 
+    /// <summary>检索严格度的合理区间：低于 0.10 基本等于不筛；高于 0.80 连文档原文都召不回。</summary>
+    public const double MinStrictness = 0.10;
+    public const double MaxStrictness = 0.80;
+
+    /// <summary>推荐值（= 平台全局默认 <c>Agents:Memory:MinScore</c>）：<b>标准</b>。</summary>
+    public const double StandardStrictness = 0.25;
+
+    /// <summary>
+    /// 设置本库的<b>检索严格度</b>（null = 恢复“沿用调用方传的值”）。
+    ///
+    /// <para>
+    /// 会夹到 <see cref="MinStrictness"/>~<see cref="MaxStrictness"/>：
+    /// 界面下拉给的是 0.15 / 0.25 / 0.40 三档，但接口不阻止别的值（留手工调参余地）。
+    /// </para>
+    /// </summary>
+    public string? SetStrictness(string kbId, double? minScore)
+    {
+        var kb = GetKb(kbId);
+        if (kb is null) return "知识库不存在";
+        if (minScore is { } v)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v)) return "严格度必须是 0.10~0.80 之间的数字";
+            kb.MinScore = Math.Clamp(v, MinStrictness, MaxStrictness);
+        }
+        else kb.MinScore = null;
+        kb.UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _changes?.Notify();
+        return null;
+    }
+
     /// <summary>在指定知识库集合中按语义检索 top-k 片段（每个知识库各取 TopK 条，按相似度合并排序）。</summary>
     public async Task<IReadOnlyList<KbHit>> SearchAsync(IReadOnlyList<string> kbIds, string query, int topK, double minScore, CancellationToken ct = default)
     {
@@ -510,9 +540,11 @@ public sealed class KnowledgeBaseCatalog
         {
             var kb = GetKb(kbId);
             if (kb is null) continue;
+            // 本库的检索严格度优先（库设了就用库的，否则用调用方传的）
+            var gate = kb.MinScore ?? minScore;
             try
             {
-                foreach (var hit in store.Search(KbGroupPrefix + kbId, "kb", vec, Math.Max(1, topK), minScore, "group"))
+                foreach (var hit in store.Search(KbGroupPrefix + kbId, "kb", vec, Math.Max(1, topK), gate, "group"))
                 {
                     hits.Add(new KbHit(kbId, kb.Name, hit.SenderId, hit.Content, hit.Score));
                 }

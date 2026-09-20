@@ -39,7 +39,27 @@ public static class KnowledgeBaseApi
             }
             var kb = catalog.CreateKb(req.Name, req.Description ?? "", user.UserId);
             if (req.SharedGroupIds is { Count: > 0 }) kb.SharedGroupIds = req.SharedGroupIds.Distinct().ToList();
-            return Results.Ok(new { kbId = kb.KbId, kb.Name, kb.Description, kb.OwnerId, kb.SharedGroupIds });
+            if (req.MinScore is { } ms) catalog.SetStrictness(kb.KbId, ms);
+            return Results.Ok(new { kbId = kb.KbId, kb.Name, kb.Description, kb.OwnerId, kb.SharedGroupIds, kb.MinScore });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 更新知识库设置（目前只有「检索严格度」）----
+        //     为何要按库调：文档是短条目 / 目录型时通用提问得分普遍偏高（门槛该收紧），
+        //     是长篇论述时一句话提问得分普遍偏低（门槛该放松）。全局值两头都不合适。
+        root.MapPut("/{kbId}", (string kbId, KbUpdateRequest req, HttpContext ctx, AuthService auth,
+            KnowledgeBaseCatalog catalog) =>
+        {
+            var user = AgentApi.RequireUser(ctx, auth);
+            if (user is null) return AgentApi.Unauthorized();
+            var kb = catalog.GetKb(kbId);
+            if (kb is null) return Results.NotFound(new AguiError(ErrorCodes.AgentNotFound, $"知识库不存在：{kbId}"));
+            if (!catalog.CanWrite(kb, user.UserId, auth.IsAdmin(user.UserId)))
+                return Results.Json(new AguiError(ErrorCodes.AgentPermissionDenied, "只有创建者或管理员可修改知识库设置"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var error = catalog.SetStrictness(kbId, req.MinScore);
+            return error is null
+                ? Results.Ok(new { kbId = kb.KbId, kb.Name, kb.Description, kb.OwnerId, kb.SharedGroupIds, kb.MinScore })
+                : Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error));
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 可见列表（系统级 + 自己创建的 + 群共享 + 管理员），含文档清单 ----
@@ -60,6 +80,8 @@ public static class KnowledgeBaseApi
                     k.SharedGroupIds,
                     k.UpdatedAtMs,
                     canManage = user is not null && catalog.CanWrite(k, user.UserId, isAdmin),
+                    // 检索严格度（null = 未设置，沿用全局 Agents:Memory:MinScore）；界面用它回显下拉
+                    k.MinScore,
                     Documents = k.Documents.Select(d => new { d.DocId, d.FileName, d.ChunkCount, d.Status, d.Error, d.AddedAtMs }),
                 });
             return Results.Ok(kbs);
@@ -115,8 +137,12 @@ public static class KnowledgeBaseApi
     }
 }
 
-/// <summary>创建知识库请求。</summary>
-public sealed record KbCreateRequest(string Name, string? Description, IReadOnlyList<string>? SharedGroupIds = null);
+/// <summary>创建知识库请求。<c>minScore</c> = 检索严格度（可选，0.10~0.80）。</summary>
+public sealed record KbCreateRequest(string Name, string? Description, IReadOnlyList<string>? SharedGroupIds = null,
+    double? MinScore = null);
+
+/// <summary>更新知识库设置：<c>minScore</c> = 检索严格度（0.10~0.80；null = 恢复为“沿用调用方传的值”）。</summary>
+public sealed record KbUpdateRequest(double? MinScore = null);
 
 /// <summary>添加文档请求：attachmentId 来自附件上传（POST /ag-ui/upload）。</summary>
 public sealed record KbAddDocumentRequest(string AttachmentId);
