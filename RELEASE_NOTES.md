@@ -1,3 +1,74 @@
+# AG-UI 群聊桌面版 1.0.151 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.151 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.151 给**数字员工产出的办公文档加上「在线查看」** —— 消息里带 docx / xlsx / pptx 附件的，下载卡片旁多一个「👁 在线查看」：服务端用 LibreOffice 转成 PDF 后**内联**返回，前端在宽幅弹窗 iframe 里直接阅读（`GET /ag-ui/preview/{attachmentId}`），不用下载、不用装本地 Office；权限与下载**共用同一段校验**（未登录 401 / 非成员 403 / 已撤回不可读 / 附件不存在 404），因此没有绕过知聚权限的口子。转换结果按「附件 ID + 源文件指纹」缓存 7 天（实测首次 docx ≈2.5s、xlsx ≈1.7s、4.4MB/16 页 pptx ≈5.3s；二次均 ≈15ms）。顺带修掉两个**在验证本功能时被暴露出来的既有界面缺陷**：① `loadGroups()` 清空消息 DOM 却不重建，导致任何一次知聚列表刷新（点「🔄 刷新」、成员加入/退出、重连）都可能把聊天区留成空白；② `virtualRender()` 在尚未选中知聚时会对 null 取 `.messages`，抛异常并让消息区空白。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.151 adds **online viewing for the office documents digital employees produce** — a message carrying a docx / xlsx / pptx attachment gains a **👁 View online** button next to the download card: the server converts the file to PDF with LibreOffice and returns it **inline**, and the frontend reads it in a wide modal iframe (`GET /ag-ui/preview/{attachmentId}`) with no download and no local Office install. Permissions are **the very same check download uses** (401 unauthenticated / 403 non-member / refused once recalled / 404 missing), so there is no way around group permissions. Results are cached for 7 days per “attachment ID + source fingerprint” (measured: first docx ≈2.5s, xlsx ≈1.7s, a 4.4MB/16-page pptx ≈5.3s; every cache hit ≈15ms). Building this also flushed out **two pre-existing UI defects**: (1) `loadGroups()` cleared the message DOM without rebuilding it, so any group-list refresh (the 🔄 button, members joining/leaving, a reconnect) could leave the chat area blank; (2) `virtualRender()` read `.messages` off a null room when no group was selected yet, throwing and blanking the message area. Web and desktop share the same Hub / gateway / frontend.
+
+## 交付物在线查看 + 两处聊天区空白缺陷（1.0.151）
+# Viewing deliverables online, plus two blank-chat defects (1.0.151)
+
+中文：
+- **👁 在线查看办公文档**：消息附件卡片旁多一个按钮，点击弹出宽幅阅读器（`min(1100px, 94vw)` × `min(88vh, 900px)`），
+  服务端转好的 PDF 以 `blob:` URL 喂给弹窗 iframe；头部有附件名与「⬇ 下载原件」，`Esc` / 「关闭」/ 点遮罩都能收起并**回收 blob**。
+  覆盖 docx / xlsx / pptx（另含 odt / ods / odp / rtf）；**PDF 附件直通不转换**（再进弹窗只是复用同一套阅读体验）。
+- **端点 `GET /ag-ui/preview/{attachmentId}`**：`200` + `application/pdf`，**不设** `Content-Disposition: attachment`（这正是它与
+  `/ag-ui/files` 的区别 —— 后者按原格式返回，浏览器拿到 `.docx` 只会去下载）；带 `nosniff` 与 `Cache-Control: private, max-age=300`，支持 Range。
+  `?token=` 与 `Authorization: Bearer` 均可（iframe 拿不到请求头，前端走前者）。
+- **权限与下载共用同一段代码**（`ResolveAndAuthorize`）：404（附件不存在）/ 403（非该附件所在知聚的成员）/ 已**撤回**消息的附件不可读。
+  非成员请求**不会**触发转换（不为越权请求白干活）——单测直接断言转换器调用次数不变。
+- **失败语义**：不支持的类型 `400`（`BAD_REQUEST`）；服务端未装 LibreOffice `503`；该文档转不出 PDF（损坏 / 120s 超时）`500`；
+  后两者错误码均为 `DOCUMENT_PREVIEW_FAILED`，`message` 给出可读原因。桌面版 / 精简部署若没装 LibreOffice，只会让这一个按钮不可用（提示可下载后用本地应用打开），**不影响其它功能**。
+- **性能与稳定性**：转换串行（LibreOffice 并发会互相踩）+ **每次调用一次性 profile**（复用只快约 1 秒，但进程被超时杀掉后残留的锁会让
+  **后续所有**转换失败）；产物按「附件 ID + 源文件指纹（长度 + mtime）」缓存在 `data/preview`，替换源文件自动失效、保留 7 天；
+  缓存清理与「清空一切」联动。
+- **修掉两处既有缺陷（验证本功能时暴露）**：
+  - `loadGroups()` 在刷新知聚列表时调 `resetVScroll()` 清空了消息 DOM，却没有重建 —— 而它被「🔄 刷新」、成员加入/退出、
+    `GROUP_CONNECTED`（重连）、进入知聚等**十余处**调用，因此聊天区会在刷新后变空白，要等下一条实时事件才恢复。修法：清空后立即 `renderMessages()`。
+  - `virtualRender()` 把 `activeTopicMessages(r)` 算在了 `if (!r || n === 0)` 守卫**之前**，`r` 为 null（已进入应用但尚未选中知聚）时直接
+    `TypeError: Cannot read properties of null`，消息区空白。修法：先判空再取消息。
+- **实测验证（真实部署 + 真实文件 + 真实浏览器，不是 mock）**：
+  - 后端端到端 `node tools/verify_doc_preview.mjs` —— **28 项全过**：4 种格式（docx 6.8KB→4 页 / xlsx 4.3KB→6 页 / pptx 4.4MB→16 页 / pdf 直通）
+    都返回 200 + `application/pdf` + `%PDF` 魔数 + 页数 ≥1 + 无 `Content-Disposition: attachment`；二次取用缓存命中
+    **2494ms→18ms / 1691ms→18ms / 5311ms→12ms / 14ms→14ms**；未登录 401、不存在 404、非成员 403、zip 400。
+  - 界面 `HEADLESS=1 node tools/ui-doc-preview.mjs`（Playwright）—— **19 项全过**：只有办公文档附件出现入口（zip 不出现）、弹窗打开、
+    标题为附件名、iframe 载入 `blob:` PDF 且可视区 **1058×485**、转换提示消失、错误区未出现、`Esc` 收起并在关闭后
+    `src` 清空（blob 已回收）、「关闭」按钮同样生效。
+  - 回归测试 **26 个新增**（转换器缓存/失效/并发/失败分类 15 + 端点权限与状态码 10 + 「漏注册预览服务时其它路由照常工作」1），
+    全量 **1395 通过**。
+
+English:
+- **👁 View office documents online**: attachments gain a button beside the download card that opens a wide reader
+  (`min(1100px, 94vw)` × `min(88vh, 900px)`); the server-converted PDF is handed to the modal iframe as a `blob:` URL. The header
+  carries the file name and “⬇ Download original”, and `Esc` / “Close” / clicking the scrim all dismiss it and **revoke the blob**.
+  Covers docx / xlsx / pptx (plus odt / ods / odp / rtf); **PDF attachments pass straight through** (opening the modal just reuses the same reader).
+- **Endpoint `GET /ag-ui/preview/{attachmentId}`**: `200` + `application/pdf` **without** `Content-Disposition: attachment` — exactly how it
+  differs from `/ag-ui/files`, which returns the original format so the browser just downloads a `.docx`. It carries `nosniff` and
+  `Cache-Control: private, max-age=300`, and supports Range. Both `?token=` and `Authorization: Bearer` work (an iframe cannot send headers, so the frontend uses the former).
+- **Permissions share the download path's code** (`ResolveAndAuthorize`): 404 missing / 403 non-member / attachments of **recalled** messages are unreadable.
+  An unauthorised request never triggers a conversion (no free work for trespassers) — a unit test asserts the converter call count is unchanged.
+- **Failure semantics**: unsupported type `400` (`BAD_REQUEST`); LibreOffice missing `503`; this document cannot be converted (corrupt / 120s timeout) `500`.
+  The latter two use `DOCUMENT_PREVIEW_FAILED` with a readable `message`. On a desktop or slim deployment without LibreOffice only this one button
+  is unavailable (with a “download and open locally” hint) — **nothing else breaks**.
+- **Performance and robustness**: conversions are serialized (LibreOffice trips over itself when run concurrently) and each call uses a
+  **one-shot profile** (reuse saves only ~1s, but a lock left behind by a timed-out process breaks **every subsequent** conversion);
+  artifacts are cached under `data/preview` per “attachment ID + source fingerprint (length + mtime)”, invalidated when the source changes, kept 7 days,
+  and cleared by “reset everything”.
+- **Two pre-existing defects fixed** (surfaced while validating this feature):
+  - `loadGroups()` called `resetVScroll()` (which clears the message DOM) without rebuilding it, and it is invoked from a dozen places — the 🔄 refresh
+    button, members joining/leaving, `GROUP_CONNECTED` on reconnect, entering a group — so the chat area could go blank until the next realtime event.
+    Fix: rebuild with `renderMessages()` right after clearing.
+  - `virtualRender()` computed `activeTopicMessages(r)` *before* the `if (!r || n === 0)` guard, so a null room (in the app but no group selected yet)
+    threw `TypeError: Cannot read properties of null` and blanked the message area. Fix: null-check before reading messages.
+- **Verified live (real deployment, real files, real browser — not mocked)**:
+  - Backend end-to-end `node tools/verify_doc_preview.mjs` — **28/28 pass**: all four formats (docx 6.8KB → 4 pages, xlsx 4.3KB → 6 pages,
+    pptx 4.4MB → 16 pages, pdf pass-through) return 200 + `application/pdf` + `%PDF` magic + ≥1 page + no `Content-Disposition: attachment`;
+    second fetches hit the cache at **2494ms→18ms / 1691ms→18ms / 5311ms→12ms / 14ms→14ms**; 401 unauthenticated, 404 missing, 403 non-member, 400 for zip.
+  - UI `HEADLESS=1 node tools/ui-doc-preview.mjs` (Playwright) — **19/19 pass**: only office attachments show the entry (a zip does not), the modal opens,
+    the title is the attachment name, the iframe loads a `blob:` PDF with a **1058×485** viewport, the converting hint disappears, the error area stays hidden,
+    `Esc` dismisses it and clears the iframe `src` (blob revoked), and the “Close” button works the same way.
+  - **26 new regression tests** (15 for cache / invalidation / concurrency / failure classification, 10 for endpoint permissions and status codes, plus one
+    proving other routes keep working when the preview service is not registered); full suite **1395 passing**.
+
 # AG-UI 群聊桌面版 1.0.150 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.150 Release Notes (current Windows desktop release)
 
