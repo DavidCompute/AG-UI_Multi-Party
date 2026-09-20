@@ -141,6 +141,8 @@ public static class SystemApi
             sp.GetService<OrgTeamStore>()?.RestoreAll(System.Array.Empty<OrgTeamRecord>());
             sp.GetService<AgentGateway>()?.ClearBridgeCursors();
             sp.GetRequiredService<AttachmentStore>().ClearAll();
+            // 预览缓存是附件的派生数据：附件清了，缓存也必须清（否则残留孤立的 PDF 白占磁盘）
+            sp.GetService<OfficePreviewConverter>()?.ClearAll();
             sp.GetService<IMessageMemoryStore>()?.ClearAll();
             sp.GetService<AguiGroupChat.Hub.Agents.IGraphMemory>()?.ClearAll(); // 图谱记忆（实体/边）
 

@@ -27,6 +27,10 @@ builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<
 builder.Services.AddSingleton(builder.Configuration.GetSection("ClientTool").Get<AguiGroupChat.Web.ClientToolOptions>() ?? new AguiGroupChat.Web.ClientToolOptions()); // 客户端技能本机桥配置（ClientTool 节：RequireAdmin 等）
 builder.Services.AddSingleton<NativeTunnelService>(); // 内网本机桥反向隧道（HTTP/SSE）路由 + 执行等待
 builder.Services.AddSingleton<NativeBridgeIssuedTokenStore>(); // 安装包绑定型令牌签发器（首次连接绑定 client，防包复制滥用）
+// 办公文档「在线查看」：docx / xlsx / pptx 用 LibreOffice 转 PDF 后缓存，前端弹窗内联渲染。
+// 缓存放 data/preview（跟 attachments 同一个数据根，容器重建不丢；丢了也只是重转一次）。
+builder.Services.AddDocumentPreview(
+    Path.Combine(builder.Environment.ContentRootPath, "data", OfficePreviewConverter.CacheDirectoryName));
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
 builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>())); // 隧道端点限流器
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeBridgeDownload").Get<NativeBridgeDownloadOptions>() ?? new NativeBridgeDownloadOptions()); // 本机桥 Windows 安装包下载（Dir 等）
@@ -76,10 +80,12 @@ app.Use(async (ctx, next) =>
     if (!ctx.Request.Path.StartsWithSegments("/ag-ui/files"))
     {
         var frameAncestors = frameOrigins.Count == 0 ? "'none'" : string.Join(" ", frameOrigins.Select(UriEscapeCspSource));
+        // frame-src 显式放行 blob:：办公文档在线查看把后端转好的 PDF 取成 Blob 再喂给弹窗 iframe
+        // （这样能拿到真实的 HTTP 状态码做错误提示，而不是让 iframe 静默渲染一个 JSON 错误页）。
         headers["Content-Security-Policy"] =
             $"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
             $"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https: http:; " +
-            $"frame-ancestors {frameAncestors}; base-uri 'self'; form-action 'self'; object-src 'none'";
+            $"frame-src 'self' blob:; frame-ancestors {frameAncestors}; base-uri 'self'; form-action 'self'; object-src 'none'";
     }
     await next();
 });

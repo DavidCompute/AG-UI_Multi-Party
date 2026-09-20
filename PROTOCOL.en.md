@@ -952,7 +952,15 @@ A successful topic creation returns the topic object and broadcasts `GROUP_TOPIC
 |API|Path|Description|
 |---|---|---|
 |Upload attachment|`POST /ag-ui/upload`|multipart/form-data，field name `file`；max 9 files per request、single file ≤20 MB。Identity required（login token，or in demo mode `?memberId=`，consistent with WS/SSE auth）。Images / audio / text / office documents are auto-categorized into `kind`|
-|Download / preview|`GET /ag-ui/files/{attachmentId}/{fileName}`|Locates by attachment ID；the file name is used only for display (the original name is kept on download)|
+|Download / preview|`GET /ag-ui/files/{attachmentId}/{fileName}`|Locates by attachment ID；the file name is used only for display (the original name is kept on download)。Returns the file in its **original format**；script / inline-renderable types are forced to download|
+|View document online|`GET /ag-ui/preview/{attachmentId}`|Converts docx / xlsx / pptx (plus odt/ods/odp/rtf) to PDF with server-side LibreOffice and returns it **inline** so the frontend can read it in a modal iframe。Both `?token=` and `Authorization: Bearer` work (an iframe cannot send headers, so the frontend uses the former)|
+
+**`/ag-ui/preview` semantics**:
+
+- **Response**: `200` + `Content-Type: application/pdf` **without** `Content-Disposition: attachment` — this is precisely how it differs from `/files`, which returns the original format and makes the browser download a `.docx`。Also `X-Content-Type-Options: nosniff` + `Cache-Control: private, max-age=300`（the artifact for a given attachment is stable）and Range support。
+- **Permission is exactly that of `/files`** (the same shared check, so the two can never drift): `401` unauthenticated, `403` when the caller is not a member of the attachment's group, `404` when it does not exist。Attachments of recalled messages are refused too (a recall must not leave the file readable)。
+- **Failure semantics**: unsupported type → `400` (`BAD_REQUEST`)；LibreOffice missing on the server → `503`；this document cannot be converted (corrupt / 120s timeout) → `500`。The latter two use the error code `DOCUMENT_PREVIEW_FAILED` with a readable `message`。
+- **Caching**: artifacts are cached server-side under `data/preview` keyed by “attachment ID + source fingerprint (length + mtime)”, so replacing the source invalidates automatically；retained for 7 days。Conversions are serialized (LibreOffice cannot run concurrently)。Measured first-conversion cost: docx ≈2.5s, xlsx ≈1.7s, pptx (4.4MB / 16 pages) ≈5.3s；a cache hit ≈15ms。
 
 Example upload response (the response body is `{ "attachments": [...] }`):
 
@@ -1275,6 +1283,12 @@ Skill library extension error codes:
 |SKILL_NOT_FOUND|The skill does not exist|
 |SKILL_EXISTS|The skill ID is already taken|
 |SKILL_PERMISSION_DENIED|Only the creator / system admin may operate; `shell`/`http` skills only for admins（returns 403）|
+
+Attachment online-view error code:
+
+|Code|Description|
+|---|---|
+|DOCUMENT_PREVIEW_FAILED|Viewing an office document online failed: the server lacks the LibreOffice converter (`503`) or this document cannot be converted (corrupt / timeout, `500`); `message` carries a readable reason。An unsupported type still returns `BAD_REQUEST` (`400`)|
 
 The error response body is uniformly `{"code": "...", "message": "..."}`（HTTP status codes are per the implementation of each API：401 / 403 / 404 / 409）。
 

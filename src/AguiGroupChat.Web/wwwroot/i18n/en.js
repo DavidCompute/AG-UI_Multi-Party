@@ -1045,6 +1045,18 @@ window.I18N_DICTS.en = {
   "msg.attachmentAudio": "Voice",
   "msg.attachmentDownload": "Download",
   "msg.attachmentTitle": "Attachment: {kind}",
+  "msg.preview": "View online",
+  "msg.previewTip": "Read it in the page without downloading",
+
+  // ---- Office document preview (docx / xlsx / pptx / pdf rendered inline as a PDF)----
+  "docPreview.converting": "Converting the document; first open takes a few seconds…",
+  "docPreview.download": "⬇ Download original",
+  "docPreview.close": "Close",
+  "docPreview.unsupported": "This file type can't be previewed; please download it instead",
+  "docPreview.missing": "Attachment not found or deleted",
+  "docPreview.denied": "You don't have access to this attachment",
+  "docPreview.failed": "Document conversion failed: {err}",
+  "docPreview.openFailed": "Failed to load preview: {err}",
   "msg.truncated": "⚠️ Content too long, truncated (only first 2MB kept)",
   "msg.startTopic": "Start a new topic from this message",
   "msg.stopGenerating": "Stop generating",

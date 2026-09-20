@@ -711,6 +711,30 @@
     </div>
   </div>
 
+  <!-- 办公文档「在线查看」：docx / xlsx / pptx / pdf。
+       服务端（LibreOffice）转成 PDF → 前端 fetch 成 Blob → 弹窗 iframe 内联渲染。
+       为何不把 iframe.src 直接指向接口：那样 iframe 会把 JSON 错误页（401/403/503/500）静默渲染出来，
+       用户只看到一片空白；取 Blob 能拿到真实状态码，从而给出准确的错因提示。
+       为此 CSP 需要放行 frame-src blob:（见 Program.cs 的响应头中间件）。 -->
+  <div id="docPreviewModal" class="modal-overlay hidden">
+    <div class="modal doc-preview-modal">
+      <div class="modal-title doc-preview-head">
+        <span class="doc-preview-name" id="docPreviewName"></span>
+        <a id="docPreviewDownload" class="doc-preview-dl" target="_blank" rel="noopener" data-i18n="docPreview.download"></a>
+      </div>
+      <div class="doc-preview-body">
+        <div class="doc-preview-hint hidden" id="docPreviewLoading">
+          <span class="spinner">⏳</span><span data-i18n="docPreview.converting"></span>
+        </div>
+        <div class="doc-preview-hint doc-preview-error hidden" id="docPreviewError"></div>
+        <iframe id="docPreviewFrame" class="doc-preview-frame hidden" title="document preview"></iframe>
+      </div>
+      <div class="modal-actions">
+        <button id="docPreviewClose" class="send" data-i18n="docPreview.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 数字员工编辑：独立选取弹窗（可复用技能 / 可调用子数字员工 / 知识库）。表单内只罗列“已选”，备选在此弹窗内勾选。 -->
   <div id="agentPickModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">

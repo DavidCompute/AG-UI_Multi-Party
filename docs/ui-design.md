@@ -113,6 +113,8 @@ topbar（品牌 + 顶栏操作）
   - 正文：支持 Markdown（标题/列表/表格/代码块/引用），先经 DOMPurify 消毒再渲染，外链 `_blank`。
   - 智能体消息扩展：`thinking` 可折叠思考块、`plan-card`（编排计划步骤卡片）、技能调用链卡片、
     `[工具] 调用中…→完成收起`、审批卡（HITL）、附件块（图片网格/音频条/文件）。
+  - **附件块：办公文档在下载卡片旁多一个「👁 在线查看」按钮**（见 §2.5）；非此类附件（图片 / 音频 /
+    文本 / 压缩包等）不显示该按钮 —— 服务端转不了，给了入口只会报错。
   - 撤回后原地置灰并显示“已撤回”。
 - `#typingRow`：正在输入指示（客服知聚按角色隔离）。
 - 右侧聊天/输入区可拖动分割线：`#chatResizer` 调节输入区高度（记忆 `agui.chatResizerH`）。
@@ -135,6 +137,32 @@ topbar（品牌 + 顶栏操作）
   - 在线离线互斥：用户在线时本人显示、分身暂停（🪞 影分身代班规则）；@ 自己可临时召唤分身。
   - 数字员工行可设置“本群触发方式”（`#gtTriggerMode` 等，管理员/群主）。
   - 客服知聚只列客服成员；顾客为非成员参与者，不出现在成员栏。
+
+### 2.5 办公文档在线查看（`#docPreviewModal`）
+
+**要解决的问题**：数字员工产出的 Word / Excel / PPT 以前只能下载后用本地 Office 打开；
+用户希望点一下就能在页面里读。
+
+**形态**：消息附件卡片旁的「👁 在线查看」→ 宽幅弹窗（`.modal.doc-preview-modal`：
+宽 `min(1100px, 94vw)`、高 `min(88vh, 900px)`）内嵌 iframe，头部是附件名 + 「⬇ 下载原件」，
+底部一个「关闭」。弹窗打开即开始加载，顶部显示「正在转换文档，首次打开需要几秒…」。
+
+**关键实现约定（都不是随手写的，每条都对应一个坑）**：
+
+| 约定 | 为什么 |
+|---|---|
+| 服务端转 PDF（`GET /ag-ui/preview/{id}`），前端不引 JS 渲染库 | PPT 的版式 / 图表 / 中文字体在前端方案里还原度很差，且 docx/xlsx/pptx 要三套库；转 PDF 三种格式共用一条通路，前端只用浏览器自带阅读器 |
+| 前端先 `fetch` 成 **Blob** 再设给 iframe（而不是把接口地址直接给 `iframe.src`） | 这样能拿到真实 HTTP 状态码，给出“没权限 / 不存在 / 服务端没装转换组件 / 这份文档转不出”的准确提示；直接给 iframe 的话错误响应会被当成一个“页面”静默渲染成空白 |
+| 因此 CSP 需要放行 `frame-src 'self' blob:` | Blob URL 入掍默认会被 `default-src 'self'` 拦住（见 `Program.cs` 响应头中间件） |
+| 关闭 / Esc / 点遮罩都要 `URL.revokeObjectURL` | 否则每看一份文档都留一份完整 PDF 在内存里 |
+| 加载 / 错误提示用 **`.hidden` 类**，不用 `hidden` 属性 | 提示元素带 `display:flex`，`hidden` 属性会被这条规则盖掉，提示永远不消失（已踩） |
+| 弹窗宽度用两段选择器 `.modal.doc-preview-modal` | `.modal` 基类在后面定义且同类选择器同权重，单类名会被它盖成 380px 宽（已踩：iframe 只剩 338px） |
+| `Esc` 在**捕获阶段**处理，且弹窗已隐藏时直接返回 | 不与下层弹窗（如库设置）争抢，不穿透 |
+| 为每一页单独的按键绑定都在 `msgDom` 末尾（`bindDocPreviewButtons`） | 消息用字符串拼 HTML + 插入后绑定，不走事件委派 |
+
+**入口判定**（`previewableAttId()`）：扩展名命中 `pdf/docx?/xlsx?/pptx?/odt/ods/odp/rtf`，
+且能解出站内附件 ID（`att_xxx`：取 `attachmentId`，外部桥接附件从 `url` 里解析）——
+外部直链附件拿不到站内 ID，不给入口。
 
 ---
 
@@ -370,6 +398,9 @@ apiKey 不回显，仅提示“已配置”。
 - 群列表与话题未读随 `onMessageStart/Read` 增量更新；重连/进入时以快照 + 服务端未读为准。
 - 角色/在线/分身事件联动成员列表；删除/解散即时移除本地 room 并回落到“选择知聚”空态。
 - 技能执行客户端：审批/一键执行经交互卡 + 本机桥/tunnel 回灌继续（卡片点亮/递归计划 UI）。
+- **`loadGroups()` 会重建消息窗口，不是“只刷列表”**：它内部调 `resetVScroll()`（清空消息 DOM），
+  因此必须紧接着 `renderMessages()`。否则任何一次知聚列表刷新（点「🔄 刷新」、成员加入/退出、
+  重连后的 `GROUP_CONNECTED`）都会把聊天区留在空白，要等下一条实时事件才恢复（已修）。
 
 ---
 
@@ -393,6 +424,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
+| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（docx / xlsx / pptx → PDF 内联；`?token=` 授权；权限同 `/files`；转换产物带缓存）|
 | 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`POST /ag-ui/kb/{kbId}/search`（试检索，只回片段预览）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌；库设置里的试检索也走它） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
 | 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |

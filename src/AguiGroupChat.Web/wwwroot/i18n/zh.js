@@ -1042,6 +1042,18 @@ window.I18N_DICTS.zh = {
   "msg.attachmentAudio": "语音",
   "msg.attachmentDownload": "下载",
   "msg.attachmentTitle": "附件：{kind}",
+  "msg.preview": "在线查看",
+  "msg.previewTip": "不下载，直接在页面内查看内容",
+
+  // ---- 办公文档在线查看（docx / xlsx / pptx / pdf 服务端转 PDF 后弹窗内联渲染）----
+  "docPreview.converting": "正在转换文档，首次打开需要几秒…",
+  "docPreview.download": "⬇ 下载原件",
+  "docPreview.close": "关闭",
+  "docPreview.unsupported": "该文件类型不支持在线查看，请下载后打开",
+  "docPreview.missing": "附件不存在或已删除",
+  "docPreview.denied": "无权访问该附件",
+  "docPreview.failed": "文档转换失败：{err}",
+  "docPreview.openFailed": "无法加载预览：{err}",
   "msg.truncated": "⚠️ 内容过长已截断（仅保留前 2MB）",
   "msg.startTopic": "以此消息新建话题",
   "msg.stopGenerating": "停止生成",

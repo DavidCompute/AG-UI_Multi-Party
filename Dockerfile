@@ -49,11 +49,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 命名卷首次创建时归 root，而容器以 app 运行 —— 必须预建并 chown，否则技能写入报 Permission denied。
 RUN mkdir -p /app/data /app/docs && chown $APP_UID:$APP_UID /app/data /app/docs
 
-# ---------- 可选：版面预览工具（默认不装）----------
-# LibreOffice（pptx/docx → pdf）+ poppler（pdf → png，并且 pdftotext 能抽文本）
+# 办公文档「在线查看」（docx / xlsx / pptx → PDF 内联渲染）依赖 LibreOffice：
+# 它不是可选能力，而是 /ag-ui/preview/{id} 端点的**运行时依赖** —— 缺了它用户点「在线查看」
+# 只会看到“服务端未安装文档转换组件”（503）。
+# 为什么三个组件都要装：Impress 只管 pptx，Writer 管 docx，Calc 管 xlsx。
+# 实测只装 libreoffice-impress 时 docx / xlsx 会报 "source file could not be loaded"（踩过）。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libreoffice-writer \
+        libreoffice-calc \
+        libreoffice-impress \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------- 可选：版面 QA 工具（默认不装）----------
+# poppler-utils（pdf → png，并且 pdftotext 能抽文本）
 # 用途：把产物渲成图做「肉眼版式校验」与自动检查（见 tools/preview-pptx.py）。
-#
-# 为什么默认不装：这是开发/QA 能力，不是运行时依赖，而它会拉进 131 个包、给镜像加上数百 MB。
+# 注意：办公文档「在线查看」**不需要**它 —— 那条路径把 LibreOffice 转出的 PDF 原样返回给浏览器，
+# 不需要再栅格化。所以它仍是开发/QA 能力，默认关。
 # 需要时显式开启：compose 里设 AGUI_PREVIEW_TOOLS=true，或
 #   docker compose build --build-arg AGUI_PREVIEW_TOOLS=true web
 #
@@ -62,7 +73,6 @@ RUN mkdir -p /app/data /app/docs && chown $APP_UID:$APP_UID /app/data /app/docs
 ARG AGUI_PREVIEW_TOOLS=false
 RUN if [ "$AGUI_PREVIEW_TOOLS" = "true" ]; then \
         apt-get update && apt-get install -y --no-install-recommends \
-            libreoffice-impress \
             poppler-utils \
         && rm -rf /var/lib/apt/lists/*; \
     fi

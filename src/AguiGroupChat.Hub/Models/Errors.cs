@@ -71,6 +71,11 @@ public static class ErrorCodes
 
     /// <summary>图库仅创建者或系统管理员可改动（群共享为只读）。</summary>
     public const string ImageLibraryPermissionDenied = "IMAGE_LIBRARY_PERMISSION_DENIED";
+
+    // ---- 办公文档在线查看（docx / xlsx / pptx 服务端转 PDF 后内联渲染）----
+
+    /// <summary>在线预览失败：服务端缺少转换组件（LibreOffice，503）或这份文档转不出 PDF（500）。</summary>
+    public const string DocumentPreviewFailed = "DOCUMENT_PREVIEW_FAILED";
 }
 
 /// <summary>HTTP 上行错误响应体：{"code": "...", "message": "..."}。</summary>

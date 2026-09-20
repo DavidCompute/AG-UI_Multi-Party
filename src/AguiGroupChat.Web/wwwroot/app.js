@@ -4336,7 +4336,10 @@ async function loadGroups() {
     $("searchBtn").disabled = true;
     const ts2 = $("topicSummaryBtn"); if (ts2) ts2.classList.add("hidden");
   }
+  // 重置虚拟滚动会**清空消息 DOM**，因此紧接着必须重建（否则刷新知聚列表就会把聊天区留在空白，
+  // 要等下一条实时事件才恢复）：手动点「刷新」、成员加入 / 退出、重连后的 loadGroups 都会走到这里。
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
+  renderMessages();
   // 登录后自动进入上次选择的知聚（一次性，手动刷新知聚列表不触发）
   if (pendingAutoEnterGroup && state.memberId && !state.activeGroupId) {
     pendingAutoEnterGroup = false;
@@ -7484,7 +7487,10 @@ function virtualRender() {
   const el = $("messages");
   const scrollTopBefore = el.scrollTop; // 重建前捕获：用于高度修正（估算→实测）后的滚动锚定补偿
   const r = state.activeGroupId ? room(state.activeGroupId) : null;
-  const msgs = activeTopicMessages(r);
+  // 必须先判空再取消息：activeTopicMessages 直接读 r.messages，
+  // 而这里原本把 msgs 算在下面的守卫之前 —— 「已进入应用但尚未选中知聚」时
+  // 会抛 TypeError（Cannot read properties of null），消息区整块空白。
+  const msgs = r ? activeTopicMessages(r) : [];
   const n = msgs.length;
   if (!r || n === 0) {
     // 已选中知聚但当前话题无消息：注入空态提示（避免误显示「选择一个群开始对话」的 CSS 占位，那样语义误导为尚未选群）；
@@ -7818,7 +7824,12 @@ function msgDom(m, r) {
     }
     const icon = att.kind === "text" || att.kind === "document" ? "📄" : "📎";
     const meta = att.size > 0 ? fmtBytes(att.size) : t("msg.attachmentDownload");
-    return `<a class="att-file" href="${href}" target="_blank" rel="noopener" title="${escapeHtml(t("msg.attachmentTitle", { kind: att.kind }))}">${icon} ${name}<span class="att-meta">${meta}</span></a>`;
+    const fileLink = `<a class="att-file" href="${href}" target="_blank" rel="noopener" title="${escapeHtml(t("msg.attachmentTitle", { kind: att.kind }))}">${icon} ${name}<span class="att-meta">${meta}</span></a>`;
+    // 办公文档 / PDF：额外给一个「在线查看」入口（不下载，弹窗内读）。
+    // 非此类附件不显示该按钮——服务端转不了，给了入口只会报错。
+    const pvId = previewableAttId(att);
+    if (!pvId) return fileLink;
+    return `<span class="att-row">${fileLink}<button type="button" class="att-preview" data-preview-id="${escapeHtml(pvId)}" data-preview-name="${name}" title="${escapeHtml(t("msg.previewTip"))}">👁 ${escapeHtml(t("msg.preview"))}</button></span>`;
   }).join("");
   const avatar = (() => {
     const sender = r.members.find((x) => x.memberId === m.senderId);
@@ -7878,10 +7889,115 @@ function msgDom(m, r) {
   const recallBtn = div.querySelector(".recall-btn");
   if (recallBtn) bindRecallButton(recallBtn, m);
   ensureFeedbackButtons(div, m); // 👍/👎（对数字员工回复评价）
+  bindDocPreviewButtons(div); // 附件「在线查看」（docx / xlsx / pptx / pdf）
   // 人机交互卡片的批准 / 拒绝按钮
   bindInteractionButtons(div, m);
   bindPlanCardButtons(div, m); // 计划卡「暂停 / 继续」（流式执行中）
   return div;
+}
+
+/** 可在线查看的附件扩展名（与服务端 `OfficePreviewConverter.PreviewableExtensions` 对应）。 */
+const PREVIEWABLE_ATT_RE = /\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
+
+/**
+ * 该附件的「可预览附件 ID」：类型不符、或拿不到站内附件 ID（外部桥接附件只有外链）时返回 null。
+ * 服务端预览端点只认站内 att_xxx 附件，所以这里必须能解析出 ID 才给入口。
+ */
+function previewableAttId(att) {
+  if (!att) return null;
+  if (!PREVIEWABLE_ATT_RE.test(att.name || "")) return null;
+  if (att.attachmentId) return att.attachmentId;
+  const m = /^\/ag-ui\/files\/(att_[A-Za-z0-9_-]+)\//.exec(att.url || "");
+  return m ? m[1] : null;
+}
+
+/** 给消息里的「在线查看」按钮挂事件。 */
+function bindDocPreviewButtons(container) {
+  container.querySelectorAll(".att-preview").forEach((btn) => {
+    btn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const attId = btn.dataset.previewId;
+      if (!attId) return;
+      openDocPreview(attId, btn.dataset.previewName || "");
+    };
+  });
+}
+
+/** 预览弹窗当前的 Blob URL（关闭时回收，避免把整份 PDF 留在内存里）。 */
+let docPreviewBlobUrl = null;
+
+/** 按状态码给本地化错因（优先本地文案：服务端错误消息只有中文，英文界面下会串味道）。 */
+function docPreviewErrorText(status, serverMsg) {
+  if (status === 403) return t("docPreview.denied");
+  if (status === 404) return t("docPreview.missing");
+  if (status === 400) return t("docPreview.unsupported");
+  return t("docPreview.failed", { err: serverMsg || `HTTP ${status}` });
+}
+
+/**
+ * 办公文档在线查看：取服务端转好的 PDF（Blob）→ 弹窗 iframe 内联渲染。
+ *
+ * 为何先 fetch 成 Blob 再喂 iframe：取 Blob 能拿到真实 HTTP 状态码（401/403/503/500），
+ * 从而给出“没权限 / 不存在 / 服务端没装转换组件 / 这份文档转不出”的准确提示；
+ * 若直接把接口地址给 iframe，错误响应会被当成一个页面静默渲染成一片空白。
+ */
+async function openDocPreview(attId, name) {
+  const modal = $("docPreviewModal");
+  const frame = $("docPreviewFrame");
+  const loading = $("docPreviewLoading");
+  const errorEl = $("docPreviewError");
+  $("docPreviewName").textContent = name || "";
+  // 「下载原件」走原有附件下载端点（同样带会话令牌）
+  $("docPreviewDownload").href = authedAssetUrl(`/ag-ui/files/${encodeURIComponent(attId)}/${encodeURIComponent(name || "file")}`);
+  releaseDocPreviewBlob();
+  frame.classList.add("hidden");
+  frame.removeAttribute("src");
+  errorEl.classList.add("hidden");
+  errorEl.textContent = "";
+  // 用 .hidden 类而不是 hidden 属性：本元素带 .doc-preview-hint 的 display:flex，
+  // 属性写法会被该规则盖掉，提示永远不消失（踩过）；.hidden 带 !important 不受影响。
+  loading.classList.remove("hidden");
+  modal.classList.remove("hidden");
+  try {
+    const res = await fetch(authedAssetUrl(`/ag-ui/preview/${encodeURIComponent(attId)}`), {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (!res.ok) {
+      let serverMsg = "";
+      try {
+        const j = await res.json();
+        serverMsg = (j && (j.message || j.code)) || "";
+      } catch { /* 响应体不是 JSON：用状态码兜底 */ }
+      throw Object.assign(new Error(serverMsg), { status: res.status });
+    }
+    const blob = await res.blob();
+    if (!/application\/pdf/i.test(blob.type || "")) {
+      throw Object.assign(new Error(t("docPreview.unsupported")), { status: 400 });
+    }
+    docPreviewBlobUrl = URL.createObjectURL(blob);
+    frame.src = docPreviewBlobUrl;
+    frame.classList.remove("hidden");
+    loading.classList.add("hidden");
+  } catch (err) {
+    loading.classList.add("hidden");
+    errorEl.textContent = docPreviewErrorText(err && err.status, err && err.message);
+    errorEl.classList.remove("hidden");
+  }
+}
+
+function releaseDocPreviewBlob() {
+  if (!docPreviewBlobUrl) return;
+  try { URL.revokeObjectURL(docPreviewBlobUrl); } catch { /* 回收失败不影响后续 */ }
+  docPreviewBlobUrl = null;
+}
+
+function closeDocPreview() {
+  $("docPreviewModal").classList.add("hidden");
+  const frame = $("docPreviewFrame");
+  frame.classList.add("hidden");
+  frame.removeAttribute("src");
+  releaseDocPreviewBlob();
 }
 
 /** 消息显示文本：数字员工消息剥离结构化 JSON 附件信息后的正文（解析缓存到 m._bridgeParse）；其余消息为原始内容。 */
@@ -9756,6 +9872,14 @@ function init() {
   $("agentImgLibManageBtn").onclick = openImgLibModal;
   $("afImgLibAddBtn").onclick = () => openAgentPick("imglib");
   $("imgLibNewBtn").onclick = () => openLibCreateDialog("imglib");
+  // 办公文档在线查看弹窗：关闭按钮 / 点遮罩 / Esc
+  $("docPreviewClose").onclick = closeDocPreview;
+  $("docPreviewModal").addEventListener("click", (e) => { if (e.target === $("docPreviewModal")) closeDocPreview(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || $("docPreviewModal").classList.contains("hidden")) return;
+    e.preventDefault(); e.stopPropagation();
+    closeDocPreview();
+  }, true);
   // 「库设置」弹窗（图库 / 知识库共用）：保存 / 取消 / 点遮罩 / Esc 关闭
   $("libSetOk").onclick = saveLibSettings;
   $("libSetCancel").onclick = closeLibSettings;

@@ -944,7 +944,15 @@ PUT /ag-ui/user/profile
 |接口|路径|说明|
 |---|---|---|
 |上传附件|`POST /ag-ui/upload`|multipart/form-data，字段名 `file`；单请求最多 9 个、单文件 ≤20 MB。需身份（登录令牌，或演示模式 `?memberId=`，与 WS/SSE 鉴权一致）。图片 / 音频 / 文本 / 办公文档自动归类 `kind`|
-|下载 / 预览|`GET /ag-ui/files/{attachmentId}/{fileName}`|按附件 ID 定位，文件名仅用于展示（下载保留原名）|
+|下载 / 预览|`GET /ag-ui/files/{attachmentId}/{fileName}`|按附件 ID 定位，文件名仅用于展示（下载保留原名）。按**原格式**返回；脚本 / 内联渲染类强制附件下载|
+|文档在线查看|`GET /ag-ui/preview/{attachmentId}`|把 docx / xlsx / pptx（含 odt/ods/odp/rtf）用服务端 LibreOffice 转成 PDF 后**内联**返回，供前端在弹窗 iframe 中直接阅读。`?token=` 与 `Authorization: Bearer` 均可（iframe 拿不到请求头，前端走前者）|
+
+**`/ag-ui/preview` 语义要点**：
+
+- **响应**：`200` + `Content-Type: application/pdf`，**不带** `Content-Disposition: attachment`（这正是它与 `/files` 的区别 —— 后者返回原格式，浏览器只会去下载 `.docx`）；`X-Content-Type-Options: nosniff` + `Cache-Control: private, max-age=300`（同一附件的产物是稳定的）；支持 Range。
+- **权限与 `/files` 完全一致**（同一段校验代码，不允许两处走样）：未登录 `401`、非该附件所在群成员 `403`、附件不存在 `404`。撤回消息的附件同样拒绝（防撤回后仍可读）。
+- **失败语义**：不支持的类型 → `400`（`BAD_REQUEST`）；服务端未安装 LibreOffice → `503`；该文档转不出 PDF（损坏 / 超时 120s）→ `500`。后两者错误码均为 `DOCUMENT_PREVIEW_FAILED`，`message` 给出可读原因。
+- **缓存**：产物按「附件 ID + 源文件指纹（长度 + mtime）」缓存于服务端 `data/preview`，替换源文件自动失效；保留 7 天。服务端串行转换（LibreOffice 不能并发跑），单次首次转换实测：docx ≈2.5s、xlsx ≈1.7s、pptx(4.4MB/16 页) ≈5.3s，二次命中缓存 ≈15ms。
 
 上传返回示例（响应体为 `{ "attachments": [...] }`）：
 
@@ -1280,6 +1288,12 @@ Hub 扩展错误码（用户 / 智能体管理）：
 |SKILL_NOT_FOUND|技能不存在|
 |SKILL_EXISTS|技能 ID 已被占用|
 |SKILL_PERMISSION_DENIED|仅创建者 / 系统管理员可操作；`shell`/`http` 技能仅管理员（返回 403）|
+
+附件在线查看错误码：
+
+|错误标识|说明|
+|---|---|
+|DOCUMENT_PREVIEW_FAILED|办公文档在线查看失败：服务端未安装转换组件 LibreOffice（`503`）或这份文档转不出 PDF（损坏 / 超时，`500`）；`message` 给出可读原因。类型不支持则仍用 `BAD_REQUEST`（`400`）|
 
 错误响应体统一为 `{"code": "...", "message": "..."}`（HTTP 状态码见各接口实现：401 / 403 / 404 / 409）。
 

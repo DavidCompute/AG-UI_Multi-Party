@@ -683,6 +683,17 @@ select {
   padding: 5px 10px; overflow: hidden;
 }
 .msg .att-file:hover { border-color: var(--accent); }
+/* 附件「在线查看」按钮：与下载卡片并排。仅办公文档 / PDF 出现（普通附件不显示，避免无意义入口）。
+   打开后是弹窗内阅读，不是下载。 */
+.msg .att-row { display: inline-flex; align-items: center; gap: 6px; }
+.msg .att-preview {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 13px; color: var(--accent); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 10px; white-space: nowrap;
+}
+.msg .att-preview:hover:not(:disabled) { border-color: var(--accent); }
+.msg .att-preview:disabled { cursor: default; opacity: .65; }
 /* 语音消息：内联播放条（音频无脚本 / 渲染风险，安全内联） */
 .msg .att-audio {
   display: flex; align-items: center; gap: 8px;
@@ -691,6 +702,24 @@ select {
 }
 .msg .att-audio audio { height: 34px; min-width: 220px; }
 .att-meta { font-size: 11px; color: var(--muted); }
+
+/* ---- 办公文档在线查看弹窗（docx / xlsx / pptx / pdf）---- */
+/* ---- 办公文档在线查看弹窗（docx / xlsx / pptx / pdf）---- */
+/* 选择器用 .modal.doc-preview-modal（而不是单独一个类）：.modal 基类在后面定义且同类选择器同权重，
+   单个类名会被它盖成 380px 宽（踩过：iframe 只剩 338px）。用双类提高权重，与文件里其它
+   .modal.xxx-modal 变体的写法保持一致。 */
+.modal.doc-preview-modal { width: min(1100px, 94vw); max-width: 94vw; height: min(88vh, 900px); display: flex; flex-direction: column; }
+.doc-preview-head { display: flex; align-items: center; gap: 12px; }
+.doc-preview-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-preview-dl { font-size: 13px; font-weight: normal; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.doc-preview-dl:hover { text-decoration: underline; }
+.doc-preview-body { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 10px 0; }
+.doc-preview-hint {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  flex: 1; font-size: 13px; color: var(--muted); text-align: center; padding: 24px;
+}
+.doc-preview-error { color: #e5534b; }
+.doc-preview-frame { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* 输入区录音中 / 画布标注模态 */
