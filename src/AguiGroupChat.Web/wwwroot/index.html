@@ -679,6 +679,29 @@
     </div>
   </div>
 
+  <!-- 「图库设置」弹窗（目前只有「检索严格度」）。
+       为何要按库调：图库描述风格差别很大 —— 短人名/标签型描述得分普遍偏高（门槛要收紧，否则容易配错），
+       长句型描述下标题式查询得分偏低（实测 0.62，门槛要放松才配得上）。一个全局值两头都不合适。
+       z-index 用 ui-dialog-overlay（80）：从 z-60 的图库管理弹窗里唤起，必须在其之上。 -->
+  <div id="imgLibSetModal" class="modal-overlay ui-dialog-overlay hidden">
+    <div class="modal ui-dialog lib-create-modal">
+      <div class="modal-title" id="imgLibSetTitle"></div>
+      <div class="lib-create-body">
+        <label class="form-hint" for="imgLibSetStrictness" style="display:block;margin:0 0 4px" data-i18n="imgLib.setStrictness"></label>
+        <select id="imgLibSetStrictness" class="modal-input">
+          <option value="0.5" data-i18n="imgLib.setLoose"></option>
+          <option value="0.6" data-i18n="imgLib.setStandard"></option>
+          <option value="0.72" data-i18n="imgLib.setStrict"></option>
+        </select>
+        <p class="form-hint" data-i18n="imgLib.setHint"></p>
+      </div>
+      <div class="modal-actions">
+        <button id="imgLibSetOk" class="send" data-i18n="common.save"></button>
+        <button id="imgLibSetCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 数字员工编辑：独立选取弹窗（可复用技能 / 可调用子数字员工 / 知识库）。表单内只罗列“已选”，备选在此弹窗内勾选。 -->
   <div id="agentPickModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">

@@ -484,9 +484,11 @@ public sealed class ImageLibraryCatalog
         {
             var lib = GetLibrary(libId);
             if (lib is null) continue;
+            // 本库的检索严格度优先（库设了就用库的，否则用调用方传的）
+            var gate = lib.MinScore ?? minScore;
             try
             {
-                foreach (var hit in store.Search(ImgGroupPrefix + libId, "img", vec, Math.Max(1, topK), minScore, "group"))
+                foreach (var hit in store.Search(ImgGroupPrefix + libId, "img", vec, Math.Max(1, topK), gate, "group"))
                     if (BuildHit(lib, hit.MessageId, hit.Score) is { } h) hits.Add(h);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "图库 {LibId} 检索失败", libId); }
@@ -501,6 +503,36 @@ public sealed class ImageLibraryCatalog
             .OrderByDescending(h => h.Score)
             .Take(topK)
             .ToList();
+    }
+
+    /// <summary>检索严格度的合理区间：低于 0.30 基本等于不筛（实测噪声高到 0.55），高于 0.95 则连本人照片都配不上。</summary>
+    public const double MinStrictness = 0.30;
+    public const double MaxStrictness = 0.95;
+
+    /// <summary>推荐值（与各文档技能默认传的 minScore 同口径）：<b>标准</b>。</summary>
+    public const double StandardStrictness = 0.60;
+
+    /// <summary>
+    /// 设置本库的<b>检索严格度</b>（null = 恢复“沿用调用方传的值”）。
+    ///
+    /// <para>
+    /// 会夹到 <see cref="MinStrictness"/>~<see cref="MaxStrictness"/>：
+    /// 前端下拉给的是 0.5 / 0.6 / 0.72 三档，但接口不阻止别的值（留手工调参余地）。
+    /// </para>
+    /// </summary>
+    public string? SetStrictness(string libId, double? minScore)
+    {
+        var lib = GetLibrary(libId);
+        if (lib is null) return "图库不存在";
+        if (minScore is { } v)
+        {
+            if (double.IsNaN(v) || double.IsInfinity(v)) return "严格度必须是 0.30~0.95 之间的数字";
+            lib.MinScore = Math.Clamp(v, MinStrictness, MaxStrictness);
+        }
+        else lib.MinScore = null;
+        lib.UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _changes?.Notify();
+        return null;
     }
 
     /// <summary>按 assetId 构造检索结果（拿不到文件时返回 null：目录里有记录但文件已丢的情况）。</summary>

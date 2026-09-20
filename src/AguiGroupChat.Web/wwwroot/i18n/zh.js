@@ -476,6 +476,16 @@ window.I18N_DICTS.zh = {
 
   /* --- 图库管理 --- */
   "imgLib.title": "图库管理",
+  "imgLib.setTitle": "图库设置：{name}",
+  "imgLib.setBtnTip": "图库设置（检索严格度）",
+  "imgLib.setStrictness": "检索严格度",
+  "imgLib.setLoose": "宽松（0.5）— 更容易配上，也更容易配错",
+  "imgLib.setStandard": "标准（0.6）— 推荐",
+  "imgLib.setStrict": "严格（0.72）— 宁可少配也不配错",
+  "imgLib.setCustom": "自定义（{value}，接口手工设置）",
+  "imgLib.setHint": "只影响本图库的配图检索：描述是短人名 / 标签时得分普遍偏高，建议收紧避免配错；描述是长句时标题式查询得分偏低（实测 0.62），可放松让它配上。不填写即沿用技能默认值（0.6）。注：描述里词面直接对上的图片不受此门槛限制。",
+  "imgLib.setSaved": "检索严格度已保存，下次配图生效",
+  "imgLib.setFail": "保存失败（{err}）",
   "imgLib.newTitle": "新建图库",
   "imgLib.createHint": "创建后在列表里展开该库、点「上传图片」加入素材（支持 png / jpg / jpeg / gif / bmp / webp，可多选）；系统会自动生成图片描述并向量化，供 PPT / Word / PDF 出稿时按语义配图。",
   "imgLib.name.ph": "图库名称（如：产品宣传图）",

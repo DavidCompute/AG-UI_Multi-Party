@@ -3126,6 +3126,7 @@ function renderImgLibModal() {
     let ops = `<button class="icon-btn imglib-expand" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.toggleImages")}" style="font-size:12px">${exp ? "▾" : "▸"}</button>`;
     if (mine) {
       ops += `<button class="chip-btn imglib-upload" data-lib="${escapeHtml(lib.libId)}" type="button" style="font-size:12px;padding:2px 8px">${t("imgLib.upload")}</button>`
+        + `<button class="icon-btn imglib-set" data-lib="${escapeHtml(lib.libId)}" title="${escapeHtml(t("imgLib.setBtnTip"))}">⚙️</button>`
         + `<button class="icon-btn imglib-del" data-lib="${escapeHtml(lib.libId)}" title="${t("imgLib.delTitle")}">🗑️</button>`;
     } else {
       ops += `<span style="color:var(--muted);font-size:12px">${t("kb.systemReadonly")}</span>`;
@@ -3191,6 +3192,9 @@ function renderImgLibModal() {
     item.querySelectorAll(".imglib-upload").forEach((upBtn) => {
       upBtn.addEventListener("click", (e) => { e.stopPropagation(); item.querySelector(".imglib-file")?.click(); });
     });
+    item.querySelectorAll(".imglib-set").forEach((setBtn) => {
+      setBtn.addEventListener("click", (e) => { e.stopPropagation(); openImgLibSettings(setBtn.dataset.lib); });
+    });
     const fileInput = item.querySelector(".imglib-file");
     if (fileInput) fileInput.onchange = async (e) => {
       const files = Array.from(e.target.files || []);
@@ -3215,6 +3219,65 @@ function renderImgLibModal() {
     });
     wrap.appendChild(item);
   });
+}
+
+/* ============ 图库设置（检索严格度） ============
+ *
+ * 为何要按库调：图库描述风格差别很大 ——
+ *   描述是**短人名 / 标签**时，通用关键词得分普遍偏高，门槛要收紧（否则容易配错）；
+ *   描述是**长句**时，标题式查询得分普遍偏低（实测 0.62），门槛要放松才配得上。
+ * 所以严格度存在**图库**上：库设了就以库为准，没设就沿用技能传的值（各文档技能默认 0.6）。
+ */
+let imgLibSetTarget = null;   // 正在设置的图库 libId
+const IMG_STRICT_PRESETS = ["0.5", "0.6", "0.72"];
+
+function openImgLibSettings(libId) {
+  const lib = (imgLibList || []).find((x) => x.libId === libId);
+  if (!lib) return;
+  imgLibSetTarget = libId;
+  $("imgLibSetTitle").textContent = t("imgLib.setTitle", { name: lib.name });
+  const sel = $("imgLibSetStrictness");
+  // 先移除上一次为“自定义值”临时加的选项（接口手工设的非预设值）
+  [...sel.options].filter((o) => o.dataset.custom).forEach((o) => o.remove());
+  const cur = Number(lib.minScore);
+  if (cur > 0 && !IMG_STRICT_PRESETS.includes(String(cur))) {
+    const o = document.createElement("option");
+    o.value = String(cur);
+    o.dataset.custom = "1";
+    o.textContent = t("imgLib.setCustom", { value: cur });
+    sel.appendChild(o);
+  }
+  // 未设置（null）按“标准”回显：各文档技能默认传的就是 0.6，实际行为就是标准
+  sel.value = cur > 0 ? String(cur) : "0.6";
+  $("imgLibSetModal").classList.remove("hidden");
+  sel.focus();
+}
+
+function closeImgLibSettings() {
+  imgLibSetTarget = null;
+  $("imgLibSetModal").classList.add("hidden");
+}
+
+async function saveImgLibSettings() {
+  const libId = imgLibSetTarget;
+  if (!libId) return;
+  const minScore = Number($("imgLibSetStrictness").value) || 0.6;
+  const btn = $("imgLibSetOk");
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/ag-ui/image-libs/${libId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+      body: JSON.stringify({ minScore }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("imgLib.setFail", { err: res.status }))); return; }
+    toast(t("imgLib.setSaved"));
+    closeImgLibSettings();
+    await loadImageLibs();
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function openImgLibModal() {
@@ -9596,6 +9659,10 @@ function init() {
   $("agentImgLibManageBtn").onclick = openImgLibModal;
   $("afImgLibAddBtn").onclick = () => openAgentPick("imglib");
   $("imgLibNewBtn").onclick = () => openLibCreateDialog("imglib");
+  // 「图库设置」弹窗：保存 / 取消 / 点遮罩 / Esc 关闭
+  $("imgLibSetOk").onclick = saveImgLibSettings;
+  $("imgLibSetCancel").onclick = closeImgLibSettings;
+  $("imgLibSetModal").addEventListener("click", (e) => { if (e.target === $("imgLibSetModal")) closeImgLibSettings(); });
   $("imgLibSearch").addEventListener("input", () => { imgLibSearchQuery = $("imgLibSearch").value; renderImgLibModal(); });
   $("imgLibCloseBtn").onclick = () => { $("imgLibModal").classList.add("hidden"); stopImgLibPolling(); renderImgLibPicks(); };
   // 「新建知识库 / 新建图库」弹窗：确认 / 取消 / 点遮罩关闭 / Esc 关闭 / 回车提交
@@ -9609,6 +9676,11 @@ function init() {
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || $("libCreateModal").classList.contains("hidden")) return;
     e.preventDefault(); e.stopPropagation(); closeLibCreateDialog();
+  }, true);
+  // 图库设置弹窗同理：捕获阶段处理，避免同一次 Esc 把下层的图库管理弹窗也关掉
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || $("imgLibSetModal").classList.contains("hidden")) return;
+    e.preventDefault(); e.stopPropagation(); closeImgLibSettings();
   }, true);
   $("agentSearch").addEventListener("input", renderAgentList);
   $("afTriggerMode").addEventListener("change", syncTriggerForm);

@@ -1042,14 +1042,20 @@ Files live under `data/images/{libId}/{assetId}{ext}`. Ingestion is asynchronous
 
 |API|Path|Notes|
 |---|---|
-|Create library|`POST /ag-ui/image-libs`|`{ name, description?, sharedGroupIds? }`; sharing to a group requires membership|
+|Create library|`POST /ag-ui/image-libs`|`{ name, description?, sharedGroupIds?, minScore? }`; sharing to a group requires membership|
 |Visible list|`GET /ag-ui/image-libs`|system-level + own + group-shared + admin, including the asset list|
 |Delete library|`DELETE /ag-ui/image-libs/{libId}`|creator or admin only; system-level is admin-only|
 |Upload image|`POST /ag-ui/image-libs/{libId}/assets`|`{ attachmentId, fileName?, caption?, tags? }` (after `POST /ag-ui/upload`)|
 |Edit caption|`PUT /ag-ui/image-libs/{libId}/assets/{assetId}`|triggers **re-vectorisation** (the caption is what retrieval matches)|
 |Delete image|`DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`|removes vector and file|
 |Read original|`GET /ag-ui/image-libs/{libId}/assets/{assetId}/raw`|login required, plus read access to that library|
-|Semantic search|`POST /ag-ui/images/search`|`{ query, topK?, minScore?, scopeHandle? }`; see below|
+| Semantic search | `POST /ag-ui/images/search` |`{ query, topK?, minScore?, scopeHandle? }`; see below |
+| Library settings | `PUT /ag-ui/image-libs/{libId}` |`{ minScore? }` = **search strictness** (0.30-0.95, clamped; null restores "follow the caller's value"); creator or admin only |
+
+**Search strictness (`minScore`, 1.0.148+)**: every library may carry its own similarity gate — `/ag-ui/images/search` resolves it **per library**: **the library's value wins when set, otherwise the request's `minScore`** (otherwise 0.25).
+Why per library: caption styles differ a lot — short name/tag captions score high across the board for topical keywords (tighten it or you get wrong picks), while long-sentence captions score low for heading-style queries (0.62 measured, loosen it to let them match).
+Callers (the document skills) send **0.6** by default, so an unset library behaves exactly as before.
+**Word-overlap hits (the BM25 fallback) are not gated by it** — matching words is a different kind of signal on a different scale.
 
 **Identity and scope at the search endpoint (security-critical)**: it accepts two identities — a logged-in user (frontend debugging; can only search libraries they may read) and the **platform self token** (built-in skills calling back; `AGUI_SELF_BASE` / `AGUI_SELF_TOKEN` are injected into the process environment at startup).
 Skills carry **only the platform-registered search-scope handle (`scopeHandle`)** and never declare library IDs — skill input is model-generated, so self-declared IDs would allow reading someone else's library.

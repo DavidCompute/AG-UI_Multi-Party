@@ -28,6 +28,23 @@ public sealed class ImageLibrary
     /// <summary>群级共享：指定群的成员也能查看 / 让技能使用该图库（只读，不可增删图片）。</summary>
     public List<string> SharedGroupIds { get; set; } = [];
 
+    /// <summary>
+    /// 本库的<b>检索严格度</b>（相似度门槛 0.30~0.95，null = 未设置，沿用调用方传的值）。
+    ///
+    /// <para>
+    /// 为何要能按库调：图库之间描述风格差别很大 ——
+    /// 描述是<b>短人名 / 标签</b>时，通用关键词的得分普遍偏高（容易配上不相干的图），门槛要收紧；
+    /// 描述是<b>长句</b>时，标题型查询得分普遍偏低（实测 0.62），门槛要放松才配得上。
+    /// 一个全局值必然两头都不合适。
+    /// </para>
+    ///
+    /// <para>
+    /// 生效位置：<c>/ag-ui/images/search</c> 在**每个库**上分别用它过滤向量命中（库设了就用库的，否则用请求里的）。
+    /// 关键词词面命中（BM25 兜底）不套这个门槛 —— 它本来就是“词都对上了”的另一种信号，分尺不同。
+    /// </para>
+    /// </summary>
+    public double? MinScore { get; set; }
+
     /// <summary>图片清单（向量存记忆存储 <c>GroupId=img:{LibId}</c>，此处仅元数据）。</summary>
     public List<ImageAsset> Assets { get; set; } = [];
 

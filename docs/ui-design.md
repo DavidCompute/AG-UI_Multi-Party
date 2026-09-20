@@ -247,6 +247,13 @@ topbar（品牌 + 顶栏操作）
   - 图库行（收起态）在**有未就绪图片**时显示 `⚠ n 张未就绪`（`imgLib.badge.pending`），全部就绪则不显示；
     处理中时行内直接显示 `⏳ 识别中…`，因此不必逐库展开也能一眼看出进度。
   - 四个徐标的悬浮说明（为何要看到完成态 / 为何“仅按文件名”也等于搜不到）均走 i18n（`imgLib.badge.*`）。
+  - **行操作**（仅创建者可见）：`📤 上传图片` / `⚙️ 图库设置` / `🗑️ 删除图库`。
+    `⚙️` 打开 `#imgLibSetModal`（`ui-dialog-overlay`，浮于管理弹窗之上）：**检索严格度**下拉三档
+    —— 宽松 `0.5` / 标准 `0.6`（推荐）/ 严格 `0.72`，下方一段说明为何要按库调。
+    未设置时按“标准 0.6”回显（各文档技能默认传的就是它，行为一致）；
+    接口手工设的非预设值（如 0.65）会临时插一个“自定义”选项回显 —— **否则一保存就会被默默改回 0.6**。
+    交互：`Enter` 无意义（仅下拉）、`Esc` / 取消 / 点遮罩关闭（`Esc` 在捕获阶段处理，避免连下层管理弹窗一起关）。
+    文案 key：`imgLib.setTitle|setBtnTip|setStrictness|setLoose|setStandard|setStrict|setCustom|setHint|setSaved|setFail`。
   - 上传：仅库创建者可见 `📤 上传图片`（多选），走 `/ag-ui/upload` → 登记进图库；
     上传后由视觉模型异步写描述并向量化，状态 `processing` 时前端**每 2s 轮询**该弹窗直到全部 `ready`（无处理中则自动停止）。
   - 保存描述：`PUT /ag-ui/image-libs/{libId}/assets/{assetId}` **会在重新向量化完成后才返回**（后端 `await task`），
@@ -375,7 +382,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
-| 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`/ag-ui/image-libs`（创建/删除/图片）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌） |
+| 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
 | 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |
 | 系统 | `/ag-ui/export|import|import/preview|reset` |

@@ -475,7 +475,17 @@ window.I18N_DICTS.en = {
   "kb.close": "Close",
 
   /* --- 图库管理 --- */
-  "imgLib.title": "Image Library",
+  "imgLib.title": "Image Libraries",
+  "imgLib.setTitle": "Library settings: {name}",
+  "imgLib.setBtnTip": "Library settings (search strictness)",
+  "imgLib.setStrictness": "Search strictness",
+  "imgLib.setLoose": "Loose (0.5) — matches more, but also more wrong ones",
+  "imgLib.setStandard": "Standard (0.6) — recommended",
+  "imgLib.setStrict": "Strict (0.72) — rather no image than a wrong one",
+  "imgLib.setCustom": "Custom ({value}, set via the API)",
+  "imgLib.setHint": "Affects illustration search for this library only: captions that are short names/tags score high across the board, so tighten it to avoid wrong picks; long-sentence captions score low for heading-style queries (0.62 measured), so loosen it to let them match. Leave it unset to use the skill default (0.6). Note: images with a direct wording overlap are not gated by this.",
+  "imgLib.setSaved": "Search strictness saved; applies to the next illustration",
+  "imgLib.setFail": "Save failed ({err})",
   "imgLib.newTitle": "New Image Library",
   "imgLib.createHint": "Once created, expand it in the list and use “Upload images” to add pictures (png / jpg / jpeg / gif / bmp / webp, multi-select). Descriptions are generated and vectorised so PPT / Word / PDF deliverables can be illustrated by semantic search.",
   "imgLib.name.ph": "Library name (e.g. Product shots)",

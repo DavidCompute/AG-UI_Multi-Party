@@ -48,7 +48,25 @@ public static class ImageLibraryApi
             }
             var lib = catalog.CreateLibrary(req.Name, req.Description ?? "", user.UserId);
             if (req.SharedGroupIds is { Count: > 0 }) lib.SharedGroupIds = req.SharedGroupIds.Distinct().ToList();
+            if (req.MinScore is { } ms) catalog.SetStrictness(lib.LibId, ms);
             return Results.Ok(ToDto(lib));
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 更新图库设置（目前只有「检索严格度」）----
+        //     为何要按库调：图库描述风格差别大 —— 短人名/标签型描述得分普遍偏高（门槛要收紧），
+        //     长句型描述下标题式查询得分偏低（实测 0.62，门槛要放松）。一个全局值两头都不合适。
+        root.MapPut("/{libId}", (string libId, ImageLibraryUpdateRequest req, HttpContext ctx, AuthService auth,
+            ImageLibraryCatalog catalog) =>
+        {
+            var user = AgentApi.RequireUser(ctx, auth);
+            if (user is null) return AgentApi.Unauthorized();
+            var lib = catalog.GetLibrary(libId);
+            if (lib is null) return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"图库不存在：{libId}"));
+            if (!catalog.CanWrite(lib, user.UserId, auth.IsAdmin(user.UserId)))
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "只有创建者或管理员可修改图库设置"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var error = catalog.SetStrictness(libId, req.MinScore);
+            return error is null ? Results.Ok(ToDto(lib)) : Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error));
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 可见列表（系统级 + 自己创建的 + 群共享 + 管理员），含图片清单 ----
@@ -236,6 +254,8 @@ public static class ImageLibraryApi
         lib.OwnerId,
         lib.SharedGroupIds,
         lib.UpdatedAtMs,
+        // 检索严格度（null = 未设置，沿用调用方传的 minScore）；界面用它回显下拉
+        lib.MinScore,
         assets = lib.Assets.Select(a => ToAssetDto(lib, a)).ToList(),
     };
 
@@ -257,7 +277,11 @@ public static class ImageLibraryApi
     };
 }
 
-public sealed record ImageLibraryCreateRequest(string Name, string? Description = null, List<string>? SharedGroupIds = null);
+public sealed record ImageLibraryCreateRequest(string Name, string? Description = null, List<string>? SharedGroupIds = null,
+    double? MinScore = null);
+
+/// <summary>更新图库设置：<c>minScore</c> = 检索严格度（0.30~0.95；null = 恢复为“沿用调用方传的值”）。</summary>
+public sealed record ImageLibraryUpdateRequest(double? MinScore = null);
 
 public sealed record ImageAssetAddRequest(string AttachmentId, string? FileName = null, string? Caption = null,
     List<string>? Tags = null);

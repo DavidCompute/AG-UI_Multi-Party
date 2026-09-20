@@ -2665,6 +2665,11 @@ public class Skill
     /// <b>必须显式传</b>：平台在不传时按 <b>0.25</b> 兜底，而实测无意义关键词能到 <b>0.44~0.55</b>、
     /// 真实命中才是 0.62~0.88。用默认值等于不筛 —— 会把不相干的照片当“配图”嵌进 PDF。
     /// </para>
+    ///
+    /// <para>
+    /// 这不是最终生效值：图库可以有自己的**检索严格度**（图库设置里调），库设了就以库为准，
+    /// 这里只是“没设时”的默认。所以失败原因里<b>不写死这个数字</b>。
+    /// </para>
     /// </summary>
     private const double ImgMinScore = 0.60;
 
@@ -2866,7 +2871,7 @@ public class Skill
                     if (hit is null)
                         why = sawUnsupported
                             ? "图库命中项不是 PNG/JPEG（PDF 只嵌 PNG/JPEG），建议换成 PNG/JPEG 后重试"
-                            : "图库里没有匹配的图片（门槛 " + ImgMinScore.ToString(CultureInfo.InvariantCulture) + "）";
+                            : "图库里没有匹配的图片（阈值按该图库的检索严格度，可在图库设置里调松）";
                 }
                 else why = "平台返回格式异常";
             }

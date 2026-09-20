@@ -1079,6 +1079,11 @@ public class Skill
     /// <b>0.44~0.55</b>，真实命中才是 0.62~0.88。用默认值等于不筛 —— 会把不相干的人物照当“配图”嵌进稿子，
     /// 比不配图差得多（PPT 侧踩过这个坑，这里同口径修正）。
     /// </para>
+    ///
+    /// <para>
+    /// 这不是最终生效值：图库可以有自己的**检索严格度**（图库设置里调，见平台 <c>ImageLibrary.MinScore</c>），
+    /// 库设了就以库为准（更严格或更宽松都行），这里只是“没设时”的默认。所以失败原因里<b>不写死这个数字</b>。
+    /// </para>
     /// </summary>
     private const double ImgMinScore = 0.60;
 
@@ -1297,7 +1302,7 @@ public class Skill
                         };
                         break;
                     }
-                    if (hit is null) why = "图库里没有匹配的图片（门槛 " + ImgMinScore.ToString(System.Globalization.CultureInfo.InvariantCulture) + "）";
+                    if (hit is null) why = "图库里没有匹配的图片（阈值按该图库的检索严格度，可在图库设置里调松）";
                 }
                 else why = "平台返回格式异常";
             }

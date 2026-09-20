@@ -1035,14 +1035,22 @@ PUT /ag-ui/user/profile
 
 |接口|路径|说明|
 |---|---|
-|创建图库|`POST /ag-ui/image-libs`|`{ name, description?, sharedGroupIds? }`；群级共享需为群成员|
+|创建图库|`POST /ag-ui/image-libs`|`{ name, description?, sharedGroupIds?, minScore? }`；群级共享需为群成员|
 |可见列表|`GET /ag-ui/image-libs`|系统级 + 自己创建的 + 群共享 + 管理员，含图片清单|
 |删除图库|`DELETE /ag-ui/image-libs/{libId}`|仅创建者或管理员；系统级仅管理员|
 |上传图片|`POST /ag-ui/image-libs/{libId}/assets`|`{ attachmentId, fileName?, caption?, tags? }`（先经 `POST /ag-ui/upload`）|
 |改描述|`PUT /ag-ui/image-libs/{libId}/assets/{assetId}`|改了会**重新向量化**（检索依据就是描述）|
 |删图片|`DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`|同时删向量与文件|
 |读原图|`GET /ag-ui/image-libs/{libId}/assets/{assetId}/raw`|需登录且可读该图库|
-|语义检索|`POST /ag-ui/images/search`|`{ query, topK?, minScore?, scopeHandle? }`；见下|
+| 语义检索 | `POST /ag-ui/images/search` |`{ query, topK?, minScore?, scopeHandle? }`；见下 |
+| 图库设置 | `PUT /ag-ui/image-libs/{libId}` |`{ minScore? }` = **检索严格度**（0.30~0.95，夹紧；null = 恢复“沿用调用方传的值”）；仅创建者或管理员 |
+
+**检索严格度（`minScore`，1.0.148+）**：每个图库可以有自己的相似度门槛 ——
+`/ag-ui/images/search` 在**每个库**上分别解析：**库设了就用库的，否则用请求里的 `minScore`**（再否则 0.25 兜底）。
+为何要按库调：图库描述风格差别很大 —— 描述是**短人名 / 标签**时通用关键词得分普遍偏高（门槛要收紧，否则容易配错）；
+描述是**长句**时标题式查询得分偏低（实测 0.62，门槛要放松才配得上）。
+下载（技能）侧默认传 **0.6**，所以“未设置”的库行为不变。
+**关键词词面命中（BM25 兜底）不套这个门槛** —— 它本来就是“词都对上了”的另一种信号，分尺不同。
 
 **检索端的身份与范围（安全关键）**：该端点接受两种身份 —— 登录用户（前端调试、只能查自己可读的图库）与
 **平台自令牌**（内置技能回调，`AGUI_SELF_BASE` / `AGUI_SELF_TOKEN` 于启动时注入进程环境变量）。

@@ -206,7 +206,39 @@ try {
     check("描述存空时提示「⚠ 仅按文件名匹配」", FILENAME_ONLY.test(emptyBadge), emptyBadge);
   }
 
-  // ---------- 5) 清理：删掉临时图库（不碰真实数据） ----------
+  // ---------- 6) 图库设置（⚙️ 检索严格度）----------
+  // 在临时库上操作（不碰真实数据）：打开 → 选严格 → 保存 → API 回读确认。
+  await openLibModal();
+  const setItem = itemOf(probeLibName);
+  await setItem.locator(".kb-row").click();   // 展开（⚙️ 在行操作区，展开不影响）
+  await sleep(200);
+  const gear = setItem.locator(".imglib-set").first();
+  check("图库行上有 ⚙️ 设置入口", await gear.count() > 0);
+  if (await gear.count() > 0) {
+    await gear.click();
+    await page.waitForSelector("#imgLibSetModal:not(.hidden)", { timeout: 5000 });
+    check("⚙️ 打开设置弹窗（浮在管理弹窗之上）", true);
+    check("弹窗标题带图库名", ((await page.locator("#imgLibSetTitle").textContent()) || "").includes(probeLibName));
+    check("未设置时回显为「标准（0.6）」（技能默认值）",
+          await page.locator("#imgLibSetStrictness").inputValue() === "0.6",
+          await page.locator("#imgLibSetStrictness").inputValue());
+    await page.selectOption("#imgLibSetStrictness", "0.72");
+    await page.click("#imgLibSetOk");
+    await page.waitForSelector("#imgLibSetModal.hidden", { state: "hidden", timeout: 8000 });
+    const saved = await apiJson("GET", "/ag-ui/image-libs");
+    const mine = (saved.body?.libraries || []).find((l) => l.libId === probeLibId);
+    check("保存后接口回读为 0.72", Math.abs((mine?.minScore ?? 0) - 0.72) < 1e-9, String(mine?.minScore));
+    // 再打开：应按已保存值回显（否则一保存就被默默改回 0.6）
+    await setItem.locator(".imglib-set").first().click();
+    await page.waitForSelector("#imgLibSetModal:not(.hidden)", { timeout: 5000 });
+    check("重新打开时回显已保存的 0.72",
+          await page.locator("#imgLibSetStrictness").inputValue() === "0.72",
+          await page.locator("#imgLibSetStrictness").inputValue());
+    await page.click("#imgLibSetCancel");
+    await page.waitForSelector("#imgLibSetModal.hidden", { state: "hidden", timeout: 5000 });
+  }
+
+  // ---------- 5) 清理：删掉临时图库（不碰真实数据）----------
   const del = await apiJson("DELETE", `/ag-ui/image-libs/${probeLibId}`);
   check("临时图库已清理", del.status === 200, JSON.stringify(del).slice(0, 120));
   const after = await apiJson("GET", "/ag-ui/image-libs");
