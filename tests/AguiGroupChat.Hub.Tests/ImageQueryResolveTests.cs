@@ -161,12 +161,14 @@ public sealed class ImageQueryResolveTests
     /// <para>默认 score 用“可信命中”的量级（实测真实命中 0.84~0.88），
     /// 这样默认路径只需一次检索；要验证“低分命中会被本页文字顶掉”时显式传低分。</para>
     /// </summary>
-    private static string ImagesJson(string path, string contentType, string caption = "团队会议 白板 讨论", double score = 0.87)
+    private static string ImagesJson(string path, string contentType, string caption = "团队会议 白板 讨论", double score = 0.87,
+        string? fileName = null)
         => JsonSerializer.Serialize(new
         {
             query = "团队会议",
             count = 1,
-            images = new[] { new { assetId = "asset_1", libId = "lib_1", libName = "宣传图库", fileName = Path.GetFileName(path), caption, contentType, score, width = 4, height = 4, path } },
+            // fileName 默认取路径名；需要验证“回显的是图库原始名（而不是服务器存储名）”时显式传
+            images = new[] { new { assetId = "asset_1", libId = "lib_1", libName = "宣传图库", fileName = fileName ?? Path.GetFileName(path), caption, contentType, score, width = 4, height = 4, path } },
         });
 
     private static string EmptyImagesJson() => JsonSerializer.Serialize(new { query = "x", count = 0, images = Array.Empty<object>() });
@@ -185,6 +187,38 @@ public sealed class ImageQueryResolveTests
         var p = Path.Combine(dir, name);
         File.WriteAllBytes(p, Convert.FromBase64String(TinyPngBase64));
         return p;
+    }
+
+    /// <summary>
+    /// 与 <see cref="WriteTinyPng"/> 同内容但**字节长度不同**（尾部多一段）的 PNG。
+    ///
+    /// <para>
+    /// 用途：验证“最终嵌进去的是哪一张”。docx 的 <c>NormalizeImage</c> 对 PNG **原样嵌入**，
+    /// 所以可以拿包里的字节与源文件字节比对 —— 两个候选必须能区分开（长度不同就够）。
+    /// 这张只是当“落败候选”，永远不会被嵌入，所以尾部多出的字节不影响解码。
+    /// </para>
+    /// </summary>
+    private static string WriteTinyPngWithPadding(string dir, string name)
+    {
+        var p = Path.Combine(dir, name);
+        var bytes = Convert.FromBase64String(TinyPngBase64);
+        var padded = new byte[bytes.Length + 64];
+        Array.Copy(bytes, padded, bytes.Length);
+        File.WriteAllBytes(p, padded);
+        return p;
+    }
+
+    /// <summary>包里嵌入的位图字节（docx/pptx 都是 zip，取第一个 media 项）。</summary>
+    private static byte[]? EmbeddedImageBytes(string packagePath)
+    {
+        using var zip = ZipFile.OpenRead(packagePath);
+        var entry = zip.Entries.FirstOrDefault(e => e.FullName.Contains("media/", StringComparison.Ordinal)
+            && (e.FullName.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+                || e.FullName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)));
+        if (entry is null) return null;
+        using var ms = new MemoryStream();
+        using (var s = entry.Open()) s.CopyTo(ms);
+        return ms.ToArray();
     }
 
     private static DotnetSkillHost NewHost(string tag)
@@ -620,6 +654,139 @@ public sealed class ImageQueryResolveTests
                 Assert.Contains("刘佳俊", used[0].GetProperty("query").GetString());
                 using var zip = ZipFile.OpenRead(path);
                 Assert.Contains(zip.Entries, e => e.FullName.StartsWith("ppt/media/", StringComparison.Ordinal));
+            }
+        });
+    }
+
+    // ===================== Word / PDF：上下文二次尝试 + 显式门槛 =====================
+
+    /// <summary>
+    /// Word：图库命中分不高时，要用**该图上下文文字**（图片自己的 caption + 前面最近的文字块）再查一次，谁分高用谁。
+    ///
+    /// <para>
+    /// 实测场景：图库描述就是人名（“刘佳俊”），模型写的是“员工 颁奖 舞台” —— 那张合影靠描述里的
+    /// “舞台/宴会厅”蹭到 0.68，而正文里写着“· 刘佳俊”，用它能直查到 0.88。以前只会用 0.68 那张。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void Docx_ImageQuery_LowScoreHit_LosesToContextText()
+    {
+        var dir = TempDir();
+        var wrong = WriteTinyPngWithPadding(dir, "family.png");
+        // 右图故意用一个“服务器存储名”当实际路径：回显应给出图库里的原始名 liujiajun.png
+        var right = WriteTinyPng(dir, "asset_deadbeef01.png");
+        using var api = new FakeSelfApi(body =>
+            body.Contains("刘佳俊", StringComparison.Ordinal)
+                ? ImagesJson(right, "image/png", "刘佳俊", 0.88, "liujiajun.png")
+                : ImagesJson(wrong, "image/png", "一家三口在宴会厅合影，背景有舞台", 0.68));
+        WithSelfEndpoint(api, () =>
+        {
+            var payload = new
+            {
+                title = "颁奖典礼",
+                imageScopeId = "iscope_docx_test",
+                sections = new object[]
+                {
+                    new { heading = "高效习惯优秀进步奖 · 刘佳俊" },          // 上下文文字（人名在这里）
+                    new { image = new { imageQuery = "员工 颁奖 舞台" } },   // 模型只给了通用词
+                },
+            };
+            var doc = RunDocx(payload, out var path);
+            using (doc)
+            {
+                // 两次检索：#1 关键词（低分）、#2 上下文文字（带人名）
+                lock (api.Bodies)
+                {
+                    Assert.Equal(2, api.Bodies.Count);
+                    Assert.Contains("员工 颁奖 舞台", api.Bodies[0]);
+                    Assert.Contains("刘佳俊", api.Bodies[1]);
+                    // 显式门槛：不传就是平台默认 0.25（等于不筛）
+                    Assert.Contains("\"minScore\":0.6", api.Bodies[0]);
+                }
+                Assert.Empty(PhotoWarnings(doc));
+                // 按字节确认嵌进去的是高分那张（docx 对 PNG 原样嵌入），不是它自己“报”的
+                Assert.Equal(File.ReadAllBytes(right), EmbeddedImageBytes(path));
+                // 并回显“用了哪条检索词、哪张图（图库原始名）、多少分”
+                var used = doc.RootElement.GetProperty("images")[0];
+                Assert.Contains("刘佳俊", used.GetProperty("query").GetString());
+                Assert.Equal("liujiajun.png", used.GetProperty("fileName").GetString());
+                Assert.Equal(0.88, used.GetProperty("score").GetDouble(), 3);
+            }
+        });
+    }
+
+    /// <summary>
+    /// PDF：同上。不用字节比对 —— PDFsharp 会把 PNG 重编进 PDF 内容流，字节不再等同源文件，
+    /// 所以用“回显 + 确实嵌了图 + 无告警”来判定。
+    /// </summary>
+    [Fact]
+    public void Pdf_ImageQuery_LowScoreHit_LosesToContextText()
+    {
+        var dir = TempDir();
+        var wrong = WriteTinyPng(dir, "family.png");
+        var right = WriteTinyPng(dir, "liujiajun.png");
+        using var api = new FakeSelfApi(body =>
+            body.Contains("刘佳俊", StringComparison.Ordinal)
+                ? ImagesJson(right, "image/png", "刘佳俊", 0.88)
+                : ImagesJson(wrong, "image/png", "一家三口在宴会厅合影，背景有舞台", 0.68));
+        WithSelfEndpoint(api, () =>
+        {
+            var payload = new
+            {
+                title = "颁奖典礼",
+                imageScopeId = "iscope_pdf_test",
+                blocks = new object[]
+                {
+                    new { type = "h1", text = "高效习惯优秀进步奖 · 刘佳俊" },
+                    new { type = "image", imageQuery = "员工 颁奖 舞台" },
+                },
+            };
+            var doc = RunPdf(payload, out var path);
+            using (doc)
+            {
+                lock (api.Bodies)
+                {
+                    Assert.Equal(2, api.Bodies.Count);
+                    Assert.Contains("员工 颁奖 舞台", api.Bodies[0]);
+                    Assert.Contains("刘佳俊", api.Bodies[1]);
+                    Assert.Contains("\"minScore\":0.6", api.Bodies[0]);
+                }
+                Assert.Empty(PhotoWarnings(doc));
+                Assert.True(PdfHasImage(path), "PDF 里应嵌入位图");
+                var used = doc.RootElement.GetProperty("images")[0];
+                Assert.Contains("刘佳俊", used.GetProperty("query").GetString());
+                Assert.Equal(0.88, used.GetProperty("score").GetDouble(), 3);
+            }
+        });
+    }
+
+    /// <summary>
+    /// 关键词已经**高分命中**时不该再多查一次：白耗时间，也会给“分低但看着更亲”的候选翻盘机会。
+    /// （图库那次命中 0.88 ≥ 可信线，于是只有 1 次请求。）
+    /// </summary>
+    [Fact]
+    public void Docx_ImageQuery_ConfidentHit_SkipsContextRetry()
+    {
+        var dir = TempDir();
+        var png = WriteTinyPng(dir, "team.png");
+        using var api = new FakeSelfApi(ImagesJson(png, "image/png", "团队会议", 0.88));
+        WithSelfEndpoint(api, () =>
+        {
+            var payload = new
+            {
+                title = "季度报告",
+                imageScopeId = "iscope_docx_test",
+                sections = new object[]
+                {
+                    new { heading = "团队协作与会议纪要" },
+                    new { image = new { imageQuery = "团队会议 白板" } },
+                },
+            };
+            var doc = RunDocx(payload, out _);
+            using (doc)
+            {
+                Assert.Empty(PhotoWarnings(doc));
+                lock (api.Bodies) Assert.Single(api.Bodies);
             }
         });
     }

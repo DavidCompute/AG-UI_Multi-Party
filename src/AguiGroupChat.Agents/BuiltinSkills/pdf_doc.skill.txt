@@ -110,6 +110,7 @@ public class Skill
             return "{\"ok\":true,\"scene\":" + Js(SceneName)
                 + ",\"docType\":" + Js(built.DocType)
                 + ",\"path\":" + Js(built.Path)
+                + ImageUsedJson()
                 + ",\"pages\":" + built.Pages
                 + ",\"blocks\":" + built.Blocks
                 + ",\"font\":" + Js(built.Font)
@@ -151,6 +152,10 @@ public class Skill
             _imgSource = (Str(root, "imageSource") ?? Str(root, "image_source")
                 ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE") ?? "").Trim();
             _imgWarnings = new List<string>();
+            _imgRecentText = null;   // 配图上下文候选：每份稿子从零开始
+            _imgLastHeading = null;
+            _imgOwnText = null;
+            _imgUsed = new List<ImgHit>();
 
             var blocks = ParseBlocks(root, warnings);
             warnings.AddRange(_imgWarnings);
@@ -2056,7 +2061,14 @@ public class Skill
             foreach (var el in arr.EnumerateArray())
             {
                 if (el.ValueKind != JsonValueKind.Object) continue;
-                blocks.Add(ParseBlock(el));
+                // 本块自己的文字先进上下文（图片块在下面用 caption / 标题 + 前面最近的文字块查图库）
+                _imgOwnText = ImgOwnTextOf(el);
+                var parsed = ParseBlock(el);
+                blocks.Add(parsed);
+                var text = (parsed.Text ?? "").Trim();
+                if (text.Length > 0) PushImgContext(text);
+                // 标题单独记一份：配图常用它当检索词（人名 / 产品名往往就写在标题里）
+                if (text.Length > 0 && parsed.Type is "h1" or "h2" or "h3") _imgLastHeading = Cap(text, ImgContextMaxChars);
             }
         }
         var md = Str(root, "markdown") ?? Str(root, "md") ?? Str(root, "content") ?? Str(root, "text");
@@ -2066,6 +2078,18 @@ public class Skill
             else blocks = ParseMarkdown(md!);
         }
         return blocks;
+    }
+
+    /// <summary>本块自己的文字（图片块看 caption / title）：当上下文候选的第一位。</summary>
+    private static string ImgOwnTextOf(JsonElement el)
+    {
+        var parts = new List<string>();
+        foreach (var name in new[] { "caption", "title", "heading", "text" })
+        {
+            var v = Str(el, name);
+            if (!string.IsNullOrWhiteSpace(v)) parts.Add(v!.Trim());
+        }
+        return Cap(string.Join(" ", parts), ImgContextMaxChars);
     }
 
     private static Block ParseBlock(JsonElement el)
@@ -2087,9 +2111,11 @@ public class Skill
             var q = (Str(el, "imageQuery") ?? Str(el, "image_query"))?.Trim() ?? "";
             if (q.Length > 0)
             {
+                // 图自己的 caption / 标题 + 前面最近的文字块：命中不够确定时拿它们再查（见 ResolveQueryImage）
+                _imgOwnText = ImgOwnTextOf(el);
                 var hit = ResolveQueryImage(q, out var why);
                 if (hit is null)
-                    _imgWarnings?.Add("配图检索未成功，已跳过该图：关键词“" + q + "”（" + (why ?? "未知原因") + "）");
+                    _imgWarnings?.Add("配图检索未成功，已跳过该图：" + (why ?? "未知原因"));
                 else b.Path = hit;
             }
         }
@@ -2617,20 +2643,102 @@ public class Skill
     // 其余格式（如图库允许上传的 WebP）跳过并在 warnings 里说清楚。
     [ThreadStatic] private static string? _imgScopeId;
     [ThreadStatic] private static string? _imgSource;
-    [ThreadStatic] private static Dictionary<string, string?>? _imgCache;
+    [ThreadStatic] private static Dictionary<string, ImgHit?>? _imgCache;
     [ThreadStatic] private static List<string>? _imgWarnings;
+    /// <summary>前面最近的文字块（滚动累积），作为配图的“上下文候选”之一。</summary>
+    [ThreadStatic] private static string? _imgRecentText;
+    /// <summary>最近一个标题（滚动）：配图常用它当检索词 —— 人名 / 产品名往往就写在标题里。</summary>
+    [ThreadStatic] private static string? _imgLastHeading;
+    /// <summary>当前那张图自己的文字（caption + 标题），由调用方在检索前设好。</summary>
+    [ThreadStatic] private static string? _imgOwnText;
+    /// <summary>本稿实际用到的图（回显用：哪条检索词胜出、分数多少）。</summary>
+    [ThreadStatic] private static List<ImgHit>? _imgUsed;
 
     private const string SelfBaseEnv = "AGUI_SELF_BASE";
     private const string SelfTokenEnv = "AGUI_SELF_TOKEN";
     private const int ImgSearchTimeoutSec = 10;
 
     /// <summary>
-    /// 按关键词查<b>团队图库</b>，命中则返回服务器上的本地图片路径（只接受 PNG / JPEG）。
+    /// 图库检索的分数门槛（传给平台 <c>/ag-ui/images/search</c> 的 <c>minScore</c>）。
     ///
     /// <para>
-    /// 技能与平台同进程，但拿不到平台的 DI 容器，所以是回环 HTTP 回调 <c>/ag-ui/images/search</c>：
-    /// 带上平台注入的句柄 + 自令牌，换回「服务器本地路径」，再由本技能直接嵌进 PDF
-    /// （平台在该接口里已按句柄做过图库可读性鉴权）。
+    /// <b>必须显式传</b>：平台在不传时按 <b>0.25</b> 兜底，而实测无意义关键词能到 <b>0.44~0.55</b>、
+    /// 真实命中才是 0.62~0.88。用默认值等于不筛 —— 会把不相干的照片当“配图”嵌进 PDF。
+    /// </para>
+    /// </summary>
+    private const double ImgMinScore = 0.60;
+
+    /// <summary>图库命中的“可信分”：低于它就用上下文文字再查一次，谁分高用谁。</summary>
+    private const double ImgConfidentScore = 0.78;
+
+    /// <summary>上下文最多再查几次（每次都是本机回环检索，但也要给时间预算留余地）。</summary>
+    private const int ImgMaxContextTries = 3;
+
+    /// <summary>上下文文字的字符上限（BM25 会把得分按查询词项数摊薄，太长反而糊掉关键的那个名字）。</summary>
+    private const int ImgContextMaxChars = 120;
+
+    /// <summary>一次图库检索的结果（拿不到时为 null）。<see cref="Score"/> 用于多个候选间择优。</summary>
+    private sealed class ImgHit
+    {
+        public string Path = "";
+        public string FileName = "";
+        public double Score;
+        public string Query = "";
+    }
+
+    /// <summary>把一段文字滚入“前面最近的文字块”（保留末尾，最近的最相关）。</summary>
+    private static void PushImgContext(string? text)
+    {
+        var t = (text ?? "").Trim();
+        if (t.Length == 0) return;
+        var s = (_imgRecentText ?? "").Trim();
+        var merged = s.Length > 0 ? s + " " + t : t;
+        _imgRecentText = merged.Length <= ImgContextMaxChars
+            ? merged
+            : merged.Substring(merged.Length - ImgContextMaxChars);
+    }
+
+    /// <summary>
+    /// 组装当前那张图的<b>上下文候选</b>（除模型关键词外）：① 图片自己的 caption/标题；② 最近的标题；③ 前面最近的文字块。
+    /// 去重、去空、每个都截到 <see cref="ImgContextMaxChars"/>，按该顺序返回。
+    ///
+    /// <para>
+    /// 为何要<b>分开</b>当候选、而不是拼成一长串：检索是按整串算分的 —— 实测把“caption + 标题 + 正文”
+    /// 拼成一句去查，关键的那个名字就被旁边的词稀释了（人名直查 0.88 → 拼串只有 0.63）。
+    /// </para>
+    /// </summary>
+    private static List<string> ImageContextCandidates(string keyword)
+    {
+        var list = new List<string>();
+        foreach (var raw in new[] { _imgOwnText, _imgLastHeading, _imgRecentText })
+        {
+            var s = Cap(raw, ImgContextMaxChars);
+            if (s.Length == 0) continue;
+            if (string.Equals(s, keyword, StringComparison.Ordinal)) continue;
+            if (list.Contains(s)) continue;
+            list.Add(s);
+        }
+        return list;
+    }
+
+    /// <summary>截断到 cap 个字符（去空白）。</summary>
+    private static string Cap(string? v, int cap)
+    {
+        var s = (v ?? "").Trim();
+        return s.Length <= cap ? s : s.Substring(0, cap);
+    }
+
+    /// <summary>给失败原因套一层：把“用的是哪条关键词”写进去（用户能据此改词重试）。</summary>
+    private static string ImgWhy(string keyword, string reason)
+        => string.IsNullOrEmpty(keyword) ? reason : "关键词“" + keyword + "”（" + reason + "）";
+
+    /// <summary>
+    /// 给一个图块配图：先拿模型给的<b>关键词</b>查图库；命中不够确定（低于 <see cref="ImgConfidentScore"/>）或没命中时，
+    /// 再用<b>上下文文字</b>查一次，<b>谁分高用谁</b>。
+    ///
+    /// <para>
+    /// 为何要二次尝试：模型看不到图库里有什么（描述常常就是人名 / 产品名），而正文里往往写着那个名字 ——
+    /// 实测用名字直查能到 0.88，用“员工 颁奖 舞台”只能蹭到 0.68 且是别的图。两次都没配上则两条原因合并报出。
     /// </para>
     ///
     /// <para>失败一律返回 null 并给出原因：配图失败不该让整份稿子出不来。</para>
@@ -2642,27 +2750,94 @@ public class Skill
         if (key.Length == 0) { why = "关键词为空"; return null; }
         if (string.Equals(_imgSource, "network", StringComparison.OrdinalIgnoreCase))
         {
-            why = "已配置为不使用图库（imageSource=network），而本技能只从图库配图";
+            why = ImgWhy(key, "已配置为不使用图库（imageSource=network），而本技能只从图库配图");
             return null;
         }
         if (string.IsNullOrWhiteSpace(_imgScopeId))
         {
-            why = "当前没有可用的图库（平台未注入检索范围）";
+            why = ImgWhy(key, "当前没有可用的图库（平台未注入检索范围）");
             return null;
         }
-        _imgCache ??= new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        var first = LibraryLookup(key, out var why1);
+        var best = first;
+        var ctxTried = new List<string>();
+        string? whyCtx = null;
+        if (first is null || first.Score < ImgConfidentScore)
+        {
+            foreach (var cand in ImageContextCandidates(key))
+            {
+                if (best is not null && best.Score >= ImgConfidentScore) break;   // 已经够确定：不必再查
+                if (ctxTried.Count >= ImgMaxContextTries) break;                 // 时间预算：上下文最多再查几次
+                ctxTried.Add(cand);
+                var hit = LibraryLookup(cand, out var candWhy);
+                if (hit is not null) { if (BetterHit(best, hit)) best = hit; }
+                else if (whyCtx is null) whyCtx = candWhy;
+            }
+        }
+        if (best is null)
+        {
+            var parts = new List<string>();
+            if (why1 is not null) parts.Add("关键词“" + key + "”（" + why1 + "）");
+            if (ctxTried.Count > 0) parts.Add("上下文“" + ctxTried[0] + "”（" + (whyCtx ?? "未找到") + "）");
+            why = parts.Count > 0 ? string.Join("；", parts) : null;
+        }
+        else MarkImageUsed(best);
+        return best?.Path;
+    }
+
+    /// <summary>记录本稿用到的图（回显用；同一张同一词只记一次）。</summary>
+    private static void MarkImageUsed(ImgHit hit)
+    {
+        _imgUsed ??= new List<ImgHit>();
+        if (!_imgUsed.Any(h => string.Equals(h.Path, hit.Path, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(h.Query, hit.Query, StringComparison.Ordinal)))
+            _imgUsed.Add(hit);
+    }
+
+    /// <summary>
+    /// 回显本稿实际用到的图（哪条检索词胜出、分数多少、哪张文件）。
+    ///
+    /// <para>为何要回显：配图一旦配错，光看稿子无法判断“为什么是这张”（与 Word / PPT 技能同口径）。</para>
+    /// </summary>
+    private static string ImageUsedJson()
+        => _imgUsed is { Count: > 0 }
+            ? ",\"images\":[" + string.Join(",", _imgUsed.Select(h =>
+                "{\"query\":" + Js(h.Query) + ",\"fileName\":" + Js(h.FileName)
+                + ",\"score\":" + h.Score.ToString("0.###", CultureInfo.InvariantCulture) + "}")) + "]"
+            : "";
+
+    /// <summary>两个候选谁更该用：分高者胜（<paramref name="alt"/> 为空表示不换）。</summary>
+    private static bool BetterHit(ImgHit? cur, ImgHit? alt)
+        => alt is not null && (cur is null || alt.Score > cur.Score);
+
+    /// <summary>
+    /// 查一次<b>团队图库</b>：回环 HTTP 回调 <c>/ag-ui/images/search</c>，拿回服务器本地路径与分数。
+    ///
+    /// <para>
+    /// 技能与平台同进程，但拿不到平台的 DI 容器，所以走回环 HTTP：带上平台注入的句柄 + 自令牌
+    /// （平台在该接口里已按句柄做过图库可读性鉴权）。
+    /// </para>
+    /// </summary>
+    private static ImgHit? LibraryLookup(string query, out string? why)
+    {
+        why = null;
+        var key = (query ?? "").Trim();
+        if (key.Length == 0) { why = "关键词为空"; return null; }
+        _imgCache ??= new Dictionary<string, ImgHit?>(StringComparer.Ordinal);
         if (_imgCache.TryGetValue(key, out var cached)) return cached;
 
         var baseUrl = Environment.GetEnvironmentVariable(SelfBaseEnv);
         var token = Environment.GetEnvironmentVariable(SelfTokenEnv);
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(token))
         {
-            why = "未拿到平台回调地址（AGUI_SELF_BASE / AGUI_SELF_TOKEN 未注入）";
+            why = ImgWhy(key, "未拿到平台回调地址（AGUI_SELF_BASE / AGUI_SELF_TOKEN 未注入）");
             return null;
         }
 
-        string? path = null;
-        var body = "{\"query\":" + Js(key) + ",\"scopeHandle\":" + Js(_imgScopeId!) + ",\"topK\":3}";
+        ImgHit? hit = null;
+        var body = "{\"query\":" + Js(key) + ",\"scopeHandle\":" + Js(_imgScopeId!) + ",\"topK\":3,\"minScore\":"
+                 + ImgMinScore.ToString(CultureInfo.InvariantCulture) + "}";
         var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, out var httpWhy);
         if (json is null) why = httpWhy ?? "平台未返回内容";
         else
@@ -2678,20 +2853,34 @@ public class Skill
                         var p = Str(img, "path");
                         if (string.IsNullOrWhiteSpace(p) || !File.Exists(p)) continue;
                         if (!IsPdfEmbeddable(p, Str(img, "contentType"))) { sawUnsupported = true; continue; }
-                        path = p;
+                        hit = new ImgHit
+                        {
+                            Path = p!,
+                            // 回显用图库里的**原始文件名**（服务器存储名是 asset_xxx.png，对人没意义）
+                            FileName = Str(img, "fileName") ?? Path.GetFileName(p!),
+                            Query = key,
+                            Score = ScoreOf(img),
+                        };
                         break;
                     }
-                    if (path is null)
+                    if (hit is null)
                         why = sawUnsupported
                             ? "图库命中项不是 PNG/JPEG（PDF 只嵌 PNG/JPEG），建议换成 PNG/JPEG 后重试"
-                            : "图库里没有匹配的图片";
+                            : "图库里没有匹配的图片（门槛 " + ImgMinScore.ToString(CultureInfo.InvariantCulture) + "）";
                 }
                 else why = "平台返回格式异常";
             }
             catch (Exception ex) { why = "平台返回解析失败：" + ex.Message; }
         }
-        _imgCache[key] = path;
-        return path;
+        _imgCache[key] = hit;
+        return hit;
+    }
+
+    /// <summary>读平台返回的相似度（缺失 / 非数字记 0：宁可当成“不确定”，就会走二次比较）。</summary>
+    private static double ScoreOf(JsonElement img)
+    {
+        if (!img.TryGetProperty("score", out var v)) return 0;
+        return v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) ? d : 0;
     }
 
     /// <summary>PDFsharp 只能嵌 PNG / JPEG；先看平台给的内容类型，没有再看扩展名。</summary>
