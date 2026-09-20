@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.148 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.148 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.148 给图库加了**检索严格度**（每个库一个相似度门槛，界面在「🖼️ 管理图库」每行的 `⚙️`）。上一版把 Word / PDF 的配图门槛统一到 0.6，但一个全局值对**所有**图库并不合适：描述是短人名 / 标签的库，通用关键词得分普遍偏高（0.6 也容易配错）；描述是长句的库，标题式查询得分偏低（实测 0.62，0.6 勉强过线）。现在**库设了就以库为准**（可更松或更紧），没设就沿用技能默认值。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.148 adds a **search strictness** setting to image libraries (one similarity gate per library; `⚙️` on each row under “🖼️ Manage image libraries”). The previous release moved Word/PDF illustration onto a 0.6 gate, but one global value fits no library well: captions that are short names/tags score high across the board (0.6 still picks wrong ones), while long-sentence captions score low for heading-style queries (0.62 measured — barely past 0.6). Now **the library wins when set** (looser or stricter), and unset libraries keep the skill default.
+
+## 图库：按库可调的检索严格度（1.0.148）
+# Image libraries: per-library search strictness (1.0.148)
+
+中文：
+- **为何要按库调**：图库之间描述风格差别很大 ——
+  描述是**短人名 / 标签**（“刘佳俊”“背景”）时，通用关键词得分普遍偏高，门槛要**收紧**（否则容易配上不相干的图）；
+  描述是**长句**时，标题式查询得分普遍偏低（实测 **0.62**），门槛要**放松**才配得上。一个全局常量两头都不合适。
+- **存在图库上，库设了就以库为准**：`/ag-ui/images/search` 在**每个库**上分别解析生效门槛
+  （库设了用库的，否则用调用方传的 `minScore`，再否则 0.25 兜底）。技能默认传 0.6，所以**未设置的库行为完全不变**（向后兼容）。
+- **界面**：管理图库每行 `⚙️` → 三档下拉 **宽松 0.5 / 标准 0.6（推荐）/ 严格 0.72** + 一段说明；
+  未设置时按“标准 0.6”回显；接口手工设的非预设值（如 0.65）会以“自定义”选项回显 —— 否则一保存会被默默改回 0.6。
+- **边界**：值夹到 **0.30~0.95**（低于 0.3 等于不筛，高于 0.95 连本人照片都配不上）；
+  仅创建者 / 管理员可改（`PUT /ag-ui/image-libs/{libId}`）；
+  **关键词词面命中（BM25 兜底）不套这个门槛** —— 词都对上了是另一种信号，分尺不同。
+- **实测**（真实图库 + 真实模型，`tools/verify_lib_strictness.py`，全程在临时库上做、结束删库）：
+  先量出某查询的真实相似度 **0.6471**，然后：库=0.71、调用方传 0.5 → **不命中**；库=0.59、调用方传 0.6 → **命中**（证明以库为准，两个方向都成立）。
+  走 `docx_report` 技能链路同样：库收紧时**不配图 + warning**（文档里位图数 0），库放松时**配上**（回显 score 0.647，文档里位图数 1）。
+- **测试**：新增 6 个（库值覆盖调用方 / 未设置时沿用 / 放松后低分图能配上 / 按库隔离 / 夹紧与恢复 / 接口保存与越权 403 + 404），全量 **1358 通过**。
+
+English:
+- **Why per library**: caption styles vary a lot — captions that are **short names/tags** (“刘佳俊”, “背景”) score high for topical keywords, so **tighten** the gate or unrelated photos get picked; **long-sentence** captions score low for heading-style queries (**0.62** measured), so **loosen** it for those to match at all. A single global constant can only be wrong for one of them.
+- **Stored on the library, and the library wins when set**: `/ag-ui/images/search` resolves the gate **per library** (library value, else the caller's `minScore`, else 0.25). Skills send 0.6, so **unset libraries behave exactly as before** (backwards compatible).
+- **UI**: `⚙️` on each library row → a three-option dropdown (**loose 0.5 / standard 0.6 (recommended) / strict 0.72**) plus an explanation; unset renders as “standard 0.6”; a non-preset value set through the API is shown as “custom” — otherwise saving would silently reset it to 0.6.
+- **Limits**: the value is clamped to **0.30-0.95** (below 0.3 is no filtering; above 0.95 not even the person's own photo matches); only the creator/admin can change it (`PUT /ag-ui/image-libs/{libId}`); **word-overlap hits (the BM25 fallback) are not gated** — matching words is a different signal on a different scale.
+- **Verified live** against the real library and model (`tools/verify_lib_strictness.py`, everything on a throwaway library it deletes at the end): a query measured at **0.6471** is **blocked** with the library at 0.71 even though the caller passed 0.5, and **matches** with the library at 0.59 even though the caller passed 0.6 — the library wins in both directions. The same holds through `docx_report`: tightened → **no image + warning** (0 bitmaps in the document); loosened → **embedded** (echo shows score 0.647, 1 bitmap).
+- **Tests**: 6 new cases (library overrides caller / unset follows the caller / loosening recovers a lower-scoring image / per-library isolation / clamping and reset / API save with 403 for non-owners and 404 for missing libraries), **1358 passing** overall.
+
+---
+
 # AG-UI 群聊桌面版 1.0.147 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.147 Release Notes (current Windows desktop release)
 
