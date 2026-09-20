@@ -1,3 +1,47 @@
+# AG-UI 群聊桌面版 1.0.149 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.149 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.149 把上一版的**检索严格度**从图库扩到**知识库**：每个知识库也能单独设相似度门槛（界面在「📚 管理知识库」每行的 `⚙️`）。上一版图库的实测分尺是“无关词 ≤0.55、真实命中 0.62~0.88”，而知识库完全不同——实测**无关提问 0.31~0.38、真实命中 0.41~0.71**（分离度窄得多），所以档位也另配（宽松 0.15 / 标准 0.25 / 严格 0.40）。两个库类型共用同一个设置弹窗 `#libSetModal`。Web 与桌面共用同一套 Hub / 网关 / 前端。
+**Version note**: 1.0.149 extends the **search strictness** from image libraries to **knowledge bases** (the `⚙️` on each row under “📚 Manage knowledge bases”). The image scale measured last time (noise ≤0.55, real hits 0.62-0.88) does not transfer: knowledge bases measure **0.31-0.38 for unrelated questions and 0.41-0.71 for real hits** — a much narrower margin, so they get their own presets (loose 0.15 / standard 0.25 / strict 0.40). Both library kinds share one settings dialog, `#libSetModal`.
+
+## 知识库：按库可调的检索严格度（1.0.149）
+# Knowledge bases: per-library search strictness (1.0.149)
+
+中文：
+- **为何要按库调**：文档是**短条目 / 目录型**（制度条款、产品参数、人名表）时，通用提问的相似度普遍偏高，门槛要**收紧**；
+  是**长篇论述**时，一句话提问与其中某段的相似度普遍偏低，门槛要**放松**才召得回。
+  全局 `Agents:Memory:MinScore`（默认 0.25）必然两头都不合适。
+- **实测定档**（真实文档 + bge-m3，平台同一条公式 `1 - 余弦距离`）：
+  | 提问 | 分数 |
+  |---|---|
+  | 知聚平台有什么创新点（答案在文档里） | **0.7181** |
+  | 数字员工的组织架构是怎么协作的（语义相关） | **0.6071** |
+  | 公司食堂今天中午吃什么（无关） | **0.3869** |
+  | `qzxv-不存在-9987`（乱码） | **0.3140** |
+  所以三档定为 **宽松 0.15 / 标准 0.25（= 平台默认）/ 严格 0.40**；
+  对比图库（无关 ≤0.55、真实 0.62~0.88）可见两者分尺完全不同 —— 所以两个库类型各自一套档位，而不是照搬。
+- **存在库上、库设了就以库为准**：`KnowledgeBaseCatalog.SearchAsync` 在**每个库**上分别解析生效门槛
+  （库设了用库的，否则用调用方传的全局值）；值夹到 **0.10~0.80**；未设置的库**行为完全不变**（向后兼容）。
+- **共用一套 UI**：知识库与图库用同一个 `#libSetModal`（交互完全一致，只有档位与说明不同）：
+  未设置时回显“标准”；接口手工设的非预设值显示为“自定义”（否则一保存就被默默改掉）；`Esc` 关闭且不穿透下层管理弹窗。
+- **边界**：仅创建者 / 管理员可改（`PUT /ag-ui/kb/{kbId}`）；
+  **关键词词面命中（BM25 兜底）不套这个门槛** —— 词都对上了是另一种信号，分尺不同。
+- **验证**（`tools/verify_kb_strictness.py` + `tools/ui-kb-strictness.mjs`，均在临时库里做、结束删库）：
+  上表四个分数真实量出；同一无关提问在 **严格 0.40 下召回 0 条、宽松 0.15 下召回 1 条**（门槛确实在起作用）；
+  接口回读 0.40、越界值夹到 0.80、其它知识库未被动过；界面：⚙️ 入口、三档取值、回显、保存、`Esc` 关闭且不穿透。
+- **测试**：新增 6 个（库值覆盖全局 / 未设置时沿用 / 放松后召回了低于全局门槛的切片 / 按库隔离 / 夹紧与恢复 / 接口保存与越权 403 + 404），全量 **1364 通过**。
+
+English:
+- **Why per library**: short-item/catalogue-style documents (policy clauses, product specs, name lists) score high for any question, so **tighten** the gate; long prose scores low for a one-line question, so **loosen** it or nothing is recalled. A single global `Agents:Memory:MinScore` (0.25) can only be wrong for one of them.
+- **Presets grounded in measurement** (real document + bge-m3, the platform's own formula `1 - cosine distance`): “知聚平台有什么创新点” (the answer is in the document) **0.7181**; a semantically related question **0.6071**; an unrelated one (“公司食堂今天中午吃什么”) **0.3869**; gibberish **0.3140**. Hence **loose 0.15 / standard 0.25 (= platform default) / strict 0.40**. Compare image libraries (noise ≤0.55, real hits 0.62-0.88): the two scales are entirely different, so each kind keeps its own presets rather than copying the other's.
+- **Stored on the library, and the library wins when set**: `KnowledgeBaseCatalog.SearchAsync` resolves the gate **per library** (library value, else the caller's global value); values are clamped to **0.10-0.80**; unset libraries **behave exactly as before** (backwards compatible).
+- **One shared dialog**: knowledge bases and image libraries use the same `#libSetModal` (identical interaction, different presets and copy): unset renders as “standard”, an API-set non-preset value shows as “custom” (otherwise saving would silently reset it), and `Esc` closes it without leaking to the management modal underneath.
+- **Limits**: creator/admin only (`PUT /ag-ui/kb/{kbId}`); **word-overlap hits (the BM25 fallback) are not gated** — matching words is a different signal on a different scale.
+- **Verified** (`tools/verify_kb_strictness.py` + `tools/ui-kb-strictness.mjs`, both on a throwaway library they delete afterwards): the four scores above measured live; the same unrelated question recalls **0 chunks at strict 0.40 and 1 chunk at loose 0.15**; the API round-trips 0.40, clamps out-of-range input to 0.80 and leaves other knowledge bases untouched; the UI check covers the ⚙️ entry, the three presets, the echo, saving, and `Esc` closing without leaking.
+- **Tests**: 6 new cases, **1364 passing** overall.
+
+---
+
 # AG-UI 群聊桌面版 1.0.148 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.148 Release Notes (current Windows desktop release)
 
