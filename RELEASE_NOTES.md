@@ -1,3 +1,69 @@
+# AG-UI 群聊桌面版 1.0.153 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.153 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.153 修一个**桌面版专属**的缺陷：**桌面版组合根漏挂了 7 个 HTTP API**，其中就包括**图库**——所以点「创建图库」根本不工作（持久化都注册了、前端界面也完整，就是路由没挂）。因为桌面根末尾有 `MapFallbackToFile("index.html")`，这些请求不会 404：`GET` 返回**首页 HTML**（前端 `res.ok` 为真、`res.json()` 解析失败）、`POST` 返回 **405**，表现就是“点了没反应”或莫名状态码，比 404 难查得多。本次补齐的是：图库、白标/品牌、配置治理、@ 建议、消息 👍/👎、编排计划暂停/继续、话题小结（另补两个状态单例与两项持久化注册）。同时加了两道护栏：① 拿**真实桌面宿主**逐条探测前端会调用的接口（不得退化成 HTML / 404 / 405）；② 比对两个组合根的 `app.Map*Api()` 清单，以后只在 Web 侧加 API 会直接红。**如果你是通过代理访问且看到 504，那不是本缺陷的表现**（应用自身不会返回 504），请把 `127.0.0.1` / `localhost` 加进代理绕过列表。
+**Version note**: 1.0.153 fixes a **desktop-only** defect: the desktop composition root **failed to map 7 HTTP APIs**, including the **image library** — so “Create library” simply did not work (persistence was registered and the UI was complete; the routes were never wired). Because the desktop root ends with `MapFallbackToFile("index.html")`, those requests are not 404s: a `GET` returns the **SPA homepage** (the frontend sees `res.ok === true` and then fails to parse JSON) and a `POST` returns **405**, which surfaces as “I clicked and nothing happened” or a puzzling status code — far harder to diagnose than a 404. Now mapped: image library, branding, config governance, @-mention suggestions, message 👍/👎, plan pause/resume, and topic summaries (plus two state singletons and two persistence registrations). Two guardrails were added: (1) the **real desktop host** is booted and every frontend-facing route is probed, asserting none degrades to HTML / 404 / 405; (2) the two composition roots' `app.Map*Api()` lists are compared, so a future Web-only addition fails the suite immediately. **If you reach the app through a proxy and see a 504, that is not this defect** (the app itself never returns 504) — add `127.0.0.1` / `localhost` to the proxy bypass list.
+
+## 桌面版漏挂 7 个 API（含图库）（1.0.153）
+# Desktop host missed 7 API mappings (image library among them) (1.0.153)
+
+中文：
+- **现象**：桌面版点「创建图库」不工作；`@` 建议、消息 👍/👎、编排计划暂停/继续、话题小结、白标、配置治理同样无效。
+- **根因**：项目有**两个组合根** —— `src/AguiGroupChat.Web/Program.cs`（Docker / 独立服务）与
+  `src/AguiGroupChat.Desktop.Core/DesktopApp.cs`（桌面版进程内 Kestrel）。前端只有一份，两边各写一份
+  `app.Map*Api()` 清单；新增 API 时只改了 Web 那份。图库就是这种：`RegisterImageLibraryPersistence()`
+  在桌面早就注册了，唯独 `MapImageLibraryApi()` 没挂。
+- **为何特别难查**：桌面根末尾有 `app.MapFallbackToFile("index.html")`，漏挂的路由不会 404 ——
+  `GET` 命中 fallback 返回 **200 + text/html**（前端 `res.ok` 为真 → `res.json()` 失败 →
+  界面报错或只静默不刷新）；`POST` 因同路径存在 GET 端点而返回 **405**。都不是“路由不存在”那种直观信号。
+- **修法**：在 `DesktopApp.cs` 补齐 7 个 `Map*Api()` + `BrandingState` / `ConfigGovernanceState` 两个状态单例
+  + `RegisterBrandingPersistence()` / `RegisterConfigGovernancePersistence()`；并写上清单同步的注释。
+  **故意不挂**两个（已写明理由）：`MapNativeTunnelApi`（公网 Hub + 内网桥的反向隧道，本机回环无意义且多一个暴露面）、
+  `MapNativeBridgeDownloadApi`（下载本机桥安装包，桌面自己就是宿主）。
+- **两道护栏（新增回归）**：
+  - `DesktopCompositionTests.FrontendApi_IsMappedOnDesktopHost`：启动**真实桌面宿主**，逐条探测前端会调用的接口，
+    断言响应不得是 SPA 首页 / 404 / 405（401/403/400 都算“路由存在”）——修复前 **9/10 红**，修复后全绿；
+  - `DesktopCompositionTests.DesktopCompositionRoot_MapsEveryApiTheWebRootMaps`：用行首锚定的正则比对两个组合根的
+    `app.Map*Api()` 清单（注释掉的算没挂），以后只在 Web 加 API 会直接红。**这条护栏我做了反向验证**：
+    把 `app.MapImageLibraryApi();` 注释掉，它确实会红（第一版正则没锚行首，注释掉也“通过”——是个假护栏，已修）。
+- **与 504 的关系（实测结论）**：应用自身不会返回 504 —— 全仓只有链接代理一处 504（访问目标链接超时，与本路径无关）。
+  漏挂 API 的实际响应是 **HTML(200) / 405**。若在桌面确看到 504，几乎可判定是**请求经过了代理**
+  （WebView2 用系统代理；代理连不到你本机的 127.0.0.1:5200 时会回 502/504），请把 `127.0.0.1` / `localhost`
+  加入代理绕过列表（或把代理指向本机地址时排除）。
+- **实测验证**：桌面宿主 HTTP 探测 **11/11 通过**（含建库 + 列表端到端）；Web 版同一接口实测仍 `200 application/json`
+  （确认只是桌面侧问题，未影响 Docker / Web 部署）；全量 **1416 通过**。
+
+English:
+- **Symptom**: on the desktop, “Create library” did nothing; so did @-mention suggestions, message 👍/👎, plan pause/resume,
+  topic summaries, branding, and config governance.
+- **Root cause**: the project has **two composition roots** — `src/AguiGroupChat.Web/Program.cs` (Docker / standalone server)
+  and `src/AguiGroupChat.Desktop.Core/DesktopApp.cs` (the desktop app's in-process Kestrel). There is one frontend but each root
+  lists its own `app.Map*Api()` calls, and new APIs were only added to the Web list. The image library was exactly that:
+  `RegisterImageLibraryPersistence()` had long been registered on the desktop, but `MapImageLibraryApi()` was never mapped.
+- **Why it was especially hard to catch**: the desktop root ends with `app.MapFallbackToFile("index.html")`, so an unmapped route
+  is not a 404 — a `GET` hits the fallback and returns **200 + text/html** (the frontend sees `res.ok === true`, then `res.json()`
+  fails, so the UI errors out or silently does nothing), while a `POST` returns **405** because a GET endpoint exists for that path.
+  Neither is the unambiguous “route does not exist” signal.
+- **Fix**: added the 7 missing `Map*Api()` calls plus the `BrandingState` / `ConfigGovernanceState` singletons and their two persistence
+  registrations to `DesktopApp.cs`, with a comment about keeping the lists in sync. Two APIs stay **deliberately unmapped** (reason
+  documented): `MapNativeTunnelApi` (reverse tunnel for “public Hub + intranet bridge” — meaningless on loopback and one more exposed
+  surface) and `MapNativeBridgeDownloadApi` (downloading the bridge installer; the desktop *is* the host).
+- **Two guardrails (new regression tests)**:
+  - `DesktopCompositionTests.FrontendApi_IsMappedOnDesktopHost` boots the **real desktop host** and probes every frontend-facing route,
+    asserting the response is never the SPA homepage / 404 / 405 (401/403/400 all count as “route exists”) — **9/10 red before the fix**, all
+    green after;
+  - `DesktopCompositionTests.DesktopCompositionRoot_MapsEveryApiTheWebRootMaps` compares the two roots' `app.Map*Api()` lists with a
+    line-anchored regex (commented-out calls count as missing), so a future Web-only addition fails the suite. **I reverse-verified this guard**:
+    commenting out `app.MapImageLibraryApi();` does make it fail (my first regex was not line-anchored, so it “passed” with the call commented
+    out — a false guard, now fixed).
+- **Relation to the 504 (measured)**: the app itself never returns 504 — the only 504 in the entire repository is in the link proxy
+  (target fetch timeout, unrelated to this path). The actual response for an unmapped API is **HTML(200) / 405**. If a 504 really does
+  appear on the desktop, the request is almost certainly **going through a proxy** (WebView2 uses the system proxy, and a proxy that cannot
+  reach your local 127.0.0.1:5200 answers 502/504) — add `127.0.0.1` / `localhost` to the proxy bypass list, or exclude them where the
+  proxy is configured.
+- **Verified**: desktop-host HTTP probing **11/11 pass** (including a create-and-list end-to-end); the same API on the Web build still returns
+  `200 application/json` (confirming the problem was desktop-only and did not affect Docker / Web deployments); full suite **1416 passing**.
+
 # AG-UI 群聊桌面版 1.0.152 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.152 Release Notes (current Windows desktop release)
 
