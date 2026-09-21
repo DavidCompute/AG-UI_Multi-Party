@@ -4,13 +4,18 @@ namespace AguiGroupChat.Hub.Storage;
 /// <param name="TotalFiles">磁盘上的附件总数。</param>
 /// <param name="TotalBytes">附件总占用字节。</param>
 /// <param name="ReferencedFiles">仍被引用的附件数（消息 / 知识库文档 / 头像 / 技能试运行产物）。</param>
-/// <param name="OrphanFiles">无人引用、且已超过宽限期的附件数（= 可回收）。</param>
-/// <param name="OrphanBytes">可回收字节数。</param>
+/// <param name="UnreferencedFiles">已无任何引用、但<b>仍在宽限期内</b>的附件数。
+/// （刚上传还没发送、正在生成的产物就属于这一档：不能当孤儿回收，但管理员应该看得到。）</param>
+/// <param name="UnreferencedBytes">上述“无引用但在宽限期内”的字节数。</param>
+/// <param name="OrphanFiles">现在就能回收的附件数 = 无引用 <b>且</b> 超过宽限期。</param>
+/// <param name="OrphanBytes">现在就能回收的字节数。</param>
 /// <param name="GracePeriodHours">判定「可回收」所用的宽限期（小时）。</param>
 public sealed record AttachmentStorageStats(
     int TotalFiles,
     long TotalBytes,
     int ReferencedFiles,
+    int UnreferencedFiles,
+    long UnreferencedBytes,
     int OrphanFiles,
     long OrphanBytes,
     int GracePeriodHours);

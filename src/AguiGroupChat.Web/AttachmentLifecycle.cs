@@ -56,9 +56,10 @@ internal sealed class AttachmentLifecycle : IAttachmentLifecycle
         var referenced = ReferencedIds();
         var cutoff = DateTime.UtcNow - gracePeriod;
         var total = 0;
-        long totalBytes = 0, orphanBytes = 0;
+        long totalBytes = 0, orphanBytes = 0, unreferencedBytes = 0;
         var referencedCount = 0;
         var orphanFiles = 0;
+        var unreferencedFiles = 0;
 
         foreach (var id in _store.EnumerateAttachmentIds())
         {
@@ -67,13 +68,19 @@ internal sealed class AttachmentLifecycle : IAttachmentLifecycle
             var size = file is null ? 0 : new FileInfo(file).Length;
             totalBytes += size;
             if (referenced.Contains(id)) { referencedCount++; continue; }
-            // 宽限期：上传后还没发出去的消息、正在写的产物都属于“暂时无引用”，不能当孤儿
+
+            // 无引用：分「仍在宽限期内」与「现在就能回收」两档分别计数。
+            // 为何要分开报：文件是“先上传、后随消息发送”的，宽限期内的无引用文件不能删；
+            // 但只报“可回收 0”会让管理员误以为“没有任何浪费”（实测：186 个无引用文件全落在 7 天宽限期内）。
+            unreferencedFiles++;
+            unreferencedBytes += size;
             if (file is not null && File.GetLastWriteTimeUtc(file) > cutoff) continue;
             orphanFiles++;
             orphanBytes += size;
         }
 
-        return new AttachmentStorageStats(total, totalBytes, referencedCount, orphanFiles, orphanBytes,
+        return new AttachmentStorageStats(total, totalBytes, referencedCount,
+            unreferencedFiles, unreferencedBytes, orphanFiles, orphanBytes,
             (int)gracePeriod.TotalHours);
     }
 

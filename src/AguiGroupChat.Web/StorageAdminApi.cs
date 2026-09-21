@@ -32,7 +32,9 @@ public static class StorageAdminApi
                     allowReclaim = false,
                     graceHours = options.GraceHours,
                     totalFiles = 0, totalBytes = 0L,
-                    referencedFiles = 0, orphanFiles = 0, orphanBytes = 0L,
+                    referencedFiles = 0,
+                    unreferencedFiles = 0, unreferencedBytes = 0L,
+                    orphanFiles = 0, orphanBytes = 0L,
                 });
 
             var stats = lifecycle.Inspect(TimeSpan.FromHours(options.GraceHours));
@@ -44,6 +46,9 @@ public static class StorageAdminApi
                 totalFiles = stats.TotalFiles,
                 totalBytes = stats.TotalBytes,
                 referencedFiles = stats.ReferencedFiles,
+                // 无引用（含宽限期内）——只报“可回收”会让管理员误以为没有任何浪费
+                unreferencedFiles = stats.UnreferencedFiles,
+                unreferencedBytes = stats.UnreferencedBytes,
                 orphanFiles = stats.OrphanFiles,
                 orphanBytes = stats.OrphanBytes,
             });

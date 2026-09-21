@@ -6501,6 +6501,7 @@ async function loadStorageGovernance() {
     cards.innerHTML = [
       [t("admin.storageTotal"), mb(d.totalBytes), t("admin.storageTotalSub", { n: d.totalFiles })],
       [t("admin.storageReferenced"), String(d.referencedFiles || 0), t("admin.storageReferencedSub")],
+      [t("admin.storageUnreferenced"), mb(d.unreferencedBytes), t("admin.storageUnreferencedSub", { n: d.unreferencedFiles || 0 })],
       [t("admin.storageOrphan"), mb(d.orphanBytes), t("admin.storageOrphanSub", { n: d.orphanFiles || 0, h: d.graceHours || 0 })],
     ].map(([label, value, sub]) =>
       `<div class="admin-metric-card"><div>${escapeHtml(label)}</div><b>${escapeHtml(value)}</b><div class="form-hint">${escapeHtml(sub)}</div></div>`)

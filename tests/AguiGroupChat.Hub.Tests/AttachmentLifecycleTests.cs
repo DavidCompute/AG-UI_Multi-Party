@@ -99,15 +99,17 @@ public sealed class AttachmentLifecycleTests : IDisposable
         Assert.Equal(5, stats.TotalFiles);
         // 4 类引用（消息 / 群头像 / 知识库文档 / 技能产物）都必须被算进去
         Assert.Equal(4, stats.ReferencedFiles);
+        Assert.Equal(1, stats.UnreferencedFiles);
         Assert.Equal(1, stats.OrphanFiles);
     }
 
     [Fact]
     public void GracePeriod_HoldsBackFreshFiles()
     {
-        // 宽限期远大于文件年龄 → 即使无引用也不算“可回收”（上传后还没发送、正在生成的产物）
+        // 宽限期远大于文件年龄 → 仍算“无引用”，但不算“可回收”（上传后还没发送、正在生成的产物）
         var stats = _lifecycle.Inspect(TimeSpan.FromHours(168));
 
+        Assert.Equal(1, stats.UnreferencedFiles);
         Assert.Equal(0, stats.OrphanFiles);
         Assert.Equal(4, stats.ReferencedFiles);
     }

@@ -188,7 +188,7 @@ public sealed class TopicTests
     {
         public List<string> Seen { get; } = [];
 
-        public AttachmentStorageStats Inspect(TimeSpan gracePeriod) => new(0, 0, 0, 0, 0, 0);
+        public AttachmentStorageStats Inspect(TimeSpan gracePeriod) => new(0, 0, 0, 0, 0, 0, 0, 0);
 
         public AttachmentReclaimResult DeleteIfUnreferenced(IReadOnlyCollection<string> attachmentIds)
         {
