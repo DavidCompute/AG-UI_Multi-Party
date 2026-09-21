@@ -150,6 +150,24 @@ The Web frontend is fully localized. **This is important** — the i18n CI check
   ```
 - **Translation courtesy:** a contribution in English is always welcome already; if you are able, please also provide the simplified Chinese translation for any new or changed keys. This is appreciated but **not** a blocker — a correct English submission with Chinese translation is the ideal, whereas English-only is perfectly acceptable.
 
+## There Are Two Composition Roots (read this before adding an API)
+
+The HTTP API is wired up **twice**, because the Web build and the Desktop build share one frontend but have separate hosts:
+
+| | Composition root | What it serves |
+|---|---|---|
+| Web | `src/AguiGroupChat.Web/Program.cs` | Docker / standalone server; the browser loads the bundled frontend |
+| Desktop | `src/AguiGroupChat.Desktop.Core/DesktopApp.cs` | The Windows desktop app's in-process Kestrel host; WebView2 loads the same frontend |
+
+**When you add a `Map*Api()` extension, add it to both.** Forgetting the desktop one fails in a particularly nasty way: the desktop root ends with `app.MapFallbackToFile("index.html")`, so an unmapped route is **not** a 404 — a `GET` returns the SPA homepage with `200 text/html` and a `POST` returns `405`. The frontend sees `res.ok === true`, fails to parse JSON, and the user sees “I clicked and nothing happened” (this is exactly how the image library shipped broken on desktop for a long time: the persistence was registered and the UI was complete, but the routes were never mapped).
+
+Guardrails (both must stay green):
+
+- `DesktopCompositionTests` boots the **real desktop host** and probes the frontend-facing routes, asserting none of them degrades to HTML / 404 / 405.
+- `DesktopCompositionTests.DesktopCompositionRoot_MapsEveryApiTheWebRootMaps` compares the two `app.Map*Api()` lists, so a future Web-only addition fails the suite instead of waiting for a user to notice.
+
+If an API genuinely does not belong on the desktop (only the “public Hub + intranet bridge” ones do today), add it to the `intentional` list in that test **and** explain why next to the mapping list in `DesktopApp.cs`.
+
 ## Releasing (maintainers)
 
 Desktop installers are built and published automatically by the `Release (Windows Desktop MSI)` workflow (`.github/workflows/release-desktop.yml`). To cut a release:
@@ -157,8 +175,8 @@ Desktop installers are built and published automatically by the `Release (Window
 1. **Bump the version** in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` (`<Version>`) and commit it to `main`.
 2. **Tag the commit and push the tag**:
    ```bash
-   git tag v1.0.152
-   git push origin v1.0.152
+   git tag v1.0.153
+   git push origin v1.0.153
    ```
    The tag must match the project `<Version>` (without the leading `v`). The workflow fails fast on a mismatch so an installer is never published under the wrong version number.
 
@@ -167,7 +185,7 @@ That's it — the workflow builds the MSI via `tools/build-msi.ps1` and creates 
 To build an installer locally without publishing, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.152
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.153
 ```
 
 You can also trigger the workflow manually from the Actions tab (`Run workflow`), leaving the `version` input blank to use the value from the csproj.

@@ -26,6 +26,8 @@
     <ProjectReference Include="..\..\src\AguiGroupChat.Agents\AguiGroupChat.Agents.csproj" />
     <ProjectReference Include="..\..\src\AguiGroupChat.SkillHosting\AguiGroupChat.SkillHosting.csproj" />
     <ProjectReference Include="..\..\src\AguiGroupChat.Web\AguiGroupChat.Web.csproj" />
+    <!-- 桌面版是**另一套组合根**：用它做「接口完整性」回归（漏挂 API 时前端只会“点了没反应”） -->
+    <ProjectReference Include="..\..\src\AguiGroupChat.Desktop.Core\AguiGroupChat.Desktop.Core.csproj" />
     <ProjectReference Include="..\..\src\AguiGroupChat.NativeBridge\AguiGroupChat.NativeBridge.csproj" />
   </ItemGroup>
 

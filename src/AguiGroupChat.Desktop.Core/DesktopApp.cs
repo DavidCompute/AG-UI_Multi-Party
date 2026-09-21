@@ -51,6 +51,8 @@ public static class DesktopApp
         builder.Services.AddSingleton<AguiGroupChat.Hub.Persistence.MessageRetentionService>(); // 消息保留策略（按天清理历史）
         builder.Services.AddSingleton<AccountErasureService>(); // 账号注销 / 数据擦除（企业合规）编排
         builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey）
+        builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4）：应用名 + Logo + 主色
+        builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员在线调整的运维旋钮
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
         builder.Services.AddSingleton<AguiGroupChat.Web.SkillRunArtifactStore>(); // 技能试运行产物归属（产出者本人可读 / 下载 / 预览）
         // 办公文档「在线查看」：docx / xlsx / pptx 转 PDF 后内联渲染。
@@ -70,11 +72,15 @@ public static class DesktopApp
                 ctx.Context.Response.Headers.CacheControl = "no-cache, must-revalidate",
         });
 
+        // 与 Web 版（Program.cs）保持**同一套 API 清单**：前端只有一份 wwwroot，任何一边漏挂 API，
+        // 用户就会看到“点了没反应”（桌面根末尾有 MapFallbackToFile，漏挂的 GET 会返回首页 HTML，
+        // 前端 res.ok 为真却解析不出 JSON）。回归：DesktopCompositionTests 逐条探测。
         HubApp.MapEndpoints(app);
         app.MapAgentApi();      // 智能体目录 + 运行时可新增 / 更新 / 删除 AI 角色
         app.MapTwinApi();       // 用户 AI 分身
-        app.MapAttachmentApi(); // 附件上传 / 下载
+        app.MapAttachmentApi(); // 附件上传 / 下载 + 办公文档在线查看
         app.MapKnowledgeBaseApi(); // 知识库：创建 / 上传文档 / 绑定智能体
+        app.MapImageLibraryApi(); // 图库：上传图片 + 语义检索（文档技能配图不依赖外网）
         app.MapGroupNameApi();  // 群名自动生成
         app.MapSkillApi();      // 技能库（可复用技能：shell / http / prompt）CRUD + 试运行
         app.MapClientToolBridgeApi(); // 客户端执行技能（shell）的本机桥：登录用户在 WebView 里执行，沙箱 + 超时
@@ -89,6 +95,15 @@ public static class DesktopApp
         app.MapAccountApi();    // 账号注销（数据主体权利）：自助注销 + 数据擦除
         app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions
         app.MapUserGroupApi();      // 用户分组 / 组织单元（细粒度授权）
+        app.MapBrandingApi();   // 白标 / 品牌化（6.4）：应用名 + Logo + 主色
+        app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
+        app.MapMentionSuggestApi(); // 输入时「建议 @ 谁」（草稿对数字员工职责的本地评分）
+        app.MapMessageFeedbackApi(); // 消息 👍/👎 反馈（偏好画像）
+        app.MapPlanControlApi(); // 编排计划「暂停 / 继续」
+        app.MapTopicSummaryApi(); // 话题滚动小结读取（长话题接续记忆）
+        // 故意不挂（桌面宿主即用户本机，这两个是“公网 Hub + 内网桥”场景的能力）：
+        //   MapNativeTunnelApi       —— 反向隧道入口：内网桥从公网连入用，本机回环无意义且多一个暴露面；
+        //   MapNativeBridgeDownloadApi —— 下载本机桥安装包 / 查连接参数：桌面自己就是宿主，不需要装桥。
         app.Services.RegisterAgentPersistence();
         app.Services.RegisterKnowledgeBasePersistence();
         app.Services.RegisterImageLibraryPersistence();
@@ -106,6 +121,8 @@ public static class DesktopApp
         app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）
         app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
         app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
+        app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
+        app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();
