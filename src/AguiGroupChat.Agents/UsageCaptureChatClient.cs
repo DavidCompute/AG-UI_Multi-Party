@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 using AIChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using AIChatOptions = Microsoft.Extensions.AI.ChatOptions;
@@ -16,11 +17,13 @@ internal sealed class UsageCaptureChatClient : IChatClient
 {
     private readonly IChatClient _inner;
     private readonly Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?> _usage;
+    private readonly ILogger _logger;
 
-    public UsageCaptureChatClient(IChatClient inner, Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?> usage)
+    public UsageCaptureChatClient(IChatClient inner, Lazy<AguiGroupChat.Hub.Agents.AgentUsageService?> usage, ILogger logger)
     {
         _inner = inner;
         _usage = usage;
+        _logger = logger;
     }
 
     public Task<ChatResponse> GetResponseAsync(IEnumerable<AIChatMessage> messages, AIChatOptions? options = null, CancellationToken ct = default)
@@ -30,7 +33,10 @@ internal sealed class UsageCaptureChatClient : IChatClient
     {
         var response = await task;
         if (response.RawRepresentation is ChatCompletion { Usage: { } u })
+        {
+            RecordCacheHits(u.InputTokenDetails?.CachedTokenCount ?? 0, u.InputTokenCount);
             Record(u.InputTokenCount, u.OutputTokenCount, u.OutputTokenDetails?.ReasoningTokenCount ?? 0);
+        }
         return response;
     }
 
@@ -48,6 +54,22 @@ internal sealed class UsageCaptureChatClient : IChatClient
             yield return update;
         }
         if (pending is { } p) Record(p.Input, p.Output, p.Reasoning);
+    }
+
+    /// <summary>
+    /// 提示缓存命中量：DeepSeek（及其他 OpenAI 兼容端）对**提示前缀命中**部分大幅降价，
+    /// 实测同一提示二次调用 2550 token 中 2304 命中、延迟 249ms→139ms。
+    ///
+    /// <para>
+    /// 为何只记日志、不进库：用量表按 (日期, 智能体, 用户) 聚合 prompt/completion/reasoning 三列，
+    /// 要落缓存量得同时改 PostgreSQL / MySQL / SQLite 三套存储的表结构与老库迁移；
+    /// 日志足以回答“缓存到底有没有生效”，等真要做成本对账再动表。
+    /// </para>
+    /// </summary>
+    private void RecordCacheHits(long cached, long input)
+    {
+        if (cached <= 0) return;
+        _logger.LogDebug("提示缓存命中 {Cached}/{Input} tokens（命中部分价格更低）", cached, input);
     }
 
     private void Record(long input, long output, long reasoning)

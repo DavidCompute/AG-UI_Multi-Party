@@ -272,8 +272,12 @@ public sealed class AgentCatalog
 
     /// <summary>
     /// 创建裸 ChatClientAgent（不缓存）：只挂 Instructions / Description，不带工具、不带 AIContextProviders（记忆注入）、
-    /// 不带技能与审批包装。用于轻量决策（如 Contextual 模式 <c>__AGUI_DECIDE__</c> 发言判断）——
-    /// 决策轮不需要业务能力，避免双重工具 / 记忆注入浪费上下文。
+    /// 不带技能与审批包装。目前只服务于<b>小决策</b>（<see cref="AgentGateway"/> 的任务指派目标排序）。
+    ///
+    /// <para>
+    /// 决策轮不需要业务能力（无需工具 / 记忆注入），且必须走<b>非推理</b>模型
+    /// （见 <see cref="AgentOptions.DecisionModel"/> 的实测说明）；否则思考模式一开，小预算被思维链吃光、正文为空。
+    /// </para>
     /// </summary>
     public ChatClientAgent CreateBare(string agentId)
     {
@@ -297,7 +301,9 @@ public sealed class AgentCatalog
         }
 
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-        var client = BuildOpenAIChatClient(_options, def, isDeepSeek);
+        // 判定/路由属“小决策”：**必须走非推理模型**（详见 AgentOptions.DecisionModel 的实测说明）。
+        // 否则思考模式一开，预算被思维链吃光 → 正文为空 → 判定静默退化为“否/无人”。
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, ResolveDecisionModelName(_options, def, isDeepSeek));
         return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
     }
 
@@ -635,7 +641,7 @@ public sealed class AgentCatalog
         // Microsoft.Agents.AI.OpenAI：ChatClient → ChatClientAgent（Instructions/Name/Description 经 options）
         // clientFactory 挂用量捕获装饰器（最底层，usage 帧在此层仍为原始类型）；未注册用量服务时透传不包装
         return client.AsAIAgent(chatOptions,
-            clientFactory: _usage.Value is null ? null : inner => new UsageCaptureChatClient(inner, _usage),
+            clientFactory: _usage.Value is null ? null : inner => new UsageCaptureChatClient(inner, _usage, _loggerFactory.CreateLogger<UsageCaptureChatClient>()),
             _loggerFactory, _services);
     }
 
@@ -649,6 +655,192 @@ public sealed class AgentCatalog
         return model ?? def?.Model ?? options.Model
             ?? (isDeepSeek ? DeepSeekDefaultModel : null)
             ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
+    }
+
+    /// <summary>
+    /// 判定/路由类「小决策」的模型名：<b>故意无视 ThinkingMode</b>。
+    ///
+    /// <para>
+    /// 这些调用的输出预算只有几个 token，推理模型会把预算全花在思维链上：实测生产使用的 deepseek-flash
+    /// 在预算 8 与 64 时正文均为空（64 那次恰好吃满被截断）—— 发言判定退化为“永不发言”、
+    /// 指派路由解析出 0 个下游。换非推理模型后同一提示只花 1–2 token 就能给出 YES/NONE。
+    /// </para>
+    /// </summary>
+    internal static string ResolveDecisionModelName(AgentOptions options, AgentDefinition? def, bool isDeepSeek)
+        => options.DecisionModel ?? def?.Model ?? options.Model
+           ?? (isDeepSeek ? DeepSeekDefaultModel : null)
+           ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
+
+    /// <summary>某智能体在「小决策」调用中实际使用的模型名（供日志与排查：日志里必须写真实模型，
+    /// 否则会把「判定走了哪个模型」写错，而这正是排查“判定为何失灵”时最需要的那条信息）。
+    ///
+    /// <para>
+    /// 只用于日志，因此**绝不抛异常**：模型名解析不出来（如测试里的空配置）时回一个可读占位符——
+    /// 一个诊断字段不该把它所诊断的那次请求弄挂。这也确实是实发过的故障：漏了个 return 导致
+    /// “命中”也走进重试分支，而重试分支的日志参数在这里抛异常，直接把整次路由打成 AGENT_RUN_ERROR。
+    /// </para>
+    /// </summary>
+    public string DecisionModelName(string agentId)
+    {
+        try
+        {
+            var def = GetDefinition(agentId);
+            var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+            return ResolveDecisionModelName(_options, def, isDeepSeek);
+        }
+        catch (InvalidOperationException)
+        {
+            return "(未配置)";
+        }
+    }
+
+    /// <summary>一次判定的结果：实际使用的模型、原始文本、P(是)（拿不到 logprobs 时为 null）、纯文本推断的布尔。</summary>
+    public sealed record DecisionOutcome(string Model, string Raw, double? Probability, bool? Answer);
+
+    /// <summary>
+    /// 「是/否」类型化判定：一步出结果 + 候选概率。
+    ///
+    /// <para>
+    /// 为何不复用 <see cref="CreateBare"/> 的 MAF 智能体：这个调用只要一个布尔与它的概率，
+    /// 不需要会话 / 工具 / 记忆；而概率要从 <c>logprobs</c> 读，MAF 的 <c>RunAsync</c> 不回传原始补全。
+    /// 直调后可以：固定温度 0（判定不该采样，否则灰区边界会抖）、只要 1 个输出 token、
+    /// 并把用量按与装饰器相同的口径记入库（判定提示很长，不记会低估配额消耗）。
+    /// </para>
+    /// </summary>
+    public async Task<DecisionOutcome> DecideYesNoAsync(string agentId, string prompt, CancellationToken ct = default)
+    {
+        var def = GetDefinition(agentId)
+            ?? throw new InvalidOperationException($"智能体 {agentId} 未在 Agents 配置中声明");
+        var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+
+        // mock 提供方没有 logprobs / 没有真实端点：走裸智能体拿文本结论，概率留空由调用方退回文本。
+        // （测试全部跑在 mock 上，且 MockChatClient 对 __AGUI_DECIDE__ 有确定性输出，行为不变。）
+        if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
+        {
+            var mockAgent = CreateBare(agentId);
+            var mockResp = await mockAgent.RunAsync(prompt, session: null,
+                new ChatClientAgentRunOptions { ChatOptions = new Microsoft.Extensions.AI.ChatOptions { MaxOutputTokens = 8 } }, ct)
+                .ConfigureAwait(false);
+            var mockRaw = mockResp.Text?.Trim() ?? "";
+            var (mockP, mockA) = ParseYesNo([], mockRaw);
+            return new DecisionOutcome("mock", mockRaw, mockP, mockA);
+        }
+
+        var model = ResolveDecisionModelName(_options, def, isDeepSeek);
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, model);
+
+        var completion = await client.CompleteChatAsync(
+            [new UserChatMessage(prompt)],
+            new ChatCompletionOptions
+            {
+                MaxOutputTokenCount = 8,
+                Temperature = 0f,
+                // 把候选 token 的对数概率要回来，用于算 P(是)；端点不支持时退化为文本解析。
+                IncludeLogProbabilities = true,
+                TopLogProbabilityCount = 8,
+            }, ct).ConfigureAwait(false);
+
+        var raw = completion.Value.Content.Count > 0 ? (completion.Value.Content[0].Text ?? "").Trim() : "";
+        var (probability, answer) = ParseYesNo(FlattenTopTokens(completion.Value.ContentTokenLogProbabilities), raw);
+        if (completion.Value.Usage is { } usage)
+            RecordUsage(usage.InputTokenCount, usage.OutputTokenCount,
+                usage.OutputTokenDetails?.ReasoningTokenCount ?? 0);
+        return new DecisionOutcome(model, raw, probability, answer);
+    }
+
+    /// <summary>用量记账（与 <see cref="UsageCaptureChatClient"/> 同口径：都取 ambient 上下文里的宿主与触发用户）：
+    /// 仅网关驱动时记录，无业务上下文（如后台任务直调）则跳过。</summary>
+    private void RecordUsage(long input, long output, long reasoning)
+    {
+        if (_usage.Value is not { } usage) return;
+        if (AgentGateway.AmbientContext.Value is not { } ctx) return;
+        usage.RecordUsage(ctx.AgentId, ctx.TriggerUserId, input, output, reasoning);
+    }
+
+    /// <summary>把“首个生成 token 的候选分布”摊平为 (token, logprob)（拿不到 logprobs 时返回空）。</summary>
+    internal static IReadOnlyList<(string Token, double LogProbability)> FlattenTopTokens(
+        IReadOnlyList<ChatTokenLogProbabilityDetails>? contentTokenLogProbabilities)
+    {
+        if (contentTokenLogProbabilities is not { Count: > 0 }) return [];
+        var first = contentTokenLogProbabilities[0];
+        var list = new List<(string, double)>();
+        if (first.TopLogProbabilities is { Count: > 0 } tops)
+        {
+            foreach (var t in tops) list.Add((Decode(t.Utf8Bytes), t.LogProbability));
+        }
+        else
+        {
+            list.Add((Decode(first.Utf8Bytes), first.LogProbability));
+        }
+        return list;
+    }
+
+    private static string Decode(ReadOnlyMemory<byte>? utf8) => utf8?.ToArray() is { Length: > 0 } b ? System.Text.Encoding.UTF8.GetString(b) : "";
+
+    /// <summary>
+    /// 从候选 token 概率 + 原始文本得出「是/否」。
+    ///
+    /// <para>
+    /// 先用概率（支持时更稳，且能拿去定阈值），只在拿不到概率时才退化到文本。
+    /// 文本路径不再用 <c>StartsWith("YES")</c> 那种前缀匹配：模型偶尔会在前面加标点，或直接输出中文「是/否」，
+    /// 前缀匹配会把「是」静默当成「否」（此类失败没有异常、没有日志，很难查）。
+    /// 两边都认不出时返回 (null, null) —— 由调用方决定“不猜”而不是默默当“否”。
+    /// </para>
+    /// </summary>
+    internal static (double? Probability, bool? Answer) ParseYesNo(
+        IReadOnlyList<(string Token, double LogProbability)> topTokens, string? raw)
+    {
+        if (topTokens.Count > 0)
+        {
+            double yes = 0, no = 0;
+            foreach (var (token, logProb) in topTokens)
+            {
+                var p = Math.Exp(logProb);
+                var vote = NormalizeVote(token);
+                if (vote > 0) yes += p;
+                else if (vote < 0) no += p;
+            }
+            if (yes + no > 0)
+            {
+                var pYes = yes / (yes + no);
+                return (pYes, pYes >= 0.5);
+            }
+        }
+        return (null, VoteFromText(raw));
+    }
+
+    /// <summary>把候选 token 归一化成投票方向：1 = 是，-1 = 否，0 = 与该判定无关。</summary>
+    internal static int NormalizeVote(string token)
+    {
+        var t = token.Trim().TrimStart('_').Trim().TrimEnd('.', '!', '。', '！', ',', '，').ToUpperInvariant();
+        return t switch
+        {
+            "YES" or "Y" or "TRUE" or "是" or "对" or "应该" or "会" => 1,
+            "NO" or "N" or "FALSE" or "否" or "不" or "不会" or "不该" => -1,
+            _ => 0,
+        };
+    }
+
+    /// <summary>
+    /// 拿不到 logprobs 时的文本兜底：只认**第一个词**，认不出返回 null（不猜）。
+    ///
+    /// <para>
+    /// 为何不能扫全文找 Y/N：一句「MAYBE LATER」里的 Y 会被当成“是”（我自己第一版就这么错过了）。
+    /// 判定宁可返回“不知道”（由调用方不发言），也不能把不确定当确定。
+    /// </para>
+    /// </summary>
+    internal static bool? VoteFromText(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var head = raw.Trim();
+        var end = head.IndexOfAny([' ', '\t', '\r', '\n', ',', '，', '.', '。', '!', '！', ':', '：', '；', ';']);
+        var word = (end < 0 ? head : head[..end]).Trim().Trim('"', '\'', '`', '*').ToUpperInvariant();
+        return word switch
+        {
+            "YES" or "Y" or "TRUE" or "是" or "对" or "应该" or "会" => true,
+            "NO" or "N" or "FALSE" or "否" or "不" or "不会" or "不该" or "不应该" => false,
+            _ => null,
+        };
     }
 
     /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。

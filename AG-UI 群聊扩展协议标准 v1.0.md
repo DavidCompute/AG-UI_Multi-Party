@@ -1227,6 +1227,7 @@ WebSocket 连接上可直接上行以下事件（等效对应 HTTP 接口），�
 
 4. **语境触发（contextual）**：服务端按最近消息上下文决策（`Agents:ContextMaxMessages` 条，默认 10），命中后唤醒对应智能体
     - 语境发言决策（`ShouldSpeakAsync`）与普通知聚一致，仅以全群可见消息（`Visibility=all`）作为判断上下文；而在<b>客服知聚</b>中，<b>正式回复的上下文窗口</b>（`BuildUserMessageAsync`）除全群可见消息外，还会纳入本次触发顾客自己的隔离会话（其提问 + 定向给该顾客的客服消息），但绝不混入其他顾客的私聊（见 §2.1.1）。
+    - 决策实现：该判定是“小决策”——固定走<b>非推理</b>模型（`Agents:DecisionModel`，留空 = 自动用非推理的常规模型；**故意不受 `Agents:ThinkingMode` 影响**），读模型返回的 `logprobs` 算 **P(发言)** 并与 `Agents:DecisionMinProbability`（默认 0.3）比较；因此单次判定耗时约 100–250ms 且不随思考模式变慢。拿不到概率时才退回文本判定（只认第一个词，认不出=不发言）。
 
 5. 智能体响应必须携带 `senderId` 与 `senderType`，前端据此渲染身份标识；智能体自身发送的消息不触发自身
 6. 智能体回复消息**不回显触发消息的 `mentions` / `mentionAll`**（提及仅用于触发，避免 @ 回显到正文）

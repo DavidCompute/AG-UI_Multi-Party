@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -428,6 +429,81 @@ public sealed class AgentGatewayTests
         // 回退到下派链末层的 b2：前缀「科室B专员 代为处理」且无「无法解决」
         Assert.Contains("科室B专员 代为处理", stored!.Content);
         Assert.DoesNotContain("无法解决", stored.Content);
+    }
+
+    /// <summary>
+    /// 回归：成功命中下游时**不得**再跑一次路由调用。
+    ///
+    /// <para>
+    /// 曾经的实现漏了「命中即 return」：`ranked.Count &gt; 0` 时也不进那个 if、直接落到下面的空输出重试分支——
+    /// 于是每次成功指派都要白烧一次模型调用，而且<b>第二次的结果会覆盖第一次</b>（真实模型下完全可能给出不同答案），
+    /// 日志还会把成功误报成「返回空输出，重试一次」。因为 mock 两次回答相同、最终正文也正确，
+    /// 只断言输出是抓不住的 —— 所以这里断言日志。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Invoke_RouterHit_DoesNotRetryRouteCall()
+    {
+        var f = new HubFixture();
+        var group = await f.Hub.CreateGroupAsync(new GroupCreateRequest
+        {
+            GroupName = "g", OwnerId = "user_1", MemberIds = ["agent_a", "agent_ex"],
+            Members =
+            [
+                new MemberSeed { MemberId = "agent_a", MemberType = MemberType.Agent, Nickname = "IT服务台" },
+                new MemberSeed { MemberId = "agent_ex", MemberType = MemberType.Agent, Nickname = "Exchange专家" },
+            ],
+        });
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        f.Drain(inbox);
+
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            Agents =
+            [
+                new AgentDefinition
+                {
+                    AgentId = "agent_ex", Nickname = "Exchange专家", Description = "负责邮件", Instructions = "输出：邮件排障答复",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                },
+                new AgentDefinition
+                {
+                    AgentId = "agent_a", Nickname = "IT服务台", Description = "IT服务台", Instructions = "你是一线IT服务台，负责常见IT问题",
+                    TriggerMode = AgentTriggerMode.Mentioned,
+                    AssignmentIds = ["agent_ex"],
+                },
+            ],
+        };
+        var catalog = new AgentCatalog(options, NullLoggerFactory.Instance, new ServiceCollection().BuildServiceProvider());
+        var services = new ServiceCollection().AddSingleton(f.Hub).BuildServiceProvider();
+        var logs = new List<string>();
+        var gateway = new AgentGateway(catalog, services, options, attachmentStore: null, new CapturingLogger<AgentGateway>(logs));
+
+        var result = await gateway.InvokeAsync(new AgentInvocationContext(
+            GroupId: group.GroupId, ThreadId: "thread_" + group.GroupId,
+            AgentId: "agent_a", AgentNickname: "IT服务台", TriggerMessageId: "msg_trig",
+            TriggerUserId: "user_1", Content: "@IT服务台 @Exchange专家 outlook连不上exchange了 帮我派单", Mentions: [], MentionAll: false,
+            TriggerMode: AgentTriggerMode.Mentioned), CancellationToken.None);
+
+        Assert.True(result.Accepted, "路由器下派失败: " + result.ErrorCode);
+        // 命中要有日志（模型、候选数、命中数都可回看）……
+        Assert.Contains(logs, l => l.Contains("指派路由") && l.Contains("命中"));
+        // ……而且这一次命中不得触发任何重试
+        Assert.DoesNotContain(logs, l => l.Contains("重试"));
+    }
+
+    /// <summary>把日志收进内存列表的捕获器（仅本文件用）：用于断言“该跑几次 / 该不该记警告”。</summary>
+    private sealed class CapturingLogger<T>(List<string> sink) : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => sink.Add(formatter(state, exception));
     }
 
     /// <summary>路由器优先下派：即使本节点自身语境也可能应答（ShouldSpeak=YES），只要白名单里有

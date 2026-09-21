@@ -82,7 +82,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       Agents__Endpoint: ${AGENTS_ENDPOINT:-}
       Agents__Model: ${AGENTS_MODEL:-deepseek-chat}
-      # 思考模式（默认开启）：智能体调用推理模型 deepseek-reasoner（可在「模型配置」弹窗开关）
+      # 判定/路由类「小决策」（该不该发言 / 派给谁）专用模型。留空 = 自动用上面的非推理常规模型——
+      # **故意不受思考模式影响**：判定调用的输出预算只有几个 token，推理模型会把预算全花在思维链上、
+      # 正文为空，于是发言判定「永远不发言」、指派路由解析出 0 个下游（表现为「只有问题提升、没有任务指派」）。
+      # 仅当你有意把判定也交给某个特定模型时才需要设置它。
+      Agents__DecisionModel: ${AGENTS_DECISION_MODEL:-}
+      # 判定为「是」所需的最低概率（0–1，默认 0.3）：低于此值按「否」处理，实际概率会写进日志。
+      # 取 0.5 会把「属于其职责但未点名」这类本该发言的情形一并压掉（实测该档位概率约 0.33）。
+      Agents__DecisionMinProbability: ${AGENTS_DECISION_MIN_PROBABILITY:-0.3}
+      # 思考模式（默认开启）：智能体调用推理模型（deepseek-flash）做正式回复（可在「模型配置」弹窗开关）
       Agents__ThinkingMode: ${AGENTS_THINKING_MODE:-true}
       # 每用户每日 token 用量配额（0 = 不限）：超出后该用户当天无法再触发智能体（管理员控制台「用量统计」查看）
       Agents__DailyTokenQuotaPerUser: ${AGENTS_DAILY_TOKEN_QUOTA:-0}

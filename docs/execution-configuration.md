@@ -83,6 +83,8 @@
 | 各角色“可调用子员工/技能”挂载、可复用技能库引用 | 角色编辑表单 / 技能库 | 保存即生效 | AgentApi / SkillApi |
 | 一键组织/客服编排与受控落库（OrgDeploy 权限） | 组织用例 | 触发即按库内外状态 | OrgApplyEngine（管理员闸） |
 | 模型 provider / apiKey / endpoint / 思考模型名 / 视觉模型 | **fixed → 需改 appsettings 并重启** | 启动装配 | `AgentOptions`：Provider/ApiKey/Endpoint/ThinkingModel/Vision* |
+| 「小决策」模型名（判定发言 / 指派路由） | **fixed → appsettings `Agents:DecisionModel`**（默认留空 = 非推理常规模型） | 启动装配 | `AgentOptions.DecisionModel`；**故意不受思考模式影响**，详见 README「「小决策」模型」一节 |
+| 「小决策」判定阈值（P(发言) 下限） | **fixed → appsettings `Agents:DecisionMinProbability`**（默认 0.3） | 启动装配 | `AgentOptions.DecisionMinProbability`；变更只影响后续调用，无需重启前端 |
 | 记忆（RAG）是否启、embedding provider、向量维度、TopK、相似度阈值、上下文 | **fixed → 需改 appsettings 并重启** | 启动装配 | `Agents:Memory` |
 | `CoordinatorPlanning`（确定性协调计划总开关） | **fixed → 需改 appsettings 并重启**（本页 P 只能调“计划条目/步骤上限”，开关仍码内固定） | — | `AgentOptions.CoordinatorPlanning` |
 | Skill 自动盲跑 server shell 风险开关 / 允许内网技能端点放行 | **fixed → appsettings**（运维安全收敛项） | — | `SkillAutoTestServerShell`、`AllowPrivateSkillEndpoints` |

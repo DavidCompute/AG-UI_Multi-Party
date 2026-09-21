@@ -2403,10 +2403,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 任务指派目标<b>排序</b>：在 <paramref name="candidates"/>（白名单）里按匹配度从高到低输出一个或多个
     /// 候选下游数字员工（可逗号分隔返回多个，供上层做递归探测回退）；都不合适输出 NONE。
     /// 返回候选 agentId 的已排序列表（保证都在 <paramref name="candidates"/> 内）。
-    /// <summary>
-    /// 任务指派目标<b>排序</b>：在 <paramref name="candidates"/>（白名单）里按匹配度从高到低输出一个或多个
-    /// 候选下游数字员工（可逗号分隔返回多个，供上层做递归探测回退）；都不合适输出 NONE。
-    /// 返回候选 agentId 的已排序列表（保证都在 <paramref name="candidates"/> 内）。
     /// 只依据<b>直接下级</b>的昵称与职责做语义匹配——组织架构的指派判断只看下一层，不向上钻、不引入更深层叶子。
     /// </summary>
     private async Task<List<string>> RankAssignTargetsAsync(AgentInvocationContext context, AgentDefinition def, List<string> candidates, string input, CancellationToken ct)
@@ -2425,10 +2421,49 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         sb.AppendLine("按匹配度从高到低输出一个或多个候选 agentId，多个用英文逗号分隔；若都不适合只输出 NONE。");
         var prompt = "__AGUI_ROUTE__\n" + sb + "\n请求：\n" + UntrustedBoundary.Wrap(input);
         var resp = await agent.RunAsync(prompt, session: null, new ChatClientAgentRunOptions { ChatOptions = new ChatOptions { MaxOutputTokens = 64 } }, ct);
-        // 解析输出：逗号分隔的候选 id（兼容单个 / NONE / 混合文本），只保留在白名单内的
-        var choices = (resp.Text ?? "NONE")
-            .Split([',', '，'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return choices.Where(c => candidates.Contains(c)).ToList();
+        var ranked = ParseAssignTargets(resp.Text, candidates);
+        if (ranked.Count > 0)
+        {
+            _logger.LogInformation("智能体 {AgentId} 指派路由：候选 {Candidates} 个 → 命中 {Hits}",
+                def.AgentId, candidates.Count, ranked.Count);
+            return ranked;
+        }
+        if (!string.IsNullOrWhiteSpace(resp.Text))
+        {
+            // 模型明确回 NONE（或全在白名单外）：尊重它的判断，不再重试
+            _logger.LogInformation("智能体 {AgentId} 指派路由：候选 {Candidates} 个 → 未命中（模型回 {Raw}）",
+                def.AgentId, candidates.Count, AgentGatewayHelpers.TruncateForChain(resp.Text));
+            return ranked;
+        }
+
+        // 空输出 = 判定失败（不是“没人合适”）：实测思考模型会把 64 个预算全花在思维链上、正文为空，
+        // 而旧代码把它当成“无候选”，于是**静默**退化成“只有问题提升、没有任务指派”。
+        // 这里重试一次（瞬时失败居多），仍为空则记警告并保留原语义（不发明指派）。
+        // 注意：命中（ranked.Count > 0）必须在上面就 return —— 否则每次成功指派都要白跑一次路由调用，
+        // 而且第二次的结果会覆盖第一次（曾经就是漏了这个 return，靠护栏才没流出）。
+        _logger.LogWarning("智能体 {AgentId} 指派路由返回空输出（模型={Model}），重试一次",
+            def.AgentId, _catalog.DecisionModelName(def.AgentId));
+        var retry = await agent.RunAsync(prompt, session: null, new ChatClientAgentRunOptions { ChatOptions = new ChatOptions { MaxOutputTokens = 256 } }, ct);
+        ranked = ParseAssignTargets(retry.Text, candidates);
+        if (ranked.Count == 0)
+            _logger.LogWarning("智能体 {AgentId} 指派路由重试后仍无候选（原始：{Raw}）——本次不指派", def.AgentId, AgentGatewayHelpers.TruncateForChain(retry.Text));
+        else
+            _logger.LogInformation("智能体 {AgentId} 指派路由：候选 {Candidates} 个 → 命中 {Hits}（重试后）", def.AgentId, candidates.Count, ranked.Count);
+        return ranked;
+    }
+
+    /// <summary>
+    /// 解析指派路由的输出：逗号分隔的候选 agentId（兼容单个 / NONE / 混合文本），只保留在白名单内的。
+    /// 注意空输入返回空列表——“模型说了 NONE”与“模型什么都没说”对调用方意义不同，
+    /// 因此判定“是否失败”应由调用方看原始文本（见 RankAssignTargetsAsync）。
+    /// </summary>
+    internal static List<string> ParseAssignTargets(string? text, IReadOnlyList<string> candidates)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        return text.Split([',', '，'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(c => candidates.Contains(c))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     /// <summary>
@@ -4130,10 +4165,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// </summary>
     private async Task<bool> ShouldSpeakAsync(AgentInvocationContext context, AgentDefinition def, CancellationToken ct)
     {
-        // 轻量决策：用裸 ChatClientAgent（无工具 / 无记忆注入 / 无审批包装）——语境决策不需要业务能力，
-        // 避免双重工具 / 记忆注入（决策轮与正式回复轮各注入一次记忆、重复挂载工具浪费上下文）
-        // 按被评估的智能体（def）构建决策体，而非总是宿主：委派链上每层用各自的身份判断语境。
-        var agent = _catalog.CreateBare(def.AgentId);
+        // 轻量决策：只要一个布尔与它的概率（不走工具 / 记忆 / 审批包装，也不需要推理模型）。
+        // 实测教训：以前走 MAF 裸智能体 + 推理模型 + MaxOutputTokens=8，推理把预算吃光 → 正文为空
+        // → StartsWith("YES") 恒为假 → “语境触发永远不发言”（且日志只是一句“保持沉默”，看不出原因）。
         // 语境判断同样按话题取最近对话（会话历史以话题为单位，与 BuildUserMessageAsync 一致）
         var history = _hub.Value.Store.RecentMessages(context.GroupId, _options.ContextMaxMessages, context.TopicId)
             .Where(m => !m.Recalled && m.Visibility == MessageVisibility.All)
@@ -4155,14 +4189,28 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             "请根据语境判断你是否应该发言：被直接提及/询问、或消息与你的职责相关且你有实质内容补充 → YES；" +
             "只是寒暄、与你职责无关、或你刚发言过且没有新的实质信息 → NO。\n只输出 YES 或 NO。";
 
-        var runOptions = new ChatClientAgentRunOptions
+        AgentCatalog.DecisionOutcome decision;
+        try
         {
-            ChatOptions = new ChatOptions { MaxOutputTokens = 8 },
-        };
-        var response = await agent.RunAsync(prompt, session: null, runOptions, ct);
-        var decision = response.Text?.Trim() ?? "";
-        _logger.LogDebug("智能体 {AgentId} 语境决策：{Decision}", context.AgentId, decision);
-        return decision.StartsWith("YES", StringComparison.OrdinalIgnoreCase);
+            decision = await _catalog.DecideYesNoAsync(def.AgentId, prompt, ct);
+        }
+        catch (Exception ex)
+        {
+            // 判定调用失败不应阻断整条链路：保守选择“不发言”，但必须留痕（以前这类失败是静默的）。
+            _logger.LogWarning(ex, "智能体 {AgentId} 语境判定调用失败，本次按不发言处理", def.AgentId);
+            return false;
+        }
+
+        // 用概率定阈值（可在 Agents:DecisionMinProbability 调）：拿不到概率时退回文本结论，两者都拿不到则不猜（不发言）。
+        var pYes = decision.Probability;
+        var speak = pYes is { } p
+            ? p >= _options.DecisionMinProbability
+            : decision.Answer == true;
+        _logger.LogInformation("智能体 {AgentId} 语境判定：模型={Model} P(发言)={PYes} 阈值={Min} → {Verdict}（原始：{Raw}）",
+            def.AgentId, decision.Model,
+            pYes is { } v ? v.ToString("F3") : "n/a", _options.DecisionMinProbability,
+            speak ? "发言" : "保持沉默", AgentGatewayHelpers.TruncateForChain(decision.Raw));
+        return speak;
     }
 
     /// <summary>

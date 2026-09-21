@@ -31,8 +31,35 @@ public sealed class AgentOptions
     /// </summary>
     public bool ThinkingMode { get; set; } = true;
 
-    /// <summary>思考模式使用的模型名（留空时：DeepSeek 自动用 deepseek-reasoner，其余提供方回退默认模型）。</summary>
+    /// <summary>思考模式使用的模型名（留空时：DeepSeek 自动用推理模型 <c>deepseek-flash</c>，其余提供方回退默认模型）。</summary>
     public string? ThinkingModel { get; set; }
+
+    /// <summary>
+    /// 「小决策」调用（该不该发言 / 派给谁）使用的模型名。留空 = 用<b>非推理</b>的常规模型
+    /// （智能体 Model → 全局 Model → 提供方默认）。
+    ///
+    /// <para>
+    /// 为何必须与 <see cref="ThinkingMode"/> 解耦：判定调用的输出预算只有几个 token（发言判定 8、指派路由 64），
+    /// 而推理模型会先把预算全花在思维链上。实测（生产实际使用的 deepseek-flash）：
+    /// 预算 8 → 正文空；预算 64 → 正文空（推理恰好吃满 64 被截断）→「指派路由」解析出 0 个下游，
+    /// 于是问题一路走到「向上提升」—— 这就是“只有问题提升、没有任务指派”的成因。
+    /// 换非推理模型后同一提示只花 1–2 个 token 就给出 YES/NONE。
+    /// </para>
+    /// </summary>
+    public string? DecisionModel { get; set; }
+
+    /// <summary>
+    /// 判定类调用判定为「是」所需的最低概率（logprobs 归一化后，0–1）。低于此值按「否」处理，
+    /// 并把实际概率写进日志（便于用真实数据回看/复调阈值）。
+    ///
+    /// <para>
+    /// 为何不是 0.5：实测同一判定提示下，概率与“该不该发言”的直觉单调对应，但绝对概率整体偏低——
+    /// 6 档实测：直接点名 0.827、明说属于其职责 0.334、边缘相关 0.131、纯寒暄 0.048、与职责无关 0.012。
+    /// 取 0.5 会把「属于其职责但未点名」这类本该发言的情形一并压掉，因此默认取 0.3。
+    /// 样本仅 6 档，上量后应以真实数据重调。
+    /// </para>
+    /// </summary>
+    public double DecisionMinProbability { get; set; } = 0.3;
 
     /// <summary>是否启用图片理解（视觉）：消息附含图片时，用 <see cref="VisionModel"/>（或 DeepSeek 默认视觉模型）以多模态喂给模型看图。默认开启。</summary>
     public bool VisionEnabled { get; set; } = true;

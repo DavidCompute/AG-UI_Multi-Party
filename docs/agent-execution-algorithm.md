@@ -65,6 +65,31 @@ flowchart TD
 
 ---
 
+## 2.1) 小决策（该不该发言 / 派给谁）：模型与阈值
+
+数字员工的模型调用分两类，**必须分开看待**：
+
+| 类别 | 调用点 | 输出预算 | 走哪个模型 |
+|---|---|---|---|
+| 正式回复 | 普通流式 / 桥接 / 计划各步 / 递归综合 | 大（受 `StreamTimeoutMinutes` 等约束） | 受思考模式影响（思考开则走推理模型） |
+| **小决策** | `ShouldSpeakAsync`（语境触发）、`RankAssignTargetsAsync`（指派路由） | **只有几个 token**（判定 8 / 路由 64） | **故意无视思考模式**，固定非推理模型 |
+
+为什么必须解耦（实测教训）：推理模型会把这点预算**全花在思维链上，正文为空**——而这类失败**没有任何异常、没有错误日志**：
+
+- 发言判定旧实现用 `StartsWith("YES")` 看正文 → 空正文恒为假 → **语境触发的数字员工永远不发言**；
+- 指派路由旧实现把空输出当“模型回 NONE” → 解析出 0 个下游 → 退化成“只有问题提升、没有任务指派”。
+
+实测（同一判定提示，生产实际使用的模型）：`deepseek-flash` 预算 8 → 正文空；预算 64 → 正文空（推理恰好吃满 64 被截断，这就是“有时空有时不空”的间歇性来源）；换 `deepseek-chat` 后预算 8 → 正文 `YES`，只花 1 个 token。
+
+因此小决策现在：
+
+1. **模型解析与思考模式解耦**（`AgentOptions.DecisionModel` → 智能体 `Model` → 全局 `Model`）；
+2. **用概率而非文本前缀**：直调 OpenAI 兼容端点拿 `logprobs`，归一化成 P(是)，再与 `Agents:DecisionMinProbability`（默认 0.3）比；拿不到概率才退回文本（只认第一个词，认不出就**不猜**，返回 null 而不是默默当“否”）；
+3. **空输出 ≠ NONE**：指派路由对空正文重试一次（更大预算）并记 `warn`，而不是静默当成“没人合适”；
+4. 判定调用固定 `temperature=0`（判定不该采样），用量按同一口径记入库（判定提示很长，不记会低估配额消耗）。
+
+---
+
 ## 3) 普通带工具 run 的内部循环（Local streaming + HITL）
 
 ```mermaid
@@ -189,3 +214,4 @@ In one sentence: once a message touches a digital employee, the runtime picks a 
 - 组织化路由/计划/递归综合/计划卡广播：`BuildCoordinatedPlanAsync` / `ExecuteCoordinatedPlanAsync` / `ExecuteRecursiveAnswerAsync` / `RecordStandinChain`。
 - 交付兑底与交付物类型判定：`TrySatisfyDeliveryAsync` / `RunDeliveryStreamAsync` / `WantedDeliverable` / `DeliverableFromSkillId` / `BuildDeliveryPrompt` / `BuildNoOutputFallback`。
 - 普通 run：`agent.RunStreamingAsync`、审批 (`HITL`) 恢复 `ResumeRunAsync`、暂停清理 `ResolveInteractionAsync`、批量客户端 `AwaitBatchClientExecAsync`。
+- 小决策（§2.1）：`AgentCatalog.ResolveDecisionModelName` / `DecideYesNoAsync` / `ParseYesNo` / `ParseAssignTargets`、`AgentGateway.ShouldSpeakAsync` / `RankAssignTargetsAsync`。

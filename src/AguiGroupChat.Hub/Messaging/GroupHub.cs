@@ -143,7 +143,7 @@ public sealed class GroupHub : IDisposable
         var members = allIds.Select(id =>
         {
             detailMap.TryGetValue(id, out var detail);
-            var type = detail?.MemberType ?? ResolveMemberType(id);
+            var type = detail?.MemberType ?? ResolveMemberTypeFor(id);
             var role = id == req.OwnerId ? GroupRole.Owner : GroupRole.Normal;
             // 客服知聚：创建者拉入的团队成员（真人 / 数字员工）均为客服（可看全部会话）；
             // 自动加入的普通用户为顾客（只能看到自己的会话），由 enter/auto-join 以 Normal 身份进入。
@@ -418,7 +418,7 @@ public sealed class GroupHub : IDisposable
                 throw new AguiProtocolException(ErrorCodes.GroupFull, "群成员数量达上限");
 
             detailMap.TryGetValue(id, out var detail);
-            var type = detail?.MemberType ?? ResolveMemberType(id);
+            var type = detail?.MemberType ?? ResolveMemberTypeFor(id);
             var member = new GroupMember
             {
                 MemberId = id,
@@ -2039,6 +2039,21 @@ public sealed class GroupHub : IDisposable
 
     internal static MemberType ResolveMemberType(string memberId)
         => memberId.StartsWith("agent_", StringComparison.Ordinal) ? MemberType.Agent : MemberType.User;
+
+    /// <summary>
+    /// 成员类型判定（实例版）：<b>先查智能体目录</b>，查不到才退回 ID 前缀兜底。
+    ///
+    /// <para>
+    /// 为何不能只用前缀：ID 前缀只覆盖 <c>agent_*</c>（前端新建的数字员工），而组织化编排 / 内置组织工具
+    /// 产出的岗位 ID 不带该前缀（<c>bl_commander</c>、<c>org_architect</c> …）。当调用方只传 memberIds
+    /// 而没带 MemberSeed（<c>member/add</c> 的常见用法）时，这类数字员工会被记成<b>真人成员</b>。
+    /// 症状：触发规则不注册（消息不唤起它），且它一旦要发言就在
+    /// <c>PublishAgentMessageStartAsync</c> 抛「发送者不是智能体成员」——报错点离成因很远，很难查。
+    /// 实测就是往知聚里加 <c>bl_field_validator</c> 后，它的回复直接失败。
+    /// </para>
+    /// </summary>
+    private MemberType ResolveMemberTypeFor(string memberId)
+        => _agentDefinitions?.GetDefinition(memberId) is not null ? MemberType.Agent : ResolveMemberType(memberId);
 
     /// <summary>
     /// 成员默认显示名：注册用户取账号昵称 → 用户名 → 兜底用户 ID；
