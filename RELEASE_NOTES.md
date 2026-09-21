@@ -1,3 +1,50 @@
+# AG-UI 群聊桌面版 1.0.155 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.155 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.155 修两个会让“数字员工该干活却什么也没干”的缺陷。① **带图的消息会把工具全部摘掉**：本轮带图时网关把执行体换成了一个**不带工具**的裸视觉体，于是请求里根本没有 `tools`；而 DeepSeek 这类模型**不会报错**，而是把工具调用**当正文写出来**（DSML 标记：`tool_calls` / `invoke` / `parameter` 一整套）——结果技能从未被调用、文件从未生成，用户既看不到 pptx，还收到一大段标记文本（实测就是「与 ppt生成助手 的单聊」里“PPT 首页背景图换成附件的图”那条，以及后续“没有看见pptx”）。现在带图轮次**只换模型、不换能力**（工具 / 记忆 / 审批包装全保留），已实测：同一请求由“写出一段标记”变成“发起技能调用 → 批准 → 产出 348KB 的 pptx 附件”。② **空值配置被当成已配置**：Docker 透传的空值（`Agents__DecisionModel=`）会绑定成**空字符串**，而空串被 `??` 当成“已设置”并一路传成模型名，`ChatClient` 构造直接抛 `Value cannot be an empty string. (Parameter 'model')`——于是**每次语境判定都失败**（日志只有一句“语境判定调用失败，本次按不发言处理”）。现在模型名解析一律“**空白即未设置**”，留空就是默认行为。
+**Version note**: 1.0.155 fixes two defects that made a digital employee do nothing when it should have worked. (1) **A message carrying an image stripped every tool**: on an image turn the gateway swapped the executor for a **tool-less** bare vision agent, so the request had no `tools` at all. DeepSeek does not error on that — it **writes the tool call into the message body** (its DSML markup: a whole `tool_calls` / `invoke` / `parameter` block) — so the skill never ran, no file was ever produced, and the user got a wall of markup instead of a pptx (exactly the “swap the PPT cover for my attached image” message in *chat with ppt-assistant*, and the “I don't see a pptx” that followed). An image turn now **swaps only the model, never the abilities** (tools, memory and the approval wrapper are all kept); measured end to end: the same request went from “emits a markup block” to “calls the skill → approve → delivers a 348 KB pptx attachment”. (2) **A blank config value was treated as configured**: an empty value passed through Docker (`Agents__DecisionModel=`) binds as an **empty string**, which `??` accepted as “set” and passed along as the model name, so constructing the `ChatClient` threw `Value cannot be an empty string. (Parameter 'model')` — and **every contextual decision failed** (the only trace being “contextual decision call failed, treating as no-speak”). Model-name resolution now treats **blank as unset**, so leaving it empty means the default behavior.
+
+## 带图消息不再丢工具 + 空值配置不再当已配置（1.0.155）
+# Image turns keep their tools + blank config no longer counts as set (1.0.155)
+
+中文：
+- **缺陷一：带图消息把工具摘掉，技能从此不会执行**
+  - 路径：普通流式与交付兑底的“本轮带图 → 换视觉模型”都换成了 `CreateBareVision`——它是**裸体**（`Tools = null`、无记忆注入）。
+  - 后果（实测）：发往模型的消息里没有 `tools`；实测真实端点（同一提示）——**带 tools → 返回结构化 `tool_calls`；不带 tools → 正文出现 DSML 标记**。于是技能从未执行、交付兑底两轮都产不出文件。
+  - 修法：新增 `AgentCatalog.GetOrCreateVision(agentId, visionModel)`：走**同一套**完整装配（工具 / 记忆 / 技能链 / 审批包装），**只把模型换成视觉模型**（缓存键按模型区分）。两个调用点全部改用它；`CreateBareVision` 删除（避免再被误用）。
+  - 为何不是模型的锅：实测视觉模型 `deepseek-v4-flash-vision-exp` **支持** tool calling（无图时返回结构化调用）。
+  - 线上实测（本机 Docker，「与 ppt生成助手 的单聊」，带图）：`构建模型客户端：... model=deepseek-v4-flash-vision-exp` → `运行中断等待交互`（模型发起需审批的技能调用）→ 批准 → `技能产物入库为附件：年度颁奖典礼_3页_暖阳版.pptx（356408 字节）`，聊天里出现可下载附件。
+- **缺陷二：`Agents__DecisionModel=`（空串）让每次语境判定失败**
+  - 根因：配置绑定会把**空字符串照样绑上**，而空串不是 `null`——旧实现用 `??`，于是把空串当成“已配置的模型名”，`ChatClient` 构造抛 `ArgumentException: Value cannot be an empty string. (Parameter 'model')`。
+  - 影响：语境判定、指派路由全部失败（日志只有“语境判定调用失败，本次按不发言处理”）；而 `Agents__DecisionModel` 的默认值就是空串，所以这是一个“默认配置就坏”的缺陷。
+  - 修法：模型名解析统一改走 `FirstNonBlank`（**空白 = 未设置**），覆盖 `DecisionModel` / `ThinkingModel` / 智能体 `Model` / `BuildOpenAIChatClient` 的 `modelOverride`；与本仓库既有约定一致（`Agents__ApiKey` / `Agents__Endpoint` 本就按空白回退）。
+  - 线上实测：修复后日志为 `语境判定：模型=deepseek-chat P(发言)=1.000 阈值=0.3 → 发言（原始：YES）`。
+- **新增回归（共 9 条）**：
+  - `DecisionModelAndParsingTests` +8：空白（`null` / `""` / `"   "`）的 `DecisionModel`、智能体 `Model`、`ThinkingModel` 必须回退到默认模型；并把生产配置形状直接喂给 `BuildOpenAIChatClient`（含空 `Endpoint` / 空 `modelOverride`）断言构造不抛。
+  - `VisionTurnToolRetentionTests` +1：带图轮次仍能调工具（用“公告”这个需审批的内置工具当探针，mock 只在挂工具时才会发出该调用）。两条护栏都做了**反向验证**：把代码改回错误实现，它们确实会红。
+  - 全量 **1444 通过 / 0 失败**。
+- **运维提示（非缺陷）**：一条流式消息**创建超过 10 分钟且 60s 无活跃**会被孤儿流兜底强制收尾；所以审批卡放超过 10 分钟再点批准，恢复会报“消息不存在或未开启流式灌入”（该次回复拿不回来了）。及时点按正常。
+- **已知小噪声（不影响产出）**：偶尔可见 `注入图库检索范围失败（按无图库处理）：skill=pptx_deck`——技能本次仍能执行，只是**不注入图库范围**（配图可能不命中团队图库）。出现在模型把工具入参传成非 JSON 文本时；待后续单独处理。
+
+English:
+- **Defect 1: an image turn dropped every tool, so skills could never run**
+  - Path: both the plain streaming path and the delivery fallback swapped to `CreateBareVision` for “image this turn → use the vision model” — a **bare** agent (`Tools = null`, no memory injection).
+  - Consequence (measured): the request sent to the model carried no `tools`; against the real endpoint with the same prompt, **with tools → structured `tool_calls`; without tools → DSML markup in the message body**. The skill therefore never executed and the delivery fallback produced no file in either of its two attempts.
+  - Fix: added `AgentCatalog.GetOrCreateVision(agentId, visionModel)`, which goes through the **same** full assembly (tools / memory / skill chain / approval wrapper) and **only swaps the model** (cache key is per model). Both call sites now use it, and `CreateBareVision` is deleted so it cannot be misused again.
+  - It was not the model's fault: the vision model `deepseek-v4-flash-vision-exp` **does** support tool calling (it returns structured calls when no image is involved).
+  - Verified live (local Docker, *chat with ppt-assistant*, with an image): `构建模型客户端：... model=deepseek-v4-flash-vision-exp` → `运行中断等待交互` (the model raised an approval-gated skill call) → approve → `技能产物入库为附件：年度颁奖典礼_3页_暖阳版.pptx（356408 字节）`, with a downloadable attachment in the chat.
+- **Defect 2: `Agents__DecisionModel=` (empty string) made every contextual decision fail**
+  - Root cause: config binding happily binds an **empty string**, and an empty string is not `null` — the old code used `??`, so the blank was treated as a configured model name and the `ChatClient` constructor threw `ArgumentException: Value cannot be an empty string. (Parameter 'model')`.
+  - Impact: every contextual decision and assignment routing call failed (the only trace: “contextual decision call failed, treating as no-speak”). Since the default value of `Agents__DecisionModel` *is* an empty string, this broke the default configuration.
+  - Fix: model-name resolution now goes through `FirstNonBlank` (**blank = unset**) for `DecisionModel`, `ThinkingModel`, the per-agent `Model` and `BuildOpenAIChatClient`'s `modelOverride` — matching the repo's existing convention (`Agents__ApiKey` / `Agents__Endpoint` already fell back on blank).
+  - Verified live: the log now reads `语境判定：模型=deepseek-chat P(发言)=1.000 阈值=0.3 → 发言（原始：YES）`.
+- **New regression tests (9 total)**:
+  - `DecisionModelAndParsingTests` +8: blank (`null` / `""` / `"   "`) `DecisionModel`, agent `Model` and `ThinkingModel` must fall back to the default model, and the production config shape is fed to `BuildOpenAIChatClient` (including a blank `Endpoint` and a blank `modelOverride`) asserting construction does not throw.
+  - `VisionTurnToolRetentionTests` +1: an image turn must still be able to call tools (using the approval-gated built-in “announcement” tool as the probe — the mock only emits that call when tools are mounted). Both guards were **reverse-verified**: restoring the broken implementations does make them fail.
+  - Full suite **1444 pass / 0 fail**.
+- **Operations note (not a defect)**: a streaming message that is **older than 10 minutes and idle for 60s** is force-closed by the orphan-stream reaper; approving an interaction card left sitting for more than 10 minutes therefore fails to resume with “message does not exist or is not streaming” (that reply is lost). Approving promptly is unaffected.
+- **Known minor noise (does not affect output)**: an occasional `注入图库检索范围失败（按无图库处理）：skill=pptx_deck` — the skill still runs, it just runs **without the image-library scope** (illustrations may therefore miss the team library). It appears when the model passes non-JSON tool arguments; to be handled separately.
+
 # AG-UI 群聊桌面版 1.0.154 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.154 Release Notes (current Windows desktop release)
 
