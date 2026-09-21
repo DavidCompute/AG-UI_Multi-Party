@@ -26,13 +26,34 @@ namespace AguiGroupChat.Hub.Tests;
 /// 也不得是 404 —— 401（要登录）/ 403 / 400 都算“路由存在”。新增 API 只改 Web 不放桌面时，本用例会红。
 /// </para>
 /// </summary>
+/// <summary>
+/// 桌面宿主**整个测试进程只起一个**（集合夹具）：桌面宿主会「探测空闲端口再监听」
+/// （<see cref="DesktopApp.FindFreePort"/>，探测与监听之间有 TOCTOU 窗口），而且实例之间共用同一份
+/// data 目录与快照文件。两个测试类各起一个实例并行跑时，谁先监听到端口完全看时序：后到者拿到一个
+/// 实际已被占用的端口，<c>Start</c> 直接抛异常 —— 表现为**随机**的、固定几条用例一起红
+/// （实测红过一次，重跑全绿；这种不稳定比没有用例更糟）。用集合夹具把两个类收敛到同一个宿主。
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class DesktopHostCollection : ICollectionFixture<DesktopCompositionServerFixture>
+{
+    public const string Name = "desktop-host";
+}
+
 public sealed class DesktopCompositionServerFixture : IAsyncLifetime
 {
+    /// <summary>
+    /// 本进程内桌面宿主被启动过几次。集合夹具保证恰为 1；若将来有人又给某个测试类单独加
+    /// <c>IClassFixture</c>，这里会变成 2 —— 而那正是「抢端口 / 抢快照 → 随机红」的成因
+    /// （见 <see cref="DesktopHostCollection"/>），必须当场报错而不是看运气。
+    /// </summary>
+    private static int _starts;
+
     public WebApplication App { get; private set; } = null!;
     public string HttpBase { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
+        Assert.Equal(1, Interlocked.Increment(ref _starts));
         // 非 backend 模式：DesktopApp 自己挑空闲端口（不抢 5200，也不与运行中的真实桌面冲突），
         // 并且**内部已 StartAsync**（见 DesktopApp.Start 末尾）—— 这里不能再启一次。
         var (app, baseUrl) = DesktopApp.Start([], preferredPort: 5350, backendMode: false);
@@ -48,7 +69,8 @@ public sealed class DesktopCompositionServerFixture : IAsyncLifetime
     }
 }
 
-public sealed class DesktopCompositionTests : IClassFixture<DesktopCompositionServerFixture>
+[Collection(DesktopHostCollection.Name)]
+public sealed class DesktopCompositionTests
 {
     private readonly DesktopCompositionServerFixture _fixture;
     private readonly HttpClient _client;
