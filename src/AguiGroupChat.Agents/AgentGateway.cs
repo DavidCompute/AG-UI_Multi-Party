@@ -593,19 +593,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var accumulated = "";
             var reasoningAccumulated = 0; // 思考过程累计长度（防推理模型思考过长撑爆消息 / 前端）
             ChatMessage userMessage;
-            // 视觉模型可用时才尝试多模态组装；不可用（如 mock / 未配视觉）一律纯文本，行为与旧版一致。
+            // 视觉模型可用时才尝试多模态组装；不可用（未配视觉）一律纯文本，行为与旧版一致。
             if (!string.IsNullOrWhiteSpace(visionModel))
             {
-                var bareVision = _catalog.CreateBareVision(context.AgentId, visionModel!);
-                if (bareVision is not null)
-                {
-                    (userMessage, var visionTurn) = await BuildVisionUserMessageAsync(context, runCt);
-                    if (visionTurn) agent = bareVision; // 本轮真的带图 → 用视觉模型；否则保持原模型
-                }
-                else
-                {
-                    userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, runCt));
-                }
+                (userMessage, var visionTurn) = await BuildVisionUserMessageAsync(context, runCt);
+                // 本轮真的带图 → 换用视觉模型。
+                // 注意：换的**只是模型**——工具 / 记忆 / 审批包装照旧（见 GetOrCreateVision 的说明）：
+                // 曾经这里换成了不带工具的裸视觉体，结果模型把工具调用当正文写出来、技能从未执行。
+                if (visionTurn) agent = _catalog.GetOrCreateVision(context.AgentId, visionModel);
             }
             else
             {
@@ -2759,13 +2754,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         ChatMessage userMessage;
         if (!string.IsNullOrWhiteSpace(visionModel))
         {
-            var bareVision = _catalog.CreateBareVision(context.AgentId, visionModel!);
-            if (bareVision is not null)
-            {
-                (userMessage, var visionTurn) = await BuildVisionUserMessageAsync(context, ct);
-                if (visionTurn) agent = bareVision;
-            }
-            else userMessage = new ChatMessage(ChatRole.User, await BuildUserMessageAsync(context, ct));
+            (userMessage, var visionTurn) = await BuildVisionUserMessageAsync(context, ct);
+            // 与普通流式同一原则：换模型，不换工具（见 GetOrCreateVision 的说明）。
+            // 交付环节特别容易撞上：用户往往正是“把这张图的某处改一下并重新出文件”。
+            if (visionTurn) agent = _catalog.GetOrCreateVision(context.AgentId, visionModel);
         }
         else
         {

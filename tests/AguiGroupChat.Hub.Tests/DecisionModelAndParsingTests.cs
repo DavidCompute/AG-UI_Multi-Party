@@ -128,6 +128,81 @@ public sealed class DecisionModelAndParsingTests
         Assert.Null(answer);
     }
 
+    // ============ ④ 空白配置值算「未设置」（实发故障）============
+
+    /// <summary>
+    /// 空白（含空串）必须等同于“没配”。
+    ///
+    /// <para>
+    /// 为何专门钉住：Docker 里 <c>Agents__DecisionModel: ${AGENTS_DECISION_MODEL:-}</c> 在用户没配时绑成
+    /// **空串**，而空串不是 null —— 用 <c>??</c> 会认它“已设置”并一路传成模型名 <c>""</c>，
+    /// OpenAI 客户端构造直接抛 <c>ArgumentException: Value cannot be an empty string. (Parameter 'model')</c>。
+    /// 实测就是 1.0.154 部署后「与 ppt生成助手 的单聊」里连续两条「语境判定调用失败」。
+    /// 也就是说：一个「默认留空」的正常配置被当成了故障配置。
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void DecisionModel_BlankValue_MeansUnset(string? blank)
+    {
+        var options = Opts(thinking: true);
+        options.DecisionModel = blank;
+        var def = new AgentDefinition { AgentId = "agent_x", Nickname = "X" };
+
+        Assert.Equal("deepseek-chat", AgentCatalog.ResolveDecisionModelName(options, def, isDeepSeek: true));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void DecisionModel_BlankAgentModel_FallsBackToGlobalModel(string? blank)
+    {
+        var options = Opts(thinking: true);
+        var def = new AgentDefinition { AgentId = "agent_x", Nickname = "X", Model = blank };
+
+        Assert.Equal("deepseek-chat", AgentCatalog.ResolveDecisionModelName(options, def, isDeepSeek: true));
+        // 同一坑也存在于思考模式的推理模型解析上
+        Assert.Equal("deepseek-flash", AgentCatalog.ResolveModelName(options, def, isDeepSeek: true));
+    }
+
+    [Fact]
+    public void ThinkingModel_BlankValue_MeansUnset()
+    {
+        var options = Opts(thinking: true);
+        options.ThinkingModel = "  ";
+        var def = new AgentDefinition { AgentId = "agent_x", Nickname = "X" };
+
+        Assert.Equal("deepseek-flash", AgentCatalog.ResolveModelName(options, def, isDeepSeek: true));
+    }
+
+    /// <summary>
+    /// 把生产部署的配置形状真正喂给客户端构造：空白项不得让构造抛异常。
+    /// 这就是线上实际崩的那一步（构造 <c>ChatClient</c>），比只断言解析结果更直接。
+    /// </summary>
+    [Fact]
+    public void BuildOpenAIChatClient_WithBlankConfigValues_DoesNotThrow()
+    {
+        var options = Opts(thinking: true);
+        options.ApiKey = "test-key";   // 仅构造客户端（不发请求），非空即可
+        options.Endpoint = "";          // Docker 里 Agents__Endpoint 默认也是空串
+        options.DecisionModel = "";
+        options.ThinkingModel = "";
+        var def = new AgentDefinition { AgentId = "agent_x", Nickname = "X", Model = "" };
+
+        var decisionModel = AgentCatalog.ResolveDecisionModelName(options, def, isDeepSeek: true);
+        Assert.Equal("deepseek-chat", decisionModel);
+        // 修复前这里抛 ArgumentException: Value cannot be an empty string. (Parameter 'model')
+        var client = AgentCatalog.BuildOpenAIChatClient(options, def, isDeepSeek: true, decisionModel);
+        Assert.NotNull(client);
+
+        // modelOverride 本身是空白时也不能被当成“已指定”
+        var client2 = AgentCatalog.BuildOpenAIChatClient(options, def, isDeepSeek: true, modelOverride: "");
+        Assert.NotNull(client2);
+    }
+
     // ============ ③ 指派路由的解析与“空输出 ≠ NONE”============
 
     private static readonly string[] Candidates = ["agent_a", "agent_b", "agent_c"];

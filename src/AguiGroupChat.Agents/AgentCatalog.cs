@@ -261,6 +261,25 @@ public sealed class AgentCatalog
     public ChatClientAgent GetOrCreate(string agentId)
         => _agents.GetOrAdd(agentId, Create);
 
+    /// <summary>
+    /// 按指定模型取（并缓存）该智能体的<b>完整</b>智能体：工具 / 记忆注入 / 技能链 / 审批包装全在，只把模型换掉。
+    ///
+    /// <para>
+    /// 用于「本轮消息带图 → 换视觉模型」。关键约束：<b>只能换模型，绝不能顺手把工具摘掉</b>。
+    /// 实测（真实 DeepSeek 端点，同一提示）：
+    /// 带 tools → 返回结构化 <c>tool_calls</c>；<b>不带 tools → 不报错，而是把工具调用当正文写出来</b>
+    /// （DeepSeek 的 DSML 标记：tool_calls / invoke / parameter 一整套）。
+    /// 于是用户看到一大段标记文本、技能从未被调用、交付兑底两轮都产不出文件，
+    /// 日志里只有一句「交付兑底均未产出文件」。实测触发条件就是带图消息。
+    /// </para>
+    /// </summary>
+    public ChatClientAgent GetOrCreateVision(string agentId, string visionModel)
+        => _agents.GetOrAdd(CacheKey(agentId, visionModel),
+            _ => Create(agentId, includeSkills: true, modelOverride: visionModel));
+
+    /// <summary>缓存键：同一智能体的不同模型变体必须分开缓存（否则先建的那个会盖掉另一个）。</summary>
+    private static string CacheKey(string agentId, string model) => agentId + "\u001F" + model;
+
     /// <summary>失效全部已缓存 ChatClientAgent（系统初始化 / 全局模型配置变更后调用：下次触发按新配置重建）。</summary>
     public void InvalidateAll()
     {
@@ -311,9 +330,10 @@ public sealed class AgentCatalog
     /// 系统级“看图”裸 agent（图库上传后自动生成图片描述用）。
     ///
     /// <para>
-    /// 与 <see cref="CreateBareVision"/> 的区别只有一点：<b>不要求已存在某个智能体定义</b>——
-    /// 上传图片的后台任务没有“当前智能体”可借，而把任意一个用户的智能体拿来当人设也不合适。
-    /// 人设指令无关紧要（调用方会自己给完整提示词），这里只关心模型本身。
+    /// 这里**故意**不带工具、不注入记忆，也<b>不要求已存在某个智能体定义</b>：上传图片的后台任务
+    /// 只想“看一眼图并写一句话描述”，没有“当前智能体”可借，也不需要能干活。
+    /// 注意与带图轮次的区别：那边必须保留工具（见 <see cref="GetOrCreateVision"/> 的说明），
+    /// 千万不要拿本方法去处理用户的带图提问。
     /// </para>
     /// </summary>
     public ChatClientAgent? CreateSystemVision(string visionModel)
@@ -328,30 +348,6 @@ public sealed class AgentCatalog
         };
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
         var client = BuildOpenAIChatClient(_options, null, isDeepSeek, visionModel);
-        return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
-    }
-
-    /// <summary>创建“视觉”裸 ChatClientAgent（不缓存）：用指定视觉模型 + 智能体人设，不带工具/记忆注入，
-    /// 用于对含图片的消息做一次看图理解（多模态 user message 走 <c>RunStreamingAsync</c>）。
-    /// mock 提供方不支持视觉，返回 null = 走普通文本。</summary>
-    public ChatClientAgent? CreateBareVision(string agentId, string visionModel)
-    {
-        if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase)) return null;
-        var def = GetDefinition(agentId)
-            ?? throw new InvalidOperationException($"智能体 {agentId} 未在 Agents 配置中声明");
-        var chatOptions = new ChatClientAgentOptions
-        {
-            Name = def.Nickname,
-            Description = def.Description,
-            ChatOptions = new Microsoft.Extensions.AI.ChatOptions
-            {
-                Instructions = def.Instructions,
-                Tools = null,
-            },
-            AIContextProviders = [],
-        };
-        var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, visionModel);
         return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
     }
 
@@ -395,7 +391,7 @@ public sealed class AgentCatalog
     /// 技能目标同时做<b>工具隔离</b>：不挂网络 / 文件读取类工具（web_search / read_url / read_attachment）——
     /// 技能链会把宿主的人设指令交由子代理执行，若子代理可联网 / 读附件，宿主被人设注入时会把
     /// SSRF / 文件读取等能力带进技能执行（攻击面放大）；基础工具（时间 / 计算 / 换算 / 记忆检索）与审批包装保留。</summary>
-    private ChatClientAgent Create(string agentId, bool includeSkills, bool isSkillTarget = false, IReadOnlySet<string>? building = null)
+    private ChatClientAgent Create(string agentId, bool includeSkills, bool isSkillTarget = false, IReadOnlySet<string>? building = null, string? modelOverride = null)
     {
         var def = GetDefinition(agentId)
             ?? throw new InvalidOperationException($"智能体 {agentId} 未在 Agents 配置中声明");
@@ -634,9 +630,10 @@ public sealed class AgentCatalog
         }
 
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-        var client = BuildOpenAIChatClient(_options, def, isDeepSeek);
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, modelOverride);
         _logger.LogInformation("智能体 {AgentId} 构建模型客户端：provider={Provider} thinkingMode={Thinking} model={Model}",
-            agentId, _options.Provider, _options.ThinkingMode, ResolveModelName(_options, def, isDeepSeek));
+            agentId, _options.Provider, _options.ThinkingMode,
+            FirstNonBlank(modelOverride, ResolveModelName(_options, def, isDeepSeek)));
 
         // Microsoft.Agents.AI.OpenAI：ChatClient → ChatClientAgent（Instructions/Name/Description 经 options）
         // clientFactory 挂用量捕获装饰器（最底层，usage 帧在此层仍为原始类型）；未注册用量服务时透传不包装
@@ -650,11 +647,31 @@ public sealed class AgentCatalog
     internal static string ResolveModelName(AgentOptions options, AgentDefinition? def, bool isDeepSeek)
     {
         var model = options.ThinkingMode
-            ? options.ThinkingModel ?? (isDeepSeek ? DeepSeekReasonerModel : null)
+            ? FirstNonBlank(options.ThinkingModel, isDeepSeek ? DeepSeekReasonerModel : null)
             : null;
-        return model ?? def?.Model ?? options.Model
-            ?? (isDeepSeek ? DeepSeekDefaultModel : null)
+        return FirstNonBlank(model, def?.Model, options.Model, isDeepSeek ? DeepSeekDefaultModel : null)
             ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
+    }
+
+    /// <summary>
+    /// 取第一个「非空白」候选值：<b>空字符串与纯空白一律算“未设置”</b>，与 <c>??</c> 的“非 null 即算已设置”不同。
+    ///
+    /// <para>
+    /// 为何必须这样：配置绑定会把**空字符串照样绑上**——Docker 里的
+    /// <c>Agents__DecisionModel: ${AGENTS_DECISION_MODEL:-}</c> 在用户没配时就是空串，而空串不是 null，
+    /// <c>??</c> 会认它“已设置”并一路传下去。实测后果：OpenAI 客户端构造直接抛
+    /// <c>ArgumentException: Value cannot be an empty string. (Parameter 'model')</c>，
+    /// 整个判定/路由调用失败（日志只有一句“语境判定调用失败，本次按不发言处理”）——
+    /// 而这恰好把一个“配置留空的默认情形”变成了线上故障。
+    /// </para>
+    ///
+    /// <para>这与本仓库其它配置的既有约定一致（如 <c>Agents__ApiKey</c> / <c>Agents__Endpoint</c> 都按空白回退）。</para>
+    /// </summary>
+    private static string? FirstNonBlank(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+            if (!string.IsNullOrWhiteSpace(c)) return c.Trim();
+        return null;
     }
 
     /// <summary>
@@ -667,8 +684,7 @@ public sealed class AgentCatalog
     /// </para>
     /// </summary>
     internal static string ResolveDecisionModelName(AgentOptions options, AgentDefinition? def, bool isDeepSeek)
-        => options.DecisionModel ?? def?.Model ?? options.Model
-           ?? (isDeepSeek ? DeepSeekDefaultModel : null)
+        => FirstNonBlank(options.DecisionModel, def?.Model, options.Model, isDeepSeek ? DeepSeekDefaultModel : null)
            ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
 
     /// <summary>某智能体在「小决策」调用中实际使用的模型名（供日志与排查：日志里必须写真实模型，
@@ -844,12 +860,13 @@ public sealed class AgentCatalog
     }
 
     /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。
-    /// <paramref name="modelOverride"/> 非空时强制用该模型（视觉等专用场景）。</summary>
+    /// <paramref name="modelOverride"/> 非空白时强制用该模型（视觉等专用场景）。</summary>
     internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition? def, bool isDeepSeek, string? modelOverride = null)
     {
-        // 思考模式（默认开启）：优先用推理模型（DeepSeek 官方 deepseek-reasoner；可经 Agents:ThinkingModel 覆盖）；
+        // 思考模式（默认开启）：优先用推理模型（DeepSeek 官方 deepseek-flash；可经 Agents:ThinkingModel 覆盖）；
         // 关闭时回退常规模型（智能体单独 Model → 全局 Model → 提供方默认）。modelOverride 优先于这一切。
-        var model = modelOverride ?? ResolveModelName(options, def, isDeepSeek);
+        // 注意这里必须用 FirstNonBlank：空串（如 Docker 里 Agents__ThinkingModel 留空）不算“已指定”。
+        var model = FirstNonBlank(modelOverride, ResolveModelName(options, def, isDeepSeek))!;
         var apiKey = options.ApiKey
             ?? throw new InvalidOperationException(
                 "Provider 非 mock 时必须配置 API Key（Agents:ApiKey / dotnet user-secrets / 环境变量 DEEPSEEK_API_KEY 或 OPENAI_API_KEY）");
@@ -865,7 +882,7 @@ public sealed class AgentCatalog
         var openAiOptions = new OpenAIClientOptions
         {
             EnableDistributedTracing = false,
-            // 底层 Azure OpenAI SDK 默认网络超时仅 100 秒：思考模型（deepseek-reasoner）长思考/长稿生成时
+            // 底层 Azure OpenAI SDK 默认网络超时仅 100 秒：思考模型（deepseek-flash）长思考/长稿生成时
             // 请求尚未完成就被掐断（表现：编排/路由运行中“取消/超时、不出稿”），且会先于我们的流式超时生效。
             // 这里调大到 15 分钟作“网络兜底”，真正的一次运行时限仍由执行配置的流式超时（streamTimeoutMinutes）控制。
             NetworkTimeout = TimeSpan.FromMinutes(15),

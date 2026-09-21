@@ -55,6 +55,8 @@ flowchart TD
 - 编排流水线 `def.Pipeline`：本角色**不自己跑模型**，而是按 `Pipeline` 步骤依次调一个子数字员工一次性 run，把各步结果聚合成本角色对群的回复。
 - 角色交接 `def.RelayToAgentId`：整轮委托给被交接方（以本角色昵称/别名代它回复），并阻止 A→B→A 环回。
 - 语境触发：`AgentTriggerMode.Contextual` 且 `ShouldSpeak` 判沉默 → 不发任何事件（`AGENT_DECIDED_SILENT`）。
+- **带图轮次只换模型、不换能力**：消息（或本话题最近窗口）含图且启用了视觉时，`BuildVisionUserMessageAsync` 把图片像素一并组装成多模态消息，并把 agent 换成**视觉模型**的同一岗位（`AgentCatalog.GetOrCreateVision`）——工具 / 记忆注入 / 技能链 / 审批包装全部保留。
+  反例（已修）：曾经换成“裸视觉体”（`Tools = null`），于是请求里根本没有 tools；DeepSeek 这类模型不会报错，而是**把工具调用当正文写出来**（DSML 标记），结果技能从未执行、也拿不到文件。
 - 组织化路由：当触发为“提及”且（角色配了 `AssignmentIds`/`EscalationAgentId` 或启用了策划）时进入 `InvokeAssignmentEscalationAsync`：
   1. `CoordinatorPlanning` 且非组织-落库部署员（未挂 `org_deploy`）→ 先试 `BuildCoordinatedPlanAsync` 拿到结构化计划；
   2. 有计划 → `ExecuteCoordinatedPlanAsync` 逐项激活并把计划卡点亮；
@@ -87,6 +89,8 @@ flowchart TD
 2. **用概率而非文本前缀**：直调 OpenAI 兼容端点拿 `logprobs`，归一化成 P(是)，再与 `Agents:DecisionMinProbability`（默认 0.3）比；拿不到概率才退回文本（只认第一个词，认不出就**不猜**，返回 null 而不是默默当“否”）；
 3. **空输出 ≠ NONE**：指派路由对空正文重试一次（更大预算）并记 `warn`，而不是静默当成“没人合适”；
 4. 判定调用固定 `temperature=0`（判定不该采样），用量按同一口径记入库（判定提示很长，不记会低估配额消耗）。
+
+**配置取值口径：留空/空白 = “未设置”。** 配置绑定会把**空字符串照绑**（Docker 里 `Agents__DecisionModel: ${AGENTS_DECISION_MODEL:-}` 在用户没配时就是空串），因此模型名解析一律按“空白即未设置”处理（`AgentCatalog.FirstNonBlank`），不能直接用 `??`。否则空串会被当成已设置的模型名一路传下去，`ChatClient` 构造直接抛 `ArgumentException: Value cannot be an empty string. (Parameter 'model')` —— 实测就是 1.0.154 上线后每次语境判定都失败（日志只有一句“语境判定调用失败”）。
 
 ---
 
@@ -195,6 +199,8 @@ flowchart TB
 ```
 
 > 关键常量/语义：模型流式 `StreamTimeoutMinutes=5` 挂起保护；人机交互 `InteractionTtlMs≈10 分钟`，超时由周期定时器清理；模型流可重试错误按 `MaxModelAttempts` 次指数退避；桥接失败走熔断退避；单次消息审批轮数有上限防死循环。驳回/超时都不会静默改库：执行类技能一律“已获批准才执行”，拒绝即不执行。
+>
+> 孤儿流兜底：一条流式消息**创建超过 10 分钟且最近 60s 无活跃**时被强制收尾（防状态泄漏）。因此审批卡放太久（>10 分钟）再点批准，恢复会报“消息不存在或未开启流式灌入”（该次回复拿不到了）；及时点按不受影响。
 
 ---
 

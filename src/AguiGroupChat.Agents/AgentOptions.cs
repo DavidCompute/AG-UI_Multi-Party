@@ -25,7 +25,7 @@ public sealed class AgentOptions
     public string? Model { get; set; }
 
     /// <summary>
-    /// 思考模式（默认开启）：智能体调用模型时使用推理模型（DeepSeek 自动用 <c>deepseek-reasoner</c>，
+    /// 思考模式（默认开启）：智能体调用模型时使用推理模型（DeepSeek 自动用 <c>deepseek-flash</c>，
     /// 可经 <see cref="ThinkingModel"/> 覆盖），回复前先思考、回答质量更高，但更慢 / 更贵。
     /// 可在「模型配置」弹窗按需开关（运行时保存后立即生效）。
     /// </summary>
@@ -35,7 +35,7 @@ public sealed class AgentOptions
     public string? ThinkingModel { get; set; }
 
     /// <summary>
-    /// 「小决策」调用（该不该发言 / 派给谁）使用的模型名。留空 = 用<b>非推理</b>的常规模型
+    /// 「小决策」调用（该不该发言 / 派给谁）使用的模型名。留空（含空白串）= 用<b>非推理</b>的常规模型
     /// （智能体 Model → 全局 Model → 提供方默认）。
     ///
     /// <para>
@@ -44,6 +44,10 @@ public sealed class AgentOptions
     /// 预算 8 → 正文空；预算 64 → 正文空（推理恰好吃满 64 被截断）→「指派路由」解析出 0 个下游，
     /// 于是问题一路走到「向上提升」—— 这就是“只有问题提升、没有任务指派”的成因。
     /// 换非推理模型后同一提示只花 1–2 个 token 就给出 YES/NONE。
+    /// </para>
+    ///
+    /// <para>
+    /// 注意取值口径：本项按<b>空白即未设置</b>处理（Docker 里 <c>Agents__DecisionModel</c> 默认就是空串）。
     /// </para>
     /// </summary>
     public string? DecisionModel { get; set; }

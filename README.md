@@ -205,7 +205,7 @@ docker compose down
 | `AGENTS_PROVIDER` | `deepseek` | 模型提供方：`mock` / `openai` / `deepseek` |
 | `AGENTS_ENDPOINT` | 空 | OpenAI 兼容端点（如 `http://host.docker.internal:11434/v1`） |
 | `AGENTS_MODEL` | `deepseek-chat` | 默认模型名 |
-| `AGENTS_DECISION_MODEL` | 空 | 「小决策」专用模型（该不该发言 / 派给谁）。**留空 = 自动用非推理的常规模型，且故意不受思考模式影响**——判定调用的输出预算只有几个 token，推理模型会把预算全花在思维链上、正文为空，于是发言判定「永不发言」、指派路由解析出 0 个下游（表现为只有问题提升、没有任务指派）。仅在你有意把判定也交给特定模型时才设置 |
+| `AGENTS_DECISION_MODEL` | 空 | 「小决策」专用模型（该不该发言 / 派给谁）。**留空（含空白串）= 自动用非推理的常规模型，且故意不受思考模式影响**——判定调用的输出预算只有几个 token，推理模型会把预算全花在思维链上、正文为空，于是发言判定「永不发言」、指派路由解析出 0 个下游（表现为只有问题提升、没有任务指派）。仅在你有意把判定也交给特定模型时才设置 |
 | `AGENTS_DECISION_MIN_PROBABILITY` | `0.3` | 判定为「是」所需的最低概率（0–1）：判定读模型返回的 `logprobs` 算 P(发言)，低于阈值按「否」处理，实际概率写进日志。默认 0.3 而非 0.5——实测「属于其职责但未点名」这类本该发言的情形概率约 0.33 |
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
@@ -723,6 +723,8 @@ Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__AP
 
 **「小决策」模型（`Agents:DecisionModel`）——建议留空**：数字员工有两类模型调用，一是**正式回复**（吃思考模式、可用大预算），二是**小决策**（语境触发时判「该不该发言」、组织化路由时判「派给谁」），后者输出预算只有几个 token。推理模型会把这点预算全花在思维链上、**正文为空**，而这**不会有任何异常**：`StartsWith("YES")` 恒为假 → 语境触发的数字员工永不发言；指派路由把空输出当「无候选」→ 只提升、不指派。
 因此这两类判定**故意无视 `Agents:ThinkingMode`**，固定走非推理的常规模型（`DecisionModel` → 智能体 `Model` → 全局 `Model`）。实测同一判定提示：`deepseek-flash` 预算 8/64 → 正文为空；`deepseek-chat` 预算 8 → 正文 `YES`、只花 1 个 token。
+
+**注意取值口径：模型名一律“留空/空白 = 未设置”。** Docker 透传的空值（如 `Agents__DecisionModel=`）会绑定成**空字符串**，而空串会被 `??` 当成已设置——曾经因此让每次判定都以 `Value cannot be an empty string. (Parameter 'model')` 失败。现在 `DecisionModel` / `ThinkingModel` / 智能体 `Model` 都按空白回退。
 
 **图片理解（视觉）配置**：`Agents:VisionEnabled`（默认 `true`）为总开关，`Agents:VisionModel`（可选模型名，默认空）在带图片的消息中指定视觉模型。
 `VisionModel` 为空且提供方为 DeepSeek 时，自动选用默认视觉模型 `deepseek-v4-flash-vision-exp`；依赖已配置的模型 API Key（同 `Agents:ApiKey` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`）。
