@@ -1,3 +1,68 @@
+# AG-UI 群聊桌面版 1.0.154 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.154 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.154 修一个**没有任何报错**的静默缺陷：数字员工的「小决策」调用（语境触发时判**该不该发言**、组织化路由时判**派给谁**）在思考模式下走了推理模型，而这类调用的输出预算只有几个 token —— 推理模型把这几个 token **全花在思维链上、正文为空**。后果是：语境触发的数字员工**永远不发言**，指派路由解析出 **0 个下游**（这正是你反馈过的「只有问题提升、没有任务指派」）。因为既没有异常也没有错误日志，从表象极难定位。现在小决策**与思考模式解耦、固定走非推理模型**，并从 `logprobs` 读**概率**再按阈值判定（不再用 `StartsWith("YES")` 猜文本）；指派路由对空输出**重试并告警**，不再静默当成“没人合适”。顺带修掉一个同类的静默坑：**往知聚里加数字员工时只按 `agent_` 前缀判断“是不是智能体”**，导致组织编排产出的岗位（`bl_commander` 这类不带前缀的 ID）被记成真人成员——触发规则不注册，且它一发言就抛「发送者不是智能体成员」。
+**Version note**: 1.0.154 fixes a **silent defect that raises no error at all**: a digital employee's “small decisions” (contextual triggering: *should I speak?*; org routing: *who should this go to?*) ran on the reasoning model in thinking mode, while those calls get only a handful of output tokens — the reasoning model spends them **entirely on its chain of thought, leaving the text empty**. The consequences: contextually-triggered employees **never speak**, and assignment routing parses **0 downstream targets** (exactly the “only escalations, no assignments” you reported). With no exception and no error log, this is very hard to pin down from the symptoms. Small decisions are now **decoupled from thinking mode and pinned to a non-reasoning model**, and they read a **probability** from `logprobs` compared against a threshold (no more guessing text with `StartsWith("YES")`); assignment routing now **retries and warns** on empty output instead of silently treating it as “nobody is suitable”. A second silent trap of the same family is fixed too: **adding a digital employee to a group decided "is this an agent?" purely from the `agent_` ID prefix**, so org-orchestration roles (IDs like `bl_commander` without that prefix) were recorded as *human* members — trigger rules were never registered, and the moment they spoke they threw “sender is not an agent member”.
+
+## 小决策不再走推理模型 + 判定改用概率阈值（1.0.154）
+# Small decisions off the reasoning model + probability-based verdicts (1.0.154)
+
+中文：
+- **现象**（两条，用户都报过）：① 语境触发（`Contextual`）的数字员工**从不发言**；② 组织化路由**只有问题提升、没有任务指派**。两者都**没有异常、没有错误日志**。
+- **根因**：小决策调用的输出预算只有 `8`（发言判定）/ `64`（指派路由）个 token，而旧实现按思考模式选了**推理模型**。实测（生产实际使用的 `deepseek-flash`，同一判定提示）：
+
+  | 模型 | 输出预算 | 正文 |
+  |---|---|---|
+  | `deepseek-flash` | 8 | **空**（8 个 token 全是推理） |
+  | `deepseek-flash` | 32 | **空** |
+  | `deepseek-flash` | 64 | **空**（推理恰好吃满 64 被截断） |
+  | `deepseek-chat` | 8 | `YES`（completion 只花 1 个 token） |
+
+  于是：旧发言判定 `decision.StartsWith("YES")` 对空正文**恒为假** → 永远沉默；旧指派路由 `resp.Text ?? "NONE"` 对**空字符串**不生效（`""` 不是 `null`）→ 解析出 0 个候选 → 静默走提升。预算 64 那档“有时空有时不空”正是**间歇性**失败的来源。
+- **修法**：
+  1. **模型解耦**：判定/路由固定走非推理模型（`Agents:DecisionModel` → 智能体 `Model` → 全局 `Model`），**故意无视 `Agents:ThinkingMode`**（`AgentCatalog.ResolveDecisionModelName`）。
+  2. **概率代替文本前缀**：直调 OpenAI 兼容端点要回 `logprobs`，把候选 token 归一化成 **P(是)**，与 `Agents:DecisionMinProbability`（默认 `0.3`）比；判定调用固定 `temperature=0`（判定不该采样）。
+  3. **灰区不猜**：拿不到概率才退回文本，且**只认第一个词**，认不出返回 `null`（调用方按“不发言”处理）——不再把 `MAYBE LATER` 里的 Y 当成“是”。
+  4. **空输出 ≠ NONE**：指派路由遇空正文**重试一次**（更大预算）并记 `warn`，命中/未命中/重试都写日志（模型、P(发言)、阈值、原始输出）。
+  5. 判定用量按同一口径**记入库**（判定提示很长，不记会低估配额消耗）。
+- **阈值为何是 0.3 而不是 0.5**：实测同一提示只改“最新消息”，概率与“该不该发言”单调对应但整体偏低——直接点名 **0.827**、明说属于其职责 **0.334**、边缘相关 0.131、纯寒暄 0.048、与职责无关 0.012、明确无需发言 0.002。取 0.5 会把「属于其职责但未点名」这类**本该发言**的情形一并压掉。样本仅 6 档，上量后应用真实数据重调。
+- **线上实测**（本机 Docker，真实 DeepSeek 端点，`ThinkingMode=true`）：临时把某岗注册为 `contextual` 后发两条消息，日志给出——
+  - 无关消息：`语境判定：模型=deepseek-chat P(发言)=0.000 阈值=0.3 → 保持沉默（原始：NO）`
+  - 点名消息：`语境判定：模型=deepseek-chat P(发言)=1.000 阈值=0.3 → 发言（原始：YES）`
+  → 既证明**判定确实用了非推理模型**（思考模式开着，用的是 `deepseek-chat`），也证明阈值与日志可用。修复前同一路径会稳定判“沉默”（且日志只有一句「保持沉默」，看不出原因）。
+- **顺带修（同类静默坑）**：群成员类型判定改为**先查智能体目录**、查不到才退回 `agent_` 前缀。实测：把 `bl_field_validator` 加进知聚后，它的回复直接抛「发送者不是智能体成员」——因为不带 `agent_` 前缀的岗位被记成了真人成员（触发规则也不注册）。
+- **新增可配项**（都有安全默认，**不配不用改任何东西**）：`AGENTS_DECISION_MODEL`（留空=自动用非推理常规模型）、`AGENTS_DECISION_MIN_PROBABILITY`（默认 0.3）。已写入 `docker-compose.yml` 注释、`README` / `README.en.md` 与 `docs/execution-configuration.md`、`docs/agent-execution-algorithm.md`（新增 §2.1 小决策）。
+- **新增回归**：`DecisionModelAndParsingTests`（9 条：判定模型不随思考模式漂移、实测 logprobs 形态解析、中文「是/否」与变体、无概率时文本兜底且 `MAYBE LATER` 必须不猜、空输出 ≠ NONE、白名单过滤/去重/中文逗号）、`GroupMemberTypeResolutionTests`（5 条：不带前缀的编排岗位按智能体记、真人不受影响、无目录时保持前缀兜底、显式 `MemberDetails` 优先）与 `Invoke_RouterHit_DoesNotRetryRouteCall`（成功命中时**不得**再跑一次路由调用）。最后这条是开发中真踩到的：重试分支漏了个 `return`，导致“命中”也一路落到重试里——每次成功指派都白烧一次模型调用、**第二次结果会覆盖第一次**、日志还把成功误报成“返回空输出”。因为 mock 两次回答相同、最终正文也正确，**只断言输出抓不住**，所以改为断言日志。护栏做了反向验证：把 `return` 去掉，它确实会红。
+- **可观测**：提示缓存命中量进日志（实测同一提示二次调用 `2550` 中 `2304` 命中、延迟 249ms→139ms）；指派路由的每次决策（含未命中）都有 `info` 级日志。
+
+English:
+- **Symptoms** (both reported by the user): (1) contextually-triggered (`Contextual`) employees **never speak**; (2) org routing shows **only escalations, no assignments**. Neither raised an exception nor logged an error.
+- **Root cause**: small-decision calls get only `8` (speak check) / `64` (assignment routing) output tokens, yet the old code picked the **reasoning** model whenever thinking mode was on. Measured on the real prompt with the production model `deepseek-flash`:
+
+  | Model | Budget | Text |
+  |---|---|---|
+  | `deepseek-flash` | 8 | **empty** (all 8 tokens were reasoning) |
+  | `deepseek-flash` | 32 | **empty** |
+  | `deepseek-flash` | 64 | **empty** (reasoning exactly hit the 64 cap and was truncated) |
+  | `deepseek-chat` | 8 | `YES` (1 completion token) |
+
+  So the old speak check `decision.StartsWith("YES")` was **always false** on empty text → permanent silence; and the old router's `resp.Text ?? "NONE"` did not apply to an **empty string** (`""` is not `null`) → 0 candidates → silent escalation. The budget-64 row “sometimes empty, sometimes not” is exactly why the failure looked **intermittent**.
+- **Fix**:
+  1. **Model decoupled**: decision/routing calls are pinned to a non-reasoning model (`Agents:DecisionModel` → agent `Model` → global `Model`), **deliberately ignoring `Agents:ThinkingMode`** (`AgentCatalog.ResolveDecisionModelName`).
+  2. **Probability instead of a text prefix**: the call goes straight to the OpenAI-compatible endpoint and asks for `logprobs`, normalizing candidate tokens into **P(yes)**, compared against `Agents:DecisionMinProbability` (default `0.3`); decision calls pin `temperature=0` (a verdict should not sample).
+  3. **No guessing in the grey zone**: text fallback only when no probabilities are available, and it only reads **the first word** — anything unrecognized returns `null` (the caller treats that as “don't speak”) instead of reading the `Y` in `MAYBE LATER` as “yes”.
+  4. **Empty output ≠ NONE**: assignment routing **retries once** with a larger budget and logs a `warn`; hits, misses and retries all log (model, P(speak), threshold, raw output).
+  5. Decision usage is now **recorded** with the same accounting as everything else (decision prompts are long; skipping them understates quota usage).
+- **Why the threshold is 0.3, not 0.5**: holding the prompt fixed and varying only the latest message, the probability tracks “should this agent speak?” monotonically but sits low overall — addressed by name **0.827**, explicitly in scope **0.334**, marginally related 0.131, pure small talk 0.048, unrelated to its role 0.012, explicitly not needed 0.002. A 0.5 threshold would suppress “in scope but not addressed by name”, which legitimately deserves speaking up. Only 6 samples so far; retune on real data once volume grows.
+- **Verified live** (local Docker, real DeepSeek endpoint, `ThinkingMode=true`): after temporarily registering one role as `contextual`, two messages produced these log lines —
+  - irrelevant message: `语境判定：模型=deepseek-chat P(发言)=0.000 阈值=0.3 → 保持沉默（原始：NO）`
+  - addressed message: `语境判定：模型=deepseek-chat P(发言)=1.000 阈值=0.3 → 发言（原始：YES）`
+  → proving both that the decision really used the **non-reasoning** model (thinking mode was on, yet `deepseek-chat` was used) and that the threshold plus logging work. Before the fix this same path reliably decided “silent” (with only a bare “staying silent” line, giving no clue why).
+- **Also fixed (same family of silent traps)**: group member type resolution now **consults the agent catalog first** and only falls back to the `agent_` prefix. Measured: after adding `bl_field_validator` to a group, its reply threw “sender is not an agent member”, because a role whose ID lacks the `agent_` prefix had been recorded as a human member (and no trigger rule was registered either).
+- **New knobs** (both have safe defaults — **no action needed if you don't set them**): `AGENTS_DECISION_MODEL` (empty = automatically the non-reasoning regular model), `AGENTS_DECISION_MIN_PROBABILITY` (default 0.3). Documented in `docker-compose.yml` comments, `README` / `README.en.md`, `docs/execution-configuration.md`, and `docs/agent-execution-algorithm.md` (new §2.1 on small decisions).
+- **New regression tests**: `DecisionModelAndParsingTests` (9 cases: the decision model does not drift with thinking mode, parsing the measured `logprobs` shape, Chinese 是/否 and decorated variants, text fallback that must not guess on `MAYBE LATER`, empty output ≠ NONE, whitelist filtering/dedup/Chinese comma), `GroupMemberTypeResolutionTests` (5 cases: prefix-less orchestration roles recorded as agents, real users unaffected, prefix fallback when no catalog is injected, explicit `MemberDetails` wins), and `Invoke_RouterHit_DoesNotRetryRouteCall` (a successful hit must **not** trigger a second routing call). That last one was a real trap hit during development: the retry branch was missing a `return`, so a *hit* fell through into the retry — burning an extra model call on every successful assignment, **letting the second result overwrite the first**, and misreporting success as “empty output, retrying” in the logs. Since the mock answers identically both times and the final body is still correct, **output assertions cannot catch it** — hence asserting on logs. The guard was reverse-verified: removing the `return` does make it fail.
+- **Observability**: prompt-cache hits are logged (measured on a repeated prompt: `2304` of `2550` tokens cached, latency 249ms → 139ms); every assignment-routing decision (including misses) now logs at `info`.
+
 # AG-UI 群聊桌面版 1.0.153 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.153 Release Notes (current Windows desktop release)
 
