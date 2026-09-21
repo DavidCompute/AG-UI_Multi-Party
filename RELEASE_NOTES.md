@@ -1,3 +1,24 @@
+# AG-UI 群聊桌面版 1.0.157 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.157 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.157 只修一处“账看不明白”的口径问题。上一版新增的「存储治理」页只报“可回收”，而附件是**先上传、后随消息发送**的，宽限期（默认 7 天）内的无引用文件按设计不能回收——而你的库里那 186 个无引用附件**恰好全部**落在宽限期内，于是页面显示「可回收 0」，看起来像“一点浪费都没有”，反而会误导管理员。现在口径拆成两档并分开展示：**无引用（含宽限期内）** 与 **现就可回收**。删除行为完全不变：仍然只删“无任何引用 **且** 超过宽限期”的文件，开关依旧默认关闭（`StorageGovernance:AllowReclaim=false`）。
+**Version note**: 1.0.157 fixes one misleading number. The *Storage* page added in the previous release reported only the reclaimable total, but attachments are **uploaded first and attached to a message later**, so unreferenced files inside the grace period (7 days by default) are deliberately not reclaimable — and in your library all 186 unreferenced attachments happened to fall inside that window, so the page showed "reclaimable 0", which reads as "nothing is being wasted at all" and misleads the admin instead of informing them. The stats are now split into **unreferenced (grace period included)** and **reclaimable now**, shown as separate cards. Deletion behavior is completely unchanged: it still only removes files with no reference at all **and** past the grace period, and the switch remains off by default (`StorageGovernance:AllowReclaim=false`).
+
+## 存储统计拆成「无引用」与「现就可回收」两档（1.0.157）
+# Storage stats split into "unreferenced" and "reclaimable now" (1.0.157)
+
+中文：
+- **问题**：`AttachmentStorageStats` 只有一个 `OrphanFiles`/`OrphanBytes`，语义是“无引用 **且** 超过宽限期”。宽限期内的无引用文件因此**完全不可见**。实测该口径下页面显示「可回收 0」，而真实情况是 203 个附件里 180 个已无引用（257 MB）——管理员据此会判断“没有任何浪费”，结论完全相反。
+- **修法**：`Inspect()` 先统计“无引用”数量，再判断是否超过宽限期，返回两组数：`UnreferencedFiles`/`UnreferencedBytes`（无引用，含宽限期内；对应“刚上传还没发送”“正在生成的产物”）与 `OrphanFiles`/`OrphanBytes`（现就可回收）。`GET /ag-ui/admin/storage` 同时返回两者，页面多加一张卡片。
+- **不变的部分**：回收判定与删除集合一字未改（仍是“无引用 **且** 超宽限期”），`POST /reclaim` 在开关关闭时依旧 **403 + 原因**，勾选删除附件的默认值依旧为不勾。
+- **回归**：`AttachmentLifecycleTests` / `TopicTests` 补齐 `UnreferencedFiles` 断言（子集 21 条全绿），全量 1457 通过 / 0 失败。
+
+English:
+- **The problem**: `AttachmentStorageStats` carried a single `OrphanFiles`/`OrphanBytes` pair meaning "no reference **and** past the grace period", which made unreferenced files inside the grace period **completely invisible**. Measured under that rule the page reported "reclaimable 0" while reality was 180 of 203 attachments having no reference at all (257 MB) — an admin would conclude "nothing is being wasted", the opposite of the truth.
+- **The fix**: `Inspect()` now counts unreferenced files first and only then checks the grace period, returning two pairs: `UnreferencedFiles`/`UnreferencedBytes` (no reference, grace period included — i.e. just-uploaded-not-yet-sent and artifacts still being generated) and `OrphanFiles`/`OrphanBytes` (reclaimable now). `GET /ag-ui/admin/storage` returns both and the page shows an extra card.
+- **What did not change**: the reclaim rule and the deleted set are untouched (still "no reference **and** past the grace period"), `POST /reclaim` still answers **403 with a reason** while the switch is off, and the "also delete attachment files" checkbox still defaults to unchecked.
+- **Regression**: `AttachmentLifecycleTests` / `TopicTests` now assert `UnreferencedFiles` (21-test subset green); full suite 1457 pass / 0 fail.
+
 # AG-UI 群聊桌面版 1.0.156 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.156 Release Notes (current Windows desktop release)
 

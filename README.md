@@ -214,7 +214,7 @@ docker compose down
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | 一键编排 apply 的冒烟自测：是否对服务端执行的 `shell` 技能盲跑一次（有副作用，默认开；置 `false` 关闭）。映射选项 `Agents__SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
 | `STORAGE_ALLOW_RECLAIM` | `false` | 存储治理：是否允许管理员在控制台「存储治理」页回收**无引用的孤儿附件**。默认关。背景：清空 / 删除话题、撤回消息都**不删附件文件**（附件是用户资料），于是磁盘上会积累“对话里已无入口”的文件。统计（只读）不需开启；开启后回收仍要求“无任何引用 + 超过宽限期”。对应 `StorageGovernance:AllowReclaim` |
-| `STORAGE_ORPHAN_GRACE_HOURS` | `168` | 孤儿附件判定宽限期（小时，默认 7 天）：刚上传还没发送、正在生成的产物都算“暂时无引用”，不能被当孤儿删 |
+| `STORAGE_ORPHAN_GRACE_HOURS` | `168` | 孤儿附件判定宽限期（小时，默认 7 天）：刚上传还没发送、正在生成的产物都算“暂时无引用”，不能被当孤儿删。宽限期内的无引用文件不减量上报：「存储治理」页把「无引用（含宽限期内）」与「现就可回收」分开展示，避免显示“可回收 0”被误读成“没有任何浪费” |
 | `AUTH_SUPER_ADMIN_USER_IDS` | 空 | 超级管理员名单（逗号分隔 userId/username，平台级 RBAC）：命中者生效角色至少为 **SuperAdmin**；留空则仅首个注册账号自举为 SuperAdmin（见 `docs/RBAC.md`） |
 | `AUTH_ADMIN_USER_IDS` | 空 | 系统管理员名单（逗号分隔 userId/username，旧机制）：命中者生效角色至少为 Admin（不授予 SuperAdmin） |
 | `NATIVE_TUNNEL_TOKEN` | 空 | 内网穿透反向隧道全局令牌：内网本机桥 `--tunnel-token` 与之匹配；未配置隧道时留空 |
