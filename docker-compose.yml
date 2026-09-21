@@ -109,6 +109,12 @@ services:
       Agents__BuiltinPptxSkills: ${AGENTS_BUILTIN_PPTX_SKILLS:-true}
       Agents__BuiltinXlsxSkills: ${AGENTS_BUILTIN_XLSX_SKILLS:-true}
       Agents__BuiltinPdfSkills: ${AGENTS_BUILTIN_PDF_SKILLS:-true}
+      # 存储治理（管理员控制台「存储治理」页）：清空 / 删除话题、撤回消息都**不删附件文件**（附件是用户资料），
+      # 于是磁盘上会积累“对话里已无入口”的孤儿。回收是破坏性操作，默认关闭；开启后管理员可在页面上一键回收。
+      # 统计（只读）始终可看，无需开这个开关。
+      StorageGovernance__AllowReclaim: ${STORAGE_ALLOW_RECLAIM:-false}
+      # 孤儿判定宽限期（小时，默认 168 = 7 天）：刚上传还没发送、正在生成的产物都算“暂时无引用”，不能被当孤儿删。
+      StorageGovernance__OrphanGraceHours: ${STORAGE_ORPHAN_GRACE_HOURS:-168}
       # 内置文档类技能的默认落盘目录（不传 outputPath 时用）；xlsx / pdf 未单独配置时沿用此项。
       # 对应下方 agui-docs 卷，容器重建/升级不影响已有文件。取文件见该卷旁的注释。
       AGUI_DOCX_OUT: ${AGUI_DOCX_OUT:-/app/docs}

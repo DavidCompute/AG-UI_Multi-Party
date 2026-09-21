@@ -39,12 +39,16 @@ public sealed class AdminApiServerFixture : IAsyncLifetime
         HubApp.ConfigureServices(builder);
         builder.Services.AddAgentFramework(builder.Configuration);
         builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）
+        builder.Services.AddSingleton<SkillRunArtifactStore>(); // 附件回收的引用源之一（技能试运行产物）
+        builder.Services.AddAttachmentGovernance(); // 附件回收（存储治理）
+        builder.Services.AddSingleton(new StorageGovernanceOptions()); // 默认关闭回收
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 
         App = builder.Build();
         HubApp.MapEndpoints(App);
         App.MapAdminApi();
         App.MapConfigGovernanceApi();
+        App.MapStorageAdminApi();
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }

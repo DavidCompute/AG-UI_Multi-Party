@@ -51,6 +51,10 @@ public sealed class AttachmentStore
     private static readonly System.Text.RegularExpressions.Regex AttachmentIdPattern = new(
         @"^att_[A-Za-z0-9_-]+$", System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+    /// <summary>附件 ID 是否合法（与内部校验同一套规则；防目录遍历，公开供上层复用）。</summary>
+    internal static bool IsValidAttachmentId(string? attachmentId)
+        => !string.IsNullOrWhiteSpace(attachmentId) && AttachmentIdPattern.IsMatch(attachmentId);
+
     /// <summary>文本类附件注入模型上下文的单文件截断长度（每个文件各自享有，避免首个大文件挤掉后续附件）。</summary>
     public const int MaxTextCharsPerFile = 12_000;
 
@@ -117,7 +121,7 @@ public sealed class AttachmentStore
     /// <summary>按附件 ID 解析存储文件路径；ID 非法或不存在返回 null。</summary>
     public string? ResolvePath(string attachmentId)
     {
-        if (string.IsNullOrWhiteSpace(attachmentId) || !AttachmentIdPattern.IsMatch(attachmentId)) return null;
+        if (!IsValidAttachmentId(attachmentId)) return null;
         var dir = Path.Combine(_root, attachmentId);
         if (!Directory.Exists(dir)) return null;
         var file = Directory.EnumerateFiles(dir).FirstOrDefault();
@@ -166,20 +170,56 @@ public sealed class AttachmentStore
     {
         if (!Directory.Exists(_root)) return [];
         var list = new List<(string, string)>();
-        foreach (var dir in Directory.EnumerateDirectories(_root))
+        foreach (var id in EnumerateAttachmentIds())
         {
-            var id = Path.GetFileName(dir);
-            if (!AttachmentIdPattern.IsMatch(id)) continue;
-            var file = Directory.EnumerateFiles(dir).FirstOrDefault();
+            var file = Directory.EnumerateFiles(Path.Combine(_root, id)).FirstOrDefault();
             if (file is not null) list.Add((id, file));
         }
         return list;
     }
 
+    /// <summary>枚举磁盘上全部附件 ID（仅合法目录名；不保证目录里有文件）。</summary>
+    public IReadOnlyList<string> EnumerateAttachmentIds()
+    {
+        if (!Directory.Exists(_root)) return [];
+        var list = new List<string>();
+        foreach (var dir in Directory.EnumerateDirectories(_root))
+        {
+            var id = Path.GetFileName(dir);
+            if (IsValidAttachmentId(id)) list.Add(id);
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 删除单个附件目录（幂等：ID 非法 / 目录不存在返回 false，不抛）。
+    ///
+    /// <para>
+    /// <b>调用方必须先确认它确实无人引用</b>：本方法只管删，不做任何引用检查。
+    /// 附件可能被消息、知识库文档、用户 / 数字员工 / 知识库头像、技能试运行产物引用，
+    /// 删错了就是数据丢失——判定入口统一走 <c>IAttachmentLifecycle</c>。
+    /// </para>
+    /// </summary>
+    public bool Delete(string attachmentId)
+    {
+        if (!IsValidAttachmentId(attachmentId)) return false;
+        var dir = Path.Combine(_root, attachmentId);
+        if (!Directory.Exists(dir)) return false;
+        try
+        {
+            Directory.Delete(dir, recursive: true);
+            return true;
+        }
+        catch
+        {
+            return false; // 文件占用等：不抛，交给下次回收
+        }
+    }
+
     /// <summary>导入还原：按指定附件 ID 写入文件（保留 ID 以保证消息 / 头像引用不变）；ID 已存在则跳过。</summary>
     public bool RestoreFile(string attachmentId, string fileName, byte[] content)
     {
-        if (string.IsNullOrWhiteSpace(attachmentId) || !AttachmentIdPattern.IsMatch(attachmentId)) return false;
+        if (!IsValidAttachmentId(attachmentId)) return false;
         if (content.Length > MaxFileBytes) return false;
         var dir = Path.Combine(_root, attachmentId);
         if (Directory.Exists(dir) && Directory.EnumerateFiles(dir).Any()) return true; // 已存在：跳过（保留现有）
@@ -192,14 +232,10 @@ public sealed class AttachmentStore
     /// <summary>清空全部附件文件（系统初始化用）。</summary>
     public void ClearAll()
     {
-        if (!Directory.Exists(_root)) return;
-        foreach (var dir in Directory.EnumerateDirectories(_root))
+        foreach (var id in EnumerateAttachmentIds())
         {
-            var id = Path.GetFileName(dir);
-            if (AttachmentIdPattern.IsMatch(id))
-            {
-                try { Directory.Delete(dir, recursive: true); } catch { /* 文件占用忽略 */ }
-            }
+            var dir = Path.Combine(_root, id);
+            try { Directory.Delete(dir, recursive: true); } catch { /* 文件占用忽略 */ }
         }
     }
 

@@ -1389,6 +1389,7 @@
         <button id="adminTabAudit" class="chip-btn admin-tab" data-i18n="admin.tabAudit">审计日志</button>
         <button id="adminTabOrphans" class="chip-btn admin-tab" data-i18n="admin.tabOrphans">孤儿盘点</button>
         <button id="adminTabUserGroups" class="chip-btn admin-tab" data-i18n="admin.tabUserGroups">用户分组</button>
+        <button id="adminTabStorage" class="chip-btn admin-tab" data-i18n="admin.tabStorage">存储治理</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1546,6 +1547,15 @@
           </table>
         </div>
       </div>
+      <!-- 存储治理：附件占用与可回收空间（只读统计 + 需显式开启的回收） -->
+      <div id="adminStorageView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="admin.storageHint">附件文件不会随着消息删除而自动清除：清空 / 删除话题、撤回消息只删消息，文件会留在磁盘上（对话里已无入口）。这里统计占用与可回收量；回收默认关闭，需在配置里显式开启。</p>
+        <div id="adminStorageCards" class="admin-metric-grid"></div>
+        <div class="admin-toolbar">
+          <button id="storageRefreshBtn" class="chip-btn" type="button" data-i18n="admin.storageRefresh">↻ 刷新</button>
+          <button id="storageReclaimBtn" class="chip-btn" type="button" data-i18n="admin.storageReclaim">🧹 回收可回收空间</button>
+        </div>
+      </div>
       <div class="modal-actions">
         <button id="adminClose" class="btn-ghost" data-i18n="admin.close">关闭</button>
       </div>
@@ -1584,6 +1594,11 @@
     <div class="modal ui-dialog">
       <div id="uiDialogTitle" class="modal-title">确认</div>
       <div id="uiDialogMsg" class="ui-dialog-msg"></div>
+      <!-- 可选勾选项（默认隐藏）：仅 uiConfirmWithCheck 使用。例：清空话题时“同时删除这批附件文件” -->
+      <label id="uiDialogCheckWrap" class="ui-dialog-check hidden">
+        <input id="uiDialogCheck" type="checkbox" />
+        <span id="uiDialogCheckLabel"></span>
+      </label>
       <input id="uiDialogInput" class="modal-input hidden" type="text" maxlength="200" />
       <div class="modal-actions ui-dialog-actions">
         <button id="uiDialogCancel" class="btn-ghost" data-i18n="ui.cancel">取消</button>

@@ -35,7 +35,7 @@ graph TD
 |---|---|---|
 | `User` | 普通用户 | 群聊、个人资料、个人记忆、公共数字员工/技能/知识库 |
 | `Operator`（运维） | 只读运维 | `GET /ag-ui/admin/status`、`/usage`、`/audit`、`/bridge-health`、`/bridge-capabilities`、`/metrics`；**不包含**数据导出、模型配置、品牌、治理、用户管理 |
-| `Admin`（系统管理员） | 既有 `IsAdmin` 语义的完整管理 | Operator 全部 + 用户列表/禁用/重置密码、数据导入导出、模型配置、品牌白标、配置治理、系统初始化（`/reset`） |
+| `Admin`（系统管理员） | 既有 `IsAdmin` 语义的完整管理 | Operator 全部 + 用户列表/禁用/重置密码、数据导入导出、模型配置、品牌白标、配置治理、**存储治理（附件统计；回收需 `StorageGovernance:AllowReclaim=true`）**、系统初始化（`/reset`） |
 | `SuperAdmin`（超级管理员） | 最高角色 | Admin 全部 + **管理平台角色**（`GET|POST /ag-ui/admin/roles`：查看角色矩阵、授予/回收 user/operator/admin/superadmin） |
 
 **生效角色推导**：账号有一个「显式」`PlatformRole` 字段，同时受既有 `IsAdmin` 标记与 `Auth:AdminUserIds` / `Auth:SuperAdminUserIds` 配置影响。`AuthService.ResolveRole` 取三者较高者——

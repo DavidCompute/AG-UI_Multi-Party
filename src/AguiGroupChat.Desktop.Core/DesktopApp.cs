@@ -59,6 +59,11 @@ public static class DesktopApp
         // 桌面机装了 LibreOffice 就可用（自动探测 C:\Program Files\LibreOffice\...）；没装只会让
         // 「在线查看」按钮不可用（提示下载后用本地应用打开），不影响其它功能。
         builder.Services.AddDocumentPreview(Path.Combine(builder.Environment.ContentRootPath, "data", AguiGroupChat.Web.OfficePreviewConverter.CacheDirectoryName));
+        // 附件治理（回收能力）：与 Web 组合根同一套判定（见 Program.cs 注释）
+        builder.Services.AddAttachmentGovernance();
+        // 存储治理配置（默认关闭回收）
+        builder.Services.AddSingleton(builder.Configuration.GetSection("StorageGovernance").Get<StorageGovernanceOptions>()
+            ?? new StorageGovernanceOptions());
         // HTTP API 枚举字符串化（与协议 §2 一致）
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase)));
 
@@ -94,6 +99,7 @@ public static class DesktopApp
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
         app.MapAccountApi();    // 账号注销（数据主体权利）：自助注销 + 数据擦除
         app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions
+        app.MapStorageAdminApi(); // 存储治理：附件占用统计 + 开关放行的孤儿回收
         app.MapUserGroupApi();      // 用户分组 / 组织单元（细粒度授权）
         app.MapBrandingApi();   // 白标 / 品牌化（6.4）：应用名 + Logo + 主色
         app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数

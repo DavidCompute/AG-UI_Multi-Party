@@ -32,6 +32,7 @@ public sealed class GroupHub : IDisposable
     private readonly ITwinAgentSync? _twinSync;
     private readonly IGraphMemory? _graph;
     private readonly IUserGroupService? _userGroups;
+    private readonly AguiGroupChat.Hub.Storage.IAttachmentLifecycle? _attachmentLifecycle;
     private readonly ConcurrentDictionary<string, byte> _disbanded = new();
     // 客服知聚的非成员参与者（顾客）：key=groupId → 已进入的顾客 id 集合。顾客不是群成员，
     // 各自拥有与客服团队的独立会话（顾客之间彼此隔离）。仅存于内存（会话参与非持久成员）。
@@ -87,7 +88,8 @@ public sealed class GroupHub : IDisposable
         IAgentDefinitionStore? agentDefinitions = null,
         ITwinAgentSync? twinSync = null,
         IGraphMemory? graph = null,
-        IUserGroupService? userGroups = null)
+        IUserGroupService? userGroups = null,
+        AguiGroupChat.Hub.Storage.IAttachmentLifecycle? attachmentLifecycle = null)
     {
         _store = store;
         _users = users;
@@ -104,6 +106,7 @@ public sealed class GroupHub : IDisposable
         _twinSync = twinSync;
         _graph = graph;
         _userGroups = userGroups;
+        _attachmentLifecycle = attachmentLifecycle;
         _agentInvocationLimiter = new SemaphoreSlim(Math.Max(1, options.MaxConcurrentAgentInvocations));
         // 孤儿流兜底定时器：周期清理 End 丢失 / 智能体进程崩溃的流式消息（方法内 try/catch，Timer 随 Dispose 释放）
         _orphanTimer = new Timer(_ => CleanupOrphanStreams(), null, OrphanCleanupIntervalMs, OrphanCleanupIntervalMs);
@@ -1264,11 +1267,14 @@ public sealed class GroupHub : IDisposable
         }
         _changes?.Notify();
 
-        // 2) 删除话题记录
+        // 4) 按需回收这批消息的附件文件（默认不删；判定“仍被引用”后只删确实无主的）
+        ReclaimAttachmentsOf(messages, req.DeleteAttachments, group.GroupId, $"删除话题 {req.TopicId}");
+
+        // 5) 删除话题记录
         if (!_store.RemoveTopic(group.GroupId, req.TopicId))
             return false;
 
-        // 3) 全群广播
+        // 6) 全群广播
         await FanOutAsync(group.GroupId, new GroupTopicDeletedEvent
         {
             GroupId = group.GroupId,
@@ -1279,6 +1285,54 @@ public sealed class GroupHub : IDisposable
         _logger.LogInformation("群 {GroupId} 删除话题 {TopicId}（{Name}，操作者 {Operator}，清除消息 {Removed} 条与对应记忆）",
             group.GroupId, req.TopicId, topic.Name, req.OperatorId, removed);
         return true;
+    }
+
+    /// <summary>
+    /// 消息被物理删除后，按需回收它们的附件文件。
+    ///
+    /// <para>
+    /// 默认<b>不删</b>（<paramref name="deleteAttachments"/>=false）：附件是用户上传的资料，
+    /// “清了聊天记录”不等于“要销毁文件”。只有调用方显式要求时才交给
+    /// <see cref="AguiGroupChat.Hub.Storage.IAttachmentLifecycle"/> 删，而且它还会二次确认“确实无人引用”
+    /// ——同一附件可能仍挂在知识库文档 / 头像 / 技能试运行产物上，删错了就是数据丢失。
+    /// </para>
+    ///
+    /// <para>
+    /// 注意：不删文件时它们会变成“磁盘上有、对话里无入口”的孤儿（需要时可经存储治理页回收），
+    /// 因此这里对两种结果都记日志，便于事后对账。
+    /// </para>
+    /// </summary>
+    private void ReclaimAttachmentsOf(
+        IReadOnlyList<GroupMessage> removedMessages, bool deleteAttachments, string groupId, string reason)
+    {
+        if (!deleteAttachments) return;
+        if (_attachmentLifecycle is null)
+        {
+            // 未注册回收能力（轻量宿主）：如实告知，不静默当作“已删”
+            _logger.LogWarning("未注册 IAttachmentLifecycle，无法删除附件文件：group={GroupId} reason={Reason}",
+                groupId, reason);
+            return;
+        }
+        var ids = removedMessages
+            .SelectMany(m => m.Attachments ?? [])
+            .Select(a => a.AttachmentId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0) return;
+        try
+        {
+            var result = _attachmentLifecycle.DeleteIfUnreferenced(ids);
+            _logger.LogInformation(
+                "附件文件回收：group={GroupId} reason={Reason} 候选={Candidates} 删除={Deleted} 跳过（仍被引用）={Skipped} 释放={Bytes} 字节",
+                groupId, reason, ids.Count, result.DeletedFiles, result.SkippedReferenced, result.DeletedBytes);
+        }
+        catch (Exception ex)
+        {
+            // 文件删除失败不该把“消息已删”这件事回滚，但必须留痕（否则用户会以为附件也删了）
+            _logger.LogWarning(ex, "附件文件回收失败（消息已删除，文件可能残留）：group={GroupId} reason={Reason}",
+                groupId, reason);
+        }
     }
 
     /// <summary>清空话题聊天记录（含主话题 main）：仅群主 / 管理员。话题本身保留，
@@ -1304,6 +1358,8 @@ public sealed class GroupHub : IDisposable
             }
         }
         _changes?.Notify();
+        // 按需回收这批消息的附件文件（默认不删；判定“仍被引用”后只删确实无主的）
+        ReclaimAttachmentsOf(messages, req.DeleteAttachments, group.GroupId, $"清空话题 {topicId}");
 
         await FanOutAsync(group.GroupId, new GroupTopicClearedEvent
         {

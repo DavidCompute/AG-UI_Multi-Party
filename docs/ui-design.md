@@ -440,7 +440,8 @@ apiKey 不回显，仅提示“已配置”。
 | 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（docx / xlsx / pptx → PDF 内联；`?token=` 授权；权限同 `/files`；转换产物带缓存）|
 | 技能库试运行 | `POST /ag-ui/skills/{skillId}/run`（返回 `attachments[]` = 本次产出的文件；产物归属记在产出者名下，本人可下载 / 可预览）|
 | 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`POST /ag-ui/kb/{kbId}/search`（试检索，只回片段预览）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌；库设置里的试检索也走它） |
-| 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥）、`/ag-ui/settings/model|branding` |
+| 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥/**存储**）、`/ag-ui/settings/model|branding` |
+| 存储治理 | `GET /ag-ui/admin/storage`（附件占用 / 仍被引用数 / 可回收量，均需系统管理员）、`POST /ag-ui/admin/storage/reclaim`（回收无引用孤儿附件；**默认关闭**，需 `StorageGovernance:AllowReclaim=true`）|
 | 本机桥安装包/在线配置 | `/ag-ui/native-bridge/download/info|file`（登录用户）、`upload`（仅管理员）、`tokens|tokens/revoke`（仅管理员）、`setup-token|setup-token/revoke`（登录用户）、本机回环 `GET/POST /ag-ui/bridge/info|setup|teardown` |
 | 系统 | `/ag-ui/export|import|import/preview|reset` |
 

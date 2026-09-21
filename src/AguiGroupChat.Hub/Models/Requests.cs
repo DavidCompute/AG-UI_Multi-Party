@@ -126,6 +126,10 @@ public sealed class GroupTopicDeleteRequest
     public required string GroupId { get; set; }
     public required string TopicId { get; set; }
     public required string OperatorId { get; set; }
+
+    /// <summary>是否<b>同时删除</b>被删消息的附件文件。默认 false：清聊天记录不等于销毁用户上传的文件。
+    /// 置 true 时仍会二次确认“确实无人引用”（同一附件可能还挂在知识库文档 / 头像 / 技能产物上）。</summary>
+    public bool DeleteAttachments { get; set; }
 }
 
 /// <summary>清空话题聊天记录（含主话题 main）：仅群主 / 管理员；话题保留，消息与对应语义记忆一并清除。</summary>
@@ -134,6 +138,11 @@ public sealed class GroupTopicClearRequest
     public required string GroupId { get; set; }
     public required string TopicId { get; set; }
     public required string OperatorId { get; set; }
+
+    /// <summary>是否<b>同时删除</b>被清空消息的附件文件。默认 false：清聊天记录不等于销毁用户上传的文件
+    /// （这也是个常见误解：文案必须说清“附件文件不会删，但从对话里已无入口”）。
+    /// 置 true 时仍会二次确认“确实无人引用”（同一附件可能还挂在知识库文档 / 头像 / 技能产物上）。</summary>
+    public bool DeleteAttachments { get; set; }
 }
 
 /// <summary>群主转让：仅当前群主可调用；目标须为群内非群主用户成员。转让后原群主降为群管理员。</summary>

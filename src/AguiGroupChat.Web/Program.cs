@@ -32,6 +32,12 @@ builder.Services.AddSingleton<SkillRunArtifactStore>(); // 技能试运行产物
 // 缓存放 data/preview（跟 attachments 同一个数据根，容器重建不丢；丢了也只是重转一次）。
 builder.Services.AddDocumentPreview(
     Path.Combine(builder.Environment.ContentRootPath, "data", OfficePreviewConverter.CacheDirectoryName));
+// 附件治理（回收能力）：判定“附件还有谁引用”需要同时看得到消息（Hub）、知识库 / 头像（Agents）
+// 与技能试运行产物（Web），因此实现放在 Web，由组合根注册（Hub 只定义 IAttachmentLifecycle 接口）。
+builder.Services.AddAttachmentGovernance();
+// 存储治理配置（默认关闭回收）+ 登记 API
+builder.Services.AddSingleton(builder.Configuration.GetSection("StorageGovernance").Get<StorageGovernanceOptions>()
+    ?? new StorageGovernanceOptions());
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeTunnel").Get<NativeTunnelOptions>() ?? new NativeTunnelOptions()); // 隧道令牌等配置
 builder.Services.AddSingleton(sp => new NativeTunnelRateLimitBag(sp.GetRequiredService<NativeTunnelOptions>())); // 隧道端点限流器
 builder.Services.AddSingleton(builder.Configuration.GetSection("NativeBridgeDownload").Get<NativeBridgeDownloadOptions>() ?? new NativeBridgeDownloadOptions()); // 本机桥 Windows 安装包下载（Dir 等）
@@ -127,6 +133,7 @@ app.MapAccountApi(); // 账号注销（数据主体权利）：自助注销 + �
 app.MapUserGroupApi(); // 用户分组 / 组织单元（细粒度授权：管理员建组 + 组→数字员工白名单）
 app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
 app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions（时序/重试/TTL/阶段开关与顺序）
+app.MapStorageAdminApi(); // 存储治理：附件占用统计 + 开关放行的孤儿回收
 
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();

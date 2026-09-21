@@ -86,6 +86,7 @@ public sealed class DesktopCompositionTests
     {
         { "GET", "/ag-ui/settings/branding" },        // 品牌（公开读）+ 顶栏 / 登录页
         { "GET", "/ag-ui/admin/config/governance" },  // 配置治理（管理员控制台）
+        { "GET", "/ag-ui/admin/storage" },           // 存储治理（管理员控制台）：附件占用与可回收量
         { "GET", "/ag-ui/image-libs" },               // 图库：列表（本次缺陷的主角）
         { "POST", "/ag-ui/mention-suggest" },         // 输入时「建议 @ 谁」
         { "POST", "/ag-ui/message-feedback" },        // 消息 👍/👎

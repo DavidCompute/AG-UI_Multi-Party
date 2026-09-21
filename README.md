@@ -213,6 +213,8 @@ docker compose down
 | `AGENTS_EXECUTION_*` | 不限 | 网关**执行参数**（`Agents:Execution`：时序/重试/TTL、阶段开关、`ExecutionOrder`）**默认与代码一致，无需容器配置**——首选在运行期于控制台「管理员 → 执行参数」页热改并持久化（`executionRuntime`，重启恢复）。若确要容器启动即用非默认值：`docker-compose.yml` `web.environment`（Docker 不透传未知键）需<b>显式补一行</b>，如 `Agents__Execution__StreamTimeoutMinutes: "8"`、`Agents__Execution__EnableOrgRoute: "false"`。角色级按单数字员工在「编辑 → 执行阶段」关闭桥接/交接/组织路由。字段/默认/可配边界见 `docs/execution-configuration.md` |
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | 一键编排 apply 的冒烟自测：是否对服务端执行的 `shell` 技能盲跑一次（有副作用，默认开；置 `false` 关闭）。映射选项 `Agents__SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | 需**人机交互审批**的工具名（命中后用 `ApprovalRequiredAIFunction` 包装：模型调用时运行中断，聊天区弹出 🔐 审批卡片，仅发起请求的用户可批准 / 拒绝） |
+| `STORAGE_ALLOW_RECLAIM` | `false` | 存储治理：是否允许管理员在控制台「存储治理」页回收**无引用的孤儿附件**。默认关。背景：清空 / 删除话题、撤回消息都**不删附件文件**（附件是用户资料），于是磁盘上会积累“对话里已无入口”的文件。统计（只读）不需开启；开启后回收仍要求“无任何引用 + 超过宽限期”。对应 `StorageGovernance:AllowReclaim` |
+| `STORAGE_ORPHAN_GRACE_HOURS` | `168` | 孤儿附件判定宽限期（小时，默认 7 天）：刚上传还没发送、正在生成的产物都算“暂时无引用”，不能被当孤儿删 |
 | `AUTH_SUPER_ADMIN_USER_IDS` | 空 | 超级管理员名单（逗号分隔 userId/username，平台级 RBAC）：命中者生效角色至少为 **SuperAdmin**；留空则仅首个注册账号自举为 SuperAdmin（见 `docs/RBAC.md`） |
 | `AUTH_ADMIN_USER_IDS` | 空 | 系统管理员名单（逗号分隔 userId/username，旧机制）：命中者生效角色至少为 Admin（不授予 SuperAdmin） |
 | `NATIVE_TUNNEL_TOKEN` | 空 | 内网穿透反向隧道全局令牌：内网本机桥 `--tunnel-token` 与之匹配；未配置隧道时留空 |

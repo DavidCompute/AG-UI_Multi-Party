@@ -880,6 +880,9 @@ textarea:focus { outline: none; border-color: var(--accent); }
 /* 通用对话框（替代系统 confirm / prompt）：消息区保留换行，输入框跟随弹层样式 */
 .ui-dialog { width: 400px; max-width: 92vw; }
 .ui-dialog-msg { font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word; margin-bottom: 4px; max-height: 45vh; overflow-y: auto; }
+/* 可勾选项（默认隐藏）：破坏性操作的“附加动作”，如清空话题时同时删除附件文件 */
+.ui-dialog-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; font-size: 13px; line-height: 1.5; color: var(--text); cursor: pointer; }
+.ui-dialog-check input { margin-top: 2px; flex: none; }
 .ui-dialog .modal-input { margin-top: 12px; }
 .ui-dialog-actions { margin-top: 16px; }
 .ui-dialog .send.danger { background: var(--danger, #e5534b); }

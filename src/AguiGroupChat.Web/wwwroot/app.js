@@ -6099,14 +6099,23 @@ function renderTopicBar() {
   const me = r.members?.find((x) => x.memberId === state.memberId);
   const canManage = me?.role === "owner" || me?.role === "admin";
 
-  /** 清空话题聊天记录（含主话题）：调 /ag-ui/group/topic/clear，本地移除该话题消息与全局索引。 */
+  /**
+   * 清空话题聊天记录（含主话题）：调 /ag-ui/group/topic/clear，本地移除该话题消息与全局索引。
+   * 附件文件默认**保留**（文件是用户上传的资料，“清聊天记录”不等于“销毁文件”），
+   * 需要连附件一起删时由用户勾选；服务端还会二次确认“确实无人引用”。
+   */
   const clearTopic = async (topicId, name) => {
-    if (!await uiConfirm({ message: t("topic.clearConfirm", { name }), danger: true })) return;
+    const { ok, checked } = await uiConfirmWithCheck({
+      message: t("topic.clearConfirm", { name }),
+      danger: true,
+      check: { label: t("topic.alsoDeleteFiles") },
+    });
+    if (!ok) return;
     try {
       const res = await fetch("/ag-ui/group/topic/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-        body: JSON.stringify({ groupId: state.activeGroupId, topicId, operatorId: state.memberId }),
+        body: JSON.stringify({ groupId: state.activeGroupId, topicId, operatorId: state.memberId, deleteAttachments: checked }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) { toast(errMsg(data, t("topic.clearFail", { err: res.status }))); return; }
@@ -6150,12 +6159,17 @@ function renderTopicBar() {
       del.title = t("topic.deleteTitle");
       del.onclick = async (e) => {
         e.stopPropagation();
-        if (!await uiConfirm({ message: t("topic.deleteConfirm", { name: tpc.name }), danger: true })) return;
+        const { ok, checked } = await uiConfirmWithCheck({
+          message: t("topic.deleteConfirm", { name: tpc.name }),
+          danger: true,
+          check: { label: t("topic.alsoDeleteFiles") },
+        });
+        if (!ok) return;
         try {
           const res = await fetch("/ag-ui/group/topic/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-            body: JSON.stringify({ groupId: state.activeGroupId, topicId: tpc.topicId, operatorId: state.memberId }),
+            body: JSON.stringify({ groupId: state.activeGroupId, topicId: tpc.topicId, operatorId: state.memberId, deleteAttachments: checked }),
           });
           const data = await res.json().catch(() => null);
           if (!res.ok) { toast(errMsg(data, t("topic.deleteFail", { err: res.status }))); return; }
@@ -6236,7 +6250,7 @@ async function openAdminModal() {
   startAdminMetricsPoll(); // 运行指标页每 8 秒自动刷新（管理员控制台打开期间）
 }
 
-/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数 / 审计日志 / 孤儿盘点。 */
+/** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数 / 审计日志 / 孤儿盘点 / 用户分组 / 存储治理。 */
 function switchAdminTab(tab) {
   const users = tab === "users";
   const usage = tab === "usage";
@@ -6246,6 +6260,7 @@ function switchAdminTab(tab) {
   const audit = tab === "audit";
   const orphans = tab === "orphans";
   const usergroups = tab === "usergroups";
+  const storage = tab === "storage";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
@@ -6254,6 +6269,7 @@ function switchAdminTab(tab) {
   $("adminTabAudit").classList.toggle("on", audit);
   $("adminTabOrphans").classList.toggle("on", orphans);
   $("adminTabUserGroups").classList.toggle("on", usergroups);
+  $("adminTabStorage").classList.toggle("on", storage);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
@@ -6262,6 +6278,7 @@ function switchAdminTab(tab) {
   $("adminAuditView").classList.toggle("hidden", !audit);
   $("adminOrphansView").classList.toggle("hidden", !orphans);
   $("adminUserGroupsView").classList.toggle("hidden", !usergroups);
+  $("adminStorageView").classList.toggle("hidden", !storage);
   if (usergroups) { loadUserGroups(); }
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
@@ -6277,6 +6294,8 @@ function switchAdminTab(tab) {
     loadAdminAudit();
   } else if (orphans) {
     loadAdminOrphans();
+  } else if (storage) {
+    loadStorageGovernance();
   } else {
     loadConfigGovernance();
   }
@@ -6456,6 +6475,65 @@ function bindUserGroupConsole() {
   $("ugSaveBtn").onclick = saveUserGroup;
   $("ugCancelBtn").onclick = () => $("ugModal").classList.add("hidden");
   $("ugMemberSearch").addEventListener("input", () => { ugMemberQuery = $("ugMemberSearch").value; renderUgMemberList(); });
+}
+
+/**
+ * 存储治理：拉取附件占用统计并渲染（只读）。
+ *
+ * 为何单独一页：清空 / 删除话题、撤回消息都**不删附件文件**（文件是用户上传的资料），
+ * 于是磁盘上会积累“对话里已无入口”的孤儿；这里把总额、仍被引用数、可回收量摆出来，
+ * 回收按钮是否可用取决于后端配置（StorageGovernance:AllowReclaim，默认关闭）。
+ */
+async function loadStorageGovernance() {
+  const cards = $("adminStorageCards");
+  const btn = $("storageReclaimBtn");
+  if (!cards) return;
+  cards.innerHTML = `<div class="admin-metric-card"><div>${t("admin.loading")}</div><b>—</b></div>`;
+  try {
+    const res = await fetch("/ag-ui/admin/storage", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) {
+      cards.innerHTML = `<div class="admin-metric-card"><div>${t("admin.loadFail", { err: escapeHtml(errMsg(d, "HTTP " + res.status)) })}</div><b>—</b></div>`;
+      if (btn) btn.disabled = true;
+      return;
+    }
+    const mb = (n) => (Number(n || 0) / 1048576).toFixed(1) + " MB";
+    cards.innerHTML = [
+      [t("admin.storageTotal"), mb(d.totalBytes), t("admin.storageTotalSub", { n: d.totalFiles })],
+      [t("admin.storageReferenced"), String(d.referencedFiles || 0), t("admin.storageReferencedSub")],
+      [t("admin.storageOrphan"), mb(d.orphanBytes), t("admin.storageOrphanSub", { n: d.orphanFiles || 0, h: d.graceHours || 0 })],
+    ].map(([label, value, sub]) =>
+      `<div class="admin-metric-card"><div>${escapeHtml(label)}</div><b>${escapeHtml(value)}</b><div class="form-hint">${escapeHtml(sub)}</div></div>`)
+      .join("");
+    if (btn) {
+      btn.disabled = !d.allowReclaim || !d.orphanFiles;
+      btn.title = d.allowReclaim ? t("admin.storageReclaimTitle") : t("admin.storageReclaimDisabled");
+    }
+  } catch (ex) {
+    cards.innerHTML = `<div class="admin-metric-card"><div>${t("admin.loadFail", { err: escapeHtml(ex.message) })}</div><b>—</b></div>`;
+  }
+}
+
+/** 存储治理：回收孤儿附件（后端默认关闭，未开启时会被 403 拒绝）。 */
+async function runStorageReclaim() {
+  const res0 = await fetch("/ag-ui/admin/storage", { headers: { Authorization: "Bearer " + state.token } });
+  const d0 = await res0.json().catch(() => null);
+  const mb = (n) => (Number(n || 0) / 1048576).toFixed(1) + " MB";
+  if (!await uiConfirm({
+    message: t("admin.storageReclaimConfirm", { n: (d0 && d0.orphanFiles) || 0, size: mb(d0 && d0.orphanBytes) }),
+    danger: true,
+  })) return;
+  try {
+    const res = await fetch("/ag-ui/admin/storage/reclaim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({}),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, t("admin.storageReclaimFail", { err: res.status }))); return; }
+    toast(t("admin.storageReclaimDone", { n: (d && d.files) || 0, size: mb(d && d.bytes) }));
+    await loadStorageGovernance();
+  } catch (ex) { toast(t("admin.storageReclaimFail", { err: ex.message })); }
 }
 
 
@@ -9475,6 +9553,7 @@ function uiConfirm(opts) {
     $("uiDialogMsg").style.display = "";
     $("uiDialogInput").classList.add("hidden");
     $("uiDialogInput").value = "";
+    $("uiDialogCheckWrap").classList.add("hidden"); // 勾选项仅 uiConfirmWithCheck 使用，普通确认必须复位
     const ok = $("uiDialogOk");
     ok.textContent = opts.okText || t("ui.ok");
     ok.classList.toggle("danger", !!opts.danger);
@@ -9483,6 +9562,27 @@ function uiConfirm(opts) {
     $("uiDialog").classList.remove("hidden");
     ok.onclick = () => _closeUiDialog(true);
     $("uiDialogCancel").onclick = () => _closeUiDialog(false);
+  });
+}
+
+/**
+ * 确认框 + 一个可选勾选项（Promise<{ok, checked}>；取消时 ok=false）。
+ * 用于“主操作为破坏性、另有一个可选附加动作”的场景，例如清空话题时“同时删除这批附件文件”。
+ * opts: { title, message, okText, cancelText, danger, check: { label, defaultChecked } }。
+ */
+function uiConfirmWithCheck(opts) {
+  return new Promise((resolve) => {
+    const wrap = $("uiDialogCheckWrap");
+    const box = $("uiDialogCheck");
+    $("uiDialogCheckLabel").textContent = opts.check?.label || "";
+    box.checked = !!opts.check?.defaultChecked;
+    uiConfirm({ ...opts, check: undefined }).then((ok) => {
+      // uiConfirm 会在关闭时隐藏勾选项；这里在隐藏前读取用户的选择
+      const checked = !!ok && box.checked;
+      wrap.classList.add("hidden");
+      resolve({ ok: !!ok, checked });
+    });
+    wrap.classList.remove("hidden"); // uiConfirm 已复位为隐藏，这里再显示出来
   });
 }
 
@@ -9495,6 +9595,7 @@ function uiPrompt(opts) {
     $("uiDialogMsg").style.display = "";
     const inputEl = $("uiDialogInput");
     inputEl.classList.remove("hidden");
+    $("uiDialogCheckWrap").classList.add("hidden"); // 输入框模式下不显示勾选项（与 uiConfirmWithCheck 互斥）
     inputEl.value = opts.defaultValue || "";
     const ok = $("uiDialogOk");
     ok.textContent = opts.okText || t("ui.ok");
@@ -9614,6 +9715,9 @@ function init() {
   $("adminTabAudit").onclick = () => switchAdminTab("audit");
   $("adminTabOrphans").onclick = () => switchAdminTab("orphans");
   bindUserGroupConsole(); // 细粒度授权：用户分组后台页签
+  $("adminTabStorage").onclick = () => switchAdminTab("storage");
+  $("storageRefreshBtn").onclick = loadStorageGovernance;
+  $("storageReclaimBtn").onclick = runStorageReclaim;
   $("auditSearchBtn").onclick = () => loadAdminAudit();
   $("auditExportBtn").onclick = exportAdminAuditCsv;
   ["auditActor", "auditAction", "auditTarget"].forEach((id) =>

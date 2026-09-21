@@ -1,8 +1,13 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Infra;
+using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Storage;
+using AguiGroupChat.Hub.Users;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -174,6 +179,98 @@ public sealed class TopicTests
             f.Hub.ClearTopicMessagesAsync(new GroupTopicClearRequest
             { GroupId = group.GroupId, TopicId = "main", OperatorId = "user_2" }));
         Assert.Equal(ErrorCodes.GroupPermissionDenied, ex.ErrorCode);
+    }
+
+    // ================= 附件文件：默认保留 / 勾选后回收 =================
+
+    /// <summary>记录被要求回收的附件 ID，但不真删（真删的判定逻辑在 AttachmentLifecycleTests）。</summary>
+    private sealed class RecordingLifecycle : IAttachmentLifecycle
+    {
+        public List<string> Seen { get; } = [];
+
+        public AttachmentStorageStats Inspect(TimeSpan gracePeriod) => new(0, 0, 0, 0, 0, 0);
+
+        public AttachmentReclaimResult DeleteIfUnreferenced(IReadOnlyCollection<string> attachmentIds)
+        {
+            Seen.AddRange(attachmentIds);
+            return new AttachmentReclaimResult(attachmentIds.Count, 0, 0);
+        }
+
+        public AttachmentReclaimResult ReclaimOrphans(TimeSpan gracePeriod, bool dryRun) => new(0, 0, 0);
+    }
+
+    /// <summary>带「附件回收」能力的 Hub（默认的 HubFixture 不注册它）。</summary>
+    private static (GroupHub Hub, InMemoryGroupStore Store, RecordingLifecycle Lifecycle) CreateSutWithLifecycle()
+    {
+        var options = new GroupChatOptions { MaxGroupMembers = 50, MessageHistoryLimit = 200 };
+        var store = new InMemoryGroupStore(options.MessageHistoryLimit);
+        var registry = new AgentRegistry();
+        var lifecycle = new RecordingLifecycle();
+        var hub = new GroupHub(store, new InMemoryUserStore(), new ConnectionManager(), registry,
+            new AgentTriggerService(registry), new RecordingGateway(), options, TimeProvider.System,
+            NullLogger<GroupHub>.Instance, attachmentLifecycle: lifecycle);
+        return (hub, store, lifecycle);
+    }
+
+    private static AttachmentInfo Doc(string id) => new()
+    {
+        AttachmentId = id, Name = id + ".docx", ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Size = 3, Url = $"/ag-ui/files/{id}/{id}.docx", Kind = "document",
+    };
+
+    [Fact]
+    public async Task ClearTopic_KeepsAttachmentFiles_UnlessExplicitlyAskedToDelete()
+    {
+        var (hub, store, lifecycle) = CreateSutWithLifecycle();
+        var group = await HubFixture.CreateGroupAsync(hub, "g", "user_1");
+        var msg = await hub.SendMessageAsync(new GroupMessageSendRequest
+        {
+            GroupId = group.GroupId, UserId = "user_1", Content = "带附件",
+            Attachments = [Doc("att_aaa111"), Doc("att_bbb222")],
+        });
+
+        // 默认：只删消息，不碰附件文件（附件是用户上传的资料）
+        await hub.ClearTopicMessagesAsync(new GroupTopicClearRequest
+        { GroupId = group.GroupId, TopicId = "main", OperatorId = "user_1" });
+        Assert.Null(store.GetMessage(group.GroupId, msg.MessageId));
+        Assert.Empty(lifecycle.Seen);
+    }
+
+    [Fact]
+    public async Task ClearTopic_DeleteAttachmentsTrue_HandsThoseAttachmentsToReclaim()
+    {
+        var (hub, store, lifecycle) = CreateSutWithLifecycle();
+        var group = await HubFixture.CreateGroupAsync(hub, "g", "user_1");
+        var msg = await hub.SendMessageAsync(new GroupMessageSendRequest
+        {
+            GroupId = group.GroupId, UserId = "user_1", Content = "带附件",
+            Attachments = [Doc("att_aaa111"), Doc("att_bbb222")],
+        });
+
+        await hub.ClearTopicMessagesAsync(new GroupTopicClearRequest
+        { GroupId = group.GroupId, TopicId = "main", OperatorId = "user_1", DeleteAttachments = true });
+
+        Assert.Null(store.GetMessage(group.GroupId, msg.MessageId));
+        Assert.Equal(["att_aaa111", "att_bbb222"], lifecycle.Seen.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task DeleteTopic_DeleteAttachmentsTrue_AlsoHandsAttachmentsToReclaim()
+    {
+        var (hub, _, lifecycle) = CreateSutWithLifecycle();
+        var group = await HubFixture.CreateGroupAsync(hub, "g", "user_1");
+        var topic = await hub.CreateTopicAsync(new GroupTopicCreateRequest
+        { GroupId = group.GroupId, Name = "专项", OperatorId = "user_1" });
+        await hub.SendMessageAsync(new GroupMessageSendRequest
+        {
+            GroupId = group.GroupId, TopicId = topic.TopicId, UserId = "user_1", Content = "带附件",
+            Attachments = [Doc("att_ccc333")],
+        });
+
+        await hub.DeleteTopicAsync(new GroupTopicDeleteRequest
+        { GroupId = group.GroupId, TopicId = topic.TopicId, OperatorId = "user_1", DeleteAttachments = true });
+
+        Assert.Equal(["att_ccc333"], lifecycle.Seen);
     }
 
     [Fact]
