@@ -238,6 +238,74 @@ public sealed class AgentCatalog
 
     /// <summary>
     /// <summary>
+    /// 技能工具：<b>两种入参形状都收</b>（有 query 用 query；没 query 就把整个参数对象当技能入参）。
+    ///
+    /// <para>
+    /// 以前工具只声明一个<b>必填</b>的 <c>query</c>（JSON 字符串）。模型把参数<b>摊平</b>直接传进来时
+    ///（<c>{title, slides}</c> 而不是 <c>{query:"{...}"}</c>）绑定就失败，模型收到一句“缺少 query”，
+    /// 下一轮再包进 query 重发 —— 用户看到的就是
+    /// “参数需要放在 <c>query</c> 里，我重新提交：”。白跑一轮、多花一次 token、还打断节奏。
+    /// </para>
+    ///
+    /// <para>
+    /// 于是 schema 改成“query 可选 + 允许额外字段”，并在调用处归一；技能侧本来就容错解析 JSON
+    ///（两种形状都能跑），客户端技能那条路的 <c>ApprovalArgsQuery</c> 也是同一取值口径。
+    /// </para>
+    /// </summary>
+    internal sealed class SkillToolFunction : AIFunction
+    {
+        private readonly Func<string, CancellationToken, Task<object?>> _invoke;
+
+        internal SkillToolFunction(string name, string description,
+            Func<string, CancellationToken, Task<object?>> invoke)
+        {
+            Name = name;
+            Description = description;
+            _invoke = invoke;
+        }
+
+        public override string Name { get; }
+        public override string Description { get; }
+        public override JsonElement JsonSchema => Schema;
+
+        /// <summary>“query 可选 + 允许额外字段”：摊平传参也能过校验，而不是被必填项拦回去重发一遍。</summary>
+        private static readonly JsonElement Schema = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "description": "技能入参（JSON 字符串）。也可以不用 query，把技能参数直接作为本工具的参数传进来，两种形状都支持。"
+                }
+              },
+              "additionalProperties": true
+            }
+            """).RootElement.Clone();
+
+        protected override ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
+            => new(_invoke(NormalizeSkillInput(arguments), cancellationToken));
+
+        /// <summary>工具参数 → 技能入参：优先 query；否则整个参数对象转紧凑 JSON（与客户端技能的取值口径一致）。</summary>
+        internal static string NormalizeSkillInput(AIFunctionArguments? args)
+        {
+            if (args is null || args.Count == 0) return "{}";
+            if (args.TryGetValue("query", out var q) && q is not null)
+            {
+                switch (q)
+                {
+                    case string s: return s;
+                    case JsonElement je:
+                        return je.ValueKind == JsonValueKind.String ? (je.GetString() ?? "{}") : je.GetRawText();
+                    default: return q.ToString() ?? "{}";
+                }
+            }
+            try { return JsonSerializer.Serialize(args, AguiJson.Options); }
+            catch { return "{}"; }
+        }
+    }
+
+    /// <summary>
     /// 从可能带代码围栏 / 前后说明文字的文本里取出第一个 JSON 对象
     /// （与技能侧 <c>ExtractJson</c> 同口径：取首个 <c>{</c> 到末个 <c>}</c>）。
     ///
@@ -594,7 +662,8 @@ public sealed class AgentCatalog
                     desc += (skill.ExecutionLocation == AgentSkillExecutionLocation.Client
                                 ? "本机 C# 技能（由本机桥在用户机器/内网机编译执行，正文含 public static string Run(string input)）。"
                                 : "服务端 C# 技能（Roslyn 动态编译受限执行，正文含 public static string Run(string input)）。")
-                            + "需用户批准后执行。";
+                            + "需用户批准后执行。入参就是 Run 的 input：可以直接把参数作为本工具参数传进来（推荐，最省事），"
+                            + "也可以写成 JSON 字符串放进 query —— 两种形状都支持，不需要为了格式再调一次。";
                 else
                     desc += $"提示词/流程模板：无需外部执行，请结合模板与请求直接综合作答。";
                 // 组织角色“设计稿”技能（org_design）：把当前平台可用运行能力注入其描述，让构建师按职责挑 kind+executionLocation，而不是一律只产 prompt。
@@ -617,26 +686,28 @@ public sealed class AgentCatalog
                 var needsDocInputCheck = !isClientSkill && AgentGatewayHelpers.IsDocumentGenerator(skill);
                 // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；批准恢复时 MSAGENT 会执行这个占位函数，
                 // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
-                var func = isClientSkill
-                    ? AIFunctionFactory.Create(() =>
+                AIFunction func = isClientSkill
+                    // 客户端技能：服务端不执行，只从 <see cref="ClientToolResultStore"/> 取前端回传的真实结果
+                    //（避免返回占位文本让模型在服务端跑 stub）。入参本身不由它用 —— 走到桥那条路时
+                    // 是 <see cref="AgentGateway"/> 直接读 FunctionCallContent.Arguments。
+                    // 仍用同一个 SkillToolFunction 包一层：要的是它那个“允许摊平传参”的 schema，
+                    // 否则模型把参数摊平传进来时会在绑定处报错、又走一遍“我重新提交”的重试。
+                    ? new SkillToolFunction(toolName, desc, (_, _) =>
                     {
                         var v = ClientToolResultStore.ConsumeOrDefault(toolName);
                         ClientToolTrace.Write($"STUB-INVOKE tool={toolName} read={(v is null ? "NULL" : $"len={v.Length} first={v.Substring(0, Math.Min(60, v.Length))}")}");
-                        return Task.FromResult(v ?? "客户端执行（本技能不在服务端运行，需前端执行并回传结果）");
-                    }, toolName, desc)
-                    : needsDocInputCheck
-                        ? AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) =>
+                        return Task.FromResult<object?>(v ?? "客户端执行（本技能不在服务端运行，需前端执行并回传结果）");
+                    })
+                    : new SkillToolFunction(toolName, desc, async (input, ct) =>
+                    {
+                        // 入参不合格时不执行（不生成空壳文件），把可执行的纯正提示回给模型
+                        if (needsDocInputCheck && AgentGatewayHelpers.ValidateDocumentSkillInput(skill, input) is { } why)
                         {
-                            // 入参不合格时不执行（不生成空壳文件），把可执行的纠正提示回给模型
-                            if (AgentGatewayHelpers.ValidateDocumentSkillInput(skill, query) is { } why)
-                            {
-                                _logger.LogWarning("文档技能入参校验未通过，已拒绝执行：skill={SkillId}", skill.SkillId);
-                                return Task.FromResult(why);
-                            }
-                            return runner.InvokeAsync(skill, WithImageScope(query, skill), ct);
-                        }, toolName, desc)
-                        : AIFunctionFactory.Create((string query, System.Threading.CancellationToken ct) =>
-                            runner.InvokeAsync(skill, WithImageScope(query, skill), ct), toolName, desc);
+                            _logger.LogWarning("文档技能入参校验未通过，已拒绍执行：skill={SkillId}", skill.SkillId);
+                            return why;
+                        }
+                        return await runner.InvokeAsync(skill, WithImageScope(input, skill), ct);
+                    });
                 // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
                 var needsApproval = skill.RequiresApproval || isClientSkill;
                 var wrapped = needsApproval ? new ApprovalRequiredAIFunction(func) : func;
