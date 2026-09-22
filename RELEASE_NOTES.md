@@ -1,3 +1,26 @@
+# AG-UI 群聊桌面版 1.0.160 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.160 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.160 修一个“每轮都白跑一次”的交互缺陷。技能工具过去只声明一个**必填**的 `query`（JSON 字符串）参数，而模型常常把技能参数**摊平**直接传进来（`{title, slides}` 而不是 `{query:"{…}"}`）——绑定就会失败，模型收到一句“缺少 query”，下一轮再包进 `query` 重发。用户看到的就是「**参数需要放在 `query` 里，我重新提交：**」，代价是白跑一整轮、多花一次 token、节奏被打断。现在工具的 schema 改成 **query 可选 + 允许额外字段**，并在执行前把两种形状归一成同一个技能入参：写在 `query` 里照旧能用，直接摊平传也能用（与客户端技能那条路早就在用的取值口径一致）；客户端技能的工具也一并统一，避免同类重试；同时把“可以直接摊平传参”写进了技能工具描述，让模型第一次就传对。
+**Version note**: 1.0.160 fixes an interaction defect that cost a wasted round trip every time. Skill tools declared a single **required** `query` (a JSON string), while models routinely pass the skill's parameters **flattened** (`{title, slides}` rather than `{query:"{…}"}`) — argument binding then failed, the model saw “missing query”, and it re-sent the whole call wrapped in `query`. That is the 「参数需要放在 `query` 里，我重新提交：」 users kept seeing, at the cost of a whole extra round trip and its tokens. The tool schema is now **query optional with extra properties allowed**, and both shapes are normalised into one skill input before execution: works as before when written into `query`, and works when flattened (the same argument convention the client-skill path already used). Client-skill tools were unified too, and the tool description now says flattened arguments are fine so the model gets it right the first time.
+
+## 技能工具接受“摊平传参”（1.0.160）
+# Skill tools accept flattened arguments (1.0.160)
+
+中文：
+- **症状**：聊天里出现「参数需要放在 `query` 里，我重新提交：」，然后同一件事重做一遍；生成类技能（PPT/Word/Excel）尤其容易碰到（参数多）。
+- **成因**：工具 schema 是 `{query: string}` 且 `query` **必填**。模型摊平传参 → 绑定失败 → 模型自己“改为放 query 里”重发。
+- **修法**：`SkillToolFunction`（自定 `AIFunction`）——schema 改为 `query` 可选 + `additionalProperties: true`；执行前归一：有 `query` 用 `query`（字符串或 JSON 对象都认），没有就把整个参数对象序列化成紧凑 JSON 交给技能（技能侧本来就容错解析 JSON）。旧写法完全兼容。
+- **护栏**：`SkillToolArgumentTests`（7 条）钉住两种形状的归一、schema 不得再要求 `query`、以及**源码扫描护栏**（技能工具必须走 `SkillToolFunction`，不得退回必填 `query` 的写法）。
+- **实测**：一份参数较多的 PPT 请求（主题/风格/动画/表格/仪表/图标行）一次调用直接出稿，**没有再出现“重新提交”**；产物核对：5 页、12 个动画效果节点、每页 `fade` 切换、悬空引用 0。
+
+English:
+- **Symptom**: chats showed 「参数需要放在 `query` 里，我重新提交：」 followed by the whole task being redone; generation skills (PPT/Word/Excel) hit it most because they take many parameters.
+- **Cause**: the tool schema was `{query: string}` with `query` **required**. A flattened call failed binding, so the model wrapped everything in `query` and re-sent.
+- **Fix**: a custom `AIFunction` (`SkillToolFunction`) — `query` optional plus `additionalProperties: true`; before execution the arguments are normalised: `query` wins when present (string or JSON object), otherwise the whole arguments object is serialised to compact JSON for the skill (skill bodies already parse JSON tolerantly). The old shape keeps working unchanged.
+- **Guardrails**: `SkillToolArgumentTests` (7 tests) pin both normalisations, that the schema no longer requires `query`, and a source-scan guard (skill tools must go through `SkillToolFunction`, not back to the required-`query` form).
+- **Verified**: a parameter-heavy PPT request (theme/style/animations/table/gauge/icon rows) produced the deck in a single call with **no “resubmitting”** message; the file checks out — 5 slides, 12 animation effect nodes, a `fade` transition on every slide, zero dangling references.
+
 # AG-UI 群聊桌面版 1.0.159 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.159 Release Notes (current Windows desktop release)
 
