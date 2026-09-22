@@ -2805,6 +2805,153 @@ public sealed class PptxDeckSkillTests
     private static int CountBlips(string slideXml)
         => slideXml.Split("<a:blip", StringSplitOptions.None).Length - 1;
 
+    // ===== 图库兜底：本页文字要切短片段 =====
+
+    /// <summary>
+    /// 桩：模拟平台内部图库检索（技能经回环自令牌调 <c>/ag-ui/images/search</c>）。
+    /// **只对完全等于配置片段的查询给命中** —— 于是“整段页文字”必然落空，
+    /// 只有把本页文字切成短片段才能配上图（这正是真实故障的形态）。
+    /// 其余路径（Wikimedia 那条）一律空结果，避免测试出网。
+    /// </summary>
+    private sealed class StubImageLibrary : IAsyncDisposable
+    {
+        private readonly WebApplication _app;
+
+        /// <summary>命中片段（如人名）：查询必须与它**完全相等**才命中。</summary>
+        public string HitFragment { get; set; } = "";
+        /// <summary>收到的查询（按顺序），用来断言“到底试了哪些片段”。</summary>
+        public List<string> Queries { get; } = new();
+        public string BaseUrl { get; private set; } = "";
+        public string HitPath { get; }
+
+        private StubImageLibrary(WebApplication app, string hitPath) { _app = app; HitPath = hitPath; }
+
+        public static async Task<StubImageLibrary> StartAsync(string hitPath)
+        {
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.Logging.ClearProviders();
+            var app = builder.Build();
+            var stub = new StubImageLibrary(app, hitPath);
+            app.Run(async ctx =>
+            {
+                if ((ctx.Request.Path.Value ?? "") == "/ag-ui/images/search")
+                {
+                    using var reader = new StreamReader(ctx.Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    var query = "";
+                    try
+                    {
+                        using var d = JsonDocument.Parse(body);
+                        query = d.RootElement.GetProperty("query").GetString() ?? "";
+                    }
+                    catch { /* 解析不了就当空查询 */ }
+                    lock (stub.Queries) stub.Queries.Add(query);
+                    ctx.Response.ContentType = "application/json";
+                    if (string.Equals(query, stub.HitFragment, StringComparison.Ordinal))
+                        await ctx.Response.WriteAsync(JsonSerializer.Serialize(new
+                        {
+                            query,
+                            count = 1,
+                            images = new object[]
+                            {
+                                new
+                                {
+                                    assetId = "asset_stub", libId = "img_stub", libName = "公司人员生活照片",
+                                    fileName = Path.GetFileName(stub.HitPath), caption = stub.HitFragment,
+                                    contentType = "image/jpeg", score = 0.76, width = 800, height = 600,
+                                    path = stub.HitPath, url = "/ag-ui/image-libs/img_stub/assets/asset_stub/raw",
+                                },
+                            },
+                        }));
+                    else
+                        await ctx.Response.WriteAsync(
+                            JsonSerializer.Serialize(new { query, count = 0, images = Array.Empty<object>() }));
+                    return;
+                }
+                // Wikimedia 那条路：空结果（正常降级），保证用例不出网
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsync("{\"query\":{}}");
+            });
+            await app.StartAsync();
+            stub.BaseUrl = app.Urls.First();
+            return stub;
+        }
+
+        public async ValueTask DisposeAsync() => await _app.DisposeAsync();
+    }
+
+    /// <summary>
+    /// <b>本页文字兜底必须切成短片段逐个试</b>，不能把整段（上限 120 字）当成一个查询。
+    ///
+    /// <para>
+    /// 钉住一个真实故障：图库里明明有本人照，ppt 却没配上（用户报“配图不正确”）。
+    /// 实测根源是<b>整段被摊薄</b>：关键词“刘佳俊”单查命中本人照 0.76，
+    /// 而含该名字的 47 字整段只有 0.5862 —— 低于“能不能用”的 0.60，于是落空、降级成网图/题图。
+    /// </para>
+    ///
+    /// <para>
+    /// 用例设计：桩<b>只对与人名完全相等的查询</b>给命中，所以“拿整段去查”必然空手 ——
+    /// 修复前这条会失败，修复后才过。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task PageTextFallback_TriesShortFragments_SoTheLibraryPhotoIsFound()
+    {
+        var outDir = TempDir();
+        var imagePath = Path.Combine(outDir, "1刘佳俊.jpg");
+        File.WriteAllBytes(imagePath, TinyJpegBytes());
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubImageLibrary.StartAsync(imagePath);
+        lib.HitFragment = "刘佳俊";
+        // 技能调图库走回环自令牌（AGUI_SELF_BASE/TOKEN）；网络那条用 imageSearchApi 指向同一个桩，不出网
+        Environment.SetEnvironmentVariable("AGUI_SELF_BASE", lib.BaseUrl);
+        Environment.SetEnvironmentVariable("AGUI_SELF_TOKEN", "stub-token");
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "配图兜底",
+                imageScopeId = "handle-stub",
+                imageSearchApi = lib.BaseUrl + "/api.php",
+                slides = new object[]
+                {
+                    new
+                    {
+                        type = "image", title = "高效习惯优秀进步奖",
+                        bullets = new[] { "刘佳俊：把快而稳做成可复制的日常习惯，带动了整个团队的节奏" },
+                        imageQuery = "员工 颁奖 舞台",   // 桩对这个关键词不命中
+                    },
+                },
+            });
+            var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+
+            // 关键断言：配上了图，而且是**图库**那张本人照
+            var images = doc.RootElement.GetProperty("images");
+            Assert.Equal(1, images.GetArrayLength());
+            var img = images[0];
+            Assert.Equal("library", img.GetProperty("source").GetString());
+            Assert.Equal("1刘佳俊.jpg", img.GetProperty("title").GetString());
+
+            // 并且确实是用**短片段**去查的，而且短片段排在整段之前（整段只当最后的兜底候选，
+            // 所以整段查询在桩上必然空手 —— 配上图只能是碎片的功劳）
+            List<string> queries;
+            lock (lib.Queries) queries = lib.Queries.ToList();
+            var fragmentAt = queries.IndexOf("刘佳俊");
+            var blobAt = queries.FindIndex(q => q.Contains('：', StringComparison.Ordinal));
+            Assert.True(fragmentAt >= 0, "应当用短片段“刘佳俊”查过图库，实际：" + string.Join(" / ", queries));
+            Assert.True(blobAt < 0 || fragmentAt < blobAt, "短片段应排在整段之前，实际：" + string.Join(" / ", queries));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null);
+            Environment.SetEnvironmentVariable("AGUI_SELF_BASE", null);
+            Environment.SetEnvironmentVariable("AGUI_SELF_TOKEN", null);
+        }
+    }
+
     // ===== 动画（AnimationML）与页间切换 =====
 
     /// <summary>一份带动画的稿子：飞入 / 逐段 / 退出，并带顶层与页级切换。</summary>

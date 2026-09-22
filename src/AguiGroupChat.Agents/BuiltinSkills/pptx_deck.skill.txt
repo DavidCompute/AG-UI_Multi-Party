@@ -5267,12 +5267,41 @@ public class Skill
         var first = ResolvePhoto(q, libraryOnly: false, label: "关键词", out var firstWarn);
         var best = first;
         // 二次尝试：见上方 summary。条件是“第一次没配上 / 只配到网图 / 图库那张不够可信”。
+        //
+        // 【为什么要把本页文字**切成短片段**逐个试】
+        // 把整段（上限 120 字）当成一个查询丢给检索，会被“摊薄”—— 实测同一页内容：
+        //   关键词“刘佳俊”单查命中本人照 **0.76**；含该名字的 47 字整段只有 **0.5862**，
+        //   反而低于“能不能用”的 0.60 → 图库里明明有照片却落空，降级成网图/题图。
+        // 切成短片段后回到可用区间（实测“AI项目支持团队”0.80、“MS商务团队”0.68）。
+        // 这正是「配图不正确 / 图库明明有对应图片却没用上」的机制。
         var pageText = PageTextOf(el);
         string? altWarn = null;
         if (pageText.Length >= 2 && !string.Equals(pageText, q, StringComparison.Ordinal)
             && (best is null || best.Source != "library" || best.Score < LibraryConfidentScore))
         {
-            var alt = ResolvePhoto(pageText, libraryOnly: true, label: "本页文字", out altWarn);
+            Photo? alt = null;
+            var tried = new List<string>();
+            var missWhy = "";
+            foreach (var cand in LibraryQueryCandidates(pageText))
+            {
+                // 预算是全稿共享的：用尽就收手，别为了配一张图把后面的页全搭进去
+                if (_photoDeadline > 0 && Environment.TickCount64 > _photoDeadline) break;
+                tried.Add(cand);
+                var one = ResolvePhoto(cand, libraryOnly: true, label: "本页文字", out var why);
+                if (one is not null)
+                {
+                    if (BetterPhoto(alt, one)) alt = one;
+                    // 已经足够可信（≥ LibraryConfidentScore）就不必再试后面的片段
+                    if (alt is not null && alt.Score >= LibraryConfidentScore) break;
+                }
+                else if (why is not null) missWhy = why;
+            }
+            if (alt is null && tried.Count > 0)
+                altWarn = "配图检索未成功，已改用自动生成的题图：本页文字片段“"
+                    + string.Join(" / ", tried.Take(3))
+                    + (tried.Count > 3 ? " 等 " + tried.Count + " 个" : "")
+                    + "”（" + (missWhy.Length > 0 ? missWhy : "图库：图库里没有匹配的图片")
+                    + "）【端点：" + PhotoEndpoint() + "】";
             if (BetterPhoto(best, alt)) best = alt;
             // 落选的候选从“用到的照片”里去掉，免得 images[] 里列着没进稿子的图
             if (best is not null && first is not null && !ReferenceEquals(best, first)
@@ -5327,6 +5356,51 @@ public class Skill
     }
 
     private const int PageTextMaxChars = 120;
+
+    /// <summary>
+    /// 从本页文字切出候选检索片段（二次尝试用，见 <see cref="ImagePathOf"/>）。
+    ///
+    /// <para>
+    /// 按标题里的分隔符（·｜—）与常见标点切成短片段：整段丢给检索会被“摊薄”，
+    /// 实测“刘佳俊”单查 0.76、含它的 47 字整段只有 0.5862（低于 0.60 的可用线）。
+    /// 切完回到 0.6~0.8 区间（“AI项目支持团队”0.80、“MS商务团队”0.68）。
+    /// </para>
+    ///
+    /// <para>
+    /// 排序：短片段优先（越短越不被摊薄），**整段作为最后一个兜底候选** —— 所以不会比改动前更差；
+    /// 数量有上界（每试一个就多一次回环检索 + embedding）。
+    /// </para>
+    /// </summary>
+    private static List<string> LibraryQueryCandidates(string pageText)
+    {
+        var text = (pageText ?? "").Trim();
+        var list = new List<string>();
+        if (text.Length == 0) return list;
+        void Add(string raw)
+        {
+            var v = raw.Trim().Trim(SegmentSeps);
+            if (v.Length < 2 || v.Length > PageSegmentMaxChars) return;
+            if (!list.Any(x => string.Equals(x, v, StringComparison.OrdinalIgnoreCase))) list.Add(v);
+        }
+        foreach (var seg in text.Split(SegmentSeps, StringSplitOptions.RemoveEmptyEntries)) Add(seg);
+        var ordered = list.OrderBy(x => x.Length).Take(LibraryQueryMaxCandidates).ToList();
+        if (!ordered.Any(x => string.Equals(x, text, StringComparison.OrdinalIgnoreCase))) ordered.Add(text);
+        return ordered;
+    }
+
+    /// <summary>片段切分/剔除符：标题里的分隔符、顿号逗号句号、斜杠、括号、引号、空白等。</summary>
+    private static readonly char[] SegmentSeps =
+    [
+        ' ', '\t', '\n', '\r', '\u3000', '·', '‧', '•', '｜', '|', '/', '\\', '、', '，', ',', '。', '；', ';', '：', ':',
+        '—', '–', '-', '(', ')', '（', '）', '[', ']', '【', '】', '「', '」', '《', '》', '<', '>',
+        '"', '\'', '“', '”', '‘', '’', '＊', '*', '&', '＋', '+',
+    ];
+
+    /// <summary>单个候选片段的最大长度：再长就又开始摊薄了（人名 2~4 字、团队名 4~12 字）。</summary>
+    private const int PageSegmentMaxChars = 20;
+
+    /// <summary>候选片段上限：每个都要一次回环检索（带 embedding），必须有上界。</summary>
+    private const int LibraryQueryMaxCandidates = 5;
 
     /// <summary>递归收集页面文字；跳过结构化字段（type/layout/variant/path/imageQuery）免得把参数名当正文。</summary>
     private static void CollectText(JsonElement el, StringBuilder sb)

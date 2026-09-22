@@ -51,7 +51,8 @@ public static class BuiltinPptxSkills
             "实测这些词会搜到 Logo、图标、甚至 1920 年代书里的插图；词太多（5 个以上）会搜不到任何结果。" +
             "要“现代商务感”就把 modern / interior / exterior 这类词带上；图廊（gallery）里每一张请给**不同**关键词。" +
             "用了检索照片时会**自动在稿末追加一页「图片来源」**（CC 许可要求署名，必须保留，不要删）；" +
-            "命中团队图库的图不需要署名。" +
+            "命中团队图库的图不需要署名。若关键词没命中，工具会**再拿本页文字（含人名/奖项名）切短后重查图库**，" +
+            "所以页面上写着谁的名字，就优先配上他本人的照片。" +
             "取不到图时会降级为自动题图并在 warnings 说明，不会失败。" +
             "注意：若部署网络访问不了 Wikimedia（如未配代理的内网），此功能会自动降级；此时不要反复重试。" +
             "【版式多样性】设计规范要求不要每页同一种版式，请主动轮换：示意/图/表/卡/时间轴交替，" +
@@ -188,7 +189,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-21.1";
+    public const string Version = "2026-09-22.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

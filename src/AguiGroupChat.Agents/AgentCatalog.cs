@@ -205,9 +205,19 @@ public sealed class AgentCatalog
                 return query;
             }
 
+            // 入参**不保证是严格 JSON**：模型会带 ``` 围栏或前后说明文字，而技能侧自己是用 ExtractJson
+            // 容错解析的。平台这里若不跟着容错，JsonDocument.Parse 就抛异常 → 被下面的 catch 吞掉 →
+            // 这次调用**整轮没有图库**（技能只能回落网图/题图）。实测踩到（日志：“注入图库检索范围失败
+            //（按无图库处理）”），用户看到的就是“配图不正确、图库明明有图却没用上”。
+            // 容错不了就必须**原样交回**，不能拿空对象顶替（那会把技能改成“参数为空”）。
+            if (!TryExtractJsonObject(query, out var normalized))
+            {
+                _logger.LogDebug("文档技能入参不是 JSON 对象，跳过图库注入：skill={SkillId}", skill.SkillId);
+                return query;
+            }
+
             var handle = libs.RegisterSearchScope(ids, agentId);
-            using var doc = JsonDocument.Parse(query);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object) return query;
+            using var doc = JsonDocument.Parse(normalized);
             var dict = new Dictionary<string, object?>();
             foreach (var p in doc.RootElement.EnumerateObject())
                 dict[p.Name] = JsonSerializer.Deserialize<object?>(p.Value.GetRawText());
@@ -227,7 +237,32 @@ public sealed class AgentCatalog
     }
 
     /// <summary>
-    /// 附件 ID → 服务器上的真实文件路径（<c>att_xxx</c>）。
+    /// <summary>
+    /// 从可能带代码围栏 / 前后说明文字的文本里取出第一个 JSON 对象
+    /// （与技能侧 <c>ExtractJson</c> 同口径：取首个 <c>{</c> 到末个 <c>}</c>）。
+    ///
+    /// <para>取不到返回 false：调用方必须原样交回入参 —— 用空对象顶替会把技能变成“参数为空”。</para>
+    /// </summary>
+    internal static bool TryExtractJsonObject(string? text, out string json)
+    {
+        json = "";
+        var t = (text ?? "").Trim();
+        if (t.Length == 0) return false;
+        var first = t.IndexOf('{');
+        var last = t.LastIndexOf('}');
+        if (first < 0 || last <= first) return false;
+        var candidate = t.Substring(first, last - first + 1);
+        try
+        {
+            using var doc = JsonDocument.Parse(candidate);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+        }
+        catch (JsonException) { return false; }
+        json = candidate;
+        return true;
+    }
+
+    /// <summary>附件 ID → 服务器上的真实文件路径（<c>att_xxx</c>）。
     ///
     /// <para>
     /// 模型只能拿到附件 ID，而 docx/pptx/xlsx/pdf 这些技能吃的是<b>路径</b>。

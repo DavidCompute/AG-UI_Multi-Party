@@ -188,4 +188,34 @@ public sealed class AgentImageScopeBindingTests
         // 模型偶尔会把正文而不是 JSON 交进来：注入不能把这类入参改坏
         Assert.Equal("写一份年度总结", catalog.WithImageScope("写一份年度总结", DocxSkill, User, AgentId));
     }
+
+    /// <summary>
+    /// <b>带代码围栏的入参也要能注入图库</b>：模型很爱写 ```json 围栏，而技能侧自己是用
+    /// ExtractJson 容错解析的。早期平台这一侧用严格 JsonDocument.Parse → 抛异常被 catch 吞掉 →
+    /// **整轮没有图库**（日志里“注入图库检索范围失败（按无图库处理）”），
+    /// 用户看到的就是“配图不正确、图库明明有图却没用上”。
+    /// </summary>
+    [Fact]
+    public void FencedJsonInput_StillGetsTheScope()
+    {
+        var (catalog, libs) = NewCatalog();
+        var lib = libs.CreateLibrary("公司人员生活照片", "", User);
+        var fence = new string('`', 3);
+        var fenced = fence + "json\n{\"title\":\"年度颁奖典礼\",\"slides\":[{\"type\":\"cover\"}]}\n" + fence;
+
+        var scope = ScopeOf(catalog.WithImageScope(fenced, DocxSkill, User, AgentId), libs);
+        Assert.NotNull(scope);
+        Assert.Equal([lib.LibId], scope);
+    }
+
+    /// <summary>取不到 JSON 对象时必须**原样交回**，不能拿空对象顶替（那会把技能改成“参数为空”）。</summary>
+    [Fact]
+    public void UnparseableInput_IsLeftUntouchedRatherThanReplacedByEmptyObject()
+    {
+        var (catalog, libs) = NewCatalog();
+        libs.CreateLibrary("任意库", "", User);
+        // 花括号但不成句：容错解析拿不到对象 → 原样交回
+        Assert.Equal("标题是 { 但没闭上", catalog.WithImageScope("标题是 { 但没闭上", DocxSkill, User, AgentId));
+        Assert.Equal("{不是 JSON}", catalog.WithImageScope("{不是 JSON}", DocxSkill, User, AgentId));
+    }
 }
