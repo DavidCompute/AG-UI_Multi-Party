@@ -636,6 +636,10 @@ public sealed class KnowledgeBaseCatalog
                 // 词面路另有一条固定底线（不随库的语义严格度变）：笛住罕罕见词 / 专有号，
                 // 不让“恰好共用一个常用词”的无关切片进来。
                 if (sim < Bm25Ranker.KeywordSimilarityFloor) continue;
+                // 还要求**词组证据**（查询里有一段连续词项都在文本里）：光靠“共享了一个常用词”
+                // 不算词面命中 —— 否则描述越长（尤其自动生成的长描述）越容易蹭分过线
+                //（实测：“颁奖 团队 合影”命中一张描述里恰好有“团队”的 AI 插画，0.38 分）。
+                if (!Bm25Ranker.HasPhraseEvidence(query, it.Content)) continue;
                 scored.Add(new KbHit(kbId, kb.Name, it.SenderId, it.Content, sim));
             }
         }

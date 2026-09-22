@@ -40,8 +40,9 @@ public sealed class ImageLibrary
     ///
     /// <para>
     /// 生效位置：<c>/ag-ui/images/search</c> 在**每个库**上分别用它过滤向量命中（库设了就用库的，否则用请求里的）。
-    /// 词面兜底不直接套这个门槛：BM25 分先换算到同一量纲（<see cref="Bm25Ranker.ToSimilarity"/>）
-    /// 再过一条固定底线（<see cref="Bm25Ranker.KeywordSimilarityFloor"/>）。
+    /// 词面兜底不直接套这个门槛：BM25 分先换算到同一量纲（<see cref="Bm25Ranker.ToSimilarity"/>），
+    /// 再过一条固定底线（<see cref="Bm25Ranker.KeywordSimilarityFloor"/>）与一道<b>词组证据</b>
+    ///（<see cref="Bm25Ranker.HasPhraseEvidence"/>：查询里得有一段连续词项命中，不是散落一个常用词）。
     /// </para>
     /// </summary>
     public double? MinScore { get; set; }

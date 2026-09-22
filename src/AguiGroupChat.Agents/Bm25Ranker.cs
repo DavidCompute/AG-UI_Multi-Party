@@ -87,6 +87,12 @@ public static partial class Bm25Ranker
     /// 它的存在意义就是笛住向量表示不好的<b>罕罕见词 / 专有号</b>，
     /// 那是强证据、不该被更严的语义门槛一票否决；而“只共用一个常用词”任何档位都不算命中。
     /// </para>
+    ///
+    /// <para>
+    /// <b>不要为了“让严格档更严”而取消这个例外或抬高底线</b>：这是产品明确要求保留的能力
+    ///（专属名词/人名不该因为向量分低就配不上图）。想收敛蹭词命中，请动“什么算词面命中”
+    ///（词项覆盖面 / 稀有词判别），而不是取消例外。
+    /// </para>
     /// </summary>
     public const double KeywordSimilarityFloor = 0.35;
 
@@ -124,6 +130,38 @@ public static partial class Bm25Ranker
         }
         satf /= Math.Max(1, distinct.Count);
         return 1.0 / (1.0 + Math.Exp(-4.0 * satf));
+    }
+
+    /// <summary>
+    /// 词面兜底要求的最短连续词项数。
+    ///
+    /// <para>
+    /// 为何词面命中不能只看“共享了多少个词项”：BM25 分是**不分词位置**的，
+    /// 描述写得越长（尤其自动生成的长描述），多个普通词累加就越容易把分拉过底线，
+    /// 于是“颁奖 团队 合影”会命中一张“AI 协作插画”（描述里恰好有“团队”二字）——
+    /// 实测图 0.38 分被当成命中，用户看到的就是“配图不正确”。
+    /// </para>
+    ///
+    /// <para>
+    /// 所以要看**位置**：查询里必须有一段<b>连续</b>词项在文本里也都在（词组证据），
+    /// 而不是散落的常用字。短查询（1~2 个词项）不作此要求，以免把“SKU-2026”这类
+    /// 双词项专有号误伤。
+    /// </para>
+    /// </summary>
+    public static bool HasPhraseEvidence(string query, string text)
+    {
+        var q = Tokens(query).ToList();
+        if (q.Count == 0) return false;
+        var t = new HashSet<string>(Tokens(text), StringComparer.Ordinal);
+        if (t.Count == 0) return false;
+        var required = q.Count >= 3 ? 2 : 1;
+        var run = 0;
+        foreach (var term in q)
+        {
+            if (t.Contains(term)) { run++; if (run >= required) return true; }
+            else run = 0;
+        }
+        return false;
     }
 
     /// <summary>融合评分：返回 [0..1]，越高越靠前。cosine 为归一化余弦相似度（原 Score，通常已近 [0,1]）。</summary>

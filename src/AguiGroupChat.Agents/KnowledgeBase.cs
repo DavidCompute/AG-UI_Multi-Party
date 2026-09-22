@@ -35,7 +35,8 @@ public sealed class KnowledgeBase
     /// <para>
     /// 生效位置：<see cref="KnowledgeBaseCatalog.SearchAsync"/> 在**每个库**上分别用它过滤向量命中
     /// （库设了就用库的，否则用调用方传的）。词面兜底不直接套这个门槛：BM25 分先换算到同一量纲
-    /// （<see cref="Bm25Ranker.ToSimilarity"/>）再过一条**固定底线**（<see cref="Bm25Ranker.KeywordSimilarityFloor"/>），
+    /// （<see cref="Bm25Ranker.ToSimilarity"/>）再过一条**固定底线**（<see cref="Bm25Ranker.KeywordSimilarityFloor"/>）
+    /// 与一道**词组证据**（<see cref="Bm25Ranker.HasPhraseEvidence"/>：查询里得有一段连续词项命中），
     /// 笛住罕罕见词 / 专有号，不让“恰好共用一个常用词”蒙混过关。
     /// </para>
     /// </summary>

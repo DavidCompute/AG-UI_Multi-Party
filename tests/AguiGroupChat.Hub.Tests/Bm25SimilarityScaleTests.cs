@@ -59,4 +59,49 @@ public sealed class Bm25SimilarityScaleTests
         var raw = Bm25Ranker.Score("紫罗兰色潜水艇在珊瑚礁间穿行", "本平台内部项目代号 ORION-7788，仅供内部文档引用。");
         Assert.Equal(0, Bm25Ranker.ToSimilarity(raw), 3);
     }
+
+    /// <summary>
+    /// <b>长描述里蹭到一个常用词不算词面命中</b>：BM25 是分词位置的，描述越长、
+    /// 普通词越多，累加越容易把分拉过底线。实测（图库）：查询“颁奖 团队 合影”会命中一张
+    /// “AI 协作插画”（描述里恰好有“团队”二字），分数 0.38 —— 已经过了 0.35 的底线，
+    /// 于是被当成命中嵌进幻灯片（用户报的“配图不正确”）。
+    /// </summary>
+    [Fact]
+    public void ScatteredCommonWord_InLongDescription_IsNotPhraseEvidence()
+    {
+        const string illustration =
+            "三个标有AI的屏幕设备与左侧三人团队图标围绕中心连接环，由虚线节点相连，构成人工智能协作主题的白色背景青绿扁平插画。"
+            + "检索词：AI设备、显示器、三人团队、用户群、连接环、数据节点、虚线弧、电路线条；人工智能、人机协作、团队协作、"
+            + "科技互联网；连接、同步、交互；青绿、蓝绿、白色；3个AI设备、3人；扁平矢量插画、图标、信息图。";
+        var sim = Bm25Ranker.ToSimilarity(Bm25Ranker.Score("颁奖 团队 合影", illustration));
+        Assert.True(sim >= Bm25Ranker.KeywordSimilarityFloor,
+            $"前提：该查询确实越过了底线（sim={sim:0.###}）—— 所以光靠底线拦不住");
+        Assert.False(Bm25Ranker.HasPhraseEvidence("颁奖 团队 合影", illustration),
+            "只共享“团队”一个词、且它在查询里是孤立词项：不算词组命中");
+    }
+
+    /// <summary>连续词组命中算词面命中：人名、型号这些正是这条路要救的目标。</summary>
+    [Fact]
+    public void ContiguousPhrase_IsPhraseEvidence()
+    {
+        // 人名（图库描述就是人名）：整串连续命中
+        Assert.True(Bm25Ranker.HasPhraseEvidence("刘佳俊", "刘佳俊"));
+        // 型号：ASCII 词项连续命中
+        Assert.True(Bm25Ranker.HasPhraseEvidence("SKU-2026", "产品包装盒正面照，蓝色，含 SKU-2026 标签"));
+        // 词组（与库里的描述用词一致）
+        Assert.True(Bm25Ranker.HasPhraseEvidence("颁奖典礼合影", "年度优秀员工颁奖典礼合影，舞台红毯"));
+        // 同库里的无关描述不算
+        Assert.False(Bm25Ranker.HasPhraseEvidence("颁奖典礼合影", "会场背景板"));
+    }
+
+    /// <summary>
+    /// 多词项查询里，**只有孤立词命中**也不算词组证据（这是“挨个蹭词”与“命中一个词组”的区别）。
+    /// 例：“MS 商务团队”与“MS技术支持团队”——共享 ms / 团队，但它们在查询里不连续。
+    /// 这种弱命中原先就过不了底线（实测 sim≈0.32），这里只把契约写清楚。
+    /// </summary>
+    [Fact]
+    public void IsolatedTokens_WithoutAContiguousRun_AreNotPhraseEvidence()
+    {
+        Assert.False(Bm25Ranker.HasPhraseEvidence("MS 商务团队", "MS技术支持团队"));
+    }
 }

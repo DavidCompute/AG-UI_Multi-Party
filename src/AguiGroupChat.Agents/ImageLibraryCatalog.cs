@@ -494,6 +494,17 @@ public sealed class ImageLibraryCatalog
             catch (Exception ex) { _logger.LogDebug(ex, "图库 {LibId} 检索失败", libId); }
         }
 
+        // 词面召回**不走上面的语义门槛** —— 这是刻意的，也是产品明确要求保留的：
+        // 专属名词/专有号（人名“刘佳俊”、型号“SKU-2026”、代号“ORION-7788”）向量表示常常不好，
+        // 但词面命中是**强证据**，不该被更严的语义门槛一票否决。
+        // 它与“蹭词命中”之间有三道闸：相似度量纲换算 + 固定词面底线（KeywordSimilarityFloor）
+        // + **词组证据**（HasPhraseEvidence：查询里得有一段连续词项命中，而不是散落一个常用词 ——
+        // 后者在长描述下会被 BM25 累加虚高，实测出过 0.38 分被当成命中）。
+        // 行为由这些测试钉住（改这一行前先看它们）：ImageLibraryTests.Search_FallsBackToKeywordRecall
+        //（minScore 0.9 仍要召回）、Search_KeywordRecall_IgnoresZeroOverlap、
+        // Search_KeywordRecall_RejectsScatteredCommonWordInLongDescription、
+        // Search_KeywordRecall_RescuesPersonNameUnderStrictGate、
+        // Bm25SimilarityScaleTests 的几条（只有常用词不算命中 / 罕见专有号算命中 / 词组证据边界），知识库侧同理。
         try { hits.AddRange(KeywordRecall(store, libIds, query, topK)); }
         catch (Exception ex) { _logger.LogDebug(ex, "图库关键词召回失败"); }
 
@@ -575,6 +586,10 @@ public sealed class ImageLibraryCatalog
                 var sim = Bm25Ranker.ToSimilarity(bm25);
                 // 词面路另有一条固定底线（不随库的语义严格度变）：笛住罕罕见词，不让常用词蒙混进来。
                 if (sim < Bm25Ranker.KeywordSimilarityFloor) continue;
+                // 还要求**词组证据**（查询里有一段连续词项都在描述里）。只共享一个常用词不算命中：
+                // 描述越长（尤其自动生成的长描述）多个普通词累加越容易蹭过底线，实测“颁奖 团队 合影”
+                // 会命中一张描述里恰好有“团队”的 AI 插画（0.38 分）—— 那就是“配图不正确”。
+                if (!Bm25Ranker.HasPhraseEvidence(query, it.Content)) continue;
                 if (BuildHit(lib, it.MessageId, sim) is { } h) scored.Add(h);
             }
         }

@@ -219,6 +219,29 @@ public sealed class ImageLibraryTests
     }
 
     /// <summary>
+    /// <b>人名这种专属名词必须能被词面路捞回来，即使语义门槛设得很严</b>。
+    ///
+    /// <para>
+    /// 这是产品明确要求保留的能力（“词面命中不被语义门槛一票否决”）：图库里的照片就是按人名命名的
+    /// （“刘佳俊”“黄敏谊”），而向量对人名常常表示不好；若没有这条路，幻灯片上写着名字也配不上本人照。
+    /// 真实场景：ppt 配图“图库里明明有对应的照片却没用上”。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Search_KeywordRecall_RescuesPersonNameUnderStrictGate()
+    {
+        var (catalog, store, _) = NewCatalog();
+        var lib = catalog.CreateLibrary("公司人员生活照片", "", "user_1");
+        await AddImageAsync(catalog, lib.LibId, "1刘佳俊.png", "刘佳俊");
+        await AddImageAsync(catalog, lib.LibId, "背景.webp", "会场背景板");
+        store.VectorSearchReturnsEmpty = true;   // 向量路空手，只剩词面路
+
+        var hits = await catalog.SearchAsync([lib.LibId], "刘佳俊", topK: 3, minScore: 0.72);
+        Assert.Single(hits);
+        Assert.Contains("刘佳俊", hits[0].Caption);
+    }
+
+    /// <summary>
     /// 关键词兜底**不得**在零词面重叠时也召回。
     ///
     /// <para>
@@ -243,6 +266,37 @@ public sealed class ImageLibraryTests
         // 真有词面交集的查询：兜底仍然要能把它捞回来（别把功能一起修没了）
         var real = await catalog.SearchAsync([lib.LibId], "颁奖合影", topK: 3, minScore: 0.9);
         Assert.Single(real);
+    }
+
+    /// <summary>
+    /// <b>长描述里蹭到一个常用词，不得算词面命中</b>。
+    ///
+    /// <para>
+    /// 真实故障：一张自动生成的长描述插画（描述里恰好有“团队”二字），被“颁奖 团队 合影”
+    /// 这个词面召回了，以 0.38 分嵌进幻灯片——用户报的就是“配图不正确”。
+    /// 收敛方式不是取消词面兜底（那条路是刻意保留的），而是看**位置**：
+    /// 必须有一段<b>连续</b>词项命中，而不是散落一个常用词。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Search_KeywordRecall_RejectsScatteredCommonWordInLongDescription()
+    {
+        var (catalog, store, _) = NewCatalog();
+        var lib = catalog.CreateLibrary("含自动描述的图库", "", "user_1");
+        await AddImageAsync(catalog, lib.LibId, "连.png",
+            "三个标有AI的屏幕设备与左侧三人团队图标围绕中心连接环，构成人工智能协作主题的扁插画。"
+            + "检索词：AI设备、显示器、三人团队、用户群、连接环、数据节点；人工智能、人机协作、团队协作；青绿、蓝绿、白色。");
+        await AddImageAsync(catalog, lib.LibId, "1刘佳俊.png", "刘佳俊");
+        store.VectorSearchReturnsEmpty = true;   // 只剩词面路
+
+        // 散落一个常用词（“团队”）→ 不算命中（以前会以 0.38 分蒙混进来）
+        var junk = await catalog.SearchAsync([lib.LibId], "颁奖 团队 合影", topK: 3, minScore: 0.6);
+        Assert.Empty(junk);
+
+        // 但连续词组（人名）仍旧照配 —— 这条才是词面兜底存在的意义
+        var real = await catalog.SearchAsync([lib.LibId], "刘佳俊", topK: 3, minScore: 0.72);
+        Assert.Single(real);
+        Assert.Equal("1刘佳俊.png", real[0].FileName);
     }
 
     [Fact]
