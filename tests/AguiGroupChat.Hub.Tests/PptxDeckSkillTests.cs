@@ -2456,6 +2456,10 @@ public sealed class PptxDeckSkillTests
         public int Fail429Times;
         /// <summary>检索次数：验证熔断（失败后不再逐页重试）与缓存（同一关键词只查一次）。</summary>
         public int Searches;
+        /// <summary>每个请求故意挂多久（毫秒）：验“取图超时要被剩余预算夹住”，桩必须比预算慢。</summary>
+        public int DelayMs;
+        /// <summary>收到的请求数（含被客户端超时掐断的）。</summary>
+        public int Requests;
 
         private StubPhotoLibrary(WebApplication app) { _app = app; }
 
@@ -2469,6 +2473,9 @@ public sealed class PptxDeckSkillTests
 
             app.Run(async ctx =>
             {
+                Interlocked.Increment(ref stub.Requests);
+                if (Volatile.Read(ref stub.DelayMs) > 0)
+                    await Task.Delay(stub.DelayMs, ctx.RequestAborted).ContinueWith(_ => { });
                 var path = ctx.Request.Path.Value ?? "";
                 if (path.StartsWith("/photo", StringComparison.Ordinal))
                 {
@@ -2949,6 +2956,67 @@ public sealed class PptxDeckSkillTests
             Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null);
             Environment.SetEnvironmentVariable("AGUI_SELF_BASE", null);
             Environment.SetEnvironmentVariable("AGUI_SELF_TOKEN", null);
+        }
+    }
+
+    // ===== 取图预算：每次网络调用都要夹到剩余预算内 =====
+
+    /// <summary>
+    /// <b>取图不能把整份稿子的执行预算吃光</b>。
+    ///
+    /// <para>
+    /// 实测（容器里跑真流程）：<b>4 张配图 45 秒、8 张正好撞在一次执行 60 秒的硬预算上</b> ——
+    /// 而超时的后果是<b>整份稿子都没了</b>，用户看到的就是“生成超时了，我把页数收敛后重出一版”。
+    /// 根因：预算只在“每次取图前”查一次，而单次取图内部可能包含库检索 10 秒 + 检索 8 秒 +
+    /// 逐个候选下载 12 秒 × N，合计能越过预算好几倍。
+    /// </para>
+    ///
+    /// <para>
+    /// 用例：桩故意每次都挂 30 秒，预算压到 2 秒 —— 整个技能必须几秒内收手（并如实报预算用尽），
+    /// 而不是一直等到 30 秒。</para>
+    /// </summary>
+    [Fact]
+    public async Task PhotoBudget_CapsEachNetworkCall_SoTheDeckStillCompletes()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        Environment.SetEnvironmentVariable("AGUI_PHOTO_BUDGET_SEC", "2");
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        lib.DelayMs = 30_000;
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "预算夹紧",
+                imageSearchApi = lib.ApiUrl,
+                slides = new object[]
+                {
+                    new { type = "image", title = "场景一", imageQuery = "slow one" },
+                    new { type = "image", title = "场景二", imageQuery = "slow two" },
+                    new { type = "image", title = "场景三", imageQuery = "slow three" },
+                },
+            });
+            var host = NewHost();
+            // 先热一下：Roslyn 编译 + NuGet 还原也在 Run 里，头一次会花十几秒，
+            // 不预热的话计时被编译时间污染（实测第一次跑就因此失败）。热身稿不带 imageQuery，不会联网。
+            host.Run(SkillSource(), JsonSerializer.Serialize(new
+            {
+                title = "warmup",
+                slides = new object[] { new { type = "content", title = "热身", bullets = new[] { "x" } } },
+            }), CancellationToken.None);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var result = host.Run(SkillSource(), json, CancellationToken.None);
+            sw.Stop();
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15),
+                $"取图预算 2 秒时不该跑这么久（实际 {sw.Elapsed.TotalSeconds:0.0}s，桩每条挂 30s）");
+            Assert.Contains("时间预算", result);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null);
+            Environment.SetEnvironmentVariable("AGUI_PHOTO_BUDGET_SEC", null);
         }
     }
 

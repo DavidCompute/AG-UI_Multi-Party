@@ -1606,7 +1606,8 @@ public class Skill
         _photos = new List<Photo>();
         _photoOffline = false;
         _photoBudgetWarned = false;
-        _photoDeadline = Environment.TickCount64 + PhotoBudgetSec * 1000L;
+        // 预算取环境变量（有则用）：部署级调参 / 测试验“夹超时”都靠它
+        _photoDeadline = Environment.TickCount64 + PhotoBudgetSeconds() * 1000L;
         // 配图来源策略：入参优先，其次环境变量（部署级一次性配置：内网部署设 library 彻底不出网）
         _imageSource = (Str(root, "imageSource") ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE") ?? "").Trim();
         _imageScopeId = Str(root, "imageScopeId") ?? Str(root, "image_scope_id");
@@ -4751,6 +4752,41 @@ public class Skill
     private const string SelfTokenEnv = "AGUI_SELF_TOKEN";
     private const int LibrarySearchTimeoutSec = 10;
 
+    /// <summary>取图预算的环境变量覆盖（部署级调参 / 测试用；不写就用 <see cref=PhotoBudgetSec/>）。</summary>
+    private const string PhotoBudgetEnv = "AGUI_PHOTO_BUDGET_SEC";
+
+    private static int PhotoBudgetSeconds()
+    {
+        var raw = Environment.GetEnvironmentVariable(PhotoBudgetEnv);
+        return int.TryParse(raw, out var v) && v > 0 ? v : PhotoBudgetSec;
+    }
+
+    /// <summary>取图还剩多少秒（预算用尽返回 0）。</summary>
+    private static int PhotoBudgetLeftSec()
+    {
+        if (_photoDeadline <= 0) return PhotoBudgetSeconds();
+        var left = (int)Math.Ceiling((_photoDeadline - Environment.TickCount64) / 1000.0);
+        return Math.Max(0, left);
+    }
+
+    /// <summary>
+    /// 把一次取图网络调用的超时夹到<b>剩余预算</b>内（返回 0 = 没预算了，调用方应直接放弃）。
+    ///
+    /// <para>
+    /// 为什么必须在每个网络调用上夹，而不只是“每次取图前”查一次：单次取图内部可能包含
+    /// 库检索（10s）+ 网络检索（8s）+ 逐个候选下载（12s × N）。实测（容器里跑真流程）：
+    /// <b>4 张配图就用了 45 秒、8 张正好卡在一次执行 60 秒的硬预算上</b> —— 而超时的后果是
+    /// <b>整份稿子都没了</b>，用户看到的就是“生成超时了，我把页数收敛后重出一版”。
+    /// 夹住之后取图阶段最多花掉预算本身，剩下的时间稳稳留给排版与落盘。
+    /// </para>
+    /// </summary>
+    private static int ClampToBudget(int configuredSec)
+    {
+        var left = PhotoBudgetLeftSec();
+        // 剩不到 3 秒就不开工：一次照片下载也要 1~3MB，来不及，白占预算
+        return left < 3 ? 0 : Math.Min(configuredSec, left);
+    }
+
     /// <summary>
     /// 图库检索的分数门槛（传给平台 <c>/ag-ui/images/search</c> 的 <c>minScore</c>）。
     ///
@@ -4813,7 +4849,7 @@ public class Skill
             if (!_photoBudgetWarned)
             {
                 _photoBudgetWarned = true;
-                Warn("配图已用完全部时间预算（" + PhotoBudgetSec + " 秒），其余配图改用自动生成的题图");
+                Warn("配图已用完全部时间预算（" + PhotoBudgetSeconds() + " 秒），其余配图改用自动生成的题图");
             }
             return null;
         }
@@ -4886,7 +4922,10 @@ public class Skill
 
         var body = "{\"query\":" + Js(query) + ",\"scopeHandle\":" + Js(scope!) + ",\"topK\":3,\"minScore\":"
                  + LibraryMinScore.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}";
-        var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, LibrarySearchTimeoutSec, out why);
+        // 超时夹到剩余取图预算内（见 ClampToBudget：只靠“取图前查一次”会越预算）
+        var timeout = ClampToBudget(LibrarySearchTimeoutSec);
+        if (timeout <= 0) { why = "取图时间预算已用尽"; return null; }
+        var json = HttpPostJson(baseUrl!.TrimEnd('/') + "/ag-ui/images/search", body, token!, timeout, out why);
         if (json is null) return null;
 
         using var doc = JsonDocument.Parse(json);
@@ -4919,9 +4958,14 @@ public class Skill
     {
         for (var attempt = 1; ; attempt++)
         {
-            var text = HttpPostOnce(url, jsonBody, token, timeoutSec, out why, out var retryable);
+            // 每次重试都**重算**超时：否则重试会拿着旧的超时值越过取图预算
+            // （实测：4 张配图本该 35 秒收手，却多跑了 9 秒——就是睡 2 秒重试那一下造成的）
+            var effective = ClampToBudget(timeoutSec);
+            if (effective <= 0) { why = "取图时间预算已用尽"; return null; }
+            var text = HttpPostOnce(url, jsonBody, token, effective, out why, out var retryable);
             if (text is not null) return text;
             if (!retryable || attempt >= 2) return null;
+            if (ClampToBudget(timeoutSec) <= 0) { why = "取图时间预算已用尽"; return null; }   // 预算没了就不必再睡 2 秒
             Thread.Sleep(2000);
         }
     }
@@ -4974,7 +5018,9 @@ public class Skill
             + "&gsrsearch=" + Uri.EscapeDataString(query + " filetype:bitmap")
             + "&prop=imageinfo&iiprop=url%7Cmime%7Csize%7Cextmetadata&iiurlwidth=" + PhotoWidth;
 
-        var json = HttpGetText(url, PhotoSearchTimeoutSec, out var netWhy);
+        var searchTimeout = ClampToBudget(PhotoSearchTimeoutSec);
+        if (searchTimeout <= 0) { why = "取图时间预算已用尽"; return null; }
+        var json = HttpGetText(url, searchTimeout, out var netWhy);
         if (json is null) { why = netWhy; return null; }
 
         using var doc = JsonDocument.Parse(json);
@@ -5022,7 +5068,9 @@ public class Skill
             var src = Str(ii, "thumburl") ?? Str(ii, "url");
             if (string.IsNullOrWhiteSpace(src)) continue;
 
-            var bytes = HttpGetBytes(src!, PhotoDownloadTimeoutSec, out var dlWhy);
+            var dlTimeout = ClampToBudget(PhotoDownloadTimeoutSec);
+            if (dlTimeout <= 0) { why = "取图时间预算已用尽"; break; }
+            var bytes = HttpGetBytes(src!, dlTimeout, out var dlWhy);
             if (bytes is null) { why = dlWhy; continue; }
             if (!IsJpeg(bytes) && !IsPng(bytes)) { why = "图库返回的不是 JPEG/PNG"; continue; }
 
@@ -5154,9 +5202,13 @@ public class Skill
     {
         for (var attempt = 1; ; attempt++)
         {
-            var bytes = HttpGetOnce(url, timeoutSec, out why, out var retryable);
+            // 每次重试都重算超时（同 HttpPostJson）：重试不能拿着旧超时越过取图预算
+            var effective = ClampToBudget(timeoutSec);
+            if (effective <= 0) { why = "取图时间预算已用尽"; return null; }
+            var bytes = HttpGetOnce(url, effective, out why, out var retryable);
             if (bytes is not null) return bytes;
             if (!retryable || attempt >= 2) return null;
+            if (ClampToBudget(timeoutSec) <= 0) { why = "取图时间预算已用尽"; return null; }   // 预算没了就不必再睡 2 秒
             Thread.Sleep(2000);
         }
     }

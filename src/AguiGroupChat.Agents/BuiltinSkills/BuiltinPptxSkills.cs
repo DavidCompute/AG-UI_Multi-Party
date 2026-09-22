@@ -159,6 +159,10 @@ public static class BuiltinPptxSkills
             "占位符/空页/只有标题/越界/文字放不进自己的框）" +
             "与 warnings（如图片缺失改用自动题图、文字过多已截断）；" +
             "**若 qa 报了问题，请先修内容再重新生成，不要直接把有问题的稿子交给用户**。" +
+            "【规模与分批（避坑）】单次生成建议 **≤ 25 页**；**联网配图（imageQuery/imageSource）建议 ≤ 6 张**" +
+            "——配图每张都要联网检索+下载，实测 4 张就吃掉 45 秒，容易撞上执行时间预算（超时=整份稿子都没了）。" +
+            "更大的稿子（如 40 页）请**分批**：先生成主体，再用 action:\"edit\" + op:\"append\" 追加剩余页" +
+            "（append 用同一个渲染器画，观感一致）；纯文字页很便宜（实测 41 页仅 5.5 秒），贵的是配图。" +
             "请据实告知用户产物路径，不要编造正文内容。"
         ),
     ];
@@ -189,7 +193,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-22.1";
+    public const string Version = "2026-09-22.2";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)

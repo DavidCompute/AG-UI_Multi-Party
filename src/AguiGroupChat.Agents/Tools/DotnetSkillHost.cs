@@ -90,7 +90,10 @@ internal sealed class DotnetSkillHost
             {
                 // 主线程强超时等待作者代码结束（Run 同步；真正耗在 Invoke 里），超时则放弃等待
                 if (!tcs.Task.Wait(timeoutMs))
-                    return $".NET 技能执行超时（{timeoutMs}ms），已中止。";
+                    return $".NET 技能执行超时（{timeoutMs}ms），已中止。"
+                        + "（不要原样重试：这通常是单次入参过重——文档技能最常见的原因是页数或联网配图太多"
+                        + "（实测 4 张配图就 45 秒）。请减少配图/页数，或**分批执行**：先出一部分，"
+                        + "再用 action:edit 的 op:append 追加剩下的。）";
                 var outText = tcs.Task.Result;
                 return outText.Length > MaxOutputChars ? outText[..MaxOutputChars] + "\n…(已截断)" : outText;
             }
