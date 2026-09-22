@@ -1,3 +1,32 @@
+# AG-UI 群聊桌面版 1.0.158 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.158 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.158 让 PPT 技能**会写动画与翻页切换**。以前生成的 pptx 是静态稿：用户在「与 ppt生成助手 的单聊」里问“第一页能否将文字加入飞出来的效果”，数字员工只能答“工具不写入动画，请在 PowerPoint 里手动加”。现在支持入场（出现 / 淡入 / 飞入 / 擦除 / 溶解）、强调（旋转 / 放大回弹 / 变色）、退出（消失 / 淡出 / 飞出 / 擦除退出 / 溶解退出）与 **21 种页间切换**；顶层写一次就是全稿默认、页级可覆盖，而且**已经交付出去的旧稿也能直接加**（`action:edit` 新增 `op:animate` / `op:transition`）。动画 XML 不是凭记忆写的——结构逐项对齐**真实 PowerPoint 产物**（从 LibreOffice 回归库的 301 份 pptx 里统计得出），因为写错会被 PowerPoint 判“需要修复”；三层把关：OpenXmlValidator、悬空引用检查（动画指向不存在的形状）、LibreOffice 实际打开与回写。不请求动画时输出与从前**逐字节一致**。
+**Version note**: 1.0.158 teaches the PPT skill to **write animations and slide transitions**. Decks used to be static: asked in *chat with ppt-assistant* whether the first slide's text could “fly in”, a digital employee could only answer “the tool does not write animations — add it by hand in PowerPoint”. It now supports entrances (appear / fade / fly in / wipe / dissolve), emphasis (spin / pulse / change colour) and exits (disappear / fade out / fly out / wipe out / dissolve out) plus **21 slide transitions**; write it once at the top level as a deck-wide default and override it per slide, and **decks already delivered can be given effects too** (the new `op:animate` / `op:transition` in `action:edit`). The AnimationML structure is not written from memory: every piece is aligned with **real PowerPoint output** (derived from 301 pptx files in LibreOffice's regression corpus), because malformed timing makes PowerPoint demand a repair. Three layers of checking: OpenXmlValidator, a dangling-reference check (animations pointing at shapes that do not exist) and an actual LibreOffice open plus write-back. With no animation requested the output stays **byte-identical** to before.
+
+## PPT 技能支持动画与页间切换（1.0.158）
+# PPT skills can now animate and transition (1.0.158)
+
+中文：
+- **怎么用**：顶层 `transition` / `animate` 作为全稿默认，页级同名字段覆盖（写 `false` 关掉该页）。例：封面主标题飞入 = 该页 `"animate": {"preset": "flyIn", "direction": "bottom"}`；要点逐条出现 = `{"preset": "fade", "byParagraph": true}`；全稿淡入 = 顶层 `"animate": "fade"`；逐页切换 = 顶层 `"transition": "fade"`；一页多个效果写数组（各占一次点击）。
+- **既有稿加动画**：`action:"edit"` + `ops:[{op:"animate",slides:[1],animate:{…}}, {op:"transition",slides:[2,3],transition:{preset:"push"}}]`；可重复执行（每次都先删旧时间线，不叠加），且绠不改原件。
+- **结构来源（关键）**：动画 XML 没有“大致对”——错一点 PowerPoint 就要修复。所以逐项对齐真实产物：Fly In 是 `p:anim` + `tavLst` 位移（**不是** `animEffect`）、Wipe 是 `animEffect filter="wipe(up)"`、退出是 `animEffect transition="out"` + 紧随的 `set hidden`（delay=dur−1）、强调是 `animRot`/`animClr`；元素次序按 `CT_Slide`（cSld → clrMapOvr → transition → timing → extLst）。
+- **三层验证**：① `OpenXmlValidator` 过 schema；② **悬空引用检查**（每个 `spTgt/@spid` 必须在当页真实存在，`qa` 报 `animTarget`）；③ 容器内 LibreOffice 实际打开转 PDF，且回写 pptx 后动画**被理解并保留**（含逐段的每个节点）。
+- **端到端实测**（本机容器）：对「与 ppt生成助手 的单聊」说“封面主标题要加飞出来的动画，每页翻页用淡入切换”，它直接交付出稿，自述“封面飞入 1 页 / 2 个效果，4 页淡入切换”；我们拆包核对，**与自述一致**（无悬空引用、每页 transition 就位）。
+- **如实说明的限制**：只做经典（2007 schema）效果，**没有 morph（变形）与 3D**；切换的“任意毫秒时长”映射到 fast/med/slow 三档；`byParagraph`（逐段）默认关，播放观感需在 PowerPoint 里看一眼（自动化只能保证文件完好、不需修复）。
+- **兼容承诺**：没请求动画时输出与从前逐字节一致；返回 JSON 新增 `animations`（pages / effects / transitions / presets）如实报出用量，0 就是没加；未知预设名一律报错，不静默回落。
+- **回归**：新增 5 条单测（目标存在性 + schema、不写就不加、未知预设报错、页级关闭、既有稿加动画且不叠加）；全量 **1462 通过 / 0 失败**。
+
+English:
+- **How to use it**: `transition` / `animate` at the top level act as deck-wide defaults and a slide's same-named field overrides them (`false` disables that slide). Examples: a cover title flying in = `"animate": {"preset": "flyIn", "direction": "bottom"}` on that slide; bullets appearing one at a time = `{"preset": "fade", "byParagraph": true}`; deck-wide fade = top-level `"animate": "fade"`; per-slide transitions = top-level `"transition": "fade"`; an array requests several effects on one slide (each on its own click).
+- **Adding effects to an existing deck**: `action:"edit"` with `ops:[{op:"animate",slides:[1],animate:{…}}, {op:"transition",slides:[2,3],transition:{preset:"push"}}]`; repeatable (the old timeline is removed first, so effects never stack) and the original file is never touched.
+- **Where the structure comes from (the important part)**: animation XML has no “roughly right” — get it slightly wrong and PowerPoint demands a repair. So every piece is aligned with real output: Fly In is `p:anim` + a `tavLst` offset (**not** `animEffect`), Wipe is `animEffect filter="wipe(up)"`, an exit is `animEffect transition="out"` followed by `set hidden` (delay = dur−1), emphasis is `animRot`/`animClr`; element order follows `CT_Slide` (cSld → clrMapOvr → transition → timing → extLst).
+- **Verified three ways**: (1) `OpenXmlValidator` against the schema; (2) a **dangling-reference check** (every `spTgt/@spid` must exist on that slide; `qa` reports `animTarget`); (3) an actual LibreOffice open to PDF inside the container, plus a pptx write-back showing the animations were **understood and preserved** (every per-paragraph node included).
+- **End-to-end result** (local container): asked in *chat with ppt-assistant* for “a fly-in cover title and fade transitions between slides”, the assistant delivered a deck and reported “cover fly-in, 1 slide / 2 effects; fade transitions on all 4 slides”; unpacking the file confirmed the claim (no dangling references, transitions present on every slide).
+- **Honest limits**: classic (2007 schema) effects only — **no morph, no 3D**; an arbitrary transition duration maps onto fast/med/slow; `byParagraph` is off by default and its playback should be eyeballed in PowerPoint (automation can only guarantee the file is intact and needs no repair).
+- **Compatibility promise**: with no animation requested the output is byte-identical to before; the new `animations` field in the return JSON (pages / effects / transitions / presets) reports real usage — 0 means nothing was added; an unknown preset name is an error rather than a silent fallback.
+- **Regression**: 5 new unit tests (target existence + schema, nothing added unless requested, unknown preset errors, per-slide opt-out, effects added to an existing deck without stacking); full suite **1462 pass / 0 fail**.
+
 # AG-UI 群聊桌面版 1.0.157 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.157 Release Notes (current Windows desktop release)
 

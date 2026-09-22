@@ -175,8 +175,8 @@ Desktop installers are built and published automatically by the `Release (Window
 1. **Bump the version** in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` (`<Version>`) and commit it to `main`.
 2. **Tag the commit and push the tag**:
    ```bash
-   git tag v1.0.157
-   git push origin v1.0.157
+   git tag v1.0.158
+   git push origin v1.0.158
    ```
    The tag must match the project `<Version>` (without the leading `v`). The workflow fails fast on a mismatch so an installer is never published under the wrong version number.
 
@@ -185,7 +185,7 @@ That's it — the workflow builds the MSI via `tools/build-msi.ps1` and creates 
 To build an installer locally without publishing, run:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.157
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.158
 ```
 
 You can also trigger the workflow manually from the Actions tab (`Run workflow`), leaving the `version` input blank to use the value from the csproj.
