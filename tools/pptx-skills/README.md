@@ -18,7 +18,7 @@ PowerPoint（`.pptx`）生成技能。**纯 .NET 实现**（`DocumentFormat.Open
 
 | skillId | 名称 | 说明 |
 |---|---|---|
-| `pptx_deck` | 演示文稿生成（PPT） | 封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 大数字 / 进度仪表 / **示意图（金字塔 / 漏斗 / 四象限 / 循环 / 层叠）** / 网格卡 / 时间轴 / 图标行 / 引言 / 配图（含图文混排） / **自动生成的题图** / 图表 / 小结 / 结束页；支持读取既有稿、套模板、出稿后自检、原地编辑既有稿 |
+| `pptx_deck` | 演示文稿生成（PPT） | 封面 / 目录 / 章节分隔 / 内容 / 两栏 / 表格 / 指标卡 / 大数字 / 进度仪表 / **示意图（金字塔 / 漏斗 / 四象限 / 循环 / 层叠）** / 网格卡 / 时间轴 / 图标行 / 引言 / 配图（含图文混排） / **自动生成的题图** / 图表 / 小结 / 结束页；**入场·强调·退出动画与页间切换**；支持读取既有稿、套模板、出稿后自检、原地编辑既有稿（含给既有稿加动画） |
 
 ## 页面类型（slides[].type）与版式变体（variant）
 
@@ -509,13 +509,15 @@ Commons 是**档案库**而不是商业图库，检索质量几乎全看关键�
     { "op": "reorder",     "order": [1, 3, 2, 4] },
     { "op": "duplicate",   "slide": 2, "count": 2 },
     { "op": "replaceText", "slides": [1, 2], "map": { "旧文案": "新文案" } },
-    { "op": "append",      "slides": [ { "type": "content", "title": "…", "bullets": ["…"] } ] }
+    { "op": "append",      "slides": [ { "type": "content", "title": "…", "bullets": ["…"] } ] },
+    { "op": "animate",     "slides": [1], "animate":     { "preset": "flyIn", "direction": "bottom" } },
+    { "op": "transition",  "slides": [2, 3], "transition": { "preset": "push" } }
   ] }
 ```
 
 语义与安全：
 
-- **绝不改原件**：先把 `path` 复制到 `outputPath` 再在副本上动刀；
+- **绠不改原件**：先把 `path` 复制到 `outputPath` 再在副本上动刀；
   `outputPath` 缺省为 `<原名>_edited.pptx`；与源文件相同时<b>直接报错</b>。
 - 页号是 **1 起算的当前顺序**，op 逐个顺序执行（上一个 op 改完的页序就是下一个 op 看到的）。
 - `delete` 不能把页删光（至少留一页）；`reorder` 必须是 1..N 的一个完整排列；越界都报可读错误。
@@ -523,6 +525,94 @@ Commons 是**档案库**而不是商业图库，检索质量几乎全看关键�
   并重写图表内部的 r:id，很容易产出“需要修复”的文件——因此**宁可明确报错**，也不静默破坏。
   图片关系会正常克隆并重写 id；备注页不跟着复制（会报 `warnings`）。
 - `append` 用本技能的渲染器画新页，沿用既有稿的版式。
+- `animate` / `transition` 给既有稿加动画与翻页效果（见下节）；
+  **可重复执行**：每次都先删掉那页旧的 `p:timing`，不会越加越多。
+  写 `transition` 时要当心一个坑（已修）：只改切换时不能动已有的时间线，
+  否则“先 animate 再加 transition”会把刚加好的动画抹掉。
+
+## 动画与翻页切换
+
+早期版本属于「已知边界」，现已支持。两类东西：
+
+- **页间切换**（`transition`）：整页怎么切到下一页；
+- **页内动画**（`animate`）：页里的形状/文字怎么出现、强调、退出。
+
+顶层写就是**全稿默认**，页级写则覆盖它（页级写 `false` 关掉该页）：
+
+```json
+{
+  "transition": { "preset": "fade", "duration": 0.4 },
+  "slides": [
+    { "type": "cover", "title": "年度颁奖典礼", "subtitle": "荣耀时刻",
+      "animate": { "preset": "flyIn", "direction": "bottom", "duration": 0.75 } },
+    { "type": "content", "title": "议程", "bullets": ["一", "二", "三"],
+      "animate": { "preset": "fade", "byParagraph": true } },
+    { "type": "end", "title": "谢谢",
+      "transition": { "preset": "push", "direction": "left" },
+      "animate": "fadeOut" }
+  ]
+}
+```
+
+### 预设（都是枚举好的，不做任意时间线）
+
+| 类 | 预设 | 说明 |
+|---|---|---|
+| 出现 | `appear` `fade` `flyIn` `wipe` `dissolve` | `flyIn`/`wipe` 可给 `direction`（bottom/top/left/right） |
+| 退出 | `disappear` `fadeOut` `flyOut` `wipeOut` `dissolveOut` | 与入场一一对应 |
+| 强调 | `spin`（旋转一周）`pulse`（放大到 120% 回弹）`fillColor`（改填充色，可给 `color`） | 不改动稿子的最终观感 |
+
+字段：`preset` `direction` `byParagraph`（要点逐条出现）`start`(with/after) `delay` `duration`(秒)
+`target`(text 默认｜all 含图片装饰｜media) `only`(只动第几个形状，1 起算) `color`。
+`animate` 可写字符串简写（`"fade"`）、对象、或**数组**（一页多个效果，各占一次点击）。
+
+切换的 `preset`：`fade cut dissolve newsflash wedge random push wipe cover pull zoom split
+blinds checker circle comb diamond plus randomBar strips wheel`；
+另有 `direction` / `orientation` / `spokes` / `speed`(fast|med|slow) / `duration`(秒，映射到三档)
+/ `advanceAfter`(秒，到点自动翻页) / `advanceOn`(click|after)。
+
+### 结构不是凭记忆写的
+
+动画 XML（AnimationML）没有“大致对”这回事：写错就被 PowerPoint 判「需要修复」。
+所以结构逐项对齐**真实 PowerPoint 产物**——样本取自 LibreOffice 回归库 `sd/qa/unit/data/pptx/*.pptx`：
+
+| 样本 | 定下来的东西 |
+|---|---|
+| `tdf124457` | Fly In = `p:anim` + `tavLst` 位移（`1+#ppt_h/2` → `#ppt_y`），**不是** `animEffect` |
+| `connector-shape-animations` | Wipe = `animEffect filter="wipe(up)"`，`presetID=22` / `sub=1` |
+| `tdf107608` | 退出 = `animEffect transition="out"` + 紧随的 `set hidden`（`delay=dur-1`） |
+| `tdf112280` / `tdf112333` | 强调 = `animRot by=21600000` / `animClr` + 两个 `set` |
+| `tdf168755` | 表格·图表·SmartArt 这类图形框用 `bldGraphic` + `bldAsOne` |
+
+骨架：`tmRoot(1)` → `mainSeq(2)` → 每个请求一个「点击组」→ 组内每个目标/段一个效果节点
+（`clickEffect` / `withEffect` / `afterEffect`）。元素次序遵循 `CT_Slide`：
+`cSld → clrMapOvr → transition → timing → extLst`。
+
+### 三层校验（都是自动跑的）
+
+1. `OpenXmlValidator` 过 schema（单测）；
+2. **悬挂引用检查**：每个 `spTgt/@spid` 必须在当页真实存在（`qa` 里报 `animTarget`）——这是最容易让 PowerPoint 要求修复的点；
+3. LibreOffice 实际打开：本仓库实测过“生成 → `soffice --convert-to pdf` 正常出图”与
+   “`--convert-to pptx` 回写后动画**被理解并保留**”（含逐段的 5 个节点）。
+
+### 做不到的部分（据实说）
+
+- **没有 morph（变形）与 3D**，也没有 p14/p15 的掠夺型效果：它们要 `mc:AlternateContent` + 扩展命名空间，
+  风险与收益不成比例。
+- 切换的「任意毫秒时长」不存在于经典 schema：只接受 `speed` 三档，给秒数就映射到最近的一档。
+- `p:push/@dir` 等方向用的是 **OOXML 原义**（推移方向），与 PowerPoint 界面文案“从左侧”可能相差一个方向，
+  觉得反向就换一个值；`wipe` 的 filter 方向语义已按真实文件定下（从下方进入 = `wipe(up)`）。
+- `byParagraph` 用“**每段一个效果节点 + `bldP build="p"`**”编码（与 PowerPoint 自身输出的形状一致，
+  默认**不开**）。自动化能证明“文件是好的、能打开”，但**逐段播放的观感需在 PowerPoint 里看一眼**
+  （LibreOffice 导 PDF 会丢掉动画层）。
+- 页码徽标标了 `name="PageBadge"` 并在排动画目标时跳过：它是装饰，动起来只是噪声。
+
+### 兼容承诺：不写就不加
+
+没请求动画时，本技能的输出与从前**逐字节一致**（注入只发生在 `WithAnimation` 里），
+所以既有稿子、既有单测（逐变体比 XML）都不受影响。返回 JSON 里新增的 `animations` 字段
+（`pages` / `effects` / `transitions` / `presets`）会如实报出实际用量——0 就是没加。
+未知的预设名/切换名一律**报错**，不静默回落成“没有动画”。
 
 ### 套模板（`template`）
 
@@ -933,7 +1023,8 @@ PYTHONIOENCODING=utf-8 python tools/verify_template_live.py
   「结构级编辑」（`action:edit`：删/复制/重排/替文字/追加）与「套模板重出一份」（`template`）；
   仍**不支持**在 XML 层改既有页的版式/颜色/图表数据。
 - `action:edit` 的 `duplicate` **不支持含图表的页**（见上，宁可报错也不产出坏文件）。
-- 不支持动画、切换、SmartArt、母版多版式。
+- 不支持 **morph（变形）/ 3D / SmartArt 内容生成**与母版多版式；
+  **动画与页间切换是支持的**（经典效果；见「动画与翻页切换」一节）。
 - 图标只有内置的 45 个几何图形，没有图标字体/外部图标库；名字不在列表里就当 1~2 字的短标记。
 - `image` 的 `bleed` 是“右侧半出血 + 左侧叠字”，不支持任意方向的出血/挖空。
 - `image` 页的图片走 ImageSharp 读取以计算尺寸与裁剪；Sprite 不支持的格式（如 svg/emf）会报可读错误。

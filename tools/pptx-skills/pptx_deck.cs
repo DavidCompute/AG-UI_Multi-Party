@@ -41,7 +41,9 @@
 //                {"op":"reorder","order":[1,3,2]},
 //                {"op":"duplicate","slide":2,"count":2},
 //                {"op":"replaceText","slides":[1,2],"map":{"旧":"新"}},
-//                {"op":"append","slides":[ {"type":"content",…} ]} ]
+//                {"op":"append","slides":[ {"type":"content",…} ]},
+//                {"op":"animate","slides":[1],"animate":{…}},
+//                {"op":"transition","slides":[2,3],"transition":{…}} ]
 //     "template": "…pptx",                                 // 可选：套用该模板的母版/版式/配色出稿（不动原件）
 //     "keepTemplateSlides": true,                          // 可选：保留模板原有页（默认清空，只借其皮）
 //     "themeColors": { "primary":"1F3864", "secondary":"2E5C9A", "accent":"C8A24A",
@@ -157,6 +159,32 @@
 //   【套模板】template 传入既有 .pptx：复制到 outputPath 后再改副本（绝不写原件），
 //   沿用模板的母版/版式，并从其主题读出配色与字体；默认清空模板原有页面（只借皮），
 //   传 keepTemplateSlides:true 则追加在其后。
+//
+//   【动画与翻页切换（可选，默认不加；既有稿也能加）】
+//     顶层 "transition" / "animate" 作为**全稿默认**，页级同名字段覆盖它（页级写 false 则关掉该页）。
+//       "transition": { "preset":"fade|cut|dissolve|newsflash|wedge|random|push|wipe|cover|pull|
+//                                zoom|split|blinds|checker|circle|comb|diamond|plus|randomBar|strips|wheel",
+//                       "direction":"left|right|top|bottom|lu|ld|ru|rd|in|out",
+//                       "orientation":"horz|vert", "spokes":1|2|3|4|8,
+//                       "speed":"fast|med|slow", "duration":秒, "advanceAfter":秒, "advanceOn":"click|after" }
+//       "animate": "fade"                              // 字符串简写
+//               | { "preset":"appear|fade|flyIn|wipe|dissolve|disappear|fadeOut|flyOut|wipeOut|dissolveOut|
+//                              spin|pulse|fillColor",
+//                   "direction":"bottom|top|left|right",   // flyIn / wipe / flyOut / wipeOut
+//                   "byParagraph":true,                    // 要点逐条出现
+//                   "start":"with|after",                  // 同一页多个形状时：同时 / 依次
+//                   "delay":秒, "duration":秒,
+//                   "target":"text|all|media",              // 默认 text = 有文字的形状
+//                   "only":[1,3],                           // 只动第几个目标（1 起算）
+//                   "color":"C00000" }                      // fillColor 用
+//               | [ {…}, {…} ]                            // 数组：一页多个效果，各占一次点击
+//     典型：封面主标题飞入 = 该页 animate:{preset:flyIn,direction:bottom}；
+//            要点逐条出现 = animate:{preset:fade,byParagraph:true}；
+//            全稿统一淡入 = 顶层 animate:"fade"；逐页切换 = 顶层 transition:"fade"。
+//     既有稿加动画：action:edit + ops:[{op:"animate",slides:[1],animate:{…}}]。
+//     限制（据实告知，不要夸大）：只做经典效果，**没有 morph（变形）与 3D**；
+//       切换的“任意毫秒时长”映射到 fast/med/slow 三档；逐段播放需在 PowerPoint 里看一眼
+//       （自动化只能保证文件完好、打开不需修复）。返回 JSON 的 animations 字段报出实际用量。
 //
 //   PALETTES（theme 的命名调色板，18 套；每套 5 色，角色由亮度/彩度自动分配）：
 //     modern-wellness  business-authority  nature-outdoors  vintage-academic
@@ -964,6 +992,8 @@ public class Skill
     {
         try
         {
+            // 线程静态的状态每轮都要清：技能宿主可能复用同一个线程（否则上一轮的动画默认会泄到下一轮）
+            ResetAnimation();
             // 读取模式：不生成文件，只把既有 pptx 的内容读回来
             var readPath = ExtractReadPath(input);
             if (readPath is not null) return ReadDeck(readPath);
@@ -1025,6 +1055,8 @@ public class Skill
                 // 原生图表用量与降级原因：调了却没用上必须说清楚，不能静默降级
                 + ",\"nativeCharts\":" + _nativeCharts
                 + ",\"nativeChartFallback\":" + (_nativeFallback is null ? "null" : Js(_nativeFallback))
+                // 动画/切换回显：让调用方看得到“要求的效果到底加上没有”（0 就是没加）
+                + ",\"animations\":" + AnimationSummaryJson()
                 + ",\"message\":" + Js("已生成演示文稿：" + built.Path
                     + (LibraryPhotoCount > 0 ? "（其中 " + LibraryPhotoCount + " 张来自团队图库）" : "")
                     + (NetworkPhotoCount > 0
@@ -1088,6 +1120,7 @@ public class Skill
             var issueCount = 0;
             var slideNo = 0;
             var emptyPages = 0;
+            var animatedSlides = 0;
             foreach (var id in presPart.Presentation.SlideIdList?.Elements<P.SlideId>() ?? [])
             {
                 var relId = id.RelationshipId?.Value;
@@ -1158,11 +1191,24 @@ public class Skill
                                 + Math.Round(need / 12700.0) + "pt，框高只有 " + Math.Round(tb.H / 12700.0)
                                 + "pt：“" + Trim60(tb.Text) + "”");
                     }
+                // 动画指向的形状 id 必须真实存在，否则 PowerPoint 打开会判“需要修复”
+                // （我们生成的稿子不会错，但 action:edit 改过的外部稿与人工改动都可能出现悬空引用）
+                var shapeIds = sp.Slide.Descendants<P.NonVisualDrawingProperties>()
+                    .Select(x => x.Id?.Value).Where(v => v.HasValue).Select(v => v!.Value).ToHashSet();
+                foreach (var tgt in sp.Slide.Descendants<P.ShapeTarget>())
+                {
+                    // 注意：SDK 里 ShapeId 是字符串（schema 上是 xsd:unsignedInt）
+                    if (uint.TryParse(tgt.ShapeId?.Value, out var sid) && !shapeIds.Contains(sid))
+                        Issue("animTarget", "动画指向页内不存在的形状 id=" + sid + "（PowerPoint 会判“需要修复”）");
+                }
+                if (sp.Slide.GetFirstChild<P.Timing>() is not null) animatedSlides++;
+
             }
 
             return "{\"ok\":true,\"action\":\"qa\",\"scene\":" + Js(SceneName)
                 + ",\"source\":" + Js(path) + ",\"slides\":" + slideNo
                 + ",\"emptySlides\":" + emptyPages
+                + ",\"animatedSlides\":" + animatedSlides
                 + ",\"issueCount\":" + issueCount
                 + ",\"issues\":[" + issues + "]"
                 + ",\"message\":" + Js(issueCount == 0
@@ -1320,9 +1366,15 @@ public class Skill
                         case "append":
                             applied.Add(AppendSlides(presPart, op));
                             break;
+                        case "animate":
+                            applied.Add(AnimateSlides(presPart, op));
+                            break;
+                        case "transition":
+                            applied.Add(TransitionSlides(presPart, op));
+                            break;
                         default:
                             throw new InvalidOperationException("不支持的 op：" + kind
-                                + "（可用：delete / reorder / duplicate / replaceText / append）");
+                                + "（可用：delete / reorder / duplicate / replaceText / append / animate / transition）");
                     }
                 }
                 presPart.Presentation.Save();
@@ -1343,6 +1395,7 @@ public class Skill
             return "{\"ok\":true,\"action\":\"edit\",\"scene\":" + Js(SceneName)
                 + ",\"source\":" + Js(path) + ",\"path\":" + Js(outPath)
                 + ",\"applied\":[" + string.Join(",", applied.Select(Js)) + "]"
+                + ",\"animations\":" + AnimationSummaryJson()
                 + ",\"warnings\":[" + string.Join(",", (_warnings ?? []).Select(Js)) + "]"
                 + ",\"qa\":" + qaJson + produce
                 + ",\"message\":" + Js("已编辑：" + outPath + "（原文件未动）") + "}";
@@ -1544,6 +1597,10 @@ public class Skill
         _nativeFallback = null;
         _titleRule = root.TryGetProperty("titleRule", out var trEl) && trEl.ValueKind == JsonValueKind.True;
         _warnings = new List<string>();
+        // 顶层的 animate / transition 作为全稿默认，页级同名字段覆盖它
+        _defaultAnims = ParseAnims(root);
+        _defaultTrans = ParseTrans(root);
+        if (_defaultTrans is { Preset: "none" }) _defaultTrans = null;
         // 联网配图的会话状态：缓存 / 署名清单 / 熔断 / 端点覆盖
         _photoCache = new Dictionary<string, Photo?>(StringComparer.OrdinalIgnoreCase);
         _photos = new List<Photo>();
@@ -2074,7 +2131,11 @@ public class Skill
     }
 
     // ===== 各页面类型 =====
+    /// <summary>渲染一页，并注入页间切换与动画（没请求时输出与从前<b>逐字节一致</b>）。</summary>
     private static string RenderSlide(JsonElement el, SlideCtx ctx)
+        => WithAnimation(RenderSlideRaw(el, ctx), el, ctx.Theme);
+
+    private static string RenderSlideRaw(JsonElement el, SlideCtx ctx)
     {
         var type = (Str(el, "type") ?? "content").Trim().ToLowerInvariant();
         var t = ctx.Theme;
@@ -2490,8 +2551,11 @@ public class Skill
         var t = ctx.Theme;
         var sb = new StringBuilder();
         sb.Append(Rect(ctx.NextId(), BadgeX, BadgeY, BadgeW, BadgeW, t.Accent, radius: true));
+        // 名字标记：动画排目标时靠它跳过装饰形状（见 DiscoverTargets）——
+        // 不标的话“逐段”会把页码也当一个文字形状，多出一条数字动效
         sb.Append(TextBox(ctx.NextId(), BadgeX, BadgeY, BadgeW, BadgeW,
-            Para(ctx.Index.ToString("00"), 1100, t.OnAccent, bold: true, align: "ctr"), anchor: "ctr"));
+            Para(ctx.Index.ToString("00"), 1100, t.OnAccent, bold: true, align: "ctr"), anchor: "ctr",
+            name: DecoBadgeName));
         return sb.ToString();
     }
 
@@ -6301,6 +6365,703 @@ public class Skill
         notesPart.NotesSlide.Save();
     }
 
+    // ===== 动画（AnimationML）与页间切换（transition）=====
+    //
+    // 【结构不是凭记忆写的】逐项对齐**真实 PowerPoint 产物**的 <p:timing> / <p:transition>，样本取自
+    // LibreOffice 回归库 sd/qa/unit/data/pptx/*.pptx：
+    //   connector-shape-animations（wipe：presetID=22 / filter=wipe(up) / sub=1）
+    //   tdf124457（flyIn：presetID=2 / sub=4 / p:anim 的 ppt_x+ppt_y 位移，1+#ppt_h/2 → #ppt_y）
+    //   tdf107608（exit fade：animEffect transition="out" + set hidden，delay=dur-1）
+    //   tdf112280（spin：emph presetID=8 / animRot by=21600000）
+    //   tdf112333（fill color：emph presetID=1 sub=2 / animClr + 两个 set）
+    //   tdf168755（SmartArt 的 bldGraphic/bldAsOne）；tdf102788 等（fade=10、dissolve=9）
+    // 元素次序遵循 CT_Slide：cSld → clrMapOvr → **transition** → **timing** → extLst
+    //（与 MS 文档 “Working with animation” 的同一段次序说明一致）。
+    //
+    // 【铁律】没请求动画时，输出与从前**逐字节一致**：注入只在 WithAnimation 里发生，
+    //   所以既有稿子、既有单测（逐变体比 XML）都不受影响。
+    //
+    // 【不做 p14/p15 扩展效果】morph（变形）/3D/掠夺型切换需要 mc:AlternateContent + p14 命名空间，
+    //   写错会被 PowerPoint 判“需要修复”；这里只做经典（2007 schema）效果，覆盖面够用、且可被
+    //   OpenXmlValidator 与 LibreOffice 逐层校验。
+    //
+    // 【做不到的部分如实说】PowerPoint 的“逐段”（文本按段分开播放）在规范里没有唯一写法，
+    //   这里用“每个段落一个效果节点 + bldP build="p"”（与 PowerPoint 自身输出的形状一致），
+    //   并把它做成**可选**（byParagraph，默认关）；自动化只能证明“包是好的、打开不需要修复”，
+    //   播放观感需在 PowerPoint 里看一眼（LibreOffice 导 PDF 会丢掉动画层）。
+
+    /// <summary>本次生成用的顶层动画默认（页级 animate 覆盖它）。</summary>
+    [ThreadStatic] private static List<AnimSpec>? _defaultAnims;
+    /// <summary>本次生成用的顶层切换默认（页级 transition 覆盖它）。</summary>
+    [ThreadStatic] private static TransSpec? _defaultTrans;
+    /// <summary>本次生成/编辑里带“入场动画”的页数、效果总数、带切换的页数（回显给调用方）。</summary>
+    [ThreadStatic] private static int _animPages;
+    [ThreadStatic] private static int _animEffects;
+    [ThreadStatic] private static int _animTransCount;
+    /// <summary>本次实际用到的预设名（去重，保序）——回显给调用方看“到底用了哪些效果”。</summary>
+    [ThreadStatic] private static List<string>? _animPresets;
+
+    private static void NoteAnimated(string preset)
+    {
+        var list = _animPresets ??= new List<string>();
+        if (!list.Contains(preset)) list.Add(preset);
+    }
+
+    /// <summary>一次动画请求（页级或顶层默认）。字符串简写 = 只给预设名。</summary>
+    private sealed class AnimSpec
+    {
+        public string Preset = "fade";
+        public string Direction = "";
+        public string Start = "";
+        public string Target = "text";
+        public string? Color;
+        public bool ByParagraph;
+        public double Delay;
+        public double Duration;
+        public int[]? Only;
+    }
+
+    /// <summary>一次页间切换请求。Preset="none" 表示显式关闭（用它区分“没写”与“写了不要”）。</summary>
+    private sealed class TransSpec
+    {
+        public string Preset = "fade";
+        public string Direction = "";
+        public string Orientation = "";
+        public int Spokes = 4;
+        public string Speed = "";
+        public double Duration;
+        public double AdvanceAfter;
+        public bool AdvClick = true;
+        public bool ThroughBlack;
+    }
+
+    /// <summary>页里一个可动画的目标：形状 id + 是不是文本框（决定能不能“逐段”）+ 有文字的段落数。</summary>
+    private sealed class AnimTarget
+    {
+        public int Id;
+        public bool IsShape;
+        public int Paragraphs;
+    }
+
+    /// <summary>预设解析结果：动画类 + 预设号 + 子类型 + 行为（filter / 位移 / 强调）。</summary>
+    private sealed class AnimPreset
+    {
+        public string Cls = "entr";   // entr | exit | emph
+        public int Id;                 // presetID（0 = 该预设没实测到编号 → 不写，PowerPoint 显示为“自定义”）
+        public int Sub;                // presetSubtype（方向；仅影响 PowerPoint 里的方向标签）
+        public string Filter = "";     // animEffect 的 filter
+        public string Motion = "";     // 位移方向 bottom|top|left|right（用 p:anim + tavLst 实现）
+        public string Emph = "";       // 强调行为 spin|scale|color
+        public string? Color;          // 强调行为用的颜色（fillColor；缺省用主题强调色）
+    }
+
+    /// <summary>全部可用预设名（报错提示与文档共用一份）。</summary>
+    private const string AnimPresetNames =
+        "appear(出现) / fade(淡入) / flyIn(飞入，可给 direction) / wipe(擦除，可给 direction) / dissolve(溶解) / "
+        + "disappear(消失) / fadeOut(淡出) / flyOut(飞出) / wipeOut(擦除退出) / dissolveOut(溶解退出) / "
+        + "spin(旋转强调) / pulse(放大回弹强调) / fillColor(变色强调)";
+
+    /// <summary>全部可用的页间切换名。</summary>
+    private const string TransNames =
+        "fade / cut / dissolve / newsflash / wedge / random / push / wipe / cover / pull / zoom / split / "
+        + "blinds / checker(棋盘) / circle / comb / diamond / plus / randomBar / strips / wheel";
+
+    /// <summary>
+    /// 把名字解析成预设。**未知名字一律抛错**，不静默回落：
+    /// 静默回落会变成“用户要了动画、文件里一个都没有”，而返回值还写着成功——比报错糟得多。
+    /// </summary>
+    private static bool TryPreset(string name, string dir, out AnimPreset p)
+    {
+        p = new AnimPreset();
+        var n = (name ?? "").Trim().ToLowerInvariant().Replace(" ", "").Replace("_", "").Replace("-", "");
+        switch (n)
+        {
+            case "appear": p.Cls = "entr"; p.Id = 1; return true;
+            case "fade": case "fadein":
+                p.Cls = "entr"; p.Id = 10; p.Filter = "fade"; return true;
+            case "dissolve": case "dissolvein":
+                p.Cls = "entr"; p.Id = 9; p.Filter = "dissolve"; return true;
+            case "flyin": case "fly":
+                p.Cls = "entr"; p.Id = 2; p.Motion = Dir4(dir, "bottom"); p.Sub = FlySub(p.Motion); return true;
+            case "wipe": case "wipein":
+                p.Cls = "entr"; p.Id = 22; p.Filter = "wipe(" + WipeFilter(dir) + ")"; p.Sub = WipeSub(dir); return true;
+            case "disappear":
+                p.Cls = "exit"; p.Id = 1; return true;
+            case "fadeout":
+                p.Cls = "exit"; p.Id = 10; p.Filter = "fade"; return true;
+            case "dissolveout":
+                p.Cls = "exit"; p.Id = 9; p.Filter = "dissolve"; return true;
+            case "flyout":
+                p.Cls = "exit"; p.Id = 2; p.Motion = Dir4(dir, "bottom"); p.Sub = FlySub(p.Motion); return true;
+            case "wipeout":
+                p.Cls = "exit"; p.Id = 22; p.Filter = "wipe(" + WipeFilter(dir) + ")"; p.Sub = WipeSub(dir); return true;
+            case "spin":
+                p.Cls = "emph"; p.Id = 8; p.Emph = "spin"; return true;
+            case "pulse": case "growshrink": case "grow":
+                p.Cls = "emph"; p.Emph = "scale"; return true;
+            case "fillcolor": case "color": case "changecolor":
+                p.Cls = "emph"; p.Id = 1; p.Sub = 2; p.Emph = "color"; return true;
+            default: return false;
+        }
+    }
+
+    /// <summary>把方向写法归一成 bottom|top|left|right（也接受 up/down/fromX/中文“上/下/左/右”）。</summary>
+    private static string Dir4(string raw, string fallback)
+    {
+        var d = (raw ?? "").Trim().ToLowerInvariant().Replace("from", "").Replace("_", "").Replace("-", "");
+        switch (d)
+        {
+            case "": return fallback;
+            case "bottom": case "down": case "b": case "下": return "bottom";
+            case "top": case "up": case "t": case "上": return "top";
+            case "left": case "l": case "左": return "left";
+            case "right": case "r": case "右": return "right";
+            default:
+                throw new InvalidOperationException("animation.direction 不支持“" + raw
+                    + "”（可用 bottom|top|left|right）");
+        }
+    }
+
+    /// <summary>Fly In/Out 的方向编号：实测 sub=4 对应“从下方飞入”。</summary>
+    private static int FlySub(string dir)
+        => dir switch { "top" => 1, "right" => 2, "bottom" => 4, "left" => 8, _ => 4 };
+
+    /// <summary>
+    /// Wipe 的 filter 方向：语义是“从哪个方向擦进来”，所以从下方进入 = wipe(up)（实测确认）。
+    /// </summary>
+    private static string WipeFilter(string raw)
+        => Dir4(raw, "bottom") switch { "bottom" => "up", "top" => "down", "left" => "right", _ => "left" };
+
+    /// <summary>Wipe 的子类型编号（只影响 PowerPoint 里的方向标签；filter 才决定实际效果）。</summary>
+    private static int WipeSub(string raw)
+        => Dir4(raw, "bottom") switch { "bottom" => 1, "left" => 2, "top" => 3, _ => 4 };
+
+    /// <summary>解析页级/顶层的 <c>animate</c>：字符串简写 / 对象 / 数组（多个效果）/ false（显式关）。</summary>
+    private static List<AnimSpec>? ParseAnims(JsonElement el, string prop = "animate")
+    {
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind is JsonValueKind.Null or JsonValueKind.False) return [];
+        if (v.ValueKind == JsonValueKind.String)
+        {
+            var name = (v.GetString() ?? "").Trim();
+            return name.Length == 0 || name is "none" or "off" ? [] : [AnimSpecFrom(null, name)];
+        }
+        if (v.ValueKind == JsonValueKind.Object && Undefined(v)) return null;   // 空对象 = 没写
+        if (v.ValueKind == JsonValueKind.Object) return [AnimSpecFrom(v, Str(v, "preset") ?? "fade")];
+        if (v.ValueKind != JsonValueKind.Array) return null;
+        var list = new List<AnimSpec>();
+        foreach (var e in v.EnumerateArray())
+        {
+            if (e.ValueKind == JsonValueKind.String) list.Add(AnimSpecFrom(null, e.GetString() ?? ""));
+            else if (e.ValueKind == JsonValueKind.Object) list.Add(AnimSpecFrom(e, Str(e, "preset") ?? "fade"));
+        }
+        return list;
+    }
+
+    /// <summary>对象里没有任何属性（模型偶尔会写 "animate":{}）。</summary>
+    private static bool Undefined(JsonElement o)
+    {
+        foreach (var _ in o.EnumerateObject()) return false;
+        return true;
+    }
+
+    private static AnimSpec AnimSpecFrom(JsonElement? o, string preset)
+    {
+        var s = new AnimSpec { Preset = (preset ?? "").Trim() };
+        if (o is not { } e) return s;
+        s.Direction = Str(e, "direction") ?? "";
+        s.Start = (Str(e, "start") ?? "").Trim().ToLowerInvariant();
+        s.Target = (Str(e, "target") ?? "text").Trim().ToLowerInvariant();
+        s.Color = Str(e, "color");
+        s.ByParagraph = e.TryGetProperty("byParagraph", out var bp) && bp.ValueKind == JsonValueKind.True;
+        s.Delay = NumOf(e, "delay", 0);
+        s.Duration = NumOf(e, "duration", 0);
+        var only = IntList(e, "only");
+        if (only.Count > 0) s.Only = only.ToArray();
+        return s;
+    }
+
+    /// <summary>解析 <c>transition</c>：字符串简写 / 对象 / false（显式关）。没写返回 null（= 用默认）。</summary>
+    private static TransSpec? ParseTrans(JsonElement el, string prop = "transition")
+    {
+        if (!el.TryGetProperty(prop, out var v)) return null;
+        if (v.ValueKind is JsonValueKind.Null or JsonValueKind.False) return new TransSpec { Preset = "none" };
+        if (v.ValueKind == JsonValueKind.String)
+        {
+            var name = (v.GetString() ?? "").Trim().ToLowerInvariant();
+            return name.Length == 0 || name is "none" or "off" ? new TransSpec { Preset = "none" } : new TransSpec { Preset = name };
+        }
+        if (v.ValueKind != JsonValueKind.Object || Undefined(v)) return null;
+        var t = new TransSpec { Preset = (Str(v, "preset") ?? "fade").Trim().ToLowerInvariant() };
+        if (t.Preset is "none" or "off") { t.Preset = "none"; return t; }
+        t.Direction = (Str(v, "direction") ?? "").Trim().ToLowerInvariant();
+        t.Orientation = (Str(v, "orientation") ?? "").Trim().ToLowerInvariant();
+        t.Speed = (Str(v, "speed") ?? "").Trim().ToLowerInvariant();
+        t.Spokes = IntOf(v, "spokes", 4);
+        t.Duration = NumOf(v, "duration", 0);
+        t.AdvanceAfter = NumOf(v, "advanceAfter", 0);
+        t.AdvClick = !(v.TryGetProperty("advanceOn", out var ao)
+            && (ao.GetString() ?? "").Trim().ToLowerInvariant() is "after" or "time" or "auto");
+        t.ThroughBlack = v.TryGetProperty("throughBlack", out var tb) && tb.ValueKind == JsonValueKind.True;
+        return t;
+    }
+
+    /// <summary>纯装饰形状的名字标记（动画排目标时靠它排除，见 DiscoverTargets）。</summary>
+    private const string DecoBadgeName = "PageBadge";
+
+    /// <summary>页里全部可动画目标（文档顺序 = 阅读顺序；我们生成的页是扁平 spTree，没有分组）。</summary>
+    private static List<AnimTarget> DiscoverTargets(P.Slide slide)
+    {
+        var list = new List<AnimTarget>();
+        var tree = slide.CommonSlideData?.ShapeTree;
+        if (tree is null) return list;
+        foreach (var child in tree.Elements())
+        {
+            // spTree 自己的 cNvPr（id=1）不是形状；分组形状（外部文件才有）算一个目标
+            if (child is P.NonVisualGroupShapeProperties) continue;
+            var props = child.Descendants<P.NonVisualDrawingProperties>().FirstOrDefault();
+            var id = props?.Id?.Value;
+            if (id is null or 0) continue;
+            // 页码徽标等装饰形状不参与动画（它们不是“内容”，动起来只是噪声）
+            if (props!.Name?.Value is { } nm && nm.StartsWith(DecoBadgeName, StringComparison.Ordinal)) continue;
+            var paras = child.Descendants<A.Paragraph>()
+                .Count(x => x.Descendants<A.Text>().Any(t => !string.IsNullOrWhiteSpace(t.Text)));
+            list.Add(new AnimTarget { Id = (int)id.Value, IsShape = child is P.Shape, Paragraphs = paras });
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 按 target/only 从全部目标里挑出本次要动的形状。
+    /// target：text（默认，有文字的形状）/ all（所有形状，含图片与装饰）/ media（图片·图表·表格框）。
+    /// only：只动第几个（1 起算，序号按**本 spec 挑完之后的列表**算）。
+    /// </summary>
+    private static List<AnimTarget> SelectTargets(List<AnimTarget> all, AnimSpec s, out string? note)
+    {
+        note = null;
+        IEnumerable<AnimTarget> sel = s.Target switch
+        {
+            "" or "text" => all.Where(t => t.Paragraphs > 0),
+            "all" => all,
+            "media" or "picture" or "image" => all.Where(t => t.Paragraphs == 0),
+            _ => throw new InvalidOperationException("animate.target 只支持 text|all|media，收到：“" + s.Target + "”"),
+        };
+        var list = sel.ToList();
+        if (list.Count == 0)
+        {
+            note = "本页没有可动画的" + (s.Target == "text" ? "文字形状" : "形状")
+                + "（预设 " + s.Preset + " 已跳过；若想连图片/装饰一起动，请写 \"target\":\"all\"）";
+            return list;
+        }
+        if (s.Only is { Length: > 0 })
+        {
+            var picked = new List<AnimTarget>();
+            foreach (var n in s.Only)
+                if (n >= 1 && n <= list.Count) picked.Add(list[n - 1]);
+                else note = "animate.only 里的 " + n + " 超出本页可动画形状数（" + list.Count + " 个），已忽略该项";
+            list = picked;
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 生成一页的 <c>&lt;p:timing&gt;</c>。没有可动画目标时返回空串（并已写 warning）。
+    /// 时间线骨架与真实产物一致：tmRoot(1) → mainSeq(2) → 每个 spec 一个“点击组” → 每个目标一个效果节点。
+    /// </summary>
+    private static string BuildTimingXml(P.Slide slide, List<AnimSpec> specs, Theme theme, out int effectCount)
+    {
+        effectCount = 0;
+        var targets = DiscoverTargets(slide);
+        var groups = new StringBuilder();
+        var animated = new List<AnimTarget>();
+        var paraBuild = new HashSet<int>();
+        var nextId = 3;   // 1 = tmRoot，2 = mainSeq
+
+        foreach (var spec in specs)
+        {
+            if (!TryPreset(spec.Preset, spec.Direction, out var preset))
+                throw new InvalidOperationException("不支持的动画预设：“" + spec.Preset + "”。可用：" + AnimPresetNames);
+            NoteAnimated(spec.Preset);
+            preset.Color = spec.Color;
+
+            var sel = SelectTargets(targets, spec, out var note);
+            if (note is not null) Warn(note);
+            if (sel.Count == 0) continue;
+
+            var dur = spec.Duration > 0
+                ? (int)Math.Round(spec.Duration * 1000)
+                : (preset.Cls == "emph" ? 700 : 500);
+            var delay = (int)Math.Round(Math.Max(0, spec.Delay) * 1000);
+
+            var clickId = nextId++;
+            var groupId = nextId++;
+            var inner = new StringBuilder();
+            var first = true;
+            foreach (var t in sel)
+            {
+                var times = spec.ByParagraph && t.IsShape && t.Paragraphs > 1 ? t.Paragraphs : 1;
+                if (times > 1) paraBuild.Add(t.Id);
+                for (var k = 0; k < times; k++)
+                {
+                    // 组内第一个是“点一下开始”，同一形状的第 2..n 段（或显式 start:"after"）依次接在后面
+                    var nodeType = first
+                        ? "clickEffect"
+                        : (times > 1 || spec.Start is "after" or "afterprevious" ? "afterEffect" : "withEffect");
+                    inner.Append(EffectNode(preset, t.Id, dur, delay, nodeType, theme, ref nextId));
+                    first = false;
+                    effectCount++;
+                }
+                if (!animated.Any(x => x.Id == t.Id)) animated.Add(t);
+            }
+
+            groups.Append("<p:par><p:cTn id=\"").Append(clickId).Append("\" fill=\"hold\"><p:stCondLst><p:cond delay=\"indefinite\"/></p:stCondLst><p:childTnLst>")
+                  .Append("<p:par><p:cTn id=\"").Append(groupId).Append("\" fill=\"hold\"><p:stCondLst><p:cond delay=\"0\"/></p:stCondLst><p:childTnLst>")
+                  .Append(inner)
+                  .Append("</p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par>");
+        }
+
+        if (effectCount == 0) return "";
+
+        var bld = new StringBuilder();
+        foreach (var t in animated)
+        {
+            // 图形框（表格/图表）不能按段落 build；用实测到的 bldGraphic + bldAsOne
+            // 注意：build="p" 是 2007 schema 里的值；buildLevel 不在该 schema 内（OpenXmlValidator 会报错）
+            if (!t.IsShape) bld.Append("<p:bldGraphic spid=\"").Append(t.Id).Append("\" grpId=\"0\"><p:bldAsOne/></p:bldGraphic>");
+            else if (paraBuild.Contains(t.Id)) bld.Append("<p:bldP spid=\"").Append(t.Id).Append("\" grpId=\"0\" build=\"p\"/>");
+            else bld.Append("<p:bldP spid=\"").Append(t.Id).Append("\" grpId=\"0\" animBg=\"1\"/>");
+        }
+
+        return new StringBuilder()
+            // 根片段必须自带 xmlns：action:edit 那条路会把这段字符串交给 SDK 的
+            // new P.Timing(xml) 去解析，前缀未声明会直接抛 XmlException
+            //（实测踩到：“'p' is an undeclared prefix”）。注入到 p:sld 里时重复声明也合法。
+            .Append("<p:timing xmlns:p=\"").Append(NS_P).Append("\" xmlns:a=\"").Append(NS_A).Append("\">")
+            .Append("<p:tnLst><p:par><p:cTn id=\"1\" dur=\"indefinite\" restart=\"never\" nodeType=\"tmRoot\"><p:childTnLst>")
+            .Append("<p:seq concurrent=\"1\" nextAc=\"seek\"><p:cTn id=\"2\" dur=\"indefinite\" nodeType=\"mainSeq\"><p:childTnLst>")
+            .Append(groups)
+            .Append("</p:childTnLst></p:cTn>")
+            .Append("<p:prevCondLst><p:cond evt=\"onPrev\" delay=\"0\"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst>")
+            .Append("<p:nextCondLst><p:cond evt=\"onNext\" delay=\"0\"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst>")
+            .Append("</p:seq></p:childTnLst></p:cTn></p:par></p:tnLst>")
+            .Append("<p:bldLst>").Append(bld).Append("</p:bldLst>")
+            .Append("</p:timing>").ToString();
+    }
+
+    /// <summary>一个效果节点（一个目标 / 一个段落）。</summary>
+    private static string EffectNode(AnimPreset p, int spid, int dur, int delay, string nodeType, Theme theme, ref int nextId)
+    {
+        var id = nextId++;
+        var sb = new StringBuilder();
+        sb.Append("<p:par><p:cTn id=\"").Append(id).Append('"');
+        if (p.Id > 0) sb.Append(" presetID=\"").Append(p.Id).Append('"');
+        sb.Append(" presetClass=\"").Append(p.Cls).Append('"');
+        if (p.Sub > 0) sb.Append(" presetSubtype=\"").Append(p.Sub).Append('"');
+        sb.Append(" fill=\"hold\" grpId=\"0\" nodeType=\"").Append(nodeType).Append("\">")
+          .Append("<p:stCondLst><p:cond delay=\"").Append(delay).Append("\"/></p:stCondLst><p:childTnLst>")
+          .Append(Behaviors(p, spid, dur, theme, ref nextId))
+          .Append("</p:childTnLst></p:cTn></p:par>");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 一个效果的行为序列。<b>顺序要紧</b>：入场是“先置可见再动”，出场是“先动再置隐藏”。
+    ///（实测 exit fade：animEffect(dur=500) → set hidden(delay=499)；若先隐藏就什么都看不见。）
+    /// </summary>
+    private static string Behaviors(AnimPreset p, int spid, int dur, Theme theme, ref int nextId)
+    {
+        var sb = new StringBuilder();
+        if (p.Cls == "emph") return EmphBehavior(p, spid, dur, theme, ref nextId);
+        var isExit = p.Cls == "exit";
+        if (!isExit) sb.Append(VisibilitySet(spid, "visible", 0, ref nextId));
+        if (p.Filter.Length > 0)
+            sb.Append("<p:animEffect transition=\"").Append(isExit ? "out" : "in").Append("\" filter=\"").Append(p.Filter)
+              .Append("\"><p:cBhvr><p:cTn id=\"").Append(nextId++).Append("\" dur=\"").Append(dur).Append("\"/><p:tgtEl><p:spTgt spid=\"").Append(spid)
+              .Append("\"/></p:tgtEl></p:cBhvr></p:animEffect>");
+        if (p.Motion.Length > 0) sb.Append(Motion(spid, p.Motion, dur, isExit, ref nextId));
+        if (isExit) sb.Append(VisibilitySet(spid, "hidden", dur - 1, ref nextId));
+        return sb.ToString();
+    }
+
+    private static string EmphBehavior(AnimPreset p, int spid, int dur, Theme theme, ref int nextId)
+    {
+        var sb = new StringBuilder();
+        switch (p.Emph)
+        {
+            case "spin":
+                // 实测：emph presetID=8 + animRot by="21600000"（= 360°）+ attrName "r"
+                sb.Append("<p:animRot by=\"21600000\"><p:cBhvr><p:cTn id=\"").Append(nextId++).Append("\" dur=\"").Append(dur)
+                  .Append("\" fill=\"hold\"/><p:tgtEl><p:spTgt spid=\"").Append(spid)
+                  .Append("\"/></p:tgtEl><p:attrNameLst><p:attrName>r</p:attrName></p:attrNameLst></p:cBhvr></p:animRot>");
+                break;
+            case "scale":
+                // 放大到 120% 再自动回弹（autoRev=1）：不改变稿子的最终观感
+                sb.Append("<p:animScale><p:cBhvr><p:cTn id=\"").Append(nextId++).Append("\" dur=\"").Append(dur)
+                  .Append("\" autoRev=\"1\" fill=\"hold\"/><p:tgtEl><p:spTgt spid=\"").Append(spid)
+                  .Append("\"/></p:tgtEl></p:cBhvr><p:from x=\"100000\" y=\"100000\"/><p:to x=\"120000\" y=\"120000\"/></p:animScale>");
+                break;
+            case "color":
+                // 实测：animClr(clrSpc=rgb) + 两个 set（fill.type=solid / fill.on=true），否则不生效
+                var hex = BareHex(p.Color ?? theme.Accent);
+                sb.Append("<p:animClr clrSpc=\"rgb\" dir=\"cw\"><p:cBhvr><p:cTn id=\"").Append(nextId++).Append("\" dur=\"").Append(dur)
+                  .Append("\" fill=\"hold\"/><p:tgtEl><p:spTgt spid=\"").Append(spid)
+                  .Append("\"/></p:tgtEl><p:attrNameLst><p:attrName>fillcolor</p:attrName></p:attrNameLst></p:cBhvr>")
+                  .Append("<p:to><a:srgbClr val=\"").Append(hex).Append("\"/></p:to></p:animClr>")
+                  .Append(AttrSet(spid, "fill.type", "solid", dur, ref nextId))
+                  .Append(AttrSet(spid, "fill.on", "true", dur, ref nextId));
+                break;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>把形状的 style.visibility 置为 visible/hidden（实测写 dur="1"；出场用 delay=dur-1）。</summary>
+    private static string VisibilitySet(int spid, string val, int delay, ref int nextId)
+        => "<p:set><p:cBhvr><p:cTn id=\"" + nextId++ + "\" dur=\"1\" fill=\"hold\"><p:stCondLst><p:cond delay=\""
+         + Math.Max(0, delay) + "\"/></p:stCondLst></p:cTn><p:tgtEl><p:spTgt spid=\"" + spid
+         + "\"/></p:tgtEl><p:attrNameLst><p:attrName>style.visibility</p:attrName></p:attrNameLst></p:cBhvr><p:to><p:strVal val=\""
+         + val + "\"/></p:to></p:set>";
+
+    /// <summary>写一个“属性=值”的 set（强调用，如 fill.type / fill.on）。</summary>
+    private static string AttrSet(int spid, string attr, string val, int dur, ref int nextId)
+        => "<p:set><p:cBhvr><p:cTn id=\"" + nextId++ + "\" dur=\"" + dur + "\" fill=\"hold\"/><p:tgtEl><p:spTgt spid=\""
+         + spid + "\"/></p:tgtEl><p:attrNameLst><p:attrName>" + attr + "</p:attrName></p:attrNameLst></p:cBhvr><p:to><p:strVal val=\""
+         + val + "\"/></p:to></p:set>";
+
+    /// <summary>
+    /// 位移（Fly In / Fly Out）：用 p:anim + tavLst 描述“从画外到自身位置”，
+    /// 数值取自实测的 fromBottom（1+#ppt_h/2 → #ppt_y），其余方向镜像。
+    /// </summary>
+    private static string Motion(int spid, string dir, int dur, bool isExit, ref int nextId)
+    {
+        string x0, x1, y0, y1;
+        switch (dir)
+        {
+            case "top": x0 = "#ppt_x"; x1 = "#ppt_x"; y0 = "0-#ppt_h/2"; y1 = "#ppt_y"; break;
+            case "left": x0 = "0-#ppt_w/2"; x1 = "#ppt_x"; y0 = "#ppt_y"; y1 = "#ppt_y"; break;
+            case "right": x0 = "1+#ppt_w/2"; x1 = "#ppt_x"; y0 = "#ppt_y"; y1 = "#ppt_y"; break;
+            default: x0 = "#ppt_x"; x1 = "#ppt_x"; y0 = "1+#ppt_h/2"; y1 = "#ppt_y"; break;
+        }
+        if (isExit) { (x0, x1) = (x1, x0); (y0, y1) = (y1, y0); }   // 出场 = 反向飞出画外
+        return Anim(spid, "ppt_x", x0, x1, dur, ref nextId) + Anim(spid, "ppt_y", y0, y1, dur, ref nextId);
+    }
+
+    private static string Anim(int spid, string attr, string from, string to, int dur, ref int nextId)
+        => "<p:anim calcmode=\"lin\" valueType=\"num\"><p:cBhvr additive=\"base\"><p:cTn id=\"" + nextId++
+         + "\" dur=\"" + dur + "\" fill=\"hold\"/><p:tgtEl><p:spTgt spid=\"" + spid
+         + "\"/></p:tgtEl><p:attrNameLst><p:attrName>" + attr + "</p:attrName></p:attrNameLst></p:cBhvr><p:tavLst>"
+         + "<p:tav tm=\"0\"><p:val><p:strVal val=\"" + from + "\"/></p:val></p:tav>"
+         + "<p:tav tm=\"100000\"><p:val><p:strVal val=\"" + to + "\"/></p:val></p:tav></p:tavLst></p:anim>";
+
+    /// <summary>页间切换的 XML（CT_Slide 里排在 timing 之前）。</summary>
+    private static string TransitionXml(TransSpec t)
+    {
+        var preset = (t.Preset ?? "").Trim().ToLowerInvariant();
+        var child = preset switch
+        {
+            "fade" => "<p:fade" + (t.ThroughBlack ? " thruBlk=\"1\"" : "") + "/>",
+            "cut" => "<p:cut" + (t.ThroughBlack ? " thruBlk=\"1\"" : "") + "/>",
+            "dissolve" => "<p:dissolve/>",
+            "newsflash" => "<p:newsflash/>",
+            "wedge" => "<p:wedge/>",
+            "random" => "<p:random/>",
+            "push" => "<p:push dir=\"" + SideDir(t.Direction, "l") + "\"/>",
+            "wipe" => "<p:wipe dir=\"" + SideDir(t.Direction, "l") + "\"/>",
+            "cover" => "<p:cover dir=\"" + EightDir(t.Direction, "l") + "\"/>",
+            "pull" => "<p:pull dir=\"" + EightDir(t.Direction, "l") + "\"/>",
+            "zoom" => "<p:zoom dir=\"" + (t.Direction is "out" ? "out" : "in") + "\"/>",
+            "split" => "<p:split orient=\"" + (t.Orientation is "vert" or "vertical" ? "vert" : "horz") + "\" dir=\""
+                       + (t.Direction is "out" ? "out" : "in") + "\"/>",
+            "blinds" or "checker" or "checkerboard" or "circle" or "comb" or "diamond" or "plus" =>
+                "<p:" + (preset == "checkerboard" ? "checker" : preset) + " dir=\"" + (t.Direction is "out" ? "out" : "in") + "\"/>",
+            "randombar" => "<p:randomBar dir=\"" + (t.Orientation is "vert" or "vertical" ? "vert" : "horz") + "\"/>",
+            "strips" => "<p:strips dir=\"" + CornerDir(t.Direction) + "\"/>",
+            "wheel" => "<p:wheel spokes=\"" + WheelSpokes(t.Spokes) + "\"/>",
+            _ => throw new InvalidOperationException("不支持的页间切换：“" + t.Preset + "”。可用：" + TransNames),
+        };
+
+        var sb = new StringBuilder("<p:transition xmlns:p=\"").Append(NS_P).Append("\" xmlns:a=\"").Append(NS_A).Append("\"");
+        var spd = SpeedOf(t);
+        if (spd.Length > 0) sb.Append(" spd=\"").Append(spd).Append('"');
+        if (t.AdvanceAfter > 0)
+            sb.Append(" advClick=\"0\" advTm=\"").Append((int)Math.Round(t.AdvanceAfter * 1000)).Append('"');
+        else if (!t.AdvClick) sb.Append(" advClick=\"0\"");
+        sb.Append('>').Append(child).Append("</p:transition>");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 经典 <c>p:transition</c> 只有 spd（slow|med|fast）三档；给了秒数就映射到最近的档，
+    /// 并在返回值里说明——不假装支持任意时长（任意时长需要 p14 扩展，见本节开头的取舍说明）。
+    /// </summary>
+    private static string SpeedOf(TransSpec t)
+    {
+        var s = (t.Speed ?? "").Trim().ToLowerInvariant();
+        if (s is "slow" or "med" or "medium" or "fast") return s == "medium" ? "med" : s;
+        if (s.Length > 0 && s != "default") throw new InvalidOperationException("transition.speed 只支持 fast|med|slow，收到：“" + t.Speed + "”");
+        if (t.Duration <= 0) return "";
+        return t.Duration <= 0.5 ? "fast" : t.Duration <= 1.25 ? "med" : "slow";
+    }
+
+    private static string SideDir(string raw, string fallback)
+        => Dir4(raw, fallback) switch { "top" => "u", "bottom" => "d", "left" => "l", _ => "r" };
+
+    private static string EightDir(string raw, string fallback)
+    {
+        var d = (raw ?? "").Trim().ToLowerInvariant();
+        if (d.Length == 0) d = fallback;
+        return d switch
+        {
+            "l" or "left" or "lu" or "leftup" => "lu",
+            "ld" or "leftdown" => "ld",
+            "ru" or "rightup" => "ru",
+            "r" or "right" or "rd" or "rightdown" => "rd",
+            "u" or "up" or "top" or "t" => "u",
+            "d" or "down" or "bottom" or "b" => "d",
+            _ => throw new InvalidOperationException("transition.direction 不支持“" + raw
+                + "”（可用 l|r|u|d|lu|ld|ru|rd）"),
+        };
+    }
+
+    private static string CornerDir(string raw)
+        => (raw ?? "").Trim().ToLowerInvariant() switch
+        {
+            "ru" or "rightup" => "ru",
+            "rd" or "rightdown" or "" => "rd",
+            "lu" or "leftup" => "lu",
+            "ld" or "leftdown" => "ld",
+            _ => throw new InvalidOperationException("transition.direction 只支持 lu|ru|ld|rd，收到：“" + raw + "”"),
+        };
+
+    private static int WheelSpokes(int n) => n is 1 or 2 or 3 or 4 or 8 ? n : 4;
+
+    /// <summary>
+    /// 给一页注入切换与动画。<b>只在有请求时才动手</b>（没请求 → 原样返回，与从前逐字节一致）。
+    /// 注入点：SlideXml 的收尾常量之后、&lt;/p:sld&gt; 之前（CT_Slide 要求 transition 在 timing 之前，
+    /// 两者都在 clrMapOvr 之后）。收尾不匹配就**报错**——宁可失败，也不产出一份顺序错乱、
+    /// 被 PowerPoint 判“需要修复”的文件。
+    /// </summary>
+    private static string WithAnimation(string slideXml, JsonElement el, Theme theme)
+    {
+        var anims = ParseAnims(el) ?? _defaultAnims;
+        var trans = ParseTrans(el) ?? _defaultTrans;
+        if (trans is { Preset: "none" }) trans = null;
+        var hasAnim = anims is { Count: > 0 };
+        if (!hasAnim && trans is null) return slideXml;
+
+        var transXml = trans is null ? "" : TransitionXml(trans);
+        var timingXml = "";
+        if (hasAnim)
+        {
+            timingXml = BuildTimingXml(new P.Slide(slideXml), anims!, theme, out var effects);
+            if (timingXml.Length > 0) { _animPages++; _animEffects += effects; }
+        }
+        if (trans is not null) _animTransCount++;
+        if (transXml.Length == 0 && timingXml.Length == 0) return slideXml;
+
+        const string closing = "</p:sld>";
+        if (!slideXml.EndsWith(closing, StringComparison.Ordinal))
+            throw new InvalidOperationException("页面 XML 收尾不是 </p:sld>，无法注入动画。");
+        return slideXml.Substring(0, slideXml.Length - closing.Length) + transXml + timingXml + closing;
+    }
+
+    /// <summary>把动画/切换汇总成返回 JSON 里的一段（让调用方看得到“到底加了没加”）。</summary>
+    private static string AnimationSummaryJson()
+        => "{\"pages\":" + _animPages + ",\"effects\":" + _animEffects
+           + ",\"transitions\":" + _animTransCount
+           + ",\"presets\":[" + string.Join(",", (_animPresets ?? []).Select(Js)) + "]}";
+
+    private static void ResetAnimation()
+    {
+        _defaultAnims = null;
+        _defaultTrans = null;
+        _animPages = 0;
+        _animEffects = 0;
+        _animTransCount = 0;
+        _animPresets = null;
+    }
+
+    /// <summary>删掉一页里已有的动画时间线（重复执行同一编辑时不叠加）。</summary>
+    private static void StripTiming(P.Slide slide) => slide.RemoveAllChildren<P.Timing>();
+
+    /// <summary>
+    /// 把切换/时间线插到合法位置（CT_Slide 的次序是 transition → timing → extLst）。
+    ///
+    /// <para>
+    /// 只删<b>本次要写的那一种</b>：早先无差别地删掉 timing，结果是“先 animate 再 transition”时，
+    /// 后一个 op 把前一个刚加上的时间线又抹掉了（实测踩到：返回里写着“动画：1 页”，文件里却没有）。
+    /// 插入位置也要看已存在的兄弟元素：有 timing 时，切换必须插在它<b>前面</b>。
+    /// </para>
+    /// </summary>
+    private static void InsertTiming(P.Slide slide, string? transXml, string? timingXml)
+    {
+        if (timingXml is not null) slide.RemoveAllChildren<P.Timing>();
+        if (transXml is not null) slide.RemoveAllChildren<P.Transition>();
+        var ext = slide.GetFirstChild<P.ExtensionList>();
+        var existingTiming = slide.GetFirstChild<P.Timing>();
+        if (transXml is not null)
+        {
+            var t = new P.Transition(transXml);
+            OpenXmlElement? before = existingTiming is not null ? existingTiming : ext;
+            if (before is null) slide.Append(t); else slide.InsertBefore(t, before);
+        }
+        if (timingXml is not null)
+        {
+            var t = new P.Timing(timingXml);
+            if (ext is null) slide.Append(t); else slide.InsertBefore(t, ext);
+        }
+    }
+
+    /// <summary>既有稿的页号选择：<c>slides:[1,3]</c> 优先，其次 <c>slide:2</c>，都没写就是全部页。</summary>
+    private static List<int> PickSlides(JsonElement op, int total)
+    {
+        var list = IntList(op, "slides");
+        if (list.Count == 0 && IntOf(op, "slide", 0) > 0) list.Add(IntOf(op, "slide", 1));
+        if (list.Count == 0) for (var i = 1; i <= total; i++) list.Add(i);
+        return list.Where(n => n >= 1 && n <= total).Distinct().ToList();
+    }
+
+    /// <summary>既有稿加动画：<c>{"op":"animate","slides":[1],"animate":{"preset":"flyIn"}}</c>。</summary>
+    private static string AnimateSlides(PresentationPart presPart, JsonElement op)
+    {
+        var specs = ParseAnims(op);
+        if (specs is null || specs.Count == 0) throw new InvalidOperationException("animate 缺少 animate 规格（如 {\"preset\":\"flyIn\"}）。");
+        var theme = _currentTheme ?? new Theme();
+        var slides = OrderedSlides(presPart);
+        var picked = PickSlides(op, slides.Count);
+        if (picked.Count == 0) throw new InvalidOperationException("animate 的 slides 为空或超出范围（共 " + slides.Count + " 页）。");
+        var pages = 0;
+        foreach (var no in picked)
+        {
+            var slide = slides[no - 1].Part.Slide;
+            StripTiming(slide);
+            var timing = BuildTimingXml(slide, specs, theme, out var effects);
+            if (timing.Length == 0) { Warn("第 " + no + " 页没有可动画的形状，已跳过"); continue; }
+            InsertTiming(slide, null, timing);
+            slide.Save();
+            pages++; _animPages++; _animEffects += effects;
+        }
+        return "动画：" + pages + " 页 / " + _animEffects + " 个效果";
+    }
+
+    /// <summary>既有稿加页间切换：<c>{"op":"transition","slides":[1,2],"transition":{"preset":"push"}}</c>。</summary>
+    private static string TransitionSlides(PresentationPart presPart, JsonElement op)
+    {
+        var t = ParseTrans(op);
+        if (t is null || t.Preset == "none") throw new InvalidOperationException("transition 缺少切换规格（如 {\"preset\":\"fade\"}）。");
+        var slides = OrderedSlides(presPart);
+        var picked = PickSlides(op, slides.Count);
+        if (picked.Count == 0) throw new InvalidOperationException("transition 的 slides 为空或超出范围（共 " + slides.Count + " 页）。");
+        var xml = TransitionXml(t);
+        foreach (var no in picked)
+        {
+            var slide = slides[no - 1].Part.Slide;
+            InsertTiming(slide, xml, null);
+            slide.Save();
+            _animTransCount++;
+        }
+        return "切换：" + picked.Count + " 页（" + t.Preset + "）";
+    }
+
     // ===== XML 片段 =====
     private static string SlideXml(string bg, IEnumerable<string> shapes)
     {
@@ -6330,10 +7091,11 @@ public class Skill
     private static string BareHex(string hex)
         => string.IsNullOrEmpty(hex) || hex[0] != '#' ? hex : hex.Substring(1);
 
-    private static string TextBox(int id, long x, long y, long cx, long cy, string paras, string anchor = "t")
+    private static string TextBox(int id, long x, long y, long cx, long cy, string paras, string anchor = "t",
+        string? name = null)
     {
         var sb = new StringBuilder();
-        sb.Append("<p:sp><p:nvSpPr><p:cNvPr id=\"").Append(id).Append("\" name=\"TextBox ").Append(id).Append("\"/>")
+        sb.Append("<p:sp><p:nvSpPr><p:cNvPr id=\"").Append(id).Append("\" name=\"").Append(name ?? ("TextBox " + id)).Append("\"/>")
           .Append("<p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr>")
           .Append("<p:spPr><a:xfrm><a:off x=\"").Append(x).Append("\" y=\"").Append(y)
           .Append("\"/><a:ext cx=\"").Append(cx).Append("\" cy=\"").Append(cy).Append("\"/></a:xfrm>")

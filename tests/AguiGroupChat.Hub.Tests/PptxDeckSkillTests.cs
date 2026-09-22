@@ -4,6 +4,7 @@ using System.Text.Json;
 using AguiGroupChat.Agents.BuiltinSkills;
 using AguiGroupChat.Agents.Tools;
 using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Presentation;
 using DocumentFormat.OpenXml.Validation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -2803,4 +2804,277 @@ public sealed class PptxDeckSkillTests
 
     private static int CountBlips(string slideXml)
         => slideXml.Split("<a:blip", StringSplitOptions.None).Length - 1;
+
+    // ===== 动画（AnimationML）与页间切换 =====
+
+    /// <summary>一份带动画的稿子：飞入 / 逐段 / 退出，并带顶层与页级切换。</summary>
+    private static string AnimatedDeckJson() => JsonSerializer.Serialize(new
+    {
+        title = "动画能力",
+        transition = new { preset = "fade", duration = 0.4 },
+        slides = new object[]
+        {
+            new
+            {
+                type = "cover", title = "封面飞入", subtitle = "副标题",
+                animate = new { preset = "flyIn", direction = "bottom", duration = 0.75 },
+            },
+            new
+            {
+                type = "content", title = "逐条出现", bullets = new[] { "第一点", "第二点", "第三点" },
+                animate = new { preset = "fade", byParagraph = true },
+            },
+            new
+            {
+                type = "end", title = "结束页", subtitle = "谢谢",
+                transition = new { preset = "push", direction = "left" },
+                animate = "fadeOut",
+            },
+        },
+    });
+
+    private static List<SlidePart> OrderedSlideParts(PresentationDocument doc)
+        => doc.PresentationPart!.Presentation.SlideIdList!.Elements<SlideId>()
+            .Select(id => (SlidePart)doc.PresentationPart.GetPartById(id.RelationshipId!.Value!))
+            .ToList();
+
+    private static List<string> SchemaErrors(string path)
+    {
+        using var pres = PresentationDocument.Open(path, false);
+        return new OpenXmlValidator().Validate(pres)
+            .Where(e => e.ErrorType == ValidationErrorType.Schema)
+            .Select(e => $"{e.Description} @ {e.Path?.XPath}")
+            .Take(20)
+            .ToList();
+    }
+
+    /// <summary>
+    /// 动画必须是<b>真写进 XML 的、且指向真实存在的形状</b>：
+    /// 悬挂的 spid 会被 PowerPoint 判「需要修复」——这正是本能力最大的风险点。
+    /// </summary>
+    [Fact]
+    public void Animations_TargetOnlyExistingShapes_AndPassSchemaValidation()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var result = NewHost().Run(SkillSource(), AnimatedDeckJson(), CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            var path = doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            // 回显：3 页有动画、3 页有切换
+            var anim = doc.RootElement.GetProperty("animations");
+            Assert.Equal(3, anim.GetProperty("pages").GetInt32());
+            Assert.Equal(3, anim.GetProperty("transitions").GetInt32());
+            Assert.True(anim.GetProperty("effects").GetInt32() >= 3, result);
+
+            Assert.Empty(SchemaErrors(path));
+
+            using var pres = PresentationDocument.Open(path, false);
+            var slides = OrderedSlideParts(pres);
+            Assert.Equal(3, slides.Count);
+            foreach (var sp in slides)
+            {
+                var timing = sp.Slide.Descendants<Timing>().FirstOrDefault();
+                if (timing is null) continue;
+                var shapeIds = sp.Slide.Descendants<NonVisualDrawingProperties>()
+                    .Select(x => x.Id?.Value).Where(v => v.HasValue).Select(v => v!.Value).ToHashSet();
+                foreach (var tgt in timing.Descendants<ShapeTarget>())
+                    Assert.True(uint.TryParse(tgt.ShapeId?.Value, out var sid) && shapeIds.Contains(sid),
+                        $"动画指向不存在的形状 id={tgt.ShapeId?.Value}");
+            }
+
+            // 第 1 页：飞入（presetID=2 + 位移动画）；换页淡入
+            var s1 = slides[0].Slide;
+            Assert.Contains(s1.Descendants<CommonTimeNode>(), t => t.PresetId?.Value == 2 && t.PresetClass?.Value == TimeNodePresetClassValues.Entrance);
+            Assert.Contains(s1.Descendants<Animate>(), a => a.Descendants<AttributeName>().Any(n => n.Text == "ppt_y"));
+            Assert.NotNull(s1.Descendants<FadeTransition>().FirstOrDefault());
+
+            // 第 2 页：逐段——标题 1 个效果 + 正文 3 段各一个（共 4 个），并声明 build="p"
+            var s2 = slides[1].Slide;
+            var effects = s2.Descendants<CommonTimeNode>().Count(t => t.NodeType is not null && t.PresetClass is not null);
+            Assert.Equal(4, effects);
+            Assert.Contains(s2.Descendants<BuildParagraph>(), b => b.Build?.Value == ParagraphBuildValues.Paragraph);
+
+            // 第 3 页：退出（presetClass=exit）+ 置隐藏；页级切换覆盖顶层
+            var s3Xml = slides[2].Slide.OuterXml;
+            Assert.Contains("presetClass=\"exit\"", s3Xml);
+            Assert.Contains("val=\"hidden\"", s3Xml);
+            Assert.NotNull(slides[2].Slide.Descendants<PushTransition>().FirstOrDefault());
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// <b>不写动画就一个都不加</b>：这是兼容性承诺（既有稿子/既有测试依赖“输出与从前一致”），
+    /// 也是“不要自作主张给用户加动效”的产品判断。
+    /// </summary>
+    [Fact]
+    public void WithoutAnimationRequest_NoTimingAndNoTransitionIsWritten()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var result = NewHost().Run(SkillSource(), FullDeckJson(), CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            var path = doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+
+            var anim = doc.RootElement.GetProperty("animations");
+            Assert.Equal(0, anim.GetProperty("pages").GetInt32());
+            Assert.Equal(0, anim.GetProperty("effects").GetInt32());
+            Assert.Equal(0, anim.GetProperty("transitions").GetInt32());
+
+            using var pres = PresentationDocument.Open(path, false);
+            foreach (var sp in OrderedSlideParts(pres))
+            {
+                Assert.Null(sp.Slide.Descendants<Timing>().FirstOrDefault());
+                Assert.Null(sp.Slide.Descendants<Transition>().FirstOrDefault());
+            }
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// 预设名/切换名写错必须<b>报错</b>，不能静默回落成“没有动画”：
+    /// 静默回落会变成“用户要了动画、文件里没有，而返回值还写着成功”。
+    /// </summary>
+    [Fact]
+    public void UnknownAnimationOrTransitionPreset_FailsLoudly()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var bad = JsonSerializer.Serialize(new
+            {
+                title = "预设写错",
+                slides = new object[]
+                {
+                    new { type = "content", title = "要点", bullets = new[] { "甲" }, animate = "fadeAwayPlease" },
+                },
+            });
+            var r1 = NewHost().Run(SkillSource(), bad, CancellationToken.None);
+            Assert.Contains("不支持的动画预设", r1);
+
+            var badTrans = JsonSerializer.Serialize(new
+            {
+                title = "切换写错",
+                slides = new object[]
+                {
+                    new { type = "content", title = "要点", bullets = new[] { "甲" }, transition = "swirl" },
+                },
+            });
+            var r2 = NewHost().Run(SkillSource(), badTrans, CancellationToken.None);
+            Assert.Contains("不支持的页间切换", r2);
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>页级 <c>animate:false</c> 关掉顶层默认——顶层开了全稿动画时，个别页要能保持静态。</summary>
+    [Fact]
+    public void PageLevelFalse_OptsOutOfGlobalAnimationDefault()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "页级关闭",
+                animate = "fade",
+                slides = new object[]
+                {
+                    new { type = "content", title = "要动画", bullets = new[] { "甲" } },
+                    new { type = "content", title = "不要动画", bullets = new[] { "乙" }, animate = false },
+                },
+            });
+            var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            var path = doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+            Assert.Equal(1, doc.RootElement.GetProperty("animations").GetProperty("pages").GetInt32());
+
+            using var pres = PresentationDocument.Open(path, false);
+            var slides = OrderedSlideParts(pres);
+            Assert.NotNull(slides[0].Slide.Descendants<Timing>().FirstOrDefault());
+            Assert.Null(slides[1].Slide.Descendants<Timing>().FirstOrDefault());
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    /// <summary>
+    /// 既有稿也能加动画（action:edit + op:animate）：这是用户手里已经出稿的那些稿子的主要通道。
+    /// 只动指定页，且重复执行不叠加（每次都先清掉旧的 p:timing）。
+    /// </summary>
+    [Fact]
+    public void Edit_AddsAnimationToExistingDeck_OnSelectedSlidesOnly()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var host = NewHost();
+            var built = host.Run(SkillSource(), JsonSerializer.Serialize(new
+            {
+                title = "既有稿",
+                slides = new object[]
+                {
+                    new { type = "cover", title = "封面", subtitle = "副标题" },
+                    new { type = "content", title = "要点", bullets = new[] { "甲", "乙" } },
+                },
+            }), CancellationToken.None);
+            using var bd = JsonDocument.Parse(built);
+            Assert.True(bd.RootElement.GetProperty("ok").GetBoolean(), built);
+            var src = bd.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+            var outPath = Path.Combine(outDir, "既有稿_带动画.pptx");
+
+            var edited = host.Run(SkillSource(), JsonSerializer.Serialize(new
+            {
+                action = "edit",
+                path = src,
+                outputPath = outPath,
+                ops = new object[]
+                {
+                    new { op = "animate", slides = new[] { 1 }, animate = new { preset = "flyIn", direction = "bottom" } },
+                    new { op = "transition", slides = new[] { 1, 2 }, transition = new { preset = "wipe", direction = "right" } },
+                },
+            }), CancellationToken.None);
+            using var ed = JsonDocument.Parse(edited);
+            Assert.True(ed.RootElement.GetProperty("ok").GetBoolean(), edited);
+            Assert.Equal(1, ed.RootElement.GetProperty("animations").GetProperty("pages").GetInt32());
+            Assert.Equal(2, ed.RootElement.GetProperty("animations").GetProperty("transitions").GetInt32());
+            Assert.Empty(SchemaErrors(outPath));
+
+            using var pres = PresentationDocument.Open(outPath, false);
+            var slides = OrderedSlideParts(pres);
+            Assert.NotNull(slides[0].Slide.Descendants<Timing>().FirstOrDefault());
+            Assert.Null(slides[1].Slide.Descendants<Timing>().FirstOrDefault());
+            Assert.NotNull(slides[1].Slide.Descendants<WipeTransition>().FirstOrDefault());
+
+            // 原件未被改动（edit 的铁律）
+            using var srcPres = PresentationDocument.Open(src, false);
+            Assert.Null(OrderedSlideParts(srcPres)[0].Slide.Descendants<Timing>().FirstOrDefault());
+
+            // 再跑一次同一条编辑：不叠加（仍然只有一个 p:timing）
+            var again = host.Run(SkillSource(), JsonSerializer.Serialize(new
+            {
+                action = "edit",
+                path = outPath,
+                outputPath = Path.Combine(outDir, "既有稿_带动画2.pptx"),
+                ops = new object[]
+                {
+                    new { op = "animate", slides = new[] { 1 }, animate = new { preset = "flyIn", direction = "bottom" } },
+                },
+            }), CancellationToken.None);
+            using var ad = JsonDocument.Parse(again);
+            var path2 = ad.RootElement.GetProperty("path").GetString()!;
+            using var pres2 = PresentationDocument.Open(path2, false);
+            Assert.Single(OrderedSlideParts(pres2)[0].Slide.Descendants<Timing>());
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
 }

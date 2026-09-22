@@ -133,6 +133,21 @@ public static class BuiltinPptxSkills
             "会生成原生可编辑图表（环形/散点/雷达暂不支持原生，会自动降级为图片并在返回里说明）。" +
             "用户上传的文件以其附件 ID（att_xxx）传入 path/template 即可，平台会解析成真实路径。" +
             "任何一页都可加 \"notes\"（写入演讲者备注）。" +
+            "【动画与翻页切换（可选，默认不加）】用户说“要动画 / 飞入 / 逐条出现 / 淡入 / 翻页效果”时用它，" +
+            "**不要再回答“做不到”**（早期版本不支持，现在支持了）：" +
+            "顶层 transition/animate 作为全稿默认，页级同名字段覆盖它（页级写 false 则关掉该页）。" +
+            "transition 支持 preset(fade|cut|dissolve|newsflash|wedge|random|push|wipe|cover|pull|zoom|split|" +
+            "blinds|checker|circle|comb|diamond|plus|randomBar|strips|wheel)、direction、orientation(horz|vert)、" +
+            "spokes(1|2|3|4|8)、speed(fast|med|slow) 或 duration(秒，映射到三档)、advanceAfter(秒，到点自动翻页)；" +
+            "animate 可写字符串简写或对象，也可写数组（一页多个效果，按顺序各占一次点击）：" +
+            "{preset:appear|fade|flyIn|wipe|dissolve|disappear|fadeOut|flyOut|wipeOut|dissolveOut|spin|pulse|fillColor, " +
+            "direction:bottom|top|left|right（flyIn/wipe 用）, byParagraph:true（要点逐条出现）, start:with|after, " +
+            "delay:秒, duration:秒, target:text|all|media（默认 text=有文字的形状）, only:[1,3]（只动第几个形状）, color:RRGGBB}。" +
+            "常用三个：封面主标题飞入 = 该页 animate:{preset:flyIn,direction:bottom}；要点逐条出现 = " +
+            "animate:{preset:fade,byParagraph:true}；全稿统一淡入 = 顶层 animate:\"fade\" / 逐页切换 = 顶层 transition:\"fade\"。" +
+            "**既有稿也能加动画**：action:edit + ops:[{op:animate,slides:[1],animate:{...}}, {op:transition,slides:[2,3],transition:{preset:push}}]。" +
+            "限制（据实告诉用户，不要夸大）：只做经典效果，没有 morph（变形）与 3D；切换的“任意毫秒时长”映射到 fast/med/slow 三档；" +
+            "逐段播放需真机看一眼（自动化只能保证文件完好）。返回值里的 animations 字段会报出实际加了几页/几个效果。" +
             "【文字多也不会溢出】每页的标题与正文都按真实字形量高后自动缩字号；" +
             "要点页（content / summary 的 list 与 split / toc）实在装不下会自动分页" +
             "（标题带“（n/m）”，不丢任何一条），表格过长同理；" +
@@ -173,7 +188,7 @@ public static class BuiltinPptxSkills
     /// 内置技能版本标识。<b>每次改动内置技能正文都应递增此值</b>，
     /// 以便已部署实例在升级时用新正文刷新旧的持久化快照。
     /// </summary>
-    public const string Version = "2026-09-18.6";
+    public const string Version = "2026-09-21.1";
 
     /// <summary>读取嵌入资源正文；换行统一为 \n（避免不同平台构建产物 CRLF 差异影响编译）。</summary>
     private static string ReadResource(string suffix)
