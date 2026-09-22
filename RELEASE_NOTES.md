@@ -1,3 +1,28 @@
+# AG-UI 群聊桌面版 1.0.161 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.161 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.161 修「生成超时」——**不是页数的问题，是配图把执行预算吃光了**。实测（容器里跑真流程）：**纯文本 41 页只要 4~5.5 秒**，但**4 张联网配图就要 45 秒、8 张正好撞在一次执行 60 秒的硬预算上**；而超时的后果是**整份稿子都没了**——用户看到的就是「生成超时了（一次提交 41 页 + 长备注）。我把页数收敛到 33 页、备注精简后重出一版」，明明页数不是原因，却靠砍页数解决，还白跑一轮。根因：取图预算只在“每次取图前”查一次，而单次取图内部可能是「库检索 10s + 网络检索 8s + 逐个候选下载 12s×N」，能**越过预算好几倍**；**重试那一下还拿着旧的超时值**。现在：每次取图网络调用的超时都**夹到剩余预算内**（剩余不到 3 秒就不开工），重试也重算，预算用尽立即收手；取图上限可用 `AGUI_PHOTO_BUDGET_SEC` 调。另外把实用规模写进了技能描述（单次 ≤ 25 页、联网配图 ≤ 6 张；更大的稿子用 `action:edit` + `op:append` 分批），超时文案不再只说“已中止”，而是直接给出“减少配图/页数或分批 append，不要原样重试”。
+**Version note**: 1.0.161 fixes "generation timed out" — **the page count is not the problem, illustrations eating the execution budget are**. Measured against the real pipeline inside the container: **41 text-only pages take just 4–5.5 seconds**, while **4 web illustrations take 45 seconds and 8 land exactly on the 60-second hard limit** — and a timeout loses **the entire deck**. That is why users saw 「生成超时了（一次提交 41 页 + 长备注）。我把页数收敛到 33 页…重出一版」: page count was not the cause, yet shrinking it was the workaround, costing a wasted round trip. Root cause: the photo budget was only checked *before* each lookup, while one lookup can chain a library search (10s), a web search (8s) and a download per candidate (12s each) — several times the budget — and the retry reused the old timeout. Now every network call in the photo path clamps its timeout to what is left of the budget (giving up under 3s), retries re-clamp, and the phase stops the moment the budget is gone; the budget is tunable through `AGUI_PHOTO_BUDGET_SEC`. The skill description now states the practical limits (up to 25 pages, 6 web illustrations, use `action:edit` + `op:append` for larger decks), and the timeout message tells the model how to retry instead of just reporting that it was aborted.
+
+## 超时的真因：配图吃光预算（1.0.161）
+# The real cause of the timeouts: illustrations (1.0.161)
+
+中文：
+- **实测数据（容器里跑真流程）**：纯文本 41 页 **4.2 秒**；41 页 + 8 页配图 **44.3 秒**、41 页 + 16 页配图 **45.0 秒**（修后均 ok=true，不再撞 60 秒）。修前：4 张配图 45 秒、8 张 **60.2 秒**（= 钉在硬预算上）。
+- **为何“越预算”**：预算只在取图前查一次；单次取图内部可能是「库检索 10s + 检索 8s + 逐个候选下载 12s × N」，而 429/超时的重试还拿着旧超时值再跑一轮。
+- **修法**：`ClampToBudget` —— 每次网络调用的超时夹到剩余预算内（剩余 < 3 秒直接放弃），重试重新夹；预算用尽立刻收手并把其余页降级为题图（如实 Warn），**先保证稿子能出来**。
+- **超时文案可操作了**：现在是「.NET 技能执行超时（…ms），已中止。（不要原样重试：这通常是单次入参过重——文档技能最常见的原因是页数或联网配图太多…请减少配图/页数，或分批执行：先出一部分，再用 action:edit 的 op:append 追加剩下的。）」
+- **提前引导**：技能描述里写明“单次建议 ≤ 25 页、联网配图 ≤ 6 张；更大分批 append”。
+- **回归**：`PhotoBudget_CapsEachNetworkCall_SoTheDeckStillCompletes`（桩每条请求故意挂 30 秒、预算压到 2 秒，断言整个技能几秒内收手并如实报预算用尽）；全量 **1478 通过 / 0 失败**。
+
+English:
+- **Measurements (real pipeline, container)**: 41 text-only pages **4.2s**; 41 pages with 8 illustrated pages **44.3s**; with 16 **45.0s** (all `ok=true` after the fix, none hitting 60s). Before the fix: 4 illustrations took 45s and 8 took **60.2s**, pinned to the hard limit.
+- **Why it overran**: the budget was checked once before each lookup, while a single lookup may chain a library search (10s), a search (8s) and a download per candidate (12s × N), and a 429/timeout retry reused the previous timeout for another full round.
+- **The fix**: `ClampToBudget` — every network call's timeout is clamped to the remaining budget (under 3s left means give up), retries re-clamp, and once the budget is gone the phase stops immediately, degrading the remaining pages to generated art with an honest warning. **The deck always comes out.**
+- **The timeout message is now actionable**: “.NET skill execution timed out (…ms), aborted. (Do not simply retry: this is usually an over-heavy single call — for document skills the most common cause is too many pages or web illustrations… reduce them, or run in batches: emit part of it, then append the rest with action:edit + op:append.)”
+- **Guide the model up front**: the skill description states the practical limits (≤ 25 pages, ≤ 6 web illustrations, append for anything larger).
+- **Regression**: `PhotoBudget_CapsEachNetworkCall_SoTheDeckStillCompletes` (the stub deliberately hangs 30 seconds per request while the budget is 2 seconds; the skill must stop within seconds and report the exhausted budget); full suite **1478 pass / 0 fail**.
+
 # AG-UI 群聊桌面版 1.0.160 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.160 Release Notes (current Windows desktop release)
 
