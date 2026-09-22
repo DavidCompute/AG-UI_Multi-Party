@@ -1,3 +1,26 @@
+# AG-UI 群聊桌面版 1.0.159 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.159 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.159 修「配图不正确 / 图库明明有对应的图片却没用上」。两个成因都查实并修掉：① **本页文字兜底把整段 120 字当一个查询丢过去，被检索“摊薄”**——同一个名字单查 0.76 命中本人照，含它的 47 字整段只有 0.5862，低于 0.60 的可用线，于是图库里明明有照片也落空、降级成网图/题图；现在把本页文字**切成短片段逐个试**（短片段优先、整段作最后兜底、命中够可信就收手，不抢全稿共享的 35 秒取图预算）。② **有 4 次调用根本没拿到图库**：模型给的入参带 ``` 围栏时，平台严格解析失败、异常被吞掉，整轮无图库；现在平台与技能同口径容错解析（取不到则**原样交回**，绝不用空对象顶替）。另外把“词面命中”的定义**收紧了一道**（这是保留该能力而不是削弱它）：查询里必须有**一段连续词项**命中——人名/型号照旧命中，长描述里蹭一个“团队”不再算命中（实测曾以 0.38 分把一张 AI 插画当成命中）。
+**Version note**: 1.0.159 fixes “the illustration is wrong / the library clearly has the matching picture but it was not used”. Both causes were reproduced and fixed: (1) **the page-text fallback handed the whole 120-character page blob to one query and got diluted** — the bare name scores 0.76 against its caption while the 47-character page text containing it scores only 0.5862, under the 0.60 usability gate, so the photo that *was* in the library was missed and the page fell back to a web photo or a generated image; the page text is now **split into short fragments tried one by one** (shortest first, the whole text kept as the last candidate, stopping at the first confident hit so the deck-wide 35-second photo budget still holds). (2) **Four calls got no image library at all**: when the model's payload arrived wrapped in ``` fences the platform's strict parse failed and the exception was swallowed, so that run had no library; the platform now tolerates input the same way the skill does (and hands an unparseable payload back **unchanged**, never replaced by an empty object). The definition of a “word-form hit” was also **tightened** (preserving that capability rather than weakening it): the query must have a **contiguous run of terms** present in the text — names and part numbers still match, while one scattered common word like 团队 in a long description no longer counts (measured: an AI illustration was once accepted at 0.38).
+
+## 配图：短片段兜底 + 注入容错 + 词面证据（1.0.159）
+# Illustrations: fragment fallback, tolerant injection, phrase evidence (1.0.159)
+
+中文：
+- **成因 1（主因）**：本页文字兜底直接用整段（上限 120 字）查图库。检索会按查询词项数**摊薄**，实测同一页内容：`刘佳俊` 单查 **0.76**，含该名字的 47 字整段 **0.5862**（低于可用线）；`AI项目支持团队` 单查 **0.80**，含它的 72 字整段 0.6281（贴线）。修法：按标题分隔符（·｜—）与常见标点切成 2~20 字片段，最多 5 个，**短片段优先**，整段作最后一个兜底候选（不会比改之前更差）；某个片段达到可信分（0.78）就提前收手。
+- **成因 2（并列）**：日志里 `注入图库检索范围失败（按无图库处理）：skill=pptx_deck`——`JsonDocument.Parse` 碰到 ``` 围栏就直接抛异常，被 catch 吞掉，**这一轮完全没有图库**。修法：平台侧与技能侧同口径容错（取首个 `{` 到末个 `}`），取不到就**原样交回**。
+- **词面命中收紧（保留能力，只堵蹭词）**：新增 `Bm25Ranker.HasPhraseEvidence`——查询里必须有**一段连续词项**在文本里也都在；1~2 个词项的短查询不作此要求（避免误伤 `SKU-2026` 这类双词项专有号）。于是 `刘佳俊` / `SKU-2026` / `颁奖典礼合影` 照样命中，而“颁奖 团队 合影”不再因为长描述里恰好有“团队”二字而命中（实测 0.38 分）。
+- **端到端实测**（本机容器，真实图库）：三个**关键词全部落空**的页面（“颁奖典礼 现场 合影”“员工 颁奖 舞台”“集体 合影 会场”），兜底分别配到了 `1刘佳俊.png`(0.762)、`MS.png`(0.762) 等**真实照片**，0 warnings（无网图、无题图降级）；而泛化词（集体/合影/现场）在图库里仍是 0 命中，不会硬塞。
+- **回归**：新增 7 条单测（短片段兜底、围栏入参仍能注入、容错不了要原样交回、人名在严格门下仍被词面召回、长描述蹭词不算命中、词组证据边界、散落词不算命中）；全量 **1470 通过 / 0 失败**。
+
+English:
+- **Cause 1 (the main one)**: the page-text fallback queried the library with the whole blob (up to 120 characters). Retrieval is diluted by the number of query terms: measured on the same page, `刘佳俊` alone scores **0.76** while the 47-character text containing it scores **0.5862** (under the usability gate), and `AI项目支持团队` alone scores **0.80** against 0.6281 for the 72-character blob. The page text is now split on title separators (·｜—) and punctuation into 2–20 character fragments, at most five, shortest first, with the whole text kept as the final candidate (so it is never worse than before); the loop stops once a fragment reaches the confidence score (0.78).
+- **Cause 2**: the log showed `injecting the image-library scope failed (treated as no library): skill=pptx_deck` — `JsonDocument.Parse` threw on ``` fences and the exception was swallowed, so that run had no library at all. The platform now tolerates the input the same way the skill does (first `{` to last `}`) and hands it back **unchanged** when it cannot.
+- **Word-form hits tightened (capability preserved, free-riding closed)**: new `Bm25Ranker.HasPhraseEvidence` requires a **contiguous run of query terms** to appear in the text; queries with only one or two terms are exempt so part numbers like `SKU-2026` are not hurt. So `刘佳俊`, `SKU-2026` and `颁奖典礼合影` still match, while “颁奖 团队 合影” no longer matches merely because a long description happens to contain 团队 (measured at 0.38).
+- **End-to-end on the real library** (local container): three pages whose keywords all missed (“颁奖典礼 现场 合影”, “员工 颁奖 舞台”, “集体 合影 会场”) were matched by the fallback to real photos — `1刘佳俊.png` (0.762), `MS.png` (0.762) — with zero warnings (no web photo, no generated fallback), while generic words (集体/合影/现场) still return nothing rather than forcing a wrong picture in.
+- **Regression**: 7 new tests (fragment fallback, fenced input still gets a scope, unparseable input left untouched, a person name still recalled under a strict gate, a scattered word in a long description no longer counted, phrase-evidence boundaries, isolated terms not counted); full suite **1470 pass / 0 fail**.
+
 # AG-UI 群聊桌面版 1.0.158 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.158 Release Notes (current Windows desktop release)
 
