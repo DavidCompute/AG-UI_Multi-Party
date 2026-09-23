@@ -164,6 +164,13 @@ services:
       Agents__Memory__PersonalTopK: ${MEMORY_PERSONAL_TOP_K:-3}
       Agents__Memory__PersonalMinScore: ${MEMORY_PERSONAL_MIN_SCORE:-0.25}
       Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}
+      # 记忆向量化的输入长度上限（embedding 耗时约 8.5ms/字符，所以这两个值是“检索慢/超时”的主要旋钮）：
+      # 检索 query / 写入内容。写入侧上限同时作用于入库文本与向量（两者必须一致）。
+      Agents__Memory__MaxQueryChars: ${MEMORY_MAX_QUERY_CHARS:-500}
+      Agents__Memory__MaxWriteChars: ${MEMORY_MAX_WRITE_CHARS:-800}
+      # embedding 建连超时（把“连不上”与“排队中”拆开）与单次慢调用告警阈值
+      Agents__Memory__EmbeddingConnectTimeoutSeconds: ${MEMORY_EMBEDDING_CONNECT_TIMEOUT:-5}
+      Agents__Memory__SlowEmbeddingWarnSeconds: ${MEMORY_SLOW_EMBEDDING_WARN:-10}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

@@ -173,6 +173,46 @@ flowchart TB
 
 ---
 
+## 2.4) 记忆向量化的输入预算（Memory embedding input budget）
+
+**现象**：日志出现 `语义记忆检索失败：HttpClient.Timeout of 60 seconds elapsing`——看着像“embedding 服务挂了”，实际是**排队超时**。
+
+**根因（实测，4 核 CPU + bge-m3）**：embedding 耗时由**输入长度**主导，约 **8.5 ms/字符**：
+
+| 输入 | 单条耗时 |
+|---|---|
+| 6 字 | 0.3 s |
+| 1500 字 | **12.7 s** |
+| 1500 字 × 4 条（批量 1 请求） | 49.6 s |
+
+而此前：**写入侧把整条消息原文不限长送进 embedding**（一条 5000 字回复 ≈ 40 s+）；检索侧 query 上限 2000 字（≈17 s/条），一轮提问约 4 条检索（群记忆 / 个人记忆 / 知识库 / 知识库图谱）→ 合计 60 s+，正好撞上传入方 60 秒超时。
+
+**改法**（都是“缩短要算的东西”，不是“提高并发”）：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `Agents:Memory:MaxQueryChars` | **500**（旧 2000） | 检索 query 截断。语义检索只需“主题含义”，500 字足够，且提高信噪比 |
+| `Agents:Memory:MaxWriteChars` | **800**（新增） | 写入侧 embedding 输入上限。**同时作用于入库文本与向量**，两者必须一致，否则“检索命中却内容对不上” |
+| `Agents:Memory:EmbeddingConnectTimeoutSeconds` | **5**（新增） | 把「连不上」与「排队中」分开：建连超时只管连接，总预算（`EmbeddingTimeoutSeconds`）只管排队 + 推理——服务不可用时秒级判死，不再白等满 60 秒 |
+| `Agents:Memory:SlowEmbeddingWarnSeconds` | **10**（新增） | 单次 embedding 超过该秒数记 WARN（带输入字符数）。阈值取 10 而非更小：写入侧 800 字本身约 6.8 秒属正常，只有明显越过（输入未截断 / 服务在排队）才告警 |
+
+**为什么不靠并发 / 并行**（实测对照，8 条同样文本）：
+
+| 模式 | 耗时 |
+|---|---|
+| 串行 8 请求 | 4.59 s |
+| 并发 8 请求（服务端并行槽=1，当前配置） | 2.77 s |
+| 并发 8 请求（并行槽=4） | 2.52 s（**仅比槽=1 快 9%**） |
+| 批量（1 请求 8 输入） | 1.26 s |
+
+- 并行槽 1→4 只快 ~9%，因为瓶颈是“4 个核在算”；代价是每槽一份 KV cache（内存翻倍）。
+- 批量化只对短文本有用（3.6×）；**长文本完全无效**（1500 字 × 4：批量 49.6 s vs 串行 48.7 s）。
+- 所以这是“算术量”问题，不是“并发度”问题：**降低每次要算的字符数**才是杠杆。
+
+> 仍未处理：知识库切片（`Memory:KnowledgeChunkSize=4096`，≈35 s/片）属于后台导入 / 周期沉淀。总量不变，但会长时间占满 embedding 队列，把交互检索挤到超时——后续应把后台批量任务隔到独立小并发池。
+
+---
+
 ## 3) 普通带工具 run 的内部循环（Local streaming + HITL）
 
 ```mermaid
@@ -302,3 +342,4 @@ In one sentence: once a message touches a digital employee, the runtime picks a 
 - 小决策（§2.1）：`AgentCatalog.ResolveDecisionModelName` / `DecideYesNoAsync` / `ParseYesNo` / `ParseAssignTargets`、`AgentGateway.ShouldSpeakAsync` / `RankAssignTargetsAsync`。
 - 复杂度自适应超时（§2.2）：`RunComplexityEstimator` / `RunTimeoutPolicy` / `RunTimeoutBudget`（`src/AguiGroupChat.Agents/RunTimeoutPolicy.cs`）、`AgentGateway.InstallRunBudget` / `ClientSkillTimeout`、`SkillRunner.RunDotnetSkill`、`AgentCatalog.BuildOpenAIChatClient`（网络兜底）。
 - 提示词装配预算（§2.3）：`PromptBudgetOptions`（`src/AguiGroupChat.Hub/Options/PromptBudgetOptions.cs`）、`AgentGateway.BuildUserMessageAsync` / `BuildHistorySection` / `BuildHistoryAttachmentsSectionAsync` / `BuildAttachmentsSectionAsync` / `TrimSectionsToBudget` / `ReportPromptAssembly`、`AttachmentStore.TextCharsPerFile/Total`、`AgentCatalog.BuildReasoningOptions`。
+- 记忆向量化输入预算（§2.4）：`MemoryOptions.MaxQueryChars/MaxWriteChars/SlowEmbeddingWarnSeconds/EmbeddingConnectTimeoutSeconds`、`AgentMessageMemory.ProcessWriteQueueAsync` / `ImportMemoriesAsync`、`HttpEmbeddingProvider`。

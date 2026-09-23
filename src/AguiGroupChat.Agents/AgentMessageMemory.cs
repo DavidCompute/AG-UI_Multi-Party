@@ -65,7 +65,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         var endpoint = m.EmbeddingEndpoint ?? options.Endpoint;
         if (string.IsNullOrWhiteSpace(endpoint)) endpoint = "https://api.openai.com/v1";
         return new HttpEmbeddingProvider(endpoint, m.EmbeddingModel, m.EmbeddingApiKey,
-            m.EmbeddingTimeoutSeconds, logger);
+            m.EmbeddingTimeoutSeconds, logger, m.SlowEmbeddingWarnSeconds, m.EmbeddingConnectTimeoutSeconds);
     }
 
     /// <summary>写入一条记忆：入有界队列异步向量化（不阻塞调用方，失败仅记日志；并发经信号量限流）。
@@ -99,7 +99,12 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 catch (OperationCanceledException) { return; } // 释放时取消
                 try
                 {
-                    var embedding = await _embedding.EmbedAsync(entry.Content);
+                    // 写入侧必须截断：原来是把整条消息原文不限长送进 embedding，
+                    // 实测一条 5000 字的回复要 40 秒以上才能向量化完，而它占着 embedding 队列
+                    //（4 核 CPU 上共 4 个并发槽），会把交互检索挤到超时。
+                    // 截断同时作用于入库文本与向量，两者保持一致。
+                    var stored = Truncate(SanitizeForMemory(entry.Content), _options.MaxWriteChars);
+                    var embedding = await _embedding.EmbedAsync(stored);
                     if (embedding is null || embedding.Length == 0) continue;
                     // 写入侧记忆拟人（仅对“数字员工本人的发言”按作者配置生效；用户消息 / 未配置一律维持旧行为）：
                     // 深记型自动刻深为“重要”级（烙印深、不过期），快速遗忘型在平台自动遗忘开启时保留更短。
@@ -116,7 +121,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                     }
                     _store.Upsert(new MessageMemoryRecord(
                         entry.MessageId, entry.GroupId, entry.TopicId,
-                        entry.SenderId, entry.SenderType, SanitizeForMemory(entry.Content), embedding, entry.Timestamp,
+                        entry.SenderId, entry.SenderType, stored, embedding, entry.Timestamp,
                         importance, expiresAt));
                     _logger.LogDebug("语义记忆已写入：{MessageId}（group={GroupId}，importance={Importance}，expiresAt={ExpiresAt}）",
                         entry.MessageId, entry.GroupId, importance, expiresAt);
@@ -281,12 +286,14 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 if (!await _embeddingLimiter.WaitAsync(TimeSpan.FromSeconds(EmbeddingWaitTimeoutSeconds), ct)) { _logger.LogWarning("记忆导入 embedding 排队超时，跳过 {MessageId}", it.MessageId); continue; }
                 try
                 {
-                    var embedding = await _embedding.EmbedAsync(SanitizeForMemory(it.Content), ct);
+                    // 入库文本与向量必须一致：先按写入上限截断再向量化，否则“检索命中但内容对不上”。
+                    var stored = Truncate(SanitizeForMemory(it.Content), _options.MaxWriteChars);
+                    var embedding = await _embedding.EmbedAsync(stored, ct);
                     if (embedding is null || embedding.Length == 0) continue;
                     var importance = MemoryImportance.IsValid(it.Importance) ? it.Importance : MemoryImportance.Normal;
                     _store.Upsert(new MessageMemoryRecord(
                         it.MessageId, it.GroupId, it.TopicId, it.SenderId, it.SenderType,
-                        SanitizeForMemory(it.Content), embedding, it.Timestamp, importance, it.ExpiresAt));
+                        stored, embedding, it.Timestamp, importance, it.ExpiresAt));
                     imported++;
                 }
                 finally { _embeddingLimiter.Release(); }

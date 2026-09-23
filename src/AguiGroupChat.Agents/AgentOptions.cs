@@ -300,8 +300,38 @@ public sealed class MemoryOptions
     /// 检索命中却看不到完整信息；模型窗口（V4.1-Flash 为 1M）下这点字符量不是瓶颈。</summary>
     public int MaxCharsPerMemory { get; set; } = 1_500;
 
-    /// <summary>检索 query 文本（触发消息）截断长度。</summary>
-    public int MaxQueryChars { get; set; } = 2000;
+    /// <summary>
+    /// 检索 query 文本（触发消息）截断长度（默认 500）。
+    ///
+    /// <para>
+    /// 为何从 2000 降到 500（实测，4 核 CPU + bge-m3）：embedding 耗时由输入长度主导——
+    /// 6 字约 0.3 秒，1500 字就要 **12.7 秒**（约 8.5ms/字符）。而一次用户提问会发起约 4 条检索
+    /// （群记忆 / 个人记忆 / 知识库 / 知识库图谱），2000 字上限意味着单轮最长可能 60 秒以上，
+    /// 直接撞上传入方 60 秒超时。语义检索只需要查询的“主题含义”，500 字足够，反而提高信噪比。
+    /// </para>
+    /// </summary>
+    public int MaxQueryChars { get; set; } = 500;
+
+    /// <summary>
+    /// 写入侧 embedding 输入上限（默认 800 字符）。
+    ///
+    /// <para>
+    /// 为何必须有：写入路径原本把 <b>整条消息原文不限长</b>送进 embedding。按上实测比例，
+    /// 一条 5000 字的回复要 **40 秒以上** 才能向量化完，而且它占着 embedding 队列
+    /// （bge-m3 在 4 核 CPU 上共 4 个并发槽），把交互检索挤到超时。
+    /// 截断会同时作用于<b>入库文本与向量</b>（两者必须一致，否则检索命中却对不上内容）。
+    /// </para>
+    /// </summary>
+    public int MaxWriteChars { get; set; } = 800;
+
+    /// <summary>单次 embedding 耗时超过此秒数就记一条 WARN（默认 10）——把“检索莫名很慢”变成可查的日志。
+    /// 阈值取 10 而非更小：按 8.5ms/字符，写入侧 800 字本身就约 6.8 秒，属正常；
+    /// 只有明显越过（如某处输入未被截断、或服务在排队）才值得告警。</summary>
+    public int SlowEmbeddingWarnSeconds { get; set; } = 10;
+
+    /// <summary>embedding 的<b>连接</b>超时（秒，默认 5）：用于把“服务没起/端口不通”与“排队中”分开。
+    /// 不设时两者共用同一条总超时（<see cref="EmbeddingTimeoutSeconds"/>），导致服务不可用时要白等满整个总预算。</summary>
+    public int EmbeddingConnectTimeoutSeconds { get; set; } = 5;
 
     /// <summary>知识库文档切片大小（字符）：长文本按此窗口切片后向量化，窗口偏小/过长都会影响检索命中。</summary>
     public int KnowledgeChunkSize { get; set; } = 4096;
