@@ -6742,6 +6742,7 @@ function applyExec(d) {
   setCfg("efMaxRecursiveRounds", num(d.maxRecursiveRounds));
   setCfg("efMaxRouteDepth", num(d.maxRouteDepth));
   setCfg("efMaxInteractionRounds", num(d.maxInteractionRounds));
+  setCfg("efMaxAutoApprovedRounds", num(d.maxAutoApprovedRounds));
   setCfg("efExecutionOrder", (d.executionOrder || []).join(", "));
   const el = $("efExecutionOrder");
   el.placeholder = (d.executionOrder && d.executionOrder.length ? d.executionOrder : []).join(",") || "bridge,pipeline,relay,org_route,streaming";
@@ -6776,6 +6777,7 @@ function collectExec() {
     maxRecursiveRounds: numOrNull("efMaxRecursiveRounds"),
     maxRouteDepth: numOrNull("efMaxRouteDepth"),
     maxInteractionRounds: numOrNull("efMaxInteractionRounds"),
+    maxAutoApprovedRounds: numOrNull("efMaxAutoApprovedRounds"),
     executionOrder: order,
     enableBridge: $("efEnableBridge").checked,
     enablePipeline: $("efEnablePipeline").checked,

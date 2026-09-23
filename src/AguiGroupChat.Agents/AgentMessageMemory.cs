@@ -38,18 +38,49 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         });
     private readonly CancellationTokenSource _writeCts = new();
 
-    public AgentMessageMemory(IMessageMemoryStore store, AgentOptions options, ILogger<AgentMessageMemory> logger, IEmbeddingProvider? embeddingProvider = null, Func<string, MemoryProfile?>? authorProfileResolver = null)
+    // 向量化并发闸门（可选）：拆分交互（回复前检索）与后台（写入 / 导入）两个池子，
+    // 避免后台批量任务（知识库入库 / 周期沉淀）把交互检索排到超时。未装配时为 null → 回退旧行为。
+    private readonly EmbeddingGates? _gates;
+
+    public AgentMessageMemory(IMessageMemoryStore store, AgentOptions options, ILogger<AgentMessageMemory> logger, IEmbeddingProvider? embeddingProvider = null, Func<string, MemoryProfile?>? authorProfileResolver = null, EmbeddingGates? gates = null)
     {
         _store = store;
         _options = options.Memory;
         _logger = logger;
         _embedding = embeddingProvider ?? CreateDefaultProvider(options, logger);
         _authorProfileResolver = authorProfileResolver;
+        _gates = gates;
         _logger.LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）",
             _options.Provider, _options.Provider == "llama" ? _options.LlamaModelPath : _options.EmbeddingModel,
             _options.EmbeddingDimensions, _options.Scope, _options.TopK);
         // 后台消费者：串行向量化 + 落库（fire-and-forget，内部已兜底异常）
         _ = Task.Run(ProcessWriteQueueAsync);
+    }
+
+    /// <summary>
+    /// 取一次向量化的执行权。
+    /// <list type="itemdesc">
+    /// <item><b>交互（interactive=true）</b>：回复前检索用。等不到槽位返回 false → 调用方降级为“本次不检索”，
+    /// 绝不让用户为了可选的记忆上下文干等。</item>
+    /// <item><b>后台（interactive=false）</b>：写入 / 导入用。可以多等一会，等不到就跳过本条，不影响调用方。</item>
+    /// </list>
+    /// 未装配闸门（测试 / 旧调用方）时回退旧行为：后台走内建 4 槽信号量，交互不排队。
+    /// </summary>
+    private async Task<bool> EnterEmbeddingAsync(bool interactive, CancellationToken ct)
+    {
+        if (_gates is null)
+            return interactive || await _embeddingLimiter.WaitAsync(TimeSpan.FromSeconds(EmbeddingWaitTimeoutSeconds), ct);
+        return interactive
+            ? await _gates.EnterInteractiveAsync(TimeSpan.FromSeconds(Math.Max(1, _options.InteractiveEmbeddingWaitSeconds)), ct)
+            : await _gates.EnterBackgroundAsync(TimeSpan.FromSeconds(Math.Max(1, _options.BackgroundEmbeddingWaitSeconds)), ct);
+    }
+
+    /// <summary>释放一次向量化的执行权（必须与返回 true 的 <see cref="EnterEmbeddingAsync"/> 成对）。</summary>
+    private void ExitEmbedding(bool interactive)
+    {
+        if (_gates is null) { if (!interactive) _embeddingLimiter.Release(); return; }
+        if (interactive) _gates.ExitInteractive();
+        else _gates.ExitBackground();
     }
 
     /// <summary>兼容旧签名：注入外部 HttpClient（测试 mock / 共享实例）作为默认 HTTP embedding 提供方。</summary>
@@ -89,10 +120,11 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 try
                 {
                     // 等待上限：embedding 并发占满（服务不可用 / 推理缓慢）时不再无限排队，超时放弃本条
-                    if (!await _embeddingLimiter.WaitAsync(TimeSpan.FromSeconds(EmbeddingWaitTimeoutSeconds)))
+                    // （后台路径走“后台池”，不会与交互检索抢槽位——见 EmbeddingGates）。
+                    if (!await EnterEmbeddingAsync(interactive: false, CancellationToken.None))
                     {
                         _logger.LogWarning("语义记忆写入放弃：embedding 排队超时（{Seconds} 秒），{MessageId} 未写入",
-                            EmbeddingWaitTimeoutSeconds, entry.MessageId);
+                            _gates is null ? EmbeddingWaitTimeoutSeconds : _options.BackgroundEmbeddingWaitSeconds, entry.MessageId);
                         continue;
                     }
                 }
@@ -130,7 +162,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 {
                     _logger.LogWarning(ex, "语义记忆写入失败：{MessageId}（检查 embedding 提供方是否可用）", entry.MessageId);
                 }
-                finally { _embeddingLimiter.Release(); }
+                finally { ExitEmbedding(interactive: false); }
             }
         }
         catch (OperationCanceledException) { /* 释放时取消 */ }
@@ -283,7 +315,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 // 去重：同 messageId 已存在（或内容一致）则跳过
                 var existing = _store.GetByMessageId(it.MessageId);
                 if (existing is not null) continue;
-                if (!await _embeddingLimiter.WaitAsync(TimeSpan.FromSeconds(EmbeddingWaitTimeoutSeconds), ct)) { _logger.LogWarning("记忆导入 embedding 排队超时，跳过 {MessageId}", it.MessageId); continue; }
+                if (!await EnterEmbeddingAsync(interactive: false, ct)) { _logger.LogWarning("记忆导入 embedding 排队超时，跳过 {MessageId}", it.MessageId); continue; }
                 try
                 {
                     // 入库文本与向量必须一致：先按写入上限截断再向量化，否则“检索命中但内容对不上”。
@@ -296,7 +328,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                         stored, embedding, it.Timestamp, importance, it.ExpiresAt));
                     imported++;
                 }
-                finally { _embeddingLimiter.Release(); }
+                finally { ExitEmbedding(interactive: false); }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { _logger.LogDebug(ex, "记忆导入单条失败：{MessageId}", it.MessageId); }
@@ -313,7 +345,11 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         if (!_options.Enabled || string.IsNullOrWhiteSpace(query)) return [];
         try
         {
-            var embedding = await _embedding.EmbedAsync(Truncate(query, _options.MaxQueryChars), ct);
+            // 交互路径：等不到 embedding 槽位就本次不注入记忆（记忆是可选上下文，不能让用户干等）。
+            if (!await EnterEmbeddingAsync(interactive: true, ct)) return [];
+            float[]? embedding;
+            try { embedding = await _embedding.EmbedAsync(Truncate(query, _options.MaxQueryChars), ct); }
+            finally { ExitEmbedding(interactive: true); }
             if (embedding is null || embedding.Length == 0) return [];
             var topK = Math.Max(1, tuning?.TopK ?? _options.TopK);
             var minScore = tuning?.MinScore ?? _options.MinScore;
@@ -338,7 +374,10 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         if (!_options.Enabled || string.IsNullOrWhiteSpace(query)) return [];
         try
         {
-            var embedding = await _embedding.EmbedAsync(Truncate(query, _options.MaxQueryChars), ct);
+            if (!await EnterEmbeddingAsync(interactive: true, ct)) return [];
+            float[]? embedding;
+            try { embedding = await _embedding.EmbedAsync(Truncate(query, _options.MaxQueryChars), ct); }
+            finally { ExitEmbedding(interactive: true); }
             if (embedding is null || embedding.Length == 0) return [];
             var personalTopK = Math.Max(1, tuning?.PersonalTopK ?? _options.PersonalTopK);
             var personalMinScore = tuning?.PersonalMinScore ?? _options.PersonalMinScore;

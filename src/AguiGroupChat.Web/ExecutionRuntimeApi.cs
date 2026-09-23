@@ -59,6 +59,7 @@ public static class ExecutionRuntimeApi
         if (req.MaxRecursiveRounds is { } rr) e.MaxRecursiveRounds = rr;
         if (req.MaxRouteDepth is { } rd) e.MaxRouteDepth = rd;
         if (req.MaxInteractionRounds is { } ir) e.MaxInteractionRounds = ir;
+        if (req.MaxAutoApprovedRounds is { } mar) e.MaxAutoApprovedRounds = mar;
         if (req.ExecutionOrder is { } order) e.ExecutionOrder = order;
         if (req.EnableBridge is { } eb) e.EnableBridge = eb;
         if (req.EnablePipeline is { } ep) e.EnablePipeline = ep;
@@ -86,7 +87,7 @@ public static class ExecutionRuntimeApi
             e.StreamTimeoutMinutes, e.MaxModelAttempts, e.InteractionTtlMinutes,
             e.SessionLockTtlMinutes, e.ApprovedSkillTtlMinutes, e.SessionLockMaxEntries,
             e.CoordinatorPlanMaxItems, e.CoordinatorPlanMaxSteps, e.MaxRecursiveRounds,
-            e.MaxRouteDepth, e.MaxInteractionRounds,
+            e.MaxRouteDepth, e.MaxInteractionRounds, e.MaxAutoApprovedRounds,
             executionOrder = e.ExecutionOrder,
             e.EnableBridge, e.EnablePipeline, e.EnableRelay, e.EnableOrgRoute,
             complexityTimeouts = new
@@ -101,6 +102,7 @@ public static class ExecutionRuntimeApi
         => $"order={string.Join(",", e.ExecutionOrder)};" +
            $"stream={e.StreamTimeoutMinutes};attempts={e.MaxModelAttempts};" +
            $"bridge={e.EnableBridge};pipeline={e.EnablePipeline};relay={e.EnableRelay};org={e.EnableOrgRoute};" +
+           $"interaction={e.MaxInteractionRounds};autoApproved={e.MaxAutoApprovedRounds};" +
            $"complexity={e.ComplexityTimeouts?.Enabled}";
 
     /// <summary>
@@ -126,6 +128,7 @@ public static class ExecutionRuntimeApi
             exec.MaxRecursiveRounds = saved.MaxRecursiveRounds;
             exec.MaxRouteDepth = saved.MaxRouteDepth;
             exec.MaxInteractionRounds = saved.MaxInteractionRounds;
+            exec.MaxAutoApprovedRounds = saved.MaxAutoApprovedRounds;
             exec.ExecutionOrder = saved.ExecutionOrder;
             exec.EnableBridge = saved.EnableBridge;
             exec.EnablePipeline = saved.EnablePipeline;
@@ -150,6 +153,7 @@ public sealed record ExecutionPatchReq(
     int? SessionLockTtlMinutes, int? ApprovedSkillTtlMinutes, int? SessionLockMaxEntries,
     int? CoordinatorPlanMaxItems, int? CoordinatorPlanMaxSteps, int? MaxRecursiveRounds,
     int? MaxRouteDepth, int? MaxInteractionRounds,
+    int? MaxAutoApprovedRounds,
     string[]? ExecutionOrder,
     bool? EnableBridge, bool? EnablePipeline, bool? EnableRelay, bool? EnableOrgRoute,
     ComplexityTimeoutPatch? ComplexityTimeouts);

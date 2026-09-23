@@ -171,6 +171,10 @@ services:
       # embedding 建连超时（把“连不上”与“排队中”拆开）与单次慢调用告警阈值
       Agents__Memory__EmbeddingConnectTimeoutSeconds: ${MEMORY_EMBEDDING_CONNECT_TIMEOUT:-5}
       Agents__Memory__SlowEmbeddingWarnSeconds: ${MEMORY_SLOW_EMBEDDING_WARN:-10}
+      # 向量化并发闸门：交互（回复前检索）/ 后台（写入·导入·知识库入库）拆池；容量之和 = 总并发（默认 4），
+      # 不增加对 embedding 服务的压力，只是不让后台批量任务把交互检索挤到超时。
+      Agents__Memory__InteractiveEmbeddingConcurrency: ${MEMORY_INTERACTIVE_EMBED_CONCURRENCY:-3}
+      Agents__Memory__BackgroundEmbeddingConcurrency: ${MEMORY_BACKGROUND_EMBED_CONCURRENCY:-1}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

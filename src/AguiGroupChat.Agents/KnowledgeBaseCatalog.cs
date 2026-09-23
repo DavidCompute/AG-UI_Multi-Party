@@ -49,6 +49,37 @@ public sealed class KnowledgeBaseCatalog
     /// <summary>文档向量化并发上限（embedding 是资源密集操作，避免并发文档上传打爆本地模型 / 存储）。</summary>
     private static readonly SemaphoreSlim ProcessingGate = new(2, 2);
 
+    // 向量化并发闸门（可选，从 DI 惰性取）：知识库入库走“后台池”、检索走“交互池”。
+    // 为何入库必须走后合池：单片 4096 字 ≈ 35 秒（实测 8.5ms/字符），多文档并发入库会长时间占满 embedding，
+    // 把交互检索排到超时（日志表现为“语义记忆检索失败”）。未装配（测试等）时为 null → 不做闸门，行为同旧版。
+    private EmbeddingGates? _gates;
+    private bool _gatesResolved;
+    private EmbeddingGates? Gates
+    {
+        get
+        {
+            if (!_gatesResolved) { _gates = _services.GetService<EmbeddingGates>(); _gatesResolved = true; }
+            return _gates;
+        }
+    }
+
+    /// <summary>取一次向量化执行权（交互等不到就降级；后台等不到就跳过本条）。</summary>
+    private async Task<bool> EnterEmbeddingAsync(bool interactive, CancellationToken ct)
+    {
+        if (Gates is not { } g) return true;
+        return interactive
+            ? await g.EnterInteractiveAsync(TimeSpan.FromSeconds(Math.Max(1, _options.Memory.InteractiveEmbeddingWaitSeconds)), ct)
+            : await g.EnterBackgroundAsync(TimeSpan.FromSeconds(Math.Max(1, _options.Memory.BackgroundEmbeddingWaitSeconds)), ct);
+    }
+
+    /// <summary>释放一次向量化执行权（与返回 true 的 <see cref="EnterEmbeddingAsync"/> 成对）。</summary>
+    private void ExitEmbedding(bool interactive)
+    {
+        if (Gates is not { } g) return;
+        if (interactive) g.ExitInteractive();
+        else g.ExitBackground();
+    }
+
     public KnowledgeBaseCatalog(AgentOptions options, IServiceProvider services, ILoggerFactory loggerFactory, ChangeHub? changes = null)
     {
         _options = options;
@@ -265,7 +296,15 @@ public sealed class KnowledgeBaseCatalog
         var vectors = new List<float[]>(chunks.Count);
         for (var i = 0; i < chunks.Count; i++)
         {
-            var vec = await embedding.EmbedAsync(chunks[i], CancellationToken.None);
+            // 入库走“后台池”：每片单独取放，让多个后台任务交替推进而不是独占（单片 4096 字 ≈ 35 秒）。
+            if (!await EnterEmbeddingAsync(interactive: false, CancellationToken.None))
+            {
+                MarkError(doc, "embedding 排队超时（后台任务繁忙），文档未入库，请稍后重试");
+                return;
+            }
+            float[]? vec;
+            try { vec = await embedding.EmbedAsync(chunks[i], CancellationToken.None); }
+            finally { ExitEmbedding(interactive: false); }
             if (vec is null || vec.Length == 0)
             {
                 MarkError(doc, "embedding 不可用（本地模型未加载或端点不可达），文档未入库");
@@ -332,7 +371,11 @@ public sealed class KnowledgeBaseCatalog
             {
                 var id = GraphMemory.NormalizeEntityId(e.Name);
                 idByName[e.Name] = id;
-                var vec = await embedding.EmbedAsync(e.Name);
+                // 实体向量也走“后台池”：入库属后台批量，不得抢占交互检索
+                if (!await EnterEmbeddingAsync(interactive: false, CancellationToken.None)) continue;
+                float[]? vec;
+                try { vec = await embedding.EmbedAsync(e.Name); }
+                finally { ExitEmbedding(interactive: false); }
                 if (vec is null || vec.Length == 0) continue;
                 graphStore.UpsertEntity(new GraphEntityRecord(id, e.Name, e.Type ?? "Concept", domain, e.Description, vec, now));
             }
@@ -530,9 +573,15 @@ public sealed class KnowledgeBaseCatalog
         var store = _services.GetService<IMessageMemoryStore>();
         var embedding = _services.GetService<IEmbeddingProvider>();
         if (store is null || embedding is null) return [];
-        float[]? vec;
-        try { vec = await embedding.EmbedAsync(query, ct); }
-        catch (Exception ex) { _logger.LogDebug(ex, "知识库检索 embedding 失败"); return []; }
+            float[]? vec;
+            try
+            {
+                // 检索走“交互池”：等不到槽位就本次不注入知识片段（可选上下文，不让用户干等）。
+                if (!await EnterEmbeddingAsync(interactive: true, ct)) { _logger.LogDebug("知识库检索：embedding 槽位等待超时，本次跳过"); return []; }
+                try { vec = await embedding.EmbedAsync(query, ct); }
+                finally { ExitEmbedding(interactive: true); }
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "知识库检索 embedding 失败"); return []; }
         if (vec is null || vec.Length == 0) return [];
 
         var hits = new List<KbHit>();
@@ -580,7 +629,11 @@ public sealed class KnowledgeBaseCatalog
         if (graphStore is null || embedding is null) return empty;
         try
         {
-            var vec = await embedding.EmbedAsync(query, ct);
+            // 图谱检索也走“交互池”（非关键路径，等不到就返回空子图）
+            if (!await EnterEmbeddingAsync(interactive: true, ct)) return empty;
+            float[]? vec;
+            try { vec = await embedding.EmbedAsync(query, ct); }
+            finally { ExitEmbedding(interactive: true); }
             if (vec is null || vec.Length == 0) return empty;
 
             var entities = new Dictionary<string, GraphEntityHit>(StringComparer.Ordinal);

@@ -23,7 +23,10 @@ public sealed class ExecutionOptionsTests
         Assert.Equal(8, d.CoordinatorPlanMaxSteps);     // 编排计划步骤数
         Assert.Equal(5, d.MaxRecursiveRounds);          // 递归补查轮次
         Assert.Equal(4, d.MaxRouteDepth);               // 指派 / 提升路由深度
-        Assert.Equal(5, d.MaxInteractionRounds);        // 审批交互轮数
+        // 人工审批轮数与自动放行轮数分开计数（1.0.162）：前者只数“真的打断了用户”的那一轮。
+        // 默认从 5 提到 15：每一轮都需用户主动点批准，本身有天然限速，卡太死只会误杀正常的长生成。
+        Assert.Equal(15, d.MaxInteractionRounds);       // 最多让用户决策几次
+        Assert.Equal(30, d.MaxAutoApprovedRounds);      // 自动放行（已同意技能 / 批量批准）工具调用上限
     }
 
     [Fact]
@@ -61,6 +64,7 @@ public sealed class ExecutionOptionsTests
             MaxRecursiveRounds = illegal,
             MaxRouteDepth = illegal,
             MaxInteractionRounds = illegal,
+            MaxAutoApprovedRounds = illegal,
         };
         exec.Normalize();
         Assert.Equal(defaults.MaxModelAttempts, exec.MaxModelAttempts);
@@ -73,6 +77,7 @@ public sealed class ExecutionOptionsTests
         Assert.Equal(defaults.MaxRecursiveRounds, exec.MaxRecursiveRounds);
         Assert.Equal(defaults.MaxRouteDepth, exec.MaxRouteDepth);
         Assert.Equal(defaults.MaxInteractionRounds, exec.MaxInteractionRounds);
+        Assert.Equal(defaults.MaxAutoApprovedRounds, exec.MaxAutoApprovedRounds);
     }
 
     [Fact]

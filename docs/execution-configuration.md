@@ -40,7 +40,8 @@
 | 8 | `coordinatorPlanMaxSteps` | 8 | 协调计划单次最多步骤 | 同上 |
 | 9 | `maxRecursiveRounds` | 5 | 递归综合补查最多轮次（防死循环） | `ExecuteRecursiveAnswerAsync` |
 | 10 | `maxRouteDepth` | 4 | 指派/提升路由最大层数（防病态深链） | `InvokeAssignmentEscalationAsync` |
-| 11 | `maxInteractionRounds` | 5 | 同一条消息最多审批轮数（防外部异常反复中断） | 审批/恢复循环 |
+| 11 | `maxInteractionRounds` | 15 | 同一消息最多允许的**人工审批**轮数（只数“真的打断了用户”的那一轮；已同意技能 / 批量批准这类自动放行不计入） | 审批 / 恢复循环 |
+| 11b | `maxAutoApprovedRounds` | 30 | 同一运行最多允许的**自动放行**工具调用次数（两道独立防线，避免真正失控循环） | 审批 / 恢复循环 |
 | 12 | `executionOrder[]` | `bridge,pipeline,relay,org_route,streaming` | 分派阶段判定顺序；白名单，`streaming` 恒置末 | `InvokeCoreAsync` |
 | 13 | `enableBridge` | true | 平台是否启用“AG-UI 桥接”阶段 | 网关 switch(bridge) → `InvokeBridgeAsync` |
 | 14 | `enablePipeline` | true | 平台是否启用“编排流水线”阶段 | case pipeline → `InvokePipelineAsync` |

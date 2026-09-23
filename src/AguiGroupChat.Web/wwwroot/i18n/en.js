@@ -829,6 +829,7 @@ window.I18N_DICTS.en = {
   "admin.exec.MaxRecursiveRounds": "Max recursive follow-up rounds",
   "admin.exec.MaxRouteDepth": "Max org-route depth",
   "admin.exec.MaxInteractionRounds": "Max interaction rounds",
+  "admin.exec.MaxAutoApprovedRounds": "Max auto-approved tool calls",
   "admin.execComplexityHint": "Complexity-adaptive run timeouts: the trigger message is scored for task magnitude (deliverable format / pages / words / items / multi-step wording / attachment size / whether the role fans out downward) and the stream timeout is multiplied accordingly (standard / complex / heavy), capped by the run-budget ceiling. The built-in document-skill budget scales by the same multiplier, and the client-skill wait ceiling plus the model network fallback widen with it. Every tier is <b>widen-only, never shrinking</b>.",
   "admin.execComplexityEnabled": "Enable complexity-adaptive timeouts",
   "admin.exec.ComplexityStandardMultiplier": "Standard tier multiplier",

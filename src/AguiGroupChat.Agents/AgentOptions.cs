@@ -329,6 +329,22 @@ public sealed class MemoryOptions
     /// 只有明显越过（如某处输入未被截断、或服务在排队）才值得告警。</summary>
     public int SlowEmbeddingWarnSeconds { get; set; } = 10;
 
+    /// <summary>
+    /// 交互路径（回复前的记忆 / 知识库检索）的 embedding 并发上限（默认 3）。
+    /// 与 <see cref="BackgroundEmbeddingConcurrency"/> 之和即对 embedding 服务的总并发（默认 4，与旧版一致）。
+    /// 见 <see cref="EmbeddingGates"/>：拆池是为了不让后台批量任务把交互检索挤到超时。
+    /// </summary>
+    public int InteractiveEmbeddingConcurrency { get; set; } = 3;
+
+    /// <summary>后台路径（记忆写入 / 导入 / 知识库切片与图谱入库）的 embedding 并发上限（默认 1）。</summary>
+    public int BackgroundEmbeddingConcurrency { get; set; } = 1;
+
+    /// <summary>交互检索等待 embedding 槽位的上限（秒，默认 12）：等不到就本次不注入记忆（可选上下文，不阻塞回复）。</summary>
+    public int InteractiveEmbeddingWaitSeconds { get; set; } = 12;
+
+    /// <summary>后台任务等待 embedding 槽位的上限（秒，默认 60）：等不到则跳过本条，由下次任务补上。</summary>
+    public int BackgroundEmbeddingWaitSeconds { get; set; } = 60;
+
     /// <summary>embedding 的<b>连接</b>超时（秒，默认 5）：用于把“服务没起/端口不通”与“排队中”分开。
     /// 不设时两者共用同一条总超时（<see cref="EmbeddingTimeoutSeconds"/>），导致服务不可用时要白等满整个总预算。</summary>
     public int EmbeddingConnectTimeoutSeconds { get; set; } = 5;

@@ -47,8 +47,28 @@ public sealed class ExecutionOptions
     /// <summary>指派 / 提升路由的最大层数（防配置病态深链）。</summary>
     public int MaxRouteDepth { get; set; } = 4;
 
-    /// <summary>同一消息最多允许的审批轮数（防外部服务异常导致反复中断的死循环）。</summary>
-    public int MaxInteractionRounds { get; set; } = 5;
+    /// <summary>同一消息最多允许的<b>人工审批</b>轮数（默认 15，防外部服务异常导致恢复后反复把卡弹给用户）。
+    ///
+    /// <para>
+    /// 语义澄清（1.0.162）：这个上限<b>只数“真的打断了用户”的那一轮</b>——已同意技能 / 批量批准这类
+    /// 自动放行不再计入（它们不弹卡）。旧实现把两者混在一个计数器里，于是一次正常的长生成
+    ///（文档技能天然要被反复调用：出正文 → 逐页配图 → 改）会在第 5 次调用就被判超限杀掉。
+    /// 默认从 5 提到 15：每一轮都需要用户主动点批准，本身就有天然限速，没必要卡得很死。
+    /// 自动放行另有自己的上限 <see cref="MaxAutoApprovedRounds"/>。
+    /// </para>
+    /// </summary>
+    public int MaxInteractionRounds { get; set; } = 15;
+
+    /// <summary>
+    /// 同一运行最多允许的<b>自动放行</b>工具调用次数（默认 30）。
+    ///
+    /// <para>
+    /// 为何需要单独一条：把自动放行从人工审批计数里拿出来后，仍需一道防线防止真正的失控循环
+    ///（外部服务异常时反复返回审批请求）。默认给得较宽（30），因为一次合法的大活本来就会有
+    /// 多次技能调用（如 40 页 PPT：出正文 → 逐页配图 → 校验 → 追加）。
+    /// </para>
+    /// </summary>
+    public int MaxAutoApprovedRounds { get; set; } = 30;
 
     /// <summary>合法阶段 token 白名单（ExecutionOrder 只允许这些；语义见各入口方法注释）。</summary>
     private static readonly string[] LegalTokens = [StageBridge, StagePipeline, StageRelay, StageOrgRoute, StageStreaming];
@@ -102,6 +122,7 @@ public sealed class ExecutionOptions
         MaxRecursiveRounds = Positive(MaxRecursiveRounds, Default.MaxRecursiveRounds, nameof(MaxRecursiveRounds), logger);
         MaxRouteDepth = Positive(MaxRouteDepth, Default.MaxRouteDepth, nameof(MaxRouteDepth), logger);
         MaxInteractionRounds = Positive(MaxInteractionRounds, Default.MaxInteractionRounds, nameof(MaxInteractionRounds), logger);
+        MaxAutoApprovedRounds = Positive(MaxAutoApprovedRounds, Default.MaxAutoApprovedRounds, nameof(MaxAutoApprovedRounds), logger);
         ExecutionOrder = NormalizeExecutionOrder(ExecutionOrder, Default.ExecutionOrder, logger);
         return this;
     }

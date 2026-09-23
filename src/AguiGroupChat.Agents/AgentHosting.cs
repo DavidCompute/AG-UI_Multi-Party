@@ -158,6 +158,11 @@ public static class AgentHosting
             return new HttpEmbeddingProvider(endpoint, m.EmbeddingModel, m.EmbeddingApiKey, m.EmbeddingTimeoutSeconds, logger);
         });
 
+        // 向量化并发闸门：交互（回复前检索）与后台（记忆写入 / 导入 / 知识库入库）拆池，
+        // 避免后台批量任务把交互检索排到超时（容量之和 = 旧版总并发，不增加对 embedding 服务的压力）。
+        services.AddSingleton(new EmbeddingGates(
+            options.Memory.InteractiveEmbeddingConcurrency, options.Memory.BackgroundEmbeddingConcurrency));
+
         // 记忆服务：store 可用才注册 AgentMessageMemory；store 为 null（如 sqlite 分支的存储类型不符）时
         // 注册 null 占位 + 明确警告，避免「store 为 null 仍构造 AgentMessageMemory → 每次操作 NRE 被静默 catch」
         services.AddSingleton<IMessageMemory>(sp =>
@@ -179,7 +184,8 @@ public static class AgentHosting
                 {
                     writeCatalog ??= sp.GetService<AgentCatalog>();
                     return writeCatalog?.GetDefinition(agentId)?.MemoryProfile;
-                });
+                },
+                sp.GetService<EmbeddingGates>());
         });
         // 自动遗忘维护服务（宿主自动启动；记忆 null 占位时内部跳过）
         services.AddHostedService<MemoryMaintenanceService>();

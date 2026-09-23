@@ -4620,6 +4620,44 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>恢复被中断的运行：同一 AgentSession 继续流式，最终结果追加到中断时保留的同一消息；
     /// 若再次中断且该运行处于「批量批准」态（用户曾对该 run 点过“批准并继续本次运行”），则自动批准后续同类操作（不打断用户）；
     /// 否则保存新的交互请求。运行结束才结束消息（中间内容在中断时已清空）。</summary>
+    /// <summary>
+    /// 终止一次恢复运行（轮次 / 自动放行超限等）：<b>先把已经产出的产物挂到消息上</b>，再说明原因并收尾。
+    ///
+    /// <para>
+    /// 为何必须先挂产物：实测踩到——40 页 PPT 已经生成到磁盘，运行却在“超过最大轮数”分支里
+    /// 直接收尾返回，<b>跳过了产物回挂</b>，于是文件被静默丢掉、用户只看到空白兜底文案
+    ///（“出稿了却拿不到”）。这与其它收尾路径同一原则：先保证用户能拿到东西，再谈为什么中断。
+    /// </para>
+    /// </summary>
+    private async Task TerminateResumedRunAsync(PendingInteraction pending, string messageId, string accumulated,
+        string reason, string errorCode)
+    {
+        var runId = pending.RunId;
+        _autoApprovedRuns.TryRemove(runId, out _); // 运行结束，批量批准失效
+        var attached = 0;
+        try { attached = await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, CancellationToken.None); }
+        catch (Exception ex) { _logger.LogWarning(ex, "终止运行前回挂产物失败：run={RunId}", runId); }
+        try
+        {
+            if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
+                await _hub.Value.AppendAgentContentAsync(pending.GroupId, messageId, EmptyReplyFallback, CancellationToken.None);
+            await _hub.Value.AppendAgentContentAsync(pending.GroupId, messageId, $"\n\n（{reason}）", CancellationToken.None);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "终止运行说明写入失败：run={RunId}", runId); }
+        try
+        {
+            await _hub.Value.BroadcastAsync(pending.GroupId, new RunErrorEvent
+            {
+                GroupId = pending.GroupId,
+                ErrorCode = errorCode,
+                Message = reason,
+                Timestamp = _hub.Value.NowMs,
+            }, ct: CancellationToken.None);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "终止运行错误广播失败：run={RunId}", runId); }
+        await SafeEndAsync(pending.Context, messageId);
+    }
+
     private async Task ResumeRunAsync(PendingInteraction pending, bool approved, string? toolResult, CancellationToken ct)
     {
         var agent = pending.Agent!;            // 调用方已保证非空（本地 run 分支）
@@ -4643,7 +4681,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             acquired = true;
             var accumulated = "";
             var reasoningAccumulated = 0; // 思考过程累计长度（与首轮一致，防推理模型思考过长）
-            var resumeRounds = 0;
+            var resumeRounds = 0;      // 真正打断了用户的审批轮数（跨调用累计）
+            var autoRounds = 0;        // 自动放行（已同意技能 / 批量批准）的工具调用次数；两者分开计数是本方法的关键修正
             var lastApproval = pending.ApprovalRequest!;
             var lastApproved = approved;
 
@@ -4749,40 +4788,45 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     break; // 本轮流式正常结束 → 运行完成
                 }
 
-                // 又需审批
+                // ── 统计与上限：必须区分「真的打断了用户」与「自动放行」两类 ──
+                // MaxInteractionRounds 的语义是“同一条消息最多让用户决策几次”（防外部服务异常反复弹卡），
+                // 而自动放行根本不弹卡。旧实现把两者混在一个计数器里，于是正常的长生成
+                //（文档技能天然会被反复调用：出正文 → 逐页配图 → 改）会在第 5 次调用就被判超限杀掉。
+                // 实测踩到：40 页 PPT 已生成到磁盘，却因“交互恢复超过最大轮数（5）”终止，
+                // 产物未被挂到消息上，用户只看到空白兜底文案。
+                var clientSkillMemoryHit = nextApproval.ToolCall is FunctionCallContent nfc
+                    && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(nfc.Name, StringComparer.Ordinal)
+                    && IsSkillApproved(pending.Context.ThreadId, pending.Context.AgentId, nfc.Name);
+                var batchApproved = !clientSkillMemoryHit && _autoApprovedRuns.ContainsKey(runId);
+
+                if (clientSkillMemoryHit || batchApproved)
+                {
+                    autoRounds++;
+                    if (autoRounds > _execution.MaxAutoApprovedRounds)
+                    {
+                        _logger.LogWarning("自动放行的工具调用超过上限（{Max}），终止运行：run={RunId}", _execution.MaxAutoApprovedRounds, runId);
+                        await TerminateResumedRunAsync(pending, messageId, accumulated,
+                            $"自动放行的工具调用超过上限（{_execution.MaxAutoApprovedRounds}），运行已终止（已生成的产物仍附在本条消息上）",
+                            "AGENT_AUTO_APPROVAL_LIMIT");
+                        return;
+                    }
+                    lastApproval = nextApproval;
+                    lastApproved = true;
+                    _logger.LogInformation("{Kind}自动放行：run={RunId} tool={Tool}（本次运行第 {Round} 次）",
+                        clientSkillMemoryHit ? "已同意技能" : "批量批准",
+                        runId, (nextApproval.ToolCall as FunctionCallContent)?.Name ?? "unknown", autoRounds);
+                    continue;
+                }
+
+                // 真正需要用户决策的才算交互轮数（含跨调用累计）
                 resumeRounds++;
-                if (resumeRounds > _execution.MaxInteractionRounds)
+                if (pending.ResumeCount + resumeRounds > _execution.MaxInteractionRounds)
                 {
                     _logger.LogWarning("交互恢复超过最大轮数（{Max}），终止运行：run={RunId}", _execution.MaxInteractionRounds, runId);
-                    await SafeEndAsync(pending.Context, messageId);
-                    await _hub.Value.BroadcastAsync(pending.GroupId, new RunErrorEvent
-                    {
-                        GroupId = pending.GroupId,
-                        ErrorCode = "AGENT_INTERACTION_LIMIT",
-                        Message = $"智能体审批交互超过最大轮数（{_execution.MaxInteractionRounds}），运行已终止，请重新发起消息",
-                        Timestamp = _hub.Value.NowMs,
-                    }, ct: CancellationToken.None);
+                    await TerminateResumedRunAsync(pending, messageId, accumulated,
+                        $"智能体审批交互超过最大轮数（{_execution.MaxInteractionRounds}），运行已终止（已生成的产物仍附在本条消息上）",
+                        "AGENT_INTERACTION_LIMIT");
                     return;
-                }
-
-                // 已批准客户端技能记忆：该客户端技能在此对话里已获用户同意 → 免确认、继续自动执行（同一问题内不再重复弹卡）
-                if (nextApproval.ToolCall is FunctionCallContent nfc
-                    && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(nfc.Name, StringComparer.Ordinal)
-                    && IsSkillApproved(pending.Context.ThreadId, pending.Context.AgentId, nfc.Name))
-                {
-                    lastApproval = nextApproval;
-                    lastApproved = true;
-                    _logger.LogInformation("已同意技能自动放行：run={RunId} tool={Tool}", runId, nfc.Name);
-                    continue;
-                }
-
-                // 批量批准生效：自动批准本次运行后续的审批操作，不打断用户
-                if (_autoApprovedRuns.ContainsKey(runId))
-                {
-                    lastApproval = nextApproval;
-                    lastApproved = true;
-                    _logger.LogInformation("批量批准自动放行：run={RunId} tool={Tool}", runId, (nextApproval.ToolCall as FunctionCallContent)?.Name ?? "unknown");
-                    continue;
                 }
 
                 // 非批量：清空已回灌的中间内容，保存新的交互请求（同触发者，同一条消息）
