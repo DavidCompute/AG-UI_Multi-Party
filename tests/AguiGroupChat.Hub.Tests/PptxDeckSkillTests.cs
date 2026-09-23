@@ -2405,7 +2405,7 @@ public sealed class PptxDeckSkillTests
         return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
     }
 
-    // ================= 联网配图（Wikimedia Commons） =================
+    // ================= 联网配图（Wikimedia Commons；1.0.164 起需显式 imageSource=auto） =================
 
     /// <summary>
     /// 一张真实可解码的小 JPEG（565 字节）。
@@ -2599,6 +2599,9 @@ public sealed class PptxDeckSkillTests
         {
             title = "配图验证",
             theme = "tech",
+            // 联网取图自 1.0.164 起**默认关闭**（只查图库）：本节用例验证的是网络那条路，
+            // 所以必须像真实调用方一样**显式**开启，而不是依赖旧默认值。
+            imageSource = "auto",
             imageSearchApi = apiUrl,
             slides,
         });
@@ -2616,6 +2619,47 @@ public sealed class PptxDeckSkillTests
                 using var r = new StreamReader(e.Open());
                 return r.ReadToEnd();
             }).ToList();
+    }
+
+    /// <summary>
+    /// 默认**只查团队图库、不联网**（1.0.164 起联网取图暂时下线）：即便调用方把检索端点也给了，也不该出网 ——
+    /// 配不到就降级为题图并在 warnings 里如实说明原因。
+    ///
+    /// <para>
+    /// 为何钉住它：默认值一旦回到“联网优先”，代价最重的不是性能而是**版权与合规**（外图必须署名），
+    /// 其次是内网部署上每次取图都白等一轮超时。所以默认必须是安全侧，出网只能显式开启。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task PhotoQuery_NetworkIsOffByDefault_OnlyLibraryIsSearched()
+    {
+        var outDir = TempDir();
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        await using var lib = await StubPhotoLibrary.StartAsync();
+        try
+        {
+            // 刻意不给 imageSource（走默认），但把端点备好 —— 默认不出网，所以这个端点不该被碰。
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "默认不出网",
+                imageSearchApi = lib.ApiUrl,
+                slides = new object[]
+                {
+                    new { type = "image", title = "场景", imageQuery = "modern office meeting room" },
+                },
+            });
+            var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+
+            Assert.Equal(0, lib.Searches);                                             // 没出网
+            Assert.Equal(0, doc.RootElement.GetProperty("images").GetArrayLength());   // 也没嵌入外图
+            var warnings = doc.RootElement.GetProperty("warnings").EnumerateArray()
+                .Select(w => w.GetString() ?? "").ToList();
+            Assert.Contains(warnings, w => w.Contains("配图检索未成功"));               // 降级不静默
+            Assert.Contains(warnings, w => w.Contains("联网取图已下线"));               // 并说清为什么
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
     }
 
     /// <summary>
@@ -2736,6 +2780,7 @@ public sealed class PptxDeckSkillTests
             var deck = JsonSerializer.Serialize(new
             {
                 title = "环境变量端点",
+                imageSource = "auto", // 联网取图默认关闭，本用例验的是端点覆盖（AGUI_PHOTO_API），故显式开启
                 slides = new object[]
                 {
                     new { type = "cover", variant = "split", title = "环境变量端点", imageQuery = "office teamwork" },
@@ -2988,6 +3033,7 @@ public sealed class PptxDeckSkillTests
             var json = JsonSerializer.Serialize(new
             {
                 title = "预算夹紧",
+                imageSource = "auto", // 本节验的是“网络调用夹预算”，需显式开启联网（默认只查图库）
                 imageSearchApi = lib.ApiUrl,
                 slides = new object[]
                 {

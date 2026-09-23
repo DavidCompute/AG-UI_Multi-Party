@@ -1,3 +1,34 @@
+# AG-UI 群聊桌面版 1.0.164 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.164 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.164 把**配图来源统一为「团队图库」这一个来源**——联网取图（Wikimedia Commons）**暂时下线**，默认彻底不出网。
+**Version note**: 1.0.164 makes the **team image library the single image source** — web image search (Wikimedia Commons) is **temporarily retired** and the default is fully offline.
+
+## 配图只走图库（1.0.164）
+# Illustration goes library-only (1.0.164)
+
+中文：
+- **改了什么**：`pptx_deck` 的 `imageSource` 默认从 `auto` 改为 **`library`**（入参与环境变量 `AGUI_IMAGE_SOURCE` 都未给时生效）：只做团队图库语义检索，未命中就**降级为自动题图**并在 `warnings` 里说明，**不再回落网络**。整条网络链路（`auto` / `network`）与端点覆盖（入参 `imageSearchApi`、环境变量 `AGUI_PHOTO_API`）**全部保留**，恢复只需改一个值，不必改代码。
+- **为什么**：联网取图带来三类成本——① **版权 / 合规**（外图必须署名，出稿会多一页「图片来源」）；② **可达性**（内网 / 部分网络下 Wikimedia 不可达，每次取图白等一轮超时，实测 4 张配图 45 秒）；③ **画不对题**（关键词置信度不够时会配上不相干的网图）。图库是**企业自有素材**：无需署名、不出网、语义命中更贴业务。
+- **安全侧默认**：`AGUI_IMAGE_SOURCE` 写错成没见过的值时**也按 `library` 处理**——出网必须是显式开启的能力，不能靠拼写意外打开。
+- **不静默**：因未开启联网而配不到图时，降级原因里会写「联网取图已下线（默认只查团队图库），未联网检索」，用户能从 `warnings` 看出原因。
+- **模型提示词同步更新**：工具描述、技能正文（`tools/pptx-skills/pptx_deck.cs` 及其内置副本）与各技能 README 全部改成“只从图库配图”，并**明确要求模型不要向用户暗示会拿到网图 / 实景照片**。
+- **配置面同步**：`docker-compose.yml` 与 `.env.example` 的默认值改为 `library`（注释里写清恢复方式）。
+- **回归**：`PptxDeckSkillTests` **125 通过 / 0 失败**，其中新增一项**钉住“默认不出网”**：即便调用方把检索端点也给了，也不得发起任何网络请求（`Searches == 0`），且降级要如实说明原因；原本验证网络路径的用例改为**显式** `imageSource=auto`。
+
+English:
+- **What changed**: `pptx_deck`'s `imageSource` now defaults to **`library`** instead of `auto` (applies when neither the input field nor `AGUI_IMAGE_SOURCE` is set): only the team image library is searched, a miss **degrades to generated art** with an explanatory `warnings` entry, and **there is no network fallback**. The whole network path (`auto` / `network`) and the endpoint overrides (input `imageSearchApi`, env `AGUI_PHOTO_API`) are **kept intact**, so restoring it is a one-value change rather than a code change.
+- **Why**: web photos carried three costs — (1) **licensing/compliance** (external photos must be credited, adding an “Image credits” page); (2) **reachability** (Wikimedia is unreachable on intranets and some networks, burning a wasted timeout per lookup — measured: 4 illustrations took 45 s); (3) **wrong subject** (a low-confidence keyword match can attach an irrelevant stock photo). The library holds **your own assets**: no attribution, no egress, and semantics that match the business.
+- **Safe-by-default**: an unrecognised `AGUI_IMAGE_SOURCE` value is treated as `library` too — egress must be an explicit capability, never something a typo can switch on.
+- **Never silent**: when a photo is missing because web search is off, the degradation reason says so (“联网取图已下线（默认只查团队图库），未联网检索”), visible in `warnings`.
+- **Prompts updated**: the tool description, the skill body (`tools/pptx-skills/pptx_deck.cs` plus its built-in copy) and every skill README now say “library only”, and **explicitly tell the model not to imply to users that web/real-scene photos will be fetched**.
+- **Config defaults aligned**: `docker-compose.yml` and `.env.example` now default to `library`, with the restore path documented in comments.
+- **Tests**: `PptxDeckSkillTests` **125 passed / 0 failed**, including a new case that **pins “no egress by default”** — even when the caller supplies a search endpoint, no network request may happen (`Searches == 0`) and the degradation must explain itself; the cases that exercise the network path were switched to an **explicit** `imageSource=auto`.
+
+---
+
+### 上一版 / Previous release
+
 # AG-UI 群聊桌面版 1.0.163 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.163 Release Notes (current Windows desktop release)
 

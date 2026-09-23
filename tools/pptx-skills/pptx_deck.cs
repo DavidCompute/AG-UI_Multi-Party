@@ -77,12 +77,12 @@
 //     stack    层叠架构  title, items:[ {title,text} ]
 //                        适合：技术架构 / 能力分层
 //     hero     自动题图  title, subtitle（整页程序生成的抽象图）
-//     credits  图片来源  title, items:[…]（用了联网照片时自动追加；见上方「照片」一节）
+//     credits  图片来源  title, items:[…]（**仅显式开启联网取图**且用了网图时自动追加；默认不出网，不会出现）
 //     grid     网格卡    title, items:[ {title,text} ], cols:2|3
 //     timeline 时间轴    title, items:[ {title,detail} ]（最多 6 步）
 //     iconRows 图标行    title, items:[ {icon,title,text} ]（最多 6 行）
 //     quote    引言      text, cite
-//     image    配图      title, path（本地文件）或 imageQuery（联网检索）, caption
+//     image    配图      title, path（本地文件）或 imageQuery（从团队图库语义检索，默认不联网）, caption
 //                        variant: full(默认) | left(图左文右) | right(文左图右) |
 //                                 bleed(半出血+叠字，自包含标题) | gallery(images:[{path,caption}] 2~4 张)
 //                        left/right/bleed 可配 heading/bullets 写文字侧
@@ -106,7 +106,7 @@
 //       抽象图，零素材、零联网、无版权问题，且**确定性**（同一标题每次生成的图一样）。
 //     设计约束：只用实色（无渐变）、透明度只用 a:alpha，颜色全部取自动调色板。
 //
-//   【照片：用 imageQuery 联网取图（Wikimedia Commons）】
+//   【照片：用 imageQuery 从团队图库取图（默认不联网）】
 //     要用**真照片**（而不是示意图/题图）时，在需要图的位置写：
 //       "imageQuery": "modern office meeting room"      // 检索关键词
 //     凡是有图的位置都支持它：cover(variant image/split) / section(variant full) /
@@ -114,17 +114,18 @@
 //       没有 path 才去检索。
 //     content 页带 imageQuery（或 path）时**自动变成“文左图右”**，所以不必为了配图改用别的页型。
 //
-//   【配图顺序：先团队图库，再网络（不依赖外网的路子）】
+//   【配图顺序：只查团队图库（不依赖外网）】
 //     平台有「图库」时，会在调用本技能前注入一个检索范围句柄（入参 imageScopeId），
 //     技能据此回调 /ag-ui/images/search 做语义检索：
-//       ① 命中 → 直接用平台返回的**本地文件路径**嵌入（自有素材，**不需要 CC 署名**）；
-//       ② 未命中 → 回落 Wikimedia Commons（CC 素材，会附「图片来源」页）；
-//       ③ 都没有 → 退回自动生成的题图（不假称有图）。
-//     imageSource 控制走哪条路（入参优先，其次环境变量 AGUI_IMAGE_SOURCE）：
-//       auto（默认）/ library（仅图库，**彻底不出网**，内网部署用这个）/ network（仅网络）。
+//       ① 命中 → 直接用平台返回的**本地文件路径**嵌入（自有素材，**不需要任何署名**）；
+//       ② 未命中 → 退回自动生成的题图，并如实说明“图库里没有匹配的图”（不假称有图）。
+//     **联网取图（Wikimedia Commons）自 1.0.164 起暂时下线**：默认只查图库、彻底不出网。
+//     要恢复出网必须**显式**指定（版权与可达性成本由部署方自担）：
+//       imageSource（入参）或 AGUI_IMAGE_SOURCE（环境变量）
+//         = auto（先图库后网络）/ network（仅网络）；其余值（含未配置）= library。
 //
 //   【照片：关键词怎么写（实测结论，不是猜的）】
-//     Commons 是**档案库**而不是商业图库，检索质量几乎全看关键词：
+//     图库检索与图库一样是**语义检索**，成图好坏几乎全看关键词：
 //       · 用 **2~4 个能看得见的具体名词**：“modern office meeting room” / “glass office building” /
 //         “handshake business” / “city skyline sunset” —— 实测前两个都直接顶到 Unsplash 导入的 CC0 会议室、
 //         以及真正的现代玻璃幕墙楼；
@@ -132,6 +133,8 @@
 //         实测 “teamwork” 的头两条是 Teamwork-icon.jpg 与 Teamwork.com-Logo-200.png；
 //         “business people working together” 的第一条是 1920 年书里的插图；
 //       · 词太多会**搜不到结果**：五个词以上的 “office desk laptop notebook business” 返回空。
+//     另注：上一段的关键词经验是在**联网检索**下测的；改成只查图库后，
+//     命中与否改为由库内语义分数决定（低于 0.6 视为没命中），关键词写法仍然同理。
 //     代码侧的兵庖（都要有，因为关键词拦不住所有坏命中）：
 //       ① 宽 < 1200px 跳过（800px 铺满一页明显发虚）；
 //       ② 长宽比超出 0.55~2.2 跳过 —— 定框裁切后全景图只剩中间一条；
@@ -1044,8 +1047,8 @@ public class Skill
                 // 降级/提示（如图片缺失改用色块）：不静默降级，调用方/用户能看见
                 + ",\"warnings\":[" + string.Join(",", (_warnings ?? []).Select(Js)) + "]"
                 + ",\"qa\":" + qaJson
-                // 用到的联网照片：署名依据（也可让调用方自行在正文里再标一次）。
-                // 只要有照片，稿末就会多一页「图片来源」——那是许可要求，不是可选渲染。
+                // 用到的照片：命中团队图库的是自有素材（无署名义务）；极少数情况下（显式开启联网）才会有网图。
+                // 只有网图才会在稿末多一页「图片来源」——那是许可要求，不是可选渲染。
                 + ",\"images\":[" + string.Join(",", Photos.Select(p =>
                     "{\"query\":" + Js(p.Query) + ",\"source\":" + Js(p.Source) + ",\"title\":" + Js(p.FileName)
                     + ",\"library\":" + Js(p.LibraryName) + ",\"caption\":" + Js(p.Caption)
@@ -1608,8 +1611,10 @@ public class Skill
         _photoBudgetWarned = false;
         // 预算取环境变量（有则用）：部署级调参 / 测试验“夹超时”都靠它
         _photoDeadline = Environment.TickCount64 + PhotoBudgetSeconds() * 1000L;
-        // 配图来源策略：入参优先，其次环境变量（部署级一次性配置：内网部署设 library 彻底不出网）
-        _imageSource = (Str(root, "imageSource") ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE") ?? "").Trim();
+        // 配图来源策略：入参优先，其次环境变量；**都没有 → 默认 library（只查图库、不联网）**。
+        // 联网取图自 1.0.164 起暂时下线：必须显式写 imageSource=auto/network 才会出网。
+        _imageSource = NormalizeImageSource(
+            Str(root, "imageSource") ?? Environment.GetEnvironmentVariable("AGUI_IMAGE_SOURCE"));
         _imageScopeId = Str(root, "imageScopeId") ?? Str(root, "image_scope_id");
         _photoApi = Str(root, "imageSearchApi") ?? Environment.GetEnvironmentVariable(PhotoApiEnvVar);
         var title = Str(root, "title") ?? "演示文稿";
@@ -4660,12 +4665,17 @@ public class Skill
         return SlideXml(t.Bg, shapes);
     }
 
-    // ---- 联网配图（Wikimedia Commons）----
+    // ---- 联网配图（Wikimedia Commons，自 1.0.164 起**默认关闭**）----
     //
-    // 为什么要联网取图：示意图与题图都是**图形**，不是照片。用户要“每页配一张符合内容的图”时
+    // 为什么要这个能力：示意图与题图都是**图形**，不是照片。用户要“每页配一张符合内容的图”时
     // 指的是照片级画面，那只能来自图库。选 Commons 的理由：**免密钥**、素材全部是自由许可
     // （CC0 / CC BY / CC BY-SA / PD）、有稳定的公开 API。代价是**必须署名**：只要用了检索来的
     // 照片，就自动在稿末追加「图片来源」页（见 CreditsSlide）—— 这是合规要求，不是可选装饰。
+    //
+    // **为什么现在默认不走这条路**：配图来源已统一为团队图库（自有素材、零署名义务、不依赖外网）；
+    // 联网卷进来的版权/可达性/画不对题三类问题大于收益，所以下线为“必须显式开启”
+    // （imageSource=auto/network）。代码与端点覆盖（imageSearchApi / AGUI_PHOTO_API）全部保留，
+    // 恢复只需改一个入参或环境变量，不必改代码。
     //
     // 失败一律降级：无网络 / 无结果 / 格式不认 → 退回自动题图 + Warn，绝不让一次联网失败
     // 把整份稿子拖垮。另外做了**熔断**：第一次连接级失败后本轮不再尝试 ——
@@ -4743,7 +4753,7 @@ public class Skill
     [ThreadStatic] private static long _photoDeadline;
     /// <summary>预算耗尽的提示只报一次。</summary>
     [ThreadStatic] private static bool _photoBudgetWarned;
-    /// <summary>配图来源策略：auto（默认，先图库后网络）| library（仅图库，不出网）| network（仅网络）。</summary>
+    /// <summary>配图来源策略：library（**默认**，仅查团队图库、不出网）| auto（先图库后网络）| network（仅网络）。</summary>
     [ThreadStatic] private static string? _imageSource;
     /// <summary>平台注入的图库检索范围句柄（没有 = 没有可用的图库，直接走网络）。</summary>
     [ThreadStatic] private static string? _imageScopeId;
@@ -4801,9 +4811,30 @@ public class Skill
     /// </summary>
     private const double LibraryMinScore = 0.60;
 
-    /// <summary>是否允许联网取图（imageSource=library 时彻底不出网，内网部署用）。</summary>
+    /// <summary>
+    /// 未配置时的默认配图来源：**只查团队图库、不联网**（1.0.164 起联网取图暂时下线）。
+    ///
+    /// <para>
+    /// 安全侧默认：即使有人把 <c>AGUI_IMAGE_SOURCE</c> 写错成一个没见过的值，也当成 library ——
+    /// 出网是“显式开启”的能力，不能靠拼写意外打开。
+    /// </para>
+    /// </summary>
+    private const string DefaultImageSource = "library";
+
+    /// <summary>归一化配图来源策略：只认 library / auto / network，其余（含空 / 未配置）回落 <see cref="DefaultImageSource"/>。</summary>
+    private static string NormalizeImageSource(string? raw)
+    {
+        var mode = (raw ?? "").Trim();
+        if (mode.Equals("network", StringComparison.OrdinalIgnoreCase)) return "network";
+        if (mode.Equals("auto", StringComparison.OrdinalIgnoreCase)) return "auto";
+        if (mode.Equals("library", StringComparison.OrdinalIgnoreCase)) return "library";
+        return DefaultImageSource;
+    }
+
+    /// <summary>是否允许联网取图：**只有显式 network / auto 才出网**（默认 library 不出网）。</summary>
     private static bool NetworkImagesAllowed
-        => !string.Equals(_imageSource, "library", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(_imageSource, "network", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(_imageSource, "auto", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>是否允许查团队图库（imageSource=network 时只走网络）。</summary>
     private static bool LibraryImagesAllowed
@@ -4819,7 +4850,7 @@ public class Skill
     }
 
     /// <summary>
-    /// 取一张图：① 团队图库（自有素材，不需署名）→ ② Wikimedia Commons（可自由使用）。
+    /// 取一张图：① 团队图库（自有素材，不需署名）→ ② Wikimedia Commons（仅在显式开启联网时；1.0.164 起默认不走）。
     /// 下载到本地缓存后返回；都取不到（无图库 / 无结果 / 无网络）返回 null —— 调用方降级为题图并记 warning。
     ///
     /// <para>
@@ -4880,13 +4911,15 @@ public class Skill
         }
         else if (photo is null && !libraryOnly && !NetworkImagesAllowed)
         {
-            reasons.Add("已配置为仅用团队图库（imageSource=library），不联网取图");
+            reasons.Add("联网取图已下线（默认只查团队图库），未联网检索");
         }
 
         if (photo is null)
         {
             var why = reasons.Count > 0 ? string.Join("；", reasons) : "未找到合适的图片";
-            warn = "配图检索未成功，已改用自动生成的题图：" + label + "“" + key + "”（" + why + "）【端点：" + PhotoEndpoint() + "】";
+            // 端点只在“本次真会联网”时才报：默认只查图库，提及 Commons 端点会让人误以为它去试了网络。
+            var hint = NetworkImagesAllowed ? "【端点：" + PhotoEndpoint() + "】" : "";
+            warn = "配图检索未成功，已改用自动生成的题图：" + label + "“" + key + "”（" + why + "）" + hint;
             if (reasons.Any(r => r.Contains("无法连接", StringComparison.Ordinal))) _photoOffline = true;
         }
         else if (!Photos.Any(p => string.Equals(p.Path, photo.Path, StringComparison.OrdinalIgnoreCase)))
@@ -5353,7 +5386,7 @@ public class Skill
                     + string.Join(" / ", tried.Take(3))
                     + (tried.Count > 3 ? " 等 " + tried.Count + " 个" : "")
                     + "”（" + (missWhy.Length > 0 ? missWhy : "图库：图库里没有匹配的图片")
-                    + "）【端点：" + PhotoEndpoint() + "】";
+                    + "）" + (NetworkImagesAllowed ? "【端点：" + PhotoEndpoint() + "】" : "");
             if (BetterPhoto(best, alt)) best = alt;
             // 落选的候选从“用到的照片”里去掉，免得 images[] 里列着没进稿子的图
             if (best is not null && first is not null && !ReferenceEquals(best, first)

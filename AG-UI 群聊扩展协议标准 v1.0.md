@@ -1036,7 +1036,7 @@ PUT /ag-ui/user/profile
 
 ### 5.8b 图库管理接口（Hub 扩展，文档技能配图的图片来源）
 
-图库是**用户上传图片**的集合，让文档技能（PPT / Word / PDF）的配图**不依赖外网**（内网部署里 Wikimedia 通常不可达）。
+图库是**用户上传图片**的集合，让文档技能（PPT / Word / PDF）的配图**不依赖外网**（也是 1.0.164 起唯一的配图来源：联网取图已暂时下线）。
 一张图一个向量（不分片）：上传后由**视觉模型自动生成中文描述**（`Agents:VisionEnabled`，失败则用文件名 + 手填描述），
 描述 + 标签 + 文件名向量化存入同一张向量表（GroupId 约定 `img:{LibId}`、`sender_type='img'`），与知识库一样**不参与群记忆检索**。
 图片文件落 `data/images/{libId}/{assetId}{ext}`。入库为异步处理：上传立即返回 `status=processing`，前端轮询 `ready` / `error`。

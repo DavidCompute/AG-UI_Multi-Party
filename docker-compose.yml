@@ -118,15 +118,17 @@ services:
       # 内置文档类技能的默认落盘目录（不传 outputPath 时用）；xlsx / pdf 未单独配置时沿用此项。
       # 对应下方 agui-docs 卷，容器重建/升级不影响已有文件。取文件见该卷旁的注释。
       AGUI_DOCX_OUT: ${AGUI_DOCX_OUT:-/app/docs}
-      # 演示文稿技能的**联网配图**（imageQuery → Wikimedia Commons 检索真照片）端点。
-      # 留空 = 用官方 API。注意：Wikimedia 在部分网络（如中国大陆）不可达 —— 实测本环境下
+      # 演示文稿技能的**联网配图**端点（仅当下面 AGUI_IMAGE_SOURCE 显式设为 auto / network 时才用得上）。
+      # 自 1.0.164 起联网取图已**暂时下线**，默认只查团队图库；保留这个变量是为了恢复时不再改代码。
+      # 留空 = 用官方 Wikimedia API。注意：Wikimedia 在部分网络（如中国大陆）不可达 —— 实测本环境下
       # example.com / api.nuget.org 通，en.wikipedia.org / upload.wikimedia.org 返回 000。
-      # 这类部署二选一：① 给下面的代理变量赋值（留空 = 不用代理，HttpClient 会读这两个变量）；
+      # 真要恢复联网时二选一：① 给下面的代理变量赋值（留空 = 不用代理，HttpClient 会读这两个变量）；
       # ② 把 AGUI_PHOTO_API 指到自建镜像/代理。都不可用时技能会自动降级为题图，不会失败。
       AGUI_PHOTO_API: ${AGUI_PHOTO_API:-}
-      # 配图来源策略：auto（默认，先团队图库再网络）/ library（**仅图库，彻底不出网**，内网部署用这个）
-      # / network（仅网络）。团队图库是用户上传的图片（数据面「图库」），按语义检索返回本地文件。
-      AGUI_IMAGE_SOURCE: ${AGUI_IMAGE_SOURCE:-auto}
+      # 配图来源策略：library（**默认**，仅图库、彻底不出网）/ auto（先图库再网络）/ network（仅网络）。
+      # 只有显式写 auto / network 才会出网（写错成其它值也当 library，安全侧默认）。
+      # 团队图库是用户上传的图片（数据面「图库」），按语义检索返回本地文件，命中无需署名。
+      AGUI_IMAGE_SOURCE: ${AGUI_IMAGE_SOURCE:-library}
       # 代理。注意：一旦启用，容器内网服务也会被套上代理而连不上（如 ollama 的 embedding 端点），
       # 所以 NO_PROXY 默认就排除了内网服务名；在 .env 里改 NO_PROXY 会覆盖这个默认值。
       HTTPS_PROXY: ${HTTPS_PROXY:-}

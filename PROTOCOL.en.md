@@ -1044,7 +1044,7 @@ Knowledge bases are created by users who upload documents (txt/md/json/csv and d
 
 ### 5.8b Image Library APIs (Hub Extension, the image source for document skills)
 
-An image library is a collection of **user-uploaded pictures** so that document skills (PPT / Word / PDF) can illustrate decks **without the internet** (Wikimedia is usually unreachable on an intranet).
+An image library is a collection of **user-uploaded pictures** so that document skills (PPT / Word / PDF) can illustrate decks **without the internet** (and it is the only image source from 1.0.164 on, web image search having been retired).
 One vector per image (no chunking): after upload a **vision model writes a Chinese description** (`Agents:VisionEnabled`; on failure the filename plus the user's caption is used), and description + tags + filename are vectorised into the same vector table (GroupId convention `img:{LibId}`, `sender_type='img'`) — like the knowledge base it is **excluded from group-memory retrieval**.
 Files live under `data/images/{libId}/{assetId}{ext}`. Ingestion is asynchronous: upload returns `status=processing` immediately and the frontend polls for `ready` / `error`.
 
