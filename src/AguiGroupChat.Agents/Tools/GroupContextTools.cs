@@ -72,7 +72,7 @@ public sealed class GroupContextTools
         try
         {
             var segment = await store.TryReadTextRangeAsync(id, startIndex,
-                maxChars is { } m && m > 0 ? Math.Min(m, 100_000) : AttachmentStore.MaxTextCharsPerFile);
+                maxChars is { } m && m > 0 ? Math.Min(m, 100_000) : store.TextCharsPerFile);
             if (segment is not { } seg)
                 return $"附件 {id} 不存在或无法提取文本（仅支持文本类与 docx/xlsx/pptx/pdf）。";
             var name = store.GetAttachmentInfo(id)?.Name ?? id;

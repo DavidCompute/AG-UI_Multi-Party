@@ -6,6 +6,7 @@ using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Hub.Storage;
 using Microsoft.Agents.AI;
@@ -29,27 +30,26 @@ namespace AguiGroupChat.Agents;
 /// </summary>
 public sealed class AgentGateway : IAgentGateway, IDisposable
 {
-    /// <summary>注入模型上下文的群历史消息条数（滑动窗口，控制上下文规模）。</summary>
-    private const int ContextWindowMessages = 12;
+    /// <summary>注入模型上下文的群历史消息条数（滑动窗口，来自 PromptBudget:HistoryWindowMessages）。</summary>
+    private readonly int ContextWindowMessages;
+
+    /// <summary>历史单条消息文本截断长度（来自 PromptBudget:MaxCharsPerHistoryMessage）。</summary>
+    private readonly int MaxContextCharsPerMessage;
+
+    /// <summary>多轮上下文：把历史消息里可提取文本的附件重新内联给模型的总字符预算（来自 PromptBudget）。</summary>
+    private readonly int MaxHistoryInlineTextChars;
+
+    /// <summary>多轮视觉上下文：单轮最多喂入的当前附图数（来自 PromptBudget:MaxContextImages）。</summary>
+    private readonly int MaxContextImages;
+
+    /// <summary>多轮视觉上下文：跟随提问时一并回喂的历史图片上限（来自 PromptBudget:MaxHistoryImages）。</summary>
+    private readonly int MaxHistoryImages;
 
     /// <summary>外部 AG-UI 会话首次建立时发送的话题历史条数上限（全量，存储层上限 5000）。</summary>
     private const int BridgeFullHistoryMax = 5000;
 
     /// <summary>外部 AG-UI 会话建立后单次增量发送条数上限（上次节点之后的新消息）。</summary>
     private const int BridgeIncrementMax = 100;
-
-    /// <summary>历史单条消息文本截断长度。</summary>
-    private const int MaxContextCharsPerMessage = 500;
-
-    /// <summary>多轮视觉上下文：单轮最多喂入的当前附图数（超过则忽略附余，防 payload 过大）。</summary>
-    private const int MaxContextImages = 4;
-
-    /// <summary>多轮视觉上下文：跟随提问时一并回喂的“历史图片”最大数量（避免历史图反复全量拉取撑爆 payload）。</summary>
-    private const int MaxHistoryImages = 4;
-
-    /// <summary>多轮上下文：把历史消息里可提取文本的附件（docx/xlsx/pdf/txt）重新内联给模型的总字符预算，
-    /// 让“先传文档、隔一轮追问”在跨轮仍能用上文档内容。太小则后轮丢细节，太大则反复喂稿撑长 prefill。</summary>
-    private const int MaxHistoryInlineTextChars = 24_000;
 
     /// <summary>话题滚动小结单次扫描消息数上限（从游标之后 / 首次话题尾部取数）。</summary>
     private const int TopicSummaryScanLimit = 400;
@@ -88,6 +88,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly AgentOptions _options;
     // 规范化（夹紧回退默认后）的执行期时序 / 重试 / TTL 覆盖（来源：Agents:Execution，默认与既有常量一致）
     private readonly ExecutionOptions _execution;
+    // 提示词装配预算（PromptBudget，可配）：总闸门 / 历史窗口 / 单条截断 / 历史附件 / 附图数量
+    private readonly PromptBudgetOptions _prompt;
     private readonly AttachmentStore? _attachmentStore;
     private readonly ILogger<AgentGateway> _logger;
     // 模型 token 用量统计与配额（可选：未注册用量存储时不统计）
@@ -223,6 +225,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         _execution = services.GetService(typeof(ExecutionOptions)) as ExecutionOptions
             ?? (options.Execution ?? ExecutionOptions.Default).Normalize(_logger);
+        // 提示词装配预算（Hub 注册的单例；未注册时用出厂默认）：历史窗口 / 单条截断 / 历史附件 / 附图数量在构造时取定，
+        // 因为它们在热路径上被反复读，且与 PromptBudget 其它字段一致“改配置需重启”。
+        _prompt = services.GetService(typeof(PromptBudgetOptions)) as PromptBudgetOptions ?? PromptBudgetOptions.Default;
+        ContextWindowMessages = _prompt.HistoryWindowMessages;
+        MaxContextCharsPerMessage = _prompt.MaxCharsPerHistoryMessage;
+        MaxHistoryInlineTextChars = _prompt.MaxHistoryInlineTextChars;
+        MaxContextImages = _prompt.MaxContextImages;
+        MaxHistoryImages = _prompt.MaxHistoryImages;
         _attachmentStore = attachmentStore;
         _logger = logger;
         _changes = services.GetService<ChangeHub>(); // 游标持久化脏位通知（可选：未注册持久化时不落盘）
@@ -3808,72 +3818,184 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // （含顾客自己的提问与客服定向回复，见 IsVisibleForAgentContext）。按话题过滤（会话历史以话题为单位）。
         var supportCircle = _hub.Value.Store.GetGroup(context.GroupId)?.IsSupportCircle == true;
 
+        // 固定段（不受总闸门裁剪；都很短且属“上下文锚点”）：话题滚动小结 + 用户反馈画像。
+        var head = new StringBuilder();
         // 长话题滚动小结：把“较早对话”的自动摘要先注入（客服知聚跳过——顾客会话彼此隔离），
-        // 让 12 条滑动窗口之外的早期结论仍能进入模型视野。
+        // 让滑动窗口之外的早期结论仍能进入模型视野。
         var topicSummary = await MaybeGetTopicSummaryAsync(context, supportCircle, ct);
         if (topicSummary is not null)
         {
-            sb.Append("【本话题历史小结（自动生成，供回顾更早对话，不必向用户复述）：】\n")
-              .Append(topicSummary).AppendLine().AppendLine();
+            head.Append("【本话题历史小结（自动生成，供回顾更早对话，不必向用户复述）：】\n")
+                .Append(topicSummary).AppendLine().AppendLine();
         }
 
         // 用户偏好画像：该用户近期对“本群/本数字员工”回复点过 👎 时，注入改进提示（客服知聚同样适用）。
         var feedbackHint = await MaybeBuildFeedbackHintAsync(context, ct);
         if (feedbackHint is not null)
         {
-            sb.Append("【该用户近期对回复的反馈（用于改进，请勿复述给用户）：】\n")
-              .Append(feedbackHint).AppendLine().AppendLine();
+            head.Append("【该用户近期对回复的反馈（用于改进，请勿复述给用户）：】\n")
+                .Append(feedbackHint).AppendLine().AppendLine();
         }
 
         var history = _hub.Value.Store.RecentMessages(context.GroupId, ContextWindowMessages, context.TopicId)
             .Where(m => !m.Recalled && m.MessageId != context.TriggerMessageId && !string.IsNullOrWhiteSpace(m.Content)
                 && IsVisibleForAgentContext(m, context.TriggerUserId, supportCircle))
             .ToList();
-        if (history.Count > 0)
-        {
-            // 群历史消息是用户输入，可能含恶意指令（prompt injection）：整段包上不可信边界
-            var block = new StringBuilder();
-            block.AppendLine("以下是群最近对话：");
-            foreach (var m in history)
-            {
-                var who = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
-                var text = m.Content.Length > MaxContextCharsPerMessage ? m.Content[..MaxContextCharsPerMessage] : m.Content;
-                block.AppendLine($"{who}：{text}");
-            }
-            sb.Append(UntrustedBoundary.Wrap(block.ToString())).AppendLine();
 
-            // 历史消息里“可提取文本”的附件（Word/Excel/PDF/txt…）跨轮重新内联，让后续追问仍能参考其内容。
-            // 注意：上下文是按触发重建的（无跨轮会话），若上一条带文档的消息正文已含摘要，这里仍把原文载回以防细节丢失；
-            // 预算限制 MaxHistoryInlineTextChars，并带文件归属标识，全部包上不可信边界。
-            if (_attachmentStore is not null)
+        // 三段“可裁剪段”各自先按自己的单项预算成型，再由总闸门（PromptBudget:MaxTotalChars）按
+        // TruncationOrder 统一裁剪。这么拆的目的：单项上限可以保持宽松（不因怕爆而把日常场景压得过紧），
+        // 真正的规模上界由总闸门兜住。
+        var historySection = BuildHistorySection(history, out var historyDropped, out var historyTruncatedMessages);
+        var (historyAttSection, historyAttIncomplete) = await BuildHistoryAttachmentsSectionAsync(history, ct);
+        var (attSection, attIncomplete) = await BuildAttachmentsSectionAsync(context, ct);
+
+        // 当前消息（含语言提示）永不截断，先为它预留额度。
+        var contentBlock = new StringBuilder();
+        AppendLanguageHint(contentBlock, context.Content);
+        contentBlock.Append(context.Content);
+
+        var sections = new List<(string Name, StringBuilder Text)>
+        {
+            ("history", historySection),
+            ("history_attachments", historyAttSection),
+            ("attachments", attSection),
+        };
+        var totalChars = head.Length + contentBlock.Length + sections.Sum(s => s.Text.Length);
+        var cut = TrimSectionsToBudget(sections, _prompt.TruncationOrder, totalChars - _prompt.MaxTotalChars);
+        if (cut.Count > 0) totalChars = head.Length + contentBlock.Length + sections.Sum(s => s.Text.Length);
+
+        sb.Append(head);
+        if (historySection.Length > 0) sb.Append(historySection).AppendLine();
+        if (historyAttSection.Length > 0) sb.Append(historyAttSection);
+        sb.Append(contentBlock);
+        if (attSection.Length > 0) sb.Append(attSection);
+
+        ReportPromptAssembly(context, totalChars, historyDropped, historyTruncatedMessages, historyAttIncomplete, attIncomplete, cut);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 总闸门的实际裁剪：把各段按 <paramref name="order"/>（越靠前越先牺牲）裁到不超预算，
+    /// 且一律从<b>尾部</b>裁（历史尾部 = 更早的消息）。就地修改 <paramref name="sections"/> 里的 StringBuilder。
+    /// 抽成纯函数（与网关状态无关）是为了能被单测直接钉住降级顺序与裁剪量。
+    /// </summary>
+    /// <returns>被实际裁剪的段及字符数（未裁的不出现）。</returns>
+    internal static List<string> TrimSectionsToBudget(
+        IReadOnlyList<(string Name, StringBuilder Text)> sections, string[] order, int overflow)
+    {
+        var cut = new List<string>();
+        if (overflow <= 0) return cut;
+        foreach (var stage in order)
+        {
+            if (overflow <= 0) break;
+            foreach (var section in sections)
             {
-                var historyInjected = 0;
-                foreach (var m in history)
-                {
-                    if (m.Attachments is not { Count: > 0 }) continue;
-                    foreach (var att in m.Attachments)
-                    {
-                        if (!AttachmentStore.IsExtractable(att)) continue;
-                        var extracted = await _attachmentStore.TryReadTextAsync(att.AttachmentId, ct);
-                        if (string.IsNullOrEmpty(extracted)) continue;
-                        if (historyInjected >= MaxHistoryInlineTextChars) break;
-                        var who2 = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
-                        var remain = MaxHistoryInlineTextChars - historyInjected;
-                        var take = Math.Min(extracted.Length, remain);
-                        if (take <= 0) break;
-                        sb.Append($"\n\n[{who2} 上传的文档 {att.Name} 内容摘录]\n")
-                          .Append(UntrustedBoundary.Wrap(extracted[..take]));
-                        historyInjected += take;
-                    }
-                    if (historyInjected >= MaxHistoryInlineTextChars) break;
-                }
+                if (!string.Equals(section.Name, stage, StringComparison.Ordinal) || section.Text.Length == 0) continue;
+                var n = Math.Min(section.Text.Length, overflow);
+                section.Text.Remove(section.Text.Length - n, n);
+                overflow -= n;
+                cut.Add($"{stage}:-{n}");
             }
         }
+        return cut;
+    }
 
-        AppendLanguageHint(sb, context.Content);
-        sb.Append(context.Content);
-        await AppendAttachmentsAsync(sb, context, ct);
-        return sb.ToString();
+    /// <summary>
+    /// 把群历史排版为可注入段落：单条按 <c>PromptBudget:MaxCharsPerHistoryMessage</c> 截断，
+    /// 整段按 <c>MaxHistoryChars</c> <b>从最新往回填</b>（填满即停，短消息不浪费额度），最后恢复时间顺序输出。
+    /// 群历史是用户输入，可能含恶意指令（prompt injection）：整段包上不可信边界。
+    /// </summary>
+    private StringBuilder BuildHistorySection(IReadOnlyList<GroupMessage> history, out int droppedOldest, out int truncatedMessages)
+    {
+        droppedOldest = 0;
+        truncatedMessages = 0;
+        if (history.Count == 0) return new StringBuilder();
+
+        const string header = "以下是群最近对话：";
+        var used = header.Length;
+        var lines = new List<string>(history.Count);
+        for (var i = history.Count - 1; i >= 0; i--)
+        {
+            var m = history[i];
+            var raw = m.Content;
+            if (raw.Length > MaxContextCharsPerMessage)
+            {
+                raw = raw[..MaxContextCharsPerMessage];
+                truncatedMessages++;
+            }
+            var who = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
+            var line = $"{who}：{raw}";
+            if (used + line.Length > _prompt.MaxHistoryChars)
+            {
+                droppedOldest = i + 1; // 0..i 放不下 → 这些更早的消息全部被丢弃
+                break;
+            }
+            lines.Add(line);
+            used += line.Length;
+        }
+        lines.Reverse(); // 恢复时间顺序
+        var block = new StringBuilder();
+        block.AppendLine(header);
+        foreach (var line in lines) block.AppendLine(line);
+        return new StringBuilder(UntrustedBoundary.Wrap(block.ToString()));
+    }
+
+    /// <summary>
+    /// 把历史消息里“可提取文本”的附件（Word/Excel/PDF/txt…）跨轮重新内联，让后续追问仍能参考其内容
+    /// （上下文按触发重建，无跨轮会话，因此需要重载回上下文）。预算：<c>PromptBudget:MaxHistoryInlineTextChars</c>。
+    /// 全部包上不可信边界。返回段落与“未被完整注入”的附件数（供截断留痕）。
+    /// </summary>
+    private async Task<(StringBuilder Text, int Incomplete)> BuildHistoryAttachmentsSectionAsync(
+        IReadOnlyList<GroupMessage> history, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        if (_attachmentStore is null || history.Count == 0) return (sb, 0);
+
+        var injected = 0;
+        var incomplete = 0;
+        foreach (var m in history)
+        {
+            if (m.Attachments is not { Count: > 0 }) continue;
+            foreach (var att in m.Attachments)
+            {
+                if (!AttachmentStore.IsExtractable(att)) continue;
+                if (injected >= MaxHistoryInlineTextChars) { incomplete++; continue; }
+                var extracted = await _attachmentStore.TryReadTextAsync(att.AttachmentId, ct);
+                if (string.IsNullOrEmpty(extracted)) continue;
+                var take = Math.Min(extracted.Length, MaxHistoryInlineTextChars - injected);
+                if (take <= 0) { incomplete++; continue; }
+                if (take < extracted.Length) incomplete++; // 只注入了截断版：同样如实计入
+                var who = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
+                sb.Append($"\n\n[{who} 上传的文档 {att.Name} 内容摘录]\n")
+                  .Append(UntrustedBoundary.Wrap(extracted[..take]));
+                injected += take;
+            }
+        }
+        return (sb, incomplete);
+    }
+
+    /// <summary>
+    /// 提示词装配留痕。此前各层截断<b>全部静默</b>，于是“看到文字被截断”却查不出是哪一层截的、截掉多少——
+    /// 这正是本机制要解决的可观测性问题：只要有截断就记一条 WARN；接近闸门时也留一条 Information 便于观察趋势。
+    /// 注意：字符数是估算，真实规模以模型返回的 prompt tokens 为准。
+    /// </summary>
+    private void ReportPromptAssembly(AgentInvocationContext context, int totalChars,
+        int historyDropped, int historyTruncatedMessages, int historyAttIncomplete, int attIncomplete, List<string> trimmed)
+    {
+        var truncated = trimmed.Count > 0 || historyDropped > 0 || historyTruncatedMessages > 0
+            || historyAttIncomplete > 0 || attIncomplete > 0;
+        if (!truncated)
+        {
+            if (totalChars > _prompt.MaxTotalChars / 2)
+                _logger.LogInformation("提示词装配：agent={AgentId} group={GroupId} 字符={Chars}/{Budget}（未截断）",
+                    context.AgentId, context.GroupId, totalChars, _prompt.MaxTotalChars);
+            return;
+        }
+        _logger.LogWarning("提示词装配发生截断：agent={AgentId} group={GroupId} 字符={Chars}/{Budget}；"
+            + "历史丢弃最早 {HistoryDropped} 条、【历史单条截断 {HistoryTruncated} 条】、历史附件未完整注入 {HistoryAtt} 个、"
+            + "当前附件未完整注入 {Att} 个、总闸门裁剪 [{Trimmed}]（当前消息与系统提示永不截断）",
+            context.AgentId, context.GroupId, totalChars, _prompt.MaxTotalChars,
+            historyDropped, historyTruncatedMessages, historyAttIncomplete, attIncomplete, string.Join(",", trimmed));
     }
 
     /// <summary>多语言自适应：按触发消息的主导语言给模型补一句“用该语言回复”的提示。
@@ -4063,9 +4185,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 再把可提取文本按顺序内联。预算策略是“每文件各自的单文件上限 + 全局总预算”（参考主流聊天工具：多个文件都可被引用，
     /// 未自动注入全文的附件可随时经 read_attachment 按 ID 读取/分段续读），避免首个大文件挤掉后续附件。
     /// </summary>
-    private async Task AppendAttachmentsAsync(StringBuilder sb, AgentInvocationContext context, CancellationToken ct)
+    private async Task<(StringBuilder Text, int Incomplete)> BuildAttachmentsSectionAsync(AgentInvocationContext context, CancellationToken ct)
     {
-        if (context.Attachments is not { Count: > 0 } attachments || _attachmentStore is null) return;
+        var sb = new StringBuilder();
+        if (context.Attachments is not { Count: > 0 } attachments || _attachmentStore is null) return (sb, 0);
 
         // 1) 预读每个可提取附件的首段文本（单文件上限）与全文长度；不可提取/提取失败以 null 标记。
         var entries = new List<(AttachmentInfo Att, string? Text, int Total)>(attachments.Count);
@@ -4076,12 +4199,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 entries.Add((att, null, 0));
                 continue;
             }
-            var seg = await _attachmentStore.TryReadTextRangeAsync(att.AttachmentId, 0, AttachmentStore.MaxTextCharsPerFile, ct);
+            var seg = await _attachmentStore.TryReadTextRangeAsync(att.AttachmentId, 0, _attachmentStore.TextCharsPerFile, ct);
             entries.Add(seg is { } s ? (att, s.Segment, s.TotalLength) : (att, null, 0));
         }
 
         // 2) 全局预算内顺序分配（每文件已由单文件上限截断，只有总预算耗尽才会截得更短）。
-        var remaining = AttachmentStore.MaxTextCharsTotal;
+        var remaining = _prompt.AttachmentMaxTextCharsTotal;
         var takes = new int[entries.Count];
         for (var i = 0; i < entries.Count; i++)
         {
@@ -4124,6 +4247,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (take <= 0 || entries[i].Text is not { Length: > 0 } text) continue;
             sb.Append($"\n【附件 {i + 1}. {entries[i].Att.Name} 正文】\n").Append(UntrustedBoundary.Wrap(text[..take]));
         }
+
+        // “未完整注入”的附件（被单文件或总预算截短的、以及完全没注入的）如实上报，供“文字被截断”排查。
+        var incomplete = 0;
+        for (var i = 0; i < entries.Count; i++)
+            if (entries[i].Total > takes[i]) incomplete++;
+        return (sb, incomplete);
+    }
+
+    /// <summary>兼容入口：把附件段落直接追加到既有 sb（桥接路径沿用，行为不变）。</summary>
+    private async Task AppendAttachmentsAsync(StringBuilder sb, AgentInvocationContext context, CancellationToken ct)
+    {
+        var (text, _) = await BuildAttachmentsSectionAsync(context, ct);
+        sb.Append(text);
     }
 
     /// <summary>

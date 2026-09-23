@@ -125,6 +125,54 @@ flowchart LR
 
 ---
 
+## 2.3) 提示词装配预算：分段 + 总闸门（PromptBudget）
+
+模型看到的“上下文”由若干段拼成。此前它们的上限散在两处（`AttachmentStore` 的常量 + 网关里的一批 `const`）、
+**各自独立且截断完全静默**——用户看到文字被截断，却查不出是哪一层截的。现在收拢为一份可配预算（appsettings 顶层 `PromptBudget` 节点）：
+
+| 段 | 字段 | 默认 |
+|---|---|---|
+| 群历史（滑动窗口） | `HistoryWindowMessages` / `MaxCharsPerHistoryMessage` / `MaxHistoryChars` | 12 条 / 4000 字符 / 48000 字符 |
+| 历史附件回喂 | `MaxHistoryInlineTextChars` | 96000 字符 |
+| 当前附件 | `AttachmentMaxTextCharsPerFile` / `AttachmentMaxTextCharsTotal` | 40000 / 200000 字符 |
+| 附图 | `MaxContextImages` / `MaxHistoryImages` | 4 / 4 张 |
+| **总闸门** | `MaxTotalChars` | 200000 字符 |
+| 降级顺序 | `TruncationOrder` | `history,history_attachments,attachments` |
+
+```mermaid
+flowchart TB
+    fixed["固定段：系统提示 + 话题小结 + 反馈画像 + 当前消息（永不截断）"]
+    s1["段1 群历史（MaxHistoryChars，从最新往回填）"]
+    s2["段2 历史附件回喂（MaxHistoryInlineTextChars）"]
+    s3["段3 当前附件（单文件 + 合计预算）"]
+    s1 --> gate{"总字符 超过 MaxTotalChars ?"}
+    s2 --> gate
+    s3 --> gate
+    fixed --> gate
+    gate -- 否 --> send["直接发送"]
+    gate -- 是 --> trim["按 TruncationOrder 从尾部裁：history 先于 history_attachments 先于 attachments"]
+    trim --> send
+```
+
+- **为何不按窗口定预算**：模型（DeepSeek-V4.1-Flash）官方推荐 `context_window = 1M tokens`，而本平台实测单次 prompt 仅 3.5K~17.5K tokens（窗口的 0.35%~1.75%）。真正的约束是成本与延迟（每轮重建上下文 → 每次调用都重付 prefill），所以设计成“单项宽松 + 总闸门兜底”，而不是贴着窗口设。
+- **分层降级**：超预算时按 `TruncationOrder` 从**尾部**裁（历史尾部 = 更早的消息）；**当前消息与系统提示永不截断**。
+- **可观测**：只要有截断就记一条 WARN，写明“用了多少 / 上限多少 / 历史丢弃最早几条 / 哪一段被总闸门裁了多少”，把“猜”变成“查”；接近闸门（>50%）也留一条 Information 便于观察趋势。
+- **记忆 / 知识库注入不在闸门内**：那部分由 `Agents:Memory` 的 `TopK` × `MaxCharsPerMemory` 各自兜住（默认 6 × 1500）。真实总规模以模型返回的 prompt tokens 为准（超 `WarnPromptTokens` 打 WARN）。
+
+### 输出侧：输出预算与推理力度
+
+实测 completion 中 **reasoning 占 57%~79%**，而应用此前**不给** `MaxOutputTokens`，等于把输出长度交给提供方默认值。
+现在正式回复路径显式给出预算：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `Agents:MaxOutputTokens` | 16000 | `<=0` = 不设（交给提供方）。模型方推荐 `max_tokens ≥ 256K`，因此默认值很保守，可放心上调 |
+| `Agents:ReasoningEffort` | null（不设） | `none` / `low` / `medium` / `high`（另接受 `extrahigh`）。**默认不启用**：DeepSeek 自家是连续 1~100 口径，而 OpenAI 兼容面上是字符串枚举，取值需实测后再固定 |
+
+两者都只作用于**正式回复**路径（`AgentCatalog.Create`）；小决策 / 路由走 `CreateBare` 并自带极小预算（发言判定 8 / 指派路由 64 tokens），不受影响。
+
+---
+
 ## 3) 普通带工具 run 的内部循环（Local streaming + HITL）
 
 ```mermaid
@@ -253,3 +301,4 @@ In one sentence: once a message touches a digital employee, the runtime picks a 
 - 普通 run：`agent.RunStreamingAsync`、审批 (`HITL`) 恢复 `ResumeRunAsync`、暂停清理 `ResolveInteractionAsync`、批量客户端 `AwaitBatchClientExecAsync`。
 - 小决策（§2.1）：`AgentCatalog.ResolveDecisionModelName` / `DecideYesNoAsync` / `ParseYesNo` / `ParseAssignTargets`、`AgentGateway.ShouldSpeakAsync` / `RankAssignTargetsAsync`。
 - 复杂度自适应超时（§2.2）：`RunComplexityEstimator` / `RunTimeoutPolicy` / `RunTimeoutBudget`（`src/AguiGroupChat.Agents/RunTimeoutPolicy.cs`）、`AgentGateway.InstallRunBudget` / `ClientSkillTimeout`、`SkillRunner.RunDotnetSkill`、`AgentCatalog.BuildOpenAIChatClient`（网络兜底）。
+- 提示词装配预算（§2.3）：`PromptBudgetOptions`（`src/AguiGroupChat.Hub/Options/PromptBudgetOptions.cs`）、`AgentGateway.BuildUserMessageAsync` / `BuildHistorySection` / `BuildHistoryAttachmentsSectionAsync` / `BuildAttachmentsSectionAsync` / `TrimSectionsToBudget` / `ReportPromptAssembly`、`AttachmentStore.TextCharsPerFile/Total`、`AgentCatalog.BuildReasoningOptions`。

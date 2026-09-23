@@ -8,6 +8,7 @@ using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Hub.Users;
 using AGUI.Abstractions;
@@ -1504,14 +1505,16 @@ public sealed class AgentGatewayTests
         });
         var gateway = CreateGateway(f, out _);
 
-        // 群历史：正常消息 + 超长消息（超截断阈值）+ 撤回消息
+        // 群历史：正常消息 + 超长消息（超出单条截断阈值）+ 撤回消息。
+        // 阈值从 PromptBudget 取（不写死 500）：改配置时本用例仍表达“单条历史被截断”这同一个意图。
+        var budget = PromptBudgetOptions.Default;
         await f.Hub.SendMessageAsync(new GroupMessageSendRequest { GroupId = group.GroupId, UserId = "user_1", Content = "第一条历史消息" });
         var longPrefix = "超长消息开头标记";
         var longMsg = await f.Hub.SendMessageAsync(new GroupMessageSendRequest
         {
             GroupId = group.GroupId,
             UserId = "user_1",
-            Content = longPrefix + new string('长', 600),
+            Content = longPrefix + new string('长', budget.MaxCharsPerHistoryMessage + 100),
         });
         var recalled = await f.Hub.SendMessageAsync(new GroupMessageSendRequest { GroupId = group.GroupId, UserId = "user_1", Content = "这条将被撤回，不应进入上下文" });
         await f.Hub.RecallMessageAsync(new GroupMessageRecallRequest { GroupId = group.GroupId, MessageId = recalled.MessageId, OperatorId = "user_1" });
@@ -1533,9 +1536,9 @@ public sealed class AgentGatewayTests
 
         Assert.Contains("第一条历史消息", agentMsg.Content);              // 窗口包含最近正常消息
         Assert.Contains(longPrefix, agentMsg.Content);                    // 超长消息被包含（截断后）
-        // 截断断言：超长消息 610 字符 → 单条截断 500，回复中“长”字符总数应 ≤ 500
+        // 截断断言：超长消息远超单条上限 → 回复中“长”字符总数应 ≤ 该上限
         var longCharCount = agentMsg.Content.Count(c => c == '长');
-        Assert.True(longCharCount <= 500, $"截断未生效：{longCharCount} 个「长」");
+        Assert.True(longCharCount <= budget.MaxCharsPerHistoryMessage, $"截断未生效：{longCharCount} 个「长」（上限 {budget.MaxCharsPerHistoryMessage}）");
         Assert.DoesNotContain("不应进入上下文", agentMsg.Content);         // 撤回消息不进上下文
         Assert.Contains("总结一下", agentMsg.Content);                    // 当前消息
     }

@@ -26,6 +26,10 @@ public static class HubApp
     {
         var options = builder.Configuration.GetSection("GroupChat").Get<GroupChatOptions>() ?? new GroupChatOptions();
         builder.Services.AddSingleton(options);
+        // 提示词装配预算（顶层节点 PromptBudget）：附件注入长度上限与智能体网关的历史/总闸门共用同一份，
+        // 因此必须在这里注册并交给 AttachmentStore，不能让两处各执一套默认值。
+        var promptBudget = (builder.Configuration.GetSection("PromptBudget").Get<PromptBudgetOptions>() ?? new PromptBudgetOptions()).Normalize();
+        builder.Services.AddSingleton(promptBudget);
         // 存储提供器：memory（默认，进程内 + JSON 快照）或 postgres（PostgreSQL 落盘，禁用 JSON 快照）
         var storageOptions = builder.Configuration.GetSection("Storage").Get<StorageOptions>() ?? new StorageOptions();
         builder.Services.AddSingleton(storageOptions);
@@ -61,9 +65,11 @@ public static class HubApp
         builder.Services.AddSingleton<AgentRegistry>();
         /// 操作审计日志（内存环形缓冲）：管理员控制台查询关键 / 敏感操作留痕
         builder.Services.AddSingleton<AguiGroupChat.Hub.Infra.AuditLogService>();
-        // 附件文件存储：与持久化快照同根目录（data/uploads），Web 层暴露 HTTP 端点，智能体网关读取文本注入
+        // 附件文件存储：与持久化快照同根目录（data/uploads），Web 层暴露 HTTP 端点，智能体网关读取文本注入。
+        // 注入模型上下文的单文件 / 总字符上限取自 PromptBudget（可配）。
         var uploadsRoot = Path.Combine(builder.Environment.ContentRootPath, "data", "uploads");
-        builder.Services.AddSingleton(new AttachmentStore(uploadsRoot));
+        builder.Services.AddSingleton(new AttachmentStore(uploadsRoot,
+            promptBudget.AttachmentMaxTextCharsPerFile, promptBudget.AttachmentMaxTextCharsTotal));
         builder.Services.AddSingleton<ConnectionManager>();
         builder.Services.AddSingleton<AgentTriggerService>();
         // 预留接口：接入真实 AG-UI 网关时替换为自定义实现

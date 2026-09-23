@@ -55,11 +55,13 @@ public sealed class AttachmentStore
     internal static bool IsValidAttachmentId(string? attachmentId)
         => !string.IsNullOrWhiteSpace(attachmentId) && AttachmentIdPattern.IsMatch(attachmentId);
 
-    /// <summary>文本类附件注入模型上下文的单文件截断长度（每个文件各自享有，避免首个大文件挤掉后续附件）。</summary>
-    public const int MaxTextCharsPerFile = 12_000;
+    /// <summary>文本类附件注入模型上下文的单文件截断长度的<b>出厂默认值</b>（每个文件各自享有，避免首个大文件挤掉后续附件）。
+    /// 运行期实际生效值见 <see cref="TextCharsPerFile"/>（可经 PromptBudget 配置）。</summary>
+    public const int DefaultTextCharsPerFile = 12_000;
 
-    /// <summary>文本类附件自动注入模型上下文的<b>总</b>字符预算（全部附件共享上限，超出部分仅给元数据、可经 read_attachment 按需读取）。</summary>
-    public const int MaxTextCharsTotal = 60_000;
+    /// <summary>文本类附件自动注入模型上下文的<b>总</b>字符预算的<b>出厂默认值</b>（全部附件共享上限，超出部分仅给元数据、
+    /// 可经 read_attachment 按需读取）。运行期实际生效值见 <see cref="TextCharsTotal"/>。</summary>
+    public const int DefaultTextCharsTotal = 60_000;
 
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -87,9 +89,17 @@ public sealed class AttachmentStore
     /// <summary>附件根目录（供其它持久化目录（如图库 data/images）与它对齐到同一个数据根）。</summary>
     public string Root => _root;
 
-    public AttachmentStore(string rootDirectory)
+    /// <summary>文本类附件注入模型上下文的运行期单文件字符上限（来自 PromptBudget，未配置时为 <see cref="DefaultTextCharsPerFile"/>）。</summary>
+    public int TextCharsPerFile { get; }
+
+    /// <summary>文本类附件注入模型上下文的运行期总字符预算（来自 PromptBudget，未配置时为 <see cref="DefaultTextCharsTotal"/>）。</summary>
+    public int TextCharsTotal { get; }
+
+    public AttachmentStore(string rootDirectory, int? textCharsPerFile = null, int? textCharsTotal = null)
     {
         _root = rootDirectory;
+        TextCharsPerFile = textCharsPerFile is > 0 ? textCharsPerFile.Value : DefaultTextCharsPerFile;
+        TextCharsTotal = textCharsTotal is > 0 ? textCharsTotal.Value : DefaultTextCharsTotal;
         Directory.CreateDirectory(_root);
     }
 
@@ -258,7 +268,7 @@ public sealed class AttachmentStore
         }
 
         if (text is null) return null;
-        return text.Length > MaxTextCharsPerFile ? text[..MaxTextCharsPerFile] : text;
+        return text.Length > TextCharsPerFile ? text[..TextCharsPerFile] : text;
     }
 
     /// <summary>
@@ -284,7 +294,7 @@ public sealed class AttachmentStore
         if (full is null) return null;
         start = Math.Max(0, start);
         if (start >= full.Length) return (string.Empty, full.Length);
-        var count = Math.Min(maxChars > 0 ? maxChars : MaxTextCharsPerFile, full.Length - start);
+        var count = Math.Min(maxChars > 0 ? maxChars : TextCharsPerFile, full.Length - start);
         return (full.Substring(start, count), full.Length);
     }
 

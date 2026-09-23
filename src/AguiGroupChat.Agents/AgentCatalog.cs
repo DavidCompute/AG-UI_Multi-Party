@@ -517,6 +517,11 @@ public sealed class AgentCatalog
             {
                 Instructions = def.Instructions,
                 Tools = tools,
+                // 输出预算与推理力度（可配，仅作用于正式回复；小决策 / 路由走 CreateBare，自带极小预算）：
+                // 实测 reasoning 占 completion 的 57%~79%，不显式给预算就只能依赖提供方默认值，
+                // 于是“长文回复被中途切断”无从归因。MaxOutputTokens<=0 表示不设。
+                MaxOutputTokens = _options.MaxOutputTokens > 0 ? _options.MaxOutputTokens : null,
+                Reasoning = BuildReasoningOptions(_options.ReasoningEffort),
             },
             AIContextProviders = _memoryContext is null ? [] : [_memoryContext],
         };
@@ -964,6 +969,19 @@ public sealed class AgentCatalog
             _ => null,
         };
     }
+
+    /// <summary>把配置里的推理力度字符串映射为 MEAI 枚举（留空 / 非法 → null = 不设该参数，沿用模型默认）。
+    /// 取值口径上界到 <c>high</c>/<c>extrahigh</c>，与 MEAI 的 <see cref="ReasoningEffort"/> 一致。</summary>
+    internal static ReasoningOptions? BuildReasoningOptions(string? effort)
+        => effort?.Trim().ToLowerInvariant() switch
+        {
+            "none" => new ReasoningOptions { Effort = ReasoningEffort.None },
+            "low" => new ReasoningOptions { Effort = ReasoningEffort.Low },
+            "medium" => new ReasoningOptions { Effort = ReasoningEffort.Medium },
+            "high" => new ReasoningOptions { Effort = ReasoningEffort.High },
+            "extrahigh" or "extra_high" or "xhigh" => new ReasoningOptions { Effort = ReasoningEffort.ExtraHigh },
+            _ => null,
+        };
 
     /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。
     /// <paramref name="modelOverride"/> 非空白时强制用该模型（视觉等专用场景）。</summary>

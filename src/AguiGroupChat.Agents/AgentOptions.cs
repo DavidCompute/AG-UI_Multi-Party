@@ -35,6 +35,33 @@ public sealed class AgentOptions
     public string? ThinkingModel { get; set; }
 
     /// <summary>
+    /// 正式回复的输出 token 上限（默认 16000；<c>&lt;=0</c> = 不设，交给提供方默认值）。
+    ///
+    /// <para>
+    /// 为何要显式给：实测（DeepSeek-V4.1-Flash，本平台真实用量）completion 中 reasoning 占 57%~79%，
+    /// 依赖提供方默认值时“长文回复被中途切断”很难归因——明明不是窗口限制，却表现为文字被截。
+    /// 这里给一个明确预算，并由推理力度（见 <see cref="ReasoningEffort"/>）控制思考占多少。
+    /// 模型方推荐 <c>max_tokens</c> ≥ 256K（推荐值），因此这个默认值很保守，可放心上调。
+    /// </para>
+    ///
+    /// <para>只作用于**正式回复**路径（<c>AgentCatalog.Create</c>）：小决策 / 路由另走 <c>CreateBare</c> 并自带极小预算。</para>
+    /// </summary>
+    public int MaxOutputTokens { get; set; } = 16_000;
+
+    /// <summary>
+    /// 推理力度（默认 null = 不设，沿用模型默认）：<c>none</c> / <c>low</c> / <c>medium</c> / <c>high</c>。
+    ///
+    /// <para>
+    /// 为何默认不设：DeepSeek-V4.1-Flash 的推理力度是**continuous 1~100** 的自家口径，而 OpenAI 兼容面上
+    /// 传的是字符串枚举（<c>reasoning_effort</c>）；两套取值能否直接对应、你当前端点上接受哪些值，
+    /// 必须先实测再固定。因此这里先把能力接好、默认不启用，验证后再到一个值。
+    /// </para>
+    ///
+    /// <para>生效位置：<c>AgentCatalog.Create</c> 的 agent 级 ChatOptions（只影响正式回复，不影响判定）。</para>
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
+
+    /// <summary>
     /// 「小决策」调用（该不该发言 / 派给谁）使用的模型名。留空（含空白串）= 用<b>非推理</b>的常规模型
     /// （智能体 Model → 全局 Model → 提供方默认）。
     ///
@@ -245,7 +272,7 @@ public sealed class MemoryOptions
     public int EmbeddingDimensions { get; set; } = 768;
 
     /// <summary>每次回复检索注入的历史记忆条数。</summary>
-    public int TopK { get; set; } = 5;
+    public int TopK { get; set; } = 6;
 
     /// <summary>相似度阈值（0..1，余弦相似度），低于此值不注入。</summary>
     public double MinScore { get; set; } = 0.25;
@@ -269,8 +296,9 @@ public sealed class MemoryOptions
     /// <summary>混合检索中 BM25 分数的权重（与余弦相似度线性融合：score = cosine×(1-w) + bm25×w）。</summary>
     public double HybridBm25Weight { get; set; } = 0.35;
 
-    /// <summary>注入的每条记忆文本截断长度。</summary>
-    public int MaxCharsPerMemory { get; set; } = 600;
+    /// <summary>注入的每条记忆文本截断长度（默认 1500）。旧值 600 对“结论 + 上下文”偏短，
+    /// 检索命中却看不到完整信息；模型窗口（V4.1-Flash 为 1M）下这点字符量不是瓶颈。</summary>
+    public int MaxCharsPerMemory { get; set; } = 1_500;
 
     /// <summary>检索 query 文本（触发消息）截断长度。</summary>
     public int MaxQueryChars { get; set; } = 2000;

@@ -139,6 +139,8 @@
 | 「小决策」模型名（判定发言 / 指派路由） | **fixed → appsettings `Agents:DecisionModel`**（默认留空 = 非推理常规模型） | 启动装配 | `AgentOptions.DecisionModel`；**故意不受思考模式影响**，详见 README「「小决策」模型」一节 |
 | 「小决策」判定阈值（P(发言) 下限） | **fixed → appsettings `Agents:DecisionMinProbability`**（默认 0.3） | 启动装配 | `AgentOptions.DecisionMinProbability`；变更只影响后续调用，无需重启前端 |
 | 记忆（RAG）是否启、embedding provider、向量维度、TopK、相似度阈值、上下文 | **fixed → 需改 appsettings 并重启** | 启动装配 | `Agents:Memory` |
+| 提示词装配预算（总闸门 / 历史窗口与截断 / 历史附件回喂 / 附件注入长度 / 附图数量） | **fixed → appsettings 顶层 `PromptBudget` 节点**（不重启不生效） | 启动装配 | `PromptBudgetOptions`；分层降级与可观测见 `docs/agent-execution-algorithm.md` §2.3 |
+| 正式回复的输出预算与推理力度 | **fixed → appsettings `Agents:MaxOutputTokens` / `Agents:ReasoningEffort`** | 启动装配 | 只作用于正式回复（`Create`）；小决策不受影响 |
 | `CoordinatorPlanning`（确定性协调计划总开关） | **fixed → 需改 appsettings 并重启**（本页 P 只能调“计划条目/步骤上限”，开关仍码内固定） | — | `AgentOptions.CoordinatorPlanning` |
 | Skill 自动盲跑 server shell 风险开关 / 允许内网技能端点放行 | **fixed → appsettings**（运维安全收敛项） | — | `SkillAutoTestServerShell`、`AllowPrivateSkillEndpoints` |
 | 全局 AG-UI 桥默认端点（AguiBridge.Endpoint） | **fixed → appsettings**，角色侧桥接端点可经角色表单配置 | 启动装配 | `Agents:AguiBridge` |

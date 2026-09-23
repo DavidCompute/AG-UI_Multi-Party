@@ -156,7 +156,7 @@ services:
       Agents__Memory__EmbeddingEndpoint: ${MEMORY_EMBEDDING_ENDPOINT:-http://ollama:11434/v1}
       Agents__Memory__EmbeddingModel: ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}
       Agents__Memory__EmbeddingDimensions: ${MEMORY_EMBEDDING_DIMENSIONS:-1024}
-      Agents__Memory__TopK: ${MEMORY_TOP_K:-5}
+      Agents__Memory__TopK: ${MEMORY_TOP_K:-6}
       Agents__Memory__MinScore: ${MEMORY_MIN_SCORE:-0.25}
       Agents__Memory__Scope: ${MEMORY_SCOPE:-agent}
       Agents__Memory__KnowledgeChunkSize: ${MEMORY_KNOWLEDGE_CHUNK_SIZE:-4096}
@@ -164,6 +164,13 @@ services:
       Agents__Memory__PersonalTopK: ${MEMORY_PERSONAL_TOP_K:-3}
       Agents__Memory__PersonalMinScore: ${MEMORY_PERSONAL_MIN_SCORE:-0.25}
       Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}
+      # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
+      # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
+      # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"
+      # 字段与分层降级语义见 docs/agent-execution-algorithm.md §2.3
+      # 正式回复的输出预算（<=0 = 不设）与推理力度（none/low/medium/high；默认空 = 不设，取值需实测后固定）：
+      # Agents__MaxOutputTokens: "16000"
+      # Agents__ReasoningEffort: "high"
       # 技能库 HTTP 是否放行本机/内网（SSRF 防护开关；默认关。确需调用本机/内网接口时置 true）
       Agents__AllowPrivateSkillEndpoints: ${AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS:-false}
       # 内网穿透反向隧道（公网 Hub + 无公网 IP 的内网桥）：全局令牌 + 逐 agent 令牌 + 限流
