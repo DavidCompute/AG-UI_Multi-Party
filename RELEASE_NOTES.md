@@ -1,3 +1,32 @@
+# AG-UI 群聊桌面版 1.0.162 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.162 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.162 是一次围绕「**上下文预算**」的集中治理——把此前散落在各处、各自独立、且**全部静默**的长度 / 时间上限收拢成可配置预算，并把截断与慢调用变成可查的日志。共五块：① **运行超时按任务复杂度自适应**（寒暄与 41 页带图 PPT 不再共用同一条预算）；② **提示词装配预算**（分段 + 总闸门 + 分层降级 + 截断 WARN），直接治「文字被截断却查不出在哪一层截的」；③ **记忆向量化的输入预算**（实测 embedding 约 **8.5ms/字符**：检索 query 2000→**500**、写入侧原本整条原文不限长→**800**）；④ **审批轮数分两道线 + 终止前先保产物**，治「40 页 PPT 已生成到磁盘、却因轮次上限被杀且产物没挂上消息」；⑤ **向量化两池隔离**，治后台批量入库把交互检索饿死（日志表现为「语义记忆检索失败」，看着像服务挂了）。
+**Version note**: 1.0.162 is a concentrated pass over **context budgets** — length/time limits that used to be scattered, independent of each other and entirely silent are now one configurable budget with observability. Five parts: (1) **run timeouts adapt to task complexity** (chit-chat and a 41-page illustrated deck no longer share one budget); (2) a **prompt assembly budget** (sections + total gate + layered downgrade + truncation warnings), fixing "text was truncated and I cannot tell which layer did it"; (3) an **input budget for memory embedding** (measured ~8.5 ms per character: retrieval query 2000 → **500**, writes from unlimited to **800**); (4) **two separate approval counters with products kept on termination**, fixing a 40-page deck that was already on disk but never attached because the run was killed by the round limit; (5) **isolated embedding pools**, fixing background ingestion starving interactive retrieval (which surfaces as "semantic memory retrieval failed").
+
+## 上下文预算治理（1.0.162）
+# Context budget governance (1.0.162)
+
+中文：
+- **运行超时按任务复杂度自适应**：按触发消息估出任务量级（交付物格式 / 页数 / 字数 / 条目数 / 多步措辞 / 附件规模 / 是否向下指派），在 `StreamTimeoutMinutes`（默认 5 分钟）之上乘倍率（常规 ×1.5、复杂 ×2、繁重 ×3），上界 `MaxRunTimeoutMinutes`（默认 30 分钟）。**三处连带放宽**：内置文档技能预算同倍率、客户端桥技能等待上界 180 秒×倍率、模型 HTTP 网络兜底改为 `MaxRunTimeoutMinutes+5`。两条不变量：**只放宽不收紧**、**恢复时重算得同一预算**。预算被放宽时日志写明档位与依据。
+- **提示词装配预算（分段 + 总闸门 + 截断可观测）**：收拢为 appsettings 顶层 `PromptBudget` 节点。单项放宽（历史单条 500→**4000** 字符、历史附件回喂 24K→**96K**、附件单文件 12K→**40K**、合计 60K→**200K**），规模由**总闸门**（默认 200000 字符）兜住：超预算时按 `TruncationOrder`（默认 `history` → `history_attachments` → `attachments`）**从尾部**裁，**当前消息与系统提示永不截断**；**只要发生截断就记一条 WARN**（写明用了多少 / 上限多少 / 丢了什么）。为什么不贴窗口定？模型（DeepSeek-V4.1-Flash）官方推荐 `context_window = 1M tokens`，而实测本平台单次 prompt 仅 3.5K~17.5K tokens（窗口的 0.35%~1.75%），真正的约束是成本与延迟（每轮重建上下文 → 每次调用都重付 prefill）。
+- **记忆向量化的输入预算**：embedding 耗时由输入长度主导（实测 4 核 CPU + bge-m3：6 字 0.3 秒、**1500 字 12.7 秒**）。检索 query 上限 2000→**500**；新增写入侧上限 **800**（**同时作用于入库文本与向量**，避免“命中却内容对不上”）；新增 `EmbeddingConnectTimeoutSeconds=5`（把「连不上」与「排队中」拆开）与 `SlowEmbeddingWarnSeconds=10`（单次超时记 WARN 并带字符数）。**为什么不靠并发/并行**：实测服务端并行槽 1→4 只快 **~9%**，批量对长文本**完全无效**（1500 字×4：49.6s vs 48.7s）——这是“算术量”问题。
+- **审批轮数分两道线 + 终止前先保产物**：`MaxInteractionRounds`（5→**15**）只数“真的打断了用户”的那一轮；**自动放行**（已同意技能 / 批量批准）走新配置 `MaxAutoApprovedRounds`（默认 30）。旧实现把两者混计，导致一次正常的长生成在第 5 次调用就被判超限杀掉（实测：40 页 PPT 已生成到磁盘、却因“交互恢复超过最大轮数（5）”终止、产物未挂上消息，用户只看到空白兜底）。现在**终止前先回挂已产出产物**。
+- **向量化两池隔离**：交互池（回复前记忆 / 知识库 / 图谱检索，默认 3 并发）与后台池（记忆写入 / 导入 / 知识库入库，默认 1 并发）互不抢占；两池之和 = 旧版总并发（4），**不增加**对 embedding 服务的压力。交互侧等不到槽位就**降级**（本次不注入这段可选上下文），后台侧跳过本条由下次补上。
+- **回归**：全量 **1546 通过 / 0 失败**。可在「管理员 → 执行参数」热改（注意：已保存过执行参数的实例会以库中快照为准，升级后需把 `maxInteractionRounds` 改成 15 再保存）。
+
+English:
+- **Run timeouts adapt to task complexity**: the trigger message is scored for magnitude and the stream timeout is multiplied (standard ×1.5, complex ×2, heavy ×3) under `MaxRunTimeoutMinutes` (30 min default). Three budgets widen together (built-in document skills, client-bridge skill wait, and the model network fallback), with two invariants: **widen-only** and **the same budget on resume**. Widening is logged with tier and evidence.
+- **Prompt assembly budget (sections + total gate + truncation observability)**: one `PromptBudget` node. Per-section caps stay generous (history message 500→**4000** chars, re-inlined historical attachments 24K→**96K**, attachment per file 12K→**40K**, total 60K→**200K**) while the **total gate** (200000 chars) bounds the size, trimming from the tail by `TruncationOrder`; **the current message and system prompt are never truncated**, and **any truncation emits a WARN** stating usage, cap and what was dropped. Sized by cost, not by the window: the model recommends a 1M-token window while measured prompts are 3.5K–17.5K tokens.
+- **Memory embedding input budget**: embedding cost is dominated by input length (4-core CPU: 6 chars = 0.3 s, **1500 chars = 12.7 s**). Query cap 2000→**500**; a new write cap of **800** (**applied to both stored text and vector**); new `EmbeddingConnectTimeoutSeconds=5` (separating "cannot connect" from "queued") and `SlowEmbeddingWarnSeconds=10`. **Not solved by concurrency**: measured, raising server slots 1→4 buys ~**9%**, and batching is useless for long text.
+- **Two separate approval counters, products kept on termination**: `MaxInteractionRounds` (5→**15**) counts only rounds that really interrupted a user; auto-releases (already-approved skills / batch approval) are bounded separately by `MaxAutoApprovedRounds` (30). Mixing them killed legitimate long generations at the fifth call — a 40-page deck was on disk when the run terminated and never got attached. Termination now re-attaches produced products first.
+- **Isolated embedding pools**: interactive (pre-reply memory / knowledge / graph retrieval, 3 concurrent) and background (writes / imports / knowledge ingestion, 1 concurrent) never preempt each other; their sum equals the previous total (4), so pressure is unchanged. Interactive callers degrade instead of waiting; background callers retry on a later pass.
+- **Tests**: **1546 passed / 0 failed**. Hot-tunable under Admin → Execution Parameters (note: instances that saved execution params keep the stored snapshot, so bump `maxInteractionRounds` to 15 and save once after upgrading).
+
+---
+
+### 上一版 / Previous release
+
 # AG-UI 群聊桌面版 1.0.161 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.161 Release Notes (current Windows desktop release)
 
