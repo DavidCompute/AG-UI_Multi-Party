@@ -110,7 +110,11 @@ internal sealed class SkillRunner
         // 内置技能给更长的预算：它们除了排版还会联网（PPT 的 imageQuery 要检索并下载照片），
         // 实测 3 张照片就会撞上 10 秒；而超时的后果是**整份稿子都没有**（比降级为题图差得多）。
         // 用户自建技能仍用短预算：正文不受我们控制，拖长只会白占线程（宿主是同步等待）。
-        var timeout = skill.BuiltinVersion is null ? _dotnetTimeoutMs : _builtinTimeoutMs;
+        // 复杂度自适应：本次任务是“41 页带插图的 PPT”这类重活时，技能预算按同一倍率放宽
+        //（上限 ComplexityTimeouts:MaxSkillTimeoutMs），避免“运行预算放开了、技能 60 秒先掉链子”。
+        var timeout = skill.BuiltinVersion is null
+            ? _dotnetTimeoutMs
+            : Math.Max(_builtinTimeoutMs, RunTimeoutPolicy.Ambient?.SkillTimeoutMs ?? 0);
         return _dotnet.Run(skill.Body ?? "", query ?? "", CancellationToken.None, timeout);
     }
 

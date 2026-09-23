@@ -94,6 +94,37 @@ flowchart TD
 
 ---
 
+## 2.2) 运行超时预算：按任务复杂度自适应（Complexity-adaptive run budget）
+
+原先所有运行共用一条固定预算（`streamTimeoutMinutes`，默认 5 分钟）——固定值对“寒暄”过宽、对“41 页带插图的 PPT”过窄（实测撞到过「一次提交 41 页 + 长备注，服务端处理超限」）。现在改为**先估任务量级、再按倍率放宽**：
+
+```mermaid
+flowchart LR
+    msg["触发消息正文(前2000字) + 附件元数据 + 角色是否扇出"]
+    msg --> est["RunComplexityEstimator（纯函数·确定性）"]
+    est --> tier{"档位"}
+    tier -- "分 0-1" --> simple["简单 x1"]
+    tier -- "分 2-3" --> std["常规 x1.5"]
+    tier -- "分 4-6" --> cplx["复杂 x2"]
+    tier -- "分 ≥7" --> heavy["繁重 x3"]
+    simple --> clamp["x streamTimeoutMinutes，夹 maxRunTimeoutMinutes"]
+    std --> clamp
+    cplx --> clamp
+    heavy --> clamp
+    clamp --> run["运行主预算 Run"]
+    clamp --> skill["内置文档技能预算（同倍率，夹 maxSkillTimeoutMs）"]
+    clamp --> client["客户端桥技能等待上界（180 秒 x 倍率，夹 maxClientSkillTimeoutSec）"]
+    clamp --> net["模型 HTTP 网络兜底 = maxRunTimeoutMinutes + 5"]
+```
+
+- **信号口径**：交付物格式词（docx/pptx/pdf/word/报告/方案…）+2；页数 / 字数 / 条目数按量级 +1~+3；多步措辞（先…再…最后 / 逐条 / 每页…）每处 +1（上限 3）；穷尽性措辞（完整/详细/全面）+1；文档类附件每个 +1（上限 3）、附件 ≥2MB +1、图片 ≥5 张 +1；该角色会向下指派或有编排流水线 +1。
+- **分配与传播**：`RunTimeoutPolicy.Install` 在**每个运行入口**各设一次（首轮 / 流水线 / 交接 / 指派链 / 桥接 / 审批恢复），同时写入 `RunTimeoutPolicy.Ambient`（`AsyncLocal`，与仓库既有的 `SkillChainBuilder.Ambient` 同一套路数），让拿不到触发上下文的**技能宿主**按同一倍率放宽单技能预算。
+- **指派链 x3**：计划 → 逐步执行 → 递归补查 → 交付兑底 是一条多阶段链，在自适应预算之上再乘 3（同样夹上界），交付兑底内部再开一份自己的预算。
+- **两条不变量**（测试钉住）：①**只放宽、不收紧**——任何档位 / 夹紧都不低于你原本配的 `streamTimeoutMinutes` 与技能预算；②**确定性**——恢复路径用 `PendingInteraction` 里保留的同一份触发上下文重算，必得同一预算。
+- 开关与字段见 `docs/execution-configuration.md` §A.1；预算被真正放宽时日志会打一行 `运行超时预算按任务复杂度放宽：agent=… Heavy（分 8，x3，5→15 分钟，依据：交付物格式、41 页…）`，可直接回答“这次为什么跑这么久”。
+
+---
+
 ## 3) 普通带工具 run 的内部循环（Local streaming + HITL）
 
 ```mermaid
@@ -198,7 +229,7 @@ flowchart TB
     finish --> extraRetry
 ```
 
-> 关键常量/语义：模型流式 `StreamTimeoutMinutes=5` 挂起保护；人机交互 `InteractionTtlMs≈10 分钟`，超时由周期定时器清理；模型流可重试错误按 `MaxModelAttempts` 次指数退避；桥接失败走熔断退避；单次消息审批轮数有上限防死循环。驳回/超时都不会静默改库：执行类技能一律“已获批准才执行”，拒绝即不执行。
+> 关键常量/语义：模型流式挂起保护 = **复杂度自适应预算**（基准 `StreamTimeoutMinutes=5` × 档位倍率，上界 `MaxRunTimeoutMinutes=30`；详见 §2.2）；人机交互 `InteractionTtlMs≈10 分钟`，超时由周期定时器清理；模型流可重试错误按 `MaxModelAttempts` 次指数退避；桥接失败走熔断退避；单次消息审批轮数有上限防死循环。驳回/超时都不会静默改库：执行类技能一律“已获批准才执行”，拒绝即不执行。
 >
 > 孤儿流兜底：一条流式消息**创建超过 10 分钟且最近 60s 无活跃**时被强制收尾（防状态泄漏）。因此审批卡放太久（>10 分钟）再点批准，恢复会报“消息不存在或未开启流式灌入”（该次回复拿不到了）；及时点按不受影响。
 
@@ -221,3 +252,4 @@ In one sentence: once a message touches a digital employee, the runtime picks a 
 - 交付兑底与交付物类型判定：`TrySatisfyDeliveryAsync` / `RunDeliveryStreamAsync` / `WantedDeliverable` / `DeliverableFromSkillId` / `BuildDeliveryPrompt` / `BuildNoOutputFallback`。
 - 普通 run：`agent.RunStreamingAsync`、审批 (`HITL`) 恢复 `ResumeRunAsync`、暂停清理 `ResolveInteractionAsync`、批量客户端 `AwaitBatchClientExecAsync`。
 - 小决策（§2.1）：`AgentCatalog.ResolveDecisionModelName` / `DecideYesNoAsync` / `ParseYesNo` / `ParseAssignTargets`、`AgentGateway.ShouldSpeakAsync` / `RankAssignTargetsAsync`。
+- 复杂度自适应超时（§2.2）：`RunComplexityEstimator` / `RunTimeoutPolicy` / `RunTimeoutBudget`（`src/AguiGroupChat.Agents/RunTimeoutPolicy.cs`）、`AgentGateway.InstallRunBudget` / `ClientSkillTimeout`、`SkillRunner.RunDotnetSkill`、`AgentCatalog.BuildOpenAIChatClient`（网络兜底）。

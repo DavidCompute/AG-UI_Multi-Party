@@ -64,22 +64,44 @@ public static class ExecutionRuntimeApi
         if (req.EnablePipeline is { } ep) e.EnablePipeline = ep;
         if (req.EnableRelay is { } er) e.EnableRelay = er;
         if (req.EnableOrgRoute is { } eo) e.EnableOrgRoute = eo;
+        if (req.ComplexityTimeouts is { } cx)
+        {
+            // 逐字段合并（未给的不动）：与其它字段同口径，避免“只改一个倍率”把上界顺手清掉。
+            var ct = e.ComplexityTimeouts ??= new ComplexityTimeoutOptions();
+            if (cx.Enabled is { } en) ct.Enabled = en;
+            if (cx.StandardMultiplier is { } sm) ct.StandardMultiplier = sm;
+            if (cx.ComplexMultiplier is { } cm) ct.ComplexMultiplier = cm;
+            if (cx.HeavyMultiplier is { } hm) ct.HeavyMultiplier = hm;
+            if (cx.MaxRunTimeoutMinutes is { } mr) ct.MaxRunTimeoutMinutes = mr;
+            if (cx.MaxSkillTimeoutMs is { } ms) ct.MaxSkillTimeoutMs = ms;
+            if (cx.MaxClientSkillTimeoutSec is { } mc) ct.MaxClientSkillTimeoutSec = mc;
+        }
     }
 
-    private static object ToDto(ExecutionOptions e) => new
+    private static object ToDto(ExecutionOptions e)
     {
-        e.StreamTimeoutMinutes, e.MaxModelAttempts, e.InteractionTtlMinutes,
-        e.SessionLockTtlMinutes, e.ApprovedSkillTtlMinutes, e.SessionLockMaxEntries,
-        e.CoordinatorPlanMaxItems, e.CoordinatorPlanMaxSteps, e.MaxRecursiveRounds,
-        e.MaxRouteDepth, e.MaxInteractionRounds,
-        executionOrder = e.ExecutionOrder,
-        e.EnableBridge, e.EnablePipeline, e.EnableRelay, e.EnableOrgRoute,
-    };
+        var ct = e.ComplexityTimeouts ?? new ComplexityTimeoutOptions();
+        return new
+        {
+            e.StreamTimeoutMinutes, e.MaxModelAttempts, e.InteractionTtlMinutes,
+            e.SessionLockTtlMinutes, e.ApprovedSkillTtlMinutes, e.SessionLockMaxEntries,
+            e.CoordinatorPlanMaxItems, e.CoordinatorPlanMaxSteps, e.MaxRecursiveRounds,
+            e.MaxRouteDepth, e.MaxInteractionRounds,
+            executionOrder = e.ExecutionOrder,
+            e.EnableBridge, e.EnablePipeline, e.EnableRelay, e.EnableOrgRoute,
+            complexityTimeouts = new
+            {
+                ct.Enabled, ct.StandardMultiplier, ct.ComplexMultiplier, ct.HeavyMultiplier,
+                ct.MaxRunTimeoutMinutes, ct.MaxSkillTimeoutMs, ct.MaxClientSkillTimeoutSec,
+            },
+        };
+    }
 
     private static string ToAudit(ExecutionOptions e)
         => $"order={string.Join(",", e.ExecutionOrder)};" +
            $"stream={e.StreamTimeoutMinutes};attempts={e.MaxModelAttempts};" +
-           $"bridge={e.EnableBridge};pipeline={e.EnablePipeline};relay={e.EnableRelay};org={e.EnableOrgRoute}";
+           $"bridge={e.EnableBridge};pipeline={e.EnablePipeline};relay={e.EnableRelay};org={e.EnableOrgRoute};" +
+           $"complexity={e.ComplexityTimeouts?.Enabled}";
 
     /// <summary>
     /// 注册「executionRuntime」到持久化：memory 写 JSON 快照，postgres/mysql/sqlite 落 agui_sections。
@@ -109,6 +131,11 @@ public static class ExecutionRuntimeApi
             exec.EnablePipeline = saved.EnablePipeline;
             exec.EnableRelay = saved.EnableRelay;
             exec.EnableOrgRoute = saved.EnableOrgRoute;
+            // 复杂度自适应超时是**后加**的嵌套节点：旧快照里根本没有这个属性，直接赋值会把
+            // appsettings 里的配置冲成默认值（升级即丢配置）。因此只在快照确实带了这个键时才覆盖。
+            if (element.ValueKind == JsonValueKind.Object
+                && (element.TryGetProperty("complexityTimeouts", out _) || element.TryGetProperty("ComplexityTimeouts", out _)))
+                exec.ComplexityTimeouts = saved.ComplexityTimeouts ?? new ComplexityTimeoutOptions();
             exec.Normalize();
         };
         var persistence = services.GetService<PersistenceService>();
@@ -124,4 +151,10 @@ public sealed record ExecutionPatchReq(
     int? CoordinatorPlanMaxItems, int? CoordinatorPlanMaxSteps, int? MaxRecursiveRounds,
     int? MaxRouteDepth, int? MaxInteractionRounds,
     string[]? ExecutionOrder,
-    bool? EnableBridge, bool? EnablePipeline, bool? EnableRelay, bool? EnableOrgRoute);
+    bool? EnableBridge, bool? EnablePipeline, bool? EnableRelay, bool? EnableOrgRoute,
+    ComplexityTimeoutPatch? ComplexityTimeouts);
+
+/// <summary>复杂度自适应超时的部分字段覆盖（未给的保持现有效值）。</summary>
+public sealed record ComplexityTimeoutPatch(
+    bool? Enabled, double? StandardMultiplier, double? ComplexMultiplier, double? HeavyMultiplier,
+    int? MaxRunTimeoutMinutes, int? MaxSkillTimeoutMs, int? MaxClientSkillTimeoutSec);

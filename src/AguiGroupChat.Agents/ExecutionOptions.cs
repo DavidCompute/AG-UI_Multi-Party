@@ -9,8 +9,16 @@ namespace AguiGroupChat.Agents;
 /// </summary>
 public sealed class ExecutionOptions
 {
-    /// <summary>单次模型 / 桥接流式调用的最长运行时间（分钟）：模型挂起时防止 Task 永久占用。</summary>
+    /// <summary>单次模型 / 桥接流式调用的最长运行时间（分钟）：模型挂起时防止 Task 永久占用。
+    /// 这是<b>基准</b>值：实际预算按任务复杂度向上放宽（见 <see cref="ComplexityTimeouts"/>）。</summary>
     public int StreamTimeoutMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// 复杂度自适应超时（默认开）：按触发消息估出的任务量级，在 <see cref="StreamTimeoutMinutes"/> 之上乘一个倍率，
+    /// 并受 <c>MaxRunTimeoutMinutes</c> 绝对上界夹紧。技能预算按同一倍率同步放宽。
+    /// 详见 <see cref="RunTimeoutPolicy"/> / <see cref="RunComplexityEstimator"/>。
+    /// </summary>
+    public ComplexityTimeoutOptions ComplexityTimeouts { get; set; } = new();
 
     /// <summary>本地模型流式调用失败时的重试次数上限（可重试 429 / 5xx / 连接重置）。</summary>
     public int MaxModelAttempts { get; set; } = 2;
@@ -83,6 +91,7 @@ public sealed class ExecutionOptions
     {
         // 逐个成员夹紧：非法（≤0，非 0 上限正整数）一律回退默认，避免范围崩溃 / 死循环等病态行为。
         StreamTimeoutMinutes = Positive(StreamTimeoutMinutes, Default.StreamTimeoutMinutes, nameof(StreamTimeoutMinutes), logger);
+        (ComplexityTimeouts ??= new ComplexityTimeoutOptions()).Normalize(logger);
         MaxModelAttempts = Positive(MaxModelAttempts, Default.MaxModelAttempts, nameof(MaxModelAttempts), logger);
         InteractionTtlMinutes = Positive(InteractionTtlMinutes, Default.InteractionTtlMinutes, nameof(InteractionTtlMinutes), logger);
         SessionLockTtlMinutes = Positive(SessionLockTtlMinutes, Default.SessionLockTtlMinutes, nameof(SessionLockTtlMinutes), logger);

@@ -71,4 +71,54 @@ public sealed class SkillTimeoutBudgetTests
         Assert.True(options.BuiltinSkillTimeoutMs >= 60_000,
             "内置文档技能会联网取图，预算不能低于 60 秒");
     }
+
+    // ===================== 复杂度自适应（RunTimeoutPolicy.Ambient） =====================
+
+    /// <summary>一次“繁重”任务的运行预算（内置技能预算 8 秒 × 3 = 24 秒）。</summary>
+    private static RunTimeoutBudget HeavyBudget(int builtinSkillMs)
+        => RunTimeoutPolicy.Build(
+            "请给我做一份41页的PPT推广方案，要完整详细，先做大纲再逐页写，最后配图", null, false,
+            new ExecutionOptions { StreamTimeoutMinutes = 5 },
+            new AgentOptions { BuiltinSkillTimeoutMs = builtinSkillMs });
+
+    [Fact]
+    public async Task BuiltinSkill_BudgetIsRaisedByComplexityBudget()
+    {
+        // 内置预算 1 毫秒（单看必然超时），但本次运行是繁重任务 → 环境预算把它抬到 24 秒。
+        var previous = RunTimeoutPolicy.Ambient;
+        try
+        {
+            var budget = HeavyBudget(builtinSkillMs: 8_000);
+            Assert.Equal(24_000, budget.SkillTimeoutMs);
+            RunTimeoutPolicy.Ambient = budget;
+
+            var runner = Runner(dotnetMs: 1, builtinMs: 1);
+            var res = await runner.InvokeAsync(BuiltinSkill(SlowSkill), "x", CancellationToken.None);
+            Assert.Contains("done:x", res);
+            Assert.DoesNotContain("超时", res);
+        }
+        finally
+        {
+            RunTimeoutPolicy.Ambient = previous;
+        }
+    }
+
+    [Fact]
+    public async Task UserSkill_IsNotRaisedByComplexityBudget()
+    {
+        // 复杂度自适应该只放宽“内置文档类技能”：用户自建技能的主文不受我们控制，仍走短预算。
+        var previous = RunTimeoutPolicy.Ambient;
+        try
+        {
+            RunTimeoutPolicy.Ambient = HeavyBudget(builtinSkillMs: 8_000);
+
+            var runner = Runner(dotnetMs: 1, builtinMs: 1);
+            var res = await runner.InvokeAsync(UserSkill(SlowSkill), "x", CancellationToken.None);
+            Assert.Contains("超时", res);
+        }
+        finally
+        {
+            RunTimeoutPolicy.Ambient = previous;
+        }
+    }
 }

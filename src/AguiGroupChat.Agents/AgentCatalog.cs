@@ -985,13 +985,16 @@ public sealed class AgentCatalog
         // 禁用 W3C traceparent 自动注入（EnableDistributedTracing=false）：.NET 10 的 DiagnosticsHandler
         // 注入 traceparent 时在部分平台（Linux 容器实测）把前一个 header 的行结束符写坏（\n\r\n），
         // 导致 DeepSeek 等严格网关返回 400 invalid header。traceparent 对调用方无业务价值，直接关闭。
+        //
+        // NetworkTimeout：底层 SDK 默认仅 100 秒，长思考 / 长稿生成会被提前掍断。这里改成
+        // “盖得住复杂度自适应后的最长运行预算”（MaxRunTimeoutMinutes + 5 分钟余量），
+        // 否则外层运行预算放开了、这一层却先掉链子，症状仍会是“编排/路由运行中取消、不出稿”。
+        var complexity = options.Execution?.ComplexityTimeouts;
+        var runCeilingMinutes = complexity is { Enabled: true } ? Math.Max(15, complexity.MaxRunTimeoutMinutes) : 15;
         var openAiOptions = new OpenAIClientOptions
         {
             EnableDistributedTracing = false,
-            // 底层 Azure OpenAI SDK 默认网络超时仅 100 秒：思考模型（deepseek-flash）长思考/长稿生成时
-            // 请求尚未完成就被掐断（表现：编排/路由运行中“取消/超时、不出稿”），且会先于我们的流式超时生效。
-            // 这里调大到 15 分钟作“网络兜底”，真正的一次运行时限仍由执行配置的流式超时（streamTimeoutMinutes）控制。
-            NetworkTimeout = TimeSpan.FromMinutes(15),
+            NetworkTimeout = TimeSpan.FromMinutes(Math.Clamp(runCeilingMinutes + 5, 15, 180)),
         };
         if (endpoint is not null) openAiOptions.Endpoint = new Uri(endpoint);
 

@@ -6749,6 +6749,15 @@ function applyExec(d) {
   setCfgBool("efEnablePipeline", d.enablePipeline);
   setCfgBool("efEnableRelay", d.enableRelay);
   setCfgBool("efEnableOrgRoute", d.enableOrgRoute);
+  // 复杂度自适应超时（嵌套节点；老服务端可能不返回 → 按空对象处理，不回填不报错）
+  const cx = d.complexityTimeouts || {};
+  setCfgBool("efComplexityEnabled", cx.enabled);
+  setCfg("efComplexityStandardMultiplier", num(cx.standardMultiplier));
+  setCfg("efComplexityComplexMultiplier", num(cx.complexMultiplier));
+  setCfg("efComplexityHeavyMultiplier", num(cx.heavyMultiplier));
+  setCfg("efComplexityMaxRunTimeoutMinutes", num(cx.maxRunTimeoutMinutes));
+  setCfg("efComplexityMaxSkillTimeoutMs", num(cx.maxSkillTimeoutMs));
+  setCfg("efComplexityMaxClientSkillTimeoutSec", num(cx.maxClientSkillTimeoutSec));
 }
 
 /** 收集执行参数表单 → 请求体（POST 全量提交，供服务端 Normalize 后回填归一化值）。 */
@@ -6772,6 +6781,15 @@ function collectExec() {
     enablePipeline: $("efEnablePipeline").checked,
     enableRelay: $("efEnableRelay").checked,
     enableOrgRoute: $("efEnableOrgRoute").checked,
+    complexityTimeouts: {
+      enabled: boolOrNull("efComplexityEnabled"),
+      standardMultiplier: numOrNull("efComplexityStandardMultiplier"),
+      complexMultiplier: numOrNull("efComplexityComplexMultiplier"),
+      heavyMultiplier: numOrNull("efComplexityHeavyMultiplier"),
+      maxRunTimeoutMinutes: numOrNull("efComplexityMaxRunTimeoutMinutes"),
+      maxSkillTimeoutMs: numOrNull("efComplexityMaxSkillTimeoutMs"),
+      maxClientSkillTimeoutSec: numOrNull("efComplexityMaxClientSkillTimeoutSec"),
+    },
   };
 }
 

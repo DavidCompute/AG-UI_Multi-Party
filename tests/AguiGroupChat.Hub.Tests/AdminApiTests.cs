@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Hub.Users;
 using AguiGroupChat.Web;
 using Microsoft.AspNetCore.Builder;
@@ -49,6 +51,7 @@ public sealed class AdminApiServerFixture : IAsyncLifetime
         App.MapAdminApi();
         App.MapConfigGovernanceApi();
         App.MapStorageAdminApi();
+        App.MapExecutionRuntimeApi();
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }
@@ -89,6 +92,99 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         var req = new HttpRequestMessage(method, path);
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return req;
+    }
+
+    // ================= 执行参数：复杂度自适应超时（热改 + 持久化契约） =================
+
+    [Fact]
+    public async Task ExecutionRuntime_ComplexityTimeouts_AreExposedAndPatchable()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+
+        // 1) 读：新嵌套节点必须出现在 DTO 里（否则前端无法回填、也无法热改）
+        using var get = Authed(HttpMethod.Get, "/ag-ui/admin/execution", token);
+        var before = (await (await _client.SendAsync(get)).Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("complexityTimeouts");
+        var original = before.GetRawText();
+        Assert.True(before.GetProperty("enabled").GetBoolean());
+        Assert.Equal(1.5, before.GetProperty("standardMultiplier").GetDouble());
+        Assert.Equal(30, before.GetProperty("maxRunTimeoutMinutes").GetInt32());
+
+        try
+        {
+            // 2) 写：只给一个字段 —— 其余字段必须保持不变（逐字段合并，不能整块重置）
+            using var set = Authed(HttpMethod.Post, "/ag-ui/admin/execution", token);
+            set.Content = JsonContent.Create(new { complexityTimeouts = new { heavyMultiplier = 4.5 } });
+            var patched = (await (await _client.SendAsync(set)).Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("execution").GetProperty("complexityTimeouts");
+            Assert.Equal(4.5, patched.GetProperty("heavyMultiplier").GetDouble());
+            Assert.Equal(before.GetProperty("standardMultiplier").GetDouble(), patched.GetProperty("standardMultiplier").GetDouble());
+            Assert.Equal(before.GetProperty("maxRunTimeoutMinutes").GetInt32(), patched.GetProperty("maxRunTimeoutMinutes").GetInt32());
+
+            // 3) 非法的单字段 → 只回退该项，而不是拒整表
+            using var bad = Authed(HttpMethod.Post, "/ag-ui/admin/execution", token);
+            bad.Content = JsonContent.Create(new { complexityTimeouts = new { complexMultiplier = 99 } }); // 上界 6
+            var clamped = (await (await _client.SendAsync(bad)).Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("execution").GetProperty("complexityTimeouts");
+            Assert.Equal(2.0, clamped.GetProperty("complexMultiplier").GetDouble()); // 回退出厂默认 2
+            Assert.Equal(4.5, clamped.GetProperty("heavyMultiplier").GetDouble());    // 其余项不受影响
+        }
+        finally
+        {
+            // 4) 还原：fixture 内其它用例共用同一份 ExecutionOptions 单例，不留污染
+            using var restore = Authed(HttpMethod.Post, "/ag-ui/admin/execution", token);
+            restore.Content = new StringContent("{\"complexityTimeouts\":" + original + "}", Encoding.UTF8, "application/json");
+            (await _client.SendAsync(restore)).EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
+    public async Task ExecutionRuntime_ComplexityTimeouts_ForbidsNonAdmin()
+    {
+        var normal = await RegisterAsync("exec_normal_user");
+        using var req = Authed(HttpMethod.Post, "/ag-ui/admin/execution", normal.GetProperty("token").GetString()!);
+        req.Content = JsonContent.Create(new { complexityTimeouts = new { enabled = false } });
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
+    public void ExecutionRuntime_LegacySnapshot_DoesNotClobberComplexityTimeouts()
+    {
+        // 升级安全：本次改动之前落盘的 executionRuntime 快照里根本没有 complexityTimeouts 键。
+        // 若无条件赋值，会把 appsettings 里配好的值冲成默认（升级即丢配置）——这是真踩过的性能陷阱，钉住它。
+        var exec = new ExecutionOptions
+        {
+            ComplexityTimeouts = new ComplexityTimeoutOptions { HeavyMultiplier = 4.5, MaxRunTimeoutMinutes = 45 },
+        };
+        var sections = new CaptureSectionStore();
+        var services = new ServiceCollection();
+        services.AddSingleton(exec);
+        services.AddSingleton<ISectionStore>(sections);
+        services.BuildServiceProvider().RegisterExecutionRuntimePersistence();
+
+        var restore = Assert.Single(sections.Restores, r => r.Key == "executionRuntime").Value;
+
+        // 旧快照（无该键）→ 只恢复旧字段，appsettings 里的复杂度配置必须原样保留
+        restore(JsonDocument.Parse("{\"streamTimeoutMinutes\":8,\"enableRelay\":false}").RootElement);
+        Assert.Equal(8, exec.StreamTimeoutMinutes);
+        Assert.False(exec.EnableRelay);
+        Assert.Equal(4.5, exec.ComplexityTimeouts.HeavyMultiplier);
+        Assert.Equal(45, exec.ComplexityTimeouts.MaxRunTimeoutMinutes);
+
+        // 新快照（带该键）→ 整个节点按快照恢复（快照总是写全字段，故不会丢）
+        restore(JsonDocument.Parse("{\"complexityTimeouts\":{\"heavyMultiplier\":6}}").RootElement);
+        Assert.Equal(6, exec.ComplexityTimeouts.HeavyMultiplier);
+        Assert.Equal(30, exec.ComplexityTimeouts.MaxRunTimeoutMinutes);
+    }
+
+    /// <summary>捕获各扩展区注册的读写回调，供无持久化环境下的恢复语义测试。</summary>
+    private sealed class CaptureSectionStore : ISectionStore
+    {
+        public Dictionary<string, Action<JsonElement>> Restores { get; } = new(StringComparer.Ordinal);
+        public void AddSection(string name, Func<object?> snapshot, Action<JsonElement> restore) => Restores[name] = restore;
+        public void LoadSections() { }
+        public void Flush() { }
     }
 
     [Fact]

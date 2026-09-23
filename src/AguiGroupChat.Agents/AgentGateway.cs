@@ -470,6 +470,42 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 what, groupId, clientId ?? "(空)");
     }
 
+    /// <summary>
+    /// 估算本次任务复杂度并安装“运行超时预算”（复杂度自适应超时）：
+    /// 主预算 = StreamTimeoutMinutes × 档位倍率，受 ComplexityTimeouts:MaxRunTimeoutMinutes 夹紧；
+    /// 同时写入 <see cref="RunTimeoutPolicy.Ambient"/>，让技能宿主按同一倍率放宽单技能预算。
+    /// 各运行入口（首轮 / 桥接 / 审批恢复）都要调用，且恢复路径用同一份触发上下文 → 结果与首轮一致。
+    /// </summary>
+    private RunTimeoutBudget InstallRunBudget(AgentInvocationContext context, AgentDefinition? def)
+    {
+        var previous = RunTimeoutPolicy.Ambient;
+        var budget = RunTimeoutPolicy.Install(context.Content, context.Attachments, IsFanOutRole(def), _execution, _options);
+        // 只在“本次异步流的首次安装”且真的被放宽时记 Information：
+        // 同一运行的后续阶段（流水线 / 指派链 / 交付兑底）重算结果相同，重复记录只会刷屏；
+        // 这一行可直接回答“为什么这次跑这么久”。
+        if (previous is null && budget.Run > TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes))
+            _logger.LogInformation("运行超时预算按任务复杂度放宽：agent={AgentId} {Budget}", context.AgentId, budget.Describe());
+        else if (previous is null)
+            _logger.LogDebug("运行超时预算：agent={AgentId} {Budget}", context.AgentId, budget.Describe());
+        return budget;
+    }
+
+    /// <summary>该角色是否会把任务向下摊开（编排流水线 / 向下指派）：这类运行的链条天然更长（计划 + 递归补查 + 交付）。</summary>
+    private static bool IsFanOutRole(AgentDefinition? def)
+        => def is not null && ((def.Pipeline?.Count ?? 0) > 0 || (def.AssignmentIds?.Count ?? 0) > 0);
+
+    /// <summary>
+    /// 客户端技能经内网隧道执行的等待上界（秒）。模型自报的 shell 超时决定基准，
+    /// 原先上界硬编码 180 秒——对“复杂度高的本地批处理”是短板；这里改用本次运行的复杂度预算作为上界。
+    /// 注意：始终不小于原本的 10..180 区间，所以对普通任务行为完全不变。
+    /// </summary>
+    private static TimeSpan ClientSkillTimeout(int? declaredSeconds)
+    {
+        var sec = Math.Clamp(declaredSeconds.GetValueOrDefault(30) + 20, 10, 180);
+        if (RunTimeoutPolicy.Ambient is { ClientSkillTimeoutSec: > 0 } b) sec = Math.Max(sec, b.ClientSkillTimeoutSec);
+        return TimeSpan.FromSeconds(sec);
+    }
+
     /// <summary>顾客机不可达时给模型的明确失败文案（客服知聚强调“只在请求顾客的机器执行”）。</summary>
     private string SupportClientUnavailableText(AgentInvocationContext ctx, string toolName)
     {
@@ -554,7 +590,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         string? messageId = null;
         ToolApprovalRequestContent? approval = null;
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes)); // 模型挂起保护
+        timeoutCts.CancelAfter(InstallRunBudget(context, def).Run); // 模型挂起保护（按任务复杂度放宽）
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId); // 注册：支持「停止生成」
         var sessionLock = GetSessionLock(context.ThreadId);
@@ -697,7 +733,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
                         var tunnelResult = await ExecuteTunnelAsync(
                             context.AgentId, context.PreferredBridgeClient, shellCmd!, shellCwd, shellTimeoutSec, ApprovalArgsQuery(tfc),
-                            TimeSpan.FromSeconds(Math.Clamp(shellTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
+                            ClientSkillTimeout(shellTimeoutSec), runCt);
                         var resultText = string.IsNullOrWhiteSpace(tunnelResult)
                             ? (tunnelResult is null ? "（内网本机桥执行未返回结果 / 超时）" : "（内网本机执行无输出）")
                             : tunnelResult;
@@ -906,7 +942,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(InstallRunBudget(context, def).Run);
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
 
@@ -1024,7 +1060,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest { GroupId = context.GroupId, MemberId = context.AgentId, IsTyping = true }, ct);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(InstallRunBudget(context, def).Run);
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
         string? messageId = null;
@@ -1117,10 +1153,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // 指派/提升是一条多阶段流水线：计划 → 逐步执行（多次模型调用）→ 递归补查 → 交付兑底。
-        // 用单次流式的预算（StreamTimeoutMinutes）盖整条链会中途截断：实测走主管时，
-        // 计划+递归已经把 5 分钟用完，轮到“真正出文件”的那一步预算刚好耗尽。
-        // 这里给整条链留更宽的总预算；交付兑底内部还会再开一份自己的预算。
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(Math.Max(_execution.StreamTimeoutMinutes * 3, 15)));
+        // 用单次流式的预算盖整条链会中途截断：实测走主管时，计划+递归已经把基准预算用完，
+        // 轮到“真正出文件”的那一步刚好耗尽。这里在“复杂度自适应预算”之上再给整条链 ×3 的总预算
+        // （交付兑底内部还会再开一份自己的预算），仍受 ComplexityTimeouts:MaxRunTimeoutMinutes 夹紧。
+        timeoutCts.CancelAfter(InstallRunBudget(context, _catalog.GetDefinition(context.AgentId)).Scale(3));
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId);
         string? messageId = null;
@@ -1782,7 +1818,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     var r = await ExecuteTunnelAsync(
                         context.AgentId, context.PreferredBridgeClient, cmd!, cwd, timeoutSec, it.Query,
-                        TimeSpan.FromSeconds(Math.Clamp(timeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                        ClientSkillTimeout(timeoutSec), ct);
                     tunneled[it.SkillId] = string.IsNullOrWhiteSpace(r) ? "（本机执行未返回结果 / 超时）" : r;
                 }
                 else
@@ -1809,7 +1845,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     var r = await ExecuteTunnelAsync(
                         context.AgentId, context.PreferredBridgeClient, aCmd!, aCwd, aTimeoutSec, it.Query,
-                        TimeSpan.FromSeconds(Math.Clamp(aTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                        ClientSkillTimeout(aTimeoutSec), ct);
                     autoResults[it.SkillId] = string.IsNullOrWhiteSpace(r) ? "（本机执行未返回结果 / 超时）" : r;
                 }
                 else
@@ -2594,7 +2630,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 若共用同一个 token，轮到真正要出文件时它已被取消 → 模型调用瞬时被取消、静默失败。
         // 实测踩到：直接找交付岗 30s 就出文件；走主管（计划+递归补查多轮）却总是拿不到文件。
         using var deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
-        deliveryCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        deliveryCts.CancelAfter(InstallRunBudget(context, _catalog.GetDefinition(context.AgentId)).Run);
         var ct = deliveryCts.Token;
         try
         {
@@ -3140,7 +3176,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         IAguiBridgeClient? bridgeClient = null;
         var interactionPending = false; // 中断时保留桥接连接供恢复，不随本方法结束释放
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes)); // 外部服务挂起保护
+        timeoutCts.CancelAfter(InstallRunBudget(context, def).Run); // 外部服务挂起保护（按任务复杂度放宽）
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId); // 注册：支持「停止生成」
         // 与本地路径一致的会话锁：同一桥接智能体并发触发时串行化，防止同一桥接智能体多路连接外部服务
@@ -3406,7 +3442,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+            timeoutCts.CancelAfter(InstallRunBudget(pending.Context, _catalog.GetDefinition(pending.Context.AgentId)).Run);
             var runCt = timeoutCts.Token;
             var sessionLock = GetSessionLock(pending.Context.ThreadId);
             var acquired = false;
@@ -4297,7 +4333,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         {
                             var br = await ExecuteTunnelAsync(
                                 batch.AgentId, batch.ClientId, bCmd!, bCwd, bTimeoutSec, it.Query,
-                                TimeSpan.FromSeconds(Math.Clamp(bTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), ct);
+                                ClientSkillTimeout(bTimeoutSec), ct);
                             results[it.SkillId] = string.IsNullOrWhiteSpace(br) ? "（本机执行未返回结果 / 超时）" : br;
                         }
                         else if (!results.ContainsKey(it.SkillId))
@@ -4381,10 +4417,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _logger.LogInformation("交互决策：interrupt={InterruptId} member={Member} approved={Approved} hasToolResult={HasToolResult} toolResultLen={ToolResultLen}",
             interruptId, memberId, approved, !string.IsNullOrEmpty(toolResult), toolResult?.Length ?? 0);
         ClientToolTrace.Write($"RESOLVE interrupt={interruptId} member={memberId} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} toolResultLen={toolResult?.Length ?? 0} agent={pending.Context.AgentId}");
-        // 恢复任务与 HTTP 请求生命周期解耦：独立 5 分钟超时 CTS（请求断开 / 前端超时不影响恢复执行，
-        // 避免恢复任务在 WaitAsync / 流式消费中被请求取消令牌中断）。
+        // 恢复任务与 HTTP 请求生命周期解耦：独立超时 CTS（请求断开 / 前端超时不影响恢复执行，
+        // 避免恢复任务在 WaitAsync / 流式消费中被请求取消令牌中断）。预算同样按该任务复杂度放宽。
         // 注意：不能在方法末尾 using 释放——后台任务仍在使用该令牌，须等任务结束后再释放。
-        var resumeCts = new CancellationTokenSource(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        var resumeCts = new CancellationTokenSource(InstallRunBudget(pending.Context, _catalog.GetDefinition(pending.Context.AgentId)).Run);
         _ = Task.Run(async () =>
         {
             var prev = AmbientContext.Value;
@@ -4456,7 +4492,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var messageId = pending.MessageId; // 复用中断时保留的消息（内容已清空，等待最终结果）
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes));
+        timeoutCts.CancelAfter(InstallRunBudget(pending.Context, _catalog.GetDefinition(pending.Context.AgentId)).Run);
         var runCt = timeoutCts.Token;
         var sessionLock = GetSessionLock(pending.Context.ThreadId);
         var acquired = false;
@@ -4484,7 +4520,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 var tr = await ExecuteTunnelAsync(
                     pending.Context.AgentId, pending.Context.PreferredBridgeClient, rCmd!, rCwd, rTimeoutSec, ApprovalArgsQuery(pfc),
-                    TimeSpan.FromSeconds(Math.Clamp(rTimeoutSec.GetValueOrDefault(30) + 20, 10, 180)), runCt);
+                    ClientSkillTimeout(rTimeoutSec), runCt);
                 if (!string.IsNullOrWhiteSpace(tr))
                 {
                     toolResult = tr;
@@ -4502,7 +4538,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 // 本机 dotnet（C#）技能：必须经本机桥（浏览器无法直接跑任意 C#）；批准后走隧道在桥所在主机编译执行
                 var dn = await ExecuteTunnelDotnetAsync(
                     pending.Context.AgentId, pending.Context.PreferredBridgeClient, dnSource, null,
-                    TimeSpan.FromSeconds(160), runCt);
+                    ClientSkillTimeout(null), runCt);
                 var dnResult = string.IsNullOrWhiteSpace(dn)
                     ? "（本机 dotnet 经桥执行未返回结果 / 超时）" : dn;
                 toolResult = dnResult;
