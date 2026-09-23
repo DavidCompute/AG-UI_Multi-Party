@@ -35,6 +35,45 @@ jobs:
         shell: pwsh
         run: dotnet tool install -g wix --version "4.*"
 
+      # 本地 embedding 模型不入源码仓库（超 GitHub 单文件限制），而**发行版 MSI 必须自带它**：
+      # 否则从 Releases 安装的用户会遇到“语义记忆自动禁用”，而 README 写着“发行版 MSI 已内置”。
+      # 用 cache 避免每版重下 600MB；如需镜像 / 内网源，设仓库变量 EMBEDDING_MODEL_URL（Settings → Variables）。
+      - name: Cache embedding model
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: src/AguiGroupChat.Desktop/models
+          key: embedding-model-bge-m3-q8-v1
+
+      - name: Download embedding model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          EMBEDDING_MODEL_URL: ${{ vars.EMBEDDING_MODEL_URL }}
+        run: |
+          $url = "$env:EMBEDDING_MODEL_URL".Trim()
+          if ([string]::IsNullOrWhiteSpace($url)) {
+            powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1
+          } else {
+            Write-Host "Using EMBEDDING_MODEL_URL override"
+            powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -Url "$url"
+          }
+
+      # 硬闸门：模型缺失或明显不是 bge-m3（如误下 130MB 的 768 维模型）就**直接让发版失败**，
+      # 而不静默交出一个“文档说已内置、实际跑不了 RAG”的瘦身安装包（这是实际踩过的坑）。
+      - name: Verify embedding model is bundled
+        shell: pwsh
+        run: |
+          $model = "src/AguiGroupChat.Desktop/models/embedding.gguf"
+          if (-not (Test-Path $model)) {
+            throw "Embedding model missing at $model - refusing to build a slim MSI (docs promise the model is bundled). Fix the download step or set the repo variable EMBEDDING_MODEL_URL."
+          }
+          $mb = (Get-Item $model).Length / 1MB
+          Write-Host "Embedding model present: $([math]::Round($mb,1)) MB"
+          if ($mb -lt 400) {
+            throw "Embedding model is only $([math]::Round($mb,1)) MB - that is not bge-m3-Q8_0 (1024 dims, ~605MB) and would mismatch Agents:Memory:EmbeddingDimensions=1024, silently breaking RAG."
+          }
+
       - name: Resolve version
         id: ver
         shell: pwsh
