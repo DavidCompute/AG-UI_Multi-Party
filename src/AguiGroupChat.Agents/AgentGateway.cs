@@ -493,7 +493,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 只在“本次异步流的首次安装”且真的被放宽时记 Information：
         // 同一运行的后续阶段（流水线 / 指派链 / 交付兑底）重算结果相同，重复记录只会刷屏；
         // 这一行可直接回答“为什么这次跑这么久”。
-        if (previous is null && budget.Run > TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes))
+        if (previous is null && (budget.Run > TimeSpan.FromMinutes(_execution.StreamTimeoutMinutes)
+            || budget.MaxAutoApprovedRounds > _execution.MaxAutoApprovedRounds))
             _logger.LogInformation("运行超时预算按任务复杂度放宽：agent={AgentId} {Budget}", context.AgentId, budget.Describe());
         else if (previous is null)
             _logger.LogDebug("运行超时预算：agent={AgentId} {Budget}", context.AgentId, budget.Describe());
@@ -4801,12 +4802,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
                 if (clientSkillMemoryHit || batchApproved)
                 {
+                    // 上限按任务复杂度定档（与超时预算同源同档）：简单档 / 关闭自适应时即运营者配的基准值。
+                    var autoLimit = RunTimeoutPolicy.Ambient?.MaxAutoApprovedRounds ?? _execution.MaxAutoApprovedRounds;
                     autoRounds++;
-                    if (autoRounds > _execution.MaxAutoApprovedRounds)
+                    if (autoRounds > autoLimit)
                     {
-                        _logger.LogWarning("自动放行的工具调用超过上限（{Max}），终止运行：run={RunId}", _execution.MaxAutoApprovedRounds, runId);
+                        _logger.LogWarning("自动放行的工具调用超过上限（{Max}），终止运行：run={RunId} budget={Budget}",
+                            autoLimit, runId, RunTimeoutPolicy.Ambient?.Describe() ?? $"默认（未安装环境预算，基准 {_execution.MaxAutoApprovedRounds}）");
                         await TerminateResumedRunAsync(pending, messageId, accumulated,
-                            $"自动放行的工具调用超过上限（{_execution.MaxAutoApprovedRounds}），运行已终止（已生成的产物仍附在本条消息上）",
+                            $"自动放行的工具调用超过上限（{autoLimit}），运行已终止（已生成的产物仍附在本条消息上）",
                             "AGENT_AUTO_APPROVAL_LIMIT");
                         return;
                     }

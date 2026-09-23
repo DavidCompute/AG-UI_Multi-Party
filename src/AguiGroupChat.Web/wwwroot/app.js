@@ -6759,6 +6759,9 @@ function applyExec(d) {
   setCfg("efComplexityMaxRunTimeoutMinutes", num(cx.maxRunTimeoutMinutes));
   setCfg("efComplexityMaxSkillTimeoutMs", num(cx.maxSkillTimeoutMs));
   setCfg("efComplexityMaxClientSkillTimeoutSec", num(cx.maxClientSkillTimeoutSec));
+  setCfg("efComplexityAutoApprovedStandard", num(cx.autoApprovedStandard));
+  setCfg("efComplexityAutoApprovedComplex", num(cx.autoApprovedComplex));
+  setCfg("efComplexityAutoApprovedHeavy", num(cx.autoApprovedHeavy));
 }
 
 /** 收集执行参数表单 → 请求体（POST 全量提交，供服务端 Normalize 后回填归一化值）。 */
@@ -6791,6 +6794,9 @@ function collectExec() {
       maxRunTimeoutMinutes: numOrNull("efComplexityMaxRunTimeoutMinutes"),
       maxSkillTimeoutMs: numOrNull("efComplexityMaxSkillTimeoutMs"),
       maxClientSkillTimeoutSec: numOrNull("efComplexityMaxClientSkillTimeoutSec"),
+      autoApprovedStandard: numOrNull("efComplexityAutoApprovedStandard"),
+      autoApprovedComplex: numOrNull("efComplexityAutoApprovedComplex"),
+      autoApprovedHeavy: numOrNull("efComplexityAutoApprovedHeavy"),
     },
   };
 }

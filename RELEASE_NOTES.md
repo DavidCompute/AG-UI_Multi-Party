@@ -1,3 +1,30 @@
+# AG-UI 群聊桌面版 1.0.163 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.163 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.163 只做一件事——把 1.0.162 新引入的「自动放行上限」（`MaxAutoApprovedRounds`）从一条**固定魔数**改成**按任务复杂度定档**，与运行超时预算**同源同档**。
+**Version note**: 1.0.163 does one thing: the auto-approval limit (`MaxAutoApprovedRounds`) introduced in 1.0.162 moves from a fixed magic number to **tiering driven by the very same task-complexity score** as the run timeout budget.
+
+## 自动放行上限按任务定档（1.0.163）
+# Auto-approval limit tiered by task (1.0.163)
+
+中文：
+- **为何要改**：1.0.162 把「自动放行」从人工审批计数里分了出来，但给它的仍是一条固定值（30）。固定值只能按最大量级去配——小任务白得宽松额度，大任务又可能被误杀（实测踩到过“产物已落盘、却因轮数超限被终止”）。而「时间够了、轮数却先到」本质上是同一件事：预算与放行额度应当同档。
+- **怎么定档**：复用已有的 `RunComplexityEstimator`（交付物格式 / 页数 / 字数 / 条目数 / 多步措辞 / 附件规模 / 是否向下指派）。`MaxAutoApprovedRounds`（默认 30）退化为**简单档基准值 / 关闭自适应时的兜底**；启用后实际上限 = `max(基准值, 档位值)`，档位值为常规 **40** / 复杂 **60** / 繁重 **100**。两条不变量与超时一致：**只放宽不收紧**（运营者把基准调高过档位值时以运营者的为准）、**确定性**（恢复运行重算得同一额度）。档位值**可以突破**基准值——否则“自适应”没有意义。
+- **可观测**：预算摘要与放宽日志现在都带上额度（`… 5→15 分钟，自动放行≤100，依据：交付物格式、41 页…`），熔断时的 WARN 也会带上本次档位与依据，可直接回答“为什么这次允许这么多次 / 为什么被兜住”。
+- **可热改**：「管理员 → 执行参数 → 复杂度自适应」下新增三个字段（小驼峰 `autoApprovedStandard` / `autoApprovedComplex` / `autoApprovedHeavy`），与超时字段同页热改并持久化；非法值回退默认（1–10000）。
+- **回归**：全量 **1554 通过 / 0 失败**。
+
+English:
+- **Why**: 1.0.162 separated auto-releases from the human-approval counter but bounded them with a fixed value (30), which can only be sized for the worst case: small tasks get an unnecessarily loose limit while big ones can still be killed (observed: a product was already on disk when the run was stopped by the round limit). "Time is enough but rounds run out first" is the same problem — the budget and the limit should share a tier.
+- **How**: reuses the existing `RunComplexityEstimator` (deliverable format / pages / words / items / multi-step wording / attachment size / whether the role fans out). `MaxAutoApprovedRounds` (30) becomes the **simplest-tier baseline / fallback when adaptive is off**; when enabled the effective limit is `max(baseline, tier value)` with tier values 40 / 60 / 100 (standard / complex / heavy). The same two invariants hold: **widen-only** and **deterministic on resume**. Tier values **may exceed** the baseline, otherwise "adaptive" would be meaningless.
+- **Observable**: the budget summary, the widening log line and the circuit-breaker WARN all carry the limit together with the tier and its evidence.
+- **Hot-tunable**: three new fields under Admin → Execution Parameters → complexity-adaptive (`autoApprovedStandard` / `autoApprovedComplex` / `autoApprovedHeavy`), persisted like the timeout fields; invalid values fall back to defaults (1–10000).
+- **Tests**: **1554 passed / 0 failed**.
+
+---
+
+### 上一版 / Previous release
+
 # AG-UI 群聊桌面版 1.0.162 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.162 Release Notes (current Windows desktop release)
 

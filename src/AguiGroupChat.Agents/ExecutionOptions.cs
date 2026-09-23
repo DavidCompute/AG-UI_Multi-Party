@@ -60,12 +60,18 @@ public sealed class ExecutionOptions
     public int MaxInteractionRounds { get; set; } = 15;
 
     /// <summary>
-    /// 同一运行最多允许的<b>自动放行</b>工具调用次数（默认 30）。
+    /// 同一运行最多允许的<b>自动放行</b>工具调用次数（默认 30）——<b>简单档基准值 / 关闭自适应时的兜底</b>。
     ///
     /// <para>
     /// 为何需要单独一条：把自动放行从人工审批计数里拿出来后，仍需一道防线防止真正的失控循环
     ///（外部服务异常时反复返回审批请求）。默认给得较宽（30），因为一次合法的大活本来就会有
     /// 多次技能调用（如 40 页 PPT：出正文 → 逐页配图 → 校验 → 追加）。
+    /// </para>
+    ///
+    /// <para>
+    /// 注意：启用复杂度自适应后，本值退化为<b>下界</b>——实际上限由档位决定
+    ///（<see cref="ComplexityTimeoutOptions.AutoApprovedStandard"/> / <c>AutoApprovedComplex</c> / <c>AutoApprovedHeavy</c>），
+    /// 并与本值取较大者（只放宽不收紧）。见 <see cref="RunTimeoutPolicy"/>。
     /// </para>
     /// </summary>
     public int MaxAutoApprovedRounds { get; set; } = 30;

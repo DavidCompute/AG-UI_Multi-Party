@@ -174,6 +174,7 @@ public sealed class RunTimeoutPolicyTests
         Assert.Equal(1, budget.Multiplier);
         Assert.Equal(TimeSpan.FromMinutes(5), budget.Run);
         Assert.Equal(new AgentOptions().BuiltinSkillTimeoutMs, budget.SkillTimeoutMs);
+        Assert.Equal(exec.MaxAutoApprovedRounds, budget.MaxAutoApprovedRounds);
     }
 
     [Fact]
@@ -267,6 +268,16 @@ public sealed class RunTimeoutPolicyTests
         Assert.Equal(30, d.MaxRunTimeoutMinutes);
         Assert.Equal(300_000, d.MaxSkillTimeoutMs);
         Assert.Equal(600, d.MaxClientSkillTimeoutSec);
+        Assert.Equal(40, d.AutoApprovedStandard);
+        Assert.Equal(60, d.AutoApprovedComplex);
+        Assert.Equal(100, d.AutoApprovedHeavy);
+    }
+
+    [Fact]
+    public void AutoApprovedLimit_SimpleTier_DoesNotOverride()
+    {
+        // 简单档不覆盖：由运营者基准值（MaxAutoApprovedRounds）拿主意。
+        Assert.Equal(0, ComplexityTimeoutOptions.Default.AutoApprovedLimit(RunComplexity.Simple));
     }
 
     [Fact]
@@ -281,6 +292,9 @@ public sealed class RunTimeoutPolicyTests
                 MaxRunTimeoutMinutes = -5,  // 非法 → 回退默认
                 MaxSkillTimeoutMs = 1,      // 低于下限 → 回退默认
                 MaxClientSkillTimeoutSec = 0,
+                AutoApprovedStandard = 0,
+                AutoApprovedComplex = -3,
+                AutoApprovedHeavy = 99_999_999, // 超上界 → 回退默认
             },
         };
         exec.Normalize();
@@ -290,6 +304,9 @@ public sealed class RunTimeoutPolicyTests
         Assert.Equal(30, exec.ComplexityTimeouts.MaxRunTimeoutMinutes);
         Assert.Equal(300_000, exec.ComplexityTimeouts.MaxSkillTimeoutMs);
         Assert.Equal(600, exec.ComplexityTimeouts.MaxClientSkillTimeoutSec);
+        Assert.Equal(40, exec.ComplexityTimeouts.AutoApprovedStandard);
+        Assert.Equal(60, exec.ComplexityTimeouts.AutoApprovedComplex);
+        Assert.Equal(100, exec.ComplexityTimeouts.AutoApprovedHeavy);
     }
 
     [Fact]
@@ -323,6 +340,69 @@ public sealed class RunTimeoutPolicyTests
         exec.Normalize();
         Assert.NotNull(exec.ComplexityTimeouts);
         Assert.True(exec.ComplexityTimeouts.Enabled);
+    }
+
+    // ===================== 自动放行上限定档 =====================
+
+    [Fact]
+    public void Build_SimpleTask_KeepsBaseAutoApprovedLimit()
+        => Assert.Equal(30, Build("你好", 5).MaxAutoApprovedRounds);
+
+    [Fact]
+    public void Build_AutoApprovedLimit_FollowsTier()
+    {
+        // 默认基准 30：常规档 40、复杂档 60、繁重档 100，全部高于基准。
+        Assert.Equal(40, Build(StandardRequest, 5).MaxAutoApprovedRounds);
+        Assert.Equal(60, Build("先列大纲，然后逐条展开，最后分别给出结论，要全面", 5).MaxAutoApprovedRounds);
+        Assert.Equal(100, Build(HeavyRequest, 5).MaxAutoApprovedRounds);
+    }
+
+    [Fact]
+    public void Build_AutoApprovedLimit_IsMonotoneWithTier()
+    {
+        var simple = Build("你好", 5).MaxAutoApprovedRounds;
+        var standard = Build(StandardRequest, 5).MaxAutoApprovedRounds;
+        var heavy = Build(HeavyRequest, 5).MaxAutoApprovedRounds;
+        Assert.True(simple <= standard && standard < heavy, $"档位越高额度应不减：{simple}/{standard}/{heavy}");
+    }
+
+    [Fact]
+    public void Build_AutoApprovedLimit_Disabled_FallsBackToBaseValue()
+    {
+        // 关闭自适应 → 与旧版行为等价：只用运营者配的基准值。
+        var exec = new ExecutionOptions
+        {
+            StreamTimeoutMinutes = 5,
+            MaxAutoApprovedRounds = 25,
+            ComplexityTimeouts = new ComplexityTimeoutOptions { Enabled = false },
+        };
+        var budget = RunTimeoutPolicy.Build(HeavyRequest, null, false, exec, new AgentOptions());
+        Assert.Equal(25, budget.MaxAutoApprovedRounds);
+    }
+
+    [Fact]
+    public void Build_AutoApprovedLimit_NeverNarrowsConfiguredBase()
+    {
+        // 只放宽不收紧：运营者把基准值调高过档位值时，以运营者的为准。
+        var exec = new ExecutionOptions { StreamTimeoutMinutes = 5, MaxAutoApprovedRounds = 250 };
+        var budget = RunTimeoutPolicy.Build(HeavyRequest, null, false, exec, new AgentOptions());
+        Assert.Equal(250, budget.MaxAutoApprovedRounds);
+    }
+
+    [Fact]
+    public void Build_AutoApprovedLimit_CanBreakThroughBaseValue()
+    {
+        // 关键的取舍：档位值必须能突破基准值，否则“自适应”没有意义。
+        var exec = new ExecutionOptions { StreamTimeoutMinutes = 5, MaxAutoApprovedRounds = 10 };
+        var budget = RunTimeoutPolicy.Build(HeavyRequest, null, false, exec, new AgentOptions());
+        Assert.Equal(100, budget.MaxAutoApprovedRounds);
+    }
+
+    [Fact]
+    public void Budget_Describe_MentionsAutoApprovedLimit()
+    {
+        var text = Build(HeavyRequest, 5).Describe();
+        Assert.Contains("自动放行≤100", text);
     }
 
     // ===================== 环境预算传播 =====================

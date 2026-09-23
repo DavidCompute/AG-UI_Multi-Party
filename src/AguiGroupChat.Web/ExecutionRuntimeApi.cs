@@ -76,6 +76,9 @@ public static class ExecutionRuntimeApi
             if (cx.MaxRunTimeoutMinutes is { } mr) ct.MaxRunTimeoutMinutes = mr;
             if (cx.MaxSkillTimeoutMs is { } ms) ct.MaxSkillTimeoutMs = ms;
             if (cx.MaxClientSkillTimeoutSec is { } mc) ct.MaxClientSkillTimeoutSec = mc;
+            if (cx.AutoApprovedStandard is { } aps) ct.AutoApprovedStandard = aps;
+            if (cx.AutoApprovedComplex is { } apc) ct.AutoApprovedComplex = apc;
+            if (cx.AutoApprovedHeavy is { } aph) ct.AutoApprovedHeavy = aph;
         }
     }
 
@@ -94,6 +97,7 @@ public static class ExecutionRuntimeApi
             {
                 ct.Enabled, ct.StandardMultiplier, ct.ComplexMultiplier, ct.HeavyMultiplier,
                 ct.MaxRunTimeoutMinutes, ct.MaxSkillTimeoutMs, ct.MaxClientSkillTimeoutSec,
+                ct.AutoApprovedStandard, ct.AutoApprovedComplex, ct.AutoApprovedHeavy,
             },
         };
     }
@@ -103,7 +107,8 @@ public static class ExecutionRuntimeApi
            $"stream={e.StreamTimeoutMinutes};attempts={e.MaxModelAttempts};" +
            $"bridge={e.EnableBridge};pipeline={e.EnablePipeline};relay={e.EnableRelay};org={e.EnableOrgRoute};" +
            $"interaction={e.MaxInteractionRounds};autoApproved={e.MaxAutoApprovedRounds};" +
-           $"complexity={e.ComplexityTimeouts?.Enabled}";
+           $"complexity={e.ComplexityTimeouts?.Enabled};autoApprovedTiers=" +
+           $"{e.ComplexityTimeouts?.AutoApprovedStandard}/{e.ComplexityTimeouts?.AutoApprovedComplex}/{e.ComplexityTimeouts?.AutoApprovedHeavy}";
 
     /// <summary>
     /// 注册「executionRuntime」到持久化：memory 写 JSON 快照，postgres/mysql/sqlite 落 agui_sections。
@@ -161,4 +166,5 @@ public sealed record ExecutionPatchReq(
 /// <summary>复杂度自适应超时的部分字段覆盖（未给的保持现有效值）。</summary>
 public sealed record ComplexityTimeoutPatch(
     bool? Enabled, double? StandardMultiplier, double? ComplexMultiplier, double? HeavyMultiplier,
-    int? MaxRunTimeoutMinutes, int? MaxSkillTimeoutMs, int? MaxClientSkillTimeoutSec);
+    int? MaxRunTimeoutMinutes, int? MaxSkillTimeoutMs, int? MaxClientSkillTimeoutSec,
+    int? AutoApprovedStandard, int? AutoApprovedComplex, int? AutoApprovedHeavy);

@@ -41,13 +41,13 @@
 | 9 | `maxRecursiveRounds` | 5 | 递归综合补查最多轮次（防死循环） | `ExecuteRecursiveAnswerAsync` |
 | 10 | `maxRouteDepth` | 4 | 指派/提升路由最大层数（防病态深链） | `InvokeAssignmentEscalationAsync` |
 | 11 | `maxInteractionRounds` | 15 | 同一消息最多允许的**人工审批**轮数（只数“真的打断了用户”的那一轮；已同意技能 / 批量批准这类自动放行不计入） | 审批 / 恢复循环 |
-| 11b | `maxAutoApprovedRounds` | 30 | 同一运行最多允许的**自动放行**工具调用次数（两道独立防线，避免真正失控循环） | 审批 / 恢复循环 |
+| 11b | `maxAutoApprovedRounds` | 30 | 同一运行最多允许的**自动放行**工具调用次数（**简单档基准值 / 关闭自适应时的兜底**；启用后实际上限由档位决定，见 §A.1） | 审批 / 恢复循环 |
 | 12 | `executionOrder[]` | `bridge,pipeline,relay,org_route,streaming` | 分派阶段判定顺序；白名单，`streaming` 恒置末 | `InvokeCoreAsync` |
 | 13 | `enableBridge` | true | 平台是否启用“AG-UI 桥接”阶段 | 网关 switch(bridge) → `InvokeBridgeAsync` |
 | 14 | `enablePipeline` | true | 平台是否启用“编排流水线”阶段 | case pipeline → `InvokePipelineAsync` |
 | 15 | `enableRelay` | true | 平台是否启用“整轮交接”阶段 | case relay → `InvokeRelayAsync` |
 | 16 | `enableOrgRoute` | true | 平台是否启用“组织化路由”阶段 | case org_route → 指派/提升/协调 |
-| 17 | `complexityTimeouts` | 见 §A.1 | **复杂度自适应超时**：按触发消息估出的任务量级，在 `streamTimeoutMinutes` 之上乘倍率并夹上界 | `RunTimeoutPolicy` / `RunComplexityEstimator`（所有运行入口） |
+| 17 | `complexityTimeouts` | 见 §A.1 | **复杂度自适应**：按触发消息估出的任务量级，在 `streamTimeoutMinutes` 之上乘倍率并夹上界；同时定档**自动放行上限** | `RunTimeoutPolicy` / `RunComplexityEstimator`（所有运行入口） |
 
 真实生效顺序 = `ExecutionOrder`（过滤去重后）；`streaming` 无条件下沉为兜底：若前面阶段都不命中/被关，就以普通带工具流式 run 收尾。
 
@@ -88,6 +88,19 @@
 | `maxRunTimeoutMinutes` | 30 | 单次运行主预算绝对上界（1–1440） |
 | `maxSkillTimeoutMs` | 300000 | 内置文档类技能预算上界（毫秒，1000–3600000） |
 | `maxClientSkillTimeoutSec` | 600 | 客户端（本机桥）技能单次调用等待上界（秒，10–3600） |
+| `autoApprovedStandard` | 40 | 常规档的**自动放行**上限（工具调用次数，1–10000） |
+| `autoApprovedComplex` | 60 | 复杂档的自动放行上限 |
+| `autoApprovedHeavy` | 100 | 繁重档的自动放行上限 |
+
+**自动放行上限也按同一档位定档**：`maxAutoApprovedRounds`（默认 30）现在退化为**简单档基准值 / 关闭自适应时的兜底**；
+启用自适应后，实际上限 = `max(基准值, 档位值)`——档位值（40 / 60 / 100）**能突破基准值**（否则“自适应”没有意义），
+但**永不低于基准值**（运营者把基准调高过档位值时以运营者的为准，同样只放宽不收紧；简单档不覆盖，即用基准值）。
+
+> 为何要按档位而不是一条固定值：“一次合法的大活”本身就会调用几十次技能（40 页 PPT：出正文 → 逐页配图 → 校验 → 追加）。
+> 固定值只能按最大量级去配，于是小任务白白得到宽松额度、大任务又可能被误杀（实测踩到过：产物已落盘却因轮数超限被终止）。
+> 注意这是一道**失控循环熔断**而非吞吐节流——墙钟成本已由运行超时兜住，所以它比人工审批的 `maxInteractionRounds` 宽松得多（自动放行根本不打断用户）。
+>
+> 排查时看日志：`自动放行的工具调用超过上限（{Max}）… budget={Budget}`，`budget` 即本次运行的档位与依据（如 `Heavy（分 8，×3，5→15 分钟，自动放行≤100，依据：交付物格式、41 页…）`）。
 
 **连带放宽的三处**（避开“主预算放开了、某一层先掐断”的短板）：
 
@@ -99,7 +112,7 @@
 
 **两条不变量**（有测试钉住，改前先看 `RunTimeoutPolicyTests` / `SkillTimeoutBudgetTests`）：
 
-- **只放宽、不收紧**：任何档位、任何夹紧都不会低于你原本配的 `streamTimeoutMinutes` 与技能预算（倍率下限 1；上界小于基准时以基准为准）。
+- **只放宽、不收紧**：任何档位、任何夹紧都不会低于你原本配的 `streamTimeoutMinutes`、技能预算与 `maxAutoApprovedRounds`（倍率下限 1；上界小于基准时以基准为准；档位放行额度低于基准值时取基准值）。
 - **确定性**：同一份触发上下文重算必得同一预算——审批恢复 / 桥接恢复用 `PendingInteraction` 里保留的同一份上下文，不会出现“恢复后预算莫名其妙变了”（否则会在恢复时被突然掐断）。
 
 ---
