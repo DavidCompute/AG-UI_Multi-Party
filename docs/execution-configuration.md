@@ -166,6 +166,11 @@
 - 运行时会写入扩展区 `executionRuntime`：memory 快照 / postgres 等 `agui_sections`，重启自动恢复。
 - 若你希望把默认固化到镜像里：把它写进 `Agents:Execution`（appsettings / Docker env）后重建。热改值优先于文件默认；重启后热改值仍在（覆盖持久化）。
 
+> ⚠️ **升级注意（实测踩到）**：只要本实例曾保存过执行参数，库里就有一份 `executionRuntime` 快照；
+> **新版本代码里的默认值会被这份快照盖掉**。典型症状：升级后管理页显示的仍是旧值
+>（如 `maxInteractionRounds` 仍是 5，而不是新默认 15）。
+> 处理：在「执行参数」页把该项改成期望值再保存一次，或在升级时清空该扩展区快照。
+
 CLI / 日志排查：
 - 保存时值非法只回退该项并记一条 `Agents.Execution` / `ExecutionRuntime` `warn`，其余项保留；观察是否为“整表非法 → 全回默认（并 warn）”——这种情况执行参数页会显示默认值。
 - 想看网关到底按什么跑：先在执行参数页 `保存`一次触发 `Normalize`，再看 `execution.patch` 审计（`execution.order/...`）确认落的值。
