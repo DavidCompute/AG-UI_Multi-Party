@@ -191,6 +191,8 @@ public static class AgentHosting
         services.AddHostedService<MemoryMaintenanceService>();
         // 重要结论自动周期沉淀（记忆治理深化；记忆未启用 / 关闭时内部跳过）
         services.AddHostedService<MemoryAutoConsolidationService>();
+        // 启动自检：HTTP embedding 端点的实际向量维度必须与配置一致，否则「RAG 静默失效」（见 EmbeddingDimensionProbe）
+        services.AddHostedService<EmbeddingDimensionProbe>();
 
         if (provider == "postgres")
         {

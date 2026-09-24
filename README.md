@@ -253,6 +253,7 @@ docker compose down
 
 - **默认即 RAG 语义记忆**：`STORAGE_PROVIDER=postgres`（compose 内置 `pgvector/pgvector:pg16` 镜像）+ `MEMORY_ENABLED=true`（embedding 由内置 `llama-embed` 提供：llama.cpp 官方 server 加载 `./models/embedding.gguf`）。
   模型与数据分别落在宿主机 `./models/`（bind mount）与命名卷 `agui-pg-data`，`docker compose down` 不丢数据。
+  启动时会对 HTTP embedding 端点做一次**维度自检**（用一条极短文本探测一次）：实际维度与 `MEMORY_EMBEDDING_DIMENSIONS` 不符就**禁用语义记忆**并给出修法——避开「换错模型 → 向量列错配 → 写入失败、检索恒空」的**静默失效**；端点暂不可用只记 WARN、**不**禁用（保持可恢复）。
 - **为什么 embedding 用 llama.cpp server 而不是 Ollama**（2026-09 同机同模型同核实测，bge-m3）：Ollama 0.32 的引擎**本身也是内置的 llama-server 子进程**，但每个请求要经 `HTTP→Go→HTTP` 中转，实测每请求多约 350~450ms 固定开销 + 约 1.5x 吞吐损耗。中位延迟（输入 6/50/200/500/800 字）：**Ollama 382/635/1708/3973/6409ms → llama.cpp 107/288/978/2978/4869ms**（短文本快 2~3.6 倍，越长收益越小——长文本是纯算术量）。两个引擎的向量**完全一致**（cosine=1.000000、1024 维、L2 归一化），换引擎不会让已入库的记忆失配。
   - 三个必须显式配置的参数：`--embeddings` 会把 `n_batch/n_ubatch` 压到 512（≥500 字直接 HTTP 500），故须 `-b 2048 -ub 2048`；`-t` 按核数给（超订会变慢）；BERT 类非因果编码器上 `--flash-attn off` 让短文本快 2~3 倍。
   - 想换回外部 Ollama / 任何 OpenAI 兼容端点：只改 `MEMORY_EMBEDDING_ENDPOINT`（+ 必要时 `MEMORY_EMBEDDING_DIMENSIONS`）即可，两端点向量语义一致。
