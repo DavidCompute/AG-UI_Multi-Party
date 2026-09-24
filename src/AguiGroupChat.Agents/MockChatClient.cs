@@ -205,15 +205,21 @@ public sealed class MockChatClient : IChatClient
                     new Dictionary<string, object?> { ["query"] = query })]);
         }
 
-        // 请求「公告」→ 调用需审批的 publish_announcement（触发人机交互）
+        // 请求「公告」→ 调用需审批的 publish_announcement（触发人机交互）。
+        // **消息里提到两次「公告」→ 同一轮次提出两个需审批的调用**：专门用于回归
+        // “一轮多个审批请求必须逐个回应”（只回一个会被 M.E.AI 抛
+        // “have no matching ToolApprovalResponseContent”，或被模型侧以 reasoning_content 缺失 400）。
         var announceIdx = lastUserText.IndexOf("公告", StringComparison.Ordinal);
         if (announceIdx >= 0)
         {
-            var content = lastUserText[(announceIdx + 2)..].Trim();
-            if (string.IsNullOrEmpty(content)) content = "（示例公告）";
-            return new ChatResponseUpdate(ChatRole.Assistant,
-                [new FunctionCallContent("call_mock_ann_" + Interlocked.Increment(ref _toolCallSeq), "publish_announcement",
-                    new Dictionary<string, object?> { ["announcement"] = content })]);
+            var segments = lastUserText.Split("公告", StringSplitOptions.None)
+                .Skip(1).Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+            if (segments.Count == 0) segments.Add("（示例公告）");
+            var calls = new List<AIContent>();
+            foreach (var segment in segments)
+                calls.Add(new FunctionCallContent("call_mock_ann_" + Interlocked.Increment(ref _toolCallSeq), "publish_announcement",
+                    new Dictionary<string, object?> { ["announcement"] = segment }));
+            return new ChatResponseUpdate(ChatRole.Assistant, calls);
         }
 
         // 请求「计算」→ calculator（提取表达式）

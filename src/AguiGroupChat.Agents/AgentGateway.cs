@@ -206,7 +206,26 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         JsonElement? ResponseSchema = null,  // kind=input 型中断：完整 responseSchema（前端渲染表单 / 恢复时规范化 payload）
         IReadOnlyList<BridgeQuestion>? Questions = null, // 外部 question 工具的结构化问题（前端逐题渲染选项）
         int ResumeCount = 0,                 // 已恢复轮数（多轮审批防护：超过 MaxInteractionRounds 强制结束）
-        bool SuppressMessage = false);       // 交付物兜底：本 run 的消息由外层统一落定，恢复/结束时不再重复开消息
+        bool SuppressMessage = false,        // 交付物兜底：本 run 的消息由外层统一落定，恢复/结束时不再重复开消息
+        IReadOnlyList<ToolApprovalRequestContent>? ApprovalRequests = null) // 同一模型轮次内的**全部**审批请求（见 PendingApprovals）
+    {
+        /// <summary>
+        /// 本轮需要回应的<b>全部</b>审批请求（至少含 <see cref="ApprovalRequest"/>）。
+        ///
+        /// <para>
+        /// 为何是复数：一次模型轮次里可能提出<b>多个</b>需审批的工具调用。M.E.AI 的
+        /// <c>FunctionInvokingChatClient</c> 要求每个 <c>ToolApprovalRequestContent</c> 都有配对的
+        /// <c>ToolApprovalResponseContent</c>，否则直接抛
+        /// “ToolApprovalRequestContent found with FunctionCall.CallId(s) 'x' that have no matching
+        /// ToolApprovalResponseContent”；即使侥幸过了框架，模型侧也会拒（实测 DeepSeek 思考模式返回
+        /// HTTP 400 “The `reasoning_content` in the thinking mode must be passed back to the API.”）。
+        /// 两种后果都是<b>整个运行失败、产物拿不到</b>，所以必须逐条回应。
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<ToolApprovalRequestContent> PendingApprovals
+            => ApprovalRequests is { Count: > 0 } ? ApprovalRequests
+             : ApprovalRequest is null ? [] : [ApprovalRequest];
+    }
 
     /// <summary>
     /// 以 IServiceProvider 惰性解析 GroupHub，避免 DI 循环依赖
@@ -600,6 +619,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         string? messageId = null;
         ToolApprovalRequestContent? approval = null;
+        // 本模型轮次收集到的**全部**审批请求（可能 >1：模型一次发起多个需审批的工具调用）。
+        // 只取第一个会让其余请求没有配对的决议：框架直接抛错 / 模型侧 400，整个运行失败。
+        var approvalsThisTurn = new List<ToolApprovalRequestContent>();
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(InstallRunBudget(context, def).Run); // 模型挂起保护（按任务复杂度放宽）
         var runCt = timeoutCts.Token;
@@ -722,11 +744,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 }
 
                 // 人机交互（协议 4.5）：工具需要审批 → 运行中断，等待触发者决策
+                // 一轮可能提出多个需审批的调用：**全部收下**（恢复时要逐个回 ToolApprovalResponseContent）。
+                approvalsThisTurn.Clear();
                 foreach (var apr in update.Contents.OfType<ToolApprovalRequestContent>())
-                {
-                    approval = apr;
-                    break;
-                }
+                    approvalsThisTurn.Add(apr);
+                approval = approvalsThisTurn.FirstOrDefault();
                 if (approval is not null) break;
                     }
 
@@ -759,6 +781,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                             new TextContent($"[前端工具] {tfc.Name} 已由内网本机桥执行完毕，请直接引用它的结果作答：\n{resultText}\n（答完即可，无需再调用该工具）"),
                         });
                         approval = null; // 复位，重新进入主循环以注入结果的用户消息继续流式作答
+                        approvalsThisTurn.Clear();
                         continue;
                     }
 
@@ -805,8 +828,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     context.TriggerUserId, context.TopicId, _hub.Value.NowMs, context,
                     ExternalInterruptId: null,
                     ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
-                    Agent: agent, Session: session, ApprovalRequest: approval,
-                    BridgeClient: null);
+                    Agent: agent, Session: session, ApprovalRequest: approval, BridgeClient: null,
+                    ApprovalRequests: approvalsThisTurn);
                 await PurgeExpiredInteractions();
                 await _hub.Value.BroadcastAsync(context.GroupId, new AgentInteractionRequestEvent
                 {
@@ -820,7 +843,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     ToolArguments = fc?.Arguments is { } args ? JsonSerializer.SerializeToElement(args) : null,
                     Message = isClientTool
                         ? $"智能体「{def.Nickname}」请求你在本机执行客户端技能「{fc?.Name}」"
-                        : $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？",
+                        : $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？"
+                          + (approvalsThisTurn.Count > 1
+                              ? $"（本轮共 {approvalsThisTurn.Count} 项待确认：{DescribeApprovalTools(approvalsThisTurn)}；批准/拒绝将同时作用于这 {approvalsThisTurn.Count} 项）"
+                              : ""),
                     Kind = isClientTool ? "client_tool" : "approval",
                     ClientRunner = clientRunner,
                     TargetMemberId = context.TriggerUserId,
@@ -849,6 +875,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "智能体 {AgentId} 运行失败：run={RunId}", context.AgentId, runId);
+            await TryAttachProductsAfterFailureAsync(context.GroupId, messageId, accumulated: null);
             await SafeEndAsync(context, messageId);
             await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent
             {
@@ -1031,6 +1058,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "编排流水线运行失败：agent={AgentId} run={RunId}", context.AgentId, runId);
+            await TryAttachProductsAfterFailureAsync(context.GroupId, messageId, accumulated: null);
             await SafeEndAsync(context, messageId);
             try
             {
@@ -1121,6 +1149,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "角色交接运行失败：agent={AgentId} relay={Relay} run={RunId}", context.AgentId, relayAgentId, runId);
+            await TryAttachProductsAfterFailureAsync(context.GroupId, messageId, accumulated: null);
             await SafeEndAsync(context, messageId);
             try
             {
@@ -2798,6 +2827,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         var accumulated = "";
         var reasoningAccumulated = 0;
+        // 收集本轮的**全部**审批请求（与主运行路径同一口径：只回一个会让其余请求没有配对决议）
+        var approvalsThisTurn = new List<ToolApprovalRequestContent>();
         ChatMessage userMessage;
         if (!string.IsNullOrWhiteSpace(visionModel))
         {
@@ -2860,11 +2891,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     Timestamp = _hub.Value.NowMs,
                 }, ct: ct);
             }
+            approvalsThisTurn.Clear();
             foreach (var apr in update.Contents.OfType<ToolApprovalRequestContent>())
-            {
-                approval = apr;
-                break;
-            }
+                approvalsThisTurn.Add(apr);
+            approval = approvalsThisTurn.FirstOrDefault();
             if (approval is not null) break;
         }
 
@@ -2885,7 +2915,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             ExternalInterruptId: null,
             ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
             Agent: agent, Session: session, ApprovalRequest: approval,
-            BridgeClient: null, SuppressMessage: true);
+            BridgeClient: null, SuppressMessage: true, ApprovalRequests: approvalsThisTurn);
         await PurgeExpiredInteractions();
         await _hub.Value.BroadcastAsync(context.GroupId, new AgentInteractionRequestEvent
         {
@@ -2899,7 +2929,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             ToolArguments = fc?.Arguments is { } args ? JsonSerializer.SerializeToElement(args) : null,
             Message = isClientTool
                 ? $"智能体「{def.Nickname}」请求你在本机执行客户端技能「{fc?.Name}」"
-                : $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？",
+                : $"智能体「{def.Nickname}」请求你确认：是否执行操作「{fc?.Name}」？"
+                  + (approvalsThisTurn.Count > 1
+                      ? $"（本轮共 {approvalsThisTurn.Count} 项待确认：{DescribeApprovalTools(approvalsThisTurn)}；批准/拒绝将同时作用于这 {approvalsThisTurn.Count} 项）"
+                      : ""),
             Kind = isClientTool ? "client_tool" : "approval",
             ClientRunner = clientRunner,
             TargetMemberId = context.TriggerUserId,
@@ -4675,16 +4708,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 首轮那个作用域已随中断返回而结束，此处不重建则收集不到本轮技能产物。
         var prevToolResults = ToolResultCollector.Ambient.Value;
         ToolResultCollector.Ambient.Value = new ToolResultCollector();
+        // accumulated 声明在 try 外：catch 里的“先保产物”也要用它扫附件引用（正文里的 att_ 引用）
+        var accumulated = "";
         try
         {
             // WaitAsync 移入 try：未获锁就取消/超时时走 catch + finally，不会对未获取的锁 Release（避免 SemaphoreFullException）
             await sessionLock.WaitAsync(runCt);
             acquired = true;
-            var accumulated = "";
             var reasoningAccumulated = 0; // 思考过程累计长度（与首轮一致，防推理模型思考过长）
             var resumeRounds = 0;      // 真正打断了用户的审批轮数（跨调用累计）
             var autoRounds = 0;        // 自动放行（已同意技能 / 批量批准）的工具调用次数；两者分开计数是本方法的关键修正
-            var lastApproval = pending.ApprovalRequest!;
+            // 本轮要回应的**全部**审批请求：一次模型轮次可能有多个需审批的调用，
+            // 必须逐条回 ToolApprovalResponseContent（只回一个会被框架 / 模型侧拒，见 PendingApprovals）。
+            var lastApprovals = pending.PendingApprovals;
+            var lastApproval = lastApprovals.Count > 0 ? lastApprovals[0] : pending.ApprovalRequest!;
             var lastApproved = approved;
 
             // 客户端 shell 技能 + 内网隧道在线 + 已批准 → 由网关经隧道在桥所在主机执行以取得真实结果
@@ -4742,9 +4779,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
 
             // 批量批准循环：同一 Session 连续流式；后续审批若命中“本次运行批量批准”自动批准，否则交还用户决策
+            // 每轮进入流式前清空：本轮的审批请求要单独收集
+            var approvalsThisTurn = new List<ToolApprovalRequestContent>();
             while (true)
             {
-                var resumeMessages = BuildResumeMessage(pending, lastApproval, lastApproved, toolResult, runCt);
+                approvalsThisTurn.Clear();
+                var resumeMessages = BuildResumeMessage(pending, lastApprovals, lastApproved, toolResult, runCt);
                 ToolApprovalRequestContent? nextApproval = null;
                 await foreach (var update in agent.RunStreamingAsync(resumeMessages, session, new ChatClientAgentRunOptions(), runCt))
                 {
@@ -4776,10 +4816,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         ToolResultCollector.Ambient.Value?.Add(AgentGatewayHelpers.DescribeToolResult(fr.Result));
                     }
                     foreach (var apr in update.Contents.OfType<ToolApprovalRequestContent>())
-                    {
-                        nextApproval = apr;
-                        break;
-                    }
+                        approvalsThisTurn.Add(apr);
+                    nextApproval = approvalsThisTurn.FirstOrDefault();
                     if (nextApproval is not null) break;
                 }
 
@@ -4795,16 +4833,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 //（文档技能天然会被反复调用：出正文 → 逐页配图 → 改）会在第 5 次调用就被判超限杀掉。
                 // 实测踩到：40 页 PPT 已生成到磁盘，却因“交互恢复超过最大轮数（5）”终止，
                 // 产物未被挂到消息上，用户只看到空白兜底文案。
-                var clientSkillMemoryHit = nextApproval.ToolCall is FunctionCallContent nfc
+                // 自动放行的判定也对**整组**生效：只有当本轮每个审批请求都属于“已同意技能 / 批量批准”时，
+                // 才能一并自动放行；只要有一个需要用户表态，就整组交用户决策（同一决定作用于全组）。
+                var clientSkillMemoryHit = approvalsThisTurn.Count > 0 && approvalsThisTurn.All(a =>
+                    a.ToolCall is FunctionCallContent nfc
                     && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(nfc.Name, StringComparer.Ordinal)
-                    && IsSkillApproved(pending.Context.ThreadId, pending.Context.AgentId, nfc.Name);
+                    && IsSkillApproved(pending.Context.ThreadId, pending.Context.AgentId, nfc.Name));
                 var batchApproved = !clientSkillMemoryHit && _autoApprovedRuns.ContainsKey(runId);
 
                 if (clientSkillMemoryHit || batchApproved)
                 {
                     // 上限按任务复杂度定档（与超时预算同源同档）：简单档 / 关闭自适应时即运营者配的基准值。
                     var autoLimit = RunTimeoutPolicy.Ambient?.MaxAutoApprovedRounds ?? _execution.MaxAutoApprovedRounds;
-                    autoRounds++;
+                    autoRounds += approvalsThisTurn.Count; // 一次放行几个就计几个（与上限语义一致）
                     if (autoRounds > autoLimit)
                     {
                         _logger.LogWarning("自动放行的工具调用超过上限（{Max}），终止运行：run={RunId} budget={Budget}",
@@ -4814,11 +4855,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                             "AGENT_AUTO_APPROVAL_LIMIT");
                         return;
                     }
-                    lastApproval = nextApproval;
+                    lastApprovals = approvalsThisTurn;
                     lastApproved = true;
-                    _logger.LogInformation("{Kind}自动放行：run={RunId} tool={Tool}（本次运行第 {Round} 次）",
+                    _logger.LogInformation("{Kind}自动放行：run={RunId} tool={Tool} count={Count}（本次运行累计 {Round} 次）",
                         clientSkillMemoryHit ? "已同意技能" : "批量批准",
-                        runId, (nextApproval.ToolCall as FunctionCallContent)?.Name ?? "unknown", autoRounds);
+                        runId, DescribeApprovalTools(approvalsThisTurn), approvalsThisTurn.Count, autoRounds);
                     continue;
                 }
 
@@ -4844,7 +4885,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
                     Agent: agent, Session: session, ApprovalRequest: nextApproval,
                     BridgeClient: null, ResumeCount: pending.ResumeCount + resumeRounds,
-                    SuppressMessage: pending.SuppressMessage);
+                    SuppressMessage: pending.SuppressMessage, ApprovalRequests: approvalsThisTurn);
                 await PurgeExpiredInteractions();
                 await _hub.Value.BroadcastAsync(pending.GroupId, new AgentInteractionRequestEvent
                 {
@@ -4856,7 +4897,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     ToolCallId = fc?.CallId ?? "tool_" + IdGenerator.NewId(),
                     ToolName = fc?.Name ?? "unknown",
                     ToolArguments = fc?.Arguments is { } args ? JsonSerializer.SerializeToElement(args) : null,
-                    Message = $"智能体请求你确认：是否执行操作「{fc?.Name}」？",
+                    Message = $"智能体请求你确认：是否执行操作「{fc?.Name}」？"
+                        + (approvalsThisTurn.Count > 1
+                            ? $"（本轮共 {approvalsThisTurn.Count} 项待确认：{DescribeApprovalTools(approvalsThisTurn)}；批准/拒绝将同时作用于这 {approvalsThisTurn.Count} 项）"
+                            : ""),
                     TargetMemberId = pending.TargetMemberId,
                     Timestamp = _hub.Value.NowMs,
                 }, ct: runCt);
@@ -4884,6 +4928,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             _logger.LogWarning(ex, "智能体交互恢复运行异常：interrupt={InterruptId}", pending.InterruptId);
             ClientToolTrace.Write($"RESUME-EX unless={ex.GetType().Name} msg={ex.Message}");
             _autoApprovedRuns.TryRemove(runId, out _);
+            // **先保产物**：本方法在抛错前可能已经真的把稿子生成到磁盘（如浅色版 PPT 已落盘），
+            // 而走到这里时消息还开着、附件一个都没挂。详见 TryAttachProductsAfterFailureAsync。
+            await TryAttachProductsAfterFailureAsync(pending.GroupId, messageId, accumulated);
             await SafeEndAsync(pending.Context, messageId);
         }
         finally
@@ -4893,17 +4940,29 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
+    /// <summary>审批工具名列表（日志 / 交互卡文案用，同名去重）。</summary>
+    private static string DescribeApprovalTools(IReadOnlyList<ToolApprovalRequestContent> approvals)
+        => string.Join("、", approvals
+            .Select(a => (a.ToolCall as FunctionCallContent)?.Name ?? "unknown")
+            .Distinct(StringComparer.Ordinal));
+
     /// <summary>构造审批 / 客户端工具恢复时的回灌消息：
-    /// 一律返回 <see cref="ToolApprovalRequestContent.CreateResponse"/>（批准 / 拒绝，满足 MSAGENT 审批决议；否则恢复抛「no matching ToolApprovalResponseContent」），
+    /// 一律为<b>每个</b>待确认的审批请求回一条 <see cref="ToolApprovalRequestContent.CreateResponse"/>（当前批准 / 拒绝，满足 MSAGENT 审批决议；否则恢复抛「no matching ToolApprovalResponseContent」），
     /// 客户端执行技能（<see cref="AgentSkillDefinition.ExecutionLocation"/> = Client）批准且前端已回传 toolResult 时，
     /// <b>额外追加一条 User 消息，把「该工具已在客户端执行、结果为 …」直接注入模型上下文</b>——
     /// 规避 MSAGENT 的 `CreateResponse` 在真实 `AsAIAgent` 路径不执行占位函数、以及工具结果经 OpenAI 序列化可能到不了模型的问题。</summary>
-    private IReadOnlyList<ChatMessage> BuildResumeMessage(PendingInteraction pending, ToolApprovalRequestContent approval, bool approved, string? toolResult, CancellationToken ct)
+    private IReadOnlyList<ChatMessage> BuildResumeMessage(PendingInteraction pending, IReadOnlyList<ToolApprovalRequestContent> approvals, bool approved, string? toolResult, CancellationToken ct)
     {
-        var fc = approval.ToolCall as FunctionCallContent;
+        // 逐个回应：漏一个就会抛 “ToolApprovalRequestContent found with FunctionCall.CallId(s) '…' that have
+        // no matching ToolApprovalResponseContent”，或被模型侧当成缺 reasoning_content 而 400。
+        var responses = new List<AIContent>(approvals.Count);
+        foreach (var apr in approvals) responses.Add(apr.CreateResponse(approved));
+
+        var fc = approvals.Select(a => a.ToolCall as FunctionCallContent).FirstOrDefault(c => c is not null)
+                 ?? pending.ApprovalRequest?.ToolCall as FunctionCallContent;
         var isClientTool = fc is not null
             && _catalog.GetAgentClientToolNames(pending.Context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
-        var msgs = new List<ChatMessage> { new(ChatRole.User, [approval.CreateResponse(approved)]) };
+        var msgs = new List<ChatMessage> { new(ChatRole.User, responses) };
         if (isClientTool && approved && !string.IsNullOrEmpty(toolResult))
         {
             // 客户端执行技能：前端已在本地执行并回传结果 → 以一句明确的 User 消息注入模型，
@@ -4919,8 +4978,36 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 + "③ 基于该校验给出精炼结论和可执行的建议或下一步排查方向。\n"
                 + "不必复述原始字段，直接谈判断与建议；数据本身无法回答问题时如实说明。无需再调用该工具。"));
         }
-        ClientToolTrace.Write($"RESUME-MSG tool={(fc?.Name ?? "?")} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} isClientAgentTool={isClientTool} agent={pending.Context.AgentId} msgCount={msgs.Count}");
+        ClientToolTrace.Write($"RESUME-MSG approvals={approvals.Count} tools={DescribeApprovalTools(approvals)} approved={approved} hasToolResult={!string.IsNullOrEmpty(toolResult)} isClientAgentTool={isClientTool} agent={pending.Context.AgentId} msgCount={msgs.Count}");
         return msgs;
+    }
+
+    /// <summary>
+    /// 崩溃路径的“<b>先保产物</b>”：本方法抛错前可能已经把稿子写到磁盘（技能返回 <c>produce_file</c>），
+    /// 而走到这里时消息还开着、附件一个都没挂。不补这一步，用户看到的就是“回复说已出稿、却拿不到文件”。
+    ///
+    /// <para>
+    /// 实测现场：用户说“领导不喜欢黑色背景”，浅色版 PPT 已落盘，随后恢复请求被模型以
+    /// <c>HTTP 400 The reasoning_content in the thinking mode must be passed back to the API.</c> 拒掉，
+    /// 而 catch 分支当时只做“空正文兑底 + 结束消息”，产物就这么丢了。
+    /// 与其它收尾路径（审批轮数超限终止 / 正常完成）同一原则：先保证用户能拿到东西，再谈为什么中断。
+    /// </para>
+    /// </summary>
+    /// <param name="accumulated">回复正文（用于扫正文里的 <c>att_</c> 附件引用）；本方法未提升该局部变量时传 null——
+    /// 技能产物靠环境里的工具返回收集器（<c>produce_file</c> 标记）恢复，不依赖正文。</param>
+    private async Task TryAttachProductsAfterFailureAsync(string groupId, string? messageId, string? accumulated)
+    {
+        if (string.IsNullOrEmpty(messageId)) return;
+        try
+        {
+            var recovered = await AttachPublishedProductsAsync(groupId, messageId, accumulated ?? "", CancellationToken.None);
+            if (recovered > 0)
+                _logger.LogInformation("运行失败但已回挂产物：{Count} 个附件（messageId={MessageId}）", recovered, messageId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "失败后回挂产物异常（忽略）：messageId={MessageId}", messageId);
+        }
     }
 
     /// <summary>清理超时未决策的交互请求

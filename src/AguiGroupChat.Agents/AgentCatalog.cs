@@ -708,7 +708,10 @@ public sealed class AgentCatalog
                         // 入参不合格时不执行（不生成空壳文件），把可执行的纯正提示回给模型
                         if (needsDocInputCheck && AgentGatewayHelpers.ValidateDocumentSkillInput(skill, input) is { } why)
                         {
-                            _logger.LogWarning("文档技能入参校验未通过，已拒绍执行：skill={SkillId}", skill.SkillId);
+                            // 把具体原因一并落到日志：否则排查“为什么没出稿”时只能看到“校验未通过”，
+                            // 而真正的线索（缺 slides / 形状不对 / action 用错）只在回给模型的提示里。
+                            _logger.LogWarning("文档技能入参校验未通过，已拒绍执行：skill={SkillId} reason={Reason}",
+                                skill.SkillId, why);
                             return why;
                         }
                         return await runner.InvokeAsync(skill, WithImageScope(input, skill), ct);

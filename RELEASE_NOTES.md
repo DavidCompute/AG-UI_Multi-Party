@@ -1,3 +1,32 @@
+# AG-UI 群聊桌面版 1.0.165 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.165 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.165 修“**说已出稿、却拿不到文件**”这类交付断链：① 恢复路径崩溃时**先回挂已产出的产物**；② 一轮多个审批请求**全部收下、全部回应**；③ 校验器不再把「读 / 自检 / 改既有稿」当成“缺 slides”拒掉；④ 被拒原因落日志。
+**Version note**: 1.0.165 fixes delivery being lost while the reply claims success: (1) the resume path now **re-attaches already-produced artifacts before failing**; (2) multiple approval requests in one turn are **all collected and all answered**; (3) the validator no longer rejects “read / qa / edit an existing deck” as a missing `slides` payload; (4) rejection reasons are now logged.
+
+## 交付不再断链（1.0.165）
+# Delivery no longer breaks mid-flight (1.0.165)
+
+中文：
+- **现场**：用户说“领导不喜欢黑色背景”→ 模型确实生成了浅色版（`/app/docs` 里躺着 `…-浅底商务版-26页-骨架稿v1.pptx`、`…v9-浅底商务版-26页.pptx`），但那条回复**一个附件都没挂**；再往前一步，恢复请求被模型以 `HTTP 400 The reasoning_content in the thinking mode must be passed back to the API.` 拒掉，运行中断。
+- **根因一（用户能感知的那个）**：恢复路径的 **catch 分支不收产物**——只“空正文兑底 + 结束消息”，而同方法的成功分支、以及其它终止路径（如审批轮数超限）都会先 `AttachPublishedProductsAsync`。于是“生成成功但没挂上”= 用户白跑。**现在 catch 分支先回挂产物再收尾**，与其它收尾路径同一原则：先保证用户能拿到东西。
+- **根因二（触发那条 400 的那一步）**：一个模型轮次里提出了**两个**需审批的工具调用，而网关只弹一张卡、只回一条 `ToolApprovalResponseContent`，留下无人回应的审批请求。日志里**三次** 400（08:25、00:16、00:27）全部紧跟“一轮两条审批”的那一步，而单审批的恢复从未失败。**现在一轮的审批全部收下、全部回应**（仍是一张卡、一个决定作用于全组，卡文会写明“本轮共 N 项待确认”并把工具名列清楚）。
+- **根因三（“读不了/改不了旧稿”）**：文档技能入参校验要求 `slides` 非空，对 `action=read` / `qa` / `edit` **也**照样拒绝（而 xlsx 对 `action=analyze` 是有豁免的）。用户要“改主题”时模型自然用 `edit`，被拒后收到“请把内容整理成 slides 数组”的误导提示，反复重试到自述“我没有文件读取能力”。**现在这三个 action 一律放行**（真正“从零生成”仍必须有 slides）。
+- **可诊断性**：校验失败时日志补上 `reason=`（原先只有“校验未通过”，真因只在回给模型的提示里）；恢复崩溃后的产物回挂也会记一条 `恢复失败但已回挂产物：N 个附件`。
+- **回归**：新增 `HitlMultiApprovalTests`（一轮两条审批：卡片写明 2 项、恢复后正常运行）与 pptx 校验的 action 豁免用例；全量 **1555 通过 / 0 失败**（新增用例后总数见下）。
+
+English:
+- **What happened**: after “the boss does not like dark backgrounds” the model really did produce a light deck (`…-浅底商务版-26页-骨架稿v1.pptx` and `…v9-浅底商务版-26页.pptx` were sitting in `/app/docs`), yet the reply carried **no attachment at all**; one step earlier the resume request had been rejected with `HTTP 400 The reasoning_content in the thinking mode must be passed back to the API.` and the run was torn down.
+- **Cause 1 (the one users notice)**: the resume path's **catch branch never collected artifacts** — it only stamped an empty-body fallback and ended the message, while the success branch and every other teardown path (e.g. the approval-round limit) attach products first. “Generated but never attached” means the user lost the work. **The catch branch now re-attaches produced artifacts before ending.**
+- **Cause 2 (the step that triggered the 400)**: one model turn asked for **two** approvals, but the gateway showed a single card and answered only one of them, leaving an approval request with no response. All **three** 400s in the log (08:25, 00:16, 00:27) immediately follow a two-approval turn, while every single-approval resume succeeded. **One turn's approvals are now all collected and all answered** (still one card, one decision applied to the whole group, and the card says “N items pending” and lists the tool names).
+- **Cause 3 (“cannot read or change the old deck”)**: the document-skill input validator demanded a non-empty `slides` array and applied that to `action=read` / `qa` / `edit` too (while xlsx already exempts `action=analyze`). Asked to change the theme, the model naturally calls `edit`, gets rejected with a misleading “please put your content into a slides array”, retries and eventually tells the user it has no file access. **Those three actions are now allowed through** (real generation still requires slides).
+- **Diagnosability**: validation failures now log `reason=` (previously only “validation failed”, with the real reason visible only to the model), and the crash-path re-attachment logs `恢复失败但已回挂产物：N 个附件`.
+- **Tests**: new `HitlMultiApprovalTests` (one turn, two approvals: the card states 2 items and the resume completes) plus pptx action-exemption cases.
+
+---
+
+### 上一版 / Previous release
+
 # AG-UI 群聊桌面版 1.0.164 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.164 Release Notes (current Windows desktop release)
 

@@ -661,6 +661,33 @@ public sealed class OrchestrationDeliveryLoopTests
         Assert.Contains("sections", why);
     }
 
+    [Theory]
+    [InlineData("read")]
+    [InlineData("qa")]
+    [InlineData("edit")]
+    public void Pptx_NonGeneratingActions_AreAcceptedWithoutSlides(string action)
+    {
+        // 实测踩到（真实事故）：用户说“领导不喜欢黑色背景”，模型自然地用 action=read / edit 去读旧稿、
+        // 改主题——而旧实现一律要求 slides，于是这些调用被当“入参不合格”拒掉，模型反复重试后
+        // 对用户说“我没有文件读取能力 / 交付不了”。产物本来就在磁盘上，却被自己的校验拦住。
+        foreach (var payload in new[]
+                 {
+                     $"{{\"action\":\"{action}\",\"path\":\"/app/docs/旧稿.pptx\"}}",
+                     $"{{\"action\":\"{action.ToUpperInvariant()}\",\"path\":\"/app/docs/旧稿.pptx\"}}", // 大小写不敏感
+                 })
+            Assert.Null(AgentGatewayHelpers.ValidateDocumentSkillInput(PptxSkill(), payload));
+    }
+
+    [Fact]
+    public void Pptx_StillRejectsGenerationWithoutSlides()
+    {
+        // 豁免只针对读取 / 自检 / 改动：真正“从零生成”依旧必须有 slides（否则产出空壳 PPT）
+        var why = AgentGatewayHelpers.ValidateDocumentSkillInput(PptxSkill(),
+            "{\"action\":\"generate\",\"title\":\"T\"}");
+        Assert.NotNull(why);
+        Assert.Contains("slides", why);
+    }
+
     [Fact]
     public void ParseDeliveryResult_ReadsSlidesForPptx()
     {

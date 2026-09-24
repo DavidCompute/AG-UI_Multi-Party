@@ -474,6 +474,21 @@ internal static class AgentGatewayHelpers
     /// <summary>演示文稿技能的 slides 校验：必须是非空数组，且每页能认出 type。</summary>
     private static string? ValidateSlidesInput(AgentSkillDefinition skill, System.Text.Json.JsonElement root)
     {
+        // 读取 / 自检 / 改动既有文件模式：入参是 path（+ops），本就不产出新稿，更不需要 slides —— 放行。
+        //
+        // 为什么必须豁免（实测踩到）：用户说“领导不喜欢黑色背景”时，模型的自然动作是
+        // action=read / edit（读旧稿、改主题或替换文字）。旧实现在这里一律要求 slides，于是这些调用
+        // 被当成“入参不合格”拒掉，模型收到“请把内容整理成 slides 数组”的误导提示后反复重试、
+        // 最后告诉用户“我没有文件读取能力”“交付不了”——明明图库里就有那份旧稿。
+        // 与 xlsx 的 action=analyze 同一口径（ValidateSheetsInput）。
+        if (root.TryGetProperty("action", out var act)
+            && act.ValueKind == System.Text.Json.JsonValueKind.String
+            && act.GetString() is { } action
+            && (action.Equals("read", StringComparison.OrdinalIgnoreCase)
+                || action.Equals("qa", StringComparison.OrdinalIgnoreCase)
+                || action.Equals("edit", StringComparison.OrdinalIgnoreCase)))
+            return null;
+
         if (!root.TryGetProperty("slides", out var slides)
             || slides.ValueKind != System.Text.Json.JsonValueKind.Array
             || slides.GetArrayLength() == 0)
