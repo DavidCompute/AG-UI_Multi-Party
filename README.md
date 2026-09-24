@@ -191,8 +191,11 @@ dotnet run --project samples/AguiGroupChat.Client -- --register lisi 654321 --gr
 cp .env.example .env
 
 # 启动全部服务（依赖镜像首次拉取 + 构建较慢，耐心等待）
-# --remove-orphans：从带 Ollama 的旧版本升级时**必须加**——旧容器仍占着 11435，
-# 不加会让 llama-embed 起不来（port is already allocated），而 web 依赖它健康，于是整套起不来。
+# --remove-orphans：从带 Ollama 的旧版本升级时**必须加**——旧 agui-group-chat-ollama 容器仍占着 11435。
+# 实测不加的后果：首次 up 直接报 `Bind for 0.0.0.0:11435 failed: port is already allocated`；
+# 即使再 up 一次把容器拉起来（web 走 compose 内网，所以应用看起来是好的），
+# 宿主机 11435 仍指向**旧的 Ollama 容器**（llama-embed 的端口映射落不了地）→ 两套 embedding 服务并存，
+# 宿主侧的巡检/脚本都会打到旧引擎上。
 docker compose up -d --build --remove-orphans
 
 # 查看启动日志：确认出现「语义记忆已启用」，且 llama-embed 为 healthy（日志有 "model loaded"）
@@ -261,7 +264,7 @@ docker compose down
 - **内置 llama-embed 与宿主机隔离**：web 容器内走内网 `http://llama-embed:8080/v1`，宿主机映射端口默认 `LLAMA_EMBED_PORT=11435`（避开本机 Ollama 的 11434）；挂载的是宿主机**目录** `./models`（不是单个文件：文件级 bind mount 在源文件缺失时会被 Docker 建出一个同名**目录**，把人卡死）。
   容器启动先校验模型：**缺失**或**过小**（<400MB，即不是 bge-m3/1024 维）都会打印可照做的下一步后退出，web 因 `depends_on: service_healthy` 等它健康才启动——不会带着坏掉的记忆服务跑起来，也不会把维度不匹配变成“RAG 静默失效”。
   若部署里配了 HTTP(S) 代理：`NO_PROXY` 默认已含 `llama-embed` / `postgres` / `host.docker.internal`；把 embedding 端点改成**别的内网主机名/容器名**时必须同步加进去——否则 .NET 的 HttpClient 会走代理，代理解析不了内网名而回 503（实测：表现为「维度自检未完成 / 语义记忆检索失败」，看着像 embedding 服务挂了）。
-- **从带 Ollama 的旧版本升级**：`git pull` → 放好 `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`。**`--remove-orphans` 不能省**：旧 `agui-group-chat-ollama` 容器仍占着 11435，不清理会让 llama-embed 直接 `port is already allocated` 起不来。
+- **从带 Ollama 的旧版本升级**：`git pull` → 放好 `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`。**`--remove-orphans` 不能省**：旧 `agui-group-chat-ollama` 容器仍占着宿主 11435，不加时首次 up 会直接失败（`port is already allocated`）；即使再 up 让容器起来，**宿主机 11435 仍归旧 Ollama 容器**（llama-embed 的映射落不了地）——两套 embedding 服务并存，宿主侧的巡检/脚本会打到旧引擎上（已实测复现）。
 - **PostgreSQL 模式**：群 / 成员 / 话题 / 消息 / 用户 / 智能体触发规则与定义全部写入 PostgreSQL，重启容器数据完整保留。
   `STORAGE_PROVIDER=memory` 切换回内存 + JSON 快照模式（此时语义记忆不可用）。
 - 镜像以非 root 用户（`app`）运行，内置健康检查 `GET /ag-ui/health`。

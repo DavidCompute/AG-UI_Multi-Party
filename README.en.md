@@ -189,9 +189,12 @@ The project provides a multi-stage `Dockerfile` (Web demo), `Dockerfile.hub` (pr
 cp .env.example .env
 
 # Start all services (pulling/building dependency images the first time is slow, please be patient)
-# --remove-orphans: **required** when upgrading from the Ollama-based version — the old container still holds
-# port 11435, otherwise llama-embed fails with "port is already allocated", and since web depends on it
-# being healthy, the whole stack never comes up.
+# --remove-orphans: **required** when upgrading from the Ollama-based version — the old agui-group-chat-ollama
+# container still holds 11435. Measured without it: the first up fails outright with
+# `Bind for 0.0.0.0:11435 failed: port is already allocated`; even after a second up brings containers back
+# (web talks to llama-embed over the compose network, so the app looks fine), host port 11435 still points at
+# the **old Ollama container** — llama-embed's mapping never lands, leaving two embedding services where
+# host-side checks and scripts hit the old engine.
 docker compose up -d --build --remove-orphans
 
 # Check the startup logs: confirm "语义记忆已启用" appears and llama-embed is healthy (its log shows "model loaded")
@@ -257,7 +260,7 @@ Key points:
 - **Bundled llama-embed is isolated from the host**: inside the web container it uses the internal network `http://llama-embed:8080/v1`; the host-mapped port defaults to `LLAMA_EMBED_PORT=11435` (avoiding the local Ollama's 11434); the mount is the host **directory** `./models` (not a single file: a file-level bind mount makes Docker create a same-named **directory** when the source file is missing, which traps users).
   The container validates the model first: **missing** or **too small** (<400MB, i.e. not bge-m3/1024-dim) both print the next actionable step and exit; because web has `depends_on: service_healthy`, you never get a running app with a broken memory service — and a dimension mismatch cannot degrade into "RAG silently fails".
   If the deployment uses an HTTP(S) proxy, the default `NO_PROXY` already covers `llama-embed` / `postgres` / `host.docker.internal`; when you point the embedding endpoint at **any other internal host or container name**, add it there too — otherwise .NET's HttpClient routes through the proxy, which cannot resolve internal names and answers 503 (measured: it shows up as "dimension check could not complete / semantic memory retrieval failed", which looks like the embedding service is down).
-- **Upgrading from the Ollama-based version**: `git pull` → place `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`. **`--remove-orphans` is not optional**: the old `agui-group-chat-ollama` container still holds port 11435, and without cleaning it up llama-embed fails immediately with `port is already allocated`.
+- **Upgrading from the Ollama-based version**: `git pull` → place `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`. **`--remove-orphans` is not optional**: the old `agui-group-chat-ollama` container still holds host port 11435. Measured: the first up fails with `port is already allocated`; and even once a retry brings the stack up, **host 11435 still belongs to the old Ollama container** (llama-embed's mapping never lands) — two embedding services coexist and host-side checks/scripts hit the old engine.
 - **PostgreSQL mode**: groups / members / topics / messages / users / agent trigger rules and definitions are all written to PostgreSQL, and data survives container restarts intact.
   Switch back to `STORAGE_PROVIDER=memory` for in-memory + JSON snapshot mode (semantic memory is unavailable in this mode).
 - The image runs as a non-root user (`app`), with a built-in health check `GET /ag-ui/health`.

@@ -52,7 +52,9 @@ services:
     restart: unless-stopped
     ports:
       # 宿主机端口默认 11435（避开本机已装的 Ollama 11434）；web 容器内走内网 http://llama-embed:8080
-      # ⚠️ 从带 Ollama 的旧版本升级时：旧容器仍占着 11435，必须加 --remove-orphans（详见 README 快速开始）。
+      # ⚠️ 从带 Ollama 的旧版本升级时：旧 agui-group-chat-ollama 容器仍占着 11435，必须加 --remove-orphans。
+      # 实测不加的后果：首次 up 报 port is already allocated；再 up 虽然能起来（web 走内网不受影响），
+      # 但宿主机 11435 仍归旧 Ollama 容器（llama-embed 的映射落不了地），等于宿主侧留着旧引擎（详见 README）。
       - "${LLAMA_EMBED_PORT:-11435}:8080"
     volumes:
       # 模型文件放宿主机目录（不在镜像里）：首次部署先执行
