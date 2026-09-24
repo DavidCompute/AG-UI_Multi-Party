@@ -180,20 +180,22 @@ dotnet run --project samples/AguiGroupChat.Client -- --register lisi 654321 --gr
 
 项目提供多阶段 `Dockerfile`（Web 演示）、`Dockerfile.hub`（仅协议 Hub）与一键编排的 `docker-compose.yml`。
 
-**默认即完整 RAG 语义记忆栈**：一条命令启动 postgres（pgvector）+ 内置 Ollama（自动拉取 embedding 模型）+ Web。
+**默认即完整 RAG 语义记忆栈**：一条命令启动 postgres（pgvector）+ 内置 `llama-embed`（llama.cpp 提供 OpenAI 兼容 embedding）+ Web。
 
 ```bash
-# 一键启动（postgres + 内置 ollama 语义记忆 + Web），浏览器打开 http://localhost:5200
-# 首次启动内置 ollama 会自动拉取 bge-m3 模型（约 1.2GB），之后进入即时可用状态
+# 一键启动（postgres + 内置 llama-embed 语义记忆 + Web），浏览器打开 http://localhost:5200
+# ⚠️ 先把 embedding 模型放到 ./models/embedding.gguf（约 605MB，bge-m3-Q8_0，1024 维；不入源码仓库）：
+#    Windows：powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models
+#    其它平台：按该脚本里的 URL 自行下载，重命名为 models/embedding.gguf
 # 若 .env 不存在，先复制：cp .env.example .env
 cp .env.example .env
 
 # 启动全部服务（依赖镜像首次拉取 + 构建较慢，耐心等待）
 docker compose up -d --build
 
-# 查看启动日志：确认出现「语义记忆已启用」且 ollama 完成模型拉取
+# 查看启动日志：确认出现「语义记忆已启用」，且 llama-embed 为 healthy（日志有 "model loaded"）
 docker compose logs -f web
-docker compose exec ollama ollama list
+docker compose logs llama-embed
 
 # 如需同时启动仅协议 Hub（http://localhost:5100）
 docker compose --profile hub up -d
@@ -228,11 +230,11 @@ docker compose down
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL 库名 / 用户 / 密码（`STORAGE_PROVIDER=postgres` 时生效） |
 | `STORAGE_CONNECTION_STRING` | 指向内置 postgres | 自定义连接串（可指向外部 PostgreSQL 实例） |
 | `MEMORY_ENABLED` | `true` | 语义记忆（RAG）开关：需 `STORAGE_PROVIDER=postgres` + pgvector 扩展（compose 已内置） |
-| `MEMORY_EMBEDDING_ENDPOINT` | `http://ollama:11434/v1` | OpenAI 兼容 embedding 端点（默认指向 compose 内置 ollama；自备外部实例可改） |
+| `MEMORY_EMBEDDING_ENDPOINT` | `http://llama-embed:8080/v1` | OpenAI 兼容 embedding 端点（默认指向 compose 内置 llama-embed；自备外部实例——包括自建 Ollama——可改） |
 | `MEMORY_EMBEDDING_MODEL` | `bge-m3:latest` | embedding 模型名（改模型时须同步改 `MEMORY_EMBEDDING_DIMENSIONS`） |
 | `MEMORY_EMBEDDING_DIMENSIONS` | `1024` | 向量维度（bge-m3=1024、MiniLM=384、qwen3-embedding=2560） |
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `6` / `0.25` | 每次回复注入的记忆条数 / 相似度阈值。**`group_memory_search` 工具更严格**：阈值取 max(0.40, MIN_SCORE)、最多 3 条，低相关命中物理过滤，避免记忆泛滥 |
-| `MEMORY_MAX_QUERY_CHARS` / `MEMORY_MAX_WRITE_CHARS` | `500` / `800` | 记忆向量化的**输入长度**上限（检索 query / 写入内容）。embedding 耗时约 8.5ms/字符，所以这两个值是“检索慢/超时”的主要旋钮；写入侧上限同时作用于入库文本与向量 |
+| `MEMORY_MAX_QUERY_CHARS` / `MEMORY_MAX_WRITE_CHARS` | `500` / `800` | 记忆向量化的**输入长度**上限（检索 query / 写入内容）。embedding 耗时与输入长度成正比（实测约 5ms/字符，换 llama.cpp 前的内置 Ollama 约 8.5ms/字符），所以这两个值是“检索慢/超时”的主要旋钮；写入侧上限同时作用于入库文本与向量 |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | embedding 调用超时（秒）。CPU 环境首次加载 bge-m3 需数十秒 |
 | `MEMORY_SCOPE` | `agent` | 检索范围：`agent` 该智能体所在的所有群（默认）/ `group` 仅当前群 / `all` 全部群 |
 | `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | 知识库文档切片窗口（字符）与重叠（字符）：切分沿换行 / 句末标点收尾（避免句子中间硬切），相邻切片携带重叠尾部降低边界信息丢失；超长切片还会被 embedding 按模型 context 自动再分段（1.0.78 起字符/token 比取 0.9），长文档不受长度限制 |
@@ -240,20 +242,23 @@ docker compose down
 | `SEED_SAMPLE_DATA` | `true` | Web 演示：无历史数据时播种示例数据 |
 | `SEED_SAMPLE_DATA_HUB` | `false` | 仅协议 Hub：是否播种示例数据 |
 | `WEB_PORT` / `HUB_PORT` | `5200` / `5100` | 宿主机端口映射（与 `launchSettings.json` 一致） |
-| `OLLAMA_PORT` | `11435` | 内置 Ollama 宿主机端口（默认避开本机 Ollama 的 11434） |
-| `OLLAMA_KEEP_ALIVE` | `-1` | 模型常驻内存（-1=永驻；改 `5m` 空闲 5 分钟后卸载、释放约 1.1GB 内存） |
+| `LLAMA_EMBED_PORT` | `11435` | 内置 llama-embed 宿主机端口（默认避开本机 Ollama 的 11434） |
+| `LLAMA_EMBED_THREADS` | `6` | llama-embed 推理线程数。**并非越多越快**：实测 6 线程适合 8 核以上，**4 核机器请设 4**（4 核上 6 线程比 4 线程慢 30%~2 倍，超订会明显变慢） |
 | `PG_PORT` | `5432` | PostgreSQL 宿主机映射端口（容器内不受影响） |
 
 要点：
 
-- **默认即 RAG 语义记忆**：`STORAGE_PROVIDER=postgres`（compose 内置 `pgvector/pgvector:pg16` 镜像）+ `MEMORY_ENABLED=true`（embedding 由内置 `ollama` 服务提供，启动时自动 `ollama pull bge-m3:latest`）。
-  首次启动拉取模型约 1.2GB，模型与数据分别落在命名卷 `agui-ollama-data` / `agui-pg-data`，`docker compose down` 不丢数据。
+- **默认即 RAG 语义记忆**：`STORAGE_PROVIDER=postgres`（compose 内置 `pgvector/pgvector:pg16` 镜像）+ `MEMORY_ENABLED=true`（embedding 由内置 `llama-embed` 提供：llama.cpp 官方 server 加载 `./models/embedding.gguf`）。
+  模型与数据分别落在宿主机 `./models/`（bind mount）与命名卷 `agui-pg-data`，`docker compose down` 不丢数据。
+- **为什么 embedding 用 llama.cpp server 而不是 Ollama**（2026-09 同机同模型同核实测，bge-m3）：Ollama 0.32 的引擎**本身也是内置的 llama-server 子进程**，但每个请求要经 `HTTP→Go→HTTP` 中转，实测每请求多约 350~450ms 固定开销 + 约 1.5x 吞吐损耗。中位延迟（输入 6/50/200/500/800 字）：**Ollama 382/635/1708/3973/6409ms → llama.cpp 107/288/978/2978/4869ms**（短文本快 2~3.6 倍，越长收益越小——长文本是纯算术量）。两个引擎的向量**完全一致**（cosine=1.000000、1024 维、L2 归一化），换引擎不会让已入库的记忆失配。
+  - 三个必须显式配置的参数：`--embeddings` 会把 `n_batch/n_ubatch` 压到 512（≥500 字直接 HTTP 500），故须 `-b 2048 -ub 2048`；`-t` 按核数给（超订会变慢）；BERT 类非因果编码器上 `--flash-attn off` 让短文本快 2~3 倍。
+  - 想换回外部 Ollama / 任何 OpenAI 兼容端点：只改 `MEMORY_EMBEDDING_ENDPOINT`（+ 必要时 `MEMORY_EMBEDDING_DIMENSIONS`）即可，两端点向量语义一致。
 - **默认即人机交互（HITL）演示**：`AGENTS_ENABLE_TOOLS=true`（compose 默认）——智能体内置工具：`get_current_time` / `calculator` / `unit_converter` / `group_memory_search` / `read_attachment` 免审批，`publish_announcement` 需审批（群聊中请智能体「发布公告」→ 🔐 审批卡片，**仅发起请求的用户**可批准 / 拒绝）；`AGENTS_REQUIRE_APPROVAL_TOOLS` 可自定义需审批的工具名，如需多个工具请在 `docker-compose.yml` 追加 `Agents__RequireApprovalToolNames__1` 等索引项；联网工具 `web_search` / `read_url` 默认关（`AGENTS_ENABLE_WEBTOOLS=true` 开启）。
-- **内置 Ollama 与宿主机隔离**：web 容器内走内网 `http://ollama:11434/v1`，宿主机映射端口默认 `OLLAMA_PORT=11435`（避开本机 Ollama 的 11434）；模型拉取失败不会导致容器退出，web 侧会打印告警日志。
+- **内置 llama-embed 与宿主机隔离**：web 容器内走内网 `http://llama-embed:8080/v1`，宿主机映射端口默认 `LLAMA_EMBED_PORT=11435`（避开本机 Ollama 的 11434）；模型文件缺失时容器**启动失败且 healthcheck 不通过**，web 会等它健康后才启动——不会带着坏掉的记忆服务跑起来。
 - **PostgreSQL 模式**：群 / 成员 / 话题 / 消息 / 用户 / 智能体触发规则与定义全部写入 PostgreSQL，重启容器数据完整保留。
   `STORAGE_PROVIDER=memory` 切换回内存 + JSON 快照模式（此时语义记忆不可用）。
 - 镜像以非 root 用户（`app`）运行，内置健康检查 `GET /ag-ui/health`。
-- 不使用 Compose 时可直接构建运行（此时需自备 pgvector 版 PostgreSQL 与 Ollama）：
+- 不使用 Compose 时可直接构建运行（此时需自备 pgvector 版 PostgreSQL 与任意 OpenAI 兼容 embedding 服务，如本机 Ollama `ollama serve` 或 llama.cpp `llama-server`）：
 
   ```bash
   docker build -t agui-group-chat-web .
@@ -1050,7 +1055,7 @@ docker run -d --name agui-redis -p 6379:6379 redis:7
 - **记忆拟人类型（按类型抽取，1.0.121+）**：单个数字员工可在「编辑 → 记忆与权限 → 🧠 记忆类型（拟人召回）」配置**记忆拟人特征**（`AgentDefinition.MemoryProfile`：五档预设<b>广记型 / 深记型 / 难录入型 / 存得住想不起型 / 快速遗忘型</b> + 口吻模式 recall/digest + 人设口吻 + TopK/阈值高级微调）。回复前 `MemoryContextProvider` 按该员工类型解析本次检索的<b>单次覆盖</b>（检索条数 TopK、相似度阈值 MinScore、快速遗忘型的近期窗口、存得住想不起型的“回忆提示”分支：用户说「记得吗/上次/之前」时临时放宽提取），真正传给 store 层检索执行，并在注入群/个人记忆时附一句与类型相符的“召回口吻”软性说明（广记型会提示用“我记得好像是…”这类留有余地的话，不凭空补全）。记忆本体仍为知聚共享历史，写入侧仅对<b>数字员工本人的发言</b>按类型微调（深记型自动刻为「重要」记忆、快速遗忘型在开启自动遗忘时保留更短；其余写入无差别），五型主要影响<b>“该员工怎么回忆”</b>；未配置（MemoryProfile=null）时行为与全局完全一致，向后兼容。机制、字段、运行效果与调试详见 <b>`docs/memory-personality.md`</b>。
 - **私密群隔离**：群可设置 `isPrivate`（创建时 `isPrivate=true`，或 `POST /ag-ui/group/update` 的 updateFields 含 `isPrivate`）。私密群的记忆**只允许在群内被检索到**——智能体在**其他群**触发（scope=agent/all）时一律排除私密群内容；在**私密群本群**内触发不受影响。前端创建群对话框提供「🔒 私密群」开关，群列表 / 聊天标题显示 🔒 标识
 - **降级**：pgvector 扩展不可用 / embedding 端点不可达时自动静默失效，不影响任何既有功能；MySQL / SQLite 提供器下该配置不生效
-- **部署**：Docker 编排的 postgres 服务已换为 pgvector 镜像（`pgvector/pgvector:pg16`，与 postgres 16 同内核）；本地起库：`docker run -d --name agui-pg -e POSTGRES_PASSWORD=agui -e POSTGRES_DB=agui -p 5432:5432 pgvector/pgvector:pg16`；embedding 用 Ollama：`ollama pull bge-m3:latest && ollama serve`
+- **部署**：Docker 编排的 postgres 服务已换为 pgvector 镜像（`pgvector/pgvector:pg16`，与 postgres 16 同内核）；本地起库：`docker run -d --name agui-pg -e POSTGRES_PASSWORD=agui -e POSTGRES_DB=agui -p 5432:5432 pgvector/pgvector:pg16`；embedding 用内置 llama-embed（llama.cpp server + `./models/embedding.gguf`，见上「默认即 RAG 语义记忆」），也可改用 Ollama：`ollama pull bge-m3:latest && ollama serve`（把 `Agents:Memory:EmbeddingEndpoint` 指向它即可，向量语义一致）
 
 ### 图谱记忆（Graph RAG，实体-关系子图注入）
 

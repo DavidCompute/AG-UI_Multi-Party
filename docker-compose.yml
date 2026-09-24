@@ -1,6 +1,6 @@
 # AG-UI 群聊扩展协议 Hub —— 容器化编排（一键 RAG 记忆 + 人机交互演示）
 #
-# 默认启动：postgres（pgvector）+ ollama（自动拉取 embedding 模型）+ web。
+# 默认启动：postgres（pgvector）+ llama-embed（llama.cpp embedding 服务）+ web。
 # 浏览器打开 http://localhost:5200 即可体验：智能体回复前会自动检索群聊历史记忆（RAG）；
 # 工具调用默认开启（Agents__EnableTools=true）——请求智能体「发布公告」时会在聊天区弹出
 # 🔐 审批卡片（人机交互 HITL），仅发起请求的用户可批准 / 拒绝。
@@ -9,7 +9,8 @@
 #
 # 存储 / 记忆（.env 的 STORAGE_PROVIDER / MEMORY_ENABLED）：
 #   postgres（默认）+ Memory.Enabled=true：群聊数据 + 向量记忆全部落 PostgreSQL（pgvector），
-#   embedding 由内置 ollama 服务提供（首次启动自动拉取 bge-m3 模型，约 1.2GB）
+#   embedding 由内置 llama-embed（llama.cpp server）提供：需先把模型放到 ./models/embedding.gguf
+#   （一键下载：powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models）
 #   memory：进程内内存 + JSON 快照（关闭记忆体验，STORAGE_PROVIDER=memory 即切换）
 #
 # 配置项见 .env.example，复制为 .env 后按需修改（docker compose 自动读取）。
@@ -36,22 +37,57 @@ services:
       timeout: 3s
       retries: 10
 
-  ollama:
-    # 语义记忆的 embedding 服务：启动时自动拉取模型（默认 bge-m3，中文语义效果好）
-    image: ollama/ollama:latest
-    container_name: agui-group-chat-ollama
+  llama-embed:
+    # 语义记忆的 embedding 服务：llama.cpp 官方 server（OpenAI 兼容 /v1/embeddings，单模型）。
+    # 为什么不用 Ollama（2026-09-24 同机同模型同核实测，bge-m3）——
+    #   Ollama 0.32 的引擎其实也是内置的 llama-server 子进程（`ps` 可见），但每个请求都要经
+    #   HTTP→Go→HTTP 中转：每请求多约 350~450ms 固定开销 + 约 1.5x 吞吐损耗。
+    #   同机同模型同核配对实测中位延迟（6/50/200/500/800 字）：
+    #     ollama 382/635/1708/3973/6409ms → llama.cpp 107/288/978/2978/4869ms（短文本 2~3.6 倍）。
+    #   向量完全一致（cosine=1.000000，维度 1024，L2 归一化），换引擎不会让已入库的记忆失配。
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: agui-group-chat-llama-embed
     restart: unless-stopped
     ports:
-      # 宿主机端口默认 11435（避开本机已装的 Ollama 11434）；web 容器内走内网 http://ollama:11434
-      - "${OLLAMA_PORT:-11435}:11434"
+      # 宿主机端口默认 11435（避开本机已装的 Ollama 11434）；web 容器内走内网 http://llama-embed:8080
+      - "${LLAMA_EMBED_PORT:-11435}:8080"
     volumes:
-      - agui-ollama-data:/root/.ollama
-    environment:
-      # 模型常驻内存：避免空闲 5 分钟后卸载导致的首次加载慢（如需释放内存改为 5m）
-      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:--1}
-    # 启动流程：serve → 拉模型 → 装 curl（镜像无 curl/wget）→ 预热加载（CPU 首次加载 bge-m3 需数十秒，预热后应用侧即时可用）；
-    # 用 ; 串联：拉取/预热失败不终止 serve，容器保持可用，web 侧会打印告警日志
-    entrypoint: ["/bin/sh", "-c", "ollama serve & sleep 5; echo 'Pulling embedding model ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}...'; ollama pull ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest} || echo 'WARN: model pull failed (check network), embedding requests will fail until model is available'; (apt-get update -qq && apt-get install -y -qq --no-install-recommends curl >/dev/null 2>&1) || true; echo 'Warming up model...'; curl -s --max-time 300 http://localhost:11434/v1/embeddings -H 'Content-Type: application/json' -d '{\"model\":\"${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}\",\"input\":\"warmup\"}' >/dev/null && echo 'Model warmup done' || echo 'WARN: model warmup failed'; wait"]
+      # 模型文件挂宿主机（不在镜像里）：首次部署先执行
+      #   powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models
+      # 缺失时容器会启动失败（healthcheck 不通过），web 侧因此不会带着坏掉的记忆服务跑起来。
+      - ./models/embedding.gguf:/models/embedding.gguf:ro
+    # 参数说明（改之前请先读 README「embedding 服务」一节）：
+    #   -c 4096           上下文（沿用旧 Ollama 引擎的取值；bge-m3 支持 8192，我们的输入上限 800 字）
+    #   -b 2048 -ub 2048  物理批：--embeddings 会把 n_batch/n_ubatch 压到 512，≥500 字的输入会直接
+    #                     HTTP 500（input is too large to process），必须显式放开
+    #   -t N              线程：**并非越多越快**（实测 12 线程比 6 线程慢），默认 6；4 核机器建议 4
+    #   --flash-attn off  非因果（BERT 类）编码器关掉 flash attention，短文本快 2~3 倍
+    command:
+      - "-m"
+      - "/models/embedding.gguf"
+      - "--embeddings"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "-c"
+      - "4096"
+      - "-b"
+      - "2048"
+      - "-ub"
+      - "2048"
+      - "-t"
+      - "${LLAMA_EMBED_THREADS:-6}"
+      - "--flash-attn"
+      - "off"
+      - "--no-webui"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      # 首次加载 1.2GB 模型需要时间（冷启动实测 < 20s），给足启动宽限
+      start_period: 60s
 
   web:
     build:
@@ -67,8 +103,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      ollama:
-        condition: service_started
+      llama-embed:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-5200}:8080"
     environment:
@@ -129,11 +165,12 @@ services:
       # 只有显式写 auto / network 才会出网（写错成其它值也当 library，安全侧默认）。
       # 团队图库是用户上传的图片（数据面「图库」），按语义检索返回本地文件，命中无需署名。
       AGUI_IMAGE_SOURCE: ${AGUI_IMAGE_SOURCE:-library}
-      # 代理。注意：一旦启用，容器内网服务也会被套上代理而连不上（如 ollama 的 embedding 端点），
-      # 所以 NO_PROXY 默认就排除了内网服务名；在 .env 里改 NO_PROXY 会覆盖这个默认值。
+      # 代理。注意：一旦启用，容器内网服务也会被套上代理而连不上（如 llama-embed 的 embedding 端点），
+      # 所以 NO_PROXY 默认就排除了内网服务名（保留 ollama 是为了兼容 .env 里把端点改回自建 Ollama 的部署）；
+      # 在 .env 里改 NO_PROXY 会覆盖这个默认值。
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-ollama,postgres,localhost,127.0.0.1,::1}
+      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,localhost,127.0.0.1,::1}
       Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
       # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）
       # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
@@ -153,9 +190,9 @@ services:
       # 存储：postgres（默认，含向量记忆）；memory 为内存 + JSON 快照
       Storage__Provider: ${STORAGE_PROVIDER:-postgres}
       Storage__ConnectionString: ${STORAGE_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${PG_DATABASE:-agui};Username=${PG_USER:-postgres};Password=${PG_PASSWORD:-agui}}
-      # 语义记忆（RAG）：默认开启，embedding 走内置 ollama 服务（bge-m3，1024 维）
+      # 语义记忆（RAG）：默认开启，embedding 走内置 llama-embed 服务（llama.cpp + bge-m3，1024 维）
       Agents__Memory__Enabled: ${MEMORY_ENABLED:-true}
-      Agents__Memory__EmbeddingEndpoint: ${MEMORY_EMBEDDING_ENDPOINT:-http://ollama:11434/v1}
+      Agents__Memory__EmbeddingEndpoint: ${MEMORY_EMBEDDING_ENDPOINT:-http://llama-embed:8080/v1}
       Agents__Memory__EmbeddingModel: ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}
       Agents__Memory__EmbeddingDimensions: ${MEMORY_EMBEDDING_DIMENSIONS:-1024}
       Agents__Memory__TopK: ${MEMORY_TOP_K:-6}
@@ -166,7 +203,8 @@ services:
       Agents__Memory__PersonalTopK: ${MEMORY_PERSONAL_TOP_K:-3}
       Agents__Memory__PersonalMinScore: ${MEMORY_PERSONAL_MIN_SCORE:-0.25}
       Agents__Memory__EmbeddingTimeoutSeconds: ${MEMORY_EMBEDDING_TIMEOUT:-60}
-      # 记忆向量化的输入长度上限（embedding 耗时约 8.5ms/字符，所以这两个值是“检索慢/超时”的主要旋钮）：
+      # 记忆向量化的输入长度上限（embedding 耗时与输入长度成正比，所以这两个值是“检索慢/超时”的主要旋钮；
+      # 换 llama.cpp 后实测约 5ms/字符，旧 Ollama 约 8.5ms/字符）：
       # 检索 query / 写入内容。写入侧上限同时作用于入库文本与向量（两者必须一致）。
       Agents__Memory__MaxQueryChars: ${MEMORY_MAX_QUERY_CHARS:-500}
       Agents__Memory__MaxWriteChars: ${MEMORY_MAX_WRITE_CHARS:-800}
@@ -243,4 +281,3 @@ volumes:
   agui-docs:
   agui-hub-data:
   agui-pg-data:
-  agui-ollama-data:

@@ -178,20 +178,22 @@ dotnet run --project samples/AguiGroupChat.Client -- --register lisi 654321 --gr
 
 The project provides a multi-stage `Dockerfile` (Web demo), `Dockerfile.hub` (protocol Hub only), and a one-click orchestration `docker-compose.yml`.
 
-**A complete RAG semantic memory stack by default**: a single command starts postgres (pgvector) + bundled Ollama (auto-pulls the embedding model) + Web.
+**A complete RAG semantic memory stack by default**: a single command starts postgres (pgvector) + bundled `llama-embed` (llama.cpp serving an OpenAI-compatible embedding API) + Web.
 
 ```bash
-# One-click start (postgres + bundled ollama semantic memory + Web), open http://localhost:5200 in a browser
-# On first start the bundled ollama automatically pulls the bge-m3 model (~1.2GB), then it enters an immediately usable state
+# One-click start (postgres + bundled llama-embed semantic memory + Web), open http://localhost:5200 in a browser
+# ⚠️ First put the embedding model at ./models/embedding.gguf (~605MB, bge-m3-Q8_0, 1024 dims; not stored in the repo):
+#    Windows: powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models
+#    Other platforms: download from the URL inside that script and rename it to models/embedding.gguf
 # If .env does not exist, copy it first: cp .env.example .env
 cp .env.example .env
 
 # Start all services (pulling/building dependency images the first time is slow, please be patient)
 docker compose up -d --build
 
-# Check the startup logs: confirm "语义记忆已启用" appears and ollama finished pulling the model
+# Check the startup logs: confirm "语义记忆已启用" appears and llama-embed is healthy (its log shows "model loaded")
 docker compose logs -f web
-docker compose exec ollama ollama list
+docker compose logs llama-embed
 
 # If you also want to start the protocol-Hub-only service (http://localhost:5100)
 docker compose --profile hub up -d
@@ -223,11 +225,11 @@ Configuration options are set in `.env` (see `.env.example`):
 | `PG_DATABASE` / `PG_USER` / `PG_PASSWORD` | `agui` / `postgres` / `agui` | PostgreSQL database / user / password (effective when `STORAGE_PROVIDER=postgres`) |
 | `STORAGE_CONNECTION_STRING` | points to bundled postgres | Custom connection string (can point to an external PostgreSQL instance) |
 | `MEMORY_ENABLED` | `true` | Semantic memory (RAG) switch: requires `STORAGE_PROVIDER=postgres` + the pgvector extension (built into compose) |
-| `MEMORY_EMBEDDING_ENDPOINT` | `http://ollama:11434/v1` | OpenAI-compatible embedding endpoint (defaults to the compose-bundled ollama; can be changed if you provide your own external instance) |
+| `MEMORY_EMBEDDING_ENDPOINT` | `http://llama-embed:8080/v1` | OpenAI-compatible embedding endpoint (defaults to the compose-bundled llama-embed; change it to use your own external instance — including your own Ollama) |
 | `MEMORY_EMBEDDING_MODEL` | `bge-m3:latest` | Embedding model name (when changing the model you must also update `MEMORY_EMBEDDING_DIMENSIONS`) |
 | `MEMORY_EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions (bge-m3=1024, MiniLM=384, qwen3-embedding=2560) |
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `6` / `0.25` | Number of memory entries injected per reply / similarity threshold. **The `group_memory_search` tool is stricter**: threshold is max(0.40, MIN_SCORE), at most 3 entries, low-relevance hits are physically filtered to avoid memory flooding |
-| `MEMORY_MAX_QUERY_CHARS` / `MEMORY_MAX_WRITE_CHARS` | `500` / `800` | **Input length** caps for memory embedding (retrieval query / written content). Embedding costs roughly 8.5 ms per character, so these are the main knobs for "retrieval is slow / times out"; the write cap applies to both the stored text and the vector |
+| `MEMORY_MAX_QUERY_CHARS` / `MEMORY_MAX_WRITE_CHARS` | `500` / `800` | **Input length** caps for memory embedding (retrieval query / written content). Embedding cost scales with input length (measured ~5 ms per character; the bundled Ollama used to be ~8.5 ms), so these are the main knobs for "retrieval is slow / times out"; the write cap applies to both the stored text and the vector |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | Embedding call timeout (seconds). First load of bge-m3 on a CPU environment takes tens of seconds |
 | `MEMORY_SCOPE` | `agent` | Retrieval scope: `agent` all groups the agent belongs to (default) / `group` only the current group / `all` all groups |
 | `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | Knowledge-base document chunking: window size (chars) / overlap (chars). Cuts are placed at line breaks or sentence-ending punctuation (avoiding mid-sentence splits), and adjacent slices share an overlapping tail to reduce boundary information loss; slices that still exceed the model context are auto re-split by the embedding provider (chars/token ratio 0.9 since 1.0.78), so long documents are not size-limited |
@@ -235,21 +237,24 @@ Configuration options are set in `.env` (see `.env.example`):
 | `SEED_SAMPLE_DATA` | `true` | Web demo: seed sample data when there is no history |
 | `SEED_SAMPLE_DATA_HUB` | `false` | Protocol Hub only: whether to seed sample data |
 | `WEB_PORT` / `HUB_PORT` | `5200` / `5100` | Host port mappings (consistent with `launchSettings.json`) |
-| `OLLAMA_PORT` | `11435` | Bundled Ollama host port (defaults to avoiding the local Ollama's 11434) |
-| `OLLAMA_KEEP_ALIVE` | `-1` | Keep the model resident in memory (-1=always; change to `5m` to unload after 5 minutes idle, freeing ~1.1GB memory) |
+| `LLAMA_EMBED_PORT` | `11435` | Bundled llama-embed host port (defaults to avoiding the local Ollama's 11434) |
+| `LLAMA_EMBED_THREADS` | `6` | Inference threads for llama-embed. **More is not faster**: 6 threads suits 8+ cores, but **on a 4-core machine set 4** (on 4 cores, 6 threads was 30%–2x slower than 4; oversubscription hurts badly) |
 | `PG_PORT` | `5432` | PostgreSQL host mapped port (unaffected inside the container) |
 
 Key points:
 
-- **RAG semantic memory by default**: `STORAGE_PROVIDER=postgres` (compose-bundled `pgvector/pgvector:pg16` image) + `MEMORY_ENABLED=true` (embedding is provided by the bundled `ollama` service, which runs `ollama pull bge-m3:latest` automatically on startup).
-  The first start pulls ~1.2GB of model; the model and data are stored in the named volumes `agui-ollama-data` / `agui-pg-data` respectively, and `docker compose down` does not lose data.
+- **RAG semantic memory by default**: `STORAGE_PROVIDER=postgres` (compose-bundled `pgvector/pgvector:pg16` image) + `MEMORY_ENABLED=true` (embedding is provided by the bundled `llama-embed`: the official llama.cpp server loading `./models/embedding.gguf`).
+  The model and the data live in the host directory `./models/` (bind mount) and the named volume `agui-pg-data` respectively, and `docker compose down` does not lose data.
+- **Why llama.cpp server instead of Ollama for embeddings** (measured 2026-09 on one machine, same model, same cores, bge-m3): Ollama 0.32's engine **is itself an internal llama-server subprocess**, but every request takes a `HTTP→Go→HTTP` detour, adding ~350–450 ms of fixed overhead per request plus ~1.5x throughput loss. Median latency (input 6/50/200/500/800 chars): **Ollama 382/635/1708/3973/6409 ms → llama.cpp 107/288/978/2978/4869 ms** (2–3.6x faster on short text, converging as input grows — long text is pure arithmetic). The two engines produce **identical vectors** (cosine=1.000000, 1024 dims, L2-normalized), so switching engines does not desynchronize already-stored memories.
+  - Three parameters that must be set explicitly: `--embeddings` clamps `n_batch/n_ubatch` to 512 (inputs of 500+ chars then fail with HTTP 500), hence `-b 2048 -ub 2048`; `-t` should match the available cores (oversubscription is slower); and on a non-causal BERT-style encoder `--flash-attn off` makes short inputs 2–3x faster.
+  - To switch back to an external Ollama / any OpenAI-compatible endpoint, only change `MEMORY_EMBEDDING_ENDPOINT` (plus `MEMORY_EMBEDDING_DIMENSIONS` if needed) — both endpoints are semantically equivalent.
 - **Human-in-the-loop (HITL) demo by default**: `AGENTS_ENABLE_TOOLS=true` (compose default) — built-in agent tools: `get_current_time` / `calculator` / `unit_converter` / `group_memory_search` / `read_attachment` require no approval, `publish_announcement` requires approval (ask an agent to "发布公告" in the group chat → 🔐 approval card, **only the requesting user** can approve / reject); `AGENTS_REQUIRE_APPROVAL_TOOLS` can customize which tool names require approval; to require multiple tools append indexed entries such as `Agents__RequireApprovalToolNames__1` in `docker-compose.yml`; web tools `web_search` / `read_url` are off by default (enable with `AGENTS_ENABLE_WEBTOOLS=true`).
-- **Bundled Ollama is isolated from the host**: inside the web container it uses the internal network `http://ollama:11434/v1`; the host-mapped port defaults to `OLLAMA_PORT=11435` (avoiding the local Ollama's 11434); a model-pull failure does not cause the container to exit, and the web side prints a warning log.
+- **Bundled llama-embed is isolated from the host**: inside the web container it uses the internal network `http://llama-embed:8080/v1`; the host-mapped port defaults to `LLAMA_EMBED_PORT=11435` (avoiding the local Ollama's 11434); if the model file is missing the container **fails to start and its health check never passes**, so web waits for it — you never get a running app with a broken memory service.
 - **PostgreSQL mode**: groups / members / topics / messages / users / agent trigger rules and definitions are all written to PostgreSQL, and data survives container restarts intact.
   Switch back to `STORAGE_PROVIDER=memory` for in-memory + JSON snapshot mode (semantic memory is unavailable in this mode).
 - The image runs as a non-root user (`app`), with a built-in health check `GET /ag-ui/health`.
 
-- If not using Compose, you can build and run directly (in this case you must provide your own pgvector-enabled PostgreSQL and Ollama):
+- If not using Compose, you can build and run directly (in this case you must provide your own pgvector-enabled PostgreSQL and any OpenAI-compatible embedding service, such as a local Ollama `ollama serve` or llama.cpp `llama-server`):
 
   ```bash
   docker build -t agui-group-chat-web .
@@ -981,7 +986,7 @@ How it works:
 - **Memory personality types (type-driven recall, 1.0.121+)**: each employee can set a **memory personality** under “Edit → Memory & Permissions → 🧠 Memory type” (`AgentDefinition.MemoryProfile`: five presets — <b>Broad / Deep / Slow-to-learn / Stored-but-cue-dependent / Fast-forgetting</b> — plus a recall/digest style, a persona-tone line, and advanced TopK/threshold tuning). Before replying, `MemoryContextProvider` resolves that employee's profile into a <b>per-run override</b> of retrieval TopK / similarity threshold, a recency window for fast-forgetting, and a “recall-cue” branch for the cue-dependent type (when the user says “remember? / last time / before” retrieval temporarily widens), which is really passed down to the store search; when group/personal memories are injected it also prepends a type-consistent “recall tone” soft note (e.g. broad types hedge with “I think it was…” instead of inventing). Memories are still the same shared group history (writing is only mildly typed for the <b>employee's own posts</b> — Deep posts are auto-marked “Important”, Fast-forgetting posts get shorter retention when auto-forget is on; everything else writes identically); the five types mainly shape <b>how this employee recalls</b>. No profile (`MemoryProfile` null) means fully global behavior, backward compatible. Mechanics, fields, runtime effects and debugging: **`docs/memory-personality.md`**.
 - **Private-group isolation**: a group can be set `isPrivate` (pass `isPrivate=true` when creating, or include `isPrivate` in the updateFields of `POST /ag-ui/group/update`). A private group's memory **can only be retrieved within that group** — when an agent is triggered in **another group** (scope=agent/all), private-group content is always excluded; triggering **inside the private group itself** is unaffected. The frontend's create-group dialog provides a「🔒 private group」switch, and the group list / chat title show a 🔒 marker
 - **Degradation**: if the pgvector extension is unavailable / the embedding endpoint is unreachable, it silently disables itself without affecting any existing functionality; the config does not take effect under the MySQL / SQLite providers
-- **Deployment**: the postgres service in the Docker orchestration has been switched to the pgvector image (`pgvector/pgvector:pg16`, same kernel as postgres 16); local database: `docker run -d --name agui-pg -e POSTGRES_PASSWORD=agui -e POSTGRES_DB=agui -p 5432:5432 pgvector/pgvector:pg16`; embedding with Ollama: `ollama pull bge-m3:latest && ollama serve`
+- **Deployment**: the postgres service in the Docker orchestration has been switched to the pgvector image (`pgvector/pgvector:pg16`, same kernel as postgres 16); local database: `docker run -d --name agui-pg -e POSTGRES_PASSWORD=agui -e POSTGRES_DB=agui -p 5432:5432 pgvector/pgvector:pg16`; embeddings come from the bundled llama-embed (llama.cpp server + `./models/embedding.gguf`, see "RAG semantic memory by default" above), or Ollama: `ollama pull bge-m3:latest && ollama serve` (point `Agents:Memory:EmbeddingEndpoint` at it; the vectors are equivalent)
 
 ### Graph Memory (Graph RAG, entity-relation subgraph injection)
 

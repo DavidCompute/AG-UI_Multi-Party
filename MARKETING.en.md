@@ -198,7 +198,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 **Scenario description**: Data-sensitive industries require **data to never leave the intranet** and cannot use public-cloud LLM APIs; meanwhile they need full multi-digital-employee collaboration, memory governance, and audit capability.
 
 **Typical usage**:
-- Docker deploy on an intranet server (PostgreSQL on disk); **all data is localized** with no external-network dependency (local Ollama provides embeddings; models can be private-deploy OpenAI-compatible endpoints);
+- Docker deploy on an intranet server (PostgreSQL on disk); **all data is localized** with no external-network dependency (a bundled llama.cpp service provides embeddings; models can be private-deploy OpenAI-compatible endpoints);
 - Use **private group chats** to host classified discussions: their chat memory is **only retrievable within that group chat**; other group chats triggering digital employees cannot read it, preventing lateral information leakage;
 - **Memory governance meets data minimization & compliance**: configure retention days for auto-forgetting per confidentiality requirements, forget manually per group chat, and audit visually in the memory management UI — memory content, level, and expiry are all controllable and checkable;
 - **Private digital employees**: only the creator can use / pull into group chats / edit — ideal for personal dedicated advisors;
@@ -262,7 +262,7 @@ It runs on **Docker (cloud / intranet server)**, **Windows desktop (standalone /
 
 | Mode | Best for | Data storage | Highlights |
 |---|---|---|---|
-| **Docker Web** (recommended for production) | Intranet server / cloud host | PostgreSQL (+ pgvector) | Single `docker compose up -d` starts Web + Postgres + Ollama; RAG memory and memory governance work out of the box |
+| **Docker Web** (recommended for production) | Intranet server / cloud host | PostgreSQL (+ pgvector) | Single `docker compose up -d` starts Web + Postgres + llama-embed (llama.cpp); RAG memory and memory governance work out of the box |
 | **Docker Web + Redis multi-replica** | High concurrency / high availability | Redis + PostgreSQL (+ pgvector) | `docker compose up --scale web=N` scales horizontally; all storage and login sessions share Redis; multi-replica consistent reads/writes and one login valid everywhere |
 | **Windows desktop** | Individuals / small-team standalone | SQLite (+ sqlite-vec) | WPF + WebView2, bundled local embedding model, works offline; **multi-instance sharing one backend** |
 | **Cross-platform desktop** | macOS / Linux / Windows | SQLite | Avalonia shell, one host, consistent experience across all three platforms |
@@ -381,7 +381,7 @@ The product value that follows: context cost is amortized across members; a new 
 > A data-sensitive R&D team (about 12 people: product / frontend / backend / ops) needs **data to never leave the intranet** and a **shared AI hub for the whole team**. Here's the complete process of them pressing every button and seeing every screen.
 
 **Step 1 · One-command intranet startup, with sample data out of the box**
-Ops runs `cp .env.example .env && docker compose up -d --build` on an intranet server, pulling up three containers — Web + PostgreSQL (pgvector) + Ollama — with a single command. Because `STORAGE_PROVIDER=postgres`, all business data and vector memory are written to the intranet database; embeddings are provided by the bundled Ollama (auto-pulls the bge-m3 model on first run). Sample data is auto-seeded on startup (`GroupChat__SeedSampleData=true`). The first time a member opens `http://intranet-IP:5200` and registers, they become an admin and can already see sample group chats and several digital employees on the left — **they can click around and play without configuring anything first**.
+Ops runs `cp .env.example .env && docker compose up -d --build` on an intranet server, pulling up three containers — Web + PostgreSQL (pgvector) + llama-embed (llama.cpp) — with a single command. Because `STORAGE_PROVIDER=postgres`, all business data and vector memory are written to the intranet database; embeddings are provided by the bundled llama-embed (llama.cpp loading a local `./models/embedding.gguf`, **never leaving the host**; measured 2–3.6x faster than Ollama on the same machine). Sample data is auto-seeded on startup (`GroupChat__SeedSampleData=true`). The first time a member opens `http://intranet-IP:5200` and registers, they become an admin and can already see sample group chats and several digital employees on the left — **they can click around and play without configuring anything first**.
 
 **Step 2 · Create three digital employees ("Code / Requirements / Legal") + an external OpenCode expert**
 1. Click "🤖 Digital Employees" in the top bar to open the management panel; first click "📥 Import" in the toolbar to batch-create 25 industry roles from `tools/agents-starter.json`, then search and edit to keep only what you want;

@@ -198,7 +198,7 @@
 **场景描述**：数据敏感行业要求**数据不出内网**，无法使用公有云大模型 API；同时需要完整的多数字员工协作、记忆治理与审计能力。
 
 **典型用法**：
-- 内网服务器 Docker 部署（PostgreSQL 落盘），**全部数据本地化**，无任何外网依赖（本地 Ollama 提供 embedding，模型可选私有化部署的 OpenAI 兼容端点）；
+- 内网服务器 Docker 部署（PostgreSQL 落盘），**全部数据本地化**，无任何外网依赖（内置 llama.cpp 服务提供 embedding，模型可选私有化部署的 OpenAI 兼容端点）；
 - 使用**私密知聚**承载涉密讨论：私密知聚的聊天记忆**仅限本知聚内检索**，其他知聚触发数字员工时读不到，防止信息横向泄露；
 - **记忆治理满足数据最小化与合规**：按保密要求配置保留天数自动遗忘、按知聚手动遗忘、记忆管理界面可视化审计——记忆内容、级别、过期时间全部可控可查；
 - **私密数字员工**：只有创建者能使用 / 拉进知聚 / 编辑，适合个人专属顾问；
@@ -262,7 +262,7 @@
 
 | 形态 | 适用 | 数据存储 | 特点 |
 |---|---|---|---|
-| **Docker Web**（推荐生产） | 内网服务器 / 云主机 | PostgreSQL（+ pgvector）| 一条 `docker compose up -d` 启动 Web + Postgres + Ollama，RAG 记忆与记忆治理开箱即用 |
+| **Docker Web**（推荐生产） | 内网服务器 / 云主机 | PostgreSQL（+ pgvector）| 一条 `docker compose up -d` 启动 Web + Postgres + llama-embed（llama.cpp），RAG 记忆与记忆治理开箱即用 |
 | **Docker Web + Redis 多副本** | 高并发 / 高可用 | Redis + PostgreSQL（+ pgvector）| `docker compose up --scale web=N` 横向扩容，全部存储与登录会话共享 Redis，多副本读写一致、同一登录处处有效 |
 | **Windows 桌面版** | 个人 / 小团队单机 | SQLite（+ sqlite-vec）| WPF + WebView2，捆绑本地 embedding 模型，离线可用；**多实例共享后端** |
 | **跨平台桌面版** | macOS / Linux / Windows | SQLite | Avalonia 壳，同一套宿主，三端体验一致 |
@@ -381,7 +381,7 @@
 > 一家数据敏感的研发团队（约 12 人，产品 / 前端 / 后端 / 运维），需要**数据不出内网**、又要**团队共用一个 AI 中枢**。以下是他们实际按下每一步按钮、看到每一个界面的完整过程。
 
 **第 1 步 · 内网一键起服务，开箱即有示例**
-运维在内网服务器执行 `cp .env.example .env && docker compose up -d --build`，一条命令拉起 Web + PostgreSQL（pgvector）+ Ollama 三个容器。因为 `STORAGE_PROVIDER=postgres`，所有业务数据与向量记忆都写进内网库；embedding 由内置 Ollama 提供（首次自动拉取 bge-m3 模型）。启动时自动播种示例数据（`GroupChat__SeedSampleData=true`），成员第一次打开 `http://内网IP:5200`，注册账号即成管理员，左侧已能看到示例知聚与几个数字员工，**不用先配任何东西就能点着玩**。
+运维在内网服务器执行 `cp .env.example .env && docker compose up -d --build`，一条命令拉起 Web + PostgreSQL（pgvector）+ llama-embed（llama.cpp）三个容器。因为 `STORAGE_PROVIDER=postgres`，所有业务数据与向量记忆都写进内网库；embedding 由内置 llama-embed 提供（llama.cpp 加载本地 `./models/embedding.gguf`，**不出网**；同机实测比 Ollama 快 2~3.6 倍）。启动时自动播种示例数据（`GroupChat__SeedSampleData=true`），成员第一次打开 `http://内网IP:5200`，注册账号即成管理员，左侧已能看到示例知聚与几个数字员工，**不用先配任何东西就能点着玩**。
 
 **第 2 步 · 建「代码 / 需求 / 法务」三个数字员工 + 外部 OpenCode 专家**
 1. 顶栏点「🤖 数字员工」打开管理面板，先点工具栏「📥 导入」从 `tools/agents-starter.json` 一键批量创建 25 个行业角色，再搜索、编辑只留想要的；
