@@ -1,3 +1,39 @@
+# 部署栈变更：语义记忆 embedding 换用 llama.cpp（Docker / Server 面，未随桌面版号发布）
+# Deployment-stack change: embeddings now served by llama.cpp (Docker / Server side, outside the desktop release numbering)
+
+**版本说明**：Docker 编排里提供语义记忆 embedding 的服务由 **Ollama 换成 llama.cpp 官方 server**（新服务名 `llama-embed`，容器内 `http://llama-embed:8080/v1`）。同机、同模型（bge-m3）、同核**配对实测**：短文本快 2~3.6 倍，检索/写入上限长度（500/800 字）快约 1.3 倍；两个引擎产出的向量**完全一致**（cosine=1.000000、1024 维、L2 归一化），**已入库记忆无需重算**。
+**Version note**: the semantic-memory embedding service in the Docker orchestration moves from **Ollama to the official llama.cpp server** (new service `llama-embed`, reachable inside compose at `http://llama-embed:8080/v1`). Paired measurement on one machine, same model (bge-m3), same cores: 2–3.6x faster on short inputs and ~1.3x at the retrieval/write caps (500/800 chars); both engines produce **identical vectors** (cosine 1.000000, 1024 dims, L2-normalized), so **no stored memory needs re-embedding**.
+
+## 为什么 / Why
+
+- Ollama 0.32 的推理引擎**本身就是内置的 `llama-server` 子进程**（容器内 `ps` 可见），所以差距不在指令集，而在每个请求都要走 `HTTP → Go → HTTP` 中转：实测多约 **350~450ms 固定开销** + 约 **1.5x** 吞吐损耗。
+- 中位延迟（输入 6/50/200/500/800 字）：**Ollama 382/635/1708/3973/6409ms → llama.cpp 107/288/978/2978/4869ms**。
+- **English**: Ollama 0.32's inference engine **is an internal `llama-server` subprocess**, so the gap is not the instruction set but the extra `HTTP → Go → HTTP` hop per request (~350–450 ms fixed plus ~1.5x throughput). Median latency (6/50/200/500/800 chars): **382/635/1708/3973/6409 ms → 107/288/978/2978/4869 ms**.
+
+## 三个必须显式给的参数 / Three flags that must be explicit
+
+| 参数 Flag | 为什么 Why |
+|---|---|
+| `-b 2048 -ub 2048` | `--embeddings` 会把 `n_batch/n_ubatch` **强制降到 512**，≥500 字的输入直接 `HTTP 500 (input is too large to process)`。English: embeddings clamp the physical batch to 512, so 500+ char inputs fail with HTTP 500 |
+| `-t N` | **并非越多越快**：4 核机器上 6 线程比 4 线程慢 30%~2 倍；12 核机器上 6 线程优于 12 线程。默认 6，4 核请设 `LLAMA_EMBED_THREADS=4`。English: threads must match cores — oversubscription measured 30%–2x slower |
+| `--flash-attn off` | 非因果（BERT 类）编码器上关掉 flash attention，短文本快 2~3 倍（**对 Ollama 无效**，这也是先前把根因找错方向的原因）。English: 2–3x faster on short inputs for a non-causal encoder; setting it on Ollama changes nothing |
+
+## 配置面变更 / Config surface
+
+- 新服务 `llama-embed`（`ghcr.io/ggml-org/llama.cpp:server`，官方多变体 ggml 构建，实测加载 `libggml-cpu-alderlake.so`，与 Ollama 同款内核）+ 健康检查；`web` 依赖它 `service_healthy`——模型缺失时**不会带着坏掉的记忆服务启动**（容器会先打印补模型的命令再退出）。
+- 模型改为挂载宿主机 `./models/embedding.gguf`（约 605MB，不入仓库；`powershell -File tools/download-embedding-model.ps1 -OutDir models` 一键取，详见新增的 `models/README.md`）。
+- `docker-compose.yml` / `.env.example`：`OLLAMA_PORT` → `LLAMA_EMBED_PORT`；新增 `LLAMA_EMBED_THREADS`；`MEMORY_EMBEDDING_ENDPOINT` 默认 → `http://llama-embed:8080/v1`；`NO_PROXY` 增补 `llama-embed`；删除 `agui-ollama-data` 卷声明。
+- **升级动作**：`git pull` → 放好 `./models/embedding.gguf` → `docker compose up -d --build`（旧的 `agui-ollama-data` 卷可删）。
+- **回退**：只改 `MEMORY_EMBEDDING_ENDPOINT` 指回任意 OpenAI 兼容端点（含自建 Ollama `ollama serve`）即可，两端向量语义一致。
+- **English**: new `llama-embed` service (official llama.cpp image) with a health check gating `web`; the model is now a host bind mount `./models/embedding.gguf` (not in the repo); `OLLAMA_PORT` → `LLAMA_EMBED_PORT`, new `LLAMA_EMBED_THREADS`, new default endpoint, `NO_PROXY` updated, `agui-ollama-data` volume declaration removed. Upgrade: `git pull`, place the GGUF, `docker compose up -d --build`. Rollback: repoint `MEMORY_EMBEDDING_ENDPOINT` at any OpenAI-compatible endpoint — the vectors are equivalent.
+
+## 一并记录的否定结论 / A negative result worth recording
+
+把 WSL（`.wslconfig`）从 4 核/8GB 放开到 12 核/12GB：embedding **没有变快**（500 字 4035 → 4676ms），同时宿主机可用内存从 9.7GB 降到 6.7GB、测量方差明显变大。embedding 是**内存带宽/同步受限**的短序列工作，不是核数受限，因此已回滚，不作为发布内容。
+Enlarging WSL to 12 cores/12GB did **not** speed embeddings up (500 chars: 4035 → 4676 ms) while cutting host free memory from 9.7 GB to 6.7 GB and inflating variance; embeddings are bandwidth/synchronization-bound short-sequence work, not core-bound, so the change was reverted.
+
+---
+
 # AG-UI 群聊桌面版 1.0.165 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.165 Release Notes (current Windows desktop release)
 

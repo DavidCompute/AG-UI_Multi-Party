@@ -54,33 +54,26 @@ services:
     volumes:
       # 模型文件挂宿主机（不在镜像里）：首次部署先执行
       #   powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models
-      # 缺失时容器会启动失败（healthcheck 不通过），web 侧因此不会带着坏掉的记忆服务跑起来。
+      # 缺失时：下面的入口脚本会打印「怎么补模型」并退出，web 因此不会带着坏掉的记忆服务跑起来。
       - ./models/embedding.gguf:/models/embedding.gguf:ro
+    # 启动入口：先校验模型文件（缺失就给一句可以照做的报错，而不是抛裸的 GGUF 打开失败），再交给 llama-server。
     # 参数说明（改之前请先读 README「embedding 服务」一节）：
     #   -c 4096           上下文（沿用旧 Ollama 引擎的取值；bge-m3 支持 8192，我们的输入上限 800 字）
     #   -b 2048 -ub 2048  物理批：--embeddings 会把 n_batch/n_ubatch 压到 512，≥500 字的输入会直接
     #                     HTTP 500（input is too large to process），必须显式放开
     #   -t N              线程：**并非越多越快**（实测 12 线程比 6 线程慢），默认 6；4 核机器建议 4
     #   --flash-attn off  非因果（BERT 类）编码器关掉 flash attention，短文本快 2~3 倍
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "-m"
-      - "/models/embedding.gguf"
-      - "--embeddings"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "8080"
-      - "-c"
-      - "4096"
-      - "-b"
-      - "2048"
-      - "-ub"
-      - "2048"
-      - "-t"
-      - "${LLAMA_EMBED_THREADS:-6}"
-      - "--flash-attn"
-      - "off"
-      - "--no-webui"
+      - |
+        if [ ! -f /models/embedding.gguf ]; then
+          echo "❌ 缺少模型文件：/models/embedding.gguf"
+          echo "  请在宿主机执行：powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models"
+          echo "  （Linux/macOS：按该脚本内的 URL 下载后重命名为 models/embedding.gguf）"
+          exit 1
+        fi
+        exec /app/llama-server -m /models/embedding.gguf --embeddings --host 0.0.0.0 --port 8080 \
+          -c 4096 -b 2048 -ub 2048 -t ${LLAMA_EMBED_THREADS:-6} --flash-attn off --no-webui
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || exit 1"]
       interval: 5s

@@ -31,8 +31,10 @@ node_modules/
 # 注意：用精确路径而不是 `**/models/`（在 core.ignorecase=true 的 Windows 上会误伤 C# Models/ 源码目录）。
 src/AguiGroupChat.Desktop/models/
 # docker compose 侧的 embedding 模型目录（llama.cpp server 的挂载源；*.gguf 已被下面的规则忽略）。
-# 用根锚定路径 `/models/`，避免误伤 C# 的 Models/ 源码目录（core.ignorecase=true 的 Windows 上尤其重要）。
-/models/
+# 用根锚定路径 `/models/*`（而非 `/models/`）才能让 ! 例外生效——git 不允许重新包含被排除目录里的文件。
+# 用精确路径而不是 `**/models/`，避免误伤 C# 的 Models/ 源码目录（core.ignorecase=true 的 Windows 上尤其重要）。
+/models/*
+!/models/README.md
 *.gguf
 tools/.live.log
 tools/.pptxverify.log
