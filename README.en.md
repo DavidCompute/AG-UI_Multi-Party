@@ -272,6 +272,29 @@ Key points:
   docker run --rm -p 5200:8080 -e DEEPSEEK_API_KEY=sk-xxx -v agui-web-data:/app/data agui-group-chat-web
   ```
 
+### Post-upgrade self-check (healthy containers do not mean correct config)
+
+Three commands covering three ways things can be "up but wrong":
+
+```bash
+# (1) Who actually owns the host port: after an upgrade the container state is usually fine,
+#     the port mapping is what quietly points somewhere else
+docker port agui-group-chat-llama-embed      # expect: 8080/tcp -> 0.0.0.0:11435
+# No output here (and docker ps showing only 8080/tcp for llama-embed) means the old Ollama
+# container still holds 11435 -> docker compose up -d --remove-orphans
+docker ps --format '{{.Names}} {{.Ports}}' | grep 11435   # expect only agui-group-chat-llama-embed
+
+# (2) Model gate: it must be the bge-m3 (1024-dim) file
+docker compose logs llama-embed | grep 就绪   # expect: ✅ embedding 模型已就绪：…（约 605~1104 MB）
+
+# (3) Dimension check: the endpoint is probed at startup
+docker compose logs web | grep 维度自检       # expect: embedding 维度自检通过：1024 维
+# "维度不一致 → 已禁用语义记忆" means a mismatched model; the log lists both fixes
+# (swap the model / change EmbeddingDimensions and re-embed). An unreachable endpoint only warns.
+```
+
+> Why (1) deserves its own line: reproduced live - when `--remove-orphans` is missed, the containers do come up (on a retry) and are healthy, and the app works, because web reaches llama-embed over the compose network; **but host 11435 still points at the old Ollama container**, so host-side checks, scripts and manual `curl` all talk to the old engine while the app uses llama.cpp. Container state alone cannot reveal this.
+
 ## Transport Endpoints
 
 | Endpoint | Description |

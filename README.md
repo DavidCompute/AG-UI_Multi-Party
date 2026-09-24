@@ -275,6 +275,28 @@ docker compose down
   docker run --rm -p 5200:8080 -e DEEPSEEK_API_KEY=sk-xxx -v agui-web-data:/app/data agui-group-chat-web
   ```
 
+### 升级后自查（容器 healthy ≠ 配置正确）
+
+三条命令，覆盖三种「看着都起来了、其实不对」的情况：
+
+```bash
+# ① 宿主端口到底归谁：升级/迁移后最容易错的不是容器状态，而是端口指向
+docker port agui-group-chat-llama-embed      # 期望：8080/tcp -> 0.0.0.0:11435
+# 若这里没有输出（而 docker ps 里 llama-embed 只显示 8080/tcp），说明 11435 仍被旧的
+# Ollama 容器占着 → docker compose up -d --remove-orphans
+docker ps --format '{{.Names}} {{.Ports}}' | grep 11435   # 期望只剩 agui-group-chat-llama-embed
+
+# ② 模型闸门：必须是 bge-m3（1024 维）那一份
+docker compose logs llama-embed | grep 就绪   # 期望：✅ embedding 模型已就绪：…（约 605~1104 MB）
+
+# ③ 维度自检：启动时会探测端点实际维度
+docker compose logs web | grep 维度自检       # 期望：embedding 维度自检通过：1024 维
+# 若出现「维度不一致 → 已禁用语义记忆」，按日志里的两种修法处理（换模型 / 同步改
+# EmbeddingDimensions 并重灌记忆）；端点不可用则只是 WARN，不需处理
+```
+
+> 为什么单列 ①：实测复现过——漏了 `--remove-orphans` 时，容器会**后来**起来且健康、应用也正常（web 走 compose 内网），**但宿主机 11435 仍指向旧的 Ollama 容器**：宿主侧的巡检 / 脚本 / 手工 `curl` 全打到旧引擎上，而应用内部用的是 llama.cpp。这种偏差从容器状态里查不出来。
+
 ## 传输端点
 
 | 端点 | 说明 |
