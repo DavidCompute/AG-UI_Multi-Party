@@ -1,8 +1,8 @@
-# 修复：数字员工回「我这边还没有收到具体需求（消息内容为空）」（Server 面，未随桌面版号发布）
-# Fix: digital employees answering “I haven't received the actual request (message content empty)” (Server side, outside the desktop release numbering)
+# AG-UI 群聊桌面版 1.0.166 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.166 Release Notes (current Windows desktop release)
 
-**版本说明**：修掉两类“数字员工答非所问 / 空手而回”的缺陷。用户反复反馈「我这边还没有收到具体需求（消息内容为空），然而按重新回答后又正常，已经出现好多回了」。两处根因都不在模型，而在网关拼提示词与恢复流拼审批决议的代码里。
-**Version note**: two defects behind “the agent answers the wrong thing / comes back empty-handed”. The user kept hitting “I haven't received the actual request (message content empty)”, which went away after pressing *Regenerate*. Neither root cause was in the model: both were in the gateway — the dispatch prompt and the resume message.
+**版本说明**：1.0.166 修掉两类“数字员工答非所问 / 空手而回”的缺陷。用户反复反馈「我这边还没有收到具体需求（消息内容为空），然而按重新回答后又正常，已经出现好多回了」。两处根因都不在模型，而在网关拼提示词与恢复流拼审批决议的代码里。**本版 MSI 也是 1.0.164 / 1.0.165 两节内容的首次发版**——那两节此前只进了主干、没有出过安装包。
+**Version note**: 1.0.166 fixes two defects behind “the agent answers the wrong thing / comes back empty-handed”. The user kept hitting “I haven't received the actual request (message content empty)”, which went away after pressing *Regenerate*. Neither root cause was in the model: both were in the gateway — the dispatch prompt and the resume message. **This MSI is also the first shipping build for the 1.0.164 / 1.0.165 sections**, which had landed on main without an installer.
 
 ## 根因一：恢复流把刚批准的审批决议清空了（用户感知最直接的那个）
 # Cause 1: the resume loop wiped the approvals it had just granted (the one users actually see)
@@ -44,6 +44,12 @@ English: when both delivery attempts fail to call the file tool, the run used to
 中文：计划路径此前**没有**任何输入侧日志（`plan.Input`、每步 `working`、交付提示词都不落日志，`agentChain` 也常常为空），所以“子岗位说没收到需求”只能靠猜。新增四条 Information 日志：`编排计划开始`（步数 + 输入长度 + 片段）、`指派子岗位`（父/子岗位、原始请求长度、上一步产出长度、提示词长度、上一步片段）、`交付兑底提示词`（素材长度、提示词长度、开头片段）、以及交付两次均未产出文件时的 `prompt=` 片段。
 English: the plan path previously logged **nothing** about its inputs (`plan.Input`, each step's `working`, the delivery prompt, and `agentChain` was often empty), leaving “teammate says it got no request” to guesswork. Four Information logs were added: plan start (steps + input length + excerpt), per-dispatch (parent/target, request length, previous-step length, prompt length, previous-step excerpt), delivery prompt (draft length, prompt length, head), and `prompt=` on the two-failed-attempts path.
 
+## 归档：计划没排文件步骤时，用户要的文件也要出
+# Also: a file the user asked for is now delivered even when the plan scheduled no file step
+
+中文：交付兜底原先只在「计划点名了文档技能、又被跳过」时触发。若计划**压根没排文件步骤**（实测：只有「需求分析师 → 内容策划文案 → 综合答复」三步），`NeedsDelivery=false`，于是没有任何兜底——用户说了“我要最终形成 word 文档”，最后只拿到一段带〔待补〕的提纲、没有文件。现在计划路径也按 `WantedDeliverable(context.Content)` 判一次（新增 `ShouldTryPlanDelivery`），与非编排路径口径一致；计划自己已把该技能跑过时，兜底内部会直接跳过，不会重复出文件。计划的“补发正文”仍只在原场景（计划正文被有意抑制时）生效，避免重复一段说明。
+English: the delivery fallback used to fire only when the plan named a document skill and the plan path skipped it. When the plan scheduled **no** file step at all (measured: “requirements analyst → content planner → synthesis”), `NeedsDelivery` stayed false, so nothing delivered — the user asked for a Word file and got an outline full of 〔待补〕 placeholders instead. The plan path now also consults `WantedDeliverable(context.Content)` (new `ShouldTryPlanDelivery`), matching the non-plan path; when the plan already ran that skill the fallback skips itself, so no duplicate file, and the “re-append the plan text” step still only applies to the original scenario.
+
 ## 验证（真跑）
 # Verification (actually run)
 
@@ -56,8 +62,8 @@ English: replayed the same request in the “direct chat with 项目总监” ag
 ## 回归
 # Tests
 
-中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）。全量 `AguiGroupChat.Hub.Tests` 相关测试类通过。
-English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases and 6 `SnapshotApprovals` / `HasResumePayload` cases. All affected test classes pass.
+中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`ShouldTryPlanDelivery` 3 例（计划跳过文件技能 / 计划没排文件步骤但用户要文件 / 两者都不是）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）。全量 `AguiGroupChat.Hub.Tests` 相关测试类通过。
+English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases, 3 `ShouldTryPlanDelivery` cases and 6 `SnapshotApprovals` / `HasResumePayload` cases. All affected test classes pass.
 
 ---
 

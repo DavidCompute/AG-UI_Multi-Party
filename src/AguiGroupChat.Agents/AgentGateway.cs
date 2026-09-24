@@ -1249,17 +1249,26 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 // 编排计划：随消息流逐项激活 & 逐条点亮计划卡（TEXT_MESSAGE_PLAN 前端渲染）
                 var planOutcome = await ExecuteCoordinatedPlanAsync(context, plan, messageId, runCt);
-                // 计划跳过了文档生成技能（它的入参是结构化 JSON，必须由模型当工具构造）：
-                // 这里补一次交付兑底 —— 完整流式，让模型自己调技能并回档产物。
-                // 不这么做就会退化为“计划跑了、用户仍拿不到文件”。
-                if (planOutcome.NeedsDelivery)
+                // 什么时候补一次交付兑底（完整流式，让模型自己调技能并回档产物）：
+                //   ① 计划里点名了文档生成技能、却被计划路径跳过 —— 它的入参是结构化 JSON，必须由模型当工具构造；
+                //   ② 计划**压根没排文件步骤**，可用户那句话明确要文件。
+                // 判据 ② 实测踩到：计划只排了「需求分析师 → 内容策划文案 → 综合答复」三步，
+                // NeedsDelivery=false，于是没有任何交付兜底 —— 用户明明说了“我要最终形成 word 文档”，
+                // 最后只拿到一段带〔待补〕的提纲、没有文件。非编排路径早就按 WantedDeliverable 处理这种情况，
+                // 这里补上，让两条路径口径一致。
+                var wantFromUser = WantedDeliverable(context.Content);
+                if (ShouldTryPlanDelivery(planOutcome.NeedsDelivery, wantFromUser))
                 {
+                    if (!planOutcome.NeedsDelivery)
+                        _logger.LogInformation("计划未排文件步骤但用户要 {Kind}，仍走交付兑底：run={RunId}",
+                            wantFromUser!.Value.Label, runId);
                     // 传外层原始 ct（而非 runCt）：runCt 的时间预算可能已被计划/递归消耗待尽，
                     // 交付兑底内部会基于它另开一份新预算。
                     // 同时把计划内已产出的内容一并传过去：交付岗直接拿它当正文素材，
                     // 不必从用户那句原始请求从零重写（否则前面各岗位的产出全白做）。
                     // 交付物类型优先听用户那句话；用户没提格式词时（如“希望有一些插图”）
                     // 回退用计划点名的文件技能，否则会直接放弃交付 —— 实测就是“什么都没给”。
+                    // 若计划自己已经把该文件技能跑过（hops 里有它），兜底内部会直接跳过，不会重复出文件。
                     var delivery = await TrySatisfyDeliveryAsync(context, input, hops, ct, runId, messageId,
                         planOutcome.Collected, planOutcome.DeliverySkillId);
                     if (delivery.MessageId is { } pmid) messageId = pmid;
@@ -1268,10 +1277,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         _logger.LogInformation("编排计划因交付兑底中断等待交互：run={RunId} interruptTarget={Target}", runId, context.TriggerUserId);
                         return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
                     }
-                    // 交付根本没发生（没认出交付物 / 找不到能做的岗位 / 空异常），
-                    // 或交付岗跑了却两次都没真正调出文件：这两种情况都要把计划侧那段正文补上，
-                    // 否则用户只看到一条空消息 / 一句失败话术，而计划期间各岗位的产出全被丢掉。
-                    if (ShouldAppendPlanText(delivery.AwaitingInteraction, delivery.Handled, planOutcome.PlanText,
+                    // 只有 ① 才需要补发计划正文：那时计划正文被有意抑制了（needsDelivery 时暂不发），
+                    // 交付没接手 / 没产出文件就会留下一条空消息或一句失败话术。
+                    // ② 的计划正文已经流式发过，再补一次就是重复。
+                    if (planOutcome.NeedsDelivery
+                        && ShouldAppendPlanText(delivery.AwaitingInteraction, delivery.Handled, planOutcome.PlanText,
                             delivery.FileGenerationFailed))
                     {
                         _logger.LogWarning("交付兑底未接手/未产出文件，补发计划说明以免空消息：run={RunId} len={Len}",
@@ -2758,7 +2768,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var candidate = FindDeliverableOwner(context, want.Value.SkillPrefix);
             if (candidate is null)
             {
-                _logger.LogDebug("交付物兜底：组织内无匹配技能的岗位（需要 {Prefix}*）", want.Value.SkillPrefix);
+                // 用 Information 而不是 Debug：这一行是“用户明确要文件、最后什么也没拿到”的关键证据。
+                // 实测踩到：用户反复问“为什么没有输出物”，而真因就是组织里没人挂这类技能，
+                // Debug 在生产日志里被过滤，现场只剩一句轻飘飘的文字回答，无从定位。
+                _logger.LogInformation(
+                    "交付兑底：组织内无匹配技能的岗位，放弃交付 — 需要 {Prefix}*（{Label}）；agent={AgentId} requestedByUser={ByUser} hintedByPlan={Hinted}",
+                    want.Value.SkillPrefix, want.Value.Label, context.AgentId,
+                    WantedDeliverable(context.Content) is not null, deliverableSkillHint is not null);
                 return new DeliveryOutcome(messageId, false);
             }
 
@@ -3183,6 +3199,23 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (Has("文档")) return ("docx_", "Word 文档");
         return null;
     }
+
+    /// <summary>计划路径是否要补一次交付兑底。测试钩子（internal）。
+    ///
+    /// <para>
+    /// ① <paramref name="planNeedsDelivery"/>：计划里点名了文档生成技能、却被计划路径跳过
+    ///（它的入参是结构化 JSON，必须由模型当工具构造）。
+    /// </para>
+    ///
+    /// <para>
+    /// ② 计划<b>压根没排文件步骤</b>，但用户那句话明确要文件。实测踩到：计划只排了
+    /// 「需求分析师 → 内容策划文案 → 综合答复」三步，NeedsDelivery=false，于是没有任何交付兜底 ——
+    /// 用户明明说了“我要最终形成 word 文档”，最后只拿到一段带〔待补〕的提纲、没有文件。
+    /// 非编排路径早就按 <see cref="WantedDeliverable"/> 处理这种情况，这里补齐口径。
+    /// </para>
+    /// </summary>
+    internal static bool ShouldTryPlanDelivery(bool planNeedsDelivery, (string SkillPrefix, string Label)? wantedFromUser)
+        => planNeedsDelivery || wantedFromUser is not null;
 
     /// <summary>
     /// 在可达组织范围内（本岗 → 下级（递归）→ 提升链（递归））找第一位挂了

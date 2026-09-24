@@ -1122,4 +1122,30 @@ public sealed class OrchestrationDeliveryLoopTests
                 + AgentGateway.MaxAssignmentPreviousChars + AgentGateway.MaxAssignmentPriorChars + 600,
             $"提示词应被截断，实际长度 {prompt.Length}");
     }
+
+    // ---------- 计划没排文件步骤、但用户要文件时，仍要走交付兑底 ----------
+
+    [Fact]
+    public void PlanDelivery_TriggeredWhenThePlanSkippedADocSkill()
+    {
+        // ① 计划点名了文档技能又被跳过：原有行为，不能丢
+        Assert.True(AgentGateway.ShouldTryPlanDelivery(planNeedsDelivery: true, wantedFromUser: null));
+    }
+
+    [Fact]
+    public void PlanDelivery_TriggeredWhenThePlanHasNoFileStepButTheUserAskedForAFile()
+    {
+        // 实测踩到：计划只排了「需求分析师 → 内容策划文案 → 综合答复」三步，NeedsDelivery=false，
+        // 于是没有任何交付兜底 —— 用户明明说了“我要最终形成 word 文档”，最后只拿到一段带〔待补〕的提纲、没有文件。
+        var want = AgentGateway.WantedDeliverable("帮我写一份知聚客户成功案例，我要最终形成 word 文档");
+        Assert.NotNull(want);
+        Assert.True(AgentGateway.ShouldTryPlanDelivery(planNeedsDelivery: false, wantedFromUser: want));
+    }
+
+    [Fact]
+    public void PlanDelivery_NotTriggeredWhenNothingPointsAtAFile()
+    {
+        // 计划没跳过文件技能、用户也没要文件 → 不多跑一次交付
+        Assert.False(AgentGateway.ShouldTryPlanDelivery(planNeedsDelivery: false, wantedFromUser: null));
+    }
 }
