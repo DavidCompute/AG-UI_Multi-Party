@@ -1,3 +1,66 @@
+# 修复：数字员工回「我这边还没有收到具体需求（消息内容为空）」（Server 面，未随桌面版号发布）
+# Fix: digital employees answering “I haven't received the actual request (message content empty)” (Server side, outside the desktop release numbering)
+
+**版本说明**：修掉两类“数字员工答非所问 / 空手而回”的缺陷。用户反复反馈「我这边还没有收到具体需求（消息内容为空），然而按重新回答后又正常，已经出现好多回了」。两处根因都不在模型，而在网关拼提示词与恢复流拼审批决议的代码里。
+**Version note**: two defects behind “the agent answers the wrong thing / comes back empty-handed”. The user kept hitting “I haven't received the actual request (message content empty)”, which went away after pressing *Regenerate*. Neither root cause was in the model: both were in the gateway — the dispatch prompt and the resume message.
+
+## 根因一：恢复流把刚批准的审批决议清空了（用户感知最直接的那个）
+# Cause 1: the resume loop wiped the approvals it had just granted (the one users actually see)
+
+中文：
+- **现场**：`data/clienttool-trace.log` 与容器日志对比后可见规律 —— 成功的那几次恢复是 `RESUME-MSG approvals=1 tools=pptx_deck` 之后直接 `RESUME-END`（正文“已按反馈出稿，文件已生成 ✅”）；失败的几次多出**第二轮** `RESUME-MSG approvals=0 tools=`（零决议），紧接着 `RESUME-END` 的正文就是「我这边还没有收到具体需求（消息内容为空）」。
+- **根因**：`ResumeRunAsync` 的批量批准循环里 `lastApprovals = approvalsThisTurn;` 是**别名赋值**，而 `approvalsThisTurn` 是每轮的收集器，循环头会先 `approvalsThisTurn.Clear()`。于是下一轮把上一轮刚自动放行的审批决议**一起清空**，`BuildResumeMessage` 造出一条**零决议的空 User 消息**投给模型 —— 模型收到的就是“空消息”，回一句“消息内容为空”完全是如实反应。
+- **为什么偶发**：只有「自动放行之后还要再跑一轮」才触发，所以时有时无；用户点「重新回答」重跑常常不复现 —— 与用户观察完全一致。
+- **修复**：自动放行分支改为存**快照**（新增 `SnapshotApprovals`，把决议复制成新 List）；三处保存运行现场（`PendingInteraction.ApprovalRequests`）也一律存快照，杜绝同类别名隐患。另加一道防御：一轮既无审批决议也无客户端执行结果时**不再发空回合**，而是记 WARN 并结束本轮（`HasResumePayload`）。
+
+English:
+- **What the logs showed**: successful resumes read `RESUME-MSG approvals=1 tools=pptx_deck` followed straight by `RESUME-END` (“file generated ✅”), while every failure had an extra **second** round logging `RESUME-MSG approvals=0 tools=` (zero approvals) whose `RESUME-END` body was exactly “I haven't received the actual request (message content empty)”.
+- **Root cause**: in the batch-approval loop of `ResumeRunAsync`, `lastApprovals = approvalsThisTurn;` **aliased** the per-round collector, whose `Clear()` sits at the top of the loop. The next round therefore wiped the approvals just auto-granted, `BuildResumeMessage` produced a **User message with zero content**, and the model — literally handed an empty turn — answered “message content empty”.
+- **Why intermittent**: it needs “an auto-approved round followed by another round”, hence the flakiness and why *Regenerate* usually looks fine.
+- **Fix**: the auto-approval branch now stores a **snapshot** (new `SnapshotApprovals`), all three sites that save the interaction state do the same, and a guard (`HasResumePayload`) refuses to send a content-free turn (WARN + end the round instead).
+
+## 根因二：派发子岗位时把「用户原始请求」弄丢了
+# Cause 2: dispatching a teammate dropped the *user's original request*
+
+中文：
+- **根因**：编排计划里 `working` 初值为 `plan.Input`，但**每跑完一步就 `working = stepOut`**，而派发提示词把整段“问题”写成 `working`。于是上一步一旦产出为空（退化成占位串「（未返回内容）」）或与需求无关，第二步起的子岗位就再也看不到用户到底要什么。计划步序由模型生成、每次都不同，因此表现为**偶发**；重新回答会重新规划，所以常常又正常。
+- **修复**：新增 `BuildAssignmentPrompt`，把提示词拆成 **【用户原始请求】（永不缺席、永不被顶替）+【上一步产出（仅供参考）】+【前序各岗位已产出】**；占位串不再当“问题”投喂；三段各自限长（8000/4000/6000 字）防撑爆下游上下文。
+- **顺带修正**：指派者文案原先写成**目标岗位自己**（“你正被「PPT 制作排版工程师」指派处理”），语义上成了“自己指派自己”，持续误导模型；现改为真正的上级（本计划的主管）。`InvokeSubordinateAsync` 同一处错误一并修正。
+
+English:
+- **Root cause**: `working` started as `plan.Input` but **was overwritten with each step's output**, and the dispatch prompt passed `working` as the whole “question”. Once a step returned nothing (degrading to the placeholder “（未返回内容）”) or something unrelated, every later teammate lost sight of what the user actually asked for. Plan step order is model-generated and differs each run — hence intermittent, and why *Regenerate* (which re-plans) often worked.
+- **Fix**: new `BuildAssignmentPrompt` splits the prompt into **【user's original request】 (never missing, never replaced) + 【previous step output (reference only)】 + 【prior teammates' output】**; placeholders are no longer fed as the question; each part is length-capped (8000/4000/6000 chars).
+- Also fixed: the dispatcher used to be named as **the target itself** (“you are being dispatched by «PPT layout engineer»”), i.e. “you assigned yourself”; it is now the real superior (the plan's owner), same fix applied in `InvokeSubordinateAsync`.
+
+## 归档：交付没出文件时不再丢掉计划素材
+# Also: the plan's material is no longer dropped when delivery fails to produce a file
+
+中文：交付兑底两次都没真正调出文件时，原先只发一句“未能生成 X 文件”就把计划期间各岗位写好的正文全丢掉了。现在新增 `DeliveryOutcome.FileGenerationFailed`，这种情况**补发计划素材**；同时把“不得反问用户要材料/定稿、优先于任何岗位人设与流程规定”提到交付提示词最前（新开一段【最高优先级】），压住“仅接收定稿才交付”“需先对齐流程”这类人设挡箭牌。
+English: when both delivery attempts fail to call the file tool, the run used to emit only “failed to generate X” and throw away everything the team wrote. A new `DeliveryOutcome.FileGenerationFailed` now **re-appends the plan's material**, and the delivery prompt leads with a 【highest priority】 block stating it outranks any persona or process (“only deliver from an approved draft”, “align on the flow first”) so the model can't hide behind them.
+
+## 可观测性（这次能定位的关键）
+# Observability that made this findable
+
+中文：计划路径此前**没有**任何输入侧日志（`plan.Input`、每步 `working`、交付提示词都不落日志，`agentChain` 也常常为空），所以“子岗位说没收到需求”只能靠猜。新增四条 Information 日志：`编排计划开始`（步数 + 输入长度 + 片段）、`指派子岗位`（父/子岗位、原始请求长度、上一步产出长度、提示词长度、上一步片段）、`交付兑底提示词`（素材长度、提示词长度、开头片段）、以及交付两次均未产出文件时的 `prompt=` 片段。
+English: the plan path previously logged **nothing** about its inputs (`plan.Input`, each step's `working`, the delivery prompt, and `agentChain` was often empty), leaving “teammate says it got no request” to guesswork. Four Information logs were added: plan start (steps + input length + excerpt), per-dispatch (parent/target, request length, previous-step length, prompt length, previous-step excerpt), delivery prompt (draft length, prompt length, head), and `prompt=` on the two-failed-attempts path.
+
+## 验证（真跑）
+# Verification (actually run)
+
+中文：本机 Docker 栈（`docker compose up -d --build web`）在「与 项目总监 的单聊」重放同一句请求「帮我写一份“知聚”市场推广文案，我要最终形成 pptx 演示文稿」。
+- 修复前：`RESUME-MSG approvals=1` → `RESUME-MSG approvals=0` → 正文「我这边还没有收到具体需求（消息内容为空）」，`/app/docs` **无新产物**。
+- 修复后：四轮恢复**全部** `approvals=1 tools=pptx_deck`，`RESUME-END` 正文为「## 交付结果 … **产物**：`/app/docs/知聚 KnowGath 市场推广｜把 AI 放进流程，而不是放进对话框_2.pptx` 21 页 · 约 196 KB」，附件已挂在消息上，磁盘上新出现 2 个 pptx。
+- 日志同时证实根因二已修：6 个 `指派子岗位` 每一步都带 `原始请求 7289 字`，其中一步上一步产出为空时提示词只省略该段、**不省略原始需求**。
+English: replayed the same request in the “direct chat with 项目总监” against the local Docker stack (`docker compose up -d --build web`). Before: `RESUME-MSG approvals=1` → `approvals=0` → “message content empty”, no new file in `/app/docs`. After: all four resume rounds logged `approvals=1 tools=pptx_deck` and `RESUME-END` carried the delivery report with the produced `.pptx` attached (2 new files on disk). The logs also show all six dispatches carrying `原始请求 7289 字`, including the one whose previous step came back empty.
+
+## 回归
+# Tests
+
+中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）。全量 `AguiGroupChat.Hub.Tests` 相关测试类通过。
+English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases and 6 `SnapshotApprovals` / `HasResumePayload` cases. All affected test classes pass.
+
+---
+
 # 部署栈变更：语义记忆 embedding 换用 llama.cpp（Docker / Server 面，未随桌面版号发布）
 # Deployment-stack change: embeddings now served by llama.cpp (Docker / Server side, outside the desktop release numbering)
 

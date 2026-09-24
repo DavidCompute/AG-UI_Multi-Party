@@ -829,7 +829,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     ExternalInterruptId: null,
                     ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
                     Agent: agent, Session: session, ApprovalRequest: approval, BridgeClient: null,
-                    ApprovalRequests: approvalsThisTurn);
+                    ApprovalRequests: SnapshotApprovals(approvalsThisTurn));
                 await PurgeExpiredInteractions();
                 await _hub.Value.BroadcastAsync(context.GroupId, new AgentInteractionRequestEvent
                 {
@@ -1268,11 +1268,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         _logger.LogInformation("编排计划因交付兑底中断等待交互：run={RunId} interruptTarget={Target}", runId, context.TriggerUserId);
                         return new AgentInvocationResult(false, runId, "AGENT_AWAITING_INTERACTION");
                     }
-                    // 交付根本没发生（没认出交付物 / 找不到能做的岗位 / 空异常）：
-                    // 这时才把计划侧那段“为什么没内容”的说明补上，否则用户只看到一条空消息。
-                    if (ShouldAppendPlanText(delivery.AwaitingInteraction, delivery.Handled, planOutcome.PlanText))
+                    // 交付根本没发生（没认出交付物 / 找不到能做的岗位 / 空异常），
+                    // 或交付岗跑了却两次都没真正调出文件：这两种情况都要把计划侧那段正文补上，
+                    // 否则用户只看到一条空消息 / 一句失败话术，而计划期间各岗位的产出全被丢掉。
+                    if (ShouldAppendPlanText(delivery.AwaitingInteraction, delivery.Handled, planOutcome.PlanText,
+                            delivery.FileGenerationFailed))
                     {
-                        _logger.LogWarning("交付兑底未接手，补发计划说明以免空消息：run={RunId} len={Len}",
+                        _logger.LogWarning("交付兑底未接手/未产出文件，补发计划说明以免空消息：run={RunId} len={Len}",
                             runId, planOutcome.PlanText.Length);
                         foreach (var chunk in AgentGatewayHelpers.ChunkReply(planOutcome.PlanText, 160))
                             await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId!, chunk, runCt);
@@ -1490,6 +1492,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var stepsRan = 0;
         var working = plan.Input;
         var hops = new List<ChainNode>();
+        // 可观测性：计划输入此前没有任何日志/落库，导致用户反复遇到“子岗位说没收到需求”却查不出原因。
+        // 记一次长度 + 片段，线上即可判断是计划压根没拿到需求，还是中途被前序产出顶替。
+        _logger.LogInformation("编排计划开始：agent={AgentId} steps={Steps} inputLen={Len} input={Input}",
+            context.AgentId, plan.Steps.Count, plan.Input?.Length ?? 0, AgentGatewayHelpers.TruncateForChain(plan.Input));
 
         void Remember(string label, string? content)
         {
@@ -1498,8 +1504,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             sb.Append("【").Append(label).Append("】\n").Append(content!.Trim());
         }
 
-        // 拼进 prompt 的“前序”要有上限（累计后会变长，不能无限撑大下游提示）
-        static string Tail(string s, int max) => s.Length <= max ? s : "…（前文从前略）\n" + s.Substring(s.Length - max);
         // 本问内已执行能力（计划阶段）全局去重：同一技能/员工在一答里只真正执行一次
         var capExecuted = new HashSet<string>(StringComparer.Ordinal);
         var clientSteps = new SortedDictionary<int, BatchClientItem>(); // planIndex(展示索) → 批量项
@@ -1550,9 +1554,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     continue;
                 }
                 var child = _catalog.GetOrCreate(step.Target);
-                var prompt = "你正被「" + (target.Nickname ?? step.Target) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：\n" + working
-                    + (sb.Length > 0 ? "\n\n前序已产出（可参考）：\n" + Tail(sb.ToString(), 6000) : "")
-                    + "\n\n只输出本步结论，不要复述前序内容。";
+                // 注意：指派方是**本计划的主管**（root），不是目标岗位自己。
+                // 原实现写成 target.Nickname（目标自己），等于告诉模型“你自己指派你自己”，持续误导。
+                var prompt = BuildAssignmentPrompt(root.Nickname ?? context.AgentId, plan.Input, working,
+                    sb.Length > 0 ? sb.ToString() : null);
+                // 可观测性：把“这一步到底喂了什么”记下来（此前只有模型回复、没有输入，无从定位）。
+                _logger.LogInformation(
+                    "指派子岗位：parent={ParentId} target={TargetId} 原始请求 {ReqLen} 字 / 上一步产出 {PrevLen} 字 / 提示词 {PromptLen} 字 prev={Prev}",
+                    context.AgentId, step.Target, plan.Input?.Length ?? 0, working?.Length ?? 0, prompt.Length,
+                    AgentGatewayHelpers.TruncateForChain(working));
                 var session = await child.CreateSessionAsync(ct);
                 var prev = AgentGateway.AmbientContext.Value;
                 AgentGateway.AmbientContext.Value = context with { AgentId = target.AgentId, AgentNickname = target.Nickname ?? target.AgentId };
@@ -1796,11 +1806,68 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return sb.ToString();
     }
 
-    /// <summary>交付兑底未能接手时，是否需要把计划侧那段说明补发给用户（否则消息是空的）。
+    /// <summary>派发子智能体的提示词尾部片段上限：取靠后的内容（通常是汇总/定稿），避免撑爆下游上下文。</summary>
+    internal static string TailText(string s, int max)
+        => string.IsNullOrEmpty(s) || s.Length <= max ? s : "…（前文从前略）\n" + s[(s.Length - max)..];
+
+    /// <summary>派发子智能体提示词里【用户原始请求】保留的字符上限（计划输入含平台上下文，可能较长）。</summary>
+    internal const int MaxAssignmentRequestChars = 8000;
+    /// <summary>派发子智能体提示词里【上一步产出】片段的字符上限。</summary>
+    internal const int MaxAssignmentPreviousChars = 4000;
+    /// <summary>派发子智能体提示词里【前序各岗位已产出】片段的字符上限。</summary>
+    internal const int MaxAssignmentPriorChars = 6000;
+
+    /// <summary>派发子智能体的提示词。测试钩子（internal）。
+    ///
+    /// <para>
+    /// 不变式：【用户原始请求】必须在提示词里，且<b>永远不被前序产出替换</b>。
+    /// 实测踩到（用户反复反馈“已经出现好多回”）：计划第二步起的子岗位回“我这边还没有收到具体需求（消息内容为空）”，
+    /// 点「重新回答」又正常。原实现先 <c>working = plan.Input</c>、每步跑完又 <c>working = stepOut</c>，
+    /// 于是“问题”整段被上一步产出顶替：上一步一旦产出为空（退化成占位串）或内容与需求无关，
+    /// 后续岗位就再也看不到用户到底要什么。计划步序由模型生成、每次不同，所以表现为偶发。
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="dispatcherNickname"/> 是真正下达指派的一方（本计划的主管），
+    /// 不再是目标岗位自己 —— 原实现写成目标岗位，语义上成了“自己指派自己”。
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="previousStep"/> 退化（空 / 占位串，见 <see cref="AgentGatewayHelpers.LooksLikeEmptyInput"/>）时
+    /// 不投喂：否则模型会把“（未返回内容）”当成要解决的问题来回答。
+    /// </para>
+    /// </summary>
+    internal static string BuildAssignmentPrompt(string dispatcherNickname, string? userRequest,
+        string? previousStep, string? priorSummary)
+    {
+        var sb = new StringBuilder();
+        sb.Append("你正被上级「").Append(dispatcherNickname).Append("」指派处理。请就下面的【用户原始请求】给出你的专业结论。\n\n");
+        sb.Append("【用户原始请求】\n").Append(TailText(userRequest ?? "", MaxAssignmentRequestChars));
+
+        var prev = previousStep?.Trim();
+        if (!string.IsNullOrWhiteSpace(prev)
+            && !AgentGatewayHelpers.LooksLikeEmptyInput(prev)
+            && !string.Equals(prev, userRequest?.Trim(), StringComparison.Ordinal))
+        {
+            sb.Append("\n\n【上一步产出（仅供参考，不是你要回答的问题）】\n")
+              .Append(TailText(prev!, MaxAssignmentPreviousChars));
+        }
+        if (!string.IsNullOrWhiteSpace(priorSummary))
+        {
+            sb.Append("\n\n【前序各岗位已产出（可参考）】\n")
+              .Append(TailText(priorSummary.Trim(), MaxAssignmentPriorChars));
+        }
+        sb.Append("\n\n只输出针对【用户原始请求】的本步结论，不要复述前序内容，也不要把【上一步产出】当成要回答的问题。");
+        return sb.ToString();
+    }
+
+    /// <summary>交付兑底未能接手 / 没产出文件时，是否需要把计划侧那段说明补发给用户（否则消息是空的）。
     /// 断言这条不变式：交付已经给了用户可见结果 / 正在等审批 → 不补（避免两条自相矛盾的说明叠在一起）；
-    /// 交付静默放过了 → 必须补。测试钩子（internal）。</summary>
-    internal static bool ShouldAppendPlanText(bool awaitingInteraction, bool handled, string? planText)
-        => !awaitingInteraction && !handled && !string.IsNullOrWhiteSpace(planText);
+    /// 交付静默放过了 → 必须补；交付明确报“没真正产出文件” → 也要补（否则用户只看到一句失败话术，
+    /// 而计划期间各岗位已产出的正文素材全被丢掉 —— 实测就是这个观感）。测试钩子（internal）。</summary>
+    internal static bool ShouldAppendPlanText(bool awaitingInteraction, bool handled, string? planText,
+        bool fileGenerationFailed = false)
+        => !awaitingInteraction && !string.IsNullOrWhiteSpace(planText) && (!handled || fileGenerationFailed);
 
     /// <summary>步骤边界暂停闸门：网关在每步（含批量执行与综合答复）之前检查一次；
     /// 用户已暂停 → 广播带「已暂停」状态的计划卡并挂起，直到用户点「继续」才恢复后续步骤。</summary>
@@ -2357,7 +2424,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     {
         if (_catalog.GetDefinition(agentId) is not { } sub) return "（指派对象不存在）";
         var child = _catalog.GetOrCreate(agentId);
-        var prompt = "你被「" + (sub.Nickname ?? sub.AgentId) + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：" + input
+        // 指派方是本次补查的发起方（本群的主管，即 context.AgentId），不是被指派的下属自己。
+        // 原实现写成 sub.Nickname（目标自己），等于告诉模型“你自己指派你自己”，会持续误导。
+        var dispatcher = _catalog.GetDefinition(context.AgentId)?.Nickname ?? context.AgentId;
+        var prompt = "你正被上级「" + dispatcher + "」指派处理，请就以下请求给出你的专业结论。\n\n问题：" + input
             + "\n\n只输出本步结论，不要复述前序内容。";
         var session = await child.CreateSessionAsync(ct);
         try { return (await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct)).Text?.Trim() ?? "（子员工未返回内容）"; }
@@ -2702,6 +2772,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             //        （实测：word_delivery 回“我需要先跟你对齐交付流程…否则我不会出文件”）。
             var wantSkill = DeliverableSkillFor(candidate, want.Value.SkillPrefix);
             var deliver = BuildDeliveryPrompt(want.Value.Label, wantSkill, context.Content, upstreamDraft: upstreamDraft);
+            // 可观测性：交付提示词此前无任何日志，导致“用户没拿到文件”只能靠猜。
+            _logger.LogInformation(
+                "交付兑底提示词：owner={AgentId} skill={Skill} 素材 {DraftLen} 字 / 提示词 {PromptLen} 字 head={Head}",
+                candidate.AgentId, wantSkill, upstreamDraft?.Length ?? 0, deliver.Length,
+                AgentGatewayHelpers.TruncateForChain(deliver));
             var prev = AmbientContext.Value;
             var prevChain = SkillChainBuilder.Ambient.Value;
             var prevToolResults = ToolResultCollector.Ambient.Value;
@@ -2764,12 +2839,15 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     hops.Add(new ChainNode { Kind = "skill", AgentId = candidate.AgentId, AgentNickname = candidate.Nickname, Query = AgentGatewayHelpers.TruncateForChain(deliver) });
                     return new DeliveryOutcome(messageId, false, true);
                 }
-                // 两次都没产出文件：不谎报，明确告知用户（产物缺失才是真问题）
-                _logger.LogWarning("交付兑底两次均未产出文件：agent={AgentId} skill={Skill}", candidate.AgentId, wantSkill);
+                // 两次都没产出文件：不谎报，明确告知用户（产物缺失才是真问题）；
+                // 同时标 FileGenerationFailed，让调用方把计划期间各岗位已产出的正文素材补发过来
+                // —— 否则用户只看到一句“没生成文件”，前面整条计划白跑（实测观感就是这个）。
+                _logger.LogWarning("交付兑底两次均未产出文件：agent={AgentId} skill={Skill} prompt={Prompt}",
+                    candidate.AgentId, wantSkill, AgentGatewayHelpers.TruncateForChain(deliver));
                 if (messageId is not null)
                     await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId,
                         $"（未能生成 {want.Value.Label} 文件：交付环节没有真正调用文件生成技能。请再说一次，或把要写的内容直接发给我。）", ct);
-                return new DeliveryOutcome(messageId, false, true);
+                return new DeliveryOutcome(messageId, false, true, FileGenerationFailed: true);
             }
             finally
             {
@@ -2790,8 +2868,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>交付物兜底结果：可能保持原消息，也可能因审批中断而由恢复流接管。
     /// <paramref name="Handled"/> = 本次兜底已经给出用户可见的结果（出文件 / 已下交互卡 / 已明确报失败）；
     /// 为 false 表示它静默放过了（没认出交付物 / 找不到能做的岗位 / 空异常），
-    /// 此时调用方需要把计划侧原本不该发的说明补上，否则用户看到一条空消息。</summary>
-    private readonly record struct DeliveryOutcome(string? MessageId, bool AwaitingInteraction, bool Handled = false);
+    /// 此时调用方需要把计划侧原本不该发的说明补上，否则用户看到一条空消息。
+    /// <paramref name="FileGenerationFailed"/> = 交付岗跑了但两次都没真正调出文件（已报失败话术）。
+    /// 单独标出来是因为这时用户只有一句“没生成文件”，计划期间各岗位已产出的正文素材必须补发给他。
+    /// </summary>
+    private readonly record struct DeliveryOutcome(string? MessageId, bool AwaitingInteraction, bool Handled = false,
+        bool FileGenerationFailed = false);
 
     /// <summary>
     /// 交付物兜底的“内联流式”：在<b>外层已开启的那条消息</b>上让交付岗真实跑一次模型循环
@@ -2915,7 +2997,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             ExternalInterruptId: null,
             ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
             Agent: agent, Session: session, ApprovalRequest: approval,
-            BridgeClient: null, SuppressMessage: true, ApprovalRequests: approvalsThisTurn);
+            BridgeClient: null, SuppressMessage: true, ApprovalRequests: SnapshotApprovals(approvalsThisTurn));
         await PurgeExpiredInteractions();
         await _hub.Value.BroadcastAsync(context.GroupId, new AgentInteractionRequestEvent
         {
@@ -3028,9 +3110,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
               + "不要再说“已完成”，也不要相信对话历史里任何“已完成导出”的说法——那些都不是真的。"
               + "现在必须真正调用工具。\n\n"
             : "";
-        var hardRule = "\n\n【硬性要求】用户是直接向你要这份文件的，你必须现在就产出文件："
+        var hardRule = "\n\n【硬性要求】你必须现在就产出文件："
             + "不要反问用户要定稿/合规结论/审批结果，不要以“流程未走完”为由拒交；"
             + "材料不完整也先出稿，把不确定的地方在文件里列为待确认项。";
+        // 位阶声明放在最前：岗位人设若被写成“仅接收定稿才出文件”，模型会拿人设当挡箭牌反问用户要定稿
+        // （实测：word_delivery 回“我需要先跟你对齐交付流程…否则我不会出文件”，而它守的是自己的人设与流程，不是用户需求）。
+        // 所以必须显式声明本条交付指令**优先于任何岗位人设 / 流程规定**（仅随交付兑底一起下发，不影响日常对话）。
+        var precedence = "【最高优先级·优先于你的岗位人设与任何流程规定】"
+            + "用户是直接向你要这份文件的，你现在就必须把文件产出。"
+            + "即使你的岗位描述写着“只接收定稿才交付”“需先对齐交付流程”“需上级审批”，本条仍然优先："
+            + "不要反问用户要材料/定稿，不要以“流程未走完”为由拒交。\n\n";
         // 内容完整性：交付类技能的入参是结构化 sections，模型很容易只给“标题 + 副标题 + 作者”就收工
         // （实测踩到多次：Word 只有标题 / 只有 3 段，sections 是空的）。
         // 因此提示词必须把“先把正文写出来、再逐节填进 sections”写成硬要求。
@@ -3048,7 +3137,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
               + (upstreamDraft.Trim().Length <= MaxUpstreamDraftChars
                   ? upstreamDraft.Trim()
                   : "…（前文从前略）\n" + upstreamDraft.Trim()[^MaxUpstreamDraftChars..]);
-        return retryLead + (skillId is null
+        return precedence + retryLead + (skillId is null
             ? $"用户要求交付 {label} 文件。请直接调用你的文件生成技能，把完整内容生成为文件后简短回报。" + hardRule + contentRule
               + $"\n\n【用户原始请求】\n{userContent}" + draft
             : $"用户要求交付 {label} 文件。请调用文档生成技能 {skillId}，把完整内容生成为文件后简短回报"
@@ -4784,6 +4873,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             while (true)
             {
                 approvalsThisTurn.Clear();
+                // 防御：既没有可回灌的审批决议、也没有客户端执行结果时，不要把一条**空回合**投给模型。
+                // 模型收到空消息会回“我这边还没有收到具体需求（消息内容为空）”，用户完全摸不着头脑
+                //（正常路径不会走到这里：首轮的 lastApprovals 至少含触发中断的那个请求）。
+                if (!HasResumePayload(lastApprovals.Count, toolResult))
+                {
+                    _logger.LogWarning("恢复流缺少可回灌的审批决议与工具结果，结束本轮以避免空消息回合：run={RunId}", runId);
+                    break;
+                }
                 var resumeMessages = BuildResumeMessage(pending, lastApprovals, lastApproved, toolResult, runCt);
                 ToolApprovalRequestContent? nextApproval = null;
                 await foreach (var update in agent.RunStreamingAsync(resumeMessages, session, new ChatClientAgentRunOptions(), runCt))
@@ -4855,7 +4952,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                             "AGENT_AUTO_APPROVAL_LIMIT");
                         return;
                     }
-                    lastApprovals = approvalsThisTurn;
+                    // **必须存快照，不能直接别名 approvalsThisTurn**（用户反复反馈的偶发症状的根因）。
+                    // approvalsThisTurn 是本轮收集器，下一轮进入时会先 Clear()；若 lastApprovals 与它指向同一个 List，
+                    // 刚自动放行的审批决议会被下一轮的 Clear() 一并清掉 → BuildResumeMessage 发出一份“零决议”的
+                    // 空消息 → 模型收到空回合后回“我这边还没有收到具体需求（消息内容为空）”。
+                    // 该症状需要“自动放行后还要再跑一轮”才复现，所以时有时无；用户点「重新回答」重跑常常不复现。
+                    lastApprovals = SnapshotApprovals(approvalsThisTurn);
                     lastApproved = true;
                     _logger.LogInformation("{Kind}自动放行：run={RunId} tool={Tool} count={Count}（本次运行累计 {Round} 次）",
                         clientSkillMemoryHit ? "已同意技能" : "批量批准",
@@ -4885,7 +4987,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     ExternalToolCallId: null, ExternalToolName: null, ExternalToolArguments: null,
                     Agent: agent, Session: session, ApprovalRequest: nextApproval,
                     BridgeClient: null, ResumeCount: pending.ResumeCount + resumeRounds,
-                    SuppressMessage: pending.SuppressMessage, ApprovalRequests: approvalsThisTurn);
+                    SuppressMessage: pending.SuppressMessage, ApprovalRequests: SnapshotApprovals(approvalsThisTurn));
                 await PurgeExpiredInteractions();
                 await _hub.Value.BroadcastAsync(pending.GroupId, new AgentInteractionRequestEvent
                 {
@@ -4945,6 +5047,22 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         => string.Join("、", approvals
             .Select(a => (a.ToolCall as FunctionCallContent)?.Name ?? "unknown")
             .Distinct(StringComparer.Ordinal));
+
+    /// <summary>把本轮收集到的审批请求复制成<b>快照</b>，供保存现场 / 下一轮恢复使用。测试钩子（internal）。
+    ///
+    /// <para>
+    /// 绝不能直接存 <c>approvalsThisTurn</c> 的引用：那个 List 是每轮的收集器，下一轮进入时会先 <c>Clear()</c>。
+    /// 别名会让刚自动放行的审批决议被下一轮清空，于是 BuildResumeMessage 发出一份“零决议”的空消息，
+    /// 模型收到空回合后回“我这边还没有收到具体需求（消息内容为空）”（用户反复反馈的偶发症状）。
+    /// </para>
+    /// </summary>
+    internal static List<ToolApprovalRequestContent> SnapshotApprovals(IEnumerable<ToolApprovalRequestContent> approvals)
+        => [.. approvals];
+
+    /// <summary>恢复流是否有可回灌的内容（审批决议或客户端执行结果）。测试钩子（internal）。
+    /// 两者皆空时不能把空回合投给模型（会回“我这边还没有收到具体需求（消息内容为空）”）。</summary>
+    internal static bool HasResumePayload(int approvalCount, string? toolResult)
+        => approvalCount > 0 || !string.IsNullOrWhiteSpace(toolResult);
 
     /// <summary>构造审批 / 客户端工具恢复时的回灌消息：
     /// 一律为<b>每个</b>待确认的审批请求回一条 <see cref="ToolApprovalRequestContent.CreateResponse"/>（当前批准 / 拒绝，满足 MSAGENT 审批决议；否则恢复抛「no matching ToolApprovalResponseContent」），

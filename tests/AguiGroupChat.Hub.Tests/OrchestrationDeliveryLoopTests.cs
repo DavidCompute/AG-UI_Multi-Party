@@ -1043,4 +1043,83 @@ public sealed class OrchestrationDeliveryLoopTests
     {
         Assert.False(AgentGateway.ShouldAppendPlanText(awaiting, handled, planText));
     }
+
+    [Fact]
+    public void PlanText_AppendedWhenDeliveryFailedToProduceFile()
+    {
+        // 实测：交付岗跑了两次都没真调出文件（Handled=true，只发了一句“没生成文件”），
+        // 而计划期间各岗位已产出的正文素材全被丢掉 → 用户只看到一句失败话术。
+        // 这时必须把计划素材补上。
+        Assert.True(AgentGateway.ShouldAppendPlanText(awaitingInteraction: false, handled: true,
+            planText: "【文案写手】\n知聚是一个多智能体协作平台……", fileGenerationFailed: true));
+    }
+
+    [Fact]
+    public void PlanText_NotAppendedForFailedFileWhenThereIsNothingToShow()
+    {
+        // 没素材可补时不能凭空造一段说明
+        Assert.False(AgentGateway.ShouldAppendPlanText(awaitingInteraction: false, handled: true,
+            planText: "", fileGenerationFailed: true));
+        // 正在等审批时依然不补（正文已清空，由恢复流接管）
+        Assert.False(AgentGateway.ShouldAppendPlanText(awaitingInteraction: true, handled: true,
+            planText: "（说明）", fileGenerationFailed: true));
+    }
+
+    // ---------- 派发子智能体的提示词（不能把“用户原始请求”弄丢） ----------
+
+    [Fact]
+    public void AssignmentPrompt_AlwaysCarriesUserRequest_EvenWhenPreviousStepIsPlaceholder()
+    {
+        // 实测（用户反复反馈“已经出现好多回”）：计划的第二步起，子岗位回
+        // “我这边还没有收到具体需求（消息内容为空）”，点「重新回答」又正常。
+        // 根因：原实现每步跑完把“问题”整段替换成上一步产出；上一步产出为空（退化成占位串）时，
+        // 后续岗位就再也看不到用户到底要什么。
+        var prompt = AgentGateway.BuildAssignmentPrompt("项目总监", "用户原始请求：做一个推广文案团队，我要最终形成word文档",
+            previousStep: "（未返回内容）", priorSummary: null);
+
+        Assert.Contains("用户原始请求", prompt);
+        Assert.Contains("做一个推广文案团队", prompt);
+        Assert.Contains("项目总监", prompt);
+        // 占位串不能当“上一步产出”投喂，否则模型会把它当成要解决的问题
+        Assert.DoesNotContain("（未返回内容）", prompt);
+    }
+
+    [Fact]
+    public void AssignmentPrompt_KeepsRequestWhenPreviousStepIsUnrelated()
+    {
+        // 上一步产出有内容但与需求无关（比如只是一段寒暄），也不能把需求顶替掉
+        var prompt = AgentGateway.BuildAssignmentPrompt("项目总监", "用户原始请求：写“知聚”市场推广文案",
+            previousStep: "好的，我理解了。", priorSummary: "【需求分析师】\n受众是中小企业 IT 负责人");
+
+        Assert.Contains("写“知聚”市场推广文案", prompt);
+        Assert.Contains("上一步产出（仅供参考，不是你要回答的问题）", prompt);
+        Assert.Contains("前序各岗位已产出", prompt);
+    }
+
+    [Fact]
+    public void AssignmentPrompt_NamesTheDispatcherNotTheTarget()
+    {
+        // 原实现把指派者写成目标岗位自己（“你正被「目标」指派处理”）→ 等于告诉模型“你自己指派你自己”
+        var prompt = AgentGateway.BuildAssignmentPrompt("项目总监", "用户原始请求：出一份 PPT", null, null);
+
+        Assert.Contains("你正被上级「项目总监」指派处理", prompt);
+        Assert.Contains("用户原始请求", prompt);
+        // 没有上一步产出时不应出现“仅供参考”那一节（页脚里提到的名字不算）
+        Assert.DoesNotContain("【上一步产出（仅供参考", prompt);
+    }
+
+    [Fact]
+    public void AssignmentPrompt_IsBounded()
+    {
+        // 计划输入 / 前序产出都可能很长，必须截断，否则撑爆下游上下文
+        var request = "请求头部标记" + new string('甲', AgentGateway.MaxAssignmentRequestChars + 2000) + "请求尾部标记";
+        var prior = new string('乙', AgentGateway.MaxAssignmentPriorChars + 2000) + "前序尾部标记";
+        var prompt = AgentGateway.BuildAssignmentPrompt("总监", request, "上一步尾部标记" + new string('丙', 6000), prior);
+
+        Assert.Contains("前文从前略", prompt);
+        Assert.Contains("前序尾部标记", prompt);
+        Assert.True(prompt.Length < AgentGateway.MaxAssignmentRequestChars
+                + AgentGateway.MaxAssignmentPreviousChars + AgentGateway.MaxAssignmentPriorChars + 600,
+            $"提示词应被截断，实际长度 {prompt.Length}");
+    }
 }

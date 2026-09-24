@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using AguiGroupChat.Agents;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -79,5 +80,33 @@ public sealed class ClientToolResumeTests
         Assert.Contains(resumeTexts, t => t.Contains("sawInjected=TRUE"));
         var last = mock.Calls[^1];
         Assert.Contains(last, m => m.Role == ChatRole.User && m.Text?.Contains("DESKTOP-PROBE-123") == true);
+    }
+
+    [Fact]
+    public void SnapshotApprovals_CopiesInsteadOfAliasingTheLiveCollector()
+    {
+        // 根因回归（用户反复反馈的偶发症状）：lastApprovals 若与 approvalsThisTurn 指向同一个 List，
+        // 下一轮开头的 approvalsThisTurn.Clear() 会把刚自动放行的审批决议一并清掉，
+        // 于是 BuildResumeMessage 发出一份“零决议”的空消息，模型收到空回合后回
+        // “我这边还没有收到具体需求（消息内容为空）”。
+        var live = new List<ToolApprovalRequestContent>();
+        var snapshot = AgentGateway.SnapshotApprovals(live);
+
+        // 必须是新实例：别名是缺陷本身
+        Assert.NotSame(live, snapshot);
+        live.Clear(); // 模拟下一轮收集器清空
+        Assert.Empty(snapshot);
+    }
+
+    [Theory]
+    [InlineData(0, null, false)]
+    [InlineData(0, "", false)]
+    [InlineData(0, "   ", false)]
+    [InlineData(0, "工具结果", true)]
+    [InlineData(1, null, true)]
+    public void HasResumePayload_RequiresAnApprovalOrAToolResult(int approvalCount, string? toolResult, bool expected)
+    {
+        // 两者皆空时不能把空回合投给模型（否则就是那句“消息内容为空”）
+        Assert.Equal(expected, AgentGateway.HasResumePayload(approvalCount, toolResult));
     }
 }
