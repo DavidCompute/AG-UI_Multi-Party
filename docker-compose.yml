@@ -176,6 +176,8 @@ services:
       # 代理。注意：一旦启用，容器内网服务也会被套上代理而连不上（如 llama-embed 的 embedding 端点），
       # 所以 NO_PROXY 默认就排除了内网服务名。其中 host.docker.internal 是给「把 embedding 端点改回
       # 宿主机上的自建 Ollama」这种部署用的（否则那条调用会被套上代理）；ollama 同理保留。
+      # ⚠️ 实测坑：若你把 MEMORY_EMBEDDING_ENDPOINT 指到**其它内网主机名/容器名**（比如另起的 embedding 服务），
+      # 必须把它也加进 NO_PROXY：否则 HttpClient 走代理 → 代理解析不了内网名而回 503（看着像服务挂了）。
       # 在 .env 里改 NO_PROXY 会覆盖这个默认值。
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}

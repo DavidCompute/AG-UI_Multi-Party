@@ -260,6 +260,7 @@ docker compose down
 - **默认即人机交互（HITL）演示**：`AGENTS_ENABLE_TOOLS=true`（compose 默认）——智能体内置工具：`get_current_time` / `calculator` / `unit_converter` / `group_memory_search` / `read_attachment` 免审批，`publish_announcement` 需审批（群聊中请智能体「发布公告」→ 🔐 审批卡片，**仅发起请求的用户**可批准 / 拒绝）；`AGENTS_REQUIRE_APPROVAL_TOOLS` 可自定义需审批的工具名，如需多个工具请在 `docker-compose.yml` 追加 `Agents__RequireApprovalToolNames__1` 等索引项；联网工具 `web_search` / `read_url` 默认关（`AGENTS_ENABLE_WEBTOOLS=true` 开启）。
 - **内置 llama-embed 与宿主机隔离**：web 容器内走内网 `http://llama-embed:8080/v1`，宿主机映射端口默认 `LLAMA_EMBED_PORT=11435`（避开本机 Ollama 的 11434）；挂载的是宿主机**目录** `./models`（不是单个文件：文件级 bind mount 在源文件缺失时会被 Docker 建出一个同名**目录**，把人卡死）。
   容器启动先校验模型：**缺失**或**过小**（<400MB，即不是 bge-m3/1024 维）都会打印可照做的下一步后退出，web 因 `depends_on: service_healthy` 等它健康才启动——不会带着坏掉的记忆服务跑起来，也不会把维度不匹配变成“RAG 静默失效”。
+  若部署里配了 HTTP(S) 代理：`NO_PROXY` 默认已含 `llama-embed` / `postgres` / `host.docker.internal`；把 embedding 端点改成**别的内网主机名/容器名**时必须同步加进去——否则 .NET 的 HttpClient 会走代理，代理解析不了内网名而回 503（实测：表现为「维度自检未完成 / 语义记忆检索失败」，看着像 embedding 服务挂了）。
 - **从带 Ollama 的旧版本升级**：`git pull` → 放好 `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`。**`--remove-orphans` 不能省**：旧 `agui-group-chat-ollama` 容器仍占着 11435，不清理会让 llama-embed 直接 `port is already allocated` 起不来。
 - **PostgreSQL 模式**：群 / 成员 / 话题 / 消息 / 用户 / 智能体触发规则与定义全部写入 PostgreSQL，重启容器数据完整保留。
   `STORAGE_PROVIDER=memory` 切换回内存 + JSON 快照模式（此时语义记忆不可用）。
