@@ -45,41 +45,56 @@ services:
     #   同机同模型同核配对实测中位延迟（6/50/200/500/800 字）：
     #     ollama 382/635/1708/3973/6409ms → llama.cpp 107/288/978/2978/4869ms（短文本 2~3.6 倍）。
     #   向量完全一致（cosine=1.000000，维度 1024，L2 归一化），换引擎不会让已入库的记忆失配。
-    image: ghcr.io/ggml-org/llama.cpp:server
+    # 镜像**按 digest 钉住**：浮动的 :server tag 会随上游 dev 构建变动（实测取到的就是 0.5.0-dev build 11146），
+    # 而我们的启动参数与 healthcheck 都依赖镜像内的具体行为。要跟进上游：先 pull，再改 .env 的 LLAMA_EMBED_IMAGE。
+    image: ${LLAMA_EMBED_IMAGE:-ghcr.io/ggml-org/llama.cpp:server@sha256:a94b642b3e2620749bf2ff5672df922c23a6202710e54a8f7667e58df70aba5a}
     container_name: agui-group-chat-llama-embed
     restart: unless-stopped
     ports:
       # 宿主机端口默认 11435（避开本机已装的 Ollama 11434）；web 容器内走内网 http://llama-embed:8080
+      # ⚠️ 从带 Ollama 的旧版本升级时：旧容器仍占着 11435，必须加 --remove-orphans（详见 README 快速开始）。
       - "${LLAMA_EMBED_PORT:-11435}:8080"
     volumes:
-      # 模型文件挂宿主机（不在镜像里）：首次部署先执行
+      # 模型文件放宿主机目录（不在镜像里）：首次部署先执行
       #   powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models
-      # 缺失时：下面的入口脚本会打印「怎么补模型」并退出，web 因此不会带着坏掉的记忆服务跑起来。
-      - ./models/embedding.gguf:/models/embedding.gguf:ro
-    # 启动入口：先校验模型文件（缺失就给一句可以照做的报错，而不是抛裸的 GGUF 打开失败），再交给 llama-server。
+      # 挂**目录**而不是单个文件：文件级 bind mount 在源文件缺失时会被 Docker 建成一个同名**目录**，
+      # 之后下载脚本会把那个目录当成「模型已存在」而什么都不下（实测踩到），造成无解死锁。
+      - ./models:/models:ro
+    # 启动入口：先校验模型（缺失/过小都给一句可以照做的报错），再交给 llama-server。
+    # 注意：下面脚本里的 shell 变量写成了 $$xxx——compose 会把单个 $ 当插值吃掉。
     # 参数说明（改之前请先读 README「embedding 服务」一节）：
     #   -c 4096           上下文（沿用旧 Ollama 引擎的取值；bge-m3 支持 8192，我们的输入上限 800 字）
     #   -b 2048 -ub 2048  物理批：--embeddings 会把 n_batch/n_ubatch 压到 512，≥500 字的输入会直接
     #                     HTTP 500（input is too large to process），必须显式放开
-    #   -t N              线程：**并非越多越快**（实测 12 线程比 6 线程慢），默认 6；4 核机器建议 4
+    #   -t N              线程：**并非越多越快**。默认 4（保底不超订）；≥8 核可调到 6 更快（实测
+    #                     4 核上 6 线程反而慢 30%~2 倍；12 核上 6 线程优于 4/12）。
     #   --flash-attn off  非因果（BERT 类）编码器关掉 flash attention，短文本快 2~3 倍
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        if [ ! -f /models/embedding.gguf ]; then
-          echo "❌ 缺少模型文件：/models/embedding.gguf"
+        MODEL=/models/embedding.gguf
+        MIN=419430400
+        if [ ! -f "$$MODEL" ]; then
+          echo "❌ 缺少模型文件：$$MODEL"
           echo "  请在宿主机执行：powershell -ExecutionPolicy Bypass -File tools/download-embedding-model.ps1 -OutDir models"
           echo "  （Linux/macOS：按该脚本内的 URL 下载后重命名为 models/embedding.gguf）"
           exit 1
         fi
-        exec /app/llama-server -m /models/embedding.gguf --embeddings --host 0.0.0.0 --port 8080 \
-          -c 4096 -b 2048 -ub 2048 -t ${LLAMA_EMBED_THREADS:-6} --flash-attn off --no-webui
+        SIZE=$$(stat -c%s "$$MODEL")
+        if [ "$$SIZE" -lt "$$MIN" ]; then
+          echo "❌ 模型文件过小：$$SIZE 字节（约 $$((SIZE/1048576)) MB）。bge-m3（1024 维）至少约 605MB。"
+          echo "  换成小模型（如 130MB/768 维的 nomic-embed-text）会让向量维度与建表维度不匹配，RAG 会静默失效。"
+          exit 1
+        fi
+        echo "✅ embedding 模型已就绪：$$SIZE 字节（约 $$((SIZE/1048576)) MB）"
+        exec /app/llama-server -m "$$MODEL" --embeddings --host 0.0.0.0 --port 8080 \
+          -c 4096 -b 2048 -ub 2048 -t ${LLAMA_EMBED_THREADS:-4} --flash-attn off --no-ui
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 20
-      # 首次加载 1.2GB 模型需要时间（冷启动实测 < 20s），给足启动宽限
+      # 首次加载模型（约 605MB~1.2GB，取决量化）需要时间（冷启动实测 < 20s），给足启动宽限
       start_period: 60s
 
   web:
@@ -159,11 +174,12 @@ services:
       # 团队图库是用户上传的图片（数据面「图库」），按语义检索返回本地文件，命中无需署名。
       AGUI_IMAGE_SOURCE: ${AGUI_IMAGE_SOURCE:-library}
       # 代理。注意：一旦启用，容器内网服务也会被套上代理而连不上（如 llama-embed 的 embedding 端点），
-      # 所以 NO_PROXY 默认就排除了内网服务名（保留 ollama 是为了兼容 .env 里把端点改回自建 Ollama 的部署）；
+      # 所以 NO_PROXY 默认就排除了内网服务名。其中 host.docker.internal 是给「把 embedding 端点改回
+      # 宿主机上的自建 Ollama」这种部署用的（否则那条调用会被套上代理）；ollama 同理保留。
       # 在 .env 里改 NO_PROXY 会覆盖这个默认值。
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,localhost,127.0.0.1,::1}
+      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,host.docker.internal,localhost,127.0.0.1,::1}
       Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
       # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）
       # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
@@ -187,6 +203,8 @@ services:
       Agents__Memory__Enabled: ${MEMORY_ENABLED:-true}
       Agents__Memory__EmbeddingEndpoint: ${MEMORY_EMBEDDING_ENDPOINT:-http://llama-embed:8080/v1}
       Agents__Memory__EmbeddingModel: ${MEMORY_EMBEDDING_MODEL:-bge-m3:latest}
+      # 注：llama-embed 是**单模型**服务，上行的模型名只用于日志/UI，改它不会换模型
+      # （真正加载的是容器里的 /models/embedding.gguf）；换模型请换文件并同步 EmbeddingDimensions。
       Agents__Memory__EmbeddingDimensions: ${MEMORY_EMBEDDING_DIMENSIONS:-1024}
       Agents__Memory__TopK: ${MEMORY_TOP_K:-6}
       Agents__Memory__MinScore: ${MEMORY_MIN_SCORE:-0.25}

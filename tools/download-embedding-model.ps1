@@ -17,7 +17,27 @@ $out = if ([System.IO.Path]::IsPathRooted($OutDir)) { $OutDir } else { Join-Path
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $target = Join-Path $out 'embedding.gguf'
 $part = $target + '.part'
-if (Test-Path $target) { Write-Host "Model already exists: $target"; exit 0 }
+# 目录占位兜底：早期版本把 models/embedding.gguf 当**单文件** bind mount，源文件缺失时 Docker 会在宿主机
+# 建一个同名**目录**；那时本脚本会把它当成「模型已存在」而什么都不下（用户卡死）。这里显式识别并清理。
+# ⚠️ 本文件的**字符串**必须一律 ASCII：本文件是 UTF-8 无 BOM，Windows PowerShell 5.1 会按 ANSI 解码，
+# 非 ASCII 字符就算在引号里也会破坏词法分析（实测踩到）。中文只放注释里。
+if (Test-Path $target -PathType Container) {
+  $items = @(Get-ChildItem -Force -LiteralPath $target)
+  if ($items.Count -eq 0) {
+    Remove-Item -LiteralPath $target -Force
+    Write-Host "Cleaned up the empty placeholder directory Docker created: $target"
+  } else {
+    throw "$target is a non-empty directory, not a model file. Delete it, then re-run this script."
+  }
+}
+if (Test-Path $target -PathType Leaf) {
+  $existing = (Get-Item -LiteralPath $target).Length
+  if ($existing -lt 400MB) {
+    throw "Existing file $target is only $([math]::Round($existing/1MB,1)) MB - that is not bge-m3-Q8_0 (1024 dims, ~605MB). Delete it, then re-run this script."
+  }
+  Write-Host "Model already exists: $target ($([math]::Round($existing/1MB,1)) MB)"
+  exit 0
+}
 Write-Host "Downloading: $Url"
 Write-Host "Saving to:   $target"
 try {

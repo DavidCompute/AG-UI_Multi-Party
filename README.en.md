@@ -189,7 +189,10 @@ The project provides a multi-stage `Dockerfile` (Web demo), `Dockerfile.hub` (pr
 cp .env.example .env
 
 # Start all services (pulling/building dependency images the first time is slow, please be patient)
-docker compose up -d --build
+# --remove-orphans: **required** when upgrading from the Ollama-based version — the old container still holds
+# port 11435, otherwise llama-embed fails with "port is already allocated", and since web depends on it
+# being healthy, the whole stack never comes up.
+docker compose up -d --build --remove-orphans
 
 # Check the startup logs: confirm "语义记忆已启用" appears and llama-embed is healthy (its log shows "model loaded")
 docker compose logs -f web
@@ -238,7 +241,8 @@ Configuration options are set in `.env` (see `.env.example`):
 | `SEED_SAMPLE_DATA_HUB` | `false` | Protocol Hub only: whether to seed sample data |
 | `WEB_PORT` / `HUB_PORT` | `5200` / `5100` | Host port mappings (consistent with `launchSettings.json`) |
 | `LLAMA_EMBED_PORT` | `11435` | Bundled llama-embed host port (defaults to avoiding the local Ollama's 11434) |
-| `LLAMA_EMBED_THREADS` | `6` | Inference threads for llama-embed. **More is not faster**: 6 threads suits 8+ cores, but **on a 4-core machine set 4** (on 4 cores, 6 threads was 30%–2x slower than 4; oversubscription hurts badly) |
+| `LLAMA_EMBED_THREADS` | `4` | Inference threads for llama-embed. **More is not faster**: the default 4 never oversubscribes; **raise to 6 when you have 8+ cores** (on 12 cores 6 beat both 4 and 12; on 4 cores 6 was 30%–2x slower than 4) |
+| `LLAMA_EMBED_IMAGE` | empty (uses the digest pinned in compose) | Override the bundled llama-embed image. It is pinned **by digest** for reproducibility; to track upstream dev builds, put a new digest here (see `.env.example`) |
 | `PG_PORT` | `5432` | PostgreSQL host mapped port (unaffected inside the container) |
 
 Key points:
@@ -249,7 +253,9 @@ Key points:
   - Three parameters that must be set explicitly: `--embeddings` clamps `n_batch/n_ubatch` to 512 (inputs of 500+ chars then fail with HTTP 500), hence `-b 2048 -ub 2048`; `-t` should match the available cores (oversubscription is slower); and on a non-causal BERT-style encoder `--flash-attn off` makes short inputs 2–3x faster.
   - To switch back to an external Ollama / any OpenAI-compatible endpoint, only change `MEMORY_EMBEDDING_ENDPOINT` (plus `MEMORY_EMBEDDING_DIMENSIONS` if needed) — both endpoints are semantically equivalent.
 - **Human-in-the-loop (HITL) demo by default**: `AGENTS_ENABLE_TOOLS=true` (compose default) — built-in agent tools: `get_current_time` / `calculator` / `unit_converter` / `group_memory_search` / `read_attachment` require no approval, `publish_announcement` requires approval (ask an agent to "发布公告" in the group chat → 🔐 approval card, **only the requesting user** can approve / reject); `AGENTS_REQUIRE_APPROVAL_TOOLS` can customize which tool names require approval; to require multiple tools append indexed entries such as `Agents__RequireApprovalToolNames__1` in `docker-compose.yml`; web tools `web_search` / `read_url` are off by default (enable with `AGENTS_ENABLE_WEBTOOLS=true`).
-- **Bundled llama-embed is isolated from the host**: inside the web container it uses the internal network `http://llama-embed:8080/v1`; the host-mapped port defaults to `LLAMA_EMBED_PORT=11435` (avoiding the local Ollama's 11434); if the model file is missing the container **fails to start and its health check never passes**, so web waits for it — you never get a running app with a broken memory service.
+- **Bundled llama-embed is isolated from the host**: inside the web container it uses the internal network `http://llama-embed:8080/v1`; the host-mapped port defaults to `LLAMA_EMBED_PORT=11435` (avoiding the local Ollama's 11434); the mount is the host **directory** `./models` (not a single file: a file-level bind mount makes Docker create a same-named **directory** when the source file is missing, which traps users).
+  The container validates the model first: **missing** or **too small** (<400MB, i.e. not bge-m3/1024-dim) both print the next actionable step and exit; because web has `depends_on: service_healthy`, you never get a running app with a broken memory service — and a dimension mismatch cannot degrade into "RAG silently fails".
+- **Upgrading from the Ollama-based version**: `git pull` → place `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`. **`--remove-orphans` is not optional**: the old `agui-group-chat-ollama` container still holds port 11435, and without cleaning it up llama-embed fails immediately with `port is already allocated`.
 - **PostgreSQL mode**: groups / members / topics / messages / users / agent trigger rules and definitions are all written to PostgreSQL, and data survives container restarts intact.
   Switch back to `STORAGE_PROVIDER=memory` for in-memory + JSON snapshot mode (semantic memory is unavailable in this mode).
 - The image runs as a non-root user (`app`), with a built-in health check `GET /ag-ui/health`.

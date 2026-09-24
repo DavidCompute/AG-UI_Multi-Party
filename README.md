@@ -191,7 +191,9 @@ dotnet run --project samples/AguiGroupChat.Client -- --register lisi 654321 --gr
 cp .env.example .env
 
 # 启动全部服务（依赖镜像首次拉取 + 构建较慢，耐心等待）
-docker compose up -d --build
+# --remove-orphans：从带 Ollama 的旧版本升级时**必须加**——旧容器仍占着 11435，
+# 不加会让 llama-embed 起不来（port is already allocated），而 web 依赖它健康，于是整套起不来。
+docker compose up -d --build --remove-orphans
 
 # 查看启动日志：确认出现「语义记忆已启用」，且 llama-embed 为 healthy（日志有 "model loaded"）
 docker compose logs -f web
@@ -243,7 +245,8 @@ docker compose down
 | `SEED_SAMPLE_DATA_HUB` | `false` | 仅协议 Hub：是否播种示例数据 |
 | `WEB_PORT` / `HUB_PORT` | `5200` / `5100` | 宿主机端口映射（与 `launchSettings.json` 一致） |
 | `LLAMA_EMBED_PORT` | `11435` | 内置 llama-embed 宿主机端口（默认避开本机 Ollama 的 11434） |
-| `LLAMA_EMBED_THREADS` | `6` | llama-embed 推理线程数。**并非越多越快**：实测 6 线程适合 8 核以上，**4 核机器请设 4**（4 核上 6 线程比 4 线程慢 30%~2 倍，超订会明显变慢） |
+| `LLAMA_EMBED_THREADS` | `4` | llama-embed 推理线程数。**并非越多越快**：默认 4 保底不超订；**≥8 核可提到 6**（实测 12 核上 6 线程优于 4/12；而 4 核上 6 线程比 4 线程慢 30%~2 倍） |
+| `LLAMA_EMBED_IMAGE` | 空（用 compose 里钉死的 digest） | 覆盖内置 llama-embed 镜像。默认**按 digest 钉死**保证可复现；要跟进上游 dev 构建就拿新 digest 填这里（见 `.env.example` 注释） |
 | `PG_PORT` | `5432` | PostgreSQL 宿主机映射端口（容器内不受影响） |
 
 要点：
@@ -254,7 +257,9 @@ docker compose down
   - 三个必须显式配置的参数：`--embeddings` 会把 `n_batch/n_ubatch` 压到 512（≥500 字直接 HTTP 500），故须 `-b 2048 -ub 2048`；`-t` 按核数给（超订会变慢）；BERT 类非因果编码器上 `--flash-attn off` 让短文本快 2~3 倍。
   - 想换回外部 Ollama / 任何 OpenAI 兼容端点：只改 `MEMORY_EMBEDDING_ENDPOINT`（+ 必要时 `MEMORY_EMBEDDING_DIMENSIONS`）即可，两端点向量语义一致。
 - **默认即人机交互（HITL）演示**：`AGENTS_ENABLE_TOOLS=true`（compose 默认）——智能体内置工具：`get_current_time` / `calculator` / `unit_converter` / `group_memory_search` / `read_attachment` 免审批，`publish_announcement` 需审批（群聊中请智能体「发布公告」→ 🔐 审批卡片，**仅发起请求的用户**可批准 / 拒绝）；`AGENTS_REQUIRE_APPROVAL_TOOLS` 可自定义需审批的工具名，如需多个工具请在 `docker-compose.yml` 追加 `Agents__RequireApprovalToolNames__1` 等索引项；联网工具 `web_search` / `read_url` 默认关（`AGENTS_ENABLE_WEBTOOLS=true` 开启）。
-- **内置 llama-embed 与宿主机隔离**：web 容器内走内网 `http://llama-embed:8080/v1`，宿主机映射端口默认 `LLAMA_EMBED_PORT=11435`（避开本机 Ollama 的 11434）；模型文件缺失时容器**启动失败且 healthcheck 不通过**，web 会等它健康后才启动——不会带着坏掉的记忆服务跑起来。
+- **内置 llama-embed 与宿主机隔离**：web 容器内走内网 `http://llama-embed:8080/v1`，宿主机映射端口默认 `LLAMA_EMBED_PORT=11435`（避开本机 Ollama 的 11434）；挂载的是宿主机**目录** `./models`（不是单个文件：文件级 bind mount 在源文件缺失时会被 Docker 建出一个同名**目录**，把人卡死）。
+  容器启动先校验模型：**缺失**或**过小**（<400MB，即不是 bge-m3/1024 维）都会打印可照做的下一步后退出，web 因 `depends_on: service_healthy` 等它健康才启动——不会带着坏掉的记忆服务跑起来，也不会把维度不匹配变成“RAG 静默失效”。
+- **从带 Ollama 的旧版本升级**：`git pull` → 放好 `./models/embedding.gguf` → `docker compose up -d --build --remove-orphans`。**`--remove-orphans` 不能省**：旧 `agui-group-chat-ollama` 容器仍占着 11435，不清理会让 llama-embed 直接 `port is already allocated` 起不来。
 - **PostgreSQL 模式**：群 / 成员 / 话题 / 消息 / 用户 / 智能体触发规则与定义全部写入 PostgreSQL，重启容器数据完整保留。
   `STORAGE_PROVIDER=memory` 切换回内存 + JSON 快照模式（此时语义记忆不可用）。
 - 镜像以非 root 用户（`app`）运行，内置健康检查 `GET /ag-ui/health`。
