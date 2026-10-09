@@ -97,9 +97,13 @@ async def main():
     if not args.send:
         return 0
 
-    call("POST", "/ag-ui/agent/register", {
+    # 注意接口是 **复数的 /ag-ui/agents/register**（AgentApi 那个，收 groupId + 字符串 triggerMode）。
+    # 原来写的是单数的 /ag-ui/agent/register（HttpGroupApi 那个，收 groupIds 数组），字段对不上 →
+    # 一直静默 400；只因单聊本身就是“直达触发”（群主发的任何消息都算触发对端），才没暴露。
+    # override=False：不把群级注册钉成永久覆盖（角色默认变更时仍随其回退）。
+    call("POST", "/ag-ui/agents/register", {
         "agentId": a["agentId"], "groupId": gid, "triggerMode": "AllMessages",
-        "nickname": a.get("nickname") or "", "override": True,
+        "nickname": a.get("nickname") or "", "override": False,
     }, token=token)
 
     before = {m.get("messageId") for m in (msgs or [])}
