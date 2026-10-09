@@ -50,6 +50,21 @@ English: the plan path previously logged **nothing** about its inputs (`plan.Inp
 中文：交付兜底原先只在「计划点名了文档技能、又被跳过」时触发。若计划**压根没排文件步骤**（实测：只有「需求分析师 → 内容策划文案 → 综合答复」三步），`NeedsDelivery=false`，于是没有任何兜底——用户说了“我要最终形成 word 文档”，最后只拿到一段带〔待补〕的提纲、没有文件。现在计划路径也按 `WantedDeliverable(context.Content)` 判一次（新增 `ShouldTryPlanDelivery`），与非编排路径口径一致；计划自己已把该技能跑过时，兜底内部会直接跳过，不会重复出文件。计划的“补发正文”仍只在原场景（计划正文被有意抑制时）生效，避免重复一段说明。
 English: the delivery fallback used to fire only when the plan named a document skill and the plan path skipped it. When the plan scheduled **no** file step at all (measured: “requirements analyst → content planner → synthesis”), `NeedsDelivery` stayed false, so nothing delivered — the user asked for a Word file and got an outline full of 〔待补〕 placeholders instead. The plan path now also consults `WantedDeliverable(context.Content)` (new `ShouldTryPlanDelivery`), matching the non-plan path; when the plan already ran that skill the fallback skips itself, so no duplicate file, and the “re-append the plan text” step still only applies to the original scenario.
 
+## 语境判定提示词瘦身：同一条判定少花 ~80% 输入
+# The speak-gate prompt is now ~80% cheaper
+
+中文：语境触发（Contextual）的“要不要发言”判定**带着一份完整对话窗口，却只换回 1 bit**（`ContextMaxMessages=10` × 每条截 4000 字，
+而输出上限只有 8 个 token）。在真实数据上重建过：典型 6.5k–11.3k 字符。现在按决策专档收紧，新增两个可配旋钮
+（`PromptBudget:DecisionMaxCharsPerMessage` 默认 300、`PromptBudget:DecisionMaxCharsForLatestMessage` 默认 2000），
+并把 `Agents:ContextMaxMessages` 默认 10 → **3**。判定提示词的构建抽成 `BuildSpeakDecisionPrompt`（测试钩子）。
+
+- 实测（离线，用真实群消息重建）：**11,302 → ~1,263 字符**。
+- 实测（在线，临时群 + 3 条 4,500 字长消息）：判定提示词 **3,283 字**且保持有界（每加一条长消息只增 ~286 字，即钳制生效）；
+  旧口径同输入约 **16,000 字**。
+- 同一处日志现在可观测了：`语境判定：模型=… 提示词 N 字（历史 M 条）P(发言)=… 阈值=… → …`。
+
+English: the Contextual “should I speak” gate used to carry a **full conversation window to answer one bit** (`ContextMaxMessages=10`, each capped at 4000 chars, with an 8-token output cap) — measured at 6.5k–11.3k chars on real data. It now has its own budget (`PromptBudget:DecisionMaxCharsPerMessage` default 300, `PromptBudget:DecisionMaxCharsForLatestMessage` default 2000) and `Agents:ContextMaxMessages` defaults to **3**; the prompt is built by the testable `BuildSpeakDecisionPrompt`. Measured offline on real messages: **11,302 → ~1,263 chars**. Measured live (temp group, 3 × 4,500-char messages): **3,283 chars and bounded** (each extra long message adds only ~286 chars, i.e. the clamp works) versus ~**16,000** under the old rules. The same log line now reports `提示词 N 字（历史 M 条）`.
+
 ## 验证（真跑）
 # Verification (actually run)
 
@@ -62,8 +77,8 @@ English: replayed the same request in the “direct chat with 项目总监” ag
 ## 回归
 # Tests
 
-中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`ShouldTryPlanDelivery` 3 例（计划跳过文件技能 / 计划没排文件步骤但用户要文件 / 两者都不是）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）。全量 `AguiGroupChat.Hub.Tests` 相关测试类通过。
-English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases, 3 `ShouldTryPlanDelivery` cases and 6 `SnapshotApprovals` / `HasResumePayload` cases. All affected test classes pass.
+中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`ShouldTryPlanDelivery` 3 例（计划跳过文件技能 / 计划没排文件步骤但用户要文件 / 两者都不是）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）、`BuildSpeakDecisionPrompt` / `ClampForDecision` 7 例（人设与规则在位 / 历史与最新消息分别钳制 / 上界 4k）。相关测试类 **501 通过 / 0 失败**。
+English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases, 3 `ShouldTryPlanDelivery` cases, 6 `SnapshotApprovals` / `HasResumePayload` cases and 7 `BuildSpeakDecisionPrompt` / `ClampForDecision` cases (persona and rules kept, history and latest clamped separately, 4k upper bound). **501 passed / 0 failed** across the affected test classes.
 
 ---
 

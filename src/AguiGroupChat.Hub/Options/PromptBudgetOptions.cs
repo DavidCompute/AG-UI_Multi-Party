@@ -43,6 +43,14 @@ public sealed class PromptBudgetOptions
     /// <summary>群历史整段字符预算（默认 48000）：从最新往回填，填满即停，短消息不浪费额度。</summary>
     public int MaxHistoryChars { get; set; } = 48_000;
 
+    /// <summary>语境发言决策（Contextual 闸门）里<b>单条历史消息</b>的截断长度（默认 300）。
+    /// 为何另立一档而不复用 <see cref="MaxCharsPerHistoryMessage"/>：那是个二选一闸门，只需要“在聊什么”的梗概；
+    /// 原口径（10 条 × 4000 字）实测一次判定要 6.5k–11.3k 字符，与一次正常回复的输入同量级却只换回 1 bit。</summary>
+    public int DecisionMaxCharsPerMessage { get; set; } = 300;
+
+    /// <summary>语境发言决策里“最新消息”的截断长度（默认 2000）：它是被判断的对象，比历史给得多。</summary>
+    public int DecisionMaxCharsForLatestMessage { get; set; } = 2_000;
+
     /// <summary>把历史消息里可提取文本的附件重新内联给模型的总字符预算（默认 96000），支撑“先传文档、隔轮追问”。</summary>
     public int MaxHistoryInlineTextChars { get; set; } = 96_000;
 
@@ -85,6 +93,8 @@ public sealed class PromptBudgetOptions
         MaxTotalChars = Positive(MaxTotalChars, Default.MaxTotalChars, 1_000, 10_000_000, nameof(MaxTotalChars), logger);
         HistoryWindowMessages = Positive(HistoryWindowMessages, Default.HistoryWindowMessages, 1, 500, nameof(HistoryWindowMessages), logger);
         MaxCharsPerHistoryMessage = Positive(MaxCharsPerHistoryMessage, Default.MaxCharsPerHistoryMessage, 50, 500_000, nameof(MaxCharsPerHistoryMessage), logger);
+        DecisionMaxCharsPerMessage = Positive(DecisionMaxCharsPerMessage, Default.DecisionMaxCharsPerMessage, 50, 100_000, nameof(DecisionMaxCharsPerMessage), logger);
+        DecisionMaxCharsForLatestMessage = Positive(DecisionMaxCharsForLatestMessage, Default.DecisionMaxCharsForLatestMessage, 100, 500_000, nameof(DecisionMaxCharsForLatestMessage), logger);
         MaxHistoryChars = Positive(MaxHistoryChars, Default.MaxHistoryChars, 100, 5_000_000, nameof(MaxHistoryChars), logger);
         MaxHistoryInlineTextChars = Positive(MaxHistoryInlineTextChars, Default.MaxHistoryInlineTextChars, 0, 5_000_000, nameof(MaxHistoryInlineTextChars), logger);
         AttachmentMaxTextCharsPerFile = Positive(AttachmentMaxTextCharsPerFile, Default.AttachmentMaxTextCharsPerFile, 100, 5_000_000, nameof(AttachmentMaxTextCharsPerFile), logger);

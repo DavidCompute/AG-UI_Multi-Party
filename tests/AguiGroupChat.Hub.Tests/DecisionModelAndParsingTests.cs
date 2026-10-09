@@ -226,4 +226,55 @@ public sealed class DecisionModelAndParsingTests
         // 白名单外与重复项：过滤 / 去重，保序
         Assert.Equal(["agent_b"], AgentGateway.ParseAssignTargets("agent_b,agent_x,agent_b", Candidates));
     }
+
+    // ============ ④ 发言判定的提示词预算（二选一闸门不能带一份完整窗口）============
+
+    [Fact]
+    public void SpeakDecisionPrompt_ClampsHistoryAndLatest_KeepsPersonaAndRules()
+    {
+        var history = new List<(string Who, string Text)>
+        {
+            ("张三", new string('甲', 500)),   // 每条超 300 → 截断 + 省略号
+            ("李四", "短消息"),               // 未超 → 原样
+        };
+        var latest = new string('乙', 5000);   // 超 2000 → 截断
+
+        var prompt = AgentGateway.BuildSpeakDecisionPrompt("推广文案", "负责对外文案", "只做推广文案",
+            "group_x", history, latest, maxCharsPerMessage: 300, maxCharsForLatest: 2000);
+
+        // 人设与判定规则必须在位（否则判定语义就变了）
+        Assert.Contains("__AGUI_DECIDE__", prompt);
+        Assert.Contains("你是「推广文案」，角色：负责对外文案", prompt);
+        Assert.Contains("行为准则：只做推广文案", prompt);
+        Assert.Contains("只输出 YES 或 NO", prompt);
+        // 历史与最新消息被截到预算（省略号作为“这是片段”的信号）
+        Assert.Contains(new string('甲', 300) + "…", prompt);
+        Assert.DoesNotContain(new string('甲', 301), prompt);
+        Assert.Contains("李四：短消息", prompt);
+        Assert.Contains(new string('乙', 2000) + "…", prompt);
+        Assert.DoesNotContain(new string('乙', 2001), prompt);
+    }
+
+    [Fact]
+    public void SpeakDecisionPrompt_WorstCaseIsAnOrderOfMagnitudeSmallerThanTheOldPolicy()
+    {
+        // 旧口径：10 条 × 每条截 4000 字 → 上界约 44k 字符（实测典型 6.5k–11.3k），
+        // 与一次正常回复的输入同量级。新口径：3 条 × 300 + 最新 2000 → 上界约 3–4k 字符。
+        // 这条断言就是防止日后又“随手把窗口调回去”。
+        var history = Enumerable.Range(0, 3)
+            .Select(i => ($"发言人{i}", new string('字', 4000))).ToList();
+        var prompt = AgentGateway.BuildSpeakDecisionPrompt("岗", "描述", new string('准', 300),
+            "group_x", history, new string('字', 4000), maxCharsPerMessage: 300, maxCharsForLatest: 2000);
+
+        Assert.True(prompt.Length < 4_000, $"判定提示词应被收紧到 4k 字符以内，实际 {prompt.Length}");
+    }
+
+    [Theory]
+    [InlineData(null, "")]
+    [InlineData("", "")]
+    [InlineData("短", "短")]
+    [InlineData("12345", "12345")]          // 恰好等于上界 → 不截断
+    [InlineData("123456", "12345…")]        // 超一字符 → 截断 + 省略号
+    public void ClampForDecision_TruncatesAtTheBoundary(string? input, string expected)
+        => Assert.Equal(expected, AgentGateway.ClampForDecision(input, max: 5));
 }

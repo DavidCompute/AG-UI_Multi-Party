@@ -154,8 +154,17 @@ public sealed class AgentOptions
     /// </summary>
     public List<string> RequireApprovalToolNames { get; set; } = ["publish_announcement"];
 
-    /// <summary>语境触发（Contextual）发言决策时携带的最近消息条数。</summary>
-    public int ContextMaxMessages { get; set; } = 10;
+    /// <summary>语境触发（Contextual）发言决策时携带的最近消息条数（默认 3）。
+    ///
+    /// <para>
+    /// 为什么降到 3（原为 10）：决策是个二选一闸门，只需要“在聊什么”的梗概。
+    /// 配合 <c>PromptBudget:DecisionMaxCharsPerMessage</c>（默认 300）与
+    /// <c>PromptBudget:DecisionMaxCharsForLatestMessage</c>（默认 2000），实测一次判定的提示词
+    /// 从 6.5k–11.3k 字符降到约 1–2k 字符（约 -85%）——而判定输入与一次正常回复的输入原本同量级，
+    /// 却只换回 1 bit。需要更宽的语境时把本项与两个字符预算一起调大即可。
+    /// </para>
+    /// </summary>
+    public int ContextMaxMessages { get; set; } = 3;
 
     /// <summary>AG-UI 桥接全局配置：智能体配置了 BridgeEndpoint（或使用默认端点）时，
     /// 不经本地大模型，改为以 AG-UI 协议对接外部 AG-UI 服务（标准 AG-UI 或本项目群聊扩展）。</summary>

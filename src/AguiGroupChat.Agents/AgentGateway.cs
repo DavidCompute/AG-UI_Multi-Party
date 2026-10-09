@@ -36,6 +36,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>历史单条消息文本截断长度（来自 PromptBudget:MaxCharsPerHistoryMessage）。</summary>
     private readonly int MaxContextCharsPerMessage;
 
+    /// <summary>语境发言决策里单条历史消息的截断长度（来自 PromptBudget:DecisionMaxCharsPerMessage）。</summary>
+    private readonly int DecisionMaxCharsPerMessage;
+
+    /// <summary>语境发言决策里“最新消息”的截断长度（来自 PromptBudget:DecisionMaxCharsForLatestMessage）。</summary>
+    private readonly int DecisionMaxCharsForLatestMessage;
+
     /// <summary>多轮上下文：把历史消息里可提取文本的附件重新内联给模型的总字符预算（来自 PromptBudget）。</summary>
     private readonly int MaxHistoryInlineTextChars;
 
@@ -249,6 +255,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         _prompt = services.GetService(typeof(PromptBudgetOptions)) as PromptBudgetOptions ?? PromptBudgetOptions.Default;
         ContextWindowMessages = _prompt.HistoryWindowMessages;
         MaxContextCharsPerMessage = _prompt.MaxCharsPerHistoryMessage;
+        DecisionMaxCharsPerMessage = _prompt.DecisionMaxCharsPerMessage;
+        DecisionMaxCharsForLatestMessage = _prompt.DecisionMaxCharsForLatestMessage;
         MaxHistoryInlineTextChars = _prompt.MaxHistoryInlineTextChars;
         MaxContextImages = _prompt.MaxContextImages;
         MaxHistoryImages = _prompt.MaxHistoryImages;
@@ -1869,6 +1877,44 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
         sb.Append("\n\n只输出针对【用户原始请求】的本步结论，不要复述前序内容，也不要把【上一步产出】当成要回答的问题。");
         return sb.ToString();
+    }
+
+    /// <summary>语境发言决策（Contextual 闸门）的提示词。测试钩子（internal）。
+    ///
+    /// <para>
+    /// 为什么刻意“小”：这是个二选一闸门，只需要“在聊什么”的梗概，不需要完整正文。
+    /// 原实现携带 10 条完整历史（每条截 4000 字），实测一次判定要 6.5k–11.3k 字符——
+    /// 与一次正常回复的输入同量级，却只换回 1 bit。收紧为「岗位人设 + 最近 N 条（短截断）+ 最新消息（限长）」后，
+    /// 实测 11.3k → ~1.3k 字符（约 -85%）。
+    /// </para>
+    ///
+    /// <para>
+    /// <paramref name="history"/> 按时间序（旧 → 新），每条截到 <paramref name="maxCharsPerMessage"/>；
+    /// 最新消息是被判断的对象，截到 <paramref name="maxCharsForLatest"/>（比历史给得多）。
+    /// 截断处加省略号，让模型知道拿到的是片段而不是全部。
+    /// </para>
+    /// </summary>
+    internal static string BuildSpeakDecisionPrompt(string nickname, string? description, string? instructions,
+        string groupId, IReadOnlyList<(string Who, string Text)> history, string? latest,
+        int maxCharsPerMessage, int maxCharsForLatest)
+    {
+        var sb = new StringBuilder();
+        foreach (var (who, text) in history)
+            sb.Append(who).Append('：').AppendLine(ClampForDecision(text, maxCharsPerMessage));
+
+        return $"__AGUI_DECIDE__\n"
+            + $"你是「{nickname}」，角色：{description}\n行为准则：{instructions}\n\n"
+            + $"这是群「{groupId}」最近的对话：\n{sb}"
+            + $"最新消息：{ClampForDecision(latest, maxCharsForLatest)}\n\n"
+            + "请根据语境判断你是否应该发言：被直接提及/询问、或消息与你的职责相关且你有实质内容补充 → YES；"
+            + "只是寒暄、与你职责无关、或你刚发言过且没有新的实质信息 → NO。\n只输出 YES 或 NO。";
+    }
+
+    /// <summary>语境判定文本截断：超长时截断并加省略号（让模型知道是片段）。测试钩子（internal）。</summary>
+    internal static string ClampForDecision(string? text, int max)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        return text.Length <= max ? text : text[..max] + "…";
     }
 
     /// <summary>交付兑底未能接手 / 没产出文件时，是否需要把计划侧那段说明补发给用户（否则消息是空的）。
@@ -4488,26 +4534,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 轻量决策：只要一个布尔与它的概率（不走工具 / 记忆 / 审批包装，也不需要推理模型）。
         // 实测教训：以前走 MAF 裸智能体 + 推理模型 + MaxOutputTokens=8，推理把预算吃光 → 正文为空
         // → StartsWith("YES") 恒为假 → “语境触发永远不发言”（且日志只是一句“保持沉默”，看不出原因）。
-        // 语境判断同样按话题取最近对话（会话历史以话题为单位，与 BuildUserMessageAsync 一致）
+        // 语境判断同样按话题取最近对话（会话历史以话题为单位，与 BuildUserMessageAsync 一致）。
+        //
+        // 而这是一个**二选一闸门**：它只需要“在聊什么”的梗概，不需要完整正文。
+        // 原口径（ContextMaxMessages=10 × 每条截 4000 字）实测一次判定要 6.5k–11.3k 字符，
+        // 与一次正常回复的输入同量级，却只换回 1 bit。现在按 PromptBudget 的决策专档收紧
+        //（决策历史条数 / 决策单条截断 / 最新消息限长），实测 11.3k → ~1.3k 字符。
         var history = _hub.Value.Store.RecentMessages(context.GroupId, _options.ContextMaxMessages, context.TopicId)
             .Where(m => !m.Recalled && m.Visibility == MessageVisibility.All)
+            .Select(m => (Who: string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname,
+                          Text: m.Content ?? ""))
             .ToList();
 
-        var sb = new StringBuilder();
-        foreach (var m in history)
-        {
-            var who = string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname;
-            var text = m.Content.Length > MaxContextCharsPerMessage ? m.Content[..MaxContextCharsPerMessage] : m.Content;
-            sb.AppendLine($"{who}：{text}");
-        }
-
-        var prompt =
-            $"__AGUI_DECIDE__\n" +
-            $"你是「{def.Nickname}」，角色：{def.Description}\n行为准则：{def.Instructions}\n\n" +
-            $"这是群「{context.GroupId}」最近的对话：\n{sb}" +
-            $"最新消息：{context.Content}\n\n" +
-            "请根据语境判断你是否应该发言：被直接提及/询问、或消息与你的职责相关且你有实质内容补充 → YES；" +
-            "只是寒暄、与你职责无关、或你刚发言过且没有新的实质信息 → NO。\n只输出 YES 或 NO。";
+        var prompt = BuildSpeakDecisionPrompt(def.Nickname, def.Description, def.Instructions,
+            context.GroupId, history, context.Content, DecisionMaxCharsPerMessage, DecisionMaxCharsForLatestMessage);
 
         AgentCatalog.DecisionOutcome decision;
         try
@@ -4526,8 +4566,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var speak = pYes is { } p
             ? p >= _options.DecisionMinProbability
             : decision.Answer == true;
-        _logger.LogInformation("智能体 {AgentId} 语境判定：模型={Model} P(发言)={PYes} 阈值={Min} → {Verdict}（原始：{Raw}）",
-            def.AgentId, decision.Model,
+        _logger.LogInformation("智能体 {AgentId} 语境判定：模型={Model} 提示词 {PromptLen} 字（历史 {Hist} 条）P(发言)={PYes} 阈值={Min} → {Verdict}（原始：{Raw}）",
+            def.AgentId, decision.Model, prompt.Length, history.Count,
             pYes is { } v ? v.ToString("F3") : "n/a", _options.DecisionMinProbability,
             speak ? "发言" : "保持沉默", AgentGatewayHelpers.TruncateForChain(decision.Raw));
         return speak;
