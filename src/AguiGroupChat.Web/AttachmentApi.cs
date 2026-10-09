@@ -78,7 +78,7 @@ public static class AttachmentApi
         // 为什么不复用 /files/{id}/{name}：那个端点按原格式返回（浏览器拿到 docx 只会下载 / 存盘），
         // 语义也不同——这里**只**返回可内联渲染的 PDF（含 .pdf 直通）。
         // 鉴权：与下载完全一致（同一段 CanAccessAttachment），否则就是一个绕过权限的读取口子。
-        root.MapGet("/preview/{attachmentId}", async (string attachmentId, HttpContext ctx, AttachmentStore store,
+        root.MapGet("/preview/{attachmentId}", async (string attachmentId, bool? notes, HttpContext ctx, AttachmentStore store,
             IGroupStore groupStore, AuthService auth, AgentCatalog catalog,
             AguiGroupChat.Hub.Messaging.GroupHub hub, IServiceProvider services) =>
         {
@@ -95,7 +95,8 @@ public static class AttachmentApi
                         "服务端未启用文档在线查看（缺少预览转换服务注册），请下载后用本地应用打开"),
                     statusCode: StatusCodes.Status503ServiceUnavailable);
 
-            var outcome = await converter.GetOrCreateAsync(attachmentId, path!, ctx.RequestAborted);
+            // notes 用可空类型：非可空值类型在 minimal API 里会被当成「必填查询参数」，缺失时直接 400
+            var outcome = await converter.GetOrCreateAsync(attachmentId, path!, notes ?? false, ctx.RequestAborted);
             if (!outcome.Ok)
                 return Results.Json(new AguiError(
                         outcome.Failure == PreviewFailure.Unsupported ? ErrorCodes.BadRequest : ErrorCodes.DocumentPreviewFailed,
@@ -107,6 +108,19 @@ public static class AttachmentApi
             ctx.Response.Headers["Cache-Control"] = "private, max-age=300";
             // 不设 Content-Disposition: attachment —— 让浏览器用内置 PDF 阅读器内联打开
             return Results.File(outcome.PdfPath!, "application/pdf", enableRangeProcessing: true);
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // 演示文稿「演讲者备注」：按幻灯片顺序返回备注文本数组（第 i 项 = 第 i 张幻灯片）。
+        // 只支持 .pptx；其它类型 / 无备注统一返回空数组（前端据此只播放幻灯片、不显示备注区）。
+        // 鉴权与下载 / 预览完全一致（同一段 ResolveAndAuthorize），否则就是一个绕过权限的读取口子。
+        root.MapGet("/preview/{attachmentId}/notes", (string attachmentId, HttpContext ctx, AttachmentStore store,
+            IGroupStore groupStore, AuthService auth, AgentCatalog catalog,
+            AguiGroupChat.Hub.Messaging.GroupHub hub) =>
+        {
+            var (path, denied) = ResolveAndAuthorize(attachmentId, ctx, store, groupStore, auth, catalog, hub);
+            if (denied is not null) return denied;
+            var notes = PresentationNotes.TryExtract(path!);
+            return Results.Ok(new { notes = notes ?? (IReadOnlyList<string>)Array.Empty<string>() });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 

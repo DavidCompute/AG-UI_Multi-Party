@@ -11,7 +11,10 @@ public sealed record SofficeResult(bool Ok, string Detail, bool Unavailable = fa
 /// <summary>把办公文档转成 PDF 的执行器（抽成接口：单测注入假实现，不依赖真机是否装了 LibreOffice）。</summary>
 public interface ISofficeRunner
 {
-    Task<SofficeResult> ConvertToPdfAsync(string sourcePath, string outDir, CancellationToken ct = default);
+    /// <summary>把源文件转成 PDF 落到 <paramref name="outDir"/>。
+    /// <paramref name="exportNotes"/> 仅对演示文稿有意义：为 true 时导出「备注页」（每页幻灯片 + 该页演讲者备注），
+    /// 否则导出普通幻灯片。</summary>
+    Task<SofficeResult> ConvertToPdfAsync(string sourcePath, string outDir, bool exportNotes = false, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -76,7 +79,7 @@ public sealed class ProcessSofficeRunner : ISofficeRunner
     }
 
     public async Task<SofficeResult> ConvertToPdfAsync(string sourcePath, string outDir,
-        CancellationToken ct = default)
+        bool exportNotes = false, CancellationToken ct = default)
     {
         if (_sofficePath is null)
             return new SofficeResult(false,
@@ -103,7 +106,11 @@ public sealed class ProcessSofficeRunner : ISofficeRunner
             // 注意：必须是单个参数（含 = 与 file:// URI），拼成两个参数会失效
             psi.ArgumentList.Add("-env:UserInstallation=" + new Uri(profileDir).AbsoluteUri);
             psi.ArgumentList.Add("--convert-to");
-            psi.ArgumentList.Add("pdf");
+            // 演示文稿「备注页」：用 Impress 的 PDF 导出过滤选项把每页演讲者备注一并导出
+            // （每张幻灯片后跟一页「缩略图 + 备注」）。JSON 过滤选项需 LibreOffice ≥ 7.4，本项目容器为 24.2。
+            psi.ArgumentList.Add(exportNotes
+                ? "pdf:impress_pdf_Export:{\"ExportNotesPages\":{\"type\":\"boolean\",\"value\":true}}"
+                : "pdf");
             psi.ArgumentList.Add("--outdir");
             psi.ArgumentList.Add(outDir);
             psi.ArgumentList.Add(sourcePath);

@@ -39,12 +39,15 @@ public sealed class DocPreviewConverterTests : IDisposable
         public bool Fail;
         public bool Unavailable;
         public bool ProduceNothing;
-        public string Detail = "转换器炸了";
+        public string Detail = "转换器炋了";
+        /// <summary>最近一次请求是否要求导出「备注页」（供「是否透传 notes」的回归断言）。</summary>
+        public bool? LastExportNotes;
 
         public Task<SofficeResult> ConvertToPdfAsync(string sourcePath, string outDir,
-            CancellationToken ct = default)
+            bool exportNotes = false, CancellationToken ct = default)
         {
             Calls++;
+            LastExportNotes = exportNotes;
             if (Unavailable) return Task.FromResult(new SofficeResult(false, "未安装转换组件", Unavailable: true));
             if (Fail) return Task.FromResult(new SofficeResult(false, Detail));
             if (!ProduceNothing)
@@ -136,6 +139,41 @@ public sealed class DocPreviewConverterTests : IDisposable
         Assert.True(a.Ok && b.Ok);
         Assert.NotEqual(a.PdfPath, b.PdfPath);
         Assert.Equal(2, _runner.Calls);
+    }
+
+    [Fact]
+    public async Task Presentation_NotesVariant_UsesSeparateCacheAndForwardsFlag()
+    {
+        var converter = NewConverter();
+        var path = WriteSource("发布会.pptx");
+
+        var slides = await converter.GetOrCreateAsync("att_a", path);              // 幻灯片
+        var notes = await converter.GetOrCreateAsync("att_a", path, notes: true);   // 备注页
+
+        Assert.True(slides.Ok && notes.Ok);
+        Assert.NotEqual(slides.PdfPath, notes.PdfPath);   // 幻灯片 / 备注页是两份独立缓存
+        Assert.Equal(2, _runner.Calls);
+        Assert.True(_runner.LastExportNotes == true);     // 最近一次（备注页）确实要求导出备注
+
+        // 再取一次备注页：命中它自己的缓存，不再转换
+        var notesAgain = await converter.GetOrCreateAsync("att_a", path, notes: true);
+        Assert.Equal(notes.PdfPath, notesAgain.PdfPath);
+        Assert.Equal(2, _runner.Calls);
+    }
+
+    [Fact]
+    public async Task NotesRequest_OnNonPresentation_IsIgnored()
+    {
+        var converter = NewConverter();
+        var path = WriteSource("文档.docx");
+
+        var normal = await converter.GetOrCreateAsync("att_a", path);
+        var askedNotes = await converter.GetOrCreateAsync("att_a", path, notes: true);
+
+        // 非演示文稿没有「备注」概念：走同一份缓存，且不向转换器透传 notes
+        Assert.Equal(normal.PdfPath, askedNotes.PdfPath);
+        Assert.Equal(1, _runner.Calls);
+        Assert.False(_runner.LastExportNotes == true);
     }
 
     [Fact]
@@ -510,6 +548,50 @@ public sealed class DocPreviewApiTests : IClassFixture<DocPreviewApiServerFixtur
         var again = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}", token));
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
         Assert.Equal(callsBefore + 1, _fixture.Runner.Calls);
+    }
+
+    [Fact]
+    public async Task Preview_NotesQuery_ForPresentation_ConvertsNotesVariant()
+    {
+        var (token, _, attId) = await SeedGroupWithAttachmentAsync("pvnotes", "发布会.pptx");
+        var callsBefore = _fixture.Runner.Calls;
+
+        // ?notes=true → 导出「备注页」变体（演示文稿才有）
+        var notes = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}?notes=true", token));
+        Assert.Equal(HttpStatusCode.OK, notes.StatusCode);
+        Assert.Equal(callsBefore + 1, _fixture.Runner.Calls);
+        Assert.True(_fixture.Runner.LastExportNotes == true);
+
+        // 幻灯片与备注页是两份缓存：再取默认视图会另转一次（不会误命中备注页缓存）
+        var slides = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}", token));
+        Assert.Equal(HttpStatusCode.OK, slides.StatusCode);
+        Assert.Equal(callsBefore + 2, _fixture.Runner.Calls);
+    }
+
+    [Fact]
+    public async Task Notes_Endpoint_ReturnsPerSlideNotes()
+    {
+        var pptxPath = PresentationNotesTests.BuildPptx("第一页备注", "第二页备注");
+        var bytes = await File.ReadAllBytesAsync(pptxPath);
+        File.Delete(pptxPath);
+        var (token, _, attId) = await SeedGroupWithAttachmentAsync("pvnotesapi", "发布会.pptx", bytes);
+
+        var res = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}/notes", token));
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var body = await res.Content.ReadFromJsonAsync<JsonElement>();
+        var notes = body.GetProperty("notes").EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Equal(new[] { "第一页备注\n次段", "第二页备注\n次段" }, notes);
+    }
+
+    [Fact]
+    public async Task Notes_Endpoint_RequiresIdentity()
+    {
+        var (_, _, attId) = await SeedGroupWithAttachmentAsync("pvnotesanon", "发布会.pptx");
+
+        var res = await _client.GetAsync($"/ag-ui/preview/{attId}/notes");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
     }
 
     [Fact]

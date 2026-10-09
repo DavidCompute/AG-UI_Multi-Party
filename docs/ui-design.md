@@ -113,7 +113,7 @@ topbar（品牌 + 顶栏操作）
   - 正文：支持 Markdown（标题/列表/表格/代码块/引用），先经 DOMPurify 消毒再渲染，外链 `_blank`。
   - 智能体消息扩展：`thinking` 可折叠思考块、`plan-card`（编排计划步骤卡片）、技能调用链卡片、
     `[工具] 调用中…→完成收起`、审批卡（HITL）、附件块（图片网格/音频条/文件）。
-  - **附件块：办公文档在下载卡片旁多一个「👁 在线查看」按钮**（见 §2.5）；非此类附件（图片 / 音频 /
+  - **附件块：办公文档在下载卡片旁多一个「👁」按钮（仅图标，悬浮提示 / 无障碍名为「在线查看」）**（见 §2.5）；非此类附件（图片 / 音频 /
     文本 / 压缩包等）不显示该按钮 —— 服务端转不了，给了入口只会报错。
   - 撤回后原地置灰并显示“已撤回”。
 - `#typingRow`：正在输入指示（客服知聚按角色隔离）。
@@ -143,9 +143,20 @@ topbar（品牌 + 顶栏操作）
 **要解决的问题**：数字员工产出的 Word / Excel / PPT 以前只能下载后用本地 Office 打开；
 用户希望点一下就能在页面里读。
 
-**形态**：消息附件卡片旁的「👁 在线查看」→ 宽幅弹窗（`.modal.doc-preview-modal`：
-宽 `min(1100px, 94vw)`、高 `min(88vh, 900px)`）内嵌 iframe，头部是附件名 + 「⬇ 下载原件」，
-底部一个「关闭」。弹窗打开即开始加载，顶部显示「正在转换文档，首次打开需要几秒…」。
+**形态**：消息附件卡片旁的「👁」图标（仅图标、悬浮提示「在线查看」）→ 宽幅弹窗（`.modal.doc-preview-modal`：
+宽 `min(1100px, 94vw)`、高 `min(88vh, 900px)`），头部是附件名 + 「⬇ 下载原件」，弹窗打开即开始加载
+（顶部显示「正在转换文档，首次打开需要几秒…」）。**两种渲染形态**：
+
+- **普通文档**（docx / xlsx / pdf / odt/ods/rtf…）：内嵌 iframe 走浏览器自带 PDF 阅读器（服务端已转好 PDF）。
+- **演示文稿**（pptx / ppt / odp）：改用**自绘幻灯片查看器**（PDF.js 把转好的 PDF 逐页画到 canvas）——
+  ① **备注跟随当前页显示在下方**（第 i 页显示第 i 页的演讲者备注）；② 底部「◀ 页码 ▶ ▶ 播放」翻页 / 播放；
+  ③ **在线播放模式**：点「▶ 播放」进入全屏黑底幻灯片，方向键 / 空格 / PageUp·PageDown 翻页、`N` 切换备注浮层、
+  `Esc` 退出播放（只退播放、不关弹窗）。
+
+播放 / 备注的数据来源：幻灯片来自 `GET /ag-ui/preview/{id}`（同普通文档的 PDF）；备注来自
+`GET /ag-ui/preview/{id}/notes`（服务端从 `.pptx` 的 `notesSlides` 按幻灯片顺序抽取文本，失败返回空数组 →
+退化为「只播放幻灯片、不显示备注区」）。为何 PPT 不走系统 PDF 阅读器：浏览器内置阅读器是黑盒，
+拿不到「当前第几页」也就无法把备注对到当前页、更无法做全屏播放。
 
 **关键实现约定（都不是随手写的，每条都对应一个坑）**：
 
@@ -155,6 +166,9 @@ topbar（品牌 + 顶栏操作）
 | 前端先 `fetch` 成 **Blob** 再设给 iframe（而不是把接口地址直接给 `iframe.src`） | 这样能拿到真实 HTTP 状态码，给出“没权限 / 不存在 / 服务端没装转换组件 / 这份文档转不出”的准确提示；直接给 iframe 的话错误响应会被当成一个“页面”静默渲染成空白 |
 | 因此 CSP 需要放行 `frame-src 'self' blob:` | Blob URL 入掍默认会被 `default-src 'self'` 拦住（见 `Program.cs` 响应头中间件） |
 | 关闭 / Esc / 点遮罩都要 `URL.revokeObjectURL` | 否则每看一份文档都留一份完整 PDF 在内存里 |
+| 演示文稿用 PDF.js 自绘（`vendor/pdfjs`），普通文档仍用 iframe | 要「备注跟随当前页 + 全屏播放」就必须自己掌握翻页；`?notes=true`（LibreOffice `ExportNotesPages`）保留为 API 选项，但当前 UI 不再用它 |
+| 备注从 `.pptx` 的 `notesSlides` 抽取（`/preview/{id}/notes`） | 幻灯片 PDF 里没有备注文本、只有备注页「版式」；抽取正文才能让备注与「当前页」一一对应。只支持 .pptx，其它格式退化为无备注 |
+| PDF.js 来自 `vendor/pdfjs`（同源），worker 同源加载 | CSP `script-src 'self'` 允许同源 worker；不用 blob worker 就无需再放宽 `worker-src` |
 | 加载 / 错误提示用 **`.hidden` 类**，不用 `hidden` 属性 | 提示元素带 `display:flex`，`hidden` 属性会被这条规则盖掉，提示永远不消失（已踩） |
 | 弹窗宽度用两段选择器 `.modal.doc-preview-modal` | `.modal` 基类在后面定义且同类选择器同权重，单类名会被它盖成 380px 宽（已踩：iframe 只剩 338px） |
 | `Esc` 在**捕获阶段**处理，且弹窗已隐藏时直接返回 | 不与下层弹窗（如库设置）争抢，不穿透 |
@@ -267,7 +281,7 @@ topbar（品牌 + 顶栏操作）
   以前用户看得到路径却拿不到稿子。现在服务端把 `produce_file` 标记入库为附件并随响应返回 `attachments[]`
   （与聊天回档**同一实现**：扩展名白名单 / 非空 / 产物尺寸上限），前端把它渲染成可操作的产出行：
   - `⬇ 下载`：站内附件直链（`authedAssetUrl` 带会话令牌），点开即下载原件；
-  - `👁 在线查看`：仅办公文档 / PDF 类出现，复用 §2.5 的文档预览弹窗（弹窗 z-index 用
+  - `👁`（在线查看；仅图标，悬浮提示 / 无障碍名为「在线查看」）：仅办公文档 / PDF 类出现，复用 §2.5 的文档预览弹窗（弹窗 z-index 用
     `ui-dialog-overlay`（80），因为它是从 z-20 的技能结果弹窗里唤起的，必须在其之上；
     `Esc` 在捕获阶段只收起预览弹窗，不会把下层的技能结果弹窗一起关掉）；
   - 每次试运行**先清空上一次的产出**，否则两次结果会混排。
@@ -441,7 +455,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
-| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（docx / xlsx / pptx → PDF 内联；`?token=` 授权；权限同 `/files`；转换产物带缓存）|
+| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（docx / xlsx / pptx → PDF 内联；`?notes=true` 演示文稿返回备注页 PDF；`?token=` 授权；权限同 `/files`；转换产物带缓存）；`GET /ag-ui/preview/{attachmentId}/notes`（演示文稿按幻灯片顺序返回备注文本数组）|
 | 技能库试运行 | `POST /ag-ui/skills/{skillId}/run`（返回 `attachments[]` = 本次产出的文件；产物归属记在产出者名下，本人可下载 / 可预览）|
 | 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`POST /ag-ui/kb/{kbId}/search`（试检索，只回片段预览）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌；库设置里的试检索也走它） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥/**存储**）、`/ag-ui/settings/model|branding` |

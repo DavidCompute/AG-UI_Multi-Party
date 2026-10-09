@@ -1063,6 +1063,11 @@ window.I18N_DICTS.en = {
 
   // ---- Office document preview (docx / xlsx / pptx / pdf rendered inline as a PDF)----
   "docPreview.converting": "Converting the document; first open takes a few seconds…",
+  "docPreview.prev": "◀",
+  "docPreview.next": "▶",
+  "docPreview.play": "▶ Play",
+  "docPreview.exitPlay": "Exit",
+  "docPreview.playNotes": "📝 Notes",
   "docPreview.download": "⬇ Download original",
   "docPreview.close": "Close",
   "docPreview.unsupported": "This file type can't be previewed; please download it instead",

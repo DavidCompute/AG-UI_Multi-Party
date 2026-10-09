@@ -711,6 +711,47 @@ select {
 .modal.doc-preview-modal { width: min(1100px, 94vw); max-width: 94vw; height: min(88vh, 900px); display: flex; flex-direction: column; }
 .doc-preview-head { display: flex; align-items: center; gap: 12px; }
 .doc-preview-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 演示文稿在线查看：自绘幻灯片查看器（备注跟随当前页）+ 全屏播放。 */
+.doc-slide-view { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.doc-slide-stage {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; padding: 8px;
+}
+.doc-slide-stage canvas { max-width: 100%; max-height: 100%; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.25); }
+.doc-slide-notes {
+  flex: none; max-height: 30%; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-size: 13px; line-height: 1.55; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 8px 12px;
+}
+.doc-slide-actions { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
+.doc-slide-nav, .doc-slide-play {
+  font-family: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+  color: var(--accent); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px;
+}
+.doc-slide-nav:hover, .doc-slide-play:hover { border-color: var(--accent); }
+.doc-slide-page { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 56px; text-align: center; }
+
+/* 全屏播放：z 高于所有弹窗（含 z-80 的 ui-dialog-overlay）。 */
+.doc-play { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; align-items: center; justify-content: center; }
+.doc-play-canvas { max-width: 92vw; max-height: 82vh; background: #fff; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+.doc-play-notes {
+  position: fixed; left: 0; right: 0; bottom: 56px; max-height: 26vh; overflow: auto; white-space: pre-wrap;
+  padding: 10px 18px; font-size: 14px; line-height: 1.5; color: #eaeaea;
+  background: rgba(0,0,0,.72); border-top: 1px solid rgba(255,255,255,.18);
+}
+.doc-play-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 56px;
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  background: rgba(0,0,0,.6); color: #fff;
+}
+.doc-play-btn {
+  font-family: inherit; font-size: 13px; cursor: pointer; color: #fff;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 14px;
+}
+.doc-play-btn:hover { background: rgba(255,255,255,.22); }
+.doc-play-page { font-size: 13px; font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
 .doc-preview-dl { font-size: 13px; font-weight: normal; color: var(--accent); text-decoration: none; white-space: nowrap; }
 .doc-preview-dl:hover { text-decoration: underline; }
 .doc-preview-body { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 10px 0; }

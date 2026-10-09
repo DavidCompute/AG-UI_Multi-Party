@@ -1060,6 +1060,11 @@ window.I18N_DICTS.zh = {
 
   // ---- 办公文档在线查看（docx / xlsx / pptx / pdf 服务端转 PDF 后弹窗内联渲染）----
   "docPreview.converting": "正在转换文档，首次打开需要几秒…",
+  "docPreview.prev": "◀",
+  "docPreview.next": "▶",
+  "docPreview.play": "▶ 播放",
+  "docPreview.exitPlay": "退出",
+  "docPreview.playNotes": "📝 备注",
   "docPreview.download": "⬇ 下载原件",
   "docPreview.close": "关闭",
   "docPreview.unsupported": "该文件类型不支持在线查看，请下载后打开",

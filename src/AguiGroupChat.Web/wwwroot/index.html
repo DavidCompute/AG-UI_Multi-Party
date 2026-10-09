@@ -731,10 +731,34 @@
         </div>
         <div class="doc-preview-hint doc-preview-error hidden" id="docPreviewError"></div>
         <iframe id="docPreviewFrame" class="doc-preview-frame hidden" title="document preview"></iframe>
+        <!-- 演示文稿：自绘查看器（备注跟随当前页显示在下方） -->
+        <div id="docSlideView" class="doc-slide-view hidden">
+          <div class="doc-slide-stage"><canvas id="docSlideCanvas"></canvas></div>
+          <div class="doc-slide-notes hidden" id="docSlideNotes"></div>
+        </div>
       </div>
       <div class="modal-actions">
+        <div id="docSlideActions" class="doc-slide-actions hidden">
+          <button id="docSlidePrev" type="button" class="doc-slide-nav" data-i18n="docPreview.prev">◀</button>
+          <span id="docSlidePage" class="doc-slide-page"></span>
+          <button id="docSlideNext" type="button" class="doc-slide-nav" data-i18n="docPreview.next">▶</button>
+          <button id="docSlidePlay" type="button" class="doc-slide-play" data-i18n="docPreview.play">▶ 播放</button>
+        </div>
         <button id="docPreviewClose" class="send" data-i18n="docPreview.close">关闭</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 演示文稿在线播放（全屏）：幻灯片 + 键盘导航 + 可选备注 -->
+  <div id="docPlayOverlay" class="doc-play hidden">
+    <canvas id="docPlayCanvas" class="doc-play-canvas"></canvas>
+    <div id="docPlayNotes" class="doc-play-notes hidden"></div>
+    <div class="doc-play-bar">
+      <button id="docPlayPrev" type="button" class="doc-play-btn" data-i18n="docPreview.prev">◀</button>
+      <span id="docPlayPage" class="doc-play-page"></span>
+      <button id="docPlayNext" type="button" class="doc-play-btn" data-i18n="docPreview.next">▶</button>
+      <button id="docPlayNotesBtn" type="button" class="doc-play-btn" data-i18n="docPreview.playNotes"></button>
+      <button id="docPlayExit" type="button" class="doc-play-btn" data-i18n="docPreview.exitPlay"></button>
     </div>
   </div>
 
@@ -1627,6 +1651,7 @@
   <script src="/vendor/marked.min.js"></script>
   <script src="/vendor/purify.min.js"></script>
   <script src="/vendor/mermaid.min.js"></script>
+  <script src="/vendor/pdfjs/pdf.min.js"></script>
   <script src="/i18n/en.js"></script>
   <script src="/i18n/zh.js"></script>
   <script src="/i18n/i18n.js"></script>

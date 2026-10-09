@@ -38,8 +38,9 @@ public sealed record PreviewOutcome(string? PdfPath, PreviewFailure Failure, str
 /// </summary>
 public interface IDocPreviewConverter
 {
-    /// <summary>取该附件的可内联 PDF：命中缓存直接返回，否则转换并缓存。</summary>
-    Task<PreviewOutcome> GetOrCreateAsync(string attachmentId, string sourcePath, CancellationToken ct = default);
+    /// <summary>取该附件的可内联 PDF：命中缓存直接返回，否则转换并缓存。
+    /// <paramref name="notes"/> 为 true 且文件是演示文稿时，返回「备注页」PDF（每页幻灯片 + 该页演讲者备注）。</summary>
+    Task<PreviewOutcome> GetOrCreateAsync(string attachmentId, string sourcePath, bool notes = false, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -72,6 +73,12 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
         ".odt", ".ods", ".odp", ".rtf",
     };
 
+    /// <summary>演示文稿（有「演讲者备注」概念）的扩展名：只有这些能在在线查看里切换「幻灯片 / 备注」。</summary>
+    private static readonly HashSet<string> PresentationExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pptx", ".ppt", ".odp",
+    };
+
     /// <summary>缓存默认保留期：超过则在下一次转换时被顺带清理（预览是“看过就算”的派生数据，不留太久）。</summary>
     public static readonly TimeSpan DefaultCacheRetention = TimeSpan.FromDays(7);
 
@@ -102,14 +109,18 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
     public static bool IsPreviewable(string fileName)
         => PreviewableExtensions.Contains(Path.GetExtension(fileName ?? ""));
 
+    /// <summary>该文件是否演示文稿（在线查看时可切换「幻灯片 / 备注」）。</summary>
+    public static bool IsPresentation(string fileName)
+        => PresentationExtensions.Contains(Path.GetExtension(fileName ?? ""));
+
     public async Task<PreviewOutcome> GetOrCreateAsync(string attachmentId, string sourcePath,
-        CancellationToken ct = default)
+        bool notes = false, CancellationToken ct = default)
     {
         if (!IsPreviewable(sourcePath))
             return PreviewOutcome.Fail(PreviewFailure.Unsupported,
                 $"该文件类型不支持在线预览（{Path.GetExtension(sourcePath)}），请下载后用本地应用打开");
 
-        // PDF 本身就是浏览器能内联渲染的格式：不必转换，直接回源文件
+        // PDF 本身就是浏览器能内联渲染的格式：不必转换，直接回源文件（也没有「备注页」概念）
         if (string.Equals(Path.GetExtension(sourcePath), ".pdf", StringComparison.OrdinalIgnoreCase))
             return File.Exists(sourcePath)
                 ? PreviewOutcome.Success(sourcePath)
@@ -119,7 +130,10 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
         if (!source.Exists)
             return PreviewOutcome.Fail(PreviewFailure.MissingSource, "源文件不存在或已删除");
 
-        var pdfPath = Path.Combine(_cacheRoot, SafeCacheKey(attachmentId) + ".pdf");
+        // 只有演示文稿有「演讲者备注」：其它格式即便请求 notes 也走普通路径，避免生成两份内容相同的缓存
+        var wantNotes = notes && IsPresentation(sourcePath);
+
+        var pdfPath = Path.Combine(_cacheRoot, SafeCacheKey(attachmentId) + (wantNotes ? ".notes" : "") + ".pdf");
         var stampPath = pdfPath + ".stamp";
         var stamp = $"{source.Length}:{source.LastWriteTimeUtc.Ticks}";
 
@@ -141,7 +155,7 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
             Directory.CreateDirectory(tmpDir);
             try
             {
-                var result = await _runner.ConvertToPdfAsync(sourcePath, tmpDir, ct).ConfigureAwait(false);
+                var result = await _runner.ConvertToPdfAsync(sourcePath, tmpDir, wantNotes, ct).ConfigureAwait(false);
                 if (!result.Ok)
                 {
                     _logger.LogWarning("在线预览转换失败：{Source}（{Detail}）", sourcePath, result.Detail);

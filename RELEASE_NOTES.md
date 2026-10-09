@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.168 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.168 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.169 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.169 Release Notes (current Windows desktop release)
+
+**版本说明**：本版把**演示文稿的在线查看**从“只能看幻灯片”升级为**能看备注、能播放**：PPT / PPTX 改用自绘幻灯片查看器，**备注跟随当前页显示在下方**，并可点「▶ 播放」进入**全屏播放模式**（方向键 / 空格翻页、`N` 开关备注、`Esc` 退出）。顺带把「👁 在线查看」按钮改为仅图标，并修掉一个高分屏下“幻灯片只显示一半宽高”的缺陷。
+**Version note**: this release turns **presentation online viewing** from “slides only” into **notes + playback**: PPT / PPTX now use a self-drawn slide viewer with **per-slide speaker notes shown below the current page**, plus a **fullscreen playback mode** (arrow / space to navigate, `N` for notes, `Esc` to exit). It also makes the “👁 view online” button icon-only and fixes a high-DPI bug where the slide rendered at half width and half height.
+
+## 演示文稿在线查看：备注跟随当前页 + 全屏播放
+# Presentation preview: per-slide notes + fullscreen playback
+
+中文：
+- **为什么改**：浏览器内置 PDF 阅读器是黑盒，拿不到“当前第几页”，所以既没法把备注对到当前页、也没法做播放。演示文稿因此改用**自绘幻灯片查看器**（内置 PDF.js 把服务端转好的 PDF 逐页画到 canvas）；docx / xlsx / pdf 等仍走原来的内置阅读器（零回归）。
+- **备注跟随当前页**：新增 `GET /ag-ui/preview/{id}/notes`，服务端从 `.pptx` 的 `ppt/notesSlides` 按幻灯片顺序抽取备注正文（只取备注正文占位符，避开页码），前端在第 i 页下方显示第 i 页备注，翻页即切换。
+- **在线播放模式**：弹窗底部「◀ 页码 ▶」翻页 + 「▶ 播放」进入全屏黑底幻灯片；方向键 / 空格 / PageUp·PageDown 翻页，`N` 切换备注浮层，`Esc` 只退播放、不关弹窗。
+- **优雅降级**：`.ppt`（二进制）/ `.odp` 抽不到备注，仍可正常播放，只是不显示备注区；服务端未装 LibreOffice 时一如既往降级为 503。
+- **依赖**：新增 vendored `PDF.js`（`wwwroot/vendor/pdfjs`，同源加载，符合现有 CSP）。另保留 `?notes=true`（LibreOffice `ExportNotesPages` 备注页 PDF）为 API 选项。
+- **缺陷修复（高分屏）**：画布后备缓冲按 DPR 分配、但渲染变换误设为单位矩阵，导致 DPR=2 屏幕上幻灯片只画进左上角 1/4（看起来只有一半宽高）。已改为 `setTransform(dpr,0,0,dpr,0,0)`。
+- **界面小改**：附件卡片的「👁 在线查看」按钮只保留 `👁` 图标（保留悬浮提示 + 补 `aria-label`）。
+
+English:
+- **Why**: the built-in PDF viewer is a black box with no “current page” signal, so it can neither line notes up with the current slide nor do playback. Presentations therefore use a **self-drawn slide viewer** (bundled PDF.js renders the server-converted PDF page by page onto a canvas); docx / xlsx / pdf keep the old built-in reader (no regression).
+- **Per-slide notes**: new `GET /ag-ui/preview/{id}/notes` extracts speaker notes in slide order from the `.pptx` `notesSlides` (body placeholder only, skipping the page-number field); the viewer shows page *i*'s notes below page *i* and swaps them on navigation.
+- **Playback mode**: a 「◀ page ▶」 bar plus 「▶ Play」 enters a fullscreen black slide view; arrow / space / PageUp·PageDown navigate, `N` toggles the notes overlay, `Esc` exits playback only (the modal stays).
+- **Graceful degradation**: `.ppt` (binary) / `.odp` yield no notes but still play; the usual 503 fallback when LibreOffice is absent is unchanged.
+- **Dependency**: vendored `PDF.js` (`wwwroot/vendor/pdfjs`, same-origin, fits the current CSP). `?notes=true` (LibreOffice `ExportNotesPages` notes-pages PDF) is kept as an API option.
+- **High-DPI fix**: the canvas backing store was sized by DPR while the render transform was left as identity, so at DPR=2 the slide drew into the top-left quarter (appearing half width and half height). Now `setTransform(dpr,0,0,dpr,0,0)`.
+- **UI tweak**: the attachment “👁 view online” button is icon-only now (tooltip kept, `aria-label` added).
+
+## 回归
+# Tests
+
+中文：新增 `PresentationNotesTests`（备注按幻灯片顺序抽取 / 跳过页码占位符 / 无备注返回空串 / 非 pptx 与损坏包返回 null）；`DocPreview` 增加“`?notes=true` 走独立缓存”“`/notes` 端点返回逐页备注”“匿名 401”。C# 相关 **73 通过 / 0 失败**。新增浏览器 E2E `tools/ui-doc-slides.mjs`（在 **deviceScaleFactor=2** 下跑）：**20 项全过**，含“幻灯片铺满画布”回归（只画 1/4 会变红）；原有 `ui-doc-preview.mjs` **19 项**仍全过。
+English: added `PresentationNotesTests` (order / placeholder skip / empty notes / non-pptx and corrupt → null), plus `DocPreview` cases for the `?notes=true` cache variant, the `/notes` endpoint, and anonymous 401. **73 passed / 0 failed** in C#. New browser E2E `tools/ui-doc-slides.mjs` (run at **deviceScaleFactor=2**): **20/20**, including the “slide fills the canvas” regression (fails if it draws only a quarter); the existing `ui-doc-preview.mjs` still passes **19/19**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.168 发布说明（上一版）
+# AG-UI Group Chat Desktop 1.0.168 Release Notes (previous release)
 
 **版本说明**：1.0.168 是 1.0.167 的**收尾加固版**。1.0.167 用「心跳 + 抬高空闲阈值」把长任务从孤儿流兜底手里救了出来，但同一条根因链上还有几处没修干净：兜底文案在流被回收后必然写不进去、桥接与计划阶段仍无心跳、终止/交互超限两条收尾路径不挂产物、心跳本身还有并发“复活”隐患。本版把审核出的 P1/P2 全部收口，并把当时“假通过”的测试改成真正会红的回归。
 **Version note**: 1.0.168 hardens 1.0.167. That release saved long runs from the orphan-stream reaper via a heartbeat and a higher idle threshold, but several links of the same root-cause chain were left open: the empty-reply fallback could never be written once the stream was reclaimed, the bridge and plan phases still had no heartbeat, the terminate and interaction-limit paths attached no products, and the heartbeat itself still had a concurrent “resurrect” hazard. This release closes every P1/P2 item from the audit and turns the previously “falsely-passing” tests into real regressions.

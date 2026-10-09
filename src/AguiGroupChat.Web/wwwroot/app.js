@@ -2459,8 +2459,9 @@ function renderSkillRunArtifacts(atts) {
       const pv = document.createElement("button");
       pv.type = "button";
       pv.className = "skill-run-artifact-btn";
-      pv.textContent = `👁 ${t("msg.preview")}`;
+      pv.textContent = "👁"; // 仅保留图标
       pv.title = t("msg.previewTip");
+      pv.setAttribute("aria-label", t("msg.preview"));
       pv.onclick = () => openDocPreview(pvId, att.name || "");
       row.appendChild(pv);
     }
@@ -7988,7 +7989,7 @@ function msgDom(m, r) {
     // 非此类附件不显示该按钮——服务端转不了，给了入口只会报错。
     const pvId = previewableAttId(att);
     if (!pvId) return fileLink;
-    return `<span class="att-row">${fileLink}<button type="button" class="att-preview" data-preview-id="${escapeHtml(pvId)}" data-preview-name="${name}" title="${escapeHtml(t("msg.previewTip"))}">👁 ${escapeHtml(t("msg.preview"))}</button></span>`;
+    return `<span class="att-row">${fileLink}<button type="button" class="att-preview" data-preview-id="${escapeHtml(pvId)}" data-preview-name="${name}" title="${escapeHtml(t("msg.previewTip"))}" aria-label="${escapeHtml(t("msg.preview"))}">👁</button></span>`;
   }).join("");
   const avatar = (() => {
     const sender = r.members.find((x) => x.memberId === m.senderId);
@@ -8057,6 +8058,8 @@ function msgDom(m, r) {
 
 /** 可在线查看的附件扩展名（与服务端 `OfficePreviewConverter.PreviewableExtensions` 对应）。 */
 const PREVIEWABLE_ATT_RE = /\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i;
+/** 演示文稿：在线查看时可切换「幻灯片 / 备注页」（其它格式没有演讲者备注）。 */
+const PRESENTATION_ATT_RE = /\.(pptx?|odp)$/i;
 
 /**
  * 该附件的「可预览附件 ID」：类型不符、或拿不到站内附件 ID（外部桥接附件只有外链）时返回 null。
@@ -8068,6 +8071,11 @@ function previewableAttId(att) {
   if (att.attachmentId) return att.attachmentId;
   const m = /^\/ag-ui\/files\/(att_[A-Za-z0-9_-]+)\//.exec(att.url || "");
   return m ? m[1] : null;
+}
+
+/** 该附件名是否演示文稿（决定在线查看弹窗是否给出「幻灯片 / 备注」切换）。 */
+function isPresentationAtt(name) {
+  return PRESENTATION_ATT_RE.test(name || "");
 }
 
 /** 给消息里的「在线查看」按钮挂事件。 */
@@ -8086,6 +8094,17 @@ function bindDocPreviewButtons(container) {
 /** 预览弹窗当前的 Blob URL（关闭时回收，避免把整份 PDF 留在内存里）。 */
 let docPreviewBlobUrl = null;
 
+/** 预览弹窗当前上下文：{ attId, name }。 */
+let docPreviewCtx = null;
+
+/** 演示文稿查看器状态：PDF 文档、当前页（0 基）、每页备注、渲染序号、播放态。 */
+let docPdf = null;
+let docPdfPage = 0;
+let docPdfNotes = null;   // string[] | null（null = 该格式不支持备注）
+let docRenderSeq = 0;
+let docPlaying = false;
+let docPlayNotesOn = false;
+
 /** 按状态码给本地化错因（优先本地文案：服务端错误消息只有中文，英文界面下会串味道）。 */
 function docPreviewErrorText(status, serverMsg) {
   if (status === 403) return t("docPreview.denied");
@@ -8095,10 +8114,14 @@ function docPreviewErrorText(status, serverMsg) {
 }
 
 /**
- * 办公文档在线查看：取服务端转好的 PDF（Blob）→ 弹窗 iframe 内联渲染。
+ * 办公文档在线查看：取服务端转好的 PDF 后弹窗内联渲染。
  *
- * 为何先 fetch 成 Blob 再喂 iframe：取 Blob 能拿到真实 HTTP 状态码（401/403/503/500），
- * 从而给出“没权限 / 不存在 / 服务端没装转换组件 / 这份文档转不出”的准确提示；
+ * 两种形态：
+ *   - **演示文稿**（pptx/ppt/odp）：交给自绘的幻灯片查看器（PDF.js）——备注跟随当前页显示在下方，并可进入全屏播放；
+ *   - **其余文档**（docx/xlsx/pdf…）：沿用浏览器内置 PDF 阅读器的 iframe（已验证、无需改动）。
+ *
+ * 为何先 fetch 成 Blob/ArrayBuffer 再交渲染：能拿到真实 HTTP 状态码（401/403/503/500），
+ * 给出“没权限 / 不存在 / 服务端没装转换组件 / 这份文档转不出”的准确提示；
  * 若直接把接口地址给 iframe，错误响应会被当成一个页面静默渲染成一片空白。
  */
 async function openDocPreview(attId, name) {
@@ -8106,12 +8129,16 @@ async function openDocPreview(attId, name) {
   const frame = $("docPreviewFrame");
   const loading = $("docPreviewLoading");
   const errorEl = $("docPreviewError");
+  resetDocViewer();
+  docPreviewCtx = { attId, name: name || "" };
   $("docPreviewName").textContent = name || "";
   // 「下载原件」走原有附件下载端点（同样带会话令牌）
   $("docPreviewDownload").href = authedAssetUrl(`/ag-ui/files/${encodeURIComponent(attId)}/${encodeURIComponent(name || "file")}`);
   releaseDocPreviewBlob();
   frame.classList.add("hidden");
   frame.removeAttribute("src");
+  $("docSlideView").classList.add("hidden");
+  $("docSlideActions").classList.add("hidden");
   errorEl.classList.add("hidden");
   errorEl.textContent = "";
   // 用 .hidden 类而不是 hidden 属性：本元素带 .doc-preview-hint 的 display:flex，
@@ -8134,15 +8161,165 @@ async function openDocPreview(attId, name) {
     if (!/application\/pdf/i.test(blob.type || "")) {
       throw Object.assign(new Error(t("docPreview.unsupported")), { status: 400 });
     }
-    docPreviewBlobUrl = URL.createObjectURL(blob);
-    frame.src = docPreviewBlobUrl;
-    frame.classList.remove("hidden");
-    loading.classList.add("hidden");
+    if (isPresentationAtt(name) && window.pdfjsLib) {
+      await openDocSlideView(await blob.arrayBuffer());   // 演示文稿：自绘幻灯片查看器
+    } else {
+      docPreviewBlobUrl = URL.createObjectURL(blob);
+      frame.src = docPreviewBlobUrl;
+      frame.classList.remove("hidden");
+      loading.classList.add("hidden");
+    }
   } catch (err) {
     loading.classList.add("hidden");
     errorEl.textContent = docPreviewErrorText(err && err.status, err && err.message);
     errorEl.classList.remove("hidden");
   }
+}
+
+/** 进入幻灯片查看器：用 PDF.js 解析已转好的 PDF，拉取每页备注，渲染第一页。 */
+async function openDocSlideView(buffer) {
+  const loading = $("docPreviewLoading");
+  const errorEl = $("docPreviewError");
+  try {
+    docPdf = await window.pdfjsLib.getDocument({ data: buffer }).promise;
+  } catch (e) {
+    loading.classList.add("hidden");
+    errorEl.textContent = docPreviewErrorText(500, e && e.message);
+    errorEl.classList.remove("hidden");
+    return;
+  }
+  docPdfPage = 0;
+  docPdfNotes = null;
+  // 备注：拿不到（老格式 .ppt / 无备注）不影响播放，退化为“只播放幻灯片、不显示备注区”
+  try {
+    const r = await fetch(authedAssetUrl(`/ag-ui/preview/${encodeURIComponent(docPreviewCtx.attId)}/notes`), {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (r.ok) {
+      const j = await r.json();
+      if (Array.isArray(j.notes)) docPdfNotes = j.notes;
+    }
+  } catch { /* 备注获取失败：忽略 */ }
+  $("docSlideView").classList.remove("hidden");
+  $("docSlideActions").classList.remove("hidden");
+  loading.classList.add("hidden");
+  await renderDocSlide();
+}
+
+/** 把某一页渲染到画布并适配给定像素尺寸（返回视口，供调用方共用）。 */
+function fitDocCanvas(canvas, page, maxW, maxH) {
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.max(Math.min(maxW / base.width, maxH / base.height), 0.05);
+  const vp = page.getViewport({ scale });
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(vp.width * dpr);
+  canvas.height = Math.floor(vp.height * dpr);
+  canvas.style.width = Math.floor(vp.width) + "px";
+  canvas.style.height = Math.floor(vp.height) + "px";
+  return vp;
+}
+
+/** 渲染当前页到弹窗内的幻灯片画布，并同步备注与页码。 */
+async function renderDocSlide() {
+  if (!docPdf || docPlaying) return;
+  const canvas = $("docSlideCanvas");
+  const stage = canvas.parentElement;
+  const seq = ++docRenderSeq;
+  const w = Math.max(stage.clientWidth - 16, 200);
+  const h = Math.max(stage.clientHeight - 16, 150);
+  try {
+    const page = await docPdf.getPage(docPdfPage + 1);
+    if (seq !== docRenderSeq) return;
+    const vp = fitDocCanvas(canvas, page, w, h);
+    const ctx = canvas.getContext("2d");
+    // 画布 backing store 是 CSS 尺寸 × devicePixelRatio；必须把坐标系放大同样倍数，
+    // 否则在 DPR=2 的高分屏上只会画进左上角 1/4（幻灯片看起来只有一半宽高）。
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  } catch { /* 渲染失败 / 被新一帧取消：保持上一帧 */ }
+  if (seq !== docRenderSeq) return;
+  const notes = (docPdfNotes && docPdfNotes[docPdfPage]) || "";
+  const notesEl = $("docSlideNotes");
+  notesEl.textContent = notes;
+  notesEl.classList.toggle("hidden", !notes);
+  $("docSlidePage").textContent = `${docPdfPage + 1} / ${docPdf.numPages}`;
+}
+
+/** 翻到上一页 / 下一页（播放态下同步刷新全屏画布）。 */
+async function docSlideGo(delta) {
+  if (!docPdf) return;
+  const next = Math.min(Math.max(docPdfPage + delta, 0), docPdf.numPages - 1);
+  if (next === docPdfPage) return;
+  docPdfPage = next;
+  if (docPlaying) await renderDocPlay();
+  else await renderDocSlide();
+}
+
+/** 进入全屏播放模式（幻灯片 + 键盘导航，可选显示备注）。 */
+async function startDocPlay() {
+  if (!docPdf) return;
+  docPlaying = true;
+  $("docPlayOverlay").classList.remove("hidden");
+  $("docPlayNotes").classList.toggle("hidden", !docPlayNotesOn);
+  await renderDocPlay();
+}
+
+/** 退出播放模式，回到弹窗内的当前页。 */
+function exitDocPlay() {
+  docPlaying = false;
+  $("docPlayOverlay").classList.add("hidden");
+  renderDocSlide();
+}
+
+/** 渲染播放模式的全屏画布（按窗口尺寸适配）。 */
+async function renderDocPlay() {
+  if (!docPdf) return;
+  const canvas = $("docPlayCanvas");
+  const seq = ++docRenderSeq;
+  const w = Math.max(window.innerWidth - 60, 200);
+  const h = Math.max(window.innerHeight - 120, 150);
+  try {
+    const page = await docPdf.getPage(docPdfPage + 1);
+    if (seq !== docRenderSeq) return;
+    const vp = fitDocCanvas(canvas, page, w, h);
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 同弹窗内查看器：DPR 缩放，防高分屏画到 1/4
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  } catch { /* 取消 / 失败：保持上一帧 */ }
+  if (seq !== docRenderSeq) return;
+  $("docPlayPage").textContent = `${docPdfPage + 1} / ${docPdf.numPages}`;
+  $("docPlayNotes").textContent = (docPdfNotes && docPdfNotes[docPdfPage]) || "";
+}
+
+/** 播放模式下切换「备注」浮层显示。 */
+function toggleDocPlayNotes() {
+  docPlayNotesOn = !docPlayNotesOn;
+  const el = $("docPlayNotes");
+  el.textContent = (docPdfNotes && docPdfNotes[docPdfPage]) || "";
+  el.classList.toggle("hidden", !docPlayNotesOn);
+}
+
+/** 释放幻灯片查看器持有的 PDF / 画布，回到干净状态。 */
+function resetDocViewer() {
+  docRenderSeq++;
+  if (docPdf) { try { docPdf.destroy(); } catch { /* 忽略 */ } docPdf = null; }
+  docPdfPage = 0;
+  docPdfNotes = null;
+  if (docPlaying) { docPlaying = false; $("docPlayOverlay").classList.add("hidden"); }
+  for (const id of ["docSlideCanvas", "docPlayCanvas"]) {
+    const c = $(id);
+    if (!c) continue;
+    const ctx = c.getContext("2d");
+    if (ctx) ctx.clearRect(0, 0, c.width, c.height);
+    c.width = 0; c.height = 0;
+    c.style.width = ""; c.style.height = "";
+  }
+  const notesEl = $("docSlideNotes");
+  notesEl.textContent = "";
+  notesEl.classList.add("hidden");
+  $("docSlidePage").textContent = "";
 }
 
 function releaseDocPreviewBlob() {
@@ -8157,6 +8334,7 @@ function closeDocPreview() {
   frame.classList.add("hidden");
   frame.removeAttribute("src");
   releaseDocPreviewBlob();
+  resetDocViewer();
 }
 
 /** 消息显示文本：数字员工消息剥离结构化 JSON 附件信息后的正文（解析缓存到 m._bridgeParse）；其余消息为原始内容。 */
@@ -10057,14 +10235,34 @@ function init() {
   $("agentImgLibManageBtn").onclick = openImgLibModal;
   $("afImgLibAddBtn").onclick = () => openAgentPick("imglib");
   $("imgLibNewBtn").onclick = () => openLibCreateDialog("imglib");
-  // 办公文档在线查看弹窗：关闭按钮 / 点遮罩 / Esc
+  // 办公文档在线查看弹窗：关闭按钮 / 点遮罩 / Esc；演示文稿额外有翻页与播放
   $("docPreviewClose").onclick = closeDocPreview;
+  $("docSlidePrev").onclick = () => docSlideGo(-1);
+  $("docSlideNext").onclick = () => docSlideGo(1);
+  $("docSlidePlay").onclick = startDocPlay;
+  $("docPlayPrev").onclick = () => docSlideGo(-1);
+  $("docPlayNext").onclick = () => docSlideGo(1);
+  $("docPlayNotesBtn").onclick = toggleDocPlayNotes;
+  $("docPlayExit").onclick = exitDocPlay;
   $("docPreviewModal").addEventListener("click", (e) => { if (e.target === $("docPreviewModal")) closeDocPreview(); });
+  // 播放模式：Esc 退出播放（而不是关弹窗）、方向键/空格翻页、N 切换备注。
   document.addEventListener("keydown", (e) => {
+    if (docPlaying) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); exitDocPlay(); }
+      else if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " " || e.key === "PageDown") { e.preventDefault(); e.stopPropagation(); docSlideGo(1); }
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); e.stopPropagation(); docSlideGo(-1); }
+      else if (e.key === "n" || e.key === "N") { e.preventDefault(); e.stopPropagation(); toggleDocPlayNotes(); }
+      return;
+    }
     if (e.key !== "Escape" || $("docPreviewModal").classList.contains("hidden")) return;
     e.preventDefault(); e.stopPropagation();
     closeDocPreview();
   }, true);
+  // 窗口尺寸变化：重渲染当前幻灯片（弹窗内 / 播放中各自适配尺寸）
+  window.addEventListener("resize", () => {
+    if (docPlaying) renderDocPlay();
+    else if (docPdf && !$("docPreviewModal").classList.contains("hidden")) renderDocSlide();
+  });
   // 「库设置」弹窗（图库 / 知识库共用）：保存 / 取消 / 点遮罩 / Esc 关闭
   $("libSetOk").onclick = saveLibSettings;
   $("libSetCancel").onclick = closeLibSettings;
