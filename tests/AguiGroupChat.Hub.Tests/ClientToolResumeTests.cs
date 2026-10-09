@@ -89,13 +89,21 @@ public sealed class ClientToolResumeTests
         // 下一轮开头的 approvalsThisTurn.Clear() 会把刚自动放行的审批决议一并清掉，
         // 于是 BuildResumeMessage 发出一份“零决议”的空消息，模型收到空回合后回
         // “我这边还没有收到具体需求（消息内容为空）”。
-        var live = new List<ToolApprovalRequestContent>();
+        //
+        // 注意：必须往收集器里先放真实元素再断言 —— 空表快照无论“拷贝”还是“别名”都会 Assert.Empty 通过，
+        // 是个恒真的假测试（审核指出）。这里放两个元素：清空 live 后快照仍应保有它们。
+        var live = new List<ToolApprovalRequestContent>
+        {
+            new ToolApprovalRequestContent("req_1", new FunctionCallContent("call_1", "sk_a", null)),
+            new ToolApprovalRequestContent("req_2", new FunctionCallContent("call_2", "sk_b", null)),
+        };
         var snapshot = AgentGateway.SnapshotApprovals(live);
 
         // 必须是新实例：别名是缺陷本身
         Assert.NotSame(live, snapshot);
+        Assert.Equal(2, snapshot.Count);
         live.Clear(); // 模拟下一轮收集器清空
-        Assert.Empty(snapshot);
+        Assert.Equal(2, snapshot.Count); // 别名 → 会被清成 0（缺陷现场）
     }
 
     [Theory]

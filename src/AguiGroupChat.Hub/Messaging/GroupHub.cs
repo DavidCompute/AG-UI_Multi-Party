@@ -1570,8 +1570,52 @@ public sealed class GroupHub : IDisposable
     /// </summary>
     public void TouchAgentStream(string groupId, string messageId)
     {
-        if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
-            _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+        // 与 EndAgentMessageAsync 的移除共用同一把锁：否则“读-改-写”会和 End 的移除交错，
+        // 把已被 End 移除的流重新写回 _agentStreams（“复活”一条已广播 END 的消息）。
+        lock (_pendingLock)
+        {
+            if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+                _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+        }
+    }
+
+    /// <summary>当消息正文仍为空时写入一段兑底说明；<b>不要求流式状态在线</b>。返回是否写入。
+    ///
+    /// <para>
+    /// 为何需要：收尾路径（崩溃 / 取消 / 终止 / 交互 TTL 清理）明知自己可能跑在“流已被回收”之后，
+    /// 却一直在用 <see cref="AppendAgentContentAsync"/> 补那句人话 —— 它硬性要求流在线，
+    /// 于是异常被 <c>catch → LogDebug</c> 吞掉，用户最终仍然只看到一只空气泡
+    /// （实测：那条消息的 content 就是 0，而不是兑底文案）。
+    /// 这里把“判空 + 写入”合并到锁内原子完成，流在线时顺带广播，流已回收则只改库。
+    /// </para>
+    /// </summary>
+    public async Task<bool> StampMessageContentIfEmptyAsync(string groupId, string messageId, string text,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        HashSet<string>? recipients = null;
+        lock (_pendingLock)
+        {
+            // 判空要连防抖缓冲一起看：流还活着时正文可能只在 _pendingContent 里，库内仍是空
+            var pending = _pendingContent.TryGetValue(messageId, out var p) ? p : null;
+            var current = pending?.Content ?? _store.GetMessage(groupId, messageId)?.Content;
+            if (!string.IsNullOrEmpty(current)) return false;
+            var msg = _store.GetMessage(groupId, messageId);
+            if (msg is null) return false; // 消息真不存在（与“流已回收”不同）：不伪造
+            msg.Content = text;
+            _store.UpdateMessage(msg);
+            // 丢弃空防抖快照：否则下一次 Append 会以它为基拼接、把刚写的兑底文案盖掉
+            _pendingContent.TryRemove(messageId, out _);
+            if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+            {
+                recipients = live.Recipients;
+                _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+            }
+        }
+        _changes?.Notify();
+        if (recipients is not null)
+            await FanOutAsync(groupId, new TextMessageContentEvent { MessageId = messageId, GroupId = groupId, Delta = text }, recipients, ct);
+        return true;
     }
 
     /// <summary>把附件挂到<b>已结束 / 流已回收</b>的智能体消息上（恢复、崩溃兜底专用）。
@@ -1658,6 +1702,9 @@ public sealed class GroupHub : IDisposable
         if (steps is null || steps.Count == 0) return Task.CompletedTask;
         if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
             return Task.CompletedTask;
+        // 计划卡是“运行仍在进行”的可见信号：顺手刷新活跃度，
+        // 否则“多步计划、每步一次性 RunAsync 不产生正文”的阶段会被孤儿流兑底误判为空闲。
+        _agentStreams[messageId] = state with { LastActivityMs = NowMs };
         // 计划随消息落库（刷新 / 重开后历史消息仍可回显计划卡）。持久化是增强，失败不阻断主流程。
         try
         {
@@ -1721,8 +1768,15 @@ public sealed class GroupHub : IDisposable
     /// 在这里统一把它替换成面向用户的 answer 后才落库 / 收尾广播（即便 JSON 早些被分块发出，也能在完结前纠正）。</summary>
     public async Task EndAgentMessageAsync(string groupId, string messageId, CancellationToken ct = default)
     {
-        if (!_agentStreams.TryRemove(messageId, out var state) || state.GroupId != groupId)
-            throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或未开启流式灌入");
+        AgentStreamState? state;
+        // 移除必须在 _pendingLock 内：否则会与各更新者（Append/Reasoning/Attachments/Touch）的
+        // “锁内二次确认 + 写回”交错，把已结束的流重新插回 _agentStreams（“复活”），
+        // 随后正文会被追加到一条已广播 END 的消息上。
+        lock (_pendingLock)
+        {
+            if (!_agentStreams.TryRemove(messageId, out state) || state.GroupId != groupId)
+                throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或未开启流式灌入");
+        }
         FlushPendingContent(messageId); // 消息结束：防抖窗口内的内容立即写库（数据库模式）
         _pendingContent.TryRemove(messageId, out _);
         var msg = _store.GetMessage(groupId, messageId);
@@ -1827,7 +1881,8 @@ public sealed class GroupHub : IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "孤儿流收尾失败：{MessageId}", kv.Key);
+                // 收尾失败会让这条消息永远停在“流式中”（流已移除但 END 未广播），必须看得见。
+                _logger.LogWarning(ex, "孤儿流收尾失败（消息可能停在流式中）：{MessageId}", kv.Key);
             }
         }
     }

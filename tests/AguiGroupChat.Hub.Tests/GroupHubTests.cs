@@ -765,12 +765,14 @@ public sealed class GroupHubTests
             GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
         });
 
-        // 长任务：每 2 分钟一次心跳（远小于 5 分钟空闲阈值）——模拟连调多轮文件生成、期间大段不吐正文
+        // 长任务：每 2 分钟一次心跳（远小于 5 分钟空闲阈值）——模拟连调多轮文件生成、期间大段不吐正文。
+        // 顺序关键：先推进 2 分钟累计空闲 → 先扫描 → 再心跳。若空闲阈值被改回旧值 60s，
+        // 第一次扫描（空闲 2 分钟 > 60s）就会误杀、随后 Append 抛异常，用例立刻变红（阈值敏感）。
         for (var i = 0; i < 7; i++)
         {
             clock.Advance(TimeSpan.FromMinutes(2));
+            hub.CleanupOrphanStreams(); // 空闲 2 分钟 < 5 分钟阈值 → 不应被回收
             hub.TouchAgentStream(group.GroupId, started.MessageId);
-            hub.CleanupOrphanStreams();
         }
         // 已过 14 分钟（远超建流阈值 10 分钟），但一直有心跳 → 流仍在，最终正文追加得进去
         await hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "最终正文");
@@ -780,6 +782,82 @@ public sealed class GroupHubTests
         hub.CleanupOrphanStreams();
         await Assert.ThrowsAsync<AguiProtocolException>(() =>
             hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "迟到正文"));
+    }
+
+    /// <summary>空正文兜底写入必须能在「流已回收」之后生效（收尾路径专用）：否则用户仍只看到空气泡。</summary>
+    [Fact]
+    public async Task StampMessageContentIfEmpty_AfterStreamEnded_StillWrites()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        await f.Hub.EndAgentMessageAsync(group.GroupId, started.MessageId); // 流已回收
+
+        // 旧实现走 AppendAgentContentAsync 会抛“未开启流式灌入”并被吞掉 → 消息 content 仍为 0
+        var ok = await f.Hub.StampMessageContentIfEmptyAsync(group.GroupId, started.MessageId, "（本轮未产出内容）");
+
+        Assert.True(ok);
+        Assert.Equal("（本轮未产出内容）", f.Store.GetMessage(group.GroupId, started.MessageId)!.Content);
+    }
+
+    /// <summary>空正文兜底只在正文仍为空时写入，绝不覆盖已产出的正文。</summary>
+    [Fact]
+    public async Task StampMessageContentIfEmpty_DoesNotOverwriteExistingContent()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        await f.Hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "真正的正文");
+        await f.Hub.EndAgentMessageAsync(group.GroupId, started.MessageId);
+
+        var ok = await f.Hub.StampMessageContentIfEmptyAsync(group.GroupId, started.MessageId, "（兜底不应出现）");
+
+        Assert.False(ok);
+        Assert.Equal("真正的正文", f.Store.GetMessage(group.GroupId, started.MessageId)!.Content);
+    }
+
+    /// <summary>兜底文案为空时不写（防御：调用方偶尔可能拼出空串）。</summary>
+    [Fact]
+    public async Task StampMessageContentIfEmpty_WithEmptyText_IsNoOp()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        await f.Hub.EndAgentMessageAsync(group.GroupId, started.MessageId);
+
+        var ok = await f.Hub.StampMessageContentIfEmptyAsync(group.GroupId, started.MessageId, "");
+
+        Assert.False(ok);
+        Assert.True(string.IsNullOrEmpty(f.Store.GetMessage(group.GroupId, started.MessageId)!.Content));
+    }
+
+    /// <summary>流仍在线时兜底写入要顺带广播 TEXT_MESSAGE_CONTENT（与流式口径一致），前端无需刷新即可看到。</summary>
+    [Fact]
+    public async Task StampMessageContentIfEmpty_WhileStreaming_BroadcastsContent()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var (conn, inbox) = f.NewConnection("user_1");
+        await f.Hub.SubscribeAsync(conn, [group.GroupId]);
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        f.Drain(inbox);
+
+        var ok = await f.Hub.StampMessageContentIfEmptyAsync(group.GroupId, started.MessageId, "（兜底）");
+
+        Assert.True(ok);
+        Assert.Contains("TEXT_MESSAGE_CONTENT", HubFixture.TypesOf(f.Drain(inbox)));
     }
 
     /// <summary>任务计划可视化：BroadcastMessagePlanAsync 广播 TEXT_MESSAGE_PLAN（工作型智能体的 PLAN.md 步骤）。</summary>

@@ -1557,6 +1557,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             // 步骤边界：用户暂停过则挂起等待「继续」，恢复后接着执行剩余步骤
             await PausePlanIfRequestedAsync(planGate, gid, messageId, display, ct);
+            // 心跳：计划阶段每步都是一次性 RunAsync（不产生消息正文），多步累计静默会被孤儿流兑底误判为空闲。
+            _hub.Value.TouchAgentStream(gid, messageId);
             var step = plan.Steps[si];
             if (clientSteps.ContainsKey(si)) continue; // 客户端技能统一在批量阶段执行
             if (step.Action == "dispatch")
@@ -1694,11 +1696,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             }
         }
 
-        // 4) 批量执行客户端技能（若有）
         // 4) 批量执行客户端技能（若有）：合并下发一张「本机一键执行全部」交互卡，前端逐个执行、逐条回传、逐条点亮
         await PausePlanIfRequestedAsync(planGate, gid, messageId, display, ct);
         if (clientSteps.Count > 0)
         {
+            // 心跳：等待用户在本机执行客户端技能期间不产生消息正文，多步累计静默会被孤儿流兜底误判为空闲。
+            _hub.Value.TouchAgentStream(gid, messageId);
             var results = await AwaitBatchClientExecAsync(context, gid, messageId, display, clientSteps.Values.ToList(), ct);
             foreach (var kv in clientSteps)
             {
@@ -3459,6 +3462,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var bridgeAttachments = new List<BridgeAttachment>(); // 外部 AG-UI 服务附件（ATTACHMENT_* / START 附件）累积，消息结束时一次性回灌
             await foreach (var evt in bridgeClient.ReceiveAsync(runCt))
             {
+                // 心跳：外部 AG-UI 服务可能长时间不吐正文（只在内部忙），不刷新活跃度会被孤儿流兑底误杀。
+                if (replyId is { Length: > 0 }) _hub.Value.TouchAgentStream(context.GroupId, replyId);
                 switch (evt.Type)
                 {
                     case "content" when evt.Delta is { Length: > 0 }:
@@ -3595,7 +3600,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             if (bridgeAttachments.Count > 0)
             {
-                try { await _hub.Value.AppendAgentAttachmentsAsync(context.GroupId, replyId, AgentGatewayHelpers.ToAttachmentInfos(bridgeAttachments), runCt); }
+                // 用“不要求流在线”的挂载通道：流仍在时行为一致（去重 + 广播），流已被孤儿流兜底回收时也不会抛错丢附件。
+                try { await _hub.Value.AttachMessageAttachmentsAsync(context.GroupId, replyId, AgentGatewayHelpers.ToAttachmentInfos(bridgeAttachments), runCt); }
                 catch (Exception ex) { _logger.LogWarning(ex, "AG-UI 桥接附件回灌失败：agent={AgentId}", context.AgentId); }
             }
             await _hub.Value.EndAgentMessageAsync(context.GroupId, replyId, runCt);
@@ -3674,6 +3680,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 var bridgeAttachments = new List<BridgeAttachment>(); // 恢复流中外部附件累积，运行结束一并回灌
                 await foreach (var evt in bridgeClient.ReceiveAsync(runCt))
                 {
+                    // 心跳：同 InvokeBridgeAsync，外部服务静默期也要让孤儿流兑底知道这条流活着。
+                    if (messageId is { Length: > 0 }) _hub.Value.TouchAgentStream(pending.GroupId, messageId);
                     switch (evt.Type)
                     {
                         case "content" when evt.Delta is { Length: > 0 }:
@@ -3788,7 +3796,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
                 if (bridgeAttachments.Count > 0)
                 {
-                    try { await _hub.Value.AppendAgentAttachmentsAsync(pending.GroupId, messageId, AgentGatewayHelpers.ToAttachmentInfos(bridgeAttachments), runCt); }
+                    // 同 InvokeBridgeAsync：改用“不要求流在线”的挂载通道，流被回收时不丢附件。
+                    try { await _hub.Value.AttachMessageAttachmentsAsync(pending.GroupId, messageId, AgentGatewayHelpers.ToAttachmentInfos(bridgeAttachments), runCt); }
                     catch (Exception ex) { _logger.LogWarning(ex, "AG-UI 桥接恢复流附件回灌失败：agent={AgentId}", pending.AgentId); }
                 }
                 await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);
@@ -3835,10 +3844,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 try
                 {
                     if (allowAfterEnd)
-                        await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [att], ct);
+                    {
+                        if (await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [att], ct)) added++;
+                    }
                     else
+                    {
                         await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [att], ct);
-                    added++;
+                        added++;
+                    }
                 }
                 catch (Exception ex) { _logger.LogWarning(ex, "publish_file 产物回档失败：{Att}", m.Value); }
             }
@@ -3871,10 +3884,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             try
             {
                 if (allowAfterEnd)
-                    await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [info], ct);
+                {
+                    if (await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [info], ct)) added++;
+                }
                 else
+                {
                     await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [info], ct);
-                added++;
+                    added++;
+                }
             }
             catch (Exception ex)
             {
@@ -4748,6 +4765,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (pending.ResumeCount >= _execution.MaxInteractionRounds)
         {
             _logger.LogWarning("交互恢复超过最大轮数（{Max}），终止运行：interrupt={InterruptId}", _execution.MaxInteractionRounds, interruptId);
+            // 终止前先尽力回挂产物：这条路径以前完全不挂（连尝试都没有），已生成的文件会直接丢。
+            // 注：本路径在“决策请求”的异步流里执行，工具返回收集器（AsyncLocal）通常已随上一轮 run 结束，
+            // 因此只能靠正文里的 att_ 引用找回；produce_file 类产物在这条路径上仍可能找不回（已知局限，至少不再静默）。
+            await TryAttachProductsAfterFailureAsync(pending.GroupId, pending.MessageId, null);
             _ = SafeEndAsync(pending.Context, pending.MessageId);
             await _hub.Value.BroadcastAsync(pending.GroupId, new RunErrorEvent
             {
@@ -4845,7 +4866,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var runId = pending.RunId;
         _autoApprovedRuns.TryRemove(runId, out _); // 运行结束，批量批准失效
         var attached = 0;
-        try { attached = await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, CancellationToken.None); }
+        try { attached = await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, CancellationToken.None, allowAfterEnd: true); }
         catch (Exception ex) { _logger.LogWarning(ex, "终止运行前回挂产物失败：run={RunId}", runId); }
         try
         {
@@ -4853,7 +4874,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 await _hub.Value.AppendAgentContentAsync(pending.GroupId, messageId, EmptyReplyFallback, CancellationToken.None);
             await _hub.Value.AppendAgentContentAsync(pending.GroupId, messageId, $"\n\n（{reason}）", CancellationToken.None);
         }
-        catch (Exception ex) { _logger.LogDebug(ex, "终止运行说明写入失败：run={RunId}", runId); }
+        catch (Exception ex) { _logger.LogWarning(ex, "终止运行说明写入失败：run={RunId}", runId); }
         try
         {
             await _hub.Value.BroadcastAsync(pending.GroupId, new RunErrorEvent
@@ -5203,10 +5224,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// </summary>
     /// <param name="accumulated">回复正文（用于扫正文里的 <c>att_</c> 附件引用）；本方法未提升该局部变量时传 null——
     /// 技能产物靠环境里的工具返回收集器（<c>produce_file</c> 标记）恢复，不依赖正文。</param>
-    /// <para>
-    /// <param name="accumulated">回复正文（用于扫正文里的 <c>att_</c> 附件引用）；本方法未提升该局部变量时传 null——
-    /// 技能产物靠环境里的工具返回收集器（<c>produce_file</c> 标记）恢复，不依赖正文。</param>
-    /// </summary>
     private async Task TryAttachProductsAfterFailureAsync(string groupId, string? messageId, string? accumulated)
     {
         if (string.IsNullOrEmpty(messageId)) return;
@@ -5275,12 +5292,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     {
         try
         {
-            var msg = _hub.Value.Store.GetMessage(groupId, messageId);
-            if (msg is null || !string.IsNullOrWhiteSpace(msg.Content)) return;
-            await _hub.Value.AppendAgentContentAsync(groupId, messageId, note, CancellationToken.None);
-            _logger.LogInformation("空正文兜底：智能体消息 {MessageId} 未产出内容，已附提示（group={GroupId}）", messageId, groupId);
+            // 走 Hub 的“不要求流在线”通道：收尾路径（崩溃/取消/终止/TTL 清理）本就可能跑在流被回收之后，
+            // 用 AppendAgentContentAsync 会抛“未开启流式灌入”并被吞掉 → 用户仍只看到空气泡（实测）。
+            if (await _hub.Value.StampMessageContentIfEmptyAsync(groupId, messageId, note, CancellationToken.None))
+                _logger.LogInformation("空正文兜底：智能体消息 {MessageId} 未产出内容，已附提示（group={GroupId}）", messageId, groupId);
         }
-        catch (Exception ex) { _logger.LogDebug(ex, "空正文兜底写入失败（忽略）：{MessageId}", messageId); }
+        catch (Exception ex) { _logger.LogWarning(ex, "空正文兜底写入失败：{MessageId}", messageId); }
     }
 
     /// <summary>

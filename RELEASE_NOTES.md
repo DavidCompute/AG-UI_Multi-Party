@@ -1,5 +1,49 @@
-# AG-UI 群聊桌面版 1.0.167 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.167 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.168 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.168 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.168 是 1.0.167 的**收尾加固版**。1.0.167 用「心跳 + 抬高空闲阈值」把长任务从孤儿流兜底手里救了出来，但同一条根因链上还有几处没修干净：兜底文案在流被回收后必然写不进去、桥接与计划阶段仍无心跳、终止/交互超限两条收尾路径不挂产物、心跳本身还有并发“复活”隐患。本版把审核出的 P1/P2 全部收口，并把当时“假通过”的测试改成真正会红的回归。
+**Version note**: 1.0.168 hardens 1.0.167. That release saved long runs from the orphan-stream reaper via a heartbeat and a higher idle threshold, but several links of the same root-cause chain were left open: the empty-reply fallback could never be written once the stream was reclaimed, the bridge and plan phases still had no heartbeat, the terminate and interaction-limit paths attached no products, and the heartbeat itself still had a concurrent “resurrect” hazard. This release closes every P1/P2 item from the audit and turns the previously “falsely-passing” tests into real regressions.
+
+## 空正文兜底不再依赖“流还开着”（空气泡的最后一环）
+# The empty-reply fallback no longer needs a live stream (the last link of the empty-bubble chain)
+
+中文：
+- **根因**：收尾路径（崩溃 / 取消 / 终止 / 交互 TTL 清理）明知自己可能跑在**流已被回收之后**，却一直用 `AppendAgentContentAsync` 补那句人话 —— 它硬性要求流在线，于是异常被 `catch → LogDebug` 吞掉，用户最终仍只看到一只空气泡（实测那条消息 `content` 就是 0，而不是兜底文案）。
+- **修复**：新增 `GroupHub.StampMessageContentIfEmptyAsync` —— 把“判空（含防抖缓冲）+ 写入 + 丢弃空快照”合并到锁内原子完成，流在线时顺带广播 `TEXT_MESSAGE_CONTENT`，流已回收则只改库；`TryStampFallbackIfEmptyAsync` 改走它，写入失败从 **Debug 提到 Warning**。
+- **同类收口**：`TerminateResumedRunAsync` 回挂产物时补上 `allowAfterEnd: true`（注释承诺了“产物仍附在本条消息上”，代码却漏了）；交互轮数超限终止路径**此前完全不挂产物**，现在也尽力回挂（靠正文里的 `att_` 引用找回；`produce_file` 类受 AsyncLocal 已结束所限仍可能找不回，属已记录局限）。
+
+English:
+- **Root cause**: the finalizers (crash / cancel / terminate / interaction-TTL sweep) knew they could run *after* the stream was reclaimed, yet still stamped their human-readable note via `AppendAgentContentAsync`, which hard-requires a live stream — so the exception was swallowed at `catch → LogDebug` and the user still saw a bare bubble (the measured message had `content = 0`, not the fallback note).
+- **Fix**: new `GroupHub.StampMessageContentIfEmptyAsync` does “check-empty (including the debounce buffer) + write + drop the empty snapshot” atomically under the lock, broadcasting `TEXT_MESSAGE_CONTENT` when the stream is live and only touching the DB when it is gone; `TryStampFallbackIfEmptyAsync` now uses it, and a failed stamp is logged at **Warning** instead of Debug. The same sweep adds `allowAfterEnd: true` to `TerminateResumedRunAsync` (whose comment promised the products stay on the message) and makes the interaction-limit termination attempt a reattach at all (recovered via `att_` references in the body; `produce_file` products can still be unrecoverable because the AsyncLocal collector has ended — a recorded limitation).
+
+## 长任务在每个阶段都有心跳（桥接 / 计划 / 批量本机执行）
+# Heartbeats in every phase of a long run (bridge / plan / batch local exec)
+
+中文：桥接两条接收循环（`InvokeBridgeAsync` / `ResumeBridgeStreamAsync`）、协调计划的逐步循环、以及等待用户在本机批量执行客户端技能的阶段，此前都不刷活跃度 —— 外部 AG-UI 服务或计划阶段可能大段时间不吐正文，仍会被孤儿流兜底误判为空闲。现在这几处统一调 `TouchAgentStream`；`BroadcastMessagePlanAsync` 命中存活流时也顺手刷新（计划卡本就是“运行仍在进行”的可见信号）。
+English: the two bridge receive loops (`InvokeBridgeAsync` / `ResumeBridgeStreamAsync`), the coordinated-plan step loop, and the wait for the user to run batch client skills locally never refreshed activity — an external AG-UI service or plan phase can be silent for minutes and still be misjudged as idle. All of these now call `TouchAgentStream`, and `BroadcastMessagePlanAsync` refreshes too when it hits a live stream (a plan card is itself a visible “run is alive” signal).
+
+## 心跳不再“复活”已结束的流（并发收口）
+# A heartbeat never “resurrects” an ended stream (concurrency)
+
+中文：`TouchAgentStream` 原先在锁外做「读-改-写」`_agentStreams`，与 `EndAgentMessageAsync` 的移除交错时，会把一条**已广播 END** 的流重新插回字典，随后的正文增量就追加到已结束的消息上。现在 `TouchAgentStream` 与 `End` 的移除共用同一把 `_pendingLock`，读-改-写原子完成。另：桥接附件回灌两处改走“不要求流在线”的挂载通道（流在时行为不变，流已回收也不丢文件）。
+English: `TouchAgentStream` used to read-modify-write `_agentStreams` outside the lock; interleaving with `EndAgentMessageAsync`'s removal could reinsert a stream that had already broadcast END, so later content deltas landed on an ended message. `TouchAgentStream` and the `End` removal now share `_pendingLock`, making the read-modify-write atomic. The two bridge attachment reflow sites also move to the durable “no live stream required” attach channel (identical when live, lossless when reclaimed).
+
+## 失败不再静默 + 计数不再虚报
+# No more silent failures, no more inflated counts
+
+中文：孤儿流收尾失败从 **Debug 提到 Warning**（这条以前完全看不到，正是“查不出来”的原因）；三处产物计数改为按挂载返回值累加（流式挂载无返回值、结束后挂载返回 `bool`，重复/消息不存在应为 false，不再把失败算成成功）。顺手修掉 `AgentGateway` 里一处改坏的 XML 文档（重复 `<param>` + 游离 `</summary>`）。
+English: orphan-stream cleanup failures are logged at **Warning** (formerly invisible, the reason these were so hard to diagnose); three product counters now accumulate by the attach return value (the streaming attach returns void; the post-end attach returns `bool`), so duplicates/missing messages no longer count as successes. A broken XML doc block in `AgentGateway` (duplicate `<param>` + stray `</summary>`) is fixed too.
+
+## 回归
+# Tests
+
+中文：把审核指出的“假通过”用例改成真正会红的回归 —— ①`OrphanReaper` 用例调整为先累计空闲、再扫描、后心跳的顺序，空闲阈值一旦被改回 60s 第一次扫描就会误杀、用例立刻变红；②`SnapshotApprovals` 用例改为**非空**快照（空表快照无论拷贝还是别名都会通过，是恒真的）；③新增 4 例 `StampMessageContentIfEmptyAsync`（流已回收仍写库 / 不覆盖已有正文 / 空文案不写 / 流在线时广播），④保留 `TouchAgentStream` 不复活、流已回收可挂附件等用例。相关测试类 **376 通过 / 0 失败**。
+English: the audit's “falsely-passing” cases are now real regressions — (1) the `OrphanReaper` case advances idle, then sweeps, then heartbeats, so dropping the idle threshold back to 60s kills the stream on the first sweep and the test goes red; (2) `SnapshotApprovals` now snapshots a **non-empty** list (an empty one passes whether or not it aliases); (3) four new `StampMessageContentIfEmptyAsync` cases (writes after the stream is gone / does not overwrite existing content / no-ops on empty text / broadcasts while streaming); (4) the “heartbeat does not resurrect” and “attach after stream ended” cases are kept. **376 passed / 0 failed** across the affected classes.
+
+---
+
+# AG-UI 群聊桌面版 1.0.167 发布说明（上一版）
+# AG-UI Group Chat Desktop 1.0.167 Release Notes (previous release)
 
 **版本说明**：1.0.167 修「文件明明生成好了，用户却只看到一只空气泡」：长任务在“只调工具、不吐正文”的阶段被孤儿流兜底误杀，随后最终正文追加崩溃，产物又因“挂载要求流还开着”而全部丢失。顺带把挂载失败与兜底收尾两处**静默**失败改为可见。上一版 1.0.166 的缺陷（空需求、计划没排文件步骤、语境判定提示词臃肿）见下一节。
 **Version note**: 1.0.167 fixes “the file was really generated, the user only saw an empty bubble”: a long run that spends minutes calling tools without emitting prose was reclaimed by the orphan-stream reaper, the final text append then crashed, and every produced file was lost because attaching required a live stream. Two silently-swallowed failures around attaching and reaping are now visible. The 1.0.166 defects (empty request, plan with no file step, bloated speak-gate prompt) are in the next section.
