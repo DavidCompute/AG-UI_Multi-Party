@@ -23,7 +23,9 @@ public sealed class HubFixture
     public NoopAgentGateway Gateway { get; }
     public GroupHub Hub { get; }
 
-    public HubFixture(int maxMembers = 50)
+    /// <param name="maxMembers">群成员上限。</param>
+    /// <param name="time">可注入时钟：孤儿流兑底判定依赖时间，需要手动推进时传 <see cref="FakeClock"/>。</param>
+    public HubFixture(int maxMembers = 50, TimeProvider? time = null)
     {
         Options = new GroupChatOptions
         {
@@ -34,7 +36,7 @@ public sealed class HubFixture
         Store = new InMemoryGroupStore(Options.MessageHistoryLimit);
         Triggers = new AgentTriggerService(Agents);
         Gateway = new NoopAgentGateway(NullLogger<NoopAgentGateway>.Instance);
-        Hub = new GroupHub(Store, Users, Connections, Agents, Triggers, Gateway, Options, TimeProvider.System, NullLogger<GroupHub>.Instance);
+        Hub = new GroupHub(Store, Users, Connections, Agents, Triggers, Gateway, Options, time ?? TimeProvider.System, NullLogger<GroupHub>.Instance);
     }
 
     /// <summary>注册一个测试替身连接，所有下行事件写入 channel。</summary>
@@ -77,4 +79,12 @@ public sealed class HubFixture
             OwnerId = owner,
             MemberIds = members,
         });
+}
+
+/// <summary>可手动推进的时钟：孤儿流兑底 / 会话锁 TTL 等依赖时间的判定需要在单测里控制时间。</summary>
+public sealed class FakeClock : TimeProvider
+{
+    private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    public override DateTimeOffset GetUtcNow() => _now;
+    public void Advance(TimeSpan delta) => _now += delta;
 }

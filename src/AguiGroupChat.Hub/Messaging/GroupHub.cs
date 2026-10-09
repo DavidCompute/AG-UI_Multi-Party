@@ -48,10 +48,15 @@ public sealed class GroupHub : IDisposable
     private readonly ConcurrentDictionary<string, PendingMessageContent> _pendingContent = new(StringComparer.Ordinal);
     // 流式内容读-改-写与落库的互斥锁（AppendAgentContentAsync / FlushPendingContent 共用；锁内无 await，同线程可重入）
     private readonly object _pendingLock = new();
-    // 孤儿流兜底：周期扫描超时未 End 且长期无活跃交互的流式消息强制收尾（防 _agentStreams / 防抖缓冲泄漏）
+    // 孤儿流兑底：周期扫描超时未 End 且长期无活跃交互的流式消息强制收尾（防 _agentStreams / 防抖缓冲泄漏）
     private const long OrphanCleanupIntervalMs = 60 * 1000;    // 扫描周期 60s
     private const long OrphanStreamTimeoutMs = 10 * 60 * 1000; // 创建超过 10 分钟视为可疑孤儿
-    private const long OrphanStreamIdleMs = 60 * 1000;         // 最近 60s 无任何追加 / 重置交互视为无活跃
+    // 空闲阈值必须大于“单个工具调用的最长静默期”。为何从 60s 提到 5 分钟：
+    // 一次文档生成（pptx/docx）可能连续 1–3 分钟不产生任何流式帧（模型在等工具返回），
+    // 60 秒的阈值会把**正在干活**的运行判成孤儿并强制 End，随后模型那段最终正文追加直接抛
+    // “未开启流式灌入”、整轮崩溃、用户只看到空气泡（实测：交付岗连调 8 轮 pptx_deck 时被误杀）。
+    // 真孤儿的回收延迟从 1 分钟变成 5 分钟，对“防泄漏”几乎无影响，但不再误杀活着的长任务。
+    private const long OrphanStreamIdleMs = 5 * 60 * 1000;
     private readonly Timer? _orphanTimer;
 
     /// <summary>typing 广播节流：memberId → 上次广播时间戳。1 秒内重复广播忽略，防脚本刷爆扇出与持久化。</summary>
@@ -1554,6 +1559,64 @@ public sealed class GroupHub : IDisposable
         await Task.CompletedTask;
     }
 
+    /// <summary>刷新流式消息的“最近活跃”时间（心跳）。未命中（流已结束 / 不存在）时静默忽略：这是心跳，不是状态变更。
+    ///
+    /// <para>
+    /// 为何需要：孤儿流兜底只看“正文 / 思考 / 重置”写入，而一次文档生成可能<b>连续十分钟只调工具、不吐正文</b>
+    /// （实测：交付岗连调 8 轮 pptx_deck）。于是消息创建满 10 分钟的那一秒被判“无活跃”强制 End，
+    /// 随后模型那段最终正文追加直接抛“未开启流式灌入”，整轮崩溃、用户只看到空气泡。
+    /// 工具调用等不产生正文的阶段也刷新活跃度，就能把“正在干活的长任务”与“真孤儿”区分开。
+    /// </para>
+    /// </summary>
+    public void TouchAgentStream(string groupId, string messageId)
+    {
+        if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+            _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+    }
+
+    /// <summary>把附件挂到<b>已结束 / 流已回收</b>的智能体消息上（恢复、崩溃兜底专用）。
+    ///
+    /// <para>
+    /// 与 <see cref="AppendAgentAttachmentsAsync"/> 的唯一差别：<b>不要求流式状态在线</b>。
+    /// 产物是已经真实落盘的成果、消息也已经落库，“挂不上去”才是真丢东西。
+    /// 实测踩到：交付岗已生成 5 个 pptx，但因恢复流报错时消息已被孤儿流兜底收尾，
+    /// 5 次挂载全部抛“未开启流式灌入”且被吞在 Debug —— 用户拿到的是一条空气泡。
+    /// </para>
+    /// 流仍在时顺带广播 TEXT_MESSAGE_ATTACHMENTS（与流式口径一致）；流已回收则只改库，前端重新拉取即可看到。
+    /// </summary>
+    public async Task<bool> AttachMessageAttachmentsAsync(string groupId, string messageId,
+        IReadOnlyList<AttachmentInfo> attachments, CancellationToken ct = default)
+    {
+        if (attachments.Count == 0) return false;
+        HashSet<string>? recipients = null;
+        List<AttachmentInfo> added;
+        lock (_pendingLock)
+        {
+            var msg = _store.GetMessage(groupId, messageId);
+            if (msg is null) return false; // 消息真不存在（与“流已回收”不同）：不伪造
+            var known = msg.Attachments.Select(a => a.Url).ToHashSet(StringComparer.Ordinal);
+            added = attachments.Where(a => !string.IsNullOrEmpty(a.Url) && known.Add(a.Url)).ToList();
+            if (added.Count == 0) return false;
+            msg.Attachments = msg.Attachments.Concat(added).ToList();
+            _store.UpdateMessage(msg);
+            if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+            {
+                recipients = live.Recipients;
+                _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+            }
+        }
+        _changes?.Notify();
+        if (recipients is not null)
+            await FanOutAsync(groupId, new TextMessageAttachmentsEvent
+            {
+                MessageId = messageId,
+                GroupId = groupId,
+                Attachments = added,
+                Timestamp = NowMs,
+            }, recipients, ct);
+        return true;
+    }
+
     /// <summary>为流式中的智能体消息追加附件（AG-UI 桥接回灌）：按 URL 去重合并写入消息并广播 TEXT_MESSAGE_ATTACHMENTS。
     /// 附件为外部 URL（ext_ 前缀）或本地上传附件；消息必须仍在流式开启状态（_agentStreams）。</summary>
     public async Task AppendAgentAttachmentsAsync(string groupId, string messageId, IReadOnlyList<AttachmentInfo> attachments, CancellationToken ct = default)
@@ -1742,7 +1805,8 @@ public sealed class GroupHub : IDisposable
     /// 无活跃交互」的流式消息，强制 <see cref="EndAgentMessageAsync"/> 收尾（End 丢失 / 智能体进程崩溃时的兜底，
     /// 防流式状态与防抖缓冲泄漏）。定时器回调内全量 try/catch：线程池回调异常会终止进程，必须吞掉并记日志。
     /// </summary>
-    private void CleanupOrphanStreams()
+    /// <summary>测试钩子：孤儿流兑底扫描（原本只由定时器驱动，无法在单测里触发时间条件）。</summary>
+    internal void CleanupOrphanStreams()
     {
         try { PurgeExpiredSupportCustomers(); } catch { /* 参与回收失败不影响孤儿清理 */ }
         var now = NowMs;
@@ -1753,6 +1817,10 @@ public sealed class GroupHub : IDisposable
         {
             try
             {
+                // 留痕（以前这条路径是静默的）：如果是“正在干活的长任务”，这里就是误杀的现场证据。
+                _logger.LogWarning(
+                    "孤儿流兑底收尾：message={MessageId} group={GroupId} 建流 {Age}s / 空闲 {Idle}s 无任何交互（若这是长任务只调工具不吐正文，请调大 OrphanStreamIdleMs 或确认已启用心跳）",
+                    kv.Key, kv.Value.GroupId, (now - kv.Value.CreatedAt) / 1000, (now - kv.Value.LastActivityMs) / 1000);
                 // EndAgentMessageAsync 非 async：正文（TryRemove / Flush / UpdateMessage）同步执行到返回 Task 前，
                 // FanOutAsync 返回的 Task 由 SendSafelyAsync 内部吞错，无需观察
                 _ = EndAgentMessageAsync(kv.Value.GroupId, kv.Key, CancellationToken.None);

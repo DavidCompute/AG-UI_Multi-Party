@@ -701,6 +701,87 @@ public sealed class GroupHubTests
             f.Hub.AppendAgentAttachmentsAsync(group.GroupId, started.MessageId, [att]));
     }
 
+    /// <summary>产物回挂必须能在「流已回收」之后生效（恢复 / 崩溃兑底专用）。
+    ///
+    /// <para>
+    /// 实测现场：交付岗已生成 5 个 pptx，但恢复流报错时消息已被孤儿流兑底收尾，
+    /// 5 次挂载全部抛“未开启流式灌入”且被吞在 Debug —— 用户拿到的是一条空气泡。
+    /// 产物是已落盘的成果、消息也已落库，挂载不该依赖“流还开着”。
+    /// </para></summary>
+    [Fact]
+    public async Task AttachMessageAttachments_AfterStreamEnded_StillPersists()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        await f.Hub.EndAgentMessageAsync(group.GroupId, started.MessageId); // 流已回收
+
+        var att = new AttachmentInfo
+        {
+            AttachmentId = "att_1", Name = "产品发布会.pptx",
+            ContentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            Size = 386243, Url = "/ag-ui/files/att_1/deck.pptx", Kind = "document",
+        };
+        var ok = await f.Hub.AttachMessageAttachmentsAsync(group.GroupId, started.MessageId, [att]);
+
+        Assert.True(ok);
+        Assert.Single(f.Store.GetMessage(group.GroupId, started.MessageId)!.Attachments);
+        // 流式口径不变（结束即不可再挂）：两条路径分工明确，而不是把流式接口放宽
+        await Assert.ThrowsAsync<AguiProtocolException>(() =>
+            f.Hub.AppendAgentAttachmentsAsync(group.GroupId, started.MessageId, [att]));
+    }
+
+    /// <summary>心跳只刷新活跃度，不能“复活”已结束的流。</summary>
+    [Fact]
+    public async Task TouchAgentStream_AfterEnd_DoesNotResurrectTheStream()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        await f.Hub.EndAgentMessageAsync(group.GroupId, started.MessageId);
+
+        f.Hub.TouchAgentStream(group.GroupId, started.MessageId); // 不抛、也不复活
+
+        await Assert.ThrowsAsync<AguiProtocolException>(() =>
+            f.Hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "迟到正文"));
+    }
+
+    /// <summary>孤儿流兑底与心跳：只调工具、不吐正文的长任务不得被误杀（回归本次“空气泡 + 没有 pptx”的根因）。</summary>
+    [Fact]
+    public async Task OrphanReaper_KillsIdleStream_ButHeartbeatKeepsLongRunAlive()
+    {
+        var clock = new FakeClock();
+        var f = new HubFixture(time: clock);
+        var hub = f.Hub;
+        var group = await HubFixture.CreateGroupAsync(hub, "g", "user_1", "agent_a");
+        var started = await hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+
+        // 长任务：每 2 分钟一次心跳（远小于 5 分钟空闲阈值）——模拟连调多轮文件生成、期间大段不吐正文
+        for (var i = 0; i < 7; i++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(2));
+            hub.TouchAgentStream(group.GroupId, started.MessageId);
+            hub.CleanupOrphanStreams();
+        }
+        // 已过 14 分钟（远超建流阈值 10 分钟），但一直有心跳 → 流仍在，最终正文追加得进去
+        await hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "最终正文");
+
+        // 对照组：停止心跳后空闲超过阈值 → 被兑底收尾，再追加就报“未开启流式灌入”（修复前的现场）
+        clock.Advance(TimeSpan.FromMinutes(6));
+        hub.CleanupOrphanStreams();
+        await Assert.ThrowsAsync<AguiProtocolException>(() =>
+            hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "迟到正文"));
+    }
+
     /// <summary>任务计划可视化：BroadcastMessagePlanAsync 广播 TEXT_MESSAGE_PLAN（工作型智能体的 PLAN.md 步骤）。</summary>
     [Fact]
     public async Task BroadcastMessagePlan_BroadcastsPlanToMembers()

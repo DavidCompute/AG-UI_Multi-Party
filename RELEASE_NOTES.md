@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.166 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.166 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.167 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.167 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.167 修「文件明明生成好了，用户却只看到一只空气泡」：长任务在“只调工具、不吐正文”的阶段被孤儿流兜底误杀，随后最终正文追加崩溃，产物又因“挂载要求流还开着”而全部丢失。顺带把挂载失败与兜底收尾两处**静默**失败改为可见。上一版 1.0.166 的缺陷（空需求、计划没排文件步骤、语境判定提示词臃肿）见下一节。
+**Version note**: 1.0.167 fixes “the file was really generated, the user only saw an empty bubble”: a long run that spends minutes calling tools without emitting prose was reclaimed by the orphan-stream reaper, the final text append then crashed, and every produced file was lost because attaching required a live stream. Two silently-swallowed failures around attaching and reaping are now visible. The 1.0.166 defects (empty request, plan with no file step, bloated speak-gate prompt) are in the next section.
+
+## 长任务不再被“孤儿流兜底”误杀（“空气泡 + 没有文件”的根因）
+# Long runs are no longer killed by the orphan-stream reaper (the “empty bubble, no file” bug)
+
+中文：现场：用户带 `MARKETING.md` 说“请根据附件撰写 ppt”，计划 7 步全跑完、交付岗也真的生成了 5 个 pptx（磁盘上都在），但消息**正文为空、附件为空**，用户在界面上只看到一只空气泡。
+根因链（现已用日志逐环证实）：
+1. 交付阶段模型连续调了 8 轮 `pptx_deck`，**全程不吐正文**；而孤儿流兜底的“活跃度”只在写正文/思考/重置时刷新 —— 于是消息创建满 10 分钟的那一秒（正好对上最后一个文件的时间）被判“空闲”强制 `End`。
+2. 流被 End 后，模型那段最终正文追加直接抛 `消息不存在或未开启流式灌入`，整轮崩溃。
+3. 崩溃兑底 `TryAttachProductsAfterFailureAsync` 也无效：挂附件同样要求“流还开着”，5 次全部失败且被吞在 **Debug**（生产日志里完全看不到）。
+
+修复：
+- **心跳**：三条流式循环（主路径 / 交付兑底 / 审批恢复）在每一帧都调 `GroupHub.TouchAgentStream`，让“只调工具、不吐正文”的长任务不再被当成孤儿。
+- **空闲阈值 60s → 5 分钟**：单次文档生成工具调用本身就会连续 1–3 分钟不产生任何流式帧，1 分钟的空闲阈值无论如何都会误杀。真孤儿的回收延迟从 1 分钟变 5 分钟，防泄漏几乎不受影响。
+- **产物回挂不再依赖“流在线”**：新增 `GroupHub.AttachMessageAttachmentsAsync`（恢复/崩溃兑底专用，流已回收也能落库；流还在时照旧广播），`TryAttachProductsAfterFailureAsync` 改走它；**挂载失败从 Debug 提到 Warning**。
+- **兜底收尾留痕**：孤儿流收尾时记一条 Warning（含建流/空闲秒数）——这条以前是静默的，正是“查不出来”的原因。
+
+**实测证据（修复前后对比，同一个请求 + 同一个 `MARKETING.md` 附件）**：
+- 修复前：`孤儿流兜底` 无任何日志（静默），消息 `clen=0／附件 0`，磁盘上躺着 5 个 pptx 却一个也没挂上。
+- 修复后：在复现现场先加固观测，拿到了直接证据 `孤儿流兜底收尾：建流 615s / 空闲 390s`（证实就是兜底误杀）；随后同一请求重跑：**未出现任何孤儿流/崩溃日志**，消息 **正文 2,115 字 + 4 个附件**（`智能体产物回档：4 个附件挂到消息`），磁盘上 4 个 pptx 全部可下载，而该消息已存在 13 分钟（远超 10 分钟阈值）。
+
+English: the scene — the user attached `MARKETING.md` and asked for a deck; the 7-step plan finished and the delivery agent really produced 5 pptx files (all on disk), yet the message had **no text and no attachments**: an empty bubble. Cause chain, each link now proven from logs: (1) the delivery agent called `pptx_deck` eight times in a row **without emitting any prose**, and the reaper's “activity” stamp only moves on content/reasoning writes — so at exactly the 10-minute mark the stream was `End`ed as idle; (2) the model's final text then threw `消息不存在或未开启流式灌入` and the whole run died; (3) the crash recovery could not help because attaching files *also* required a live stream — all five attaches failed and were swallowed at **Debug**. Fix: a **heartbeat** on every frame of all three streaming loops; the **idle threshold raised 60s → 5 minutes** (a single document-generation call is silent for 1–3 minutes by nature); a **durable attach** (`GroupHub.AttachMessageAttachmentsAsync`) for the recovery path that works after the stream is gone, with attach failures logged at **Warning**; and a Warning line whenever the reaper does reclaim a stream.
+
+## 回归
+# Tests
+
+中文：新增 3 例 `OrphanReaper` / `AttachMessageAttachments` / `TouchAgentStream`（心跳保住长任务 / 无心跳的对照组证实会被误杀 / 流已回收仍可挂附件 / 心跳不复活已结束的流），时间由可注入的 `FakeClock` 驱动；相关测试类 **453 通过 / 0 失败**。
+English: added 3 `OrphanReaper` / `AttachMessageAttachments` / `TouchAgentStream` cases (a heartbeat keeps a long run alive, the control case proves it dies without one, a reclaimed stream still takes attachments, and a heartbeat never resurrects an ended stream), driven by an injectable `FakeClock`. **453 passed / 0 failed** across the affected test classes.
+
+---
+
+# AG-UI 群聊桌面版 1.0.166 发布说明（上一版）
+# AG-UI Group Chat Desktop 1.0.166 Release Notes (previous release)
 
 **版本说明**：1.0.166 修掉两类“数字员工答非所问 / 空手而回”的缺陷。用户反复反馈「我这边还没有收到具体需求（消息内容为空），然而按重新回答后又正常，已经出现好多回了」。两处根因都不在模型，而在网关拼提示词与恢复流拼审批决议的代码里。**本版 MSI 也是 1.0.164 / 1.0.165 两节内容的首次发版**——那两节此前只进了主干、没有出过安装包。
 **Version note**: 1.0.166 fixes two defects behind “the agent answers the wrong thing / comes back empty-handed”. The user kept hitting “I haven't received the actual request (message content empty)”, which went away after pressing *Regenerate*. Neither root cause was in the model: both were in the gateway — the dispatch prompt and the resume message. **This MSI is also the first shipping build for the 1.0.164 / 1.0.165 sections**, which had landed on main without an installer.
@@ -77,8 +112,8 @@ English: replayed the same request in the “direct chat with 项目总监” ag
 ## 回归
 # Tests
 
-中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`ShouldTryPlanDelivery` 3 例（计划跳过文件技能 / 计划没排文件步骤但用户要文件 / 两者都不是）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）、`BuildSpeakDecisionPrompt` / `ClampForDecision` 7 例（人设与规则在位 / 历史与最新消息分别钳制 / 上界 4k）。相关测试类 **501 通过 / 0 失败**。
-English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases, 3 `ShouldTryPlanDelivery` cases, 6 `SnapshotApprovals` / `HasResumePayload` cases and 7 `BuildSpeakDecisionPrompt` / `ClampForDecision` cases (persona and rules kept, history and latest clamped separately, 4k upper bound). **501 passed / 0 failed** across the affected test classes.
+中文：新增 `AssignmentPrompt` 4 例（占位串不当需求 / 上一步无关也保留需求 / 指派者是上级不是目标 / 限长）、`PlanText_` 2 例（交付未出文件时补发素材）、`ShouldTryPlanDelivery` 3 例（计划跳过文件技能 / 计划没排文件步骤但用户要文件 / 两者都不是）、`SnapshotApprovals` / `HasResumePayload` 6 例（别名回归 + 空回合防护）、`BuildSpeakDecisionPrompt` / `ClampForDecision` 7 例（人设与规则在位 / 历史与最新消息分别钳制 / 上界 4k）。相关测试类全部通过。
+English: added 4 `AssignmentPrompt` cases, 2 `PlanText_` cases, 3 `ShouldTryPlanDelivery` cases, 6 `SnapshotApprovals` / `HasResumePayload` cases (alias regression + empty-turn guard) and 7 `BuildSpeakDecisionPrompt` / `ClampForDecision` cases. All affected test classes pass.
 
 ---
 

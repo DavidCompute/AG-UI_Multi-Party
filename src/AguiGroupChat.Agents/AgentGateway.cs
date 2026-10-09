@@ -694,6 +694,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     await foreach (var update in agent.RunStreamingAsync(userMessage, session, runOptions, runCt))
                     {
+                // 心跳：工具调用等不产生正文的阶段也让孤儿流兑底知道“这条流有人在干活”（详见 GroupHub.TouchAgentStream）。
+                if (messageId is { Length: > 0 }) _hub.Value.TouchAgentStream(context.GroupId, messageId);
                 // AgentResponseUpdate.Text 的形态取决于客户端：MockChatClient 为累计文本，
                 // 真实 OpenAI 兼容客户端（如 DeepSeek）为增量片段。统一按累计文本跟踪：
                 // 累计文本 → 取相对上一帧的新增部分；增量片段 → 整体作为 delta。
@@ -2989,6 +2991,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         ToolApprovalRequestContent? approval = null;
         await foreach (var update in agent.RunStreamingAsync(userMessage, session, new ChatClientAgentRunOptions(), ct))
         {
+            // 心跳：交付阶段大量时间花在工具调用上（实测连调 8 轮 pptx_deck、近十分钟不吐正文），
+            // 不刷新活跃度就会被孤儿流兑底误杀（详见 GroupHub.TouchAgentStream）。
+            if (messageId is { Length: > 0 }) _hub.Value.TouchAgentStream(context.GroupId, messageId);
             if (update.Text is { Length: > 0 } text)
             {
                 var delta = ComputeTextDelta(accumulated, text);
@@ -3815,7 +3820,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 工具返回是权威且未经模型改写的，作为主来源；正文扫描保留以兼容 publish_file 的引用式产物。
     /// </para>
     /// </summary>
-    private async Task<int> AttachPublishedProductsAsync(string groupId, string messageId, string content, CancellationToken ct)
+    private async Task<int> AttachPublishedProductsAsync(string groupId, string messageId, string content, CancellationToken ct,
+        bool allowAfterEnd = false)
     {
         if (_attachmentStore is null) return 0;
         try
@@ -3828,15 +3834,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 // 逐个追加：AppendAgentAttachmentsAsync 内部按 URL 去重，重复引用不重复挂
                 try
                 {
-                    await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [att], ct);
+                    if (allowAfterEnd)
+                        await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [att], ct);
+                    else
+                        await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [att], ct);
                     added++;
                 }
-                catch (Exception ex) { _logger.LogDebug(ex, "publish_file 产物回档失败：{Att}", m.Value); }
+                catch (Exception ex) { _logger.LogWarning(ex, "publish_file 产物回档失败：{Att}", m.Value); }
             }
             // 技能产物（如内置 docx 技能）：结果里带 produce_file 标记的文件入库为附件并挂到本条消息。
             // 正文 + 本轮全部工具返回合并扫描（去重由下游按路径保证）。
             var toolResults = ToolResultCollector.Ambient.Value?.Text ?? "";
-            added += await AttachSkillProducedFilesAsync(groupId, messageId, content + "\n" + toolResults, ct);
+            added += await AttachSkillProducedFilesAsync(groupId, messageId, content + "\n" + toolResults, ct, allowAfterEnd);
             if (added > 0)
                 _logger.LogInformation("智能体产物回档：{Count} 个附件挂到消息 {MessageId}", added, messageId);
             return added;
@@ -3852,7 +3861,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 把技能声明产出（结果文本里的 <c>produce_file</c> 标记）的文件登记为附件并挂到消息。
     /// 解析与入库都在 <see cref="ProducedFileMarker"/>（与技能库试运行共用同一实现）。
     /// </summary>
-    private async Task<int> AttachSkillProducedFilesAsync(string groupId, string messageId, string content, CancellationToken ct)
+    private async Task<int> AttachSkillProducedFilesAsync(string groupId, string messageId, string content, CancellationToken ct,
+        bool allowAfterEnd = false)
     {
         if (_attachmentStore is null) return 0;
         var added = 0;
@@ -3860,12 +3870,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             try
             {
-                await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [info], ct);
+                if (allowAfterEnd)
+                    await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [info], ct);
+                else
+                    await _hub.Value.AppendAgentAttachmentsAsync(groupId, messageId, [info], ct);
                 added++;
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "产物挂到消息失败（已忽略）");
+                // 不能再用 Debug：产物已落盘却挂不上消息，用户就是“什么也没拿到”，必须看得见。
+                _logger.LogWarning(ex, "产物挂到消息失败：{Name}", info.Name);
             }
         }
         return added;
@@ -4958,6 +4972,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 ToolApprovalRequestContent? nextApproval = null;
                 await foreach (var update in agent.RunStreamingAsync(resumeMessages, session, new ChatClientAgentRunOptions(), runCt))
                 {
+                    // 心跳：恢复阶段的自动放行轮次可能连续多轮只调工具、不吐正文（实测 8 轮），
+                    // 不刷新活跃度就会被孤儿流兑底误杀（详见 GroupHub.TouchAgentStream）。
+                    if (messageId is { Length: > 0 }) _hub.Value.TouchAgentStream(pending.GroupId, messageId);
                     ClientToolTrace.Write($"RESUME-UPDATE textLen={(update.Text?.Length ?? 0)} cts=[{string.Join(",", update.Contents.Select(c => c.GetType().Name))}]");
                     if (update.Text is { Length: > 0 } text)
                     {
@@ -5186,12 +5203,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// </summary>
     /// <param name="accumulated">回复正文（用于扫正文里的 <c>att_</c> 附件引用）；本方法未提升该局部变量时传 null——
     /// 技能产物靠环境里的工具返回收集器（<c>produce_file</c> 标记）恢复，不依赖正文。</param>
+    /// <para>
+    /// <param name="accumulated">回复正文（用于扫正文里的 <c>att_</c> 附件引用）；本方法未提升该局部变量时传 null——
+    /// 技能产物靠环境里的工具返回收集器（<c>produce_file</c> 标记）恢复，不依赖正文。</param>
+    /// </summary>
     private async Task TryAttachProductsAfterFailureAsync(string groupId, string? messageId, string? accumulated)
     {
         if (string.IsNullOrEmpty(messageId)) return;
         try
         {
-            var recovered = await AttachPublishedProductsAsync(groupId, messageId, accumulated ?? "", CancellationToken.None);
+            var recovered = await AttachPublishedProductsAsync(groupId, messageId, accumulated ?? "", CancellationToken.None, allowAfterEnd: true);
             if (recovered > 0)
                 _logger.LogInformation("运行失败但已回挂产物：{Count} 个附件（messageId={MessageId}）", recovered, messageId);
         }
