@@ -84,6 +84,12 @@
         <div id="mentionSuggest" class="mention-suggest hidden"></div>
         <div id="mentionPicker" class="mention-picker" hidden></div>
         <div id="replyBar" class="reply-bar hidden"></div>
+        <div id="sendRetryBar" class="send-retry-bar hidden">
+          <span class="srb-icon" aria-hidden="true">⚠️</span>
+          <span id="sendRetryText" class="srb-text" data-i18n="chat.sendFailed"></span>
+          <button id="sendRetryBtn" class="chip-btn" type="button" data-i18n="chat.retrySend">重试</button>
+          <button id="sendRetryDiscard" class="chip-btn" type="button" data-i18n="common.cancel">取消</button>
+        </div>
         <div class="composer-opts">
           <label><span data-i18n="chat.visibility">可见范围</span>
             <select id="visibilitySelect">
@@ -1216,6 +1222,10 @@
   <div id="helpModal" class="modal-overlay hidden">
     <div class="modal help-modal">
       <div class="modal-title" data-i18n="help.title">❓ 使用帮助</div>
+      <div class="help-search-wrap search-clear-wrap">
+        <input id="helpSearch" class="modal-input" data-i18n-placeholder="help.searchPh" />
+        <button type="button" class="search-clear" data-clear-for="helpSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+      </div>
       <div class="help-content">
         <div class="help-section">
           <h4 data-i18n="help.s1">🚀 快速上手</h4>
@@ -1345,6 +1355,22 @@
             <li data-i18n-html="help.s12.4"></li>
           </ul>
         </div>
+        <div class="help-section">
+          <h4 data-i18n="help.s13">🔎 概念速查</h4>
+          <ul>
+            <li data-i18n-html="help.s13.1"><b>知聚</b>：一个围绕主题的群组，集成人、数字员工、聊天记忆三者；是本系统的基本协作单位</li>
+            <li data-i18n-html="help.s13.2"><b>数字员工</b>：具备人设、技能、记忆的 AI 角色，可被 @ 触发，也可挂为其他角色的可调用技能</li>
+            <li data-i18n-html="help.s13.3"><b>技能（Skill）</b>：数字员工可调用的能力——既可指向另一个数字员工，也可指向本机桥 / 服务端内置能力（文档生成、检索、命令执行等）</li>
+            <li data-i18n-html="help.s13.4"><b>记忆</b>：聊天记录向量化后的语义记忆，分<b>知聚记忆</b>与<b>个人记忆</b>；每条可设普通 / 重要 / 关键，按相似度优先检索</li>
+            <li data-i18n-html="help.s13.5"><b>记忆特征</b>：角色的“性格化记忆”配置——广记 / 深记 / 难录入 / 存得住想不起 / 快速遗忘，决定记忆的编码与提取倾向</li>
+            <li data-i18n-html="help.s13.6"><b>组织架构</b>：由「组织架构构建师」一键生成的多层级数字员工团队，含上下级与协作关系，可跨角色自动编排交付物</li>
+            <li data-i18n-html="help.s13.7"><b>图库 / 知识库</b>：图库为可语义检索的图片集，PPT / Word / PDF 技能可自动配图；知识库为文档集，数字员工回复前经 RAG 检索后作答</li>
+            <li data-i18n-html="help.s13.8"><b>输出物</b>：本知聚内产生的全部附件（含技能生成的文档），可集中下载或在线查看</li>
+            <li data-i18n-html="help.s13.9"><b>本机桥</b>：装在您电脑上的小程序，让数字员工的客户端技能（如本机 dotnet / 脚本）真正在<b>您所在的主机</b>上执行</li>
+            <li data-i18n-html="help.s13.10"><b>客服知聚</b>：面向外部客服场景的知聚，客户端技能始终运行在<b>提问顾客的浏览器所在主机</b>上，隔离于内部成员</li>
+          </ul>
+        </div>
+        <div id="helpNoMatch" class="help-no-match hidden" data-i18n="help.noMatch">没有匹配的帮助条目</div>
       </div>
       <div class="modal-actions">
         <button id="helpClose" class="btn-ghost" data-i18n="help.close">关闭</button>

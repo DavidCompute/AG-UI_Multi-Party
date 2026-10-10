@@ -1,5 +1,35 @@
-# AG-UI 群聊桌面版 1.0.172 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.172 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.173 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.173 Release Notes (current Windows desktop release)
+
+**版本说明**：本版继续**界面与操作体验的人性化优化**（第二批）：消息日期标签、禁用按钮给出原因、发送失败可重试、通知可按知聚静音、成员栏更清爽、帮助可搜索并新增「概念速查」。
+**Version note**: a second batch of **UI/UX humanization**: message date labels, reasons on disabled buttons, retry on failed send, per-circle notification mute, a cleaner member bar, and a searchable help with a glossary.
+
+## 消息更易读 + 失败可重试
+# More readable messages + retry on failure
+
+中文：
+- **日期标签**：每天第一条消息的时间前带「今天 / 昨天 / 具体日期」，跨天回看不再需要猜时间。
+- **发送失败重试**：断线或竞态导致消息没发出去时，输入内容与附件**保留**，底部出现警示条给出「重试 / 取消」——不再只靠一闪而过的提示。
+- **禁用按钮给出原因**：未进入知聚时，置灰的按钮悬浮/读屏会说明「请先进入一个知聚」，不再“只灰不说”。
+English:
+- **Date labels**: the first message of each day shows “Today / Yesterday / date” before its time, so cross-day reading needs no guessing.
+- **Retry on failure**: if a send is dropped (disconnect / race), the text and attachments are kept and a warning bar offers “Retry / Cancel” instead of a fleeting toast.
+- **Reasons on disabled buttons**: buttons grayed out before entering a circle now explain “Enter a circle first” on hover and to screen readers.
+
+## 通知静音 + 成员栏更清爽 + 帮助可搜索
+# Per-circle mute + cleaner member bar + searchable help
+
+中文：
+- **按知聚静音**：知聚行 🔔/🔕 开关，被静音的知聚不再产生应用内通知与桌面通知（本地偏好，按用户保存）。
+- **成员栏信息密度**：操作按钮（触发方式 / 移除）默认隐没，悬停或键盘聚焦才显现；触屏设备保持常显。
+- **帮助可搜索 + 概念速查**：帮助弹窗新增搜索框（逐条过滤、无命中给提示）与「🔎 概念速查」——一次看懂知聚 / 数字员工 / 技能 / 记忆 / 记忆特征 / 组织架构 / 图库知识库 / 输出物 / 本机桥 / 客服知聚。
+English:
+- **Per-circle mute**: a 🔔/🔕 toggle on each circle row; muted circles stop producing in-app and desktop notifications (a local, per-user preference).
+- **Member-bar density**: action buttons (trigger mode / remove) stay hidden until hover or keyboard focus; touch devices keep them always visible.
+- **Searchable help + glossary**: the help dialog gains a search box (per-entry filtering with a no-match hint) and a “🔎 Glossary” covering circle / digital employee / skill / memory / memory trait / org structure / image & knowledge base / outputs / local bridge / support circle.
+
+# AG-UI 群聊桌面版 1.0.172 发布说明
+# AG-UI Group Chat Desktop 1.0.172 Release Notes
 
 **版本说明**：本版是一次**界面与操作体验的人性化优化**（第一批）：修中文输入法回车误发、窄屏抽屉、输入区「＋」菜单、按群草稿、跳到底部按钮、弹窗焦点管理、全局快捷键、无障碍名与空态引导。
 **Version note**: a first batch of **UI/UX humanization**: IME-safe Enter, a narrow-screen drawer, a composer “＋” menu, per-circle drafts, a jump-to-latest button, modal focus management, keyboard shortcuts, accessible names and empty-state hints.

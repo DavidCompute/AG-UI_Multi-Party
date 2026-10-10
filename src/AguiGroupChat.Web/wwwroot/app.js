@@ -110,7 +110,8 @@ function connect() {
 }
 
 function send(payload) {
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(payload));
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) { state.ws.send(JSON.stringify(payload)); return true; }
+  return false; // 未连接：调用方据此保留内容并提示重试，而非静默丢弃
 }
 
 /* ============ 成员目录 ============ */
@@ -371,11 +372,11 @@ function resetChatState() {
   state.activeTopicId = "main";
   state.replyTo = null; // 切知聚 / 重置时清除引用
   renderReplyBar();
-  $("addMemberBtn").disabled = true;
-  $("groupSettingsBtn").disabled = true;
-  $("searchBtn").disabled = true;
-  $("groupFilesBtn").disabled = true;
-  $("discussBtn").disabled = true;
+  setDisabledWithReason("addMemberBtn", true, "chat.needGroup");
+  setDisabledWithReason("groupSettingsBtn", true, "chat.needGroup");
+  setDisabledWithReason("searchBtn", true, "chat.needGroup");
+  setDisabledWithReason("groupFilesBtn", true, "chat.needGroup");
+  setDisabledWithReason("discussBtn", true, "chat.needGroup");
   const ts0 = $("topicSummaryBtn"); if (ts0) ts0.classList.add("hidden");
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
   // 登出 / 切换身份：取消断线重连定时器；清理输入区残留（@ 选择 / @ 全体 / 草稿 / 待发送附件），防跨账号残留
@@ -385,6 +386,7 @@ function resetChatState() {
   state.mentionMemory = new Map();
   state.groupUnread.clear();
   pendingAttachments = [];
+  hideSendRetryBar();
   state.visibility = "all";
   // 通知中心（5.4）：登出清空通知，避免跨账号残留
   state.notifications = [];
@@ -4387,10 +4389,10 @@ async function loadGroups() {
     renderMembers();
     renderTopicBar();
     $("chatGroupName").textContent = t("chat.selectGroup");
-    $("addMemberBtn").disabled = true;
-    $("groupSettingsBtn").disabled = true;
-    $("searchBtn").disabled = true;
-    $("groupFilesBtn").disabled = true;
+    setDisabledWithReason("addMemberBtn", true, "chat.needGroup");
+    setDisabledWithReason("groupSettingsBtn", true, "chat.needGroup");
+    setDisabledWithReason("searchBtn", true, "chat.needGroup");
+    setDisabledWithReason("groupFilesBtn", true, "chat.needGroup");
     const ts2 = $("topicSummaryBtn"); if (ts2) ts2.classList.add("hidden");
   }
   // 重置虚拟滚动会**清空消息 DOM**，因此紧接着必须重建（否则刷新知聚列表就会把聊天区留在空白，
@@ -5696,11 +5698,11 @@ function cleanupRoom(gid) {
     renderMembers();
     renderTopicBar();
     $("chatGroupName").textContent = t("chat.selectGroup");
-    $("addMemberBtn").disabled = true;
-    $("groupSettingsBtn").disabled = true;
-    $("searchBtn").disabled = true;
-    $("groupFilesBtn").disabled = true;
-    $("discussBtn").disabled = true;
+    setDisabledWithReason("addMemberBtn", true, "chat.needGroup");
+    setDisabledWithReason("groupSettingsBtn", true, "chat.needGroup");
+    setDisabledWithReason("searchBtn", true, "chat.needGroup");
+    setDisabledWithReason("groupFilesBtn", true, "chat.needGroup");
+    setDisabledWithReason("discussBtn", true, "chat.needGroup");
     const ts1 = $("topicSummaryBtn"); if (ts1) ts1.classList.add("hidden");
   }
 }
@@ -5763,14 +5765,21 @@ function renderGroupList() {
     const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
     const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
     const enterTag = needEnter ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
+    const muted = isMuted(g.groupId);
+    if (muted) div.classList.add("muted");
+    const muteTip = t(muted ? "notif.unmuteTip" : "notif.muteTip");
+    const muteBtn = `<button type="button" class="group-mute" title="${escapeHtml(muteTip)}" aria-label="${escapeHtml(muteTip)}">${muted ? "🔕" : "🔔"}</button>`;
     div.innerHTML = avatar + `<span class="group-name"></span>` + kindTag + enterTag +
       (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
+      muteBtn +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
     // 知聚名过长截断（ellipsis）；悬浮 title 显示完整名称
     const groupNameEl = div.querySelector(".group-name");
     groupNameEl.textContent = g.groupName || "";
     groupNameEl.title = g.groupName || "";
     div.onclick = () => selectGroup(g.groupId);
+    const mb = div.querySelector(".group-mute");
+    if (mb) mb.onclick = (e) => { e.stopPropagation(); toggleMutedGroup(g.groupId); };
     el.appendChild(div);
   }
 }
@@ -5843,8 +5852,30 @@ function handleSystemNotifyClick(groupId) {
 
 /* ============ 应用内通知中心（5.4） ============ */
 
-/** 新增应用内通知；页面隐藏时同步发系统桌面通知。 */
+/* ---- 按知聚静音：本地偏好（静音的知聚不再产生通知、不弹系统桌面通知） ---- */
+function mutedKey(uid) { return "agui.muted." + (uid || ""); }
+function mutedGroups() {
+  try { const a = JSON.parse(localStorage.getItem(mutedKey(state.memberId)) || "[]"); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+function isMuted(gid) { return !!gid && mutedGroups().includes(gid); }
+function toggleMutedGroup(gid) {
+  if (!gid) return;
+  const list = mutedGroups();
+  const i = list.indexOf(gid);
+  if (i >= 0) list.splice(i, 1); else list.push(gid);
+  try { localStorage.setItem(mutedKey(state.memberId), JSON.stringify(list)); } catch { /* 隐私模式忽略 */ }
+  renderGroupList();
+  toast(t(i >= 0 ? "notif.unmuted" : "notif.muted", { name: groupNameOf(gid) }));
+}
+function groupNameOf(gid) {
+  return (state.groups || []).find((g) => g.groupId === gid)?.groupName || gid || "";
+}
+
+/** 新增应用内通知；页面隐藏时同步发系统桌面通知。静音知聚的通知直接丢弃。 */
 function addNotification(type, title, body, opts = {}) {
+  // 按知聚静音：来源知聚被静音时不入通知中心、不弹桌面通知（重连类无 groupId，不受影响）
+  if (opts.groupId && isMuted(opts.groupId)) return;
   const n = {
     id: "n" + (++state.notifSeq),
     type, // mention / approval / message / reconnect / info
@@ -6035,6 +6066,16 @@ function renderChatMeta() {
   $("chatGroupMeta").textContent = meta;
 }
 
+/** 禁用按钮时给出原因（否则用户只看到变灰、不知为何）；启用时恢复其 i18n 标题。 */
+function setDisabledWithReason(id, disabled, reasonKey) {
+  const b = $(id);
+  if (!b) return;
+  b.disabled = disabled;
+  const baseKey = b.getAttribute("data-i18n-title");
+  const label = disabled && reasonKey ? t(reasonKey) : (baseKey ? t(baseKey) : b.title);
+  if (label) { b.title = label; b.setAttribute("aria-label", label); }
+}
+
 /** Alt+↑/↓ 在知聚列表中循环切换（键盘快速跳群）。 */
 function cycleGroup(delta) {
   const gs = state.groups || [];
@@ -6110,16 +6151,17 @@ async function selectGroup(gid) {
   jumpUnseen = 0; updateJumpButton(); // 切群：清掉“↓ 新消息”计数
   hideMentionPicker();
   hideMentionSuggest();
+  hideSendRetryBar(); // 切群：上一知聚的发送失败提示不跨知聚残留
   // 进入知聚不标记任何话题已读：话题栏先展示全部未读徽标，用户点击对应话题（或该话题收到新消息）后才已读
   $("mentionAllBtn").classList.toggle("on", state.mentionAll);
   renderMentionChips();
   renderMembers(); // 恢复被 @ 成员的高亮
   renderGroupList();
-  $("addMemberBtn").disabled = false;
-  $("groupSettingsBtn").disabled = false;
-  $("searchBtn").disabled = false; // 知聚内消息全文搜索（进入知聚后可用）
-  $("groupFilesBtn").disabled = false; // 输出物：本知聚全部附件（进入知聚后可用）
-  $("discussBtn").disabled = false; // 多位数字员工讨论（进入知聚后可用）
+  setDisabledWithReason("addMemberBtn", false);
+  setDisabledWithReason("groupSettingsBtn", false);
+  setDisabledWithReason("searchBtn", false); // 知聚内消息全文搜索（进入知聚后可用）
+  setDisabledWithReason("groupFilesBtn", false); // 输出物：本知聚全部附件（进入知聚后可用）
+  setDisabledWithReason("discussBtn", false); // 多位数字员工讨论（进入知聚后可用）
   const ts3 = $("topicSummaryBtn"); if (ts3) ts3.classList.remove("hidden"); // 话题进度小结（长话题接续记忆）
   const g = state.groups.find((x) => x.groupId === gid);
   $("chatGroupName").textContent = (g?.isSupportCircle ? (t("support.badge") + " ") : (g?.isPrivate ? "🔒 " : "")) + (g?.groupName || "");
@@ -7801,7 +7843,7 @@ function virtualRender() {
   // 头部插入（loadEarlierMessages）已强制 force 走整表重建；撤回/工具行/结束等也走整表。
   if (start === 0 && prevEnd > 0 && prevEnd < end) {
     const frag = document.createDocumentFragment();
-    for (let i = prevEnd; i < end; i++) frag.appendChild(msgDom(msgs[i], r));
+    for (let i = prevEnd; i < end; i++) frag.appendChild(msgDom(msgs[i], r, msgs[i - 1]));
     const inserted = [...frag.children]; // insertBefore 会把 frag 子节点移入 DOM，之后 frag.children 为空
     el.insertBefore(frag, bot);
     for (const n of inserted) renderMermaidBlocks(n); // 新增消息的 Mermaid 图表渲染
@@ -7832,7 +7874,7 @@ function virtualRender() {
     if (child.classList.contains("vmsg")) child.remove();
   }
   const frag = document.createDocumentFragment();
-  for (let i = start; i < end; i++) frag.appendChild(msgDom(msgs[i], r));
+  for (let i = start; i < end; i++) frag.appendChild(msgDom(msgs[i], r, msgs[i - 1]));
   const inserted = [...frag.children]; // insertBefore 会把 frag 子节点移入 DOM，之后 frag.children 为空
   el.insertBefore(frag, bot);
   for (const n of inserted) renderMermaidBlocks(n); // 重建窗口后渲染 Mermaid 图表
@@ -7995,7 +8037,30 @@ const ICONS = {
 function icon(name) { return ICONS[name] || ""; }
 
 /** 构建单条消息的 DOM 节点（vmsg 标记类供虚拟窗口重建/测量定位；折叠按钮由 virtualRender 挂载）。 */
-function msgDom(m, r) {
+/** 日期键（同一天返回相同值）；0 时间戳返回 ""。 */
+function dayKey(ts) {
+  const n = Number(ts) || 0;
+  if (!n) return "";
+  const d = new Date(n);
+  return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+}
+/** 日期的可读标签：今天 / 昨天 / 具体日期（按浏览器语言）。 */
+function dayLabel(ts) {
+  const n = Number(ts) || 0;
+  if (!n) return "";
+  const d = new Date(n);
+  const now = Date.now();
+  const k = dayKey(n);
+  if (k === dayKey(now)) return t("msg.today");
+  if (k === dayKey(now - 86400000)) return t("msg.yesterday");
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function msgDom(m, r, prev) {
+  // 每天第一条消息：时间前加日期（今天/昨天/具体日期），不占用额外行、不改虚拟高度
+  const mDay = dayKey(m.timestamp);
+  const showDay = !!mDay && mDay !== dayKey(prev && prev.timestamp);
+  const headTime = showDay ? `${dayLabel(m.timestamp)} ${m.time}` : m.time;
   if (m.sys) {
     const el = sysLine(m.sys, false);
     el.classList.add("vmsg");
@@ -8112,7 +8177,7 @@ function msgDom(m, r) {
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
-      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}" aria-label="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
+      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time${showDay ? " time-day" : ""}">${headTime}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}" aria-label="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
       ${replyRef}
       ${mentionTags ? `<div class="mention-line">${mentionTags}</div>` : ""}
       ${thinking}
@@ -9268,6 +9333,17 @@ function loadDraft(gid) {
 }
 function clearDraft(gid) { saveDraft(gid, ""); }
 
+/* ============ 发送失败重试条：内容/附件已保留，用户可重试或取消 ============ */
+// 文案由 data-i18n 托管（chat.sendFailed / chat.retrySend / common.cancel），此处只控制显隐
+function showSendRetryBar() {
+  const bar = $("sendRetryBar");
+  if (bar) bar.classList.remove("hidden");
+}
+function hideSendRetryBar() {
+  const bar = $("sendRetryBar");
+  if (bar) bar.classList.add("hidden");
+}
+
 async function sendMessage() {
   const input = $("input");
   const content = input.value.trim();
@@ -9277,6 +9353,7 @@ async function sendMessage() {
   // 断线 / 未连接：明确提示而不是静默丢弃（内容保留在输入框，重连后可直接重发）
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
     toast(t("msg.sendDisconnected"));
+    showSendRetryBar();
     return;
   }
   if (sending) return; // 防连按：上一次发送尚未结束时忽略本次
@@ -9319,12 +9396,20 @@ async function sendMessage() {
     if (state.visibility === "private") payload.visibleMemberIds = [...state.mentions];
     if (attachments.length > 0) payload.attachments = attachments;
 
-    send(payload);
+    if (!send(payload)) {
+      // 竞态：readyState 检查后 socket 恰好关闭 → send() 未发送。保留输入与附件，给出重试入口
+      input.value = content;
+      saveDraft(gid, content);
+      toast(t("msg.sendDisconnected"));
+      showSendRetryBar();
+      return;
+    }
     input.value = "";
     clearDraft(gid); // 发送成功：清掉本群草稿
     clearReplyTo(); // 引用一次性消费：发送后清除引用条
     pendingAttachments = [];
     renderAttachList();
+    hideSendRetryBar(); // 发送成功：清掉上一次的失败提示
     hideMentionSuggest(); // 发送后草稿清空，建议条一并收起
     // @ 选择保留（按知聚记忆）：连续对话无需每次重新 @；点输入框上方的 chips ✕ 可随时取消
     renderMentionChips();
@@ -10048,6 +10133,28 @@ function initSearchClears() {
   });
 }
 
+/* ============ 帮助弹窗：条目搜索过滤 ============ */
+
+/** 按关键词过滤帮助条目：逐条 <li> 匹配（标题文字 + 内容），无匹配的小节整体隐藏；全无匹配时提示。 */
+function filterHelp(q) {
+  const content = document.querySelector(".help-content");
+  if (!content) return;
+  const needle = String(q || "").trim().toLowerCase();
+  let matched = 0;
+  content.querySelectorAll(".help-section").forEach((sec) => {
+    let visible = 0;
+    sec.querySelectorAll("li").forEach((li) => {
+      const hit = !needle || (li.textContent || "").toLowerCase().includes(needle);
+      li.classList.toggle("hidden", !hit);
+      if (hit) visible++;
+    });
+    sec.classList.toggle("hidden", visible === 0);
+    matched += visible;
+  });
+  const empty = $("helpNoMatch");
+  if (empty) empty.classList.toggle("hidden", !needle || matched > 0);
+}
+
 /* ============ 模态焦点管理：打开时焦点入弹窗 / 关闭时归还 / Tab 困在弹窗内 ============ */
 function initModalFocus() {
   let lastFocused = null;
@@ -10552,12 +10659,16 @@ function init() {
   });
 
   // ---- 使用帮助 ----
-  $("helpBtn").onclick = () => $("helpModal").classList.remove("hidden");
+  $("helpBtn").onclick = () => { $("helpSearch").value = ""; filterHelp(""); $("helpModal").classList.remove("hidden"); };
   $("helpClose").onclick = () => $("helpModal").classList.add("hidden");
+  $("helpSearch").addEventListener("input", (e) => filterHelp(e.target.value));
   $("helpModal").addEventListener("click", (e) => { if (e.target === $("helpModal")) $("helpModal").classList.add("hidden"); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("helpModal").classList.add("hidden"); });
 
   $("sendBtn").onclick = sendMessage;
+  // 发送失败重试条：重试重走发送；取消则收起提示（输入内容与附件保留，由用户自行处置）
+  $("sendRetryBtn").onclick = () => { hideSendRetryBar(); sendMessage(); };
+  $("sendRetryDiscard").onclick = hideSendRetryBar;
   initModalFocus(); // 弹窗焦点：打开入框 / 关闭归还 / Tab 困住
   $("jumpToBottom").onclick = jumpToBottom;
   // 窄屏抽屉：☰ 知聚列表 / 👥 成员栏；点遮罩或 Esc 收起

@@ -72,6 +72,23 @@ try {
   // 主行不再是四个图标：只剩 ＋ / 讨论 / 发送
   check("主行图标精简（附件/语音/画布移入菜单）", (await page.locator(".composer-row .composer-icon-btn").count()) === 2);
 
+  // ---- 日期分隔（每天第一条消息时间前带日期）----
+  const dayTime = await page.locator("#messages .vmsg .time.time-day").first().textContent().catch(() => null);
+  check("每天第一条消息时间前带日期", !!dayTime && dayTime.trim().length > 5, JSON.stringify(dayTime));
+
+  // ---- 知聚静音开关 ----
+  check("知聚行有静音按钮", (await page.locator(".group-item .group-mute").count()) >= 1);
+  const aItem = page.locator(".group-item", { hasText: "UX-A-" }).first();
+  await aItem.hover();
+  await aItem.locator(".group-mute").click();
+  await sleep(200);
+  check("点静音后知聚标记为静音", (await page.locator(".group-item.muted", { hasText: "UX-A-" }).count()) >= 1);
+  const aItem2 = page.locator(".group-item", { hasText: "UX-A-" }).first();
+  await aItem2.hover();
+  await aItem2.locator(".group-mute").click();
+  await sleep(200);
+  check("再次点击取消静音", (await page.locator(".group-item.muted", { hasText: "UX-A-" }).count()) === 0);
+
   // ---- 2) 草稿按群持久 ----
   await page.fill("#input", "这是一段未发送的草稿");
   await sleep(200);
@@ -133,6 +150,23 @@ try {
     return !!(modal && ae && modal.contains(ae));
   });
   check("弹窗打开后焦点落在弹窗内", focusedInside);
+  await page.locator("#searchClose").click(); // 显式关闭搜索弹窗（Escape 可能被输入框捕获）
+  await page.waitForFunction(() => document.getElementById("searchModal").classList.contains("hidden"), { timeout: 5000 });
+
+  // ---- 帮助搜索过滤 ----
+  await page.locator("#helpBtn").click();
+  await page.waitForSelector("#helpModal:not(.hidden)", { timeout: 5000 });
+  await page.fill("#helpSearch", "记忆");
+  await sleep(150);
+  const visSections = await page.locator("#helpModal .help-section:visible").count();
+  const hidSections = await page.locator("#helpModal .help-section.hidden").count();
+  check("帮助搜索：命中时过滤出少量小节", visSections >= 1 && hidSections >= 1, `vis=${visSections} hidden=${hidSections}`);
+  await page.fill("#helpSearch", "zzz-nonexistent-zzz");
+  await sleep(150);
+  check("帮助搜索：无命中显示提示", await page.locator("#helpNoMatch").isVisible());
+  await page.fill("#helpSearch", "");
+  await sleep(150);
+  check("帮助搜索：清空后恢复全部", (await page.locator("#helpModal .help-section.hidden").count()) === 0);
   await page.keyboard.press("Escape");
 
   console.log(`\n=== ${pass} 通过 / ${fail} 失败 ===`);

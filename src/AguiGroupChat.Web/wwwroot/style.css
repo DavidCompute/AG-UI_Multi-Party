@@ -178,6 +178,14 @@ select {
   text-overflow: ellipsis; white-space: nowrap;
 }
 .group-item .icon { font-size: 16px; }
+/* 知聚静音开关：默认隐藏（悬停/选中或已静音时显示），点击切换该知聚通知静音 */
+.group-item .group-mute {
+  flex: none; background: none; border: none; cursor: pointer; padding: 0 2px; line-height: 1;
+  font-size: 13px; color: var(--muted); opacity: 0; transition: opacity .15s ease, color .15s ease;
+}
+.group-item:hover .group-mute, .group-item.active .group-mute { opacity: .75; }
+.group-item.muted .group-mute { opacity: 1; color: var(--warn); }
+.group-item .group-mute:hover { opacity: 1; color: var(--accent-text); }
 /* 客服知聚：蓝色标签 + 「进入」小标（非成员可见可进入） */
 .group-item .support-tag {
   margin-left: 6px; padding: 0 6px; border-radius: 999px; background: rgba(79,140,255,.16);
@@ -255,6 +263,12 @@ select {
   color: var(--muted); border-radius: 6px; padding: 2px 7px; font-size: 12px; cursor: pointer;
 }
 .member-item .trigger-btn:hover { background: rgba(79,140,255,.15); color: var(--accent-text); }
+/* 成员栏信息密度：悬停/键盘聚焦时才显现操作按钮（仅指针悬停设备；触屏始终可见，避免不可达） */
+@media (hover: hover) {
+  .member-item .trigger-btn { opacity: 0; transition: opacity .15s ease; }
+  .member-item:hover .trigger-btn,
+  .member-item:focus-within .trigger-btn { opacity: 1; }
+}
 /* 成员移除按钮：小尺寸、危险色，hover 变红；随 ⚙ 一起被 .role 的 margin-left:auto 推到行最右、紧贴右缘 */
 .member-item .trigger-btn.rm-btn { padding: 2px 6px; font-size: 11px; }
 .member-item .trigger-btn.rm-btn:hover { background: rgba(255,77,79,.15); color: #ff8a80; border-color: #ff5252; }
@@ -344,6 +358,8 @@ select {
 .msg .nick { font-size: 13px; font-weight: 600; }
 .msg.agent .nick { color: var(--agent); }
 .msg .time { font-size: 11px; color: var(--muted); }
+/* 每天第一条消息：时间前带日期（今天/昨天/具体日期），略作强调 */
+.msg .time.time-day { color: var(--accent-text); font-weight: 600; }
 /* 头部操作按钮（新建话题 / 复制 / 重新回答 / 撤回）：统一线条图标，悬停消息时显示，hover 高亮 */
 .msg .head button {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1367,6 +1383,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
   display: flex; flex-direction: column; padding: 18px 20px;
 }
 .help-content { overflow-y: auto; padding-right: 6px; }
+/* 帮助搜索框：固定于标题下，内容区单独滚动 */
+.help-search-wrap { margin: 8px 0 4px; }
+.help-no-match { display: none; padding: 18px 4px; font-size: 13px; color: var(--muted); text-align: center; }
+.help-no-match:not(.hidden) { display: block; }
 .help-section { margin-top: 16px; }
 .help-section:first-child { margin-top: 0; }
 .help-section h4 { font-size: 14px; margin: 0 0 8px; color: var(--accent); }
@@ -1440,6 +1460,12 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .reply-bar-text b { color: inherit; font-weight: 600; }
 .reply-bar-cancel { flex: none; background: none; border: none; cursor: pointer; color: var(--muted, #888); font-size: 13px; padding: 2px 6px; border-radius: 4px; }
 .reply-bar-cancel:hover { background: rgba(255,107,107,.15); color: var(--err, #ff6b6b); }
+/* 发送失败重试条：底色偏警示，提供「重试 / 取消」，直到发送成功或用户放弃才消失 */
+.send-retry-bar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; margin-bottom: 6px;
+  border-left: 3px solid var(--err, #ff6b6b); background: rgba(255,107,107,.10); border-radius: 6px; font-size: 12px; }
+.send-retry-bar .srb-icon { flex: none; }
+.send-retry-bar .srb-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted, #888); }
+.send-retry-bar .chip-btn { flex: none; }
 .reply-btn { opacity: 1; visibility: hidden; }
 .msg:hover .reply-btn { visibility: visible; }
 .reply-ref { cursor: pointer; font-size: 12px; color: var(--muted, #888); margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
