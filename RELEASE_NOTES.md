@@ -1,5 +1,55 @@
-# AG-UI 群聊桌面版 1.0.171 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.171 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.172 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.172 Release Notes (current Windows desktop release)
+
+**版本说明**：本版是一次**界面与操作体验的人性化优化**（第一批）：修中文输入法回车误发、窄屏抽屉、输入区「＋」菜单、按群草稿、跳到底部按钮、弹窗焦点管理、全局快捷键、无障碍名与空态引导。
+**Version note**: a first batch of **UI/UX humanization**: IME-safe Enter, a narrow-screen drawer, a composer “＋” menu, per-circle drafts, a jump-to-latest button, modal focus management, keyboard shortcuts, accessible names and empty-state hints.
+
+## 中文输入法不再误发 + 窄屏可用
+# IME-safe Enter + usable narrow screens
+
+中文：
+- **输入法回车误发（P0）**：`#input` 的 Enter 现在判断 `isComposing` / keyCode 229 —— 拼音选词回车不再把半句话发出去。
+- **窄屏抽屉（P0）**：≤900px 时两侧栏不再直接 `display:none`（那样**根本无法切知聚**），改为聊天头 `☰`/`👥` 打开左/右抽屉，点遮罩 / 选群 / Esc 收起。
+English:
+- **IME Enter**: the composer checks `isComposing` / keyCode 229, so confirming a pinyin candidate no longer sends a half-finished line.
+- **Narrow-screen drawer**: ≤900px no longer hides both sidebars (`display:none`, which made switching circles impossible) but opens them as ☰ / 👥 drawers with a backdrop; close on backdrop / picking a circle / Esc.
+
+## 输入区「＋」菜单 / 按群草稿 / 跳到底部
+# Composer “＋” menu / per-circle drafts / jump-to-latest
+
+中文：
+- **「＋」菜单**：附件 / 语音 / 画布收进 `＋` 弹出菜单，主行只留 ＋ / 讨论 / 发送，图标密度下降。
+- **按群草稿**：输入实时存 `agui.draft.<用户>.<群>`，切群 / 刷新 / 重连不丢，发送即清。
+- **「↓ 到最新 / N 条新消息」**：上滑离开底部时出现并累计新消息计数；点一下贴底归零。
+English:
+- **“＋” menu**: attachment / voice / canvas move into a `＋` popover; the main row keeps only ＋ / discuss / send.
+- **Per-circle drafts**: input is persisted to `agui.draft.<user>.<circle>`, surviving circle switches / reloads / reconnects, cleared on send.
+- **“↓ latest / N new messages”**: appears when you scroll away from the bottom and counts incoming messages; one click returns to the bottom.
+
+## 键盘、焦点与无障碍
+# Keyboard, focus and accessibility
+
+中文：
+- **弹窗焦点管理**：打开自动把焦点移入弹窗、关闭归还、`Tab` 困在最上层弹窗内。
+- **全局快捷键**：`Ctrl/⌘+K` 搜索（群内 / 全局自适应）、`/` 聚焦输入框、`Alt+↑/↓` 快速切知聚。
+- **无障碍名**：动态生成的消息操作按钮（回复 / 复制 / 重新回答 / 撤回 / 停止 / 新建话题）补齐 `aria-label`。
+- **空态引导**：空知聚提示追加一句操作引导。
+English:
+- **Modal focus**: focus moves into the modal on open, is restored on close, and `Tab` is trapped inside the topmost modal.
+- **Shortcuts**: `Ctrl/⌘+K` search (scoped adaptively), `/` focus the input, `Alt+↑/↓` switch circles.
+- **Accessible names**: dynamically rendered message actions (reply / copy / regenerate / recall / stop / new-topic) now carry `aria-label`.
+- **Empty state**: the empty-circle hint gains an actionable tip.
+
+## 回归
+# Tests
+
+中文：新增浏览器 E2E `tools/ui-ux-polish.mjs` **16/16**（＋菜单 / 草稿 / 输入法 / 抽屉 / 弹窗焦点）；回归 `ui-group-files` 19/19、`ui-plan-collapse` 11/11、`ui-doc-slides` 23/23、`ui-doc-preview` 19/19；i18n 审计 `zh=en=1469，missing 0`。
+English: new browser E2E `tools/ui-ux-polish.mjs` **16/16**; regressions `ui-group-files` 19/19, `ui-plan-collapse` 11/11, `ui-doc-slides` 23/23, `ui-doc-preview` 19/19; i18n audit `zh=en=1469, missing 0`.
+
+---
+
+# AG-UI 群聊桌面版 1.0.171 发布说明（上一版）
+# AG-UI Group Chat Desktop 1.0.171 Release Notes (previous release)
 
 **版本说明**：本版三件事——① 新增「📁 输出物」：集中查看本知聚里**所有附件**并下载 / 预览；② 「执行计划」卡片可**收缩 / 展开**（默认未完成展开、全部完成收起，手动选择优先）；③ **保留数字员工的“过程”**：审批 / 交互中断时不再清空已流式产出的正文。
 **Version note**: three things — (1) a new **“📁 Outputs”** panel listing **every attachment in the circle** with download / preview; (2) the **plan card can collapse / expand** (default: expanded while running, collapsed once done; a manual choice wins); (3) **the agent's “process” is kept**: the streamed text is no longer wiped on an approval/interaction interrupt.

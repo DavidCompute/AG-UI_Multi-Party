@@ -4574,6 +4574,8 @@ function onMessageStart(evt) {
   if (state.activeGroupId === evt.groupId) {
     const el = $("messages");
     if (el) el.querySelectorAll(".regenerate-btn").forEach((b) => b.remove());
+    // 用户上滑（未贴底）时收到他人新消息：计数 + 亮出「↓ N 条新消息」
+    if (!vscroll.stickBottom && m.senderId !== state.memberId) { jumpUnseen++; updateJumpButton(); }
   }
   // 未读 / 已读维护：当前知聚内，当前话题的新消息视为已读（发回执），其他话题计入未读；
   // 同时刷新该知聚活跃度（lastMessageAt）→ 知聚列表按最新发言动态重排
@@ -6033,6 +6035,31 @@ function renderChatMeta() {
   $("chatGroupMeta").textContent = meta;
 }
 
+/** Alt+↑/↓ 在知聚列表中循环切换（键盘快速跳群）。 */
+function cycleGroup(delta) {
+  const gs = state.groups || [];
+  if (!gs.length) return;
+  const idx = gs.findIndex((g) => g.groupId === state.activeGroupId);
+  const next = gs[(idx < 0 ? 0 : (idx + delta + gs.length) % gs.length)];
+  if (next) selectGroup(next.groupId);
+}
+
+/* ============ 窄屏抽屉：☰ 知聚列表 / 👥 成员栏 ============ */
+function closeDrawers() {
+  document.querySelectorAll(".panel.drawer-open").forEach((p) => p.classList.remove("drawer-open"));
+  const bd = $("drawerBackdrop"); if (bd) bd.classList.add("hidden");
+}
+function toggleDrawer(sel) {
+  const panel = document.querySelector(sel);
+  if (!panel) return;
+  const willOpen = !panel.classList.contains("drawer-open");
+  closeDrawers();
+  if (willOpen) {
+    panel.classList.add("drawer-open");
+    const bd = $("drawerBackdrop"); if (bd) bd.classList.remove("hidden");
+  }
+}
+
 async function selectGroup(gid) {
   if (state.activeGroupId === gid) return;
   clearReplyTo(); // 切知聚时清除引用目标（引用属于原知聚上下文）
@@ -6080,6 +6107,7 @@ async function selectGroup(gid) {
   }
   resetVScroll(); // 清空上一知聚的虚拟滚动状态与消息 DOM
   vscroll.stickBottom = true; // 切知聚后定位到最新消息（快照到达后由 renderMessages 生效）
+  jumpUnseen = 0; updateJumpButton(); // 切群：清掉“↓ 新消息”计数
   hideMentionPicker();
   hideMentionSuggest();
   // 进入知聚不标记任何话题已读：话题栏先展示全部未读徽标，用户点击对应话题（或该话题收到新消息）后才已读
@@ -6105,6 +6133,11 @@ async function selectGroup(gid) {
   renderMembers();
   renderMessages();
   renderTyping();
+  // 恢复本群草稿（切群 / 刷新 / 重连后不丢已输入内容）
+  const draftEl = $("input");
+  draftEl.value = loadDraft(gid);
+  draftEl.dispatchEvent(new Event("input", { bubbles: true }));
+  closeDrawers(); // 窄屏：选中知聚后收起左侧抽屉
 }
 
 /* ============ 知聚话题（知聚扩展） ============ */
@@ -7623,6 +7656,29 @@ const RECALL_WINDOW_MS = 3 * 60 * 1000; // 撤回时限：仅允许撤回发送 
  * stickBottom = 用户“停靠底部”意图：滚动监听在贴底时置位、一上滑即清除；渲染不消耗。
  * avgH = 实测行高的滑动平均，用于未测量消息的估算（比固定 88px 更贴近真实，减少滚动条漂移）。 */
 let vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBottom: false, avgH: 0 };
+
+/** 「↓ 到底部 / N 条新消息」悬浮按钮：上滑离开底部时亮出，回到顶部自动归零。 */
+let jumpUnseen = 0;
+function updateJumpButton() {
+  const btn = $("jumpToBottom");
+  if (!btn) return;
+  const atBottom = vscroll.stickBottom;
+  if (atBottom) jumpUnseen = 0;
+  const show = !atBottom && !!state.activeGroupId;
+  btn.classList.toggle("hidden", !show);
+  btn.classList.toggle("jtb-new", jumpUnseen > 0);
+  const lbl = $("jumpToBottomLabel");
+  if (lbl) lbl.textContent = jumpUnseen > 0 ? t("chat.newMessages", { n: jumpUnseen }) : "";
+  // 贴在输入区上方（composer 高度可拖拽变化）
+  const comp = document.querySelector(".chat .composer");
+  if (comp && comp.offsetHeight) btn.style.bottom = (comp.offsetHeight + 10) + "px";
+}
+function jumpToBottom() {
+  vscroll.stickBottom = true;
+  jumpUnseen = 0;
+  updateJumpButton();
+  virtualRender();
+}
 let vscrollRO = null; // ResizeObserver：测量已渲染消息高度（图片加载 / 展开 / 流式增长）
 let followRaf = 0;    // 流式跟随跳转的 rAF 合并：每帧最多一次布局/滚动，避免高频增量逐条强制布局
 
@@ -7689,7 +7745,7 @@ function virtualRender() {
     // 已选中知聚但当前话题无消息：注入空态提示（避免误显示「选择一个群开始对话」的 CSS 占位，那样语义误导为尚未选群）；
     // 未选中任何知聚（activeGroupId 为空）才让元素置空，交给 #messages:empty::before 显示「选择群」引导。
     el.innerHTML = state.activeGroupId
-      ? `<div class="msg-empty-hint">${escapeHtml(t("msg.noMessages"))}</div>`
+      ? `<div class="msg-empty-hint">${escapeHtml(t("msg.noMessages"))}<div class="msg-empty-sub">${escapeHtml(t("msg.noMessagesTip"))}</div></div>`
       : "";
     vscroll.start = vscroll.end = 0;
     vscroll.heights = null;
@@ -8056,7 +8112,7 @@ function msgDom(m, r) {
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
-      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
+      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time">${m.time}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}" aria-label="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
       ${replyRef}
       ${mentionTags ? `<div class="mention-line">${mentionTags}</div>` : ""}
       ${thinking}
@@ -8684,21 +8740,21 @@ function attachHeadActions(msgEl, m, r) {
     && (Number(m.timestamp) > 0 && Date.now() - Number(m.timestamp) <= RECALL_WINDOW_MS);
   if (canCopy && !head.querySelector(".copy-btn")) {
     const btn = document.createElement("button");
-    btn.className = "copy-btn"; btn.type = "button"; btn.title = t("msg.copy");
+    btn.className = "copy-btn"; btn.type = "button"; btn.title = t("msg.copy"); btn.setAttribute("aria-label", t("msg.copy"));
     btn.innerHTML = icon("copy");
     bindCopyButton(btn, m);
     head.appendChild(btn);
   }
   if (canRegenerate && !head.querySelector(".regenerate-btn")) {
     const btn = document.createElement("button");
-    btn.className = "regenerate-btn"; btn.type = "button"; btn.title = t("msg.regenTitle");
+    btn.className = "regenerate-btn"; btn.type = "button"; btn.title = t("msg.regenTitle"); btn.setAttribute("aria-label", t("msg.regenTitle"));
     btn.innerHTML = icon("refresh");
     bindRegenerateButton(btn, m);
     head.appendChild(btn);
   }
   if (canRecall && !head.querySelector(".recall-btn")) {
     const btn = document.createElement("button");
-    btn.className = "recall-btn"; btn.type = "button"; btn.title = t("msg.recallTitle");
+    btn.className = "recall-btn"; btn.type = "button"; btn.title = t("msg.recallTitle"); btn.setAttribute("aria-label", t("msg.recallTitle"));
     btn.innerHTML = icon("recall");
     bindRecallButton(btn, m);
     head.appendChild(btn);
@@ -9197,6 +9253,21 @@ function initChatResizer() {
 
 let sending = false; // Enter 发送锁：防快速连按重复发送（发送完成或失败后延时释放）
 
+/* ============ 输入草稿：按「用户 + 知聚」本地持久化（切群 / 刷新不丢） ============ */
+function draftKey(gid) { return "agui.draft." + (state.memberId || "") + "." + (gid || ""); }
+function saveDraft(gid, text) {
+  if (!gid) return;
+  try {
+    if (text && text.trim()) localStorage.setItem(draftKey(gid), text);
+    else localStorage.removeItem(draftKey(gid));
+  } catch { /* 隐私模式忽略 */ }
+}
+function loadDraft(gid) {
+  if (!gid) return "";
+  try { return localStorage.getItem(draftKey(gid)) || ""; } catch { return ""; }
+}
+function clearDraft(gid) { saveDraft(gid, ""); }
+
 async function sendMessage() {
   const input = $("input");
   const content = input.value.trim();
@@ -9250,6 +9321,7 @@ async function sendMessage() {
 
     send(payload);
     input.value = "";
+    clearDraft(gid); // 发送成功：清掉本群草稿
     clearReplyTo(); // 引用一次性消费：发送后清除引用条
     pendingAttachments = [];
     renderAttachList();
@@ -9976,6 +10048,45 @@ function initSearchClears() {
   });
 }
 
+/* ============ 模态焦点管理：打开时焦点入弹窗 / 关闭时归还 / Tab 困在弹窗内 ============ */
+function initModalFocus() {
+  let lastFocused = null;
+  const FOCUSABLE = "a[href], button:not([disabled]), input:not([type=hidden]):not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
+  const observer = new MutationObserver((muts) => {
+    for (const mut of muts) {
+      const el = mut.target;
+      if (!(el instanceof Element) || !el.classList.contains("modal-overlay")) continue;
+      const wasHidden = mut.oldValue ? mut.oldValue.split(" ").includes("hidden") : true;
+      const isHidden = el.classList.contains("hidden");
+      if (wasHidden && !isHidden) {
+        lastFocused = document.activeElement;
+        setTimeout(() => {
+          if (el.classList.contains("hidden")) return;
+          const f = el.querySelector(FOCUSABLE);
+          if (f) { try { f.focus(); } catch { /* 忽略 */ } }
+        }, 30);
+      } else if (!wasHidden && isHidden) {
+        if (lastFocused && document.contains(lastFocused)) { try { lastFocused.focus(); } catch { /* 忽略 */ } }
+        lastFocused = null;
+      }
+    }
+  });
+  document.querySelectorAll(".modal-overlay").forEach((el) =>
+    observer.observe(el, { attributes: true, attributeFilter: ["class"], attributeOldValue: true }));
+  // Tab / Shift+Tab 困在最上层可见弹窗内（键盘用户焦点不会跑到背后页面）
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const modals = [...document.querySelectorAll(".modal-overlay:not(.hidden)")];
+    if (!modals.length) return;
+    const modal = modals[modals.length - 1];
+    const items = [...modal.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }, true);
+}
+
 /* ============ 初始化 ============ */
 
 function init() {
@@ -10447,6 +10558,36 @@ function init() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("helpModal").classList.add("hidden"); });
 
   $("sendBtn").onclick = sendMessage;
+  initModalFocus(); // 弹窗焦点：打开入框 / 关闭归还 / Tab 困住
+  $("jumpToBottom").onclick = jumpToBottom;
+  // 窄屏抽屉：☰ 知聚列表 / 👥 成员栏；点遮罩或 Esc 收起
+  $("navToggle").onclick = () => toggleDrawer(".panel.groups");
+  $("membersToggle").onclick = () => toggleDrawer(".panel.members");
+  $("drawerBackdrop").onclick = closeDrawers;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (document.querySelector(".modal-overlay:not(.hidden)")) return; // 有弹窗时让弹窗处理
+    closeDrawers();
+  }, true);
+  // 全局快捷键（不在输入态时生效）：Ctrl/⌘+K 搜索、/ 聚焦输入、Alt+↑/↓ 切知聚
+  document.addEventListener("keydown", (e) => {
+    const ae = document.activeElement;
+    const tag = (ae && ae.tagName || "").toLowerCase();
+    const typing = tag === "input" || tag === "textarea" || tag === "select" || (ae && ae.isContentEditable);
+    if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      if (state.activeGroupId) openSearchModal(); else openGlobalSearchModal();
+      return;
+    }
+    if (typing) return;
+    if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!state.activeGroupId) return;
+      e.preventDefault(); $("input").focus(); return;
+    }
+    if (e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault(); cycleGroup(e.key === "ArrowDown" ? 1 : -1); return;
+    }
+  });
   // 输入框 @ 成员选择：输入时检测 @ 弹出选择器，↑/↓ 移动高亮，Enter 选中（浮层未开时 Enter 发送）
   const msgInput = $("input");
   // 浮层内按下鼠标不转移焦点（否则 textarea blur 会把浮层清掉，导致点击失效）
@@ -10455,6 +10596,7 @@ function init() {
   msgInput.addEventListener("compositionend", () => { composing = false; updateMentionPicker(); scheduleMentionSuggest(); });
   msgInput.addEventListener("input", (e) => {
     if (!composing && !e.isComposing) { updateMentionPicker(); scheduleMentionSuggest(); }
+    saveDraft(state.activeGroupId, msgInput.value); // 草稿实时落本地，切群 / 刷新不丢
   });
   // 点击输入框外部 = 取消：移除 @ 及后续输入（延迟等点击浮层项先于 blur 回调执行；浮层内 mousedown 已阻止 blur）
   msgInput.addEventListener("blur", () => setTimeout(cancelMentionPicker, 150));
@@ -10475,13 +10617,27 @@ function init() {
       }
       if (e.key === "Escape") { e.preventDefault(); cancelMentionPicker(); return; }
     }
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      // 中文/日文输入法组字中：回车是“选词”而不是“发送”（否则拼音选词会把半句话发出去）
+      if (e.isComposing || composing || e.keyCode === 229) return;
+      e.preventDefault();
+      sendMessage();
+    }
   });
 
   // ---- 聊天区 / 输入区可拖动分割线 ----
   initChatResizer();
   applyChatResizer();
 
+  // 输入区「＋」弹出菜单：附件 / 语音 / 画布（选完 / 点外部自动收起）
+  $("composerPlusBtn").onclick = (e) => { e.stopPropagation(); $("composerPlusMenu").classList.toggle("hidden"); };
+  $("composerPlusMenu").addEventListener("click", (e) => { if (e.target.closest(".composer-plus-item")) $("composerPlusMenu").classList.add("hidden"); });
+  document.addEventListener("click", (e) => {
+    const menu = $("composerPlusMenu");
+    if (menu.classList.contains("hidden")) return;
+    if (e.target.closest("#composerPlusMenu") || e.target.closest("#composerPlusBtn")) return;
+    menu.classList.add("hidden");
+  });
   // ---- 附件上传（富媒体 5.2：图片多选 / 语音 / 画布标注）----
   $("attachBtn").disabled = false;
   $("attachBtn").onclick = () => $("attachInput").click();
@@ -10596,6 +10752,7 @@ function init() {
   $("messages").addEventListener("scroll", () => {
     const el = $("messages");
     vscroll.stickBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 2;
+    updateJumpButton(); // 贴底 / 上滑 → 显隐「↓ 到最新」按钮
     const r = state.activeGroupId ? room(state.activeGroupId) : null;
     const h = vscroll.heights;
     if (r && h && r.messages.length > 0 && vscroll.start < vscroll.end) {

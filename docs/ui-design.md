@@ -196,6 +196,17 @@ topbar（品牌 + 顶栏操作）
 
 **Esc 层级**：在线查看弹窗叠在输出物弹窗之上（z 更高），`Esc` 只收上层——为此在线查看的 `Esc` 监听改用 `stopImmediatePropagation()`（同是 document 捕获监听，`stopPropagation` 拦不住后面注册的输出物监听）。
 
+### 2.7 操作体验优化（1.0.172）
+
+- **中文输入法不误发**：`#input` 的回车发送判断 `e.isComposing || composing || e.keyCode === 229`，拼音选词回车不会发出半句。
+- **窄屏抽屉**：≤900px 时 `.panel` 不再 `display:none`，而是 `position:fixed` 抽屉（`.panel.groups` 左 / `.panel.members` 右，`transform` 滑入）+ `#drawerBackdrop` 遮罩；聊天头 `#navToggle`(☰) / `#membersToggle`(👥) 开合，选群 / 点遮罩 / Esc 收起。
+- **输入区「＋」菜单**：`.composer-row` 只留 ＋ / 讨论 / 发送；附件 / 语音 / 画布移入 `#composerPlusMenu` 弹出层（点外部或选完收起）。
+- **按群草稿**：`agui.draft.<memberId>.<groupId>` 实时保存，`selectGroup` 恢复并派发 `input`，发送后清除。
+- **跳到底部**：`#jumpToBottom` 悬浮钮（`.chat{position:relative}`，bottom 按 composer 高度动态设）；`vscroll.stickBottom` 为真时隐藏、上滑时出现，`jumpUnseen` 计数显示「N 条新消息」。
+- **弹窗焦点**：`initModalFocus()` 用 MutationObserver 监听 `.modal-overlay` 的 class 变化——打开聚焦首个可交互项，关闭归还上一焦点；`Tab` 困在最上层可见弹窗内。
+- **全局快捷键**：`Ctrl/⌘+K` 搜索（有群→群内，否则全局）、`/` 聚焦输入框、`Alt+↑/↓` 循环切群（`cycleGroup`）；仅在非输入态生效。
+- **无障碍名**：动态生成的消息操作按钮补 `aria-label`；空知聚提示追加 `msg.noMessagesTip` 引导语。
+
 ---
 
 ## 3. 头像与默认占位规范（全局）
