@@ -98,6 +98,8 @@ window.I18N_DICTS.zh = {
   "chat.settings": "知聚设置（知聚名 / 头像 / 私密）",
   "chat.messages": "消息列表",
   "chat.resize": "拖动调整聊天记录与输入区大小",
+  "chat.resizeGroups": "拖动调整知聚列表宽度（双击复位，←/→ 微调）",
+  "chat.resizeMembers": "拖动调整成员列表宽度（双击复位，←/→ 微调）",
   "chat.visibility": "可见范围",
   "chat.visibility.all": "全知聚可见",
   "chat.visibility.mentioned": "仅 @ 提及者可见",

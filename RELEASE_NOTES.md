@@ -1,5 +1,27 @@
-# AG-UI 群聊桌面版 1.0.176 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.176 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.177 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.177 Release Notes (current Windows desktop release)
+
+**版本说明**：界面布局人性化——左侧知聚列表与右侧成员列表的宽度现在可以拖拽（与输入区拖拽同一套交互），按用户记忆，长名称不再被截断。
+**Version note**: layout usability — the left circle list and right member list are now **resizable by dragging** (same interaction as the composer splitter), remembered per user, so long names are no longer truncated.
+
+## 侧栏宽度可拖拽
+# Resizable side panels
+
+中文：
+- **拖动改宽**：左 / 右栏边缘各有一条拖拽手柄（悬停高亮），拖动即改宽，聊天区相应伸缩。
+- **按用户记住**：宽度存到本机（每个账号独立），刷新 / 下次登录仍生效；登出后换账号不串。
+- **不挤坏聊天区**：聊天区不低于 360px；窗口变窄时两侧栏自动各让一半。
+- **键盘与复位**：手柄可 Tab 聚焦，`←/→` 微调 8px；**双击手柄复位**默认宽度。
+- 窄屏（≤900px）侧栏为抽屉，手柄自动隐藏。
+English:
+- **Drag to resize**: each side panel edge has a drag handle (highlights on hover); dragging resizes it and the chat area follows.
+- **Remembered per user**: the width is stored locally per account and restored on reload / next login; it does not leak across accounts after sign-out.
+- **Chat never squeezed**: the chat area keeps at least 360px; on window shrink both panels give way automatically.
+- **Keyboard & reset**: the handle is focusable, `← / →` nudges by 8px, and **double-click resets** to the default width.
+- On narrow screens (≤900px) the panels become drawers and the handles hide.
+
+# AG-UI 群聊桌面版 1.0.176 发布说明
+# AG-UI Group Chat Desktop 1.0.176 Release Notes
 
 **版本说明**：对「执行过程分层」做一次严格审核后的修复——撤回 / 中断重置时不再残留过时或空白的「执行过程」块，并清理折叠状态表避免长会话下无界增长。
 **Version note**: bug fixes after a strict review of the process/final-answer layering — recalled or reset replies no longer leave a stale or empty “Execution process” block, and the collapse-state maps are pruned to avoid unbounded growth in long sessions.

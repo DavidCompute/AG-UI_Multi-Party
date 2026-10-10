@@ -148,7 +148,17 @@ select {
 .auth-submit { margin-top: 14px; }
 .auth-error { min-height: 18px; color: var(--err); font-size: 12px; margin-top: 8px; }
 
-.layout { flex: 1; display: grid; grid-template-columns: 220px 1fr 240px; min-height: 0; min-width: 0; }
+.layout { flex: 1; display: grid; grid-template-columns: var(--groups-w, 220px) 6px minmax(0, 1fr) 6px var(--members-w, 240px); min-height: 0; min-width: 0; }
+
+/* 左/右侧栏拖拽手柄：列宽 6px，中心一条细竖线（悬停 / 拖拽 / 键盘聚焦时高亮加粗）。 */
+.panel-resizer { cursor: col-resize; touch-action: none; position: relative; z-index: 5; margin: 0; padding: 0; border: none; background: transparent; }
+.panel-resizer::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 1px; background: var(--border); transition: background .15s, width .15s;
+}
+.panel-resizer:hover::after, .panel-resizer.dragging::after, .panel-resizer:focus-visible::after { background: var(--accent); width: 2px; }
+.panel-resizer:focus-visible { outline: none; }
+body.resizing-x { cursor: col-resize; user-select: none; }
 
 .panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .panel-title { padding: 12px 14px 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
@@ -1414,6 +1424,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .nav-toggle { display: inline-flex; }
+  .panel-resizer { display: none; } /* 窄屏侧栏为抽屉（固定定位），拖拽手柄不适用 */
   .panel {
     position: fixed; top: 0; bottom: 0; width: min(86vw, 320px); z-index: 70;
     display: flex; transition: transform .22s ease; box-shadow: 0 0 30px rgba(0,0,0,.4);

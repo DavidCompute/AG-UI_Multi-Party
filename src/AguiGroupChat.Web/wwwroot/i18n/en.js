@@ -98,6 +98,8 @@ window.I18N_DICTS.en = {
   "chat.settings": "Group settings (name / avatar / privacy)",
   "chat.messages": "Message list",
   "chat.resize": "Drag to resize chat history and input area",
+  "chat.resizeGroups": "Drag to resize the circle list (double-click to reset, ← / → to nudge)",
+  "chat.resizeMembers": "Drag to resize the member list (double-click to reset, ← / → to nudge)",
   "chat.visibility": "Visibility",
   "chat.visibility.all": "Visible to all in group",
   "chat.visibility.mentioned": "Visible to mentioned members only",

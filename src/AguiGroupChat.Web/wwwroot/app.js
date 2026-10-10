@@ -345,6 +345,7 @@ function enterApp(data) {
     renderMeAvatar();
     applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
     resetChatState();
+    applyPanelWidths(); // 恢复该用户上次拖拽的左 / 右栏宽度（需在 resetChatState 清除内联变量之后）
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
@@ -394,6 +395,9 @@ function resetChatState() {
   // 折叠覆盖表按 messageId 记录：登出 / 切换身份一并清空，避免跨账号累积
   planCollapseOverride.clear();
   processCollapseOverride.clear();
+  // 侧栏宽度为按用户偏好：清除内联变量，避免跨账号残留（下次登录由 applyPanelWidths 重新应用）
+  const layoutEl = document.querySelector(".layout");
+  if (layoutEl) { layoutEl.style.removeProperty("--groups-w"); layoutEl.style.removeProperty("--members-w"); }
   hideNotifPanel();
   if ($("notifBadge")) renderNotifications();
   const input = $("input"); if (input) input.value = "";
@@ -9427,6 +9431,111 @@ function loadDraft(gid) {
 }
 function clearDraft(gid) { saveDraft(gid, ""); }
 
+/* ============ 左 / 右侧栏宽度拖拽（与输入区拖拽同一套交互，按用户记忆） ============ */
+
+const PANEL_W_KEY = "agui.panelW"; // 每用户：{ groups, members }（px）
+const PANEL_MIN_W = 168, PANEL_MAX_W = 560, PANEL_MIN_CHAT = 360;
+const clampPanelW = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(v)));
+
+/** 读取本用户保存的侧栏宽度（无 / 异常 → 空对象，由 CSS 默认值兼底）。 */
+function savedPanelWidths() {
+  try {
+    const o = JSON.parse(localStorage.getItem(PANEL_W_KEY + "." + (state.memberId || "")) || "null");
+    return (o && typeof o === "object") ? o : {};
+  } catch { return {}; }
+}
+/** 登录 / 切换身份后应用本用户的侧栏宽度；未设置过则清除内联变量回退默认。 */
+function applyPanelWidths() {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  const w = savedPanelWidths();
+  const set = (prop, v) => Number.isFinite(v) ? layout.style.setProperty(prop, clampPanelW(v, PANEL_MIN_W, PANEL_MAX_W) + "px") : layout.style.removeProperty(prop);
+  set("--groups-w", w.groups);
+  set("--members-w", w.members);
+  reclampPanelWidths();
+}
+function savePanelWidths() {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  const g = layout.querySelector(".panel.groups")?.getBoundingClientRect().width;
+  const m = layout.querySelector(".panel.members")?.getBoundingClientRect().width;
+  try { localStorage.setItem(PANEL_W_KEY + "." + (state.memberId || ""), JSON.stringify({ groups: Math.round(g || 0), members: Math.round(m || 0) })); } catch { /* 隐私模式忽略 */ }
+}
+/** 窗口变窄时把两侧栏收回，保证聊天区至少 PANEL_MIN_CHAT（抽屉模式不适用）。 */
+function reclampPanelWidths() {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  const total = layout.getBoundingClientRect().width;
+  if (total < 901) return;
+  const cs = getComputedStyle(layout);
+  const gw = parseFloat(cs.getPropertyValue("--groups-w")) || 220;
+  const mw = parseFloat(cs.getPropertyValue("--members-w")) || 240;
+  const avail = total - 12 - PANEL_MIN_CHAT;
+  if (gw + mw <= avail) return;
+  const over = gw + mw - avail;
+  const ng = clampPanelW(gw - over / 2, PANEL_MIN_W, PANEL_MAX_W);
+  const nm = clampPanelW(mw - over / 2, PANEL_MIN_W, PANEL_MAX_W);
+  layout.style.setProperty("--groups-w", ng + "px");
+  layout.style.setProperty("--members-w", nm + "px");
+}
+
+/** 绑定左 / 右拖拽手柄：拖动改列宽（聊天区不低于 PANEL_MIN_CHAT），松手持久化；←/→ 键盘微调。 */
+function initPanelResizers() {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  const groupsEl = () => layout.querySelector(".panel.groups");
+  const membersEl = () => layout.querySelector(".panel.members");
+  const maxFor = (otherW) => Math.max(PANEL_MIN_W, Math.min(PANEL_MAX_W, layout.getBoundingClientRect().width - otherW - 12 - PANEL_MIN_CHAT));
+
+  const setup = (resizerId, side) => {
+    const r = $(resizerId);
+    if (!r) return;
+    let dragging = false;
+    const apply = (px) => {
+      const rect = layout.getBoundingClientRect();
+      const prop = side === "groups" ? "--groups-w" : "--members-w";
+      const otherW = side === "groups" ? (membersEl()?.getBoundingClientRect().width || 240) : (groupsEl()?.getBoundingClientRect().width || 220);
+      const raw = side === "groups" ? (px - rect.left) : (rect.right - px);
+      layout.style.setProperty(prop, clampPanelW(raw, PANEL_MIN_W, maxFor(otherW)) + "px");
+    };
+    const onMove = (e) => { if (dragging) apply(e.clientX); };
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      r.classList.remove("dragging");
+      document.body.classList.remove("resizing-x");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      savePanelWidths();
+    };
+    r.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      dragging = true;
+      r.classList.add("dragging");
+      document.body.classList.add("resizing-x");
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
+    // 双击复位为默认宽度（与多数编辑器一致，便于“拖飞了”一键回正）
+    r.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      layout.style.setProperty(side === "groups" ? "--groups-w" : "--members-w", (side === "groups" ? 220 : 240) + "px");
+      savePanelWidths();
+    });
+    r.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowLeft" ? -8 : e.key === "ArrowRight" ? 8 : 0;
+      if (!step) return;
+      e.preventDefault();
+      const cur = (side === "groups" ? groupsEl() : membersEl())?.getBoundingClientRect().width || PANEL_MIN_W;
+      const next = clampPanelW(cur + (side === "groups" ? step : -step), PANEL_MIN_W, PANEL_MAX_W);
+      layout.style.setProperty(side === "groups" ? "--groups-w" : "--members-w", next + "px");
+      savePanelWidths();
+    });
+  };
+  setup("groupsResizer", "groups");
+  setup("membersResizer", "members");
+}
+
 /* ============ 发送失败重试条：内容/附件已保留，用户可重试或取消 ============ */
 // 文案由 data-i18n 托管（chat.sendFailed / chat.retrySend / common.cancel），此处只控制显隐
 function showSendRetryBar() {
@@ -10833,6 +10942,10 @@ function init() {
   // ---- 聊天区 / 输入区可拖动分割线 ----
   initChatResizer();
   applyChatResizer();
+
+  // ---- 左 / 右侧栏可拖动分割线（窗口变窄时自动收回，保证聊天区宽度）----
+  initPanelResizers();
+  window.addEventListener("resize", reclampPanelWidths);
 
   // 输入区「＋」弹出菜单：附件 / 语音 / 画布（选完 / 点外部自动收起）
   $("composerPlusBtn").onclick = (e) => { e.stopPropagation(); $("composerPlusMenu").classList.toggle("hidden"); };

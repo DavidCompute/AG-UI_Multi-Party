@@ -32,14 +32,16 @@ topbar（品牌 + 顶栏操作）
 ├─ 操作区      #langBtn(中/EN) #themeBtn(深浅) #helpBtn(帮助)
 │             #agentManageBtn(🤖 数字员工) #notifBtn(#notifBadge 通知)
 │             #meChip(自己头像 #meAvatar + 昵称 #meNickname) #connStatus(在线点)
-└─ 会话主区（三栏 flex）
+└─ 会话主区（三栏 grid，`--groups-w` / `--members-w` 可控）
    ├─ aside.left   ─ 知聚列表：#refreshGroupsBtn #createGroupBtn / #groupList
+   ├─ #groupsResizer ─ 左栏宽度拖拽手柄（宽屏可见）
    ├─ main         ─ 聊天：#chatGroupName #chatGroupMeta / #searchBtn #groupSettingsBtn
    │                  #topicBar(话题) / #messages(虚拟滚动) / #typingRow
-   │                  #mentionPicker #replyBar #attachList
+   │                  #mentionPicker #replyBar #sendReplyBar(发送失败重试) #attachList
    │                  输入：#visibilitySelect #mentionAllBtn #mentionChips #input
    │                  #discussBtn(多智能体讨论) #attachBtn #voiceBtn #canvasBtn #sendBtn
    │                  #chatResizer(输入区高度拖拽) #attachInput
+   ├─ #membersResizer ─ 右栏宽度拖拽手柄（宽屏可见）
    └─ aside.right  ─ 成员：#memberCount #refreshMembersBtn #addMemberBtn / #memberList
 ```
 
@@ -253,6 +255,21 @@ topbar（品牌 + 顶栏操作）
 
 验证：`tools/ui-process-layers.mjs`（14 项，另含 4 项流式插入路径）——分组归属、位于正文之前、**结束收起 / 流式展开**、手动展开后重渲染保持、无过程不渲染，
 以及真实数据回放（6 个知聚 / 23 条数字员工消息 / 20 个过程块全部默认收起、8 个带步数进度、无错层、无控制台报错）。
+
+### 2.10 侧栏宽度可拖拽（1.0.177）
+
+**要解决的问题**：知聚列表（220px）与成员列表（240px）宽度**写死**，知聚名 / 昵称稍长就被省略号截断，而输入区高度却可以拖——同一屏里一套能拖一套不能拖，不一致。
+
+**实现**：
+
+- `.layout` 改为 5 列网格：`var(--groups-w,220px) 6px minmax(0,1fr) 6px var(--members-w,240px)`——两根 6px 的拖拽手柄（`#groupsResizer` / `#membersResizer`）各占一列，中间聊天区用 `minmax(0,1fr)` 保证可收缩。
+- 拖动改对应 CSS 变量（左栏用 `clientX - layout.left`，右栏用 `layout.right - clientX`），夹在 168–560px；**并保证聊天区不低于 360px**（越过则不再变宽）。
+- **按用户持久化** `agui.panelW.<userId>`；登录后 `applyPanelWidths()` 应用（未设置过则清除内联变量回退默认）；登出 / 切换身份在 `resetChatState` 清除内联变量，防跨账号残留。
+- **窗口变窄自动收回**（`reclampPanelWidths`，挂在 `resize`）：两侧栏合计超出可用宽度时各让一半，聊天区不被挤没。
+- **键盘可达**：手柄 `tabindex=0` + `role=separator`，`←/→` 微调 8px；**双击复位**默认宽度（220 / 240）。
+- ≤900px 侧栏为抽屉（固定定位），手柄 `display:none`。
+
+验证：`tools/ui-panel-resize.mjs`（12 项）——手柄可见、拖动改变列宽且聊天区相应变化、持久化并刷新保持、键盘微调、双击复位、窄屏隐藏。
 
 ---
 
@@ -491,6 +508,9 @@ apiKey 不回显，仅提示“已配置”。
 | `agui.agentFormSections` | 数字员工表单折叠状态 |
 | `agui.skillError.<uid>` | 技能试运行错误本地备查 |
 | `agui.chatResizerH` | 输入区高度 |
+| `agui.panelW.<uid>` | 左 / 右侧栏宽度 `{groups, members}` |
+| `agui.muted.<uid>` | 按知聚静音通知的知聚 id 列表 |
+| `agui.draft.<uid>.<gid>` | 按群输入草稿 |
 
 `agui.theme`/`agui.auth` 之外的用户个性化键均按 `memberId` 隔离。
 
