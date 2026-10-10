@@ -8256,12 +8256,20 @@ async function docSlideGo(delta) {
   else await renderDocSlide();
 }
 
-/** 进入全屏播放模式（幻灯片 + 键盘导航，可选显示备注）。 */
+/** 进入全屏播放模式（真·全屏 + 幻灯片铺满，控制条自动隐没）。 */
 async function startDocPlay() {
   if (!docPdf) return;
   docPlaying = true;
-  $("docPlayOverlay").classList.remove("hidden");
+  const overlay = $("docPlayOverlay");
+  overlay.classList.remove("hidden");
   $("docPlayNotes").classList.toggle("hidden", !docPlayNotesOn);
+  // 真全屏：请求浏览器 Fullscreen API（桌面版 WebView2 也支持）。
+  // 失败也不影响——覆盖层本身已 position:fixed inset:0 铺满视口，只是浏览器还带着边框。
+  if (!document.fullscreenElement) {
+    const req = overlay.requestFullscreen || overlay.webkitRequestFullscreen;
+    try { if (req) await req.call(overlay); } catch { /* 用户手势不足 / 不支持：忽略 */ }
+  }
+  showDocPlayBar();
   await renderDocPlay();
 }
 
@@ -8269,16 +8277,18 @@ async function startDocPlay() {
 function exitDocPlay() {
   docPlaying = false;
   $("docPlayOverlay").classList.add("hidden");
+  resetDocPlayBar();
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch { /* 忽略 */ }
   renderDocSlide();
 }
 
-/** 渲染播放模式的全屏画布（按窗口尺寸适配）。 */
+/** 渲染播放模式的全屏画布：铺满整个视口（全屏下即整块屏幕），按比例居中，比例不符时留有黑边。 */
 async function renderDocPlay() {
   if (!docPdf) return;
   const canvas = $("docPlayCanvas");
   const seq = ++docRenderSeq;
-  const w = Math.max(window.innerWidth - 60, 200);
-  const h = Math.max(window.innerHeight - 120, 150);
+  const w = Math.max(window.innerWidth, 200);
+  const h = Math.max(window.innerHeight, 150);
   try {
     const page = await docPdf.getPage(docPdfPage + 1);
     if (seq !== docRenderSeq) return;
@@ -8291,6 +8301,20 @@ async function renderDocPlay() {
   if (seq !== docRenderSeq) return;
   $("docPlayPage").textContent = `${docPdfPage + 1} / ${docPdf.numPages}`;
   $("docPlayNotes").textContent = (docPdfNotes && docPdfNotes[docPdfPage]) || "";
+}
+
+/** 播放控制条：鼠标移动时显现，静置 3 秒后自动隐没（让幻灯片铺满屏幕）。 */
+let docPlayBarTimer = null;
+function showDocPlayBar() {
+  const bar = $("docPlayBar");
+  if (!bar) return;
+  bar.classList.remove("doc-play-hidden");
+  if (docPlayBarTimer) clearTimeout(docPlayBarTimer);
+  docPlayBarTimer = setTimeout(() => bar.classList.add("doc-play-hidden"), 3000);
+}
+function resetDocPlayBar() {
+  if (docPlayBarTimer) { clearTimeout(docPlayBarTimer); docPlayBarTimer = null; }
+  $("docPlayBar")?.classList.remove("doc-play-hidden");
 }
 
 /** 播放模式下切换「备注」浮层显示。 */
@@ -8308,6 +8332,8 @@ function resetDocViewer() {
   docPdfPage = 0;
   docPdfNotes = null;
   if (docPlaying) { docPlaying = false; $("docPlayOverlay").classList.add("hidden"); }
+  resetDocPlayBar();
+  try { if (document.fullscreenElement) document.exitFullscreen(); } catch { /* 忽略 */ }
   for (const id of ["docSlideCanvas", "docPlayCanvas"]) {
     const c = $(id);
     if (!c) continue;
@@ -10244,6 +10270,15 @@ function init() {
   $("docPlayNext").onclick = () => docSlideGo(1);
   $("docPlayNotesBtn").onclick = toggleDocPlayNotes;
   $("docPlayExit").onclick = exitDocPlay;
+  // 播放：鼠标移动唤出控制条（静置自动隐没）
+  $("docPlayOverlay").addEventListener("mousemove", () => { if (docPlaying) showDocPlayBar(); });
+  // 全屏状态变化：浏览器用 Esc/F11 退出全屏时会吞掉 Esc（我们的 keydown 收不到），靠这里收尾；
+  // 进入全屏导致视口变化时也重画一次。
+  document.addEventListener("fullscreenchange", () => {
+    if (!docPlaying) return;
+    if (document.fullscreenElement) renderDocPlay();
+    else exitDocPlay();
+  });
   $("docPreviewModal").addEventListener("click", (e) => { if (e.target === $("docPreviewModal")) closeDocPreview(); });
   // 播放模式：Esc 退出播放（而不是关弹窗）、方向键/空格翻页、N 切换备注。
   document.addEventListener("keydown", (e) => {

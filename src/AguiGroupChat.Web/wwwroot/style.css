@@ -734,8 +734,9 @@ select {
 .doc-slide-page { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 56px; text-align: center; }
 
 /* 全屏播放：z 高于所有弹窗（含 z-80 的 ui-dialog-overlay）。 */
-.doc-play { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; align-items: center; justify-content: center; }
-.doc-play-canvas { max-width: 92vw; max-height: 82vh; background: #fff; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+.doc-play { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+/* 不要 max-width/max-height 限制：JS 已按视口尺寸等比算出画布大小，限制反而会让它填不满。 */
+.doc-play-canvas { background: #fff; box-shadow: 0 0 40px rgba(0,0,0,.6); }
 .doc-play-notes {
   position: fixed; left: 0; right: 0; bottom: 56px; max-height: 26vh; overflow: auto; white-space: pre-wrap;
   padding: 10px 18px; font-size: 14px; line-height: 1.5; color: #eaeaea;
@@ -744,8 +745,10 @@ select {
 .doc-play-bar {
   position: fixed; left: 0; right: 0; bottom: 0; height: 56px;
   display: flex; align-items: center; justify-content: center; gap: 12px;
-  background: rgba(0,0,0,.6); color: #fff;
+  background: rgba(0,0,0,.6); color: #fff; transition: opacity .25s;
 }
+/* 播放中控制条自动隐没（鼠标移动后再现），让幻灯片真正铺满屏幕 */
+.doc-play-bar.doc-play-hidden { opacity: 0; pointer-events: none; }
 .doc-play-btn {
   font-family: inherit; font-size: 13px; cursor: pointer; color: #fff;
   background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3); border-radius: 8px; padding: 6px 14px;

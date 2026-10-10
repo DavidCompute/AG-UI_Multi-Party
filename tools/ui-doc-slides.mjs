@@ -121,7 +121,7 @@ try {
   check("翻到第 2 页（页码更新）", true, await page.locator("#docSlidePage").textContent());
   check("备注随当前页切换", notes2 !== notes1, (notes2 || "").slice(0, 30) + "…");
 
-  // 断言 4：播放模式
+  // 断言 4：播放模式（真·全屏 + 铺满）
   await page.locator("#docSlidePlay").click();
   await page.waitForSelector("#docPlayOverlay:not(.hidden)", { timeout: 10000 });
   check("进入全屏播放模式", true);
@@ -129,9 +129,18 @@ try {
   check("播放起始页沿用当前页 2 / " + EXPECT_PAGES, true);
   const playBox = await page.locator("#docPlayCanvas").boundingBox();
   check("播放画布已渲染", !!playBox && playBox.width > 200, playBox ? `${Math.round(playBox.width)}×${Math.round(playBox.height)}` : "无");
+  // 满屏：画布在限制方向上铺满整个视口（比例不符时另一方向留黑边属正常）
+  const inner = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight, fs: document.fullscreenElement && document.fullscreenElement.id }));
+  const fillW = playBox ? playBox.width / inner.w : 0, fillH = playBox ? playBox.height / inner.h : 0;
+  check("播放满屏（限制方向铺满视口）", Math.max(fillW, fillH) >= 0.99 && Math.min(fillW, fillH) >= 0.7,
+    `${Math.round(playBox.width)}×${Math.round(playBox.height)} / 视口 ${inner.w}×${inner.h}`);
+  check("进入浏览器全屏（requestFullscreen）", inner.fs === "docPlayOverlay", String(inner.fs));
   await page.keyboard.press("ArrowRight");
   await page.waitForFunction((n) => document.getElementById("docPlayPage")?.textContent === `3 / ${n}`, EXPECT_PAGES, { timeout: 15000 });
   check("方向键翻页（播放中 → 3 / " + EXPECT_PAGES + "）", true);
+  // 控制条静置后自动隐没（幻灯片真正铺满）
+  await sleep(3300);
+  check("控制条静置后自动隐没", await page.locator("#docPlayBar").evaluate((el) => el.classList.contains("doc-play-hidden")));
 
   // 断言 5：Esc 只退出播放，再 Esc 收弹窗
   await page.keyboard.press("Escape");

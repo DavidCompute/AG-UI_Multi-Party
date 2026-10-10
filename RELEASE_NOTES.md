@@ -1,5 +1,28 @@
-# AG-UI 群聊桌面版 1.0.169 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.169 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.170 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.170 Release Notes (current Windows desktop release)
+
+**版本说明**：1.0.170 把演示文稿的「在线播放」做成**真·全屏**：幻灯片铺满整块屏幕（仅按比例留黑边），控制条静置自动隐没；以前它只是“铺满浏览器视口里的一个小框”（还受 `max-width/max-height` 限制），且从不请求浏览器全屏。
+**Version note**: 1.0.170 makes presentation playback **truly fullscreen**: the slide fills the whole screen (letterboxed only for aspect mismatch) and the control bar auto-hides. Before, it merely filled a small box inside the viewport (clamped by `max-width/max-height`) and never requested browser fullscreen.
+
+## 播放满屏（1.0.170）
+# Fullscreen playback (1.0.170)
+
+中文：
+- **真全屏**：点「▶ 播放」时调用浏览器 Fullscreen API（桌面版 WebView2 同样支持）；请求失败也不影响——覆盖层本身 `position:fixed; inset:0` 已铺满视口，只是浏览器还留边框。
+- **铺满屏幕**：删除 `.doc-play-canvas` 上的 `max-width:92vw / max-height:82vh` 限制（这正是“填不满”的直接原因），画布按 `window.innerWidth × window.innerHeight` 等比铺满；比例不符时另一方向留黑边属正常。
+- **控制条自动隐没**：播放中控制条（◀ 页码 ▶ / 备注 / 退出）静置 3 秒后淡出、鼠标移动再现，让幻灯片真正占满屏幕；进出全屏导致的视口变化会重画一帧。`Esc`（或浏览器 F11/退出全屏）统一收尾：只退播放、不关弹窗。
+- **回归**：浏览器 E2E `tools/ui-doc-slides.mjs`（`deviceScaleFactor=2`）新增“播放满屏（限制方向铺满视口）”“进入浏览器全屏”“控制条静置后自动隐没”三项，**23 项全过**；`ui-doc-preview.mjs` **19 项**仍全过。
+
+English:
+- **True fullscreen**: 「▶ Play」now calls the browser Fullscreen API (WebView2 supports it too); if the request fails it still works — the overlay is `position:fixed; inset:0`, so only browser chrome differs.
+- **Fills the screen**: removed the `max-width:92vw / max-height:82vh` clamp on `.doc-play-canvas` (the direct cause of “not filling”), and the canvas is fitted to `window.innerWidth × window.innerHeight` preserving aspect; black bars on the other axis for aspect mismatch are expected.
+- **Auto-hiding controls**: the play bar (◀ page ▶ / notes / exit) fades out after 3 s of no mouse movement and returns on move; viewport changes from entering/leaving fullscreen trigger a re-render. `Esc` (or the browser leaving fullscreen) exits playback only, never the modal.
+- **Tests**: the browser E2E `tools/ui-doc-slides.mjs` (`deviceScaleFactor=2`) adds “playback fills the viewport”, “entered browser fullscreen”, and “control bar auto-hides after idle”, now **23/23**; `ui-doc-preview.mjs` still passes **19/19**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.169 发布说明（上一版）
+# AG-UI Group Chat Desktop 1.0.169 Release Notes (previous release)
 
 **版本说明**：本版把**演示文稿的在线查看**从“只能看幻灯片”升级为**能看备注、能播放**：PPT / PPTX 改用自绘幻灯片查看器，**备注跟随当前页显示在下方**，并可点「▶ 播放」进入**全屏播放模式**（方向键 / 空格翻页、`N` 开关备注、`Esc` 退出）。顺带把「👁 在线查看」按钮改为仅图标，并修掉一个高分屏下“幻灯片只显示一半宽高”的缺陷。
 **Version note**: this release turns **presentation online viewing** from “slides only” into **notes + playback**: PPT / PPTX now use a self-drawn slide viewer with **per-slide speaker notes shown below the current page**, plus a **fullscreen playback mode** (arrow / space to navigate, `N` for notes, `Esc` to exit). It also makes the “👁 view online” button icon-only and fixes a high-DPI bug where the slide rendered at half width and half height.
