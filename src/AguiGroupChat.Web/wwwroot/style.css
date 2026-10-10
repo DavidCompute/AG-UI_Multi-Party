@@ -160,6 +160,18 @@ select {
 .panel-resizer:focus-visible { outline: none; }
 body.resizing-x { cursor: col-resize; user-select: none; }
 
+/* 一键收起 / 展开侧栏：仅改网格列宽（面板仍参与网格，避免列错位），面板 overflow:hidden 防内容溢出。 */
+.layout.collapse-groups { grid-template-columns: 0 0 minmax(0, 1fr) 6px var(--members-w, 240px); }
+.layout.collapse-members { grid-template-columns: var(--groups-w, 220px) 6px minmax(0, 1fr) 0 0; }
+.layout.collapse-groups.collapse-members { grid-template-columns: 0 0 minmax(0, 1fr) 0 0; }
+.panel { overflow: hidden; }
+/* 收起时去掉面板自身的边框线，避免 0 宽轨道下还留 1px 竖线 */
+.layout.collapse-groups .panel.groups { border-right: none; }
+.layout.collapse-members .panel.members { border-left: none; }
+/* 收起 / 展开按钮：仅宽屏可见（窄屏侧栏为抽屉，☰ / 👥 已足够） */
+.panel-collapse-btn { flex: none; }
+@media (max-width: 900px) { .panel-collapse-btn { display: none; } }
+
 .panel { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .panel-title { padding: 12px 14px 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .groups-title { display: flex; align-items: center; justify-content: space-between; }
@@ -834,6 +846,15 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .load-more-btn:hover { color: var(--accent); border-color: var(--accent); }
 .load-more-btn:disabled { cursor: not-allowed; opacity: .7; }
 .messages .vtop, .messages .vbottom { flex: none; }
+/* 未读分隔线（进入知聚后首条未读前）：与消息同处一个 .vmsg 行，横跨整行居中展示 */
+.messages .unread-marker { display: flex; flex-direction: column; }
+.messages .unread-divider {
+  display: flex; align-items: center; gap: 10px; margin: 2px 0 6px;
+  font-size: 12px; color: var(--accent-text, var(--accent)); user-select: none;
+}
+.messages .unread-divider::before, .messages .unread-divider::after {
+  content: ""; flex: 1; height: 1px; background: currentColor; opacity: .35;
+}
 
 .typing-row { min-height: 20px; padding: 0 18px; font-size: 12px; color: var(--muted); }
 
@@ -1425,6 +1446,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
   .layout { grid-template-columns: 1fr; }
   .nav-toggle { display: inline-flex; }
   .panel-resizer { display: none; } /* 窄屏侧栏为抽屉（固定定位），拖拽手柄不适用 */
+  /* 窄屏忽略收起类（抽屉模式下不适用，否则会盖掉 1fr 列） */
+  .layout.collapse-groups, .layout.collapse-members, .layout.collapse-groups.collapse-members { grid-template-columns: 1fr; }
   .panel {
     position: fixed; top: 0; bottom: 0; width: min(86vw, 320px); z-index: 70;
     display: flex; transition: transform .22s ease; box-shadow: 0 0 30px rgba(0,0,0,.4);

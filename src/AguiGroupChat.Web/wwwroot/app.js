@@ -45,6 +45,8 @@ const state = {
   mentionAll: false,
   // 按知聚未读信息（groupId → { lastMessageAt, unreadCount, byTopic: { topicId: n } }）：来自知聚列表 API，实时事件增量维护
   groupUnread: new Map(),
+  // 按知聚记忆的滚动位置（groupId → { top, stick }）：切走再回来停在原处（本次会话内有效）
+  scrollMem: new Map(),
   // 按知聚记忆的 @ 选择（groupId → {ids, all}）：切知聚恢复、发送后保留，避免每次重新 @
   mentionMemory: new Map(),
   // 按知聚记忆的话题：groupId → 话题 ID（持久化 localStorage，切知聚/再登录自动恢复）
@@ -395,9 +397,19 @@ function resetChatState() {
   // 折叠覆盖表按 messageId 记录：登出 / 切换身份一并清空，避免跨账号累积
   planCollapseOverride.clear();
   processCollapseOverride.clear();
-  // 侧栏宽度为按用户偏好：清除内联变量，避免跨账号残留（下次登录由 applyPanelWidths 重新应用）
+  // ---- 侧栏宽度为按用户偏好：清除内联变量与收起态，避免跨账号残留（下次登录由 applyPanelWidths 重新应用）
   const layoutEl = document.querySelector(".layout");
-  if (layoutEl) { layoutEl.style.removeProperty("--groups-w"); layoutEl.style.removeProperty("--members-w"); }
+  if (layoutEl) {
+    layoutEl.style.removeProperty("--groups-w");
+    layoutEl.style.removeProperty("--members-w");
+    layoutEl.classList.remove("collapse-groups", "collapse-members");
+  }
+  updateCollapseButtons();
+  // 未读分隔线：重置时清除，避免跨账号 / 跨知聚残留
+  pendingUnreadDivider = null;
+  unreadDividerId = null;
+  clearPendingScrollRestore();
+  state.scrollMem.clear();
   hideNotifPanel();
   if ($("notifBadge")) renderNotifications();
   const input = $("input"); if (input) input.value = "";
@@ -3557,6 +3569,7 @@ async function submitChangePassword() {
 function openProfileModal() {
   $("pfNickname").value = $("meNickname").textContent;
   $("pfPersonalMemory").checked = !!state.personalMemoryEnabled;
+  $("pfFocusOnSwitch").checked = focusOnSwitchPref();
   profileAvatar = state.avatar || null; // null = 未改动
   pfAvatarPicker.render(state.avatar || "");
   refreshTwinUi(null); // 默认未启用，随后异步查询
@@ -3830,6 +3843,7 @@ async function submitProfile() {
     $("meNickname").textContent = data.nickname || state.memberId;
     state.avatar = data.avatar || null;
     state.personalMemoryEnabled = !!data.personalMemoryEnabled;
+    setFocusOnSwitchPref($("pfFocusOnSwitch").checked); // 本地偏好（不上服务端）
     updateAuthNickname(data.nickname); // 同步会话快照昵称（sessionStorage + localStorage）
     renderMeAvatar();
     loadUserDirectory();
@@ -4561,9 +4575,10 @@ function applySnapshot(evt) {
     renderMembers();
     renderChatMeta(); // 成员列表就绪后刷新知聚主昵称显示
     renderTopicBar(); // 话题列表随快照到达刷新（未读徽标保留展示，进入知聚不标记已读）
-    // 快照可能晚于首次渲染到达（新消息沉在视口下方）：贴近底部时重新跟随到最新
+    // 快照可能晚于首次渲染到达（新消息沉在视口下方）：贴近底部时重新跟随到最新。
+    // 有待恢复的滚动位置时不自动贴底（否则会把用户上次的位置冲到底部）。
     const el = $("messages");
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) vscroll.stickBottom = true;
+    if (!pendingScrollRestore && el.scrollHeight - el.scrollTop - el.clientHeight < 120) vscroll.stickBottom = true;
     renderMessages();
   }
 }
@@ -6103,6 +6118,13 @@ function clearNotifications() {
 }
 
 /** 本地把某话题未读清零（进入知聚 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
+/** 进入知聚 / 自动恢复话题时：按该话题当前未读数记下分隔线基线（无未读则清除）。 */
+function setUnreadDividerBaseline(gid, topicId) {
+  const n = state.groupUnread.get(gid)?.byTopic?.[topicId] || 0;
+  pendingUnreadDivider = n > 0 ? { gid, topicId, count: n } : null;
+  unreadDividerId = null;
+}
+
 function markTopicRead(gid, topicId, messageId) {
   const info = state.groupUnread.get(gid);
   if (info) {
@@ -6112,6 +6134,12 @@ function markTopicRead(gid, topicId, messageId) {
       info.unreadCount = Math.max(0, info.unreadCount - n);
     }
     if (messageId) sendReadReceipt(gid, topicId, messageId);
+  }
+  // 该话题已读：未读分隔线不再有显示依据
+  if (pendingUnreadDivider && pendingUnreadDivider.gid === gid && pendingUnreadDivider.topicId === topicId) {
+    pendingUnreadDivider = null;
+    unreadDividerId = null;
+    if (state.activeGroupId === gid) scheduleVirtualRender();
   }
   if (state.activeGroupId === gid) { renderTopicBar(); renderGroupList(); }
   updateDocTitle(); // 未读变化同步标签页标题
@@ -6210,6 +6238,7 @@ async function selectGroup(gid) {
   // 按知聚记忆 @ 选择：保存当前知聚，恢复目标知聚（无记忆则空）
   if (state.activeGroupId) {
     state.mentionMemory.set(state.activeGroupId, { ids: [...state.mentions], all: state.mentionAll });
+    saveScrollPos(state.activeGroupId); // 离开前记住该知聚的滚动位置（下次回来恢复）
   }
   state.activeGroupId = gid;
   state.activeTopicId = "main"; // 先主话题，随后按话题记忆恢复
@@ -6230,7 +6259,16 @@ async function selectGroup(gid) {
     }
   }
   resetVScroll(); // 清空上一知聚的虚拟滚动状态与消息 DOM
-  vscroll.stickBottom = true; // 切知聚后定位到最新消息（快照到达后由 renderMessages 生效）
+  // 切知聚后的定位：上次在底部（或未看过）→ 贴最新；上次停在中间 → 恢复原位（虚拟滚动状态下由 virtualRender 落地）
+  const memScroll = state.scrollMem.get(gid);
+  if (memScroll && !memScroll.stick && memScroll.top > 40) {
+    vscroll.stickBottom = false;
+    clearPendingScrollRestore();
+    pendingScrollRestore = { gid, top: memScroll.top };
+  } else {
+    vscroll.stickBottom = true; // 快照到达后由 renderMessages 生效
+    clearPendingScrollRestore();
+  }
   jumpUnseen = 0; updateJumpButton(); // 切群：清掉“↓ 新消息”计数
   hideMentionPicker();
   hideMentionSuggest();
@@ -6258,11 +6296,14 @@ async function selectGroup(gid) {
   renderMembers();
   renderMessages();
   renderTyping();
+  // 未读分隔线：进入时记下当前话题未读数（快照渲染时在首条未读前显示；读到即清）
+  setUnreadDividerBaseline(gid, state.activeTopicId || "main");
   // 恢复本群草稿（切群 / 刷新 / 重连后不丢已输入内容）
   const draftEl = $("input");
   draftEl.value = loadDraft(gid);
   draftEl.dispatchEvent(new Event("input", { bubbles: true }));
   closeDrawers(); // 窄屏：选中知聚后收起左侧抽屉
+  maybeFocusComposer(); // 按偏好把光标放进输入框（触屏 / 有弹窗时不抢）
 }
 
 /* ============ 知聚话题（知聚扩展） ============ */
@@ -6405,6 +6446,9 @@ async function selectTopic(topicId, opts) {
   renderTopicBar();
   resetVScroll();
   vscroll.stickBottom = true;
+  // 未读分隔线：自动恢复话题按该话题未读记基线；用户主动点击 = 已读，不显示
+  if (auto) setUnreadDividerBaseline(gid, topicId);
+  else { pendingUnreadDivider = null; unreadDividerId = null; }
   renderMessages();
   // 用户主动点击话题 → 视为已读（清零该话题未读并落读位点）；自动恢复不标记
   if (!auto) markTopicRead(gid, topicId, lastMessageIdOf(gid, topicId));
@@ -7782,6 +7826,13 @@ const RECALL_WINDOW_MS = 3 * 60 * 1000; // 撤回时限：仅允许撤回发送 
  * avgH = 实测行高的滑动平均，用于未测量消息的估算（比固定 88px 更贴近真实，减少滚动条漂移）。 */
 let vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBottom: false, avgH: 0 };
 
+/** 未读分隔线：进入知聚时按当前话题未读数记下（{gid,topicId,count}），快照渲染时在首条未读前显示；读到即清除。 */
+let pendingUnreadDivider = null;
+/** 当前应显示未读分隔线的消息 id（由 virtualRender 每次计算，msgDom 据此把分隔线包进该消息行）。 */
+let unreadDividerId = null;
+/** 待恢复的滚动位置（{gid, top}）：切知聚后由 virtualRender 落地一次，避免估算高度阶段定位偏差。 */
+let pendingScrollRestore = null;
+
 /** 「↓ 到底部 / N 条新消息」悬浮按钮：上滑离开底部时亮出，回到顶部自动归零。 */
 let jumpUnseen = 0;
 function updateJumpButton() {
@@ -7798,9 +7849,26 @@ function updateJumpButton() {
   const comp = document.querySelector(".chat .composer");
   if (comp && comp.offsetHeight) btn.style.bottom = (comp.offsetHeight + 10) + "px";
 }
+/** 记住某知聚的滚动位置（离开时调用）：贴底则记为 stick（回来直接到最新），否则记 scrollTop。 */
+function saveScrollPos(gid) {
+  if (!gid) return;
+  const el = $("messages");
+  if (!el) return;
+  state.scrollMem.set(gid, { top: el.scrollTop, stick: !!vscroll.stickBottom });
+}
+
+/** 清除待恢复的滚动位置（含续期定时器）。 */
+function clearPendingScrollRestore() {
+  if (pendingScrollRestore && pendingScrollRestore._t) clearTimeout(pendingScrollRestore._t);
+  pendingScrollRestore = null;
+}
+
 function jumpToBottom() {
   vscroll.stickBottom = true;
   jumpUnseen = 0;
+  clearPendingScrollRestore();
+  // force 重建：virtualRender 的“窗口未变”早退路径不调 stick()，不置位会点了没反应（PLAIN 模式尤其明显）
+  vscroll.force = true;
   updateJumpButton();
   virtualRender();
 }
@@ -7874,6 +7942,7 @@ function virtualRender() {
       : "";
     vscroll.start = vscroll.end = 0;
     vscroll.heights = null;
+    unreadDividerId = null;
     return;
   }
 
@@ -7890,6 +7959,13 @@ function virtualRender() {
 
   vscroll.heights = computeHeights(msgs);
   const h = vscroll.heights;
+  // 未读分隔线目标：当前话题末尾 unreadN 条的第一条（首条未读）；读后 pending 已清则不再显示。
+  unreadDividerId = null;
+  if (pendingUnreadDivider && pendingUnreadDivider.gid === state.activeGroupId
+      && pendingUnreadDivider.topicId === (state.activeTopicId || "main")) {
+    const idx = Math.max(0, n - pendingUnreadDivider.count);
+    unreadDividerId = msgs[idx] ? msgs[idx].id : null;
+  }
   const loadH = r.allLoaded ? 0 : LOAD_MORE_HEIGHT; // loadMore 行占据的顶部高度
 
   const anchor = Math.min(lowerBound(h, Math.max(0, el.scrollTop - loadH)), n - 1);
@@ -8009,6 +8085,16 @@ function virtualRender() {
   }
   top.style.height = newH[start] + "px";
   bot.style.height = (newH[n] - newH[end]) + "px";
+  // 切知聚后的滚动位置恢复：占位高度已就绪（scrollHeight 正确）。
+  // 不在应用后立即清除——loadGroups 会清空 DOM 再重建，保留一个短窗口（每次应用续期）供那次重建重新落地。
+  if (pendingScrollRestore && pendingScrollRestore.gid === state.activeGroupId) {
+    const max = el.scrollHeight - el.clientHeight;
+    el.scrollTop = Math.max(0, Math.min(pendingScrollRestore.top, max));
+    clearTimeout(pendingScrollRestore._t);
+    pendingScrollRestore._t = setTimeout(() => { pendingScrollRestore = null; }, 1200);
+    updateJumpButton();
+    return;
+  }
   stick();
 }
 
@@ -8032,6 +8118,7 @@ function scheduleFollow() {
 function resetVScroll() {
   vscrollRO?.disconnect();
   vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBottom: false, avgH: 0 };
+  unreadDividerId = null;
   $("messages").innerHTML = "";
 }
 
@@ -8305,6 +8392,29 @@ function msgDom(m, r, prev) {
   // 「执行过程」块：手动收起 / 展开按 messageId 记住（默认展开，不改动 DOM 其他地方）
   const procEl = div.querySelector(".process");
   if (procEl && m) bindProcessToggle(procEl, m.id);
+  // 双击消息 = 引用回复：仅在未选中文本（双击选词不触发）、且未点在交互元素上时生效。
+  if (canReply) {
+    div.addEventListener("dblclick", (e) => {
+      if (e.target.closest("button, a, input, textarea, select, audio, video, summary, .process")) return;
+      if (String(window.getSelection?.()?.toString() || "").trim()) return;
+      setReplyTo(m);
+    });
+  }
+  // 未读分隔线：把分隔线与该消息包进同一个 .vmsg 行（高度随该行测量，不破坏虚拟高度模型）。
+  // 内层去掉 vmsg / data-mid，避免与 wrapper 重复计数 / 重复匹配；wrapper 承载 data-mid 供测量定位。
+  if (unreadDividerId && m.id === unreadDividerId) {
+    const wrap = document.createElement("div");
+    wrap.className = "vmsg unread-marker";
+    wrap.setAttribute("data-mid", m.id);
+    const line = document.createElement("div");
+    line.className = "unread-divider";
+    line.textContent = t("msg.unreadDivider");
+    wrap.appendChild(line);
+    div.classList.remove("vmsg");
+    div.removeAttribute("data-mid");
+    wrap.appendChild(div);
+    return wrap;
+  }
   return div;
 }
 
@@ -9444,7 +9554,7 @@ function savedPanelWidths() {
     return (o && typeof o === "object") ? o : {};
   } catch { return {}; }
 }
-/** 登录 / 切换身份后应用本用户的侧栏宽度；未设置过则清除内联变量回退默认。 */
+/** 登录 / 切换身份后应用本用户的侧栏宽度与收起态；未设置过则清除内联变量回退默认。 */
 function applyPanelWidths() {
   const layout = document.querySelector(".layout");
   if (!layout) return;
@@ -9452,14 +9562,55 @@ function applyPanelWidths() {
   const set = (prop, v) => Number.isFinite(v) ? layout.style.setProperty(prop, clampPanelW(v, PANEL_MIN_W, PANEL_MAX_W) + "px") : layout.style.removeProperty(prop);
   set("--groups-w", w.groups);
   set("--members-w", w.members);
+  layout.classList.toggle("collapse-groups", !!w.groupsCollapsed);
+  layout.classList.toggle("collapse-members", !!w.membersCollapsed);
+  updateCollapseButtons();
   reclampPanelWidths();
 }
-function savePanelWidths() {
+/** 保存侧栏宽度 + 收起态（收起时宽度为 0，沿用上次记住的值）。 */
+function savePanelLayout() {
   const layout = document.querySelector(".layout");
   if (!layout) return;
-  const g = layout.querySelector(".panel.groups")?.getBoundingClientRect().width;
-  const m = layout.querySelector(".panel.members")?.getBoundingClientRect().width;
-  try { localStorage.setItem(PANEL_W_KEY + "." + (state.memberId || ""), JSON.stringify({ groups: Math.round(g || 0), members: Math.round(m || 0) })); } catch { /* 隐私模式忽略 */ }
+  const prev = savedPanelWidths();
+  const cg = layout.classList.contains("collapse-groups");
+  const cm = layout.classList.contains("collapse-members");
+  const gw = layout.querySelector(".panel.groups")?.getBoundingClientRect().width || 0;
+  const mw = layout.querySelector(".panel.members")?.getBoundingClientRect().width || 0;
+  try {
+    localStorage.setItem(PANEL_W_KEY + "." + (state.memberId || ""), JSON.stringify({
+      groups: cg ? (Number(prev.groups) || 220) : Math.round(gw),
+      members: cm ? (Number(prev.members) || 240) : Math.round(mw),
+      groupsCollapsed: cg, membersCollapsed: cm,
+    }));
+  } catch { /* 隐私模式忽略 */ }
+}
+/** 同步收起 / 展开按钮的图标、标题与 aria-pressed（按钮在页头，两个方向各一个）。 */
+function updateCollapseButtons() {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  const g = $("collapseGroupsBtn"), m = $("collapseMembersBtn");
+  const cg = layout.classList.contains("collapse-groups");
+  const cm = layout.classList.contains("collapse-members");
+  if (g) {
+    g.textContent = cg ? "»" : "«";
+    const key = cg ? "chat.expandGroups" : "chat.collapseGroups";
+    g.title = t(key); g.setAttribute("aria-label", t(key)); g.setAttribute("aria-pressed", String(cg));
+  }
+  if (m) {
+    m.textContent = cm ? "«" : "»";
+    const key = cm ? "chat.expandMembers" : "chat.collapseMembers";
+    m.title = t(key); m.setAttribute("aria-label", t(key)); m.setAttribute("aria-pressed", String(cm));
+  }
+}
+/** 一键收起 / 展开侧栏（持久化；收起后聊天区变宽，贴底时保持跟随）。 */
+function togglePanelCollapse(side) {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  layout.classList.toggle(side === "groups" ? "collapse-groups" : "collapse-members");
+  updateCollapseButtons();
+  savePanelLayout();
+  reclampPanelWidths();
+  if (vscroll.stickBottom) scheduleFollow();
 }
 /** 窗口变窄时把两侧栏收回，保证聊天区至少 PANEL_MIN_CHAT（抽屉模式不适用）。 */
 function reclampPanelWidths() {
@@ -9506,7 +9657,7 @@ function initPanelResizers() {
       document.body.classList.remove("resizing-x");
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      savePanelWidths();
+      savePanelLayout();
     };
     r.addEventListener("pointerdown", (e) => {
       e.preventDefault();
@@ -9520,7 +9671,7 @@ function initPanelResizers() {
     r.addEventListener("dblclick", (e) => {
       e.preventDefault();
       layout.style.setProperty(side === "groups" ? "--groups-w" : "--members-w", (side === "groups" ? 220 : 240) + "px");
-      savePanelWidths();
+      savePanelLayout();
     });
     r.addEventListener("keydown", (e) => {
       const step = e.key === "ArrowLeft" ? -8 : e.key === "ArrowRight" ? 8 : 0;
@@ -9529,11 +9680,31 @@ function initPanelResizers() {
       const cur = (side === "groups" ? groupsEl() : membersEl())?.getBoundingClientRect().width || PANEL_MIN_W;
       const next = clampPanelW(cur + (side === "groups" ? step : -step), PANEL_MIN_W, PANEL_MAX_W);
       layout.style.setProperty(side === "groups" ? "--groups-w" : "--members-w", next + "px");
-      savePanelWidths();
+      savePanelLayout();
     });
   };
   setup("groupsResizer", "groups");
   setup("membersResizer", "members");
+}
+
+/* ============ 输入框自动聚焦偏好（切换知聚后是否聚焦输入框；本地，按用户） ============ */
+
+const FOCUS_SWITCH_KEY = "agui.focusSwitch";
+/** 默认开启：打开一个知聚光标直接落在输入框，可立即打字。 */
+function focusOnSwitchPref() {
+  try { const v = localStorage.getItem(FOCUS_SWITCH_KEY + "." + (state.memberId || "")); return v === null ? true : v === "1"; }
+  catch { return true; }
+}
+function setFocusOnSwitchPref(on) {
+  try { localStorage.setItem(FOCUS_SWITCH_KEY + "." + (state.memberId || ""), on ? "1" : "0"); } catch { /* 隐私模式忽略 */ }
+}
+/** 按偏好把光标放进输入框：触屏 / 无悬浮设备不自动弹键盘，有弹窗打开时不抢焦点。 */
+function maybeFocusComposer() {
+  if (!focusOnSwitchPref()) return;
+  if (!window.matchMedia || !window.matchMedia("(hover: hover)").matches) return;
+  if (document.querySelector(".modal-overlay:not(.hidden)")) return;
+  const inp = $("input");
+  if (inp && !inp.disabled) inp.focus();
 }
 
 /* ============ 发送失败重试条：内容/附件已保留，用户可重试或取消 ============ */
@@ -10946,6 +11117,10 @@ function init() {
   // ---- 左 / 右侧栏可拖动分割线（窗口变窄时自动收回，保证聊天区宽度）----
   initPanelResizers();
   window.addEventListener("resize", reclampPanelWidths);
+  // ---- 侧栏一键收起 / 展开 ----
+  $("collapseGroupsBtn").onclick = () => togglePanelCollapse("groups");
+  $("collapseMembersBtn").onclick = () => togglePanelCollapse("members");
+  updateCollapseButtons();
 
   // 输入区「＋」弹出菜单：附件 / 语音 / 画布（选完 / 点外部自动收起）
   $("composerPlusBtn").onclick = (e) => { e.stopPropagation(); $("composerPlusMenu").classList.toggle("hidden"); };

@@ -68,6 +68,7 @@
     <main class="chat">
       <div class="chat-header">
         <button id="navToggle" class="chip-btn nav-toggle" data-i18n-title="chat.showGroups" data-i18n-label="chat.showGroups">☰</button>
+        <button id="collapseGroupsBtn" class="chip-btn panel-collapse-btn" data-i18n-title="chat.collapseGroups" data-i18n-label="chat.collapseGroups" aria-pressed="false">«</button>
         <span id="chatGroupName" data-i18n="chat.selectGroup">请选择一个知聚</span>
         <span id="chatGroupMeta" class="muted"></span>
         <span class="chat-header-ops">
@@ -75,6 +76,7 @@
           <button id="groupFilesBtn" class="chip-btn" data-i18n-title="gf.tip" disabled>📁</button>
           <button id="topicSummaryBtn" class="chip-btn hidden" data-i18n-title="topic.summaryTip" title="📌 话题进度小结">📌</button>
           <button id="groupSettingsBtn" class="chip-btn" data-i18n-title="chat.settings" disabled>⚙</button>
+          <button id="collapseMembersBtn" class="chip-btn panel-collapse-btn" data-i18n-title="chat.collapseMembers" data-i18n-label="chat.collapseMembers" aria-pressed="false">»</button>
           <button id="membersToggle" class="chip-btn nav-toggle" data-i18n-title="chat.showMembers" data-i18n-label="chat.showMembers">👥</button>
         </span>
       </div>
@@ -1042,6 +1044,14 @@
         <p class="form-hint" style="margin-top:6px" data-i18n="profile.personalMemoryHint">（默认关闭。开启后，数字员工回复您时会参考您在其他对话中的历史发言，帮助了解您的偏好；关闭时您的发言不会被作为个人记忆读取）</p>
       </div>
 
+      <div class="form-group" style="margin-top:14px">
+        <label class="pf-check">
+          <input id="pfFocusOnSwitch" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+          <span data-i18n="profile.focusOnSwitch">⌨️ 切换知聚后自动聚焦输入框</span>
+        </label>
+        <p class="form-hint" style="margin-top:6px" data-i18n="profile.focusOnSwitchHint">（开启后，点开一个知聚光标直接落在输入框，可立即打字；触屏设备不生效）</p>
+      </div>
+
       <div class="form-section" data-i18n="profile.twinSection">AI 分身</div>
       <div class="form-group">
         <label data-i18n="profile.trigger">触发方式</label>
@@ -1239,6 +1249,7 @@
             <li data-i18n-html="help.s1.2"><b>创建知聚</b>：左侧「我的知聚」点 <code>＋</code>，填写知聚名并勾选成员（可勾选数字员工一起加入知聚）</li>
             <li data-i18n-html="help.s1.3"><b>发送消息</b>：底部输入框输入，<code>Enter</code> 发送、<code>Shift+Enter</code> 换行；发送前可选可见范围</li>
             <li data-i18n-html="help.s1.4"><b>刷新</b>：知聚列表 / 成员列表<b>标题栏</b>的 <code>🔄</code> 按钮可重新拉取最新数据（与创建知聚 / 添加成员按钮并排）</li>
+            <li data-i18n-html="help.s1.5"><b>布局随手调</b>：左 / 右栏边缘可<b>拖动改宽</b>（双击复位，<code>←/→</code> 微调）；页头 <code>«</code> / <code>»</code> 可一键收起 / 展开侧栏；输入区与聊天区之间的横线改输入区高度</li>
           </ul>
         </div>
         <div class="help-section">
@@ -1277,6 +1288,7 @@
             <li data-i18n-html="help.s4.7"><b>🔗 链接代理</b>：数字员工回复中的链接（含内网地址，如外部 AG-UI 专家返回的本地服务）由<b>后端代访</b>——点击后打开经 Hub 代理的页面，无需担心浏览器无法直连 / 混合内容被拦截；下载类链接自动使用正确文件名</li>
             <li data-i18n-html="help.s4.8"><b>🧠 思考过程</b>：外部 AG-UI 专家的「思考」独立展示为可折叠的灰底块（流式中展开实时可见，结束后自动收起），与正文分离</li>
             <li data-i18n-html="help.s4.9"><b>🔧 工具调用</b>：数字员工执行工具时显示「🔧 名称 调用中…」进度行，完成后自动收起，不打扰阅读</li>
+            <li data-i18n-html="help.s4.10"><b>双击引用</b>：<b>双击</b>某条消息（未选中文字时）即可引用它回复；未读时进入知聚会在首条未读前显示「以下是新消息」分隔线</li>
           </ul>
         </div>
         <div class="help-section">

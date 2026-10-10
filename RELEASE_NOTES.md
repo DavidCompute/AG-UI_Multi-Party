@@ -1,5 +1,35 @@
-# AG-UI 群聊桌面版 1.0.177 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.177 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.178 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.178 Release Notes (current Windows desktop release)
+
+**版本说明**：界面布局与操作人性化（第三轮）——未读分隔线、记住滚动位置、侧栏一键收起、双击引用回复、切群后自动聚焦输入框（可关）。
+**Version note**: layout & interaction polish (round 3) — an unread divider, remembered scroll position per circle, one-click panel collapse, double-click to quote, and auto-focus the composer after switching (toggleable).
+
+## 未读分隔线 + 记住滚动位置
+# Unread divider + remembered scroll position
+
+中文：
+- **「以下是新消息」**：进入有未读的知聚时，在该话题首条未读前显示分隔线；读到即消失。分隔线与消息同处一行测量，不影响滚动定位。
+- **记住到过的地方**：切走前若你正停在中间某处，切回来就回到原处（贴底时仍然直接到最新）。
+English:
+- **“New messages below”**: entering a circle with unread messages shows a divider before the first unread one; it disappears once read. It is measured with its message row, so scrolling stays accurate.
+- **Remembered position**: if you were scrolled up when you left a circle, returning takes you back there (if you were at the bottom, you still land on the latest).
+
+## 侧栏一键收起 + 双击引用 + 自动聚焦
+# One-click panel collapse + double-click to quote + auto-focus
+
+中文：
+- **一键收起**：聊天页头 <code>«</code> / <code>»</code> 收起 / 展开左 / 右侧栏，收起后聊天区变宽，状态被记住。
+- **双击引用**：双击消息（未选中文字时）即引用回复；双击选词不误触。
+- **切群后聚焦输入框**：默认开启（「修改资料」里可关）；触屏设备不生效，避免自动弹键盘。
+- **顺带修复**：点「↓ 到最新」在某些情况下没反应（虚拟滚动早退路径不执行贴底）——已修复。
+English:
+- **One-click collapse**: the <code>«</code> / <code>»</code> buttons in the chat header collapse / expand the left / right panel; the chat area widens and the state is remembered.
+- **Double-click to quote**: double-click a message (with no text selected) to quote it; double-clicking to select a word won't misfire.
+- **Focus the composer after switching**: on by default, toggleable in “Edit profile”; not applied on touch devices so the keyboard doesn't pop up.
+- **Also fixed**: the “↓ latest” button could do nothing in some cases (the virtual-scroll early-return path skipped sticking to the bottom).
+
+# AG-UI 群聊桌面版 1.0.177 发布说明
+# AG-UI Group Chat Desktop 1.0.177 Release Notes
 
 **版本说明**：界面布局人性化——左侧知聚列表与右侧成员列表的宽度现在可以拖拽（与输入区拖拽同一套交互），按用户记忆，长名称不再被截断。
 **Version note**: layout usability — the left circle list and right member list are now **resizable by dragging** (same interaction as the composer splitter), remembered per user, so long names are no longer truncated.

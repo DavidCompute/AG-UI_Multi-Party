@@ -35,7 +35,9 @@ topbar（品牌 + 顶栏操作）
 └─ 会话主区（三栏 grid，`--groups-w` / `--members-w` 可控）
    ├─ aside.left   ─ 知聚列表：#refreshGroupsBtn #createGroupBtn / #groupList
    ├─ #groupsResizer ─ 左栏宽度拖拽手柄（宽屏可见）
-   ├─ main         ─ 聊天：#chatGroupName #chatGroupMeta / #searchBtn #groupSettingsBtn
+   ├─ main         ─ 聊天：#chatGroupName #chatGroupMeta / #searchBtn #groupFilesBtn
+   │                  #collapseGroupsBtn(« 收起左栏) #collapseMembersBtn(» 收起右栏)
+   │                  #searchBtn #groupSettingsBtn #topicSummaryBtn
    │                  #topicBar(话题) / #messages(虚拟滚动) / #typingRow
    │                  #mentionPicker #replyBar #sendReplyBar(发送失败重试) #attachList
    │                  输入：#visibilitySelect #mentionAllBtn #mentionChips #input
@@ -270,6 +272,20 @@ topbar（品牌 + 顶栏操作）
 - ≤900px 侧栏为抽屉（固定定位），手柄 `display:none`。
 
 验证：`tools/ui-panel-resize.mjs`（12 项）——手柄可见、拖动改变列宽且聊天区相应变化、持久化并刷新保持、键盘微调、双击复位、窄屏隐藏。
+
+### 2.11 布局与操作人性化（1.0.178）
+
+| 改动 | 说明 |
+|---|---|
+| 未读分隔线 | 进入有未读的知聚时，在该话题**首条未读前**显示「以下是新消息」（`.unread-divider`）。实现：把分隔线与目标消息包进同一个 `.vmsg.unread-marker`（内层去掉 `vmsg`/`data-mid`），**高度随该行一起测量**，虚拟高度模型不受影响；读到（`markTopicRead`）即清。 |
+| 记住滚动位置 | 离开知聚时记 `{top, stick}`（`state.scrollMem`，会话内）；回来时若上次非贴底则恢复原位。`virtualRender` 在占位高度就绪后落地，并保留一个短窗口（每次应用续期）跨过 `loadGroups` 的 DOM 重建；`applySnapshot` 有待恢复时不自动贴底。 |
+| 侧栏一键收起 | 聊天页头 `#collapseGroupsBtn`（«）/ `#collapseMembersBtn`（»）：切 `.layout.collapse-groups/-members`（对应网格轨道归零 + 去边框），持久化到 `agui.panelW` 的 `*Collapsed`。 |
+| 双击引用 | **双击**消息（当未选中文字、且未点在按钮/附件/过程块上）即引用回复；与“双击选词”不冲突。 |
+| 切换后聚焦输入框 | `agui.focusSwitch.<uid>`（默认开）：切知聚后把光标放入输入框（触屏 / 有弹窗时不抢）。开关在「修改资料」。 |
+
+**顺带修复（审核中发现）**：`jumpToBottom()` 只调 `virtualRender()`，而 virtualRender 的“窗口未变”早退路径**不调用 `stick()`** —— 点「↓ 到最新」可能点了没反应（PLAIN 模式下尤其明显）。已改为置 `vscroll.force = true` 强制走重建路径。
+
+验证：`tools/ui-ux-round3.mjs`（17 项）——分隔线出现 / 唯一 / 不破坏 `.vmsg` 计数 / 读完消失；双击引用与选词不触发；折叠 / 展开与持久化；滚动位置恢复；聚焦偏好开关；无控制台报错。
 
 ---
 
@@ -511,6 +527,7 @@ apiKey 不回显，仅提示“已配置”。
 | `agui.panelW.<uid>` | 左 / 右侧栏宽度 `{groups, members}` |
 | `agui.muted.<uid>` | 按知聚静音通知的知聚 id 列表 |
 | `agui.draft.<uid>.<gid>` | 按群输入草稿 |
+| `agui.focusSwitch.<uid>` | 切换知聚后是否自动聚焦输入框（默认开） |
 
 `agui.theme`/`agui.auth` 之外的用户个性化键均按 `memberId` 隔离。
 
