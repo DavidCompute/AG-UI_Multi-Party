@@ -55,7 +55,7 @@ try {
     const proc = host.querySelector(".process");
     const content = host.querySelector(".content");
     res.hasProcess = !!proc;
-    res.processOpenByDefault = proc ? proc.open : false;
+    res.processCollapsedByDefault = proc ? !proc.open : false; // 执行结束 → 默认收起（跟随计划卡）
     // 过程块应位于正文（最终答复）之前
     res.processBeforeContent = !!(proc && content
       && (proc.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING));
@@ -66,11 +66,15 @@ try {
     res.summaryHasTitle = !!(host.querySelector(".process > .process-summary")?.textContent || "").trim();
     res.contentOutsideProcess = !!content && !proc.contains(content);
 
-    // 折叠后重渲染保持收起（手动覆盖生效）
-    proc.open = false;
+    // 流式中 → 默认展开
+    const hostS = render({ ...base, id: "m_live", streaming: true });
+    res.processOpenWhileStreaming = !!hostS.querySelector(".process")?.open;
+
+    // 手动展开（已完成的消息）→ 重渲染仍展开（手动覆盖生效）
+    proc.open = true;
     proc.dispatchEvent(new Event("toggle"));
     const host2 = render({ ...base, id: "m_proc" });
-    res.collapsedPersists = host2.querySelector(".process") && !host2.querySelector(".process").open;
+    res.expandedPersists = !!host2.querySelector(".process")?.open;
 
     // 无过程内容（无思考 / 计划 / 链 / 工具）时不渲染过程块
     const host3 = render({ ...base, id: "m_plain", reasoning: "", plan: null, agentChain: null, toolCalls: [] });
@@ -93,13 +97,14 @@ try {
     res.streamNoOrphanThinking = msgEl.querySelectorAll(".body > .thinking").length === 0;
     msgEl.remove();
 
-    host.remove(); host2.remove(); host3.remove();
+    host.remove(); hostS.remove(); host2.remove(); host3.remove();
     return { node: typeof msgDom, ...res };
   });
 
   check("msgDom 在前端可用", out.node === "function");
   check("有过程内容时渲染「执行过程」块", out.hasProcess);
-  check("过程块默认展开", out.processOpenByDefault);
+  check("执行结束 → 过程块默认收起", out.processCollapsedByDefault);
+  check("流式中 → 过程块默认展开", out.processOpenWhileStreaming);
   check("过程块位于正文（最终答复）之前", out.processBeforeContent);
   check("思考块归入过程容器", out.thinkingInside);
   check("计划卡归入过程容器", out.planInside);
@@ -107,7 +112,7 @@ try {
   check("工具调用归入过程容器", out.toolsInside);
   check("过程块标题非空", out.summaryHasTitle);
   check("正文在过程容器之外", out.contentOutsideProcess);
-  check("手动折叠后重渲染仍收起（覆盖生效）", out.collapsedPersists);
+  check("手动展开后重渲染仍展开（覆盖生效）", out.expandedPersists);
   check("无过程内容时不渲染过程块", out.noProcessWhenEmpty);
   check("无过程内容时正文照常渲染", out.contentStillThere);
   check("流式：工具调用补出过程容器且置于正文之前", out.streamProcessBeforeContent);

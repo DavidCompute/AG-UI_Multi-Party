@@ -4698,14 +4698,14 @@ function onMessageReasoning(evt) {
     return;
   }
   if (msgEl && !th && !m.recalled && m.streaming) {
-    // 思考块尚未创建（思考先于正文/渲染）：插入到正文前
-    const content = msgEl.querySelector(".content");
+    // 过程块尚无思考：补出「执行过程」容器，思考块排在其中最前（思考先于正文到达）
     const box = document.createElement("details");
     box.className = "thinking";
     box.open = true;
     box.innerHTML = `<summary>${t("msg.thinkingStreaming")}</summary><div class='thinking-body'></div>`;
     box.querySelector(".thinking-body").textContent = m.reasoning;
-    (content ? content.parentNode : msgEl.querySelector(".body")).insertBefore(box, content);
+    const pb = ensureProcessBody(msgEl);
+    pb.insertBefore(box, pb.firstChild);
     if (vscroll.stickBottom) scheduleFollow();
     return;
   }
@@ -4828,6 +4828,8 @@ function onMessageEnd(evt) {
       attachToggleButton(msgEl, m);
       renderMermaidBlocks(content); // Mermaid 代码块 → 图表（异步，失败保留代码块）
     }
+    // 执行结束 → 「执行过程」块默认收起（用户手动展开过则保持）
+    finalizeProcessBlock(msgEl, m);
     // 补挂头部操作按钮（复制 / 重新回答 / 撤回）：流式期间渲染头部时这些按钮不显示（streaming=true），
     // END 后才有资格显示；PLAIN 局部更新不重建头部，这里补挂（滚动 / 刷新整表重建后由 msgDom 正常渲染）
     attachHeadActions(msgEl, m, r);
@@ -4961,9 +4963,37 @@ function ensureProcessBody(msgEl) {
   const content = body.querySelector(".content");
   if (content) body.insertBefore(details, content); else body.appendChild(details);
   // 与 msgDom 一致：手动收起 / 展开按 messageId 记住
-  const mid = msgEl.dataset.mid;
-  details.addEventListener("toggle", () => { if (mid) processCollapseOverride.set(mid, !details.open); });
+  bindProcessToggle(details, msgEl.dataset.mid);
   return pbNew;
+}
+
+/** 绑定「执行过程」折叠开关：仅在**用户操作**时记入手动覆盖（程序性开合不计入）。 */
+function bindProcessToggle(details, mid) {
+  if (!mid) return;
+  details.addEventListener("toggle", () => {
+    if (details._prog) { details._prog = false; return; }
+    processCollapseOverride.set(mid, !details.open);
+  });
+}
+
+/** 程序性设置「执行过程」开合（不计入手动覆盖）。 */
+function setProcessOpen(details, open) {
+  if (details.open === open) return;
+  details._prog = true;
+  details.open = open;
+}
+
+/** 流式结束把「执行过程」块收敛到最终态：与计划卡一致——执行完默认收起；用户手动展开过则保持。
+ *  同时把标题补上计划步数进度。 */
+function finalizeProcessBlock(msgEl, m) {
+  const proc = msgEl.querySelector(".process");
+  if (!proc) return;
+  if (!processCollapseOverride.has(m.id)) setProcessOpen(proc, false); // 手动选择过则尊重
+  const sum = proc.querySelector(".process-summary");
+  if (sum) {
+    const steps = m.plan && m.plan.steps && m.plan.steps.length ? m.plan.steps : null;
+    sum.textContent = window.t("msg.processTitle") + (steps ? ` · ${steps.filter((s) => s.done).length}/${steps.length}` : "");
+  }
 }
 
 function onToolCall(evt) {
@@ -8214,7 +8244,8 @@ function msgDom(m, r, prev) {
   // 过程 / 最终答复分层：把思考、计划、技能链、工具调用归为「执行过程」，置于正文（最终答复）之上。
   // 默认展开（用户大多希望看到过程），点标题可一键收起；手动选择按 messageId 记住，重渲染不动。
   const processInner = thinking + planCardHtml + chainCard + toolCalls;
-  const processCollapsed = !!(m && processCollapseOverride.get(m.id) === true);
+  // 默认跟随计划卡：执行结束（非流式）则收起，流式中展开；手动点过则以其选择为准。
+  const processCollapsed = processCollapseOverride.has(m.id) ? processCollapseOverride.get(m.id) === true : !m.streaming;
   const stepInfo = (m.plan && m.plan.steps && m.plan.steps.length)
     ? ` · ${m.plan.steps.filter((s) => s.done).length}/${m.plan.steps.length}`
     : "";
@@ -8253,7 +8284,7 @@ function msgDom(m, r, prev) {
   bindPlanCardButtons(div, m); // 计划卡「暂停 / 继续」（流式执行中）
   // 「执行过程」块：手动收起 / 展开按 messageId 记住（默认展开，不改动 DOM 其他地方）
   const procEl = div.querySelector(".process");
-  if (procEl && m) procEl.addEventListener("toggle", () => { processCollapseOverride.set(m.id, !procEl.open); });
+  if (procEl && m) bindProcessToggle(procEl, m.id);
   return div;
 }
 

@@ -1,5 +1,23 @@
-# AG-UI 群聊桌面版 1.0.174 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.174 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.175 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.175 Release Notes (current Windows desktop release)
+
+**版本说明**：微调 1.0.174 的分层默认行为——「执行过程」块改为**执行结束自动收起**（与计划卡一致），最终答复始终优先可见；流式中仍实时展开，手动展开过则保持。
+**Version note**: a small follow-up to 1.0.174 — the “Execution process” block now **auto-collapses when the run finishes** (matching the plan card), so the final answer stays front and center; it still expands live while streaming and keeps your manual choice.
+
+## 过程块默认收起
+# Process block auto-collapses
+
+中文：
+- **结束即收起**：数字员工回复结束后，「执行过程」块默认收起，只留标题（如 `▶ 执行过程 · 3/5`）+ 最终答复；想回看过程点一下展开。
+- **流式中仍展开**：思考 / 工具执行时实时可见，不遮挡过程。
+- **手动优先**：只要您点过标题，就以您的选择为准（重渲染 / 滚动重绘不被程序性收起覆盖）。
+English:
+- **Collapse on finish**: once a reply ends, the block collapses to just its header (`▶ Execution process · 3/5`) plus the final answer; one click re-opens the process.
+- **Still expands while streaming**: thinking and tool execution stay visible in real time.
+- **Your choice wins**: once you click the header, your state is kept (programmatic collapse won't override it on re-render).
+
+# AG-UI 群聊桌面版 1.0.174 发布说明
+# AG-UI Group Chat Desktop 1.0.174 Release Notes
 
 **版本说明**：本版把数字员工回复里的「过程」与「最终答复」分层——思考 / 执行计划 / 技能调用链 / 工具调用归入一个可折叠的「执行过程」块，置于最终答复之上，默认展开、可一键收起，读起来一眼分得清“过程”与“结论”。
 **Version note**: this release layers a digital employee's reply into "process" and "final answer": thinking / plan / skill-call chain / tool calls are grouped into one collapsible “Execution process” block above the final answer — expanded by default, one click to collapse.
