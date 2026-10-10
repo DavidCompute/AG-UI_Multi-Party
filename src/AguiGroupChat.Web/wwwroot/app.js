@@ -4935,8 +4935,35 @@ function toolCallElement(tc) {
 function createToolCallsWrap(msgEl) {
   const wrap = document.createElement("div");
   wrap.className = "tool-calls";
-  msgEl.querySelector(".body").appendChild(wrap);
+  ensureProcessBody(msgEl).appendChild(wrap);
   return wrap;
+}
+
+/** 找到（必要时创建）消息内的「执行过程」容器：工具行局部插入也落到其中，保持过程/答复分层一致。
+ *  首次出现过程内容时补出 <details class="process">，插在正文（.content）之上。 */
+function ensureProcessBody(msgEl) {
+  const body = msgEl.querySelector(".body");
+  let pb = body.querySelector(".process-body");
+  if (pb) return pb;
+  const details = document.createElement("details");
+  details.className = "process";
+  details.open = true;
+  const summary = document.createElement("summary");
+  summary.className = "process-summary";
+  summary.textContent = window.t("msg.processTitle");
+  const pbNew = document.createElement("div");
+  pbNew.className = "process-body";
+  details.appendChild(summary);
+  details.appendChild(pbNew);
+  // 已有一个“独立”的思考块（流式早期 onMessageReasoning 插在正文前）：收入过程容器，避免分层错乱
+  const orphanThinking = Array.from(body.children).find((c) => c.classList.contains("thinking"));
+  if (orphanThinking) pbNew.appendChild(orphanThinking);
+  const content = body.querySelector(".content");
+  if (content) body.insertBefore(details, content); else body.appendChild(details);
+  // 与 msgDom 一致：手动收起 / 展开按 messageId 记住
+  const mid = msgEl.dataset.mid;
+  details.addEventListener("toggle", () => { if (mid) processCollapseOverride.set(mid, !details.open); });
+  return pbNew;
 }
 
 function onToolCall(evt) {
@@ -4950,7 +4977,7 @@ function onToolCall(evt) {
   if (activeTopicMessages(r).length <= PLAIN_LIMIT) {
     const msgEl = $("messages").querySelector(`[data-mid="${cssEsc(m.id)}"]`);
     if (msgEl) {
-      const wrap = msgEl.querySelector(".body > .tool-calls") || createToolCallsWrap(msgEl);
+      const wrap = msgEl.querySelector(".tool-calls") || createToolCallsWrap(msgEl);
       wrap.appendChild(toolCallElement(m.toolCalls[m.toolCalls.length - 1]));
       return;
     }
@@ -4971,9 +4998,11 @@ function onToolCallResult(evt) {
   const el = msgEl ? msgEl.querySelector(`.tool-call[data-toolcall-id="${cssEsc(evt.toolCallId)}"]`) : null;
   if (msgEl && el) {
     el.remove();
-    // 工具行清空后移除空容器，避免残留占位
-    const wrap = msgEl.querySelector(".body > .tool-calls");
+    // 工具行清空后移除空容器，避免残留占位；过程容器也空了（无思考 / 计划 / 链）则一并移除
+    const wrap = msgEl.querySelector(".tool-calls");
     if (wrap && !wrap.children.length) wrap.remove();
+    const pb = msgEl.querySelector(".process-body");
+    if (pb && !pb.children.length) pb.closest(".process")?.remove();
     return;
   }
   vscroll.force = true;
@@ -5164,6 +5193,10 @@ function collectSchemaPayload(container) {
 /** 计划卡收起状态（按 messageId 的**手动覆盖**）：未手动设置时，默认「执行未完→展开、全部完成→收起」。
  *  一旦用户点过箭头，就以手动选择为准，后续重渲染（计划推进 / 消息重绘）保持不动。 */
 const planCollapseOverride = new Map();
+
+/** 「执行过程」块收起状态（按 messageId 的手动覆盖）：默认展开，用户点过即以其选择为准。
+ *  执行过程 = 思考 / 计划 / 技能调用链 / 工具调用；与「最终答复」（正文）分层展示。 */
+const processCollapseOverride = new Map();
 
 /** 任务计划可视化卡片：工作型数字员工消息结束时，把其工作区 PLAN.md 的步骤渲染为带勾选清单 + 进度条的计划卡。
  *  流式执行中且调用者为触发者（或群主/管理员）时展示「暂停 / 继续」控制；paused 状态由后端广播 / planJson 同步。
@@ -8174,19 +8207,30 @@ function msgDom(m, r, prev) {
   const chainCard = (m.senderType === "agent" && !m.recalled && !m.sys && m.agentChain)
     ? renderChainCard(m.agentChain)
     : "";
+  // 计划卡（工作型数字员工消息结束时由 renderPlanCard 绘制）
+  const planCardHtml = (m.plan && m.plan.steps && m.plan.steps.length && !m.recalled)
+    ? `<div class="plan-card">${renderPlanCard(m.plan, m, r)}</div>`
+    : "";
+  // 过程 / 最终答复分层：把思考、计划、技能链、工具调用归为「执行过程」，置于正文（最终答复）之上。
+  // 默认展开（用户大多希望看到过程），点标题可一键收起；手动选择按 messageId 记住，重渲染不动。
+  const processInner = thinking + planCardHtml + chainCard + toolCalls;
+  const processCollapsed = !!(m && processCollapseOverride.get(m.id) === true);
+  const stepInfo = (m.plan && m.plan.steps && m.plan.steps.length)
+    ? ` · ${m.plan.steps.filter((s) => s.done).length}/${m.plan.steps.length}`
+    : "";
+  const processWrap = (processInner.trim() && !m.recalled)
+    ? `<details class="process" ${processCollapsed ? "" : "open"}><summary class="process-summary">${escapeHtml(t("msg.processTitle"))}${escapeHtml(stepInfo)}</summary><div class="process-body">${processInner}</div></details>`
+    : "";
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
       <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time${showDay ? " time-day" : ""}">${headTime}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}" aria-label="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
       ${replyRef}
       ${mentionTags ? `<div class="mention-line">${mentionTags}</div>` : ""}
-      ${thinking}
+      ${processWrap}
       <div class="content ${m.recalled ? "recalled" : ""} ${m.streaming ? "streaming" : ""} ${m.waiting ? "waiting" : ""}${clamp}${md}">${truncatedHint}${contentHtml}</div>
       ${interactionBlock}
       ${attachments && !m.recalled ? `<div class="attachments${imgGrid ? " img-grid" : ""}">${attachments}</div>` : ""}
-      ${m.plan && m.plan.steps && m.plan.steps.length && !m.recalled ? `<div class="plan-card">${renderPlanCard(m.plan, m, r)}</div>` : ""}
-      ${chainCard}
-      ${toolCalls}
     </div>`;
   const topicStartBtn = div.querySelector(".topic-start-btn");
   if (topicStartBtn) topicStartBtn.onclick = (e) => { e.stopPropagation(); openTopicModalFromMessage(m.id); };
@@ -8207,6 +8251,9 @@ function msgDom(m, r, prev) {
   // 人机交互卡片的批准 / 拒绝按钮
   bindInteractionButtons(div, m);
   bindPlanCardButtons(div, m); // 计划卡「暂停 / 继续」（流式执行中）
+  // 「执行过程」块：手动收起 / 展开按 messageId 记住（默认展开，不改动 DOM 其他地方）
+  const procEl = div.querySelector(".process");
+  if (procEl && m) procEl.addEventListener("toggle", () => { processCollapseOverride.set(m.id, !procEl.open); });
   return div;
 }
 

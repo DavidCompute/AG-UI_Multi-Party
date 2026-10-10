@@ -1,5 +1,25 @@
-# AG-UI 群聊桌面版 1.0.173 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.173 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.174 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.174 Release Notes (current Windows desktop release)
+
+**版本说明**：本版把数字员工回复里的「过程」与「最终答复」分层——思考 / 执行计划 / 技能调用链 / 工具调用归入一个可折叠的「执行过程」块，置于最终答复之上，默认展开、可一键收起，读起来一眼分得清“过程”与“结论”。
+**Version note**: this release layers a digital employee's reply into "process" and "final answer": thinking / plan / skill-call chain / tool calls are grouped into one collapsible “Execution process” block above the final answer — expanded by default, one click to collapse.
+
+## 执行过程 / 最终答复分层
+# Process / final-answer layering
+
+中文：
+- **过去的问题**：思考块在正文上方，计划卡 / 调用链 / 工具行在正文下方，最终答复被夹在中间，分不清哪句是结论。
+- **现在**：四类过程块统一收进 `.process`（标题 `▶ 执行过程`，有计划时显示 `· 3/5` 步数进度），置于正文之上；左侧细竖线 + 缩进与正文区分；**默认展开**，点标题一键收起，手动选择按消息记住（滚动重绘 / 计划推进不被覆盖）。
+- **无过程则不打扰**：没有思考 / 计划 / 链路 / 工具的回复不会多出这个块；已撤回消息不渲染。
+- **流式也对齐**：工具调用比思考先到时，过程容器会即时补出并把已有的思考块收编进来，不会出现“思考在外、工具在内”的错层。
+English:
+- **The old problem**: thinking sat above the answer while the plan / chain / tool rows sat below it, sandwiching the final answer so it was hard to tell which line was the conclusion.
+- **Now**: all four process blocks live in one `.process` (header `▶ Execution process`, with a `· 3/5` step counter when a plan exists) placed above the answer, set off by a thin left rule and indent; **expanded by default**, one click to collapse, with your choice remembered per message (kept across scroll repaints / plan progress).
+- **No process, no clutter**: replies without thinking / plan / chain / tools don't get the block; recalled messages don't render it.
+- **Streaming stays aligned**: when a tool call arrives before any process content, the container is created on the fly and adopts the existing thinking block, so you never see the thinking outside but the tools inside.
+
+# AG-UI 群聊桌面版 1.0.173 发布说明
+# AG-UI Group Chat Desktop 1.0.173 Release Notes
 
 **版本说明**：本版继续**界面与操作体验的人性化优化**（第二批）：消息日期标签、禁用按钮给出原因、发送失败可重试、通知可按知聚静音、成员栏更清爽、帮助可搜索并新增「概念速查」。
 **Version note**: a second batch of **UI/UX humanization**: message date labels, reasons on disabled buttons, retry on failed send, per-circle notification mute, a cleaner member bar, and a searchable help with a glossary.
