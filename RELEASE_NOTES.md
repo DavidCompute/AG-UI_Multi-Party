@@ -1,5 +1,46 @@
-# AG-UI 群聊桌面版 1.0.170 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.170 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.171 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.171 Release Notes (current Windows desktop release)
+
+**版本说明**：本版三件事——① 新增「📁 输出物」：集中查看本知聚里**所有附件**并下载 / 预览；② 「执行计划」卡片可**收缩 / 展开**（默认未完成展开、全部完成收起，手动选择优先）；③ **保留数字员工的“过程”**：审批 / 交互中断时不再清空已流式产出的正文。
+**Version note**: three things — (1) a new **“📁 Outputs”** panel listing **every attachment in the circle** with download / preview; (2) the **plan card can collapse / expand** (default: expanded while running, collapsed once done; a manual choice wins); (3) **the agent's “process” is kept**: the streamed text is no longer wiped on an approval/interaction interrupt.
+
+## 保留数字员工的「过程」（审批中断不再清空）
+# Keep the agent's process (no more wipe on approval interrupt)
+
+中文：
+- **现场**：在「与 项目总监 的单聊」里，一轮编排跑完后只看到“最后一次的回复”，之前的自检 / 改稿 / 质检过程全不见了。
+- **根因**：人机交互（审批卡）中断时网关调用 `ResetAgentContentAsync` **清空已流式产出的正文与思考**（库 + 前端一起清，注释写的意图是“保持决策前正文为空”），恢复后只把最终结果追加进去。
+- **修复**：审批 / 交互中断**不再清空**——把“过程”留在消息里，决策后同一消息**继续追加**最终结果。仅模型**可重试错误重试**时仍清空半截输出（避免重试内容拼接重复）。另修**收尾剥壳**：整段是「过程叙述 + 协调 JSON」时不再被替换成只剩 `answer`（保留 JSON 之前的过程）。
+- **实测**：对同一请求重跑（日志确认 `交付物兜底触发交互中断` 已发生），结束后消息从**过程第一句**开始（之前只剩中断后的片段）。
+
+English:
+- **Scene**: in the “与 项目总监” direct chat, a coordinator run showed only the last reply; the earlier self-check / rewrite / review process was gone.
+- **Cause**: on an approval-card interrupt the gateway called `ResetAgentContentAsync`, which wiped the streamed text and reasoning (store + frontend), then only appended the final result.
+- **Fix**: interrupts **no longer wipe** — the process stays on the message and the final result is appended to the same message after the decision. Only a **retryable model-error retry** still clears the half output (to avoid duplicated concatenation). Also fixed the close-out peel so “process + coordination JSON” keeps the process narration before the JSON.
+- **Real run**: rerunning the same request (logs confirm an interrupt fired) leaves the message starting at the process's **first line**, not the post-interrupt tail.
+
+## 📁 输出物：本知聚全部附件一览
+# 📁 Outputs: every attachment in the circle
+
+中文：聊天头部「📁」打开汇总弹窗，列出本知聚**所有可见消息里的附件**（服务端汇总 `GET /ag-ui/group/{id}/attachments`：按时间倒序、按附件 ID 去重、过滤已撤回 / 不可见），每行可**直接下载**或（办公文档 / PDF）**在线查看**（复用现有阅读器 / 幻灯片查看器），顶部可按文件名筛选。
+English: the chat header “📁” opens a summary dialog listing **every attachment across the circle's visible messages** (server-aggregated `GET /ag-ui/group/{id}/attachments`: newest first, de-duplicated by attachment id, recalled / invisible messages filtered); each row is **directly downloadable** or (office docs / PDF) **viewable online** (reusing the existing reader / slide viewer), with a name filter on top.
+
+## 执行计划卡片：收缩 / 展开
+# Plan card: collapse / expand
+
+中文：计划卡头部多一个 `⌄/›` 箭头：**默认未执行完展开、全部完成收起**；用户手动点过箭头则以其选择为准（重渲染后保持）。收起后只留标题一行 + 进度文本。
+English: the plan card head gains a `⌄/›` caret: **expanded while running, collapsed once all steps are done**; a manual choice wins and sticks across re-renders. Collapsed keeps just the title line plus the progress text.
+
+## 回归
+# Tests
+
+中文：C# 相关面 **386 通过 / 0 失败**（含新增 `EndMessage_CoordinationJson_KeepsProcessPrefix`、输出物端点「列出全部 + 撤回后不出现 + 匿名 401」）；浏览器 E2E：新增 `ui-group-files.mjs` **19/19**、`ui-plan-collapse.mjs` **11/11**，回归 `ui-doc-slides.mjs` **23/23**、`ui-doc-preview.mjs` **19/19**；i18n 审计 `zh=en=1460，missing 0`。
+English: **386 passed / 0 failed** across the affected C# suites (including the new `EndMessage_CoordinationJson_KeepsProcessPrefix` and the outputs endpoint cases); browser E2E: new `ui-group-files.mjs` **19/19** and `ui-plan-collapse.mjs` **11/11**, regressions `ui-doc-slides.mjs` **23/23** and `ui-doc-preview.mjs` **19/19**; i18n audit `zh=en=1460, missing 0`.
+
+---
+
+# AG-UI 群聊桌面版 1.0.170 发布说明（上一版）
+# AG-UI Group Chat Desktop 1.0.170 Release Notes (previous release)
 
 **版本说明**：1.0.170 把演示文稿的「在线播放」做成**真·全屏**：幻灯片铺满整块屏幕（仅按比例留黑边），控制条静置自动隐没；以前它只是“铺满浏览器视口里的一个小框”（还受 `max-width/max-height` 限制），且从不请求浏览器全屏。
 **Version note**: 1.0.170 makes presentation playback **truly fullscreen**: the slide fills the whole screen (letterboxed only for aspect mismatch) and the control bar auto-hides. Before, it merely filled a small box inside the viewport (clamped by `max-width/max-height`) and never requested browser fullscreen.

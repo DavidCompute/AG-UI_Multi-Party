@@ -1824,7 +1824,12 @@ public sealed class GroupHub : IDisposable
             if (hasFlag && r.TryGetProperty("answer", out var a) && a.ValueKind == System.Text.Json.JsonValueKind.String)
             {
                 var ans = a.GetString();
-                if (!string.IsNullOrWhiteSpace(ans)) return ans.Trim();
+                if (!string.IsNullOrWhiteSpace(ans))
+                {
+                    // 保留协调 JSON 之前的正文（数字员工的过程叙述）：只剥掉 JSON 包壳，不吞掉过程。
+                    var prefix = text[..start].Trim();
+                    return prefix.Length > 0 ? prefix + "\n\n" + ans.Trim() : ans.Trim();
+                }
             }
         }
         catch { /* 非常规 JSON 原样返回 */ }

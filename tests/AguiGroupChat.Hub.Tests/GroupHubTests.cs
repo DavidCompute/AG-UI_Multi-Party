@@ -860,6 +860,27 @@ public sealed class GroupHubTests
         Assert.Contains("TEXT_MESSAGE_CONTENT", HubFixture.TypesOf(f.Drain(inbox)));
     }
 
+    /// <summary>收尾剥壳保留「协调 JSON 之前的过程叙述」：只去掉 JSON 包壳，不吞掉数字员工的过程。</summary>
+    [Fact]
+    public async Task EndMessage_CoordinationJson_KeepsProcessPrefix()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "g", "user_1", "agent_a");
+        var started = await f.Hub.PublishAgentMessageStartAsync(new AgentMessageStartInput
+        {
+            GroupId = group.GroupId, AgentId = "agent_a", ReplyToMessageId = null,
+        });
+        await f.Hub.AppendAgentContentAsync(group.GroupId, started.MessageId, "我先核对了三份稿子，过程如下。");
+        await f.Hub.AppendAgentContentAsync(group.GroupId, started.MessageId,
+            "\n{\"needsMore\":false,\"answer\":\"最终答复正文\"}");
+        await f.Hub.EndAgentMessageAsync(group.GroupId, started.MessageId);
+
+        var content = f.Store.GetMessage(group.GroupId, started.MessageId)!.Content;
+        Assert.Contains("过程如下", content);      // 过程叙述保留（修复前会被整段吞掉）
+        Assert.Contains("最终答复正文", content);
+        Assert.DoesNotContain("needsMore", content); // JSON 包壳仍然剥掉
+    }
+
     /// <summary>任务计划可视化：BroadcastMessagePlanAsync 广播 TEXT_MESSAGE_PLAN（工作型智能体的 PLAN.md 步骤）。</summary>
     [Fact]
     public async Task BroadcastMessagePlan_BroadcastsPlanToMembers()

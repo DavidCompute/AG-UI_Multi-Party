@@ -67,6 +67,7 @@
         <span id="chatGroupMeta" class="muted"></span>
         <span class="chat-header-ops">
           <button id="searchBtn" class="chip-btn" data-i18n-title="chat.search" disabled>🔍</button>
+          <button id="groupFilesBtn" class="chip-btn" data-i18n-title="gf.tip" disabled>📁</button>
           <button id="topicSummaryBtn" class="chip-btn hidden" data-i18n-title="topic.summaryTip" title="📌 话题进度小结">📌</button>
           <button id="groupSettingsBtn" class="chip-btn" data-i18n-title="chat.settings" disabled>⚙</button>
         </span>
@@ -659,6 +660,25 @@
       <div class="modal-actions">
         <button id="imgLibNewBtn" class="send" data-i18n="imgLib.create">＋ 创建图库</button>
         <button id="imgLibCloseBtn" class="btn-ghost" data-i18n="kb.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 输出物：当前知聚里所有消息的附件汇总（下载 / 在线查看）。 -->
+  <div id="groupFilesModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal kb-modal gf-modal">
+      <div class="modal-title">📁 <span data-i18n="gf.title">输出物</span><span id="groupFilesCount" class="gf-count"></span></div>
+      <div class="kb-view">
+        <div class="kb-toolbar">
+          <span class="search-clear-wrap" style="flex:1;min-width:160px">
+            <input id="groupFilesSearch" class="modal-input" data-i18n-placeholder="gf.search" />
+            <button type="button" class="search-clear" data-clear-for="groupFilesSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
+        </div>
+        <div id="groupFilesList" class="gf-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="groupFilesClose" class="btn-ghost" data-i18n="gf.close">关闭</button>
       </div>
     </div>
   </div>

@@ -595,6 +595,39 @@ public sealed class DocPreviewApiTests : IClassFixture<DocPreviewApiServerFixtur
     }
 
     [Fact]
+    public async Task GroupAttachments_ListsAttachments_AndExcludesRecalled()
+    {
+        var (token, groupId, attId) = await SeedGroupWithAttachmentAsync("gf1", "季度报告.docx");
+
+        var res = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/attachments", token));
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var list = (await res.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToList();
+        Assert.Single(list);
+        Assert.Equal(attId, list[0].GetProperty("attachmentId").GetString());
+        Assert.Equal("季度报告.docx", list[0].GetProperty("name").GetString());
+        Assert.Equal("document", list[0].GetProperty("kind").GetString());
+        Assert.False(string.IsNullOrEmpty(list[0].GetProperty("url").GetString()));
+
+        // 撤回该消息后再列：不再出现（可见性 / 撤回过滤与消息列表一致）
+        var recall = await _client.SendAsync(Authed(HttpMethod.Post, "/ag-ui/group/message/recall", token,
+            new { groupId, messageId = await LastMessageIdAsync(token, groupId), operatorId = (string?)null }));
+        recall.EnsureSuccessStatusCode();
+        var after = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/group/{groupId}/attachments", token));
+        var list2 = (await after.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToList();
+        Assert.Empty(list2);
+    }
+
+    [Fact]
+    public async Task GroupAttachments_RequiresIdentity()
+    {
+        var (_, groupId, _) = await SeedGroupWithAttachmentAsync("gf2", "稿子.docx");
+
+        var res = await _client.GetAsync($"/ag-ui/group/{groupId}/attachments");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [Fact]
     public async Task Preview_TokenViaQueryString_Works()
     {
         // iframe / 新窗口拿不到 Authorization 头，只能用 ?token=（前端 authedAssetUrl 的机制）

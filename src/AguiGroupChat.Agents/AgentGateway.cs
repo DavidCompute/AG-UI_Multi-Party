@@ -773,7 +773,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         && !_options.ClientToolTunnelRequireApproval
                         && TryParseClientShell(tfc.Name, out var shellCmd, out var shellCwd, out var shellTimeoutSec))
                     {
-                        await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
+                        // 不先清空已流式产出的正文：把“过程”留在消息里，隧道结果回灌后继续追加（用户要求保留过程）。
                         var tunnelResult = await ExecuteTunnelAsync(
                             context.AgentId, context.PreferredBridgeClient, shellCmd!, shellCwd, shellTimeoutSec, ApprovalArgsQuery(tfc),
                             ClientSkillTimeout(shellTimeoutSec), runCt);
@@ -784,7 +784,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         // 该客户端技能的占位函数，占位函数从该 Store 读取真实结果；不写入则读到 null 回落为占位文本，覆盖掉隧道结果。
                         ClientToolResultStore.Put(tfc.Name, resultText);
                         _logger.LogInformation("客户端技能经内网隧道执行：agent={AgentId} tool={Tool}", context.AgentId, tfc.Name);
-                        accumulated = ""; reasoningAccumulated = 0;
                         userMessage = new ChatMessage(ChatRole.User, new AIContent[]
                         {
                             approval.CreateResponse(true),
@@ -809,8 +808,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 }
             }
 
-            // 审批中断：清空已回灌的中间内容（避免显示半截回复），保存运行现场 + 广播交互请求（仅触发者可决策）。
-            // 消息保持开启（不 End）：用户反馈后同一 AgentSession 继续运行，最终结果在运行结束时一次性返回。
+            // 审批中断：**保留**已回灌的正文（把数字员工的过程留在消息里，而不是清掉），保存运行现场 + 广播交互请求（仅触发者可决策）。
+            // 消息保持开启（不 End）：用户反馈后同一 AgentSession 继续运行，最终结果继续追加在同一消息上。
             if (approval is not null)
             {
                 // 诊断：客户端技能需要在本机执行，但发起请求的 client 缺失 / 其桥不在线——这种情形下无人能真机执行，
@@ -823,7 +822,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                         "客户端技能 {Tool} 无法路由到发起客户端：PreferredBridgeClient={Client}（空=前端未发现本机桥；非空=该桥不在线/未注册）",
                         diagFc.Name, context.PreferredBridgeClient ?? "(空)");
                 }
-                await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, runCt);
+                _hub.Value.TouchAgentStream(context.GroupId, messageId); // 刷新活跃时间（不再清空正文）
                 var fc = approval.ToolCall as FunctionCallContent;
                 // 客户端执行技能：toolName 命中则标记 kind=client_tool，下发给前端执行（复用 HITL 通道下发 + 回传）；
                 // 若该数字员工已有内网隧道桥，则在 while 内经隧道执行（见上），不会到达这里走前端下发。
@@ -3052,9 +3051,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         if (approval is null) return (null, accumulated);
 
-        // 审批中断：复用外层 runId（不另开 run），先把这次兜底已追加的正文清掉，保持“决策前正文为空”的一致体验
-        if (messageId is not null)
-            await _hub.Value.ResetAgentContentAsync(context.GroupId, messageId, ct);
+        // 审批中断：复用外层 runId（不另开 run）。**不**清掉已追加的正文——把过程留在消息里（用户要求保留过程）。
         var fc = approval.ToolCall as FunctionCallContent;
         var isClientTool = fc is not null
             && _catalog.GetAgentClientToolNames(context.AgentId).Contains(fc.Name, StringComparer.Ordinal);
@@ -5087,8 +5084,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     return;
                 }
 
-                // 非批量：清空已回灌的中间内容，保存新的交互请求（同触发者，同一条消息）
-                await _hub.Value.ResetAgentContentAsync(pending.GroupId, messageId, runCt);
+                // 非批量：**保留**已回灌的中间内容（过程），保存新的交互请求（同触发者，同一条消息）
                 var interruptId = "interrupt_" + IdGenerator.NewId();
                 var fc = nextApproval.ToolCall as FunctionCallContent;
                 _pendingInteractions[interruptId] = new PendingInteraction(
@@ -5125,9 +5121,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 运行完成
             _autoApprovedRuns.TryRemove(runId, out _); // 批量批准随运行结束失效
             var attached = await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, runCt);
-            // 空正文兜底：交互前通常已清空过正文（ResetAgentContentAsync），若恢复后又什么都没产出，
-            // 消息会变成完全空白 —— 与其它路径同一口径，补一句人话。
-            if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
+            // 空正文兜底：只有消息正文确实为空（含交互前保留的过程）且没产出文件时才补一句人话。
+            var hasBody = !string.IsNullOrWhiteSpace(accumulated)
+                || !string.IsNullOrWhiteSpace(_hub.Value.Store.GetMessage(pending.GroupId, messageId)?.Content);
+            if (!hasBody && attached == 0)
                 await _hub.Value.AppendAgentContentAsync(pending.GroupId, messageId, EmptyReplyFallback, runCt);
             // 交付物兜底：正文已由兜底流写入，这里只修正媒体/链路的挂载并把消息收尾
             if (!pending.SuppressMessage)

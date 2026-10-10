@@ -923,6 +923,7 @@ PUT /ag-ui/user/profile
 |群状态快照|`GET /ag-ui/group/{groupId}`|同 GROUP_STATE_SNAPSHOT（§4.7），含成员 / 话题 / 最近消息|
 |成员列表|`GET /ag-ui/group/{groupId}/members`|全部成员（智能体成员含触发字段）|
 |消息历史分页|`GET /ag-ui/group/{groupId}/messages?before=&count=`|按游标向前分页（虚拟滚动「加载更早消息」）|
+|群内全部附件|`GET /ag-ui/group/{groupId}/attachments`|汇总该知聚所有可见消息里的附件（前端「输出物」）：按时间倒序、按附件 ID 去重；过滤已撤回与不可见（定向 / 私密）消息。每项含 `messageId / senderId / senderNickname / timestamp / attachmentId / name / contentType / size / url / kind`|
 
 历史分页游标语义：`before` 为游标消息 ID（不含该条），`count` 默认 50、上限 100；返回按时间序（旧 → 新）的 `SnapshotMessage` 列表（过滤已撤回）；`before` 缺省返回最近 count 条；游标为首条或不存在时返回空数组。同一群内按 `(timestamp, messageId)` 字典序排序。
 

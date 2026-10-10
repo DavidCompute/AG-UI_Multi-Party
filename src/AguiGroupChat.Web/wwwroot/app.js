@@ -374,6 +374,7 @@ function resetChatState() {
   $("addMemberBtn").disabled = true;
   $("groupSettingsBtn").disabled = true;
   $("searchBtn").disabled = true;
+  $("groupFilesBtn").disabled = true;
   $("discussBtn").disabled = true;
   const ts0 = $("topicSummaryBtn"); if (ts0) ts0.classList.add("hidden");
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
@@ -4389,6 +4390,7 @@ async function loadGroups() {
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
+    $("groupFilesBtn").disabled = true;
     const ts2 = $("topicSummaryBtn"); if (ts2) ts2.classList.add("hidden");
   }
   // 重置虚拟滚动会**清空消息 DOM**，因此紧接着必须重建（否则刷新知聚列表就会把聊天区留在空白，
@@ -5155,14 +5157,22 @@ function collectSchemaPayload(container) {
   return payload;
 }
 
+/** 计划卡收起状态（按 messageId 的**手动覆盖**）：未手动设置时，默认「执行未完→展开、全部完成→收起」。
+ *  一旦用户点过箭头，就以手动选择为准，后续重渲染（计划推进 / 消息重绘）保持不动。 */
+const planCollapseOverride = new Map();
+
 /** 任务计划可视化卡片：工作型数字员工消息结束时，把其工作区 PLAN.md 的步骤渲染为带勾选清单 + 进度条的计划卡。
- *  流式执行中且调用者为触发者（或群主/管理员）时展示「暂停 / 继续」控制；paused 状态由后端广播 / planJson 同步。 */
+ *  流式执行中且调用者为触发者（或群主/管理员）时展示「暂停 / 继续」控制；paused 状态由后端广播 / planJson 同步。
+ *  头部有「⌄/›」收缩按钮：默认未完执行展开、全部完成收起；收起后只留标题一行（进度条 / 步骤 / 操作全部隐起）。 */
 function renderPlanCard(plan, m, r) {
   const steps = plan.steps || [];
   const done = steps.filter((s) => s.done).length;
   const pct = steps.length ? Math.round((done / steps.length) * 100) : 0;
   const paused = !!plan.paused;
   const total = steps.length;
+  // 默认状态：还没执行完（或有暂停等未完结）→ 展开；全部完成 → 收起。用户手动点过箭头则以其选择为准。
+  const autoCollapsed = total > 0 && done >= total && !paused;
+  const collapsed = m && planCollapseOverride.has(m.id) ? planCollapseOverride.get(m.id) : autoCollapsed;
   const myRole = r?.members?.find((x) => x.memberId === state.memberId)?.role;
   const canControl = !!m && !!r && !m.recalled && !!m.streaming && total > 0 && done < total
     && (state.memberId === plan.triggerMemberId || myRole === "owner" || myRole === "admin");
@@ -5172,19 +5182,40 @@ function renderPlanCard(plan, m, r) {
   const act = paused
     ? (canControl ? `<button class="chip-btn plan-resume-btn" type="button">▶ ${escapeHtml(t("plan.resume"))}</button>` : "")
     : (canControl ? `<button class="chip-btn plan-pause-btn" type="button">⏸ ${escapeHtml(t("plan.pause"))}</button>` : "");
-  return `<div class="plan-card-head">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : t("itx.planCardTitle")}<span class="plan-progress-txt">${done}/${total}（${pct}%）</span>${stateLine}</div>`
+  return `<div class="plan-card-head">`
+    + `<span class="plan-head-left">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : t("itx.planCardTitle")}</span>`
+    + `<span class="plan-head-right">`
+    + `<span class="plan-progress-txt">${done}/${total}（${pct}%）</span>${stateLine}`
+    + `<button class="plan-toggle" type="button" aria-expanded="${collapsed ? "false" : "true"}" title="${escapeHtml(collapsed ? t("plan.expand") : t("plan.collapse"))}">${collapsed ? "›" : "⌄"}</button>`
+    + `</span></div>`
+    + `<div class="plan-body${collapsed ? " hidden" : ""}">`
     + `<div class="plan-progress"><div class="plan-progress-bar" style="width:${pct}%"></div></div>`
     + `<ul class="plan-steps">${steps.map((s) =>
         `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>`
-    + (act ? `<div class="plan-actions">${act}</div>` : "");
+    + (act ? `<div class="plan-actions">${act}</div>` : "")
+    + `</div>`;
 }
 
-/** 绑定计划卡「暂停 / 继续」按钮（渲染后由 msgDom 调用一次）。 */
+/** 绑定计划卡「暂停 / 继续」与「收缩 / 展开」按钮（渲染后由 msgDom 调用一次）。 */
 function bindPlanCardButtons(container, m) {
   const pauseBtn = container.querySelector(".plan-pause-btn");
   if (pauseBtn) pauseBtn.onclick = (e) => { e.stopPropagation(); setPlanPaused(m, true); };
   const resumeBtn = container.querySelector(".plan-resume-btn");
   if (resumeBtn) resumeBtn.onclick = (e) => { e.stopPropagation(); setPlanPaused(m, false); };
+  const toggleBtn = container.querySelector(".plan-toggle");
+  if (toggleBtn && m) {
+    toggleBtn.onclick = (e) => {
+      e.stopPropagation();
+      // 直接切换 DOM（不动整块渲染缓存）：body 显隐 + 箭头方向 + 无障碍状态；
+      // 同时记下手动覆盖，后续重渲染不冉按“完成度默认值”覆盖掉用户的选择。
+      const nowCollapsed = !container.querySelector(".plan-body")?.classList.contains("hidden");
+      planCollapseOverride.set(m.id, nowCollapsed);
+      container.querySelector(".plan-body")?.classList.toggle("hidden", nowCollapsed);
+      toggleBtn.textContent = nowCollapsed ? "›" : "⌄";
+      toggleBtn.setAttribute("aria-expanded", String(!nowCollapsed));
+      toggleBtn.title = t(nowCollapsed ? "plan.expand" : "plan.collapse");
+    };
+  }
 }
 
 /** 暂停 / 继续编排计划：POST /ag-ui/plan/{pause|resume}；成功后乐观更新本地卡片状态。 */
@@ -5666,6 +5697,7 @@ function cleanupRoom(gid) {
     $("addMemberBtn").disabled = true;
     $("groupSettingsBtn").disabled = true;
     $("searchBtn").disabled = true;
+    $("groupFilesBtn").disabled = true;
     $("discussBtn").disabled = true;
     const ts1 = $("topicSummaryBtn"); if (ts1) ts1.classList.add("hidden");
   }
@@ -6058,6 +6090,7 @@ async function selectGroup(gid) {
   $("addMemberBtn").disabled = false;
   $("groupSettingsBtn").disabled = false;
   $("searchBtn").disabled = false; // 知聚内消息全文搜索（进入知聚后可用）
+  $("groupFilesBtn").disabled = false; // 输出物：本知聚全部附件（进入知聚后可用）
   $("discussBtn").disabled = false; // 多位数字员工讨论（进入知聚后可用）
   const ts3 = $("topicSummaryBtn"); if (ts3) ts3.classList.remove("hidden"); // 话题进度小结（长话题接续记忆）
   const g = state.groups.find((x) => x.groupId === gid);
@@ -8363,6 +8396,76 @@ function closeDocPreview() {
   resetDocViewer();
 }
 
+/* ============ 输出物（当前知聚全部附件） ============ */
+
+/** 输出物弹窗缓存：当前知聚的全部附件（服务端汇总）+ 过滤关键词 + 拉取时的知聚 ID。 */
+let groupFilesItems = null;
+let groupFilesQuery = "";
+let groupFilesForGroup = null;
+
+/** 打开「输出物」：拉取当前知聚全部可见消息里的附件，最新在前展示（可下载 / 在线查看）。 */
+async function openGroupFiles() {
+  const gid = state.activeGroupId;
+  if (!gid || !state.token) { toast(t("gf.noGroup")); return; }
+  groupFilesForGroup = gid;
+  groupFilesQuery = "";
+  const search = $("groupFilesSearch");
+  if (search) search.value = "";
+  groupFilesItems = null;
+  $("groupFilesCount").textContent = "";
+  $("groupFilesList").innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.loading"))}</div>`;
+  $("groupFilesModal").classList.remove("hidden");
+  try {
+    const res = await fetch(authedAssetUrl(`/ag-ui/group/${encodeURIComponent(gid)}/attachments`), {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
+    if (!res.ok) throw Object.assign(new Error(), { status: res.status });
+    groupFilesItems = await res.json();
+    if (groupFilesForGroup !== gid) return; // 拉取期间切换了知聚：丢弃过期结果
+    renderGroupFiles();
+  } catch (ex) {
+    $("groupFilesList").innerHTML =
+      `<div class="gf-empty">${escapeHtml(t("gf.fail", { err: "HTTP " + (ex && ex.status || "?") }))}</div>`;
+  }
+}
+
+/** 附件类型图标（与消息附件一致的观感）。 */
+function gfIcon(kind, name) {
+  if (kind === "image") return "🖼️";
+  if (kind === "audio") return "🎤";
+  if (kind === "text" || kind === "document") return "📄";
+  if (/\.(zip|rar|7z)$/i.test(name || "")) return "🗜️";
+  return "📎";
+}
+
+/** 渲染输出物列表（按关键词过滤；可预览的办公文档给出「👁」）。 */
+function renderGroupFiles() {
+  const list = $("groupFilesList");
+  if (!list) return;
+  const all = Array.isArray(groupFilesItems) ? groupFilesItems : [];
+  const q = groupFilesQuery.trim().toLowerCase();
+  const items = q ? all.filter((a) => (a.name || "").toLowerCase().includes(q)) : all;
+  $("groupFilesCount").textContent = all.length ? t("gf.count", { n: items.length, total: all.length }) : "";
+  if (!all.length) { list.innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.empty"))}</div>`; return; }
+  if (!items.length) { list.innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.noMatch"))}</div>`; return; }
+  list.innerHTML = items.map((a) => {
+    const href = authedAssetUrl(a.url || `/ag-ui/files/${encodeURIComponent(a.attachmentId)}/${encodeURIComponent(a.name || "file")}`);
+    const meta = [fmtBytes(a.size || 0), a.senderNickname || a.senderId || "", fmtTime(a.timestamp)].filter(Boolean).join(" · ");
+    const pvId = previewableAttId({ name: a.name, attachmentId: a.attachmentId, url: a.url });
+    const pv = pvId
+      ? `<button type="button" class="gf-btn att-preview" data-preview-id="${escapeHtml(pvId)}" data-preview-name="${escapeHtml(a.name || "")}" title="${escapeHtml(t("msg.previewTip"))}" aria-label="${escapeHtml(t("msg.preview"))}">👁</button>`
+      : "";
+    return `<div class="gf-row">`
+      + `<span class="gf-icon" title="${escapeHtml(a.kind || "")}">${gfIcon(a.kind, a.name)}</span>`
+      + `<span class="gf-name" title="${escapeHtml(a.name || "")}">${escapeHtml(a.name || "(未命名)")}</span>`
+      + `<span class="gf-meta">${escapeHtml(meta)}</span>`
+      + `<a class="gf-btn" href="${escapeHtml(href || "#")}" target="_blank" rel="noopener" title="${escapeHtml(t("gf.download"))}">⬇</a>`
+      + pv
+      + `</div>`;
+  }).join("");
+  bindDocPreviewButtons(list); // 「👁」复用在线查看（含幻灯片 / 备注 / 播放）
+}
+
 /** 消息显示文本：数字员工消息剥离结构化 JSON 附件信息后的正文（解析缓存到 m._bridgeParse）；其余消息为原始内容。 */
 function displayTextOf(m) {
   if (!m || m.recalled) return "";
@@ -10283,14 +10386,16 @@ function init() {
   // 播放模式：Esc 退出播放（而不是关弹窗）、方向键/空格翻页、N 切换备注。
   document.addEventListener("keydown", (e) => {
     if (docPlaying) {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); exitDocPlay(); }
-      else if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " " || e.key === "PageDown") { e.preventDefault(); e.stopPropagation(); docSlideGo(1); }
-      else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); e.stopPropagation(); docSlideGo(-1); }
-      else if (e.key === "n" || e.key === "N") { e.preventDefault(); e.stopPropagation(); toggleDocPlayNotes(); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); exitDocPlay(); }
+      else if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " " || e.key === "PageDown") { e.preventDefault(); e.stopImmediatePropagation(); docSlideGo(1); }
+      else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); e.stopImmediatePropagation(); docSlideGo(-1); }
+      else if (e.key === "n" || e.key === "N") { e.preventDefault(); e.stopImmediatePropagation(); toggleDocPlayNotes(); }
       return;
     }
     if (e.key !== "Escape" || $("docPreviewModal").classList.contains("hidden")) return;
-    e.preventDefault(); e.stopPropagation();
+    // stopImmediatePropagation（而非 stopPropagation）：同是 document 上的捕获监听，
+    // 只有它才能阻止后面注册的监听（如「输出物」弹窗）也跟着把 Esc 当自己的事。
+    e.preventDefault(); e.stopImmediatePropagation();
     closeDocPreview();
   }, true);
   // 窗口尺寸变化：重渲染当前幻灯片（弹窗内 / 播放中各自适配尺寸）
@@ -10450,6 +10555,17 @@ function init() {
   $("searchBtn").onclick = openSearchModal;
   $("searchClose").onclick = () => $("searchModal").classList.add("hidden");
   $("searchGo").onclick = doSearch;
+  // 输出物（当前知聚全部附件：下载 / 在线查看）
+  $("groupFilesBtn").onclick = openGroupFiles;
+  $("groupFilesClose").onclick = () => $("groupFilesModal").classList.add("hidden");
+  $("groupFilesModal").addEventListener("click", (e) => { if (e.target === $("groupFilesModal")) $("groupFilesModal").classList.add("hidden"); });
+  $("groupFilesSearch").addEventListener("input", () => { groupFilesQuery = $("groupFilesSearch").value; renderGroupFiles(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || $("groupFilesModal").classList.contains("hidden")) return;
+    if (!$("docPreviewModal").classList.contains("hidden")) return; // 在线查看弹窗在上：先让它收
+    e.preventDefault(); e.stopPropagation();
+    $("groupFilesModal").classList.add("hidden");
+  }, true);
   // 全局智能检索（跨知聚）
   $("globalSearchBtn").onclick = openGlobalSearchModal;
   $("gsClose").onclick = () => $("globalSearchModal").classList.add("hidden");

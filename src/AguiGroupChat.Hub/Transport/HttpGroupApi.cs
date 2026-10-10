@@ -461,6 +461,48 @@ public static class HttpGroupApi
                 return Results.Ok(messages);
             }));
 
+        // 群内全部附件（前端「输出物」）：汇总该知聚所有可见消息里的附件，供集中下载 / 在线查看。
+        // 按时间倒序（最新在前）、按附件 ID 去重；过滤撤回与不可见（定向 / 私密）消息，权限同查看消息。
+        group.MapGet("/{groupId}/attachments", async (string groupId, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
+            => await RunAsync(async () =>
+            {
+                var (identity, error) = RequireIdentity(ctx, auth, authOptions);
+                if (identity is null) return error!;
+                if (hub.Store.GetGroup(groupId) is null)
+                    return Results.NotFound(new AguiError(ErrorCodes.GroupNotFound, "群组不存在"));
+                if (!hub.CanParticipate(groupId, identity))
+                    return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看群内附件"),
+                        statusCode: StatusCodes.Status403Forbidden);
+
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                var items = new List<object>();
+                foreach (var m in hub.Store.AllMessages(groupId)
+                    .Where(m => !m.Recalled && hub.CanSeeMessageAware(m, identity))
+                    .OrderByDescending(m => m.Timestamp))
+                {
+                    foreach (var a in m.Attachments)
+                    {
+                        if (string.IsNullOrEmpty(a.AttachmentId) || !seen.Add(a.AttachmentId)) continue;
+                        items.Add(new
+                        {
+                            messageId = m.MessageId,
+                            senderId = m.SenderId,
+                            senderType = m.SenderType.ToString(),
+                            senderNickname = m.SenderNickname,
+                            timestamp = m.Timestamp,
+                            topicId = m.TopicId,
+                            attachmentId = a.AttachmentId,
+                            name = a.Name,
+                            contentType = a.ContentType,
+                            size = a.Size,
+                            url = a.Url,
+                            kind = a.Kind,
+                        });
+                    }
+                }
+                return Results.Ok(items);
+            }));
+
         // 多智能体讨论：用户 @ 多个智能体发起话题，按序串行触发（前序智能体的回复作为后序的群历史上下文），
         // 后台执行（智能体回复经 WS 实时广播），接口立即返回已受理。
         group.MapPost("/{groupId}/discussion", async (string groupId, DiscussionHttpRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, IAgentGateway gateway, ILoggerFactory loggerFactory, CancellationToken ct)
