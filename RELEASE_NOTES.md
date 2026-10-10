@@ -1,5 +1,33 @@
-# AG-UI 群聊桌面版 1.0.178 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.178 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.179 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.179 Release Notes (current Windows desktop release)
+
+**版本说明**：界面人性化（第四轮）——消息操作收进「⋯」菜单、话题栏可收起、`?` 快捷键面板、知聚行悬停看跨话题未读、「上次离开后」分隔线。
+**Version note**: UI polish (round 4) — message actions tucked into a “⋯” menu, a collapsible topic bar, a `?` shortcuts panel, per-topic unread on circle hover, and a “since you last left” divider.
+
+## 更干净的消息操作 + 话题栏可收起
+# Cleaner message actions + collapsible topic bar
+
+中文：
+- **「⋯」菜单**：悬停消息时头部只留「停止 / 引用」，新建话题 / 复制 / 重新回答 / 撤回 / 👍👎 收进「⋯」；同一时刻只开一个，点外部或滚动即收起。
+- **话题栏收起**：话题栏左侧 ▾ / ▸ 一键收起，只保留当前话题（话题多时省空间），状态按用户记住。
+English:
+- **“⋯” menu**: hovering a message now shows only Stop / Quote; new-topic / copy / regenerate / recall / 👍👎 move into “⋯” — only one opens at a time, closing on outside click or scroll.
+- **Collapsible topic bar**: the ▾ / ▸ toggle on its left collapses it to just the current topic (handy when there are many), remembered per user.
+
+## ? 快捷键面板 + 未读汇总 + 上次离开分隔线
+# ? shortcuts panel + unread summary + since-you-left divider
+
+中文：
+- **快捷键面板**：不在输入框时按 `?` 弹出，列出 Ctrl/⌘+K、Alt+↑/↓、/、Enter、Esc，以及双击消息引用、←/→ 调侧栏宽度；帮助弹窗底部也有入口。
+- **跨话题未读**：悬停知聚行即可看到各话题未读数（如「# 综合：3」）。
+- **「上次离开后」分隔线**：进入知聚时，在您上次离开后产生的新消息前显示一条淡色分隔线（与「以下是新消息」重合时不重复）。
+English:
+- **Shortcuts panel**: press `?` outside an input to see Ctrl/⌘+K, Alt+↑/↓, /, Enter, Esc, plus double-click-to-quote and ←/→ panel nudging; also reachable from the help dialog.
+- **Per-topic unread**: hovering a circle row shows each topic's unread count (e.g. “# General: 3”).
+- **“Since you last left” divider**: entering a circle shows a faint divider before the messages that arrived after you last left it (not duplicated when it coincides with “New messages below”).
+
+# AG-UI 群聊桌面版 1.0.178 发布说明
+# AG-UI Group Chat Desktop 1.0.178 Release Notes
 
 **版本说明**：界面布局与操作人性化（第三轮）——未读分隔线、记住滚动位置、侧栏一键收起、双击引用回复、切群后自动聚焦输入框（可关）。
 **Version note**: layout & interaction polish (round 3) — an unread divider, remembered scroll position per circle, one-click panel collapse, double-click to quote, and auto-focus the composer after switching (toggleable).

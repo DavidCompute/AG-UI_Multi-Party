@@ -1390,7 +1390,28 @@
         <div id="helpNoMatch" class="help-no-match hidden" data-i18n="help.noMatch">没有匹配的帮助条目</div>
       </div>
       <div class="modal-actions">
+        <button id="helpShortcutsBtn" class="btn-ghost" data-i18n="sc.open">⌨️ 快捷键</button>
         <button id="helpClose" class="btn-ghost" data-i18n="help.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 键盘快捷键面板（`?` 唤起；也可从帮助弹窗打开） -->
+  <div id="shortcutsModal" class="modal-overlay ui-dialog-overlay hidden">
+    <div class="modal shortcuts-modal">
+      <div class="modal-title" data-i18n="sc.title">⌨️ 键盘快捷键</div>
+      <div class="sc-list">
+        <div class="sc-row"><kbd>Ctrl / ⌘ + K</kbd><span data-i18n="sc.search">搜索（知聚内 / 全局）</span></div>
+        <div class="sc-row"><kbd>Alt + ↑ / ↓</kbd><span data-i18n="sc.cycleGroup">切换知聚</span></div>
+        <div class="sc-row"><kbd>/</kbd><span data-i18n="sc.focusInput">聚焦输入框</span></div>
+        <div class="sc-row"><kbd>Enter</kbd><span data-i18n="sc.send">发送（Shift + Enter 换行）</span></div>
+        <div class="sc-row"><kbd>Esc</kbd><span data-i18n="sc.esc">关闭弹窗 / 取消引用</span></div>
+        <div class="sc-row"><kbd data-i18n="sc.dblclickKey">双击消息</kbd><span data-i18n="sc.dblclick">引用回复（未选中文字时）</span></div>
+        <div class="sc-row"><kbd>← / →</kbd><span data-i18n="sc.resizePanels">聚焦侧栏分隔条时微调宽度</span></div>
+        <div class="sc-row"><kbd>?</kbd><span data-i18n="sc.thisPanel">本快捷键面板</span></div>
+      </div>
+      <div class="modal-actions">
+        <button id="scClose" class="send" data-i18n="ui.ok">确定</button>
       </div>
     </div>
   </div>

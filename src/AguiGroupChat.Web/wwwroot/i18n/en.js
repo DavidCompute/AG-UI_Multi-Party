@@ -82,7 +82,9 @@ window.I18N_DICTS.en = {
   "chat.showGroups": "Show circles",
   "chat.showMembers": "Show members",
   "msg.noMessagesTip": "No messages yet — say something, or @ a digital employee.",
+  "msg.moreActions": "More actions",
   "msg.unreadDivider": "New messages below",
+  "msg.leaveDivider": "Since you last left",
   "msg.dblClickReply": "Double-click a message to quote it",
   "msg.today": "Today",
   "msg.yesterday": "Yesterday",
@@ -1275,6 +1277,8 @@ window.I18N_DICTS.en = {
   /* --- 话题栏 / 话题操作 --- */
   "topic.mainText": "# General",
   "topic.mainTitle": "Main topic (default in group)",
+  "topic.collapse": "Collapse the topic bar (keep the current topic)",
+  "topic.expand": "Expand the topic bar",
   "topic.summaryTip": "📌 View this topic's auto rolling summary (long-thread continuity memory)",
   "topic.summaryTitle": "Topic progress summary",
   "topic.summaryHint": "Once enough new messages accumulate, agents compress the earlier conversation into a rolling summary and use it when replying (so long threads still remember earlier conclusions). This shows the latest one.",
@@ -1649,6 +1653,18 @@ window.I18N_DICTS.en = {
 
   "admin.ugUnknownUser": "Cannot resolve member username(s): {who}",
   "admin.thMembers": "Members",
-  "agent.form.allowedGroupTitle": "🔐 Allowed user groups (empty = no restriction)"
+  "agent.form.allowedGroupTitle": "🔐 Allowed user groups (empty = no restriction)",
 
+  /* --- Keyboard shortcuts panel --- */
+  "sc.title": "⌨️ Keyboard shortcuts",
+  "sc.open": "⌨️ Shortcuts",
+  "sc.search": "Search (in circle / global)",
+  "sc.cycleGroup": "Switch circle",
+  "sc.focusInput": "Focus the composer",
+  "sc.send": "Send (Shift + Enter for a new line)",
+  "sc.esc": "Close a dialog / cancel quoting",
+  "sc.dblclickKey": "Double-click a message",
+  "sc.dblclick": "Quote it in a reply (when no text is selected)",
+  "sc.resizePanels": "Nudge the panel width when the handle is focused",
+  "sc.thisPanel": "This shortcuts panel"
 };

@@ -47,6 +47,8 @@ const state = {
   groupUnread: new Map(),
   // 按知聚记忆的滚动位置（groupId → { top, stick }）：切走再回来停在原处（本次会话内有效）
   scrollMem: new Map(),
+  // 上次离开各知聚的时间（groupId → ms）：用于「上次离开后」分隔线（会话内缓存，持久化在 localStorage）
+  leaveTime: new Map(),
   // 按知聚记忆的 @ 选择（groupId → {ids, all}）：切知聚恢复、发送后保留，避免每次重新 @
   mentionMemory: new Map(),
   // 按知聚记忆的话题：groupId → 话题 ID（持久化 localStorage，切知聚/再登录自动恢复）
@@ -367,6 +369,8 @@ function refreshMessagesEmptyHint() {
 }
 
 function resetChatState() {
+  // 离开当前知聚：先记下离开时间（下次进入显示「上次离开后」分隔线；memberId 此时尚在）
+  if (state.activeGroupId) saveLeaveTime(state.activeGroupId);
   state.rooms.clear();
   state.msgIndex.clear();
   state.subscribedGroups.clear();
@@ -408,8 +412,11 @@ function resetChatState() {
   // 未读分隔线：重置时清除，避免跨账号 / 跨知聚残留
   pendingUnreadDivider = null;
   unreadDividerId = null;
+  pendingLeaveDivider = null;
+  leaveDividerId = null;
   clearPendingScrollRestore();
   state.scrollMem.clear();
+  state.leaveTime.clear();
   hideNotifPanel();
   if ($("notifBadge")) renderNotifications();
   const input = $("input"); if (input) input.value = "";
@@ -5875,6 +5882,21 @@ function renderGroupList() {
     const groupNameEl = div.querySelector(".group-name");
     groupNameEl.textContent = g.groupName || "";
     groupNameEl.title = g.groupName || "";
+    // 跨话题未读汇总（悬停知聚行可见）：总未读 + 各话题未读数（话题名已知时显示名称）
+    const info = state.groupUnread.get(g.groupId);
+    const unreadTotal = info?.unreadCount || 0;
+    const lines = [];
+    if (unreadTotal > 0) {
+      const byTopic = info?.byTopic || {};
+      const roomTopics = state.rooms.get(g.groupId)?.topics || [];
+      for (const [tid, cnt] of Object.entries(byTopic)) {
+        if (!cnt) continue;
+        const name = tid === "main" ? t("topic.mainText") : (roomTopics.find((x) => x.topicId === tid)?.name || tid);
+        lines.push(`${name}：${cnt}`);
+      }
+      if (lines.length === 0) lines.push(t("list.unread", { count: unreadTotal }));
+    }
+    div.title = [g.groupName || "", ...lines].filter(Boolean).join("\n");
     div.onclick = () => selectGroup(g.groupId);
     const mb = div.querySelector(".group-mute");
     if (mb) mb.onclick = (e) => { e.stopPropagation(); toggleMutedGroup(g.groupId); };
@@ -6118,11 +6140,31 @@ function clearNotifications() {
 }
 
 /** 本地把某话题未读清零（进入知聚 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
-/** 进入知聚 / 自动恢复话题时：按该话题当前未读数记下分隔线基线（无未读则清除）。 */
-function setUnreadDividerBaseline(gid, topicId) {
+/** 进入知聚 / 自动恢复话题时：按该话题当前未读数与上次离开时间记下分隔线基线（无则清除）。 */
+function setDividerBaselines(gid, topicId) {
   const n = state.groupUnread.get(gid)?.byTopic?.[topicId] || 0;
   pendingUnreadDivider = n > 0 ? { gid, topicId, count: n } : null;
+  const since = getLeaveTime(gid);
+  pendingLeaveDivider = since > 0 ? { gid, since } : null;
   unreadDividerId = null;
+  leaveDividerId = null;
+}
+
+/** 上次离开某知聚的时间（ms）：会话内缓存，首次从 localStorage 读。 */
+function getLeaveTime(gid) {
+  if (!gid) return 0;
+  if (state.leaveTime.has(gid)) return state.leaveTime.get(gid) || 0;
+  let v = 0;
+  try { v = Number(localStorage.getItem("agui.leaveAt." + (state.memberId || "") + "." + gid)) || 0; } catch { /* 忽略 */ }
+  state.leaveTime.set(gid, v);
+  return v;
+}
+/** 记录离开某知聚的时间（切走 / 登出时调用），供下次进入显示「上次离开后」分隔线。 */
+function saveLeaveTime(gid) {
+  if (!gid) return;
+  const now = Date.now();
+  state.leaveTime.set(gid, now);
+  try { localStorage.setItem("agui.leaveAt." + (state.memberId || "") + "." + gid, String(now)); } catch { /* 忽略 */ }
 }
 
 function markTopicRead(gid, topicId, messageId) {
@@ -6135,10 +6177,15 @@ function markTopicRead(gid, topicId, messageId) {
     }
     if (messageId) sendReadReceipt(gid, topicId, messageId);
   }
-  // 该话题已读：未读分隔线不再有显示依据
+  // 该话题已读：未读 / 上次离开 分隔线不再有显示依据
   if (pendingUnreadDivider && pendingUnreadDivider.gid === gid && pendingUnreadDivider.topicId === topicId) {
     pendingUnreadDivider = null;
     unreadDividerId = null;
+    if (state.activeGroupId === gid) scheduleVirtualRender();
+  }
+  if (pendingLeaveDivider && pendingLeaveDivider.gid === gid) {
+    pendingLeaveDivider = null;
+    leaveDividerId = null;
     if (state.activeGroupId === gid) scheduleVirtualRender();
   }
   if (state.activeGroupId === gid) { renderTopicBar(); renderGroupList(); }
@@ -6239,6 +6286,7 @@ async function selectGroup(gid) {
   if (state.activeGroupId) {
     state.mentionMemory.set(state.activeGroupId, { ids: [...state.mentions], all: state.mentionAll });
     saveScrollPos(state.activeGroupId); // 离开前记住该知聚的滚动位置（下次回来恢复）
+    saveLeaveTime(state.activeGroupId); // 离开时间（下次回来显示「上次离开后」分隔线）
   }
   state.activeGroupId = gid;
   state.activeTopicId = "main"; // 先主话题，随后按话题记忆恢复
@@ -6296,8 +6344,8 @@ async function selectGroup(gid) {
   renderMembers();
   renderMessages();
   renderTyping();
-  // 未读分隔线：进入时记下当前话题未读数（快照渲染时在首条未读前显示；读到即清）
-  setUnreadDividerBaseline(gid, state.activeTopicId || "main");
+  // 未读 / 上次离开分隔线：进入时按当前话题未读数与上次离开时间记基线（快照渲染时显示；读到即清）
+  setDividerBaselines(gid, state.activeTopicId || "main");
   // 恢复本群草稿（切群 / 刷新 / 重连后不丢已输入内容）
   const draftEl = $("input");
   draftEl.value = loadDraft(gid);
@@ -6311,13 +6359,44 @@ async function selectGroup(gid) {
 /** 当前“以此消息新建话题”的来源消息 ID（null = 普通新建话题）。 */
 let topicSourceMessageId = null;
 
-/** 渲染话题栏：主话题 + 自定义话题 chip + 新建按钮。 */
+/* 话题栏收起（省空间）：收起时只留折叠按钮 + 当前话题 chip；状态按用户记忆。 */
+const TOPIC_BAR_KEY = "agui.topicBarCollapsed";
+let topicBarCollapsed = false;
+function topicBarCollapsedPref() {
+  try { return localStorage.getItem(TOPIC_BAR_KEY + "." + (state.memberId || "")) === "1"; } catch { return false; }
+}
+function syncTopicCollapseBtn() {
+  const b = $("topicCollapseBtn");
+  if (!b) return;
+  b.textContent = topicBarCollapsed ? "▸" : "▾";
+  const label = t(topicBarCollapsed ? "topic.expand" : "topic.collapse");
+  b.title = label; b.setAttribute("aria-label", label);
+  b.setAttribute("aria-expanded", String(!topicBarCollapsed));
+}
+function setTopicBarCollapsed(v) {
+  topicBarCollapsed = !!v;
+  try { localStorage.setItem(TOPIC_BAR_KEY + "." + (state.memberId || ""), topicBarCollapsed ? "1" : "0"); } catch { /* 忽略 */ }
+  $("topicBar")?.classList.toggle("collapsed", topicBarCollapsed);
+  syncTopicCollapseBtn();
+}
+
+/** 渲染话题栏：折叠开关 + 主话题 + 自定义话题 chip + 新建按钮。 */
 function renderTopicBar() {
   const el = $("topicBar");
   const r = state.activeGroupId ? room(state.activeGroupId) : null;
   el.innerHTML = "";
   if (!r) { el.classList.add("hidden"); return; }
   el.classList.remove("hidden");
+  // 收起状态（按用户记忆）：只留折叠按钮 + 当前话题
+  topicBarCollapsed = topicBarCollapsedPref();
+  el.classList.toggle("collapsed", topicBarCollapsed);
+  const collapseBtn = document.createElement("button");
+  collapseBtn.id = "topicCollapseBtn";
+  collapseBtn.className = "topic-collapse-btn";
+  collapseBtn.type = "button";
+  collapseBtn.onclick = (e) => { e.stopPropagation(); setTopicBarCollapsed(!topicBarCollapsed); };
+  el.appendChild(collapseBtn);
+  syncTopicCollapseBtn();
 
   const main = document.createElement("span");
   main.className = "topic-chip" + (state.activeTopicId === "main" ? " active" : "");
@@ -6446,9 +6525,9 @@ async function selectTopic(topicId, opts) {
   renderTopicBar();
   resetVScroll();
   vscroll.stickBottom = true;
-  // 未读分隔线：自动恢复话题按该话题未读记基线；用户主动点击 = 已读，不显示
-  if (auto) setUnreadDividerBaseline(gid, topicId);
-  else { pendingUnreadDivider = null; unreadDividerId = null; }
+  // 未读 / 上次离开分隔线：自动恢复话题按该话题未读与离开时间记基线；用户主动点击 = 已读，不显示
+  if (auto) setDividerBaselines(gid, topicId);
+  else { pendingUnreadDivider = null; unreadDividerId = null; pendingLeaveDivider = null; leaveDividerId = null; }
   renderMessages();
   // 用户主动点击话题 → 视为已读（清零该话题未读并落读位点）；自动恢复不标记
   if (!auto) markTopicRead(gid, topicId, lastMessageIdOf(gid, topicId));
@@ -7830,6 +7909,9 @@ let vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBott
 let pendingUnreadDivider = null;
 /** 当前应显示未读分隔线的消息 id（由 virtualRender 每次计算，msgDom 据此把分隔线包进该消息行）。 */
 let unreadDividerId = null;
+/** 「上次离开后」分隔线：{ gid, since }（进入时按上次离开时间记下），与未读分隔线重合时不重复显示。 */
+let pendingLeaveDivider = null;
+let leaveDividerId = null;
 /** 待恢复的滚动位置（{gid, top}）：切知聚后由 virtualRender 落地一次，避免估算高度阶段定位偏差。 */
 let pendingScrollRestore = null;
 
@@ -7943,6 +8025,7 @@ function virtualRender() {
     vscroll.start = vscroll.end = 0;
     vscroll.heights = null;
     unreadDividerId = null;
+    leaveDividerId = null;
     return;
   }
 
@@ -7959,12 +8042,21 @@ function virtualRender() {
 
   vscroll.heights = computeHeights(msgs);
   const h = vscroll.heights;
-  // 未读分隔线目标：当前话题末尾 unreadN 条的第一条（首条未读）；读后 pending 已清则不再显示。
+  // 分隔线目标：未读→当前话题末尾 unreadN 条的第一条；上次离开→第一条晚于上次离开时间的消息
+  // （两者重合时只显示未读那条）；读后 pending 已清则不再显示。
   unreadDividerId = null;
+  leaveDividerId = null;
   if (pendingUnreadDivider && pendingUnreadDivider.gid === state.activeGroupId
       && pendingUnreadDivider.topicId === (state.activeTopicId || "main")) {
     const idx = Math.max(0, n - pendingUnreadDivider.count);
     unreadDividerId = msgs[idx] ? msgs[idx].id : null;
+  }
+  if (pendingLeaveDivider && pendingLeaveDivider.gid === state.activeGroupId) {
+    const first = msgs.findIndex((x) => !x.sys && Number(x.timestamp) > pendingLeaveDivider.since);
+    if (first >= 0) {
+      const id = msgs[first].id;
+      if (id !== unreadDividerId) leaveDividerId = id;
+    }
   }
   const loadH = r.allLoaded ? 0 : LOAD_MORE_HEIGHT; // loadMore 行占据的顶部高度
 
@@ -8119,6 +8211,7 @@ function resetVScroll() {
   vscrollRO?.disconnect();
   vscroll = { start: 0, end: 0, heights: null, raf: 0, force: false, stickBottom: false, avgH: 0 };
   unreadDividerId = null;
+  leaveDividerId = null;
   $("messages").innerHTML = "";
 }
 
@@ -8260,6 +8353,13 @@ function msgDom(m, r, prev) {
   // 停止生成按钮：数字员工消息流式进行中显示（点击后调停止 API，END 后随重建消失）
   const canStop = !m.sys && !m.recalled && m.streaming && m.senderType === "agent" && !!m.runId;
   const replyRef = m.replyTo ? `<div class="reply-ref">${t("msg.replyRef", { sender: escapeHtml(quoteOf(m.replyTo)) })}</div>` : "";
+  // 次要操作收进「⋯」菜单（减少悬停时的图标噪音）；停止 / 引用常显，菜单内点击后仍即时可用。
+  const topicStartBtnHtml = `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}" aria-label="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>";
+  const moreItems = topicStartBtnHtml
+    + (canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : "")
+    + (canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : "")
+    + (canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : "");
+  const moreHtml = `<button class="msg-more-btn" type="button" title="${escapeHtml(t("msg.moreActions"))}" aria-label="${escapeHtml(t("msg.moreActions"))}" aria-expanded="false" aria-haspopup="true">⋯</button><span class="msg-actions hidden">${moreItems}</span>`;
   // @ 提及回显：chips 选择的成员（或 @全体）在消息内以标签形式展示
   const mentionTags = (() => {
     if (m.mentionAll) return `<span class="mention-tag">${escapeHtml(t("msg.mentionAllTag"))}</span>`;
@@ -8362,7 +8462,7 @@ function msgDom(m, r, prev) {
   div.innerHTML = `
     <div class="avatar">${avatar}</div>
     <div class="body">
-      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time${showDay ? " time-day" : ""}">${headTime}</span>${m.sys ? "" : `<button class="topic-start-btn" title="${escapeHtml(t("msg.startTopic"))}" aria-label="${escapeHtml(t("msg.startTopic"))}">` + icon("topic") + "</button>"}${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : ""}${canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : ""}${canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : ""}</div>
+      <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time${showDay ? " time-day" : ""}">${headTime}</span>${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${moreHtml}</div>
       ${replyRef}
       ${mentionTags ? `<div class="mention-line">${mentionTags}</div>` : ""}
       ${processWrap}
@@ -8372,6 +8472,8 @@ function msgDom(m, r, prev) {
     </div>`;
   const topicStartBtn = div.querySelector(".topic-start-btn");
   if (topicStartBtn) topicStartBtn.onclick = (e) => { e.stopPropagation(); openTopicModalFromMessage(m.id); };
+  const moreBtn = div.querySelector(".msg-more-btn");
+  if (moreBtn) moreBtn.onclick = (e) => { e.stopPropagation(); toggleMsgActions(div); };
   const stopBtn = div.querySelector(".stop-btn");
   if (stopBtn) bindStopButton(stopBtn, m);
   const replyBtn = div.querySelector(".reply-btn");
@@ -8402,13 +8504,14 @@ function msgDom(m, r, prev) {
   }
   // 未读分隔线：把分隔线与该消息包进同一个 .vmsg 行（高度随该行测量，不破坏虚拟高度模型）。
   // 内层去掉 vmsg / data-mid，避免与 wrapper 重复计数 / 重复匹配；wrapper 承载 data-mid 供测量定位。
-  if (unreadDividerId && m.id === unreadDividerId) {
+  if (unreadDividerId && (m.id === unreadDividerId || m.id === leaveDividerId)) {
+    const isLeave = m.id !== unreadDividerId;
     const wrap = document.createElement("div");
     wrap.className = "vmsg unread-marker";
     wrap.setAttribute("data-mid", m.id);
     const line = document.createElement("div");
-    line.className = "unread-divider";
-    line.textContent = t("msg.unreadDivider");
+    line.className = "unread-divider" + (isLeave ? " leave" : "");
+    line.textContent = isLeave ? t("msg.leaveDivider") : t("msg.unreadDivider");
     wrap.appendChild(line);
     div.classList.remove("vmsg");
     div.removeAttribute("data-mid");
@@ -8915,8 +9018,9 @@ function ensureFeedbackButtons(msgEl, m) {
   dislike.type = "button"; dislike.title = t("fb.dislikeTitle");
   dislike.innerHTML = icon("thumbs-down");
   dislike.onclick = (e) => { e.stopPropagation(); if (state === -1) return; openFeedbackTags(msgEl, m); };
-  head.appendChild(like);
-  head.appendChild(dislike);
+  const box = headActionsBox(head);
+  box.appendChild(like);
+  box.appendChild(dislike);
 }
 
 /** 👎：弹出原因标签选择条（点击标签即提交，可再点一次取消该标签）。 */
@@ -9002,6 +9106,39 @@ function bindRegenerateButton(btn, m) {
  * 补挂头部操作按钮（复制 / 重新回答 / 撤回）：流式期间渲染头部时这些按钮不显示，
  * END（或局部更新）后由这里补挂；滚动 / 刷新整表重建后由 msgDom 正常渲染。
  */
+/** 消息「⋯」更多操作菜单（新建话题 / 复制 / 重新回答 / 撤回 / 评价）：同时只开一个，点外部或滚动即收起。 */
+function closeAllMsgActions(except) {
+  document.querySelectorAll("#messages .msg-actions:not(.hidden)").forEach((el) => {
+    if (el === except) return;
+    el.classList.add("hidden");
+    el.parentElement?.querySelector(".msg-more-btn")?.setAttribute("aria-expanded", "false");
+  });
+}
+function toggleMsgActions(msgEl) {
+  const menu = msgEl?.querySelector(".msg-actions");
+  if (!menu) return;
+  const willOpen = menu.classList.contains("hidden");
+  closeAllMsgActions();
+  menu.classList.toggle("hidden", !willOpen);
+  msgEl.querySelector(".msg-more-btn")?.setAttribute("aria-expanded", String(willOpen));
+}
+/** 取（必要时建）消息头的「⋯」操作容器：attachHeadActions / 评价按钮补挂时落到其中。 */
+function headActionsBox(head) {
+  let box = head.querySelector(".msg-actions");
+  if (box) return box;
+  const msgEl = head.closest(".msg") || head;
+  box = document.createElement("span");
+  box.className = "msg-actions hidden";
+  const more = document.createElement("button");
+  more.className = "msg-more-btn"; more.type = "button"; more.textContent = "⋯";
+  more.title = t("msg.moreActions"); more.setAttribute("aria-label", t("msg.moreActions"));
+  more.setAttribute("aria-expanded", "false"); more.setAttribute("aria-haspopup", "true");
+  more.onclick = (e) => { e.stopPropagation(); toggleMsgActions(msgEl); };
+  head.appendChild(more);
+  head.appendChild(box);
+  return box;
+}
+
 function attachHeadActions(msgEl, m, r) {
   const head = msgEl?.querySelector(".head");
   if (!head || m.sys) return;
@@ -9016,21 +9153,21 @@ function attachHeadActions(msgEl, m, r) {
     btn.className = "copy-btn"; btn.type = "button"; btn.title = t("msg.copy"); btn.setAttribute("aria-label", t("msg.copy"));
     btn.innerHTML = icon("copy");
     bindCopyButton(btn, m);
-    head.appendChild(btn);
+    headActionsBox(head).appendChild(btn);
   }
   if (canRegenerate && !head.querySelector(".regenerate-btn")) {
     const btn = document.createElement("button");
     btn.className = "regenerate-btn"; btn.type = "button"; btn.title = t("msg.regenTitle"); btn.setAttribute("aria-label", t("msg.regenTitle"));
     btn.innerHTML = icon("refresh");
     bindRegenerateButton(btn, m);
-    head.appendChild(btn);
+    headActionsBox(head).appendChild(btn);
   }
   if (canRecall && !head.querySelector(".recall-btn")) {
     const btn = document.createElement("button");
     btn.className = "recall-btn"; btn.type = "button"; btn.title = t("msg.recallTitle"); btn.setAttribute("aria-label", t("msg.recallTitle"));
     btn.innerHTML = icon("recall");
     bindRecallButton(btn, m);
-    head.appendChild(btn);
+    headActionsBox(head).appendChild(btn);
   }
   ensureFeedbackButtons(msgEl, m); // 流式结束后补挂 👍/👎
 }
@@ -11065,6 +11202,9 @@ function init() {
       return;
     }
     if (typing) return;
+    if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault(); $("shortcutsModal").classList.remove("hidden"); return;
+    }
     if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (!state.activeGroupId) return;
       e.preventDefault(); $("input").focus(); return;
@@ -11121,6 +11261,18 @@ function init() {
   $("collapseGroupsBtn").onclick = () => togglePanelCollapse("groups");
   $("collapseMembersBtn").onclick = () => togglePanelCollapse("members");
   updateCollapseButtons();
+
+  // ---- 消息「⋯」更多操作菜单：点外部 / 滚动即收起 ----
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".msg-actions") && !e.target.closest(".msg-more-btn")) closeAllMsgActions();
+  });
+  $("messages").addEventListener("scroll", () => closeAllMsgActions(), { passive: true });
+
+  // ---- 键盘快捷键面板 ----
+  $("scClose").onclick = () => $("shortcutsModal").classList.add("hidden");
+  $("shortcutsModal").addEventListener("click", (e) => { if (e.target === $("shortcutsModal")) $("shortcutsModal").classList.add("hidden"); });
+  $("helpShortcutsBtn").onclick = () => { $("helpModal").classList.add("hidden"); $("shortcutsModal").classList.remove("hidden"); };
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("shortcutsModal").classList.contains("hidden")) $("shortcutsModal").classList.add("hidden"); });
 
   // 输入区「＋」弹出菜单：附件 / 语音 / 画布（选完 / 点外部自动收起）
   $("composerPlusBtn").onclick = (e) => { e.stopPropagation(); $("composerPlusMenu").classList.toggle("hidden"); };

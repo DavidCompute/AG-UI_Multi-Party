@@ -82,7 +82,9 @@ window.I18N_DICTS.zh = {
   "chat.showGroups": "显示知聚列表",
   "chat.showMembers": "显示成员",
   "msg.noMessagesTip": "还没有消息 —— 直接发言，或用 @ 唤起一位数字员工。",
+  "msg.moreActions": "更多操作",
   "msg.unreadDivider": "以下是新消息",
+  "msg.leaveDivider": "上次离开后的消息",
   "msg.dblClickReply": "双击消息可引用回复",
   "msg.today": "今天",
   "msg.yesterday": "昨天",
@@ -1272,6 +1274,8 @@ window.I18N_DICTS.zh = {
   /* --- 话题栏 / 话题操作 --- */
   "topic.mainText": "# 综合",
   "topic.mainTitle": "主话题（知聚默认）",
+  "topic.collapse": "收起话题栏（只留当前话题）",
+  "topic.expand": "展开话题栏",
   "topic.summaryTip": "📌 查看该话题的自动进度小结（长话题接续记忆）",
   "topic.summaryTitle": "话题进度小结",
   "topic.summaryHint": "数字员工会在话题新增消息达到一定量后，把较早对话自动压缩成小结并随回复使用（长话题也记得之前聊到哪）。这里展示最近一次生成的小结。",
@@ -1643,5 +1647,18 @@ window.I18N_DICTS.zh = {
   "admin.ugLoadFail": "分组加载失败：{err}",
   "admin.ugUnknownUser": "无法识别成员用户名：{who}",
   "admin.thMembers": "成员",
-  "agent.form.allowedGroupTitle": "🔐 允许访问的用户组（留空 = 不设限）"
+  "agent.form.allowedGroupTitle": "🔐 允许访问的用户组（留空 = 不设限）",
+
+  /* --- 键盘快捷键面板 --- */
+  "sc.title": "⌨️ 键盘快捷键",
+  "sc.open": "⌨️ 快捷键",
+  "sc.search": "搜索（知聚内 / 全局）",
+  "sc.cycleGroup": "切换知聚",
+  "sc.focusInput": "聚焦输入框",
+  "sc.send": "发送（Shift + Enter 换行）",
+  "sc.esc": "关闭弹窗 / 取消引用",
+  "sc.dblclickKey": "双击消息",
+  "sc.dblclick": "引用回复（未选中文字时）",
+  "sc.resizePanels": "聚焦侧栏分隔条时微调宽度",
+  "sc.thisPanel": "本快捷键面板"
 };
