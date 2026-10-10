@@ -95,9 +95,23 @@ try {
     res.streamAdoptsThinking = !!msgEl.querySelector(".process-body .thinking");
     res.streamToolsInside = !!msgEl.querySelector(".process-body .tool-calls");
     res.streamNoOrphanThinking = msgEl.querySelectorAll(".body > .thinking").length === 0;
+    // 撤回的消息不渲染过程块
+    const hostRec = render({ ...base, id: "m_rec", recalled: true });
+    res.recalledNoProcess = !hostRec.querySelector(".process");
+
+    // pruneEmptyProcess：空过程体 → 移除容器；非空 → 保留
+    const hostP = document.createElement("div");
+    hostP.innerHTML = `<div class="msg"><div class="body"><div class="process"><div class="process-body"></div></div><div class="content">x</div></div></div>`;
+    pruneEmptyProcess(hostP.querySelector(".msg"));
+    res.pruneEmptied = !hostP.querySelector(".process");
+    const hostP2 = document.createElement("div");
+    hostP2.innerHTML = `<div class="msg"><div class="body"><div class="process"><div class="process-body"><div class="tool-calls"></div></div></div><div class="content">x</div></div></div>`;
+    pruneEmptyProcess(hostP2.querySelector(".msg"));
+    res.pruneKeptWhenNonEmpty = !!hostP2.querySelector(".process");
+
     msgEl.remove();
 
-    host.remove(); hostS.remove(); host2.remove(); host3.remove();
+    host.remove(); hostS.remove(); host2.remove(); host3.remove(); hostRec.remove(); hostP.remove(); hostP2.remove();
     return { node: typeof msgDom, ...res };
   });
 
@@ -119,6 +133,9 @@ try {
   check("流式：已有思考块被收入过程容器", out.streamAdoptsThinking);
   check("流式：工具调用落在过程容器内", out.streamToolsInside);
   check("流式：不残留容器外的思考块", out.streamNoOrphanThinking);
+  check("撤回的消息不渲染过程块", out.recalledNoProcess);
+  check("pruneEmptyProcess：空过程容器被移除", out.pruneEmptied);
+  check("pruneEmptyProcess：非空过程容器保留", out.pruneKeptWhenNonEmpty);
 
   console.log(`\n=== ${pass} 通过 / ${fail} 失败 ===`);
 } catch (e) {

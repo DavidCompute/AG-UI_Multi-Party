@@ -1,5 +1,23 @@
-# AG-UI 群聊桌面版 1.0.175 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.175 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.176 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.176 Release Notes (current Windows desktop release)
+
+**版本说明**：对「执行过程分层」做一次严格审核后的修复——撤回 / 中断重置时不再残留过时或空白的「执行过程」块，并清理折叠状态表避免长会话下无界增长。
+**Version note**: bug fixes after a strict review of the process/final-answer layering — recalled or reset replies no longer leave a stale or empty “Execution process” block, and the collapse-state maps are pruned to avoid unbounded growth in long sessions.
+
+## 过程分层：边界路径修复
+# Process layering: edge-path fixes
+
+中文：
+- **撤回消息**：撤回后「执行过程」块（思考 / 计划 / 链 / 工具）一并隐藏，不再残留过时过程。
+- **中断重置**（人机交互中断）：清空思考后若过程体已空，连同「执行过程」标题一并移除，不留空壳。
+- **折叠状态表清理**：消息超出内存上限被裁剪、或登出 / 切换身份时，同步清理按消息记录的折叠覆盖，避免长时间会话 / 多次登录下无界增长。
+English:
+- **Recalled messages**: recalling a message now also hides its process block (thinking / plan / chain / tools) instead of leaving a stale one behind.
+- **Reset on interruption** (human-in-the-loop): if clearing the thinking leaves the process body empty, the whole block is removed — no hollow header.
+- **Collapse-state pruning**: the per-message collapse overrides are now cleared when old messages are trimmed or on sign-out / identity switch, avoiding unbounded growth across long sessions or repeated logins.
+
+# AG-UI 群聊桌面版 1.0.175 发布说明
+# AG-UI Group Chat Desktop 1.0.175 Release Notes
 
 **版本说明**：微调 1.0.174 的分层默认行为——「执行过程」块改为**执行结束自动收起**（与计划卡一致），最终答复始终优先可见；流式中仍实时展开，手动展开过则保持。
 **Version note**: a small follow-up to 1.0.174 — the “Execution process” block now **auto-collapses when the run finishes** (matching the plan card), so the final answer stays front and center; it still expands live while streaming and keeps your manual choice.

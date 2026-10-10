@@ -246,6 +246,11 @@ topbar（品牌 + 顶栏操作）
 程序性开合（`setProcessOpen`）带 `_prog` 标记，不计入“用户手动覆盖”，避免把自动收起误当成用户的折叠选择。
 工具全部完成后若过程体已空（无思考 / 计划 / 链）则连容器一并移除，不留空标题。
 
+**与既有局部更新路径的对齐（审核后补的）**：
+- **撤回**（`applyRecallLocal`）：整表重建不渲染 `recalled` 消息的过程块，但 PLAIN 局部更新不会重建——因此显式移除 `.process`，否则撤回后过程仍可见。
+- **重置**（`onMessageReset`，HITL 中断）：清空思考后调用 `pruneEmptyProcess` 去除空容器。
+- **覆盖表清理**：`trimMessages`（消息超限裁剪）与 `resetChatState`（登出 / 切换身份）同步清理 `processCollapseOverride` / `planCollapseOverride`，避免长会话 / 多次登录下无界增长。
+
 验证：`tools/ui-process-layers.mjs`（14 项，另含 4 项流式插入路径）——分组归属、位于正文之前、**结束收起 / 流式展开**、手动展开后重渲染保持、无过程不渲染，
 以及真实数据回放（6 个知聚 / 23 条数字员工消息 / 20 个过程块全部默认收起、8 个带步数进度、无错层、无控制台报错）。
 

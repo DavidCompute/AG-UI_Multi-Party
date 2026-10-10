@@ -391,6 +391,9 @@ function resetChatState() {
   // 通知中心（5.4）：登出清空通知，避免跨账号残留
   state.notifications = [];
   state.hadConnection = false;
+  // 折叠覆盖表按 messageId 记录：登出 / 切换身份一并清空，避免跨账号累积
+  planCollapseOverride.clear();
+  processCollapseOverride.clear();
   hideNotifPanel();
   if ($("notifBadge")) renderNotifications();
   const input = $("input"); if (input) input.value = "";
@@ -4422,7 +4425,12 @@ const STREAM_MAX_LENGTH = 2 * 1024 * 1024;
 function trimMessages(r) {
   if (!r || r.messages.length <= MAX_MESSAGES) return;
   const excess = r.messages.splice(0, r.messages.length - MAX_MESSAGES);
-  for (const m of excess) state.msgIndex.delete(m.id);
+  for (const m of excess) {
+    state.msgIndex.delete(m.id);
+    // 折叠覆盖表按 messageId 记录，消息被裁后一并清理，避免长会话下无界增长
+    planCollapseOverride.delete(m.id);
+    processCollapseOverride.delete(m.id);
+  }
 }
 
 /** 当前话题的消息（虚拟滚动 / 分页按话题隔离；系统行只在主话题显示，旧消息无 topicId 归主话题）。 */
@@ -4735,6 +4743,7 @@ function onMessageReset(evt) {
   if (msgEl) {
     const th = msgEl.querySelector(".thinking");
     if (th) th.remove(); // 思考块随内容一起清空
+    pruneEmptyProcess(msgEl); // 思考清空后过程体可能已空，去掉空「执行过程」标题
     const contentEl = msgEl.querySelector(".content");
     if (contentEl && !m.recalled && m.streaming) {
       contentEl.textContent = t("msg.waitingConfirm");
@@ -4889,6 +4898,8 @@ function applyRecallLocal(groupId, messageId) {
       if (btn) btn.remove();
       const ib = msgEl.querySelector(".interaction-block");
       if (ib) ib.remove(); // 撤回：嵌入的审批卡片一并移除
+      const proc = msgEl.querySelector(".process");
+      if (proc) proc.remove(); // 撤回：执行过程（思考 / 计划 / 链 / 工具）一并隐藏（整表重建也不会再渲染）
       const fbTags = msgEl.querySelector(".fb-tags");
       if (fbTags) fbTags.remove(); // 撤回：收起未提交的 👎 原因标签行
       // 撤回后头部操作按钮（复制 / 重新回答 / 撤回 / 评价）一并隐藏
@@ -5031,12 +5042,17 @@ function onToolCallResult(evt) {
     // 工具行清空后移除空容器，避免残留占位；过程容器也空了（无思考 / 计划 / 链）则一并移除
     const wrap = msgEl.querySelector(".tool-calls");
     if (wrap && !wrap.children.length) wrap.remove();
-    const pb = msgEl.querySelector(".process-body");
-    if (pb && !pb.children.length) pb.closest(".process")?.remove();
+    pruneEmptyProcess(msgEl);
     return;
   }
   vscroll.force = true;
   scheduleVirtualRender();
+}
+
+/** 过程体已空（无思考 / 计划 / 链 / 工具）时移除容器，避免留一个空「执行过程」标题。 */
+function pruneEmptyProcess(msgEl) {
+  const pb = msgEl.querySelector(".process-body");
+  if (pb && !pb.children.length) pb.closest(".process")?.remove();
 }
 
 /**
