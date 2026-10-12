@@ -2,8 +2,8 @@
 
 [English](README.en.md) | **简体中文**
 
-纯桌面应用（Windows）**（当前版本 1.0.163）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
-个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型等），但**数据与模型全部在本机**；服务在本机固定起在
+纯桌面应用（Windows）**（当前版本 1.0.189）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
+个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、办公文档在线查看与 PPT 播放（**需本机 LibreOffice**，见下方说明）等），但**数据与模型全部在本机**；服务在本机固定起在
 `http://127.0.0.1:5200`，即便断网也能跑通群聊 / 智能体管理 / 语义记忆等本地功能（仅对话模型 DeepSeek 等仍需联网），
 支持把标记为「本机执行」的客户端技能经本机桥在桌面机执行：
 
@@ -30,16 +30,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### 构建发行版（win-x64 程序 / MSI 安装包）
 
-当前版本：**1.0.163**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
+当前版本：**1.0.189**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
 
 ```bash
 # 1. 发布 win-x64 产物到 artifacts/win-x64（含 SQLite / 本地 llama embedding / wwwroot / VC++ 运行库 / vec0.dll）
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. 打 MSI 安装包：输出到 artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    例如 1.0.163：
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.163
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.163.msi
+#    例如 1.0.189：
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.189.msi
 ```
 
 > `tools/build-msi.ps1` 会先**强制全新发布**（清理 Release 中间产物，防止增量复用旧 DLL）、排除非 Windows 原生运行库、
@@ -111,6 +111,10 @@ src/AguiGroupChat.Desktop/
 - **客户端执行技能（`ExecutionLocation=Client`）**：技能可标记为<b>在本机执行</b>——桌面版由桌面壳（本机进程）在沙箱内执行 shell 或由 WebView 执行 http，结果回传模型继续作答（桌面版<b>无需额外配置本机桥/令牌</b>，开箱即用）。编排计划选中的多个客户端技能会合并成「本机一键执行全部」卡，一次确认后逐个执行。
 - **知识库（Knowledge Base）**：智能体管理里可创建知识库并上传文档（Word / Excel / PPT / PDF / 文本），
   回复前自动检索知识文档相关内容注入（RAG），让智能体基于您的资料作答；文档向量与语义记忆共用一套存储（sqlite-vec + 本地 bge-m3）；
+- **办公文档在线查看 / PPT 播放依赖本机 LibreOffice**：docx / xlsx / pptx 由服务端用 **LibreOffice**（headless）转 PDF 后内联渲染，
+  PPT 播放（转场 / 逐段动画）也走这条路。**MSI 不捆绑 LibreOffice**（Docker / Web 版镜像已内置），目标机未装时该入口不可用
+  （提示下载后用本地应用打开），其余功能不受影响。是否就绪可在管理员「系统状态 → 文档在线转换」查看；已装时自动探测
+  `C:\Program Files\LibreOffice\…`，也可用环境变量 `AGUI_SOFFICE` 指定 `soffice.exe` 路径后重启。
 - **数字员工组织架构**：顶栏「🌐 组织架构」画布拖拽连线配置各角色的<b>任务指派（向下）/ 问题提升（向上）</b>；节点右上角「**优化指派**」图标按钮可按该角色的<b>直接下一层</b>自动生成「管理下一层任务指派」提示词（只看下一层挑下游、不越级），预览后可追加到其 Instructions；
 - **VC++ 运行库已捆绑**（`vcruntime140.dll` / `vcruntime140_1.dll` / `msvcp140.dll` 随 MSI 装在 exe 旁，
   app-local 部署，目标机无需预装）。若个别机器 LLamaSharp 原生库仍加载失败（如缺失的旧系统库），

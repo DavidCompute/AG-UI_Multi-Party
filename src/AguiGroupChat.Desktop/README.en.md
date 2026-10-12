@@ -2,8 +2,8 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows) **(current version 1.0.163)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
-personal memory, AI twin, attachments, topics, trigger modes, memory personality types, etc.), but with **all data and models stored locally**; the service always runs on
+A pure desktop application (Windows) **(current version 1.0.189)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+personal memory, AI twin, attachments, topics, trigger modes, memory personality types, office document online view and PPT playback (**needs local LibreOffice**, see Notes), etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
 
@@ -31,16 +31,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### Building a release (win-x64 publish / MSI installer)
 
-Current version: **1.0.163** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+Current version: **1.0.189** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
 
 ```bash
 # 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. Build the MSI installer: outputs to artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    e.g. for 1.0.163:
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.163
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.163.msi
+#    e.g. for 1.0.189:
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.189.msi
 ```
 
 > `tools/build-msi.ps1` first does a **forced fresh publish** (cleans Release intermediates to avoid reusing stale DLLs), strips non-Windows native runtimes,
@@ -111,6 +111,8 @@ src/AguiGroupChat.Desktop/
 - **Client-execution skills (`ExecutionLocation=Client`)**: a skill can be marked to <b>run on the local machine</b> - in the desktop edition the desktop shell (the local process) runs shell in a sandbox or the WebView runs http, and the result is fed back to the model (desktop needs <b>no extra native-bridge/token config</b>; works out of the box). Multiple client skills selected by an orchestration plan merge into one "run all locally" card after a single confirmation.
 - **Knowledge Base**: in agent management you can create knowledge bases and upload documents (Word / Excel / PPT / PDF / text);
   before replying, relevant knowledge-document content is automatically retrieved and injected (RAG) so the agent answers based on your materials; document vectors and semantic memory share one storage backend (sqlite-vec + local bge-m3);
+- **Office document online view / PPT playback requires local LibreOffice**: docx / xlsx / pptx are converted to PDF by **LibreOffice** (headless) on the service side and rendered inline, and PPT playback (transitions / per-step animation) uses the same path. The **MSI does not bundle LibreOffice** (the Docker / web image does), so on a machine without it that entry point is unavailable (it suggests downloading and opening with a local app) while everything else keeps working. Availability is shown to admins under **System status → Document conversion**; when installed it is auto-detected at
+  `C:\Program Files\LibreOffice\…`, or you can point the `AGUI_SOFFICE` environment variable at `soffice.exe` and restart.
 - **VC++ runtime is bundled** (`vcruntime140.dll` / `vcruntime140_1.dll` / `msvcp140.dll` are installed next to the exe with the MSI,
   app-local deployment, no need to preinstall on the target machine). If LLamaSharp's native library still fails to load on some machines (e.g. due to missing legacy system libraries),
   the app automatically degrades by disabling semantic memory and logs the error—**it will not crash**, and other features such as group chat remain unaffected;
