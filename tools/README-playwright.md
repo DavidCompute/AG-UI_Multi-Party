@@ -95,6 +95,7 @@ HEADLESS=1 node ui-ux-round3.mjs          # 17 项：未读分隔线 / 滚动记
 HEADLESS=1 node ui-ux-round4.mjs          # 19 项：「⋯」菜单 / 话题栏收起 / 快捷键面板 / 上次离开分隔线
 HEADLESS=1 node ui-ux-round5.mjs          # 21 项：搜索命中高亮 + 上/下一条导航条 / 图片灯箱
 HEADLESS=1 node ui-ux-round6.mjs          # 13 项：全局搜索一致性 / 灯箱旋转下载 / 拖拽上传
+HEADLESS=1 node ui-ux-round7.mjs          # 17 项：搜索弹窗内翻页（↑↓/回车）/ 表情选择器
 HEADLESS=1 node ui-panel-resize.mjs       # 12 项：侧栏 / 输入区拖拽宽度与持久化
 HEADLESS=1 node ui-process-layers.mjs     # 21 项：执行过程 / 最终答复分层
 HEADLESS=1 node ui-plan-collapse.mjs      # 11 项：计划卡默认展开 / 收起

@@ -107,8 +107,9 @@ try {
   check("高亮落在命中的那条消息上", s1.mid === s1.hits[0], `${s1.mid} vs ${s1.hits[0]}`);
 
   await page.locator("#searchNavNext").click();
-  await page.waitForFunction(() => searchPos === 1, null, { timeout: 8000 });
-  await page.waitForFunction(() => document.querySelectorAll("#messages mark.hl-term").length >= 1, null, { timeout: 8000 });
+  await page.waitForFunction(() => searchPos === 1 && /^2 \//.test(document.getElementById("searchNavPos").textContent.trim()), null, { timeout: 8000 });
+  // 等高亮真正转移到第 2 条（paintSearchHighlight 在双 rAF 后生效）
+  await page.waitForFunction((mid) => document.querySelector("#messages mark.hl-term")?.closest(".msg")?.dataset.mid === mid, s1.hits[1], { timeout: 8000 });
   const s2 = await page.evaluate(() => ({
     pos: searchPos,
     navText: document.getElementById("searchNavPos").textContent,
@@ -119,7 +120,7 @@ try {
   check("高亮转移到下一条消息", s2.mid === s2.hits[1], `${s2.mid} vs ${s2.hits[1]}`);
 
   await page.locator("#searchNavPrev").click();
-  await page.waitForFunction(() => searchPos === 0, null, { timeout: 8000 });
+  await page.waitForFunction(() => searchPos === 0 && /^1 \//.test(document.getElementById("searchNavPos").textContent.trim()), null, { timeout: 8000 });
   check("「上一条」可回退到第 1 条命中", await page.evaluate(() => searchPos === 0));
 
   await page.locator("#searchNavClose").click();

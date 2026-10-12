@@ -1,3 +1,19 @@
+# AG-UI 群聊桌面版 1.0.182 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.182 Release Notes (current Windows desktop release)
+
+**版本说明**：界面人性化（第七轮）——搜索弹窗内可直接上下翻页并回车打开、输入区新增表情选择器。
+**Version note**: UI polish (round 7) — page through search results inside the dialog and press Enter to open, plus an emoji picker in the composer.
+
+## 搜索弹窗内翻页 + 表情选择器
+# In-dialog search paging + emoji picker
+
+中文：
+- **弹窗内结果导航**：知聚内搜索后，结果上方出现「‹ i / N ›」，**不用关弹窗**即可逐条翻看（选中行高亮）；也可用 `↑` / `↓` 移动，按**回车**直接打开当前条（关闭弹窗并跳到该消息、标出关键词、出现左下角上下条导航）。
+- **表情选择器**：输入区「＋」菜单里新增「😀 表情」，打开常用表情网格，点选即插入到输入框光标处（可连续点选多个），点外部 / `Esc` 收起。
+English:
+- **In-dialog result navigation**: after searching in a circle, a “‹ i / N ›” bar appears above the results so you can browse them **without closing the dialog** (the selected row is highlighted); `↑` / `↓` also move the selection, and **Enter** opens the current one (closes the dialog, jumps to the message, highlights the keyword, and shows the bottom-left prev/next bar).
+- **Emoji picker**: the composer's “＋” menu now has “😀 Emoji”, opening a grid of common emoji; clicking one inserts it at the cursor (you can insert several in a row), and clicking outside or `Esc` dismisses it.
+
 # AG-UI 群聊桌面版 1.0.181 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.181 Release Notes (current Windows desktop release)
 

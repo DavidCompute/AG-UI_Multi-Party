@@ -7557,6 +7557,7 @@ function openSearchModal() {
   const gid = state.activeGroupId;
   if (!gid) return;
   closeSearchNav(); // 新的检索：收起上次的导航条与高亮
+  searchHits = []; searchListIdx = -1; updateSearchModalNav(); // 弹窗内导航复位（无结果时隐藏）
   const g = state.groups.find((x) => x.groupId === gid);
   $("searchGroupName").textContent = g?.groupName || gid;
   $("searchInput").value = "";
@@ -7611,7 +7612,8 @@ function renderSearchResults(results, q) {
   searchHits = Array.isArray(results) ? results : [];
   searchTerm = String(q || "");
   searchPos = -1;
-  if (!results.length) { wrap.innerHTML = `<div class="search-empty">${t("search.noMatch")}</div>`; return; }
+  searchListIdx = searchHits.length > 0 ? 0 : -1;
+  if (!results.length) { wrap.innerHTML = `<div class="search-empty">${t("search.noMatch")}</div>`; updateSearchModalNav(); return; }
   const r = room(state.activeGroupId);
   const topicName = (tid) => {
     const tp = r?.topics?.find((x) => x.topicId === tid);
@@ -7628,13 +7630,15 @@ function renderSearchResults(results, q) {
   wrap.querySelectorAll(".search-hit").forEach((el) => {
     el.onclick = () => jumpToSearchHit(el.dataset.mid, el.dataset.topic, Number(el.dataset.idx));
   });
+  updateSearchModalNav();
 }
 
 /* ============ 搜索结果跳转后的命中词高亮 + 上/下一条 ============ */
 
 let searchHits = [];      // 当前检索结果（供导航）
-let searchPos = -1;       // 当前命中的下标
+let searchPos = -1;       // 当前命中的下标（跳转后的左下角导航条）
 let searchTerm = "";      // 检索词（用于消息内高亮）
+let searchListIdx = -1;   // 搜索弹窗内当前选中的结果行（↑↓ 选择 / 回车打开）
 
 const SEARCH_NAV_KEY = "agui.searchNavBottom"; // 仅内存：随 composer 高度调整
 
@@ -7710,6 +7714,32 @@ function gotoSearchStep(delta) {
   jumpToSearchHit(hit.messageId, hit.topicId || "main", searchPos);
 }
 
+/* ---- 搜索弹窗内的结果导航：不关弹窗，↑↓ 选行 / 回车打开 ---- */
+
+/** 刷新弹窗内导航：位置计数 + 选中行高亮（滚动到可见）。 */
+function updateSearchModalNav() {
+  const nav = $("searchModalNav");
+  const n = searchHits.length;
+  nav.classList.toggle("hidden", n === 0);
+  $("searchResPos").textContent = n ? `${(searchListIdx < 0 ? 0 : searchListIdx) + 1} / ${n}` : "";
+  const rows = document.querySelectorAll("#searchResults .search-hit");
+  rows.forEach((r, i) => r.classList.toggle("active", i === searchListIdx));
+  rows[searchListIdx]?.scrollIntoView({ block: "nearest" });
+}
+function searchModalStep(delta) {
+  const n = searchHits.length;
+  if (n === 0) return;
+  searchListIdx = ((searchListIdx < 0 ? 0 : searchListIdx) + delta + n) % n;
+  updateSearchModalNav();
+}
+/** 打开当前选中的结果行（等价点击该行：跳转 + 高亮 + 左下角导航条）。 */
+function searchModalOpen() {
+  const n = searchHits.length;
+  if (n === 0 || searchListIdx < 0) return;
+  const hit = searchHits[searchListIdx];
+  jumpToSearchHit(hit.messageId, hit.topicId || "main", searchListIdx);
+}
+
 /* ============ 图片灯箱：消息内图片点击放大（缩放 + 同条消息内左右切换） ============ */
 
 let lbList = [], lbIndex = 0, lbZoom = 1, lbPanX = 0, lbPanY = 0, lbRot = 0;
@@ -7766,6 +7796,7 @@ function closeLightbox() {
 async function jumpToSearchHit(messageId, topicId, idx) {
   $("searchModal").classList.add("hidden");
   if (Number.isInteger(idx) && idx >= 0) searchPos = idx;
+  updateSearchNav(); // 位置计数同步刷新（高亮需等消息进入 DOM，见 afterJumpHighlight）
   const gid = state.activeGroupId;
   if (!gid) return;
   const r = room(gid);
@@ -10212,6 +10243,21 @@ async function uploadAttachments() {
   }
 }
 
+/** 在输入框光标处插入文本（表情等），并触发 input 事件（刷新草稿 / @ 建议）。 */
+function insertAtCursor(text) {
+  const inp = $("input");
+  const s = inp.selectionStart ?? inp.value.length;
+  const e = inp.selectionEnd ?? inp.value.length;
+  inp.value = inp.value.slice(0, s) + text + inp.value.slice(e);
+  const pos = s + text.length;
+  try { inp.selectionStart = inp.selectionEnd = pos; } catch { /* 忽略 */ }
+  inp.focus();
+  inp.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** 表情选择面板的候选集（常用分组，单网格展示）。 */
+const EMOJI_SET = "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😋 😛 😝 🤗 🤔 🤨 😐 😶 🙄 😏 😒 😞 😔 😟 😕 🙁 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 👍 👎 👏 🙌 🙏 💪 🤝 🎉 🎊 🔥 ✨ ⭐ 💡 ✅ ❌ ⚠ ❤ 💔 💯 🚀 📌 📎 📝 📁 📷 🎯 🔍 💬 🤖 🧑 💻 ⏰ 📅 🌟 🍀 🎁 🎈 🎵 ⚡ 🌈 🌙 ☀ 🔔".split(" ");
+
 /** 把一批本地文件加入待发送附件（拖拽上传与文件选择共用）：数量上限 9、单个 20MB。 */
 function queueAttachmentFiles(files) {
   let added = 0;
@@ -11480,6 +11526,23 @@ function init() {
     if (e.target.closest("#composerPlusMenu") || e.target.closest("#composerPlusBtn")) return;
     menu.classList.add("hidden");
   });
+  // 表情选择：网格浮层，点击插入光标处（选完 / 点外部 / Esc 收起）
+  {
+    const picker = $("emojiPicker");
+    picker.innerHTML = EMOJI_SET.map((em) => `<button type="button" class="em" tabindex="-1">${em}</button>`).join("");
+    $("emojiBtn").onclick = () => picker.classList.toggle("hidden");
+    picker.addEventListener("click", (e) => {
+      const b = e.target.closest(".em");
+      if (!b) return;
+      insertAtCursor(b.textContent); // 面板保持打开：便于连续插入多个表情
+    });
+    document.addEventListener("click", (e) => {
+      if (picker.classList.contains("hidden")) return;
+      if (e.target.closest("#emojiPicker") || e.target.closest("#emojiBtn")) return;
+      picker.classList.add("hidden");
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") picker.classList.add("hidden"); });
+  }
   // ---- 附件上传（富媒体 5.2：图片多选 / 语音 / 画布标注）----
   $("attachBtn").disabled = false;
   $("attachBtn").onclick = () => $("attachInput").click();
@@ -11582,6 +11645,9 @@ function init() {
   $("searchBtn").onclick = openSearchModal;
   $("searchClose").onclick = () => $("searchModal").classList.add("hidden");
   $("searchGo").onclick = doSearch;
+  // 弹窗内结果导航：上/下一条（↑↓ 亦可）
+  $("searchResPrev").onclick = () => searchModalStep(-1);
+  $("searchResNext").onclick = () => searchModalStep(1);
   // 搜索结果导航条：上/下一条 + 关闭
   $("searchNavPrev").onclick = () => gotoSearchStep(-1);
   $("searchNavNext").onclick = () => gotoSearchStep(1);
@@ -11657,7 +11723,11 @@ function init() {
   $("globalSearchBtn").onclick = openGlobalSearchModal;
   $("gsClose").onclick = () => $("globalSearchModal").classList.add("hidden");
   $("gsKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); runGlobalSearch(); } });
-  $("searchInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doSearch(); } });
+  $("searchInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); (searchHits.length > 0 && $("searchInput").value.trim() === searchTerm) ? searchModalOpen() : doSearch(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); searchModalStep(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); searchModalStep(-1); }
+  });
   // 话题进度小结（长话题接续记忆）
   $("topicSummaryBtn").onclick = openTopicSummary;
   $("tsClose").onclick = () => $("topicSummaryModal").classList.add("hidden");

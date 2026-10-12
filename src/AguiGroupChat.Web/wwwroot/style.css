@@ -1016,6 +1016,15 @@ body.resizing { cursor: ns-resize; user-select: none; }
 .composer-plus-item:hover:not(:disabled) { background: rgba(79,140,255,.12); }
 .composer-plus-item:disabled { opacity: .5; cursor: not-allowed; }
 .composer-plus-item svg { width: 18px; height: 18px; flex: none; }
+/* 表情选择浮层：与「＋」菜单同位置，网格排列；点击即插入光标处 */
+.emoji-picker {
+  position: absolute; left: 14px; bottom: 100%; margin-bottom: 8px; z-index: 9;
+  width: 304px; max-width: calc(100% - 28px); max-height: 224px; overflow-y: auto;
+  padding: 8px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border);
+  box-shadow: 0 8px 28px rgba(0,0,0,.35); display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px;
+}
+.emoji-picker .em { font-size: 20px; line-height: 1; padding: 4px 0; border: none; background: transparent; cursor: pointer; border-radius: 6px; text-align: center; font-family: inherit; }
+.emoji-picker .em:hover { background: rgba(79,140,255,.14); }
 #input { flex: 1; align-self: stretch; min-height: 44px; }
 .attach-btn { flex: none; align-self: flex-end; padding: 10px 12px; font-size: 16px; line-height: 1; }
 .attach-list { display: none; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -1254,6 +1263,11 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .search-hit-topic { color: var(--accent); }
 .search-hit-time { color: var(--muted); margin-left: auto; }
 .search-hit-text { margin-top: 3px; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 弹窗内结果导航（上/下一条 + 回车打开）：与跳转后的左下角导航条呼应 */
+.search-modal-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.search-modal-pos { font-size: 12px; color: var(--muted); min-width: 44px; text-align: center; }
+.search-modal-hint { font-size: 12px; color: var(--muted); margin-left: auto; }
+.search-hit.active { border-color: var(--accent); background: rgba(79,140,255,.12); box-shadow: 0 0 0 1px var(--accent) inset; }
 /* 搜索结果跳转后消息短暂高亮 */
 .msg.flash-highlight .body { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .4s; }
 .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }

@@ -43,7 +43,7 @@ topbar（品牌 + 顶栏操作）
    │                  #dropOverlay(拖拽上传覆盖层)
    │                  #mentionPicker #replyBar #sendReplyBar(发送失败重试) #attachList
    │                  输入：#visibilitySelect #mentionAllBtn #mentionChips #input
-   │                  #discussBtn(多智能体讨论) #attachBtn #voiceBtn #canvasBtn #sendBtn
+   │                  #discussBtn(多智能体讨论) #attachBtn #voiceBtn #canvasBtn #emojiBtn(表情) #sendBtn
    │                  #chatResizer(输入区高度拖拽) #attachInput
    ├─ #membersResizer ─ 右栏宽度拖拽手柄（宽屏可见）
    └─ aside.right  ─ 成员：#memberCount #refreshMembersBtn #addMemberBtn / #memberList
@@ -323,6 +323,16 @@ topbar（品牌 + 顶栏操作）
 | 拖拽上传 | 把文件拖到聊天区（`main.chat`）即加入待发送附件（覆盖层 `#dropOverlay` 仅在拖入文件时显示）；与文件选择共用 `queueAttachmentFiles()`（上限 9 个 / 单个 20MB）。窗口级 `dragover/drop` 兜底 `preventDefault`，避免拖到聊天区外松手时浏览器直接打开文件。 |
 
 验证：`tools/ui-ux-round6.mjs`（13 项）——全局搜索跳转后高亮与导航条、灯箱旋转 / 下载文件名、拖拽覆盖层与附件入列；无控制台报错。
+
+### 2.15 界面人性化第七轮（1.0.182）
+
+| 改动 | 说明 |
+|---|---|
+| 搜索弹窗内结果导航 | `#searchModal` 新增导航行 `#searchModalNav`（‹ / 位置计数 / › / 提示）：检索后**不关弹窗**即可在结果间翻页，选中行加 `.active` 高亮并滚入可见；`↑` / `↓` 亦可移动，**回车**打开当前行（等价点击：关弹窗 + 跳转 + 命中词高亮 + 左下角导航条）。输入框回车在「关键词未变且已有结果」时打开选中行，否则重新检索。 |
+| 表情选择器 | 输入区「＋」菜单新增表情入口 `#emojiBtn`，打开网格浮层 `#emojiPicker`（95 个常用表情）；点选即在 `#input` **光标处插入**（`insertAtCursor`，连续点选可插多个）；选完 / 点外部 / `Esc` / 再点按钮收起，与「＋」菜单同一套开合与定位。 |
+| 即时计数 | 搜索跳转时 `jumpToSearchHit` 同步刷新左下角位置计数（高亮仍需等目标消息进入 DOM 后绘制），使「i / N」在点击瞬间即更新。 |
+
+验证：`tools/ui-ux-round7.mjs`（17 项）——弹窗内导航计数与上下条 / ↑↓ / 回车打开、打开后高亮与导航条；表情入口 / 网格浮层开合、插入光标处、点外部与 Esc 收起；无控制台报错。
 
 ---
 

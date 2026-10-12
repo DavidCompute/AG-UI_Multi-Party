@@ -1,5 +1,5 @@
 // 界面人性化改动验证（Playwright，真实浏览器）：
-//   1. 输入区「＋」弹出菜单（附件/语音/画布），点外部收起；
+//   1. 输入区「＋」弹出菜单（附件/语音/画布/表情），点外部收起；
 //   2. 草稿按群持久：输入后切群再切回，内容仍在；
 //   3. 中文输入法组字中回车不误发（isComposing / keyCode 229）；
 //   4. 窄屏抽屉：☰ 打开知聚抽屉、👥 打开成员抽屉，点遮罩收起；
@@ -64,13 +64,13 @@ try {
   await page.locator("#composerPlusBtn").click();
   await page.waitForSelector("#composerPlusMenu:not(.hidden)", { timeout: 5000 });
   check("点「＋」弹出菜单", true);
-  check("菜单含 附件/语音/画布", (await page.locator("#composerPlusMenu .composer-plus-item").count()) === 3);
+  check("菜单含 附件/语音/画布/表情", (await page.locator("#composerPlusMenu .composer-plus-item").count()) === 4);
   await page.locator("#messages").click({ position: { x: 5, y: 5 } });
   await sleep(150);
   check("点外部收起菜单", await page.locator("#composerPlusMenu").isHidden());
 
-  // 主行不再是四个图标：只剩 ＋ / 讨论 / 发送
-  check("主行图标精简（附件/语音/画布移入菜单）", (await page.locator(".composer-row .composer-icon-btn").count()) === 2);
+  // 主行不再是多个图标：只剩 ＋ / 讨论 / 发送
+  check("主行图标精简（附件/语音/画布/表情移入菜单）", (await page.locator(".composer-row .composer-icon-btn").count()) === 2);
 
   // ---- 日期分隔（每天第一条消息时间前带日期）----
   const dayTime = await page.locator("#messages .vmsg .time.time-day").first().textContent().catch(() => null);
