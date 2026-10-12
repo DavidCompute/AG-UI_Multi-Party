@@ -1,3 +1,23 @@
+# AG-UI 群聊桌面版 1.0.188 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.188 Release Notes (current Windows desktop release)
+
+**版本说明**：演示文稿在线播放的动画平顺性优化——消除跨页撕裂、重复清屏闪烁与翻页卡顿。
+**Version note**: smoother PPT playback animation — no more cross-slide tearing, re-rasterization flicker, or per-page jank.
+
+## 播放平顺性
+# Playback smoothness
+
+中文：
+- **转场带动精灵层**：转场动画从画布改挂到整个「舞台」，底图与形状精灵一起动，跨页不再撕裂。
+- **不再重复清屏**：画布尺寸不变就不重设 backing store；进/出全屏连发的 `fullscreenchange`/`resize` 合并为一次渲染。
+- **翻页更轻**：只在形状并集 bbox 内取差、精灵直接用 `<canvas>`（去掉 PNG 同步编码）、同页离屏渲染缓存复用——大幅减少主线程长任务；同一步的多个精灵只强制一次重排。
+- **位移与曲线**：飞入改 `translate3d` 并按形状尺寸给出最小位移（短行带也看得清），缓动改为更平滑的 `cubic-bezier`；dpr 统一上限 2，避免高 DPR 下像素网格错位。
+English:
+- **Transition moves the sprite layer too**: the transition now animates the whole stage, so the base image and sprites move together — no cross-slide tearing.
+- **No re-rasterization flicker**: the canvas backing store is kept when the size is unchanged; the `fullscreenchange`/`resize` burst on entering fullscreen is coalesced into one render.
+- **Lighter page turns**: diff only inside the union bbox of animated shapes, use `<canvas>` sprites directly (no synchronous PNG encoding), and cache the offscreen renders per slide — far less main-thread work; sprites shown in the same step share a single forced reflow.
+- **Motion & easing**: fly-in now uses `translate3d` with a minimum distance based on shape size (short row bands stay visible) and a smoother `cubic-bezier`; dpr is capped at 2 for consistent pixel grids on high-DPR displays.
+
 # AG-UI 群聊桌面版 1.0.187 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.187 Release Notes (current Windows desktop release)
 

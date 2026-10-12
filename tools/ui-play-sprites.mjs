@@ -130,6 +130,24 @@ try {
   check("页码显示 4/4 步", /4\/4/.test(label4 || ""), label4);
   try { fs.mkdirSync(path.join(__dirname, "screenshots"), { recursive: true }); await page.screenshot({ path: path.join(__dirname, "screenshots", "play-sprites-bands.png") }); } catch { /* 仅供人工核对 */ }
 
+  // 飞入精灵带位移距离（短行带也保证看得清位移）
+  const dist = await page.locator("#docSpriteLayer .doc-sprite").first().evaluate((el) => el.style.getPropertyValue("--sp-dist"));
+  check("飞入精灵带位移距离 --sp-dist", /px$/.test((dist || "").trim()), dist);
+
+  // 转场动画挂在「舞台」上（底图 + 精灵层一起动，不会撕裂）
+  const trTarget = await page.evaluate(() => {
+    const stage = document.getElementById("docPlayStage");
+    const canvas = document.getElementById("docPlayCanvas");
+    stage.classList.add("doc-tr-fade");
+    const onStage = getComputedStyle(stage).animationName;
+    stage.classList.remove("doc-tr-fade");
+    canvas.classList.add("doc-tr-fade");
+    const onCanvas = getComputedStyle(canvas).animationName;
+    canvas.classList.remove("doc-tr-fade");
+    return { onStage, onCanvas };
+  });
+  check("转场动画挂在舞台上（非画布）", trTarget.onStage !== "none" && trTarget.onCanvas === "none", JSON.stringify(trTarget));
+
   // Esc 退出播放
   await page.keyboard.press("Escape");
   await page.locator("#docPlayOverlay").waitFor({ state: "hidden", timeout: 5000 });

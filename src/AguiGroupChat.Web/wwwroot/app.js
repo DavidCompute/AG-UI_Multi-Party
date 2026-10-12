@@ -8945,6 +8945,10 @@ let docAutoTimer = null;
 // 方案 C：当前幻灯片的「形状精灵」与其动画步（0 = 一个都还没入场）
 let docSprites = [];
 let docSpriteStep = 0;
+// 精灵取差的离屏渲染缓存（同页重复进入时复用，避免重复渲染造成顿挫）
+let docSpriteCache = null;
+// 合并同一瞬间的多重渲染请求（进/出全屏会同时触发 fullscreenchange 与 resize）
+let docPlayRenderTimer = null;
 const SPRITE_CLASSES = ["sp-in-fade", "sp-in-fly-b", "sp-in-fly-t", "sp-in-fly-l", "sp-in-fly-r", "sp-out-fade", "sp-emph-spin", "sp-emph-pulse"];
 
 /** 按状态码给本地化错因（优先本地文案：服务端错误消息只有中文，英文界面下会串味道）。 */
@@ -9048,16 +9052,23 @@ async function openDocSlideView(buffer) {
   await renderDocSlide();
 }
 
-/** 把某一页渲染到画布并适配给定像素尺寸（返回视口，供调用方共用）。 */
+/** 预览 / 播放共用的设备像素比（上限 2：与「精灵取差」的 dpr 一致，避免高 DPR 下像素网格错位）。 */
+function docDpr() { return Math.min(window.devicePixelRatio || 1, 2); }
+
+/** 把某一页渲染到画布并适配给定像素尺寸（返回视口，供调用方共用）。
+ *  尺寸没变时不动 backing store——重设 canvas.width/height 会清空并重新栅格化整屏位图，造成闪烁。 */
 function fitDocCanvas(canvas, page, maxW, maxH) {
   const base = page.getViewport({ scale: 1 });
   const scale = Math.max(Math.min(maxW / base.width, maxH / base.height), 0.05);
   const vp = page.getViewport({ scale });
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(vp.width * dpr);
-  canvas.height = Math.floor(vp.height * dpr);
-  canvas.style.width = Math.floor(vp.width) + "px";
-  canvas.style.height = Math.floor(vp.height) + "px";
+  const dpr = docDpr();
+  const bw = Math.floor(vp.width * dpr), bh = Math.floor(vp.height * dpr);
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+    canvas.style.width = Math.floor(vp.width) + "px";
+    canvas.style.height = Math.floor(vp.height) + "px";
+  }
   return vp;
 }
 
@@ -9076,7 +9087,7 @@ async function renderDocSlide() {
     const ctx = canvas.getContext("2d");
     // 画布 backing store 是 CSS 尺寸 × devicePixelRatio；必须把坐标系放大同样倍数，
     // 否则在 DPR=2 的高分屏上只会画进左上角 1/4（幻灯片看起来只有一半宽高）。
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = docDpr();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
   } catch { /* 渲染失败 / 被新一帧取消：保持上一帧 */ }
@@ -9097,7 +9108,7 @@ async function docSlideGo(delta) {
     if (cur && spriteModeForSlide(cur.slide)) {
       const steps = cur.steps || 1;
       if (delta > 0 && docSpriteStep < steps) { docSpriteStep++; clearAutoAdvance(); applySpriteState(true); scheduleAutoAdvance(); return; }
-      if (delta < 0 && docSpriteStep > 0) { docSpriteStep = 0; clearAutoAdvance(); await setupSprites(cur.slide); return; }
+      if (delta < 0 && docSpriteStep > 0) { docSpriteStep = 0; clearAutoAdvance(); applySpriteState(false); return; }
     }
     const total = docPlayPdf.numPages;
     const next = Math.min(Math.max(docPlayPage + delta, 0), total - 1);
@@ -9152,6 +9163,7 @@ async function startDocPlay() {
 /** 退出播放模式，回到弹窗内的当前页。 */
 function exitDocPlay() {
   clearAutoAdvance();
+  if (docPlayRenderTimer) { clearTimeout(docPlayRenderTimer); docPlayRenderTimer = null; }
   clearSprites();
   // 播放版回到弹窗查看器：按当前幻灯片对齐到普通 PDF 的页
   if (playModeActive() && docPlayManifest) {
@@ -9196,6 +9208,12 @@ function showDocPlayBar() {
 function resetDocPlayBar() {
   if (docPlayBarTimer) { clearTimeout(docPlayBarTimer); docPlayBarTimer = null; }
   $("docPlayBar")?.classList.remove("doc-play-hidden");
+}
+
+/** 合并同一瞬间的多重渲染请求（进/出全屏会同时触发 fullscreenchange 与 resize），避免重复清屏重建造成闪烁。 */
+function scheduleDocPlayRender(delay) {
+  if (docPlayRenderTimer) clearTimeout(docPlayRenderTimer);
+  docPlayRenderTimer = setTimeout(() => { docPlayRenderTimer = null; if (docPlaying) renderDocPlay(); }, delay || 0);
 }
 
 /** 播放模式下切换「备注」浮层显示。 */
@@ -9266,7 +9284,7 @@ function transitionClass(tr) {
   return "doc-tr-fade"; // fade / dissolve / newsflash / wheel / circle / diamond / plus / wedge … → 近似淡入
 }
 function runCanvasAnimation(cls) {
-  const c = $("docPlayCanvas");
+  const c = $("docPlayStage"); // 转场作用于整个舞台：底图与精灵层一起动，避免撕裂
   if (!c || !cls) return;
   c.classList.remove(...DOC_TRANSITION_CLASSES);
   void c.offsetWidth; // 强制重排以重启动画
@@ -9305,6 +9323,7 @@ function clearSprites() {
   if (layer) layer.innerHTML = "";
   docSprites = [];
   docSpriteStep = 0;
+  docSpriteCache = null;
 }
 
 /** 把某页渲染到离屏画布（与可见画布同一“适配尺寸 × dpr”，供取差使用）。 */
@@ -9378,20 +9397,28 @@ function splitRowBands(rowInk, k, ph) {
   return bands;
 }
 
-/** 从掩码裁出 [cropY, cropY+cropH) 行带，作为精灵按 bbox 定位（与底图像素级对齐）。 */
-function placeSprite(layer, maskCanvas, px, py, pw, dpr, shape, cropY, cropH) {
+/** 飞入位移距离（px）：按飞行轴向的形状尺寸，且不小于幻灯片对应尺寸的 6%（短行带也能看清位移）。 */
+function spriteFlyDist(shape, pw, ph, dpr, slideW, slideH) {
+  const horiz = shape.direction === "l" || shape.direction === "r";
+  const own = (horiz ? pw : ph) / dpr;
+  const slide = horiz ? slideW : slideH;
+  return Math.max(Math.round(own), Math.round(slide * 0.06));
+}
+
+/** 从掩码裁出 [cropY, cropY+cropH) 行带，作为精灵按 bbox 定位（与底图像素级对齐）。
+ *  直接把裁好的 canvas 当精灵用（省去 toDataURL 的 PNG 同步编码，避免翻页卡顿）。 */
+function placeSprite(layer, maskCanvas, px, py, pw, dpr, shape, cropY, cropH, distPx) {
   const c = document.createElement("canvas");
   c.width = pw; c.height = cropH;
   c.getContext("2d").drawImage(maskCanvas, 0, cropY, pw, cropH, 0, 0, pw, cropH);
-  const el = document.createElement("img");
-  el.className = "doc-sprite"; el.alt = "";
-  el.src = c.toDataURL("image/png");
-  el.style.left = (px / dpr) + "px";
-  el.style.top = ((py + cropY) / dpr) + "px";
-  el.style.width = (pw / dpr) + "px";
-  el.style.height = (cropH / dpr) + "px";
-  layer.appendChild(el);
-  docSprites.push({ el, shape, hidden: false });
+  c.className = "doc-sprite";
+  c.style.left = (px / dpr) + "px";
+  c.style.top = ((py + cropY) / dpr) + "px";
+  c.style.width = (pw / dpr) + "px";
+  c.style.height = (cropH / dpr) + "px";
+  c.style.setProperty("--sp-dist", distPx + "px");
+  layer.appendChild(c);
+  docSprites.push({ el: c, shape, hidden: false });
 }
 
 /**
@@ -9412,13 +9439,19 @@ async function setupSprites(slideIdx) {
   const cssW = parseFloat(canvas.style.width) || 0;
   const cssH = parseFloat(canvas.style.height) || 0;
   if (!cssW || !cssH) return;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const full = await renderPageOffscreen(docPdf, slideIdx, cssW, cssH, dpr);
-  const base = await renderPageOffscreen(docPlayPdf, docPlayPage, cssW, cssH, dpr);
+  const dpr = docDpr();
+  // 离屏渲染缓存：同一幻灯片重复进入（如倒退重播）时复用，避免重复渲染造成顿挫
+  const cacheKey = `${slideIdx}|${docPlayPage}|${cssW}x${cssH}|${dpr}`;
+  let full, base;
+  if (docSpriteCache && docSpriteCache.key === cacheKey) {
+    full = docSpriteCache.full; base = docSpriteCache.base;
+  } else {
+    full = await renderPageOffscreen(docPdf, slideIdx, cssW, cssH, dpr);
+    base = await renderPageOffscreen(docPlayPdf, docPlayPage, cssW, cssH, dpr);
+    docSpriteCache = (full && base) ? { key: cacheKey, full, base } : null;
+  }
   if (!full || !base) return;
   const W = full.width, H = full.height;
-  const fd = full.getContext("2d").getImageData(0, 0, W, H).data;
-  const bd = base.getContext("2d").getImageData(0, 0, W, H).data;
 
   // 按 spid 归组：逐段形状会有多条（每段一条），需整体切分；其它形状一条一目。
   const groups = new Map();
@@ -9426,30 +9459,51 @@ async function setupSprites(slideIdx) {
     if (!groups.has(sh.spid)) groups.set(sh.spid, []);
     groups.get(sh.spid).push(sh);
   }
-  for (const entries of groups.values()) {
+  // 逐个形状的 bbox，并求并集：只读取/比较这块区域（整页 getImageData 是翻页卡顿的主要来源）
+  const rects = new Map();
+  let ux0 = Infinity, uy0 = Infinity, ux1 = 0, uy1 = 0;
+  for (const [spid, entries] of groups) {
     const sh = entries[0];
     const px = Math.max(0, Math.round(sh.x * W)), py = Math.max(0, Math.round(sh.y * H));
     const pw = Math.max(1, Math.min(W - px, Math.round(sh.w * W)));
     const ph = Math.max(1, Math.min(H - py, Math.round(sh.h * H)));
-    if (pw <= 1 || ph <= 1) continue;
-    const mask = diffMask(fd, bd, W, px, py, pw, ph);
+    rects.set(spid, { px, py, pw, ph });
+    if (pw > 1 && ph > 1) {
+      ux0 = Math.min(ux0, px); uy0 = Math.min(uy0, py);
+      ux1 = Math.max(ux1, px + pw); uy1 = Math.max(uy1, py + ph);
+    }
+  }
+  if (!isFinite(ux0) || ux1 <= ux0 || uy1 <= uy0) return;
+  const uw = ux1 - ux0, uh = uy1 - uy0;
+  const fd = full.getContext("2d").getImageData(ux0, uy0, uw, uh).data;
+  const bd = base.getContext("2d").getImageData(ux0, uy0, uw, uh).data;
+
+  for (const [spid, entries] of groups) {
+    const r = rects.get(spid);
+    if (!r || r.pw <= 1 || r.ph <= 1) continue;
+    const mask = diffMask(fd, bd, uw, r.px - ux0, r.py - uy0, r.pw, r.ph);
     if (!mask) continue;
 
     const paras = entries.filter((s) => (s.paraIndex | 0) > 0).sort((a, b) => a.paraIndex - b.paraIndex);
     if (paras.length) {
       const k = paras[paras.length - 1].paraIndex | 0;
-      const bands = splitRowBands(mask.rowInk, k, ph);
+      const bands = splitRowBands(mask.rowInk, k, r.ph);
       if (bands) {
         for (const s of paras) {
           const band = bands[(s.paraIndex | 0) - 1];
-          if (band) placeSprite(layer, mask.canvas, px, py, pw, dpr, s, band[0], band[1] - band[0]);
+          if (!band) continue;
+          const cropH = band[1] - band[0];
+          placeSprite(layer, mask.canvas, r.px, r.py, r.pw, dpr, s, band[0], cropH,
+            spriteFlyDist(s, r.pw, cropH, dpr, cssW, cssH));
         }
         continue;
       }
-      placeSprite(layer, mask.canvas, px, py, pw, dpr, paras[0], 0, ph); // 回退：整形状
+      placeSprite(layer, mask.canvas, r.px, r.py, r.pw, dpr, paras[0], 0, r.ph, // 回退：整形状
+        spriteFlyDist(paras[0], r.pw, r.ph, dpr, cssW, cssH));
       continue;
     }
-    for (const s of entries) placeSprite(layer, mask.canvas, px, py, pw, dpr, s, 0, ph);
+    for (const s of entries)
+      placeSprite(layer, mask.canvas, r.px, r.py, r.pw, dpr, s, 0, r.ph, spriteFlyDist(s, r.pw, r.ph, dpr, cssW, cssH));
   }
   applySpriteState(false);
 }
@@ -9460,17 +9514,11 @@ function spriteAnimClass(shape, kind) {
   if (shape.preset === "spin") return "sp-emph-spin";
   return "sp-emph-pulse";
 }
-function playSpriteAnim(el, shape, kind) {
-  const cls = spriteAnimClass(shape, kind);
-  el.classList.remove(...SPRITE_CLASSES);
-  el.style.opacity = "";
-  el.style.setProperty("--sp-dur", (shape.durationMs > 0 ? shape.durationMs : 500) + "ms");
-  void el.offsetWidth; // 重置动画
-  el.classList.add(cls);
-}
-
-/** 按当前步显现 / 播放精灵；<paramref name="animate"/> 为 false 时只摆状态（不播动画）。 */
+/** 按当前步显现 / 播放精灵；animate 为 false 时只摆状态（不播动画）。
+ *  同一步里需要播放的精灵先统一移除动画类、只强制一次重排，再统一加类——
+ *  避免每个精灵各强制一次同步重排（多个精灵同时入场时的卡顿来源）。 */
 function applySpriteState(animate) {
+  const pending = [];
   for (const s of docSprites) {
     const sh = s.shape;
     const st = sh.effectStep || 0;
@@ -9480,13 +9528,22 @@ function applySpriteState(animate) {
       const wasHidden = s.hidden;
       s.el.style.display = "";
       s.hidden = false;
-      if (wasHidden && animate && docSpriteStep === st) playSpriteAnim(s.el, sh, "in");
+      if (wasHidden && animate && docSpriteStep === st) pending.push({ el: s.el, shape: sh, kind: "in" });
       else if (wasHidden) s.el.classList.remove(...SPRITE_CLASSES);
     } else {
       s.el.style.display = "";
-      if (docSpriteStep === st && animate) playSpriteAnim(s.el, sh, sh.effect);
+      if (docSpriteStep === st && animate) pending.push({ el: s.el, shape: sh, kind: sh.effect });
       else if (docSpriteStep < st) { s.el.classList.remove(...SPRITE_CLASSES); s.el.style.opacity = ""; }
       else if (sh.effect === "exit") s.el.style.opacity = "0"; // 退出：播放完保持不可见
+    }
+  }
+  if (pending.length) {
+    const layer = $("docSpriteLayer");
+    for (const p of pending) { p.el.classList.remove(...SPRITE_CLASSES); p.el.style.opacity = ""; }
+    if (layer) void layer.offsetWidth; // 一次强制重排，批量重启动画
+    for (const p of pending) {
+      p.el.style.setProperty("--sp-dur", (p.shape.durationMs > 0 ? p.shape.durationMs : 500) + "ms");
+      p.el.classList.add(spriteAnimClass(p.shape, p.kind));
     }
   }
   const el = $("docPlayPage");
@@ -9501,7 +9558,7 @@ async function renderPageToCanvas(pdf, pageIdx, canvas, w, h) {
     if (seq !== docRenderSeq) return false;
     const vp = fitDocCanvas(canvas, page, w, h);
     const ctx = canvas.getContext("2d");
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = docDpr();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
     return seq === docRenderSeq;
@@ -11875,7 +11932,7 @@ function init() {
   // 进入全屏导致视口变化时也重画一次。
   document.addEventListener("fullscreenchange", () => {
     if (!docPlaying) return;
-    if (document.fullscreenElement) renderDocPlay();
+    if (document.fullscreenElement) scheduleDocPlayRender(0);
     else exitDocPlay();
   });
   $("docPreviewModal").addEventListener("click", (e) => { if (e.target === $("docPreviewModal")) closeDocPreview(); });
@@ -11894,9 +11951,9 @@ function init() {
     e.preventDefault(); e.stopImmediatePropagation();
     closeDocPreview();
   }, true);
-  // 窗口尺寸变化：重渲染当前幻灯片（弹窗内 / 播放中各自适配尺寸）
+  // 窗口尺寸变化：重渲染当前幻灯片（弹窗内 / 播放中各自适配尺寸）；播放中做轻微防抖，避免拖动窗口时反复重建
   window.addEventListener("resize", () => {
-    if (docPlaying) renderDocPlay();
+    if (docPlaying) scheduleDocPlayRender(80);
     else if (docPdf && !$("docPreviewModal").classList.contains("hidden")) renderDocSlide();
   });
   // 「库设置」弹窗（图库 / 知识库共用）：保存 / 取消 / 点遮罩 / Esc 关闭
