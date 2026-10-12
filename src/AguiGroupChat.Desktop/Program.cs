@@ -52,6 +52,15 @@ public static class Program
         }
         coordinator.AddInstance(resetIfStale: startedBackend);
 
+        // 一次性提示：本机未装 LibreOffice（在线查看 / PPT 播放的唯一外部依赖）时首次启动提示一次。
+        // 探测与后端同源（ProcessSofficeRunner.DetectSoffice 只读环境变量 + 常见安装路径，无副作用）；
+        // 先 MarkShown 再弹，避免多实例并发启动时各弹一次。
+        if (DocPreviewStartupHint.ShouldShow(AguiGroupChat.Web.ProcessSofficeRunner.DetectSoffice() is not null))
+        {
+            DocPreviewStartupHint.MarkShown();
+            MessageBox.Show(L10n.DocPreviewHintBody, L10n.MessageBoxTitle, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
         // 桌面窗口（WebView2 加载本地页面；共享同一后端，多实例各自独立窗口）
         var wpfApp = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         var window = new MainWindow(baseUrl);

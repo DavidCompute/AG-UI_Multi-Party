@@ -1,3 +1,23 @@
+# AG-UI 群聊桌面版 1.0.190 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.190 Release Notes (current Windows desktop release)
+
+**版本说明**：桌面版首次启动的「未装 LibreOffice」一次性提示——说明哪些功能受影响、如何启用，之后不再打扰。
+**Version note**: a one-time first-launch notice in the desktop build when LibreOffice is missing — explains what is affected and how to enable it, and never nags again.
+
+## 首次启动一次性提示（缺 LibreOffice）
+# One-time first-launch notice (missing LibreOffice)
+
+中文：
+- **触发条件**：桌面版首次启动时若**未检测到 LibreOffice**（办公文档在线查看 / PPT 播放的唯一外部依赖），弹一次说明；**只弹一次**（在 `%LocalAppData%\AguiGroupChat\docpreview-hint-shown` 落标记），之后不再打扰。
+- **提示内容**：PPT / Word / Excel 在线查看与播放不可用（附件仍可下载后用本地应用打开）；如何启用（装 LibreOffice 或用 `AGUI_SOFFICE` 指定 soffice 后重启）；安装后可到「管理员 → 系统状态 → 文档在线转换」确认。
+- **探测同源**：与后端用同一套探测（环境变量 + `C:\Program Files\LibreOffice\…`），不占端口、不需登录；未装时才提示，已装则完全不打扰。
+- Web 版（Docker 已内置 LibreOffice）不受影响。
+English:
+- **When**: on the desktop build's first launch, if **LibreOffice is not detected** (the only external dependency for office document online view / PPT playback), a one-time notice is shown; it appears **only once** (a marker at `%LocalAppData%\AguiGroupChat\docpreview-hint-shown`) and never nags again.
+- **What it says**: PPT / Word / Excel online view and playback are unavailable (attachments can still be downloaded and opened with a local app); how to enable it (install LibreOffice, or point `AGUI_SOFFICE` at soffice and restart); and where to confirm it afterwards (Admin → System status → Document conversion).
+- **Same detection as the backend** (env var + `C:\Program Files\LibreOffice\…`), no port or login needed; it only appears when LibreOffice is missing.
+- The web build (LibreOffice bundled in Docker) is unaffected.
+
 # AG-UI 群聊桌面版 1.0.189 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.189 Release Notes (current Windows desktop release)
 

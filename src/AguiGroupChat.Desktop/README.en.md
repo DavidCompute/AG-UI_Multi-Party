@@ -113,6 +113,7 @@ src/AguiGroupChat.Desktop/
   before replying, relevant knowledge-document content is automatically retrieved and injected (RAG) so the agent answers based on your materials; document vectors and semantic memory share one storage backend (sqlite-vec + local bge-m3);
 - **Office document online view / PPT playback requires local LibreOffice**: docx / xlsx / pptx are converted to PDF by **LibreOffice** (headless) on the service side and rendered inline, and PPT playback (transitions / per-step animation) uses the same path. The **MSI does not bundle LibreOffice** (the Docker / web image does), so on a machine without it that entry point is unavailable (it suggests downloading and opening with a local app) while everything else keeps working. Availability is shown to admins under **System status → Document conversion**; when installed it is auto-detected at
   `C:\Program Files\LibreOffice\…`, or you can point the `AGUI_SOFFICE` environment variable at `soffice.exe` and restart.
+  On the desktop build, a **one-time notice** is shown on first launch when it is missing.
 - **VC++ runtime is bundled** (`vcruntime140.dll` / `vcruntime140_1.dll` / `msvcp140.dll` are installed next to the exe with the MSI,
   app-local deployment, no need to preinstall on the target machine). If LLamaSharp's native library still fails to load on some machines (e.g. due to missing legacy system libraries),
   the app automatically degrades by disabling semantic memory and logs the error—**it will not crash**, and other features such as group chat remain unaffected;

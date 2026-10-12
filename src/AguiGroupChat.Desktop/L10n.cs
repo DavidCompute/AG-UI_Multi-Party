@@ -32,6 +32,19 @@ public static class L10n
         : $"WebView2 initialization failed: {message}";
 
     public static string MessageBoxTitle => IsZh() ? "AG-UI 桌面版" : "AG-UI Desktop";
+
+    /// <summary>首次启动一次性提示：本机未装 LibreOffice（办公文档在线查看 / PPT 播放依赖它）。</summary>
+    public static string DocPreviewHintBody => IsZh()
+        ? "本机未检测到 LibreOffice，办公文档（PPT / Word / Excel）的在线查看与播放将不可用——\n" +
+          "附件仍可下载后用本地应用打开。\n\n" +
+          "如需启用：安装 LibreOffice（https://www.libreoffice.org），\n" +
+          "或设置环境变量 AGUI_SOFFICE 指向 soffice.exe 后重启本应用。\n\n" +
+          "安装后可在「管理员 → 系统状态 → 文档在线转换」确认是否就绪。此提示仅显示一次。"
+        : "LibreOffice was not found on this machine, so online view and playback of office documents (PPT / Word / Excel) will be unavailable —\n" +
+          "attachments can still be downloaded and opened with a local app.\n\n" +
+          "To enable it: install LibreOffice (https://www.libreoffice.org),\n" +
+          "or set the AGUI_SOFFICE environment variable to soffice.exe and restart this app.\n\n" +
+          "After installing, check \"Admin → System status → Document conversion\". This notice is shown only once.";
     public static string WebviewRuntimeBody(string message) => IsZh()
         ? "无法初始化 WebView2（Chromium Edge WebView2 Runtime）。\n" +
           "请安装 Microsoft Edge WebView2 Runtime（Windows 10/11 通常已内置）。\n\n" + message

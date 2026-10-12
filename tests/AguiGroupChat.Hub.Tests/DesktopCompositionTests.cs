@@ -194,3 +194,43 @@ public sealed class DesktopCompositionTests
         Assert.Contains("桌面图库验证", await listed.Content.ReadAsStringAsync());
     }
 }
+
+/// <summary>
+/// 桌面版「首次启动一次性提示」的门控逻辑（未装 LibreOffice 时只提示一次）。
+/// 与真实宿主无关，故不挂桌面宿主夹具；用临时目录，绝不碰用户真实的 %LocalAppData%。
+/// </summary>
+public sealed class DocPreviewStartupHintTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "agui-hint-" + Guid.NewGuid().ToString("N")[..8]);
+
+    [Fact]
+    public void ShowsOnce_WhenConverterMissing()
+    {
+        // 未装转换器 + 从未提示过 → 弹
+        Assert.True(DocPreviewStartupHint.ShouldShow(converterAvailable: false, _dir));
+        DocPreviewStartupHint.MarkShown(_dir);
+        // 已提示过 → 不再弹（即使仍未装）
+        Assert.False(DocPreviewStartupHint.ShouldShow(converterAvailable: false, _dir));
+    }
+
+    [Fact]
+    public void NeverShows_WhenConverterAvailable()
+    {
+        // 已装 LibreOffice → 不弹，也不写标记
+        Assert.False(DocPreviewStartupHint.ShouldShow(converterAvailable: true, _dir));
+        Assert.False(File.Exists(DocPreviewStartupHint.MarkerPath(_dir)));
+    }
+
+    [Fact]
+    public void MarkShown_IsIdempotent()
+    {
+        DocPreviewStartupHint.MarkShown(_dir);
+        DocPreviewStartupHint.MarkShown(_dir); // 再记一次不应抛
+        Assert.False(DocPreviewStartupHint.ShouldShow(converterAvailable: false, _dir));
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_dir, recursive: true); } catch { /* 忽略 */ }
+    }
+}
