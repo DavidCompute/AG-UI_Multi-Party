@@ -203,7 +203,7 @@ public static class DesktopApp
         var candidates = new[]
         {
             preferredDir,
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AguiGroupChat", "models"),
+            Path.Combine(DesktopPaths.DataDir, "models"),
         }.Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToList();
         if (candidates.Any(d => File.Exists(Path.Combine(d, "embedding.gguf")))) return;
 

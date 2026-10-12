@@ -1,3 +1,25 @@
+# AG-UI 群聊桌面版 1.0.191 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.191 Release Notes (current Windows desktop release)
+
+**版本说明**：代码审核修复——PPT 播放不再因残留的逐段标注丢文字；逐段切分只在可靠时进行；桌面首次提示不再可能重复弹；桌面共享目录与测试补齐。
+**Version note**: review fixes — PPT playback no longer loses text due to stale paragraph-build markers; paragraph splitting only happens when reliable; the desktop first-launch notice can no longer double-fire; desktop shared paths and tests were tidied.
+
+## 审核修复
+# Review fixes
+
+中文：
+- **播放不再丢文字（重要）**：`bldLst` 里**残留**的 `build="p"` 标注（PowerPoint 删除动画后常见）此前会让对应文本框被**整段留白清空**、文字在播放里凭空消失。现在只把「真的出现在 timing 里」的逐段形状当作逐段，其余保持原样可见。回归用例 `PresentationPlaybackStaleBuildTests`（已验证：去掉修复即变红）。
+- **逐段切分改为「可靠才切」**：由「取最宽 k-1 个间隔」改为**只有墨迹块数恰等于段数**时才切；有段落折行或挨着时一律回退为整形状精灵，不再可能出「半段先出现」的切错。
+- **桌面首次提示不会重复弹**：`TryClaimOnce` 在跨进程独占锁内完成「查标记 + 写标记」，多实例并发启动只有一个会弹（新增并发用例）。
+- **桌面共享目录集中一处**（`DesktopPaths.DataDir`），避免三处各自硬编码 `%LocalAppData%\AguiGroupChat`。
+- **测试补齐**：`/admin/status` 的 `docPreview` 正向路径（已注册转换器 → 就绪）现在有断言。
+English:
+- **Playback no longer loses text (important)**: a stale `build="p"` marker in `bldLst` (common after deleting an animation in PowerPoint) used to blank that text box entirely, making its text vanish during playback. Only paragraph shapes actually targeted by `timing` are treated as paragraph builds now; others stay visible. Regression: `PresentationPlaybackStaleBuildTests` (verified red without the fix).
+- **Paragraph splitting only when reliable**: replaced “take the k-1 widest gaps” with **only split when the number of ink blocks equals the number of paragraphs**; wrapped or adjacent paragraphs fall back to a whole-shape sprite, so a “half paragraph first” mis-split can no longer happen.
+- **The desktop first-launch notice can't double-fire**: `TryClaimOnce` checks and writes the marker inside a cross-process exclusive lock, so only one instance shows it (new concurrency test).
+- **Desktop shared path centralized** (`DesktopPaths.DataDir`) instead of three hardcoded copies of `%LocalAppData%\AguiGroupChat`.
+- **Test coverage**: the positive `docPreview` path of `/admin/status` (converter registered → ready) is now asserted.
+
 # AG-UI 群聊桌面版 1.0.190 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.190 Release Notes (current Windows desktop release)
 

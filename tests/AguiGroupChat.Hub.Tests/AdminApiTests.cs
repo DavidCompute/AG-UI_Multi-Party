@@ -44,6 +44,8 @@ public sealed class AdminApiServerFixture : IAsyncLifetime
         builder.Services.AddSingleton<SkillRunArtifactStore>(); // 附件回收的引用源之一（技能试运行产物）
         builder.Services.AddAttachmentGovernance(); // 附件回收（存储治理）
         builder.Services.AddSingleton(new StorageGovernanceOptions()); // 默认关闭回收
+        // 文档在线转换能力：注册一个「已探测到转换器」的假执行器 → /admin/status 应报「就绪」
+        builder.Services.AddSingleton<ISofficeRunner>(new StubAvailableSofficeRunner());
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 
         App = builder.Build();
@@ -279,10 +281,10 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.True(d.TryGetProperty("connections", out _));
         Assert.True(d.TryGetProperty("messages", out _));
         Assert.True(d.TryGetProperty("dotnetVersion", out _));
-        // 文档在线转换能力：该宿主未注册 ISofficeRunner → 明确报「未就绪」（桌面版缺 LibreOffice 时同样如此）
+        // 文档在线转换能力：本宿主注册了「可用」的转换器 → 应报就绪（`converter` 为具体实现名）
         Assert.True(d.TryGetProperty("docPreview", out var dp));
-        Assert.False(dp.GetProperty("available").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, dp.GetProperty("converter").ValueKind);
+        Assert.True(dp.GetProperty("available").GetBoolean());
+        Assert.Equal("libreoffice", dp.GetProperty("converter").GetString());
     }
 
     [Fact]
@@ -552,4 +554,14 @@ public sealed class PlatformRoleApiTests : IClassFixture<PlatformRoleApiServerFi
         denied.Content = JsonContent.Create(new { role = "admin" });
         Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
     }
+}
+
+/// <summary>测试用：「已探测到转换器」的假执行器——只服务于 /admin/status 文档转换能力（docPreview）的断言。</summary>
+internal sealed class StubAvailableSofficeRunner : ISofficeRunner
+{
+    public bool Available => true;
+
+    public Task<SofficeResult> ConvertToPdfAsync(string sourcePath, string outDir,
+        bool exportNotes = false, CancellationToken ct = default)
+        => Task.FromResult(new SofficeResult(true, "stub"));
 }

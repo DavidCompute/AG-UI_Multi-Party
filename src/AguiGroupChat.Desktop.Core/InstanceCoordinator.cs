@@ -9,8 +9,7 @@ namespace AguiGroupChat.Desktop;
 /// </summary>
 public sealed class InstanceCoordinator
 {
-    private static readonly string BaseDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AguiGroupChat");
+    private static readonly string BaseDir = DesktopPaths.DataDir;
     private static readonly string CountFile = Path.Combine(BaseDir, "instance-count");
     private static readonly string LockFile = Path.Combine(BaseDir, "instance.lock");
     private static readonly string SecretFile = Path.Combine(BaseDir, "backend-secret");

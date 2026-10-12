@@ -54,10 +54,9 @@ public static class Program
 
         // 一次性提示：本机未装 LibreOffice（在线查看 / PPT 播放的唯一外部依赖）时首次启动提示一次。
         // 探测与后端同源（ProcessSofficeRunner.DetectSoffice 只读环境变量 + 常见安装路径，无副作用）；
-        // 先 MarkShown 再弹，避免多实例并发启动时各弹一次。
-        if (DocPreviewStartupHint.ShouldShow(AguiGroupChat.Web.ProcessSofficeRunner.DetectSoffice() is not null))
+        // TryClaimOnce 在跨进程独占锁内「查标记 + 写标记」，多实例并发启动也不会各弹一次。
+        if (DocPreviewStartupHint.TryClaimOnce(AguiGroupChat.Web.ProcessSofficeRunner.DetectSoffice() is not null))
         {
-            DocPreviewStartupHint.MarkShown();
             MessageBox.Show(L10n.DocPreviewHintBody, L10n.MessageBoxTitle, MessageBoxButton.OK, MessageBoxImage.Information);
         }
 

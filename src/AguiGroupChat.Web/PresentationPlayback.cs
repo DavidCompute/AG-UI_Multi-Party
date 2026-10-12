@@ -167,7 +167,7 @@ public static class PresentationPlayback
     /// 解析动画：沿 mainSeq 下的效果节点（clickEffect 起新步 / afterEffect 起新步 / withEffect 并入上一步）收集。
     /// 同时给出：
     ///   - <c>Steps</c>：每步显现的 spid 集合（供「分步模式」构造展开稿与「底图」移除形状）；
-    ///   - <c>ParaSpids</c>：逐段构建（build=p）的形状 id；
+    ///   - <c>ParaSpids</c>：逐段构建（build=p）且**真的被 timing 动到**的形状 id（残留的 bldLst 不算）；
     ///   - <c>Shapes</c>：形状级动画清单（几何 + 效果 + 时长/延迟），供「精灵模式」；
     ///   - <c>HasParagraphBuild</c>：出现逐段构建 → 该页不做精灵模式。
     ///   - <c>ParaEligible</c>：逐段构建的形状是否适合「行带切精灵」（均无填充无边线）；false → 该页不做精灵模式。
@@ -226,6 +226,10 @@ public static class PresentationPlayback
                         g.X, g.Y, g.W, g.H, g.Kind, effect, preset, dir, duration, delay));
                 }
         }
+        // 只把「真的出现在 timing 里」的逐段形状当作逐段：bldLst 可能残留（PowerPoint 删除动画后常留下
+        // bldP 条目）。若按残留的 bldLst 留白，paraReveal 永远是 0 → 该文本框**整段被清空**、文字凭空
+        // 消失（同页其它动画正常，极难察觉）。求交集后，这类形状既不留白也不移除，文字保持可见。
+        para.IntersectWith(new HashSet<string>(steps.SelectMany(s => s), StringComparer.Ordinal));
         var paraEligible = ParaShapesEligible(slideXml, para);
         return new Anim(steps, para, shapes, steps.Count, paraEligible);
     }
@@ -306,7 +310,10 @@ public static class PresentationPlayback
         return (w, h);
     }
 
-    /// <summary>spid → 形状几何（相对幻灯片的比例）+ 类型（shape / picture / table / group）。</summary>
+    /// <summary>spid → 形状几何（相对幻灯片的比例）+ 类型（shape / picture / table / group）。
+    /// 只遍历顶层 <c>spTree</c> 子元素：组（grpSp）内部的形状不参与动画 / 精灵 / 逐段留白——
+    /// 组整体无法表达逐段，且三处（本方法、<see cref="ParaShapesEligible"/>、BlankParagraphsBeyond 的调用方）
+    /// 口径一致，所以组内文本会「从第 0 步就显示」，属降级而非损坏。</summary>
     private static Dictionary<string, (double X, double Y, double W, double H, string Kind)> ShapeGeometry(XDocument slideXml, double sldW, double sldH)
     {
         var map = new Dictionary<string, (double, double, double, double, string)>(StringComparer.Ordinal);

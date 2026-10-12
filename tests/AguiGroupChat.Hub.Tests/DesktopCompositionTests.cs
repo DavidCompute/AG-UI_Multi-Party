@@ -204,29 +204,32 @@ public sealed class DocPreviewStartupHintTests : IDisposable
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "agui-hint-" + Guid.NewGuid().ToString("N")[..8]);
 
     [Fact]
-    public void ShowsOnce_WhenConverterMissing()
+    public void ClaimsOnce_WhenConverterMissing()
     {
-        // 未装转换器 + 从未提示过 → 弹
-        Assert.True(DocPreviewStartupHint.ShouldShow(converterAvailable: false, _dir));
-        DocPreviewStartupHint.MarkShown(_dir);
-        // 已提示过 → 不再弹（即使仍未装）
-        Assert.False(DocPreviewStartupHint.ShouldShow(converterAvailable: false, _dir));
+        // 未装转换器 + 从未提示过 → 本次认领成功
+        Assert.True(DocPreviewStartupHint.TryClaimOnce(converterAvailable: false, _dir));
+        // 已提示过 → 认领失败（即使仍未装）
+        Assert.False(DocPreviewStartupHint.TryClaimOnce(converterAvailable: false, _dir));
     }
 
     [Fact]
-    public void NeverShows_WhenConverterAvailable()
+    public void NeverClaims_WhenConverterAvailable()
     {
-        // 已装 LibreOffice → 不弹，也不写标记
-        Assert.False(DocPreviewStartupHint.ShouldShow(converterAvailable: true, _dir));
+        // 已装 LibreOffice → 不认领，也不写标记
+        Assert.False(DocPreviewStartupHint.TryClaimOnce(converterAvailable: true, _dir));
         Assert.False(File.Exists(DocPreviewStartupHint.MarkerPath(_dir)));
     }
 
     [Fact]
-    public void MarkShown_IsIdempotent()
+    public void ExactlyOneWinner_UnderConcurrency()
     {
-        DocPreviewStartupHint.MarkShown(_dir);
-        DocPreviewStartupHint.MarkShown(_dir); // 再记一次不应抛
-        Assert.False(DocPreviewStartupHint.ShouldShow(converterAvailable: false, _dir));
+        // 多实例并发启动：跨进程独占锁保证只有一个「赢家」会弹窗（其余认领失败）
+        var wins = 0;
+        Parallel.For(0, 8, _ =>
+        {
+            if (DocPreviewStartupHint.TryClaimOnce(converterAvailable: false, _dir)) Interlocked.Increment(ref wins);
+        });
+        Assert.Equal(1, wins);
     }
 
     public void Dispose()

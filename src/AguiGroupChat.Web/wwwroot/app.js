@@ -9372,9 +9372,13 @@ function diffMask(fd, bd, W, px, py, pw, ph) {
 }
 
 /**
- * 逐段形状「行带切分」：在掩码里找 k-1 条最宽的**内部空白行带**（段与段之间的留白）作为切分点，
- * 恰好切成 k 组。依赖「段间距 &gt; 段内折行间距」——多条并列时取最宽的，保证切在段间。
- * 返回 [[r0,r1), …]（k 组的像素行范围）或 null（切分不可靠 → 调用方回退整形状精灵）。
+ * 逐段形状「行带切分」：把掩码按**墨迹块**（连续有差异像素的行）切成 k 段。
+ *
+ * 只有当**墨迹块数恰好等于段数 k** 时才切——这时代码里的 k-1 条内部空白行带就是段边界，切分必然正确：
+ *   - 块数 > k：有段落**折行**成多块（块与段无法一一对应）→ 回退；
+ *   - 块数 < k：有段落挨着（中间没有整行留白）→ 回退。
+ * 回退 = 返回 null，由调用方改用整形状精灵（保内容可见，绝不产出错位精灵）。
+ * 注：不看“间隔宽度”排序——那样在“折行间隔 ≥ 段间距”时会切错且不空，反而无法回退。
  */
 function splitRowBands(rowInk, k, ph) {
   if (k <= 1) return [[0, ph]];
@@ -9386,21 +9390,13 @@ function splitRowBands(rowInk, k, ph) {
     const start = y;
     while (y < ph && rowInk[y] === 0) y++;
     if (y >= ph) break; // 尾部留白：不是内部空白带
-    runs.push({ start, end: y, len: y - start });
+    runs.push({ start, end: y });
   }
-  if (runs.length < k - 1) return null; // 空白带不够，切不出 k 组
-  const picks = runs.slice().sort((a, b) => b.len - a.len || a.start - b.start).slice(0, k - 1).sort((a, b) => a.start - b.start);
+  if (runs.length + 1 !== k) return null; // 墨迹块数不等于段数：块与段无法一一对应 → 回退
   const bounds = [0];
-  for (const r of picks) bounds.push(Math.floor((r.start + r.end) / 2));
+  for (const r of runs) bounds.push(Math.floor((r.start + r.end) / 2));
   bounds.push(ph);
-  for (let i = 0; i < k; i++) {
-    let ink = 0;
-    for (let yy = bounds[i]; yy < bounds[i + 1]; yy++) ink += rowInk[yy];
-    if (ink === 0) return null; // 有空组 → 切错位，回退
-  }
-  const bands = [];
-  for (let i = 0; i < k; i++) bands.push([bounds[i], bounds[i + 1]]);
-  return bands;
+  return bounds.slice(0, -1).map((b, i) => [b, bounds[i + 1]]);
 }
 
 /** 飞入位移距离（px）：按飞行轴向的形状尺寸，且不小于幻灯片对应尺寸的 6%（短行带也能看清位移）。 */
