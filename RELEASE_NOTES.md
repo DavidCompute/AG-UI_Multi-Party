@@ -1,3 +1,21 @@
+# AG-UI 群聊桌面版 1.0.187 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.187 Release Notes (current Windows desktop release)
+
+**版本说明**：演示文稿在线播放的「逐段构建」（要点逐条出现）现在也走「底图 + 形状精灵」真动画——按行带把文本框切成每段一个精灵，逐步显现。
+**Version note**: per-paragraph builds (bullets revealed one by one) now also play as real animation via the “base raster + shape sprite” path — the text box is split into one sprite per paragraph by row bands and revealed step by step.
+
+## 逐段构建也走真动画
+# Per-paragraph builds as real animation
+
+中文：
+- **逐段切精灵**：`bldP build="p"` 的文本框在清单里是同一 spid 的多条目（`paraIndex` = 段序）。前端在取差掩码上按**行带切分**——取 k-1 条最宽的「内部空白行带」作为切分点，恰好切成 k 段，每段一个精灵、各自在自己的步显现（实测每步只多显现一段 `counts=1,2,3,4`）。
+- **安全回退**：空白带不够或切出空组 → 回退整形状精灵（绝不产出错位精灵）；服务端先做适配性检查（文本框无填充、无边线），不满足的页仍走分步展开。
+- **效果**：要点逐条出现的页不再「硬切」，随段位播飞入 / 淡入等真动画。
+English:
+- **Paragraph sprites**: a `bldP build="p"` text box appears as multiple entries sharing one spid (`paraIndex` = paragraph order). The viewer splits the diff mask by **row bands** — picking the k-1 widest internal blank bands as cut points — into exactly k sprites, each revealed on its own step (measured: each step reveals exactly one more, `counts=1,2,3,4`).
+- **Safe fallback**: too few blank bands or an empty group ⇒ fall back to a whole-shape sprite (never a mis-placed one); the server pre-checks eligibility (no fill, no line), and ineligible slides keep the step expansion.
+- **Result**: bullet-by-bullet slides no longer hard-cut — they play fly-in / fade etc. per paragraph.
+
 # AG-UI 群聊桌面版 1.0.186 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.186 Release Notes (current Windows desktop release)
 

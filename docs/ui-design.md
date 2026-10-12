@@ -187,8 +187,8 @@ topbar（品牌 + 顶栏操作）
 - **分步（入场动画）**：服务端把每页的**入场**效果解析成有序步骤，生成一份「展开稿」——一页有 k 个入场步就复制成 k 页
   （第 j 页只显现前 j 步的形状；逐段（`bldP build="p"`）的文本框按已显现段数**留白占位**，保持版式不跳）。
   展开稿由 LibreOffice **一次**转成多页 PDF；前端「页内翻页 = 分步出现、跨页 = 转场」，并支持 `advanceAfter` **自动前进**。
-- 数据：`GET /ag-ui/preview/{id}/play`（清单 `{expanded, slideCount, pages[{slide,step,steps}], transitions[], notes[]}`）
-  + `GET /ag-ui/preview/{id}?play=true`（展开版 PDF）。两者同源同缓存。
+- 数据：`GET /ag-ui/preview/{id}/play`（清单 `{expanded, slideCount, pages[{slide,step,steps}], transitions[], notes[], animations[]}`）
+  + `GET /ag-ui/preview/{id}?play=true`（播放版 PDF）。两者同源同缓存。
 - 进入播放**先立刻用普通 PDF 出画面**（异步升级到展开版），全屏请求放在 `await` 之前（否则用户手势失效）。
 - **如实说明的边界**：非 `.pptx`（`.ppt/.odp`）无清单，退化为逐页播放；解析失败一律降级，绝不影响普通预览。
   位移（flyIn）/ 强调 / 退出见下一段的「形状级动画」。
@@ -196,16 +196,22 @@ topbar（品牌 + 顶栏操作）
 **形状级动画（方案 C，1.0.186）**：上面的「分步」只能给出「直接出现」。要还原**位移 / 强调 / 退出**这些真动画，
 又不想自研整份 PPT 的形状级渲染器（字体度量、图表、SmartArt 会全面失真），采用**混合方案**：
 
-- 对**只有整形状动画**（入场 / 强调 / 退出，且不含逐段 `bldP`）的页：播放 PDF 只放 **1 页「底图」**——
-  即把该页所有被动画形状**移除**后的样子；同时清单里带上这些形状的 **bbox（相对比例）+ 动画规格**（效果/预设/方向/时长/步序）。
+- 对**有动画的页**（精灵模式）：播放 PDF 只放 **1 页「底图」**——即把该页所有被动画形状**移除**
+  （逐段文本框则清空成留白占位，保留版式）后的样子；同时清单里带上这些形状的 **bbox（相对比例）+ 动画规格**
+  （效果/预设/方向/时长/步序，逐段形状另带**段序 `paraIndex`**）。`animations[i]` 非 null 即该页为精灵模式。
 - 前端把「普通页」与「底图页」**各渲染一次，在 bbox 内取差** → 差异处即形状像素，得到**透明精灵**，
   再用 CSS 动画对精灵播真动画（`sp-in-fly-*` 位移 / `sp-in-fade` / `sp-emph-*` / `sp-out-fade`）。
   因为精灵像素出自同一套渲染，**静止时与底图像素级对齐**，也**完全不依赖前端字体度量**。
-- 含**逐段构建**的页无法用整形状精灵表达 → 自动回退到上面的分步展开。
+- **逐段构建也走真动画（1.0.187）**：`bldP build="p"` 的文本框在清单里是**同一 spid 的多条目**（`paraIndex` = 段序 1..k）。
+  前端在取差掩码之上做**行带切分**：逐行统计差异像素，找 **k-1 条最宽的「内部空白行带」**（段与段之间的留白）作为切分点，
+  恰好切成 k 段，每段一个精灵、各自在自己的步显现（实测 `counts=1,2,3,4`，每步只多显现一段）。
+  切分依赖「段间距 &gt; 段内折行间距」；空白带不够、或切出空组 → **回退整形状精灵**（取最早入场步），绝不产出错位精灵。
+- 服务端对逐段形状先做**适配性检查**（`ParaShapesEligible`：文本框无填充、无边线）——有底色/边框的整块会被移除而无法只切文字，
+  这类页仍回退到分步展开（`animations[i] = null`）。
 - 实测（移除被动画形状后与原件逐像素比对）：**bbox 之外的版面差异为 0 像素**（cover：732858 像素 0 差异；要点页：277000 像素 0 差异），
-  所以「底图 + 精灵」拼接是干净的；精灵定位也与形状 bbox 一致（实测 692×273 @ 498,199）。
+  所以「底图 + 精灵」拼接是干净的；精灵定位也与形状 bbox 一致（实测 692×273 @ 498,199）；逐段行带切分后 4 个精灵纵向分布实测 `top=48,160,213,267`。
 
-验证：`tools/ui-play-sprites.mjs`（14 项）——清单同时含精灵页与回退页；精灵按 bbox 定位、初始隐藏、下一步显现并播放 `sp-in-*`、结束后完全可见；跨页到逐段页回退分步且精灵层清空。
+验证：`tools/ui-play-sprites.mjs`（21 项）——3 张幻灯片全走精灵模式；精灵按 bbox 定位、初始隐藏、逐步显现并播放 `sp-in-*`、结束后完全可见；要点页切成「标题 + 逐段 3」共 4 个精灵、每步只多显现一段、页码显示 `步/总步`。
 
 **关键实现约定（都不是随手写的，每条都对应一个坑）**：
 
@@ -222,7 +228,8 @@ topbar（品牌 + 顶栏操作）
 | 弹窗宽度用两段选择器 `.modal.doc-preview-modal` | `.modal` 基类在后面定义且同类选择器同权重，单类名会被它盖成 380px 宽（已踩：iframe 只剩 338px） |
 | `Esc` 在**捕获阶段**处理，且弹窗已隐藏时直接返回 | 不与下层弹窗（如库设置）争抢，不穿透 |
 | 为每一页单独的按键绑定都在 `msgDom` 末尾（`bindDocPreviewButtons`） | 消息用字符串拼 HTML + 插入后绑定，不走事件委派 |
-| 转场 / 分步需要把「展开稿」重新转一次 PDF（`.play.pdf` / `.play.json` 单独缓存） | LibreOffice 导 PDF 会丢动画层；把动画「烘焙」成多页是无需商业组件的可行上限。两者页数不同不能共用缓存；清单里的 `notes` 按**幻灯片**索引（展开后页≠幻灯片） |
+| 转场 / 精灵底图需要把「播放稿」重新转一次 PDF（`.play.pdf` / `.play.json` 单独缓存） | LibreOffice 导 PDF 会丢动画层；把动画「烘焙」成底图 + 精灵是无需商业组件的可行上限。两者页数不同不能共用缓存；清单里的 `notes` 按**幻灯片**索引（播放稿里每张幻灯片恰好 1 页） |
+| 逐段精灵按「行带」切分（取 k-1 条最宽的内部空白行带），组数不足或有空组即回退整形状 | 逐段文本框在底图里是「留白占位 + 全段落」，只能靠渲染差异定位每段；「段间距 > 段内折行间距」是切分依据，不可靠时宁可整形状也不要错位 |
 
 | 入口判定 | `previewableAttId()`：扩展名命中 `pdf/docx?/xlsx?/pptx?/odt/ods/odp/rtf`，
 且能解出站内附件 ID（`att_xxx`：取 `attachmentId`，外部桥接附件从 `url` 里解析）——
@@ -663,7 +670,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
-| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（`?play=true` 返回展开分步动画后的播放版 PDF）、`GET /ag-ui/preview/{attachmentId}/play`（播放清单：页→幻灯片/步骤、转场、备注）（docx / xlsx / pptx → PDF 内联；`?notes=true` 演示文稿返回备注页 PDF；`?token=` 授权；权限同 `/files`；转换产物带缓存）；`GET /ag-ui/preview/{attachmentId}/notes`（演示文稿按幻灯片顺序返回备注文本数组）|
+| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（`?play=true` 返回**播放稿** PDF：每张幻灯片恰好 1 页底图（被动画形状已移除），前端叠精灵播真动画）、`GET /ag-ui/preview/{attachmentId}/play`（播放清单：页→幻灯片/步骤、转场、备注、`animations[]` 形状精灵）（docx / xlsx / pptx → PDF 内联；`?notes=true` 演示文稿返回备注页 PDF；`?token=` 授权；权限同 `/files`；转换产物带缓存）；`GET /ag-ui/preview/{attachmentId}/notes`（演示文稿按幻灯片顺序返回备注文本数组）|
 | 技能库试运行 | `POST /ag-ui/skills/{skillId}/run`（返回 `attachments[]` = 本次产出的文件；产物归属记在产出者名下，本人可下载 / 可预览）|
 | 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`POST /ag-ui/kb/{kbId}/search`（试检索，只回片段预览）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌；库设置里的试检索也走它） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥/**存储**）、`/ag-ui/settings/model|branding` |

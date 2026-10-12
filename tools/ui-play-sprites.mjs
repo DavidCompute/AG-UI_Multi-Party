@@ -1,5 +1,6 @@
-// 方案 C 验证（Playwright，真实浏览器）：带转场/动画的 pptx 在线播放时，
-//   「整形状动画」页走「底图 + 形状精灵」并播真动画（flyIn 等）；「逐段构建」页回退到分步展开。
+// 方案 C 验证（Playwright，真实浏览器）：带转场/动画的 pptx 在线播放时，每张幻灯片都走
+//   「底图 + 形状精灵」并播真动画（flyIn 等）；逐段构建（byParagraph）的形状同 spid 多条目，
+//   前端按「行带」切成 k 段精灵，各自在自己的步显现。
 //
 // 用法：cd tools && HEADLESS=1 node ui-play-sprites.mjs
 //   样例：默认 <repo>/artifacts/pptx-play/deck.pptx（由 PresentationPlaybackTests 生成，3 页：封面 flyIn / 要点逐段 / 结束 fadeOut）
@@ -54,14 +55,16 @@ try {
   check("上传带动画的 pptx", !!att?.attachmentId);
   await api("POST", "/ag-ui/group/message/send", { groupId, userId, content: "播放精灵验证", attachments: [att] });
 
-  // 播放清单：应有精灵模式的页（animations 非空）与回退页（null）
+  // 播放清单：3 张幻灯片全部走精灵模式（逐段构建也纳入）
   const manifest = (await api("GET", `/ag-ui/preview/${att.attachmentId}/play`)).body;
-  check("清单含展开稿标记", !!manifest && manifest.expanded === true, JSON.stringify({ expanded: manifest?.expanded, pages: manifest?.pages?.length }));
+  check("清单含播放稿标记", !!manifest && manifest.expanded === true, JSON.stringify({ expanded: manifest?.expanded, pages: manifest?.pages?.length }));
   const spriteSlides = (manifest.animations || []).filter(Boolean).length;
   const fallbackSlides = (manifest.animations || []).filter((a) => !a).length;
-  check("既有精灵模式页也有回退页", spriteSlides >= 1 && fallbackSlides >= 1, `sprite=${spriteSlides} fallback=${fallbackSlides}`);
+  check("每张幻灯片都走精灵模式", spriteSlides === 3 && fallbackSlides === 0, `sprite=${spriteSlides} fallback=${fallbackSlides}`);
   const fly = (manifest.animations || []).flat().find((s) => s.effect === "entr");
   check("精灵含入场动画（flyIn/fade 等）", !!fly, fly ? `${fly.kind}/${fly.preset} step=${fly.revealStep} box=${fly.x.toFixed(2)},${fly.y.toFixed(2)}` : "无");
+  const paras = ((manifest.animations || [])[1] || []).filter((s) => s.paraIndex > 0);
+  check("逐段构建进精灵模式（正文 3 段带段序）", paras.length === 3 && paras.map((s) => s.paraIndex).join(",") === "1,2,3", "paraIndex=" + paras.map((s) => s.paraIndex).join(","));
 
   // 打开预览 → 进入播放
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -99,14 +102,33 @@ try {
   const settled = await page.locator("#docSpriteLayer .doc-sprite").first().evaluate((el) => ({ op: getComputedStyle(el).opacity, display: getComputedStyle(el).display }));
   check("动画结束后精灵完全可见", settled.display !== "none" && parseFloat(settled.op) > 0.95, JSON.stringify(settled));
 
-  // 再下一步 → 进入下一张（要点页 = 回退分步模式，精灵层清空）
+  // 再下一步 → 进入要点页（也走精灵模式：标题 1 + 正文逐段 3 = 4 个精灵）
   await page.keyboard.press("ArrowRight");
-  await sleep(600);
-  const afterSlide2 = await page.evaluate(() => ({
+  await sleep(700);
+  const slide2 = await page.evaluate(() => ({
     text: document.getElementById("docPlayPage").textContent,
-    sprites: document.querySelectorAll("#docSpriteLayer .doc-sprite").length,
+    sprites: [...document.querySelectorAll("#docSpriteLayer .doc-sprite")].map((el) => ({ top: parseFloat(el.style.top), display: getComputedStyle(el).display })),
   }));
-  check("跨到下一张（回退分步页无精灵）", /2 \/ 3/.test(afterSlide2.text) && afterSlide2.sprites === 0, JSON.stringify(afterSlide2));
+  check("跨到要点页（4 个精灵：标题 + 逐段 3）", /2 \/ 3/.test(slide2.text) && slide2.sprites.length === 4, JSON.stringify({ text: slide2.text, n: slide2.sprites.length }));
+  const tops = slide2.sprites.map((s) => s.top).sort((a, b) => a - b);
+  check("逐段精灵按行带纵向分布（非重复）", new Set(tops).size === 4, "tops=" + tops.map((t) => t.toFixed(0)).join(","));
+  check("要点页初始全部隐藏（步 0）", slide2.sprites.every((s) => s.display === "none"), JSON.stringify(slide2.sprites.map((s) => s.display)));
+  check("页码显示 0/4 步", /0\/4/.test(slide2.text || ""), slide2.text);
+
+  // 逐步显现：连按 4 次 → 标题 + 3 段逐段显现（每步只多显现一个）
+  const counts = [];
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press("ArrowRight");
+    await sleep(250);
+    counts.push(await page.evaluate(() => [...document.querySelectorAll("#docSpriteLayer .doc-sprite")].filter((el) => getComputedStyle(el).display !== "none").length));
+  }
+  check("逐段逐步显现（每步只多一段）", counts.join(",") === "1,2,3,4", "counts=" + counts.join(","));
+  await sleep(900); // 等最后一段淡入完成
+  const shown = await page.evaluate(() => [...document.querySelectorAll("#docSpriteLayer .doc-sprite")].filter((el) => getComputedStyle(el).display !== "none" && parseFloat(getComputedStyle(el).opacity) > 0.95).length);
+  check("逐段全部可见（4 个）", shown === 4, "visible=" + shown);
+  const label4 = await page.locator("#docPlayPage").textContent();
+  check("页码显示 4/4 步", /4\/4/.test(label4 || ""), label4);
+  try { fs.mkdirSync(path.join(__dirname, "screenshots"), { recursive: true }); await page.screenshot({ path: path.join(__dirname, "screenshots", "play-sprites-bands.png") }); } catch { /* 仅供人工核对 */ }
 
   // Esc 退出播放
   await page.keyboard.press("Escape");

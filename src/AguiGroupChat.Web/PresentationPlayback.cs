@@ -15,10 +15,11 @@ public sealed record PlayPage(int Slide, int Step, int Steps);
 /// 前端据此在底图上定位精灵（精灵像素由「普通页 ⊖ 底图页」在同一矩形内取差得到）。
 /// <param name="RevealStep">：1 基的入场步序；0 = 一开场就可见（只有退出 / 强调动画）。
 /// <paramref name="EffectStep"/>：该效果**本身**在第几步播放（入场 / 退出 / 强调都用它定时）。
+/// <paramref name="ParaIndex"/>：逐段构建里的段序（1 基）；0 = 不是逐段（整形状）。
 /// <paramref name="Effect"/>：entr / exit / emph；<paramref name="Preset"/>：flyIn/fade/wipe/spin/pulse/fillColor/appear…
 /// </summary>
 public sealed record AnimatedShape(
-    int Spid, int RevealStep, int EffectStep,
+    int Spid, int RevealStep, int EffectStep, int ParaIndex,
     double X, double Y, double W, double H,
     string Kind, string Effect, string Preset, string? Direction,
     int DurationMs, int DelayMs);
@@ -101,8 +102,8 @@ public static class PresentationPlayback
                 var xml = LoadXml(entries, target);
                 transitions.Add(xml is null ? null : ParseTransition(xml));
                 var anim = xml is null ? Anim.Empty : ParseAnimations(xml, sldW, sldH);
-                // 精灵模式：有入场分步 / 动画，且不含逐段构建（逐段无法用整形状精灵表达）
-                var sprite = anim.StepCount > 0 && !anim.HasParagraphBuild && anim.Shapes.Count > 0;
+                // 精灵模式：有动画、几何可解析，且逐段形状均无填充无边线（可把它按行带切精灵）
+                var sprite = anim.StepCount > 0 && anim.Shapes.Count > 0 && anim.ParaEligible;
                 variants.Add(new Variant(target, anim.Steps, anim.ParaSpids, sprite));
                 if (sprite)
                 {
@@ -157,9 +158,9 @@ public static class PresentationPlayback
 
     // ================= 解析：动画（p:timing） =================
 
-    private readonly record struct Anim(List<List<string>> Steps, HashSet<string> ParaSpids, List<AnimatedShape> Shapes, int StepCount, bool HasParagraphBuild)
+    private readonly record struct Anim(List<List<string>> Steps, HashSet<string> ParaSpids, List<AnimatedShape> Shapes, int StepCount, bool ParaEligible)
     {
-        public static readonly Anim Empty = new(new List<List<string>>(), new HashSet<string>(), new List<AnimatedShape>(), 0, false);
+        public static readonly Anim Empty = new(new List<List<string>>(), new HashSet<string>(), new List<AnimatedShape>(), 0, true);
     }
 
     /// <summary>
@@ -169,6 +170,7 @@ public static class PresentationPlayback
     ///   - <c>ParaSpids</c>：逐段构建（build=p）的形状 id；
     ///   - <c>Shapes</c>：形状级动画清单（几何 + 效果 + 时长/延迟），供「精灵模式」；
     ///   - <c>HasParagraphBuild</c>：出现逐段构建 → 该页不做精灵模式。
+    ///   - <c>ParaEligible</c>：逐段构建的形状是否适合「行带切精灵」（均无填充无边线）；false → 该页不做精灵模式。
     /// </summary>
     private static Anim ParseAnimations(XDocument slideXml, double sldW, double sldH)
     {
@@ -176,7 +178,7 @@ public static class PresentationPlayback
         var para = new HashSet<string>(StringComparer.Ordinal);
         var shapes = new List<AnimatedShape>();
         var timing = slideXml.Root?.Element(P + "timing");
-        if (timing is null) return new Anim(steps, para, shapes, 0, false);
+        if (timing is null) return Anim.Empty;
 
         foreach (var b in timing.Element(P + "bldLst")?.Descendants(P + "bldP") ?? Enumerable.Empty<XElement>())
             if (string.Equals(b.Attribute("build")?.Value, "p", StringComparison.Ordinal)
@@ -185,9 +187,10 @@ public static class PresentationPlayback
 
         var mainSeq = timing.Descendants(P + "cTn")
             .FirstOrDefault(c => string.Equals(c.Attribute("nodeType")?.Value, "mainSeq", StringComparison.Ordinal));
-        if (mainSeq is null) return new Anim(steps, para, shapes, 0, false);
+        if (mainSeq is null) return Anim.Empty;
 
         var geometry = ShapeGeometry(slideXml, sldW, sldH);
+        var paraSeq = new Dictionary<string, int>(StringComparer.Ordinal); // spid → 已出现的段序
 
         foreach (var ctn in mainSeq.Descendants(P + "cTn").ToList())
         {
@@ -212,9 +215,38 @@ public static class PresentationPlayback
             var delay = FirstInt(ctn, P + "cond", "delay");
             foreach (var id in ids)
                 if (int.TryParse(id, out var spid) && geometry.TryGetValue(id, out var g))
-                    shapes.Add(new AnimatedShape(spid, effect == "entr" ? revealStep : 0, revealStep, g.X, g.Y, g.W, g.H, g.Kind, effect, preset, dir, duration, delay));
+                {
+                    var paraIndex = 0;
+                    if (para.Contains(id))
+                    {
+                        paraSeq[id] = paraSeq.GetValueOrDefault(id) + 1;
+                        paraIndex = paraSeq[id];
+                    }
+                    shapes.Add(new AnimatedShape(spid, effect == "entr" ? revealStep : 0, revealStep, paraIndex,
+                        g.X, g.Y, g.W, g.H, g.Kind, effect, preset, dir, duration, delay));
+                }
         }
-        return new Anim(steps, para, shapes, steps.Count, shapes.Any(s => para.Contains(s.Spid.ToString())));
+        var paraEligible = ParaShapesEligible(slideXml, para);
+        return new Anim(steps, para, shapes, steps.Count, paraEligible);
+    }
+
+    /// <summary>逐段形状是否适合「行带切精灵」：文本框无填充、无边线（否则整块底纹会被移除，无法只切文字）。</summary>
+    private static bool ParaShapesEligible(XDocument slideXml, HashSet<string> paraSpids)
+    {
+        if (paraSpids.Count == 0) return true;
+        var spTree = slideXml.Descendants(P + "spTree").FirstOrDefault();
+        if (spTree is null) return false;
+        foreach (var el in spTree.Elements())
+        {
+            var id = ShapeId(el);
+            if (id is null || !paraSpids.Contains(id)) continue;
+            var spPr = el.Element(P + "spPr");
+            if (spPr is null) return false; // 不确定 → 保守
+            if (spPr.Elements().Any(e => e.Name == A + "solidFill" || e.Name == A + "gradFill" || e.Name == A + "pattFill" || e.Name == A + "blipFill")) return false;
+            var ln = spPr.Element(A + "ln");
+            if (ln is not null && ln.Elements().Any(e => e.Name == A + "solidFill" || e.Name == A + "gradFill" || e.Name == A + "pattFill")) return false;
+        }
+        return true;
     }
 
     /// <summary>效果节点的可读名 + 方向（b/l/t/r）：位移 / 淡入淡出 / 擦除 / 旋转 / 缩放 / 变色…

@@ -9322,8 +9322,85 @@ async function renderPageOffscreen(pdf, pageIdx, cssW, cssH, dpr) {
 }
 
 /**
+ * 取差掩码：在 [px,py,pw,ph) 内比较「普通页」与「底图页」，差异像素即形状像素（透明背景）。
+ * 返回 { canvas, rowInk }（rowInk[y] = 该行差异像素数，供逐段「行带切分」），无差异返回 null。
+ */
+function diffMask(fd, bd, W, px, py, pw, ph) {
+  const c = document.createElement("canvas");
+  c.width = pw; c.height = ph;
+  const ctx = c.getContext("2d");
+  const out = ctx.createImageData(pw, ph);
+  const rowInk = new Int32Array(ph);
+  let ink = 0;
+  for (let y = 0; y < ph; y++) {
+    let rowCount = 0;
+    for (let x = 0; x < pw; x++) {
+      const si = ((py + y) * W + (px + x)) * 4, di = (y * pw + x) * 4;
+      const d = Math.max(Math.abs(fd[si] - bd[si]), Math.abs(fd[si + 1] - bd[si + 1]), Math.abs(fd[si + 2] - bd[si + 2]));
+      if (d > 10) { out.data[di] = fd[si]; out.data[di + 1] = fd[si + 1]; out.data[di + 2] = fd[si + 2]; out.data[di + 3] = 255; ink++; rowCount++; }
+    }
+    rowInk[y] = rowCount;
+  }
+  if (ink === 0) return null; // 该形状与底图无差异（可能已被其它形状覆盖）→ 跳过
+  ctx.putImageData(out, 0, 0);
+  return { canvas: c, rowInk };
+}
+
+/**
+ * 逐段形状「行带切分」：在掩码里找 k-1 条最宽的**内部空白行带**（段与段之间的留白）作为切分点，
+ * 恰好切成 k 组。依赖「段间距 &gt; 段内折行间距」——多条并列时取最宽的，保证切在段间。
+ * 返回 [[r0,r1), …]（k 组的像素行范围）或 null（切分不可靠 → 调用方回退整形状精灵）。
+ */
+function splitRowBands(rowInk, k, ph) {
+  if (k <= 1) return [[0, ph]];
+  const runs = [];
+  let y = 0;
+  while (y < ph && rowInk[y] === 0) y++; // 跳过顶部留白
+  for (; y < ph; ) {
+    if (rowInk[y] > 0) { y++; continue; }
+    const start = y;
+    while (y < ph && rowInk[y] === 0) y++;
+    if (y >= ph) break; // 尾部留白：不是内部空白带
+    runs.push({ start, end: y, len: y - start });
+  }
+  if (runs.length < k - 1) return null; // 空白带不够，切不出 k 组
+  const picks = runs.slice().sort((a, b) => b.len - a.len || a.start - b.start).slice(0, k - 1).sort((a, b) => a.start - b.start);
+  const bounds = [0];
+  for (const r of picks) bounds.push(Math.floor((r.start + r.end) / 2));
+  bounds.push(ph);
+  for (let i = 0; i < k; i++) {
+    let ink = 0;
+    for (let yy = bounds[i]; yy < bounds[i + 1]; yy++) ink += rowInk[yy];
+    if (ink === 0) return null; // 有空组 → 切错位，回退
+  }
+  const bands = [];
+  for (let i = 0; i < k; i++) bands.push([bounds[i], bounds[i + 1]]);
+  return bands;
+}
+
+/** 从掩码裁出 [cropY, cropY+cropH) 行带，作为精灵按 bbox 定位（与底图像素级对齐）。 */
+function placeSprite(layer, maskCanvas, px, py, pw, dpr, shape, cropY, cropH) {
+  const c = document.createElement("canvas");
+  c.width = pw; c.height = cropH;
+  c.getContext("2d").drawImage(maskCanvas, 0, cropY, pw, cropH, 0, 0, pw, cropH);
+  const el = document.createElement("img");
+  el.className = "doc-sprite"; el.alt = "";
+  el.src = c.toDataURL("image/png");
+  el.style.left = (px / dpr) + "px";
+  el.style.top = ((py + cropY) / dpr) + "px";
+  el.style.width = (pw / dpr) + "px";
+  el.style.height = (cropH / dpr) + "px";
+  layer.appendChild(el);
+  docSprites.push({ el, shape, hidden: false });
+}
+
+/**
  * 为当前幻灯片构建精灵：把「普通页」与「底图页」（已移除全部被动画形状）在同一 bbox 内取差，
  * 差异处即形状像素 → 得到透明背景的精灵。因为两个源是同一套渲染，静止时与底图像素级对齐。
+ *
+ * 逐段构建（byParagraph）的形状在清单里是同一 spid 的多条目（paraIndex = 段序）：
+ * 按**行带**把掩码切成 k 段，每段一个精灵，各自在自己的步显现 → 逐段也走真动画。
+ * 切分不可靠时回退成「整形状精灵」（取最早入场步），保证内容至少可见。
  */
 async function setupSprites(slideIdx) {
   const layer = $("docSpriteLayer");
@@ -9342,29 +9419,37 @@ async function setupSprites(slideIdx) {
   const W = full.width, H = full.height;
   const fd = full.getContext("2d").getImageData(0, 0, W, H).data;
   const bd = base.getContext("2d").getImageData(0, 0, W, H).data;
+
+  // 按 spid 归组：逐段形状会有多条（每段一条），需整体切分；其它形状一条一目。
+  const groups = new Map();
   for (const sh of docPlayManifest.animations[slideIdx]) {
+    if (!groups.has(sh.spid)) groups.set(sh.spid, []);
+    groups.get(sh.spid).push(sh);
+  }
+  for (const entries of groups.values()) {
+    const sh = entries[0];
     const px = Math.max(0, Math.round(sh.x * W)), py = Math.max(0, Math.round(sh.y * H));
     const pw = Math.max(1, Math.min(W - px, Math.round(sh.w * W)));
     const ph = Math.max(1, Math.min(H - py, Math.round(sh.h * H)));
     if (pw <= 1 || ph <= 1) continue;
-    const c = document.createElement("canvas"); c.width = pw; c.height = ph;
-    const ctx = c.getContext("2d");
-    const out = ctx.createImageData(pw, ph);
-    let ink = 0;
-    for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
-      const si = ((py + y) * W + (px + x)) * 4, di = (y * pw + x) * 4;
-      const d = Math.max(Math.abs(fd[si] - bd[si]), Math.abs(fd[si + 1] - bd[si + 1]), Math.abs(fd[si + 2] - bd[si + 2]));
-      if (d > 10) { out.data[di] = fd[si]; out.data[di + 1] = fd[si + 1]; out.data[di + 2] = fd[si + 2]; out.data[di + 3] = 255; ink++; }
+    const mask = diffMask(fd, bd, W, px, py, pw, ph);
+    if (!mask) continue;
+
+    const paras = entries.filter((s) => (s.paraIndex | 0) > 0).sort((a, b) => a.paraIndex - b.paraIndex);
+    if (paras.length) {
+      const k = paras[paras.length - 1].paraIndex | 0;
+      const bands = splitRowBands(mask.rowInk, k, ph);
+      if (bands) {
+        for (const s of paras) {
+          const band = bands[(s.paraIndex | 0) - 1];
+          if (band) placeSprite(layer, mask.canvas, px, py, pw, dpr, s, band[0], band[1] - band[0]);
+        }
+        continue;
+      }
+      placeSprite(layer, mask.canvas, px, py, pw, dpr, paras[0], 0, ph); // 回退：整形状
+      continue;
     }
-    if (ink === 0) continue; // 该形状与底图无差异（可能已被其它形状覆盖）→ 跳过
-    ctx.putImageData(out, 0, 0);
-    const el = document.createElement("img");
-    el.className = "doc-sprite"; el.alt = "";
-    el.src = c.toDataURL("image/png");
-    el.style.left = (px / dpr) + "px"; el.style.top = (py / dpr) + "px";
-    el.style.width = (pw / dpr) + "px"; el.style.height = (ph / dpr) + "px";
-    layer.appendChild(el);
-    docSprites.push({ el, shape: sh, hidden: false });
+    for (const s of entries) placeSprite(layer, mask.canvas, px, py, pw, dpr, s, 0, ph);
   }
   applySpriteState(false);
 }

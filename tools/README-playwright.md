@@ -102,7 +102,7 @@ HEADLESS=1 node ui-process-layers.mjs     # 21 项：执行过程 / 最终答复
 HEADLESS=1 node ui-plan-collapse.mjs      # 11 项：计划卡默认展开 / 收起
 SAMPLES=../artifacts/e2e HEADLESS=1 node ui-group-files.mjs   # 19 项：输出物（需样例文件）
 SAMPLES=../artifacts/e2e HEADLESS=1 node ui-doc-slides.mjs    # 23 项：办公文档在线查看 / 幻灯片
-HEADLESS=1 node ui-play-sprites.mjs       # 14 项：演示文稿形状级动画（底图 + 精灵）
+HEADLESS=1 node ui-play-sprites.mjs       # 21 项：演示文稿形状级动画（底图 + 精灵，含逐段行带切分）
 ```
 
 - 退出码 `0` = 全部通过；`1` = 有失败（控制台打印失败项）。
@@ -110,12 +110,13 @@ HEADLESS=1 node ui-play-sprites.mjs       # 14 项：演示文稿形状级动画
 - `ui-group-files` / `ui-doc-slides` 需要样例文件（`artifacts/e2e/sample.docx`、`sample-notes.pptx`；`artifacts/` 已 gitignore）。
 - `ui-ux-round6.mjs` 的「下载原图」用 Playwright 下载事件校验，无需额外依赖。
 - `ui-play-sprites.mjs` 需要一份**带转场/动画**的 pptx：默认用 `artifacts/pptx-play/deck.pptx`（由 `PresentationPlaybackTests` 生成），可用 `PPTX=...` 覆盖。
+  该样稿的要点页是逐段构建，会验证「同 spid 多条目 → 按行带切成 4 个精灵、每步只多显现一段」。
 
 ---
 
-## 演示文稿在线播放（转场 + 分步）端到端核对
+## 演示文稿在线播放（转场 + 精灵）端到端核对
 
-`e2e-play-check.mjs`：登录 → 建临时知聚 → 上传一份 pptx → 取**播放清单**与**展开版 PDF**，打印
+`e2e-play-check.mjs`：登录 → 建临时知聚 → 上传一份 pptx → 取**播放清单**与**播放稿 PDF**，打印
 `expanded / slideCount / pages / transitions / 每张幻灯片页数`，并落一份 `artifacts/pptx-play/play.pdf`。
 
 ```bash
@@ -123,5 +124,5 @@ cd tools
 node e2e-play-check.mjs ../artifacts/pptx-play/deck.pptx   # 需一份带转场/动画的 pptx
 ```
 
-> 展开版校对：把落盘的 `play.pdf` 拷进容器用 `pdftoppm` 数页，应等于清单的 `pages.length`
-> （例：3 张幻灯片 / 6 步 → 展开版 6 页，原件只有 3 页）。
+> 播放稿校对：把落盘的 `play.pdf` 拷进容器用 `pdftoppm` 数页，应等于清单的 `pages.length`
+> （例：3 张幻灯片全部走精灵模式 → 播放稿 3 页，每页是移除被动画形状后的底图；前端在底图上叠精灵播真动画）。

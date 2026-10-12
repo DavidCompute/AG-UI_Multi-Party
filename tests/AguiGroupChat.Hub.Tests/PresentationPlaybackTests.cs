@@ -77,27 +77,23 @@ public sealed class PresentationPlaybackTests
         var (expandedPath, manifest) = built!.Value;
 
         // 清单：3 张幻灯片；转场解析到（首张继承全局 fade，末张 push）
-        Assert.True(manifest.Expanded, "应发生分步展开");
+        Assert.True(manifest.Expanded, "应生成播放稿（精灵模式底图）");
         Assert.Equal(3, manifest.SlideCount);
         Assert.Equal(3, manifest.Transitions.Count);
         Assert.Equal("fade", manifest.Transitions[0]!.Preset);
         Assert.Equal("push", manifest.Transitions[2]!.Preset);
         Assert.Equal("l", manifest.Transitions[2]!.Direction);
 
-        // 页数 > 幻灯片数（至少一页有多步），且每张幻灯片的页是连续的 0..n-1
-        Assert.True(manifest.Pages.Count > manifest.SlideCount,
-            $"应有分步展开，实际 pages={manifest.Pages.Count}");
-        Assert.Equal(3, manifest.Pages.Select(p => p.Slide).Distinct().Count());
-        Assert.Equal(Enumerable.Range(0, manifest.SlideCount), manifest.Pages.Select(p => p.Slide).Distinct());
-        foreach (var g in manifest.Pages.GroupBy(p => p.Slide))
-        {
-            Assert.Equal(Enumerable.Range(0, g.Count()), g.Select(p => p.Step));
-            Assert.All(g, p => Assert.Equal(g.Count(), p.Steps));
-        }
+        // 三张幻灯片全部走「精灵模式」→ 播放稿里每张幻灯片恰好 1 页（步数记录在 Steps 里，由前端逐步播）
+        Assert.Equal(manifest.SlideCount, manifest.Pages.Count);
+        Assert.Equal(Enumerable.Range(0, manifest.SlideCount), manifest.Pages.Select(p => p.Slide));
+        Assert.All(manifest.Pages, p => Assert.Equal(0, p.Step));
+        // 封面 1 步、要点页 4 步（标题 1 + 正文逐段 3）、结束页 1 步
+        Assert.Equal(new[] { 1, 4, 1 }, manifest.Pages.Select(p => p.Steps));
 
-        // 展开稿存在且是结构完好的 pptx：幻灯片部件数 == 清单页数
+        // 播放稿存在且是结构完好的 pptx：幻灯片部件数 == 清单页数
         Assert.NotNull(expandedPath);
-        Assert.True(File.Exists(expandedPath), "展开稿未生成");
+        Assert.True(File.Exists(expandedPath), "播放稿未生成");
         using var pres = PresentationDocument.Open(expandedPath!, false);
         Assert.Equal(manifest.Pages.Count, pres.PresentationPart!.SlideParts.Count());
 
@@ -113,16 +109,22 @@ public sealed class PresentationPlaybackTests
         }
         catch { /* 仅用于人工核对，失败不影响用例 */ }
 
-        // 方案 C：整形状动画的页走「精灵模式」（清单带形状几何 + 动画规格），逐段的页回退到分步展开
+        // 方案 C：每张幻灯片都走「精灵模式」（清单带形状几何 + 动画规格），逐段构建也纳入（ParaIndex > 0）
         Assert.NotNull(manifest.Animations);
         Assert.Equal(3, manifest.Animations.Count);
         // 封面：flyIn 标题 → 精灵模式
         Assert.NotNull(manifest.Animations[0]);
         Assert.Contains(manifest.Animations[0]!, (s) => s.Effect == "entr" && s.Preset == "flyIn");
         Assert.All(manifest.Animations[0]!, (s) => Assert.True(s.W > 0 && s.H > 0 && s.W <= 1 && s.H <= 1, "几何应为比例"));
-        // 要点页：byParagraph → 不能用整形状精灵 → 回退分步（Animations 为 null）
-        Assert.Null(manifest.Animations[1]);
-        Assert.Equal(4, manifest.Pages.Count((p) => p.Slide == 1));
+        // 要点页：byParagraph 也走精灵模式——标题是整形状（ParaIndex=0），正文 3 段各带 ParaIndex 1..3
+        Assert.NotNull(manifest.Animations[1]);
+        var bullets = manifest.Animations[1]!.Where((s) => s.ParaIndex > 0).ToList();
+        Assert.Equal(3, bullets.Count);
+        Assert.Equal(new[] { 1, 2, 3 }, bullets.Select((s) => s.ParaIndex).OrderBy((i) => i));
+        Assert.Contains(manifest.Animations[1]!, (s) => s.ParaIndex == 0);
+        // 4 个互不相同的入场步（标题 1 + 正文逐段 3）
+        Assert.Equal(4, manifest.Animations[1]!.Where((s) => s.Effect == "entr")
+            .Select((s) => s.RevealStep).Distinct().Count());
         // 结束页：只有退出动画 → 精灵模式，且形状一开场就可见（RevealStep=0）
         Assert.NotNull(manifest.Animations[2]);
         Assert.Contains(manifest.Animations[2]!, (s) => s.Effect == "exit" && s.RevealStep == 0);
