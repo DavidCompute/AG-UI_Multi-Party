@@ -130,6 +130,10 @@ let agentDirectory = [];
 let selectedMembers = new Set();
 // 待发送附件：{ file, uploading }，发送时先上传到 /ag-ui/upload 再随消息携带
 let pendingAttachments = [];
+// 消息多选：选择模式 + 已选消息 id 集合（跨重渲染保持；切知聚 / 退出清空）
+let selectMode = false;
+let selectedMsgIds = new Set();
+let forwardTargetGid = null;
 
 async function loadUserDirectory() {
   try {
@@ -417,10 +421,12 @@ function resetChatState() {
   clearPendingScrollRestore();
   state.scrollMem.clear();
   state.leaveTime.clear();
-  // 搜索导航状态（避免跨账号残留）
+  // 搜索导航状态（避免跨账号 / 跨知聚残留）
   searchHits = [];
   searchPos = -1;
   searchTerm = "";
+  searchListIdx = -1;
+  exitSelectMode(); // 多选状态一并复位（工具条 / 勾选框收起）
   $("searchNav")?.classList.add("hidden");
   hideNotifPanel();
   if ($("notifBadge")) renderNotifications();
@@ -6335,6 +6341,7 @@ async function selectGroup(gid) {
   setDisabledWithReason("groupSettingsBtn", false);
   setDisabledWithReason("searchBtn", false); // 知聚内消息全文搜索（进入知聚后可用）
   setDisabledWithReason("groupFilesBtn", false); // 输出物：本知聚全部附件（进入知聚后可用）
+  setDisabledWithReason("selectBtn", false); // 消息多选（进入知聚后可用）
   setDisabledWithReason("discussBtn", false); // 多位数字员工讨论（进入知聚后可用）
   const ts3 = $("topicSummaryBtn"); if (ts3) ts3.classList.remove("hidden"); // 话题进度小结（长话题接续记忆）
   const g = state.groups.find((x) => x.groupId === gid);
@@ -6357,6 +6364,7 @@ async function selectGroup(gid) {
   draftEl.dispatchEvent(new Event("input", { bubbles: true }));
   closeDrawers(); // 窄屏：选中知聚后收起左侧抽屉
   closeSearchNav(); // 切知聚：搜索结果导航条与高亮失效
+  if (selectMode) exitSelectMode(); // 切知聚：退出多选（选择不跨知聚）
   maybeFocusComposer(); // 按偏好把光标放进输入框（触屏 / 有弹窗时不抢）
 }
 
@@ -7791,6 +7799,151 @@ function closeLightbox() {
   lbList = [];
 }
 
+/* ============ 消息多选（批量复制 / 转发 / 删除） ============ */
+
+/** 进入多选模式：显示工具条与每条消息前的勾选框。 */
+function enterSelectMode() {
+  if (!state.activeGroupId) { toast(t("chat.selectGroup")); return; }
+  selectMode = true;
+  selectedMsgIds.clear();
+  $("selectBtn")?.classList.add("on");
+  $("selectBar")?.classList.remove("hidden");
+  vscroll.force = true; // 逐条渲染需带勾选框：强制整表重建（否则窗口未变会早退，不重渲染）
+  scheduleVirtualRender();
+  updateSelectBar();
+}
+/** 退出多选模式：清空选择并收起工具条。 */
+function exitSelectMode() {
+  selectMode = false;
+  selectedMsgIds.clear();
+  forwardTargetGid = null;
+  $("selectBtn")?.classList.remove("on");
+  $("selectBar")?.classList.add("hidden");
+  $("forwardModal")?.classList.add("hidden");
+  vscroll.force = true; // 退出：去掉勾选框 / 选中高亮，同样需强制重建
+  scheduleVirtualRender();
+}
+/** 切换单条消息的选中态（仅更新本条 DOM，避免整表重建）。 */
+function toggleSelectMessage(mid, msgEl) {
+  if (!mid) return;
+  if (selectedMsgIds.has(mid)) selectedMsgIds.delete(mid); else selectedMsgIds.add(mid);
+  const on = selectedMsgIds.has(mid);
+  msgEl?.classList.toggle("selected", on);
+  msgEl?.querySelector(".select-check")?.classList.toggle("on", on);
+  updateSelectBar();
+}
+/** 当前话题内按时间排序的「已选且非系统」消息。 */
+function selectedMessagesInOrder() {
+  const r = room(state.activeGroupId);
+  if (!r) return [];
+  const tid = state.activeTopicId || "main";
+  return r.messages.filter((m) => selectedMsgIds.has(m.id) && !m.sys && (m.topicId || "main") === tid);
+}
+/** 刷新工具条：计数 + 按钮可用性。 */
+function updateSelectBar() {
+  const n = selectedMsgIds.size;
+  const cnt = $("selectCount");
+  if (cnt) cnt.textContent = t("sel.count", { n });
+  for (const id of ["selectCopyBtn", "selectForwardBtn", "selectDeleteBtn"]) {
+    const b = $(id);
+    if (b) b.disabled = n === 0;
+  }
+}
+/** 全选 / 全不选：作用于当前话题内已加载的非系统消息。 */
+function toggleSelectAllMessages() {
+  const r = room(state.activeGroupId);
+  if (!r) return;
+  const tid = state.activeTopicId || "main";
+  const ids = r.messages.filter((m) => !m.sys && !m.recalled && (m.topicId || "main") === tid).map((m) => m.id);
+  const allSelected = ids.length > 0 && ids.every((id) => selectedMsgIds.has(id));
+  selectedMsgIds.clear();
+  if (!allSelected) ids.forEach((id) => selectedMsgIds.add(id));
+  vscroll.force = true; // 全选变化需同步每条勾选框
+  scheduleVirtualRender();
+  updateSelectBar();
+}
+/** 批量复制：把已选消息拼成「发送者: 内容」多行文本到剪贴板。 */
+async function copySelectedMessages() {
+  const msgs = selectedMessagesInOrder().filter((m) => !m.recalled && displayTextOf(m));
+  if (msgs.length === 0) { toast(t("sel.none")); return; }
+  const text = msgs.map((m) => `${m.senderNickname || m.senderId}: ${displayTextOf(m)}`).join("\n");
+  const ok = await copyText(text);
+  if (!ok) { toast(t("msg.copyFail")); return; }
+  toast(t("sel.copied", { n: msgs.length }));
+  exitSelectMode();
+}
+/** 批量删除（撤回）：仅对可撤回的消息（本人 / 管理员 + 3 分钟内）尝试，服务端再校验。 */
+async function deleteSelectedMessages() {
+  const gid = state.activeGroupId;
+  const meRole = room(gid)?.members.find((x) => x.memberId === state.memberId)?.role;
+  const eligible = selectedMessagesInOrder().filter((m) => !m.recalled && !m.streaming
+    && (m.senderId === state.memberId || meRole === "owner" || meRole === "admin")
+    && (Number(m.timestamp) > 0 && Date.now() - Number(m.timestamp) <= RECALL_WINDOW_MS));
+  if (eligible.length === 0) { toast(t("sel.deleteNone")); return; }
+  if (!await uiConfirm({ message: t("sel.deleteConfirm", { n: eligible.length }), danger: true })) return;
+  let ok = 0, failed = 0;
+  for (const m of eligible) {
+    try {
+      const res = await fetch("/ag-ui/group/message/recall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify({ groupId: gid, messageId: m.id, operatorId: state.memberId }),
+      });
+      if (res.ok) { ok++; applyRecallLocal(gid, m.id); } else { failed++; }
+    } catch { failed++; }
+  }
+  toast(t("sel.deleteDone", { n: ok }));
+  if (failed > 0) toast(t("sel.failCount", { failed }));
+  exitSelectMode();
+}
+/** 打开「转发到知聚」选择弹窗。 */
+function openForwardModal() {
+  if (selectedMessagesInOrder().filter((m) => !m.recalled && displayTextOf(m)).length === 0) { toast(t("sel.forwardNone")); return; }
+  forwardTargetGid = null;
+  $("forwardSearch").value = "";
+  renderForwardList();
+  $("forwardModal").classList.remove("hidden");
+  $("forwardSearch").focus();
+}
+/** 渲染转发目标列表（按名称过滤；单选）。 */
+function renderForwardList() {
+  const q = ($("forwardSearch").value || "").trim().toLowerCase();
+  const list = state.groups
+    .filter((g) => !g.isSupportCircle || g.isMember || g.isEntered) // 客服知聚仅列出已进入的
+    .filter((g) => !q || (g.groupName || "").toLowerCase().includes(q));
+  const el = $("forwardList");
+  el.innerHTML = list.length
+    ? list.map((g) => `<button type="button" class="forward-item${g.groupId === forwardTargetGid ? " on" : ""}" data-gid="${escapeHtml(g.groupId)}">${g.isPrivate ? "🔒 " : ""}${escapeHtml(g.groupName || g.groupId)}</button>`).join("")
+    : `<div class="search-empty">${t("sel.forwardNoTarget")}</div>`;
+  el.querySelectorAll(".forward-item").forEach((b) => { b.onclick = () => { forwardTargetGid = b.dataset.gid; renderForwardList(); }; });
+}
+/** 执行转发：把已选消息的文本逐条发送到目标知聚（不含附件）。 */
+async function doForwardSelected() {
+  const gid = forwardTargetGid;
+  if (!gid) { toast(t("sel.forwardPick")); return; }
+  const msgs = selectedMessagesInOrder().filter((m) => !m.recalled && displayTextOf(m));
+  if (msgs.length === 0) { toast(t("sel.forwardNone")); return; }
+  const target = state.groups.find((g) => g.groupId === gid);
+  const btn = $("forwardConfirm");
+  btn.disabled = true;
+  let ok = 0, failed = 0;
+  for (const m of msgs) {
+    try {
+      const res = await fetch("/ag-ui/group/message/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
+        body: JSON.stringify({ groupId: gid, topicId: "main", userId: state.memberId, content: displayTextOf(m) }),
+      });
+      if (res.ok) ok++; else failed++;
+    } catch { failed++; }
+  }
+  btn.disabled = false;
+  $("forwardModal").classList.add("hidden");
+  toast(t("sel.forwardDone", { n: ok, name: target?.groupName || gid }));
+  if (failed > 0) toast(t("sel.failCount", { failed }));
+  exitSelectMode();
+}
+
 /** 跳转到搜索结果：切到对应话题并滚动 / 高亮该消息；
  * 目标不在已加载窗口时，拉取其前后各 count/2 条重建当前话题窗口再定位（深度定位）。 */
 async function jumpToSearchHit(messageId, topicId, idx) {
@@ -8532,7 +8685,9 @@ function msgDom(m, r, prev) {
   }
   const isMine = m.senderId === state.memberId;
   const div = document.createElement("div");
-  div.className = "msg" + (isMine ? " mine" : "") + (m.senderType === "agent" ? " agent" : "") + " vmsg";
+  const selectable = selectMode && !m.sys;
+  div.className = "msg" + (isMine ? " mine" : "") + (m.senderType === "agent" ? " agent" : "") + " vmsg"
+    + (selectable ? " selectable" : "") + (selectable && selectedMsgIds.has(m.id) ? " selected" : "");
   div.setAttribute("data-mid", m.id); // 供展开/收起、流式增量、撤回等局部更新定位
   // ARIA（5.3）：每条消息作为列表项，附发件人 + 时间 + 内容摘要标签供读屏朗读
   div.setAttribute("role", "listitem");
@@ -8659,8 +8814,9 @@ function msgDom(m, r, prev) {
   const processWrap = (processInner.trim() && !m.recalled)
     ? `<details class="process" ${processCollapsed ? "" : "open"}><summary class="process-summary">${escapeHtml(t("msg.processTitle"))}${escapeHtml(stepInfo)}</summary><div class="process-body">${processInner}</div></details>`
     : "";
+  const selectCheck = selectable ? `<span class="select-check${selectedMsgIds.has(m.id) ? " on" : ""}" aria-hidden="true"></span>` : "";
   div.innerHTML = `
-    <div class="avatar">${avatar}</div>
+    ${selectCheck}<div class="avatar">${avatar}</div>
     <div class="body">
       <div class="head"><span class="nick">${escapeHtml(m.senderNickname)}</span><span class="time${showDay ? " time-day" : ""}">${headTime}</span>${canStop ? `<button class="stop-btn" title="${escapeHtml(t("msg.stopGenerating"))}" aria-label="${escapeHtml(t("msg.stopGenerating"))}">` + icon("stop") + "</button>" : ""}${canReply ? `<button class="reply-btn" title="${escapeHtml(t("msg.reply"))}" aria-label="${escapeHtml(t("msg.reply"))}">` + icon("reply") + "</button>" : ""}${moreHtml}</div>
       ${replyRef}
@@ -8697,6 +8853,7 @@ function msgDom(m, r, prev) {
   // 双击消息 = 引用回复：仅在未选中文本（双击选词不触发）、且未点在交互元素上时生效。
   if (canReply) {
     div.addEventListener("dblclick", (e) => {
+      if (selectMode) return; // 多选模式下双击不触发引用
       if (e.target.closest("button, a, input, textarea, select, audio, video, summary, .process")) return;
       if (String(window.getSelection?.()?.toString() || "").trim()) return;
       setReplyTo(m);
@@ -11652,6 +11809,33 @@ function init() {
   $("searchNavPrev").onclick = () => gotoSearchStep(-1);
   $("searchNavNext").onclick = () => gotoSearchStep(1);
   $("searchNavClose").onclick = closeSearchNav;
+  // ---- 消息多选：入口 / 工具条 / 每条点选 / 转发弹窗 ----
+  $("selectBtn").onclick = () => (selectMode ? exitSelectMode() : enterSelectMode());
+  $("selectAllBtn").onclick = toggleSelectAllMessages;
+  $("selectCopyBtn").onclick = copySelectedMessages;
+  $("selectForwardBtn").onclick = openForwardModal;
+  $("selectDeleteBtn").onclick = deleteSelectedMessages;
+  $("selectCancelBtn").onclick = exitSelectMode;
+  $("forwardCancel").onclick = () => $("forwardModal").classList.add("hidden");
+  $("forwardConfirm").onclick = doForwardSelected;
+  $("forwardSearch").addEventListener("input", renderForwardList);
+  // 多选模式下点消息体 = 切换选中（捕获阶段抢先；stopImmediatePropagation 挡住灯箱 / 双击引用等）
+  $("messages").addEventListener("click", (e) => {
+    if (!selectMode) return;
+    const msgEl = e.target.closest(".msg");
+    if (!msgEl || msgEl.classList.contains("sys")) return;
+    // 带未读 / 离开分隔线的消息包在 .vmsg.unread-marker 里、内层 .msg 去掉了 data-mid：回退到外层取 id
+    const mid = msgEl.dataset.mid || msgEl.closest(".vmsg")?.dataset.mid;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    toggleSelectMessage(mid, msgEl);
+  }, true);
+  // Esc：先关转发弹窗，否则退出多选
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("forwardModal").classList.contains("hidden")) { $("forwardModal").classList.add("hidden"); return; }
+    if (selectMode) exitSelectMode();
+  });
 
   // ---- 图片灯箱：消息内图片点击放大（缩放 + 左右切换）----
   $("messages").addEventListener("click", (e) => {

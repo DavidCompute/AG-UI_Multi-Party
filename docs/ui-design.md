@@ -35,10 +35,10 @@ topbar（品牌 + 顶栏操作）
 └─ 会话主区（三栏 grid，`--groups-w` / `--members-w` 可控）
    ├─ aside.left   ─ 知聚列表：#refreshGroupsBtn #createGroupBtn / #groupList
    ├─ #groupsResizer ─ 左栏宽度拖拽手柄（宽屏可见）
-   ├─ main         ─ 聊天：#chatGroupName #chatGroupMeta / #searchBtn #groupFilesBtn
+   ├─ main         ─ 聊天：#chatGroupName #chatGroupMeta / #searchBtn #groupFilesBtn #selectBtn(多选)
    │                  #collapseGroupsBtn(« 收起左栏) #collapseMembersBtn(» 收起右栏)
    │                  #searchBtn #groupSettingsBtn #topicSummaryBtn
-   │                  #topicBar(话题) / #messages(虚拟滚动) / #typingRow
+   │                  #topicBar(话题) / #selectBar(多选工具条) / #messages(虚拟滚动) / #typingRow
    │                  #searchNav(搜索命中导航条：上一个/下一个/关闭)
    │                  #dropOverlay(拖拽上传覆盖层)
    │                  #mentionPicker #replyBar #sendReplyBar(发送失败重试) #attachList
@@ -333,6 +333,18 @@ topbar（品牌 + 顶栏操作）
 | 即时计数 | 搜索跳转时 `jumpToSearchHit` 同步刷新左下角位置计数（高亮仍需等目标消息进入 DOM 后绘制），使「i / N」在点击瞬间即更新。 |
 
 验证：`tools/ui-ux-round7.mjs`（17 项）——弹窗内导航计数与上下条 / ↑↓ / 回车打开、打开后高亮与导航条；表情入口 / 网格浮层开合、插入光标处、点外部与 Esc 收起；无控制台报错。
+
+### 2.16 界面人性化第八轮（1.0.183）
+
+| 改动 | 说明 |
+|---|---|
+| 消息多选 | 聊天页头新增 `#selectBtn`（☑）：进入选择模式后话题栏下方出现工具条 `#selectBar`（已选计数 + 全选 / 复制 / 转发 / 删除 / 取消），每条消息前出现圆形勾选框 `.select-check`。**点消息体即切换选中**（捕获阶段抢先并 `stopImmediatePropagation`，屏蔽灯箱 / 双击引用等）；选中态以消息 id 集合 `selectedMsgIds` 维护，跨重渲染保持。 |
+| 批量复制 | 把已选消息拼成「发送者: 内容」多行文本写入剪贴板（`copyText`），完成后退回普通模式。 |
+| 批量转发 | 弹窗 `#forwardModal` 单选目标知聚（可按名称过滤，客服知聚仅列已进入的）；逐条 `POST /ag-ui/group/message/send` 转发**文本内容（不含附件）**到目标知聚主话题，返回成功 / 失败计数。 |
+| 批量删除 | 删除即**撤回**：仅对「本人 / 管理员且 3 分钟内」的已选消息尝试（与服务端一致），确认后逐条 `POST /ag-ui/group/message/recall` 并本地即时更新；无可撤回项时给出提示。 |
+| 视图重建 | 进入 / 退出多选、全选变化需逐条带勾选框重渲染，故置 `vscroll.force = true` 再调度（否则虚拟滚动窗口未变会早退、不重渲染）。带未读 / 离开分隔线的消息内层 `.msg` 去掉了 `data-mid`，点选时回退取外层 `.vmsg` 的 id。 |
+
+验证：`tools/ui-ux-round8.mjs`（18 项）——进入多选与勾选框、逐条点选计数、全选 / 全不选、批量复制（剪贴板内容）、批量转发（目标知聚经 API 复核）、批量删除（确认后撤回、命中减少）、Esc 退出；无控制台报错。
 
 ---
 

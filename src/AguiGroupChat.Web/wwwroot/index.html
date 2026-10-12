@@ -74,6 +74,7 @@
         <span class="chat-header-ops">
           <button id="searchBtn" class="chip-btn" data-i18n-title="chat.search" disabled>🔍</button>
           <button id="groupFilesBtn" class="chip-btn" data-i18n-title="gf.tip" disabled>📁</button>
+          <button id="selectBtn" class="chip-btn" data-i18n-title="sel.btn" data-i18n-label="sel.btn" disabled>☑</button>
           <button id="topicSummaryBtn" class="chip-btn hidden" data-i18n-title="topic.summaryTip" title="📌 话题进度小结">📌</button>
           <button id="groupSettingsBtn" class="chip-btn" data-i18n-title="chat.settings" disabled>⚙</button>
           <button id="collapseMembersBtn" class="chip-btn panel-collapse-btn" data-i18n-title="chat.collapseMembers" data-i18n-label="chat.collapseMembers" aria-pressed="false">»</button>
@@ -81,6 +82,15 @@
         </span>
       </div>
       <div id="topicBar" class="topic-bar hidden"></div>
+      <!-- 多选工具条：进入多选模式后出现（复制 / 转发 / 删除 + 全选 / 取消） -->
+      <div id="selectBar" class="select-bar hidden">
+        <span id="selectCount" class="sel-count"></span>
+        <button id="selectAllBtn" class="chip-btn" type="button" data-i18n="sel.selectAll">全选</button>
+        <button id="selectCopyBtn" class="chip-btn" type="button" data-i18n="sel.copy" disabled>复制</button>
+        <button id="selectForwardBtn" class="chip-btn" type="button" data-i18n="sel.forward" disabled>转发</button>
+        <button id="selectDeleteBtn" class="chip-btn" type="button" data-i18n="sel.delete" disabled>删除</button>
+        <button id="selectCancelBtn" class="chip-btn" type="button" data-i18n="common.cancel">取消</button>
+      </div>
       <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions" data-i18n-label="chat.messages" data-empty="请选择一个知聚，开始对话"></div>
       <div id="typingRow" class="typing-row"></div>
       <div id="chatResizer" class="chat-resizer" data-i18n-title="chat.resize"></div>
@@ -1484,6 +1494,22 @@
       <div id="searchResults" class="search-results"></div>
       <div class="modal-actions">
         <button id="searchClose" class="btn-ghost" data-i18n="search.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 转发到知聚：多选后选择目标知聚，逐条转发文本内容 -->
+  <div id="forwardModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title">↪ <span data-i18n="sel.forwardTitle">转发到知聚</span></div>
+      <div class="muted" style="font-size:12px;margin-bottom:8px" data-i18n="sel.forwardHint"></div>
+      <div class="form-group">
+        <input id="forwardSearch" class="modal-input" data-i18n-placeholder="sel.forwardSearch" />
+        <div id="forwardList" class="forward-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="forwardCancel" class="btn-ghost" data-i18n="common.cancel">取消</button>
+        <button id="forwardConfirm" class="send" data-i18n="sel.forward">转发</button>
       </div>
     </div>
   </div>

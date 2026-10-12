@@ -1,3 +1,25 @@
+# AG-UI 群聊桌面版 1.0.183 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.183 Release Notes (current Windows desktop release)
+
+**版本说明**：界面人性化（第八轮）——消息多选：批量复制 / 转发 / 删除（撤回）。
+**Version note**: UI polish (round 8) — message multi-select for batch copy, forward, and delete (recall).
+
+## 消息多选：批量复制 / 转发 / 删除
+# Message multi-select: batch copy / forward / delete
+
+中文：
+- **进入多选**：聊天页头「☑」进入选择模式，话题栏下方出现工具条；每条消息前出现勾选框，**点消息即选中 / 取消**。
+- **批量复制**：把已选消息拼成「发送者: 内容」多行复制到剪贴板。
+- **批量转发**：选目标知聚（可搜索）逐条转发文本内容（不含附件）到其主话题。
+- **批量删除**：删除即**撤回**（仅限你有权限撤回的：本人发送且 3 分钟内），确认后逐条执行。
+- **全选 / 全不选**：一键作用于当前话题已加载的消息；`Esc` 随时退出多选。
+English:
+- **Enter multi-select**: click “☑” in the chat header to enter selection mode; a toolbar appears under the topic bar and each message gets a checkbox — **click a message to toggle it**. 
+- **Batch copy**: joins the selected messages as “sender: content” lines to the clipboard.
+- **Batch forward**: pick a target circle (searchable) and forward the text (attachments excluded) into its main topic, one by one.
+- **Batch delete**: deleting means **recall** (only for what you may recall: your own within 3 minutes); after confirmation they're recalled one by one.
+- **Select all / none**: one click across the loaded messages in the current topic; `Esc` exits multi-select anytime.
+
 # AG-UI 群聊桌面版 1.0.182 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.182 Release Notes (current Windows desktop release)
 
