@@ -1,3 +1,23 @@
+# AG-UI 群聊桌面版 1.0.180 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.180 Release Notes (current Windows desktop release)
+
+**版本说明**：界面人性化（第五轮）——修复「更多操作」菜单位置、消息内搜索命中高亮 + 上/下一条导航条、图片灯箱放大。
+**Version note**: UI polish (round 5) — fixed the “more actions” menu position, in-message search hit highlighting with a prev/next nav bar, and an image lightbox.
+
+## 搜索命中高亮 + 上/下一条 + 图片灯箱
+# Search hit highlighting + prev/next nav + image lightbox
+
+中文：
+- **搜索结果高亮**：在知聚内搜索后点某条结果，跳转到的消息里会把命中关键词用黄色标出并滚动到第一处。
+- **上/下一条导航条**：命中后聊天区左下角出现「i / N」与上一条 / 下一条 / 关闭，可在多条结果间循环跳转；切知聚或重新搜索时自动收起。
+- **图片灯箱**：点消息里的图片即可全屏放大，同一条消息内的图片可左右切换，支持放大 / 缩小 / 重置（滚轮亦可）与放大后拖拽平移，`Esc` 关闭；按住 Ctrl/⌘/Shift 或中键点击仍按原样在新标签打开。
+- **修复「⋯」菜单位置**：此前「更多操作」弹出菜单会跑到气泡右缘、看似错位；现改为锚在「⋯」按钮下方（空间不足时向上翻转）。
+English:
+- **Search hit highlighting**: after searching within a circle and clicking a result, the matched keyword is highlighted in the target message and scrolled to its first occurrence.
+- **Prev/next nav bar**: a “i / N” bar with prev / next / close appears at the bottom-left after a hit, cycling through all results; it auto-collapses when you switch circles or start a new search.
+- **Image lightbox**: click an image in a message to view it full-screen; images within the same message can be flipped through, with zoom in/out/reset (wheel too) and drag-to-pan when zoomed, and `Esc` to close; Ctrl/⌘/Shift or middle-click still opens a new tab as before.
+- **Fixed the “⋯” menu position**: the “more actions” popup used to appear at the bubble's right edge and looked misplaced; it now anchors under the “⋯” button (flipping upward when there's no room below).
+
 # AG-UI 群聊桌面版 1.0.179 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.179 Release Notes (current Windows desktop release)
 

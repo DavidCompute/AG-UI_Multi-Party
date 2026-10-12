@@ -69,10 +69,19 @@ try {
   await sleep(150);
   const opened = await page.evaluate(() => {
     const m = document.querySelector("#messages .msg");
-    return { open: !m.querySelector(".msg-actions").classList.contains("hidden"), expanded: m.querySelector(".msg-more-btn").getAttribute("aria-expanded"), copyVisible: m.querySelector(".msg-actions .copy-btn").checkVisibility?.() ?? true };
+    const btn = m.querySelector(".msg-more-btn").getBoundingClientRect();
+    const menu = m.querySelector(".msg-actions").getBoundingClientRect();
+    return {
+      open: !m.querySelector(".msg-actions").classList.contains("hidden"),
+      expanded: m.querySelector(".msg-more-btn").getAttribute("aria-expanded"),
+      copyVisible: m.querySelector(".msg-actions .copy-btn").checkVisibility?.() ?? true,
+      below: menu.top >= btn.bottom - 2,
+      rightAligned: Math.abs(menu.right - btn.right) <= 3,
+    };
   });
   check("点「⋯」展开菜单", opened.open && opened.expanded === "true");
   check("菜单内按钮可见（不受悬停消隐影响）", opened.copyVisible);
+  check("菜单锚在「⋯」按钮下方（而非气泡右缘）", opened.below && opened.rightAligned, JSON.stringify({ below: opened.below, rightAligned: opened.rightAligned }));
   await page.locator("#messages").click({ position: { x: 5, y: 5 } });
   await sleep(150);
   check("点外部收起菜单", await page.evaluate(() => document.querySelector("#messages .msg .msg-actions").classList.contains("hidden")));

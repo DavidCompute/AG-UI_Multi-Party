@@ -85,6 +85,12 @@
       <div id="typingRow" class="typing-row"></div>
       <div id="chatResizer" class="chat-resizer" data-i18n-title="chat.resize"></div>
       <button id="jumpToBottom" type="button" class="jump-to-bottom hidden" data-i18n-title="chat.jumpToBottom" data-i18n-label="chat.jumpToBottom"><span class="jtb-arrow">↓</span><span id="jumpToBottomLabel"></span></button>
+      <div id="searchNav" class="search-nav hidden" role="group" data-i18n-label="search.navLabel">
+        <span id="searchNavPos" class="search-nav-pos"></span>
+        <button id="searchNavPrev" class="chip-btn" type="button" data-i18n-title="search.prev" data-i18n-label="search.prev">‹</button>
+        <button id="searchNavNext" class="chip-btn" type="button" data-i18n-title="search.next" data-i18n-label="search.next">›</button>
+        <button id="searchNavClose" class="chip-btn" type="button" data-i18n-title="search.close" data-i18n-label="search.close">✕</button>
+      </div>
       <div class="composer">
         <div id="mentionSuggest" class="mention-suggest hidden"></div>
         <div id="mentionPicker" class="mention-picker" hidden></div>
@@ -1736,6 +1742,22 @@
         <button id="uiDialogOk" class="send" data-i18n="ui.ok">确定</button>
       </div>
     </div>
+  </div>
+
+  <!-- 图片灯箱：消息内图片点击放大（缩放 + 同条消息内左右切换） -->
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" data-i18n-label="lb.title">
+    <div class="lb-bar">
+      <span id="lbName" class="lb-name"></span>
+      <span class="lb-pos" id="lbPos"></span>
+      <span class="lb-spacer"></span>
+      <button id="lbZoomOut" class="chip-btn" type="button" data-i18n-title="lb.zoomOut" data-i18n-label="lb.zoomOut">−</button>
+      <button id="lbZoomReset" class="chip-btn" type="button" data-i18n-title="lb.zoomReset" data-i18n-label="lb.zoomReset">1:1</button>
+      <button id="lbZoomIn" class="chip-btn" type="button" data-i18n-title="lb.zoomIn" data-i18n-label="lb.zoomIn">+</button>
+      <button id="lbPrev" class="chip-btn" type="button" data-i18n-title="lb.prev" data-i18n-label="lb.prev">‹</button>
+      <button id="lbNext" class="chip-btn" type="button" data-i18n-title="lb.next" data-i18n-label="lb.next">›</button>
+      <button id="lbClose" class="chip-btn" type="button" data-i18n-title="lb.close" data-i18n-label="lb.close">✕</button>
+    </div>
+    <div id="lbStage" class="lb-stage"><img id="lbImg" alt="" draggable="false" /></div>
   </div>
 
   <div id="toast" class="toast"></div>

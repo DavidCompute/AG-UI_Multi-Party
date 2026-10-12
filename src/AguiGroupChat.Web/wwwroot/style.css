@@ -325,6 +325,32 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .jump-to-bottom:hover { border-color: var(--accent); }
 .jump-to-bottom.jtb-new { background: var(--accent); color: #fff; border-color: var(--accent); }
 .jump-to-bottom .jtb-arrow { font-size: 14px; line-height: 1; }
+/* 搜索结果导航条（跳转后显示）：上/下一条 + 位置计数；贴左下角，不占聊天区 */
+.search-nav {
+  position: absolute; left: 18px; bottom: 96px; z-index: 7;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 6px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(0,0,0,.28);
+}
+.search-nav .search-nav-pos { font-size: 12px; color: var(--muted); padding: 0 4px; white-space: nowrap; }
+.search-nav .chip-btn { padding: 1px 7px; line-height: 1.3; }
+/* 搜索命中词高亮（跳转后在消息内标出，随重渲染自然清除） */
+.msg .content mark.hl-term, .msg .thinking-body mark.hl-term {
+  background: rgba(255, 196, 0, .45); color: inherit; border-radius: 3px; padding: 0 1px;
+}
+
+/* 图片灯箱（消息内图片点击放大）：全屏黑底，顶部工具条，支持缩放与同条消息内左右切换 */
+.lightbox { position: fixed; inset: 0; z-index: 150; background: rgba(0,0,0,.9); display: flex; flex-direction: column; }
+.lb-bar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; color: #eaeaea; font-size: 13px; }
+.lb-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 38vw; }
+.lb-pos { color: #9aa3b2; font-size: 12px; }
+.lb-spacer { flex: 1; }
+.lb-bar .chip-btn { color: #eaeaea; border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
+.lb-bar .chip-btn:hover { background: rgba(255,255,255,.18); color: #fff; }
+.lb-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.lb-stage img { max-width: 96vw; max-height: 100%; transform-origin: center center; transition: transform .12s ease; cursor: grab; user-select: none; }
+.lb-stage img.dragging { transition: none; cursor: grabbing; }
+.lb-stage img.zoomed { cursor: move; }
 .chat-header {
   padding: 10px 18px; border-bottom: 1px solid var(--border);
   font-weight: 600; display: flex; align-items: baseline; gap: 10px;
@@ -386,14 +412,17 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .msg.mine .body { background: rgba(79,140,255,.14); border-color: rgba(79,140,255,.35); }
 .msg .head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; position: relative; }
 /* 「⋯」更多操作：新建话题 / 复制 / 重新回答 / 撤回 / 评价收入弹出菜单，悬停只留停止 / 引用，减少图标噪音 */
+.msg .msg-more-wrap { position: relative; display: inline-flex; align-items: center; }
 .msg .msg-more-btn { visibility: hidden; font-size: 14px; line-height: 1; letter-spacing: 1px; }
 .msg:hover .msg-more-btn, .msg .msg-more-btn[aria-expanded="true"] { visibility: visible; }
+/* 菜单错在「⋯」按钮下（不是气泡右边缘）：right:0 相对 .msg-more-wrap；空间不足时 .up 向上翻转 */
 .msg .msg-actions {
-  position: absolute; right: 0; top: calc(100% + 4px); z-index: 8;
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 8;
   display: flex; align-items: center; gap: 2px; padding: 3px 5px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0,0,0,.28);
 }
+.msg .msg-actions.up { top: auto; bottom: calc(100% + 6px); }
 /* 菜单内按钮始终可见（不随悬停消隐；本条选择器特异性高于 .msg .copy-btn 等） */
 .msg .msg-actions button { visibility: visible; margin-left: 0; }
 .msg .nick { font-size: 13px; font-weight: 600; }

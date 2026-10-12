@@ -39,6 +39,7 @@ topbar（品牌 + 顶栏操作）
    │                  #collapseGroupsBtn(« 收起左栏) #collapseMembersBtn(» 收起右栏)
    │                  #searchBtn #groupSettingsBtn #topicSummaryBtn
    │                  #topicBar(话题) / #messages(虚拟滚动) / #typingRow
+   │                  #searchNav(搜索命中导航条：上一个/下一个/关闭)
    │                  #mentionPicker #replyBar #sendReplyBar(发送失败重试) #attachList
    │                  输入：#visibilitySelect #mentionAllBtn #mentionChips #input
    │                  #discussBtn(多智能体讨论) #attachBtn #voiceBtn #canvasBtn #sendBtn
@@ -48,7 +49,7 @@ topbar（品牌 + 顶栏操作）
 ```
 
 模态/抽屉均以覆盖层 div 挂在 `body` 下（如 `#agentModal`、`#orgModal`、`#skillModal`、`#kbModal`、
-`#adminModal` 及各设置弹窗），用 `hidden` class 控制显隐。
+`#adminModal` 及各设置弹窗），用 `hidden` class 控制显隐；图片放大用全屏覆盖层 `#lightbox`。
 
 ### 1.4 登录 / 注册与会话
 
@@ -297,7 +298,20 @@ topbar（品牌 + 顶栏操作）
 | 跨话题未读汇总 | 知聚行 `title` = 知聚名 + 各话题未读明细（如「# 综合：3」，话题名已知时显示名称）——悬停即见，不占界面。 |
 | 「上次离开后」分隔线 | 复用分隔线机制（`.unread-divider.leave`，色更淡）：进入时按 `agui.leaveAt.<uid>.<gid>` 记的上次离开时间，在首条晚于该时间的消息前显示；与未读分隔线重合时不重复。 |
 
-验证：`tools/ui-ux-round4.mjs`（18 项）+ 真实数据回放（7 个知聚，`.vmsg`/`.msg` 计数一致、每头一个 `⋯`、0 控制台报错）。
+验证：`tools/ui-ux-round4.mjs`（19 项）+ 真实数据回放（7 个知聚，`.vmsg`/`.msg` 计数一致、每头一个 `⋯`、0 控制台报错）。
+
+### 2.13 界面人性化第五轮（1.0.180）
+
+| 改动 | 说明 |
+|---|---|
+| 「⋯」菜单位置修复 | 菜单原先绝对定位锚在 `.msg .head`（`right:0` = 气泡右缘），而 `⋯` 按钮在时间之后偏左，导致弹出层错位。改为新增包裹层 `.msg-more-wrap`（`position:relative; display:inline-flex`），按钮与菜单同处其中、菜单 `right:0` 相对按钮；展开时 `positionMsgActions()` 检测下方空间不足则加 `.up` 向上翻转。 |
+| 消息内搜索高亮 | 搜索结果跳转后，在目标消息的 `.content` / `.thinking-body` 内用 TreeWalker 找到命中词并包裹 `<mark class="hl-term">`（黄色），滚动到第一处。消息重渲染后高亮自然消失（不写入 `m._html` 渲染缓存，属预期）。 |
+| 搜索导航条 `#searchNav` | 命中词高亮后，聊天区左下角（贴 composer 高度）出现上一条 / 下一条 / 关闭：`#searchNavPos` 显示「i / N」，`gotoSearchStep()` 在结果间**循环**跳转（`jumpToSearchHit` 复用深度定位），`#searchNavClose` 清高亮并收起。切知聚 / 开新搜索时自动收起（`closeSearchNav`）。 |
+| 图片灯箱 `#lightbox` | 点消息内图片（`.att-img-wrap`）全屏放大（z-150），同一条消息内的全部图片为一组可左右切换（`#lbPos` 显示「i / N」）；顶部工具条支持放大 / 缩小 / 重置（1–6 倍，滚轮亦可），放大后拖拽平移；`Esc` / ← / → / + / - / 0 键盘操作。**保留 ctrl/⌘/shift/中键** 的「新标签打开」手势，此时不开灯箱。 |
+
+键盘监听一律用 document 捕获阶段 + `stopImmediatePropagation()`（`stopPropagation` 拦不住同元素后续监听），避免灯箱的 Esc 连带关闭下层弹窗。
+
+验证：`tools/ui-ux-round5.mjs`（21 项）——命中词高亮文本=关键词且落在命中消息上、导航条计数与上下条切换、关闭后高亮清空；灯箱打开 / 图片切换 / 缩放 / 重置 / Esc；ctrl+点击不开灯箱；无控制台报错。
 
 ---
 

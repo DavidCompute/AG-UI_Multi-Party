@@ -417,6 +417,11 @@ function resetChatState() {
   clearPendingScrollRestore();
   state.scrollMem.clear();
   state.leaveTime.clear();
+  // 搜索导航状态（避免跨账号残留）
+  searchHits = [];
+  searchPos = -1;
+  searchTerm = "";
+  $("searchNav")?.classList.add("hidden");
   hideNotifPanel();
   if ($("notifBadge")) renderNotifications();
   const input = $("input"); if (input) input.value = "";
@@ -6351,6 +6356,7 @@ async function selectGroup(gid) {
   draftEl.value = loadDraft(gid);
   draftEl.dispatchEvent(new Event("input", { bubbles: true }));
   closeDrawers(); // 窄屏：选中知聚后收起左侧抽屉
+  closeSearchNav(); // 切知聚：搜索结果导航条与高亮失效
   maybeFocusComposer(); // 按偏好把光标放进输入框（触屏 / 有弹窗时不抢）
 }
 
@@ -7530,6 +7536,7 @@ function renderGlobalResults(data) {
 function openSearchModal() {
   const gid = state.activeGroupId;
   if (!gid) return;
+  closeSearchNav(); // 新的检索：收起上次的导航条与高亮
   const g = state.groups.find((x) => x.groupId === gid);
   $("searchGroupName").textContent = g?.groupName || gid;
   $("searchInput").value = "";
@@ -7581,29 +7588,163 @@ async function doSearch() {
 
 function renderSearchResults(results, q) {
   const wrap = $("searchResults");
+  searchHits = Array.isArray(results) ? results : [];
+  searchTerm = String(q || "");
+  searchPos = -1;
   if (!results.length) { wrap.innerHTML = `<div class="search-empty">${t("search.noMatch")}</div>`; return; }
   const r = room(state.activeGroupId);
   const topicName = (tid) => {
     const tp = r?.topics?.find((x) => x.topicId === tid);
     return tp ? tp.name : (tid === "main" ? t("topic.mainShort") : tid);
   };
-  wrap.innerHTML = results.map((m) => {
+  wrap.innerHTML = results.map((m, idx) => {
     const sender = m.senderId === state.memberId ? t("search.me") : (memberName(m.senderId) || m.senderNickname || m.senderId);
     const snippet = String(m.content || "").slice(0, 120);
-    return `<div class="search-hit" data-mid="${escapeHtml(m.messageId)}" data-topic="${escapeHtml(m.topicId || "main")}">
+    return `<div class="search-hit" data-idx="${idx}" data-mid="${escapeHtml(m.messageId)}" data-topic="${escapeHtml(m.topicId || "main")}">
       <div class="search-hit-head"><span class="search-hit-sender">${escapeHtml(sender)}</span><span class="search-hit-topic"># ${escapeHtml(topicName(m.topicId || "main"))}</span><span class="search-hit-time">${escapeHtml(fmtTime(m.timestamp))}</span></div>
       <div class="search-hit-text">${escapeHtml(snippet)}</div>
     </div>`;
   }).join("");
   wrap.querySelectorAll(".search-hit").forEach((el) => {
-    el.onclick = () => jumpToSearchHit(el.dataset.mid, el.dataset.topic);
+    el.onclick = () => jumpToSearchHit(el.dataset.mid, el.dataset.topic, Number(el.dataset.idx));
   });
+}
+
+/* ============ 搜索结果跳转后的命中词高亮 + 上/下一条 ============ */
+
+let searchHits = [];      // 当前检索结果（供导航）
+let searchPos = -1;       // 当前命中的下标
+let searchTerm = "";      // 检索词（用于消息内高亮）
+
+const SEARCH_NAV_KEY = "agui.searchNavBottom"; // 仅内存：随 composer 高度调整
+
+/** 清除所有消息内的命中词高亮。 */
+function clearSearchHighlight() {
+  document.querySelectorAll("#messages mark.hl-term").forEach((mk) => {
+    const p = mk.parentNode;
+    if (!p) return;
+    p.replaceChild(document.createTextNode(mk.textContent), mk);
+    p.normalize();
+  });
+}
+
+/** 在目标消息内高亮命中词并滚动到第一处（消息重渲染后高亮自然消失，属预期）。 */
+function paintSearchHighlight(messageId, term) {
+  if (!term) return;
+  const root = document.querySelector(`#messages [data-mid="${cssEsc(messageId)}"]`);
+  if (!root) return;
+  const needle = term.toLowerCase();
+  const targets = root.querySelectorAll(".content, .thinking-body");
+  let first = null;
+  targets.forEach((host) => {
+    const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+    for (const tn of nodes) {
+      const text = tn.nodeValue || "";
+      const lower = text.toLowerCase();
+      let idx = lower.indexOf(needle);
+      if (idx < 0) continue;
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      while (idx >= 0) {
+        if (idx > last) frag.appendChild(document.createTextNode(text.slice(last, idx)));
+        const mk = document.createElement("mark");
+        mk.className = "hl-term";
+        mk.textContent = text.slice(idx, idx + needle.length);
+        frag.appendChild(mk);
+        if (!first) first = mk;
+        last = idx + needle.length;
+        idx = lower.indexOf(needle, last);
+      }
+      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+      tn.parentNode?.replaceChild(frag, tn);
+    }
+  });
+  first?.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+/** 更新搜索导航条（位置计数 / 显隐 / 贴 composer 高度）。 */
+function updateSearchNav() {
+  const nav = $("searchNav");
+  if (!nav) return;
+  const show = searchPos >= 0 && searchHits.length > 1;
+  nav.classList.toggle("hidden", !show);
+  if (show) {
+    $("searchNavPos").textContent = t("search.pos", { i: searchPos + 1, n: searchHits.length });
+    const comp = document.querySelector(".chat .composer");
+    if (comp && comp.offsetHeight) nav.style.bottom = (comp.offsetHeight + 10) + "px";
+  }
+}
+function closeSearchNav() {
+  searchPos = -1;
+  updateSearchNav();
+  clearSearchHighlight();
+}
+/** 上/下一条：在检索结果间循环跳转（不重开搜索弹窗）。 */
+function gotoSearchStep(delta) {
+  if (searchHits.length === 0) return;
+  const n = searchHits.length;
+  searchPos = ((searchPos < 0 ? 0 : searchPos) + delta + n) % n;
+  const hit = searchHits[searchPos];
+  jumpToSearchHit(hit.messageId, hit.topicId || "main", searchPos);
+}
+
+/* ============ 图片灯箱：消息内图片点击放大（缩放 + 同条消息内左右切换） ============ */
+
+let lbList = [], lbIndex = 0, lbZoom = 1, lbPanX = 0, lbPanY = 0;
+
+/** 从被点击的图片容器打开灯箱：同一消息内的全部图片作为一组，可左右切换。 */
+function openLightboxFromWrap(a) {
+  const msgEl = a.closest(".msg");
+  if (!msgEl) return;
+  const wraps = [...msgEl.querySelectorAll(".att-img-wrap")];
+  if (wraps.length === 0) return;
+  lbList = wraps.map((w) => ({ url: w.getAttribute("href") || "", name: w.getAttribute("title") || "" }));
+  lbIndex = Math.max(0, wraps.indexOf(a));
+  lbZoom = 1; lbPanX = 0; lbPanY = 0;
+  renderLightbox();
+  $("lightbox").classList.remove("hidden");
+}
+function renderLightbox() {
+  const it = lbList[lbIndex];
+  if (!it) return;
+  const img = $("lbImg");
+  img.src = it.url; img.alt = it.name;
+  applyLbTransform();
+  $("lbName").textContent = it.name || "";
+  $("lbPos").textContent = lbList.length > 1 ? `${lbIndex + 1} / ${lbList.length}` : "";
+}
+function applyLbTransform() {
+  const img = $("lbImg");
+  img.style.transform = `translate(${lbPanX}px, ${lbPanY}px) scale(${lbZoom})`;
+  img.classList.toggle("zoomed", lbZoom > 1);
+}
+function setLbZoom(z) {
+  lbZoom = Math.max(1, Math.min(6, z));
+  if (lbZoom === 1) { lbPanX = 0; lbPanY = 0; }
+  applyLbTransform();
+}
+function lbStep(delta) {
+  if (lbList.length <= 1) return;
+  lbIndex = (lbIndex + delta + lbList.length) % lbList.length;
+  lbZoom = 1; lbPanX = 0; lbPanY = 0;
+  renderLightbox();
+}
+function closeLightbox() {
+  $("lightbox").classList.add("hidden");
+  const img = $("lbImg");
+  img.classList.remove("zoomed", "dragging");
+  img.removeAttribute("src"); // 释放引用
+  img.style.transform = "";
+  lbList = [];
 }
 
 /** 跳转到搜索结果：切到对应话题并滚动 / 高亮该消息；
  * 目标不在已加载窗口时，拉取其前后各 count/2 条重建当前话题窗口再定位（深度定位）。 */
-async function jumpToSearchHit(messageId, topicId) {
+async function jumpToSearchHit(messageId, topicId, idx) {
   $("searchModal").classList.add("hidden");
+  if (Number.isInteger(idx) && idx >= 0) searchPos = idx;
   const gid = state.activeGroupId;
   if (!gid) return;
   const r = room(gid);
@@ -7612,7 +7753,7 @@ async function jumpToSearchHit(messageId, topicId) {
   const inDom = await new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(!!document.querySelector(`[data-mid="${cssEsc(messageId)}"]`))));
   });
-  if (inDom) { scrollToMessage(messageId); return; }
+  if (inDom) { scrollToMessage(messageId); afterJumpHighlight(messageId); return; }
   // 深度定位：拉取目标消息前后各 count/2 条，重建当前话题窗口
   try {
     const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/messages/around?messageId=${encodeURIComponent(messageId)}&topicId=${encodeURIComponent(topicId || "main")}&count=60`,
@@ -7628,8 +7769,15 @@ async function jumpToSearchHit(messageId, topicId) {
     r.allLoaded = false; // around 不是完整历史，保留「加载更早」入口
     vscroll.force = true;
     scheduleVirtualRender();
-    requestAnimationFrame(() => requestAnimationFrame(() => scrollToMessage(messageId)));
+    requestAnimationFrame(() => requestAnimationFrame(() => { scrollToMessage(messageId); afterJumpHighlight(messageId); }));
   } catch { toast(t("search.locateNetErr")); }
+}
+
+/** 跳转后：先清除旧高亮，再标出命中词并刷新导航条。 */
+function afterJumpHighlight(messageId) {
+  clearSearchHighlight();
+  paintSearchHighlight(messageId, searchTerm);
+  updateSearchNav();
 }
 
 /** 滚动到指定消息并高亮（2.2s 闪烁）。 */
@@ -8359,7 +8507,7 @@ function msgDom(m, r, prev) {
     + (canCopy ? `<button class="copy-btn" title="${escapeHtml(t("msg.copy"))}" aria-label="${escapeHtml(t("msg.copy"))}">` + icon("copy") + "</button>" : "")
     + (canRegenerate ? `<button class="regenerate-btn" title="${escapeHtml(t("msg.regenTitle"))}" aria-label="${escapeHtml(t("msg.regenTitle"))}">` + icon("refresh") + "</button>" : "")
     + (canRecall ? `<button class="recall-btn" title="${escapeHtml(t("msg.recallTitle"))}" aria-label="${escapeHtml(t("msg.recallTitle"))}">` + icon("recall") + "</button>" : "");
-  const moreHtml = `<button class="msg-more-btn" type="button" title="${escapeHtml(t("msg.moreActions"))}" aria-label="${escapeHtml(t("msg.moreActions"))}" aria-expanded="false" aria-haspopup="true">⋯</button><span class="msg-actions hidden">${moreItems}</span>`;
+  const moreHtml = `<span class="msg-more-wrap"><button class="msg-more-btn" type="button" title="${escapeHtml(t("msg.moreActions"))}" aria-label="${escapeHtml(t("msg.moreActions"))}" aria-expanded="false" aria-haspopup="true">⋯</button><span class="msg-actions hidden">${moreItems}</span></span>`;
   // @ 提及回显：chips 选择的成员（或 @全体）在消息内以标签形式展示
   const mentionTags = (() => {
     if (m.mentionAll) return `<span class="mention-tag">${escapeHtml(t("msg.mentionAllTag"))}</span>`;
@@ -9114,6 +9262,7 @@ function closeAllMsgActions(except) {
     el.parentElement?.querySelector(".msg-more-btn")?.setAttribute("aria-expanded", "false");
   });
 }
+/** 展开 / 收起「⋯」菜单：开时按视口空间决定向上还是向下（靠底部的消息向上翻转）。 */
 function toggleMsgActions(msgEl) {
   const menu = msgEl?.querySelector(".msg-actions");
   if (!menu) return;
@@ -9121,12 +9270,26 @@ function toggleMsgActions(msgEl) {
   closeAllMsgActions();
   menu.classList.toggle("hidden", !willOpen);
   msgEl.querySelector(".msg-more-btn")?.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen) positionMsgActions(msgEl);
+}
+/** 菜单贴住「⋯」按钮（.msg-more-wrap）展开：下方空间不足则向上翻转，避免超出消息区被裁掉。 */
+function positionMsgActions(msgEl) {
+  const menu = msgEl?.querySelector(".msg-actions");
+  const wrap = menu?.closest(".msg-more-wrap");
+  const cont = $("messages");
+  if (!menu || !wrap || !cont) return;
+  menu.classList.remove("up");
+  const wr = wrap.getBoundingClientRect();
+  const cr = cont.getBoundingClientRect();
+  if (wr.bottom + menu.offsetHeight + 8 > cr.bottom) menu.classList.add("up");
 }
 /** 取（必要时建）消息头的「⋯」操作容器：attachHeadActions / 评价按钮补挂时落到其中。 */
 function headActionsBox(head) {
   let box = head.querySelector(".msg-actions");
   if (box) return box;
   const msgEl = head.closest(".msg") || head;
+  const wrap = document.createElement("span");
+  wrap.className = "msg-more-wrap";
   box = document.createElement("span");
   box.className = "msg-actions hidden";
   const more = document.createElement("button");
@@ -9134,8 +9297,9 @@ function headActionsBox(head) {
   more.title = t("msg.moreActions"); more.setAttribute("aria-label", t("msg.moreActions"));
   more.setAttribute("aria-expanded", "false"); more.setAttribute("aria-haspopup", "true");
   more.onclick = (e) => { e.stopPropagation(); toggleMsgActions(msgEl); };
-  head.appendChild(more);
-  head.appendChild(box);
+  wrap.appendChild(more);
+  wrap.appendChild(box);
+  head.appendChild(wrap);
   return box;
 }
 
@@ -11356,6 +11520,56 @@ function init() {
   $("searchBtn").onclick = openSearchModal;
   $("searchClose").onclick = () => $("searchModal").classList.add("hidden");
   $("searchGo").onclick = doSearch;
+  // 搜索结果导航条：上/下一条 + 关闭
+  $("searchNavPrev").onclick = () => gotoSearchStep(-1);
+  $("searchNavNext").onclick = () => gotoSearchStep(1);
+  $("searchNavClose").onclick = closeSearchNav;
+
+  // ---- 图片灯箱：消息内图片点击放大（缩放 + 左右切换）----
+  $("messages").addEventListener("click", (e) => {
+    const a = e.target.closest(".att-img-wrap");
+    if (!a) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // 保留「新标签打开」手势
+    e.preventDefault();
+    openLightboxFromWrap(a);
+  });
+  $("lbClose").onclick = closeLightbox;
+  $("lbPrev").onclick = () => lbStep(-1);
+  $("lbNext").onclick = () => lbStep(1);
+  $("lbZoomIn").onclick = () => setLbZoom(lbZoom * 1.25);
+  $("lbZoomOut").onclick = () => setLbZoom(lbZoom / 1.25);
+  $("lbZoomReset").onclick = () => setLbZoom(1);
+  $("lightbox").addEventListener("click", (e) => { if (e.target === $("lightbox") || e.target === $("lbStage")) closeLightbox(); });
+  $("lbStage").addEventListener("wheel", (e) => { e.preventDefault(); setLbZoom(lbZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
+  document.addEventListener("keydown", (e) => {
+    if ($("lightbox").classList.contains("hidden")) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeLightbox(); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); e.stopImmediatePropagation(); lbStep(-1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); e.stopImmediatePropagation(); lbStep(1); }
+    else if (e.key === "+" || e.key === "=") { e.preventDefault(); setLbZoom(lbZoom * 1.25); }
+    else if (e.key === "-") { e.preventDefault(); setLbZoom(lbZoom / 1.25); }
+    else if (e.key === "0") { e.preventDefault(); setLbZoom(1); }
+  }, true);
+  { // 放大后拖拽平移
+    const lbImg = $("lbImg");
+    let drag = null;
+    lbImg.addEventListener("pointerdown", (e) => {
+      if (lbZoom <= 1) return;
+      e.preventDefault();
+      lbImg.classList.add("dragging");
+      try { lbImg.setPointerCapture(e.pointerId); } catch { /* 忽略 */ }
+      drag = { x: e.clientX, y: e.clientY, px: lbPanX, py: lbPanY };
+    });
+    lbImg.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      lbPanX = drag.px + (e.clientX - drag.x);
+      lbPanY = drag.py + (e.clientY - drag.y);
+      applyLbTransform();
+    });
+    const endDrag = () => { if (!drag) return; drag = null; lbImg.classList.remove("dragging"); };
+    lbImg.addEventListener("pointerup", endDrag);
+    lbImg.addEventListener("pointercancel", endDrag);
+  }
   // 输出物（当前知聚全部附件：下载 / 在线查看）
   $("groupFilesBtn").onclick = openGroupFiles;
   $("groupFilesClose").onclick = () => $("groupFilesModal").classList.add("hidden");
