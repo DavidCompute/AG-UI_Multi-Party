@@ -1584,6 +1584,10 @@ window.I18N_DICTS.zh = {
   "status.ragGraph": "图谱方式（Graph RAG）",
   "status.graphActive": "已生效 · 实体 {e} / 关系 {r}",
   "status.ragGraphOff": "未启用",
+  "status.docPreview": "文档在线转换",
+  "status.docPreviewReady": "就绪",
+  "status.docPreviewMissing": "未就绪",
+  "status.docPreviewHint": "运行本服务的机器上未检测到 LibreOffice：PPT / Word / Excel 的在线查看与播放将不可用（附件仍可下载后用本地应用打开）。若要启用：在本机安装 LibreOffice（Windows 自动探测 C:\\Program Files\\LibreOffice），或用环境变量 AGUI_SOFFICE 指定 soffice 路径后重启服务。",
 
   /* --- 消息搜索补充 --- */
   "search.me": "我",

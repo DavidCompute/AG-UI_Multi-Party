@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.189 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.189 Release Notes (current Windows desktop release)
+
+**版本说明**：管理端「系统状态」显式展示文档在线转换能力（未就绪给修复指引）；「回到最新消息」改用内联 SVG 图标。
+**Version note**: the admin “System status” panel now shows document-conversion availability (with a fix hint when missing); the “jump to latest” control now uses an inline SVG icon.
+
+## 文档在线转换能力显式提示
+# Explicit document-conversion availability
+
+中文：
+- **系统状态新增能力行**：`GET /ag-ui/admin/status` 新增 `docPreview.available`（探测本机 LibreOffice），管理端「系统状态」展示「文档在线转换：就绪 / 未就绪」；未就绪时值标警示色，并在下方给出修复指引（装 LibreOffice 或用 `AGUI_SOFFICE` 指定 soffice 路径后重启），不再等用户点「在线查看 / ▶ 播放」时才报 503。
+- **桌面版尤其相关**：MSI 不捆绑 LibreOffice，缺它即 PPT / Word / Excel 在线查看与播放不可用（Docker / Web 版镜像已内置）。
+- 合规回归新增 2 项检查；并修复该套件 `ADMIN_USERNAME/PASSWORD` 未生效的问题。
+English:
+- **Capability row in System status**: `GET /ag-ui/admin/status` now returns `docPreview.available` (detects local LibreOffice); the admin “System status” panel shows “Document conversion: Ready / Not ready” and, when not ready, a fix hint (install LibreOffice or point `AGUI_SOFFICE` at soffice and restart) — instead of only failing with 503 when the user clicks view/play.
+- **Most relevant to the desktop build**: the MSI does not bundle LibreOffice, so without it PPT / Word / Excel online view/play is unavailable (the Docker/web image bundles it).
+- The compliance suite gained 2 checks, and its `ADMIN_USERNAME/PASSWORD` env vars are now actually honored.
+
+## 「回到最新消息」图标美化
+# “Jump to latest” icon polish
+
+中文：
+- 图标由文本字符 `↓` 改为**内联 SVG 箭头**（跨字体渲染一致、垂直居中）；**无新消息时是 40×40 圆形图标钮，有新消息时展开成胶囊**并轻微上下浮动（`prefers-reduced-motion` 下不浮动）。
+English:
+- The icon is now an **inline SVG arrow** instead of the text glyph `↓` (consistent across fonts, vertically centered); a **40×40 circle when there are no unseen messages**, expanding into a pill with the count when there are, with a subtle bob (`prefers-reduced-motion` disables it).
+
 # AG-UI 群聊桌面版 1.0.188 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.188 Release Notes (current Windows desktop release)
 

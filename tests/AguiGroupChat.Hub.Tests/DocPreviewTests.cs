@@ -38,6 +38,8 @@ public sealed class DocPreviewConverterTests : IDisposable
         public int Calls;
         public bool Fail;
         public bool Unavailable;
+        /// <summary>与 <see cref="Unavailable"/> 相反：供系统状态「转换组件是否就绪」的断言。</summary>
+        public bool Available => !Unavailable;
         public bool ProduceNothing;
         public string Detail = "转换器炋了";
         /// <summary>最近一次请求是否要求导出「备注页」（供「是否透传 notes」的回归断言）。</summary>

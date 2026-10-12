@@ -107,6 +107,8 @@ public static class AdminApi
             var graphActive = graph is not null && agents.Memory.GraphEnabled;
             GraphStats? gs = null;
             if (graphActive) { try { gs = graph!.Stats(); } catch { gs = null; } }
+            // 在线查看 / 播放依赖服务端 LibreOffice（桌面版需本机安装）；未注册（测试宿主）视为不可用
+            var soffice = sp.GetService<ISofficeRunner>();
             return Results.Ok(new
             {
                 status = "ok",
@@ -129,6 +131,11 @@ public static class AdminApi
                     graphHops = agents.Memory.GraphHops,
                     graphEntities = gs?.EntityCount ?? 0,              // 当前图谱实体数
                     graphEdges = gs?.EdgeCount ?? 0,                   // 当前图谱关系边数
+                },
+                docPreview = new
+                {
+                    available = soffice?.Available ?? false,          // 转换组件（LibreOffice）是否就绪
+                    converter = soffice is null ? null : "libreoffice", // 转换器类型（预留其它实现）
                 },
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));

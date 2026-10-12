@@ -1587,6 +1587,10 @@ window.I18N_DICTS.en = {
   "status.ragGraph": "Graph mode (Graph RAG)",
   "status.graphActive": "Active · {e} entities / {r} relations",
   "status.ragGraphOff": "Not enabled",
+  "status.docPreview": "Document conversion",
+  "status.docPreviewReady": "Ready",
+  "status.docPreviewMissing": "Not ready",
+  "status.docPreviewHint": "LibreOffice was not found on the machine running this service: online view/play for PPT / Word / Excel is unavailable (attachments can still be downloaded and opened with a local app). To enable it, install LibreOffice on that machine (auto-detected at C:\\Program Files\\LibreOffice on Windows) or point the AGUI_SOFFICE environment variable at soffice and restart the service.",
 
   /* --- 消息搜索补充 --- */
   "search.me": "Me",

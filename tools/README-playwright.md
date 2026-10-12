@@ -47,7 +47,7 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 1. 普通用户：资料弹窗「危险操作」区显示「⬇ 导出我的数据」与「注销账户」；注销弹窗错误密码提示与取消；
 2. 消息 👍/👎 评价按钮默认隐藏、悬停消息可见（与复制/重新回答等头部按钮一致的悬停显隐）；
-3. 管理员：用户管理他人行出现「🗑️ 彻底删除」；控制台「审计日志」tab 打开渲染。
+3. 管理员：用户管理他人行出现「🗑️ 彻底删除」；控制台「审计日志」tab 打开渲染；「系统状态」显式展示**文档在线转换**（LibreOffice）能力行——就绪显示「就绪」，未就绪标警示色并给出修复指引（Docker 内置 LibreOffice，应显示「就绪」）。
 
 ```bash
 cd tools && node ui-regression-compliance.mjs                 # 有头，自建临时账号

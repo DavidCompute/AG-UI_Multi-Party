@@ -58,8 +58,8 @@ const api = async (method, p, token, json) => {
 };
 const register = async (username) => (await api("POST", "/ag-ui/user/register", null,
   { username, password: "secret123", nickname: username })).data;
-const login = async (username) => (await api("POST", "/ag-ui/user/login", null,
-  { username, password: "secret123" })).data;
+const login = async (username, password = "secret123") => (await api("POST", "/ag-ui/user/login", null,
+  { username, password })).data;
 
 // ---------- 账号准备 ----------
 const envNormal = process.env.USERNAME && process.env.PASSWORD
@@ -74,7 +74,7 @@ if (!normal) {
 }
 if (!normal?.token) { console.error("❌ 无法准备普通用户账号（请检查 BASE_URL / 网络 / 账号）；请用 USERNAME/PASSWORD 显式提供"); process.exit(1); }
 
-let admin = envAdmin ? await login(envAdmin.username) : null;
+let admin = envAdmin ? await login(envAdmin.username, envAdmin.password) : null; // 用 ADMIN_PASSWORD 真登（之前硬编码 secret123，导致 ADMIN_* 实际不生效）
 if (!admin) {
   const candidate = await register(`uiadmin_${stamp}`);
   const isRoot = candidate?.platformRole === "superadmin" || candidate?.isAdmin === true;
@@ -176,6 +176,18 @@ try {
     if (auditRows === 1 && auditErr === 1) note("审计列表为空（实例暂无审计记录）——渲染正常");
     await shot(page, "admin-audit-tab");
     await page.click("#adminClose").catch(() => {});
+
+    // 系统状态：文档在线转换能力应显式展示（Docker 内置 LibreOffice → 「就绪」且无修复提示）
+    await page.evaluate(() => openStatusModal());
+    await page.waitForSelector("#statusBody .status-cell", { timeout: 8000 });
+    const statusCells = await page.locator("#statusBody .status-cell").count();
+    const docRow = await page.locator("#statusBody .status-cell", { hasText: "文档在线转换" }).count();
+    check("系统状态含「文档在线转换」能力行", statusCells >= 10 && docRow === 1, `cells=${statusCells} docRow=${docRow}`);
+    const docVal = ((await page.locator("#statusBody .status-cell", { hasText: "文档在线转换" }).locator(".status-val").textContent()) || "").trim();
+    const hintCnt = await page.locator("#statusBody .status-hint").count();
+    check("Docker 环境文档转换「就绪」且无修复提示", docVal === "就绪" && hintCnt === 0, `val=${docVal} hint=${hintCnt}`);
+    await shot(page, "admin-status-docpreview");
+    await page.evaluate(() => document.getElementById("statusModal").classList.add("hidden"));
   }
 
   if (pageErrors.length) note(`页面 JS 异常: ${pageErrors.join(" | ")}`);

@@ -195,6 +195,9 @@ topbar（品牌 + 顶栏操作）
 - 进入播放**先立刻用普通 PDF 出画面**（异步升级到展开版），全屏请求放在 `await` 之前（否则用户手势失效）。
 - **如实说明的边界**：非 `.pptx`（`.ppt/.odp`）无清单，退化为逐页播放；解析失败一律降级，绝不影响普通预览。
   位移（flyIn）/ 强调 / 退出见下一段的「形状级动画」——自 1.0.188 起，含入场动画的页大多走这条路径（而非分步）。
+- **能力可诊断**：是否装了 LibreOffice 会经 `GET /ag-ui/admin/status` 的 `docPreview.available`（`ISofficeRunner.Available`）下发，
+  管理端「系统状态」显式展示「文档在线转换：就绪 / 未就绪」，未就绪时给修复指引（见 §7.6）。
+  桌面版 MSI **不捆绑 LibreOffice**（Docker 镜像已内置），缺它即无预览 / 播放。
 
 **形状级动画（方案 C，1.0.186）**：上面的「分步」只能给出「直接出现」。要还原**位移 / 强调 / 退出**这些真动画，
 又不想自研整份 PPT 的形状级渲染器（字体度量、图表、SmartArt 会全面失真），采用**混合方案**：
@@ -625,6 +628,10 @@ apiKey 不回显，仅提示“已配置”。
 - 用户管理（列表/角色/禁用/重置密码/平台角色授予）；系统状态与用量、审计、桥健康/能力、执行参数（在线热改）、
   配置治理、白标设置；权限随角色（User 无管理菜单 / Operator 只读 / Admin+ 完整 / SuperAdmin 角色管理）。
 - 管理页按生效角色显示，角色下拉仅 SuperAdmin 可见。
+- **系统状态（`#statusModal`）里的「文档在线转换」能力行**：显式展示服务端是否就绪（`GET /ag-ui/admin/status` 的
+  `docPreview.available`，由 `ISofficeRunner.Available` 探测本机 LibreOffice）。未就绪时值标为警示色并在下方给出**修复指引**
+  （装 LibreOffice 或用 `AGUI_SOFFICE` 指定 soffice 路径后重启）——不再等用户点「在线查看 / ▶ 播放」时才报 503。
+  桌面版（本机宿主）尤其需要这行：MSI **不捆绑 LibreOffice**，缺它即 PPT / Word / Excel 在线查看与播放不可用。
 
 ---
 

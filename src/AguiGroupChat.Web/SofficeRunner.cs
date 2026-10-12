@@ -11,6 +11,9 @@ public sealed record SofficeResult(bool Ok, string Detail, bool Unavailable = fa
 /// <summary>把办公文档转成 PDF 的执行器（抽成接口：单测注入假实现，不依赖真机是否装了 LibreOffice）。</summary>
 public interface ISofficeRunner
 {
+    /// <summary>是否探测到转换器（LibreOffice）。供系统状态 / 诊断展示，不触发转换。</summary>
+    bool Available { get; }
+
     /// <summary>把源文件转成 PDF 落到 <paramref name="outDir"/>。
     /// <paramref name="exportNotes"/> 仅对演示文稿有意义：为 true 时导出「备注页」（每页幻灯片 + 该页演讲者备注），
     /// 否则导出普通幻灯片。</summary>

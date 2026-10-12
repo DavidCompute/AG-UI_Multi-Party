@@ -7424,8 +7424,14 @@ async function openStatusModal() {
     } else {
       items.push([t("status.ragGraph"), t("status.ragGraphOff")]);
     }
+    // 文档在线转换（LibreOffice）是否就绪：未就绪时显式标出 + 给出修复指引，而不是等用户点「在线查看 / 播放」才报错
+    const docPreviewOk = !!(d.docPreview && d.docPreview.available);
+    items.push([t("status.docPreview"), docPreviewOk
+      ? t("status.docPreviewReady")
+      : `<span class="status-warn">${t("status.docPreviewMissing")}</span>`]);
     $("statusBody").innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
-      `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`;
+      `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`
+      + (docPreviewOk ? "" : `<div class="status-hint">${escapeHtml(t("status.docPreviewHint"))}</div>`);
   } catch { $("statusBody").innerHTML = t("admin.sysNetErr"); }
 }
 

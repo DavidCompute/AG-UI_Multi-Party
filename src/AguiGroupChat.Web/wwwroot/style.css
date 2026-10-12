@@ -1627,6 +1627,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .status-cell { border: 1px solid var(--border, rgba(128,128,128,.25)); border-radius: 8px; padding: 10px 12px; }
 .status-key { font-size: 12px; color: var(--muted, #888); margin-bottom: 4px; }
 .status-val { font-size: 16px; font-weight: 600; }
+.status-warn { color: var(--warn, #b26f0e); }
+/* 系统状态里的“未就绪”说明（左侧色条提示可修复项，如缺 LibreOffice） */
+.status-hint {
+  margin-top: 10px; font-size: 12.5px; line-height: 1.55; color: var(--muted, #888);
+  border: 1px solid var(--border, rgba(128,128,128,.25)); border-left: 3px solid var(--warn, #b26f0e);
+  border-radius: 8px; padding: 8px 10px;
+}
 
 /* ============ 引用回复 ============ */
 .reply-bar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; margin-bottom: 6px;

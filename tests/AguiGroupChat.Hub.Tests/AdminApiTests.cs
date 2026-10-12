@@ -279,6 +279,10 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.True(d.TryGetProperty("connections", out _));
         Assert.True(d.TryGetProperty("messages", out _));
         Assert.True(d.TryGetProperty("dotnetVersion", out _));
+        // 文档在线转换能力：该宿主未注册 ISofficeRunner → 明确报「未就绪」（桌面版缺 LibreOffice 时同样如此）
+        Assert.True(d.TryGetProperty("docPreview", out var dp));
+        Assert.False(dp.GetProperty("available").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, dp.GetProperty("converter").ValueKind);
     }
 
     [Fact]
