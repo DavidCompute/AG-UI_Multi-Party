@@ -91,6 +91,8 @@
         <button id="searchNavNext" class="chip-btn" type="button" data-i18n-title="search.next" data-i18n-label="search.next">›</button>
         <button id="searchNavClose" class="chip-btn" type="button" data-i18n-title="search.close" data-i18n-label="search.close">✕</button>
       </div>
+      <!-- 拖拽上传：把文件拖到聊天区即加入待发送附件（覆盖层只在拖入文件时显示） -->
+      <div id="dropOverlay" class="drop-overlay hidden" aria-hidden="true"><div class="drop-overlay-inner">📥 <span data-i18n="chat.dropHint">松开以添加附件</span></div></div>
       <div class="composer">
         <div id="mentionSuggest" class="mention-suggest hidden"></div>
         <div id="mentionPicker" class="mention-picker" hidden></div>
@@ -1753,6 +1755,8 @@
       <button id="lbZoomOut" class="chip-btn" type="button" data-i18n-title="lb.zoomOut" data-i18n-label="lb.zoomOut">−</button>
       <button id="lbZoomReset" class="chip-btn" type="button" data-i18n-title="lb.zoomReset" data-i18n-label="lb.zoomReset">1:1</button>
       <button id="lbZoomIn" class="chip-btn" type="button" data-i18n-title="lb.zoomIn" data-i18n-label="lb.zoomIn">+</button>
+      <button id="lbRotate" class="chip-btn" type="button" data-i18n-title="lb.rotate" data-i18n-label="lb.rotate">↻</button>
+      <button id="lbDownload" class="chip-btn" type="button" data-i18n-title="lb.download" data-i18n-label="lb.download">⬇</button>
       <button id="lbPrev" class="chip-btn" type="button" data-i18n-title="lb.prev" data-i18n-label="lb.prev">‹</button>
       <button id="lbNext" class="chip-btn" type="button" data-i18n-title="lb.next" data-i18n-label="lb.next">›</button>
       <button id="lbClose" class="chip-btn" type="button" data-i18n-title="lb.close" data-i18n-label="lb.close">✕</button>

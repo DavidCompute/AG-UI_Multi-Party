@@ -1,3 +1,21 @@
+# AG-UI 群聊桌面版 1.0.181 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.181 Release Notes (current Windows desktop release)
+
+**版本说明**：界面人性化（第六轮）——全局搜索跳转后同样高亮并带上下条导航、图片灯箱可旋转与下载原图、支持拖拽上传。
+**Version note**: UI polish (round 6) — global search now highlights hits with prev/next nav after jumping, the image lightbox can rotate and download, and files can be drag-dropped to attach.
+
+## 全局搜索一致性 + 灯箱增强 + 拖拽上传
+# Consistent global search + lightbox extras + drag-and-drop upload
+
+中文：
+- **全局搜索也高亮**：跨知聚全局搜索（🔎）点结果跳转后，目标消息同样标出命中关键词并出现「i / N」上下条导航（与知聚内搜索一致）；修复了此前可能用上一次检索词误高亮的问题。
+- **灯箱再增强**：图片放大后新增「旋转 90°」（快捷键 `r`）与「下载原图」（文件名即附件原名）。
+- **拖拽上传**：把文件直接拖到聊天区即可加入待发送附件（拖入时显示提示层），与点 📎 选择文件共用同一套校验（最多 9 个、单个 20MB）。
+English:
+- **Global search highlights too**: after clicking a result from the cross-circle global search (🔎), the target message now highlights the keyword and shows the “i / N” prev/next nav (matching in-circle search); also fixes a case where a stale keyword could be highlighted.
+- **Lightbox extras**: viewing an image full-screen now also offers “Rotate 90°” (`r` shortcut) and “Download original” (saved under the attachment's original name).
+- **Drag-and-drop upload**: drop files straight onto the chat area to queue them as attachments (a hint layer appears while dragging); shares the same limits as picking files with 📎 (up to 9 files, 20MB each).
+
 # AG-UI 群聊桌面版 1.0.180 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.180 Release Notes (current Windows desktop release)
 

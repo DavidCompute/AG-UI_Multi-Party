@@ -40,6 +40,7 @@ topbar（品牌 + 顶栏操作）
    │                  #searchBtn #groupSettingsBtn #topicSummaryBtn
    │                  #topicBar(话题) / #messages(虚拟滚动) / #typingRow
    │                  #searchNav(搜索命中导航条：上一个/下一个/关闭)
+   │                  #dropOverlay(拖拽上传覆盖层)
    │                  #mentionPicker #replyBar #sendReplyBar(发送失败重试) #attachList
    │                  输入：#visibilitySelect #mentionAllBtn #mentionChips #input
    │                  #discussBtn(多智能体讨论) #attachBtn #voiceBtn #canvasBtn #sendBtn
@@ -312,6 +313,16 @@ topbar（品牌 + 顶栏操作）
 键盘监听一律用 document 捕获阶段 + `stopImmediatePropagation()`（`stopPropagation` 拦不住同元素后续监听），避免灯箱的 Esc 连带关闭下层弹窗。
 
 验证：`tools/ui-ux-round5.mjs`（21 项）——命中词高亮文本=关键词且落在命中消息上、导航条计数与上下条切换、关闭后高亮清空；灯箱打开 / 图片切换 / 缩放 / 重置 / Esc；ctrl+点击不开灯箱；无控制台报错。
+
+### 2.14 界面人性化第六轮（1.0.181）
+
+| 改动 | 说明 |
+|---|---|
+| 全局搜索一致性 | 全局搜索（🔎）跳转结果后同样沿用「命中词高亮 + 上/下一条」：`renderGlobalResults(data, keyword)` 接收检索词，按知聚归集该次命中的**消息**集（记忆/知识库不入导航集），跳转前写入 `searchTerm/searchHits/searchPos`。此前全局搜索跳转**既不高亮也无导航条**，且可能拿上一次残留的检索词误高亮——已修复。 |
+| 灯箱增强 | 图片灯箱新增「旋转 90°」（`#lbRotate`，键盘 `r`）与「下载原图」（`#lbDownload`，走附件直链、文件名取附件名）；旋转与缩放叠加在同一 `transform` 上（`translate · scale · rotate`）。 |
+| 拖拽上传 | 把文件拖到聊天区（`main.chat`）即加入待发送附件（覆盖层 `#dropOverlay` 仅在拖入文件时显示）；与文件选择共用 `queueAttachmentFiles()`（上限 9 个 / 单个 20MB）。窗口级 `dragover/drop` 兜底 `preventDefault`，避免拖到聊天区外松手时浏览器直接打开文件。 |
+
+验证：`tools/ui-ux-round6.mjs`（13 项）——全局搜索跳转后高亮与导航条、灯箱旋转 / 下载文件名、拖拽覆盖层与附件入列；无控制台报错。
 
 ---
 

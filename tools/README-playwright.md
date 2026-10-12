@@ -94,6 +94,7 @@ HEADLESS=1 node ui-ux-polish.mjs          # 23 项：基础人性化（抽屉 / 
 HEADLESS=1 node ui-ux-round3.mjs          # 17 项：未读分隔线 / 滚动记忆 / 侧栏收起 / 双击引用
 HEADLESS=1 node ui-ux-round4.mjs          # 19 项：「⋯」菜单 / 话题栏收起 / 快捷键面板 / 上次离开分隔线
 HEADLESS=1 node ui-ux-round5.mjs          # 21 项：搜索命中高亮 + 上/下一条导航条 / 图片灯箱
+HEADLESS=1 node ui-ux-round6.mjs          # 13 项：全局搜索一致性 / 灯箱旋转下载 / 拖拽上传
 HEADLESS=1 node ui-panel-resize.mjs       # 12 项：侧栏 / 输入区拖拽宽度与持久化
 HEADLESS=1 node ui-process-layers.mjs     # 21 项：执行过程 / 最终答复分层
 HEADLESS=1 node ui-plan-collapse.mjs      # 11 项：计划卡默认展开 / 收起
@@ -104,3 +105,4 @@ SAMPLES=../artifacts/e2e HEADLESS=1 node ui-doc-slides.mjs    # 23 项：办公�
 - 退出码 `0` = 全部通过；`1` = 有失败（控制台打印失败项）。
 - **不要并发跑**：多个脚本同时打同一后端会因时序争用出现偶发失败，请逐个串行执行。
 - `ui-group-files` / `ui-doc-slides` 需要样例文件（`artifacts/e2e/sample.docx`、`sample-notes.pptx`；`artifacts/` 已 gitignore）。
+- `ui-ux-round6.mjs` 的「下载原图」用 Playwright 下载事件校验，无需额外依赖。

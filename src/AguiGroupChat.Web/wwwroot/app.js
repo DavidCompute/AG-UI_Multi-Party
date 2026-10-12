@@ -7489,17 +7489,25 @@ async function runGlobalSearch() {
     const res = await fetch(`/ag-ui/search?q=${encodeURIComponent(q)}&limit=60`, { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) { $("gsResults").innerHTML = `<div class="gs-empty">${escapeHtml(errMsg(data, t("search.fail", { err: "HTTP " + res.status })))}</div>`; return; }
-    renderGlobalResults(data);
+    renderGlobalResults(data, q);
   } catch { $("gsResults").innerHTML = `<div class="gs-empty">${t("search.networkErr")}</div>`; }
 }
 
-/** 渲染全局检索结果：消息 / 记忆 / 知识库三组；消息与记忆可点击跳转该知聚。 */
-function renderGlobalResults(data) {
+/** 渲染全局检索结果：消息 / 记忆 / 知识库三组；消息与记忆可点击跳转该知聚。
+ *  keyword：本次检索词 —— 跳转后沿用「命中词高亮 + 上/下一条」导航条（与知聚内搜索一致）。 */
+function renderGlobalResults(data, keyword) {
   const wrap = $("gsResults");
+  const term = String(keyword || "");
   const msgs = data.messages || [];
   const mems = data.memories || [];
   const kbs = data.knowledgeBases || [];
   if (!msgs.length && !mems.length && !kbs.length) { wrap.innerHTML = `<div class="gs-empty">${t("search.noMatch")}</div>`; return; }
+  // 按群归集「消息」命中：跳转后作为导航条的翻页集合（记忆/知识库不纳入，避免跳到非消息记录）
+  const hitsByGroup = {};
+  msgs.forEach((m) => {
+    if (!m.groupId || !m.messageId) return;
+    (hitsByGroup[m.groupId] ||= []).push({ messageId: m.messageId, topicId: m.topicId || "main" });
+  });
   const html = [];
   const row = (hit, icon) => `<div class="gs-row" data-mid="${escapeHtml(hit.messageId || "")}" data-gid="${escapeHtml(hit.groupId || "")}" data-tid="${escapeHtml((hit.topicId || "main").replace(/"/g, ""))}">
     <div class="gs-meta"><span>${icon} ${escapeHtml(hit.groupName || "")}${hit.senderNickname ? " · " + escapeHtml(hit.senderNickname) : ""}</span><span>${escapeHtml(fmtTime(hit.timestamp))}</span></div>
@@ -7524,10 +7532,22 @@ function renderGlobalResults(data) {
       const { gid, mid, tid } = el.dataset;
       $("globalSearchModal").classList.add("hidden");
       if (!gid) return;
-      if (state.activeGroupId === gid) { jumpToSearchHit(mid, tid); return; }
+      const groupHits = hitsByGroup[gid] || [];
+      const idx = groupHits.findIndex((h) => h.messageId === mid);
+      // 与知聚内搜索一致：先备好检索词与命中集，再跳转（在切群之后设置，避免被切群逻辑清掉）
+      const jump = () => {
+        searchTerm = term;
+        searchHits = groupHits;
+        searchPos = -1;
+        jumpToSearchHit(mid, tid, idx >= 0 ? idx : undefined);
+      };
+      if (state.activeGroupId === gid) {
+        if (!mid) { searchHits = []; searchTerm = ""; updateSearchNav(); selectTopic(tid).catch(() => {}); return; }
+        jump(); return;
+      }
       selectGroup(gid).then(() => {
-        if (!mid) { selectTopic(tid).catch(() => {}); return; }
-        jumpToSearchHit(mid, tid);
+        if (!mid) { searchHits = []; searchTerm = ""; updateSearchNav(); selectTopic(tid).catch(() => {}); return; }
+        jump();
       }).catch(() => {});
     };
   });
@@ -7692,7 +7712,7 @@ function gotoSearchStep(delta) {
 
 /* ============ 图片灯箱：消息内图片点击放大（缩放 + 同条消息内左右切换） ============ */
 
-let lbList = [], lbIndex = 0, lbZoom = 1, lbPanX = 0, lbPanY = 0;
+let lbList = [], lbIndex = 0, lbZoom = 1, lbPanX = 0, lbPanY = 0, lbRot = 0;
 
 /** 从被点击的图片容器打开灯箱：同一消息内的全部图片作为一组，可左右切换。 */
 function openLightboxFromWrap(a) {
@@ -7702,7 +7722,7 @@ function openLightboxFromWrap(a) {
   if (wraps.length === 0) return;
   lbList = wraps.map((w) => ({ url: w.getAttribute("href") || "", name: w.getAttribute("title") || "" }));
   lbIndex = Math.max(0, wraps.indexOf(a));
-  lbZoom = 1; lbPanX = 0; lbPanY = 0;
+  lbZoom = 1; lbPanX = 0; lbPanY = 0; lbRot = 0;
   renderLightbox();
   $("lightbox").classList.remove("hidden");
 }
@@ -7717,7 +7737,7 @@ function renderLightbox() {
 }
 function applyLbTransform() {
   const img = $("lbImg");
-  img.style.transform = `translate(${lbPanX}px, ${lbPanY}px) scale(${lbZoom})`;
+  img.style.transform = `translate(${lbPanX}px, ${lbPanY}px) scale(${lbZoom}) rotate(${lbRot}deg)`;
   img.classList.toggle("zoomed", lbZoom > 1);
 }
 function setLbZoom(z) {
@@ -7728,7 +7748,7 @@ function setLbZoom(z) {
 function lbStep(delta) {
   if (lbList.length <= 1) return;
   lbIndex = (lbIndex + delta + lbList.length) % lbList.length;
-  lbZoom = 1; lbPanX = 0; lbPanY = 0;
+  lbZoom = 1; lbPanX = 0; lbPanY = 0; lbRot = 0;
   renderLightbox();
 }
 function closeLightbox() {
@@ -7737,6 +7757,7 @@ function closeLightbox() {
   img.classList.remove("zoomed", "dragging");
   img.removeAttribute("src"); // 释放引用
   img.style.transform = "";
+  lbRot = 0;
   lbList = [];
 }
 
@@ -10191,6 +10212,18 @@ async function uploadAttachments() {
   }
 }
 
+/** 把一批本地文件加入待发送附件（拖拽上传与文件选择共用）：数量上限 9、单个 20MB。 */
+function queueAttachmentFiles(files) {
+  let added = 0;
+  for (const f of files || []) {
+    if (pendingAttachments.length >= 9) { toast(t("attach.maxCount", { count: 9 })); break; }
+    if (f.size > 20 * 1024 * 1024) { toast(t("attach.overSize", { name: f.name, mb: 20 })); continue; }
+    pendingAttachments.push({ file: f, uploading: false });
+    added++;
+  }
+  if (added) renderAttachList();
+}
+
 function renderAttachList() {
   const el = $("attachList");
   el.innerHTML = "";
@@ -11451,14 +11484,43 @@ function init() {
   $("attachBtn").disabled = false;
   $("attachBtn").onclick = () => $("attachInput").click();
   $("attachInput").onchange = (e) => {
-    for (const f of e.target.files || []) {
-      if (pendingAttachments.length >= 9) { toast(t("attach.maxCount", { count: 9 })); break; }
-      if (f.size > 20 * 1024 * 1024) { toast(t("attach.overSize", { name: f.name, mb: 20 })); continue; }
-      pendingAttachments.push({ file: f, uploading: false });
-    }
+    queueAttachmentFiles(e.target.files);
     e.target.value = "";
-    renderAttachList();
   };
+  // 拖拽上传：把文件拖到聊天区即加入待发送附件（覆盖层只在拖入文件时显示）
+  {
+    const chatEl = document.querySelector("main.chat");
+    const overlay = $("dropOverlay");
+    const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    let dragDepth = 0;
+    const endDrag = () => { dragDepth = 0; overlay.classList.add("hidden"); };
+    chatEl.addEventListener("dragenter", (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      dragDepth++;
+      overlay.classList.remove("hidden");
+    });
+    chatEl.addEventListener("dragover", (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = state.activeGroupId ? "copy" : "none";
+    });
+    chatEl.addEventListener("dragleave", (e) => {
+      if (!isFileDrag(e)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) overlay.classList.add("hidden");
+    });
+    chatEl.addEventListener("drop", (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      endDrag();
+      if (!state.activeGroupId) { toast(t("chat.selectGroup")); return; }
+      queueAttachmentFiles(e.dataTransfer.files);
+    });
+    // 阻止浏览器把文件当作页面打开（拖到聊天区外松手时不导航）
+    window.addEventListener("dragover", (e) => { if (isFileDrag(e)) e.preventDefault(); });
+    window.addEventListener("drop", (e) => { if (isFileDrag(e)) e.preventDefault(); });
+  }
   // 语音消息：点击开始录音，再点停止并加入附件（取消走状态条按钮）
   $("voiceBtn").disabled = false;
   $("voiceBtn").onclick = () => { if (voiceRecorder) stopVoiceRecording(); else startVoiceRecording(); };
@@ -11539,6 +11601,15 @@ function init() {
   $("lbZoomIn").onclick = () => setLbZoom(lbZoom * 1.25);
   $("lbZoomOut").onclick = () => setLbZoom(lbZoom / 1.25);
   $("lbZoomReset").onclick = () => setLbZoom(1);
+  $("lbRotate").onclick = () => { lbRot = (lbRot + 90) % 360; applyLbTransform(); };
+  $("lbDownload").onclick = () => {
+    const it = lbList[lbIndex];
+    if (!it || !it.url) return;
+    const a = document.createElement("a");
+    a.href = it.url;
+    a.download = it.name || "";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
   $("lightbox").addEventListener("click", (e) => { if (e.target === $("lightbox") || e.target === $("lbStage")) closeLightbox(); });
   $("lbStage").addEventListener("wheel", (e) => { e.preventDefault(); setLbZoom(lbZoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
   document.addEventListener("keydown", (e) => {
@@ -11549,6 +11620,7 @@ function init() {
     else if (e.key === "+" || e.key === "=") { e.preventDefault(); setLbZoom(lbZoom * 1.25); }
     else if (e.key === "-") { e.preventDefault(); setLbZoom(lbZoom / 1.25); }
     else if (e.key === "0") { e.preventDefault(); setLbZoom(1); }
+    else if (e.key === "r" || e.key === "R") { e.preventDefault(); lbRot = (lbRot + 90) % 360; applyLbTransform(); }
   }, true);
   { // 放大后拖拽平移
     const lbImg = $("lbImg");
