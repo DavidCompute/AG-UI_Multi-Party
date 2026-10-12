@@ -179,6 +179,20 @@ topbar（品牌 + 顶栏操作）
 退化为「只播放幻灯片、不显示备注区」）。为何 PPT 不走系统 PDF 阅读器：浏览器内置阅读器是黑盒，
 拿不到「当前第几页」也就无法把备注对到当前页、更无法做全屏播放。
 
+**在线播放增强（转场 + 分步，1.0.185）**：幻灯片 PDF 是「静态画面」——LibreOffice 转 PDF **会丢动画层**，
+所以最初播放只能逐页翻。现在改为：
+
+- **转场（页间切换）**：服务端解析每页 `<p:transition>`（preset / 方向 / 速度 / 自动前进毫秒），随清单下发；
+  前端在两页位图之间用 CSS 动画还原（fade / dissolve / push / cover / pull / wipe / zoom…；morph、3D 无）。
+- **分步（入场动画）**：服务端把每页的**入场**效果解析成有序步骤，生成一份「展开稿」——一页有 k 个入场步就复制成 k 页
+  （第 j 页只显现前 j 步的形状；逐段（`bldP build="p"`）的文本框按已显现段数**留白占位**，保持版式不跳）。
+  展开稿由 LibreOffice **一次**转成多页 PDF；前端「页内翻页 = 分步出现、跨页 = 转场」，并支持 `advanceAfter` **自动前进**。
+- 数据：`GET /ag-ui/preview/{id}/play`（清单 `{expanded, slideCount, pages[{slide,step,steps}], transitions[], notes[]}`）
+  + `GET /ag-ui/preview/{id}?play=true`（展开版 PDF）。两者同源同缓存。
+- 进入播放**先立刻用普通 PDF 出画面**（异步升级到展开版），全屏请求放在 `await` 之前（否则用户手势失效）。
+- **如实说明的边界**：位移（flyIn 的滑动轨迹）、退出、强调（spin/pulse/变色）无法用位图表达，退化为「直接出现 / 忽略」；
+  非 `.pptx`（`.ppt/.odp`）无清单，退化为逐页播放；解析失败一律降级，绝不影响普通预览。
+
 **关键实现约定（都不是随手写的，每条都对应一个坑）**：
 
 | 约定 | 为什么 |
@@ -194,6 +208,7 @@ topbar（品牌 + 顶栏操作）
 | 弹窗宽度用两段选择器 `.modal.doc-preview-modal` | `.modal` 基类在后面定义且同类选择器同权重，单类名会被它盖成 380px 宽（已踩：iframe 只剩 338px） |
 | `Esc` 在**捕获阶段**处理，且弹窗已隐藏时直接返回 | 不与下层弹窗（如库设置）争抢，不穿透 |
 | 为每一页单独的按键绑定都在 `msgDom` 末尾（`bindDocPreviewButtons`） | 消息用字符串拼 HTML + 插入后绑定，不走事件委派 |
+| 转场 / 分步需要把「展开稿」重新转一次 PDF（`.play.pdf` / `.play.json` 单独缓存） | LibreOffice 导 PDF 会丢动画层；把动画「烘焙」成多页是无需商业组件的可行上限。两者页数不同不能共用缓存；清单里的 `notes` 按**幻灯片**索引（展开后页≠幻灯片） |
 
 | 入口判定 | `previewableAttId()`：扩展名命中 `pdf/docx?/xlsx?/pptx?/odt/ods/odp/rtf`，
 且能解出站内附件 ID（`att_xxx`：取 `attachmentId`，外部桥接附件从 `url` 里解析）——
@@ -634,7 +649,7 @@ apiKey 不回显，仅提示“已配置”。
 | 数字员工 | `/ag-ui/agents`(GET/POST)、`/{id}`(PUT/DELETE)、`/register`、`/direct`（单聊） |
 | 组织编排 | `/ag-ui/agents/orchestrate(/stream)`、`/optimize-assignment` |
 | 记忆/搜索/附件 | `/ag-ui/memory/*`、`/ag-ui/upload`、`/ag-ui/files/*`、`/ag-ui/group/search` |
-| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（docx / xlsx / pptx → PDF 内联；`?notes=true` 演示文稿返回备注页 PDF；`?token=` 授权；权限同 `/files`；转换产物带缓存）；`GET /ag-ui/preview/{attachmentId}/notes`（演示文稿按幻灯片顺序返回备注文本数组）|
+| 办公文档在线查看 | `GET /ag-ui/preview/{attachmentId}`（`?play=true` 返回展开分步动画后的播放版 PDF）、`GET /ag-ui/preview/{attachmentId}/play`（播放清单：页→幻灯片/步骤、转场、备注）（docx / xlsx / pptx → PDF 内联；`?notes=true` 演示文稿返回备注页 PDF；`?token=` 授权；权限同 `/files`；转换产物带缓存）；`GET /ag-ui/preview/{attachmentId}/notes`（演示文稿按幻灯片顺序返回备注文本数组）|
 | 技能库试运行 | `POST /ag-ui/skills/{skillId}/run`（返回 `attachments[]` = 本次产出的文件；产物归属记在产出者名下，本人可下载 / 可预览）|
 | 知识库 / 图库 | `/ag-ui/kb`（创建/删除/文档）、`PUT /ag-ui/kb/{kbId}`（库设置：检索严格度）、`POST /ag-ui/kb/{kbId}/search`（试检索，只回片段预览）、`/ag-ui/image-libs`（创建/删除/图片）、`PUT /ag-ui/image-libs/{libId}`（图库设置：检索严格度）、`/ag-ui/image-libs/{libId}/assets/{assetId}/raw`（缩略图/原图）、`/ag-ui/images/search`（语义检索；**技能经自令牌调**，服务器路径只回自令牌；库设置里的试检索也走它） |
 | 管理 | `/ag-ui/admin/*`（用户/角色/执行/治理/状态/审计/桥/**存储**）、`/ag-ui/settings/model|branding` |

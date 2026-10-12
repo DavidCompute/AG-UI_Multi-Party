@@ -8937,6 +8937,11 @@ let docPdfNotes = null;   // string[] | null（null = 该格式不支持备注�
 let docRenderSeq = 0;
 let docPlaying = false;
 let docPlayNotesOn = false;
+// 播放增强（转场 + 分步）：展开版 PDF + 清单；非演示文稿 / 获取失败时为 null，退化为逐页播放
+let docPlayPdf = null;
+let docPlayManifest = null;
+let docPlayPage = 0;
+let docAutoTimer = null;
 
 /** 按状态码给本地化错因（优先本地文案：服务端错误消息只有中文，英文界面下会串味道）。 */
 function docPreviewErrorText(status, serverMsg) {
@@ -9079,8 +9084,22 @@ async function renderDocSlide() {
   $("docSlidePage").textContent = `${docPdfPage + 1} / ${docPdf.numPages}`;
 }
 
-/** 翻到上一页 / 下一页（播放态下同步刷新全屏画布）。 */
+/** 翻到上一页 / 下一页（播放态下按展开版分步 / 转场推进）。 */
 async function docSlideGo(delta) {
+  if (playModeActive()) {
+    const total = docPlayPdf.numPages;
+    const next = Math.min(Math.max(docPlayPage + delta, 0), total - 1);
+    if (next === docPlayPage) return;
+    const from = docPlayManifest ? docPlayManifest.pages[docPlayPage] : null;
+    const to = docPlayManifest ? docPlayManifest.pages[next] : null;
+    docPlayPage = next;
+    clearAutoAdvance();
+    await renderDocPlay();
+    if (from && to && to.slide !== from.slide) playTransition(docPlayManifest.transitions[to.slide]);
+    else playStepFlash();
+    scheduleAutoAdvance();
+    return;
+  }
   if (!docPdf) return;
   const next = Math.min(Math.max(docPdfPage + delta, 0), docPdf.numPages - 1);
   if (next === docPdfPage) return;
@@ -9091,23 +9110,40 @@ async function docSlideGo(delta) {
 
 /** 进入全屏播放模式（真·全屏 + 幻灯片铺满，控制条自动隐没）。 */
 async function startDocPlay() {
-  if (!docPdf) return;
+  if (!docPdf || !docPreviewCtx) return;
   docPlaying = true;
+  docPlayPage = docPdfPage;
   const overlay = $("docPlayOverlay");
   overlay.classList.remove("hidden");
   $("docPlayNotes").classList.toggle("hidden", !docPlayNotesOn);
-  // 真全屏：请求浏览器 Fullscreen API（桌面版 WebView2 也支持）。
+  // 真全屏：必须在用户手势内请求（放在 await 网络之前，否则手势失效）。
   // 失败也不影响——覆盖层本身已 position:fixed inset:0 铺满视口，只是浏览器还带着边框。
   if (!document.fullscreenElement) {
     const req = overlay.requestFullscreen || overlay.webkitRequestFullscreen;
     try { if (req) await req.call(overlay); } catch { /* 用户手势不足 / 不支持：忽略 */ }
   }
   showDocPlayBar();
-  await renderDocPlay();
+  await renderDocPlay();   // 先用普通 PDF 立即出画面（展开版可能还在转换）
+  // 再异步升级到「展开版」（转场 + 分步）；失败则保持逐页播放
+  if (isPresentationAtt(docPreviewCtx.name) && window.pdfjsLib && !docPlayPdf) {
+    try {
+      await loadPlayDeck(docPreviewCtx.attId);
+      if (!docPlaying) return;                 // 加载期间已退出：丢弃
+      docPlayPage = playPageForSlide(docPdfPage);
+      await renderDocPlay();
+      scheduleAutoAdvance();
+    } catch { docPlayPdf = null; docPlayManifest = null; }
+  }
 }
 
 /** 退出播放模式，回到弹窗内的当前页。 */
 function exitDocPlay() {
+  clearAutoAdvance();
+  // 播放版回到弹窗查看器：按当前幻灯片对齐到普通 PDF 的页
+  if (playModeActive() && docPlayManifest) {
+    const p = docPlayManifest.pages[docPlayPage];
+    if (p && docPdf && p.slide < docPdf.numPages) docPdfPage = p.slide;
+  }
   docPlaying = false;
   $("docPlayOverlay").classList.add("hidden");
   resetDocPlayBar();
@@ -9117,23 +9153,16 @@ function exitDocPlay() {
 
 /** 渲染播放模式的全屏画布：铺满整个视口（全屏下即整块屏幕），按比例居中，比例不符时留有黑边。 */
 async function renderDocPlay() {
-  if (!docPdf) return;
+  const pdf = playModeActive() ? docPlayPdf : docPdf;
+  if (!pdf) return;
+  const pageIdx = playModeActive() ? docPlayPage : docPdfPage;
   const canvas = $("docPlayCanvas");
-  const seq = ++docRenderSeq;
   const w = Math.max(window.innerWidth, 200);
   const h = Math.max(window.innerHeight, 150);
-  try {
-    const page = await docPdf.getPage(docPdfPage + 1);
-    if (seq !== docRenderSeq) return;
-    const vp = fitDocCanvas(canvas, page, w, h);
-    const ctx = canvas.getContext("2d");
-    const dpr = window.devicePixelRatio || 1;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);   // 同弹窗内查看器：DPR 缩放，防高分屏画到 1/4
-    await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  } catch { /* 取消 / 失败：保持上一帧 */ }
-  if (seq !== docRenderSeq) return;
-  $("docPlayPage").textContent = `${docPdfPage + 1} / ${docPdf.numPages}`;
-  $("docPlayNotes").textContent = (docPdfNotes && docPdfNotes[docPdfPage]) || "";
+  const ok = await renderPageToCanvas(pdf, pageIdx, canvas, w, h);
+  if (!ok) return;
+  $("docPlayPage").textContent = playLabel(pageIdx, pdf.numPages);
+  $("docPlayNotes").textContent = playNotesFor(pageIdx);
 }
 
 /** 播放控制条：鼠标移动时显现，静置 3 秒后自动隐没（让幻灯片铺满屏幕）。 */
@@ -9154,14 +9183,111 @@ function resetDocPlayBar() {
 function toggleDocPlayNotes() {
   docPlayNotesOn = !docPlayNotesOn;
   const el = $("docPlayNotes");
-  el.textContent = (docPdfNotes && docPdfNotes[docPdfPage]) || "";
+  el.textContent = playNotesFor(playIndex());
   el.classList.toggle("hidden", !docPlayNotesOn);
+}
+
+/** 播放模式是否使用「展开版」播放 PDF（转场 + 分步）。 */
+function playModeActive() { return docPlaying && !!docPlayPdf; }
+function playIndex() { return playModeActive() ? docPlayPage : docPdfPage; }
+
+/** 载入「展开版」播放 PDF + 清单（仅演示文稿；失败则退化为逐页播放）。 */
+async function loadPlayDeck(attId) {
+  const headers = { Authorization: "Bearer " + (state.token || "") };
+  const mr = await fetch(authedAssetUrl(`/ag-ui/preview/${encodeURIComponent(attId)}/play`), { headers });
+  if (!mr.ok) throw new Error("HTTP " + mr.status);
+  const manifest = await mr.json();
+  const pr = await fetch(authedAssetUrl(`/ag-ui/preview/${encodeURIComponent(attId)}?play=true`), { headers });
+  if (!pr.ok) throw new Error("HTTP " + pr.status);
+  const buf = await pr.arrayBuffer();
+  if (docPlayPdf) { try { docPlayPdf.destroy(); } catch { /* 忽略 */ } docPlayPdf = null; }
+  docPlayPdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+  // 仅当清单确实对应演示文稿（有页映射）时才启用增强；否则退化为逐页播放
+  docPlayManifest = (manifest && Array.isArray(manifest.pages) && manifest.pages.length && manifest.slideCount > 0) ? manifest : null;
+}
+/** 从「幻灯片序号」映射到展开版页序（该幻灯片第 1 步）。 */
+function playPageForSlide(slideIdx) {
+  if (!docPlayManifest) return 0;
+  const i = docPlayManifest.pages.findIndex((p) => p.slide === slideIdx && p.step === 0);
+  return i < 0 ? 0 : i;
+}
+/** 播放页码文案：有清单时显示「幻灯片 i / N（步 j/k）」。 */
+function playLabel(idx, total) {
+  const m = docPlayManifest;
+  if (playModeActive() && m) {
+    const p = m.pages[idx];
+    if (p) return p.steps > 1 ? `${p.slide + 1} / ${m.slideCount} · ${p.step + 1}/${p.steps}` : `${p.slide + 1} / ${m.slideCount}`;
+  }
+  return `${idx + 1} / ${total}`;
+}
+/** 当前播放页对应的备注（展开版按幻灯片取；否则按页取）。 */
+function playNotesFor(idx) {
+  const m = docPlayManifest;
+  if (playModeActive() && m) { const p = m.pages[idx]; return (p && m.notes && m.notes[p.slide]) || ""; }
+  return (docPdfNotes && docPdfNotes[idx]) || "";
+}
+
+/* ---- 转场：把 OOXML 转场（preset + dir）映射为 CSS 动画 ---- */
+const DOC_TRANSITION_CLASSES = ["doc-tr-fade", "doc-tr-zoom", "doc-tr-push-l", "doc-tr-push-r", "doc-tr-push-u", "doc-tr-push-d"];
+function transitionClass(tr) {
+  if (!tr || !tr.preset) return "";
+  const preset = String(tr.preset).toLowerCase();
+  if (preset === "cut") return "";
+  const dir = String(tr.dir || tr.direction || "").toLowerCase();
+  const side = dir.startsWith("l") ? "l" : dir.startsWith("r") ? "r" : dir.startsWith("t") ? "u" : dir.startsWith("b") ? "d" : "";
+  if (preset === "zoom") return "doc-tr-zoom";
+  if (preset === "push" || preset === "cover" || preset === "pull" || preset === "wipe" || preset === "split" || preset === "blinds" || preset === "checker" || preset === "strips" || preset === "comb" || preset === "randombar")
+    return side ? "doc-tr-push-" + side : "doc-tr-fade";
+  return "doc-tr-fade"; // fade / dissolve / newsflash / wheel / circle / diamond / plus / wedge … → 近似淡入
+}
+function runCanvasAnimation(cls) {
+  const c = $("docPlayCanvas");
+  if (!c || !cls) return;
+  c.classList.remove(...DOC_TRANSITION_CLASSES);
+  void c.offsetWidth; // 强制重排以重启动画
+  c.classList.add(cls);
+  setTimeout(() => c.classList.remove(cls), 600);
+}
+/** 跨幻灯片：按该页转场。 */
+function playTransition(tr) { runCanvasAnimation(transitionClass(tr)); }
+/** 页内分步：短淡入，避免硬切。 */
+function playStepFlash() { runCanvasAnimation("doc-tr-fade"); }
+/** 自动前进：到达幻灯片最后一步且该页设了 advanceAfter 时，定时翻到下一张。 */
+function scheduleAutoAdvance() {
+  clearAutoAdvance();
+  const m = docPlayManifest;
+  if (!playModeActive() || !m) return;
+  const p = m.pages[docPlayPage];
+  if (!p || p.step < p.steps - 1) return;
+  const tr = m.transitions[p.slide];
+  if (!tr || !tr.advanceAfterMs) return;
+  docAutoTimer = setTimeout(() => docSlideGo(1), tr.advanceAfterMs);
+}
+function clearAutoAdvance() { if (docAutoTimer) { clearTimeout(docAutoTimer); docAutoTimer = null; } }
+
+/** 子文档页渲染（辅助）：把某 PDF 的某页画到给定画布。 */
+async function renderPageToCanvas(pdf, pageIdx, canvas, w, h) {
+  const seq = ++docRenderSeq;
+  try {
+    const page = await pdf.getPage(pageIdx + 1);
+    if (seq !== docRenderSeq) return false;
+    const vp = fitDocCanvas(canvas, page, w, h);
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    return seq === docRenderSeq;
+  } catch { return false; }
 }
 
 /** 释放幻灯片查看器持有的 PDF / 画布，回到干净状态。 */
 function resetDocViewer() {
   docRenderSeq++;
+  clearAutoAdvance();
   if (docPdf) { try { docPdf.destroy(); } catch { /* 忽略 */ } docPdf = null; }
+  if (docPlayPdf) { try { docPlayPdf.destroy(); } catch { /* 忽略 */ } docPlayPdf = null; }
+  docPlayManifest = null;
+  docPlayPage = 0;
   docPdfPage = 0;
   docPdfNotes = null;
   if (docPlaying) { docPlaying = false; $("docPlayOverlay").classList.add("hidden"); }

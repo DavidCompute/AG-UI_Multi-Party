@@ -78,7 +78,7 @@ public static class AttachmentApi
         // 为什么不复用 /files/{id}/{name}：那个端点按原格式返回（浏览器拿到 docx 只会下载 / 存盘），
         // 语义也不同——这里**只**返回可内联渲染的 PDF（含 .pdf 直通）。
         // 鉴权：与下载完全一致（同一段 CanAccessAttachment），否则就是一个绕过权限的读取口子。
-        root.MapGet("/preview/{attachmentId}", async (string attachmentId, bool? notes, HttpContext ctx, AttachmentStore store,
+        root.MapGet("/preview/{attachmentId}", async (string attachmentId, bool? notes, bool? play, HttpContext ctx, AttachmentStore store,
             IGroupStore groupStore, AuthService auth, AgentCatalog catalog,
             AguiGroupChat.Hub.Messaging.GroupHub hub, IServiceProvider services) =>
         {
@@ -94,6 +94,20 @@ public static class AttachmentApi
                 return Results.Json(new AguiError(ErrorCodes.DocumentPreviewFailed,
                         "服务端未启用文档在线查看（缺少预览转换服务注册），请下载后用本地应用打开"),
                     statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            // 播放版（?play=1）：展开演示文稿的分步动画后的多页 PDF
+            if (play == true)
+            {
+                var deck = await converter.GetOrCreatePlayAsync(attachmentId, path!, ctx.RequestAborted);
+                if (!deck.Ok)
+                    return Results.Json(new AguiError(
+                            deck.Failure == PreviewFailure.Unsupported ? ErrorCodes.BadRequest : ErrorCodes.DocumentPreviewFailed,
+                            deck.Message),
+                        statusCode: PreviewStatusCode(deck.Failure));
+                ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                ctx.Response.Headers["Cache-Control"] = "private, max-age=300";
+                return Results.File(deck.PdfPath!, "application/pdf", enableRangeProcessing: true);
+            }
 
             // notes 用可空类型：非可空值类型在 minimal API 里会被当成「必填查询参数」，缺失时直接 400
             var outcome = await converter.GetOrCreateAsync(attachmentId, path!, notes ?? false, ctx.RequestAborted);
@@ -111,8 +125,6 @@ public static class AttachmentApi
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // 演示文稿「演讲者备注」：按幻灯片顺序返回备注文本数组（第 i 项 = 第 i 张幻灯片）。
-        // 只支持 .pptx；其它类型 / 无备注统一返回空数组（前端据此只播放幻灯片、不显示备注区）。
-        // 鉴权与下载 / 预览完全一致（同一段 ResolveAndAuthorize），否则就是一个绕过权限的读取口子。
         root.MapGet("/preview/{attachmentId}/notes", (string attachmentId, HttpContext ctx, AttachmentStore store,
             IGroupStore groupStore, AuthService auth, AgentCatalog catalog,
             AguiGroupChat.Hub.Messaging.GroupHub hub) =>
@@ -121,6 +133,28 @@ public static class AttachmentApi
             if (denied is not null) return denied;
             var notes = PresentationNotes.TryExtract(path!);
             return Results.Ok(new { notes = notes ?? (IReadOnlyList<string>)Array.Empty<string>() });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // 演示文稿「在线播放清单」：页→幻灯片/步骤 映射 + 每页备注 + 每张幻灯片的切换。
+        // 与 ?play=1 的 PDF 页序严格对应（同一份 GetOrCreatePlayAsync 产物）。鉴权与下载 / 预览一致。
+        root.MapGet("/preview/{attachmentId}/play", async (string attachmentId, HttpContext ctx, AttachmentStore store,
+            IGroupStore groupStore, AuthService auth, AgentCatalog catalog,
+            AguiGroupChat.Hub.Messaging.GroupHub hub, IServiceProvider services) =>
+        {
+            var (path, denied) = ResolveAndAuthorize(attachmentId, ctx, store, groupStore, auth, catalog, hub);
+            if (denied is not null) return denied;
+            var converter = services.GetService<IDocPreviewConverter>();
+            if (converter is null)
+                return Results.Json(new AguiError(ErrorCodes.DocumentPreviewFailed,
+                        "服务端未启用文档在线查看（缺少预览转换服务注册），请下载后用本地应用打开"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            var deck = await converter.GetOrCreatePlayAsync(attachmentId, path!, ctx.RequestAborted);
+            if (!deck.Ok)
+                return Results.Json(new AguiError(
+                        deck.Failure == PreviewFailure.Unsupported ? ErrorCodes.BadRequest : ErrorCodes.DocumentPreviewFailed,
+                        deck.Message),
+                    statusCode: PreviewStatusCode(deck.Failure));
+            return Results.Ok(deck.Manifest);
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
     }
 

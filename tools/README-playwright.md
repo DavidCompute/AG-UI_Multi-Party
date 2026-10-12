@@ -108,3 +108,18 @@ SAMPLES=../artifacts/e2e HEADLESS=1 node ui-doc-slides.mjs    # 23 项：办公�
 - **不要并发跑**：多个脚本同时打同一后端会因时序争用出现偶发失败，请逐个串行执行。
 - `ui-group-files` / `ui-doc-slides` 需要样例文件（`artifacts/e2e/sample.docx`、`sample-notes.pptx`；`artifacts/` 已 gitignore）。
 - `ui-ux-round6.mjs` 的「下载原图」用 Playwright 下载事件校验，无需额外依赖。
+
+---
+
+## 演示文稿在线播放（转场 + 分步）端到端核对
+
+`e2e-play-check.mjs`：登录 → 建临时知聚 → 上传一份 pptx → 取**播放清单**与**展开版 PDF**，打印
+`expanded / slideCount / pages / transitions / 每张幻灯片页数`，并落一份 `artifacts/pptx-play/play.pdf`。
+
+```bash
+cd tools
+node e2e-play-check.mjs ../artifacts/pptx-play/deck.pptx   # 需一份带转场/动画的 pptx
+```
+
+> 展开版校对：把落盘的 `play.pdf` 拷进容器用 `pdftoppm` 数页，应等于清单的 `pages.length`
+> （例：3 张幻灯片 / 6 步 → 展开版 6 页，原件只有 3 页）。

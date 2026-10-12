@@ -1,5 +1,6 @@
 using AguiGroupChat.Hub.Infra;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace AguiGroupChat.Web;
 
@@ -41,6 +42,10 @@ public interface IDocPreviewConverter
     /// <summary>取该附件的可内联 PDF：命中缓存直接返回，否则转换并缓存。
     /// <paramref name="notes"/> 为 true 且文件是演示文稿时，返回「备注页」PDF（每页幻灯片 + 该页演讲者备注）。</summary>
     Task<PreviewOutcome> GetOrCreateAsync(string attachmentId, string sourcePath, bool notes = false, CancellationToken ct = default);
+
+    /// <summary>取该附件的「播放」PDF：把分步动画展开成多页（见 <see cref="PresentationPlayback"/>）后的 PDF，并给出页→幻灯片/步骤清单。
+    /// 非 .pptx 退回普通 PDF + 空清单；无需展开时即原件 PDF。</summary>
+    Task<PlayDeckOutcome> GetOrCreatePlayAsync(string attachmentId, string sourcePath, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -183,6 +188,97 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
         }
     }
 
+    /// <summary>清单 JSON 序列化选项：camelCase（前端直接消费）。</summary>
+    private static readonly JsonSerializerOptions ManifestJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    /// <summary>
+    /// 播放版：展开演示文稿的分步动画后转 PDF（多页 = 幻灯片×步骤），并缓存「PDF + 清单」。
+    /// 与普通预览共用同一把 <see cref="_gate"/>（LibreOffice 并发跑会互踩）。
+    /// </summary>
+    public async Task<PlayDeckOutcome> GetOrCreatePlayAsync(string attachmentId, string sourcePath, CancellationToken ct = default)
+    {
+        if (!IsPreviewable(sourcePath))
+            return PlayDeckOutcome.Fail(PreviewFailure.Unsupported,
+                $"该文件类型不支持在线播放（{Path.GetExtension(sourcePath)}），请下载后用本地应用打开");
+
+        var source = new FileInfo(sourcePath);
+        if (!source.Exists)
+            return PlayDeckOutcome.Fail(PreviewFailure.MissingSource, "源文件不存在或已删除");
+
+        // 仅 .pptx 有转场 / 分步可解析：其它格式退回普通 PDF，清单为空（前端按无增强播放）
+        if (!PresentationPlayback.Supports(sourcePath))
+        {
+            var plain = await GetOrCreateAsync(attachmentId, sourcePath, false, ct).ConfigureAwait(false);
+            return plain.Ok
+                ? PlayDeckOutcome.Success(plain.PdfPath!, EmptyManifest())
+                : PlayDeckOutcome.Fail(plain.Failure, plain.Message);
+        }
+
+        var pdfPath = Path.Combine(_cacheRoot, SafeCacheKey(attachmentId) + ".play.pdf");
+        var manifestPath = pdfPath + ".json";
+        var stampPath = pdfPath + ".stamp";
+        var stamp = $"{source.Length}:{source.LastWriteTimeUtc.Ticks}";
+
+        if (IsFreshCache(pdfPath, stampPath, stamp) && TryReadManifest(manifestPath) is { } cached)
+            return PlayDeckOutcome.Success(pdfPath, cached);
+
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            PruneIfDue();
+            if (IsFreshCache(pdfPath, stampPath, stamp) && TryReadManifest(manifestPath) is { } cached2)
+                return PlayDeckOutcome.Success(pdfPath, cached2);
+
+            Directory.CreateDirectory(_cacheRoot);
+            var tmpDir = Path.Combine(_cacheRoot, "tmp-" + IdGenerator.NewId());
+            Directory.CreateDirectory(tmpDir);
+            try
+            {
+                var built = PresentationPlayback.TryBuild(sourcePath, tmpDir);
+                var convertSource = built?.ExpandedPath ?? sourcePath;
+                var result = await _runner.ConvertToPdfAsync(convertSource, tmpDir, false, ct).ConfigureAwait(false);
+                if (!result.Ok)
+                {
+                    _logger.LogWarning("播放版转换失败：{Source}（{Detail}）", sourcePath, result.Detail);
+                    return PlayDeckOutcome.Fail(result.Unavailable ? PreviewFailure.Unavailable
+                        : PreviewFailure.ConversionFailed, result.Detail);
+                }
+
+                var produced = Directory.EnumerateFiles(tmpDir, "*.pdf").FirstOrDefault();
+                if (produced is null)
+                    return PlayDeckOutcome.Fail(PreviewFailure.ConversionFailed,
+                        "转换未产出 PDF（文档可能已损坏或含不支持的内容）");
+
+                File.Move(produced, pdfPath, overwrite: true);
+                var manifest = built?.Manifest ?? EmptyManifest();
+                await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, ManifestJsonOptions), ct).ConfigureAwait(false);
+                await File.WriteAllTextAsync(stampPath, stamp, ct).ConfigureAwait(false);
+                return PlayDeckOutcome.Success(pdfPath, manifest);
+            }
+            finally
+            {
+                try { Directory.Delete(tmpDir, recursive: true); } catch { /* 清理失败不影响结果 */ }
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static PlayManifest EmptyManifest()
+        => new(false, 0, Array.Empty<PlayPage>(), Array.Empty<SlideTransition?>(), Array.Empty<string>());
+
+    private static PlayManifest? TryReadManifest(string manifestPath)
+    {
+        try
+        {
+            if (!File.Exists(manifestPath)) return null;
+            return JsonSerializer.Deserialize<PlayManifest>(File.ReadAllText(manifestPath), ManifestJsonOptions);
+        }
+        catch { return null; }
+    }
+
     /// <summary>清空全部预览缓存（系统初始化「清空一切」用）。</summary>
     public void ClearAll()
     {
@@ -231,7 +327,8 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
                 if (File.GetLastWriteTimeUtc(file) >= cutoff) continue;
                 // 只碰自己的派生数据：.stamp 是元数据，.pdf 是产物，两者同生命周期
                 if (!file.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
-                    && !file.EndsWith(".stamp", StringComparison.OrdinalIgnoreCase)) continue;
+                    && !file.EndsWith(".stamp", StringComparison.OrdinalIgnoreCase)
+                    && !file.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) continue;
                 try { File.Delete(file); } catch { /* 忽略 */ }
             }
             foreach (var dir in Directory.EnumerateDirectories(_cacheRoot, "tmp-*"))

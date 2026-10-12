@@ -1,3 +1,25 @@
+# AG-UI 群聊桌面版 1.0.185 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.185 Release Notes (current Windows desktop release)
+
+**版本说明**：演示文稿在线播放支持转场与逐条动画（无需商业组件）——服务端把分步动画展开成多页 PDF，前端页间转场、页内分步，并支持自动前进。
+**Version note**: presentation playback now supports slide transitions and per-step animations (no commercial components) — the server expands build steps into extra PDF pages; the viewer plays transitions between slides and steps within a slide, with auto-advance.
+
+## 演示文稿在线播放：转场 + 逐条动画
+# Presentation playback: transitions + step animations
+
+中文：
+- **转场**：读每页的 `<p:transition>`（fade / push / wipe / cover / dissolve / zoom… + 方向 / 速度）→ 播放时用 CSS 动画还原。
+- **逐条动画**：读 `<p:timing>` 的入场效果，把一页展开成多页（第 j 页只显现前 j 步；逐段要点按段留白占位，版式不跳）；播放时“页内翻页”就是逐条出现。
+- **自动前进**：若该页设了 `advanceAfter`，播完本页最后一步后自动翻到下一张。
+- **进入即出画面**：点播放先立刻用普通 PDF 出画面，随后异步升级到展开版；全屏依旧生效。
+- **如实说明**：位移（飞入轨迹）、退出、强调（旋转/放大/变色）无法用位图表达，退化为“直接出现”；非 .pptx（.ppt/.odp）退化为逐页播放。
+English:
+- **Transitions**: read each slide's `<p:transition>` (fade / push / wipe / cover / dissolve / zoom…, with direction/speed) and replay it with CSS animations.
+- **Step animations**: read entrance effects from `<p:timing>` and expand a slide into several pages (page j shows only the first j steps; per-paragraph builds leave the later paragraphs blank but space-reserving so the layout doesn't shift); “next” inside a slide is the step-by-step reveal.
+- **Auto-advance**: if a slide sets `advanceAfter`, playback moves to the next slide automatically after its last step.
+- **Instant feedback**: entering play shows the plain PDF immediately, then upgrades to the expanded deck asynchronously; fullscreen still works.
+- **Honest limits**: motion paths (fly-in), exits and emphasis (spin/scale/color) can't be expressed with raster pages — they degrade to “just appear”; non-`.pptx` (`.ppt/.odp`) falls back to page-by-page.
+
 # AG-UI 群聊桌面版 1.0.184 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.184 Release Notes (current Windows desktop release)
 

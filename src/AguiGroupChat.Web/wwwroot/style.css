@@ -857,6 +857,19 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .doc-play { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 /* 不要 max-width/max-height 限制：JS 已按视口尺寸等比算出画布大小，限制反而会让它填不满。 */
 .doc-play-canvas { background: #fff; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+/* 播放转场（页间切换 / 页内分步）：把 PPT 的 <p:transition> 近似为 CSS 动画 */
+@keyframes docTrFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes docTrZoom { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
+@keyframes docTrPushL { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes docTrPushR { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes docTrPushU { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes docTrPushD { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+.doc-play-canvas.doc-tr-fade { animation: docTrFade .45s ease; }
+.doc-play-canvas.doc-tr-zoom { animation: docTrZoom .45s ease; }
+.doc-play-canvas.doc-tr-push-l { animation: docTrPushL .5s ease; }
+.doc-play-canvas.doc-tr-push-r { animation: docTrPushR .5s ease; }
+.doc-play-canvas.doc-tr-push-u { animation: docTrPushU .5s ease; }
+.doc-play-canvas.doc-tr-push-d { animation: docTrPushD .5s ease; }
 .doc-play-notes {
   position: fixed; left: 0; right: 0; bottom: 56px; max-height: 26vh; overflow: auto; white-space: pre-wrap;
   padding: 10px 18px; font-size: 14px; line-height: 1.5; color: #eaeaea;

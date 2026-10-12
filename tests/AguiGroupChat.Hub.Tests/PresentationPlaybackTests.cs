@@ -1,0 +1,148 @@
+using System.Text.Json;
+using AguiGroupChat.Agents.Tools;
+using AguiGroupChat.Web;
+using DocumentFormat.OpenXml.Packaging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace AguiGroupChat.Hub.Tests;
+
+/// <summary>
+/// 演示文稿「在线播放」的展开与清单：用内置 pptx 技能生成一份**真实带转场/动画**的稿子，
+/// 再跑 <see cref="PresentationPlayback.TryBuild"/>，断言清单页序与展开稿结构。
+/// 渲染层面的验证（LibreOffice 能否打开展开稿、页数对不对）由手动 E2E 覆盖——这里只保证结构正确。
+/// </summary>
+[Collection(EnvVarCollection.Name)] // 改 AGUI_PPTX_OUT（进程级）→ 与其它改环境变量的用例串行
+public sealed class PresentationPlaybackTests
+{
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "AguiGroupChat.slnx")))
+            dir = dir.Parent;
+        Assert.NotNull(dir);
+        return dir!.FullName;
+    }
+
+    private static string SkillSource()
+    {
+        var path = Path.Combine(RepoRoot(), "tools", "pptx-skills", "pptx_deck.cs");
+        Assert.True(File.Exists(path), "找不到技能源文件：" + path);
+        return File.ReadAllText(path);
+    }
+
+    private static DotnetSkillHost NewHost()
+        => new(NullLogger<DotnetSkillHost>.Instance,
+            Path.Combine(Path.GetTempPath(), "agui-pptx-skill-nuget-cache")); // 全进程共用一个 NuGet 缓存根
+
+    private static string AnimatedDeckJson() => JsonSerializer.Serialize(new
+    {
+        title = "播放测试",
+        transition = new { preset = "fade", duration = 0.4 },
+        slides = new object[]
+        {
+            new { type = "cover", title = "封面", subtitle = "副标题", animate = new { preset = "flyIn", direction = "bottom" } },
+            new { type = "content", title = "要点", bullets = new[] { "甲", "乙", "丙" }, animate = new { preset = "fade", byParagraph = true } },
+            new { type = "end", title = "谢谢", subtitle = "完", transition = new { preset = "push", direction = "left" }, animate = "fadeOut" },
+        },
+    });
+
+    private static string RenderAnimatedDeck()
+    {
+        var outDir = Path.Combine(Path.GetTempPath(), "agui-play-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outDir);
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        try
+        {
+            var result = NewHost().Run(SkillSource(), AnimatedDeckJson(), CancellationToken.None);
+            Assert.DoesNotContain("编译失败", result);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            return doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+    }
+
+    [Fact]
+    public void Expansion_ProducesMultiPageManifest_AndParseablePackage()
+    {
+        var deckPath = RenderAnimatedDeck();
+        // 先留一份原始稿供人工核对（即使后续断言失败也能拿到）
+        try { var art0 = Path.Combine(RepoRoot(), "artifacts", "pptx-play"); Directory.CreateDirectory(art0); File.Copy(deckPath, Path.Combine(art0, "deck.pptx"), true); } catch { /* 忽略 */ }
+        var outDir = Path.Combine(Path.GetTempPath(), "agui-play-out-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outDir);
+
+        var built = PresentationPlayback.TryBuild(deckPath, outDir);
+        Assert.NotNull(built);
+        var (expandedPath, manifest) = built!.Value;
+
+        // 清单：3 张幻灯片；转场解析到（首张继承全局 fade，末张 push）
+        Assert.True(manifest.Expanded, "应发生分步展开");
+        Assert.Equal(3, manifest.SlideCount);
+        Assert.Equal(3, manifest.Transitions.Count);
+        Assert.Equal("fade", manifest.Transitions[0]!.Preset);
+        Assert.Equal("push", manifest.Transitions[2]!.Preset);
+        Assert.Equal("l", manifest.Transitions[2]!.Direction);
+
+        // 页数 > 幻灯片数（至少一页有多步），且每张幻灯片的页是连续的 0..n-1
+        Assert.True(manifest.Pages.Count > manifest.SlideCount,
+            $"应有分步展开，实际 pages={manifest.Pages.Count}");
+        Assert.Equal(3, manifest.Pages.Select(p => p.Slide).Distinct().Count());
+        Assert.Equal(Enumerable.Range(0, manifest.SlideCount), manifest.Pages.Select(p => p.Slide).Distinct());
+        foreach (var g in manifest.Pages.GroupBy(p => p.Slide))
+        {
+            Assert.Equal(Enumerable.Range(0, g.Count()), g.Select(p => p.Step));
+            Assert.All(g, p => Assert.Equal(g.Count(), p.Steps));
+        }
+
+        // 展开稿存在且是结构完好的 pptx：幻灯片部件数 == 清单页数
+        Assert.NotNull(expandedPath);
+        Assert.True(File.Exists(expandedPath), "展开稿未生成");
+        using var pres = PresentationDocument.Open(expandedPath!, false);
+        Assert.Equal(manifest.Pages.Count, pres.PresentationPart!.SlideParts.Count());
+
+        // 留一份到 artifacts 供手动渲染核对（LibreOffice 打开 / 转 PDF 页数）
+        try
+        {
+            var art = Path.Combine(RepoRoot(), "artifacts", "pptx-play");
+            Directory.CreateDirectory(art);
+            File.Copy(deckPath, Path.Combine(art, "deck.pptx"), true);
+            File.Copy(expandedPath!, Path.Combine(art, "deck-expanded.pptx"), true);
+            File.WriteAllText(Path.Combine(art, "manifest.json"),
+                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true }));
+        }
+        catch { /* 仅用于人工核对，失败不影响用例 */ }
+    }
+
+    [Fact]
+    public void WithoutAnimation_NoExpansion_AndSinglePagePerSlide()
+    {
+        var outDir = Path.Combine(Path.GetTempPath(), "agui-play-plain-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outDir);
+        Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", outDir);
+        string deckPath;
+        try
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                title = "无动画",
+                slides = new object[] { new { type = "cover", title = "封面" }, new { type = "content", title = "要点", bullets = new[] { "甲" } } },
+            });
+            var result = NewHost().Run(SkillSource(), json, CancellationToken.None);
+            using var doc = JsonDocument.Parse(result);
+            Assert.True(doc.RootElement.GetProperty("ok").GetBoolean(), result);
+            deckPath = doc.RootElement.GetProperty("produce_file").GetProperty("path").GetString()!;
+        }
+        finally { Environment.SetEnvironmentVariable("AGUI_PPTX_OUT", null); }
+
+        var built = PresentationPlayback.TryBuild(deckPath, outDir);
+        Assert.NotNull(built);
+        var (expandedPath, manifest) = built!.Value;
+
+        Assert.False(manifest.Expanded);
+        Assert.Null(expandedPath); // 无需展开 → 直接转原件
+        Assert.Equal(2, manifest.Pages.Count);
+        Assert.All(manifest.Pages, p => Assert.Equal(1, p.Steps));
+        Assert.Equal(new[] { 0, 1 }, manifest.Pages.Select(p => p.Slide));
+    }
+}
