@@ -74,7 +74,7 @@
         <span class="chat-header-ops">
           <button id="searchBtn" class="chip-btn" data-i18n-title="chat.search" disabled>🔍</button>
           <button id="groupFilesBtn" class="chip-btn" data-i18n-title="gf.tip" disabled>📁</button>
-          <button id="selectBtn" class="chip-btn" data-i18n-title="sel.btn" data-i18n-label="sel.btn" disabled>☑</button>
+          <button id="selectBtn" class="chip-btn" data-i18n-title="sel.btn" data-i18n-label="sel.btn" aria-pressed="false" disabled>☑</button>
           <button id="topicSummaryBtn" class="chip-btn hidden" data-i18n-title="topic.summaryTip" title="📌 话题进度小结">📌</button>
           <button id="groupSettingsBtn" class="chip-btn" data-i18n-title="chat.settings" disabled>⚙</button>
           <button id="collapseMembersBtn" class="chip-btn panel-collapse-btn" data-i18n-title="chat.collapseMembers" data-i18n-label="chat.collapseMembers" aria-pressed="false">»</button>
@@ -83,7 +83,7 @@
       </div>
       <div id="topicBar" class="topic-bar hidden"></div>
       <!-- 多选工具条：进入多选模式后出现（复制 / 转发 / 删除 + 全选 / 取消） -->
-      <div id="selectBar" class="select-bar hidden">
+      <div id="selectBar" class="select-bar hidden" role="toolbar" data-i18n-label="sel.toolbar">
         <span id="selectCount" class="sel-count"></span>
         <button id="selectAllBtn" class="chip-btn" type="button" data-i18n="sel.selectAll">全选</button>
         <button id="selectCopyBtn" class="chip-btn" type="button" data-i18n="sel.copy" disabled>复制</button>
@@ -136,7 +136,7 @@
           <button id="canvasBtn" class="composer-plus-item" type="button" data-i18n-title="chat.canvas" data-i18n-label="chat.canvas" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg><span data-i18n="chat.canvasShort">画布</span></button>
           <button id="emojiBtn" class="composer-plus-item" type="button" data-i18n-title="chat.emoji" data-i18n-label="chat.emoji">😀 <span data-i18n="chat.emojiShort">表情</span></button>
         </div>
-        <div id="emojiPicker" class="emoji-picker hidden" role="listbox" data-i18n-label="chat.emoji"></div>
+        <div id="emojiPicker" class="emoji-picker hidden" role="group" data-i18n-label="chat.emoji"></div>
         <div id="voiceStatus" class="voice-status hidden"><span class="rec-dot">●</span> <span data-i18n="chat.recording">正在录音</span> <span id="voiceTimer" class="rec-timer">0:00</span> <button id="voiceCancel" class="chip-btn" type="button" data-i18n="chat.cancelRecording">取消</button></div>
         <div id="attachList" class="attach-list"></div>
         <input type="file" id="attachInput" multiple hidden />

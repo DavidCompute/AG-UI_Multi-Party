@@ -1,3 +1,23 @@
+# AG-UI 群聊桌面版 1.0.184 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.184 Release Notes (current Windows desktop release)
+
+**版本说明**：代码审核修复（消息多选 / 灯箱 / 表情）——切话题退出多选、按钮按可执行性启用、外部图片下载提示、表情浮层随场景收起。
+**Version note**: Review fixes (multi-select / lightbox / emoji) — leaving multi-select on topic switch, eligibility-based buttons, external-image download hint, and dismissing the emoji panel on context changes.
+
+## 审核修复
+# Review fixes
+
+中文：
+- **切话题退出多选**：切换话题会自动退出多选，避免工具条计数（总数）与实际操作（仅当前话题）不一致。
+- **按钮按可执行性启用**：未选中时复制 / 转发 / 删除禁用；删除仅在存在可撤回项（本人 / 管理员且 3 分钟内）时可用。
+- **外部图片下载**：图片查看的「下载原图」对站外图片改为新标签打开并提示右键另存（浏览器不允许跨源直接下载）。
+- **表情浮层**：切换知聚或发送消息后自动收起。
+English:
+- **Exit multi-select on topic switch**: switching topics now leaves selection mode, so the toolbar count can't drift from what the actions actually apply to.
+- **Eligibility-based buttons**: copy / forward / delete are disabled with nothing selected, and delete is enabled only when a recallable item (your own within 3 minutes, or as admin) is selected.
+- **External-image download**: “Download original” opens off-site images in a new tab with a right-click-to-save hint (browsers block cross-origin downloads).
+- **Emoji panel**: now dismissed when switching circles or after sending.
+
 # AG-UI 群聊桌面版 1.0.183 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.183 Release Notes (current Windows desktop release)
 

@@ -6364,6 +6364,7 @@ async function selectGroup(gid) {
   draftEl.dispatchEvent(new Event("input", { bubbles: true }));
   closeDrawers(); // 窄屏：选中知聚后收起左侧抽屉
   closeSearchNav(); // 切知聚：搜索结果导航条与高亮失效
+  $("emojiPicker")?.classList.add("hidden"); // 切知聚：收起表情浮层
   if (selectMode) exitSelectMode(); // 切知聚：退出多选（选择不跨知聚）
   maybeFocusComposer(); // 按偏好把光标放进输入框（触屏 / 有弹窗时不抢）
 }
@@ -6532,6 +6533,7 @@ async function selectTopic(topicId, opts) {
     return;
   }
   state.activeTopicId = topicId;
+  if (selectMode) exitSelectMode(); // 切话题：退出多选（选择不跨话题，否则计数与实际操作不一致）
   r.allLoaded = false; // 切换话题后允许加载更早（实际是否有更早由分页返回纠正）
   // 记住话题选择：切知聚 / 再次进入该知聚时自动恢复（localStorage 按用户持久化）
   state.topicMemory.set(gid, topicId);
@@ -7807,6 +7809,7 @@ function enterSelectMode() {
   selectMode = true;
   selectedMsgIds.clear();
   $("selectBtn")?.classList.add("on");
+  $("selectBtn")?.setAttribute("aria-pressed", "true");
   $("selectBar")?.classList.remove("hidden");
   vscroll.force = true; // 逐条渲染需带勾选框：强制整表重建（否则窗口未变会早退，不重渲染）
   scheduleVirtualRender();
@@ -7818,6 +7821,7 @@ function exitSelectMode() {
   selectedMsgIds.clear();
   forwardTargetGid = null;
   $("selectBtn")?.classList.remove("on");
+  $("selectBtn")?.setAttribute("aria-pressed", "false");
   $("selectBar")?.classList.add("hidden");
   $("forwardModal")?.classList.add("hidden");
   vscroll.force = true; // 退出：去掉勾选框 / 选中高亮，同样需强制重建
@@ -7839,15 +7843,25 @@ function selectedMessagesInOrder() {
   const tid = state.activeTopicId || "main";
   return r.messages.filter((m) => selectedMsgIds.has(m.id) && !m.sys && (m.topicId || "main") === tid);
 }
-/** 刷新工具条：计数 + 按钮可用性。 */
+/** 已选中且可撤回的消息（本人 / 管理员 + 3 分钟内），与服务端一致。 */
+function recallEligibleSelected() {
+  const gid = state.activeGroupId;
+  const meRole = room(gid)?.members.find((x) => x.memberId === state.memberId)?.role;
+  return selectedMessagesInOrder().filter((m) => !m.recalled && !m.streaming
+    && (m.senderId === state.memberId || meRole === "owner" || meRole === "admin")
+    && (Number(m.timestamp) > 0 && Date.now() - Number(m.timestamp) <= RECALL_WINDOW_MS));
+}
+/** 刷新工具条：计数 + 按可执行性点亮按钮（复制 / 转发需有文本，删除需有可撤回项）。 */
 function updateSelectBar() {
   const n = selectedMsgIds.size;
   const cnt = $("selectCount");
   if (cnt) cnt.textContent = t("sel.count", { n });
-  for (const id of ["selectCopyBtn", "selectForwardBtn", "selectDeleteBtn"]) {
-    const b = $(id);
-    if (b) b.disabled = n === 0;
-  }
+  const hasText = selectedMessagesInOrder().some((m) => !m.recalled && displayTextOf(m));
+  const canRecall = recallEligibleSelected().length > 0;
+  const set = (id, on) => { const b = $(id); if (b) b.disabled = !on; };
+  set("selectCopyBtn", hasText);
+  set("selectForwardBtn", hasText);
+  set("selectDeleteBtn", canRecall);
 }
 /** 全选 / 全不选：作用于当前话题内已加载的非系统消息。 */
 function toggleSelectAllMessages() {
@@ -7875,10 +7889,7 @@ async function copySelectedMessages() {
 /** 批量删除（撤回）：仅对可撤回的消息（本人 / 管理员 + 3 分钟内）尝试，服务端再校验。 */
 async function deleteSelectedMessages() {
   const gid = state.activeGroupId;
-  const meRole = room(gid)?.members.find((x) => x.memberId === state.memberId)?.role;
-  const eligible = selectedMessagesInOrder().filter((m) => !m.recalled && !m.streaming
-    && (m.senderId === state.memberId || meRole === "owner" || meRole === "admin")
-    && (Number(m.timestamp) > 0 && Date.now() - Number(m.timestamp) <= RECALL_WINDOW_MS));
+  const eligible = recallEligibleSelected();
   if (eligible.length === 0) { toast(t("sel.deleteNone")); return; }
   if (!await uiConfirm({ message: t("sel.deleteConfirm", { n: eligible.length }), danger: true })) return;
   let ok = 0, failed = 0;
@@ -10295,6 +10306,7 @@ async function sendMessage() {
     renderAttachList();
     hideSendRetryBar(); // 发送成功：清掉上一次的失败提示
     hideMentionSuggest(); // 发送后草稿清空，建议条一并收起
+    $("emojiPicker")?.classList.add("hidden"); // 发送后收起表情浮层
     // @ 选择保留（按知聚记忆）：连续对话无需每次重新 @；点输入框上方的 chips ✕ 可随时取消
     renderMentionChips();
     renderMembers();
@@ -11855,6 +11867,12 @@ function init() {
   $("lbDownload").onclick = () => {
     const it = lbList[lbIndex];
     if (!it || !it.url) return;
+    // <a download> 仅对同源 / data: / blob: 生效；跳源（外部图片）会被忽略 → 新标签打开并提示另存
+    if (/^https?:\/\//i.test(it.url) && !it.url.startsWith(window.location.origin + "/")) {
+      toast(t("lb.downloadExternal"));
+      window.open(it.url, "_blank", "noopener");
+      return;
+    }
     const a = document.createElement("a");
     a.href = it.url;
     a.download = it.name || "";

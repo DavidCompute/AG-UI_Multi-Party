@@ -53,6 +53,8 @@ try {
   const contents = [`第一条 ${token} A`, `第二条 ${token} B`, "第三条 C", "第四条 D", "第五条 E"];
   for (const c of contents) { await api("POST", "/ag-ui/group/message/send", { groupId: gidA, userId, content: c }); await sleep(20); }
   const searchA = async () => (await api("GET", `/ag-ui/group/${gidA}/messages/search?q=${encodeURIComponent(token)}&count=50`)).body || [];
+  const topicRes = await api("POST", "/ag-ui/group/topic/create", { groupId: gidA, name: "R8话题", operatorId: userId });
+  check("准备：为知聚 A 建一个附加话题", topicRes.status === 200, String(topicRes.body?.topicId || topicRes.status));
   check("准备：知聚 A 有 5 条消息，其中 2 条含关键词", (await searchA()).length === 2);
   const searchB = async () => (await api("GET", `/ag-ui/group/${gidB}/messages/search?q=${encodeURIComponent(token)}&count=50`)).body || [];
 
@@ -76,6 +78,12 @@ try {
   }));
   check("进入多选：工具条出现、按钮点亮", entered.barVisible && entered.btnOn);
   check("每条消息出现勾选框且可点选", entered.checkboxes >= 5 && entered.selectable >= 5, JSON.stringify({ cb: entered.checkboxes, sel: entered.selectable }));
+  const disabled0 = await page.evaluate(() => ({
+    copy: document.getElementById("selectCopyBtn").disabled,
+    fwd: document.getElementById("selectForwardBtn").disabled,
+    del: document.getElementById("selectDeleteBtn").disabled,
+  }));
+  check("未选中时复制 / 转发 / 删除均禁用", disabled0.copy && disabled0.fwd && disabled0.del, JSON.stringify(disabled0));
 
   /* ============ 逐条点选 ============ */
   await page.locator("#messages .msg").nth(0).click();
@@ -147,6 +155,17 @@ try {
   await page.keyboard.press("Escape");
   await sleep(200);
   check("Esc 退出多选模式", await page.evaluate(() => document.getElementById("selectBar").classList.contains("hidden")));
+
+  /* ============ 切话题退出多选（避免计数与实际操作不一致） ============ */
+  await page.locator("#selectBtn").click();
+  await page.waitForSelector("#messages .msg .select-check", { timeout: 8000 });
+  await sleep(150);
+  await page.locator("#messages .msg").nth(0).click();
+  await sleep(120);
+  check("切话题前已选中 1 条", await page.evaluate(() => document.getElementById("selectCount").textContent.includes("1")));
+  await page.locator("#topicBar .topic-chip", { hasText: "R8话题" }).first().click();
+  await sleep(400);
+  check("切换话题后退出多选（工具条收起、按钮灭）", await page.evaluate(() => document.getElementById("selectBar").classList.contains("hidden") && !document.getElementById("selectBtn").classList.contains("on")));
 
   check("无控制台报错", errors.length === 0, errors.slice(0, 3).join(" | "));
   console.log(`\n=== ${pass} 通过 / ${fail} 失败 ===`);
