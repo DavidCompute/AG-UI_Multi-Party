@@ -267,7 +267,7 @@ public sealed class OfficePreviewConverter : IDocPreviewConverter, IDisposable
     }
 
     private static PlayManifest EmptyManifest()
-        => new(false, 0, Array.Empty<PlayPage>(), Array.Empty<SlideTransition?>(), Array.Empty<string>());
+        => new(false, 0, Array.Empty<PlayPage>(), Array.Empty<SlideTransition?>(), Array.Empty<string>(), Array.Empty<IReadOnlyList<AnimatedShape>?>());
 
     private static PlayManifest? TryReadManifest(string manifestPath)
     {

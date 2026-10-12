@@ -1,3 +1,23 @@
+# AG-UI 群聊桌面版 1.0.186 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.186 Release Notes (current Windows desktop release)
+
+**版本说明**：演示文稿在线播放升级为「底图 + 形状精灵」混合渲染——整形状动画（飞入位移 / 强调 / 退出）现在能真播；逐段构建仍走分步展开。
+**Version note**: presentation playback now uses a “base raster + shape sprite” hybrid — whole-shape animations (fly-in motion, emphasis, exit) really play, while per-paragraph builds keep the step expansion.
+
+## 形状级动画（底图 + 精灵）
+# Shape-level animation (base raster + sprites)
+
+中文：
+- **底图 + 精灵**：只有整形状动画的页，播放稿只输出 1 页「移除被动画形状」的底图；前端把普通页与底图页在形状框内取差得到**透明精灵**，再对精灵播真动画。因为是同一套渲染，**静止时与底图像素级对齐**，也不依赖前端字体。
+- **真动画**：飞入（按方向位移）、淡入淡出、旋转、缩放、退出；`<p:transition>` 转场照旧。
+- **逐段构建**（要点逐条出现）无法用整形状精灵表达 → 自动回退到已发布的分步展开。
+- 实测移除被动画形状后，**形状框之外的版面 0 像素差异**，所以底图与精灵拼接干净。
+English:
+- **Base raster + sprites**: for slides with whole-shape animations only, the play deck emits a single “base” page with those shapes removed; the viewer diffs the normal page against the base inside each shape's box to build a **transparent sprite**, then plays the real animation on it. Same renderer source ⇒ **pixel-aligned at rest**, no font-metric dependency.
+- **Real animations**: fly-in (directional motion), fade in/out, spin, pulse, exit; `<p:transition>` slide transitions unchanged.
+- **Per-paragraph builds** can't be expressed as whole-shape sprites → they fall back to the previously shipped step expansion.
+- Measured: outside the shape boxes, removing the animated shapes changes **0 pixels**, so base + sprite compositing is clean.
+
 # AG-UI 群聊桌面版 1.0.185 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.185 Release Notes (current Windows desktop release)
 

@@ -6,18 +6,38 @@ namespace AguiGroupChat.Web;
 /// <summary>一张幻灯片的切换（转场）信息；无 &lt;p:transition&gt; 时为 null（等价于「无切换」，前端按硬切处理）。</summary>
 public sealed record SlideTransition(string Preset, string? Direction, string? Orientation, string? Spokes, string? Speed, int AdvanceAfterMs, bool AdvanceOnClick);
 
-/// <summary>播放 PDF 的第 i 页归属于哪张幻灯片（<paramref name="Slide"/>，0 基）、是该页的第几个动画步骤（<paramref name="Step"/>，0 基）、该幻灯片共几步（<paramref name="Steps"/>）。</summary>
+/// <summary>播放 PDF 的第 i 页归属于哪张幻灯片（<paramref name="Slide"/>，0 基）、是该页的第几个步骤（<paramref name="Step"/>，0 基）、该幻灯片共几步（<paramref name="Steps"/>）。</summary>
 public sealed record PlayPage(int Slide, int Step, int Steps);
 
-/// <summary>演示文稿在线播放清单：PDF 页 → 幻灯片/步骤 的映射 + 每页备注 + 每张幻灯片的切换。</summary>
+/// <summary>
+/// 一张幻灯片里被动画的**形状**（方案 C：前端以「底图 + 形状精灵」播放真动画）。
+/// <paramref name="X"/>/<paramref name="Y"/>/<paramref name="W"/>/<paramref name="H"/> 是相对幻灯片尺寸的比例（0..1），
+/// 前端据此在底图上定位精灵（精灵像素由「普通页 ⊖ 底图页」在同一矩形内取差得到）。
+/// <param name="RevealStep">：1 基的入场步序；0 = 一开场就可见（只有退出 / 强调动画）。
+/// <paramref name="EffectStep"/>：该效果**本身**在第几步播放（入场 / 退出 / 强调都用它定时）。
+/// <paramref name="Effect"/>：entr / exit / emph；<paramref name="Preset"/>：flyIn/fade/wipe/spin/pulse/fillColor/appear…
+/// </summary>
+public sealed record AnimatedShape(
+    int Spid, int RevealStep, int EffectStep,
+    double X, double Y, double W, double H,
+    string Kind, string Effect, string Preset, string? Direction,
+    int DurationMs, int DelayMs);
+
+/// <summary>
+/// 演示文稿在线播放清单：PDF 页 → 幻灯片/步骤 的映射 + 每页备注 + 每张幻灯片的切换。
+/// <paramref name="Animations"/>：第 i 张幻灯片的形状动画清单；**非 null ⇒ 该页为「精灵模式」**
+/// （播放 PDF 里该幻灯片只有 1 页 = 移除全部被动画形状的底图，前端在底图上按步播放精灵动画）；
+/// null ⇒ 「分步模式」（播放 PDF 已把该页展开成多页，逐页翻即分步出现，兼容逐段构建等无法精灵化的情形）。
+/// </summary>
 public sealed record PlayManifest(
     bool Expanded,
     int SlideCount,
     IReadOnlyList<PlayPage> Pages,
     IReadOnlyList<SlideTransition?> Transitions,
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes,
+    IReadOnlyList<IReadOnlyList<AnimatedShape>?> Animations);
 
-/// <summary>播放构建结果：展开后的 pptx 路径（无需展开时为 null——直接转原件）+ 清单 + 失败原因。</summary>
+/// <summary>播放构建结果：展开稿路径（无需变化时为 null——直接转原件）+ 清单 + 失败原因。</summary>
 public sealed record PlayDeckOutcome(string? PdfPath, PlayManifest? Manifest, PreviewFailure Failure, string Message)
 {
     public bool Ok => PdfPath is not null;
@@ -26,14 +46,17 @@ public sealed record PlayDeckOutcome(string? PdfPath, PlayManifest? Manifest, Pr
 }
 
 /// <summary>
-/// 演示文稿「在线播放」支持：
+/// 演示文稿「在线播放」支持（无需商业组件）：
 ///
-/// <para><b>A. 转场</b>——解析每张幻灯片的 <c>&lt;p:transition&gt;</c>（preset / 方向 / 速度 / 自动前进毫秒），
-/// 前端据此在两页位图之间做 CSS 过渡。</para>
+/// <para><b>A. 转场</b>——解析每张幻灯片的 <c>&lt;p:transition&gt;</c>，前端在两页位图之间做 CSS 过渡。</para>
 ///
-/// <para><b>B. 入场分步</b>——解析 <c>&lt;p:timing&gt;</c> 的 mainSeq：把每个「点击」当成一步；
-/// 生成一份「展开稿」= 每张有分步动画的幻灯片被复制成 k 张（第 j 张只显现前 j 步的形状、标题外的段落）。
-/// 展开稿由 LibreOffice <b>一次</b>转成多页 PDF —— 前端「页内翻页 = 分步出现」。位移/强调/退出无法用位图表达，退化为「出现」。</para>
+/// <para><b>B. 分步（逐段构建等）</b>——解析 <c>&lt;p:timing&gt;</c>，把一页复制成 k 张（第 j 张只显现前 j 步的形状、
+/// 逐段文本框按已显现段数留白），LibreOffice 一次转成多页 PDF；前端「页内翻页 = 分步出现」。</para>
+///
+/// <para><b>C. 精灵（真动画）</b>——对只有「整形状」动画的页：只输出 1 页**底图**（移除全部被动画形状），
+/// 并把被动画形状的几何与动画规格写进清单；前端用「普通页 ⊖ 底图页」取差得到**透明精灵**，
+/// 再对精灵播真动画（位移 / 淡入淡出 / 旋转 / 缩放 / 变色）。因为精灵像素来自同一套渲染，
+/// 静止时与底图**像素级对齐**，且不依赖前端字体度量。</para>
 ///
 /// <para>只支持 .pptx（OOXML zip）；解析失败一律降级（不展开 / 无转场），绝不影响普通预览。</para>
 /// </summary>
@@ -52,7 +75,7 @@ public static class PresentationPlayback
         => !string.IsNullOrEmpty(path) && string.Equals(Path.GetExtension(path), ".pptx", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 构建播放产物：写出「展开稿」到 <paramref name="outDir"/>（无需展开则返回 null）并给出清单。
+    /// 构建播放产物：写出「播放稿」到 <paramref name="outDir"/>（无需变化则返回 null）并给出清单。
     /// 非 .pptx / 解析异常 → 返回 null（调用方直接用原件转 PDF）。
     /// </summary>
     public static (string? ExpandedPath, PlayManifest Manifest)? TryBuild(string sourcePath, string outDir)
@@ -63,34 +86,43 @@ public static class PresentationPlayback
             var entries = ReadEntries(sourcePath);
             var slideOrder = ReadSlideOrder(entries);
             if (slideOrder.Count == 0) return null;
+            var (sldW, sldH) = ReadSlideSize(entries);
 
             var notes = PresentationNotes.TryExtract(sourcePath) is { } extracted ? new List<string>(extracted) : new List<string>();
             var transitions = new List<SlideTransition?>(slideOrder.Count);
-            var variants = new List<(string OrigPath, List<List<string>> Steps, HashSet<string> Para)>(slideOrder.Count);
-            foreach (var target in slideOrder)
+            var pages = new List<PlayPage>();
+            var animations = new List<IReadOnlyList<AnimatedShape>?>();
+            var variants = new List<Variant>(slideOrder.Count);
+            var changed = false;
+
+            for (var i = 0; i < slideOrder.Count; i++)
             {
+                var target = slideOrder[i];
                 var xml = LoadXml(entries, target);
                 transitions.Add(xml is null ? null : ParseTransition(xml));
-                var (steps, para) = xml is null
-                    ? (new List<List<string>>(), new HashSet<string>(StringComparer.Ordinal))
-                    : ParseTiming(xml);
-                variants.Add((target, steps, para));
-            }
-
-            var pages = new List<PlayPage>(slideOrder.Count);
-            for (var i = 0; i < variants.Count; i++)
-            {
-                var stepCount = Math.Max(1, variants[i].Steps.Count);
-                for (var s = 0; s < stepCount; s++) pages.Add(new PlayPage(i, s, stepCount));
+                var anim = xml is null ? Anim.Empty : ParseAnimations(xml, sldW, sldH);
+                // 精灵模式：有入场分步 / 动画，且不含逐段构建（逐段无法用整形状精灵表达）
+                var sprite = anim.StepCount > 0 && !anim.HasParagraphBuild && anim.Shapes.Count > 0;
+                variants.Add(new Variant(target, anim.Steps, anim.ParaSpids, sprite));
+                if (sprite)
+                {
+                    // 精灵模式：该页在播放 PDF 里只有 1 页（底图），但动画步数仍是 StepCount
+                    pages.Add(new PlayPage(i, 0, Math.Max(1, anim.StepCount)));
+                    animations.Add(anim.Shapes);
+                    changed = true;
+                }
+                else
+                {
+                    var stepCount = Math.Max(1, anim.StepCount);
+                    for (var s = 0; s < stepCount; s++) pages.Add(new PlayPage(i, s, stepCount));
+                    animations.Add(null);
+                    if (stepCount > 1) changed = true;
+                }
             }
             NormalizeNotes(notes, slideOrder.Count);
 
-            var expanded = pages.Count > slideOrder.Count || variants.Any(v => v.Steps.Count > 1);
-            string? expandedPath = null;
-            if (expanded)
-                expandedPath = WriteExpanded(sourcePath, outDir, entries, slideOrder, variants);
-
-            var manifest = new PlayManifest(expanded, slideOrder.Count, pages, transitions, notes);
+            string? expandedPath = changed ? WriteDeck(sourcePath, outDir, entries, variants) : null;
+            var manifest = new PlayManifest(changed, slideOrder.Count, pages, transitions, notes, animations);
             return (expandedPath, manifest);
         }
         catch
@@ -98,6 +130,8 @@ public static class PresentationPlayback
             return null; // 任何异常都降级为「普通预览」——播放增强不该拖垮查看
         }
     }
+
+    private readonly record struct Variant(string OrigPath, List<List<string>> Steps, HashSet<string> Para, bool Sprite);
 
     private static void NormalizeNotes(List<string> notes, int slideCount)
     {
@@ -121,21 +155,29 @@ public static class PresentationPlayback
         return new SlideTransition(preset, Attr("dir"), Attr("orient"), Attr("spokes"), tr.Attribute("spd")?.Value, advMs, advClick);
     }
 
-    // ================= 解析：分步（p:timing） =================
+    // ================= 解析：动画（p:timing） =================
+
+    private readonly record struct Anim(List<List<string>> Steps, HashSet<string> ParaSpids, List<AnimatedShape> Shapes, int StepCount, bool HasParagraphBuild)
+    {
+        public static readonly Anim Empty = new(new List<List<string>>(), new HashSet<string>(), new List<AnimatedShape>(), 0, false);
+    }
 
     /// <summary>
-    /// 解析入场分步：沿 mainSeq 下的效果节点（nodeType=clickEffect/afterEffect/withEffect）按文档顺序收集，
-    /// 每一个「入场」效果视为一步（withEffect 并入上一步）；退出 / 强调不产生可见状态变化，不产生步骤。
-    /// 返回：步骤列表（每步显现的 spid 集合）+ 逐段构建（build=p）的 spid 集合（来自 timing 根的 p:bldLst）。
+    /// 解析动画：沿 mainSeq 下的效果节点（clickEffect 起新步 / afterEffect 起新步 / withEffect 并入上一步）收集。
+    /// 同时给出：
+    ///   - <c>Steps</c>：每步显现的 spid 集合（供「分步模式」构造展开稿与「底图」移除形状）；
+    ///   - <c>ParaSpids</c>：逐段构建（build=p）的形状 id；
+    ///   - <c>Shapes</c>：形状级动画清单（几何 + 效果 + 时长/延迟），供「精灵模式」；
+    ///   - <c>HasParagraphBuild</c>：出现逐段构建 → 该页不做精灵模式。
     /// </summary>
-    private static (List<List<string>> Steps, HashSet<string> ParaSpids) ParseTiming(XDocument slideXml)
+    private static Anim ParseAnimations(XDocument slideXml, double sldW, double sldH)
     {
-        var result = new List<List<string>>();
+        var steps = new List<List<string>>();
         var para = new HashSet<string>(StringComparer.Ordinal);
+        var shapes = new List<AnimatedShape>();
         var timing = slideXml.Root?.Element(P + "timing");
-        if (timing is null) return (result, para);
+        if (timing is null) return new Anim(steps, para, shapes, 0, false);
 
-        // 逐段构建声明在 timing 根的 <p:bldLst> 上（不在各步里）
         foreach (var b in timing.Element(P + "bldLst")?.Descendants(P + "bldP") ?? Enumerable.Empty<XElement>())
             if (string.Equals(b.Attribute("build")?.Value, "p", StringComparison.Ordinal)
                 && b.Attribute("spid")?.Value is { Length: > 0 } pid)
@@ -143,34 +185,127 @@ public static class PresentationPlayback
 
         var mainSeq = timing.Descendants(P + "cTn")
             .FirstOrDefault(c => string.Equals(c.Attribute("nodeType")?.Value, "mainSeq", StringComparison.Ordinal));
-        if (mainSeq is null) return (result, para);
+        if (mainSeq is null) return new Anim(steps, para, shapes, 0, false);
 
-        // 入场效果 = 一步（退出 / 强调不产生可见状态变化，不计入）
+        var geometry = ShapeGeometry(slideXml, sldW, sldH);
+
         foreach (var ctn in mainSeq.Descendants(P + "cTn").ToList())
         {
             var nodeType = ctn.Attribute("nodeType")?.Value;
             if (nodeType != "clickEffect" && nodeType != "afterEffect" && nodeType != "withEffect") continue;
-            if (!string.Equals(ctn.Attribute("presetClass")?.Value, "entr", StringComparison.Ordinal)) continue;
             var ids = new List<string>();
-            foreach (var t in ctn.Descendants(P + "spTgt"))
+            foreach (var tg in ctn.Descendants(P + "spTgt"))
             {
-                var v = t.Attribute("spid")?.Value;
+                var v = tg.Attribute("spid")?.Value;
                 if (!string.IsNullOrEmpty(v) && !ids.Contains(v)) ids.Add(v);
             }
             if (ids.Count == 0) continue;
-            result.Add(ids);
+
+            if (nodeType != "withEffect" || steps.Count == 0) steps.Add(new List<string>(ids));
+            else foreach (var id in ids) if (!steps[^1].Contains(id)) steps[^1].Add(id);
+
+            var revealStep = steps.Count; // 1 基
+            var (preset, dir) = EffectName(ctn);
+            var effect = ctn.Attribute("presetClass")?.Value ?? "entr";
+            if (effect is not ("entr" or "exit" or "emph")) effect = "entr";
+            var duration = MaxInt(ctn, P + "cTn", "dur");
+            var delay = FirstInt(ctn, P + "cond", "delay");
+            foreach (var id in ids)
+                if (int.TryParse(id, out var spid) && geometry.TryGetValue(id, out var g))
+                    shapes.Add(new AnimatedShape(spid, effect == "entr" ? revealStep : 0, revealStep, g.X, g.Y, g.W, g.H, g.Kind, effect, preset, dir, duration, delay));
         }
-        return (result, para);
+        return new Anim(steps, para, shapes, steps.Count, shapes.Any(s => para.Contains(s.Spid.ToString())));
     }
 
-    // ================= 展开稿写出 =================
+    /// <summary>效果节点的可读名 + 方向（b/l/t/r）：位移 / 淡入淡出 / 擦除 / 旋转 / 缩放 / 变色…
+    /// 方向编码与预设相关：位移用位掩码（1=上 2=右 4=下 8=左），擦除看 filter 的 wipe(up|down|left|right)。</summary>
+    private static (string Preset, string? Dir) EffectName(XElement ctn)
+    {
+        var cls = ctn.Attribute("presetClass")?.Value ?? "entr";
+        var sub = int.TryParse(ctn.Attribute("presetSubtype")?.Value, out var s) ? s : 0;
+        var motion = ctn.Descendants(P + "attrName").Any(n => n.Value is "ppt_x" or "ppt_y");
+        if (motion)
+        {
+            // 位移：presetSubtype 位掩码
+            var dir = sub switch { 1 => "t", 2 => "r", 4 => "b", 8 => "l", _ => (string?)null };
+            return (cls == "exit" ? "flyOut" : "flyIn", dir);
+        }
+        var filter = ctn.Descendants(P + "animEffect").Select(a => a.Attribute("filter")?.Value).FirstOrDefault(f => !string.IsNullOrEmpty(f));
+        if (filter is not null)
+        {
+            if (filter.StartsWith("fade", StringComparison.OrdinalIgnoreCase)) return ("fade", null);
+            if (filter.StartsWith("dissolve", StringComparison.OrdinalIgnoreCase)) return ("dissolve", null);
+            if (filter.StartsWith("wipe", StringComparison.OrdinalIgnoreCase))
+            {
+                var inner = filter.Length > 5 ? filter[5..].TrimEnd(')').Trim().ToLowerInvariant() : "";
+                var d = inner switch { "up" => "t", "down" => "b", "left" => "l", "right" => "r", _ => (string?)null };
+                return ("wipe", d);
+            }
+        }
+        if (ctn.Descendants(P + "animRot").Any()) return ("spin", null);
+        if (ctn.Descendants(P + "animScale").Any()) return ("pulse", null);
+        if (ctn.Descendants(P + "animClr").Any()) return ("fillColor", null);
+        return ("appear", null);
+    }
 
-    private static string WriteExpanded(string sourcePath, string outDir, Dictionary<string, byte[]> entries,
-        List<string> slideOrder, List<(string OrigPath, List<List<string>> Steps, HashSet<string> Para)> variants)
+    private static int FirstInt(XElement root, XName name, string attr)
+    {
+        foreach (var e in root.Descendants(name))
+            if (int.TryParse(e.Attribute(attr)?.Value, out var v)) return v;
+        return 0;
+    }
+
+    /// <summary>取最大整数（时长：一个效果里有 set（dur=1）与 animEffect（真时长），取最大才是真时长）。</summary>
+    private static int MaxInt(XElement root, XName name, string attr)
+    {
+        var max = 0;
+        foreach (var e in root.Descendants(name))
+            if (int.TryParse(e.Attribute(attr)?.Value, out var v) && v > max) max = v;
+        return max;
+    }
+
+    /// <summary>幻灯片尺寸（EMU）。缺失时退回 16:9 标准尺寸。</summary>
+    private static (double W, double H) ReadSlideSize(Dictionary<string, byte[]> entries)
+    {
+        var presPath = FindEntry(entries, "ppt/presentation.xml");
+        var sz = presPath is null ? null : LoadXml(entries, presPath)?.Root?.Element(P + "sldSz");
+        var w = double.TryParse(sz?.Attribute("cx")?.Value, out var cx) ? cx : 12192000.0;
+        var h = double.TryParse(sz?.Attribute("cy")?.Value, out var cy) ? cy : 6858000.0;
+        return (w, h);
+    }
+
+    /// <summary>spid → 形状几何（相对幻灯片的比例）+ 类型（shape / picture / table / group）。</summary>
+    private static Dictionary<string, (double X, double Y, double W, double H, string Kind)> ShapeGeometry(XDocument slideXml, double sldW, double sldH)
+    {
+        var map = new Dictionary<string, (double, double, double, double, string)>(StringComparer.Ordinal);
+        var spTree = slideXml.Descendants(P + "spTree").FirstOrDefault();
+        if (spTree is null) return map;
+        foreach (var el in spTree.Elements())
+        {
+            var local = el.Name.LocalName;
+            var kind = local switch { "sp" => "shape", "pic" => "picture", "graphicFrame" => "table", "grpSp" => "group", _ => null };
+            if (kind is null) continue;
+            var id = ShapeId(el);
+            if (id is null) continue;
+            var xfrm = el.Descendants(A + "xfrm").FirstOrDefault();
+            var off = xfrm?.Element(A + "off");
+            var ext = xfrm?.Element(A + "ext");
+            if (off is null || ext is null) continue;
+            if (!double.TryParse(off.Attribute("x")?.Value, out var x)) continue;
+            if (!double.TryParse(off.Attribute("y")?.Value, out var y)) continue;
+            if (!double.TryParse(ext.Attribute("cx")?.Value, out var w)) continue;
+            if (!double.TryParse(ext.Attribute("cy")?.Value, out var h)) continue;
+            map[id] = (x / sldW, y / sldH, w / sldW, h / sldH, kind);
+        }
+        return map;
+    }
+
+    // ================= 写出「播放稿」 =================
+
+    private static string WriteDeck(string sourcePath, string outDir, Dictionary<string, byte[]> entries, List<Variant> variants)
     {
         Directory.CreateDirectory(outDir);
 
-        // presentation.xml / rels / content-types 都要改：这里读成 XDocument 便于插节点
         var presPath = FindEntry(entries, "ppt/presentation.xml") ?? throw new InvalidOperationException("缺少 presentation.xml");
         var presRelsPath = FindEntry(entries, "ppt/_rels/presentation.xml.rels") ?? throw new InvalidOperationException("缺少 presentation rels");
         var ctPath = FindEntry(entries, "[Content_Types].xml") ?? throw new InvalidOperationException("缺少 [Content_Types].xml");
@@ -180,32 +315,32 @@ public static class PresentationPlayback
         var ct = LoadXml(entries, ctPath)!;
         var sldIdLst = pres.Root?.Element(P + "sldIdLst") ?? throw new InvalidOperationException("缺少 sldIdLst");
 
-        // 每张幻灯片的 rId / sldId 锚点：先快照，避免边插边枚举导致位置错位
+        // 锚点先快照，避免边插边枚举导致位置错位
         var anchors = sldIdLst.Elements(P + "sldId").ToList();
-
-        var usedSldIds = anchors
-            .Select(e => int.TryParse(e.Attribute("id")?.Value, out var v) ? v : 255)
-            .DefaultIfEmpty(255).Max();
+        var usedSldIds = anchors.Select(e => int.TryParse(e.Attribute("id")?.Value, out var v) ? v : 255).DefaultIfEmpty(255).Max();
         var relSeq = 1;
         var partSeq = 1;
 
-        // 逐张幻灯片生成「第 2..k 步」的额外部件（第 1 步复用原部件，只改其 XML）
         for (var i = 0; i < variants.Count; i++)
         {
-            var (origPath, steps, para) = variants[i];
-            var stepCount = Math.Max(1, steps.Count);
+            var v = variants[i];
+            var stepCount = Math.Max(1, v.Steps.Count);
+            if (v.Sprite)
+            {
+                // 精灵模式：该页只留 1 页 = 移除全部被动画形状的底图
+                entries[v.OrigPath] = Serialize(BuildVariantXml(entries, v.OrigPath, v.Steps, v.Para, 0));
+                continue;
+            }
             if (stepCount <= 1) continue;
 
             var anchor = anchors.ElementAtOrDefault(i);
-
             for (var s = 1; s < stepCount; s++)
             {
-                var variantXml = BuildVariantXml(entries, origPath, steps, para, s + 1); // 第 s+1 步（1 基）
+                var variantXml = BuildVariantXml(entries, v.OrigPath, v.Steps, v.Para, s + 1); // 第 s+1 步（1 基）
                 var partName = $"ppt/slides/slidePlay{partSeq}.xml";
                 var relsName = $"ppt/slides/_rels/slidePlay{partSeq}.xml.rels";
                 entries[partName] = Serialize(variantXml);
-                var relsBytes = BuildVariantRels(entries, origPath);
-                if (relsBytes is not null) entries[relsName] = relsBytes;
+                if (BuildVariantRels(entries, v.OrigPath) is { } relsBytes) entries[relsName] = relsBytes;
 
                 var rid = $"rIdPlay{relSeq++}";
                 presRels.Root?.Add(new XElement(Rel + "Relationship",
@@ -215,12 +350,9 @@ public static class PresentationPlayback
 
                 var sldId = new XElement(P + "sldId", new XAttribute("id", ++usedSldIds), new XAttribute(R + "id", rid));
                 if (anchor is not null) anchor.AddAfterSelf(sldId); else sldIdLst.Add(sldId);
-
                 partSeq++;
             }
-
-            // 第 1 步：原部件改成「只显现第 1 步」的形态
-            entries[origPath] = Serialize(BuildVariantXml(entries, origPath, steps, para, 1));
+            entries[v.OrigPath] = Serialize(BuildVariantXml(entries, v.OrigPath, v.Steps, v.Para, 1));
         }
 
         entries[presPath] = Serialize(pres);
@@ -228,20 +360,24 @@ public static class PresentationPlayback
         entries[ctPath] = Serialize(ct);
 
         var outPath = Path.Combine(outDir, "play-" + Guid.NewGuid().ToString("N")[..8] + ".pptx");
-        using (var fs = File.Create(outPath))
-        using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
-        {
-            foreach (var (name, bytes) in entries)
-            {
-                var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
-                using var es = entry.Open();
-                es.Write(bytes, 0, bytes.Length);
-            }
-        }
+        WriteZip(entries, outPath);
         return outPath;
     }
 
-    /// <summary>生成某张幻灯片「第 stepNo 步」（1 基）的 XML：未显现的形状移除；逐段形状按已显现段数留白。</summary>
+    /// <summary>把内存里的部件集合写成一个 zip/pptx。</summary>
+    private static void WriteZip(Dictionary<string, byte[]> entries, string outPath)
+    {
+        using var fs = File.Create(outPath);
+        using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
+        foreach (var (name, bytes) in entries)
+        {
+            var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
+            using var es = entry.Open();
+            es.Write(bytes, 0, bytes.Length);
+        }
+    }
+
+    /// <summary>生成某张幻灯片「第 stepNo 步」（1 基；0 = 一步都不显现 = 底图）的 XML：未显现的形状移除；逐段形状按已显现段数留白。</summary>
     private static XDocument BuildVariantXml(Dictionary<string, byte[]> entries, string slidePath,
         List<List<string>> steps, HashSet<string> paraSpids, int stepNo)
     {
@@ -249,11 +385,9 @@ public static class PresentationPlayback
         var spTree = doc.Descendants(P + "spTree").FirstOrDefault();
         if (spTree is null) return doc;
 
-        // 全体动画目标（未揭露的才需要隐藏；未被动画的形状永远可见）
         var allTargets = new HashSet<string>(steps.SelectMany(s => s), StringComparer.Ordinal);
         if (allTargets.Count == 0) return doc;
 
-        // 累计：第 stepNo 步前已显现的形状，以及逐段形状已显现到第几段
         var revealed = new HashSet<string>(StringComparer.Ordinal);
         var paraReveal = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var s = 0; s < Math.Min(stepNo, steps.Count); s++)
@@ -280,7 +414,6 @@ public static class PresentationPlayback
     private static string? ShapeId(XElement shape)
     {
         if (shape.Name.Namespace != P) return null;
-        // sp / pic / graphicFrame / grpSp / cxnSp：id 在其 nv*Pr/cNvPr 上
         var nv = shape.Elements().FirstOrDefault(e => e.Name.LocalName.EndsWith("Pr", StringComparison.Ordinal) && e.Name.LocalName.StartsWith("nv", StringComparison.Ordinal));
         return nv?.Element(P + "cNvPr")?.Attribute("id")?.Value;
     }
@@ -299,7 +432,6 @@ public static class PresentationPlayback
                 var t = r.Element(A + "t");
                 if (t is not null) t.Value = ""; else r.Remove();
             }
-            // 去项目符号：避免空段落仍画出圆点
             var pPr = p.Element(A + "pPr");
             if (pPr is null) { pPr = new XElement(A + "pPr"); p.AddFirst(pPr); }
             pPr.Elements(A + "buChar").Remove();
@@ -314,7 +446,6 @@ public static class PresentationPlayback
         var relsPath = dir.Length == 0 ? "_rels/" + file + ".rels" : dir + "/_rels/" + file + ".rels";
         if (FindEntry(entries, relsPath) is null) return null;
         var rels = LoadXml(entries, relsPath)!;
-        // 去掉 notesSlide 关系：多张展开页不应共享同一备注页
         foreach (var r in rels.Root?.Elements(Rel + "Relationship").ToList() ?? new List<XElement>())
             if (r.Attribute("Type")?.Value?.EndsWith("/notesSlide", StringComparison.Ordinal) == true) r.Remove();
         return Serialize(rels);

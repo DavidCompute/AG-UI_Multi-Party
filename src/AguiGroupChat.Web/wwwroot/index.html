@@ -811,7 +811,10 @@
 
   <!-- 演示文稿在线播放（全屏）：幻灯片 + 键盘导航 + 可选备注 -->
   <div id="docPlayOverlay" class="doc-play hidden">
-    <canvas id="docPlayCanvas" class="doc-play-canvas"></canvas>
+    <div id="docPlayStage" class="doc-play-stage">
+      <canvas id="docPlayCanvas" class="doc-play-canvas"></canvas>
+      <div id="docSpriteLayer" class="doc-sprite-layer"></div>
+    </div>
     <div id="docPlayNotes" class="doc-play-notes hidden"></div>
     <div class="doc-play-bar" id="docPlayBar">
       <button id="docPlayPrev" type="button" class="doc-play-btn" data-i18n="docPreview.prev">◀</button>

@@ -8942,6 +8942,10 @@ let docPlayPdf = null;
 let docPlayManifest = null;
 let docPlayPage = 0;
 let docAutoTimer = null;
+// 方案 C：当前幻灯片的「形状精灵」与其动画步（0 = 一个都还没入场）
+let docSprites = [];
+let docSpriteStep = 0;
+const SPRITE_CLASSES = ["sp-in-fade", "sp-in-fly-b", "sp-in-fly-t", "sp-in-fly-l", "sp-in-fly-r", "sp-out-fade", "sp-emph-spin", "sp-emph-pulse"];
 
 /** 按状态码给本地化错因（优先本地文案：服务端错误消息只有中文，英文界面下会串味道）。 */
 function docPreviewErrorText(status, serverMsg) {
@@ -9087,15 +9091,23 @@ async function renderDocSlide() {
 /** 翻到上一页 / 下一页（播放态下按展开版分步 / 转场推进）。 */
 async function docSlideGo(delta) {
   if (playModeActive()) {
+    const m = docPlayManifest;
+    const cur = m ? m.pages[docPlayPage] : null;
+    // 精灵模式：页内推进 = 播放下一个形状动画（不翻 PDF 页）
+    if (cur && spriteModeForSlide(cur.slide)) {
+      const steps = cur.steps || 1;
+      if (delta > 0 && docSpriteStep < steps) { docSpriteStep++; clearAutoAdvance(); applySpriteState(true); scheduleAutoAdvance(); return; }
+      if (delta < 0 && docSpriteStep > 0) { docSpriteStep = 0; clearAutoAdvance(); await setupSprites(cur.slide); return; }
+    }
     const total = docPlayPdf.numPages;
     const next = Math.min(Math.max(docPlayPage + delta, 0), total - 1);
     if (next === docPlayPage) return;
-    const from = docPlayManifest ? docPlayManifest.pages[docPlayPage] : null;
-    const to = docPlayManifest ? docPlayManifest.pages[next] : null;
+    const from = m ? m.pages[docPlayPage] : null;
+    const to = m ? m.pages[next] : null;
     docPlayPage = next;
     clearAutoAdvance();
     await renderDocPlay();
-    if (from && to && to.slide !== from.slide) playTransition(docPlayManifest.transitions[to.slide]);
+    if (from && to && to.slide !== from.slide) playTransition(m.transitions[to.slide]);
     else playStepFlash();
     scheduleAutoAdvance();
     return;
@@ -9113,6 +9125,7 @@ async function startDocPlay() {
   if (!docPdf || !docPreviewCtx) return;
   docPlaying = true;
   docPlayPage = docPdfPage;
+  clearSprites();
   const overlay = $("docPlayOverlay");
   overlay.classList.remove("hidden");
   $("docPlayNotes").classList.toggle("hidden", !docPlayNotesOn);
@@ -9139,6 +9152,7 @@ async function startDocPlay() {
 /** 退出播放模式，回到弹窗内的当前页。 */
 function exitDocPlay() {
   clearAutoAdvance();
+  clearSprites();
   // 播放版回到弹窗查看器：按当前幻灯片对齐到普通 PDF 的页
   if (playModeActive() && docPlayManifest) {
     const p = docPlayManifest.pages[docPlayPage];
@@ -9161,6 +9175,11 @@ async function renderDocPlay() {
   const h = Math.max(window.innerHeight, 150);
   const ok = await renderPageToCanvas(pdf, pageIdx, canvas, w, h);
   if (!ok) return;
+  if (playModeActive()) {
+    const slide = docPlayManifest ? (docPlayManifest.pages[pageIdx]?.slide ?? 0) : 0;
+    if (spriteModeForSlide(slide)) await setupSprites(slide);
+    else clearSprites();
+  } else clearSprites();
   $("docPlayPage").textContent = playLabel(pageIdx, pdf.numPages);
   $("docPlayNotes").textContent = playNotesFor(pageIdx);
 }
@@ -9211,12 +9230,18 @@ function playPageForSlide(slideIdx) {
   const i = docPlayManifest.pages.findIndex((p) => p.slide === slideIdx && p.step === 0);
   return i < 0 ? 0 : i;
 }
-/** 播放页码文案：有清单时显示「幻灯片 i / N（步 j/k）」。 */
+/** 播放页码文案：有清单时显示「幻灯片 i / N（步 j/k）」；精灵模式用精灵步。 */
 function playLabel(idx, total) {
   const m = docPlayManifest;
   if (playModeActive() && m) {
     const p = m.pages[idx];
-    if (p) return p.steps > 1 ? `${p.slide + 1} / ${m.slideCount} · ${p.step + 1}/${p.steps}` : `${p.slide + 1} / ${m.slideCount}`;
+    if (p) {
+      if (spriteModeForSlide(p.slide)) {
+        const steps = p.steps || 1;
+        return steps > 1 ? `${p.slide + 1} / ${m.slideCount} · ${docSpriteStep}/${steps}` : `${p.slide + 1} / ${m.slideCount}`;
+      }
+      return p.steps > 1 ? `${p.slide + 1} / ${m.slideCount} · ${p.step + 1}/${p.steps}` : `${p.slide + 1} / ${m.slideCount}`;
+    }
   }
   return `${idx + 1} / ${total}`;
 }
@@ -9258,12 +9283,130 @@ function scheduleAutoAdvance() {
   const m = docPlayManifest;
   if (!playModeActive() || !m) return;
   const p = m.pages[docPlayPage];
-  if (!p || p.step < p.steps - 1) return;
+  if (!p) return;
+  // 本页是否已到末尾：精灵模式看到精灵步，分步模式看页内步
+  const atEnd = spriteModeForSlide(p.slide) ? docSpriteStep >= (p.steps || 1) : p.step >= p.steps - 1;
+  if (!atEnd) return;
   const tr = m.transitions[p.slide];
   if (!tr || !tr.advanceAfterMs) return;
   docAutoTimer = setTimeout(() => docSlideGo(1), tr.advanceAfterMs);
 }
 function clearAutoAdvance() { if (docAutoTimer) { clearTimeout(docAutoTimer); docAutoTimer = null; } }
+
+/* ---- 方案 C：形状精灵（底图 + 被动画形状） ---- */
+
+/** 该幻灯片是否走「精灵模式」（清单里有形状动画且非逐段构建）。 */
+function spriteModeForSlide(slideIdx) {
+  const a = docPlayManifest && docPlayManifest.animations;
+  return !!(a && a[slideIdx] && a[slideIdx].length);
+}
+function clearSprites() {
+  const layer = $("docSpriteLayer");
+  if (layer) layer.innerHTML = "";
+  docSprites = [];
+  docSpriteStep = 0;
+}
+
+/** 把某页渲染到离屏画布（与可见画布同一“适配尺寸 × dpr”，供取差使用）。 */
+async function renderPageOffscreen(pdf, pageIdx, cssW, cssH, dpr) {
+  try {
+    const page = await pdf.getPage(pageIdx + 1);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.max(Math.min(cssW / base.width, cssH / base.height), 0.05) * dpr;
+    const vp = page.getViewport({ scale });
+    const c = document.createElement("canvas");
+    c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+    await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    return c;
+  } catch { return null; }
+}
+
+/**
+ * 为当前幻灯片构建精灵：把「普通页」与「底图页」（已移除全部被动画形状）在同一 bbox 内取差，
+ * 差异处即形状像素 → 得到透明背景的精灵。因为两个源是同一套渲染，静止时与底图像素级对齐。
+ */
+async function setupSprites(slideIdx) {
+  const layer = $("docSpriteLayer");
+  if (layer) layer.innerHTML = "";
+  docSprites = [];
+  docSpriteStep = 0;
+  if (!docPlayManifest || !spriteModeForSlide(slideIdx) || !docPdf || !docPlayPdf || !layer) return;
+  const canvas = $("docPlayCanvas");
+  const cssW = parseFloat(canvas.style.width) || 0;
+  const cssH = parseFloat(canvas.style.height) || 0;
+  if (!cssW || !cssH) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const full = await renderPageOffscreen(docPdf, slideIdx, cssW, cssH, dpr);
+  const base = await renderPageOffscreen(docPlayPdf, docPlayPage, cssW, cssH, dpr);
+  if (!full || !base) return;
+  const W = full.width, H = full.height;
+  const fd = full.getContext("2d").getImageData(0, 0, W, H).data;
+  const bd = base.getContext("2d").getImageData(0, 0, W, H).data;
+  for (const sh of docPlayManifest.animations[slideIdx]) {
+    const px = Math.max(0, Math.round(sh.x * W)), py = Math.max(0, Math.round(sh.y * H));
+    const pw = Math.max(1, Math.min(W - px, Math.round(sh.w * W)));
+    const ph = Math.max(1, Math.min(H - py, Math.round(sh.h * H)));
+    if (pw <= 1 || ph <= 1) continue;
+    const c = document.createElement("canvas"); c.width = pw; c.height = ph;
+    const ctx = c.getContext("2d");
+    const out = ctx.createImageData(pw, ph);
+    let ink = 0;
+    for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
+      const si = ((py + y) * W + (px + x)) * 4, di = (y * pw + x) * 4;
+      const d = Math.max(Math.abs(fd[si] - bd[si]), Math.abs(fd[si + 1] - bd[si + 1]), Math.abs(fd[si + 2] - bd[si + 2]));
+      if (d > 10) { out.data[di] = fd[si]; out.data[di + 1] = fd[si + 1]; out.data[di + 2] = fd[si + 2]; out.data[di + 3] = 255; ink++; }
+    }
+    if (ink === 0) continue; // 该形状与底图无差异（可能已被其它形状覆盖）→ 跳过
+    ctx.putImageData(out, 0, 0);
+    const el = document.createElement("img");
+    el.className = "doc-sprite"; el.alt = "";
+    el.src = c.toDataURL("image/png");
+    el.style.left = (px / dpr) + "px"; el.style.top = (py / dpr) + "px";
+    el.style.width = (pw / dpr) + "px"; el.style.height = (ph / dpr) + "px";
+    layer.appendChild(el);
+    docSprites.push({ el, shape: sh, hidden: false });
+  }
+  applySpriteState(false);
+}
+
+function spriteAnimClass(shape, kind) {
+  if (kind === "in") return shape.preset === "flyIn" ? "sp-in-fly-" + (shape.direction || "b") : "sp-in-fade";
+  if (kind === "exit") return "sp-out-fade";
+  if (shape.preset === "spin") return "sp-emph-spin";
+  return "sp-emph-pulse";
+}
+function playSpriteAnim(el, shape, kind) {
+  const cls = spriteAnimClass(shape, kind);
+  el.classList.remove(...SPRITE_CLASSES);
+  el.style.opacity = "";
+  el.style.setProperty("--sp-dur", (shape.durationMs > 0 ? shape.durationMs : 500) + "ms");
+  void el.offsetWidth; // 重置动画
+  el.classList.add(cls);
+}
+
+/** 按当前步显现 / 播放精灵；<paramref name="animate"/> 为 false 时只摆状态（不播动画）。 */
+function applySpriteState(animate) {
+  for (const s of docSprites) {
+    const sh = s.shape;
+    const st = sh.effectStep || 0;
+    if (sh.effect === "entr") {
+      const on = docSpriteStep >= (sh.revealStep || 0);
+      if (!on) { s.el.style.display = "none"; s.hidden = true; continue; }
+      const wasHidden = s.hidden;
+      s.el.style.display = "";
+      s.hidden = false;
+      if (wasHidden && animate && docSpriteStep === st) playSpriteAnim(s.el, sh, "in");
+      else if (wasHidden) s.el.classList.remove(...SPRITE_CLASSES);
+    } else {
+      s.el.style.display = "";
+      if (docSpriteStep === st && animate) playSpriteAnim(s.el, sh, sh.effect);
+      else if (docSpriteStep < st) { s.el.classList.remove(...SPRITE_CLASSES); s.el.style.opacity = ""; }
+      else if (sh.effect === "exit") s.el.style.opacity = "0"; // 退出：播放完保持不可见
+    }
+  }
+  const el = $("docPlayPage");
+  if (el && playModeActive()) el.textContent = playLabel(docPlayPage, docPlayPdf ? docPlayPdf.numPages : 0);
+}
 
 /** 子文档页渲染（辅助）：把某 PDF 的某页画到给定画布。 */
 async function renderPageToCanvas(pdf, pageIdx, canvas, w, h) {
@@ -9284,6 +9427,7 @@ async function renderPageToCanvas(pdf, pageIdx, canvas, w, h) {
 function resetDocViewer() {
   docRenderSeq++;
   clearAutoAdvance();
+  clearSprites();
   if (docPdf) { try { docPdf.destroy(); } catch { /* 忽略 */ } docPdf = null; }
   if (docPlayPdf) { try { docPlayPdf.destroy(); } catch { /* 忽略 */ } docPlayPdf = null; }
   docPlayManifest = null;

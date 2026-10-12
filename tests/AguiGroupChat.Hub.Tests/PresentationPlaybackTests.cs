@@ -112,6 +112,20 @@ public sealed class PresentationPlaybackTests
                 JsonSerializer.Serialize(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true }));
         }
         catch { /* 仅用于人工核对，失败不影响用例 */ }
+
+        // 方案 C：整形状动画的页走「精灵模式」（清单带形状几何 + 动画规格），逐段的页回退到分步展开
+        Assert.NotNull(manifest.Animations);
+        Assert.Equal(3, manifest.Animations.Count);
+        // 封面：flyIn 标题 → 精灵模式
+        Assert.NotNull(manifest.Animations[0]);
+        Assert.Contains(manifest.Animations[0]!, (s) => s.Effect == "entr" && s.Preset == "flyIn");
+        Assert.All(manifest.Animations[0]!, (s) => Assert.True(s.W > 0 && s.H > 0 && s.W <= 1 && s.H <= 1, "几何应为比例"));
+        // 要点页：byParagraph → 不能用整形状精灵 → 回退分步（Animations 为 null）
+        Assert.Null(manifest.Animations[1]);
+        Assert.Equal(4, manifest.Pages.Count((p) => p.Slide == 1));
+        // 结束页：只有退出动画 → 精灵模式，且形状一开场就可见（RevealStep=0）
+        Assert.NotNull(manifest.Animations[2]);
+        Assert.Contains(manifest.Animations[2]!, (s) => s.Effect == "exit" && s.RevealStep == 0);
     }
 
     [Fact]

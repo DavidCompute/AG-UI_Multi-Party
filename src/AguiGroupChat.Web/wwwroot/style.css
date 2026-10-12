@@ -856,7 +856,27 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 /* 全屏播放：z 高于所有弹窗（含 z-80 的 ui-dialog-overlay）。 */
 .doc-play { position: fixed; inset: 0; z-index: 200; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 /* 不要 max-width/max-height 限制：JS 已按视口尺寸等比算出画布大小，限制反而会让它填不满。 */
+.doc-play-stage { position: relative; line-height: 0; }
 .doc-play-canvas { background: #fff; box-shadow: 0 0 40px rgba(0,0,0,.6); }
+/* 方案 C：底图之上叠加「被动画形状」的精灵层（像素取自普通页与底图的差异，静止时与底图完全对齐） */
+.doc-sprite-layer { position: absolute; inset: 0; pointer-events: none; }
+.doc-sprite { position: absolute; transform-origin: center center; will-change: transform, opacity; }
+@keyframes spFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes spFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes spFlyB { from { transform: translateY(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes spFlyT { from { transform: translateY(-100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes spFlyL { from { transform: translateX(-100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes spFlyR { from { transform: translateX(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes spSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes spPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+.doc-sprite.sp-in-fade { animation: spFadeIn var(--sp-dur, 500ms) ease both; }
+.doc-sprite.sp-in-fly-b { animation: spFlyB var(--sp-dur, 500ms) ease-out both; }
+.doc-sprite.sp-in-fly-t { animation: spFlyT var(--sp-dur, 500ms) ease-out both; }
+.doc-sprite.sp-in-fly-l { animation: spFlyL var(--sp-dur, 500ms) ease-out both; }
+.doc-sprite.sp-in-fly-r { animation: spFlyR var(--sp-dur, 500ms) ease-out both; }
+.doc-sprite.sp-out-fade { animation: spFadeOut var(--sp-dur, 500ms) ease both; }
+.doc-sprite.sp-emph-spin { animation: spSpin var(--sp-dur, 800ms) linear both; }
+.doc-sprite.sp-emph-pulse { animation: spPulse var(--sp-dur, 800ms) ease-in-out both; }
 /* 播放转场（页间切换 / 页内分步）：把 PPT 的 <p:transition> 近似为 CSS 动画 */
 @keyframes docTrFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes docTrZoom { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: scale(1); } }
