@@ -72,6 +72,40 @@ public sealed class MetricsTests
         Assert.Equal(1L, (long)pt.GetProperty("invocations")!.GetValue(list[0])!);
     }
 
+    [Fact]
+    public void RenderPrometheus_ContainsCoreMetricsAndLabels()
+    {
+        var m = new MetricsService();
+        m.RecordInvocation("agent_a", accepted: true, isBridge: true, isBridgeFailure: false, outputChars: 12);
+        m.RecordInvocation("agent_a", accepted: false, isBridge: true, isBridgeFailure: true, outputChars: 0);
+        m.RecordMemoryResult(hit: true);
+
+        var text = m.RenderPrometheusText();
+
+        Assert.Contains("# TYPE knowgath_agent_invocations_total counter", text);
+        Assert.Contains("knowgath_agent_invocations_total 2", text);
+        Assert.Contains("knowgath_agent_accepted_total 1", text);
+        Assert.Contains("knowgath_agent_rejected_total 1", text);
+        Assert.Contains("knowgath_bridge_calls_total 2", text);
+        Assert.Contains("knowgath_bridge_failures_total 1", text);
+        Assert.Contains("knowgath_memory_hits_total 1", text);
+        Assert.Contains("knowgath_output_chars_total 12", text);
+        Assert.Contains("knowgath_agent_invocations_by_agent_total{agent_id=\"agent_a\"} 2", text);
+        Assert.Contains("knowgath_process_working_set_bytes", text);
+        Assert.Contains("knowgath_gc_collections_total{generation=\"0\"}", text);
+        Assert.Contains("knowgath_up 1", text);
+    }
+
+    [Fact]
+    public void RenderPrometheus_EscapesLabelValues()
+    {
+        var m = new MetricsService();
+        m.RecordInvocation("a\"b\\c", accepted: true, isBridge: false, isBridgeFailure: false, outputChars: 0);
+        var text = m.RenderPrometheusText();
+        // 反斜杠 / 双引号在标签值里必须转义（否则抓取端解析失败）
+        Assert.Contains("agent_id=\"a\\\"b\\\\c\"}", text);
+    }
+
     private static (long Invocations, long Accepted, long Rejected, long BridgeCalls, long BridgeFailures, long MemoryHitCount, long MemoryEmptySearch, long OutputChars) GetProps(object snap)
     {
         var t = snap.GetType();

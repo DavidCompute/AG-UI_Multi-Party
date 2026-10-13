@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.206 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.206 Release Notes (current Windows desktop release)
+
+**版本说明**：**OpenTelemetry / Prometheus 指标导出**——新增 `GET /ag-ui/metrics`（Prometheus 文本格式），把已有进程内指标暴露给外部监控系统；Prometheus 可直接抓取，OTel Collector 也可用 `prometheus` receiver 采集后转发到任意后端。
+**Version note**: **OpenTelemetry / Prometheus metric export** — a new `GET /ag-ui/metrics` (Prometheus text format) exposes the existing in-process metrics to external monitoring; Prometheus can scrape it directly, and an OTel Collector can collect it via its `prometheus` receiver and forward to any backend.
+
+## 指标导出（Prometheus / OTel）
+# Metric export (Prometheus / OTel)
+
+中文：
+- **端点**：`GET /ag-ui/metrics` → `text/plain; version=0.0.4`。指标名前缀统一 `knowgath_`：业务计数器（`knowgath_agent_invocations_total` / `_accepted_total` / `_rejected_total` / `knowgath_bridge_calls_total` / `knowgath_bridge_failures_total` / `knowgath_memory_hits_total` / `knowgath_memory_empty_total` / `knowgath_output_chars_total`）、分员工调用量（`knowgath_agent_invocations_by_agent_total{agent_id="…"}`，标签值转义）、进程与 GC（`knowgath_process_working_set_bytes` / `_private_bytes` / `_threads` / `_handles` / `knowgath_processors` / `knowgath_gc_heap_bytes` / `knowgath_dotnet_allocated_bytes_total` / `knowgath_gc_collections_total{generation="0|1|2"}`）与 `knowgath_uptime_seconds` / `knowgath_start_time_seconds` / `knowgath_up`。
+- **鉴权（默认开）**：指标含数字员工标识与调用量，默认**要求鉴权**——可用专用抓取令牌（`Observability:PrometheusScrapeToken`，`Authorization: Bearer` 或 `?token=`）或已有登录会话 / 托管 API 密钥；`Observability:PrometheusRequireAuth=false` 仅建议在「仅内网可达」部署。`Observability:PrometheusEnabled=false` 时端点 404。
+- **零新增依赖**：不内嵌 OTel SDK，直接输出标准文本格式（OTel Collector 的 `prometheus` receiver 可采集）；避免为一个导出功能引入大依赖与后台导出线程。
+English:
+- **Endpoint**: `GET /ag-ui/metrics` → `text/plain; version=0.0.4`. All names are prefixed `knowgath_`: business counters (`knowgath_agent_invocations_total` / `_accepted_total` / `_rejected_total` / `knowgath_bridge_calls_total` / `knowgath_bridge_failures_total` / `knowgath_memory_hits_total` / `knowgath_memory_empty_total` / `knowgath_output_chars_total`), per-agent counts (`knowgath_agent_invocations_by_agent_total{agent_id="…"}`, label values escaped), process & GC (`knowgath_process_working_set_bytes` / `_private_bytes` / `_threads` / `_handles` / `knowgath_processors` / `knowgath_gc_heap_bytes` / `knowgath_dotnet_allocated_bytes_total` / `knowgath_gc_collections_total{generation="0|1|2"}`) and `knowgath_uptime_seconds` / `knowgath_start_time_seconds` / `knowgath_up`.
+- **Auth (on by default)**: metrics leak digital-employee ids and call counts, so the endpoint **requires auth by default** — either a dedicated scrape token (`Observability:PrometheusScrapeToken`, via `Authorization: Bearer` or `?token=`) or an existing session / managed API key; setting `Observability:PrometheusRequireAuth=false` is only advised for internal-only deployments. With `Observability:PrometheusEnabled=false` the endpoint 404s.
+- **No new dependency**: no embedded OTel SDK — it emits the standard text format (an OTel Collector `prometheus` receiver can scrape it), avoiding a large dependency and a background export thread for one export path.
+
+## 测试
+# Tests
+
+中文：新增 `MetricsApiTests` 6/6（无令牌 401 / 抓取令牌 200 且为 Prometheus 文本 / `?token=` 200 / 会话令牌 200 / 错误令牌 401 / 关闭时 404）；`MetricsTests` 新增 2 例（文本含核心指标与标签 / 标签值转义），共 7/7；连同桌面组合根对等合跑 25/25。
+English: new `MetricsApiTests` 6/6 (no token 401 / scrape token 200 returning Prometheus text / `?token=` 200 / session token 200 / wrong token 401 / 404 when disabled); `MetricsTests` gains 2 cases (text carries core metrics and labels / label escaping), 7/7 total; 25/25 together with desktop parity.
+
 # AG-UI 群聊桌面版 1.0.205 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.205 Release Notes (current Windows desktop release)
 

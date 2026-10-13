@@ -35,6 +35,8 @@ builder.Services.AddSingleton<AguiGroupChat.Hub.Messaging.IGroupEventObserver>(s
 // 模板市场在线分发：远程目录源（管理员配置）+ 拉取（缓存 / 尺寸 / 协议防护）
 builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持久化到扩展区「marketplace」）
 builder.Services.AddSingleton<MarketplaceRemoteService>(); // 远程目录 / 分发包拉取
+// 可观测性（6.1 / OpenTelemetry 对接）：Prometheus 抓取端点与鉴权选项
+builder.Services.AddSingleton(builder.Configuration.GetSection("Observability").Get<ObservabilityOptions>() ?? new ObservabilityOptions());
 // 办公文档「在线查看」：docx / xlsx / pptx 用 LibreOffice 转 PDF 后缓存，前端弹窗内联渲染。
 // 缓存放 data/preview（跟 attachments 同一个数据根，容器重建不丢；丢了也只是重转一次）。
 builder.Services.AddDocumentPreview(
@@ -135,6 +137,7 @@ app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
 app.MapGlobalSearchApi(); // 全局智能检索（跨知聚搜索消息 / 记忆 / 知识库）
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
+app.MapMetricsApi(); // 可观测性导出（6.1）：Prometheus 文本格式抓取端点 /ag-ui/metrics
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
 app.MapAccountApi(); // 账号注销（数据主体权利）：自助注销 + 数据擦除
 app.MapUserGroupApi(); // 用户分组 / 组织单元（细粒度授权：管理员建组 + 组→数字员工白名单）

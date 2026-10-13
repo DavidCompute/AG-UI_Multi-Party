@@ -4569,6 +4569,56 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
 
 ---
 
+#### 9.2.12 指标导出（Prometheus / OpenTelemetry 对接，`MetricsApi.cs`）
+
+`GET /ag-ui/metrics` 以 **Prometheus 文本格式**（`text/plain; version=0.0.4`）暴露已有进程内指标（`MetricsService.RenderPrometheusText()`），供外部监控系统采集。**无需专用后端**：Prometheus 直接抓取，或 OTel Collector 用 `prometheus` receiver 采集后转发到任意后端（OTLP / Tempo / 云监控）。
+
+| 指标 | 类型 | 说明 |
+|---|---|---|
+| `knowgath_agent_invocations_total` | counter | 数字员工调用总数 |
+| `knowgath_agent_accepted_total` / `knowgath_agent_rejected_total` | counter | 出答 / 拒绝 |
+| `knowgath_bridge_calls_total` / `knowgath_bridge_failures_total` | counter | 桥接调用 / 失败 |
+| `knowgath_memory_hits_total` / `knowgath_memory_empty_total` | counter | 语义记忆命中 / 空检索 |
+| `knowgath_output_chars_total` | counter | 输出字符总数 |
+| `knowgath_agent_invocations_by_agent_total{agent_id="…"}` | counter | 分数字员工调用量（标签值转义） |
+| `knowgath_process_working_set_bytes` / `_private_bytes` / `_threads` / `_handles` / `knowgath_processors` | gauge | 进程资源 |
+| `knowgath_gc_heap_bytes` / `knowgath_dotnet_allocated_bytes_total` / `knowgath_gc_collections_total{generation="0|1|2"}` | gauge / counter | GC |
+| `knowgath_uptime_seconds` / `knowgath_start_time_seconds` / `knowgath_up` | gauge | 运行时长 / 启动时间 / 存活 |
+
+**鉴权**：指标含数字员工标识与调用量，**默认要求鉴权**（`Observability:PrometheusRequireAuth` 默认 `true`）。可用：① 专用抓取令牌 `Observability:PrometheusScrapeToken`（`Authorization: Bearer <token>` 或 `?token=<token>`，恒定时间比较）——与用户体系解耦；② 登录会话令牌；③ 托管 API 密钥（§8.20）。无凭证 → 401。`PrometheusRequireAuth=false` 仅建议在「仅内网可达」部署；`PrometheusEnabled=false` 时端点 404。
+
+**抓取示例**：
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: knowgath
+    scheme: http
+    authorization: { credentials: "<Observability:PrometheusScrapeToken>" }
+    static_configs: [{ targets: ["127.0.0.1:5200"] }]
+    metrics_path: /ag-ui/metrics
+```
+
+```yaml
+# otel-collector.yaml（采集后转发到 OTLP 后端）
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: knowgath
+          authorization: { credentials: "<token>" }
+          static_configs: [{ targets: ["127.0.0.1:5200"] }]
+          metrics_path: /ag-ui/metrics
+exporters:
+  otlp: { endpoint: "<collector>:4317" }
+service:
+  pipelines: { metrics: { receivers: [prometheus], exporters: [otlp] } }
+```
+
+> 看板 UI（控制台「运行指标」页）与本节是**同一份进程内指标**的两个出口：前者给人看（图表），后者给机器采集。
+
+---
+
 ### 9.3 配置键全表（服务端）
 
 > 服务端 appsettings 以「节:子节:键」形式绑定到强类型 Options；同名环境变量用双下划线（如 `Agents__Memory__Enabled`）。**绑定到 `AgentOptions` 的键若在代码里没有对应属性，则不会生效**（见 §9.9）。
@@ -4581,6 +4631,9 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
 | `AllowedHosts` | — | `*` | `*` | 主机白名单 |
 | `Auth:SessionTtlHours` | `AuthOptions.SessionTtlHours` | 168 | 168 | 登录会话有效期（小时，滑动续期） |
 | `Auth:RequireTokenOnRealTime` | `AuthOptions.RequireTokenOnRealTime` | `true` | `true` | WS/SSE 与写接口是否强制令牌 |
+| `Observability:PrometheusEnabled` | `ObservabilityOptions.PrometheusEnabled` | `true` | `true` | 是否暴露 `GET /ag-ui/metrics`（置 false → 404） |
+| `Observability:PrometheusRequireAuth` | `ObservabilityOptions.PrometheusRequireAuth` | `true` | `true` | 指标端点是否要求鉴权（建议保持 true） |
+| `Observability:PrometheusScrapeToken` | `ObservabilityOptions.PrometheusScrapeToken` | `""` | 未配 | 专用抓取令牌（留空则只接受会话 / API 密钥） |
 | `Auth:AdminUserIds` | `AuthOptions.AdminUserIds` | `""` | 未配 | 管理员名单（逗号分隔 userId/username） |
 | `Auth:SuperAdminUserIds` | `AuthOptions.SuperAdminUserIds` | `""` | 未配 | 超管名单 |
 | `Auth:FirstUserIsAdmin` | `AuthOptions.FirstUserIsAdmin` | `true` | 未配 | 首个注册账号自动成为管理员 |

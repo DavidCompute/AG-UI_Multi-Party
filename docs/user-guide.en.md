@@ -4577,6 +4577,56 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
 
 ---
 
+#### 9.2.12 Metric export (Prometheus / OpenTelemetry, `MetricsApi.cs`)
+
+`GET /ag-ui/metrics` exposes the existing in-process metrics (`MetricsService.RenderPrometheusText()`) in **Prometheus text format** (`text/plain; version=0.0.4`) for external monitoring. **No dedicated backend is needed**: Prometheus can scrape it directly, or an OTel Collector can collect it via its `prometheus` receiver and forward to any backend (OTLP / Tempo / cloud monitoring).
+
+| Metric | Type | Description |
+|---|---|---|
+| `knowgath_agent_invocations_total` | counter | Total digital-employee invocations |
+| `knowgath_agent_accepted_total` / `knowgath_agent_rejected_total` | counter | Answered / rejected |
+| `knowgath_bridge_calls_total` / `knowgath_bridge_failures_total` | counter | Bridge calls / failures |
+| `knowgath_memory_hits_total` / `knowgath_memory_empty_total` | counter | Memory hits / empty searches |
+| `knowgath_output_chars_total` | counter | Total output characters |
+| `knowgath_agent_invocations_by_agent_total{agent_id="…"}` | counter | Per-agent invocations (label values escaped) |
+| `knowgath_process_working_set_bytes` / `_private_bytes` / `_threads` / `_handles` / `knowgath_processors` | gauge | Process resources |
+| `knowgath_gc_heap_bytes` / `knowgath_dotnet_allocated_bytes_total` / `knowgath_gc_collections_total{generation="0|1|2"}` | gauge / counter | GC |
+| `knowgath_uptime_seconds` / `knowgath_start_time_seconds` / `knowgath_up` | gauge | Uptime / start time / liveness |
+
+**Auth**: metrics leak digital-employee ids and call counts, so the endpoint **requires auth by default** (`Observability:PrometheusRequireAuth` defaults to `true`). Options: (1) a dedicated scrape token `Observability:PrometheusScrapeToken` (`Authorization: Bearer <token>` or `?token=<token>`, constant-time compare) — decoupled from the user system; (2) a login session token; (3) a managed API key (8.20). No credential → 401. `PrometheusRequireAuth=false` is only advised for internal-only deployments; with `PrometheusEnabled=false` the endpoint 404s.
+
+**Scrape examples**:
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: knowgath
+    scheme: http
+    authorization: { credentials: "<Observability:PrometheusScrapeToken>" }
+    static_configs: [{ targets: ["127.0.0.1:5200"] }]
+    metrics_path: /ag-ui/metrics
+```
+
+```yaml
+# otel-collector.yaml (collect, then forward to an OTLP backend)
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: knowgath
+          authorization: { credentials: "<token>" }
+          static_configs: [{ targets: ["127.0.0.1:5200"] }]
+          metrics_path: /ag-ui/metrics
+exporters:
+  otlp: { endpoint: "<collector>:4317" }
+service:
+  pipelines: { metrics: { receivers: [prometheus], exporters: [otlp] } }
+```
+
+> The dashboard UI (the console's Runtime Metrics tab) and this section are two **exits for the same in-process metrics**: one for humans (charts), one for machines (scraping).
+
+---
+
 ### 9.3 Full config key table (server side)
 
 > Server-side appsettings bind to strongly typed Options in the form "section:subsection:key"; environment variables with the same names use double underscores (e.g. `Agents__Memory__Enabled`). **A key that binds to `AgentOptions` and has no corresponding property in the code will not take effect** (see §9.9).
@@ -4589,6 +4639,9 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
 | `AllowedHosts` | — | `*` | `*` | Host whitelist |
 | `Auth:SessionTtlHours` | `AuthOptions.SessionTtlHours` | 168 | 168 | Login session lifetime (hours, sliding renewal) |
 | `Auth:RequireTokenOnRealTime` | `AuthOptions.RequireTokenOnRealTime` | `true` | `true` | Whether tokens are mandatory for WS/SSE and write endpoints |
+| `Observability:PrometheusEnabled` | `ObservabilityOptions.PrometheusEnabled` | `true` | `true` | Whether `GET /ag-ui/metrics` is exposed (false → 404) |
+| `Observability:PrometheusRequireAuth` | `ObservabilityOptions.PrometheusRequireAuth` | `true` | `true` | Whether the metrics endpoint requires auth (keep true) |
+| `Observability:PrometheusScrapeToken` | `ObservabilityOptions.PrometheusScrapeToken` | `""` | not set | Dedicated scrape token (blank = session / API key only) |
 | `Auth:AdminUserIds` | `AuthOptions.AdminUserIds` | `""` | not set | Admin list (comma-separated userId/username) |
 | `Auth:SuperAdminUserIds` | `AuthOptions.SuperAdminUserIds` | `""` | not set | SuperAdmin list |
 | `Auth:FirstUserIsAdmin` | `AuthOptions.FirstUserIsAdmin` | `true` | not set | The first registered account automatically becomes an admin |

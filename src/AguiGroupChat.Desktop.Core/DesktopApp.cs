@@ -60,6 +60,8 @@ public static class DesktopApp
         // 模板市场在线分发：远程目录源 + 拉取
         builder.Services.AddSingleton(new MarketplaceState());
         builder.Services.AddSingleton<MarketplaceRemoteService>();
+        // 可观测性（6.1 / OpenTelemetry 对接）：Prometheus 抓取端点与鉴权选项
+        builder.Services.AddSingleton(builder.Configuration.GetSection("Observability").Get<ObservabilityOptions>() ?? new ObservabilityOptions());
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
         builder.Services.AddSingleton<AguiGroupChat.Web.SkillRunArtifactStore>(); // 技能试运行产物归属（产出者本人可读 / 下载 / 预览）
         // 办公文档「在线查看」：docx / xlsx / pptx 转 PDF 后内联渲染。
@@ -103,6 +105,7 @@ public static class DesktopApp
         app.MapGlobalSearchApi(); // 全局智能检索（跨知聚搜索消息 / 记忆 / 知识库）
         app.MapScheduledTaskApi(); // 重复性定时任务（1.4）
         app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）
+        app.MapMetricsApi();    // 可观测性导出（6.1）：Prometheus 文本格式抓取端点 /ag-ui/metrics
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
         app.MapAccountApi();    // 账号注销（数据主体权利）：自助注销 + 数据擦除
         app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions
