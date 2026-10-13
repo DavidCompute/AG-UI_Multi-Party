@@ -1,3 +1,4 @@
+using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
@@ -127,6 +128,40 @@ public static class MemoryApi
                         m.Content, m.Importance,
                     }).ToList(),
                 }).ToList(),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // ---- 图谱记忆（Graph RAG）可视化：按查询语义召回种子实体 + n 跳子图（实体 + 关系边），供前端关系图渲染 ----
+        root.MapGet("/graph", async (HttpContext ctx, AuthService auth, IGroupStore store, IServiceProvider sp,
+            string? groupId, string? q, CancellationToken ct) =>
+        {
+            var userId = WebIdentity.UserId(ctx)!;
+            var global = MemoryGovernance.IsGlobalManager(auth, userId);
+            // 图谱按知聚存放：必须指定知聚，且（非全局管理员）须为成员
+            if (string.IsNullOrWhiteSpace(groupId))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请在指定知聚内查看图谱"));
+            if (!global && !store.IsMember(groupId, userId))
+                return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看该群图谱"),
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            var graph = sp.GetService<IGraphMemory>();
+            var options = sp.GetRequiredService<AgentOptions>();
+            var active = graph is not null && options.Memory.GraphEnabled;
+            if (string.IsNullOrWhiteSpace(q))
+                return Results.Ok(new { enabled = active, needQuery = active, stats = (object?)null, entities = Array.Empty<object>(), edges = Array.Empty<object>() });
+            if (!active)
+                return Results.Ok(new { enabled = false, needQuery = false, stats = (object?)null, entities = Array.Empty<object>(), edges = Array.Empty<object>() });
+
+            var sub = await graph!.SearchAsync(groupId!, q!, ct);
+            GraphStats? stats = null;
+            try { stats = graph.Stats(); } catch { /* 统计失败不阻塞可视化 */ }
+            return Results.Ok(new
+            {
+                enabled = true,
+                needQuery = false,
+                stats = stats is null ? null : new { entityCount = stats.EntityCount, edgeCount = stats.EdgeCount, lastAt = stats.LastAt },
+                entities = sub.Entities.Select(e => new { e.EntityId, e.Name, e.Type, e.Score, e.Description, e.Hop }),
+                edges = sub.Edges.Select(e => new { e.SourceId, e.SourceName, e.Relation, e.TargetId, e.TargetName, e.Weight, e.Hop }),
             });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 

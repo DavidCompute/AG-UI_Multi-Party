@@ -2690,6 +2690,9 @@ flowchart TD
 | `#memKbSelect` | 沉淀目标知识库下拉 | 仅列出系统级（无 ownerId）或本人创建 / 管理员可见的库 |
 | `#memConsolidateBtn` | 一键沉淀「关键」级结论 | `memory.consolidate` |
 | `#memList` | 记忆条目列表容器 | — |
+| `#memViewList` / `#memViewTimeline` / `#memViewGraph` | 视图切换：列表 / 时间线 / 图谱（默认列表） | `memory.viewList` / `viewTimeline` / `viewGraph`（1.0.196） |
+| `#memTimeline` | 时间线视图容器（按话题回放，调 `GET /ag-ui/memory/timeline`） | 1.0.196 |
+| `#memGraphQuery` / `#memGraphLoadBtn` / `#memGraphStats` / `#memGraphCanvas` | 图谱视图：主题词 / 生成 / 统计 / Mermaid 画布（调 `GET /ag-ui/memory/graph`） | `memory.graph*`（1.0.196） |
 | `#memPager` | 分页信息与上一页 / 下一页 | 每页 `MEM_PAGE = 30` |
 | `#memoryClose` | 关闭弹窗 | `memory.close` |
 
@@ -2902,10 +2905,11 @@ i18n key 前缀为 **`agent.form.memoryType.*`**（标题 `agent.form.memoryType
 - 启用条件：`Agents:Memory:GraphEnabled = true` **且** `IGraphMemory` 已注册（依赖记忆启用 + postgres/sqlite 存储 + embedding 提供方）。未启用时对既有流程完全透明。
 - 注入：`MemoryContextProvider.ProvideAIContextAsync` 里，当 `_graph is not null && GraphEnabled` 时 `graph.SearchAsync(groupId, query)` → `BuildGraphSection(...)`（`UntrustedBoundary.Wrap`，字符预算 `GraphMaxSectionChars=700`）。此外，绑定了知识库的数字员工在 `GraphEnabled` 时还会走 `KnowledgeBaseCatalog.SearchGraphAsync` 注入**知识库图谱**子图。
 
-#### 6.7.2 是否有可视化界面（核实）
+#### 6.7.2 可视化界面（1.0.196）
 
-- **没有独立的图谱可视化界面**。全仓检索未发现图谱节点 / 边的图形化前端。
-- 唯一的图谱观测点：**系统状态弹窗**（`#statusModal`，管理员，`GET /ag-ui/admin/status`）。`AdminApi` 返回 `rag.graphInUse`、`graphEnabled`、`graphTopK`、`graphHops`、`graphEntities`、`graphEdges`；前端 `openStatusModal` 在 `graphInUse` 时显示 i18n `status.graphActive`「已生效 · 实体 {e} / 关系 {r}」，否则显示 `status.ragGraphOff`「未启用」。
+- **记忆管理弹窗新增「🕸 图谱」视图**：输入主题词后调用 `GET /ag-ui/memory/graph?groupId=&q=`（新增，见 §9.2.5）返回命中子图（实体 + 关系边），前端把子图转成 Mermaid `graph LR` 后用应用内 mermaid 渲染器画成关系图（`buildMermaidGraph` → `renderMermaidBlocks`）。
+- **图谱未启用 / 未命中时给出明确状态**：`enabled=false` → 「图谱记忆未启用」；无实体 → 「未命中实体」；未选知聚 / 无主题词分别提示（i18n `memory.graph*`）。
+- 另一观测点仍是**系统状态弹窗**（`#statusModal`，管理员，`GET /ag-ui/admin/status`）：`rag.graphInUse` / `graphEnabled` / `graphTopK` / `graphHops` / `graphEntities` / `graphEdges`；前端在 `graphInUse` 时显示 i18n `status.graphActive`「已生效 · 实体 {e} / 关系 {r}」，否则 `status.ragGraphOff`「未启用」。
 
 ---
 
@@ -2975,9 +2979,9 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 5. **组织配型措辞**：该文档 §4.4 写「重复套路岗为 `slowToLearn`」；代码启发式规则表中的 `slowToLearn` 关键词为「培训 / 带教 / 教练 / 教学 / 训练 / 新人 / coach / trainer / mentor」（即培训带教类岗位），口径略有出入，以代码关键词表为准。
 6. **`Scope` 默认**：代码默认 `Scope="agent"`（检索该智能体所在的所有群），与文档一致；三项取值 `agent` / `group` / `all` 与 store 实现一致。
 7. **需复核点（代码中未找到依据 / 需人工确认）**：
-   - 是否有面向「图谱节点 / 边」的可视化界面 —— **未找到**（仅有系统状态弹窗的实体 / 关系计数）。
+   - 图谱节点 / 边的可视化界面 —— **已提供**（1.0.196：记忆管理弹窗「🕸 图谱」视图 + 新增 `GET /ag-ui/memory/graph`，见 §6.7.2）。
    - 手动「整群遗忘」对**重要 / 关键记忆**的处理 —— `SetExpiry` 不按 `importance` 过滤，会把重要记忆也设为过期（检索不到），但 `PruneExpired` 豁免 `importance>0`（不会物理删除）；文档未描述此细节。
-   - 记忆管理界面的「时间线回放」（`GET /ag-ui/memory/timeline`）**有接口、无前端入口** —— 全仓未发现对应 UI。
+   - 记忆管理界面的「时间线回放」（`GET /ag-ui/memory/timeline`）—— **已接入前端**（1.0.196：记忆管理弹窗「⏱ 时间线」视图）。
    - `docs/memory-personality.md` §1「个人记忆程序性默认关闭（Docker 编排默认注入 3 条）」与代码 / 编排一致（代码默认 `0`，Docker 默认 `3`），此条**不构成偏差**，记录以备核对。
 
 ## 第 7 章 办公文档在线查看、幻灯片播放与输出物
@@ -4325,6 +4329,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/memory/groups` | 各群记忆统计（按可管理范围） | 登录 |
 | GET | `/ag-ui/memory` | 记忆条目列表（`groupId` / `senderId` / `keyword` / `limit` / `offset`，按角色限定可查群） | 登录 |
 | GET | `/ag-ui/memory/timeline` | 记忆时间线（按话题回放旧→新） | 登录 |
+| GET | `/ag-ui/memory/graph` | 图谱记忆子图（按 `groupId` + 主题词 `q` 召回实体 / 关系，供前端关系图；未启用返回 `enabled=false`） | 登录（群成员 / 管理员） |
 | POST | `/ag-ui/memory/{messageId}/importance` | 调整单条记忆级别（0 普通 / 1 重要 / 2 关键） | 登录（归属 / 群管理 / 管理员） |
 | DELETE | `/ag-ui/memory/{messageId}` | 物理删除单条记忆 | 登录（同上） |
 | POST | `/ag-ui/memory/forget` | 手动遗忘（按群或全部设过期，可选保留最近 N 小时） | 登录（同上） |

@@ -1045,6 +1045,20 @@
         <button id="memForgetCancel" class="btn-ghost" data-i18n="memory.cancel">取消</button>
       </div>
       <div id="memForgetHint" class="hidden" style="color:var(--muted);font-size:12px;margin:-4px 0 6px" data-i18n-html="memory.nonAdmin">非管理员：遗忘仅作用于<b>你自己的记忆</b>，不影响他人</div>
+      <div class="memory-viewbar">
+        <button id="memViewList" class="chip-btn on" type="button" data-i18n="memory.viewList">📋 列表</button>
+        <button id="memViewTimeline" class="chip-btn" type="button" data-i18n="memory.viewTimeline">⏱ 时间线</button>
+        <button id="memViewGraph" class="chip-btn" type="button" data-i18n="memory.viewGraph">🕸 图谱</button>
+      </div>
+      <div id="memTimeline" class="memory-timeline hidden"></div>
+      <div id="memGraph" class="memory-graph hidden">
+        <div class="memory-graph-bar">
+          <input id="memGraphQuery" class="modal-input" data-i18n-placeholder="memory.graphQueryPh" />
+          <button id="memGraphLoadBtn" class="chip-btn" type="button" data-i18n="memory.graphLoad">生成图谱</button>
+        </div>
+        <div id="memGraphStats" class="memory-graph-stats"></div>
+        <div id="memGraphCanvas" class="memory-graph-canvas"></div>
+      </div>
       <div id="memList" class="memory-list"></div>
       <div id="memPager" class="memory-pager"></div>
       <div class="modal-actions">

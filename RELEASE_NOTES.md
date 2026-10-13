@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.196 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.196 Release Notes (current Windows desktop release)
+
+**版本说明**：记忆可视化——记忆管理弹窗新增「列表 / 时间线 / 图谱」视图；时间线接入既有接口，图谱新增只读端点 `GET /ag-ui/memory/graph` 并用应用内 mermaid 画关系图。
+**Version note**: memory visualization — the memory dialog gains List / Timeline / Graph views; the timeline consumes the existing endpoint, and the graph adds a read-only `GET /ag-ui/memory/graph` rendered via the in-app mermaid.
+
+## 记忆可视化
+# Memory visualization
+
+中文：
+- **视图切换**：`#memoryModal` 顶部新增「📋 列表 / ⏱ 时间线 / 🕸 图谱」，默认列表；切换知聚 / 关键词按当前视图刷新。
+- **时间线**：调 `GET /ag-ui/memory/timeline`（既有接口）按话题回放记忆演进（旧→新），显示时间、发言者、级别与内容。
+- **图谱**：新增只读端点 `GET /ag-ui/memory/graph?groupId=&q=`，按 `groupId` + 主题词语义召回种子实体并 n 跳遍历返回子图（实体 + 关系边），前端 `buildMermaidGraph` 转 Mermaid `graph LR` 后用 `renderMermaidBlocks` 渲染；未启用 / 未命中 / 未选知聚 / 无主题词各有明确状态。需群成员（管理员可跨群）。
+- **实现**：后端 `MemoryApi.cs` 新端点复用 `IGraphMemory.SearchAsync` / `Stats` 与 `MemoryGovernance` 范围判定；前端复用既有 mermaid 管线，未引入任何前端图库。
+English:
+- **View switch**: `#memoryModal` gains "📋 List / ⏱ Timeline / 🕸 Graph", defaulting to List; changing the Circle / keyword refreshes the active view.
+- **Timeline**: calls `GET /ag-ui/memory/timeline` (existing) to replay memory evolution per topic (old→new), showing time, sender, level, and content.
+- **Graph**: a new read-only `GET /ag-ui/memory/graph?groupId=&q=` seeds entities by `groupId` + topic semantics and does an n-hop walk, returning the subgraph (entities + relation edges); the frontend's `buildMermaidGraph` turns it into a Mermaid `graph LR` and `renderMermaidBlocks` draws it. Clear states for not-enabled / no match / no Circle / no keyword. Requires circle membership (admins may cross circles).
+- **Implementation**: the new `MemoryApi.cs` endpoint reuses `IGraphMemory.SearchAsync` / `Stats` and `MemoryGovernance` scoping; the frontend reuses the existing mermaid pipeline with no new frontend library.
+
+## 测试
+# Tests
+
+中文：新增 `tools/ui-memory-views.mjs`（真实浏览器，17 项：视图切换、时间线、图谱状态、`buildMermaidGraph`、端点契约）。
+English: added `tools/ui-memory-views.mjs` (real browser; 17 checks: view switch, timeline, graph states, `buildMermaidGraph`, endpoint contract).
+
 # AG-UI 群聊桌面版 1.0.195 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.195 Release Notes (current Windows desktop release)
 

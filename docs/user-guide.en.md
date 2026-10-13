@@ -2695,6 +2695,9 @@ Key DOM ids inside the modal:
 | `#memKbSelect` | consolidation target knowledge base dropdown | only lists libraries that are system-level (no ownerId) or created by oneself / visible to admins |
 | `#memConsolidateBtn` | one-click consolidation of "Critical" conclusions | `memory.consolidate` |
 | `#memList` | memory item list container | — |
+| `#memViewList` / `#memViewTimeline` / `#memViewGraph` | view switch: List / Timeline / Graph (List by default) | `memory.viewList` / `viewTimeline` / `viewGraph` (1.0.196) |
+| `#memTimeline` | timeline view container (topic replay via `GET /ag-ui/memory/timeline`) | 1.0.196 |
+| `#memGraphQuery` / `#memGraphLoadBtn` / `#memGraphStats` / `#memGraphCanvas` | graph view: keyword / build / stats / Mermaid canvas (`GET /ag-ui/memory/graph`) | `memory.graph*` (1.0.196) |
 | `#memPager` | paging info and previous / next page | `MEM_PAGE = 30` per page |
 | `#memoryClose` | closes the modal | `memory.close` |
 
@@ -2907,10 +2910,11 @@ It takes effect only when **the message author is the digital employee itself** 
 - Enabling conditions: `Agents:Memory:GraphEnabled = true` **and** `IGraphMemory` is registered (depends on memory being enabled + postgres/sqlite storage + an embedding provider). When not enabled, it is completely transparent to existing flows.
 - Injection: in `MemoryContextProvider.ProvideAIContextAsync`, when `_graph is not null && GraphEnabled`, `graph.SearchAsync(groupId, query)` → `BuildGraphSection(...)` (`UntrustedBoundary.Wrap`, character budget `GraphMaxSectionChars=700`). In addition, a digital employee bound to a knowledge base will, when `GraphEnabled`, also inject the **knowledge base graph** subgraph via `KnowledgeBaseCatalog.SearchGraphAsync`.
 
-#### 6.7.2 Whether there is a visualization UI (verified)
+#### 6.7.2 Visualization UI (1.0.196)
 
-- **There is no standalone graph visualization UI**. A repo-wide search found no graphical frontend for graph nodes / edges.
-- The only graph observation point: the **system status modal** (`#statusModal`, admin, `GET /ag-ui/admin/status`). `AdminApi` returns `rag.graphInUse`, `graphEnabled`, `graphTopK`, `graphHops`, `graphEntities`, `graphEdges`; the frontend `openStatusModal` shows i18n `status.graphActive` "Active · {e} entities / {r} relations" when `graphInUse`, otherwise `status.ragGraphOff` "Not enabled".
+- **The memory dialog gains a "🕸 Graph" view**: after entering a topic keyword it calls `GET /ag-ui/memory/graph?groupId=&q=` (new, see §9.2.5) which returns the matched subgraph (entities + relation edges); the frontend turns the subgraph into a Mermaid `graph LR` source and draws it with the in-app mermaid renderer (`buildMermaidGraph` → `renderMermaidBlocks`).
+- **Clear states when graph is off / nothing matched**: `enabled=false` → "graph memory is not enabled"; no entities → "no entities matched"; missing Circle / keyword are prompted separately (i18n `memory.graph*`).
+- The other observation point is still the **system status modal** (`#statusModal`, admin, `GET /ag-ui/admin/status`): `rag.graphInUse` / `graphEnabled` / `graphTopK` / `graphHops` / `graphEntities` / `graphEdges`; the frontend shows i18n `status.graphActive` "Active · {e} entities / {r} relations" when `graphInUse`, otherwise `status.ragGraphOff` "Not enabled".
 
 ---
 
@@ -2980,9 +2984,9 @@ Checking the existing `docs/memory-personality.md` against **the code as the sou
 5. **Org-role-assignment wording**: §4.4 of that document states "repetitive-routine roles are `slowToLearn`"; in the code heuristic rule table, the `slowToLearn` keywords are "培训 / 带教 / 教练 / 教学 / 训练 / 新人 / coach / trainer / mentor" (i.e., training-and-mentoring roles), which is slightly different; defer to the code keyword table.
 6. **`Scope` default**: the code default is `Scope="agent"` (retrieves all groups the agent belongs to), consistent with the documentation; the three values `agent` / `group` / `all` are consistent with the store implementation.
 7. **Points to verify (no basis found in the code / need manual confirmation)**:
-   - Whether there is a visualization UI for "graph nodes / edges" — **not found** (only the entity / relation counts in the system status modal).
+   - A visualization UI for graph nodes / edges — **now provided** (1.0.196: the memory dialog's "🕸 Graph" view + the new `GET /ag-ui/memory/graph`, see §6.7.2).
    - How manual "whole-group forgetting" handles **Important / Critical memories** — `SetExpiry` does not filter by `importance` and will set important memories as expired too (so they cannot be retrieved), but `PruneExpired` exempts `importance>0` (they are not physically deleted); the documentation does not describe this detail.
-   - The memory management UI's "timeline replay" (`GET /ag-ui/memory/timeline`) **has an API but no frontend entry** — no corresponding UI was found repo-wide.
+   - The memory management UI's "timeline replay" (`GET /ag-ui/memory/timeline`) — **now wired into the frontend** (1.0.196: the memory dialog's "⏱ Timeline" view).
    - `docs/memory-personality.md` §1 "personal memory is programmatically off by default (Docker orchestration injects 3 items by default)" is consistent with the code / orchestration (code default `0`, Docker default `3`); this item **does not constitute a deviation** and is recorded for cross-checking.
 
 
@@ -4333,6 +4337,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | GET | `/ag-ui/memory/groups` | Per-group memory statistics (within the manageable scope) | Login |
 | GET | `/ag-ui/memory` | Memory entry list (`groupId` / `senderId` / `keyword` / `limit` / `offset`; the queryable groups depend on the role) | Login |
 | GET | `/ag-ui/memory/timeline` | Memory timeline (replays a topic old→new) | Login |
+| GET | `/ag-ui/memory/graph` | Graph-memory subgraph (seeds entities / relations by `groupId` + topic `q`, for the frontend graph view; returns `enabled=false` when not enabled) | Login (member / admin) |
 | POST | `/ag-ui/memory/{messageId}/importance` | Adjust a single memory's importance level (0 normal / 1 important / 2 critical) | Login (owner / group management / admin) |
 | DELETE | `/ag-ui/memory/{messageId}` | Physically delete a single memory | Login (same as above) |
 | POST | `/ag-ui/memory/forget` | Manual forgetting (expire by group or everything; optionally keep the most recent N hours) | Login (same as above) |

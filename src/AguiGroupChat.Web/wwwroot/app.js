@@ -584,10 +584,106 @@ async function openMemoryModal() {
   $("memConsolidateBtn").disabled = false;
   $("memConsolidateBtn").textContent = t("memory.consolidate");
   $("memoryModal").classList.remove("hidden");
+  $("memGraphQuery").value = "";
+  if ($("memGraphStats")) $("memGraphStats").textContent = "";
+  switchMemView("list");
   await loadMemoryGroups();
   syncMemForgetHint();
   await loadMemoryKbs();
   await loadMemoryList(0);
+}
+
+/* ============ 记忆可视化：列表 / 时间线 / 图谱 ============ */
+let memView = "list"; // 当前记忆弹窗视图
+
+/** 按当前视图刷新数据（搜索 / 切知聚时统一入口）。 */
+function refreshMemView() {
+  if (memView === "timeline") loadMemoryTimeline();
+  else if (memView === "graph") loadMemoryGraph();
+  else loadMemoryList(0);
+}
+
+/** 切换记忆弹窗视图：列表（默认）/ 时间线 / 图谱。 */
+function switchMemView(view) {
+  memView = view;
+  $("memViewList").classList.toggle("on", view === "list");
+  $("memViewTimeline").classList.toggle("on", view === "timeline");
+  $("memViewGraph").classList.toggle("on", view === "graph");
+  $("memList").classList.toggle("hidden", view !== "list");
+  $("memPager").classList.toggle("hidden", view !== "list");
+  $("memTimeline").classList.toggle("hidden", view !== "timeline");
+  $("memGraph").classList.toggle("hidden", view !== "graph");
+  if (view === "timeline") loadMemoryTimeline();
+  else if (view === "graph") loadMemoryGraph();
+}
+
+/** 记忆时间线（2.2）：按话题回放某知聚记忆的时间演进（旧→新）。 */
+async function loadMemoryTimeline() {
+  const box = $("memTimeline");
+  box.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loading"))}</div>`;
+  const groupId = $("memGroupSelect").value || "";
+  const keyword = $("memKeyword").value.trim();
+  try {
+    const params = new URLSearchParams({ limit: "200" });
+    if (groupId) params.set("groupId", groupId);
+    if (keyword) params.set("keyword", keyword);
+    const res = await fetch(`/ag-ui/memory/timeline?${params.toString()}`, { headers: { Authorization: "Bearer " + (state.token || "") } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { box.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loadFail"))}</div>`; return; }
+    const topics = d.topics || [];
+    if (!topics.length) { box.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.timelineEmpty"))}</div>`; return; }
+    box.innerHTML = topics.map((tp) => `
+      <div class="mem-tl-topic">
+        <div class="mem-tl-topic-head">${escapeHtml(tp.topicId || t("memory.defaultTopic"))} <span class="muted">${fmtDateTime(tp.startMs)} → ${fmtDateTime(tp.endMs)}</span></div>
+        ${(tp.steps || []).map((s) => {
+          const lvl = Math.max(0, Math.min(2, Number(s.importance) || 0));
+          return `<div class="mem-tl-step">
+            <span class="mem-tl-time">${fmtDateTime(s.timestamp)}</span>
+            <span class="mem-tl-who">${escapeHtml(s.senderNickname || s.senderId || "")}</span>
+            <span class="mem-tl-lvl mem-lvl-${lvl}">${escapeHtml([t("memory.level0"), t("memory.level1"), t("memory.level2")][lvl])}</span>
+            <div class="mem-tl-body">${escapeHtml(s.content || "")}</div>
+          </div>`;
+        }).join("")}
+      </div>`).join("");
+  } catch { box.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loadFail"))}</div>`; }
+}
+
+/** 图谱记忆可视化：按查询召回子图，交给应用内 mermaid 渲染器画成关系图。 */
+async function loadMemoryGraph() {
+  const canvas = $("memGraphCanvas");
+  const statsEl = $("memGraphStats");
+  if (statsEl) statsEl.textContent = "";
+  const groupId = $("memGroupSelect").value || "";
+  const q = $("memGraphQuery").value.trim();
+  if (!groupId) { canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.graphNeedGroup"))}</div>`; return; }
+  if (!q) { canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.graphNeedQuery"))}</div>`; return; }
+  canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loading"))}</div>`;
+  try {
+    const res = await fetch(`/ag-ui/memory/graph?groupId=${encodeURIComponent(groupId)}&q=${encodeURIComponent(q)}`, { headers: { Authorization: "Bearer " + (state.token || "") } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loadFail"))}</div>`; return; }
+    if (d.enabled === false) { canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.graphDisabled"))}</div>`; return; }
+    const entities = d.entities || [], edges = d.edges || [];
+    if (d.stats && statsEl) statsEl.textContent = t("memory.graphStats", { entities: d.stats.entityCount, edges: d.stats.edgeCount });
+    if (!entities.length) { canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.graphEmpty"))}</div>`; return; }
+    canvas.innerHTML = `<pre><code class="language-mermaid">${escapeHtml(buildMermaidGraph(entities, edges))}</code></pre>`;
+    renderMermaidBlocks(canvas);
+  } catch { canvas.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loadFail"))}</div>`; }
+}
+
+/** 子图 → Mermaid graph LR 源码（节点 id 用 n<i>；标签去掉会破坏语法的字符并限长）。 */
+function buildMermaidGraph(entities, edges) {
+  const clean = (s) => String(s == null ? "" : s).replace(/["`\[\]{}|<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+  const idx = new Map();
+  entities.forEach((e, i) => idx.set(e.entityId, i));
+  let out = "graph LR\n";
+  entities.forEach((e, i) => { out += `  n${i}["${clean(e.name || e.entityId) || ("#" + i)}"]\n`; });
+  edges.forEach((ed) => {
+    const a = idx.get(ed.sourceId), b = idx.get(ed.targetId);
+    if (a === undefined || b === undefined) return;
+    out += `  n${a} -->|${clean(ed.relation) || "related_to"}| n${b}\n`;
+  });
+  return out;
 }
 
 /** 加载「当前用户可写」的知识库（系统级或本人创建 / 管理员）到沉淀目标下拉框。 */
@@ -11808,9 +11904,14 @@ function init() {
   $("efReset").onclick = resetExecutionConfig;
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
-  $("memSearchBtn").onclick = () => loadMemoryList(0);
-  $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") loadMemoryList(0); });
-  $("memGroupSelect").addEventListener("change", () => { loadMemoryList(0); syncMemForgetHint(); });
+  $("memSearchBtn").onclick = () => refreshMemView();
+  $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") refreshMemView(); });
+  $("memGroupSelect").addEventListener("change", () => { refreshMemView(); syncMemForgetHint(); });
+  $("memViewList").onclick = () => switchMemView("list");
+  $("memViewTimeline").onclick = () => switchMemView("timeline");
+  $("memViewGraph").onclick = () => switchMemView("graph");
+  $("memGraphLoadBtn").onclick = loadMemoryGraph;
+  $("memGraphQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") loadMemoryGraph(); });
   $("memForgetBtn").onclick = () => $("memForgetPanel").classList.toggle("hidden");
   $("memConsolidateBtn").onclick = consolidateGroupMemory;
   $("memForgetCancel").onclick = () => $("memForgetPanel").classList.add("hidden");
