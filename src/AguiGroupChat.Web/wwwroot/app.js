@@ -7576,37 +7576,68 @@ async function runStorageReclaim() {
 }
 
 
-/** 画一条趋势折线（SVG，按最近区间增量）；无数据时留空。 */
-function renderTrendSvg(id, vals, good) {
+/** 多序列迷你折线图：series = [{ vals, cls }]（cls: ok/bad/warn/neutral）；按全局最大归一。 */
+function renderSparkSvg(id, series) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.toggle("good", !!good);
-  el.classList.toggle("bad", !good);
-  if (!Array.isArray(vals) || vals.length < 2) { el.innerHTML = ""; return; }
-  const w = 800, h = 48;
-  const max = Math.max(1, ...vals);
-  const step = vals.length > 1 ? (w - 4) / (vals.length - 1) : 0;
-  const pts = vals.map((v, i) => `${(2 + i * step).toFixed(1)},${(h - 2 - ((v / max) * (h - 6))).toFixed(1)}`);
-  el.innerHTML = `<polyline points="${pts.join(" ")}" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+  const valid = (series || []).filter((s) => Array.isArray(s.vals) && s.vals.length >= 2);
+  if (!valid.length) { el.innerHTML = ""; return; }
+  const w = 800, h = 60;
+  const max = Math.max(1, ...valid.flatMap((s) => s.vals));
+  const n = valid[0].vals.length;
+  const step = n > 1 ? (w - 4) / (n - 1) : 0;
+  el.innerHTML = valid.map((s) => {
+    const pts = s.vals.map((v, i) => `${(2 + i * step).toFixed(1)},${(h - 3 - (Math.max(0, v) / max) * (h - 8)).toFixed(1)}`);
+    return `<polyline class="${s.cls || "neutral"}" points="${pts.join(" ")}" fill="none" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+  }).join("");
 }
 
-/** 指标趋势：服务端每 60s 一个累计采样点，前端取最近 120 点差分后画“成功调用 / 桥接失败”两条折线。 */
-function renderMetricsTrend(d) {
+/** 成功率环（ratio 为 0–1；null = 无数据）。 */
+function renderDonut(id, ratio) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (ratio == null || !isFinite(ratio)) { el.innerHTML = `<div class="muted" style="font-size:12px">—</div>`; return; }
+  const pct = Math.round(ratio * 1000) / 10;
+  const r = 26, c = 2 * Math.PI * r;
+  const dash = (c * Math.max(0, Math.min(1, ratio))).toFixed(1);
+  const cls = pct >= 90 ? "ok" : pct >= 60 ? "warn" : "bad";
+  el.innerHTML = `<svg viewBox="0 0 64 64" class="donut-svg">
+    <circle cx="32" cy="32" r="${r}" class="donut-track" fill="none" stroke-width="7"/>
+    <circle cx="32" cy="32" r="${r}" class="donut-val ${cls}" fill="none" stroke-width="7"
+      stroke-dasharray="${dash} ${c.toFixed(1)}" stroke-linecap="round" transform="rotate(-90 32 32)"/>
+  </svg><div class="donut-label">${pct}%</div>`;
+}
+
+/**
+ * 可观测性看板：服务端每 60s 一个累计采样点，前端按所选时间窗口取最近 N 点做差分
+ * （间隔即 60s → 差分值就是“每分钟增量”），画调用 / 成功·拒绝 / 桥接 / 记忆 / 输出多序列图 + 成功率环。
+ */
+function renderMetricsDashboard(d) {
   const view = $("adminTrendView");
   if (!view) return;
-  const trend = d?.trend || [];
+  const trend = (d && d.trend) || [];
   const have = trend.length >= 2;
   view.classList.toggle("hidden", !have);
-  if (!have) return;
-  const recent = trend.slice(-120);
-  const acc = []; const fai = [];
-  for (let i = 1; i < recent.length; i++) {
-    acc.push(Math.max(0, (Number(recent[i].accepted) || 0) - (Number(recent[i - 1].accepted) || 0)));
-    fai.push(Math.max(0, (Number(recent[i].bridgeFailures) || 0) - (Number(recent[i - 1].bridgeFailures) || 0)));
-  }
-  renderTrendSvg("trendAcceptedSvg", acc, true);
-  renderTrendSvg("trendFailedSvg", fai, false);
+  if (!have) { renderDonut("successDonut", null); return; }
+  const minutes = Math.max(2, Number($("metricsRange")?.value) || 240);
+  const recent = trend.slice(-Math.min(minutes, trend.length));
+  const delta = (k) => {
+    const out = [];
+    for (let i = 1; i < recent.length; i++) out.push(Math.max(0, (Number(recent[i][k]) || 0) - (Number(recent[i - 1][k]) || 0)));
+    return out;
+  };
+  const acc = delta("accepted"), rej = delta("rejected");
+  renderSparkSvg("chartInvoke", [{ vals: delta("invocations"), cls: "neutral" }]);
+  renderSparkSvg("chartSuccess", [{ vals: acc, cls: "ok" }, { vals: rej, cls: "bad" }]);
+  renderSparkSvg("chartBridge", [{ vals: delta("bridgeCalls"), cls: "neutral" }, { vals: delta("bridgeFailures"), cls: "bad" }]);
+  renderSparkSvg("chartMemory", [{ vals: delta("memoryHitCount"), cls: "warn" }, { vals: delta("memoryEmptySearch"), cls: "neutral" }]);
+  renderSparkSvg("chartOutput", [{ vals: delta("outputChars"), cls: "neutral" }]);
+  const accSum = acc.reduce((a, b) => a + b, 0), rejSum = rej.reduce((a, b) => a + b, 0);
+  renderDonut("successDonut", accSum + rejSum > 0 ? accSum / (accSum + rejSum) : null);
 }
+
+/** 记录最近一次的指标快照，供切换时间范围时即时重画（无需重新请求）。 */
+let lastMetricsData = null;
 
 /** 运行指标（6.1）：进程内调用 / 桥接 / 记忆命中率 + 分数字员工计数 + 桥接端点健康。 */
 async function loadAdminMetrics() {
@@ -7643,7 +7674,21 @@ async function loadAdminMetrics() {
     byAgent.innerHTML = (d.byAgent || []).length
       ? d.byAgent.map((a) => `<tr><td>${escapeHtml(a.agentId)}</td><td>${Number(a.count || 0).toLocaleString()}</td></tr>`).join("")
       : `<tr><td colspan="2" class="admin-empty">${t("admin.metricsEmpty")}</td></tr>`;
-    renderMetricsTrend(d);
+    // 进程健康（看板）：内存 / GC / 线程
+    const p = d.process || {};
+    const proc = $("adminProcessCards");
+    if (proc) {
+      proc.innerHTML = [
+        { label: t("admin.procWorkingSet"), value: fmtBytes(Number(p.workingSetBytes) || 0), sub: t("admin.procPrivate", { v: fmtBytes(Number(p.privateBytes) || 0) }) },
+        { label: t("admin.procGcHeap"), value: fmtBytes(Number(p.gcHeapBytes) || 0), sub: t("admin.procGcCount", { g0: p.gcGen0 || 0, g1: p.gcGen1 || 0, g2: p.gcGen2 || 0 }) },
+        { label: t("admin.procThreads"), value: String(p.threadCount || 0), sub: t("admin.procCpu", { n: p.processorCount || 0 }) },
+        { label: t("admin.procAllocated"), value: fmtBytes(Number(p.allocatedBytes) || 0), sub: t("admin.procHandles", { n: p.handleCount || 0 }) },
+      ].map((it) => `<div class="admin-metric-card"><div class="am-label">${escapeHtml(it.label)}</div>`
+        + `<div class="am-value">${escapeHtml(it.value)}</div>`
+        + (it.sub ? `<div class="am-sub">${escapeHtml(it.sub)}</div>` : "") + `</div>`).join("");
+    }
+    lastMetricsData = d;
+    renderMetricsDashboard(d);
   } catch (ex) { if (meta) meta.textContent = t("admin.sysNetErr"); cards.innerHTML = ""; }
   try {
     const bh = await fetch("/ag-ui/admin/bridge-health", { headers: { Authorization: "Bearer " + state.token } });
@@ -12392,6 +12437,8 @@ function init() {
       if (btn) orphanAdminAction(btn.dataset.orp, btn.dataset.type, btn.dataset.id, btn.dataset.name);
     }));
   $("metricsRefreshBtn").onclick = () => loadAdminMetrics();
+  const mr = $("metricsRange");
+  if (mr) mr.onchange = () => { if (lastMetricsData) renderMetricsDashboard(lastMetricsData); };
   $("cfgSave").onclick = saveConfigGovernance;
   $("cfgReload").onclick = loadConfigGovernance;
   $("efSave").onclick = saveExecutionConfig;

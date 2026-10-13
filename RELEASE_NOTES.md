@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.204 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.204 Release Notes (current Windows desktop release)
+
+**版本说明**：**可观测性看板**——管理员控制台「运行指标」从“6 张卡片 + 2 条趋势线”升级为看板：新增**进程健康**（工作集 / GC 堆 / 线程 / 分配）、**五张多序列图**（调用速率 / 成功-拒绝 / 桥接调用-失败 / 记忆命中-空检索 / 输出吞吐）、**成功率环**与**时间范围选择**（30 分 / 2 时 / 4 时）。
+**Version note**: an **observability dashboard** — the admin console's "Runtime Metrics" grows from "6 cards + 2 trend lines" into a dashboard: **process health** (working set / GC heap / threads / allocated), **five multi-series charts** (invocation rate / accepted-rejected / bridge calls-failures / memory hits-empty / output throughput), a **success-rate ring**, and a **range selector** (30 min / 2 h / 4 h).
+
+## 可观测性看板
+# Observability dashboard
+
+中文：
+- **进程健康卡片**（`#adminProcessCards`）：工作集内存（+ 私有）、GC 堆（+ G0/G1/G2 次数）、线程数（+ 核心数）、累计分配（+ 句柄）——来自 `MetricsService.Snapshot` 新增的 `process` 节点（`Process.GetCurrentProcess()` + GC 计数器；取不到时置 0，不影响其它指标）。
+- **多序列图表**（`renderSparkSvg`）：服务端每 60s 采一点、缓存最近 240 点（约 4 小时）；前端按所选窗口取最近 N 点**差分**（间隔即 60s → 差分值＝每分钟增量），画调用速率 / 成功-拒绝 / 桥接调用-失败 / 记忆命中-空检索 / 输出吞吐五条多序列折线（按全局最大值归一，避免各图比例不一致而误读）。
+- **成功率环**（`renderDonut`）：按窗口内成功 / 拒绝之和画环（≥90% 绿 / ≥60% 黄 / 否则红）。
+- **时间范围选择**（`#metricsRange`）：切换时用最近一次快照**即时重画**（不重新请求）；数据不足 2 点时图表区隐藏、环显示 `—`。
+English:
+- **Process-health cards** (`#adminProcessCards`): working set (+ private), GC heap (+ G0/G1/G2 collections), threads (+ CPU count), total allocated (+ handles) — from a new `process` node in `MetricsService.Snapshot` (`Process.GetCurrentProcess()` + GC counters; zeros on failure, never affecting other metrics).
+- **Multi-series charts** (`renderSparkSvg`): the server samples one point every 60s and caches the latest 240 (about 4 hours); the frontend takes the last N points of the selected window and **diffs** them (a 60s interval means each delta is a "per-minute increment"), drawing five charts — invocation rate / accepted-rejected / bridge calls-failures / memory hits-empty / output throughput (normalised to a shared max so the panels are comparable).
+- **Success-rate ring** (`renderDonut`): drawn from the window's accepted / rejected sums (≥90% green / ≥60% amber / else red).
+- **Range selector** (`#metricsRange`): changing it **redraws immediately** from the last snapshot (no refetch); with fewer than 2 points the chart area is hidden and the ring shows `—`.
+
+## 测试
+# Tests
+
+中文：`MetricsTests` 新增 2 例（快照含 `process` 字段且数值合理 / 首个趋势采样点落环），共 5/5；连同市场在线分发 / 桌面组合根对等合跑 34/34；i18n zh=en=1708、missing 0。
+English: `MetricsTests` gains 2 cases (the snapshot carries a sane `process` node / the first trend sample lands in the ring), 5/5 total; 34/34 together with the marketplace online distribution and desktop parity; i18n zh=en=1708, missing 0.
+
 # AG-UI 群聊桌面版 1.0.203 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.203 Release Notes (current Windows desktop release)
 

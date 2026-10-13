@@ -2425,3 +2425,29 @@ button { white-space: nowrap; }
 .market-pack-name { font-weight: 600; }
 .market-pack-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .market-pack-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+/* ================= 可观测性看板 ================= */
+.admin-dash-controls { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }
+.admin-dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.admin-chart { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
+.admin-chart-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
+.admin-chart svg { width: 100%; height: 60px; display: block; }
+.admin-chart polyline { stroke: currentColor; }
+.admin-chart polyline.ok { color: var(--ok, #34c77b); }
+.admin-chart polyline.bad { color: var(--err, #ff6b6b); }
+.admin-chart polyline.warn { color: var(--warn, #f0a63a); }
+.admin-chart polyline.neutral { color: var(--accent, #4f8cff); }
+.chart-legend { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.chart-legend .lg { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart-legend .lg.ok { background: var(--ok, #34c77b); }
+.chart-legend .lg.bad { background: var(--err, #ff6b6b); }
+.chart-legend .lg.warn { background: var(--warn, #f0a63a); }
+.chart-legend .lg.neutral { background: var(--accent, #4f8cff); }
+.admin-donut-wrap { display: flex; flex-direction: column; }
+.admin-donut { position: relative; display: flex; align-items: center; justify-content: center; }
+.admin-donut .donut-svg { width: 72px; height: 72px; }
+.donut-track { stroke: var(--border); }
+.donut-val.ok { stroke: var(--ok, #34c77b); }
+.donut-val.warn { stroke: var(--warn, #f0a63a); }
+.donut-val.bad { stroke: var(--err, #ff6b6b); }
+.donut-label { position: absolute; font-size: 13px; font-weight: 600; }

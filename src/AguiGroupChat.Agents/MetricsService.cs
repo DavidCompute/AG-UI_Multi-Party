@@ -111,6 +111,37 @@ public sealed class MetricsService
             outputChars = Volatile.Read(ref _outputChars),
             byAgent = _byAgent.OrderByDescending(kv => kv.Value).Take(30).Select(kv => new { agentId = kv.Key, count = kv.Value }),
             trend,
+            // 进程健康（可观测性看板）：内存 / 线程 / GC——与业务计数器一起展示
+            process = ProcessMetrics(),
+        };
+    }
+
+    /// <summary>进程级资源指标（廉价、无副作用）：工作集 / 私有内存 / 线程 / 句柄 / GC。</summary>
+    private static object ProcessMetrics()
+    {
+        long workingSet = 0, privateBytes = 0, handles = 0;
+        var threads = 0;
+        try
+        {
+            using var p = System.Diagnostics.Process.GetCurrentProcess();
+            workingSet = p.WorkingSet64;
+            privateBytes = p.PrivateMemorySize64;
+            handles = p.HandleCount;
+            threads = p.Threads.Count;
+        }
+        catch { /* 取不到就留 0（不影响其它指标） */ }
+        return new
+        {
+            workingSetBytes = workingSet,
+            privateBytes,
+            threadCount = threads,
+            handleCount = handles,
+            processorCount = Environment.ProcessorCount,
+            gcHeapBytes = GC.GetTotalMemory(forceFullCollection: false),
+            gcGen0 = GC.CollectionCount(0),
+            gcGen1 = GC.CollectionCount(1),
+            gcGen2 = GC.CollectionCount(2),
+            allocatedBytes = GC.GetTotalAllocatedBytes(precise: false),
         };
     }
 }

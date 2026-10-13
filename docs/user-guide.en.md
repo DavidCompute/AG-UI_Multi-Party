@@ -3872,20 +3872,21 @@ Key audit actions (partial, for reference): `admin.user.disable`, `admin.user.re
 
 ### 8.8 Runtime Metrics tab (`#adminTabMetrics`, including bridge health)
 
-View `#adminMetricsView` (`index.html:1584-1618`): a header `#adminMetricsMeta` + `#metricsRefreshBtn` (`↻ Refresh`), the metric cards `#adminMetricCards`, the trend area `#adminTrendView`, and two columns `#adminByAgentRows` (invocations by digital employee) and `#adminBridgeRows` (**bridge endpoint health**).
+View `#adminMetricsView` (`index.html`): a header `#adminMetricsMeta` + `#metricsRefreshBtn` (`↻ Refresh`), business metric cards `#adminMetricCards`, process-health cards `#adminProcessCards`, the dashboard range selector `#metricsRange` (30 min / 2 h / 4 h), the chart area `#adminTrendView` (`#chartInvoke` / `#chartSuccess` / `#chartBridge` / `#chartMemory` / `#chartOutput` plus the success-rate ring `#successDonut`), and two columns `#adminByAgentRows` (invocations by digital employee) and `#adminBridgeRows` (**bridge endpoint health**).
 
 #### 8.8.1 8-second polling
 
-`openAdminModal()` calls `startAdminMetricsPoll()` (`app.js:6663-6674`): `setInterval(..., 8000)`, calling `loadAdminMetrics()` **only when** `#adminModal` is not hidden **and** `#adminTabMetrics` has the `on` class. When the console is closed, `stopAdminMetricsPoll()` clears the timer.
+`openAdminModal()` calls `startAdminMetricsPoll()`: `setInterval(..., 8000)`, calling `loadAdminMetrics()` **only when** `#adminModal` is not hidden **and** `#adminTabMetrics` has the `on` class. When the console is closed, `stopAdminMetricsPoll()` clears the timer. Changing `#metricsRange` **redraws immediately** from the last snapshot `lastMetricsData` (no refetch).
 
-#### 8.8.2 Metric fields
+#### 8.8.2 Metric fields and the dashboard
 
-`loadAdminMetrics()` (`app.js:6931-6978`):
+`loadAdminMetrics()`:
 
-- Main endpoint `GET /ag-ui/admin/metrics` (in-process counters `MetricsService.Snapshot`, `MetricsService.cs:80-115`): `startedAtMs`, `uptimeSeconds`, `invocations`, `accepted`, `rejected`, `bridgeCalls`, `bridgeFailures`, `memoryHitCount`, `memoryEmptySearch`, `outputChars`, `byAgent` (top 30), `trend`.
-- 6 cards (`app.js:6948-6955`): total invocations, accepted (`accepted`), rejected (`rejected`, shown in red when >0), output chars (`outputChars`), bridge failures (`bridgeFailures / bridgeCalls`, with a ratio), memory hits (`memoryHitCount / (memoryHitCount+memoryEmptySearch)`, with a ratio).
+- Main endpoint `GET /ag-ui/admin/metrics` (in-process counters `MetricsService.Snapshot`): `startedAtMs`, `uptimeSeconds`, `invocations`, `accepted`, `rejected`, `bridgeCalls`, `bridgeFailures`, `memoryHitCount`, `memoryEmptySearch`, `outputChars`, `byAgent` (top 30), `trend`, **and `process`** (`workingSetBytes` / `privateBytes` / `threadCount` / `handleCount` / `processorCount` / `gcHeapBytes` / `gcGen0-2` / `allocatedBytes`).
+- 6 business cards: total invocations, accepted (`accepted`), rejected (`rejected`, shown in red when >0), output chars (`outputChars`), bridge failures (`bridgeFailures / bridgeCalls`, with a ratio), memory hits (`memoryHitCount / (memoryHitCount+memoryEmptySearch)`, with a ratio).
+- **4 process-health cards** (`#adminProcessCards`): working set (+ private), GC heap (+ G0/G1/G2 collections), threads (+ CPU count), total allocated (+ handles).
 - Per-digital-employee table `#adminByAgentRows`: `byAgent[].agentId / count`.
-- Trend `renderMetricsTrend` (`app.js:6913-6928`): takes `trend.slice(-120)` and diffs it, plotting "accepted calls" (`#trendAcceptedSvg`) and "bridge failures" (`#trendFailedSvg`). The server samples one point **every 60 seconds** and caches the latest **240** points (about 4 hours, `MetricsService.cs:20-21`).
+- **Dashboard charts** (`renderMetricsDashboard`, `renderSparkSvg`): the server samples one point **every 60 seconds** and caches the latest **240** points (about 4 hours); the frontend takes the last N points of the selected window and **diffs** them (a 60s interval means each delta is a "per-minute increment"), plotting five multi-series charts — invocation rate, accepted / rejected, bridge calls / failures, memory hits / empty, and output throughput — plus a **success-rate ring** from the window's accepted / rejected sums (`renderDonut`; ≥90% green / ≥60% amber / else red). With fewer than 2 points the chart area is hidden and the ring shows `—`.
 - Meta info: `admin.metricsMeta` (`Started {start}, running {up}`).
 
 #### 8.8.3 Bridge endpoint health (`#adminBridgeRows`)

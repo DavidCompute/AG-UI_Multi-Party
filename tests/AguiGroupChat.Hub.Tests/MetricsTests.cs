@@ -45,6 +45,33 @@ public sealed class MetricsTests
         Assert.Equal(1L, GetProps(snap).MemoryEmptySearch);
     }
 
+    [Fact]
+    public void Snapshot_IncludesProcessMetrics()
+    {
+        var m = new MetricsService();
+        var snap = m.Snapshot();
+        var proc = snap.GetType().GetProperty("process")!.GetValue(snap)!;
+        var pt = proc.GetType();
+        Assert.True((long)pt.GetProperty("workingSetBytes")!.GetValue(proc)! > 0);
+        Assert.True((int)pt.GetProperty("threadCount")!.GetValue(proc)! > 0);
+        Assert.True((int)pt.GetProperty("processorCount")!.GetValue(proc)! > 0);
+        Assert.True((long)pt.GetProperty("gcHeapBytes")!.GetValue(proc)! >= 0);
+        Assert.True((long)pt.GetProperty("allocatedBytes")!.GetValue(proc)! > 0);
+    }
+
+    [Fact]
+    public void Snapshot_IncludesTrendRing()
+    {
+        var m = new MetricsService();
+        m.RecordInvocation("a", accepted: true, isBridge: false, isBridgeFailure: false, outputChars: 1);
+        var snap = m.Snapshot();
+        var trend = (System.Collections.IEnumerable)snap.GetType().GetProperty("trend")!.GetValue(snap)!;
+        var list = trend.Cast<object>().ToList();
+        Assert.Single(list); // 首次采样落一点
+        var pt = list[0].GetType();
+        Assert.Equal(1L, (long)pt.GetProperty("invocations")!.GetValue(list[0])!);
+    }
+
     private static (long Invocations, long Accepted, long Rejected, long BridgeCalls, long BridgeFailures, long MemoryHitCount, long MemoryEmptySearch, long OutputChars) GetProps(object snap)
     {
         var t = snap.GetType();

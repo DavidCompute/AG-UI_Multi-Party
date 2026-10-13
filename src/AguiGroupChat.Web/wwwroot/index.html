@@ -1740,12 +1740,48 @@
           <button id="metricsRefreshBtn" class="chip-btn" type="button" data-i18n="admin.metricsRefresh">↻ 刷新</button>
         </div>
         <div id="adminMetricCards" class="admin-metric-grid"></div>
-        <!-- 调用 / 失败趋势（B3：60s 采样环，展示近 4 小时） -->
+        <div id="adminProcessCards" class="admin-metric-grid" style="margin-top:8px"></div>
+        <!-- 看板：时间范围 + 多序列图表 + 成功率环（60s 采样环，展示窗口内每分钟增量） -->
+        <div class="admin-dash-controls">
+          <span class="form-hint" data-i18n="admin.dashRange">时间范围</span>
+          <select id="metricsRange" class="modal-input" style="width:auto;display:inline-block;padding:2px 8px">
+            <option value="30" data-i18n="admin.dashRange30">30 分钟</option>
+            <option value="120" data-i18n="admin.dashRange120">2 小时</option>
+            <option value="240" selected data-i18n="admin.dashRange240">4 小时</option>
+          </select>
+        </div>
         <div id="adminTrendView" class="admin-trend-view hidden">
-          <h4 data-i18n="admin.trendTitle">调用 / 失败趋势（近 4 小时）</h4>
-          <div class="admin-trend-charts">
-            <div class="trend-line"><span class="trend-label ok" data-i18n="admin.trendAccepted">成功调用</span><svg id="trendAcceptedSvg" viewBox="0 0 800 48" preserveAspectRatio="none"></svg></div>
-            <div class="trend-line"><span class="trend-label bad" data-i18n="admin.trendFailed">桥接失败</span><svg id="trendFailedSvg" viewBox="0 0 800 48" preserveAspectRatio="none"></svg></div>
+          <div class="admin-dash-grid">
+            <div class="admin-chart">
+              <div class="admin-chart-title"><span data-i18n="admin.chartInvokeRate">调用速率（次/分）</span></div>
+              <svg id="chartInvoke" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="admin-chart">
+              <div class="admin-chart-title"><span data-i18n="admin.chartSuccess">成功 / 拒绝（次/分）</span>
+                <span class="chart-legend"><i class="lg ok"></i><span data-i18n="admin.trendAccepted">成功调用</span><i class="lg bad"></i><span data-i18n="admin.trendRejected">拒绝</span></span>
+              </div>
+              <svg id="chartSuccess" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="admin-chart">
+              <div class="admin-chart-title"><span data-i18n="admin.chartBridge">桥接调用 / 失败（次/分）</span>
+                <span class="chart-legend"><i class="lg neutral"></i><span data-i18n="admin.chartBridgeCalls">调用</span><i class="lg bad"></i><span data-i18n="admin.trendFailed">桥接失败</span></span>
+              </div>
+              <svg id="chartBridge" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="admin-chart">
+              <div class="admin-chart-title"><span data-i18n="admin.chartMemory">记忆命中 / 空检索（次/分）</span>
+                <span class="chart-legend"><i class="lg warn"></i><span data-i18n="admin.chartMemHit">命中</span><i class="lg neutral"></i><span data-i18n="admin.chartMemMiss">空检索</span></span>
+              </div>
+              <svg id="chartMemory" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="admin-chart">
+              <div class="admin-chart-title"><span data-i18n="admin.chartOutput">输出吞吐（字符/分）</span></div>
+              <svg id="chartOutput" viewBox="0 0 800 60" preserveAspectRatio="none"></svg>
+            </div>
+            <div class="admin-chart admin-donut-wrap">
+              <div class="admin-chart-title"><span data-i18n="admin.chartSuccessRate">成功率</span></div>
+              <div id="successDonut" class="admin-donut"></div>
+            </div>
           </div>
         </div>
         <div class="admin-metric-cols">

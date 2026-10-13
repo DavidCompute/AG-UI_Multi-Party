@@ -3865,20 +3865,21 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.8 运行指标 tab（`#adminTabMetrics`，含桥健康）
 
-视图 `#adminMetricsView`（`index.html:1584-1618`）：头部 `#adminMetricsMeta` + `#metricsRefreshBtn`（`↻ 刷新`），指标卡片 `#adminMetricCards`，趋势区 `#adminTrendView`，两列 `#adminByAgentRows`（按数字员工调用）与 `#adminBridgeRows`（**桥接端点健康**）。
+视图 `#adminMetricsView`（`index.html`）：头部 `#adminMetricsMeta` + `#metricsRefreshBtn`（`↻ 刷新`），业务指标卡片 `#adminMetricCards`，进程健康卡片 `#adminProcessCards`，看板窗口选择 `#metricsRange`（30 分钟 / 2 小时 / 4 小时），图表区 `#adminTrendView`（`#chartInvoke` / `#chartSuccess` / `#chartBridge` / `#chartMemory` / `#chartOutput` + 成功率环 `#successDonut`），两列 `#adminByAgentRows`（按数字员工调用）与 `#adminBridgeRows`（**桥接端点健康**）。
 
 #### 8.8.1 8 秒轮询
 
-`openAdminModal()` 会调 `startAdminMetricsPoll()`（`app.js:6663-6674`）：`setInterval(..., 8000)`，**仅当** `#adminModal` 未隐藏**且** `#adminTabMetrics` 带 `on` 类时 `loadAdminMetrics()`。关闭控制台时 `stopAdminMetricsPoll()` 清除定时器。
+`openAdminModal()` 会调 `startAdminMetricsPoll()`：`setInterval(..., 8000)`，**仅当** `#adminModal` 未隐藏**且** `#adminTabMetrics` 带 `on` 类时 `loadAdminMetrics()`。关闭控制台时 `stopAdminMetricsPoll()` 清除定时器。切换 `#metricsRange` 时用最近一次快照 `lastMetricsData` **即时重画**（不重新请求）。
 
-#### 8.8.2 指标字段
+#### 8.8.2 指标字段与看板
 
-`loadAdminMetrics()`（`app.js:6931-6978`）：
+`loadAdminMetrics()`：
 
-- 主接口 `GET /ag-ui/admin/metrics`（进程内计数 `MetricsService.Snapshot`，`MetricsService.cs:80-115`）：`startedAtMs`、`uptimeSeconds`、`invocations`、`accepted`、`rejected`、`bridgeCalls`、`bridgeFailures`、`memoryHitCount`、`memoryEmptySearch`、`outputChars`、`byAgent`（前 30 名）、`trend`。
-- 卡片 6 项（`app.js:6948-6955`）：调用总次数、成功（`accepted`）、拒绝（`rejected`，>0 标红）、输出字符数（`outputChars`）、桥接失败（`bridgeFailures / bridgeCalls`，含比率）、记忆命中（`memoryHitCount / (memoryHitCount+memoryEmptySearch)`，含比率）。
+- 主接口 `GET /ag-ui/admin/metrics`（进程内计数 `MetricsService.Snapshot`）：`startedAtMs`、`uptimeSeconds`、`invocations`、`accepted`、`rejected`、`bridgeCalls`、`bridgeFailures`、`memoryHitCount`、`memoryEmptySearch`、`outputChars`、`byAgent`（前 30 名）、`trend`，**以及 `process`**（`workingSetBytes` / `privateBytes` / `threadCount` / `handleCount` / `processorCount` / `gcHeapBytes` / `gcGen0-2` / `allocatedBytes`）。
+- 业务卡片 6 项：调用总次数、成功（`accepted`）、拒绝（`rejected`，>0 标红）、输出字符数（`outputChars`）、桥接失败（`bridgeFailures / bridgeCalls`，含比率）、记忆命中（`memoryHitCount / (memoryHitCount+memoryEmptySearch)`，含比率）。
+- **进程健康卡片 4 项**（`#adminProcessCards`）：工作集内存（+ 私有内存）、GC 堆（+ G0/G1/G2 次数）、线程数（+ 核心数）、累计分配（+ 句柄）。
 - 分数字员工表 `#adminByAgentRows`：`byAgent[].agentId / count`。
-- 趋势 `renderMetricsTrend`（`app.js:6913-6928`）：取 `trend.slice(-120)` 做差分，画「成功调用」（`#trendAcceptedSvg`）与「桥接失败」（`#trendFailedSvg`）。服务端**每 60 秒**采一点、缓存最近 **240** 点（约 4 小时，`MetricsService.cs:20-21`）。
+- **看板图表**（`renderMetricsDashboard`，`renderSparkSvg`）：服务端**每 60 秒**采一点、缓存最近 **240** 点（约 4 小时），前端取所选窗口最近 N 点做**差分**（间隔即 60s → 差分值即「每分钟增量」），画五条多序列图——调用速率、成功 / 拒绝、桥接调用 / 失败、记忆命中 / 空检索、输出吞吐；并据窗口内成功 / 拒绝之和画**成功率环**（`renderDonut`，≥90% 绿 / ≥60% 黄 / 否则红）。无 ≥2 点时图表区整体隐藏、环显示 `—`。
 - 元信息：`admin.metricsMeta`（`进程自 {start} 启动，累计运行 {up}`）。
 
 #### 8.8.3 桥接端点健康（`#adminBridgeRows`）
