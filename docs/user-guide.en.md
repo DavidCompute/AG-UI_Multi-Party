@@ -2409,7 +2409,7 @@ So "chunks / images that match lexically head-on" (such as the proper name "刘�
 **Explainable + correctable (1.0.197, illustrations C)**:
 
 - **Explainable**: each image in the search response (`/ag-ui/images/search`) carries `score`, `matchKind` (`vector` vs `keyword`), `tags`, and `mismatchCount`; the library's "test retrieval" (`#libSetModal`) shows these directly so it's clear *why* an image matched.
-- **Correctable (negative feedback)**: `POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback` (body `{relevant}`) records relevant / not-relevant; retrieval **lowers the score** by the **(not-relevant − relevant)** balance (`MismatchPenaltyStep = 0.08` each, capped at `MaxMismatchPenalty = 0.32`). Note the penalty is applied **after** gate filtering and does **not** re-apply the semantic gate (that would break the "keyword fallback bypasses the gate" invariant) — so the practical effect is **lower score / lower rank**, and an image is **excluded only once it is penalized down to 0** (a mild mismatch above the gate is still kept at a lower score). Counts persist with the library snapshot (`ImageAsset.MismatchCount` / `RelevantCount`) and are **per-image, not per-query** (marking an image not-relevant affects all its later retrievals). The UI offers 👎 "mark not relevant" on each test-retrieval hit row.
+- **Correctable (negative feedback)**: `POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback` (body `{relevant, query?}`) records relevant / not-relevant; feedback accumulates per **(query → image)** (`query` empty is stored as `*` = applies to all queries), and retrieval **lowers the score** only for the **same topic keyword** by the balance (`MismatchPenaltyStep = 0.08` each, capped at `MaxMismatchPenalty = 0.32`). Note the penalty is applied **after** gate filtering and does **not** re-apply the semantic gate (that would break the "keyword fallback bypasses the gate" invariant) — so the practical effect is **lower score / lower rank**, and an image is **excluded only once it is penalized down to 0**. Counts persist with the library snapshot (`MismatchCount` / `RelevantCount` are totals; `MismatchQueries` / `RelevantQueries` hold the per-query detail, newest 50 each; legacy entries without detail apply to all queries). The UI offers 👎 "mark not relevant" on each test-retrieval hit row (shown only to writers).
 
 ### 5.5 Library settings: search strictness and test retrieval (`#libSetModal`)
 
@@ -2537,7 +2537,7 @@ The two endpoints and their returned fields (`LIB_SET_PROBE`):
 | `DELETE` | `/ag-ui/image-libs/{libId}` | Creator / admin | Delete an image library (with its vectors and disk files) |
 | `POST` | `/ag-ui/image-libs/{libId}/assets` | Creator / admin | Upload images; `{ attachmentId, fileName?, caption?, tags? }` |
 | `PUT` | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Creator / admin | Edit description / tags (returns after re-vectorization completes) |
-| `POST` | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Creator / admin | Illustration feedback (`{relevant}`); retrieval down-weights by not-relevant − relevant |
+| `POST` | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Creator / admin | Illustration feedback (`{relevant, query?}`); lowers the score per (query → image) |
 | `DELETE` | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Creator / admin | Delete an image (delete the vector first, then the file) |
 | `GET` | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | Login required and readable | Read the original image (frontend thumbnail / preview) |
 | `POST` | `/ag-ui/images/search` | Logged-in user **or** self token | Image-library semantic retrieval; `{ query, topK?, minScore?, scopeHandle? }` (a logged-in user may also pass `libraryIds`, but only readable libraries) |
@@ -4337,7 +4337,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | DELETE | `/ag-ui/image-libs/{libId}` | Delete an image library (creator / admin) | Login(strict) |
 | POST | `/ag-ui/image-libs/{libId}/assets` | Upload an image (reuses the `attachmentId` from `/ag-ui/upload`) | Login(strict) |
 | PUT | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Edit description / tags (re-vectorized) | Login(strict) |
-| POST | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Illustration feedback (`{relevant}`; retrieval down-weights) | Login(strict) |
+| POST | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Illustration feedback (`{relevant, query?}`; lowers the score per query) | Login(strict) |
 | DELETE | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Delete an image | Login(strict) |
 | GET | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | Read the original image (thumbnail / preview) | Login(strict) |
 | POST | `/ag-ui/images/search` | Image library semantic search (**self-token or logged-in user**; the server path accepts only the self-token) | Self-token **or** Login(strict) |

@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.199 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.199 Release Notes (current Windows desktop release)
+
+**版本说明**：清理 1.0.198 审核遗留的 5 条 nit——配图反馈改为「按查询」维度（不再一损俱损）、只读库隐藏 👎、图谱视图隐藏无关关键词框、新视图补 aria、角色序回退加固，并同步手册。
+**Version note**: clears the 5 leftover nits from the 1.0.198 review — per-query illustration feedback (no more collateral down-weighting), 👎 hidden for read-only libraries, the shared keyword box hidden in the graph view, ARIA on the new views, a hardened role-rank fallback, and matching docs.
+
+## 审核 nit 清理
+# Review nits
+
+中文：
+- **配图反馈改为按查询维度（C）**：反馈记入 `MismatchQueries` / `RelevantQueries`（归一化；空 = `*` 对所有查询生效），检索只对**同一主题词**降分（`POST …/feedback {relevant, query?}`）——对一张图在某个主题词下点一次「不相关」，不会波及它在其它主题词下的匹配；旧版无明细的计数仍按「对所有查询生效」兼容。
+- **只读库隐藏 👎（C）**：图库「试检索」的 👎 仅对可写者（创建者 / 管理员）显示，避免群共享（只读）库上点了得 403。
+- **图谱视图隐藏共享关键词框（A3）**：图谱有自己的主题词输入，图谱视图下隐藏 `#memKeyword` 与搜索按钮，消除「改了没反应」。
+- **新视图补 aria（A3）**：视图切换按钮加 `aria-pressed`，时间线 / 图谱容器加 `role=region` + `aria-live=polite` + `aria-label`；👎 加 `aria-label`。
+- **角色序回退加固（A1）**：`roleRank()` 在缺 `platformRole` 时按 `isSuperAdmin` / `isAdmin` 回退，不依赖单一字段。
+English:
+- **Per-query illustration feedback (C)**: feedback is recorded in `MismatchQueries` / `RelevantQueries` (normalized; empty = `*` = applies to all queries) and retrieval lowers the score only for the **same topic keyword** (`POST …/feedback {relevant, query?}`) — marking an image not-relevant for one topic no longer affects its matches for others; legacy counts without detail still apply to all queries.
+- **👎 hidden for read-only libraries (C)**: the thumbs-down in the library test retrieval shows only to writers (creator / admin), so it can't be clicked on a shared read-only library and 403.
+- **Shared keyword box hidden in the graph view (A3)**: the graph has its own keyword input, so `#memKeyword` and the search button are hidden in the graph view, removing the "changed but nothing happened" confusion.
+- **ARIA on the new views (A3)**: view-switch buttons carry `aria-pressed`; the timeline / graph containers carry `role=region` + `aria-live=polite` + `aria-label`; the 👎 carries `aria-label`.
+- **Role-rank fallback hardened (A1)**: `roleRank()` now falls back via `isSuperAdmin` / `isAdmin` when `platformRole` is absent, rather than depending on a single field.
+
+## 测试
+# Tests
+
+中文：`ui-imglib-feedback` 14/14（新增「按查询隔离」用例）；`ui-role-console` 26/26、`ui-memory-views` 17/17、`ui-imglib-vector-status` 全通过；`ui-regression-compliance` 12/12（含管理员）；`ImageLibrary` / `Bm25` 单测 30/30。
+English: `ui-imglib-feedback` 14/14 (new "per-query isolation" case); `ui-role-console` 26/26, `ui-memory-views` 17/17, `ui-imglib-vector-status` all pass; `ui-regression-compliance` 12/12 (with admin); `ImageLibrary` / `Bm25` unit tests 30/30.
+
 # AG-UI 群聊桌面版 1.0.198 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.198 Release Notes (current Windows desktop release)
 

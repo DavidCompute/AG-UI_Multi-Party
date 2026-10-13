@@ -69,31 +69,37 @@ try {
   for (let i = 0; i < 40; i++) { await sleep(750); asset = await findAsset(); if (asset && asset.status !== "processing") break; }
   check("图片进入稳定状态", !!asset && asset.status !== "processing", asset?.status);
 
-  // 反馈计数
+  // 反馈计数（按查询维度）
   check("未标注时不相关计数为 0", (await findAsset()).mismatchCount === 0);
-  let r = await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: false });
+  let r = await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: false, query: fileName });
   check("标注「不相关」→ 计数 +1", r.status === 200 && r.body.mismatchCount === 1, JSON.stringify(r.body).slice(0, 80));
-  r = await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: true });
+  r = await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: true, query: fileName });
   check("标注「相关」→ relevantCount +1", r.status === 200 && r.body.relevantCount === 1);
   check("未知图片 → 404", (await api("POST", `/ag-ui/image-libs/${libId}/assets/att_nope/feedback`, { relevant: false })).status === 404);
 
-  // 降权：对比检索分数
-  const search = async () => (await api("POST", "/ag-ui/images/search", { query: fileName, topK: 5, minScore: 0.25, libraryIds: [libId] })).body;
-  const d1 = await search();
+  // 检索 + 降分（按查询维度）
+  const search = async (q) => (await api("POST", "/ag-ui/images/search", { query: q, topK: 5, minScore: 0.25, libraryIds: [libId] })).body;
+  const d1 = await search(fileName);
   const h1 = (d1.images || []).find((x) => x.assetId === assetId);
   check("检索命中该图且带解释字段（tags/matchKind/mismatchCount）",
     !!h1 && Array.isArray(h1.tags) && typeof h1.matchKind === "string" && typeof h1.mismatchCount === "number",
     h1 ? `score=${h1.score} kind=${h1.matchKind} mm=${h1.mismatchCount}` : "no hit");
 
   if (h1) {
-    // 补 3 次不相关（加上此前 1 次 = 4；再减 1 次相关 = 净 3）→ 惩罚 0.24
-    for (let i = 0; i < 3; i++) await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: false });
-    const d2 = await search();
+    // 按查询隔离：用「另一个主题词」标不相关，不应影响本词分数
+    await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: false, query: "zzz-other-" + stamp });
+    const dIso = await search(fileName);
+    const hIso = (dIso.images || []).find((x) => x.assetId === assetId);
+    check("按查询隔离：他词标注不影响本词分数", !!hIso && Math.abs(hIso.score - h1.score) < 0.02, hIso ? `${h1.score} → ${hIso.score}` : "lost");
+
+    // 同词标 4 次 → 降分封顶 0.32
+    for (let i = 0; i < 4; i++) await api("POST", `/ag-ui/image-libs/${libId}/assets/${assetId}/feedback`, { relevant: false, query: fileName });
+    const d2 = await search(fileName);
     const h2 = (d2.images || []).find((x) => x.assetId === assetId);
-    const dropped = !h2 || (h2.score <= h1.score - 0.1);
-    check("负反馈后分数下降或跌出召回", dropped, h2 ? `score ${h1.score} → ${h2.score}` : "no longer returned");
+    check("同词负反馈降分 / 剔除", !h2 || h2.score <= h1.score - 0.1, h2 ? `score ${h1.score} → ${h2.score}` : "no longer returned");
   } else {
-    check("负反馈后分数下降或跌出召回", true, "跳过（初始未召回）");
+    check("按查询隔离：他词标注不影响本词分数", true, "跳过（初始未召回）");
+    check("同词负反馈降分 / 剔除", true, "跳过（初始未召回）");
   }
 
   // UI：试检索里点 👎

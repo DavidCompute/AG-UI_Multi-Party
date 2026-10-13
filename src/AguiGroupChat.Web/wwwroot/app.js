@@ -608,15 +608,23 @@ function refreshMemView() {
 /** 切换记忆弹窗视图：列表（默认）/ 时间线 / 图谱。 */
 function switchMemView(view) {
   memView = view;
+  const isGraph = view === "graph";
   $("memViewList").classList.toggle("on", view === "list");
   $("memViewTimeline").classList.toggle("on", view === "timeline");
-  $("memViewGraph").classList.toggle("on", view === "graph");
+  $("memViewGraph").classList.toggle("on", isGraph);
+  // aria：切换按钮用 aria-pressed 反映选中态（供读屏 / 键盘用户）
+  $("memViewList").setAttribute("aria-pressed", String(view === "list"));
+  $("memViewTimeline").setAttribute("aria-pressed", String(view === "timeline"));
+  $("memViewGraph").setAttribute("aria-pressed", String(isGraph));
+  // 图谱有自己的主题词输入：图谱视图下隐藏共享的关键词框与搜索按钮，避免「改了没反应」
+  if ($("memKeywordWrap")) $("memKeywordWrap").classList.toggle("hidden", isGraph);
+  if ($("memSearchBtn")) $("memSearchBtn").classList.toggle("hidden", isGraph);
   $("memList").classList.toggle("hidden", view !== "list");
   $("memPager").classList.toggle("hidden", view !== "list");
   $("memTimeline").classList.toggle("hidden", view !== "timeline");
   $("memGraph").classList.toggle("hidden", view !== "graph");
   if (view === "timeline") loadMemoryTimeline();
-  else if (view === "graph") loadMemoryGraph();
+  else if (isGraph) loadMemoryGraph();
 }
 
 /** 记忆时间线（2.2）：按话题回放某知聚记忆的时间演进（旧→新）。 */
@@ -3603,31 +3611,37 @@ async function runLibSetProbe() {
     const rows = spec.pick(data);
     $("libSetProbeGate").textContent = t("libSet.probeGate", { value: minScore, count: rows.length });
     const isImg = libSetKind === "imglib";
+    // 只有可写者（创建者 / 管理员）才能标注反馈：只读（群共享）库不显示 👎，避免点了得 403
+    const imgLib = isImg ? (LIB_SET_KINDS.imglib.list() || []).find((x) => x.libId === libSetTarget) : null;
+    const canFb = !!imgLib && (!imgLib.ownerId ? isAdminPlus() : (isAdminPlus() || imgLib.ownerId === state.memberId));
+    const probeQuery = q;
     box.innerHTML = rows.length
       ? rows.map((r) => {
           const extra = isImg
             ? `<span class="lib-set-kind-tag">${escapeHtml(r.matchKind === "keyword" ? t("libSet.matchKeyword") : t("libSet.matchVector"))}</span>`
               + `<span class="lib-set-tags">${(r.tags || []).map((tg) => `<span class="lib-set-tag">${escapeHtml(tg)}</span>`).join("")}</span>`
-              + `<button class="chip-btn lib-set-fb" data-asset-id="${escapeHtml(r.assetId)}" data-lib-id="${escapeHtml(r.libId)}" title="${escapeHtml(t("libSet.markMismatch"))}">👎${r.mismatchCount ? " " + r.mismatchCount : ""}</button>`
+              + (canFb
+                  ? `<button class="chip-btn lib-set-fb" data-asset-id="${escapeHtml(r.assetId)}" data-lib-id="${escapeHtml(r.libId)}" title="${escapeHtml(t("libSet.markMismatch"))}" aria-label="${escapeHtml(t("libSet.markMismatch"))}">👎${r.mismatchCount ? " " + r.mismatchCount : ""}</button>`
+                  : "")
             : "";
           return `<div class="lib-set-probe-hit${isImg ? " imglib" : ""}"><span class="score">${Number(r.score || 0).toFixed(2)}</span>`
             + `<span class="name" title="${escapeHtml(r.name || "")}">${escapeHtml(r.name || "")}</span>`
             + `<span class="snippet" title="${escapeHtml(r.snippet || "")}">${escapeHtml(r.snippet || "")}</span>${extra}</div>`;
         }).join("")
       : `<div class="kb-empty" style="padding:6px 0">${t("libSet.probeNone")}</div>`;
-    if (isImg) box.querySelectorAll(".lib-set-fb").forEach((b) => { b.onclick = () => sendImgFeedback(b.dataset.libId, b.dataset.assetId); });
+    if (isImg) box.querySelectorAll(".lib-set-fb").forEach((b) => { b.onclick = () => sendImgFeedback(b.dataset.libId, b.dataset.assetId, probeQuery); });
   } finally {
     btn.disabled = false;
   }
 }
 
-/** 配图反馈（可纠正）：标记某张图「不相关」→ 后端记录，下次检索降权；重新试检索直接看到分数变化。 */
-async function sendImgFeedback(libId, assetId) {
+/** 配图反馈（可纠正）：标记某张图在某个主题词下「不相关」→ 后端按 (查询 → 图) 维度记录，下次同词检索降分。 */
+async function sendImgFeedback(libId, assetId, query) {
   try {
     const res = await fetch(`/ag-ui/image-libs/${encodeURIComponent(libId)}/assets/${encodeURIComponent(assetId)}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token || ""}` },
-      body: JSON.stringify({ relevant: false }),
+      body: JSON.stringify({ relevant: false, query: query || null }),
     });
     if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, t("libSet.mismatchFail", { err: res.status }))); return; }
     toast(t("libSet.mismatchDone"));
@@ -6800,8 +6814,12 @@ async function selectTopic(topicId, opts) {
 
 /* ============ 平台角色（RBAC）：前端按生效角色收敛管理入口 ============ */
 const ROLE_RANK = { user: 0, operator: 1, admin: 2, superadmin: 3 };
-/** 当前生效平台角色序（未知时回退：管理员=2 / 其它=0）。 */
-function roleRank() { return ROLE_RANK[state.platformRole] ?? (state.isAdmin ? 2 : 0); }
+/** 当前生效平台角色序（未知时回退：超管=3 / 管理员=2 / 其它=0）。 */
+function roleRank() {
+  if (state.platformRole && ROLE_RANK[state.platformRole] != null) return ROLE_RANK[state.platformRole];
+  if (state.isSuperAdmin) return 3;
+  return state.isAdmin ? 2 : 0;
+}
 function isOperatorPlus() { return roleRank() >= 1; }
 function isAdminPlus() { return roleRank() >= 2; }
 

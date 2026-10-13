@@ -90,6 +90,12 @@ public sealed class ImageAsset
     /// <summary>配图「相关」累计次数（正反馈）：抵消部分失配惩罚。</summary>
     public int RelevantCount { get; set; }
 
+    /// <summary>记过「不相关」的查询（归一化；"*" = 对所有查询生效）。降权按 (查询 → 图) 维度，避免一损俱损。</summary>
+    public List<string> MismatchQueries { get; set; } = [];
+
+    /// <summary>记过「相关」的查询（归一化；"*" = 对所有查询生效）。</summary>
+    public List<string> RelevantQueries { get; set; } = [];
+
     /// <summary>处理状态：processing（生成描述 / 向量化中）| ready（可检索）| error（失败，见 Error）。</summary>
     public string Status { get; set; } = "processing";
 

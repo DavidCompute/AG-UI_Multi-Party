@@ -151,7 +151,7 @@ public static class ImageLibraryApi
             if (!catalog.CanWrite(lib, user.UserId, auth.IsAdmin(user.UserId)))
                 return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "只有创建者或管理员可标注配图反馈"),
                     statusCode: StatusCodes.Status403Forbidden);
-            var error = catalog.RecordFeedback(lib.LibId, assetId, req.Relevant);
+            var error = catalog.RecordFeedback(lib.LibId, assetId, req.Relevant, req.Query);
             var asset = lib.Assets.FirstOrDefault(a => a.AssetId == assetId);
             if (asset is null) return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"图片不存在：{assetId}"));
             return error is null
@@ -302,8 +302,9 @@ public static class ImageLibraryApi
     };
 }
 
-/// <summary>配图反馈（可纠正）：relevant=true 记正反馈，false 记「不相关」（检索时降权）。</summary>
-public sealed record ImageAssetFeedbackRequest(bool Relevant);
+/// <summary>配图反馈（可纠正）：relevant=true 记正反馈，false 记「不相关」（检索时按 query 维度降分）。
+/// <paramref name="Query"/> 为触发检索的主题词（可空 = 对所有查询生效）。</summary>
+public sealed record ImageAssetFeedbackRequest(bool Relevant, string? Query = null);
 
 public sealed record ImageLibraryCreateRequest(string Name, string? Description = null, List<string>? SharedGroupIds = null,
     double? MinScore = null);

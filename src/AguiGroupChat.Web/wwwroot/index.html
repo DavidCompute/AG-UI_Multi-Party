@@ -1018,7 +1018,7 @@
         <select id="memGroupSelect" class="modal-input" style="flex:1;min-width:120px">
           <option value="" data-i18n="memory.allGroups">全部知聚</option>
         </select>
-        <span class="search-clear-wrap" style="flex:2;min-width:140px">
+        <span id="memKeywordWrap" class="search-clear-wrap" style="flex:2;min-width:140px">
           <input id="memKeyword" class="modal-input" data-i18n-placeholder="memory.searchPh" />
           <button type="button" class="search-clear" data-clear-for="memKeyword" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
         </span>
@@ -1046,12 +1046,12 @@
       </div>
       <div id="memForgetHint" class="hidden" style="color:var(--muted);font-size:12px;margin:-4px 0 6px" data-i18n-html="memory.nonAdmin">非管理员：遗忘仅作用于<b>你自己的记忆</b>，不影响他人</div>
       <div class="memory-viewbar">
-        <button id="memViewList" class="chip-btn on" type="button" data-i18n="memory.viewList">📋 列表</button>
-        <button id="memViewTimeline" class="chip-btn" type="button" data-i18n="memory.viewTimeline">⏱ 时间线</button>
-        <button id="memViewGraph" class="chip-btn" type="button" data-i18n="memory.viewGraph">🕸 图谱</button>
+        <button id="memViewList" class="chip-btn on" type="button" aria-pressed="true" data-i18n="memory.viewList">📋 列表</button>
+        <button id="memViewTimeline" class="chip-btn" type="button" aria-pressed="false" data-i18n="memory.viewTimeline">⏱ 时间线</button>
+        <button id="memViewGraph" class="chip-btn" type="button" aria-pressed="false" data-i18n="memory.viewGraph">🕸 图谱</button>
       </div>
-      <div id="memTimeline" class="memory-timeline hidden"></div>
-      <div id="memGraph" class="memory-graph hidden">
+      <div id="memTimeline" class="memory-timeline hidden" role="region" aria-live="polite" data-i18n-label="memory.viewTimeline"></div>
+      <div id="memGraph" class="memory-graph hidden" role="region" aria-live="polite" data-i18n-label="memory.viewGraph">
         <div class="memory-graph-bar">
           <input id="memGraphQuery" class="modal-input" data-i18n-placeholder="memory.graphQueryPh" />
           <button id="memGraphLoadBtn" class="chip-btn" type="button" data-i18n="memory.graphLoad">生成图谱</button>

@@ -513,7 +513,7 @@ public sealed class ImageLibraryCatalog
             try
             {
                 foreach (var hit in store.Search(ImgGroupPrefix + libId, "img", vec, Math.Max(1, topK), gate, "group"))
-                    if (BuildHit(lib, hit.MessageId, hit.Score, "vector") is { } h) hits.Add(h);
+                    if (BuildHit(lib, hit.MessageId, hit.Score, "vector", query) is { } h) hits.Add(h);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "图库 {LibId} 检索失败", libId); }
         }
@@ -535,7 +535,6 @@ public sealed class ImageLibraryCatalog
         return hits
             .GroupBy(h => h.AssetId, StringComparer.Ordinal)
             .Select(g => g.OrderByDescending(h => h.Score).First())
-            .Select(ApplyFeedbackPenalty)
             .Where(h => h.Score > 0)
             .OrderByDescending(h => h.Score)
             .Take(topK)
@@ -572,39 +571,74 @@ public sealed class ImageLibraryCatalog
         return null;
     }
 
-    /// <summary>配图反馈（可纠正）的降权步长与封顶：每条「不相关」扣 Step，最多扣 Cap。</summary>
+    /// <summary>配图反馈（可纠正）的降分步长与封顶：每条「不相关」扣 Step，最多扣 Cap。</summary>
     public const double MismatchPenaltyStep = 0.08;
     public const double MaxMismatchPenalty = 0.32;
 
-    /// <summary>负反馈降权（按「不相关 − 相关」的差额扣分，封顶 <see cref="MaxMismatchPenalty"/>）。</summary>
-    private static ImageHit ApplyFeedbackPenalty(ImageHit h)
-    {
-        var net = Math.Max(0, h.MismatchCount - h.RelevantCount);
-        if (net == 0) return h;
-        var penalty = Math.Min(MaxMismatchPenalty, net * MismatchPenaltyStep);
-        return h with { Score = Math.Max(0, h.Score - penalty) };
-    }
-
-    /// <summary>记录一次配图反馈（可纠正）：relevant=true 记正反馈，false 记「不相关」；下次检索据此降权。</summary>
-    public string? RecordFeedback(string libId, string assetId, bool relevant)
+    /// <summary>记录一次配图反馈（可纠正）。<paramref name="query"/> 为触发检索的主题词（空 = 对所有查询生效，记 "*"）；
+    /// 反馈按 <b>(查询 → 图)</b> 维度累计，检索时只对<b>同一主题词</b>降分，避免「一次不相关影响该图所有检索」。</summary>
+    public string? RecordFeedback(string libId, string assetId, bool relevant, string? query)
     {
         var lib = GetLibrary(libId);
         var asset = lib?.Assets.FirstOrDefault(a => a.AssetId == assetId);
         if (lib is null || asset is null) return "图片不存在";
-        if (relevant) asset.RelevantCount++; else asset.MismatchCount++;
+        var q = NormalizeFeedbackQuery(query);
+        if (relevant) { asset.RelevantCount++; asset.RelevantQueries.Add(q); }
+        else { asset.MismatchCount++; asset.MismatchQueries.Add(q); }
+        TrimQueries(asset.MismatchQueries);
+        TrimQueries(asset.RelevantQueries);
         lib.UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         _changes?.Notify();
         return null;
     }
 
-    /// <summary>按 assetId 构造检索结果（拿不到文件时返回 null：目录里有记录但文件已丢的情况）。</summary>
-    private ImageHit? BuildHit(ImageLibrary lib, string assetId, double score, string matchKind)
+    /// <summary>反馈查询归一化：空 = "*"（对所有查询生效）；否则小写 + 压缩空白。</summary>
+    private static string NormalizeFeedbackQuery(string? query)
+        => string.IsNullOrWhiteSpace(query)
+            ? "*"
+            : string.Join(' ', query.Trim().ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    private static void TrimQueries(List<string> list)
+    {
+        const int cap = 50;
+        if (list.Count > cap) list.RemoveRange(0, list.Count - cap);
+    }
+
+    /// <summary>某查询命中的反馈条数（条目等于该查询，或为 "*" 对所有查询生效）。</summary>
+    private static int CountFeedback(IReadOnlyList<string> list, string query)
+    {
+        var n = 0;
+        foreach (var e in list) if (e == query || e == "*") n++;
+        return n;
+    }
+
+    /// <summary>按 (查询 → 图) 维度算降分：net = 该查询下的「不相关 − 相关」；兼容早期「按图全局」计数（无查询列表时）。</summary>
+    private static double FeedbackPenalty(ImageAsset asset, string query)
+    {
+        int mismatch, relevant;
+        if (asset.MismatchQueries.Count == 0 && asset.RelevantQueries.Count == 0)
+        {
+            mismatch = asset.MismatchCount; relevant = asset.RelevantCount; // 兼容 1.0.197 及更早（无查询维度）
+        }
+        else
+        {
+            var q = NormalizeFeedbackQuery(query);
+            mismatch = CountFeedback(asset.MismatchQueries, q);
+            relevant = CountFeedback(asset.RelevantQueries, q);
+        }
+        var net = Math.Max(0, mismatch - relevant);
+        return net == 0 ? 0 : Math.Min(MaxMismatchPenalty, net * MismatchPenaltyStep);
+    }
+
+    /// <summary>按 assetId 构造检索结果（拿不到文件时返回 null：目录里有记录但文件已丢的情况）。已就查询应用反馈降分。</summary>
+    private ImageHit? BuildHit(ImageLibrary lib, string assetId, double score, string matchKind, string query)
     {
         var asset = lib.Assets.FirstOrDefault(a => a.AssetId == assetId);
         if (asset is null || !string.Equals(asset.Status, "ready", StringComparison.OrdinalIgnoreCase)) return null;
         var path = ResolveAssetPath(lib, asset);
         if (path is null) return null;
-        return new ImageHit(lib.LibId, lib.Name, asset.AssetId, asset.FileName, asset.Caption, score,
+        var adjusted = Math.Max(0, score - FeedbackPenalty(asset, query));
+        return new ImageHit(lib.LibId, lib.Name, asset.AssetId, asset.FileName, asset.Caption, adjusted,
             asset.ContentType, path, asset.Width, asset.Height, asset.Tags, matchKind, asset.MismatchCount, asset.RelevantCount);
     }
 
@@ -641,7 +675,7 @@ public sealed class ImageLibraryCatalog
                 // 描述越长（尤其自动生成的长描述）多个普通词累加越容易蹭过底线，实测“颁奖 团队 合影”
                 // 会命中一张描述里恰好有“团队”的 AI 插画（0.38 分）—— 那就是“配图不正确”。
                 if (!Bm25Ranker.HasPhraseEvidence(query, it.Content)) continue;
-                if (BuildHit(lib, it.MessageId, sim, "keyword") is { } h) scored.Add(h);
+                if (BuildHit(lib, it.MessageId, sim, "keyword", query) is { } h) scored.Add(h);
             }
         }
         return scored;
