@@ -1038,6 +1038,15 @@ window.I18N_DICTS.en = {
   "help.s13.9": "<b>Local bridge</b>: a small app on your computer that lets an agent's client-side skills (e.g. local dotnet / scripts) run on <b>your own host</b>.",
   "help.s13.10": "<b>Support circle</b>: a circle for external customer service; client-side skills always run on the <b>host of the customer's browser</b>, isolated from internal members.",
 
+  /* --- Full manual --- */
+  "manual.open": "📖 Full Manual",
+  "manual.title": "📖 Full Manual",
+  "manual.close": "Close",
+  "manual.loading": "Loading the manual…",
+  "manual.loadFailed": "Failed to load the manual. Please try again later.",
+  "manual.searchPh": "Search the manual…",
+  "manual.noMatch": "No matching manual content",
+
   /* --- 通用 --- */
   "common.saveFail": "Save failed: {err}",
   "common.save": "Save",

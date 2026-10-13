@@ -1035,6 +1035,15 @@ window.I18N_DICTS.zh = {
   "help.s13.9": "<b>本机桥</b>：装在您电脑上的小程序，让数字员工的客户端技能（如本机 dotnet / 脚本）真正在<b>您所在的主机</b>上执行。",
   "help.s13.10": "<b>客服知聚</b>：面向外部客服场景的知聚，客户端技能始终运行在<b>提问顾客的浏览器所在主机</b>上，隔离于内部成员。",
 
+  /* --- 完整手册 --- */
+  "manual.open": "📖 完整手册",
+  "manual.title": "📖 完整手册",
+  "manual.close": "关闭",
+  "manual.loading": "正在加载手册…",
+  "manual.loadFailed": "手册加载失败，请稍后重试",
+  "manual.searchPh": "搜索手册内容…",
+  "manual.noMatch": "没有匹配的手册内容",
+
   /* --- 通用 --- */
   "common.saveFail": "保存失败：{err}",
   "common.save": "保存",

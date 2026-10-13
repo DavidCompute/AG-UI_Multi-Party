@@ -134,6 +134,7 @@ app.MapUserGroupApi(); // 用户分组 / 组织单元（细粒度授权：管理
 app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
 app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions（时序/重试/TTL/阶段开关与顺序）
 app.MapStorageAdminApi(); // 存储治理：附件占用统计 + 开关放行的孤儿回收
+app.MapManualApi(); // 内置用户手册：前端「📖 完整手册」按界面语言拉取（嵌入资源，公开只读）
 
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();

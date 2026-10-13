@@ -1568,6 +1568,35 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .help-search-wrap { margin: 8px 0 4px; }
 .help-no-match { display: none; padding: 18px 4px; font-size: 13px; color: var(--muted); text-align: center; }
 .help-no-match:not(.hidden) { display: block; }
+
+/* 完整手册弹窗：内置用户手册（按语言渲染 Markdown，内容区独立滚动） */
+.manual-modal {
+  width: 960px; max-width: 96vw; max-height: 90vh;
+  display: flex; flex-direction: column; padding: 18px 20px;
+}
+.manual-modal .modal-title, .manual-modal .modal-actions { flex: none; }
+.manual-search-wrap { flex: none; margin: 8px 0 4px; }
+.manual-content { overflow-y: auto; flex: 1 1 auto; padding: 4px 10px 4px 2px; font-size: 14px; line-height: 1.7; }
+.manual-loading { padding: 24px 4px; font-size: 13px; color: var(--muted); text-align: center; }
+/* 手册正文的 Markdown 排版（作用域独立，与消息正文视觉一致） */
+.manual-content.md { white-space: normal; }
+.manual-content.md p { margin: 6px 0; }
+.manual-content.md h1, .manual-content.md h2, .manual-content.md h3, .manual-content.md h4 { margin: 16px 0 6px; font-weight: 700; }
+.manual-content.md h1 { font-size: 20px; }
+.manual-content.md h2 { font-size: 17px; }
+.manual-content.md h3 { font-size: 15px; }
+.manual-content.md h4 { font-size: 14px; }
+.manual-content.md ul, .manual-content.md ol { margin: 6px 0; padding-left: 24px; }
+.manual-content.md li { margin: 3px 0; }
+.manual-content.md a { color: var(--accent); }
+.manual-content.md code { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; background: rgba(127,140,180,.14); border-radius: 5px; padding: 1px 5px; }
+.manual-content.md pre { margin: 8px 0; padding: 10px 14px; overflow-x: auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; font-size: 12.5px; line-height: 1.5; }
+.manual-content.md pre code { background: none; padding: 0; }
+.manual-content.md table { border-collapse: collapse; margin: 8px 0; max-width: 100%; display: block; overflow-x: auto; }
+.manual-content.md th, .manual-content.md td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
+.manual-content.md th { background: var(--panel-2); font-weight: 600; }
+.manual-content.md blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--border); color: var(--muted); }
+.manual-content.md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 .help-section { margin-top: 16px; }
 .help-section:first-child { margin-top: 0; }
 .help-section h4 { font-size: 14px; margin: 0 0 8px; color: var(--accent); }

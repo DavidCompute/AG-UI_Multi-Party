@@ -1,3 +1,21 @@
+# AG-UI 群聊桌面版 1.0.193 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.193 Release Notes (current Windows desktop release)
+
+**版本说明**：完整用户手册——应用内新增「📖 完整手册」入口（中英双语，按界面语言渲染、可搜索、目录跳转），并随本次发布产出 `docs/user-guide.md` / `docs/user-guide.en.md`。
+**Version note**: a full user manual — a new in-app “📖 Full Manual” entry (bilingual, rendered in the current UI language, with search and table-of-contents jump), plus the `docs/user-guide.md` / `docs/user-guide.en.md` delivered with this release.
+
+## 完整用户手册
+# Full user manual
+
+中文：
+- **新增「📖 完整手册」入口**：帮助弹窗 `#helpModal` 底部新增按钮，打开 `#manualModal`，按**当前界面语言**拉取内置用户手册（`GET /ag-ui/manual?lang=zh|en`，**需登录**）并用与消息正文相同的 Markdown 管线渲染；含搜索框（按顶层块过滤 + 空态）、章节标题自动生成可跳转锚点，`Esc` / 点遮罩 / 关闭按钮均可收起。
+- **手册随程序集嵌入**：`docs/user-guide.md`（中文，4,887 行）与 `docs/user-guide.en.md`（英文，4,895 行）作为嵌入资源编入 `AguiGroupChat.Web`，开发 / Docker / 桌面三处无路径差异（`Dockerfile` 发布前 `COPY docs/ docs/`）。英文那份必须 `WithCulture="false"` —— 否则 MSBuild 会把文件名里的 `.en.` 当作 culture（卫星资源）而从主程序集剔除。
+- **手册内容**：按代码实现逐模块、逐字段、逐按钮描述，共 9 章（快速上手 / 知聚与消息 / 数字员工与组织架构 / 技能与本机桥 / 知识库与图库 / 记忆系统 / 办公文档查看与播放 / 管理控制台与账号 / 接口·配置·排障）；每章附「实现与文档的偏差」与「需复核点」，只写代码可证实的事实。
+English:
+- **New “📖 Full Manual” entry**: a new button at the bottom of the help dialog (`#helpModal`) opens `#manualModal`, which fetches the built-in user manual in the **current UI language** (`GET /ag-ui/manual?lang=zh|en`, **login required**) and renders it through the same Markdown pipeline as message bodies; it has a search box (top-level block filtering + empty state), auto-generated jump anchors on section headings, and closes via `Esc` / overlay click / the close button.
+- **The manual is embedded in the assembly**: `docs/user-guide.md` (Chinese, 4,887 lines) and `docs/user-guide.en.md` (English, 4,895 lines) ship as embedded resources in `AguiGroupChat.Web`, so dev / Docker / desktop share one source with no path differences (`Dockerfile` does `COPY docs/ docs/` before publish). The English one requires `WithCulture="false"` — otherwise MSBuild treats the `.en.` in the file name as a culture (satellite resource) and drops it from the main assembly.
+- **Manual scope**: every module, field, and button described against the code across 9 chapters (Quick Start / Circles & Messages / Digital Employees & Org Structure / Skills & Local Bridge / Knowledge Bases & Image Libraries / Memory System / Document Viewing & Playback / Admin Console & Account / API·Config·Troubleshooting); each chapter ends with “Implementation vs. documentation deviations” and “Points to verify”, stating only code-verifiable facts.
+
 # AG-UI 群聊桌面版 1.0.192 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.192 Release Notes (current Windows desktop release)
 

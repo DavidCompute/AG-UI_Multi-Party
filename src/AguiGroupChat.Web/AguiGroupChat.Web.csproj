@@ -21,4 +21,13 @@
     <Content Remove="appsettings.Development.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 用户手册：以嵌入资源随程序集分发（前端「📖 完整手册」按语言拉取；避免 dev / Docker / 桌面三处路径差异）。
+         相对路径指向仓库 docs/；Dockerfile 发布前需 COPY docs/ docs/，桌面版从仓库构建天然存在。 -->
+    <!-- WithCulture="false" 必需：否则 MSBuild 会把文件名里的 .en. 当作 culture（卫星资源），
+         从主程序集里剔除，导致英文手册不被嵌入。 -->
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../docs/user-guide.md" LogicalName="AguiGroupChat.Manual.zh.md" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../docs/user-guide.en.md" LogicalName="AguiGroupChat.Manual.en.md" WithCulture="false" />
+  </ItemGroup>
+
 </Project>

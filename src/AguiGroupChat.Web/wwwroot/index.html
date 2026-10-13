@@ -1425,8 +1425,25 @@
         <div id="helpNoMatch" class="help-no-match hidden" data-i18n="help.noMatch">没有匹配的帮助条目</div>
       </div>
       <div class="modal-actions">
+        <button id="helpManualBtn" class="btn-ghost" data-i18n="manual.open">📖 完整手册</button>
         <button id="helpShortcutsBtn" class="btn-ghost" data-i18n="sc.open">⌨️ 快捷键</button>
         <button id="helpClose" class="btn-ghost" data-i18n="help.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 完整手册（内置用户手册：按当前界面语言拉取 Markdown 并渲染） -->
+  <div id="manualModal" class="modal-overlay ui-dialog-overlay hidden">
+    <div class="modal manual-modal">
+      <div class="modal-title" data-i18n="manual.title">📖 完整手册</div>
+      <div class="manual-search-wrap search-clear-wrap">
+        <input id="manualSearch" class="modal-input" data-i18n-placeholder="manual.searchPh" />
+        <button type="button" class="search-clear" data-clear-for="manualSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+      </div>
+      <div id="manualContent" class="manual-content md"></div>
+      <div id="manualNoMatch" class="help-no-match hidden" data-i18n="manual.noMatch">没有匹配的手册内容</div>
+      <div class="modal-actions">
+        <button id="manualClose" class="btn-ghost" data-i18n="manual.close">关闭</button>
       </div>
     </div>
   </div>

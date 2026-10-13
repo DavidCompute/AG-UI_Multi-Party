@@ -11518,6 +11518,70 @@ function filterHelp(q) {
   if (empty) empty.classList.toggle("hidden", !needle || matched > 0);
 }
 
+/* ============ 完整手册（内置用户手册：按当前界面语言拉取并渲染 Markdown） ============ */
+let manualLang = null; // 已加载的语言；语言切换后再次打开会重新拉取
+
+/** 打开「📖 完整手册」：按语言拉取内置 Markdown 并渲染；同一语言只拉取一次。 */
+async function openManual() {
+  $("manualModal").classList.remove("hidden");
+  const lang = (window.i18n && i18n.lang && i18n.lang()) || "en";
+  const box = $("manualContent");
+  if (manualLang === lang) { box.scrollTop = 0; return; }
+  box.innerHTML = `<div class="manual-loading">${escapeHtml(t("manual.loading"))}</div>`;
+  try {
+    const res = await fetch(`/ag-ui/manual?lang=${encodeURIComponent(lang)}`);
+    if (!res.ok) throw new Error(String(res.status));
+    box.innerHTML = renderMarkdown(await res.text());
+    decorateManual(box);
+    manualLang = lang;
+    $("manualSearch").value = "";
+    filterManual("");
+    box.scrollTop = 0;
+  } catch (e) {
+    manualLang = null;
+    box.innerHTML = `<div class="manual-loading">${escapeHtml(t("manual.loadFailed"))}</div>`;
+  }
+}
+
+/** 给手册标题补 id（供文内目录锚点跳转），并把 #锚点 链接改为容器内滚动（renderMarkdown 默认会加 target=_blank）。 */
+function decorateManual(root) {
+  root.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((h) => {
+    const slug = (h.textContent || "").trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s+/g, "-");
+    if (!slug) return;
+    let dup = false;
+    try { dup = !!root.querySelector(`[id="${CSS.escape(slug)}"]`); } catch (e) { dup = false; }
+    if (!dup) h.id = slug;
+  });
+  root.querySelectorAll('a[href^="#"]').forEach((a) => {
+    a.removeAttribute("target");
+    a.removeAttribute("rel");
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const id = decodeURIComponent((a.getAttribute("href") || "").slice(1));
+      if (!id) return;
+      let target = null;
+      try { target = root.querySelector(`[id="${CSS.escape(id)}"]`); } catch (err) { target = null; }
+      if (target) target.scrollIntoView({ block: "start" });
+    });
+  });
+}
+
+/** 手册内搜索：按渲染后的顶层块过滤（命中保留；标题按文本命中保留）。 */
+function filterManual(q) {
+  const root = $("manualContent");
+  if (!root) return;
+  const needle = String(q || "").trim().toLowerCase();
+  let matched = 0;
+  Array.from(root.children).forEach((el) => {
+    if (el.classList.contains("manual-loading")) return;
+    const hit = !needle || (el.textContent || "").toLowerCase().includes(needle);
+    el.classList.toggle("hidden", !hit);
+    if (hit) matched++;
+  });
+  const empty = $("manualNoMatch");
+  if (empty) empty.classList.toggle("hidden", !needle || matched > 0);
+}
+
 /* ============ 模态焦点管理：打开时焦点入弹窗 / 关闭时归还 / Tab 困在弹窗内 ============ */
 function initModalFocus() {
   let lastFocused = null;
@@ -12031,6 +12095,13 @@ function init() {
   $("helpSearch").addEventListener("input", (e) => filterHelp(e.target.value));
   $("helpModal").addEventListener("click", (e) => { if (e.target === $("helpModal")) $("helpModal").classList.add("hidden"); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("helpModal").classList.add("hidden"); });
+
+  // ---- 完整手册（从帮助弹窗进入）----
+  $("helpManualBtn").onclick = () => { $("helpModal").classList.add("hidden"); openManual(); };
+  $("manualClose").onclick = () => $("manualModal").classList.add("hidden");
+  $("manualSearch").addEventListener("input", (e) => filterManual(e.target.value));
+  $("manualModal").addEventListener("click", (e) => { if (e.target === $("manualModal")) $("manualModal").classList.add("hidden"); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("manualModal").classList.contains("hidden")) $("manualModal").classList.add("hidden"); });
 
   $("sendBtn").onclick = sendMessage;
   // 发送失败重试条：重试重走发送；取消则收起提示（输入内容与附件保留，由用户自行处置）

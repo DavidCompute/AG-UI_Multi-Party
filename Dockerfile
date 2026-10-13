@@ -17,6 +17,9 @@ RUN dotnet restore src/AguiGroupChat.Web/AguiGroupChat.Web.csproj
 
 # 复制全部源码并发布（Release，框架依赖）
 COPY src/ src/
+# 用户手册以嵌入资源编入 Web 程序集（AguiGroupChat.Web.csproj 的 EmbeddedResource 指向 ../../docs/），
+# 因此发布前必须把 docs/ 一并复制进来，否则 dotnet publish 找不到嵌入源文件。
+COPY docs/ docs/
 RUN dotnet publish src/AguiGroupChat.Web/AguiGroupChat.Web.csproj \
     -c Release -o /app/publish --no-restore
 
