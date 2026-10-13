@@ -1,4 +1,27 @@
-# AG-UI 群聊桌面版 1.0.200 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.201 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.201 Release Notes (current Windows desktop release)
+
+**版本说明**：新增**版本化对外 REST API（`/agui/v1`，入站集成）**——与 1.0.200 的出站 Webhook 构成双向：外部系统既能被推送事件，也能**主动发消息并同步等回数字员工的回复**。
+**Version note**: adds a **versioned external REST API (`/agui/v1`, inbound integration)** — together with 1.0.200's outbound webhooks this makes integration bidirectional: external systems can both receive pushed events and **actively send a message and synchronously wait for the agent's reply**.
+
+## 版本化对外 REST API（入站集成）
+# Versioned external REST API (inbound integration)
+
+中文：
+- **发消息 + 同步等回复**：`POST /agui/v1/groups/{groupId}/messages` 接受 `{content, topicId?, mentions?, mentionAll?, replyToMessageId?, attachments?, waitMs?}`，返回 `{messageId, groupId, topicId, createdAt, reply?}`。带 `waitMs`（上限 45000）时服务端长轮询，等该次触发的数字员工回复**完整**（正文非空且流式灌入已结束，`GroupHub.IsAgentMessageStreaming`）再返回，回复挂在 `reply` 并标 `complete`；超时回半截并标 `complete:false`，无回复则为 `null`。不带 `waitMs` 即异步（用历史 / `replies` 或 Webhook 取结果）。
+- **其余端点**：`GET /agui/v1/me`（身份）、`GET /agui/v1/groups`（我参与的知聚）、历史（`after` 时间游标 / `before` 消息游标）、单条消息、`GET /agui/v1/groups/{groupId}/replies`（支持 `waitMs` 长轮询）。
+- **鉴权与权限**：只接受真实身份（`Authorization: Bearer <apiKey|token>`），并以该身份做成员 / 可见性校验（非成员 / 非客服参与者 403、不存在 404、未登录 401、参数非法 400）；发送者始终取服务端解析身份，防伪造。
+English:
+- **Send + synchronous wait**: `POST /agui/v1/groups/{groupId}/messages` takes `{content, topicId?, mentions?, mentionAll?, replyToMessageId?, attachments?, waitMs?}` and returns `{messageId, groupId, topicId, createdAt, reply?}`. With `waitMs` (capped at 45000) the server long-polls until the agent reply triggered by that send is **complete** (non-empty body and its stream has ended — `GroupHub.IsAgentMessageStreaming`), returning it under `reply` with `complete`; on timeout it returns the partial reply with `complete:false`, and `null` when there is none. Without `waitMs` it is asynchronous (fetch later via history / `replies` or a webhook).
+- **Other endpoints**: `GET /agui/v1/me` (identity), `GET /agui/v1/groups` (circles I participate in), history (`after` time cursor / `before` message cursor), single message, and `GET /agui/v1/groups/{groupId}/replies` (with `waitMs` long-poll).
+- **Auth and permissions**: only a real identity (`Authorization: Bearer <apiKey|token>`) is accepted, and membership / visibility are checked as that identity (non-member / non-participant 403, missing 404, unauthenticated 401, bad params 400); the sender is always the server-resolved identity, so it cannot be spoofed.
+
+## 测试
+# Tests
+
+中文：新增 `ExternalApiTests` 7/7（鉴权 / 身份 / 知聚列表 / 发消息 / 历史 / 单条 / 非成员 403 / 不存在 404 / 回复长轮询 / `waitMs` 同步等回复完整）；与 `Webhook`（13）、`GroupEventObserver`（3）、`DesktopCompositionTests`（12）合跑 35/35。
+English: new `ExternalApiTests` 7/7 (auth / identity / group list / send / history / single / non-member 403 / missing 404 / reply long-poll / `waitMs` synchronous complete reply); 35/35 together with `Webhook` (13), `GroupEventObserver` (3), `DesktopCompositionTests` (12).
+
 # AG-UI Group Chat Desktop 1.0.200 Release Notes (current Windows desktop release)
 
 **版本说明**：新增**出站 Webhook（对外集成）**——管理员在控制台配置回调地址与事件订阅，知聚里的事件会以带 HMAC-SHA256 签名的 HTTP POST 推送到外部系统（n8n / 自建服务 / 低代码平台），让「知聚」从「人用的网站」升级为可被系统集成的中枢。

@@ -4493,6 +4493,37 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 
 ---
 
+#### 9.2.11 Versioned external REST API (inbound integration, `ExternalApi.cs`)
+
+Unlike the legacy `/ag-ui/group/*` (protocol wire format, Hub-internal surface), `/agui/v1` is a **stable external contract**: versioned prefix, explicitly defined fields, and auth that only accepts a real identity (`Authorization: Bearer <apiKey|token>`, see 9.1), using that identity for membership / visibility checks. Implemented in `src/AguiGroupChat.Web/ExternalApi.cs`; the whole group runs behind `WebIdentity.RequireIdentityFilter` (401 when unauthenticated).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/agui/v1/me` | Caller identity: `{userId, username, nickname, platformRole}` |
+| `GET` | `/agui/v1/groups` | Circles the caller participates in: `{groupId, name, kind, isPrivate, isDirectChat, memberCount, ownerId, lastMessageAt}` |
+| `POST` | `/agui/v1/groups/{groupId}/messages` | Send: `{content, topicId?, mentions?, mentionAll?, replyToMessageId?, attachments?, waitMs?}` → `{messageId, groupId, topicId, createdAt, reply?}` |
+| `GET` | `/agui/v1/groups/{groupId}/messages` | History: `after=<ms>` (ascending, time cursor) or `before=<messageId>` (earlier); `topicId?`, `limit?` (1–200, default 50) |
+| `GET` | `/agui/v1/groups/{groupId}/messages/{messageId}` | Single message (missing / recalled = 404; not visible = 403) |
+| `GET` | `/agui/v1/groups/{groupId}/replies` | Agent replies: `after=<ms>` (ascending), `topicId?`, `limit?`, `waitMs?` (long-poll until a reply exists) |
+
+**Synchronous wait (`waitMs`)**: with `waitMs` on `POST .../messages` (capped at 45000, polling every 250ms), the server waits until the agent reply triggered by that send is **complete** (non-empty body and its stream has ended — `GroupHub.IsAgentMessageStreaming`) and returns it under `reply`; on timeout it returns the partial reply with `complete:false`, and `reply` is `null` when there is none. Without `waitMs` it is asynchronous: send returns immediately, and you fetch the result via history / `replies` or a webhook (8.19).
+
+**Reply object fields**: `{messageId, groupId, topicId, senderId, senderType, senderNickname, content, replyToMessageId, timestamp, fromAgent, complete, attachments[], mentions[], mentionAll, reasoning}`. `fromAgent` marks whether an agent authored it; `complete` marks whether the reply is complete (always `true` for non-agent messages).
+
+**Error mapping**: circle / message not found → 404; non-member (or non-participant) → 403; unauthenticated → 401; invalid params (empty `content`, `content` > 20000 chars) → 400. Error bodies are uniformly `{"code":"GROUP_XXX","message":"..."}`.
+
+**Example** (one call, one answer):
+
+```bash
+curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
+  -H "Authorization: Bearer <apiKey>" -H "Content-Type: application/json" \
+  -d '{"content":"@Delivery Lead draft a weekly report","waitMs":30000}'
+```
+
+> This layer only reads and sends messages; it exposes no admin operations (groups / members / skills remain under `/ag-ui/*` and the admin console). For outbound push see the webhook in 8.19.
+
+---
+
 ### 9.3 Full config key table (server side)
 
 > Server-side appsettings bind to strongly typed Options in the form "section:subsection:key"; environment variables with the same names use double underscores (e.g. `Agents__Memory__Enabled`). **A key that binds to `AgentOptions` and has no corresponding property in the code will not take effect** (see §9.9).

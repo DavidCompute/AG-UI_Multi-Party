@@ -4485,6 +4485,37 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 
 ---
 
+#### 9.2.11 版本化对外 REST API（入站集成，`ExternalApi.cs`）
+
+与既有的 `/ag-ui/group/*`（协议线格式、Hub 内部面）不同，`/agui/v1` 是**稳定的对外契约**：路径带版本、字段显式定义、鉴权只接受真实身份（`Authorization: Bearer <apiKey|token>`，见 §9.1），并以该身份做成员 / 可见性校验。实现于 `src/AguiGroupChat.Web/ExternalApi.cs`，整个分组套 `WebIdentity.RequireIdentityFilter`（未登录 401）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/agui/v1/me` | 返回调用者身份：`{userId, username, nickname, platformRole}` |
+| `GET` | `/agui/v1/groups` | 调用者参与的知聚：`{groupId, name, kind, isPrivate, isDirectChat, memberCount, ownerId, lastMessageAt}` |
+| `POST` | `/agui/v1/groups/{groupId}/messages` | 发消息：`{content, topicId?, mentions?, mentionAll?, replyToMessageId?, attachments?, waitMs?}` → `{messageId, groupId, topicId, createdAt, reply?}` |
+| `GET` | `/agui/v1/groups/{groupId}/messages` | 历史：`after=<毫秒>`（升序，时间游标）或 `before=<消息ID>`（取更早）；`topicId?`、`limit?`（1–200，默认 50） |
+| `GET` | `/agui/v1/groups/{groupId}/messages/{messageId}` | 单条消息（不存在 / 已撤回 404；无权查看 403） |
+| `GET` | `/agui/v1/groups/{groupId}/replies` | 数字员工回复：`after=<毫秒>`（升序）、`topicId?`、`limit?`、`waitMs?`（长轮询到有回复为止） |
+
+**同步等回复（`waitMs`）**：`POST .../messages` 带 `waitMs`（上限 45000，实测以 250ms 轮询）时，服务端会等到该次发消息触发的**数字员工回复完整**（正文非空、且流式灌入已结束——`GroupHub.IsAgentMessageStreaming`）再返回，回复挂在 `reply` 字段；超时则返回半截并标 `complete:false`，无回复则 `reply` 为 `null`。不带 `waitMs` 即为异步：发完即返回，用历史 / `replies` 接口或 Webhook（§8.19）取结果。
+
+**回复对象字段**：`{messageId, groupId, topicId, senderId, senderType, senderNickname, content, replyToMessageId, timestamp, fromAgent, complete, attachments[], mentions[], mentionAll, reasoning}`。其中 `fromAgent` 表示是否数字员工发出；`complete` 表示该回复是否已完整（非智能体消息恒为 `true`）。
+
+**错误映射**：知聚 / 消息不存在 → 404；非成员（或非客服参与者）→ 403；未登录 → 401；参数非法（如空 `content`、`content` > 20000 字符）→ 400。错误体统一 `{"code":"GROUP_XXX","message":"..."}`。
+
+**示例**（一次调用即拿到答复）：
+
+```bash
+curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
+  -H "Authorization: Bearer <apiKey>" -H "Content-Type: application/json" \
+  -d '{"content":"@交付专员 出一份周报","waitMs":30000}'
+```
+
+> 本层只读 / 发消息，不提供管理操作（群 / 成员 / 技能等仍在 `/ag-ui/*` 与管理员控制台）。出站推送见 §8.19 的 Webhook。
+
+---
+
 ### 9.3 配置键全表（服务端）
 
 > 服务端 appsettings 以「节:子节:键」形式绑定到强类型 Options；同名环境变量用双下划线（如 `Agents__Memory__Enabled`）。**绑定到 `AgentOptions` 的键若在代码里没有对应属性，则不会生效**（见 §9.9）。

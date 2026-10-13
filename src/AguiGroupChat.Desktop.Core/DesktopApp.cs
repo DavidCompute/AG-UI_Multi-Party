@@ -108,6 +108,7 @@ public static class DesktopApp
         app.MapBrandingApi();   // 白标 / 品牌化（6.4）：应用名 + Logo + 主色
         app.MapWebhookApi();    // 出站 Webhook（对外集成）：管理员配置回调地址 + 事件订阅 + 投递记录
         app.MapManualApi();     // 内置用户手册：前端「📖 完整手册」按界面语言拉取（嵌入资源，仅登录可读）
+        app.MapExternalApi();   // 版本化对外 REST API（入站集成）：/agui/v1 发消息 / 读历史 / 同步等回复
         app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
         app.MapMentionSuggestApi(); // 输入时「建议 @ 谁」（草稿对数字员工职责的本地评分）
         app.MapMessageFeedbackApi(); // 消息 👍/👎 反馈（偏好画像）

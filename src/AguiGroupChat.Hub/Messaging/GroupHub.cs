@@ -123,6 +123,10 @@ public sealed class GroupHub : IDisposable
 
     public long NowMs => _time.GetUtcNow().ToUnixTimeMilliseconds();
 
+    /// <summary>某智能体消息的流式灌入是否仍在进行（尚未 End）。供对外同步 API 判断一条回复是否已完整
+    /// （正文仍会增长时不应把半截内容当成最终回复返回）。</summary>
+    public bool IsAgentMessageStreaming(string messageId) => _agentStreams.ContainsKey(messageId);
+
     public IGroupStore Store => _store;
 
     public void Dispose() => _orphanTimer?.Dispose(); // 兜底定时器随宿主生命周期释放（DI 单例自动销毁）
