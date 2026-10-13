@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.197 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.197 Release Notes (current Windows desktop release)
+
+**版本说明**：图库配图增强——多模态自动打标（描述 + 检索标签）、检索可解释（命中类型 / 标签 / 分数）、错配可纠正（👎 负反馈降权）。
+**Version note**: image-library illustration improvements — multimodal auto-tagging (caption + retrieval tags), explainable retrieval (match kind / tags / score), and correctable mismatches (👎 negative-feedback down-weighting).
+
+## 图库配图
+# Image-library illustrations
+
+中文：
+- **多模态自动打标**：`CaptionAsync` 改为要求视觉模型输出严格 JSON `{caption, tags[]}`；`caption` 为检索描述（≤400 字），`tags` 为检索标签（≤20，仅在用户未手填时写入）；两者一并参与向量化。解析失败回退为整段文本当描述。
+- **可解释**：`/ag-ui/images/search` 每张图返回 `score` / `matchKind`（vector / keyword）/ `tags` / `mismatchCount`；图库「试检索」直接展示，看清「为什么配这张图」。
+- **可纠正（负反馈）**：新增 `POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback {relevant}`；检索按「不相关 − 相关」差额降权（每条 0.08，封顶 0.32），降权后低于门槛即不再召回。计数随图库快照持久化。UI 在「试检索」命中行内提供 👎「标记不相关」并即时重跑试检索。
+English:
+- **Multimodal auto-tagging**: `CaptionAsync` now asks the vision model for strict JSON `{caption, tags[]}`; `caption` is the retrieval description (≤400 chars) and `tags` are retrieval tags (≤20, written only when the user hasn't entered tags); both feed vectorization. Parse failure falls back to the whole text as the caption.
+- **Explainable**: `/ag-ui/images/search` returns `score` / `matchKind` (vector / keyword) / `tags` / `mismatchCount` per image; the library's test retrieval shows them so it's clear why an image matched.
+- **Correctable (negative feedback)**: new `POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback {relevant}`; retrieval down-weights by (not-relevant − relevant) (0.08 each, capped 0.32) and drops below the gate once penalized. Counts persist with the library snapshot. The UI offers 👎 "mark not relevant" on test-retrieval rows and re-runs the probe immediately.
+
+## 测试
+# Tests
+
+中文：新增 `tools/ui-imglib-feedback.mjs`（真实浏览器，13 项：反馈计数、降权实测、解释字段、UI 👎 落库）；既有 `ImageLibrary` / `Bm25` 单测 30/30 通过。
+English: added `tools/ui-imglib-feedback.mjs` (real browser; 13 checks: feedback counts, measured down-weighting, explain fields, UI 👎 write-back); existing `ImageLibrary` / `Bm25` unit tests pass 30/30.
+
 # AG-UI 群聊桌面版 1.0.196 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.196 Release Notes (current Windows desktop release)
 

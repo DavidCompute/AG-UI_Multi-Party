@@ -140,6 +140,25 @@ public static class ImageLibraryApi
                 : Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error));
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 配图反馈（可纠正）：不相关 / 相关；检索时按「不相关 − 相关」降权（C）----
+        root.MapPost("/{libId}/assets/{assetId}/feedback", (string libId, string assetId, ImageAssetFeedbackRequest req,
+            HttpContext ctx, AuthService auth, ImageLibraryCatalog catalog) =>
+        {
+            var user = AgentApi.RequireUser(ctx, auth);
+            if (user is null) return AgentApi.Unauthorized();
+            var lib = catalog.GetLibrary(libId);
+            if (lib is null) return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"图库不存在：{libId}"));
+            if (!catalog.CanWrite(lib, user.UserId, auth.IsAdmin(user.UserId)))
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "只有创建者或管理员可标注配图反馈"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var error = catalog.RecordFeedback(lib.LibId, assetId, req.Relevant);
+            var asset = lib.Assets.FirstOrDefault(a => a.AssetId == assetId);
+            if (asset is null) return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"图片不存在：{assetId}"));
+            return error is null
+                ? Results.Ok(ToAssetDto(lib, asset))
+                : Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error));
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 删除图片 ----
         root.MapDelete("/{libId}/assets/{assetId}", (string libId, string assetId, HttpContext ctx,
             AuthService auth, ImageLibraryCatalog catalog) =>
@@ -220,6 +239,10 @@ public static class ImageLibraryApi
                     h.LibName,
                     h.FileName,
                     h.Caption,
+                    h.Tags,
+                    h.MatchKind,
+                    h.MismatchCount,
+                    h.RelevantCount,
                     h.ContentType,
                     score = Math.Round(h.Score, 4),
                     h.Width,
@@ -269,6 +292,8 @@ public static class ImageLibraryApi
         a.Bytes,
         a.Caption,
         a.Tags,
+        a.MismatchCount,
+        a.RelevantCount,
         a.Status,
         a.Error,
         a.UploadedAtMs,
@@ -276,6 +301,9 @@ public static class ImageLibraryApi
         url = $"/ag-ui/image-libs/{lib.LibId}/assets/{a.AssetId}/raw",
     };
 }
+
+/// <summary>配图反馈（可纠正）：relevant=true 记正反馈，false 记「不相关」（检索时降权）。</summary>
+public sealed record ImageAssetFeedbackRequest(bool Relevant);
 
 public sealed record ImageLibraryCreateRequest(string Name, string? Description = null, List<string>? SharedGroupIds = null,
     double? MinScore = null);

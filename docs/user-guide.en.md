@@ -2389,7 +2389,7 @@ Image files land in `data/images/{libId}/{assetId}{ext}` (`ImageLibraryCatalog` 
 #### 5.4.4 Image description (caption) and re-vectorization
 
 - **The description is the sole basis for semantic search** (`ImageLibrary.cs` comment: "the platform has no CLIP-style 'search by image'"). The text that goes into vectorization = `Caption` + `Tags` + `FileName` (`EmbeddingText()`, with the filename weighted low and placed last).
-- After upload, a **vision model automatically generates a Chinese description** (`CaptionAsync`): `Agents:VisionEnabled` (default `true`) is the master switch; the model name prefers `Agents:VisionModel`, and when it is empty and the provider is DeepSeek it uses `deepseek-v4-flash-vision-exp` (`AgentCatalog.ResolveVisionModelName`). The description length limit is **400 characters** (`MaxCaptionChars`). If generation fails / vision is not enabled (e.g. the `mock` provider) it returns `null`, and then only the filename + a manually entered description are vectorized (i.e. the "filename only" state in the table above).
+- After upload, the vision model **auto-generates** metadata (`CaptionAsync`, **multimodal tagging** since 1.0.197): it is asked to output strict JSON `{"caption":"…","tags":[…]}`; `caption` is the retrieval description (≤400 chars, `MaxCaptionChars`) and `tags` are retrieval tags (≤20). `Agents:VisionEnabled` (default `true`) is the master switch; the model name prefers `Agents:VisionModel`, and when it is empty and the provider is DeepSeek it uses `deepseek-v4-flash-vision-exp` (`AgentCatalog.ResolveVisionModelName`). If parsing fails the whole text is used as the caption (no tags); if vision is off / generation fails it returns empty and only the filename + manual description are vectorized (i.e. the "filename only" state above). **Auto tags are written only when the user hasn't entered tags** (never overwrites manual ones), and participate in `EmbeddingText()` together with the caption.
 - **Editing the description**: `saveImageCaption()` → `PUT /ag-ui/image-libs/{libId}/assets/{assetId}` with body `{ caption }`. This endpoint **returns only after re-vectorization completes** (the backend `UpdateAssetAsync` does `await task` inside), so the save button shows `⏳ Vectorizing…` (`imgLib.vectorizing`) and is disabled during this time; on return it shows `imgLib.captionSaved` ("Description saved and re-vectorized — live now").
 - **Removing an image**: `DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`, confirmed with `imgLib.removeImageConfirm` ("Remove this image? Its caption and vectors will be deleted"), success `imgLib.imageRemoved`. The backend deletes the vector first and then the file (`RemoveAsset`), avoiding a vector still hitting after the file is gone.
 - **Deleting a library**: `DELETE /ag-ui/image-libs/{libId}`, confirmed with `imgLib.delConfirm` ("Delete this whole image library? All its images and vectors will be cleared"), success `imgLib.deleted`; it also deletes the vectors + the disk directory (`RemoveLibrary`).
@@ -2405,6 +2405,11 @@ Image files land in `data/images/{libId}/{assetId}{ext}` (`ImageLibraryCatalog` 
 - It also requires **phrase evidence** `Bm25Ranker.HasPhraseEvidence` (a run of consecutive terms in the query must match), ruling out "sharing just one common word".
 
 So "chunks / images that match lexically head-on" (such as the proper name "刘佳俊", the model number "SKU-2026", the codename "ORION-7788") **are not vetoed by a stricter semantic threshold** and can still be recalled; whereas "irrelevant content that happens to share one common word" does not count as a hit.
+
+**Explainable + correctable (1.0.197, illustrations C)**:
+
+- **Explainable**: each image in the search response (`/ag-ui/images/search`) carries `score`, `matchKind` (`vector` vs `keyword`), `tags`, and `mismatchCount`; the library's "test retrieval" (`#libSetModal`) shows these directly so it's clear *why* an image matched.
+- **Correctable (negative feedback)**: `POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback` (body `{relevant}`) records relevant / not-relevant; retrieval **down-weights** by the **(not-relevant − relevant)** balance (`MismatchPenaltyStep = 0.08` each, capped at `MaxMismatchPenalty = 0.32`) — once it drops below the gate the image is no longer recalled. The counts persist with the library snapshot (`ImageAsset.MismatchCount` / `RelevantCount`). The UI offers 👎 "mark not relevant" on each test-retrieval hit row.
 
 ### 5.5 Library settings: search strictness and test retrieval (`#libSetModal`)
 
@@ -2532,6 +2537,7 @@ The two endpoints and their returned fields (`LIB_SET_PROBE`):
 | `DELETE` | `/ag-ui/image-libs/{libId}` | Creator / admin | Delete an image library (with its vectors and disk files) |
 | `POST` | `/ag-ui/image-libs/{libId}/assets` | Creator / admin | Upload images; `{ attachmentId, fileName?, caption?, tags? }` |
 | `PUT` | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Creator / admin | Edit description / tags (returns after re-vectorization completes) |
+| `POST` | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Creator / admin | Illustration feedback (`{relevant}`); retrieval down-weights by not-relevant − relevant |
 | `DELETE` | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Creator / admin | Delete an image (delete the vector first, then the file) |
 | `GET` | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | Login required and readable | Read the original image (frontend thumbnail / preview) |
 | `POST` | `/ag-ui/images/search` | Logged-in user **or** self token | Image-library semantic retrieval; `{ query, topK?, minScore?, scopeHandle? }` (a logged-in user may also pass `libraryIds`, but only readable libraries) |
@@ -4331,6 +4337,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | DELETE | `/ag-ui/image-libs/{libId}` | Delete an image library (creator / admin) | Login(strict) |
 | POST | `/ag-ui/image-libs/{libId}/assets` | Upload an image (reuses the `attachmentId` from `/ag-ui/upload`) | Login(strict) |
 | PUT | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Edit description / tags (re-vectorized) | Login(strict) |
+| POST | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Illustration feedback (`{relevant}`; retrieval down-weights) | Login(strict) |
 | DELETE | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Delete an image | Login(strict) |
 | GET | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | Read the original image (thumbnail / preview) | Login(strict) |
 | POST | `/ag-ui/images/search` | Image library semantic search (**self-token or logged-in user**; the server path accepts only the self-token) | Self-token **or** Login(strict) |

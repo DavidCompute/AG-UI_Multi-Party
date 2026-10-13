@@ -2385,7 +2385,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 #### 5.4.4 图片描述（caption）与重新向量化
 
 - **描述是语义检索的唯一依据**（`ImageLibrary.cs` 注释：「平台没有 CLIP 那种『以图搜图』」）。参与向量化的文本 = `Caption` + `Tags` + `FileName`（`EmbeddingText()`，文件名权重低、排最后）。
-- 上传后由**视觉模型自动生成中文描述**（`CaptionAsync`）：`Agents:VisionEnabled`（默认 `true`）为总开关；模型名优先 `Agents:VisionModel`，为空且提供方为 DeepSeek 时用 `deepseek-v4-flash-vision-exp`（`AgentCatalog.ResolveVisionModelName`）。描述长度上限 **400 字**（`MaxCaptionChars`）。生成失败 / 未启用视觉（如 `mock` 提供方）返回 `null`，则仅用文件名 + 手填描述向量化（即上表「仅按文件名匹配」态）。
+- 上传后由**视觉模型自动生成**元数据（`CaptionAsync`，1.0.197 起为**多模态打标**）：要求只输出严格 JSON `{"caption":"…","tags":[…]}`；`caption` 为检索描述（≤400 字，`MaxCaptionChars`），`tags` 为检索标签（≤20 个）。`Agents:VisionEnabled`（默认 `true`）为总开关；模型名优先 `Agents:VisionModel`，为空且提供方为 DeepSeek 时用 `deepseek-v4-flash-vision-exp`（`AgentCatalog.ResolveVisionModelName`）。解析失败则整段文本当 caption（无 tags）；未启用视觉 / 生成失败返回空，仅用文件名 + 手填描述向量化（即上表「仅按文件名匹配」态）。**自动 tags 仅在用户未手填标签时写入**（不覆盖人工标注），且与描述一起参与 `EmbeddingText()` 向量化。
 - **编辑描述**：`saveImageCaption()` → `PUT /ag-ui/image-libs/{libId}/assets/{assetId}`，请求体 `{ caption }`。该接口**在重新向量化完成后才返回**（后端 `UpdateAssetAsync` 内 `await task`），因此保存按钮在此期间显示 `⏳ 向量化中…`（`imgLib.vectorizing`）并禁用；返回成功提示 `imgLib.captionSaved`（「描述已保存并重新向量化，立即生效」）。
 - **移除图片**：`DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`，二次确认 `imgLib.removeImageConfirm`（「移除这张图片？其描述与向量数据将被删除」），成功 `imgLib.imageRemoved`。后端先删向量再删文件（`RemoveAsset`），避免删文件后向量仍命中。
 - **删除图库**：`DELETE /ag-ui/image-libs/{libId}`，二次确认 `imgLib.delConfirm`（「删除整个图库？其中全部图片与向量将被清除」），成功 `imgLib.deleted`；同时删向量 + 磁盘目录（`RemoveLibrary`）。
@@ -2401,6 +2401,11 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 - 还要有**词组证据** `Bm25Ranker.HasPhraseEvidence`（查询里得有一段连续词项命中），排除「只共用一个常用词」。
 
 因此「词面直接对上的切片 / 图」（如专有人名「刘佳俊」、型号「SKU-2026」、代号「ORION-7788」）**不会被更严的语义门槛一票否决**，仍能召回；而「恰好共用一个常用词的无关内容」不算命中。
+
+**可解释 + 可纠正（1.0.197，配图 C）**：
+
+- **可解释**：检索响应（`/ag-ui/images/search`）的每张图带 `score`、`matchKind`（`vector` 向量命中 / `keyword` 词面命中）、`tags`、`mismatchCount`；图库「试检索」（`#libSetModal`）直接展示这些，便于看清「为什么配这张图」。
+- **可纠正（负反馈）**：`POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback`（body `{relevant}`）记录「相关 / 不相关」；检索时按 **（不相关 − 相关）** 的差额**降权**（每条扣 `MismatchPenaltyStep = 0.08`，封顶 `MaxMismatchPenalty = 0.32`），降权后低于门槛即不再召回。计数随图库快照持久化（`ImageAsset.MismatchCount` / `RelevantCount`）。UI 在「试检索」命中行内提供 👎「标记不相关」。
 
 ### 5.5 库设置：检索严格度与试检索（`#libSetModal`）
 
@@ -2528,6 +2533,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 | `DELETE` | `/ag-ui/image-libs/{libId}` | 创建者 / 管理员 | 删除图库（连带向量与磁盘文件） |
 | `POST` | `/ag-ui/image-libs/{libId}/assets` | 创建者 / 管理员 | 上传图片；`{ attachmentId, fileName?, caption?, tags? }` |
 | `PUT` | `/ag-ui/image-libs/{libId}/assets/{assetId}` | 创建者 / 管理员 | 改描述 / 标签（重新向量化完成后返回） |
+| `POST` | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | 创建者 / 管理员 | 配图反馈（`{relevant}`）；检索按「不相关 − 相关」降权 |
 | `DELETE` | `/ag-ui/image-libs/{libId}/assets/{assetId}` | 创建者 / 管理员 | 删除图片（先删向量再删文件） |
 | `GET` | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | 需登录且可读该库 | 读取原图（前端缩略图 / 预览） |
 | `POST` | `/ag-ui/images/search` | 登录用户 **或** 自令牌 | 图库语义检索；`{ query, topK?, minScore?, scopeHandle? }`（登录用户也可传 `libraryIds`，但仅限可读库） |
@@ -4323,6 +4329,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | DELETE | `/ag-ui/image-libs/{libId}` | 删除图库（创建者 / 管理员） | 登录(严) |
 | POST | `/ag-ui/image-libs/{libId}/assets` | 上传图片（复用 `/ag-ui/upload` 的 `attachmentId`） | 登录(严) |
 | PUT | `/ag-ui/image-libs/{libId}/assets/{assetId}` | 改描述 / 标签（重新向量化） | 登录(严) |
+| POST | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | 配图反馈（`{relevant}`；检索降权） | 登录(严) |
 | DELETE | `/ag-ui/image-libs/{libId}/assets/{assetId}` | 删除图片 | 登录(严) |
 | GET | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | 原图读取（缩略图 / 预览） | 登录(严) |
 | POST | `/ag-ui/images/search` | 图库语义检索（**自令牌或登录用户**；服务器路径只给自令牌） | 自令牌 **或** 登录(严) |

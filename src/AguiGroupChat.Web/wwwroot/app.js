@@ -3558,7 +3558,10 @@ const LIB_SET_PROBE = {
   imglib: (id, query, minScore) => ({
     url: "/ag-ui/images/search",
     body: { query, topK: 5, minScore, libraryIds: [id] },
-    pick: (d) => (d.images || []).map((x) => ({ name: x.fileName, score: x.score, snippet: x.caption })),
+    pick: (d) => (d.images || []).map((x) => ({
+      name: x.fileName, score: x.score, snippet: x.caption,
+      assetId: x.assetId, libId: x.libId, tags: x.tags || [], matchKind: x.matchKind, mismatchCount: x.mismatchCount || 0,
+    })),
   }),
   kb: (id, query, minScore) => ({
     url: `/ag-ui/kb/${id}/search`,
@@ -3595,14 +3598,37 @@ async function runLibSetProbe() {
     }
     const rows = spec.pick(data);
     $("libSetProbeGate").textContent = t("libSet.probeGate", { value: minScore, count: rows.length });
+    const isImg = libSetKind === "imglib";
     box.innerHTML = rows.length
-      ? rows.map((r) => `<div class="lib-set-probe-hit"><span class="score">${Number(r.score || 0).toFixed(2)}</span>`
-          + `<span class="name" title="${escapeHtml(r.name || "")}">${escapeHtml(r.name || "")}</span>`
-          + `<span class="snippet" title="${escapeHtml(r.snippet || "")}">${escapeHtml(r.snippet || "")}</span></div>`).join("")
+      ? rows.map((r) => {
+          const extra = isImg
+            ? `<span class="lib-set-kind-tag">${escapeHtml(r.matchKind === "keyword" ? t("libSet.matchKeyword") : t("libSet.matchVector"))}</span>`
+              + `<span class="lib-set-tags">${(r.tags || []).map((tg) => `<span class="lib-set-tag">${escapeHtml(tg)}</span>`).join("")}</span>`
+              + `<button class="chip-btn lib-set-fb" data-asset-id="${escapeHtml(r.assetId)}" data-lib-id="${escapeHtml(r.libId)}" title="${escapeHtml(t("libSet.markMismatch"))}">👎${r.mismatchCount ? " " + r.mismatchCount : ""}</button>`
+            : "";
+          return `<div class="lib-set-probe-hit${isImg ? " imglib" : ""}"><span class="score">${Number(r.score || 0).toFixed(2)}</span>`
+            + `<span class="name" title="${escapeHtml(r.name || "")}">${escapeHtml(r.name || "")}</span>`
+            + `<span class="snippet" title="${escapeHtml(r.snippet || "")}">${escapeHtml(r.snippet || "")}</span>${extra}</div>`;
+        }).join("")
       : `<div class="kb-empty" style="padding:6px 0">${t("libSet.probeNone")}</div>`;
+    if (isImg) box.querySelectorAll(".lib-set-fb").forEach((b) => { b.onclick = () => sendImgFeedback(b.dataset.libId, b.dataset.assetId); });
   } finally {
     btn.disabled = false;
   }
+}
+
+/** 配图反馈（可纠正）：标记某张图「不相关」→ 后端记录，下次检索降权；重新试检索直接看到分数变化。 */
+async function sendImgFeedback(libId, assetId) {
+  try {
+    const res = await fetch(`/ag-ui/image-libs/${encodeURIComponent(libId)}/assets/${encodeURIComponent(assetId)}/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token || ""}` },
+      body: JSON.stringify({ relevant: false }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, t("libSet.mismatchFail", { err: res.status }))); return; }
+    toast(t("libSet.mismatchDone"));
+    runLibSetProbe();
+  } catch { toast(t("libSet.mismatchFail", { err: 0 })); }
 }
 
 function openLibSettings(kind, id) {

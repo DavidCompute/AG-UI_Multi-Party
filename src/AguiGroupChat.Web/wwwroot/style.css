@@ -1301,6 +1301,11 @@ textarea:focus { outline: none; border-color: var(--accent); }
   flex: none; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .lib-set-probe-hit .snippet { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-set-probe-hit.imglib { flex-wrap: wrap; }
+.lib-set-kind-tag { flex: none; font-size: 11px; color: var(--muted); }
+.lib-set-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; flex: none; }
+.lib-set-tag { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); color: var(--muted); }
+.lib-set-fb { flex: none; font-size: 11px; padding: 0 8px; height: 20px; }
 .lib-create-body .form-hint { margin: 0; }
 #kbListWrap { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .kb-list-item { border-bottom: 1px solid rgba(128,141,180,.12); background: transparent; }

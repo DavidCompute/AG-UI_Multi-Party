@@ -84,6 +84,12 @@ public sealed class ImageAsset
     /// <summary>用户标签（与描述一起参与向量化）。</summary>
     public List<string> Tags { get; set; } = [];
 
+    /// <summary>配图「不相关」累计次数（负反馈）：检索时对该图降权（见 <c>ImageLibraryCatalog</c> 的失配惩罚）。</summary>
+    public int MismatchCount { get; set; }
+
+    /// <summary>配图「相关」累计次数（正反馈）：抵消部分失配惩罚。</summary>
+    public int RelevantCount { get; set; }
+
     /// <summary>处理状态：processing（生成描述 / 向量化中）| ready（可检索）| error（失败，见 Error）。</summary>
     public string Status { get; set; } = "processing";
 

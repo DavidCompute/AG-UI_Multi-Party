@@ -248,8 +248,10 @@ public sealed class ImageLibraryCatalog
             {
                 if (asset.Caption.Length == 0)
                 {
-                    var caption = await CaptionAsync(bytes, asset.ContentType, asset.FileName, CancellationToken.None);
+                    var (caption, tags) = await CaptionAsync(bytes, asset.ContentType, asset.FileName, CancellationToken.None);
                     if (caption is { Length: > 0 }) asset.Caption = caption;
+                    // 多模态打标：自动生成的标签只在用户没手填标签时填充（不覆盖人工标注）
+                    if (tags.Count > 0 && asset.Tags.Count == 0) asset.Tags = tags;
                 }
                 await VectorizeAsync(lib, asset, store, embedding);
             }
@@ -309,31 +311,27 @@ public sealed class ImageLibraryCatalog
     }
 
     /// <summary>
-    /// 视觉模型生成图片描述。失败 / 未启用视觉（如 mock 提供方、未配视觉模型）返回 null —— 
+    /// 视觉模型生成图片描述 + 检索标签（多模态打标）。失败 / 未启用视觉（如 mock 提供方、未配视觉模型）返回空 ——
     /// 调用方继续用文件名 + 标签向量化，检索会弱一些，但不会让上传失败。
     /// </summary>
-    private async Task<string?> CaptionAsync(byte[] bytes, string contentType, string fileName, CancellationToken ct)
+    private async Task<(string? Caption, List<string> Tags)> CaptionAsync(byte[] bytes, string contentType, string fileName, CancellationToken ct)
     {
-        if (!_options.VisionEnabled) return null;
+        if (!_options.VisionEnabled) return (null, []);
         var visionModel = AgentCatalog.ResolveVisionModelName(
             _options, string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase));
-        if (string.IsNullOrWhiteSpace(visionModel)) return null;
+        if (string.IsNullOrWhiteSpace(visionModel)) return (null, []);
         var catalog = _services.GetService<AgentCatalog>();
-        if (catalog is null) return null;
+        if (catalog is null) return (null, []);
 
         try
         {
             var agent = catalog.CreateSystemVision(visionModel!);
-            if (agent is null) return null;
+            if (agent is null) return (null, []);
             var session = await agent.CreateSessionAsync(ct);
             var prompt =
-                "请为这张图片写一段用于**语义检索**的描述（之后有人用一句话来找图，要能命中它）。\n"
-                + "要求：\n"
-                + "① 先一句话说清画面主体与场景（谁/什么、在哪、在做什么）；\n"
-                + "② 再列出可直接当检索词的要素：物体、场景、动作、行业、配色、数量、风格（照片/截图/图表/插画）；\n"
-                + "③ 用中文，不要 Markdown、不要客套话、不要“这张图片”之类的开头；\n"
-                + "④ 总长不超过 200 字。\n"
-                + "只输出描述本身。";
+                "请为这张图片生成用于**语义检索**的元数据，只输出严格 JSON（不要代码块、不要多余文字）：\n"
+                + "{\"caption\":\"<一句话说清主体与场景，并含可直接当检索词的要素：物体/场景/动作/行业/配色/数量/风格；中文，≤160字；不要 Markdown>\",\"tags\":[\"<能区分这张图的检索词或短语>\"]}\n"
+                + "tags 给 3~10 个（人名 / 专有号 / 行业词优先）。";
             var msg = new ChatMessage(ChatRole.User, new AIContent[]
             {
                 new TextContent(prompt),
@@ -341,13 +339,38 @@ public sealed class ImageLibraryCatalog
             });
             var resp = await agent.RunAsync([msg], session, null, ct);
             var text = (resp.Text ?? "").Trim();
-            if (text.Length == 0) return null;
-            return text.Length > MaxCaptionChars ? text[..MaxCaptionChars] : text;
+            if (text.Length == 0) return (null, []);
+
+            // 容忍模型加代码块 / 前后缀：截取第一个 { 到最后一个 } 再解析
+            var start = text.IndexOf('{');
+            var end = text.LastIndexOf('}');
+            if (start >= 0 && end > start)
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(text[start..(end + 1)]);
+                    var root = doc.RootElement;
+                    var cap = root.TryGetProperty("caption", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? (c.GetString() ?? "").Trim() : "";
+                    var tags = new List<string>();
+                    if (root.TryGetProperty("tags", out var tg) && tg.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        foreach (var t in tg.EnumerateArray())
+                        {
+                            var s = (t.ValueKind == System.Text.Json.JsonValueKind.String ? t.GetString() : null)?.Trim() ?? "";
+                            if (s.Length > 0 && !tags.Contains(s, StringComparer.Ordinal)) tags.Add(s);
+                            if (tags.Count >= 20) break;
+                        }
+                    if (cap.Length > MaxCaptionChars) cap = cap[..MaxCaptionChars];
+                    if (cap.Length > 0 || tags.Count > 0) return (cap.Length > 0 ? cap : null, tags);
+                }
+                catch { /* 解析失败：回退整段文本当描述 */ }
+            }
+            return (text.Length > MaxCaptionChars ? text[..MaxCaptionChars] : text, []);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "图库图片自动描述失败（继续用文件名向量化）：{FileName}", fileName);
-            return null;
+            return (null, []);
         }
     }
 
@@ -460,7 +483,8 @@ public sealed class ImageLibraryCatalog
     /// <remarks><see cref="ContentType"/> 是给技能的“能不能嵌入”判断用的：Word 认 png/gif/bmp/tiff，
     /// PDF 只认 png/jpeg —— 图库允许上传 WebP，不告知类型技能就只能靠扩展名猜。</remarks>
     public sealed record ImageHit(string LibId, string LibName, string AssetId, string FileName,
-        string Caption, double Score, string ContentType, string Path, int Width, int Height);
+        string Caption, double Score, string ContentType, string Path, int Width, int Height,
+        IReadOnlyList<string> Tags, string MatchKind, int MismatchCount, int RelevantCount);
 
     /// <summary>
     /// 在指定图库集合里按语义检索 top-k 图片（每库各取 topK 条再合并排序），返回**可读的绝对路径**。
@@ -489,7 +513,7 @@ public sealed class ImageLibraryCatalog
             try
             {
                 foreach (var hit in store.Search(ImgGroupPrefix + libId, "img", vec, Math.Max(1, topK), gate, "group"))
-                    if (BuildHit(lib, hit.MessageId, hit.Score) is { } h) hits.Add(h);
+                    if (BuildHit(lib, hit.MessageId, hit.Score, "vector") is { } h) hits.Add(h);
             }
             catch (Exception ex) { _logger.LogDebug(ex, "图库 {LibId} 检索失败", libId); }
         }
@@ -511,6 +535,8 @@ public sealed class ImageLibraryCatalog
         return hits
             .GroupBy(h => h.AssetId, StringComparer.Ordinal)
             .Select(g => g.OrderByDescending(h => h.Score).First())
+            .Select(ApplyFeedbackPenalty)
+            .Where(h => h.Score > 0)
             .OrderByDescending(h => h.Score)
             .Take(topK)
             .ToList();
@@ -546,15 +572,40 @@ public sealed class ImageLibraryCatalog
         return null;
     }
 
+    /// <summary>配图反馈（可纠正）的降权步长与封顶：每条「不相关」扣 Step，最多扣 Cap。</summary>
+    public const double MismatchPenaltyStep = 0.08;
+    public const double MaxMismatchPenalty = 0.32;
+
+    /// <summary>负反馈降权（按「不相关 − 相关」的差额扣分，封顶 <see cref="MaxMismatchPenalty"/>）。</summary>
+    private static ImageHit ApplyFeedbackPenalty(ImageHit h)
+    {
+        var net = Math.Max(0, h.MismatchCount - h.RelevantCount);
+        if (net == 0) return h;
+        var penalty = Math.Min(MaxMismatchPenalty, net * MismatchPenaltyStep);
+        return h with { Score = Math.Max(0, h.Score - penalty) };
+    }
+
+    /// <summary>记录一次配图反馈（可纠正）：relevant=true 记正反馈，false 记「不相关」；下次检索据此降权。</summary>
+    public string? RecordFeedback(string libId, string assetId, bool relevant)
+    {
+        var lib = GetLibrary(libId);
+        var asset = lib?.Assets.FirstOrDefault(a => a.AssetId == assetId);
+        if (lib is null || asset is null) return "图片不存在";
+        if (relevant) asset.RelevantCount++; else asset.MismatchCount++;
+        lib.UpdatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _changes?.Notify();
+        return null;
+    }
+
     /// <summary>按 assetId 构造检索结果（拿不到文件时返回 null：目录里有记录但文件已丢的情况）。</summary>
-    private ImageHit? BuildHit(ImageLibrary lib, string assetId, double score)
+    private ImageHit? BuildHit(ImageLibrary lib, string assetId, double score, string matchKind)
     {
         var asset = lib.Assets.FirstOrDefault(a => a.AssetId == assetId);
         if (asset is null || !string.Equals(asset.Status, "ready", StringComparison.OrdinalIgnoreCase)) return null;
         var path = ResolveAssetPath(lib, asset);
         if (path is null) return null;
         return new ImageHit(lib.LibId, lib.Name, asset.AssetId, asset.FileName, asset.Caption, score,
-            asset.ContentType, path, asset.Width, asset.Height);
+            asset.ContentType, path, asset.Width, asset.Height, asset.Tags, matchKind, asset.MismatchCount, asset.RelevantCount);
     }
 
     /// <summary>图片的绝对路径（文件不存在返回 null）。</summary>
@@ -590,7 +641,7 @@ public sealed class ImageLibraryCatalog
                 // 描述越长（尤其自动生成的长描述）多个普通词累加越容易蹭过底线，实测“颁奖 团队 合影”
                 // 会命中一张描述里恰好有“团队”的 AI 插画（0.38 分）—— 那就是“配图不正确”。
                 if (!Bm25Ranker.HasPhraseEvidence(query, it.Content)) continue;
-                if (BuildHit(lib, it.MessageId, sim) is { } h) scored.Add(h);
+                if (BuildHit(lib, it.MessageId, sim, "keyword") is { } h) scored.Add(h);
             }
         }
         return scored;
