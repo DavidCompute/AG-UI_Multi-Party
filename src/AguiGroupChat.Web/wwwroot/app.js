@@ -1723,6 +1723,14 @@ function serializeAgent(a) {
     assignmentIds: (a.assignmentIds || []),
     escalationAgentId: a.escalationAgentId || null,
     skillDefIds: (a.skillDefIds || []),
+    // 定时 / 审批 / 执行阶段 / 交接与流水线：随导出往返（否则导入静默丢配置）
+    schedule: a.schedule || null,
+    requireApprovalToolNames: (a.requireApprovalToolNames || []),
+    relayToAgentId: a.relayToAgentId || null,
+    pipeline: (a.pipeline || []).map((s) => ({ stepAgentId: s.stepAgentId || null, prompt: s.prompt || null })),
+    disableBridge: a.disableBridge ?? null,
+    disableRelay: a.disableRelay ?? null,
+    disableOrgRoute: a.disableOrgRoute ?? null,
     // 记忆拟人类型：随导出 / 导入往返（导入者按需保留或自行调整）
     memoryProfile: a.memoryProfile ? {
       memoryType: a.memoryProfile.memoryType || null,
@@ -1801,7 +1809,72 @@ function parseAgentImport(text) {
   throw new Error("无法识别的导入文件格式（应为 {version, agents:[…]} 或数字员工数组）");
 }
 
-/** 从文件导入：逐条调用 POST /ag-ui/agents 创建（agentId 冲突时自动生成新 ID；bridgeToken 不导入）。 */
+/** 拉取目标实例可用的用户分组 id 集合：拿不到（非管理员 / 请求失败）返回 null
+ * （调用方据此省略 allowedGroupIds，以免引用不存在的分组被服务端拒绝、导致整条导入失败）。 */
+async function fetchValidGroupIds() {
+  try {
+    const res = await apiRaw("GET", "/ag-ui/usergroups");
+    if (!res.ok) return null;
+    const list = await res.json();
+    return Array.isArray(list) ? new Set(list.map((g) => g.groupId)) : null;
+  } catch { return null; }
+}
+
+/** 过滤 allowedGroupIds：仅保留目标实例确实存在的分组；无可用分组信息时不携带（null = 不设限）。 */
+function filterAllowedGroups(ids, validGroups) {
+  if (!ids || !ids.length || !validGroups) return null;
+  const kept = ids.filter((id) => validGroups.has(id));
+  return kept.length ? kept : null;
+}
+
+/** 该导出体是否含「引用型」字段（指派 / 提升 / 交接 / 流水线）——决定导入后是否需要第二轮补写。 */
+function hasAgentRefs(a) {
+  return !!((a.assignmentIds && a.assignmentIds.length) || a.escalationAgentId || a.relayToAgentId || (a.pipeline && a.pipeline.length));
+}
+
+/** 数字员工导出 / 导入共用的 upsert 请求体（PUT 为整体替换，故两次写入必须提供同一份完整字段）。
+ *  includeRefs=false 时剥离「引用型」字段：它们指向其他数字员工，第一轮创建时目标可能尚未注册（服务端会 400）。 */
+function buildAgentUpsertBody(a, { includeRefs = true, allowedGroupIds = null } = {}) {
+  const body = {
+    agentId: a.agentId || null,
+    nickname: (a.nickname || "").trim(),
+    description: a.description || null,
+    instructions: a.instructions || null,
+    avatar: a.avatar || null,
+    triggerMode: a.triggerMode || "mentioned",
+    keywords: a.keywords || [],
+    model: a.model || null,
+    bridgeEndpoint: a.bridgeEndpoint || null,
+    bridgeMode: a.bridgeMode || null,
+    // 敏感令牌不导入（导出时已排除），由导入者重新配置
+    bridgeToken: null,
+    schedule: a.schedule || null,
+    personalMemoryEnabled: !!a.personalMemoryEnabled,
+    isPrivate: !!a.isPrivate,
+    knowledgeBaseIds: (a.knowledgeBaseIds || []),
+    imageLibraryIds: (a.imageLibraryIds || []),
+    skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
+    skillDefIds: (a.skillDefIds || []),
+    requireApprovalToolNames: (a.requireApprovalToolNames || []),
+    disableBridge: a.disableBridge ?? null,
+    disableRelay: a.disableRelay ?? null,
+    disableOrgRoute: a.disableOrgRoute ?? null,
+    // 记忆拟人类型（如需保留原设置则原样携带；未导出则保持默认）
+    memoryProfile: a.memoryProfile || null,
+    allowedGroupIds: allowedGroupIds && allowedGroupIds.length ? allowedGroupIds : null,
+  };
+  if (includeRefs) {
+    body.assignmentIds = (a.assignmentIds || []);
+    body.escalationAgentId = a.escalationAgentId || null;
+    body.relayToAgentId = a.relayToAgentId || null;
+    body.pipeline = (a.pipeline || []).map((s) => ({ stepAgentId: s.stepAgentId || "", prompt: s.prompt || null }));
+  }
+  return body;
+}
+
+/** 从文件导入：两轮写入——第一轮创建（剥离「引用型」字段，避免目标未注册而 400），
+ *  第二轮 PUT 补写指派 / 提升 / 交接 / 流水线引用（此时同批数字员工已创建，可整体成立）。
+ *  allowedGroupIds 先按目标实例已有分组过滤；bridgeToken 不导入。 */
 async function importAgentsFromFile(file) {
   let agents;
   try {
@@ -1813,54 +1886,46 @@ async function importAgentsFromFile(file) {
   if (!Array.isArray(agents) || agents.length === 0) { toast(t("agent.importEmpty")); return; }
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
 
-  let ok = 0, conflict = 0, failed = 0;
+  const validGroups = await fetchValidGroupIds(); // 目标实例已有分组（用于安全过滤 allowedGroupIds）
+  let ok = 0, conflict = 0, failed = 0, refApplied = 0, refDropped = 0;
+  const created = []; // { exported, newId, groups }
+
+  // 第一轮：创建（不含引用型字段）
   for (const a of agents) {
-    const body = {
-      agentId: a.agentId || null,
-      nickname: (a.nickname || "").trim(),
-      description: a.description || null,
-      instructions: a.instructions || null,
-      avatar: a.avatar || null,
-      triggerMode: a.triggerMode || "mentioned",
-      keywords: a.keywords || [],
-      model: a.model || null,
-      bridgeEndpoint: a.bridgeEndpoint || null,
-      bridgeMode: a.bridgeMode || null,
-      // 敏感令牌不导入（导出时已排除），由导入者重新配置
-      bridgeToken: null,
-      personalMemoryEnabled: !!a.personalMemoryEnabled,
-      isPrivate: !!a.isPrivate,
-      knowledgeBaseIds: (a.knowledgeBaseIds || []),
-      imageLibraryIds: (a.imageLibraryIds || []),
-      skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
-      assignmentIds: (a.assignmentIds || []),
-      escalationAgentId: a.escalationAgentId || null,
-      skillDefIds: (a.skillDefIds || []),
-      // 记忆拟人类型（如需保留原设置则原样携带；未导出则保持默认）
-      memoryProfile: a.memoryProfile || null,
-    };
+    const groups = filterAllowedGroups(a.allowedGroupIds, validGroups);
+    const body = buildAgentUpsertBody(a, { includeRefs: false, allowedGroupIds: groups });
     if (!body.nickname) { failed++; continue; }
     try {
-      let res = await fetch("/ag-ui/agents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-        body: JSON.stringify(body),
-      });
+      let res = await apiRaw("POST", "/ag-ui/agents", body);
       if (res.status === 409 && body.agentId) {
         // agentId 冲突：自动生成新 ID 重试，避免覆盖现有数字员工
         conflict++;
         body.agentId = null;
-        res = await fetch("/ag-ui/agents", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.token}` },
-          body: JSON.stringify(body),
-        });
+        res = await apiRaw("POST", "/ag-ui/agents", body);
       }
-      if (res.ok) ok++; else failed++;
+      if (!res.ok) { failed++; continue; }
+      ok++;
+      const d = await res.json().catch(() => null);
+      const newId = (d && d.agentId) || body.agentId || null;
+      if (newId) created.push({ exported: a, newId, groups });
     } catch { failed++; }
   }
+
+  // 第二轮：补写引用型字段（整体替换 PUT；引用目标不存在则保留第一轮状态并计数）
+  for (const { exported, newId, groups } of created) {
+    if (!hasAgentRefs(exported)) continue;
+    const body = buildAgentUpsertBody(exported, { includeRefs: true, allowedGroupIds: groups });
+    body.agentId = newId;
+    try {
+      const res = await apiRaw("PUT", `/ag-ui/agents/${encodeURIComponent(newId)}`, body);
+      if (res.ok) refApplied++; else refDropped++;
+    } catch { refDropped++; }
+  }
+
   await Promise.all([loadAgents(), loadAgentDirectory()]);
-  toast(t("agent.importDone", { ok, failed }) + (conflict ? t("agent.importConflict", { n: conflict }) : ""));
+  toast(t("agent.importDone", { ok, failed })
+    + (conflict ? t("agent.importConflict", { n: conflict }) : "")
+    + (refDropped ? t("agent.importRefWarn", { n: refDropped }) : ""));
 }
 
 /** 删除二次确认：首次点击进入确认态（✅ 确认 / ❌ 取消图标），再次点击确认执行删除。

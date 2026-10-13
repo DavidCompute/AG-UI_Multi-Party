@@ -1,6 +1,7 @@
 using System.Text;
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Options;
 
 namespace AguiGroupChat.Hub.Storage;
 
@@ -55,13 +56,14 @@ public sealed class AttachmentStore
     internal static bool IsValidAttachmentId(string? attachmentId)
         => !string.IsNullOrWhiteSpace(attachmentId) && AttachmentIdPattern.IsMatch(attachmentId);
 
-    /// <summary>文本类附件注入模型上下文的单文件截断长度的<b>出厂默认值</b>（每个文件各自享有，避免首个大文件挤掉后续附件）。
-    /// 运行期实际生效值见 <see cref="TextCharsPerFile"/>（可经 PromptBudget 配置）。</summary>
-    public const int DefaultTextCharsPerFile = 12_000;
+    /// <summary>文本类附件注入模型上下文的单文件截断长度的出厂默认值（每个文件各自享有，避免首个大文件挤掉后续附件）。
+    /// 单一事实来源：直接取自 <see cref="PromptBudgetOptions.Default"/>（运行期实际生效值见 <see cref="TextCharsPerFile"/>），
+    /// 避免此处与 PromptBudget 各写一份默认值而漂移。</summary>
+    public static readonly int DefaultTextCharsPerFile = PromptBudgetOptions.Default.AttachmentMaxTextCharsPerFile;
 
-    /// <summary>文本类附件自动注入模型上下文的<b>总</b>字符预算的<b>出厂默认值</b>（全部附件共享上限，超出部分仅给元数据、
-    /// 可经 read_attachment 按需读取）。运行期实际生效值见 <see cref="TextCharsTotal"/>。</summary>
-    public const int DefaultTextCharsTotal = 60_000;
+    /// <summary>文本类附件自动注入模型上下文的总字符预算的出厂默认值（全部附件共享上限，超出部分仅给元数据、
+    /// 可经 read_attachment 按需读取）。同样取自 <see cref="PromptBudgetOptions.Default"/>（运行期实际生效值见 <see cref="TextCharsTotal"/>）。</summary>
+    public static readonly int DefaultTextCharsTotal = PromptBudgetOptions.Default.AttachmentMaxTextCharsTotal;
 
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {

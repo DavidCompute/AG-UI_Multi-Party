@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.194 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.194 Release Notes (current Windows desktop release)
+
+**版本说明**：数据正确性收口——数字员工导出/导入改为无损往返（补齐定时 / 审批 / 阶段开关 / 指派 / 交接 / 流水线），导入改为两轮写入、引用可整体成立；附件注入预算默认值统一为一处。
+**Version note**: data-correctness hardening — digital-employee export/import is now lossless (schedule / approval names / stage switches / assignment / relay / pipeline), import is two-pass so cross-references resolve, and the attachment-injection budget defaults are unified into one source.
+
+## 数据正确性
+# Data correctness
+
+中文：
+- **数字员工导出 / 导入无损往返**：此前 `serializeAgent` 与导入请求体遗漏 `schedule`（定时任务）、`requireApprovalToolNames`（审批名单）、`disableBridge` / `disableRelay` / `disableOrgRoute`（阶段开关）、`relayToAgentId` / `pipeline`（交接 / 流水线），导入还会丢掉 `allowedGroupIds`（用户组白名单）——迁移时**静默丢配置**。现全部随导出往返。
+- **导入改为两轮写入**：第一轮创建（剥离「引用型」字段），第二轮 `PUT` 补写指派 / 提升 / 交接 / 流水线——引用同批创建的其他数字员工（含「被引用者后创建」的顺序）也能整体成立；服务端对未注册目标的 400 不再导致整条失败（引用暂不可解析时保留无引用状态并计数提示）。`allowedGroupIds` 先按目标实例已有分组过滤，避免引用不存在分组。
+- **附件注入预算默认值统一**：`AttachmentStore.DefaultTextCharsPerFile` / `DefaultTextCharsTotal` 现直接取自 `PromptBudgetOptions.Default`（40000 / 200000），不再与 PromptBudget 各写一份、发生漂移（运行期实际生效值仍以 PromptBudget 配置为准）。
+English:
+- **Lossless digital-employee export/import**: `serializeAgent` and the import body used to omit `schedule` (cron), `requireApprovalToolNames`, `disableBridge` / `disableRelay` / `disableOrgRoute` (stage switches), `relayToAgentId` / `pipeline` (relay / pipeline), and the import dropped `allowedGroupIds` (user-group whitelist) — silently losing configuration on migration. All now round-trip.
+- **Import is now two-pass**: pass 1 creates (reference-type fields stripped), pass 2 `PUT`s assignment / escalation / relay / pipeline back — so references to other employees created in the same batch (including “referenced agent created later”) resolve as a whole; the server's 400 for unregistered targets no longer fails the whole employee (an unresolvable reference keeps the no-reference state and is reported). `allowedGroupIds` is filtered against the target instance's existing groups first.
+- **Attachment-injection budget defaults unified**: `AttachmentStore.DefaultTextCharsPerFile` / `DefaultTextCharsTotal` now come directly from `PromptBudgetOptions.Default` (40000 / 200000) instead of being duplicated and drifting (runtime effective values still follow the PromptBudget config).
+
+## 测试
+# Tests
+
+中文：新增 `tools/verify-agent-roundtrip.mjs`（真实浏览器，18 项：字段暴露、导出完整性、两轮写入、导入后引用成立）。
+English: added `tools/verify-agent-roundtrip.mjs` (real browser; 18 checks: field exposure, export completeness, two-pass write, post-import references).
+
 # AG-UI 群聊桌面版 1.0.193 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.193 Release Notes (current Windows desktop release)
 

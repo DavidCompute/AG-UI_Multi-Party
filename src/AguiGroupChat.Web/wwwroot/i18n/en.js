@@ -1268,6 +1268,7 @@ window.I18N_DICTS.en = {
   "agent.importEmpty": "Import file is empty",
   "agent.importDone": "Import finished: {ok} succeeded, {failed} failed",
   "agent.importConflict": "({n} ID conflicts auto-renamed)",
+  "agent.importRefWarn": "; {n} reference(s) skipped (target not found)",
   "agent.pickPrefix": "AI digital employee",
   "agent.pickUser": "User",
   "agent.form.descTooShort": "Please first fill in a one-line summary (at least 2 characters)",

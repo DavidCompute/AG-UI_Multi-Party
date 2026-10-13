@@ -1265,6 +1265,7 @@ window.I18N_DICTS.zh = {
   "agent.importEmpty": "导入文件为空",
   "agent.importDone": "导入完成：成功 {ok}，失败 {failed}",
   "agent.importConflict": "（其中 {n} 个 ID 冲突已自动改名）",
+  "agent.importRefWarn": "；{n} 个引用（指派/提升/交接/流水线）因目标不存在未写入",
   "agent.pickPrefix": "AI 数字员工",
   "agent.pickUser": "用户",
   "agent.form.descTooShort": "请先填写一句话简介（至少 2 个字符）",

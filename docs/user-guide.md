@@ -832,7 +832,7 @@
 服务端 `AgentGateway.BuildAttachmentsSectionAsync()` 把一条消息的附件组织成「模型可逐个引用」的附件区：
 
 1. 先给出**附件清单**：`【本条消息共 N 个附件（可对任意一个调用 read_attachment 读取正文）：】`，逐个列出「附件 i. 名称（kind，大小，attachmentId=…）：注入状态」。
-2. **每个可提取文件先注入首段文本**，单文件上限为 `AttachmentStore.TextCharsPerFile`（出厂默认 `DefaultTextCharsPerFile = 12_000` 字符，可经 PromptBudget 配置）。
+2. **每个可提取文件先注入首段文本**，单文件上限为 `AttachmentStore.TextCharsPerFile`（出厂默认 `DefaultTextCharsPerFile` 直接取自 `PromptBudgetOptions.Default.AttachmentMaxTextCharsPerFile`（40000），可用 PromptBudget 覆盖）。
 3. **全局总预算**为 `PromptBudgetOptions.AttachmentMaxTextCharsTotal`（默认 `200_000` 字符），按顺序分配，先到的附件优先，预算耗尽后其余附件仅保留清单（不注入正文）。
 4. 未完整注入的附件可由数字员工用工具 `read_attachment`（参数 `attachmentId` / `startIndex` / `maxChars`，默认 `12000`）分段续读——工具说明明确写着「一条消息可带多个附件——需要综合多个附件作答时，请对每个需要参考的附件各调用一次」。
 5. **图片**：受多轮视觉上限限制，`PromptBudgetOptions.MaxContextImages`（默认 `4`）张以内的图片随本轮视觉上下文提供，超出仅给元数据（`AgentGateway` 的 `MaxContextImages` / `MaxHistoryImages`）。
@@ -1118,7 +1118,7 @@
 - 撤回事件向全群广播（不做成员过滤），且快照过滤已撤回消息 —— 请确认「私密 / 定向消息被撤回」的提示语义是否需要在手册中特别说明（事件不含内容，不泄露原文）。
 - 「私聊」与「@ 提及」共用同一 `mentions` 集合（`visibleMemberIds = [...state.mentions]`）—— 请确认用户是否清楚「私聊」需先双击选中成员。
 - 「发言迁移为新话题」后该发言从原话题移除（`topic.hint`），其服务端行为（`GROUP_MESSAGE_TOPIC_MOVED` 事件）建议在合并时补充事件级说明。
-- 附件「多附件问答」的全局字符预算默认值在 `PromptBudgetOptions.AttachmentMaxTextCharsTotal`（`200_000`）与 `AttachmentStore.DefaultTextCharsTotal`（`60_000`）两处不同 —— 手册引用时请以「实际生效」的 PromptBudget 值为准，并核实部署配置是否覆盖。
+- 附件「多附件问答」的预算默认值已统一：`AttachmentStore.DefaultTextCharsPerFile` / `DefaultTextCharsTotal` 直接取自 `PromptBudgetOptions.Default`（`40_000` / `200_000`），不再各写一份；运行期实际生效值仍以部署的 PromptBudget 配置为准。
 
 ## 第 3 章 数字员工与组织架构
 
@@ -4862,7 +4862,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 5. **`Agents:WorkToolsEnabled`（compose `Agents__WorkToolsEnabled`）/ `enableWorkTools` 无 C# 绑定属性**。协议文档 §5.7（`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`）与前端 i18n（`agent.form.enableWorkTools` 等）均提到它，但 `AgentOptions` 与 `AgentDefinition` 中均无该属性（`src/**/*.cs` 检索零命中）。第 3 章草稿亦已指出该表单分区未渲染。依据：`docker-compose.yml` L188-191、`AgentOptions.cs`、`i18n/zh.js` L272-274。
 6. **任务提到的 `artifacts/verify-msi-payload.py` 在仓库中不存在**。MSI 打包的真实入口是 `tools/build-msi.ps1`（其第 4 步内嵌“后端 DLL 新鲜度”校验），另有 `tools/wix/package.wxs`、`tools/wix/nativebridge-package.wxs`、`tools/publish-nativebridge*.ps1`。依据：`find_path **/verify-msi*` 无命中、`tools/build-msi.ps1`。
 7. **上传与产物大小上限不同（非缺陷，易误读）**：用户上传单文件 `AttachmentStore.MaxFileBytes = 20MB`，而技能产物 `MaxProducedFileBytes = 64MB`（带插图稿子天然大）。前端“文件生成了却没有下载入口”类现象多因产物超 64MB 被静默忽略。依据：`AttachmentStore.cs` L15-28。
-8. **附件注入出厂默认与 `PromptBudget` 覆盖**：`AttachmentStore.DefaultTextCharsPerFile = 12000` / `DefaultTextCharsTotal = 60000`，但运行期实际取 `PromptBudget:AttachmentMaxTextCharsPerFile = 40000` / `AttachmentMaxTextCharsTotal = 200000`。两个“默认值”并存，易在文档中混淆。依据：`AttachmentStore.cs` L58-64、`PromptBudgetOptions.cs` L57-61。
+8. **附件注入出厂默认已统一**：`AttachmentStore.DefaultTextCharsPerFile` / `DefaultTextCharsTotal` 现直接取自 `PromptBudgetOptions.Default`（`40000` / `200000`），不再单独硬编码，二者不再漂移。依据：`AttachmentStore.cs`、`PromptBudgetOptions.cs` L57-61。
 
 > 与既有 `docs/*.md` 的一致性：已逐节核对 `docs/execution-configuration.md`（`Agents:Execution` 各字段、`complexityTimeouts` 档位值）与代码一致，未发现偏差；其余文档未发现与本表冲突项。（若后续另有文档与本表冲突，**以代码为准**。）
 
