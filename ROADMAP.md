@@ -201,7 +201,7 @@
 - **落点模块**：`SystemApi`、`AuthService`（API key）、前端主题化、`AguiGroupChat.Sdk`。
 - **已实现**：
   - **官方 .NET SDK（第三方接入）**：`src/AguiGroupChat.Sdk`——`AguiClient`（HTTP 上行：认证 / 群组 / 成员 / 话题 / 消息 / 多智能体讨论 / 人机交互 / 智能体操 / 附件）+ `AguiRealtimeClient`（WS 全双工 / SSE 下行 + 强类型事件分发）+ `Models`（与协议线格式一致的 DTO / 事件），`net8.0` / `net10.0`、零外部依赖；错误统一抛 `AguiException`（协议错误码 + HTTP 状态码）。示例 `samples/AguiGroupChat.Client`，端到端测试 `tests/AguiGroupChat.Sdk.Tests`（自托管真实 Hub，含 WebSocket 全链路）。
-  - **对外 API 密钥**：`Auth:ApiKeys`（`[{apiKey, username}]`），`Authorization: Bearer <apiKey>` 免登录以绑定账号身份调用 HTTP API，继承其权限 / 管理员标记。
+  - **对外 API 密钥**：`Auth:ApiKeys`（`[{apiKey, username}]`），`Authorization: Bearer <apiKey>` 免登录以绑定账号身份调用 HTTP API，继承其权限 / 管理员标记。**另提供托管密钥**（管理员控制台「API 密钥」页签）：创建 / 列出 / 吊销，明文仅创建时返回一次、服务端只存 SHA-256，跨重启持久化（扩展区 `apiKeys`），避免改一次配置就重启。落点：`Hub/Users/ManagedApiKeyStore.cs`、`Web/ApiKeyApi.cs`。
   - **白标品牌**：`GET/POST /ag-ui/settings/branding`（公开读 / 管理员写），配置应用名 + Logo + 品牌主色 + 强制深色 + 副标语，持久化到扩展区「branding」；前端以 CSS 变量注入主色、渲染登录页 / 顶栏 Logo 与应用名，管理菜单「白标设置」可在线编辑。
   - **iframe 嵌入**：`GroupChatOptions.AllowedFrameOrigins` 配置允许嵌入来源（CSP `frame-ancestors` 与 X-Frame-Options 相应放行，默认禁止）；前端自动检测 iframe / `?embed=1` 进入紧凑嵌入模式（隐藏无关按钮 / 副标题）。
   - **出站 Webhook（对外集成）**：管理员控制台「Webhook」页签配置回调地址 + 事件订阅（18 类事件；可按 `groupId` 限定知聚；密钥 `whsec_…` 仅创建 / 轮换时显示一次，落盘加密），知聚事件以带 **HMAC-SHA256 签名**的 HTTP POST 推送（信封 `{deliveryId, event, groupId, sentAt, data}`，头部 `X-KnowGath-Signature = sha256(HMAC(secret, "{timestamp}.{body}"))`）；失败重试 3 次（退避 1s/5s/25s），后台线程不阻塞扇出，与在线人数无关；「最近投递」+「测试」便于集成调试。管理 API：`/ag-ui/admin/webhooks(+/events,/deliveries,/{id}/test)`。落点：`IGroupEventObserver`（Hub 钩子）+ `WebhookApi` / `WebhookDispatcher`（Web）。

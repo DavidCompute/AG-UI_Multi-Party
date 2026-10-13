@@ -921,6 +921,31 @@
     </div>
   </div>
 
+  <!-- 托管 API 密钥：新建（密钥仅创建后显示一次） -->
+  <div id="apiKeyModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal pick-modal">
+      <div class="modal-title" data-i18n="admin.akNewTitle">新建 API 密钥</div>
+      <div class="form-group">
+        <label data-i18n="admin.akName">名称</label>
+        <input id="akNameField" class="modal-input" maxlength="60" data-i18n-placeholder="admin.akNamePh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.akBound">绑定账号（用户名）</label>
+        <input id="akUserField" class="modal-input" maxlength="50" data-i18n-placeholder="admin.akUserPh" />
+        <p class="form-hint" style="margin:4px 0" data-i18n="admin.akBoundHint">密钥将以此账号的身份访问（继承其知聚成员与权限）。</p>
+      </div>
+      <div id="akSecretBox" class="hidden" style="margin-top:4px;padding:10px;border:1px dashed var(--accent);border-radius:8px">
+        <div data-i18n="admin.akSecretOnce">API 密钥（仅显示一次，请立即复制保存）：</div>
+        <code id="akSecretValue" style="word-break:break-all;display:block;margin:6px 0"></code>
+        <button id="akSecretCopy" class="chip-btn" type="button" data-i18n="admin.akSecretCopy">复制密钥</button>
+      </div>
+      <div class="modal-actions">
+        <button id="akCancelBtn" class="btn-ghost" type="button" data-i18n="common.cancel">取消</button>
+        <button id="akSaveBtn" class="send" type="button" data-i18n="common.save">保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 修改密码 -->
   <div id="pwModal" class="modal-overlay hidden">
     <div class="modal">
@@ -1633,6 +1658,7 @@
         <button id="adminTabUserGroups" class="chip-btn admin-tab" data-i18n="admin.tabUserGroups">用户分组</button>
         <button id="adminTabStorage" class="chip-btn admin-tab" data-i18n="admin.tabStorage">存储治理</button>
         <button id="adminTabWebhooks" class="chip-btn admin-tab" data-i18n="admin.tabWebhooks">Webhook</button>
+        <button id="adminTabApiKeys" class="chip-btn admin-tab" data-i18n="admin.tabApiKeys">API 密钥</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1833,6 +1859,20 @@
           <table class="admin-table">
             <thead><tr><th data-i18n="admin.whColTime">时间</th><th data-i18n="admin.whColEvent">事件</th><th data-i18n="admin.whColStatus">结果</th><th data-i18n="admin.whColDetail">详情</th></tr></thead>
             <tbody id="adminWebhookDeliveryRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 托管 API 密钥（对外集成凭证）：创建 / 列出 / 吊销；明文仅创建时展示一次 -->
+      <div id="adminApiKeysView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="admin.apiKeyHint">创建供外部系统调用的 <b>API 密钥</b>（用于 <code>/agui/v1</code> 对外接口与出站集成）——以绑定账号的身份访问（继承其知聚成员 / 权限）。明文密钥<b>只在创建时显示一次</b>，服务端只存哈希；不再需要时点「吊销」。</p>
+        <div class="admin-toolbar">
+          <button id="akAddBtn" class="chip-btn" type="button" data-i18n="admin.akAdd">＋ 新建密钥</button>
+          <button id="akRefreshBtn" class="chip-btn" type="button" data-i18n="admin.whRefresh">↻ 刷新</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="admin.akName">名称</th><th data-i18n="admin.akBound">绑定账号</th><th data-i18n="admin.akPrefix">前缀</th><th data-i18n="admin.akCreated">创建时间</th><th data-i18n="admin.akLastUsed">最近使用</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+            <tbody id="adminApiKeyRows"></tbody>
           </table>
         </div>
       </div>

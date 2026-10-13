@@ -23,6 +23,8 @@ public sealed class AuthService
     private readonly ISessionStore _sessions;
     // 服务端主动终止实时连接（可选注入；为空时跳过——既有测试构造不依赖它）
     private readonly ConnectionManager? _connections;
+    // 托管 API 密钥（管理员控制台创建；可选：未注册时仅用 appsettings 的 Auth:ApiKeys）
+    private readonly ManagedApiKeyStore? _managedKeys;
 
     // 登录失败限速：按「IP + 用户名」组合键计数，窗口内失败次数超限后临时拒绝（防暴力破解）。
     // 组合键防「同一 IP 刷不同用户名绕过单用户名限速」的 DoS；纯 username 维度会被分布式小号批量绕开。
@@ -34,7 +36,7 @@ public sealed class AuthService
     private static readonly string DummySalt = Convert.ToBase64String([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10]);
     private static readonly string DummyHash = Convert.ToBase64String([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30]);
 
-    public AuthService(IUserStore store, AuthOptions options, TimeProvider time, ILogger<AuthService> logger, ChangeHub? changes = null, ISessionStore? sessions = null, ConnectionManager? connections = null)
+    public AuthService(IUserStore store, AuthOptions options, TimeProvider time, ILogger<AuthService> logger, ChangeHub? changes = null, ISessionStore? sessions = null, ConnectionManager? connections = null, ManagedApiKeyStore? managedKeys = null)
     {
         _store = store;
         _options = options;
@@ -43,6 +45,7 @@ public sealed class AuthService
         _changes = changes;
         _sessions = sessions ?? new InMemorySessionStore();
         _connections = connections;
+        _managedKeys = managedKeys;
     }
 
     /// <summary>
@@ -150,11 +153,23 @@ public sealed class AuthService
     public UserAccount? ResolveApiKey(string? token)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
+        var t = token.Trim();
+        // 1) 配置密钥（appsettings 的 Auth:ApiKeys，明文、需重启）
         foreach (var entry in _options.ApiKeys)
         {
             if (string.IsNullOrWhiteSpace(entry.ApiKey) || string.IsNullOrWhiteSpace(entry.Username)) continue;
-            if (FixedTimeEquals(entry.ApiKey, token.Trim()))
+            if (FixedTimeEquals(entry.ApiKey, t))
                 return _store.GetUserByUsername(entry.Username);
+        }
+        // 2) 托管密钥（管理员控制台创建 / 吊销，只存哈希；命中后刷新最近使用时间）
+        if (_managedKeys is not null)
+        {
+            var key = _managedKeys.Match(t, _time.GetUtcNow().ToUnixTimeMilliseconds());
+            if (key is not null)
+            {
+                _changes?.Notify(); // 驱动 LastUsedAt 持久化（与 ValidateToken 同口径，节流在 Match 内）
+                return _store.GetUserByUsername(key.Username);
+            }
         }
         return null;
     }

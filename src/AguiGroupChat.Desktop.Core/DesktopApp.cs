@@ -109,6 +109,7 @@ public static class DesktopApp
         app.MapWebhookApi();    // 出站 Webhook（对外集成）：管理员配置回调地址 + 事件订阅 + 投递记录
         app.MapManualApi();     // 内置用户手册：前端「📖 完整手册」按界面语言拉取（嵌入资源，仅登录可读）
         app.MapExternalApi();   // 版本化对外 REST API（入站集成）：/agui/v1 发消息 / 读历史 / 同步等回复
+        app.MapApiKeyApi();     // 托管 API 密钥（对外集成凭证）：管理员创建 / 列出 / 吊销
         app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
         app.MapMentionSuggestApi(); // 输入时「建议 @ 谁」（草稿对数字员工职责的本地评分）
         app.MapMessageFeedbackApi(); // 消息 👍/👎 反馈（偏好画像）
@@ -137,6 +138,7 @@ public static class DesktopApp
         app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
+        app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();

@@ -4208,6 +4208,28 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ---
 
+### 8.20 托管 API 密钥（对外集成凭证）
+
+管理员控制台新增 **API 密钥** 页签（`#adminTabApiKeys`，仅 `Admin` 及以上）——创建 / 列出 / 吊销供外部系统调用 `/agui/v1`（§9.2.11）与出站集成的凭证，替代只能写在 `appsettings`、改一次要重启的 `Auth:ApiKeys`。
+
+**入口与视图**：页签 `#adminTabApiKeys` → 视图 `#adminApiKeysView`（`index.html`），提示 `admin.apiKeyHint`；工具栏 `#akAddBtn`（新建）/ `#akRefreshBtn`（刷新）；列表 `#adminApiKeyRows`；弹窗 `#apiKeyModal`（`akNameField` / `akUserField` / `akSecretBox`）。
+
+**管理 API**（均需 `Admin`）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/ag-ui/admin/api-keys` | 列出（只回前缀 `keyPrefix` 与最近使用时间，**不回密钥 / 哈希**） |
+| `POST` | `/ag-ui/admin/api-keys` | 创建 `{name, username}`；**返回一次性明文密钥** `ak_…`；绑定账号不存在则 400 |
+| `DELETE` | `/ag-ui/admin/api-keys/{id}` | 吊销（同时删除；使用它的外部调用**立即失效**） |
+
+**安全与行为**：
+
+- 密钥为 32 字节随机值（`ak_` 前缀），服务端**只存 SHA-256 哈希**，明文只在创建时返回一次；列表接口永不回密钥。
+- 以**绑定账号**身份访问（继承其知聚成员 / 权限）；鉴权时 `AuthService.ResolveApiKey` 先查配置密钥（`Auth:ApiKeys`），再查托管密钥，两者共存。
+- 最近使用时间按 60 秒节流刷新（避免每请求写库）；创建 / 吊销写审计（`apikey.create` / `apikey.revoke`）；跨重启持久化（扩展区 `apiKeys`）。
+
+---
+
 ## 第 9 章 接口一览、配置项与环境变量、排障
 
 > 本章依据源码：`src/AguiGroupChat.Hub/{Program.cs,HubApp.cs,Transport/HttpGroupApi.cs,Users/UserApi.cs,Options/*.cs,appsettings*.json}`、`src/AguiGroupChat.Web/{Program.cs,WebIdentity.cs,AccountApi.cs,AdminApi.cs,AgentApi.cs,AttachmentApi.cs,BrandingApi.cs,ClientToolBridgeApi.cs,ConfigGovernanceApi.cs,ExecutionRuntimeApi.cs,ExportImportApi.cs,GlobalSearchApi.cs,GroupNameApi.cs,ImageLibraryApi.cs,KnowledgeBaseApi.cs,LinkProxyApi.cs,MarketplaceApi.cs,MemoryApi.cs,MentionSuggestApi.cs,MessageFeedbackApi.cs,NativeBridgeDownloadApi.cs,NativeTunnelApi.cs,PlanControlApi.cs,ScheduledTaskApi.cs,SelfApi.cs,SkillApi.cs,SofficeRunner.cs,StorageAdminApi.cs,SystemApi.cs,TopicSummaryApi.cs,TwinApi.cs,UserGroupApi.cs,WebhookApi.cs,WebhookDispatcher.cs,appsettings*.json}`、`src/AguiGroupChat.Agents/{AgentOptions.cs,ExecutionOptions.cs,KnowledgeBase.cs}`、`src/AguiGroupChat.Desktop*/**`、`src/AguiGroupChat.NativeBridge/Program.cs`、`docker-compose.yml`、`Dockerfile`、`Dockerfile.hub`、`.github/workflows/*`、`tools/{i18n-audit.mjs,build-msi.ps1,README-playwright.md}`、`src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/*}`。
@@ -4512,7 +4534,7 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
   -d '{"content":"@交付专员 出一份周报","waitMs":30000}'
 ```
 
-> 本层只读 / 发消息，不提供管理操作（群 / 成员 / 技能等仍在 `/ag-ui/*` 与管理员控制台）。出站推送见 §8.19 的 Webhook。
+> 本层只读 / 发消息，不提供管理操作（群 / 成员 / 技能等仍在 `/ag-ui/*` 与管理员控制台）。出站推送见 §8.19 的 Webhook；调用本层的凭证请用托管 API 密钥（§8.20）。
 
 ---
 

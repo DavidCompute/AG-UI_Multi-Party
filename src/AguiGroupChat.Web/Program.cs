@@ -141,6 +141,7 @@ app.MapStorageAdminApi(); // 存储治理：附件占用统计 + 开关放行的
 app.MapManualApi(); // 内置用户手册：前端「📖 完整手册」按界面语言拉取（嵌入资源，公开只读）
 app.MapWebhookApi(); // 出站 Webhook（对外集成）：管理员配置回调地址 + 事件订阅 + 投递记录
 app.MapExternalApi(); // 版本化对外 REST API（入站集成）：/agui/v1 发消息 / 读历史 / 同步等回复
+app.MapApiKeyApi(); // 托管 API 密钥（对外集成凭证）：管理员创建 / 列出 / 吊销
 
 // 智能体目录 / 知识库 / 登录会话 / 外部 AG-UI 增量游标接入统一持久化（须在状态恢复之前注册）
 app.Services.RegisterAgentPersistence();
@@ -163,6 +164,7 @@ app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3�
 app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
 app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
 app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
+app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

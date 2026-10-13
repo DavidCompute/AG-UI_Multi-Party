@@ -6830,7 +6830,7 @@ function applyAdminTabVisibility() {
     adminTabUsers: adminPlus, adminTabUsage: operatorPlus, adminTabMetrics: operatorPlus,
     adminTabConfig: adminPlus, adminTabExec: adminPlus, adminTabAudit: operatorPlus,
     adminTabOrphans: adminPlus, adminTabUserGroups: adminPlus, adminTabStorage: adminPlus,
-    adminTabWebhooks: adminPlus,
+    adminTabWebhooks: adminPlus, adminTabApiKeys: adminPlus,
   };
   for (const [id, show] of Object.entries(visible)) $(id)?.classList.toggle("hidden", !show);
 }
@@ -6857,6 +6857,7 @@ function switchAdminTab(tab) {
   const usergroups = tab === "usergroups";
   const storage = tab === "storage";
   const webhooks = tab === "webhooks";
+  const apikeys = tab === "apikeys";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
@@ -6867,6 +6868,7 @@ function switchAdminTab(tab) {
   $("adminTabUserGroups").classList.toggle("on", usergroups);
   $("adminTabStorage").classList.toggle("on", storage);
   $("adminTabWebhooks").classList.toggle("on", webhooks);
+  $("adminTabApiKeys").classList.toggle("on", apikeys);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
@@ -6877,6 +6879,7 @@ function switchAdminTab(tab) {
   $("adminUserGroupsView").classList.toggle("hidden", !usergroups);
   $("adminStorageView").classList.toggle("hidden", !storage);
   $("adminWebhooksView").classList.toggle("hidden", !webhooks);
+  $("adminApiKeysView").classList.toggle("hidden", !apikeys);
   if (usergroups) { loadUserGroups(); }
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
@@ -6897,6 +6900,8 @@ function switchAdminTab(tab) {
   } else if (webhooks) {
     loadWebhooks();
     loadWebhookDeliveries();
+  } else if (apikeys) {
+    loadApiKeys();
   } else {
     loadConfigGovernance();
   }
@@ -7244,6 +7249,100 @@ async function testWebhook(id) {
   if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
   toast(d && d.ok ? t("admin.whTestOk", { code: d.statusCode || "OK" }) : t("admin.whTestFail", { err: (d && d.error) || "" }));
   loadWebhookDeliveries();
+}
+
+/* ============ 管理员控制台：托管 API 密钥（对外集成凭证） ============ */
+
+function bindApiKeyConsole() {
+  $("adminTabApiKeys").onclick = () => switchAdminTab("apikeys");
+  $("akAddBtn").onclick = () => openApiKeyModal();
+  $("akRefreshBtn").onclick = loadApiKeys;
+  $("akSaveBtn").onclick = saveApiKey;
+  $("akCancelBtn").onclick = () => $("apiKeyModal").classList.add("hidden");
+  $("akSecretCopy").onclick = () => {
+    const v = $("akSecretValue").textContent || "";
+    navigator.clipboard?.writeText(v).then(() => toast(t("admin.akSecretCopied")), () => {});
+  };
+  $("adminApiKeyRows").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (btn && btn.dataset.act === "revoke") revokeApiKey(btn.dataset.id);
+  });
+}
+
+/** 拉取托管密钥列表（只回前缀，不回密钥）并渲染。 */
+async function loadApiKeys() {
+  const rows = $("adminApiKeyRows");
+  if (!rows) return;
+  rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await fetch("/ag-ui/admin/api-keys", { headers: { Authorization: "Bearer " + state.token } });
+    const list = await res.json().catch(() => null);
+    if (!res.ok || !Array.isArray(list)) {
+      rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(list, "HTTP " + res.status)) })}</td></tr>`;
+      return;
+    }
+    if (!list.length) { rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.akEmpty")}</td></tr>`; return; }
+    rows.innerHTML = list.map((k) => {
+      const created = k.createdAt ? new Date(k.createdAt).toLocaleString() : "—";
+      const used = k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : t("admin.akNeverUsed");
+      return `<tr>
+        <td>${escapeHtml(k.name || "—")}</td>
+        <td>${escapeHtml(k.username)}</td>
+        <td><code>${escapeHtml(k.keyPrefix || "")}</code></td>
+        <td>${escapeHtml(created)}</td>
+        <td>${escapeHtml(used)}</td>
+        <td><button class="chip-btn danger" data-act="revoke" data-id="${escapeHtml(k.id)}" type="button">${t("admin.akRevoke")}</button></td>
+      </tr>`;
+    }).join("");
+  } catch (ex) {
+    rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
+  }
+}
+
+function openApiKeyModal() {
+  $("akNameField").value = "";
+  $("akUserField").value = "";
+  $("akSecretBox").classList.add("hidden");
+  $("akSecretValue").textContent = "";
+  $("apiKeyModal").classList.remove("hidden");
+}
+
+async function saveApiKey() {
+  const name = $("akNameField").value.trim();
+  const username = $("akUserField").value.trim();
+  if (!name) { toast(t("admin.akNameRequired")); return; }
+  if (!username) { toast(t("admin.akUserRequired")); return; }
+  const btn = $("akSaveBtn"); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = t("common.saving");
+  try {
+    const res = await fetch("/ag-ui/admin/api-keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ name, username }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    toast(t("admin.akSaved"));
+    await loadApiKeys();
+    if (d && d.secret) {
+      // 新建：密钥仅此一次返回，留在弹窗里供复制
+      $("akSecretBox").classList.remove("hidden");
+      $("akSecretValue").textContent = d.secret;
+    } else {
+      $("apiKeyModal").classList.add("hidden");
+    }
+  } catch (ex) { toast(ex.message); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+async function revokeApiKey(id) {
+  if (!await uiConfirm({ message: t("admin.akRevokeConfirm"), danger: true })) return;
+  const res = await fetch(`/ag-ui/admin/api-keys/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: { Authorization: "Bearer " + state.token },
+  });
+  if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, "HTTP " + res.status)); return; }
+  toast(t("admin.akRevoked"));
+  await loadApiKeys();
 }
 
 /**
@@ -12107,6 +12206,7 @@ function init() {
   $("adminTabOrphans").onclick = () => switchAdminTab("orphans");
   bindUserGroupConsole(); // 细粒度授权：用户分组后台页签
   bindWebhookConsole(); // 对外集成：出站 Webhook 后台页签
+  bindApiKeyConsole(); // 对外集成凭证：托管 API 密钥后台页签
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
   $("storageRefreshBtn").onclick = loadStorageGovernance;
   $("storageReclaimBtn").onclick = runStorageReclaim;

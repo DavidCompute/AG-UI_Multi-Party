@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.202 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.202 Release Notes (current Windows desktop release)
+
+**版本说明**：新增**托管式 API 密钥**——管理员在控制台创建 / 列出 / 吊销外部集成凭证（替代只能写在 `appsettings`、改一次要重启的 `Auth:ApiKeys`）；密钥明文仅创建时显示一次，服务端只存哈希。
+**Version note**: adds **managed API keys** — admins create / list / revoke external-integration credentials in the console (replacing `Auth:ApiKeys`, which lived in `appsettings` and needed a restart to change); the plaintext key is shown only at creation and only its hash is stored.
+
+## 托管式 API 密钥
+# Managed API keys
+
+中文：
+- **控制台页签**：管理员控制台新增「API 密钥」页签（仅 `Admin` 及以上）——新建（选名称 + 绑定账号）、列出（只回前缀与最近使用时间）、吊销。
+- **只存哈希**：密钥为 32 字节随机值（`ak_…`），服务端只存 SHA-256，明文**只在创建时返回一次**；列表接口永不回密钥。最近使用时间按 60 秒节流刷新（避免每请求都写库）。
+- **鉴权融合**：`AuthService.ResolveApiKey` 先查配置密钥（`Auth:ApiKeys`），再查托管密钥——两者共存，托管密钥命中即以绑定账号身份访问（继承其知聚成员 / 权限），可用于 `/agui/v1` 对外接口与出站集成。
+- **权限与留痕**：创建 / 吊销仅管理员，写操作审计（`apikey.create` / `apikey.revoke`）；绑定账号不存在则 400；跨重启持久化（扩展区 `apiKeys`）。
+- **管理 API**：`GET /ag-ui/admin/api-keys`（列表，脱敏）、`POST /ag-ui/admin/api-keys`（创建，返回一次性明文）、`DELETE /ag-ui/admin/api-keys/{id}`（吊销）。
+English:
+- **Console tab**: a new "API keys" tab in the admin console (visible to `Admin` and above) — create (name + bound account), list (prefix and last-used only), revoke.
+- **Hash-only storage**: keys are 32 random bytes (`ak_…`); the server stores only SHA-256 and returns the plaintext **once at creation**; the list endpoint never returns the key. Last-used is refreshed at a 60s throttle to avoid a write per request.
+- **Unified auth**: `AuthService.ResolveApiKey` first checks configured keys (`Auth:ApiKeys`) and then managed keys — both coexist; a managed key hit acts as its bound account (inheriting that account's circle memberships and permissions) and works for the `/agui/v1` external API and outbound integration.
+- **Permissions and audit**: create / revoke are admin-only and audited (`apikey.create` / `apikey.revoke`); an unknown bound account yields 400; managed keys persist across restarts (extension section `apiKeys`).
+- **Management API**: `GET /ag-ui/admin/api-keys` (list, masked), `POST /ag-ui/admin/api-keys` (create, returns the plaintext once), `DELETE /ag-ui/admin/api-keys/{id}` (revoke).
+
+## 测试
+# Tests
+
+中文：新增 `ManagedApiKeyTests` 7/7（生成 / 哈希 / 前缀 / 匹配与最近使用 / 删除 / AuthService 解析 / 绑定账号不存在）与 `ApiKeyApiTests` 3/3（端到端：创建→用密钥调 `/agui/v1/me` 成功→吊销后 401；需管理员；绑定账号校验）；连同 Webhook / 对外 API / 桌面组合根对等合跑 48/48。
+English: new `ManagedApiKeyTests` 7/7 (generate / hash / prefix / match & last-used / remove / AuthService resolution / unknown bound account) and `ApiKeyApiTests` 3/3 (end-to-end: create → call `/agui/v1/me` with the key → 401 after revoke; admin-gated; bound-account validation); 48/48 together with webhook / external API / desktop parity.
+
 # AG-UI 群聊桌面版 1.0.201 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.201 Release Notes (current Windows desktop release)
 

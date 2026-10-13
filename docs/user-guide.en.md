@@ -4216,6 +4216,28 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 
 ---
 
+### 8.20 Managed API keys (external integration credentials)
+
+The admin console gains an **API keys** tab (`#adminTabApiKeys`, visible to `Admin` and above) to create / list / revoke credentials for external systems calling `/agui/v1` (9.2.11) and outbound integration — replacing `Auth:ApiKeys`, which lived in `appsettings` and needed a restart to change.
+
+**Entry and views**: tab `#adminTabApiKeys` → view `#adminApiKeysView` (`index.html`), hint `admin.apiKeyHint`; toolbar `#akAddBtn` (new) / `#akRefreshBtn` (refresh); table `#adminApiKeyRows`; dialog `#apiKeyModal` (`akNameField` / `akUserField` / `akSecretBox`).
+
+**Management API** (all require `Admin`):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/ag-ui/admin/api-keys` | List (returns only the `keyPrefix` and last-used time, **never the key or hash**) |
+| `POST` | `/ag-ui/admin/api-keys` | Create `{name, username}`; **returns the plaintext key once** `ak_…`; unknown bound account yields 400 |
+| `DELETE` | `/ag-ui/admin/api-keys/{id}` | Revoke (and delete); external calls using it **fail immediately** |
+
+**Security and behaviour**:
+
+- Keys are 32 random bytes (`ak_` prefix); the server stores **only the SHA-256 hash**, and the plaintext is returned once at creation; the list endpoint never returns the key.
+- The key acts as its **bound account** (inheriting that account's circle memberships and permissions); on auth, `AuthService.ResolveApiKey` checks configured keys (`Auth:ApiKeys`) first and then managed keys — both coexist.
+- Last-used is refreshed at a 60s throttle (no write per request); create / revoke are audited (`apikey.create` / `apikey.revoke`) and persist across restarts (extension section `apiKeys`).
+
+---
+
 ## Chapter 9: API Reference, Configuration, and Troubleshooting
 
 > Primary sources: `src/AguiGroupChat.Hub/{Program.cs,HubApp.cs,Transport/HttpGroupApi.cs,Users/UserApi.cs,Options/*.cs,appsettings*.json}`, `src/AguiGroupChat.Web/{Program.cs,WebIdentity.cs,AccountApi.cs,AdminApi.cs,AgentApi.cs,AttachmentApi.cs,BrandingApi.cs,ClientToolBridgeApi.cs,ConfigGovernanceApi.cs,ExecutionRuntimeApi.cs,ExportImportApi.cs,GlobalSearchApi.cs,GroupNameApi.cs,ImageLibraryApi.cs,KnowledgeBaseApi.cs,LinkProxyApi.cs,MarketplaceApi.cs,MemoryApi.cs,MentionSuggestApi.cs,MessageFeedbackApi.cs,NativeBridgeDownloadApi.cs,NativeTunnelApi.cs,PlanControlApi.cs,ScheduledTaskApi.cs,SelfApi.cs,SkillApi.cs,SofficeRunner.cs,StorageAdminApi.cs,SystemApi.cs,TopicSummaryApi.cs,TwinApi.cs,UserGroupApi.cs,appsettings*.json}`, `src/AguiGroupChat.Agents/{AgentOptions.cs,ExecutionOptions.cs,KnowledgeBase.cs}`, `src/AguiGroupChat.Desktop*/**`, `src/AguiGroupChat.NativeBridge/Program.cs`, `docker-compose.yml`, `Dockerfile`, `Dockerfile.hub`, `.github/workflows/*`, `tools/{i18n-audit.mjs,build-msi.ps1,README-playwright.md}`, `src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/*}`.
@@ -4520,7 +4542,7 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
   -d '{"content":"@Delivery Lead draft a weekly report","waitMs":30000}'
 ```
 
-> This layer only reads and sends messages; it exposes no admin operations (groups / members / skills remain under `/ag-ui/*` and the admin console). For outbound push see the webhook in 8.19.
+> This layer only reads and sends messages; it exposes no admin operations (groups / members / skills remain under `/ag-ui/*` and the admin console). For outbound push see the webhook in 8.19; use a managed API key (8.20) as the credential for this layer.
 
 ---
 

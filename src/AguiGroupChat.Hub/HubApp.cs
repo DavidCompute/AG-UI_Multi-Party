@@ -61,6 +61,7 @@ public static class HubApp
         var authOptions = builder.Configuration.GetSection("Auth").Get<AuthOptions>() ?? new AuthOptions();
         builder.Services.AddSingleton(authOptions);
         builder.Services.AddSingleton<AuthService>();
+        builder.Services.AddSingleton<ManagedApiKeyStore>(); // 托管 API 密钥（管理员控制台创建 / 吊销；AuthService 据此鉴权）
         builder.Services.AddSingleton<TotpService>(); // 登录二次验证（TOTP，4.4）
         builder.Services.AddSingleton<AgentRegistry>();
         /// 操作审计日志（内存环形缓冲）：管理员控制台查询关键 / 敏感操作留痕
