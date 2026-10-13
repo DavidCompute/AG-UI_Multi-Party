@@ -25,6 +25,7 @@ const page = await browser.newPage();
 const stamp = Date.now().toString(36).slice(-5);
 const probeKbName = "UI严格度验证-" + stamp;
 let probeKbId = null;
+let autoKbId = null; // 临时「自动沉淀」库（名字带系统前缀）——验证该类库默认隐藏
 
 try {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
@@ -51,6 +52,12 @@ try {
   probeKbId = created.body?.kbId;
   check("建临时知识库", created.status === 200 && !!probeKbId, JSON.stringify(created).slice(0, 160));
   if (!probeKbId) throw new Error("临时库未创建");
+
+  // 另建一个「自动沉淀」类库（名字带系统前缀 → 接口应报 autoConsolidated=true）
+  const autoName = "自动沉淀·UI验证-" + stamp;
+  const autoCreated = await api("POST", "/ag-ui/kb", { name: autoName, description: "界面验证（用完即删）" });
+  autoKbId = autoCreated.body?.kbId;
+  check("建临时「自动沉淀」知识库", autoCreated.status === 200 && !!autoKbId);
 
   // 上传一份小文档，让试检索有东西可查（内容固定，方便断言）
   const docText = [
@@ -90,9 +97,42 @@ try {
   await page.waitForSelector("#kbModal:not(.hidden)", { timeout: 10000 });
 
   const item = page.locator("#kbListWrap .kb-list-item").filter({ hasText: probeKbName }).first();
+  await page.waitForSelector("#kbListWrap .kb-list-item", { timeout: 10000 }); // count() 不会自动等，先等列表渲染出来
   check("临时知识库出现在列表里", await item.count() > 0);
   const gear = item.locator(".kb-set").first();
   check("知识库行上有 ⚙️ 设置入口", await gear.count() > 0);
+
+  // 操作列几何回归：固定列宽必须容得下「展开 ▸ + 上传 + ⚙ + 🗑」——否则内容会向左溢出、压到描述文字（踩过：150px 时溢出 32px）
+  await page.waitForSelector("#kbListWrap .kb-row", { timeout: 10000 }); // evaluate 不会自动等，先等行渲染出来
+  const opGeom = await page.evaluate(() => {
+    const row = document.querySelector("#kbListWrap .kb-row");
+    if (!row) return null;
+    const op = row.querySelector(".kb-op-col"), desc = row.querySelector(".kb-desc-cell");
+    const first = op && op.firstElementChild;
+    if (!op || !desc || !first) return null;
+    return {
+      opL: Math.round(op.getBoundingClientRect().left),
+      opW: Math.round(op.getBoundingClientRect().width),
+      descR: Math.round(desc.getBoundingClientRect().right),
+      firstL: Math.round(first.getBoundingClientRect().left),
+    };
+  });
+  check("知识库操作列不溢出、不压描述", !!opGeom && opGeom.firstL >= opGeom.opL - 1 && opGeom.descR <= opGeom.opL + 1,
+    opGeom ? JSON.stringify(opGeom) : "无行");
+
+  // 「显示自动沉淀的知识库」开关：默认关 → 这一类库默认隐藏；勾选后出现，取消后又隐
+  await page.waitForSelector("#kbShowAuto", { timeout: 5000 });
+  const autoRowCount = () => page.locator("#kbListWrap .kb-list-item").filter({ hasText: autoName }).count();
+  check("有「显示自动沉淀的知识库」开关", await page.locator("#kbShowAuto").count() === 1);
+  check("开关默认关闭", !(await page.locator("#kbShowAuto").isChecked()));
+  check("自动沉淀库默认不出现在列表里", await autoRowCount() === 0);
+  check("开关旁标出已隐藏数量", /[0-9]/.test(((await page.locator("#kbShowAutoCount").textContent()) || "")));
+  await page.locator("#kbShowAuto").check();
+  await page.waitForTimeout(200);
+  check("勾选后自动沉淀库出现", await autoRowCount() === 1);
+  await page.locator("#kbShowAuto").uncheck();
+  await page.waitForTimeout(200);
+  check("取消勾选后重新隐藏", await autoRowCount() === 0);
 
   if (await gear.count() > 0) {
     await gear.click();
@@ -182,12 +222,15 @@ try {
     check("下层管理弹窗仍开着（Esc 没穿透）", await page.locator("#kbModal.hidden").count() === 0);
   }
 } finally {
-  if (probeKbId) {
+  if (probeKbId || autoKbId) {
     try {
       const r = await page.request.post(BASE_URL + "/ag-ui/user/login", { data: { username: USERNAME, password: PASSWORD } });
       const t = (await r.json()).token;
-      const del = await page.request.fetch(BASE_URL + "/ag-ui/kb/" + probeKbId, { method: "DELETE", headers: { Authorization: "Bearer " + t } });
-      console.log((del.status() === 200 ? "清理：临时知识库已删除" : "清理：删除失败 " + del.status()));
+      for (const id of [probeKbId, autoKbId]) {
+        if (!id) continue;
+        const del = await page.request.fetch(BASE_URL + "/ag-ui/kb/" + id, { method: "DELETE", headers: { Authorization: "Bearer " + t } });
+        console.log((del.status() === 200 ? "清理：临时知识库已删除 " : "清理：删除失败 " + del.status() + " ") + id);
+      }
     } catch { /* 清理失败不影响结论 */ }
   }
   await browser.close();

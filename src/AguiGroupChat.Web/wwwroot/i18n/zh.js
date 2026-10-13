@@ -515,6 +515,10 @@ window.I18N_DICTS.zh = {
   "kb.col.ops": "操作",
   "kb.toggleDocs": "展开 / 收起文档",
   "kb.noMatch": "没有匹配的知识库",
+  "kb.showAuto": "显示自动沉淀的知识库",
+  "kb.showAutoCount": "（{n}）",
+  "kb.showAutoTip": "系统按配置周期把各知聚的「关键」级记忆自动沉淀成知识库（每个知聚一个）；默认隐藏它们，避免淹没你手工创建的知识库。",
+  "kb.onlyAutoHidden": "这里只剩自动沉淀的知识库（已隐藏 {n} 个）——勾选「显示自动沉淀的知识库」可见。",
   "kb.close": "关闭",
 
   /* --- 图库管理 --- */

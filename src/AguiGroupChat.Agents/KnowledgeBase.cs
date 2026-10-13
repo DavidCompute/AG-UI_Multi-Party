@@ -45,6 +45,20 @@ public sealed class KnowledgeBase
     /// <summary>文档清单（向量存记忆存储，此处仅元数据）。</summary>
     public List<KbDocument> Documents { get; set; } = [];
 
+    /// <summary>「自动沉淀」知识库的名字前缀：系统按周期为每个知聚创建的目标库用它命名。</summary>
+    public const string AutoConsolidationPrefix = "自动沉淀·";
+
+    /// <summary>
+    /// 是否为「重要结论自动周期沉淀」创建的库（<see cref="MemoryAutoConsolidationService"/>）：
+    /// 这类库是每个知聚的<b>机器沉淀目标</b>，不是用户亲手建的——管理界面默认隐藏，避免把自己的库淹掉。
+    /// 本标记引入前创建的老库没有它，读取时用 <see cref="LooksAutoConsolidated"/> 按名字前缀兜底。
+    /// </summary>
+    public bool AutoConsolidated { get; set; }
+
+    /// <summary>按名字前缀识别自动沉淀库（打标前创建的老库兼容）。</summary>
+    public static bool LooksAutoConsolidated(string? name)
+        => name is not null && name.StartsWith(AutoConsolidationPrefix, StringComparison.Ordinal);
+
     public long UpdatedAtMs { get; set; }
 }
 

@@ -662,6 +662,12 @@
             <input id="kbSearch" class="modal-input" data-i18n-placeholder="kb.search" />
             <button type="button" class="search-clear" data-clear-for="kbSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
+          <!-- 自动沉淀库默认隐藏（系统按周期为每个知聚生成的目标库，数量多、会淹掉自建库） -->
+          <label class="kb-show-auto" data-i18n-title="kb.showAutoTip">
+            <input type="checkbox" id="kbShowAuto" />
+            <span data-i18n="kb.showAuto">显示自动沉淀的知识库</span>
+            <span id="kbShowAutoCount" class="kb-auto-count"></span>
+          </label>
         </div>
         <div class="kb-grid-head">
           <span data-i18n="kb.col.name">名称 / ID</span>
@@ -834,6 +840,12 @@
         <input id="agentPickSearch" class="modal-input" data-i18n-placeholder="agent.form.pick.searchPh" />
         <button type="button" class="search-clear" data-clear-for="agentPickSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
       </span>
+      <!-- 仅「绑定知识库」时出现：自动沉淀库默认隐藏（与「知识库管理」同一开关语义） -->
+      <label class="kb-show-auto hidden" id="agentPickShowAutoWrap" style="margin-top:8px" data-i18n-title="kb.showAutoTip">
+        <input type="checkbox" id="agentPickShowAuto" />
+        <span data-i18n="kb.showAuto">显示自动沉淀的知识库</span>
+        <span id="agentPickShowAutoCount" class="kb-auto-count"></span>
+      </label>
       <div id="agentPickList" class="member-pick" style="max-height:55vh;overflow:auto;margin-top:10px"></div>
       <div class="modal-actions">
         <button id="agentPickCloseBtn" class="send" data-i18n="agent.form.pick.done">完成</button>

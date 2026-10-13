@@ -2821,6 +2821,10 @@ async function openAgentPick(kind) {
   agentPickQuery = "";
   const search = $("agentPickSearch");
   if (search) search.value = "";
+  // 「显示自动沉淀的知识库」开关只在绑定知识库时出现（与「知识库管理」同一个状态）
+  $("agentPickShowAutoWrap")?.classList.toggle("hidden", kind !== "kb");
+  const showAutoCb = $("agentPickShowAuto");
+  if (showAutoCb) showAutoCb.checked = kbShowAuto;
   $("agentPickTitle").textContent = t({
     skill: "agent.form.pick.title.skill", agent: "agent.form.pick.title.agent", kb: "agent.form.pick.title.kb",
     imglib: "agent.form.pick.title.imglib", usergroup: "agent.form.pick.title.usergroup",
@@ -2870,6 +2874,7 @@ function renderAgentPickList() {
   el.innerHTML = "";
   const q = agentPickQuery.trim().toLowerCase();
   let count = 0;
+  let kbHiddenAuto = 0; // 「绑定知识库」分支：被开关隐藏的自动沉淀库数量（用于空态说明）
   if (agentPickKind === "skill") {
     (skillList || []).forEach((s) => {
       const hay = `${s.name} ${s.skillId} ${s.description || ""} ${s.kind || ""}`.toLowerCase();
@@ -2903,7 +2908,14 @@ function renderAgentPickList() {
       count++;
     });
   } else if (agentPickKind === "kb") {
-    (kbList || []).forEach((kb) => {
+    const allKbs = kbList || [];
+    const autoAll = allKbs.filter((kb) => kb.autoConsolidated);
+    // 开关旁的数量标记（与「知识库管理」一致）
+    const cnt = $("agentPickShowAutoCount");
+    if (cnt) cnt.textContent = autoAll.length ? t("kb.showAutoCount", { n: autoAll.length }) : "";
+    const pool = kbShowAuto ? allKbs : allKbs.filter((kb) => !kb.autoConsolidated);
+    if (!kbShowAuto) kbHiddenAuto = autoAll.length;
+    pool.forEach((kb) => {
       const hay = `${kb.name} ${kb.kbId} ${kb.description || ""}`.toLowerCase();
       if (q && !hay.includes(q)) return;
       const on = agentKbIds.includes(kb.kbId);
@@ -2954,25 +2966,39 @@ function renderAgentPickList() {
       count++;
     });
   }
-  if (!count) el.innerHTML = `<span class="form-hint">${t("agent.form.pick.noMatch")}</span>`;
+  if (!count) el.innerHTML = agentPickKind === "kb" && kbHiddenAuto > 0
+    ? `<span class="form-hint">${escapeHtml(t("kb.onlyAutoHidden", { n: kbHiddenAuto }))}</span>`
+    : `<span class="form-hint">${t("agent.form.pick.noMatch")}</span>`;
 }
 
 /** 知识库管理弹窗：仿技能库的列表布局——工具栏搜索 + 表头网格 + 每库一行（名称/文档/描述/操作），
  *  点击行或▸ 展开文档区；仅自己创建的库可上传 / 删除（与技能库管理模式一致）。 */
 let kbSearchQuery = "";   // 知识库搜索词（名称 / ID / 描述 / 文档名，仅前端过滤）
+let kbShowAuto = false;    // 是否显示「自动沉淀」库（系统按周期为每个知聚生成的目标库）；**默认隐藏**
 let kbExpanded = new Set(); // 已展开文档区的知识库 kbId
 
 function renderKbModal() {
   const wrap = $("kbListWrap");
   wrap.innerHTML = "";
   const q = kbSearchQuery.trim().toLowerCase();
-  const visible = (kbList || []).filter((kb) => {
+  const all = kbList || [];
+  const autoCount = all.filter((kb) => kb.autoConsolidated).length;
+  // 「显示自动沉淀的知识库」开关（默认关 → 隐藏这一类系统生成的库），并把数量标在标签旁
+  const cb = $("kbShowAuto");
+  if (cb) cb.checked = kbShowAuto;
+  const cnt = $("kbShowAutoCount");
+  if (cnt) cnt.textContent = autoCount ? t("kb.showAutoCount", { n: autoCount }) : "";
+  const pool = kbShowAuto ? all : all.filter((kb) => !kb.autoConsolidated);
+  const visible = pool.filter((kb) => {
     if (!q) return true;
     const hay = [kb.name, kb.kbId, kb.description || "", ...(kb.documents || []).map((d) => d.fileName || "")].join(" ").toLowerCase();
     return hay.includes(q);
   });
   if (!visible.length) {
-    wrap.innerHTML = `<div class="kb-empty">${t(kbList.length ? "kb.noMatch" : "kb.noKb")}</div>`;
+    // 全被「自动沉淀」开关滤掉时明说清楚（否则用户以为库丢了）
+    const hiddenAuto = !kbShowAuto && autoCount > 0;
+    const key = all.length === 0 ? "kb.noKb" : hiddenAuto ? "kb.onlyAutoHidden" : "kb.noMatch";
+    wrap.innerHTML = `<div class="kb-empty">${t(key, hiddenAuto ? { n: autoCount } : {})}</div>`;
     return;
   }
   const statusBadge = (d) => d.status === "processing"
@@ -11800,6 +11826,8 @@ function init() {
   $("afSkillAgentAddBtn").onclick = () => openAgentPick("agent");
   $("agentPickCloseBtn").onclick = () => { $("agentPickModal").classList.add("hidden"); agentPickKind = ""; };
   $("agentPickSearch").addEventListener("input", () => { agentPickQuery = $("agentPickSearch").value; renderAgentPickList(); });
+  // 绑定知识库弹窗里的「显示自动沉淀的知识库」开关（与「知识库管理」共享同一状态）
+  $("agentPickShowAuto").addEventListener("change", (e) => { kbShowAuto = !!e.target.checked; renderAgentPickList(); });
   // 数字员工导出 / 导入
   $("agentExportAllBtn").onclick = () => exportAgents(agentList);
   $("agentImportBtn").onclick = () => $("agentImportFile").click();
@@ -11914,6 +11942,8 @@ function init() {
   if (afAllowGroupAddBtn) afAllowGroupAddBtn.onclick = () => openAgentPick("usergroup");
   $("kbNewBtn").onclick = () => openLibCreateDialog("kb");
   $("kbSearch").addEventListener("input", () => { kbSearchQuery = $("kbSearch").value; renderKbModal(); });
+  // 「显示自动沉淀的知识库」开关（默认关）；切换只重渲染列表，不用重新拉数据
+  $("kbShowAuto").addEventListener("change", (e) => { kbShowAuto = !!e.target.checked; renderKbModal(); });
   $("kbCloseBtn").onclick = () => { $("kbModal").classList.add("hidden"); stopKbPolling(); renderKbPicks(); };
   // 图库：管理弹窗（入口在「AI 角色管理」工具栏）+ 创建 + 绑定（与知识库一致）
   $("agentImgLibManageBtn").onclick = openImgLibModal;

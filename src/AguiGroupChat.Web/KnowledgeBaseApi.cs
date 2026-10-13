@@ -76,6 +76,9 @@ public static class KnowledgeBaseApi
                     k.OwnerId,
                     k.SharedGroupIds,
                     k.UpdatedAtMs,
+                    // 自动沉淀库（系统按周期为本知聚创建的目标库）：管理界面默认隐藏，避免淹没用户自建的库。
+                    // 新库看标记；标记引入前创建的老库按名字前缀兜底。
+                    autoConsolidated = k.AutoConsolidated || KnowledgeBase.LooksAutoConsolidated(k.Name),
                     canManage = user is not null && catalog.CanWrite(k, user.UserId, scope.IsAdmin),
                     // 检索严格度（null = 未设置，沿用全局 Agents:Memory:MinScore）；界面用它回显下拉
                     k.MinScore,

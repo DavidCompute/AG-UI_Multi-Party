@@ -1,3 +1,19 @@
+# AG-UI 群聊桌面版 1.0.192 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.192 Release Notes (current Windows desktop release)
+
+**版本说明**：知识库管理——新增「显示自动沉淀的知识库」开关（默认隐藏，量多时不淹没自建库）；修复操作列过窄导致展开图标压住描述文字。
+**Version note**: knowledge base management — a new “Show auto-consolidated KBs” toggle (hidden by default) and a fix for the action column being too narrow (the expand icon overlapped the description).
+
+## 知识库管理
+# Knowledge base management
+
+中文：
+- **新增开关「显示自动沉淀的知识库」（默认关）**：系统按周期为每个知聚生成的沉淀目标库（名 `自动沉淀·{群名}`，实例多时数百个）默认**隐藏**；开关旁标出已隐藏数量，列表为空时明确说明「只剩自动沉淀库（已隐藏 N 个）」，不会让人以为库丢了。识别靠服务端的 `autoConsolidated` 标记（不是名字），打标前的老库按名字前缀兜底。**同一开关也加在数字员工表单的「＋ 绑定知识库」选取弹窗里**（只在知识库种类时显示，两处共享同一状态）。
+- **修复：操作列过窄导致展开图标压住描述**：操作列固定 150px 而内容需约 182px，`justify-content:flex-end` 把溢出**推向左侧** → 展开 `▸` 与描述文字重叠。列宽改为 190px，并让图标不收缩、上传按钮可省略号收缩（极端情况只挤按钮，不压邻列）。知识库与图库共用同一套类，一处修两处生效。
+English:
+- **New toggle “Show auto-consolidated KBs” (off by default)**: the per-group sediment target KBs the system creates periodically (named `自动沉淀·{group}`, hundreds on busy instances) are hidden by default; the toggle shows how many are hidden, and an empty list explains “only auto-consolidated KBs remain (N hidden)” so nothing looks lost. Detection uses a server-side `autoConsolidated` flag (not the name); pre-flag KBs fall back to the name prefix. **The same toggle is also in the “＋ Bind knowledge base” picker of the agent form** (shown only for the KB kind; both places share one state).
+- **Fix: the action column was too narrow, so the expand icon overlapped the description**: the column was fixed at 150px while its content needs ~182px, and `justify-content:flex-end` pushed the overflow to the left — the `▸` sat on top of the description text. The column is now 190px, icons no longer shrink, and the upload button ellipsizes (only the button is squeezed, never the neighbour column). Shared by the KB and image-library modals, so one fix covers both.
+
 # AG-UI 群聊桌面版 1.0.191 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.191 Release Notes (current Windows desktop release)
 

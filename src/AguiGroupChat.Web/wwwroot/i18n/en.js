@@ -515,6 +515,10 @@ window.I18N_DICTS.en = {
   "kb.col.ops": "Actions",
   "kb.toggleDocs": "Expand / collapse docs",
   "kb.noMatch": "No matching knowledge bases",
+  "kb.showAuto": "Show auto-consolidated KBs",
+  "kb.showAutoCount": " ({n})",
+  "kb.showAutoTip": "The system periodically consolidates each group's key memories into a knowledge base (one per group). They are hidden by default so they don't drown out the ones you created.",
+  "kb.onlyAutoHidden": "Only auto-consolidated knowledge bases remain ({n} hidden) — tick “Show auto-consolidated KBs” to view them.",
   "kb.close": "Close",
 
   /* --- 图库管理 --- */

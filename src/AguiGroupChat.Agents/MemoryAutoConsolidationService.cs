@@ -149,8 +149,9 @@ public sealed class MemoryAutoConsolidationService : IHostedService, IDisposable
 
     private AutoConsolidationRow CreateTarget(AguiGroupChat.Hub.Models.Group group)
     {
-        var name = $"自动沉淀·{group.GroupName}";
+        var name = $"{KnowledgeBase.AutoConsolidationPrefix}{group.GroupName}";
         var kb = _kbs.CreateKb(name, $"由系统按配置周期自动沉淀本知聚「关键」级记忆；群成员可查看并绑定检索。", group.OwnerId);
+        kb.AutoConsolidated = true; // 稳定标记：管理界面据此默认隐藏这一类库（不再只靠名字前缀）
         kb.SharedGroupIds.Add(group.GroupId); // 开放给群成员只读 / 绑定
         kb.Description = "由系统按配置周期自动沉淀本知聚「关键」级记忆；群成员可查看并绑定检索。";
         var row = new AutoConsolidationRow(group.GroupId, kb.KbId, 0);

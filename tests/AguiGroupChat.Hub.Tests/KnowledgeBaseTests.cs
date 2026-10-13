@@ -15,6 +15,29 @@ namespace AguiGroupChat.Hub.Tests;
 /// <summary>知识库（RAG 知识文档）测试：切片、文档入库（向量）、检索、删除、注入。</summary>
 public sealed class KnowledgeBaseTests
 {
+    // ================= 自动沉淀库的识别（管理界面默认隐藏这一类） =================
+
+    [Fact]
+    public void AutoConsolidation_MarkedExplicitly_AndRecognizedByLegacyNamePrefix()
+    {
+        // 新库：由创建方（MemoryAutoConsolidationService）显式打标
+        var fresh = new KnowledgeBase { KbId = "kb_1", Name = "我的知识库" };
+        Assert.False(fresh.AutoConsolidated); // 默认不是自动沉淀库
+        Assert.False(KnowledgeBase.LooksAutoConsolidated(fresh.Name));
+
+        // 打标前创建的老库：没有标记，靠名字前缀兜底识别
+        var legacy = new KnowledgeBase { KbId = "kb_2", Name = KnowledgeBase.AutoConsolidationPrefix + "某知聚" };
+        Assert.False(legacy.AutoConsolidated);
+        Assert.True(KnowledgeBase.LooksAutoConsolidated(legacy.Name));
+
+        // 新库打标后同样被识别（不依赖名字）
+        var marked = new KnowledgeBase { KbId = "kb_3", Name = "改名后也不怕", AutoConsolidated = true };
+        Assert.True(marked.AutoConsolidated);
+        Assert.False(KnowledgeBase.LooksAutoConsolidated(marked.Name));
+
+        Assert.False(KnowledgeBase.LooksAutoConsolidated(null));
+    }
+
     // ================= 切片 =================
 
     [Fact]
