@@ -344,12 +344,21 @@ function enterApp(data) {
   try {
     $("meChip").classList.remove("hidden");
     $("meNickname").textContent = data.nickname || data.userId;
-    // 管理菜单（数据备份 / 模型配置）仅管理员显示
-    $("meMenuBackup").classList.toggle("hidden", !state.isAdmin);
-    $("meMenuModelConfig").classList.toggle("hidden", !state.isAdmin);
-    $("meMenuAdmin").classList.toggle("hidden", !state.isAdmin);   // 用户管理（仅管理员）
-    $("meMenuStatus").classList.toggle("hidden", !state.isAdmin);  // 系统状态（仅管理员）
-    $("meMenuBranding").classList.toggle("hidden", !state.isAdmin); // 白标品牌（仅管理员）
+    // 管理入口按「生效平台角色」收敛：Operator（运维）可进只读控制台 / 系统状态；Admin 及以上全量
+    const adminPlus = isAdminPlus(), operatorPlus = isOperatorPlus();
+    $("meMenuBackup").classList.toggle("hidden", !adminPlus);       // 数据备份（Admin+）
+    $("meMenuModelConfig").classList.toggle("hidden", !adminPlus);  // 模型配置（Admin+）
+    $("meMenuAdmin").classList.toggle("hidden", !operatorPlus);     // 管理控制台（Operator+；页签按角色收敛）
+    $("meMenuStatus").classList.toggle("hidden", !operatorPlus);    // 系统状态（Operator+）
+    $("meMenuBranding").classList.toggle("hidden", !adminPlus);     // 白标品牌（Admin+）
+    // Operator 下控制台仅只读页签：菜单文案从「用户管理」改为「管理控制台」，避免语义不符
+    // （改 data-i18n 键而不是直接写文本：否则切换语言时 applyDom 会把它重置回「用户管理」）
+    const adminItem = $("meMenuAdmin");
+    if (adminItem) {
+      const adminKey = adminPlus ? "menu.admin" : "menu.console";
+      adminItem.setAttribute("data-i18n", adminKey);
+      adminItem.textContent = t(adminKey);
+    }
     renderMeAvatar();
     applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
     resetChatState();
@@ -6663,13 +6672,32 @@ async function selectTopic(topicId, opts) {
 
 /* ============ 消息搜索（知聚内全文） ============ */
 
+/* ============ 平台角色（RBAC）：前端按生效角色收敛管理入口 ============ */
+const ROLE_RANK = { user: 0, operator: 1, admin: 2, superadmin: 3 };
+/** 当前生效平台角色序（未知时回退：管理员=2 / 其它=0）。 */
+function roleRank() { return ROLE_RANK[state.platformRole] ?? (state.isAdmin ? 2 : 0); }
+function isOperatorPlus() { return roleRank() >= 1; }
+function isAdminPlus() { return roleRank() >= 2; }
+
+/** 控制台页签按角色可见：Operator 仅只读页签（用量 / 审计 / 运行指标），Admin 及以上全量。 */
+function applyAdminTabVisibility() {
+  const adminPlus = isAdminPlus(), operatorPlus = isOperatorPlus();
+  const visible = {
+    adminTabUsers: adminPlus, adminTabUsage: operatorPlus, adminTabMetrics: operatorPlus,
+    adminTabConfig: adminPlus, adminTabExec: adminPlus, adminTabAudit: operatorPlus,
+    adminTabOrphans: adminPlus, adminTabUserGroups: adminPlus, adminTabStorage: adminPlus,
+  };
+  for (const [id, show] of Object.entries(visible)) $(id)?.classList.toggle("hidden", !show);
+}
+
 /* ============ 管理员控制台：用户管理 + 系统状态 ============ */
 
 async function openAdminModal() {
-  if (!state.isAdmin) { toast(t("admin.adminOnly")); return; }
+  if (!isOperatorPlus()) { toast(t("admin.adminOnly")); return; }
+  applyAdminTabVisibility(); // 按角色隐藏无权限页签（Operator 仅只读）
   $("adminModal").classList.remove("hidden");
-  switchAdminTab("users");
-  startAdminMetricsPoll(); // 运行指标页每 8 秒自动刷新（管理员控制台打开期间）
+  switchAdminTab(isAdminPlus() ? "users" : "usage"); // Operator 默认落到只读页签
+  startAdminMetricsPoll(); // 运行指标页每 8 秒自动刷新（控制台打开期间）
 }
 
 /** 管理员弹窗 tab 切换：用户管理 / 用量统计 / 运行指标 / 配置治理 / 执行参数 / 审计日志 / 孤儿盘点 / 用户分组 / 存储治理。 */
@@ -7488,7 +7516,7 @@ async function adminUserAction(op, uid, name) {
 }
 
 async function openStatusModal() {
-  if (!state.isAdmin) { toast(t("admin.adminOnly")); return; }
+  if (!isOperatorPlus()) { toast(t("admin.adminOnly")); return; }
   $("statusModal").classList.remove("hidden");
   $("statusBody").innerHTML = t("status.loading");
   try {

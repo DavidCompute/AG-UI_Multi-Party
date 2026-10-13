@@ -3530,20 +3530,20 @@ Safety checks (`AdminApi.cs:62-75` + `AuthService.SetPlatformRole`, `AuthService
 - Setting the explicit role to `admin` / `superadmin` also sets `IsAdmin=true`; demoting to `User` / `Operator` clears the `IsAdmin` flag **unless** the account matches `Auth:AdminUserIds` (the configuration is not forcibly overridden).
 - On success, writes the audit entry `admin.user.role`.
 
-#### 8.1.5 The frontend entry point relies only on `state.isAdmin` (important: differs from the documentation)
+#### 8.1.5 Frontend entries are scoped by effective role (`platformRole`)
 
-**Conclusion (provable from the code): the frontend admin side is not subdivided by `platformRole`.** The key point is in `app.js:enterApp` (`app.js:328-354`):
+The frontend admin entries are **scoped by the effective platform role** (`roleRank` / `isOperatorPlus` / `isAdminPlus` in `app.js`):
 
-- `state.isAdmin = !!data.isAdmin;` (does not include `platformRole` derivation);
-- In the top account menu `#meMenu`, `#meMenuBackup` (Data Backup), `#meMenuModelConfig` (Model Config), `#meMenuAdmin` (User Management / admin console), `#meMenuStatus` (System Status), and `#meMenuBranding` (Whitelabel Settings) **are all shown/hidden purely by `state.isAdmin`** (`app.js:348-352`).
-- `state.isSuperAdmin = state.platformRole === "superadmin";` (`app.js:333`) is **used only** to decide whether to render the platform-role dropdown in "User Management" (`app.js:7207-7211`).
+- Top account menu `#meMenu`:
+  - `#meMenuAdmin` (admin console) and `#meMenuStatus` (System Status) are visible to **Operator and above**;
+  - `#meMenuBackup` (Data Backup), `#meMenuModelConfig` (Model Config), and `#meMenuBranding` (Whitelabel Settings) are visible to **Admin and above**.
+  - For Operator, `#meMenuAdmin`'s label switches to `menu.console` ("Admin Console") to avoid the misleading "User Management".
+- Admin console `#adminModal` tabs are scoped by role (`applyAdminTabVisibility`):
+  - **Operator** sees only read-only tabs: Usage / Audit Log / Runtime Metrics (matching the backend endpoints gated by `RequireRoleFilter(Operator)`); it defaults to the Usage tab.
+  - **Admin / SuperAdmin** see all 9 tabs.
+- `state.isSuperAdmin` is still used only for the platform-role dropdown in "User Management" (only SuperAdmin can grant/revoke roles).
 
-Therefore:
-
-- **`Operator` has no admin entry point in the frontend at all** — `ResolveRole` returns `Operator` for it, while the `IsAdmin` flag is `false` (`SetPlatformRole` clears it), so `state.isAdmin=false` and all five admin menus are hidden. Operator's read-only endpoints (see §8.1.6) can only be called directly over HTTP; **there is no frontend consumer**.
-- `Admin` / `SuperAdmin` see the same complete set of admin menus; the only difference is whether the platform-role dropdown appears in the "User Management" tab (`SuperAdmin` only).
-
-Comparison of the basis: `docs/RBAC.md` §5 "Frontend: the admin-console portal is shown by effective role — User has no admin menu; Operator shows a read-only ops menu; Admin/SuperAdmin show the complete admin menu" and the similar description in `docs/ui-design.md` §7.6 are **not implemented in the current code** (see §8.16 for details).
+> Evidence: `app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`; backend filters per endpoint in §8.1.6. Now consistent with `docs/RBAC.md` §5 ("menus subdivided by effective role").
 
 #### 8.1.6 Summary of permission requirements for admin backend endpoints
 
@@ -4153,8 +4153,7 @@ The support circle (`GroupKind.Support`, `Group.IsSupportCircle`) has no dedicat
 
 The following is all based on the code (each item has been verified against the code):
 
-1. **The frontend admin side is not subdivided by `platformRole`.** The visibility of the five admin menus in `#meMenu` and the tabs of `#adminModal` depends **only on `state.isAdmin`** (`app.js:348-352`, `6604`); `platformRole` is used only for `state.isSuperAdmin` to decide the role dropdown in "User Management" (`app.js:333`, 7207-7211). **`Operator` has no admin entry point in the frontend** (`ResolveRole=Operator` but `IsAdmin=false`), and its read-only endpoints can only be called over HTTP.
-   - This is **inconsistent** with `docs/RBAC.md` §5 "Frontend… Operator shows a read-only ops menu; Admin/SuperAdmin show the complete admin menu" and the similar description in `docs/ui-design.md` §7.6: that "subdivide the menu by effective role" is currently **not implemented**.
+1. **The frontend admin side is now subdivided by `platformRole` (fixed in 1.0.194).** The `#meMenu` admin menus and the `#adminModal` tab visibility are now scoped by effective role via `roleRank` / `applyAdminTabVisibility`: Operator and above see the admin console and System Status; Admin and above additionally see Data Backup / Model Config / Whitelabel; Operator's console has only read-only tabs (Usage / Audit / Metrics). Now consistent with `docs/RBAC.md` §5 and `docs/ui-design.md` §7.6.
 2. **`GET /ag-ui/admin/config` (read-only snapshot) is a pure API that `app.js` does not consume.** Across the whole repo, the frontend calls only `POST /ag-ui/admin/config` and `GET /ag-ui/admin/config/governance`; and the "parameter snapshot beside 'System Status' in the Data Backup menu" that the `admin.configHint` text points to has **no** corresponding UI in the code.
 3. **"Bridge health" is inside the "Runtime Metrics" tab** (`#adminBridgeRows`, `app.js:6967-6977`), **not a separate tab**; "whitelabel" is the standalone modal `#brandModal` (not a tab); "System Status" is also the standalone modal `#statusModal` (not a tab).
 4. **User Management has no search box** (§8.3.6); if an existing document describes a "user search", that is a misstatement.
@@ -4166,7 +4165,7 @@ The following is all based on the code (each item has been verified against the 
 
 1. **The position of `streaming` in `executionOrder`**: the UI hint lists only `bridge / pipeline / relay / org_route` as the whitelist, but the code's whitelist actually includes `streaming` (always placed last); the two are inconsistent — a wording difference between the doc / UI.
 2. **Config Governance 12 vs. 13 keys**: `messageWriteDebounceMs` exists in the state layer and the write request body, but there is no UI input for it; to tune it online, a frontend field must be added.
-3. **`Operator` read-only endpoints** (`/status`, `/usage`, `/audit`, `/bridge-health`, `/bridge-capabilities`, `/metrics`) currently have no frontend entry point; whether to add a read-only console for them is a product decision.
+3. **Operator's read-only console is now implemented (1.0.194)**: the console's read-only tabs (Usage / Audit / Metrics) consume Operator's read-only endpoints; note that `GET /ag-ui/admin/bridge-capabilities` is **still not consumed by the frontend** (`bridge-health` is consumed in the Runtime Metrics tab).
 4. **`bridge-health` live probe**: the frontend does not pass `refresh`, so it only shows the periodic-probe cache; to see an "immediate probe", the UI must pass `refresh=true` (the backend already supports it).
 5. **The import semantics of "group id regeneration" and "account profile update, password not overwritten"**: these need to be explained clearly to users in migration / disaster-recovery scenarios (see §8.12.2 for details).
 6. **Audit retention of 5000 records** vs. the frontend `limit=200`: for the complete history, use CSV export (no 200 cap, but bounded by the 5000 capacity).

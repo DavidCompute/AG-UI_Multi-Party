@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.195 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.195 Release Notes (current Windows desktop release)
+
+**版本说明**：前端按生效平台角色收敛——Operator（运维）获得只读「管理控制台」与「系统状态」入口，Admin+ 保持全量。
+**Version note**: frontend entries now follow the effective platform role — Operator gets the read-only admin console and System Status, Admin+ keeps the full set.
+
+## 平台角色收敛
+# Role-scoped entries
+
+中文：
+- **菜单按生效角色收敛**：`#meMenuAdmin`（管理控制台）与 `#meMenuStatus`（系统状态）现对 **Operator 及以上**可见；数据备份 / 模型配置 / 白标仍限 **Admin 及以上**。Operator 下「管理控制台」文案经 `data-i18n` 切到 `menu.console`（`管理控制台` / `Admin Console`），切换语言不会被重置。
+- **控制台页签按角色收敛**：`applyAdminTabVisibility` 令 Operator 仅见只读页签（用量统计 / 审计日志 / 运行指标，对应后端 `RequireRoleFilter(Operator)`），默认落到「用量统计」；Admin / SuperAdmin 见全量 9 页签。
+- 与 `docs/RBAC.md` §5 / `docs/ui-design.md` §7.6「按生效角色细分菜单」现已一致；两份用户手册 §8.1.5 / §8.17 / §8.18 已同步更新。
+English:
+- **Menus scoped by effective role**: `#meMenuAdmin` (admin console) and `#meMenuStatus` (System Status) are now visible to **Operator and above**; Data Backup / Model Config / Whitelabel stay **Admin and above**. For Operator the console label flips to `menu.console` (`管理控制台` / `Admin Console`) via `data-i18n`, so a language switch no longer resets it.
+- **Console tabs scoped by role**: `applyAdminTabVisibility` gives Operator only the read-only tabs (Usage / Audit / Runtime Metrics, matching the backend `RequireRoleFilter(Operator)`) and defaults to Usage; Admin / SuperAdmin see all 9 tabs.
+- Now consistent with `docs/RBAC.md` §5 / `docs/ui-design.md` §7.6; both user manuals' §8.1.5 / §8.17 / §8.18 were updated.
+
+## 测试
+# Tests
+
+中文：新增 `tools/ui-role-console.mjs`（真实浏览器，26 项：菜单可见性、文案切换、控制台只读页签、系统状态可开）。
+English: added `tools/ui-role-console.mjs` (real browser; 26 checks: menu visibility, label switching, read-only tabs, System Status opens).
+
 # AG-UI 群聊桌面版 1.0.194 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.194 Release Notes (current Windows desktop release)
 

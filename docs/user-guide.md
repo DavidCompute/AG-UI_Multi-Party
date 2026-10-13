@@ -3523,20 +3523,20 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 - 把显式角色设为 `admin` / `superadmin` 会同步 `IsAdmin=true`；降级到 `User` / `Operator` 会清除 `IsAdmin` 标记，**除非**命中 `Auth:AdminUserIds`（配置不被硬改）。
 - 成功写审计 `admin.user.role`。
 
-#### 8.1.5 前端入口只按 `state.isAdmin`（重要：与文档描述不一致）
+#### 8.1.5 前端入口按生效角色收敛（`platformRole`）
 
-**结论（代码可证）：前端管理端不按 `platformRole` 细分。** 关键点在 `app.js:enterApp`（`app.js:328-354`）：
+前端管理入口**按生效平台角色收敛**（`app.js` 的 `roleRank` / `isOperatorPlus` / `isAdminPlus`）：
 
-- `state.isAdmin = !!data.isAdmin;`（不含 `platformRole` 推导）；
-- 顶部账号菜单 `#meMenu` 中，`#meMenuBackup`（数据备份）、`#meMenuModelConfig`（模型配置）、`#meMenuAdmin`（用户管理 / 管理控制台）、`#meMenuStatus`（系统状态）、`#meMenuBranding`（白标设置）**全部只按 `state.isAdmin` 显隐**（`app.js:348-352`）。
-- `state.isSuperAdmin = state.platformRole === "superadmin";`（`app.js:333`）**仅用于**「用户管理」里是否渲染平台角色下拉（`app.js:7207-7211`）。
+- 顶部账号菜单 `#meMenu`：
+  - `#meMenuAdmin`（管理控制台）、`#meMenuStatus`（系统状态）对 **Operator 及以上**可见；
+  - `#meMenuBackup`（数据备份）、`#meMenuModelConfig`（模型配置）、`#meMenuBranding`（白标设置）对 **Admin 及以上**可见。
+  - Operator 下 `#meMenuAdmin` 的文案切换为 `menu.console`「管理控制台」（避免与「用户管理」语义不符）。
+- 管理员控制台 `#adminModal` 的页签按角色收敛（`applyAdminTabVisibility`）：
+  - **Operator** 仅只读页签：用量统计 / 审计日志 / 运行指标（对应 `RequireRoleFilter(Operator)` 的后端端点）；默认落到「用量统计」。
+  - **Admin / SuperAdmin** 看到全量 9 个页签。
+- `state.isSuperAdmin` 仍仅用于「用户管理」里的平台角色下拉（仅 SuperAdmin 可授予 / 回收角色）。
 
-因此：
-
-- **`Operator`（运维）在前端没有任何管理入口**——`ResolveRole` 对其返回 `Operator`，而 `IsAdmin` 标记为 `false`（`SetPlatformRole` 会清除），故 `state.isAdmin=false`，五个管理菜单均隐藏。Operator 的只读端点（见 §8.1.6）只能经 HTTP 直接调用，**前端无消费方**。
-- `Admin` / `SuperAdmin` 看到同一套完整管理菜单，二者差别只体现在「用户管理」tab 的平台角色下拉是否出现（仅 `SuperAdmin`）。
-
-依据对比：`docs/RBAC.md` §5「前端：管理员控制台门户按生效角色显示——User 无管理菜单；Operator 显示只读运维菜单；Admin/SuperAdmin 显示完整管理菜单」与 `docs/ui-design.md` §7.6 的同类描述，**当前代码未实现**（详见 §8.16）。
+> 依据：`app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`；后端 `AdminApi.cs` 各端点过滤器见 §8.1.6。与 `docs/RBAC.md` §5「按生效角色细分菜单」现已一致。
 
 #### 8.1.6 管理端后端端点权限要求总表
 
@@ -4146,8 +4146,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 以下均以代码为准（逐项已回代码核实）：
 
-1. **前端管理端不按 `platformRole` 细分**。`#meMenu` 的五个管理菜单与 `#adminModal` 的 tab 可见性**只按 `state.isAdmin`**（`app.js:348-352`、`6604`）；`platformRole` 仅用于 `state.isSuperAdmin` 决定「用户管理」里的角色下拉（`app.js:333`、7207-7211）。**`Operator` 在前端无任何管理入口**（`ResolveRole=Operator` 但 `IsAdmin=false`），其只读端点仅能经 HTTP 调用。
-   - 与 `docs/RBAC.md` §5「前端… Operator 显示只读运维菜单；Admin/SuperAdmin 显示完整管理菜单」、`docs/ui-design.md` §7.6 同类描述**不一致**：该「按生效角色细分菜单」当前**未实现**。
+1. **前端管理端已按 `platformRole` 细分（1.0.194 修复）**。`#meMenu` 的管理菜单与 `#adminModal` 的页签可见性现由 `roleRank` / `applyAdminTabVisibility` 按生效角色收敛：Operator 及以上可见「管理控制台」「系统状态」，Admin 及以上可见数据备份 / 模型配置 / 白标；Operator 的控制台仅只读页签（用量 / 审计 / 运行指标）。与 `docs/RBAC.md` §5、`docs/ui-design.md` §7.6「按生效角色细分菜单」现已一致。
 2. **`GET /ag-ui/admin/config`（只读快照）是纯接口，`app.js` 未消费**。全仓前端仅调用 `POST /ag-ui/admin/config` 与 `GET /ag-ui/admin/config/governance`；而 `admin.configHint` 文案指向的「数据备份菜单「系统状态」旁的参数快照」在代码中**不存在**对应界面。
 3. **「桥健康」在「运行指标」tab 内**（`#adminBridgeRows`，`app.js:6967-6977`），**不是独立 tab**；「白标」是独立弹窗 `#brandModal`（非 tab）；「系统状态」也是独立弹窗 `#statusModal`（非 tab）。
 4. **用户管理无搜索框**（§8.3.6）；若既有文档描述「用户搜索」则为误述。
@@ -4159,7 +4158,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 1. **`executionOrder` 中 `streaming` 位置**：UI 提示白名单仅列 `bridge / pipeline / relay / org_route`，但代码白名单实际含 `streaming`（恒置末）；两者不一致，属文档/界面表述差异。
 2. **配置治理 12 vs 13 键**：`messageWriteDebounceMs` 在状态层与写请求体存在，但 UI 无输入框；若需在线调，需补前端字段。
-3. **`Operator` 只读端点**（`/status`、`/usage`、`/audit`、`/bridge-health`、`/bridge-capabilities`、`/metrics`）目前无前端入口；是否为其补一个只读控制台，取决于产品决策。
+3. **`Operator` 只读控制台已落地（1.0.194）**：「管理控制台」的只读页签（用量 / 审计 / 运行指标）消费 Operator 只读端点；其中 `GET /ag-ui/admin/bridge-capabilities` **仍未接入前端**（`bridge-health` 已在运行指标页消费）。
 4. **`bridge-health` 实时探测**：前端未传 `refresh`，只展示周期探测缓存；若想看「立即探测」需在 UI 补传 `refresh=true`（后端已支持）。
 5. **导入的「群 id 重生成」与「账号资料更新、密码不覆盖」语义**：迁移 / 灾备场景需向用户说明清楚（详见 §8.12.2）。
 6. **审计保留 5000 条**与前端 `limit=200`：需要完整历史请用 CSV 导出（无 200 上限，但受 5000 容量约束）。
