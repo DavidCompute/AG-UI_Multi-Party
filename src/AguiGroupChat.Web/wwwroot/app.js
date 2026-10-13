@@ -351,14 +351,8 @@ function enterApp(data) {
     $("meMenuAdmin").classList.toggle("hidden", !operatorPlus);     // 管理控制台（Operator+；页签按角色收敛）
     $("meMenuStatus").classList.toggle("hidden", !operatorPlus);    // 系统状态（Operator+）
     $("meMenuBranding").classList.toggle("hidden", !adminPlus);     // 白标品牌（Admin+）
-    // Operator 下控制台仅只读页签：菜单文案从「用户管理」改为「管理控制台」，避免语义不符
-    // （改 data-i18n 键而不是直接写文本：否则切换语言时 applyDom 会把它重置回「用户管理」）
-    const adminItem = $("meMenuAdmin");
-    if (adminItem) {
-      const adminKey = adminPlus ? "menu.admin" : "menu.console";
-      adminItem.setAttribute("data-i18n", adminKey);
-      adminItem.textContent = t(adminKey);
-    }
+    // 管理入口文案统一为「管理控制台」（markup 的 data-i18n=menu.console）：它打开的是整个控制台
+    // 而非仅用户管理；角色只决定可见页签（Operator 仅只读），不改菜单名。
     renderMeAvatar();
     applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
     resetChatState();

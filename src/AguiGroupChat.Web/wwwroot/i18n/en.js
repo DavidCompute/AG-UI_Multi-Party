@@ -59,7 +59,6 @@ window.I18N_DICTS.en = {
   "menu.profile": "Edit Profile",
   "menu.password": "Change Password",
   "menu.modelConfig": "Model Config",
-  "menu.admin": "User Management",
   "menu.console": "Admin Console",
   "menu.status": "System Status",
   "menu.memory": "Memory Management",

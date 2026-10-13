@@ -59,7 +59,6 @@ window.I18N_DICTS.zh = {
   "menu.profile": "修改资料",
   "menu.password": "修改密码",
   "menu.modelConfig": "模型配置",
-  "menu.admin": "用户管理",
   "menu.console": "管理控制台",
   "menu.status": "系统状态",
   "menu.memory": "记忆管理",

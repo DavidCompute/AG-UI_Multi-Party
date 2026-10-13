@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.205 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.205 Release Notes (current Windows desktop release)
+
+**版本说明**：管理员控制台三处界面修正——菜单文案、固定大小 + 内滚、页签不再溢出。
+**Version note**: three admin-console UI fixes — the menu label, a fixed size with internal scrolling, and tabs that no longer overflow.
+
+## 界面修正
+# UI fixes
+
+中文：
+1. **菜单文案**：账号菜单里那条打开**整个控制台**的入口原来叫「用户管理」（`menu.admin`），语义不符。现两个角色统一为「**管理控制台**」（`menu.console`）——角色只决定可见页签，不影响菜单名；与之重复的 `menu.admin` 键已从中英字典删除。
+2. **固定大小 + 滚动条**：`.admin-modal` 宽 `min(1000px, 96vw)`、高 `calc(100vh - 48px)`（固定，此前只有 `max-height`、高度随内容跳动）；标题 / 页签 / 底部按钮 `flex:none` 固定，内容包进新的 `.admin-body`（`flex:1 1 auto; min-height:0; overflow-y:auto`）**内部滚动**，切页签弹窗高度不变（实测 752px 恒定）。
+3. **页签不再溢出**：`div.admin-tabs` 加 `flex-wrap:wrap`。11 个页签在 1000px 宽下正好单行容纳（不再溢出），窄屏（实测 820px）自动换行成两行且仍不横向溢出（只作用于控制台弹窗）。
+English:
+1. **Menu label**: the account-menu entry that opens the **whole console** was labelled "User Management" (`menu.admin`), which is misleading. Both roles now use "**Admin Console**" (`menu.console`) — the role only determines visible tabs, not the menu name; the now-duplicate `menu.admin` key was removed from both dictionaries.
+2. **Fixed size + scrollbar**: `.admin-modal` is `min(1000px, 96vw)` wide and `calc(100vh - 48px)` tall (fixed; previously only `max-height`, so its height jumped with content); the title / tabs / footer buttons are `flex:none`, and the content is wrapped in a new `.admin-body` (`flex:1 1 auto; min-height:0; overflow-y:auto`) that **scrolls internally**, so the modal height is constant across tabs (measured 752px).
+3. **Tabs no longer overflow**: `div.admin-tabs` gained `flex-wrap:wrap`. The 11 tabs fit on one line at 1000px wide (no overflow), and on narrow viewports (measured 820px) they wrap to two rows while still not overflowing horizontally (scoped to the console modal).
+
+## 测试
+# Tests
+
+中文：新增 Playwright 回归 `tools/ui-admin-console-layout.mjs` 13/13（菜单文案 / 高度固定且切页签不变 / `.admin-body` 内滚且标题固定 / 宽屏不溢出 / 窄屏换行不溢出）；既有 `ui-role-console.mjs` 26/26 仍通过。
+English: new Playwright regression `tools/ui-admin-console-layout.mjs` 13/13 (menu label / fixed height across tabs / `.admin-body` internal scroll with a fixed title / no overflow on wide screens / wrapping without overflow on narrow screens); the existing `ui-role-console.mjs` still passes 26/26.
+
 # AG-UI 群聊桌面版 1.0.204 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.204 Release Notes (current Windows desktop release)
 

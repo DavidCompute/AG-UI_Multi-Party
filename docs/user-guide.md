@@ -474,7 +474,7 @@
 | 1 | `#meMenuProfile` | `menu.profile` | 打开资料弹窗 `#profileModal` | 全部用户 |
 | 2 | `#meMenuPassword` | `menu.password` | 清空 `#pwOld`/`#pwNew` 后打开修改密码弹窗 `#pwModal` | 全部用户 |
 | 3 | `#meMenuModelConfig` | `menu.modelConfig` | 打开模型配置 `#modelConfigModal` | 仅管理员 |
-| 4 | `#meMenuAdmin` | `menu.admin` | 打开用户管理 `#adminModal` | 仅管理员 |
+| 4 | `#meMenuAdmin` | `menu.console` | 打开管理控制台 `#adminModal`（页签按生效角色收敛） | Operator 及以上 |
 | 5 | `#meMenuStatus` | `menu.status` | 打开系统状态 `#statusModal` | 仅管理员 |
 | 6 | `#meMenuMemory` | `menu.memory` | 打开记忆管理 `#memoryModal` | 全部用户 |
 | 7 | `#meMenuBranding` | `menu.branding` | 打开白标设置 `#brandModal` | 仅管理员 |
@@ -3566,7 +3566,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 - 顶部账号菜单 `#meMenu`：
   - `#meMenuAdmin`（管理控制台）、`#meMenuStatus`（系统状态）对 **Operator 及以上**可见；
   - `#meMenuBackup`（数据备份）、`#meMenuModelConfig`（模型配置）、`#meMenuBranding`（白标设置）对 **Admin 及以上**可见。
-  - Operator 下 `#meMenuAdmin` 的文案切换为 `menu.console`「管理控制台」（避免与「用户管理」语义不符）。
+  - Operator 与 Admin 及以上**文案统一为 `menu.console`「管理控制台」**（打开的是整个控制台而非仅用户管理；角色只影响可见页签，不影响菜单名）。
 - 管理员控制台 `#adminModal` 的页签按角色收敛（`applyAdminTabVisibility`）：
   - **Operator** 仅只读页签：用量统计 / 审计日志 / 运行指标（对应 `RequireRoleFilter(Operator)` 的后端端点）；默认落到「用量统计」。
   - **Admin / SuperAdmin** 看到全量 9 个页签。
@@ -3609,7 +3609,9 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.2 管理员控制台 `#adminModal`：tab 全集与顺序
 
-`#adminModal`（`index.html:1552-1751`）是**单一弹窗**，其 tab 条 `div.admin-tabs`（`index.html:1555-1565`）共 **9 个 tab**，`index.html` 中的物理顺序即下表的 1→9：
+`#adminModal`（`index.html`）是**单一弹窗**，其 tab 条 `div.admin-tabs` 共 **11 个 tab**，`index.html` 中的物理顺序即下表的 1→11。
+
+**布局（固定大小 + 内滚）**：`.admin-modal` 宽 `min(1000px, 96vw)`、高 `calc(100vh - 48px)`（固定），`display:flex; flex-direction:column`；标题 / `div.admin-tabs` / 底部按钮 `flex:none`（不随内容滚动），内容包在 `.admin-body`（`flex:1 1 auto; min-height:0; overflow-y:auto`）里**内部滚动**，因此切换页签时**弹窗高度不变**。tab 条 `flex-wrap:wrap`：页签多时自动换行（窄屏至少两行），**不再横向溢出**。
 
 | # | tab DOM id | i18n key | 中文（zh） | 内容容器 | 主要接口 |
 |---|---|---|---|---|---|
@@ -3622,8 +3624,10 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 7 | `#adminTabOrphans` | `admin.tabOrphans` | 孤儿盘点 | `#adminOrphansView` | `GET /ag-ui/admin/orphans` + 接管 / 删除 |
 | 8 | `#adminTabUserGroups` | `admin.tabUserGroups` | 用户分组 | `#adminUserGroupsView` | `GET/POST /ag-ui/usergroups`、`GET /usergroups/{id}/impact`、`DELETE` |
 | 9 | `#adminTabStorage` | `admin.tabStorage` | 存储治理 | `#adminStorageView` | `GET /ag-ui/admin/storage`、`POST /ag-ui/admin/storage/reclaim` |
+| 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`、`…/events`、`…/deliveries`、`…/{id}/test`（见 §8.19） |
+| 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`、`DELETE /ag-ui/admin/api-keys/{id}`（见 §8.20） |
 
-打开与切换（`app.js:6603-6659`）：
+打开与切换（`app.js`）：
 
 - `openAdminModal()` 先判 `state.isAdmin`（否则 toast `admin.adminOnly`），移除 `#adminModal` 的 `hidden`，**默认切到 `users`**，并启动指标轮询 `startAdminMetricsPoll()`。
 - `switchAdminTab(tab)` 用 9 个布尔量控制 `on` 类与 9 个 view 的 `hidden`；随后按 tab 拉数据；`audit` 之外的 `else` 落到 `loadConfigGovernance()`（即 `config`）。

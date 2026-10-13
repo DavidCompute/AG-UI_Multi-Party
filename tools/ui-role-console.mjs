@@ -1,7 +1,7 @@
 // 平台角色前端收敛（A1）验证（Playwright，真实浏览器）：
 //   1. Operator 登录后可见「管理控制台」「系统状态」，隐藏数据备份 / 模型配置 / 白标；
 //   2. 控制台仅只读页签（用量 / 审计 / 运行指标），默认落到「用量统计」；
-//   3. 菜单文案随语言切换在「管理控制台 / Admin Console」与「用户管理 / User Management」间正确切换；
+//   3. 菜单文案随语言切换在「管理控制台 / Admin Console」与「Admin Console」间正确切换（两种角色统一用 menu.console）；
 //   4. 系统状态弹窗对 Operator 可打开。
 // 用法：cd tools && HEADLESS=1 node ui-role-console.mjs
 import { chromium } from "playwright";

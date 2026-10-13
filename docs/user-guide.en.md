@@ -474,7 +474,7 @@ Clicking the account area `#meChip` in the top bar expands the account menu `#me
 | 1 | `#meMenuProfile` | `menu.profile` | Opens the profile dialog `#profileModal` | All users |
 | 2 | `#meMenuPassword` | `menu.password` | Clears `#pwOld`/`#pwNew` then opens the change-password dialog `#pwModal` | All users |
 | 3 | `#meMenuModelConfig` | `menu.modelConfig` | Opens the model config `#modelConfigModal` | Admins only |
-| 4 | `#meMenuAdmin` | `menu.admin` | Opens user management `#adminModal` | Admins only |
+| 4 | `#meMenuAdmin` | `menu.console` | Opens the admin console `#adminModal` (tabs scoped by effective role) | Operator and above |
 | 5 | `#meMenuStatus` | `menu.status` | Opens system status `#statusModal` | Admins only |
 | 6 | `#meMenuMemory` | `menu.memory` | Opens memory management `#memoryModal` | All users |
 | 7 | `#meMenuBranding` | `menu.branding` | Opens whitelabel settings `#brandModal` | Admins only |
@@ -3573,7 +3573,7 @@ The frontend admin entries are **scoped by the effective platform role** (`roleR
 - Top account menu `#meMenu`:
   - `#meMenuAdmin` (admin console) and `#meMenuStatus` (System Status) are visible to **Operator and above**;
   - `#meMenuBackup` (Data Backup), `#meMenuModelConfig` (Model Config), and `#meMenuBranding` (Whitelabel Settings) are visible to **Admin and above**.
-  - For Operator, `#meMenuAdmin`'s label switches to `menu.console` ("Admin Console") to avoid the misleading "User Management".
+  - **Both Operator and Admin+ use `menu.console` "Admin Console"** (the entry opens the whole console, not just user management; the role only affects visible tabs, not the menu label).
 - Admin console `#adminModal` tabs are scoped by role (`applyAdminTabVisibility`):
   - **Operator** sees only read-only tabs: Usage / Audit Log / Runtime Metrics (matching the backend endpoints gated by `RequireRoleFilter(Operator)`); it defaults to the Usage tab.
   - **Admin / SuperAdmin** see all 9 tabs.
@@ -3616,7 +3616,9 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 
 ### 8.2 Admin console `#adminModal`: the full set of tabs and their order
 
-`#adminModal` (`index.html:1552-1751`) is a **single modal**; its tab bar `div.admin-tabs` (`index.html:1555-1565`) has **9 tabs** in total, and the physical order in `index.html` is exactly 1→9 in the table below:
+`#adminModal` (`index.html`) is a **single modal**; its tab bar `div.admin-tabs` has **11 tabs** in total, and the physical order in `index.html` is exactly 1→11 in the table below.
+
+**Layout (fixed size + internal scroll)**: `.admin-modal` is `min(1000px, 96vw)` wide and `calc(100vh - 48px)` tall (fixed), with `display:flex; flex-direction:column`; the title / `div.admin-tabs` / footer buttons are `flex:none` (they do not scroll with content), while the content is wrapped in `.admin-body` (`flex:1 1 auto; min-height:0; overflow-y:auto`) and **scrolls internally**, so the **modal height stays constant when switching tabs**. The tab bar is `flex-wrap:wrap`, so with many tabs it wraps (at least two rows on narrow viewports) instead of **overflowing horizontally**.
 
 | # | tab DOM id | i18n key | Label (en) | Content container | Main endpoints |
 |---|---|---|---|---|---|
@@ -3629,8 +3631,10 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 | 7 | `#adminTabOrphans` | `admin.tabOrphans` | Orphan Inventory | `#adminOrphansView` | `GET /ag-ui/admin/orphans` + adopt / delete |
 | 8 | `#adminTabUserGroups` | `admin.tabUserGroups` | User Groups | `#adminUserGroupsView` | `GET/POST /ag-ui/usergroups`, `GET /usergroups/{id}/impact`, `DELETE` |
 | 9 | `#adminTabStorage` | `admin.tabStorage` | Storage | `#adminStorageView` | `GET /ag-ui/admin/storage`, `POST /ag-ui/admin/storage/reclaim` |
+| 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhooks | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`, `…/events`, `…/deliveries`, `…/{id}/test` (see 8.19) |
+| 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API keys | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`, `DELETE /ag-ui/admin/api-keys/{id}` (see 8.20) |
 
-Opening and switching (`app.js:6603-6659`):
+Opening and switching (`app.js`):
 
 - `openAdminModal()` first checks `state.isAdmin` (otherwise toasts `admin.adminOnly`), removes `hidden` from `#adminModal`, **switches to `users` by default**, and starts the metrics polling via `startAdminMetricsPoll()`.
 - `switchAdminTab(tab)` uses 9 booleans to control the `on` class and the `hidden` state of the 9 views; it then loads data per tab; the `else` branch other than `audit` falls through to `loadConfigGovernance()` (i.e. `config`).
