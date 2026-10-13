@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.203 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.203 Release Notes (current Windows desktop release)
+
+**版本说明**：新增**模板市场在线分发**——除了内置角色包，管理员可配置<b>在线目录</b>（任意静态 JSON 地址），用户一键安装目录里的数字员工包；也可把自己创建的数字员工<b>发布</b>为可分发包文件自行托管。首次提供模板市场的图形界面。
+**Version note**: adds **template marketplace online distribution** — beyond built-in packs, admins can configure **online catalogs** (any static JSON URL) and users install agent packs from them in one click; you can also **publish** agents you created as a distributable pack file to host yourself. This is the first GUI for the marketplace.
+
+## 模板市场在线分发
+# Template marketplace online distribution
+
+中文：
+- **合同即 JSON**：目录索引 `{ "packs": [ { packId, name, description, url, agentCount } ] }`（顶层数组亦可；`url` 省略则按目录同目录 `<packId>.json`），分发包 `{ schema: "knowgath/marketplace-pack/v1", packId, name, description, agents: [AgentDefinition…] }`。可放在任意静态服务器 / 对象存储，无需专用后端。
+- **两趟导入 + 引用重映射**：安装 / 导入时先为每个数字员工分配不与现有目录冲突的新 ID（并避免包内互撞），再把<b>包内</b>相互引用（指派 AssignmentIds / 提升 EscalationAgentId / 交接 RelayToAgentId / 流水线步骤 / 技能目标）重映射到新 ID——分发的团队包引用不会断。
+- **安装时安全净化**：外部包不得带入桥接端点 / 令牌（BridgeEndpoint / BridgeToken / BridgeMode 清空）、他实例的用户组 id（AllowedGroupIds 清空）、私有 / 技能目标标记（置 false）。
+- **鲁棒拉取**：目录 / 包均 http/https、单响应 2MB 上限、10s 超时、不开重定向、目录 60s 缓存；拉取失败**不影响**聚合接口（逐源回报 `ok=false` + 错误）。
+- **图形界面**：「AI 角色管理」工具栏新增「🏪 模板市场」：内置 + 远程包列表 + 一键安装；管理员可管目录源（添加 / 删除）；「📤 发布分包」多选自建数字员工 → 生成分包 JSON 下载。
+English:
+- **Contract is plain JSON**: catalog index `{ "packs": [ { packId, name, description, url, agentCount } ] }` (a top-level array also works; omit `url` to resolve `<packId>.json` next to the catalog), pack `{ schema: "knowgath/marketplace-pack/v1", packId, name, description, agents: [AgentDefinition…] }`. Host it on any static server / object store — no dedicated backend required.
+- **Two-pass import with reference remapping**: install / import first assigns each agent a new ID that avoids both the existing catalog and intra-pack collisions, then remaps **intra-pack** references (AssignmentIds / EscalationAgentId / RelayToAgentId / pipeline steps / skill targets) to the new IDs — a distributed team pack keeps its links intact.
+- **Install-time sanitisation**: an external pack may not bring bridge endpoints / tokens (BridgeEndpoint / BridgeToken / BridgeMode cleared), another instance's user-group ids (AllowedGroupIds cleared), or private / skill-target flags (set to false).
+- **Robust fetching**: catalogs / packs are http/https only, 2MB per response, 10s timeout, no redirects, 60s catalog cache; a failing source **never** breaks the aggregate listing (per-source `ok=false` + error).
+- **GUI**: a new "🏪 Marketplace" button in the AI-role toolbar: built-in + remote pack lists with one-click install; admins manage catalog sources (add / remove); "📤 Publish pack" multi-selects your agents and downloads a pack JSON.
+
+## 测试
+# Tests
+
+中文：新增 `MarketplaceRemoteTests` 10/10（目录 / 包解析、相对地址、坏源、未知包、错 schema、空包、非 http 拒绝、超大拒绝、包内引用重映射、改名后重映射）与 `MarketplaceApiTests` 3/3（本地目录站集成：聚合 → 安装 → 净化校验 → 发布 → 坏源不致命；需管理员）；连同 Webhook / 对外 API / 托管密钥 / 桌面组合根对等合跑 64/64。
+English: new `MarketplaceRemoteTests` 10/10 (catalog / pack parsing, relative URL, bad source, unknown pack, wrong schema, empty pack, non-http rejected, oversized rejected, intra-pack remap, remap after rename) and `MarketplaceApiTests` 3/3 (local catalog-station integration: aggregate → install → sanitisation → publish → bad source tolerated; admin-gated); 64/64 together with webhook / external API / managed keys / desktop parity.
+
 # AG-UI 群聊桌面版 1.0.202 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.202 Release Notes (current Windows desktop release)
 

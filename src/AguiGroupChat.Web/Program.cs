@@ -32,6 +32,9 @@ builder.Services.AddSingleton<SkillRunArtifactStore>(); // 技能试运行产物
 builder.Services.AddSingleton(new WebhookState()); // 订阅配置（持久化到扩展区「webhooks」）
 builder.Services.AddSingleton<WebhookDispatcher>(); // 事件→订阅过滤→后台投递（含重试 / 签名 / 投递日志）
 builder.Services.AddSingleton<AguiGroupChat.Hub.Messaging.IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>()); // GroupHub 出站钩子
+// 模板市场在线分发：远程目录源（管理员配置）+ 拉取（缓存 / 尺寸 / 协议防护）
+builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持久化到扩展区「marketplace」）
+builder.Services.AddSingleton<MarketplaceRemoteService>(); // 远程目录 / 分发包拉取
 // 办公文档「在线查看」：docx / xlsx / pptx 用 LibreOffice 转 PDF 后缓存，前端弹窗内联渲染。
 // 缓存放 data/preview（跟 attachments 同一个数据根，容器重建不丢；丢了也只是重转一次）。
 builder.Services.AddDocumentPreview(
@@ -165,6 +168,7 @@ app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行�
 app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
 app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
 app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
+app.Services.RegisterMarketplacePersistence(); // 市场目录源跨重启保持
 
 // 恢复持久化状态；无历史数据且开启示例数据时才播种
 var loaded = HubApp.InitializePersistence(app);

@@ -1573,6 +1573,32 @@
 > 2. `AgentCatalog.Create` 中「挂 `org_design` 即自动挂 `org_commit`/`org_plan_draft`」的判定以 `SkillDefIds.Contains("org_design")` 为准；若用户自建同名技能是否会误触发，建议在组织角色章节明确。
 > 3. 组织架构坐标持久化按 `memberId` 区分；匿名/未登录访问组织架构的行为（本入口已要求登录）以实际运行验证为准。
 
+### 3.12 模板市场（在线分发）
+
+入口：「AI 角色管理」工具栏 →「🏪 模板市场」（`#agentMarketBtn` → 弹窗 `#marketModal`）。把<b>开箱即用的数字员工包</b>一键安装为你自己的数字员工——除内置角色包外，还包括管理员配置的<b>在线目录</b>。
+
+**图形界面**：
+
+- **内置角色包**（`#marketBuiltin`）：法务 / 研发 / 健康等内置行业包，点「安装」即导入。
+- **在线目录**（`#marketRemote`）：逐个目录源展示，源不可用时只在该源旁标出错（**不影响其它源与内置包**）。
+- **目录源管理**（`#marketSources`，仅 `Admin` 及以上可见「⚙ 目录源」按钮）：填写名称 + 目录 JSON 地址添加；列表可删除。
+- **发布分包**（「📤 发布分包」→ `#marketPublishModal`）：勾选<b>自己创建</b>的数字员工 + 填包名 → 下载一份分包 JSON（可托管到任意静态服务器作为目录）。非本人创建的不会被发布（服务端 403）。
+
+**合同（纯 JSON，无需专用后端）**：
+
+- 目录索引（`GET <目录地址>`）：`{ "packs": [ { "packId", "name", "description", "url", "agentCount" } ] }`（顶层数组亦可；`url` 省略时按「目录同目录 + `<packId>.json`」解析）。
+- 分发包（`GET <pack.url>`）：`{ "schema": "knowgath/marketplace-pack/v1", "packId", "name", "description", "agents": [ AgentDefinition… ] }`。
+
+**安装语义**：
+
+- **两趟导入**：先为每个数字员工分配不与现有目录冲突的新 ID（并避免包内互撞），再把<b>包内</b>相互引用（`assignmentIds` / `escalationAgentId` / `relayToAgentId` / `pipeline` 步骤 / `skills.targetAgentId`）重映射到新 ID；指向包外的引用保留原值。
+- **安全净化**：外部包带入的桥接端点 / 令牌（`bridgeEndpoint` / `bridgeToken` / `bridgeMode`）、他实例的用户组 id（`allowedGroupIds`）一律清空，`isPrivate` / `isSkillTarget` 置 false；归属改为安装者。
+- **拉取防护**：仅 http/https；单响应 2MB 上限；10s 超时；不开重定向；目录 60s 缓存；单包 ≤100 个数字员工；`schema` 不符 / 空包 / 缺 `agentId`·`nickname` 一律拒纯。
+
+**接口**：`GET /ag-ui/marketplace`（聚合目录）、`POST /ag-ui/marketplace/import/{packId}`（内置包）、`POST /ag-ui/marketplace/install`（`{sourceId, packId}`）、`POST /ag-ui/marketplace/publish`；目录源管理：`GET` / `POST /ag-ui/admin/marketplace/sources`、`DELETE /ag-ui/admin/marketplace/sources/{id}`（仅管理员）。
+
+---
+
 ## 第 4 章 技能库、客户端技能与本机桥
 
 > 本章依据源码：`src/AguiGroupChat.Agents/AgentSkillDefinition.cs`、`src/AguiGroupChat.Agents/AgentSkillAutoFixer.cs`、`src/AguiGroupChat.Agents/SkillDefinitionGenerator.cs`、`src/AguiGroupChat.Agents/SkillSandboxCapabilities.cs`、`src/AguiGroupChat.Agents/BuiltinSkills/*`、`src/AguiGroupChat.Agents/Tools/DotnetSkillHost.cs`、`src/AguiGroupChat.Agents/NativeTunnelService.cs`、`src/AguiGroupChat.Agents/AgentOptions.cs`、`src/AguiGroupChat.SkillHosting/*`、`src/AguiGroupChat.Web/SkillApi.cs`、`src/AguiGroupChat.Web/ClientToolBridgeApi.cs`、`src/AguiGroupChat.Web/NativeTunnelApi.cs`、`src/AguiGroupChat.Web/NativeBridgeDownloadApi.cs`、`src/AguiGroupChat.NativeBridge/*`、`src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/zh.js}`、`tools/publish-nativebridge*.ps1`、`tools/wix/nativebridge-package.wxs`。

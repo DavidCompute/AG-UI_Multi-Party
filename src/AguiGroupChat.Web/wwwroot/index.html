@@ -193,6 +193,7 @@
           <button id="agentOrgBtn" class="chip-btn" data-i18n-title="agent.orgChart">🌐 <span data-i18n="agent.orgBtn">组织架构</span></button>
           <button id="agentOrchBtn" class="chip-btn" data-i18n-title="org.orchTitle">🛠️ <span data-i18n="org.orchBtn">一键编排</span></button>
           <button id="agentSkillLibBtn" class="chip-btn" data-i18n-title="skill.title">🎯 <span data-i18n="skill.toolbarBtn">技能库</span></button>
+          <button id="agentMarketBtn" class="chip-btn" data-i18n-title="market.title">🏪 <span data-i18n="market.toolbarBtn">模板市场</span></button>
           <button id="agentKbManageBtn" class="chip-btn" data-i18n-title="kb.title">📚 <span data-i18n="agent.kbBtn">管理知识库</span></button>
           <button id="agentImgLibManageBtn" class="chip-btn" data-i18n-title="imgLib.title">🖼️ <span data-i18n="agent.imgLibBtn">管理图库</span></button>
           <button id="agentImportBtn" class="chip-btn" data-i18n-title="agent.importTip">📥 <span data-i18n="agent.import">导入</span></button>
@@ -531,6 +532,61 @@
       <div class="modal-actions">
         <button id="orgOrchCancel" class="btn-ghost" data-i18n="org.cancel">取消</button>
         <button id="orgOrchApply" class="send" disabled data-i18n="org.orchApply">确认并创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模板市场（在线分发）：内置包 + 远程目录包一键安装；管理员可管目录源；可发布自己的分包 -->
+  <div id="marketModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal pick-modal">
+      <div class="modal-title">🏪 <span data-i18n="market.title">模板市场</span></div>
+      <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="market.hint">一键安装<b>开箱即用的数字员工包</b>：内置角色包，以及管理员配置的<b>在线目录</b>里的包（从任意静态 JSON 地址拉取）。安装后会成为<b>你自己的</b>数字员工（ID 冲突自动改名，包内相互引用自动重映射）。</p>
+      <div class="admin-toolbar">
+        <button id="marketRefreshBtn" class="chip-btn" type="button" data-i18n="admin.whRefresh">↻ 刷新</button>
+        <button id="marketPublishBtn" class="chip-btn" type="button" data-i18n="market.publishBtn">📤 发布分包</button>
+        <button id="marketSourcesBtn" class="chip-btn hidden" type="button" data-i18n="market.sourcesBtn">⚙ 目录源</button>
+      </div>
+      <div id="marketBuiltin" class="market-section"></div>
+      <div id="marketRemote" class="market-section"></div>
+      <div id="marketSources" class="hidden" style="margin-top:10px">
+        <div class="modal-title" style="font-size:13px" data-i18n="market.sourcesTitle">目录源（管理员）</div>
+        <div class="form-row">
+          <input id="marketSrcName" class="modal-input" maxlength="60" data-i18n-placeholder="market.srcNamePh" />
+          <input id="marketSrcUrl" class="modal-input" maxlength="2000" placeholder="https://example.com/catalog.json" data-i18n-placeholder="market.srcUrlPh" />
+        </div>
+        <div style="margin-top:8px"><button id="marketSrcAdd" class="chip-btn" type="button" data-i18n="market.srcAdd">＋ 添加目录源</button></div>
+        <div class="admin-table-wrap" style="margin-top:8px">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="market.srcName">名称</th><th data-i18n="market.srcUrl">地址</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+            <tbody id="marketSrcRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="marketClose" class="btn-ghost" data-i18n="admin.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 发布分包：把自建数字员工导出为可分发包 JSON（可托管到任意静态服务器作为目录） -->
+  <div id="marketPublishModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal pick-modal">
+      <div class="modal-title" data-i18n="market.publishTitle">发布分发包</div>
+      <div class="form-group">
+        <label data-i18n="market.packName">包名</label>
+        <input id="mpName" class="modal-input" maxlength="60" data-i18n-placeholder="market.packNamePh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="market.packDesc">说明（可选）</label>
+        <input id="mpDesc" class="modal-input" maxlength="200" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="market.pickAgents">选择要发布的数字员工（自己创建的）</label>
+        <div id="mpAgentList" class="member-pick" style="max-height:40vh;overflow:auto"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="mpCancel" class="btn-ghost" type="button" data-i18n="common.cancel">取消</button>
+        <button id="mpGo" class="send" type="button" data-i18n="market.publishGo">生成分包</button>
       </div>
     </div>
   </div>

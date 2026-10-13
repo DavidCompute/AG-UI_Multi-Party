@@ -95,27 +95,73 @@ public sealed class MarketplaceService
     public ImportResult ImportPack(string packId, string userId)
     {
         var pack = Get(packId) ?? throw new AguiProtocolException(ErrorCodes.BadRequest, "角色包不存在");
-        var created = new List<AgentDefinition>();
-        foreach (var src in pack.Agents)
+        return ImportDefinitions(pack.PackId, pack.Name, pack.Agents, userId);
+    }
+
+    /// <summary>
+    /// 按一组智能体定义导入（内置包 / 远程分发包共用）：**两趟**处理——
+    ///   1) 先为每个智能体分配不与现有目录冲突的新 ID（并避免包内互撞）；
+    ///   2) 再把<b>包内</b>相互引用（指派 / 提升 / 交接 / 流水线步骤 / 技能目标）重映射到新 ID。
+    /// 指向包外的引用保留原值（可能指向本实例已有对象）。归当前用户。
+    /// </summary>
+    public ImportResult ImportDefinitions(string packId, string packName, IReadOnlyList<AgentDefinition> agents, string userId)
+    {
+        var idMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        var reserved = new HashSet<string>(StringComparer.Ordinal);
+        var clones = new List<AgentDefinition>();
+
+        // 第一趟：定新 ID（克隆后不再改动共享对象）
+        foreach (var src in agents)
         {
-            var agentId = UniqueAgentId(src.AgentId);
-            src.AgentId = agentId;
-            src.OwnerId = userId;
-            // 运行时创建：copy 一份，避免修改内置目录共享对象
             var def = Clone(src);
+            var newId = UniqueAgentId(src.AgentId, reserved);
+            idMap[src.AgentId] = newId;
+            reserved.Add(newId);
+            def.AgentId = newId;
+            clones.Add(def);
+        }
+
+        // 第二趟：重映射包内引用
+        foreach (var def in clones) RemapReferences(def, idMap);
+
+        var created = new List<AgentDefinition>();
+        foreach (var def in clones)
+        {
+            def.OwnerId = userId;
             _catalog.Upsert(def);
             created.Add(def);
         }
-        return new ImportResult(packId, pack.Name, created.Count);
+        return new ImportResult(packId, packName, created.Count);
     }
 
-    private string UniqueAgentId(string baseId)
+    /// <summary>把包内相互引用重映射到新 ID（包外引用原值保留）。</summary>
+    private static void RemapReferences(AgentDefinition d, IReadOnlyDictionary<string, string> map)
     {
-        if (_catalog.GetDefinition(baseId) is null) return baseId;
+        static string? MapOne(IReadOnlyDictionary<string, string> m, string? id)
+            => id is null ? null : (m.TryGetValue(id, out var n) ? n : id); // 包外保留原值
+
+        d.RelayToAgentId = MapOne(map, d.RelayToAgentId);
+        d.EscalationAgentId = MapOne(map, d.EscalationAgentId);
+        if (d.AssignmentIds is { Count: > 0 }) d.AssignmentIds = d.AssignmentIds.Select(a => MapOne(map, a)!).ToList();
+        if (d.Pipeline is not null)
+            d.Pipeline = d.Pipeline.Select(p => new AgentPipelineStep
+            {
+                StepAgentId = MapOne(map, p.StepAgentId) ?? p.StepAgentId,
+                Prompt = p.Prompt,
+            }).ToList();
+        if (d.Skills is not null)
+            foreach (var s in d.Skills)
+                if (s.TargetAgentId is { } t && map.TryGetValue(t, out var nid)) s.TargetAgentId = nid;
+    }
+
+    private string UniqueAgentId(string baseId, ISet<string> reserved)
+    {
+        bool Taken(string id) => _catalog.GetDefinition(id) is not null || reserved.Contains(id);
+        if (!Taken(baseId)) return baseId;
         for (var i = 2; i < 1000; i++)
         {
             var candidate = $"{baseId}_{i}";
-            if (_catalog.GetDefinition(candidate) is null) return candidate;
+            if (!Taken(candidate)) return candidate;
         }
         return baseId + "_" + IdGenerator.NewId();
     }

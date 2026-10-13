@@ -57,6 +57,9 @@ public static class DesktopApp
         builder.Services.AddSingleton(new WebhookState());
         builder.Services.AddSingleton<WebhookDispatcher>();
         builder.Services.AddSingleton<IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>());
+        // 模板市场在线分发：远程目录源 + 拉取
+        builder.Services.AddSingleton(new MarketplaceState());
+        builder.Services.AddSingleton<MarketplaceRemoteService>();
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
         builder.Services.AddSingleton<AguiGroupChat.Web.SkillRunArtifactStore>(); // 技能试运行产物归属（产出者本人可读 / 下载 / 预览）
         // 办公文档「在线查看」：docx / xlsx / pptx 转 PDF 后内联渲染。
@@ -139,6 +142,7 @@ public static class DesktopApp
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
         app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
+        app.Services.RegisterMarketplacePersistence(); // 市场目录源跨重启保持
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();

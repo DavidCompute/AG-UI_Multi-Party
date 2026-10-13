@@ -105,10 +105,11 @@
 - **目标**：基于 AG-UI 协议做能力发现（支持哪些工具 / 附件 / 审批类型），减少人工配置。
 - **落点模块**：`AgentGateway` 桥接链路、`AguiBridge*` 客户端。
 
-### 3.3 智能体 / 技能市场（★★☆） ✅已实现（内置目录一键导入）
+### 3.3 智能体 / 技能市场（★★☆） ✅已实现（内置目录一键导入 + **在线分发**）
 - **现状**：角色 / 技能靠 JSON 文件手动导入（`tools/agents-starter.json`）。
 - **目标**：内置「行业角色 / 技能 / 知识库模板」下载市场，一键分发。
 - **落点模块**：`AgentApi`、前端「智能体管理」、复用 starter JSON 打包结构。
+- **在线分发（已实现）**：除内置角色包外，管理员可配置<b>在线目录源</b>（任意静态 JSON 地址），用户一键安装目录里的包；也可把自建数字员工<b>发布</b>为分包文件自行托管。合同为纯 JSON（目录索引 + 包 `schema=knowgath/marketplace-pack/v1`），无需专用后端。安装<b>两趟</b>处理（先分配新 ID，再把包内相互引用重映射），并做<b>安全净化</b>（清桥接端点 / 令牌、他实例用户组 id、私有标记）；拉取限制 http/https、2MB、10s、不开重定向、60s 缓存，坏源不影响聚合。前端：「AI 角色管理」工具栏「🏪 模板市场」。落点：`Agents/MarketplaceService.cs`（`ImportDefinitions`）、`Web/MarketplaceRemote.cs`、`Web/MarketplaceApi.cs`。
 - **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
 
 ---

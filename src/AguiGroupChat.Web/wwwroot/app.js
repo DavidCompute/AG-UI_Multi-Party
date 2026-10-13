@@ -7083,6 +7083,176 @@ function bindUserGroupConsole() {
   $("ugMemberSearch").addEventListener("input", () => { ugMemberQuery = $("ugMemberSearch").value; renderUgMemberList(); });
 }
 
+/* ============ 模板市场（在线分发）============ */
+
+function bindMarketConsole() {
+  $("agentMarketBtn").onclick = () => { $("agentModal").classList.add("hidden"); openMarketModal(); };
+  $("marketRefreshBtn").onclick = () => loadMarket();
+  $("marketClose").onclick = () => $("marketModal").classList.add("hidden");
+  $("marketPublishBtn").onclick = openMarketPublish;
+  $("marketSourcesBtn").onclick = () => { $("marketSources").classList.toggle("hidden"); loadMarketSources(); };
+  $("marketSrcAdd").onclick = addMarketSource;
+  $("mpCancel").onclick = () => $("marketPublishModal").classList.add("hidden");
+  $("mpGo").onclick = publishPack;
+  $("marketBuiltin").addEventListener("click", marketClick);
+  $("marketRemote").addEventListener("click", marketClick);
+  $("marketSrcRows").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-del]");
+    if (b) delMarketSource(b.dataset.del);
+  });
+}
+
+function marketClick(e) {
+  const b = e.target.closest("button[data-pack]");
+  if (!b) return;
+  installMarketPack(b.dataset.source || "", b.dataset.pack);
+}
+
+async function openMarketModal() {
+  $("marketModal").classList.remove("hidden");
+  $("marketSourcesBtn").classList.toggle("hidden", !isAdminPlus()); // 目录源仅管理员可管
+  await loadMarket();
+}
+
+async function loadMarket() {
+  $("marketBuiltin").innerHTML = `<p class="form-hint">${t("admin.loading")}</p>`;
+  $("marketRemote").innerHTML = "";
+  try {
+    const res = await fetch("/ag-ui/marketplace", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) {
+      $("marketBuiltin").innerHTML = `<p class="form-hint">${escapeHtml(errMsg(d, "HTTP " + res.status))}</p>`;
+      return;
+    }
+    renderMarketSection($("marketBuiltin"), "", d.builtin || []);
+    const remote = d.remote || [];
+    $("marketRemote").innerHTML = "";
+    for (const src of remote) {
+      const box = document.createElement("div");
+      box.className = "market-source";
+      box.innerHTML = `<div class="market-src-name">${escapeHtml(src.sourceName)}`
+        + (src.enabled === false ? ` <span class="muted">(${t("market.srcDisabled")})</span>` : "")
+        + (src.ok ? "" : ` <span class="tag-disabled">${escapeHtml(src.error || "")}</span>`)
+        + `</div>`;
+      const list = document.createElement("div");
+      renderMarketSection(list, src.sourceId, src.packs || []);
+      box.appendChild(list);
+      $("marketRemote").appendChild(box);
+    }
+  } catch (ex) {
+    $("marketBuiltin").innerHTML = `<p class="form-hint">${escapeHtml(ex.message)}</p>`;
+  }
+}
+
+function renderMarketSection(el, sourceId, packs) {
+  if (!packs.length) { el.innerHTML = `<p class="form-hint">${t("market.empty")}</p>`; return; }
+  el.innerHTML = packs.map((p) => `<div class="market-pack">
+    <div style="flex:1;min-width:0">
+      <div class="market-pack-name">${escapeHtml(p.name)}</div>
+      <div class="market-pack-desc">${escapeHtml(p.description || "")}</div>
+      <div class="market-pack-meta">${t("market.agentCount", { n: p.agentCount || 0 })}${p.remote && p.sourceName ? " · " + escapeHtml(p.sourceName) : ""}</div>
+    </div>
+    <button class="chip-btn" data-pack="${escapeHtml(p.packId)}" data-source="${escapeHtml(sourceId)}" type="button">${t("market.install")}</button>
+  </div>`).join("");
+}
+
+async function installMarketPack(sourceId, packId) {
+  const url = sourceId ? "/ag-ui/marketplace/install" : `/ag-ui/marketplace/import/${encodeURIComponent(packId)}`;
+  const opts = sourceId
+    ? { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify({ sourceId, packId }) }
+    : { method: "POST", headers: { Authorization: "Bearer " + state.token } };
+  try {
+    const res = await fetch(url, opts);
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    toast(t("market.installed", { name: d.packName || packId, n: d.agentsCreated || 0 }));
+    if (typeof loadAgents === "function") loadAgents();
+  } catch (ex) { toast(ex.message); }
+}
+
+async function loadMarketSources() {
+  const rows = $("marketSrcRows");
+  try {
+    const res = await fetch("/ag-ui/admin/marketplace/sources", { headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) { rows.innerHTML = ""; return; }
+    const list = await res.json();
+    rows.innerHTML = (list && list.length)
+      ? list.map((s) => `<tr><td>${escapeHtml(s.name)}</td><td style="word-break:break-all">${escapeHtml(s.url)}</td>
+          <td><button class="chip-btn danger" data-del="${escapeHtml(s.id)}" type="button">${t("market.srcDel")}</button></td></tr>`).join("")
+      : `<tr><td colspan="3" class="admin-empty">${t("market.srcEmpty")}</td></tr>`;
+  } catch { rows.innerHTML = ""; }
+}
+
+async function addMarketSource() {
+  const name = $("marketSrcName").value.trim();
+  const url = $("marketSrcUrl").value.trim();
+  if (!url) { toast(t("market.srcUrlRequired")); return; }
+  try {
+    const res = await fetch("/ag-ui/admin/marketplace/sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ name: name || url, url }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    $("marketSrcName").value = ""; $("marketSrcUrl").value = "";
+    toast(t("market.srcAdded"));
+    loadMarketSources(); loadMarket();
+  } catch (ex) { toast(ex.message); }
+}
+
+async function delMarketSource(id) {
+  if (!await uiConfirm({ message: t("market.srcDelConfirm"), danger: true })) return;
+  const res = await fetch(`/ag-ui/admin/marketplace/sources/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: { Authorization: "Bearer " + state.token },
+  });
+  if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, "HTTP " + res.status)); return; }
+  toast(t("market.srcDeleted"));
+  loadMarketSources(); loadMarket();
+}
+
+function openMarketPublish() {
+  const mine = (typeof agentList !== "undefined" ? agentList : []).filter((a) => a.ownerId && a.ownerId === state.memberId);
+  $("mpName").value = ""; $("mpDesc").value = "";
+  $("mpAgentList").innerHTML = mine.length
+    ? mine.map((a) => `<label class="pick-item">
+        <input type="checkbox" value="${escapeHtml(a.agentId)}" />
+        <span class="pick-info"><span class="pick-name">${escapeHtml(a.nickname || a.agentId)}</span><span class="pick-sub">${escapeHtml(a.agentId)}</span></span>
+      </label>`).join("")
+    : `<div class="pick-empty">${t("market.publishEmpty")}</div>`;
+  $("mpAgentList").querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.onchange = () => cb.closest("label")?.classList.toggle("checked", cb.checked);
+  });
+  $("marketPublishModal").classList.remove("hidden");
+}
+
+async function publishPack() {
+  const name = $("mpName").value.trim();
+  if (!name) { toast(t("market.packNameRequired")); return; }
+  const agentIds = Array.from($("mpAgentList").querySelectorAll("input:checked")).map((i) => i.value);
+  if (!agentIds.length) { toast(t("market.publishPick")); return; }
+  const btn = $("mpGo"); const orig = btn.textContent; btn.disabled = true; btn.textContent = t("common.saving");
+  try {
+    const res = await fetch("/ag-ui/marketplace/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ name, description: $("mpDesc").value.trim(), agentIds }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    // 下载为 JSON 文件（可托管到任意静态服务器作为目录源）
+    const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (d.packId || "pack") + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    toast(t("market.published"));
+    $("marketPublishModal").classList.add("hidden");
+  } catch (ex) { toast(ex.message); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
 /* ============ 管理员控制台：出站 Webhook（对外集成） ============ */
 
 let webhookEventCatalog = null; // 事件类型目录（懒加载缓存）
@@ -12207,6 +12377,7 @@ function init() {
   bindUserGroupConsole(); // 细粒度授权：用户分组后台页签
   bindWebhookConsole(); // 对外集成：出站 Webhook 后台页签
   bindApiKeyConsole(); // 对外集成凭证：托管 API 密钥后台页签
+  bindMarketConsole(); // 模板市场（在线分发）
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
   $("storageRefreshBtn").onclick = loadStorageGovernance;
   $("storageReclaimBtn").onclick = runStorageReclaim;

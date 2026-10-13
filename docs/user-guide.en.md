@@ -1576,6 +1576,32 @@ The following are deviations / easily-misunderstood points confirmed by checking
 > 3. Org-structure coordinate persistence is distinguished by `memberId`; the behavior of anonymous/not-logged-in access to the org structure (this entry already requires login) is subject to verification in actual running.
 
 
+### 3.12 Template marketplace (online distribution)
+
+Entry: the AI-role toolbar → "🏪 Marketplace" (`#agentMarketBtn` → dialog `#marketModal`). Install <b>ready-to-use agent packs</b> as your own agents in one click — built-in packs plus packs from the <b>online catalogs</b> an admin configured.
+
+**GUI**:
+
+- **Built-in packs** (`#marketBuiltin`): the built-in industry packs (legal / R&D / health, …); click Install to import.
+- **Online catalogs** (`#marketRemote`): listed per source; an unavailable source is flagged next to that source only (**it never affects other sources or the built-in packs**).
+- **Catalog management** (`#marketSources`; the "⚙ Catalogs" button shows only to `Admin` and above): enter a name + catalog JSON URL to add; the list can delete.
+- **Publish a pack** ("📤 Publish pack" → `#marketPublishModal`): select agents <b>you created</b> plus a pack name → download a pack JSON (host it on any static server as a catalog). Agents you did not create are rejected (server 403).
+
+**Contract (plain JSON, no dedicated backend)**
+
+- Catalog index (`GET <catalog URL>`): `{ "packs": [ { "packId", "name", "description", "url", "agentCount" } ] }` (a top-level array also works; omit `url` to resolve `<packId>.json` next to the catalog).
+- Pack (`GET <pack.url>`): `{ "schema": "knowgath/marketplace-pack/v1", "packId", "name", "description", "agents": [ AgentDefinition… ] }`.
+
+**Install semantics**:
+
+- **Two-pass import**: first assign each agent a new ID that avoids the existing catalog and intra-pack collisions, then remap **intra-pack** references (`assignmentIds` / `escalationAgentId` / `relayToAgentId` / `pipeline` steps / `skills.targetAgentId`) to the new IDs; references pointing outside the pack keep their original values.
+- **Sanitisation**: bridge endpoint / token (`bridgeEndpoint` / `bridgeToken` / `bridgeMode`) and another instance's user-group ids (`allowedGroupIds`) carried by an external pack are cleared, and `isPrivate` / `isSkillTarget` are set to false; ownership becomes the installer.
+- **Fetch guards**: http/https only; 2MB per response; 10s timeout; no redirects; 60s catalog cache; ≤100 agents per pack; a wrong `schema` / empty pack / missing `agentId`·`nickname` is rejected outright.
+
+**API**: `GET /ag-ui/marketplace` (aggregate), `POST /ag-ui/marketplace/import/{packId}` (built-in), `POST /ag-ui/marketplace/install` (`{sourceId, packId}`), `POST /ag-ui/marketplace/publish`; catalog management: `GET` / `POST /ag-ui/admin/marketplace/sources`, `DELETE /ag-ui/admin/marketplace/sources/{id}` (admin only).
+
+---
+
 ## Chapter 4: Skills, Client Skills, and the Local Bridge
 
 > Primary sources: `src/AguiGroupChat.Agents/AgentSkillDefinition.cs`, `src/AguiGroupChat.Agents/AgentSkillAutoFixer.cs`, `src/AguiGroupChat.Agents/SkillDefinitionGenerator.cs`, `src/AguiGroupChat.Agents/SkillSandboxCapabilities.cs`, `src/AguiGroupChat.Agents/BuiltinSkills/*`, `src/AguiGroupChat.Agents/Tools/DotnetSkillHost.cs`, `src/AguiGroupChat.Agents/NativeTunnelService.cs`, `src/AguiGroupChat.Agents/AgentOptions.cs`, `src/AguiGroupChat.SkillHosting/*`, `src/AguiGroupChat.Web/SkillApi.cs`, `src/AguiGroupChat.Web/ClientToolBridgeApi.cs`, `src/AguiGroupChat.Web/NativeTunnelApi.cs`, `src/AguiGroupChat.Web/NativeBridgeDownloadApi.cs`, `src/AguiGroupChat.NativeBridge/*`, `src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/zh.js}`, `tools/publish-nativebridge*.ps1`, `tools/wix/nativebridge-package.wxs`.
