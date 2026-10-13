@@ -53,6 +53,10 @@ public static class DesktopApp
         builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey）
         builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4）：应用名 + Logo + 主色
         builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员在线调整的运维旋钮
+        // 出站 Webhook（对外集成）：与 Web 组合根同一套（管理员配置回调地址 + 事件订阅）
+        builder.Services.AddSingleton(new WebhookState());
+        builder.Services.AddSingleton<WebhookDispatcher>();
+        builder.Services.AddSingleton<IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>());
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
         builder.Services.AddSingleton<AguiGroupChat.Web.SkillRunArtifactStore>(); // 技能试运行产物归属（产出者本人可读 / 下载 / 预览）
         // 办公文档「在线查看」：docx / xlsx / pptx 转 PDF 后内联渲染。
@@ -102,6 +106,8 @@ public static class DesktopApp
         app.MapStorageAdminApi(); // 存储治理：附件占用统计 + 开关放行的孤儿回收
         app.MapUserGroupApi();      // 用户分组 / 组织单元（细粒度授权）
         app.MapBrandingApi();   // 白标 / 品牌化（6.4）：应用名 + Logo + 主色
+        app.MapWebhookApi();    // 出站 Webhook（对外集成）：管理员配置回调地址 + 事件订阅 + 投递记录
+        app.MapManualApi();     // 内置用户手册：前端「📖 完整手册」按界面语言拉取（嵌入资源，仅登录可读）
         app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
         app.MapMentionSuggestApi(); // 输入时「建议 @ 谁」（草稿对数字员工职责的本地评分）
         app.MapMessageFeedbackApi(); // 消息 👍/👎 反馈（偏好画像）
@@ -129,6 +135,7 @@ public static class DesktopApp
         app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
         app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
+        app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
         var loaded = HubApp.InitializePersistence(app);
         if (!loaded && app.Services.GetRequiredService<GroupChatOptions>().SeedSampleData)
             HubApp.SeedSampleDataAsync(app).GetAwaiter().GetResult();
@@ -141,6 +148,8 @@ public static class DesktopApp
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Agents.BridgeHealthService>().Start());
         // 应用就绪后启动消息保留周期检查（GroupChat:MessageRetentionDays 配置）
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Hub.Persistence.MessageRetentionService>().Start());
+        // 应用就绪后启动 Webhook 出站投递工作线程
+        app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<WebhookDispatcher>().Start());
         app.MapFallbackToFile("index.html");
 
         if (backendMode)

@@ -4181,6 +4181,41 @@ The following is all based on the code (each item has been verified against the 
 6. **Audit retention of 5000 records** vs. the frontend `limit=200`: for the complete history, use CSV export (no 200 cap, but bounded by the 5000 capacity).
 
 
+### 8.19 Outbound webhooks (external integration)
+
+The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Admin` and above) that pushes **events** from a circle to external systems (n8n / your own service / low-code) as a signed HTTP POST. This is the capability that turns a circle from "a site people use" into an **integration hub systems can call**.
+
+**Entry and views**: tab `#adminTabWebhooks` → view `#adminWebhooksView` (`index.html`), with hint `admin.webhookHint`; toolbar `#whAddBtn` (new) / `#whRefreshBtn` (refresh); subscription table `#adminWebhookRows`; recent-deliveries table `#adminWebhookDeliveryRows`; subscription dialog `#webhookModal` (`whNameField` / `whUrlField` / `whEventList` / `whGroupField` / `whEnabledField` / `whSecretBox`).
+
+**Management API** (all require `Admin`):
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/ag-ui/admin/webhooks` | List subscriptions; the **signing secret is masked** (only `hasSecret`) |
+| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (18) |
+| `GET` | `/ag-ui/admin/webhooks/deliveries` | Last 100 delivery records (newest first) |
+| `POST` | `/ag-ui/admin/webhooks` | Create; **returns the plaintext secret once** (`whsec_…`) |
+| `PUT` | `/ag-ui/admin/webhooks/{id}` | Update (null fields = unchanged; `rotateSecret=true` rotates and returns the new secret) |
+| `DELETE` | `/ag-ui/admin/webhooks/{id}` | Delete |
+| `POST` | `/ag-ui/admin/webhooks/{id}/test` | Fire a `PING` test delivery and return the result synchronously |
+
+**Subscription fields**: `name`, `url` (**must be an absolute http / https URL**, else 400), `eventTypes` (none selected = all except high-frequency streaming deltas; types outside the catalog are rejected with 400), `groupId` (optional, scopes pushes to one circle), `enabled`.
+
+**Selectable event types (18)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+
+**Delivery contract**:
+
+- Body (envelope): `{ deliveryId, event, groupId, sentAt, data }`, where `data` is the original event object (same wire format as WebSocket downstream).
+- Headers: `X-KnowGath-Event`, `X-KnowGath-Delivery`, `X-KnowGath-Timestamp` (Unix ms), `X-KnowGath-Signature`.
+- **Verification**: `X-KnowGath-Signature = "sha256=" + hex(HMAC-SHA256(secret, "{timestamp}.{body}"))` — computed over the **raw body bytes** with the `whsec_…` secret from creation, joined with the timestamp header (check the timestamp for replay protection).
+- **Retries**: on failure (non-2xx / timeout / connection error) it retries **up to 3 times**, backing off 1s / 5s / 25s, with a 10s per-attempt timeout; a final failure is logged, never blocking.
+- **Independent of who is online**: the hook sits on the event fan-out point (`GroupHub.FanOutAsync`) and runs **before** the "no subscribers, return early" check — an external system still receives events even with no browser open on that circle; a throwing observer is swallowed and never affects normal chat.
+- **Async, non-blocking**: deliveries run on background workers (bounded queue) and never block realtime fan-out.
+
+**Security**: the signing secret is encrypted at rest via `SecretVault` (same as the model API key); the list endpoint never returns the plaintext secret; it is returned only at **creation** and on **rotation** — save it immediately. The callback URL is admin-supplied; **do not point it at an untrusted host** (outbound requests carry the subscribed event contents).
+
+---
+
 ## Chapter 9: API Reference, Configuration, and Troubleshooting
 
 > Primary sources: `src/AguiGroupChat.Hub/{Program.cs,HubApp.cs,Transport/HttpGroupApi.cs,Users/UserApi.cs,Options/*.cs,appsettings*.json}`, `src/AguiGroupChat.Web/{Program.cs,WebIdentity.cs,AccountApi.cs,AdminApi.cs,AgentApi.cs,AttachmentApi.cs,BrandingApi.cs,ClientToolBridgeApi.cs,ConfigGovernanceApi.cs,ExecutionRuntimeApi.cs,ExportImportApi.cs,GlobalSearchApi.cs,GroupNameApi.cs,ImageLibraryApi.cs,KnowledgeBaseApi.cs,LinkProxyApi.cs,MarketplaceApi.cs,MemoryApi.cs,MentionSuggestApi.cs,MessageFeedbackApi.cs,NativeBridgeDownloadApi.cs,NativeTunnelApi.cs,PlanControlApi.cs,ScheduledTaskApi.cs,SelfApi.cs,SkillApi.cs,SofficeRunner.cs,StorageAdminApi.cs,SystemApi.cs,TopicSummaryApi.cs,TwinApi.cs,UserGroupApi.cs,appsettings*.json}`, `src/AguiGroupChat.Agents/{AgentOptions.cs,ExecutionOptions.cs,KnowledgeBase.cs}`, `src/AguiGroupChat.Desktop*/**`, `src/AguiGroupChat.NativeBridge/Program.cs`, `docker-compose.yml`, `Dockerfile`, `Dockerfile.hub`, `.github/workflows/*`, `tools/{i18n-audit.mjs,build-msi.ps1,README-playwright.md}`, `src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/*}`.

@@ -882,6 +882,45 @@
     </div>
   </div>
 
+  <!-- 出站 Webhook：新建 / 编辑订阅（独立弹窗；密钥仅在创建 / 轮换后显示一次） -->
+  <div id="webhookModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal pick-modal">
+      <div class="modal-title" id="whModalTitle" data-i18n="admin.whNewTitle">新建 Webhook 订阅</div>
+      <input id="whIdField" type="hidden" />
+      <div class="form-group">
+        <label data-i18n="admin.whName">名称</label>
+        <input id="whNameField" class="modal-input" maxlength="60" data-i18n-placeholder="admin.whNamePh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.whUrl">回调地址</label>
+        <input id="whUrlField" class="modal-input" maxlength="2000" placeholder="https://example.com/hook" data-i18n-placeholder="admin.whUrlPh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.whEvents">事件</label>
+        <p class="form-hint" style="margin:4px 0" data-i18n="admin.whEventsHint">不勾选 = 除高频流式增量外的全部事件。</p>
+        <div id="whEventList" class="member-pick" style="max-height:34vh;overflow:auto"></div>
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.whGroupId">限定知聚（可选）</label>
+        <input id="whGroupField" class="modal-input" maxlength="120" data-i18n-placeholder="admin.whGroupIdPh" />
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px">
+          <input id="whEnabledField" type="checkbox" checked /> <span data-i18n="admin.whEnabled">启用</span>
+        </label>
+      </div>
+      <div id="whSecretBox" class="hidden" style="margin-top:4px;padding:10px;border:1px dashed var(--accent);border-radius:8px">
+        <div data-i18n="admin.whSecretOnce">签名密钥（仅显示一次，请立即复制保存）：</div>
+        <code id="whSecretValue" style="word-break:break-all;display:block;margin:6px 0"></code>
+        <button id="whSecretCopy" class="chip-btn" type="button" data-i18n="admin.whSecretCopy">复制密钥</button>
+      </div>
+      <div class="modal-actions">
+        <button id="whCancelBtn" class="btn-ghost" type="button" data-i18n="common.cancel">取消</button>
+        <button id="whSaveBtn" class="send" type="button" data-i18n="common.save">保存</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 修改密码 -->
   <div id="pwModal" class="modal-overlay hidden">
     <div class="modal">
@@ -1593,6 +1632,7 @@
         <button id="adminTabOrphans" class="chip-btn admin-tab" data-i18n="admin.tabOrphans">孤儿盘点</button>
         <button id="adminTabUserGroups" class="chip-btn admin-tab" data-i18n="admin.tabUserGroups">用户分组</button>
         <button id="adminTabStorage" class="chip-btn admin-tab" data-i18n="admin.tabStorage">存储治理</button>
+        <button id="adminTabWebhooks" class="chip-btn admin-tab" data-i18n="admin.tabWebhooks">Webhook</button>
       </div>
       <div id="adminUsersView">
         <div class="admin-table-wrap">
@@ -1773,6 +1813,27 @@
         <div class="admin-toolbar">
           <button id="storageRefreshBtn" class="chip-btn" type="button" data-i18n="admin.storageRefresh">↻ 刷新</button>
           <button id="storageReclaimBtn" class="chip-btn" type="button" data-i18n="admin.storageReclaim">🧹 回收可回收空间</button>
+        </div>
+      </div>
+      <!-- 出站 Webhook（对外集成）：把知聚事件以带签名的 POST 推送给外部系统 -->
+      <div id="adminWebhooksView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="admin.webhookHint">把知聚里的<b>事件</b>以带签名的 HTTP POST 推送给外部系统（n8n / 自建服务 / 低代码平台）。请求头含 <code>X-KnowGath-Signature</code>（HMAC-SHA256，签名内容为 <code>{timestamp}.{body}</code>），用创建时给出的 <code>whsec_</code> 密钥即可验签。</p>
+        <div class="admin-toolbar">
+          <button id="whAddBtn" class="chip-btn" type="button" data-i18n="admin.whAdd">＋ 新建订阅</button>
+          <button id="whRefreshBtn" class="chip-btn" type="button" data-i18n="admin.whRefresh">↻ 刷新</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="admin.whName">名称</th><th data-i18n="admin.whUrl">回调地址</th><th data-i18n="admin.whEvents">事件</th><th data-i18n="admin.whState">状态</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+            <tbody id="adminWebhookRows"></tbody>
+          </table>
+        </div>
+        <div class="modal-title" style="margin-top:14px" data-i18n="admin.whDeliveries">最近投递</div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="admin.whColTime">时间</th><th data-i18n="admin.whColEvent">事件</th><th data-i18n="admin.whColStatus">结果</th><th data-i18n="admin.whColDetail">详情</th></tr></thead>
+            <tbody id="adminWebhookDeliveryRows"></tbody>
+          </table>
         </div>
       </div>
       <div class="modal-actions">

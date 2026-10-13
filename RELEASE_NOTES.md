@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.200 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.200 Release Notes (current Windows desktop release)
+
+**版本说明**：新增**出站 Webhook（对外集成）**——管理员在控制台配置回调地址与事件订阅，知聚里的事件会以带 HMAC-SHA256 签名的 HTTP POST 推送到外部系统（n8n / 自建服务 / 低代码平台），让「知聚」从「人用的网站」升级为可被系统集成的中枢。
+**Version note**: adds **outbound webhooks (external integration)** — admins configure callback URLs and event subscriptions in the console, and circle events are pushed to external systems (n8n / your own service / low-code) as HMAC-SHA256-signed HTTP POSTs, turning a circle from "a site people use" into an integration hub systems can call.
+
+## 出站 Webhook（对外集成）
+# Outbound webhooks (external integration)
+
+中文：
+- **订阅配置**：管理员控制台新增「Webhook」页签——新建 / 编辑 / 删除订阅，可选**事件类型**（群 / 成员 / 消息 / 工具 / 人机交互 / 话题 / 运行错误共 18 类；不勾选＝除高频流式增量外的全部）、可用 `groupId` **限定单个知聚**、可随时**启用 / 停用**；签名密钥 `whsec_…` **仅在创建或轮换时显示一次**（列表脱敏），落盘经 `SecretVault` 加密。
+- **投递语义**：请求体为信封 `{ deliveryId, event, groupId, sentAt, data }`（`data` 即既有事件对象）；请求头含 `X-KnowGath-Event` / `X-KnowGath-Delivery` / `X-KnowGath-Timestamp` / `X-KnowGath-Signature`（`sha256=hex(HMAC-SHA256(secret, "{timestamp}.{body}"))`）。失败**重试至多 3 次**（退避 1s / 5s / 25s），单次超时 10s，串行化在后台工作线程（不阻塞实时扇出）。
+- **可观测**：「最近投递」记录最近 100 条（时间 / 事件 / 结果码 / 耗时 / 错误），并有「测试」按钮发出一条 `PING` 投递即时验证连通与验签。
+- **与在线人数无关**：出站钩子挂在群事件扇出点、**先于**「无订阅者则提前返回」执行——即使该群当前没有浏览器连接，外部系统依然能收到事件。观察者抛异常不影响正常聊天。
+English:
+- **Subscriptions**: a new "Webhooks" tab in the admin console — create / edit / delete subscriptions, pick **event types** (18 categories across group / member / message / tool / human-in-the-loop / topic / run error; none selected = all except high-frequency streaming deltas), optionally scope to a single circle via `groupId`, enable / disable at will; the `whsec_…` signing secret is **shown only once** (at creation or rotation), while the list is masked, and it is encrypted at rest via `SecretVault`.
+- **Delivery semantics**: the body is an envelope `{ deliveryId, event, groupId, sentAt, data }` (`data` being the existing event object); headers carry `X-KnowGath-Event` / `X-KnowGath-Delivery` / `X-KnowGath-Timestamp` / `X-KnowGath-Signature` (`sha256=hex(HMAC-SHA256(secret, "{timestamp}.{body}"))`). Failures **retry up to 3 times** (backoff 1s / 5s / 25s) with a 10s per-attempt timeout, on background workers that never block realtime fan-out.
+- **Observability**: "Recent deliveries" keeps the last 100 (time / event / status / latency / error), and a **Test** button fires a `PING` to check connectivity and signature verification immediately.
+- **Independent of who is online**: the hook sits on the event fan-out point and runs **before** the "no subscribers, return early" check — so an external system still receives events even when nobody has a browser open on that circle. A throwing observer never affects normal chat.
+
+## 测试
+# Tests
+
+中文：新增 `WebhookTests` 10/10（签名 / 订阅过滤 / 噪声排除 / 群过滤 / 信封与验签 / 重试到位 / 重试耗尽 / 测试投递）；`GroupEventObserverTests` 3/3（事件到达 / 无订阅者也触发 / 观察者异常不影响发送）；`WebhookApiTests` 3/3（需管理员 / URL 校验 / **端到端**：建群发消息 → 调度器 → 本地接收端投递并 HMAC 验签）；既有 `GroupHub` 相关用例 50/50 无回归。
+English: new `WebhookTests` 10/10 (signing / subscription filtering / noise exclusion / group filter / envelope & verification / retry-to-success / retry-exhaustion / test delivery); `GroupEventObserverTests` 3/3 (events arrive / fires without subscribers / a throwing observer never breaks sending); `WebhookApiTests` 3/3 (admin-gated / URL validation / **end-to-end**: create group and send → dispatcher → local receiver with HMAC verification); 50/50 existing `GroupHub`-related cases, no regressions.
+
 # AG-UI 群聊桌面版 1.0.199 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.199 Release Notes (current Windows desktop release)
 

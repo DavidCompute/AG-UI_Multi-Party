@@ -4173,9 +4173,44 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 5. **导入的「群 id 重生成」与「账号资料更新、密码不覆盖」语义**：迁移 / 灾备场景需向用户说明清楚（详见 §8.12.2）。
 6. **审计保留 5000 条**与前端 `limit=200`：需要完整历史请用 CSV 导出（无 200 上限，但受 5000 容量约束）。
 
+### 8.19 出站 Webhook（对外集成）
+
+管理员控制台新增 **Webhook** 页签（`#adminTabWebhooks`，仅 `Admin` 及以上可见），把知聚里的**事件**以带签名的 HTTP POST 推送到外部系统（n8n / 自建服务 / 低代码平台）。这是「知聚」从「人用的网站」升级为**可被系统集成的中枢**的关键能力。
+
+**入口与视图**：页签 `#adminTabWebhooks` → 视图 `#adminWebhooksView`（`index.html`），提示 `admin.webhookHint`；工具栏 `#whAddBtn`（新建）/ `#whRefreshBtn`（刷新）；订阅表 `#adminWebhookRows`；最近投递表 `#adminWebhookDeliveryRows`；订阅弹窗 `#webhookModal`（`whNameField` / `whUrlField` / `whEventList` / `whGroupField` / `whEnabledField` / `whSecretBox`）。
+
+**管理 API**（均需 `Admin`）：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/ag-ui/admin/webhooks` | 列出订阅；**签名密钥脱敏**（只回 `hasSecret`，不回明文） |
+| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（18 类） |
+| `GET` | `/ag-ui/admin/webhooks/deliveries` | 最近 100 条投递记录（新→旧） |
+| `POST` | `/ag-ui/admin/webhooks` | 新建订阅；**返回一次性明文密钥** `whsec_…` |
+| `PUT` | `/ag-ui/admin/webhooks/{id}` | 更新订阅（字段为空 = 不变更；`rotateSecret=true` 轮换密钥并回新密钥） |
+| `DELETE` | `/ag-ui/admin/webhooks/{id}` | 删除订阅 |
+| `POST` | `/ag-ui/admin/webhooks/{id}/test` | 发一条 `PING` 测试投递，同步返回投递结果 |
+
+**订阅字段**：`name`（展示名）、`url`（**必须 http / https 绝对 URL**，否则 400）、`eventTypes`（不选＝除高频流式增量外的全部；目录外类型会被 400 拒绝）、`groupId`（可选，限定只推送该知聚）、`enabled`（启用 / 停用）。
+
+**可选事件类型（18 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
+
+**投递契约**：
+
+- 请求体（信封）：`{ deliveryId, event, groupId, sentAt, data }`，其中 `data` 即该事件的原有对象（与 WebSocket 下行线格式一致）。
+- 请求头：`X-KnowGath-Event`（事件类型）、`X-KnowGath-Delivery`（投递 ID）、`X-KnowGath-Timestamp`（Unix 毫秒）、`X-KnowGath-Signature`。
+- **验签**：`X-KnowGath-Signature = "sha256=" + hex(HMAC-SHA256(secret, "{timestamp}.{body}"))`——用创建订阅时给出的 `whsec_…` 密钥对**原始 body 字节**计算，与请求头时间戳拼接后比对（防重放可校验时间戳偏差）。
+- **重试**：失败（非 2xx / 超时 / 连接失败）**重试至多 3 次**，退避 1s / 5s / 25s，单次超时 10s；仍失败则记入投递日志（不阻断）。
+- **与在线人数无关**：出站钩子挂在群事件扇出点（`GroupHub.FanOutAsync`），**先于**「无订阅者则提前返回」执行——即使该知聚当前没有浏览器连接，外部系统依然能收到事件；观察者抛异常会被吞掉，不影响正常聊天。
+- **异步不阻塞**：投递在后台工作线程完成（有界队列），绝不阻塞实时扇出。
+
+**安全**：签名密钥落盘经 `SecretVault` 加密（与模型 API Key 同口径）；列表接口永不回明文密钥；密钥只在**创建**与**轮换**时返回一次，请立即保存。回调地址由管理员填写，**请勿填写不可信地址**（出站请求会携带订阅到的事件内容）。
+
+---
+
 ## 第 9 章 接口一览、配置项与环境变量、排障
 
-> 本章依据源码：`src/AguiGroupChat.Hub/{Program.cs,HubApp.cs,Transport/HttpGroupApi.cs,Users/UserApi.cs,Options/*.cs,appsettings*.json}`、`src/AguiGroupChat.Web/{Program.cs,WebIdentity.cs,AccountApi.cs,AdminApi.cs,AgentApi.cs,AttachmentApi.cs,BrandingApi.cs,ClientToolBridgeApi.cs,ConfigGovernanceApi.cs,ExecutionRuntimeApi.cs,ExportImportApi.cs,GlobalSearchApi.cs,GroupNameApi.cs,ImageLibraryApi.cs,KnowledgeBaseApi.cs,LinkProxyApi.cs,MarketplaceApi.cs,MemoryApi.cs,MentionSuggestApi.cs,MessageFeedbackApi.cs,NativeBridgeDownloadApi.cs,NativeTunnelApi.cs,PlanControlApi.cs,ScheduledTaskApi.cs,SelfApi.cs,SkillApi.cs,SofficeRunner.cs,StorageAdminApi.cs,SystemApi.cs,TopicSummaryApi.cs,TwinApi.cs,UserGroupApi.cs,appsettings*.json}`、`src/AguiGroupChat.Agents/{AgentOptions.cs,ExecutionOptions.cs,KnowledgeBase.cs}`、`src/AguiGroupChat.Desktop*/**`、`src/AguiGroupChat.NativeBridge/Program.cs`、`docker-compose.yml`、`Dockerfile`、`Dockerfile.hub`、`.github/workflows/*`、`tools/{i18n-audit.mjs,build-msi.ps1,README-playwright.md}`、`src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/*}`。
+> 本章依据源码：`src/AguiGroupChat.Hub/{Program.cs,HubApp.cs,Transport/HttpGroupApi.cs,Users/UserApi.cs,Options/*.cs,appsettings*.json}`、`src/AguiGroupChat.Web/{Program.cs,WebIdentity.cs,AccountApi.cs,AdminApi.cs,AgentApi.cs,AttachmentApi.cs,BrandingApi.cs,ClientToolBridgeApi.cs,ConfigGovernanceApi.cs,ExecutionRuntimeApi.cs,ExportImportApi.cs,GlobalSearchApi.cs,GroupNameApi.cs,ImageLibraryApi.cs,KnowledgeBaseApi.cs,LinkProxyApi.cs,MarketplaceApi.cs,MemoryApi.cs,MentionSuggestApi.cs,MessageFeedbackApi.cs,NativeBridgeDownloadApi.cs,NativeTunnelApi.cs,PlanControlApi.cs,ScheduledTaskApi.cs,SelfApi.cs,SkillApi.cs,SofficeRunner.cs,StorageAdminApi.cs,SystemApi.cs,TopicSummaryApi.cs,TwinApi.cs,UserGroupApi.cs,WebhookApi.cs,WebhookDispatcher.cs,appsettings*.json}`、`src/AguiGroupChat.Agents/{AgentOptions.cs,ExecutionOptions.cs,KnowledgeBase.cs}`、`src/AguiGroupChat.Desktop*/**`、`src/AguiGroupChat.NativeBridge/Program.cs`、`docker-compose.yml`、`Dockerfile`、`Dockerfile.hub`、`.github/workflows/*`、`tools/{i18n-audit.mjs,build-msi.ps1,README-playwright.md}`、`src/AguiGroupChat.Web/wwwroot/{index.html,app.js,i18n/*}`。
 
 > 凡接口路径、配置键、默认值、枚举均取自上述文件；无法在代码中证实的，正文显式标注「（代码中未找到依据）」。
 

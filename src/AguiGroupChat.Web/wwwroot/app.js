@@ -6830,6 +6830,7 @@ function applyAdminTabVisibility() {
     adminTabUsers: adminPlus, adminTabUsage: operatorPlus, adminTabMetrics: operatorPlus,
     adminTabConfig: adminPlus, adminTabExec: adminPlus, adminTabAudit: operatorPlus,
     adminTabOrphans: adminPlus, adminTabUserGroups: adminPlus, adminTabStorage: adminPlus,
+    adminTabWebhooks: adminPlus,
   };
   for (const [id, show] of Object.entries(visible)) $(id)?.classList.toggle("hidden", !show);
 }
@@ -6855,6 +6856,7 @@ function switchAdminTab(tab) {
   const orphans = tab === "orphans";
   const usergroups = tab === "usergroups";
   const storage = tab === "storage";
+  const webhooks = tab === "webhooks";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
@@ -6864,6 +6866,7 @@ function switchAdminTab(tab) {
   $("adminTabOrphans").classList.toggle("on", orphans);
   $("adminTabUserGroups").classList.toggle("on", usergroups);
   $("adminTabStorage").classList.toggle("on", storage);
+  $("adminTabWebhooks").classList.toggle("on", webhooks);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
@@ -6873,6 +6876,7 @@ function switchAdminTab(tab) {
   $("adminOrphansView").classList.toggle("hidden", !orphans);
   $("adminUserGroupsView").classList.toggle("hidden", !usergroups);
   $("adminStorageView").classList.toggle("hidden", !storage);
+  $("adminWebhooksView").classList.toggle("hidden", !webhooks);
   if (usergroups) { loadUserGroups(); }
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
@@ -6890,6 +6894,9 @@ function switchAdminTab(tab) {
     loadAdminOrphans();
   } else if (storage) {
     loadStorageGovernance();
+  } else if (webhooks) {
+    loadWebhooks();
+    loadWebhookDeliveries();
   } else {
     loadConfigGovernance();
   }
@@ -7069,6 +7076,174 @@ function bindUserGroupConsole() {
   $("ugSaveBtn").onclick = saveUserGroup;
   $("ugCancelBtn").onclick = () => $("ugModal").classList.add("hidden");
   $("ugMemberSearch").addEventListener("input", () => { ugMemberQuery = $("ugMemberSearch").value; renderUgMemberList(); });
+}
+
+/* ============ 管理员控制台：出站 Webhook（对外集成） ============ */
+
+let webhookEventCatalog = null; // 事件类型目录（懒加载缓存）
+let webhooksById = {};
+
+function bindWebhookConsole() {
+  $("adminTabWebhooks").onclick = () => switchAdminTab("webhooks");
+  $("whAddBtn").onclick = () => openWebhookModal(null);
+  $("whRefreshBtn").onclick = () => { loadWebhooks(); loadWebhookDeliveries(); };
+  $("whSaveBtn").onclick = saveWebhook;
+  $("whCancelBtn").onclick = () => $("webhookModal").classList.add("hidden");
+  $("whSecretCopy").onclick = () => {
+    const v = $("whSecretValue").textContent || "";
+    navigator.clipboard?.writeText(v).then(() => toast(t("admin.whSecretCopied")), () => {});
+  };
+  $("adminWebhookRows").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const id = btn.dataset.id;
+    if (btn.dataset.act === "test") testWebhook(id);
+    else if (btn.dataset.act === "edit") openWebhookModal(webhooksById[id]);
+    else if (btn.dataset.act === "del") deleteWebhook(id);
+  });
+}
+
+/** 拉取订阅列表并渲染（密钥脱敏，仅展示 hasSecret）。 */
+async function loadWebhooks() {
+  const rows = $("adminWebhookRows");
+  if (!rows) return;
+  rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await fetch("/ag-ui/admin/webhooks", { headers: { Authorization: "Bearer " + state.token } });
+    const list = await res.json().catch(() => null);
+    if (!res.ok || !Array.isArray(list)) {
+      rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(list, "HTTP " + res.status)) })}</td></tr>`;
+      return;
+    }
+    webhooksById = {};
+    for (const s of list) webhooksById[s.id] = s;
+    if (!list.length) { rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.whEmpty")}</td></tr>`; return; }
+    rows.innerHTML = list.map((s) => {
+      const ev = (s.eventTypes && s.eventTypes.length) ? t("admin.whEventsCount", { n: s.eventTypes.length }) : t("admin.whEventsAll");
+      const st = s.enabled ? `<span class="tag-active">${t("admin.whEnabledOn")}</span>` : `<span class="tag-disabled">${t("admin.whEnabledOff")}</span>`;
+      const id = escapeHtml(s.id);
+      return `<tr>
+        <td>${escapeHtml(s.name || "—")}</td>
+        <td style="word-break:break-all">${escapeHtml(s.url)}</td>
+        <td>${escapeHtml(ev)}</td>
+        <td>${st}</td>
+        <td>
+          <button class="chip-btn" data-act="test" data-id="${id}" type="button">${t("admin.whTest")}</button>
+          <button class="chip-btn" data-act="edit" data-id="${id}" type="button">${t("admin.whEdit")}</button>
+          <button class="chip-btn danger" data-act="del" data-id="${id}" type="button">${t("admin.whDel")}</button>
+        </td></tr>`;
+    }).join("");
+  } catch (ex) {
+    rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
+  }
+}
+
+/** 拉取最近投递记录并渲染（新→旧，最多 30 条）。 */
+async function loadWebhookDeliveries() {
+  const rows = $("adminWebhookDeliveryRows");
+  if (!rows) return;
+  try {
+    const res = await fetch("/ag-ui/admin/webhooks/deliveries", { headers: { Authorization: "Bearer " + state.token } });
+    const list = await res.json().catch(() => null);
+    if (!res.ok || !Array.isArray(list) || !list.length) {
+      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.whNoDeliveries")}</td></tr>`;
+      return;
+    }
+    rows.innerHTML = list.slice(0, 30).map((d) => {
+      const time = new Date(d.atMs).toLocaleString();
+      const st = d.ok
+        ? `<span class="tag-active">${escapeHtml(String(d.statusCode || "OK"))}</span>`
+        : `<span class="tag-disabled">${escapeHtml(d.error || ("HTTP " + d.statusCode))}</span>`;
+      return `<tr><td>${escapeHtml(time)}</td><td>${escapeHtml(d.eventType)}</td><td>${st}</td>
+        <td style="word-break:break-all">${escapeHtml(d.url)} · #${d.attempt} · ${d.durationMs}ms</td></tr>`;
+    }).join("");
+  } catch { rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.whNoDeliveries")}</td></tr>`; }
+}
+
+async function ensureWebhookCatalog() {
+  if (webhookEventCatalog) return webhookEventCatalog;
+  const res = await fetch("/ag-ui/admin/webhooks/events", { headers: { Authorization: "Bearer " + state.token } });
+  webhookEventCatalog = (await res.json().catch(() => null)) || [];
+  return webhookEventCatalog;
+}
+
+/** 打开新建 / 编辑订阅弹窗；编辑时预填已选事件（密钥不回显）。 */
+async function openWebhookModal(sub) {
+  const isEdit = !!sub;
+  $("whModalTitle").textContent = t(isEdit ? "admin.whEditTitle" : "admin.whNewTitle");
+  $("whIdField").value = isEdit ? sub.id : "";
+  $("whNameField").value = isEdit ? (sub.name || "") : "";
+  $("whUrlField").value = isEdit ? (sub.url || "") : "";
+  $("whGroupField").value = isEdit ? (sub.groupId || "") : "";
+  $("whEnabledField").checked = isEdit ? !!sub.enabled : true;
+  $("whSecretBox").classList.add("hidden");
+  $("whSecretValue").textContent = "";
+  const catalog = await ensureWebhookCatalog();
+  const selected = new Set(isEdit ? (sub.eventTypes || []) : []);
+  $("whEventList").innerHTML = catalog.map((tp) => {
+    const on = selected.has(tp);
+    return `<label class="pick-item${on ? " checked" : ""}">
+      <input type="checkbox" value="${escapeHtml(tp)}" ${on ? "checked" : ""} />
+      <span class="pick-name">${escapeHtml(tp)}</span></label>`;
+  }).join("");
+  $("whEventList").querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.onchange = () => cb.closest("label")?.classList.toggle("checked", cb.checked);
+  });
+  $("webhookModal").classList.remove("hidden");
+}
+
+async function saveWebhook() {
+  const id = $("whIdField").value;
+  const body = {
+    name: $("whNameField").value.trim(),
+    url: $("whUrlField").value.trim(),
+    groupId: $("whGroupField").value.trim(),
+    enabled: $("whEnabledField").checked,
+    eventTypes: Array.from($("whEventList").querySelectorAll("input:checked")).map((i) => i.value),
+  };
+  if (!body.url) { toast(t("admin.whUrlRequired")); return; }
+  const btn = $("whSaveBtn"); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = t("common.saving");
+  try {
+    const res = await fetch(id ? `/ag-ui/admin/webhooks/${encodeURIComponent(id)}` : "/ag-ui/admin/webhooks", {
+      method: id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    toast(t("admin.whSaved"));
+    await loadWebhooks();
+    if (!id && d && d.secret) {
+      // 新建：密钥仅此一次返回，留在弹窗里供复制
+      $("whSecretBox").classList.remove("hidden");
+      $("whSecretValue").textContent = d.secret;
+    } else {
+      $("webhookModal").classList.add("hidden");
+    }
+    loadWebhookDeliveries();
+  } catch (ex) { toast(ex.message); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+async function deleteWebhook(id) {
+  if (!await uiConfirm({ message: t("admin.whDeleteConfirm"), danger: true })) return;
+  const res = await fetch(`/ag-ui/admin/webhooks/${encodeURIComponent(id)}`, {
+    method: "DELETE", headers: { Authorization: "Bearer " + state.token },
+  });
+  if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, "HTTP " + res.status)); return; }
+  toast(t("admin.whDeleted"));
+  await loadWebhooks();
+}
+
+async function testWebhook(id) {
+  const res = await fetch(`/ag-ui/admin/webhooks/${encodeURIComponent(id)}/test`, {
+    method: "POST", headers: { Authorization: "Bearer " + state.token },
+  });
+  const d = await res.json().catch(() => null);
+  if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+  toast(d && d.ok ? t("admin.whTestOk", { code: d.statusCode || "OK" }) : t("admin.whTestFail", { err: (d && d.error) || "" }));
+  loadWebhookDeliveries();
 }
 
 /**
@@ -11931,6 +12106,7 @@ function init() {
   $("adminTabAudit").onclick = () => switchAdminTab("audit");
   $("adminTabOrphans").onclick = () => switchAdminTab("orphans");
   bindUserGroupConsole(); // 细粒度授权：用户分组后台页签
+  bindWebhookConsole(); // 对外集成：出站 Webhook 后台页签
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
   $("storageRefreshBtn").onclick = loadStorageGovernance;
   $("storageReclaimBtn").onclick = runStorageReclaim;

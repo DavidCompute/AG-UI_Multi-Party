@@ -204,6 +204,7 @@
   - **对外 API 密钥**：`Auth:ApiKeys`（`[{apiKey, username}]`），`Authorization: Bearer <apiKey>` 免登录以绑定账号身份调用 HTTP API，继承其权限 / 管理员标记。
   - **白标品牌**：`GET/POST /ag-ui/settings/branding`（公开读 / 管理员写），配置应用名 + Logo + 品牌主色 + 强制深色 + 副标语，持久化到扩展区「branding」；前端以 CSS 变量注入主色、渲染登录页 / 顶栏 Logo 与应用名，管理菜单「白标设置」可在线编辑。
   - **iframe 嵌入**：`GroupChatOptions.AllowedFrameOrigins` 配置允许嵌入来源（CSP `frame-ancestors` 与 X-Frame-Options 相应放行，默认禁止）；前端自动检测 iframe / `?embed=1` 进入紧凑嵌入模式（隐藏无关按钮 / 副标题）。
+  - **出站 Webhook（对外集成）**：管理员控制台「Webhook」页签配置回调地址 + 事件订阅（18 类事件；可按 `groupId` 限定知聚；密钥 `whsec_…` 仅创建 / 轮换时显示一次，落盘加密），知聚事件以带 **HMAC-SHA256 签名**的 HTTP POST 推送（信封 `{deliveryId, event, groupId, sentAt, data}`，头部 `X-KnowGath-Signature = sha256(HMAC(secret, "{timestamp}.{body}"))`）；失败重试 3 次（退避 1s/5s/25s），后台线程不阻塞扇出，与在线人数无关；「最近投递」+「测试」便于集成调试。管理 API：`/ag-ui/admin/webhooks(+/events,/deliveries,/{id}/test)`。落点：`IGroupEventObserver`（Hub 钩子）+ `WebhookApi` / `WebhookDispatcher`（Web）。
 
 - **Playwright 自动化验证（已实现）**：`tools/ui-orchestrate-flow.mjs` 用 Playwright 自动跑「一键组织编排 → 建客服知聚」全链路并截图（`tools/README-playwright.md`），覆盖 SSE 流式生成、apply 落库、客服知聚进入与会话隔离的前端验证。
 

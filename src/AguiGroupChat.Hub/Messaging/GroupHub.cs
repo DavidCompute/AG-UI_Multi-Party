@@ -33,6 +33,8 @@ public sealed class GroupHub : IDisposable
     private readonly IGraphMemory? _graph;
     private readonly IUserGroupService? _userGroups;
     private readonly AguiGroupChat.Hub.Storage.IAttachmentLifecycle? _attachmentLifecycle;
+    // 出站集成钩子（Webhook 等）：每次扇出事件同步回调一次，实现方须立即返回（见 IGroupEventObserver）
+    private readonly IGroupEventObserver? _eventObserver;
     private readonly ConcurrentDictionary<string, byte> _disbanded = new();
     // 客服知聚的非成员参与者（顾客）：key=groupId → 已进入的顾客 id 集合。顾客不是群成员，
     // 各自拥有与客服团队的独立会话（顾客之间彼此隔离）。仅存于内存（会话参与非持久成员）。
@@ -94,7 +96,8 @@ public sealed class GroupHub : IDisposable
         ITwinAgentSync? twinSync = null,
         IGraphMemory? graph = null,
         IUserGroupService? userGroups = null,
-        AguiGroupChat.Hub.Storage.IAttachmentLifecycle? attachmentLifecycle = null)
+        AguiGroupChat.Hub.Storage.IAttachmentLifecycle? attachmentLifecycle = null,
+        IGroupEventObserver? eventObserver = null)
     {
         _store = store;
         _users = users;
@@ -112,6 +115,7 @@ public sealed class GroupHub : IDisposable
         _graph = graph;
         _userGroups = userGroups;
         _attachmentLifecycle = attachmentLifecycle;
+        _eventObserver = eventObserver;
         _agentInvocationLimiter = new SemaphoreSlim(Math.Max(1, options.MaxConcurrentAgentInvocations));
         // 孤儿流兜底定时器：周期清理 End 丢失 / 智能体进程崩溃的流式消息（方法内 try/catch，Timer 随 Dispose 释放）
         _orphanTimer = new Timer(_ => CleanupOrphanStreams(), null, OrphanCleanupIntervalMs, OrphanCleanupIntervalMs);
@@ -2019,6 +2023,14 @@ public sealed class GroupHub : IDisposable
     /// </summary>
     private async Task FanOutAsync(string groupId, object evt, IReadOnlySet<string>? onlyTo = null, CancellationToken ct = default)
     {
+        // 出站集成钩子先于「无订阅者则提前返回」执行：外部系统（Webhook）只关心事件本身，
+        // 与该群当前是否有浏览器连接无关。观察者实现须立即返回（内部入队），故不拖慢扇出。
+        if (_eventObserver is not null)
+        {
+            try { _eventObserver.OnEvent(groupId, evt); }
+            catch (Exception ex) { _logger.LogDebug(ex, "事件观察者回调失败（忽略，不影响扇出）"); }
+        }
+
         var json = AguiJson.Serialize(evt);
         var targets = _connections.SubscribersOf(groupId)
             .Where(c => onlyTo is null || onlyTo.Contains(c.MemberId))
