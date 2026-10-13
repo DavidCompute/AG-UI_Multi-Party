@@ -2405,7 +2405,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 **可解释 + 可纠正（1.0.197，配图 C）**：
 
 - **可解释**：检索响应（`/ag-ui/images/search`）的每张图带 `score`、`matchKind`（`vector` 向量命中 / `keyword` 词面命中）、`tags`、`mismatchCount`；图库「试检索」（`#libSetModal`）直接展示这些，便于看清「为什么配这张图」。
-- **可纠正（负反馈）**：`POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback`（body `{relevant}`）记录「相关 / 不相关」；检索时按 **（不相关 − 相关）** 的差额**降权**（每条扣 `MismatchPenaltyStep = 0.08`，封顶 `MaxMismatchPenalty = 0.32`），降权后低于门槛即不再召回。计数随图库快照持久化（`ImageAsset.MismatchCount` / `RelevantCount`）。UI 在「试检索」命中行内提供 👎「标记不相关」。
+- **可纠正（负反馈）**：`POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback`（body `{relevant}`）记录「相关 / 不相关」；检索时按 **（不相关 − 相关）** 的差额**降分**（每条扣 `MismatchPenaltyStep = 0.08`，封顶 `MaxMismatchPenalty = 0.32`）。注意：降分**在门槛过滤之后应用，不会重新套用语义门槛**（否则会破坏「词面兜底不套门槛」这条不变量）——因此实际效果是**降分 / 降位**，**只有扣至 0 分才被剔除**（门槛之上的少量误配仍会以较低分保留）。计数随图库快照持久化（`ImageAsset.MismatchCount` / `RelevantCount`），且为**按图全局**而非按查询（对一张图标过不相关，会影响它的所有后续检索）。UI 在「试检索」命中行内提供 👎「标记不相关」。
 
 ### 5.5 库设置：检索严格度与试检索（`#libSetModal`）
 

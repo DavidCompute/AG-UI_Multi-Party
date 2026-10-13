@@ -475,6 +475,8 @@ async function logout() {
   state.memberId = null;
   state.avatar = null;
   state.isAdmin = false;
+  state.platformRole = "user"; // 复位生效角色，避免登出后残留旧角色影响菜单/控制台判定
+  state.isSuperAdmin = false;
   pendingAutoEnterGroup = false;
   clearAuth(); // 同时清除 sessionStorage 与 localStorage（保持登录状态随退出登录失效）
   try {
@@ -628,6 +630,8 @@ async function loadMemoryTimeline() {
     if (groupId) params.set("groupId", groupId);
     if (keyword) params.set("keyword", keyword);
     const res = await fetch(`/ag-ui/memory/timeline?${params.toString()}`, { headers: { Authorization: "Bearer " + (state.token || "") } });
+    // 非管理员必须指定自己所在群（服务端 403）；给明确指引而不是笼统“加载失败”
+    if (res.status === 403) { box.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.timelineNeedGroup"))}</div>`; return; }
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) { box.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loadFail"))}</div>`; return; }
     const topics = d.topics || [];

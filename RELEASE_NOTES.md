@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.198 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.198 Release Notes (current Windows desktop release)
+
+**版本说明**：对 1.0.195–1.0.197 三项做代码审核后的修复——手册纠正配图降权描述（只降分、不重套门槛、扣至 0 才剔除）、登出复位生效角色、时间线 403 给出明确指引。
+**Version note**: review fixes for 1.0.195–1.0.197 — correct the illustration down-weighting description (lower score only, no gate re-application, excluded only at 0), reset the effective role on logout, and give a clear hint for the timeline 403.
+
+## 审核修复
+# Review fixes
+
+中文：
+- **手册纠正（C）**：原写「降权后低于门槛即不再召回」有误——惩罚在门槛过滤**之后**应用，且**不重新套用**语义门槛（否则会破坏「词面兜底不套门槛」这条被测试钉住的不变量）。改为准确描述：**只降分 / 降位，扣至 0 分才剔除**；并注明计数是「按图全局」而非按查询。
+- **登出复位角色（A1）**：`logout()` 现同时复位 `state.platformRole = "user"` 与 `isSuperAdmin`，避免登出后残留旧角色影响菜单 / 控制台判定。
+- **时间线 403 指引（A3）**：非管理员在「全部知聚」下切时间线（服务端按设计返回 403）时，改为提示「需先选择一个知聚」而不是笼统「记忆加载失败」。
+English:
+- **Doc fix (C)**: the old wording "once it drops below the gate the image is no longer recalled" was wrong — the penalty is applied **after** gate filtering and does **not** re-apply the semantic gate (that would break the "keyword fallback bypasses the gate" invariant). Now accurate: **lower score / lower rank, excluded only at 0**; and the counts are noted as **per-image, not per-query**.
+- **Role reset on logout (A1)**: `logout()` now also resets `state.platformRole = "user"` and `isSuperAdmin`, so a stale role can't affect the menu / console after logout.
+- **Timeline 403 hint (A3)**: for a non-admin with "All groups", switching to Timeline (the server returns 403 by design) now says "select a Circle first" instead of a generic "memory load failed".
+
+## 测试
+# Tests
+
+中文：三项既有套件复跑全绿（`ui-role-console` 26/26、`ui-memory-views` 17/17、`ui-imglib-feedback` 13/13）。
+English: the three suites re-run green (`ui-role-console` 26/26, `ui-memory-views` 17/17, `ui-imglib-feedback` 13/13).
+
 # AG-UI 群聊桌面版 1.0.197 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.197 Release Notes (current Windows desktop release)
 

@@ -1495,6 +1495,7 @@ window.I18N_DICTS.en = {
   "memory.viewTimeline": "⏱ Timeline",
   "memory.viewGraph": "🕸 Graph",
   "memory.timelineEmpty": "No memories to replay in this Circle (recorded automatically once semantic memory is enabled)",
+  "memory.timelineNeedGroup": "Select a Circle above first — replay is per Circle",
   "memory.defaultTopic": "Default topic",
   "memory.graphNeedGroup": "Select a Circle above first",
   "memory.graphNeedQuery": "Enter a topic keyword to build the related memory graph",

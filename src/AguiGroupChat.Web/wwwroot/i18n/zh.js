@@ -1492,6 +1492,7 @@ window.I18N_DICTS.zh = {
   "memory.viewTimeline": "⏱ 时间线",
   "memory.viewGraph": "🕸 图谱",
   "memory.timelineEmpty": "该知聚暂无记忆可回放（启用语义记忆后自动记录）",
+  "memory.timelineNeedGroup": "时间线需先在上方选择一个知聚（回放是按单个知聚进行的）",
   "memory.defaultTopic": "默认话题",
   "memory.graphNeedGroup": "请先在上方选择一个知聚",
   "memory.graphNeedQuery": "输入一个主题词，生成相关的记忆关系图",
