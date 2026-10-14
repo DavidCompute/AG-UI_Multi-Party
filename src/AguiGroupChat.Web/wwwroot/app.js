@@ -352,6 +352,7 @@ function enterApp(data) {
     $("meMenuModelConfig").classList.toggle("hidden", !adminPlus);  // 模型配置（Admin+）
     $("meMenuAdmin").classList.toggle("hidden", !operatorPlus);     // 管理控制台（Operator+；页签按角色收敛）
     $("meMenuStatus").classList.toggle("hidden", !operatorPlus);    // 系统状态（Operator+）
+    $("meMenuVoice").classList.toggle("hidden", !operatorPlus);     // 语音服务（Operator+）
     $("meMenuBranding").classList.toggle("hidden", !adminPlus);     // 白标品牌（Admin+）
     // 管理入口文案统一为「管理控制台」（markup 的 data-i18n=menu.console）：它打开的是整个控制台
     // 而非仅用户管理；角色只决定可见页签（Operator 仅只读），不改菜单名。
@@ -8230,67 +8231,78 @@ async function openStatusModal() {
     items.push([t("status.docPreview"), docPreviewOk
       ? t("status.docPreviewReady")
       : `<span class="status-warn">${t("status.docPreviewMissing")}</span>`]);
-    // 语音（多模态进阶 · 语音问答）：ASR 转写 / TTS 回复的配置与可达性（探测失败不阻断其余展示）
-    const voiceRow = (label, v) => {
-      if (!v || !v.enabled) return [label, t("status.voiceOff")];
-      if (v.reachable === false) return [label, `<span class="status-warn">${t("status.voiceUnreachable")}</span>`];
-      return [label, t("status.voiceReady")];
-    };
-    const voiceHints = [];
-    if (d.voice) {
-      items.push(voiceRow(t("status.voiceAsr"), d.voice.asr));
-      items.push(voiceRow(t("status.voiceTts"), d.voice.tts));
-      if (d.voice.asr && d.voice.asr.enabled) voiceHints.push(t("status.voiceAsrEndpoint", { ep: escapeHtml(String(d.voice.asr.endpoint || "")) }));
-      if (d.voice.tts && d.voice.tts.enabled) voiceHints.push(t("status.voiceTtsEndpoint", { ep: escapeHtml(String(d.voice.tts.endpoint || "")), mode: d.voice.tts.onlyForVoice ? t("status.voiceOnlyTurn") : "" }));
-    }
     const hints = [];
     if (!docPreviewOk) hints.push(escapeHtml(t("status.docPreviewHint")));
-    for (const h of voiceHints) hints.push(h);
+    hints.push(escapeHtml(t("status.voiceMovedHint"))); // 语音服务已抽成独立入口
     $("statusBody").innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
       `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`
       + hints.map((h) => `<div class="status-hint">${h}</div>`).join("");
-    // TTS 已启用：给一个「试听音色」入口（列出合成服务的音色，逐个试听）
-    if (d.voice && d.voice.tts && d.voice.tts.enabled) {
-      const pick = document.createElement("button");
-      pick.type = "button"; pick.className = "btn-ghost"; pick.style.marginTop = "10px";
-      pick.textContent = t("status.voicePick");
-      pick.onclick = openVoicePicker;
-      $("statusBody").appendChild(pick);
-    }
   } catch { $("statusBody").innerHTML = t("admin.sysNetErr"); }
 }
 
-/** 语音音色试听：列出合成服务的音色，逐个试听（调用试听端点合成一句短样例）。*/
-async function openVoicePicker() {
-  $("voicePickerModal").classList.remove("hidden");
-  $("voicePickerBody").innerHTML = t("status.loading");
+/** 语音服务（多模态进阶 · 语音问答，仅运维及以上）：配置 + 可达性 + 音色试听。 */
+async function openVoiceServiceModal() {
+  if (!isOperatorPlus()) { toast(t("admin.adminOnly")); return; }
+  $("voiceServiceModal").classList.remove("hidden");
+  await renderVoiceService();
+}
+
+async function renderVoiceService() {
+  const body = $("voiceServiceBody");
+  body.innerHTML = t("status.loading");
   try {
-    const res = await fetch("/ag-ui/admin/voice/voices", { headers: { Authorization: "Bearer " + state.token } });
-    const d = await res.json().catch(() => null);
-    const voices = (res.ok && d && Array.isArray(d.voices)) ? d.voices : null;
-    const box = $("voicePickerBody");
-    if (!voices) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("status.voicePickFail", { err: errMsg(d, "HTTP " + res.status) }))}</div>`; return; }
-    if (voices.length === 0) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("status.voicePickEmpty"))}</div>`; return; }
-    box.innerHTML = "";
-    const audio = document.createElement("audio"); // 复用单个元素，避免多例叠加播放
-    audio.preload = "none";
-    for (const v of voices) {
-      const row = document.createElement("div");
-      row.className = "voice-row";
-      const name = document.createElement("span");
-      name.className = "voice-name"; name.textContent = v;
-      const play = document.createElement("button");
-      play.type = "button"; play.className = "voice-play"; play.textContent = "▶";
-      play.title = t("status.voicePlay");
-      play.onclick = () => {
-        audio.src = `/ag-ui/admin/voice/sample?voice=${encodeURIComponent(v)}&token=${encodeURIComponent(state.token || "")}`;
-        audio.play().catch(() => toast(t("status.voicePickFail", { err: "play" })));
-      };
-      row.appendChild(name); row.appendChild(play);
-      box.appendChild(row);
+    const [stRes, vRes] = await Promise.all([
+      fetch("/ag-ui/admin/status", { headers: { Authorization: "Bearer " + state.token } }),
+      fetch("/ag-ui/admin/voice/voices", { headers: { Authorization: "Bearer " + state.token } }),
+    ]);
+    const st = await stRes.json().catch(() => null);
+    if (!stRes.ok || !st || !st.voice) { body.innerHTML = t("admin.loadFail", { err: escapeHtml(errMsg(st, "HTTP " + stRes.status)) }); return; }
+    const voiceVal = (v) => {
+      if (!v || !v.enabled) return t("status.voiceOff");
+      if (v.reachable === false) return `<span class="status-warn">${t("status.voiceUnreachable")}</span>`;
+      return t("status.voiceReady");
+    };
+    const items = [
+      [t("status.voiceAsr"), voiceVal(st.voice.asr)],
+      [t("status.voiceTts"), voiceVal(st.voice.tts)],
+    ];
+    const hints = [];
+    if (st.voice.asr && st.voice.asr.enabled) hints.push(t("status.voiceAsrEndpoint", { ep: escapeHtml(String(st.voice.asr.endpoint || "")) }));
+    if (st.voice.tts && st.voice.tts.enabled) hints.push(t("status.voiceTtsEndpoint", { ep: escapeHtml(String(st.voice.tts.endpoint || "")), mode: st.voice.tts.onlyForVoice ? t("status.voiceOnlyTurn") : "" }));
+    body.innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
+      `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`
+      + hints.map((h) => `<div class="status-hint">${h}</div>`).join("");
+
+    // 音色试听（TTS 启用时）：列出合成服务的音色，逐个试听
+    if (st.voice.tts && st.voice.tts.enabled) {
+      const sec = document.createElement("div");
+      sec.className = "voice-sec";
+      sec.innerHTML = `<div class="voice-sec-title">${escapeHtml(t("voice.voicesTitle"))}</div><div class="voice-picker"></div>`;
+      body.appendChild(sec);
+      const box = sec.querySelector(".voice-picker");
+      const vd = await vRes.json().catch(() => null);
+      const voices = (vRes.ok && vd && Array.isArray(vd.voices)) ? vd.voices : null;
+      if (voices === null) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("voice.listFail", { err: errMsg(vd, "HTTP " + vRes.status) }))}</div>`; return; }
+      if (voices.length === 0) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("voice.empty"))}</div>`; return; }
+      const audio = document.createElement("audio"); // 复用单个元素，避免多例叠加播放
+      audio.preload = "none";
+      for (const v of voices) {
+        const row = document.createElement("div");
+        row.className = "voice-row";
+        const name = document.createElement("span");
+        name.className = "voice-name"; name.textContent = v;
+        const play = document.createElement("button");
+        play.type = "button"; play.className = "voice-play"; play.textContent = "▶"; play.title = t("voice.play");
+        play.onclick = () => {
+          audio.src = `/ag-ui/admin/voice/sample?voice=${encodeURIComponent(v)}&token=${encodeURIComponent(state.token || "")}`;
+          audio.play().catch(() => toast(t("voice.listFail", { err: "play" })));
+        };
+        row.appendChild(name); row.appendChild(play);
+        box.appendChild(row);
+      }
+      box.appendChild(audio);
     }
-    box.appendChild(audio);
-  } catch { $("voicePickerBody").innerHTML = t("admin.sysNetErr"); }
+  } catch { body.innerHTML = t("admin.sysNetErr"); }
 }
 
 /** 运行时长格式化（秒 → “X天X小时X分”）。 */
@@ -12797,8 +12809,10 @@ function init() {
   $("efReset").onclick = resetExecutionConfig;
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
-  $("voicePickerClose").onclick = () => $("voicePickerModal").classList.add("hidden");
-  $("voicePickerModal").addEventListener("click", (e) => { if (e.target === $("voicePickerModal")) $("voicePickerModal").classList.add("hidden"); });
+  $("meMenuVoice").onclick = () => { $("meMenu").classList.add("hidden"); openVoiceServiceModal(); };
+  $("voiceServiceClose").onclick = () => $("voiceServiceModal").classList.add("hidden");
+  $("voiceServiceModal").addEventListener("click", (e) => { if (e.target === $("voiceServiceModal")) $("voiceServiceModal").classList.add("hidden"); });
+  $("voiceServiceRecheck").onclick = () => renderVoiceService();
   $("memSearchBtn").onclick = () => refreshMemView();
   $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") refreshMemView(); });
   $("memGroupSelect").addEventListener("change", () => { refreshMemView(); syncMemForgetHint(); });

@@ -161,6 +161,7 @@
   - **多模态进阶 · 语音进→语音出闭环（TTS，1.0.209）**：数字员工回复头部 🔊 用 Web Speech API（系统语音，离线）朗读，可开关自动朗读；发语音消息时其回复自动朗读。Docker 新增可选 `speaches` 服务（`--profile voice`，OpenAI 兼容转写 + 合成），前端默认转写端点已指向它。
   - **多模态进阶 · 服务端语音回复（TTS，1.0.210）**：开启 `Agents:Audio:SpeechEnabled` 后回复经 `SpeechSynthesisService` 合成为音频附件并挂到消息（复用技能产物回挂路径），覆盖主回复/流水线/交接/提升/审批恢复；默认关，失败静默。新增 `SpeechSynthesisTests` 与真实端点集成测试 `AudioIntegrationTests`。
   - **多模态进阶 · 独立 TTS 服务（1.0.211）**：服务端语音回复改用独立 Kokoro-FastAPI（`--profile voice` 一起拉起，镜像走南京大学镜像站，中文音色内置、CPU 可跑）；`SpeechSynthesisService` 仅改配置即接上（无需改代码）。实测中文合成→转写闭环通过。
+  - **多模态进阶 · 语音服务独立运维入口（1.0.212–1.0.218）**：控制台把语音服务收敛为账号菜单 **「🎙️ 语音服务」** 独立面板（`#voiceServiceModal`）：并行拉取 `/ag-ui/admin/status` 与 `/ag-ui/admin/voice/voices`，展示 **ASR / TTS 就绪 / 未启用 / 不可达**三态 + 端点提示、逐音色 **「▶」试听**（复用单个 `<audio>`）、**「🔄 重新检测」**不关窗即重拉；语音消息**转写默认内联**并可**就地修正 + 一键按修正文本重问**；TTS 新增语速参数（`Agents:Audio:SpeechSpeed`）。「系统状态」只留一行跳转提示，后端端点无改动。
 
 ### 5.3 前端性能与无障碍（★☆☆） ✅已实现（虚拟滚动已具备 + ARIA 增强）
 - **现状**：已做流式局部渲染 + 仅渲染最近 300 条。

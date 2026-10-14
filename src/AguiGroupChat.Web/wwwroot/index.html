@@ -43,6 +43,7 @@
     <div id="meMenuModelConfig" class="me-menu-item" data-i18n="menu.modelConfig">模型配置</div>
     <div id="meMenuAdmin" class="me-menu-item" data-i18n="menu.console">管理控制台</div>
     <div id="meMenuStatus" class="me-menu-item" data-i18n="menu.status">系统状态</div>
+    <div id="meMenuVoice" class="me-menu-item" data-i18n="menu.voice">🎙️ 语音服务</div>
     <div id="meMenuMemory" class="me-menu-item" data-i18n="menu.memory">记忆管理</div>
     <div id="meMenuBranding" class="me-menu-item" data-i18n="menu.branding">白标设置</div>
     <div id="meMenuBackup" class="me-menu-item" data-i18n="menu.backup">数据备份</div>
@@ -2006,14 +2007,15 @@
     </div>
   </div>
 
-  <!-- 语音音色试听（多模态进阶 · 语音问答）：列出合成服务的音色，逐个试听 -->
-  <div id="voicePickerModal" class="modal-overlay hidden">
+  <!-- 语音服务（多模态进阶 · 语音问答，仅运维及以上）：配置 + 可达性 + 音色试听 + 一键重检 -->
+  <div id="voiceServiceModal" class="modal-overlay hidden">
     <div class="modal status-modal">
-      <div class="modal-title" data-i18n="status.voicePickTitle">🎧 语音音色试听</div>
-      <p class="form-hint" style="margin:0 0 8px" data-i18n="status.voicePickHint">点击「▶」试听该音色的样例句；设为默认请改 Agents:Audio:SpeechVoice（或 AGENTS_AUDIO_SPEECH_VOICE）后重启。</p>
-      <div id="voicePickerBody" class="voice-picker"></div>
+      <div class="modal-title" data-i18n="voice.title">🎙️ 语音服务</div>
+      <p class="form-hint" style="margin:0 0 8px" data-i18n="voice.hint">语音问答（ASR）与语音回复（TTS）的配置与连通性；端点 / 模型在服务端配置（Agents:Audio:*）修改后需重启。</p>
+      <div id="voiceServiceBody" class="status-body"></div>
       <div class="modal-actions">
-        <button id="voicePickerClose" class="btn-ghost" data-i18n="status.close">关闭</button>
+        <button id="voiceServiceRecheck" class="btn-ghost" data-i18n="voice.recheck">🔄 重新检测</button>
+        <button id="voiceServiceClose" class="btn-ghost" data-i18n="status.close">关闭</button>
       </div>
     </div>
   </div>

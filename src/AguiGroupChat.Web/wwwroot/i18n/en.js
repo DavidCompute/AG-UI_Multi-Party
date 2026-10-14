@@ -61,6 +61,7 @@ window.I18N_DICTS.en = {
   "menu.modelConfig": "Model Config",
   "menu.console": "Admin Console",
   "menu.status": "System Status",
+  "menu.voice": "🎙️ Voice service",
   "menu.memory": "Memory Management",
   "menu.branding": "Whitelabel Settings",
   "menu.tasks": "Task Center",
@@ -1683,12 +1684,7 @@ window.I18N_DICTS.en = {
   "status.voiceAsrEndpoint": "ASR endpoint: {ep}",
   "status.voiceTtsEndpoint": "TTS endpoint: {ep}{mode}",
   "status.voiceOnlyTurn": " (voice turns only)",
-  "status.voicePick": "🎧 Preview voices",
-  "status.voicePickTitle": "🎧 Voice preview",
-  "status.voicePickHint": "Click ▶ to hear a sample in that voice; to make it the default, change Agents:Audio:SpeechVoice (or AGENTS_AUDIO_SPEECH_VOICE) and restart.",
-  "status.voicePickEmpty": "The service returned no voice list",
-  "status.voicePickFail": "Failed to get the voice list: {err}",
-  "status.voicePlay": "Preview",
+  "status.voiceMovedHint": "Voice service has moved to the account menu → 🎙️ Voice service (config, reachability, voice preview).",
 
   /* --- 消息搜索补充 --- */
   "search.me": "Me",
@@ -1733,6 +1729,13 @@ window.I18N_DICTS.en = {
   "profile.avatarUploadFail": "Avatar upload failed: {err}",
 
   /* --- 语音 / 画布 / Mermaid --- */
+  "voice.title": "🎙️ Voice service",
+  "voice.hint": "Configuration and connectivity for voice Q&A (ASR) and voice reply (TTS); endpoints / models are configured server-side (Agents:Audio:*) and require a restart.",
+  "voice.recheck": "🔄 Re-check",
+  "voice.voicesTitle": "Voice preview",
+  "voice.listFail": "Failed to get the voice list: {err}",
+  "voice.empty": "The service returned no voice list",
+  "voice.play": "Preview",
   "voice.micDenied": "Cannot access microphone: please grant permission",
   "voice.micNotFound": "Cannot access microphone: no recording device available",
   "voice.unsupported": "This browser does not support audio recording",

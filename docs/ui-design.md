@@ -643,6 +643,16 @@ apiKey 不回显，仅提示“已配置”。
   （装 LibreOffice 或用 `AGUI_SOFFICE` 指定 soffice 路径后重启）——不再等用户点「在线查看 / ▶ 播放」时才报 503。
   桌面版（本机宿主）尤其需要这行：MSI **不捆绑 LibreOffice**，缺它即 PPT / Word / Excel 在线查看与播放不可用。
 
+### 7.7 语音服务（#voiceServiceModal，账号菜单，Operator+）
+
+- 账号菜单 **「🎙️ 语音服务」**（`#meMenuVoice`，`menu.voice`）打开 `#voiceServiceModal`，把语音问答（ASR）/ 语音回复（TTS）
+  的**配置、可达性、音色试听、一键重检**集中到一个独立面板；「系统状态」不再列语音行，只留一行跳转提示。
+- 面板并行拉取 `GET /ag-ui/admin/status` 与 `GET /ag-ui/admin/voice/voices`：
+  - **ASR / TTS 状态行**：就绪 / 未启用 / 不可达三态（`reachable` 由短超时 GET 探测，任意 HTTP 响应即算可达），附端点提示（TTS 另标「（仅语音回合）」）。
+  - **音色试听**：TTS 启用时列出合成服务全部音色，逐个 **「▶」** 试听（复用单个 `<audio>`，避免叠加播放）。
+  - **「🔄 重新检测」**：不关窗即可重新拉取状态与音色列表。
+- 前端实现 `openVoiceServiceModal()` / `renderVoiceService()`（`app.js`）；后端复用既有端点，无改动。
+
 ---
 
 ## 8. 本地持久化键一览

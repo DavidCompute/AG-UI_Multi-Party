@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.218 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.218 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音服务独立运维入口**——账号菜单新增 **「🎙️ 语音服务」**：把语音问答（ASR）/ 语音回复（TTS）的可达性、端点、**音色试听**与**一键重检**集中到一个独立面板；「系统状态」只保留一行指向新入口的提示，职责更清晰。
+**Version note**: **A dedicated Voice Service entry** — the account menu gains **“🎙️ Voice service”**, consolidating voice Q&A (ASR) / voice reply (TTS) reachability, endpoints, **voice preview** and a **one-click re-check** into its own panel; System Status keeps just a one-line pointer to it, so responsibilities are cleaner.
+
+## 语音服务独立入口
+# Dedicated Voice Service panel
+
+中文：账号菜单（运维及以上可见）新增 **「🎙️ 语音服务」**，打开即**并行拉取** `/ag-ui/admin/status` 与 `/ag-ui/admin/voice/voices`：
+- **ASR / TTS 状态**：就绪 / 未启用 / 不可达三态，附端点提示（TTS 另标「（仅语音回合）」）。
+- **音色试听**：TTS 启用时列出合成服务的全部音色，逐个 **「▶」** 试听（复用单个 `<audio>`，避免叠加播放）。
+- **一键重检**：面板底部「🔄 重新检测」重新拉取，无需关窗重开。
+
+「系统状态」移除了语音行与「试听音色」按钮，改为一行提示「语音服务已移至账号菜单 → 🎙️ 语音服务」。后端**无改动**（复用既有 `/ag-ui/admin/status`、`/ag-ui/admin/voice/voices`、`/ag-ui/admin/voice/sample` 端点）。
+English: the account menu (visible to Operator+) gains **“🎙️ Voice service”**, which on open **fetches in parallel** `/ag-ui/admin/status` and `/ag-ui/admin/voice/voices`:
+- **ASR / TTS status**: ready / off / unreachable, with endpoint hints (TTS also marked “(voice turns only)”).
+- **Voice preview**: when TTS is on, lists every voice the synthesis service offers, each previewable with **“▶”** (a single reused `<audio>` avoids overlapping playback).
+- **One-click re-check**: the **“🔄 Re-check”** button at the bottom re-fetches, no need to close and reopen.
+
+System Status drops the voice rows and the “Preview voices” button, replaced by a one-line pointer: “Voice service has moved to the account menu → 🎙️ Voice service”. The backend is **unchanged** (it reuses the existing `/ag-ui/admin/status`, `/ag-ui/admin/voice/voices`, `/ag-ui/admin/voice/sample` endpoints).
+
+## 测试
+# Tests
+
+中文：`node --check`（`app.js` / `zh.js` / `en.js`）通过；i18n 审计 **zh=en=1754，missing 0**，`index.html` / `app.js` 引用键全部存在。桌面组合根 / 存储 / 管理接口 / 语音合成合跑 **44/44**。运行栈实测：`/index.html` 含 `voiceServiceModal`；`/app.js` 含 `openVoiceServiceModal`、**不含** `voicePickerModal`；`/i18n/zh.js` 含 `menu.voice`。
+English: `node --check` (`app.js` / `zh.js` / `en.js`) passes; the i18n audit is **zh=en=1754, missing 0**, with all referenced keys present in `index.html` / `app.js`. The desktop-composition / store / admin-API / speech-synthesis suites run **44/44**. Verified live: `/index.html` contains `voiceServiceModal`; `/app.js` contains `openVoiceServiceModal` and **no** `voicePickerModal`; `/i18n/zh.js` contains `menu.voice`.
+
 # AG-UI 群聊桌面版 1.0.217 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.217 Release Notes (current Windows desktop release)
 

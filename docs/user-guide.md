@@ -4124,9 +4124,18 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.13 系统状态（`#statusModal`，非页签）
 
-除统计与 RAG / 文档转换能力行外，还有两行**语音服务（多模态进阶 · 语音问答）**：**🎤 语音转写（ASR）** / **🔊 语音回复（TTS）**，值为「就绪 / 未启用 / 不可达」（来自 `GET /ag-ui/admin/status` 的 `voice.asr` / `voice.tts`；`reachable` 由短超时 GET 探测得出，收到任意 HTTP 响应即算可达），并在下方列出实际端点（TTS 附带「（仅语音回合）」）。TTS 启用时下方还有 **「🎧 试听音色」**：打开弹窗列出合成服务的全部音色（`GET /ag-ui/admin/voice/voices`），逐个「▶」试听（`GET /ag-ui/admin/voice/sample?voice=`）。
+除统计与 RAG / 文档转换能力行外，这里**不再包含语音行**：语音服务已抽成**独立运维入口**——账号菜单 **「🎙️ 语音服务」**（`#meMenuVoice` → `#voiceServiceModal`，`openVoiceServiceModal()` / `renderVoiceService()`，`app.js`）。「系统状态」底部改为一行提示「语音服务已移至账号菜单 → 🎙️ 语音服务」。
 
-`#statusModal`（`index.html:1754-1762`）由账号菜单 `#meMenuStatus`（`menu.status` = 系统状态，**仅 `state.isAdmin`**）打开，`openStatusModal()`（`app.js:7425-7462`）拉 `GET /ag-ui/admin/status`（后端仅需 `Operator`）。
+语音服务面板（`#voiceServiceModal`）并行拉取 `GET /ag-ui/admin/status` 与 `GET /ag-ui/admin/voice/voices`，展示：
+
+| 区域 | 内容 | 来源 |
+|---|---|---|
+| ASR / TTS 状态 | 「就绪 / 未启用 / 不可达」两行（`reachable` 由短超时 GET 探测得出，收到任意 HTTP 响应即算可达） | `voice.asr` / `voice.tts` |
+| 端点提示 | 实际端点（TTS 附带「（仅语音回合）」） | `voice.asr.endpoint` / `voice.tts.endpoint` |
+| 音色试听 | TTS 启用时列出合成服务全部音色，逐个「▶」试听（复用单个 `<audio>`，避免叠加播放） | `GET /ag-ui/admin/voice/voices` + `GET /ag-ui/admin/voice/sample?voice=` |
+| 一键重检 | 底部「🔄 重新检测」重新拉取，无需关窗重开 | 同上 |
+
+`#statusModal`（`index.html`）由账号菜单 `#meMenuStatus`（`menu.status` = 系统状态，**仅 `state.isAdmin`**）打开，`openStatusModal()`（`app.js`）拉 `GET /ag-ui/admin/status`（后端仅需 `Operator`）。语音服务改用同级的 `#meMenuVoice`（`menu.voice` = 🎙️ 语音服务，**仅 Operator+**）打开 `#voiceServiceModal`。
 
 返回字段（`AdminApi.cs:99-141`）与前端展示（`app.js:7434-7460`）：
 

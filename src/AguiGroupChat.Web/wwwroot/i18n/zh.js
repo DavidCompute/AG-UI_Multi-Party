@@ -61,6 +61,7 @@ window.I18N_DICTS.zh = {
   "menu.modelConfig": "模型配置",
   "menu.console": "管理控制台",
   "menu.status": "系统状态",
+  "menu.voice": "🎙️ 语音服务",
   "menu.memory": "记忆管理",
   "menu.branding": "白标设置",
   "menu.tasks": "任务中心",
@@ -1680,12 +1681,7 @@ window.I18N_DICTS.zh = {
   "status.voiceAsrEndpoint": "ASR 端点：{ep}",
   "status.voiceTtsEndpoint": "TTS 端点：{ep}{mode}",
   "status.voiceOnlyTurn": "（仅语音回合）",
-  "status.voicePick": "🎧 试听音色",
-  "status.voicePickTitle": "🎧 语音音色试听",
-  "status.voicePickHint": "点击「▶」试听该音色的样例句；设为默认请改 Agents:Audio:SpeechVoice（或 AGENTS_AUDIO_SPEECH_VOICE）后重启。",
-  "status.voicePickEmpty": "该服务未返回音色列表",
-  "status.voicePickFail": "获取音色列表失败：{err}",
-  "status.voicePlay": "试听",
+  "status.voiceMovedHint": "语音服务已移至账号菜单 → 🎙️ 语音服务（配置、可达性与音色试听）。",
 
   /* --- 消息搜索补充 --- */
   "search.me": "我",
@@ -1730,6 +1726,13 @@ window.I18N_DICTS.zh = {
   "profile.avatarUploadFail": "头像上传失败：{err}",
 
   /* --- 语音 / 画布 / Mermaid --- */
+  "voice.title": "🎙️ 语音服务",
+  "voice.hint": "语音问答（ASR）与语音回复（TTS）的配置与连通性；端点 / 模型在服务端配置（Agents:Audio:*）修改后需重启。",
+  "voice.recheck": "🔄 重新检测",
+  "voice.voicesTitle": "音色试听",
+  "voice.listFail": "获取音色列表失败：{err}",
+  "voice.empty": "该服务未返回音色列表",
+  "voice.play": "试听",
   "voice.micDenied": "无法访问麦克风：请授予麦克风权限",
   "voice.micNotFound": "无法访问麦克风：本机无可用录音设备",
   "voice.unsupported": "此浏览器不支持音频录制",
