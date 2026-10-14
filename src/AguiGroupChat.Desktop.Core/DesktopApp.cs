@@ -60,6 +60,7 @@ public static class DesktopApp
         // 模板市场在线分发：远程目录源 + 拉取
         builder.Services.AddSingleton(new MarketplaceState());
         builder.Services.AddSingleton<MarketplaceRemoteService>();
+        builder.Services.AddSingleton<ReplicaMetricsPublisher>(); // 副本心跳（跨副本诊断）
         // 可观测性（6.1 / OpenTelemetry 对接）：Prometheus 抓取端点与鉴权选项
         builder.Services.AddSingleton(builder.Configuration.GetSection("Observability").Get<ObservabilityOptions>() ?? new ObservabilityOptions());
         builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置
@@ -160,6 +161,8 @@ public static class DesktopApp
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Hub.Persistence.MessageRetentionService>().Start());
         // 应用就绪后启动 Webhook 出站投递工作线程
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<WebhookDispatcher>().Start());
+        // 应用就绪后启动副本心跳发布（跨副本诊断）
+        app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<ReplicaMetricsPublisher>().Start());
         app.MapFallbackToFile("index.html");
 
         if (backendMode)

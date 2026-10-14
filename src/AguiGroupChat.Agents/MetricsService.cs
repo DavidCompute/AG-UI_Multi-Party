@@ -78,7 +78,7 @@ public sealed class MetricsService
         }
     }
 
-    /// <summary>进程级资源指标（廉价、无副作用）：工作集 / 私有内存 / 线程 / 句柄。</summary>
+    /// <summary>进程与 GC</summary>
     private static (long WorkingSet, long PrivateBytes, int Threads, long Handles) ReadProcess()
     {
         long workingSet = 0, privateBytes = 0, handles = 0;
@@ -174,6 +174,20 @@ public sealed class MetricsService
     /// <summary>Prometheus 标签值转义（反斜杠 / 双引号 / 换行）。</summary>
     private static string EscapeLabel(string v)
         => v.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
+
+    /// <summary>
+    /// 供跨副本诊断发布的一次性读数（与 <see cref="Snapshot"/> 同源，但<b>强类型</b>、无反射 / 无分配）。
+    /// </summary>
+    public (long Invocations, long Accepted, long Rejected, long BridgeCalls, long BridgeFailures,
+        long MemoryHits, long MemoryEmpty, long OutputChars, long WorkingSetBytes, long GcHeapBytes) Counters()
+    {
+        var (workingSet, _, _, _) = ReadProcess();
+        return (
+            Volatile.Read(ref _invocations), Volatile.Read(ref _accepted), Volatile.Read(ref _rejected),
+            Volatile.Read(ref _bridgeCalls), Volatile.Read(ref _bridgeFailures),
+            Volatile.Read(ref _memoryHitCount), Volatile.Read(ref _memoryEmptySearch), Volatile.Read(ref _outputChars),
+            workingSet, GC.GetTotalMemory(forceFullCollection: false));
+    }
 
     public object Snapshot()
     {

@@ -7695,6 +7695,50 @@ async function loadAdminMetrics() {
         + `<td class="bh-detail" title="${escapeHtml(h.endpoint || "")}">${escapeHtml(h.detail || (h.endpoint || ""))}</td></tr>`).join("")
       : `<tr><td colspan="4" class="admin-empty">${t("admin.metricsBridgeEmpty")}</td></tr>`;
   } catch { $("adminBridgeRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
+  loadReplicas(); // 第三段：跨副本诊断（独立拉取，失败不影响其余）
+}
+
+/** 跨副本诊断：活跃副本列表 + 汇总 + Redis 健康（多副本部署时跨进程可见）。 */
+async function loadReplicas() {
+  const section = $("adminReplicaSection");
+  const rows = $("adminReplicaRows");
+  if (!section || !rows) return;
+  try {
+    const res = await fetch("/ag-ui/admin/replicas", { headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) { section.classList.add("hidden"); return; }
+    const d = await res.json();
+    const list = d.replicas || [];
+    // 单副本且无 Redis 时也展示（自洽），仅由 redis 行说明部署形态
+    section.classList.remove("hidden");
+    const now = Date.now();
+    rows.innerHTML = list.map((r) => {
+      const upMin = Math.max(0, Math.floor((now - Number(r.startedAtMs || 0)) / 60000));
+      const age = Math.max(0, Math.floor((now - Number(r.lastSeenMs || 0)) / 1000));
+      const stale = age > 45;
+      const hb = stale
+        ? `<span class="tag-disabled">${t("admin.replicaStale")}</span>`
+        : escapeHtml(t("admin.replicaSeconds", { n: age }));
+      return `<tr>
+        <td>${escapeHtml(r.replicaId)}${r.isSelf ? ` <span class="tag-active">${t("admin.replicaSelf")}</span>` : ""}</td>
+        <td>${escapeHtml(r.host || "")}</td>
+        <td>${Number(r.pid) || 0}</td>
+        <td>${upMin}m</td>
+        <td>${hb}</td>
+        <td>${Number(r.invocations || 0).toLocaleString()}</td>
+        <td>${Number(r.bridgeFailures || 0).toLocaleString()}</td>
+        <td>${escapeHtml(fmtBytes(Number(r.workingSetBytes) || 0))}</td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="8" class="admin-empty">${t("admin.replicaEmpty")}</td></tr>`;
+    const agg = d.aggregate || {};
+    $("adminReplicaMeta").textContent = t("admin.replicaMeta", {
+      n: d.count || list.length, total: Number(agg.invocations || 0).toLocaleString(),
+    });
+    $("adminReplicaRedis").textContent = d.redis
+      ? (d.redis.connected
+        ? t("admin.replicaRedisOk", { ms: d.redis.latencyMs, eps: (d.redis.endpoints || []).join(", ") })
+        : t("admin.replicaRedisDown"))
+      : t("admin.replicaRedisNone");
+  } catch { section.classList.add("hidden"); }
 }
 
 /** 用量统计：最近 7 天按日汇总 + 配额配置。 */

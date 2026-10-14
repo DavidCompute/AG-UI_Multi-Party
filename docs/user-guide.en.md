@@ -3906,6 +3906,24 @@ Within `loadAdminMetrics()`, a **second section** independently fetches `GET /ag
 
 Note: `GET /ag-ui/admin/bridge-health?refresh=true` triggers a live full probe (`ProbeAllAsync`); otherwise it returns the cache (`AdminApi.cs:182-188`). The frontend **does not pass `refresh`**, so it shows the cached status from the periodic probe. Likewise, `GET /ag-ui/admin/bridge-capabilities` (capability negotiation) exists on the backend but is **not consumed by the frontend**.
 
+#### 8.8.4 Replicas (cross-replica diagnostics)
+
+The third independent section of `loadAdminMetrics()` fetches `GET /ag-ui/admin/replicas` (Operator and above only) and renders `#adminReplicaSection` (table `#adminReplicaRows` + summary `#adminReplicaMeta` + Redis line `#adminReplicaRedis`):
+
+| Column | Field | Description |
+|---|---|---|
+| Replica | `replicaId` | `Observability:ReplicaId` or `hostname:pid`; the local process is marked `self` (`isSelf`) |
+| Host / PID | `host` / `pid` | |
+| Uptime | `startedAtMs` | Shown in minutes |
+| Heartbeat | `lastSeenMs` | Seconds since the last heartbeat; flagged `stale` beyond 45s |
+| Invocations / bridge failures / working set | matching fields | |
+
+Summary: totals of `aggregate.invocations` and friends across replicas. The Redis line shows `connected`, `latencyMs` and `endpoints` (`RedisContext.Ping`) in Redis deployments, warning that replicas may already be inconsistent when unreachable; outside Redis it states the deployment is single-replica.
+
+**Implementation**: replica identity `ReplicaIdentity` (built at startup); heartbeat registry `IReplicaRegistry` — Redis uses `RedisReplicaRegistry` (`agui:replica:{id}` with a 60s TTL plus the `agui:replicas` set, pruning dead index entries on read), others use `LocalReplicaRegistry` (self only); `ReplicaMetricsPublisher` publishes every 15s (and once at startup).
+
+> Division of labour with `/ag-ui/metrics`: Prometheus's correct model is **one target per scrape** (it adds its own `instance` label), so that endpoint keeps its per-process semantics; the replica view is for humans doing diagnostics.
+
 ---
 
 ### 8.9 Execution Params tab (`#adminTabExec`)
@@ -4642,6 +4660,7 @@ service:
 | `Observability:PrometheusEnabled` | `ObservabilityOptions.PrometheusEnabled` | `true` | `true` | Whether `GET /ag-ui/metrics` is exposed (false → 404) |
 | `Observability:PrometheusRequireAuth` | `ObservabilityOptions.PrometheusRequireAuth` | `true` | `true` | Whether the metrics endpoint requires auth (keep true) |
 | `Observability:PrometheusScrapeToken` | `ObservabilityOptions.PrometheusScrapeToken` | `""` | not set | Dedicated scrape token (blank = session / API key only) |
+| `Observability:ReplicaId` | `ReplicaIdentity` (read by HubApp at startup) | `""` | not set | Replica identifier (cross-replica diagnostics); blank falls back to `hostname:pid`; K8s: a pod name / ordinal |
 | `Auth:AdminUserIds` | `AuthOptions.AdminUserIds` | `""` | not set | Admin list (comma-separated userId/username) |
 | `Auth:SuperAdminUserIds` | `AuthOptions.SuperAdminUserIds` | `""` | not set | SuperAdmin list |
 | `Auth:FirstUserIsAdmin` | `AuthOptions.FirstUserIsAdmin` | `true` | not set | The first registered account automatically becomes an admin |

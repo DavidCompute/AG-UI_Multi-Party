@@ -183,7 +183,7 @@
 - **可视化看板（已实现）**：`MetricsService` 除业务计数器外新增 `process` 节点（工作集 / GC 堆 / 线程 / 分配 / 句柄），控制台「运行指标」页升级为看板：**五张多序列图**（调用速率 / 成功-拒绝 / 桥接调用-失败 / 记忆命中-空检索 / 输出吞吐；按 60s 采样环做差分＝每分钟增量）、**成功率环**与**时间范围选择**（30 分 / 2 时 / 4 时）。落点：`Agents/MetricsService.cs`、`wwwroot/app.js`（`renderMetricsDashboard` / `renderSparkSvg` / `renderDonut`）。
 - **Prometheus / OTel 导出（已实现）**：`GET /ag-ui/metrics`（`text/plain; version=0.0.4`，指标前缀 `knowgath_*`）——Prometheus 直接抓取，OTel Collector 可用 `prometheus` receiver 采集后转发；零新增依赖。默认需鉴权（`Observability:PrometheusScrapeToken` / 会话 / API 密钥），`PrometheusEnabled=false` → 404。落点：`Agents/MetricsService.RenderPrometheusText()`、`Web/MetricsApi.cs`。未完成：进程内 OTLP 直推（如需可后续加 SDK）。
 
-### 6.2 Web 端多副本横向扩展（★☆☆） ✅已实现（Redis 共享存储）
+### 6.2 Web 端多副本横向扩展（★☆☆） ✅已实现（Redis 共享存储 + **跨副本诊断**）
 - **现状**：单进程 Kestrel。
 - **目标**：Docker 场景多副本 + Redis 共享会话 / 存储（README 已预留 `IGroupStore` / `IUserStore` 可替换为 Redis / DB）。
 - **实现**：新增 `Storage:Provider=redis`。`RedisContext`（连接复用与 key 约定）+ `RedisGroupStore` / `RedisUserStore` / `RedisTaskStore` / `RedisUsageStore` / `RedisAgentRegistryStore` / `RedisSectionStore`；登录会话经 `ISessionStore` 抽象（`RedisSessionStore`）跨副本共享，一台副本登录即可其余副本校验。多副本读写同一批 `agui:*` key 保持一致。

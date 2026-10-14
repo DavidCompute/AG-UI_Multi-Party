@@ -6,6 +6,8 @@ using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
+using AguiGroupChat.Hub.Persistence;
+using AguiGroupChat.Hub.Persistence.Redis;
 using AguiGroupChat.Hub.Users;
 
 namespace AguiGroupChat.Web;
@@ -200,6 +202,77 @@ public static class AdminApi
         root.MapGet("/metrics", (HttpContext ctx, AguiGroupChat.Agents.MetricsService metrics) =>
         {
             return Results.Ok(metrics.Snapshot());
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 跨副本诊断（6.1 / 6.2）：列出活跃副本 + 汇总 + Redis 健康（Redis 多副本时跨进程可见）。
+        // 仅 Redis 多副本部署下副本数会 > 1；单副本时也返回自身（界面自洽）。
+        root.MapGet("/replicas", (IReplicaRegistry registry, ReplicaIdentity identity,
+            AguiGroupChat.Agents.MetricsService metrics, IServiceProvider sp) =>
+        {
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var list = registry.List().ToList();
+            // 启动初期尚未发布心跳时用当前读数兑底，保证列表至少含自身
+            if (!list.Any(r => r.ReplicaId == identity.Id))
+            {
+                var c = metrics.Counters();
+                list.Add(new ReplicaSnapshot
+                {
+                    ReplicaId = identity.Id, Host = identity.Host, Pid = identity.Pid,
+                    StartedAtMs = identity.StartedAtMs, LastSeenMs = now,
+                    Invocations = c.Invocations, Accepted = c.Accepted, Rejected = c.Rejected,
+                    BridgeCalls = c.BridgeCalls, BridgeFailures = c.BridgeFailures,
+                    MemoryHits = c.MemoryHits, MemoryEmpty = c.MemoryEmpty, OutputChars = c.OutputChars,
+                    WorkingSetBytes = c.WorkingSetBytes, GcHeapBytes = c.GcHeapBytes,
+                });
+            }
+
+            var replicas = list.Select(r => new
+            {
+                r.ReplicaId,
+                r.Host,
+                r.Pid,
+                r.StartedAtMs,
+                r.LastSeenMs,
+                ageMs = now - r.LastSeenMs,
+                isSelf = r.ReplicaId == identity.Id,
+                r.Invocations,
+                r.Accepted,
+                r.Rejected,
+                r.BridgeCalls,
+                r.BridgeFailures,
+                r.MemoryHits,
+                r.MemoryEmpty,
+                r.OutputChars,
+                r.WorkingSetBytes,
+                r.GcHeapBytes,
+            }).ToList();
+
+            var redis = sp.GetService<RedisContext>();
+            var health = redis?.Ping();
+            return Results.Ok(new
+            {
+                selfId = identity.Id,
+                count = replicas.Count,
+                replicas,
+                aggregate = new
+                {
+                    invocations = list.Sum(r => r.Invocations),
+                    accepted = list.Sum(r => r.Accepted),
+                    rejected = list.Sum(r => r.Rejected),
+                    bridgeCalls = list.Sum(r => r.BridgeCalls),
+                    bridgeFailures = list.Sum(r => r.BridgeFailures),
+                    memoryHits = list.Sum(r => r.MemoryHits),
+                    memoryEmpty = list.Sum(r => r.MemoryEmpty),
+                    outputChars = list.Sum(r => r.OutputChars),
+                    workingSetBytes = list.Sum(r => r.WorkingSetBytes),
+                },
+                redis = redis is null ? null : new
+                {
+                    connected = health!.Value.Connected,
+                    latencyMs = health.Value.Connected ? Math.Round(health.Value.LatencyMs, 2) : (double?)null,
+                    endpoints = redis.Endpoints,
+                },
+            });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 运维配置只读快照（6.3 数据面，仅管理员）：集中展示散在各处 appsettings / .env 的关键参数，供治理与排障。

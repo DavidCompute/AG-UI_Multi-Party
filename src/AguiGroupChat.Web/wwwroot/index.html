@@ -1785,6 +1785,17 @@
             </div>
           </div>
         </div>
+        <!-- 跨副本诊断：多副本部署下各副本身份 / 心跳 / 计数 / Redis 健康 -->
+        <div id="adminReplicaSection" class="hidden">
+          <h4><span data-i18n="admin.replicaTitle">副本（跨副本诊断）</span> <span id="adminReplicaMeta" class="muted"></span></h4>
+          <p id="adminReplicaRedis" class="form-hint" style="margin:2px 0 8px"></p>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th data-i18n="admin.replicaId">副本</th><th data-i18n="admin.replicaHost">主机</th><th data-i18n="admin.replicaPid">PID</th><th data-i18n="admin.replicaUptime">运行</th><th data-i18n="admin.replicaHeartbeat">心跳</th><th data-i18n="admin.metricInvocations">调用</th><th data-i18n="admin.replicaBridge">桥接失败</th><th data-i18n="admin.procWorkingSet">工作集内存</th></tr></thead>
+              <tbody id="adminReplicaRows"></tbody>
+            </table>
+          </div>
+        </div>
         <div class="admin-metric-cols">
           <div class="admin-metric-col">
             <h4 data-i18n="admin.metricByAgent">按数字员工调用</h4>

@@ -45,6 +45,27 @@ public sealed class RedisContext : IDisposable
     public static string UsageRowKey(string date, string agentId, string userId) => $"agui:usage:{date}:{agentId}:{userId}";
     public static string UsageDateIndexKey => "agui:usage:dates";
     public static string SectionKey(string name) => $"agui:section:{name}";
+    public static string ReplicaKey(string replicaId) => $"agui:replica:{replicaId}";
+    public static string ReplicaIndexKey => "agui:replicas";
+
+    /// <summary>Redis 健康探测（跨副本诊断）：PING 往返延迟（ms）与连接状态。失败返回 Connected=false。</summary>
+    public (bool Connected, double LatencyMs) Ping()
+    {
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Db.Ping();
+            sw.Stop();
+            return (true, sw.Elapsed.TotalMilliseconds);
+        }
+        catch { return (false, -1); }
+    }
+
+    /// <summary>已配置的 Redis 端点（诊断展示）。</summary>
+    public IReadOnlyList<string> Endpoints
+    {
+        get { try { return _redis.GetEndPoints().Select(e => e.ToString()).ToList(); } catch { return []; } }
+    }
 
     public static string Serialize<T>(T value) => AguiJson.Serialize(value);
     public static T? Deserialize<T>(string json) => AguiJson.Deserialize<T>(json);

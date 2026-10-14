@@ -3899,6 +3899,24 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 说明：`GET /ag-ui/admin/bridge-health?refresh=true` 会触发一次实时全量探测（`ProbeAllAsync`），否则返回缓存（`AdminApi.cs:182-188`）。前端**不传 `refresh`**，故展示的是周期探测的缓存状态。同理 `GET /ag-ui/admin/bridge-capabilities`（能力协商）后端存在但**前端未消费**。
 
+#### 8.8.4 副本（跨副本诊断）
+
+`loadAdminMetrics()` 第三段独立拉 `GET /ag-ui/admin/replicas`（仅 `Operator` 及以上），渲染 `#adminReplicaSection`（表 `#adminReplicaRows` + 汇总 `#adminReplicaMeta` + Redis 行 `#adminReplicaRedis`）：
+
+| 列 | 字段 | 说明 |
+|---|---|---|
+| 副本 | `replicaId` | 配置 `Observability:ReplicaId` 或「主机名:进程号」；本进程带「本机」标记（`isSelf`） |
+| 主机 / PID | `host` / `pid` | |
+| 运行 | `startedAtMs` | 展示为分钟数 |
+| 心跳 | `lastSeenMs` | 距上次心跳的秒数；> 45s 标桩【心跳陈旧】 |
+| 调用 / 桥接失败 / 工作集内存 | 对应字段 | |
+
+汇总：`aggregate.invocations` 等各副本同类项之和。Redis 行：Redis 部署下显示 `connected` 与 `latencyMs` + `endpoints`（`RedisContext.Ping`），不可达时警告「副本间可能已不一致」；非 Redis 部署显示「本部署未使用 Redis 共享存储（单副本）」。
+
+**实现**：副本身份 `ReplicaIdentity`（启动时构建）；心跳注册表 `IReplicaRegistry`——Redis 用 `RedisReplicaRegistry`（`agui:replica:{id}` TTL 60s + 集合 `agui:replicas`，读取时清理死索引），其余用 `LocalReplicaRegistry`（仅自身）；心跳由 `ReplicaMetricsPublisher` 每 15s 发布一次（启动时先发一次）。
+
+> 与 `/ag-ui/metrics` 的分工：Prometheus 正确模型是**每个目标单独抓取**（它自带 `instance` 标签），所以该端点保持「本进程」语义；副本视图是给**人**做诊断的。
+
 ---
 
 ### 8.9 执行参数 tab（`#adminTabExec`）
@@ -4634,6 +4652,7 @@ service:
 | `Observability:PrometheusEnabled` | `ObservabilityOptions.PrometheusEnabled` | `true` | `true` | 是否暴露 `GET /ag-ui/metrics`（置 false → 404） |
 | `Observability:PrometheusRequireAuth` | `ObservabilityOptions.PrometheusRequireAuth` | `true` | `true` | 指标端点是否要求鉴权（建议保持 true） |
 | `Observability:PrometheusScrapeToken` | `ObservabilityOptions.PrometheusScrapeToken` | `""` | 未配 | 专用抓取令牌（留空则只接受会话 / API 密钥） |
+| `Observability:ReplicaId` | `ReplicaIdentity`（HubApp 启动时读） | `""` | 未配 | 副本标识（跨副本诊断）；留空回退「主机名:进程号」，K8s 建议用 pod 名 / 序号 |
 | `Auth:AdminUserIds` | `AuthOptions.AdminUserIds` | `""` | 未配 | 管理员名单（逗号分隔 userId/username） |
 | `Auth:SuperAdminUserIds` | `AuthOptions.SuperAdminUserIds` | `""` | 未配 | 超管名单 |
 | `Auth:FirstUserIsAdmin` | `AuthOptions.FirstUserIsAdmin` | `true` | 未配 | 首个注册账号自动成为管理员 |

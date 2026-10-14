@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.207 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.207 Release Notes (current Windows desktop release)
+
+**版本说明**：**跨副本诊断**——多副本（Redis 共享存储）部署下，各副本周期性发布自身指标快照，任一副本都能在控制台看到**全部活跃副本**与汇总，并一键判断 Redis 共享存储是否健康。
+**Version note**: **cross-replica diagnostics** — in a multi-replica (Redis shared storage) deployment each replica periodically publishes its own metric snapshot, so any replica can show **all live replicas** and their totals in the console, plus whether the Redis shared storage is healthy.
+
+## 跨副本诊断
+# Cross-replica diagnostics
+
+中文：
+- **副本身份**：`ReplicaIdentity` = 配置 `Observability:ReplicaId`（K8s 建议用 pod 名 / 序号）或回退「主机名:进程号」；启动时间一并上报。
+- **心跳注册表**：`IReplicaRegistry`——Redis 部署用 `RedisReplicaRegistry`（每个副本写 `agui:replica:{id}`，TTL 60s，并登记到集合 `agui:replicas`；读取时**顺带清理已过期的索引项**，无需额外 GC 任务）；其余存储（memory / sqlite / postgres / mysql）用 `LocalReplicaRegistry`（仅自身，单副本下界面也自洽）。心跳间隔 15s（`ReplicaMetricsPublisher`）。
+- **诊断端点**：`GET /ag-ui/admin/replicas`（Operator+）返回 `{ selfId, count, replicas[{replicaId, host, pid, startedAtMs, lastSeenMs, ageMs, isSelf, invocations, bridgeFailures, workingSetBytes, …}], aggregate{…}, redis{connected, latencyMs, endpoints} }`。`redis` 在非 Redis 部署下为 `null`。
+- **看板**：控制台「运行指标」页新增**副本**表（含「本机」/「心跳陈旧」标记、汇总调用数与 Redis 健康行）。
+- **为什么不是把副本号做成 Prometheus 标签**：Prometheus 的正确模型是**每个目标单独抓取**（它自带 `instance` 标签），所以 `/ag-ui/metrics` 保持「本进程」语义不变；跨副本视图是给**人**看诊断用的。
+English:
+- **Replica identity**: `ReplicaIdentity` = `Observability:ReplicaId` (K8s: a pod name / ordinal) or falls back to `hostname:pid`; the start time is reported too.
+- **Heartbeat registry**: `IReplicaRegistry` — Redis deployments use `RedisReplicaRegistry` (each replica writes `agui:replica:{id}` with a 60s TTL and registers in the set `agui:replicas`; reads **prune expired index entries**, so no separate GC task is needed); other stores (memory / sqlite / postgres / mysql) use `LocalReplicaRegistry` (self only, so the UI is coherent even with one replica). Heartbeat interval 15s (`ReplicaMetricsPublisher`).
+- **Diagnostics endpoint**: `GET /ag-ui/admin/replicas` (Operator+) returns `{ selfId, count, replicas[{…}], aggregate{…}, redis{connected, latencyMs, endpoints} }`; `redis` is `null` outside Redis deployments.
+- **Dashboard**: the console's Runtime Metrics tab gains a **Replicas** table (with `self` / `stale` markers, aggregate invocations and a Redis health line).
+- **Why not a replica label in Prometheus**: Prometheus's correct model is **one target per scrape** (it adds its own `instance` label), so `/ag-ui/metrics` keeps its per-process semantics; the cross-replica view is for humans doing diagnostics.
+
+## 测试
+# Tests
+
+中文：新增 `ReplicaRegistryTests` 4/4（身份默认/覆盖、单副本发布前后）与 `RedisReplicaRegistryTests` 3/3（跨读取者可见、清理死索引、PING；Redis 不可达时跳过）、`ReplicaApiTests` 3/3（需 Operator+、返回自身与汇总、反映已发布的其它副本快照）；连同指标 / 桌面对等合跑通过。
+English: new `ReplicaRegistryTests` 4/4 (identity default/override, local before/after publish), `RedisReplicaRegistryTests` 3/3 (visible to other readers, dead-index pruning, PING; skipped when Redis is unreachable) and `ReplicaApiTests` 3/3 (Operator+, self and aggregate, reflects published other-replica snapshots); passing together with the metric and desktop-parity suites.
+
 # AG-UI 群聊桌面版 1.0.206 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.206 Release Notes (current Windows desktop release)
 

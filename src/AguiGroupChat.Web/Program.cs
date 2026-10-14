@@ -37,6 +37,7 @@ builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持�
 builder.Services.AddSingleton<MarketplaceRemoteService>(); // 远程目录 / 分发包拉取
 // 可观测性（6.1 / OpenTelemetry 对接）：Prometheus 抓取端点与鉴权选项
 builder.Services.AddSingleton(builder.Configuration.GetSection("Observability").Get<ObservabilityOptions>() ?? new ObservabilityOptions());
+builder.Services.AddSingleton<ReplicaMetricsPublisher>(); // 副本心跳（跨副本诊断）：周期性发布本进程指标快照
 // 办公文档「在线查看」：docx / xlsx / pptx 用 LibreOffice 转 PDF 后缓存，前端弹窗内联渲染。
 // 缓存放 data/preview（跟 attachments 同一个数据根，容器重建不丢；丢了也只是重转一次）。
 builder.Services.AddDocumentPreview(
@@ -193,6 +194,8 @@ app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<A
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Hub.Persistence.MessageRetentionService>().Start());
 // 应用就绪后启动 Webhook 出站投递工作线程
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<WebhookDispatcher>().Start());
+// 应用就绪后启动副本心跳发布（跳副本诊断）
+app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<ReplicaMetricsPublisher>().Start());
 
 app.MapFallbackToFile("index.html");
 

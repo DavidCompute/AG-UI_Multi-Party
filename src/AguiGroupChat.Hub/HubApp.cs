@@ -38,6 +38,8 @@ public static class HubApp
         // 变更通知中心：各存储变更后通知持久化服务标记脏位
         var changeHub = new ChangeHub();
         builder.Services.AddSingleton(changeHub);
+        // 本进程的副本身份（跨副本诊断）：Observability:ReplicaId 可覆盖（K8s 建议用 pod 名）
+        builder.Services.AddSingleton(new ReplicaIdentity(builder.Configuration["Observability:ReplicaId"]));
 
         // 存储注册：按 Provider 选择方言实现。每种方言把「底层连接上下文 + 一组 Store」收敛为单一职责的注册方法，
         // 消除四段 if/else 里重复的 Store 注册行，新增数据库时只加一个分支。
@@ -94,6 +96,7 @@ public static class HubApp
         builder.Services.AddSingleton<IUsageStore, PostgresUsageStore>(); // 模型用量统计（按日聚合）
         builder.Services.AddSingleton<IAuditStore>(sp => new PostgresAuditStore(sp.GetRequiredService<PostgresStore>())); // 审计独立表
         builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
+        builder.Services.AddSingleton<IReplicaRegistry, LocalReplicaRegistry>(); // 单副本（跨副本诊断仅自身）
     }
 
     /// <summary>MySQL / SQLite 存储：共用 Relational* 实现（方言差异隔离在 RelationalStore），同样禁用 JSON 快照。</summary>
@@ -112,6 +115,7 @@ public static class HubApp
         builder.Services.AddSingleton<IUsageStore, RelationalUsageStore>(); // 模型用量统计（按日聚合）
         builder.Services.AddSingleton<IAuditStore>(sp => new RelationalAuditStore(sp.GetRequiredService<RelationalStore>())); // 审计独立表
         builder.Services.AddSingleton<ISessionStore>(new InMemorySessionStore()); // 登录会话（进程内 + 扩展区持久化）
+        builder.Services.AddSingleton<IReplicaRegistry, LocalReplicaRegistry>(); // 单副本（跨副本诊断仅自身）
     }
 
     /// <summary>Redis 存储（6.2 Web 多副本横向扩展）：全部 Store 与登录会话共享 Redis，多副本读写同一批 key 保持一致；禁用 JSON 快照（Redis 本身即落盘）。</summary>
@@ -125,6 +129,7 @@ public static class HubApp
         builder.Services.AddSingleton<ISectionStore, RedisSectionStore>();
         builder.Services.AddSingleton<IUsageStore, RedisUsageStore>();   // 模型用量统计（按日聚合）
         builder.Services.AddSingleton<ISessionStore, RedisSessionStore>(); // 登录会话跨副本共享
+        builder.Services.AddSingleton<IReplicaRegistry, RedisReplicaRegistry>(); // 副本注册表（跨副本诊断：各副本快照共享）
     }
 
     /// <summary>内存存储：进程内账号存储 + 认证服务 + 单文件快照持久化（变更后定时落盘，启动时恢复）。</summary>
@@ -140,6 +145,7 @@ public static class HubApp
             persistenceOptions.FilePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, persistenceOptions.FilePath));
         builder.Services.AddSingleton(persistenceOptions);
         builder.Services.AddSingleton<PersistenceService>();
+        builder.Services.AddSingleton<IReplicaRegistry, LocalReplicaRegistry>(); // 单副本（跨副本诊断仅自身）
     }
 
     public static void MapEndpoints(WebApplication app)
