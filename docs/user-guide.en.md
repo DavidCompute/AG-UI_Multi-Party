@@ -3602,9 +3602,11 @@ The frontend admin entries are **scoped by the effective platform role** (`roleR
   - `#meMenuBackup` (Data Backup), `#meMenuModelConfig` (Model Config), and `#meMenuBranding` (Whitelabel Settings) are visible to **Admin and above**.
   - **Both Operator and Admin+ use `menu.console` "Admin Console"** (the entry opens the whole console, not just user management; the role only affects visible tabs, not the menu label).
 - Admin console `#adminModal` tabs are scoped by role (`applyAdminTabVisibility`):
-  - **Operator** sees only read-only tabs: Usage / Audit Log / Runtime Metrics (matching the backend endpoints gated by `RequireRoleFilter(Operator)`); it defaults to the Usage tab.
-  - **Admin / SuperAdmin** see all 9 tabs.
+  - **Operator** sees only read-only tabs: Usage / Audit Log / Runtime Metrics / Agent performance (matching the backend endpoints gated by `RequireRoleFilter(Operator)`); it defaults to the Usage tab.
+  - **Admin / SuperAdmin** see all 12 tabs.
 - `state.isSuperAdmin` is still used only for the platform-role dropdown in "User Management" (only SuperAdmin can grant/revoke roles).
+
+**Agent performance tab (`#adminTabPerf`, `admin.tabPerf`, Operator+)**: aggregates **calls / total tokens / 👍👎 positive rate / last active** per employee, with 7 / 30 / 90-day windows and refresh (sorted by calls descending); positive rate shows "—" when there is no feedback. Data comes from `GET /ag-ui/admin/agent-performance?days=N` (`agui_usage` rows + message feedback; names use the employee nickname, falling back to the agentId). The aggregation is a pure function `AgentPerformance.Aggregate` (`AgentPerformance.cs`), mounted by `AdminApi.cs`.
 
 > Evidence: `app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`; backend filters per endpoint in §8.1.6. Now consistent with `docs/RBAC.md` §5 ("menus subdivided by effective role").
 
@@ -3660,6 +3662,7 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 | 9 | `#adminTabStorage` | `admin.tabStorage` | Storage | `#adminStorageView` | `GET /ag-ui/admin/storage`, `POST /ag-ui/admin/storage/reclaim` |
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhooks | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`, `…/events`, `…/deliveries`, `…/{id}/test` (see 8.19) |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API keys | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`, `DELETE /ag-ui/admin/api-keys/{id}` (see 8.20) |
+| 12 | `#adminTabPerf` | `admin.tabPerf` | Agent performance | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 
 Opening and switching (`app.js`):
 
@@ -4250,7 +4253,7 @@ The support circle (`GroupKind.Support`, `Group.IsSupportCircle`) has no dedicat
 
 The following is all based on the code (each item has been verified against the code):
 
-1. **The frontend admin side is now subdivided by `platformRole` (fixed in 1.0.194).** The `#meMenu` admin menus and the `#adminModal` tab visibility are now scoped by effective role via `roleRank` / `applyAdminTabVisibility`: Operator and above see the admin console and System Status; Admin and above additionally see Data Backup / Model Config / Whitelabel; Operator's console has only read-only tabs (Usage / Audit / Metrics). Now consistent with `docs/RBAC.md` §5 and `docs/ui-design.md` §7.6.
+1. **The frontend admin side is now subdivided by `platformRole` (fixed in 1.0.194).** The `#meMenu` admin menus and the `#adminModal` tab visibility are now scoped by effective role via `roleRank` / `applyAdminTabVisibility`: Operator and above see the admin console and System Status; Admin and above additionally see Data Backup / Model Config / Whitelabel; Operator's console has only read-only tabs (Usage / Audit / Metrics / Agent performance). Now consistent with `docs/RBAC.md` §5 and `docs/ui-design.md` §7.6.
 2. **`GET /ag-ui/admin/config` (read-only snapshot) is a pure API that `app.js` does not consume.** Across the whole repo, the frontend calls only `POST /ag-ui/admin/config` and `GET /ag-ui/admin/config/governance`; and the "parameter snapshot beside 'System Status' in the Data Backup menu" that the `admin.configHint` text points to has **no** corresponding UI in the code.
 3. **"Bridge health" is inside the "Runtime Metrics" tab** (`#adminBridgeRows`, `app.js:6967-6977`), **not a separate tab**; "whitelabel" is the standalone modal `#brandModal` (not a tab); "System Status" is also the standalone modal `#statusModal` (not a tab).
 4. **User Management has no search box** (§8.3.6); if an existing document describes a "user search", that is a misstatement.
@@ -4557,6 +4560,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | POST | `/ag-ui/admin/users/{userId}/password` | Reset password (revokes all sessions) | Admin |
 | DELETE | `/ag-ui/admin/users/{userId}` | Permanently delete an account (data erasure; cannot delete yourself, use "Delete Account" instead) | Admin |
 | GET | `/ag-ui/admin/status` | System status (connections / groups / users / messages / agents / memory / threads / RAG / document conversion capability / **voice services (ASR·TTS config & reachability `voice`)**) | Operator |
+| GET | `/ag-ui/admin/agent-performance` | Digital-employee performance dashboard (per-agent calls / tokens / 👍👎 positive rate / last active, `?days=N`) | Operator |
 | GET | `/ag-ui/admin/voice/voices` | Voice list for synthesis (proxies the TTS `/v1/audio/voices`): `{ voices: string[] }`; 404 unconfigured / unsupported, 503 unreachable | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |

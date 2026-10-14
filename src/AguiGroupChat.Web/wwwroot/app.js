@@ -6830,13 +6830,42 @@ function isOperatorPlus() { return roleRank() >= 1; }
 function isAdminPlus() { return roleRank() >= 2; }
 
 /** 控制台页签按角色可见：Operator 仅只读页签（用量 / 审计 / 运行指标），Admin 及以上全量。 */
+/** 员工绩效看板（P0）：按数字员工聚合调用量 / token / 👍👎 好评率。数据源 /ag-ui/admin/agent-performance。 */
+async function loadAgentPerformance() {
+  const meta = $("adminPerfMeta");
+  const rows = $("adminPerfRows");
+  const days = Number($("perfRange") && $("perfRange").value) || 30;
+  if (meta) meta.textContent = t("admin.loading");
+  rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
+    const list = d.agents || [];
+    const s = d.summary || {};
+    if (meta) meta.textContent = t("admin.perfMeta", {
+      from: d.from || "", to: d.to || "", agents: s.agents || 0,
+      calls: Number(s.calls || 0).toLocaleString(), tokens: Number(s.totalTokens || 0).toLocaleString(),
+      rate: s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%",
+    });
+    if (!list.length) { rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
+    rows.innerHTML = list.map((a) => {
+      const rate = a.positiveRate == null ? "—" : Math.round(a.positiveRate * 100) + "%";
+      return `<tr><td title="${escapeHtml(a.agentId || "")}">${escapeHtml(a.name || a.agentId)}</td>`
+        + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
+        + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
+        + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td></tr>`;
+    }).join("");
+  } catch { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+}
+
 function applyAdminTabVisibility() {
   const adminPlus = isAdminPlus(), operatorPlus = isOperatorPlus();
   const visible = {
     adminTabUsers: adminPlus, adminTabUsage: operatorPlus, adminTabMetrics: operatorPlus,
     adminTabConfig: adminPlus, adminTabExec: adminPlus, adminTabAudit: operatorPlus,
     adminTabOrphans: adminPlus, adminTabUserGroups: adminPlus, adminTabStorage: adminPlus,
-    adminTabWebhooks: adminPlus, adminTabApiKeys: adminPlus,
+    adminTabWebhooks: adminPlus, adminTabApiKeys: adminPlus, adminTabPerf: operatorPlus,
   };
   for (const [id, show] of Object.entries(visible)) $(id)?.classList.toggle("hidden", !show);
 }
@@ -6864,6 +6893,7 @@ function switchAdminTab(tab) {
   const storage = tab === "storage";
   const webhooks = tab === "webhooks";
   const apikeys = tab === "apikeys";
+  const perf = tab === "perf";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
@@ -6875,6 +6905,7 @@ function switchAdminTab(tab) {
   $("adminTabStorage").classList.toggle("on", storage);
   $("adminTabWebhooks").classList.toggle("on", webhooks);
   $("adminTabApiKeys").classList.toggle("on", apikeys);
+  $("adminTabPerf").classList.toggle("on", perf);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
@@ -6886,6 +6917,7 @@ function switchAdminTab(tab) {
   $("adminStorageView").classList.toggle("hidden", !storage);
   $("adminWebhooksView").classList.toggle("hidden", !webhooks);
   $("adminApiKeysView").classList.toggle("hidden", !apikeys);
+  $("adminPerfView").classList.toggle("hidden", !perf);
   if (usergroups) { loadUserGroups(); }
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
@@ -6908,6 +6940,8 @@ function switchAdminTab(tab) {
     loadWebhookDeliveries();
   } else if (apikeys) {
     loadApiKeys();
+  } else if (perf) {
+    loadAgentPerformance();
   } else {
     loadConfigGovernance();
   }
@@ -12816,6 +12850,10 @@ function init() {
   bindApiKeyConsole(); // 对外集成凭证：托管 API 密钥后台页签
   bindMarketConsole(); // 模板市场（在线分发）
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
+  $("adminTabPerf").onclick = () => switchAdminTab("perf");
+  $("perfRefreshBtn").onclick = loadAgentPerformance;
+  const pr = $("perfRange");
+  if (pr) pr.onchange = loadAgentPerformance;
   $("storageRefreshBtn").onclick = loadStorageGovernance;
   $("storageReclaimBtn").onclick = runStorageReclaim;
   $("auditSearchBtn").onclick = () => loadAdminAudit();

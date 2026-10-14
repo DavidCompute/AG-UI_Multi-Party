@@ -638,6 +638,7 @@ apiKey 不回显，仅提示“已配置”。
 - 用户管理（列表/角色/禁用/重置密码/平台角色授予）；系统状态与用量、审计、桥健康/能力、执行参数（在线热改）、
   配置治理、白标设置；权限随角色（User 无管理菜单 / Operator 只读 / Admin+ 完整 / SuperAdmin 角色管理）。
 - 管理页按生效角色显示，角色下拉仅 SuperAdmin 可见。
+- **数字员工绩效看板（`#adminTabPerf` → `#adminPerfView`，P0）**：管理员控制台新增页签，按数字员工聚合调用次数 / 总 token / 👍👎 好评率 / 最近活跃，7 / 30 / 90 天窗口 + 一键刷新（按调用次数降序）；数据来自 `GET /ag-ui/admin/agent-performance`（`agui_usage` + 消息反馈），聚合为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`）便于单测。
 - **系统状态（`#statusModal`）里的「文档在线转换」能力行**：显式展示服务端是否就绪（`GET /ag-ui/admin/status` 的
   `docPreview.available`，由 `ISofficeRunner.Available` 探测本机 LibreOffice）。未就绪时值标为警示色并在下方给出**修复指引**
   （装 LibreOffice 或用 `AGUI_SOFFICE` 指定 soffice 路径后重启）——不再等用户点「在线查看 / ▶ 播放」时才报 503。

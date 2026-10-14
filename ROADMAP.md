@@ -217,6 +217,12 @@
 
 - **Playwright 自动化验证（已实现）**：`tools/ui-orchestrate-flow.mjs` 用 Playwright 自动跑「一键组织编排 → 建客服知聚」全链路并截图（`tools/README-playwright.md`），覆盖 SSE 流式生成、apply 落库、客服知聚进入与会话隔离的前端验证。
 
+### 6.5 数字员工绩效看板（★★☆ 运营洞察 / 反哺编排） ✅已实现（1.0.220）
+- **现状**：`agui_usage` 已在记录按「日期 + 员工 + 触发者」的调用与 token；消息 👍👎 反馈也已在存；但**没有按员工的汇总视图**，编排选人仍靠静态角色描述。
+- **目标**：按数字员工聚合绩效（调用量 / token / 好评率 / 最近活跃），为「一键编排选人」与组织体检提供实测依据。
+- **已实现**：端点 `GET /ag-ui/admin/agent-performance?days=N`（Operator+，只读；名字取昵称、取不到回退 agentId）；控制台新增「员工绩效」页签（7/30/90 天窗口 + 刷新，按调用次数降序）；聚合为纯函数 `AgentPerformance.Aggregate`。落点：`Web/AgentPerformance.cs`、`Web/AdminApi.cs`、`wwwroot/{index.html,app.js}`。
+- **待续**：把绩效作为信号**自动反馈进编排**（候选复用 / 部门体检 / 低绩效提醒），需先定口径防抖动。
+
 ---
 
 ## 优先排期建议（★★★ 优先）

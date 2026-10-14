@@ -1724,6 +1724,7 @@
         <button id="adminTabStorage" class="chip-btn admin-tab" data-i18n="admin.tabStorage">存储治理</button>
         <button id="adminTabWebhooks" class="chip-btn admin-tab" data-i18n="admin.tabWebhooks">Webhook</button>
         <button id="adminTabApiKeys" class="chip-btn admin-tab" data-i18n="admin.tabApiKeys">API 密钥</button>
+        <button id="adminTabPerf" class="chip-btn admin-tab" data-i18n="admin.tabPerf">员工绩效</button>
       </div>
       <div class="admin-body">
       <div id="adminUsersView">
@@ -1740,6 +1741,33 @@
           <table class="admin-table">
             <thead><tr><th data-i18n="admin.thDate">日期</th><th data-i18n="admin.thTotal">总 Token</th><th data-i18n="admin.thIn">输入</th><th data-i18n="admin.thOut">输出</th><th data-i18n="admin.thThink">思考</th><th data-i18n="admin.thCalls">调用次数</th></tr></thead>
             <tbody id="adminUsageRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 员工绩效看板（P0）：按数字员工聚合调用量 / token / 👍👎 好评率 -->
+      <div id="adminPerfView" class="hidden">
+        <div class="admin-metrics-head">
+          <span class="form-hint" data-i18n="admin.perfRange">统计范围</span>
+          <select id="perfRange" class="modal-input" style="width:auto;display:inline-block;padding:2px 8px">
+            <option value="7" data-i18n="admin.perfRange7">近 7 天</option>
+            <option value="30" selected data-i18n="admin.perfRange30">近 30 天</option>
+            <option value="90" data-i18n="admin.perfRange90">近 90 天</option>
+          </select>
+          <button id="perfRefreshBtn" class="chip-btn" type="button" data-i18n="admin.perfRefresh">↻ 刷新</button>
+          <span id="adminPerfMeta" class="form-hint"></span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr>
+              <th data-i18n="admin.perfThAgent">数字员工</th>
+              <th data-i18n="admin.perfThCalls">调用次数</th>
+              <th data-i18n="admin.perfThTokens">总 Token</th>
+              <th data-i18n="admin.perfThUp">👍</th>
+              <th data-i18n="admin.perfThDown">👎</th>
+              <th data-i18n="admin.perfThRate">好评率</th>
+              <th data-i18n="admin.perfThLast">最近活跃</th>
+            </tr></thead>
+            <tbody id="adminPerfRows"></tbody>
           </table>
         </div>
       </div>

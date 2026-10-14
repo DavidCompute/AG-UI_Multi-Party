@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.220 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.220 Release Notes (current Windows desktop release)
+
+**版本说明**：**数字员工绩效看板（P0）**——管理员控制台新增「📈 员工绩效」页签：按数字员工聚合**调用次数 / 总 token / 👍👎 好评率 / 最近活跃**，支持 7 / 30 / 90 天窗口，一眼看出哪位置得用、哪位置需改进（为“一键编排选人”与组织体检提供实测依据）。
+**Version note**: **Digital-employee performance dashboard (P0)** — the admin console gains an "📈 Agent performance" tab aggregating **calls / total tokens / 👍👎 positive rate / last active** per employee, with 7 / 30 / 90-day windows, so you can see at a glance who delivers and who needs work (a data foundation for "pick people when orchestrating" and org health checks).
+
+## 员工绩效看板
+# Agent performance dashboard
+
+中文：新增端点 `GET /ag-ui/admin/agent-performance?days=N`（仅运维及以上，只读）：
+- **数据源**：`agui_usage` 按「日期 + 员工 + 触发者」的聚合行（调用次数 / 输入·输出·思考 token）与消息反馈（👍/👎）。
+- **窗口**：`days` 限 1–365（默认 30），只用于过滤反馈（用量行按日期区间取）。
+- **返回**：`agents[]`（agentId / name / calls / prompt·completion·reasoning·totalTokens / up / down / positiveRate / lastDate）与 `summary`（员工数 / 总调用 / 总 token / 综合好评率）。名字取数字员工昵称，取不到时回退 agentId。
+- **前端**：管理员控制台新增「📈 员工绩效」页签（Operator+ 可见），范围选择 7 / 30 / 90 天 + 一键刷新，按调用次数降序列表；无反馈时好评率显示「—」。
+- 实现：聚合逻辑抽为纯函数 `AgentPerformance.Aggregate`（便于单测）；后端复用既有 `IUsageStore` / `MessageFeedbackStore` / `AgentCatalog`，无新增存储。
+English: new endpoint `GET /ag-ui/admin/agent-performance?days=N` (Operator+, read-only):
+- **Sources**: `agui_usage`'s per-date+agent+trigger aggregate rows (calls / prompt·completion·reasoning tokens) and message feedback (👍/👎).
+- **Window**: `days` clamped to 1–365 (default 30), used only to filter feedback (usage is fetched by date range).
+- **Returns**: `agents[]` (agentId / name / calls / prompt·completion·reasoning·totalTokens / up / down / positiveRate / lastDate) plus `summary` (agents / total calls / total tokens / overall positive rate). Names use the employee's nickname, falling back to the agentId.
+- **Front end**: the admin console gains an "📈 Agent performance" tab (Operator+), with 7/30/90-day range and refresh, listed by calls descending; positive rate shows "—" when there is no feedback.
+- Implementation: the aggregation is a pure function `AgentPerformance.Aggregate` (unit-tested); the backend reuses the existing `IUsageStore` / `MessageFeedbackStore` / `AgentCatalog` — no new storage.
+
+## 测试
+# Tests
+
+中文：新增 `AgentPerformanceTests`（按员工汇总 / 窗口外反馈不计 / 名回退 id / 排序 / 空输入）与端点鉴权/形状集成测试，合跑 **4/4**；连同管理接口与桌面组合根回归全通过。`node --check` 与 i18n 审计（zh=en=1770，missing 0）通过。运行栈实测：无令牌 401；带令牌 200（近 30 天 22 位数字员工 / 1079 次调用 / 16.35M tokens）；Playwright 实测页签渲染正确。
+English: new `AgentPerformanceTests` (per-agent aggregation / out-of-window feedback excluded / name falls back to id / ordering / empty input) plus an endpoint auth/shape integration test, running **4/4**; the admin-API and desktop-composition suites all pass. `node --check` and the i18n audit pass (zh=en=1770, missing 0). Verified live: 401 without a token; 200 with one (22 agents / 1079 calls / 16.35M tokens over 30 days); Playwright confirms the tab renders correctly.
+
 # AG-UI 群聊桌面版 1.0.219 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.219 Release Notes (current Windows desktop release)
 

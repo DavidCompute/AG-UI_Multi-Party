@@ -3595,9 +3595,11 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
   - `#meMenuBackup`（数据备份）、`#meMenuModelConfig`（模型配置）、`#meMenuBranding`（白标设置）对 **Admin 及以上**可见。
   - Operator 与 Admin 及以上**文案统一为 `menu.console`「管理控制台」**（打开的是整个控制台而非仅用户管理；角色只影响可见页签，不影响菜单名）。
 - 管理员控制台 `#adminModal` 的页签按角色收敛（`applyAdminTabVisibility`）：
-  - **Operator** 仅只读页签：用量统计 / 审计日志 / 运行指标（对应 `RequireRoleFilter(Operator)` 的后端端点）；默认落到「用量统计」。
-  - **Admin / SuperAdmin** 看到全量 9 个页签。
+  - **Operator** 仅只读页签：用量统计 / 审计日志 / 运行指标 / 员工绩效（对应 `RequireRoleFilter(Operator)` 的后端端点）；默认落到「用量统计」。
+  - **Admin / SuperAdmin** 看到全量 12 个页签。
 - `state.isSuperAdmin` 仍仅用于「用户管理」里的平台角色下拉（仅 SuperAdmin 可授予 / 回收角色）。
+
+**员工绩效 tab（`#adminTabPerf`，`admin.tabPerf`，Operator+）**：按数字员工聚合**调用次数 / 总 token / 👍👎 好评率 / 最近活跃**，支持 7 / 30 / 90 天窗口与一键刷新（按调用次数降序）；无反馈时好评率显示「—」。数据来自 `GET /ag-ui/admin/agent-performance?days=N`（`agui_usage` 用量行 + 消息反馈；名字取数字员工昵称，取不到回退 agentId）。聚合逻辑为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`），由 `AdminApi.cs` 挂载。
 
 > 依据：`app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`；后端 `AdminApi.cs` 各端点过滤器见 §8.1.6。与 `docs/RBAC.md` §5「按生效角色细分菜单」现已一致。
 
@@ -3651,6 +3653,9 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 7 | `#adminTabOrphans` | `admin.tabOrphans` | 孤儿盘点 | `#adminOrphansView` | `GET /ag-ui/admin/orphans` + 接管 / 删除 |
 | 8 | `#adminTabUserGroups` | `admin.tabUserGroups` | 用户分组 | `#adminUserGroupsView` | `GET/POST /ag-ui/usergroups`、`GET /usergroups/{id}/impact`、`DELETE` |
 | 9 | `#adminTabStorage` | `admin.tabStorage` | 存储治理 | `#adminStorageView` | `GET /ag-ui/admin/storage`、`POST /ag-ui/admin/storage/reclaim` |
+| 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST /ag-ui/admin/webhooks`、`GET /ag-ui/admin/webhooks/deliveries` |
+| 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys` |
+| 12 | `#adminTabPerf` | `admin.tabPerf` | 员工绩效 | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`、`…/events`、`…/deliveries`、`…/{id}/test`（见 §8.19） |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`、`DELETE /ag-ui/admin/api-keys/{id}`（见 §8.20） |
 
@@ -4243,7 +4248,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 以下均以代码为准（逐项已回代码核实）：
 
-1. **前端管理端已按 `platformRole` 细分（1.0.194 修复）**。`#meMenu` 的管理菜单与 `#adminModal` 的页签可见性现由 `roleRank` / `applyAdminTabVisibility` 按生效角色收敛：Operator 及以上可见「管理控制台」「系统状态」，Admin 及以上可见数据备份 / 模型配置 / 白标；Operator 的控制台仅只读页签（用量 / 审计 / 运行指标）。与 `docs/RBAC.md` §5、`docs/ui-design.md` §7.6「按生效角色细分菜单」现已一致。
+1. **前端管理端已按 `platformRole` 细分（1.0.194 修复）**。`#meMenu` 的管理菜单与 `#adminModal` 的页签可见性现由 `roleRank` / `applyAdminTabVisibility` 按生效角色收敛：Operator 及以上可见「管理控制台」「系统状态」，Admin 及以上可见数据备份 / 模型配置 / 白标；Operator 的控制台仅只读页签（用量 / 审计 / 运行指标 / 员工绩效）。与 `docs/RBAC.md` §5、`docs/ui-design.md` §7.6「按生效角色细分菜单」现已一致。
 2. **`GET /ag-ui/admin/config`（只读快照）是纯接口，`app.js` 未消费**。全仓前端仅调用 `POST /ag-ui/admin/config` 与 `GET /ag-ui/admin/config/governance`；而 `admin.configHint` 文案指向的「数据备份菜单「系统状态」旁的参数快照」在代码中**不存在**对应界面。
 3. **「桥健康」在「运行指标」tab 内**（`#adminBridgeRows`，`app.js:6967-6977`），**不是独立 tab**；「白标」是独立弹窗 `#brandModal`（非 tab）；「系统状态」也是独立弹窗 `#statusModal`（非 tab）。
 4. **用户管理无搜索框**（§8.3.6）；若既有文档描述「用户搜索」则为误述。
@@ -4549,6 +4554,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/admin/users/{userId}/password` | 重置密码（吊销全部会话） | 管理员 |
 | DELETE | `/ag-ui/admin/users/{userId}` | 彻底删除账号（数据擦除；不可删自己，请走「注销账户」） | 管理员 |
 | GET | `/ag-ui/admin/status` | 系统状态（连接 / 知聚 / 用户 / 消息 / 数字员工 / 内存 / 线程 / RAG / 文档转换能力 / **语音服务（ASR·TTS 配置与可达性 `voice`）**） | Operator |
+| GET | `/ag-ui/admin/agent-performance` | 数字员工绩效看板（按员工聚合调用次数 / token / 👍👎 好评率 / 最近活跃，`?days=N`） | Operator |
 | GET | `/ag-ui/admin/voice/voices` | 语音合成音色列表（代理 TTS 服务 `/v1/audio/voices`）：`{ voices: string[] }`；未配置 / 不支持 404、不可达 503 | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | 音色试听：合成一句短样例并内联返回音频（便于 `<audio src>`，可带 `?token=`）；未启用 404、失败 503 | Operator |
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 配额） | 运维 |

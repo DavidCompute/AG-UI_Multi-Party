@@ -9,6 +9,7 @@ using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Options;
 using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Hub.Persistence.Redis;
+using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Hub.Users;
 
 namespace AguiGroupChat.Web;
@@ -189,7 +190,47 @@ public static class AdminApi
             return Results.File(bytes, tts.SampleContentType);
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 模型用量统计（最近 N 天按日汇总 + 配额配置）：仅管理员及以上（含运维）
+        // 数字员工绩效看板（P0）：按数字员工聚合调用量 / token / 👍👎 好评率。仅运维及以上（只读）。
+        // 数据源：agui_usage（按日期+员工+触发者聚合行）与消息反馈；窗口 days 只用于过滤反馈。
+        root.MapGet("/agent-performance", (int? days, IServiceProvider sp) =>
+        {
+            var usage = sp.GetService<IUsageStore>();
+            var catalog = sp.GetService<AgentCatalog>();
+            if (usage is null || catalog is null)
+                return Results.Ok(new { days = 0, agents = Array.Empty<object>() });
+            var d = Math.Clamp(days ?? 30, 1, 365);
+            var to = DateTimeOffset.UtcNow;
+            var from = to.AddDays(-d + 1);
+            var rows = usage.GetUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"));
+            var feedback = sp.GetService<MessageFeedbackStore>()?.Snapshot() ?? (IReadOnlyList<MessageFeedbackEntry>)[];
+            var names = catalog.ListDefinitions()
+                .ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
+            var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            var up = stats.Sum(s => s.Up);
+            var down = stats.Sum(s => s.Down);
+            return Results.Ok(new
+            {
+                days = d,
+                from = from.ToString("yyyy-MM-dd"),
+                to = to.ToString("yyyy-MM-dd"),
+                summary = new
+                {
+                    agents = stats.Count,
+                    calls = stats.Sum(s => s.Calls),
+                    totalTokens = stats.Sum(s => s.TotalTokens),
+                    up,
+                    down,
+                    positiveRate = (up + down) == 0 ? (double?)null : Math.Round((double)up / (up + down), 4),
+                },
+                agents = stats.Select(s => new
+                {
+                    s.AgentId, s.Name, s.Calls, s.PromptTokens, s.CompletionTokens, s.ReasoningTokens, s.TotalTokens,
+                    s.Up, s.Down, s.PositiveRate, s.LastDate,
+                }),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 模型用量统计（最近 N 天按日汇总 / 配额配置）：仅管理员及以上（含运维）
         root.MapGet("/usage", (int? days, HttpContext ctx, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
             return Results.Ok(new
