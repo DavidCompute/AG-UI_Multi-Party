@@ -4130,7 +4130,7 @@ The server (`SystemApi.cs:90-164`): in database mode (postgres/mysql/sqlite) it 
 
 #### 8.13 System Status (`#statusModal`, not a tab)
 
-Besides the counters and the RAG / document-conversion capability rows, there are two **voice-service** rows (multimodality · voice Q&A): **🎤 Voice transcription (ASR)** / **🔊 Voice reply (TTS)**, with values "Ready / Off / Unreachable" (from `voice.asr` / `voice.tts` of `GET /ag-ui/admin/status`; `reachable` comes from a short-timeout GET probe, where any HTTP response counts as reachable), plus a hint listing the actual endpoints (TTS notes "voice turns only").
+Besides the counters and the RAG / document-conversion capability rows, there are two **voice-service** rows (multimodality · voice Q&A): **🎤 Voice transcription (ASR)** / **🔊 Voice reply (TTS)**, with values "Ready / Off / Unreachable" (from `voice.asr` / `voice.tts` of `GET /ag-ui/admin/status`; `reachable` comes from a short-timeout GET probe, where any HTTP response counts as reachable), plus a hint listing the actual endpoints (TTS notes "voice turns only"). When TTS is on there is also a **"🎧 Preview voices"** button: it opens a modal listing every voice the synthesis service offers (`GET /ag-ui/admin/voice/voices`), each previewable with ▶ (`GET /ag-ui/admin/voice/sample?voice=`).
 
 `#statusModal` (`index.html:1754-1762`) is opened from the account menu `#meMenuStatus` (`menu.status` = System Status, **`state.isAdmin` only**); `openStatusModal()` (`app.js:7425-7462`) fetches `GET /ag-ui/admin/status` (the backend requires only `Operator`).
 
@@ -4547,6 +4547,8 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | POST | `/ag-ui/admin/users/{userId}/password` | Reset password (revokes all sessions) | Admin |
 | DELETE | `/ag-ui/admin/users/{userId}` | Permanently delete an account (data erasure; cannot delete yourself, use "Delete Account" instead) | Admin |
 | GET | `/ag-ui/admin/status` | System status (connections / groups / users / messages / agents / memory / threads / RAG / document conversion capability / **voice services (ASR·TTS config & reachability `voice`)**) | Operator |
+| GET | `/ag-ui/admin/voice/voices` | Voice list for synthesis (proxies the TTS `/v1/audio/voices`): `{ voices: string[] }`; 404 unconfigured / unsupported, 503 unreachable | Operator |
+| GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |
 | GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `fromMs` / `toMs`) | Operator |
 | GET | `/ag-ui/admin/audit.csv` | Audit log CSV export (UTF-8 BOM, no 200-row limit) | Operator |

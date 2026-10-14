@@ -1674,6 +1674,12 @@ window.I18N_DICTS.zh = {
   "status.voiceAsrEndpoint": "ASR 端点：{ep}",
   "status.voiceTtsEndpoint": "TTS 端点：{ep}{mode}",
   "status.voiceOnlyTurn": "（仅语音回合）",
+  "status.voicePick": "🎧 试听音色",
+  "status.voicePickTitle": "🎧 语音音色试听",
+  "status.voicePickHint": "点击「▶」试听该音色的样例句；设为默认请改 Agents:Audio:SpeechVoice（或 AGENTS_AUDIO_SPEECH_VOICE）后重启。",
+  "status.voicePickEmpty": "该服务未返回音色列表",
+  "status.voicePickFail": "获取音色列表失败：{err}",
+  "status.voicePlay": "试听",
 
   /* --- 消息搜索补充 --- */
   "search.me": "我",

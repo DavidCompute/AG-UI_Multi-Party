@@ -1677,6 +1677,12 @@ window.I18N_DICTS.en = {
   "status.voiceAsrEndpoint": "ASR endpoint: {ep}",
   "status.voiceTtsEndpoint": "TTS endpoint: {ep}{mode}",
   "status.voiceOnlyTurn": " (voice turns only)",
+  "status.voicePick": "🎧 Preview voices",
+  "status.voicePickTitle": "🎧 Voice preview",
+  "status.voicePickHint": "Click ▶ to hear a sample in that voice; to make it the default, change Agents:Audio:SpeechVoice (or AGENTS_AUDIO_SPEECH_VOICE) and restart.",
+  "status.voicePickEmpty": "The service returned no voice list",
+  "status.voicePickFail": "Failed to get the voice list: {err}",
+  "status.voicePlay": "Preview",
 
   /* --- 消息搜索补充 --- */
   "search.me": "Me",

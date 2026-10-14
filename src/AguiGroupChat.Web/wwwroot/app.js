@@ -8249,7 +8249,48 @@ async function openStatusModal() {
     $("statusBody").innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
       `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`
       + hints.map((h) => `<div class="status-hint">${h}</div>`).join("");
+    // TTS 已启用：给一个「试听音色」入口（列出合成服务的音色，逐个试听）
+    if (d.voice && d.voice.tts && d.voice.tts.enabled) {
+      const pick = document.createElement("button");
+      pick.type = "button"; pick.className = "btn-ghost"; pick.style.marginTop = "10px";
+      pick.textContent = t("status.voicePick");
+      pick.onclick = openVoicePicker;
+      $("statusBody").appendChild(pick);
+    }
   } catch { $("statusBody").innerHTML = t("admin.sysNetErr"); }
+}
+
+/** 语音音色试听：列出合成服务的音色，逐个试听（调用试听端点合成一句短样例）。*/
+async function openVoicePicker() {
+  $("voicePickerModal").classList.remove("hidden");
+  $("voicePickerBody").innerHTML = t("status.loading");
+  try {
+    const res = await fetch("/ag-ui/admin/voice/voices", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const voices = (res.ok && d && Array.isArray(d.voices)) ? d.voices : null;
+    const box = $("voicePickerBody");
+    if (!voices) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("status.voicePickFail", { err: errMsg(d, "HTTP " + res.status) }))}</div>`; return; }
+    if (voices.length === 0) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("status.voicePickEmpty"))}</div>`; return; }
+    box.innerHTML = "";
+    const audio = document.createElement("audio"); // 复用单个元素，避免多例叠加播放
+    audio.preload = "none";
+    for (const v of voices) {
+      const row = document.createElement("div");
+      row.className = "voice-row";
+      const name = document.createElement("span");
+      name.className = "voice-name"; name.textContent = v;
+      const play = document.createElement("button");
+      play.type = "button"; play.className = "voice-play"; play.textContent = "▶";
+      play.title = t("status.voicePlay");
+      play.onclick = () => {
+        audio.src = `/ag-ui/admin/voice/sample?voice=${encodeURIComponent(v)}&token=${encodeURIComponent(state.token || "")}`;
+        audio.play().catch(() => toast(t("status.voicePickFail", { err: "play" })));
+      };
+      row.appendChild(name); row.appendChild(play);
+      box.appendChild(row);
+    }
+    box.appendChild(audio);
+  } catch { $("voicePickerBody").innerHTML = t("admin.sysNetErr"); }
 }
 
 /** 运行时长格式化（秒 → “X天X小时X分”）。 */
@@ -12686,6 +12727,8 @@ function init() {
   $("efReset").onclick = resetExecutionConfig;
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
+  $("voicePickerClose").onclick = () => $("voicePickerModal").classList.add("hidden");
+  $("voicePickerModal").addEventListener("click", (e) => { if (e.target === $("voicePickerModal")) $("voicePickerModal").classList.add("hidden"); });
   $("memSearchBtn").onclick = () => refreshMemView();
   $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") refreshMemView(); });
   $("memGroupSelect").addEventListener("change", () => { refreshMemView(); syncMemForgetHint(); });

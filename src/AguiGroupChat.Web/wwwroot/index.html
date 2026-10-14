@@ -2006,6 +2006,18 @@
     </div>
   </div>
 
+  <!-- 语音音色试听（多模态进阶 · 语音问答）：列出合成服务的音色，逐个试听 -->
+  <div id="voicePickerModal" class="modal-overlay hidden">
+    <div class="modal status-modal">
+      <div class="modal-title" data-i18n="status.voicePickTitle">🎧 语音音色试听</div>
+      <p class="form-hint" style="margin:0 0 8px" data-i18n="status.voicePickHint">点击「▶」试听该音色的样例句；设为默认请改 Agents:Audio:SpeechVoice（或 AGENTS_AUDIO_SPEECH_VOICE）后重启。</p>
+      <div id="voicePickerBody" class="voice-picker"></div>
+      <div class="modal-actions">
+        <button id="voicePickerClose" class="btn-ghost" data-i18n="status.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 全局搜索（跨知聚检索消息 / 记忆 / 知识库） -->
   <div id="globalSearchModal" class="modal-overlay hidden">
     <div class="modal search-modal">

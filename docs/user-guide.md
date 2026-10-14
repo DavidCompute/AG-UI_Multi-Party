@@ -4123,7 +4123,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.13 系统状态（`#statusModal`，非页签）
 
-除统计与 RAG / 文档转换能力行外，还有两行**语音服务（多模态进阶 · 语音问答）**：**🎤 语音转写（ASR）** / **🔊 语音回复（TTS）**，值为「就绪 / 未启用 / 不可达」（来自 `GET /ag-ui/admin/status` 的 `voice.asr` / `voice.tts`；`reachable` 由短超时 GET 探测得出，收到任意 HTTP 响应即算可达），并在下方列出实际端点（TTS 附带「（仅语音回合）」）。
+除统计与 RAG / 文档转换能力行外，还有两行**语音服务（多模态进阶 · 语音问答）**：**🎤 语音转写（ASR）** / **🔊 语音回复（TTS）**，值为「就绪 / 未启用 / 不可达」（来自 `GET /ag-ui/admin/status` 的 `voice.asr` / `voice.tts`；`reachable` 由短超时 GET 探测得出，收到任意 HTTP 响应即算可达），并在下方列出实际端点（TTS 附带「（仅语音回合）」）。TTS 启用时下方还有 **「🎧 试听音色」**：打开弹窗列出合成服务的全部音色（`GET /ag-ui/admin/voice/voices`），逐个「▶」试听（`GET /ag-ui/admin/voice/sample?voice=`）。
 
 `#statusModal`（`index.html:1754-1762`）由账号菜单 `#meMenuStatus`（`menu.status` = 系统状态，**仅 `state.isAdmin`**）打开，`openStatusModal()`（`app.js:7425-7462`）拉 `GET /ag-ui/admin/status`（后端仅需 `Operator`）。
 
@@ -4539,6 +4539,8 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/admin/users/{userId}/password` | 重置密码（吊销全部会话） | 管理员 |
 | DELETE | `/ag-ui/admin/users/{userId}` | 彻底删除账号（数据擦除；不可删自己，请走「注销账户」） | 管理员 |
 | GET | `/ag-ui/admin/status` | 系统状态（连接 / 知聚 / 用户 / 消息 / 数字员工 / 内存 / 线程 / RAG / 文档转换能力 / **语音服务（ASR·TTS 配置与可达性 `voice`）**） | Operator |
+| GET | `/ag-ui/admin/voice/voices` | 语音合成音色列表（代理 TTS 服务 `/v1/audio/voices`）：`{ voices: string[] }`；未配置 / 不支持 404、不可达 503 | Operator |
+| GET | `/ag-ui/admin/voice/sample?voice=` | 音色试听：合成一句短样例并内联返回音频（便于 `<audio src>`，可带 `?token=`）；未启用 404、失败 503 | Operator |
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 配额） | 运维 |
 | GET | `/ag-ui/admin/audit` | 操作审计日志查询（`limit` 最多 200；过滤 `actor` / `action` / `targetId` / `fromMs` / `toMs`） | 运维 |
 | GET | `/ag-ui/admin/audit.csv` | 审计日志导出 CSV（UTF-8 BOM，无 200 条上限） | 运维 |

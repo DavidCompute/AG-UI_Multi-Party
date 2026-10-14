@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub;
 using AguiGroupChat.Hub.Agents;
@@ -150,6 +151,42 @@ public static class AdminApi
                     tts = new { enabled = tts?.IsEnabled ?? false, endpoint = tts?.Endpoint, onlyForVoice = tts?.OnlyWhenVoiceTurn ?? false, reachable = ttsReach },
                 },
             });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 语音合成音色列表（多模态进阶 · 语音问答）：代理合成服务的 /v1/audio/voices，供管理员选音色。
+        // 未配置 / 不支持 → 404；服务不可达 → 503；成功 → { voices: string[] }。仅运维及以上。
+        root.MapGet("/voice/voices", async (IServiceProvider sp) =>
+        {
+            var tts = sp.GetService<AguiGroupChat.Agents.SpeechSynthesisService>();
+            var url = tts?.VoicesEndpoint;
+            if (tts is null || !tts.IsEnabled || url is null)
+                return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "未配置独立的语音合成服务（或不支持音色列表）"));
+            try
+            {
+                using var res = await VoiceHttp.GetAsync(url);
+                if (!res.IsSuccessStatusCode)
+                    return Results.Json(new AguiError(ErrorCodes.BadRequest, $"音色列表获取失败（HTTP {(int)res.StatusCode}）"),
+                        statusCode: StatusCodes.Status503ServiceUnavailable);
+                return Results.Ok(new { voices = ParseVoices(await res.Content.ReadAsStringAsync()) });
+            }
+            catch
+            {
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, "语音合成服务不可达"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 音色试听：用配置的 TTS 端点合成一句短样例并**内联返回音频**（GET，便于 <audio src>，可带 ?token=）。
+        // 未启用 → 404；合成失败 → 503。仅运维及以上。
+        root.MapGet("/voice/sample", async (string? voice, IServiceProvider sp) =>
+        {
+            var tts = sp.GetService<AguiGroupChat.Agents.SpeechSynthesisService>();
+            if (tts is null || !tts.IsEnabled) return Results.NotFound();
+            var bytes = await tts.TrySynthesizeBytesAsync("你好，我是知聚平台的数字员工。这是音色试听。", voice, CancellationToken.None);
+            if (bytes is null)
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, "音色试听合成失败"),
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Results.File(bytes, tts.SampleContentType);
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 模型用量统计（最近 N 天按日汇总 + 配额配置）：仅管理员及以上（含运维）
@@ -510,6 +547,44 @@ public static class AdminApi
         ConnectTimeout = TimeSpan.FromMilliseconds(1200),
     })
     { Timeout = TimeSpan.FromMilliseconds(1800) };
+
+    /// <summary>音色列表 / 试听用 HttpClient（合成与列表可能稍慢，给宽松超时）。</summary>
+    private static readonly HttpClient VoiceHttp = new(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromSeconds(3),
+    })
+    { Timeout = TimeSpan.FromSeconds(15) };
+
+    /// <summary>解析音色列表响应：兼容 `{voices:[…]}` / 裸数组，元素为字符串或带 id / name 的对象。</summary>
+    private static List<string> ParseVoices(string body)
+    {
+        var list = new List<string>();
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            JsonElement arr;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array) arr = doc.RootElement;
+            else if (doc.RootElement.TryGetProperty("voices", out var v) && v.ValueKind == JsonValueKind.Array) arr = v;
+            else return list;
+            foreach (var el in arr.EnumerateArray())
+            {
+                if (el.ValueKind == JsonValueKind.String)
+                {
+                    var s = el.GetString();
+                    if (!string.IsNullOrWhiteSpace(s)) list.Add(s!);
+                }
+                else if (el.ValueKind == JsonValueKind.Object)
+                {
+                    var id = el.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString()
+                        : el.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+                    if (!string.IsNullOrWhiteSpace(id)) list.Add(id!);
+                }
+            }
+        }
+        catch { /* 非 JSON / 结构不符：返回空列表（前端显示“无”） */ }
+        return list;
+    }
 
     /// <summary>
     /// 语音端点可达性探测（多模态进阶 · 语音问答）：发一个 GET，**只要收到任意 HTTP 响应即算可达**

@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.216 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.216 Release Notes (current Windows desktop release)
+
+**版本说明**：**管理端「语音音色试听」**——在「系统状态」的语音行旁新增「🎧 试听音色」：列出声合成服务提供的全部音色（代理其 `/v1/audio/voices`），逐个「▶」试听一段样句，不用改配置重启就能选定中文音色。
+**Version note**: **Voice preview in the admin console** — a "🎧 Preview voices" entry next to the voice rows in System Status: lists every voice the synthesis service offers (proxying its `/v1/audio/voices`) and previews each with a ▶ sample, so a Chinese voice can be chosen without editing config and restarting.
+
+## 音色列表与试听
+# Voice list & preview
+
+中文：
+- **新端点（仅运维及以上）**：`GET /ag-ui/admin/voice/voices` —— 代理合成服务的音色列表，返回 `{ voices: string[] }`（未配置 / 不支持 404，服务不可达 503）；`GET /ag-ui/admin/voice/sample?voice=<id>` —— 用配置的 TTS 端点合成一句短样例并**内联返回音频**（便于 `<audio src>`，可带 `?token=`；失败 503）。
+- **端点推导**：音色列表端点由合成端点推导（`…/v1/audio/speech` → `…/v1/audio/voices`）；自定义非标准形状的服务无法推导时返回 404（不报错，前端提示）。
+- **服务层**：`SpeechSynthesisService` 抽出 `TrySynthesizeBytesAsync(text, voiceOverride)`（不落盘，供试听）与 `VoicesEndpoint` / `SampleContentType`；回复合成路径复用同一实现（行为不变）。
+- **另**：确认「输出物」弹窗**已自动包含** TTS 回复的音频附件（动画/语音统一在件入口），无需改动。
+English:
+- **New endpoints (Operator+)**: `GET /ag-ui/admin/voice/voices` — proxies the synthesis service's voice list, returning `{ voices: string[] }` (404 when unconfigured / unsupported, 503 when unreachable); `GET /ag-ui/admin/voice/sample?voice=<id>` — synthesizes a short sample via the configured TTS endpoint and returns the **audio inline** (for `<audio src>`, `?token=` accepted; 503 on failure).
+- **Endpoint derivation**: the voices URL is derived from the synthesis URL (`…/v1/audio/speech` → `…/v1/audio/voices`); a custom, non-standard service yields 404 (a hint is shown rather than an error).
+- **Service layer**: `SpeechSynthesisService` gains `TrySynthesizeBytesAsync(text, voiceOverride)` (no disk write, for previews) plus `VoicesEndpoint` / `SampleContentType`; the reply path reuses the same implementation (behaviour unchanged).
+- **Also**: confirmed the Outputs dialog **already includes** TTS-reply audio attachments (one consolidated attachment entry), so no change was needed.
+
+## 测试
+# Tests
+
+中文：`SpeechSynthesisTests` 新增 2 例（字节合成 + 音色覆盖生效、`VoicesEndpoint` 推导与自定义形状为 null），连同存储 / 管理接口 / 桌面组合根合跑 **43/43**；`node --check` 与 i18n 审计（zh=en=1745，missing 0）通过。运行栈实测：`GET /ag-ui/admin/voice/voices` → 200（72 个音色，含 8 个中文）；`GET …/voice/sample?voice=zf_xiaoyi` → 200 `audio/mpeg` 69KB；无令牌 401。
+English: `SpeechSynthesisTests` gains 2 cases (byte synthesis with voice override taking effect; `VoicesEndpoint` derivation and null for custom shapes), **43/43** together with the store / admin-API / desktop-composition suites; `node --check` and the i18n audit pass (zh=en=1745, missing 0). Verified live: `GET /ag-ui/admin/voice/voices` → 200 (72 voices incl. 8 Chinese); `GET …/voice/sample?voice=zf_xiaoyi` → 200 `audio/mpeg` 69KB; 401 without a token.
+
 # AG-UI 群聊桌面版 1.0.215 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.215 Release Notes (current Windows desktop release)
 

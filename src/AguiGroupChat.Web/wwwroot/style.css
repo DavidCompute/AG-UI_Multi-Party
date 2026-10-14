@@ -1713,6 +1713,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
   border: 1px solid var(--border, rgba(128,128,128,.25)); border-left: 3px solid var(--warn, #b26f0e);
   border-radius: 8px; padding: 8px 10px;
 }
+/* 语音音色试听（多模态进阶 · 语音问答）：一行一个音色，右侧 ▶ 试听 */
+.voice-picker { max-height: 46vh; overflow-y: auto; margin-top: 4px; }
+.voice-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; border-bottom: 1px solid var(--border, rgba(128,128,128,.18)); }
+.voice-row:last-of-type { border-bottom: none; }
+.voice-name { font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: text; }
+.voice-play { min-width: 34px; padding: 2px 9px; border: 1px solid var(--border, rgba(127,140,180,.4)); border-radius: 7px; background: transparent; color: inherit; cursor: pointer; }
+.voice-play:hover { border-color: var(--accent, #4f8cff); color: var(--accent, #4f8cff); }
 
 /* ============ 引用回复 ============ */
 .reply-bar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; margin-bottom: 6px;

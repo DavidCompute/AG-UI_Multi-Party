@@ -60,28 +60,44 @@ public sealed class SpeechSynthesisService : IDisposable
     public string? Endpoint => _endpoint;
 
     /// <summary>
-    /// 尝试把回复文本合成为音频附件。不可用 / 空文本 / 请求失败返回 null（调用方按「无语音」处理）。
-    /// <paramref name="triggerHadVoice"/>：触发本次回复的消息是否带语音附件；
-    /// 当配置了 <see cref="AudioOptions.SpeechOnlyForVoice"/> 且它为 false 时直接返回 null（不合成）。
+    /// 语音合成服务可能的「音色列表」端点（由合成端点推导）：`…/v1/audio/speech` → `…/v1/audio/voices`；
+    /// 端点不符合该形状（自定义服务）时为 null。供管理端列出可试听音色。
     /// </summary>
-    public async Task<AttachmentInfo?> TrySynthesizeAsync(string? text, CancellationToken ct = default, bool triggerHadVoice = true)
+    public string? VoicesEndpoint
+    {
+        get
+        {
+            const string tail = "/v1/audio/speech";
+            return _endpoint is { } e && e.EndsWith(tail, StringComparison.OrdinalIgnoreCase)
+                ? e[..^tail.Length] + "/v1/audio/voices"
+                : null;
+        }
+    }
+
+    /// <summary>合成输出对应的 MIME（试听端点返回音频时用）。</summary>
+    public string SampleContentType => FormatOf(_audio?.SpeechFormat).Mime;
+
+    /// <summary>
+    /// 尝试把文本合成为音频字节（不落盘）：供管理端「音色试听」等按需合成使用。
+    /// <paramref name="voiceOverride"/> 非空时覆盖配置音色。不可用 / 空文本 / 失败返回 null。
+    /// </summary>
+    public async Task<byte[]?> TrySynthesizeBytesAsync(string? text, string? voiceOverride = null, CancellationToken ct = default)
     {
         if (!IsEnabled) return null;
-        if (OnlyWhenVoiceTurn && !triggerHadVoice) return null;
         var clean = ForSpeech(text);
         if (clean.Length == 0) return null;
 
         var o = _audio!;
         if (clean.Length > o.SpeechMaxChars) clean = clean[..o.SpeechMaxChars];
-
-        var (ext, mime) = FormatOf(o.SpeechFormat);
+        var voice = !string.IsNullOrWhiteSpace(voiceOverride) ? voiceOverride.Trim()
+            : (string.IsNullOrWhiteSpace(o.SpeechVoice) ? "alloy" : o.SpeechVoice);
         try
         {
             var payload = new Dictionary<string, object?>
             {
                 ["model"] = string.IsNullOrWhiteSpace(o.SpeechModel) ? "tts-1" : o.SpeechModel,
                 ["input"] = clean,
-                ["voice"] = string.IsNullOrWhiteSpace(o.SpeechVoice) ? "alloy" : o.SpeechVoice,
+                ["voice"] = voice,
                 ["response_format"] = o.SpeechFormat,
             };
             using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(payload) };
@@ -94,21 +110,33 @@ public sealed class SpeechSynthesisService : IDisposable
             if (!resp.IsSuccessStatusCode)
             {
                 var body = await resp.Content.ReadAsStringAsync(cts.Token);
-                _logger.LogWarning("语音回复合成失败 HTTP {Status}：{Body}", (int)resp.StatusCode, Truncate(body, 300));
+                _logger.LogWarning("语音合成失败 HTTP {Status}：{Body}", (int)resp.StatusCode, Truncate(body, 300));
                 return null;
             }
             var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token);
-            if (bytes.Length == 0) { _logger.LogWarning("语音回复合成返回空音频"); return null; }
-
-            using var ms = new MemoryStream(bytes);
-            var info = _store!.Save("语音回复" + ext, mime, ms, bytes.Length);
-            return info;
+            if (bytes.Length == 0) { _logger.LogWarning("语音合成返回空音频"); return null; }
+            return bytes;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "语音回复合成异常（忽略，本次不挂语音）");
+            _logger.LogWarning(ex, "语音合成异常（忽略）");
             return null;
         }
+    }
+
+    /// <summary>
+    /// 尝试把回复文本合成为音频附件。不可用 / 空文本 / 请求失败返回 null（调用方按「无语音」处理）。
+    /// <paramref name="triggerHadVoice"/>：触发本次回复的消息是否带语音附件；
+    /// 当配置了 <see cref="AudioOptions.SpeechOnlyForVoice"/> 且它为 false 时直接返回 null（不合成）。
+    /// </summary>
+    public async Task<AttachmentInfo?> TrySynthesizeAsync(string? text, CancellationToken ct = default, bool triggerHadVoice = true)
+    {
+        if (OnlyWhenVoiceTurn && !triggerHadVoice) return null;
+        var bytes = await TrySynthesizeBytesAsync(text, voiceOverride: null, ct);
+        if (bytes is null) return null;
+        var (ext, mime) = FormatOf(_audio!.SpeechFormat);
+        using var ms = new MemoryStream(bytes);
+        return _store!.Save("语音回复" + ext, mime, ms, bytes.Length);
     }
 
     /// <summary>把正文整理成适合朗读的纯文本：去代码块 / 行内代码 / 图片 / 链接标记 / 标题符号 / 强调符。</summary>

@@ -1150,7 +1150,9 @@ The following are all Hub extension management-type APIs, expanding the capabili
 |API|Path|Description|
 |---|---|---|
 |Operation audit log|`GET /ag-ui/admin/audit?limit=`|Record of critical / sensitive operations（who / when / which tool was approved / import-export / resets，etc.），`limit` ≤200，exportable for compliance|
-|Runtime status|`GET /ag-ui/admin/status`|Connection / group / user / agent / message counts，memory，threads，and other process information|
+|Runtime status|`GET /ag-ui/admin/status`|Connection / group / user / agent / message counts，memory，threads，and other process information；includes `docPreview`（document conversion readiness）and `voice`（ASR/TTS config & reachability）|
+|Voice list|`GET /ag-ui/admin/voice/voices`|Proxies the synthesis service's `/v1/audio/voices`，returning `{ voices: string[] }`；404 unconfigured / unsupported，503 unreachable（Operator+）|
+|Voice preview|`GET /ag-ui/admin/voice/sample?voice=`|Synthesizes a short sample via the configured TTS endpoint and returns the **audio inline**（`<audio src>`，`?token=` accepted）；404 when off，503 on failure（Operator+）|
 |Model usage|`GET /ag-ui/admin/usage?days=`|Model call volume summarized by day for the most recent N days + quota configuration|
 |Runtime metrics|`GET /ag-ui/admin/metrics`|Agent invocation / bridge / memory hit / output length，and other in-process metric counters（6.1）|
 |Configuration snapshot|`GET /ag-ui/admin/config`|Central read-only display of key appsettings / .env operations parameters（model，storage，permissions，allowed origins，etc.），for governance and troubleshooting（6.3） |

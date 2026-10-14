@@ -1157,7 +1157,9 @@ PUT /ag-ui/user/profile
 |接口|路径|说明|
 |---|---|---|
 |操作审计日志|`GET /ag-ui/admin/audit?limit=`|关键 / 敏感操作留痕（谁 / 何时 / 批准了什么工具 / 导入导出 / 重置等），`limit` ≤200，可导出满足合规|
-|运行状态|`GET /ag-ui/admin/status`|连接 / 群 / 用户 / 智能体 / 消息计数、内存、线程等进程信息|
+|运行状态|`GET /ag-ui/admin/status`|连接 / 群 / 用户 / 智能体 / 消息计数、内存、线程等进程信息；含 `docPreview`（文档转换就绪）与 `voice`（ASR/TTS 配置与可达性）|
+|语音音色列表|`GET /ag-ui/admin/voice/voices`|代理合成服务 `/v1/audio/voices`，返回 `{ voices: string[] }`；未配置 / 不支持 404、不可达 503（仅运维及以上）|
+|语音音色试听|`GET /ag-ui/admin/voice/sample?voice=`|用配置的 TTS 端点合成一句短样例并**内联返回音频**（`<audio src>`，可带 `?token=`）；未启用 404、失败 503（仅运维及以上）|
 |模型用量|`GET /ag-ui/admin/usage?days=`|最近 N 天模型调用量按日汇总 + 配额配置|
 |运行指标|`GET /ag-ui/admin/metrics`|智能体调用 / 桥接 / 记忆命中 / 输出长度等进程内指标计数（6.1）|
 |配置快照|`GET /ag-ui/admin/config`|集中只读展示 appsettings / .env 关键运维参数（模型、存储、权限、允许来源等），供治理与排障（6.3） |

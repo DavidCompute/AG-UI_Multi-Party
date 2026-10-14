@@ -202,6 +202,30 @@ public sealed class SpeechSynthesisTests : IDisposable
         Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task TrySynthesizeBytes_UsesVoiceOverride_AndReturnsAudioBytes()
+    {
+        var handler = new FakeHandler(_ => Audio("audio/mpeg", 3333));
+        var svc = Service(handler, a => a.SpeechVoice = "default_voice");
+
+        var bytes = await svc.TrySynthesizeBytesAsync("试听一下", "zf_xiaoyi");
+        Assert.NotNull(bytes);
+        Assert.Equal(3333, bytes!.Length);
+        Assert.Equal(1, handler.Calls);
+        using var doc = JsonDocument.Parse(handler.LastBody!);
+        Assert.Equal("zf_xiaoyi", doc.RootElement.GetProperty("voice").GetString()); // 覆盖生效
+    }
+
+    [Fact]
+    public void VoicesEndpoint_DerivesFromSpeechEndpoint()
+    {
+        var handler = new FakeHandler(_ => Audio());
+        var svc = Service(handler, a => a.SpeechEndpoint = "https://tts.local/api/v1/audio/speech");
+        Assert.Equal("https://tts.local/api/v1/audio/voices", svc.VoicesEndpoint);
+        var custom = Service(handler, a => a.SpeechEndpoint = "https://custom.local/say");
+        Assert.Null(custom.VoicesEndpoint); // 非标准形状：无法推导
+    }
+
     /// <summary>可编程假 HttpMessageHandler：记录调用次数与请求，按委托返回响应。</summary>
     private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
