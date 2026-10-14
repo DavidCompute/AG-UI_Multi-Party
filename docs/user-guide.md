@@ -2555,6 +2555,9 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
   | `MaxFilesPerMessage` | `3` | 单条消息最多转写的语音文件数（控成本，0 = 禁用转写） |
 
   环境变量等价覆盖：`Agents__Audio__Enabled` / `Agents__Audio__Endpoint` / `Agents__Audio__ApiKey` / `Agents__Audio__Model` / `Agents__Audio__Language`（`docker-compose.yml` 亦有对应 `${AGENTS_AUDIO_*}` 透传）。
+
+  **Docker 一键转写服务**：`docker compose --profile voice up -d` 会拉起内置的 `speaches` 服务（OpenAI 兼容，提供 `/v1/audio/transcriptions` 与 `/v1/audio/speech`）。首次会从 Hugging Face 下载 whisper 模型（走 `HTTP(S)_PROXY`，约 500MB），缓存落在 `agui-speaches-data` 卷（一次性任务 `speaches-preload` 会预先拉取）。web 的默认转写端点已指向它，只需把 `.env` 的 `AGENTS_AUDIO_ENABLED=true` 并 `docker compose up -d web` 即接通。可通过 `AGENTS_AUDIO_MODEL`（如换成 `Systran/faster-whisper-large-v3`）与 `SPEACHES_PRELOAD_MODEL` 同步换模型。
+- **语音回复（TTS 朗读，语音进→语音出）**：数字员工回复头部有 🔊 按钮，点击用**系统语音**朗读（Web Speech API：浏览器 / 桌面 WebView2 本地完成，**离线可用**，按内容自动选中文/英文语音），朗读中再点变 ⏹ 停止。**「个人资料 → 🔊 自动朗读数字员工回复」**开关（本地偏好，默认关）可让每条回复完成即朗读；而当用户发送**语音消息**时，对应的回复**无论开关如何都会自动朗读**（`app.js` 的 `state.voiceTurn`），即“对着说话 → 听到回答”。服务端 TTS（`speaches` 的 `/v1/audio/speech`）为可选替代（适合无浏览器 / 需分发音频文件的场景），本次未接前端。
 - **扫描件 / 图片的文本提取（OCR）**：**代码中未找到依据。** 知识库文档文本提取只覆盖文本类扩展名与 `docx/xlsx/pptx/pdf`（`AttachmentStore.TryReadTextAsync` + `OfficeTextExtractor`）；其中 PDF 由 `OfficeTextExtractor.ExtractPdf` 遍历内容流的 `Tj` / `TJ` 操作符提取**文本层**（PDFsharp / PdfPig 文本引擎），对**纯图片 / 扫描件 PDF 不会产生文本**；`image` 类附件（png/jpg/…）**不可提取文本**（`IsExtractable` 对 image 返回 false）。因此：图片、扫描件的文字不会被识别进知识库。
 
 ### 5.11 接口一览（速查）

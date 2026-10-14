@@ -54,6 +54,8 @@ const state = {
   // 按知聚记忆的话题：groupId → 话题 ID（持久化 localStorage，切知聚/再登录自动恢复）
   topicMemory: new Map(),
   visibility: "all",
+  // 语音问答闭环（多模态进阶）：本条是语音消息的回复 → 下一条数字员工回复结束自动朗读（消费后置回 false）
+  voiceTurn: false,
   // 应用内通知中心（5.4）：{ id, type, icon, title, body, groupId?, topicId?, ts, read }[]
   notifications: [],
   notifSeq: 0,
@@ -3822,6 +3824,7 @@ function openProfileModal() {
   $("pfNickname").value = $("meNickname").textContent;
   $("pfPersonalMemory").checked = !!state.personalMemoryEnabled;
   $("pfFocusOnSwitch").checked = focusOnSwitchPref();
+  $("pfAutoSpeak").checked = autoSpeakPref();
   profileAvatar = state.avatar || null; // null = 未改动
   pfAvatarPicker.render(state.avatar || "");
   refreshTwinUi(null); // 默认未启用，随后异步查询
@@ -4096,6 +4099,7 @@ async function submitProfile() {
     state.avatar = data.avatar || null;
     state.personalMemoryEnabled = !!data.personalMemoryEnabled;
     setFocusOnSwitchPref($("pfFocusOnSwitch").checked); // 本地偏好（不上服务端）
+    setAutoSpeakPref($("pfAutoSpeak").checked); // 本地偏好（不上服务端）
     updateAuthNickname(data.nickname); // 同步会话快照昵称（sessionStorage + localStorage）
     renderMeAvatar();
     loadUserDirectory();
@@ -5117,6 +5121,12 @@ function onMessageEnd(evt) {
     const stopBtn = msgEl.querySelector(".head .stop-btn");
     if (stopBtn) stopBtn.remove();
   }
+  // 语音朗读（TTS）：数字员工回复结束即考虑朗读——开启了「自动朗读」，或本条是对语音消息的回复（语音问答闭环）。
+  if (m.senderType === "agent" && !m.recalled) {
+    const voiceLoop = state.voiceTurn; // 本条是对语音消息的回复
+    state.voiceTurn = false;
+    if (String(displayTextOf(m) || "").trim() && (autoSpeakPref() || voiceLoop)) speakMessage(m);
+  }
   // PLAIN 模式（整表渲染）局部更新已足够，无需整表重建（高度变化由 ResizeObserver 更新）；
   // 虚拟窗口模式才强制重建，统一处理窗口外消息与窗口跟随。
   if (activeTopicMessages(r).length > PLAIN_LIMIT) {
@@ -5173,8 +5183,8 @@ function applyRecallLocal(groupId, messageId) {
       if (proc) proc.remove(); // 撤回：执行过程（思考 / 计划 / 链 / 工具）一并隐藏（整表重建也不会再渲染）
       const fbTags = msgEl.querySelector(".fb-tags");
       if (fbTags) fbTags.remove(); // 撤回：收起未提交的 👎 原因标签行
-      // 撤回后头部操作按钮（复制 / 重新回答 / 撤回 / 评价）一并隐藏
-      msgEl.querySelectorAll(".head .copy-btn, .head .regenerate-btn, .head .recall-btn, .head .fb-like, .head .fb-dislike")
+      // 撤回后头部操作按钮（复制 / 重新回答 / 撤回 / 评价 / 朗读）一并隐藏
+      msgEl.querySelectorAll(".head .copy-btn, .head .regenerate-btn, .head .recall-btn, .head .fb-like, .head .fb-dislike, .head .speak-btn")
         .forEach((b) => b.remove());
     }
     return; // addSystemLine 已调度增量渲染（系统行追加）
@@ -9454,6 +9464,7 @@ const ICONS = {
   reply: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>',
   "thumbs-up": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>',
   "thumbs-down": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.67 2.67 0 0 1 22 4.67v6.66a2.67 2.67 0 0 1-2.67 2.67H17"/></svg>',
+  speak: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
   code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
   stop: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
 };
@@ -9650,6 +9661,7 @@ function msgDom(m, r, prev) {
   const recallBtn = div.querySelector(".recall-btn");
   if (recallBtn) bindRecallButton(recallBtn, m);
   ensureFeedbackButtons(div, m); // 👍/👎（对数字员工回复评价）
+  ensureSpeakButton(div, m); // 🔊 朗读数字员工回复（TTS，离线可用）
   bindDocPreviewButtons(div); // 附件「在线查看」（docx / xlsx / pptx / pdf）
   // 人机交互卡片的批准 / 拒绝按钮
   bindInteractionButtons(div, m);
@@ -10649,6 +10661,7 @@ async function sendMessageFeedback(m, value, tags) {
     if (msgEl) {
       msgEl.querySelectorAll(".fb-like, .fb-dislike").forEach((b) => b.remove());
       ensureFeedbackButtons(msgEl, m);
+      ensureSpeakButton(msgEl, m);
     }
     toast(value > 0 ? t("fb.thanksLike") : t("fb.thanksDislike"));
   } catch (ex) { toast(t("fb.fail", { err: ex.message })); }
@@ -10758,6 +10771,7 @@ function attachHeadActions(msgEl, m, r) {
     headActionsBox(head).appendChild(btn);
   }
   ensureFeedbackButtons(msgEl, m); // 流式结束后补挂 👍/👎
+  ensureSpeakButton(msgEl, m); // 流式结束后补挂 🔊 朗读
 }
 
 /** 绑定撤回按钮：确认后调 /ag-ui/group/message/recall（服务端校验本人 / 知聚主 / 管理员 + 3 分钟时限；撤回后内容隐藏并清除记忆）。 */
@@ -11432,6 +11446,99 @@ function maybeFocusComposer() {
   if (inp && !inp.disabled) inp.focus();
 }
 
+/* ============ 语音朗读（TTS，多模态进阶）：Web Speech API，离线可用（桌面 WebView2 / 浏览器均支持） ============
+ * 「语音进、语音出」闭环：用户发语音消息 → ASR 转写 → 数字员工回复 → 本条回复自动朗读。
+ * 默认不自动朗读（需在「个人资料」里开启），但**对语音消息的回复总会被朗读**（发送时置 state.voiceTurn）。*/
+
+const AUTO_SPEAK_KEY = "agui.autoSpeak";
+/** 自动朗读偏好（按用户，本地）。默认关闭。 */
+function autoSpeakPref() {
+  try { return localStorage.getItem(AUTO_SPEAK_KEY + "." + (state.memberId || "")) === "1"; } catch { return false; }
+}
+function setAutoSpeakPref(on) {
+  try { localStorage.setItem(AUTO_SPEAK_KEY + "." + (state.memberId || ""), on ? "1" : "0"); } catch { /* 隐私模式忽略 */ }
+}
+
+/** 当前正在朗读的消息 id（null = 未在朗读）。 */
+let speakingMsgId = null;
+/** 浏览器是否支持语音合成（不支持则不给朗读入口）。 */
+const ttsSupported = typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance === "function";
+
+/** 是否以中文为主（用于选择朗读语种）。 */
+function isMostlyChinese(text) {
+  const s = String(text || "");
+  const cjk = (s.match(/[\u4e00-\u9fff]/g) || []).length;
+  return cjk >= Math.max(4, s.replace(/\s/g, "").length * 0.15);
+}
+
+/** 按 lang 挑一个可用系统语音（语音列表可能异步加载；取不到交给浏览器默认）。 */
+function pickVoice(lang) {
+  try {
+    const vs = window.speechSynthesis.getVoices() || [];
+    const pre = lang.slice(0, 2).toLowerCase();
+    return vs.find((v) => (v.lang || "").toLowerCase() === lang.toLowerCase())
+        || vs.find((v) => (v.lang || "").toLowerCase().startsWith(pre)) || null;
+  } catch { return null; }
+}
+
+/** 刷新所有朗读按钮状态（🔊 ↔ 朗读中显示停止图标）。 */
+function refreshSpeakButtons() {
+  document.querySelectorAll(".speak-btn").forEach((b) => {
+    const on = b.dataset.mid && b.dataset.mid === speakingMsgId;
+    b.classList.toggle("on", !!on);
+    b.innerHTML = icon(on ? "stop" : "speak");
+    const label = t(on ? "msg.stopSpeakTitle" : "msg.speakTitle");
+    b.title = label;
+    b.setAttribute("aria-label", label);
+  });
+}
+
+/** 停止朗读并复位按钮。 */
+function stopSpeaking() {
+  if (ttsSupported) { try { window.speechSynthesis.cancel(); } catch { /* ignore */ } }
+  speakingMsgId = null;
+  refreshSpeakButtons();
+}
+
+/** 朗读一条数字员工回复（纯文本）；再次点击 / 朗读中点击则停止。 */
+function speakMessage(m) {
+  if (!ttsSupported) { toast(t("msg.speakUnsupported")); return; }
+  if (!m) return;
+  if (speakingMsgId === m.id) { stopSpeaking(); return; }
+  const text = String(displayTextOf(m) || "").trim();
+  if (!text) return;
+  try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = isMostlyChinese(text) ? "zh-CN" : "en-US";
+  const v = pickVoice(u.lang);
+  if (v) u.voice = v;
+  speakingMsgId = m.id;
+  const done = () => { if (speakingMsgId === m.id) { speakingMsgId = null; refreshSpeakButtons(); } };
+  u.onend = done;
+  u.onerror = done;
+  refreshSpeakButtons();
+  try { window.speechSynthesis.speak(u); } catch { done(); }
+}
+
+/** 给数字员工回复补挂「朗读」按钮（流式结束 / 非流式都适用）。 */
+function ensureSpeakButton(msgEl, m) {
+  const head = msgEl?.querySelector(".head");
+  if (!head || !m || m.sys || m.recalled || m.streaming || m.senderType !== "agent") return;
+  if (!ttsSupported) return;
+  if (!String(displayTextOf(m) || "").trim()) return;
+  if (head.querySelector(".speak-btn")) return;
+  const btn = document.createElement("button");
+  btn.className = "speak-btn";
+  btn.type = "button";
+  btn.dataset.mid = m.id;
+  btn.title = t("msg.speakTitle");
+  btn.setAttribute("aria-label", btn.title);
+  btn.innerHTML = icon("speak");
+  btn.onclick = (e) => { e.stopPropagation(); speakMessage(m); };
+  head.appendChild(btn);
+  refreshSpeakButtons();
+}
+
 /* ============ 发送失败重试条：内容/附件已保留，用户可重试或取消 ============ */
 // 文案由 data-i18n 托管（chat.sendFailed / chat.retrySend / common.cancel），此处只控制显隐
 function showSendRetryBar() {
@@ -11508,6 +11615,8 @@ async function sendMessage() {
     clearReplyTo(); // 引用一次性消费：发送后清除引用条
     pendingAttachments = [];
     renderAttachList();
+    // 语音问答闭环：本条含语音附件 → 下一条数字员工回复结束自动朗读（即使未开「自动朗读」）
+    if (attachments.some((a) => a.kind === "audio" || /^audio\//i.test(a.contentType || ""))) state.voiceTurn = true;
     hideSendRetryBar(); // 发送成功：清掉上一次的失败提示
     hideMentionSuggest(); // 发送后草稿清空，建议条一并收起
     $("emojiPicker")?.classList.add("hidden"); // 发送后收起表情浮层

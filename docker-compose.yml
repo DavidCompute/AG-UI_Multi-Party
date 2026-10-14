@@ -6,6 +6,8 @@
 # 🔐 审批卡片（人机交互 HITL），仅发起请求的用户可批准 / 拒绝。
 # 需要同时启动仅协议 Hub（http://localhost:5100）时启用 profile：
 #   docker compose --profile hub up -d
+# 需要语音问答（ASR）时启用 voice profile（拉一个本地转写服务）：
+#   docker compose --profile voice up -d   # 再把 .env 的 AGENTS_AUDIO_ENABLED=true
 #
 # 存储 / 记忆（.env 的 STORAGE_PROVIDER / MEMORY_ENABLED）：
 #   postgres（默认）+ Memory.Enabled=true：群聊数据 + 向量记忆全部落 PostgreSQL（pgvector），
@@ -183,7 +185,7 @@ services:
       # 在 .env 里改 NO_PROXY 会覆盖这个默认值。
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,host.docker.internal,localhost,127.0.0.1,::1}
+      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,speaches,host.docker.internal,localhost,127.0.0.1,::1}
       Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
       # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）
       # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
@@ -231,11 +233,12 @@ services:
       Agents__Memory__InteractiveEmbeddingConcurrency: ${MEMORY_INTERACTIVE_EMBED_CONCURRENCY:-3}
       Agents__Memory__BackgroundEmbeddingConcurrency: ${MEMORY_BACKGROUND_EMBED_CONCURRENCY:-1}
       # 多模态进阶·语音问答（ASR）：把用户发来的语音附件转写为文字后注入上下文（默认关，旧行为不变）。
-      # 开启且能解析出端点才生效：Endpoint 留空时由 Agents__Endpoint 派生 {base}/v1/audio/transcriptions。
+      # 开启（AGENTS_AUDIO_ENABLED=true）即用内置 speaches 服务（需 --profile voice 启动，见文件末）
+      # 转写：Endpoint 默认指向内网 speaches；也可改成任何 OpenAI 兼容的 /v1/audio/transcriptions 端点。
       Agents__Audio__Enabled: ${AGENTS_AUDIO_ENABLED:-false}
-      Agents__Audio__Endpoint: ${AGENTS_AUDIO_ENDPOINT:-}
+      Agents__Audio__Endpoint: ${AGENTS_AUDIO_ENDPOINT:-http://speaches:8000/v1/audio/transcriptions}
       Agents__Audio__ApiKey: ${AGENTS_AUDIO_API_KEY:-}
-      Agents__Audio__Model: ${AGENTS_AUDIO_MODEL:-whisper-1}
+      Agents__Audio__Model: ${AGENTS_AUDIO_MODEL:-Systran/faster-whisper-small}
       Agents__Audio__Language: ${AGENTS_AUDIO_LANGUAGE:-zh}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
@@ -276,6 +279,66 @@ services:
       # 提供 Agents:Agents 种子智能体定义等默认配置；环境变量（Agents__*）优先级更高，仍可覆盖
       - ./src/AguiGroupChat.Web/appsettings.json:/app/appsettings.json:ro
 
+  speaches:
+    # 多模态进阶·语音问答（ASR）的可选服务：OpenAI 兼容的语音转写 / 合成（faster-whisper + piper/kokoro）。
+    # 仅当启用 profile voice 时才启动；默认 `docker compose up -d` 不拉起（不开就不占内存 / 不下载模型）。
+    #   docker compose --profile voice up -d          # 拉起 speaches + web 等
+    #   docker compose --profile voice up -d speaches # 只拉 speaches
+    # 启用后把 .env 的 AGENTS_AUDIO_ENABLED 置 true 即接通（web 默认端点已指向它）。
+    # 首次使用某模型时从 Hugging Face 下载（需外网 / 代理，见 HTTP(S)_PROXY）；模型缓存落在 agui-speaches-data 卷。
+    profiles: ["voice"]
+    image: ${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8}
+    container_name: agui-group-chat-speaches
+    restart: unless-stopped
+    ports:
+      - "${SPEACHES_PORT:-8001}:8000"
+    environment:
+      # 模型下载需外网；容器不会自动继承宿主代理，这里显式传入（.env 里的 HTTP(S)_PROXY）
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1
+      # CPU 上 int8 量化：更快、更省内存
+      WHISPER__COMPUTE_TYPE: ${SPEACHES_COMPUTE_TYPE:-int8}
+      # 注：本镜像版本不支持启动时预下载模型（Config 无 preload_models 字段），
+      # 模型由下面的 speaches-preload 一次性任务预先拉取，或首次转写时懒加载。
+    volumes:
+      # Hugging Face 模型缓存（转写模型下载一次即可复用，不必每次重建容器）
+      - agui-speaches-data:/home/ubuntu/.cache/huggingface
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  speaches-preload:
+    # 一次性任务：speaches 就绪后预下载转写模型，让第一条语音消息不必等模型下载（best-effort）。
+    # 与 speaches 同镜像（自带 curl，不多拉镜像）；下载失败也不影响服务（首次转写时会自动再试）。
+    profiles: ["voice"]
+    image: ${SPEACHES_IMAGE:-ghcr.io/speaches-ai/speaches:latest-cpu@sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8}
+    depends_on:
+      speaches:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: speaches,localhost,127.0.0.1
+    entrypoint: ["/bin/sh", "-c"]
+    # 复用 web 的转写模型变量；POST /v1/models/{id} 在下载后可能因代理抖动返回 5xx，故失败也当成功（|| true）。
+    command:
+      - |
+        M="$${SPEACHES_PRELOAD_MODEL:-Systran/faster-whisper-small}"
+        i=0
+        while [ $$i -lt 5 ]; do
+          i=$$((i+1))
+          code=$$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://speaches:8000/v1/models/$$M" || echo 000)
+          echo "预下载 $$M -> HTTP $$code"
+          if [ "$$code" = "200" ]; then break; fi
+          sleep 5
+        done
+        exit 0
+
   hub:
     profiles: ["hub"]
     build:
@@ -303,3 +366,4 @@ volumes:
   agui-docs:
   agui-hub-data:
   agui-pg-data:
+  agui-speaches-data:

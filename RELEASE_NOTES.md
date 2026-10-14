@@ -1,3 +1,37 @@
+# AG-UI 群聊桌面版 1.0.209 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.209 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音进 → 语音出闭环**——在语音问答（ASR，1.0.208）基础上，新增：① Docker 一键拉起本地语音转写服务（`--profile voice`，OpenAI 兼容）；② 前端「朗读回复」（TTS，Web Speech API，离线可用）+ 发送语音消息时自动朗读该条回复，形成完整闭环；③ 桌面版配置入口与说明。
+**Version note**: **A voice in → voice out loop** — building on voice Q&A (ASR, 1.0.208): ① a one-command local transcription service for Docker (`--profile voice`, OpenAI-compatible); ② front-end "read reply aloud" (TTS via Web Speech API, works offline) plus auto-reading of the reply to a voice message, closing the loop; ③ desktop config and docs.
+
+## 语音进 → 语音出闭环
+# Voice in → voice out loop
+
+中文：
+- **本地转写服务（Docker，可选）**：新增 `speaches` 服务（`docker compose --profile voice up -d`，镜像 `ghcr.io/speaches-ai/speaches:latest-cpu`，按 digest 钉住）。它是 OpenAI 兼容服务，同时提供 `/v1/audio/transcriptions`（faster-whisper 转写）与 `/v1/audio/speech`（TTS）；模型首次从 Hugging Face 下载（走 `HTTP(S)_PROXY`），缓存落在 `agui-speaches-data` 卷；`speaches-preload` 一次性任务预先拉取模型。web 默认转写端点已指向它，开开关即可用：`.env` 置 `AGENTS_AUDIO_ENABLED=true`。
+- **朗读回复（TTS，前端）**：数字员工回复的头部新增 🔊 按钮，点击用**系统语音**朗读（Web Speech API，自动按内容选中/英文），再次点击停止；朗读中按钮高亮为 ⏹。新增「个人资料 → 🔊 自动朗读数字员工回复」开关（本地偏好，默认关）。
+- **语音问答闭环**：当用户发送含**语音附件**的消息时，该消息对应的数字员工回复**无论开关如何都会自动朗读**（`state.voiceTurn`），即「对着说话 → 听到回答」。
+- **为什么 TTS 走浏览器原生而不是服务端**：系统语音（Windows SAPI / WebView2、浏览器）离线、零部署、零成本，且中/英文通常均已内置；服务端 TTS（如 speaches 的 `/v1/audio/speech`）作为可选替代，适合无浏览器/需附件分发的场景（本次仅落地前端路径）。
+- **桌面版**：桌面版为本地自托管（WebView2）。**朗读（TTS）开箱即用**（用 Windows 内置语音）；**转写（ASR）**需在 `appsettings.json` 的 `Agents:Audio` 配置一个可达的 OpenAI 兼容转写端点（如另一台机器上的 speaches，或云端 whisper），默认关闭。
+English:
+- **Local transcription service (Docker, optional)**: new `speaches` service (`docker compose --profile voice up -d`, image `ghcr.io/speaches-ai/speaches:latest-cpu`, digest-pinned). It is OpenAI-compatible and serves both `/v1/audio/transcriptions` (faster-whisper) and `/v1/audio/speech` (TTS); models download from Hugging Face on first use (via `HTTP(S)_PROXY`) and cache in the `agui-speaches-data` volume, with a one-shot `speaches-preload` task pulling them ahead of time. The web app's default transcription endpoint already points at it — just set `AGENTS_AUDIO_ENABLED=true` in `.env`.
+- **Read reply aloud (TTS, front end)**: a new 🔊 button in a digital employee's message header reads the reply with a **system voice** (Web Speech API; auto zh/en by content), and toggles to ⏹ while speaking. New "Profile → 🔊 Auto-read digital employee replies" switch (local preference, off by default).
+- **Voice Q&A loop**: when a user sends a message with a **voice attachment**, the corresponding digital employee reply is **read aloud regardless of the switch** (`state.voiceTurn`) — talk to it, hear the answer.
+- **Why TTS is browser-native, not server-side**: system voices (Windows SAPI / WebView2, browsers) are offline, zero-deploy and zero-cost, and typically already ship zh/en; server-side TTS (e.g. speaches' `/v1/audio/speech`) is an optional alternative for browser-less or attachment-sharing scenarios (only the front-end path shipped here).
+- **Desktop**: the desktop app is self-hosted locally (WebView2). **Read-aloud (TTS) works out of the box** (Windows built-in voices); **transcription (ASR)** requires configuring a reachable OpenAI-compatible endpoint under `Agents:Audio` in `appsettings.json` (e.g. speaches on another host, or a cloud whisper); off by default.
+
+## 配置
+# Configuration
+
+中文：
+- Docker：`--profile voice` 启 `speaches`；`.env` 的 `AGENTS_AUDIO_ENABLED` / `AGENTS_AUDIO_ENDPOINT` / `AGENTS_AUDIO_MODEL` / `AGENTS_AUDIO_LANGUAGE`、`SPEACHES_PORT` / `SPEACHES_COMPUTE_TYPE` / `SPEACHES_PRELOAD_MODEL`。`NO_PROXY` 已包含 `speaches`（开了代理也能走内网直连）。
+- 桌面：`src/AguiGroupChat.Desktop/appsettings.json` 的 `Agents:Audio`（默认 `Enabled=false`；端点/模型/语言可配）。
+- 前端：朗读为本地偏好（`localStorage`，按用户），无需服务端配置。
+English:
+- Docker: start `speaches` with `--profile voice`; `.env` keys `AGENTS_AUDIO_ENABLED` / `AGENTS_AUDIO_ENDPOINT` / `AGENTS_AUDIO_MODEL` / `AGENTS_AUDIO_LANGUAGE`, `SPEACHES_PORT` / `SPEACHES_COMPUTE_TYPE` / `SPEACHES_PRELOAD_MODEL`. `NO_PROXY` now includes `speaches` (internal direct calls even with a proxy on).
+- Desktop: `Agents:Audio` in `src/AguiGroupChat.Desktop/appsettings.json` (`Enabled=false` by default; endpoint/model/language configurable).
+- Front end: read-aloud is a local per-user preference (`localStorage`), no server config needed.
+
 # AG-UI 群聊桌面版 1.0.208 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.208 Release Notes (current Windows desktop release)
 

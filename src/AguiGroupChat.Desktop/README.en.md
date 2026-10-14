@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows) **(current version 1.0.189)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+A pure desktop application (Windows) **(current version 1.0.209)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
 personal memory, AI twin, attachments, topics, trigger modes, memory personality types, office document online view and PPT playback (**needs local LibreOffice**, see Notes), etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
@@ -31,7 +31,7 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### Building a release (win-x64 publish / MSI installer)
 
-Current version: **1.0.189** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+Current version: **1.0.209** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
 
 ```bash
 # 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
@@ -74,8 +74,20 @@ On first use, just register an account.
 | `Agents:Memory:EmbeddingDimensions` | `1024` | **Must match the model** (bundled model bge-m3=1024; nomic-embed-text=768 must be changed to 768) |
 | `Agents:Memory:LlamaThreads` | `4` | Number of local inference threads (4~8 recommended for CPU desktops) |
 | `GroupChat:SeedSampleData` | `true` | Seeds sample groups / members / agents on first launch |
+| `Agents:Audio:Enabled` | `false` | Voice Q&A (ASR): transcribes voice attachments to text and injects it into context (see "Voice (ASR / TTS)" below) |
+| `Agents:Audio:Endpoint` | empty | OpenAI-compatible transcription endpoint (e.g. speaches on another host, or a cloud whisper); when blank, derived from `Agents:Endpoint` |
+| `Agents:Audio:Model` | `Systran/faster-whisper-small` | Transcription model name |
+| `Agents:Audio:Language` | `zh` | Language hint (blank = auto-detect) |
 
 > Chat models (DeepSeek, etc.) still need network connectivity; **core features such as semantic memory / group chat / agent management work offline**.
+
+## Voice (ASR transcription / TTS read-aloud)
+
+- **Read-aloud (TTS, out of the box)**: a digital employee's reply header has a 🔊 button that reads the reply with a **Windows built-in system voice** (Web Speech API, synthesized locally in WebView2, **works offline**, auto zh/en); the **"Profile → 🔊 Auto-read digital employee replies"** switch reads every reply on completion; when you send a **voice message**, that reply is **read aloud regardless of the switch** (voice in → voice out). No server config required.
+- **Transcription (ASR, needs an endpoint)**: the desktop build does not bundle whisper (too large), but you can point `Agents:Audio:Endpoint` at any OpenAI-compatible transcription service:
+  - Shared with the Docker edition: run `docker compose --profile voice up -d` on another host (see the repo root README) and set `Agents:Audio:Endpoint` to `http://<that host>:8001/v1/audio/transcriptions`;
+  - Cloud: any whisper-compatible endpoint (with an `ApiKey`).
+  Off by default (`Enabled=false`); once on, voice attachments are transcribed before injection, and failures / timeouts degrade silently without blocking the conversation.
 
 ## How Semantic Memory (RAG) Works
 

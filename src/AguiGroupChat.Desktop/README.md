@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-纯桌面应用（Windows）**（当前版本 1.0.189）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
+纯桌面应用（Windows）**（当前版本 1.0.209）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
 个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、办公文档在线查看与 PPT 播放（**需本机 LibreOffice**，见下方说明）等），但**数据与模型全部在本机**；服务在本机固定起在
 `http://127.0.0.1:5200`，即便断网也能跑通群聊 / 智能体管理 / 语义记忆等本地功能（仅对话模型 DeepSeek 等仍需联网），
 支持把标记为「本机执行」的客户端技能经本机桥在桌面机执行：
@@ -30,7 +30,7 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### 构建发行版（win-x64 程序 / MSI 安装包）
 
-当前版本：**1.0.189**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
+当前版本：**1.0.209**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
 
 ```bash
 # 1. 发布 win-x64 产物到 artifacts/win-x64（含 SQLite / 本地 llama embedding / wwwroot / VC++ 运行库 / vec0.dll）
@@ -73,8 +73,20 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
 | `Agents:Memory:EmbeddingDimensions` | `1024` | **须与模型一致**（捆绑模型 bge-m3=1024；nomic-embed-text=768 需改为 768） |
 | `Agents:Memory:LlamaThreads` | `4` | 本地推理线程数（CPU 桌面推荐 4~8） |
 | `GroupChat:SeedSampleData` | `true` | 首次启动播种示例群 / 成员 / 智能体 |
+| `Agents:Audio:Enabled` | `false` | 语音问答（ASR）：把用户语音附件转写为文字后注入上下文（详见下方「语音（ASR 转写 / TTS 朗读）」） |
+| `Agents:Audio:Endpoint` | 空 | OpenAI 兼容转写端点（如另一台机器的 speaches、云端 whisper）；留空时由 `Agents:Endpoint` 派生 |
+| `Agents:Audio:Model` | `Systran/faster-whisper-small` | 转写模型名 |
+| `Agents:Audio:Language` | `zh` | 语言提示（留空自动识别） |
 
 > 对话模型（DeepSeek 等）仍需联网；**语义记忆 / 群聊 / 智能体管理**等核心功能离线可用。
+
+## 语音（ASR 转写 / TTS 朗读）
+
+- **朗读（TTS，开箱即用）**：数字员工回复头部的 🔊 按钮用 **Windows 内置系统语音** 朗读（Web Speech API，WebView2 本地合成，**离线可用**，自动中/英文）；「个人资料 → 🔊 自动朗读数字员工回复」开关可让每条回复完成即朗读；发**语音消息**时该回复**无论开关如何都会自动朗读**（语音进→语音出闭环）。无需任何服务端配置。
+- **转写（ASR，需配端点）**：桌面版不内置 whisper（体积大），但可在 `Agents:Audio:Endpoint` 指向任一 OpenAI 兼容转写服务即用，例如：
+  - 与 Docker 版共用：在另一台机器跑 `docker compose --profile voice up -d`（见仓库根 README），把 `Agents:Audio:Endpoint` 设为 `http://<那台机器>:8001/v1/audio/transcriptions`；
+  - 云端：任何 whisper 兼容端点（带 `ApiKey`）。
+  默认关闭（`Enabled=false`）；开启后语音附件会先转写再注入，失败 / 超时静默降级、不阻断对话。
 
 ## 语义记忆（RAG）工作原理
 
