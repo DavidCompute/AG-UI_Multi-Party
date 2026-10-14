@@ -179,6 +179,9 @@ public sealed class AgentOptions
     /// <summary>网关执行期及时序 / 重试 / TTL 设置（appsettings：<c>Agents:Execution</c>；默认与原生常量一致）。</summary>
     public ExecutionOptions Execution { get; set; } = new();
 
+    /// <summary>成本估算（appsettings：<c>Agents:Pricing</c>）：把 token 换算成金额，供控制台「员工绩效」成本列与预算提示。</summary>
+    public PricingOptions Pricing { get; set; } = new();
+
     public List<AgentDefinition> Agents { get; set; } = [];
 
     /// <summary>技能库种子（appsettings 声明）：启动时若技能库为空则播种，与 <see cref="Agents"/> 同模式。</summary>
@@ -247,6 +250,32 @@ public sealed class AgentOptions
 
     /// <summary>话题滚动小结触发阈值：距上次小结新增消息达到该数量才触发一次生成（成本控制）。</summary>
     public int TopicSummaryTriggerCount { get; set; } = 20;
+}
+
+/// <summary>
+/// 成本估算配置（appsettings：<c>Agents:Pricing</c>）：按 token 单价把用量换算成金额，
+/// 供管理员控制台「员工绩效」看板的成本列与预算提示。单价为 0 时不估算成本（展示「—」）。
+/// </summary>
+public sealed class PricingOptions
+{
+    /// <summary>输入（prompt）每百万 token 单价（默认 0 = 不估算成本）。</summary>
+    public decimal InputPerMillion { get; set; }
+
+    /// <summary>输出（completion + reasoning）每百万 token 单价（默认 0 = 不估算成本）。</summary>
+    public decimal OutputPerMillion { get; set; }
+
+    /// <summary>币种符号（默认 <c>$</c>；仅用于展示，不做汇率换算）。</summary>
+    public string Currency { get; set; } = "$";
+
+    /// <summary>每日成本预算（0 = 不限）；用于看板「预算已用」提示（按窗口内的日均成本对比）。</summary>
+    public decimal DailyBudget { get; set; }
+
+    /// <summary>是否已配置单价（两者皆为 0 视为未配置）。</summary>
+    public bool Configured => InputPerMillion > 0 || OutputPerMillion > 0;
+
+    /// <summary>按 token 估算成本：输入单价 × prompt + 输出单价 ×（completion + reasoning）。</summary>
+    public decimal EstimateCost(long promptTokens, long completionTokens, long reasoningTokens)
+        => InputPerMillion * promptTokens / 1_000_000m + OutputPerMillion * (completionTokens + reasoningTokens) / 1_000_000m;
 }
 
 /// <summary>

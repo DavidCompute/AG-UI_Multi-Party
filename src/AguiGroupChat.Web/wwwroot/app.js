@@ -6836,27 +6836,36 @@ async function loadAgentPerformance() {
   const rows = $("adminPerfRows");
   const days = Number($("perfRange") && $("perfRange").value) || 30;
   if (meta) meta.textContent = t("admin.loading");
-  rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
     const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
+    if (!res.ok || !d) { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
     const list = d.agents || [];
     const s = d.summary || {};
-    if (meta) meta.textContent = t("admin.perfMeta", {
-      from: d.from || "", to: d.to || "", agents: s.agents || 0,
-      calls: Number(s.calls || 0).toLocaleString(), tokens: Number(s.totalTokens || 0).toLocaleString(),
-      rate: s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%",
-    });
-    if (!list.length) { rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
+    const price = d.pricing || {};
+    const cur = price.currency || "$";
+    const fmtCost = (v) => price.configured ? cur + Number(v || 0).toFixed(2) : "—";
+    if (meta) {
+      let m = t("admin.perfMeta", {
+        from: d.from || "", to: d.to || "", agents: s.agents || 0,
+        calls: Number(s.calls || 0).toLocaleString(), tokens: Number(s.totalTokens || 0).toLocaleString(),
+        rate: s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%",
+      });
+      if (price.configured) m += " · " + t("admin.perfCost", { cost: fmtCost(s.cost) });
+      if (s.budgetPct != null) m += " · " + t("admin.perfBudget", { currency: cur, budget: Number(s.budget || 0).toFixed(2), pct: s.budgetPct }) + (s.overBudget ? " ⚠" : "");
+      meta.textContent = m;
+    }
+    if (!list.length) { rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
     rows.innerHTML = list.map((a) => {
       const rate = a.positiveRate == null ? "—" : Math.round(a.positiveRate * 100) + "%";
       return `<tr><td title="${escapeHtml(a.agentId || "")}">${escapeHtml(a.name || a.agentId)}</td>`
         + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
+        + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
         + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
         + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td></tr>`;
     }).join("");
-  } catch { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+  } catch { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
 }
 
 function applyAdminTabVisibility() {

@@ -206,13 +206,24 @@ public static class AdminApi
             var names = catalog.ListDefinitions()
                 .ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
             var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
+            var totalCost = stats.Sum(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens));
+            var dailyAvgCost = totalCost / d;
             return Results.Ok(new
             {
                 days = d,
                 from = from.ToString("yyyy-MM-dd"),
                 to = to.ToString("yyyy-MM-dd"),
+                pricing = new
+                {
+                    configured = pricing.Configured,
+                    currency = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency,
+                    inputPerMillion = pricing.InputPerMillion,
+                    outputPerMillion = pricing.OutputPerMillion,
+                    dailyBudget = pricing.DailyBudget,
+                },
                 summary = new
                 {
                     agents = stats.Count,
@@ -221,11 +232,17 @@ public static class AdminApi
                     up,
                     down,
                     positiveRate = (up + down) == 0 ? (double?)null : Math.Round((double)up / (up + down), 4),
+                    cost = Math.Round(totalCost, 4),
+                    dailyAvgCost = Math.Round(dailyAvgCost, 4),
+                    budget = pricing.DailyBudget,
+                    budgetPct = pricing.DailyBudget > 0 ? (double)Math.Round(dailyAvgCost / pricing.DailyBudget * 100, 1) : (double?)null,
+                    overBudget = pricing.DailyBudget > 0 && dailyAvgCost > pricing.DailyBudget,
                 },
                 agents = stats.Select(s => new
                 {
                     s.AgentId, s.Name, s.Calls, s.PromptTokens, s.CompletionTokens, s.ReasoningTokens, s.TotalTokens,
                     s.Up, s.Down, s.PositiveRate, s.LastDate,
+                    cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
                 }),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));

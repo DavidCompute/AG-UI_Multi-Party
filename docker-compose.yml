@@ -252,6 +252,12 @@ services:
       Agents__Audio__SpeechTimeoutSeconds: ${AGENTS_AUDIO_SPEECH_TIMEOUT:-300}
       # 仅当触发消息带语音附件时才合成（默认 true = 只在“语音进→语音出”时出声；false = 每条回复都带音频）
       Agents__Audio__SpeechOnlyForVoice: ${AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE:-true}
+      # 成本估算（Agents:Pricing）：按 token 单价把用量换算成金额，供控制台「员工绩效」成本列与预算提示。
+      # 单价为 0（默认）= 不估算成本（看板显示「—」）。示例：输入 0.5 / 输出 8（金额单位自定义；币种留空则用 $）。
+      Agents__Pricing__InputPerMillion: ${AGENTS_PRICING_INPUT_PER_MILLION:-0}
+      Agents__Pricing__OutputPerMillion: ${AGENTS_PRICING_OUTPUT_PER_MILLION:-0}
+      Agents__Pricing__Currency: ${AGENTS_PRICING_CURRENCY:-}
+      Agents__Pricing__DailyBudget: ${AGENTS_PRICING_DAILY_BUDGET:-0}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows) **(current version 1.0.220)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+A pure desktop application (Windows) **(current version 1.0.221)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
 personal memory, AI twin, attachments, topics, trigger modes, memory personality types, office document online view and PPT playback (**needs local LibreOffice**, see Notes), etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
@@ -31,16 +31,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### Building a release (win-x64 publish / MSI installer)
 
-Current version: **1.0.220** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+Current version: **1.0.221** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
 
 ```bash
 # 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. Build the MSI installer: outputs to artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    e.g. for 1.0.220:
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.220
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.220.msi
+#    e.g. for 1.0.221:
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.221
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.221.msi
 ```
 
 > `tools/build-msi.ps1` first does a **forced fresh publish** (cleans Release intermediates to avoid reusing stale DLLs), strips non-Windows native runtimes,
@@ -82,6 +82,7 @@ On first use, just register an account.
 | `Agents:Audio:SpeechEndpoint` | empty | Speech synthesis endpoint (OpenAI-compatible); blank → derived from `Agents:Endpoint` |
 | `Agents:Audio:SpeechOnlyForVoice` | `true` | Synthesize only when the trigger message carries a voice attachment (default `true` = speak only on "talk, then hear the answer" turns) |
 | `Agents:Audio:SpeechSpeed` | `1.0` | Synthesis speed (Kokoro / OpenAI-compatible `speed`, clamped to 0.25–4.0) |
+| `Agents:Pricing:*` | `0` / `$` | Cost estimation: `InputPerMillion` / `OutputPerMillion` (per million tokens), `Currency`, `DailyBudget`. Feeds the "Agent performance" dashboard's cost column and budget hint; prices 0 = not estimated |
 
 > Chat models (DeepSeek, etc.) still need network connectivity; **core features such as semantic memory / group chat / agent management work offline**.
 

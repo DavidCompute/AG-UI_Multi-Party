@@ -3599,7 +3599,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
   - **Admin / SuperAdmin** 看到全量 12 个页签。
 - `state.isSuperAdmin` 仍仅用于「用户管理」里的平台角色下拉（仅 SuperAdmin 可授予 / 回收角色）。
 
-**员工绩效 tab（`#adminTabPerf`，`admin.tabPerf`，Operator+）**：按数字员工聚合**调用次数 / 总 token / 👍👎 好评率 / 最近活跃**，支持 7 / 30 / 90 天窗口与一键刷新（按调用次数降序）；无反馈时好评率显示「—」。数据来自 `GET /ag-ui/admin/agent-performance?days=N`（`agui_usage` 用量行 + 消息反馈；名字取数字员工昵称，取不到回退 agentId）。聚合逻辑为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`），由 `AdminApi.cs` 挂载。
+**员工绩效 tab（`#adminTabPerf`，`admin.tabPerf`，Operator+）**：按数字员工聚合**调用次数 / 总 token / 成本 / 👍👎 好评率 / 最近活跃**，支持 7 / 30 / 90 天窗口与一键刷新（按调用次数降序）；无反馈时好评率显示「—」。数据来自 `GET /ag-ui/admin/agent-performance?days=N`（`agui_usage` 用量行 + 消息反馈；名字取数字员工昵称，取不到回退 agentId）。聚合逻辑为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`），由 `AdminApi.cs` 挂载。**成本**按可配单价 `Agents:Pricing`（`InputPerMillion` / `OutputPerMillion` / `Currency` / `DailyBudget`；Docker：`AGENTS_PRICING_*`）估算（输入×prompt + 输出×（completion+reasoning））；单价为 0 时成本显示「—」；配了 `DailyBudget` 时顶部 meta 显示「已用 X%」、超预算标 ⚠。
 
 > 依据：`app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`；后端 `AdminApi.cs` 各端点过滤器见 §8.1.6。与 `docs/RBAC.md` §5「按生效角色细分菜单」现已一致。
 
@@ -4554,7 +4554,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/admin/users/{userId}/password` | 重置密码（吊销全部会话） | 管理员 |
 | DELETE | `/ag-ui/admin/users/{userId}` | 彻底删除账号（数据擦除；不可删自己，请走「注销账户」） | 管理员 |
 | GET | `/ag-ui/admin/status` | 系统状态（连接 / 知聚 / 用户 / 消息 / 数字员工 / 内存 / 线程 / RAG / 文档转换能力 / **语音服务（ASR·TTS 配置与可达性 `voice`）**） | Operator |
-| GET | `/ag-ui/admin/agent-performance` | 数字员工绩效看板（按员工聚合调用次数 / token / 👍👎 好评率 / 最近活跃，`?days=N`） | Operator |
+| GET | `/ag-ui/admin/agent-performance` | 数字员工绩效看板（按员工聚合调用次数 / token / 成本 / 👍👎 好评率 / 最近活跃，`?days=N`；另含 `pricing` 与预算字段） | Operator |
 | GET | `/ag-ui/admin/voice/voices` | 语音合成音色列表（代理 TTS 服务 `/v1/audio/voices`）：`{ voices: string[] }`；未配置 / 不支持 404、不可达 503 | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | 音色试听：合成一句短样例并内联返回音频（便于 `<audio src>`，可带 `?token=`）；未启用 404、失败 503 | Operator |
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 配额） | 运维 |

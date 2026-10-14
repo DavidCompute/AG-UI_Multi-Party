@@ -76,6 +76,18 @@ public sealed class AgentPerformanceTests
         var stats = AgentPerformance.Aggregate([], [], new Dictionary<string, string>(), 7, Now);
         Assert.Empty(stats);
     }
+
+    [Fact]
+    public void PricingOptions_EstimateCost_WeightsInputAndOutput()
+    {
+        var p = new PricingOptions { InputPerMillion = 2m, OutputPerMillion = 8m };
+        // 1e6 prompt ×2 + (0.6e6 + 0.4e6) output ×8 = 2 + 8 = 10
+        Assert.Equal(10m, p.EstimateCost(1_000_000, 600_000, 400_000));
+        Assert.True(p.Configured);
+        Assert.False(new PricingOptions().Configured); // 单价皆为 0 → 未配置
+        // 零用量 → 零成本
+        Assert.Equal(0m, p.EstimateCost(0, 0, 0));
+    }
 }
 
 /// <summary>端点鉴权与响应形状（挂在管理员控制台下，Operator+）。</summary>
@@ -107,6 +119,9 @@ public sealed class AgentPerformanceApiTests : IClassFixture<AdminApiServerFixtu
         var d = await res.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(7, d.GetProperty("days").GetInt32());
         Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
+        Assert.True(d.TryGetProperty("pricing", out var pricing));
+        Assert.True(pricing.TryGetProperty("configured", out _));
+        Assert.True(d.GetProperty("summary").TryGetProperty("cost", out _));
 
         // 无令牌 → 401
         var anon = await _client.GetAsync("/ag-ui/admin/agent-performance");

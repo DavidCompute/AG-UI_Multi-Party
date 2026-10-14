@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.221 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.221 Release Notes (current Windows desktop release)
+
+**版本说明**：**成本估算与预算提示（P0 第二项）**——员工绩效看板新增**成本列**与合计：按可配的 token 单价（`Agents:Pricing`）把用量换算成金额，并可选**每日成本预算**，在看板顶部显示「已用 X%」、超预算时标 ⚠。单价未配置时成本显示「—」。
+**Version note**: **Cost estimation and budget hint (P0, item 2)** — the agent performance dashboard gains a **cost column** and total: token usage is converted to money via configurable per-token prices (`Agents:Pricing`), with an optional **daily cost budget** showing "{pct}% used" at the top (⚠ when over). Cost shows "—" when prices are unconfigured.
+
+## 成本估算与预算
+# Cost estimation & budget
+
+中文：扩展 `GET /ag-ui/admin/agent-performance`（同一端点，向后兼容）：
+- **可配单价**（`Agents:Pricing`，也可用 `AGENTS_PRICING_*`）：`InputPerMillion`（输入每百万 token 单价）、`OutputPerMillion`（输出 = completion + reasoning 每百万 token 单价）、`Currency`（币种符号，仅展示）、`DailyBudget`（每日成本预算，0 = 不限）。单价皆为 0 视为未配置。
+- **返回新增**：`pricing`（configured / currency / inputPerMillion / outputPerMillion / dailyBudget）；`summary` 新增 `cost`（窗口内总成本）、`dailyAvgCost`、`budget`、`budgetPct`（日均成本 / 日预算 ×100）、`overBudget`；每个 `agents[]` 新增 `cost`。
+- **前端**：「📈 员工绩效」页签新增**成本列**；顶部 meta 行附加「成本 {金额}」与（配了预算时）「预算 {币}{额}/天 · 已用 {pct}%」（超预算追加 ⚠）。
+- 实现：`PricingOptions`（`AgentOptions.cs`，含 `EstimateCost`）+ 端点计算；纯函数不涉新存储。成本按「输入单价 × prompt + 输出单价 × (completion + reasoning)」估算。
+- **未做（下一步）**：按复杂度**自动选模型**（经济/强模型路由）——需先定口径与防抖动，本轮只做「可配 + 可观测」。
+English: extends `GET /ag-ui/admin/agent-performance` (same endpoint, backward-compatible):
+- **Configurable prices** (`Agents:Pricing`, also `AGENTS_PRICING_*`): `InputPerMillion`, `OutputPerMillion` (output = completion + reasoning, per million tokens), `Currency` (display only), `DailyBudget` (0 = unlimited). Both prices 0 means unconfigured.
+- **New response fields**: `pricing` (configured / currency / inputPerMillion / outputPerMillion / dailyBudget); `summary` gains `cost`, `dailyAvgCost`, `budget`, `budgetPct` (daily-average cost / daily budget ×100) and `overBudget`; each `agents[]` gains `cost`.
+- **Front end**: the "📈 Agent performance" tab gains a **cost column**; the meta line appends "Cost {amount}" and (when a budget is set) "Budget {cur}{amt}/day · {pct}% used" (⚠ when over).
+- Implementation: `PricingOptions` (`AgentOptions.cs`, with `EstimateCost`) + endpoint math; no new storage. Cost = input price × prompt + output price × (completion + reasoning).
+- **Not done (next step)**: complexity-based **automatic model routing** (economy/strong) — needs a stable rule first; this round is "configurable + observable" only.
+
+## 测试
+# Tests
+
+中文：`AgentPerformanceTests` 新增 `PricingOptions.EstimateCost` 用例（输入/输出加权 + 未配置判定 + 零用量），端点集成测试新增 `pricing` / `summary.cost` 形状断言，合跑 **21/21**（含 AdminApi / DesktopComposition）。`node --check`、i18n 审计（zh=en=1773，missing 0）与 appsettings JSON 校验通过。运行栈实测：未配单价 `pricing.configured=false`、成本显示「—」；临时设 `AGENTS_PRICING_INPUT_PER_MILLION=2 / OUTPUT=8 / DAILY_BUDGET=5` 后返回总成本 **61.59**、日均 **2.053**、预算已用 **41.1%**（未超）、首位员工成本 **14.66**。
+English: `AgentPerformanceTests` gains a `PricingOptions.EstimateCost` case (input/output weighting + unconfigured check + zero usage); the endpoint integration test asserts the `pricing` / `summary.cost` shape; **21/21** (incl. AdminApi / DesktopComposition). `node --check`, the i18n audit (zh=en=1773, missing 0) and appsettings JSON validation pass. Verified live: unconfigured prices → `pricing.configured=false` and cost shows "—"; with `AGENTS_PRICING_INPUT_PER_MILLION=2 / OUTPUT=8 / DAILY_BUDGET=5` it returns total cost **61.59**, daily average **2.053**, budget **41.1% used** (not over), top agent **14.66**.
+
 # AG-UI 群聊桌面版 1.0.220 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.220 Release Notes (current Windows desktop release)
 

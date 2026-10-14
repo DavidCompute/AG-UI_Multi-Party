@@ -3606,7 +3606,7 @@ The frontend admin entries are **scoped by the effective platform role** (`roleR
   - **Admin / SuperAdmin** see all 12 tabs.
 - `state.isSuperAdmin` is still used only for the platform-role dropdown in "User Management" (only SuperAdmin can grant/revoke roles).
 
-**Agent performance tab (`#adminTabPerf`, `admin.tabPerf`, Operator+)**: aggregates **calls / total tokens / 👍👎 positive rate / last active** per employee, with 7 / 30 / 90-day windows and refresh (sorted by calls descending); positive rate shows "—" when there is no feedback. Data comes from `GET /ag-ui/admin/agent-performance?days=N` (`agui_usage` rows + message feedback; names use the employee nickname, falling back to the agentId). The aggregation is a pure function `AgentPerformance.Aggregate` (`AgentPerformance.cs`), mounted by `AdminApi.cs`.
+**Agent performance tab (`#adminTabPerf`, `admin.tabPerf`, Operator+)**: aggregates **calls / total tokens / cost / 👍👎 positive rate / last active** per employee, with 7 / 30 / 90-day windows and refresh (sorted by calls descending); positive rate shows "—" when there is no feedback. Data comes from `GET /ag-ui/admin/agent-performance?days=N` (`agui_usage` rows + message feedback; names use the employee nickname, falling back to the agentId). The aggregation is a pure function `AgentPerformance.Aggregate` (`AgentPerformance.cs`), mounted by `AdminApi.cs`. **Cost** is estimated from configurable prices `Agents:Pricing` (`InputPerMillion` / `OutputPerMillion` / `Currency` / `DailyBudget`; Docker: `AGENTS_PRICING_*`) as input×prompt + output×(completion+reasoning); cost shows "—" when prices are 0, and with a `DailyBudget` the meta line shows "{pct}% used" (⚠ when over).
 
 > Evidence: `app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`; backend filters per endpoint in §8.1.6. Now consistent with `docs/RBAC.md` §5 ("menus subdivided by effective role").
 
@@ -4560,7 +4560,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | POST | `/ag-ui/admin/users/{userId}/password` | Reset password (revokes all sessions) | Admin |
 | DELETE | `/ag-ui/admin/users/{userId}` | Permanently delete an account (data erasure; cannot delete yourself, use "Delete Account" instead) | Admin |
 | GET | `/ag-ui/admin/status` | System status (connections / groups / users / messages / agents / memory / threads / RAG / document conversion capability / **voice services (ASR·TTS config & reachability `voice`)**) | Operator |
-| GET | `/ag-ui/admin/agent-performance` | Digital-employee performance dashboard (per-agent calls / tokens / 👍👎 positive rate / last active, `?days=N`) | Operator |
+| GET | `/ag-ui/admin/agent-performance` | Digital-employee performance dashboard (per-agent calls / tokens / cost / 👍👎 positive rate / last active, `?days=N`; also returns `pricing` and budget fields) | Operator |
 | GET | `/ag-ui/admin/voice/voices` | Voice list for synthesis (proxies the TTS `/v1/audio/voices`): `{ voices: string[] }`; 404 unconfigured / unsupported, 503 unreachable | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |

@@ -220,8 +220,8 @@
 ### 6.5 数字员工绩效看板（★★☆ 运营洞察 / 反哺编排） ✅已实现（1.0.220）
 - **现状**：`agui_usage` 已在记录按「日期 + 员工 + 触发者」的调用与 token；消息 👍👎 反馈也已在存；但**没有按员工的汇总视图**，编排选人仍靠静态角色描述。
 - **目标**：按数字员工聚合绩效（调用量 / token / 好评率 / 最近活跃），为「一键编排选人」与组织体检提供实测依据。
-- **已实现**：端点 `GET /ag-ui/admin/agent-performance?days=N`（Operator+，只读；名字取昵称、取不到回退 agentId）；控制台新增「员工绩效」页签（7/30/90 天窗口 + 刷新，按调用次数降序）；聚合为纯函数 `AgentPerformance.Aggregate`。落点：`Web/AgentPerformance.cs`、`Web/AdminApi.cs`、`wwwroot/{index.html,app.js}`。
-- **待续**：把绩效作为信号**自动反馈进编排**（候选复用 / 部门体检 / 低绩效提醒），需先定口径防抖动。
+- **已实现**：端点 `GET /ag-ui/admin/agent-performance?days=N`（Operator+，只读；名字取昵称、取不到回退 agentId）；控制台新增「员工绩效」页签（7/30/90 天窗口 + 刷新，按调用次数降序）；聚合为纯函数 `AgentPerformance.Aggregate`。**成本估算（1.0.221）**：按可配单价 `Agents:Pricing`（输入/输出每百万 token 单价 + 币种 + 每日预算）算成本列与预算已用（单价为 0 时显示「—」）。落点：`Web/AgentPerformance.cs`、`AgentOptions.PricingOptions`、`Web/AdminApi.cs`、`wwwroot/{index.html,app.js}`。
+- **待续**：把绩效 / 成本作为信号**自动反馈进编排**（候选复用 / 部门体检 / 低绩效提醒）与**按复杂度自动选模型**（经济/强模型路由），均需先定口径防抖动。
 
 ---
 
