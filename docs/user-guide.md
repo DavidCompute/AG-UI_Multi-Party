@@ -4124,7 +4124,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.13 系统状态（`#statusModal`，非页签）
 
-除统计与 RAG / 文档转换能力行外，这里**不再包含语音行**：语音服务已抽成**独立运维入口**——账号菜单 **「🎙️ 语音服务」**（`#meMenuVoice` → `#voiceServiceModal`，`openVoiceServiceModal()` / `renderVoiceService()`，`app.js`）。「系统状态」底部改为一行提示「语音服务已移至账号菜单 → 🎙️ 语音服务」。
+除统计与 RAG / 文档转换能力行外，这里**不再包含语音行**：语音服务已抽成**独立运维入口**——账号菜单 **「语音服务」**（`#meMenuVoice` → `#voiceServiceModal`，`openVoiceServiceModal()` / `renderVoiceService()`，`app.js`）。「系统状态」底部改为一行提示「语音服务已移至账号菜单 → 🎙️ 语音服务」。
 
 语音服务面板（`#voiceServiceModal`）并行拉取 `GET /ag-ui/admin/status` 与 `GET /ag-ui/admin/voice/voices`，展示：
 
@@ -4135,7 +4135,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 音色试听 | TTS 启用时列出合成服务全部音色，逐个「▶」试听（复用单个 `<audio>`，避免叠加播放） | `GET /ag-ui/admin/voice/voices` + `GET /ag-ui/admin/voice/sample?voice=` |
 | 一键重检 | 底部「🔄 重新检测」重新拉取，无需关窗重开 | 同上 |
 
-`#statusModal`（`index.html`）由账号菜单 `#meMenuStatus`（`menu.status` = 系统状态，**仅 `state.isAdmin`**）打开，`openStatusModal()`（`app.js`）拉 `GET /ag-ui/admin/status`（后端仅需 `Operator`）。语音服务改用同级的 `#meMenuVoice`（`menu.voice` = 🎙️ 语音服务，**仅 Operator+**）打开 `#voiceServiceModal`。
+`#statusModal`（`index.html`）由账号菜单 `#meMenuStatus`（`menu.status` = 系统状态，**仅 `state.isAdmin`**）打开，`openStatusModal()`（`app.js`）拉 `GET /ag-ui/admin/status`（后端仅需 `Operator`）。语音服务改用同级的 `#meMenuVoice`（`menu.voice` = 语音服务，**仅 Operator+**）打开 `#voiceServiceModal`（弹窗标题仍为「🎙️ 语音服务」）。
 
 返回字段（`AdminApi.cs:99-141`）与前端展示（`app.js:7434-7460`）：
 

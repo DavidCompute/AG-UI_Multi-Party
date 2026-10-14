@@ -4131,7 +4131,7 @@ The server (`SystemApi.cs:90-164`): in database mode (postgres/mysql/sqlite) it 
 
 #### 8.13 System Status (`#statusModal`, not a tab)
 
-Besides the counters and the RAG / document-conversion capability rows, this panel **no longer contains voice rows**: the voice service has been split into a **dedicated operations entry** — the account menu **“🎙️ Voice service”** (`#meMenuVoice` → `#voiceServiceModal`, `openVoiceServiceModal()` / `renderVoiceService()`, `app.js`). System Status now ends with a one-line pointer: “Voice service has moved to the account menu → 🎙️ Voice service”.
+Besides the counters and the RAG / document-conversion capability rows, this panel **no longer contains voice rows**: the voice service has been split into a **dedicated operations entry** — the account menu **“Voice service”** (`#meMenuVoice` → `#voiceServiceModal`, `openVoiceServiceModal()` / `renderVoiceService()`, `app.js`). System Status now ends with a one-line pointer: “Voice service has moved to the account menu → 🎙️ Voice service”.
 
 The voice-service panel (`#voiceServiceModal`) fetches `GET /ag-ui/admin/status` and `GET /ag-ui/admin/voice/voices` in parallel and shows:
 
@@ -4142,7 +4142,7 @@ The voice-service panel (`#voiceServiceModal`) fetches `GET /ag-ui/admin/status`
 | Voice preview | When TTS is on, every voice the synthesis service offers, each previewable with ▶ (a single reused `<audio>` avoids overlapping playback) | `GET /ag-ui/admin/voice/voices` + `GET /ag-ui/admin/voice/sample?voice=` |
 | One-click re-check | The “🔄 Re-check” button at the bottom re-fetches, no need to close and reopen | same as above |
 
-`#statusModal` (`index.html`) is opened from the account menu `#meMenuStatus` (`menu.status` = System Status, **`state.isAdmin` only**); `openStatusModal()` (`app.js`) fetches `GET /ag-ui/admin/status` (the backend requires only `Operator`). The voice service now uses the sibling `#meMenuVoice` (`menu.voice` = 🎙️ Voice service, **Operator+ only**) to open `#voiceServiceModal`.
+`#statusModal` (`index.html`) is opened from the account menu `#meMenuStatus` (`menu.status` = System Status, **`state.isAdmin` only**); `openStatusModal()` (`app.js`) fetches `GET /ag-ui/admin/status` (the backend requires only `Operator`). The voice service now uses the sibling `#meMenuVoice` (`menu.voice` = Voice service, **Operator+ only**) to open `#voiceServiceModal` (the modal title stays “🎙️ Voice service”).
 
 Returned fields (`AdminApi.cs:99-141`) and frontend display (`app.js:7434-7460`):
 

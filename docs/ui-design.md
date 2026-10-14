@@ -645,7 +645,7 @@ apiKey 不回显，仅提示“已配置”。
 
 ### 7.7 语音服务（#voiceServiceModal，账号菜单，Operator+）
 
-- 账号菜单 **「🎙️ 语音服务」**（`#meMenuVoice`，`menu.voice`）打开 `#voiceServiceModal`，把语音问答（ASR）/ 语音回复（TTS）
+- 账号菜单 **「语音服务」**（`#meMenuVoice`，`menu.voice`；弹窗标题为「🎙️ 语音服务」）打开 `#voiceServiceModal`，把语音问答（ASR）/ 语音回复（TTS）
   的**配置、可达性、音色试听、一键重检**集中到一个独立面板；「系统状态」不再列语音行，只留一行跳转提示。
 - 面板并行拉取 `GET /ag-ui/admin/status` 与 `GET /ag-ui/admin/voice/voices`：
   - **ASR / TTS 状态行**：就绪 / 未启用 / 不可达三态（`reachable` 由短超时 GET 探测，任意 HTTP 响应即算可达），附端点提示（TTS 另标「（仅语音回合）」）。
