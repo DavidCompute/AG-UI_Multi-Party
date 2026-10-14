@@ -160,6 +160,7 @@
   - **多模态进阶 · 语音问答（ASR，1.0.208）**：开启 `Agents:Audio:Enabled` 且能解析出转写端点时，服务端在组织附件区时先把语音转写为文字（OpenAI 兼容 `multipart/form-data`，响应 `{"text":"…"}`），再当作该附件「正文」走与文档附件同一条注入 / 预算路径；默认关闭，失败 / 超时 / 超限静默降级不阻断，按 attachmentId 缓存。对应实现 `AudioOptions` / `AudioTranscriptionService` 与 `AgentGateway.BuildAttachmentsSectionAsync`，回归 `AudioTranscriptionTests`。
   - **多模态进阶 · 语音进→语音出闭环（TTS，1.0.209）**：数字员工回复头部 🔊 用 Web Speech API（系统语音，离线）朗读，可开关自动朗读；发语音消息时其回复自动朗读。Docker 新增可选 `speaches` 服务（`--profile voice`，OpenAI 兼容转写 + 合成），前端默认转写端点已指向它。
   - **多模态进阶 · 服务端语音回复（TTS，1.0.210）**：开启 `Agents:Audio:SpeechEnabled` 后回复经 `SpeechSynthesisService` 合成为音频附件并挂到消息（复用技能产物回挂路径），覆盖主回复/流水线/交接/提升/审批恢复；默认关，失败静默。新增 `SpeechSynthesisTests` 与真实端点集成测试 `AudioIntegrationTests`。
+  - **多模态进阶 · 独立 TTS 服务（1.0.211）**：服务端语音回复改用独立 Kokoro-FastAPI（`--profile voice` 一起拉起，镜像走南京大学镜像站，中文音色内置、CPU 可跑）；`SpeechSynthesisService` 仅改配置即接上（无需改代码）。实测中文合成→转写闭环通过。
 
 ### 5.3 前端性能与无障碍（★☆☆） ✅已实现（虚拟滚动已具备 + ARIA 增强）
 - **现状**：已做流式局部渲染 + 仅渲染最近 300 条。

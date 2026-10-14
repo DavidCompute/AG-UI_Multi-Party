@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-纯桌面应用（Windows）**（当前版本 1.0.209）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
+纯桌面应用（Windows）**（当前版本 1.0.211）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
 个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、办公文档在线查看与 PPT 播放（**需本机 LibreOffice**，见下方说明）等），但**数据与模型全部在本机**；服务在本机固定起在
 `http://127.0.0.1:5200`，即便断网也能跑通群聊 / 智能体管理 / 语义记忆等本地功能（仅对话模型 DeepSeek 等仍需联网），
 支持把标记为「本机执行」的客户端技能经本机桥在桌面机执行：
@@ -30,16 +30,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### 构建发行版（win-x64 程序 / MSI 安装包）
 
-当前版本：**1.0.209**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
+当前版本：**1.0.211**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
 
 ```bash
 # 1. 发布 win-x64 产物到 artifacts/win-x64（含 SQLite / 本地 llama embedding / wwwroot / VC++ 运行库 / vec0.dll）
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. 打 MSI 安装包：输出到 artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    例如 1.0.189：
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.189.msi
+#    例如 1.0.211：
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.211
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.211.msi
 ```
 
 > `tools/build-msi.ps1` 会先**强制全新发布**（清理 Release 中间产物，防止增量复用旧 DLL）、排除非 Windows 原生运行库、
@@ -89,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
   - 与 Docker 版共用：在另一台机器跑 `docker compose --profile voice up -d`（见仓库根 README），把 `Agents:Audio:Endpoint` 设为 `http://<那台机器>:8001/v1/audio/transcriptions`；
   - 云端：任何 whisper 兼容端点（带 `ApiKey`）。
   默认关闭（`Enabled=false`）；开启后语音附件会先转写再注入，失败 / 超时静默降级、不阻断对话。
-- **服务端语音回复（TTS，可选）**：开启 `Agents:Audio:SpeechEnabled` 并配好 `SpeechEndpoint` / `SpeechModel` / `SpeechVoice` 后，回复文本会合成为**音频附件**挂在消息上（与技能产物同一条回挂路径）；失败静默、不阻断。默认关闭（前端 🔊 朗读已能满足大多数场景）。
+- **服务端语音回复（TTS，可选）**：开启 `Agents:Audio:SpeechEnabled` 并配好 `SpeechEndpoint` / `SpeechModel` / `SpeechVoice` 后，回复文本会合成为**音频附件**挂在消息上（与技能产物同一条回挂路径）；失败静默、不阻断。默认关闭（前端 🔊 朗读已能满足大多数场景）。示例：在任一机器跑 `docker compose --profile voice up -d` 起独立 Kokoro-FastAPI（支持中文），`SpeechEndpoint=http://<那台机器>:8880/v1/audio/speech`、`SpeechModel=kokoro`、`SpeechVoice=zf_xiaoxiao`。
 
 ## 语义记忆（RAG）工作原理
 

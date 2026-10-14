@@ -1,3 +1,23 @@
+# AG-UI 群聊桌面版 1.0.211 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.211 Release Notes (current Windows desktop release)
+
+**版本说明**：**服务端语音回复改用独立的 TTS 服务（Kokoro-FastAPI）**——内置 speaches 的中文 TTS 不可用（piper-zh 近乎静音、Kokoro-zh 缺音素化后端），改用专门的 OpenAI 兼容 TTS 服务；已验证中文合成→转写闭环。
+**Version note**: **Server-side voice reply now uses a standalone TTS service (Kokoro-FastAPI)** — the bundled speaches' Chinese TTS is unusable (piper-zh near-silent, Kokoro-zh missing a phonemizer backend), so switch to a dedicated OpenAI-compatible TTS service; the Chinese synthesize → transcribe loop is verified.
+
+## 独立 TTS 服务
+# Standalone TTS service
+
+中文：
+- **服务**：新增 `tts` 容器（`ghcr.nju.edu.cn/remsky/kokoro-fastapi-cpu:latest`，南京大学镜像站加速），OpenAI 兼容 `/v1/audio/speech`，**模型与中文音色内置、CPU 可跑**（`zf_xiaoxiao` / `zf_xiaoyi` / `zm_yunjian` …）。与 `speaches` 同属 `voice` profile：`docker compose --profile voice up -d`。
+- **接线（无需改代码）**：`SpeechSynthesisService` 本就是标准 OpenAI 兼容，仅改默认值——`Agents:Audio:SpeechEndpoint=http://tts:8880/v1/audio/speech`、`SpeechModel=kokoro`、`SpeechVoice=zf_xiaoxiao`（可用 `AGENTS_AUDIO_SPEECH_*` 覆盖）。web 的 `NO_PROXY` 已含 `tts`。
+- **实测闭环**：智能体回复→Kokoro 合成→`语音回复.mp3`（audio/mpeg，268KB）挂到消息；下载后回喂 speaches ASR 能读出中文（“我是组织架构构建石…”，同音字属正常）。
+- **为什么不用 edge-tts**：`travisvn/openai-edge-tts` 实测被 Microsoft 以 403 拒（其 edge-tts 客户端已过期），故改用全本地的 Kokoro。
+English:
+- **Service**: a new `tts` container (`ghcr.nju.edu.cn/remsky/kokoro-fastapi-cpu:latest`, accelerated via the Nanjing University mirror), OpenAI-compatible `/v1/audio/speech`, **model and Chinese voices bundled, runs on CPU** (`zf_xiaoxiao` / `zf_xiaoyi` / `zm_yunjian` …). Same `voice` profile as `speaches`: `docker compose --profile voice up -d`.
+- **Wiring (no code change)**: `SpeechSynthesisService` is standard OpenAI-compatible, so only defaults change — `Agents:Audio:SpeechEndpoint=http://tts:8880/v1/audio/speech`, `SpeechModel=kokoro`, `SpeechVoice=zf_xiaoxiao` (overridable via `AGENTS_AUDIO_SPEECH_*`). The web container's `NO_PROXY` now includes `tts`.
+- **Verified loop**: agent reply → Kokoro synthesis → `语音回复.mp3` (audio/mpeg, 268KB) attached to the message; after download, feeding it back to speaches ASR reads out Chinese (homophones like 石/师 are normal).
+- **Why not edge-tts**: `travisvn/openai-edge-tts` was rejected with 403 by Microsoft (its edge-tts client is outdated), so a fully local Kokoro is used instead.
+
 # AG-UI 群聊桌面版 1.0.210 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.210 Release Notes (current Windows desktop release)
 

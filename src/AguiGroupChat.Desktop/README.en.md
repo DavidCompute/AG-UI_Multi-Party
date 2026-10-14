@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows) **(current version 1.0.209)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+A pure desktop application (Windows) **(current version 1.0.211)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
 personal memory, AI twin, attachments, topics, trigger modes, memory personality types, office document online view and PPT playback (**needs local LibreOffice**, see Notes), etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
@@ -31,16 +31,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### Building a release (win-x64 publish / MSI installer)
 
-Current version: **1.0.209** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+Current version: **1.0.211** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
 
 ```bash
 # 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. Build the MSI installer: outputs to artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    e.g. for 1.0.189:
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.189.msi
+#    e.g. for 1.0.211:
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.211
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.211.msi
 ```
 
 > `tools/build-msi.ps1` first does a **forced fresh publish** (cleans Release intermediates to avoid reusing stale DLLs), strips non-Windows native runtimes,
@@ -90,7 +90,7 @@ On first use, just register an account.
   - Shared with the Docker edition: run `docker compose --profile voice up -d` on another host (see the repo root README) and set `Agents:Audio:Endpoint` to `http://<that host>:8001/v1/audio/transcriptions`;
   - Cloud: any whisper-compatible endpoint (with an `ApiKey`).
   Off by default (`Enabled=false`); once on, voice attachments are transcribed before injection, and failures / timeouts degrade silently without blocking the conversation.
-- **Server-side voice reply (TTS, optional)**: with `Agents:Audio:SpeechEnabled` on and `SpeechEndpoint` / `SpeechModel` / `SpeechVoice` set, the reply text is synthesized into an **audio attachment** on the message (the same recall path as skill-produced files); failures skip silently without blocking. Off by default (front-end 🔊 read-aloud already covers most needs).
+- **Server-side voice reply (TTS, optional)**: with `Agents:Audio:SpeechEnabled` on and `SpeechEndpoint` / `SpeechModel` / `SpeechVoice` set, the reply text is synthesized into an **audio attachment** on the message (the same recall path as skill-produced files); failures skip silently without blocking. Off by default (front-end 🔊 read-aloud already covers most needs). Example: run `docker compose --profile voice up -d` on any host to start the standalone Kokoro-FastAPI (Chinese-capable); then `SpeechEndpoint=http://<that host>:8880/v1/audio/speech`, `SpeechModel=kokoro`, `SpeechVoice=zf_xiaoxiao`.
 
 ## How Semantic Memory (RAG) Works
 

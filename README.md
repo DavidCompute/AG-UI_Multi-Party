@@ -213,10 +213,11 @@ docker compose logs llama-embed
 # 如需同时启动仅协议 Hub（http://localhost:5100）
 docker compose --profile hub up -d
 
-# 如需语音问答（ASR）：拉起本地转写服务（OpenAI 兼容，首次会下载 whisper 模型，约 500MB）
+# 如需语音（ASR 转写 + TTS 合成）：拉起本地语音服务（OpenAI 兼容）
 docker compose --profile voice up -d
-#   再把 .env 的 AGENTS_AUDIO_ENABLED 置 true 并重启 web：docker compose up -d web
-#   本地语音转写服务端口：宿主机 SPEACHES_PORT（默认 8001）；模型缓存在 agui-speaches-data 卷。
+#   会一并启动：speaches（转写，端口 SPEACHES_PORT 默认 8001）+ tts（Kokoro 语音合成，端口 TTS_PORT 默认 8880）
+#   再把 .env 的 AGENTS_AUDIO_ENABLED=true（语音问答）与/或 AGENTS_AUDIO_SPEECH_ENABLED=true（语音回复）打开，重启 web：docker compose up -d web
+#   首次转写会下载 whisper 模型（约 500MB）至 agui-speaches-data 卷；Kokoro 模型与中文音色已内置镜像。
 
 # 停止（数据保留在命名卷，再次 up 数据完整）
 docker compose down
@@ -239,9 +240,10 @@ docker compose down
 | `AGENTS_AUDIO_MODEL` | `Systran/faster-whisper-small` | 转写模型（须是 speaches 能下载的 HF 仓库 id） |
 | `AGENTS_AUDIO_LANGUAGE` | `zh` | 语言提示（留空自动识别） |
 | `SPEACHES_PORT` | `8001` | 本地转写服务宿主机端口 |
-| `AGENTS_AUDIO_SPEECH_ENABLED` | `false` | 服务端语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。开启需同时配 `SPEECH_MODEL`/`SPEECH_VOICE` |
-| `AGENTS_AUDIO_SPEECH_ENDPOINT` | `http://speaches:8000/v1/audio/speech` | 语音合成端点（OpenAI 兼容） |
-| `AGENTS_AUDIO_SPEECH_MODEL` / `SPEECH_VOICE` | 空 | 合成模型 / 音色（如 `speaches-ai/piper-en_US-lessac-medium` / `lessac`） |
+| `AGENTS_AUDIO_SPEECH_ENABLED` | `false` | 服务端语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。由独立 `tts` 服务提供 |
+| `AGENTS_AUDIO_SPEECH_ENDPOINT` | `http://tts:8880/v1/audio/speech` | 语音合成端点（Kokoro-FastAPI，OpenAI 兼容） |
+| `AGENTS_AUDIO_SPEECH_MODEL` / `SPEECH_VOICE` | `kokoro` / `zf_xiaoxiao` | 合成模型 / 中文音色（可选 `zf_xiaoyi` / `zm_yunjian` 等） |
+| `TTS_PORT` | `8880` | 独立 TTS 服务的宿主机端口 |
 | `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
 | `AGENTS_EXECUTION_*` | 不限 | 网关**执行参数**（`Agents:Execution`：时序/重试/TTL、阶段开关、`ExecutionOrder`、**复杂度自适应超时 `ComplexityTimeouts`**）**默认与代码一致，无需容器配置**——首选在运行期于控制台「管理员 → 执行参数」页热改并持久化（`executionRuntime`，重启恢复）。若确要容器启动即用非默认值：`docker-compose.yml` `web.environment`（Docker 不透传未知键）需<b>显式补一行</b>，如 `Agents__Execution__StreamTimeoutMinutes: "8"`、`Agents__Execution__ComplexityTimeouts__Enabled: "false"`、`Agents__Execution__EnableOrgRoute: "false"`。角色级按单数字员工在「编辑 → 执行阶段」关闭桥接/交接/组织路由。字段/默认/可配边界见 `docs/execution-configuration.md` |
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | 一键编排 apply 的冒烟自测：是否对服务端执行的 `shell` 技能盲跑一次（有副作用，默认开；置 `false` 关闭）。映射选项 `Agents__SkillAutoTestServerShell` |

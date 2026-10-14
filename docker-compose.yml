@@ -185,7 +185,7 @@ services:
       # 在 .env 里改 NO_PROXY 会覆盖这个默认值。
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,speaches,host.docker.internal,localhost,127.0.0.1,::1}
+      NO_PROXY: ${NO_PROXY:-llama-embed,ollama,postgres,speaches,tts,host.docker.internal,localhost,127.0.0.1,::1}
       Agents__WebSearchEndpoint: ${AGENTS_WEB_SEARCH_ENDPOINT:-https://api.duckduckgo.com/}
       # 工作型智能体：开启后，标记为「工作型」的智能体可在其专属工作区（/app/data/workspaces/<agentId>/）
       # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
@@ -243,9 +243,9 @@ services:
       # 语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。开启需同时配好 SpeechModel / SpeechVoice
       # （speaches 的语音合成模型/音色，如 speaches-ai/piper-en_US-lessac-medium / huayan）。
       Agents__Audio__SpeechEnabled: ${AGENTS_AUDIO_SPEECH_ENABLED:-false}
-      Agents__Audio__SpeechEndpoint: ${AGENTS_AUDIO_SPEECH_ENDPOINT:-http://speaches:8000/v1/audio/speech}
-      Agents__Audio__SpeechModel: ${AGENTS_AUDIO_SPEECH_MODEL:-}
-      Agents__Audio__SpeechVoice: ${AGENTS_AUDIO_SPEECH_VOICE:-}
+      Agents__Audio__SpeechEndpoint: ${AGENTS_AUDIO_SPEECH_ENDPOINT:-http://tts:8880/v1/audio/speech}
+      Agents__Audio__SpeechModel: ${AGENTS_AUDIO_SPEECH_MODEL:-kokoro}
+      Agents__Audio__SpeechVoice: ${AGENTS_AUDIO_SPEECH_VOICE:-zf_xiaoxiao}
       Agents__Audio__SpeechFormat: ${AGENTS_AUDIO_SPEECH_FORMAT:-mp3}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
@@ -345,6 +345,31 @@ services:
           sleep 5
         done
         exit 0
+
+  tts:
+    # 独立的语音合成（TTS）服务：Kokoro-FastAPI（OpenAI 兼容 /v1/audio/speech，支持中文）。
+    # 与 speaches 同属 voice profile：
+    #   docker compose --profile voice up -d
+    # 镜像默认走南京大学镜像站（ghcr.io → ghcr.nju.edu.cn）；海外 / 能直连 ghcr 时改成 ghcr.io/remsky/kokoro-fastapi-cpu:latest。
+    # 模型与音色已内置镜像（首次启动加载 + 预热约 30~60s），音色如 zf_xiaoxiao / zf_xiaoyi / zm_yunjian。
+    # 与 web 的 AGENTS_AUDIO_SPEECH_ENDPOINT（默认 http://tts:8880/v1/audio/speech）配对。
+    profiles: ["voice"]
+    image: ${KOKORO_TTS_IMAGE:-ghcr.nju.edu.cn/remsky/kokoro-fastapi-cpu:latest}
+    container_name: agui-group-chat-tts
+    restart: unless-stopped
+    ports:
+      - "${TTS_PORT:-8880}:8880"
+    environment:
+      # 一般不需要外网（模型内置）；保留代理透传以防未来拉语音包
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8880/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 120s
 
   hub:
     profiles: ["hub"]
