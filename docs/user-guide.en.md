@@ -804,7 +804,7 @@ After upload, `AttachmentStore.Classify()` classifies each into one of four `kin
 Rendered by `msgDom()`'s attachment block (`.attachments`):
 
 - **Images** (`kind === "image"`): thumbnail `.att-img`, outer `.att-img-wrap`; when all are images, the container uses a grid layout `.attachments.img-grid`. Clicking an image opens the image lightbox `#lightbox` (zoom `#lbZoomIn`/`#lbZoomOut`/`#lbZoomReset`, rotate `#lbRotate`, download `#lbDownload`, switch within the same message with `#lbPrev`/`#lbNext`).
-- **Audio** (`kind === "audio"`): `.att-audio`, an inline `<audio controls>` player; below it a **"🎤 Show transcript"** entry (`.att-transcript`) lazily fetches `GET /ag-ui/attachments/{id}/transcript` to show the voice message's ASR transcript (when none is available it shows a hint and removes the entry), so users can see what the digital employee "heard".
+- **Audio** (`kind === "audio"`): `.att-audio`, an inline `<audio controls>` player; below it the transcript is **shown inline by default** (`.att-transcript` auto-fetches `GET /ag-ui/attachments/{id}/transcript`, showing "🎤 Transcribing…" while loading, and is collapsible/expandable on click) — talk-to-text, so users see what the digital employee "heard". When none is available after retries the entry is removed without disturbing others; cached per attachmentId per session.
 - **Text / documents** (`kind === "text"` or `"document"`): download card `.att-file` (icon `📄`), the rest `📎`; the link `href` goes to `/ag-ui/files/{attachmentId}/{name}`, and `meta` shows the file size.
 - Attachment URLs pass through the `safeUrl()` whitelist (rejects `javascript:` etc.) and `authedAssetUrl()` (appends a `token=` query param for in-site paths).
 
@@ -4128,7 +4128,9 @@ The server (`SystemApi.cs:90-164`): in database mode (postgres/mysql/sqlite) it 
 
 ---
 
-### 8.13 System Status (`#statusModal`, not a tab)
+#### 8.13 System Status (`#statusModal`, not a tab)
+
+Besides the counters and the RAG / document-conversion capability rows, there are two **voice-service** rows (multimodality · voice Q&A): **🎤 Voice transcription (ASR)** / **🔊 Voice reply (TTS)**, with values "Ready / Off / Unreachable" (from `voice.asr` / `voice.tts` of `GET /ag-ui/admin/status`; `reachable` comes from a short-timeout GET probe, where any HTTP response counts as reachable), plus a hint listing the actual endpoints (TTS notes "voice turns only").
 
 `#statusModal` (`index.html:1754-1762`) is opened from the account menu `#meMenuStatus` (`menu.status` = System Status, **`state.isAdmin` only**); `openStatusModal()` (`app.js:7425-7462`) fetches `GET /ag-ui/admin/status` (the backend requires only `Operator`).
 
@@ -4544,7 +4546,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | POST | `/ag-ui/admin/users/{userId}/disabled` | Disable / enable an account (disabling revokes all sessions; cannot disable yourself) | Admin |
 | POST | `/ag-ui/admin/users/{userId}/password` | Reset password (revokes all sessions) | Admin |
 | DELETE | `/ag-ui/admin/users/{userId}` | Permanently delete an account (data erasure; cannot delete yourself, use "Delete Account" instead) | Admin |
-| GET | `/ag-ui/admin/status` | System status (connections / groups / users / messages / agents / memory / threads / RAG / document conversion capability) | Operator |
+| GET | `/ag-ui/admin/status` | System status (connections / groups / users / messages / agents / memory / threads / RAG / document conversion capability / **voice services (ASR·TTS config & reachability `voice`)**) | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |
 | GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `fromMs` / `toMs`) | Operator |
 | GET | `/ag-ui/admin/audit.csv` | Audit log CSV export (UTF-8 BOM, no 200-row limit) | Operator |

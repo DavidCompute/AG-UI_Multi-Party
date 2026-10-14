@@ -98,7 +98,7 @@ public static class AdminApi
                 return Results.Ok(new { ok = true, userId });
             })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
-        root.MapGet("/status", (HttpContext ctx, AuthService auth, GroupHub hub, AgentCatalog catalog, ConnectionManager connections, IServiceProvider sp) =>
+        root.MapGet("/status", async (HttpContext ctx, AuthService auth, GroupHub hub, AgentCatalog catalog, ConnectionManager connections, IServiceProvider sp) =>
         {
             var store = hub.Store;
             var messageCount = store.AllGroups().Sum(g => store.AllMessages(g.GroupId).Count);
@@ -111,6 +111,11 @@ public static class AdminApi
             if (graphActive) { try { gs = graph!.Stats(); } catch { gs = null; } }
             // 在线查看 / 播放依赖服务端 LibreOffice（桌面版需本机安装）；未注册（测试宿主）视为不可用
             var soffice = sp.GetService<ISofficeRunner>();
+            // 语音（多模态进阶）：ASR 转写 / TTS 合成的配置与可达性（可选能力，未注册时为 null）
+            var asr = sp.GetService<AguiGroupChat.Agents.AudioTranscriptionService>();
+            var tts = sp.GetService<AguiGroupChat.Agents.SpeechSynthesisService>();
+            var asrReach = asr is { IsEnabled: true } ? await ProbeAsync(asr.Endpoint) : (bool?)null;
+            var ttsReach = tts is { IsEnabled: true } ? await ProbeAsync(tts.Endpoint) : (bool?)null;
             return Results.Ok(new
             {
                 status = "ok",
@@ -138,6 +143,11 @@ public static class AdminApi
                 {
                     available = soffice?.Available ?? false,          // 转换组件（LibreOffice）是否就绪
                     converter = soffice is null ? null : "libreoffice", // 转换器类型（预留其它实现）
+                },
+                voice = new
+                {
+                    asr = new { enabled = asr?.IsEnabled ?? false, endpoint = asr?.Endpoint, reachable = asrReach },
+                    tts = new { enabled = tts?.IsEnabled ?? false, endpoint = tts?.Endpoint, onlyForVoice = tts?.OnlyWhenVoiceTurn ?? false, reachable = ttsReach },
                 },
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
@@ -491,6 +501,31 @@ public static class AdminApi
     {
         try { return action(); }
         catch (AguiProtocolException ex) { return MapErasureError(ex); }
+    }
+
+    /// <summary>探测用 HttpClient（懒建，短超时）：仅管理员打开「系统状态」时才用，不阻塞主路径。</summary>
+    private static readonly HttpClient ProbeHttp = new(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromMilliseconds(1200),
+    })
+    { Timeout = TimeSpan.FromMilliseconds(1800) };
+
+    /// <summary>
+    /// 语音端点可达性探测（多模态进阶 · 语音问答）：发一个 GET，**只要收到任意 HTTP 响应即算可达**
+    /// （`/v1/audio/*` 对 GET 通常回 405，那也已证明服务在监听）；连接失败 / 超时 / 未配置返回 null 或 false。
+    /// 端点来自服务端配置（非用户输入），无 SSRF 面。
+    /// </summary>
+    private static async Task<bool?> ProbeAsync(string? endpoint)
+    {
+        if (string.IsNullOrWhiteSpace(endpoint)) return null;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
+            using var res = await ProbeHttp.SendAsync(req).ConfigureAwait(false);
+            return true;
+        }
+        catch { return false; }
     }
 
     /// <summary>账号删除 / 孤儿操作错误码 → HTTP 状态映射（404 目标不存在；403 权限不足 / 防呆；其余 400）。</summary>

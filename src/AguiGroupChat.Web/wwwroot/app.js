@@ -380,6 +380,7 @@ function refreshMessagesEmptyHint() {
 function resetChatState() {
   // 离开当前知聚：先记下离开时间（下次进入显示「上次离开后」分隔线；memberId 此时尚在）
   if (state.activeGroupId) saveLeaveTime(state.activeGroupId);
+  try { transcriptCache.clear(); } catch { /* 模块初始化前调用（TDZ）忽略 */ }
   state.rooms.clear();
   state.msgIndex.clear();
   state.subscribedGroups.clear();
@@ -8229,9 +8230,25 @@ async function openStatusModal() {
     items.push([t("status.docPreview"), docPreviewOk
       ? t("status.docPreviewReady")
       : `<span class="status-warn">${t("status.docPreviewMissing")}</span>`]);
+    // 语音（多模态进阶 · 语音问答）：ASR 转写 / TTS 回复的配置与可达性（探测失败不阻断其余展示）
+    const voiceRow = (label, v) => {
+      if (!v || !v.enabled) return [label, t("status.voiceOff")];
+      if (v.reachable === false) return [label, `<span class="status-warn">${t("status.voiceUnreachable")}</span>`];
+      return [label, t("status.voiceReady")];
+    };
+    const voiceHints = [];
+    if (d.voice) {
+      items.push(voiceRow(t("status.voiceAsr"), d.voice.asr));
+      items.push(voiceRow(t("status.voiceTts"), d.voice.tts));
+      if (d.voice.asr && d.voice.asr.enabled) voiceHints.push(t("status.voiceAsrEndpoint", { ep: escapeHtml(String(d.voice.asr.endpoint || "")) }));
+      if (d.voice.tts && d.voice.tts.enabled) voiceHints.push(t("status.voiceTtsEndpoint", { ep: escapeHtml(String(d.voice.tts.endpoint || "")), mode: d.voice.tts.onlyForVoice ? t("status.voiceOnlyTurn") : "" }));
+    }
+    const hints = [];
+    if (!docPreviewOk) hints.push(escapeHtml(t("status.docPreviewHint")));
+    for (const h of voiceHints) hints.push(h);
     $("statusBody").innerHTML = `<div class="status-grid">` + items.map(([k, v]) =>
       `<div class="status-cell"><div class="status-key">${k}</div><div class="status-val">${v}</div></div>`).join("") + `</div>`
-      + (docPreviewOk ? "" : `<div class="status-hint">${escapeHtml(t("status.docPreviewHint"))}</div>`);
+      + hints.map((h) => `<div class="status-hint">${h}</div>`).join("");
   } catch { $("statusBody").innerHTML = t("admin.sysNetErr"); }
 }
 
@@ -9737,45 +9754,74 @@ function bindDocPreviewButtons(container) {
   });
 }
 
-/** 语音消息「查看转写」（多模态进阶 · 语音问答）：懒加载 `/ag-ui/attachments/{id}/transcript`，
- * 成功则展开文本（再点收起 / 展开）；无转写（404）或出错时提示并移除入口（不干扰其它附件）。 */
+/** 语音消息转写（多模态进阶 · 语音问答）：默认内联展示（「播放即转写」）。
+ * 客户端按 attachmentId 缓存（本会话）：避免虚拟滚动重渲染时反复请求；负结果在重试耗尽后也缓存，
+ * 防止 ASR 未启用时重渲染触发请求风暴。登出 / 重置时清空。 */
+const transcriptCache = new Map(); // attachmentId -> text（非空）或 ""（确定无转写）
+
+/** 取转写（命中缓存直接返回；成功才缓存正结果，便利重试）。 */
+async function fetchTranscript(id) {
+  if (transcriptCache.has(id)) return transcriptCache.get(id);
+  let text = "";
+  try {
+    const res = await fetch(`/ag-ui/attachments/${encodeURIComponent(id)}/transcript`, {
+      headers: { Authorization: `Bearer ${state.token || ""}` },
+    });
+    if (res.ok) {
+      const d = await res.json().catch(() => null);
+      text = d && d.transcript ? String(d.transcript) : "";
+    }
+  } catch { text = ""; }
+  if (text) transcriptCache.set(id, text);
+  return text;
+}
+
+/** 将转写文本内联展示，并把按钮变为展开 / 收起。 */
+function renderTranscript(box, text) {
+  const btn = box.querySelector(".att-transcript-btn");
+  const out = box.querySelector(".att-transcript-text");
+  if (!btn || !out) return;
+  out.textContent = text;
+  out.dataset.loaded = "1";
+  out.classList.remove("hidden");
+  btn.disabled = false;
+  btn.textContent = t("msg.hideTranscript");
+  btn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const show = out.classList.contains("hidden");
+    out.classList.toggle("hidden", !show);
+    btn.textContent = t(show ? "msg.hideTranscript" : "msg.showTranscript");
+  };
+}
+
 function bindTranscriptButtons(container) {
   container.querySelectorAll(".att-transcript").forEach((box) => {
+    const id = box.dataset.transcriptId;
     const btn = box.querySelector(".att-transcript-btn");
     const out = box.querySelector(".att-transcript-text");
-    if (!btn || !out) return;
-    btn.onclick = async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // 已加载：纯展开 / 收起，不再请求
-      if (out.dataset.loaded === "1") {
-        const show = out.classList.contains("hidden");
-        out.classList.toggle("hidden", !show);
-        btn.textContent = t(show ? "msg.hideTranscript" : "msg.showTranscript");
-        return;
-      }
-      const id = box.dataset.transcriptId;
-      if (!id) { box.remove(); return; }
+    if (!id || !btn || !out) { box.remove(); return; }
+
+    const cached = transcriptCache.get(id);
+    if (cached !== undefined) {
+      if (!cached) { box.remove(); return; } // 已知无转写：直接移除入口
+      renderTranscript(box, cached);
+      return;
+    }
+
+    // 自动加载（不需点击）；因 ASR 可能仍在进行，空结果最多重试 2 次（5s / 10s）后置为确定无转写
+    let tries = 0;
+    const run = async () => {
+      if (!box.isConnected) return;
       btn.disabled = true;
-      try {
-        const res = await fetch(`/ag-ui/attachments/${encodeURIComponent(id)}/transcript`, {
-          headers: { Authorization: `Bearer ${state.token || ""}` },
-        });
-        if (!res.ok) { toast(t("msg.transcriptNone")); box.remove(); return; }
-        const d = await res.json().catch(() => null);
-        const text = d && d.transcript ? String(d.transcript) : "";
-        if (!text) { toast(t("msg.transcriptNone")); box.remove(); return; }
-        out.textContent = text;
-        out.dataset.loaded = "1";
-        out.classList.remove("hidden");
-        btn.textContent = t("msg.hideTranscript");
-      } catch {
-        toast(t("msg.transcriptNone"));
-        box.remove();
-      } finally {
-        btn.disabled = false;
-      }
+      btn.textContent = t("msg.transcriptLoading");
+      const text = await fetchTranscript(id);
+      if (!box.isConnected) return;
+      if (text) { renderTranscript(box, text); return; }
+      if (tries < 2) { tries++; setTimeout(run, 5000 * tries); }
+      else { transcriptCache.set(id, ""); box.remove(); }
     };
+    run();
   });
 }
 

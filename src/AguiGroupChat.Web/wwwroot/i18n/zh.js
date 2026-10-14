@@ -1138,6 +1138,7 @@ window.I18N_DICTS.zh = {
   "msg.attachmentAudio": "语音",
   "msg.showTranscript": "🎤 查看转写",
   "msg.hideTranscript": "🎤 收起转写",
+  "msg.transcriptLoading": "🎤 转写中…",
   "msg.transcriptNone": "暂无转写文本",
   "msg.attachmentDownload": "下载",
   "msg.attachmentTitle": "附件：{kind}",
@@ -1665,6 +1666,14 @@ window.I18N_DICTS.zh = {
   "status.docPreviewReady": "就绪",
   "status.docPreviewMissing": "未就绪",
   "status.docPreviewHint": "运行本服务的机器上未检测到 LibreOffice：PPT / Word / Excel 的在线查看与播放将不可用（附件仍可下载后用本地应用打开）。若要启用：在本机安装 LibreOffice（Windows 自动探测 C:\\Program Files\\LibreOffice），或用环境变量 AGUI_SOFFICE 指定 soffice 路径后重启服务。",
+  "status.voiceAsr": "🎤 语音转写（ASR）",
+  "status.voiceTts": "🔊 语音回复（TTS）",
+  "status.voiceOff": "未启用",
+  "status.voiceReady": "就绪",
+  "status.voiceUnreachable": "不可达",
+  "status.voiceAsrEndpoint": "ASR 端点：{ep}",
+  "status.voiceTtsEndpoint": "TTS 端点：{ep}{mode}",
+  "status.voiceOnlyTurn": "（仅语音回合）",
 
   /* --- 消息搜索补充 --- */
   "search.me": "我",

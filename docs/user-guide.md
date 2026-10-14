@@ -803,7 +803,7 @@
 由 `msgDom()` 的附件块渲染（`.attachments`）：
 
 - **图片**（`kind === "image"`）：缩略图 `.att-img`，外层 `.att-img-wrap`；全部为图片时容器用网格布局 `.attachments.img-grid`。点击图片打开图片灯箱 `#lightbox`（缩放 `#lbZoomIn`/`#lbZoomOut`/`#lbZoomReset`、旋转 `#lbRotate`、下载 `#lbDownload`、同条消息内 `#lbPrev`/`#lbNext` 切换）。
-- **音频**（`kind === "audio"`）：`.att-audio`，内联 `<audio controls>` 播放条；下方多一个 **「🎤 查看转写」**（`.att-transcript`）——懒加载 `GET /ag-ui/attachments/{id}/transcript` 展示该语音的 ASR 转写文本（无 / 取不到时提示并移除入口），让用户看到「数字员工听到的是什么」。
+- **音频**（`kind === "audio"`）：`.att-audio`，内联 `<audio controls>` 播放条；下方 **默认内联展示转写**（`.att-transcript`，自动请求 `GET /ag-ui/attachments/{id}/transcript`，加载中显「🎤 转写中…」，可点击收起 / 展开）——「播放即转写」，让用户看到「数字员工听到的是什么」。无 / 重试后仍取不到时移除入口不干扰；本会话按 attachmentId 缓存。
 - **文本 / 文档**（`kind === "text"` 或 `"document"`）：下载卡片 `.att-file`（图标 `📄`），其余为 `📎`；链接 `href` 走 `/ag-ui/files/{attachmentId}/{name}`，`meta` 显示文件大小。
 - 附件的 URL 会经 `safeUrl()` 白名单（拒绝 `javascript:` 等）与 `authedAssetUrl()`（对站内路径追加 `token=` 查询参数）。
 
@@ -4121,7 +4121,9 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ---
 
-### 8.13 系统状态（`#statusModal`，非 tab）
+#### 8.13 系统状态（`#statusModal`，非页签）
+
+除统计与 RAG / 文档转换能力行外，还有两行**语音服务（多模态进阶 · 语音问答）**：**🎤 语音转写（ASR）** / **🔊 语音回复（TTS）**，值为「就绪 / 未启用 / 不可达」（来自 `GET /ag-ui/admin/status` 的 `voice.asr` / `voice.tts`；`reachable` 由短超时 GET 探测得出，收到任意 HTTP 响应即算可达），并在下方列出实际端点（TTS 附带「（仅语音回合）」）。
 
 `#statusModal`（`index.html:1754-1762`）由账号菜单 `#meMenuStatus`（`menu.status` = 系统状态，**仅 `state.isAdmin`**）打开，`openStatusModal()`（`app.js:7425-7462`）拉 `GET /ag-ui/admin/status`（后端仅需 `Operator`）。
 
@@ -4536,7 +4538,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/admin/users/{userId}/disabled` | 禁用 / 启用账号（禁用即吊销全部会话；不可禁用自己） | 管理员 |
 | POST | `/ag-ui/admin/users/{userId}/password` | 重置密码（吊销全部会话） | 管理员 |
 | DELETE | `/ag-ui/admin/users/{userId}` | 彻底删除账号（数据擦除；不可删自己，请走「注销账户」） | 管理员 |
-| GET | `/ag-ui/admin/status` | 系统状态（连接 / 群 / 用户 / 消息 / 智能体 / 内存 / 线程 / RAG / 文档转换能力） | 运维 |
+| GET | `/ag-ui/admin/status` | 系统状态（连接 / 知聚 / 用户 / 消息 / 数字员工 / 内存 / 线程 / RAG / 文档转换能力 / **语音服务（ASR·TTS 配置与可达性 `voice`）**） | Operator |
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 配额） | 运维 |
 | GET | `/ag-ui/admin/audit` | 操作审计日志查询（`limit` 最多 200；过滤 `actor` / `action` / `targetId` / `fromMs` / `toMs`） | 运维 |
 | GET | `/ag-ui/admin/audit.csv` | 审计日志导出 CSV（UTF-8 BOM，无 200 条上限） | 运维 |

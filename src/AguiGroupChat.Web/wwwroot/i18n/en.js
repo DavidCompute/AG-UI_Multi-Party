@@ -1141,6 +1141,7 @@ window.I18N_DICTS.en = {
   "msg.attachmentAudio": "Voice",
   "msg.showTranscript": "🎤 Show transcript",
   "msg.hideTranscript": "🎤 Hide transcript",
+  "msg.transcriptLoading": "🎤 Transcribing…",
   "msg.transcriptNone": "No transcript available",
   "msg.attachmentDownload": "Download",
   "msg.attachmentTitle": "Attachment: {kind}",
@@ -1668,6 +1669,14 @@ window.I18N_DICTS.en = {
   "status.docPreviewReady": "Ready",
   "status.docPreviewMissing": "Not ready",
   "status.docPreviewHint": "LibreOffice was not found on the machine running this service: online view/play for PPT / Word / Excel is unavailable (attachments can still be downloaded and opened with a local app). To enable it, install LibreOffice on that machine (auto-detected at C:\\Program Files\\LibreOffice on Windows) or point the AGUI_SOFFICE environment variable at soffice and restart the service.",
+  "status.voiceAsr": "🎤 Voice transcription (ASR)",
+  "status.voiceTts": "🔊 Voice reply (TTS)",
+  "status.voiceOff": "Off",
+  "status.voiceReady": "Ready",
+  "status.voiceUnreachable": "Unreachable",
+  "status.voiceAsrEndpoint": "ASR endpoint: {ep}",
+  "status.voiceTtsEndpoint": "TTS endpoint: {ep}{mode}",
+  "status.voiceOnlyTurn": " (voice turns only)",
 
   /* --- 消息搜索补充 --- */
   "search.me": "Me",

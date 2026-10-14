@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.215 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.215 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音消息转写「播放即转写」+ 控制台语音服务状态**——语音消息的 ASR 转写**默认内联展示**（无需再点）；管理员「系统状态」新增语音能力行，一眼看出 ASR / TTS 是否配好、是否可达。
+**Version note**: **Voice transcripts show inline + a voice-service row in the console** — a voice message's ASR transcript is now **shown inline by default** (no click), and the admin System Status gains voice capability rows so ASR / TTS configured-and-reachable status is visible at a glance.
+
+## 语音消息转写默认内联（1.0.214 的「点击查看」→ 自动展示）
+# Voice transcript inline by default
+
+中文：语音消息下自动加载并展开转写（「🎤 转写中…」→ 文本），仍可点击收起 / 展开。客户端按 `attachmentId` 缓存（本会话）：虚拟滚动重渲染不再重复请求；因 ASR 可能仍在进行，空结果最多重试 **2 次（5s / 10s）**，仍无才置为「确定无转写」并移除入口（避免未启用 ASR 时的请求风暴）；登出 / 重置时清空缓存。
+English: a voice message auto-loads and expands its transcript ("🎤 Transcribing…" → text), still collapsible/expandable on click. Cached per `attachmentId` per session so virtual-scroll re-renders do not re-request; since ASR may still be running, an empty result retries up to **2 times (5s / 10s)** before being marked definitively absent and the entry removed (preventing a request storm when ASR is off); the cache is cleared on logout / reset.
+
+## 管理控制台：语音服务状态
+# Admin console: voice-service status
+
+中文：`GET /ag-ui/admin/status` 新增 `voice` 字段：`voice.asr` / `voice.tts` = `{ enabled, endpoint, reachable[, onlyForVoice] }`。可达性由**短超时（连接 1.2s / 总 1.8s）的 GET 探测**得出——**收到任意 HTTP 响应即算可达**（`/v1/audio/*` 对 GET 常回 405，也已证明服务在监听）；未配置 / 未启用为 `null` / `enabled=false`。控制台「系统状态」新增两行：**🎤 语音转写（ASR）**、**🔊 语音回复（TTS）**，值为「就绪 / 未启用 / 不可达」，并在下方列出实际端点（TTS 附带「（仅语音回合）」）。端点来自服务端配置，无 SSRF 面。
+English: `GET /ag-ui/admin/status` gains a `voice` field: `voice.asr` / `voice.tts` = `{ enabled, endpoint, reachable[, onlyForVoice] }`. Reachability comes from a **short-timeout GET probe (1.2s connect / 1.8s total)** where **any HTTP response counts as reachable** (`/v1/audio/*` typically answers 405 to GET, which already proves the service is listening); unconfigured / disabled is `null` / `enabled=false`. The System Status modal adds two rows: **🎤 Voice transcription (ASR)** and **🔊 Voice reply (TTS)** with values "Ready / Off / Unreachable", plus a hint listing the actual endpoints (TTS notes "voice turns only"). Endpoints come from server config, so there is no SSRF surface.
+
+## 测试
+# Tests
+
+中文：`AudioTranscriptStoreTests` / 网关转写用例 / `AdminApiTests`（含 `/admin/status`）/ 桌面组合根合跑 **65/65**；`node --check` 与 i18n 审计（zh=en=1739，missing 0）通过。运行栈实测：`GET /ag-ui/admin/status` 返回 `voice.asr{enabled:true,reachable:true}` / `voice.tts{enabled:true,reachable:true,onlyForVoice:true}`。
+English: `AudioTranscriptStoreTests` / the gateway transcription case / `AdminApiTests` (incl. `/admin/status`) / desktop composition run **65/65**; `node --check` and the i18n audit pass (zh=en=1739, missing 0). Verified on the live stack: `GET /ag-ui/admin/status` returns `voice.asr{enabled:true,reachable:true}` / `voice.tts{enabled:true,reachable:true,onlyForVoice:true}`.
+
 # AG-UI 群聊桌面版 1.0.214 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.214 Release Notes (current Windows desktop release)
 
