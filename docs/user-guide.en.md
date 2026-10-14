@@ -2562,7 +2562,9 @@ The two endpoints and their returned fields (`LIB_SET_PROBE`):
   | `SpeechModel` | `kokoro` | Synthesis model (standalone Kokoro-FastAPI service); defaults to `tts-1` if unset |
   | `SpeechVoice` | `zf_xiaoxiao` | Voice (Kokoro Chinese voices: `zf_xiaoxiao` / `zf_xiaoyi` / `zm_yunjian`, …) |
   | `SpeechFormat` | `mp3` | Output format (`mp3` / `wav` / `opus` / `aac` / `flac`) |
-  | `SpeechMaxChars` | `1200` | Max characters of the reply to synthesize |
+  | `SpeechMaxChars` | `600` | Max characters of the reply to synthesize (~0.2s/char on CPU) |
+  | `SpeechTimeoutSeconds` | `300` | Synthesis request timeout in seconds (decoupled from the transcription `TimeoutSeconds`) |
+  | `SpeechOnlyForVoice` | `false` | Synthesize only when the trigger message carries a voice attachment (`true` = speak only on "talk, then hear the answer" turns) |
 
   Equivalent environment-variable overrides: `Agents__Audio__Enabled` / `Agents__Audio__Endpoint` / `Agents__Audio__ApiKey` / `Agents__Audio__Model` / `Agents__Audio__Language` (`docker-compose.yml` also passes through the matching `${AGENTS_AUDIO_*}`).
 

@@ -164,6 +164,32 @@ public sealed class SpeechSynthesisTests : IDisposable
         Assert.Equal(expected, SpeechSynthesisService.ForSpeech(input));
     }
 
+    [Fact]
+    public async Task OnlyForVoice_SkipsWhenTriggerHasNoVoice_SynthesizesWhenItDoes()
+    {
+        var handler = new FakeHandler(_ => Audio());
+        var svc = Service(handler, a => a.SpeechOnlyForVoice = true);
+
+        Assert.True(svc.OnlyWhenVoiceTurn);
+        // 触发消息不带语音 → 跳过（不发请求）
+        Assert.Null(await svc.TrySynthesizeAsync("普通文字回复", triggerHadVoice: false));
+        Assert.Equal(0, handler.Calls);
+        // 触发消息带语音 → 正常合成
+        var att = await svc.TrySynthesizeAsync("对语音的回复", triggerHadVoice: true);
+        Assert.NotNull(att);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task OnlyForVoice_DefaultOff_SynthesizesRegardlessOfTrigger()
+    {
+        var handler = new FakeHandler(_ => Audio());
+        var svc = Service(handler); // 默认 SpeechOnlyForVoice=false
+        Assert.False(svc.OnlyWhenVoiceTurn);
+        Assert.NotNull(await svc.TrySynthesizeAsync("普通回复", triggerHadVoice: false));
+        Assert.Equal(1, handler.Calls);
+    }
+
     /// <summary>可编程假 HttpMessageHandler：记录调用次数与请求，按委托返回响应。</summary>
     private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

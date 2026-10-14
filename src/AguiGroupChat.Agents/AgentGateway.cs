@@ -879,12 +879,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             var attached = await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
             await AttachAgentChainAsync(context, messageId, runCt);
-            await AttachSpeechAsync(context.GroupId, messageId, accumulated, runCt); // 语音回复（TTS，可选）
             // 空正文兜底：模型这一轮既没给正文、也没产出文件时，不要留一条**完全空白**的消息
             // （前端就是一只空气泡，用户不知道发生了什么）。与指派/提升、计划两条路径同一口径。
             if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, EmptyReplyFallback, runCt);
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
+            ScheduleSpeech(context.GroupId, messageId, accumulated, TriggerHadVoice(context)); // 语音回复（TTS，后台异步，可选）
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
@@ -1067,8 +1067,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             foreach (var chunk in AgentGatewayHelpers.ChunkReply(finalText, 160)) // 分块广播，前端可像流式一样渐进渲染
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
-            await AttachSpeechAsync(context.GroupId, messageId, finalText, runCt); // 语音回复（TTS，可选）
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
+            ScheduleSpeech(context.GroupId, messageId, finalText, TriggerHadVoice(context)); // 语音回复（TTS，后台异步，可选）
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
@@ -1156,11 +1156,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 AgentGateway.AmbientContext.Value = prevAmbient;
             }
-            foreach (var chunk in AgentGatewayHelpers.ChunkReply(UnwrapCoordinationAnswer(text), 160)) // 防内部协调 JSON 泄漏到用户
+            var relayFinal = UnwrapCoordinationAnswer(text);
+            foreach (var chunk in AgentGatewayHelpers.ChunkReply(relayFinal, 160)) // 防内部协调 JSON 泄漏到用户
                 await _hub.Value.AppendAgentContentAsync(context.GroupId, messageId, chunk, runCt);
 
-            await AttachSpeechAsync(context.GroupId, messageId, UnwrapCoordinationAnswer(text), runCt); // 语音回复（TTS，可选）
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId, runCt);
+            ScheduleSpeech(context.GroupId, messageId, relayFinal, TriggerHadVoice(context)); // 语音回复（TTS，后台异步，可选）
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
@@ -1372,8 +1373,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 不能因为“预算到点”就把已经生成好的产物丢掉（那样用户拿不到文件）。
             using var finalCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             await AttachPublishedProductsAsync(context.GroupId, messageId!, finalText ?? "", finalCts.Token);
-            await AttachSpeechAsync(context.GroupId, messageId!, finalText, finalCts.Token); // 语音回复（TTS，可选）
             await _hub.Value.EndAgentMessageAsync(context.GroupId, messageId!, finalCts.Token);
+            ScheduleSpeech(context.GroupId, messageId!, finalText, TriggerHadVoice(context)); // 语音回复（TTS，后台异步，可选）
             return new AgentInvocationResult(true, runId, null);
         }
         catch (OperationCanceledException)
@@ -3831,25 +3832,39 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     }
 
     /// <summary>
-    /// 语音回复（TTS）回挂：开启时把本条回复正文合成为音频附件并挂到消息上（前端用内联音频播放条呈现）。
-    /// 失败 / 未启用 / 空文本一律静默返回 0（绝不阻断回复）。返回挂上的附件数。
+    /// 语音回复（TTS）后台回挂：开启时把本条回复正文合成为音频附件并挂到消息上（前端用内联音频播放条呈现）。
+    ///
+    /// <para>
+    /// <b>后台异步</b>（fire-and-forget）：CPU 上合成很慢（实测约 0.2s/字，几百字可能几分钟），
+    /// 若同步做会把“正文出现”拖到几分钟后。因此本方法在 <c>EndAgentMessageAsync</c> <b>之后</b>调用，
+    /// 合成完成时用<b>不要求流在线</b>的挂载通道（<c>AttachMessageAttachmentsAsync</c>）补挂并广播
+    /// TEXT_MESSAGE_ATTACHMENTS；失败 / 未启用 / 空文本静默忽略（绝不阻断回复）。
+    /// </para>
     /// </summary>
-    private async Task<int> AttachSpeechAsync(string groupId, string messageId, string? content, CancellationToken ct)
+    private void ScheduleSpeech(string groupId, string messageId, string? content, bool triggerHadVoice)
     {
-        if (_speech is not { IsEnabled: true }) return 0;
-        if (string.IsNullOrWhiteSpace(content)) return 0;
-        try
+        if (_speech is not { IsEnabled: true }) return;
+        if (string.IsNullOrWhiteSpace(content)) return;
+        if (_speech.OnlyWhenVoiceTurn && !triggerHadVoice) return;
+        var text = content; // 捕获取值，避免闭包引用变量
+        _ = Task.Run(async () =>
         {
-            var att = await _speech.TrySynthesizeAsync(content, ct);
-            if (att is null) return 0;
-            return await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [att], ct) ? 1 : 0;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "语音回复回挂失败（忽略）：messageId={MessageId}", messageId);
-            return 0;
-        }
+            try
+            {
+                var att = await _speech.TrySynthesizeAsync(text, CancellationToken.None, triggerHadVoice);
+                if (att is null) return;
+                await _hub.Value.AttachMessageAttachmentsAsync(groupId, messageId, [att], CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "语音回复后台合成/回挂失败（忽略）：messageId={MessageId}", messageId);
+            }
+        });
     }
+
+    /// <summary>触发消息是否带语音附件（决定「仅语音回合才合成」是否放行）。</summary>
+    private static bool TriggerHadVoice(AgentInvocationContext? ctx)
+        => ctx?.Attachments is { Count: > 0 } atts && atts.Any(IsAudio);
 
     /// <summary>
     /// 工作型智能体产物回档：从已生成正文中提取 <c>attach_xxx</c>（publish_file 发布的附件 ID），
@@ -5181,7 +5196,6 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             // 运行完成
             _autoApprovedRuns.TryRemove(runId, out _); // 批量批准随运行结束失效
             var attached = await AttachPublishedProductsAsync(pending.GroupId, messageId, accumulated, runCt);
-            await AttachSpeechAsync(pending.GroupId, messageId, accumulated, runCt); // 语音回复（TTS，可选）
             // 空正文兜底：只有消息正文确实为空（含交互前保留的过程）且没产出文件时才补一句人话。
             var hasBody = !string.IsNullOrWhiteSpace(accumulated)
                 || !string.IsNullOrWhiteSpace(_hub.Value.Store.GetMessage(pending.GroupId, messageId)?.Content);
@@ -5192,6 +5206,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 await _hub.Value.EndAgentMessageAsync(pending.GroupId, messageId, runCt);
             else
                 await EndSuppressedMessageAsync(pending.GroupId, messageId, runCt);
+            ScheduleSpeech(pending.GroupId, messageId, accumulated, TriggerHadVoice(pending.Context)); // 语音回复（TTS，后台异步，可选）
         }
         catch (Exception ex)
         {

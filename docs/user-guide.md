@@ -2558,7 +2558,9 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
   | `SpeechModel` | `kokoro` | 合成模型（独立 Kokoro-FastAPI 服务）；未配时默认 `tts-1` |
   | `SpeechVoice` | `zf_xiaoxiao` | 音色（Kokoro 中文音色：`zf_xiaoxiao` / `zf_xiaoyi` / `zm_yunjian` 等） |
   | `SpeechFormat` | `mp3` | 输出格式（`mp3` / `wav` / `opus` / `aac` / `flac`） |
-  | `SpeechMaxChars` | `1200` | 合成正文长度上限（字符） |
+  | `SpeechMaxChars` | `600` | 合成正文长度上限（字符；CPU 上约 0.2s/字） |
+  | `SpeechTimeoutSeconds` | `300` | 合成请求超时（秒；与转写的 `TimeoutSeconds` 解耦） |
+  | `SpeechOnlyForVoice` | `false` | 仅当触发消息带语音附件时才合成（`true` = 只在“语音进→语音出”时出声） |
 
   环境变量等价覆盖：`Agents__Audio__Enabled` / `Agents__Audio__Endpoint` / `Agents__Audio__ApiKey` / `Agents__Audio__Model` / `Agents__Audio__Language`（`docker-compose.yml` 亦有对应 `${AGENTS_AUDIO_*}` 透传）。
 

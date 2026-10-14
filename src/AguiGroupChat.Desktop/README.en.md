@@ -80,6 +80,7 @@ On first use, just register an account.
 | `Agents:Audio:Language` | `zh` | Language hint (blank = auto-detect) |
 | `Agents:Audio:SpeechEnabled` | `false` | Server-side voice reply (TTS): synthesize the reply into an audio attachment (optional; needs `SpeechModel`/`SpeechVoice` and a reachable endpoint) |
 | `Agents:Audio:SpeechEndpoint` | empty | Speech synthesis endpoint (OpenAI-compatible); blank → derived from `Agents:Endpoint` |
+| `Agents:Audio:SpeechOnlyForVoice` | `false` | Synthesize only when the trigger message carries a voice attachment (`true` = speak only on "talk, then hear the answer" turns) |
 
 > Chat models (DeepSeek, etc.) still need network connectivity; **core features such as semantic memory / group chat / agent management work offline**.
 

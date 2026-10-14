@@ -240,13 +240,17 @@ services:
       Agents__Audio__ApiKey: ${AGENTS_AUDIO_API_KEY:-}
       Agents__Audio__Model: ${AGENTS_AUDIO_MODEL:-Systran/faster-whisper-small}
       Agents__Audio__Language: ${AGENTS_AUDIO_LANGUAGE:-zh}
-      # 语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。开启需同时配好 SpeechModel / SpeechVoice
-      # （speaches 的语音合成模型/音色，如 speaches-ai/piper-en_US-lessac-medium / huayan）。
+      # 语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。由独立 tts 服务（Kokoro）提供。
       Agents__Audio__SpeechEnabled: ${AGENTS_AUDIO_SPEECH_ENABLED:-false}
       Agents__Audio__SpeechEndpoint: ${AGENTS_AUDIO_SPEECH_ENDPOINT:-http://tts:8880/v1/audio/speech}
       Agents__Audio__SpeechModel: ${AGENTS_AUDIO_SPEECH_MODEL:-kokoro}
       Agents__Audio__SpeechVoice: ${AGENTS_AUDIO_SPEECH_VOICE:-zf_xiaoxiao}
       Agents__Audio__SpeechFormat: ${AGENTS_AUDIO_SPEECH_FORMAT:-mp3}
+      # 合成正文长度上限 / 合成超时（CPU 上合成约 0.2s/字，长正文需更长超时）
+      Agents__Audio__SpeechMaxChars: ${AGENTS_AUDIO_SPEECH_MAX_CHARS:-600}
+      Agents__Audio__SpeechTimeoutSeconds: ${AGENTS_AUDIO_SPEECH_TIMEOUT:-300}
+      # 仅当触发消息带语音附件时才合成（默认 false = 每条回复都带音频；true = 只在“语音进→语音出”时出声）
+      Agents__Audio__SpeechOnlyForVoice: ${AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE:-false}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

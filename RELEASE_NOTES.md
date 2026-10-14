@@ -1,3 +1,47 @@
+# AG-UI 群聊桌面版 1.0.212 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.212 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音回复新增「仅语音回合」开关 + 中文音色备选**——避免每条文字回复都拖一个音频附件，只在「说完听回复」（语音进→语音出）时出声；并确认 Kokoro 的 8 个中文音色均可用于对比选型。
+**Version note**: **A "voice turns only" switch for voice replies + Chinese voice options** — avoid attaching audio to every text reply, speaking only on "talk, then hear the answer" turns; also confirmed all 8 Kokoro Chinese voices work for selection.
+
+## 仅语音回合才合成
+# Synthesize only on voice turns
+
+中文：
+- **新配置** `Agents:Audio:SpeechOnlyForVoice`（默认 `false`）。开 `true` 时，**只有触发消息带语音附件**的回合才合成音频（`SpeechSynthesisService.TrySynthesizeAsync` 新增 `triggerHadVoice` 参数，网关按 `TriggerHadVoice(context)` 传入）；`false` 则维持旧行为（开启语音回复后每条回复都带音频）。
+- **原因**：服务端 TTS 开启后，每条文字回复都附一段音频会让对话变重（每条几十~几百 KB）。开这个开关就只在真正的「语音进→语音出」时出声，其余回复仍由用户按需点 🔊 朗读（前端 Web Speech，无附件）。
+- **Docker**：`AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE`（默认 `false`）。
+English:
+- **New config** `Agents:Audio:SpeechOnlyForVoice` (default `false`). When `true`, only turns whose **trigger message carries a voice attachment** synthesize audio (`SpeechSynthesisService.TrySynthesizeAsync` gained a `triggerHadVoice` parameter, passed by the gateway as `TriggerHadVoice(context)`); `false` keeps the previous behaviour (every reply carries audio once voice replies are on).
+- **Why**: with server-side TTS on, attaching audio to every text reply makes threads heavy (tens to hundreds of KB each). This switch speaks only on genuine "talk, then hear the answer" turns; other replies stay readable on demand via the front-end 🔊 (Web Speech, no attachment).
+- **Docker**: `AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE` (default `false`).
+
+## 后台异步合成（不阻塞回复）+ 超时/长度调优
+# Async synthesis (non-blocking) + timeout/length tuning
+
+中文：
+- **实测缺陷（1.0.211 遗留）**：语音回复是在回帖路径里**同步**合成的，而 Kokoro 在 CPU 上很慢（实测 924 字 ≈ **180 秒**，约 0.2s/字）。长回复会超时（默认 60s）被取消→静默不挂；即使不超时，也会把“正文出现”拖到几分钟后。
+- **改法**：改为**回复结束后后台异步合成**（`ScheduleSpeech`，fire-and-forget），合成完成时用**不要求流在线**的挂载通道补挂并广播；正文立即返回，不受合成耗时影响；不再用运行取消令牌（避免长任务被上一轮取消连带杀掉）。
+- **配套调优**：新增 `Agents:Audio:SpeechTimeoutSeconds`（默认 **300**，与转写超时解耦；转写仍用 `TimeoutSeconds`）；`SpeechMaxChars` 默认 600（≈2 分钟）。长回复自动截断。
+- **实测**：语音消息→回复（109 字）→不阻塞返回，约 75s 后该消息自动挂上 `语音回复.mp3`（283KB，audio/mpeg）。
+English:
+- **Measured defect (from 1.0.211)**: voice reply was synthesized **synchronously** on the reply path, and Kokoro on CPU is slow (measured 924 chars ≈ **180 seconds**, ~0.2s/char). Long replies timed out (default 60s), got cancelled and silently attached nothing; even without a timeout, it delayed the reply's appearance by minutes.
+- **Fix**: synthesize **in the background after the reply ends** (`ScheduleSpeech`, fire-and-forget), attaching via the **stream-free** attach path and broadcasting when done; the reply returns immediately, unaffected by synthesis time, and no longer uses the run cancellation token (so a long job isn't killed by the previous turn's cancellation).
+- **Tuning**: new `Agents:Audio:SpeechTimeoutSeconds` (default **300**, decoupled from the transcription timeout which keeps `TimeoutSeconds`); `SpeechMaxChars` default 600 (≈2 minutes). Long replies are truncated.
+- **Verified**: voice message → reply (109 chars) returns without blocking, and ~75s later the message automatically gains `语音回复.mp3` (283KB, audio/mpeg).
+
+## 中文音色备选（Kokoro）
+# Chinese voice options (Kokoro)
+
+中文：Kokoro 提供 8 个中文音色，均已实测可合成（`zf_xiaoxiao` / `zf_xiaoyi` / `zf_xiaobei` / `zf_xiaoni` / `zm_yunjian` / `zm_yunxi` / `zm_yunxia` / `zm_yunyang`）；同一句话的试听样音已生成（本地 `artifacts/voice-samples/*.mp3`）。换音色只需改 `Agents:Audio:SpeechVoice`（或 `AGENTS_AUDIO_SPEECH_VOICE`），无需重启服务代码，重启 web 即可。
+English: Kokoro ships 8 Chinese voices, all verified to synthesize (`zf_xiaoxiao` / `zf_xiaoyi` / `zf_xiaobei` / `zf_xiaoni` / `zm_yunjian` / `zm_yunxi` / `zm_yunxia` / `zm_yunyang`); listening samples of the same sentence were generated (local `artifacts/voice-samples/*.mp3`). To switch, just change `Agents:Audio:SpeechVoice` (or `AGENTS_AUDIO_SPEECH_VOICE`) and restart web — no code change.
+
+## 测试
+# Tests
+
+中文：`SpeechSynthesisTests` 新增 2 例（开关开时非语音回合跳过且不发请求、语音回合正常合成；默认关时不受触发影响），共 16/16。
+English: `SpeechSynthesisTests` gains 2 cases (with the switch on, non-voice turns skip without a request while voice turns synthesize; with it off, behaviour is unaffected by the trigger), 16/16 total.
+
 # AG-UI 群聊桌面版 1.0.211 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.211 Release Notes (current Windows desktop release)
 

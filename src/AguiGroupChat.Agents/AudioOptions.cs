@@ -53,6 +53,15 @@ public sealed class AudioOptions
     /// <summary>输出格式（<c>mp3</c> / <c>wav</c> / <c>opus</c>；默认 mp3）。</summary>
     public string SpeechFormat { get; set; } = "mp3";
 
-    /// <summary>合成正文长度上限（字符，默认 1200；过长只取前段，控成本）。</summary>
-    public int SpeechMaxChars { get; set; } = 1200;
+    /// <summary>合成正文长度上限（字符，默认 600；过长只取前段，控成本与时长：CPU 上约 0.2s/字）。</summary>
+    public int SpeechMaxChars { get; set; } = 600;
+
+    /// <summary>语音合成请求超时（秒，默认 300）。CPU 上合成较慢（实测约 0.2s/字），需比转写宽松得多。</summary>
+    public int SpeechTimeoutSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// 仅当触发消息带<b>语音附件</b>时才合成（默认 false = 开启后每条回复都带音频）。
+    /// 开 true 可避免每条文字回复都拖一个音频附件，只在「说完听回复」（语音进→语音出）时出声。
+    /// </summary>
+    public bool SpeechOnlyForVoice { get; set; }
 }

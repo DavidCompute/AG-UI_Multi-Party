@@ -243,6 +243,7 @@ docker compose down
 | `AGENTS_AUDIO_SPEECH_ENABLED` | `false` | 服务端语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。由独立 `tts` 服务提供 |
 | `AGENTS_AUDIO_SPEECH_ENDPOINT` | `http://tts:8880/v1/audio/speech` | 语音合成端点（Kokoro-FastAPI，OpenAI 兼容） |
 | `AGENTS_AUDIO_SPEECH_MODEL` / `SPEECH_VOICE` | `kokoro` / `zf_xiaoxiao` | 合成模型 / 中文音色（可选 `zf_xiaoyi` / `zm_yunjian` 等） |
+| `AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE` | `false` | 仅当触发消息带语音附件时才合成（`true` = 只在“语音进→语音出”时出声，不每条文字回复都带音频） |
 | `TTS_PORT` | `8880` | 独立 TTS 服务的宿主机端口 |
 | `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
 | `AGENTS_EXECUTION_*` | 不限 | 网关**执行参数**（`Agents:Execution`：时序/重试/TTL、阶段开关、`ExecutionOrder`、**复杂度自适应超时 `ComplexityTimeouts`**）**默认与代码一致，无需容器配置**——首选在运行期于控制台「管理员 → 执行参数」页热改并持久化（`executionRuntime`，重启恢复）。若确要容器启动即用非默认值：`docker-compose.yml` `web.environment`（Docker 不透传未知键）需<b>显式补一行</b>，如 `Agents__Execution__StreamTimeoutMinutes: "8"`、`Agents__Execution__ComplexityTimeouts__Enabled: "false"`、`Agents__Execution__EnableOrgRoute: "false"`。角色级按单数字员工在「编辑 → 执行阶段」关闭桥接/交接/组织路由。字段/默认/可配边界见 `docs/execution-configuration.md` |

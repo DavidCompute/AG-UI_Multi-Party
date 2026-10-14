@@ -53,15 +53,21 @@ public sealed class SpeechSynthesisService : IDisposable
     /// <summary>是否可用：已启用语音回复、能解析出端点、且有附件存储。</summary>
     public bool IsEnabled => _audio is { SpeechEnabled: true } && _endpoint is not null && _store is not null;
 
+    /// <summary>是否只在触发消息带语音附件时才合成（<see cref="AudioOptions.SpeechOnlyForVoice"/>）。</summary>
+    public bool OnlyWhenVoiceTurn => _audio?.SpeechOnlyForVoice == true;
+
     /// <summary>合成端点（诊断 / 日志；未启用为 null）。</summary>
     public string? Endpoint => _endpoint;
 
     /// <summary>
     /// 尝试把回复文本合成为音频附件。不可用 / 空文本 / 请求失败返回 null（调用方按「无语音」处理）。
+    /// <paramref name="triggerHadVoice"/>：触发本次回复的消息是否带语音附件；
+    /// 当配置了 <see cref="AudioOptions.SpeechOnlyForVoice"/> 且它为 false 时直接返回 null（不合成）。
     /// </summary>
-    public async Task<AttachmentInfo?> TrySynthesizeAsync(string? text, CancellationToken ct = default)
+    public async Task<AttachmentInfo?> TrySynthesizeAsync(string? text, CancellationToken ct = default, bool triggerHadVoice = true)
     {
         if (!IsEnabled) return null;
+        if (OnlyWhenVoiceTurn && !triggerHadVoice) return null;
         var clean = ForSpeech(text);
         if (clean.Length == 0) return null;
 
@@ -83,7 +89,7 @@ public sealed class SpeechSynthesisService : IDisposable
                 req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(o.TimeoutSeconds, 5, 600)));
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(o.SpeechTimeoutSeconds, 5, 1800)));
             using var resp = await _http.SendAsync(req, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {

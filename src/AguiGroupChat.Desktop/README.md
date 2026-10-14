@@ -79,6 +79,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.211
 | `Agents:Audio:Language` | `zh` | 语言提示（留空自动识别） |
 | `Agents:Audio:SpeechEnabled` | `false` | 服务端语音回复（TTS）：把回复文本合成为音频附件挂到消息上（可选；需配 `SpeechModel`/`SpeechVoice` 与可达端点） |
 | `Agents:Audio:SpeechEndpoint` | 空 | 语音合成端点（OpenAI 兼容）；留空时由 `Agents:Endpoint` 派生 |
+| `Agents:Audio:SpeechOnlyForVoice` | `false` | 仅当触发消息带语音附件时才合成（`true` = 只在“语音进→语音出”时出声） |
 
 > 对话模型（DeepSeek 等）仍需联网；**语义记忆 / 群聊 / 智能体管理**等核心功能离线可用。
 
