@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.219 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.219 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音服务面板打磨**——账号菜单图标风格统一（不再只有语音一项带图标）、弹窗改为固定尺寸并带内部滚动条、音色试听改用 fetch+blob 播放（试听期间按钮显示「…」防重复点击，错误提示不再误导）。
+**Version note**: **Voice-service panel polish** — the account menu is now visually uniform (voice was the only item with an icon), the modal has a fixed size with an internal scrollbar, and voice preview now plays via fetch+blob (the button shows “…” while synthesizing to block double-clicks, and error messages are no longer misleading).
+
+## 三项修正
+# Three fixes
+
+中文：
+1. **账号菜单图标统一**：去掉「语音服务」菜单项前的 🎙️，与其它菜单项（修改资料 / 模型配置 / 管理控制台 …）保持纯文字风格一致（弹窗标题仍保留图标，与「📊 系统状态」等一致）。
+2. **弹窗固定尺寸 + 滚动条**：`#voiceServiceModal` 新增 `voice-service-modal` 类（640px 宽、`min(80vh,760px)` 高、内部 `overflow-y:auto`），音色再多也在弹窗内滚动，不再撑高页面 / 忽大忽小。
+3. **音色试听不再报错**：原先把带 `token` 的 URL 直接丢给隐藏 `<audio>` 播放，合成一句样例需数秒，期间无反馈、易重复点击（二次改 `src` 触发 `AbortError`），且失败一律提示「获取音色列表失败」（误导）。现改为：合成期间按钮变 **「…」并禁用重复点击**，先 `fetch` 取音频字节再以 **blob URL** 播放（令牌不再出现在 URL 里，且能拿到真实 HTTP 状态给出准确提示）；关闭弹窗 / 重检时释放 blob URL。CSP 相应放行 `media-src 'self' blob:`。
+English:
+1. **Unified menu icons**: dropped the 🎙️ before the “Voice service” menu item so it matches the plain-text style of every other item (the modal title keeps its icon, like “📊 System Status”).
+2. **Fixed-size modal with a scrollbar**: `#voiceServiceModal` gains a `voice-service-modal` class (640px wide, `min(80vh,760px)` tall, internal `overflow-y:auto`), so any number of voices scrolls inside the modal instead of stretching the page or resizing.
+3. **Preview no longer errors**: previously the token-bearing URL was handed straight to a hidden `<audio>`; synthesis takes seconds with no feedback and invites double-clicks (changing `src` again aborts with `AbortError`), and any failure showed the misleading “failed to get the voice list”. Now the button shows **“…” and blocks repeat clicks** while synthesizing, the audio is `fetch`ed and played via a **blob URL** (the token never appears in the URL, and the real HTTP status yields an accurate message), and the blob URL is released on close / re-check. CSP accordingly allows `media-src 'self' blob:`.
+
+## 测试
+# Tests
+
+中文：`node --check`（`app.js` / `zh.js` / `en.js`）通过；i18n 审计 **zh=en=1755，missing 0**。`SpeechSynthesisTests` / `AdminApiTests` / `DesktopCompositionTests` / `BrandingApiTests` 合跑 **39/39**。Playwright 实测（headless）：账号菜单 10 项均无图标；弹窗 640×576（`80vh`）且 `#voiceServiceBody` 可滚动；点 ▶ 后按钮变「…」，合成完成 `audio.src` 为 `blob:`、`readyState=4`、`paused=false`、`play()` 兑现——不再有错误 toast。
+English: `node --check` (`app.js` / `zh.js` / `en.js`) passes; the i18n audit is **zh=en=1755, missing 0**. `SpeechSynthesisTests` / `AdminApiTests` / `DesktopCompositionTests` / `BrandingApiTests` run **39/39**. Verified with Playwright (headless): all 10 account-menu items are icon-free; the modal is 640×576 (`80vh`) with a scrollable `#voiceServiceBody`; after clicking ▶ the button shows “…”, then on completion `audio.src` is `blob:`, `readyState=4`, `paused=false`, and `play()` resolves — no error toast.
+
 # AG-UI 群聊桌面版 1.0.218 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.218 Release Notes (current Windows desktop release)
 

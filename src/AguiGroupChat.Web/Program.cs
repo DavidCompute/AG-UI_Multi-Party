@@ -99,9 +99,11 @@ app.Use(async (ctx, next) =>
         var frameAncestors = frameOrigins.Count == 0 ? "'none'" : string.Join(" ", frameOrigins.Select(UriEscapeCspSource));
         // frame-src 显式放行 blob:：办公文档在线查看把后端转好的 PDF 取成 Blob 再喂给弹窗 iframe
         // （这样能拿到真实的 HTTP 状态码做错误提示，而不是让 iframe 静默渲染一个 JSON 错误页）。
+        // media-src 放行 blob:：语音服务「音色试听」先 fetch 音频字节再以 blob URL 播放
+        // （既避免把令牌放进 URL，又能拿到真实 HTTP 状态码）。
         headers["Content-Security-Policy"] =
             $"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-            $"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' ws: wss: https: http:; " +
+            $"img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' ws: wss: https: http:; " +
             $"frame-src 'self' blob:; frame-ancestors {frameAncestors}; base-uri 'self'; form-action 'self'; object-src 'none'";
     }
     await next();

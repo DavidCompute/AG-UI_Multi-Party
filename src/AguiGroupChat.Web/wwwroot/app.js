@@ -8241,6 +8241,14 @@ async function openStatusModal() {
 }
 
 /** 语音服务（多模态进阶 · 语音问答，仅运维及以上）：配置 + 可达性 + 音色试听。 */
+let voicePreviewUrl = null; // 语音试听当前 blob URL（复用 / 关闭弹窗时释放）
+
+/** 关闭语音服务弹窗并释放试听音频的 blob URL。 */
+function closeVoiceServiceModal() {
+  if (voicePreviewUrl) { try { URL.revokeObjectURL(voicePreviewUrl); } catch { /* 忽略 */ } voicePreviewUrl = null; }
+  $("voiceServiceModal").classList.add("hidden");
+}
+
 async function openVoiceServiceModal() {
   if (!isOperatorPlus()) { toast(t("admin.adminOnly")); return; }
   $("voiceServiceModal").classList.remove("hidden");
@@ -8284,8 +8292,12 @@ async function renderVoiceService() {
       const voices = (vRes.ok && vd && Array.isArray(vd.voices)) ? vd.voices : null;
       if (voices === null) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("voice.listFail", { err: errMsg(vd, "HTTP " + vRes.status) }))}</div>`; return; }
       if (voices.length === 0) { box.innerHTML = `<div class="status-hint">${escapeHtml(t("voice.empty"))}</div>`; return; }
+      // 合成一句样例需数秒：先经 fetch 取得音频字节再以 blob 播放——既避免把令牌放进 URL，
+      // 又能拿到真实 HTTP 状态码给出准确提示；合成期间按钮置为「…」并防重复点击（重复点击会 AbortError）。
+      if (voicePreviewUrl) { try { URL.revokeObjectURL(voicePreviewUrl); } catch { /* 忽略 */ } voicePreviewUrl = null; }
       const audio = document.createElement("audio"); // 复用单个元素，避免多例叠加播放
-      audio.preload = "none";
+      audio.preload = "auto";
+      box.appendChild(audio);
       for (const v of voices) {
         const row = document.createElement("div");
         row.className = "voice-row";
@@ -8293,14 +8305,31 @@ async function renderVoiceService() {
         name.className = "voice-name"; name.textContent = v;
         const play = document.createElement("button");
         play.type = "button"; play.className = "voice-play"; play.textContent = "▶"; play.title = t("voice.play");
-        play.onclick = () => {
-          audio.src = `/ag-ui/admin/voice/sample?voice=${encodeURIComponent(v)}&token=${encodeURIComponent(state.token || "")}`;
-          audio.play().catch(() => toast(t("voice.listFail", { err: "play" })));
+        play.onclick = async () => {
+          if (play.dataset.busy === "1") return;
+          play.dataset.busy = "1"; play.textContent = "…";
+          try {
+            const res = await fetch(`/ag-ui/admin/voice/sample?voice=${encodeURIComponent(v)}`);
+            if (!res.ok) {
+              const d = await res.json().catch(() => null);
+              toast(t("voice.playFail", { err: errMsg(d, "HTTP " + res.status) }));
+              return;
+            }
+            const blob = await res.blob();
+            if (!blob || blob.size === 0) { toast(t("voice.playFail", { err: "empty" })); return; }
+            if (voicePreviewUrl) { try { URL.revokeObjectURL(voicePreviewUrl); } catch { /* 忽略 */ } }
+            voicePreviewUrl = URL.createObjectURL(blob);
+            audio.src = voicePreviewUrl;
+            await audio.play();
+          } catch (e) {
+            toast(t("voice.playFail", { err: (e && e.name) || "error" }));
+          } finally {
+            play.dataset.busy = ""; play.textContent = "▶";
+          }
         };
         row.appendChild(name); row.appendChild(play);
         box.appendChild(row);
       }
-      box.appendChild(audio);
     }
   } catch { body.innerHTML = t("admin.sysNetErr"); }
 }
@@ -12810,8 +12839,8 @@ function init() {
   $("meMenuStatus").onclick = () => { $("meMenu").classList.add("hidden"); openStatusModal(); };
   $("statusClose").onclick = () => $("statusModal").classList.add("hidden");
   $("meMenuVoice").onclick = () => { $("meMenu").classList.add("hidden"); openVoiceServiceModal(); };
-  $("voiceServiceClose").onclick = () => $("voiceServiceModal").classList.add("hidden");
-  $("voiceServiceModal").addEventListener("click", (e) => { if (e.target === $("voiceServiceModal")) $("voiceServiceModal").classList.add("hidden"); });
+  $("voiceServiceClose").onclick = () => closeVoiceServiceModal();
+  $("voiceServiceModal").addEventListener("click", (e) => { if (e.target === $("voiceServiceModal")) closeVoiceServiceModal(); });
   $("voiceServiceRecheck").onclick = () => renderVoiceService();
   $("memSearchBtn").onclick = () => refreshMemView();
   $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") refreshMemView(); });
