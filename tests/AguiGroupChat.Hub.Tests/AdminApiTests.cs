@@ -50,10 +50,12 @@ public sealed class AdminApiServerFixture : IAsyncLifetime
 
         App = builder.Build();
         HubApp.MapEndpoints(App);
+        App.MapAgentApi();
         App.MapAdminApi();
         App.MapConfigGovernanceApi();
         App.MapStorageAdminApi();
         App.MapExecutionRuntimeApi();
+        App.MapEvalApi();
         await App.StartAsync();
         HttpBase = App.Urls.First();
     }

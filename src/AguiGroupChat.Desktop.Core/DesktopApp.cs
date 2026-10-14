@@ -108,6 +108,7 @@ public static class DesktopApp
         app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）
         app.MapMetricsApi();    // 可观测性导出（6.1）：Prometheus 文本格式抓取端点 /ag-ui/metrics
         app.MapAdminApi();      // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
+        app.MapEvalApi();       // 数字员工评测集 / 回归（管理员）：金标准用例 + 一键跑分
         app.MapAccountApi();    // 账号注销（数据主体权利）：自助注销 + 数据擦除
         app.MapExecutionRuntimeApi(); // 执行期参数：管理员在线读写共享 ExecutionOptions
         app.MapStorageAdminApi(); // 存储治理：附件占用统计 + 开关放行的孤儿回收
@@ -138,6 +139,7 @@ public static class DesktopApp
         app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
         app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+正文）跨重启保持
         app.Services.RegisterMessageFeedbackPersistence(); // 消息 👍/👎 反馈跨重启保持
+        app.Services.RegisterEvalCasePersistence(); // 数字员工评测集跨重启保持
         app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群→知识库 + 时间水位）跨重启保持
         app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
         app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）

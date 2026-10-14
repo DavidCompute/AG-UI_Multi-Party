@@ -6830,7 +6830,136 @@ function isOperatorPlus() { return roleRank() >= 1; }
 function isAdminPlus() { return roleRank() >= 2; }
 
 /** 控制台页签按角色可见：Operator 仅只读页签（用量 / 审计 / 运行指标），Admin 及以上全量。 */
-/** 员工绩效看板（P0）：按数字员工聚合调用量 / token / 👍👎 好评率。数据源 /ag-ui/admin/agent-performance。 */
+/* ============ 数字员工评测集 / 回归（管理员） ============ */
+let evalCasesCache = [];
+let evalAgentsCache = [];
+let evalEditingId = null;
+const evalResults = new Map(); // caseId → 最近一次跑分结果
+
+function bindEvalConsole() {
+  $("evalRunBtn").onclick = () => runEvalCases();
+  $("evalAddBtn").onclick = () => openEvalModal(null);
+  $("evalSave").onclick = saveEvalCase;
+  $("evalCancel").onclick = () => $("evalModal").classList.add("hidden");
+  $("evalModal").addEventListener("click", (e) => { if (e.target === $("evalModal")) $("evalModal").classList.add("hidden"); });
+  $("adminEvalRows").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-act]");
+    if (!btn) return;
+    const c = evalCasesCache.find((x) => x.caseId === btn.dataset.id);
+    if (!c) return;
+    if (btn.dataset.act === "run") runEvalCases([c.caseId]);
+    else if (btn.dataset.act === "edit") openEvalModal(c);
+    else if (btn.dataset.act === "del") deleteEvalCase(c);
+  });
+}
+
+async function loadEvalCases() {
+  const rows = $("adminEvalRows");
+  if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await fetch("/ag-ui/admin/eval-cases", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
+    evalCasesCache = d.cases || [];
+    evalAgentsCache = d.agents || [];
+    renderEvalRows();
+  } catch { if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+}
+
+function evalAgentName(id) { const a = evalAgentsCache.find((x) => x.agentId === id); return a ? a.name : id; }
+
+function renderEvalRows() {
+  const rows = $("adminEvalRows");
+  if (!rows) return;
+  if (!evalCasesCache.length) { rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(t("admin.evalEmpty"))}</td></tr>`; return; }
+  rows.innerHTML = evalCasesCache.map((c) => {
+    const r = evalResults.get(c.caseId);
+    const badge = !r ? `<span class="muted">—</span>`
+      : r.passed ? `<span class="tag-active">${escapeHtml(t("admin.evalPass"))}</span>`
+        : `<span class="tag-disabled">${escapeHtml(t("admin.evalFail"))}</span>`;
+    const detail = r && !r.passed ? `<div class="eval-detail">${escapeHtml((r.error || r.reply || "").slice(0, 160))}</div>` : "";
+    const match = c.matchMode === "all" ? t("admin.evalMatchAll") : t("admin.evalMatchAny");
+    return `<tr>
+      <td>${escapeHtml(c.name || c.caseId)}<div class="eval-detail">${escapeHtml((c.prompt || "").slice(0, 80))}</div></td>
+      <td>${escapeHtml(evalAgentName(c.agentId))}</td>
+      <td>${escapeHtml(match)}${(c.expected || []).length ? " · " + c.expected.length : ""}</td>
+      <td>${c.enabled ? "✓" : "—"}</td>
+      <td>${badge}${detail}</td>
+      <td>
+        <button class="chip-btn" data-act="run" data-id="${escapeHtml(c.caseId)}" type="button" title="${escapeHtml(t("admin.evalRunOne"))}">▶</button>
+        <button class="chip-btn" data-act="edit" data-id="${escapeHtml(c.caseId)}" type="button">${escapeHtml(t("admin.evalEdit"))}</button>
+        <button class="chip-btn danger" data-act="del" data-id="${escapeHtml(c.caseId)}" type="button">${escapeHtml(t("admin.evalDelete"))}</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function openEvalModal(c) {
+  evalEditingId = c ? c.caseId : null;
+  $("evalModal").classList.remove("hidden");
+  // 先清空上一次的表单数据，再按需回填（避免编辑不同用例时残留）
+  $("evalName").value = c ? (c.name || "") : "";
+  $("evalPrompt").value = c ? (c.prompt || "") : "";
+  $("evalExpected").value = c ? (c.expected || []).join("\n") : "";
+  $("evalMatch").value = c && c.matchMode === "all" ? "all" : "any";
+  $("evalEnabled").checked = c ? !!c.enabled : true;
+  const sel = $("evalAgent");
+  sel.innerHTML = evalAgentsCache.map((a) => `<option value="${escapeHtml(a.agentId)}">${escapeHtml(a.name)}</option>`).join("");
+  sel.value = c ? c.agentId : (evalAgentsCache[0] ? evalAgentsCache[0].agentId : "");
+  $("evalModal").querySelector(".modal-title").textContent = c ? t("admin.evalEdit") : t("admin.evalAdd");
+}
+
+async function saveEvalCase() {
+  const body = {
+    caseId: evalEditingId || null,
+    name: $("evalName").value.trim(),
+    agentId: $("evalAgent").value,
+    prompt: $("evalPrompt").value.trim(),
+    expected: $("evalExpected").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+    matchMode: $("evalMatch").value,
+    enabled: $("evalEnabled").checked,
+  };
+  if (!body.agentId) { toast(t("admin.evalNeedAgent")); return; }
+  if (!body.prompt) { toast(t("admin.evalNeedPrompt")); return; }
+  try {
+    const res = await fetch("/ag-ui/admin/eval-cases", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    $("evalModal").classList.add("hidden");
+    toast(t("admin.evalSaved"));
+    if (evalEditingId) evalResults.delete(evalEditingId); // 用例改了，旧结果作废
+    await loadEvalCases();
+  } catch { toast(t("admin.sysNetErr")); }
+}
+
+async function deleteEvalCase(c) {
+  const ok = await uiConfirm({ title: t("admin.evalDelete"), message: t("admin.evalDeleteConfirm", { name: c.name || c.caseId }) });
+  if (!ok) return;
+  try {
+    const res = await fetch(`/ag-ui/admin/eval-cases/${encodeURIComponent(c.caseId)}`, { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, "HTTP " + res.status)); return; }
+    evalResults.delete(c.caseId);
+    await loadEvalCases();
+  } catch { toast(t("admin.sysNetErr")); }
+}
+
+async function runEvalCases(ids) {
+  const meta = $("adminEvalMeta");
+  const btn = $("evalRunBtn");
+  if (btn) btn.disabled = true;
+  if (meta) meta.textContent = t("admin.evalRunning");
+  try {
+    const res = await fetch("/ag-ui/admin/eval-cases/run", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify({ caseIds: ids || null }) });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { if (meta) meta.textContent = errMsg(d, "HTTP " + res.status); return; }
+    (d.items || []).forEach((it) => evalResults.set(it.caseId, it));
+    renderEvalRows();
+    if (meta) meta.textContent = t("admin.evalMeta", { passed: d.passed || 0, total: d.total || 0, sec: ((d.durationMs || 0) / 1000).toFixed(1) });
+  } catch { if (meta) meta.textContent = t("admin.sysNetErr"); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+/** 员工绩效看板（P0）：按数字员工聚合调用次数 / token / 成本 / 👍👎 好评率。数据源 /ag-ui/admin/agent-performance。 */
 async function loadAgentPerformance() {
   const meta = $("adminPerfMeta");
   const rows = $("adminPerfRows");
@@ -6874,7 +7003,7 @@ function applyAdminTabVisibility() {
     adminTabUsers: adminPlus, adminTabUsage: operatorPlus, adminTabMetrics: operatorPlus,
     adminTabConfig: adminPlus, adminTabExec: adminPlus, adminTabAudit: operatorPlus,
     adminTabOrphans: adminPlus, adminTabUserGroups: adminPlus, adminTabStorage: adminPlus,
-    adminTabWebhooks: adminPlus, adminTabApiKeys: adminPlus, adminTabPerf: operatorPlus,
+    adminTabWebhooks: adminPlus, adminTabApiKeys: adminPlus, adminTabPerf: operatorPlus, adminTabEval: adminPlus,
   };
   for (const [id, show] of Object.entries(visible)) $(id)?.classList.toggle("hidden", !show);
 }
@@ -6903,6 +7032,7 @@ function switchAdminTab(tab) {
   const webhooks = tab === "webhooks";
   const apikeys = tab === "apikeys";
   const perf = tab === "perf";
+  const evalTab = tab === "eval";
   $("adminTabUsers").classList.toggle("on", users);
   $("adminTabUsage").classList.toggle("on", usage);
   $("adminTabMetrics").classList.toggle("on", metrics);
@@ -6915,6 +7045,7 @@ function switchAdminTab(tab) {
   $("adminTabWebhooks").classList.toggle("on", webhooks);
   $("adminTabApiKeys").classList.toggle("on", apikeys);
   $("adminTabPerf").classList.toggle("on", perf);
+  $("adminTabEval").classList.toggle("on", evalTab);
   $("adminUsersView").classList.toggle("hidden", !users);
   $("adminUsageView").classList.toggle("hidden", !usage);
   $("adminMetricsView").classList.toggle("hidden", !metrics);
@@ -6927,6 +7058,7 @@ function switchAdminTab(tab) {
   $("adminWebhooksView").classList.toggle("hidden", !webhooks);
   $("adminApiKeysView").classList.toggle("hidden", !apikeys);
   $("adminPerfView").classList.toggle("hidden", !perf);
+  $("adminEvalView").classList.toggle("hidden", !evalTab);
   if (usergroups) { loadUserGroups(); }
   if (users) {
     $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
@@ -6951,6 +7083,8 @@ function switchAdminTab(tab) {
     loadApiKeys();
   } else if (perf) {
     loadAgentPerformance();
+  } else if (evalTab) {
+    loadEvalCases();
   } else {
     loadConfigGovernance();
   }
@@ -12860,6 +12994,8 @@ function init() {
   bindMarketConsole(); // 模板市场（在线分发）
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
   $("adminTabPerf").onclick = () => switchAdminTab("perf");
+  $("adminTabEval").onclick = () => switchAdminTab("eval");
+  bindEvalConsole();
   $("perfRefreshBtn").onclick = loadAgentPerformance;
   const pr = $("perfRange");
   if (pr) pr.onchange = loadAgentPerformance;

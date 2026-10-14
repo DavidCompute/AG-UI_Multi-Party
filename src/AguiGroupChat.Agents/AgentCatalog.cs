@@ -430,6 +430,35 @@ public sealed class AgentCatalog
     }
 
     /// <summary>
+    /// 创建「评测」用裸 ChatClientAgent（不缓存）：只挂 Instructions / Description，不带工具 / 记忆 / 技能 /
+    /// 审批包装，且走**正式回复模型**（与正式路径同一思考模式口径）——用于管理员「数字员工评测集」回归：
+    /// 只评「提示词 + 模型」的行为（换提示词 / 换模型后可对比），排除工具与记忆注入带来的不确定性。
+    /// </summary>
+    public ChatClientAgent CreateForEval(string agentId)
+    {
+        var def = GetDefinition(agentId)
+            ?? throw new InvalidOperationException($"智能体 {agentId} 未在 Agents 配置中声明");
+        var chatOptions = new ChatClientAgentOptions
+        {
+            Name = def.Nickname,
+            Description = def.Description,
+            ChatOptions = new Microsoft.Extensions.AI.ChatOptions
+            {
+                Instructions = def.Instructions,
+                Tools = null,
+            },
+            AIContextProviders = [],
+        };
+
+        if (string.Equals(_options.Provider, "mock", StringComparison.OrdinalIgnoreCase))
+            return new ChatClientAgent(new MockChatClient(def, enableTools: false), chatOptions, _loggerFactory, _services);
+
+        var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek);
+        return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
+    }
+
+    /// <summary>
     /// 系统级“看图”裸 agent（图库上传后自动生成图片描述用）。
     ///
     /// <para>

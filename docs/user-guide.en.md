@@ -3603,10 +3603,12 @@ The frontend admin entries are **scoped by the effective platform role** (`roleR
   - **Both Operator and Admin+ use `menu.console` "Admin Console"** (the entry opens the whole console, not just user management; the role only affects visible tabs, not the menu label).
 - Admin console `#adminModal` tabs are scoped by role (`applyAdminTabVisibility`):
   - **Operator** sees only read-only tabs: Usage / Audit Log / Runtime Metrics / Agent performance (matching the backend endpoints gated by `RequireRoleFilter(Operator)`); it defaults to the Usage tab.
-  - **Admin / SuperAdmin** see all 12 tabs.
+  - **Admin / SuperAdmin** see all 13 tabs.
 - `state.isSuperAdmin` is still used only for the platform-role dropdown in "User Management" (only SuperAdmin can grant/revoke roles).
 
 **Agent performance tab (`#adminTabPerf`, `admin.tabPerf`, Operator+)**: aggregates **calls / total tokens / cost / 👍👎 positive rate / last active** per employee, with 7 / 30 / 90-day windows and refresh (sorted by calls descending); positive rate shows "—" when there is no feedback. Data comes from `GET /ag-ui/admin/agent-performance?days=N` (`agui_usage` rows + message feedback; names use the employee nickname, falling back to the agentId). The aggregation is a pure function `AgentPerformance.Aggregate` (`AgentPerformance.cs`), mounted by `AdminApi.cs`. **Cost** is estimated from configurable prices `Agents:Pricing` (`InputPerMillion` / `OutputPerMillion` / `Currency` / `DailyBudget`; Docker: `AGENTS_PRICING_*`) as input×prompt + output×(completion+reasoning); cost shows "—" when prices are 0, and with a `DailyBudget` the meta line shows "{pct}% used" (⚠ when over).
+
+**Eval & regression tab (`#adminTabEval`, `admin.tabEval`, Admin+)**: define **golden cases** for an employee (case name / target employee / prompt / expected points / match mode any·all / enabled) and click "▶ Run all" or run one row with "▶": each case runs the target's **instructions + normal reply model** once (no tools / memory / skills) and is judged **pass/fail** by whether the **expected points appear** (case-insensitive), with a reply excerpt; the summary shows passed count and duration. Cases persist in the "evalCases" extension area (survive restart). Endpoints in §9.2.8; aggregation and judging are pure functions for easy regression. Create/edit uses a dialog that **clears then refills** each time it opens.
 
 > Evidence: `app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`; backend filters per endpoint in §8.1.6. Now consistent with `docs/RBAC.md` §5 ("menus subdivided by effective role").
 
@@ -3663,6 +3665,7 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhooks | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`, `…/events`, `…/deliveries`, `…/{id}/test` (see 8.19) |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API keys | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`, `DELETE /ag-ui/admin/api-keys/{id}` (see 8.20) |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | Agent performance | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
+| 13 | `#adminTabEval` | `admin.tabEval` | Eval & regression | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`, `DELETE …/{id}`, `POST …/run` |
 
 Opening and switching (`app.js`):
 
@@ -4561,6 +4564,10 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | DELETE | `/ag-ui/admin/users/{userId}` | Permanently delete an account (data erasure; cannot delete yourself, use "Delete Account" instead) | Admin |
 | GET | `/ag-ui/admin/status` | System status (connections / groups / users / messages / agents / memory / threads / RAG / document conversion capability / **voice services (ASR·TTS config & reachability `voice`)**) | Operator |
 | GET | `/ag-ui/admin/agent-performance` | Digital-employee performance dashboard (per-agent calls / tokens / cost / 👍👎 positive rate / last active, `?days=N`; also returns `pricing` and budget fields) | Operator |
+| GET | `/ag-ui/admin/eval-cases` | Digital-employee eval cases + target-employee options | Admin |
+| POST | `/ag-ui/admin/eval-cases` | Create / update an eval case (name / agentId / prompt / expected[] / matchMode=any·all / enabled) | Admin |
+| DELETE | `/ag-ui/admin/eval-cases/{id}` | Delete an eval case | Admin |
+| POST | `/ag-ui/admin/eval-cases/run` | Run all (deterministic keyword judging; returns per-case passed / matched / missed / reply / durationMs) | Admin |
 | GET | `/ag-ui/admin/voice/voices` | Voice list for synthesis (proxies the TTS `/v1/audio/voices`): `{ voices: string[] }`; 404 unconfigured / unsupported, 503 unreachable | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |

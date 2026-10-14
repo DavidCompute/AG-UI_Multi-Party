@@ -1725,6 +1725,7 @@
         <button id="adminTabWebhooks" class="chip-btn admin-tab" data-i18n="admin.tabWebhooks">Webhook</button>
         <button id="adminTabApiKeys" class="chip-btn admin-tab" data-i18n="admin.tabApiKeys">API 密钥</button>
         <button id="adminTabPerf" class="chip-btn admin-tab" data-i18n="admin.tabPerf">员工绩效</button>
+        <button id="adminTabEval" class="chip-btn admin-tab" data-i18n="admin.tabEval">评测回归</button>
       </div>
       <div class="admin-body">
       <div id="adminUsersView">
@@ -1769,6 +1770,27 @@
               <th data-i18n="admin.perfThLast">最近活跃</th>
             </tr></thead>
             <tbody id="adminPerfRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <!-- 数字员工评测集 / 回归（管理员）：金标准用例 + 一键跑分 -->
+      <div id="adminEvalView" class="hidden">
+        <div class="admin-metrics-head">
+          <button id="evalRunBtn" class="chip-btn" type="button" data-i18n="admin.evalRun">▶ 跑全部</button>
+          <button id="evalAddBtn" class="chip-btn" type="button" data-i18n="admin.evalAdd">＋ 新建用例</button>
+          <span id="adminEvalMeta" class="form-hint"></span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr>
+              <th data-i18n="admin.evalThName">用例</th>
+              <th data-i18n="admin.evalThAgent">数字员工</th>
+              <th data-i18n="admin.evalThMatch">判定</th>
+              <th data-i18n="admin.evalThEnabled">启用</th>
+              <th data-i18n="admin.evalThResult">最近结果</th>
+              <th data-i18n="admin.evalThOps">操作</th>
+            </tr></thead>
+            <tbody id="adminEvalRows"></tbody>
           </table>
         </div>
       </div>
@@ -2045,6 +2067,41 @@
       <div class="modal-actions">
         <button id="voiceServiceRecheck" class="btn-ghost" data-i18n="voice.recheck">🔄 重新检测</button>
         <button id="voiceServiceClose" class="btn-ghost" data-i18n="status.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数字员工评测集：新建 / 编辑用例（弹窗） -->
+  <div id="evalModal" class="modal-overlay hidden">
+    <div class="modal eval-modal">
+      <div class="modal-title" data-i18n="admin.evalAdd">＋ 新建用例</div>
+      <div class="form-group">
+        <label data-i18n="admin.evalName">用例名称</label>
+        <input id="evalName" class="modal-input" maxlength="120" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.evalAgent">被测数字员工</label>
+        <select id="evalAgent" class="modal-input"></select>
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.evalPrompt">提问内容</label>
+        <textarea id="evalPrompt" class="modal-input" rows="3" maxlength="2000"></textarea>
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.evalExpected">期望要点（每行一个；回复中出现即算命中）</label>
+        <textarea id="evalExpected" class="modal-input" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label data-i18n="admin.evalMatch">判定方式</label>
+        <select id="evalMatch" class="modal-input">
+          <option value="any" data-i18n="admin.evalMatchAny">命中任一即通过</option>
+          <option value="all" data-i18n="admin.evalMatchAll">全部命中才通过</option>
+        </select>
+      </div>
+      <label class="eval-enabled"><input id="evalEnabled" type="checkbox" checked /> <span data-i18n="admin.evalEnabled">启用（参与「跑全部」）</span></label>
+      <div class="modal-actions">
+        <button id="evalSave" class="btn-ghost" data-i18n="common.save">保存</button>
+        <button id="evalCancel" class="btn-ghost" data-i18n="common.cancel">取消</button>
       </div>
     </div>
   </div>

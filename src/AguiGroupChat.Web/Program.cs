@@ -142,6 +142,7 @@ app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班�
 app.MapMarketplaceApi(); // 智能体 / 技能市场（3.3）：内置角色包一键导入
 app.MapMetricsApi(); // 可观测性导出（6.1）：Prometheus 文本格式抓取端点 /ag-ui/metrics
 app.MapAdminApi();  // 管理员控制台：用户管理（禁用 / 重置密码）+ 系统状态
+app.MapEvalApi();   // 数字员工评测集 / 回归（管理员）：金标准用例 + 一键跑分
 app.MapAccountApi(); // 账号注销（数据主体权利）：自助注销 + 数据擦除
 app.MapUserGroupApi(); // 用户分组 / 组织单元（细粒度授权：管理员建组 + 组→数字员工白名单）
 app.MapConfigGovernanceApi(); // 配置治理（6.3）：管理员在线调整并持久化运维参数
@@ -166,6 +167,7 @@ app.Services.RegisterModelConfigPersistence(); // 运行时模型配置（endpoi
 app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
 app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+正文）跨重启保持
 app.Services.RegisterMessageFeedbackPersistence(); // 消息 👍/👎 反馈跨重启保持
+app.Services.RegisterEvalCasePersistence(); // 数字员工评测集跨重启保持
 app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群→知识库 + 时间水位）跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）

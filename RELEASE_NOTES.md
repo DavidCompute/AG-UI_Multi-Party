@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.222 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.222 Release Notes (current Windows desktop release)
+
+**版本说明**：**数字员工评测集 / 回归（P0 第三项，收官）**——管理员控制台新增「🧪 评测回归」页签：为数字员工建**金标准用例**（提问 → 期望要点），改提示词 / 换模型后**一键跑分**，按确定性判据给出每条**通过 / 未通过**与回复摘录，防能力退化。
+**Version note**: **Digital-employee eval cases / regression (P0, item 3 — the finale)** — the admin console gains a "🧪 Eval & regression" tab: define **golden cases** for an employee (prompt → expected points), and after changing prompts or models **run all** to score each case **pass/fail** by a deterministic rule, with a reply excerpt — guarding against regressions.
+
+## 数字员工评测集 / 回归
+# Digital-employee eval cases / regression
+
+中文：新增端点 `/ag-ui/admin/eval-cases`（仅管理员）：
+- `GET /` —— 列出用例 + 被测员工候选（下拉用）。
+- `POST /` —— 新建 / 更新用例（`name` / `agentId` / `prompt` / `expected[]` / `matchMode`=any|all / `enabled`）；校验员工存在、提问非空且 ≤2000 字。
+- `DELETE /{id}` —— 删除用例。
+- `POST /run` —— 一键跑分：对每条启用用例（或指定 `caseIds`）用目标员工的**提示词 + 正式回复模型**跑一次，按「期望要点是否出现」判定；返回逐条 `passed` / `matched` / `missed` / `reply` 摘录 / `durationMs` 与总计。
+- **判定**：确定性关键词判据（大小写不敏感；`any` 命中任一即通过 / `all` 全部命中）；**不用 LLM 当裁判**（便宜、可复现）。
+- **实现**：`AgentCatalog.CreateForEval`（只挂 Instructions、走正式回复模型，**不带工具 / 记忆 / 技能**，排除干扰）；`AgentEvalRunner`（`Score` 为纯函数，便于单测）；`EvalCaseStore` 内存持有 + 扩展区「evalCases」持久化（重启不丢，与消息反馈同机制）。
+- **前端**：控制台新增「🧪 评测回归」页签（Admin+）：用例表（名称 / 员工 / 判定 / 启用 / 最近结果 / 操作）+ 逐条「▶ 跑此用例」/「编辑」/「删除」+ 顶部「▶ 跑全部」与汇总（通过数 / 用时）；用「＋ 新建用例」弹窗录入（**每次打开先清空再回填**，避免残留）。
+English: new endpoints under `/ag-ui/admin/eval-cases` (admin only):
+- `GET /` — list cases + target-employee options (for the dropdown).
+- `POST /` — create / update a case (`name` / `agentId` / `prompt` / `expected[]` / `matchMode`=any|all / `enabled`); validates the employee exists and the prompt is non-empty and ≤2000 chars.
+- `DELETE /{id}` — delete a case.
+- `POST /run` — run all: for each enabled case (or given `caseIds`) run the target employee's **instructions + normal reply model** once and judge by whether the **expected points appear**; returns per-case `passed` / `matched` / `missed` / `reply` excerpt / `durationMs` plus totals.
+- **Judging**: a deterministic keyword rule (case-insensitive; `any` = at least one hit / `all` = every hit); **no LLM as judge** (cheap, reproducible).
+- **Implementation**: `AgentCatalog.CreateForEval` (instructions only, normal reply model, **no tools / memory / skills** — removing noise); `AgentEvalRunner` (with a pure `Score`, unit-tested); `EvalCaseStore` held in memory + persisted in the "evalCases" extension area (survives restart, same mechanism as message feedback).
+- **Front end**: a "🧪 Eval & regression" tab (Admin+): a case table (name / agent / match / enabled / last result / actions) with per-row "▶ Run this case" / "Edit" / "Delete", plus a top "▶ Run all" with a summary (passed / duration); the "+ New case" dialog **clears then refills** so no stale data leaks between edits.
+
+## 测试
+# Tests
+
+中文：新增 `EvalScoreTests`（any / all / 大小写不敏感 / 空期望）与 `EvalApiTests`（建员工→建用例→列出→跑分 `total=2 passed=1`→非管理员 403），合跑 **13/13**（连同 AdminApi / AgentPerformance）。i18n 审计 **zh=en=1802，missing 0**；`node --check` 通过。运行栈实测：无令牌 401、管理员 200（17 个候选员工）；对真实模型跑一条用例得 reply 与判定（2.9s）；Playwright 实测页签与新建弹窗渲染正常、无前端报错。
+English: new `EvalScoreTests` (any / all / case-insensitive / empty expected) and `EvalApiTests` (create agent → create case → list → run `total=2 passed=1` → non-admin 403), **13/13** (with AdminApi / AgentPerformance). The i18n audit is **zh=en=1802, missing 0**; `node --check` passes. Verified live: 401 without a token, 200 for an admin (17 candidate employees); a real-model run of one case returned a reply and a verdict (2.9s); Playwright confirms the tab and the new-case dialog render with no front-end errors.
+
 # AG-UI 群聊桌面版 1.0.221 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.221 Release Notes (current Windows desktop release)
 

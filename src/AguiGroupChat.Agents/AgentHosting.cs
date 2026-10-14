@@ -75,6 +75,9 @@ public static class AgentHosting
         services.AddSingleton<TopicSummaryStore>();
         // 消息反馈（👍/👎）：内存持有 + 扩展区持久化
         services.AddSingleton<MessageFeedbackStore>();
+        // 数字员工评测集（回归）：内存持有 + 扩展区持久化
+        services.AddSingleton<EvalCaseStore>();
+        services.AddSingleton<AgentEvalRunner>();
         // 编排计划暂停/继续控制：内存持有（单次计划执行生命周期，无需持久化）
         services.AddSingleton<CoordinatedPlanControlStore>();
         // 桥接端点健康度（3.1）：周期 TCP 探测 + 管理员控制台查看
@@ -440,6 +443,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("msgFeedback", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册数字员工评测集到持久化扩展区「evalCases」：重启后用例不丢。</summary>
+    public static void RegisterEvalCasePersistence(this IServiceProvider services)
+    {
+        var store = services.GetRequiredService<EvalCaseStore>();
+        Func<object?> snapshot = () => store.Snapshot().Select(c => (object)c).ToList();
+        Action<JsonElement> restore = element => store.Restore(
+            element.Deserialize<List<EvalCase>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("evalCases", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("evalCases", snapshot, restore);
         }
     }
 
