@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-纯桌面应用（Windows）**（当前版本 1.0.216）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
+纯桌面应用（Windows）**（当前版本 1.0.217）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
 个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、办公文档在线查看与 PPT 播放（**需本机 LibreOffice**，见下方说明）等），但**数据与模型全部在本机**；服务在本机固定起在
 `http://127.0.0.1:5200`，即便断网也能跑通群聊 / 智能体管理 / 语义记忆等本地功能（仅对话模型 DeepSeek 等仍需联网），
 支持把标记为「本机执行」的客户端技能经本机桥在桌面机执行：
@@ -30,16 +30,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### 构建发行版（win-x64 程序 / MSI 安装包）
 
-当前版本：**1.0.216**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
+当前版本：**1.0.217**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
 
 ```bash
 # 1. 发布 win-x64 产物到 artifacts/win-x64（含 SQLite / 本地 llama embedding / wwwroot / VC++ 运行库 / vec0.dll）
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. 打 MSI 安装包：输出到 artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    例如 1.0.216：
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.216
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.216.msi
+#    例如 1.0.217：
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.217
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.217.msi
 ```
 
 > `tools/build-msi.ps1` 会先**强制全新发布**（清理 Release 中间产物，防止增量复用旧 DLL）、排除非 Windows 原生运行库、
@@ -80,6 +80,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.216
 | `Agents:Audio:SpeechEnabled` | `false` | 服务端语音回复（TTS）：把回复文本合成为音频附件挂到消息上（可选；需配 `SpeechModel`/`SpeechVoice` 与可达端点） |
 | `Agents:Audio:SpeechEndpoint` | 空 | 语音合成端点（OpenAI 兼容）；留空时由 `Agents:Endpoint` 派生 |
 | `Agents:Audio:SpeechOnlyForVoice` | `true` | 仅当触发消息带语音附件时才合成（默认 `true` = 只在“语音进→语音出”时出声） |
+| `Agents:Audio:SpeechSpeed` | `1.0` | 合成语速（Kokoro / OpenAI 兼容的 `speed`，夹紧 0.25–4.0） |
 
 > 对话模型（DeepSeek 等）仍需联网；**语义记忆 / 群聊 / 智能体管理**等核心功能离线可用。
 

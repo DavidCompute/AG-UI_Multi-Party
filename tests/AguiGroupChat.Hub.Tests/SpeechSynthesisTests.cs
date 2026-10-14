@@ -226,6 +226,22 @@ public sealed class SpeechSynthesisTests : IDisposable
         Assert.Null(custom.VoicesEndpoint); // 非标准形状：无法推导
     }
 
+    [Fact]
+    public async Task Speed_IsSentAndClamped()
+    {
+        var h1 = new FakeHandler(_ => Audio());
+        var s1 = Service(h1, a => a.SpeechSpeed = 1.5);
+        await s1.TrySynthesizeBytesAsync("语速", null);
+        using (var d1 = JsonDocument.Parse(h1.LastBody!))
+            Assert.Equal(1.5, d1.RootElement.GetProperty("speed").GetDouble(), 3);
+
+        var h2 = new FakeHandler(_ => Audio());
+        var s2 = Service(h2, a => a.SpeechSpeed = 9.0); // 超上限 → 夹到 4.0
+        await s2.TrySynthesizeBytesAsync("语速", null);
+        using (var d2 = JsonDocument.Parse(h2.LastBody!))
+            Assert.Equal(4.0, d2.RootElement.GetProperty("speed").GetDouble(), 3);
+    }
+
     /// <summary>可编程假 HttpMessageHandler：记录调用次数与请求，按委托返回响应。</summary>
     private sealed class FakeHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

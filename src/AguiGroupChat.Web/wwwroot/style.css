@@ -867,6 +867,22 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
   white-space: pre-wrap; word-break: break-word; user-select: text;
 }
+/* 转写修正 / 重问（多模态进阶 · 语音问答）：内联编辑区 */
+.msg .att-transcript-edit { margin-left: 6px; }
+.msg .att-transcript-editor { margin-top: 6px; max-width: 340px; }
+.msg .att-transcript-input {
+  width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 13px;
+  padding: 7px 9px; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--accent, #4f8cff); border-radius: 8px;
+}
+.msg .att-transcript-actions { display: flex; gap: 6px; margin-top: 6px; }
+.msg .att-transcript-reask, .msg .att-transcript-cancel {
+  font-size: 12px; padding: 3px 9px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--text);
+}
+.msg .att-transcript-reask { border-color: var(--accent, #4f8cff); color: var(--accent, #4f8cff); }
+.msg .att-transcript-reask:hover { background: rgba(79, 140, 255, .14); }
+.msg .att-transcript-cancel:hover { color: var(--muted); }
 
 /* ---- 办公文档在线查看弹窗（docx / xlsx / pptx / pdf）---- */
 /* ---- 办公文档在线查看弹窗（docx / xlsx / pptx / pdf）---- */

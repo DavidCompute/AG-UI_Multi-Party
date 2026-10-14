@@ -56,6 +56,9 @@ public sealed class AudioOptions
     /// <summary>合成正文长度上限（字符，默认 600；过长只取前段，控成本与时长：CPU 上约 0.2s/字）。</summary>
     public int SpeechMaxChars { get; set; } = 600;
 
+    /// <summary>语速（1.0 = 原速；Kokoro / OpenAI 兼容服务的 <c>speed</c> 参数，建议 0.5–2.0）。</summary>
+    public double SpeechSpeed { get; set; } = 1.0;
+
     /// <summary>语音合成请求超时（秒，默认 300）。CPU 上合成较慢（实测约 0.2s/字），需比转写宽松得多。</summary>
     public int SpeechTimeoutSeconds { get; set; } = 300;
 

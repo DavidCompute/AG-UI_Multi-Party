@@ -804,7 +804,7 @@ After upload, `AttachmentStore.Classify()` classifies each into one of four `kin
 Rendered by `msgDom()`'s attachment block (`.attachments`):
 
 - **Images** (`kind === "image"`): thumbnail `.att-img`, outer `.att-img-wrap`; when all are images, the container uses a grid layout `.attachments.img-grid`. Clicking an image opens the image lightbox `#lightbox` (zoom `#lbZoomIn`/`#lbZoomOut`/`#lbZoomReset`, rotate `#lbRotate`, download `#lbDownload`, switch within the same message with `#lbPrev`/`#lbNext`).
-- **Audio** (`kind === "audio"`): `.att-audio`, an inline `<audio controls>` player; below it the transcript is **shown inline by default** (`.att-transcript` auto-fetches `GET /ag-ui/attachments/{id}/transcript`, showing "🎤 Transcribing…" while loading, and is collapsible/expandable on click) — talk-to-text, so users see what the digital employee "heard". When none is available after retries the entry is removed without disturbing others; cached per attachmentId per session.
+- **Audio** (`kind === "audio"`): `.att-audio`, an inline `<audio controls>` player; below it the transcript is **shown inline by default** (`.att-transcript` auto-fetches `GET /ag-ui/attachments/{id}/transcript`, showing "🎤 Transcribing…" while loading, and is collapsible/expandable on click) — talk-to-text, so users see what the digital employee "heard". When none is available after retries the entry is removed without disturbing others; cached per attachmentId per session. The transcript can be **"✏️ Fix"**-ed and then **"↻ Re-ask with correction"**-ed (quoting the voice message and @-mentioning the employee who answered; the original transcript and history are not modified).
 - **Text / documents** (`kind === "text"` or `"document"`): download card `.att-file` (icon `📄`), the rest `📎`; the link `href` goes to `/ag-ui/files/{attachmentId}/{name}`, and `meta` shows the file size.
 - Attachment URLs pass through the `safeUrl()` whitelist (rejects `javascript:` etc.) and `authedAssetUrl()` (appends a `token=` query param for in-site paths).
 
@@ -2563,6 +2563,7 @@ The two endpoints and their returned fields (`LIB_SET_PROBE`):
   | `SpeechVoice` | `zf_xiaoxiao` | Voice (Kokoro Chinese voices: `zf_xiaoxiao` / `zf_xiaoyi` / `zm_yunjian`, …) |
   | `SpeechFormat` | `mp3` | Output format (`mp3` / `wav` / `opus` / `aac` / `flac`) |
   | `SpeechMaxChars` | `600` | Max characters of the reply to synthesize (~0.2s/char on CPU) |
+  | `SpeechSpeed` | `1.0` | Speed (Kokoro / OpenAI-compatible `speed`, clamped to 0.25–4.0) |
   | `SpeechTimeoutSeconds` | `300` | Synthesis request timeout in seconds (decoupled from the transcription `TimeoutSeconds`) |
   | `SpeechOnlyForVoice` | `true` | Synthesize only when the trigger message carries a voice attachment (default `true` = speak only on "talk, then hear the answer" turns; `false` = every reply carries audio) |
 

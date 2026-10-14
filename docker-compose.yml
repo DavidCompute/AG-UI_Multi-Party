@@ -248,6 +248,7 @@ services:
       Agents__Audio__SpeechFormat: ${AGENTS_AUDIO_SPEECH_FORMAT:-mp3}
       # 合成正文长度上限 / 合成超时（CPU 上合成约 0.2s/字，长正文需更长超时）
       Agents__Audio__SpeechMaxChars: ${AGENTS_AUDIO_SPEECH_MAX_CHARS:-600}
+      Agents__Audio__SpeechSpeed: ${AGENTS_AUDIO_SPEECH_SPEED:-1.0}
       Agents__Audio__SpeechTimeoutSeconds: ${AGENTS_AUDIO_SPEECH_TIMEOUT:-300}
       # 仅当触发消息带语音附件时才合成（默认 true = 只在“语音进→语音出”时出声；false = 每条回复都带音频）
       Agents__Audio__SpeechOnlyForVoice: ${AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE:-true}

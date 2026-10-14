@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.217 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.217 Release Notes (current Windows desktop release)
+
+**版本说明**：**转写可修正并一键重问 + TTS 语速**——ASR 听错时，可在语音消息下就地修正转写并一键「按修正文本重问」（引用原语音、@ 上一轮回复的数字员工）；语音合成新增语速参数。
+**Version note**: **Editable transcript with one-click re-ask + TTS speed** — when ASR mishears, you can now correct the transcript in place under the voice message and re-ask with the correction (quoting the original voice message and @-mentioning the employee who answered); voice synthesis gains a speed parameter.
+
+## 转写可修正 + 一键重问
+# Editable transcript + one-click re-ask
+
+中文：转写文本旁新增 **「✏️ 修正」**：就地编辑为正确文本，再点 **「↻ 按修正文本重问」** → 以修正后的文本发一条**新消息**（引用原语音消息，并 **@ 上一轮回复的那个数字员工**，确保重问能触发同一位）；「取消」放弃。这是 ASR 听错时的**一次性纠错入口**，**不修改**原始转写与历史。重问走正常发送通道（与手动发消息一致）。
+English: next to the transcript is a **"✏️ Fix"** button: edit it in place, then **"↻ Re-ask with correction"** sends the corrected text as a **new message** (quoting the original voice message and **@-mentioning the employee who answered**, so the same one is triggered); "Cancel" discards. It is a **one-shot correction entry** for ASR mishears and **does not modify** the original transcript or history. The re-ask goes through the normal send path.
+
+## 语音合成语速
+# TTS speed
+
+中文：新增 `Agents:Audio:SpeechSpeed`（默认 `1.0`），随合成请求发送 `speed` 参数（Kokoro / OpenAI 兼容，夹紧到 0.25–4.0）。Docker 对应 `AGENTS_AUDIO_SPEECH_SPEED`。
+English: new `Agents:Audio:SpeechSpeed` (default `1.0`), sent as the `speed` field in the synthesis request (Kokoro / OpenAI-compatible, clamped to 0.25–4.0). Docker: `AGENTS_AUDIO_SPEECH_SPEED`.
+
+## 测试
+# Tests
+
+中文：`SpeechSynthesisTests` 新增 1 例（语速发送与上限夹紧）；连同存储 / 管理接口 / 桌面组合根合跑 **44/44**；`node --check` 与 i18n 审计（zh=en=1751，missing 0）通过。运行栈实测：试听端点带 `speed` 仍 200 `audio/mpeg`；前端已上线「修正 / 重问」入口。
+English: `SpeechSynthesisTests` gains 1 case (speed sent and upper-clamped); **44/44** together with the store / admin-API / desktop-composition suites; `node --check` and the i18n audit pass (zh=en=1751, missing 0). Verified live: the preview endpoint still returns 200 `audio/mpeg` with `speed`; the front end serves the Fix / Re-ask entries.
+
 # AG-UI 群聊桌面版 1.0.216 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.216 Release Notes (current Windows desktop release)
 

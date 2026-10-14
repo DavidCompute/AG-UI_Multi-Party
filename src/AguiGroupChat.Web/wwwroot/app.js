@@ -9638,7 +9638,7 @@ function msgDom(m, r, prev) {
       const tid = att.attachmentId || "";
       // 语音消息：播放条 + 「查看转写」（多模态进阶 · 语音问答）：点击懒加载 ASR 转写文本，
       // 让用户看到「数字员工听到的是什么」（否则仅一段录音无法核对）。无 / 取不到时按钮自动移除。
-      const tCap = tid ? `<div class="att-transcript" data-transcript-id="${escapeHtml(tid)}"><button type="button" class="att-transcript-btn">${escapeHtml(t("msg.showTranscript"))}</button><div class="att-transcript-text hidden"></div></div>` : "";
+      const tCap = tid ? `<div class="att-transcript" data-transcript-id="${escapeHtml(tid)}"><button type="button" class="att-transcript-btn">${escapeHtml(t("msg.showTranscript"))}</button><button type="button" class="att-transcript-edit hidden">${escapeHtml(t("msg.editTranscript"))}</button><div class="att-transcript-text hidden"></div><div class="att-transcript-editor hidden"><textarea class="att-transcript-input" rows="3"></textarea><div class="att-transcript-actions"><button type="button" class="att-transcript-reask">${escapeHtml(t("msg.reask"))}</button><button type="button" class="att-transcript-cancel">${escapeHtml(t("msg.reaskCancel"))}</button></div></div></div>` : "";
       return `<div class="att-audio"><span title="${escapeHtml(t("msg.attachmentAudio"))}">🎤</span><audio controls preload="none" src="${href}"></audio><span class="att-meta">${meta}</span></div>${tCap}`;
     }
     const icon = att.kind === "text" || att.kind === "document" ? "📄" : "📎";
@@ -9817,7 +9817,7 @@ async function fetchTranscript(id) {
   return text;
 }
 
-/** 将转写文本内联展示，并把按钮变为展开 / 收起。 */
+/** 将转写文本内联展示，并把按钮变为展开 / 收起；同时提供「✏️ 修正」→ 编辑后「↻ 重问」。 */
 function renderTranscript(box, text) {
   const btn = box.querySelector(".att-transcript-btn");
   const out = box.querySelector(".att-transcript-text");
@@ -9834,6 +9834,76 @@ function renderTranscript(box, text) {
     out.classList.toggle("hidden", !show);
     btn.textContent = t(show ? "msg.hideTranscript" : "msg.showTranscript");
   };
+
+  const editBtn = box.querySelector(".att-transcript-edit");
+  const editor = box.querySelector(".att-transcript-editor");
+  const input = box.querySelector(".att-transcript-input");
+  if (!editBtn || !editor || !input) return;
+  editBtn.classList.remove("hidden");
+  editBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    input.value = out.textContent || "";
+    out.classList.add("hidden");
+    btn.classList.add("hidden");
+    editBtn.classList.add("hidden");
+    editor.classList.remove("hidden");
+    input.focus();
+  };
+  const cancelBtn = box.querySelector(".att-transcript-cancel");
+  if (cancelBtn) cancelBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    editor.classList.add("hidden");
+    btn.classList.remove("hidden");
+    editBtn.classList.remove("hidden");
+    out.classList.remove("hidden");
+  };
+  const reaskBtn = box.querySelector(".att-transcript-reask");
+  if (reaskBtn) reaskBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const corrected = (input.value || "").trim();
+    if (!corrected) { toast(t("msg.reaskEmpty")); return; }
+    const msgEl = box.closest(".msg");
+    const mid = msgEl ? msgEl.getAttribute("data-mid") : null;
+    if (!reaskWithText(corrected, mid)) { toast(t("msg.reaskFail")); return; }
+    editor.classList.add("hidden");
+    btn.classList.remove("hidden");
+    editBtn.classList.remove("hidden");
+    out.classList.remove("hidden");
+    toast(t("msg.reaskSent"));
+  };
+}
+
+/** 「按修正文本重问」：以修正后的文本发一条新消息（引用原语音消息，并 @ 上一轮回复的数字员工）。
+ * 仅当 ASR 听错时的一次性纠错入口，不修改原始转写与历史。返回是否已发出。 */
+function reaskWithText(text, voiceMsgId) {
+  const gid = state.activeGroupId;
+  if (!gid || !text) return false;
+  // 找原语音消息之后的第一个数字员工回复，@ 它以确保重问能触发同一个数字员工
+  const r = room(gid);
+  const msgs = r ? r.messages : [];
+  const idx = voiceMsgId ? msgs.findIndex((m) => m.id === voiceMsgId) : -1;
+  let agentId = null;
+  if (idx >= 0) {
+    for (let i = idx + 1; i < msgs.length; i++) {
+      if (msgs[i].senderType === "agent" && !msgs[i].recalled) { agentId = msgs[i].senderId; break; }
+    }
+  }
+  const payload = {
+    type: "GROUP_MESSAGE_SEND",
+    groupId: gid,
+    topicId: state.activeTopicId || "main",
+    userId: state.memberId,
+    content: text,
+    mentions: agentId ? [agentId] : [],
+    mentionAll: false,
+    visibility: "all",
+  };
+  if (voiceMsgId) payload.replyToMessageId = voiceMsgId;
+  if (state.bridgeClient) payload.bridgeClient = state.bridgeClient;
+  return send(payload);
 }
 
 function bindTranscriptButtons(container) {

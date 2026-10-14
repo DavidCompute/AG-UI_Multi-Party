@@ -803,7 +803,7 @@
 由 `msgDom()` 的附件块渲染（`.attachments`）：
 
 - **图片**（`kind === "image"`）：缩略图 `.att-img`，外层 `.att-img-wrap`；全部为图片时容器用网格布局 `.attachments.img-grid`。点击图片打开图片灯箱 `#lightbox`（缩放 `#lbZoomIn`/`#lbZoomOut`/`#lbZoomReset`、旋转 `#lbRotate`、下载 `#lbDownload`、同条消息内 `#lbPrev`/`#lbNext` 切换）。
-- **音频**（`kind === "audio"`）：`.att-audio`，内联 `<audio controls>` 播放条；下方 **默认内联展示转写**（`.att-transcript`，自动请求 `GET /ag-ui/attachments/{id}/transcript`，加载中显「🎤 转写中…」，可点击收起 / 展开）——「播放即转写」，让用户看到「数字员工听到的是什么」。无 / 重试后仍取不到时移除入口不干扰；本会话按 attachmentId 缓存。
+- **音频**（`kind === "audio"`）：`.att-audio`，内联 `<audio controls>` 播放条；下方 **默认内联展示转写**（`.att-transcript`，自动请求 `GET /ag-ui/attachments/{id}/transcript`，加载中显「🎤 转写中…」，可点击收起 / 展开）——「播放即转写」，让用户看到「数字员工听到的是什么」。无 / 重试后仍取不到时移除入口不干扰；本会话按 attachmentId 缓存。转写可 **「✏️ 修正」**后 **「↻ 按修正文本重问」**（引用原语音 + @ 上一轮回复的数字员工；不修改原始转写与历史）。
 - **文本 / 文档**（`kind === "text"` 或 `"document"`）：下载卡片 `.att-file`（图标 `📄`），其余为 `📎`；链接 `href` 走 `/ag-ui/files/{attachmentId}/{name}`，`meta` 显示文件大小。
 - 附件的 URL 会经 `safeUrl()` 白名单（拒绝 `javascript:` 等）与 `authedAssetUrl()`（对站内路径追加 `token=` 查询参数）。
 
@@ -2559,6 +2559,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
   | `SpeechVoice` | `zf_xiaoxiao` | 音色（Kokoro 中文音色：`zf_xiaoxiao` / `zf_xiaoyi` / `zm_yunjian` 等） |
   | `SpeechFormat` | `mp3` | 输出格式（`mp3` / `wav` / `opus` / `aac` / `flac`） |
   | `SpeechMaxChars` | `600` | 合成正文长度上限（字符；CPU 上约 0.2s/字） |
+  | `SpeechSpeed` | `1.0` | 语速（Kokoro / OpenAI 兼容的 `speed`，夹紧 0.25–4.0） |
   | `SpeechTimeoutSeconds` | `300` | 合成请求超时（秒；与转写的 `TimeoutSeconds` 解耦） |
   | `SpeechOnlyForVoice` | `true` | 仅当触发消息带语音附件时才合成（默认 `true` = 只在“语音进→语音出”时出声；`false` = 每条回复都带音频） |
 

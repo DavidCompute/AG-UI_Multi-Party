@@ -99,6 +99,7 @@ public sealed class SpeechSynthesisService : IDisposable
                 ["input"] = clean,
                 ["voice"] = voice,
                 ["response_format"] = o.SpeechFormat,
+                ["speed"] = Math.Clamp(o.SpeechSpeed, 0.25, 4.0),
             };
             using var req = new HttpRequestMessage(HttpMethod.Post, _endpoint) { Content = JsonContent.Create(payload) };
             if (!string.IsNullOrWhiteSpace(_apiKey))
