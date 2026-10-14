@@ -946,6 +946,7 @@ PUT /ag-ui/user/profile
 |---|---|---|
 |上传附件|`POST /ag-ui/upload`|multipart/form-data，字段名 `file`；单请求最多 9 个、单文件 ≤20 MB。需身份（登录令牌，或演示模式 `?memberId=`，与 WS/SSE 鉴权一致）。图片 / 音频 / 文本 / 办公文档自动归类 `kind`|
 |下载 / 预览|`GET /ag-ui/files/{attachmentId}/{fileName}`|按附件 ID 定位，文件名仅用于展示（下载保留原名）。按**原格式**返回；脚本 / 内联渲染类强制附件下载|
+|语音转写|`GET /ag-ui/attachments/{attachmentId}/transcript`|语音消息（`kind=audio`）的 ASR 转写文本 `{ transcript }`；鉴权与下载 / 在线查看**同一套**（未登录 401 / 非成员 403），无转写 / 不存在 404。经扩展区 `audioTranscripts` 跨重启保持|
 |文档在线查看|`GET /ag-ui/preview/{attachmentId}`|把 docx / xlsx / pptx（含 odt/ods/odp/rtf）用服务端 LibreOffice 转成 PDF 后**内联**返回，供前端在弹窗 iframe 中直接阅读。`?token=` 与 `Authorization: Bearer` 均可（iframe 拿不到请求头，前端走前者）。**`?notes=true`**（仅演示文稿 pptx/ppt/odp）返回「备注页」PDF（每张幻灯片后跟该页演讲者备注，LibreOffice `ExportNotesPages`），与幻灯片 PDF 各自缓存|
 |演示文稿备注|`GET /ag-ui/preview/{attachmentId}/notes`|仅 `.pptx`：按幻灯片顺序返回每页演讲者备注文本 `{ notes: ["…", …] }`（无备注 / 不支持返回空数组），供前端「备注跟随当前页」显示；鉴权同下载 / 预览|
 

@@ -140,6 +140,7 @@ public static class SystemApi
             sp.GetService<AgentSkillCatalog>()?.RestoreAll(System.Array.Empty<AgentSkillDefinition>()); // 只留守常种子技能；运行时自建/导入的技能一并清
             sp.GetService<OrgTeamStore>()?.RestoreAll(System.Array.Empty<OrgTeamRecord>());
             sp.GetService<AgentGateway>()?.ClearBridgeCursors();
+            sp.GetService<AudioTranscriptStore>()?.Clear();
             sp.GetRequiredService<AttachmentStore>().ClearAll();
             // 预览缓存是附件的派生数据：附件清了，缓存也必须清（否则残留孤立的 PDF 白占磁盘）
             sp.GetService<OfficePreviewConverter>()?.ClearAll();

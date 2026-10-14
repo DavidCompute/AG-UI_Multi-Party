@@ -298,6 +298,27 @@ public sealed class AudioTranscriptionTests : IDisposable
     }
 
     [Fact]
+    public async Task Gateway_Transcription_RecordsTranscriptForUi()
+    {
+        // 转写成功后应把文本记入 AudioTranscriptStore，供前端「查看转写」展示
+        var handler = new FakeHandler(_ => Ok("""{"text":"把这段语音转写出来"}"""));
+        var options = GatewayOptions();
+        options.Audio = new AudioOptions { Enabled = true, Endpoint = "https://asr.local/t" };
+        var transcripts = new AudioTranscriptStore();
+        var services = new ServiceCollection()
+            .AddSingleton(new AudioTranscriptionService(options, _store, NullLogger<AudioTranscriptionService>.Instance, new HttpClient(handler)))
+            .AddSingleton(transcripts)
+            .BuildServiceProvider();
+
+        var gateway = Gateway(options, services);
+        var att = SaveAudio();
+        await gateway.BuildAttachmentsSectionAsync(Context(att), CancellationToken.None);
+
+        Assert.True(transcripts.TryGet(att.AttachmentId, out var text));
+        Assert.Equal("把这段语音转写出来", text);
+    }
+
+    [Fact]
     public async Task Gateway_DisabledTranscription_KeepsMetadataOnlyNote()
     {
         // 未注册 AudioTranscriptionService（默认关闭形态）→ 语音仍只携元数据，附件区如实提示内容不可理解。

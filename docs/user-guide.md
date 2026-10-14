@@ -803,7 +803,7 @@
 由 `msgDom()` 的附件块渲染（`.attachments`）：
 
 - **图片**（`kind === "image"`）：缩略图 `.att-img`，外层 `.att-img-wrap`；全部为图片时容器用网格布局 `.attachments.img-grid`。点击图片打开图片灯箱 `#lightbox`（缩放 `#lbZoomIn`/`#lbZoomOut`/`#lbZoomReset`、旋转 `#lbRotate`、下载 `#lbDownload`、同条消息内 `#lbPrev`/`#lbNext` 切换）。
-- **音频**（`kind === "audio"`）：`.att-audio`，内联 `<audio controls>` 播放条。
+- **音频**（`kind === "audio"`）：`.att-audio`，内联 `<audio controls>` 播放条；下方多一个 **「🎤 查看转写」**（`.att-transcript`）——懒加载 `GET /ag-ui/attachments/{id}/transcript` 展示该语音的 ASR 转写文本（无 / 取不到时提示并移除入口），让用户看到「数字员工听到的是什么」。
 - **文本 / 文档**（`kind === "text"` 或 `"document"`）：下载卡片 `.att-file`（图标 `📄`），其余为 `📎`；链接 `href` 走 `/ag-ui/files/{attachmentId}/{name}`，`meta` 显示文件大小。
 - 附件的 URL 会经 `safeUrl()` 白名单（拒绝 `javascript:` 等）与 `authedAssetUrl()`（对站内路径追加 `token=` 查询参数）。
 
@@ -4406,6 +4406,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | --- | --- | --- | --- |
 | POST | `/ag-ui/upload` | multipart 上传（单请求最多 9 个文件；扩展名白名单；单文件大小上限 `AttachmentStore.MaxFileBytes`） | 登录 |
 | GET | `/ag-ui/files/{attachmentId}/{fileName}` | 下载 / 预览附件（按原格式；脚本 / 内联渲染类强制附件下载） | 登录 + 附件所在群成员 |
+| GET | `/ag-ui/attachments/{attachmentId}/transcript` | 语音消息（`kind=audio`）的 ASR 转写文本 `{ transcript }`；鉴权与下载 / 在线查看同一套；无转写 / 不存在 404 | 登录 + 附件所在群成员 |
 | GET | `/ag-ui/preview/{attachmentId}` | 办公文档在线查看（docx / xlsx / pptx → PDF 内联；`?notes=1` 备注页、`?play=1` 播放版） | 登录 + 附件所在群成员 |
 | GET | `/ag-ui/preview/{attachmentId}/notes` | 演示文稿演讲者备注（按幻灯片序返回文本数组） | 登录 + 附件所在群成员 |
 | GET | `/ag-ui/preview/{attachmentId}/play` | 演示文稿在线播放清单（页→幻灯片/步骤映射 + 每条转场 + 备注 + 动画） | 登录 + 附件所在群成员 |

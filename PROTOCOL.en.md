@@ -953,6 +953,7 @@ A successful topic creation returns the topic object and broadcasts `GROUP_TOPIC
 |---|---|---|
 |Upload attachment|`POST /ag-ui/upload`|multipart/form-data，field name `file`；max 9 files per request、single file ≤20 MB。Identity required（login token，or in demo mode `?memberId=`，consistent with WS/SSE auth）。Images / audio / text / office documents are auto-categorized into `kind`|
 |Download / preview|`GET /ag-ui/files/{attachmentId}/{fileName}`|Locates by attachment ID；the file name is used only for display (the original name is kept on download)。Returns the file in its **original format**；script / inline-renderable types are forced to download|
+|Voice transcript|`GET /ag-ui/attachments/{attachmentId}/transcript`|ASR transcript of a voice message (`kind=audio`) as `{ transcript }`；**the same auth** as download / online view (401 unauthenticated / 403 non-member)，404 when none / missing。Persisted across restarts via the extension section `audioTranscripts`|
 |View document online|`GET /ag-ui/preview/{attachmentId}`|Converts docx / xlsx / pptx (plus odt/ods/odp/rtf) to PDF with server-side LibreOffice and returns it **inline** so the frontend can read it in a modal iframe。Both `?token=` and `Authorization: Bearer` work (an iframe cannot send headers, so the frontend uses the former)|
 
 **`/ag-ui/preview` semantics**:

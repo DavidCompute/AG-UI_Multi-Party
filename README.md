@@ -353,6 +353,7 @@ WebSocket 上行事件（`type` 判别）：`GROUP_SUBSCRIBE`、`GROUP_UNSUBSCRI
 | 发送消息 | `POST /ag-ui/group/message/send` | groupId、userId、content、mentions、attachments*、replyToMessageId…（content 可空，纯附件消息） |
 | 上传附件 | `POST /ag-ui/upload` | multipart 的 `file` 字段（可多个），返回附件元信息列表（需登录；**仅限白名单扩展名**，脚本类 html/js/svg 等拒绝） |
 | 附件下载 | `GET /ag-ui/files/{attachmentId}/{name}` | 按附件 ID 返回文件内容（支持 Range，图片可预览；**需身份且是该附件所在群的成员**，否则 401/403；**头像附件放行**：附件是任意用户 / 智能体（含分身）头像时已登录用户可访问；响应带 nosniff 与安全响应头） |
+| 语音转写 | `GET /ag-ui/attachments/{attachmentId}/transcript` | 语音消息（`kind=audio`）的 ASR 转写文本 `{ transcript }`；鉴权与下载 / 在线查看**同一套**（401/403），无转写 / 不存在 404。经扩展区 `audioTranscripts` 跨重启保持（共享存储下多副本亦可查） |
 | 文档在线查看 | `GET /ag-ui/preview/{attachmentId}` | 把 docx / xlsx / pptx（含 odt/ods/odp/rtf）用服务端 LibreOffice 转成 PDF 后**内联**返回（`application/pdf`，不设 `Content-Disposition`），供前端弹窗 iframe 直接阅读；`.pdf` 直通不转换。**权限与下载完全同一套校验**（未登录 401 / 非成员 403 / 附件不存在 404）；不支持的类型 400、服务端缺 LibreOffice 503、转换失败 500（错误码 `DOCUMENT_PREVIEW_FAILED`）。转换结果按「附件 ID + 源文件指纹」缓存，同一文档二次打开毫秒级 |
 | 撤回消息 | `POST /ag-ui/group/message/recall` | groupId、messageId、operatorId |
 | 正在输入 | `POST /ag-ui/group/message/typing` | groupId、memberId、isTyping |

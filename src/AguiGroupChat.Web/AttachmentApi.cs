@@ -74,6 +74,26 @@ public static class AttachmentApi
             return Results.File(path!, contentType, enableRangeProcessing: true);
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
+        // 语音转写文本：语音消息（kind=audio）经 ASR 转写的文本，供前端在语音消息下方展示「数字员工听到的是什么」。
+        // 鉴权：与下载 / 预览完全一致（同一段 CanAccessAttachment），避免越权读取。
+        // 存储为进程内缓存（便利信息，非权威数据）：重启 / 多副本下可能取不到 → 404（前端隐藏入口）。
+        root.MapGet("/attachments/{attachmentId}/transcript", (string attachmentId, HttpContext ctx, AttachmentStore store,
+            IGroupStore groupStore, AuthService auth, AgentCatalog catalog,
+            AguiGroupChat.Hub.Messaging.GroupHub hub, IServiceProvider services) =>
+        {
+            // 用 GetService：转写展示是可选能力，精简宿主 / 测试夹具未注册时不应影响其它路由（见 /preview 同理）
+            var transcripts = services.GetService<AudioTranscriptStore>();
+            if (transcripts is null) return Results.NotFound();
+
+            // 404（附件不存在）/ 403（无权）与下载 / 预览完全同一段校验（CanAccessAttachment）
+            var (_, denied) = ResolveAndAuthorize(attachmentId, ctx, store, groupStore, auth, catalog, hub);
+            if (denied is not null) return denied;
+
+            return transcripts.TryGet(attachmentId, out var text) && !string.IsNullOrWhiteSpace(text)
+                ? Results.Ok(new { transcript = text })
+                : Results.NotFound(new AguiError(ErrorCodes.GroupMessageNotFound, "暂无转写文本"));
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
         // 办公文档「在线查看」：docx / xlsx / pptx 由服务端转成 PDF 后**内联**返回，前端在弹窗 iframe 中渲染。
         // 为什么不复用 /files/{id}/{name}：那个端点按原格式返回（浏览器拿到 docx 只会下载 / 存盘），
         // 语义也不同——这里**只**返回可内联渲染的 PDF（含 .pdf 直通）。

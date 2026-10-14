@@ -9577,7 +9577,11 @@ function msgDom(m, r, prev) {
     }
     if (att.kind === "audio") {
       const meta = att.size > 0 ? fmtBytes(att.size) : t("msg.attachmentAudio");
-      return `<div class="att-audio"><span title="${escapeHtml(t("msg.attachmentAudio"))}">🎤</span><audio controls preload="none" src="${href}"></audio><span class="att-meta">${meta}</span></div>`;
+      const tid = att.attachmentId || "";
+      // 语音消息：播放条 + 「查看转写」（多模态进阶 · 语音问答）：点击懒加载 ASR 转写文本，
+      // 让用户看到「数字员工听到的是什么」（否则仅一段录音无法核对）。无 / 取不到时按钮自动移除。
+      const tCap = tid ? `<div class="att-transcript" data-transcript-id="${escapeHtml(tid)}"><button type="button" class="att-transcript-btn">${escapeHtml(t("msg.showTranscript"))}</button><div class="att-transcript-text hidden"></div></div>` : "";
+      return `<div class="att-audio"><span title="${escapeHtml(t("msg.attachmentAudio"))}">🎤</span><audio controls preload="none" src="${href}"></audio><span class="att-meta">${meta}</span></div>${tCap}`;
     }
     const icon = att.kind === "text" || att.kind === "document" ? "📄" : "📎";
     const meta = att.size > 0 ? fmtBytes(att.size) : t("msg.attachmentDownload");
@@ -9663,6 +9667,7 @@ function msgDom(m, r, prev) {
   ensureFeedbackButtons(div, m); // 👍/👎（对数字员工回复评价）
   ensureSpeakButton(div, m); // 🔊 朗读数字员工回复（TTS，离线可用）
   bindDocPreviewButtons(div); // 附件「在线查看」（docx / xlsx / pptx / pdf）
+  bindTranscriptButtons(div); // 语音消息「查看转写」
   // 人机交互卡片的批准 / 拒绝按钮
   bindInteractionButtons(div, m);
   bindPlanCardButtons(div, m); // 计划卡「暂停 / 继续」（流式执行中）
@@ -9728,6 +9733,48 @@ function bindDocPreviewButtons(container) {
       const attId = btn.dataset.previewId;
       if (!attId) return;
       openDocPreview(attId, btn.dataset.previewName || "");
+    };
+  });
+}
+
+/** 语音消息「查看转写」（多模态进阶 · 语音问答）：懒加载 `/ag-ui/attachments/{id}/transcript`，
+ * 成功则展开文本（再点收起 / 展开）；无转写（404）或出错时提示并移除入口（不干扰其它附件）。 */
+function bindTranscriptButtons(container) {
+  container.querySelectorAll(".att-transcript").forEach((box) => {
+    const btn = box.querySelector(".att-transcript-btn");
+    const out = box.querySelector(".att-transcript-text");
+    if (!btn || !out) return;
+    btn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // 已加载：纯展开 / 收起，不再请求
+      if (out.dataset.loaded === "1") {
+        const show = out.classList.contains("hidden");
+        out.classList.toggle("hidden", !show);
+        btn.textContent = t(show ? "msg.hideTranscript" : "msg.showTranscript");
+        return;
+      }
+      const id = box.dataset.transcriptId;
+      if (!id) { box.remove(); return; }
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/ag-ui/attachments/${encodeURIComponent(id)}/transcript`, {
+          headers: { Authorization: `Bearer ${state.token || ""}` },
+        });
+        if (!res.ok) { toast(t("msg.transcriptNone")); box.remove(); return; }
+        const d = await res.json().catch(() => null);
+        const text = d && d.transcript ? String(d.transcript) : "";
+        if (!text) { toast(t("msg.transcriptNone")); box.remove(); return; }
+        out.textContent = text;
+        out.dataset.loaded = "1";
+        out.classList.remove("hidden");
+        btn.textContent = t("msg.hideTranscript");
+      } catch {
+        toast(t("msg.transcriptNone"));
+        box.remove();
+      } finally {
+        btn.disabled = false;
+      }
     };
   });
 }

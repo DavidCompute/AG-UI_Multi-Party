@@ -54,6 +54,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>语音转写（多模态进阶 · 语音问答）：可选；未启用 / 未注册时语音附件仅携元数据（旧行为）。</summary>
     private readonly AudioTranscriptionService? _audio;
 
+    /// <summary>语音转写文本缓存（可选）：转写成功后按 attachmentId 记录，供前端展示「听到的是什么」。</summary>
+    private readonly AudioTranscriptStore? _transcripts;
+
     /// <summary>语音回复（多模态进阶 · 语音出）：可选；未启用 / 未注册时不产生音频附件（旧行为）。</summary>
     private readonly SpeechSynthesisService? _speech;
 
@@ -279,6 +282,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             services.GetService(typeof(MetricsService)) as MetricsService);
         // 语音转写（可选）：开启且配置了端点时，语音附件会先转写为文字再注入上下文
         _audio = services.GetService(typeof(AudioTranscriptionService)) as AudioTranscriptionService;
+        // 语音转写文本（可选）：转写成功后记录，前端可查该附件「听到的是什么」
+        _transcripts = services.GetService(typeof(AudioTranscriptStore)) as AudioTranscriptStore;
         // 语音回复（可选）：开启且配置了端点时，回复文本会合成为音频附件挂到消息上
         _speech = services.GetService(typeof(SpeechSynthesisService)) as SpeechSynthesisService;
         _topicSummary = new Lazy<TopicSummaryStore?>(() =>
@@ -4484,6 +4489,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 {
                     audioTranscribed++;
                     transcript = await _audio.TryTranscribeAsync(att, ct);
+                    // 记录转写文本供前端展示（语音消息下「听到的是什么」）；失败 / 空串不记
+                    if (!string.IsNullOrWhiteSpace(transcript)) _transcripts?.Set(att.AttachmentId, transcript!);
                 }
                 entries.Add((att, transcript, transcript?.Length ?? 0));
                 continue;

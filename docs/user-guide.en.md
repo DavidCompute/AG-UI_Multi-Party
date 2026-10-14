@@ -804,7 +804,7 @@ After upload, `AttachmentStore.Classify()` classifies each into one of four `kin
 Rendered by `msgDom()`'s attachment block (`.attachments`):
 
 - **Images** (`kind === "image"`): thumbnail `.att-img`, outer `.att-img-wrap`; when all are images, the container uses a grid layout `.attachments.img-grid`. Clicking an image opens the image lightbox `#lightbox` (zoom `#lbZoomIn`/`#lbZoomOut`/`#lbZoomReset`, rotate `#lbRotate`, download `#lbDownload`, switch within the same message with `#lbPrev`/`#lbNext`).
-- **Audio** (`kind === "audio"`): `.att-audio`, an inline `<audio controls>` player bar.
+- **Audio** (`kind === "audio"`): `.att-audio`, an inline `<audio controls>` player; below it a **"🎤 Show transcript"** entry (`.att-transcript`) lazily fetches `GET /ag-ui/attachments/{id}/transcript` to show the voice message's ASR transcript (when none is available it shows a hint and removes the entry), so users can see what the digital employee "heard".
 - **Text / documents** (`kind === "text"` or `"document"`): download card `.att-file` (icon `📄`), the rest `📎`; the link `href` goes to `/ag-ui/files/{attachmentId}/{name}`, and `meta` shows the file size.
 - Attachment URLs pass through the `safeUrl()` whitelist (rejects `javascript:` etc.) and `authedAssetUrl()` (appends a `token=` query param for in-site paths).
 
@@ -4414,6 +4414,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | --- | --- | --- | --- |
 | POST | `/ag-ui/upload` | multipart upload (at most 9 files per request; extension whitelist; per-file size limit `AttachmentStore.MaxFileBytes`) | Login |
 | GET | `/ag-ui/files/{attachmentId}/{fileName}` | Download / preview an attachment (original format; scripts / inline-renderable types are forced to download as attachments) | Login + member of the group the attachment belongs to |
+| GET | `/ag-ui/attachments/{attachmentId}/transcript` | ASR transcript of a voice message (`kind=audio`) as `{ transcript }`; same auth as download / online view; 404 when none / missing | Login + member of the group the attachment belongs to |
 | GET | `/ag-ui/preview/{attachmentId}` | Online viewing of office documents (docx / xlsx / pptx → inline PDF; `?notes=1` notes page, `?play=1` playback version) | Login + member of the group the attachment belongs to |
 | GET | `/ag-ui/preview/{attachmentId}/notes` | Presentation speaker notes (returns a text array in slide order) | Login + member of the group the attachment belongs to |
 | GET | `/ag-ui/preview/{attachmentId}/play` | Presentation online playback manifest (page→slide/step mapping + each transition + notes + animation) | Login + member of the group the attachment belongs to |

@@ -73,6 +73,9 @@ public static class HubApp
         var uploadsRoot = Path.Combine(builder.Environment.ContentRootPath, "data", "uploads");
         builder.Services.AddSingleton(new AttachmentStore(uploadsRoot,
             promptBudget.AttachmentMaxTextCharsPerFile, promptBudget.AttachmentMaxTextCharsTotal));
+        // 语音转写文本（供前端在语音消息下展示「听到的是什么」）：注入 ChangeHub 以在更新时驱动持久化落盘
+        builder.Services.AddSingleton(sp => new AudioTranscriptStore(
+            sp.GetService(typeof(AguiGroupChat.Hub.Persistence.ChangeHub)) as AguiGroupChat.Hub.Persistence.ChangeHub));
         builder.Services.AddSingleton<ConnectionManager>();
         builder.Services.AddSingleton<AgentTriggerService>();
         // 预留接口：接入真实 AG-UI 网关时替换为自定义实现

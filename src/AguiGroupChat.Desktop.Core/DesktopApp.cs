@@ -133,6 +133,7 @@ public static class DesktopApp
         app.Services.RegisterUserGroupsPersistence(); // 用户分组目录跨重启保持（细粒度授权数据）
         app.Services.RegisterSessionPersistence(); // 会话落库（哈希）：桌面重启后「保持登录」仍有效
         app.Services.RegisterBridgeCursorPersistence(); // 外部 AG-UI 话题增量游标跨重启保持
+        app.Services.RegisterAudioTranscriptPersistence(); // 语音转写文本跨重启保持（多模态进阶 · 语音问答）
         app.Services.RegisterModelConfigPersistence(); // 运行时模型配置跨重启保持
         app.Services.RegisterScheduledTaskPersistence(); // 重复性定时任务配置跨重启保持
         app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+正文）跨重启保持

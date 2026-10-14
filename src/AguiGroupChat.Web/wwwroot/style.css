@@ -854,6 +854,19 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 }
 .msg .att-audio audio { height: 34px; min-width: 220px; }
 .att-meta { font-size: 11px; color: var(--muted); }
+/* 语音消息转写展示（多模态进阶 · 语音问答）：麦克风按钮 + 展开的转写正文（等宽感、左对齐、可复制） */
+.msg .att-transcript { margin-top: 4px; max-width: 340px; }
+.msg .att-transcript-btn {
+  font-size: 12px; color: var(--muted); background: transparent;
+  border: 1px solid var(--border); border-radius: 8px; padding: 3px 8px; cursor: pointer;
+}
+.msg .att-transcript-btn:hover { color: var(--text); border-color: var(--accent); }
+.msg .att-transcript-btn:disabled { opacity: .6; cursor: default; }
+.msg .att-transcript-text {
+  margin-top: 6px; padding: 7px 9px; font-size: 13px; line-height: 1.5;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+  white-space: pre-wrap; word-break: break-word; user-select: text;
+}
 
 /* ---- 办公文档在线查看弹窗（docx / xlsx / pptx / pdf）---- */
 /* ---- 办公文档在线查看弹窗（docx / xlsx / pptx / pdf）---- */

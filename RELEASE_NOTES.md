@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.214 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.214 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音消息可见「转写文本」**——以前用户发了一段语音，只看到录音与回复，不知道数字员工到底「听到」了什么（答非所问时无从核对）。现在语音消息下多一个「🎤 查看转写」，点击展示该语音的 ASR 转写文本。
+**Version note**: **Voice messages now show their transcript** — previously a user sending a voice message saw only the recording and the reply, with no way to check what the digital employee actually "heard" (impossible to diagnose an off-target answer). A "🎤 Show transcript" entry now appears under a voice message and reveals its ASR transcript on click.
+
+## 语音消息转写展示
+# Voice-message transcript display
+
+中文：
+- **端点** `GET /ag-ui/attachments/{attachmentId}/transcript` → `{ transcript }`（无转写 / 附件不存在 404）。鉴权与附件**下载 / 在线查看完全同一段校验**（`ResolveAndAuthorize` → `CanAccessAttachment`），未登录 401 / 非成员 403，不存在越权读取口子。
+- **存储**：新增 `AudioTranscriptStore`——网关转写成功后按 `attachmentId` 记录；经持久化扩展区 **`audioTranscripts`** 跨重启保持（memory 模式写 JSON 快照，数据库模式落 `agui_sections`；共享存储下多副本亦可查）。系统初始化（清空全部数据）时一并清除。
+- **前端**：语音消息渲染时多一个「🎤 查看转写」按钮（**懒加载**，点击才请求）；无 / 取不到时提示「暂无转写文本」并移除入口，不干扰其它附件；再点可收起。
+English:
+- **Endpoint** `GET /ag-ui/attachments/{attachmentId}/transcript` → `{ transcript }` (404 when there is no transcript / the attachment is missing). Authorization is **exactly the same check as attachment download / online view** (`ResolveAndAuthorize` → `CanAccessAttachment`): 401 unauthenticated, 403 non-member — no privilege-escalation read path.
+- **Storage**: new `AudioTranscriptStore` — the gateway records the transcript by `attachmentId` after a successful transcription, persisted across restarts via the extension section **`audioTranscripts`** (JSON snapshot in memory mode; `agui_sections` in database mode; available across replicas on shared storage). Cleared together with “wipe all data”.
+- **Front end**: a voice message gains a "🎤 Show transcript" button (**lazy** — only requested on click); when none is available it shows "No transcript available" and removes the entry without affecting other attachments; click again to collapse.
+
+## 测试
+# Tests
+
+中文：新增 `AudioTranscriptStoreTests` 6/6（读写 / 截断空白 / 覆盖 / 清空 / 快照↔恢复往返）与网关用例 `Gateway_Transcription_RecordsTranscriptForUi`；连同语音 / 桌面组合根合跑 **59/59**。运行栈实测：发语音 → 端点 200 返回正确中文转写；无令牌 401、未知附件 404；**重启 web 后仍可查**（持久化生效）。
+English: new `AudioTranscriptStoreTests` 6/6 (read/write, blank trimming, overwrite, clear, snapshot↔restore round-trip) and gateway case `Gateway_Transcription_RecordsTranscriptForUi`; **59/59** together with the voice / desktop-composition suites. Verified on the live stack: send voice → the endpoint returns 200 with the correct Chinese transcript; 401 without a token, 404 for an unknown attachment; and it is **still retrievable after restarting web** (persistence works).
+
 # AG-UI 群聊桌面版 1.0.213 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.213 Release Notes (current Windows desktop release)
 
