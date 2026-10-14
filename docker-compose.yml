@@ -249,8 +249,8 @@ services:
       # 合成正文长度上限 / 合成超时（CPU 上合成约 0.2s/字，长正文需更长超时）
       Agents__Audio__SpeechMaxChars: ${AGENTS_AUDIO_SPEECH_MAX_CHARS:-600}
       Agents__Audio__SpeechTimeoutSeconds: ${AGENTS_AUDIO_SPEECH_TIMEOUT:-300}
-      # 仅当触发消息带语音附件时才合成（默认 false = 每条回复都带音频；true = 只在“语音进→语音出”时出声）
-      Agents__Audio__SpeechOnlyForVoice: ${AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE:-false}
+      # 仅当触发消息带语音附件时才合成（默认 true = 只在“语音进→语音出”时出声；false = 每条回复都带音频）
+      Agents__Audio__SpeechOnlyForVoice: ${AGENTS_AUDIO_SPEECH_ONLY_FOR_VOICE:-true}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

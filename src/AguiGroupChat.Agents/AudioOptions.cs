@@ -60,8 +60,10 @@ public sealed class AudioOptions
     public int SpeechTimeoutSeconds { get; set; } = 300;
 
     /// <summary>
-    /// 仅当触发消息带<b>语音附件</b>时才合成（默认 false = 开启后每条回复都带音频）。
-    /// 开 true 可避免每条文字回复都拖一个音频附件，只在「说完听回复」（语音进→语音出）时出声。
+    /// 仅当触发消息带<b>语音附件</b>时才合成（默认 <c>true</c> = 只在「语音进→语音出」时出声）；
+    /// 设 false 则开启语音回复后<b>每条回复都带音频</b>。
+    /// 默认 true 的理由：Kokoro 在 CPU 上合成很慢（约 0.2s/字），每条文字回复都合成既重又吵；
+    /// 非语音回合仍可由用户按需点前端 🔊 朗读（Web Speech，无附件）。
     /// </summary>
-    public bool SpeechOnlyForVoice { get; set; }
+    public bool SpeechOnlyForVoice { get; set; } = true;
 }

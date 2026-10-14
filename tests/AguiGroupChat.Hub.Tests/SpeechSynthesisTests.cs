@@ -181,10 +181,22 @@ public sealed class SpeechSynthesisTests : IDisposable
     }
 
     [Fact]
-    public async Task OnlyForVoice_DefaultOff_SynthesizesRegardlessOfTrigger()
+    public async Task OnlyForVoice_DefaultOn_SkipsNonVoiceTrigger()
     {
         var handler = new FakeHandler(_ => Audio());
-        var svc = Service(handler); // 默认 SpeechOnlyForVoice=false
+        var svc = Service(handler); // 默认 SpeechOnlyForVoice=true
+        Assert.True(svc.OnlyWhenVoiceTurn);
+        Assert.Null(await svc.TrySynthesizeAsync("普通文字回复", triggerHadVoice: false));
+        Assert.Equal(0, handler.Calls);
+        Assert.NotNull(await svc.TrySynthesizeAsync("语音回合的回复", triggerHadVoice: true));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task OnlyForVoice_ExplicitlyOff_SynthesizesRegardlessOfTrigger()
+    {
+        var handler = new FakeHandler(_ => Audio());
+        var svc = Service(handler, a => a.SpeechOnlyForVoice = false);
         Assert.False(svc.OnlyWhenVoiceTurn);
         Assert.NotNull(await svc.TrySynthesizeAsync("普通回复", triggerHadVoice: false));
         Assert.Equal(1, handler.Calls);

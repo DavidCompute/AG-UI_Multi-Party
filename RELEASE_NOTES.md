@@ -1,3 +1,12 @@
+# AG-UI 群聊桌面版 1.0.213 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.213 Release Notes (current Windows desktop release)
+
+**版本说明**：**语音回复默认「仅语音回合」**——`Agents:Audio:SpeechOnlyForVoice` 默认改为 `true`：开启语音回复后，只有触发消息带语音附件的回合才合成音频，文字回复不再拖音频（Kokoro 在 CPU 上约 0.2s/字，逐条合成本就重）。跨语言、非语音回合仍可按需点前端 🔊 朗读。
+**Version note**: **Voice replies default to voice turns only** — `Agents:Audio:SpeechOnlyForVoice` now defaults to `true`: once voice replies are on, only turns whose trigger message carries a voice attachment synthesize audio, so text replies no longer drag an attachment (Kokoro is ~0.2s/char on CPU, so per-reply synthesis is heavy anyway). Non-voice turns remain readable on demand via the front-end 🔊.
+
+（默认音色保持 `zf_xiaoxiao`——中文清晰通用；男声可选 `zm_yunjian` / `zm_yunxi`，其余女声 `zf_xiaoyi` / `zf_xiaobei` / `zf_xiaoni`，试听样音见 `artifacts/voice-samples/`。）
+(The default voice stays `zf_xiaoxiao` — clear and general-purpose Chinese; male alternatives are `zm_yunjian` / `zm_yunxi`, other female ones `zf_xiaoyi` / `zf_xiaobei` / `zf_xiaoni`; samples in `artifacts/voice-samples/`.)
+
 # AG-UI 群聊桌面版 1.0.212 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.212 Release Notes (current Windows desktop release)
 
