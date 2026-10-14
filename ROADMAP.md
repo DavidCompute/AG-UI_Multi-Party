@@ -150,13 +150,14 @@
 - **落点模块**：`GroupTopic`、`HttpGroupApi` 话题接口、前端话题栏。
 - **已实现**：新增 `GET /ag-ui/group/{groupId}/topics/related?topicId=…`，按话题消息的分词共享关键词（Jaccard）计算关联分（>0.02、Top6），仅群成员可见（非成员 403）。
 
-### 5.2 富媒体消息（★☆☆） ✅已实现（图片多选 + 语音 + 画布标注）
+### 5.2 富媒体消息（★☆☆） ✅已实现（图片多选 + 语音 + 画布标注 + 语音问答 ASR）
 - **现状**：附件支持办公文档已完善。
 - **目标**：语音消息、图片多图上传、画布标注，贴近即时通讯习惯。
 - **落点模块**：`AttachmentInfo`、`/ag-ui/upload`、前端渲染。
 - **已实现**：
-  - 后端附件新增 `audio` 类别（`audio/mpeg`/`wav`/`ogg`/`webm` 等），上传白名单放行，仅携元数据供前端播放、不注入模型文本上下文；下载端点返回正确音频 MIME（range 支持）。
+  - 后端附件新增 `audio` 类别（`audio/mpeg`/`wav`/`ogg`/`webm` 等），上传白名单放行，默认仅携元数据供前端播放（`AttachmentStore.IsExtractable` 对 audio 返回 false）；下载端点返回正确音频 MIME（range 支持）。
   - 输入端支持图片多选 / 拖拽；新增**语音消息**（MediaRecorder 录音 → 音频附件）与**画布标注**（canvas 绘制 → PNG 图片附件）；图片附件在消息内以平铺网格展示、输入区显示缩略图，音频以 `<audio>` 内联播放条展示。
+  - **多模态进阶 · 语音问答（ASR，1.0.208）**：开启 `Agents:Audio:Enabled` 且能解析出转写端点时，服务端在组织附件区时先把语音转写为文字（OpenAI 兼容 `multipart/form-data`，响应 `{"text":"…"}`），再当作该附件「正文」走与文档附件同一条注入 / 预算路径；默认关闭，失败 / 超时 / 超限静默降级不阻断，按 attachmentId 缓存。对应实现 `AudioOptions` / `AudioTranscriptionService` 与 `AgentGateway.BuildAttachmentsSectionAsync`，回归 `AudioTranscriptionTests`。
 
 ### 5.3 前端性能与无障碍（★☆☆） ✅已实现（虚拟滚动已具备 + ARIA 增强）
 - **现状**：已做流式局部渲染 + 仅渲染最近 300 条。

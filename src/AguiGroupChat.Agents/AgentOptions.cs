@@ -98,6 +98,9 @@ public sealed class AgentOptions
     /// <summary>视觉（图理解）模型名（留空时 DeepSeek 默认 <c>deepseek-v4-flash-vision-exp</c>）。仅在带图片的消息中使用。</summary>
     public string? VisionModel { get; set; }
 
+    /// <summary>语音问答（ASR）配置（<c>Agents:Audio</c>）：把语音附件转写为文字注入上下文。默认关闭。</summary>
+    public AudioOptions? Audio { get; set; }
+
     /// <summary>
     /// 每个用户每日 token 用量配额（默认 0 = 不限）。超过配额的触发请求被拒绝（AGENT_QUOTA_EXCEEDED），
     /// 次日 0 点（UTC）自动恢复；定时任务（system 触发）与桥接调用不计入个人配额。

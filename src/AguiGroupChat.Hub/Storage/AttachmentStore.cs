@@ -325,6 +325,23 @@ public sealed class AttachmentStore
         catch (Exception) { return null; }
     }
 
+    /// <summary>
+    /// 读取任意附件的原始字节 + MIME + 文件名（供语音转写等按需读取）。
+    /// 不存在 / id 非法 / 超过 <paramref name="maxBytes"/>（默认单文件上限）返回 null。
+    /// </summary>
+    public (byte[] Bytes, string ContentType, string FileName)? TryReadBytes(string attachmentId, long? maxBytes = null)
+    {
+        var path = ResolvePath(attachmentId);
+        if (path is null) return null;
+        try
+        {
+            var info = new FileInfo(path);
+            if (info.Length > (maxBytes ?? MaxFileBytes)) return null;
+            return (File.ReadAllBytes(path), GuessContentType(path), info.Name);
+        }
+        catch (Exception) { return null; }
+    }
+
     /// <summary>判断附件是否可提取文本（纯文本或办公文档，供智能体上下文注入）。</summary>
     public static bool IsExtractable(AttachmentInfo attachment)
         => attachment.Kind is "text" or "document"

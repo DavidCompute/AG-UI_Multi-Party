@@ -836,7 +836,8 @@
 3. **全局总预算**为 `PromptBudgetOptions.AttachmentMaxTextCharsTotal`（默认 `200_000` 字符），按顺序分配，先到的附件优先，预算耗尽后其余附件仅保留清单（不注入正文）。
 4. 未完整注入的附件可由数字员工用工具 `read_attachment`（参数 `attachmentId` / `startIndex` / `maxChars`，默认 `12000`）分段续读——工具说明明确写着「一条消息可带多个附件——需要综合多个附件作答时，请对每个需要参考的附件各调用一次」。
 5. **图片**：受多轮视觉上限限制，`PromptBudgetOptions.MaxContextImages`（默认 `4`）张以内的图片随本轮视觉上下文提供，超出仅给元数据（`AgentGateway` 的 `MaxContextImages` / `MaxHistoryImages`）。
-6. 注入的正文用 `UntrustedBoundary.Wrap()` 包裹（不可信输入边界）。
+6. **语音（audio）**：**默认仅携元数据供前端播放、不注入上下文**（`AttachmentStore.IsExtractable` 对 audio 返回 false）。若开启 `Agents:Audio:Enabled` 且能解析出转写端点，服务端在组织附件区时**先把语音转写为文字**（OpenAI 兼容音频转写接口），再把转写文本当作该附件的「正文」走与文档附件**同一条**注入 / 预算路径（单条消息限转写的文件数由 `Agents:Audio:MaxFilesPerMessage` 控制，默认 3）；转写失败 / 超时 / 超限一律**静默不注入**且不阻断对话。详见 §5.10「语音问答（ASR）」。
+7. 注入的正文用 `UntrustedBoundary.Wrap()` 包裹（不可信输入边界）。
 
 #### 2.6.9 输出物弹窗（`📁`）
 
@@ -2540,6 +2541,20 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 ### 5.10 多模态与 OCR
 
 - **图片理解（视觉）**：`Agents:VisionEnabled`（默认 `true`）为总开关。它在两处使用：① 群消息带图片附件时，该轮回复路由到视觉模型看图作答；② **图库上传时用视觉模型自动生成图片描述**（5.4.4）。这属于「多模态理解」，**不是 OCR**。
+- **语音问答（ASR）**：把用户发来的**语音附件转写为文字**后注入模型上下文，数字员工即可「听懂」语音。**默认关闭**——`Agents:Audio:Enabled=false` 时行为与旧版完全一致（语音仅携元数据供前端播放）。开启且能解析出端点后生效：服务端在 `AgentGateway.BuildAttachmentsSectionAsync()` 组织附件区时，对 `audio` 类附件先调转写接口，再把转写文本当作该附件的「正文」走与文档附件**同一条**注入 / 预算路径（清单里标注「语音（已转写为文字，见下方）」，正文段标签为「语音转写」）。协议与 OpenAI 音频转写一致：`POST {endpoint}`，`multipart/form-data`（`file` + `model` [+ `language`]），响应 `{"text":"…"}`（非 JSON 纯文本亦兼容）。**降级语义**：不可用 / 非语音 / 读取失败 / 超限 / 请求失败 / 空文本一律返回 null 并记日志，**绝不抛出、绝不阻断对话**；结果按 `attachmentId` 缓存，同一段语音多轮只转一次（避免重复计费）。相关实现：`AudioOptions` / `AudioTranscriptionService`（`src/AguiGroupChat.Agents/`）。
+
+  | 配置键（`Agents:Audio`） | 默认 | 说明 |
+  |---|---|---|
+  | `Enabled` | `false` | 总开关；开启且能解析出端点才生效 |
+  | `Endpoint` | 空 | 转写端点完整 URL；留空时由 `Agents:Endpoint` 派生 `{base}/v1/audio/transcriptions` |
+  | `ApiKey` | 空 | 转写专用 Key；留空回退 `Agents:ApiKey` |
+  | `Model` | `whisper-1` | 转写模型名 |
+  | `Language` | 空 | 语言提示（ISO-639-1，如 `zh`）；留空自动识别 |
+  | `MaxBytes` | `26214400`（25MB） | 单文件字节上限 |
+  | `TimeoutSeconds` | `60` | 单次请求超时（夹紧到 5–600 秒） |
+  | `MaxFilesPerMessage` | `3` | 单条消息最多转写的语音文件数（控成本，0 = 禁用转写） |
+
+  环境变量等价覆盖：`Agents__Audio__Enabled` / `Agents__Audio__Endpoint` / `Agents__Audio__ApiKey` / `Agents__Audio__Model` / `Agents__Audio__Language`（`docker-compose.yml` 亦有对应 `${AGENTS_AUDIO_*}` 透传）。
 - **扫描件 / 图片的文本提取（OCR）**：**代码中未找到依据。** 知识库文档文本提取只覆盖文本类扩展名与 `docx/xlsx/pptx/pdf`（`AttachmentStore.TryReadTextAsync` + `OfficeTextExtractor`）；其中 PDF 由 `OfficeTextExtractor.ExtractPdf` 遍历内容流的 `Tj` / `TJ` 操作符提取**文本层**（PDFsharp / PdfPig 文本引擎），对**纯图片 / 扫描件 PDF 不会产生文本**；`image` 类附件（png/jpg/…）**不可提取文本**（`IsExtractable` 对 image 返回 false）。因此：图片、扫描件的文字不会被识别进知识库。
 
 ### 5.11 接口一览（速查）

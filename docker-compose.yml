@@ -230,6 +230,13 @@ services:
       # 不增加对 embedding 服务的压力，只是不让后台批量任务把交互检索挤到超时。
       Agents__Memory__InteractiveEmbeddingConcurrency: ${MEMORY_INTERACTIVE_EMBED_CONCURRENCY:-3}
       Agents__Memory__BackgroundEmbeddingConcurrency: ${MEMORY_BACKGROUND_EMBED_CONCURRENCY:-1}
+      # 多模态进阶·语音问答（ASR）：把用户发来的语音附件转写为文字后注入上下文（默认关，旧行为不变）。
+      # 开启且能解析出端点才生效：Endpoint 留空时由 Agents__Endpoint 派生 {base}/v1/audio/transcriptions。
+      Agents__Audio__Enabled: ${AGENTS_AUDIO_ENABLED:-false}
+      Agents__Audio__Endpoint: ${AGENTS_AUDIO_ENDPOINT:-}
+      Agents__Audio__ApiKey: ${AGENTS_AUDIO_API_KEY:-}
+      Agents__Audio__Model: ${AGENTS_AUDIO_MODEL:-whisper-1}
+      Agents__Audio__Language: ${AGENTS_AUDIO_LANGUAGE:-zh}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

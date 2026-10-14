@@ -51,6 +51,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// <summary>多轮视觉上下文：跟随提问时一并回喂的历史图片上限（来自 PromptBudget:MaxHistoryImages）。</summary>
     private readonly int MaxHistoryImages;
 
+    /// <summary>语音转写（多模态进阶 · 语音问答）：可选；未启用 / 未注册时语音附件仅携元数据（旧行为）。</summary>
+    private readonly AudioTranscriptionService? _audio;
+
     /// <summary>外部 AG-UI 会话首次建立时发送的话题历史条数上限（全量，存储层上限 5000）。</summary>
     private const int BridgeFullHistoryMax = 5000;
 
@@ -271,6 +274,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 轻量运行指标（可选，6.1）
         _metrics = new Lazy<MetricsService?>(() =>
             services.GetService(typeof(MetricsService)) as MetricsService);
+        // 语音转写（可选）：开启且配置了端点时，语音附件会先转写为文字再注入上下文
+        _audio = services.GetService(typeof(AudioTranscriptionService)) as AudioTranscriptionService;
         _topicSummary = new Lazy<TopicSummaryStore?>(() =>
             services.GetService(typeof(TopicSummaryStore)) as TopicSummaryStore);
         _feedback = new Lazy<MessageFeedbackStore?>(() =>
@@ -4415,15 +4420,29 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// 再把可提取文本按顺序内联。预算策略是“每文件各自的单文件上限 + 全局总预算”（参考主流聊天工具：多个文件都可被引用，
     /// 未自动注入全文的附件可随时经 read_attachment 按 ID 读取/分段续读），避免首个大文件挤掉后续附件。
     /// </summary>
-    private async Task<(StringBuilder Text, int Incomplete)> BuildAttachmentsSectionAsync(AgentInvocationContext context, CancellationToken ct)
+    /// <summary>测试钩子（internal）：把本轮附件组织成附件区文本（清单 + 可注入正文）。语音转写的注入即在此发生。</summary>
+    internal async Task<(StringBuilder Text, int Incomplete)> BuildAttachmentsSectionAsync(AgentInvocationContext context, CancellationToken ct)
     {
         var sb = new StringBuilder();
         if (context.Attachments is not { Count: > 0 } attachments || _attachmentStore is null) return (sb, 0);
 
         // 1) 预读每个可提取附件的首段文本（单文件上限）与全文长度；不可提取/提取失败以 null 标记。
+        //    语音（audio）附件：启用语音转写时，把转写文本当作它的「正文」走同一条注入 / 预算路径（单条消息限转 N 个）。
         var entries = new List<(AttachmentInfo Att, string? Text, int Total)>(attachments.Count);
+        var audioTranscribed = 0;
         foreach (var att in attachments)
         {
+            if (IsAudio(att))
+            {
+                string? transcript = null;
+                if (_audio is { IsEnabled: true } && audioTranscribed < _audio.MaxFilesPerMessage)
+                {
+                    audioTranscribed++;
+                    transcript = await _audio.TryTranscribeAsync(att, ct);
+                }
+                entries.Add((att, transcript, transcript?.Length ?? 0));
+                continue;
+            }
             if (!AttachmentStore.IsExtractable(att))
             {
                 entries.Add((att, null, 0));
@@ -4457,6 +4476,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 note = ++imageSeen <= MaxContextImages + MaxHistoryImages
                     ? "图片（已随本轮视觉上下文提供）"
                     : "图片（本轮视觉数量已达上限，仅元数据）";
+            else if (IsAudio(att))
+                note = text is { Length: > 0 }
+                    ? "语音（已转写为文字，见下方）"
+                    : _audio is { IsEnabled: true }
+                        ? "语音（本次未转写，内容未注入）"
+                        : "语音（未启用语音转写，内容无法被模型理解）";
             else if (text is null || text.Length == 0)
                 note = "无文本可提取（仅元数据）";
             else if (take >= total)
@@ -4475,7 +4500,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             var take = takes[i];
             if (take <= 0 || entries[i].Text is not { Length: > 0 } text) continue;
-            sb.Append($"\n【附件 {i + 1}. {entries[i].Att.Name} 正文】\n").Append(UntrustedBoundary.Wrap(text[..take]));
+            var label = IsAudio(entries[i].Att) ? "语音转写" : "正文";
+            sb.Append($"\n【附件 {i + 1}. {entries[i].Att.Name} {label}】\n").Append(UntrustedBoundary.Wrap(text[..take]));
         }
 
         // “未完整注入”的附件（被单文件或总预算截短的、以及完全没注入的）如实上报，供“文字被截断”排查。
@@ -4552,6 +4578,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
     private static bool IsImage(AttachmentInfo a)
         => a?.Kind == "image" || (a?.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ?? false);
+
+    /// <summary>是否为语音附件（kind=audio 或 MIME audio/*）——转写只对这类附件做。</summary>
+    private static bool IsAudio(AttachmentInfo a)
+        => a?.Kind == "audio" || (a?.ContentType?.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) ?? false);
 
     /// <summary>
     /// 语境发言决策（Contextual 模式）：把群最近消息作为上下文交给模型，

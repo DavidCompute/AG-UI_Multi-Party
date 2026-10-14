@@ -837,7 +837,8 @@ The server's `AgentGateway.BuildAttachmentsSectionAsync()` organizes a message's
 3. The **global total budget** is `PromptBudgetOptions.AttachmentMaxTextCharsTotal` (default `200_000` characters), allocated in order with earlier attachments taking priority; once the budget is exhausted, the remaining attachments keep only the manifest (their body text is not injected).
 4. Attachments not fully injected can be read in segments by the digital employee using the `read_attachment` tool (params `attachmentId` / `startIndex` / `maxChars`, default `12000`) — the tool description explicitly says "a single message can carry multiple attachments — when you need to answer by combining several attachments, call it once for each attachment you need to reference".
 5. **Images**: subject to the multi-turn vision cap, up to `PromptBudgetOptions.MaxContextImages` (default `4`) images are provided with this turn's vision context; beyond that, only metadata is given (`AgentGateway`'s `MaxContextImages` / `MaxHistoryImages`).
-6. The injected body text is wrapped with `UntrustedBoundary.Wrap()` (an untrusted-input boundary).
+6. **Voice (audio)**: **by default it carries metadata only for frontend playback and is not injected into the context** (`AttachmentStore.IsExtractable` returns false for audio). If `Agents:Audio:Enabled` is on and a transcription endpoint can be resolved, the server **first transcribes the voice to text** (OpenAI-compatible audio transcription API) while assembling the attachment section, then treats the transcript as that attachment's "body", going through the **same** injection / budget path as document attachments (the per-message transcription count is capped by `Agents:Audio:MaxFilesPerMessage`, default 3); failure / timeout / oversize all **silently skip injection** and never block the conversation. See §5.10 "Voice Q&A (ASR)".
+7. The injected body text is wrapped with `UntrustedBoundary.Wrap()` (an untrusted-input boundary).
 
 #### 2.6.9 The Outputs dialog (`📁`)
 
@@ -2544,6 +2545,20 @@ The two endpoints and their returned fields (`LIB_SET_PROBE`):
 ### 5.10 Multimodality and OCR
 
 - **Image understanding (vision)**: `Agents:VisionEnabled` (default `true`) is the master switch. It is used in two places: ① when a group message carries an image attachment, that turn's reply is routed to the vision model to answer from the image; ② **when uploading to an image library, the vision model automatically generates the image description** (5.4.4). This is "multimodal understanding", **not OCR**.
+- **Voice Q&A (ASR)**: transcribes the user's **voice attachment to text** and injects it into the model context, so a digital employee can "hear" voice messages. **Off by default** — with `Agents:Audio:Enabled=false` behaviour is identical to before (audio is metadata-only for frontend playback). Once enabled with a resolvable endpoint it takes effect: while assembling the attachment section, `AgentGateway.BuildAttachmentsSectionAsync()` first calls the transcription API for `audio`-class attachments, then treats the transcript as that attachment's "body", going through the **same** injection / budget path as document attachments (the manifest notes "voice (transcribed, see below)" and the body segment is labelled "voice transcript"). The protocol matches OpenAI audio transcription: `POST {endpoint}`, `multipart/form-data` (`file` + `model` [+ `language`]), response `{"text":"…"}` (non-JSON plain text is tolerated too). **Degradation**: unavailable / non-audio / read failure / oversize / request failure / empty text all return null and log, **never throw and never block the conversation**; results are cached by `attachmentId`, so the same clip is transcribed once across turns (avoiding double billing). Implementation: `AudioOptions` / `AudioTranscriptionService` (`src/AguiGroupChat.Agents/`).
+
+  | Config key (`Agents:Audio`) | Default | Notes |
+  |---|---|---|
+  | `Enabled` | `false` | Master switch; effective only once enabled with a resolvable endpoint |
+  | `Endpoint` | empty | Full transcription endpoint URL; when blank, derived from `Agents:Endpoint` as `{base}/v1/audio/transcriptions` |
+  | `ApiKey` | empty | Transcription-only key; a blank value falls back to `Agents:ApiKey` |
+  | `Model` | `whisper-1` | Transcription model name |
+  | `Language` | empty | Language hint (ISO-639-1, e.g. `zh`); blank means auto-detect |
+  | `MaxBytes` | `26214400` (25MB) | Per-file byte cap |
+  | `TimeoutSeconds` | `60` | Per-request timeout (clamped to 5–600s) |
+  | `MaxFilesPerMessage` | `3` | Max voice files transcribed per message (cost control; 0 = transcription disabled) |
+
+  Equivalent environment-variable overrides: `Agents__Audio__Enabled` / `Agents__Audio__Endpoint` / `Agents__Audio__ApiKey` / `Agents__Audio__Model` / `Agents__Audio__Language` (`docker-compose.yml` also passes through the matching `${AGENTS_AUDIO_*}`).
 - **Text extraction from scans / images (OCR)**: **no basis found in the code.** Knowledge-base document text extraction covers only text-class extensions and `docx/xlsx/pptx/pdf` (`AttachmentStore.TryReadTextAsync` + `OfficeTextExtractor`); of these, PDF is handled by `OfficeTextExtractor.ExtractPdf`, which walks the content stream's `Tj` / `TJ` operators to extract the **text layer** (PDFsharp / PdfPig text engine), and **produces no text for pure-image / scanned PDFs**; `image`-class attachments (png/jpg/…) **cannot have text extracted** (`IsExtractable` returns false for image). Therefore: the text in images and scans is not recognized into knowledge bases.
 
 ### 5.11 Endpoint list (quick reference)

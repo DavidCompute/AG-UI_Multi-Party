@@ -81,6 +81,8 @@ public static class AgentHosting
         services.AddSingleton<BridgeHealthService>();
         // 轻量运行指标（6.1）：进程内计数器，管理员控制台查看
         services.AddSingleton<MetricsService>();
+        // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
+        services.AddSingleton<AudioTranscriptionService>();
         // 沉淀文档润色器（可选：mock / 无 Key 时跳过）
         services.AddSingleton<ConclusionPolisher>();
         // 智能体 / 技能市场（3.3）：内置角色包一键导入

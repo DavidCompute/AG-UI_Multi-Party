@@ -64,7 +64,7 @@ public sealed class RedisContext : IDisposable
     /// <summary>已配置的 Redis 端点（诊断展示）。</summary>
     public IReadOnlyList<string> Endpoints
     {
-        get { try { return _redis.GetEndPoints().Select(e => e.ToString()).ToList(); } catch { return []; } }
+        get { try { return _redis.GetEndPoints().Select(e => e.ToString() ?? "").ToList(); } catch { return []; } }
     }
 
     public static string Serialize<T>(T value) => AguiJson.Serialize(value);

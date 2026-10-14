@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.208 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.208 Release Notes (current Windows desktop release)
+
+**版本说明**：**多模态进阶 · 语音问答（ASR）**——用户发来的**语音附件**可先转写为文字再注入模型上下文，数字员工从此能「听懂」语音消息（此前语音仅携元数据供前端播放、完全不进上下文）。默认关闭，开启并配置端点后生效。
+**Version note**: **Multimodality · voice Q&A (ASR)** — **voice attachments** are transcribed to text and injected into the model context, so digital employees can now "hear" voice messages (previously audio was metadata-only for playback and never reached the context). Off by default; active once enabled with an endpoint.
+
+## 语音问答（ASR）
+# Voice Q&A (ASR)
+
+中文：
+- **一句话**：语音附件 → 转写文字 → 当作该附件的「正文」，走**与文档附件同一条**注入 / 预算路径（网关组织附件区时完成）。
+- **默认关闭**：`Agents:Audio:Enabled=false` 时行为与旧版**完全一致**（语音仅元数据）；`AttachmentStore.IsExtractable` 对 audio 仍返回 `false`（转写是网关层额外做的，不改该语义）。
+- **端点**：`Agents:Audio:Endpoint`（留空时由 `Agents:Endpoint` 派生 `{base}/v1/audio/transcriptions`）；`ApiKey` 留空回退 `Agents:ApiKey`。协议 = OpenAI 音频转写（`multipart/form-data`：`file` + `model` [+ `language`]，响应 `{"text":"…"}`；非 JSON 纯文本亦兼容）。
+- **配置**：`Agents:Audio`——`Enabled` / `Endpoint` / `ApiKey` / `Model`（默认 `whisper-1`）/ `Language` / `MaxBytes`（默认 25MB）/ `TimeoutSeconds`（默认 60）/ `MaxFilesPerMessage`（默认 3）。
+- **降级**：不可用 / 非语音 / 读取失败 / 超限 / 请求失败 / 空文本一律**静默不注入**并记日志，**绝不抛出、绝不阻断对话**；附件清单如实标注「语音（已转写为文字，见下方）」「语音（本次未转写，内容未注入）」「语音（未启用语音转写，内容无法被模型理解）」。
+- **缓存**：转写结果按 attachmentId 缓存（同一段语音多轮只转一次，避免重复计费；上限 1000 条，超出清空重建）。
+English:
+- **In one line**: voice attachment → transcript text → treated as that attachment's **body**, going through the **same** injection / budget path as document attachments (assembled by the gateway's attachment section).
+- **Off by default**: with `Agents:Audio:Enabled=false` behaviour is **identical** to before (audio is metadata-only); `AttachmentStore.IsExtractable` still returns `false` for audio (transcription is an extra gateway-layer step and does not change that semantics).
+- **Endpoint**: `Agents:Audio:Endpoint` (when blank, derived from `Agents:Endpoint` as `{base}/v1/audio/transcriptions`); a blank `ApiKey` falls back to `Agents:ApiKey`. Protocol = OpenAI audio transcription (`multipart/form-data`: `file` + `model` [+ `language`], response `{"text":"…"}`; non-JSON plain text tolerated).
+- **Config**: `Agents:Audio` — `Enabled` / `Endpoint` / `ApiKey` / `Model` (default `whisper-1`) / `Language` / `MaxBytes` (default 25MB) / `TimeoutSeconds` (default 60) / `MaxFilesPerMessage` (default 3).
+- **Degradation**: unavailable / non-audio / read failure / oversize / request failure / empty text all **silently skip injection** and log, **never throw and never block the conversation**; the attachment list states it faithfully ("voice (transcribed, see below)" / "voice (not transcribed this time, content not injected)" / "voice (transcription disabled, content not understood by the model)").
+- **Cache**: transcripts are cached by attachmentId (the same clip is transcribed once across turns to avoid double billing; cap 1000 entries, cleared and rebuilt on overflow).
+
+## 测试
+# Tests
+
+中文：新增 `AudioTranscriptionTests` 17/17——默认关闭 / 端点派生与显式优先 / 成功解析（含非 JSON 纯文本、自定义模型）/ HTTP 失败与空文本与无 `text` 字段（含纯文本）/ 非语音与超限跳过（不发请求）/ 按附件缓存（第二次与清缓存后行为）/ 单条消息转写数量上限，以及网关级「转写文本确实进入附件区并带『语音转写』标签」/「未启用时保持元数据提示」。
+English: new `AudioTranscriptionTests` 17/17 — off-by-default / endpoint derivation and explicit precedence / successful parsing (incl. non-JSON plain text and a custom model) / HTTP failure, empty text and missing `text` field (incl. plain text) / non-audio and oversize skipped without a request / per-attachment caching (second call and after clearing) / per-message transcription cap, plus gateway-level "the transcript does enter the attachment section with the 'voice transcript' label" and "metadata-only note when disabled".
+
 # AG-UI 群聊桌面版 1.0.207 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.207 Release Notes (current Windows desktop release)
 
