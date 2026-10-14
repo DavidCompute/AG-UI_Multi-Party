@@ -78,6 +78,8 @@ On first use, just register an account.
 | `Agents:Audio:Endpoint` | empty | OpenAI-compatible transcription endpoint (e.g. speaches on another host, or a cloud whisper); when blank, derived from `Agents:Endpoint` |
 | `Agents:Audio:Model` | `Systran/faster-whisper-small` | Transcription model name |
 | `Agents:Audio:Language` | `zh` | Language hint (blank = auto-detect) |
+| `Agents:Audio:SpeechEnabled` | `false` | Server-side voice reply (TTS): synthesize the reply into an audio attachment (optional; needs `SpeechModel`/`SpeechVoice` and a reachable endpoint) |
+| `Agents:Audio:SpeechEndpoint` | empty | Speech synthesis endpoint (OpenAI-compatible); blank → derived from `Agents:Endpoint` |
 
 > Chat models (DeepSeek, etc.) still need network connectivity; **core features such as semantic memory / group chat / agent management work offline**.
 
@@ -88,6 +90,7 @@ On first use, just register an account.
   - Shared with the Docker edition: run `docker compose --profile voice up -d` on another host (see the repo root README) and set `Agents:Audio:Endpoint` to `http://<that host>:8001/v1/audio/transcriptions`;
   - Cloud: any whisper-compatible endpoint (with an `ApiKey`).
   Off by default (`Enabled=false`); once on, voice attachments are transcribed before injection, and failures / timeouts degrade silently without blocking the conversation.
+- **Server-side voice reply (TTS, optional)**: with `Agents:Audio:SpeechEnabled` on and `SpeechEndpoint` / `SpeechModel` / `SpeechVoice` set, the reply text is synthesized into an **audio attachment** on the message (the same recall path as skill-produced files); failures skip silently without blocking. Off by default (front-end 🔊 read-aloud already covers most needs).
 
 ## How Semantic Memory (RAG) Works
 

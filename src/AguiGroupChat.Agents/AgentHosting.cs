@@ -83,6 +83,8 @@ public static class AgentHosting
         services.AddSingleton<MetricsService>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
+        // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效
+        services.AddSingleton<SpeechSynthesisService>();
         // 沉淀文档润色器（可选：mock / 无 Key 时跳过）
         services.AddSingleton<ConclusionPolisher>();
         // 智能体 / 技能市场（3.3）：内置角色包一键导入

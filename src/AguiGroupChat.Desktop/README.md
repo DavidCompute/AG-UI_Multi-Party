@@ -77,6 +77,8 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
 | `Agents:Audio:Endpoint` | 空 | OpenAI 兼容转写端点（如另一台机器的 speaches、云端 whisper）；留空时由 `Agents:Endpoint` 派生 |
 | `Agents:Audio:Model` | `Systran/faster-whisper-small` | 转写模型名 |
 | `Agents:Audio:Language` | `zh` | 语言提示（留空自动识别） |
+| `Agents:Audio:SpeechEnabled` | `false` | 服务端语音回复（TTS）：把回复文本合成为音频附件挂到消息上（可选；需配 `SpeechModel`/`SpeechVoice` 与可达端点） |
+| `Agents:Audio:SpeechEndpoint` | 空 | 语音合成端点（OpenAI 兼容）；留空时由 `Agents:Endpoint` 派生 |
 
 > 对话模型（DeepSeek 等）仍需联网；**语义记忆 / 群聊 / 智能体管理**等核心功能离线可用。
 
@@ -87,6 +89,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.189
   - 与 Docker 版共用：在另一台机器跑 `docker compose --profile voice up -d`（见仓库根 README），把 `Agents:Audio:Endpoint` 设为 `http://<那台机器>:8001/v1/audio/transcriptions`；
   - 云端：任何 whisper 兼容端点（带 `ApiKey`）。
   默认关闭（`Enabled=false`）；开启后语音附件会先转写再注入，失败 / 超时静默降级、不阻断对话。
+- **服务端语音回复（TTS，可选）**：开启 `Agents:Audio:SpeechEnabled` 并配好 `SpeechEndpoint` / `SpeechModel` / `SpeechVoice` 后，回复文本会合成为**音频附件**挂在消息上（与技能产物同一条回挂路径）；失败静默、不阻断。默认关闭（前端 🔊 朗读已能满足大多数场景）。
 
 ## 语义记忆（RAG）工作原理
 

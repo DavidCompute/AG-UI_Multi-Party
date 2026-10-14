@@ -240,6 +240,13 @@ services:
       Agents__Audio__ApiKey: ${AGENTS_AUDIO_API_KEY:-}
       Agents__Audio__Model: ${AGENTS_AUDIO_MODEL:-Systran/faster-whisper-small}
       Agents__Audio__Language: ${AGENTS_AUDIO_LANGUAGE:-zh}
+      # 语音回复（TTS）：把回复文本合成为音频附件挂到消息上（默认关）。开启需同时配好 SpeechModel / SpeechVoice
+      # （speaches 的语音合成模型/音色，如 speaches-ai/piper-en_US-lessac-medium / huayan）。
+      Agents__Audio__SpeechEnabled: ${AGENTS_AUDIO_SPEECH_ENABLED:-false}
+      Agents__Audio__SpeechEndpoint: ${AGENTS_AUDIO_SPEECH_ENDPOINT:-http://speaches:8000/v1/audio/speech}
+      Agents__Audio__SpeechModel: ${AGENTS_AUDIO_SPEECH_MODEL:-}
+      Agents__Audio__SpeechVoice: ${AGENTS_AUDIO_SPEECH_VOICE:-}
+      Agents__Audio__SpeechFormat: ${AGENTS_AUDIO_SPEECH_FORMAT:-mp3}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

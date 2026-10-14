@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.210 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.210 Release Notes (current Windows desktop release)
+
+**版本说明**：**服务端语音回复（TTS）+ 语音链路的真实端点集成测试**——在 1.0.209「语音进 → 语音出」基础上补齐服务端能力：数字员工回复可合成为**音频附件**挂在消息上（供无浏览器 / 需分发音频的场景），并新增以真实 OpenAI 兼容服务为对象的集成测试（默认跳过）。
+**Version note**: **Server-side voice reply (TTS) + real-endpoint integration tests for the voice path** — complementing 1.0.209's "voice in → voice out": a digital employee's reply can now be synthesized into an **audio attachment** on the message (for browser-less / audio-sharing scenarios), plus new integration tests against a real OpenAI-compatible service (skipped by default).
+
+## 服务端语音回复（TTS）
+# Server-side voice reply (TTS)
+
+中文：
+- **做什么**：开启 `Agents:Audio:SpeechEnabled` 且能解析出语音合成端点时，数字员工**每次回复的正文**会经 `SpeechSynthesisService` 合成为音频，用与技能产物**同一条回挂路径**（`GroupHub.AttachMessageAttachmentsAsync`）挂到消息上（前端以 `<audio>` 内联播放条呈现，可下载）。覆盖主回复 / 流水线 / 交接代答 / 指派提升 / 审批恢复等收尾路径。
+- **协议**：OpenAI 语音合成——`POST {endpoint}` JSON `{model, input, voice, response_format}` 取音频字节；端点留空时由 `Agents:Endpoint` 派生 `{base}/v1/audio/speech`（与内置 speaches 一致）。
+- **鲁棒**：合成前把正文整理成适合朗读的纯文本（去代码块 / 链接 / 标题 / 强调符）并截到 `SpeechMaxChars`；失败 / 超时 / 空文本一律**静默不挂、绝不阻断回复**。默认关闭。
+- **与前端朗读（TTS）的分工**：前端 🔊（Web Speech API，离线、系统语音）是**默认且零配置**的“语音出”；服务端 TTS 是**可选增强**（产物是文件，可供非浏览器客户端、可分享/归档，或接入中文 TTS 服务提升音质）。
+English:
+- **What it does**: with `Agents:Audio:SpeechEnabled` on and a speech endpoint resolvable, every digital-employee **reply body** is synthesized to audio by `SpeechSynthesisService` and attached to the message via **the same recall path as skill-produced files** (`GroupHub.AttachMessageAttachmentsAsync`) — rendered as an inline `<audio>` player and downloadable. Covers the main reply, pipeline, relay, escalation and approval-resume finalization paths.
+- **Protocol**: OpenAI speech synthesis — `POST {endpoint}` JSON `{model, input, voice, response_format}` returning audio bytes; when the endpoint is blank it is derived from `Agents:Endpoint` as `{base}/v1/audio/speech` (matching the bundled speaches).
+- **Robust**: before synthesis the reply is cleaned into speakable plain text (code fences / links / headings / emphasis stripped) and truncated to `SpeechMaxChars`; failure / timeout / empty text all **silently skip, never blocking the reply**. Off by default.
+- **How it splits with front-end read-aloud**: the front-end 🔊 (Web Speech API, offline system voices) is the **default, zero-config** "voice out"; server-side TTS is an **optional enhancement** (the output is a file — usable by browser-less clients, shareable/archivable, or wired to a Chinese TTS service for better quality).
+
+## 配置
+# Configuration
+
+中文：`Agents:Audio:SpeechEnabled`（默认 `false`）/ `SpeechEndpoint`（留空派生 `/v1/audio/speech`）/ `SpeechModel` / `SpeechVoice` / `SpeechFormat`（默认 `mp3`）/ `SpeechMaxChars`（默认 1200）。Docker 对应 `AGENTS_AUDIO_SPEECH_*`；桌面见 `appsettings.json`。
+English: `Agents:Audio:SpeechEnabled` (default `false`) / `SpeechEndpoint` (blank → derived `/v1/audio/speech`) / `SpeechModel` / `SpeechVoice` / `SpeechFormat` (default `mp3`) / `SpeechMaxChars` (default 1200). Docker: `AGENTS_AUDIO_SPEECH_*`; desktop in `appsettings.json`.
+
+## 测试
+# Tests
+
+中文：新增 `SpeechSynthesisTests` 14/14（默认关 / 端点派生 / 成功入库为 audio 附件且校验请求 JSON / 格式→扩展名与 MIME / HTTP 失败降级 / 空文本不发请求 / 超长截断 / `ForSpeech` 清理 markdown）。新增 `AudioIntegrationTests` 2 例（**真实端点，默认跳过**）：`AGUI_ASR_TEST_ENDPOINT`+`AGUI_ASR_TEST_WAV` 真实转写、`AGUI_TTS_TEST_ENDPOINT/MODEL/VOICE` 真实合成；本地对内置 speaches 实测 **2/2 通过**。另在运行栈上做了应用级 e2e：经 `/agui/v1` 发一条带语音附件的消息，speaches 日志确认应用发起了 `POST /v1/audio/transcriptions` 且 200。
+English: new `SpeechSynthesisTests` 14/14 (off by default / endpoint derivation / success registered as an audio attachment with request-JSON assertions / format → extension and MIME / HTTP-failure degradation / empty text sends no request / over-long truncation / `ForSpeech` markdown cleanup). New `AudioIntegrationTests` 2 cases (**real endpoint, skipped by default**): real transcription via `AGUI_ASR_TEST_ENDPOINT`+`AGUI_ASR_TEST_WAV`, and real synthesis via `AGUI_TTS_TEST_ENDPOINT/MODEL/VOICE`; verified **2/2 locally** against the bundled speaches. Also ran an app-level e2e on the live stack: sent a message with a voice attachment through `/agui/v1`, and the speaches log confirms the app issued `POST /v1/audio/transcriptions` returning 200.
+
 # AG-UI 群聊桌面版 1.0.209 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.209 Release Notes (current Windows desktop release)
 

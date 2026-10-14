@@ -35,4 +35,24 @@ public sealed class AudioOptions
 
     /// <summary>单条消息最多转写的语音文件数（默认 3，控成本）。</summary>
     public int MaxFilesPerMessage { get; set; } = 3;
+
+    // ── 语音回复（TTS）：把数字员工的文字回复合成为音频附件挂到消息上 ──
+
+    /// <summary>是否启用语音回复（TTS）：回复文本合成为音频附件。默认关闭。</summary>
+    public bool SpeechEnabled { get; set; }
+
+    /// <summary>语音合成端点完整 URL；留空时由 <c>Agents:Endpoint</c> 派生 <c>{base}/v1/audio/speech</c>。</summary>
+    public string? SpeechEndpoint { get; set; }
+
+    /// <summary>语音合成模型（HF 仓库 id / 服务商模型名，如 <c>speaches-ai/piper-en_US-lessac-medium</c>）。</summary>
+    public string? SpeechModel { get; set; }
+
+    /// <summary>音色名（随模型而定，如 <c>zf_xiaoxiao</c> / <c>huayan</c> / <c>af_heart</c>）。</summary>
+    public string? SpeechVoice { get; set; }
+
+    /// <summary>输出格式（<c>mp3</c> / <c>wav</c> / <c>opus</c>；默认 mp3）。</summary>
+    public string SpeechFormat { get; set; } = "mp3";
+
+    /// <summary>合成正文长度上限（字符，默认 1200；过长只取前段，控成本）。</summary>
+    public int SpeechMaxChars { get; set; } = 1200;
 }
