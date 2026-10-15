@@ -1535,21 +1535,23 @@ Corresponding frontend behavior: private employees get the `isPrivate` badge �
 
 **Export** (`exportAgents` / `serializeAgent`; the frontend generates a `{ version:1, agents:[…] }` file locally):
 
-Fields output by `serializeAgent(a)`: `agentId, nickname, description, instructions, avatar, triggerMode, keywords, model, bridgeEndpoint, bridgeMode, personalMemoryEnabled, isPrivate, knowledgeBaseIds, imageLibraryIds, skills[{skillId,description,targetAgentId}], assignmentIds, escalationAgentId, skillDefIds, memoryProfile{memoryType,styleMode,personaCard,topK,personalTopK,minScore,personalMinScore}, allowedGroupIds`.
+Fields output by `serializeAgent(a)`: `agentId, nickname, description, instructions, avatar, triggerMode, keywords, model, bridgeEndpoint, bridgeMode, personalMemoryEnabled, isPrivate, knowledgeBaseIds, imageLibraryIds, skills[{skillId,description,targetAgentId}], assignmentIds, escalationAgentId, skillDefIds, schedule, requireApprovalToolNames, relayToAgentId, pipeline[{stepAgentId,prompt}], disableBridge, disableRelay, disableOrgRoute, memoryProfile{memoryType,styleMode,personaCard,topK,personalTopK,minScore,personalMinScore}, allowedGroupIds`.
 
 **The export does not contain** (sensitive/ownership fields; see the `serializeAgent` comment `exclude the sensitive field bridgeToken (not exported); ownerId is not exported (after import it belongs to the current user)`):
 
 - `bridgeToken` (bridge token): **not exported**;
-- `ownerId` (ownership): **not exported**;
-- `schedule` (scheduled task), `relayToAgentId` (handoff), `pipeline` (orchestration pipeline), `requireApprovalToolNames` (differentiated approval), `disableBridge/disableRelay/disableOrgRoute` (role-level stage overrides): **not included by `serializeAgent`, so export/import does not cover these fields**.
+- `ownerId` (ownership): **not exported**.
 
-**Import** (`importAgentsFromFile` → `POST /ag-ui/agents`, creating one by one; on an `agentId` conflict (409) it automatically blanks and retries with a rename):
+> Note: `schedule`, `requireApprovalToolNames`, `relayToAgentId`, `pipeline`, `disableBridge/disableRelay/disableOrgRoute` and `memoryProfile` **all round-trip** now (an earlier build omitted them and silently lost configuration; that is fixed).
 
-Import body fields: `agentId, nickname, description, instructions, avatar, triggerMode, keywords, model, bridgeEndpoint, bridgeMode, bridgeToken:null, personalMemoryEnabled, isPrivate, knowledgeBaseIds, imageLibraryIds, skills, assignmentIds, escalationAgentId, skillDefIds, memoryProfile`.
+**Import** (`importAgentsFromFile`, two passes: pass 1 `POST /ag-ui/agents` creates — reference-type fields stripped — and pass 2 `PUT /ag-ui/agents/{id}` writes assignment / escalation / relay / pipeline back; on an `agentId` conflict (409) it blanks and retries with a rename):
 
-- **The import body does not contain** `schedule`, `allowedGroupIds`, `relayToAgentId`, `pipeline`, `requireApprovalToolNames`, `disable*` (i.e. after import these fields are set to defaults / unrestricted).
+Import body fields mirror the export (see `buildAgentUpsertBody`) — including `schedule / requireApprovalToolNames / disable* / memoryProfile / skillDefIds`; **reference-type fields (`assignmentIds` / `escalationAgentId` / `relayToAgentId` / `pipeline`) are carried only in pass 2**.
+
+- `allowedGroupIds` **is imported**, but first filtered against the target instance's **existing groups** (omitted when no group information is available, so a nonexistent group cannot fail the whole employee).
 - `bridgeToken` is explicitly passed as `null` (**sensitive tokens are not imported**; the importer reconfigures them).
 - **After import it belongs to the current user**: the backend `BuildDefinition(..., ownerId: user.UserId)`, with `OwnerId` being the currently logged-in user.
+- If a reference target cannot be resolved yet: a failing pass-2 `PUT` **keeps the pass-1 state and is counted** (`agent.importRefWarn`), no longer failing the whole employee.
 - ID-conflict hint `agent.importConflict` = `({n} ID conflicts auto-renamed)`; result `agent.importDone` = `Import finished: {ok} succeeded, {failed} failed`.
 
 > Additional note: the Skill Library dialog (`#skillModal`) **has no import/export buttons**; import/export exist only in the digital-employee management toolbar and row actions (see 3.1.2, 3.1.4).
@@ -1563,7 +1565,7 @@ The following are deviations / easily-misunderstood points confirmed by checking
 1. **The form has no "Work Capabilities" section**: i18n has keys such as `agent.form.section.work` = `Work Capabilities`, `agent.form.enableWorkTools`, `agent.form.enableWorkToolsHint`, but this section is **not rendered** in `#agentFormView` of `index.html` (`grep` finds no hit). Likewise, keys such as `agent.form.section.route` (`Assignment / Escalation`), `agent.form.assignmentIds`, `agent.form.escalationAgent` exist but have **no form controls**.
 2. **`AssignmentIds` / `EscalationAgentId` are maintained by the org structure**: the form provides no controls; on edit, `saveAgent()` carries over the original values from `agentList` (empty for add).
 3. **`RelayToAgentId` / `Pipeline` / `RequireApprovalToolNames` have no form controls**: on edit, `saveAgent()` carries over the original values (to avoid a whole-row PUT silently clearing them); one-click orchestration's agent items can carry `relayToAgentId`.
-4. **Export/import does not cover some fields**: `serializeAgent` does not include `schedule`/`relayToAgentId`/`pipeline`/`requireApprovalToolNames`/`disable*`; the import body likewise does not include `schedule`/`allowedGroupIds`. That is, "export then import" will not bring back these kinds of configuration.
+4. **[Fixed]** Digital-employee export/import is now **lossless**: an earlier `serializeAgent` and import body omitted `schedule` / `relayToAgentId` / `pipeline` / `requireApprovalToolNames` / `disable*`, and the import dropped `allowedGroupIds`; all now round-trip, the import is **two-pass** (reference-type fields written in pass 2), and `allowedGroupIds` is filtered against the target instance's existing groups. Only `bridgeToken` (sensitive) and `ownerId` (ownership) are not exported.
 5. **The Skill Library dialog has no import/export buttons**: `#skillModal` only has "＋ New Skill / Close / ▶ Test run / Save Skill"; only at the digital-employee level are there 📥 Import / 📤 Export All.
 6. **Number of sections**: the task brief says "six collapsible sections"; besides these six, `afSectMemMicro` and `afSectExecStages` are also collapsible sub-blocks in the code; `afSectKb` and `afSectImgLib` have `data-collapse-key` but no body of the same name, and are in fact non-collapsible subheadings (`if (!body) return` in `initCollapsibleSections`).
 7. **Wording of `IsSkillTarget`**: phrasing it as "some built-in roles are always skill targets" is inaccurate — in the code `IsSkillTarget` is set at runtime (skill-chain sub-agents), and the persisted definition defaults to `false`.

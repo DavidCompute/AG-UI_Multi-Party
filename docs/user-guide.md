@@ -1533,21 +1533,23 @@
 
 **导出**（`exportAgents` / `serializeAgent`，前端本地生成 `{ version:1, agents:[…] }` 文件）：
 
-`serializeAgent(a)` 输出的字段：`agentId, nickname, description, instructions, avatar, triggerMode, keywords, model, bridgeEndpoint, bridgeMode, personalMemoryEnabled, isPrivate, knowledgeBaseIds, imageLibraryIds, skills[{skillId,description,targetAgentId}], assignmentIds, escalationAgentId, skillDefIds, memoryProfile{memoryType,styleMode,personaCard,topK,personalTopK,minScore,personalMinScore}, allowedGroupIds`。
+`serializeAgent(a)` 输出的字段：`agentId, nickname, description, instructions, avatar, triggerMode, keywords, model, bridgeEndpoint, bridgeMode, personalMemoryEnabled, isPrivate, knowledgeBaseIds, imageLibraryIds, skills[{skillId,description,targetAgentId}], assignmentIds, escalationAgentId, skillDefIds, schedule, requireApprovalToolNames, relayToAgentId, pipeline[{stepAgentId,prompt}], disableBridge, disableRelay, disableOrgRoute, memoryProfile{memoryType,styleMode,personaCard,topK,personalTopK,minScore,personalMinScore}, allowedGroupIds`。
 
 **导出不含**（敏感/归属字段，见 `serializeAgent` 注释 `排除敏感字段 bridgeToken（不导出）；ownerId 不导出（导入后归属当前用户）`）：
 
 - `bridgeToken`（桥接令牌）：**不导出**；
-- `ownerId`（归属）：**不导出**；
-- `schedule`（定时任务）、`relayToAgentId`（交接）、`pipeline`（流水线）、`requireApprovalToolNames`（差异化审批）、`disableBridge/disableRelay/disableOrgRoute`（角色级阶段覆盖）：**`serializeAgent` 未包含，故导出/导入不覆盖这些字段**。
+- `ownerId`（归属）：**不导出**。
 
-**导入**（`importAgentsFromFile` → `POST /ag-ui/agents`，逐条创建；`agentId` 冲突 409 时自动置空重试改名）：
+> 注：`schedule`（定时任务）、`requireApprovalToolNames`（差异化审批）、`relayToAgentId`（交接）、`pipeline`（流水线）、`disableBridge/disableRelay/disableOrgRoute`（角色级阶段覆盖）、`memoryProfile`（记忆拟人）**均已随导出往返**（早期版本曾遗漏而静默丢配置，现已修复）。
 
-导入体字段：`agentId, nickname, description, instructions, avatar, triggerMode, keywords, model, bridgeEndpoint, bridgeMode, bridgeToken:null, personalMemoryEnabled, isPrivate, knowledgeBaseIds, imageLibraryIds, skills, assignmentIds, escalationAgentId, skillDefIds, memoryProfile`。
+**导入**（`importAgentsFromFile`，两轮写入：第一轮 `POST /ag-ui/agents` 创建（剥离引用型字段），第二轮 `PUT /ag-ui/agents/{id}` 补写指派 / 提升 / 交接 / 流水线；`agentId` 冲突 409 时自动置空重试改名）：
 
-- **导入体不含** `schedule`、`allowedGroupIds`、`relayToAgentId`、`pipeline`、`requireApprovalToolNames`、`disable*`（即这些字段导入后被置默认/不设限）。
+导入体字段：与导出对齐（见 `buildAgentUpsertBody`）——含 `schedule / requireApprovalToolNames / disable* / memoryProfile / skillDefIds` 等；**引用型字段（`assignmentIds` / `escalationAgentId` / `relayToAgentId` / `pipeline`）仅在第二轮带上**。
+
+- `allowedGroupIds` **会导入**，但先按目标实例**已有分组**过滤（无可用分组信息时不携带，避免引用不存在分组而整条失败）。
 - `bridgeToken` 显式传 `null`（**敏感令牌不导入**，由导入者重新配置）。
 - **导入后归属当前用户**：后端 `BuildDefinition(..., ownerId: user.UserId)`，`OwnerId` 为当前登录用户。
+- 引用目标暂不可解析时：第二轮 `PUT` 失败则**保留第一轮状态并计数**（`agent.importRefWarn`），不再导致整条失败。
 - ID 冲突提示 `agent.importConflict`＝`（其中 {n} 个 ID 冲突已自动改名）`；结果 `agent.importDone`＝`导入完成：成功 {ok}，失败 {failed}`。
 
 > 另注：技能库弹窗（`#skillModal`）**没有导入/导出按钮**，导入/导出仅存在于数字员工管理工具栏与单行操作（见 3.1.2、3.1.4）。
@@ -1561,7 +1563,7 @@
 1. **表单无「工作能力」分区**：i18n 存在 `agent.form.section.work`＝`工作能力`、`agent.form.enableWorkTools`、`agent.form.enableWorkToolsHint` 等 key，但 `index.html` 的 `#agentFormView` 中**未渲染**该分区（`grep` 未命中）。同样 `agent.form.section.route`（`任务指派 / 问题提升`）、`agent.form.assignmentIds`、`agent.form.escalationAgent` 等 key 存在但**无表单控件**。
 2. **`AssignmentIds` / `EscalationAgentId` 由组织架构维护**：表单不提供控件；`saveAgent()` 编辑时从 `agentList` 沿用原值（新增为空）。
 3. **`RelayToAgentId` / `Pipeline` / `RequireApprovalToolNames` 无表单控件**：`saveAgent()` 编辑时沿用原值（避免整表 PUT 静默清空），一键编排的 agent 项可携带 `relayToAgentId`。
-4. **导出/导入不覆盖部分字段**：`serializeAgent` 不含 `schedule`/`relayToAgentId`/`pipeline`/`requireApprovalToolNames`/`disable*`；导入体同样不含 `schedule`/`allowedGroupIds`。即「导出再导入」不会带回这几类配置。
+4. **【已修复】**数字员工导出/导入**现已无损往返**：早期 `serializeAgent` 与导入体遗漏 `schedule`/`relayToAgentId`/`pipeline`/`requireApprovalToolNames`/`disable*`，导入还丢 `allowedGroupIds`；现已全部随导出往返，导入改为**两轮写入**（引用型字段第二轮补写），`allowedGroupIds` 先按目标实例已有分组过滤。仅 `bridgeToken`（敏感）与 `ownerId`（归属）不导出。
 5. **技能库弹窗无导入/导出按钮**：`#skillModal` 仅有「＋ 新增技能 / 关闭 / ▶ 试运行 / 保存技能」；数字员工级才有 📥 导入 / 📤 导出全部。
 6. **分区数量**：任务书称「六个折叠分区」，代码中除这六个外，`afSectMemMicro`、`afSectExecStages` 亦为可折叠子块；`afSectKb`、`afSectImgLib` 有 `data-collapse-key` 但无同名 body，实为不可折叠小标题（`initCollapsibleSections` 中 `if (!body) return`）。
 7. **`IsSkillTarget` 的表述**：文档若表述为“某些内置角色恒为技能目标”并不准确——代码中 `IsSkillTarget` 是运行期置位（技能链子代理），持久化定义默认 `false`。

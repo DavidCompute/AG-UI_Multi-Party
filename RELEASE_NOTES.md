@@ -20,6 +20,9 @@ English:
 中文：`docs/user-guide.md` / `en.md` §3.12（新增「随包携带的配置」与预览的技能名）。
 English: `docs/user-guide.md` / `en.md` §3.12 (the new "configuration carried with the pack" note and skill names in the preview).
 
+同轮文档修正（follow-up，无代码变更）：`docs/user-guide.md` / `en.md` §3.10 与 §3.11-4 —— 原文声称「导出/导入不覆盖 `schedule`/`relayToAgentId`/`pipeline`/`requireApprovalToolNames`/`disable*`，导入体不含 `schedule`/`allowedGroupIds`」，与代码不符：这些字段**早已随导出/导入无损往返**（两轮导入、`allowedGroupIds` 先按目标实例已有分组过滤），仅 `bridgeToken`/`ownerId` 不导出。已按实际行为修正；`docs/feature-review-2026-10.md` §8.3 第 4 项由「已知边界」改为「文档已修正」。
+Same-round doc correction (follow-up, no code change): `docs/user-guide.md` / `en.md` §3.10 and §3.11-4 — they claimed export/import "does not cover `schedule` / `relayToAgentId` / `pipeline` / `requireApprovalToolNames` / `disable*`" and that the import body omits `schedule` / `allowedGroupIds`, which does not match the code: those fields have long been **lossless on export/import** (two-pass import, `allowedGroupIds` filtered against existing groups) and only `bridgeToken` / `ownerId` are not exported. Corrected to match the actual behaviour; `docs/feature-review-2026-10.md` §8.3 item 4 moved from "known boundary" to "docs corrected".
+
 ## 测试
 # Tests
 

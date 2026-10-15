@@ -129,7 +129,7 @@
 | 1 | 表单无「工作能力」分区（i18n 有键无控件） | ℹ️ 已知边界 |
 | 2 | `AssignmentIds` / `EscalationAgentId` 由组织架构维护 | 📄 已按代码 |
 | 3 | `RelayToAgentId` / `Pipeline` / `RequireApprovalToolNames` 无控件 | ℹ️ 已知边界 |
-| 4 | 导出/导入不覆盖部分字段 | ℹ️ 已知边界 |
+| 4 | 导出/导入不覆盖部分字段 | 📄 1.0.241（文档已按实际修正；代码早已无损往返） |
 | 5 | 技能库弹窗无导入/导出按钮 | ℹ️ 已知边界 |
 | 6 | 分区数量表述 | 📄 已按代码 |
 | 7 | `IsSkillTarget` 表述 | 📄 已按代码 |
@@ -236,7 +236,7 @@
 ### 8.10 小结
 
 - **已关闭（✅）**：1.0.230 共 8 项（桥接能力协商、`bridge-health` 探测、`admin/config` 快照、配置治理 13 键、用户搜索、`?refresh=1` 缺陷、`BuiltinPptxSkills.Version`、`GET /admin/config` 消费）；1.0.231 共 11 项（`#authRemember`、help 内联兜底、`menu.tasks`/`docPreview.openFailed` 孤儿键、`applyAccentFromHex` 命名、`subAgentCandidates` 注释、`org_design` 加固、`TopK`/`PersonalTopK`/组织配型措辞、`SnapshotSigningKey` 注释、`§7.15-1/2/4` 三个测试、compose 暴露 `ClientTool__RequireAdmin`）；**1.0.232 共 1 项**（`advanceOnClick` 前端点击推进，见 7.14/9.9-4）；**1.0.233 共 1 项**（转场 `speed` 决定时长，见 7.6.3/7.14）。
-- **文档已按代码修正（📄）**：若干（详见上表）。
+- **文档已按代码修正（📄）**：若干（详见上表）；1.0.241 又根据实际代码修正了第 3 章 §3.10「导出/导入不覆盖部分字段」的陈旧描述（代码早已无损往返，仅 `bridgeToken`/`ownerId` 不导出）。
 - **非偏差 / 已知边界（ℹ️）**：若干。
 - **保留的人工项（🖐）**：帮助文案图标不精确、i18n 术语统一、撤回广播 / 私聊 mentions / 发言迁移话题的服务端说明、`orientation`/`spokes`、`ModelDownloadUrl`、`WorkToolsEnabled`、`*.skill.txt` 正文细节、`LoadAllowedOrigin`、桌面 WebView2 播放 E2E、导入迁移语义说明。
 - **部署相关（⚙️）**：§5.13 各项、`Memory:Enabled` 默认、`DecisionModel` 解耦。
