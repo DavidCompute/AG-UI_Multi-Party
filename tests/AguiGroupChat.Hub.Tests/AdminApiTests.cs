@@ -120,7 +120,9 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         foreach (var k in new[] { "agents", "totalAgents", "calls", "totalTokens", "up", "down", "cost", "flagged" })
             Assert.True(summary.TryGetProperty(k, out _), $"summary 缺字段 {k}");
         Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
-        Assert.True(d.GetProperty("pricing").TryGetProperty("configured", out _));
+        var pricing = d.GetProperty("pricing");
+        foreach (var k in new[] { "configured", "currency", "inputPerMillion", "outputPerMillion" })
+            Assert.True(pricing.TryGetProperty(k, out _), $"pricing 缺字段 {k}");
     }
 
     [Fact]

@@ -7081,6 +7081,18 @@ async function downloadOrgHealthReport() {
 }
 
 /** 组织体检报告·图表视图：拉同一端点，用结构化数据画 KPI / 调用量 Top 柱状 / 关注项。 */
+let orgHealthTrendRows = [];
+let orgHealthTrendPrice = null;
+let orgHealthTrendMetric = "calls";
+
+/** 趋势指标切换（调用次数 / Token / 成本）：仅重绘，不重新拉取数据。 */
+function setOrgHealthTrendMetric(metric) {
+  orgHealthTrendMetric = metric === "tokens" || metric === "cost" ? metric : "calls";
+  const box = $("orgHealthMetric");
+  if (box) box.querySelectorAll(".oh-metric-btn").forEach((b) => b.classList.toggle("active", b.dataset.metric === orgHealthTrendMetric));
+  renderOrgHealthTrend();
+}
+
 async function openOrgHealthCharts() {
   const days = Number($("perfRange") && $("perfRange").value) || 30;
   $("orgHealthModal").classList.remove("hidden");
@@ -7088,19 +7100,29 @@ async function openOrgHealthCharts() {
   $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.loading"))}</div>`;
   $("orgHealthBars").innerHTML = "";
   $("orgHealthFlags").innerHTML = "";
+  orgHealthTrendRows = []; orgHealthTrendPrice = null;
   const trend = $("orgHealthTrend"); if (trend) trend.innerHTML = "";
   const rate = $("orgHealthRate"); if (rate) rate.innerHTML = "";
+  const metricBox = $("orgHealthMetric");
+  if (metricBox) metricBox.querySelectorAll(".oh-metric-btn").forEach((b) => b.classList.toggle("active", b.dataset.metric === orgHealthTrendMetric));
   try {
     const res = await fetch(`/ag-ui/admin/org-health?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) { $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(errMsg(d, "HTTP " + res.status))}</div>`; return; }
+    orgHealthTrendPrice = d.pricing || null;
     renderOrgHealthCharts(d, days);
+    // 成本维度需要单价：未配置则禁用「成本」按钮，并将当前维度从成本回退到调用次数。
+    const canCost = !!(orgHealthTrendPrice && orgHealthTrendPrice.configured);
+    const costBtn = document.querySelector('#orgHealthMetric .oh-metric-btn[data-metric="cost"]');
+    if (costBtn) { costBtn.disabled = !canCost; costBtn.title = canCost ? "" : t("admin.orgHealthTrendNoPricing"); }
+    if (!canCost && orgHealthTrendMetric === "cost") setOrgHealthTrendMetric("calls");
     // 按日趋势（非致命：失败就不画折线）
     try {
       const ures = await fetch(`/ag-ui/admin/usage?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
       const ud = ures.ok ? await ures.json().catch(() => null) : null;
-      renderOrgHealthTrend((ud && ud.days) || []);
-    } catch { renderOrgHealthTrend([]); }
+      orgHealthTrendRows = (ud && ud.days) || [];
+    } catch { orgHealthTrendRows = []; }
+    renderOrgHealthTrend();
   } catch (ex) { $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(ex.message)}</div>`; }
 }
 function renderOrgHealthCharts(d, days) {
@@ -7140,28 +7162,43 @@ function renderOrgHealthCharts(d, days) {
     : `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.orgHealthNoFlag"))}</div>`;
 }
 
-/** 按日趋势折线（调用次数）：数据来自既有 /admin/usage 的按日汇总（与图表弹窗同窗口）。 */
-function renderOrgHealthTrend(days) {
+/** 把 /admin/usage 的一天行换算为当前所选指标的值（调用次数 / Token / 成本）。 */
+function orgHealthTrendValue(r) {
+  if (orgHealthTrendMetric === "tokens") return Number(r.totalTokens || 0);
+  if (orgHealthTrendMetric === "cost") {
+    const p = orgHealthTrendPrice || {};
+    if (!p.configured) return 0;
+    const inRate = Number(p.inputPerMillion || 0), outRate = Number(p.outputPerMillion || 0);
+    return inRate * Number(r.promptTokens || 0) / 1e6 + outRate * (Number(r.completionTokens || 0) + Number(r.reasoningTokens || 0)) / 1e6;
+  }
+  return Number(r.calls || 0);
+}
+
+/** 按日趋势折线：数据来自既有 /admin/usage 的按日汇总（与图表弹窗同窗口）；指标可切换（调用次数 / Token / 成本）。 */
+function renderOrgHealthTrend() {
   const el = $("orgHealthTrend");
   if (!el) return;
-  const rows = (days || []).map((r) => ({ date: r.date, calls: Number(r.calls || 0) }))
+  const rows = (orgHealthTrendRows || []).map((r) => ({ date: r.date, v: orgHealthTrendValue(r) }))
     .filter((r) => !!r.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (rows.length < 2) { el.innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.orgHealthTrendShort"))}</div>`; return; }
   const w = 800, h = 90, pad = 6;
-  const max = rows.reduce((m, r) => Math.max(m, r.calls), 0) || 1;
+  const max = rows.reduce((m, r) => Math.max(m, r.v), 0) || 1;
   const step = (w - 2 * pad) / (rows.length - 1);
   const yOf = (v) => (h - pad - (v / max) * (h - 2 * pad)).toFixed(1);
-  const pts = rows.map((r, i) => `${(pad + i * step).toFixed(1)},${yOf(r.calls)}`).join(" ");
+  const pts = rows.map((r, i) => `${(pad + i * step).toFixed(1)},${yOf(r.v)}`).join(" ");
   const area = `${pad},${(h - pad).toFixed(1)} ${pts} ${(w - pad).toFixed(1)},${(h - pad).toFixed(1)}`;
   const grid = [0, 0.5, 1].map((g) => `<line x1="0" y1="${yOf(max * g)}" x2="${w}" y2="${yOf(max * g)}" stroke="currentColor" stroke-opacity="0.12" stroke-width="1"/>`).join("");
+  const fmt = (v) => orgHealthTrendMetric === "cost"
+    ? ((orgHealthTrendPrice && orgHealthTrendPrice.currency) || "$") + v.toFixed(2)
+    : Math.round(v).toLocaleString() + " " + t(orgHealthTrendMetric === "tokens" ? "admin.orgHealthUnitTokens" : "admin.orgHealthUnitCalls");
   el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:90px;display:block">`
     + grid
     + `<polygon points="${area}" fill="var(--accent, #4f8cff)" fill-opacity="0.14"/>`
     + `<polyline points="${pts}" fill="none" stroke="var(--accent, #4f8cff)" stroke-width="2" vector-effect="non-scaling-stroke"/>`
     + `</svg>`
     + `<div class="oh-trend-meta">${escapeHtml(t("admin.orgHealthTrendMeta", {
-      from: rows[0].date, to: rows[rows.length - 1].date, days: rows.length,
-      max: max.toLocaleString(), total: rows.reduce((sum, r) => sum + r.calls, 0).toLocaleString(),
+      from: rows[0].date, to: rows[rows.length - 1].date,
+      max: fmt(max), total: fmt(rows.reduce((sum, r) => sum + r.v, 0)),
     }))}</div>`;
 }
 
@@ -13478,6 +13515,11 @@ function init() {
   $("perfChartBtn").onclick = openOrgHealthCharts;
   $("orgHealthClose").onclick = () => $("orgHealthModal").classList.add("hidden");
   $("orgHealthDownload").onclick = downloadOrgHealthReport;
+  const ohm = $("orgHealthMetric");
+  if (ohm) ohm.addEventListener("click", (e) => {
+    const b = e.target.closest(".oh-metric-btn");
+    if (b && !b.disabled) setOrgHealthTrendMetric(b.dataset.metric);
+  });
   $("orgHealthModal").addEventListener("click", (e) => { if (e.target === $("orgHealthModal")) $("orgHealthModal").classList.add("hidden"); });
   const pr = $("perfRange");
   if (pr) pr.onchange = loadAgentPerformance;

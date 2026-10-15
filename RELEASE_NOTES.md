@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.243 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.243 Release Notes (current Windows desktop release)
+
+**版本说明**：**组织体检图表的「按日趋势」支持指标切换**——可在**调用次数 / Token / 成本**三种维度间一键切换，复盘用量与花销的形状。
+**Version note**: **The org health chart's daily trend now switches metrics** — flip between **calls / tokens / cost** with one click to review the shape of usage and spend.
+
+## 变更
+# Changes
+
+中文：
+- **前端**：`#orgHealthModal` 的「按日趋势」标题旁新增**指标切换控件**（`#orgHealthMetric`，分段按钮：调用次数 / Token / 成本）——切换只**重绘折线**（不重新拉数据），折线与下方 meta（区间 · 共 N · 单日峰值 M）同步换单位：执行次数用「次」、用量用「Token」、花销用配置货币（如 `$`）。
+- **数据**：沿用既有 `GET /ag-ui/admin/usage?days=N` 的按日汇总（已含 `calls` / `totalTokens` / `promptTokens` / `completionTokens` / `reasoningTokens`），**无新增接口**。
+- **后端**：`GET /ag-ui/admin/org-health` 的 `pricing` 对象**补下两个单价字段** `inputPerMillion` / `outputPerMillion`（与 `/agent-performance` 一致），供前端在浏览器内按日估算成本；**向后兼容**（仅新增字段）。
+- **降级**：未配置单价（`pricing.configured=false`）时「成本」按钮**置灰并带提示**（`admin.orgHealthTrendNoPricing`），且若当前维度为成本则自动回退到调用次数；有效天数 `<2` 时仍显示提示文案而非空图。
+English:
+- **Front end**: next to the "Daily trend" title in `#orgHealthModal`, a **metric switch** (`#orgHealthMetric`, segmented buttons: calls / tokens / cost) is added — switching only **re-renders the line** (no refetch), and both the polyline and the meta line (range · N total · peak M) change units accordingly: calls show "calls", usage shows "tokens", spend shows the configured currency (e.g. `$`).
+- **Data**: reuses the existing `GET /ag-ui/admin/usage?days=N` daily summary (already carries `calls` / `totalTokens` / `promptTokens` / `completionTokens` / `reasoningTokens`) — **no new endpoint**.
+- **Backend**: the `pricing` object of `GET /ag-ui/admin/org-health` now **includes the two unit prices** `inputPerMillion` / `outputPerMillion` (matching `/agent-performance`), so the front end can estimate per-day cost in the browser; **backward compatible** (additive only).
+- **Degradation**: when no pricing is configured (`pricing.configured=false`) the **Cost** button is **greyed out with a hint** (`admin.orgHealthTrendNoPricing`), and if the current metric is cost it falls back to calls; with fewer than 2 effective days the hint text is still shown instead of an empty chart.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（图表视图的按日趋势补指标切换）与 §9.2.8（`org-health` 行注明 `pricing` 含单价字段）。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (the chart view's daily trend now documents the metric switch) and §9.2.8 (the `org-health` row notes `pricing` carries the unit-price fields).
+
+## 测试
+# Tests
+
+中文：`AdminApiTests.OrgHealth_ReturnsStructuredDataForCharts` 扩展为断言 `pricing` 含 `configured` / `currency` / `inputPerMillion` / `outputPerMillion`；`AdminApiIntegrationTests` 合跑 **13/13**。`node --check`（`app.js` / `zh.js` / `en.js`）、i18n 审计 **zh=en=1870，missing 0**、`check-i18n-keys`（868 处引用）、`check-orphan-keys`（890 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后，管理员，真实数据）：图表弹窗 **6 张 KPI 卡 / 12 条柱**；折线 12 个点；默认「调用次数」→ meta「2026-09-17 ~ 2026-10-14 · 共 960 次 · 单日峰值 219 次」；切到「Token」→ meta「共 14,878,030 Token · 单日峰值 3,598,713 Token」（折线仍 12 点）；「成本」按钮因未配置单价**正确置灰**，注入单价（2/8 每百万）后切到成本 → meta「共 $57.19 · 单日峰值 $14.16」；环形无反馈正确显示「—」；**无页面报错**。
+English: `AdminApiTests.OrgHealth_ReturnsStructuredDataForCharts` is extended to assert `pricing` carries `configured` / `currency` / `inputPerMillion` / `outputPerMillion`; `AdminApiIntegrationTests` runs **13/13**. `node --check` (`app.js` / `zh.js` / `en.js`), the i18n audit **zh=en=1870, missing 0**, `check-i18n-keys` (868 references), `check-orphan-keys` (890 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web, as admin, real data): the chart dialog shows **6 KPI cards / 12 bars**; the line has 12 points; default "calls" → meta "2026-09-17 ~ 2026-10-14 · 960 calls total · peak 219 calls"; switching to "Tokens" → meta "14,878,030 tokens total · peak 3,598,713 tokens" (line still 12 points); the **Cost** button is correctly **greyed out** with no pricing, and after injecting unit prices (2/8 per million) switching to cost → meta "$57.19 total · peak $14.16"; the donut correctly shows "—" with no feedback; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.242 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.242 Release Notes (current Windows desktop release)
 

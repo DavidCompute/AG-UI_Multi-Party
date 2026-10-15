@@ -581,7 +581,14 @@
         <div class="oh-trend-row">
           <div class="oh-donut"><div id="orgHealthRate"></div><div class="oh-donut-cap" data-i18n="admin.perfThRate">好评率</div></div>
           <div class="oh-trend-col">
-            <div class="oh-section-title" style="margin-top:0" data-i18n="admin.orgHealthTrend">按日趋势</div>
+            <div class="oh-trend-head">
+              <div class="oh-section-title" style="margin-top:0" data-i18n="admin.orgHealthTrend">按日趋势</div>
+              <div class="oh-metric" id="orgHealthMetric" role="group">
+                <button type="button" class="oh-metric-btn active" data-metric="calls" data-i18n="admin.orgHealthMetricCalls">调用次数</button>
+                <button type="button" class="oh-metric-btn" data-metric="tokens" data-i18n="admin.orgHealthMetricTokens">Token</button>
+                <button type="button" class="oh-metric-btn" data-metric="cost" data-i18n="admin.orgHealthMetricCost">成本</button>
+              </div>
+            </div>
             <div id="orgHealthTrend"></div>
           </div>
         </div>

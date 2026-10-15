@@ -281,6 +281,9 @@ public static class AdminApi
                 {
                     configured = pricing.Configured,
                     currency = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency,
+                    // 单价随包下发，供前端图表视图在「成本」维度按日估算（与 /agent-performance 一致）。
+                    inputPerMillion = pricing.InputPerMillion,
+                    outputPerMillion = pricing.OutputPerMillion,
                 },
                 summary = new
                 {
