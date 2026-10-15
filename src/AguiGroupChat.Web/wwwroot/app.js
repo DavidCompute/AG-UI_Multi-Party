@@ -6862,6 +6862,11 @@ async function loadEvalCases() {
     if (!res.ok || !d) { if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
     evalCasesCache = d.cases || [];
     evalAgentsCache = d.agents || [];
+    // 跑分基线随用例持久化：刷新 / 重开页签后仍能回显最近结果
+    evalResults.clear();
+    for (const c of evalCasesCache) {
+      if (c.lastRunAtMs) evalResults.set(c.caseId, { caseId: c.caseId, passed: !!c.lastPassed, reply: c.lastReply || "", error: c.lastError || "" });
+    }
     renderEvalRows();
   } catch { if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
 }

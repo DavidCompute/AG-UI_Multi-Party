@@ -119,6 +119,15 @@ public sealed class EvalApiTests : IClassFixture<AdminApiServerFixture>
             Assert.Contains(items, (i) => !i.GetProperty("passed").GetBoolean());
         }
 
+        // 跑分基线已持久化：重新列出用例应带 lastRunAtMs / lastPassed（页签回显 + 报告）
+        using (var list2 = Authed(HttpMethod.Get, "/ag-ui/admin/eval-cases", token))
+        {
+            var d2 = await (await _client.SendAsync(list2)).Content.ReadFromJsonAsync<JsonElement>();
+            var cases = d2.GetProperty("cases").EnumerateArray().ToList();
+            Assert.Contains(cases, (c) => c.GetProperty("lastRunAtMs").GetInt64() > 0);
+            Assert.Contains(cases, (c) => c.TryGetProperty("lastPassed", out _));
+        }
+
         // 非管理员 → 403
         var plain = await _client.PostAsJsonAsync("/ag-ui/user/register", new { username = "eval_plain_" + Guid.NewGuid().ToString("N")[..6], password = "secret1", nickname = "plain" });
         var plainToken = (await plain.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;

@@ -30,6 +30,18 @@ public sealed class EvalCase
 
     public long CreatedAtMs { get; set; }
     public string CreatedBy { get; set; } = "";
+
+    /// <summary>最近一次跑分的通过与否（null = 从未跑过）；随用例一起持久化，供报告与页签回显，也让报告能带「回归通过率」。</summary>
+    public bool? LastPassed { get; set; }
+
+    /// <summary>最近一次跑分时间（ms；0 = 未跑过）。</summary>
+    public long LastRunAtMs { get; set; }
+
+    /// <summary>最近一次跑分的回复摘录（截断保存，控体积）。</summary>
+    public string LastReply { get; set; } = "";
+
+    /// <summary>最近一次跑分的错误（若有）。</summary>
+    public string LastError { get; set; } = "";
 }
 
 /// <summary>

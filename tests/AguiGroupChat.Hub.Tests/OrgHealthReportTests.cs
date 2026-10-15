@@ -21,8 +21,13 @@ public sealed class OrgHealthReportTests
             ["a2"] = new AgentDefinition { AgentId = "a2", Nickname = "闲置专员", EscalationAgentId = "a1" },
         };
         var pricing = new PricingOptions { InputPerMillion = 2m, OutputPerMillion = 8m, Currency = "$" };
+        var evalCases = new List<EvalCase>
+        {
+            new() { CaseId = "e1", Name = "用例一", AgentId = "a1", LastPassed = true, LastRunAtMs = 1_700_000_000_000 },
+            new() { CaseId = "e2", Name = "用例二", AgentId = "a2", LastPassed = false, LastRunAtMs = 1_700_000_100_000 },
+        };
 
-        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, pricing, 1_700_000_000_000);
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, pricing, 1_700_000_000_000, evalCases);
 
         Assert.Contains("# 组织健康报告", md);
         Assert.Contains("## 二、需要关注（2）", md);
@@ -32,6 +37,8 @@ public sealed class OrgHealthReportTests
         Assert.Contains("提升 → 低分助手", md);
         Assert.Contains("$0.01", md); // 2×1000/1e6 + 8×500/1e6 = 0.006 → 0.01
         Assert.Contains("## 五、建议", md);
+        Assert.Contains("## 六、评测回归", md);
+        Assert.Contains("通过率 50%", md); // 2 条已跑，1 条通过
     }
 
     [Fact]

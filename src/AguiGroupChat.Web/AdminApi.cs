@@ -265,7 +265,7 @@ public static class AdminApi
             var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var byId = defs.ToDictionary(x => x.AgentId, x => x, StringComparer.Ordinal);
             var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
-                stats, byId, pricing, to.ToUnixTimeMilliseconds());
+                stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List());
             return Results.Ok(new { filename = $"org-health-{to:yyyyMMdd}.md", markdown = md });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

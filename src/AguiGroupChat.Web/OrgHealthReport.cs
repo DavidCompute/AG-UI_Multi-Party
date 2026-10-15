@@ -18,7 +18,8 @@ public static class OrgHealthReport
         IReadOnlyList<AgentPerformance.AgentStat> stats,
         IReadOnlyDictionary<string, AgentDefinition> defs,
         PricingOptions pricing,
-        long nowMs)
+        long nowMs,
+        IReadOnlyList<EvalCase>? evalCases = null)
     {
         var sb = new StringBuilder();
         var cur = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency;
@@ -108,6 +109,33 @@ public static class OrgHealthReport
         if (advice.Count == 0) advice.Add("组织运行健康，无需特别处理。");
         foreach (var a in advice) sb.AppendLine($"- {a}");
         sb.AppendLine();
+
+        // 评测回归（持久化基线）：让报告能带「回归通过率」
+        if (evalCases is not null)
+        {
+            var run = evalCases.Where(c => c.LastRunAtMs > 0).ToList();
+            var passedN = run.Count(c => c.LastPassed == true);
+            sb.AppendLine("## 六、评测回归");
+            if (evalCases.Count == 0)
+            {
+                sb.AppendLine("- 暂无评测用例（可在控制台「评测回归」创建）");
+            }
+            else
+            {
+                var rate = run.Count == 0 ? "—" : Math.Round((double)passedN / run.Count * 100) + "%";
+                sb.AppendLine($"- 用例：{evalCases.Count} 条；已跑过：{run.Count} 条（通过 {passedN}，通过率 {rate}）");
+                sb.AppendLine();
+                sb.AppendLine("| 用例 | 数字员工 | 结果 | 最近跑分 |");
+                sb.AppendLine("| --- | --- | --- | --- |");
+                foreach (var c in evalCases.OrderByDescending(c => c.LastRunAtMs))
+                {
+                    var result = c.LastRunAtMs == 0 ? "未跑过" : (c.LastPassed == true ? "通过" : "未通过");
+                    var at = c.LastRunAtMs == 0 ? "—" : DateTimeOffset.FromUnixTimeMilliseconds(c.LastRunAtMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+                    sb.AppendLine($"| {c.Name} | {Name(c.AgentId)} | {result} | {at} |");
+                }
+            }
+            sb.AppendLine();
+        }
         return sb.ToString();
     }
 }

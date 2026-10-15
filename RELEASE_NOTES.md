@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.225 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.225 Release Notes (current Windows desktop release)
+
+**版本说明**：**评测基线持久化**——每次跑分结果（通过与否 / 时间 / 回复摘录）随用例落库（扩展区「evalCases」）。好处：① 「评测回归」页刷新 / 重开后仍能看到**最近结果**；② **组织体检报告新增「六、评测回归」**（用例数 / 已跑过 / 通过率 + 明细表）。
+**Version note**: **Persisted eval baselines** — each run's result (pass/fail / time / reply excerpt) is saved with the case (in the "evalCases" extension area). Benefits: (1) the Eval & regression tab keeps showing **last results** after reload; (2) the **org health report gains a "6. Eval regression" section** (case count / run count / pass rate + detail table).
+
+## 评测基线持久化
+# Persisted eval baselines
+
+中文：`EvalCase` 新增 `LastPassed` / `LastRunAtMs` / `LastReply` / `LastError`：
+- **跑分时写入**：`POST /ag-ui/admin/eval-cases/run` 对每条用例跑完即把上述字段写回用例并 `store.Put`（随「evalCases」一起持久化、重启不丢），并广播变更让其它客户端页签刷新。
+- **编辑即失效**：`POST /ag-ui/admin/eval-cases`（更新）会清空该用例的跑分基线，避免报告 / 页签显示过期结果。
+- **页签回显**：「测评回归」页加载时从 `lastRunAtMs` / `lastPassed` 重建「最近结果」列（不再只存于内存、刷新即丢）。
+- **报告集成**：`GET /ag-ui/admin/org-health` 新增 **「## 六、评测回归」**——用例数 / 已跑过数 / **通过率** + （用例 × 数字员工 × 结果 × 最近跑分）明细表；无用例时提示去创建。
+- 实现：`OrgHealthReport.BuildMarkdown` 新增可选 `evalCases` 参数（默认 null → 不出该节）；纯函数仍便于单测。
+English: `EvalCase` gains `LastPassed` / `LastRunAtMs` / `LastReply` / `LastError`:
+- **Written on run**: `POST /ag-ui/admin/eval-cases/run` writes these back per case and `store.Put`s them (persisted with "evalCases", surviving restart) and broadcasts a change so other clients' tabs refresh.
+- **Invalidated on edit**: `POST /ag-ui/admin/eval-cases` (update) clears the case's baseline to avoid stale results in the report / tab.
+- **Tab rehydration**: the Eval & regression tab rebuilds the "last result" column from `lastRunAtMs` / `lastPassed` on load (no longer memory-only, so a reload keeps them).
+- **Report integration**: `GET /ag-ui/admin/org-health` gains a **"## 6. Eval regression"** section — case count / run count / **pass rate** + a table (case × agent × result × last run); a hint to create cases when there are none.
+- Implementation: `OrgHealthReport.BuildMarkdown` gains an optional `evalCases` parameter (default null → section omitted); still a pure function for unit testing.
+
+## 测试
+# Tests
+
+中文：`OrgHealthReportTests` 新增评测回归节断言（含「通过率 50%」）；`EvalApiTests` 新增基线持久化断言（跑分后重列用例带 `lastRunAtMs > 0` / `lastPassed`）；连同 AdminApi / DesktopComposition / AgentPerformance 合跑 **29/29**。i18n 审计 **zh=en=1809，missing 0**；`node --check` 通过。运行栈实测：建用例 → 跑分（`passed 0`）→ 重列用例 `lastRunAtMs=…/lastPassed=false`；`org-health` 报告含「## 六、评测回归」与通过率表。
+English: `OrgHealthReportTests` gains an eval-section assertion (incl. "pass rate 50%"); `EvalApiTests` gains a baseline-persistence assertion (after a run, re-listing cases carries `lastRunAtMs > 0` / `lastPassed`); **29/29** with AdminApi / DesktopComposition / AgentPerformance. The i18n audit is **zh=en=1809, missing 0**; `node --check` passes. Verified live: create a case → run (`passed 0`) → re-list shows `lastRunAtMs=…/lastPassed=false`; the `org-health` report contains "## 6. Eval regression" with a pass-rate table.
+
 # AG-UI 群聊桌面版 1.0.224 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.224 Release Notes (current Windows desktop release)
 

@@ -71,6 +71,14 @@ public static class EvalApi
                 @case.CreatedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 @case.CreatedBy = me;
             }
+            else
+            {
+                // 用例内容改了 → 旧跑分基线失效（否则报告/页签会显示过期的通过结果）
+                @case.LastPassed = null;
+                @case.LastRunAtMs = 0;
+                @case.LastReply = "";
+                @case.LastError = "";
+            }
 
             store.Put(@case);
             changes.Notify();
@@ -92,18 +100,27 @@ public static class EvalApi
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // ---- 一键跑分 ----
-        root.MapPost("/run", async (EvalRunRequest req, EvalCaseStore store, AgentEvalRunner runner, CancellationToken ct) =>
+        root.MapPost("/run", async (EvalRunRequest req, EvalCaseStore store, AgentEvalRunner runner, ChangeHub changes, CancellationToken ct) =>
         {
             var ids = req.CaseIds is { Length: > 0 } ? req.CaseIds.ToHashSet(StringComparer.Ordinal) : null;
             var cases = store.List().Where(c => ids is null ? c.Enabled : ids.Contains(c.CaseId)).ToList();
             var items = new List<EvalRunItem>(cases.Count);
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var sw = Stopwatch.StartNew();
             foreach (var c in cases)
             {
                 ct.ThrowIfCancellationRequested();
-                items.Add(await runner.RunAsync(c, ct));
+                var item = await runner.RunAsync(c, ct);
+                // 持久化跑分基线（随用例保存）：供页签回显与组织体检报告的「回归通过率」
+                c.LastPassed = item.Passed;
+                c.LastRunAtMs = nowMs;
+                c.LastReply = item.Reply;
+                c.LastError = item.Error;
+                store.Put(c);
+                items.Add(item);
             }
             sw.Stop();
+            if (cases.Count > 0) changes.Notify(); // 让其它客户端的「评测回归」页同步刷新
             return Results.Ok(new
             {
                 total = items.Count,
