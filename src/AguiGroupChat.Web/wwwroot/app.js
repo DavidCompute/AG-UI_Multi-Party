@@ -6833,6 +6833,7 @@ function isAdminPlus() { return roleRank() >= 2; }
 /* ============ 数字员工评测集 / 回归（管理员） ============ */
 let evalCasesCache = [];
 let evalAgentsCache = [];
+let evalRunsCache = [];
 let evalEditingId = null;
 const evalResults = new Map(); // caseId → 最近一次跑分结果
 
@@ -6862,16 +6863,44 @@ async function loadEvalCases() {
     if (!res.ok || !d) { if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
     evalCasesCache = d.cases || [];
     evalAgentsCache = d.agents || [];
+    evalRunsCache = d.runs || [];
     // 跑分基线随用例持久化：刷新 / 重开页签后仍能回显最近结果
     evalResults.clear();
     for (const c of evalCasesCache) {
       if (c.lastRunAtMs) evalResults.set(c.caseId, { caseId: c.caseId, passed: !!c.lastPassed, reply: c.lastReply || "", error: c.lastError || "" });
     }
+    renderEvalTrend();
     renderEvalRows();
   } catch { if (rows) rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
 }
 
 function evalAgentName(id) { const a = evalAgentsCache.find((x) => x.agentId === id); return a ? a.name : id; }
+
+/** 评分趋势（多次跑分折线）：固定 0–100% 纵轴，横轴为按时间升序的历次跑分。 */
+function renderEvalTrend() {
+  const wrap = $("evalTrendWrap");
+  const svg = $("evalTrendChart");
+  const meta = $("evalTrendMeta");
+  if (!wrap || !svg) return;
+  const runs = evalRunsCache || [];
+  if (runs.length < 2) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  const w = 800, h = 44, pad = 3;
+  const n = runs.length;
+  const step = n > 1 ? (w - 2 * pad) / (n - 1) : 0;
+  const yOf = (pct) => h - pad - (pct / 100) * (h - 2 * pad);
+  const pts = runs.map((r, i) => {
+    const pct = r.total > 0 ? (r.passed / r.total) * 100 : 0;
+    return `${(pad + i * step).toFixed(1)},${yOf(pct).toFixed(1)}`;
+  }).join(" ");
+  const grid = [0, 50, 100].map((g) => `<line x1="0" y1="${yOf(g).toFixed(1)}" x2="${w}" y2="${yOf(g).toFixed(1)}" stroke="currentColor" stroke-opacity="0.12" stroke-width="1"/>`).join("");
+  svg.innerHTML = grid + `<polyline points="${pts}" fill="none" stroke="var(--accent,#4f8cff)" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  if (meta) {
+    const last = runs[n - 1];
+    const pct = last.total > 0 ? Math.round((last.passed / last.total) * 100) : 0;
+    meta.textContent = t("admin.evalTrend", { n, pct, at: new Date(last.atMs).toLocaleString() });
+  }
+}
 
 function renderEvalRows() {
   const rows = $("adminEvalRows");
@@ -6958,6 +6987,11 @@ async function runEvalCases(ids) {
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) { if (meta) meta.textContent = errMsg(d, "HTTP " + res.status); return; }
     (d.items || []).forEach((it) => evalResults.set(it.caseId, it));
+    if ((d.total || 0) > 0) {
+      evalRunsCache.push({ atMs: Date.now(), total: d.total, passed: d.passed });
+      if (evalRunsCache.length > 200) evalRunsCache = evalRunsCache.slice(-200);
+      renderEvalTrend();
+    }
     renderEvalRows();
     if (meta) meta.textContent = t("admin.evalMeta", { passed: d.passed || 0, total: d.total || 0, sec: ((d.durationMs || 0) / 1000).toFixed(1) });
   } catch { if (meta) meta.textContent = t("admin.sysNetErr"); }

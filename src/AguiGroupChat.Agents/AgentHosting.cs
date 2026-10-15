@@ -463,6 +463,19 @@ public static class AgentHosting
         {
             services.GetService<ISectionStore>()?.AddSection("evalCases", snapshot, restore);
         }
+
+        // 跑分历史（评分趋势）单独一段：不动「evalCases」的持久化形状（向后兼容旧数据）
+        Func<object?> runSnapshot = () => store.Runs().Select(r => (object)r).ToList();
+        Action<JsonElement> runRestore = element => store.RestoreRuns(
+            element.Deserialize<List<EvalRunRecord>>(AguiJson.Options) ?? []);
+        if (persistence is not null)
+        {
+            persistence.AddSection("evalRuns", runSnapshot, runRestore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("evalRuns", runSnapshot, runRestore);
+        }
     }
 
     /// <summary>注册自动沉淀水位到扩展区「autoMemoryConsolidation」：重启后不会把已沉淀过的关键记忆再写一遍。</summary>

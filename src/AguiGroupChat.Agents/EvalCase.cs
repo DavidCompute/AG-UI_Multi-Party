@@ -44,12 +44,18 @@ public sealed class EvalCase
     public string LastError { get; set; } = "";
 }
 
+/// <summary>一次跑分的历史记录（用于「评分趋势」折线）。</summary>
+public sealed record EvalRunRecord(long AtMs, int Total, int Passed);
+
 /// <summary>
 /// 评测用例服务：内存持有 + 扩展区持久化（重启后不丢）。运行结果不落库（每次跑分即时返回）。
 /// </summary>
 public sealed class EvalCaseStore
 {
+    private const int MaxRuns = 200;
     private readonly ConcurrentDictionary<string, EvalCase> _cases = new(StringComparer.Ordinal);
+    private readonly object _runGate = new();
+    private readonly List<EvalRunRecord> _runs = [];
 
     public IReadOnlyList<EvalCase> List() => _cases.Values.OrderBy(c => c.CreatedAtMs).ToList();
 
@@ -72,6 +78,32 @@ public sealed class EvalCaseStore
         {
             if (string.IsNullOrWhiteSpace(c.CaseId)) continue;
             _cases[c.CaseId] = c;
+        }
+    }
+
+    /// <summary>记录一次跑分（保留最近 <see cref="MaxRuns"/> 次）——用于「评分趋势」。</summary>
+    public void RecordRun(long atMs, int total, int passed)
+    {
+        lock (_runGate)
+        {
+            _runs.Add(new EvalRunRecord(atMs, total, passed));
+            if (_runs.Count > MaxRuns) _runs.RemoveRange(0, _runs.Count - MaxRuns);
+        }
+    }
+
+    /// <summary>跑分历史（按时间升序）。</summary>
+    public IReadOnlyList<EvalRunRecord> Runs()
+    {
+        lock (_runGate) return _runs.ToList();
+    }
+
+    public void RestoreRuns(IEnumerable<EvalRunRecord> runs)
+    {
+        lock (_runGate)
+        {
+            _runs.Clear();
+            foreach (var r in runs) _runs.Add(r);
+            if (_runs.Count > MaxRuns) _runs.RemoveRange(0, _runs.Count - MaxRuns);
         }
     }
 }

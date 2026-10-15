@@ -103,6 +103,7 @@ public sealed class EvalApiTests : IClassFixture<AdminApiServerFixture>
             Assert.Equal(JsonValueKind.Array, d.GetProperty("cases").ValueKind);
             Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
             Assert.True(d.GetProperty("cases").GetArrayLength() >= 2);
+            Assert.Equal(JsonValueKind.Array, d.GetProperty("runs").ValueKind);
         }
 
         // 跑分：应得 1 通过 / 2 总数
@@ -126,6 +127,7 @@ public sealed class EvalApiTests : IClassFixture<AdminApiServerFixture>
             var cases = d2.GetProperty("cases").EnumerateArray().ToList();
             Assert.Contains(cases, (c) => c.GetProperty("lastRunAtMs").GetInt64() > 0);
             Assert.Contains(cases, (c) => c.TryGetProperty("lastPassed", out _));
+            Assert.True(d2.GetProperty("runs").GetArrayLength() >= 1); // 评分趋势历史已记录
         }
 
         // 非管理员 → 403

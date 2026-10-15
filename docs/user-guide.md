@@ -3601,7 +3601,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **员工绩效 tab（`#adminTabPerf`，`admin.tabPerf`，Operator+）**：按数字员工聚合**调用次数 / 总 token / 成本 / 👍👎 好评率 / 最近活跃**，支持 7 / 30 / 90 天窗口与一键刷新（按调用次数降序）；无反馈时好评率显示「—」。数据来自 `GET /ag-ui/admin/agent-performance?days=N`（`agui_usage` 用量行 + 消息反馈；名字取数字员工昵称，取不到回退 agentId）。聚合逻辑为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`），由 `AdminApi.cs` 挂载。**成本**按可配单价 `Agents:Pricing`（`InputPerMillion` / `OutputPerMillion` / `Currency` / `DailyBudget`；Docker：`AGENTS_PRICING_*`）估算（输入×prompt + 输出×（completion+reasoning））；单价为 0 时成本显示「—」；配了 `DailyBudget` 时顶部 meta 显示「已用 X%」、超预算标 ⚠。页内还有**「关注」列**（`flags`：`low-praise` 好评率偏低 / `idle` 窗口内无调用，确定性判据）与**建议栏**列出需关注的员工（反哺编排 / 组织体检）。点 **「📄 组织体检报告」** 可下载 Markdown 报告（`GET /ag-ui/admin/org-health?days=N`，含总览 / 关注项 / 绩效明细 / 组织架构 / 建议）。
 
-**评测回归 tab（`#adminTabEval`，`admin.tabEval`，Admin+）**：为数字员工建**金标准用例**（用例名 / 被测员工 / 提问 / 期望要点 / 判定方式 any·all / 启用），点「▶ 跑全部」或逐条「▶」跑分：对每条用例用目标员工的**提示词 + 正式回复模型**跑一次（不带工具 / 记忆 / 技能），按「期望要点是否出现」（大小写不敏感）判定**通过 / 未通过**并给回复摘录；汇总显示通过数与用时。用例经扩展区「evalCases」持久化（重启不丢）。接口见 §9.2.8；聚合与判定为纯函数，便于回归。新建/编辑走弹窗（**每次打开先清空再回填**）。跑分结果随用例**持久化**（`lastRunAtMs` / `lastPassed` / 回复摘录，重启不丢）：刷新 / 重开页签仍显示「最近结果」，编辑用例会清空基线；并并入「组织体检报告」的「六、评测回归」（通过率 + 明细）。
+**评测回归 tab（`#adminTabEval`，`admin.tabEval`，Admin+）**：为数字员工建**金标准用例**（用例名 / 被测员工 / 提问 / 期望要点 / 判定方式 any·all / 启用），点「▶ 跑全部」或逐条「▶」跑分：对每条用例用目标员工的**提示词 + 正式回复模型**跑一次（不带工具 / 记忆 / 技能），按「期望要点是否出现」（大小写不敏感）判定**通过 / 未通过**并给回复摘录；汇总显示通过数与用时。用例经扩展区「evalCases」持久化（重启不丢）。接口见 §9.2.8；聚合与判定为纯函数，便于回归。新建/编辑走弹窗（**每次打开先清空再回填**）。跑分结果随用例**持久化**（`lastRunAtMs` / `lastPassed` / 回复摘录，重启不丢）：刷新 / 重开页签仍显示「最近结果」，编辑用例会清空基线；并并入「组织体检报告」的「六、评测回归」（通过率 + 明细）。页内还有**评分趋势折线**（最近若干次跑分的通过率，纵轴固定 0–100%，≥ 2 次跑分显示；历史持久化于扩展区「evalRuns」，保留最近 200 次）。
 
 > 依据：`app.js` `roleRank` / `applyAdminTabVisibility` / `openAdminModal`；后端 `AdminApi.cs` 各端点过滤器见 §8.1.6。与 `docs/RBAC.md` §5「按生效角色细分菜单」现已一致。
 
@@ -4559,7 +4559,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/status` | 系统状态（连接 / 知聚 / 用户 / 消息 / 数字员工 / 内存 / 线程 / RAG / 文档转换能力 / **语音服务（ASR·TTS 配置与可达性 `voice`）**） | Operator |
 | GET | `/ag-ui/admin/agent-performance` | 数字员工绩效看板（按员工聚合调用次数 / token / 成本 / 👍👎 好评率 / 最近活跃，`?days=N`；另含 `pricing` 与预算字段与 `flags` 标记） | Operator |
 | GET | `/ag-ui/admin/org-health` | 组织体检报告（Markdown，`?days=N`）：总览 / 关注项 / 绩效明细 / 组织架构 / 建议 / **评测回归（通过率）** | Operator |
-| GET | `/ag-ui/admin/eval-cases` | 数字员工评测用例列表 + 被测员工候选 | 管理员 |
+| GET | `/ag-ui/admin/eval-cases` | 数字员工评测用例列表 + 被测员工候选 + 跑分历史（`runs`） | 管理员 |
 | POST | `/ag-ui/admin/eval-cases` | 新建 / 更新评测用例（name / agentId / prompt / expected[] / matchMode=any·all / enabled） | 管理员 |
 | DELETE | `/ag-ui/admin/eval-cases/{id}` | 删除评测用例 | 管理员 |
 | POST | `/ag-ui/admin/eval-cases/run` | 一键跑分（确定性关键词判定，返回逐条 passed / matched / missed / reply / durationMs） | 管理员 |

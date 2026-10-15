@@ -1845,6 +1845,7 @@ window.I18N_DICTS.zh = {
   "admin.evalEmpty": "暂无用例，点「＋ 新建用例」创建",
   "admin.evalRunning": "跑分中…（每条用例会真实调用模型，请稍候）",
   "admin.evalMeta": "{total} 条用例 · 通过 {passed} · 用时 {sec}s",
+  "admin.evalTrend": "评分趋势：最近 {n} 次跑分 · 最新通过率 {pct}%（{at}）",
   "admin.evalPass": "通过",
   "admin.evalFail": "未通过",
   "admin.evalThName": "用例",

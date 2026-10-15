@@ -33,7 +33,7 @@ public static class EvalApi
                 .Select(d => new { agentId = d.AgentId, name = string.IsNullOrWhiteSpace(d.Nickname) ? d.AgentId : d.Nickname })
                 .OrderBy(a => a.name, StringComparer.CurrentCulture)
                 .ToList();
-            return Results.Ok(new { cases = store.List(), agents });
+            return Results.Ok(new { cases = store.List(), agents, runs = store.Runs() });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         // ---- 新建 / 更新 ----
@@ -121,6 +121,7 @@ public static class EvalApi
             }
             sw.Stop();
             if (cases.Count > 0) changes.Notify(); // 让其它客户端的「评测回归」页同步刷新
+            if (items.Count > 0) store.RecordRun(nowMs, items.Count, items.Count(i => i.Passed)); // 评分趋势历史
             return Results.Ok(new
             {
                 total = items.Count,

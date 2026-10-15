@@ -1852,6 +1852,7 @@ window.I18N_DICTS.en = {
   "admin.evalEmpty": "No cases yet — click “+ New case” to create one",
   "admin.evalRunning": "Running… (each case makes a real model call, please wait)",
   "admin.evalMeta": "{total} cases · {passed} passed · {sec}s",
+  "admin.evalTrend": "Pass-rate trend: last {n} runs · latest {pct}% ({at})",
   "admin.evalPass": "Pass",
   "admin.evalFail": "Fail",
   "admin.evalThName": "Case",

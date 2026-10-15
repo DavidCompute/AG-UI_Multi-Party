@@ -1,3 +1,27 @@
+# AG-UI 群聊桌面版 1.0.226 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.226 Release Notes (current Windows desktop release)
+
+**版本说明**：**评分趋势（多次跑分折线）**——「评测回归」页新增一条**通过率折线**：每次跑分记录 `{时间, 用例数, 通过数}` 并持久化（扩展区「evalRuns」，保留最近 200 次），页内以固定 0–100% 纵轴展示最近若干次跑分的通过率趋势，一眼看出「改提示词/换模型后有没有变差」。
+**Version note**: **Pass-rate trend (a line over runs)** — the Eval & regression tab gains a **pass-rate line**: each run records `{time, cases, passed}` and persists it ("evalRuns" extension area, last 200 kept), drawn with a fixed 0–100% y-axis so you can see at a glance whether prompt/model changes made things worse.
+
+## 评分趋势
+# Pass-rate trend
+
+中文：
+- **记录与持久化**：`POST /ag-ui/admin/eval-cases/run` 跑完全部用例后记一条历史 `{atMs, total, passed}`（保留最近 200 条，扩展区「evalRuns」独立一段，不动「evalCases」的持久化形状、向后兼容）。
+- **接口**：`GET /ag-ui/admin/eval-cases` 新增 `runs` 数组（按时间升序）。
+- **前端**：「🧪 评测回归」页在工具栏下方新增**趋势折线**（≥ 2 次跑分才显示）：纵轴固定 0/50/100%，横轴为历次跑分；标题行显示「最近 N 次跑分 · 最新通过率 P%（时间）」。刚跑完会立即把本次追加到折线上（无需刷新）。
+English:
+- **Record & persist**: after running all cases, `POST /ag-ui/admin/eval-cases/run` appends a history entry `{atMs, total, passed}` (last 200 kept; a separate "evalRuns" extension section that leaves the "evalCases" persisted shape untouched and backward-compatible).
+- **API**: `GET /ag-ui/admin/eval-cases` now returns a `runs` array (ascending by time).
+- **Front end**: the "🧪 Eval & regression" tab gains a **trend line** below the toolbar (shown once ≥ 2 runs exist): fixed 0/50/100% y-axis, x-axis over runs; the caption reads "last N runs · latest pass rate P% (time)". A just-finished run is appended immediately without a refresh.
+
+## 测试
+# Tests
+
+中文：`EvalApiTests` 新增 `runs` 形状与历史累积断言（跑分后 `runs` 长度 ≥ 1）；连同 EvalScore / OrgHealthReport / AgentPerformance / AdminApi / DesktopComposition 合跑 **29/29**。i18n 审计 **zh=en=1810，missing 0**；`node --check` 通过。运行栈实测：跑 2 次后 `runs` 返回 2 条记录；Playwright 实测趋势折线与标题渲染正常、无前端报错。
+English: `EvalApiTests` gains `runs` shape and history-accumulation assertions (after a run, `runs` length ≥ 1); **29/29** with EvalScore / OrgHealthReport / AgentPerformance / AdminApi / DesktopComposition. The i18n audit is **zh=en=1810, missing 0**; `node --check` passes. Verified live: after 2 runs, `runs` returns 2 entries; Playwright confirms the trend line and caption render with no front-end errors.
+
 # AG-UI 群聊桌面版 1.0.225 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.225 Release Notes (current Windows desktop release)
 
