@@ -1158,6 +1158,7 @@ window.I18N_DICTS.zh = {
   "docPreview.play": "▶ 播放",
   "docPreview.exitPlay": "退出",
   "docPreview.playNotes": "📝 备注",
+  "docPreview.seek": "播放进度（拖动跳转）",
   "docPreview.download": "⬇ 下载原件",
   "docPreview.close": "关闭",
   "docPreview.unsupported": "该文件类型不支持在线查看，请下载后打开",

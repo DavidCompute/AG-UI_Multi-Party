@@ -3356,7 +3356,9 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 
 #### 7.8.6 控制条 3 秒隐没
 
-`showDocPlayBar`（`app.js:9233-9239`）：移除 `doc-play-hidden` 后 `setTimeout(3000)` 重新加上（CSS `.doc-play-bar.doc-play-hidden { opacity:0; pointer-events:none }`）。`#docPlayOverlay` 的 `mousemove` 会再次唤出。控制条内容：`◀ #docPlayPrev`、`#docPlayPage` 页码、`▶ #docPlayNext`、`📝 备注 #docPlayNotesBtn`、`退出 #docPlayExit`（`index.html:817-831`）。
+`showDocPlayBar`（`app.js:9233-9239`）：移除 `doc-play-hidden` 后 `setTimeout(3000)` 重新加上（CSS `.doc-play-bar.doc-play-hidden { opacity:0; pointer-events:none }`）。`#docPlayOverlay` 的 `mousemove` 会再次唤出。控制条内容：`#docPlaySeek` 进度条、`◀ #docPlayPrev`、`#docPlayPage` 页码、`▶ #docPlayNext`、`📝 备注 #docPlayNotesBtn`、`退出 #docPlayExit`（`index.html`）。
+
+**进度条拖动跳转**（`#docPlaySeek`，range 输入，1.0.234 起）：`updateDocPlaySeek` 在每次 `renderDocPlay` 后同步范围（`max = 页数-1`）与当前页；拖动触发 `input` → `scheduleDocSeek`（80ms 防抖）→ `docSeekGo(idx)` 跳到任意页（重置精灵步、播该页转场、`scheduleAutoAdvance`）。单页时进度条置灰（`disabled`）。拖动中多次重渲染由 `renderPageToCanvas` 的 `docRenderSeq` 丢弃过期帧。
 
 页码文案 `playLabel`（`app.js:9284-9297`）：有清单时显示 `幻灯片 i / N（步 j/k）`，精灵模式用精灵步 `i / N · step/steps`。
 

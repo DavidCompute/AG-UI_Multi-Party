@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.234 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.234 Release Notes (current Windows desktop release)
+
+**版本说明**：**PPT 在线播放支持拖拽进度条跳页**——播放控制条新增进度条（range），拖动即跳到任意页（此前只能按钮 / 键盘逐页）。
+**Version note**: **PPT online playback now supports seeking by dragging a progress bar** — the play control bar gains a seek slider (range); dragging jumps to any page (previously only buttons / keyboard page-by-page).
+
+## 变更
+# Changes
+
+中文：
+- **进度条 `#docPlaySeek`**：控制条最左侧新增 range；`updateDocPlaySeek` 在每次 `renderDocPlay` 后同步 `max = 页数-1` 与当前页；单页时 `disabled` 置灰。i18n `docPreview.seek`（悬浮提示 / aria）。
+- **拖动跳页 `docSeekGo(idx)`**：重置精灵步、渲染目标页、播该页转场（跨幻灯片时），并重设自动前进；输入带 80ms 防抖（`scheduleDocSeek`），拖动中多次重渲染由 `renderPageToCanvas` 的 `docRenderSeq` 丢弃过期帧。退出播放时清除防抖定时器。
+English:
+- **Progress bar `#docPlaySeek`**: a range at the left of the control bar; `updateDocPlaySeek` syncs `max = pages-1` and the current page after every `renderDocPlay`; greyed out (`disabled`) for a single page. i18n `docPreview.seek` (tooltip / aria).
+- **Seek `docSeekGo(idx)`**: resets the sprite step, renders the target page, plays that page's transition (on a slide change) and re-arms auto-advance; input is debounced 80 ms (`scheduleDocSeek`), and stale frames during a drag are dropped by `renderPageToCanvas`'s `docRenderSeq`. The debounce timer is cleared on exiting playback.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §7.8.6 控制条小节补充进度条与拖动跳转说明。
+English: `docs/user-guide.md` / `en.md` §7.8.6 (control bar) documents the progress bar and drag-to-seek.
+
+## 测试
+# Tests
+
+中文：浏览器实测（重建 web 后）：`#docPlaySeek` 在控制条内、`title` 已本地化；无 PDF → `disabled`；5 页 → `max=4`/`value=2`/可用；单页 → `disabled`；播放态跟随 `docPlayPage`（9 页 → `max=8`/`value=6`）；`docSeekGo` 在非播放态安全早退；页面无报错。`node --check` 与 i18n 审计（**zh=en=1823，missing 0**）、`check-orphan-keys`（index 841 引用）全过；重建 web 后健康 200。
+English: browser-verified (after rebuilding web): `#docPlaySeek` is inside the control bar and its `title` is localized; no PDF → `disabled`; 5 pages → `max=4`/`value=2`/enabled; single page → `disabled`; in playback it follows `docPlayPage` (9 pages → `max=8`/`value=6`); `docSeekGo` safely early-returns outside playback; no page errors. `node --check` and the i18n audit (**zh=en=1823, missing 0**), `check-orphan-keys` (841 index refs) all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.233 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.233 Release Notes (current Windows desktop release)
 

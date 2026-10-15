@@ -3362,7 +3362,9 @@ When not in playback but the preview modal is visible, `Escape` closes the previ
 
 #### 7.8.6 Control bar hides after 3 seconds
 
-`showDocPlayBar` (`app.js:9233-9239`): after removing `doc-play-hidden`, `setTimeout(3000)` adds it back (CSS `.doc-play-bar.doc-play-hidden { opacity:0; pointer-events:none }`). A `mousemove` on `#docPlayOverlay` brings it back. Control-bar contents: `◀ #docPlayPrev`, `#docPlayPage` page number, `▶ #docPlayNext`, `📝 备注 #docPlayNotesBtn`, `退出 #docPlayExit` (`index.html:817-831`).
+`showDocPlayBar` (`app.js:9233-9239`): after removing `doc-play-hidden`, `setTimeout(3000)` adds it back (CSS `.doc-play-bar.doc-play-hidden { opacity:0; pointer-events:none }`). A `mousemove` on `#docPlayOverlay` brings it back. Control-bar contents: the `#docPlaySeek` progress bar, `◀ #docPlayPrev`, `#docPlayPage` page number, `▶ #docPlayNext`, `📝 Notes #docPlayNotesBtn`, `Exit #docPlayExit` (`index.html`).
+
+**Seek by dragging the progress bar** (`#docPlaySeek`, a range input, since 1.0.234): `updateDocPlaySeek` syncs the range (`max = pages-1`) and the current page after every `renderDocPlay`; dragging fires `input` → `scheduleDocSeek` (80 ms debounce) → `docSeekGo(idx)` jumps to any page (resets the sprite step, plays that page's transition, `scheduleAutoAdvance`). With a single page the bar is greyed out (`disabled`). Rapid re-renders during a drag have stale frames dropped by `renderPageToCanvas`'s `docRenderSeq`.
 
 Page-label text `playLabel` (`app.js:9284-9297`): when a manifest exists it shows `幻灯片 i / N（步 j/k）`, and sprite mode uses the sprite step `i / N · step/steps`.
 

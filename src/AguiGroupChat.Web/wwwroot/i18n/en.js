@@ -1161,6 +1161,7 @@ window.I18N_DICTS.en = {
   "docPreview.play": "▶ Play",
   "docPreview.exitPlay": "Exit",
   "docPreview.playNotes": "📝 Notes",
+  "docPreview.seek": "Playback position (drag to seek)",
   "docPreview.download": "⬇ Download original",
   "docPreview.close": "Close",
   "docPreview.unsupported": "This file type can't be previewed; please download it instead",

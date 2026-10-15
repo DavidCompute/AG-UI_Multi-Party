@@ -10503,6 +10503,39 @@ async function docSlideGo(delta) {
   else await renderDocSlide();
 }
 
+/** 拖动进度条跳到指定播放页（与 docSlideGo 同源，但目标是任意页；拖动时防抖，避免反复重渲染）。 */
+async function docSeekGo(idx) {
+  if (!playModeActive() || !docPlayPdf) return;
+  const total = docPlayPdf.numPages;
+  const next = Math.min(Math.max(idx, 0), Math.max(0, total - 1));
+  if (next === docPlayPage) { updateDocPlaySeek(); return; }
+  const m = docPlayManifest;
+  const from = m ? m.pages[docPlayPage] : null;
+  const to = m ? m.pages[next] : null;
+  docPlayPage = next;
+  docSpriteStep = 0;               // 跳页重置精灵步（renderDocPlay 的 setupSprites 会再置 0）
+  clearAutoAdvance();
+  await renderDocPlay();
+  if (from && to && to.slide !== from.slide) playTransition(m.transitions[to.slide]);
+  scheduleAutoAdvance();
+}
+let docSeekTimer = null;
+function scheduleDocSeek(idx) {
+  if (docSeekTimer) clearTimeout(docSeekTimer);
+  docSeekTimer = setTimeout(() => { docSeekTimer = null; docSeekGo(idx); }, 80);
+}
+
+/** 同步播放进度条：范围 = 展开版页数（无清单时退化为普通 PDF 页数）。 */
+function updateDocPlaySeek() {
+  const el = $("docPlaySeek");
+  if (!el) return;
+  const pdf = playModeActive() ? docPlayPdf : docPdf;
+  const total = pdf ? pdf.numPages : 0;
+  el.max = String(Math.max(0, total - 1));
+  el.value = String(playModeActive() ? docPlayPage : docPdfPage);
+  el.disabled = total <= 1;
+}
+
 /** 进入全屏播放模式（真·全屏 + 幻灯片铺满，控制条自动隐没）。 */
 async function startDocPlay() {
   if (!docPdf || !docPreviewCtx) return;
@@ -10535,6 +10568,7 @@ async function startDocPlay() {
 /** 退出播放模式，回到弹窗内的当前页。 */
 function exitDocPlay() {
   clearAutoAdvance();
+  if (docSeekTimer) { clearTimeout(docSeekTimer); docSeekTimer = null; }
   if (docPlayRenderTimer) { clearTimeout(docPlayRenderTimer); docPlayRenderTimer = null; }
   clearSprites();
   // 播放版回到弹窗查看器：按当前幻灯片对齐到普通 PDF 的页
@@ -10566,6 +10600,7 @@ async function renderDocPlay() {
   } else clearSprites();
   $("docPlayPage").textContent = playLabel(pageIdx, pdf.numPages);
   $("docPlayNotes").textContent = playNotesFor(pageIdx);
+  updateDocPlaySeek();
 }
 
 /** 播放控制条：鼠标移动时显现，静置 3 秒后自动隐没（让幻灯片铺满屏幕）。 */
@@ -13495,6 +13530,8 @@ function init() {
   $("docPlayExit").onclick = exitDocPlay;
   // 播放：鼠标移动唤出控制条（静置自动隐没）
   $("docPlayOverlay").addEventListener("mousemove", () => { if (docPlaying) showDocPlayBar(); });
+  // 播放：拖动进度条跳页（防抖，避免拖拽中反复重渲染）
+  $("docPlaySeek").addEventListener("input", (e) => { if (docPlaying) scheduleDocSeek(Number(e.target.value) || 0); });
   // 播放：点击画面推进到下一步 / 下一页（尊重该页转场的 advClick；控制条按钮在舞台之外，不受影响）
   $("docPlayStage").addEventListener("click", () => {
     if (!docPlaying) return;
