@@ -123,6 +123,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             Assert.True(summary.TryGetProperty(k, out _), $"summary 缺字段 {k}");
         Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
         Assert.Equal(JsonValueKind.Array, d.GetProperty("users").ValueKind);
+        Assert.Equal(JsonValueKind.Array, d.GetProperty("groups").ValueKind);
         var pricing = d.GetProperty("pricing");
         foreach (var k in new[] { "configured", "currency", "inputPerMillion", "outputPerMillion" })
             Assert.True(pricing.TryGetProperty(k, out _), $"pricing 缺字段 {k}");
@@ -151,6 +152,31 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         // 无对应账号时名字回退为 userId
         Assert.Equal("user_u1", users["user_u1"].GetProperty("name").GetString());
         Assert.Equal(1, users["user_u2"].GetProperty("calls").GetInt64());
+    }
+
+    [Fact]
+    public async Task OrgHealth_IncludesPerGroupAggregation()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        usage.RecordUsage("agent_g", "user_g", "group_k1", 100, 50, 0);
+        usage.RecordUsage("agent_g", "user_g", "group_k1", 10, 10, 0); // 同键累加
+        usage.RecordUsage("agent_g", "user_g", "group_k2", 1, 1, 0);
+
+        using var req = Authed(HttpMethod.Get, "/ag-ui/admin/org-health?days=7", token);
+        var res = await _client.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+
+        var groups = d.GetProperty("groups").EnumerateArray()
+            .ToDictionary(g => g.GetProperty("groupId").GetString()!, g => g, StringComparer.Ordinal);
+        Assert.True(groups.ContainsKey("group_k1"), "groups 应含 group_k1");
+        Assert.Equal(2, groups["group_k1"].GetProperty("calls").GetInt64());
+        Assert.Equal(170, groups["group_k1"].GetProperty("totalTokens").GetInt64());
+        // 群不存在时名字回退为 groupId
+        Assert.Equal("group_k1", groups["group_k1"].GetProperty("name").GetString());
+        Assert.Equal(1, groups["group_k2"].GetProperty("calls").GetInt64());
     }
 
     [Fact]

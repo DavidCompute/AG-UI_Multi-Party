@@ -941,7 +941,7 @@ public sealed class AgentCatalog
     {
         if (_usage.Value is not { } usage) return;
         if (AgentGateway.AmbientContext.Value is not { } ctx) return;
-        usage.RecordUsage(ctx.AgentId, ctx.TriggerUserId, input, output, reasoning);
+        usage.RecordUsage(ctx.AgentId, ctx.TriggerUserId, ctx.GroupId, input, output, reasoning);
     }
 
     /// <summary>把“首个生成 token 的候选分布”摊平为 (token, logprob)（拿不到 logprobs 时返回空）。</summary>

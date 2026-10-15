@@ -287,6 +287,23 @@ public static class AdminApi
                 .OrderByDescending(x => x.calls)
                 .Take(50)
                 .ToList();
+            // 按「知聚（群）」聚合：哪个知聚最耗资源。注：群维度自本版起录入，历史用量无群信息不会出现在此表。
+            var groupNames = sp.GetService<GroupHub>()?.Store.AllGroups()
+                .ToDictionary(g => g.GroupId, g => g.GroupName, StringComparer.Ordinal)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            var groups = usage.GetGroupUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"))
+                .GroupBy(r => r.GroupId, StringComparer.Ordinal)
+                .Select(g => new
+                {
+                    groupId = g.Key,
+                    name = groupNames.TryGetValue(g.Key, out var gn) ? gn : g.Key,
+                    calls = g.Sum(x => x.Calls),
+                    totalTokens = g.Sum(x => x.TotalTokens),
+                    cost = Math.Round(g.Sum(x => pricing.EstimateCost(x.PromptTokens, x.CompletionTokens, x.ReasoningTokens)), 4),
+                })
+                .OrderByDescending(x => x.calls)
+                .Take(50)
+                .ToList();
             return Results.Ok(new
             {
                 filename = $"org-health-{to:yyyyMMdd}.md",
@@ -321,6 +338,8 @@ public static class AdminApi
                 }),
                 // 图表视图「触发者」维度：按调用次数降序的前 50 名（无反馈 / flags，故仅调用量 / token / 成本）。
                 users = users,
+                // 图表视图「知聚」维度：按调用次数降序的前 50 名知聚（同理无反馈 / flags）。
+                groups = groups,
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

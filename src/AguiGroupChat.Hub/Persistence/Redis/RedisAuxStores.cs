@@ -188,6 +188,47 @@ public sealed class RedisUsageStore : IUsageStore
         return result.OrderBy(u => u.Date).ToList();
     }
 
+    public void RecordGroupUsage(string date, string groupId, string agentId, string userId, long promptTokens, long completionTokens, long reasoningTokens)
+    {
+        var db = _ctx.Db;
+        var row = GroupRowKey(date, groupId, agentId, userId);
+        var tx = db.CreateTransaction();
+        _ = tx.HashIncrementAsync(row, "prompt", promptTokens);
+        _ = tx.HashIncrementAsync(row, "completion", completionTokens);
+        _ = tx.HashIncrementAsync(row, "reasoning", reasoningTokens);
+        _ = tx.HashIncrementAsync(row, "calls", 1);
+        _ = tx.SetAddAsync(GroupDateIndexKey, date);
+        _ = tx.KeyPersistAsync(row);
+        tx.Execute();
+    }
+
+    public IReadOnlyList<UsageAggregate> GetGroupUsageBetween(string fromDate, string toDate)
+    {
+        var db = _ctx.Db;
+        var result = new List<UsageAggregate>();
+        var dates = db.SetMembers(GroupDateIndexKey)
+            .Where(v => !v.IsNullOrEmpty).Select(v => v.ToString()).Where(d => d.CompareTo(fromDate) >= 0 && d.CompareTo(toDate) <= 0).ToArray();
+        if (dates.Length == 0) return result;
+        var server = _ctx.Mux.GetServer(_ctx.Mux.GetEndPoints()[0]);
+        foreach (var key in server.Keys(pattern: "agui:usageg:*"))
+        {
+            var parts = key.ToString()["agui:usageg:".Length..].Split(':');
+            if (parts.Length < 4) continue;
+            var date = parts[0];
+            if (date.CompareTo(fromDate) < 0 || date.CompareTo(toDate) > 0) continue;
+            var group = parts[1];
+            var agent = parts[2];
+            var user = string.Join(":", parts.Skip(3));
+            var fields = db.HashGetAll(key);
+            result.Add(new UsageAggregate(date, agent, user, Field(fields, "prompt"), Field(fields, "completion"), Field(fields, "reasoning"), Field(fields, "calls"))
+            { GroupId = group });
+        }
+        return result.OrderBy(u => u.Date).ThenBy(u => u.GroupId).ToList();
+    }
+
+    private static string GroupRowKey(string date, string groupId, string agentId, string userId) => $"agui:usageg:{date}:{groupId}:{agentId}:{userId}";
+    private static string GroupDateIndexKey => "agui:usageg:dates";
+
     public void ClearAll() => _ctx.FlushAguiKeys();
 
     private long GetRowTotal(string key)

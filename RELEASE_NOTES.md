@@ -1,3 +1,37 @@
+# AG-UI 群聊桌面版 1.0.247 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.247 Release Notes (current Windows desktop release)
+
+**版本说明**：**图表视图维度再加「知聚」**——回答「**哪个知聚最耗资源**」。为此新增按知聚聚合的用量表（**零迁移风险**）。
+**Version note**: **The chart view gains a "groups" dimension** — answering "**which group consumes the most**". This adds a per-group usage aggregate table (**zero migration risk**).
+
+## 变更
+# Changes
+
+中文：
+- **存储**：新增聚合表 `agui_usage_group(usage_date, group_id, agent_id, user_id, prompt/completion/reasoning/calls)`，主键 `(日期, 知聚, 员工, 触发者)`，仅用 `CREATE TABLE IF NOT EXISTS` 建表——**不修改既有 `agui_usage` 表、无需任何迁移**，旧库启动自动建表。SQLite / MySQL / Postgres / Redis / 内存五套实现同步支持。
+- **接口**：`IUsageStore` 新增 `RecordGroupUsage` 与 `GetGroupUsageBetween`；`AgentUsageService.RecordUsage` 新增带 `groupId` 的重载（**同时写两张表**；无群上下文时只写原表，旧 5 参重载保留 → 既有调用/测试不受影响）；用量记录点（`AgentCatalog` / `UsageCaptureChatClient`）改为传入 `AmbientContext.GroupId`。
+- **接口出参**：`GET /ag-ui/admin/org-health` 结构化数据**新增 `groups[]`**（按知聚聚合调用量 / token / 成本；名字从群库解析，取不到回退 groupId；取调用次数前 50），**向后兼容**。
+- **前端**：柱状图**维度切换**在「数字员工 / 触发者」基础上**新增「知聚」**（三档）；空态文案改为**维度化**（非员工维度显示「该维度暂无用量（自本版起按维度记录）」）。
+- **注意**：群维度**自本版起**录入——**历史用量无群信息故不计入**（这是无法回填的）。
+English:
+- **Storage**: a new aggregate table `agui_usage_group(usage_date, group_id, agent_id, user_id, prompt/completion/reasoning/calls)` with primary key `(date, group, employee, trigger)`, created with `CREATE TABLE IF NOT EXISTS` only — **the existing `agui_usage` table is untouched and no migration is needed**; existing databases create the table on startup. All five implementations (SQLite / MySQL / Postgres / Redis / in-memory) support it.
+- **Interface**: `IUsageStore` gains `RecordGroupUsage` and `GetGroupUsageBetween`; `AgentUsageService.RecordUsage` gains a `groupId` overload (**writing both tables**; without a group context only the original table is written, and the old 5-arg overload is kept so existing call sites / tests are unaffected); usage recording points (`AgentCatalog` / `UsageCaptureChatClient`) now pass `AmbientContext.GroupId`.
+- **Endpoint output**: the structured data of `GET /ag-ui/admin/org-health` **adds `groups[]`** (calls / tokens / cost aggregated per group; name resolved from the group store, falling back to groupId; top 50 by calls), **backward compatible**.
+- **Front end**: the bar chart's **dimension switch** gains **"groups"** alongside "employees / triggered by" (three options); the empty state is now **dimension-aware** (non-employee dimensions show "No usage for this dimension yet (recorded since this version)").
+- **Note**: the group dimension is recorded **from this version on** — **historical usage has no group info and is therefore not counted** (impossible to backfill).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（维度切换加「知聚」）与 §9.2.8（`org-health` 行补 `groups`）；`ROADMAP.md` §6.5 补知聚维度。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (the dimension switch gains "groups") and §9.2.8 (the `org-health` row notes `groups`); `ROADMAP.md` §6.5 records the group dimension.
+
+## 测试
+# Tests
+
+中文：`AdminApiTests` 新增 `OrgHealth_IncludesPerGroupAggregation`（`group_k1` → calls=2 / tokens=170、`group_k2` → calls=1，且**群不存在时名字回退为 groupId**）；`OrgHealth_ReturnsStructuredDataForCharts` 补断言 `groups` 为数组。`AdminApiIntegrationTests` + `AgentUsageServiceTests` + `OrgHealthReportTests` 合跑 **21/21**；`Usage|RedisStore` 筛选 **18/18**。`node --check`、i18n 审计 **zh=en=1877，missing 0**、`check-i18n-keys`（872 处引用）、`check-orphan-keys`（897 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后，管理员）：接口 `groups` 为数组（真实历史为空，因无群维度）；维度切换三档正常；切「知聚」→ 空态文案「该维度暂无用量（自本版起按维度记录）」；注入合成知聚后渲 2 条（首条「产品推广知聚 120」）；**无页面报错**。
+English: `AdminApiTests` gains `OrgHealth_IncludesPerGroupAggregation` (`group_k1` → calls=2 / tokens=170, `group_k2` → calls=1, and **the name falls back to the groupId when the group does not exist**); `OrgHealth_ReturnsStructuredDataForCharts` now asserts `groups` is an array. `AdminApiIntegrationTests` + `AgentUsageServiceTests` + `OrgHealthReportTests` run **21/21**; the `Usage|RedisStore` filter **18/18**. `node --check`, the i18n audit **zh=en=1877, missing 0**, `check-i18n-keys` (872 references), `check-orphan-keys` (897 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web, as admin): the endpoint's `groups` is an array (empty for real history, since there is no group dimension); the three-way dimension switch works; switching to "groups" shows the empty state "No usage for this dimension yet (recorded since this version)"; injecting synthetic groups renders 2 bars (first "产品推广知聚 120"); **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.246 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.246 Release Notes (current Windows desktop release)
 

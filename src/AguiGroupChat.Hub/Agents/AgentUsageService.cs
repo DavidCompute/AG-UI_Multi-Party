@@ -27,13 +27,22 @@ public sealed class AgentUsageService
     /// <summary>当前 UTC 日期（YYYY-MM-DD，配额 / 统计按 UTC 日切分，行为可预测）。</summary>
     public static string Today() => DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
 
-    /// <summary>记录一次模型调用用量（幂等累加）。</summary>
+    /// <summary>记录一次模型调用用量（幂等累加；不含知聚维度，供测试 / 无群上下文场景）。</summary>
     public void RecordUsage(string agentId, string userId, long promptTokens, long completionTokens, long reasoningTokens)
+        => RecordUsage(agentId, userId, "", promptTokens, completionTokens, reasoningTokens);
+
+    /// <summary>记录一次模型调用用量（幂等累加）：同时写「日期+员工+触发者」与（有知聚时）「日期+知聚+员工+触发者」两张聚合表。</summary>
+    public void RecordUsage(string agentId, string userId, string groupId, long promptTokens, long completionTokens, long reasoningTokens)
     {
         if (promptTokens <= 0 && completionTokens <= 0 && reasoningTokens <= 0) return;
         try
         {
-            _store.RecordUsage(Today(), agentId, userId, Math.Max(0, promptTokens), Math.Max(0, completionTokens), Math.Max(0, reasoningTokens));
+            var date = Today();
+            var p = Math.Max(0, promptTokens);
+            var c = Math.Max(0, completionTokens);
+            var r = Math.Max(0, reasoningTokens);
+            _store.RecordUsage(date, agentId, userId, p, c, r);
+            if (!string.IsNullOrEmpty(groupId)) _store.RecordGroupUsage(date, groupId, agentId, userId, p, c, r);
         }
         catch (Exception ex)
         {

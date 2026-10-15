@@ -30,6 +30,27 @@ public sealed class RelationalUsageStore : IUsageStore
         cmd.ExecuteNonQuery();
     }
 
+    public void RecordGroupUsage(string date, string groupId, string agentId, string userId, long prompt, long completion, long reasoning)
+    {
+        using var conn = _db.Open();
+        using var cmd = conn.CreateCommand();
+        // 按知聚聚合行：同一 日期+知聚+智能体+触发者 已存在时增量累加。
+        cmd.CommandText = _db.Dialect.IncrementUpsert(
+            "agui_usage_group",
+            "usage_date, group_id, agent_id, user_id, prompt_tokens, completion_tokens, reasoning_tokens, calls",
+            "@d, @g, @a, @u, @p, @c, @r, 1",
+            "usage_date, group_id, agent_id, user_id",
+            "prompt_tokens, completion_tokens, reasoning_tokens, calls");
+        cmd.AddWithValue("p", prompt);
+        cmd.AddWithValue("c", completion);
+        cmd.AddWithValue("r", reasoning);
+        cmd.AddWithValue("d", date);
+        cmd.AddWithValue("g", groupId);
+        cmd.AddWithValue("a", agentId);
+        cmd.AddWithValue("u", userId);
+        cmd.ExecuteNonQuery();
+    }
+
     public long GetUserUsage(string userId, string date)
     {
         using var conn = _db.Open();
@@ -66,11 +87,38 @@ public sealed class RelationalUsageStore : IUsageStore
         return list;
     }
 
-    public void ClearAll()
+    public IReadOnlyList<UsageAggregate> GetGroupUsageBetween(string fromDate, string toDate)
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM agui_usage";
-        cmd.ExecuteNonQuery();
+        cmd.CommandText = """
+            SELECT usage_date, group_id, agent_id, user_id, prompt_tokens, completion_tokens, reasoning_tokens, calls
+            FROM agui_usage_group
+            WHERE usage_date BETWEEN @from AND @to
+            ORDER BY usage_date, group_id, agent_id, user_id
+            """;
+        cmd.AddWithValue("from", fromDate);
+        cmd.AddWithValue("to", toDate);
+        var list = new List<UsageAggregate>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new UsageAggregate(
+                reader.GetString(0), reader.GetString(2), reader.GetString(3),
+                reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7))
+            { GroupId = reader.GetString(1) });
+        }
+        return list;
+    }
+
+    public void ClearAll()
+    {
+        using var conn = _db.Open();
+        foreach (var sql in new[] { "DELETE FROM agui_usage", "DELETE FROM agui_usage_group" })
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
     }
 }

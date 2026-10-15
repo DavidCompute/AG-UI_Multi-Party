@@ -180,6 +180,18 @@ public sealed class PostgresStore
                 PRIMARY KEY (usage_date, agent_id, user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS agui_usage_group (
+                usage_date TEXT NOT NULL,
+                group_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                prompt_tokens BIGINT NOT NULL DEFAULT 0,
+                completion_tokens BIGINT NOT NULL DEFAULT 0,
+                reasoning_tokens BIGINT NOT NULL DEFAULT 0,
+                calls BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (usage_date, group_id, agent_id, user_id)
+            );
+
             CREATE TABLE IF NOT EXISTS agui_tasks (
                 task_id TEXT PRIMARY KEY,
                 group_id TEXT NOT NULL,

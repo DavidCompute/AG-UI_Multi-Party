@@ -77,7 +77,7 @@ internal sealed class UsageCaptureChatClient : IChatClient
         if (_usage.Value is not { } usage) return;
         var ctx = AgentGateway.AmbientContext.Value;
         if (ctx is null) return; // 非网关驱动（如技能子代理经网关间接驱动仍带上下文）
-        usage.RecordUsage(ctx.AgentId, ctx.TriggerUserId, input, output, reasoning);
+        usage.RecordUsage(ctx.AgentId, ctx.TriggerUserId, ctx.GroupId, input, output, reasoning);
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null) => _inner.GetService(serviceType, serviceKey);

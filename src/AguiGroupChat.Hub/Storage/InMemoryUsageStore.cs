@@ -2,10 +2,11 @@ using System.Collections.Concurrent;
 
 namespace AguiGroupChat.Hub.Storage;
 
-/// <summary>进程内线程安全的用量统计（按 日期+智能体+触发者 聚合，变更通知持久化）。</summary>
+/// <summary>进程内线程安全的用量统计（按 日期+智能体+触发者 聚合，变更通知持久化；另有按知聚的聚合行）。</summary>
 public sealed class InMemoryUsageStore : IUsageStore
 {
     private readonly ConcurrentDictionary<(string Date, string AgentId, string UserId), UsageAggregate> _rows = new();
+    private readonly ConcurrentDictionary<(string Date, string GroupId, string AgentId, string UserId), UsageAggregate> _groupRows = new();
     private readonly Persistence.ChangeHub? _changes;
 
     public InMemoryUsageStore(Persistence.ChangeHub? changes = null) => _changes = changes;
@@ -14,6 +15,20 @@ public sealed class InMemoryUsageStore : IUsageStore
     {
         _rows.AddOrUpdate((date, agentId, userId),
             _ => new UsageAggregate(date, agentId, userId, prompt, completion, reasoning, 1),
+            (_, old) => old with
+            {
+                PromptTokens = old.PromptTokens + prompt,
+                CompletionTokens = old.CompletionTokens + completion,
+                ReasoningTokens = old.ReasoningTokens + reasoning,
+                Calls = old.Calls + 1,
+            });
+        _changes?.Notify();
+    }
+
+    public void RecordGroupUsage(string date, string groupId, string agentId, string userId, long prompt, long completion, long reasoning)
+    {
+        _groupRows.AddOrUpdate((date, groupId, agentId, userId),
+            _ => new UsageAggregate(date, agentId, userId, prompt, completion, reasoning, 1) { GroupId = groupId },
             (_, old) => old with
             {
                 PromptTokens = old.PromptTokens + prompt,
@@ -34,9 +49,16 @@ public sealed class InMemoryUsageStore : IUsageStore
             .OrderBy(a => a.Date).ThenBy(a => a.AgentId).ThenBy(a => a.UserId)
             .ToList();
 
+    public IReadOnlyList<UsageAggregate> GetGroupUsageBetween(string fromDate, string toDate)
+        => _groupRows.Where(kv => string.CompareOrdinal(kv.Key.Date, fromDate) >= 0 && string.CompareOrdinal(kv.Key.Date, toDate) <= 0)
+            .Select(kv => kv.Value)
+            .OrderBy(a => a.Date).ThenBy(a => a.GroupId).ThenBy(a => a.AgentId).ThenBy(a => a.UserId)
+            .ToList();
+
     public void ClearAll()
     {
         _rows.Clear();
+        _groupRows.Clear();
         _changes?.Notify();
     }
 }

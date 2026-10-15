@@ -33,6 +33,30 @@ public sealed class PostgresUsageStore : IUsageStore
         cmd.ExecuteNonQuery();
     }
 
+    public void RecordGroupUsage(string date, string groupId, string agentId, string userId, long prompt, long completion, long reasoning)
+    {
+        using var conn = _pg.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO agui_usage_group (usage_date, group_id, agent_id, user_id, prompt_tokens, completion_tokens, reasoning_tokens, calls)
+            VALUES (@d, @g, @a, @u, @p, @c, @r, 1)
+            ON CONFLICT (usage_date, group_id, agent_id, user_id)
+            DO UPDATE SET
+                prompt_tokens = agui_usage_group.prompt_tokens + EXCLUDED.prompt_tokens,
+                completion_tokens = agui_usage_group.completion_tokens + EXCLUDED.completion_tokens,
+                reasoning_tokens = agui_usage_group.reasoning_tokens + EXCLUDED.reasoning_tokens,
+                calls = agui_usage_group.calls + 1
+            """;
+        cmd.Parameters.AddWithValue("d", date);
+        cmd.Parameters.AddWithValue("g", groupId);
+        cmd.Parameters.AddWithValue("a", agentId);
+        cmd.Parameters.AddWithValue("u", userId);
+        cmd.Parameters.AddWithValue("p", prompt);
+        cmd.Parameters.AddWithValue("c", completion);
+        cmd.Parameters.AddWithValue("r", reasoning);
+        cmd.ExecuteNonQuery();
+    }
+
     public long GetUserUsage(string userId, string date)
     {
         using var conn = _pg.Open();
@@ -69,11 +93,38 @@ public sealed class PostgresUsageStore : IUsageStore
         return list;
     }
 
-    public void ClearAll()
+    public IReadOnlyList<UsageAggregate> GetGroupUsageBetween(string fromDate, string toDate)
     {
         using var conn = _pg.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "DELETE FROM agui_usage";
-        cmd.ExecuteNonQuery();
+        cmd.CommandText = """
+            SELECT usage_date, group_id, agent_id, user_id, prompt_tokens, completion_tokens, reasoning_tokens, calls
+            FROM agui_usage_group
+            WHERE usage_date BETWEEN @from AND @to
+            ORDER BY usage_date, group_id, agent_id, user_id
+            """;
+        cmd.Parameters.AddWithValue("from", fromDate);
+        cmd.Parameters.AddWithValue("to", toDate);
+        var list = new List<UsageAggregate>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            list.Add(new UsageAggregate(
+                reader.GetString(0), reader.GetString(2), reader.GetString(3),
+                reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7))
+            { GroupId = reader.GetString(1) });
+        }
+        return list;
+    }
+
+    public void ClearAll()
+    {
+        using var conn = _pg.Open();
+        foreach (var sql in new[] { "DELETE FROM agui_usage", "DELETE FROM agui_usage_group" })
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+        }
     }
 }

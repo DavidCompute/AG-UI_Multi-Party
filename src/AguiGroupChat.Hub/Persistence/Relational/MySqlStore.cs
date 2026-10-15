@@ -196,6 +196,18 @@ public sealed class MySqlStore : RelationalStore
             PRIMARY KEY (usage_date, agent_id, user_id)
         ) CHARACTER SET utf8mb4;
 
+        CREATE TABLE IF NOT EXISTS agui_usage_group (
+            usage_date VARCHAR(16) NOT NULL,
+            group_id VARCHAR(64) NOT NULL,
+            agent_id VARCHAR(128) NOT NULL,
+            user_id VARCHAR(128) NOT NULL,
+            prompt_tokens BIGINT NOT NULL DEFAULT 0,
+            completion_tokens BIGINT NOT NULL DEFAULT 0,
+            reasoning_tokens BIGINT NOT NULL DEFAULT 0,
+            calls BIGINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (usage_date, group_id, agent_id, user_id)
+        ) CHARACTER SET utf8mb4;
+
         CREATE TABLE IF NOT EXISTS agui_tasks (
             task_id VARCHAR(64) PRIMARY KEY,
             group_id VARCHAR(64) NOT NULL,

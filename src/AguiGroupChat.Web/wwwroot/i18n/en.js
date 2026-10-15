@@ -1888,6 +1888,8 @@ window.I18N_DICTS.en = {
   "admin.orgHealthTrendShort": "Not enough data to draw a trend",
   "admin.orgHealthDimAgents": "Employees",
   "admin.orgHealthDimUsers": "Triggered by",
+  "admin.orgHealthDimGroups": "Groups",
+  "admin.orgHealthDimEmpty": "No usage for this dimension yet (recorded since this version)",
   "admin.orgHealthMetricCalls": "Calls",
   "admin.orgHealthMetricTokens": "Tokens",
   "admin.orgHealthMetricCost": "Cost",

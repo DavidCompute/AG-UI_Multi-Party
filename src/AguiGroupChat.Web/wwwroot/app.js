@@ -7119,7 +7119,7 @@ let orgHealthData = null;        // 最近一次 /org-health 响应（供柱状�
 let orgHealthTrendRows = [];     // 最近一次 /usage 的按日汇总
 let orgHealthPrice = null;       // org-health 下发的 pricing
 let orgHealthMetric = "calls";   // 当前指标：calls | tokens | cost（柱状图与趋势图共用）
-let orgHealthDim = "agents";     // 柱状图维度：agents（数字员工）| users（触发者）
+let orgHealthDim = "agents";     // 柱状图维度：agents（数字员工）| users（触发者）| groups（知聚）
 
 /** 成本指标是否可用：需已在服务端配置单价。 */
 function orgHealthCanCost() { return !!(orgHealthPrice && orgHealthPrice.configured); }
@@ -7142,7 +7142,7 @@ function setOrgHealthMetric(metric) {
 
 /** 切换柱状图维度（数字员工 / 触发者）：仅重绘柱状。 */
 function setOrgHealthDim(dim) {
-  orgHealthDim = dim === "users" ? "users" : "agents";
+  orgHealthDim = dim === "users" || dim === "groups" ? dim : "agents";
   syncOrgHealthSwitches();
   renderOrgHealthBars();
 }
@@ -7212,12 +7212,15 @@ function orgHealthBarValue(r) {
   return Number(r.calls || 0);
 }
 
-/** 当前维度下的柱状图数据行：触发者维度无 👍👎 / 关注（仅调用量 / token / 成本）。 */
+/** 当前维度下的柱状图数据行：触发者 / 知聚维度无 👍👎 / 关注（仅调用量 / token / 成本）。 */
 function orgHealthBarRows() {
   const d = orgHealthData;
   if (!d) return [];
   if (orgHealthDim === "users") {
     return (d.users || []).map((u) => ({ id: u.userId, name: u.name || u.userId, calls: u.calls, totalTokens: u.totalTokens, cost: u.cost, positiveRate: null, flags: [] }));
+  }
+  if (orgHealthDim === "groups") {
+    return (d.groups || []).map((g) => ({ id: g.groupId, name: g.name || g.groupId, calls: g.calls, totalTokens: g.totalTokens, cost: g.cost, positiveRate: null, flags: [] }));
   }
   return (d.agents || []).map((a) => ({ id: a.agentId, name: a.name || a.agentId, calls: a.calls, totalTokens: a.totalTokens, cost: a.cost, positiveRate: a.positiveRate, flags: a.flags || [] }));
 }
@@ -7231,7 +7234,11 @@ function renderOrgHealthBars() {
   const cur = (orgHealthPrice && orgHealthPrice.currency) || "$";
   const rows = orgHealthBarRows().filter((r) => orgHealthBarValue(r) > 0)
     .slice().sort((a, b) => orgHealthBarValue(b) - orgHealthBarValue(a)).slice(0, 12);
-  if (!rows.length) { el.innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.perfEmpty"))}</div>`; return; }
+  if (!rows.length) {
+    const emptyKey = orgHealthDim === "agents" ? "admin.perfEmpty" : "admin.orgHealthDimEmpty";
+    el.innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t(emptyKey))}</div>`;
+    return;
+  }
   const max = rows.reduce((m, r) => Math.max(m, orgHealthBarValue(r)), 0) || 1;
   el.innerHTML = rows.map((r) => {
     const v = orgHealthBarValue(r);
