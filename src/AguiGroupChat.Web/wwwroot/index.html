@@ -777,10 +777,29 @@
             <input id="groupFilesSearch" class="modal-input" data-i18n-placeholder="gf.search" />
             <button type="button" class="search-clear" data-clear-for="groupFilesSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
+          <select id="groupFilesKindFilter" class="modal-input gf-filter" data-i18n-title="gf.filterKind">
+            <option value="" data-i18n="gf.kindAll"></option>
+            <option value="doc" data-i18n="gf.kindDoc"></option>
+            <option value="sheet" data-i18n="gf.kindSheet"></option>
+            <option value="slide" data-i18n="gf.kindSlide"></option>
+            <option value="pdf" data-i18n="gf.kindPdf"></option>
+            <option value="image" data-i18n="gf.kindImage"></option>
+            <option value="audio" data-i18n="gf.kindAudio"></option>
+            <option value="other" data-i18n="gf.kindOther"></option>
+          </select>
+          <select id="groupFilesTimeFilter" class="modal-input gf-filter" data-i18n-title="gf.filterTime">
+            <option value="" data-i18n="gf.timeAll"></option>
+            <option value="today" data-i18n="gf.timeToday"></option>
+            <option value="7d" data-i18n="gf.time7"></option>
+            <option value="30d" data-i18n="gf.time30"></option>
+          </select>
         </div>
         <div id="groupFilesList" class="gf-list"></div>
       </div>
       <div class="modal-actions">
+        <label class="gf-selall"><input id="groupFilesSelectAll" type="checkbox" /> <span data-i18n="gf.selectAll">全选</span></label>
+        <span id="groupFilesSelCount" class="gf-selcount"></span>
+        <button id="groupFilesDownloadSel" class="btn-ghost" data-i18n="gf.downloadSelected" disabled>下载所选</button>
         <button id="groupFilesClose" class="btn-ghost" data-i18n="gf.close">关闭</button>
       </div>
     </div>

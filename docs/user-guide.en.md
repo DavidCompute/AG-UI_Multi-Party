@@ -3472,23 +3472,33 @@ If the circle is switched while fetching, stale results are discarded (returns w
 
 #### 7.12.3 List behavior and i18n
 
-Modal DOM: `#groupFilesModal` (`index.html:712-728`), title `gf.title` = "Outputs" + count `#groupFilesCount`; search box `#groupFilesSearch` (`gf.search` = "Filter by file name…"); list `#groupFilesList` (`.gf-list`); close `#groupFilesClose` (`gf.close`).
+Modal DOM: `#groupFilesModal`, title `gf.title` = "Outputs" + count `#groupFilesCount`; search box `#groupFilesSearch` (`gf.search` = "Filter by file name…"); type filter `#groupFilesKindFilter`, time filter `#groupFilesTimeFilter`; list `#groupFilesList` (`.gf-list`); at the bottom "Select all" `#groupFilesSelectAll`, the selected count `#groupFilesSelCount`, "Download selected" `#groupFilesDownloadSel`, close `#groupFilesClose` (`gf.close`).
 
-`renderGroupFiles` (`app.js:9682-9707`) filters by keyword (`a.name.includes(q)`); each row:
+`renderGroupFiles` filters by keyword + type + time; each row:
 
 ```text
-[类型图标]  文件名  大小 · 发送者 · 时间   [⬇ 下载]  [👁 在线查看?]
+[☑]  [type icon]  file name  size · sender · time   [⬇ Download]  [👁 View online?]
 ```
 
+- The leading `☑` (`.gf-check`, `data-gf-id`) adds the item to batch download; the selected set is `groupFilesSelected` (`Set<attachmentId>`);
 - Icon `gfIcon`: image 🖼️ / audio 🎤 / text·document 📄 / archive 🗜️ / other 📎;
 - "⬇ Download" = `authedAssetUrl(a.url || '/ag-ui/files/{id}/{name}')` (with the session token, `gf.download`);
 - "👁" appears only when `previewableAttId` decides it is previewable; clicking reuses `openDocPreview` (including the slide viewer / notes / playback, bound by `bindDocPreviewButtons`).
 
 Status texts: `gf.loading` (Loading…), `gf.empty` (No attachments in this circle yet), `gf.noMatch` (No matching attachments), `gf.count` (`{n} / {total} 个附件`), `gf.fail` (Failed to load: {err}), `gf.noGroup` (Enter a circle first).
 
-#### 7.12.4 Esc layering
+#### 7.12.4 Filtering and batch download (1.0.235)
 
-The online-viewing modal (higher z) stacks above the Outputs modal; `Esc` only reaches the top layer — the online-viewing `Esc` listener uses `stopImmediatePropagation()` (both are document capture-phase listeners, and `stopPropagation` cannot stop the Outputs listener registered later, `app.js:11980-11984` comment).
+- **Type filter** `#groupFilesKindFilter`: All types / Document / Spreadsheet / Presentation / PDF / Image / Audio / Other. The category comes from `gfCategory(a)` using the extension and `kind` (`doc` / `sheet` / `slide` / `pdf` / `image` / `audio` / `other`).
+- **Time filter** `#groupFilesTimeFilter`: Any time / Today / Last 7 days / Last 30 days. `gfTimeCutoff()` gives the start instant (Today = midnight today; last N days = `now - N*86400000`).
+- Filtering is unified in `filteredGroupFiles()` (keyword + type + time); `renderGroupFiles` renders from it and **prunes `groupFilesSelected` to the currently visible items** (switching filters leaves no "hidden selection").
+- **Select all** `#groupFilesSelectAll` acts on the current filter result (with an `indeterminate` half-state); `#groupFilesSelCount` shows the selected count; `#groupFilesDownloadSel` is `disabled` when nothing is selected.
+- **Batch download** `downloadSelectedGroupFiles()`: builds a temporary `<a download>` per selected item to trigger a same-origin download **350 ms apart** (to reduce the browser's multi-file-download blocking), with a single failure not stopping the rest; it toasts `gf.downloading` `{n}` first, and `gf.noneSelected` when nothing is selected.
+- Filter / option texts: `gf.filterKind`, `gf.filterTime` (tooltips); `gf.kindAll` / `gf.kindDoc` / `gf.kindSheet` / `gf.kindSlide` / `gf.kindPdf` / `gf.kindImage` / `gf.kindAudio` / `gf.kindOther`; `gf.timeAll` / `gf.timeToday` / `gf.time7` / `gf.time30`; `gf.selectAll` (Select all), `gf.downloadSelected` (Download selected), `gf.noneSelected`, `gf.downloading` (`Downloading {n} files…`).
+
+#### 7.12.5 Esc layering
+
+The online-viewing modal (higher z) stacks above the Outputs modal; `Esc` only reaches the top layer — the online-viewing `Esc` listener uses `stopImmediatePropagation()` (both are document capture-phase listeners, and `stopPropagation` cannot stop the Outputs listener registered later).
 
 ---
 

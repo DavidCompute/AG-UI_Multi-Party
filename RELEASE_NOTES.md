@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.235 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.235 Release Notes (current Windows desktop release)
+
+**版本说明**：**输出物弹窗新增按类型 / 时间筛选与批量下载**——知聚的附件越积越多时，原来只能按文件名筛、逐个下载。
+**Version note**: **The Outputs dialog gains type/time filtering and batch download** — as a circle's attachments pile up, previously you could only filter by file name and download one at a time.
+
+## 变更
+# Changes
+
+中文：
+- **类型筛选** `#groupFilesKindFilter`：全部类型 / 文档 / 表格 / 演示 / PDF / 图片 / 音频 / 其它（`gfCategory` 依扩展名与 `kind` 判定）。
+- **时间筛选** `#groupFilesTimeFilter`：全部时间 / 今天 / 近 7 天 / 近 30 天（`gfTimeCutoff`）。
+- **行首勾选 + 全选 + 批量下载**：`#groupFilesSelectAll`（含 `indeterminate` 半选态）、`#groupFilesSelCount` 已选计数、`#groupFilesDownloadSel`「下载所选」（逐个建临时 `<a download>`，间隔 350ms）。
+- 过滤统一在 `filteredGroupFiles()`；`renderGroupFiles` 把已选集合裁剪到当前可见项（切换筛选不留“隐形已选”）。
+English:
+- **Type filter** `#groupFilesKindFilter`: All types / Document / Spreadsheet / Presentation / PDF / Image / Audio / Other (`gfCategory` by extension and `kind`).
+- **Time filter** `#groupFilesTimeFilter`: Any time / Today / Last 7 days / Last 30 days (`gfTimeCutoff`).
+- **Row checkbox + select-all + batch download**: `#groupFilesSelectAll` (with an `indeterminate` half-state), `#groupFilesSelCount` selected count, `#groupFilesDownloadSel` "Download selected" (one temporary `<a download>` per item, 350 ms apart).
+- Filtering is unified in `filteredGroupFiles()`; `renderGroupFiles` prunes the selected set to the visible items (no "hidden selection" after switching filters).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §7.12.3 重写（工具栏 + 行首勾选）并新增 §7.12.4「筛选与批量下载」（原 Esc 小节顺延为 7.12.5）。
+English: `docs/user-guide.md` / `en.md` §7.12.3 rewritten (toolbar + row checkbox) and a new §7.12.4 "Filtering and batch download" (the Esc subsection becomes 7.12.5).
+
+## 测试
+# Tests
+
+中文：浏览器实测（重建 web 后）：`gfCategory` 对 docx/xlsx/pptx/pdf/png/mp3/zip 分别得 `doc/sheet/slide/pdf/image/audio/other`；无筛选 7 行、类型=表格 1 行、近 7 天排除 8 天前项得 6 行；全选 → 已选 7、按钮可用、计数 7；取消一个 → 6 且全选半选态；切到「图片」已选裁剪为 1；选项文案已本地化（“文档”）；页面无报错。`node --check` 与 i18n 审计（**zh=en=1841，missing 0**）、`check-orphan-keys`（index 857 引用）全过；重建 web 后健康 200。
+English: browser-verified (after rebuilding web): `gfCategory` maps docx/xlsx/pptx/pdf/png/mp3/zip to `doc/sheet/slide/pdf/image/audio/other`; no filter 7 rows, type=Spreadsheet 1 row, last-7-days excludes the 8-day-old item (6 rows); select all → 7 selected, button enabled, count 7; uncheck one → 6 with an indeterminate select-all; switching to Image prunes the selection to 1; option labels are localized ("文档"); no page errors. `node --check` and the i18n audit (**zh=en=1841, missing 0**), `check-orphan-keys` (857 index refs) all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.234 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.234 Release Notes (current Windows desktop release)
 

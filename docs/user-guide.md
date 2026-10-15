@@ -3466,23 +3466,33 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 
 #### 7.12.3 列表行为与 i18n
 
-弹窗 DOM：`#groupFilesModal`（`index.html:712-728`），标题 `gf.title` = 「输出物」+ 计数 `#groupFilesCount`；搜索框 `#groupFilesSearch`（`gf.search` = 「按文件名筛选…」）；列表 `#groupFilesList`（`.gf-list`）；关闭 `#groupFilesClose`（`gf.close`）。
+弹窗 DOM：`#groupFilesModal`，标题 `gf.title` = 「输出物」+ 计数 `#groupFilesCount`；搜索框 `#groupFilesSearch`（`gf.search` = 「按文件名筛选…」）；类型筛选 `#groupFilesKindFilter`、时间筛选 `#groupFilesTimeFilter`；列表 `#groupFilesList`（`.gf-list`）；底部「全选」`#groupFilesSelectAll`、已选计数 `#groupFilesSelCount`、「下载所选」`#groupFilesDownloadSel`、关闭 `#groupFilesClose`（`gf.close`）。
 
-`renderGroupFiles`（`app.js:9682-9707`）按关键词过滤（`a.name.includes(q)`），每行：
+`renderGroupFiles` 按「关键词 + 类型 + 时间」过滤，每行：
 
 ```text
-[类型图标]  文件名  大小 · 发送者 · 时间   [⬇ 下载]  [👁 在线查看?]
+[☑]  [类型图标]  文件名  大小 · 发送者 · 时间   [⬇ 下载]  [👁 在线查看?]
 ```
 
+- 行首 `☑`（`.gf-check`，`data-gf-id`）：勾选加入批量下载；已选集合 `groupFilesSelected`（`Set<attachmentId>`）；
 - 图标 `gfIcon`：图片 🖼️ / 音频 🎤 / 文本·文档 📄 / 压缩包 🗜️ / 其它 📎；
 - 「⬇ 下载」= `authedAssetUrl(a.url || '/ag-ui/files/{id}/{name}')`（带会话令牌，`gf.download`）；
 - 「👁」仅当 `previewableAttId` 判定可预览时出现，点击复用 `openDocPreview`（含幻灯片查看器 / 备注 / 播放，`bindDocPreviewButtons` 绑定）。
 
 状态文案：`gf.loading`（正在加载…）、`gf.empty`（本知聚还没有附件）、`gf.noMatch`（没有匹配的附件）、`gf.count`（`{n} / {total} 个附件`）、`gf.fail`（加载失败：{err}）、`gf.noGroup`（请先进入一个知聚）。
 
-#### 7.12.4 Esc 层级
+#### 7.12.4 筛选与批量下载（1.0.235）
 
-在线查看弹窗（z 更高）叠在输出物弹窗之上；`Esc` 只收上层——在线查看的 `Esc` 监听用 `stopImmediatePropagation()`（同是 document 捕获监听，`stopPropagation` 拦不住后注册的输出物监听，`app.js:11980-11984` 注释）。
+- **类型筛选** `#groupFilesKindFilter`：全部类型 / 文档 / 表格 / 演示 / PDF / 图片 / 音频 / 其它。分类由 `gfCategory(a)` 依扩展名与 `kind` 判定（`doc` / `sheet` / `slide` / `pdf` / `image` / `audio` / `other`）。
+- **时间筛选** `#groupFilesTimeFilter`：全部时间 / 今天 / 近 7 天 / 近 30 天。起算时刻由 `gfTimeCutoff()` 给出（今天 = 当日 0 点；近 N 天 = `now - N*86400000`）。
+- 过滤统一在 `filteredGroupFiles()`（关键词 + 类型 + 时间三段）；`renderGroupFiles` 据此渲染，并把 `groupFilesSelected` **裁剪到当前可见项**（切换筛选后不留“隐形已选”）。
+- **全选** `#groupFilesSelectAll` 作用于当前筛选结果（含 `indeterminate` 半选态）；`#groupFilesSelCount` 显示已选数量；`#groupFilesDownloadSel` 无选中时 `disabled`。
+- **批量下载** `downloadSelectedGroupFiles()`：对已选项逐个建临时 `<a download>` 触发同源下载，**每个间隔 350ms**（降低浏览器“多文件下载”拦截概率），单个失败不阻断其余；开始前 `toast(gf.downloading, {n})`，无选中时 `gf.noneSelected`。
+- 筛选 / 选项文案：`gf.filterKind`、`gf.filterTime`（悬浮说明）；`gf.kindAll` / `gf.kindDoc` / `gf.kindSheet` / `gf.kindSlide` / `gf.kindPdf` / `gf.kindImage` / `gf.kindAudio` / `gf.kindOther`；`gf.timeAll` / `gf.timeToday` / `gf.time7` / `gf.time30`；`gf.selectAll`（全选）、`gf.downloadSelected`（下载所选）、`gf.noneSelected`、`gf.downloading`（`正在下载 {n} 个文件…`）。
+
+#### 7.12.5 Esc 层级
+
+在线查看弹窗（z 更高）叠在输出物弹窗之上；`Esc` 只收上层——在线查看的 `Esc` 监听用 `stopImmediatePropagation()`（同是 document 捕获监听，`stopPropagation` 拦不住后注册的输出物监听）。
 
 ---
 

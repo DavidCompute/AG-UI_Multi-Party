@@ -1304,6 +1304,12 @@ textarea:focus { outline: none; border-color: var(--accent); }
   color: var(--accent); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
 }
 .gf-btn:hover { border-color: var(--accent); background: rgba(79,140,255,.10); }
+.gf-check { flex: none; display: inline-flex; align-items: center; margin: 0; cursor: pointer; }
+.gf-check input { width: 15px; height: 15px; margin: 0; accent-color: #4f8cff; }
+.modal-input.gf-filter { width: auto; flex: none; min-width: 96px; padding: 6px 8px; }
+.gf-selall { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 13px; color: var(--muted); cursor: pointer; }
+.gf-selall input { width: 15px; height: 15px; margin: 0; accent-color: #4f8cff; }
+.gf-selcount { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 8px; min-width: 16px; text-align: right; }
 .kb-grid-head {
   flex: none; display: grid; grid-template-columns: 1.5fr .8fr 2.2fr 190px; gap: 10px;
   align-items: center; padding: 8px 12px; margin-top: 10px;

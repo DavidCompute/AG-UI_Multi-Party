@@ -11023,9 +11023,12 @@ function closeDocPreview() {
 
 /* ============ 输出物（当前知聚全部附件） ============ */
 
-/** 输出物弹窗缓存：当前知聚的全部附件（服务端汇总）+ 过滤关键词 + 拉取时的知聚 ID。 */
+/** 输出物弹窗缓存：当前知聚的全部附件（服务端汇总）+ 筛选条件 + 已选集合 + 拉取时的知聚 ID。 */
 let groupFilesItems = null;
 let groupFilesQuery = "";
+let groupFilesKind = "";
+let groupFilesTime = "";
+let groupFilesSelected = new Set();
 let groupFilesForGroup = null;
 
 /** 打开「输出物」：拉取当前知聚全部可见消息里的附件，最新在前展示（可下载 / 在线查看）。 */
@@ -11034,8 +11037,13 @@ async function openGroupFiles() {
   if (!gid || !state.token) { toast(t("gf.noGroup")); return; }
   groupFilesForGroup = gid;
   groupFilesQuery = "";
+  groupFilesKind = "";
+  groupFilesTime = "";
+  groupFilesSelected = new Set();
   const search = $("groupFilesSearch");
   if (search) search.value = "";
+  const kindSel = $("groupFilesKindFilter"); if (kindSel) kindSel.value = "";
+  const timeSel = $("groupFilesTimeFilter"); if (timeSel) timeSel.value = "";
   groupFilesItems = null;
   $("groupFilesCount").textContent = "";
   $("groupFilesList").innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.loading"))}</div>`;
@@ -11063,16 +11071,68 @@ function gfIcon(kind, name) {
   return "📎";
 }
 
-/** 渲染输出物列表（按关键词过滤；可预览的办公文档给出「👁」）。 */
+/** 输出物分类（用于类型筛选）：doc / sheet / slide / pdf / image / audio / other。 */
+function gfCategory(a) {
+  const kind = String((a && a.kind) || "").toLowerCase();
+  const name = String((a && a.name) || "");
+  if (/\.(xlsx?|xlsm|ods|csv)$/i.test(name)) return "sheet";
+  if (/\.(pptx?|odp)$/i.test(name)) return "slide";
+  if (/\.pdf$/i.test(name)) return "pdf";
+  if (kind === "image" || /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)) return "image";
+  if (kind === "audio" || /\.(mp3|wav|m4a|ogg|aac|flac)$/i.test(name)) return "audio";
+  if (kind === "document" || kind === "text" || /\.(docx?|odt|rtf|txt|md|markdown)$/i.test(name)) return "doc";
+  return "other";
+}
+
+/** 时间筛选的起算时刻（毫秒）；空 = 不限。 */
+function gfTimeCutoff() {
+  if (groupFilesTime === "today") { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
+  if (groupFilesTime === "7d") return Date.now() - 7 * 86400000;
+  if (groupFilesTime === "30d") return Date.now() - 30 * 86400000;
+  return 0;
+}
+
+/** 当前筛选（关键词 + 类型 + 时间）后的输出物列表。 */
+function filteredGroupFiles() {
+  const all = Array.isArray(groupFilesItems) ? groupFilesItems : [];
+  const q = groupFilesQuery.trim().toLowerCase();
+  const cut = gfTimeCutoff();
+  return all.filter((a) => {
+    if (q && !String(a.name || "").toLowerCase().includes(q)) return false;
+    if (groupFilesKind && gfCategory(a) !== groupFilesKind) return false;
+    if (cut && (Number(a.timestamp) || 0) < cut) return false;
+    return true;
+  });
+}
+
+/** 同步「全选」勾选态、已选计数与「下载所选」可用性（基于当前筛选结果）。 */
+function updateGroupFilesSelectionUi() {
+  const items = filteredGroupFiles();
+  const inView = items.filter((a) => groupFilesSelected.has(a.attachmentId)).length;
+  const allEl = $("groupFilesSelectAll");
+  if (allEl) {
+    allEl.checked = items.length > 0 && inView === items.length;
+    allEl.indeterminate = inView > 0 && inView < items.length;
+    allEl.disabled = items.length === 0;
+  }
+  const cnt = $("groupFilesSelCount");
+  if (cnt) cnt.textContent = groupFilesSelected.size ? String(groupFilesSelected.size) : "";
+  const btn = $("groupFilesDownloadSel");
+  if (btn) btn.disabled = groupFilesSelected.size === 0;
+}
+
+/** 渲染输出物列表（关键词 + 类型 + 时间筛选；可预览的办公文档给出「👁」；行首可勾选批量下载）。 */
 function renderGroupFiles() {
   const list = $("groupFilesList");
   if (!list) return;
   const all = Array.isArray(groupFilesItems) ? groupFilesItems : [];
-  const q = groupFilesQuery.trim().toLowerCase();
-  const items = q ? all.filter((a) => (a.name || "").toLowerCase().includes(q)) : all;
+  const items = filteredGroupFiles();
+  // 已选集合裁剪到当前可见项：筛选切换后不留“隐形已选”
+  const visible = new Set(items.map((a) => a.attachmentId));
+  for (const id of [...groupFilesSelected]) if (!visible.has(id)) groupFilesSelected.delete(id);
   $("groupFilesCount").textContent = all.length ? t("gf.count", { n: items.length, total: all.length }) : "";
-  if (!all.length) { list.innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.empty"))}</div>`; return; }
-  if (!items.length) { list.innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.noMatch"))}</div>`; return; }
+  if (!all.length) { list.innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.empty"))}</div>`; updateGroupFilesSelectionUi(); return; }
+  if (!items.length) { list.innerHTML = `<div class="gf-empty">${escapeHtml(t("gf.noMatch"))}</div>`; updateGroupFilesSelectionUi(); return; }
   list.innerHTML = items.map((a) => {
     const href = authedAssetUrl(a.url || `/ag-ui/files/${encodeURIComponent(a.attachmentId)}/${encodeURIComponent(a.name || "file")}`);
     const meta = [fmtBytes(a.size || 0), a.senderNickname || a.senderId || "", fmtTime(a.timestamp)].filter(Boolean).join(" · ");
@@ -11080,7 +11140,9 @@ function renderGroupFiles() {
     const pv = pvId
       ? `<button type="button" class="gf-btn att-preview" data-preview-id="${escapeHtml(pvId)}" data-preview-name="${escapeHtml(a.name || "")}" title="${escapeHtml(t("msg.previewTip"))}" aria-label="${escapeHtml(t("msg.preview"))}">👁</button>`
       : "";
+    const on = groupFilesSelected.has(a.attachmentId);
     return `<div class="gf-row">`
+      + `<label class="gf-check"><input type="checkbox" data-gf-id="${escapeHtml(a.attachmentId)}"${on ? " checked" : ""} /></label>`
       + `<span class="gf-icon" title="${escapeHtml(a.kind || "")}">${gfIcon(a.kind, a.name)}</span>`
       + `<span class="gf-name" title="${escapeHtml(a.name || "")}">${escapeHtml(a.name || "(未命名)")}</span>`
       + `<span class="gf-meta">${escapeHtml(meta)}</span>`
@@ -11089,6 +11151,23 @@ function renderGroupFiles() {
       + `</div>`;
   }).join("");
   bindDocPreviewButtons(list); // 「👁」复用在线查看（含幻灯片 / 备注 / 播放）
+  updateGroupFilesSelectionUi();
+}
+
+/** 批量下载已选的输出物（同源 `download`；间隔 350ms 降低被浏览器拦截的概率）。 */
+async function downloadSelectedGroupFiles() {
+  const items = filteredGroupFiles().filter((a) => groupFilesSelected.has(a.attachmentId));
+  if (!items.length) { toast(t("gf.noneSelected")); return; }
+  toast(t("gf.downloading", { n: items.length }));
+  for (const a of items) {
+    try {
+      const href = authedAssetUrl(a.url || `/ag-ui/files/${encodeURIComponent(a.attachmentId)}/${encodeURIComponent(a.name || "file")}`);
+      const el = document.createElement("a");
+      el.href = href; el.download = a.name || "file"; el.rel = "noopener";
+      document.body.appendChild(el); el.click(); el.remove();
+    } catch { /* 单个失败不阻断其余 */ }
+    await new Promise((r) => setTimeout(r, 350));
+  }
 }
 
 /** 消息显示文本：数字员工消息剥离结构化 JSON 附件信息后的正文（解析缓存到 m._bridgeParse）；其余消息为原始内容。 */
@@ -13945,6 +14024,23 @@ function init() {
   $("groupFilesClose").onclick = () => $("groupFilesModal").classList.add("hidden");
   $("groupFilesModal").addEventListener("click", (e) => { if (e.target === $("groupFilesModal")) $("groupFilesModal").classList.add("hidden"); });
   $("groupFilesSearch").addEventListener("input", () => { groupFilesQuery = $("groupFilesSearch").value; renderGroupFiles(); });
+  $("groupFilesKindFilter").addEventListener("change", () => { groupFilesKind = $("groupFilesKindFilter").value; renderGroupFiles(); });
+  $("groupFilesTimeFilter").addEventListener("change", () => { groupFilesTime = $("groupFilesTimeFilter").value; renderGroupFiles(); });
+  // 行首勾选：勾 / 取消单个附件
+  $("groupFilesList").addEventListener("change", (e) => {
+    const cb = e.target && e.target.closest ? e.target.closest("input[data-gf-id]") : null;
+    if (!cb) return;
+    const id = cb.getAttribute("data-gf-id");
+    if (cb.checked) groupFilesSelected.add(id); else groupFilesSelected.delete(id);
+    updateGroupFilesSelectionUi();
+  });
+  // 全选 / 取消全选（作用于当前筛选结果）
+  $("groupFilesSelectAll").addEventListener("change", (e) => {
+    const on = !!e.target.checked;
+    for (const a of filteredGroupFiles()) { if (on) groupFilesSelected.add(a.attachmentId); else groupFilesSelected.delete(a.attachmentId); }
+    renderGroupFiles();
+  });
+  $("groupFilesDownloadSel").addEventListener("click", downloadSelectedGroupFiles);
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || $("groupFilesModal").classList.contains("hidden")) return;
     if (!$("docPreviewModal").classList.contains("hidden")) return; // 在线查看弹窗在上：先让它收
