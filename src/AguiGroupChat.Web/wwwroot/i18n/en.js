@@ -103,6 +103,7 @@ window.I18N_DICTS.en = {
   "gf.noMatch": "No matching attachments",
   "gf.count": "{n} / {total} files",
   "gf.download": "Download",
+  "gf.locate": "Locate the message",
   "gf.fail": "Failed to load: {err}",
   "gf.noGroup": "Enter a circle first",
   "gf.filterKind": "Filter by type",

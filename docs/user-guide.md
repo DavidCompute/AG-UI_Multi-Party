@@ -3472,11 +3472,12 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 `renderGroupFiles` 按「关键词 + 类型 + 时间」过滤，每行：
 
 ```text
-[☑]  [类型图标]  文件名  大小 · 发送者 · 时间   [⬇ 下载]  [👁 在线查看?]
+[☑]  [类型图标]  文件名  大小 · 发送者 · 时间   [📍 定位?]  [⬇ 下载]  [👁 在线查看?]
 ```
 
 - 行首 `☑`（`.gf-check`，`data-gf-id`）：勾选加入批量下载；已选集合 `groupFilesSelected`（`Set<attachmentId>`）；
 - 图标 `gfIcon`：图片 🖼️ / 音频 🎤 / 文本·文档 📄 / 压缩包 🗜️ / 其它 📎；
+- 「📍 定位」（`.gf-locate`，`gf.locate`，**1.0.237**）：仅当该附件来自某条消息（`a.messageId` 存在）时出现；点击 → `locateGroupFile`，关弹窗并跳到该消息（复用搜索的深度定位 `locateMessage` + `scrollToMessage` 闪烁高亮，必要时拉取前后文重建话题窗口）；
 - 「⬇ 下载」= `authedAssetUrl(a.url || '/ag-ui/files/{id}/{name}')`（带会话令牌，`gf.download`）；
 - 「👁」仅当 `previewableAttId` 判定可预览时出现，点击复用 `openDocPreview`（含幻灯片查看器 / 备注 / 播放，`bindDocPreviewButtons` 绑定）。
 

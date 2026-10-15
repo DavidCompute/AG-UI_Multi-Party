@@ -9213,27 +9213,25 @@ async function doForwardSelected() {
   exitSelectMode();
 }
 
-/** 跳转到搜索结果：切到对应话题并滚动 / 高亮该消息；
+/** 定位到某条消息：切到对应话题、确保进入虚拟窗口、滚动闪烁；
  * 目标不在已加载窗口时，拉取其前后各 count/2 条重建当前话题窗口再定位（深度定位）。 */
-async function jumpToSearchHit(messageId, topicId, idx) {
-  $("searchModal").classList.add("hidden");
-  if (Number.isInteger(idx) && idx >= 0) searchPos = idx;
-  updateSearchNav(); // 位置计数同步刷新（高亮需等消息进入 DOM，见 afterJumpHighlight）
+async function locateMessage(messageId, topicId) {
   const gid = state.activeGroupId;
-  if (!gid) return;
+  if (!gid || !messageId) return false;
   const r = room(gid);
-  if (state.activeTopicId !== topicId) await selectTopic(topicId);
+  const tid = topicId || "main";
+  if (state.activeTopicId !== tid) await selectTopic(tid);
   // 双 rAF 确保虚拟窗口重建 / 增量渲染完成后再检查目标是否已在 DOM
   const inDom = await new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(!!document.querySelector(`[data-mid="${cssEsc(messageId)}"]`))));
   });
-  if (inDom) { scrollToMessage(messageId); afterJumpHighlight(messageId); return; }
+  if (inDom) { scrollToMessage(messageId); return true; }
   // 深度定位：拉取目标消息前后各 count/2 条，重建当前话题窗口
   try {
-    const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/messages/around?messageId=${encodeURIComponent(messageId)}&topicId=${encodeURIComponent(topicId || "main")}&count=60`,
+    const res = await fetch(`/ag-ui/group/${encodeURIComponent(gid)}/messages/around?messageId=${encodeURIComponent(messageId)}&topicId=${encodeURIComponent(tid)}&count=60`,
       { headers: { Authorization: "Bearer " + (state.token || "") } });
     const data = await res.json().catch(() => null);
-    if (!res.ok || !Array.isArray(data) || data.length === 0) { toast(t("search.locateFail")); return; }
+    if (!res.ok || !Array.isArray(data) || data.length === 0) { toast(t("search.locateFail")); return false; }
     const known = new Set(r.messages.map((m) => m.id));
     // 重建窗口：保留流式进行中的消息与系统行（避免正在输出的回复丢失），其余以定位窗口为准
     const live = r.messages.filter((m) => m.streaming || m.sys);
@@ -9243,8 +9241,25 @@ async function jumpToSearchHit(messageId, topicId, idx) {
     r.allLoaded = false; // around 不是完整历史，保留「加载更早」入口
     vscroll.force = true;
     scheduleVirtualRender();
-    requestAnimationFrame(() => requestAnimationFrame(() => { scrollToMessage(messageId); afterJumpHighlight(messageId); }));
-  } catch { toast(t("search.locateNetErr")); }
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    scrollToMessage(messageId);
+    return true;
+  } catch { toast(t("search.locateNetErr")); return false; }
+}
+
+/** 跳转到搜索结果：关搜索弹窗、更新位置计数，再定位并高亮命中词。 */
+async function jumpToSearchHit(messageId, topicId, idx) {
+  $("searchModal").classList.add("hidden");
+  if (Number.isInteger(idx) && idx >= 0) searchPos = idx;
+  updateSearchNav(); // 位置计数同步刷新（高亮需等消息进入 DOM，见 afterJumpHighlight）
+  if (await locateMessage(messageId, topicId)) afterJumpHighlight(messageId);
+}
+
+/** 从「输出物」定位：关弹窗并跳到携带该附件的消息（对话区高亮）。 */
+async function locateGroupFile(messageId, topicId) {
+  if (!messageId) { toast(t("search.locateFail")); return; }
+  $("groupFilesModal").classList.add("hidden");
+  await locateMessage(messageId, topicId || "main");
 }
 
 /** 跳转后：先清除旧高亮，再标出命中词并刷新导航条。 */
@@ -11175,11 +11190,15 @@ function renderGroupFiles() {
       ? `<button type="button" class="gf-btn att-preview" data-preview-id="${escapeHtml(pvId)}" data-preview-name="${escapeHtml(a.name || "")}" title="${escapeHtml(t("msg.previewTip"))}" aria-label="${escapeHtml(t("msg.preview"))}">👁</button>`
       : "";
     const on = groupFilesSelected.has(a.attachmentId);
+    const loc = a.messageId
+      ? `<button type="button" class="gf-btn gf-locate" data-gf-locate="${escapeHtml(a.messageId)}" data-gf-topic="${escapeHtml(a.topicId || "main")}" title="${escapeHtml(t("gf.locate"))}" aria-label="${escapeHtml(t("gf.locate"))}">📍</button>`
+      : "";
     return `<div class="gf-row">`
       + `<label class="gf-check"><input type="checkbox" data-gf-id="${escapeHtml(a.attachmentId)}"${on ? " checked" : ""} /></label>`
       + `<span class="gf-icon" title="${escapeHtml(a.kind || "")}">${gfIcon(a.kind, a.name)}</span>`
       + `<span class="gf-name" title="${escapeHtml(a.name || "")}">${escapeHtml(a.name || "(未命名)")}</span>`
       + `<span class="gf-meta">${escapeHtml(meta)}</span>`
+      + loc
       + `<a class="gf-btn" href="${escapeHtml(href || "#")}" target="_blank" rel="noopener" title="${escapeHtml(t("gf.download"))}">⬇</a>`
       + pv
       + `</div>`;
@@ -14068,6 +14087,13 @@ function init() {
     const id = cb.getAttribute("data-gf-id");
     if (cb.checked) groupFilesSelected.add(id); else groupFilesSelected.delete(id);
     updateGroupFilesSelectionUi();
+  });
+  // 「📍 定位」：跳到携带该附件的消息
+  $("groupFilesList").addEventListener("click", (e) => {
+    const b = e.target && e.target.closest ? e.target.closest("[data-gf-locate]") : null;
+    if (!b) return;
+    e.preventDefault();
+    locateGroupFile(b.getAttribute("data-gf-locate"), b.getAttribute("data-gf-topic"));
   });
   // 全选 / 取消全选（作用于当前筛选结果）
   $("groupFilesSelectAll").addEventListener("change", (e) => {

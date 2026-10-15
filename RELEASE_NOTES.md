@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.237 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.237 Release Notes (current Windows desktop release)
+
+**版本说明**：**输出物可一键「定位到该消息」**——在「输出物」里看到某个附件后，点「📍」即关弹窗并跳到携带它的那条消息（对话区闪烁高亮）。
+**Version note**: **Outputs items can jump straight to their message** — spot an attachment in Outputs, click "📍" to close the dialog and jump to the message that carries it (with a flash highlight in the chat).
+
+## 变更
+# Changes
+
+中文：
+- **「📍 定位」**（`.gf-locate`）：仅当附件来自某条消息（`a.messageId`）时出现；点击 → `locateGroupFile(messageId, topicId)` 关弹窗并定位。
+- **抽取复用**：把原搜索跳转的深层定位逻辑抽为通用 `locateMessage(messageId, topicId)`——切话题、若不在虚拟窗口则拉 `messages/around` 前后文重建窗口、再 `scrollToMessage` 闪烁高亮；`jumpToSearchHit` 改为调用它（并保留搜索命中词高亮）。
+- i18n 新增 `gf.locate`。
+English:
+- **"📍 Locate"** (`.gf-locate`): appears only when the attachment belongs to a message (`a.messageId`); clicking it calls `locateGroupFile(messageId, topicId)` to close the dialog and locate.
+- **Extraction/reuse**: the search jump's deep-locate logic is extracted into a generic `locateMessage(messageId, topicId)` — switches topic, fetches the `messages/around` window when the target is outside the virtual window, then `scrollToMessage` flash-highlights; `jumpToSearchHit` now calls it (keeping the search-term highlight).
+- New i18n key `gf.locate`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §7.12.3（行内新增「📍 定位」说明）。
+English: `docs/user-guide.md` / `en.md` §7.12.3 (the new "📍 Locate" row action).
+
+## 测试
+# Tests
+
+中文：浏览器实测（重建 web 后）：合成两条附件（一条带 `messageId`、一条不带）→ 「📍」只出现 1 个、`title` 已本地化（“定位到该消息”）；`locateGroupFile` 存在；点击后输出物弹窗被关闭（`hidden`）；页面无报错。`node --check` 与 i18n 审计（**zh=en=1844，missing 0**）、`check-orphan-keys` 全过；重建 web 后健康 200。
+English: browser-verified (after rebuilding web): with two synthetic attachments (one with `messageId`, one without) exactly one "📍" renders and its `title` is localized ("定位到该消息"); `locateGroupFile` exists; clicking closes the Outputs dialog (`hidden`); no page errors. `node --check` and the i18n audit (**zh=en=1844, missing 0**), `check-orphan-keys` all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.236 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.236 Release Notes (current Windows desktop release)
 

@@ -3478,11 +3478,12 @@ Modal DOM: `#groupFilesModal`, title `gf.title` = "Outputs" + count `#groupFiles
 `renderGroupFiles` filters by keyword + type + time; each row:
 
 ```text
-[☑]  [type icon]  file name  size · sender · time   [⬇ Download]  [👁 View online?]
+[☑]  [type icon]  file name  size · sender · time   [📍 Locate?]  [⬇ Download]  [👁 View online?]
 ```
 
 - The leading `☑` (`.gf-check`, `data-gf-id`) adds the item to batch download; the selected set is `groupFilesSelected` (`Set<attachmentId>`);
 - Icon `gfIcon`: image 🖼️ / audio 🎤 / text·document 📄 / archive 🗜️ / other 📎;
+- "📍 Locate" (`.gf-locate`, `gf.locate`, **1.0.237**): appears only when the attachment belongs to a message (`a.messageId` present); clicking it calls `locateGroupFile`, closes the dialog and jumps to that message (reusing the search deep-locate `locateMessage` + `scrollToMessage` flash highlight, fetching the surrounding window when needed);
 - "⬇ Download" = `authedAssetUrl(a.url || '/ag-ui/files/{id}/{name}')` (with the session token, `gf.download`);
 - "👁" appears only when `previewableAttId` decides it is previewable; clicking reuses `openDocPreview` (including the slide viewer / notes / playback, bound by `bindDocPreviewButtons`).
 

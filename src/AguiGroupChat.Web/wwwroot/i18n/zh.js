@@ -103,6 +103,7 @@ window.I18N_DICTS.zh = {
   "gf.noMatch": "没有匹配的附件",
   "gf.count": "{n} / {total} 个附件",
   "gf.download": "下载",
+  "gf.locate": "定位到该消息",
   "gf.fail": "加载失败：{err}",
   "gf.noGroup": "请先进入一个知聚",
   "gf.filterKind": "按类型筛选",
