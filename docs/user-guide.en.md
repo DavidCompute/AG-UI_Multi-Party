@@ -2166,7 +2166,7 @@ Administrators can also upload / update the installer in the same dialog (`#brid
 
 The admin console has a "**Bridge endpoint health**" panel (`admin.metricBridgeHealth`, table `#adminBridgeRows`, consumed by `app.js`'s `loadAdminMetrics` via `GET /ag-ui/admin/bridge-health`, requires `PlatformRole.Operator`). But **it serves "external AG-UI bridge endpoints" (agents configured with `BridgeEndpoint` / the global `AguiBridge.Endpoint`), not the Local bridge (NativeBridge)** — the `BridgeHealthService` comment states explicitly that it "does TCP connectivity probing for external AG-UI endpoints configured with bridging", with a default probe interval of 60 seconds.
 
-The accompanying `GET /ag-ui/admin/bridge-capabilities` (also requires Operator, `BridgeCapabilitiesService`) is a **pure interface**: `app.js` does not consume it (see the deviation in 4.10). **There is no dedicated admin dashboard for the Local bridge's online status**; it can only be viewed in the user-side Profile dialog.
+The accompanying `GET /ag-ui/admin/bridge-capabilities` (also requires Operator, `BridgeCapabilitiesService`) has been consumed, since 1.0.230, by the Runtime Metrics tab's "Bridge capability negotiation" table (`loadBridgeCaps`; see 4.10). It targets the same **external AG-UI bridge endpoints**. **There is no dedicated admin dashboard for the Local bridge (NativeBridge)'s online status**; it can only be viewed in the user-side Profile dialog.
 
 ---
 
@@ -5133,10 +5133,10 @@ All of the following were verified against the source (line numbers are location
 
 | # | Item | Description |
 | --- | --- | --- |
-| 1 | Config key form for `PersistenceOptions.SnapshotSigningKey` | The property should bind as `Persistence:SnapshotSigningKey`, but the code comment says `Secrets:SnapshotSigningKey` / the environment variable `SECRETS__SNAPSHOTSIGNINGKEY`, and the two are inconsistent; the actual read path needs to be verified |
+| 1 | **[Verified in 1.0.231]** The config key for `PersistenceOptions.SnapshotSigningKey` | The actual binding key is `Persistence:SnapshotSigningKey` (env var `PERSISTENCE__SNAPSHOTSIGNINGKEY`); the original code comment wrongly said `Secrets:...`, and the comment was corrected in 1.0.231 |
 | 2 | `NativeBridgeDownloadOptions.MaxZipBytes` (default 500MB) vs. the actual threshold of the upload endpoint | The upload endpoint uses `Math.Min(options.MaxZipBytes, 200MB)` to reject over-limit requests; the two differ |
 | 3 | `ClientTool:RequireAdmin` for a shared multi-user deployment | `docker-compose.yml` **does not expose** this key; it defaults to `false`. Several places in the documentation emphasize that a shared deployment should set it to `true` to close off the RCE surface, so you must add the environment variable yourself ((no compose default found in the code)) |
-| 4 | The two names in `StorageGovernanceOptions` | `OrphanGraceHours` is the actual config key (`StorageGovernance:OrphanGraceHours`); `GraceHours` is the derived read-only value after clamping |
+| 4 | The two names in `StorageGovernanceOptions` | **[Verified in 1.0.231]** `OrphanGraceHours` is the actual config key (`StorageGovernance:OrphanGraceHours`); `GraceHours` is the derived read-only value after clamping (`StorageAdminApi.cs`) |
 | 5 | `POST /ag-ui/images/search` has no filter | Security-critical: authorization is inside the handler (self-token or logged-in user) and is not preemptively 401'd by `RequireTokenFilter`; self-reported image library IDs are never trusted (the self-token only recognizes platform-registered handles) |
 | 6 | `GET /ag-ui/admin/config` may display an unused `persistence.filePath` in postgres mode | When `PersistenceOptions` is not registered, it falls back to `new PersistenceOptions()` (default `data/agui-state.json`), which does not match the reality of "JSON snapshots disabled" |
 | 7 | `Agents:Memory:Enabled` default | The code default is `false`, but Docker / desktop both set `true` — running `dotnet run` (Web/Hub) directly **does not enable** memory by default |

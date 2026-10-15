@@ -2163,7 +2163,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 
 管理控制台有一块「**桥接端点健康**」（`admin.metricBridgeHealth`，表格 `#adminBridgeRows`，由 `app.js` 的 `loadAdminMetrics` 消费 `GET /ag-ui/admin/bridge-health`，需 `PlatformRole.Operator`）。但**它服务的是「外部 AG-UI 桥接端点」（智能体配置了 `BridgeEndpoint` / 全局 `AguiBridge.Endpoint`），不是本机桥（NativeBridge）**——`BridgeHealthService` 注释明确其为「对配置了桥接的外部 AG-UI 端点做 TCP 连通性探测」，探测周期默认 60 秒。
 
-与之配套的 `GET /ag-ui/admin/bridge-capabilities`（同样需 Operator，`BridgeCapabilitiesService`）是**纯接口**：`app.js` 并未消费它（见 4.10 偏差）。**本机桥的在线状态没有专门的管理员看板**，只能在用户侧资料弹窗查看。
+与之配套的 `GET /ag-ui/admin/bridge-capabilities`（同样需 Operator，`BridgeCapabilitiesService`）自 **1.0.230** 起已由「运行指标」页的「桥接能力协商」表消费（`loadBridgeCaps`，见 4.10）。目标同样是**外部 AG-UI 桥接端点**。**本机桥（NativeBridge）的在线状态没有专门的管理员看板**，只能在用户侧资料弹窗查看。
 
 ---
 
@@ -2174,7 +2174,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 1. **i18n 前缀**：不存在 `clientTool.*` 或 `nativeBridge.*` 前缀。客户端技能 / 本机执行的界面文案真实前缀是 `itx.*`（审批卡，如 `itx.cardAskClientTool`、`itx.clientToolRun`、`itx.clientToolConfirmShell`），本机桥相关在 `profile.bridge*`（资料弹窗），另有一处帮助文案 `help.s13.9` / `help.s13.10`。
 2. **技能库弹窗无「导入 / 导出」按钮**：弹窗只有「＋ 新增技能」「🗑️ 删除所选」「关闭」。但服务端对内置技能的只读错误文案却是「系统内置技能只读，请**导出**后另建」——界面没有对应导出入口。
 3. **自然语言生成技能不是 SSE 流式**：`generateSkill()` 是**一次普通 `fetch` POST**（`/ag-ui/skills/generate`）并用 `AbortController` 支持「停止」。生成 / 停止确实共用一个按钮 `#sgGenerate`（`setSkillGenButton` 切换文案为 `msg.stopGenerating`），但**没有 EventSource / 流式分块**（全仓 `app.js` 亦无相关 EventSource 使用）。
-4. **`GET /ag-ui/admin/bridge-capabilities` 未被前端消费**：接口存在（`BridgeCapabilitiesService`），但 `app.js` 只消费 `bridge-health`。且 `bridge-health` 针对的是**外部 AG-UI 桥接端点**，与 NativeBridge 无关。
+4. **【已修复 1.0.230】`GET /ag-ui/admin/bridge-capabilities` 已由前端消费**：「运行指标」页新增「桥接能力协商」表（`loadBridgeCaps`），`bridge-health` 同页消费，且两者都支持「立即探测」（`?refresh=true`）；它们针对的都是**外部 AG-UI 桥接端点**，与 NativeBridge 无关。
 5. **安装包「按访问者动态重打包 / 包内注入平台地址与令牌」与代码不符**：代码中 `GET /ag-ui/native-bridge/download/file` **原样下发**静态 MSI；`NativeBridgeDownloadApi` 注释明确「通用安装包内不含令牌；连接由登录后网页在线下发配置完成」。README 中「下载由服务器按当前访问者动态重打包、包内 `bridge-config.txt` 已注入当前平台地址」的描述与实现不一致。
 6. **zip 与 msi 双脚本**：`tools/publish-nativebridge.ps1` 产 **zip**（含 `install-autostart.bat` 等），`tools/publish-nativebridge-msi.ps1` 产 **perUser MSI**（HKCU Run 自启、安装即启）。Web 上传 / 下载端点**只接受 / 只标注 `.msi`**，`tools/e2e-nativebridge-api.mjs` 上传的也是 `.msi`；涉及网页分发的路径应以 MSI 为准。
 7. **强制审批集合比「shell + client」更宽**：确切集合是 `shell` ∪ `dotnet` ∪ 任意 `client`（`BuildDef`）。`dotnet` 一律强制审批（`server` 亦然），`org_deploy` 属特权类型（仅管理员可建）但其界面审批勾选默认不强制。
@@ -5127,10 +5127,10 @@ service:
 
 | # | 事项 | 说明 |
 | --- | --- |
-| 1 | `PersistenceOptions.SnapshotSigningKey` 的配置键口径 | 属性绑定应为 `Persistence:SnapshotSigningKey`，但代码注释写的是 `Secrets:SnapshotSigningKey` / 环境变量 `SECRETS__SNAPSHOTSIGNINGKEY`，二者不一致，待核实实际读取路径 |
+| 1 | **【已核实 1.0.231】**`PersistenceOptions.SnapshotSigningKey` 的配置键 | 实际绑定键为 `Persistence:SnapshotSigningKey`（环境变量 `PERSISTENCE__SNAPSHOTSIGNINGKEY`）；原代码注释误写为 `Secrets:...`，1.0.231 已修正注释 |
 | 2 | `NativeBridgeDownloadOptions.MaxZipBytes`（默认 500MB）vs 上传端点实际阈值 | 上传端点用 `Math.Min(options.MaxZipBytes, 200MB)` 拒绝超限，两处口径不同 |
 | 3 | 共享多用户部署的 `ClientTool:RequireAdmin` | `docker-compose.yml` **未暴露**该键，默认 `false`；文档多处强调共享部署应置 `true` 以封堵 RCE 面，需自行补加环境变量（（代码中未找到 compose 默认值）） |
-| 4 | `StorageGovernanceOptions` 的两个名字 | `OrphanGraceHours` 才是配置键（`StorageGovernance:OrphanGraceHours`）；`GraceHours` 是夹紧后的派生只读值 |
+| 4 | **【已核实 1.0.231】**`StorageGovernanceOptions` 的两个名字 | `OrphanGraceHours` 才是配置键（`StorageGovernance:OrphanGraceHours`）；`GraceHours` 是夹紧后的派生只读值（`StorageAdminApi.cs`） |
 | 5 | `POST /ag-ui/images/search` 无过滤器 | 安全关键：鉴权在 handler 内（自令牌或登录用户），不会被 `RequireTokenFilter` 提前 401；自报图库 ID 一律不信（自令牌只认平台登记句柄） |
 | 6 | `GET /ag-ui/admin/config` 在 postgres 模式下可能展示未使用的 `persistence.filePath` | 未注册 `PersistenceOptions` 时回退 `new PersistenceOptions()`（默认 `data/agui-state.json`），与“已禁用 JSON 快照”的实际不符 |
 | 7 | `Agents:Memory:Enabled` 默认值 | 代码默认 `false`，但 Docker / 桌面均置 `true`——直接跑 `dotnet run`（Web/Hub）时默认**不启用**记忆 |
