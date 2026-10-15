@@ -1880,6 +1880,9 @@ window.I18N_DICTS.en = {
   "admin.orgHealthCalls": "Calls (top)",
   "admin.orgHealthFlags": "Needs attention",
   "admin.orgHealthNoFlag": "No employees need attention",
+  "admin.orgHealthTrend": "Daily trend (calls)",
+  "admin.orgHealthTrendMeta": "{from} ~ {to} · {total} calls · daily peak {max}",
+  "admin.orgHealthTrendShort": "Not enough data to draw a trend",
   /* Digital-employee eval cases / regression (admin) */
   "admin.tabEval": "Eval & regression",
   "admin.evalRun": "▶ Run all",

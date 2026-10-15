@@ -1873,6 +1873,9 @@ window.I18N_DICTS.zh = {
   "admin.orgHealthCalls": "调用次数 Top",
   "admin.orgHealthFlags": "需要关注",
   "admin.orgHealthNoFlag": "没有需要关注的员工",
+  "admin.orgHealthTrend": "按日趋势（调用次数）",
+  "admin.orgHealthTrendMeta": "{from} ~ {to} · 共 {total} 次调用 · 单日峰值 {max}",
+  "admin.orgHealthTrendShort": "数据不足以绘制趋势",
   /* 数字员工评测集 / 回归（管理员） */
   "admin.tabEval": "评测回归",
   "admin.evalRun": "▶ 跑全部",

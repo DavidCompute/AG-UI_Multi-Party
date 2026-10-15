@@ -7088,11 +7088,19 @@ async function openOrgHealthCharts() {
   $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.loading"))}</div>`;
   $("orgHealthBars").innerHTML = "";
   $("orgHealthFlags").innerHTML = "";
+  const trend = $("orgHealthTrend"); if (trend) trend.innerHTML = "";
+  const rate = $("orgHealthRate"); if (rate) rate.innerHTML = "";
   try {
     const res = await fetch(`/ag-ui/admin/org-health?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) { $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(errMsg(d, "HTTP " + res.status))}</div>`; return; }
     renderOrgHealthCharts(d, days);
+    // 按日趋势（非致命：失败就不画折线）
+    try {
+      const ures = await fetch(`/ag-ui/admin/usage?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
+      const ud = ures.ok ? await ures.json().catch(() => null) : null;
+      renderOrgHealthTrend((ud && ud.days) || []);
+    } catch { renderOrgHealthTrend([]); }
   } catch (ex) { $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(ex.message)}</div>`; }
 }
 function renderOrgHealthCharts(d, days) {
@@ -7110,6 +7118,7 @@ function renderOrgHealthCharts(d, days) {
     + card(t("admin.perfThRate"), rate)
     + card(t("admin.orgHealthFlagged"), num(s.flagged));
   $("orgHealthMeta").textContent = t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" });
+  renderDonut("orgHealthRate", s.positiveRate);
 
   const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
     : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
@@ -7129,6 +7138,31 @@ function renderOrgHealthCharts(d, days) {
   $("orgHealthFlags").innerHTML = flagged.length
     ? flagged.map((a) => `<div>⚠️ <b>${escapeHtml(a.name || a.agentId)}</b> — ${escapeHtml((a.flags || []).map(flagLabel).join("、"))}</div>`).join("")
     : `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.orgHealthNoFlag"))}</div>`;
+}
+
+/** 按日趋势折线（调用次数）：数据来自既有 /admin/usage 的按日汇总（与图表弹窗同窗口）。 */
+function renderOrgHealthTrend(days) {
+  const el = $("orgHealthTrend");
+  if (!el) return;
+  const rows = (days || []).map((r) => ({ date: r.date, calls: Number(r.calls || 0) }))
+    .filter((r) => !!r.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (rows.length < 2) { el.innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.orgHealthTrendShort"))}</div>`; return; }
+  const w = 800, h = 90, pad = 6;
+  const max = rows.reduce((m, r) => Math.max(m, r.calls), 0) || 1;
+  const step = (w - 2 * pad) / (rows.length - 1);
+  const yOf = (v) => (h - pad - (v / max) * (h - 2 * pad)).toFixed(1);
+  const pts = rows.map((r, i) => `${(pad + i * step).toFixed(1)},${yOf(r.calls)}`).join(" ");
+  const area = `${pad},${(h - pad).toFixed(1)} ${pts} ${(w - pad).toFixed(1)},${(h - pad).toFixed(1)}`;
+  const grid = [0, 0.5, 1].map((g) => `<line x1="0" y1="${yOf(max * g)}" x2="${w}" y2="${yOf(max * g)}" stroke="currentColor" stroke-opacity="0.12" stroke-width="1"/>`).join("");
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:90px;display:block">`
+    + grid
+    + `<polygon points="${area}" fill="var(--accent, #4f8cff)" fill-opacity="0.14"/>`
+    + `<polyline points="${pts}" fill="none" stroke="var(--accent, #4f8cff)" stroke-width="2" vector-effect="non-scaling-stroke"/>`
+    + `</svg>`
+    + `<div class="oh-trend-meta">${escapeHtml(t("admin.orgHealthTrendMeta", {
+      from: rows[0].date, to: rows[rows.length - 1].date, days: rows.length,
+      max: max.toLocaleString(), total: rows.reduce((sum, r) => sum + r.calls, 0).toLocaleString(),
+    }))}</div>`;
 }
 
 function applyAdminTabVisibility() {

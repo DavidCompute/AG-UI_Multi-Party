@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.242 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.242 Release Notes (current Windows desktop release)
+
+**版本说明**：**组织体检图表视图再进一步**——在既有 KPI 与 Top 柱状之上，新增**按日趋势折线**（调用次数/天）与**好评率环形**。
+**Version note**: **The org health chart view goes one step further** — on top of the existing KPIs and top-calls bars, it now adds a **daily trend line** (calls per day) and a **positive-rate donut**.
+
+## 变更
+# Changes
+
+中文：
+- **前端**：`#orgHealthModal` 在柱状图与需关注项之间新增一行：左侧**好评率环形**（复用既有 `renderDonut`，有 👍/👎 反馈时按 优/中/差 三档配色，无反馈时优雅降级显示「—」），右侧**按日趋势折线**（`viewBox="0 0 800 90"` 网格 + 面积 + `polyline`，`preserveAspectRatio="none"` + `vector-effect="non-scaling-stroke"` 防拉伸变形），下方 meta 显示「区间 · 共 N 次调用 · 单日峰值 M」。
+- **数据来源**：图表弹窗现并行发起两个请求——`GET /ag-ui/admin/org-health?days=N`（KPI / 柱状 / 关注项）与 `GET /ag-ui/admin/usage?days=N`（按日趋势）；`/usage` **失败非致命**，仅降级折线，不影响其余渲染。
+- **降级**：有效天数 `< 2` 时折线区显示提示文案（`admin.orgHealthTrendShort`）而非空图；无评价数据时环形显示「—」。
+English:
+- **Front end**: `#orgHealthModal` gains a new row between the bars and the attention list: a **positive-rate donut** on the left (reusing the existing `renderDonut`; the 优/中/差 colour tiers when 👍/👎 feedback exists, a graceful "—" when it does not) and a **daily trend line** on the right (`viewBox="0 0 800 90"` grid + area + `polyline`, `preserveAspectRatio="none"` + `vector-effect="non-scaling-stroke"` to avoid stretching), with a meta line below reading "range · N calls total · peak M per day".
+- **Data source**: the chart dialog now fires two requests in parallel — `GET /ag-ui/admin/org-health?days=N` (KPIs / bars / attention) and `GET /ag-ui/admin/usage?days=N` (daily trend); a `/usage` **failure is non-fatal** and only degrades the trend line, leaving the rest intact.
+- **Degradation**: with fewer than 2 effective days the trend area shows a hint (`admin.orgHealthTrendShort`) instead of an empty chart; the donut shows "—" when there is no rating data.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（图表视图补「好评率环形（无反馈显示 —）」与「按日趋势折线（1.0.242，复用 `/admin/usage`）」）。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (the chart view now documents the "positive-rate donut (— when no feedback)" and the "daily trend line (1.0.242, reusing `/admin/usage`)").
+
+## 测试
+# Tests
+
+中文：`node --check`（`app.js` / `zh.js` / `en.js`）与 i18n 审计 **zh=en=1864，missing 0**、`check-i18n-keys`（865 处引用）、`check-orphan-keys`（889 处 `t()` 引用）全过；`dotnet build AguiGroupChat.slnx` **0 错误**（本轮无 C# 改动）。浏览器实测（重建 web 后，管理员，真实数据）：图表弹窗 **6 张 KPI 卡**、**12 条柱**、折线 **`polyline` 存在且 12 个点**、meta「2026-09-17 ~ 2026-10-14 · 共 960 次调用 · 单日峰值 219」；环形因当前库无 👍/👎 反馈正确降级显示「—」（手动 `renderDonut("orgHealthRate", 0.93)` 验证渲出 2 个 `<circle>`）；**无页面报错**。
+English: `node --check` (`app.js` / `zh.js` / `en.js`) and the i18n audit **zh=en=1864, missing 0**, `check-i18n-keys` (865 references) and `check-orphan-keys` (889 `t()` references) all pass; `dotnet build AguiGroupChat.slnx` **0 errors** (no C# changes this round). Browser-verified (after rebuilding web, as admin, real data): the chart dialog renders **6 KPI cards**, **12 bars**, a trend **`polyline` with 12 points**, meta "2026-09-17 ~ 2026-10-14 · 960 calls total · peak 219 per day"; the donut correctly degrades to "—" because the current store has no 👍/👎 feedback (manually calling `renderDonut("orgHealthRate", 0.93)` renders 2 `<circle>`s); **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.241 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.241 Release Notes (current Windows desktop release)
 
