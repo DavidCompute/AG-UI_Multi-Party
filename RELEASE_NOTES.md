@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.248 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.248 Release Notes (current Windows desktop release)
+
+**版本说明**：**CSV 导出跟随当前维度**——图表视图切到「触发者 / 知聚」后，导出的 CSV 就是该维度的明细（不再恒为员工表）。
+**Version note**: **The CSV export follows the current dimension** — after switching the chart to "triggered by / groups", the exported CSV is that dimension's table (no longer always employees).
+
+## 变更
+# Changes
+
+中文：`#orgHealthModal` 的「📥 导出 CSV」现按**当前维度**导出：
+- **数字员工**：员工 / 数字员工 ID / 调用次数 / 总 Token / 👍 / 👎 / 好评率 / 成本 / 最近活跃 / 关注（与之前一致）；
+- **触发者 / 知聚**：名称 / ID / 调用次数 / 总 Token / 成本（这两维度无 👍👎 / 关注）。
+
+文件名与维度对齐（`org-health-<dim>-<yyyymmdd>.csv`）；依然前置 UTF-8 BOM、字段全引号转义；维度为空时给出**维度化**的空态提示（不再用员工文案）。纯前端改动，**无新增接口**。
+English: the "📥 Export CSV" button in `#orgHealthModal` now exports by the **current dimension**:
+- **employees**: employee / agent ID / calls / total tokens / 👍 / 👎 / positive rate / cost / last active / attention (unchanged);
+- **triggered by / groups**: name / ID / calls / total tokens / cost (these two dimensions have no 👍👎 / attention).
+
+The filename matches the dimension (`org-health-<dim>-<yyyymmdd>.csv`); the UTF-8 BOM and full field quoting are kept; an empty dimension now shows a **dimension-aware** empty hint (no longer the employee copy). Front-end only, **no new endpoint**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（CSV 导出注明跟随维度）；`ROADMAP.md` §6.5 补一句。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (the CSV export now notes it follows the dimension); `ROADMAP.md` §6.5 records it.
+
+## 测试
+# Tests
+
+中文：本轮**无 C# 改动**（仅前端 + 文案），`dotnet build` 与 1.0.247 一致（0 错误）。`node --check`、i18n 审计 **zh=en=1879，missing 0**、`check-i18n-keys`（872 处引用）、`check-orphan-keys`（899 处 `t()` 引用）均过。浏览器实测（重建 web 后，管理员，真实数据）：数字员工维度 → `org-health-agents-20261015.csv`（BOM，10 列，17 行）；注入合成知聚并切到知聚维度 → `org-health-groups-20261015.csv`（BOM，5 列：名称 / ID / 调用次数 / 总 Token / 成本，2 行，首行「产品推广知聚, group_k1, 120, 3200000」）；**无页面报错**。
+English: **no C# changes** this round (frontend + copy only), so `dotnet build` matches 1.0.247 (0 errors). `node --check`, the i18n audit **zh=en=1879, missing 0**, `check-i18n-keys` (872 references) and `check-orphan-keys` (899 `t()` references) all pass. Browser-verified (after rebuilding web, as admin, real data): employees dimension → `org-health-agents-20261015.csv` (BOM, 10 columns, 17 rows); after injecting synthetic groups and switching to the groups dimension → `org-health-groups-20261015.csv` (BOM, 5 columns: name / ID / calls / total tokens / cost, 2 rows, first "产品推广知聚, group_k1, 120, 3200000"); **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.247 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.247 Release Notes (current Windows desktop release)
 

@@ -1883,6 +1883,8 @@ window.I18N_DICTS.zh = {
   "admin.orgHealthDimUsers": "触发者",
   "admin.orgHealthDimGroups": "知聚",
   "admin.orgHealthDimEmpty": "该维度暂无用量（自本版起按维度记录）",
+  "admin.orgHealthDimName": "名称",
+  "admin.orgHealthDimId": "ID",
   "admin.orgHealthMetricCalls": "调用次数",
   "admin.orgHealthMetricTokens": "Token",
   "admin.orgHealthMetricCost": "成本",

@@ -1890,6 +1890,8 @@ window.I18N_DICTS.en = {
   "admin.orgHealthDimUsers": "Triggered by",
   "admin.orgHealthDimGroups": "Groups",
   "admin.orgHealthDimEmpty": "No usage for this dimension yet (recorded since this version)",
+  "admin.orgHealthDimName": "Name",
+  "admin.orgHealthDimId": "ID",
   "admin.orgHealthMetricCalls": "Calls",
   "admin.orgHealthMetricTokens": "Tokens",
   "admin.orgHealthMetricCost": "Cost",

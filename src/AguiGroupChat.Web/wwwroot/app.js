@@ -7080,35 +7080,51 @@ async function downloadOrgHealthReport() {
   finally { if (btn) btn.disabled = false; }
 }
 
-/** 导出组织体检的员工明细为 CSV（含全部员工，便于进 Excel 汇报；与当前指标无关）。 */
+/** 导出组织体检明细为 CSV：**跟随当前维度**（数字员工 / 触发者 / 知聚），含全部行，便于进 Excel 汇报。 */
 function downloadOrgHealthCsv() {
   const d = orgHealthData;
-  if (!d || !d.agents || !d.agents.length) { toast(t("admin.perfEmpty")); return; }
+  if (!d) return;
   const priced = !!(orgHealthPrice && orgHealthPrice.configured);
   const cur = (orgHealthPrice && orgHealthPrice.currency) || "$";
   const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
     : f === "idle" ? t("admin.perfFlagIdle", { days: d.days || 30 }) : f;
   const cell = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
-  const header = [t("admin.perfThAgent"), t("admin.perfThAgentId"), t("admin.perfThCalls"), t("admin.perfThTokens"),
-    t("admin.perfThUp"), t("admin.perfThDown"), t("admin.perfThRate"), t("admin.perfThCost"), t("admin.perfThLast"), t("admin.perfThFlag")];
-  const rows = (d.agents || []).slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((a) => [
-    a.name || a.agentId,
-    a.agentId || "",
-    Number(a.calls || 0),
-    Number(a.totalTokens || 0),
-    Number(a.up || 0),
-    Number(a.down || 0),
-    a.positiveRate == null ? "" : Math.round(a.positiveRate * 1000) / 10 + "%",
-    priced ? cur + Number(a.cost || 0).toFixed(2) : "",
-    a.lastDate || "",
-    (a.flags || []).map(flagLabel).join(" / "),
-  ]);
+  const costCell = (v) => (priced ? cur + Number(v || 0).toFixed(2) : "");
+  let header, rows;
+  if (orgHealthDim === "users" || orgHealthDim === "groups") {
+    const isUsers = orgHealthDim === "users";
+    const src = (isUsers ? d.users : d.groups) || [];
+    header = [t("admin.orgHealthDimName"), t("admin.orgHealthDimId"), t("admin.perfThCalls"), t("admin.perfThTokens"), t("admin.perfThCost")];
+    rows = src.slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((r) => [
+      r.name || (isUsers ? r.userId : r.groupId),
+      (isUsers ? r.userId : r.groupId) || "",
+      Number(r.calls || 0),
+      Number(r.totalTokens || 0),
+      costCell(r.cost),
+    ]);
+  } else {
+    header = [t("admin.perfThAgent"), t("admin.perfThAgentId"), t("admin.perfThCalls"), t("admin.perfThTokens"),
+      t("admin.perfThUp"), t("admin.perfThDown"), t("admin.perfThRate"), t("admin.perfThCost"), t("admin.perfThLast"), t("admin.perfThFlag")];
+    rows = (d.agents || []).slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((a) => [
+      a.name || a.agentId,
+      a.agentId || "",
+      Number(a.calls || 0),
+      Number(a.totalTokens || 0),
+      Number(a.up || 0),
+      Number(a.down || 0),
+      a.positiveRate == null ? "" : Math.round(a.positiveRate * 1000) / 10 + "%",
+      costCell(a.cost),
+      a.lastDate || "",
+      (a.flags || []).map(flagLabel).join(" / "),
+    ]);
+  }
+  if (!rows.length) { toast(t(orgHealthDim === "agents" ? "admin.perfEmpty" : "admin.orgHealthDimEmpty")); return; }
   // 前置 BOM，确保 Excel 以 UTF-8 正确打开中文
   const csv = "\uFEFF" + [header, ...rows].map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `org-health-agents-${String(d.to || "").replace(/-/g, "")}.csv`;
+  a.href = url; a.download = `org-health-${orgHealthDim}-${String(d.to || "").replace(/-/g, "")}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   toast(t("admin.orgHealthCsvOk"));
