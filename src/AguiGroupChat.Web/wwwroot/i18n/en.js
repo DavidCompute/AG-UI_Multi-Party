@@ -1877,7 +1877,7 @@ window.I18N_DICTS.en = {
   "admin.orgHealthWindow": "{from} ~ {to}",
   "admin.orgHealthAgents": "Employees (active / total)",
   "admin.orgHealthFlagged": "Flagged",
-  "admin.orgHealthCalls": "Calls (top)",
+  "admin.orgHealthTopN": "Top 12",
   "admin.orgHealthFlags": "Needs attention",
   "admin.orgHealthNoFlag": "No employees need attention",
   "admin.orgHealthTrend": "Daily trend",

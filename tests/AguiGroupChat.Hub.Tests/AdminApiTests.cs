@@ -35,8 +35,10 @@ public sealed class AdminApiServerFixture : IAsyncLifetime
             ["Agents:Provider"] = "mock",
             ["Persistence:Enabled"] = "false",
             ["Auth:RequireTokenOnRealTime"] = "false",
-            // 固定管理员账号（首个注册用户在其他测试先注册时不一定是管理员）
+            // 固定管理员账号（避免依赖注册顺序）；并关闭 FirstUserIsAdmin，否则首个注册的普通用户
+            // 会被自举为管理员，使各「非管理员 → 403」用例在单独运行时随机失败（与其他夹具一致）。
             ["Auth:AdminUserIds"] = "admin_chief",
+            ["Auth:FirstUserIsAdmin"] = "false",
         });
         HubApp.ConfigureServices(builder);
         builder.Services.AddAgentFramework(builder.Configuration);

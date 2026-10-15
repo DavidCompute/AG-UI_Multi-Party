@@ -1870,7 +1870,7 @@ window.I18N_DICTS.zh = {
   "admin.orgHealthWindow": "{from} ~ {to}",
   "admin.orgHealthAgents": "员工（有调用 / 总数）",
   "admin.orgHealthFlagged": "关注项",
-  "admin.orgHealthCalls": "调用次数 Top",
+  "admin.orgHealthTopN": "Top 12",
   "admin.orgHealthFlags": "需要关注",
   "admin.orgHealthNoFlag": "没有需要关注的员工",
   "admin.orgHealthTrend": "按日趋势",

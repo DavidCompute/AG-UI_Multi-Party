@@ -1,3 +1,37 @@
+# AG-UI 群聊桌面版 1.0.244 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.244 Release Notes (current Windows desktop release)
+
+**版本说明**：**柱状图也支持指标切换**——组织体检图表的 Top 12 横向柱状与按日趋势折线**共用一组指标**（调用次数 / Token / 成本）；并**修复一处集成测试的隔离脆弱性**（非管理员用例在单独运行时随机失败）。
+**Version note**: **The bar chart switches metrics too** — the org health Top-12 bar chart and the daily trend line now **share one metric** (calls / tokens / cost); also **fixes an integration-test isolation fragility** (non-admin cases used to fail randomly when run in isolation).
+
+## 变更
+# Changes
+
+中文：
+- **前端**：`#orgHealthModal` 的「Top 12」柱状与「按日趋势」折线**共用同一指标状态**（`orgHealthMetric`）——两组分段按钮（各 3 档：调用次数 / Token / 成本）始终同步高亮；切换**只重绘**（不重新拉数据），柱状按当前指标**降序重排**并换值（成本带货币、其余用千分位），趋势折线与 meta 同步换单位。指标切换绑定改为在弹窗上**事件委派**（`.oh-metric-btn`），无需各自 id。
+- **降级不变**：未配置单价时所有「成本」按钮**统一置灰 + 提示**，当前维度若为成本则回退调用次数。柱状图数据取自 `org-health` 的 `agents[].cost` / `totalTokens` / `calls`，趋势图取自 `/admin/usage` 按日汇总，**无新增接口**。
+English:
+- **Front end**: the "Top 12" bar chart and the "Daily trend" line in `#orgHealthModal` now **share one metric state** (`orgHealthMetric`) — the two segmented controls (3 options each: calls / tokens / cost) always highlight in sync; switching **only re-renders** (no refetch), the bars **re-sort descending** by the current metric and change their values (cost with currency, others thousands-separated), and the trend line and meta line change units together. The metric binding now uses **event delegation** on the dialog (`.oh-metric-btn`), so no per-group id is needed.
+- **Degradation unchanged**: when no pricing is configured every **Cost** button is **greyed out with a hint** in unison, and the current metric falls back to calls. Bar values come from `org-health`'s `agents[].cost` / `totalTokens` / `calls`; the trend comes from `/admin/usage`'s daily summary — **no new endpoint**.
+
+## 修复
+# Fixes
+
+中文：**`AdminApiServerFixture` 未关闭 `Auth:FirstUserIsAdmin`（真实缺陷）**：该夹具被 `AdminApiIntegrationTests` 等 5 个测试类共用，却没像其它夹具那样显著关闭「首个注册用户自动提升为管理员」。于是多处「非管理员 → 403」用例（如 `OrgHealth_RequiresOperator`）在**单独运行**时，会因为自己的普通用户恰好是首个注册者而被当作管理员，导致断言失败（整类串跑时碰巧由 `admin_chief` 先注册而通过）。现按既有约定补上 `["Auth:FirstUserIsAdmin"] = "false"`，管理员只由 `Auth:AdminUserIds` 决定，与注册顺序解耦。
+English: **`AdminApiServerFixture` did not disable `Auth:FirstUserIsAdmin` (real defect)**: this fixture, shared by 5 test classes including `AdminApiIntegrationTests`, unlike the other fixtures did not turn off "the first registered user auto-promotes to admin". So several "non-admin → 403" cases (e.g. `OrgHealth_RequiresOperator`) failed when **run in isolation**, because their plain user happened to be the first registrant and got treated as admin (when the whole class runs, `admin_chief` is registered first by luck and it passes). It now sets `["Auth:FirstUserIsAdmin"] = "false"`, matching the existing convention, so admin status is decided only by `Auth:AdminUserIds`, decoupled from registration order.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（图表视图：柱状与折线共用指标切换）；`ROADMAP.md` §6.5 补图表视图进展。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (chart view: bars and line share the metric switch); `ROADMAP.md` §6.5 records the chart-view progress.
+
+## 测试
+# Tests
+
+中文：`AdminApiIntegrationTests` + `AgentPerformanceApiTests` + `OrphanAdminApiTests` + `StorageAdminApiTests` + `EvalApiTests` + `OrgHealthReportTests` 合跑 **21/21**；`OrgHealth_RequiresOperator` **单独运行也通过**（修复验证）。`node --check`、i18n 审计 **zh=en=1870，missing 0**、`check-i18n-keys`（868 处引用）、`check-orphan-keys`（890 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后，管理员，真实数据）：两组切换器始终同步；柱状 12 条：调用次数首条「质检审核 243」、切 Token「3,135,219」、切成本（注入单价/成本）「$3135.22」；趋势 meta 对应「共 960 次 / 共 14,878,030 Token / 共 $57.19」；未配置单价时成本按钮**两组均置灰**；**无页面报错**。
+English: `AdminApiIntegrationTests` + `AgentPerformanceApiTests` + `OrphanAdminApiTests` + `StorageAdminApiTests` + `EvalApiTests` + `OrgHealthReportTests` run **21/21**; `OrgHealth_RequiresOperator` **passes in isolation too** (fix verification). `node --check`, the i18n audit **zh=en=1870, missing 0**, `check-i18n-keys` (868 references), `check-orphan-keys` (890 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web, as admin, real data): the two switches always stay in sync; 12 bars: calls → first "质检审核 243", tokens → "3,135,219", cost (with injected pricing/cost) → "$3135.22"; trend meta matches ("960 calls / 14,878,030 tokens / $57.19"); with no pricing both Cost buttons are **greyed out**; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.243 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.243 Release Notes (current Windows desktop release)
 
