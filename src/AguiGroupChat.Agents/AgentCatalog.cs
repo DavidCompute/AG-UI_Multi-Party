@@ -116,7 +116,7 @@ public sealed class AgentCatalog
     public void Upsert(AgentDefinition def)
     {
         _definitions[def.AgentId] = def;
-        _agents.TryRemove(def.AgentId, out _);
+        EvictAgent(def.AgentId);
         _agentToolNames.TryRemove(def.AgentId, out _);
         _agentApprovalToolNames.TryRemove(def.AgentId, out _);
         _changes?.Notify();
@@ -125,12 +125,22 @@ public sealed class AgentCatalog
     /// <summary>删除智能体定义并失效缓存。返回是否存在。</summary>
     public bool Remove(string agentId)
     {
-        _agents.TryRemove(agentId, out _);
+        EvictAgent(agentId);
         _agentToolNames.TryRemove(agentId, out _);
         _agentApprovalToolNames.TryRemove(agentId, out _);
         var ok = _definitions.TryRemove(agentId, out _);
         if (ok) _changes?.Notify();
         return ok;
+    }
+
+    /// <summary>失效某智能体的<b>全部</b>缓存变体：主键 + 按模型分键的变体（视觉 / 按复杂度路由）。
+    /// 只删主键会留下旧模型变体 → 改了人设却仍用旧指令（缓存键为 <c>agentId\u001Fmodel</c>）。</summary>
+    private void EvictAgent(string agentId)
+    {
+        _agents.TryRemove(agentId, out _);
+        var prefix = agentId + "\u001F";
+        foreach (var key in _agents.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList())
+            _agents.TryRemove(key, out _);
     }
 
     /// <summary>

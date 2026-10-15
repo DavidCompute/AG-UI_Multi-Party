@@ -2656,8 +2656,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 绩效反哺（Agents:PerformanceFeedback，默认关）：候选近期好评率作为参考，让指派更偏向实测靠谱者。
         if (_options.PerformanceFeedback is { Enabled: true } pf && _feedback.Value is { } fbStore)
         {
-            var names = candidates.ToDictionary(cid => cid, cid => _catalog.GetDefinition(cid)?.Nickname ?? cid, StringComparer.Ordinal);
-            var lines = PerformanceRoutingHint.BuildLines(fbStore.Snapshot(), candidates, names,
+            var lines = PerformanceRoutingHint.BuildLines(fbStore.Snapshot(), candidates,
+                cid => _catalog.GetDefinition(cid)?.Nickname ?? cid,
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), pf.WindowDays, pf.MinRatings);
             if (lines.Count > 0)
             {

@@ -41,6 +41,24 @@ public sealed class AgentCatalogDynamicTests
     }
 
     [Fact]
+    public void Upsert_EvictsModelKeyedVariants_Too()
+    {
+        var catalog = CreateCatalog(new AgentOptions
+        {
+            Provider = "mock",
+            Agents = { new AgentDefinition { AgentId = "agent_a", Nickname = "助手A" } },
+        });
+
+        var v1 = catalog.GetOrCreateWithModel("agent_a", "some-model");
+        Assert.Same(v1, catalog.GetOrCreateWithModel("agent_a", "some-model")); // 命中缓存
+
+        catalog.Upsert(new AgentDefinition { AgentId = "agent_a", Nickname = "助手A2" });
+
+        // 变体缓存必须一并失效（否则改了人设却仍用旧指令）
+        Assert.NotSame(v1, catalog.GetOrCreateWithModel("agent_a", "some-model"));
+    }
+
+    [Fact]
     public void Catalog_Upsert_AddsNewAgent_AndReplacesDefinition()
     {
         var catalog = CreateCatalog();

@@ -21,7 +21,8 @@ public sealed class PerformanceRoutingHintTests
         };
         var names = new Dictionary<string, string> { ["a1"] = "一", ["a2"] = "二", ["a3"] = "三" };
 
-        var lines = PerformanceRoutingHint.BuildLines(fb, ["a1", "a2", "a3", "a4"], names, Now, 30, 2);
+        var lines = PerformanceRoutingHint.BuildLines(fb, ["a1", "a2", "a3", "a4"],
+            id => names.TryGetValue(id, out var n) ? n : id, Now, 30, 2);
 
         var only = Assert.Single(lines);
         Assert.Contains("a1", only);
@@ -36,14 +37,25 @@ public sealed class PerformanceRoutingHintTests
         {
             new MessageFeedbackEntry { MessageId = "m1", GroupId = "g", AgentId = "a2", UserId = "u1", Value = 1, CreatedAtMs = Now },
         };
-        var lines = PerformanceRoutingHint.BuildLines(fb, ["a2"], new Dictionary<string, string>(), Now, 30, 1);
+        var lines = PerformanceRoutingHint.BuildLines(fb, ["a2"], id => id, Now, 30, 1);
         Assert.Contains("100%", Assert.Single(lines));
+    }
+
+    [Fact]
+    public void BuildLines_DuplicateCandidates_DoNotThrow()
+    {
+        var fb = new[]
+        {
+            new MessageFeedbackEntry { MessageId = "m1", GroupId = "g", AgentId = "a1", UserId = "u1", Value = 1, CreatedAtMs = Now },
+        };
+        var lines = PerformanceRoutingHint.BuildLines(fb, ["a1", "a1"], id => id, Now, 30, 1);
+        Assert.Equal(2, lines.Count); // 重复候选仅重复提示行，不抛「重复键」
     }
 
     [Fact]
     public void BuildLines_NoFeedback_Empty()
     {
-        var lines = PerformanceRoutingHint.BuildLines([], ["a1"], new Dictionary<string, string>(), Now, 30, 1);
+        var lines = PerformanceRoutingHint.BuildLines([], ["a1"], id => id, Now, 30, 1);
         Assert.Empty(lines);
     }
 }

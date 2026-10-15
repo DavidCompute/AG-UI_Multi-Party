@@ -1,3 +1,25 @@
+# AG-UI 群聊桌面版 1.0.229 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.229 Release Notes (current Windows desktop release)
+
+**版本说明**：**新一轮新增功能的严格代码审核与修复**——审到两处真实缺陷并修复（均与本次新增的「按复杂度选模型 / 绩效反哺」同源的缓存与健壮性问题）。
+**Version note**: **Strict code review of the newly added features, with fixes** — two real defects found and fixed (both cache/robustness issues exposed by the new "complexity model routing / performance-feedback" work).
+
+## 修复
+# Fixes
+
+中文：
+1. **模型变体缓存未失效（真实缺陷）**：`AgentCatalog.Upsert`/`Remove` 原先只删主缓存键 `_agents[agentId]`，**不删按模型分键的变体**（`agentId\u001Fmodel`，即视觉 / 按复杂度路由的变体）——于是**改了数字员工的人设后，走视觉或模型路由的运行仍用旧指令**。现新增 `EvictAgent`：连主键带全部 `agentId\u001F*` 变体一并失效；并加回归用例 `Upsert_EvictsModelKeyedVariants_Too`。
+2. **候选重复键会抛异常（健壮性）**：绩效反哺下 `RankAssignTargetsAsync` 曾用 `candidates.ToDictionary(...)` 建名字表——**候选列表含重复 agentId 时抛「重复键」**（`AssignmentIds` 未去重）。现改为传**名称查找委托**（`Func<string,string>`），从根上消除重复键风险（也少一次分配）；加回归用例 `BuildLines_DuplicateCandidates_DoNotThrow`。
+English:
+1. **Model-variant cache not invalidated (real defect)**: `AgentCatalog.Upsert`/`Remove` only removed the base key `_agents[agentId]`, **not the model-keyed variants** (`agentId\u001Fmodel`, i.e. vision / model-routed variants) — so after editing an employee's persona, vision or model-routed runs still used the **old instructions**. Added `EvictAgent` to evict the base key plus every `agentId\u001F*` variant; regression test `Upsert_EvictsModelKeyedVariants_Too`.
+2. **Duplicate candidate keys threw (robustness)**: under performance feedback, `RankAssignTargetsAsync` used `candidates.ToDictionary(...)` for a name map — a **duplicate candidate agentId threw a duplicate-key error** (`AssignmentIds` isn't de-duplicated). Now it passes a **name lookup delegate** (`Func<string,string>`), removing the risk at the root (and one allocation); regression test `BuildLines_DuplicateCandidates_DoNotThrow`.
+
+## 测试
+# Tests
+
+中文：新增 2 个回归用例；连同 AgentGateway / AgentCatalogDynamic / AgentPerformance / EvalApi / EvalScore / OrgHealthReport / AdminApi / DesktopComposition 合跑 **86/86**。i18n 审计 **zh=en=1813，missing 0**；`node --check` 通过。运行栈实测：重建 web 后健康 200。
+English: 2 new regression tests; **86/86** with AgentGateway / AgentCatalogDynamic / AgentPerformance / EvalApi / EvalScore / OrgHealthReport / AdminApi / DesktopComposition. The i18n audit is **zh=en=1813, missing 0**; `node --check` passes. Verified live: health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.228 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.228 Release Notes (current Windows desktop release)
 

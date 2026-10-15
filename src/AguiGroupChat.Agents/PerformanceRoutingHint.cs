@@ -13,7 +13,7 @@ public static class PerformanceRoutingHint
     public static IReadOnlyList<string> BuildLines(
         IEnumerable<MessageFeedbackEntry> feedback,
         IReadOnlyList<string> candidateIds,
-        IReadOnlyDictionary<string, string> names,
+        Func<string, string> nameOf,
         long nowMs,
         int windowDays,
         int minRatings)
@@ -38,7 +38,8 @@ public static class PerformanceRoutingHint
             var total = s.Up + s.Down;
             if (total < min) continue;
             var rate = (int)Math.Round((double)s.Up / total * 100);
-            var name = names.TryGetValue(id, out var n) && !string.IsNullOrWhiteSpace(n) ? n : id;
+            var name = nameOf(id);
+            if (string.IsNullOrWhiteSpace(name)) name = id;
             lines.Add($"{id}（{name}）：近期好评率 {rate}%（{s.Up}👍/{s.Down}👎，{days} 天内）");
         }
         return lines;
