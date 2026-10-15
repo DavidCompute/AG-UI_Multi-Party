@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.228 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.228 Release Notes (current Windows desktop release)
+
+**版本说明**：**绩效反哺编排（候选复用排序，默认关）**——开启后，任务指派路由会把候选数字员工的**近期好评率**（👍👎）作为参考注入提示词，让指派更偏向「实测靠谱」的员工（数据驱动，而非仅静态职责）。**默认关 = 行为与旧版完全一致。**
+**Version note**: **Performance-feedback routing (candidate ranking, off by default)** — when enabled, task-assignment routing injects candidates' **recent positive rate** (👍👎) into the prompt, biasing assignment toward employees that have proven reliable (data-driven rather than role-description-only). **Off by default = identical to before.**
+
+## 绩效反哺编排
+# Performance-feedback routing
+
+中文：新增 `Agents:PerformanceFeedback`（`Enabled` / `WindowDays` 默认 30 / `MinRatings` 默认 2；Docker `AGENTS_PERFORMANCEFEEDBACK_*`，**默认关**）：
+- **注入点**：`AgentGateway.RankAssignTargetsAsync`（任务指派目标判定）——在候选职责之后追加「候选近期绩效」参考行（如 `a1（助理）：近期好评率 67%（2👍/1👎，30 天内）`），并声明「仅供参考；同等匹配时优先好评率高者、避开明显偏低者」。
+- **口径**：仅统计**窗口内**反馈；候选反馈样本**不足 `MinRatings` 不列**（样本太少不可信）。各候选统计相互独立，**不会跨员工抹平**。
+- **实现**：纯函数 `PerformanceRoutingHint.BuildLines`（便于单测）；数据来自既有消息反馈存储，无新增存储。
+- **设计取舍（为何默认关）**：绩效是**行为信号**，若直接改写路由结果可能引入抖动（好评是滞后、稀疏、带主观性的）。因此采取「**只把数据给模型、由模型综合职责与绩效判断**」的最小干预方式，并默认关闭、可随开关启用。
+English: new `Agents:PerformanceFeedback` (`Enabled` / `WindowDays` default 30 / `MinRatings` default 2; Docker `AGENTS_PERFORMANCEFEEDBACK_*`, **off by default**):
+- **Injection point**: `AgentGateway.RankAssignTargetsAsync` (assignment target decision) — after candidate duties, append "candidate recent performance" reference lines (e.g. `a1（助理）：近期好评率 67%（2👍/1👎，30 天内）`) plus a note: "reference only; prefer higher positive rate on a tie, avoid clearly low ones".
+- **Scope**: counts only feedback **within the window**; candidates with **fewer than `MinRatings`** samples are omitted (too few to trust). Each candidate is counted independently — **no cross-employee smoothing**.
+- **Implementation**: a pure `PerformanceRoutingHint.BuildLines` (unit-tested); data from the existing message-feedback store — no new storage.
+- **Design trade-off (why off by default)**: performance is a **behavioural signal**; rewriting routing outright could introduce churn (praise is lagging, sparse and subjective). So it takes the minimal-intervention form of **giving the data to the model and letting it weigh duties vs. performance**, off by default and toggleable.
+
+## 测试
+# Tests
+
+中文：新增 `PerformanceRoutingHintTests`（仅列足够近期反馈者 / 降 `MinRatings` 后纳入稀疏候选 / 无反馈为空）；连同 AgentGateway / AgentPerformance / AdminApi / DesktopComposition / EvalApi 合跑 **75/75**。i18n 审计 **zh=en=1813，missing 0**；`node --check` 与 appsettings JSON 校验通过。运行栈实测：健康 200、绩效端点 200（默认关，无行为变化）。
+English: new `PerformanceRoutingHintTests` (only candidates with enough recent feedback / lower `MinRatings` includes sparse ones / no feedback yields empty); **75/75** with AgentGateway / AgentPerformance / AdminApi / DesktopComposition / EvalApi. The i18n audit is **zh=en=1813, missing 0**; `node --check` and appsettings JSON validation pass. Verified live: health 200 and the performance endpoint 200 (off by default, no behaviour change).
+
 # AG-UI 群聊桌面版 1.0.227 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.227 Release Notes (current Windows desktop release)
 

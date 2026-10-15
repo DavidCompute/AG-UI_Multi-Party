@@ -247,6 +247,7 @@ docker compose down
 | `TTS_PORT` | `8880` | 独立 TTS 服务的宿主机端口 |
 | `AGENTS_PRICING_*` | `0` | 成本估算（`Agents:Pricing`）：`INPUT_PER_MILLION` / `OUTPUT_PER_MILLION`（每百万 token 单价）、`CURRENCY`（币种符号）、`DAILY_BUDGET`（每日预算）。用于控制台「员工绩效」成本列与预算提示；单价为 0 = 不估算（显示「—」） |
 | `AGENTS_MODELROUTING_*` | `false` | 按复杂度模型路由（`Agents:ModelRouting`）：`ENABLED` / `SIMPLE_MODEL` / `HEAVY_MODEL`。开启后简单档用 `SIMPLE_MODEL`、复杂/繁重档用 `HEAVY_MODEL`（与自适应超时同一估计器）；某档留空 = 不换。默认关 = 行为与旧版一致 |
+| `AGENTS_PERFORMANCEFEEDBACK_*` | `false` | 绩效反哺编排（`Agents:PerformanceFeedback`）：`ENABLED` / `WINDOW_DAYS`（默认 30）/ `MIN_RATINGS`（默认 2）。开启后任务指派路由会把候选员工的**近期好评率**（👍👎）作为参考注入提示词，让指派更偏向实测靠谱者。默认关 = 行为与旧版一致 |
 | `AGENTS_COORDINATOR_PLANNING` | `true` | 确定性编排计划：路由型数字员工先按组织/技能定计划，再依次激活对应员工/技能执行；计划内的客户端执行技能会合并成一张「本机一键执行全部」确认卡（默认开，可用 `AGENTS_COORDINATOR_PLANNING=false` 关闭） |
 | `AGENTS_EXECUTION_*` | 不限 | 网关**执行参数**（`Agents:Execution`：时序/重试/TTL、阶段开关、`ExecutionOrder`、**复杂度自适应超时 `ComplexityTimeouts`**）**默认与代码一致，无需容器配置**——首选在运行期于控制台「管理员 → 执行参数」页热改并持久化（`executionRuntime`，重启恢复）。若确要容器启动即用非默认值：`docker-compose.yml` `web.environment`（Docker 不透传未知键）需<b>显式补一行</b>，如 `Agents__Execution__StreamTimeoutMinutes: "8"`、`Agents__Execution__ComplexityTimeouts__Enabled: "false"`、`Agents__Execution__EnableOrgRoute: "false"`。角色级按单数字员工在「编辑 → 执行阶段」关闭桥接/交接/组织路由。字段/默认/可配边界见 `docs/execution-configuration.md` |
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | 一键编排 apply 的冒烟自测：是否对服务端执行的 `shell` 技能盲跑一次（有副作用，默认开；置 `false` 关闭）。映射选项 `Agents__SkillAutoTestServerShell` |

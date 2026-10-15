@@ -262,6 +262,10 @@ services:
       Agents__ModelRouting__Enabled: ${AGENTS_MODELROUTING_ENABLED:-false}
       Agents__ModelRouting__SimpleModel: ${AGENTS_MODELROUTING_SIMPLE_MODEL:-}
       Agents__ModelRouting__HeavyModel: ${AGENTS_MODELROUTING_HEAVY_MODEL:-}
+      # 绩效反哺编排（Agents:PerformanceFeedback，默认关）：指派路由时把候选员工的近期好评率作为参考。
+      Agents__PerformanceFeedback__Enabled: ${AGENTS_PERFORMANCEFEEDBACK_ENABLED:-false}
+      Agents__PerformanceFeedback__WindowDays: ${AGENTS_PERFORMANCEFEEDBACK_WINDOW_DAYS:-30}
+      Agents__PerformanceFeedback__MinRatings: ${AGENTS_PERFORMANCEFEEDBACK_MIN_RATINGS:-2}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

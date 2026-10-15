@@ -223,7 +223,8 @@
 - **已实现**：端点 `GET /ag-ui/admin/agent-performance?days=N`（Operator+，只读；名字取昵称、取不到回退 agentId）；控制台新增「员工绩效」页签（7/30/90 天窗口 + 刷新，按调用次数降序）；聚合为纯函数 `AgentPerformance.Aggregate`。**成本估算（1.0.221）**：按可配单价 `Agents:Pricing`（输入/输出每百万 token 单价 + 币种 + 每日预算）算成本列与预算已用（单价为 0 时显示「—」）。落点：`Web/AgentPerformance.cs`、`AgentOptions.PricingOptions`、`Web/AdminApi.cs`、`wwwroot/{index.html,app.js}`。
 - **已实现（1.0.223 反哺）**：端点返回每人 `flags`（`low-praise` 反馈≥ 3 且好评率 < 60% / `idle` 窗口内无调用，确定性、可解释），控制台新增「关注」列与建议栏——把绩效变成可行动的运营信号。
 - **已实现（1.0.224 组织体检报告）**：`GET /ag-ui/admin/org-health?days=N` 导出 Markdown（总览 / 关注项 / 绩效明细 / 组织架构 / 建议），纯函数 `OrgHealthReport.BuildMarkdown`。
-- **待续**：进一步把绩效作为信号**自动反馈进编排**（候选复用排序），需先定口径防抖动。
+- **已实现（1.0.228 反哺编排）**：`Agents:PerformanceFeedback`（默认关）——任务指派路由把候选的**近期好评率**作为参考注入提示词（`PerformanceRoutingHint.BuildLines`，仅列窗口内样本足够者）。采取「只给数据、不硬改写路由」的最小干预方式。
+- **待续**：若验证下来稳定，可考虑更强的候选排序权重（需防抖动，避免好评稀疏 / 滞后带来的误判）。
 
 ### 6.6 数字员工评测集 / 回归（★★☆ 质量守护） ✅已实现（1.0.222）
 - **现状**：改提示词 / 换模型靠“凭感觉”，无金标准用例，能力退化无告警。

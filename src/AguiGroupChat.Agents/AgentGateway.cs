@@ -2653,6 +2653,18 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var cdef = _catalog.GetDefinition(cid);
             sb.AppendLine($"  - {cid}：{cdef?.Nickname ?? cid} - {cdef?.Description ?? ""}");
         }
+        // 绩效反哺（Agents:PerformanceFeedback，默认关）：候选近期好评率作为参考，让指派更偏向实测靠谱者。
+        if (_options.PerformanceFeedback is { Enabled: true } pf && _feedback.Value is { } fbStore)
+        {
+            var names = candidates.ToDictionary(cid => cid, cid => _catalog.GetDefinition(cid)?.Nickname ?? cid, StringComparer.Ordinal);
+            var lines = PerformanceRoutingHint.BuildLines(fbStore.Snapshot(), candidates, names,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), pf.WindowDays, pf.MinRatings);
+            if (lines.Count > 0)
+            {
+                sb.AppendLine("候选近期绩效（仅供参考；同等匹配时优先好评率高者、避开明显偏低者）：");
+                foreach (var l in lines) sb.AppendLine("  - " + l);
+            }
+        }
         sb.AppendLine("按匹配度从高到低输出一个或多个候选 agentId，多个用英文逗号分隔；若都不适合只输出 NONE。");
         var prompt = "__AGUI_ROUTE__\n" + sb + "\n请求：\n" + UntrustedBoundary.Wrap(input);
         var resp = await agent.RunAsync(prompt, session: null, new ChatClientAgentRunOptions { ChatOptions = new ChatOptions { MaxOutputTokens = 64 } }, ct);

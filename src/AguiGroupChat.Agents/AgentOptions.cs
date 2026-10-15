@@ -185,6 +185,9 @@ public sealed class AgentOptions
     /// <summary>按任务复杂度自动选模型（appsettings：<c>Agents:ModelRouting</c>，默认关）：简单任务用经济模型、繁重任务用强模型。</summary>
     public ModelRoutingOptions ModelRouting { get; set; } = new();
 
+    /// <summary>绩效反哺编排（appsettings：<c>Agents:PerformanceFeedback</c>，默认关）：指派路由时把候选员工的近期好评率作为参考。</summary>
+    public PerformanceFeedbackOptions PerformanceFeedback { get; set; } = new();
+
     public List<AgentDefinition> Agents { get; set; } = [];
 
     /// <summary>技能库种子（appsettings 声明）：启动时若技能库为空则播种，与 <see cref="Agents"/> 同模式。</summary>
@@ -311,6 +314,23 @@ public sealed class ModelRoutingOptions
         };
         return string.IsNullOrWhiteSpace(m) ? null : m.Trim();
     }
+}
+
+/// <summary>
+/// 绩效反哺编排（appsettings：<c>Agents:PerformanceFeedback</c>，默认关）：
+/// 任务指派路由时，把候选数字员工**近期**的 👍👎 好评率作为参考注入提示词，
+/// 让指派更偏向「实测靠谱」的员工（数据驱动，而非仅静态职责）。默认关 = 行为与旧版完全一致。
+/// </summary>
+public sealed class PerformanceFeedbackOptions
+{
+    /// <summary>是否启用（默认关）。</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>统计窗口（天，默认 30；夹紧 1–365）。</summary>
+    public int WindowDays { get; set; } = 30;
+
+    /// <summary>候选的反馈样本数低于该值不列（样本太少不可信；默认 2）。</summary>
+    public int MinRatings { get; set; } = 2;
 }
 
 /// <summary>
