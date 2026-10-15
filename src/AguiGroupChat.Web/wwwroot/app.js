@@ -10667,6 +10667,13 @@ function runCanvasAnimation(cls) {
 function playTransition(tr) { runCanvasAnimation(transitionClass(tr)); }
 /** 页内分步：短淡入，避免硬切。 */
 function playStepFlash() { runCanvasAnimation("doc-tr-fade"); }
+/** 该幻灯片是否允许「点击画面推进」（OOXML `advClick`）：无转场元素或缺省字段时为 true，仅显式 false 才禁止。 */
+function slideAdvanceOnClick(slide) {
+  const m = docPlayManifest;
+  const tr = m && m.transitions ? m.transitions[slide] : null;
+  return !tr || tr.advanceOnClick !== false;
+}
+
 /** 自动前进：到达幻灯片最后一步且该页设了 advanceAfter 时，定时翻到下一张。 */
 function scheduleAutoAdvance() {
   clearAutoAdvance();
@@ -13485,6 +13492,13 @@ function init() {
   $("docPlayExit").onclick = exitDocPlay;
   // 播放：鼠标移动唤出控制条（静置自动隐没）
   $("docPlayOverlay").addEventListener("mousemove", () => { if (docPlaying) showDocPlayBar(); });
+  // 播放：点击画面推进到下一步 / 下一页（尊重该页转场的 advClick；控制条按钮在舞台之外，不受影响）
+  $("docPlayStage").addEventListener("click", () => {
+    if (!docPlaying) return;
+    const p = docPlayManifest && docPlayManifest.pages ? docPlayManifest.pages[docPlayPage] : null;
+    if (p && !slideAdvanceOnClick(p.slide)) return; // 该页 advClick=0：仅自动 / 按钮 / 键盘可推进
+    docSlideGo(1);
+  });
   // 全屏状态变化：浏览器用 Esc/F11 退出全屏时会吞掉 Esc（我们的 keydown 收不到），靠这里收尾；
   // 进入全屏导致视口变化时也重画一次。
   document.addEventListener("fullscreenchange", () => {

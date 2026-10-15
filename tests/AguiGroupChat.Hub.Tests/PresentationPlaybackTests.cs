@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using AguiGroupChat.Agents.Tools;
 using AguiGroupChat.Web;
@@ -160,5 +162,54 @@ public sealed class PresentationPlaybackTests
         Assert.Equal(2, manifest.Pages.Count);
         Assert.All(manifest.Pages, p => Assert.Equal(1, p.Steps));
         Assert.Equal(new[] { 0, 1 }, manifest.Pages.Select(p => p.Slide));
+    }
+
+    [Fact]
+    public void Transitions_ParseAdvanceOnClickAndSpeed()
+    {
+        // 最小 pptx：slide1 无 <p:transition>；slide2 显式 advClick="0" + spd="slow" + advTm="3000" + fade。
+        var path = Path.Combine(Path.GetTempPath(), "agui-tr-" + Guid.NewGuid().ToString("N")[..8] + ".pptx");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            AddToZip(zip, "ppt/presentation.xml",
+                "<p:presentation xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
+                + "<p:sldIdLst><p:sldId id=\"256\" r:id=\"rId1\"/><p:sldId id=\"257\" r:id=\"rId2\"/></p:sldIdLst></p:presentation>");
+            AddToZip(zip, "ppt/_rels/presentation.xml.rels",
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                + "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide1.xml\"/>"
+                + "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide2.xml\"/></Relationships>");
+            AddToZip(zip, "ppt/slides/slide1.xml", "<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"/>");
+            AddToZip(zip, "ppt/slides/slide2.xml",
+                "<p:sld xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">"
+                + "<p:transition spd=\"slow\" advClick=\"0\" advTm=\"3000\"><p:fade/></p:transition></p:sld>");
+        }
+        try
+        {
+            var outDir = Path.Combine(Path.GetTempPath(), "agui-tr-out-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(outDir);
+
+            var built = PresentationPlayback.TryBuild(path, outDir);
+            Assert.NotNull(built);
+            var manifest = built!.Value.Manifest;
+            Assert.Equal(2, manifest.SlideCount);
+
+            // 无转场元素 → null（前端按默认「可点击推进」处理）
+            Assert.Null(manifest.Transitions[0]);
+
+            var t = manifest.Transitions[1];
+            Assert.NotNull(t);
+            Assert.Equal("fade", t!.Preset);
+            Assert.Equal("slow", t.Speed);
+            Assert.Equal(3000, t.AdvanceAfterMs);
+            Assert.False(t.AdvanceOnClick); // advClick="0" → 点击不推进
+        }
+        finally { try { File.Delete(path); } catch { /* 忽略 */ } }
+    }
+
+    private static void AddToZip(ZipArchive zip, string name, string content)
+    {
+        using var s = zip.CreateEntry(name).Open();
+        var bytes = Encoding.UTF8.GetBytes(content);
+        s.Write(bytes, 0, bytes.Length);
     }
 }

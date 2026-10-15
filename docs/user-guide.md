@@ -3247,7 +3247,7 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 - 方向 / 方向轴 / 轮辐写在**子元素**上（如 `<p:push dir="l"/>`），`direction` / `orientation` / `spokes` 从子元素（回退到 `transition` 自身）取；
 - `speed` 取 `transition` 的 `spd`；
 - `advanceAfterMs` 取 `advTm`（毫秒，缺省 0）；
-- `advanceOnClick` = `advClick != "0"`（即缺省视为 `true`）。
+- `advanceOnClick` = `advClick != "0"`（即缺省视为 `true`）；前端播放态据此决定「点击画面是否推进」（见 7.8.2）。
 
 前端 `transitionClass`（`app.js:9307-9317`）把 preset + dir 映射为 CSS 动画类，`runCanvasAnimation` 作用在**整个播放舞台** `#docPlayStage` 上（底图 canvas 与精灵层一起动，避免撕裂）：
 
@@ -3318,9 +3318,13 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 
 `scheduleAutoAdvance`（`app.js:9331-9343`）：到达该幻灯片**最后一步**且该页转场的 `advanceAfterMs > 0` 时，`setTimeout(() => docSlideGo(1), advanceAfterMs)` 定时翻到下一张。“已到末尾”的判定分精灵模式（看 `docSpriteStep >= steps`）与分步模式（看 `step >= steps-1`）。
 
-#### 7.8.2 `advanceOnClick`
+#### 7.8.2 `advanceOnClick` 与点击推进
 
-服务端**解析**了 `advanceOnClick`（`SlideTransition.AdvanceOnClick`，缺省 `true`），但它只是清单里的一个字段：**前端从未读取它**（`app.js` 无任何 `advanceOnClick` 引用）。即：无论该值为何，播放都由键盘 / 点击 / 控制条驱动前进。**这是一个已核实的实现细节**（见 7.14）。
+服务端把 `advanceOnClick`（`SlideTransition.AdvanceOnClick`，`advClick != "0"`，缺省 `true`）写进清单；**前端播放态据此决定「点击画面是否推进」**（1.0.232 起）：
+
+- 点击播放舞台（`#docPlayStage`）→ 前进（`docSlideGo(1)`：精灵模式先播下一步形状，否则翻到下一页）。
+- 该页清单项存在且 `advanceOnClick === false` → 点击**不推进**（仅自动前进 / 控制条按钮 / 键盘可推进）；无转场元素（`transitions[i]` 为 `null`）或缺省字段视为可点击推进。
+- 控制条按钮在舞台之外，不受点击推进逻辑影响。
 
 #### 7.8.3 备注显示
 
@@ -3331,7 +3335,7 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 
 > 备注仅 `.pptx` 可抽取（`PresentationNotes.Supports` 只认 `.pptx`）；`.ppt`（二进制 OLE）/ `.odp` 返回空数组 → 退化为「只播放幻灯片、不显示备注区」。抽取只取备注正文占位符（`ph[@type='body']`），避开同页幻灯片缩略图 / 页码字段（测试 `Extract_ReturnsNotesInSlideOrderAndSkipsPlaceholders` 佐证）。
 
-#### 7.8.4 键盘操作
+#### 7.8.4 键盘与鼠标操作
 
 播放态（`docPlaying`）的 `document` 捕获阶段 `keydown`（`app.js:11972-11985`）：
 
@@ -3341,6 +3345,8 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 | `ArrowRight` / `ArrowDown` / `Space` / `PageDown` | `docSlideGo(1)`（前进） |
 | `ArrowLeft` / `ArrowUp` / `PageUp` | `docSlideGo(-1)`（后退） |
 | `n` / `N` | `toggleDocPlayNotes()`（切换备注浮层） |
+
+鼠标：播放态点击画面（`#docPlayStage`）同样前进，但受该页 `advanceOnClick` 约束（见 7.8.2）。
 
 非播放态但预览弹窗可见时，`Escape` 关闭预览弹窗（用 `stopImmediatePropagation()`，避免同是 document 捕获监听的「输出物」弹窗也跟着关）。
 
@@ -3495,7 +3501,7 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 
 | 项 | 文档说法 | 代码事实 | 结论 |
 |---|---|---|---|
-| `advanceOnClick` | 文档未提及 | 服务端解析进清单（`SlideTransition.AdvanceOnClick`），**前端从未使用** | 已核实：解析但未使用 |
+| `advanceOnClick` | 文档未提及 | 服务端解析进清单（`SlideTransition.AdvanceOnClick`） | **已修复 1.0.232**：前端播放态支持「点击画面推进」并遵循该字段（`false` 时点击不推进；见 7.8.2） |
 | 转场 `speed` / `orientation` / `spokes` | `docs/ui-design.md` §2.5 称“解析（preset / 方向 / 速度 / 自动前进毫秒）”并下发 | 三者被解析进清单，但**前端未使用**（只用 preset 与 dir，CSS 时长固定） | 已核实：解析但未使用 |
 | 播放层媒体（视频 / 音频） | 未有任何文档宣称支持 | 播放层**无**媒体还原（无媒体字段 / 元素） | 已核实：不支持（如实说明的边界，非文档冲突） |
 | 在线查看入口数量 | `docs/ui-design.md` §2.5 表内写「可从**两个**入口唤起」，随后却列了 ①②③ 三个 | 代码确有**三个**入口（消息附件 / 技能试运行产出 / 输出物） | 文档笔误：应为“三个” |
@@ -5113,7 +5119,7 @@ service:
 1. **【已修复 1.0.230】`GET /ag-ui/admin/config` 已被前端消费**：「配置治理」页「只读参数快照」按钮（`loadConfigSnapshot`）调用该端点并展开 JSON。依据：`wwwroot/app.js` 的 `loadConfigSnapshot`。
 2. **【已修复 1.0.230】`GET /ag-ui/admin/bridge-capabilities` 已被前端消费**：「运行指标」页「桥接能力协商」表（`loadBridgeCaps`）；`bridge-health` 同页消费，且两者均支持 `?refresh=true` 立即探测（`#bridgeProbeBtn`）。
 3. **`Agents:Memory:ModelDownloadUrl` 在 `MemoryOptions` 中无对应属性**（`AgentOptions.cs` 的 `MemoryOptions` 无该成员）。该键由**桌面组合根直接经 `IConfiguration` 读取**（`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`），`AgentHosting.cs` L138-141 的日志文案也提及它；但 `Agents:Memory` 绑定到强类型 Options 时**不认这个键**。`README.md` / `README.en.md` / 桌面 README 均把它当配置键描述。依据：`AgentOptions.cs` L254-413、`DesktopApp.cs`、`AgentHosting.cs`。
-4. **`advanceOnClick` 服务端解析但前端未使用**。服务端 `SlideTransition` 含 `AdvanceOnClick` 字段并从 `<p:transition>` 解析、随 `/ag-ui/preview/{id}/play` 清单下发；前端仅在 `scheduleAutoAdvance` 中读 `tr.advanceAfterMs`，**未读 `advanceOnClick`**。依据：`PresentationPlayback.cs` L6、`wwwroot/app.js` L9331-9341。
+4. **【已修复 1.0.232】`advanceOnClick` 前端已使用**。服务端 `SlideTransition` 从 `<p:transition>` 解析 `AdvanceOnClick` 并随 `/ag-ui/preview/{id}/play` 清单下发；前端现于播放态点击画面时读取该字段决定是否推进（`slideAdvanceOnClick`），并保留 `scheduleAutoAdvance` 的 `advanceAfterMs` 自动前进。依据：`PresentationPlayback.cs`、`wwwroot/app.js`（`slideAdvanceOnClick` / `#docPlayStage` click）。
 5. **`Agents:WorkToolsEnabled`（compose `Agents__WorkToolsEnabled`）/ `enableWorkTools` 无 C# 绑定属性**。协议文档 §5.7（`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`）与前端 i18n（`agent.form.enableWorkTools` 等）均提到它，但 `AgentOptions` 与 `AgentDefinition` 中均无该属性（`src/**/*.cs` 检索零命中）。第 3 章草稿亦已指出该表单分区未渲染。依据：`docker-compose.yml` L188-191、`AgentOptions.cs`、`i18n/zh.js` L272-274。
 6. **任务提到的 `artifacts/verify-msi-payload.py` 在仓库中不存在**。MSI 打包的真实入口是 `tools/build-msi.ps1`（其第 4 步内嵌“后端 DLL 新鲜度”校验），另有 `tools/wix/package.wxs`、`tools/wix/nativebridge-package.wxs`、`tools/publish-nativebridge*.ps1`。依据：`find_path **/verify-msi*` 无命中、`tools/build-msi.ps1`。
 7. **上传与产物大小上限不同（非缺陷，易误读）**：用户上传单文件 `AttachmentStore.MaxFileBytes = 20MB`，而技能产物 `MaxProducedFileBytes = 64MB`（带插图稿子天然大）。前端“文件生成了却没有下载入口”类现象多因产物超 64MB 被静默忽略。依据：`AttachmentStore.cs` L15-28。

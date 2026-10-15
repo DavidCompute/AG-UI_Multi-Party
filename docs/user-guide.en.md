@@ -3253,7 +3253,7 @@ The server parses each slide's `<p:transition>` (`ParseTransition`, `Presentatio
 - The direction / orientation / spokes are written on the **child element** (e.g. `<p:push dir="l"/>`), and `direction` / `orientation` / `spokes` are taken from the child element (falling back to `transition` itself);
 - `speed` takes `transition`'s `spd`;
 - `advanceAfterMs` takes `advTm` (milliseconds, default 0);
-- `advanceOnClick` = `advClick != "0"` (i.e., the default is treated as `true`).
+- `advanceOnClick` = `advClick != "0"` (i.e., the default is treated as `true`); the frontend uses it to decide whether clicking the stage advances (see 7.8.2).
 
 The front end's `transitionClass` (`app.js:9307-9317`) maps preset + dir to CSS animation classes; `runCanvasAnimation` acts on the **entire playback stage** `#docPlayStage` (the base-image canvas and the sprite layer move together, avoiding tearing):
 
@@ -3324,9 +3324,13 @@ The server also first runs an **eligibility check** `ParaShapesEligible` (`Prese
 
 `scheduleAutoAdvance` (`app.js:9331-9343`): upon reaching the slide's **last step**, if the page transition's `advanceAfterMs > 0`, `setTimeout(() => docSlideGo(1), advanceAfterMs)` schedules a turn to the next slide. The "reached the end" check differs between sprite mode (looks at `docSpriteStep >= steps`) and step mode (looks at `step >= steps-1`).
 
-#### 7.8.2 `advanceOnClick`
+#### 7.8.2 `advanceOnClick` and click-to-advance
 
-The server **parses** `advanceOnClick` (`SlideTransition.AdvanceOnClick`, default `true`), but it is just a field in the manifest: **the front end never reads it** (`app.js` has no reference to `advanceOnClick` at all). That is: regardless of the value, playback is advanced by keyboard / click / control bar. **This is a verified implementation detail** (see 7.14).
+The server writes `advanceOnClick` (`SlideTransition.AdvanceOnClick`, `advClick != "0"`, default `true`) into the manifest; **the frontend uses it to decide whether clicking the stage advances** (since 1.0.232):
+
+- Clicking the playback stage (`#docPlayStage`) → advance (`docSlideGo(1)`: in sprite mode it plays the next shape step, otherwise it turns to the next page).
+- If the page's manifest entry exists and `advanceOnClick === false` → clicking does **not** advance (only auto-advance / control-bar buttons / the keyboard can); no transition element (`transitions[i]` is `null`) or a missing field is treated as click-to-advance.
+- The control-bar buttons are outside the stage and are unaffected by the click-to-advance logic.
 
 #### 7.8.3 Notes display
 
@@ -3337,7 +3341,7 @@ Notes are shown in two places, with different data sources:
 
 > Notes can be extracted only from `.pptx` (`PresentationNotes.Supports` recognizes only `.pptx`); `.ppt` (binary OLE) / `.odp` return an empty array → degrading to "play only the slides, no notes area". Extraction takes only the notes body placeholder (`ph[@type='body']`), avoiding the same page's slide thumbnail / page-number fields (as the test `Extract_ReturnsNotesInSlideOrderAndSkipsPlaceholders` corroborates).
 
-#### 7.8.4 Keyboard operations
+#### 7.8.4 Keyboard and mouse operations
 
 In playback state (`docPlaying`), `document`'s capture-phase `keydown` (`app.js:11972-11985`):
 
@@ -3347,6 +3351,8 @@ In playback state (`docPlaying`), `document`'s capture-phase `keydown` (`app.js:
 | `ArrowRight` / `ArrowDown` / `Space` / `PageDown` | `docSlideGo(1)` (forward) |
 | `ArrowLeft` / `ArrowUp` / `PageUp` | `docSlideGo(-1)` (back) |
 | `n` / `N` | `toggleDocPlayNotes()` (toggle the notes overlay) |
+
+Mouse: during playback, clicking the stage (`#docPlayStage`) also advances, but subject to the page's `advanceOnClick` (see 7.8.2).
 
 When not in playback but the preview modal is visible, `Escape` closes the preview modal (using `stopImmediatePropagation()`, to avoid the "Outputs" modal, which is also a document capture-phase listener, closing as well).
 
@@ -3501,7 +3507,7 @@ The following are deviations / points not covered by the docs found by checking 
 
 | Item | Documentation claim | Code fact | Conclusion |
 |---|---|---|---|
-| `advanceOnClick` | Not mentioned in the docs | The server parses it into the manifest (`SlideTransition.AdvanceOnClick`), but **the front end never uses it** | Verified: parsed but unused |
+| `advanceOnClick` | Not mentioned in the docs | The server parses it into the manifest (`SlideTransition.AdvanceOnClick`) | **Fixed in 1.0.232**: the frontend supports click-to-advance during playback and honors the field (`false` means clicking does not advance; see 7.8.2) |
 | Transition `speed` / `orientation` / `spokes` | `docs/ui-design.md` §2.5 says they are "parsed (preset / direction / speed / auto-advance ms)" and sent down | All three are parsed into the manifest, but **the front end does not use them** (only preset and dir are used, and CSS durations are fixed) | Verified: parsed but unused |
 | Playback-layer media (video / audio) | No documentation claims support | The playback layer has **no** media restoration (no media fields / elements) | Verified: unsupported (a boundary stated faithfully, not a documentation conflict) |
 | Number of online-viewing entry points | The `docs/ui-design.md` §2.5 table says "can be invoked from **two** entry points" but then lists three, ①②③ | The code really does have **three** entry points (message attachment / skill test-run artifacts / Outputs) | Documentation typo: it should be "three" |
@@ -5119,7 +5125,7 @@ All of the following were verified against the source (line numbers are location
 1. **[Fixed in 1.0.230] `GET /ag-ui/admin/config` is now consumed** by the Config Governance tab's "Read-only snapshot" button (`loadConfigSnapshot`).
 2. **[Fixed in 1.0.230] `GET /ag-ui/admin/bridge-capabilities` is now consumed** by the Runtime Metrics tab's "Bridge capability negotiation" table (`loadBridgeCaps`); `bridge-health` is consumed on the same page, and both support `?refresh=true` for a live probe (`#bridgeProbeBtn`).
 3. **`Agents:Memory:ModelDownloadUrl` has no corresponding property in `MemoryOptions`** (the `MemoryOptions` in `AgentOptions.cs` has no such member). This key is **read directly via `IConfiguration` by the desktop composition root** (`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`), and the log text at `AgentHosting.cs` L138-141 also mentions it; but when `Agents:Memory` binds to the strongly typed Options, it **does not recognize this key**. `README.md` / `README.en.md` / the desktop README all describe it as a config key. Evidence: `AgentOptions.cs` L254-413, `DesktopApp.cs`, `AgentHosting.cs`.
-4. **`advanceOnClick` is parsed by the server but not used by the frontend**. The server-side `SlideTransition` contains an `AdvanceOnClick` field and parses it from `<p:transition>`, sending it down with the `/ag-ui/preview/{id}/play` manifest; the frontend only reads `tr.advanceAfterMs` in `scheduleAutoAdvance` and **does not read `advanceOnClick`**. Evidence: `PresentationPlayback.cs` L6, `wwwroot/app.js` L9331-9341.
+4. **[Fixed in 1.0.232] `advanceOnClick` is now used by the frontend**. The server-side `SlideTransition` parses `AdvanceOnClick` from `<p:transition>` and sends it down with the `/ag-ui/preview/{id}/play` manifest; the frontend now reads it when the stage is clicked during playback to decide whether to advance (`slideAdvanceOnClick`), while keeping `scheduleAutoAdvance`'s `advanceAfterMs` auto-advance. Evidence: `PresentationPlayback.cs`, `wwwroot/app.js` (`slideAdvanceOnClick` / `#docPlayStage` click).
 5. **`Agents:WorkToolsEnabled` (compose `Agents__WorkToolsEnabled`) / `enableWorkTools` has no C# binding property**. The protocol document §5.7 (`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`) and the frontend i18n (`agent.form.enableWorkTools`, etc.) both mention it, but neither `AgentOptions` nor `AgentDefinition` has this property (zero hits searching `src/**/*.cs`). The Chapter 3 draft also pointed out that this form section is not rendered. Evidence: `docker-compose.yml` L188-191, `AgentOptions.cs`, `i18n/zh.js` L272-274.
 6. **The `artifacts/verify-msi-payload.py` mentioned in the task does not exist in the repository**. The real entry point for MSI packaging is `tools/build-msi.ps1` (its step 4 embeds a "backend DLL freshness" check), along with `tools/wix/package.wxs`, `tools/wix/nativebridge-package.wxs`, and `tools/publish-nativebridge*.ps1`. Evidence: `find_path **/verify-msi*` has no hits, `tools/build-msi.ps1`.
 7. **The upload and artifact size limits differ (not a defect, but easy to misread)**: the user upload per-file limit is `AttachmentStore.MaxFileBytes = 20MB`, while the skill artifact limit is `MaxProducedFileBytes = 64MB` (illustrated drafts are naturally large). Frontend phenomena like "the file was generated but there is no download entry" are mostly because the artifact exceeded 64MB and was silently ignored. Evidence: `AttachmentStore.cs` L15-28.

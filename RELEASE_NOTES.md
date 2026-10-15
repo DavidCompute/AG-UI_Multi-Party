@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.232 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.232 Release Notes (current Windows desktop release)
+
+**版本说明**：**PPT 在线播放支持「点击画面推进」并遵循幻灯片自身的 `advClick`**——此前该清单字段被服务端解析、下发，但前端从未读取（清单里的「已核实：解析但未使用」项）。现播放态点击舞台即前进（精灵模式先播下一步形状，否则翻页）。
+**Version note**: **PPT online playback now supports click-to-advance and honors the slide's own `advClick`** — the server had been parsing and sending this manifest field down, but the frontend never read it (a "verified: parsed but unused" item in the checklist). Now, during playback, clicking the stage advances (in sprite mode it plays the next shape step, otherwise it turns the page).
+
+## 变更
+# Changes
+
+中文：
+- **点击推进**：`#docPlayStage` 新增 click 处理——播放态点击画面调用 `docSlideGo(1)`（精灵模式推进下一步形状，否则翻到下一页）。
+- **遵循 `advanceOnClick`**：`slideAdvanceOnClick(slide)` 读清单 `transitions[slide].advanceOnClick`；为 `false` 时点击**不推进**（仅自动前进 / 控制条按钮 / 键盘可推进）；无转场元素（`null`）或缺省字段视为可点击推进。控制条按钮在舞台之外，不受影响。
+- 与既有「自动前进（`advanceAfterMs`）」互补：自动前进到点仍由 `scheduleAutoAdvance` 触发。
+English:
+- **Click-to-advance**: a click handler on `#docPlayStage` — during playback, clicking the stage calls `docSlideGo(1)` (sprite mode steps the next shape, otherwise it turns the page).
+- **Honors `advanceOnClick`**: `slideAdvanceOnClick(slide)` reads `transitions[slide].advanceOnClick` from the manifest; when `false`, clicking does **not** advance (only auto-advance / control-bar buttons / the keyboard can); no transition element (`null`) or a missing field is treated as click-to-advance. The control-bar buttons are outside the stage and unaffected.
+- Complements the existing auto-advance (`advanceAfterMs`), which still fires via `scheduleAutoAdvance`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` 的 §7.6.3、§7.8.2（重写为「`advanceOnClick` 与点击推进」）、§7.8.4（改为「键盘与鼠标操作」）、§7.14、§9.9-4 同步；`docs/feature-review-2026-10.md` §8.7/§8.9/§8.10 状态更新（§8.7、§9.9-4 → 已关闭）。
+English: `docs/user-guide.md` / `en.md` §7.6.3, §7.8.2 (rewritten as "`advanceOnClick` and click-to-advance"), §7.8.4 (now "Keyboard and mouse operations"), §7.14 and §9.9-4 updated; `docs/feature-review-2026-10.md` §8.7/§8.9/§8.10 statuses updated (§8.7, §9.9-4 → closed).
+
+## 测试
+# Tests
+
+中文：新增 `PresentationPlaybackTests.Transitions_ParseAdvanceOnClickAndSpeed`（最小 pptx：无转场 → `null`；`advClick="0"` + `spd="slow"` + `advTm="3000"` → `AdvanceOnClick=false` / `Speed=slow` / `AdvanceAfterMs=3000`）。浏览器实测：新版 `app.js` 加载无报错；`slideAdvanceOnClick` 对 `[null, {advanceOnClick:false}, {advanceOnClick:true}]` 返回 `[true,false,true]`。`node --check` 通过；重建 web 后健康 200。
+English: new `PresentationPlaybackTests.Transitions_ParseAdvanceOnClickAndSpeed` (minimal pptx: no transition → `null`; `advClick="0"` + `spd="slow"` + `advTm="3000"` → `AdvanceOnClick=false` / `Speed=slow` / `AdvanceAfterMs=3000`). Browser-verified: the new `app.js` loads with no errors; `slideAdvanceOnClick` returns `[true,false,true]` for `[null, {advanceOnClick:false}, {advanceOnClick:true}]`. `node --check` passes; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.231 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.231 Release Notes (current Windows desktop release)
 
