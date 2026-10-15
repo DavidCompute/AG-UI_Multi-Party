@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.245 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.245 Release Notes (current Windows desktop release)
+
+**版本说明**：**图表视图支持导出 CSV**——组织体检图表的全部员工明细可一键导出为 CSV（本地化表头、带 BOM、UTF-8），直接进 Excel 做汇报。
+**Version note**: **The chart view exports CSV** — the full employee table of the org health chart can be exported to CSV with one click (localized headers, BOM, UTF-8), ready for Excel reporting.
+
+## 变更
+# Changes
+
+中文：
+- **前端**：`#orgHealthModal` 底部新增 **「📥 导出 CSV」**（与「📄 组织体检报告」「关闭」并列）——把 `org-health` 返回的**全部员工**（不限于柱状图 Top 12）导出为 CSV，列为员工 / 数字员工 ID / 调用次数 / 总 Token / 👍 / 👎 / 好评率 / 成本 / 最近活跃 / 关注，**按调用次数降序**。
+- **健壮性**：字段全部加引号并转义内嵌引号（逗号 / 引号 / 换行安全）；文件前置 **UTF-8 BOM**，避免 Excel 打开中文乱码；文件名 `org-health-agents-<yyyymmdd>.csv`（日期取响应窗口 `to`）。未配置单价时成本列留空；表头与关注标签随语言。
+- **无新增接口**：数据取自已拉取的 `org-health` 响应（与图表同源），导出**与当前指标切换无关**（CSV 总是含全部列）。
+English:
+- **Front end**: `#orgHealthModal` gains an **"📥 Export CSV"** button (next to "📄 Org health report" and "Close") — it exports **every employee** returned by `org-health` (not just the chart's Top 12) as CSV, with columns employee / agent ID / calls / total tokens / 👍 / 👎 / positive rate / cost / last active / attention, **sorted by calls descending**.
+- **Robustness**: all fields are quoted with embedded quotes escaped (comma / quote / newline safe); the file starts with a **UTF-8 BOM** so Excel opens Chinese correctly; the filename is `org-health-agents-<yyyymmdd>.csv` (date from the response's `to`). The cost column is blank when no pricing is configured; headers and attention labels follow the language.
+- **No new endpoint**: the data comes from the already-fetched `org-health` response (same source as the charts), and the export is **independent of the metric switch** (CSV always carries all columns).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（图表视图：新增 CSV 导出与文件名 / BOM 说明）；`ROADMAP.md` §6.5 补 CSV 导出。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (chart view: the new CSV export with filename / BOM notes); `ROADMAP.md` §6.5 records the CSV export.
+
+## 测试
+# Tests
+
+中文：本轮**无 C# 改动**（仅前端 + 文案），`dotnet build` 结果与 1.0.244 一致（0 错误）。`node --check`、i18n 审计 **zh=en=1873，missing 0**、`check-i18n-keys`（869 处引用）、`check-orphan-keys`（897 处 `t()` 引用）均过。浏览器实测（重建 web 后，管理员，真实数据）：点「📥 导出 CSV」→ 下载 `org-health-agents-20261015.csv`，**BOM=true**，**18 行**（1 表头 + 17 员工），表头「数字员工,数字员工 ID,调用次数,总 Token,👍,👎,好评率,成本,最近活跃,关注」，首两行按调用降序（质检审核 243 / 3,135,219、PPT制作排版工程师 157 / 2,873,070），未配置单价时成本列为空；toast「已导出 CSV」；**无页面报错**。
+English: **no C# changes** this round (frontend + copy only), so `dotnet build` matches 1.0.244 (0 errors). `node --check`, the i18n audit **zh=en=1873, missing 0**, `check-i18n-keys` (869 references) and `check-orphan-keys` (897 `t()` references) all pass. Browser-verified (after rebuilding web, as admin, real data): clicking "📥 Export CSV" downloads `org-health-agents-20261015.csv` with **BOM=true**, **18 lines** (1 header + 17 employees), header "employee, agent ID, calls, total tokens, 👍, 👎, positive rate, cost, last active, attention", the first two rows sorted by calls descending (质检审核 243 / 3,135,219; PPT制作排版工程师 157 / 2,873,070), and a blank cost column with no pricing; toast "CSV exported"; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.244 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.244 Release Notes (current Windows desktop release)
 
