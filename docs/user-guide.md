@@ -1181,6 +1181,7 @@
 
 - 📤 `data-act="export"`（title＝`agent.exportTip`＝`导出 JSON`）→ `exportAgents([a], "{agentId}.json")`。**所有行都有**。
 - 💬 `data-act="chat"`（title＝`agent.chatTip`＝`与数字员工单聊`）→ `startDirectChat(a.agentId, a.nickname)`，调用 `POST /ag-ui/agents/direct` 建/复用彼此隔离的私有双人群后进入。**所有行都有**。
+- 📊 `data-act="perf"`（title＝`agent.perfTip`＝`看绩效`）→ `openAgentPerformance(agentId)`：关掉角色管理、打开管理控制台并切到「员工绩效」页，**定位并高亮**该员工所在行（`#adminPerfRows tr[data-agent-id]`，`.perf-row-hit` 动画 2.4s）——打通「发现→归因→编辑」闭环。**仅生效角色 ≥ Operator 时渲染**（1.0.250）。
 - ✏️ `data-act="edit"`（title＝`agent.edit`＝`编辑`）→ `openAgentForm(a.agentId)`；🗑️ `data-act="del"`（title＝`agent.del`＝`删除`）→ `confirmDeleteAgent()`（首次点击进入确认态 ✅/❌）。**仅 `canManage` 时渲染**。
 
 `canManage = !!a.ownerId && (state.isAdmin || a.ownerId === state.memberId)`（`app.js`）。即：**系统内置数字员工（`ownerId` 为 null）不可编辑/删除**；普通用户仅能改自己的；管理员可改所有非内置。

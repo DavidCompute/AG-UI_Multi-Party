@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.250 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.250 Release Notes (current Windows desktop release)
+
+**版本说明**：**AI 角色管理新增「📊 看绩效」入口**——从角色列表一键跳到管理控制台的「员工绩效」并**自动定位 + 高亮**该员工，打通「发现→归因→编辑」闭环。
+**Version note**: **AI Role Management gains a "📊 View performance" action** — jump from the role list straight to the admin console's "Employee performance" tab with that employee's row **located and highlighted**, closing the "spot → attribute → edit" loop.
+
+## 变更
+# Changes
+
+中文：
+- **角色列表操作列**（`#agentList` 每行）：在 📤 导出 / 💬 单聊 之后新增 **📊 `data-act="perf"`**（title＝`agent.perfTip`＝「看绩效」）——**仅生效角色 ≥ Operator 时渲染**（`isOperatorPlus()`）；无权限时点击提示 `admin.adminOnly`。
+- **跳转与定位** `openAgentPerformance(agentId)`：关掉角色管理窗 → 按角色刷新页签可见性 → 打开控制台 `#adminModal` → `switchAdminTab("perf")`（同步置入「加载中」占位并异步拉取）→ `waitForPerfRow` 轮询（≤ 4s）等目标行出现 → `scrollIntoView` 居中 + `.perf-row-hit` 高亮动画（2.4s 后自动移除）；未找到则提示 `admin.perfNotFound`。
+- **绩效行可定位**：`#adminPerfRows` 每行新增 `data-agent-id`（便于定位 / 高亮 / 未来扩展）。
+- **样式**：新增 `.perf-row-hit` + `@keyframes perfHit`（主题色渐隐高亮）。纯前端改动，**无新增接口**。
+English:
+- **Role list action column** (each row in `#agentList`): after 📤 export / 💬 direct chat, a new **📊 `data-act="perf"`** (title = `agent.perfTip` = "View performance") — **rendered only when the effective role is Operator or above** (`isOperatorPlus()`); without permission a click shows `admin.adminOnly`.
+- **Jump and locate** `openAgentPerformance(agentId)`: closes the role-management dialog → refreshes tab visibility by role → opens the console `#adminModal` → `switchAdminTab("perf")` (synchronously puts in the "loading" placeholder and fetches asynchronously) → `waitForPerfRow` polls (≤ 4s) until the target row appears → `scrollIntoView` centred + a `.perf-row-hit` highlight animation (auto-removed after 2.4s); if not found it shows `admin.perfNotFound`.
+- **Locatable performance rows**: each row in `#adminPerfRows` now carries `data-agent-id` (for locating / highlighting and future use).
+- **Styles**: added `.perf-row-hit` + `@keyframes perfHit` (accent-colour fade highlight). Front-end only, **no new endpoint**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.1.4（行内操作新增 📊 看绩效）。
+English: `docs/user-guide.md` / `en.md` §3.1.4 (the inline actions now include 📊 View performance).
+
+## 测试
+# Tests
+
+中文：本轮**无 C# 改动**（仅前端 + 文案），`dotnet build` 与 1.0.249 一致（0 错误）。`node --check`（`app.js` / `zh.js` / `en.js`）、i18n 审计 **zh=en=1886，missing 0**、`check-i18n-keys`（873 处引用）、`check-orphan-keys`（909 处 `t()` 引用）均过。浏览器实测（重建 web 后，管理员，真实数据）：角色列表每行存在 📊 按钮；点首行（`word_delivery`）→ 控制台打开、角色窗关闭、「员工绩效」页签 `on`、绩效视图可见、**目标行已定位**（`Word交付专员 110 / 267 / — / 0 / 0 / — / 2026-09-24`，全表 17 行）且**高亮已触发**；**无页面报错**。
+English: **no C# changes** this round (frontend + copy only), so `dotnet build` matches 1.0.249 (0 errors). `node --check` (`app.js` / `zh.js` / `en.js`), the i18n audit **zh=en=1886, missing 0**, `check-i18n-keys` (873 references) and `check-orphan-keys` (909 `t()` references) all pass. Browser-verified (after rebuilding web, as admin, real data): every role-list row has the 📊 button; clicking the first row (`word_delivery`) → the console opens, the role dialog closes, the "Employee performance" tab is `on`, the performance view is visible, the **target row is located** (`Word交付专员 110 / 267 / — / 0 / 0 / — / 2026-09-24`, 17 rows in all) and the **highlight fired**; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.249 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.249 Release Notes (current Windows desktop release)
 

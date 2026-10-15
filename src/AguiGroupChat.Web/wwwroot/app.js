@@ -1046,10 +1046,13 @@ function renderAgentList() {
       <div class="agent-cell agent-op-col">
         <button class="icon-btn" data-act="export" title="${escapeHtml(t("agent.exportTip"))}">📤</button>
         <button class="icon-btn" data-act="chat" title="${escapeHtml(t("agent.chatTip"))}">💬</button>
+        ${isOperatorPlus() ? `<button class="icon-btn" data-act="perf" title="${escapeHtml(t("agent.perfTip"))}">📊</button>` : ""}
         ${canManage ? `<button class="icon-btn" data-act="edit" title="${escapeHtml(t("agent.edit"))}">✏️</button><button class="icon-btn danger" data-act="del" title="${escapeHtml(t("agent.del"))}">🗑️</button>` : ""}
       </div>`;
     row.querySelector('[data-act="export"]').onclick = () => exportAgents([a], `${a.agentId}.json`);
     row.querySelector('[data-act="chat"]').onclick = () => startDirectChat(a.agentId, a.nickname);
+    const perfBtn = row.querySelector('[data-act="perf"]');
+    if (perfBtn) perfBtn.onclick = () => openAgentPerformance(a.agentId);
     if (canManage) {
       row.querySelector('[data-act="edit"]').onclick = () => { agentFormReturnFrom = null; openAgentForm(a.agentId); };
       row.querySelector('[data-act="del"]').onclick = (e) => confirmDeleteAgent(a, e.currentTarget);
@@ -7051,13 +7054,43 @@ async function loadAgentPerformance() {
       const flags = (a.flags || []).length
         ? (a.flags || []).map((f) => `<span class="tag-disabled">${escapeHtml(flagLabel(f))}</span>`).join(" ")
         : `<span class="muted">—</span>`;
-      return `<tr><td title="${escapeHtml(a.agentId || "")}">${escapeHtml(a.name || a.agentId)}</td>`
+      return `<tr data-agent-id="${escapeHtml(a.agentId || "")}" title="${escapeHtml(a.agentId || "")}"><td>${escapeHtml(a.name || a.agentId)}</td>`
         + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
         + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
         + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
         + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
     }).join("");
   } catch { if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+}
+
+/** 轮询等待绩效表中某员工的行出现（加载完成后）。 */
+function waitForPerfRow(agentId, timeoutMs) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const sel = `#adminPerfRows tr[data-agent-id="${(window.CSS && CSS.escape ? CSS.escape(agentId) : agentId)}"]`;
+    const tick = () => {
+      const row = document.querySelector(sel);
+      if (row) return resolve(row);
+      if (Date.now() - started > timeoutMs) return resolve(null);
+      setTimeout(tick, 120);
+    };
+    tick();
+  });
+}
+
+/** 「看绩效」：从 AI 角色管理跳到管理控制台·员工绩效，并定位 / 高亮该数字员工（打通「发现→归因→编辑」）。 */
+async function openAgentPerformance(agentId) {
+  if (!isOperatorPlus()) { toast(t("admin.adminOnly")); return; }
+  $("agentModal").classList.add("hidden");
+  applyAdminTabVisibility();
+  $("adminModal").classList.remove("hidden");
+  startAdminMetricsPoll();
+  switchAdminTab("perf"); // 已同步置入「加载中」占位，并异步拉取绩效
+  const row = await waitForPerfRow(agentId, 4000);
+  if (!row) { toast(t("admin.perfNotFound")); return; }
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.add("perf-row-hit");
+  setTimeout(() => row.classList.remove("perf-row-hit"), 2600);
 }
 
 /** 组织体检报告（P0）：下载由绩效 + 组织连接汇成的 Markdown（/ag-ui/admin/org-health）。 */

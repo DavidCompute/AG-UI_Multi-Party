@@ -1183,6 +1183,7 @@ Buttons inside `.agent-op-col` of each row:
 
 - 📤 `data-act="export"` (title = `agent.exportTip` = `Export JSON`) → `exportAgents([a], "{agentId}.json")`. **Present on every row**.
 - 💬 `data-act="chat"` (title = `agent.chatTip` = `Chat with this digital employee (direct 1:1)`) → `startDirectChat(a.agentId, a.nickname)`, which calls `POST /ag-ui/agents/direct` to create/reuse a mutually isolated private two-person group and then enters it. **Present on every row**.
+- 📊 `data-act="perf"` (title = `agent.perfTip` = `View performance`) → `openAgentPerformance(agentId)`: closes role management, opens the admin console on the "Employee performance" tab, and **locates and highlights** that employee's row (`#adminPerfRows tr[data-agent-id]`, `.perf-row-hit` animation 2.4s) — closing the "spot → attribute → edit" loop. **Rendered only when the effective role is Operator or above** (1.0.250).
 - ✏️ `data-act="edit"` (title = `agent.edit` = `Edit`) → `openAgentForm(a.agentId)`; 🗑️ `data-act="del"` (title = `agent.del` = `Delete`) → `confirmDeleteAgent()` (the first click enters the confirm state ✅/❌). **Rendered only when `canManage`**.
 
 `canManage = !!a.ownerId && (state.isAdmin || a.ownerId === state.memberId)` (`app.js`). That is: **system built-in digital employees (`ownerId` is null) cannot be edited/deleted**; regular users can modify only their own; admins can modify all non-built-in ones.
