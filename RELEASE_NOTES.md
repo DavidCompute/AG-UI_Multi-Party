@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.249 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.249 Release Notes (current Windows desktop release)
+
+**版本说明**：**图表视图可导出单文件 HTML 报告**——把 KPI / 柱状 / 环形 / 按日趋势 / 需关注项 / 明细表打包成一个**自带样式与图表**的 HTML 文件，**离线可开、可直接打印成 PDF**。
+**Version note**: **The chart view exports a single-file HTML report** — packaging the KPIs / bars / donut / daily trend / attention list / detail table into one HTML file with **styles and charts inlined**, which **opens offline and prints straight to PDF**.
+
+## 变更
+# Changes
+
+中文：
+- **前端**：`#orgHealthModal` 新增 **「🖨️ 导出 HTML」**（与「📄 组织体检报告」「📥 导出 CSV」「关闭」并列）→ 下载 `org-health-report-<yyyymmdd>.html`。
+- **报告内容**：标题 + 窗口 + 生成时间；**KPI 卡片**；**Top 12 柱状**（反射当前维度与指标）；**好评率环形** + **按日趋势折线**（独立内联 SVG，写死颜色，不依赖页面 CSS 变量）；**需关注项**；**当前维度明细表**。
+- **自包含**：样式内联在 `<style>`、图表为内联 SVG，**无任何外部引用**（无 `src`/`href` 指向网络）；`<html lang>` 跟随当前语言；带打印样式（`@media print` + `print-color-adjust: exact`）。
+- **重构**：抽取 `orgHealthTable()`（当前维度表头 / 行）供 **CSV 与 HTML 报告共用**，保证两者口径一致；新增 `reportDonutSvg` / `reportTrendSvg`（报告用独立 SVG）。纯前端改动，**无新增接口**。
+English:
+- **Front end**: `#orgHealthModal` gains **"🖨️ Export HTML"** (alongside "📄 Org health report", "📥 Export CSV", "Close") → downloads `org-health-report-<yyyymmdd>.html`.
+- **Report content**: title + window + generated time; **KPI cards**; the **Top-12 bars** (reflecting the current dimension and metric); a **positive-rate donut** + **daily trend line** (standalone inline SVGs with hardcoded colours, not depending on the page's CSS variables); the **needs-attention list**; and the **current dimension's detail table**.
+- **Self-contained**: styles are inlined in `<style>`, charts are inline SVGs, with **no external references** (no `src`/`href` pointing to the network); `<html lang>` follows the current language; print styles are included (`@media print` + `print-color-adjust: exact`).
+- **Refactor**: extracted `orgHealthTable()` (current dimension's header / rows) **shared by the CSV and the HTML report** so both stay consistent; added `reportDonutSvg` / `reportTrendSvg` (standalone SVGs for the report). Front-end only, **no new endpoint**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（新增 HTML 报告导出说明）；`ROADMAP.md` §6.5 补一句。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (documents the new HTML report export); `ROADMAP.md` §6.5 records it.
+
+## 测试
+# Tests
+
+中文：本轮**无 C# 改动**（仅前端 + 文案），`dotnet build` 与 1.0.248 一致（0 错误）。`node --check`、i18n 审计 **zh=en=1884，missing 0**、`check-i18n-keys`（873 处引用）、`check-orphan-keys`（907 处 `t()` 引用）均过。浏览器实测（重建 web 后，管理员，真实数据）：点「🖨️ 导出 HTML」→ `org-health-report-20261015.html`（~9.9 KB）：`<!doctype html>` ✓、内联 `<style>` ✓、1 个内联 SVG（当前无 👍👎，环形降级为「—」，故仅趋势图）、`<table>`（1 表头 + 17 行）✓、6 张卡片 / 12 条柱 ✓、**无外部引用** ✓、标题本地化 ✓；把该 HTML 单独渲染到空白页 → h1「📊 组织体检报告」/ 6 卡 / 12 柱 / 1 SVG / 17 行表，**0 渲染错误**；toast「已导出 HTML 报告」；**无页面报错**。
+English: **no C# changes** this round (frontend + copy only), so `dotnet build` matches 1.0.248 (0 errors). `node --check`, the i18n audit **zh=en=1884, missing 0**, `check-i18n-keys` (873 references) and `check-orphan-keys` (907 `t()` references) all pass. Browser-verified (after rebuilding web, as admin, real data): clicking "🖨️ Export HTML" → `org-health-report-20261015.html` (~9.9 KB): `<!doctype html>` ✓, inline `<style>` ✓, 1 inline SVG (no 👍👎 yet, so the donut degrades to "—" and only the trend chart remains), a `<table>` (1 header + 17 rows) ✓, 6 cards / 12 bars ✓, **no external references** ✓, localized title ✓; rendering that HTML alone in a blank page → h1 "📊 Org health report" / 6 cards / 12 bars / 1 SVG / 17 table rows, **0 render errors**; toast "HTML report exported"; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.248 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.248 Release Notes (current Windows desktop release)
 

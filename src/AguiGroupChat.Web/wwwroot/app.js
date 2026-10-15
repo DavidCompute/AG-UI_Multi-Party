@@ -7080,47 +7080,47 @@ async function downloadOrgHealthReport() {
   finally { if (btn) btn.disabled = false; }
 }
 
-/** 导出组织体检明细为 CSV：**跟随当前维度**（数字员工 / 触发者 / 知聚），含全部行，便于进 Excel 汇报。 */
-function downloadOrgHealthCsv() {
+/** 当前维度的明细表（表头 + 行，原始值；CSV 与 HTML 报告共用）。 */
+function orgHealthTable() {
   const d = orgHealthData;
-  if (!d) return;
+  if (!d) return { header: [], rows: [] };
   const priced = !!(orgHealthPrice && orgHealthPrice.configured);
   const cur = (orgHealthPrice && orgHealthPrice.currency) || "$";
-  const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
-    : f === "idle" ? t("admin.perfFlagIdle", { days: d.days || 30 }) : f;
-  const cell = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
   const costCell = (v) => (priced ? cur + Number(v || 0).toFixed(2) : "");
-  let header, rows;
   if (orgHealthDim === "users" || orgHealthDim === "groups") {
     const isUsers = orgHealthDim === "users";
     const src = (isUsers ? d.users : d.groups) || [];
-    header = [t("admin.orgHealthDimName"), t("admin.orgHealthDimId"), t("admin.perfThCalls"), t("admin.perfThTokens"), t("admin.perfThCost")];
-    rows = src.slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((r) => [
-      r.name || (isUsers ? r.userId : r.groupId),
-      (isUsers ? r.userId : r.groupId) || "",
-      Number(r.calls || 0),
-      Number(r.totalTokens || 0),
-      costCell(r.cost),
-    ]);
-  } else {
-    header = [t("admin.perfThAgent"), t("admin.perfThAgentId"), t("admin.perfThCalls"), t("admin.perfThTokens"),
-      t("admin.perfThUp"), t("admin.perfThDown"), t("admin.perfThRate"), t("admin.perfThCost"), t("admin.perfThLast"), t("admin.perfThFlag")];
-    rows = (d.agents || []).slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((a) => [
-      a.name || a.agentId,
-      a.agentId || "",
-      Number(a.calls || 0),
-      Number(a.totalTokens || 0),
-      Number(a.up || 0),
-      Number(a.down || 0),
-      a.positiveRate == null ? "" : Math.round(a.positiveRate * 1000) / 10 + "%",
-      costCell(a.cost),
-      a.lastDate || "",
-      (a.flags || []).map(flagLabel).join(" / "),
-    ]);
+    return {
+      header: [t("admin.orgHealthDimName"), t("admin.orgHealthDimId"), t("admin.perfThCalls"), t("admin.perfThTokens"), t("admin.perfThCost")],
+      rows: src.slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((r) => [
+        r.name || (isUsers ? r.userId : r.groupId), (isUsers ? r.userId : r.groupId) || "",
+        Number(r.calls || 0), Number(r.totalTokens || 0), costCell(r.cost),
+      ]),
+    };
   }
-  if (!rows.length) { toast(t(orgHealthDim === "agents" ? "admin.perfEmpty" : "admin.orgHealthDimEmpty")); return; }
+  const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+    : f === "idle" ? t("admin.perfFlagIdle", { days: d.days || 30 }) : f;
+  return {
+    header: [t("admin.perfThAgent"), t("admin.perfThAgentId"), t("admin.perfThCalls"), t("admin.perfThTokens"),
+      t("admin.perfThUp"), t("admin.perfThDown"), t("admin.perfThRate"), t("admin.perfThCost"), t("admin.perfThLast"), t("admin.perfThFlag")],
+    rows: (d.agents || []).slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((a) => [
+      a.name || a.agentId, a.agentId || "", Number(a.calls || 0), Number(a.totalTokens || 0),
+      Number(a.up || 0), Number(a.down || 0),
+      a.positiveRate == null ? "" : Math.round(a.positiveRate * 1000) / 10 + "%",
+      costCell(a.cost), a.lastDate || "", (a.flags || []).map(flagLabel).join(" / "),
+    ]),
+  };
+}
+
+/** 导出组织体检明细为 CSV：**跟随当前维度**（数字员工 / 触发者 / 知聚）。 */
+function downloadOrgHealthCsv() {
+  const d = orgHealthData;
+  if (!d) return;
+  const cell = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  const tb = orgHealthTable();
+  if (!tb.rows.length) { toast(t(orgHealthDim === "agents" ? "admin.perfEmpty" : "admin.orgHealthDimEmpty")); return; }
   // 前置 BOM，确保 Excel 以 UTF-8 正确打开中文
-  const csv = "\uFEFF" + [header, ...rows].map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
+  const csv = "\uFEFF" + [tb.header, ...tb.rows].map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -7128,6 +7128,123 @@ function downloadOrgHealthCsv() {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   toast(t("admin.orgHealthCsvOk"));
+}
+
+/** 独立环形 SVG（报告用：写死颜色，不依赖页面 CSS 变量）。 */
+function reportDonutSvg(ratio) {
+  const r = 26, c = 2 * Math.PI * r;
+  const pct = Math.round(ratio * 1000) / 10;
+  const color = pct >= 90 ? "#1f9d5e" : pct >= 60 ? "#d97706" : "#dc2626";
+  const dash = (c * Math.max(0, Math.min(1, ratio))).toFixed(1);
+  return `<svg viewBox="0 0 64 64" width="84" height="84"><circle cx="32" cy="32" r="${r}" fill="none" stroke="#e5e7eb" stroke-width="7"/>`
+    + `<circle cx="32" cy="32" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${dash} ${(c - dash).toFixed(1)}" transform="rotate(-90 32 32)"/>`
+    + `<text x="32" y="36" text-anchor="middle" font-size="13" font-weight="600" fill="${color}">${pct}%</text></svg>`;
+}
+
+/** 独立趋势折线 SVG（报告用）。 */
+function reportTrendSvg(rows) {
+  const w = 800, h = 90, pad = 6;
+  const max = rows.reduce((m, r) => Math.max(m, r.v), 0) || 1;
+  const step = (w - 2 * pad) / (rows.length - 1);
+  const yOf = (v) => (h - pad - (v / max) * (h - 2 * pad)).toFixed(1);
+  const pts = rows.map((r, i) => `${(pad + i * step).toFixed(1)},${yOf(r.v)}`).join(" ");
+  const area = `${pad},${(h - pad).toFixed(1)} ${pts} ${(w - pad).toFixed(1)},${(h - pad).toFixed(1)}`;
+  const grid = [0, 0.5, 1].map((g) => `<line x1="0" y1="${yOf(max * g)}" x2="${w}" y2="${yOf(max * g)}" stroke="#94a3b8" stroke-opacity="0.25" stroke-width="1"/>`).join("");
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="90" preserveAspectRatio="none">` + grid
+    + `<polygon points="${area}" fill="#4f8cff" fill-opacity="0.14"/>`
+    + `<polyline points="${pts}" fill="none" stroke="#4f8cff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+/** 导出**单文件 HTML 报告**（内联样式 + 内联 SVG，离线可开 / 可直接打印为 PDF）。 */
+function downloadOrgHealthHtml() {
+  const d = orgHealthData;
+  if (!d) return;
+  const s = d.summary || {};
+  const priced = !!(orgHealthPrice && orgHealthPrice.configured);
+  const cur = (orgHealthPrice && orgHealthPrice.currency) || "$";
+  const num = (v) => Number(v || 0).toLocaleString();
+  const metricLabel = t(orgHealthMetric === "tokens" ? "admin.orgHealthMetricTokens" : orgHealthMetric === "cost" ? "admin.orgHealthMetricCost" : "admin.orgHealthMetricCalls");
+  const dimLabel = t(orgHealthDim === "users" ? "admin.orgHealthDimUsers" : orgHealthDim === "groups" ? "admin.orgHealthDimGroups" : "admin.orgHealthDimAgents");
+  const fmtVal = (v) => orgHealthMetric === "cost" ? cur + v.toFixed(2) : num(Math.round(v));
+
+  const card = (k, v) => `<div class="card"><div class="card-k">${escapeHtml(k)}</div><div class="card-v">${escapeHtml(String(v))}</div></div>`;
+  const cards = card(t("admin.orgHealthAgents"), `${num(s.agents)} / ${num(s.totalAgents)}`)
+    + card(t("admin.perfThCalls"), num(s.calls)) + card(t("admin.perfThTokens"), num(s.totalTokens))
+    + card(t("admin.perfThCost"), priced ? cur + Number(s.cost || 0).toFixed(2) : "—")
+    + card(t("admin.perfThRate"), s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%")
+    + card(t("admin.orgHealthFlagged"), num(s.flagged));
+
+  const barRows = orgHealthBarRows().filter((r) => orgHealthBarValue(r) > 0).slice().sort((a, b) => orgHealthBarValue(b) - orgHealthBarValue(a)).slice(0, 12);
+  const bmax = barRows.reduce((m, r) => Math.max(m, orgHealthBarValue(r)), 0) || 1;
+  const bars = barRows.length ? barRows.map((r) => {
+    const v = orgHealthBarValue(r);
+    const pct = Math.max(2, Math.round((v / bmax) * 100));
+    const flags = r.flags || [];
+    const cls = flags.includes("low-praise") ? " low" : flags.includes("idle") ? " idle" : "";
+    const rt = r.positiveRate == null ? "" : " · " + Math.round(r.positiveRate * 100) + "%";
+    return `<div class="bar-row"><span class="bar-name">${escapeHtml(r.name)}</span><span class="bar-track"><span class="bar-fill${cls}" style="width:${pct}%"></span></span><span class="bar-val">${escapeHtml(fmtVal(v) + rt)}</span></div>`;
+  }).join("") : `<div class="meta">${escapeHtml(t(orgHealthDim === "agents" ? "admin.perfEmpty" : "admin.orgHealthDimEmpty"))}</div>`;
+
+  const donut = s.positiveRate == null ? `<div class="meta">—</div>` : reportDonutSvg(s.positiveRate);
+  const trendRows = (orgHealthTrendRows || []).map((r) => ({ date: r.date, v: orgHealthTrendValue(r) }))
+    .filter((r) => !!r.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const trend = trendRows.length < 2
+    ? `<div class="meta">${escapeHtml(t("admin.orgHealthTrendShort"))}</div>`
+    : reportTrendSvg(trendRows) + `<div class="meta">${escapeHtml(t("admin.orgHealthTrendMeta", {
+        from: trendRows[0].date, to: trendRows[trendRows.length - 1].date,
+        max: fmtVal(trendRows.reduce((m, r) => Math.max(m, r.v), 0)), total: fmtVal(trendRows.reduce((x, r) => x + r.v, 0)),
+      }))}</div>`;
+
+  const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise") : f === "idle" ? t("admin.perfFlagIdle", { days: d.days || 30 }) : f;
+  const flagged = (d.agents || []).filter((a) => a.flags && a.flags.length);
+  const flags = flagged.length
+    ? "<ul>" + flagged.map((a) => `<li><b>${escapeHtml(a.name || a.agentId)}</b> — ${escapeHtml((a.flags || []).map(flagLabel).join(" / "))}</li>`).join("") + "</ul>"
+    : `<div class="meta">${escapeHtml(t("admin.orgHealthNoFlag"))}</div>`;
+
+  const tb = orgHealthTable();
+  const table = tb.rows.length
+    ? `<table><thead><tr>${tb.header.map((h) => `<th>${escapeHtml(String(h))}</th>`).join("")}</tr></thead><tbody>`
+      + tb.rows.map((r) => `<tr>${r.map((v) => `<td class="${typeof v === "number" ? "num" : ""}">${escapeHtml(typeof v === "number" ? num(v) : String(v))}</td>`).join("")}</tr>`).join("")
+      + `</tbody></table>`
+    : `<div class="meta">${escapeHtml(t("admin.orgHealthDimEmpty"))}</div>`;
+
+  const style = `:root{--border:#d7dde8;--muted:#667085;--accent:#4f8cff;--bad:#dc2626}`
+    + `*{box-sizing:border-box}body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#1e2432;margin:24px;background:#fff}`
+    + `h1{font-size:20px;margin:0 0 4px}h2{font-size:13px;color:var(--muted);margin:18px 0 6px}`
+    + `.meta{color:var(--muted);font-size:12px}.cards{display:flex;flex-wrap:wrap;gap:10px}`
+    + `.card{flex:1 1 120px;min-width:110px;border:1px solid var(--border);border-radius:8px;padding:8px 10px}`
+    + `.card-k{font-size:11px;color:var(--muted)}.card-v{font-size:18px;font-weight:600;margin-top:2px}`
+    + `.bars{display:flex;flex-direction:column;gap:6px}`
+    + `.bar-row{display:grid;grid-template-columns:minmax(90px,28%) 1fr auto;gap:8px;align-items:center;font-size:12px}`
+    + `.bar-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`
+    + `.bar-track{background:#eef1f6;border-radius:4px;height:12px;overflow:hidden;display:block}`
+    + `.bar-fill{display:block;height:100%;background:var(--accent)}.bar-fill.low{background:var(--bad)}.bar-fill.idle{background:#9ca3af}`
+    + `.bar-val{color:var(--muted);white-space:nowrap}`
+    + `.row2{display:flex;gap:18px;align-items:flex-start}.row2>div{flex:none}.row2>.grow{flex:1;min-width:0}`
+    + `table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid var(--border);padding:4px 6px;text-align:left}`
+    + `th{background:#f5f7fb}td.num{text-align:right;font-variant-numeric:tabular-nums}ul{margin:0;padding-left:18px;font-size:12px}`
+    + `@media print{body{margin:0}h2{break-after:avoid}tr{break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;
+
+  const lang = (document.documentElement && document.documentElement.lang) || "zh";
+  const html = "<!doctype html>\n<html lang=\"" + lang + "\"><head><meta charset=\"utf-8\">\n"
+    + `<title>${escapeHtml(t("admin.orgHealthHtmlTitle"))} · ${escapeHtml(d.to || "")}</title>\n<style>${style}</style>\n</head>\n<body>\n`
+    + `<h1>📊 ${escapeHtml(t("admin.orgHealthHtmlTitle"))}</h1>\n`
+    + `<div class="meta">${escapeHtml(t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" }))} · ${escapeHtml(t("admin.orgHealthHtmlGenerated", { time: new Date().toLocaleString() }))}</div>\n`
+    + `<div class="cards">${cards}</div>\n`
+    + `<h2>${escapeHtml(t("admin.orgHealthTopN"))} · ${escapeHtml(dimLabel)} · ${escapeHtml(metricLabel)}</h2>\n<div class="bars">${bars}</div>\n`
+    + `<div class="row2"><div><h2>${escapeHtml(t("admin.perfThRate"))}</h2>${donut}</div>`
+    + `<div class="grow"><h2>${escapeHtml(t("admin.orgHealthTrend"))} · ${escapeHtml(metricLabel)}</h2>${trend}</div></div>\n`
+    + `<h2>${escapeHtml(t("admin.orgHealthFlags"))}</h2>\n<div>${flags}</div>\n`
+    + `<h2>${escapeHtml(t("admin.orgHealthHtmlAppendix"))} · ${escapeHtml(dimLabel)}</h2>\n${table}\n`
+    + `</body></html>`;
+
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `org-health-report-${String(d.to || "").replace(/-/g, "")}.html`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast(t("admin.orgHealthHtmlOk"));
 }
 
 /** 组织体检报告·图表视图：拉同一端点，用结构化数据画 KPI / 调用量 Top 柱状 / 关注项。 */
@@ -13623,6 +13740,7 @@ function init() {
   $("orgHealthClose").onclick = () => $("orgHealthModal").classList.add("hidden");
   $("orgHealthDownload").onclick = downloadOrgHealthReport;
   $("orgHealthCsv").onclick = downloadOrgHealthCsv;
+  $("orgHealthHtml").onclick = downloadOrgHealthHtml;
   $("orgHealthModal").addEventListener("click", (e) => {
     const m = e.target.closest(".oh-metric-btn[data-metric]");
     if (m && !m.disabled) { setOrgHealthMetric(m.dataset.metric); return; }
