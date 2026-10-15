@@ -3508,9 +3508,9 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 以下结论**无法完全由本仓库代码直接证实**或**无测试覆盖**，列出以便复核：
 
 1. **【已由测试覆盖 1.0.230】`?play=1` 返回 400**：`play` 声明为 `bool?`（`AttachmentApi.cs`），前端只用 `?play=true`；`?play=1` 因 ASP.NET Core 查询布尔绑定走 `bool.TryParse`（不认 `1`）而返回 400。已新增用例 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` 固化该行为。
-2. **`/ag-ui/preview/{id}/play` 无独立端点测试**：`DocPreviewTests.cs` 覆盖了 `/preview` 与 `/notes`，但清单端点 `/play` 未在其中的断言搜索到（`PresentationPlaybackTests` 只测 `TryBuild` 结构）。其端到端行为建议以手动 E2E 复核。
+2. **【已由测试覆盖 1.0.231】`/ag-ui/preview/{id}/play` 端点**：新增用例 `Play_Endpoint_ReturnsManifest` 断言其返回 200 与清单字段（`expanded` / `slideCount=2` / `pages` / `notes` 长度）；`PresentationPlaybackTests` 仍负责 `TryBuild` 的结构展开。
 3. **【已清理 1.0.230】i18n 键 `docPreview.openFailed`（无法加载预览：{err}）**：该键此前在 `zh.js` / `en.js` 定义但 `app.js` 无引用（`docPreviewErrorText` 用的是 `docPreview.failed`）——1.0.230 已从两份字典删除该残留键。
-4. **播放 PDF 的浏览器缓存**：`/preview` 与 `?play=true` 均设 `Cache-Control: private, max-age=300`，浏览器可能缓存 5 分钟；若源文件在 5 分钟内被替换（附件 ID 不变），前端可能命中旧缓存（此为从响应头推断的行为，未见专门处理 / 测试）。
+4. **【已由测试覆盖 1.0.231】播放 PDF 的浏览器缓存**：新增用例 `Preview_And_PlayPdf_SetCacheHeaders` 断言 `/preview` 与 `?play=true` 两条路径均返回 `X-Content-Type-Options: nosniff` 与 `Cache-Control: private, max-age=300`。这是**有意为之**（同一附件的产物稳定，短时缓存避免重复转换）；若源文件在 5 分钟内被替换而附件 ID 不变，浏览器仍可能命中旧缓存——属已知边界，当前不做强制失效。
 5. **桌面版 PPT 播放的端到端验证**：代码路径上桌面版与 Web 版共用前端，但未见针对桌面版 WebView2 内播放的自动化测试（渲染层验证在 `docs/ui-design.md` 记为手动 E2E）。
 
 ## 第 8 章 管理控制台、账号与数据

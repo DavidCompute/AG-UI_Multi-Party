@@ -87,9 +87,9 @@
 
 ### 7.3 验证（1.0.230 / 1.0.231）
 - i18n 审计 **zh=en=1822，missing 0**；`node --check` / `check-i18n-keys` / `check-orphan-keys` 全过；`dotnet build` 0 错误。
-- `DocPreviewApiTests` **17/17**（含新增 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400`）；Playwright + curl 实测 A 组各页无 JS 报错、端点 200。
+- `DocPreviewApiTests` **19/19**（含新增 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` / `Play_Endpoint_ReturnsManifest` / `Preview_And_PlayPdf_SetCacheHeaders`）；Playwright + curl 实测 A 组各页无 JS 报错、端点 200。
 
 ### 7.4 仍未关闭项（如实标注）
-- 第 7 章 §7.15-2：`/ag-ui/preview/{id}/play` 清单端点**仍无独立端点测试**（仅 `PresentationPlaybackTests.TryBuild` 结构测试），待补。
-- 第 7 章 §7.15-4/5：播放 PDF 浏览器缓存、桌面版 WebView2 内播放的端到端，仍属**推断 / 手动 E2E**。
+- 第 7 章 §7.15-2 / §7.15-4：**已由 1.0.231 的两个端点用例关闭**（`Play_Endpoint_ReturnsManifest`、`Preview_And_PlayPdf_SetCacheHeaders`）。
+- 第 7 章 §7.15-5：桌面版 WebView2 内播放的端到端仍属**手动 E2E**（渲染层）。
 - 第 5 章 §5.13、第 9 章 §9.10 的部署相关口径（`MinScore` 实配值、`SnapshotSigningKey` 配置键口径等）为**部署相关**，未在代码层面化。

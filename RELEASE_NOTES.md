@@ -41,8 +41,8 @@ English:
 ## 测试
 # Tests
 
-中文：新增回归用例 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400`（固化 `?play=1` → 400 的 `bool?` 绑定行为）；`DocPreviewApiTests` 合跑 **17/17**。i18n 审计 **zh=en=1822，missing 0**；`node --check`、`check-i18n-keys`、`check-orphan-keys` 全过；`dotnet build` 0 错误。
-English: new regression test `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` (pinning the `bool?`-binding behavior of `?play=1` → 400); `DocPreviewApiTests` **17/17**. The i18n audit is **zh=en=1822, missing 0**; `node --check`, `check-i18n-keys` and `check-orphan-keys` all pass; `dotnet build` 0 errors.
+中文：新增回归用例 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400`（固化 `?play=1` → 400 的 `bool?` 绑定行为）、`Play_Endpoint_ReturnsManifest`（`/ag-ui/preview/{id}/play` 清单端点 200 与字段）与 `Preview_And_PlayPdf_SetCacheHeaders`（`/preview` 与 `?play=true` 的 `nosniff` + `private, max-age=300`）；`DocPreviewApiTests` 合跑 **19/19**。i18n 审计 **zh=en=1822，missing 0**；`node --check`、`check-i18n-keys`、`check-orphan-keys` 全过；`dotnet build` 0 错误。
+English: new regression tests `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` (pinning the `bool?`-binding behavior of `?play=1` → 400), `Play_Endpoint_ReturnsManifest` (the `/ag-ui/preview/{id}/play` manifest endpoint's 200 and fields) and `Preview_And_PlayPdf_SetCacheHeaders` (`nosniff` + `private, max-age=300` on `/preview` and `?play=true`); `DocPreviewApiTests` **19/19**. The i18n audit is **zh=en=1822, missing 0**; `node --check`, `check-i18n-keys` and `check-orphan-keys` all pass; `dotnet build` 0 errors.
 
 # AG-UI 群聊桌面版 1.0.230 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.230 Release Notes (current Windows desktop release)

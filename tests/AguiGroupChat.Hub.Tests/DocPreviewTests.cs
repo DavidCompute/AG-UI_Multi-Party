@@ -583,6 +583,46 @@ public sealed class DocPreviewApiTests : IClassFixture<DocPreviewApiServerFixtur
     }
 
     [Fact]
+    public async Task Play_Endpoint_ReturnsManifest()
+    {
+        var pptxPath = PresentationNotesTests.BuildPptx("第一页备注", "第二页备注");
+        var bytes = await File.ReadAllBytesAsync(pptxPath);
+        File.Delete(pptxPath);
+        var (token, _, attId) = await SeedGroupWithAttachmentAsync("pvplayapi", "发布会.pptx", bytes);
+
+        var res = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}/play", token));
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var m = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(m.TryGetProperty("expanded", out _));
+        Assert.Equal(2, m.GetProperty("slideCount").GetInt32());
+        Assert.Equal(JsonValueKind.Array, m.GetProperty("pages").ValueKind);
+        // 备注清单一律下发（与 /notes 同源）：本 fixture 有 2 张幻灯片
+        Assert.Equal(2, m.GetProperty("notes").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Preview_And_PlayPdf_SetCacheHeaders()
+    {
+        var pptxPath = PresentationNotesTests.BuildPptx("备注");
+        var bytes = await File.ReadAllBytesAsync(pptxPath);
+        File.Delete(pptxPath);
+        var (token, _, attId) = await SeedGroupWithAttachmentAsync("pvcache", "发布会.pptx", bytes);
+
+        // /preview 与 ?play=true 两条路径都带 nosniff + 允许 5 分钟短缓存（产物对同一附件稳定）。
+        foreach (var url in new[] { $"/ag-ui/preview/{attId}", $"/ag-ui/preview/{attId}?play=true" })
+        {
+            var res = await _client.SendAsync(Authed(HttpMethod.Get, url, token));
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            Assert.Equal("nosniff", string.Join("", res.Headers.GetValues("X-Content-Type-Options")));
+            var cc = res.Headers.CacheControl;
+            Assert.NotNull(cc);
+            Assert.True(cc!.Private);
+            Assert.Equal(TimeSpan.FromSeconds(300), cc.MaxAge);
+        }
+    }
+
+    [Fact]
     public async Task Notes_Endpoint_ReturnsPerSlideNotes()
     {
         var pptxPath = PresentationNotesTests.BuildPptx("第一页备注", "第二页备注");
