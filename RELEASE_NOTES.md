@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.240 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.240 Release Notes (current Windows desktop release)
+
+**版本说明**：**修复「预览说有的、装完却没有」的偏差**——市场导入原来在克隆数字员工时**丢掉了 `skillDefIds`（可复用技能引用）与 `memoryProfile`（记忆拟人类型）**，导致包内这两项配置永远带不进来。现一并携带（深拷贝），预览与安装结果一致。
+**Version note**: **Fixes a "the preview says it, but install drops it" mismatch** — importing from the marketplace used to clone digital employees **without `skillDefIds` (reusable skill references) or `memoryProfile` (memory personality)**, so those two would never come with a pack. They are now carried too (deep-copied), so the preview matches the install result.
+
+## 修复
+# Fixes
+
+中文：
+1. **`MarketplaceService.Clone` 漏拷两字段**（真实缺陷）：`Clone` 复制了人设 / 触发 / 关键词 / 桥接 / 知识库 / 图库 / 流水线 / 指派等，但**没有复制 `SkillDefIds` 与 `MemoryProfile`**——于是任何经市场（内置或远程）安装的数字员工，其挂载的可复用技能与记忆拟人类型全部丢失。现补上，并为 `MemoryProfile` 做**深拷贝**（新增 `CloneMemoryProfile`），不共享原对象。
+2. **预览改为展示技能名**：预览接口新增 `skillNames`（按目标实例的技能库解析 `SkillDefIds` → 名称；未知 id 回退为 id），前端优先展示「技能：A、B」（>5 个截断），否则回退「技能 n」；与安装后实际一致。
+English:
+1. **`MarketplaceService.Clone` dropped two fields (real defect)**: `Clone` copied persona / trigger / keywords / bridge / knowledge bases / image libraries / pipeline / assignments, but **not `SkillDefIds` or `MemoryProfile`** — so any digital employee installed from the marketplace (built-in or remote) silently lost its mounted reusable skills and its memory personality. Both are now copied, with `MemoryProfile` **deep-copied** (new `CloneMemoryProfile`) so nothing is shared with the source object.
+2. **The preview now shows skill names**: the preview endpoint gains `skillNames` (resolving `SkillDefIds` against the target instance's skill library → names; unknown ids fall back to the id), and the front end prefers "Skills: A, B" (truncated past 5), else the "Skills n" count — matching what actually gets installed.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.12（新增「随包携带的配置」与预览的技能名）。
+English: `docs/user-guide.md` / `en.md` §3.12 (the new "configuration carried with the pack" note and skill names in the preview).
+
+## 测试
+# Tests
+
+中文：`MarketplaceTests` 新增 `ImportDefinitions_CarriesSkillRefsAndMemoryProfile`（导入后 `SkillDefIds` 与 `MemoryProfile` 各字段保留；改动导入结果**不影响源定义**，验证深拷贝）；`MarketplaceApiTests` 的远程 demo 包加 `skillDefIds: ["demo_skill"]` 并断言预览 `skillNames` 回退为 `demo_skill`。Marketplace 相关合跑 **20/20**。浏览器实测（重建 web 后）：预览仍正常渲染 2 行 / 2 个勾选框，开市场与预览期间 **0 控制台报错**。`node --check`、i18n 审计 **zh=en=1853，missing 0**、`check-orphan-keys`、`dotnet build` 0 错误均过；重建 web 后健康 200。
+English: `MarketplaceTests` gains `ImportDefinitions_CarriesSkillRefsAndMemoryProfile` (after import, `SkillDefIds` and every `MemoryProfile` field survive; mutating the import result **does not affect the source definition**, proving the deep copy); the remote demo pack in `MarketplaceApiTests` now carries `skillDefIds: ["demo_skill"]` and asserts the preview's `skillNames` falls back to `demo_skill`. Marketplace tests **20/20**. Browser-verified (after rebuilding web): the preview still renders 2 rows / 2 checkboxes, with **0 console errors** while opening the market and previewing. `node --check`, the i18n audit **zh=en=1853, missing 0**, `check-orphan-keys` and `dotnet build` 0 errors all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.239 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.239 Release Notes (current Windows desktop release)
 

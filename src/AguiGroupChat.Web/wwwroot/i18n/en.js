@@ -1956,6 +1956,7 @@ window.I18N_DICTS.en = {
   "market.previewEmpty": "This pack has no agents to preview",
   "market.previewFail": "Preview failed: {err}",
   "market.previewSkills": "Skills {n}",
+  "market.previewSkillList": "Skills: {list}",
   "market.previewKb": "Knowledge {n}",
   "market.previewNoneSelected": "Select at least one agent",
   "market.installed": "Installed \u201c{name}\u201d: {n} agents",

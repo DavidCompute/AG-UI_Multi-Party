@@ -1949,6 +1949,7 @@ window.I18N_DICTS.zh = {
   "market.previewEmpty": "该包没有可预览的数字员工",
   "market.previewFail": "预览失败：{err}",
   "market.previewSkills": "技能 {n}",
+  "market.previewSkillList": "技能：{list}",
   "market.previewKb": "知识库 {n}",
   "market.previewNoneSelected": "请至少选择一个数字员工",
   "market.installed": "已安装「{name}」：{n} 个数字员工",

@@ -70,7 +70,7 @@ public static class MarketplaceApi
 
         // ---- 安装前预览：返回某包的「数字员工清单」（内置直接给出；远程按需拉整包，不落库）----
         root.MapGet("/preview", async (string? sourceId, string? packId, MarketplaceService market,
-            MarketplaceState state, MarketplaceRemoteService remote, CancellationToken ct) =>
+            MarketplaceState state, MarketplaceRemoteService remote, AgentSkillCatalog skills, CancellationToken ct) =>
         {
             var pid = (packId ?? "").Trim();
             if (pid.Length == 0) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "packId 必填"));
@@ -110,6 +110,7 @@ public static class MarketplaceApi
                     a.Nickname,
                     a.Description,
                     skillCount = a.SkillDefIds?.Count ?? 0,
+                    skillNames = (a.SkillDefIds ?? []).Select(id => skills.Get(id)?.Name ?? id).ToList(),
                     memoryType = a.MemoryProfile?.MemoryType,
                     triggerMode = a.TriggerMode.ToString().ToLowerInvariant(),
                     knowledgeBaseCount = a.KnowledgeBaseIds?.Count ?? 0,

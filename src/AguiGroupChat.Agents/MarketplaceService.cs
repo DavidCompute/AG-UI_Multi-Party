@@ -191,6 +191,21 @@ public sealed class MarketplaceService
         RelayToAgentId = d.RelayToAgentId,
         AssignmentIds = d.AssignmentIds?.ToList() ?? [],
         EscalationAgentId = d.EscalationAgentId,
+        // 随包携带：可复用技能引用与记忆拟人类型（都是配置；引用不存在的技能 id 在挂载时会被跳过）
+        SkillDefIds = d.SkillDefIds?.ToList() ?? [],
+        MemoryProfile = CloneMemoryProfile(d.MemoryProfile),
+    };
+
+    /// <summary>记忆拟人配置的深拷贝（可空）。</summary>
+    private static MemoryProfile? CloneMemoryProfile(MemoryProfile? p) => p is null ? null : new MemoryProfile
+    {
+        MemoryType = p.MemoryType,
+        StyleMode = p.StyleMode,
+        PersonaCard = p.PersonaCard,
+        TopK = p.TopK,
+        PersonalTopK = p.PersonalTopK,
+        MinScore = p.MinScore,
+        PersonalMinScore = p.PersonalMinScore,
     };
 }
 

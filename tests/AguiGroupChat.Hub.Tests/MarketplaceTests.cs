@@ -52,6 +52,36 @@ public sealed class MarketplaceTests
     }
 
     [Fact]
+    public void ImportDefinitions_CarriesSkillRefsAndMemoryProfile()
+    {
+        var (market, catalog) = Create();
+        var src = new AgentDefinition
+        {
+            AgentId = "agent_x",
+            Nickname = "X",
+            SkillDefIds = ["skill_a", "skill_b"],
+            MemoryProfile = new MemoryProfile { MemoryType = "deep", StyleMode = "digest", PersonaCard = "p", TopK = 7 },
+        };
+
+        var result = market.ImportDefinitions("p", "包", [src], "user_1");
+        Assert.Equal(1, result.AgentsCreated);
+
+        var def = catalog.GetDefinition("agent_x");
+        Assert.NotNull(def);
+        Assert.Equal(new[] { "skill_a", "skill_b" }, def!.SkillDefIds);
+        Assert.NotNull(def.MemoryProfile);
+        Assert.Equal("deep", def.MemoryProfile!.MemoryType);
+        Assert.Equal("digest", def.MemoryProfile.StyleMode);
+        Assert.Equal(7, def.MemoryProfile.TopK);
+
+        // 深拷贝：改动导入结果不影响源定义
+        def.MemoryProfile.PersonaCard = "changed";
+        def.SkillDefIds.Add("skill_c");
+        Assert.Equal("p", src.MemoryProfile!.PersonaCard);
+        Assert.Equal(2, src.SkillDefIds.Count);
+    }
+
+    [Fact]
     public void ImportPack_UnknownPack_Throws()
         => Assert.Throws<AguiGroupChat.Hub.Infra.AguiProtocolException>(() => Create().Market.ImportPack("nope", "user_1"));
 }

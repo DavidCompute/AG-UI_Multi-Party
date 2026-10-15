@@ -7493,7 +7493,9 @@ function renderMarketPreview(d) {
   if (!agents.length) { list.innerHTML = `<div class="muted" style="padding:12px;font-size:13px">${escapeHtml(t("market.previewEmpty"))}</div>`; return; }
   list.innerHTML = agents.map((a) => {
     const bits = [];
-    if (a.skillCount) bits.push(t("market.previewSkills", { n: a.skillCount }));
+    const names = Array.isArray(a.skillNames) ? a.skillNames.filter(Boolean) : [];
+    if (names.length) bits.push(t("market.previewSkillList", { list: names.slice(0, 5).join("、") + (names.length > 5 ? "…" : "") }));
+    else if (a.skillCount) bits.push(t("market.previewSkills", { n: a.skillCount }));
     if (a.knowledgeBaseCount) bits.push(t("market.previewKb", { n: a.knowledgeBaseCount }));
     if (a.memoryType) { const lbl = t("agent.form.memoryType." + a.memoryType); if (lbl && !/^agent\./.test(lbl)) bits.push("🧠 " + lbl); }
     return `<div class="market-preview-row">`
