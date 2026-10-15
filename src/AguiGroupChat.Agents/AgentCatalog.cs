@@ -377,8 +377,13 @@ public sealed class AgentCatalog
     /// </para>
     /// </summary>
     public ChatClientAgent GetOrCreateVision(string agentId, string visionModel)
-        => _agents.GetOrAdd(CacheKey(agentId, visionModel),
-            _ => Create(agentId, includeSkills: true, modelOverride: visionModel));
+        => GetOrCreateWithModel(agentId, visionModel);
+
+    /// <summary>按指定模型获取智能体（缓存按 agentId + 模型分键）：用于视觉 / 按任务复杂度选模型等变体。
+    /// 与 <see cref="GetOrCreate"/> 一样带工具 / 记忆 / 审批包装，只是换了模型。</summary>
+    public ChatClientAgent GetOrCreateWithModel(string agentId, string model)
+        => _agents.GetOrAdd(CacheKey(agentId, model),
+            _ => Create(agentId, includeSkills: true, modelOverride: model));
 
     /// <summary>缓存键：同一智能体的不同模型变体必须分开缓存（否则先建的那个会盖掉另一个）。</summary>
     private static string CacheKey(string agentId, string model) => agentId + "\u001F" + model;

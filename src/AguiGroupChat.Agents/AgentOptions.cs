@@ -182,6 +182,9 @@ public sealed class AgentOptions
     /// <summary>成本估算（appsettings：<c>Agents:Pricing</c>）：把 token 换算成金额，供控制台「员工绩效」成本列与预算提示。</summary>
     public PricingOptions Pricing { get; set; } = new();
 
+    /// <summary>按任务复杂度自动选模型（appsettings：<c>Agents:ModelRouting</c>，默认关）：简单任务用经济模型、繁重任务用强模型。</summary>
+    public ModelRoutingOptions ModelRouting { get; set; } = new();
+
     public List<AgentDefinition> Agents { get; set; } = [];
 
     /// <summary>技能库种子（appsettings 声明）：启动时若技能库为空则播种，与 <see cref="Agents"/> 同模式。</summary>
@@ -276,6 +279,38 @@ public sealed class PricingOptions
     /// <summary>按 token 估算成本：输入单价 × prompt + 输出单价 ×（completion + reasoning）。</summary>
     public decimal EstimateCost(long promptTokens, long completionTokens, long reasoningTokens)
         => InputPerMillion * promptTokens / 1_000_000m + OutputPerMillion * (completionTokens + reasoningTokens) / 1_000_000m;
+}
+
+/// <summary>
+/// 按任务复杂度自动选模型（appsettings：<c>Agents:ModelRouting</c>，默认关）：
+/// 复用「复杂度自适应超时」同一份估计器（<see cref="RunComplexityEstimator"/>），
+/// 把 <see cref="RunComplexity.Simple"/> 档路由到经济模型、<see cref="RunComplexity.Complex"/> / <see cref="RunComplexity.Heavy"/> 档路由到强模型；
+/// 未配置的档位不换（走正常模型）。默认关 = 行为与旧版完全一致。
+/// </summary>
+public sealed class ModelRoutingOptions
+{
+    /// <summary>是否启用（默认关）。</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>简单档使用的模型名（留空 = 不换）。适合便宜 / 快的非推理模型。Docker：<c>AGENTS_MODELROUTING_SIMPLE_MODEL</c>。</summary>
+    public string SimpleModel { get; set; } = "";
+
+    /// <summary>复杂 / 繁重档使用的模型名（留空 = 不换）。适合强模型。Docker：<c>AGENTS_MODELROUTING_HEAVY_MODEL</c>。</summary>
+    public string HeavyModel { get; set; } = "";
+
+    /// <summary>按档位解析要用的模型：未启用 / 该档未配（含 Standard 档不换）→ null（走正常模型）。纯函数便于单测。</summary>
+    public string? ResolveForTier(RunComplexity tier)
+    {
+        if (!Enabled) return null;
+        var m = tier switch
+        {
+            RunComplexity.Simple => SimpleModel,
+            RunComplexity.Complex => HeavyModel,
+            RunComplexity.Heavy => HeavyModel,
+            _ => null, // Standard：不换
+        };
+        return string.IsNullOrWhiteSpace(m) ? null : m.Trim();
+    }
 }
 
 /// <summary>

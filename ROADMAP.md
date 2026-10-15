@@ -221,13 +221,20 @@
 - **现状**：`agui_usage` 已在记录按「日期 + 员工 + 触发者」的调用与 token；消息 👍👎 反馈也已在存；但**没有按员工的汇总视图**，编排选人仍靠静态角色描述。
 - **目标**：按数字员工聚合绩效（调用量 / token / 好评率 / 最近活跃），为「一键编排选人」与组织体检提供实测依据。
 - **已实现**：端点 `GET /ag-ui/admin/agent-performance?days=N`（Operator+，只读；名字取昵称、取不到回退 agentId）；控制台新增「员工绩效」页签（7/30/90 天窗口 + 刷新，按调用次数降序）；聚合为纯函数 `AgentPerformance.Aggregate`。**成本估算（1.0.221）**：按可配单价 `Agents:Pricing`（输入/输出每百万 token 单价 + 币种 + 每日预算）算成本列与预算已用（单价为 0 时显示「—」）。落点：`Web/AgentPerformance.cs`、`AgentOptions.PricingOptions`、`Web/AdminApi.cs`、`wwwroot/{index.html,app.js}`。
-- **待续**：把绩效 / 成本作为信号**自动反馈进编排**（候选复用 / 部门体检 / 低绩效提醒）与**按复杂度自动选模型**（经济/强模型路由），均需先定口径防抖动。
+- **已实现（1.0.223 反哺）**：端点返回每人 `flags`（`low-praise` 反馈≥ 3 且好评率 < 60% / `idle` 窗口内无调用，确定性、可解释），控制台新增「关注」列与建议栏——把绩效变成可行动的运营信号。
+- **待续**：进一步把绩效作为信号**自动反馈进编排**（候选复用排序 / 部门体检报告），需先定口径防抖动。
 
 ### 6.6 数字员工评测集 / 回归（★★☆ 质量守护） ✅已实现（1.0.222）
 - **现状**：改提示词 / 换模型靠“凭感觉”，无金标准用例，能力退化无告警。
 - **目标**：为数字员工建金标准用例（提问 → 期望要点），改动后一键跑分防退化。
 - **已实现**：端点 `/ag-ui/admin/eval-cases`（CRUD + `run`，仅管理员）；跑分对每条用例用目标员工的「提示词 + 正式回复模型」跑一次（`AgentCatalog.CreateForEval`，不带工具 / 记忆 / 技能排除干扰），按**确定性关键词判据**（any/all，不用 LLM 当裁判）；控制台新增「评测回归」页签；用例经扩展区「evalCases」持久化。落点：`Agents/{EvalCase,AgentEvalRunner}.cs`、`Web/EvalApi.cs`、`wwwroot/{index.html,app.js}`。
 - **待续**：可给用例加“期望产出物”（交付文件类型）/ 评分基线存档与趋势对比。
+
+### 6.7 按任务复杂度自动选模型（★★☆ 成本 / 速度） ✅已实现（1.0.223）
+- **现状**：所有任务共用同一模型（思考模式决定推理/非推理），简单任务也用强模型，成本 / 速度浪费。
+- **目标**：把已经很成熟的「复杂度自适应超时」同一套档位估计延伸到**模型选择**：简单任务用经济模型、繁重任务用强模型。
+- **已实现**：`Agents:ModelRouting`（`Enabled` / `SimpleModel` / `HeavyModel`，**默认关**）；网关运行开始时安装复杂度预算，据此经 `AgentCatalog.GetOrCreateWithModel`（按 `agentId + 模型` 分键缓存，与视觉变体同机制）取得模型变体——**只换模型，工具 / 记忆 / 审批包装照旧**；关闭时行为与旧版完全一致。落点：`AgentOptions.ModelRoutingOptions`、`AgentCatalog.GetOrCreateWithModel`、`AgentGateway.ResolveRoutedModel`。
+- **待续**：Standard 档的细分策略 / 按租户或按知聚覆写。
 
 ---
 

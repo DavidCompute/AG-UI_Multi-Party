@@ -241,7 +241,7 @@ public static class AdminApi
                 agents = stats.Select(s => new
                 {
                     s.AgentId, s.Name, s.Calls, s.PromptTokens, s.CompletionTokens, s.ReasoningTokens, s.TotalTokens,
-                    s.Up, s.Down, s.PositiveRate, s.LastDate,
+                    s.Up, s.Down, s.PositiveRate, s.LastDate, s.Flags,
                     cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
                 }),
             });

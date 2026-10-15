@@ -547,6 +547,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private static bool IsFanOutRole(AgentDefinition? def)
         => def is not null && ((def.Pipeline?.Count ?? 0) > 0 || (def.AssignmentIds?.Count ?? 0) > 0);
 
+    /// <summary>按任务复杂度选模型（Agents:ModelRouting，默认关）：未启用 / 该档未配模型时返回 null（走正常模型）。
+    /// 复用「复杂度自适应超时」同一份估计器（<see cref="RunTimeoutPolicy"/>）。</summary>
+    private string? ResolveRoutedModel(RunComplexity tier)
+        => _options.ModelRouting?.ResolveForTier(tier);
+
     /// <summary>
     /// 客户端技能经内网隧道执行的等待上界（秒）。模型自报的 shell 超时决定基准，
     /// 原先上界硬编码 180 秒——对“复杂度高的本地批处理”是短板；这里改用本次运行的复杂度预算作为上界。
@@ -604,7 +609,16 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return new AgentInvocationResult(false, null, "AGENT_DECIDED_SILENT");
         }
 
-        var agent = _catalog.GetOrCreate(context.AgentId);
+        // 复杂度预算提前安装：既用于模型挂起保护，也用于「按复杂度选模型」（Agents:ModelRouting）。
+        // 同一运行内后续阶段（流水线 / 指派链 / 交付兜底）重算结果相同，不受提前安装影响。
+        var runBudget = InstallRunBudget(context, def);
+        var routedModel = ResolveRoutedModel(runBudget.Complexity);
+        var agent = routedModel is null
+            ? _catalog.GetOrCreate(context.AgentId)
+            : _catalog.GetOrCreateWithModel(context.AgentId, routedModel);
+        if (routedModel is not null)
+            _logger.LogInformation("按任务复杂度选模型：agent={AgentId} tier={Tier} model={Model}",
+                context.AgentId, runBudget.Complexity, routedModel);
         var runId = "run_" + IdGenerator.NewId();
         _logger.LogInformation("智能体 {AgentId} 开始运行：run={RunId} group={GroupId} 触发消息={MessageId}",
             context.AgentId, runId, context.GroupId, context.TriggerMessageId);
@@ -646,7 +660,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 只取第一个会让其余请求没有配对的决议：框架直接抛错 / 模型侧 400，整个运行失败。
         var approvalsThisTurn = new List<ToolApprovalRequestContent>();
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(InstallRunBudget(context, def).Run); // 模型挂起保护（按任务复杂度放宽）
+        timeoutCts.CancelAfter(runBudget.Run); // 模型挂起保护（按任务复杂度放宽；runBudget 已在上方安装）
         var runCt = timeoutCts.Token;
         _activeRuns[runId] = new ActiveRun(timeoutCts, context.GroupId, context.AgentId, context.TriggerUserId); // 注册：支持「停止生成」
         var sessionLock = GetSessionLock(context.ThreadId);

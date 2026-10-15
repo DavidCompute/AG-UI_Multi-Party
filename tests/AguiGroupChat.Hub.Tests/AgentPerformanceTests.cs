@@ -78,6 +78,42 @@ public sealed class AgentPerformanceTests
     }
 
     [Fact]
+    public void Aggregate_ComputesFlags_LowPraise_And_Idle()
+    {
+        var fb = new[]
+        {
+            new MessageFeedbackEntry { MessageId = "m1", GroupId = "g", AgentId = "aLow", UserId = "u1", Value = 1, CreatedAtMs = Now },
+            new MessageFeedbackEntry { MessageId = "m2", GroupId = "g", AgentId = "aLow", UserId = "u2", Value = -1, CreatedAtMs = Now },
+            new MessageFeedbackEntry { MessageId = "m3", GroupId = "g", AgentId = "aLow", UserId = "u3", Value = -1, CreatedAtMs = Now },
+        };
+        var names = new Dictionary<string, string> { ["aLow"] = "低分", ["aIdle"] = "闲置", ["aGood"] = "好评" };
+        var usage = new[] { new UsageAggregate("2026-10-02", "aGood", "u1", 1, 1, 0, 3) };
+
+        var stats = AgentPerformance.Aggregate(usage, fb, names, 30, Now);
+
+        Assert.Contains("low-praise", stats.Single(s => s.AgentId == "aLow").Flags);  // 3 反馈、1/3 好评
+        Assert.Contains("idle", stats.Single(s => s.AgentId == "aIdle").Flags);       // 目录中但无用量
+        Assert.Empty(stats.Single(s => s.AgentId == "aGood").Flags);                  // 有调用、无反馈 → 不标记
+    }
+
+    [Fact]
+    public void ModelRouting_ResolveForTier_OnlyWhenEnabled()
+    {
+        var off = new ModelRoutingOptions { Enabled = false, SimpleModel = "cheap", HeavyModel = "strong" };
+        Assert.Null(off.ResolveForTier(RunComplexity.Simple)); // 未启用 → 不换
+
+        var on = new ModelRoutingOptions { Enabled = true, SimpleModel = "cheap", HeavyModel = "strong" };
+        Assert.Equal("cheap", on.ResolveForTier(RunComplexity.Simple));
+        Assert.Null(on.ResolveForTier(RunComplexity.Standard));          // 常规档不换
+        Assert.Equal("strong", on.ResolveForTier(RunComplexity.Complex));
+        Assert.Equal("strong", on.ResolveForTier(RunComplexity.Heavy));
+
+        var partial = new ModelRoutingOptions { Enabled = true, SimpleModel = "cheap" };
+        Assert.Equal("cheap", partial.ResolveForTier(RunComplexity.Simple));
+        Assert.Null(partial.ResolveForTier(RunComplexity.Heavy));        // 该档未配 → 不换
+    }
+
+    [Fact]
     public void PricingOptions_EstimateCost_WeightsInputAndOutput()
     {
         var p = new PricingOptions { InputPerMillion = 2m, OutputPerMillion = 8m };

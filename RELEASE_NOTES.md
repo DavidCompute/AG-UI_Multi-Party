@@ -1,3 +1,39 @@
+# AG-UI 群聊桌面版 1.0.223 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.223 Release Notes (current Windows desktop release)
+
+**版本说明**：**绩效反哺 + 按复杂度选模型（P0 收官之后的两项）**——员工绩效看板新增**「关注」列与建议栏**（低好评率 / 闲置，确定性判据），把绩效变成可行动的运营信号；另新增**按任务复杂度自动选模型**（`Agents:ModelRouting`，**默认关**）：简单任务用经济模型、繁重任务用强模型，复用「复杂度自适应超时」同一估计器。
+**Version note**: **Performance feedback + complexity-based model routing (the two items after the P0 finale)** — the performance dashboard gains an **"Attention" column and a hints strip** (low praise rate / idle, deterministic), turning performance into actionable signals; plus **complexity-based model routing** (`Agents:ModelRouting`, **off by default**): cheap model for simple tasks, strong model for heavy ones, reusing the same estimator as adaptive timeouts.
+
+## 绩效反哺（读侧建议）
+# Performance feedback (read-side hints)
+
+中文：`GET /ag-ui/admin/agent-performance` 的 `agents[]` 新增 `flags`（确定性、可解释）：
+- `low-praise`：反馈数 ≥ 3 且好评率 < 60% → 建议复核提示词 / 技能。
+- `idle`：窗口内无调用（窗口内目录中的全部数字员工都会被列出，便于发现闲置岗位）。
+- 前端：「📈 员工绩效」页新增**「关注」列**与**建议栏**（列出需关注员工），按 i18n 渲染。
+English: `GET /ag-ui/admin/agent-performance`'s `agents[]` gains `flags` (deterministic, explainable):
+- `low-praise`: ≥ 3 ratings and a positive rate < 60% → review the prompt / skills.
+- `idle`: no calls in the window (every employee in the catalog is listed, so idle roles surface).
+- Front end: the "📈 Agent performance" tab gains an **"Attention" column** and a **hints strip** (listing employees needing attention), rendered per i18n.
+
+## 按任务复杂度自动选模型
+# Complexity-based model routing
+
+中文：新增 `Agents:ModelRouting`（`Enabled` / `SimpleModel` / `HeavyModel`；Docker：`AGENTS_MODELROUTING_*`，**默认关**）：
+- 复用「复杂度自适应超时」同一份估计器（`RunComplexityEstimator`）：**Simple** 档路由到 `SimpleModel`、**Complex/Heavy** 档路由到 `HeavyModel`、**Standard** 档不换；某档留空 = 不换。
+- 实现：网关在运行开始时先安装复杂度预算，据此经 `AgentCatalog.GetOrCreateWithModel`（与视觉变体同机制：按 `agentId + 模型` 分键缓存）取得对应模型变体（**只换模型、工具/记忆/审批包装照旧**）；关闭时返回 null → 走正常模型，行为与旧版完全一致。
+- 纯函数 `ModelRoutingOptions.ResolveForTier` 便于单测。
+English: new `Agents:ModelRouting` (`Enabled` / `SimpleModel` / `HeavyModel`; Docker: `AGENTS_MODELROUTING_*`, **off by default**):
+- Reuses the same estimator as adaptive timeouts (`RunComplexityEstimator`): **Simple** → `SimpleModel`, **Complex/Heavy** → `HeavyModel`, **Standard** unchanged; a blank tier model means no switch.
+- Implementation: the gateway installs the complexity budget at run start and, based on it, gets the matching model variant via `AgentCatalog.GetOrCreateWithModel` (same mechanism as the vision variant: cached per `agentId + model`) — **only the model changes; tools / memory / approval wrapping stay**; when off it returns null and the normal model is used, identical to before.
+- Pure `ModelRoutingOptions.ResolveForTier` is unit-tested.
+
+## 测试
+# Tests
+
+中文：`AgentPerformanceTests` 新增标记用例（`low-praise` / `idle` / 无标记）与 `ModelRoutingOptions.ResolveForTier` 用例；合跑 **44/44**（含 AdminApi / DesktopComposition / EvalApi / SpeechSynthesis）。i18n 审计 **zh=en=1807，missing 0**；`node --check`、appsettings JSON 校验通过。运行栈实测：绩效端点返回 `flags`（30 天窗口 17 位员工中 2 位 `idle`）。
+English: `AgentPerformanceTests` gains flag cases (`low-praise` / `idle` / none) and a `ModelRoutingOptions.ResolveForTier` case; **44/44** (incl. AdminApi / DesktopComposition / EvalApi / SpeechSynthesis). The i18n audit is **zh=en=1807, missing 0**; `node --check` and appsettings JSON validation pass. Verified live: the performance endpoint returns `flags` (2 of 17 employees `idle` over 30 days).
+
 # AG-UI 群聊桌面版 1.0.222 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.222 Release Notes (current Windows desktop release)
 

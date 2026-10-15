@@ -1833,6 +1833,11 @@ window.I18N_DICTS.en = {
   "admin.perfThCost": "Cost",
   "admin.perfCost": "Cost {cost}",
   "admin.perfBudget": "Budget {currency}{budget}/day · {pct}% used",
+  "admin.perfThFlag": "Attention",
+  "admin.perfFlagLowPraise": "Low praise",
+  "admin.perfFlagIdle": "Idle for {days}d",
+  "admin.perfHints": "Needs attention: {names}",
+  "admin.perfHintsNone": "No employees need attention",
   /* Digital-employee eval cases / regression (admin) */
   "admin.tabEval": "Eval & regression",
   "admin.evalRun": "▶ Run all",

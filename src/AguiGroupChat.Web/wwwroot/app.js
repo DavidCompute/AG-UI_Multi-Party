@@ -6962,19 +6962,23 @@ async function runEvalCases(ids) {
 /** 员工绩效看板（P0）：按数字员工聚合调用次数 / token / 成本 / 👍👎 好评率。数据源 /ag-ui/admin/agent-performance。 */
 async function loadAgentPerformance() {
   const meta = $("adminPerfMeta");
+  const hints = $("adminPerfHints");
   const rows = $("adminPerfRows");
   const days = Number($("perfRange") && $("perfRange").value) || 30;
   if (meta) meta.textContent = t("admin.loading");
-  rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  if (hints) hints.textContent = "";
+  rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
     const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
+    if (!res.ok || !d) { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
     const list = d.agents || [];
     const s = d.summary || {};
     const price = d.pricing || {};
     const cur = price.currency || "$";
     const fmtCost = (v) => price.configured ? cur + Number(v || 0).toFixed(2) : "—";
+    const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+      : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
     if (meta) {
       let m = t("admin.perfMeta", {
         from: d.from || "", to: d.to || "", agents: s.agents || 0,
@@ -6985,16 +6989,24 @@ async function loadAgentPerformance() {
       if (s.budgetPct != null) m += " · " + t("admin.perfBudget", { currency: cur, budget: Number(s.budget || 0).toFixed(2), pct: s.budgetPct }) + (s.overBudget ? " ⚠" : "");
       meta.textContent = m;
     }
-    if (!list.length) { rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
+    if (!list.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
+    // 关注建议（确定性）：列出带标记的员工，便于「反哺编排 / 组织体检」
+    const flagged = list.filter((a) => (a.flags || []).length);
+    if (hints) hints.textContent = flagged.length
+      ? t("admin.perfHints", { names: flagged.slice(0, 8).map((a) => a.name + "（" + (a.flags || []).map(flagLabel).join(" / ") + "）").join("、") })
+      : t("admin.perfHintsNone");
     rows.innerHTML = list.map((a) => {
       const rate = a.positiveRate == null ? "—" : Math.round(a.positiveRate * 100) + "%";
+      const flags = (a.flags || []).length
+        ? (a.flags || []).map((f) => `<span class="tag-disabled">${escapeHtml(flagLabel(f))}</span>`).join(" ")
+        : `<span class="muted">—</span>`;
       return `<tr><td title="${escapeHtml(a.agentId || "")}">${escapeHtml(a.name || a.agentId)}</td>`
         + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
         + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
         + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
-        + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td></tr>`;
+        + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
     }).join("");
-  } catch { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+  } catch { if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
 }
 
 function applyAdminTabVisibility() {

@@ -638,7 +638,7 @@ apiKey 不回显，仅提示“已配置”。
 - 用户管理（列表/角色/禁用/重置密码/平台角色授予）；系统状态与用量、审计、桥健康/能力、执行参数（在线热改）、
   配置治理、白标设置；权限随角色（User 无管理菜单 / Operator 只读 / Admin+ 完整 / SuperAdmin 角色管理）。
 - 管理页按生效角色显示，角色下拉仅 SuperAdmin 可见。
-- **数字员工绩效看板（`#adminTabPerf` → `#adminPerfView`，P0）**：管理员控制台新增页签，按数字员工聚合调用次数 / 总 token / **成本** / 👍👎 好评率 / 最近活跃，7 / 30 / 90 天窗口 + 一键刷新（按调用次数降序）；数据来自 `GET /ag-ui/admin/agent-performance`（`agui_usage` + 消息反馈），聚合为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`）便于单测。**成本**按可配单价 `Agents:Pricing`（`InputPerMillion`/`OutputPerMillion`/`Currency`/`DailyBudget`）估算；单价为 0 显示「—」，配了 `DailyBudget` 时 meta 行显示「已用 X%」、超预算标 ⚠。
+- **数字员工绩效看板（`#adminTabPerf` → `#adminPerfView`，P0）**：管理员控制台新增页签，按数字员工聚合调用次数 / 总 token / **成本** / 👍👎 好评率 / 最近活跃，7 / 30 / 90 天窗口 + 一键刷新（按调用次数降序）；数据来自 `GET /ag-ui/admin/agent-performance`（`agui_usage` + 消息反馈），聚合为纯函数 `AgentPerformance.Aggregate`（`AgentPerformance.cs`）便于单测。**成本**按可配单价 `Agents:Pricing`（`InputPerMillion`/`OutputPerMillion`/`Currency`/`DailyBudget`）估算；单价为 0 显示「—」，配了 `DailyBudget` 时 meta 行显示「已用 X%」、超预算标 ⚠。**「关注」列**：`low-praise`（反馈≥ 3 且好评率 < 60%）/ `idle`（窗口内无调用）确定性标记，并有建议栏汇总（反哺编排）。
 - **数字员工评测集 / 回归（`#adminTabEval` → `#adminEvalView`，Admin+，P0）**：建金标准用例（提问 + 期望要点 + 判定 any/all），一键跑分：对每条用例用目标员工的「提示词 + 正式回复模型」跑一次（`AgentCatalog.CreateForEval`，不带工具 / 记忆 / 技能），按确定性关键词判据给通过 / 未通过与回复摘录；用例经扩展区「evalCases」持久化。落点：`Agents/{EvalCase,AgentEvalRunner}.cs`、`Web/EvalApi.cs`、`wwwroot/{index.html,app.js}`。
 - **系统状态（`#statusModal`）里的「文档在线转换」能力行**：显式展示服务端是否就绪（`GET /ag-ui/admin/status` 的
   `docPreview.available`，由 `ISofficeRunner.Available` 探测本机 LibreOffice）。未就绪时值标为警示色并在下方给出**修复指引**

@@ -258,6 +258,10 @@ services:
       Agents__Pricing__OutputPerMillion: ${AGENTS_PRICING_OUTPUT_PER_MILLION:-0}
       Agents__Pricing__Currency: ${AGENTS_PRICING_CURRENCY:-}
       Agents__Pricing__DailyBudget: ${AGENTS_PRICING_DAILY_BUDGET:-0}
+      # 按任务复杂度自动选模型（Agents:ModelRouting，默认关）：简单档用经济模型、复杂/繁重档用强模型（留空 = 不换）。
+      Agents__ModelRouting__Enabled: ${AGENTS_MODELROUTING_ENABLED:-false}
+      Agents__ModelRouting__SimpleModel: ${AGENTS_MODELROUTING_SIMPLE_MODEL:-}
+      Agents__ModelRouting__HeavyModel: ${AGENTS_MODELROUTING_HEAVY_MODEL:-}
       # 提示词装配预算（顶层 PromptBudget 节点）：总闸门 / 历史窗口与单条截断 / 历史附件回喂 / 附件注入长度 / 附图数量。
       # 代码默认已按 1M 窗口放宽（总闸门 200000 字符、历史单条 4000、附件单文件 40000、合计 200000），
       # 因此无需在此配置；要非默认值必须显式补行（Docker 不透传未知键），如：PromptBudget__MaxTotalChars: "400000"

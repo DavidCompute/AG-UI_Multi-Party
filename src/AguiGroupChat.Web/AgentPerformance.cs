@@ -24,6 +24,19 @@ public static class AgentPerformance
     {
         /// <summary>好评率 = 👍 / (👍 + 👎)；无反馈时为 null（前端显示「—」）。</summary>
         public double? PositiveRate => (Up + Down) == 0 ? null : Math.Round((double)Up / (Up + Down), 4);
+
+        /// <summary>需要关注的标记（确定性、可解释）：<c>low-praise</c> 好评率偏低 / <c>idle</c> 无调用。
+        /// 供控制台「员工绩效」页的「关注」列与建议栏使用（前端按 i18n 渲染）。</summary>
+        public IReadOnlyList<string> Flags
+        {
+            get
+            {
+                var flags = new List<string>();
+                if (Up + Down >= 3 && PositiveRate is { } rate && rate < 0.6) flags.Add("low-praise");
+                if (Calls == 0) flags.Add("idle");
+                return flags;
+            }
+        }
     }
 
     public static IReadOnlyList<AgentStat> Aggregate(
@@ -36,6 +49,10 @@ public static class AgentPerformance
         var fromMs = nowMs - (long)Math.Max(1, days) * 24 * 3600 * 1000;
         var acc = new Dictionary<string, Acc>(StringComparer.Ordinal);
         Acc Get(string id) => acc.TryGetValue(id, out var a) ? a : (acc[id] = new Acc());
+
+        // 先把目录里的全部数字员工播种进来（calls=0）——便于识别「近 N 天无调用」的闲置岗位；
+        // 无名字信息时（names 为空）保持原行为：只列出有用量 / 反馈的员工。
+        foreach (var id in names.Keys) Get(id);
 
         foreach (var u in usage)
         {

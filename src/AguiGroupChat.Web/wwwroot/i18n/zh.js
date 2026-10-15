@@ -1826,6 +1826,11 @@ window.I18N_DICTS.zh = {
   "admin.perfThCost": "成本",
   "admin.perfCost": "成本 {cost}",
   "admin.perfBudget": "预算 {currency}{budget}/天 · 已用 {pct}%",
+  "admin.perfThFlag": "关注",
+  "admin.perfFlagLowPraise": "好评率偏低",
+  "admin.perfFlagIdle": "近 {days} 天无调用",
+  "admin.perfHints": "需要关注：{names}",
+  "admin.perfHintsNone": "暂无需要关注的员工",
   /* 数字员工评测集 / 回归（管理员） */
   "admin.tabEval": "评测回归",
   "admin.evalRun": "▶ 跑全部",
