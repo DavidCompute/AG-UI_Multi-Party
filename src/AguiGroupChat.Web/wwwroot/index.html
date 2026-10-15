@@ -570,6 +570,20 @@
     </div>
   </div>
 
+  <!-- 模板市场·安装前预览：查看包内数字员工（含技能 / 知识库 / 记忆类型）再决定安装 -->
+  <div id="marketPreviewModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal pick-modal">
+      <div class="modal-title">🔍 <span id="marketPreviewName" data-i18n="market.previewTitle">包预览</span></div>
+      <p id="marketPreviewDesc" class="form-hint" style="margin:2px 0 4px"></p>
+      <div id="marketPreviewMeta" class="muted" style="font-size:12px;margin-bottom:8px"></div>
+      <div id="marketPreviewList" class="market-preview-list"></div>
+      <div class="modal-actions">
+        <button id="marketPreviewCancel" class="btn-ghost" data-i18n="common.cancel">取消</button>
+        <button id="marketPreviewInstall" class="send" data-i18n="market.install" disabled>安装</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 发布分包：把自建数字员工导出为可分发包 JSON（可托管到任意静态服务器作为目录） -->
   <div id="marketPublishModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">

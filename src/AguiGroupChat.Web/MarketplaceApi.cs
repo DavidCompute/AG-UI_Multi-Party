@@ -68,6 +68,55 @@ public static class MarketplaceApi
             return Results.Ok(new { builtin, remote = remoteSources });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
+        // ---- 安装前预览：返回某包的「数字员工清单」（内置直接给出；远程按需拉整包，不落库）----
+        root.MapGet("/preview", async (string? sourceId, string? packId, MarketplaceService market,
+            MarketplaceState state, MarketplaceRemoteService remote, CancellationToken ct) =>
+        {
+            var pid = (packId ?? "").Trim();
+            if (pid.Length == 0) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "packId 必填"));
+            var sid = (sourceId ?? "").Trim();
+
+            string name, description;
+            IReadOnlyList<AgentDefinition> agents;
+            if (sid.Length == 0)
+            {
+                var pack = market.Packs().FirstOrDefault(p => string.Equals(p.PackId, pid, StringComparison.Ordinal));
+                if (pack is null) return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "内置包不存在"));
+                name = pack.Name; description = pack.Description; agents = pack.Agents;
+            }
+            else
+            {
+                var src = state.Get(sid);
+                if (src is null || !src.Enabled)
+                    return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "目录源不存在或已停用"));
+                MarketplacePackDocument doc;
+                try { doc = await remote.FetchPackAsync(src, pid, ct); }
+                catch (AguiProtocolException ex) { return Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)); }
+                catch (Exception ex) { return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"预览失败：{ex.Message}")); }
+                name = doc.Name; description = doc.Description; agents = doc.Agents;
+            }
+
+            return Results.Ok(new
+            {
+                packId = pid,
+                name,
+                description,
+                agentCount = agents.Count,
+                remote = sid.Length > 0,
+                sourceId = sid.Length > 0 ? sid : null,
+                agents = agents.Select(a => new
+                {
+                    agentId = a.AgentId,
+                    a.Nickname,
+                    a.Description,
+                    skillCount = a.SkillDefIds?.Count ?? 0,
+                    memoryType = a.MemoryProfile?.MemoryType,
+                    triggerMode = a.TriggerMode.ToString().ToLowerInvariant(),
+                    knowledgeBaseCount = a.KnowledgeBaseIds?.Count ?? 0,
+                }).ToList(),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
         // ---- 一键导入内置包 ----
         root.MapPost("/import/{packId}", (string packId, HttpContext ctx, MarketplaceService market, ChangeHub changes) =>
         {

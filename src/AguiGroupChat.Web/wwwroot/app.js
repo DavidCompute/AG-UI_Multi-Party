@@ -7360,6 +7360,18 @@ function bindMarketConsole() {
   $("marketSrcAdd").onclick = addMarketSource;
   $("mpCancel").onclick = () => $("marketPublishModal").classList.add("hidden");
   $("mpGo").onclick = publishPack;
+  $("marketPreviewCancel").onclick = () => $("marketPreviewModal").classList.add("hidden");
+  $("marketPreviewInstall").onclick = async () => {
+    if (!marketPreviewCtx) return;
+    $("marketPreviewModal").classList.add("hidden");
+    await installMarketPack(marketPreviewCtx.sourceId, marketPreviewCtx.packId);
+  };
+  $("marketPreviewModal").addEventListener("click", (e) => { if (e.target === $("marketPreviewModal")) $("marketPreviewModal").classList.add("hidden"); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || $("marketPreviewModal").classList.contains("hidden")) return;
+    e.preventDefault(); e.stopPropagation();
+    $("marketPreviewModal").classList.add("hidden");
+  }, true);
   $("marketBuiltin").addEventListener("click", marketClick);
   $("marketRemote").addEventListener("click", marketClick);
   $("marketSrcRows").addEventListener("click", (e) => {
@@ -7371,7 +7383,10 @@ function bindMarketConsole() {
 function marketClick(e) {
   const b = e.target.closest("button[data-pack]");
   if (!b) return;
-  installMarketPack(b.dataset.source || "", b.dataset.pack);
+  const sourceId = b.dataset.source || "";
+  const packId = b.dataset.pack;
+  if (b.dataset.act === "preview") openMarketPreview(sourceId, packId);
+  else installMarketPack(sourceId, packId);
 }
 
 async function openMarketModal() {
@@ -7418,7 +7433,10 @@ function renderMarketSection(el, sourceId, packs) {
       <div class="market-pack-desc">${escapeHtml(p.description || "")}</div>
       <div class="market-pack-meta">${t("market.agentCount", { n: p.agentCount || 0 })}${p.remote && p.sourceName ? " · " + escapeHtml(p.sourceName) : ""}</div>
     </div>
-    <button class="chip-btn" data-pack="${escapeHtml(p.packId)}" data-source="${escapeHtml(sourceId)}" type="button">${t("market.install")}</button>
+    <div class="market-pack-actions">
+      <button class="chip-btn" data-act="preview" data-pack="${escapeHtml(p.packId)}" data-source="${escapeHtml(sourceId)}" type="button">${t("market.preview")}</button>
+      <button class="chip-btn" data-act="install" data-pack="${escapeHtml(p.packId)}" data-source="${escapeHtml(sourceId)}" type="button">${t("market.install")}</button>
+    </div>
   </div>`).join("");
 }
 
@@ -7434,6 +7452,50 @@ async function installMarketPack(sourceId, packId) {
     toast(t("market.installed", { name: d.packName || packId, n: d.agentsCreated || 0 }));
     if (typeof loadAgents === "function") loadAgents();
   } catch (ex) { toast(ex.message); }
+}
+
+/** 安装前预览：拉取包内数字员工清单（内置 / 远程同一接口），在弹窗中展示（不落库）。 */
+let marketPreviewCtx = null;
+async function openMarketPreview(sourceId, packId) {
+  marketPreviewCtx = { sourceId: sourceId || "", packId };
+  $("marketPreviewModal").classList.remove("hidden");
+  $("marketPreviewName").textContent = t("admin.loading");
+  $("marketPreviewDesc").textContent = "";
+  $("marketPreviewMeta").textContent = "";
+  $("marketPreviewList").innerHTML = "";
+  $("marketPreviewInstall").disabled = true;
+  try {
+    const qs = `packId=${encodeURIComponent(packId)}` + (sourceId ? `&sourceId=${encodeURIComponent(sourceId)}` : "");
+    const res = await fetch(`/ag-ui/marketplace/preview?${qs}`, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { previewFail(errMsg(d, "HTTP " + res.status)); return; }
+    renderMarketPreview(d);
+    $("marketPreviewInstall").disabled = false;
+  } catch (ex) { previewFail(ex.message); }
+}
+function previewFail(err) {
+  $("marketPreviewName").textContent = t("market.previewTitle");
+  $("marketPreviewList").innerHTML = `<div class="muted" style="padding:12px;font-size:13px">${escapeHtml(t("market.previewFail", { err }))}</div>`;
+}
+function renderMarketPreview(d) {
+  $("marketPreviewName").textContent = d.name || t("market.previewTitle");
+  $("marketPreviewDesc").textContent = d.description || "";
+  $("marketPreviewMeta").textContent = t("market.previewMeta", { n: d.agentCount || 0 });
+  const list = $("marketPreviewList");
+  const agents = d.agents || [];
+  if (!agents.length) { list.innerHTML = `<div class="muted" style="padding:12px;font-size:13px">${escapeHtml(t("market.previewEmpty"))}</div>`; return; }
+  list.innerHTML = agents.map((a) => {
+    const bits = [];
+    if (a.skillCount) bits.push(t("market.previewSkills", { n: a.skillCount }));
+    if (a.knowledgeBaseCount) bits.push(t("market.previewKb", { n: a.knowledgeBaseCount }));
+    if (a.memoryType) { const lbl = t("agent.form.memoryType." + a.memoryType); if (lbl && !/^agent\./.test(lbl)) bits.push("🧠 " + lbl); }
+    return `<div class="market-preview-row">`
+      + `<div class="market-preview-head"><span class="skill-kind tag-agent">AI</span>`
+      + `<b>${escapeHtml(a.nickname || a.agentId || "")}</b> <code>${escapeHtml(a.agentId || "")}</code></div>`
+      + (a.description ? `<div class="market-preview-desc">${escapeHtml(a.description)}</div>` : "")
+      + (bits.length ? `<div class="market-preview-bits">${escapeHtml(bits.join(" · "))}</div>` : "")
+      + `</div>`;
+  }).join("");
 }
 
 async function loadMarketSources() {

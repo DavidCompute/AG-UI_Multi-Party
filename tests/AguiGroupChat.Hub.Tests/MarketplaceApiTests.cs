@@ -178,6 +178,40 @@ public sealed class MarketplaceApiTests : IClassFixture<MarketplaceApiServerFixt
     }
 
     [Fact]
+    public async Task Preview_BuiltinAndRemote_AndValidation()
+    {
+        var admin = await TokenAsync("mp_admin");
+        await AddSourceAsync(admin, _fx.StationBase + "/catalog.json");
+
+        using var list = Authed(HttpMethod.Get, "/ag-ui/marketplace", admin);
+        var agg = await (await _client.SendAsync(list)).Content.ReadFromJsonAsync<JsonElement>();
+
+        // 1) 内置包预览
+        var builtinId = agg.GetProperty("builtin").EnumerateArray().First().GetProperty("packId").GetString()!;
+        using var bReq = Authed(HttpMethod.Get, $"/ag-ui/marketplace/preview?packId={builtinId}", admin);
+        var bRes = await _client.SendAsync(bReq);
+        Assert.Equal(HttpStatusCode.OK, bRes.StatusCode);
+        var bDoc = await bRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(bDoc.GetProperty("remote").GetBoolean());
+        Assert.True(bDoc.GetProperty("agents").GetArrayLength() > 0);
+
+        // 2) 远程包预览（demo 有 2 个数字员工；预览不落库）
+        var remote = agg.GetProperty("remote").EnumerateArray().First(r => r.GetProperty("ok").GetBoolean());
+        var sourceId = remote.GetProperty("sourceId").GetString()!;
+        using var rReq = Authed(HttpMethod.Get, $"/ag-ui/marketplace/preview?packId=demo&sourceId={sourceId}", admin);
+        var rRes = await _client.SendAsync(rReq);
+        Assert.Equal(HttpStatusCode.OK, rRes.StatusCode);
+        var rDoc = await rRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(rDoc.GetProperty("remote").GetBoolean());
+        Assert.Equal(2, rDoc.GetProperty("agentCount").GetInt32());
+        Assert.Equal("mp_lead", rDoc.GetProperty("agents").EnumerateArray().First().GetProperty("agentId").GetString());
+
+        // 3) packId 必填
+        using var bad = Authed(HttpMethod.Get, "/ag-ui/marketplace/preview", admin);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(bad)).StatusCode);
+    }
+
+    [Fact]
     public async Task BadSource_DoesNotBreakAggregate()
     {
         var admin = await TokenAsync("mp_admin");

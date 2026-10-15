@@ -1143,6 +1143,7 @@ PUT /ag-ui/user/profile
 |接口|路径|说明|
 |---|---|---|
 |市场目录|`GET /ag-ui/marketplace`|可选角色 / 技能包目录（行业角色包，复用 `agents-starter` 打包结构，需登录）|
+|安装前预览|`GET /ag-ui/marketplace/preview?packId=&sourceId=`|列出包内数字员工（昵称 / `agentId` / 描述 / 技能数 / 知识库数 / 记忆类型）；`sourceId` 空 = 内置包；**不落库**|
 |一键导入|`POST /ag-ui/marketplace/import/{packId}`|把市场包导入为当前用户智能体（agentId 冲突自动改 ID 不覆盖）|
 
 **桥接健康度与能力（3.1 / 3.2，仅管理员）**：

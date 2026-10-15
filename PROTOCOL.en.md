@@ -1136,6 +1136,7 @@ The following are all Hub extension management-type APIs, expanding the capabili
 |API|Path|Description|
 |---|---|---|
 |Marketplace catalog|`GET /ag-ui/marketplace`|Optional role / skill pack catalog（industry role packs，reusing the `agents-starter` packaging structure，login required）|
+|Pre-install preview|`GET /ag-ui/marketplace/preview?packId=&sourceId=`|Lists the pack's agents (nickname / `agentId` / description / skill count / knowledge-base count / memory type); empty `sourceId` = built-in; **writes nothing**|
 |One-click import|`POST /ag-ui/marketplace/import/{packId}`|Imports a marketplace pack as an agent of the current user（on agentId conflict the ID is auto-renamed without overwriting）|
 
 **Bridge health and capabilities (3.1 / 3.2，admins only)**：

@@ -2499,6 +2499,12 @@ button { white-space: nowrap; }
 .market-pack-name { font-weight: 600; }
 .market-pack-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .market-pack-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.market-pack-actions { display: flex; gap: 6px; flex: none; }
+.market-preview-list { max-height: 52vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.market-preview-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.market-preview-head { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; }
+.market-preview-desc { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.market-preview-bits { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
 
 /* ================= 可观测性看板 ================= */
 .admin-dash-controls { display: flex; align-items: center; gap: 8px; margin: 10px 0 6px; }

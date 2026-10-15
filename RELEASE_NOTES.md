@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.238 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.238 Release Notes (current Windows desktop release)
+
+**版本说明**：**模板市场新增「安装前预览」**——安装前先看清包内数字员工（昵称 / 描述 / 技能数 / 知识库数 / 记忆类型），预览本身不落库。
+**Version note**: **The template marketplace gains a pre-install preview** — inspect a pack's agents (nickname / description / skill count / knowledge-base count / memory type) before installing; the preview itself writes nothing.
+
+## 变更
+# Changes
+
+中文：
+- **服务端** `GET /ag-ui/marketplace/preview?packId=&sourceId=`：内置包从 `MarketplaceService.Packs()` 直取；远程包经 `MarketplaceRemoteService.FetchPackAsync` 按需拉取（同样受 http/https、2MB、10s、不开重定向防护）；`sourceId` 空 = 内置；只回清单、**不落库**。
+- **前端**：每个包旁新增「预览」按钮 → `#marketPreviewModal` 列出数字员工（`AI` 标签 + 昵称 + `agentId` + 描述 + `技能 n · 知识库 n · 🧠 记忆类型`）；弹窗内可直接「安装」。Esc / 取消 / 点遮罩关闭。
+- i18n 新增 `market.preview` / `previewTitle` / `previewMeta` / `previewEmpty` / `previewFail` / `previewSkills` / `previewKb`。
+English:
+- **Server** `GET /ag-ui/marketplace/preview?packId=&sourceId=`: built-in packs are taken directly from `MarketplaceService.Packs()`; remote packs are fetched on demand via `MarketplaceRemoteService.FetchPackAsync` (same http/https, 2MB, 10s, no-redirect guards); empty `sourceId` = built-in; returns a listing only, **never writes**.
+- **Front end**: a "Preview" button per pack → `#marketPreviewModal` lists the agents (`AI` tag + nickname + `agentId` + description + `Skills n · Knowledge n · 🧠 memory type`); "Install" is available right in the dialog. Esc / Cancel / overlay click closes it.
+- New i18n keys `market.preview` / `previewTitle` / `previewMeta` / `previewEmpty` / `previewFail` / `previewSkills` / `previewKb`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.12（新增「安装前预览」与接口）；`README.md` 市场条目；协议 `AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md` §5.9 表格。
+English: `docs/user-guide.md` / `en.md` §3.12 (the new "pre-install preview" and the endpoint); `README.md` marketplace entry; the protocol `AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md` §5.9 table.
+
+## 测试
+# Tests
+
+中文：`MarketplaceApiTests` 新增 `Preview_BuiltinAndRemote_AndValidation`（内置预览 200 且含 agent / 远程预览 200 且 2 个 agent、首个 `agentId=mp_lead` / 缺 `packId` 400），合跑 **4/4**。浏览器实测（重建 web 后）：管理员登录 → 开市场 → 内置 3 个包均有「预览」；点首个 → 弹窗标题「法务协作包」、元信息「2 个数字员工…」、列出 2 行、「安装」可用；**开市场与预览期间零控制台报错**（登录阶段的预存噪声与本次无关）。`node --check`、i18n 审计 **zh=en=1851，missing 0**、`check-orphan-keys`、`dotnet build` 0 错误均过；重建 web 后健康 200。
+English: `MarketplaceApiTests` gains `Preview_BuiltinAndRemote_AndValidation` (built-in preview 200 with agents / remote preview 200 with 2 agents, first `agentId=mp_lead` / missing `packId` 400), **4/4**. Browser-verified (after rebuilding web): admin login → open market → all 3 built-in packs show "Preview"; clicking the first → dialog title "法务协作包", meta "2 个数字员工…", 2 rows, "Install" enabled; **zero console errors while opening the market and previewing** (login-phase noise is unrelated). `node --check`, the i18n audit **zh=en=1851, missing 0**, `check-orphan-keys` and `dotnet build` 0 errors all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.237 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.237 Release Notes (current Windows desktop release)
 
