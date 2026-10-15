@@ -64,7 +64,6 @@ window.I18N_DICTS.zh = {
   "menu.voice": "语音服务",
   "menu.memory": "记忆管理",
   "menu.branding": "白标设置",
-  "menu.tasks": "任务中心",
   "menu.backup": "数据备份",
   "menu.logout": "退出登录",
 
@@ -1165,7 +1164,6 @@ window.I18N_DICTS.zh = {
   "docPreview.missing": "附件不存在或已删除",
   "docPreview.denied": "无权访问该附件",
   "docPreview.failed": "文档转换失败：{err}",
-  "docPreview.openFailed": "无法加载预览：{err}",
   "msg.truncated": "⚠️ 内容过长已截断（仅保留前 2MB）",
   "msg.startTopic": "以此消息新建话题",
   "msg.stopGenerating": "停止生成",

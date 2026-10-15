@@ -238,7 +238,7 @@
 | 用户名 | `#authUsername`（`maxlength=32`，placeholder key `auth.username`） | 文案「用户名（≥3 字符）」 |
 | 密码 | `#authPassword`（`type=password`，placeholder key `auth.password`） | 文案「密码（≥6 位）」 |
 | 昵称 | `#authNickname`（`maxlength=20`，placeholder key `auth.nickname`） | 文案「昵称（可选，默认取用户名）」；**仅在注册页签可见**，登录时隐藏 |
-| 保持登录 | `#authRemember`（checkbox，文案 key `auth.remember`） | 「保持登录状态（下次访问无需再次登录，退出登录后失效）」——**实际为无效项，见下** |
+| 保持登录 | `#authRemember`（checkbox，文案 key `auth.remember`） | 「保持登录状态（下次访问无需再次登录，退出登录后失效）」——**控制会话是否写入 `localStorage`（跨浏览器重启保持），默认勾选，见 §1.1.5** |
 | 提交按钮 | `#authSubmit`（class `send auth-submit`，文案 key `auth.submit`） | 登录页显示「登录」 |
 | 错误提示 | `#authError` | |
 
@@ -267,16 +267,18 @@
 
 #### 1.1.5 「保持登录状态」的实际机制（重要）
 
-页面上的 `#authRemember` 复选框在当前版本是一个**纯展示项**：全项目 JS 中没有任何代码读取它的勾选状态（在 `app.js`、`i18n/*.js` 中检索 `authRemember`，除 `index.html` 的标记与 `auth.remember` 文案外无其他引用）。
+页面上的 `#authRemember` 复选框**控制会话的持久化范围**（1.0.230 起生效）：
 
-实际持久化由 `app.js` 的会话存取函数完成：
+- **勾选**（HTML 默认 `checked`）：登录后会话写入 `localStorage["agui.auth"]`，**关闭浏览器再打开仍保持登录**（跨重启）。
+- **未勾选**：仅写 `sessionStorage["agui.auth"]`，并清除 `localStorage` 中可能残留的持久会话；**关闭标签页 / 浏览器即失效**，需重新登录。
 
-- `AUTH_KEY = "agui.auth"`（`app.js` L263）。
-- `storeAuth()`（`app.js` L269–272）**无条件**同时写入 `sessionStorage["agui.auth"]` 与 `localStorage["agui.auth"]`。
-- `readAuth()`（L275–283）优先读 `sessionStorage`，其次读 `localStorage`。
-- `clearAuth()`（L285）同时清除两处；`logout()`（L466 起）调用 `clearAuth()`。
+实现要点：
 
-因此：**登录后刷新 / 关闭再打开页面都会自动恢复会话，无需重新登录**；只有主动「退出登录」（或令牌在服务端失效、被 401 拒绝时）才会清除登录态。复选框是否勾选不影响该行为。
+- `AUTH_KEY = "agui.auth"`；`authPersist` 记录当前是否持久化（启动时按已有 `localStorage` 会话推断，登录时按复选框设定）。
+- `storeAuth()`：**始终**写 `sessionStorage`；`authPersist` 为真时写 `localStorage`，否则移除其中的会话。
+- `readAuth()` 优先读 `sessionStorage`，其次 `localStorage`；`clearAuth()` / `logout()` 清除两处。
+
+因此：刷新页面总会自动恢复本标签页会话；只有勾选「保持登录状态」时，关闭浏览器后再次访问才会免登录。主动「退出登录」（或令牌被服务端 401 拒绝）仍会清除登录态。
 
 #### 1.1.6 首次进入未配置模型时的引导
 
@@ -573,26 +575,22 @@
 
 以下条目均已在源码中核实，供后续合并 / 校订 `docs/user-guide.md` 时参考。**以代码为准。**
 
-1. **帮助面板 `help.s11` / `help.s12` 两个分组的条目在 HTML 中没有内联文本。**
-   `index.html` L1395–1398（`help.s11.1`–`help.s11.4`）与 L1404–1407（`help.s12.1`–`help.s12.4`）的 `<li data-i18n-html="...">` 元素**标签内为空**。但是：
-   - i18n 运行时会处理 `[data-i18n-html]` 属性，用字典值设置 `innerHTML`（`i18n/i18n.js` L67–69）；
-   - `zh.js` 与 `en.js` 中 `help.s11.1`–`help.s11.4`、`help.s12.1`–`help.s12.4` **均有非空内容**（见 `zh.js` L1015 起、`en.js` L1018 起）。
+1. **【已修复 1.0.230】帮助面板 `help.s11` / `help.s12` 两个分组的 `<li>` 原缺内联兜底文本，现已补齐。**
+   这两组的 `<li data-i18n-html="help.s11.*">` / `help.s12.*` 内容本就由 i18n 在运行时经 `[data-i18n-html]` 注入（`i18n/i18n.js`），`zh.js` 与 `en.js` 中两类 key 均有非空内容，因此**不能说这两组「内容为空」**。潜在影响仅是：若 `i18n.js` 与字典加载失败，这两节（区别于其它节）会显示为空。1.0.230 已在 `index.html` 给这两组 `<li>` 补回内联兜底文案，与其余分组一致。
 
-   因此**不能说这两个分组「内容为空」**——它们的内容由 i18n 在运行时注入。准确表述是：这两个分组的 `<li>` **没有内联兜底文本**（其余分组都带内联 HTML 兜底）。潜在影响：只有当 `i18n.js` 与字典加载成功时，这两节才显示内容；若 i18n 资源加载失败，这两节（区别于其它节）会显示为空。两节的 `<h4>` 标题本身仍有内联兜底文案。看起来是在更新 i18n 时把 `<li>` 正文一并清掉、未恢复内联文本所致。
+2. **【已修复 1.0.230】登录页的「保持登录状态」复选框（`#authRemember`）此前不起作用，现已生效。**
+   现 `storeAuth()` 按该复选框决定持久化范围：**勾选**（HTML 默认 `checked`）→ 会话写入 `localStorage`（关浏览器仍在）；**未勾选** → 仅写 `sessionStorage`（关闭标签页 / 浏览器即失效），并显式清除 `localStorage` 中可能残留的上一次持久会话。刷新页面时按已有持久会话推断默认值（`authPersist`）；登出 / 服务端 401 仍由 `clearAuth()` 清空两处。
 
-2. **登录页的「保持登录状态」复选框（`#authRemember`）实际上不起作用。**
-   全项目 JS 中没有读取该复选框状态的代码；`storeAuth()` 无条件同时写入 `sessionStorage` 与 `localStorage`（`app.js` L269–272），只在「退出登录」或服务端 401 时才清除。因此无论是否勾选，行为一致：登录后下次访问自动恢复会话。`docs/ui-design.md` 若将该复选框列为有效功能，属文档与实现不符。
-
-3. **账户菜单 `menu.tasks`「任务中心」的 i18n 键存在，但无对应界面元素。**
-   `zh.js`（L64 起）与 `en.js` 均定义了 `menu.tasks`，但 `index.html` 的 `#meMenu` 中**没有** `#meMenuTasks` 之类的元素。账户菜单实际只有 9 项（见 1.7）。文档不应把「任务中心」列为菜单项。
+3. **【已修复 1.0.230】账户菜单的孤儿键 `menu.tasks`「任务中心」已移除。**
+   该键此前在 `zh.js` / `en.js` 定义但 `index.html` / `app.js` 均无引用（无对应菜单元素）。1.0.230 已从两份字典删除该孤儿键；账户菜单仍为上表的 9 项（见 1.7）。
 
 4. **注册无邮箱字段。**
    登录 / 注册表单与 `AuthService.Register` 均不涉及邮箱。若既有文档提到注册需要邮箱，属偏差。
 
-5. **`applyAccentFromHex` 内局部变量命名易误导（细节）。**
-   该函数中 `const light = document.documentElement.dataset.theme !== "light";` 实际表示的是「**深色**模式」（`light === true` 对应深色），与字面「light = 浅色」相反。仅在精确描述主色派生逻辑时才需注意，属实现细节，建议后续重命名消除歧义。
+5. **【已修复 1.0.230】`applyAccentFromHex` 内局部变量 `light` 已重命名为 `isDark`。**
+   原 `const light = document.documentElement.dataset.theme !== "light";` 实际表示「**深色**模式」（值 `true` 对应深色），与字面「light = 浅色」相反；1.0.230 已重命名为 `isDark` 消除歧义，逻辑不变。
 
-> 待上级复核的不确定点：`docs/ui-design.md` 等既有文档中关于登录页复选框、账户菜单、帮助分组的描述，需要与上述代码事实对齐后再统一。
+> 待上级复核的不确定点：`docs/ui-design.md` 等既有文档中关于登录页复选框、账户菜单、帮助分组的描述，需与上述已修复后的代码事实对齐后再统一（`docs/ui-design.md` §1.4 早已按「勾选写 `localStorage`、否则 `sessionStorage`」描述该复选框，1.0.230 实现后二者已一致）。
 
 ## 第 2 章 知聚与消息
 
@@ -1570,8 +1568,8 @@
 ---
 
 > 需复核点（建议后续人工确认）：
-> 1. `subAgentCandidates` 中排除条件 `x.agentId !== "agent_" + editingAgentId` 的意图（代码中未注释，疑似历史兼容逻辑）。
-> 2. `AgentCatalog.Create` 中「挂 `org_design` 即自动挂 `org_commit`/`org_plan_draft`」的判定以 `SkillDefIds.Contains("org_design")` 为准；若用户自建同名技能是否会误触发，建议在组织角色章节明确。
+> 1. **【已澄清 1.0.230】**`subAgentCandidates` 中排除条件 `x.agentId !== "agent_" + editingAgentId`：已加注释说明——用于排除旧数据里「为某数字员工另存的同源副本」（`agent_<自身 id>`），避免当作外部候选重复挂载；正常目录 id 不会命中。
+> 2. **【已加固 1.0.230】**`AgentCatalog.Create` 中「挂 `org_design` 即自动挂 `org_commit`/`org_plan_draft`」的判定：在原有 `SkillDefIds.Contains("org_design")` 之外**追加「该技能是系统技能（`OwnerId` 为空）」**的条件（`IsSystemOrgDesignSkill`），用户自建同名技能不再误触发（且 `org_commit` 本身在运行期强制校验管理员权限）。
 > 3. 组织架构坐标持久化按 `memberId` 区分；匿名/未登录访问组织架构的行为（本入口已要求登录）以实际运行验证为准。
 
 ### 3.12 模板市场（在线分发）
@@ -1669,7 +1667,7 @@
 | `xlsx_book` | 表格生成（Excel） | 工作簿生成 + 既有 xlsx 结构分析 | `xlsx_book.skill.txt` | 2026-09-15.2 |
 | `pdf_doc` | PDF 文档生成 | 打印级 PDF（报告/方案/简历…），或 Markdown/文本重排 | `pdf_doc.skill.txt` | 2026-09-18.2 |
 
-> 版本常量：`BuiltinDocxSkills.Version`、`BuiltinPdfSkills.Version` = `2026-09-18.2`；`BuiltinXlsxSkills.Version` = `2026-09-15.2`（`BuiltinPptxSkills` 版本常量见其源码，与同批次一致）。正文维护源在 `tools/*-skills/`，`.skill.txt` 是同步产物。
+> 版本常量：`BuiltinDocxSkills.Version`、`BuiltinPdfSkills.Version` = `2026-09-18.2`；`BuiltinXlsxSkills.Version` = `2026-09-15.2`；`BuiltinPptxSkills.Version` = `2026-09-22.2`。正文维护源在 `tools/*-skills/`，`.skill.txt` 是同步产物。
 
 #### 4.2.1 docx 三支
 
@@ -2187,7 +2185,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 
 ### 4.11 需复核点（代码中未完全确认）
 
-- `BuiltinPptxSkills.Version` 的具体字符串（本章其余内置版本已核实；该项未逐字读取，写为「与同批次一致」）。
+- **【已核实 1.0.230】**`BuiltinPptxSkills.Version` = `2026-09-22.2`（见 §4.2）。
 - 内置技能正文（`*.skill.txt`）里的**完整**字段集与校验细节（本章依据的是 `Builtin*Skills.cs` 的 `Description` 与 `skill.txt` 首部注释；更细的边界行为需直接读正文）。
 - 本机桥静态连接（模式 B）下，来源锁从 `--config` 的 `SERVER` 推导的具体时机（`LoadAllowedOrigin`）未逐行验证。
 
@@ -3031,11 +3029,11 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 
 以**代码为准**核对既有 `docs/memory-personality.md`，发现如下偏差 / 需复核点：
 
-1. **`TopK` 默认值**：`docs/memory-personality.md` §1 写「`TopK=5`」为全局默认；**代码默认 `MemoryOptions.TopK = 6`**（`AgentOptions.cs`）。`5` 是**桌面版** `appsettings.json` 的覆盖值；Docker compose 环境变量默认也是 `6`。文档把桌面覆盖值当成了平台默认。
-2. **`PersonalTopK` 举例值**：该文档 §3 的换算示例使用 `PersonalTopK=4`；代码默认 `PersonalTopK = 0`（个人记忆程序性关闭），桌面 / Docker 默认均为 `3`。`4` 既非代码默认也非桌面默认，属示例性取值，易被误读为默认。
-3. **i18n 前缀**：`memType.*` **不存在**。真实前缀是 **`agent.form.memoryType.*`**（另有菜单 / 界面文案 `menu.memory`、`memory.*`）。凡引用 `memType.*` 的说明均应以 `agent.form.memoryType.*` 为准。
+1. **【已修复 1.0.230】`TopK` 默认值**：`docs/memory-personality.md` §1 已改为「`TopK=6`（代码默认）；桌面版 `appsettings.json` 覆盖为 5，Docker 默认 6」。**代码默认 `MemoryOptions.TopK = 6`**（`AgentOptions.cs`）。
+2. **【已修复 1.0.230】`PersonalTopK` 举例值**：该文档 §3 换算示例已改为基准 `PersonalTopK=0`（代码默认，个人记忆程序性关闭；桌面 / Docker 默认 `3`），并按 `TopK=6` 基准重算了广记型 / 深记型 / 存得住想不起型的条数。
+3. **i18n 前缀**：`memType.*` **不存在**。真实前缀是 **`agent.form.memoryType.*`**（另有菜单 / 界面文案 `menu.memory`、`memory.*`）。**已核实** `docs/memory-personality.md` 未引用 `memType.*`，无需修订；后续引用按 `agent.form.memoryType.*` 为准。
 4. **管理员可见性（「看不到任何信息」）**：当前代码（`MemoryGovernance.IsGlobalManager` = `auth.IsAdmin`）对 `GET /ag-ui/memory/groups` 与 `GET /ag-ui/memory` 均对平台管理员**全局放行**，**不存在**把管理员挡住的 scope 过滤；列表项 `canManage` 也据此放行。代码中唯一让所有人（含管理员）都看不到内容的路径是**语义记忆未真正启用**（`Enabled=false` 或存储模式非 postgres/sqlite → `IMessageMemory` 为 `null` 占位，`GroupStats()` / `ListMessages()` 返回空）。故「管理员看不到信息」若复现，应查 `Agents:Memory:Enabled` 与 `Storage:Provider`，而非记忆管理权限。
-5. **组织配型措辞**：该文档 §4.4 写「重复套路岗为 `slowToLearn`」；代码启发式规则表中的 `slowToLearn` 关键词为「培训 / 带教 / 教练 / 教学 / 训练 / 新人 / coach / trainer / mentor」（即培训带教类岗位），口径略有出入，以代码关键词表为准。
+5. **【已修复 1.0.230】组织配型措辞**：该文档 §4.4 已把「重复套路岗为 `slowToLearn`」改为「需反复培训带教才上手的岗位」，并列出代码启发式关键词表「培训 / 带教 / 教练 / 教学 / 训练 / 新人 / coach / trainer / mentor」。
 6. **`Scope` 默认**：代码默认 `Scope="agent"`（检索该智能体所在的所有群），与文档一致；三项取值 `agent` / `group` / `all` 与 store 实现一致。
 7. **需复核点（代码中未找到依据 / 需人工确认）**：
    - 图谱节点 / 边的可视化界面 —— **已提供**（1.0.196：记忆管理弹窗「🕸 图谱」视图 + 新增 `GET /ag-ui/memory/graph`，见 §6.7.2）。
@@ -3509,9 +3507,9 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 
 以下结论**无法完全由本仓库代码直接证实**或**无测试覆盖**，列出以便复核：
 
-1. **`?play=1` 返回 400**：`play` 声明为 `bool?`（`AttachmentApi.cs:81`），前端只用 `?play=true`；`?play=1` 的行为取决于 ASP.NET Core 查询布尔绑定走 `bool.TryParse`（不认 `1`）——此为**框架行为推断**，`tests/AguiGroupChat.Hub.Tests/DocPreviewTests.cs` 未见针对 `play=1` 的用例。
+1. **【已由测试覆盖 1.0.230】`?play=1` 返回 400**：`play` 声明为 `bool?`（`AttachmentApi.cs`），前端只用 `?play=true`；`?play=1` 因 ASP.NET Core 查询布尔绑定走 `bool.TryParse`（不认 `1`）而返回 400。已新增用例 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` 固化该行为。
 2. **`/ag-ui/preview/{id}/play` 无独立端点测试**：`DocPreviewTests.cs` 覆盖了 `/preview` 与 `/notes`，但清单端点 `/play` 未在其中的断言搜索到（`PresentationPlaybackTests` 只测 `TryBuild` 结构）。其端到端行为建议以手动 E2E 复核。
-3. **i18n 键 `docPreview.openFailed`（无法加载预览：{err}）**：在 `zh.js` / `en.js` 有定义，但 `app.js` 未检索到引用（`docPreviewErrorText` 用的是 `docPreview.failed`）——疑似未使用的残留键。
+3. **【已清理 1.0.230】i18n 键 `docPreview.openFailed`（无法加载预览：{err}）**：该键此前在 `zh.js` / `en.js` 定义但 `app.js` 无引用（`docPreviewErrorText` 用的是 `docPreview.failed`）——1.0.230 已从两份字典删除该残留键。
 4. **播放 PDF 的浏览器缓存**：`/preview` 与 `?play=true` 均设 `Cache-Control: private, max-age=300`，浏览器可能缓存 5 分钟；若源文件在 5 分钟内被替换（附件 ID 不变），前端可能命中旧缓存（此为从响应头推断的行为，未见专门处理 / 测试）。
 5. **桌面版 PPT 播放的端到端验证**：代码路径上桌面版与 Web 版共用前端，但未见针对桌面版 WebView2 内播放的自动化测试（渲染层验证在 `docs/ui-design.md` 记为手动 E2E）。
 

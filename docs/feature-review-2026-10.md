@@ -1,6 +1,6 @@
 # 近期新增功能评审记录（2026-10）
 
-> 范围：**1.0.220 → 1.0.229** 期间新增/改动的「运营闭环」相关代码与文档。
+> 范围：**1.0.220 → 1.0.231** 期间新增/改动的「运营闭环」相关代码与文档，以及随之进行的**「实现—文档偏差」清单清理**。
 > 目的：留下一份可追溯的评审结论（审了什么、发现了什么、怎么修的、还差什么），供后续维护与上线前复核。
 > 评审方式：逐文件读代码 + 针对新面补回归用例 + 运行栈实测；结论以「代码为实证」，未验证处**如实标注**。
 
@@ -18,6 +18,8 @@
 | 1.0.227 | **评测期望交付格式**（`expectDeliverable`） | `Agents/{EvalCase,AgentEvalRunner}.cs`、`Web/EvalApi.cs` |
 | 1.0.228 | **绩效反哺编排**（`Agents:PerformanceFeedback`，默认关） | `Agents/{AgentOptions,AgentGateway,PerformanceRoutingHint}.cs` |
 | 1.0.229 | **本轮评审修复**（见下） | `Agents/{AgentCatalog,AgentGateway,PerformanceRoutingHint}.cs` |
+| 1.0.230 | **偏差清理 A 组**（管理员控制台可见性：用户搜索 / 桥接能力协商 / 立即探测 / 只读快照 / 配置键补齐；修 `?refresh=1`→`?refresh=true`） | `wwwroot/{index.html,app.js,i18n/*.js}` |
+| 1.0.231 | **偏差清理 B 组**（见下） | `wwwroot/{index.html,app.js,i18n/*.js}`、`Agents/AgentCatalog.cs`、`tests/**` |
 
 ## 二、发现并修复的缺陷（1.0.229）
 
@@ -66,3 +68,28 @@
 ---
 
 > 结论：本轮运营闭环（**绩效 → 成本/预算 → 关注/建议 → 组织体检报告 → 反哺编排**）已闭合；两处缺陷已修并留回归；未验证项已在上面如实标注。
+
+## 七、偏差清理（1.0.230 / 1.0.231）
+
+在两轮评审之后，逐章清理了 `docs/user-guide.md` / `en.md` 各章「实现与文档的偏差 / 需复核点」里**可关闭**的剩余项。
+
+### 7.1 A 组（1.0.230）· 管理员控制台可见性
+- 管理员用户列表加搜索（`renderAdminUsers`/`adminUserRow`）；桥接能力协商接入前端（`loadBridgeCaps`）+ 「立即探测」（`#bridgeProbeBtn`）；只读参数快照（`#cfgSnapshotBtn`/`loadConfigSnapshot`）；配置治理补 `messageWriteDebounceMs`（UI 键 12 → 13）。
+- **修真实缺陷**：`GET /ag-ui/admin/bridge-health|bridge-capabilities` 的 `refresh` 为 `bool?`，**传 `1` 会 400**；前端与文档统一为 `?refresh=true`。
+
+### 7.2 B 组（1.0.231）· 跨章「需复核点」收尾
+- **`#authRemember` 生效**（第 1 章）：`storeAuth()` 按复选框决定写 `localStorage`（勾选，默认）还是仅 `sessionStorage`（未勾选）。
+- **帮助面板 `help.s11`/`help.s12` 补内联兜底**（第 1 章）。
+- **移除两处孤儿 i18n 键**：`menu.tasks`、`docPreview.openFailed`（第 1、7 章）。
+- **`applyAccentFromHex` 变量 `light` → `isDark`**（第 1 章）。
+- **`subAgentCandidates` 排除条件加注释**、**组织落库工具挂载口径收紧**（`IsSystemOrgDesignSkill`，第 3 章）。
+- **`BuiltinPptxSkills.Version` 核实为 `2026-09-22.2`**（第 4 章）；**`docs/memory-personality.md` 的 `TopK` / `PersonalTopK` / 组织配型措辞校正**（第 5、6 章）；**新增 `?play=1` → 400 回归用例**（第 7 章）。
+
+### 7.3 验证（1.0.230 / 1.0.231）
+- i18n 审计 **zh=en=1822，missing 0**；`node --check` / `check-i18n-keys` / `check-orphan-keys` 全过；`dotnet build` 0 错误。
+- `DocPreviewApiTests` **17/17**（含新增 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400`）；Playwright + curl 实测 A 组各页无 JS 报错、端点 200。
+
+### 7.4 仍未关闭项（如实标注）
+- 第 7 章 §7.15-2：`/ag-ui/preview/{id}/play` 清单端点**仍无独立端点测试**（仅 `PresentationPlaybackTests.TryBuild` 结构测试），待补。
+- 第 7 章 §7.15-4/5：播放 PDF 浏览器缓存、桌面版 WebView2 内播放的端到端，仍属**推断 / 手动 E2E**。
+- 第 5 章 §5.13、第 9 章 §9.10 的部署相关口径（`MinScore` 实配值、`SnapshotSigningKey` 配置键口径等）为**部署相关**，未在代码层面化。

@@ -238,7 +238,7 @@ The login card (`.auth-card`) contains, from top to bottom:
 | Username | `#authUsername` (`maxlength=32`, placeholder key `auth.username`) | Label "Username (≥3 chars)" |
 | Password | `#authPassword` (`type=password`, placeholder key `auth.password`) | Label "Password (≥6 chars)" |
 | Nickname | `#authNickname` (`maxlength=20`, placeholder key `auth.nickname`) | Label "Nickname (optional, defaults to username)"; **visible only on the Sign Up tab**, hidden when logging in |
-| Keep me signed in | `#authRemember` (checkbox, label key `auth.remember`) | "Keep me signed in on this device" — **actually a no-op, see below** |
+| Keep me signed in | `#authRemember` (checkbox, label key `auth.remember`) | "Keep me signed in on this device" — **controls whether the session is written to `localStorage` (persists across browser restarts), checked by default; see §1.1.5** |
 | Submit button | `#authSubmit` (class `send auth-submit`, label key `auth.submit`) | Shows "Log In" on the login page |
 | Error message | `#authError` | |
 
@@ -267,16 +267,18 @@ The system has built-in "bootstrap" logic: **the first account to register succe
 
 #### 1.1.5 The actual mechanism behind "Keep me signed in" (important)
 
-The `#authRemember` checkbox on the page is a **purely cosmetic item** in the current version: no code anywhere in the project's JS reads its checked state (searching `authRemember` in `app.js` and `i18n/*.js` turns up no reference other than the markup in `index.html` and the `auth.remember` label).
+The `#authRemember` checkbox on the page **controls the session's persistence scope** (effective since 1.0.230):
 
-The actual persistence is handled by the session access functions in `app.js`:
+- **Ticked** (the HTML default is `checked`): the session is written to `localStorage["agui.auth"]`, so you **stay signed in after closing and reopening the browser** (across restarts).
+- **Unticked**: only `sessionStorage["agui.auth"]` is written, and any leftover persistent session in `localStorage` is cleared; the login **expires when the tab / browser is closed** and you must sign in again.
 
-- `AUTH_KEY = "agui.auth"` (`app.js` L263).
-- `storeAuth()` (`app.js` L269–272) **unconditionally** writes to both `sessionStorage["agui.auth"]` and `localStorage["agui.auth"]`.
-- `readAuth()` (L275–283) reads `sessionStorage` first, then `localStorage`.
-- `clearAuth()` (L285) clears both; `logout()` (from L466) calls `clearAuth()`.
+Implementation notes:
 
-Therefore: **after logging in, refreshing / closing and reopening the page will automatically restore the session, with no need to log in again**; the login state is only cleared by actively "logging out" (or when the token is invalidated server-side and rejected with a 401). Whether the checkbox is ticked does not affect this behavior.
+- `AUTH_KEY = "agui.auth"`; `authPersist` records whether persistence is currently on (inferred at startup from an existing `localStorage` session, and set from the checkbox on login).
+- `storeAuth()`: **always** writes `sessionStorage`; when `authPersist` is true it writes `localStorage`, otherwise it removes the session there.
+- `readAuth()` reads `sessionStorage` first, then `localStorage`; `clearAuth()` / `logout()` clear both.
+
+Therefore: refreshing the page always restores the session in the current tab; only with "Keep me signed in" ticked will a later visit be signed in automatically after the browser is closed. Actively "logging out" (or the token being rejected with a server 401) still clears the login state.
 
 #### 1.1.6 Guidance on first entry when no model is configured
 
@@ -573,26 +575,22 @@ The following strings together the key steps for first-time use. Assume you alre
 
 The items below have all been verified in the source code and are provided for reference when later merging / revising `docs/user-guide.md`. **The code is authoritative.**
 
-1. **The entries of the two help-panel groups `help.s11` / `help.s12` have no inline text in the HTML.**
-   The `<li data-i18n-html="...">` elements at `index.html` L1395–1398 (`help.s11.1`–`help.s11.4`) and L1404–1407 (`help.s12.1`–`help.s12.4`) are **empty inside the tag**. However:
-   - the i18n runtime processes the `[data-i18n-html]` attribute and sets `innerHTML` from the dictionary value (`i18n/i18n.js` L67–69);
-   - in `zh.js` and `en.js`, `help.s11.1`–`help.s11.4` and `help.s12.1`–`help.s12.4` **all have non-empty content** (see `zh.js` from L1015, `en.js` from L1018).
+1. **[Fixed in 1.0.230] The two help-panel groups `help.s11` / `help.s12` previously had no inline fallback text in their `<li>`; this is now restored.**
+   Both groups' `<li data-i18n-html="help.s11.*">` / `help.s12.*` content is injected by i18n at runtime via the `[data-i18n-html]` attribute (`i18n/i18n.js`), and `zh.js` / `en.js` both hold non-empty content for these keys — so **you cannot say the two groups "have empty content"**. The only impact was that if `i18n.js` and the dictionaries failed to load, these two sections (unlike the other sections) would render empty. In 1.0.230 `index.html` now carries inline fallback copy for both groups' `<li>` elements, matching every other group.
 
-   Therefore **you cannot say these two groups "have empty content"** — their content is injected by i18n at runtime. Precisely put: these two groups' `<li>` elements **have no inline fallback text** (the other groups all carry inline HTML fallbacks). Potential impact: these two sections only show content when `i18n.js` and the dictionary load successfully; if the i18n resources fail to load, these two sections (unlike the other sections) show as empty. The sections' `<h4>` titles themselves still have inline fallback text. It looks like the `<li>` bodies were cleared along with an i18n update and the inline text was not restored.
+2. **[Fixed in 1.0.230] The "Keep me signed in" checkbox on the login page (`#authRemember`) previously had no effect; it now works.**
+   `storeAuth()` now uses that checkbox to decide the persistence scope: **ticked** (the HTML default is `checked`) → the session is written to `localStorage` (still signed in after closing the browser); **unticked** → only `sessionStorage` is written (invalidated when the tab / browser closes), and any leftover `localStorage` persistent session is explicitly cleared. On page refresh the default is inferred from an existing persistent session (`authPersist`); log-out / a server 401 still clears both via `clearAuth()`.
 
-2. **The "Keep me signed in" checkbox on the login page (`#authRemember`) actually has no effect.**
-   No code anywhere in the project's JS reads that checkbox's state; `storeAuth()` unconditionally writes both `sessionStorage` and `localStorage` (`app.js` L269–272), and the login is only cleared on "Log Out" or a server-side 401. So the behavior is identical whether or not it is ticked: after logging in, the session is automatically restored on the next visit. If `docs/ui-design.md` lists this checkbox as an effective feature, that is a discrepancy between the docs and the implementation.
-
-3. **The i18n key `menu.tasks` "Task Center" for the account menu exists, but there is no corresponding UI element.**
-   `zh.js` (from L64) and `en.js` both define `menu.tasks`, but there is **no** element such as `#meMenuTasks` in `index.html`'s `#meMenu`. The account menu in fact has only 9 items (see 1.7). The docs should not list "Task Center" as a menu item.
+3. **[Fixed in 1.0.230] The account menu's orphan key `menu.tasks` "Task Center" has been removed.**
+   That key was defined in `zh.js` / `en.js` but referenced nowhere in `index.html` / `app.js` (no corresponding menu element). In 1.0.230 it was deleted from both dictionaries; the account menu remains the 9 items in the table above (see 1.7).
 
 4. **Sign-up has no email field.**
    Neither the login / sign-up form nor `AuthService.Register` involves email. If existing docs mention that sign-up requires an email, that is a discrepancy.
 
-5. **The local-variable naming inside `applyAccentFromHex` is misleading (a detail).**
-   In this function, `const light = document.documentElement.dataset.theme !== "light";` actually denotes "**dark** mode" (`light === true` corresponds to dark), the opposite of the literal "light = light theme". This only matters when describing the accent-derivation logic precisely; it is an implementation detail, and renaming later to remove the ambiguity is recommended.
+5. **[Fixed in 1.0.230] The local variable `light` in `applyAccentFromHex` has been renamed to `isDark`.**
+   The original `const light = document.documentElement.dataset.theme !== "light";` actually denotes "**dark** mode" (a `true` value corresponds to dark), the opposite of the literal; in 1.0.230 it was renamed to `isDark` to remove the ambiguity, with no logic change.
 
-> Points to verify with a superior: the descriptions in existing docs such as `docs/ui-design.md` about the login-page checkbox, the account menu and the help groups need to be reconciled with the code facts above before being unified.
+> Points to verify with a superior: the descriptions in existing docs such as `docs/ui-design.md` about the login-page checkbox, the account menu and the help groups need to be reconciled with the code facts above after the fixes (`docs/ui-design.md` §1.4 already described that checkbox as "ticked writes `localStorage`, otherwise `sessionStorage`", so after the 1.0.230 implementation the two now agree).
 
 
 ## Chapter 2: Circles and Messages
@@ -1572,8 +1570,8 @@ The following are deviations / easily-misunderstood points confirmed by checking
 ---
 
 > Points to verify (recommended for manual confirmation later):
-> 1. The intent of the exclusion condition `x.agentId !== "agent_" + editingAgentId` in `subAgentCandidates` (not commented in the code; suspected legacy-compatibility logic).
-> 2. In `AgentCatalog.Create`, the rule "mounting `org_design` automatically mounts `org_commit`/`org_plan_draft`" is determined by `SkillDefIds.Contains("org_design")`; whether a user-created skill with the same name would falsely trigger it should be clarified in the org-roles chapter.
+> 1. **[Clarified in 1.0.230]** The exclusion condition `x.agentId !== "agent_" + editingAgentId` in `subAgentCandidates`: a comment now explains it excludes legacy "same-origin copies stored for an agent" (`agent_<its own id>`) so they are not re-mounted as external candidates; normal catalog ids never match it.
+> 2. **[Hardened in 1.0.230]** In `AgentCatalog.Create`, the rule "mounting `org_design` automatically mounts `org_commit`/`org_plan_draft`": in addition to `SkillDefIds.Contains("org_design")`, it now **also requires the skill to be a system skill (`OwnerId` is null)** (`IsSystemOrgDesignSkill`), so a user-created skill with the same name no longer falsely triggers it (and `org_commit` itself enforces admin rights at runtime).
 > 3. Org-structure coordinate persistence is distinguished by `memberId`; the behavior of anonymous/not-logged-in access to the org structure (this entry already requires login) is subject to verification in actual running.
 
 
@@ -1672,7 +1670,7 @@ System built-in skills are provided by the four `Builtin*Skills` static classes 
 | `xlsx_book` | Spreadsheet generation (Excel) | Workbook generation + analysis of an existing xlsx structure | `xlsx_book.skill.txt` | 2026-09-15.2 |
 | `pdf_doc` | PDF document generation | Print-grade PDF (report/plan/resume…), or Markdown/text reflow | `pdf_doc.skill.txt` | 2026-09-18.2 |
 
-> Version constants: `BuiltinDocxSkills.Version`, `BuiltinPdfSkills.Version` = `2026-09-18.2`; `BuiltinXlsxSkills.Version` = `2026-09-15.2` (the `BuiltinPptxSkills` version constant is in its source, consistent with the same batch). The body maintenance sources are in `tools/*-skills/`; `.skill.txt` is a synchronized artifact.
+> Version constants: `BuiltinDocxSkills.Version`, `BuiltinPdfSkills.Version` = `2026-09-18.2`; `BuiltinXlsxSkills.Version` = `2026-09-15.2`; `BuiltinPptxSkills.Version` = `2026-09-22.2`. The body maintenance sources are in `tools/*-skills/`; `.skill.txt` is a synchronized artifact.
 
 #### 4.2.1 The three docx skills
 
@@ -2190,7 +2188,7 @@ The following are points verified against the code in this chapter that disagree
 
 ### 4.11 Points to verify (not fully confirmed in the code)
 
-- The specific string of `BuiltinPptxSkills.Version` (the other built-in versions in this chapter have been verified; this item was not read verbatim and is written as "consistent with the same batch").
+- **[Verified in 1.0.230]** `BuiltinPptxSkills.Version` = `2026-09-22.2` (see 4.2).
 - The **complete** field set and validation details in the built-in skill bodies (`*.skill.txt`) (this chapter relied on the `Description` in `Builtin*Skills.cs` and the header comment of `skill.txt`; finer boundary behavior requires reading the bodies directly).
 - Under the Local bridge's static connection (mode B), the exact timing of deriving the origin lock from `--config`'s `SERVER` (`LoadAllowedOrigin`) was not verified line by line.
 
@@ -3036,11 +3034,11 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 
 Checking the existing `docs/memory-personality.md` against **the code as the source of truth**, the following deviations / points to verify were found:
 
-1. **`TopK` default**: `docs/memory-personality.md` §1 states "`TopK=5`" as the global default; **the code default is `MemoryOptions.TopK = 6`** (`AgentOptions.cs`). `5` is the override value in the **desktop** `appsettings.json`; the Docker compose environment-variable default is also `6`. The document mistook the desktop override value for the platform default.
-2. **`PersonalTopK` example value**: §3 of that document uses `PersonalTopK=4` in its conversion example; the code default is `PersonalTopK = 0` (personal memory programmatically off), and both the desktop / Docker defaults are `3`. `4` is neither the code default nor the desktop default; it is an example value that is easily misread as the default.
-3. **i18n prefix**: `memType.*` **does not exist**. The real prefix is **`agent.form.memoryType.*`** (plus the menu / UI copy `menu.memory`, `memory.*`). Any description that references `memType.*` should defer to `agent.form.memoryType.*`.
+1. **[Fixed in 1.0.230] `TopK` default**: `docs/memory-personality.md` §1 now reads "`TopK=6` (code default); the desktop `appsettings.json` overrides it to 5, and Docker defaults to 6". **The code default is `MemoryOptions.TopK = 6`** (`AgentOptions.cs`).
+2. **[Fixed in 1.0.230] `PersonalTopK` example value**: §3 of that document now uses a base of `PersonalTopK=0` (code default, personal memory programmatically off; desktop / Docker default `3`), and recomputes the broad / deep / cue-dependent counts against a `TopK=6` base.
+3. **i18n prefix**: `memType.*` **does not exist**. The real prefix is **`agent.form.memoryType.*`** (plus the menu / UI copy `menu.memory`, `memory.*`). **Verified** that `docs/memory-personality.md` does not reference `memType.*`, so no revision is needed; future references should use `agent.form.memoryType.*`.
 4. **Admin visibility ("cannot see any information")**: with the current code (`MemoryGovernance.IsGlobalManager` = `auth.IsAdmin`), both `GET /ag-ui/memory/groups` and `GET /ag-ui/memory` **pass globally** for platform admins, and **there is no** scope filter that blocks admins; the list item's `canManage` also passes on this basis. The only path in the code that makes everyone (including admins) unable to see content is that **semantic memory is not truly enabled** (`Enabled=false` or a storage mode other than postgres/sqlite → `IMessageMemory` is a `null` placeholder, and `GroupStats()` / `ListMessages()` return empty). So if "admins cannot see information" reproduces, check `Agents:Memory:Enabled` and `Storage:Provider`, not memory management permissions.
-5. **Org-role-assignment wording**: §4.4 of that document states "repetitive-routine roles are `slowToLearn`"; in the code heuristic rule table, the `slowToLearn` keywords are "培训 / 带教 / 教练 / 教学 / 训练 / 新人 / coach / trainer / mentor" (i.e., training-and-mentoring roles), which is slightly different; defer to the code keyword table.
+5. **[Fixed in 1.0.230] Org-role-assignment wording**: §4.4 of that document now reads "roles that need repeated training and mentoring before they take hold" instead of "repetitive-routine roles are `slowToLearn`", and lists the code heuristic keyword table "培训 / 带教 / 教练 / 教学 / 训练 / 新人 / coach / trainer / mentor".
 6. **`Scope` default**: the code default is `Scope="agent"` (retrieves all groups the agent belongs to), consistent with the documentation; the three values `agent` / `group` / `all` are consistent with the store implementation.
 7. **Points to verify (no basis found in the code / need manual confirmation)**:
    - A visualization UI for graph nodes / edges — **now provided** (1.0.196: the memory dialog's "🕸 Graph" view + the new `GET /ag-ui/memory/graph`, see §6.7.2).
@@ -3515,9 +3513,9 @@ The following are deviations / points not covered by the docs found by checking 
 
 The following conclusions **cannot be fully proven directly from this repository's code** or have **no test coverage**; they are listed for review:
 
-1. **`?play=1` returns 400**: `play` is declared as `bool?` (`AttachmentApi.cs:81`), and the front end uses only `?play=true`; the behavior of `?play=1` depends on ASP.NET Core's query bool binding going through `bool.TryParse` (which does not recognize `1`) — this is an **inference about framework behavior**, and `tests/AguiGroupChat.Hub.Tests/DocPreviewTests.cs` shows no case for `play=1`.
+1. **[Covered by a test in 1.0.230] `?play=1` returns 400**: `play` is declared as `bool?` (`AttachmentApi.cs`), and the front end uses only `?play=true`; `?play=1` returns 400 because ASP.NET Core's query bool binding goes through `bool.TryParse` (which does not recognize `1`). A new case `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` pins this behavior down.
 2. **`/ag-ui/preview/{id}/play` has no independent endpoint test**: `DocPreviewTests.cs` covers `/preview` and `/notes`, but no assertion for the manifest endpoint `/play` is found in it (`PresentationPlaybackTests` tests only the `TryBuild` structure). Its end-to-end behavior is best verified with a manual E2E check.
-3. **i18n key `docPreview.openFailed` (Failed to load preview: {err})**: defined in `zh.js` / `en.js`, but no reference is found in `app.js` (`docPreviewErrorText` uses `docPreview.failed`) — apparently an unused leftover key.
+3. **[Cleaned up in 1.0.230] i18n key `docPreview.openFailed` (Failed to load preview: {err})**: this key was defined in `zh.js` / `en.js` but had no reference in `app.js` (`docPreviewErrorText` uses `docPreview.failed`) — in 1.0.230 it was deleted from both dictionaries.
 4. **Browser caching of the playback PDF**: both `/preview` and `?play=true` set `Cache-Control: private, max-age=300`, so the browser may cache for 5 minutes; if the source file is replaced within those 5 minutes (with the attachment ID unchanged), the front end may hit the old cache (this is behavior inferred from the response header, with no dedicated handling / test).
 5. **End-to-end verification of PPT playback in the desktop edition**: on the code path, the desktop and Web editions share the front end, but no automated test for playback inside the desktop edition's WebView2 was found (rendering-layer verification is recorded as manual E2E in `docs/ui-design.md`).
 

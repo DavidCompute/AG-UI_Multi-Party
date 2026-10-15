@@ -571,6 +571,18 @@ public sealed class DocPreviewApiTests : IClassFixture<DocPreviewApiServerFixtur
     }
 
     [Fact]
+    public async Task Preview_PlayQuery_WithNumericOne_IsRejectedWith400()
+    {
+        var (token, _, attId) = await SeedGroupWithAttachmentAsync("pvplay1", "发布会.pptx");
+
+        // play 声明为 bool?：ASP.NET Core 查询绑定走 bool.TryParse（只认 true/false），
+        // 故 ?play=1 会绑定失败 → 400（前端统一用 ?play=true；旧版 ?refresh=1 同类问题）。
+        var res = await _client.SendAsync(Authed(HttpMethod.Get, $"/ag-ui/preview/{attId}?play=1", token));
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+    }
+
+    [Fact]
     public async Task Notes_Endpoint_ReturnsPerSlideNotes()
     {
         var pptxPath = PresentationNotesTests.BuildPptx("第一页备注", "第二页备注");

@@ -348,6 +348,17 @@ public sealed class AgentCatalog
     /// 未部署附件存储（如测试宿主）时返回 null，技能会照旧给出可读错误。
     /// </para>
     /// </summary>
+    /// <summary>
+    /// org_design 是否为系统技能（OwnerId 为空）——用于防止用户自建同名技能误触发组织落库工具。
+    /// 技能库不可用或该技能尚未注册时沿用旧的“按 id 判定”行为（返回 true），仅在解析到“归属于某用户”的同名技能时才拒绝。
+    /// </summary>
+    private bool IsSystemOrgDesignSkill()
+    {
+        var catalog = _skillCatalog.Value;
+        var skill = catalog?.Get("org_design");
+        return skill is null || skill.OwnerId is null;
+    }
+
     private string? ResolveAttachmentPath(string attachmentId)
         => (_services.GetService(typeof(AguiGroupChat.Hub.Storage.AttachmentStore))
             as AguiGroupChat.Hub.Storage.AttachmentStore)?.ResolvePath(attachmentId);
@@ -648,9 +659,11 @@ public sealed class AgentCatalog
 
         // 内置组织角色（挂载 org_design 方案技能的，如组织构建师/组织运营官）：追加受控落库工具 org_commit。
         // 仅平台管理员触发才真正写入；普通用户调用只会拿到“请管理员放行”的说明，绝不写库。
+        // 判定同时要求该 org_design 是系统技能（OwnerId 为空）：避免用户自建的同名技能误触发（见 §3.11 需复核点）。
         if (tools is not null
             && def.SkillDefIds is { Count: > 0 }
-            && def.SkillDefIds.Contains("org_design", StringComparer.OrdinalIgnoreCase))
+            && def.SkillDefIds.Contains("org_design", StringComparer.OrdinalIgnoreCase)
+            && IsSystemOrgDesignSkill())
         {
             var commitTool = new Tools.OrgCommitTool(_services, _loggerFactory);
             var commitFunc = AIFunctionFactory.Create(commitTool.Commit, "org_commit",

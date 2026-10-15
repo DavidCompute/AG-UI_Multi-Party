@@ -1,3 +1,49 @@
+# AG-UI 群聊桌面版 1.0.231 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.231 Release Notes (current Windows desktop release)
+
+**版本说明**：**「需复核点」收尾（B 组）**——逐章清理各章「实现与文档偏差 / 需复核点」里**可关闭**的剩余项：把几处真实现象（登录页复选框无效、帮助面板缺内联兜底、两处孤儿 i18n 键、易误导命名）**真正修掉**，并把组织落库工具挂载的口径收紧。
+**Version note**: **Closing the "points to verify" backlog (group B)** — each chapter's remaining closable "implementation vs. documentation deviations / to-verify" items were resolved, fixing several real issues (a no-op login checkbox, missing inline fallbacks in the help panel, two orphan i18n keys, a misleading name) and tightening how the org-commit tool is mounted.
+
+## 修复
+# Fixes
+
+中文：
+1. **登录页「保持登录状态」复选框此前是无效项（真实缺陷）**：`#authRemember` 无人读取，`storeAuth()` 无条件同时写 `sessionStorage` 与 `localStorage`。现改为按复选框决定：**勾选**（HTML 默认 `checked`）写 `localStorage`（跨浏览器重启保持）；**未勾选**仅写 `sessionStorage` 并清除残留的 `localStorage` 会话（关标签页 / 浏览器即失效）。刷新页面按既有持久会话推断默认值。
+2. **帮助面板 `help.s11` / `help.s12` 两组的 `<li>` 缺内联兜底**：其余分组都带内联文案，只有这两组靠 i18n 运行时注入——若 i18n 资源加载失败会显示为空。现已在 `index.html` 补齐这两组的内联兜底文案。
+3. **组织落库工具挂载口径收紧**：`AgentCatalog.Create` 原仅按 `SkillDefIds.Contains("org_design")` 判定是否追加 `org_commit` / `org_plan_draft`；现**追加「该技能为系统技能（`OwnerId` 为空）」**条件（`IsSystemOrgDesignSkill`），用户自建同名技能不再误触发（`org_commit` 本身仍在运行期强制校验管理员权限）。
+English:
+1. **The login page's "Keep me signed in" checkbox was a no-op (real defect)**: `#authRemember` was read by nothing, and `storeAuth()` unconditionally wrote both `sessionStorage` and `localStorage`. It now follows the checkbox: **ticked** (the HTML default is `checked`) writes `localStorage` (persists across browser restarts); **unticked** writes only `sessionStorage` and clears any leftover `localStorage` session (expires when the tab / browser closes). On refresh the default is inferred from an existing persistent session.
+2. **The help panel's `help.s11` / `help.s12` groups lacked inline fallbacks**: every other group carries inline copy; these two relied on i18n injection and would render empty if i18n resources failed to load. `index.html` now carries fallback copy for both groups.
+3. **Tighter org-commit mounting**: `AgentCatalog.Create` used to decide whether to append `org_commit` / `org_plan_draft` from `SkillDefIds.Contains("org_design")` alone; it now **also requires the skill to be a system skill (`OwnerId` is null)** (`IsSystemOrgDesignSkill`), so a user-created skill with the same name no longer falsely triggers it (`org_commit` still enforces admin rights at runtime).
+
+## 清理
+# Cleanup
+
+中文：
+- **移除孤儿 i18n 键**：`menu.tasks`（无对应菜单元素）与 `docPreview.openFailed`（`app.js` 未引用，实际用 `docPreview.failed`）已从 `zh.js` / `en.js` 删除（字典键 1824 → 1822）。
+- **`applyAccentFromHex` 变量重命名**：`light` → `isDark`（原命名与实际含义「深色模式」相反），逻辑不变。
+- **`subAgentCandidates` 排除条件加注释**：说明 `x.agentId !== "agent_" + editingAgentId` 用于排除旧数据里的同源副本。
+English:
+- **Removed orphan i18n keys**: `menu.tasks` (no matching menu element) and `docPreview.openFailed` (not referenced by `app.js`, which uses `docPreview.failed`) were deleted from `zh.js` / `en.js` (dictionary keys 1824 → 1822).
+- **Renamed a variable in `applyAccentFromHex`**: `light` → `isDark` (the old name was the opposite of its meaning, "dark mode"); no logic change.
+- **Commented the `subAgentCandidates` exclusion**: explains that `x.agentId !== "agent_" + editingAgentId` excludes legacy same-origin copies.
+
+## 文档
+# Docs
+
+中文：
+- `docs/memory-personality.md`：`TopK` 默认改为代码默认 `6`（桌面覆盖 5 / Docker 6）；换算示例按 `TopK=6` 基准重算（广记型 11 / 深记型 3 / 存得住想不起型 4→10）；组织配型措辞改为「需反复培训带教才上手的岗位」并列出代码关键词表。
+- `docs/user-guide.md` / `docs/user-guide.en.md`：§1.1.1、§1.1.5、§1.12、§3.11、§4.2、§4.11、§6.12、§7.15 同步更新；`BuiltinPptxSkills.Version` 核实为 `2026-09-22.2`。
+English:
+- `docs/memory-personality.md`: `TopK` default corrected to the code default `6` (desktop override 5 / Docker 6); the worked example is recomputed on a `TopK=6` base (broad 11 / deep 3 / cue-dependent 4→10); the org-assignment wording became "roles that need repeated training and mentoring" plus the code keyword table.
+- `docs/user-guide.md` / `docs/user-guide.en.md`: §1.1.1, §1.1.5, §1.12, §3.11, §4.2, §4.11, §6.12, §7.15 updated; `BuiltinPptxSkills.Version` verified as `2026-09-22.2`.
+
+## 测试
+# Tests
+
+中文：新增回归用例 `Preview_PlayQuery_WithNumericOne_IsRejectedWith400`（固化 `?play=1` → 400 的 `bool?` 绑定行为）；`DocPreviewApiTests` 合跑 **17/17**。i18n 审计 **zh=en=1822，missing 0**；`node --check`、`check-i18n-keys`、`check-orphan-keys` 全过；`dotnet build` 0 错误。
+English: new regression test `Preview_PlayQuery_WithNumericOne_IsRejectedWith400` (pinning the `bool?`-binding behavior of `?play=1` → 400); `DocPreviewApiTests` **17/17**. The i18n audit is **zh=en=1822, missing 0**; `node --check`, `check-i18n-keys` and `check-orphan-keys` all pass; `dotnet build` 0 errors.
+
 # AG-UI 群聊桌面版 1.0.230 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.230 Release Notes (current Windows desktop release)
 

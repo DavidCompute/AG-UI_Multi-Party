@@ -204,15 +204,15 @@ function applyAccentFromHex(hex) {
   }
   const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
   // 由单一主色生成：深色模式用原色，浅色模式加深；派生浅色文字标 / 紫色数字员工色
-  const light = document.documentElement.dataset.theme !== "light";
-  const base = light
+  const isDark = document.documentElement.dataset.theme !== "light";
+  const base = isDark
     ? `rgb(${r},${g},${b})`
     : `rgb(${Math.max(0, r - 40)},${Math.max(0, g - 40)},${Math.max(0, b - 40)})`;
   root.style.setProperty("--accent", base);
-  root.style.setProperty("--accent-text", light
+  root.style.setProperty("--accent-text", isDark
     ? `rgb(${Math.min(255, r + 130)},${Math.min(255, g + 130)},${Math.min(255, b + 130)})`
     : `rgb(${Math.max(0, r - 130)},${Math.max(0, g - 130)},${Math.max(0, b - 130)})`);
-  root.style.setProperty("--agent", light
+  root.style.setProperty("--agent", isDark
     ? `rgb(${Math.min(255, r + 60)},${Math.max(0, g - 40)},${Math.min(255, b + 40)})`
     : `rgb(${Math.max(0, r - 30)},${Math.max(0, g - 70)},${Math.max(0, b - 20)})`);
 }
@@ -265,12 +265,16 @@ async function loadBranding() {
 const AUTH_KEY = "agui.auth";
 let authMode = "login";
 
-/** 会话持久化：始终写入 sessionStorage（标签页级）与 localStorage（跨刷新 / 重启的会话兜底）。
- * 注意：localStorage 也始终写入，是为避免某些环境（WebView / 隐私模式）刷新时 sessionStorage 被清
- * 导致「刷新就自动退出登录」。登出时 clearAuth() 会同时清掉两者。 */
+/** 「保持登录状态」是否勾选（跨刷新 / 重启保留本决定）：勾选 → 会话写入 localStorage（关浏览器仍在）；
+ * 未勾选 → 仅 sessionStorage（关闭标签页 / 浏览器即失效）。启动时按既有持久会话推断默认值。 */
+let authPersist = (() => { try { return !!localStorage.getItem(AUTH_KEY); } catch { return false; } })();
+
+/** 会话持久化：始终写入 sessionStorage（标签页级）；仅当「保持登录状态」时才写入 localStorage
+ * （跨刷新 / 重启的会话兜底）；未勾选时显式清除 localStorage，避免上一次的持久会话残留。
+ * 登出时 clearAuth() 会同时清掉两者。 */
 function storeAuth(auth) {
   try { sessionStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch { /* 存储不可用忽略 */ }
-  try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch { /* 存储不可用忽略 */ }
+  try { if (authPersist) localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); else localStorage.removeItem(AUTH_KEY); } catch { /* 存储不可用忽略 */ }
 }
 
 /** 读取会话：优先 sessionStorage（当前标签页），其次 localStorage（保持登录）。 */
@@ -320,6 +324,8 @@ async function submitAuth(e) {
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) { $("authError").textContent = errMsg(data?.code, data?.message); return; }
+    const remember = $("authRemember");
+    authPersist = remember ? !!remember.checked : true; // 勾选「保持登录状态」→ 跨浏览器会话仍登录；否则仅本标签页
     enterApp(data);
   } catch (ex) {
     $("authError").textContent = t("auth.err.network"); // 固定文案，异常细节只进 console 不暴露到界面
@@ -2970,6 +2976,8 @@ function makeSelectedRemoveBtn(id, kind) {
 
 /** 可调用子数字员工备选名单：排除自身 / 技能目标子代理（与旧版目录口径一致）。 */
 function subAgentCandidates() {
+  // 排除自身、技能子代理（skill_ 前缀）与以“agent_+自身 id”命名的历史兼容子代理（旧数据里可能存在
+  // 这种“为某数字员工另存的同源副本”，避免把它当外部候选重复挂上；正常目录 id 不会命中此条件）。
   return (agentList || []).filter((x) =>
     x.agentId && x.agentId !== editingAgentId && !/^skill_/.test(x.agentId) && x.agentId !== "agent_" + editingAgentId);
 }

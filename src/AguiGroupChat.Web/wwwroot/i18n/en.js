@@ -64,7 +64,6 @@ window.I18N_DICTS.en = {
   "menu.voice": "Voice service",
   "menu.memory": "Memory Management",
   "menu.branding": "Whitelabel Settings",
-  "menu.tasks": "Task Center",
   "menu.backup": "Data Backup",
   "menu.logout": "Log Out",
 
@@ -1168,7 +1167,6 @@ window.I18N_DICTS.en = {
   "docPreview.missing": "Attachment not found or deleted",
   "docPreview.denied": "You don't have access to this attachment",
   "docPreview.failed": "Document conversion failed: {err}",
-  "docPreview.openFailed": "Failed to load preview: {err}",
   "msg.truncated": "⚠️ Content too long, truncated (only first 2MB kept)",
   "msg.startTopic": "Start a new topic from this message",
   "msg.stopGenerating": "Stop generating",
