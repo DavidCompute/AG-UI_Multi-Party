@@ -2179,7 +2179,7 @@ The following are points verified against the code in this chapter that disagree
 1. **i18n prefix**: there is no `clientTool.*` or `nativeBridge.*` prefix. The real prefix for client skill / local execution UI text is `itx.*` (the approval cards, such as `itx.cardAskClientTool`, `itx.clientToolRun`, `itx.clientToolConfirmShell`), while Local-bridge-related text is under `profile.bridge*` (the Profile dialog), plus a help text at `help.s13.9` / `help.s13.10`.
 2. **The Skill Library dialog has no "Import / Export" button**: the dialog has only "+ New Skill", "🗑️ Delete selected", and "Close". Yet the server's read-only error text for built-in skills is "Built-in system skills are read-only; **export** and create a new one instead" — the UI has no corresponding export entry point.
 3. **Natural-language skill generation is not SSE streaming**: `generateSkill()` is **a single ordinary `fetch` POST** (`/ag-ui/skills/generate`) and uses `AbortController` to support "stop". Generate / stop do share one button `#sgGenerate` (`setSkillGenButton` switches the text to `msg.stopGenerating`), but there is **no EventSource / streaming chunking** (the whole repo's `app.js` has no related EventSource usage either).
-4. **`GET /ag-ui/admin/bridge-capabilities` is not consumed by the frontend**: the endpoint exists (`BridgeCapabilitiesService`), but `app.js` consumes only `bridge-health`. Moreover, `bridge-health` targets **external AG-UI bridge endpoints** and has nothing to do with NativeBridge.
+4. **[Fixed in 1.0.230] `GET /ag-ui/admin/bridge-capabilities` is now consumed by the frontend**: the Runtime Metrics tab renders a "Bridge capability negotiation" table, and `bridge-health` has a live-probe button. It targets **external AG-UI bridge endpoints** and has nothing to do with NativeBridge.
 5. **The installer's "dynamically repackaged per visitor / platform address and token injected into the package" does not match the code**: in the code, `GET /ag-ui/native-bridge/download/file` **serves the static MSI as is**; the `NativeBridgeDownloadApi` comment states explicitly that "the generic installer contains no token; the connection is completed by the web page pushing the configuration online after login". The README's description that "the download is dynamically repackaged by the server per current visitor, with the current platform address already injected into `bridge-config.txt` inside the package" is inconsistent with the implementation.
 6. **Two scripts for zip and msi**: `tools/publish-nativebridge.ps1` produces a **zip** (containing `install-autostart.bat`, etc.), and `tools/publish-nativebridge-msi.ps1` produces a **perUser MSI** (HKCU Run auto-start, starts on install). The Web upload / download endpoints **accept / label `.msi` only**, and what `tools/e2e-nativebridge-api.mjs` uploads is also `.msi`; paths involving web distribution should go by the MSI.
 7. **The forced-approval set is broader than "shell + client"**: the exact set is `shell` ∪ `dotnet` ∪ any `client` (`BuildDef`). `dotnet` always forces approval (including `server`), and `org_deploy` is a privileged type (only administrators can create it) but its UI approval checkbox is not forced by default.
@@ -3746,7 +3746,7 @@ Response body (`AdminApi.cs:272-283`): `ok`, `userId`, `accountRemoved`, `groups
 
 #### 8.3.6 User search
 
-**(no basis found in the code)**: `#adminUsersView` / `#adminUserRows` only render the full list; `loadAdminUsers` in `app.js` takes no filter parameters, and there is no user-search input in the DOM. The User Management tab **provides no search**.
+**(provided in 1.0.230)**: `#adminUsersSearch` (`admin.usersSearchPh`) does **front-end filtering** of `#adminUserRows` (by username / nickname / userId, case-insensitive): `loadAdminUsers` fetches the full list into `adminUsersCache`, and `renderAdminUsers()` filters on input (the `input` event re-renders; the "×" is wired up by `initSearchClears()`). Shows `admin.usersNoMatch` when nothing matches.
 
 ---
 
@@ -3937,7 +3937,7 @@ Within `loadAdminMetrics()`, a **second section** independently fetches `GET /ag
 | Latency | `latencyMs` | Shows `{n} ms` when present, otherwise `—` |
 | Detail | `detail` (falls back to `endpoint`) | The hover title is `endpoint` |
 
-Note: `GET /ag-ui/admin/bridge-health?refresh=true` triggers a live full probe (`ProbeAllAsync`); otherwise it returns the cache (`AdminApi.cs:182-188`). The frontend **does not pass `refresh`**, so it shows the cached status from the periodic probe. Likewise, `GET /ag-ui/admin/bridge-capabilities` (capability negotiation) exists on the backend but is **not consumed by the frontend**.
+Note: `GET /ag-ui/admin/bridge-health?refresh=true` triggers a live full probe (`ProbeAllAsync`); otherwise it returns the cache (`AdminApi.cs`). Since **1.0.230** the UI has a "Probe now" button (`#bridgeProbeBtn`) that passes `refresh=true`, and the same page shows a "Bridge capability negotiation" table from `GET /ag-ui/admin/bridge-capabilities` (`loadBridgeCaps`).
 
 #### 8.8.4 Replicas (cross-replica diagnostics)
 
@@ -4026,9 +4026,9 @@ View `#adminConfigView` (`index.html:1619-1641`): the hint `admin.configHint` (w
 
 Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/config` (`app.js:7007-7076`).
 
-#### 8.10.1 Hot-changeable keys (12 in the UI / 13 in the state layer) + bounds
+#### 8.10.1 Hot-changeable keys (13 in the UI / 13 in the state layer) + bounds
 
-`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-34`) has **13** fields in total, but the UI form presents only **12** (`messageWriteDebounceMs` is API-only, with no UI input). The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:37-50`).
+`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-34`) has **13** fields in total, and the UI form now presents **13** too (`#cfgMessageWriteDebounceMs`, **added in 1.0.230**). The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:37-50`).
 
 | # | Frontend field DOM id | Key `key` | Type | UI label i18n | Bounds / validation |
 |---|---|---|---|---|---|
@@ -4044,7 +4044,7 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 10 | `#cfgThinking` | `thinkingMode` | bool | `admin.thinking` | Tri-state |
 | 11 | `#cfgApprovalTools` | `requireApprovalToolNames` | list | `admin.approvalTools` | Comma-separated; empty = do not modify |
 | 12 | `#cfgFrameOrigins` | `allowedFrameOrigins` | list | `admin.frameOrigins` | Comma-separated; empty = do not modify |
-| — | (no UI) | `messageWriteDebounceMs` | int | — | ≥ 0 |
+| 13 | `#cfgMessageWriteDebounceMs` | `messageWriteDebounceMs` | int | `admin.writeDebounce` | ≥ 0 |
 
 Bounds are validated on the server in `POST /ag-ui/admin/config` (`ConfigGovernanceApi.cs:88-93`): out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` cannot be negative.
 
@@ -4066,7 +4066,7 @@ The frontend's `setCfgBool` uses `indeterminate` to mean "keep the configured de
 - `persistence`: `enabled`, `filePath`;
 - `agents`: `provider`, `enableTools`, `enableWebTools`, `thinkingMode`, `dailyTokenQuotaPerUser`, `requireApprovalToolNames`, `memory.{enabled,provider,embeddingModel,embeddingDimensions,retentionDays,scope}`.
 
-> **Note (deviation)**: `GET /ag-ui/admin/config` is a **pure API** — **no consumer can be found** in `app.js` (across the whole repo, only `POST /admin/config` and `GET /admin/config/governance` are called by the frontend), yet the text of `admin.configHint` says "see the parameter snapshot beside 'System Status' in the Data Backup menu", and that entry point does not exist in the code. See §8.17 for details.
+> **Fixed (1.0.230)**: `GET /ag-ui/admin/config` is now consumed by the Config Governance tab's **"Read-only snapshot" button** (`#cfgSnapshotBtn` → `loadConfigSnapshot`); the `admin.configHint` text now points at that button (no longer at an entry point that does not exist).
 
 ---
 
@@ -4257,19 +4257,19 @@ The support circle (`GroupKind.Support`, `Group.IsSupportCircle`) has no dedicat
 The following is all based on the code (each item has been verified against the code):
 
 1. **The frontend admin side is now subdivided by `platformRole` (fixed in 1.0.194).** The `#meMenu` admin menus and the `#adminModal` tab visibility are now scoped by effective role via `roleRank` / `applyAdminTabVisibility`: Operator and above see the admin console and System Status; Admin and above additionally see Data Backup / Model Config / Whitelabel; Operator's console has only read-only tabs (Usage / Audit / Metrics / Agent performance). Now consistent with `docs/RBAC.md` §5 and `docs/ui-design.md` §7.6.
-2. **`GET /ag-ui/admin/config` (read-only snapshot) is a pure API that `app.js` does not consume.** Across the whole repo, the frontend calls only `POST /ag-ui/admin/config` and `GET /ag-ui/admin/config/governance`; and the "parameter snapshot beside 'System Status' in the Data Backup menu" that the `admin.configHint` text points to has **no** corresponding UI in the code.
-3. **"Bridge health" is inside the "Runtime Metrics" tab** (`#adminBridgeRows`, `app.js:6967-6977`), **not a separate tab**; "whitelabel" is the standalone modal `#brandModal` (not a tab); "System Status" is also the standalone modal `#statusModal` (not a tab).
-4. **User Management has no search box** (§8.3.6); if an existing document describes a "user search", that is a misstatement.
+2. **[Fixed in 1.0.230] `GET /ag-ui/admin/config` is now consumed.** The Config Governance tab gained a "Read-only snapshot" button (`loadConfigSnapshot`), and `admin.configHint` now points to it.
+3. **"Bridge health" is inside the "Runtime Metrics" tab** (`#adminBridgeRows`, `app.js`), **not a separate tab**; since **1.0.230** there is also a **"Bridge capability negotiation" table** on the same page (`#adminBridgeCapsRows`, `loadBridgeCaps`); "whitelabel" is the standalone modal `#brandModal` (not a tab); "System Status" is also the standalone modal `#statusModal` (not a tab).
+4. **[Fixed in 1.0.230] User Management now has a search box** (§8.3.6): `#adminUsersSearch` does front-end filtering (username / nickname / userId).
 5. Note: the execution-parameter defaults and erasure semantics described in `docs/execution-configuration.md` and `docs/enterprise-compliance.md` are consistent with the code in this chapter (the `ExecutionOptions` / `ComplexityTimeoutOptions` defaults and the `AccountErasureService` steps all line up); where inconsistent, the two points above (1, 2) prevail.
 
 ---
 
 ### 8.18 Points to verify
 
-1. **The position of `streaming` in `executionOrder`**: the UI hint lists only `bridge / pipeline / relay / org_route` as the whitelist, but the code's whitelist actually includes `streaming` (always placed last); the two are inconsistent — a wording difference between the doc / UI.
-2. **Config Governance 12 vs. 13 keys**: `messageWriteDebounceMs` exists in the state layer and the write request body, but there is no UI input for it; to tune it online, a frontend field must be added.
-3. **Operator's read-only console is now implemented (1.0.194)**: the console's read-only tabs (Usage / Audit / Metrics) consume Operator's read-only endpoints; note that `GET /ag-ui/admin/bridge-capabilities` is **still not consumed by the frontend** (`bridge-health` is consumed in the Runtime Metrics tab).
-4. **`bridge-health` live probe**: the frontend does not pass `refresh`, so it only shows the periodic-probe cache; to see an "immediate probe", the UI must pass `refresh=true` (the backend already supports it).
+1. **The position of `streaming` in `executionOrder`**: the UI whitelist now includes `streaming` (i18n `admin.execOrder` and the placeholder both do) and matches the code whitelist; `streaming` is always placed last.
+2. **[Fixed in 1.0.230] Config Governance 12 vs. 13 keys**: a `#cfgMessageWriteDebounceMs` input was added (13 UI keys).
+3. **[Fixed in 1.0.230] `GET /ag-ui/admin/bridge-capabilities` is now consumed by the frontend**: the Runtime Metrics tab's "Bridge capability negotiation" table (protocol / tools / attachments / approval types; `refresh=true` for a live probe).
+4. **[Fixed in 1.0.230] `bridge-health` live probe**: `#bridgeProbeBtn` ("Probe now") probes live via `?refresh=true` (together with capability negotiation). Note the parameter is **`refresh=true`** (a `bool` binding does not accept `1`).
 5. **The import semantics of "group id regeneration" and "account profile update, password not overwritten"**: these need to be explained clearly to users in migration / disaster-recovery scenarios (see §8.12.2 for details).
 6. **Audit retention of 5000 records** vs. the frontend `limit=200`: for the complete history, use CSV export (no 200 cap, but bounded by the 5000 capacity).
 
@@ -4574,8 +4574,8 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |
 | GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `fromMs` / `toMs`) | Operator |
 | GET | `/ag-ui/admin/audit.csv` | Audit log CSV export (UTF-8 BOM, no 200-row limit) | Operator |
-| GET | `/ag-ui/admin/bridge-health` | Bridge endpoint health (`?refresh=1` for a live probe) | Operator |
-| GET | `/ag-ui/admin/bridge-capabilities` | Bridge capability negotiation (`?refresh=1` for a live probe) | Operator |
+| GET | `/ag-ui/admin/bridge-health` | Bridge endpoint health (`?refresh=true` for a live probe) | Operator |
+| GET | `/ag-ui/admin/bridge-capabilities` | Bridge capability negotiation (`?refresh=true` for a live probe) | Operator |
 | GET | `/ag-ui/admin/metrics` | Lightweight metrics snapshot | Operator |
 | GET | `/ag-ui/admin/config` | Read-only config snapshot (auth / groupChat / storage / persistence / agents summary) | Admin |
 | GET | `/ag-ui/admin/config/governance` | Current config governance override values | Admin |
@@ -5118,8 +5118,8 @@ The shortcut panel is rendered by `#shortcutsModal`, with text keys `sc.*` (`www
 
 All of the following were verified against the source (line numbers are locations at the time of writing, for re-checking):
 
-1. **`GET /ag-ui/admin/config` is a pure API and is not consumed by the frontend**. The frontend config governance page reads `GET /ag-ui/admin/config/governance` (`loadConfigGovernance`) and writes `POST /ag-ui/admin/config` (`saveConfigGovernance`); there is no call to `GET /ag-ui/admin/config` in `wwwroot/app.js`. Evidence: `ConfigGovernanceApi.cs` L119-122, `AdminApi.cs` L205-259, `wwwroot/app.js` L7008 / L7065.
-2. **`GET /ag-ui/admin/bridge-capabilities` is not consumed by the frontend**. `bridge-capabilities` is not found in `wwwroot/app.js`; note that **`GET /ag-ui/admin/bridge-health` is consumed** (`loadAdminMetrics`, `app.js` L6967). Evidence: `AdminApi.cs` L181-197.
+1. **[Fixed in 1.0.230] `GET /ag-ui/admin/config` is now consumed** by the Config Governance tab's "Read-only snapshot" button (`loadConfigSnapshot`).
+2. **[Fixed in 1.0.230] `GET /ag-ui/admin/bridge-capabilities` is now consumed** by the Runtime Metrics tab's "Bridge capability negotiation" table (`loadBridgeCaps`); `bridge-health` is consumed on the same page, and both support `?refresh=true` for a live probe (`#bridgeProbeBtn`).
 3. **`Agents:Memory:ModelDownloadUrl` has no corresponding property in `MemoryOptions`** (the `MemoryOptions` in `AgentOptions.cs` has no such member). This key is **read directly via `IConfiguration` by the desktop composition root** (`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`), and the log text at `AgentHosting.cs` L138-141 also mentions it; but when `Agents:Memory` binds to the strongly typed Options, it **does not recognize this key**. `README.md` / `README.en.md` / the desktop README all describe it as a config key. Evidence: `AgentOptions.cs` L254-413, `DesktopApp.cs`, `AgentHosting.cs`.
 4. **`advanceOnClick` is parsed by the server but not used by the frontend**. The server-side `SlideTransition` contains an `AdvanceOnClick` field and parses it from `<p:transition>`, sending it down with the `/ag-ui/preview/{id}/play` manifest; the frontend only reads `tr.advanceAfterMs` in `scheduleAutoAdvance` and **does not read `advanceOnClick`**. Evidence: `PresentationPlayback.cs` L6, `wwwroot/app.js` L9331-9341.
 5. **`Agents:WorkToolsEnabled` (compose `Agents__WorkToolsEnabled`) / `enableWorkTools` has no C# binding property**. The protocol document §5.7 (`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`) and the frontend i18n (`agent.form.enableWorkTools`, etc.) both mention it, but neither `AgentOptions` nor `AgentDefinition` has this property (zero hits searching `src/**/*.cs`). The Chapter 3 draft also pointed out that this form section is not rendered. Evidence: `docker-compose.yml` L188-191, `AgentOptions.cs`, `i18n/zh.js` L272-274.

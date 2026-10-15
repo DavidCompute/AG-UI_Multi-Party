@@ -1,3 +1,41 @@
+# AG-UI 群聊桌面版 1.0.230 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.230 Release Notes (current Windows desktop release)
+
+**版本说明**：**文档与实现偏差清理（A 组）**——逐一核对 `docs/user-guide.md` §8.17/§8.18 记录的「实现与文档偏差 / 需复核点」，把其中**已可补齐的项**在代码与文档两侧对齐（用户搜索、桥接能力协商接入前端、实时探测、只读参数快照、配置治理键补齐）。**新增/变更均为管理员控制台侧的可见性增强，不改变既有业务行为。**
+**Version note**: **A-group deviation cleanup (docs vs. implementation)** — each item recorded in `docs/user-guide.md` §8.17/§8.18 as an "implementation vs. documentation deviation / to-verify" that could be closed was aligned on both the code and doc sides (user search, bridge capability negotiation wired into the frontend, live probe, read-only config snapshot, config-governance key completion). **All additions are admin-console visibility improvements and do not change existing business behaviour.**
+
+## 偏差清理
+# Deviation cleanup
+
+中文：
+- **A1 管理员用户列表支持搜索**：新增 `#adminUsersSearch` 输入框；`loadAdminUsers()` 拉全量后走 `renderAdminUsers()` / `adminUserRow()` 按「用户名 / 显示名 / 角色」过滤（与其它列表的「x」清除按钮一致）。
+- **A2 桥接能力协商接入前端**：新增 `loadBridgeCaps()`（消费 `GET /ag-ui/admin/bridge-capabilities`），「运行指标」页渲染「桥接能力协商」表；`loadAdminMetrics()` 末尾统一刷新桥接健康 / 能力协商 / 副本。
+- **A3「立即探测」按钮**：`#bridgeProbeBtn` 通过 `loadBridgeHealth(true)` + `loadBridgeCaps(true)` 触发 `?refresh=true` 实时探测。
+- **A4 只读参数快照**：新增 `#cfgSnapshotBtn` / `#cfgSnapshot`，消费 `GET /ag-ui/admin/config`，展开 JSON（配置治理页可直接核对当前生效值）。
+- **A5 配置治理补 `messageWriteDebounceMs`**：`#cfgMessageWriteDebounceMs` 加入 `setCfg` / `collectCfg`（UI 键 12 → 13，与后端一致）。
+- **A6 `executionOrder` 白名单表述（仅文档）**：查证后 i18n `admin.execOrder` 与 placeholder **均已含 `streaming`**，与代码白名单一致，故只需修正文档描述（`streaming` 恒置末）。
+English:
+- **A1 Admin user list search**: added `#adminUsersSearch`; `loadAdminUsers()` fetches all then `renderAdminUsers()` / `adminUserRow()` filters by username / display name / role (with the same "x" clear button as other lists).
+- **A2 Bridge capability negotiation wired into the frontend**: added `loadBridgeCaps()` (consumes `GET /ag-ui/admin/bridge-capabilities`); the Runtime Metrics tab renders a "Bridge capability negotiation" table; `loadAdminMetrics()` refreshes bridge health / caps / replicas together.
+- **A3 "Probe now" button**: `#bridgeProbeBtn` triggers a live `?refresh=true` probe via `loadBridgeHealth(true)` + `loadBridgeCaps(true)`.
+- **A4 Read-only config snapshot**: added `#cfgSnapshotBtn` / `#cfgSnapshot`, consuming `GET /ag-ui/admin/config` and expanding the JSON (verify effective values from the Config Governance tab).
+- **A5 Config Governance gains `messageWriteDebounceMs`**: `#cfgMessageWriteDebounceMs` added to `setCfg` / `collectCfg` (UI keys 12 → 13, matching the backend).
+- **A6 `executionOrder` whitelist wording (docs only)**: verified that i18n `admin.execOrder` and the placeholder **already include `streaming`**, matching the code whitelist, so only the doc description needed fixing (`streaming` always last).
+
+## 修复
+# Fixes
+
+中文：
+1. **`?refresh=1` 会 400（本轮暴露的真实缺陷）**：`GET /ag-ui/admin/bridge-health` / `bridge-capabilities` 的 `refresh` 为 `bool?` 绑定，**不接受 `1`**；前端与文档已统一改为 **`?refresh=true`**。
+English:
+1. **`?refresh=1` returned 400 (real defect exposed this round)**: `refresh` on `GET /ag-ui/admin/bridge-health` / `bridge-capabilities` binds as `bool?` and **does not accept `1`**; the frontend and docs now consistently use **`?refresh=true`**.
+
+## 测试
+# Tests
+
+中文：i18n 审计 **zh=en=1824，missing 0**；`node --check`（app.js / zh.js / en.js）、`check-i18n-keys`、`check-orphan-keys` 全过。运行栈实测（Playwright + curl）：A1 搜索全量 1 / 过滤 1、A2/A3 能力协商与健康各 1 行、A5 字段存在、A4 快照显示 JSON，**页面无 JS 报错**；`bridge-health?refresh=true` / `bridge-capabilities?refresh=true` / `GET /admin/config` 均 200；重建 web 后健康 200。
+English: the i18n audit is **zh=en=1824, missing 0**; `node --check` (app.js / zh.js / en.js), `check-i18n-keys` and `check-orphan-keys` all pass. Verified live (Playwright + curl): A1 search all=1 / filtered=1, A2/A3 caps and health one row each, A5 field present, A4 snapshot shows JSON, **no page JS errors**; `bridge-health?refresh=true` / `bridge-capabilities?refresh=true` / `GET /admin/config` all 200; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.229 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.229 Release Notes (current Windows desktop release)
 

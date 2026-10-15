@@ -7948,18 +7948,44 @@ async function loadAdminMetrics() {
     lastMetricsData = d;
     renderMetricsDashboard(d);
   } catch (ex) { if (meta) meta.textContent = t("admin.sysNetErr"); cards.innerHTML = ""; }
+  loadBridgeHealth(); // 第二段：桥接端点健康（周期探测缓存；可点「立即探测」）
+  loadBridgeCaps();   // 第三段：桥接能力协商（协议 / 工具 / 附件 / 审批类型）
+  loadReplicas();     // 第四段：跨副本诊断（独立拉取，失败不影响其余）
+}
+
+/** 桥接端点健康：<paramref name="refresh"/> 为真时让后端立即探测一次（否则用周期缓存）。 */
+async function loadBridgeHealth(refresh) {
+  const rows = $("adminBridgeRows");
+  if (!rows) return;
+  if (refresh) rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
-    const bh = await fetch("/ag-ui/admin/bridge-health", { headers: { Authorization: "Bearer " + state.token } });
+    const url = "/ag-ui/admin/bridge-health" + (refresh ? "?refresh=true" : "");
+    const bh = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const list = bh.ok ? ((await bh.json()) || []) : [];
-    const rows = $("adminBridgeRows");
     rows.innerHTML = list.length
       ? list.map((h) => `<tr><td>${escapeHtml(h.agentId || "")}</td>`
         + `<td><span class="bh-dot ${h.up ? "up" : "down"}"></span>${escapeHtml(t(h.up ? "admin.metricUp" : "admin.metricDown"))}</td>`
         + `<td>${h.latencyMs != null ? escapeHtml(h.latencyMs + " ms") : "—"}</td>`
         + `<td class="bh-detail" title="${escapeHtml(h.endpoint || "")}">${escapeHtml(h.detail || (h.endpoint || ""))}</td></tr>`).join("")
       : `<tr><td colspan="4" class="admin-empty">${t("admin.metricsBridgeEmpty")}</td></tr>`;
-  } catch { $("adminBridgeRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
-  loadReplicas(); // 第三段：跨副本诊断（独立拉取，失败不影响其余）
+  } catch { rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
+}
+
+/** 桥接能力协商（Capability Discovery）：各端点支持的协议 / 工具 / 附件 / 审批类型。 */
+async function loadBridgeCaps(refresh) {
+  const rows = $("adminBridgeCapsRows");
+  if (!rows) return;
+  try {
+    const url = "/ag-ui/admin/bridge-capabilities" + (refresh ? "?refresh=true" : "");
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
+    const list = res.ok ? ((await res.json()) || []) : [];
+    const yn = (v) => v ? `<span class="tag-active">✓</span>` : `<span class="muted">—</span>`;
+    rows.innerHTML = list.length
+      ? list.map((c) => `<tr><td>${escapeHtml(c.agentId || "")}</td>`
+        + `<td>${yn(c.supportsProtocol)}</td><td>${yn(c.supportsTools)}</td><td>${yn(c.supportsAttachments)}</td>`
+        + `<td>${escapeHtml((c.approvalTypes || []).join(", ") || "—")}</td></tr>`).join("")
+      : `<tr><td colspan="5" class="admin-empty">${t("admin.bridgeCapsEmpty")}</td></tr>`;
+  } catch { rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
 }
 
 /** 跨副本诊断：活跃副本列表 + 汇总 + Redis 健康（多副本部署时跨进程可见）。 */
@@ -8043,6 +8069,7 @@ async function loadConfigGovernance() {
     setCfg("cfgMaxMessageChars", d.maxMessageChars);
     setCfg("cfgMessageRetentionDays", d.messageRetentionDays);
     setCfg("cfgDailyTokenQuota", d.dailyTokenQuotaPerUser);
+    setCfg("cfgMessageWriteDebounceMs", d.messageWriteDebounceMs);
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
     setCfgBool("cfgEnableWebTools", d.enableWebTools);
@@ -8050,6 +8077,19 @@ async function loadConfigGovernance() {
     $("cfgApprovalTools").value = (d.requireApprovalToolNames || []).join(", ");
     $("cfgFrameOrigins").value = (d.allowedFrameOrigins || []).join(", ");
   } catch { toast(t("admin.configLoadFail")); }
+}
+
+/** 只读参数快照（`GET /ag-ui/admin/config`）：把当前生效的运维参数展开为可复制文本。 */
+async function loadConfigSnapshot() {
+  const pre = $("cfgSnapshot");
+  if (!pre) return;
+  pre.classList.remove("hidden");
+  pre.textContent = t("admin.loading");
+  try {
+    const res = await fetch("/ag-ui/admin/config", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    pre.textContent = (res.ok && d) ? JSON.stringify(d, null, 2) : errMsg(d, "HTTP " + res.status);
+  } catch { pre.textContent = t("admin.sysNetErr"); }
 }
 
 function setCfg(id, v) { const el = $(id); if (el) el.value = v === null || v === undefined ? "" : String(v); }
@@ -8068,6 +8108,7 @@ function collectCfg() {
   body.maxMessageChars = numOrNull("cfgMaxMessageChars");
   body.messageRetentionDays = numOrNull("cfgMessageRetentionDays");
   body.dailyTokenQuotaPerUser = numOrNull("cfgDailyTokenQuota");
+  body.messageWriteDebounceMs = numOrNull("cfgMessageWriteDebounceMs");
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");
   body.enableWebTools = boolOrNull("cfgEnableWebTools");
@@ -8217,32 +8258,29 @@ async function resetExecutionConfig() {
   } catch (ex) { toast(t("admin.execLoadFail")); }
 }
 
-async function loadAdminUsers() {
-  try {
-    const res = await fetch("/ag-ui/admin/users", { headers: { Authorization: "Bearer " + state.token } });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
-    const meId = state.memberId;
-    $("adminUserRows").innerHTML = (data || []).map((u) => {
-      const role = roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"));
-      const status = u.isDisabled ? `<span class="tag-disabled">${t("admin.disabled")}</span>` : `<span class="tag-active">${t("admin.active")}</span>`;
-      const self = u.userId === meId ? t("admin.me") : "";
-      let actions;
-      if (u.userId === meId) {
-        actions = `<span class="muted">${t("admin.currentAccount")}</span>`;
-      } else {
-        // 超级管理员可见「平台角色」下拉（RBAC）：可授予 / 回收 user / operator / admin / superadmin
-        const roleSel = state.isSuperAdmin
-          ? `<select class="admin-role-sel" data-op="role" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.roleSelTitle")}">
+let adminUsersCache = [];
+
+/** 用户表单行渲染（与搜索过滤解耦）。 */
+function adminUserRow(u, meId) {
+  const role = roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"));
+  const status = u.isDisabled ? `<span class="tag-disabled">${t("admin.disabled")}</span>` : `<span class="tag-active">${t("admin.active")}</span>`;
+  const self = u.userId === meId ? t("admin.me") : "";
+  let actions;
+  if (u.userId === meId) {
+    actions = `<span class="muted">${t("admin.currentAccount")}</span>`;
+  } else {
+    // 超级管理员可见「平台角色」下拉（RBAC）：可授予 / 回收 user / operator / admin / superadmin
+    const roleSel = state.isSuperAdmin
+      ? `<select class="admin-role-sel" data-op="role" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.roleSelTitle")}">
               ${["user","operator","admin","superadmin"].map((r) => `<option value="${r}"${(u.platformRole||"user")===r?" selected":""}>${t("admin.roleName."+r)}</option>`).join("")}
             </select>`
-          : "";
-        actions = roleSel
-          + `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? t("admin.enableTitle") : t("admin.disableTitle")}">${u.isDisabled ? "🔓" : "🔒"}</button>`
-          + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.resetPwTitle")}">🔑</button>`
-          + `<button class="chip-btn icon-btn" data-op="delete" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.deleteTitle")}">🗑️</button>`;
-      }
-      return `<tr>
+      : "";
+    actions = roleSel
+      + `<button class="chip-btn icon-btn" data-op="disable" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${u.isDisabled ? t("admin.enableTitle") : t("admin.disableTitle")}">${u.isDisabled ? "🔓" : "🔒"}</button>`
+      + `<button class="chip-btn icon-btn" data-op="resetpw" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.resetPwTitle")}">🔑</button>`
+      + `<button class="chip-btn icon-btn" data-op="delete" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.deleteTitle")}">🗑️</button>`;
+  }
+  return `<tr>
         <td>${escapeHtml(u.username)}${self}</td>
         <td>${escapeHtml(u.nickname || "")}</td>
         <td>${role}</td>
@@ -8251,7 +8289,28 @@ async function loadAdminUsers() {
         <td>${fmtDateTime(Number(u.createdAt) || 0)}</td>
         <td>${actions}</td>
       </tr>`;
-    }).join("") || `<tr><td colspan="7" class="admin-empty">${t("admin.noUsers")}</td></tr>`;
+}
+
+/** 按搜索词（用户名 / 昵称 / userId）过滤渲染用户表。 */
+function renderAdminUsers() {
+  const box = $("adminUsersSearch");
+  const q = ((box && box.value) || "").trim().toLowerCase();
+  const meId = state.memberId;
+  const list = q
+    ? adminUsersCache.filter((u) => [u.username, u.nickname, u.userId].some((v) => String(v || "").toLowerCase().includes(q)))
+    : adminUsersCache;
+  $("adminUserRows").innerHTML = list.length
+    ? list.map((u) => adminUserRow(u, meId)).join("")
+    : `<tr><td colspan="7" class="admin-empty">${t(q ? "admin.usersNoMatch" : "admin.noUsers")}</td></tr>`;
+}
+
+async function loadAdminUsers() {
+  try {
+    const res = await fetch("/ag-ui/admin/users", { headers: { Authorization: "Bearer " + state.token } });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
+    adminUsersCache = Array.isArray(data) ? data : [];
+    renderAdminUsers();
   } catch { $("adminUserRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
 }
 
@@ -13088,6 +13147,9 @@ function init() {
       if (btn) orphanAdminAction(btn.dataset.orp, btn.dataset.type, btn.dataset.id, btn.dataset.name);
     }));
   $("metricsRefreshBtn").onclick = () => loadAdminMetrics();
+  $("bridgeProbeBtn").onclick = () => { loadBridgeHealth(true); loadBridgeCaps(true); };
+  $("adminUsersSearch").addEventListener("input", renderAdminUsers);
+  $("cfgSnapshotBtn").onclick = loadConfigSnapshot;
   const mr = $("metricsRange");
   if (mr) mr.onchange = () => { if (lastMetricsData) renderMetricsDashboard(lastMetricsData); };
   $("cfgSave").onclick = saveConfigGovernance;

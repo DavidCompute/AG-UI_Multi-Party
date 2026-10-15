@@ -3741,7 +3741,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.3.6 用户搜索
 
-**（代码中未找到依据）**：`#adminUsersView` / `#adminUserRows` 只渲染全量列表，`app.js` 的 `loadAdminUsers` 不带任何过滤参数，DOM 中也没有用户搜索输入框。用户管理 tab **不提供搜索**。
+**已提供（1.0.230）**：`#adminUsersSearch`（`admin.usersSearchPh`）对 `#adminUserRows` 做**前端过滤**（按用户名 / 昵称 / userId，大小写不敏感）：`loadAdminUsers` 拉全量后写入 `adminUsersCache`，`renderAdminUsers()` 按输入过滤渲染；`input` 事件触发重渲染，右侧「×」由 `initSearchClears()` 统一接线清空。无匹配时显示 `admin.usersNoMatch`。
 
 ---
 
@@ -4021,9 +4021,9 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 接口：读 `GET /ag-ui/admin/config/governance`，写 `POST /ag-ui/admin/config`（`app.js:7007-7076`）。
 
-#### 8.10.1 可热改键（UI 12 个 / 状态层 13 个）+ 边界
+#### 8.10.1 可热改键（UI 13 个 / 状态层 13 个）+ 边界
 
-`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-34`）共 **13** 个字段，但 UI 表单只呈现 **12** 个（`messageWriteDebounceMs` 仅 API 支持、无 UI 输入框）。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:37-50`）。
+`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-34`）共 **13** 个字段，UI 表单亦呈现 **13** 个（`#cfgMessageWriteDebounceMs`，**1.0.230 补齐**）。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:37-50`）。
 
 | # | 前端字段 DOM id | 键 `key` | 类型 | UI 标签 i18n | 边界 / 校验 |
 |---|---|---|---|---|---|
@@ -4039,7 +4039,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 10 | `#cfgThinking` | `thinkingMode` | bool | `admin.thinking` | 三态 |
 | 11 | `#cfgApprovalTools` | `requireApprovalToolNames` | list | `admin.approvalTools` | 逗号分隔；空 = 不修改 |
 | 12 | `#cfgFrameOrigins` | `allowedFrameOrigins` | list | `admin.frameOrigins` | 逗号分隔；空 = 不修改 |
-| — | （无 UI） | `messageWriteDebounceMs` | int | — | ≥ 0 |
+| 13 | `#cfgMessageWriteDebounceMs` | `messageWriteDebounceMs` | int | `admin.writeDebounce` | ≥ 0 |
 
 边界校验在服务端 `POST /ag-ui/admin/config`（`ConfigGovernanceApi.cs:88-93`）：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` 不能为负。
 
@@ -4061,7 +4061,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 - `persistence`：`enabled`、`filePath`；
 - `agents`：`provider`、`enableTools`、`enableWebTools`、`thinkingMode`、`dailyTokenQuotaPerUser`、`requireApprovalToolNames`、`memory.{enabled,provider,embeddingModel,embeddingDimensions,retentionDays,scope}`。
 
-> **注意（偏差）**：`GET /ag-ui/admin/config` 是一个**纯接口**——`app.js` 中**未找到任何消费方**（全仓仅 `POST /admin/config`、`GET /admin/config/governance` 被前端调用），而 `admin.configHint` 的文案却写着「见数据备份菜单「系统状态」旁的参数快照」，该入口在代码中不存在。详见 §8.17。
+> **已修复（1.0.230）**：`GET /ag-ui/admin/config` 现由「配置治理」页的 **「只读参数快照」按钮**（`#cfgSnapshotBtn` → `loadConfigSnapshot`）消费；`admin.configHint` 文案已同步改为指向该按钮（不再指向不存在的入口）。
 
 ---
 
@@ -4252,19 +4252,19 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 以下均以代码为准（逐项已回代码核实）：
 
 1. **前端管理端已按 `platformRole` 细分（1.0.194 修复）**。`#meMenu` 的管理菜单与 `#adminModal` 的页签可见性现由 `roleRank` / `applyAdminTabVisibility` 按生效角色收敛：Operator 及以上可见「管理控制台」「系统状态」，Admin 及以上可见数据备份 / 模型配置 / 白标；Operator 的控制台仅只读页签（用量 / 审计 / 运行指标 / 员工绩效）。与 `docs/RBAC.md` §5、`docs/ui-design.md` §7.6「按生效角色细分菜单」现已一致。
-2. **`GET /ag-ui/admin/config`（只读快照）是纯接口，`app.js` 未消费**。全仓前端仅调用 `POST /ag-ui/admin/config` 与 `GET /ag-ui/admin/config/governance`；而 `admin.configHint` 文案指向的「数据备份菜单「系统状态」旁的参数快照」在代码中**不存在**对应界面。
-3. **「桥健康」在「运行指标」tab 内**（`#adminBridgeRows`，`app.js:6967-6977`），**不是独立 tab**；「白标」是独立弹窗 `#brandModal`（非 tab）；「系统状态」也是独立弹窗 `#statusModal`（非 tab）。
-4. **用户管理无搜索框**（§8.3.6）；若既有文档描述「用户搜索」则为误述。
+2. **【已修复 1.0.230】`GET /ag-ui/admin/config`（只读快照）现已被消费**：「配置治理」页新增「只读参数快照」按钮（`loadConfigSnapshot`），`admin.configHint` 文案同步指向该按钮。
+3. **「桥健康」在「运行指标」tab 内**（`#adminBridgeRows`，`app.js`），**不是独立 tab**；**1.0.230 起同页并列「桥接能力协商」表**（`#adminBridgeCapsRows`，`loadBridgeCaps`）；「白标」是独立弹窗 `#brandModal`（非 tab）；「系统状态」也是独立弹窗 `#statusModal`（非 tab）。
+4. **【已修复 1.0.230】用户管理已提供搜索**（§8.3.6）：`#adminUsersSearch` 前端过滤（用户名 / 昵称 / userId）。
 5. 附：`docs/execution-configuration.md` 与 `docs/enterprise-compliance.md` 描述的执行参数默认值与擦除语义，与本章代码一致（`ExecutionOptions` / `ComplexityTimeoutOptions` 默认值、`AccountErasureService` 步骤均对得上）；不一致处以上两处（1、2）为准。
 
 ---
 
 ### 8.18 需复核点
 
-1. **`executionOrder` 中 `streaming` 位置**：UI 提示白名单仅列 `bridge / pipeline / relay / org_route`，但代码白名单实际含 `streaming`（恒置末）；两者不一致，属文档/界面表述差异。
-2. **配置治理 12 vs 13 键**：`messageWriteDebounceMs` 在状态层与写请求体存在，但 UI 无输入框；若需在线调，需补前端字段。
-3. **`Operator` 只读控制台已落地（1.0.194）**：「管理控制台」的只读页签（用量 / 审计 / 运行指标）消费 Operator 只读端点；其中 `GET /ag-ui/admin/bridge-capabilities` **仍未接入前端**（`bridge-health` 已在运行指标页消费）。
-4. **`bridge-health` 实时探测**：前端未传 `refresh`，只展示周期探测缓存；若想看「立即探测」需在 UI 补传 `refresh=true`（后端已支持）。
+1. **`executionOrder` 中 `streaming` 位置**：UI 标注白名单含 `streaming`（i18n `admin.execOrder` 与 placeholder 均已含），与代码白名单一致；`streaming` 恒置末。
+2. **【已修复 1.0.230】配置治理 12 vs 13 键**：已补 `#cfgMessageWriteDebounceMs` 输入框（UI 13 个键）。
+3. **【已修复 1.0.230】`GET /ag-ui/admin/bridge-capabilities` 已接入前端**：「运行指标」页「桥接能力协商」表（协议 / 工具 / 附件 / 审批类型；`refresh=true` 立即探测）。
+4. **【已修复 1.0.230】`bridge-health` 实时探测**：`#bridgeProbeBtn`「立即探测」以 `?refresh=true` 实时探测（连同能力协商）。注意参数为 **`refresh=true`**（`bool` 绑定不接受 `1`）。
 5. **导入的「群 id 重生成」与「账号资料更新、密码不覆盖」语义**：迁移 / 灾备场景需向用户说明清楚（详见 §8.12.2）。
 6. **审计保留 5000 条**与前端 `limit=200`：需要完整历史请用 CSV 导出（无 200 上限，但受 5000 容量约束）。
 
@@ -4568,8 +4568,8 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 配额） | 运维 |
 | GET | `/ag-ui/admin/audit` | 操作审计日志查询（`limit` 最多 200；过滤 `actor` / `action` / `targetId` / `fromMs` / `toMs`） | 运维 |
 | GET | `/ag-ui/admin/audit.csv` | 审计日志导出 CSV（UTF-8 BOM，无 200 条上限） | 运维 |
-| GET | `/ag-ui/admin/bridge-health` | 桥接端点健康度（`?refresh=1` 实时探测） | 运维 |
-| GET | `/ag-ui/admin/bridge-capabilities` | 桥接能力协商（`?refresh=1` 实时探测） | 运维 |
+| GET | `/ag-ui/admin/bridge-health` | 桥接端点健康度（`?refresh=true` 实时探测） | 运维 |
+| GET | `/ag-ui/admin/bridge-capabilities` | 桥接能力协商（`?refresh=true` 实时探测） | 运维 |
 | GET | `/ag-ui/admin/metrics` | 轻量运行指标快照 | 运维 |
 | GET | `/ag-ui/admin/config` | 运维配置只读快照（auth / groupChat / storage / persistence / agents 汇总） | 管理员 |
 | GET | `/ag-ui/admin/config/governance` | 配置治理当前覆盖值 | 管理员 |
@@ -5112,8 +5112,8 @@ service:
 
 以下均经源码核实（行号为撰写时的定位，供回查）：
 
-1. **`GET /ag-ui/admin/config` 是纯接口，前端未消费**。前端配置治理页读取的是 `GET /ag-ui/admin/config/governance`（`loadConfigGovernance`）并写入 `POST /ag-ui/admin/config`（`saveConfigGovernance`）；`wwwroot/app.js` 中不存在对 `GET /ag-ui/admin/config` 的调用。依据：`ConfigGovernanceApi.cs` L119-122、`AdminApi.cs` L205-259、`wwwroot/app.js` L7008 / L7065。
-2. **`GET /ag-ui/admin/bridge-capabilities` 前端未消费**。`wwwroot/app.js` 未检索到 `bridge-capabilities`；注意：**`GET /ag-ui/admin/bridge-health` 有被消费**（`loadAdminMetrics`，`app.js` L6967）。依据：`AdminApi.cs` L181-197。
+1. **【已修复 1.0.230】`GET /ag-ui/admin/config` 已被前端消费**：「配置治理」页「只读参数快照」按钮（`loadConfigSnapshot`）调用该端点并展开 JSON。依据：`wwwroot/app.js` 的 `loadConfigSnapshot`。
+2. **【已修复 1.0.230】`GET /ag-ui/admin/bridge-capabilities` 已被前端消费**：「运行指标」页「桥接能力协商」表（`loadBridgeCaps`）；`bridge-health` 同页消费，且两者均支持 `?refresh=true` 立即探测（`#bridgeProbeBtn`）。
 3. **`Agents:Memory:ModelDownloadUrl` 在 `MemoryOptions` 中无对应属性**（`AgentOptions.cs` 的 `MemoryOptions` 无该成员）。该键由**桌面组合根直接经 `IConfiguration` 读取**（`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`），`AgentHosting.cs` L138-141 的日志文案也提及它；但 `Agents:Memory` 绑定到强类型 Options 时**不认这个键**。`README.md` / `README.en.md` / 桌面 README 均把它当配置键描述。依据：`AgentOptions.cs` L254-413、`DesktopApp.cs`、`AgentHosting.cs`。
 4. **`advanceOnClick` 服务端解析但前端未使用**。服务端 `SlideTransition` 含 `AdvanceOnClick` 字段并从 `<p:transition>` 解析、随 `/ag-ui/preview/{id}/play` 清单下发；前端仅在 `scheduleAutoAdvance` 中读 `tr.advanceAfterMs`，**未读 `advanceOnClick`**。依据：`PresentationPlayback.cs` L6、`wwwroot/app.js` L9331-9341。
 5. **`Agents:WorkToolsEnabled`（compose `Agents__WorkToolsEnabled`）/ `enableWorkTools` 无 C# 绑定属性**。协议文档 §5.7（`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`）与前端 i18n（`agent.form.enableWorkTools` 等）均提到它，但 `AgentOptions` 与 `AgentDefinition` 中均无该属性（`src/**/*.cs` 检索零命中）。第 3 章草稿亦已指出该表单分区未渲染。依据：`docker-compose.yml` L188-191、`AgentOptions.cs`、`i18n/zh.js` L272-274。

@@ -1729,6 +1729,12 @@
       </div>
       <div class="admin-body">
       <div id="adminUsersView">
+        <div class="admin-metrics-head">
+          <span class="search-clear-wrap" style="width:280px">
+            <input id="adminUsersSearch" class="modal-input" autocomplete="off" data-i18n-placeholder="admin.usersSearchPh" />
+            <button type="button" class="search-clear" data-clear-for="adminUsersSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
+        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead><tr><th data-i18n="admin.thUser">用户名</th><th data-i18n="admin.thNick">昵称</th><th data-i18n="admin.thRole">角色</th><th data-i18n="admin.thStatus">状态</th><th data-i18n="admin.thGroups">所在知聚</th><th data-i18n="admin.thReg">注册时间</th><th data-i18n="admin.thOps">操作</th></tr></thead>
@@ -1874,7 +1880,7 @@
             </div>
           </div>
           <div class="admin-metric-col">
-            <h4 data-i18n="admin.metricBridgeHealth">桥接端点健康</h4>
+            <h4><span data-i18n="admin.metricBridgeHealth">桥接端点健康</span> <button id="bridgeProbeBtn" class="chip-btn" type="button" data-i18n="admin.bridgeProbe">立即探测</button></h4>
             <div class="admin-table-wrap">
               <table class="admin-table">
                 <thead><tr><th data-i18n="admin.thAgent">数字员工</th><th data-i18n="admin.thStatus">状态</th><th data-i18n="admin.thLatency">延迟</th><th data-i18n="admin.thDetail">详情</th></tr></thead>
@@ -1882,10 +1888,19 @@
               </table>
             </div>
           </div>
+          <div class="admin-metric-col">
+            <h4 data-i18n="admin.bridgeCapsTitle">桥接能力协商</h4>
+            <div class="admin-table-wrap">
+              <table class="admin-table">
+                <thead><tr><th data-i18n="admin.thAgent">数字员工</th><th data-i18n="admin.thProtocol">协议</th><th data-i18n="admin.thTools">工具</th><th data-i18n="admin.thAttachments">附件</th><th data-i18n="admin.thApprovalTypes">审批类型</th></tr></thead>
+                <tbody id="adminBridgeCapsRows"></tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
       <div id="adminConfigView" class="hidden">
-        <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="admin.configHint">在线调整并持久化运维参数（无需改配置文件 / 重启）。存储提供方 / 模型 / 记忆提供方等<span style="color:var(--warn)">需重启</span>的项目为只读，见数据备份菜单「系统状态」旁的参数快照。</p>
+        <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="admin.configHint">在线调整并持久化运维参数（无需改配置文件 / 重启）。存储提供方 / 模型 / 记忆提供方等<span style="color:var(--warn)">需重启</span>的项目为只读，可点下方「只读参数快照」查看当前生效值。</p>
         <div class="config-grid">
           <div class="form-group"><label data-i18n="admin.session">会话有效期（小时）</label><input id="cfgSessionTtlHours" class="modal-input" type="number" min="1" max="720" /></div>
           <div class="form-group"><label data-i18n="admin.history">单知聚消息历史上限</label><input id="cfgMessageHistoryLimit" class="modal-input" type="number" min="1" max="100000" /></div>
@@ -1893,6 +1908,7 @@
           <div class="form-group"><label data-i18n="admin.maxChars">单消息最大字符数</label><input id="cfgMaxMessageChars" class="modal-input" type="number" min="1" max="1000000" /></div>
           <div class="form-group"><label data-i18n="admin.retention">消息保留天数（0=不清理）</label><input id="cfgMessageRetentionDays" class="modal-input" type="number" min="0" /></div>
           <div class="form-group"><label data-i18n="admin.quota">每日 Token 配额 / 用户</label><input id="cfgDailyTokenQuota" class="modal-input" type="number" min="0" /></div>
+          <div class="form-group"><label data-i18n="admin.writeDebounce">流式落库防抖（毫秒，0=立即）</label><input id="cfgMessageWriteDebounceMs" class="modal-input" type="number" min="0" /></div>
         </div>
         <div class="config-checks">
           <label class="cfg-check"><input id="cfgRequireToken" type="checkbox" /> <span data-i18n="admin.reqRealTime">实时通道强制令牌（RequireTokenOnRealTime）</span></label>
@@ -1903,13 +1919,15 @@
         <div class="form-group"><label data-i18n="admin.approvalTools">需审批的工具名（逗号分隔）</label><input id="cfgApprovalTools" class="modal-input" placeholder="publish_announcement"></div>
         <div class="form-group"><label data-i18n="admin.frameOrigins">允许 iframe 嵌入的来源（逗号分隔，空=禁止嵌入）</label><input id="cfgFrameOrigins" class="modal-input" placeholder="https://portal.example.com"></div>
         <div class="modal-actions" style="padding-top:8px">
+          <button id="cfgSnapshotBtn" class="btn-ghost" data-i18n="admin.configSnapshot">只读参数快照</button>
           <button id="cfgReload" class="btn-ghost" data-i18n="admin.reload">刷新</button>
           <button id="cfgSave" class="send" data-i18n="admin.save">保存</button>
         </div>
+        <pre id="cfgSnapshot" class="hidden" style="max-height:280px;overflow:auto;font-size:11.5px;line-height:1.5;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:8px;white-space:pre-wrap;word-break:break-word"></pre>
       </div>
       <div id="adminExecView" class="hidden">
         <p class="form-hint" style="margin:2px 0 10px" data-i18n-html="admin.execHint">调整数字员工<b>运行时执行参数</b>（时序 / 重试 / 轮次 / 阶段开关），保存后立即对后续调用生效并持久化（无需改配置 / 重启）。角色级禁用覆盖在「数字员工管理 → 编辑 → 执行阶段」中维护。</p>
-        <div class="form-group"><label data-i18n="admin.execOrder">执行阶段顺序（逗号分隔，白名单：bridge / pipeline / relay / org_route）</label><input id="efExecutionOrder" class="modal-input" placeholder="bridge,pipeline,relay,org_route,streaming" /></div>
+        <div class="form-group"><label data-i18n="admin.execOrder">执行阶段顺序（逗号分隔，白名单：bridge / pipeline / relay / org_route / streaming）</label><input id="efExecutionOrder" class="modal-input" placeholder="bridge,pipeline,relay,org_route,streaming" /></div>
         <div class="config-checks">
           <label class="cfg-check"><input id="efEnableBridge" type="checkbox" /> <span data-i18n="admin.execBridge">启用桥接阶段（bridge）</span></label>
           <label class="cfg-check"><input id="efEnablePipeline" type="checkbox" /> <span data-i18n="admin.execPipeline">启用流水线阶段（pipeline）</span></label>
