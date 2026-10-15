@@ -3245,7 +3245,7 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 
 - `preset` = `transition` 的**第一个子元素**的本地名（`fade` / `push` / `wipe` / `cover` / `dissolve` / `cut` …），无子元素时取 `"cut"`；
 - 方向 / 方向轴 / 轮辐写在**子元素**上（如 `<p:push dir="l"/>`），`direction` / `orientation` / `spokes` 从子元素（回退到 `transition` 自身）取；
-- `speed` 取 `transition` 的 `spd`；
+- `speed` 取 `transition` 的 `spd`（`slow` / `med` / `fast`，缺省无）；
 - `advanceAfterMs` 取 `advTm`（毫秒，缺省 0）；
 - `advanceOnClick` = `advClick != "0"`（即缺省视为 `true`）；前端播放态据此决定「点击画面是否推进」（见 7.8.2）。
 
@@ -3258,7 +3258,7 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 | `push` / `cover` / `pull` / `wipe` / `split` / `blinds` / `checker` / `strips` / `comb` / `randombar` | `l`/`r`/`t`/`b`→`l`/`r`/`u`/`d` | `doc-tr-push-l` / `-r` / `-u` / `-d`（无方向则淡入） | 推入 / 覆盖 / 擦除等近似为位移 |
 | 其它（`fade` / `dissolve` / `newsflash` / `wheel` / `circle` / `diamond` / `plus` / `wedge` …） | — | `doc-tr-fade` | 近似淡入 |
 
-CSS 时长固定（`.doc-tr-fade`/`-zoom` = `.45s`，`-push-*` = `.5s`，`style.css`）。**注意：服务端解析的 `speed`（spd）、`orientation`、`spokes` 前端未使用**（只用 `preset` 与 `dir`）。
+CSS 时长 = 基准（`.doc-tr-fade` / `-zoom` = `.45s`，`-push-*` = `.5s`）× `--doc-tr-scale`（`style.css`）。`runCanvasAnimation` 按该页转场的 `speed`（`spd`）设置倍率：`slow` = 1.8、`fast` = 0.55、其它（含 `med` / 缺省）= 1（1.0.233 起生效）——即 `slow` 转场约 0.81s、`fast` 约 0.25s。**注意：`orientation`、`spokes` 前端仍未使用**（只用 `preset` / `dir` / `speed`）。
 
 跨页切换播该页转场（`playTransition(m.transitions[to.slide])`）；页内分步则播短淡入（`playStepFlash`，`doc-tr-fade`）。
 
@@ -3502,7 +3502,7 @@ LibreOffice 导 PDF **会丢动画层**。若自研整份形状级渲染器，�
 | 项 | 文档说法 | 代码事实 | 结论 |
 |---|---|---|---|
 | `advanceOnClick` | 文档未提及 | 服务端解析进清单（`SlideTransition.AdvanceOnClick`） | **已修复 1.0.232**：前端播放态支持「点击画面推进」并遵循该字段（`false` 时点击不推进；见 7.8.2） |
-| 转场 `speed` / `orientation` / `spokes` | `docs/ui-design.md` §2.5 称“解析（preset / 方向 / 速度 / 自动前进毫秒）”并下发 | 三者被解析进清单，但**前端未使用**（只用 preset 与 dir，CSS 时长固定） | 已核实：解析但未使用 |
+| 转场 `speed` / `orientation` / `spokes` | `docs/ui-design.md` §2.5 称“解析（preset / 方向 / 速度 / 自动前进毫秒）”并下发 | 三者都被解析进清单 | **部分已修复 1.0.233**：`speed` 已用于决定转场时长（`slow` 1.8× / `fast` 0.55×，见 7.6.3）；`orientation` / `spokes` 仍未使用 |
 | 播放层媒体（视频 / 音频） | 未有任何文档宣称支持 | 播放层**无**媒体还原（无媒体字段 / 元素） | 已核实：不支持（如实说明的边界，非文档冲突） |
 | 在线查看入口数量 | `docs/ui-design.md` §2.5 表内写「可从**两个**入口唤起」，随后却列了 ①②③ 三个 | 代码确有**三个**入口（消息附件 / 技能试运行产出 / 输出物） | 文档笔误：应为“三个” |
 | 「👁」在线查看按钮 | README / ROADMAP / ui-design 均称“仅图标、悬浮提示 / 无障碍名『在线查看』” | 代码 `textContent="👁"`、`title=msg.previewTip`、`aria-label=msg.preview` | **一致**，无偏差 |

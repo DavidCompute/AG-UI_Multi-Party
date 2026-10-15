@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.233 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.233 Release Notes (current Windows desktop release)
+
+**版本说明**：**PPT 在线播放转场遵循 `spd` 速度**——此前清单里每页转场的 `speed`（`spd`：`slow`/`med`/`fast`）被服务端解析、下发，但前端未用（CSS 时长写死）。现按 `speed` 调节转场时长。
+**Version note**: **PPT online playback transitions honor `spd` speed** — the per-slide transition `speed` (`spd`: `slow`/`med`/`fast`) had been parsed and sent down in the manifest, but the front end ignored it (CSS durations were fixed). The duration now follows `speed`.
+
+## 变更
+# Changes
+
+中文：
+- **`speed` → 转场时长**：CSS 转场时长改为 `基准 × --doc-tr-scale`（`style.css`）；`runCanvasAnimation(cls, speed)` 按该页转场的 `speed` 设置倍率：`slow` = 1.8、`fast` = 0.55、其它（含 `med` / 缺省）= 1。即淡入 / 缩放：默认 0.45s、`slow` ≈0.81s、`fast` ≈0.25s；推入类默认 0.5s、`slow` 0.9s。
+- **清理计时器**：动画类的移除延时改为 `≈基准 × 倍率 + 150ms`，与真实时长对齐（此前固定 600ms）。
+- 页内分步仍用短淡入（`playStepFlash` 显式传 `fast`）。
+English:
+- **`speed` → transition duration**: the CSS transition duration is now `base × --doc-tr-scale` (`style.css`); `runCanvasAnimation(cls, speed)` sets the scale from that page's transition `speed`: `slow` = 1.8, `fast` = 0.55, otherwise (including `med` / absent) = 1. So fade / zoom: 0.45s by default, `slow` ≈0.81s, `fast` ≈0.25s; push-style: 0.5s by default, 0.9s when `slow`.
+- **Timer cleanup**: the class-removal delay is now `≈base × scale + 150ms`, matching the real duration (it used to be a fixed 600ms).
+- In-page steps still play a short fade-in (`playStepFlash` explicitly passes `fast`).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §7.6.3（转场映射补充 `speed` → 时长）与 §7.14（`speed` 标记为「部分已修复 1.0.233」）；`docs/feature-review-2026-10.md` §8.7/§8.10 状态更新。
+English: `docs/user-guide.md` / `en.md` §7.6.3 (transition mapping now notes `speed` → duration) and §7.14 (`speed` marked "partly fixed in 1.0.233"); `docs/feature-review-2026-10.md` §8.7/§8.10 statuses updated.
+
+## 测试
+# Tests
+
+中文：浏览器实测（重建 web 后）：`runCanvasAnimation` 后舞台 `animationDuration` 为 `slow` = `0.81s`、`fast` = `0.2475s`、`med` / 缺省 = `0.45s`、push + `slow` = `0.9s`，页面无报错。`node --check` 通过；`dotnet build` 0 错误；重建 web 后健康 200。
+English: browser-verified (after rebuilding web): after `runCanvasAnimation`, the stage's `animationDuration` is `slow` = `0.81s`, `fast` = `0.2475s`, `med` / absent = `0.45s`, push + `slow` = `0.9s`, with no page errors. `node --check` passes; `dotnet build` 0 errors; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.232 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.232 Release Notes (current Windows desktop release)
 

@@ -10655,18 +10655,21 @@ function transitionClass(tr) {
     return side ? "doc-tr-push-" + side : "doc-tr-fade";
   return "doc-tr-fade"; // fade / dissolve / newsflash / wheel / circle / diamond / plus / wedge … → 近似淡入
 }
-function runCanvasAnimation(cls) {
+function runCanvasAnimation(cls, speed) {
   const c = $("docPlayStage"); // 转场作用于整个舞台：底图与精灵层一起动，避免撕裂
   if (!c || !cls) return;
+  // 转场速度（OOXML spd：slow / med / fast）→ CSS 动画时长倍率（见 style.css 的 --doc-tr-scale）
+  const scale = speed === "slow" ? 1.8 : speed === "fast" ? 0.55 : 1;
+  c.style.setProperty("--doc-tr-scale", String(scale));
   c.classList.remove(...DOC_TRANSITION_CLASSES);
   void c.offsetWidth; // 强制重排以重启动画
   c.classList.add(cls);
-  setTimeout(() => c.classList.remove(cls), 600);
+  setTimeout(() => c.classList.remove(cls), Math.round(500 * scale) + 150);
 }
-/** 跨幻灯片：按该页转场。 */
-function playTransition(tr) { runCanvasAnimation(transitionClass(tr)); }
+/** 跨幻灯片：按该页转场（含 spd 速度）。 */
+function playTransition(tr) { runCanvasAnimation(transitionClass(tr), tr && String(tr.speed || "").toLowerCase()); }
 /** 页内分步：短淡入，避免硬切。 */
-function playStepFlash() { runCanvasAnimation("doc-tr-fade"); }
+function playStepFlash() { runCanvasAnimation("doc-tr-fade", "fast"); }
 /** 该幻灯片是否允许「点击画面推进」（OOXML `advClick`）：无转场元素或缺省字段时为 true，仅显式 false 才禁止。 */
 function slideAdvanceOnClick(slide) {
   const m = docPlayManifest;

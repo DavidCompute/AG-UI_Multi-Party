@@ -3251,7 +3251,7 @@ The server parses each slide's `<p:transition>` (`ParseTransition`, `Presentatio
 
 - `preset` = the local name of the **first child element** of `transition` (`fade` / `push` / `wipe` / `cover` / `dissolve` / `cut` …), or `"cut"` when there is no child element;
 - The direction / orientation / spokes are written on the **child element** (e.g. `<p:push dir="l"/>`), and `direction` / `orientation` / `spokes` are taken from the child element (falling back to `transition` itself);
-- `speed` takes `transition`'s `spd`;
+- `speed` takes `transition`'s `spd` (`slow` / `med` / `fast`, absent by default);
 - `advanceAfterMs` takes `advTm` (milliseconds, default 0);
 - `advanceOnClick` = `advClick != "0"` (i.e., the default is treated as `true`); the frontend uses it to decide whether clicking the stage advances (see 7.8.2).
 
@@ -3264,7 +3264,7 @@ The front end's `transitionClass` (`app.js:9307-9317`) maps preset + dir to CSS 
 | `push` / `cover` / `pull` / `wipe` / `split` / `blinds` / `checker` / `strips` / `comb` / `randombar` | `l`/`r`/`t`/`b`→`l`/`r`/`u`/`d` | `doc-tr-push-l` / `-r` / `-u` / `-d` (fade in when there is no direction) | push / cover / wipe etc. approximated as displacement |
 | Other (`fade` / `dissolve` / `newsflash` / `wheel` / `circle` / `diamond` / `plus` / `wedge` …) | — | `doc-tr-fade` | approximated as fade-in |
 
-CSS durations are fixed (`.doc-tr-fade`/`-zoom` = `.45s`, `-push-*` = `.5s`, `style.css`). **Note: the server-parsed `speed` (spd), `orientation`, and `spokes` are not used by the front end** (only `preset` and `dir` are used).
+The CSS duration is a base (`.doc-tr-fade`/`-zoom` = `.45s`, `-push-*` = `.5s`) times `--doc-tr-scale` (`style.css`). `runCanvasAnimation` sets the scale from that page's transition `speed` (`spd`): `slow` = 1.8, `fast` = 0.55, otherwise (including `med` / absent) = 1 (effective since 1.0.233) — so a `slow` transition is ≈0.81s and a `fast` one ≈0.25s. **Note: `orientation` and `spokes` are still unused by the front end** (only `preset` / `dir` / `speed` are used).
 
 A cross-page switch plays that page's transition (`playTransition(m.transitions[to.slide])`); an in-page step plays a short fade-in (`playStepFlash`, `doc-tr-fade`).
 
@@ -3508,7 +3508,7 @@ The following are deviations / points not covered by the docs found by checking 
 | Item | Documentation claim | Code fact | Conclusion |
 |---|---|---|---|
 | `advanceOnClick` | Not mentioned in the docs | The server parses it into the manifest (`SlideTransition.AdvanceOnClick`) | **Fixed in 1.0.232**: the frontend supports click-to-advance during playback and honors the field (`false` means clicking does not advance; see 7.8.2) |
-| Transition `speed` / `orientation` / `spokes` | `docs/ui-design.md` §2.5 says they are "parsed (preset / direction / speed / auto-advance ms)" and sent down | All three are parsed into the manifest, but **the front end does not use them** (only preset and dir are used, and CSS durations are fixed) | Verified: parsed but unused |
+| Transition `speed` / `orientation` / `spokes` | `docs/ui-design.md` §2.5 says they are "parsed (preset / direction / speed / auto-advance ms)" and sent down | All three are parsed into the manifest | **Partly fixed in 1.0.233**: `speed` now drives the transition duration (`slow` 1.8× / `fast` 0.55×, see 7.6.3); `orientation` / `spokes` are still unused |
 | Playback-layer media (video / audio) | No documentation claims support | The playback layer has **no** media restoration (no media fields / elements) | Verified: unsupported (a boundary stated faithfully, not a documentation conflict) |
 | Number of online-viewing entry points | The `docs/ui-design.md` §2.5 table says "can be invoked from **two** entry points" but then lists three, ①②③ | The code really does have **three** entry points (message attachment / skill test-run artifacts / Outputs) | Documentation typo: it should be "three" |
 | The "👁" online-viewing button | README / ROADMAP / ui-design all say "icon-only, with the tooltip / accessible name 'View online'" | Code `textContent="👁"`, `title=msg.previewTip`, `aria-label=msg.preview` | **Consistent**, no deviation |

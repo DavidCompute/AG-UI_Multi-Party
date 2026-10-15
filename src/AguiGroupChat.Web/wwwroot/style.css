@@ -945,12 +945,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 @keyframes docTrPushR { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 @keyframes docTrPushU { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes docTrPushD { from { transform: translateY(-100%); } to { transform: translateY(0); } }
-.doc-play-stage.doc-tr-fade { animation: docTrFade .45s ease; }
-.doc-play-stage.doc-tr-zoom { animation: docTrZoom .45s ease; }
-.doc-play-stage.doc-tr-push-l { animation: docTrPushL .5s ease; }
-.doc-play-stage.doc-tr-push-r { animation: docTrPushR .5s ease; }
-.doc-play-stage.doc-tr-push-u { animation: docTrPushU .5s ease; }
-.doc-play-stage.doc-tr-push-d { animation: docTrPushD .5s ease; }
+/* 转场时长 = 基准 × --doc-tr-scale（由 runCanvasAnimation 按 OOXML spd 设置：slow≈1.8 / fast≈0.55 / 其它=1）。 */
+.doc-play-stage.doc-tr-fade { animation: docTrFade calc(.45s * var(--doc-tr-scale, 1)) ease; }
+.doc-play-stage.doc-tr-zoom { animation: docTrZoom calc(.45s * var(--doc-tr-scale, 1)) ease; }
+.doc-play-stage.doc-tr-push-l { animation: docTrPushL calc(.5s * var(--doc-tr-scale, 1)) ease; }
+.doc-play-stage.doc-tr-push-r { animation: docTrPushR calc(.5s * var(--doc-tr-scale, 1)) ease; }
+.doc-play-stage.doc-tr-push-u { animation: docTrPushU calc(.5s * var(--doc-tr-scale, 1)) ease; }
+.doc-play-stage.doc-tr-push-d { animation: docTrPushD calc(.5s * var(--doc-tr-scale, 1)) ease; }
 .doc-play-notes {
   position: fixed; left: 0; right: 0; bottom: 56px; max-height: 26vh; overflow: auto; white-space: pre-wrap;
   padding: 10px 18px; font-size: 14px; line-height: 1.5; color: #eaeaea;
