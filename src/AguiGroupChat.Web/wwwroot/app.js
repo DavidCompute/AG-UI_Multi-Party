@@ -9038,6 +9038,7 @@ function enterSelectMode() {
   vscroll.force = true; // 逐条渲染需带勾选框：强制整表重建（否则窗口未变会早退，不重渲染）
   scheduleVirtualRender();
   updateSelectBar();
+  renderSelectSenderOptions();
 }
 /** 退出多选模式：清空选择并收起工具条。 */
 function exitSelectMode() {
@@ -9097,6 +9098,39 @@ function toggleSelectAllMessages() {
   selectedMsgIds.clear();
   if (!allSelected) ids.forEach((id) => selectedMsgIds.add(id));
   vscroll.force = true; // 全选变化需同步每条勾选框
+  scheduleVirtualRender();
+  updateSelectBar();
+}
+
+/** 刷新多选工具条的「按发送者」下拉：当前话题内出现过的发送者（按出现顺序去重）。 */
+function renderSelectSenderOptions() {
+  const sel = $("selectSender");
+  if (!sel) return;
+  const r = room(state.activeGroupId);
+  const tid = state.activeTopicId || "main";
+  const seen = new Map();
+  (r?.messages || []).forEach((m) => {
+    if (m.sys || (m.topicId || "main") !== tid) return;
+    if (!seen.has(m.senderId)) seen.set(m.senderId, m.senderNickname || m.senderId || "");
+  });
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${escapeHtml(t("sel.senderAll"))}</option>`
+    + [...seen.entries()].map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join("");
+  sel.value = seen.has(cur) ? cur : "";
+}
+
+/** 按发送者勾选：选入当前话题里该发送者的非系统 / 未撤回消息（空 = 全部；替换现有选择）。 */
+function selectBySender(senderId) {
+  const r = room(state.activeGroupId);
+  if (!r) return;
+  const tid = state.activeTopicId || "main";
+  const ids = r.messages
+    .filter((m) => !m.sys && !m.recalled && (m.topicId || "main") === tid)
+    .filter((m) => !senderId || m.senderId === senderId)
+    .map((m) => m.id);
+  selectedMsgIds.clear();
+  ids.forEach((id) => selectedMsgIds.add(id));
+  vscroll.force = true;
   scheduleVirtualRender();
   updateSelectBar();
 }
@@ -13933,6 +13967,7 @@ function init() {
   // ---- 消息多选：入口 / 工具条 / 每条点选 / 转发弹窗 ----
   $("selectBtn").onclick = () => (selectMode ? exitSelectMode() : enterSelectMode());
   $("selectAllBtn").onclick = toggleSelectAllMessages;
+  $("selectSender").addEventListener("change", () => selectBySender($("selectSender").value));
   $("selectCopyBtn").onclick = copySelectedMessages;
   $("selectForwardBtn").onclick = openForwardModal;
   $("selectDeleteBtn").onclick = deleteSelectedMessages;
@@ -14103,6 +14138,7 @@ function init() {
     refreshMessagesEmptyHint(); // 空态引导文案跟随语言
     // 「新建知识库 / 新建图库」弹窗正开着时，它的标题/按钮/占位符不在静态 DOM 的扫描范围内，得自己重刷
     if (!$("libCreateModal").classList.contains("hidden")) renderLibCreateTexts();
+    if (selectMode) renderSelectSenderOptions(); // 多选条里的「按发送者」下拉是动态生成的
   });
 
   // 搜索框右侧“×”清除按钮接线（放在各搜索 input 监听之后，清空时派发的 input 事件可触发过滤）

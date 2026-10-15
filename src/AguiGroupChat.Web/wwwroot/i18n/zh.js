@@ -1402,6 +1402,8 @@ window.I18N_DICTS.zh = {
   "sel.toolbar": "消息多选",
   "sel.count": "已选 {n} 条",
   "sel.selectAll": "全选",
+  "sel.senderAll": "全部发送者",
+  "sel.senderTip": "按发送者勾选（本话题内）",
   "sel.copy": "复制",
   "sel.forward": "转发",
   "sel.delete": "删除",

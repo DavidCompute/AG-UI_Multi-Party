@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.236 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.236 Release Notes (current Windows desktop release)
+
+**版本说明**：**消息多选支持「按发送者勾选」**——多选工具条新增下拉，一键选入当前话题里某位发送者的全部（可批量复制 / 转发 / 删除）。
+**Version note**: **Message multi-select gains "select by sender"** — the multi-select toolbar has a new dropdown that selects all of one sender's messages in the current topic in one go (for batch copy / forward / delete).
+
+## 变更
+# Changes
+
+中文：
+- **`#selectSender` 下拉**（多选工具条内）：列出**当前话题内**出现过的发送者（`renderSelectSenderOptions` 按出现顺序去重，首项 `sel.senderAll`「全部发送者」），选项文案本地化。
+- **`selectBySender(senderId)`**：选入该发送者在本话题内**非系统 / 未撤回**的消息（替换现有选择；空值 = 全部），与「全选」同源地强制重建列表并刷新工具条。
+- 随 `enterSelectMode` 与语言切换（`i18nchanged`）刷新下拉。i18n 新增 `sel.senderAll` / `sel.senderTip`。
+English:
+- **`#selectSender` dropdown** (inside the multi-select toolbar): lists the senders that appear **in the current topic** (`renderSelectSenderOptions`, deduped in appearance order; the first item is `sel.senderAll` "All senders"), with localized options.
+- **`selectBySender(senderId)`**: selects that sender's **non-system / non-recalled** messages in the topic (replacing the current selection; empty = all), forcing a list rebuild and refreshing the toolbar just like "Select all".
+- The dropdown is refreshed on `enterSelectMode` and on language change (`i18nchanged`). New i18n keys `sel.senderAll` / `sel.senderTip`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.3（工具条控件列表）与 §2.7.7（新增「按发送者勾选」说明）。
+English: `docs/user-guide.md` / `en.md` §1.2.3 (toolbar control list) and §2.7.7 (the new "select by sender" note).
+
+## 测试
+# Tests
+
+中文：浏览器实测（重建 web 后）：合成当前话题消息（张三 ×2、李四 ×1、张三系统 ×1、李四已撤回 ×1、另一话题张三 ×1）后，下拉选项为 `全部发送者 / 张三 / 李四`；`selectBySender("u1")` 选 2 条、`("")` 选 3 条、`("u2")` 选 1 条（正确排除系统 / 已撤回 / 跨话题）；下拉在多选条内、`title` 已本地化；页面无报错。`node --check` 与 i18n 审计（**zh=en=1843，missing 0**）、`check-orphan-keys` 全过；重建 web 后健康 200。
+English: browser-verified (after rebuilding web): with synthetic topic messages (Zhang ×2, Li ×1, Zhang system ×1, Li recalled ×1, Zhang in another topic ×1), the dropdown options are `All senders / 张三 / 李四`; `selectBySender("u1")` selects 2, `("")` selects 3, `("u2")` selects 1 (correctly excluding system / recalled / cross-topic); the dropdown sits in the select bar and its `title` is localized; no page errors. `node --check` and the i18n audit (**zh=en=1843, missing 0**), `check-orphan-keys` all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.235 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.235 Release Notes (current Windows desktop release)
 

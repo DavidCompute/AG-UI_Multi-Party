@@ -1405,6 +1405,8 @@ window.I18N_DICTS.en = {
   "sel.toolbar": "Message selection",
   "sel.count": "{n} selected",
   "sel.selectAll": "Select all",
+  "sel.senderAll": "All senders",
+  "sel.senderTip": "Select by sender (in this topic)",
   "sel.copy": "Copy",
   "sel.forward": "Forward",
   "sel.delete": "Delete",

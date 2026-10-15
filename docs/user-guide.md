@@ -328,7 +328,7 @@
 - `#chatGroupMeta`（`.muted`）：知聚元信息。
 - 操作区 `.chat-header-ops`：`#searchBtn`（`chat.search`，🔍）、`#groupFilesBtn`（`gf.tip`，📁）、`#selectBtn`（`sel.btn`，☑）、`#topicSummaryBtn`（`topic.summaryTip`，📌，默认 `hidden`）、`#groupSettingsBtn`（`chat.settings`，⚙）、`#collapseMembersBtn`（`chat.collapseMembers`，`»` / `«`）、`#membersToggle`（`chat.showMembers`，👥）。
 
-聊天区主体包含：话题切换条 `#topicBar`（默认 `hidden`；`topic.mainText`「# 综合」、`topic.newBtn`「➕ 新建话题」）；多选工具条 `#selectBar`（默认 `hidden`，含 `#selectCount`、`#selectAllBtn`/`sel.selectAll`、`#selectCopyBtn`/`sel.copy`、`#selectForwardBtn`/`sel.forward`、`#selectDeleteBtn`/`sel.delete`、`#selectCancelBtn`/`common.cancel`）；消息列表 `#messages`（`role="log"`，空态提示 `chat.selectGroupTip`「💬 请选择一个知聚，开始对话」/`msg.emptyStart`）；正在输入行 `#typingRow`；`#jumpToBottom`（`chat.jumpToBottom`）；搜索导航 `#searchNav`；拖拽上传覆盖层 `#dropOverlay`（`chat.dropHint`「松开以添加附件」）。
+聊天区主体包含：话题切换条 `#topicBar`（默认 `hidden`；`topic.mainText`「# 综合」、`topic.newBtn`「➕ 新建话题」）；多选工具条 `#selectBar`（默认 `hidden`，含 `#selectCount`、`#selectSender`/`sel.senderTip`「按发送者勾选」、`#selectAllBtn`/`sel.selectAll`、`#selectCopyBtn`/`sel.copy`、`#selectForwardBtn`/`sel.forward`、`#selectDeleteBtn`/`sel.delete`、`#selectCancelBtn`/`common.cancel`）；消息列表 `#messages`（`role="log"`，空态提示 `chat.selectGroupTip`「💬 请选择一个知聚，开始对话」/`msg.emptyStart`）；正在输入行 `#typingRow`；`#jumpToBottom`（`chat.jumpToBottom`）；搜索导航 `#searchNav`；拖拽上传覆盖层 `#dropOverlay`（`chat.dropHint`「松开以添加附件」）。
 
 底部输入区 `.composer` 见 1.5。
 
@@ -891,8 +891,9 @@
 
 聊天头部 `#selectBtn`（`☑`，`title`/label = `sel.btn`「多选」）→ `enterSelectMode()`：
 
-- 显示多选工具条 `#selectBar`（`role="toolbar"`，label `sel.toolbar`「消息多选」），含：`#selectCount`（`sel.count`「已选 {n} 条」）、`#selectAllBtn`（`sel.selectAll`「全选」）、`#selectCopyBtn`（`sel.copy`「复制」）、`#selectForwardBtn`（`sel.forward`「转发」）、`#selectDeleteBtn`（`sel.delete`「删除」）、`#selectCancelBtn`（`common.cancel`「取消」）。
+- 显示多选工具条 `#selectBar`（`role="toolbar"`，label `sel.toolbar`「消息多选」），含：`#selectCount`（`sel.count`「已选 {n} 条」）、`#selectSender`（按发送者勾选，`sel.senderTip`）、`#selectAllBtn`（`sel.selectAll`「全选」）、`#selectCopyBtn`（`sel.copy`「复制」）、`#selectForwardBtn`（`sel.forward`「转发」）、`#selectDeleteBtn`（`sel.delete`「删除」）、`#selectCancelBtn`（`common.cancel`「取消」）。
 - 每条消息前出现勾选框 `.select-check`（选中加 `.on`）。「全选」作用于当前话题内已加载的非系统、未撤回消息。
+- **按发送者勾选**（`#selectSender`，1.0.236）：下拉列出**当前话题内**出现过的发送者（`renderSelectSenderOptions` 按出现顺序去重，首项 `sel.senderAll`「全部发送者」）；选择某人即把该发送者在本话题内非系统 / 未撤回的消息**整体选入**（替换现有选择，`selectBySender`）。随 `enterSelectMode` 与语言切换刷新。
 - 按钮点亮规则（`updateSelectBar()`）：复制 / 转发需有可复制文本；删除需有「可撤回」项（本人 / 管理员 + 3 分钟内）。
 
 批量删除**就是批量撤回**：`deleteSelectedMessages()` 对每个可撤回项调用 `POST /ag-ui/group/message/recall`，确认文案 `sel.deleteConfirm`（「删除选中的 {n} 条消息？删除即撤回，消息将被隐藏」）；全部不可撤回时提示 `sel.deleteNone`（「所选消息均不可撤回（仅限本人发送且 3 分钟内）」）。批量复制把每条拼成「发送者: 内容」多行文本到剪贴板，成功提示 `sel.copied`（「已复制 {n} 条消息」）。

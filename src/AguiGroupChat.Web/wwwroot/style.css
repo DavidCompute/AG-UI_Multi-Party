@@ -437,6 +437,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 /* 多选工具条：进入多选模式后出现在话题栏下方 */
 .select-bar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: var(--panel-2); }
 .select-bar .sel-count { font-size: 13px; font-weight: 600; margin-right: 4px; }
+.select-bar .sel-sender { width: auto; max-width: 200px; padding: 4px 8px; font-size: 12.5px; }
 /* 转发弹窗的目标知聚列表 */
 .forward-list { max-height: 45vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .forward-item { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--text); cursor: pointer; font-family: inherit; font-size: 13px; }
