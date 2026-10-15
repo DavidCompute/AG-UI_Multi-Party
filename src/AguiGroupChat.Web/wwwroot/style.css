@@ -2501,7 +2501,8 @@ button { white-space: nowrap; }
 .market-pack-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
 .market-pack-actions { display: flex; gap: 6px; flex: none; }
 .market-preview-list { max-height: 52vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
-.market-preview-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.market-preview-row { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); display: flex; gap: 8px; align-items: flex-start; }
+.market-preview-body { flex: 1; min-width: 0; }
 .market-preview-head { display: flex; align-items: center; gap: 6px; font-size: 13px; flex-wrap: wrap; }
 .market-preview-desc { font-size: 12px; color: var(--muted); margin-top: 3px; }
 .market-preview-bits { font-size: 11.5px; color: var(--muted); margin-top: 3px; }

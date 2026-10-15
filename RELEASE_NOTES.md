@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.239 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.239 Release Notes (current Windows desktop release)
+
+**版本说明**：**模板市场可按需勾选子集安装**——预览里每行可勾选（默认全选），只把需要的数字员工装进自己的目录。
+**Version note**: **The marketplace can install a checked subset** — each preview row is checkable (all checked by default) so you install only the agents you need.
+
+## 变更
+# Changes
+
+中文：
+- **服务端**：`POST /ag-ui/marketplace/import/{packId}` 与 `/install` 接受可选 `agentIds`（空 / 缺省 = 整包）；新增 `FilterAgents` 统一过滤，显式给了名单但一个都不匹配时返回 400「所选数字员工为空」。过滤后仍走原 `ImportDefinitions` 两趟导入（先定新 ID，再重映射包内引用）；**被排除成员的引用按“包外”保留原值**。
+- **前端**：预览弹窗每行加勾选框 + 顶部「全选」开关；「安装」只提交勾选的 `agentIds`；一个都不选时提示 `market.previewNoneSelected` 且不发请求。
+- i18n 新增 `market.previewNoneSelected`。
+English:
+- **Server**: `POST /ag-ui/marketplace/import/{packId}` and `/install` accept an optional `agentIds` (empty / omitted = whole pack); a shared `FilterAgents` does the filtering, returning 400 "selected agents are empty" when an explicit list matches nothing. The filtered set still flows through `ImportDefinitions`'s two-pass import (assign new IDs, then remap intra-pack references); **references to excluded members are kept as-is (treated as outside the pack)**.
+- **Front end**: preview rows gain checkboxes plus a "Select all" toggle at the top; "Install" submits only the checked `agentIds`; selecting none prompts `market.previewNoneSelected` and issues no request.
+- New i18n key `market.previewNoneSelected`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.12（预览勾选子集安装与接口 `agentIds`）；协议 `AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md` §5.9 表格。
+English: `docs/user-guide.md` / `en.md` §3.12 (subset install from the preview and the `agentIds` parameters); the protocol `AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md` §5.9 table.
+
+## 测试
+# Tests
+
+中文：`MarketplaceApiTests` 新增 `Import_Subset_AndValidation`（内置整包 2 → 只装 `agent_finance` 得 1；名单全不匹配 400；远程 `demo` 只装 `mp_member` 得 1），Marketplace 相关合跑 **19/19**。浏览器实测（重建 web 后）：预览列出 2 行且**默认全选**；「全选」取消 → 全不选；此时点「安装」**弹窗不关、不发请求**（守卫生效）；再全选 → 逐行回勾；无页面报错。`node --check`、i18n 审计 **zh=en=1852，missing 0**、`check-orphan-keys`、`dotnet build` 0 错误均过；重建 web 后健康 200。
+English: `MarketplaceApiTests` gains `Import_Subset_AndValidation` (whole built-in pack 2 → only `agent_finance` gives 1; a fully non-matching list is 400; remote `demo` with only `mp_member` gives 1); Marketplace tests **19/19**. Browser-verified (after rebuilding web): the preview lists 2 rows **all checked by default**; toggling "Select all" off unchecks all; clicking "Install" then **keeps the dialog open and issues no request** (the guard works); toggling back re-checks every row; no page errors. `node --check`, the i18n audit **zh=en=1852, missing 0**, `check-orphan-keys` and `dotnet build` 0 errors all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.238 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.238 Release Notes (current Windows desktop release)
 

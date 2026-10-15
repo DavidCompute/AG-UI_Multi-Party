@@ -7361,10 +7361,16 @@ function bindMarketConsole() {
   $("mpCancel").onclick = () => $("marketPublishModal").classList.add("hidden");
   $("mpGo").onclick = publishPack;
   $("marketPreviewCancel").onclick = () => $("marketPreviewModal").classList.add("hidden");
+  $("marketPreviewAll").addEventListener("change", (e) => {
+    for (const cb of document.querySelectorAll("#marketPreviewList [data-preview-agent]")) cb.checked = !!e.target.checked;
+  });
   $("marketPreviewInstall").onclick = async () => {
     if (!marketPreviewCtx) return;
+    const boxes = [...document.querySelectorAll("#marketPreviewList [data-preview-agent]")];
+    const ids = boxes.filter((cb) => cb.checked).map((cb) => cb.getAttribute("data-preview-agent"));
+    if (boxes.length > 0 && ids.length === 0) { toast(t("market.previewNoneSelected")); return; }
     $("marketPreviewModal").classList.add("hidden");
-    await installMarketPack(marketPreviewCtx.sourceId, marketPreviewCtx.packId);
+    await installMarketPack(marketPreviewCtx.sourceId, marketPreviewCtx.packId, ids.length ? ids : null);
   };
   $("marketPreviewModal").addEventListener("click", (e) => { if (e.target === $("marketPreviewModal")) $("marketPreviewModal").classList.add("hidden"); });
   document.addEventListener("keydown", (e) => {
@@ -7440,11 +7446,12 @@ function renderMarketSection(el, sourceId, packs) {
   </div>`).join("");
 }
 
-async function installMarketPack(sourceId, packId) {
+async function installMarketPack(sourceId, packId, agentIds) {
+  const subset = Array.isArray(agentIds) && agentIds.length ? { agentIds } : {};
   const url = sourceId ? "/ag-ui/marketplace/install" : `/ag-ui/marketplace/import/${encodeURIComponent(packId)}`;
   const opts = sourceId
-    ? { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify({ sourceId, packId }) }
-    : { method: "POST", headers: { Authorization: "Bearer " + state.token } };
+    ? { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify({ sourceId, packId, ...subset }) }
+    : { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token }, body: JSON.stringify(subset) };
   try {
     const res = await fetch(url, opts);
     const d = await res.json().catch(() => null);
@@ -7490,11 +7497,13 @@ function renderMarketPreview(d) {
     if (a.knowledgeBaseCount) bits.push(t("market.previewKb", { n: a.knowledgeBaseCount }));
     if (a.memoryType) { const lbl = t("agent.form.memoryType." + a.memoryType); if (lbl && !/^agent\./.test(lbl)) bits.push("🧠 " + lbl); }
     return `<div class="market-preview-row">`
+      + `<label class="gf-check"><input type="checkbox" data-preview-agent="${escapeHtml(a.agentId || "")}" checked /></label>`
+      + `<div class="market-preview-body">`
       + `<div class="market-preview-head"><span class="skill-kind tag-agent">AI</span>`
       + `<b>${escapeHtml(a.nickname || a.agentId || "")}</b> <code>${escapeHtml(a.agentId || "")}</code></div>`
       + (a.description ? `<div class="market-preview-desc">${escapeHtml(a.description)}</div>` : "")
       + (bits.length ? `<div class="market-preview-bits">${escapeHtml(bits.join(" · "))}</div>` : "")
-      + `</div>`;
+      + `</div></div>`;
   }).join("");
 }
 

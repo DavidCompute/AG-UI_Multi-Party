@@ -1950,6 +1950,7 @@ window.I18N_DICTS.zh = {
   "market.previewFail": "预览失败：{err}",
   "market.previewSkills": "技能 {n}",
   "market.previewKb": "知识库 {n}",
+  "market.previewNoneSelected": "请至少选择一个数字员工",
   "market.installed": "已安装「{name}」：{n} 个数字员工",
   "market.publishTitle": "发布分发包",
   "market.packName": "包名",

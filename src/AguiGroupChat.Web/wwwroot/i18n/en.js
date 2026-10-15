@@ -1957,6 +1957,7 @@ window.I18N_DICTS.en = {
   "market.previewFail": "Preview failed: {err}",
   "market.previewSkills": "Skills {n}",
   "market.previewKb": "Knowledge {n}",
+  "market.previewNoneSelected": "Select at least one agent",
   "market.installed": "Installed \u201c{name}\u201d: {n} agents",
   "market.publishTitle": "Publish a pack",
   "market.packName": "Pack name",

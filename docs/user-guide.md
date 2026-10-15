@@ -1581,7 +1581,7 @@
 
 - **内置角色包**（`#marketBuiltin`）：法务 / 研发 / 健康等内置行业包，点「安装」即导入。
 - **在线目录**（`#marketRemote`）：逐个目录源展示，源不可用时只在该源旁标出错（**不影响其它源与内置包**）。
-- **安装前预览**（每个包旁的「预览」→ `#marketPreviewModal`，**1.0.238**）：点「预览」调 `GET /ag-ui/marketplace/preview?packId=&sourceId=`（内置 / 远程同一接口）列出包内数字员工（昵称 / `agentId` / 描述 / 技能数 / 知识库数 / 记忆类型），确认后再点「安装」**不落库**。
+- **安装前预览**（每个包旁的「预览」→ `#marketPreviewModal`，**1.0.238**）：点「预览」调 `GET /ag-ui/marketplace/preview?packId=&sourceId=`（内置 / 远程同一接口）列出包内数字员工（昵称 / `agentId` / 描述 / 技能数 / 知识库数 / 记忆类型），确认后再点「安装」**不落库**。每行可勾选（默认全选，带「全选」开关），**只安装勾选的子集**（`agentIds`）；一个都不选会提示 `market.previewNoneSelected`（不发起安装）。
 - **目录源管理**（`#marketSources`，仅 `Admin` 及以上可见「⚙ 目录源」按钮）：填写名称 + 目录 JSON 地址添加；列表可删除。
 - **发布分包**（「📤 发布分包」→ `#marketPublishModal`）：勾选<b>自己创建</b>的数字员工 + 填包名 → 下载一份分包 JSON（可托管到任意静态服务器作为目录）。非本人创建的不会被发布（服务端 403）。
 
@@ -1596,7 +1596,7 @@
 - **安全净化**：外部包带入的桥接端点 / 令牌（`bridgeEndpoint` / `bridgeToken` / `bridgeMode`）、他实例的用户组 id（`allowedGroupIds`）一律清空，`isPrivate` / `isSkillTarget` 置 false；归属改为安装者。
 - **拉取防护**：仅 http/https；单响应 2MB 上限；10s 超时；不开重定向；目录 60s 缓存；单包 ≤100 个数字员工；`schema` 不符 / 空包 / 缺 `agentId`·`nickname` 一律拒纯。
 
-**接口**：`GET /ag-ui/marketplace`（聚合目录）、`GET /ag-ui/marketplace/preview?packId=&sourceId=`（安装前预览；`sourceId` 空 = 内置）、`POST /ag-ui/marketplace/import/{packId}`（内置包）、`POST /ag-ui/marketplace/install`（`{sourceId, packId}`）、`POST /ag-ui/marketplace/publish`；目录源管理：`GET` / `POST /ag-ui/admin/marketplace/sources`、`DELETE /ag-ui/admin/marketplace/sources/{id}`（仅管理员）。
+**接口**：`GET /ag-ui/marketplace`（聚合目录）、`GET /ag-ui/marketplace/preview?packId=&sourceId=`（安装前预览；`sourceId` 空 = 内置）、`POST /ag-ui/marketplace/import/{packId}`（内置包；body `{ agentIds? }`）、`POST /ag-ui/marketplace/install`（`{sourceId, packId, agentIds?}`；`agentIds` 空 / 缺省 = 整包）、`POST /ag-ui/marketplace/publish`；目录源管理：`GET` / `POST /ag-ui/admin/marketplace/sources`、`DELETE /ag-ui/admin/marketplace/sources/{id}`（仅管理员）。
 
 ---
 

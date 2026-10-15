@@ -178,6 +178,36 @@ public sealed class MarketplaceApiTests : IClassFixture<MarketplaceApiServerFixt
     }
 
     [Fact]
+    public async Task Import_Subset_AndValidation()
+    {
+        var admin = await TokenAsync("mp_admin");
+
+        // 只装其中一个（内置包 business-legal 有 2 个 → 1 个）
+        using var one = Authed(HttpMethod.Post, "/ag-ui/marketplace/import/business-legal", admin);
+        one.Content = JsonContent.Create(new { agentIds = new[] { "agent_finance" } });
+        var oneRes = await _client.SendAsync(one);
+        Assert.Equal(HttpStatusCode.OK, oneRes.StatusCode);
+        Assert.Equal(1, (await oneRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("agentsCreated").GetInt32());
+
+        // 名单一个都不匹配 → 400
+        using var bad = Authed(HttpMethod.Post, "/ag-ui/marketplace/import/business-legal", admin);
+        bad.Content = JsonContent.Create(new { agentIds = new[] { "no_such_agent" } });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(bad)).StatusCode);
+
+        // 远程包同样支持子集（demo 两个，只装 mp_member）
+        await AddSourceAsync(admin, _fx.StationBase + "/catalog.json");
+        using var list = Authed(HttpMethod.Get, "/ag-ui/marketplace", admin);
+        var agg = await (await _client.SendAsync(list)).Content.ReadFromJsonAsync<JsonElement>();
+        var sourceId = agg.GetProperty("remote").EnumerateArray()
+            .First(r => r.GetProperty("ok").GetBoolean()).GetProperty("sourceId").GetString()!;
+        using var sub = Authed(HttpMethod.Post, "/ag-ui/marketplace/install", admin);
+        sub.Content = JsonContent.Create(new { sourceId, packId = "demo", agentIds = new[] { "mp_member" } });
+        var subRes = await _client.SendAsync(sub);
+        Assert.Equal(HttpStatusCode.OK, subRes.StatusCode);
+        Assert.Equal(1, (await subRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("agentsCreated").GetInt32());
+    }
+
+    [Fact]
     public async Task Preview_BuiltinAndRemote_AndValidation()
     {
         var admin = await TokenAsync("mp_admin");

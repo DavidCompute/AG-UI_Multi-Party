@@ -117,11 +117,15 @@ public static class MarketplaceApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
-        // ---- 一键导入内置包 ----
-        root.MapPost("/import/{packId}", (string packId, HttpContext ctx, MarketplaceService market, ChangeHub changes) =>
+        // ---- 一键导入内置包（可只导子集：body { agentIds }；空 / 缺省 = 整包）----
+        root.MapPost("/import/{packId}", (string packId, MarketplaceImportRequest? req, HttpContext ctx, MarketplaceService market, ChangeHub changes) =>
         {
             var userId = WebIdentity.UserId(ctx)!;
-            var result = market.ImportPack(packId, userId);
+            var pack = market.Get(packId);
+            if (pack is null) return Results.NotFound(new AguiError(ErrorCodes.BadRequest, "角色包不存在"));
+            var agents = FilterAgents(pack.Agents, req?.AgentIds);
+            if (agents is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "所选数字员工为空"));
+            var result = market.ImportDefinitions(pack.PackId, pack.Name, agents, userId);
             changes.Notify();
             return Results.Ok(new { ok = true, result.PackId, result.PackName, result.AgentsCreated });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
@@ -142,7 +146,9 @@ public static class MarketplaceApi
             catch (Exception ex) { return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"安装失败：{ex.Message}")); }
 
             foreach (var a in doc.Agents) SanitizeInstalled(a);
-            var result = market.ImportDefinitions(doc.PackId, doc.Name, doc.Agents, userId);
+            var agents = FilterAgents(doc.Agents, req.AgentIds);
+            if (agents is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "所选数字员工为空"));
+            var result = market.ImportDefinitions(doc.PackId, doc.Name, agents, userId);
             changes.Notify();
             audit.Record("marketplace.install", userId, auth.GetUser(userId)?.Username, targetType: "pack", targetId: doc.PackId,
                 detail: $"从「{src.Name}」安装 {result.AgentsCreated} 个数字员工");
@@ -223,6 +229,15 @@ public static class MarketplaceApi
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
+    /// <summary>按 agentIds 过滤要导入的数字员工（null / 空 = 整包）；返回 null 表示「显式给了名单但一个都不匹配」。</summary>
+    private static IReadOnlyList<AgentDefinition>? FilterAgents(IReadOnlyList<AgentDefinition> all, string[]? agentIds)
+    {
+        var ids = (agentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToHashSet(StringComparer.Ordinal);
+        if (ids.Count == 0) return all;
+        var picked = all.Where(a => ids.Contains(a.AgentId)).ToList();
+        return picked.Count == 0 ? null : picked;
+    }
+
     /// <summary>安装时的安全净化：外部包不得带入桥接端点 / 令牌、他实例的用户组 id、私有 / 技能目标标记。</summary>
     private static void SanitizeInstalled(AgentDefinition d)
     {
@@ -278,8 +293,11 @@ public static class MarketplaceApi
     }
 }
 
-/// <summary>安装远程包请求体。</summary>
-public sealed record MarketplaceInstallRequest(string? SourceId, string? PackId);
+/// <summary>安装远程包请求体（agentIds 为空 / 缺省 = 整包）。</summary>
+public sealed record MarketplaceInstallRequest(string? SourceId, string? PackId, string[]? AgentIds = null);
+
+/// <summary>导入内置包请求体（agentIds 为空 / 缺省 = 整包）。</summary>
+public sealed record MarketplaceImportRequest(string[]? AgentIds);
 
 /// <summary>发布分发包请求体。</summary>
 public sealed record MarketplacePublishRequest(string? PackId, string? Name, string? Description, string[]? AgentIds);

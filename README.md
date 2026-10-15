@@ -388,7 +388,7 @@ WebSocket 上行事件（`type` 判别）：`GROUP_SUBSCRIBE`、`GROUP_UNSUBSCRI
 | 对外 API · 发消息 | `POST /agui/v1/groups/{groupId}/messages` | `{content, topicId?, mentions?, mentionAll?, replyToMessageId?, attachments?, waitMs?}` → `{messageId, createdAt, reply?}`；`waitMs`（≤45000）长轮询等数字员工回复**完整**再返回（`complete` 标记） |
 | 对外 API · 历史 / 单条 / 回复 | `GET /agui/v1/groups/{id}/messages` · `.../messages/{messageId}` · `.../replies` | `after`（时间游标升序）/ `before`（消息游标）；`replies` 支持 `waitMs` 长轮询。非成员 403 / 不存在 404 |
 | 托管 API 密钥 | `GET · POST /ag-ui/admin/api-keys` · `DELETE /ag-ui/admin/api-keys/{id}` | 仅管理员：列出（只回前缀）/ 创建（返回**一次性明文密钥** `ak_…`，绑定指定账号）/ 吊销；服务端只存 SHA-256 |
-| 模板市场 | `GET /ag-ui/marketplace` · `POST /ag-ui/marketplace/import/{packId}` · `POST /ag-ui/marketplace/install` | 聚合目录（内置 + 远程）；导入内置包；安装远程包 `{sourceId, packId}`（安装时安全净化） |
+| 模板市场 | `GET /ag-ui/marketplace` · `GET /ag-ui/marketplace/preview` · `POST /ag-ui/marketplace/import/{packId}` · `POST /ag-ui/marketplace/install` | 聚合目录（内置 + 远程）；安装前预览 `{packId, sourceId?}`；导入内置包 / 安装远程包 `{sourceId, packId, agentIds?}`（缺省整包、安装时安全净化） |
 | 模板市场 · 发布 / 目录源 | `POST /ag-ui/marketplace/publish` · `GET · POST /ag-ui/admin/marketplace/sources` · `DELETE .../{id}` | 发布：把自建数字员工导出为分包 JSON（`schema=knowgath/marketplace-pack/v1`）；目录源增删仅管理员 |
 | 健康检查 | `GET /ag-ui/health` | connections / groups 计数 |
 | 指标导出（Prometheus / OTel） | `GET /ag-ui/metrics` | `text/plain; version=0.0.4`；指标名 `knowgath_*`（业务计数器 + 分员工调用量 `{agent_id}` + 进程 / GC + `knowgath_up`）。默认需鉴权（专用抓取令牌 `Observability:PrometheusScrapeToken` 或登录会话 / API 密钥） |
