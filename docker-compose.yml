@@ -275,6 +275,9 @@ services:
       # Agents__ReasoningEffort: "high"
       # 技能库 HTTP 是否放行本机/内网（SSRF 防护开关；默认关。确需调用本机/内网接口时置 true）
       Agents__AllowPrivateSkillEndpoints: ${AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS:-false}
+      # 客户端（本机）技能桥是否仅系统管理员可用：默认 false = 单机桌面「本机执行」；
+      # 共享多用户 Web 部署建议置 true（CLIENTTOOL_REQUIRE_ADMIN=true），封堵宿主机任意 shell 的 RCE 面（见 docs/RBAC.md §4）。
+      ClientTool__RequireAdmin: ${CLIENTTOOL_REQUIRE_ADMIN:-false}
       # 内网穿透反向隧道（公网 Hub + 无公网 IP 的内网桥）：全局令牌 + 逐 agent 令牌 + 限流
       NativeTunnel__Token: ${NATIVE_TUNNEL_TOKEN:-}
       NativeTunnel__ConnectRateLimitPerMinute: ${NATIVE_TUNNEL_CONNECT_RATE:-120}

@@ -5129,7 +5129,7 @@ service:
 | --- | --- |
 | 1 | **【已核实 1.0.231】**`PersistenceOptions.SnapshotSigningKey` 的配置键 | 实际绑定键为 `Persistence:SnapshotSigningKey`（环境变量 `PERSISTENCE__SNAPSHOTSIGNINGKEY`）；原代码注释误写为 `Secrets:...`，1.0.231 已修正注释 |
 | 2 | `NativeBridgeDownloadOptions.MaxZipBytes`（默认 500MB）vs 上传端点实际阈值 | 上传端点用 `Math.Min(options.MaxZipBytes, 200MB)` 拒绝超限，两处口径不同 |
-| 3 | 共享多用户部署的 `ClientTool:RequireAdmin` | `docker-compose.yml` **未暴露**该键，默认 `false`；文档多处强调共享部署应置 `true` 以封堵 RCE 面，需自行补加环境变量（（代码中未找到 compose 默认值）） |
+| 3 | **【已修复 1.0.231】**共享多用户部署的 `ClientTool:RequireAdmin` | `docker-compose.yml` 现已暴露 `ClientTool__RequireAdmin`（`${CLIENTTOOL_REQUIRE_ADMIN:-false}`，默认 `false` = 单机本机执行）；共享多用户 Web 部署置 `CLIENTTOOL_REQUIRE_ADMIN=true` 即可封堵宿主机任意 shell 的 RCE 面 |
 | 4 | **【已核实 1.0.231】**`StorageGovernanceOptions` 的两个名字 | `OrphanGraceHours` 才是配置键（`StorageGovernance:OrphanGraceHours`）；`GraceHours` 是夹紧后的派生只读值（`StorageAdminApi.cs`） |
 | 5 | `POST /ag-ui/images/search` 无过滤器 | 安全关键：鉴权在 handler 内（自令牌或登录用户），不会被 `RequireTokenFilter` 提前 401；自报图库 ID 一律不信（自令牌只认平台登记句柄） |
 | 6 | `GET /ag-ui/admin/config` 在 postgres 模式下可能展示未使用的 `persistence.filePath` | 未注册 `PersistenceOptions` 时回退 `new PersistenceOptions()`（默认 `data/agui-state.json`），与“已禁用 JSON 快照”的实际不符 |

@@ -38,6 +38,12 @@ English:
 - `docs/memory-personality.md`: `TopK` default corrected to the code default `6` (desktop override 5 / Docker 6); the worked example is recomputed on a `TopK=6` base (broad 11 / deep 3 / cue-dependent 4→10); the org-assignment wording became "roles that need repeated training and mentoring" plus the code keyword table.
 - `docs/user-guide.md` / `docs/user-guide.en.md`: §1.1.1, §1.1.5, §1.12, §3.11, §4.2, §4.11, §6.12, §7.15 updated; `BuiltinPptxSkills.Version` verified as `2026-09-22.2`.
 
+## 部署
+# Deployment
+
+中文：`docker-compose.yml` 现暴露客户端技能桥部署开关 `ClientTool__RequireAdmin`（`${CLIENTTOOL_REQUIRE_ADMIN:-false}`，默认 `false` = 单机本机执行）。共享多用户 Web 部署置 `CLIENTTOOL_REQUIRE_ADMIN=true`，本机技能桥仅系统管理员可用，封堵宿主机任意 shell 的 RCE 面（见 `docs/RBAC.md` §4）。
+English: `docker-compose.yml` now exposes `ClientTool__RequireAdmin` (`${CLIENTTOOL_REQUIRE_ADMIN:-false}`, default `false` = single-machine local execution). A shared multi-user Web deployment can set `CLIENTTOOL_REQUIRE_ADMIN=true` so only platform admins may use the local skill bridge, closing off the host's arbitrary-shell RCE surface (see `docs/RBAC.md` §4).
+
 ## 测试
 # Tests
 

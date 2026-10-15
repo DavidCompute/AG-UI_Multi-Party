@@ -225,7 +225,7 @@
 | 9.9-8 | 附件注入出厂默认已统一 | ✅ 已统一 |
 | 9.10-1 | `SnapshotSigningKey` 配置键口径 | ✅ 1.0.231（修正注释为 `Persistence:...`） |
 | 9.10-2 | `MaxZipBytes` vs 上传端点阈值 | ℹ️ 已知边界（`Math.Min(…, 200MB)`） |
-| 9.10-3 | `ClientTool:RequireAdmin` 未在 compose 暴露 | ⚙️ 部署相关（共享部署建议自行补加） |
+| 9.10-3 | `ClientTool:RequireAdmin` 未在 compose 暴露 | ✅ 1.0.231（compose 暴露 `CLIENTTOOL_REQUIRE_ADMIN`，默认 false） |
 | 9.10-4 | `StorageGovernanceOptions` 两个名字 | ✅ 已核实 |
 | 9.10-5 | `POST /images/search` 无过滤器 | ℹ️ 安全设计说明（handler 内鉴权，自报 ID 不信） |
 | 9.10-6 | `admin/config` postgres 下展示未用的 `filePath` | ℹ️ 已知边界 |
@@ -235,8 +235,8 @@
 
 ### 8.10 小结
 
-- **已关闭（✅）**：1.0.230 共 8 项（桥接能力协商、`bridge-health` 探测、`admin/config` 快照、配置治理 13 键、用户搜索、`?refresh=1` 缺陷、`BuiltinPptxSkills.Version`、`GET /admin/config` 消费）；1.0.231 共 10 项（`#authRemember`、help 内联兜底、`menu.tasks`/`docPreview.openFailed` 孤儿键、`applyAccentFromHex` 命名、`subAgentCandidates` 注释、`org_design` 加固、`TopK`/`PersonalTopK`/组织配型措辞、`SnapshotSigningKey` 注释，以及 §7.15-1/2/4 三个测试）。
+- **已关闭（✅）**：1.0.230 共 8 项（桥接能力协商、`bridge-health` 探测、`admin/config` 快照、配置治理 13 键、用户搜索、`?refresh=1` 缺陷、`BuiltinPptxSkills.Version`、`GET /admin/config` 消费）；1.0.231 共 11 项（`#authRemember`、help 内联兜底、`menu.tasks`/`docPreview.openFailed` 孤儿键、`applyAccentFromHex` 命名、`subAgentCandidates` 注释、`org_design` 加固、`TopK`/`PersonalTopK`/组织配型措辞、`SnapshotSigningKey` 注释、`§7.15-1/2/4` 三个测试、compose 暴露 `ClientTool__RequireAdmin`）。
 - **文档已按代码修正（📄）**：若干（详见上表）。
 - **非偏差 / 已知边界（ℹ️）**：若干。
 - **保留的人工项（🖐）**：帮助文案图标不精确、i18n 术语统一、撤回广播 / 私聊 mentions / 发言迁移话题的服务端说明、`advanceOnClick`、`ModelDownloadUrl`、`WorkToolsEnabled`、`*.skill.txt` 正文细节、`LoadAllowedOrigin`、桌面 WebView2 播放 E2E、导入迁移语义说明。
-- **部署相关（⚙️）**：§5.13 各项、`ClientTool:RequireAdmin`、`Memory:Enabled` 默认、`DecisionModel` 解耦。
+- **部署相关（⚙️）**：§5.13 各项、`Memory:Enabled` 默认、`DecisionModel` 解耦。
