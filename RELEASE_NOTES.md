@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.246 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.246 Release Notes (current Windows desktop release)
+
+**版本说明**：**图表视图新增「维度」切换**——组织体检图表的 Top 12 横向柱状可在**数字员工 / 触发者**之间切换，后者回答「谁在消耗资源」，与「按用户配额」互补。
+**Version note**: **The chart view gains a dimension switch** — the org health Top-12 bar chart can now switch between **employees / triggered by**, the latter answering "who consumes resources", complementing the per-user quota.
+
+## 变更
+# Changes
+
+中文：
+- **后端**：`GET /ag-ui/admin/org-health?days=N` 的结构化数据**新增 `users[]`**——按 `UserId` 聚合调用量 / token / 成本（名字解析：昵称 → 用户名 → userId；取调用次数前 50）。**向后兼容**（仅新增字段）。
+- **前端**：`#orgHealthModal` 的 Top 12 柱状标题行新增**维度分段按钮**（**数字员工 / 触发者**，与既有的指标分段按钮并列于新的 `.oh-switches` 容器），与指标按钮**各自独立同步高亮**。「触发者」维度无 👍👎 / 关注（这些是员工专属），仅展示调用量 / token / 成本；柱状仍按当前指标降序。导出 CSV 仍为**员工明细**（不随维度变）。
+- **无新增接口**：`users` 由已在拉取的 `org-health` 响应随包下发（服务端从同一批 `GetUsageBetween` 行聚合）。
+English:
+- **Backend**: the structured data of `GET /ag-ui/admin/org-health?days=N` **adds `users[]`** — calls / tokens / cost aggregated by `UserId` (name resolved: nickname → username → userId; top 50 by calls). **Backward compatible** (additive only).
+- **Front end**: the Top-12 bar header in `#orgHealthModal` gains a **dimension segmented control** (**employees / triggered by**) alongside the existing metric control, both inside a new `.oh-switches` container, each**independently syncing its highlight**. The "triggered by" dimension has no 👍👎 / attention (those are employee-specific) and shows calls / tokens / cost only; bars still sort by the current metric. The CSV export remains the **employee table** (does not follow the dimension).
+- **No new endpoint**: `users` rides along in the already-fetched `org-health` response (aggregated server-side from the same `GetUsageBetween` rows).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（图表视图：新增维度切换）与 §9.2.8（`org-health` 行补 `users`）；`ROADMAP.md` §6.5 补维度切换。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (chart view: the new dimension switch) and §9.2.8 (the `org-health` row notes `users`); `ROADMAP.md` §6.5 records the dimension switch.
+
+## 测试
+# Tests
+
+中文：`AdminApiTests` 新增 `OrgHealth_IncludesPerUserAggregation`（直接记录用量：`user_u1` → calls=2 / tokens=40、`user_u2` → calls=1，且**无对应账号时名字回退为 userId**）；`OrgHealth_ReturnsStructuredDataForCharts` 补断言 `users` 为数组。`AdminApiIntegrationTests` + `OrgHealthReportTests` 合跑 **16/16**。`node --check`、i18n 审计 **zh=en=1875，missing 0**、`check-i18n-keys`（871 处引用）、`check-orphan-keys`（897 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后，管理员，真实数据）：默认「数字员工 + 调用次数」→ 12 条柱（首条「质检审核 243」）；切「触发者」→ 1 条（「David 960」，名字由账号昵称解析）；再切「Token」→「David 14,878,030」；两组切换器均正确同步；**无页面报错**。
+English: `AdminApiTests` gains `OrgHealth_IncludesPerUserAggregation` (recording usage directly: `user_u1` → calls=2 / tokens=40, `user_u2` → calls=1, and **the name falls back to the userId when no account exists**); `OrgHealth_ReturnsStructuredDataForCharts` now asserts `users` is an array. `AdminApiIntegrationTests` + `OrgHealthReportTests` run **16/16**. `node --check`, the i18n audit **zh=en=1875, missing 0**, `check-i18n-keys` (871 references), `check-orphan-keys` (897 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web, as admin, real data): default "employees + calls" → 12 bars (first "质检审核 243"); switch to "triggered by" → 1 bar ("David 960", name resolved from the account nickname); then "Tokens" → "David 14,878,030"; both switches stay in sync correctly; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.245 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.245 Release Notes (current Windows desktop release)
 

@@ -7115,21 +7115,36 @@ function downloadOrgHealthCsv() {
 }
 
 /** 组织体检报告·图表视图：拉同一端点，用结构化数据画 KPI / 调用量 Top 柱状 / 关注项。 */
-let orgHealthData = null;        // 最近一次 /org-health 响应（供柱状图按指标重绘）
+let orgHealthData = null;        // 最近一次 /org-health 响应（供柱状图按维度 / 指标重绘）
 let orgHealthTrendRows = [];     // 最近一次 /usage 的按日汇总
 let orgHealthPrice = null;       // org-health 下发的 pricing
 let orgHealthMetric = "calls";   // 当前指标：calls | tokens | cost（柱状图与趋势图共用）
+let orgHealthDim = "agents";     // 柱状图维度：agents（数字员工）| users（触发者）
 
 /** 成本指标是否可用：需已在服务端配置单价。 */
 function orgHealthCanCost() { return !!(orgHealthPrice && orgHealthPrice.configured); }
 
+/** 同步两组分段按钮的高亮（指标 / 维度各自独立）。 */
+function syncOrgHealthSwitches() {
+  const modal = $("orgHealthModal");
+  if (!modal) return;
+  modal.querySelectorAll(".oh-metric-btn[data-metric]").forEach((b) => b.classList.toggle("active", b.dataset.metric === orgHealthMetric));
+  modal.querySelectorAll(".oh-metric-btn[data-dim]").forEach((b) => b.classList.toggle("active", b.dataset.dim === orgHealthDim));
+}
+
 /** 切换柱状图 / 趋势图共用指标（仅重绘，不重新拉取数据）。 */
 function setOrgHealthMetric(metric) {
   orgHealthMetric = metric === "tokens" || metric === "cost" ? metric : "calls";
-  const modal = $("orgHealthModal");
-  if (modal) modal.querySelectorAll(".oh-metric-btn").forEach((b) => b.classList.toggle("active", b.dataset.metric === orgHealthMetric));
+  syncOrgHealthSwitches();
   renderOrgHealthBars();
   renderOrgHealthTrend();
+}
+
+/** 切换柱状图维度（数字员工 / 触发者）：仅重绘柱状。 */
+function setOrgHealthDim(dim) {
+  orgHealthDim = dim === "users" ? "users" : "agents";
+  syncOrgHealthSwitches();
+  renderOrgHealthBars();
 }
 
 async function openOrgHealthCharts() {
@@ -7143,7 +7158,7 @@ async function openOrgHealthCharts() {
   const trend = $("orgHealthTrend"); if (trend) trend.innerHTML = "";
   const rate = $("orgHealthRate"); if (rate) rate.innerHTML = "";
   const modal = $("orgHealthModal");
-  if (modal) modal.querySelectorAll(".oh-metric-btn").forEach((b) => b.classList.toggle("active", b.dataset.metric === orgHealthMetric));
+  syncOrgHealthSwitches();
   try {
     const res = await fetch(`/ag-ui/admin/org-health?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
@@ -7190,33 +7205,42 @@ function renderOrgHealthCharts(d, days) {
     : `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.orgHealthNoFlag"))}</div>`;
 }
 
-/** 柱状图某个数字员工在当前指标下的值（调用次数 / Token / 成本）。 */
-function orgHealthBarValue(a) {
-  if (orgHealthMetric === "tokens") return Number(a.totalTokens || 0);
-  if (orgHealthMetric === "cost") return Number(a.cost || 0);
-  return Number(a.calls || 0);
+/** 柱状图某一行在当前指标下的值（调用次数 / Token / 成本）。 */
+function orgHealthBarValue(r) {
+  if (orgHealthMetric === "tokens") return Number(r.totalTokens || 0);
+  if (orgHealthMetric === "cost") return Number(r.cost || 0);
+  return Number(r.calls || 0);
 }
 
-/** 调用次数 / Token / 成本 Top 12 横向柱状（与趋势图共用当前指标，按该指标降序）。 */
+/** 当前维度下的柱状图数据行：触发者维度无 👍👎 / 关注（仅调用量 / token / 成本）。 */
+function orgHealthBarRows() {
+  const d = orgHealthData;
+  if (!d) return [];
+  if (orgHealthDim === "users") {
+    return (d.users || []).map((u) => ({ id: u.userId, name: u.name || u.userId, calls: u.calls, totalTokens: u.totalTokens, cost: u.cost, positiveRate: null, flags: [] }));
+  }
+  return (d.agents || []).map((a) => ({ id: a.agentId, name: a.name || a.agentId, calls: a.calls, totalTokens: a.totalTokens, cost: a.cost, positiveRate: a.positiveRate, flags: a.flags || [] }));
+}
+
+/** Top 12 横向柱状：按当前维度（数字员工 / 触发者）与指标（调用次数 / Token / 成本）降序。 */
 function renderOrgHealthBars() {
   const el = $("orgHealthBars");
   if (!el) return;
-  const d = orgHealthData;
-  if (!d) { el.innerHTML = ""; return; }
+  if (!orgHealthData) { el.innerHTML = ""; return; }
   const num = (v) => Number(v || 0).toLocaleString();
   const cur = (orgHealthPrice && orgHealthPrice.currency) || "$";
-  const agents = (d.agents || []).filter((a) => orgHealthBarValue(a) > 0)
+  const rows = orgHealthBarRows().filter((r) => orgHealthBarValue(r) > 0)
     .slice().sort((a, b) => orgHealthBarValue(b) - orgHealthBarValue(a)).slice(0, 12);
-  if (!agents.length) { el.innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.perfEmpty"))}</div>`; return; }
-  const max = agents.reduce((m, a) => Math.max(m, orgHealthBarValue(a)), 0) || 1;
-  el.innerHTML = agents.map((a) => {
-    const v = orgHealthBarValue(a);
+  if (!rows.length) { el.innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.perfEmpty"))}</div>`; return; }
+  const max = rows.reduce((m, r) => Math.max(m, orgHealthBarValue(r)), 0) || 1;
+  el.innerHTML = rows.map((r) => {
+    const v = orgHealthBarValue(r);
     const pct = Math.max(2, Math.round((v / max) * 100));
-    const flags = a.flags || [];
+    const flags = r.flags || [];
     const cls = flags.includes("low-praise") ? " low" : flags.includes("idle") ? " idle" : "";
-    const rt = a.positiveRate == null ? "" : " · " + Math.round(a.positiveRate * 100) + "%";
+    const rt = r.positiveRate == null ? "" : " · " + Math.round(r.positiveRate * 100) + "%";
     const valText = orgHealthMetric === "cost" ? cur + v.toFixed(2) : num(Math.round(v));
-    return `<div class="oh-bar-row"><span class="oh-bar-name" title="${escapeHtml(a.agentId || "")}">${escapeHtml(a.name || a.agentId)}</span>`
+    return `<div class="oh-bar-row"><span class="oh-bar-name" title="${escapeHtml(r.id || "")}">${escapeHtml(r.name)}</span>`
       + `<div class="oh-bar-track"><div class="oh-bar-fill${cls}" style="width:${pct}%"></div></div>`
       + `<span class="oh-bar-val">${escapeHtml(valText)}${escapeHtml(rt)}</span></div>`;
   }).join("");
@@ -13577,8 +13601,10 @@ function init() {
   $("orgHealthDownload").onclick = downloadOrgHealthReport;
   $("orgHealthCsv").onclick = downloadOrgHealthCsv;
   $("orgHealthModal").addEventListener("click", (e) => {
-    const b = e.target.closest(".oh-metric-btn");
-    if (b && !b.disabled) setOrgHealthMetric(b.dataset.metric);
+    const m = e.target.closest(".oh-metric-btn[data-metric]");
+    if (m && !m.disabled) { setOrgHealthMetric(m.dataset.metric); return; }
+    const dm = e.target.closest(".oh-metric-btn[data-dim]");
+    if (dm && !dm.disabled) setOrgHealthDim(dm.dataset.dim);
   });
   $("orgHealthModal").addEventListener("click", (e) => { if (e.target === $("orgHealthModal")) $("orgHealthModal").classList.add("hidden"); });
   const pr = $("perfRange");

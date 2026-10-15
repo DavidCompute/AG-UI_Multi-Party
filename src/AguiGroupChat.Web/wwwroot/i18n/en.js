@@ -1886,6 +1886,8 @@ window.I18N_DICTS.en = {
   "admin.orgHealthTrend": "Daily trend",
   "admin.orgHealthTrendMeta": "{from} ~ {to} · {total} total · daily peak {max}",
   "admin.orgHealthTrendShort": "Not enough data to draw a trend",
+  "admin.orgHealthDimAgents": "Employees",
+  "admin.orgHealthDimUsers": "Triggered by",
   "admin.orgHealthMetricCalls": "Calls",
   "admin.orgHealthMetricTokens": "Tokens",
   "admin.orgHealthMetricCost": "Cost",

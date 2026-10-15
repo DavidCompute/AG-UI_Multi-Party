@@ -1879,6 +1879,8 @@ window.I18N_DICTS.zh = {
   "admin.orgHealthTrend": "按日趋势",
   "admin.orgHealthTrendMeta": "{from} ~ {to} · 共 {total} · 单日峰值 {max}",
   "admin.orgHealthTrendShort": "数据不足以绘制趋势",
+  "admin.orgHealthDimAgents": "数字员工",
+  "admin.orgHealthDimUsers": "触发者",
   "admin.orgHealthMetricCalls": "调用次数",
   "admin.orgHealthMetricTokens": "Token",
   "admin.orgHealthMetricCost": "成本",

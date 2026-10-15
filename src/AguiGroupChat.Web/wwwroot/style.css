@@ -1338,6 +1338,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .oh-metric-btn:hover:not(:disabled):not(.active) { background: var(--panel-2); color: var(--text); }
 .oh-metric-btn.active { background: var(--accent); color: #fff; }
 .oh-metric-btn:disabled { opacity: .45; cursor: not-allowed; }
+.oh-switches { display: inline-flex; gap: 8px; flex: none; }
 .oh-trend-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 .kb-grid-head {
   flex: none; display: grid; grid-template-columns: 1.5fr .8fr 2.2fr 190px; gap: 10px;

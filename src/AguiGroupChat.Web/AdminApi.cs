@@ -270,6 +270,23 @@ public static class AdminApi
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
             var totalCost = stats.Sum(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens));
+            // 按「触发者（用户）」聚合：谁在消耗资源（与「按用户配额」互补）；名字取昵称 → 用户名 → userId。
+            var userNames = sp.GetService<AuthService>()?.ListUsers()
+                .ToDictionary(x => x.UserId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.Username : x.Nickname, StringComparer.Ordinal)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            var users = rows
+                .GroupBy(r => r.UserId, StringComparer.Ordinal)
+                .Select(g => new
+                {
+                    userId = g.Key,
+                    name = userNames.TryGetValue(g.Key, out var un) ? un : g.Key,
+                    calls = g.Sum(x => x.Calls),
+                    totalTokens = g.Sum(x => x.TotalTokens),
+                    cost = Math.Round(g.Sum(x => pricing.EstimateCost(x.PromptTokens, x.CompletionTokens, x.ReasoningTokens)), 4),
+                })
+                .OrderByDescending(x => x.calls)
+                .Take(50)
+                .ToList();
             return Results.Ok(new
             {
                 filename = $"org-health-{to:yyyyMMdd}.md",
@@ -302,6 +319,8 @@ public static class AdminApi
                     s.AgentId, s.Name, s.Calls, s.TotalTokens, s.Up, s.Down, s.PositiveRate, s.LastDate, s.Flags,
                     cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
                 }),
+                // 图表视图「触发者」维度：按调用次数降序的前 50 名（无反馈 / flags，故仅调用量 / token / 成本）。
+                users = users,
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

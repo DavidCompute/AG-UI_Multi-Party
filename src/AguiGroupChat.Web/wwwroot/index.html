@@ -578,10 +578,16 @@
         <div id="orgHealthCards" class="oh-cards"></div>
         <div class="oh-chart-head">
           <div class="oh-section-title" data-i18n="admin.orgHealthTopN">Top 12</div>
-          <div class="oh-metric" role="group">
-            <button type="button" class="oh-metric-btn active" data-metric="calls" data-i18n="admin.orgHealthMetricCalls">调用次数</button>
-            <button type="button" class="oh-metric-btn" data-metric="tokens" data-i18n="admin.orgHealthMetricTokens">Token</button>
-            <button type="button" class="oh-metric-btn" data-metric="cost" data-i18n="admin.orgHealthMetricCost">成本</button>
+          <div class="oh-switches">
+            <div class="oh-metric" role="group">
+              <button type="button" class="oh-metric-btn active" data-dim="agents" data-i18n="admin.orgHealthDimAgents">数字员工</button>
+              <button type="button" class="oh-metric-btn" data-dim="users" data-i18n="admin.orgHealthDimUsers">触发者</button>
+            </div>
+            <div class="oh-metric" role="group">
+              <button type="button" class="oh-metric-btn active" data-metric="calls" data-i18n="admin.orgHealthMetricCalls">调用次数</button>
+              <button type="button" class="oh-metric-btn" data-metric="tokens" data-i18n="admin.orgHealthMetricTokens">Token</button>
+              <button type="button" class="oh-metric-btn" data-metric="cost" data-i18n="admin.orgHealthMetricCost">成本</button>
+            </div>
           </div>
         </div>
         <div id="orgHealthBars" class="oh-bars"></div>

@@ -122,9 +122,35 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         foreach (var k in new[] { "agents", "totalAgents", "calls", "totalTokens", "up", "down", "cost", "flagged" })
             Assert.True(summary.TryGetProperty(k, out _), $"summary 缺字段 {k}");
         Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
+        Assert.Equal(JsonValueKind.Array, d.GetProperty("users").ValueKind);
         var pricing = d.GetProperty("pricing");
         foreach (var k in new[] { "configured", "currency", "inputPerMillion", "outputPerMillion" })
             Assert.True(pricing.TryGetProperty(k, out _), $"pricing 缺字段 {k}");
+    }
+
+    [Fact]
+    public async Task OrgHealth_IncludesPerUserAggregation()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        usage.RecordUsage("agent_u", "user_u1", 10, 20, 0);
+        usage.RecordUsage("agent_u", "user_u1", 5, 5, 0);
+        usage.RecordUsage("agent_u", "user_u2", 1, 1, 0);
+
+        using var req = Authed(HttpMethod.Get, "/ag-ui/admin/org-health?days=7", token);
+        var res = await _client.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+
+        var users = d.GetProperty("users").EnumerateArray()
+            .ToDictionary(u => u.GetProperty("userId").GetString()!, u => u, StringComparer.Ordinal);
+        Assert.True(users.ContainsKey("user_u1"), "users 应含 user_u1");
+        Assert.Equal(2, users["user_u1"].GetProperty("calls").GetInt64());
+        Assert.Equal(40, users["user_u1"].GetProperty("totalTokens").GetInt64());
+        // 无对应账号时名字回退为 userId
+        Assert.Equal("user_u1", users["user_u1"].GetProperty("name").GetString());
+        Assert.Equal(1, users["user_u2"].GetProperty("calls").GetInt64());
     }
 
     [Fact]
