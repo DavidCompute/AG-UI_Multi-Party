@@ -6913,12 +6913,14 @@ function renderEvalRows() {
         : `<span class="tag-disabled">${escapeHtml(t("admin.evalFail"))}</span>`;
     const detail = r && !r.passed ? `<div class="eval-detail">${escapeHtml((r.error || r.reply || "").slice(0, 160))}</div>` : "";
     const match = c.matchMode === "all" ? t("admin.evalMatchAll") : t("admin.evalMatchAny");
+    const deliv = c.expectDeliverable ? ` · <span class="tag-active">${escapeHtml(c.expectDeliverable)}</span>` : "";
+    const delivMiss = r && r.deliverableOk === false ? `<div class="eval-detail">${escapeHtml(t("admin.evalDeliverableMiss", { fmt: c.expectDeliverable }))}</div>` : "";
     return `<tr>
       <td>${escapeHtml(c.name || c.caseId)}<div class="eval-detail">${escapeHtml((c.prompt || "").slice(0, 80))}</div></td>
       <td>${escapeHtml(evalAgentName(c.agentId))}</td>
-      <td>${escapeHtml(match)}${(c.expected || []).length ? " · " + c.expected.length : ""}</td>
+      <td>${escapeHtml(match)}${(c.expected || []).length ? " · " + c.expected.length : ""}${deliv}</td>
       <td>${c.enabled ? "✓" : "—"}</td>
-      <td>${badge}${detail}</td>
+      <td>${badge}${delivMiss}${detail}</td>
       <td>
         <button class="chip-btn" data-act="run" data-id="${escapeHtml(c.caseId)}" type="button" title="${escapeHtml(t("admin.evalRunOne"))}">▶</button>
         <button class="chip-btn" data-act="edit" data-id="${escapeHtml(c.caseId)}" type="button">${escapeHtml(t("admin.evalEdit"))}</button>
@@ -6936,6 +6938,7 @@ function openEvalModal(c) {
   $("evalPrompt").value = c ? (c.prompt || "") : "";
   $("evalExpected").value = c ? (c.expected || []).join("\n") : "";
   $("evalMatch").value = c && c.matchMode === "all" ? "all" : "any";
+  $("evalDeliverable").value = c ? (c.expectDeliverable || "") : "";
   $("evalEnabled").checked = c ? !!c.enabled : true;
   const sel = $("evalAgent");
   sel.innerHTML = evalAgentsCache.map((a) => `<option value="${escapeHtml(a.agentId)}">${escapeHtml(a.name)}</option>`).join("");
@@ -6951,6 +6954,7 @@ async function saveEvalCase() {
     prompt: $("evalPrompt").value.trim(),
     expected: $("evalExpected").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
     matchMode: $("evalMatch").value,
+    expectDeliverable: $("evalDeliverable").value,
     enabled: $("evalEnabled").checked,
   };
   if (!body.agentId) { toast(t("admin.evalNeedAgent")); return; }

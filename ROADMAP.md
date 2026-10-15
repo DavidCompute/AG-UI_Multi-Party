@@ -231,7 +231,8 @@
 - **已实现**：端点 `/ag-ui/admin/eval-cases`（CRUD + `run`，仅管理员）；跑分对每条用例用目标员工的「提示词 + 正式回复模型」跑一次（`AgentCatalog.CreateForEval`，不带工具 / 记忆 / 技能排除干扰），按**确定性关键词判据**（any/all，不用 LLM 当裁判）；控制台新增「评测回归」页签；用例经扩展区「evalCases」持久化。落点：`Agents/{EvalCase,AgentEvalRunner}.cs`、`Web/EvalApi.cs`、`wwwroot/{index.html,app.js}`。
 - **跑分基线持久化（1.0.225）**：`EvalCase` 落库 `LastPassed`/`LastRunAtMs`/回复摘录（编辑用例即清空），页签刷新仍显「最近结果」，并并入组织体检报告「六、评测回归」（通过率 + 明细）。
 - **评分趋势（1.0.226）**：历次跑分记录 `{atMs,total,passed}`（扩展区「evalRuns」，保留 200 次），「评测回归」页以固定 0–100% 纵轴绘通过率折线；`GET /ag-ui/admin/eval-cases` 返回 `runs`。
-- **待续**：可给用例加“期望产出物”（交付文件类型）。
+- **期望交付格式（1.0.227）**：`EvalCase.ExpectDeliverable`（docx/pptx/xlsx/pdf/text/image），判定除期望要点外还要求回复命中该格式同义词；**裸模型下校验「格式意图」，非真实出文件**。
+- **待续**：在评测中**真正生成文件**（需带工具 / 技能运行，涉及审批自动放行）——较重，需先定安全口径。
 
 ### 6.7 按任务复杂度自动选模型（★★☆ 成本 / 速度） ✅已实现（1.0.223）
 - **现状**：所有任务共用同一模型（思考模式决定推理/非推理），简单任务也用强模型，成本 / 速度浪费。

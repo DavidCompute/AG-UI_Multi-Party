@@ -18,7 +18,7 @@ namespace AguiGroupChat.Web;
 public static class EvalApi
 {
     public sealed record EvalCaseRequest(string? CaseId, string? Name, string? AgentId, string? Prompt,
-        string[]? Expected, string? MatchMode, bool? Enabled);
+        string[]? Expected, string? MatchMode, bool? Enabled, string? ExpectDeliverable);
 
     public sealed record EvalRunRequest(string[]? CaseIds);
 
@@ -65,6 +65,7 @@ public static class EvalApi
                 .Take(50) // 上限：避免误粘超长文本
                 .ToArray();
             @case.MatchMode = string.Equals(req.MatchMode, "all", StringComparison.OrdinalIgnoreCase) ? "all" : "any";
+            @case.ExpectDeliverable = AgentEvalRunner.NormalizeDeliverable(req.ExpectDeliverable);
             @case.Enabled = req.Enabled ?? true;
             if (isNew)
             {

@@ -34,6 +34,28 @@ public sealed class EvalScoreTests
         Assert.True(AgentEvalRunner.Score("有内容", [], "any").Passed);
         Assert.False(AgentEvalRunner.Score("   ", [], "any").Passed);
     }
+
+    [Fact]
+    public void Deliverable_MustBeMentionedWhenSet()
+    {
+        // 指定 docx 但回复未提及 → 即使要点命中也不通过
+        var s1 = AgentEvalRunner.Score("这是建议如下", ["建议"], "any", "docx");
+        Assert.False(s1.DeliverableOk);
+        Assert.False(s1.Passed);
+
+        // 回复提到 Word / 文档 → 通过
+        var s2 = AgentEvalRunner.Score("已生成 Word 文档，请查收", ["Word"], "any", "docx");
+        Assert.True(s2.DeliverableOk);
+        Assert.True(s2.Passed);
+
+        // 未指定 / 未知格式 → 不卡
+        Assert.True(AgentEvalRunner.Score("随便", [], "any", "").DeliverableOk);
+        Assert.True(AgentEvalRunner.Score("随便", [], "any", "zzz").Passed);
+
+        // 规范化
+        Assert.Equal("docx", AgentEvalRunner.NormalizeDeliverable(" DOCX "));
+        Assert.Equal("", AgentEvalRunner.NormalizeDeliverable("zzz"));
+    }
 }
 
 /// <summary>评测集端点：CRUD + 一键跑分（mock 网关，确定性）。</summary>
@@ -89,7 +111,7 @@ public sealed class EvalApiTests : IClassFixture<AdminApiServerFixture>
         // 新建「应失败」用例
         using (var add = Authed(HttpMethod.Post, "/ag-ui/admin/eval-cases", token))
         {
-            add.Content = JsonContent.Create(new { name = "不可能命中", agentId, prompt = "随便问问", expected = new[] { "zzz_never_appears_zzz" }, matchMode = "any", enabled = true });
+            add.Content = JsonContent.Create(new { name = "不可能命中", agentId, prompt = "随便问问", expected = new[] { "zzz_never_appears_zzz" }, matchMode = "any", enabled = true, expectDeliverable = " PPTX " });
             var res = await _client.SendAsync(add);
             Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         }
@@ -128,6 +150,8 @@ public sealed class EvalApiTests : IClassFixture<AdminApiServerFixture>
             Assert.Contains(cases, (c) => c.GetProperty("lastRunAtMs").GetInt64() > 0);
             Assert.Contains(cases, (c) => c.TryGetProperty("lastPassed", out _));
             Assert.True(d2.GetProperty("runs").GetArrayLength() >= 1); // 评分趋势历史已记录
+            var withDeliverable = cases.Single((c) => c.GetProperty("name").GetString() == "不可能命中");
+            Assert.Equal("pptx", withDeliverable.GetProperty("expectDeliverable").GetString()); // 已规范化（大写→小写）
         }
 
         // 非管理员 → 403

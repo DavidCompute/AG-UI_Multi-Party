@@ -25,6 +25,14 @@ public sealed class EvalCase
     /// <summary>判定模式：<c>any</c>（默认，命中任一即通过）/ <c>all</c>（全部命中才通过）。</summary>
     public string MatchMode { get; set; } = "any";
 
+    /// <summary>
+    /// 期望交付格式（可空）：<c>docx</c> / <c>pptx</c> / <c>xlsx</c> / <c>pdf</c> / <c>text</c> / <c>image</c>。
+    /// 设置后，除「期望要点」外还要求回复中**体现该格式**（同义词命中）。
+    /// 注意：评测跑的是裸模型（不带工具 / 技能），这里校验的是「格式意图」而非真实产出文件
+    /// ——真实文件生成由平台的技能回归与端到端用例覆盖。
+    /// </summary>
+    public string ExpectDeliverable { get; set; } = "";
+
     /// <summary>是否参与「跑全部」。</summary>
     public bool Enabled { get; set; } = true;
 

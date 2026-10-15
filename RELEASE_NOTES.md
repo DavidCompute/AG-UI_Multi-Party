@@ -1,3 +1,29 @@
+# AG-UI 群聊桌面版 1.0.227 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.227 Release Notes (current Windows desktop release)
+
+**版本说明**：**评测用例支持「期望交付格式」**——每条用例可选一个交付格式（docx / pptx / xlsx / pdf / text / image）；跑分时除「期望要点」外，还要求**回复中体现该格式**（同义词命中），用于检查数字员工的**格式意图**。
+**Version note**: **Eval cases can expect a deliverable format** — each case may pick a format (docx / pptx / xlsx / pdf / text / image); a run then also requires the **reply to mention that format** (synonym hit), checking the employee's **format intent**.
+
+## 期望交付格式
+# Expected deliverable format
+
+中文：
+- **数据**：`EvalCase.ExpectDeliverable`（`docx`/`pptx`/`xlsx`/`pdf`/`text`/`image`，空 = 不限）；服务端规范化（大写/带空格→小写键，未知格式存空）。
+- **判定**：`AgentEvalRunner.Score` 新增 `expectDeliverable` 参数——在「期望要点」判定之外，还要求回复命中该格式的同义词（如 docx → docx/word/文档；pptx → pptx/ppt/powerpoint/幻灯片/演示文稿）；未指定或未知格式不卡。结果新增 `deliverableOk`。
+- **前端**：新建/编辑用例弹窗新增「期望交付格式」下拉；列表中「判定」列显示已选格式标签，未命中时在结果里标「（未体现 {格式}）」。
+- **口径说明（重要）**：评测跑的是**裸模型（不带工具 / 技能）**以保证确定性，因此这里校验的是「回复中是否体现该交付格式」的**格式意图**，**不是**真实产出文件；真实文件生成由平台既有技能回归与端到端用例覆盖。此限制已在代码注释 / 手册中如实标注。
+English:
+- **Data**: `EvalCase.ExpectDeliverable` (`docx`/`pptx`/`xlsx`/`pdf`/`text`/`image`; empty = any); normalized server-side (uppercase/whitespace → lowercase key, unknown → empty).
+- **Judging**: `AgentEvalRunner.Score` gains an `expectDeliverable` parameter — beyond the "expected points" rule, the reply must also hit that format's synonyms (e.g. docx → docx/word/文档; pptx → pptx/ppt/powerpoint/幻灯片/演示文稿); unspecified or unknown formats don't gate. The result gains `deliverableOk`.
+- **Front end**: the create/edit dialog gains an "expected deliverable format" dropdown; the list's "match" column shows the chosen format tag, and on a miss the result is annotated "(did not mention {fmt})".
+- **Scope note (important)**: the eval runs a **bare model (no tools / skills)** for determinism, so this checks the **format intent** of the reply — **not** real file production; actual file generation is covered by the platform's existing skill regression and end-to-end cases. This limitation is stated honestly in code comments and the manual.
+
+## 测试
+# Tests
+
+中文：`EvalScoreTests` 新增交付格式用例（未提及不通过 / word·文档通过 / 未指定与未知不卡 / 规范化）；`EvalApiTests` 断言 `expectDeliverable` 规范化落库（` PPTX ` → `pptx`）；连同 OrgHealthReport / AgentPerformance / AdminApi / DesktopComposition 合跑 **30/30**。i18n 审计 **zh=en=1813，missing 0**；`node --check` 通过。运行栈实测：建带 `expectDeliverable=PPTX` 的用例→落库为 `pptx`，跑分返回 `deliverableOk=false`。
+English: `EvalScoreTests` gains deliverable cases (not-mentioned fails / word·文档 passes / unspecified and unknown don't gate / normalization); `EvalApiTests` asserts `expectDeliverable` is normalized on write (` PPTX ` → `pptx`); **30/30** with OrgHealthReport / AgentPerformance / AdminApi / DesktopComposition. The i18n audit is **zh=en=1813, missing 0**; `node --check` passes. Verified live: create a case with `expectDeliverable=PPTX` → stored as `pptx`, and a run returns `deliverableOk=false`.
+
 # AG-UI 群聊桌面版 1.0.226 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.226 Release Notes (current Windows desktop release)
 

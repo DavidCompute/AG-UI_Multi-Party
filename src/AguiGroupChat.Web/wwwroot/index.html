@@ -2105,6 +2105,18 @@
           <option value="all" data-i18n="admin.evalMatchAll">全部命中才通过</option>
         </select>
       </div>
+      <div class="form-group">
+        <label data-i18n="admin.evalDeliverable">期望交付格式（回复中体现）</label>
+        <select id="evalDeliverable" class="modal-input">
+          <option value="" data-i18n="admin.evalDeliverableNone">不限</option>
+          <option value="docx">docx / Word</option>
+          <option value="pptx">pptx / PPT</option>
+          <option value="xlsx">xlsx / Excel</option>
+          <option value="pdf">pdf</option>
+          <option value="text">text / 纯文本</option>
+          <option value="image">image / 图片</option>
+        </select>
+      </div>
       <label class="eval-enabled"><input id="evalEnabled" type="checkbox" checked /> <span data-i18n="admin.evalEnabled">启用（参与「跑全部」）</span></label>
       <div class="modal-actions">
         <button id="evalSave" class="btn-ghost" data-i18n="common.save">保存</button>
