@@ -247,6 +247,28 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 组织体检报告（P0）：把「员工绩效 + 组织连接」汇成可导出的 Markdown。仅运维及以上（只读）。
+        root.MapGet("/org-health", (int? days, IServiceProvider sp) =>
+        {
+            var usage = sp.GetService<IUsageStore>();
+            var catalog = sp.GetService<AgentCatalog>();
+            if (usage is null || catalog is null)
+                return Results.Ok(new { filename = "", markdown = "" });
+            var d = Math.Clamp(days ?? 30, 1, 365);
+            var to = DateTimeOffset.UtcNow;
+            var from = to.AddDays(-d + 1);
+            var rows = usage.GetUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"));
+            var feedback = sp.GetService<MessageFeedbackStore>()?.Snapshot() ?? (IReadOnlyList<MessageFeedbackEntry>)[];
+            var defs = catalog.ListDefinitions();
+            var names = defs.ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
+            var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
+            var byId = defs.ToDictionary(x => x.AgentId, x => x, StringComparer.Ordinal);
+            var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
+                stats, byId, pricing, to.ToUnixTimeMilliseconds());
+            return Results.Ok(new { filename = $"org-health-{to:yyyyMMdd}.md", markdown = md });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 模型用量统计（最近 N 天按日汇总 / 配额配置）：仅管理员及以上（含运维）
         root.MapGet("/usage", (int? days, HttpContext ctx, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {

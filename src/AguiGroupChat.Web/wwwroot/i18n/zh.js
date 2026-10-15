@@ -1831,6 +1831,8 @@ window.I18N_DICTS.zh = {
   "admin.perfFlagIdle": "近 {days} 天无调用",
   "admin.perfHints": "需要关注：{names}",
   "admin.perfHintsNone": "暂无需要关注的员工",
+  "admin.perfReport": "📄 组织体检报告",
+  "admin.perfReportOk": "已生成组织体检报告（Markdown）",
   /* 数字员工评测集 / 回归（管理员） */
   "admin.tabEval": "评测回归",
   "admin.evalRun": "▶ 跑全部",

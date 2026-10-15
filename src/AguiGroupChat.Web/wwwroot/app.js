@@ -7009,6 +7009,26 @@ async function loadAgentPerformance() {
   } catch { if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
 }
 
+/** 组织体检报告（P0）：下载由绩效 + 组织连接汇成的 Markdown（/ag-ui/admin/org-health）。 */
+async function downloadOrgHealthReport() {
+  const btn = $("perfReportBtn");
+  const days = Number($("perfRange") && $("perfRange").value) || 30;
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`/ag-ui/admin/org-health?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { toast(errMsg(d, "HTTP " + res.status)); return; }
+    const blob = new Blob([d.markdown || ""], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = d.filename || "org-health.md";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast(t("admin.perfReportOk"));
+  } catch { toast(t("admin.sysNetErr")); }
+  finally { if (btn) btn.disabled = false; }
+}
+
 function applyAdminTabVisibility() {
   const adminPlus = isAdminPlus(), operatorPlus = isOperatorPlus();
   const visible = {
@@ -13009,6 +13029,7 @@ function init() {
   $("adminTabEval").onclick = () => switchAdminTab("eval");
   bindEvalConsole();
   $("perfRefreshBtn").onclick = loadAgentPerformance;
+  $("perfReportBtn").onclick = downloadOrgHealthReport;
   const pr = $("perfRange");
   if (pr) pr.onchange = loadAgentPerformance;
   $("storageRefreshBtn").onclick = loadStorageGovernance;

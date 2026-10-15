@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.224 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.224 Release Notes (current Windows desktop release)
+
+**版本说明**：**组织体检报告（可导出）**——把「数字员工绩效（调用 / token / 成本 / 好评率 / 关注标记）」与「组织连接（指派 / 提升 / 流水线）」汇成一份 **Markdown 报告**，控制台「员工绩效」页一键下载，便于运营复盘与对外汇报。
+**Version note**: **Org health report (exportable)** — combines **digital-employee performance** (calls / tokens / cost / positive rate / attention flags) with **org connections** (assignment / escalation / pipeline) into a **Markdown report**, downloadable in one click from the console's "Agent performance" tab, for operational reviews and reporting.
+
+## 组织体检报告
+# Org health report
+
+中文：新增端点 `GET /ag-ui/admin/org-health?days=N`（Operator+，只读）→ `{ filename, markdown }`：
+- **总览**：员工数（窗口内有调用数）/ 调用次数 / Token / 成本（未配单价则注明）/ 综合好评率 / 组织连接数（指派·提升·流水线）。
+- **需要关注**：带 `low-praise` / `idle` 标记的员工及原因。
+- **绩效明细表**：数字员工 × （调用 / Token / 成本 / 👍 / 👎 / 好评率 / 最近活跃 / 关注），按调用降序。
+- **组织架构**：每位员工的「指派 → …；提升 → …；流水线 → …」。
+- **建议**：由标记与成本推导的确定性建议（复核低分岗位 / 归档闲置岗位 / 评估复杂度模型路由）。
+- **前端**：「📈 员工绩效」页新增 **「📄 组织体检报告」** 按钮，按当前窗口生成并下载 `org-health-YYYYMMDD.md`。
+- 实现：纯函数 `OrgHealthReport.BuildMarkdown`（便于单测）；数据复用既有绩效聚合 + 智能体目录，无新增存储。
+English: new endpoint `GET /ag-ui/admin/org-health?days=N` (Operator+, read-only) → `{ filename, markdown }`:
+- **Overview**: employee count (with calls in window) / calls / tokens / cost (annotated when prices are unset) / overall positive rate / connection counts (assignment · escalation · pipeline).
+- **Attention**: employees flagged `low-praise` / `idle` with reasons.
+- **Detail table**: employee × (calls / tokens / cost / 👍 / 👎 / positive rate / last active / attention), sorted by calls descending.
+- **Org structure**: each employee's “assignment → …; escalation → …; pipeline → …”.
+- **Advice**: deterministic suggestions derived from the flags and cost (review low-scoring roles / archive idle ones / evaluate complexity model routing).
+- **Front end**: the "📈 Agent performance" tab gains a **"📄 Org health report"** button that generates and downloads `org-health-YYYYMMDD.md` for the current window.
+- Implementation: a pure `OrgHealthReport.BuildMarkdown` (unit-tested); data reuses the existing performance aggregation + agent catalog — no new storage.
+
+## 测试
+# Tests
+
+中文：新增 `OrgHealthReportTests`（总览 / 关注项 / 层级关系 / 成本 / 无单价降级 / 健康建议），连同 AdminApi / DesktopComposition / AgentPerformance 合跑 **25/25**。i18n 审计 **zh=en=1809，missing 0**；`node --check` 通过。运行栈实测：无令牌 401；管理员 200，生成 1932 字符的 Markdown（17 位员工 / 960 次调用 / 14.88M tokens / 12 条指派、 12 条提升）。
+English: new `OrgHealthReportTests` (overview / attention items / hierarchy / cost / no-pricing fallback / healthy advice), **25/25** with AdminApi / DesktopComposition / AgentPerformance. The i18n audit is **zh=en=1809, missing 0**; `node --check` passes. Verified live: 401 without a token; 200 for an admin, producing a 1,932-char Markdown (17 employees / 960 calls / 14.88M tokens / 12 assignments, 12 escalations).
+
 # AG-UI 群聊桌面版 1.0.223 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.223 Release Notes (current Windows desktop release)
 

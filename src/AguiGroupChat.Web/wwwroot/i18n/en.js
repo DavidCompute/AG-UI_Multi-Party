@@ -1838,6 +1838,8 @@ window.I18N_DICTS.en = {
   "admin.perfFlagIdle": "Idle for {days}d",
   "admin.perfHints": "Needs attention: {names}",
   "admin.perfHintsNone": "No employees need attention",
+  "admin.perfReport": "📄 Org health report",
+  "admin.perfReportOk": "Org health report generated (Markdown)",
   /* Digital-employee eval cases / regression (admin) */
   "admin.tabEval": "Eval & regression",
   "admin.evalRun": "▶ Run all",
