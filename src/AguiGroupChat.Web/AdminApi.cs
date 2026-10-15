@@ -266,7 +266,40 @@ public static class AdminApi
             var byId = defs.ToDictionary(x => x.AgentId, x => x, StringComparer.Ordinal);
             var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
                 stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List());
-            return Results.Ok(new { filename = $"org-health-{to:yyyyMMdd}.md", markdown = md });
+            // 除 Markdown 外，同时下发结构化数据（供前端图表视图：KPI / 调用量 Top / 关注项）。
+            var up = stats.Sum(s => s.Up);
+            var down = stats.Sum(s => s.Down);
+            var totalCost = stats.Sum(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens));
+            return Results.Ok(new
+            {
+                filename = $"org-health-{to:yyyyMMdd}.md",
+                markdown = md,
+                days = d,
+                from = from.ToString("yyyy-MM-dd"),
+                to = to.ToString("yyyy-MM-dd"),
+                pricing = new
+                {
+                    configured = pricing.Configured,
+                    currency = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency,
+                },
+                summary = new
+                {
+                    agents = stats.Count(s => s.Calls > 0),
+                    totalAgents = stats.Count,
+                    calls = stats.Sum(s => s.Calls),
+                    totalTokens = stats.Sum(s => s.TotalTokens),
+                    up,
+                    down,
+                    positiveRate = (up + down) == 0 ? (double?)null : Math.Round((double)up / (up + down), 4),
+                    cost = Math.Round(totalCost, 4),
+                    flagged = stats.Count(s => s.Flags is { Count: > 0 }),
+                },
+                agents = stats.Select(s => new
+                {
+                    s.AgentId, s.Name, s.Calls, s.TotalTokens, s.Up, s.Down, s.PositiveRate, s.LastDate, s.Flags,
+                    cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
+                }),
+            });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 模型用量统计（最近 N 天按日汇总 / 配额配置）：仅管理员及以上（含运维）

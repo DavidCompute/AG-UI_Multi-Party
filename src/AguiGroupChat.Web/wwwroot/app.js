@@ -7080,6 +7080,57 @@ async function downloadOrgHealthReport() {
   finally { if (btn) btn.disabled = false; }
 }
 
+/** 组织体检报告·图表视图：拉同一端点，用结构化数据画 KPI / 调用量 Top 柱状 / 关注项。 */
+async function openOrgHealthCharts() {
+  const days = Number($("perfRange") && $("perfRange").value) || 30;
+  $("orgHealthModal").classList.remove("hidden");
+  $("orgHealthMeta").textContent = "";
+  $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.loading"))}</div>`;
+  $("orgHealthBars").innerHTML = "";
+  $("orgHealthFlags").innerHTML = "";
+  try {
+    const res = await fetch(`/ag-ui/admin/org-health?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(errMsg(d, "HTTP " + res.status))}</div>`; return; }
+    renderOrgHealthCharts(d, days);
+  } catch (ex) { $("orgHealthCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(ex.message)}</div>`; }
+}
+function renderOrgHealthCharts(d, days) {
+  const s = d.summary || {};
+  const num = (v) => Number(v || 0).toLocaleString();
+  const price = d.pricing || {};
+  const cost = price.configured ? (price.currency || "$") + Number(s.cost || 0).toFixed(2) : "—";
+  const rate = s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%";
+  const card = (k, v) => `<div class="oh-card"><div class="oh-card-k">${escapeHtml(k)}</div><div class="oh-card-v">${escapeHtml(String(v))}</div></div>`;
+  $("orgHealthCards").innerHTML =
+    card(t("admin.orgHealthAgents"), `${num(s.agents)} / ${num(s.totalAgents)}`)
+    + card(t("admin.perfThCalls"), num(s.calls))
+    + card(t("admin.perfThTokens"), num(s.totalTokens))
+    + card(t("admin.perfThCost"), cost)
+    + card(t("admin.perfThRate"), rate)
+    + card(t("admin.orgHealthFlagged"), num(s.flagged));
+  $("orgHealthMeta").textContent = t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" });
+
+  const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+    : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
+  const agents = (d.agents || []).filter((a) => (a.calls || 0) > 0).slice().sort((a, b) => b.calls - a.calls).slice(0, 12);
+  const max = agents.reduce((m, a) => Math.max(m, a.calls || 0), 0) || 1;
+  $("orgHealthBars").innerHTML = agents.length ? agents.map((a) => {
+    const pct = Math.max(2, Math.round(((a.calls || 0) / max) * 100));
+    const flags = a.flags || [];
+    const cls = flags.includes("low-praise") ? " low" : flags.includes("idle") ? " idle" : "";
+    const rt = a.positiveRate == null ? "" : " · " + Math.round(a.positiveRate * 100) + "%";
+    return `<div class="oh-bar-row"><span class="oh-bar-name" title="${escapeHtml(a.agentId || "")}">${escapeHtml(a.name || a.agentId)}</span>`
+      + `<div class="oh-bar-track"><div class="oh-bar-fill${cls}" style="width:${pct}%"></div></div>`
+      + `<span class="oh-bar-val">${num(a.calls)}${escapeHtml(rt)}</span></div>`;
+  }).join("") : `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.perfEmpty"))}</div>`;
+
+  const flagged = (d.agents || []).filter((a) => a.flags && a.flags.length);
+  $("orgHealthFlags").innerHTML = flagged.length
+    ? flagged.map((a) => `<div>⚠️ <b>${escapeHtml(a.name || a.agentId)}</b> — ${escapeHtml((a.flags || []).map(flagLabel).join("、"))}</div>`).join("")
+    : `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.orgHealthNoFlag"))}</div>`;
+}
+
 function applyAdminTabVisibility() {
   const adminPlus = isAdminPlus(), operatorPlus = isOperatorPlus();
   const visible = {
@@ -13390,6 +13441,10 @@ function init() {
   bindEvalConsole();
   $("perfRefreshBtn").onclick = loadAgentPerformance;
   $("perfReportBtn").onclick = downloadOrgHealthReport;
+  $("perfChartBtn").onclick = openOrgHealthCharts;
+  $("orgHealthClose").onclick = () => $("orgHealthModal").classList.add("hidden");
+  $("orgHealthDownload").onclick = downloadOrgHealthReport;
+  $("orgHealthModal").addEventListener("click", (e) => { if (e.target === $("orgHealthModal")) $("orgHealthModal").classList.add("hidden"); });
   const pr = $("perfRange");
   if (pr) pr.onchange = loadAgentPerformance;
   $("storageRefreshBtn").onclick = loadStorageGovernance;

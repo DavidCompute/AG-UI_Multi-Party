@@ -98,6 +98,40 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         return req;
     }
 
+    // ================= 组织体检报告：结构化数据（供前端图表视图） =================
+
+    [Fact]
+    public async Task OrgHealth_ReturnsStructuredDataForCharts()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+
+        using var req = Authed(HttpMethod.Get, "/ag-ui/admin/org-health?days=30", token);
+        var res = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+
+        // Markdown 仍在（下载路径不变）
+        Assert.True(d.TryGetProperty("markdown", out var md) && md.GetString()!.Length > 0);
+        Assert.False(string.IsNullOrWhiteSpace(d.GetProperty("filename").GetString()));
+
+        // 结构化数据（图表视图依赖）
+        var summary = d.GetProperty("summary");
+        foreach (var k in new[] { "agents", "totalAgents", "calls", "totalTokens", "up", "down", "cost", "flagged" })
+            Assert.True(summary.TryGetProperty(k, out _), $"summary 缺字段 {k}");
+        Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
+        Assert.True(d.GetProperty("pricing").TryGetProperty("configured", out _));
+    }
+
+    [Fact]
+    public async Task OrgHealth_RequiresOperator()
+    {
+        var plain = await RegisterAsync("oh_plain");
+        var token = plain.GetProperty("token").GetString()!;
+        using var req = Authed(HttpMethod.Get, "/ag-ui/admin/org-health", token);
+        Assert.False((await _client.SendAsync(req)).IsSuccessStatusCode);
+    }
+
     // ================= 执行参数：复杂度自适应超时（热改 + 持久化契约） =================
 
     [Fact]

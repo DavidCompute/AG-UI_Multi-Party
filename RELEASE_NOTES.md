@@ -1,3 +1,31 @@
+# AG-UI 群聊桌面版 1.0.241 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.241 Release Notes (current Windows desktop release)
+
+**版本说明**：**组织体检报告新增「图表视图」**——除下载 Markdown 外，可在应用内直接看到 KPI、调用量 Top 柱状与需关注项。
+**Version note**: **The org health report gains a chart view** — beyond downloading the Markdown, you can now see KPIs, a top-calls bar chart and the attention list right in the app.
+
+## 变更
+# Changes
+
+中文：
+- **接口** `GET /ag-ui/admin/org-health?days=N` 除 `filename` / `markdown` 外，**同时下发结构化数据**：`summary`（`agents` 有调用员工数 / `totalAgents` / `calls` / `totalTokens` / `up` / `down` / `positiveRate` / `cost` / `flagged`）、`agents[]`（每员工 `calls` / `totalTokens` / `up` / `down` / `positiveRate` / `lastDate` / `flags` / `cost`）、`pricing`（`configured` / `currency`）。**向后兼容**（Markdown 下载路径不变）。
+- **前端**：绩效页新增「📊 图表」按钮 → `#orgHealthModal`：KPI 卡片（员工 有调用/总数、调用次数、总 Token、成本、好评率、关注项）、**调用次数 Top 12 横向柱状**（好评率偏低标红 `low`、闲置标灰 `idle`）、**需关注项列表**（`low-praise` / `idle`，标签随语言）；弹窗内可直接下载 Markdown。Esc / 取消 / 点遮罩关闭。
+English:
+- **Endpoint** `GET /ag-ui/admin/org-health?days=N` now also returns **structured data** alongside `filename` / `markdown`: `summary` (`agents` active / `totalAgents` / `calls` / `totalTokens` / `up` / `down` / `positiveRate` / `cost` / `flagged`), `agents[]` (per-employee `calls` / `totalTokens` / `up` / `down` / `positiveRate` / `lastDate` / `flags` / `cost`) and `pricing` (`configured` / `currency`). **Backward compatible** (the Markdown download path is unchanged).
+- **Front end**: the performance tab gains a "📊 Charts" button → `#orgHealthModal`: KPI cards (employees active/total, calls, total tokens, cost, positive rate, flagged), a **top-12 calls horizontal bar chart** (low-praise bars red `low`, idle grey `idle`) and a **needs-attention list** (`low-praise` / `idle`, labelled per language); the dialog can also download the Markdown. Esc / Cancel / overlay click closes it.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（绩效段落补图表视图）与 §9.2.8（`org-health` 行注明同时下发结构化数据）。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (chart view added to the performance paragraph) and §9.2.8 (the `org-health` row notes it also returns structured data).
+
+## 测试
+# Tests
+
+中文：`AdminApiTests` 新增 `OrgHealth_ReturnsStructuredDataForCharts`（200 且含 `markdown` / `filename` 与 `summary` 全部字段、`agents` 为数组、`pricing.configured`）与 `OrgHealth_RequiresOperator`（非 Operator 非成功）；连同 `OrgHealthReportTests` 合跑 **15/15**。浏览器实测（重建 web 后，管理员）：图表弹窗渲 **6 张 KPI 卡**（员工 15/17 · 调用 960 · tokens 14,878,030 · 成本 — · 好评率 — · 关注项 2）、**12 条柱**（首条“质检审核 243”）、需关注列出 2 位闲置员工（标签本地化）；无页面报错。`node --check`、i18n 审计 **zh=en=1861，missing 0**、`check-orphan-keys`、`dotnet build` 0 错误均过；重建 web 后健康 200。
+English: `AdminApiTests` gains `OrgHealth_ReturnsStructuredDataForCharts` (200 with `markdown` / `filename` and every `summary` field, `agents` an array, `pricing.configured`) and `OrgHealth_RequiresOperator` (a non-Operator is not successful); **15/15** with `OrgHealthReportTests`. Browser-verified (after rebuilding web, as admin): the chart dialog renders **6 KPI cards** (employees 15/17 · calls 960 · tokens 14,878,030 · cost — · positive rate — · flagged 2), **12 bars** (first "质检审核 243") and lists 2 idle employees (labels localized); no page errors. `node --check`, the i18n audit **zh=en=1861, missing 0**, `check-orphan-keys` and `dotnet build` 0 errors all pass; health 200 after rebuilding web.
+
 # AG-UI 群聊桌面版 1.0.240 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.240 Release Notes (current Windows desktop release)
 

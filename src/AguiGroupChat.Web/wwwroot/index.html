@@ -570,6 +570,24 @@
     </div>
   </div>
 
+  <!-- 组织体检报告·图表视图：KPI + 调用量 Top 柱状 + 需关注项（可再下载 Markdown） -->
+  <div id="orgHealthModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal kb-modal">
+      <div class="modal-title">📊 <span data-i18n="admin.orgHealthTitle">组织体检图表</span><span id="orgHealthMeta" class="gf-count"></span></div>
+      <div class="kb-view">
+        <div id="orgHealthCards" class="oh-cards"></div>
+        <div class="oh-section-title" data-i18n="admin.orgHealthCalls">调用次数 Top</div>
+        <div id="orgHealthBars" class="oh-bars"></div>
+        <div class="oh-section-title" data-i18n="admin.orgHealthFlags">需要关注</div>
+        <div id="orgHealthFlags" class="oh-flags"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="orgHealthDownload" class="btn-ghost" data-i18n="admin.perfReport">📄 组织体检报告</button>
+        <button id="orgHealthClose" class="btn-ghost" data-i18n="admin.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 模板市场·安装前预览：查看包内数字员工（含技能 / 知识库 / 记忆类型）再决定安装 -->
   <div id="marketPreviewModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">
@@ -1799,6 +1817,7 @@
           </select>
           <button id="perfRefreshBtn" class="chip-btn" type="button" data-i18n="admin.perfRefresh">↻ 刷新</button>
           <button id="perfReportBtn" class="chip-btn" type="button" data-i18n="admin.perfReport">📄 组织体检报告</button>
+          <button id="perfChartBtn" class="chip-btn" type="button" data-i18n="admin.orgHealthBtn">📊 图表</button>
           <span id="adminPerfMeta" class="form-hint"></span>
         </div>
         <div id="adminPerfHints" class="form-hint"></div>

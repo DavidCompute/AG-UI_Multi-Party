@@ -1311,6 +1311,21 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .gf-selall { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 13px; color: var(--muted); cursor: pointer; }
 .gf-selall input { width: 15px; height: 15px; margin: 0; accent-color: #4f8cff; }
 .gf-selcount { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 8px; min-width: 16px; text-align: right; }
+/* 组织体检图表视图 */
+.oh-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+.oh-card { flex: 1 1 120px; min-width: 110px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.oh-card-k { font-size: 11px; color: var(--muted); }
+.oh-card-v { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.oh-section-title { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 6px; }
+.oh-bars { display: flex; flex-direction: column; gap: 6px; }
+.oh-bar-row { display: grid; grid-template-columns: minmax(90px, 28%) 1fr auto; gap: 8px; align-items: center; font-size: 12px; }
+.oh-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oh-bar-track { height: 10px; background: rgba(128,141,180,.16); border-radius: 5px; overflow: hidden; }
+.oh-bar-fill { height: 100%; background: var(--accent); }
+.oh-bar-fill.low { background: #e5534b; }
+.oh-bar-fill.idle { background: #8b93a7; }
+.oh-bar-val { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.oh-flags { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .kb-grid-head {
   flex: none; display: grid; grid-template-columns: 1.5fr .8fr 2.2fr 190px; gap: 10px;
   align-items: center; padding: 8px 12px; margin-top: 10px;
