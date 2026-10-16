@@ -381,6 +381,10 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         var token = admin.GetProperty("token").GetString()!;
         // 直接记录几条用量（真实调用由 AgentGateway 在流式结束时写入）
         var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        // 用量 store 是本夹具共享的单例，其它用例也会写入 → 断言用**增量**而非绝对值（否则依赖执行顺序）
+        var todayBefore = usage.GetDailySummary(7).FirstOrDefault(x => x.Date == AguiGroupChat.Hub.Agents.AgentUsageService.Today());
+        var tokenBefore = todayBefore?.TotalTokens ?? 0;
+        var callsBefore = todayBefore?.Calls ?? 0;
         usage.RecordUsage("agent_x", "user_a", 100, 50, 10);
         usage.RecordUsage("agent_y", "user_a", 20, 30, 0);
 
@@ -390,8 +394,8 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         var d = await res.Content.ReadFromJsonAsync<JsonElement>();
         var days = d.GetProperty("days").EnumerateArray().ToList();
         var today = Assert.Single(days, x => x.GetProperty("date").GetString() == AguiGroupChat.Hub.Agents.AgentUsageService.Today());
-        Assert.Equal(210, today.GetProperty("totalTokens").GetInt64());
-        Assert.Equal(2, today.GetProperty("calls").GetInt64());
+        Assert.Equal(tokenBefore + 210, today.GetProperty("totalTokens").GetInt64());
+        Assert.Equal(callsBefore + 2, today.GetProperty("calls").GetInt64());
 
         // 非管理员 → 403
         var outsider = await RegisterAsync("usage_outsider");
@@ -449,6 +453,88 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             restore.Content = JsonContent.Create(new { dailyTokenQuotaPerGroup = 0 });
             await _client.SendAsync(restore);
         }
+    }
+
+    [Fact]
+    public async Task GroupQuotaOverride_WinsInUsageAndQuotaStatus()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var userId = admin.GetProperty("userId").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+
+        using var create = Authed(HttpMethod.Post, "/ag-ui/group/create", token);
+        create.Content = JsonContent.Create(new { groupName = "配额覆写知聚", ownerId = userId, memberIds = new[] { userId } });
+        var gid = (await (await _client.SendAsync(create)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+        usage.RecordUsage("agent_o", "user_o", gid, 40, 20, 0); // 60 tokens
+
+        // 管理员给该知聚设覆写 50 → 今日 60 已超；全局值（默认 0）不变
+        using (var set = Authed(HttpMethod.Post, "/ag-ui/group/update", token))
+        {
+            set.Content = JsonContent.Create(new
+            {
+                groupId = gid,
+                operatorId = userId,
+                updateFields = new[] { "quotaPerGroup" },
+                groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = 50 },
+            });
+            (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+        }
+
+        // 群列表回读覆写（供设置弹窗回显）
+        using (var list = Authed(HttpMethod.Get, $"/ag-ui/member/{userId}/groups", token))
+        {
+            var gs = await (await _client.SendAsync(list)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = gs.EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal(50, row.GetProperty("quotaOverride").GetInt64());
+        }
+
+        // /usage 的 groupsToday 该行：分母用**本知聚生效配额** 50（而非全局 0），水位 over
+        using (var u = Authed(HttpMethod.Get, "/ag-ui/admin/usage?days=7", token))
+        {
+            var ud = await (await _client.SendAsync(u)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = ud.GetProperty("groupsToday").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal(50, row.GetProperty("quota").GetInt64());
+            Assert.Equal("over", row.GetProperty("level").GetString());
+        }
+
+        // /quota-status 同口径（侧边栏角标来源）
+        using (var q = Authed(HttpMethod.Get, "/ag-ui/admin/quota-status", token))
+        {
+            var qd = await (await _client.SendAsync(q)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = qd.GetProperty("groups").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal("over", row.GetProperty("level").GetString());
+        }
+
+        // 普通用户即群主也不能设（成本控制属平台管理员）→ 403
+        var owner = await RegisterAsync("grp_quota_owner");
+        var oToken = owner.GetProperty("token").GetString()!;
+        var oId = owner.GetProperty("userId").GetString()!;
+        using (var create2 = Authed(HttpMethod.Post, "/ag-ui/group/create", oToken))
+        {
+            create2.Content = JsonContent.Create(new { groupName = "配额覆写-普通", ownerId = oId });
+            var gid2 = (await (await _client.SendAsync(create2)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+            using var deny = Authed(HttpMethod.Post, "/ag-ui/group/update", oToken);
+            deny.Content = JsonContent.Create(new
+            {
+                groupId = gid2,
+                operatorId = oId,
+                updateFields = new[] { "quotaPerGroup" },
+                groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = 999999 },
+            });
+            Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(deny)).StatusCode);
+        }
+
+        // 还原：清覆写（空串）
+        using var clear = Authed(HttpMethod.Post, "/ag-ui/group/update", token);
+        clear.Content = JsonContent.Create(new
+        {
+            groupId = gid,
+            operatorId = userId,
+            updateFields = new[] { "quotaPerGroup" },
+            groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = "" },
+        });
+        (await _client.SendAsync(clear)).EnsureSuccessStatusCode();
     }
 
     [Fact]

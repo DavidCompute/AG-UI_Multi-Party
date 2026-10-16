@@ -1,4 +1,40 @@
-# AG-UI 群聊桌面版 1.0.266 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.267 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.267 Release Notes (current Windows desktop release)
+
+**版本说明**：**知聚级配额覆写**——全局配额 `Agents:DailyTokenQuotaPerGroup` 是**一刀切**，但知聚之间开销差异极大（客服知聚接待顾客 vs 内部小群）。现在管理员可在「知聚设置」给**单个知聚**单独指定每日 Token 额度（含 `0` = 本知聚不限），**不必抬高全平台上限**。水位预警相应变成**每知聚各用自己的分母**。
+**Version note**: **Per-circle quota override** — the global `Agents:DailyTokenQuotaPerGroup` is **one-size-fits-all**, but circles differ hugely in cost (a support circle serving customers vs a small internal circle). An admin can now give **a single circle** its own daily token allowance in the group settings (including `0` = unlimited for that circle), **without raising the platform-wide cap**. The level warning now judges **each circle against its own quota**.
+
+## 变更
+# Changes
+
+中文：
+- **存储（零迁移）**：`Group.QuotaOverride`（`long?`）存于 `Extra["quotaPerGroup"]`（同 `ModelOverride` / `Kind`），既有所有群存储透传 extra JSON，无需新增列；`null` = 用全局，`0` = 本知聚不限。
+- **更新与权限**：`GroupHub.UpdateGroupAsync` 支持 `updateFields=["quotaPerGroup"]`（缺省 / 空串 / 负数 / 非数字 = 取消覆写）；`HttpGroupApi` 的 `/update` 在含 `quotaPerGroup` 时要求生效角色 ≥ `PlatformRole.Admin`，否则 **403**（与模型覆写同口径）。
+- **生效**：`AgentGateway` 取 `GroupHub.GroupQuotaOverride(groupId)` 后传入 `CheckGroupQuota(groupId, override)`；新增单一口径 `AgentUsageService.EffectiveGroupQuota(groupId, override)`（覆写优先，否则全局）——校验与展示共用，避免两处各写一遍回退逻辑。
+- **用量页**：`groupsToday[]` 每行新增 `quota`（**本知聚生效配额**）；配额使用列改用该行自己的分母；与全局值不同时在知聚名后标 `⚙`（悬停显示具体额度与「优先于全局值」）。
+- **群设置弹窗**：新增 `#gsQuotaGroup` / `#gsQuotaOverride`（**仅平台管理员可见**，与模型覆写并列）；群列表接口下发 `quotaOverride` 供回显；保存后异步刷新侧边栏水位角标。
+- **顺带修复**：`AdminApiIntegrationTests.AdminUsage_ReturnsDailySummary` 原先断言当日**绝对** token 总数（210），而用量 store 是测试夹具共享单例——其它用例写入后断言依赖执行顺序（隐藏很久的脆弱性，本次被新用例暴露）；已改为断言**增量**。
+
+English:
+- **Storage (zero migration)**: `Group.QuotaOverride` (`long?`) is kept in `Extra["quotaPerGroup"]` (like `ModelOverride` / `Kind`); every group store passes extra JSON through, so no new column is needed; `null` = use the global value, `0` = unlimited for that circle.
+- **Update & permission**: `GroupHub.UpdateGroupAsync` accepts `updateFields=["quotaPerGroup"]` (absent / empty / negative / non-numeric = clear the override); `HttpGroupApi`'s `/update` requires an effective role ≥ `PlatformRole.Admin` when `quotaPerGroup` is present, otherwise **403** (same rule as the model override).
+- **Effect**: `AgentGateway` reads `GroupHub.GroupQuotaOverride(groupId)` and passes it to `CheckGroupQuota(groupId, override)`; a new single source `AgentUsageService.EffectiveGroupQuota(groupId, override)` (override first, else global) is shared by enforcement and display, so the fallback logic is written once.
+- **Usage page**: each `groupsToday[]` row gains `quota` (**that circle's effective quota**); the quota-use column uses the row's own denominator; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value and "takes precedence over the global value").
+- **Group settings dialog**: gains `#gsQuotaGroup` / `#gsQuotaOverride` (**platform admins only**, alongside the model override); the group-list endpoint returns `quotaOverride` for rendering; saving asynchronously refreshes the sidebar level badges.
+- **Incidental fix**: `AdminApiIntegrationTests.AdminUsage_ReturnsDailySummary` asserted an **absolute** daily token total (210), but the usage store is a fixture-wide singleton — once other tests wrote to it, the assertion depended on execution order (a long-hidden fragility that the new cases exposed); it now asserts a **delta**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2（字段表新增 `#gsQuotaOverride`）、新增 §2.2.2.2（知聚级配额覆写）、§8.6（`groupsToday` 新增 `quota` 字段、每行自己的分母与 `⚙` 覆写标）、§9.2.2（`/ag-ui/group/update` 权限补 `quotaPerGroup`）、§9.2.8（`/quota-status` 补「每知聚自己的分母」）。
+English: `docs/user-guide.md` / `en.md` §2.2.2 (the field table gains `#gsQuotaOverride`), a new §2.2.2.2 (per-circle quota override), §8.6 (the `quota` field on `groupsToday`, per-row denominator and the `⚙` override marker), §9.2.2 (`/ag-ui/group/update` permission note for `quotaPerGroup`), §9.2.8 (`/quota-status` gains "each circle's own denominator").
+
+## 测试
+# Tests
+
+中文：新增 3 例——`GroupHubTests.UpdateGroup_QuotaOverride_AppliedAndCleared`（JSON number / 纯数字字符串两种形态；`0` 是有效覆写；负数 / 非数字 = 清除）；`AgentUsageServiceTests.GroupQuota_OverrideWinsAndZeroMeansUnlimitedForThatGroup`（覆写放行 / 覆写 0 不限 / 覆写更小则卡死 / `null` 与负数回退全局）；`AdminApiIntegrationTests.GroupQuotaOverride_WinsInUsageAndQuotaStatus`（管理员设覆写 → 群列表回读 → `/usage` 行 `quota` 用覆写值且 `level=over` → `/quota-status` 同口径 → 普通用户即群主 403 → 清除）。**全量测试通过**（1803 → 1806）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1945，missing 0**，4 个守卫脚本均过；Docker 重建后**真实浏览器**端到端（Playwright）**12/12**：对今日有用量的真实知聚设覆写 1000（全局 0）→ 群列表回读 1000、`/usage` 该行 `quota=1000` 且 `level=over`、`/quota-status` `level=over`、设置弹窗对管理员可见并回填 1000、无页面脚本错误、清除后回 `null`。
+English: 3 new cases — `GroupHubTests.UpdateGroup_QuotaOverride_AppliedAndCleared` (both JSON-number and numeric-string forms; `0` is a valid override; negative / non-numeric clears it); `AgentUsageServiceTests.GroupQuota_OverrideWinsAndZeroMeansUnlimitedForThatGroup` (override unblocks / override 0 = unlimited / a smaller override still blocks / `null` and negatives fall back to the global); `AdminApiIntegrationTests.GroupQuotaOverride_WinsInUsageAndQuotaStatus` (admin sets the override → group list reads it back → the `/usage` row uses the override as its `quota` with `level=over` → `/quota-status` matches → a normal user who owns the group gets 403 → cleared). **All tests pass** (1803 → 1806); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1945, missing 0**, and all 4 guard scripts pass; after a Docker rebuild, a **real-browser** end-to-end (Playwright) **12/12**: setting an override of 1000 on a circle that has today's usage (global 0) → the group list reads back 1000, the `/usage` row has `quota=1000` with `level=over`, `/quota-status` reports `level=over`, the settings dialog is visible to the admin and prefilled with 1000, there are no page script errors, and clearing returns it to `null`.
+
 # AG-UI Group Chat Desktop 1.0.266 Release Notes (current Windows desktop release)
 
 **版本说明**：**知聚配额从「事后可查」变成「事前可见」**——新增**配额水位预警**：当日用量达知聚配额 80% 即标 `⚠`、达 100% 标 `🔴`，**不打开控制台就能在侧边栏知聚列表上看到哪个知聚快满了**（仅 Operator+；配额 / 成本属运维信息，不下发普通用户）。同一水位口径同时用在用量统计页：表格按水位配色（蕾珀 / 红），meta 行多一句「接近上限 N 个 ｜ 已超限 M 个」。

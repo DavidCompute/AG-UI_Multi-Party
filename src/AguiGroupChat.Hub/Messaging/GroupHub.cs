@@ -351,6 +351,9 @@ public sealed class GroupHub : IDisposable
         // 知聚级模型覆写（管理员，治理层已限）；空串 = 取消覆写
         if (fields.Contains("model", StringComparer.Ordinal))
             group.ModelOverride = GetString(req.GroupInfo, "model");
+        // 知聚级每日 Token 配额覆写（管理员，治理层已限）；缺省 / 负数 / 非数字 = 取消覆写（回退全局）
+        if (fields.Contains("quotaPerGroup", StringComparer.Ordinal))
+            group.QuotaOverride = GetLongOrNull(req.GroupInfo, "quotaPerGroup");
 
         await FanOutAsync(group.GroupId, new GroupUpdatedEvent
         {
@@ -2266,6 +2269,15 @@ public sealed class GroupHub : IDisposable
         catch { return null; }
     }
 
+    /// <summary>本知聚的每日 Token 配额覆写（null = 用全局 <c>Agents:DailyTokenQuotaPerGroup</c>）。
+    /// 供网关与管理员用量页判断「本知聚自己的额度」（0 = 本知聚不限）。</summary>
+    public long? GroupQuotaOverride(string groupId)
+    {
+        if (_disbanded.ContainsKey(groupId)) return null;
+        try { return _store.GetGroup(groupId)?.QuotaOverride; }
+        catch { return null; }
+    }
+
     private bool CanManage(string operatorId, Group group)
     {
         if (group.OwnerId == operatorId) return true;
@@ -2518,4 +2530,18 @@ public sealed class GroupHub : IDisposable
 
     private static bool GetBool(Dictionary<string, JsonElement> dict, string key)
         => dict.TryGetValue(key, out var je) && je.ValueKind == JsonValueKind.True;
+
+    /// <summary>从群信息字典取可空 long：接受 JSON number 或纯数字字符串（缺省 / 空串 / 非数字 / 负数 = null）。</summary>
+    private static long? GetLongOrNull(Dictionary<string, JsonElement> dict, string key)
+    {
+        if (!dict.TryGetValue(key, out var je)) return null;
+        long? n = je.ValueKind switch
+        {
+            JsonValueKind.Number => je.TryGetInt64(out var num) ? num : null,
+            JsonValueKind.String => long.TryParse(je.GetString(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : null,
+            _ => null,
+        };
+        return n is { } v && v >= 0 ? v : null;
+    }
 }

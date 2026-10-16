@@ -52,6 +52,7 @@ public static class HttpGroupApi
                         kind = g.Kind,
                         isSupportCircle = g.IsSupportCircle,
                         modelOverride = g.ModelOverride, // 知聚级模型覆写（管理员可设；前端设置弹窗回显）
+                        quotaOverride = g.QuotaOverride, // 知聚级每日 Token 配额覆写（管理员可设；前端设置弹窗回显）
                         myRole = me?.Role,
                         myNickname = me?.Nickname,
                         // 活跃度排序 / 未读提示（前端按 lastMessageAt 降序展示，未读徽标）
@@ -83,6 +84,10 @@ public static class HttpGroupApi
                 // 知聚级模型覆写属成本 / 容量控制：仅平台管理员可设（其它群设置仍由群主 / 管理员）。
                 if (req.UpdateFields.Contains("model", StringComparer.Ordinal) && auth.ResolveRole(identity) < PlatformRole.Admin)
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅平台管理员可设置知聚模型覆写"),
+                        statusCode: StatusCodes.Status403Forbidden);
+                // 知聚级 Token 配额覆写：同属成本控制（能把一个知聚的消费上限抬高），同样仅平台管理员可设。
+                if (req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal) && auth.ResolveRole(identity) < PlatformRole.Admin)
+                    return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅平台管理员可设置知聚 Token 配额覆写"),
                         statusCode: StatusCodes.Status403Forbidden);
                 return Results.Ok(await hub.UpdateGroupAsync(req, ct));
             }));

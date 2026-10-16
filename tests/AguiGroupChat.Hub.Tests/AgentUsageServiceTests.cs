@@ -148,6 +148,33 @@ public sealed class AgentUsageServiceTests
     }
 
     [Fact]
+    public void GroupQuota_OverrideWinsAndZeroMeansUnlimitedForThatGroup()
+    {
+        // 全局配额 100
+        var svc = CreateLive(() => 0, () => 100);
+        svc.RecordUsage("agent_a", "user_1", "group_x", 60, 40, 0); // 100 → 全局下应 over
+        Assert.NotNull(svc.CheckGroupQuota("group_x"));
+
+        // 覆写更大 → 放行（管理员只给该知聚放额，不抬高全平台上限）
+        Assert.Null(svc.CheckGroupQuota("group_x", 50000));
+        Assert.Equal(50000, svc.EffectiveGroupQuota("group_x", 50000));
+
+        // 覆写 0 = 本知聚不限
+        Assert.Null(svc.CheckGroupQuota("group_x", 0));
+        Assert.Equal(0, svc.EffectiveGroupQuota("group_x", 0));
+
+        // 覆写更小 → 卡死（即使全局更大也一样以覆写为准）
+        var hit = svc.CheckGroupQuota("group_x", 10);
+        Assert.NotNull(hit);
+        Assert.Equal(10, hit!.Quota);
+
+        // null = 用全局；负数视为未覆写（回退全局）
+        Assert.Equal(100, svc.EffectiveGroupQuota("group_x", null));
+        Assert.Equal(100, svc.EffectiveGroupQuota("group_x", -5));
+        Assert.NotNull(svc.CheckGroupQuota("group_x", -5));
+    }
+
+    [Fact]
     public void GetDailySummary_AggregatesByDay()
     {
         var svc = Create();

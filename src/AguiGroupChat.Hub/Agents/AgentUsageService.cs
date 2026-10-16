@@ -123,16 +123,23 @@ public sealed class AgentUsageService
     }
 
     /// <summary>知聚配额校验：超限返回剩余额度信息（null = 未超限 / 未启用配额）。
-    /// 不豁免 system 触发——系统任务的消耗同样计入知聚总账（这正是它要管的）。</summary>
-    public QuotaCheckResult? CheckGroupQuota(string groupId)
+    /// 不豁免 system 触发——系统任务的消耗同样计入知聚总账（这正是它要管的）。
+    /// <paramref name="quotaOverride"/> = 知聚级覆写（`Group.QuotaOverride`，null = 用全局）；
+    /// 非 null 时**以覆写为准**（0 = 本知聚不限），全局值仅作回退——所以管理员能只给某个知聚放额，不抬高全平台上限。</summary>
+    public QuotaCheckResult? CheckGroupQuota(string groupId, long? quotaOverride = null)
     {
         if (string.IsNullOrEmpty(groupId)) return null;
-        var quota = DailyQuotaPerGroup;
+        var quota = quotaOverride is { } o && o >= 0 ? o : DailyQuotaPerGroup;
         if (quota <= 0) return null;
         var used = GetGroupTodayTokens(groupId);
         if (used < quota) return null;
         return new QuotaCheckResult(quota, used);
     }
+
+    /// <summary>某知聚的**生效**配额：知聚级覆写优先，否则全局 `Agents:DailyTokenQuotaPerGroup`（0 = 不限）。
+    /// 单一解析点，供校验与管理页展示共用（避免两处各写一遍回退逻辑）。</summary>
+    public long EffectiveGroupQuota(string groupId, long? quotaOverride = null)
+        => quotaOverride is { } o && o >= 0 ? o : DailyQuotaPerGroup;
 
     /// <summary>最近 N 天的按天汇总（管理员用量统计页）。</summary>
     public IReadOnlyList<UsageDaySummary> GetDailySummary(int days)

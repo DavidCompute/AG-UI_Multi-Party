@@ -559,6 +559,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch { return null; }
     }
 
+    /// <summary>知聚级每日 Token 配额覆写（管理员在「知聚设置」给的额度；null = 用全局）。</summary>
+    private long? ResolveGroupQuota(string groupId)
+    {
+        try { return _hub.Value.GroupQuotaOverride(groupId); }
+        catch { return null; }
+    }
+
     /// <summary>
     /// 客户端技能经内网隧道执行的等待上界（秒）。模型自报的 shell 超时决定基准，
     /// 原先上界硬编码 180 秒——对“复杂度高的本地批处理”是短板；这里改用本次运行的复杂度预算作为上界。
@@ -650,7 +657,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
         // 知聚配额校验（Agents:DailyTokenQuotaPerGroup）：把「本知聚今天一共烧了多少」卡住。
         // 它对 system 触发**同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这里要管的。
-        if (_usage.Value?.CheckGroupQuota(context.GroupId) is { } groupQuota)
+        if (_usage.Value?.CheckGroupQuota(context.GroupId, ResolveGroupQuota(context.GroupId)) is { } groupQuota)
         {
             _metrics.Value?.RecordQuotaRejection(isGroup: true);
             _logger.LogWarning("智能体触发被知聚配额拦截：group={Group} used={Used}/{Quota} agent={AgentId} trigger={User}",

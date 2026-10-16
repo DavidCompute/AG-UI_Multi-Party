@@ -4481,6 +4481,9 @@ function openGroupSettings() {
   // 知聚级模型覆写：仅平台管理员可见 / 可改（服务端同样限管理员）
   if ($("gsModelGroup")) $("gsModelGroup").classList.toggle("hidden", !isAdminPlus());
   if ($("gsModelOverride")) $("gsModelOverride").value = g.modelOverride || "";
+  // 知聚级每日 Token 配额覆写：同属成本控制，仅平台管理员可见 / 可改（服务端同样限管理员）
+  if ($("gsQuotaGroup")) $("gsQuotaGroup").classList.toggle("hidden", !isAdminPlus());
+  if ($("gsQuotaOverride")) $("gsQuotaOverride").value = (g.quotaOverride === null || g.quotaOverride === undefined) ? "" : String(g.quotaOverride);
   // 客服知聚：私密开关隐藏且不可改（服务端强制非私密）
   const gsPrivLabel = $("gsIsPrivate").closest(".modal-label");
   if (gsPrivLabel) gsPrivLabel.style.display = g.isSupportCircle ? "none" : "";
@@ -4507,6 +4510,16 @@ async function saveGroupSettings() {
     const mo = $("gsModelOverride").value.trim();
     if (mo !== (g.modelOverride || "")) { updateFields.push("model"); groupInfo.model = mo; }
   }
+  // 知聚级每日 Token 配额覆写：仅管理员（服务端强校验）；空 / 非法 / 负数 = 取消覆写（回退全局）
+  if (isAdminPlus() && $("gsQuotaOverride")) {
+    const raw = $("gsQuotaOverride").value.trim();
+    const cur = (g.quotaOverride === null || g.quotaOverride === undefined) ? "" : String(g.quotaOverride);
+    if (raw !== cur) {
+      updateFields.push("quotaPerGroup");
+      const n = Number(raw);
+      groupInfo.quotaPerGroup = (raw !== "" && Number.isFinite(n) && n >= 0) ? n : "";
+    }
+  }
   if (updateFields.length === 0) { $("groupSettingsModal").classList.add("hidden"); return; }
   try {
     const res = await fetch("/ag-ui/group/update", {
@@ -4522,9 +4535,13 @@ async function saveGroupSettings() {
     if (groupInfo.groupAvatar !== undefined) g.groupAvatar = groupInfo.groupAvatar;
     if (groupInfo.isPrivate !== undefined) g.isPrivate = groupInfo.isPrivate;
     if (groupInfo.model !== undefined) g.modelOverride = groupInfo.model || null;
+    if (groupInfo.quotaPerGroup !== undefined)
+      g.quotaOverride = (groupInfo.quotaPerGroup === "" || groupInfo.quotaPerGroup === null) ? null : Number(groupInfo.quotaPerGroup);
     renderGroupList();
     $("chatGroupName").textContent = (g.isPrivate ? "🔒 " : "") + (g.groupName || "");
     toast(t("gs.saved"));
+    // 配额覆写可能改变本知聚的水位标（快满 / 已满）；异步刷新侧边栏角标（不阻塞保存提示）
+    if (groupInfo.quotaPerGroup !== undefined) loadQuotaStatus().then(renderGroupList);
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
 }
 
@@ -8900,15 +8917,18 @@ async function loadAdminUsage() {
     $("adminUsageGroupRows").innerHTML = groups.length
       ? groups.map((g) => {
           const used = Number(g.tokens) || 0;
+          const q = Number(g.quota) || 0; // 本知聚**生效**配额（可能是知聚级覆写，不一定是全局值）
           let quotaCell = "—";
-          if (quotaGroup > 0) {
-            const ratio = Math.round((used / quotaGroup) * 100);
+          if (q > 0) {
+            const ratio = Math.round((used / q) * 100);
             const cls = g.level === "over" ? " class=\"usage-quota-hit\"" : g.level === "warn" ? " class=\"usage-quota-warn\"" : "";
             const mark = g.level === "over" ? "🔴 " : g.level === "warn" ? "⚠ " : "";
-            quotaCell = `<span${cls}>${mark}${used.toLocaleString()} / ${quotaGroup.toLocaleString()}（${ratio}%）</span>`;
+            quotaCell = `<span${cls}>${mark}${used.toLocaleString()} / ${q.toLocaleString()}（${ratio}%）</span>`;
           }
+          // 与全局配额不同 → 说明本行用的是「本知聚覆写」（悬停可见具体值）
+          const ovr = q !== quotaGroup ? ` <span class="usage-quota-ovr" title="${escapeHtml(t("admin.quotaOverrideTag", { quota: q.toLocaleString() }))}">⚙</span>` : "";
           return `<tr>
-          <td>${escapeHtml(g.name || g.groupId)}</td>
+          <td>${escapeHtml(g.name || g.groupId)}${ovr}</td>
           <td>${used.toLocaleString()}</td>
           <td>${Number(g.calls).toLocaleString()}</td>
           <td>${quotaCell}</td>

@@ -165,6 +165,46 @@ public sealed class GroupHubTests
     }
 
     [Fact]
+    public async Task UpdateGroup_QuotaOverride_AppliedAndCleared()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "配额覆写群", "user_1", "user_2");
+        Assert.Null(group.QuotaOverride);
+
+        // 设置覆写（存于 Extra["quotaPerGroup"]，零迁移）——接受 JSON number 与纯数字字符串两种形态
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup"],
+            GroupInfo = new() { ["quotaPerGroup"] = JsonSerializer.SerializeToElement(50000) },
+        });
+        Assert.Equal(50000, f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+        Assert.Equal(50000, f.Hub.GroupQuotaOverride(group.GroupId));
+
+        // 0 = 本知聚不限（是有效覆写，不是取消）
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup"],
+            GroupInfo = new() { ["quotaPerGroup"] = JsonSerializer.SerializeToElement("0") },
+        });
+        Assert.Equal(0, f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+
+        // 负数 / 非数字 = 取消覆写（回退全局）
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup"],
+            GroupInfo = new() { ["quotaPerGroup"] = JsonSerializer.SerializeToElement(-1) },
+        });
+        Assert.Null(f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+        Assert.Null(f.Hub.GroupQuotaOverride(group.GroupId));
+    }
+
+    [Fact]
     public async Task UpdateGroup_NonAdmin_ThrowsPermissionDenied()
     {
         var f = new HubFixture();

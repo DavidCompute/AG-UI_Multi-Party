@@ -1495,6 +1495,11 @@
         <input id="gsModelOverride" class="modal-input" placeholder="deepseek-flash / deepseek-v4-pro" />
         <span style="color:#8a8f98;font-size:12px" data-i18n="gs.modelHint">仅平台管理员可设；优先级最高，覆盖「按复杂度自动选模型」与本知聚内智能体的默认模型（例：高消耗知聚钉 deepseek-v4-pro，或钉 deepseek-flash 省成本）。</span>
       </div>
+      <div class="form-group hidden" id="gsQuotaGroup">
+        <label for="gsQuotaOverride" data-i18n="gs.quota">🎚️ 本知聚每日 Token 配额覆写（管理员，留空 = 用全局）</label>
+        <input id="gsQuotaOverride" class="modal-input" type="number" min="0" placeholder="0 = 本知聚不限" />
+        <span style="color:#8a8f98;font-size:12px" data-i18n="gs.quotaHint">仅平台管理员可设；优先于全局 Agents:DailyTokenQuotaPerGroup。全局配额对所有知聚一刀切，但知聚之间开销差异很大——可给客服知聚单独放额，或设为 0 让本知聚不限。留空 / 负数 = 取消覆写。</span>
+      </div>
       <div class="danger-zone">
         <button id="gsDisbandBtn" class="btn-ghost danger" data-i18n="gs.disband">解散知聚</button>
       </div>

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.266**
+> 适用版本：**1.0.267**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -651,6 +651,7 @@
 | `#gsAvatarPreview` / `#gsAvatarUploadBtn` / `#gsAvatarClearBtn` / `#gsAvatarFile` | 群头像预览 / 上传 / 移除（`accept="image/*"`） | `gs.avatar`、`gs.avatarUpload`、`gs.avatarRemove` |
 | `#gsIsPrivate` | 「🔒 私密知聚」开关 | `gs.private`、`gs.privateHint` |
 | `#gsModelOverride`（组 `#gsModelGroup`） | **知聚级模型覆写**（**仅平台管理员**可见 / 可改；留空 = 不覆写） | `gs.model`、`gs.modelHint` |
+| `#gsQuotaOverride`（组 `#gsQuotaGroup`） | **知聚级每日 Token 配额覆写**（**仅平台管理员**可见 / 可改；留空 = 用全局） | `gs.quota`、`gs.quotaHint` |
 | `#gsDisbandBtn` | 解散按钮 | `gs.disband` |
 | `#gsCancel` / `#gsConfirm` | 取消 / 保存 | `gs.cancel`、`gs.save` |
 
@@ -669,6 +670,17 @@
 - **生效**：`AgentGateway.ResolveGroupModel(groupId)`（= `GroupHub.GroupModelOverride`）→ `GetOrCreateWithModel`，**只换模型，工具 / 记忆 / 审批包装照旧**；`GROUP_UPDATED` 广播后即时生效（仅影响后续触发的回复）。
 
 > **顺带修复的存储缺陷**：`PostgresGroupStore.UpdateGroup` / `RelationalGroupStore.UpdateGroup` 原先的 UPDATE 语句**未写 `extra` 列**，导致 `kind` / `model` 等 extra 支撑字段在创建后无法修改 / 清除（1.0.261 修复，已补回归）。
+
+#### 2.2.2.2 知聚级 Token 配额覆写（管理员，1.0.267）
+
+- **入口**：知聚设置弹窗内 `#gsQuotaGroup` / `#gsQuotaOverride`（`type=number`，`min=0`），**仅平台管理员（`isAdminPlus()`）可见**，否则该组隐藏。
+- **语义**：给某个知聚**单独指定每日 Token 额度**，**优先于**全局 `Agents:DailyTokenQuotaPerGroup`（`AgentUsageService.EffectiveGroupQuota`）。留空 = 用全局；`0` = **本知聚不限**（是一个有效覆写，不是「未设」）；负数 / 非数字 = 取消覆写。
+- **为什么需要**：全局配额对全部知聚一刀切，但知聚之间开销差异极大（客服知聚接待顾客 vs 内部小群）——有了覆写就能只给某个知聚放额，**不必抬高全平台上限**。
+- **存储（零迁移）**：存于 `Group.Extra["quotaPerGroup"]`（字符串，同 `ModelOverride`），既有所有群存储透传 extra JSON，无需新增列。读取兼容 JSON number 与纯数字字符串（`Group.QuotaOverride` / `LongOf`）。
+- **权限（服务端强校验）**：`HttpGroupApi` 的 `/update` 在 `updateFields` 含 `quotaPerGroup` 时要求生效角色 ≥ `PlatformRole.Admin`，否则 **403**（「仅平台管理员可设置知聚 Token 配额覆写」）；`GroupHub` 亦要求群主 / 群管理员。
+- **生效**：`AgentGateway` 取 `GroupHub.GroupQuotaOverride(groupId)`（`AgentGateway.ResolveGroupQuota`）后传入 `AgentUsageService.CheckGroupQuota(groupId, override)`——超限拦截报 `GROUP_QUOTA_EXCEEDED`（见 8.6）。
+- **与水位预警联动**：用量页「今日各知聚明细」的配额使用列改用**该行自己的分母**；与全局值不同时在知聚名后标 `⚙`（悬停显示具体额度）；侧边栏 `⚠` / `🔴` 角标也按各知聚自己的额度算（见 2.1.1 / 8.6）。
+- **回显**：群列表接口 `GET /ag-ui/member/{memberId}/groups` 下发 `quotaOverride`（`null` = 未覆写），`openGroupSettings()` 回填。
 
 #### 2.2.3 解散知聚
 
@@ -3934,20 +3946,21 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 服务端（`AdminApi.cs:397-408`）返回：
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls, level }… ], "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls, quota, level }… ], "days": [ UsageDaySummary… ] }
 ```
 
 - `UsageDaySummary`（`AgentUsageService.cs:164`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
 - `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:138`，即最多 90 天）；前端固定传 `days=7`。
-- **`groupsToday`（1.0.265 新增，1.0.266 加 `level`）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:96`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**。
+- **`groupsToday`（1.0.265 新增，1.0.266 加 `level`，1.0.267 加 `quota`）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:96`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**。
+- **`quota` = 本知聚生效配额（1.0.267）**：`AgentUsageService.EffectiveGroupQuota`（`AgentUsageService.cs:141`）——**知聚级覆写优先**，否则全局；因此每行的分母可能不同（不再是全局 `dailyQuotaPerGroup`）。覆写与全局不同时，知聚名后标 `⚙`（`admin.quotaOverrideTag`，悬停显示额度）。
 - **配额水位 `level`（1.0.266）**：`AgentUsageService.QuotaLevel(tokens, quota)`（`AgentUsageService.cs:27`）返回 `ok` / `warn` / `over`，阈值 `QuotaWarnRatio = 0.8`（`AgentUsageService.cs:24`）——**单一阈值来源**，前端不重复写 80%。用量表：`ok` 无色、`warn` 琥珀（`⚠` / `.usage-quota-warn`）、`over` 红标（`🔴` / `.usage-quota-hit`）；meta 尾部追加 `admin.quotaNear`「接近上限 {near} 个 ｜ 已超限 {over} 个」。
-- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限）。
+- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限）——注意它只是**全局回退值**，某知聚的实际分母以该行 `quota` 为准。
 
 前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`；若 `quotaGroup > 0` 再追加 `admin.quotaGroupEnabled`（`app.js:8847-8854`）。按日表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
 
 > **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,115-123`）。
 >
-> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:127-135`，网关侧拦截见 `AgentGateway.cs:653-665`，错误码 `GROUP_QUOTA_EXCEEDED`）。
+> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:129`，网关侧拦截见 `AgentGateway.cs:660`，错误码 `GROUP_QUOTA_EXCEEDED`）；实际分母经 `EffectiveGroupQuota` 解析（**知聚级覆写优先**，`Group.QuotaOverride`，见 2.2.2.2）。
 >
 > **主动预警（1.0.266）**：同一水位口径还经 `GET /ag-ui/admin/quota-status`（`AdminApi.cs:410-426`）下发到**侧边栏知聚项**（仅 Operator+）——不用打开控制台就能看到哪个知聚「快满」。
 >
@@ -4483,7 +4496,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/health` | 健康检查（连接数 / 群数） | 公开 |
 | GET | `/ag-ui/member/{memberId}/groups` | 某成员所在知聚列表（含未读数）；仅本人可查自己 | 身份 |
 | POST | `/ag-ui/group/create` | 创建知聚 | 身份（创建者 = 解析身份） |
-| POST | `/ag-ui/group/update` | 更新知聚 | 身份（群管理） |
+| POST | `/ag-ui/group/update` | 更新知聚（`updateFields` 含 `model` 或 `quotaPerGroup` 时需平台管理员，见 §2.2.2.1 / §2.2.2.2） | 身份（群管理；成本控制项需 Admin） |
 | POST | `/ag-ui/group/disband` | 解散知聚 | 身份（群主，服务端校验） |
 | GET | `/ag-ui/group/discover` | 客服知聚发现列表（对任意登录用户可见） | 身份 |
 | POST | `/ag-ui/group/{groupId}/enter` | 进入客服知聚（非成员自动成为顾客参与者） | 身份 |
@@ -4666,7 +4679,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/voice/voices` | 语音合成音色列表（代理 TTS 服务 `/v1/audio/voices`）：`{ voices: string[] }`；未配置 / 不支持 404、不可达 503 | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | 音色试听：合成一句短样例并内联返回音频（便于 `<audio src>`，可带 `?token=`）；未启用 404、失败 503 | Operator |
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 分知聚今日明细 + 配额） | 运维 |
-| GET | `/ag-ui/admin/quota-status` | 知聚配额水位（今日各知聚 `ok` / `warn`（≥80%）/ `over`，加配额值与阈值；供侧边栏知聚项预警角标） | 运维 |
+| GET | `/ag-ui/admin/quota-status` | 知聚配额水位（今日各知聚 `ok` / `warn`（≥80%）/ `over`，加全局配额值与阈值；**每知聚按自己的生效配额判定**，见 §2.2.2.2；供侧边栏知聚项预警角标） | 运维 |
 | GET | `/ag-ui/admin/audit` | 操作审计日志查询（`limit` 最多 200；过滤 `actor` / `action` / `targetId` / `fromMs` / `toMs`） | 运维 |
 | GET | `/ag-ui/admin/audit.csv` | 审计日志导出 CSV（UTF-8 BOM，无 200 条上限） | 运维 |
 | GET | `/ag-ui/admin/bridge-health` | 桥接端点健康度（`?refresh=true` 实时探测） | 运维 |

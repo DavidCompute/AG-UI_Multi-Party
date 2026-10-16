@@ -409,43 +409,54 @@ public static class AdminApi
         // 与用量页汇总。仅 Operator+（配额 / 成本属运维信息，不下发给普通用户）。
         root.MapGet("/quota-status", (IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
-            var quota = usage.DailyQuotaPerGroup;
+            var global = usage.DailyQuotaPerGroup;
+            var hub = sp.GetService<GroupHub>();
             var groups = usage.GetGroupTodaySummary()
                 .Take(50)
                 .Select(g => new
                 {
                     groupId = g.GroupId,
-                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, quota),
+                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, EffectiveQuota(hub, usage, g.GroupId)),
                 })
                 .ToList();
             return Results.Ok(new
             {
-                quotaPerGroup = quota,
+                quotaPerGroup = global,
                 warnRatio = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaWarnRatio,
                 groups,
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 今日各知聚用量行（/usage 与 /quota-status 共用口径）：名字由群库解析，取不到回退 groupId；
-        // 同时带上配额水位 `level`（ok / warn / over）——单一阈值来源，避免前后端各写一份 80%。
+        // 同时带上**本知聚生效配额** `quota` 与水位 `level`（ok / warn / over）——单一阈值来源，
+        // 且支持知聚级配额覆写（每行自己的分母，前端直接用 `quota` 而非全局值）。
         static List<object> GroupTodayRows(IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage)
         {
-            var quota = usage.DailyQuotaPerGroup;
             var groupNames = sp.GetService<GroupHub>()?.Store.AllGroups()
                 .ToDictionary(g => g.GroupId, g => g.GroupName, StringComparer.Ordinal)
                 ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            var hub = sp.GetService<GroupHub>();
             return usage.GetGroupTodaySummary()
                 .Take(50)
-                .Select(g => (object)new
+                .Select(g =>
                 {
-                    groupId = g.GroupId,
-                    name = groupNames.TryGetValue(g.GroupId, out var gn) ? gn : g.GroupId,
-                    tokens = g.Tokens,
-                    calls = g.Calls,
-                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, quota),
+                    var quota = EffectiveQuota(hub, usage, g.GroupId);
+                    return (object)new
+                    {
+                        groupId = g.GroupId,
+                        name = groupNames.TryGetValue(g.GroupId, out var gn) ? gn : g.GroupId,
+                        tokens = g.Tokens,
+                        calls = g.Calls,
+                        quota,
+                        level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, quota),
+                    };
                 })
                 .ToList();
         }
+
+        // 生效配额 = 知聚级覆写（Group.QuotaOverride）优先，否则全局 Agents:DailyTokenQuotaPerGroup。
+        static long EffectiveQuota(GroupHub? hub, AguiGroupChat.Hub.Agents.AgentUsageService usage, string groupId)
+            => usage.EffectiveGroupQuota(groupId, hub?.GroupQuotaOverride(groupId));
 
         // 操作审计日志（4.3 / 企业合规）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。
         // 支持过滤：actor（操作者用户名 / ID 子串）、action（操作名子串）、targetId、fromMs / toMs（UTC 毫秒）。limit 最多 200。

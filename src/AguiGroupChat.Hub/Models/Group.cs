@@ -89,6 +89,37 @@ public sealed class Group
         _ => v.ToString(),
     };
 
+    /// <summary>
+    /// 本知聚的<b>每日 Token 配额覆写</b>（<c>null</c> = 用全局 <c>Agents:DailyTokenQuotaPerGroup</c>）。
+    /// 为什么要按知聚覆写：全局配额对全部知聚一刀切，但知聚之间开销差异极大（客服知聚接待顾客 vs 内部小群）；
+    /// 管理员可给某知聚单独放额（例如设为 <c>0</c> = 本知聚不限），而不必抬高全平台上限。
+    /// 存于 <c>Extra["quotaPerGroup"]</c>（字符串），既有所有群存储均透传 extra JSON，无需新增列 / 迁移（同 <see cref="ModelOverride"/>）。
+    /// </summary>
+    public long? QuotaOverride
+    {
+        get => Extra is not null && Extra.TryGetValue("quotaPerGroup", out var v) ? LongOf(v) : null;
+        set
+        {
+            if (Extra is null) return; // Extra 为 null 时不支持原地写入（由创建路径预置）
+            if (value is not { } n || n < 0) Extra.Remove("quotaPerGroup"); // null / 负数 = 取消覆写
+            else Extra["quotaPerGroup"] = n.ToString(); // 纯整数默认格式即无分隔符，与 culture 无关
+        }
+    }
+
+    /// <summary>Extra 值归一化为可空 long：兼容 CLR 数值 / JsonElement（number 或纯数字字符串）。非数字 = null（视为未覆写）。</summary>
+    private static long? LongOf(object? v) => v switch
+    {
+        null => null,
+        long l => l,
+        int i => i,
+        System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number
+            => je.TryGetInt64(out var n) ? n : null,
+        System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
+            => long.TryParse(je.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : null,
+        string s => long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var p) ? p : null,
+        _ => null,
+    };
+
     /// <summary>群主成员 ID。</summary>
     public required string OwnerId { get; set; }
 
