@@ -5,8 +5,14 @@ namespace AguiGroupChat.Hub.Agents;
 
 /// <summary>
 /// 模型 token 用量统计与配额服务：每次智能体模型调用结束后记录 (日期, 智能体, 触发者) 的用量，
-/// 管理员可查看按天汇总；配额（Agents:DailyTokenQuotaPerUser，0 = 不限）按「触发者当日累计 token」执行，
-/// 超限拒绝新触发（定时任务 system 触发不计入个人配额）。
+/// 管理员可查看按天汇总；配额按「触发者当日累计 token」（Agents:DailyTokenQuotaPerUser）与
+/// 「知聚当日累计 token」（Agents:DailyTokenQuotaPerGroup）执行，均 0 = 不限，超限拒绝新触发。
+/// 定时任务以虚拟触发者 <see cref="SystemUserId"/> 发起，不计入个人配额，但**计入知聚配额**。
+/// <para>
+/// 配额值以 <c>Func&lt;long&gt;</c> **实时读取**（由 Agents 层注入 `() =&gt; options.DailyTokenQuota…`），
+/// 而非在构造时拷贝——否则管理员在「配置治理」热改配额只会在重启后才生效（曾踩到这个静默失效）。
+/// 本服务位于 Hub 层，不能直接引用 Agents 层的 AgentOptions，故用委托解耦。
+/// </para>
 /// </summary>
 public sealed class AgentUsageService
 {
@@ -14,14 +20,23 @@ public sealed class AgentUsageService
     public const string SystemUserId = "system";
 
     private readonly IUsageStore _store;
-    private readonly long _dailyQuotaPerUser;
+    private readonly Func<long> _quotaPerUser;
+    private readonly Func<long> _quotaPerGroup;
     private readonly ILogger<AgentUsageService> _logger;
 
-    public AgentUsageService(IUsageStore store, long dailyQuotaPerUser, ILogger<AgentUsageService> logger)
+    /// <summary>主构造：配额值实时读取（由调用方以委托注入）。</summary>
+    public AgentUsageService(IUsageStore store, Func<long> quotaPerUser, Func<long> quotaPerGroup, ILogger<AgentUsageService> logger)
     {
         _store = store;
-        _dailyQuotaPerUser = Math.Max(0, dailyQuotaPerUser);
+        _quotaPerUser = quotaPerUser;
+        _quotaPerGroup = quotaPerGroup;
         _logger = logger;
+    }
+
+    /// <summary>兼容旧签名（测试 / 旧调用方）：固定个人配额、不限知聚。新代码请用主构造。</summary>
+    public AgentUsageService(IUsageStore store, long dailyQuotaPerUser, ILogger<AgentUsageService> logger)
+        : this(store, () => Math.Max(0, dailyQuotaPerUser), () => 0, logger)
+    {
     }
 
     /// <summary>当前 UTC 日期（YYYY-MM-DD，配额 / 统计按 UTC 日切分，行为可预测）。</summary>
@@ -53,8 +68,22 @@ public sealed class AgentUsageService
     /// <summary>某用户当日累计 token（配额检查；无记录返回 0）。</summary>
     public long GetUserTodayTokens(string userId) => _store.GetUserUsage(userId, Today());
 
-    /// <summary>配额配置（0 = 不限）。</summary>
-    public long DailyQuotaPerUser => _dailyQuotaPerUser;
+    /// <summary>某知聚当日累计 token（配额检查；无记录返回 0）。
+    /// 复用既有「按知聚」聚合表的当日行——无需改 <see cref="IUsageStore"/> 接口（4 个存储实现通用）。</summary>
+    public long GetGroupTodayTokens(string groupId)
+    {
+        if (string.IsNullOrEmpty(groupId)) return 0;
+        var today = Today();
+        return _store.GetGroupUsageBetween(today, today)
+            .Where(r => string.Equals(r.GroupId, groupId, StringComparison.Ordinal))
+            .Sum(r => r.TotalTokens);
+    }
+
+    /// <summary>按用户配额配置（0 = 不限；实时读配置）。</summary>
+    public long DailyQuotaPerUser => Math.Max(0, _quotaPerUser());
+
+    /// <summary>按知聚配额配置（0 = 不限；实时读配置）。</summary>
+    public long DailyQuotaPerGroup => Math.Max(0, _quotaPerGroup());
 
     /// <summary>配额校验：超限返回剩余额度信息（null = 未超限 / 未启用配额）。</summary>
     public QuotaCheckResult? CheckUserQuota(string userId)
@@ -63,6 +92,18 @@ public sealed class AgentUsageService
         var quota = DailyQuotaPerUser;
         if (quota <= 0) return null;
         var used = GetUserTodayTokens(userId);
+        if (used < quota) return null;
+        return new QuotaCheckResult(quota, used);
+    }
+
+    /// <summary>知聚配额校验：超限返回剩余额度信息（null = 未超限 / 未启用配额）。
+    /// 不豁免 system 触发——系统任务的消耗同样计入知聚总账（这正是它要管的）。</summary>
+    public QuotaCheckResult? CheckGroupQuota(string groupId)
+    {
+        if (string.IsNullOrEmpty(groupId)) return null;
+        var quota = DailyQuotaPerGroup;
+        if (quota <= 0) return null;
+        var used = GetGroupTodayTokens(groupId);
         if (used < quota) return null;
         return new QuotaCheckResult(quota, used);
     }

@@ -578,6 +578,9 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             memoryInteractiveEmbeddingWaitSeconds = 20,
             memoryBackgroundEmbeddingWaitSeconds = 90,
             memoryWriteEmbeddingCacheSize = 256,
+            // token 配额（热改）：按用户与按知聚
+            dailyTokenQuotaPerUser = 12345,
+            dailyTokenQuotaPerGroup = 6789,
         });
         var setRes = await _client.SendAsync(set);
         setRes.EnsureSuccessStatusCode();
@@ -603,6 +606,17 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.Equal(20, agents.Memory.InteractiveEmbeddingWaitSeconds);
         Assert.Equal(90, agents.Memory.BackgroundEmbeddingWaitSeconds);
         Assert.Equal(256, agents.Memory.WriteEmbeddingCacheSize);
+
+        // token 配额：回读一致 + 落到运行时 AgentOptions
+        Assert.Equal(12345, d.GetProperty("dailyTokenQuotaPerUser").GetInt64());
+        Assert.Equal(6789, d.GetProperty("dailyTokenQuotaPerGroup").GetInt64());
+        Assert.Equal(12345, agents.DailyTokenQuotaPerUser);
+        Assert.Equal(6789, agents.DailyTokenQuotaPerGroup);
+        // 关键回归：AgentUsageService 必须**实时**读到新配额，而不是构造时拷贝的旧值
+        // （旧实现把配额拷贝成字段 → 热改只重启后才生效，文档却写「热改持久」）。
+        var usageSvc = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        Assert.Equal(12345, usageSvc.DailyQuotaPerUser);
+        Assert.Equal(6789, usageSvc.DailyQuotaPerGroup);
     }
 
     [Fact]
@@ -623,6 +637,14 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         using var badCache = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
         badCache.Content = JsonContent.Create(new { memoryWriteEmbeddingCacheSize = -1 });
         Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badCache)).StatusCode);
+
+        // token 配额不能为负 → 400
+        using var badQuotaUser = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badQuotaUser.Content = JsonContent.Create(new { dailyTokenQuotaPerUser = -1 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuotaUser)).StatusCode);
+        using var badQuotaGroup = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badQuotaGroup.Content = JsonContent.Create(new { dailyTokenQuotaPerGroup = -1 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuotaGroup)).StatusCode);
 
         // 非管理员 → 403
         var normal = await RegisterAsync("cfg_normal_admin");

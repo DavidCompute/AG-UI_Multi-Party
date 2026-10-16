@@ -29,6 +29,7 @@ public sealed class ConfigGovernanceState
     public bool? EnableWebTools { get; set; }
     public bool? ThinkingMode { get; set; }
     public long? DailyTokenQuotaPerUser { get; set; }
+    public long? DailyTokenQuotaPerGroup { get; set; }
     public List<string>? RequireApprovalToolNames { get; set; }
     public List<string>? AllowedFrameOrigins { get; set; }
     // 按任务复杂度自动选模型（6.7）：启用 + 各档模型名（留空 = 该档不换）
@@ -58,6 +59,7 @@ public sealed record ConfigGovernanceHttpRequest(
     bool? EnableWebTools,
     bool? ThinkingMode,
     long? DailyTokenQuotaPerUser,
+    long? DailyTokenQuotaPerGroup,
     List<string>? RequireApprovalToolNames,
     List<string>? AllowedFrameOrigins,
     bool? ModelRoutingEnabled,
@@ -89,6 +91,7 @@ public static class ConfigGovernanceApi
         if (s.EnableWebTools is { } c2) agents.EnableWebTools = c2;
         if (s.ThinkingMode is { } c4) agents.ThinkingMode = c4;
         if (s.DailyTokenQuotaPerUser is { } c5 && c5 >= 0) agents.DailyTokenQuotaPerUser = c5;
+        if (s.DailyTokenQuotaPerGroup is { } c5g && c5g >= 0) agents.DailyTokenQuotaPerGroup = c5g;
         if (s.RequireApprovalToolNames is { } c6) agents.RequireApprovalToolNames = c6.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         // 模型路由（6.7）：启用与各档模型名（ModelRouting 已初始化为非空，直接改属性即可）
         if (s.ModelRoutingEnabled is { } c7) agents.ModelRouting.Enabled = c7;
@@ -125,6 +128,7 @@ public static class ConfigGovernanceApi
             if (req.SessionTtlHours is { } st && st is not (> 0 and <= 720)) return BadReq("sessionTtlHours 需在 1..720");
             if (req.MessageRetentionDays is < 0) return BadReq("messageRetentionDays 不能为负");
             if (req.DailyTokenQuotaPerUser is < 0) return BadReq("dailyTokenQuotaPerUser 不能为负");
+            if (req.DailyTokenQuotaPerGroup is < 0) return BadReq("dailyTokenQuotaPerGroup 不能为负");
             if (req.ModelRoutingSimpleModel is { Length: > 200 } || req.ModelRoutingStandardModel is { Length: > 200 } || req.ModelRoutingHeavyModel is { Length: > 200 })
                 return BadReq("模型名过长（≤200 字符）");
             if (req.MemoryMaxQueryChars is { } q1 && q1 is not (> 0 and <= 10_000)) return BadReq("memoryMaxQueryChars 需在 1..10000");
@@ -145,6 +149,7 @@ public static class ConfigGovernanceApi
             state.EnableWebTools = req.EnableWebTools ?? state.EnableWebTools;
             state.ThinkingMode = req.ThinkingMode ?? state.ThinkingMode;
             state.DailyTokenQuotaPerUser = req.DailyTokenQuotaPerUser ?? state.DailyTokenQuotaPerUser;
+            state.DailyTokenQuotaPerGroup = req.DailyTokenQuotaPerGroup ?? state.DailyTokenQuotaPerGroup;
             if (req.RequireApprovalToolNames is not null) state.RequireApprovalToolNames = req.RequireApprovalToolNames;
             if (req.AllowedFrameOrigins is not null) state.AllowedFrameOrigins = req.AllowedFrameOrigins;
             state.ModelRoutingEnabled = req.ModelRoutingEnabled ?? state.ModelRoutingEnabled;
@@ -195,6 +200,7 @@ public static class ConfigGovernanceApi
             state.EnableWebTools = saved.EnableWebTools;
             state.ThinkingMode = saved.ThinkingMode;
             state.DailyTokenQuotaPerUser = saved.DailyTokenQuotaPerUser;
+            state.DailyTokenQuotaPerGroup = saved.DailyTokenQuotaPerGroup;
             state.RequireApprovalToolNames = saved.RequireApprovalToolNames;
             state.AllowedFrameOrigins = saved.AllowedFrameOrigins;
             state.ModelRoutingEnabled = saved.ModelRoutingEnabled;

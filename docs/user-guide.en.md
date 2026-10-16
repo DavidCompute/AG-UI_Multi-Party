@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.193**
+> Applies to version: **1.0.264**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3933,21 +3933,25 @@ The single server-side source of truth is `MemoryGovernance` (`MemoryGovernance.
 
 ### 8.6 Usage Stats tab (`#adminTabUsage`)
 
-`loadAdminUsage()` (`app.js:6981-7002`) calls `GET /ag-ui/admin/usage?days=7`.
+`loadAdminUsage()` (`app.js:8836-8879`) calls `GET /ag-ui/admin/usage?days=7`.
 
-The server (`AdminApi.cs:144-151`) returns:
+The server (`AdminApi.cs:396-405`) returns:
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary` (`AgentUsageService.cs:88`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
-- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:62-66`, i.e. at most 90 days); the frontend always passes `days=7`.
-- Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited, `AgentUsageService.cs:23`).
+- `UsageDaySummary` (`AgentUsageService.cs:138`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
+- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:112-128`, i.e. at most 90 days); the frontend always passes `days=7`.
+- Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited, `AgentUsageService.cs:83`); `dailyQuotaPerGroup` comes from `AgentUsageService.DailyQuotaPerGroup` (config `Agents:DailyTokenQuotaPerGroup`, `0` = unlimited, `AgentUsageService.cs:86`).
 
-Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, noting "exceeding it will be rejected; auto-restores at UTC next day"); otherwise `admin.quotaDisabled` (`app.js:6986-6989`). The table has 6 columns: date / total tokens / input / output / thinking / calls.
+Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, noting "exceeding it will be rejected; auto-restores at UTC next day"); otherwise `admin.quotaDisabled`; if `quotaGroup > 0` it appends `admin.quotaGroupEnabled` (`app.js:8841-8849`). The table has 6 columns: date / total tokens / input / output / thinking / calls.
 
-> The quota is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:13,28,53`).
+> The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,89-97`).
+>
+> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:101-109`; the gateway-side check is `AgentGateway.cs:652-664`, error code `GROUP_QUOTA_EXCEEDED`).
+
+> **Fixed (1.0.264)**: both quota values used to be copied into fields **at construction** of `AgentUsageService`, so an admin hot-changing the quota in Config Governance **did not actually apply** (it only took effect after a restart); they now read via an injected `Func<long>` **in real time** (`AgentHosting.cs:66-70`), so they apply on save.
 
 ---
 
@@ -4094,13 +4098,13 @@ The lower bound of the multipliers is always `1` (only relaxes, never tightens);
 
 ### 8.10 Config Governance tab (`#adminTabConfig`)
 
-View `#adminConfigView` (`index.html`): the hint `admin.configHint` (which states explicitly that "storage provider / model / memory provider etc. that require a restart are read-only"); 7 number boxes (session / history / members / chars / retention / quota / debounce) + 5 tri-state checkboxes + 2 comma lists + 3 model-name inputs (model routing) + **5 memory & vectorization number boxes (new in 1.0.263)** + `#cfgReload` (Refresh) / `#cfgSave` (Save).
+View `#adminConfigView` (`index.html`): the hint `admin.configHint` (which states explicitly that "storage provider / model / memory provider etc. that require a restart are read-only"); **8 number boxes** (session / history / members / chars / retention / quota·user / quota·circle / debounce) + 5 tri-state checkboxes + 2 comma lists + 3 model-name inputs (model routing) + **5 memory & vectorization number boxes (new in 1.0.263)** + `#cfgReload` (Refresh) / `#cfgSave` (Save).
 
 Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/config` (`app.js` `loadConfigGovernance` / `collectCfg`).
 
-#### 8.10.1 Hot-changeable keys (22 in the UI / 22 in the state layer) + bounds
+#### 8.10.1 Hot-changeable keys (23 in the UI / 23 in the state layer) + bounds
 
-`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-46`) has **22** fields in total, and the UI form presents **22** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:48-72`).
+`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-47`) has **23** fields in total, and the UI form presents **23** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:50-74`).
 
 | # | Frontend field DOM id | Key `key` | Type | UI label i18n | Bounds / validation |
 |---|---|---|---|---|---|
@@ -4110,6 +4114,7 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 4 | `#cfgMaxMessageChars` | `maxMessageChars` | int | `admin.maxChars` | 1..1000000 |
 | 5 | `#cfgMessageRetentionDays` | `messageRetentionDays` | int | `admin.retention` (0 = never clean) | ≥ 0 |
 | 6 | `#cfgDailyTokenQuota` | `dailyTokenQuotaPerUser` | long | `admin.quota` | ≥ 0 |
+| 6b | `#cfgDailyTokenQuotaGroup` | `dailyTokenQuotaPerGroup` | long | `admin.quotaGroup` | ≥ 0 (**new in 1.0.264**) |
 | 7 | `#cfgRequireToken` | `requireTokenOnRealTime` | bool | `admin.reqRealTime` | Tri-state |
 | 8 | `#cfgEnableTools` | `enableTools` | bool | `admin.enableTools` | Tri-state |
 | 9 | `#cfgEnableWebTools` | `enableWebTools` | bool | `admin.enableWeb` | Tri-state |
@@ -4127,7 +4132,9 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 21 | `#cfgMemBackgroundWait` | `memoryBackgroundEmbeddingWaitSeconds` | int | `admin.memBackgroundWait` | 1..3600 |
 | 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0 (**0 = dedup off**) |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative).
+Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative).
+
+> **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-70`), so saving applies at once.
 
 > **Model routing (6.7, 1.0.260)**: #14–#17 map to `AgentOptions.ModelRouting` (`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`). **StandardModel is new in this version** — previously the Standard tier never switched. Once enabled, the same `RunComplexityEstimator` used by complexity-adaptive timeouts picks a model per tier (Simple / Standard / Complex / Heavy; blank = don't switch that tier), e.g. `deepseek-flash` for Simple/Standard and `deepseek-v4-pro` for Heavy. It shares the `Agents:ModelRouting` config (env `AGENTS_MODELROUTING_*`); saving on this page takes effect immediately and persists. Note: unlike list items ("empty = do not modify"), model names follow string `??` semantics — **an empty string clears that tier** (the frontend always submits these three fields, i.e. "save = the form wins").
 
@@ -4149,7 +4156,7 @@ The frontend's `setCfgBool` uses `indeterminate` to mean "keep the configured de
 - `groupChat`: `messageHistoryLimit`, `messageWriteDebounceMs`, `maxMessageChars`, `maxConcurrentAgentInvocations`, `messageRetentionDays`;
 - `storage`: `provider`, `autoCreateSchema`, `hasConnectionString`;
 - `persistence`: `enabled`, `filePath`;
-- `agents`: `provider`, `enableTools`, `enableWebTools`, `thinkingMode`, `dailyTokenQuotaPerUser`, `requireApprovalToolNames`, `memory.{enabled,provider,embeddingModel,embeddingDimensions,retentionDays,scope}`.
+- `agents`: `provider`, `enableTools`, `enableWebTools`, `thinkingMode`, `dailyTokenQuotaPerUser`, `dailyTokenQuotaPerGroup`, `requireApprovalToolNames`, `memory.{enabled,provider,embeddingModel,embeddingDimensions,retentionDays,scope}`.
 
 > **Fixed (1.0.230)**: `GET /ag-ui/admin/config` is now consumed by the Config Governance tab's **"Read-only snapshot" button** (`#cfgSnapshotBtn` → `loadConfigSnapshot`); the `admin.configHint` text now points at that button (no longer at an entry point that does not exist).
 
@@ -4863,7 +4870,8 @@ service:
 | `Agents:DecisionMinProbability` | `DecisionMinProbability` | 0.3 | not set | Minimum probability for a "yes" decision |
 | `Agents:VisionEnabled` | `VisionEnabled` | `true` | not set | Image understanding toggle |
 | `Agents:VisionModel` | `VisionModel` | `null` | not set | Vision model name |
-| `Agents:DailyTokenQuotaPerUser` | `DailyTokenQuotaPerUser` | 0 | not set | Daily token quota per user (0 = unlimited) |
+| `Agents:DailyTokenQuotaPerUser` | `DailyTokenQuotaPerUser` | 0 | not set | Daily token quota per user (0 = unlimited; **exempts** the `system` trigger) |
+| `Agents:DailyTokenQuotaPerGroup` | `DailyTokenQuotaPerGroup` | 0 | not set | Daily token quota per circle (0 = unlimited; **counts** `system` triggers) |
 | `Agents:EnableTools` | `EnableTools` | `false` | `true` | Tool calling toggle |
 | `Agents:EnableWebTools` | `EnableWebTools` | `false` | `false` | Web-type tools (web_search / read_url) |
 | `Agents:WebSearchEndpoint` | `WebSearchEndpoint` | `https://api.duckduckgo.com/` | not set | Search endpoint |
@@ -5067,6 +5075,7 @@ Named volumes: `agui-web-data` / `agui-docs` / `agui-hub-data` / `agui-pg-data`.
 | `AGENTS_ENABLE_TOOLS` / `AGENTS_ENABLE_WEBTOOLS` | `true` / `false` | `Agents:EnableTools` / `EnableWebTools` |
 | `AGENTS_BUILTIN_DOCX_SKILLS` / `PPTX` / `XLSX` / `PDF` | all `true` | `Agents:Builtin*Skills` |
 | `AGENTS_DAILY_TOKEN_QUOTA` | `0` | `Agents:DailyTokenQuotaPerUser` |
+| `AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP` | `0` | `Agents:DailyTokenQuotaPerGroup` |
 | `STORAGE_PROVIDER` / `STORAGE_CONNECTION_STRING` | `postgres` / points to `postgres` | `Storage:Provider` / `ConnectionString` |
 | `MEMORY_ENABLED` | `true` | `Agents:Memory:Enabled` |
 | `MEMORY_EMBEDDING_ENDPOINT` | `http://llama-embed:8080/v1` | `Agents:Memory:EmbeddingEndpoint` |

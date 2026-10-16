@@ -61,10 +61,12 @@ public static class AgentHosting
         services.AddSingleton<AguiGroupChat.Agents.UserGroups.UserGroupStore>();
         // 供 Hub 层做准入门校验的只读桥接（避免 Hub 反向依赖 Agents 目录）
         services.AddSingleton<AguiGroupChat.Hub.Agents.IUserGroupService, UserGroupService>();
-        // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值取 Agents:DailyTokenQuotaPerUser）
+        // 模型 token 用量统计与配额（依赖 Hub 的 IUsageStore；配额值从 AgentOptions **实时读取**，
+        // 因此管理员在「配置治理」热改配额立即生效——不要在构造时拷贝配额值）
         services.AddSingleton(sp => new AguiGroupChat.Hub.Agents.AgentUsageService(
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
-            options.DailyTokenQuotaPerUser,
+            () => options.DailyTokenQuotaPerUser,
+            () => options.DailyTokenQuotaPerGroup,
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AguiGroupChat.Hub.Agents.AgentUsageService>>()));
         // 同时注册具体类型与接口：组合根 RegisterBridgeCursorPersistence 按具体类型解析网关（注册扩展区）
         services.AddSingleton<AgentGateway>();

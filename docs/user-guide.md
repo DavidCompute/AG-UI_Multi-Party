@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.193**
+> 适用版本：**1.0.264**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3928,21 +3928,25 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.6 用量统计 tab（`#adminTabUsage`）
 
-`loadAdminUsage()`（`app.js:6981-7002`）调 `GET /ag-ui/admin/usage?days=7`。
+`loadAdminUsage()`（`app.js:8836-8879`）调 `GET /ag-ui/admin/usage?days=7`。
 
-服务端（`AdminApi.cs:144-151`）返回：
+服务端（`AdminApi.cs:396-405`）返回：
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary`（`AgentUsageService.cs:88`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
-- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:62-66`，即最多 90 天）；前端固定传 `days=7`。
-- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限，`AgentUsageService.cs:23`）。
+- `UsageDaySummary`（`AgentUsageService.cs:138`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
+- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:112-128`，即最多 90 天）；前端固定传 `days=7`。
+- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限，`AgentUsageService.cs:83`）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限，`AgentUsageService.cs:86`）。
 
-前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`（`app.js:6986-6989`）。表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
+前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`；若 `quotaGroup > 0` 再追加 `admin.quotaGroupEnabled`（`app.js:8841-8849`）。表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
 
-> 配额按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:13,28,53`）。
+> **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,89-97`）。
+>
+> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:101-109`，网关侧拦截见 `AgentGateway.cs:652-664`，错误码 `GROUP_QUOTA_EXCEEDED`）。
+
+> **修复（1.0.264）**：此前两个配额值在 `AgentUsageService` **构造时**被拷贝成字段，导致管理员在「配置治理」热改配额**实际不生效**（只有重启才生效）；现改为注入 `Func<long>` **实时读取**（`AgentHosting.cs:66-70`），保存即生效。
 
 ---
 
@@ -4089,13 +4093,13 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.10 配置治理 tab（`#adminTabConfig`）
 
-视图 `#adminConfigView`（`index.html`）：提示 `admin.configHint`（明确指出「存储提供方 / 模型 / 记忆提供方等需重启的项目为只读」）；7 个数字框（会话 / 历史 / 成员 / 字符 / 保留 / 配额 / 防抖）+ 5 个三态复选框 + 2 个逗号列表 + 3 个模型名输入框（模型路由）+ **5 个记忆与向量化数字框（1.0.263 新增）** + `#cfgReload`（刷新）/ `#cfgSave`（保存）。
+视图 `#adminConfigView`（`index.html`）：提示 `admin.configHint`（明确指出「存储提供方 / 模型 / 记忆提供方等需重启的项目为只读」）；**8 个数字框**（会话 / 历史 / 成员 / 字符 / 保留 / 配额·用户 / 配额·知聚 / 防抖）+ 5 个三态复选框 + 2 个逗号列表 + 3 个模型名输入框（模型路由）+ **5 个记忆与向量化数字框（1.0.263 新增）** + `#cfgReload`（刷新）/ `#cfgSave`（保存）。
 
 接口：读 `GET /ag-ui/admin/config/governance`，写 `POST /ag-ui/admin/config`（`app.js` 的 `loadConfigGovernance` / `collectCfg`）。
 
-#### 8.10.1 可热改键（UI 22 个 / 状态层 22 个）+ 边界
+#### 8.10.1 可热改键（UI 23 个 / 状态层 23 个）+ 边界
 
-`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-46`）共 **22** 个字段，UI 表单亦呈现 **22** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:48-72`）。
+`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-47`）共 **23** 个字段，UI 表单亦呈现 **23** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:50-74`）。
 
 | # | 前端字段 DOM id | 键 `key` | 类型 | UI 标签 i18n | 边界 / 校验 |
 |---|---|---|---|---|---|
@@ -4105,6 +4109,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 4 | `#cfgMaxMessageChars` | `maxMessageChars` | int | `admin.maxChars` | 1..1000000 |
 | 5 | `#cfgMessageRetentionDays` | `messageRetentionDays` | int | `admin.retention`（0=不清理） | ≥ 0 |
 | 6 | `#cfgDailyTokenQuota` | `dailyTokenQuotaPerUser` | long | `admin.quota` | ≥ 0 |
+| 6b | `#cfgDailyTokenQuotaGroup` | `dailyTokenQuotaPerGroup` | long | `admin.quotaGroup` | ≥ 0（**1.0.264 新增**） |
 | 7 | `#cfgRequireToken` | `requireTokenOnRealTime` | bool | `admin.reqRealTime` | 三态 |
 | 8 | `#cfgEnableTools` | `enableTools` | bool | `admin.enableTools` | 三态 |
 | 9 | `#cfgEnableWebTools` | `enableWebTools` | bool | `admin.enableWeb` | 三态 |
@@ -4122,9 +4127,11 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 21 | `#cfgMemBackgroundWait` | `memoryBackgroundEmbeddingWaitSeconds` | int | `admin.memBackgroundWait` | 1..3600 |
 | 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0（**0 = 关闭去重**） |
 
-边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）。
+边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）。
 
 > **记忆与向量化（6.3 + 2.4/2.6，1.0.263）**：#18–#22 对应 `AgentOptions.Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`。这四个（除缓存容量外）在**每次写入 / 检索时重新读取**，所以保存即生效；缓存容量则由写入路径**按需重建 / 热改容量**（改 0 = 立即关闭去重，改大 / 改小按 LRU 即时生效）。它们是「语义记忆检索慢 / 超时」的主旋钮（embedding 耗时与输入长度成正比），无需再改 appsettings / 重启。并发额度（`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`）因闸门信号量在启动时定型，仍属**需重启**项（见 8.10.4）。
+
+> **配额（1.0.264）**：#6 / #6b 分别对应 `AgentOptions.DailyTokenQuotaPerUser` 与 `AgentOptions.DailyTokenQuotaPerGroup`（`0` = 不限）。两者均为「超限拒绝新触发」型硬限：按用户配额**豁免** `system` 触发者，按知聚配额**不豁免**（把定时 / 广播那路消耗管住）。它们由 `AgentUsageService` 以 `Func<long>` **实时读取**（`AgentHosting.cs:66-70`），所以保存即生效。
 
 > **模型路由（6.7，1.0.260）**：#14–#17 对应 `AgentOptions.ModelRouting`（`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`）。**StandardModel 为本版新增**——此前 Standard 档固定不换。启用后按「复杂度自适应」同一份估计器（`RunComplexityEstimator`）为 Simple / Standard / Complex / Heavy 四档分别选模型（留空 = 该档不换）；例如 Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。与后台 `Agents:ModelRouting`（env `AGENTS_MODELROUTING_*`）同源，页面保存后即时生效并持久化。注意：与列表项「空 = 不修改」不同，模型名走字符串 `??` 语义 —— **空串会清空该档**（前端总是提交这三个字段，即“保存 = 以表单为准”）。
 
@@ -4144,7 +4151,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 - `groupChat`：`messageHistoryLimit`、`messageWriteDebounceMs`、`maxMessageChars`、`maxConcurrentAgentInvocations`、`messageRetentionDays`；
 - `storage`：`provider`、`autoCreateSchema`、`hasConnectionString`；
 - `persistence`：`enabled`、`filePath`；
-- `agents`：`provider`、`enableTools`、`enableWebTools`、`thinkingMode`、`dailyTokenQuotaPerUser`、`requireApprovalToolNames`、`memory.{enabled,provider,embeddingModel,embeddingDimensions,retentionDays,scope}`。
+- `agents`：`provider`、`enableTools`、`enableWebTools`、`thinkingMode`、`dailyTokenQuotaPerUser`、`dailyTokenQuotaPerGroup`、`requireApprovalToolNames`、`memory.{enabled,provider,embeddingModel,embeddingDimensions,retentionDays,scope}`。
 
 > **已修复（1.0.230）**：`GET /ag-ui/admin/config` 现由「配置治理」页的 **「只读参数快照」按钮**（`#cfgSnapshotBtn` → `loadConfigSnapshot`）消费；`admin.configHint` 文案已同步改为指向该按钮（不再指向不存在的入口）。
 
@@ -4857,7 +4864,8 @@ service:
 | `Agents:DecisionMinProbability` | `DecisionMinProbability` | 0.3 | 未配 | 判定为「是」的最低概率 |
 | `Agents:VisionEnabled` | `VisionEnabled` | `true` | 未配 | 图片理解开关 |
 | `Agents:VisionModel` | `VisionModel` | `null` | 未配 | 视觉模型名 |
-| `Agents:DailyTokenQuotaPerUser` | `DailyTokenQuotaPerUser` | 0 | 未配 | 每用户每日 token 配额（0 = 不限） |
+| `Agents:DailyTokenQuotaPerUser` | `DailyTokenQuotaPerUser` | 0 | 未配 | 每用户每日 token 配额（0 = 不限；豁免 `system` 触发） |
+| `Agents:DailyTokenQuotaPerGroup` | `DailyTokenQuotaPerGroup` | 0 | 未配 | 每知聚每日 token 配额（0 = 不限；**计入 `system` 触发**） |
 | `Agents:EnableTools` | `EnableTools` | `false` | `true` | 工具调用开关 |
 | `Agents:EnableWebTools` | `EnableWebTools` | `false` | `false` | 网络类工具（web_search / read_url） |
 | `Agents:WebSearchEndpoint` | `WebSearchEndpoint` | `https://api.duckduckgo.com/` | 未配 | 搜索端点 |
@@ -5061,6 +5069,7 @@ service:
 | `AGENTS_ENABLE_TOOLS` / `AGENTS_ENABLE_WEBTOOLS` | `true` / `false` | `Agents:EnableTools` / `EnableWebTools` |
 | `AGENTS_BUILTIN_DOCX_SKILLS` / `PPTX` / `XLSX` / `PDF` | 均 `true` | `Agents:Builtin*Skills` |
 | `AGENTS_DAILY_TOKEN_QUOTA` | `0` | `Agents:DailyTokenQuotaPerUser` |
+| `AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP` | `0` | `Agents:DailyTokenQuotaPerGroup` |
 | `STORAGE_PROVIDER` / `STORAGE_CONNECTION_STRING` | `postgres` / 指向 `postgres` | `Storage:Provider` / `ConnectionString` |
 | `MEMORY_ENABLED` | `true` | `Agents:Memory:Enabled` |
 | `MEMORY_EMBEDDING_ENDPOINT` | `http://llama-embed:8080/v1` | `Agents:Memory:EmbeddingEndpoint` |

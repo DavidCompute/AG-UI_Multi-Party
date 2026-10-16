@@ -108,6 +108,18 @@ public sealed class AgentOptions
     /// </summary>
     public long DailyTokenQuotaPerUser { get; set; }
 
+    /// <summary>
+    /// 每个知聚每日 token 用量配额（默认 0 = 不限）。超限后该知聚当天不再触发任何智能体（AGENT_QUOTA_EXCEEDED），
+    /// 次日 0 点（UTC）自动恢复。
+    ///
+    /// <para>
+    /// 为什么除了「按用户」还要「按知聚」：定时任务 / 广播等以虚拟触发者 <c>system</c> 发起的消耗**不计入个人配额**
+    /// （避免系统任务被某个用户的配额误伤），但因此也无人可管——按知聚配额把「这个知聚一共烧了多少」卡住，
+    /// 恰好补上这一路。两者独立，任一超限即拒绝。
+    /// </para>
+    /// </summary>
+    public long DailyTokenQuotaPerGroup { get; set; }
+
     /// <summary>是否启用工具调用（内置本地工具：get_current_time / calculator / unit_converter /
     /// group_memory_search / read_attachment，以及需 EnableWebTools 的网络工具）。供 TOOL_CALL_START / 人机交互演示。</summary>
     public bool EnableTools { get; set; }

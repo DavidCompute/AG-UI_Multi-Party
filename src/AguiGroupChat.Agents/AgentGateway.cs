@@ -647,6 +647,22 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             return new AgentInvocationResult(false, runId, "AGENT_QUOTA_EXCEEDED");
         }
 
+        // 知聚配额校验（Agents:DailyTokenQuotaPerGroup）：把「本知聚今天一共烧了多少」卡住。
+        // 它对 system 触发**同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这里要管的。
+        if (_usage.Value?.CheckGroupQuota(context.GroupId) is { } groupQuota)
+        {
+            _logger.LogWarning("智能体触发被知聚配额拦截：group={Group} used={Used}/{Quota} agent={AgentId} trigger={User}",
+                context.GroupId, groupQuota.Used, groupQuota.Quota, context.AgentId, context.TriggerUserId);
+            await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent
+            {
+                GroupId = context.GroupId,
+                ErrorCode = "GROUP_QUOTA_EXCEEDED",
+                Message = $"本知聚今日模型用量已达配额上限（{groupQuota.Quota} token），请明日再试或联系管理员",
+                Timestamp = _hub.Value.NowMs,
+            }, ct: CancellationToken.None);
+            return new AgentInvocationResult(false, runId, "GROUP_QUOTA_EXCEEDED");
+        }
+
         await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
         {
             GroupId = context.GroupId,

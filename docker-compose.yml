@@ -142,6 +142,10 @@ services:
       Agents__ThinkingMode: ${AGENTS_THINKING_MODE:-true}
       # 每用户每日 token 用量配额（0 = 不限）：超出后该用户当天无法再触发智能体（管理员控制台「用量统计」查看）
       Agents__DailyTokenQuotaPerUser: ${AGENTS_DAILY_TOKEN_QUOTA:-0}
+      # 每知聚每日 token 用量配额（0 = 不限）：超限后该知聚当天不再触发智能体。
+      # 与按用户配额互补：定时/广播任务以虚拟触发者 system 发起、不计入任何人的个人配额，
+      # 但**计入知聚配额**——这一路消耗就由它管住。
+      Agents__DailyTokenQuotaPerGroup: ${AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP:-0}
       # 工具调用（默认开启）：内置 get_current_time（免审批）+ calculator / unit_converter /
       # group_memory_search / read_attachment + publish_announcement（需审批，人机交互 HITL）
       Agents__EnableTools: ${AGENTS_ENABLE_TOOLS:-true}

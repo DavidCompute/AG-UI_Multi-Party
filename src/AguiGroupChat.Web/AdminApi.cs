@@ -399,6 +399,7 @@ public static class AdminApi
             return Results.Ok(new
             {
                 dailyQuotaPerUser = usage.DailyQuotaPerUser,
+                dailyQuotaPerGroup = usage.DailyQuotaPerGroup,
                 days = usage.GetDailySummary(days ?? 7),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
@@ -568,6 +569,7 @@ public static class AdminApi
                     enableWebTools = agents.EnableWebTools,
                     thinkingMode = agents.ThinkingMode,
                     dailyTokenQuotaPerUser = agents.DailyTokenQuotaPerUser,
+                    dailyTokenQuotaPerGroup = agents.DailyTokenQuotaPerGroup,
                     requireApprovalToolNames = agents.RequireApprovalToolNames,
                     memory = new
                     {

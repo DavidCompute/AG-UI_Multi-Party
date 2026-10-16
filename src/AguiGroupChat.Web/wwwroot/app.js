@@ -8839,9 +8839,14 @@ async function loadAdminUsage() {
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) { $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
     const quota = Number(data.dailyQuotaPerUser) || 0;
+    const quotaGroup = Number(data.dailyQuotaPerGroup) || 0;
     $("adminUsageMeta").textContent = quota > 0
       ? t("admin.quotaEnabled", { quota: quota.toLocaleString() })
       : t("admin.quotaDisabled");
+    if (quotaGroup > 0) {
+      const g = t("admin.quotaGroupEnabled", { quota: quotaGroup.toLocaleString() });
+      $("adminUsageMeta").textContent += ($("adminUsageMeta").textContent ? " ｜ " : "") + g;
+    }
     const days = data.days || [];
     $("adminUsageRows").innerHTML = days.length
       ? days.map((d) => `<tr>
@@ -8870,6 +8875,7 @@ async function loadConfigGovernance() {
     setCfg("cfgMaxMessageChars", d.maxMessageChars);
     setCfg("cfgMessageRetentionDays", d.messageRetentionDays);
     setCfg("cfgDailyTokenQuota", d.dailyTokenQuotaPerUser);
+    setCfg("cfgDailyTokenQuotaGroup", d.dailyTokenQuotaPerGroup);
     setCfg("cfgMessageWriteDebounceMs", d.messageWriteDebounceMs);
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
@@ -8918,6 +8924,7 @@ function collectCfg() {
   body.maxMessageChars = numOrNull("cfgMaxMessageChars");
   body.messageRetentionDays = numOrNull("cfgMessageRetentionDays");
   body.dailyTokenQuotaPerUser = numOrNull("cfgDailyTokenQuota");
+  body.dailyTokenQuotaPerGroup = numOrNull("cfgDailyTokenQuotaGroup");
   body.messageWriteDebounceMs = numOrNull("cfgMessageWriteDebounceMs");
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");

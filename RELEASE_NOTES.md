@@ -1,4 +1,40 @@
-# AG-UI 群聊桌面版 1.0.263 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.264 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.264 Release Notes (current Windows desktop release)
+
+**版本说明**：**修复配额「热改静默失效」+ 新增「按知聚每日 Token 配额」**——前者是长期潜伏的缺陷：管理员在「配置治理」把每日 Token 配额改完、界面回读也对，但**实际不生效**（服务在构造时把配额拷成了一个字段，之后永远读那个旧值）；现已改为**委托实时读取**，保存即生效。后者补上一处「无人可管」的消耗：定时 / 广播任务以虚拟触发者 `system` 发起，**刻意豁免个人配额**，于是这一路只增不减；新增的知聚配额正好卡住它。
+**Version note**: **Fixes "hot-change silently ineffective" for quotas + adds "daily token quota per circle"** — the former was a long-latent defect: after an admin changed the daily token quota in Config Governance, the UI read back correctly but it **did not actually apply** (the service had copied the quota into a field at construction and kept reading that stale value); it now reads via a **delegate in real time**, taking effect on save. The latter closes a "nobody can manage it" consumption path: scheduled / broadcast tasks run as the virtual trigger `system`, which is **deliberately exempt** from the per-user quota, so that path only grew; the new per-circle quota caps it.
+
+## 变更
+# Changes
+
+中文：
+- **修复：配额热改即刻生效**（`AgentUsageService`）。原因：``DailyQuotaPerUser`` 在**构造时**从 `AgentOptions` 拷贝成字段，而「配置治理」改的是 `AgentOptions` 单例属性——服务读的永远是构造那一刻的旧值，**只有重启后才生效**（而 `docs/execution-configuration.md` 却写着「配额 → 热改持久」，属文档与实现不符）。现在改为注入 ``Func<long>``（由 `AgentHosting` 传 ``() => options.DailyTokenQuotaPerUser`` / ``() => options.DailyTokenQuotaPerGroup``），**每次读取都取当前值**。
+- **新增：按知聚每日 Token 配额**（`Agents:DailyTokenQuotaPerGroup`，`0` = 不限）。复用既有的「按知聚」用量聚合表（`GetGroupUsageBetween`），**不扩 `IUsageStore` 接口**，4 个存储实现通用。超限时在网关 `InvokeCoreAsync` 广播 `RunErrorEvent { ErrorCode = "GROUP_QUOTA_EXCEEDED" }` 并拒绝本次触发。
+- **它与按用户配额互补**：个人配额**豁免** `system` 触发者（系统任务不该被某个人的配额误伤），所以定时 / 广播任务的消耗此前无人可管；**知聚配额不豁免 `system`**——这一路消耗由它管住。
+- **兼容**：保留旧构造 ``(IUsageStore, long, ILogger)``（等价于「固定个人配额 + 知聚不限」），既有测试 / 调用点不受影响。
+- **配置治理新增 1 键**（22 → **23**）：`dailyTokenQuotaPerGroup`（≥ 0；越界 / 为负返回 **400**）。`GET /ag-ui/admin/usage` 出参新增 `dailyQuotaPerGroup`；用量统计页在个人配额提示后追加一行「每知聚每日配额」。
+- **Docker**：`docker-compose.yml` 新增 `Agents__DailyTokenQuotaPerGroup`（`AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP`，默认 0）。
+
+English:
+- **Fix: quota hot-change now applies at once** (`AgentUsageService`). Cause: `DailyQuotaPerUser` was copied from `AgentOptions` into a field **at construction**, while Config Governance mutates the `AgentOptions` singleton property — so the service forever read the value from construction time and it **only took effect after a restart** (while `docs/execution-configuration.md` claimed "quota → hot-change persistent", i.e. docs did not match the implementation). It now takes a `Func<long>` (injected by `AgentHosting` as `() => options.DailyTokenQuotaPerUser` / `() => options.DailyTokenQuotaPerGroup`), **reading the current value on every access**.
+- **New: daily token quota per circle** (`Agents:DailyTokenQuotaPerGroup`, `0` = unlimited). It reuses the existing per-circle usage aggregate table (`GetGroupUsageBetween`) and **does not extend the `IUsageStore` interface**, so all 4 store implementations work. On overflow the gateway's `InvokeCoreAsync` broadcasts `RunErrorEvent { ErrorCode = "GROUP_QUOTA_EXCEEDED" }` and rejects the trigger.
+- **It complements the per-user quota**: the personal quota **exempts** the `system` trigger (system tasks should not be hurt by one person's quota), so scheduled / broadcast consumption was previously unmanageable; the **per-circle quota does not exempt `system`** — that path is exactly what it caps.
+- **Compatibility**: the old constructor `(IUsageStore, long, ILogger)` is kept (equivalent to "fixed per-user quota + no per-circle limit"), so existing tests / call sites are unaffected.
+- **Config Governance gains 1 key** (22 → **23**): `dailyTokenQuotaPerGroup` (≥ 0; out-of-range / negative returns **400**). `GET /ag-ui/admin/usage` gains `dailyQuotaPerGroup`; the Usage Stats page appends a "daily quota per circle" line after the per-user quota hint.
+- **Docker**: `docker-compose.yml` gains `Agents__DailyTokenQuotaPerGroup` (`AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP`, default 0).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.6（用量统计新增知聚配额说明）、§8.10（配置治理 **22 → 23 键**，新增 `#cfgDailyTokenQuotaGroup` 行与边界校验）、§9.3.3（`Agents` 配置键表新增 `DailyTokenQuotaPerGroup`）、§9.5.2（env 表新增 `AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP`）；`docs/execution-configuration.md`（配额热改说明现与实现一致）。
+English: `docs/user-guide.md` / `en.md` §8.6 (Usage Stats gains the per-circle quota note), §8.10 (Config Governance **22 → 23 keys**, new `#cfgDailyTokenQuotaGroup` row and bounds), §9.3.3 (`Agents` config key table gains `DailyTokenQuotaPerGroup`), §9.5.2 (env table gains `AGENTS_DAILY_TOKEN_QUOTA_PER_GROUP`); `docs/execution-configuration.md` (the quota hot-change claim now matches the implementation).
+
+## 测试
+# Tests
+
+中文：`AgentUsageServiceTests` 新增 4 例——①配额热改实时生效（回归：构造后改被委托读取的值，`DailyQuotaPerUser` 跟着变、`CheckUserQuota` 随之放行 / 拦截）；②旧构造行为不变（固定个人配额、知聚不限）；③知聚配额执行且**计入 `system` 触发**；④`GetGroupTodayTokens` 跨知聚不串、空 ID 返回 0。扩展 `AdminApiIntegrationTests.ConfigGovernance_Post_AdminUpdatesAndPersists`（保存两个配额 → 回读一致 + 断言落到运行时 `AgentOptions`，并**断言 `AgentUsageService` 单例读到的是新值**——即本缺陷的回归检查）；`ConfigGovernance_Post_RejectsInvalidAndForbidsNonAdmin` 新增两条负值 400。**全量 1798 测试通过**（1794 → 1798）；`dotnet build AguiGroupChat.slnx` **0 错误**；`node --check` 三份前端脚本通过；i18n 审计 **zh=en=1933，missing 0**，`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 均过。
+English: `AgentUsageServiceTests` gains 4 cases — ①quota hot-change applies live (regression: after construction, changing the value read by the delegate makes `DailyQuotaPerUser` follow and `CheckUserQuota` allow / block accordingly); ②the old constructor keeps its behaviour (fixed per-user quota, no per-circle limit); ③per-circle quota enforcement that **counts `system` triggers**; ④`GetGroupTodayTokens` does not cross circles and returns 0 for an empty id. Extended `AdminApiIntegrationTests.ConfigGovernance_Post_AdminUpdatesAndPersists` (save both quotas → read back consistently + assert they land in the runtime `AgentOptions`, and **assert the `AgentUsageService` singleton reads the new value** — i.e. the regression check for this defect); `ConfigGovernance_Post_RejectsInvalidAndForbidsNonAdmin` gains two negative-value 400 checks. **All 1798 tests pass** (1794 → 1798); `dotnet build AguiGroupChat.slnx` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1933, missing 0**, and `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass.
+
 # AG-UI Group Chat Desktop 1.0.263 Release Notes (current Windows desktop release)
 
 **版本说明**：**记忆与向量化旋钮上线「配置治理」**——把「语义记忆检索慢 / 超时」的主旋钮（检索 query 截断、写入侧截断、交互 / 后台等待上限）与新增的「写入去重缓存条数」搬到管理员控制台在线热改，保存即生效、无需改 appsettings / 重启。
