@@ -220,25 +220,28 @@ public sealed class ToolsTests
     [Fact]
     public async Task ReadAttachment_LongDocument_ReadsInSegmentsAndCanContinue()
     {
-        // 长文档（超过单文件 12000 字符上限）：首段默认返回 + startIndex 续读直到读完 + 超尾提示，供模型完整引用大附件。
+        // 长文档（超过单文件字符上限）：首段默认返回 + startIndex 续读直到读完 + 超尾提示，供模型完整引用大附件。
+        // 上限不写死：取 AttachmentStore 的出厂默认（运行期由 PromptBudget 决定，当前 40000）。
+        // 早先这里写死 12000，随默认值上调而失效（文档仅 24000 字符 → 一次读完、没有续读提示）。
+        var per = AttachmentStore.DefaultTextCharsPerFile;
         var dir = Path.Combine(Path.GetTempPath(), "agui-tools-" + Guid.NewGuid().ToString("N")[..8]);
         try
         {
             var store = new AttachmentStore(dir);
-            var content = new string('A', 12_000) + new string('B', 12_000) + "ENDMARKER-" + Guid.NewGuid().ToString("N");
+            var content = new string('A', per) + new string('B', per) + "ENDMARKER-" + Guid.NewGuid().ToString("N");
             using var ms = new MemoryStream(Encoding.UTF8.GetBytes(content));
             var info = store.Save("长文档.txt", "text/plain", ms, ms.Length);
 
             var tools = new GroupContextTools(new ServiceCollection().AddSingleton(store).BuildServiceProvider(), new AgentOptions(), NullLoggerFactory.Instance);
             var first = await tools.ReadAttachment(info.AttachmentId);
-            Assert.Contains(new string('A', 500), first);   // 首段正文
-            Assert.Contains("startIndex=12000", first);    // 提示可继续读取
-            var second = await tools.ReadAttachment(info.AttachmentId, 12_000);
-            Assert.Contains(new string('B', 500), second);  // 续读段正文
-            var tail = await tools.ReadAttachment(info.AttachmentId, 24_000);
-            Assert.Contains("ENDMARKER-", tail);           // 再续读到文件结尾
+            Assert.Contains(new string('A', 500), first);        // 首段正文
+            Assert.Contains($"startIndex={per}", first);            // 提示可继续读取
+            var second = await tools.ReadAttachment(info.AttachmentId, per);
+            Assert.Contains(new string('B', 500), second);        // 续读段正文
+            var tail = await tools.ReadAttachment(info.AttachmentId, 2 * per);
+            Assert.Contains("ENDMARKER-", tail);                 // 再续读到文件结尾
             var beyond = await tools.ReadAttachment(info.AttachmentId, 999_999);
-            Assert.Contains("已到文件末尾", beyond);        // 超尾明确提示
+            Assert.Contains("已到文件末尾", beyond);             // 超尾明确提示
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
