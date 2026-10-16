@@ -223,6 +223,7 @@
   - **版本化对外 REST API（入站集成）**：`/agui/v1`——外部系统用 API 密钥（或会话）主动发消息 / 读历史 / 同步等回复。`POST /agui/v1/groups/{id}/messages` 可带 `waitMs`（≤45000）长轮询，等该次触发的数字员工回复**完整**（正文非空且流已结束，`GroupHub.IsAgentMessageStreaming`）再返回（超时回半截并标 `complete:false`）；`GET /agui/v1/{me,groups,groups/{id}/messages,groups/{id}/messages/{mid},groups/{id}/replies}`。鉴权只接受真实身份并以该身份做成员 / 可见性校验。落点：`Web/ExternalApi.cs`。
 
 - **Playwright 自动化验证（已实现）**：`tools/ui-orchestrate-flow.mjs` 用 Playwright 自动跑「一键组织编排 → 建客服知聚」全链路并截图（`tools/README-playwright.md`），覆盖 SSE 流式生成、apply 落库、客服知聚进入与会话隔离的前端验证。
+- **运行期回归扫描（已实现）**：`tools/api-smoke.mjs`（后端 HTTP 只读主流面 46 项：路由 / 鉴权 / 序列化 / Prometheus 指标）与 `tools/ui-smoke.mjs`（前端控制台：未捕获运行时错误 + i18n 原文键泄漏；带总时长看门狗与注入式自检），均为只读、可重复跑，见 `tools/README-regression.md`。
 
 ### 6.5 数字员工绩效看板（★★☆ 运营洞察 / 反哺编排） ✅已实现（1.0.220）
 - **现状**：`agui_usage` 已在记录按「日期 + 员工 + 触发者」的调用与 token；消息 👍👎 反馈也已在存；但**没有按员工的汇总视图**，编排选人仍靠静态角色描述。

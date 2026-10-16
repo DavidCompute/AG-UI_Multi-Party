@@ -58,7 +58,7 @@
 - ✅ **用户分组与按组授权（细粒度访问控制）**：管理员控制台「用户分组」把平台账号编组（`ug_xxx`，与“群聊知聚”不同概念）；资源可指定「允许访问的用户组」白名单——**数字员工** `AllowedGroupIds`（未配置=全员；配置后仅命中的组成员可看到 / 单聊 / 拉入建群；服务端四关口拦截，403 `AGENT_PERMISSION_DENIED`）、**技能库** `AllowedUserGroupIds`（受限技能对非授权者隐藏且不可挂载）；知识库已有“群级共享”与之互补。创建者与系统管理员始终放行（详见 `docs/RBAC.md` §6）
 - ✅ **记忆拟人类型（按类型召回）**：每个数字员工可在「编辑 → 记忆与权限」配置自己的记忆特征——五档拟人预设（广记型 / 深记型 / 难录入型 / 存得住想不起型 / 快速遗忘型）+ 口吻模式 + 人设 + TopK / 阈值微调；调取群 / 个人记忆时按类型实际执行抽取（条数、相似度阈值、回忆提示分支、近期窗口），深记型本人发言自动刻为「重要」记忆、快速遗忘型在开启自动遗忘时本人普通发言保留更短。未配置 = 沿用平台全局，完全向后兼容（机制、字段与调试见 `docs/memory-personality.md`）；**组织构建自动配型**——网页一键组织编排与内置组织架构构建师产稿时会按每个岗位职责自动挑选合适的记忆拟人预设，落库的新数字员工即自带匹配其岗位的记忆类型（见 §4.4）
 - ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
-- ✅ **浏览器自动化工具**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服知聚」全链路并截图，见 `tools/README-playwright.md`）
+- ✅ **浏览器自动化工具 + 运行期回归扫描**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服知聚」全链路并截图，见 `tools/README-playwright.md`）；**`tools/api-smoke.mjs`**（后端 HTTP 只读主流面 46 项回归）与 **`tools/ui-smoke.mjs`**（前端控制台回归：抓未捕获运行时错误 + **i18n 原文键泄漏**，如界面直接显示 `common.save common.cancel`）——零依赖 / Playwright，均为只读，见 `tools/README-regression.md`
 
 ## 项目结构
 
@@ -89,6 +89,9 @@ tools/direct-chat-flow.mjs       # Playwright 浏览器自动化：数字员工�
 tools/team-replace.mjs           # 团队级整批替换 / 反复覆盖（管理员）：删旧批 + 一键编排 apply 落新；加 `--name` 可对同一支反复改、始终只留最新一版（见 tools/README-team-replace.md）
 tools/README-playwright.md       # 上述编排自动化的安装 / 运行 / 退出码说明
 tools/README-team-replace.md     # 团队整批替换 / 反复修改同一支的操作与 plan.json 结构说明
+tools/api-smoke.mjs              # 运行期回归：后端 HTTP 只读主流面扫描（46 项，零依赖，见 tools/README-regression.md）
+tools/ui-smoke.mjs               # 运行期回归：前端控制台扫描（未捕获运行时错误 + i18n 原文键泄漏，Playwright，见 tools/README-regression.md）
+tools/README-regression.md       # 运行期回归扫描（API + UI）的使用 / 退出码 / 探针判据说明
 ```
 
 ```mermaid
