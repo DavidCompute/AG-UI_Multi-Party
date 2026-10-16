@@ -113,6 +113,7 @@ public sealed class PostgresStore
                 agent_chain TEXT,
                 plan_json TEXT,
                 usage_json TEXT,
+                citations_json TEXT,
                 timestamp BIGINT NOT NULL,
                 recalled BOOLEAN NOT NULL DEFAULT FALSE
             );
@@ -123,6 +124,7 @@ public sealed class PostgresStore
             ALTER TABLE agui_messages ADD COLUMN IF NOT EXISTS agent_chain TEXT;
             ALTER TABLE agui_messages ADD COLUMN IF NOT EXISTS plan_json TEXT;
             ALTER TABLE agui_messages ADD COLUMN IF NOT EXISTS usage_json TEXT;
+            ALTER TABLE agui_messages ADD COLUMN IF NOT EXISTS citations_json TEXT;
 
             CREATE TABLE IF NOT EXISTS agui_users (
                 user_id TEXT PRIMARY KEY,

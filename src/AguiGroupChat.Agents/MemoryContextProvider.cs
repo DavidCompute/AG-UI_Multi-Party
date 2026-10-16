@@ -105,6 +105,9 @@ public sealed class MemoryContextProvider : AIContextProvider
                     _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条历史记忆（group={GroupId}，记忆类型={MemoryType}）", run.AgentId, memories.Count, run.GroupId, profileTuning?.MemoryType ?? "默认");
                     sb.Append(memorySection).AppendLine();
                     memorySectionInjected = true;
+                    // 引用来源：记录真正注入的群记忆命中
+                    if (CitationCollector.Ambient.Value is { } citMem)
+                        foreach (var h in memories) citMem.Add("memory", h.SenderId, "", h.Score, h.Content);
                 }
 
                 // 个人记忆：需全局能力（PersonalTopK>0）+ 智能体开启 + 触发者用户开启（隐私），三重条件
@@ -129,6 +132,9 @@ public sealed class MemoryContextProvider : AIContextProvider
                         _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条个人记忆（person={PersonId}）", run.AgentId, personal.Count, run.TriggerUserId);
                         sb.Append(personSection).AppendLine();
                         memorySectionInjected = true;
+                        // 引用来源：记录真正注入的个人记忆命中
+                        if (CitationCollector.Ambient.Value is { } citPer)
+                            foreach (var h in personal) citPer.Add("person", h.SenderId, "", h.Score, h.Content);
                     }
                 }
             }
@@ -148,6 +154,9 @@ public sealed class MemoryContextProvider : AIContextProvider
                 {
                     _logger.LogInformation("智能体 {AgentId} 回复前注入 {Count} 条知识库片段（kbs={Kbs}）", run.AgentId, kbHits.Count, string.Join(",", kbIds));
                     sb.Append(kbSection).AppendLine();
+                    // 引用来源：记录真正注入的知识库片段
+                    if (CitationCollector.Ambient.Value is { } citKb)
+                        foreach (var h in kbHits) citKb.Add("kb", h.KbName, h.FileName, h.Score, h.Content);
                 }
 
                 // 知识库图谱（Graph RAG，启用时）：对绑定知识库的图谱隔离域做种子召回 + 图遍历，注入子图补强

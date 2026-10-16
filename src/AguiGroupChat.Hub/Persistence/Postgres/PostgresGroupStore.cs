@@ -574,7 +574,7 @@ public sealed class PostgresGroupStore : IGroupStore
     {
         using var conn = _pg.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain, plan_json = @planJson, usage_json = @usageJson WHERE group_id = @gid AND message_id = @mid";
+        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain, plan_json = @planJson, usage_json = @usageJson, citations_json = @citationsJson WHERE group_id = @gid AND message_id = @mid";
         cmd.Parameters.AddWithValue("topic", message.TopicId);
         cmd.Parameters.AddWithValue("content", message.Content);
         cmd.Parameters.AddWithValue("attachments", Json(message.Attachments));
@@ -582,6 +582,7 @@ public sealed class PostgresGroupStore : IGroupStore
         cmd.Parameters.AddWithValue("agentChain", (object?)message.AgentChain ?? DBNull.Value);
         cmd.Parameters.AddWithValue("planJson", (object?)message.PlanJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("usageJson", (object?)message.UsageJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("citationsJson", (object?)message.CitationsJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("gid", message.GroupId);
         cmd.Parameters.AddWithValue("mid", message.MessageId);
         cmd.ExecuteNonQuery();
@@ -595,7 +596,7 @@ public sealed class PostgresGroupStore : IGroupStore
         cmd.CommandText = """
             UPDATE agui_messages
             SET content = '', sender_nickname = @nick, mentions = @empty, mention_all = FALSE,
-                attachments = @empty, reasoning = NULL, agent_chain = NULL, plan_json = NULL
+                attachments = @empty, reasoning = NULL, agent_chain = NULL, plan_json = NULL, usage_json = NULL, citations_json = NULL
             WHERE sender_id = @sender
             """;
         cmd.Parameters.AddWithValue("nick", placeholderNickname);
@@ -694,7 +695,8 @@ public sealed class PostgresGroupStore : IGroupStore
         Content = r.GetString(r.GetOrdinal("content")),
         Reasoning = r.IsDBNull(r.GetOrdinal("reasoning")) ? null : r.GetString(r.GetOrdinal("reasoning")),
         AgentChain = r.IsDBNull(r.GetOrdinal("agent_chain")) ? null : r.GetString(r.GetOrdinal("agent_chain")),
-        PlanJson = r.IsDBNull(r.GetOrdinal("plan_json")) ? null : r.GetString(r.GetOrdinal("plan_json")),
+        UsageJson = r.IsDBNull(r.GetOrdinal("usage_json")) ? null : r.GetString(r.GetOrdinal("usage_json")),
+        CitationsJson = r.IsDBNull(r.GetOrdinal("citations_json")) ? null : r.GetString(r.GetOrdinal("citations_json")),
         Timestamp = r.GetInt64(r.GetOrdinal("timestamp")),
         Recalled = r.GetBoolean(r.GetOrdinal("recalled")),
     };

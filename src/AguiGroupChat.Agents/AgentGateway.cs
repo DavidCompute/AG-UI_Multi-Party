@@ -654,6 +654,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var ownUsage = prevUsage is null;
         var usageAcc = prevUsage ?? new UsageAccumulator();
         UsageAccumulator.Ambient.Value = usageAcc;
+        // 本次回答引用来源（记忆 / 知识库检索注入）：同样最外层创建、嵌套沿用
+        var prevCites = CitationCollector.Ambient.Value;
+        var ownCites = prevCites is null;
+        var citations = prevCites ?? new CitationCollector();
+        CitationCollector.Ambient.Value = citations;
         // 工具返回收集：技能产物（produce_file 标记）以工具真实返回为准，
         // 不依赖模型在正文里原样复述 JSON（模型常改写成人话而丢掉标记）。
         var prevToolResults = ToolResultCollector.Ambient.Value;
@@ -904,6 +909,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             var attached = await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
             await AttachAgentChainAsync(context, messageId, runCt);
             if (ownUsage) await AttachUsageAsync(context, messageId, usageAcc, runCt);
+            if (ownCites) await AttachCitationsAsync(context, messageId, citations, runCt);
             // 空正文兜底：模型这一轮既没给正文、也没产出文件时，不要留一条**完全空白**的消息
             // （前端就是一只空气泡，用户不知道发生了什么）。与指派/提升、计划两条路径同一口径。
             if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
@@ -937,6 +943,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             _activeRuns.TryRemove(runId, out _); // 运行结束 / 取消：注销停止能力
             SkillChainBuilder.Ambient.Value = prevChain; // 清理链构造器（恢复外层）
             UsageAccumulator.Ambient.Value = prevUsage;  // 恢复外层用量累加器
+            CitationCollector.Ambient.Value = prevCites; // 恢复外层引用采集器
             ToolResultCollector.Ambient.Value = prevToolResults; // 恢复外层工具返回收集器
             await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
             {
@@ -3987,6 +3994,33 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return added;
     }
 
+
+    /// <summary>把本次回答的「引用来源」（记忆 / 知识库检索命中的片段）回档到消息，供前端展示并可点开查看。
+    /// 无来源时静默跳过，不阻断主流程。</summary>
+    private async Task AttachCitationsAsync(AgentInvocationContext context, string messageId, CitationCollector collector, CancellationToken ct)
+    {
+        try
+        {
+            if (collector.IsEmpty) return;
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                items = collector.Items.Select(i => new
+                {
+                    kind = i.Kind,
+                    title = i.Title,
+                    detail = i.Detail,
+                    score = i.Score,
+                    snippet = i.Snippet,
+                }),
+            });
+            await _hub.Value.AttachCitationsAsync(context.GroupId, messageId, payload, ct);
+            _logger.LogDebug("引用来源回档：消息 {MessageId}（{Count} 条）", messageId, collector.Items.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "引用来源回档失败（不影响主流程）：消息 {MessageId}", messageId);
+        }
+    }
 
     /// <summary>把本次回答运行的 token 用量（含子代理）回档到消息，供前端展示「本次用量 / 成本」。
     /// 未捕获到用量帧时静默跳过，不阻断主流程。</summary>

@@ -305,6 +305,7 @@ public sealed class PersistenceService : IDisposable
         AgentChain = m.AgentChain,
         PlanJson = m.PlanJson,
         UsageJson = m.UsageJson,
+        CitationsJson = m.CitationsJson,
         Timestamp = m.Timestamp,
         Recalled = m.Recalled,
     };
@@ -365,6 +366,7 @@ public sealed class PersistenceService : IDisposable
             AgentChain = m.AgentChain,
             PlanJson = m.PlanJson,
             UsageJson = m.UsageJson,
+            CitationsJson = m.CitationsJson,
             Timestamp = m.Timestamp,
         };
         msg.Recalled = m.Recalled;

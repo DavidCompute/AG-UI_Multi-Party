@@ -67,6 +67,10 @@ public sealed record GroupMessage
     /// 由网关在运行结束时回档（含子代理调用），供前端展示「本次用量 / 成本」；可空 = 未捕获到用量。</summary>
     public string? UsageJson { get; set; }
 
+    /// <summary>本次回答的「引用来源」（JSON：<c>{ items:[{kind,title,detail,score,snippet}] }</c>，含知识库 / 记忆命中）；
+    /// 由网关在运行结束时回档，供前端展示并可点开查看片段；可空 = 本次无检索来源。</summary>
+    public string? CitationsJson { get; set; }
+
     /// <summary>发送时间戳（毫秒级）。</summary>
     public required long Timestamp { get; init; }
 

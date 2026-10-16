@@ -234,6 +234,7 @@ public sealed class RedisGroupStore : IGroupStore
                 msg.AgentChain = null;
                 msg.PlanJson = null;
                 msg.UsageJson = null;
+                msg.CitationsJson = null;
                 UpdateMessage(msg);
                 affected++;
             }

@@ -251,6 +251,8 @@ public sealed class TextMessageEndEvent
     public string? PlanJson { get; init; }
     /// <summary>消息结束时本次回答的模型用量（JSON 序列化；可空 = 未捕获）。</summary>
     public string? UsageJson { get; init; }
+    /// <summary>消息结束时本次回答的引用来源（JSON 序列化；可空 = 无来源）。</summary>
+    public string? CitationsJson { get; init; }
     public required long Timestamp { get; init; }
 }
 
@@ -502,6 +504,8 @@ public sealed class SnapshotMessage
     public string? PlanJson { get; init; }
     /// <summary>本次回答的模型用量（JSON 序列化 { inputTokens, outputTokens, reasoningTokens, cost, currency }；可空）。</summary>
     public string? UsageJson { get; init; }
+    /// <summary>本次回答的引用来源（JSON 序列化 { items:[...] }；可空）。</summary>
+    public string? CitationsJson { get; init; }
     /// <summary>@ 提及成员（协议 2.3 扩展字段，前端回显）。</summary>
     public IReadOnlyList<string> Mentions { get; init; } = [];
     /// <summary>是否 @ 全体。</summary>

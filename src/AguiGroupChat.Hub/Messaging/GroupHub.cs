@@ -1143,6 +1143,7 @@ public sealed class GroupHub : IDisposable
                 AgentChain = m.AgentChain,
                 PlanJson = m.PlanJson,
                 UsageJson = m.UsageJson,
+                CitationsJson = m.CitationsJson,
                 Timestamp = m.Timestamp,
             })
             .ToList();
@@ -1568,6 +1569,25 @@ public sealed class GroupHub : IDisposable
         await Task.CompletedTask;
     }
 
+    /// <summary>为流式中的智能体消息附加本次回答的「引用来源」（JSON：<c>{ items:[{kind,title,detail,score,snippet}] }</c>），
+    /// 于运行结束时写库一次。与正文通道共用锁。</summary>
+    public async Task AttachCitationsAsync(string groupId, string messageId, string citationsJson, CancellationToken ct = default)
+    {
+        if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
+            throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或未开启流式灌入");
+        lock (_pendingLock)
+        {
+            if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+                _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+            var msg = _store.GetMessage(groupId, messageId)
+                ?? throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在");
+            msg.CitationsJson = citationsJson;
+            _store.UpdateMessage(msg);
+        }
+        _changes?.Notify();
+        await Task.CompletedTask;
+    }
+
     /// <summary>为流式中的智能体消息附加本次回答的模型用量（JSON：<c>{ inputTokens, outputTokens, reasoningTokens, cost, currency }</c>），
     /// 于运行结束时写库一次，供前端展示「本次用量 / 成本」。与正文通道共用锁。</summary>
     public async Task AttachUsageAsync(string groupId, string messageId, string usageJson, CancellationToken ct = default)
@@ -1832,6 +1852,7 @@ public sealed class GroupHub : IDisposable
             AgentChain = msg?.AgentChain, // 技能调用链（链路可视化）
             PlanJson = msg?.PlanJson, // 任务计划（刷新后回显）
             UsageJson = msg?.UsageJson, // 本次用量（刷新后回显）
+            CitationsJson = msg?.CitationsJson, // 引用来源（刷新后回显）
             Timestamp = NowMs,
         }, state.Recipients, ct);
     }

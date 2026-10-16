@@ -79,6 +79,8 @@ public sealed class PersistedMessage
     public string? PlanJson { get; set; }
     /// <summary>本次回答的模型用量（JSON 序列化；可空）。</summary>
     public string? UsageJson { get; set; }
+    /// <summary>本次回答的引用来源（JSON 序列化；可空）。</summary>
+    public string? CitationsJson { get; set; }
     public required long Timestamp { get; init; }
     public bool Recalled { get; init; }
 }

@@ -4823,7 +4823,7 @@ function applySnapshot(evt) {
       content: sm.content, reasoning: sm.reasoning || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll, agentChain: sm.agentChain || null,
       topicId: sm.topicId || "main",
       timestamp: Number(sm.timestamp) || 0,
-      time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: parsePlanJson(sm.planJson), usage: parseUsageJson(sm.usageJson),
+      time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: parsePlanJson(sm.planJson), usage: parseUsageJson(sm.usageJson), citations: parseCitationsJson(sm.citationsJson),
     };
     state.msgIndex.set(sm.messageId, m);
     seen.add(sm.messageId);
@@ -5111,6 +5111,29 @@ function renderUsageCard(u) {
   return `<div class="usage-card">💰 <b>${escapeHtml(t("msg.usageTitle"))}</b> <span class="usage-vals">${escapeHtml(parts.join(" · "))}${escapeHtml(cost)}</span></div>`;
 }
 
+/** 解析消息携带的 citationsJson（本次回答的引用来源）；非法 / 缺失 / 空列表返回 null。 */
+function parseCitationsJson(json) {
+  if (!json) return null;
+  try {
+    const c = typeof json === "string" ? JSON.parse(json) : json;
+    if (!c || !Array.isArray(c.items) || !c.items.length) return null;
+    return { items: c.items };
+  } catch { return null; }
+}
+
+/** 引用来源卡（本次回答实际注入的知识库 / 记忆命中，可点开看片段）：置于「执行过程」块内。 */
+function renderCitationsCard(c) {
+  const items = (c && c.items) ? c.items : [];
+  if (!items.length) return "";
+  const kindLabel = (k) => k === "kb" ? t("msg.citeKb") : k === "person" ? t("msg.citePerson") : t("msg.citeMemory");
+  const rows = items.map((it) => {
+    const meta = (it.detail ? " · " + it.detail : "") + (it.score == null ? "" : " · " + Number(it.score).toFixed(2));
+    const snippet = it.snippet ? `<div class="cite-snippet">${escapeHtml(it.snippet)}</div>` : "";
+    return `<li><div class="cite-head"><span class="cite-kind">${escapeHtml(kindLabel(it.kind))}</span> <b>${escapeHtml(it.title || "")}</b>${escapeHtml(meta)}</div>${snippet}</li>`;
+  }).join("");
+  return `<details class="cite-card"><summary>📎 ${escapeHtml(t("msg.citeTitle"))} <span class="cite-count">${items.length}</span></summary><ul class="cite-list">${rows}</ul></details>`;
+}
+
 
 function onMessageEnd(evt) {
   const r = room(evt.groupId);
@@ -5121,6 +5144,7 @@ function onMessageEnd(evt) {
   m.reasoning = evt.reasoning ?? m.reasoning;
   m.agentChain = evt.agentChain ?? m.agentChain; // 技能调用链（链路可视化）
   m.usage = parseUsageJson(evt.usageJson) ?? m.usage; // 本次用量（token / 成本）
+  m.citations = parseCitationsJson(evt.citationsJson) ?? m.citations; // 引用来源（知识库 / 记忆命中）
   m._html = undefined; // 结束 → 切 Markdown 渲染
   if (state.activeGroupId !== evt.groupId) return;
   // 窗口内消息立即局部更新（切 Markdown + 折叠 + 挂按钮）。
@@ -10641,9 +10665,13 @@ function msgDom(m, r, prev) {
   const usageCard = (m.senderType === "agent" && !m.recalled && m.usage && !m.usage._empty)
     ? renderUsageCard(m.usage)
     : "";
+  // 引用来源（知识库 / 记忆命中）：随回答落库，刷新后仍可回显
+  const citationsCard = (m.senderType === "agent" && !m.recalled && m.citations)
+    ? renderCitationsCard(m.citations)
+    : "";
   // 过程 / 最终答复分层：把思考、计划、技能链、工具调用归为「执行过程」，置于正文（最终答复）之上。
   // 默认展开（用户大多希望看到过程），点标题可一键收起；手动选择按 messageId 记住，重渲染不动。
-  const processInner = thinking + planCardHtml + chainCard + usageCard + toolCalls;
+  const processInner = thinking + planCardHtml + chainCard + citationsCard + usageCard + toolCalls;
   // 默认跟随计划卡：执行结束（非流式）则收起，流式中展开；手动点过则以其选择为准。
   const processCollapsed = processCollapseOverride.has(m.id) ? processCollapseOverride.get(m.id) === true : !m.streaming;
   const stepInfo = (m.plan && m.plan.steps && m.plan.steps.length)

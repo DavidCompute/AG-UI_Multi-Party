@@ -1346,6 +1346,14 @@ textarea:focus { outline: none; border-color: var(--accent); }
 /* 本次用量行（对话内「执行过程」块） */
 .usage-card { font-size: 12px; color: var(--muted); padding: 4px 0; }
 .usage-card .usage-vals { font-variant-numeric: tabular-nums; }
+/* 引用来源卡（对话内「执行过程」块） */
+.cite-card { font-size: 12px; margin: 6px 0; }
+.cite-card > summary { cursor: pointer; color: var(--muted); }
+.cite-count { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px; background: var(--panel-2); color: var(--muted); font-size: 11px; text-align: center; }
+.cite-list { margin: 6px 0 0; padding-left: 18px; }
+.cite-head { color: var(--text); }
+.cite-kind { display: inline-block; padding: 0 6px; margin-right: 4px; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; color: var(--muted); }
+.cite-snippet { color: var(--muted); margin: 2px 0 6px; white-space: pre-wrap; word-break: break-word; }
 .oh-trend-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
 .kb-grid-head {
   flex: none; display: grid; grid-template-columns: 1.5fr .8fr 2.2fr 190px; gap: 10px;

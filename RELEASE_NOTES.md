@@ -1,3 +1,37 @@
+# AG-UI 群聊桌面版 1.0.254 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.254 Release Notes (current Windows desktop release)
+
+**版本说明**：**每条回答带「📎 引用来源」**——数字员工回复的「执行过程」里列出本次**实际注入**的知识库片段 / 群记忆 / 个人记忆命中（可展开查看摘录片段）。
+**Version note**: **Every reply now shows its "📎 Sources"** — the digital employee's "Execution process" lists the knowledge-base snippets / group memories / personal memories **actually injected** for this reply (expandable to read the excerpts).
+
+## 变更
+# Changes
+
+中文：
+- **采集**：新增 `CitationCollector`（AsyncLocal，同 `UsageAccumulator` 作用域约定）——在**唯一**的记忆 / 知识库检索注入处 `MemoryContextProvider.ProvideAIContextAsync` 埋点：只有**确实被注入**的命中才记录（群记忆 `memory` / 个人记忆 `person` / 知识库 `kb`），同来源去重、单条摘录截 400 字、至多 12 条。
+- **回档**：网关最外层运行结束时 `AttachCitationsAsync` → `GroupHub.AttachCitationsAsync` → 消息 `citations_json`（`{items:[{kind,title,detail,score,snippet}]}`）；无来源不写。
+- **存储**：`GroupMessage.CitationsJson` 继续沿用 `usage_json` 同款模式（SQLite / MySQL `EnsureColumn` + Postgres `ADD COLUMN IF NOT EXISTS`，**老库自动补列、零迁移**；两种关系库读写改 + Redis 匿名化 + 内存快照同步）。
+- **前端**：`msgDom()` 的「执行过程」内新增 `.cite-card`（在调用链之后、用量之前）——折叠标题「📎 引用来源 + 条数」，每项为类型胶囊（知识库 / 群记忆 / 个人记忆）+ 标题（库名 / 发送者）+ 副标题（文档名）+ 相似度，下方为**摘录片段**；随快照与 `TEXT_MESSAGE_END` 两路解析（`parseCitationsJson`），空 / 缺 / 非法不渲染。
+- **价值**：回答可**核对来源**（点开看片段）；存储 / 记忆没被用上时一眼可见（解释了「为什么没用到知识库」类疑问），与「本次用量」一起补全单次回答的透明度。
+English:
+- **Capture**: a new `CitationCollector` (AsyncLocal, same scoping convention as `UsageAccumulator`) — instrumented at the **single** memory / KB retrieval-and-injection site `MemoryContextProvider.ProvideAIContextAsync`: only hits **actually injected** are recorded (group memory `memory` / personal memory `person` / knowledge base `kb`), deduped by source, excerpts clamped to 400 chars, at most 12 items.
+- **Archive**: at the end of the outermost run, `AttachCitationsAsync` → `GroupHub.AttachCitationsAsync` → the message's `citations_json` (`{items:[{kind,title,detail,score,snippet}]}`); nothing is written when there are no sources.
+- **Storage**: `GroupMessage.CitationsJson` follows the same `usage_json` pattern (SQLite / MySQL `EnsureColumn` plus Postgres `ADD COLUMN IF NOT EXISTS`, **auto-added on old databases, zero migration**; the two relational stores read/write/update, Redis anonymization and the in-memory snapshot are all in sync).
+- **Front end**: `msgDom()`'s "Execution process" gains a `.cite-card` (after the call chain, before the usage row) — the summary reads "📎 Sources + count", each item is a kind pill (knowledge base / group memory / personal memory) + title (KB name / sender) + subtitle (file name) + score, with the **excerpt** below; parsed from both the snapshot and `TEXT_MESSAGE_END` (`parseCitationsJson`), empty / missing / invalid renders nothing.
+- **Value**: replies can be **verified against their sources** (open to read the excerpt); when storage / memory was not used it becomes immediately visible (explaining "why didn't it use the knowledge base?"), completing single-reply transparency together with the usage row.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.10.1（过程体新增「引用来源卡」）。
+English: `docs/user-guide.md` / `en.md` §2.10.1 (the process body gains the "sources card").
+
+## 测试
+# Tests
+
+中文：新增 `CitationCollectorTests`（去重 / 摘录截断 / 条数上限）。相关用例合跑 **19/19**。`node --check`、i18n 审计 **zh=en=1902，missing 0**、`check-i18n-keys`（875 处引用）、`check-orphan-keys`（923 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后）：`parseCitationsJson`（三项 / 坏 JSON → null）；直接调 `msgDom()` 渲一条带引用的探针消息 → `.cite-card` **存在且在 `.process` 内**，类型胶囊为「知识库 / 群记忆 / 个人记忆」、计数徽标「3」、摘录片段已渲染；无 / 空引用均不渲染；**无页面报错**。数据库侧：Postgres `agui_messages` 已自动出现 `citations_json` 列（与 `plan_json` / `usage_json` 并列）。
+English: adds `CitationCollectorTests` (dedupe / excerpt clamping / item cap). Related tests run **19/19**. `node --check`, the i18n audit **zh=en=1902, missing 0**, `check-i18n-keys` (875 references), `check-orphan-keys` (923 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web): `parseCitationsJson` (three items / bad JSON → null); calling `msgDom()` directly on a probe message with citations → the `.cite-card` **exists and sits inside `.process`**, kind pills read "Knowledge base / Group memory / Personal memory", the count badge is "3" and the excerpts render; none / empty render nothing; **no page errors**. Database side: Postgres `agui_messages` now has the `citations_json` column (alongside `plan_json` / `usage_json`).
+
 # AG-UI 群聊桌面版 1.0.253 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.253 Release Notes (current Windows desktop release)
 

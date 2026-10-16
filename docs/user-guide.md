@@ -997,7 +997,8 @@
 思考、计划、技能链、工具调用四类「过程」块统一收进一个可折叠的 `.process`（`<details>`）：
 
 - 折叠标题 `.process-summary` 文字为 `msg.processTitle`（「执行过程」），有计划时附步数进度（如「执行过程 · 3/5」）。
-- 过程体 `.process-body` 内依次为思考块 / 计划卡 / 调用链 / **本次用量行** / 工具行；左侧有细竖线 + 缩进，与正文（最终答复）视觉区分。
+- 过程体 `.process-body` 内依次为思考块 / 计划卡 / 调用链 / **引用来源卡** / **本次用量行** / 工具行；左侧有细竖线 + 缩进，与正文（最终答复）视觉区分。
+- **引用来源卡（`.cite-card`，1.0.254）**：本次回答**实际注入**的知识库片段 / 群记忆 / 个人记忆命中（记忆 / 知识库检索注入处 `MemoryContextProvider` 写入 `CitationCollector`，运行结束由 `AttachCitationsAsync` 回档到 `agui_messages.citations_json`）。折叠标题「📎 引用来源 + 条数」；每项显示类型胶囊（知识库 / 群记忆 / 个人记忆）+ 标题（库名 / 发送者）+ 副标题（文档名）+ 相似度，下方为**摘录片段**（单条至 400 字，最多 12 条，同来源去重）；刷新 / 重开仍可回显。
 - **本次用量行（`.usage-card`，1.0.253）**：`msgDom()` 读消息上的 `usage`（由 `msg.usageJson` 解析 / `TEXT_MESSAGE_END` 携带）渲染 `💰 本次用量 输入 N · 输出 N · 思考 N · 成本 X`；成本按 `Agents:Pricing` 在回档时估算（未配单价则不显示成本）；全零 / 缺失不渲染。网关在运行结束时把本次回答（含子代理）的 token 汇总回档到消息（`AttachUsageAsync` → `GroupHub.AttachUsageAsync` → `agui_messages.usage_json`），刷新 / 重开仍可回显。
 - 默认行为：流式中展开、结束后收起；用户手动点过则以其选择为准（按 `messageId` 记到 `processCollapseOverride`，重渲染后保持）。
 - 无过程内容时不渲染整个块。

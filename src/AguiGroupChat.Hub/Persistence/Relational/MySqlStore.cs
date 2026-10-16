@@ -28,6 +28,7 @@ public sealed class MySqlStore : RelationalStore
         EnsureColumn("agui_messages", "agent_chain", "ALTER TABLE agui_messages ADD COLUMN agent_chain MEDIUMTEXT NULL");
         EnsureColumn("agui_messages", "plan_json", "ALTER TABLE agui_messages ADD COLUMN plan_json MEDIUMTEXT NULL");
         EnsureColumn("agui_messages", "usage_json", "ALTER TABLE agui_messages ADD COLUMN usage_json MEDIUMTEXT NULL");
+        EnsureColumn("agui_messages", "citations_json", "ALTER TABLE agui_messages ADD COLUMN citations_json MEDIUMTEXT NULL");
         EnsureIndex("agui_group_members", "idx_members_member",
             "CREATE INDEX idx_members_member ON agui_group_members(member_id)");
         EnsureIndex("agui_topics", "idx_topics_group",
@@ -145,6 +146,7 @@ public sealed class MySqlStore : RelationalStore
             agent_chain MEDIUMTEXT NULL,
             plan_json MEDIUMTEXT NULL,
             usage_json MEDIUMTEXT NULL,
+            citations_json MEDIUMTEXT NULL,
             timestamp BIGINT NOT NULL,
             recalled TINYINT(1) NOT NULL DEFAULT 0
         ) CHARACTER SET utf8mb4;
