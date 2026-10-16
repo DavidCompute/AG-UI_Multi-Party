@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.256 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.256 Release Notes (current Windows desktop release)
+
+**版本说明**：**会话导出可选范围与格式**——点 📥 弹出选择：**当前话题 / 整个知聚（所有话题）** × **Markdown / HTML**；HTML 为单文件、内联样式、可直接打印为 PDF。
+**Version note**: **Conversation export gains scope and format options** — clicking 📥 opens a chooser: **current topic / whole Circle (all topics)** × **Markdown / HTML**; the HTML is a single file with inline styles, printable straight to PDF.
+
+## 变更
+# Changes
+
+中文：
+- **入口改为弹窗**：📥 → `openExportChatModal()` □ `#exportChatModal`（范围单选 + 格式单选 + 导出 / 取消；Esc / 点遮罩关闭），点导出 → `runChatExport()`。
+- **范围**：当前话题（单节） / 整个知聚（按话题分节；MD 用 `## {话题}`，HTML 用 `<h2>`；最多 12 个话题，每话题至多 10 页）。
+- **HTML 导出（新）**：**单文件 + 内联样式 + 无外部引用**，离线可开、可打印为 PDF（`@media print` + `print-color-adjust: exact`）；正文用已渲染并消毒的 `renderMarkdown`，数字员工消息带浅蓝左边线。
+- **代码整理**：抽出 `fetchTopicMessages`（分页拉全）、`collectConversation`（按范围）、`topicLabel` / `fmtTs` / `msgFootnotes` / `mdMessageLines`（Markdown 与 HTML 共用脚注），`buildConversationMarkdown`（单话题）/ `buildGroupMarkdown` / `buildGroupHtml`（整知聚）。纯前端改动，**无新增接口**。
+English:
+- **Entry point is now a dialog**: 📥 → `openExportChatModal()` shows `#exportChatModal` (scope radios + format radios + Export / Cancel; Esc / overlay click closes), and Export calls `runChatExport()`.
+- **Scope**: current topic (one section) / whole Circle (sectioned by topic; `## {topic}` in Markdown, `<h2>` in HTML; up to 12 topics, up to 10 pages each).
+- **HTML export (new)**: a **single file with inline styles and no external references**, openable offline and printable to PDF (`@media print` + `print-color-adjust: exact`); bodies use already-rendered, sanitized `renderMarkdown`, and digital-employee messages get a light-blue left border.
+- **Refactor**: extracted `fetchTopicMessages` (paging), `collectConversation` (by scope), `topicLabel` / `fmtTs` / `msgFootnotes` / `mdMessageLines` (footnotes shared by Markdown and HTML), `buildConversationMarkdown` (single topic) / `buildGroupMarkdown` / `buildGroupHtml` (whole Circle). Front-end only, **no new endpoint**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.9.6 重写（弹窗选择、范围 / 格式、HTML 单文件）。
+English: `docs/user-guide.md` / `en.md` §2.9.6 rewritten (the chooser, scope / format, single-file HTML).
+
+## 测试
+# Tests
+
+中文：本轮**无 C# 改动**（纯前端 + 文案），`dotnet build` 与 1.0.255 一致（0 错误；MSI 步骤的完整 publish 也 0 错误）。`node --check`、i18n 审计 **zh=en=1916，missing 0**、`check-i18n-keys`（884 处引用）、`check-orphan-keys`（929 处 `t()` 引用）均过。浏览器实测（重建 web 后，管理员，真实数据）：📥 弹出选择；选「整个知聚 + Markdown」→ `chat-group_direct_5f….md`（23371 字节，**3 个话题节**、42 条）；选「整个知聚 + HTML」→ `chat-group_direct_5f….html`（35850 字节，`<!doctype html>` ✓、内联 `<style>` ✓、**无外部引用** ✓、42 个 `.msg` ✓、3 个 `<h2>` ✓）；将该 HTML 单独渲染到空页 → h1「与 组织架构构建师 的单聊」、42 条消息、**0 渲染错误**；**无页面报错**。
+English: **no C# changes** this round (frontend + copy only), so `dotnet build` matches 1.0.255 (0 errors; the MSI step's full publish also reports 0 errors). `node --check`, the i18n audit **zh=en=1916, missing 0**, `check-i18n-keys` (884 references) and `check-orphan-keys` (929 `t()` references) all pass. Browser-verified (after rebuilding web, as admin, real data): 📥 opens the chooser; "whole Circle + Markdown" → `chat-group_direct_5f….md` (23371 bytes, **3 topic sections**, 42 messages); "whole Circle + HTML" → `chat-group_direct_5f….html` (35850 bytes, `<!doctype html>` ✓, inline `<style>` ✓, **no external references** ✓, 42 `.msg` ✓, 3 `<h2>` ✓); rendering that HTML alone in a blank page → h1 "与 组织架构构建师 的单聊", 42 messages, **0 render errors**; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.255 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.255 Release Notes (current Windows desktop release)
 

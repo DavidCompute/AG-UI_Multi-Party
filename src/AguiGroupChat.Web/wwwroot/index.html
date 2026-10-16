@@ -571,6 +571,27 @@
     </div>
   </div>
 
+  <!-- 会话导出：范围（当前话题 / 整个知聚）+ 格式（Markdown / HTML） -->
+  <div id="exportChatModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal" style="width:440px">
+      <div class="modal-title">📥 <span data-i18n="chat.exportTitle">导出会话</span></div>
+      <div class="form-group">
+        <label data-i18n="chat.exportScope">导出范围</label>
+        <label class="pick-item"><input type="radio" name="exportScope" value="topic" checked /> <span data-i18n="chat.exportScopeTopic">当前话题</span></label>
+        <label class="pick-item"><input type="radio" name="exportScope" value="group" /> <span data-i18n="chat.exportScopeGroup">整个知聚（所有话题）</span></label>
+      </div>
+      <div class="form-group">
+        <label data-i18n="chat.exportFormat">文件格式</label>
+        <label class="pick-item"><input type="radio" name="exportFormat" value="md" checked /> <span data-i18n="chat.exportFormatMd">Markdown（.md）</span></label>
+        <label class="pick-item"><input type="radio" name="exportFormat" value="html" /> <span data-i18n="chat.exportFormatHtml">HTML（可打印为 PDF）</span></label>
+      </div>
+      <div class="modal-actions">
+        <button id="exportChatGo" class="chip-btn" data-i18n="chat.exportGo">导出</button>
+        <button id="exportChatCancel" class="btn-ghost" data-i18n="common.cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 组织体检报告·图表视图：KPI + 调用量 Top 柱状 + 需关注项（可再下载 Markdown） -->
   <div id="orgHealthModal" class="modal-overlay modal-over-console hidden">
     <div class="modal kb-modal">

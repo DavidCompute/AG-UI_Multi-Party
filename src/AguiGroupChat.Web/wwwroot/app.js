@@ -7402,77 +7402,188 @@ function downloadTextFile(text, filename, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/** 会话导出（Markdown）：导出当前知聚的**当前话题**。分页拉全历史（突破客户端内存裁剪）。 */
-async function exportCurrentTopic() {
-  const gid = state.activeGroupId;
-  if (!gid) { toast(t("chat.needGroup")); return; }
-  const btn = $("exportChatBtn");
-  if (btn) btn.disabled = true;
-  try {
-    const topicId = state.activeTopicId || "main";
-    const maxPages = 20, pageSize = 100;
-    let msgs = [];
-    let before = null;
-    for (let i = 0; i < maxPages; i++) {
-      const url = `/ag-ui/group/${encodeURIComponent(gid)}/topics/${encodeURIComponent(topicId)}/messages?count=${pageSize}`
-        + (before ? `&before=${encodeURIComponent(before)}` : "");
-      const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
-      if (!res.ok) break;
-      const page = await res.json().catch(() => null);
-      if (!Array.isArray(page) || page.length === 0) break;
-      msgs = page.concat(msgs); // page 为升序，更早的页拼在前面
-      before = page[0].messageId;
-      if (page.length < pageSize) break;
-    }
-    const seen = new Set();
-    msgs = msgs.filter((m) => { if (!m || !m.messageId || seen.has(m.messageId)) return false; seen.add(m.messageId); return true; })
-      .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
-    if (!msgs.length) { toast(t("chat.exportEmpty")); return; }
-    const md = buildConversationMarkdown(gid, topicId, msgs, msgs.length >= maxPages * pageSize);
-    downloadTextFile(md, `chat-${gid}-${topicId}.md`, "text/markdown;charset=utf-8");
-    toast(t("chat.exportOk", { n: msgs.length }));
-  } catch { toast(t("admin.sysNetErr")); }
-  finally { if (btn) btn.disabled = !state.activeGroupId; }
+/** 拉取某话题的全部可见消息（按 before 游标向前翻页拉全，突破客户端内存裁剪）。 */
+async function fetchTopicMessages(gid, topicId, maxPages) {
+  const pageSize = 100;
+  let msgs = [];
+  let before = null;
+  for (let i = 0; i < maxPages; i++) {
+    const url = `/ag-ui/group/${encodeURIComponent(gid)}/topics/${encodeURIComponent(topicId)}/messages?count=${pageSize}`
+      + (before ? `&before=${encodeURIComponent(before)}` : "");
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
+    if (!res.ok) break;
+    const page = await res.json().catch(() => null);
+    if (!Array.isArray(page) || page.length === 0) break;
+    msgs = page.concat(msgs); // page 为升序，更早的页拼在前面
+    before = page[0].messageId;
+    if (page.length < pageSize) break;
+  }
+  const seen = new Set();
+  const out = [];
+  for (const m of msgs) {
+    if (!m || !m.messageId || seen.has(m.messageId)) continue;
+    seen.add(m.messageId);
+    out.push(m);
+  }
+  out.sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+  return out;
+}
+
+/** 按范围收集会话：`topic` = 当前话题；`group` = 整个知聚（所有话题，上限 12 个）。 */
+async function collectConversation(gid, scope) {
+  if (scope !== "group") {
+    const tid = state.activeTopicId || "main";
+    return [{ topicId: tid, msgs: await fetchTopicMessages(gid, tid, 20) }];
+  }
+  const all = [{ topicId: "main" }].concat((room(gid).topics || []).filter((tp) => tp.topicId !== "main"));
+  const out = [];
+  for (const tp of all.slice(0, 12)) {
+    const msgs = await fetchTopicMessages(gid, tp.topicId, 10);
+    if (msgs.length) out.push({ topicId: tp.topicId, msgs });
+  }
+  return out;
+}
+
+/** 话题显示名（主话题用 topic.mainShort）。 */
+function topicLabel(gid, topicId) {
+  if (topicId === "main") return t("topic.mainShort");
+  return ((room(gid).topics || []).find((x) => x.topicId === topicId) || {}).name || topicId;
+}
+
+/** 时间戳 → `yyyy-MM-dd HH:mm`。 */
+function fmtTs(ts) {
+  const d = new Date(Number(ts) || 0);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 单条消息的透明度脚注（用量 / 引用来源），Markdown 与 HTML 共用。 */
+function msgFootnotes(m) {
+  const out = [];
+  const u = parseUsageJson(m.usageJson);
+  if (u && !u._empty) {
+    let uu = `${t("msg.usageIn", { n: Number(u.inputTokens).toLocaleString() })} · ${t("msg.usageOut", { n: Number(u.outputTokens).toLocaleString() })}`;
+    if (u.reasoningTokens) uu += " · " + t("msg.usageReason", { n: Number(u.reasoningTokens).toLocaleString() });
+    if (u.cost != null && u.currency) uu += " · " + t("msg.usageCost", { cost: u.currency + Number(u.cost).toFixed(4) });
+    out.push("💰 " + uu);
+  }
+  const c = parseCitationsJson(m.citationsJson);
+  if (c) out.push("📎 " + t("msg.citeTitle") + "：" + c.items.map((it) => (it.detail ? `${it.title}/${it.detail}` : it.title)).join("、"));
+  return out;
+}
+
+/** 单条消息 → Markdown 行。 */
+function mdMessageLines(m) {
+  const lines = [];
+  const agent = String(m.senderType || "").toLowerCase().includes("agent");
+  lines.push(`### ${agent ? "🤖 " : ""}${m.senderNickname || m.senderId || ""} · ${fmtTs(m.timestamp)}`);
+  if (m.replyToMessageId) lines.push(`> ↩ ${m.replyToMessageId}`);
+  lines.push("", String(m.content || "").trim() || "—", "");
+  const atts = (m.attachments || []).map((a) => a.name || a.fileName || a.path || "").filter(Boolean);
+  if (atts.length) { lines.push("📁 " + atts.map((n) => `\`${n}\``).join("、"), ""); }
+  for (const f of msgFootnotes(m)) lines.push("> " + f);
+  if (msgFootnotes(m).length) lines.push("");
+  return lines;
 }
 
 /** 把消息列表拼成会话 Markdown（含附件名、回复关系，以及数字员工回复的用量 / 引用来源）。 */
 function buildConversationMarkdown(gid, topicId, msgs, truncated) {
   const g = state.groups.find((x) => x.groupId === gid);
   const groupName = (g && g.groupName) || gid;
-  const topic = topicId === "main"
-    ? t("topic.mainShort")
-    : (((room(gid).topics || []).find((x) => x.topicId === topicId) || {}).name || topicId);
-  const fmt = (ts) => {
-    const d = new Date(Number(ts) || 0);
-    const p = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-  };
   const lines = [];
-  lines.push(`# ${groupName} · ${topic}`, "");
-  lines.push(`- ${t("chat.exportMeta", { from: fmt(msgs[0].timestamp), to: fmt(msgs[msgs.length - 1].timestamp), n: msgs.length, time: fmt(Date.now()) })}`);
+  lines.push(`# ${groupName} · ${topicLabel(gid, topicId)}`, "");
+  lines.push(`- ${t("chat.exportMeta", { from: fmtTs(msgs[0].timestamp), to: fmtTs(msgs[msgs.length - 1].timestamp), n: msgs.length, time: fmtTs(Date.now()) })}`);
   if (truncated) lines.push(`- ⚠ ${t("chat.exportTruncated")}`);
   lines.push("");
-  for (const m of msgs) {
-    const agent = String(m.senderType || "").toLowerCase().includes("agent");
-    lines.push(`### ${agent ? "🤖 " : ""}${m.senderNickname || m.senderId || ""} · ${fmt(m.timestamp)}`);
-    if (m.replyToMessageId) lines.push(`> ↩ ${m.replyToMessageId}`);
-    lines.push("");
-    lines.push(String(m.content || "").trim() || "—");
-    lines.push("");
-    const atts = (m.attachments || []).map((a) => a.name || a.fileName || a.path || "").filter(Boolean);
-    if (atts.length) { lines.push("📁 " + atts.map((n) => `\`${n}\``).join("、")); lines.push(""); }
-    const u = parseUsageJson(m.usageJson);
-    if (u && !u._empty) {
-      let uu = `> 💰 ${t("msg.usageIn", { n: Number(u.inputTokens).toLocaleString() })} · ${t("msg.usageOut", { n: Number(u.outputTokens).toLocaleString() })}`;
-      if (u.reasoningTokens) uu += " · " + t("msg.usageReason", { n: Number(u.reasoningTokens).toLocaleString() });
-      if (u.cost != null && u.currency) uu += " · " + t("msg.usageCost", { cost: u.currency + Number(u.cost).toFixed(4) });
-      lines.push(uu);
-    }
-    const c = parseCitationsJson(m.citationsJson);
-    if (c) lines.push(`> 📎 ${t("msg.citeTitle")}：` + c.items.map((it) => (it.detail ? `${it.title}/${it.detail}` : it.title)).join("、"));
-    if (u || c) lines.push("");
+  for (const m of msgs) lines.push(...mdMessageLines(m));
+  return lines.join("\n");
+}
+
+/** 整个知聚（多话题）→ Markdown（每个话题一节）。 */
+function buildGroupMarkdown(gid, sections) {
+  const g = state.groups.find((x) => x.groupId === gid);
+  const groupName = (g && g.groupName) || gid;
+  const total = sections.reduce((n, s) => n + s.msgs.length, 0);
+  const lines = [`# ${groupName}`, ""];
+  lines.push(`- ${t("chat.exportGroupMeta", { topics: sections.length, n: total, time: fmtTs(Date.now()) })}`, "");
+  for (const s of sections) {
+    lines.push(`## ${topicLabel(gid, s.topicId)}（${s.msgs.length}）`, "");
+    for (const m of s.msgs) lines.push(...mdMessageLines(m));
   }
   return lines.join("\n");
+}
+
+/** 单条消息 → HTML 片段（正文用已渲染并消毒的 Markdown）。 */
+function htmlMessageBody(m) {
+  const agent = String(m.senderType || "").toLowerCase().includes("agent");
+  const atts = (m.attachments || []).map((a) => a.name || a.fileName || a.path || "").filter(Boolean);
+  const foot = msgFootnotes(m).map((f) => `<div class="foot">${escapeHtml(f)}</div>`).join("");
+  return `<div class="msg${agent ? " agent" : ""}">`
+    + `<div class="who">${agent ? "🤖 " : ""}${escapeHtml(m.senderNickname || m.senderId || "")}<span class="at">${escapeHtml(fmtTs(m.timestamp))}</span></div>`
+    + (m.replyToMessageId ? `<div class="foot">↩ ${escapeHtml(m.replyToMessageId)}</div>` : "")
+    + `<div class="body">${renderMarkdown(String(m.content || ""))}</div>`
+    + (atts.length ? `<div class="foot">📁 ${atts.map((n) => `<code>${escapeHtml(n)}</code>`).join("、")}</div>` : "")
+    + foot + `</div>`;
+}
+
+/** 整个知聚（多话题）→ 单文件 HTML（内联样式，离线可开 / 可打印为 PDF）。 */
+function buildGroupHtml(gid, sections) {
+  const g = state.groups.find((x) => x.groupId === gid);
+  const groupName = (g && g.groupName) || gid;
+  const total = sections.reduce((n, s) => n + s.msgs.length, 0);
+  const style = `:root{--border:#d7dde8;--muted:#667085;--panel:#f5f7fb}`
+    + `*{box-sizing:border-box}body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#1e2432;margin:24px;background:#fff}`
+    + `h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:22px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--border)}`
+    + `.meta{color:var(--muted);font-size:12px;margin-bottom:12px}`
+    + `.msg{border-left:3px solid var(--border);padding:6px 10px;margin:8px 0}.msg.agent{border-left-color:#4f8cff;background:#f8faff}`
+    + `.who{font-weight:600;font-size:13px}.at{color:var(--muted);font-weight:400;font-size:12px;margin-left:8px}`
+    + `.body{font-size:13px;line-height:1.6;word-wrap:break-word}.body p{margin:.4em 0}.body pre{background:var(--panel);padding:8px;overflow:auto;border-radius:6px}`
+    + `.body code{background:var(--panel);padding:0 4px;border-radius:4px}.body img{max-width:100%}`
+    + `.foot{color:var(--muted);font-size:12px;margin-top:4px}`
+    + `@media print{body{margin:0}.msg{break-inside:avoid}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`;
+  const body = sections.map((s) =>
+    `<h2>${escapeHtml(topicLabel(gid, s.topicId))}（${s.msgs.length}）</h2>` + s.msgs.map(htmlMessageBody).join("")
+  ).join("");
+  const lang = (document.documentElement && document.documentElement.lang) || "zh";
+  return "<!doctype html>\n<html lang=\"" + lang + "\"><head><meta charset=\"utf-8\">\n"
+    + `<title>${escapeHtml(groupName)}</title>\n<style>${style}</style>\n</head>\n<body>\n`
+    + `<h1>${escapeHtml(groupName)}</h1>\n`
+    + `<div class="meta">${escapeHtml(t("chat.exportGroupMeta", { topics: sections.length, n: total, time: fmtTs(Date.now()) }))}</div>\n`
+    + body + "\n</body></html>";
+}
+
+/** 打开会话导出弹窗（范围 / 格式）。 */
+function openExportChatModal() {
+  if (!state.activeGroupId) { toast(t("chat.needGroup")); return; }
+  $("exportChatModal").classList.remove("hidden");
+}
+
+/** 按弹窗选择导出会话（当前话题 / 整个知聚；Markdown / HTML）。 */
+async function runChatExport() {
+  const gid = state.activeGroupId;
+  if (!gid) { toast(t("chat.needGroup")); return; }
+  const scope = (document.querySelector('input[name="exportScope"]:checked') || {}).value || "topic";
+  const format = (document.querySelector('input[name="exportFormat"]:checked') || {}).value || "md";
+  const go = $("exportChatGo");
+  if (go) go.disabled = true;
+  try {
+    const sections = await collectConversation(gid, scope);
+    const total = sections.reduce((n, s) => n + s.msgs.length, 0);
+    if (!total) { toast(t("chat.exportEmpty")); return; }
+    if (scope === "topic") {
+      const s = sections[0];
+      const truncated = s.msgs.length >= 2000;
+      if (format === "html") downloadTextFile(buildGroupHtml(gid, sections), `chat-${gid}-${s.topicId}.html`, "text/html;charset=utf-8");
+      else downloadTextFile(buildConversationMarkdown(gid, s.topicId, s.msgs, truncated), `chat-${gid}-${s.topicId}.md`, "text/markdown;charset=utf-8");
+    } else if (format === "html") {
+      downloadTextFile(buildGroupHtml(gid, sections), `chat-${gid}.html`, "text/html;charset=utf-8");
+    } else {
+      downloadTextFile(buildGroupMarkdown(gid, sections), `chat-${gid}.md`, "text/markdown;charset=utf-8");
+    }
+    $("exportChatModal").classList.add("hidden");
+    toast(t("chat.exportOk", { n: total }));
+  } catch { toast(t("admin.sysNetErr")); }
+  finally { if (go) go.disabled = false; }
 }
 
 /** 组织体检报告·图表视图：拉同一端点，用结构化数据画 KPI / 调用量 Top 柱状 / 关注项。 */
@@ -14757,7 +14868,10 @@ function init() {
   }
   // 输出物（当前知聚全部附件：下载 / 在线查看）
   $("groupFilesBtn").onclick = openGroupFiles;
-  $("exportChatBtn").onclick = exportCurrentTopic;
+  $("exportChatBtn").onclick = openExportChatModal;
+  $("exportChatGo").onclick = runChatExport;
+  $("exportChatCancel").onclick = () => $("exportChatModal").classList.add("hidden");
+  $("exportChatModal").addEventListener("click", (e) => { if (e.target === $("exportChatModal")) $("exportChatModal").classList.add("hidden"); });
   $("groupFilesClose").onclick = () => $("groupFilesModal").classList.add("hidden");
   $("groupFilesModal").addEventListener("click", (e) => { if (e.target === $("groupFilesModal")) $("groupFilesModal").classList.add("hidden"); });
   $("groupFilesSearch").addEventListener("input", () => { groupFilesQuery = $("groupFilesSearch").value; renderGroupFiles(); });

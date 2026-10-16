@@ -988,14 +988,16 @@
 - 说明文案 `search.hint`：「一次搜遍您所在知聚的消息、语义记忆与可读知识库（Enter 搜索；点击消息 / 记忆跳转该知聚）」。
 - 接口：`GET /ag-ui/search?q={q}&limit=60`；结果按消息 / 记忆 / 知识库分组（`search.gsMsgs` / `search.gsMems` / `search.gsKbs`）。点击跳转逻辑与知聚内搜索共用 `renderGlobalResults()` / `jumpToSearchHit()`（同样带命中词高亮 + 上/下一条导航）。关键词至少 2 字符。
 
-#### 2.9.6 会话导出（📥 Markdown）
+#### 2.9.6 会话导出（📥 Markdown / HTML）
 
-聊天头部 `#exportChatBtn`（`chat.exportTip`「导出本话题会话（Markdown）」，📥；进入知聚后可用，未进入时 `setDisabledWithReason(..., "chat.needGroup")`）→ `exportCurrentTopic()`（`app.js`）：把**当前知聚的当前话题**导出为单个 `.md`。单聊也是一样（其只有一个主话题）。
+聊天头部 `#exportChatBtn`（`chat.exportTip`「导出本话题会话（Markdown）」，📥；进入知聚后可用，未进入时 `setDisabledWithReason(..., "chat.needGroup")`）→ `openExportChatModal()` 弹出 `#exportChatModal`：**导出范围**（当前话题 / 整个知聚） + **文件格式**（Markdown / HTML），点「导出」→ `runChatExport()`。单聊同路径。
 
-- **拉全历史**：客户端消息是**分页加载且有内存裁剪**（`MAX_MESSAGES`），因此导出**不复用内存列表**，而是按 `GET /ag-ui/group/{groupId}/topics/{topicId}/messages?count=100`（`count` 上限 100）以 `before` 游标**向前翻页拉全**（最多 20 页 ≈ 2000 条，超出会在报告头标注 `chat.exportTruncated`）；服务端过滤（已撤回、可见性 `CanSeeMessageAware`）与界面一致，故不会导出你看不到的消息。
-- **文档结构**：`# {知聚名} · {话题名}`（主话题用 `topic.mainShort`）+ 一行 meta（消息范围 / 条数 / 导出时间，`chat.exportMeta`）；每条消息为 `### {昵称} · {时间}`（数字员工前缀 🤖），正文原样 Markdown，回复关系标 `> ↩ {消息 ID}`，附件列 `📁 \`文件名\``。
-- **数字员工回复的透明度**：有 `usageJson` 时附一行 `> 💰 输入/输出/思考 token · 成本`（未配单价则不显成本）；有 `citationsJson` 时附一行 `> 📎 引用来源：库名/文档名、…`——与消息内「执行过程」的「引用来源 / 本次用量」同源（1.0.253 / 1.0.254）。
-- **文件名**：`chat-{groupId}-{topicId}.md`；空话题提示 `chat.exportEmpty`，成功 toast `chat.exportOk`（含条数）。
+- **拉全历史（关键）**：客户端消息是**分页加载且有内存裁剪**（`MAX_MESSAGES`），因此导出**不复用内存列表**，而是按 `GET /ag-ui/group/{groupId}/topics/{topicId}/messages?count=100`（`count` 上限 100）以 `before` 游标**向前翻页拉全**（`fetchTopicMessages`：当前话题至多 20 页 ≈ 2000 条；整个知聚每个话题至多 10 页，最多 12 个话题）；服务端过滤（已撤回、可见性 `CanSeeMessageAware`）与界面一致，故不会导出你看不到的消息。
+- **范围**：`topic` = 当前话题（单节）；`group` = 整个知聚，按话题分节（Markdown 用 `## {话题}`；HTML 用 `<h2>`）。
+- **Markdown 结构**：`# {知聚名} · {话题名}`（整知聚时为 `# {知聚名}`）+ meta 行（`chat.exportMeta` / `chat.exportGroupMeta`）；每条 `### {昵称} · {时间}`（数字员工 🤖），正文原样 Markdown，回复标 `> ↩ {消息 ID}`，附件列 `📁 \`文件名\``。
+- **HTML 结构（1.0.256）**：**单文件、内联样式、无外部引用**，可直接离线打开或打印为 PDF（`@media print` + `print-color-adjust: exact`）；正文用已渲染并消毒的 Markdown（`renderMarkdown`），数字员工消息带浅蓝左边线。
+- **数字员工透明度**：每条回复带 `> 💰 输入/输出/思考 token · 成本`（未配单价则不显成本）与 `> 📎 引用来源：库名/文档名、…`——与消息内「执行过程」同源（1.0.253 / 1.0.254）。
+- **文件名**：`chat-{groupId}-{topicId}.md|.html`（单话题）/ `chat-{groupId}.md|.html`（整知聚）；空会话提示 `chat.exportEmpty`，成功 toast `chat.exportOk`（含条数）。
 
 ### 2.10 数字员工相关消息块
 
