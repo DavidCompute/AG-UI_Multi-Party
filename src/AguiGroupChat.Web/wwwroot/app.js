@@ -400,6 +400,7 @@ function resetChatState() {
   setDisabledWithReason("groupSettingsBtn", true, "chat.needGroup");
   setDisabledWithReason("searchBtn", true, "chat.needGroup");
   setDisabledWithReason("groupFilesBtn", true, "chat.needGroup");
+  setDisabledWithReason("exportChatBtn", true, "chat.needGroup");
   setDisabledWithReason("discussBtn", true, "chat.needGroup");
   const ts0 = $("topicSummaryBtn"); if (ts0) ts0.classList.add("hidden");
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
@@ -4683,6 +4684,7 @@ async function loadGroups() {
     setDisabledWithReason("groupSettingsBtn", true, "chat.needGroup");
     setDisabledWithReason("searchBtn", true, "chat.needGroup");
     setDisabledWithReason("groupFilesBtn", true, "chat.needGroup");
+    setDisabledWithReason("exportChatBtn", true, "chat.needGroup");
     const ts2 = $("topicSummaryBtn"); if (ts2) ts2.classList.add("hidden");
   }
   // 重置虚拟滚动会**清空消息 DOM**，因此紧接着必须重建（否则刷新知聚列表就会把聊天区留在空白，
@@ -6127,6 +6129,7 @@ function cleanupRoom(gid) {
     setDisabledWithReason("groupSettingsBtn", true, "chat.needGroup");
     setDisabledWithReason("searchBtn", true, "chat.needGroup");
     setDisabledWithReason("groupFilesBtn", true, "chat.needGroup");
+    setDisabledWithReason("exportChatBtn", true, "chat.needGroup");
     setDisabledWithReason("discussBtn", true, "chat.needGroup");
     const ts1 = $("topicSummaryBtn"); if (ts1) ts1.classList.add("hidden");
   }
@@ -6650,6 +6653,7 @@ async function selectGroup(gid) {
   setDisabledWithReason("groupSettingsBtn", false);
   setDisabledWithReason("searchBtn", false); // 知聚内消息全文搜索（进入知聚后可用）
   setDisabledWithReason("groupFilesBtn", false); // 输出物：本知聚全部附件（进入知聚后可用）
+  setDisabledWithReason("exportChatBtn", false); // 导出本话题会话（Markdown）
   setDisabledWithReason("selectBtn", false); // 消息多选（进入知聚后可用）
   setDisabledWithReason("discussBtn", false); // 多位数字员工讨论（进入知聚后可用）
   const ts3 = $("topicSummaryBtn"); if (ts3) ts3.classList.remove("hidden"); // 话题进度小结（长话题接续记忆）
@@ -7386,6 +7390,89 @@ function downloadOrgHealthHtml() {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
   toast(t("admin.orgHealthHtmlOk"));
+}
+
+/** 触发一次文本文件下载。 */
+function downloadTextFile(text, filename, mime) {
+  const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/** 会话导出（Markdown）：导出当前知聚的**当前话题**。分页拉全历史（突破客户端内存裁剪）。 */
+async function exportCurrentTopic() {
+  const gid = state.activeGroupId;
+  if (!gid) { toast(t("chat.needGroup")); return; }
+  const btn = $("exportChatBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const topicId = state.activeTopicId || "main";
+    const maxPages = 20, pageSize = 100;
+    let msgs = [];
+    let before = null;
+    for (let i = 0; i < maxPages; i++) {
+      const url = `/ag-ui/group/${encodeURIComponent(gid)}/topics/${encodeURIComponent(topicId)}/messages?count=${pageSize}`
+        + (before ? `&before=${encodeURIComponent(before)}` : "");
+      const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
+      if (!res.ok) break;
+      const page = await res.json().catch(() => null);
+      if (!Array.isArray(page) || page.length === 0) break;
+      msgs = page.concat(msgs); // page 为升序，更早的页拼在前面
+      before = page[0].messageId;
+      if (page.length < pageSize) break;
+    }
+    const seen = new Set();
+    msgs = msgs.filter((m) => { if (!m || !m.messageId || seen.has(m.messageId)) return false; seen.add(m.messageId); return true; })
+      .sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0));
+    if (!msgs.length) { toast(t("chat.exportEmpty")); return; }
+    const md = buildConversationMarkdown(gid, topicId, msgs, msgs.length >= maxPages * pageSize);
+    downloadTextFile(md, `chat-${gid}-${topicId}.md`, "text/markdown;charset=utf-8");
+    toast(t("chat.exportOk", { n: msgs.length }));
+  } catch { toast(t("admin.sysNetErr")); }
+  finally { if (btn) btn.disabled = !state.activeGroupId; }
+}
+
+/** 把消息列表拼成会话 Markdown（含附件名、回复关系，以及数字员工回复的用量 / 引用来源）。 */
+function buildConversationMarkdown(gid, topicId, msgs, truncated) {
+  const g = state.groups.find((x) => x.groupId === gid);
+  const groupName = (g && g.groupName) || gid;
+  const topic = topicId === "main"
+    ? t("topic.mainShort")
+    : (((room(gid).topics || []).find((x) => x.topicId === topicId) || {}).name || topicId);
+  const fmt = (ts) => {
+    const d = new Date(Number(ts) || 0);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const lines = [];
+  lines.push(`# ${groupName} · ${topic}`, "");
+  lines.push(`- ${t("chat.exportMeta", { from: fmt(msgs[0].timestamp), to: fmt(msgs[msgs.length - 1].timestamp), n: msgs.length, time: fmt(Date.now()) })}`);
+  if (truncated) lines.push(`- ⚠ ${t("chat.exportTruncated")}`);
+  lines.push("");
+  for (const m of msgs) {
+    const agent = String(m.senderType || "").toLowerCase().includes("agent");
+    lines.push(`### ${agent ? "🤖 " : ""}${m.senderNickname || m.senderId || ""} · ${fmt(m.timestamp)}`);
+    if (m.replyToMessageId) lines.push(`> ↩ ${m.replyToMessageId}`);
+    lines.push("");
+    lines.push(String(m.content || "").trim() || "—");
+    lines.push("");
+    const atts = (m.attachments || []).map((a) => a.name || a.fileName || a.path || "").filter(Boolean);
+    if (atts.length) { lines.push("📁 " + atts.map((n) => `\`${n}\``).join("、")); lines.push(""); }
+    const u = parseUsageJson(m.usageJson);
+    if (u && !u._empty) {
+      let uu = `> 💰 ${t("msg.usageIn", { n: Number(u.inputTokens).toLocaleString() })} · ${t("msg.usageOut", { n: Number(u.outputTokens).toLocaleString() })}`;
+      if (u.reasoningTokens) uu += " · " + t("msg.usageReason", { n: Number(u.reasoningTokens).toLocaleString() });
+      if (u.cost != null && u.currency) uu += " · " + t("msg.usageCost", { cost: u.currency + Number(u.cost).toFixed(4) });
+      lines.push(uu);
+    }
+    const c = parseCitationsJson(m.citationsJson);
+    if (c) lines.push(`> 📎 ${t("msg.citeTitle")}：` + c.items.map((it) => (it.detail ? `${it.title}/${it.detail}` : it.title)).join("、"));
+    if (u || c) lines.push("");
+  }
+  return lines.join("\n");
 }
 
 /** 组织体检报告·图表视图：拉同一端点，用结构化数据画 KPI / 调用量 Top 柱状 / 关注项。 */
@@ -14670,6 +14757,7 @@ function init() {
   }
   // 输出物（当前知聚全部附件：下载 / 在线查看）
   $("groupFilesBtn").onclick = openGroupFiles;
+  $("exportChatBtn").onclick = exportCurrentTopic;
   $("groupFilesClose").onclick = () => $("groupFilesModal").classList.add("hidden");
   $("groupFilesModal").addEventListener("click", (e) => { if (e.target === $("groupFilesModal")) $("groupFilesModal").classList.add("hidden"); });
   $("groupFilesSearch").addEventListener("input", () => { groupFilesQuery = $("groupFilesSearch").value; renderGroupFiles(); });

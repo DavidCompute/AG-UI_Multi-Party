@@ -326,7 +326,7 @@
 - `#collapseGroupsBtn`（title 收起时 `chat.collapseGroups`、展开时 `chat.expandGroups`，图标 `«` / `»`）：一键收起 / 展开左栏。
 - `#chatGroupName`：未选知聚时显示 `chat.selectGroup`「请选择一个知聚」。
 - `#chatGroupMeta`（`.muted`）：知聚元信息。
-- 操作区 `.chat-header-ops`：`#searchBtn`（`chat.search`，🔍）、`#groupFilesBtn`（`gf.tip`，📁）、`#selectBtn`（`sel.btn`，☑）、`#topicSummaryBtn`（`topic.summaryTip`，📌，默认 `hidden`）、`#groupSettingsBtn`（`chat.settings`，⚙）、`#collapseMembersBtn`（`chat.collapseMembers`，`»` / `«`）、`#membersToggle`（`chat.showMembers`，👥）。
+- 操作区 `.chat-header-ops`：`#searchBtn`（`chat.search`，🔍）、`#groupFilesBtn`（`gf.tip`，📁）、`#exportChatBtn`（`chat.exportTip`，📥）、`#selectBtn`（`sel.btn`，☑）、`#topicSummaryBtn`（`topic.summaryTip`，📌，默认 `hidden`）、`#groupSettingsBtn`（`chat.settings`，⚙）、`#collapseMembersBtn`（`chat.collapseMembers`，`»` / `«`）、`#membersToggle`（`chat.showMembers`，👥）。
 
 聊天区主体包含：话题切换条 `#topicBar`（默认 `hidden`；`topic.mainText`「# 综合」、`topic.newBtn`「➕ 新建话题」）；多选工具条 `#selectBar`（默认 `hidden`，含 `#selectCount`、`#selectSender`/`sel.senderTip`「按发送者勾选」、`#selectAllBtn`/`sel.selectAll`、`#selectCopyBtn`/`sel.copy`、`#selectForwardBtn`/`sel.forward`、`#selectDeleteBtn`/`sel.delete`、`#selectCancelBtn`/`common.cancel`）；消息列表 `#messages`（`role="log"`，空态提示 `chat.selectGroupTip`「💬 请选择一个知聚，开始对话」/`msg.emptyStart`）；正在输入行 `#typingRow`；`#jumpToBottom`（`chat.jumpToBottom`）；搜索导航 `#searchNav`；拖拽上传覆盖层 `#dropOverlay`（`chat.dropHint`「松开以添加附件」）。
 
@@ -621,7 +621,7 @@
 
 #### 2.1.2 进入知聚
 
-点击行触发 `selectGroup(groupId)`。进入后：订阅实时通道、拉取 `#messages` 快照、按钮解除禁用（`#searchBtn`、`#selectBtn`、`#groupFilesBtn`、`#groupSettingsBtn`、`#discussBtn` 等）、并把 `#topicSummaryBtn` 显示出来。会话顶部 `#chatGroupName` 会带上前缀：客服知聚前缀「客服知聚 」，私密知聚前缀 `🔒 `。
+点击行触发 `selectGroup(groupId)`。进入后：订阅实时通道、拉取 `#messages` 快照、按钮解除禁用（`#searchBtn`、`#selectBtn`、`#groupFilesBtn`、`#exportChatBtn`、`#groupSettingsBtn`、`#discussBtn` 等）、并把 `#topicSummaryBtn` 显示出来。会话顶部 `#chatGroupName` 会带上前缀：客服知聚前缀「客服知聚 」，私密知聚前缀 `🔒 `。
 
 客服知聚特殊：非成员顾客进入时，前端会先调用 `POST /ag-ui/group/{groupId}/enter`（`src/AguiGroupChat.Hub/Transport/HttpGroupApi.cs`）自动加入为顾客参与者，再进入聊天。
 
@@ -987,6 +987,15 @@
 - `#gsKeyword`（`search.placeholder`，`maxlength="100"`）、结果区 `#gsResults`。
 - 说明文案 `search.hint`：「一次搜遍您所在知聚的消息、语义记忆与可读知识库（Enter 搜索；点击消息 / 记忆跳转该知聚）」。
 - 接口：`GET /ag-ui/search?q={q}&limit=60`；结果按消息 / 记忆 / 知识库分组（`search.gsMsgs` / `search.gsMems` / `search.gsKbs`）。点击跳转逻辑与知聚内搜索共用 `renderGlobalResults()` / `jumpToSearchHit()`（同样带命中词高亮 + 上/下一条导航）。关键词至少 2 字符。
+
+#### 2.9.6 会话导出（📥 Markdown）
+
+聊天头部 `#exportChatBtn`（`chat.exportTip`「导出本话题会话（Markdown）」，📥；进入知聚后可用，未进入时 `setDisabledWithReason(..., "chat.needGroup")`）→ `exportCurrentTopic()`（`app.js`）：把**当前知聚的当前话题**导出为单个 `.md`。单聊也是一样（其只有一个主话题）。
+
+- **拉全历史**：客户端消息是**分页加载且有内存裁剪**（`MAX_MESSAGES`），因此导出**不复用内存列表**，而是按 `GET /ag-ui/group/{groupId}/topics/{topicId}/messages?count=100`（`count` 上限 100）以 `before` 游标**向前翻页拉全**（最多 20 页 ≈ 2000 条，超出会在报告头标注 `chat.exportTruncated`）；服务端过滤（已撤回、可见性 `CanSeeMessageAware`）与界面一致，故不会导出你看不到的消息。
+- **文档结构**：`# {知聚名} · {话题名}`（主话题用 `topic.mainShort`）+ 一行 meta（消息范围 / 条数 / 导出时间，`chat.exportMeta`）；每条消息为 `### {昵称} · {时间}`（数字员工前缀 🤖），正文原样 Markdown，回复关系标 `> ↩ {消息 ID}`，附件列 `📁 \`文件名\``。
+- **数字员工回复的透明度**：有 `usageJson` 时附一行 `> 💰 输入/输出/思考 token · 成本`（未配单价则不显成本）；有 `citationsJson` 时附一行 `> 📎 引用来源：库名/文档名、…`——与消息内「执行过程」的「引用来源 / 本次用量」同源（1.0.253 / 1.0.254）。
+- **文件名**：`chat-{groupId}-{topicId}.md`；空话题提示 `chat.exportEmpty`，成功 toast `chat.exportOk`（含条数）。
 
 ### 2.10 数字员工相关消息块
 

@@ -326,7 +326,7 @@ The chat-area header `.chat-header`, from left to right:
 - `#collapseGroupsBtn` (title `chat.collapseGroups` when collapsed, `chat.expandGroups` when expanded, icons `«` / `»`): one-click collapse / expand of the left column.
 - `#chatGroupName`: shows `chat.selectGroup` "Select a group" when no circle is selected.
 - `#chatGroupMeta` (`.muted`): circle meta-information.
-- Operations area `.chat-header-ops`: `#searchBtn` (`chat.search`, 🔍), `#groupFilesBtn` (`gf.tip`, 📁), `#selectBtn` (`sel.btn`, ☑), `#topicSummaryBtn` (`topic.summaryTip`, 📌, `hidden` by default), `#groupSettingsBtn` (`chat.settings`, ⚙), `#collapseMembersBtn` (`chat.collapseMembers`, `»` / `«`), `#membersToggle` (`chat.showMembers`, 👥).
+- Operations area `.chat-header-ops`: `#searchBtn` (`chat.search`, 🔍), `#groupFilesBtn` (`gf.tip`, 📁), `#exportChatBtn` (`chat.exportTip`, 📥), `#selectBtn` (`sel.btn`, ☑), `#topicSummaryBtn` (`topic.summaryTip`, 📌, `hidden` by default), `#groupSettingsBtn` (`chat.settings`, ⚙), `#collapseMembersBtn` (`chat.collapseMembers`, `»` / `«`), `#membersToggle` (`chat.showMembers`, 👥).
 
 The chat-area body contains: the topic switcher bar `#topicBar` (`hidden` by default; `topic.mainText` "# General", `topic.newBtn` "＋ New Topic"); the multi-select toolbar `#selectBar` (`hidden` by default, containing `#selectCount`, `#selectSender`/`sel.senderTip` "Select by sender", `#selectAllBtn`/`sel.selectAll`, `#selectCopyBtn`/`sel.copy`, `#selectForwardBtn`/`sel.forward`, `#selectDeleteBtn`/`sel.delete`, `#selectCancelBtn`/`common.cancel`); the message list `#messages` (`role="log"`, empty-state hint `chat.selectGroupTip` "💬 Select a group to start chatting" / `msg.emptyStart`); the typing row `#typingRow`; `#jumpToBottom` (`chat.jumpToBottom`); the search navigation `#searchNav`; and the drag-and-drop upload overlay `#dropOverlay` (`chat.dropHint` "Drop to attach").
 
@@ -622,7 +622,7 @@ The row `title` (hover tooltip) lists that Circle's cross-topic unread summary: 
 
 #### 2.1.2 Entering a Circle
 
-Clicking a row triggers `selectGroup(groupId)`. After entering: it subscribes to the real-time channel, pulls a snapshot of `#messages`, enables the buttons (`#searchBtn`, `#selectBtn`, `#groupFilesBtn`, `#groupSettingsBtn`, `#discussBtn`, etc.), and reveals `#topicSummaryBtn`. The top of the conversation `#chatGroupName` gets a prefix: support circles get the prefix "Support " and private circles the prefix `🔒 `.
+Clicking a row triggers `selectGroup(groupId)`. After entering: it subscribes to the real-time channel, pulls a snapshot of `#messages`, enables the buttons (`#searchBtn`, `#selectBtn`, `#groupFilesBtn`, `#exportChatBtn`, `#groupSettingsBtn`, `#discussBtn`, etc.), and reveals `#topicSummaryBtn`. The top of the conversation `#chatGroupName` gets a prefix: support circles get the prefix "Support " and private circles the prefix `🔒 `.
 
 Support circles are special: when a non-member customer enters, the frontend first calls `POST /ag-ui/group/{groupId}/enter` (`src/AguiGroupChat.Hub/Transport/HttpGroupApi.cs`) to auto-join as a customer participant, then enters the chat.
 
@@ -988,6 +988,15 @@ The top bar's `#globalSearchBtn` (`search.globalBtn` "Global Search") → `#glob
 - `#gsKeyword` (`search.placeholder`, `maxlength="100"`), results area `#gsResults`.
 - The explanatory text `search.hint`: "Search messages, memories and readable knowledge bases across your groups at once (press Enter; click a message / memory to jump into that group)".
 - API: `GET /ag-ui/search?q={q}&limit=60`; results are grouped by messages / memories / knowledge bases (`search.gsMsgs` / `search.gsMems` / `search.gsKbs`). The click-to-jump logic is shared with in-Circle search via `renderGlobalResults()` / `jumpToSearchHit()` (likewise with hit-word highlighting + previous/next navigation). The keyword must be at least 2 characters.
+
+#### 2.9.6 Conversation export (📥 Markdown)
+
+The chat header's `#exportChatBtn` (`chat.exportTip` "Export this topic as Markdown", 📥; available after entering a Circle, greyed out with `setDisabledWithReason(..., "chat.needGroup")` otherwise) → `exportCurrentTopic()` (`app.js`): exports the **current Circle's current topic** as a single `.md`. Direct chats work the same way (they only have the main topic).
+
+- **Full history**: client messages are **paginated and memory-trimmed** (`MAX_MESSAGES`), so the export **does not reuse the in-memory list**; instead it pages **backwards** through `GET /ag-ui/group/{groupId}/topics/{topicId}/messages?count=100` (`count` capped at 100) using the `before` cursor (up to 20 pages ≈ 2000 messages; beyond that the report header notes `chat.exportTruncated`). Server-side filtering (recalled, `CanSeeMessageAware` visibility) matches the UI, so you never export messages you cannot see.
+- **Document structure**: `# {Circle name} · {topic name}` (the main topic uses `topic.mainShort`) plus one meta line (range / count / exported time, `chat.exportMeta`); each message is `### {nickname} · {time}` (digital employees prefixed with 🤖), the body is Markdown as-is, replies are marked `> ↩ {message ID}` and attachments are listed as `📁 \`filename\``.
+- **Digital-employee transparency**: when `usageJson` exists, a `> 💰 in/out/reasoning tokens · cost` line is added (no cost without pricing); when `citationsJson` exists, a `> 📎 Sources: KB/file, …` line is added — the same data as the "Sources / usage" rows in the message's Execution process (1.0.253 / 1.0.254).
+- **Filename**: `chat-{groupId}-{topicId}.md`; an empty topic shows `chat.exportEmpty`, and success toasts `chat.exportOk` (with the count).
 
 ### 2.10 Digital-employee-related message blocks
 

@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.255 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.255 Release Notes (current Windows desktop release)
+
+**版本说明**：**会话导出（Markdown）**——聊天头部新增「📥 导出本话题会话」，把当前知聚的当前话题**全量**导出为单个 `.md`（分页拉全历史，绕过客户端内存裁剪），并在报告里带上数字员工回复的 💰 用量与 📎 引用来源。
+**Version note**: **Conversation export (Markdown)** — the chat header gains "📥 Export this topic", dumping the current Circle's current topic **in full** to a single `.md` (paging through history to bypass the client's memory trimming) and including each digital-employee reply's 💰 usage and 📎 sources.
+
+## 变更
+# Changes
+
+中文：
+- **入口**：`.chat-header-ops` 新增 `#exportChatBtn`（`chat.exportTip`，📥）——与其它头部按钮一致，进入知聚后可用（未进入时 `setDisabledWithReason(..., "chat.needGroup")`，四处状态切换均已同步）；点击 → `exportCurrentTopic()`。
+- **拉全历史（关键）**：客户端消息是**分页加载且有内存裁剪**（`MAX_MESSAGES`），直接导出内存列表会**不完整**；改为按既有 `GET /ag-ui/group/{groupId}/topics/{topicId}/messages?count=100`（`count` 上限 100）以 `before` 游标向前翻页拉全（至多 20 页 ≈ 2000 条，超出在报告头标注 `chat.exportTruncated`），去重 + 按时间排序；服务端过滤（已撤回 / 可见性）与界面一致。**无需新增接口**。
+- **文档结构**：`# {知聚名} · {话题名}`（主话题用 `topic.mainShort`）+ meta 行（范围 / 条数 / 导出时间）；每条消息 `### {昵称} · {时间}`（数字员工 🤖），正文原样 Markdown，回复标 `> ↩ {消息 ID}`，附件列 `📁 \`文件名\``；单聊同路径（只有一个主话题）。
+- **透明度延续**：有 `usageJson` 时附 `> 💰 输入/输出/思考 token · 成本`；有 `citationsJson` 时附 `> 📎 引用来源：库名/文档名、…`——与消息内「执行过程」同源（1.0.253 / 1.0.254）。
+English:
+- **Entry point**: `.chat-header-ops` gains `#exportChatBtn` (`chat.exportTip`, 📥) — consistent with the other header buttons, enabled after entering a Circle (greyed out with `setDisabledWithReason(..., "chat.needGroup")` otherwise; all four state transitions updated); clicking it calls `exportCurrentTopic()`.
+- **Full history (the key part)**: client messages are **paginated and memory-trimmed** (`MAX_MESSAGES`), so exporting the in-memory list would be **incomplete**; instead the export pages **backwards** through the existing `GET /ag-ui/group/{groupId}/topics/{topicId}/messages?count=100` (`count` capped at 100) using the `before` cursor (up to 20 pages ≈ 2000 messages, beyond which the report header notes `chat.exportTruncated`), then dedupes and sorts by time; server-side filtering (recalled / visibility) matches the UI. **No new endpoint needed.**
+- **Document structure**: `# {Circle name} · {topic name}` (the main topic uses `topic.mainShort`) plus a meta line (range / count / exported time); each message is `### {nickname} · {time}` (digital employees 🤖), the body is Markdown as-is, replies are marked `> ↩ {message ID}`, and attachments are listed as `📁 \`filename\``; direct chats follow the same path (only the main topic).
+- **Transparency carried over**: when `usageJson` exists, a `> 💰 in/out/reasoning tokens · cost` line is added; when `citationsJson` exists, a `> 📎 Sources: KB/file, …` line is added — the same data as the in-message Execution process (1.0.253 / 1.0.254).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` 新增 §2.9.6「会话导出（📥 Markdown）」；§1.2.3（头部操作区）与 §2.1.2（进入知聚后启用）同步补上 `#exportChatBtn`。
+English: `docs/user-guide.md` / `en.md` add §2.9.6 "Conversation export (📥 Markdown)"; §1.2.3 (header operations) and §2.1.2 (enabled after entering) both mention `#exportChatBtn`.
+
+## 测试
+# Tests
+
+中文：本轮**无 C# 改动**（纯前端 + 文案），`dotnet build` 与 1.0.254 一致（0 错误）。`node --check`、i18n 审计 **zh=en=1907，missing 0**、`check-i18n-keys`（876 处引用）、`check-orphan-keys`（928 处 `t()` 引用）均过。浏览器实测（重建 web 后，管理员，真实数据）：未进入知聚时📥**置灰**、进入后**启用**；点导出 → 下载 `chat-group_direct_5f...-main.md`（4697 字节），头部为「# 与 组织架构构建师 的单聊 · 主话题」+ meta「消息范围：2026-09-23 16:08 ~ 2026-10-14 11:51（共 16 条）」，正文含 `### David · …` 与 `### 🤖 组织架构构建师 · …`；另以合成消息直接测 `buildConversationMarkdown()` → 附件 `📁 \`brief.pdf\``、回复 `↩ m1`、`💰 输入 1,234 · 输出 567 · 思考 89 · 成本 $0.0125`、`📎 引用来源：产品手册/manual.pdf、David` 四项断言全部通过；**无页面报错**。
+English: **no C# changes** this round (frontend + copy only), so `dotnet build` matches 1.0.254 (0 errors). `node --check`, the i18n audit **zh=en=1907, missing 0**, `check-i18n-keys` (876 references) and `check-orphan-keys` (928 `t()` references) all pass. Browser-verified (after rebuilding web, as admin, real data): 📥 is **greyed out** before entering a Circle and **enabled** after; clicking export downloads `chat-group_direct_5f...-main.md` (4697 bytes) with the header "# 与 组织架构构建师 的单聊 · 主话题" and meta "消息范围：2026-09-23 16:08 ~ 2026-10-14 11:51（共 16 条）", the body containing `### David · …` and `### 🤖 组织架构构建师 · …`; separately, calling `buildConversationMarkdown()` with synthetic messages passes all four assertions (attachment `📁 \`brief.pdf\``, reply `↩ m1`, `💰 输入 1,234 · 输出 567 · 思考 89 · 成本 $0.0125`, `📎 引用来源：产品手册/manual.pdf、David`); **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.254 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.254 Release Notes (current Windows desktop release)
 
