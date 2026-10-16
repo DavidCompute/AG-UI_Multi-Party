@@ -19,7 +19,8 @@ public static class OrgHealthReport
         IReadOnlyDictionary<string, AgentDefinition> defs,
         PricingOptions pricing,
         long nowMs,
-        IReadOnlyList<EvalCase>? evalCases = null)
+        IReadOnlyList<EvalCase>? evalCases = null,
+        IReadOnlyList<AgentPerformance.AgentStat>? prevStats = null)
     {
         var sb = new StringBuilder();
         var cur = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency;
@@ -31,6 +32,14 @@ public static class OrgHealthReport
             ? cur + pricing.EstimateCost(p, c, r).ToString("0.00", CultureInfo.InvariantCulture)
             : "—";
         static string N0(long n) => n.ToString("N0", CultureInfo.InvariantCulture);
+        static string Delta(double? curIn, double? prevIn)
+        {
+            if (curIn is not { } cur || prevIn is not { } prev) return "—";
+            if (prev == 0) return cur == 0 ? "持平" : "新增";
+            var pct = (cur - prev) / prev;
+            var arrow = pct > 0.005 ? "▲" : pct < -0.005 ? "▼" : "≈";
+            return arrow + Math.Round(Math.Abs(pct) * 100) + "%";
+        }
 
         var totalCalls = stats.Sum(s => s.Calls);
         var totalTokens = stats.Sum(s => s.TotalTokens);
@@ -54,6 +63,18 @@ public static class OrgHealthReport
         sb.AppendLine($"- 数字员工：{stats.Count} 位（窗口内有调用 {active} 位）");
         sb.AppendLine($"- 调用次数：{N0(totalCalls)}；Token：{N0(totalTokens)}；成本：{(priced ? cur + totalCost.ToString("0.00", CultureInfo.InvariantCulture) : "未配置单价（Agents:Pricing）")}");
         sb.AppendLine($"- 综合好评率：{Pct((up + down) == 0 ? null : (double)up / (up + down))}（👍 {up} / 👎 {down}）");
+        if (prevStats is not null)
+        {
+            // 环比：与紧邻的上一同长度窗口对比（涨跌箭头 + 百分比）
+            var pCalls = prevStats.Sum(s => s.Calls);
+            var pTokens = prevStats.Sum(s => s.TotalTokens);
+            var pUp = prevStats.Sum(s => s.Up);
+            var pDown = prevStats.Sum(s => s.Down);
+            var pCost = pricing.EstimateCost(prevStats.Sum(s => s.PromptTokens), prevStats.Sum(s => s.CompletionTokens), prevStats.Sum(s => s.ReasoningTokens));
+            double? curRate = (up + down) == 0 ? null : (double)up / (up + down);
+            double? prevRate = (pUp + pDown) == 0 ? null : (double)pUp / (pUp + pDown);
+            sb.AppendLine($"- 环比上一 {days} 天：调用 {Delta(totalCalls, pCalls)}；Token {Delta(totalTokens, pTokens)}；成本 {(priced ? Delta((double)totalCost, (double)pCost) : "—")}；好评率 {Delta(curRate, prevRate)}");
+        }
         sb.AppendLine($"- 组织连接：指派 {assignmentEdges} 条 / 提升 {escalationEdges} 条 / 流水线 {pipelineSteps} 步");
         sb.AppendLine();
         sb.AppendLine($"## 二、需要关注（{flagged.Count}）");

@@ -1316,6 +1316,7 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .oh-card { flex: 1 1 120px; min-width: 110px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
 .oh-card-k { font-size: 11px; color: var(--muted); }
 .oh-card-v { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.oh-card-d { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
 .oh-section-title { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 0 6px; }
 .oh-bars { display: flex; flex-direction: column; gap: 6px; }
 .oh-bar-row { display: grid; grid-template-columns: minmax(90px, 28%) 1fr auto; gap: 8px; align-items: center; font-size: 12px; }

@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.251 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.251 Release Notes (current Windows desktop release)
+
+**版本说明**：**组织体检带「环比」 + 绩效页可筛选**——KPI / 报告对比上一同长度窗口（▲/▼ + %），绩效页新增名称搜索与「仅看需关注」。
+**Version note**: **Period-over-period in org health + filters on the perf tab** — KPIs / reports compare against the previous window of the same length (▲/▼ + %), and the perf tab gains a name search and a "flagged only" toggle.
+
+## 变更
+# Changes
+
+中文：
+- **环比（后端）**：`GET /ag-ui/admin/org-health` 额外计算**上一同长度窗口**（`from-1` 往前 `days` 天）的员工绩效，Markdown 报告「一、总览」新增一条**环比行**（调用 / Token / 成本 / 好评率），结构化数据新增 **`prev`**（`from` / `to` / `summary{agents,calls,totalTokens,cost,positiveRate,flagged}`），**向后兼容**。空值/上期为 0 时标「—」或「持平」/「新增」。
+- **环比（前端）**：图表弹窗的 KPI 卡片在数值下显示**环比**（▲/▼/≈ + 百分比；上期为 0 或无从可比则不显示；成本卡未配单价时不显示），meta 尾部标注「环比上一 N 天」；**HTML 报告**同步（卡片 + 标题行）。
+- **绩效页筛选**：`#adminPerfView` 头部新增**名称 / ID 搜索框**（带 × 清除）与 **「⚠️ 仅看需关注」开关**——**纯前端过滤**（`perfData` 缓存，不重拉数），筛选生效时 meta 尾部显示「显示 N / 总数」，无匹配时给空态文案；原「统计范围 / 刷新」逻辑不变。为此把 `loadAgentPerformance` 拆为**拉取** + `renderPerfRows`（按筛选重绘）。
+English:
+- **Period-over-period (backend)**: `GET /ag-ui/admin/org-health` additionally computes the **previous same-length window** (`days` ending the day before `from`); the Markdown report's "Overview" gains a **period-over-period line** (calls / tokens / cost / positive rate), and the structured data gains **`prev`** (`from` / `to` / `summary{agents,calls,totalTokens,cost,positiveRate,flagged}`), **backward compatible**. Nulls / a zero previous period show "—" or "持平" / "新增".
+- **Period-over-period (front end)**: the chart dialog's KPI cards show a **delta** under each value (▲/▼/≈ + %; omitted when the previous period is 0 or not comparable, and on the cost card when no pricing is configured), with the meta line noting "vs previous N days"; the **HTML report** mirrors it (cards + header line).
+- **Perf-tab filters**: the `#adminPerfView` header gains a **name / ID search box** (with an × clear) and a **"⚠️ Flagged only" toggle** — **front-end filtering** (`perfData` cached, no refetch); when active the meta line appends "Showing N / total", and an empty state is shown when nothing matches. The existing range / refresh logic is unchanged. To support this, `loadAgentPerformance` was split into **fetch** + `renderPerfRows` (re-render by filter).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（环比 + 绩效页筛选）与 §9.2.8（`org-health` 行补 `prev`）；`ROADMAP.md` §6.5 补环比与筛选。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (period-over-period + perf-tab filters) and §9.2.8 (the `org-health` row notes `prev`); `ROADMAP.md` §6.5 records both.
+
+## 测试
+# Tests
+
+中文：`OrgHealthReportTests` 新增 `BuildMarkdown_WithPrevStats_ShowsPeriodOverPeriodLine`（断言「环比上一 30 天」「调用 ▲100%」「好评率 ▲」）；`OrgHealth_ReturnsStructuredDataForCharts` 补断言 `prev.summary` 含 `agents` / `calls` / `totalTokens` / `cost` / `flagged` 与 `prev.from` 非空。相关类合跑 **19/19**。`node --check`、i18n 审计 **zh=en=1891，missing 0**、`check-i18n-keys`（875 处引用）、`check-orphan-keys`（912 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后，管理员，真实数据）：图表弹窗 KPI 出现 **4 个环比**（如 ▲25% / ▲707% / ▼83%；成本/好评率因未配单价与无反馈不出），meta「2026-09-17 ~ 2026-10-16 · 环比上一 30 天」；HTML 报告含 **4 个 `card-d`** 与环比提示；绩效页 17 行 → 搜「ppt」**8 行**（meta「显示 8 / 17」）→ 开「仅看需关注」**2 行**（meta「显示 2 / 17」）→ 关闭恢复 **17 行**；**无页面报错**。
+English: `OrgHealthReportTests` gains `BuildMarkdown_WithPrevStats_ShowsPeriodOverPeriodLine` (asserting "环比上一 30 天", "调用 ▲100%" and "好评率 ▲"); `OrgHealth_ReturnsStructuredDataForCharts` now asserts `prev.summary` carries `agents` / `calls` / `totalTokens` / `cost` / `flagged` and that `prev.from` is non-empty. The related classes run **19/19**. `node --check`, the i18n audit **zh=en=1891, missing 0**, `check-i18n-keys` (875 references), `check-orphan-keys` (912 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web, as admin, real data): the chart KPIs show **4 deltas** (e.g. ▲25% / ▲707% / ▼83%; cost and positive rate are omitted with no pricing and no feedback), meta "2026-09-17 ~ 2026-10-16 · vs previous 30 days"; the HTML report has **4 `card-d`** plus the period hint; the perf tab goes 17 rows → searching "ppt" gives **8 rows** (meta "Showing 8 / 17") → enabling "Flagged only" gives **2 rows** (meta "Showing 2 / 17") → turning it off restores **17 rows**; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.250 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.250 Release Notes (current Windows desktop release)
 

@@ -7014,6 +7014,10 @@ async function runEvalCases(ids) {
 }
 
 /** 员工绩效看板（P0）：按数字员工聚合调用次数 / token / 成本 / 👍👎 好评率。数据源 /ag-ui/admin/agent-performance。 */
+let perfData = null;            // 最近一次绩效响应（供筛选重绘）
+let perfOnlyFlagged = false;    // 仅看需关注
+let perfKeyword = "";           // 名称 / ID 关键词
+
 async function loadAgentPerformance() {
   const meta = $("adminPerfMeta");
   const hints = $("adminPerfHints");
@@ -7025,42 +7029,62 @@ async function loadAgentPerformance() {
   try {
     const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
-    const list = d.agents || [];
-    const s = d.summary || {};
-    const price = d.pricing || {};
-    const cur = price.currency || "$";
-    const fmtCost = (v) => price.configured ? cur + Number(v || 0).toFixed(2) : "—";
-    const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
-      : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
-    if (meta) {
-      let m = t("admin.perfMeta", {
-        from: d.from || "", to: d.to || "", agents: s.agents || 0,
-        calls: Number(s.calls || 0).toLocaleString(), tokens: Number(s.totalTokens || 0).toLocaleString(),
-        rate: s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%",
-      });
-      if (price.configured) m += " · " + t("admin.perfCost", { cost: fmtCost(s.cost) });
-      if (s.budgetPct != null) m += " · " + t("admin.perfBudget", { currency: cur, budget: Number(s.budget || 0).toFixed(2), pct: s.budgetPct }) + (s.overBudget ? " ⚠" : "");
-      meta.textContent = m;
-    }
-    if (!list.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
-    // 关注建议（确定性）：列出带标记的员工，便于「反哺编排 / 组织体检」
-    const flagged = list.filter((a) => (a.flags || []).length);
-    if (hints) hints.textContent = flagged.length
-      ? t("admin.perfHints", { names: flagged.slice(0, 8).map((a) => a.name + "（" + (a.flags || []).map(flagLabel).join(" / ") + "）").join("、") })
-      : t("admin.perfHintsNone");
-    rows.innerHTML = list.map((a) => {
-      const rate = a.positiveRate == null ? "—" : Math.round(a.positiveRate * 100) + "%";
-      const flags = (a.flags || []).length
-        ? (a.flags || []).map((f) => `<span class="tag-disabled">${escapeHtml(flagLabel(f))}</span>`).join(" ")
-        : `<span class="muted">—</span>`;
-      return `<tr data-agent-id="${escapeHtml(a.agentId || "")}" title="${escapeHtml(a.agentId || "")}"><td>${escapeHtml(a.name || a.agentId)}</td>`
-        + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
-        + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
-        + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
-        + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
-    }).join("");
-  } catch { if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+    if (!res.ok || !d) { perfData = null; if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
+    perfData = d;
+    renderPerfRows();
+  } catch { perfData = null; if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+}
+
+/** 按当前筛选（仅看需关注 / 名称关键词）渲染绩效表（数据已就绪时不再重新拉取）。 */
+function renderPerfRows() {
+  const d = perfData;
+  if (!d) return;
+  const meta = $("adminPerfMeta");
+  const hints = $("adminPerfHints");
+  const rows = $("adminPerfRows");
+  const days = Number($("perfRange") && $("perfRange").value) || 30;
+  const list = d.agents || [];
+  const s = d.summary || {};
+  const price = d.pricing || {};
+  const cur = price.currency || "$";
+  const fmtCost = (v) => price.configured ? cur + Number(v || 0).toFixed(2) : "—";
+  const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+    : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
+  const flagged = list.filter((a) => (a.flags || []).length);
+  const kw = (perfKeyword || "").trim().toLowerCase();
+  const filtered = list.filter((a) => {
+    if (perfOnlyFlagged && !(a.flags || []).length) return false;
+    if (kw && !((a.name || "").toLowerCase().includes(kw) || (a.agentId || "").toLowerCase().includes(kw))) return false;
+    return true;
+  });
+  if (meta) {
+    let m = t("admin.perfMeta", {
+      from: d.from || "", to: d.to || "", agents: s.agents || 0,
+      calls: Number(s.calls || 0).toLocaleString(), tokens: Number(s.totalTokens || 0).toLocaleString(),
+      rate: s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%",
+    });
+    if (price.configured) m += " · " + t("admin.perfCost", { cost: fmtCost(s.cost) });
+    if (s.budgetPct != null) m += " · " + t("admin.perfBudget", { currency: cur, budget: Number(s.budget || 0).toFixed(2), pct: s.budgetPct }) + (s.overBudget ? " ⚠" : "");
+    if (filtered.length !== list.length) m += " · " + t("admin.perfShowing", { n: filtered.length, total: list.length });
+    meta.textContent = m;
+  }
+  // 关注建议（确定性）：列出带标记的员工，便于「反哺编排 / 组织体检」
+  if (hints) hints.textContent = flagged.length
+    ? t("admin.perfHints", { names: flagged.slice(0, 8).map((a) => a.name + "（" + (a.flags || []).map(flagLabel).join(" / ") + "）").join("、") })
+    : t("admin.perfHintsNone");
+  if (!list.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
+  if (!filtered.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfNoMatch"))}</td></tr>`; return; }
+  rows.innerHTML = filtered.map((a) => {
+    const rate = a.positiveRate == null ? "—" : Math.round(a.positiveRate * 100) + "%";
+    const flags = (a.flags || []).length
+      ? (a.flags || []).map((f) => `<span class="tag-disabled">${escapeHtml(flagLabel(f))}</span>`).join(" ")
+      : `<span class="muted">—</span>`;
+    return `<tr data-agent-id="${escapeHtml(a.agentId || "")}" title="${escapeHtml(a.agentId || "")}"><td>${escapeHtml(a.name || a.agentId)}</td>`
+      + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
+      + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
+      + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
+      + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
+  }).join("");
 }
 
 /** 轮询等待绩效表中某员工的行出现（加载完成后）。 */
@@ -7200,12 +7224,20 @@ function downloadOrgHealthHtml() {
   const dimLabel = t(orgHealthDim === "users" ? "admin.orgHealthDimUsers" : orgHealthDim === "groups" ? "admin.orgHealthDimGroups" : "admin.orgHealthDimAgents");
   const fmtVal = (v) => orgHealthMetric === "cost" ? cur + v.toFixed(2) : num(Math.round(v));
 
-  const card = (k, v) => `<div class="card"><div class="card-k">${escapeHtml(k)}</div><div class="card-v">${escapeHtml(String(v))}</div></div>`;
-  const cards = card(t("admin.orgHealthAgents"), `${num(s.agents)} / ${num(s.totalAgents)}`)
-    + card(t("admin.perfThCalls"), num(s.calls)) + card(t("admin.perfThTokens"), num(s.totalTokens))
-    + card(t("admin.perfThCost"), priced ? cur + Number(s.cost || 0).toFixed(2) : "—")
-    + card(t("admin.perfThRate"), s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%")
-    + card(t("admin.orgHealthFlagged"), num(s.flagged));
+  const card = (k, v, dp) => `<div class="card"><div class="card-k">${escapeHtml(k)}</div><div class="card-v">${escapeHtml(String(v))}</div>`
+    + (dp == null ? "" : `<div class="card-d">${escapeHtml((dp > 0.005 ? "▲" : dp < -0.005 ? "▼" : "≈") + " " + Math.round(Math.abs(dp) * 100) + "%")}</div>`) + `</div>`;
+  const prev = (d.prev && d.prev.summary) || null;
+  const dOf = (cur, p) => {
+    if (p == null || cur == null) return null;
+    if (p === 0) return cur === 0 ? 0 : null;
+    return (cur - p) / p;
+  };
+  const cards = card(t("admin.orgHealthAgents"), `${num(s.agents)} / ${num(s.totalAgents)}`, dOf(s.agents, prev && prev.agents))
+    + card(t("admin.perfThCalls"), num(s.calls), dOf(s.calls, prev && prev.calls))
+    + card(t("admin.perfThTokens"), num(s.totalTokens), dOf(s.totalTokens, prev && prev.totalTokens))
+    + card(t("admin.perfThCost"), priced ? cur + Number(s.cost || 0).toFixed(2) : "—", priced && prev && prev.cost != null ? dOf(Number(s.cost || 0), Number(prev.cost)) : null)
+    + card(t("admin.perfThRate"), s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%", dOf(s.positiveRate, prev && prev.positiveRate))
+    + card(t("admin.orgHealthFlagged"), num(s.flagged), dOf(s.flagged, prev && prev.flagged));
 
   const barRows = orgHealthBarRows().filter((r) => orgHealthBarValue(r) > 0).slice().sort((a, b) => orgHealthBarValue(b) - orgHealthBarValue(a)).slice(0, 12);
   const bmax = barRows.reduce((m, r) => Math.max(m, orgHealthBarValue(r)), 0) || 1;
@@ -7246,7 +7278,7 @@ function downloadOrgHealthHtml() {
     + `h1{font-size:20px;margin:0 0 4px}h2{font-size:13px;color:var(--muted);margin:18px 0 6px}`
     + `.meta{color:var(--muted);font-size:12px}.cards{display:flex;flex-wrap:wrap;gap:10px}`
     + `.card{flex:1 1 120px;min-width:110px;border:1px solid var(--border);border-radius:8px;padding:8px 10px}`
-    + `.card-k{font-size:11px;color:var(--muted)}.card-v{font-size:18px;font-weight:600;margin-top:2px}`
+    + `.card-k{font-size:11px;color:var(--muted)}.card-v{font-size:18px;font-weight:600;margin-top:2px}.card-d{font-size:11px;color:var(--muted);margin-top:2px}`
     + `.bars{display:flex;flex-direction:column;gap:6px}`
     + `.bar-row{display:grid;grid-template-columns:minmax(90px,28%) 1fr auto;gap:8px;align-items:center;font-size:12px}`
     + `.bar-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}`
@@ -7262,7 +7294,7 @@ function downloadOrgHealthHtml() {
   const html = "<!doctype html>\n<html lang=\"" + lang + "\"><head><meta charset=\"utf-8\">\n"
     + `<title>${escapeHtml(t("admin.orgHealthHtmlTitle"))} · ${escapeHtml(d.to || "")}</title>\n<style>${style}</style>\n</head>\n<body>\n`
     + `<h1>📊 ${escapeHtml(t("admin.orgHealthHtmlTitle"))}</h1>\n`
-    + `<div class="meta">${escapeHtml(t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" }))} · ${escapeHtml(t("admin.orgHealthHtmlGenerated", { time: new Date().toLocaleString() }))}</div>\n`
+    + `<div class="meta">${escapeHtml(t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" }))}${prev ? " · " + escapeHtml(t("admin.orgHealthPrevHint", { days: d.days || 30 })) : ""} · ${escapeHtml(t("admin.orgHealthHtmlGenerated", { time: new Date().toLocaleString() }))}</div>\n`
     + `<div class="cards">${cards}</div>\n`
     + `<h2>${escapeHtml(t("admin.orgHealthTopN"))} · ${escapeHtml(dimLabel)} · ${escapeHtml(metricLabel)}</h2>\n<div class="bars">${bars}</div>\n`
     + `<div class="row2"><div><h2>${escapeHtml(t("admin.perfThRate"))}</h2>${donut}</div>`
@@ -7351,15 +7383,23 @@ function renderOrgHealthCharts(d, days) {
   const price = d.pricing || {};
   const cost = price.configured ? (price.currency || "$") + Number(s.cost || 0).toFixed(2) : "—";
   const rate = s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%";
-  const card = (k, v) => `<div class="oh-card"><div class="oh-card-k">${escapeHtml(k)}</div><div class="oh-card-v">${escapeHtml(String(v))}</div></div>`;
+  const prev = (d.prev && d.prev.summary) || null;
+  const dOf = (cur, p) => {
+    if (p == null || cur == null) return null;
+    if (p === 0) return cur === 0 ? 0 : null; // 上期为 0 时无法算百分比
+    return (cur - p) / p;
+  };
+  const card = (k, v, dp) => `<div class="oh-card"><div class="oh-card-k">${escapeHtml(k)}</div><div class="oh-card-v">${escapeHtml(String(v))}</div>`
+    + (dp == null ? "" : `<div class="oh-card-d">${escapeHtml((dp > 0.005 ? "▲" : dp < -0.005 ? "▼" : "≈") + " " + Math.round(Math.abs(dp) * 100) + "%")}</div>`) + `</div>`;
   $("orgHealthCards").innerHTML =
-    card(t("admin.orgHealthAgents"), `${num(s.agents)} / ${num(s.totalAgents)}`)
-    + card(t("admin.perfThCalls"), num(s.calls))
-    + card(t("admin.perfThTokens"), num(s.totalTokens))
-    + card(t("admin.perfThCost"), cost)
-    + card(t("admin.perfThRate"), rate)
-    + card(t("admin.orgHealthFlagged"), num(s.flagged));
-  $("orgHealthMeta").textContent = t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" });
+    card(t("admin.orgHealthAgents"), `${num(s.agents)} / ${num(s.totalAgents)}`, dOf(s.agents, prev && prev.agents))
+    + card(t("admin.perfThCalls"), num(s.calls), dOf(s.calls, prev && prev.calls))
+    + card(t("admin.perfThTokens"), num(s.totalTokens), dOf(s.totalTokens, prev && prev.totalTokens))
+    + card(t("admin.perfThCost"), cost, price.configured && prev && prev.cost != null ? dOf(Number(s.cost || 0), Number(prev.cost)) : null)
+    + card(t("admin.perfThRate"), rate, dOf(s.positiveRate, prev && prev.positiveRate))
+    + card(t("admin.orgHealthFlagged"), num(s.flagged), dOf(s.flagged, prev && prev.flagged));
+  $("orgHealthMeta").textContent = t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" })
+    + (prev ? " · " + t("admin.orgHealthPrevHint", { days }) : "");
   renderDonut("orgHealthRate", s.positiveRate);
   renderOrgHealthBars();
 
@@ -13768,6 +13808,10 @@ function init() {
   $("adminTabEval").onclick = () => switchAdminTab("eval");
   bindEvalConsole();
   $("perfRefreshBtn").onclick = loadAgentPerformance;
+  const perfSearchEl = $("perfSearch");
+  if (perfSearchEl) perfSearchEl.addEventListener("input", () => { perfKeyword = perfSearchEl.value; renderPerfRows(); });
+  const perfFlaggedEl = $("perfFlaggedBtn");
+  if (perfFlaggedEl) perfFlaggedEl.onclick = () => { perfOnlyFlagged = !perfOnlyFlagged; perfFlaggedEl.classList.toggle("on", perfOnlyFlagged); renderPerfRows(); };
   $("perfReportBtn").onclick = downloadOrgHealthReport;
   $("perfChartBtn").onclick = openOrgHealthCharts;
   $("orgHealthClose").onclick = () => $("orgHealthModal").classList.add("hidden");

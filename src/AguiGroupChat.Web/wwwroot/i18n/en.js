@@ -1854,6 +1854,10 @@ window.I18N_DICTS.en = {
   "admin.perfRange30": "Last 30 days",
   "admin.perfRange90": "Last 90 days",
   "admin.perfRefresh": "↻ Refresh",
+  "admin.perfSearch": "Search employees…",
+  "admin.perfOnlyFlagged": "⚠️ Flagged only",
+  "admin.perfNoMatch": "No employees match the filter",
+  "admin.perfShowing": "Showing {n} / {total}",
   "admin.perfMeta": "{from} ~ {to} · {agents} agents · {calls} calls · {tokens} tokens · overall positive rate {rate}",
   "admin.perfEmpty": "No agent calls or feedback in this range",
   "admin.perfThAgent": "Agent",
@@ -1905,6 +1909,7 @@ window.I18N_DICTS.en = {
   "admin.orgHealthUnitCalls": "calls",
   "admin.orgHealthUnitTokens": "tokens",
   "admin.orgHealthTrendNoPricing": "No pricing configured; cost trend unavailable",
+  "admin.orgHealthPrevHint": "vs previous {days} days",
   /* Digital-employee eval cases / regression (admin) */
   "admin.tabEval": "Eval & regression",
   "admin.evalRun": "▶ Run all",

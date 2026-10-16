@@ -1848,6 +1848,11 @@
           <button id="perfRefreshBtn" class="chip-btn" type="button" data-i18n="admin.perfRefresh">↻ 刷新</button>
           <button id="perfReportBtn" class="chip-btn" type="button" data-i18n="admin.perfReport">📄 组织体检报告</button>
           <button id="perfChartBtn" class="chip-btn" type="button" data-i18n="admin.orgHealthBtn">📊 图表</button>
+          <span class="search-clear-wrap" style="width:190px;flex:none">
+            <input id="perfSearch" class="modal-input" autocomplete="off" data-i18n-placeholder="admin.perfSearch" />
+            <button type="button" class="search-clear" data-clear-for="perfSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+          </span>
+          <button id="perfFlaggedBtn" class="chip-btn" type="button" data-i18n="admin.perfOnlyFlagged">⚠️ 仅看需关注</button>
           <span id="adminPerfMeta" class="form-hint"></span>
         </div>
         <div id="adminPerfHints" class="form-hint"></div>

@@ -1847,6 +1847,10 @@ window.I18N_DICTS.zh = {
   "admin.perfRange30": "近 30 天",
   "admin.perfRange90": "近 90 天",
   "admin.perfRefresh": "↻ 刷新",
+  "admin.perfSearch": "搜索数字员工…",
+  "admin.perfOnlyFlagged": "⚠️ 仅看需关注",
+  "admin.perfNoMatch": "没有符合筛选条件的数字员工",
+  "admin.perfShowing": "显示 {n} / {total}",
   "admin.perfMeta": "{from} ~ {to} · {agents} 位数字员工 · 共 {calls} 次调用 · {tokens} tokens · 综合好评率 {rate}",
   "admin.perfEmpty": "该范围内暂无数字员工调用或反馈记录",
   "admin.perfThAgent": "数字员工",
@@ -1898,6 +1902,7 @@ window.I18N_DICTS.zh = {
   "admin.orgHealthUnitCalls": "次",
   "admin.orgHealthUnitTokens": "Token",
   "admin.orgHealthTrendNoPricing": "未配置单价，无法按成本绘制",
+  "admin.orgHealthPrevHint": "环比上一 {days} 天",
   /* 数字员工评测集 / 回归（管理员） */
   "admin.tabEval": "评测回归",
   "admin.evalRun": "▶ 跑全部",

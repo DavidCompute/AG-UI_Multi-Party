@@ -124,6 +124,12 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.Equal(JsonValueKind.Array, d.GetProperty("agents").ValueKind);
         Assert.Equal(JsonValueKind.Array, d.GetProperty("users").ValueKind);
         Assert.Equal(JsonValueKind.Array, d.GetProperty("groups").ValueKind);
+        // 环比：上一窗口的 summary 随包下发
+        Assert.True(d.TryGetProperty("prev", out var prev));
+        Assert.True(prev.TryGetProperty("summary", out var prevSummary));
+        foreach (var k in new[] { "agents", "calls", "totalTokens", "cost", "flagged" })
+            Assert.True(prevSummary.TryGetProperty(k, out _), $"prev.summary 缺字段 {k}");
+        Assert.False(string.IsNullOrWhiteSpace(prev.GetProperty("from").GetString()));
         var pricing = d.GetProperty("pricing");
         foreach (var k in new[] { "configured", "currency", "inputPerMillion", "outputPerMillion" })
             Assert.True(pricing.TryGetProperty(k, out _), $"pricing 缺字段 {k}");

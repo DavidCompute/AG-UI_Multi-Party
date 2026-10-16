@@ -53,4 +53,20 @@ public sealed class OrgHealthReportTests
         Assert.Contains("需要关注（0）", md);
         Assert.Contains("组织运行健康", md);
     }
+
+    [Fact]
+    public void BuildMarkdown_WithPrevStats_ShowsPeriodOverPeriodLine()
+    {
+        // 本期：调用 200；上期：100 → ▲100%
+        var stats = new[] { new AgentPerformance.AgentStat("a1", "好员工", 200, 100, 100, 0, 200, 3, 0, "2026-10-10") };
+        var prev = new[] { new AgentPerformance.AgentStat("a1", "好员工", 100, 50, 50, 0, 100, 1, 1, "2026-09-10") };
+        var defs = new Dictionary<string, AgentDefinition> { ["a1"] = new AgentDefinition { AgentId = "a1", Nickname = "好员工" } };
+
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, new PricingOptions(), 1_700_000_000_000, null, prev);
+
+        Assert.Contains("环比上一 30 天", md);
+        Assert.Contains("调用 ▲100%", md);
+        // 好评率：本期 3/3=100%、上期 1/2=50% → ▲...
+        Assert.Contains("好评率 ▲", md);
+    }
 }

@@ -262,14 +262,22 @@ public static class AdminApi
             var defs = catalog.ListDefinitions();
             var names = defs.ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
             var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            // 上一窗口（同长度、紧邻当前窗口之前）：供环比
+            var prevTo = from.AddDays(-1);
+            var prevFrom = prevTo.AddDays(-d + 1);
+            var prevRows = usage.GetUsageBetween(prevFrom.ToString("yyyy-MM-dd"), prevTo.ToString("yyyy-MM-dd"));
+            var prevStats = AgentPerformance.Aggregate(prevRows, feedback, names, d, prevTo.ToUnixTimeMilliseconds());
             var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var byId = defs.ToDictionary(x => x.AgentId, x => x, StringComparer.Ordinal);
             var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
-                stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List());
+                stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List(), prevStats);
             // 除 Markdown 外，同时下发结构化数据（供前端图表视图：KPI / 调用量 Top / 关注项）。
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
             var totalCost = stats.Sum(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens));
+            var prevUp = prevStats.Sum(s => s.Up);
+            var prevDown = prevStats.Sum(s => s.Down);
+            var prevTotalCost = pricing.EstimateCost(prevStats.Sum(s => s.PromptTokens), prevStats.Sum(s => s.CompletionTokens), prevStats.Sum(s => s.ReasoningTokens));
             // 按「触发者（用户）」聚合：谁在消耗资源（与「按用户配额」互补）；名字取昵称 → 用户名 → userId。
             var userNames = sp.GetService<AuthService>()?.ListUsers()
                 .ToDictionary(x => x.UserId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.Username : x.Nickname, StringComparer.Ordinal)
@@ -330,6 +338,21 @@ public static class AdminApi
                     positiveRate = (up + down) == 0 ? (double?)null : Math.Round((double)up / (up + down), 4),
                     cost = Math.Round(totalCost, 4),
                     flagged = stats.Count(s => s.Flags is { Count: > 0 }),
+                },
+                // 上一窗口（同长度）：供前端 / 报告做环比
+                prev = new
+                {
+                    from = prevFrom.ToString("yyyy-MM-dd"),
+                    to = prevTo.ToString("yyyy-MM-dd"),
+                    summary = new
+                    {
+                        agents = prevStats.Count(s => s.Calls > 0),
+                        calls = prevStats.Sum(s => s.Calls),
+                        totalTokens = prevStats.Sum(s => s.TotalTokens),
+                        cost = Math.Round(prevTotalCost, 4),
+                        positiveRate = (prevUp + prevDown) == 0 ? (double?)null : Math.Round((double)prevUp / (prevUp + prevDown), 4),
+                        flagged = prevStats.Count(s => s.Flags is { Count: > 0 }),
+                    },
                 },
                 agents = stats.Select(s => new
                 {
