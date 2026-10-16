@@ -25,7 +25,7 @@
 - ✅ **运行时模型配置与初始化**：登录后可在界面填写 DeepSeek endpoint / apiKey（留空用官方端点与环境变量，`GET/POST /ag-ui/settings/model`），重启不丢；用户菜单「数据备份」内提供「初始化（清空一切）」（`POST /ag-ui/reset`，清空数据 + 浏览器缓存）
 - ✅ **桌面版多实例**：WPF / Avalonia 客户端共享同一后端进程（固定 5200），第一个实例启动 `--backend` 子进程、最后一个实例关闭才停后端；支持一次打开多个窗口
 - ✅ **思考模式（AG-UI 桥接）**：外部服务的 `REASONING_MESSAGE_CONTENT` 独立通道回灌，前端渲染可折叠「思考过程」块；工具调用简洁展示（「🔧 名称 调用中…」→ 完成后收起）
-- ✅ **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到**视觉模型**，图片以 base64 多模态内容喂给模型看图并作答；纯文本消息仍走常规 / 思考模型，行为不变。DeepSeek 下视觉模型默认 `deepseek-v4-flash-vision-exp`（可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关）；`mock` 提供方不支持视觉，图片消息按文本处理。图片直接从附件库按字节 + MIME 读取内联传入，无需另存文件；共享的群成员审批 / 发图片附件工作流不变。
+- ✅ **图片理解（视觉）**：群消息携带图片附件时，该轮数字员工回复自动路由到**视觉模型**，图片以 base64 多模态内容喂给模型看图并作答；纯文本消息仍走常规 / 思考模型，行为不变。DeepSeek 下视觉模型默认 `deepseek-flash`（同一 Flash 模型；旧名 `deepseek-v4-flash-vision-exp` 已下线，可用 `Agents:VisionModel` 覆盖，`Agents:VisionEnabled` 默认开启为总开关）；`mock` 提供方不支持视觉，图片消息按文本处理。图片直接从附件库按字节 + MIME 读取内联传入，无需另存文件；共享的群成员审批 / 发图片附件工作流不变。
 - ✅ **语音问答（ASR）**：群消息携带**语音附件**时，若开启 `Agents:Audio:Enabled` 且能解析出转写端点，服务端先调 OpenAI 兼容的音频转写接口（`multipart/form-data`，`file` + `model` [+ `language`]，响应 `{"text":"…"}`）把语音转成文字，再当作该附件的「正文」走**与文档附件同一条**注入 / 预算路径，数字员工即可「听懂」语音。**默认关闭**（不开则行为与旧版完全一致，语音仅携元数据供前端播放）；端点留空时由 `Agents:Endpoint` 派生 `{base}/v1/audio/transcriptions`；转写失败 / 超时 / 超限一律**静默不注入、绝不阻断对话**并记日志；结果按 attachmentId 缓存避免重复计费。Docker 部署可一键拉起内置转写服务（`docker compose --profile voice up -d`，见下方容器化部署）。
 - ✅ **语音进 → 语音出闭环**：数字员工回复头部的 🔊 按钮用**系统语音**朗读（Web Speech API，离线可用、自动中/英文）；「个人资料 → 🔊 自动朗读数字员工回复」开关可让回复完成即朗读；当用户发送**语音消息**时，该条回复**无论开关如何都会自动朗读**，实现「对着说话 → 听到回答」。TTS 全部在浏览器/桌面 WebView2 本地完成，无需服务端。**服务端 TTS（可选）**：开启 `Agents:Audio:SpeechEnabled` 后，回复文本会经 `SpeechSynthesisService` 合成为**音频附件**挂到消息上（与技能产物同一条回挂路径），供无浏览器 / 需分发音频的场景；默认关闭，失败静默不阻断。
 - ✅ **运行超时按任务复杂度自适应**：所有运行不再共用一条固定预算——先按触发消息估出任务量级（交付物格式 / 页数 / 字数 / 条目数 / 多步措辞 / 附件规模 / 是否向下指派），再在 `StreamTimeoutMinutes`（默认 5 分钟）之上乘倍率（常规 ×1.5、复杂 ×2、繁重 ×3），并以 `MaxRunTimeoutMinutes`（默认 30 分钟）兜上界。**三处连带放宽**，避开“主预算放开了、某一层先掉链子”的短板：内置文档类技能预算同倍率放宽、客户端（本机桥）技能隧道等待上界由硬编码 180 秒改为 180×倍率、模型 HTTP 网络兜底改为 `MaxRunTimeoutMinutes+5`。指派链（计划→逐步→递归补查→交付兑底）在自适应预算上再 ×3。两条不变量：**只放宽不收紧**（任何档位都不低于你原本配的值）、**确定性**（审批 / 桥接恢复用同一份触发上下文重算，预算不会莫名变化）。预算被放宽时日志会写明档位与依据（`运行超时预算按任务复杂度放宽：… Heavy（分 8，×3，5→15 分钟，依据：交付物格式、41 页…）`），可直接回答“这次为什么跑这么久”；可在「管理员 → 执行参数」热改或一键关闭（`complexityTimeouts.enabled=false`）。**同一档位也定档「自动放行上限」**：`MaxAutoApprovedRounds`（默认 30）退化为简单档基准值 / 关闭自适应时的兜底，启用后实际上限 = `max(基准值, 常规 40 / 复杂 60 / 繁重 100)` ——时间放开了、轮数不该先到，本是一件事。详见 `docs/execution-configuration.md` §A.1 与 `docs/agent-execution-algorithm.md` §2.2
@@ -230,8 +230,8 @@ docker compose down
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek API Key（也支持 `OPENAI_API_KEY`） |
 | `AGENTS_PROVIDER` | `deepseek` | 模型提供方：`mock` / `openai` / `deepseek` |
 | `AGENTS_ENDPOINT` | 空 | OpenAI 兼容端点（如 `http://host.docker.internal:11434/v1`） |
-| `AGENTS_MODEL` | `deepseek-chat` | 默认模型名 |
-| `AGENTS_DECISION_MODEL` | 空 | 「小决策」专用模型（该不该发言 / 派给谁）。**留空（含空白串）= 自动用非推理的常规模型，且故意不受思考模式影响**——判定调用的输出预算只有几个 token，推理模型会把预算全花在思维链上、正文为空，于是发言判定「永不发言」、指派路由解析出 0 个下游（表现为只有问题提升、没有任务指派）。仅在你有意把判定也交给特定模型时才设置 |
+| `AGENTS_MODEL` | `deepseek-flash` | 默认模型名（现网 DeepSeek 唯一的 Flash 模型名） |
+| `AGENTS_DECISION_MODEL` | 空 | 「小决策」专用模型（该不该发言 / 派给谁）。**留空（含空白串）= 自动用 `deepseek-flash` 并关闭思考（请求参数 `thinking.type=disabled`），且故意不受 `Agents:ThinkingMode` 影响**——判定调用的输出预算只有几个 token，思考会把预算全花在思维链上、正文为空（且不报错），于是发言判定「永不发言」、指派路由解析出 0 个下游（表现为只有问题提升、没有任务指派）。仅在你有意把判定也交给特定模型时才设置 |
 | `AGENTS_DECISION_MIN_PROBABILITY` | `0.3` | 判定为「是」所需的最低概率（0–1）：判定读模型返回的 `logprobs` 算 P(发言)，低于阈值按「否」处理，实际概率写进日志。默认 0.3 而非 0.5——实测「属于其职责但未点名」这类本该发言的情形概率约 0.33 |
 | `AGENTS_ENABLE_TOOLS` | `true` | 是否启用工具调用（默认开启：内置 `get_current_time` 免审批 + `publish_announcement` 需审批） |
 | `AGENTS_ALLOW_PRIVATE_SKILL_ENDPOINTS` | `false` | 技能库 HTTP 是否放行<b>本机/内网/私网</b>地址（默认关=保留 SSRF 防护）；确需调用本机/内网接口时置 `true` |
@@ -784,7 +784,7 @@ Web 界面的群成员列表可直接改并保存。语境触发的发言决策�
 | `Provider` | 说明 |
 |---|---|
 | `mock`（默认） | 内置 `MockChatClient`，无需 API 密钥即可演示流式群聊 |
-| `deepseek` | DeepSeek 官方 API：自动使用 `https://api.deepseek.com` 与默认模型 `deepseek-chat` |
+| `deepseek` | DeepSeek 官方 API：自动使用 `https://api.deepseek.com` 与模型名 `deepseek-flash`（现网唯一 Flash 模型名；“是否思考”由请求参数 `thinking.type` 控制） |
 | `openai` | OpenAI 官方 / 任何 OpenAI 兼容端点（Ollama、vLLM、Azure OpenAI…），配 `Endpoint`、`Model` |
 
 ### 接入 DeepSeek（Web 演示默认已配置 `Provider = deepseek`）
@@ -807,16 +807,16 @@ export DEEPSEEK_API_KEY="sk-xxxx"
 
 Key 解析优先级：`Agents:ApiKey`（appsettings / user-secrets / `AGENTS__APIKEY` 环境变量）→ `DEEPSEEK_API_KEY` → `OPENAI_API_KEY`。
 
-模型可在 `Agents:Model` 全局设置（如 `deepseek-reasoner`），或按智能体在 `Agents:Agents[i].Model` 单独覆盖。
+现网 DeepSeek 只有一个模型名 `deepseek-flash`（官方文档口径；旧的 `deepseek-chat` / `reasoner` 等都路由到同一个 V4.1-Flash）——“是否思考”由请求参数 `thinking.type` 控制，不再靠换模型名。模型名可在 `Agents:Model` 全局设置，或按智能体在 `Agents:Agents[i].Model` 单独覆盖（留空 = `deepseek-flash`）。
 本地无密钥联调时把 `Agents:Provider` 改回 `mock` 即可。
 
-**「小决策」模型（`Agents:DecisionModel`）——建议留空**：数字员工有两类模型调用，一是**正式回复**（吃思考模式、可用大预算），二是**小决策**（语境触发时判「该不该发言」、组织化路由时判「派给谁」），后者输出预算只有几个 token。推理模型会把这点预算全花在思维链上、**正文为空**，而这**不会有任何异常**：`StartsWith("YES")` 恒为假 → 语境触发的数字员工永不发言；指派路由把空输出当「无候选」→ 只提升、不指派。
-因此这两类判定**故意无视 `Agents:ThinkingMode`**，固定走非推理的常规模型（`DecisionModel` → 智能体 `Model` → 全局 `Model`）。实测同一判定提示：`deepseek-flash` 预算 8/64 → 正文为空；`deepseek-chat` 预算 8 → 正文 `YES`、只花 1 个 token。
+**「小决策」模型（`Agents:DecisionModel`）——建议留空**：数字员工有两类模型调用，一是**正式回复**（开思考、可用大预算），二是**小决策**（语境触发时判「该不该发言」、组织化路由时判「派给谁」），后者输出预算只有几个 token。开思考会把这点预算全花在思维链上、**正文为空**，而这**不会有任何异常**：判定恒为「否」→ 语境触发的数字员工永不发言；指派路由把空输出当「无候选」→ 只提升、不指派。
+因此这两类判定**故意无视 `Agents:ThinkingMode`**，固定**关闭思考**（在传输层注入 `thinking.type=disabled`，见 `AgentCatalog.DeepSeekThinkingPolicy`）。实测同一判定提示：`deepseek-flash` 不关思考、预算 8/64 → 正文为空；关思考后预算 8 → 正文 `YES`、只花 1 个 token。
 
 **注意取值口径：模型名一律“留空/空白 = 未设置”。** Docker 透传的空值（如 `Agents__DecisionModel=`）会绑定成**空字符串**，而空串会被 `??` 当成已设置——曾经因此让每次判定都以 `Value cannot be an empty string. (Parameter 'model')` 失败。现在 `DecisionModel` / `ThinkingModel` / 智能体 `Model` 都按空白回退。
 
 **图片理解（视觉）配置**：`Agents:VisionEnabled`（默认 `true`）为总开关，`Agents:VisionModel`（可选模型名，默认空）在带图片的消息中指定视觉模型。
-`VisionModel` 为空且提供方为 DeepSeek 时，自动选用默认视觉模型 `deepseek-v4-flash-vision-exp`；依赖已配置的模型 API Key（同 `Agents:ApiKey` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`）。
+`VisionModel` 为空且提供方为 DeepSeek 时，自动选用视觉模型 `deepseek-flash`（同一 Flash 模型；旧名 `deepseek-v4-flash-vision-exp` 已下线）；依赖已配置的模型 API Key（同 `Agents:ApiKey` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`）。
 二者也可用环境变量 `Agents__VisionEnabled` / `Agents__VisionModel` 等价覆盖（与 `AGENTS__APIKEY` 相同的映射约定）。`mock` 提供方不支持视觉，图片消息按文本处理。
 
 **语音问答（ASR）配置**：`Agents:Audio:Enabled`（默认 `false`，总开关）开启且能解析出转写端点后生效；`Agents:Audio:Endpoint` 留空时由 `Agents:Endpoint` 派生 `{base}/v1/audio/transcriptions`，`Agents:Audio:ApiKey` 留空回退 `Agents:ApiKey`（同 `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`）。其余：`Model`（默认 `whisper-1`）、`Language`（可选，如 `zh`；留空自动识别）、`MaxBytes`（默认 25MB）、`TimeoutSeconds`（默认 60）、`MaxFilesPerMessage`（默认 3，控制成本）。环境变量：`Agents__Audio__Enabled` 等。

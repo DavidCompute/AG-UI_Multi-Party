@@ -1,3 +1,34 @@
+# AG-UI 群聊桌面版 1.0.258 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.258 Release Notes (current Windows desktop release)
+
+**版本说明**：**DeepSeek 全部统一到 `deepseek-flash`**——按官方文档（api-docs.deepseek.com），现网只有一个 Flash 模型名；“是否思考”改为**请求参数** `thinking.type` 控制（传输层注入），不再靠换模型名。旧的 `deepseek-chat` / `deepseek-reasoner` / `deepseek-v4-flash-vision-exp` 引用全部清理。
+**Version note**: **All DeepSeek calls now use `deepseek-flash`** — per the official docs (api-docs.deepseek.com) there is a single Flash model name; "whether to think" is now a **request field** (`thinking.type`, injected at the transport layer) instead of swapping model names. All references to the legacy `deepseek-chat` / `deepseek-reasoner` / `deepseek-v4-flash-vision-exp` are gone.
+
+## 变更
+# Changes
+
+中文：
+- **统一模型名**：`AgentCatalog.DeepSeekModel = "deepseek-flash"`（`DeepSeekDefaultModel` / `DeepSeekReasonerModel` / `DeepSeekVisionModel` 均为该值别名）；`StructuredFastModel` / `ResolveDecisionModelName` / `ResolveModelName` 全部收敛到该名；Docker `AGENTS_MODEL` 默认与 `Web/appsettings.json` 的 `Agents:Model` 同步改为 `deepseek-flash`。
+- **思考开关改为请求参数**：新增 `AgentCatalog.DeepSeekThinkingPolicy`（`System.ClientModel` 的 `PipelinePolicy`，`PipelinePosition.BeforeTransport`）——在 `chat/completions` 的 JSON 顶层注入 `"thinking":{"type":"enabled|disabled"}`（已存在则不覆盖，并补回 `Content-Type: application/json`）。`BuildOpenAIChatClient(..., DeepSeekThinking thinking = Default)`：`Default` 跟随 `Agents:ThinkingMode`；判定 / 路由 / 严格 JSON / 视觉 / 技能生成与修复等**固定 `Disabled`**，正式回复跟随思考模式。
+- **为何必须注入**：实测（真实端点）`deepseek-flash` **默认开思考**，且不抛异常——8/64 token 的判定调用正文会为空（“永不发言 / 指派 0 个下游”），而带 `thinking.type=disabled` 或 `reasoning_effort=none` 时正文正常。
+
+English:
+- **Single model name**: `AgentCatalog.DeepSeekModel = "deepseek-flash"` (`DeepSeekDefaultModel` / `DeepSeekReasonerModel` / `DeepSeekVisionModel` alias it); `StructuredFastModel` / `ResolveDecisionModelName` / `ResolveModelName` all resolve to it; the Docker `AGENTS_MODEL` default and `Web/appsettings.json`'s `Agents:Model` are now `deepseek-flash`.
+- **Thinking is a request field**: added `AgentCatalog.DeepSeekThinkingPolicy` (a `System.ClientModel` `PipelinePolicy` at `PipelinePosition.BeforeTransport`) that injects `"thinking":{"type":"enabled|disabled"}` into the top level of the `chat/completions` JSON body (skipped if already present; re-sets `Content-Type: application/json`). `BuildOpenAIChatClient(..., DeepSeekThinking thinking = Default)`: `Default` follows `Agents:ThinkingMode`; decisions / routing / strict JSON / vision / skill generation & repair are **always `Disabled`**, while formal replies follow thinking mode.
+- **Why injection is required**: measured against the real endpoint, `deepseek-flash` **defaults to thinking on** and raises no exception — an 8/64-token decision call comes back with empty text ("never speak / 0 downstream"), while `thinking.type=disabled` (or `reasoning_effort=none`) yields normal text.
+
+## 文档
+# Docs
+
+中文：`README.md` / `en.md`（DeepSeek 提供方 / `AGENTS_MODEL` / `AGENTS_DECISION_MODEL` / 视觉默认模型 / 小决策段落）；`docs/user-guide.md` / `en.md`（默认模型、视觉模型、配置默认值表）；`docs/agent-execution-algorithm.md` §2.1（小决策改为“固定关思考”）；`MARKETING.md` / `en.md`；`ROADMAP.md` §6.5。
+English: `README.md` / `en.md` (DeepSeek provider / `AGENTS_MODEL` / `AGENTS_DECISION_MODEL` / default vision model / small-decision paragraph); `docs/user-guide.md` / `en.md` (default model, vision model, config-default tables); `docs/agent-execution-algorithm.md` §2.1 (decisions now "thinking off"); `MARKETING.md` / `en.md`; `ROADMAP.md` §6.5.
+
+## 测试
+# Tests
+
+中文：新增 `tests/AguiGroupChat.Hub.Tests/DeepSeekThinkingPolicyTests.cs`（用自建 Transport 离线抓包：`thinking.type` 确实进了 `chat/completions` 请求体、Content-Type 保持 JSON、恰好注入一次、body 仍是合法 JSON）；`DesktopDecisionPathTests` 更新为“单一模型名 + 请求级思考”。真实端点实测：`deepseek-flash`＋`thinking.type=disabled` 正文正常、不关思考时空正文（curl 探针）；本机 Docker 登录后 `POST /ag-ui/agents/orchestrate` 真实模型调用 **HTTP 200**，返回 7 岗位方案且 `selfCheck` 全绿。`dotnet build AguiGroupChat.slnx` **0 错误**；相关测试类 **32 通过**。
+English: new `tests/AguiGroupChat.Hub.Tests/DeepSeekThinkingPolicyTests.cs` (offline capture via a custom Transport: the `thinking.type` flag really lands in the `chat/completions` body, Content-Type stays JSON, injected exactly once, body remains valid JSON); `DesktopDecisionPathTests` updated to "single model name + request-level thinking". Verified against the real endpoint: `deepseek-flash` with `thinking.type=disabled` returns text, while thinking-on returns empty text (curl probe); against the local Docker build, after login `POST /ag-ui/agents/orchestrate` (a real model call) returned **HTTP 200** with a 7-role plan and an all-green `selfCheck`. `dotnet build AguiGroupChat.slnx` reports **0 errors**, and the related test classes passed **32**.
+
 # AG-UI 群聊桌面版 1.0.257 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.257 Release Notes (current Windows desktop release)
 

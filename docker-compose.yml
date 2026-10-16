@@ -129,7 +129,7 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       Agents__Endpoint: ${AGENTS_ENDPOINT:-}
-      Agents__Model: ${AGENTS_MODEL:-deepseek-chat}
+      Agents__Model: ${AGENTS_MODEL:-deepseek-flash}
       # 判定/路由类「小决策」（该不该发言 / 派给谁）专用模型。留空 = 自动用上面的非推理常规模型——
       # **故意不受思考模式影响**：判定调用的输出预算只有几个 token，推理模型会把预算全花在思维链上、
       # 正文为空，于是发言判定「永远不发言」、指派路由解析出 0 个下游（表现为「只有问题提升、没有任务指派」）。

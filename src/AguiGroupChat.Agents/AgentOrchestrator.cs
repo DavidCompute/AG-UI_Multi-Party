@@ -49,7 +49,7 @@ public static class AgentOrchestrator
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
             var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 组织方案按严格 JSON 解析：格式任务，不进 reasoner
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek, ov).AsIChatClient();
+                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek, ov, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
         }
         catch (Exception ex)
         {
@@ -101,7 +101,7 @@ public static class AgentOrchestrator
             var isDeepSeek = string.Equals(options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
             var ov2 = AgentCatalog.StructuredFastModel(isDeepSeek); // 同：流式组织的 JSON 也按常规模型，保证速度与有效
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek, ov2).AsIChatClient();
+                options, new AgentDefinition { AgentId = "orchestrator", Nickname = "组织编排器" }, isDeepSeek, ov2, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
         }
         catch (Exception ex)
         {

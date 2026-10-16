@@ -24,29 +24,95 @@ namespace AguiGroupChat.Agents;
 /// </summary>
 public sealed class AgentCatalog
 {
-    /// <summary>DeepSeek 官方 OpenAI 兼容端点与默认模型。</summary>
+    /// <summary>DeepSeek 官方 OpenAI 兼容端点。</summary>
     internal const string DeepSeekEndpoint = "https://api.deepseek.com";
-    internal const string DeepSeekDefaultModel = "deepseek-chat";
-    /// <summary>思考模式下 DeepSeek 使用的推理模型。
+
+    /// <summary>
+    /// DeepSeek 现网<b>唯一</b>可用的 Flash 模型名。官方文档（api-docs.deepseek.com）已明确
+    /// “模型名请使用 <c>deepseek-flash</c>”：旧名 <c>deepseek-chat</c> / <c>deepseek-reasoner</c> /
+    /// <c>deepseek-v4-flash</c> / <c>deepseek-v4-flash-vision-exp</c> 均被路由到同一个 DeepSeek-V4.1-Flash
+    /// （实测：三者请求后响应的 <c>model</c> 字段都是 <c>deepseek-flash</c>）。
+    /// 因此本平台<b>全部</b>调用统一用这个名字；“是否思考”不再靠换模型名，而由请求参数
+    /// <c>thinking.type = enabled|disabled</c> 控制（见 <see cref="DeepSeekThinking"/> / <see cref="DeepSeekThinkingPolicy"/>）。
+    /// </summary>
+    internal const string DeepSeekModel = "deepseek-flash";
+
+    /// <summary>向后兼容别名：现网下与 <see cref="DeepSeekModel"/> 相同（同一个 Flash 模型）。</summary>
+    internal const string DeepSeekDefaultModel = DeepSeekModel;
+    /// <summary>向后兼容别名：现网下与 <see cref="DeepSeekModel"/> 相同——“思考”只是请求参数，不再是另一个模型。</summary>
+    internal const string DeepSeekReasonerModel = DeepSeekModel;
+    /// <summary>视觉（图片理解）同走 Flash：旧名 <c>deepseek-v4-flash-vision-exp</c> 已下线，同模型。</summary>
+    internal const string DeepSeekVisionModel = DeepSeekModel;
+
+    /// <summary>
+    /// DeepSeek 请求的思考开关。现网只有一个模型名（<c>deepseek-flash</c>），“是否思考”改由请求参数
+    /// <c>thinking.type</c> 表达，所以不再靠换模型名。
+    /// <c>Default</c> = 跟随 <see cref="AgentOptions.ThinkingMode"/>；<c>Enabled</c>/<c>Disabled</c> 强制开 / 关
+    /// （用于输出预算极小的“判定 / 路由 / 严格 JSON”调用：思考会把预算吃光、正文为空）。
+    /// </summary>
+    internal enum DeepSeekThinking { Default, Enabled, Disabled }
+
+    /// <summary>
+    /// 把 DeepSeek 的思考开关写进<b>请求体</b>：在 <c>chat/completions</c> 的 JSON 顶层注入
+    /// <c>"thinking":{"type":"enabled|disabled"}</c>（调用方已自带该字段则不重复注入）。
     ///
     /// <para>
-    /// 用 <c>deepseek-flash</c>（V4 Flash）：它自带思考（返回 reasoning_content），
-    /// 但比旧的 <c>deepseek-reasoner</c> 又快得多。实测对比（同一 300 token 任务）：
-    /// flash 1.3s / pro 4.9s / reasoner 0.9s（短答），而长文生成时 reasoner 会吐出
-    /// 上万条 reasoning 帧（实测踩到：一次交付跑了 8000+ 帧、数分钟不出稿）。
-    /// </para></summary>
-    internal const string DeepSeekReasonerModel = "deepseek-flash";
-    /// <summary>DeepSeek 视觉（图片理解）模型（需显式指定；deepseek-chat 不支持图片）。</summary>
-    internal const string DeepSeekVisionModel = "deepseek-v4-flash-vision-exp";
+    /// 为何在传输层注入，而不是用 SDK 的类型化参数：现网只有一个模型名 <c>deepseek-flash</c>，
+    /// “是否思考”只能由请求参数表达；而 OpenAI .NET SDK 2.10 的 <c>ChatCompletionOptions</c> 既没有
+    /// <c>thinking</c>、也没有可写自定义字段的口子（<c>reasoning_effort</c> 枚举只有 low/medium/high，
+    /// 无法表达“关闭”）。实测：<c>deepseek-flash</c> <b>默认开思考</b>；不给该参数时，8/64 token 的判定
+    /// 调用会被思维链吃光、正文为空（即“永不发言 / 指派 0 个下游”）；而带 <c>thinking.type=disabled</c>
+    /// 或 <c>reasoning_effort=none</c> 时正文正常。故在此统一注入（对 MEAI 路径与裸 SDK 路径都生效）。
+    /// </para>
+    /// </summary>
+    internal sealed class DeepSeekThinkingPolicy(string type) : System.ClientModel.Primitives.PipelinePolicy
+    {
+        private readonly string _field = "\"thinking\":{\"type\":\"" + type + "\"}";
 
-    /// <summary>“结构化/格式型”生成任务的模型选择：是否需要“思考”（用推理模型）。
-    /// 任务输出若会被机器按固定 JSON 或长度截取的短 token 解析，属格式任务——
-    /// 始终用常规对话模型（deepseek-chat/schema-fast）。与 <see cref="GenComplexity"/> 配合：
-    /// 复杂度仅决定是否在提示词里让它“先想后给”（见 <see cref="DeliberateFirstLine"/>），
-    /// 而不是真的切开 reasoner（reasoner 在严格 JSON/截短输出上又慢又易空/超时）。
-    /// 返回 null 表示“跟随全局思考模式”，供需要开放推理/创造的生成（如角色人设）不传 override。</summary>
+        public override void Process(System.ClientModel.Primitives.PipelineMessage message,
+            IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline, int currentIndex)
+        {
+            Inject(message);
+            ProcessNext(message, pipeline, currentIndex);
+        }
+
+        public override ValueTask ProcessAsync(System.ClientModel.Primitives.PipelineMessage message,
+            IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline, int currentIndex)
+        {
+            Inject(message);
+            return ProcessNextAsync(message, pipeline, currentIndex);
+        }
+
+        private void Inject(System.ClientModel.Primitives.PipelineMessage message)
+        {
+            var req = message.Request;
+            if (req.Content is null) return;
+            var uri = req.Uri;
+            if (uri is null || !uri.AbsolutePath.Contains("chat/completions", StringComparison.Ordinal)) return;
+
+            string text;
+            using (var ms = new System.IO.MemoryStream())
+            {
+                req.Content.WriteTo(ms, default);
+                text = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+            }
+            if (text.Contains("\"thinking\"", StringComparison.Ordinal)) return; // 调用方已自带，不覆盖
+            var idx = text.LastIndexOf('}');
+            if (idx < 0) return;
+            var injected = text[..idx] + "," + _field + text[idx..];
+
+            req.Content = System.ClientModel.BinaryContent.Create(BinaryData.FromString(injected));
+            // 替换 Content 后确保媒体类型仍在（服务器按 Content-Type 解析 JSON）。
+            req.Headers.Set("Content-Type", "application/json");
+        }
+    }
+
+    /// <summary>“结构化/格式型”生成任务的模型选择。现网 DeepSeek 只有一个模型名（<c>deepseek-flash</c>），
+    /// 不再靠换模型来区分——“快而稳”由调用方同时传 <see cref="DeepSeekThinking.Disabled"/> 关闭思考达成
+    /// （思考会把严格 JSON / 短 token 的预算吃光）。
+    /// 返回 null 表示“跟随全局”，供需要开放推理/创造的生成（如角色人设）不传 override。</summary>
     internal static string? StructuredFastModel(bool isDeepSeek)
-        => isDeepSeek ? DeepSeekDefaultModel : null;
+        => isDeepSeek ? DeepSeekModel : null;
 
     /// <summary>生成任务的复杂度分档（决定是否“先想后给”再产出最终结构）。
     /// Simple：一句话/单一短 token（群名、示例入参、图谱抽等）——直接给格式答案，不做多余心理铺陈；
@@ -451,7 +517,7 @@ public sealed class AgentCatalog
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
         // 判定/路由属“小决策”：**必须走非推理模型**（详见 AgentOptions.DecisionModel 的实测说明）。
         // 否则思考模式一开，预算被思维链吃光 → 正文为空 → 判定静默退化为“否/无人”。
-        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, ResolveDecisionModelName(_options, def, isDeepSeek));
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, ResolveDecisionModelName(_options, def, isDeepSeek), DeepSeekThinking.Disabled);
         return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
     }
 
@@ -505,7 +571,7 @@ public sealed class AgentCatalog
             AIContextProviders = [],
         };
         var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
-        var client = BuildOpenAIChatClient(_options, null, isDeepSeek, visionModel);
+        var client = BuildOpenAIChatClient(_options, null, isDeepSeek, visionModel, DeepSeekThinking.Disabled);
         return client.AsAIAgent(chatOptions, clientFactory: null, _loggerFactory, _services);
     }
 
@@ -813,14 +879,15 @@ public sealed class AgentCatalog
             _loggerFactory, _services);
     }
 
-    /// <summary>解析实际使用的模型名（思考模式开启时优先推理模型；否则智能体 Model → 全局 Model → 提供方默认）。
+    /// <summary>解析实际使用的模型名（智能体 Model → 全局 Model → 提供方默认）。
+    /// 现网 DeepSeek 统一 <c>deepseek-flash</c>；“是否思考”不在名字上，而由请求参数控制（见 <see cref="DeepSeekThinking"/>）。
     /// <paramref name="def"/> 允许为 null（系统级看图 / 图片描述等后台场景没有智能体可借）。</summary>
     internal static string ResolveModelName(AgentOptions options, AgentDefinition? def, bool isDeepSeek)
     {
         var model = options.ThinkingMode
-            ? FirstNonBlank(options.ThinkingModel, isDeepSeek ? DeepSeekReasonerModel : null)
+            ? FirstNonBlank(options.ThinkingModel, isDeepSeek ? DeepSeekModel : null)
             : null;
-        return FirstNonBlank(model, def?.Model, options.Model, isDeepSeek ? DeepSeekDefaultModel : null)
+        return FirstNonBlank(model, def?.Model, options.Model, isDeepSeek ? DeepSeekModel : null)
             ?? throw new InvalidOperationException("未配置模型名（Agents:Model 或智能体 Model）");
     }
 
@@ -849,9 +916,9 @@ public sealed class AgentCatalog
     /// 判定/路由类「小决策」的模型名：<b>故意无视 ThinkingMode</b>。
     ///
     /// <para>
-    /// 这些调用的输出预算只有几个 token，推理模型会把预算全花在思维链上：实测生产使用的 deepseek-flash
+    /// 这些调用的输出预算只有几个 token，思考会把预算全花在思维链上：实测生产使用的 deepseek-flash
     /// 在预算 8 与 64 时正文均为空（64 那次恰好吃满被截断）—— 发言判定退化为“永不发言”、
-    /// 指派路由解析出 0 个下游。换非推理模型后同一提示只花 1–2 token 就能给出 YES/NONE。
+    /// 指派路由解析出 0 个下游。关闭思考（thinking.type=disabled）后同一提示只花 1–2 token 就能给出 YES/NONE。
     /// </para>
     /// </summary>
     internal static string ResolveDecisionModelName(AgentOptions options, AgentDefinition? def, bool isDeepSeek)
@@ -914,7 +981,7 @@ public sealed class AgentCatalog
         }
 
         var model = ResolveDecisionModelName(_options, def, isDeepSeek);
-        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, model);
+        var client = BuildOpenAIChatClient(_options, def, isDeepSeek, model, DeepSeekThinking.Disabled);
 
         var completion = await client.CompleteChatAsync(
             [new UserChatMessage(prompt)],
@@ -1044,11 +1111,12 @@ public sealed class AgentCatalog
         };
 
     /// <summary>构建 OpenAI 兼容 ChatClient（真实模型路径；Provider=mock 走 <see cref="MockChatClient"/>）。供分身人设生成等复用。
-    /// <paramref name="modelOverride"/> 非空白时强制用该模型（视觉等专用场景）。</summary>
-    internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition? def, bool isDeepSeek, string? modelOverride = null)
+    /// <paramref name="modelOverride"/> 非空白时强制用该模型（视觉等专用场景）。
+    /// <paramref name="thinking"/> 控制 DeepSeek 的思考开关（现网只有一个模型名，思考是请求参数）；
+    /// <c>Default</c> = 跟随 <see cref="AgentOptions.ThinkingMode"/>。非 DeepSeek 提供方忽略。</summary>
+    internal static ChatClient BuildOpenAIChatClient(AgentOptions options, AgentDefinition? def, bool isDeepSeek, string? modelOverride = null, DeepSeekThinking thinking = DeepSeekThinking.Default)
     {
-        // 思考模式（默认开启）：优先用推理模型（DeepSeek 官方 deepseek-flash；可经 Agents:ThinkingModel 覆盖）；
-        // 关闭时回退常规模型（智能体单独 Model → 全局 Model → 提供方默认）。modelOverride 优先于这一切。
+        // 模型名：智能体单独 Model → 全局 Model → 提供方默认（DeepSeek 现网统一 deepseek-flash）。
         // 注意这里必须用 FirstNonBlank：空串（如 Docker 里 Agents__ThinkingModel 留空）不算“已指定”。
         var model = FirstNonBlank(modelOverride, ResolveModelName(options, def, isDeepSeek))!;
         var apiKey = options.ApiKey
@@ -1075,6 +1143,17 @@ public sealed class AgentCatalog
             NetworkTimeout = TimeSpan.FromMinutes(Math.Clamp(runCeilingMinutes + 5, 15, 180)),
         };
         if (endpoint is not null) openAiOptions.Endpoint = new Uri(endpoint);
+
+        // DeepSeek：思考开关由请求参数 thinking.type 表达（现网只有一个模型名 deepseek-flash）。
+        if (isDeepSeek)
+        {
+            var mode = thinking == DeepSeekThinking.Default
+                ? (options.ThinkingMode ? DeepSeekThinking.Enabled : DeepSeekThinking.Disabled)
+                : thinking;
+            openAiOptions.AddPolicy(
+                new DeepSeekThinkingPolicy(mode == DeepSeekThinking.Enabled ? "enabled" : "disabled"),
+                System.ClientModel.Primitives.PipelinePosition.BeforeTransport);
+        }
 
         return new ChatClient(model, credential, openAiOptions);
     }

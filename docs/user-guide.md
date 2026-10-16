@@ -1269,13 +1269,13 @@
 |---|---|---|---|
 | 触发方式 | `#afTriggerMode`（`<select>`） | `agent.form.trigger` | 四个 option：`mentioned`＝`提及触发`、`allMessages`＝`全量监听`、`keyword`＝`关键词触发`、`contextual`＝`语境触发`（见 3.3） |
 | 触发说明 | `#afTriggerHint` | 动态 `*​.hint` | `syncTriggerForm()` 按模式写入 |
-| 模型 | `#afModel` | `agent.form.model` / `agent.form.model.ph`＝`默认 deepseek-chat` | 留空＝后端回退（见下） |
+| 模型 | `#afModel` | `agent.form.model` / `agent.form.model.ph`＝`默认 deepseek-flash` | 留空＝后端回退（见下） |
 | 触发关键词 | `#afKeywords`（组 `#afKeywordGroup`） | `agent.form.keywords(.ph/.hint)` | **仅 `keyword` 模式显示**；保存时按 `,`/`，` 切分去空 |
 | 定时任务（Cron） | `#afSchedule` | `agent.form.schedule(.ph/.hint)` | 5 段表达式（分 时 日 月 周，UTC）；保存前前端用正则校验，非法提示 `agent.err.scheduleInvalid` |
 
-**默认模型核实**：`saveAgent()` 中 `model: $("afModel").value.trim() || null`（留空为 null）。后端 `BuildDefinition` 把空串收敛为 null。模型名解析在 `AgentCatalog.ResolveModelName`：`FirstNonBlank(model, def.Model, options.Model, DeepSeekDefaultModel)`；其中 `appsettings.json` 的 `Agents:Model = "deepseek-chat"`，`AgentCatalog.DeepSeekDefaultModel = "deepseek-chat"`。故**有效默认模型为 `deepseek-chat`**。
+**默认模型核实**：`saveAgent()` 中 `model: $("afModel").value.trim() || null`（留空为 null）。后端 `BuildDefinition` 把空串收敛为 null。模型名解析在 `AgentCatalog.ResolveModelName`：`FirstNonBlank(model, def.Model, options.Model, DeepSeekModel)`；其中 `appsettings.json` 的 `Agents:Model = "deepseek-flash"`，`AgentCatalog.DeepSeekModel = "deepseek-flash"`。故**有效默认模型为 `deepseek-flash`**（现网 DeepSeek 唯一 Flash 模型名）。
 
-> 注意：`Agents:ThinkingMode` 默认开启时，**正式回复**实际使用推理模型（`AgentCatalog.DeepSeekReasonerModel = "deepseek-flash"`），智能体 `Model` 主要在非思考路径/「小决策」路径生效（`ResolveDecisionModelName` 也用 `def.Model`）。此为模型解析层行为，属第 2 章运行时配置范围，本章仅作核实说明。
+> 注意：现网 DeepSeek 只有一个模型名（`deepseek-flash`），“是否思考”不再是另一个模型，而由请求参数 `thinking.type` 控制（传输层注入，见 `AgentCatalog.DeepSeekThinkingPolicy`）：**正式回复**跟随 `Agents:ThinkingMode`，**小决策 / 判定 / 严格 JSON** 一律关闭思考（不看 `ThinkingMode`）。智能体 `Model` 仍可单独覆盖模型名；`ResolveDecisionModelName` 也用 `def.Model`。
 
 #### 3.2.5 AG-UI 桥接（`afSectBridge`）
 
@@ -2433,7 +2433,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 #### 5.4.4 图片描述（caption）与重新向量化
 
 - **描述是语义检索的唯一依据**（`ImageLibrary.cs` 注释：「平台没有 CLIP 那种『以图搜图』」）。参与向量化的文本 = `Caption` + `Tags` + `FileName`（`EmbeddingText()`，文件名权重低、排最后）。
-- 上传后由**视觉模型自动生成**元数据（`CaptionAsync`，1.0.197 起为**多模态打标**）：要求只输出严格 JSON `{"caption":"…","tags":[…]}`；`caption` 为检索描述（≤400 字，`MaxCaptionChars`），`tags` 为检索标签（≤20 个）。`Agents:VisionEnabled`（默认 `true`）为总开关；模型名优先 `Agents:VisionModel`，为空且提供方为 DeepSeek 时用 `deepseek-v4-flash-vision-exp`（`AgentCatalog.ResolveVisionModelName`）。解析失败则整段文本当 caption（无 tags）；未启用视觉 / 生成失败返回空，仅用文件名 + 手填描述向量化（即上表「仅按文件名匹配」态）。**自动 tags 仅在用户未手填标签时写入**（不覆盖人工标注），且与描述一起参与 `EmbeddingText()` 向量化。
+- 上传后由**视觉模型自动生成**元数据（`CaptionAsync`，1.0.197 起为**多模态打标**）：要求只输出严格 JSON `{"caption":"…","tags":[…]}`；`caption` 为检索描述（≤400 字，`MaxCaptionChars`），`tags` 为检索标签（≤20 个）。`Agents:VisionEnabled`（默认 `true`）为总开关；模型名优先 `Agents:VisionModel`，为空且提供方为 DeepSeek 时用 `deepseek-flash`（同一 Flash 模型，`AgentCatalog.ResolveVisionModelName`）。解析失败则整段文本当 caption（无 tags）；未启用视觉 / 生成失败返回空，仅用文件名 + 手填描述向量化（即上表「仅按文件名匹配」态）。**自动 tags 仅在用户未手填标签时写入**（不覆盖人工标注），且与描述一起参与 `EmbeddingText()` 向量化。
 - **编辑描述**：`saveImageCaption()` → `PUT /ag-ui/image-libs/{libId}/assets/{assetId}`，请求体 `{ caption }`。该接口**在重新向量化完成后才返回**（后端 `UpdateAssetAsync` 内 `await task`），因此保存按钮在此期间显示 `⏳ 向量化中…`（`imgLib.vectorizing`）并禁用；返回成功提示 `imgLib.captionSaved`（「描述已保存并重新向量化，立即生效」）。
 - **移除图片**：`DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`，二次确认 `imgLib.removeImageConfirm`（「移除这张图片？其描述与向量数据将被删除」），成功 `imgLib.imageRemoved`。后端先删向量再删文件（`RemoveAsset`），避免删文件后向量仍命中。
 - **删除图库**：`DELETE /ag-ui/image-libs/{libId}`，二次确认 `imgLib.delConfirm`（「删除整个图库？其中全部图片与向量将被清除」），成功 `imgLib.deleted`；同时删向量 + 磁盘目录（`RemoveLibrary`）。
@@ -4803,7 +4803,7 @@ service:
 | `Agents:Provider` | `Provider` | `mock` | `deepseek` | `mock`/`openai`/`deepseek` |
 | `Agents:ApiKey` | `ApiKey` | `null` | `""` | 密钥，空则回退 `DEEPSEEK_API_KEY` → `OPENAI_API_KEY` |
 | `Agents:Endpoint` | `Endpoint` | `null` | `""` | OpenAI 兼容端点；空时 deepseek 用官方端点 |
-| `Agents:Model` | `Model` | `null` | `deepseek-chat` | 默认模型 |
+| `Agents:Model` | `Model` | `null` | `deepseek-flash` | 默认模型 |
 | `Agents:ThinkingMode` | `ThinkingMode` | `true` | 未配 | 思考模式（官方文档注释示例为 `deepseek-flash`） |
 | `Agents:ThinkingModel` | `ThinkingModel` | `null` | 未配 | 思考模式模型名 |
 | `Agents:MaxOutputTokens` | `MaxOutputTokens` | 16000 | 未配 | 正式回复输出 token 上限（≤0 = 不设） |
@@ -5009,7 +5009,7 @@ service:
 | `ASPNETCORE_ENVIRONMENT` | `Production` | — |
 | `ASPNETCORE_URLS` | `http://+:8080` | — |
 | `AGENTS_PROVIDER` | `deepseek` | `Agents:Provider` |
-| `DEEPSEEK_API_KEY` / `AGENTS_ENDPOINT` / `AGENTS_MODEL` | 空 / 空 / `deepseek-chat` | `Agents:ApiKey` / `Agents:Endpoint` / `Agents:Model` |
+| `DEEPSEEK_API_KEY` / `AGENTS_ENDPOINT` / `AGENTS_MODEL` | 空 / 空 / `deepseek-flash` | `Agents:ApiKey` / `Agents:Endpoint` / `Agents:Model` |
 | `AGENTS_DECISION_MODEL` / `AGENTS_DECISION_MIN_PROBABILITY` | 空 / `0.3` | `Agents:DecisionModel` / `DecisionMinProbability` |
 | `AGENTS_THINKING_MODE` | `true` | `Agents:ThinkingMode` |
 | `AGENTS_ENABLE_TOOLS` / `AGENTS_ENABLE_WEBTOOLS` | `true` / `false` | `Agents:EnableTools` / `EnableWebTools` |

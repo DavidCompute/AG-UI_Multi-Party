@@ -39,7 +39,7 @@ public static class SkillDefinitionGenerator
             // 技能生成是“结构 JSON / 代码”格式任务：即使全局思考模式开也不进 reasoner（慢/易空）；见 AgentCatalog.StructuredFastModel
             var modelOverride = AgentCatalog.StructuredFastModel(isDeepSeek);
             client = AgentCatalog.BuildOpenAIChatClient(
-                options, new AgentDefinition { AgentId = "skill_gen", Nickname = "技能生成器" }, isDeepSeek, modelOverride).AsIChatClient();
+                options, new AgentDefinition { AgentId = "skill_gen", Nickname = "技能生成器" }, isDeepSeek, modelOverride, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
         }
         catch (Exception ex)
         {

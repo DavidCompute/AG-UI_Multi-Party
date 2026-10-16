@@ -236,7 +236,7 @@ window.I18N_DICTS.en = {
   "agent.form.trigger.keyword": "Keyword",
   "agent.form.trigger.contextual": "Contextual",
   "agent.form.model": "Model (optional)",
-  "agent.form.model.ph": "Default deepseek-chat",
+  "agent.form.model.ph": "Default deepseek-flash",
   "agent.form.keywords": "Trigger keywords",
   "agent.form.keywords.ph": "Comma-separated, e.g. requirements,review",
   "agent.form.keywords.hint": "Only applies to \"Keyword\" trigger mode",
@@ -679,7 +679,7 @@ window.I18N_DICTS.en = {
   "mc.endpointPh": "https://api.deepseek.com (blank = default)",
   "mc.apiKey": "API Key",
   "mc.apiKeyPh": "Blank = use env DEEPSEEK_API_KEY / OPENAI_API_KEY",
-  "mc.thinking": "Thinking mode (uses the reasoning model <code>deepseek-reasoner</code>; thinks before replying — higher quality but slower / pricier)",
+  "mc.thinking": "Thinking mode (turns thinking on for <code>deepseek-flash</code>; thinks before replying — higher quality but slower / pricier)",
   "mc.cancel": "Cancel",
   "mc.save": "Save",
 

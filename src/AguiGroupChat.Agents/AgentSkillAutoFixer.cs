@@ -118,7 +118,7 @@ public sealed class SkillAutoFixer
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
             var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 自测短问答属格式任务
             using var client = AgentCatalog.BuildOpenAIChatClient(
-                _options, new AgentDefinition { AgentId = "skill_selfcheck", Nickname = "技能自测器" }, isDeepSeek, ov).AsIChatClient();
+                _options, new AgentDefinition { AgentId = "skill_selfcheck", Nickname = "技能自测器" }, isDeepSeek, ov, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
             var prompt =
                 "以下是一个数字员工的“技能”。请把它当作给你的指令现场执行一次并给出<b>具体结果</b>（这是自测，直接作答）。\n" +
                 $"技能说明：{description}\n模板：\n{body}\n\n自测请求：请对一个小而典型的样例执行本技能并输出结果。";
@@ -213,7 +213,7 @@ public sealed class SkillAutoFixer
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
             var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 技能修正是结构化改写（JSON/脚本），不进 reasoner
             using var client = AgentCatalog.BuildOpenAIChatClient(
-                _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek, ov).AsIChatClient();
+                _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek, ov, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
             var heading = def.Kind switch
             {
                 AgentSkillKind.Dotnet => "该技能是 C#（dotnet）技能：正文为 C# 源码，须<b>能编译通过</b>且含 public static string Run(string input) 入口，代码必须写在 class 内（形如 public class Skill {{ public static string Run(string input){{...}} }}，可含私有辅助方法）；不要把方法写在文件顶层、不要用顶层语句。"

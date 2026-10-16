@@ -81,11 +81,11 @@ flowchart TD
 - 发言判定旧实现用 `StartsWith("YES")` 看正文 → 空正文恒为假 → **语境触发的数字员工永远不发言**；
 - 指派路由旧实现把空输出当“模型回 NONE” → 解析出 0 个下游 → 退化成“只有问题提升、没有任务指派”。
 
-实测（同一判定提示，生产实际使用的模型）：`deepseek-flash` 预算 8 → 正文空；预算 64 → 正文空（推理恰好吃满 64 被截断，这就是“有时空有时不空”的间歇性来源）；换 `deepseek-chat` 后预算 8 → 正文 `YES`，只花 1 个 token。
+实测（同一判定提示）：`deepseek-flash` **不关思考**、预算 8/64 → 正文空（思考恰好吃满预算被截断，这就是“有时空有时不空”的间歇性来源）；**关思考**（请求参数 `thinking.type=disabled`）后预算 8 → 正文 `YES`，只花 1 个 token。
 
 因此小决策现在：
 
-1. **模型解析与思考模式解耦**（`AgentOptions.DecisionModel` → 智能体 `Model` → 全局 `Model`）；
+1. **固定关闭思考**（不再靠换模型名——现网 DeepSeek 只有一个模型名 `deepseek-flash`）：解析出模型名后，在传输层注入 `thinking.type=disabled`（`AgentCatalog.DeepSeekThinkingPolicy`），与 `Agents:ThinkingMode` 无关；
 2. **用概率而非文本前缀**：直调 OpenAI 兼容端点拿 `logprobs`，归一化成 P(是)，再与 `Agents:DecisionMinProbability`（默认 0.3）比；拿不到概率才退回文本（只认第一个词，认不出就**不猜**，返回 null 而不是默默当“否”）；
 3. **空输出 ≠ NONE**：指派路由对空正文重试一次（更大预算）并记 `warn`，而不是静默当成“没人合适”；
 4. 判定调用固定 `temperature=0`（判定不该采样），用量按同一口径记入库（判定提示很长，不记会低估配额消耗）。

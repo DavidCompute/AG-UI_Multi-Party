@@ -66,25 +66,25 @@ public sealed class DesktopDecisionPathTests
     /// <summary>
     /// 按桌面 appsettings.json 的形状（<c>deepseek</c> + 思考模式默认开）绑定一次配置，验证：
     /// ① 新增的判定项真的能从 <c>Agents</c> 节绑上（键名就是对外承诺的契约）；
-    /// ② 思考模式开启时，正式回复走推理模型而<b>小决策仍走非推理模型</b>。
-    /// 后者是已修缺陷（判定正文为空 → 静默失效）的根因，必须在桌面这套配置形状下也不复发。
+    /// ② 现网 DeepSeek 只有一个模型名（<c>deepseek-flash</c>），正式回复与小决策<b>同名</b>——
+    ///    “小决策不进思考”改由请求参数 <c>thinking.type=disabled</c> 表达（见 <see cref="AgentCatalog.DeepSeekThinkingPolicy"/>），
+    ///    不再靠换模型名；已修缺陷（判定正文为空 → 静默失效）不能在桌面这套配置形状下复发。
     /// </summary>
     [Fact]
-    public void DesktopShapedConfig_KeepsDecisionsOffTheReasoningModel()
+    public void DesktopShapedConfig_UsesTheSingleFlashModelName()
     {
         var bound = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Agents:Provider"] = "deepseek",
-            ["Agents:Model"] = "deepseek-chat",
+            ["Agents:Model"] = "deepseek-flash",
             ["Agents:ThinkingMode"] = "true",
         }).Build().GetSection("Agents").Get<AgentOptions>()!;
         var def = new AgentDefinition { AgentId = DecisionAgentId, Nickname = "桌面判定测试" };
 
         Assert.True(bound.ThinkingMode);
-        // 正式回复：思考模式开启 → 推理模型（这两个名字是 AgentCatalog 里文档化的 DeepSeek 组合）
+        // 现网统一一个 Flash 模型名：正式回复与判定解析出的名字相同。
         Assert.Equal("deepseek-flash", AgentCatalog.ResolveModelName(bound, def, isDeepSeek: true));
-        // 小决策：必须仍是非推理的常规模型
-        Assert.Equal("deepseek-chat", AgentCatalog.ResolveDecisionModelName(bound, def, isDeepSeek: true));
+        Assert.Equal("deepseek-flash", AgentCatalog.ResolveDecisionModelName(bound, def, isDeepSeek: true));
 
         // 两个新旋钮可被配置覆盖（键名 = 对外契约：AGENTS_DECISION_MODEL / AGENTS_DECISION_MIN_PROBABILITY 同源）
         var tuned = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

@@ -234,6 +234,7 @@
 - **已实现（1.0.255 会话导出）**：聊天头部「📥 导出本话题会话（Markdown）」——按分页接口向前翻页拉全当前话题历史（绕过客户端内存裁剪），导出含附件名 / 回复关系 / 数字员工回复的用量与引用来源；纯前端改动，无新增接口。
 - **已实现（1.0.256 导出可选范围 / 格式）**：📥 改为弹窗——范围（当前话题 / 整个知聚）× 格式（Markdown / HTML）；HTML 为单文件、内联样式、无外部引用，可直接打印为 PDF。
 - **已实现（1.0.257 编排自检清单 + 连接双向归一）**：`AgentOrchestrator.SelfCheck` 把结构 / 连接 / 技能 / 交付闭环逐条列出（`selfCheck` 随 `/orchestrate` 与流式 `done` 下发，预览逐条渲染 ❌/⚠️/✅），把“只有问题提升没有指派 / 没人能产出文件 / 交付岗是门卫”等在确认落库前暴露（不再是只显示一条 `deliveryWarning`）；`NormalizeConnections`（orchestrator + apply 两侧）把「指派 ⇄ 提升」双向补全（自环 / 二环保护、多上级不猜、只增不改）。
+- **已实现（1.0.258 DeepSeek 全部统一 `deepseek-flash`）**：按官方文档口径，现网只有一个 Flash 模型名——“是否思考”改为**请求参数** `thinking.type`，由新增的 `AgentCatalog.DeepSeekThinkingPolicy`（`System.ClientModel` 的 `PipelinePolicy`）在 `chat/completions` 请求体内注入；`StructuredFastModel` / `ResolveDecisionModelName` / `ResolveModelName` 与 Docker/`appsettings` 默认值全部收敛到 `deepseek-flash`；判定 / 路由 / 严格 JSON / 视觉固定关思考，正式回复跟随 `Agents:ThinkingMode`。旧的 `deepseek-chat` / `deepseek-reasoner` / `deepseek-v4-flash-vision-exp` 引用全部清理。
 - **待续**：若验证下来稳定，可考虑更强的候选排序权重（需防抖动，避免好评稀疏 / 滞后带来的误判）。
 
 ### 6.6 数字员工评测集 / 回归（★★☆ 质量守护） ✅已实现（1.0.222）

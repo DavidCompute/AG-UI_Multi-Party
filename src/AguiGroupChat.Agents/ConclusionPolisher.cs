@@ -34,7 +34,7 @@ public sealed class ConclusionPolisher
             var isDeepSeek = string.Equals(_options.Provider, "deepseek", StringComparison.OrdinalIgnoreCase);
             var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 结构化整理属格式任务：不进 reasoner，速度快、稳定
             using var client = AgentCatalog.BuildOpenAIChatClient(
-                _options, new AgentDefinition { AgentId = "conclusion_polish", Nickname = "结论整理器" }, isDeepSeek, ov).AsIChatClient();
+                _options, new AgentDefinition { AgentId = "conclusion_polish", Nickname = "结论整理器" }, isDeepSeek, ov, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
             var prompt =
                 "你是群聊关键结论的整理员。下面是一段从群对话里按时间抽取的「关键级记忆」原文（可能包含口语、重复与闲聊），" +
                 "请把它整理成一份结构清晰、便于日后检索的知识文档，Markdown 格式：\n" +

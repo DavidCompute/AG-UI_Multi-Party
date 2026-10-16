@@ -1271,13 +1271,13 @@ The "✨ Generate Role Prompt" button `#afGenInstructionsBtn` (`agent.form.genIn
 |---|---|---|---|
 | Trigger mode | `#afTriggerMode` (`<select>`) | `agent.form.trigger` | Four options: `mentioned` = `On mention`, `allMessages` = `All messages`, `keyword` = `Keyword`, `contextual` = `Contextual` (see 3.3) |
 | Trigger hint | `#afTriggerHint` | dynamic `*.hint` | Written by `syncTriggerForm()` per mode |
-| Model | `#afModel` | `agent.form.model` / `agent.form.model.ph` = `Default deepseek-chat` | Blank = backend fallback (see below) |
+| Model | `#afModel` | `agent.form.model` / `agent.form.model.ph` = `Default deepseek-flash` | Blank = backend fallback (see below) |
 | Trigger keywords | `#afKeywords` (group `#afKeywordGroup`) | `agent.form.keywords(.ph/.hint)` | **Shown only in `keyword` mode**; on save, split by `,`/`，` and blanks removed |
 | Scheduled task (Cron) | `#afSchedule` | `agent.form.schedule(.ph/.hint)` | 5-field expression (minute hour day month weekday, UTC); the frontend validates it with a regex before saving; invalid → prompts `agent.err.scheduleInvalid` |
 
-**Default-model verification**: in `saveAgent()`, `model: $("afModel").value.trim() || null` (blank → null). The backend `BuildDefinition` collapses the empty string to null. Model-name resolution is in `AgentCatalog.ResolveModelName`: `FirstNonBlank(model, def.Model, options.Model, DeepSeekDefaultModel)`; here `appsettings.json`'s `Agents:Model = "deepseek-chat"` and `AgentCatalog.DeepSeekDefaultModel = "deepseek-chat"`. So **the effective default model is `deepseek-chat`**.
+**Default-model verification**: in `saveAgent()`, `model: $("afModel").value.trim() || null` (blank → null). The backend `BuildDefinition` collapses the empty string to null. Model-name resolution is in `AgentCatalog.ResolveModelName`: `FirstNonBlank(model, def.Model, options.Model, DeepSeekModel)`; here `appsettings.json`'s `Agents:Model = "deepseek-flash"` and `AgentCatalog.DeepSeekModel = "deepseek-flash"`. So **the effective default model is `deepseek-flash`** (the only Flash model name DeepSeek serves now).
 
-> Note: when `Agents:ThinkingMode` is on by default, **formal replies** actually use the reasoning model (`AgentCatalog.DeepSeekReasonerModel = "deepseek-flash"`), and the agent's `Model` mainly takes effect on the non-thinking path / "small decision" path (`ResolveDecisionModelName` also uses `def.Model`). This is model-resolution-layer behavior and belongs to the Chapter 2 runtime-configuration scope; here it is provided only as a verification note.
+> Note: DeepSeek now serves a single model name (`deepseek-flash`); "whether to think" is no longer a different model but the request field `thinking.type` (injected at the transport layer; see `AgentCatalog.DeepSeekThinkingPolicy`): **formal replies** follow `Agents:ThinkingMode`, while **small decisions / verdicts / strict JSON** always turn thinking off (ignoring `ThinkingMode`). The per-agent `Model` can still override the model name; `ResolveDecisionModelName` also uses `def.Model`.
 
 #### 3.2.5 AG-UI bridge (`afSectBridge`)
 
@@ -2437,7 +2437,7 @@ Image files land in `data/images/{libId}/{assetId}{ext}` (`ImageLibraryCatalog` 
 #### 5.4.4 Image description (caption) and re-vectorization
 
 - **The description is the sole basis for semantic search** (`ImageLibrary.cs` comment: "the platform has no CLIP-style 'search by image'"). The text that goes into vectorization = `Caption` + `Tags` + `FileName` (`EmbeddingText()`, with the filename weighted low and placed last).
-- After upload, the vision model **auto-generates** metadata (`CaptionAsync`, **multimodal tagging** since 1.0.197): it is asked to output strict JSON `{"caption":"…","tags":[…]}`; `caption` is the retrieval description (≤400 chars, `MaxCaptionChars`) and `tags` are retrieval tags (≤20). `Agents:VisionEnabled` (default `true`) is the master switch; the model name prefers `Agents:VisionModel`, and when it is empty and the provider is DeepSeek it uses `deepseek-v4-flash-vision-exp` (`AgentCatalog.ResolveVisionModelName`). If parsing fails the whole text is used as the caption (no tags); if vision is off / generation fails it returns empty and only the filename + manual description are vectorized (i.e. the "filename only" state above). **Auto tags are written only when the user hasn't entered tags** (never overwrites manual ones), and participate in `EmbeddingText()` together with the caption.
+- After upload, the vision model **auto-generates** metadata (`CaptionAsync`, **multimodal tagging** since 1.0.197): it is asked to output strict JSON `{"caption":"…","tags":[…]}`; `caption` is the retrieval description (≤400 chars, `MaxCaptionChars`) and `tags` are retrieval tags (≤20). `Agents:VisionEnabled` (default `true`) is the master switch; the model name prefers `Agents:VisionModel`, and when it is empty and the provider is DeepSeek it uses `deepseek-flash` (the same Flash model, `AgentCatalog.ResolveVisionModelName`). If parsing fails the whole text is used as the caption (no tags); if vision is off / generation fails it returns empty and only the filename + manual description are vectorized (i.e. the "filename only" state above). **Auto tags are written only when the user hasn't entered tags** (never overwrites manual ones), and participate in `EmbeddingText()` together with the caption.
 - **Editing the description**: `saveImageCaption()` → `PUT /ag-ui/image-libs/{libId}/assets/{assetId}` with body `{ caption }`. This endpoint **returns only after re-vectorization completes** (the backend `UpdateAssetAsync` does `await task` inside), so the save button shows `⏳ Vectorizing…` (`imgLib.vectorizing`) and is disabled during this time; on return it shows `imgLib.captionSaved` ("Description saved and re-vectorized — live now").
 - **Removing an image**: `DELETE /ag-ui/image-libs/{libId}/assets/{assetId}`, confirmed with `imgLib.removeImageConfirm` ("Remove this image? Its caption and vectors will be deleted"), success `imgLib.imageRemoved`. The backend deletes the vector first and then the file (`RemoveAsset`), avoiding a vector still hitting after the file is gone.
 - **Deleting a library**: `DELETE /ag-ui/image-libs/{libId}`, confirmed with `imgLib.delConfirm` ("Delete this whole image library? All its images and vectors will be cleared"), success `imgLib.deleted`; it also deletes the vectors + the disk directory (`RemoveLibrary`).
@@ -4809,7 +4809,7 @@ service:
 | `Agents:Provider` | `Provider` | `mock` | `deepseek` | `mock`/`openai`/`deepseek` |
 | `Agents:ApiKey` | `ApiKey` | `null` | `""` | Key; when empty, falls back to `DEEPSEEK_API_KEY` → `OPENAI_API_KEY` |
 | `Agents:Endpoint` | `Endpoint` | `null` | `""` | OpenAI-compatible endpoint; when empty, deepseek uses the official endpoint |
-| `Agents:Model` | `Model` | `null` | `deepseek-chat` | Default model |
+| `Agents:Model` | `Model` | `null` | `deepseek-flash` | Default model |
 | `Agents:ThinkingMode` | `ThinkingMode` | `true` | not set | Thinking mode (the official documentation comment example is `deepseek-flash`) |
 | `Agents:ThinkingModel` | `ThinkingModel` | `null` | not set | Thinking mode model name |
 | `Agents:MaxOutputTokens` | `MaxOutputTokens` | 16000 | not set | Output token cap for the final reply (≤0 = unset) |
@@ -5015,7 +5015,7 @@ Named volumes: `agui-web-data` / `agui-docs` / `agui-hub-data` / `agui-pg-data`.
 | `ASPNETCORE_ENVIRONMENT` | `Production` | — |
 | `ASPNETCORE_URLS` | `http://+:8080` | — |
 | `AGENTS_PROVIDER` | `deepseek` | `Agents:Provider` |
-| `DEEPSEEK_API_KEY` / `AGENTS_ENDPOINT` / `AGENTS_MODEL` | empty / empty / `deepseek-chat` | `Agents:ApiKey` / `Agents:Endpoint` / `Agents:Model` |
+| `DEEPSEEK_API_KEY` / `AGENTS_ENDPOINT` / `AGENTS_MODEL` | empty / empty / `deepseek-flash` | `Agents:ApiKey` / `Agents:Endpoint` / `Agents:Model` |
 | `AGENTS_DECISION_MODEL` / `AGENTS_DECISION_MIN_PROBABILITY` | empty / `0.3` | `Agents:DecisionModel` / `DecisionMinProbability` |
 | `AGENTS_THINKING_MODE` | `true` | `Agents:ThinkingMode` |
 | `AGENTS_ENABLE_TOOLS` / `AGENTS_ENABLE_WEBTOOLS` | `true` / `false` | `Agents:EnableTools` / `EnableWebTools` |

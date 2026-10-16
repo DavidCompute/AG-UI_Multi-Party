@@ -386,7 +386,7 @@ Ops runs `cp .env.example .env && docker compose up -d --build` on an intranet s
 **Step 2 · Create three digital employees ("Code / Requirements / Legal") + an external OpenCode expert**
 1. Click "🤖 Digital Employees" in the top bar to open the management panel; first click "📥 Import" in the toolbar to batch-create 25 industry roles from `tools/agents-starter.json`, then search and edit to keep only what you want;
 2. Open the "Product Assistant" form: nickname, avatar (local image upload ok), and a one-sentence intro "product requirements analysis assistant"; click "✨ Generate Role Definition" — the model auto-fills **identity / responsibility scope / reply style requirements** into the Instructions system prompt; review, fine-tune, and save;
-3. Repeat the same steps to create "Code Buddy": its persona stresses "explain the approach before giving code"; trigger mode is set to **context trigger** (🧠), and the model can be individually overridden to `deepseek-reasoner` thinking mode;
+3. Repeat the same steps to create "Code Buddy": its persona stresses "explain the approach before giving code"; trigger mode is set to **context trigger** (🧠), and the model can be individually overridden to `deepseek-flash` thinking mode;
 4. To add the external coding expert, create a role and fill in the AG-UI bridge endpoint `http://192.168.6.18:8889/ag-ui/opencode` — after saving, this role **no longer calls the local LLM**; messages are forwarded to the external OpenCode via the AG-UI protocol, and its **reasoning trace, tool-calling progress, approval cards, and attachments** feed back into the group chat verbatim.
 
 **Step 3 · Pull up a "Technical Discussion" group chat and use it daily**

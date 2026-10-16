@@ -9,7 +9,7 @@ public sealed class AgentOptions
     /// <summary>
     /// 模型提供方：<c>mock</c>（内置模拟客户端，无需密钥，开箱即用）、
     /// <c>openai</c>（OpenAI 官方 / 任何 OpenAI 兼容端点，如 Ollama、vLLM、Azure OpenAI）或
-    /// <c>deepseek</c>（DeepSeek 官方 API，自动使用 https://api.deepseek.com 与 deepseek-chat）。
+    /// <c>deepseek</c>（DeepSeek 官方 API，自动使用 https://api.deepseek.com 与模型名 deepseek-flash）。
     /// </summary>
     public string Provider { get; set; } = "mock";
 
