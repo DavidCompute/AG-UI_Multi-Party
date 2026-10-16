@@ -287,8 +287,9 @@ public sealed class PricingOptions
 /// <summary>
 /// 按任务复杂度自动选模型（appsettings：<c>Agents:ModelRouting</c>，默认关）：
 /// 复用「复杂度自适应超时」同一份估计器（<see cref="RunComplexityEstimator"/>），
-/// 把 <see cref="RunComplexity.Simple"/> 档路由到经济模型、<see cref="RunComplexity.Complex"/> / <see cref="RunComplexity.Heavy"/> 档路由到强模型；
+/// 把 <see cref="RunComplexity.Simple"/> 档路由到经济模型、<see cref="RunComplexity.Standard"/> / <see cref="RunComplexity.Complex"/> / <see cref="RunComplexity.Heavy"/> 档可分别配模型；
 /// 未配置的档位不换（走正常模型）。默认关 = 行为与旧版完全一致。
+/// 可在管理员控制台「配置治理」页在线开关并填模型名（6.3，重启后仍生效）。
 /// </summary>
 public sealed class ModelRoutingOptions
 {
@@ -298,19 +299,23 @@ public sealed class ModelRoutingOptions
     /// <summary>简单档使用的模型名（留空 = 不换）。适合便宜 / 快的非推理模型。Docker：<c>AGENTS_MODELROUTING_SIMPLE_MODEL</c>。</summary>
     public string SimpleModel { get; set; } = "";
 
+    /// <summary>标准档使用的模型名（留空 = 不换）。Docker：<c>AGENTS_MODELROUTING_STANDARD_MODEL</c>。</summary>
+    public string StandardModel { get; set; } = "";
+
     /// <summary>复杂 / 繁重档使用的模型名（留空 = 不换）。适合强模型。Docker：<c>AGENTS_MODELROUTING_HEAVY_MODEL</c>。</summary>
     public string HeavyModel { get; set; } = "";
 
-    /// <summary>按档位解析要用的模型：未启用 / 该档未配（含 Standard 档不换）→ null（走正常模型）。纯函数便于单测。</summary>
+    /// <summary>按档位解析要用的模型：未启用 / 该档未配 → null（走正常模型）。纯函数便于单测。</summary>
     public string? ResolveForTier(RunComplexity tier)
     {
         if (!Enabled) return null;
         var m = tier switch
         {
             RunComplexity.Simple => SimpleModel,
+            RunComplexity.Standard => StandardModel,
             RunComplexity.Complex => HeavyModel,
             RunComplexity.Heavy => HeavyModel,
-            _ => null, // Standard：不换
+            _ => null,
         };
         return string.IsNullOrWhiteSpace(m) ? null : m.Trim();
     }

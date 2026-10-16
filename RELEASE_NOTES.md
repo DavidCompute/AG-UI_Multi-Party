@@ -1,3 +1,36 @@
+# AG-UI 群聊桌面版 1.0.260 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.260 Release Notes (current Windows desktop release)
+
+**版本说明**：**模型路由补全 Standard 档 + 可在「配置治理」页在线开关**——新增 `ModelRoutingOptions.StandardModel`（Standard 档不再固定不换，留空 = 不换），并把 `ModelRouting` 四个旋钮（启用 + 简单/标准/复杂三档模型名）暴露到管理员控制台「配置治理」页，保存即时生效、重启后仍生效，无需改 appsettings / env。
+**Version note**: **Model routing gains the Standard tier and is now editable in Config Governance** — added `ModelRoutingOptions.StandardModel` (the Standard tier no longer never-switches; blank = don't switch), and exposed the four `ModelRouting` knobs (enable + simple/standard/heavy model names) on the admin Config Governance page: saving takes effect immediately and persists across restarts, with no appsettings / env edits.
+
+## 变更
+# Changes
+
+中文：
+- **Standard 档（新）**：`ModelRoutingOptions.StandardModel`；`ResolveForTier` 的 Standard 档由「固定不换」改为「配了就换、留空不换」（向后兼容：默认留空 → 行为与旧版一致）。
+- **在线配置**：`ConfigGovernanceState` / `ConfigGovernanceHttpRequest` / `Apply` / 持久化新增 4 个字段（`modelRoutingEnabled` / `modelRoutingSimpleModel` / `modelRoutingStandardModel` / `modelRoutingHeavyModel`）；`Apply` 写入 `AgentOptions.ModelRouting`。校验：模型名 >200 字符返回 400。
+- **前端**：「配置治理」页新增一个三态复选框 `#cfgModelRouting` + 三个模型名输入框 `#cfgRoutingSimple/Standard/Heavy`（`collectCfg` / `loadConfigGovernance` 同步）；i18n 新增 `admin.modelRouting` / `admin.routingSimple` / `admin.routingStandard` / `admin.routingHeavy`（zh/en）。示例：Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。
+- **Docker**：`docker-compose.yml` 补 `Agents__ModelRouting__StandardModel`（`AGENTS_MODELROUTING_STANDARD_MODEL`）。
+
+English:
+- **Standard tier (new)**: `ModelRoutingOptions.StandardModel`; the Standard arm of `ResolveForTier` changed from "never switch" to "switch if configured, blank = don't switch" (backward compatible: blank by default → same as before).
+- **Online config**: `ConfigGovernanceState` / `ConfigGovernanceHttpRequest` / `Apply` / persistence gain 4 fields (`modelRoutingEnabled` / `modelRoutingSimpleModel` / `modelRoutingStandardModel` / `modelRoutingHeavyModel`); `Apply` writes into `AgentOptions.ModelRouting`. Validation: a model name over 200 chars returns 400.
+- **Frontend**: the Config Governance page gains one tri-state checkbox `#cfgModelRouting` plus three model-name inputs `#cfgRoutingSimple/Standard/Heavy` (kept in sync by `collectCfg` / `loadConfigGovernance`); i18n adds `admin.modelRouting` / `admin.routingSimple` / `admin.routingStandard` / `admin.routingHeavy` (zh/en). Example: `deepseek-flash` for Simple/Standard and `deepseek-v4-pro` for Heavy.
+- **Docker**: `docker-compose.yml` gains `Agents__ModelRouting__StandardModel` (`AGENTS_MODELROUTING_STANDARD_MODEL`).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.10（配置治理 13 → **17** 键，含 8.10.1 表与说明）；`ROADMAP.md` §6.7；`README.md` / `en.md`（`AGENTS_MODELROUTING_*` 补 `STANDARD_MODEL` 与在线配置说明）。
+English: `docs/user-guide.md` / `en.md` §8.10 (Config Governance 13 → **17** keys, incl. the 8.10.1 table and notes); `ROADMAP.md` §6.7; `README.md` / `en.md` (`AGENTS_MODELROUTING_*` gains `STANDARD_MODEL` plus the online-config note).
+
+## 测试
+# Tests
+
+中文：新增 / 扩展 `AgentPerformanceTests.ModelRouting_ResolveForTier_OnlyWhenEnabled`（Standard 有值时换、留空时不换）；`AdminApiIntegrationTests.ConfigGovernance_Post_AdminUpdatesAndPersists` 增加路由四字段（保存 → 回读 `heavy=deepseek-v4-pro` 等断言）。相关测试类 **22 通过**；`dotnet build AguiGroupChat.slnx` **0 错误**；i18n 审计 **zh=en=1922，missing 0**；本机 Docker 实测：登录后 `POST /ag-ui/admin/config` 保存路由 → `GET /config/governance` 回读到 `enabled=true, simple/standard=deepseek-flash, heavy=deepseek-v4-pro`，随后恢复默认。
+English: new/extended `AgentPerformanceTests.ModelRouting_ResolveForTier_OnlyWhenEnabled` (Standard switches when set, stays null when blank); `AdminApiIntegrationTests.ConfigGovernance_Post_AdminUpdatesAndPersists` now covers the four routing fields (save → read-back asserts incl. `heavy=deepseek-v4-pro`). The related test classes passed **22**; `dotnet build AguiGroupChat.slnx` reports **0 errors**; the i18n audit is **zh=en=1922, missing 0**; verified against local Docker: after login, `POST /ag-ui/admin/config` saved the routing config → `GET /config/governance` read back `enabled=true, simple/standard=deepseek-flash, heavy=deepseek-v4-pro`, then restored to defaults.
+
 # AG-UI 群聊桌面版 1.0.259 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.259 Release Notes (current Windows desktop release)
 

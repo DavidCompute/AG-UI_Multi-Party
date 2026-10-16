@@ -258,9 +258,11 @@ services:
       Agents__Pricing__OutputPerMillion: ${AGENTS_PRICING_OUTPUT_PER_MILLION:-0}
       Agents__Pricing__Currency: ${AGENTS_PRICING_CURRENCY:-}
       Agents__Pricing__DailyBudget: ${AGENTS_PRICING_DAILY_BUDGET:-0}
-      # 按任务复杂度自动选模型（Agents:ModelRouting，默认关）：简单档用经济模型、复杂/繁重档用强模型（留空 = 不换）。
+      # 按任务复杂度自动选模型（Agents:ModelRouting，默认关）：简单 / 标准档用经济模型、复杂 / 繁重档用强模型（留空 = 该档不换）。
+      # 也可在管理员控制台「配置治理」页在线开关并填模型名（重启后仍生效）。
       Agents__ModelRouting__Enabled: ${AGENTS_MODELROUTING_ENABLED:-false}
       Agents__ModelRouting__SimpleModel: ${AGENTS_MODELROUTING_SIMPLE_MODEL:-}
+      Agents__ModelRouting__StandardModel: ${AGENTS_MODELROUTING_STANDARD_MODEL:-}
       Agents__ModelRouting__HeavyModel: ${AGENTS_MODELROUTING_HEAVY_MODEL:-}
       # 绩效反哺编排（Agents:PerformanceFeedback，默认关）：指派路由时把候选员工的近期好评率作为参考。
       Agents__PerformanceFeedback__Enabled: ${AGENTS_PERFORMANCEFEEDBACK_ENABLED:-false}

@@ -99,14 +99,19 @@ public sealed class AgentPerformanceTests
     [Fact]
     public void ModelRouting_ResolveForTier_OnlyWhenEnabled()
     {
-        var off = new ModelRoutingOptions { Enabled = false, SimpleModel = "cheap", HeavyModel = "strong" };
+        var off = new ModelRoutingOptions { Enabled = false, SimpleModel = "cheap", StandardModel = "mid", HeavyModel = "strong" };
         Assert.Null(off.ResolveForTier(RunComplexity.Simple)); // 未启用 → 不换
+        Assert.Null(off.ResolveForTier(RunComplexity.Standard));
 
-        var on = new ModelRoutingOptions { Enabled = true, SimpleModel = "cheap", HeavyModel = "strong" };
+        var on = new ModelRoutingOptions { Enabled = true, SimpleModel = "cheap", StandardModel = "mid", HeavyModel = "strong" };
         Assert.Equal("cheap", on.ResolveForTier(RunComplexity.Simple));
-        Assert.Null(on.ResolveForTier(RunComplexity.Standard));          // 常规档不换
+        Assert.Equal("mid", on.ResolveForTier(RunComplexity.Standard));   // 标准档可单独配（1.0.260）
         Assert.Equal("strong", on.ResolveForTier(RunComplexity.Complex));
         Assert.Equal("strong", on.ResolveForTier(RunComplexity.Heavy));
+
+        // 标准档留空 → 不换（向后兼容旧行为）
+        var noStd = new ModelRoutingOptions { Enabled = true, SimpleModel = "cheap", HeavyModel = "strong" };
+        Assert.Null(noStd.ResolveForTier(RunComplexity.Standard));
 
         var partial = new ModelRoutingOptions { Enabled = true, SimpleModel = "cheap" };
         Assert.Equal("cheap", partial.ResolveForTier(RunComplexity.Simple));

@@ -8862,6 +8862,10 @@ async function loadConfigGovernance() {
     setCfgBool("cfgEnableTools", d.enableTools);
     setCfgBool("cfgEnableWebTools", d.enableWebTools);
     setCfgBool("cfgThinking", d.thinkingMode);
+    setCfgBool("cfgModelRouting", d.modelRoutingEnabled);
+    setCfg("cfgRoutingSimple", d.modelRoutingSimpleModel);
+    setCfg("cfgRoutingStandard", d.modelRoutingStandardModel);
+    setCfg("cfgRoutingHeavy", d.modelRoutingHeavyModel);
     $("cfgApprovalTools").value = (d.requireApprovalToolNames || []).join(", ");
     $("cfgFrameOrigins").value = (d.allowedFrameOrigins || []).join(", ");
   } catch { toast(t("admin.configLoadFail")); }
@@ -8901,6 +8905,10 @@ function collectCfg() {
   body.enableTools = boolOrNull("cfgEnableTools");
   body.enableWebTools = boolOrNull("cfgEnableWebTools");
   body.thinkingMode = boolOrNull("cfgThinking");
+  body.modelRoutingEnabled = boolOrNull("cfgModelRouting");
+  body.modelRoutingSimpleModel = $("cfgRoutingSimple").value.trim();
+  body.modelRoutingStandardModel = $("cfgRoutingStandard").value.trim();
+  body.modelRoutingHeavyModel = $("cfgRoutingHeavy").value.trim();
   body.requireApprovalToolNames = listOrUndefined($("cfgApprovalTools").value);
   body.allowedFrameOrigins = listOrUndefined($("cfgFrameOrigins").value);
   // 去掉 undefined / null 字段（保持后端语义：未传不修改）

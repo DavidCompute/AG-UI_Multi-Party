@@ -524,6 +524,10 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             enableWebTools = true,
             requireApprovalToolNames = new[] { "publish_announcement", "deploy" },
             allowedFrameOrigins = new[] { "https://portal.example.com" },
+            modelRoutingEnabled = true,
+            modelRoutingSimpleModel = "deepseek-flash",
+            modelRoutingStandardModel = "deepseek-flash",
+            modelRoutingHeavyModel = "deepseek-v4-pro",
         });
         var setRes = await _client.SendAsync(set);
         setRes.EnsureSuccessStatusCode();
@@ -535,6 +539,10 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.Equal(300, d.GetProperty("maxGroupMembers").GetInt32());
         Assert.Contains(d.GetProperty("requireApprovalToolNames").EnumerateArray(), x => x.GetString() == "deploy");
         Assert.Contains(d.GetProperty("allowedFrameOrigins").EnumerateArray(), x => x.GetString() == "https://portal.example.com");
+        // 模型路由（6.7）：启用 + 各档模型名可在线保存与回读
+        Assert.True(d.GetProperty("modelRoutingEnabled").GetBoolean());
+        Assert.Equal("deepseek-flash", d.GetProperty("modelRoutingStandardModel").GetString());
+        Assert.Equal("deepseek-v4-pro", d.GetProperty("modelRoutingHeavyModel").GetString());
     }
 
     [Fact]

@@ -4062,13 +4062,13 @@ The lower bound of the multipliers is always `1` (only relaxes, never tightens);
 
 ### 8.10 Config Governance tab (`#adminTabConfig`)
 
-View `#adminConfigView` (`index.html:1619-1641`): the hint `admin.configHint` (which states explicitly that "storage provider / model / memory provider etc. that require a restart are read-only"); 6 number boxes + 4 tri-state checkboxes + 2 comma lists + `#cfgReload` (Refresh) / `#cfgSave` (Save).
+View `#adminConfigView` (`index.html:1619-1641`): the hint `admin.configHint` (which states explicitly that "storage provider / model / memory provider etc. that require a restart are read-only"); 6 number boxes + 5 tri-state checkboxes + 2 comma lists + 3 model-name inputs (model routing) + `#cfgReload` (Refresh) / `#cfgSave` (Save).
 
 Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/config` (`app.js:7007-7076`).
 
-#### 8.10.1 Hot-changeable keys (13 in the UI / 13 in the state layer) + bounds
+#### 8.10.1 Hot-changeable keys (17 in the UI / 17 in the state layer) + bounds
 
-`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-34`) has **13** fields in total, and the UI form now presents **13** too (`#cfgMessageWriteDebounceMs`, **added in 1.0.230**). The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:37-50`).
+`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-38`) has **17** fields in total, and the UI form presents **17** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:41-54`).
 
 | # | Frontend field DOM id | Key `key` | Type | UI label i18n | Bounds / validation |
 |---|---|---|---|---|---|
@@ -4085,8 +4085,14 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 11 | `#cfgApprovalTools` | `requireApprovalToolNames` | list | `admin.approvalTools` | Comma-separated; empty = do not modify |
 | 12 | `#cfgFrameOrigins` | `allowedFrameOrigins` | list | `admin.frameOrigins` | Comma-separated; empty = do not modify |
 | 13 | `#cfgMessageWriteDebounceMs` | `messageWriteDebounceMs` | int | `admin.writeDebounce` | ≥ 0 |
+| 14 | `#cfgModelRouting` | `modelRoutingEnabled` | bool | `admin.modelRouting` | Tri-state (**new in 1.0.260**) |
+| 15 | `#cfgRoutingSimple` | `modelRoutingSimpleModel` | string | `admin.routingSimple` | Name ≤ 200; **empty string clears that tier** |
+| 16 | `#cfgRoutingStandard` | `modelRoutingStandardModel` | string | `admin.routingStandard` | as above |
+| 17 | `#cfgRoutingHeavy` | `modelRoutingHeavyModel` | string | `admin.routingHeavy` | as above |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config` (`ConfigGovernanceApi.cs:88-93`): out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` cannot be negative.
+Bounds are validated on the server in `POST /ag-ui/admin/config` (`ConfigGovernanceApi.cs:88-96`): out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` cannot be negative; an over-long model name (>200) returns 400.
+
+> **Model routing (6.7, 1.0.260)**: #14–#17 map to `AgentOptions.ModelRouting` (`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`). **StandardModel is new in this version** — previously the Standard tier never switched. Once enabled, the same `RunComplexityEstimator` used by complexity-adaptive timeouts picks a model per tier (Simple / Standard / Complex / Heavy; blank = don't switch that tier), e.g. `deepseek-flash` for Simple/Standard and `deepseek-v4-pro` for Heavy. It shares the `Agents:ModelRouting` config (env `AGENTS_MODELROUTING_*`); saving on this page takes effect immediately and persists. Note: unlike list items ("empty = do not modify"), model names follow string `??` semantics — **an empty string clears that tier** (the frontend always submits these three fields, i.e. "save = the form wins").
 
 #### 8.10.2 Tri-state booleans and "not sent means not changed"
 

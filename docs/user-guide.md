@@ -4057,13 +4057,13 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.10 配置治理 tab（`#adminTabConfig`）
 
-视图 `#adminConfigView`（`index.html:1619-1641`）：提示 `admin.configHint`（明确指出「存储提供方 / 模型 / 记忆提供方等需重启的项目为只读」）；6 个数字框 + 4 个三态复选框 + 2 个逗号列表 + `#cfgReload`（刷新）/ `#cfgSave`（保存）。
+视图 `#adminConfigView`（`index.html:1619-1641`）：提示 `admin.configHint`（明确指出「存储提供方 / 模型 / 记忆提供方等需重启的项目为只读」）；6 个数字框 + 5 个三态复选框 + 2 个逗号列表 + 3 个模型名输入框（模型路由）+ `#cfgReload`（刷新）/ `#cfgSave`（保存）。
 
 接口：读 `GET /ag-ui/admin/config/governance`，写 `POST /ag-ui/admin/config`（`app.js:7007-7076`）。
 
-#### 8.10.1 可热改键（UI 13 个 / 状态层 13 个）+ 边界
+#### 8.10.1 可热改键（UI 17 个 / 状态层 17 个）+ 边界
 
-`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-34`）共 **13** 个字段，UI 表单亦呈现 **13** 个（`#cfgMessageWriteDebounceMs`，**1.0.230 补齐**）。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:37-50`）。
+`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-38`）共 **17** 个字段，UI 表单亦呈现 **17** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:41-54`）。
 
 | # | 前端字段 DOM id | 键 `key` | 类型 | UI 标签 i18n | 边界 / 校验 |
 |---|---|---|---|---|---|
@@ -4080,8 +4080,14 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 11 | `#cfgApprovalTools` | `requireApprovalToolNames` | list | `admin.approvalTools` | 逗号分隔；空 = 不修改 |
 | 12 | `#cfgFrameOrigins` | `allowedFrameOrigins` | list | `admin.frameOrigins` | 逗号分隔；空 = 不修改 |
 | 13 | `#cfgMessageWriteDebounceMs` | `messageWriteDebounceMs` | int | `admin.writeDebounce` | ≥ 0 |
+| 14 | `#cfgModelRouting` | `modelRoutingEnabled` | bool | `admin.modelRouting` | 三态（**1.0.260 新增**） |
+| 15 | `#cfgRoutingSimple` | `modelRoutingSimpleModel` | string | `admin.routingSimple` | 模型名 ≤ 200；**空串 = 清空该档**（要“不修改”需不提交） |
+| 16 | `#cfgRoutingStandard` | `modelRoutingStandardModel` | string | `admin.routingStandard` | 同上 |
+| 17 | `#cfgRoutingHeavy` | `modelRoutingHeavyModel` | string | `admin.routingHeavy` | 同上 |
 
-边界校验在服务端 `POST /ag-ui/admin/config`（`ConfigGovernanceApi.cs:88-93`）：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` 不能为负。
+边界校验在服务端 `POST /ag-ui/admin/config`（`ConfigGovernanceApi.cs:88-96`）：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` 不能为负；模型名过长（>200）返回 400。
+
+> **模型路由（6.7，1.0.260）**：#14–#17 对应 `AgentOptions.ModelRouting`（`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`）。**StandardModel 为本版新增**——此前 Standard 档固定不换。启用后按「复杂度自适应」同一份估计器（`RunComplexityEstimator`）为 Simple / Standard / Complex / Heavy 四档分别选模型（留空 = 该档不换）；例如 Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。与后台 `Agents:ModelRouting`（env `AGENTS_MODELROUTING_*`）同源，页面保存后即时生效并持久化。注意：与列表项「空 = 不修改」不同，模型名走字符串 `??` 语义 —— **空串会清空该档**（前端总是提交这三个字段，即“保存 = 以表单为准”）。
 
 #### 8.10.2 三态布尔与「未传不改」
 
@@ -4089,7 +4095,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.10.3 生效方式
 
-`Apply(state, groupChat, auth, agents)`（`ConfigGovernanceApi.cs:55-74`）把覆盖写到运行时单例（`GroupChatOptions` / `AuthOptions` / `AgentOptions`），并 `changes.Notify()` 持久化到扩展区 `configGovernance`（重启恢复并重新应用，`ConfigGovernanceApi.cs:128-163`）。即**保存即时生效、无需重启**。成功写审计 `config.update`。
+`Apply(state, groupChat, auth, agents)`（`ConfigGovernanceApi.cs:59-82`）把覆盖写到运行时单例（`GroupChatOptions` / `AuthOptions` / `AgentOptions`，含 `AgentOptions.ModelRouting`），并 `changes.Notify()` 持久化到扩展区 `configGovernance`（重启恢复并重新应用，`ConfigGovernanceApi.cs:132-171`）。即**保存即时生效、无需重启**。成功写审计 `config.update`。
 
 #### 8.10.4 只读项（需改 appsettings / 重启）
 
