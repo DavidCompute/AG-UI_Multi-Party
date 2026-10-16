@@ -50,3 +50,9 @@ jobs:
 
       - name: i18n orphan-key detection
         run: node .github/workflows/check-orphan-keys.js
+
+      - name: Config key guard (compose/appsettings vs C# properties)
+        run: node tools/check-config-keys.mjs
+
+      - name: Docs reference integrity (links + backticked file refs)
+        run: node tools/check-docs-links.mjs

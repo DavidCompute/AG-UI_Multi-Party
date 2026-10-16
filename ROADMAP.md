@@ -225,6 +225,7 @@
 
 - **Playwright 自动化验证（已实现）**：`tools/ui-orchestrate-flow.mjs` 用 Playwright 自动跑「一键组织编排 → 建客服知聚」全链路并截图（`tools/README-playwright.md`），覆盖 SSE 流式生成、apply 落库、客服知聚进入与会话隔离的前端验证。
 - **运行期回归扫描（已实现）**：`tools/api-smoke.mjs`（后端 HTTP 只读主流面 46 项：路由 / 鉴权 / 序列化 / Prometheus 指标）与 `tools/ui-smoke.mjs`（前端控制台：未捕获运行时错误 + i18n 原文键泄漏；带总时长看门狗与注入式自检），均为只读、可重复跑，见 `tools/README-regression.md`。
+- **静态守卫（已实现）**：`tools/check-config-keys.mjs`（配置键 ↔ C# 属性漂移）与 `tools/check-docs-links.mjs`（文档引用完整性：markdown 链接 + 反引号文件引用 + 行号越界）——**两者已接入 CI**（`.github/workflows/ci.yml`，秒级、无需起服务），推送 / PR 即自动阻止漂移。
 
 ### 6.5 数字员工绩效看板（★★☆ 运营洞察 / 反哺编排） ✅已实现（1.0.220）
 - **现状**：`agui_usage` 已在记录按「日期 + 员工 + 触发者」的调用与 token；消息 👍👎 反馈也已在存；但**没有按员工的汇总视图**，编排选人仍靠静态角色描述。

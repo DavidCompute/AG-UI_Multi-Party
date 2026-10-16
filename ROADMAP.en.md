@@ -204,6 +204,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
 
 - **Playwright automated verification (implemented)**: `tools/ui-orchestrate-flow.mjs` uses Playwright to run the full "one-click orchestrate → create support circle" flow with screenshots (`tools/README-playwright.md`), covering SSE streaming generation, apply persistence, and frontend verification of support-circle entry & session isolation.
 - **Runtime regression scans (implemented)**: `tools/api-smoke.mjs` (a 46-check read-only backend HTTP sweep: routes / auth / serialization / Prometheus metrics) and `tools/ui-smoke.mjs` (frontend console: uncaught runtime errors + raw i18n key leaks, with an overall watchdog and an injection-based self-test); both read-only and repeatable — see `tools/README-regression.md`.
+- **Static guards (implemented)**: `tools/check-config-keys.mjs` (config-key ↔ C# property drift) and `tools/check-docs-links.mjs` (docs reference integrity: markdown links + backticked file refs + out-of-range line numbers) — **both wired into CI** (`.github/workflows/ci.yml`, seconds, no service needed), blocking drift on every push / PR.
 
 ---
 

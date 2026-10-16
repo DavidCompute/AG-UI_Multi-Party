@@ -58,7 +58,7 @@
 - ✅ **用户分组与按组授权（细粒度访问控制）**：管理员控制台「用户分组」把平台账号编组（`ug_xxx`，与“群聊知聚”不同概念）；资源可指定「允许访问的用户组」白名单——**数字员工** `AllowedGroupIds`（未配置=全员；配置后仅命中的组成员可看到 / 单聊 / 拉入建群；服务端四关口拦截，403 `AGENT_PERMISSION_DENIED`）、**技能库** `AllowedUserGroupIds`（受限技能对非授权者隐藏且不可挂载）；知识库已有“群级共享”与之互补。创建者与系统管理员始终放行（详见 `docs/RBAC.md` §6）
 - ✅ **记忆拟人类型（按类型召回）**：每个数字员工可在「编辑 → 记忆与权限」配置自己的记忆特征——五档拟人预设（广记型 / 深记型 / 难录入型 / 存得住想不起型 / 快速遗忘型）+ 口吻模式 + 人设 + TopK / 阈值微调；调取群 / 个人记忆时按类型实际执行抽取（条数、相似度阈值、回忆提示分支、近期窗口），深记型本人发言自动刻为「重要」记忆、快速遗忘型在开启自动遗忘时本人普通发言保留更短。未配置 = 沿用平台全局，完全向后兼容（机制、字段与调试见 `docs/memory-personality.md`）；**组织构建自动配型**——网页一键组织编排与内置组织架构构建师产稿时会按每个岗位职责自动挑选合适的记忆拟人预设，落库的新数字员工即自带匹配其岗位的记忆类型（见 §4.4）
 - ✅ **本机技能经隧道执行**：`NativeTunnel__Token` 配置内网桥；`ClientToolTunnelRequireApproval`（默认 `true`）决定客户知聚 / 编排中的本机 shell 是否需触发者审批后才经隧道执行
-- ✅ **浏览器自动化工具 + 回归与守卫**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服智聚」全链路并截图，见 `tools/README-playwright.md`）；**`tools/api-smoke.mjs`**（后端 HTTP 只读主流面 46 项回归）、**`tools/ui-smoke.mjs`**（前端控制台回归：抓未捕获运行时错误 + **i18n 原文键泄漏**）与 **`tools/check-config-keys.mjs`**（**配置键 ↔ C# 属性静态校验**：抓「配了却没属性、被静默忽略」的漂移，文档 §9.9 的已知坑现已有自动守卫；带白名单与 `--no-allowlist` 自证）——见 `tools/README-regression.md`
+- ✅ **浏览器自动化工具 + 回归与守卫**：`tools/ui-orchestrate-flow.mjs`（Playwright 自动跑「一键编排 → 建客服智聚」全链路并截图，见 `tools/README-playwright.md`）；**`tools/api-smoke.mjs`**（后端 HTTP 只读主流面 46 项回归）、**`tools/ui-smoke.mjs`**（前端控制台回归：抓未捕获运行时错误 + **i18n 原文键泄漏**）与 **`tools/check-config-keys.mjs`** 与 **`tools/check-docs-links.mjs`** —— **两个静态守卫已在 CI 自动执行**（`.github/workflows/ci.yml`）：前者校验**配置键 ↔ C# 属性**漂移（抓「配了却没属性、被静默忽略」，即文档 §9.9 的已知坑；带白名单与 `--no-allowlist` 自证），后者校验**文档引用完整性**（markdown 链接 + 反引号文件引用 + 行号越界）——见 `tools/README-regression.md`
 
 ## 项目结构
 
@@ -91,8 +91,9 @@ tools/README-playwright.md       # 上述编排自动化的安装 / 运行 / 退
 tools/README-team-replace.md     # 团队整批替换 / 反复修改同一支的操作与 plan.json 结构说明
 tools/api-smoke.mjs              # 运行期回归：后端 HTTP 只读主流面扫描（46 项，零依赖，见 tools/README-regression.md）
 tools/ui-smoke.mjs               # 运行期回归：前端控制台扫描（未捕获运行时错误 + i18n 原文键泄漏，Playwright，见 tools/README-regression.md）
-tools/check-config-keys.mjs      # 静态守卫：配置键 ↔ C# 属性漂移校验（防“配了却没属性”静默忽略，见 tools/README-regression.md）
-tools/README-regression.md       # 回归与守卫（运行期扫描 + 配置键静态校验）的使用 / 退出码 / 探针判据
+tools/check-config-keys.mjs      # 静态守卫：配置键 ↔ C# 属性漂移校验（防“配了却没属性”静默忽略；已在 CI，见 tools/README-regression.md）
+tools/check-docs-links.mjs       # 静态守卫：文档引用完整性（markdown 链接 + 反引号文件引用 + 行号越界校验；已在 CI）
+tools/README-regression.md       # 回归与守卫（运行期扫描 + 配置/文档 静态校验）的使用 / 退出码 / 探针判据
 ```
 
 ```mermaid

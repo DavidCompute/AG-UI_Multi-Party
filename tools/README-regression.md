@@ -1,15 +1,16 @@
 # 回归与守卫（运行期扫描 + 配置键静态校验）
 
-三个**可复用**的仓库级守卫，用来在一次运行中对「正在跑的服务」与「配置/代码一致性」做自动体检。
+三个**可复用**的仓库级守卫，用来在一次运行中对「正在跑的服务」与「配置/文档 一致性」做自动体检。
 它们不替代单元 / 集成测试（`dotnet test`），而是覆盖测试之外的三类真实缺陷：
 
-| 脚本 | 类别 | 抓什么 |
-|---|---|---|
-| `api-smoke.mjs` | 运行期 | 后端 HTTP 只读主流面（46 项）：路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 |
-| `ui-smoke.mjs` | 运行期 | 前端主要界面（Playwright）：**未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏** |
-| `check-config-keys.mjs` | **静态** | **配置键 ↔ C# 属性漂移**：compose / appsettings 里配了、代码里没属性 → 会被**静默忽略、不报错也不生效**（文档 §9.9 专列此坑） |
+| 脚本 | 类别 | 抓什么 | CI |
+|---|---|---|---|
+| `api-smoke.mjs` | 运行期 | 后端 HTTP 只读主流面（46 项）：路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 | 手动（需起服务） |
+| `ui-smoke.mjs` | 运行期 | 前端主要界面（Playwright）：**未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏** | 手动（需浏览器） |
+| `check-config-keys.mjs` | **静态** | **配置键 ↔ C# 属性漂移**：compose / appsettings 里配了、代码里没属性 → **静默忽略、不报错也不生效**（文档 §9.9 专列此坑） | **已在 CI** |
+| `check-docs-links.mjs` | **静态** | **文档引用失效**：markdown 链接 + 反引号文件引用（含 `:行号` 越界）指向不存在 / 已移动的文件 | **已在 CI** |
 
-> 两个运行期脚本都是**只读**的：API 扫描全走 GET；UI 扫描只「打开界面 + 切换页签」，新增类弹窗只开一次即关（不保存）。
+> 两个运行期脚本都是**只读**的：API 扫描全走 GET；UI 扫描只「打开界面 + 切换页签」，新增类弹窗只开一次即关（不保存）。两个静态脚本秒级、无需起服务，已接入 `.github/workflows/ci.yml`。
 
 ## 依赖
 
@@ -70,9 +71,30 @@ node tools/check-config-keys.mjs --no-allowlist  # 自证 / 审计：把白名�
 - `--no-allowlist` 让白名单失效——既能**自证探针有牙**（当前恰好现形 3 个已文档化项），也能随时审计已知漂移清单（防止白名单里悄悄积压新问题）。
 - 新增配置键时若忘了在 Options 里加属性，默认模式会直接失败并指出来源文件。
 
+## 文档引用守卫（`check-docs-links.mjs`，静态、无需跑服务）
+
+```bash
+node tools/check-docs-links.mjs   # 退出码 0 = 全部可解析；1 = 有失效引用
+```
+
+怎么判：扫全仓 `*.md`（跳过 node_modules / bin / obj / artifacts 等，忽略围栏代码块——所以本文的示例放在围栏块里就不会被当成真实引用），校验两类引用：
+
+```text
+A. markdown 相对链接：  ](docs/user-guide.md)     或  href="src/AguiGroupChat.Web/AdminApi.cs"
+B. 反引号文件引用：     `docs/user-guide.md`   `src/…/ConfigGovernanceApi.cs:18-38`
+```
+
+- **markdown 相对链接**：跳过 http(s) / mailto / `#` / `data:` 开头者；去锚点 / 查询后按文件所在目录解析（也接受仓库根相对）。
+- **反引号文件引用**（本仓文档的主流写法）：去 `:行号` / `#L…` 后解析，允许**简写后缀**（`Web/AttachmentApi.cs` → `src/AguiGroupChat.Web/AttachmentApi.cs`，字符串级 `endsWith`），并排除容器 / 运行时路径（`/app/…`、`data/…`）；行号**超出该文件总行数**则报错。
+
+> 自检：往任意 md 里写一条 `` `NoSuchDir/NoSuchFile.xyz` `` 与一个不存在的 md 链接，运行即应报错（已验证探针有牙且不误报同文件的正常引用）。
+> （示例用非白名单扩展名 `.xyz`，以免检查器把文档里的示例本身当成真实引用。）
+
 ## 建议的使用时机
 
 - 每次改动前端（`index.html` / `app.js` / i18n）后跑一遍 `ui-smoke.mjs`——i18n 与运行时错误在浏览器里才现形。
 - 每次后端改动 / 重建镜像后跑一遍 `api-smoke.mjs`。
 - 每次动 **compose / appsettings / 选项类**后跑一遍 `check-config-keys.mjs`（纯静态、秒级）。
+- 每次动 **markdown 文档 / 改文件名**后跑一遍 `check-docs-links.mjs`（纯静态、秒级）。
 - 发布前三者都跑一遍，作为单元 / 集成测试之外的「仓库级体检」。
+- 两个静态守卫已在 CI（`.github/workflows/ci.yml`），推送 / PR 即自动执行；两个运行期扫描需起服务，保持手动。
