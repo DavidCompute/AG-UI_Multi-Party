@@ -4823,7 +4823,7 @@ function applySnapshot(evt) {
       content: sm.content, reasoning: sm.reasoning || "", attachments: sm.attachments || [], mentions: sm.mentions || [], mentionAll: !!sm.mentionAll, agentChain: sm.agentChain || null,
       topicId: sm.topicId || "main",
       timestamp: Number(sm.timestamp) || 0,
-      time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: parsePlanJson(sm.planJson),
+      time: fmtTime(sm.timestamp), recalled: false, streaming: false, plan: parsePlanJson(sm.planJson), usage: parseUsageJson(sm.usageJson),
     };
     state.msgIndex.set(sm.messageId, m);
     seen.add(sm.messageId);
@@ -5084,6 +5084,33 @@ function parsePlanJson(planJson) {
   } catch { return null; }
 }
 
+/** 解析消息携带的 usageJson（本次回答用量）；非法 / 缺失 / 全零返回 null。 */
+function parseUsageJson(json) {
+  if (!json) return null;
+  try {
+    const u = typeof json === "string" ? JSON.parse(json) : json;
+    if (!u || typeof u !== "object") return null;
+    const out = {
+      inputTokens: Number(u.inputTokens || 0),
+      outputTokens: Number(u.outputTokens || 0),
+      reasoningTokens: Number(u.reasoningTokens || 0),
+      cost: u.cost == null ? null : Number(u.cost),
+      currency: u.currency || null,
+    };
+    out._empty = out.inputTokens <= 0 && out.outputTokens <= 0 && out.reasoningTokens <= 0;
+    return out;
+  } catch { return null; }
+}
+
+/** 本次用量行（token + 估算成本）：置于「执行过程」块内，随回答落库。 */
+function renderUsageCard(u) {
+  const n = (v) => Number(v || 0).toLocaleString();
+  const parts = [t("msg.usageIn", { n: n(u.inputTokens) }), t("msg.usageOut", { n: n(u.outputTokens) })];
+  if (Number(u.reasoningTokens || 0) > 0) parts.push(t("msg.usageReason", { n: n(u.reasoningTokens) }));
+  const cost = (u.cost != null && u.currency) ? " · " + t("msg.usageCost", { cost: u.currency + Number(u.cost).toFixed(4) }) : "";
+  return `<div class="usage-card">💰 <b>${escapeHtml(t("msg.usageTitle"))}</b> <span class="usage-vals">${escapeHtml(parts.join(" · "))}${escapeHtml(cost)}</span></div>`;
+}
+
 
 function onMessageEnd(evt) {
   const r = room(evt.groupId);
@@ -5093,6 +5120,7 @@ function onMessageEnd(evt) {
   // 思考内容以结束事件携带的完整快照为准（防抖 / 乱序场景下保证回放完整）
   m.reasoning = evt.reasoning ?? m.reasoning;
   m.agentChain = evt.agentChain ?? m.agentChain; // 技能调用链（链路可视化）
+  m.usage = parseUsageJson(evt.usageJson) ?? m.usage; // 本次用量（token / 成本）
   m._html = undefined; // 结束 → 切 Markdown 渲染
   if (state.activeGroupId !== evt.groupId) return;
   // 窗口内消息立即局部更新（切 Markdown + 折叠 + 挂按钮）。
@@ -10609,9 +10637,13 @@ function msgDom(m, r, prev) {
   const planCardHtml = (m.plan && m.plan.steps && m.plan.steps.length && !m.recalled)
     ? `<div class="plan-card">${renderPlanCard(m.plan, m, r)}</div>`
     : "";
+  // 本次用量（模型 token / 估算成本）：随回答落库，刷新后仍可回显
+  const usageCard = (m.senderType === "agent" && !m.recalled && m.usage && !m.usage._empty)
+    ? renderUsageCard(m.usage)
+    : "";
   // 过程 / 最终答复分层：把思考、计划、技能链、工具调用归为「执行过程」，置于正文（最终答复）之上。
   // 默认展开（用户大多希望看到过程），点标题可一键收起；手动选择按 messageId 记住，重渲染不动。
-  const processInner = thinking + planCardHtml + chainCard + toolCalls;
+  const processInner = thinking + planCardHtml + chainCard + usageCard + toolCalls;
   // 默认跟随计划卡：执行结束（非流式）则收起，流式中展开；手动点过则以其选择为准。
   const processCollapsed = processCollapseOverride.has(m.id) ? processCollapseOverride.get(m.id) === true : !m.streaming;
   const stepInfo = (m.plan && m.plan.steps && m.plan.steps.length)

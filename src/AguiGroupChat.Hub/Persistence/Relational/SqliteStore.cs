@@ -42,6 +42,7 @@ public sealed class SqliteStore : RelationalStore
         EnsureColumn("agui_messages", "reasoning", "ALTER TABLE agui_messages ADD COLUMN reasoning TEXT");
         EnsureColumn("agui_messages", "agent_chain", "ALTER TABLE agui_messages ADD COLUMN agent_chain TEXT");
         EnsureColumn("agui_messages", "plan_json", "ALTER TABLE agui_messages ADD COLUMN plan_json TEXT");
+        EnsureColumn("agui_messages", "usage_json", "ALTER TABLE agui_messages ADD COLUMN usage_json TEXT");
     }
 
     /// <summary>是否内存库（:memory: 或 file: URI 的 mode=memory），内存库无持久化文件，不适用 WAL 等文件级参数。</summary>
@@ -142,6 +143,7 @@ public sealed class SqliteStore : RelationalStore
             reasoning TEXT,
             agent_chain TEXT,
             plan_json TEXT,
+            usage_json TEXT,
             timestamp INTEGER NOT NULL,
             recalled INTEGER NOT NULL DEFAULT 0
         );

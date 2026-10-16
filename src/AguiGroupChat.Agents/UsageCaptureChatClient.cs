@@ -74,6 +74,8 @@ internal sealed class UsageCaptureChatClient : IChatClient
 
     private void Record(long input, long output, long reasoning)
     {
+        // 先累加到「本次回答」用量（即使未装配用量服务也要计入消息展示）
+        UsageAccumulator.Ambient.Value?.Add(input, output, reasoning);
         if (_usage.Value is not { } usage) return;
         var ctx = AgentGateway.AmbientContext.Value;
         if (ctx is null) return; // 非网关驱动（如技能子代理经网关间接驱动仍带上下文）

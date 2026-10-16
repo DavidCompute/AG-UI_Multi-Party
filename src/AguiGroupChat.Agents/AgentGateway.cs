@@ -649,6 +649,11 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var prevChain = SkillChainBuilder.Ambient.Value;
         SkillChainBuilder.Ambient.Value = new SkillChainBuilder();
         SkillChainBuilder.Ambient.Value.EnsureRoot(context.AgentId, def.Nickname ?? context.AgentId);
+        // 本次回答用量累加：最外层运行才回档到消息（嵌套沿用同一实例 → 总量含子调用）
+        var prevUsage = UsageAccumulator.Ambient.Value;
+        var ownUsage = prevUsage is null;
+        var usageAcc = prevUsage ?? new UsageAccumulator();
+        UsageAccumulator.Ambient.Value = usageAcc;
         // 工具返回收集：技能产物（produce_file 标记）以工具真实返回为准，
         // 不依赖模型在正文里原样复述 JSON（模型常改写成人话而丢掉标记）。
         var prevToolResults = ToolResultCollector.Ambient.Value;
@@ -898,6 +903,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
 
             var attached = await AttachPublishedProductsAsync(context.GroupId, messageId, accumulated, runCt);
             await AttachAgentChainAsync(context, messageId, runCt);
+            if (ownUsage) await AttachUsageAsync(context, messageId, usageAcc, runCt);
             // 空正文兜底：模型这一轮既没给正文、也没产出文件时，不要留一条**完全空白**的消息
             // （前端就是一只空气泡，用户不知道发生了什么）。与指派/提升、计划两条路径同一口径。
             if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
@@ -930,6 +936,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             if (acquired) sessionLock.Release(); // 未获得锁时不 Release（避免 SemaphoreFullException）
             _activeRuns.TryRemove(runId, out _); // 运行结束 / 取消：注销停止能力
             SkillChainBuilder.Ambient.Value = prevChain; // 清理链构造器（恢复外层）
+            UsageAccumulator.Ambient.Value = prevUsage;  // 恢复外层用量累加器
             ToolResultCollector.Ambient.Value = prevToolResults; // 恢复外层工具返回收集器
             await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
             {
@@ -3980,6 +3987,33 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         return added;
     }
 
+
+    /// <summary>把本次回答运行的 token 用量（含子代理）回档到消息，供前端展示「本次用量 / 成本」。
+    /// 未捕获到用量帧时静默跳过，不阻断主流程。</summary>
+    private async Task AttachUsageAsync(AgentInvocationContext context, string messageId, UsageAccumulator acc, CancellationToken ct)
+    {
+        try
+        {
+            if (acc.IsEmpty) return;
+            var pricing = _options.Pricing;
+            var cost = pricing.EstimateCost(acc.InputTokens, acc.OutputTokens, acc.ReasoningTokens);
+            var currency = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency;
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                inputTokens = acc.InputTokens,
+                outputTokens = acc.OutputTokens,
+                reasoningTokens = acc.ReasoningTokens,
+                cost = pricing.Configured ? (decimal?)Math.Round(cost, 6) : null,
+                currency = pricing.Configured ? currency : null,
+            });
+            await _hub.Value.AttachUsageAsync(context.GroupId, messageId, payload, ct);
+            _logger.LogDebug("本次用量回档：消息 {MessageId}（in {In} / out {Out} / reason {Reason}）", messageId, acc.InputTokens, acc.OutputTokens, acc.ReasoningTokens);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "本次用量回档失败（不影响主流程）：消息 {MessageId}", messageId);
+        }
+    }
 
     /// <summary>技能调用链可视化：运行结束时把 <see cref="SkillChainBuilder.Ambient"/> 中的多跳技能树
     /// 写入当前消息（JSON），供前端渲染链路。无技能调用（null）静默跳过，不阻断主流程。</summary>

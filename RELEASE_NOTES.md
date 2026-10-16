@@ -1,3 +1,35 @@
+# AG-UI 群聊桌面版 1.0.253 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.253 Release Notes (current Windows desktop release)
+
+**版本说明**：**每条回答带「本次用量」**——数字员工回复的「执行过程」里新增一行 `💰 本次用量 输入/输出/思考 token · 成本`，按本次运行（含子代理）汇总，随消息落库、刷新后仍在。
+**Version note**: **Every reply now carries its own usage** — the digital employee's "Execution process" gains a `💰 Usage for this reply` row (input/output/reasoning tokens · cost), totalled over the run (including sub-agents), persisted with the message so it survives a refresh.
+
+## 变更
+# Changes
+
+中文：
+- **采集**：新增 `UsageAccumulator`（AsyncLocal）——模型调用处 `UsageCaptureChatClient.Record` 在落统计库的同时累加到「本次回答」；网关 `InvokeCoreAsync` **最外层运行创建、嵌套（子代理 / 交付兜底）沿用同一实例**，故总量含全部子调用；结束 / finally 正确恢复外层。
+- **回档**：运行结束（与技能链同道）调 `AttachUsageAsync` → `GroupHub.AttachUsageAsync` → 消息 `usage_json`（`{inputTokens,outputTokens,reasoningTokens,cost,currency}`；成本按 `Agents:Pricing` 估算，未配单价则 cost/currency 为 null；全零不写）。
+- **存储**：`GroupMessage.UsageJson` 随 `plan_json` 同款落库——SQLite / MySQL `EnsureColumn` + Postgres `ADD COLUMN IF NOT EXISTS` 老库自动补列（**无需迁移**），Relational / Postgres 读改写、Redis（整对象 JSON）与内存快照（`PersistedMessage`）同步。
+- **前端**：`msgDom()` 的「执行过程」内新增 `.usage-card`（在调用链之后）——`💰 本次用量 输入 N · 输出 N · 思考 N · 成本 X`；`usageJson` 由快照与 `TEXT_MESSAGE_END` 两路解析（`parseUsageJson`），全零 / 缺失 / 非法不渲染。
+English:
+- **Capture**: a new `UsageAccumulator` (AsyncLocal) — `UsageCaptureChatClient.Record` accumulates into "this reply" while also writing the usage store; `AgentGateway.InvokeCoreAsync` **creates it for the outermost run and nested runs (sub-agents / delivery fallback) reuse the same instance**, so the total includes every sub-call; the outer value is restored at the end / in `finally`.
+- **Archive**: at the end of the run (same path as the skill chain) `AttachUsageAsync` → `GroupHub.AttachUsageAsync` → the message's `usage_json` (`{inputTokens,outputTokens,reasoningTokens,cost,currency}`; cost is estimated from `Agents:Pricing`, with cost/currency null when no pricing is configured; all-zero is not written).
+- **Storage**: `GroupMessage.UsageJson` is persisted like `plan_json` — SQLite / MySQL `EnsureColumn` plus Postgres `ADD COLUMN IF NOT EXISTS` auto-add the column on old databases (**no migration**), with Relational / Postgres read-write-update, Redis (whole-object JSON) and the in-memory snapshot (`PersistedMessage`) all in sync.
+- **Front end**: `msgDom()`'s "Execution process" gains a `.usage-card` (after the call chain) — `💰 Usage for this reply in N · out N · reasoning N · cost X`; `usageJson` is parsed from both the snapshot and `TEXT_MESSAGE_END` (`parseUsageJson`), and all-zero / missing / invalid renders nothing.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.10.1（过程体新增「本次用量行」）。
+English: `docs/user-guide.md` / `en.md` §2.10.1 (the process body gains the "usage row").
+
+## 测试
+# Tests
+
+中文：新增 `UsageAccumulatorTests`（累加 + 非正数忽略 + AsyncLocal 默认空 / 可恢复）。相关/邻近用例合跑 **40/40**。`node --check`、i18n 审计 **zh=en=1898，missing 0**、`check-i18n-keys`（875 处引用）、`check-orphan-keys`（919 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后）：`parseUsageJson`（正/空/零/坏 JSON）与 `renderUsageCard` 输出正确；直接调用 `msgDom()` 渲一条带 usage 的探针消息 → `.usage-card` **存在且在 `.process` 内**，文案「💰 本次用量 输入 1,234 · 输出 567 · 思考 89 · 成本 $0.0125」；无 usage / 零 usage 均不渲染；**无页面报错**。数据库侧：Postgres `agui_messages` 已自动出现 `usage_json` 列。
+English: adds `UsageAccumulatorTests` (accumulation + non-positive ignored + AsyncLocal null by default / restorable). Related and neighbouring tests run **40/40**. `node --check`, the i18n audit **zh=en=1898, missing 0**, `check-i18n-keys` (875 references), `check-orphan-keys` (919 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web): `parseUsageJson` (valid / empty / zero / bad JSON) and `renderUsageCard` output are correct; calling `msgDom()` directly on a probe message with usage → the `.usage-card` **exists and sits inside `.process`**, reading "💰 Usage for this reply in 1,234 · out 567 · reasoning 89 · cost $0.0125"; no usage / zero usage render nothing; **no page errors**. Database side: Postgres `agui_messages` now has the `usage_json` column automatically.
+
 # AG-UI 群聊桌面版 1.0.252 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.252 Release Notes (current Windows desktop release)
 

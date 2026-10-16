@@ -1142,6 +1142,7 @@ public sealed class GroupHub : IDisposable
                 Reasoning = m.Reasoning,
                 AgentChain = m.AgentChain,
                 PlanJson = m.PlanJson,
+                UsageJson = m.UsageJson,
                 Timestamp = m.Timestamp,
             })
             .ToList();
@@ -1567,6 +1568,25 @@ public sealed class GroupHub : IDisposable
         await Task.CompletedTask;
     }
 
+    /// <summary>为流式中的智能体消息附加本次回答的模型用量（JSON：<c>{ inputTokens, outputTokens, reasoningTokens, cost, currency }</c>），
+    /// 于运行结束时写库一次，供前端展示「本次用量 / 成本」。与正文通道共用锁。</summary>
+    public async Task AttachUsageAsync(string groupId, string messageId, string usageJson, CancellationToken ct = default)
+    {
+        if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
+            throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在或未开启流式灌入");
+        lock (_pendingLock)
+        {
+            if (_agentStreams.TryGetValue(messageId, out var live) && live.GroupId == groupId)
+                _agentStreams[messageId] = live with { LastActivityMs = NowMs };
+            var msg = _store.GetMessage(groupId, messageId)
+                ?? throw new AguiProtocolException(ErrorCodes.GroupMessageNotFound, "消息不存在");
+            msg.UsageJson = usageJson;
+            _store.UpdateMessage(msg);
+        }
+        _changes?.Notify();
+        await Task.CompletedTask;
+    }
+
     /// <summary>刷新流式消息的“最近活跃”时间（心跳）。未命中（流已结束 / 不存在）时静默忽略：这是心跳，不是状态变更。
     ///
     /// <para>
@@ -1811,6 +1831,7 @@ public sealed class GroupHub : IDisposable
             Reasoning = msg?.Reasoning, // 思考内容完整快照（供前端回放）
             AgentChain = msg?.AgentChain, // 技能调用链（链路可视化）
             PlanJson = msg?.PlanJson, // 任务计划（刷新后回显）
+            UsageJson = msg?.UsageJson, // 本次用量（刷新后回显）
             Timestamp = NowMs,
         }, state.Recipients, ct);
     }

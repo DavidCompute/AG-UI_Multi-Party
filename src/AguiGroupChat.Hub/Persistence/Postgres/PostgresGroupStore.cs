@@ -574,13 +574,14 @@ public sealed class PostgresGroupStore : IGroupStore
     {
         using var conn = _pg.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain, plan_json = @planJson WHERE group_id = @gid AND message_id = @mid";
+        cmd.CommandText = "UPDATE agui_messages SET topic_id = @topic, content = @content, attachments = @attachments, reasoning = @reasoning, agent_chain = @agentChain, plan_json = @planJson, usage_json = @usageJson WHERE group_id = @gid AND message_id = @mid";
         cmd.Parameters.AddWithValue("topic", message.TopicId);
         cmd.Parameters.AddWithValue("content", message.Content);
         cmd.Parameters.AddWithValue("attachments", Json(message.Attachments));
         cmd.Parameters.AddWithValue("reasoning", (object?)message.Reasoning ?? DBNull.Value);
         cmd.Parameters.AddWithValue("agentChain", (object?)message.AgentChain ?? DBNull.Value);
         cmd.Parameters.AddWithValue("planJson", (object?)message.PlanJson ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("usageJson", (object?)message.UsageJson ?? DBNull.Value);
         cmd.Parameters.AddWithValue("gid", message.GroupId);
         cmd.Parameters.AddWithValue("mid", message.MessageId);
         cmd.ExecuteNonQuery();

@@ -63,6 +63,10 @@ public sealed record GroupMessage
     /// 随消息落库，刷新 / 重开后历史消息仍可回显计划卡；可空 = 无计划。</summary>
     public string? PlanJson { get; set; }
 
+    /// <summary>本次回答的模型用量（JSON：<c>{ inputTokens, outputTokens, reasoningTokens, cost, currency }</c>）；
+    /// 由网关在运行结束时回档（含子代理调用），供前端展示「本次用量 / 成本」；可空 = 未捕获到用量。</summary>
+    public string? UsageJson { get; set; }
+
     /// <summary>发送时间戳（毫秒级）。</summary>
     public required long Timestamp { get; init; }
 
