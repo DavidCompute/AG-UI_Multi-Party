@@ -2674,7 +2674,9 @@ flowchart TD
     C -- 否 --> Z[不写入记忆]
     C -- 是 --> D[IMessageMemory.Remember 入有界队列 256]
     D --> E[SanitizeForMemory 剥离注入段落 + MaxWriteChars 截断]
-    E --> F[embedding 向量化]
+    E --> E2{入库文本命中去重缓存?}
+    E2 -- 是 --> G
+    E2 -- 否 --> F[embedding 向量化]
     F --> G[(向量存储 pgvector / sqlite-vec)]
     A -. 触发时 .-> H[MemoryContextProvider.ProvideAIContextAsync]
     H --> I[MemoryProfileTuning.Resolve 按类型算覆盖]
@@ -2705,6 +2707,23 @@ flowchart TD
 - 记忆相关使用点：`BuildMemorySection`（群记忆）、`BuildPersonSection`（个人记忆）、`BuildKbSection`（知识库）、`BuildGraphSection` / `BuildKbGraphSection`（图谱）均返回 `UntrustedBoundary.Wrap(...)`。
 - 写入侧 `SanitizeForMemory`（`AgentMessageMemory.cs`）会剥离消息里回显的注入段落（`以下是相关历史记忆` … `以下是群最近对话`），避免「记忆嵌套污染」。
 
+#### 6.1.3 写入侧「重复编码」去重（`WriteEmbeddingCacheSize`）
+
+写入向量化**之前**，先用**实际入库文本**（即 `SanitizeForMemory` 净化 + `MaxWriteChars` 截断后的那一份，与最终入库、送向量的文本完全一致）查一个进程内 **LRU 缓存**（`MemoryEmbeddingCache`）：
+
+- **命中**：直接复用已算出的向量，**跳过 embedding 调用**（也省掉一次后台池槽位占用）；
+- **未命中**：照常向量化，并把结果写入缓存。
+
+**为何是“语义等价的省钱优化”**：向量只由「文本 + 模型」决定——**相同文本在同一模型下向量恒等**，所以复用结果与重新计算**逐位相同**；而且**每条消息仍各自落库、按自己的 messageId 可被检索**（去重只发生在“要不要再算一次向量”，不是“要不要存这条记忆”），召回集合与排序一字不差。
+
+代价与边界：
+
+- 每条约占「维度 × 4 字节」（bge-m3 1024 维 ≈ 4KB），默认 512 条约 2MB；LRU 淘汰最久未使用者 → 内存有界；无 TTL（同进程内模型不变，向量不会失效）。
+- 容量 `0` = **关闭**，行为与旧版完全一致。
+- **只作用于写入 / 导入路径**；检索 query 通常唯一、命中率低，不缓存。
+
+可观测：新增计数器 `knowgath_memory_embedding_cache_hits_total` / `knowgath_memory_embedding_cache_misses_total`（`/ag-ui/metrics`），并在控制台「运行指标」页显示**「记忆去重命中 / 写入编码」命中占比**卡片（无写入时不显示）。
+
 ---
 
 ### 6.2 全局配置 `Agents:Memory`（`MemoryOptions`）
@@ -2733,6 +2752,7 @@ flowchart TD
 | `MaxQueryChars` | `500` | 未设 | `500` | 检索 query（触发消息）截断长度 |
 | `MaxWriteChars` | `800` | 未设 | `800` | 写入侧 embedding 输入上限（同时作用于入库文本与向量） |
 | `SlowEmbeddingWarnSeconds` | `10` | 未设 | `10` | 单次 embedding 超过此秒数记 WARN |
+| `WriteEmbeddingCacheSize` | `512` | 未设 | `512` | 写入侧「重复编码」去重缓存条目数（**0 = 关闭**）：命中即复用向量、跳过 embedding（语义等价，见 6.1.3） |
 | `InteractiveEmbeddingConcurrency` | `3` | 未设 | `3` | 交互路径 embedding 并发上限 |
 | `BackgroundEmbeddingConcurrency` | `1` | 未设 | `1` | 后台路径 embedding 并发上限（两者之和 = 总并发 4） |
 | `InteractiveEmbeddingWaitSeconds` | `12` | 未设 | 未设 | 交互等槽位上限；等不到本次不注入 |
@@ -3054,8 +3074,9 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 - 检索日志（`AgentMessageMemory`）：`LogDebug` 带 `topK / minScore / scope` 与命中片段，可确认类型覆盖是否真传到 store。
 - 写入日志：`LogDebug("语义记忆已写入：{MessageId}（group=…，importance=…，expiresAt=…）")`；队列满（256）丢弃时 `LogDebug`。
 - 维护日志：`MemoryMaintenanceService` 清理过期时 `LogInformation("自动遗忘：已清理 {Count} 条过期记忆")`；`MemoryAutoConsolidationService` 每轮 `LogInformation("重要结论自动周期沉淀完成：{Count} 个知聚写入新文档")`。
-- 启动日志：`AgentMessageMemory` 构造时 `LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）")`。
+- 启动日志：`AgentMessageMemory` 构造时 `LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）")`；启用去重缓存时另有 `LogInformation("记忆写入去重缓存已启用：容量 {Capacity} 条…")`。
 - 若怀疑「慢 / 超时」：核对 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` 与 `SlowEmbeddingWarnSeconds`（单次 embedding 超阈值记 WARN）。
+- 若怀疑「写入侧重复向量化」：核对 `WriteEmbeddingCacheSize`（**0 = 关闭**），并在控制台「运行指标」页看「记忆去重命中 / 写入编码」卡片（占比越高，省下的 embedding 越多）。
 
 ---
 
@@ -4875,6 +4896,7 @@ service:
 | `MaxQueryChars` | 500 | 检索 query 截断长度 |
 | `MaxWriteChars` | 800 | 写入侧 embedding 输入上限 |
 | `SlowEmbeddingWarnSeconds` | 10 | 慢 embedding 告警阈值（秒） |
+| `WriteEmbeddingCacheSize` | 512 | 写入侧「重复编码」去重缓存条目数（0 = 关闭） |
 | `InteractiveEmbeddingConcurrency` | 3 | 交互路径 embedding 并发 |
 | `BackgroundEmbeddingConcurrency` | 1 | 后台路径 embedding 并发 |
 | `InteractiveEmbeddingWaitSeconds` | 12 | 交互检索等待槽位上限（秒） |

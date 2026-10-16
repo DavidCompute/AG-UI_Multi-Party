@@ -8711,6 +8711,8 @@ async function loadAdminMetrics() {
     }
     const bridgeCalls = Number(d.bridgeCalls) || 0;
     const memSearches = (Number(d.memoryHitCount) || 0) + (Number(d.memoryEmptySearch) || 0);
+    const dedupHits = Number(d.embeddingCacheHits) || 0;
+    const dedupTotal = dedupHits + (Number(d.embeddingCacheMisses) || 0);
     const pct = (n, den) => den > 0 ? Math.round((n / den) * 1000) / 10 : 0;
     const items = [
       { label: t("admin.metricInvocations"), value: Number(d.invocations || 0).toLocaleString(), sub: "" },
@@ -8719,6 +8721,8 @@ async function loadAdminMetrics() {
       { label: t("admin.metricOutputChars"), value: Number(d.outputChars || 0).toLocaleString(), sub: "" },
       { label: t("admin.metricBridgeFailures"), value: `${Number(d.bridgeFailures || 0).toLocaleString()} / ${bridgeCalls.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(Number(d.bridgeFailures || 0), bridgeCalls) }), bad: Number(d.bridgeFailures || 0) > 0 },
       { label: t("admin.metricMemoryHits"), value: `${Number(d.memoryHitCount || 0).toLocaleString()} / ${memSearches.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(Number(d.memoryHitCount || 0), memSearches) }) },
+      // 记忆写入去重（仅当有过写入编码时才显示，避免空卡片）
+      ...(dedupTotal > 0 ? [{ label: t("admin.metricDedup"), value: `${dedupHits.toLocaleString()} / ${dedupTotal.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(dedupHits, dedupTotal) }), good: true }] : []),
     ];
     cards.innerHTML = items.map((it) => `<div class="admin-metric-card ${it.bad ? "bad" : it.good ? "good" : ""}">`
       + `<div class="am-label">${escapeHtml(it.label)}</div>`

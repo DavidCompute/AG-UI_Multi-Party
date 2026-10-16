@@ -228,6 +228,8 @@ services:
       # embedding 建连超时（把“连不上”与“排队中”拆开）与单次慢调用告警阈值
       Agents__Memory__EmbeddingConnectTimeoutSeconds: ${MEMORY_EMBEDDING_CONNECT_TIMEOUT:-5}
       Agents__Memory__SlowEmbeddingWarnSeconds: ${MEMORY_SLOW_EMBEDDING_WARN:-10}
+      # 写入侧“重复编码”去重缓存（条目数，默认 512；0 = 关闭）：同文本复用向量、跳过 embedding（语义等价，只省重复推理）
+      Agents__Memory__WriteEmbeddingCacheSize: ${MEMORY_WRITE_EMBEDDING_CACHE_SIZE:-512}
       # 向量化并发闸门：交互（回复前检索）/ 后台（写入·导入·知识库入库）拆池；容量之和 = 总并发（默认 4），
       # 不增加对 embedding 服务的压力，只是不让后台批量任务把交互检索挤到超时。
       Agents__Memory__InteractiveEmbeddingConcurrency: ${MEMORY_INTERACTIVE_EMBED_CONCURRENCY:-3}

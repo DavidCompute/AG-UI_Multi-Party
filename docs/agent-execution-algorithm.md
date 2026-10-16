@@ -197,6 +197,7 @@ flowchart TB
 | `Agents:Memory:MaxWriteChars` | **800**（新增） | 写入侧 embedding 输入上限。**同时作用于入库文本与向量**，两者必须一致，否则“检索命中却内容对不上” |
 | `Agents:Memory:EmbeddingConnectTimeoutSeconds` | **5**（新增） | 把「连不上」与「排队中」分开：建连超时只管连接，总预算（`EmbeddingTimeoutSeconds`）只管排队 + 推理——服务不可用时秒级判死，不再白等满 60 秒 |
 | `Agents:Memory:SlowEmbeddingWarnSeconds` | **10**（新增） | 单次 embedding 超过该秒数记 WARN（带输入字符数）。阈值取 10 而非更小：写入侧 800 字本身约 6.8 秒属正常，只有明显越过（输入未截断 / 服务在排队）才告警 |
+| `Agents:Memory:WriteEmbeddingCacheSize` | **512**（新增，0 = 关闭） | 写入侧「重复编码」去重缓存容量（条目数）。向量化前先用**实际入库文本**（上两行的净化 + 截断结果）查进程内 LRU，命中即**复用向量、跳过 embedding** |
 
 **为什么不靠并发 / 并行**（实测对照，8 条同样文本）：
 
@@ -212,6 +213,20 @@ flowchart TB
 - 所以这是“算术量”问题，不是“并发度”问题：**降低每次要算的字符数**才是杠杆。
 
 > 仍未处理：知识库切片（`Memory:KnowledgeChunkSize=4096`，≈35 s/片）属于后台导入 / 周期沉淀。总量不变，已用 **两池隔离**（见下）避免它把交互检索挤到超时。
+
+#### 写入侧「重复编码」去重（dedup cache）
+
+**为什么**：同一条文本（组织编排 / 定时汇报里反复出现的“收到，我来处理”类短句、模板文案；导入包里的重复内容）此前每次写入都要重新向量化一遍——CPU 上单条可达数秒，还占着后台池那唯一的槽位。
+
+**怎么做**：写入向量化**之前**，先用**实际入库文本**（`SanitizeForMemory` 剥离注入段落 + 按 `MaxWriteChars` 截断后的那一份，即最终既入库、又送向量的文本）查一个进程内 **LRU 缓存**（`MemoryEmbeddingCache`，容量 `WriteEmbeddingCacheSize`，默认 512 条；0 = 关闭）；命中则直接复用已算出的向量，**跳过 embedding 调用**。未命中才真去算，并把结果写进缓存。
+
+**为什么语义等价（不改召回）**：向量只由「文本 + 模型」决定——**相同文本在同一模型下向量恒等**，所以复用命中与重新计算的结果**逐位相同**。而且**每条消息仍各自落库、按自己的 messageId 可被检索**（去重只发生在“要不要再算一次向量”，不是“要不要存这条记忆”）。这是纯粹的推理去重，不是记忆去重。
+
+**代价与边界**：每条约占「维度 × 4 字节」（bge-m3 1024 维 ≈ 4KB），512 条约 2MB，LRU 淘汰最久未使用者 → 内存有界；无 TTL（同进程内模型不变，向量不会失效）。**只作用于写入 / 导入路径**，检索 query 通常唯一、命中率低，不缓存。
+
+**可观测**：新增计数器 `knowgath_memory_embedding_cache_hits_total` / `knowgath_memory_embedding_cache_misses_total`（分别见 `/ag-ui/metrics` 与控制台「运行指标」的**命中占比**卡片）。
+
+> 为何不把“同文本只存一条记忆”也做了：那会改变召回集合（少掉若干条目）、并使“引用来源”指向更早的那条消息——属语义变更，与“零行为变化的省钱优化”不同，若要做需单独评估。
 
 ### 交互 / 后台两池隔离（EmbeddingGates）
 
@@ -362,3 +377,4 @@ In one sentence: once a message touches a digital employee, the runtime picks a 
 - 复杂度自适应超时（§2.2）：`RunComplexityEstimator` / `RunTimeoutPolicy` / `RunTimeoutBudget`（`src/AguiGroupChat.Agents/RunTimeoutPolicy.cs`）、`AgentGateway.InstallRunBudget` / `ClientSkillTimeout`、`SkillRunner.RunDotnetSkill`、`AgentCatalog.BuildOpenAIChatClient`（网络兜底）。
 - 提示词装配预算（§2.3）：`PromptBudgetOptions`（`src/AguiGroupChat.Hub/Options/PromptBudgetOptions.cs`）、`AgentGateway.BuildUserMessageAsync` / `BuildHistorySection` / `BuildHistoryAttachmentsSectionAsync` / `BuildAttachmentsSectionAsync` / `TrimSectionsToBudget` / `ReportPromptAssembly`、`AttachmentStore.TextCharsPerFile/Total`、`AgentCatalog.BuildReasoningOptions`。
 - 记忆向量化输入预算（§2.4）：`MemoryOptions.MaxQueryChars/MaxWriteChars/SlowEmbeddingWarnSeconds/EmbeddingConnectTimeoutSeconds`、`AgentMessageMemory.ProcessWriteQueueAsync` / `ImportMemoriesAsync`、`HttpEmbeddingProvider`。
+- 写入侧重复编码去重（§2.4）：`MemoryOptions.WriteEmbeddingCacheSize`、`MemoryEmbeddingCache`、`AgentMessageMemory.ProcessWriteQueueAsync` / `ImportMemoriesAsync`、`MetricsService.RecordEmbeddingCache`。

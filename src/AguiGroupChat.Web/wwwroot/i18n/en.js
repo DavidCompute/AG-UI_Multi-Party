@@ -1629,6 +1629,7 @@ window.I18N_DICTS.en = {
   "admin.metricOutputChars": "Output chars",
   "admin.metricBridgeFailures": "Bridge failures / calls",
   "admin.metricMemoryHits": "Memory hits / searches",
+  "admin.metricDedup": "Memory dedup hits / writes",
   "admin.metricRate": "{pct}%",
   "admin.metricByAgent": "Invocations by agent",
   "admin.metricBridgeHealth": "Bridge endpoint health",

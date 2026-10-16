@@ -2679,7 +2679,9 @@ flowchart TD
     C -- 否 --> Z[不写入记忆]
     C -- 是 --> D[IMessageMemory.Remember 入有界队列 256]
     D --> E[SanitizeForMemory 剥离注入段落 + MaxWriteChars 截断]
-    E --> F[embedding 向量化]
+    E --> E2{入库文本命中去重缓存?}
+    E2 -- 是 --> G
+    E2 -- 否 --> F[embedding 向量化]
     F --> G[(向量存储 pgvector / sqlite-vec)]
     A -. 触发时 .-> H[MemoryContextProvider.ProvideAIContextAsync]
     H --> I[MemoryProfileTuning.Resolve 按类型算覆盖]
@@ -2710,6 +2712,23 @@ Key implementation (guarding against prompt-injection amplification):
 - Memory-related usage points: `BuildMemorySection` (group memory), `BuildPersonSection` (personal memory), `BuildKbSection` (knowledge base), `BuildGraphSection` / `BuildKbGraphSection` (graph) all return `UntrustedBoundary.Wrap(...)`.
 - On the write side, `SanitizeForMemory` (`AgentMessageMemory.cs`) strips injection sections echoed in the message (`以下是相关历史记忆` … `以下是群最近对话`), avoiding "memory nesting pollution".
 
+#### 6.1.3 Write-side "repeated encoding" dedup (`WriteEmbeddingCacheSize`)
+
+**Before** embedding, the **actual stored text** (the exact output of `SanitizeForMemory` + `MaxWriteChars` truncation — the same text that is stored and sent to embedding) is looked up in an in-process **LRU cache** (`MemoryEmbeddingCache`):
+
+- **Hit**: the already-computed vector is reused and the **embedding call is skipped** (also freeing a background-pool slot for this write);
+- **Miss**: embed as usual, then store the result in the cache.
+
+**Why this is a semantics-preserving cost optimization**: a vector is determined only by “text + model” — **identical text yields an identical vector on the same model**, so a reused result is **bit-for-bit the same** as recomputing; and **every message is still stored under its own `messageId` and remains retrievable** (dedup decides whether to *recompute a vector*, not whether to *keep a memory*), so the recalled set and ordering are unchanged.
+
+Cost and boundaries:
+
+- Each entry is about “dimensions × 4 bytes” (bge-m3 1024-dim ≈ 4 KB), so the default 512 entries ≈ 2 MB; LRU evicts the least-recently-used entry, keeping memory bounded; no TTL (the model does not change within a process, so vectors never go stale).
+- A capacity of `0` means **off**, matching the old behaviour exactly.
+- It applies **only to the write / import paths**; retrieval queries are usually unique and would rarely hit, so they are not cached.
+
+Observability: new counters `knowgath_memory_embedding_cache_hits_total` / `knowgath_memory_embedding_cache_misses_total` (`/ag-ui/metrics`), plus a **"Memory dedup hits / writes" hit-share card** on the console "Runtime Metrics" page (hidden when there have been no writes).
+
 ---
 
 ### 6.2 Global configuration `Agents:Memory` (`MemoryOptions`)
@@ -2738,6 +2757,7 @@ Key implementation (guarding against prompt-injection amplification):
 | `MaxQueryChars` | `500` | not set | `500` | truncation length of the retrieval query (triggering message) |
 | `MaxWriteChars` | `800` | not set | `800` | upper limit of the write-side embedding input (applies to both the stored text and the vector) |
 | `SlowEmbeddingWarnSeconds` | `10` | not set | `10` | a WARN is logged when a single embedding exceeds this many seconds |
+| `WriteEmbeddingCacheSize` | `512` | not set | `512` | Write-side "repeated encoding" dedup cache entries (**0 = off**): a hit reuses the vector and skips embedding (semantics-preserving, see 6.1.3) |
 | `InteractiveEmbeddingConcurrency` | `3` | not set | `3` | upper limit of embedding concurrency on the interactive path |
 | `BackgroundEmbeddingConcurrency` | `1` | not set | `1` | upper limit of embedding concurrency on the background path (the sum of the two = total concurrency 4) |
 | `InteractiveEmbeddingWaitSeconds` | `12` | not set | not set | upper limit for the interactive path to wait for a slot; if it cannot get one, nothing is injected this time |
@@ -3059,8 +3079,9 @@ AND (m.group_id = @gid OR COALESCE(g.is_private, 0) = 0)
 - Retrieval log (`AgentMessageMemory`): `LogDebug` with `topK / minScore / scope` and the hit snippets, which lets you confirm whether the type override is truly passed to the store.
 - Write log: `LogDebug("语义记忆已写入：{MessageId}（group=…，importance=…，expiresAt=…）")`; when the queue is full (256) and items are dropped, `LogDebug`.
 - Maintenance log: `MemoryMaintenanceService` logs `LogInformation("自动遗忘：已清理 {Count} 条过期记忆")` when cleaning up expired entries; `MemoryAutoConsolidationService` logs `LogInformation("重要结论自动周期沉淀完成：{Count} 个知聚写入新文档")` each round.
-- Startup log: `AgentMessageMemory` logs `LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）")` on construction.
+- Startup log: `AgentMessageMemory` logs `LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）")` on construction; when the dedup cache is enabled it also logs `LogInformation("记忆写入去重缓存已启用：容量 {Capacity} 条…")`.
 - If you suspect "slow / timeout": check `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` and `SlowEmbeddingWarnSeconds` (a single embedding exceeding the threshold is logged as WARN).
+- If you suspect "repeated vectorization on the write side": check `WriteEmbeddingCacheSize` (**0 = off**) and look at the "Memory dedup hits / writes" card on the console "Runtime Metrics" page (a higher share means more embedding calls saved).
 
 ---
 
@@ -4881,6 +4902,7 @@ service:
 | `MaxQueryChars` | 500 | Retrieval query truncation length |
 | `MaxWriteChars` | 800 | Upper limit of embedding input on the write side |
 | `SlowEmbeddingWarnSeconds` | 10 | Slow embedding warning threshold (seconds) |
+| `WriteEmbeddingCacheSize` | 512 | Write-side "repeated encoding" dedup cache entries (0 = off) |
 | `InteractiveEmbeddingConcurrency` | 3 | embedding concurrency on the interactive path |
 | `BackgroundEmbeddingConcurrency` | 1 | embedding concurrency on the background path |
 | `InteractiveEmbeddingWaitSeconds` | 12 | Upper limit of waiting for a slot in interactive retrieval (seconds) |

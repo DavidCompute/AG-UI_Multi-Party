@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.262 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.262 Release Notes (current Windows desktop release)
+
+**版本说明**：**记忆写入「重复编码」去重**——写入向量化前先用**实际入库文本**查一个进程内 LRU 缓存，命中即复用向量、跳过 embedding（相同文本向量恒等 → **语义等价**，召回结果不变，只省重复推理）；新增可观测指标与控制台命中占比卡片。
+**Version note**: **Write-side "repeated encoding" dedup** — before embedding, the **actual stored text** is looked up in an in-process LRU cache; a hit reuses the vector and skips embedding (identical text yields an identical vector, so it is **semantics-preserving** — recall is unchanged and only the repeated inference is saved); with new metrics and a hit-share card on the admin console.
+
+## 变更
+# Changes
+
+中文：
+- **写入去重（新）**：新增 `MemoryEmbeddingCache`（进程内 LRU，容量 `Agents:Memory:WriteEmbeddingCacheSize`，默认 **512**、**0 = 关闭**）。`AgentMessageMemory` 在原「净化 + 截断」之后、embedding 之前先查缓存：命中则复用向量、**跳过 embedding 调用**（也省掉一次后台池槽位占用）；未命中才向量化并写回缓存。
+- **为什么语义等价**：向量只由「文本 + 模型」决定——相同文本在同一模型下向量恒等，复用结果与重算**逐位相同**；且**每条消息仍各自落库、按自己的 messageId 可被检索**（去重的是“要不要再算向量”，不是“要不要存记忆”），所以召回集合与排序一字不差。
+- **范围**：只作用于**写入 / 导入**路径（`ProcessWriteQueueAsync` / `ImportMemoriesAsync`）；检索 query 通常唯一、命中率低，不缓存。有界 LRU（512 条约 2MB），无 TTL。
+- **可观测**：`MetricsService.RecordEmbeddingCache` + 计数器 `knowgath_memory_embedding_cache_hits_total` / `knowgath_memory_embedding_cache_misses_total`（`/ag-ui/metrics` 与 `Snapshot`）；控制台「运行指标」新增**「记忆去重命中 / 写入编码」**卡片（无写入时不显示），i18n `admin.metricDedup`。
+- **Docker**：`docker-compose.yml` 新增 `Agents__Memory__WriteEmbeddingCacheSize`（`MEMORY_WRITE_EMBEDDING_CACHE_SIZE`，默认 512）。
+
+English:
+- **Write dedup (new)**: added `MemoryEmbeddingCache` (in-process LRU, capacity `Agents:Memory:WriteEmbeddingCacheSize`, default **512**, **0 = off**). After the existing sanitize + truncate step and before embedding, `AgentMessageMemory` looks up the cache: a hit reuses the vector and skips the embedding call (also freeing a background-pool slot); a miss embeds as usual and writes the result back.
+- **Why it is semantics-preserving**: a vector is determined only by "text + model" — identical text yields an identical vector on the same model, so a reused result is bit-for-bit the same as recomputing; and **every message is still stored under its own `messageId` and remains retrievable** (dedup decides whether to recompute a vector, not whether to keep a memory), so the recalled set and ordering are unchanged.
+- **Scope**: only the **write / import** paths (`ProcessWriteQueueAsync` / `ImportMemoriesAsync`); retrieval queries are usually unique and rarely hit, so they are not cached. Bounded LRU (512 entries ≈ 2 MB), no TTL.
+- **Observability**: `MetricsService.RecordEmbeddingCache` plus counters `knowgath_memory_embedding_cache_hits_total` / `knowgath_memory_embedding_cache_misses_total` (`/ag-ui/metrics` and `Snapshot`); the console "Runtime Metrics" page gains a **"Memory dedup hits / writes"** card (hidden when there have been no writes), with i18n `admin.metricDedup`.
+- **Docker**: `docker-compose.yml` gains `Agents__Memory__WriteEmbeddingCacheSize` (`MEMORY_WRITE_EMBEDDING_CACHE_SIZE`, default 512).
+
+## 文档
+# Docs
+
+中文：`README.md` / `README.en.md`（功能清单新增去重条目 + `MEMORY_WRITE_EMBEDDING_CACHE_SIZE` 环境变量表）；`docs/agent-execution-algorithm.md` §2.4（新增子节 + 配置行 + 代码锚点）；`docs/user-guide.md` / `en.md`（§6.1.1 写入链路图加缓存判定、新增 §6.1.3、§6.2 / §9.3.4 配置表、§6.11 排障）；`ROADMAP.md` 新增 §2.6。
+English: `README.md` / `README.en.md` (feature bullet + `MEMORY_WRITE_EMBEDDING_CACHE_SIZE` in the env-var table); `docs/agent-execution-algorithm.md` §2.4 (new subsection + config row + code anchors); `docs/user-guide.md` / `en.md` (§6.1.1 write-chain diagram gains the cache decision, new §6.1.3, config tables §6.2 / §9.3.4, troubleshooting §6.11); `ROADMAP.md` gains §2.6.
+
+## 测试
+# Tests
+
+中文：新增 `MemoryDedupCacheTests`（9 例）——缓存本体（存取 / LRU 淘汰 / 空向量忽略 / 默认容量）、写入路径（同内容只编码一次但两条消息都落库且向量一致、异内容各编码、关闭缓存行为不变、截断后同文本命中）、导入路径复现缓存复用，并断言 Prometheus 命中 / 未命中计数。`dotnet build AguiGroupChat.slnx` 0 错误；`node --check` 三份前端脚本通过；i18n 审计 **zh=en=1925，missing 0**，`check-i18n-keys` / `check-orphan-keys` 均过。
+English: new `MemoryDedupCacheTests` (9 cases) — the cache itself (get/set, LRU eviction, empty-vector ignored, default capacity), the write path (identical content embedded once while both messages are stored with the same vector, different content embedded separately, cache-off behaves as before, truncated-to-equal text hits), and import reuse of the cached vector, with assertions on the Prometheus hit/miss counters. `dotnet build AguiGroupChat.slnx` 0 errors; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1925, missing 0**, and `check-i18n-keys` / `check-orphan-keys` both pass.
+
 # AG-UI 群聊桌面版 1.0.261 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.261 Release Notes (current Windows desktop release)
 

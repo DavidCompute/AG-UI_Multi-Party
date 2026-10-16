@@ -447,6 +447,20 @@ public sealed class MemoryOptions
     /// <summary>后台任务等待 embedding 槽位的上限（秒，默认 60）：等不到则跳过本条，由下次任务补上。</summary>
     public int BackgroundEmbeddingWaitSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// 记忆写入侧「重复编码」去重缓存容量（条目数，默认 512；<b>0 = 关闭</b>）。
+    ///
+    /// <para>
+    /// 写入向量化之前，先用<b>实际入库文本</b>（净化 + 截断后）查一个进程内 LRU 缓存；
+    /// 命中则直接复用向量、跳过 embedding。相同文本在同一模型下向量恒等，故复用在语义上
+    /// <b>完全等价</b>（召回结果不变），只省去重复推理（CPU 上 bge-m3 单条最多可达数秒，占着后台池槽位）。
+    /// 典型收益来自组织编排 / 定时汇报中反复出现的相同短句与模板文案。
+    /// </para>
+    ///
+    /// <para>每条约占「维度 × 4 字节」（bge-m3 1024 维 ≈ 4KB），512 条约 2MB；LRU 淘汰最久未使用者，内存有界。</para>
+    /// </summary>
+    public int WriteEmbeddingCacheSize { get; set; } = 512;
+
     /// <summary>embedding 的<b>连接</b>超时（秒，默认 5）：用于把“服务没起/端口不通”与“排队中”分开。
     /// 不设时两者共用同一条总超时（<see cref="EmbeddingTimeoutSeconds"/>），导致服务不可用时要白等满整个总预算。</summary>
     public int EmbeddingConnectTimeoutSeconds { get; set; } = 5;

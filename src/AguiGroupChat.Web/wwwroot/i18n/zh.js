@@ -1626,6 +1626,7 @@ window.I18N_DICTS.zh = {
   "admin.metricOutputChars": "输出字符",
   "admin.metricBridgeFailures": "桥接失败 / 总调用",
   "admin.metricMemoryHits": "记忆命中 / 检索次数",
+  "admin.metricDedup": "记忆去重命中 / 写入编码",
   "admin.metricRate": "占比 {pct}%",
   "admin.metricByAgent": "按数字员工调用",
   "admin.metricBridgeHealth": "桥接端点健康",

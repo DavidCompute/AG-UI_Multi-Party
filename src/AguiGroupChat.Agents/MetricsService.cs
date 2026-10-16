@@ -16,6 +16,8 @@ public sealed class MetricsService
     private long _bridgeFailures;
     private long _memoryHitCount;
     private long _memoryEmptySearch;
+    private long _embeddingCacheHits;
+    private long _embeddingCacheMisses;
     private long _outputChars;
     private readonly ConcurrentDictionary<string, long> _byAgent = new(StringComparer.Ordinal);
     private readonly long _startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -53,6 +55,13 @@ public sealed class MetricsService
     public void RecordMemoryResult(bool hit)
     {
         if (hit) Interlocked.Increment(ref _memoryHitCount); else Interlocked.Increment(ref _memoryEmptySearch);
+    }
+
+    /// <summary>记忆写入侧「重复编码去重」缓存命中 / 未命中计数（见 <see cref="MemoryEmbeddingCache"/>）。
+    /// 命中 = 本次写入跳过了一次 embedding 调用（成本 / 延迟节省）。</summary>
+    public void RecordEmbeddingCache(bool hit)
+    {
+        if (hit) Interlocked.Increment(ref _embeddingCacheHits); else Interlocked.Increment(ref _embeddingCacheMisses);
     }
 
     /// <summary>读取侧惰性采样：距上次样本 ≥60s 时把当前累计值记入趋势环（保留最近 4 小时）。</summary>
@@ -138,6 +147,8 @@ public sealed class MetricsService
         Metric(sb, "knowgath_bridge_failures_total", "counter", "AG-UI bridge call failures", Volatile.Read(ref _bridgeFailures));
         Metric(sb, "knowgath_memory_hits_total", "counter", "Semantic-memory searches that returned hits", Volatile.Read(ref _memoryHitCount));
         Metric(sb, "knowgath_memory_empty_total", "counter", "Semantic-memory searches that returned nothing", Volatile.Read(ref _memoryEmptySearch));
+        Metric(sb, "knowgath_memory_embedding_cache_hits_total", "counter", "Memory-write embedding calls avoided by content dedup cache", Volatile.Read(ref _embeddingCacheHits));
+        Metric(sb, "knowgath_memory_embedding_cache_misses_total", "counter", "Memory-write embedding calls performed (dedup cache miss)", Volatile.Read(ref _embeddingCacheMisses));
         Metric(sb, "knowgath_output_chars_total", "counter", "Total characters produced by agents", Volatile.Read(ref _outputChars));
 
         // 分数字员工调用量（带 agent_id 标签）
@@ -220,6 +231,8 @@ public sealed class MetricsService
             bridgeFailures = Volatile.Read(ref _bridgeFailures),
             memoryHitCount = Volatile.Read(ref _memoryHitCount),
             memoryEmptySearch = Volatile.Read(ref _memoryEmptySearch),
+            embeddingCacheHits = Volatile.Read(ref _embeddingCacheHits),
+            embeddingCacheMisses = Volatile.Read(ref _embeddingCacheMisses),
             outputChars = Volatile.Read(ref _outputChars),
             byAgent = _byAgent.OrderByDescending(kv => kv.Value).Take(30).Select(kv => new { agentId = kv.Key, count = kv.Value }),
             trend,

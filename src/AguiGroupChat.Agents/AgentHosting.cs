@@ -192,7 +192,8 @@ public static class AgentHosting
                     writeCatalog ??= sp.GetService<AgentCatalog>();
                     return writeCatalog?.GetDefinition(agentId)?.MemoryProfile;
                 },
-                sp.GetService<EmbeddingGates>());
+                sp.GetService<EmbeddingGates>(),
+                sp.GetService<MetricsService>());
         });
         // 自动遗忘维护服务（宿主自动启动；记忆 null 占位时内部跳过）
         services.AddHostedService<MemoryMaintenanceService>();

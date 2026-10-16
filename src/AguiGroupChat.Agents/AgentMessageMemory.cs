@@ -41,8 +41,12 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
     // 向量化并发闸门（可选）：拆分交互（回复前检索）与后台（写入 / 导入）两个池子，
     // 避免后台批量任务（知识库入库 / 周期沉淀）把交互检索排到超时。未装配时为 null → 回退旧行为。
     private readonly EmbeddingGates? _gates;
+    // 记忆写入侧「重复编码」去重缓存：容量 > 0 才构造；命中即复用向量、跳过 embedding。
+    private readonly MemoryEmbeddingCache? _embeddingCache;
+    // 运行指标（可选）：记录去重缓存的命中 / 未命中，供控制台与 Prometheus 观测收益。
+    private readonly MetricsService? _metrics;
 
-    public AgentMessageMemory(IMessageMemoryStore store, AgentOptions options, ILogger<AgentMessageMemory> logger, IEmbeddingProvider? embeddingProvider = null, Func<string, MemoryProfile?>? authorProfileResolver = null, EmbeddingGates? gates = null)
+    public AgentMessageMemory(IMessageMemoryStore store, AgentOptions options, ILogger<AgentMessageMemory> logger, IEmbeddingProvider? embeddingProvider = null, Func<string, MemoryProfile?>? authorProfileResolver = null, EmbeddingGates? gates = null, MetricsService? metrics = null)
     {
         _store = store;
         _options = options.Memory;
@@ -50,9 +54,15 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         _embedding = embeddingProvider ?? CreateDefaultProvider(options, logger);
         _authorProfileResolver = authorProfileResolver;
         _gates = gates;
+        _metrics = metrics;
+        _embeddingCache = _options.WriteEmbeddingCacheSize > 0
+            ? new MemoryEmbeddingCache(_options.WriteEmbeddingCacheSize)
+            : null;
         _logger.LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）",
             _options.Provider, _options.Provider == "llama" ? _options.LlamaModelPath : _options.EmbeddingModel,
             _options.EmbeddingDimensions, _options.Scope, _options.TopK);
+        if (_embeddingCache is not null)
+            _logger.LogInformation("记忆写入去重缓存已启用：容量 {Capacity} 条（写入前按入库文本命中即跳过 embedding）", _embeddingCache.Capacity);
         // 后台消费者：串行向量化 + 落库（fire-and-forget，内部已兜底异常）
         _ = Task.Run(ProcessWriteQueueAsync);
     }
@@ -117,27 +127,40 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         {
             await foreach (var entry in _writeQueue.Reader.ReadAllAsync(_writeCts.Token))
             {
+                // 写入侧必须截断：原来是把整条消息原文不限长送进 embedding，
+                // 实测一条 5000 字的回复要 40 秒以上才能向量化完，而它占着 embedding 队列
+                //（4 核 CPU 上共 4 个并发槽），会把交互检索挤到超时。
+                // 截断同时作用于入库文本与向量，两者保持一致。
+                var stored = Truncate(SanitizeForMemory(entry.Content), _options.MaxWriteChars);
+                if (stored.Length == 0) continue;
+
+                var enteredGate = false;
                 try
                 {
-                    // 等待上限：embedding 并发占满（服务不可用 / 推理缓慢）时不再无限排队，超时放弃本条
-                    // （后台路径走“后台池”，不会与交互检索抢槽位——见 EmbeddingGates）。
-                    if (!await EnterEmbeddingAsync(interactive: false, CancellationToken.None))
+                    // 重复编码去重（ROADMAP §二）：同文本复用向量，跳过 embedding。
+                    // 相同文本在同一模型下向量恒等 → 语义等价，只省去重复推理（也省掉一次后台池槽位占用）。
+                    float[]? embedding = _embeddingCache?.TryGet(stored);
+                    if (embedding is not null)
                     {
-                        _logger.LogWarning("语义记忆写入放弃：embedding 排队超时（{Seconds} 秒），{MessageId} 未写入",
-                            _gates is null ? EmbeddingWaitTimeoutSeconds : _options.BackgroundEmbeddingWaitSeconds, entry.MessageId);
-                        continue;
+                        _metrics?.RecordEmbeddingCache(hit: true);
                     }
-                }
-                catch (OperationCanceledException) { return; } // 释放时取消
-                try
-                {
-                    // 写入侧必须截断：原来是把整条消息原文不限长送进 embedding，
-                    // 实测一条 5000 字的回复要 40 秒以上才能向量化完，而它占着 embedding 队列
-                    //（4 核 CPU 上共 4 个并发槽），会把交互检索挤到超时。
-                    // 截断同时作用于入库文本与向量，两者保持一致。
-                    var stored = Truncate(SanitizeForMemory(entry.Content), _options.MaxWriteChars);
-                    var embedding = await _embedding.EmbedAsync(stored);
-                    if (embedding is null || embedding.Length == 0) continue;
+                    else
+                    {
+                        // 等待上限：embedding 并发占满（服务不可用 / 推理缓慢）时不再无限排队，超时放弃本条
+                        // （后台路径走“后台池”，不会与交互检索抢槽位——见 EmbeddingGates）。
+                        if (!await EnterEmbeddingAsync(interactive: false, CancellationToken.None))
+                        {
+                            _logger.LogWarning("语义记忆写入放弃：embedding 排队超时（{Seconds} 秒），{MessageId} 未写入",
+                                _gates is null ? EmbeddingWaitTimeoutSeconds : _options.BackgroundEmbeddingWaitSeconds, entry.MessageId);
+                            continue;
+                        }
+                        enteredGate = true;
+                        _metrics?.RecordEmbeddingCache(hit: false);
+                        embedding = await _embedding.EmbedAsync(stored);
+                        if (embedding is null || embedding.Length == 0) continue;
+                        _embeddingCache?.Set(stored, embedding);
+                    }
+
                     // 写入侧记忆拟人（仅对“数字员工本人的发言”按作者配置生效；用户消息 / 未配置一律维持旧行为）：
                     // 深记型自动刻深为“重要”级（烙印深、不过期），快速遗忘型在平台自动遗忘开启时保留更短。
                     var profile = _authorProfileResolver is not null
@@ -162,7 +185,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 {
                     _logger.LogWarning(ex, "语义记忆写入失败：{MessageId}（检查 embedding 提供方是否可用）", entry.MessageId);
                 }
-                finally { ExitEmbedding(interactive: false); }
+                finally { if (enteredGate) ExitEmbedding(interactive: false); }
             }
         }
         catch (OperationCanceledException) { /* 释放时取消 */ }
@@ -315,20 +338,34 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 // 去重：同 messageId 已存在（或内容一致）则跳过
                 var existing = _store.GetByMessageId(it.MessageId);
                 if (existing is not null) continue;
-                if (!await EnterEmbeddingAsync(interactive: false, ct)) { _logger.LogWarning("记忆导入 embedding 排队超时，跳过 {MessageId}", it.MessageId); continue; }
+                // 入库文本与向量必须一致：先按写入上限截断再向量化，否则“检索命中但内容对不上”。
+                var stored = Truncate(SanitizeForMemory(it.Content), _options.MaxWriteChars);
+                if (stored.Length == 0) continue;
+                var enteredGate = false;
                 try
                 {
-                    // 入库文本与向量必须一致：先按写入上限截断再向量化，否则“检索命中但内容对不上”。
-                    var stored = Truncate(SanitizeForMemory(it.Content), _options.MaxWriteChars);
-                    var embedding = await _embedding.EmbedAsync(stored, ct);
-                    if (embedding is null || embedding.Length == 0) continue;
+                    // 重复编码去重：同文本复用向量（导入包常含重复内容，命中率较高）。
+                    float[]? embedding = _embeddingCache?.TryGet(stored);
+                    if (embedding is not null)
+                    {
+                        _metrics?.RecordEmbeddingCache(hit: true);
+                    }
+                    else
+                    {
+                        if (!await EnterEmbeddingAsync(interactive: false, ct)) { _logger.LogWarning("记忆导入 embedding 排队超时，跳过 {MessageId}", it.MessageId); continue; }
+                        enteredGate = true;
+                        _metrics?.RecordEmbeddingCache(hit: false);
+                        embedding = await _embedding.EmbedAsync(stored, ct);
+                        if (embedding is null || embedding.Length == 0) continue;
+                        _embeddingCache?.Set(stored, embedding);
+                    }
                     var importance = MemoryImportance.IsValid(it.Importance) ? it.Importance : MemoryImportance.Normal;
                     _store.Upsert(new MessageMemoryRecord(
                         it.MessageId, it.GroupId, it.TopicId, it.SenderId, it.SenderType,
                         stored, embedding, it.Timestamp, importance, it.ExpiresAt));
                     imported++;
                 }
-                finally { ExitEmbedding(interactive: false); }
+                finally { if (enteredGate) ExitEmbedding(interactive: false); }
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex) { _logger.LogDebug(ex, "记忆导入单条失败：{MessageId}", it.MessageId); }
