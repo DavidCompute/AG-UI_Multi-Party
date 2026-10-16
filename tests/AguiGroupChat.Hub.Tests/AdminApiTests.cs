@@ -510,6 +510,50 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task GroupModelOverride_RequiresPlatformAdmin()
+    {
+        // 普通用户即使是群主也不能设置知聚模型覆写（成本 / 容量控制属平台管理员）→ 403
+        var owner = await RegisterAsync("grp_model_owner");
+        var oToken = owner.GetProperty("token").GetString()!;
+        var oId = owner.GetProperty("userId").GetString()!;
+
+        using var create = Authed(HttpMethod.Post, "/ag-ui/group/create", oToken);
+        create.Content = JsonContent.Create(new { groupName = "模型覆写-普通", ownerId = oId });
+        var gid = (await (await _client.SendAsync(create)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+
+        using var deny = Authed(HttpMethod.Post, "/ag-ui/group/update", oToken);
+        deny.Content = JsonContent.Create(new
+        {
+            groupId = gid,
+            operatorId = oId,
+            updateFields = new[] { "model" },
+            groupInfo = new Dictionary<string, object?> { ["model"] = "deepseek-v4-pro" },
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(deny)).StatusCode);
+
+        // 平台管理员（且为群主）设置成功，并在响应里回读 modelOverride
+        var admin = await RegisterAsync("admin_chief");
+        var aToken = admin.GetProperty("token").GetString()!;
+        var aId = admin.GetProperty("userId").GetString()!;
+        using var create2 = Authed(HttpMethod.Post, "/ag-ui/group/create", aToken);
+        create2.Content = JsonContent.Create(new { groupName = "模型覆写-管理", ownerId = aId });
+        var gid2 = (await (await _client.SendAsync(create2)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+
+        using var ok = Authed(HttpMethod.Post, "/ag-ui/group/update", aToken);
+        ok.Content = JsonContent.Create(new
+        {
+            groupId = gid2,
+            operatorId = aId,
+            updateFields = new[] { "model" },
+            groupInfo = new Dictionary<string, object?> { ["model"] = "deepseek-v4-pro" },
+        });
+        var okRes = await _client.SendAsync(ok);
+        okRes.EnsureSuccessStatusCode();
+        var g = await okRes.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("deepseek-v4-pro", g.GetProperty("modelOverride").GetString());
+    }
+
+    [Fact]
     public async Task ConfigGovernance_Post_AdminUpdatesAndPersists()
     {
         var admin = await RegisterAsync("admin_chief"); // 配置名单管理员

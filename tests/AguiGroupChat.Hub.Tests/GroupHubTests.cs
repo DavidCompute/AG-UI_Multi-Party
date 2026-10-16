@@ -135,6 +135,36 @@ public sealed class GroupHubTests
     }
 
     [Fact]
+    public async Task UpdateGroup_ModelOverride_AppliedAndCleared()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "模型覆写群", "user_1", "user_2");
+        Assert.Null(group.ModelOverride);
+
+        // 设置覆写（存于 Extra["model"]，零迁移）
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["model"],
+            GroupInfo = new() { ["model"] = JsonSerializer.SerializeToElement("deepseek-v4-pro") },
+        });
+        Assert.Equal("deepseek-v4-pro", f.Store.GetGroup(group.GroupId)!.ModelOverride);
+        Assert.Equal("deepseek-v4-pro", f.Hub.GroupModelOverride(group.GroupId));
+
+        // 空串 = 取消覆写
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["model"],
+            GroupInfo = new() { ["model"] = JsonSerializer.SerializeToElement("") },
+        });
+        Assert.Null(f.Store.GetGroup(group.GroupId)!.ModelOverride);
+        Assert.Null(f.Hub.GroupModelOverride(group.GroupId));
+    }
+
+    [Fact]
     public async Task UpdateGroup_NonAdmin_ThrowsPermissionDenied()
     {
         var f = new HubFixture();

@@ -649,6 +649,7 @@
 | `#gsGroupName` | 知聚名称，`maxlength="30"` | `gs.name`「知聚名称」、`gs.namePh` |
 | `#gsAvatarPreview` / `#gsAvatarUploadBtn` / `#gsAvatarClearBtn` / `#gsAvatarFile` | 群头像预览 / 上传 / 移除（`accept="image/*"`） | `gs.avatar`、`gs.avatarUpload`、`gs.avatarRemove` |
 | `#gsIsPrivate` | 「🔒 私密知聚」开关 | `gs.private`、`gs.privateHint` |
+| `#gsModelOverride`（组 `#gsModelGroup`） | **知聚级模型覆写**（**仅平台管理员**可见 / 可改；留空 = 不覆写） | `gs.model`、`gs.modelHint` |
 | `#gsDisbandBtn` | 解散按钮 | `gs.disband` |
 | `#gsCancel` / `#gsConfirm` | 取消 / 保存 | `gs.cancel`、`gs.save` |
 
@@ -657,6 +658,16 @@
 私密开关的含义（`gs.privateHint`）：「私密知聚的聊天记忆仅限本知聚内检索，其他知聚触发数字员工时不会读到」。该语义在服务端由 `Group.IsPrivate` 落地：私密群的语义记忆仅允许在本群内被检索，其他群触发时一律排除（`Messages.Postgres.PgMessageMemoryStore.Search` 中的私密过滤；`GroupHub.RememberMessage` 亦只对 `Visibility == All` 的消息入记忆）。
 
 客服知聚的语言与实现：客服知聚**不支持私密**——服务端在 `CreateGroupAsync` 中强制 `IsPrivate = false`；前端 `openGroupSettings()` 会把 `#gsIsPrivate` 所在行隐藏。
+
+#### 2.2.2.1 知聚级模型覆写（管理员，1.0.261）
+
+- **入口**：知聚设置弹窗内 `#gsModelGroup` / `#gsModelOverride`，**仅平台管理员（`isAdminPlus()`）可见**，否则该组隐藏。
+- **语义**：给某个知聚**钉一个模型**，覆盖「按任务复杂度自动选模型」（`Agents:ModelRouting`，见 8.10.1）与本知聚内智能体的默认模型——**优先级最高**。留空 = 不覆写。典型用法：高消耗知聚钉 `deepseek-v4-pro`（要质量），或钉 `deepseek-flash`（省成本）。
+- **存储（零迁移）**：存于 `Group.Extra["model"]`（同 `Kind`），既有所有群存储透传 extra JSON，无需新增列。
+- **权限（服务端强校验）**：`HttpGroupApi` 的 `/update` 在 `updateFields` 含 `model` 时要求操作者生效角色 ≥ `PlatformRole.Admin`，否则 **403**（「仅平台管理员可设置知聚模型覆写」）；同时 `GroupHub.UpdateGroupAsync` 仍要求群主 / 群管理员（`EnsureCanManage`）。即实际需「**知聚主 / 群管理员 且 平台管理员**」。
+- **生效**：`AgentGateway.ResolveGroupModel(groupId)`（= `GroupHub.GroupModelOverride`）→ `GetOrCreateWithModel`，**只换模型，工具 / 记忆 / 审批包装照旧**；`GROUP_UPDATED` 广播后即时生效（仅影响后续触发的回复）。
+
+> **顺带修复的存储缺陷**：`PostgresGroupStore.UpdateGroup` / `RelationalGroupStore.UpdateGroup` 原先的 UPDATE 语句**未写 `extra` 列**，导致 `kind` / `model` 等 extra 支撑字段在创建后无法修改 / 清除（1.0.261 修复，已补回归）。
 
 #### 2.2.3 解散知聚
 

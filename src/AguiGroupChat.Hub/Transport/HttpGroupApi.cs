@@ -51,6 +51,7 @@ public static class HttpGroupApi
                         g.IsPrivate,
                         kind = g.Kind,
                         isSupportCircle = g.IsSupportCircle,
+                        modelOverride = g.ModelOverride, // 知聚级模型覆写（管理员可设；前端设置弹窗回显）
                         myRole = me?.Role,
                         myNickname = me?.Nickname,
                         // 活跃度排序 / 未读提示（前端按 lastMessageAt 降序展示，未读徽标）
@@ -79,6 +80,10 @@ public static class HttpGroupApi
                 var (identity, error) = RequireIdentity(ctx, auth, authOptions, fallback: req.OperatorId);
                 if (identity is null) return error!;
                 req.OperatorId = identity;
+                // 知聚级模型覆写属成本 / 容量控制：仅平台管理员可设（其它群设置仍由群主 / 管理员）。
+                if (req.UpdateFields.Contains("model", StringComparer.Ordinal) && auth.ResolveRole(identity) < PlatformRole.Admin)
+                    return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅平台管理员可设置知聚模型覆写"),
+                        statusCode: StatusCodes.Status403Forbidden);
                 return Results.Ok(await hub.UpdateGroupAsync(req, ct));
             }));
         group.MapPost("/disband", async (GroupDisbandRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)

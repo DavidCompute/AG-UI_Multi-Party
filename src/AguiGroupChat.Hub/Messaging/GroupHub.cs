@@ -348,6 +348,9 @@ public sealed class GroupHub : IDisposable
             group.GroupAvatar = GetString(req.GroupInfo, "groupAvatar");
         if (fields.Contains("isPrivate", StringComparer.Ordinal))
             group.IsPrivate = GetBool(req.GroupInfo, "isPrivate");
+        // 知聚级模型覆写（管理员，治理层已限）；空串 = 取消覆写
+        if (fields.Contains("model", StringComparer.Ordinal))
+            group.ModelOverride = GetString(req.GroupInfo, "model");
 
         await FanOutAsync(group.GroupId, new GroupUpdatedEvent
         {
@@ -2253,6 +2256,14 @@ public sealed class GroupHub : IDisposable
     {
         try { return _store.GetGroup(groupId)?.IsSupportCircle == true; }
         catch { return false; }
+    }
+
+    /// <summary>本知聚的模型覆写（留空 = 不覆写）。供网关照「本知聚钉的模型」优先于按复杂度选模型。</summary>
+    public string? GroupModelOverride(string groupId)
+    {
+        if (_disbanded.ContainsKey(groupId)) return null;
+        try { return _store.GetGroup(groupId)?.ModelOverride; }
+        catch { return null; }
     }
 
     private bool CanManage(string operatorId, Group group)

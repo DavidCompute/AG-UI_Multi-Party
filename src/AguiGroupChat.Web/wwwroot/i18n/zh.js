@@ -820,6 +820,8 @@ window.I18N_DICTS.zh = {
   "gs.avatarRemove": "移除",
   "gs.private": "🔒 私密知聚",
   "gs.privateHint": "（私密知聚的聊天记忆仅限本知聚内检索，其他知聚触发数字员工时不会读到）",
+  "gs.model": "🧠 本知聚模型覆写（管理员，留空 = 不覆写）",
+  "gs.modelHint": "仅平台管理员可设；优先级最高，覆盖「按复杂度自动选模型」与本知聚内智能体的默认模型（例：高消耗知聚钉 deepseek-v4-pro，或钉 deepseek-flash 省成本）。",
   "gs.disband": "解散知聚",
   "gs.cancel": "取消",
   "gs.save": "保存",

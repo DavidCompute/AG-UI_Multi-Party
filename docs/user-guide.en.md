@@ -650,6 +650,7 @@ DOM inside the dialog (`index.html` `#groupSettingsModal`):
 | `#gsGroupName` | Group name, `maxlength="30"` | `gs.name` "Group name", `gs.namePh` |
 | `#gsAvatarPreview` / `#gsAvatarUploadBtn` / `#gsAvatarClearBtn` / `#gsAvatarFile` | Group avatar preview / upload / remove (`accept="image/*"`) | `gs.avatar`, `gs.avatarUpload`, `gs.avatarRemove` |
 | `#gsIsPrivate` | "🔒 Private Group" toggle | `gs.private`, `gs.privateHint` |
+| `#gsModelOverride` (group `#gsModelGroup`) | **Group model override** (**platform admins only**; blank = none) | `gs.model`, `gs.modelHint` |
 | `#gsDisbandBtn` | Disband button | `gs.disband` |
 | `#gsCancel` / `#gsConfirm` | Cancel / Save | `gs.cancel`, `gs.save` |
 
@@ -658,6 +659,16 @@ Saving goes through `saveGroupSettings()` → `POST /ag-ui/group/update`, with t
 The meaning of the private toggle (`gs.privateHint`): "a private group's chat memory is only retrievable within it; other groups won't read it when triggering digital employees". This semantic is implemented server-side by `Group.IsPrivate`: a private group's semantic memory may only be retrieved within that group and is always excluded when other groups trigger (the private filter in `Messages.Postgres.PgMessageMemoryStore.Search`; `GroupHub.RememberMessage` also only records messages with `Visibility == All` into memory).
 
 Support circles, in language and implementation: support circles **do not support privacy** — the server forces `IsPrivate = false` in `CreateGroupAsync`; the frontend `openGroupSettings()` hides the row containing `#gsIsPrivate`.
+
+#### 2.2.2.1 Group model override (admin, 1.0.261)
+
+- **Entry**: inside the group settings dialog, `#gsModelGroup` / `#gsModelOverride`, **visible only to platform admins** (`isAdminPlus()`); otherwise the group is hidden.
+- **Meaning**: pin a model for one group, overriding complexity-based model routing (`Agents:ModelRouting`, see 8.10.1) and the default model of digital employees in that group — it has the **highest precedence**. Blank = no override. Typical use: pin `deepseek-v4-pro` for a heavy group (quality), or `deepseek-flash` to save cost.
+- **Storage (zero migration)**: kept in `Group.Extra["model"]` (like `Kind`); every group store passes extra JSON through, so no new column is needed.
+- **Permission (enforced server-side)**: `HttpGroupApi`'s `/update` requires the operator's effective role ≥ `PlatformRole.Admin` when `updateFields` contains `model`, otherwise **403** ("only platform admins can set a group model override"); `GroupHub.UpdateGroupAsync` still requires owner / group-admin (`EnsureCanManage`). So it effectively needs **owner / group-admin AND platform admin**.
+- **Effect**: `AgentGateway.ResolveGroupModel(groupId)` (= `GroupHub.GroupModelOverride`) → `GetOrCreateWithModel` — **only the model changes; tools / memory / approval wrapping are unchanged**; it takes effect after the `GROUP_UPDATED` broadcast (affects subsequent replies only).
+
+> **Latent store bug fixed alongside**: `PostgresGroupStore.UpdateGroup` / `RelationalGroupStore.UpdateGroup` did not write the `extra` column, so extra-backed fields such as `kind` / `model` could not be changed or cleared after creation (fixed in 1.0.261, with a regression test).
 
 #### 2.2.3 Disbanding a Circle
 

@@ -821,6 +821,8 @@ window.I18N_DICTS.en = {
   "gs.avatarRemove": "Remove",
   "gs.private": "🔒 Private Group",
   "gs.privateHint": "(a private group's chat memory is only retrievable within it; other groups won't read it when triggering digital employees)",
+  "gs.model": "🧠 Group model override (admin; blank = none)",
+  "gs.modelHint": "Admin-only; highest precedence — overrides complexity-based model routing and the default model of digital employees in this group (e.g. pin deepseek-v4-pro for a heavy group, or deepseek-flash to save cost).",
   "gs.disband": "Disband Group",
   "gs.cancel": "Cancel",
   "gs.save": "Save",

@@ -519,10 +519,12 @@ public sealed class RelationalGroupStore : IGroupStore
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE agui_groups SET group_name = @name, group_avatar = @avatar, is_private = @isPrivate WHERE group_id = @gid";
+        cmd.CommandText = "UPDATE agui_groups SET group_name = @name, group_avatar = @avatar, is_private = @isPrivate, extra = @extra WHERE group_id = @gid";
         cmd.AddWithValue("name", group.GroupName);
         cmd.AddWithValue("avatar", (object?)group.GroupAvatar ?? DBNull.Value);
         cmd.AddWithValue("isPrivate", group.IsPrivate);
+        // extra 一并落库：否则“知聚类型 kind / 知聚级模型覆写 model”等 extra 支撑的字段在创建后无法修改 / 清除
+        cmd.AddWithValue("extra", Json(group.Extra));
         cmd.AddWithValue("gid", group.GroupId);
         cmd.ExecuteNonQuery();
     }

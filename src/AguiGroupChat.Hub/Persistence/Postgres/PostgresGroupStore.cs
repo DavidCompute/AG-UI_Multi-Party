@@ -541,10 +541,12 @@ public sealed class PostgresGroupStore : IGroupStore
     {
         using var conn = _pg.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE agui_groups SET group_name = @name, group_avatar = @avatar, is_private = @isPrivate WHERE group_id = @gid";
+        cmd.CommandText = "UPDATE agui_groups SET group_name = @name, group_avatar = @avatar, is_private = @isPrivate, extra = @extra WHERE group_id = @gid";
         cmd.Parameters.AddWithValue("name", group.GroupName);
         cmd.Parameters.AddWithValue("avatar", (object?)group.GroupAvatar ?? DBNull.Value);
         cmd.Parameters.AddWithValue("isPrivate", group.IsPrivate);
+        // extra 一并落库：否则“知聚类型 kind / 知聚级模型覆写 model”等 extra 支撑的字段在创建后无法修改 / 清除
+        cmd.Parameters.AddWithValue("extra", Json(group.Extra));
         cmd.Parameters.AddWithValue("gid", group.GroupId);
         cmd.ExecuteNonQuery();
     }

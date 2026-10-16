@@ -250,8 +250,9 @@
 - **现状**：所有任务共用同一模型（思考模式决定推理/非推理），简单任务也用强模型，成本 / 速度浪费。
 - **目标**：把已经很成熟的「复杂度自适应超时」同一套档位估计延伸到**模型选择**：简单任务用经济模型、繁重任务用强模型。
 - **已实现**：`Agents:ModelRouting`（`Enabled` / `SimpleModel` / `HeavyModel`，**默认关**）；网关运行开始时安装复杂度预算，据此经 `AgentCatalog.GetOrCreateWithModel`（按 `agentId + 模型` 分键缓存，与视觉变体同机制）取得模型变体——**只换模型，工具 / 记忆 / 审批包装照旧**；关闭时行为与旧版完全一致。落点：`AgentOptions.ModelRoutingOptions`、`AgentCatalog.GetOrCreateWithModel`、`AgentGateway.ResolveRoutedModel`。
-- **已实现（1.0.260 Standard 档 + 在线配置）**：新增 `ModelRoutingOptions.StandardModel`——Standard 档不再固定不换（留空 = 不换，向后兼容）；并在管理员控制台**「配置治理」页在线暴露** `ModelRouting` 四个旋钮（`#cfgModelRouting` + `#cfgRoutingSimple/Standard/Heavy`，`ConfigGovernanceState` / `HttpRequest` / `Apply` / 持久化全链），保存即时生效且重启后仍生效（无需改 appsettings / env）。至此 §6.7 原「待续」项全部落地（除“按租户 / 按知聚覆写”）。
-- **待续**：按租户或按知聚覆写模型（当前为全局 + 按智能体 `Model`）。
+- **已实现（1.0.260 Standard 档 + 在线配置）**：新增 `ModelRoutingOptions.StandardModel`——Standard 档不再固定不换（留空 = 不换，向后兼容）；并在管理员控制台**「配置治理」页在线暴露** `ModelRouting` 四个旋钮（`#cfgModelRouting` + `#cfgRoutingSimple/Standard/Heavy`，`ConfigGovernanceState` / `HttpRequest` / `Apply` / 持久化全链），保存即时生效且重启后仍生效（无需改 appsettings / env）。
+- **已实现（1.0.261 按知聚覆写）**：知聚级模型覆写 `Group.Extra["model"]`（同 `Kind`，零迁移）——管理员在「知聚设置」给某个知聚**钉一个模型**，优先级**高于**按复杂度路由与本知聚内智能体默认模型；服务端限平台管理员（`HttpGroupApi` `/update` 含 `model` 时 `ResolveRole < Admin` → 403）。落点：`Group.ModelOverride`、`GroupHub.GroupModelOverride`、`AgentGateway.ResolveGroupModel`。顺带修复 `Postgres/Relational.UpdateGroup` 未写 `extra` 列的存储缺陷。
+- **待续**：按租户（多租户）覆写模型。
 
 ---
 

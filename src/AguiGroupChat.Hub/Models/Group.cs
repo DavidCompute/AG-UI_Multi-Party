@@ -60,6 +60,35 @@ public sealed class Group
     /// </summary>
     public bool IsPrivate { get; set; }
 
+    /// <summary>
+    /// 本知聚的<b>模型覆写</b>（留空 = 不覆写）：管理员可给某个知聚钉一个模型，
+    /// 例如给高消耗知聚钉 <c>deepseek-v4-pro</c>（要质量），或钉 <c>deepseek-flash</c>（省成本）。
+    /// <b>优先级最高</b>——覆盖「按任务复杂度自动选模型」（<c>Agents:ModelRouting</c>）与该知聚内智能体的默认模型。
+    /// 存于 <c>Extra["model"]</c>（字符串），既有所有群存储均透传 extra JSON，无需新增列 / 迁移（同 <see cref="Kind"/>）。
+    /// </summary>
+    public string? ModelOverride
+    {
+        get => Extra is not null && Extra.TryGetValue("model", out var v) ? StrOf(v) : null;
+        set
+        {
+            if (Extra is null) return; // Extra 为 null 时不支持原地写入（由创建路径预置）
+            var s = (value ?? "").Trim();
+            if (s.Length == 0) Extra.Remove("model"); // 空 = 取消覆写
+            else Extra["model"] = s;
+        }
+    }
+
+    /// <summary>Extra 值归一化为字符串：兼容 CLR string / JsonElement（存储反序列化可能给出任一形态）。</summary>
+    private static string? StrOf(object? v) => v switch
+    {
+        null => null,
+        string s => string.IsNullOrWhiteSpace(s) ? null : s,
+        System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String =>
+            string.IsNullOrWhiteSpace(je.GetString()) ? null : je.GetString(),
+        System.Text.Json.JsonElement je when je.ValueKind is System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined => null,
+        _ => v.ToString(),
+    };
+
     /// <summary>群主成员 ID。</summary>
     public required string OwnerId { get; set; }
 

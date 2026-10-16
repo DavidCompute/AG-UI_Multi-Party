@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.261 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.261 Release Notes (current Windows desktop release)
+
+**版本说明**：**知聚级模型覆写**——管理员可在「知聚设置」给某个知聚**钉一个模型**（如高消耗知聚钉 `deepseek-v4-pro`，或钉 `deepseek-flash` 省成本），优先级**高于**按复杂度自动选模型与本知聚内智能体的默认模型；顺带修复了一个存储缺陷（群更新未写 `extra` 列）。
+**Version note**: **Per-circle model override** — an admin can pin a model for a specific group in “Group Settings” (e.g. pin `deepseek-v4-pro` for a heavy group, or `deepseek-flash` to save cost); it takes precedence over complexity-based routing and the default model of digital employees in that group. A store defect (group update did not write the `extra` column) was fixed alongside.
+
+## 变更
+# Changes
+
+中文：
+- **知聚级模型覆写（新）**：`Group.ModelOverride` 存于 `Extra["model"]`（同 `Kind`，零迁移）；`GroupHub.UpdateGroupAsync` 支持 `updateFields=["model"]`（空串 = 取消覆写）；`GroupHub.GroupModelOverride` 供网关读取。
+- **优先级**：`AgentGateway` 先取知聚覆写，再回退按复杂度路由——`effectiveModel = ResolveGroupModel(groupId) ?? routedModel`（只换模型，工具 / 记忆 / 审批包装照旧）。
+- **权限**：知聚级模型属成本 / 容量控制，**仅平台管理员**可设——`HttpGroupApi` `/update` 在含 `model` 时要求 `ResolveRole ≥ Admin`，否则 **403**；群更新本身仍要群主 / 群管理员（实际需“知聚主/群管理员 且 平台管理员”）。
+- **前端**：知聚设置弹窗新增 `#gsModelGroup` / `#gsModelOverride`（**仅管理员可见**，i18n `gs.model` / `gs.modelHint`）；群列表接口下发 `modelOverride` 供回显。
+- **修复存储缺陷**：`PostgresGroupStore.UpdateGroup` / `RelationalGroupStore.UpdateGroup` 的 UPDATE 语句**未写 `extra` 列**——导致 `kind` / `model` 等 extra 支撑字段在创建后无法修改 / 清除（仅内存 / Redis 正常）。已补齐 `extra = @extra`，并加回归。
+
+English:
+- **Per-circle model override (new)**: `Group.ModelOverride` is stored in `Extra["model"]` (like `Kind`, zero migration); `GroupHub.UpdateGroupAsync` accepts `updateFields=["model"]` (empty string clears it); `GroupHub.GroupModelOverride` exposes it to the gateway.
+- **Precedence**: `AgentGateway` takes the group override first, then falls back to complexity routing — `effectiveModel = ResolveGroupModel(groupId) ?? routedModel` (only the model changes; tools / memory / approval wrapping are unchanged).
+- **Permission**: a per-group model is a cost / capacity control, so **platform admins only** — `HttpGroupApi`'s `/update` requires `ResolveRole ≥ Admin` when `model` is present, otherwise **403**; group updates themselves still require owner / group-admin (so it effectively needs owner/group-admin AND platform admin).
+- **Frontend**: the group settings dialog gains `#gsModelGroup` / `#gsModelOverride` (**admins only**, i18n `gs.model` / `gs.modelHint`); the group-list endpoint now returns `modelOverride` for rendering.
+- **Store defect fixed**: `PostgresGroupStore.UpdateGroup` / `RelationalGroupStore.UpdateGroup` did not write the `extra` column — so extra-backed fields such as `kind` / `model` could not be changed or cleared after creation (only in-memory / Redis were fine). Added `extra = @extra`, with a regression test.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2（新增 2.2.2.1 知聚级模型覆写：入口 / 语义 / 存储 / 权限 / 生效 + 存储缺陷说明）；`ROADMAP.md` §6.7（按知聚覆写落地）。
+English: `docs/user-guide.md` / `en.md` §2.2.2 (new 2.2.2.1 for the group model override: entry / meaning / storage / permission / effect, plus the store-defect note); `ROADMAP.md` §6.7 (per-group override shipped).
+
+## 测试
+# Tests
+
+中文：新增 `GroupHubTests.UpdateGroup_ModelOverride_AppliedAndCleared`（设置 → 读回 → 空串清除）；`AdminApiIntegrationTests.GroupModelOverride_RequiresPlatformAdmin`（普通用户即群主 → 403；管理员 → 200 并回读 `modelOverride`）；扩展 `Postgres/Relational/Sqlite` 的群存储往返用例（`extra` 透传 + 更新后清除）。**全量 1785 测试通过**；`dotnet build AguiGroupChat.slnx` **0 错误**；i18n 审计 **zh=en=1924，missing 0**；本机 Docker（Postgres）实测：登录后对真实知聚设置 `model=deepseek-v4-pro` → 200、群列表回读一致，随后清除（此过程暴露并验证了上述存储缺陷修复）。
+English: new `GroupHubTests.UpdateGroup_ModelOverride_AppliedAndCleared` (set → read back → clear with an empty string); `AdminApiIntegrationTests.GroupModelOverride_RequiresPlatformAdmin` (a normal user who owns the group → 403; an admin → 200 and reads back `modelOverride`); extended the Postgres / Relational / SQLite group-store round-trip cases (`extra` passthrough plus clear-after-update). **All 1785 tests pass**; `dotnet build AguiGroupChat.slnx` reports **0 errors**; the i18n audit is **zh=en=1924, missing 0**; verified against local Docker (Postgres): after login, setting `model=deepseek-v4-pro` on a real group returned 200 and read back consistently from the group list, then was cleared (this exposed and validated the store fix above).
+
 # AG-UI 群聊桌面版 1.0.260 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.260 Release Notes (current Windows desktop release)
 

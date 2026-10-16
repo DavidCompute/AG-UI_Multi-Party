@@ -217,23 +217,32 @@ public abstract class RelationalStoreTestsBase : IDisposable
     }
 
     [Fact]
-    public void IsPrivate_RoundTrip_AndUpdate()
+    public void IsPrivate_And_ModelOverride_RoundTrip_AndUpdate()
     {
         if (!Ready) return;
 
-        Groups.AddGroup(new Group { GroupId = "g6", GroupName = "私密群", OwnerId = "u1", CreateTime = 100, IsPrivate = true });
+        Groups.AddGroup(new Group
+        {
+            GroupId = "g6", GroupName = "私密群", OwnerId = "u1", CreateTime = 100, IsPrivate = true,
+            Extra = new Dictionary<string, object?>(StringComparer.Ordinal) { ["kind"] = "normal", ["model"] = "deepseek-v4-pro" },
+        });
         Groups.AddGroup(new Group { GroupId = "g7", GroupName = "公开群", OwnerId = "u1", CreateTime = 101 });
 
-        // 新实例读回：私密标记持久化，公开群默认为 false
+        // 新实例读回：私密标记与模型覆写都持久化，公开群默认为无
         var fresh = new RelationalGroupStore(Db);
         Assert.True(fresh.GetGroup("g6")!.IsPrivate);
         Assert.False(fresh.GetGroup("g7")!.IsPrivate);
+        Assert.Equal("deepseek-v4-pro", fresh.GetGroup("g6")!.ModelOverride);
+        Assert.Null(fresh.GetGroup("g7")!.ModelOverride);
 
-        // 原地修改路径（模拟 GroupHub.UpdateGroupAsync）：私密 → 公开
+        // 原地修改路径（模拟 GroupHub.UpdateGroupAsync）：私密 → 公开，并清空模型覆写
         var group = fresh.GetGroup("g6")!;
         group.IsPrivate = false;
+        group.ModelOverride = "";
         fresh.UpdateGroup(group);
-        Assert.False(new RelationalGroupStore(Db).GetGroup("g6")!.IsPrivate);
+        var again = new RelationalGroupStore(Db).GetGroup("g6")!;
+        Assert.False(again.IsPrivate);
+        Assert.Null(again.ModelOverride);
     }
 
     [Fact]

@@ -232,23 +232,33 @@ public sealed class PostgresGroupStoreTests : PostgresTestBase
     }
 
     [Fact]
-    public void IsPrivate_RoundTrip_AndUpdate()
+    public void IsPrivate_And_ModelOverride_RoundTrip_AndUpdate()
     {
         if (!PgAvailable) return;
 
-        Groups.AddGroup(new Group { GroupId = "g6", GroupName = "私密群", OwnerId = "u1", CreateTime = 100, IsPrivate = true });
+        Groups.AddGroup(new Group
+        {
+            GroupId = "g6", GroupName = "私密群", OwnerId = "u1", CreateTime = 100, IsPrivate = true,
+            // 知聚级模型覆写存于 Extra["model"]（零迁移）：验证 extra JSON 透传后仍能读回
+            Extra = new Dictionary<string, object?>(StringComparer.Ordinal) { ["kind"] = "normal", ["model"] = "deepseek-v4-pro" },
+        });
         Groups.AddGroup(new Group { GroupId = "g7", GroupName = "公开群", OwnerId = "u1", CreateTime = 101 });
 
-        // 新实例读回：私密标记持久化，公开群默认为 false
+        // 新实例读回：私密标记与模型覆写都持久化，公开群默认为无
         var fresh = new PostgresGroupStore(Store);
         Assert.True(fresh.GetGroup("g6")!.IsPrivate);
         Assert.False(fresh.GetGroup("g7")!.IsPrivate);
+        Assert.Equal("deepseek-v4-pro", fresh.GetGroup("g6")!.ModelOverride);
+        Assert.Null(fresh.GetGroup("g7")!.ModelOverride);
 
-        // 原地修改路径（模拟 GroupHub.UpdateGroupAsync）：私密 → 公开
+        // 原地修改路径（模拟 GroupHub.UpdateGroupAsync）：私密 → 公开，并清空模型覆写
         var group = fresh.GetGroup("g6")!;
         group.IsPrivate = false;
+        group.ModelOverride = ""; // 空 = 取消覆写
         fresh.UpdateGroup(group);
-        Assert.False(new PostgresGroupStore(Store).GetGroup("g6")!.IsPrivate);
+        var again = new PostgresGroupStore(Store).GetGroup("g6")!;
+        Assert.False(again.IsPrivate);
+        Assert.Null(again.ModelOverride);
     }
 }
 

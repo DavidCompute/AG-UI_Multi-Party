@@ -552,6 +552,13 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private string? ResolveRoutedModel(RunComplexity tier)
         => _options.ModelRouting?.ResolveForTier(tier);
 
+    /// <summary>知聚级模型覆写（管理员在「知聚设置」钉的模型；留空 = 不覆写）。优先于按复杂度路由。</summary>
+    private string? ResolveGroupModel(string groupId)
+    {
+        try { return _hub.Value.GroupModelOverride(groupId); }
+        catch { return null; }
+    }
+
     /// <summary>
     /// 客户端技能经内网隧道执行的等待上界（秒）。模型自报的 shell 超时决定基准，
     /// 原先上界硬编码 180 秒——对“复杂度高的本地批处理”是短板；这里改用本次运行的复杂度预算作为上界。
@@ -613,12 +620,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 同一运行内后续阶段（流水线 / 指派链 / 交付兜底）重算结果相同，不受提前安装影响。
         var runBudget = InstallRunBudget(context, def);
         var routedModel = ResolveRoutedModel(runBudget.Complexity);
-        var agent = routedModel is null
+        // 知聚级模型覆写（管理员）优先级最高：覆盖按复杂度路由与智能体默认模型
+        var effectiveModel = ResolveGroupModel(context.GroupId) ?? routedModel;
+        var agent = effectiveModel is null
             ? _catalog.GetOrCreate(context.AgentId)
-            : _catalog.GetOrCreateWithModel(context.AgentId, routedModel);
-        if (routedModel is not null)
-            _logger.LogInformation("按任务复杂度选模型：agent={AgentId} tier={Tier} model={Model}",
-                context.AgentId, runBudget.Complexity, routedModel);
+            : _catalog.GetOrCreateWithModel(context.AgentId, effectiveModel);
+        if (effectiveModel is not null)
+            _logger.LogInformation("按配置选择模型：agent={AgentId} tier={Tier} model={Model}（知聚覆写优先于复杂度路由）",
+                context.AgentId, runBudget.Complexity, effectiveModel);
         var runId = "run_" + IdGenerator.NewId();
         _logger.LogInformation("智能体 {AgentId} 开始运行：run={RunId} group={GroupId} 触发消息={MessageId}",
             context.AgentId, runId, context.GroupId, context.TriggerMessageId);

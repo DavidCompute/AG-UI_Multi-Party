@@ -4475,6 +4475,9 @@ function openGroupSettings() {
   $("gsDisbandBtn").style.display = me?.role === "owner" || g.ownerId === state.memberId ? "" : "none";
   $("gsGroupName").value = g.groupName || "";
   $("gsIsPrivate").checked = !!g.isPrivate;
+  // 知聚级模型覆写：仅平台管理员可见 / 可改（服务端同样限管理员）
+  if ($("gsModelGroup")) $("gsModelGroup").classList.toggle("hidden", !isAdminPlus());
+  if ($("gsModelOverride")) $("gsModelOverride").value = g.modelOverride || "";
   // 客服知聚：私密开关隐藏且不可改（服务端强制非私密）
   const gsPrivLabel = $("gsIsPrivate").closest(".modal-label");
   if (gsPrivLabel) gsPrivLabel.style.display = g.isSupportCircle ? "none" : "";
@@ -4496,6 +4499,11 @@ async function saveGroupSettings() {
   if (avatar !== (g.groupAvatar || null)) { updateFields.push("groupAvatar"); groupInfo.groupAvatar = avatar; }
   const isPrivate = $("gsIsPrivate").checked;
   if (isPrivate !== !!g.isPrivate) { updateFields.push("isPrivate"); groupInfo.isPrivate = isPrivate; }
+  // 知聚级模型覆写：仅管理员（服务端强校验）；空 = 取消覆写
+  if (isAdminPlus() && $("gsModelOverride")) {
+    const mo = $("gsModelOverride").value.trim();
+    if (mo !== (g.modelOverride || "")) { updateFields.push("model"); groupInfo.model = mo; }
+  }
   if (updateFields.length === 0) { $("groupSettingsModal").classList.add("hidden"); return; }
   try {
     const res = await fetch("/ag-ui/group/update", {
@@ -4510,6 +4518,7 @@ async function saveGroupSettings() {
     if (groupInfo.groupName !== undefined) g.groupName = groupInfo.groupName;
     if (groupInfo.groupAvatar !== undefined) g.groupAvatar = groupInfo.groupAvatar;
     if (groupInfo.isPrivate !== undefined) g.isPrivate = groupInfo.isPrivate;
+    if (groupInfo.model !== undefined) g.modelOverride = groupInfo.model || null;
     renderGroupList();
     $("chatGroupName").textContent = (g.isPrivate ? "🔒 " : "") + (g.groupName || "");
     toast(t("gs.saved"));
