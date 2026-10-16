@@ -1,3 +1,32 @@
+# AG-UI 群聊桌面版 1.0.259 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.259 Release Notes (current Windows desktop release)
+
+**版本说明**：**搜索框“×”清除按钮全覆盖 + 过期文案清理**——补齐最后几个缺失的筛选框（转发目标 / 记忆图谱 / 审计筛选），并把 index.html 中残留的旧模型名兜底文案对齐到 `deepseek-flash`。
+**Version note**: **Full coverage of the “×” clear buttons + stale-copy cleanup** — the last few filter boxes missing it (forward target / memory graph / audit filters) now have it, and leftover old-model fallback copy in index.html is aligned to `deepseek-flash`.
+
+## 变更
+# Changes
+
+中文：
+- **清除按钮补齐**：「转发到知聚」目标筛选 `#forwardSearch`、记忆图谱主题词 `#memGraphQuery`、管理员控制台「审计日志」筛选行 `#auditActor`/`#auditAction`/`#auditTarget` 均补上右侧 “×”（`.search-clear-wrap` + `button.search-clear[data-clear-for]`）。`initSearchClears()` 已通用接线，**无需额外 JS**。至此全部搜索 / 筛选文本框都有 “×”。
+- **过期兜底文案**：`#mc.thinking`（模型配置弹窗）与 `help.s5.4`（帮助）的 index.html 兜底文本仍写 `deepseek-reasoner` / `deepseek-chat`，与 1.0.258 统一后的 `deepseek-flash` 对齐。
+
+English:
+- **Clear-button coverage**: the forward-target filter `#forwardSearch`, the memory-graph topic box `#memGraphQuery`, and the admin **audit-log** filter row `#auditActor`/`#auditAction`/`#auditTarget` now have the “×” clear button (`.search-clear-wrap` + `button.search-clear[data-clear-for]`). `initSearchClears()` already wired them generically — **no extra JS**. Every search / filter box now has one.
+- **Stale fallback copy**: the index.html fallback text for `#mc.thinking` (model-config dialog) and `help.s5.4` still named `deepseek-reasoner` / `deepseek-chat`; aligned to `deepseek-flash` as unified in 1.0.258.
+
+## 文档
+# Docs
+
+中文：`docs/ui-design.md` 新增 §2.17，并更新全局「搜索框 ×」约定为全覆盖。
+English: `docs/ui-design.md` gains §2.17 and the global “search-box ×” convention is updated to full coverage.
+
+## 测试
+# Tests
+
+中文：纯前端改动。Playwright 实测（登录后）：5 个新增清除按钮均存在且结构正确（都在 `.search-clear-wrap` 内）、填入后 “×” 出现、点击清空；审计筛选行无横向溢出（`scrollWidth - clientWidth = 0`）；无控制台报错。i18n 审计 **zh=en=1918，missing 0**、`check-i18n-keys`（884）、`check-orphan-keys`（931）均过。另做了一次运行期扫描：登录后逐个调用 20 个弹窗打开函数并遍历账户菜单项，**无 JS 报错**（仅本机桥 127.0.0.1:17321 探测失败，属预期）。
+English: front-end only. Verified with Playwright (after login): all 5 new clear buttons exist with the correct structure (inside `.search-clear-wrap`), the “×” appears once filled and clears on click; the audit filter row does not overflow (`scrollWidth - clientWidth = 0`); no console errors. The i18n audit passes **zh=en=1918, missing 0**, `check-i18n-keys` (884) and `check-orphan-keys` (931). A runtime sweep was also run: after login, invoking 20 modal-opener functions and clicking every account-menu item produced **no JS errors** (only the local-bridge probe at 127.0.0.1:17321 failed, as expected).
+
 # AG-UI 群聊桌面版 1.0.258 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.258 Release Notes (current Windows desktop release)
 

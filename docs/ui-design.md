@@ -408,6 +408,15 @@ topbar（品牌 + 顶栏操作）
 - **灯箱外部图片下载**：<code>&lt;a download&gt;</code> 对跳源 URL 无效——外部图片改为新标签打开并提示右键另存（`lb.downloadExternal`）。
 - **表情浮层随场景收起**：切知聚（`selectGroup`）与发送后（`sendMessage`）一并收起。
 
+### 2.17 搜索框清除按钮全覆盖 + 过期文案清理（1.0.259）
+
+| 改动 | 说明 |
+|---|---|
+| 清除按钮补齐 | 「转发到知聚」目标筛选 `#forwardSearch`、记忆图谱主题词 `#memGraphQuery`、管理员控制台「审计日志」筛选行 `#auditActor` / `#auditAction` / `#auditTarget` 均补上右侧 “×” 一键清空（`.search-clear-wrap` + `button.search-clear[data-clear-for]`）。此前仅这几个筛选框缺失；`initSearchClears()` 已通用接线，无需额外 JS。至此**全部**搜索 / 筛选文本框均有 “×”。 |
+| 过期兜底文案 | `#mc.thinking` 与 `help.s5.4` 的 index.html **兜底文案**（i18n 尚未加载时的默认文本）仍写 `deepseek-reasoner` / `deepseek-chat`，与 1.0.258 统一后的 `deepseek-flash` 对齐。 |
+
+验证：Playwright（登录后）核对 5 个清除按钮存在且结构正确（均在 `.search-clear-wrap` 内）、填入后 “×” 出现、点击清空；审计筛选行无横向溢出（`scrollWidth - clientWidth = 0`）；无控制台报错。
+
 ---
 
 ## 3. 头像与默认占位规范（全局）
@@ -476,7 +485,7 @@ topbar（品牌 + 顶栏操作）
     绑定语义：绑了 = 该岗位出稿配图**只用这几个图库**（如对外宣讲岗只准用已审核品牌图库）；不绑 = 用触发者本人可读的全部图库。
     绑定的库全部被删时**不注入**（按“无图库”降级），**不会**静默放宽成该用户全部图库（回归：`AgentImageScopeBindingTests`）。
 - 折叠状态记忆 `agui.agentFormSections`。保存走 PUT（全量），携带既有交接/流水线/审批名单不丢失。
-- 界面约定：全部搜索输入框（数字员工 / 技能库 / 记忆 / 成员选择 / 消息搜索）右侧均有 “×” 一键清空（`common.clearSearch`）。
+- 界面约定：全部搜索 / 筛选输入框（数字员工 / 技能库 / 知识库 / 图库 / 记忆 / 成员选择 / 消息搜索 / 全局搜索 / 转发目标 / 记忆图谱 / 审计筛选）右侧均有 “×” 一键清空（`common.clearSearch`）；1.0.259 起全覆盖。
 
 ### 4.3 一键编排与组织架构
 
