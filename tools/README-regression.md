@@ -1,14 +1,15 @@
-# 运行期回归扫描（API + UI 控制台）
+# 回归与守卫（运行期扫描 + 配置键静态校验）
 
-两个**可复用**的回归脚本，用来在一次运行中对「正在跑的服务」（本机 Docker / 桌面版 / 任意部署）做一轮自动体检。
-它们不替代单元 / 集成测试（`dotnet test`），而是覆盖测试之外的两类真实缺陷：
+三个**可复用**的仓库级守卫，用来在一次运行中对「正在跑的服务」与「配置/代码一致性」做自动体检。
+它们不替代单元 / 集成测试（`dotnet test`），而是覆盖测试之外的三类真实缺陷：
 
-| 脚本 | 覆盖 | 抓什么 |
+| 脚本 | 类别 | 抓什么 |
 |---|---|---|
-| `api-smoke.mjs` | 后端 HTTP 只读主流面（46 项） | 路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 |
-| `ui-smoke.mjs` | 前端主要界面（Playwright） | **未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏**（如界面直接显示 `common.save common.cancel`） |
+| `api-smoke.mjs` | 运行期 | 后端 HTTP 只读主流面（46 项）：路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 |
+| `ui-smoke.mjs` | 运行期 | 前端主要界面（Playwright）：**未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏** |
+| `check-config-keys.mjs` | **静态** | **配置键 ↔ C# 属性漂移**：compose / appsettings 里配了、代码里没属性 → 会被**静默忽略、不报错也不生效**（文档 §9.9 专列此坑） |
 
-> 二者都是**只读**的：API 扫描全部走 GET；UI 扫描只「打开界面 + 切换页签」，新增类弹窗只开一次即关（不保存）。
+> 两个运行期脚本都是**只读**的：API 扫描全走 GET；UI 扫描只「打开界面 + 切换页签」，新增类弹窗只开一次即关（不保存）。
 
 ## 依赖
 
@@ -56,8 +57,22 @@ BASE_URL=http://127.0.0.1:5200 USERNAME=david PASSWORD='lingtong' node tools/ui-
 - 误报防护：`docs/user-guide.md`（含 `/`）、`app.js:7079`（含 `:`）、`deepseek-flash`（含 `-`）、`1.0.263`（数字开头）、`e.g`（前缀不在白名单）均不命中；`.hidden` 子树跳过。
 - 该探针经过**注入式自检**验证：往页面塞入 `common.save common.cancel` 与一个 `.hidden` 隐藏键，确认「该抓的抓到、该跳的跳过、正常文案不误报」。
 
+## 配置键守卫（`check-config-keys.mjs`，静态、不需跑服务）
+
+```bash
+node tools/check-config-keys.mjs                 # 校验：退出码 0 = 无未登记漂移；1 = 有漂移
+node tools/check-config-keys.mjs --no-allowlist  # 自证 / 审计：把白名单抑制的已知漂移全部打出
+```
+
+怎么判：从 `docker-compose.yml`（env `X__Y__Z`）与各 `appsettings.json`（`Section:Sub:Key`）收集配置键，按「节根 → 选项类文件」映射，检查末段属性名是否真在该文件（含同文件内嵌的嵌套 Options 类）声明。
+
+- **白名单**登记「有意保留 / 不参与强类型绑定」的键，并写明原因（如 `Observability:ReplicaId` 是 HubApp 启动时 `Configuration[...]` **直读**，非属性绑定）。
+- `--no-allowlist` 让白名单失效——既能**自证探针有牙**（当前恰好现形 3 个已文档化项），也能随时审计已知漂移清单（防止白名单里悄悄积压新问题）。
+- 新增配置键时若忘了在 Options 里加属性，默认模式会直接失败并指出来源文件。
+
 ## 建议的使用时机
 
 - 每次改动前端（`index.html` / `app.js` / i18n）后跑一遍 `ui-smoke.mjs`——i18n 与运行时错误在浏览器里才现形。
 - 每次后端改动 / 重建镜像后跑一遍 `api-smoke.mjs`。
-- 发布前两者都跑一遍，作为单元 / 集成测试之外的「运行期体检」。
+- 每次动 **compose / appsettings / 选项类**后跑一遍 `check-config-keys.mjs`（纯静态、秒级）。
+- 发布前三者都跑一遍，作为单元 / 集成测试之外的「仓库级体检」。

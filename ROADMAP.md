@@ -208,7 +208,8 @@
   - 后端：`GET /ag-ui/admin/config`（现有只读快照，涵盖存储 / 模型 / 记忆等需重启项）+ `POST /ag-ui/admin/config`（写入运行时安全可改旋钮：会话有效期、群消息上限 / 群成员上限 / 单消息字符、消息保留天数、强制令牌、工具开关 / 工作型工具 / 思考模式 / 每日 Token 配额、审批名单、iframe 嵌入来源），非法值 400，持久化到扩展区「configGovernance」，重启自动应用覆盖；`GET /ag-ui/admin/config/governance` 读回当前覆盖值。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
-  - 已含 2 个集成测试（管理员更新持久化 + 非法值 400 / 非管理员 403）。
+  - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。
+  - **配置键守卫（已实现）**：`tools/check-config-keys.mjs` 静态校验「compose / appsettings 的配置键 ↔ C# 选项属性」——把文档 §9.9 记录的「配了却没属性、被静默忽略」从**手工登记**变成**自动守卫**（白名单登记有意保留项，`--no-allowlist` 可自证 / 审计）。
 
 ### 6.4 嵌入 / 白标 / 对外 API（★☆☆） ✅已实现
 - **现状**：接入走网页会话 token；已提供官方 .NET SDK 供第三方应用程序化接入。

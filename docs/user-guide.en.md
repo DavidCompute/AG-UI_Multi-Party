@@ -5203,7 +5203,9 @@ The shortcut panel is rendered by `#shortcutsModal`, with text keys `sc.*` (`www
 
 ### 9.9 Implementation vs. documentation deviations
 
-All of the following were verified against the source (line numbers are locations at the time of writing, for re-checking):
+All of the following were verified against the source (line numbers are the locations at the time of writing, for traceability):
+
+> **Items 3 and 5 below are now guarded automatically**: `tools/check-config-keys.mjs` statically checks "config keys in compose / appsettings ↔ C# option properties", with an allowlist recording such intentional / directly-read exceptions; `--no-allowlist` self-checks and audits it (currently it surfaces exactly these three). A newly added config key that forgot its property is called out immediately.
 
 1. **[Fixed in 1.0.230] `GET /ag-ui/admin/config` is now consumed** by the Config Governance tab's "Read-only snapshot" button (`loadConfigSnapshot`).
 2. **[Fixed in 1.0.230] `GET /ag-ui/admin/bridge-capabilities` is now consumed** by the Runtime Metrics tab's "Bridge capability negotiation" table (`loadBridgeCaps`); `bridge-health` is consumed on the same page, and both support `?refresh=true` for a live probe (`#bridgeProbeBtn`).

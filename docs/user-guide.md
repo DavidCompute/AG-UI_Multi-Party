@@ -5199,6 +5199,8 @@ service:
 
 以下均经源码核实（行号为撰写时的定位，供回查）：
 
+> **本节第 3 / 5 条已由工具自动守卫**：`tools/check-config-keys.mjs` 静态校验「compose / appsettings 的配置键 ↔ C# 选项属性」，白名单登记此类「有意保留 / 直读」项；`--no-allowlist` 可自证与审计（当前恰好现形这 3 条）。新增配置键若忘了加属性会被直接找出来。
+
 1. **【已修复 1.0.230】`GET /ag-ui/admin/config` 已被前端消费**：「配置治理」页「只读参数快照」按钮（`loadConfigSnapshot`）调用该端点并展开 JSON。依据：`wwwroot/app.js` 的 `loadConfigSnapshot`。
 2. **【已修复 1.0.230】`GET /ag-ui/admin/bridge-capabilities` 已被前端消费**：「运行指标」页「桥接能力协商」表（`loadBridgeCaps`）；`bridge-health` 同页消费，且两者均支持 `?refresh=true` 立即探测（`#bridgeProbeBtn`）。
 3. **`Agents:Memory:ModelDownloadUrl` 在 `MemoryOptions` 中无对应属性**（`AgentOptions.cs` 的 `MemoryOptions` 无该成员）。该键由**桌面组合根直接经 `IConfiguration` 读取**（`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`），`AgentHosting.cs` L138-141 的日志文案也提及它；但 `Agents:Memory` 绑定到强类型 Options 时**不认这个键**。`README.md` / `README.en.md` / 桌面 README 均把它当配置键描述。依据：`AgentOptions.cs` L254-413、`DesktopApp.cs`、`AgentHosting.cs`。

@@ -6,7 +6,8 @@
   "scripts": {
     "ui:orch": "node ui-orchestrate-flow.mjs",
     "smoke:api": "node api-smoke.mjs",
-    "smoke:ui": "node ui-smoke.mjs"
+    "smoke:ui": "node ui-smoke.mjs",
+    "check:config": "node check-config-keys.mjs"
   },
   "devDependencies": {
     "playwright": "^1.48.0"
