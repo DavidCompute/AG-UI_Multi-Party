@@ -1,4 +1,34 @@
-# AG-UI 群聊桌面版 1.0.264 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.265 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.265 Release Notes (current Windows desktop release)
+
+**版本说明**：**把「谁在烧 token」摆到台面上**——用量统计页新增「**今日各知聚用量**」明细（含**配额使用占比**，达/超配额标红），并给两处配额拦截补上**可观测**（Prometheus 计数器 + 运行指标页卡片）。上一版刚把「按知聚配额」加上，如果看不见「哪个知聚快烧到了」，配额就只能靠报警发现；这一版补上可见性。
+**Version note**: **Putting "who is burning tokens" on the table** — the Usage Stats page gains a **today's usage per circle** breakdown (with **quota-utilization share**, red at/over quota), and both quota rejections become **observable** (a Prometheus counter + a Runtime Metrics card). The previous release added the per-circle quota; without visibility into which circle is about to hit its cap, a quota can only be discovered by surprise — this release adds that visibility.
+
+## 变更
+# Changes
+
+中文：
+- **用量统计新增「今日各知聚明细」**（`GET /ag-ui/admin/usage` 出参新增 `groupsToday[]`）：一次聚合（`AgentUsageService.GetGroupTodaySummary`，复用既有「按知聚」聚合表的当日行，**不扩接口**、4 个存储通用），按 token 降序取前 50；名称由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`，单聊知聚也能显示「与 X 的单聊」）。前端在按日表下方新增一张表：知聚 / 今日 Token / 调用次数 / **配额使用**（未设知聚配额时显「—」，达到或超出配额时标红）。
+- **配额拦截可观测**（`MetricsService.RecordQuotaRejection`，在 `AgentGateway` 两处拦截点调用）：新增计数器 `knowgath_quota_rejections_total{scope="user|group"}`（`/ag-ui/metrics`，按用户 / 按知聚分开），并加进 `Snapshot`；运行指标页新增**「配额拦截」卡片**（仅被挡过才显示，标红，副标题「用户 N ｜ 知聚 M」，一眼分辨是「知聚烧超」还是「个人超」）。
+- **为何不用审计日志**：配额拦截是**高频事件**（一旦超限，每个触发都会拦），写进审计日志会冲掉真正的关键操作记录（审计环形缓冲仅 5000 条）；指标是廉价累加、不落库，更适合这类计数。
+
+English:
+- **Usage Stats gains "today's usage per circle"** (the `GET /ag-ui/admin/usage` response adds `groupsToday[]`): aggregated in one pass (`AgentUsageService.GetGroupTodaySummary`, reusing the existing per-circle aggregate table's today rows, **without extending the interface**, so all 4 stores work), top 50 by tokens descending; names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`, so direct-chat circles show "Chat with X" too). The frontend adds a second table below the daily one: circle / today's tokens / calls / **quota use** ("—" when no per-circle quota is set, red at or over quota).
+- **Quota rejections are observable** (`MetricsService.RecordQuotaRejection`, called at both `AgentGateway` check points): a new counter `knowgath_quota_rejections_total{scope="user|group"}` (`/ag-ui/metrics`, split per user / per circle), also added to `Snapshot`; the Runtime Metrics page gains a **"Quota rejections" card** (shown only once something has been blocked, in red, with a "user N ｜ circle M" subtitle so you can instantly tell a per-circle burn from a personal one).
+- **Why not the audit log**: quota rejections are a **high-frequency event** (once over quota, every trigger is blocked), and writing them to the audit log would push out the genuinely critical operations (the audit ring buffer holds only 5000 entries); a cheap, non-persisted counter is the right fit.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.6（`/usage` 出参文档补 `groupsToday` 与 4 列表格说明，并把入参行号校正到当前实现）、§8.8.2（`Snapshot` 字段补 `embeddingCacheHits/Misses` 与 `quotaUser/GroupRejections`、卡片说明补两张条件卡片）、§9.2.8（`/usage` 端点描述）、§9.4 Prometheus 指标表（新增 `knowgath_quota_rejections_total`）。
+English: `docs/user-guide.md` / `en.md` §8.6 (the `/usage` response doc gains `groupsToday` and the 4-column table, with line numbers corrected to the current implementation), §8.8.2 (`Snapshot` fields gain `embeddingCacheHits/Misses` and `quotaUser/GroupRejections`; the card notes gain the two conditional cards), §9.2.8 (the `/usage` endpoint description), §9.4 Prometheus metrics table (new `knowgath_quota_rejections_total`).
+
+## 测试
+# Tests
+
+中文：新增 3 例——`AgentUsageServiceTests.GetGroupTodaySummary_GroupsByGroup_SortedDesc`（按知聚聚合 / 降序 / 无群上下文不入表）；`MetricsTests.RecordQuotaRejection_CountedByScope`（快照两字段 + Prometheus 两个 scope 标签）；`AdminApiIntegrationTests.AdminUsage_IncludesGroupsTodayWithNames`（建真实知聚 → 记录用量 → 断言 `groupsToday` **解出知聚名**而非回退 ID、tokens/calls 正确）。**全量测试通过**（1798 → 1801）；`dotnet build AguiGroupChat.slnx` **0 错误**；`node --check` 三份前端脚本通过；i18n 审计 **zh=en=1939，missing 0**，`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 均过；Docker 重建后端到端实测（`/usage` 出参含 `groupsToday` 且名称正确解析为「与 字段校验岗 的单聊」；`/admin/metrics` 含两个配额字段；`/ag-ui/metrics` 含 `knowgath_quota_rejections_total{scope=...}`）**7/7**、`tools/api-smoke.mjs` **46/46**。
+English: 3 new cases — `AgentUsageServiceTests.GetGroupTodaySummary_GroupsByGroup_SortedDesc` (aggregation per circle / descending / no-group context excluded); `MetricsTests.RecordQuotaRejection_CountedByScope` (both snapshot fields + both Prometheus `scope` labels); `AdminApiIntegrationTests.AdminUsage_IncludesGroupsTodayWithNames` (create a real circle → record usage → assert `groupsToday` **resolves the circle name** rather than falling back to the id, with correct tokens/calls). **All tests pass** (1798 → 1801); `dotnet build AguiGroupChat.slnx` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1939, missing 0**, and `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass; end-to-end against the rebuilt Docker stack (the `/usage` response contains `groupsToday` with names correctly resolved to "与 字段校验岗 的单聊"; `/admin/metrics` contains both quota fields; `/ag-ui/metrics` contains `knowgath_quota_rejections_total{scope=...}`) **7/7**, and `tools/api-smoke.mjs` **46/46**.
+
 # AG-UI Group Chat Desktop 1.0.264 Release Notes (current Windows desktop release)
 
 **版本说明**：**修复配额「热改静默失效」+ 新增「按知聚每日 Token 配额」**——前者是长期潜伏的缺陷：管理员在「配置治理」把每日 Token 配额改完、界面回读也对，但**实际不生效**（服务在构造时把配额拷成了一个字段，之后永远读那个旧值）；现已改为**委托实时读取**，保存即生效。后者补上一处「无人可管」的消耗：定时 / 广播任务以虚拟触发者 `system` 发起，**刻意豁免个人配额**，于是这一路只增不减；新增的知聚配额正好卡住它。

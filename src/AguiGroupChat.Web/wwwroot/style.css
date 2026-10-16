@@ -1763,6 +1763,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .admin-table th { position: sticky; top: 0; background: var(--bg, #fff); z-index: 1; font-weight: 600; }
 .admin-table td:last-child { white-space: normal; }
 .admin-empty { text-align: center; color: var(--muted); padding: 24px 0; }
+/* 用量统计：知聚今日用量达到 / 超出配额时高亮该行数字（配额使用列） */
+.usage-quota-hit { color: var(--err, #ff6b6b); font-weight: 600; }
 .tag-admin, .tag-user, .tag-disabled, .tag-active { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .tag-admin { background: rgba(240, 166, 58, .15); color: var(--warn, #f0a63a); }
 .tag-user { background: rgba(128, 128, 128, .12); color: var(--muted, #888); }

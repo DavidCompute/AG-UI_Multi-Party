@@ -79,6 +79,20 @@ public sealed class AgentUsageService
             .Sum(r => r.TotalTokens);
     }
 
+    /// <summary>今日各知聚用量汇总（一次查询聚合，按 token 降序）——供管理员「用量统计」的**分知聚明细**。
+    /// 与 <see cref="GetGroupTodayTokens"/> 同源（当日「按知聚」聚合表），但一次取回全部知聚，避免逐群查询。</summary>
+    public IReadOnlyList<GroupUsageToday> GetGroupTodaySummary()
+    {
+        var today = Today();
+        return _store.GetGroupUsageBetween(today, today)
+            .Where(r => !string.IsNullOrEmpty(r.GroupId))
+            .GroupBy(r => r.GroupId, StringComparer.Ordinal)
+            .Select(g => new GroupUsageToday(g.Key, g.Sum(r => r.TotalTokens), g.Sum(r => r.Calls)))
+            .OrderByDescending(x => x.Tokens)
+            .ThenBy(x => x.GroupId, StringComparer.Ordinal)
+            .ToList();
+    }
+
     /// <summary>按用户配额配置（0 = 不限；实时读配置）。</summary>
     public long DailyQuotaPerUser => Math.Max(0, _quotaPerUser());
 
@@ -136,3 +150,6 @@ public sealed record QuotaCheckResult(long Quota, long Used)
 
 /// <summary>按天聚合的用量摘要（管理员查看）。</summary>
 public sealed record UsageDaySummary(string Date, long TotalTokens, long PromptTokens, long CompletionTokens, long ReasoningTokens, long Calls);
+
+/// <summary>今日某知聚的用量汇总（管理员「用量统计」分知聚明细）。</summary>
+public sealed record GroupUsageToday(string GroupId, long Tokens, long Calls);

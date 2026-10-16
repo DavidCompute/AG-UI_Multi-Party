@@ -400,6 +400,31 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task AdminUsage_IncludesGroupsTodayWithNames()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var userId = admin.GetProperty("userId").GetString()!;
+
+        // 建一个真实知聚 → 记录该知的用量，验证「今日各知聚明细」能解出名字（而非回退 groupId）
+        using var create = Authed(HttpMethod.Post, "/ag-ui/group/create", token);
+        create.Content = JsonContent.Create(new { groupName = "用量明细知聚", ownerId = userId, memberIds = new[] { userId } });
+        var groupId = (await (await _client.SendAsync(create)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        usage.RecordUsage("agent_gt", "user_gt", groupId, 100, 50, 10);
+
+        using var req = Authed(HttpMethod.Get, "/ag-ui/admin/usage?days=7", token);
+        var res = await _client.SendAsync(req);
+        res.EnsureSuccessStatusCode();
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+        var row = d.GetProperty("groupsToday").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == groupId);
+        Assert.Equal("用量明细知聚", row.GetProperty("name").GetString());
+        Assert.Equal(160, row.GetProperty("tokens").GetInt64());
+        Assert.Equal(1, row.GetProperty("calls").GetInt64());
+    }
+
+    [Fact]
     public async Task AdminStatus_ReturnsCounters()
     {
         var admin = await RegisterAsync("admin_chief");

@@ -8713,6 +8713,9 @@ async function loadAdminMetrics() {
     const memSearches = (Number(d.memoryHitCount) || 0) + (Number(d.memoryEmptySearch) || 0);
     const dedupHits = Number(d.embeddingCacheHits) || 0;
     const dedupTotal = dedupHits + (Number(d.embeddingCacheMisses) || 0);
+    const quotaUserRejs = Number(d.quotaUserRejections) || 0;
+    const quotaGroupRejs = Number(d.quotaGroupRejections) || 0;
+    const quotaRejects = quotaUserRejs + quotaGroupRejs;
     const pct = (n, den) => den > 0 ? Math.round((n / den) * 1000) / 10 : 0;
     const items = [
       { label: t("admin.metricInvocations"), value: Number(d.invocations || 0).toLocaleString(), sub: "" },
@@ -8723,6 +8726,8 @@ async function loadAdminMetrics() {
       { label: t("admin.metricMemoryHits"), value: `${Number(d.memoryHitCount || 0).toLocaleString()} / ${memSearches.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(Number(d.memoryHitCount || 0), memSearches) }) },
       // 记忆写入去重（仅当有过写入编码时才显示，避免空卡片）
       ...(dedupTotal > 0 ? [{ label: t("admin.metricDedup"), value: `${dedupHits.toLocaleString()} / ${dedupTotal.toLocaleString()}`, sub: t("admin.metricRate", { pct: pct(dedupHits, dedupTotal) }), good: true }] : []),
+      // 配额拦截（仅当被挡过才显示）：知聚 / 按用户分开，便于判断是“知聚烧超”还是“个人超”
+      ...(quotaRejects > 0 ? [{ label: t("admin.metricQuota"), value: quotaRejects.toLocaleString(), sub: t("admin.metricQuotaSub", { user: quotaUserRejs.toLocaleString(), group: quotaGroupRejs.toLocaleString() }), bad: true }] : []),
     ];
     cards.innerHTML = items.map((it) => `<div class="admin-metric-card ${it.bad ? "bad" : it.good ? "good" : ""}">`
       + `<div class="am-label">${escapeHtml(it.label)}</div>`
@@ -8858,7 +8863,29 @@ async function loadAdminUsage() {
           <td>${Number(d.calls).toLocaleString()}</td>
         </tr>`).join("")
       : `<tr><td colspan="6" class="admin-empty">${t("admin.usageEmpty")}</td></tr>`;
-  } catch { $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`; }
+
+    // 今日各知聚明细：用量 + 配额使用占比（未设知聚配额时占比列显 "—"）
+    const groups = data.groupsToday || [];
+    $("adminUsageGroupRows").innerHTML = groups.length
+      ? groups.map((g) => {
+          const used = Number(g.tokens) || 0;
+          let quotaCell = "—";
+          if (quotaGroup > 0) {
+            const ratio = Math.round((used / quotaGroup) * 100);
+            quotaCell = `<span${ratio >= 100 ? ' class="usage-quota-hit"' : ""}>${used.toLocaleString()} / ${quotaGroup.toLocaleString()}（${ratio}%）</span>`;
+          }
+          return `<tr>
+          <td>${escapeHtml(g.name || g.groupId)}</td>
+          <td>${used.toLocaleString()}</td>
+          <td>${Number(g.calls).toLocaleString()}</td>
+          <td>${quotaCell}</td>
+        </tr>`;
+        }).join("")
+      : `<tr><td colspan="4" class="admin-empty">${t("admin.usageEmpty")}</td></tr>`;
+  } catch {
+    $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
+    $("adminUsageGroupRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
+  }
 }
 
 /* ============ 配置治理（6.3）：管理员在线调参 ============ */

@@ -106,6 +106,24 @@ public sealed class MetricsTests
         Assert.Contains("agent_id=\"a\\\"b\\\\c\"}", text);
     }
 
+    [Fact]
+    public void RecordQuotaRejection_CountedByScope()
+    {
+        var m = new MetricsService();
+        m.RecordQuotaRejection(isGroup: false);
+        m.RecordQuotaRejection(isGroup: true);
+        m.RecordQuotaRejection(isGroup: true);
+        var snap = m.Snapshot();
+        var t = snap.GetType();
+        Assert.Equal(1L, (long)t.GetProperty("quotaUserRejections")!.GetValue(snap)!);
+        Assert.Equal(2L, (long)t.GetProperty("quotaGroupRejections")!.GetValue(snap)!);
+
+        // Prometheus：按 scope 标签区分（user / group）
+        var text = m.RenderPrometheusText();
+        Assert.Contains("knowgath_quota_rejections_total{scope=\"user\"} 1", text);
+        Assert.Contains("knowgath_quota_rejections_total{scope=\"group\"} 2", text);
+    }
+
     private static (long Invocations, long Accepted, long Rejected, long BridgeCalls, long BridgeFailures, long MemoryHitCount, long MemoryEmptySearch, long OutputChars) GetProps(object snap)
     {
         var t = snap.GetType();

@@ -635,6 +635,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 配额校验（Agents:DailyTokenQuotaPerUser）：超限拒绝触发（定时任务 system 不受限）
         if (_usage.Value?.CheckUserQuota(context.TriggerUserId) is { } quota)
         {
+            _metrics.Value?.RecordQuotaRejection(isGroup: false);
             _logger.LogWarning("智能体触发被配额拦截：user={User} used={Used}/{Quota} agent={AgentId}",
                 context.TriggerUserId, quota.Used, quota.Quota, context.AgentId);
             await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent
@@ -651,6 +652,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 它对 system 触发**同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这里要管的。
         if (_usage.Value?.CheckGroupQuota(context.GroupId) is { } groupQuota)
         {
+            _metrics.Value?.RecordQuotaRejection(isGroup: true);
             _logger.LogWarning("智能体触发被知聚配额拦截：group={Group} used={Used}/{Quota} agent={AgentId} trigger={User}",
                 context.GroupId, groupQuota.Used, groupQuota.Quota, context.AgentId, context.TriggerUserId);
             await _hub.Value.BroadcastAsync(context.GroupId, new RunErrorEvent

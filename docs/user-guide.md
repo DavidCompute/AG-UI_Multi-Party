@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.264**
+> 适用版本：**1.0.265**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3928,23 +3928,26 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.6 用量统计 tab（`#adminTabUsage`）
 
-`loadAdminUsage()`（`app.js:8836-8879`）调 `GET /ag-ui/admin/usage?days=7`。
+`loadAdminUsage()`（`app.js:8841-8900`）调 `GET /ag-ui/admin/usage?days=7`。
 
-服务端（`AdminApi.cs:396-405`）返回：
+服务端（`AdminApi.cs:397-421`）返回：
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls }… ], "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary`（`AgentUsageService.cs:138`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
-- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:112-128`，即最多 90 天）；前端固定传 `days=7`。
-- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限，`AgentUsageService.cs:83`）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限，`AgentUsageService.cs:86`）。
+- `UsageDaySummary`（`AgentUsageService.cs:152`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
+- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:126`，即最多 90 天）；前端固定传 `days=7`。
+- **`groupsToday`（1.0.265 新增）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:84`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**（未设知聚配额时显「—」；达到或超出配额时该格标红）。
+- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限，`AgentUsageService.cs:97`）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限，`AgentUsageService.cs:100`）。
 
-前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`；若 `quotaGroup > 0` 再追加 `admin.quotaGroupEnabled`（`app.js:8841-8849`）。表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
+前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`；若 `quotaGroup > 0` 再追加 `admin.quotaGroupEnabled`（`app.js:8847-8854`）。按日表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
 
-> **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,89-97`）。
+> **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,103-111`）。
 >
-> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:101-109`，网关侧拦截见 `AgentGateway.cs:652-664`，错误码 `GROUP_QUOTA_EXCEEDED`）。
+> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:115-123`，网关侧拦截见 `AgentGateway.cs:653-665`，错误码 `GROUP_QUOTA_EXCEEDED`）。
+>
+> **拦截可观测（1.0.265）**：两处配额拦截均累加 `MetricsService.RecordQuotaRejection`（`AgentGateway.cs:638` / `:655`），经 `/ag-ui/metrics` 的 `knowgath_quota_rejections_total{scope="user|group"}` 与「运行指标」页的**「配额拦截」卡片**（仅被挡过才显示，附「用户 N ｜ 知聚 M」）观察「有多少请求被挡」。
 
 > **修复（1.0.264）**：此前两个配额值在 `AgentUsageService` **构造时**被拷贝成字段，导致管理员在「配置治理」热改配额**实际不生效**（只有重启才生效）；现改为注入 `Func<long>` **实时读取**（`AgentHosting.cs:66-70`），保存即生效。
 
@@ -3990,8 +3993,8 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 `loadAdminMetrics()`：
 
-- 主接口 `GET /ag-ui/admin/metrics`（进程内计数 `MetricsService.Snapshot`）：`startedAtMs`、`uptimeSeconds`、`invocations`、`accepted`、`rejected`、`bridgeCalls`、`bridgeFailures`、`memoryHitCount`、`memoryEmptySearch`、`outputChars`、`byAgent`（前 30 名）、`trend`，**以及 `process`**（`workingSetBytes` / `privateBytes` / `threadCount` / `handleCount` / `processorCount` / `gcHeapBytes` / `gcGen0-2` / `allocatedBytes`）。
-- 业务卡片 6 项：调用总次数、成功（`accepted`）、拒绝（`rejected`，>0 标红）、输出字符数（`outputChars`）、桥接失败（`bridgeFailures / bridgeCalls`，含比率）、记忆命中（`memoryHitCount / (memoryHitCount+memoryEmptySearch)`，含比率）。
+- 主接口 `GET /ag-ui/admin/metrics`（进程内计数 `MetricsService.Snapshot`）：`startedAtMs`、`uptimeSeconds`、`invocations`、`accepted`、`rejected`、`bridgeCalls`、`bridgeFailures`、`memoryHitCount`、`memoryEmptySearch`、`embeddingCacheHits` / `embeddingCacheMisses`、`quotaUserRejections` / `quotaGroupRejections`（1.0.265 新增）、`outputChars`、`byAgent`（前 30 名）、`trend`，**以及 `process`**（`workingSetBytes` / `privateBytes` / `threadCount` / `handleCount` / `processorCount` / `gcHeapBytes` / `gcGen0-2` / `allocatedBytes`）。
+- 业务卡片固定 6 项：调用总次数、成功（`accepted`）、拒绝（`rejected`，>0 标红）、输出字符数（`outputChars`）、桥接失败（`bridgeFailures / bridgeCalls`，含比率）、记忆命中（`memoryHitCount / (memoryHitCount+memoryEmptySearch)`，含比率）；另有**两张条件卡片**（无数据时不显示）：「记忆去重命中 / 写入编码」（有写入编码时）与「**配额拦截**」（`quotaUserRejections + quotaGroupRejections > 0` 时；被挡过则标红，副标题为「用户 N ｜ 知聚 M」，用于区分是「知聚烧超」还是「个人超」）。
 - **进程健康卡片 4 项**（`#adminProcessCards`）：工作集内存（+ 私有内存）、GC 堆（+ G0/G1/G2 次数）、线程数（+ 核心数）、累计分配（+ 句柄）。
 - 分数字员工表 `#adminByAgentRows`：`byAgent[].agentId / count`。
 - **看板图表**（`renderMetricsDashboard`，`renderSparkSvg`）：服务端**每 60 秒**采一点、缓存最近 **240** 点（约 4 小时），前端取所选窗口最近 N 点做**差分**（间隔即 60s → 差分值即「每分钟增量」），画五条多序列图——调用速率、成功 / 拒绝、桥接调用 / 失败、记忆命中 / 空检索、输出吞吐；并据窗口内成功 / 拒绝之和画**成功率环**（`renderDonut`，≥90% 绿 / ≥60% 黄 / 否则红）。无 ≥2 点时图表区整体隐藏、环显示 `—`。
@@ -4658,7 +4661,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/admin/eval-cases/run` | 一键跑分（确定性关键词判定，返回逐条 passed / matched / missed / reply / durationMs） | 管理员 |
 | GET | `/ag-ui/admin/voice/voices` | 语音合成音色列表（代理 TTS 服务 `/v1/audio/voices`）：`{ voices: string[] }`；未配置 / 不支持 404、不可达 503 | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | 音色试听：合成一句短样例并内联返回音频（便于 `<audio src>`，可带 `?token=`）；未启用 404、失败 503 | Operator |
-| GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 配额） | 运维 |
+| GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 分知聚今日明细 + 配额） | 运维 |
 | GET | `/ag-ui/admin/audit` | 操作审计日志查询（`limit` 最多 200；过滤 `actor` / `action` / `targetId` / `fromMs` / `toMs`） | 运维 |
 | GET | `/ag-ui/admin/audit.csv` | 审计日志导出 CSV（UTF-8 BOM，无 200 条上限） | 运维 |
 | GET | `/ag-ui/admin/bridge-health` | 桥接端点健康度（`?refresh=true` 实时探测） | 运维 |
@@ -4745,6 +4748,7 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
 | `knowgath_agent_accepted_total` / `knowgath_agent_rejected_total` | counter | 出答 / 拒绝 |
 | `knowgath_bridge_calls_total` / `knowgath_bridge_failures_total` | counter | 桥接调用 / 失败 |
 | `knowgath_memory_hits_total` / `knowgath_memory_empty_total` | counter | 语义记忆命中 / 空检索 |
+| `knowgath_quota_rejections_total{scope="user|group"}` | counter | 被 token 配额拦截的触发数（按用户 / 按知聚，1.0.265 新增） |
 | `knowgath_output_chars_total` | counter | 输出字符总数 |
 | `knowgath_agent_invocations_by_agent_total{agent_id="…"}` | counter | 分数字员工调用量（标签值转义） |
 | `knowgath_process_working_set_bytes` / `_private_bytes` / `_threads` / `_handles` / `knowgath_processors` | gauge | 进程资源 |

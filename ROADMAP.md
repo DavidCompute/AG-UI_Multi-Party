@@ -207,6 +207,7 @@
 - **已实现**：
   - 后端：`GET /ag-ui/admin/config`（现有只读快照，涵盖存储 / 模型 / 记忆等需重启项）+ `POST /ag-ui/admin/config`（写入运行时安全可改旋钮：会话有效期、群消息上限 / 群成员上限 / 单消息字符、消息保留天数、强制令牌、工具开关 / 工作型工具 / 思考模式 / 每日 Token 配额（按用户 / 按知聚）、审批名单、iframe 嵌入来源），非法值 400，持久化到扩展区「configGovernance」，重启自动应用覆盖；`GET /ag-ui/admin/config/governance` 读回当前覆盖值。
   - **配额修复与扩充（1.0.264）**：新增**按知聚每日 Token 配额**（`Agents:DailyTokenQuotaPerGroup`）——按用户配额刻意豁免 `system` 触发者，于是定时 / 广播那路消耗无人可管；按知聚配额不豁免，正好卡住它。并修复一个潜伏缺陷：两个配额原先在 `AgentUsageService` 构造时被拷贝成字段，导致「配置治理」热改配额**实际不生效**（仅重启生效）；现改为 `Func<long>` 实时读取，保存即生效。
+  - **配额可见性（1.0.265）**：用量统计页新增「今日各知聚用量」明细（`/usage` 出参 `groupsToday[]`，含配额使用占比、达/超标红）；两处配额拦截补上可观测（`knowgath_quota_rejections_total{scope="user|group"}` + 运行指标页「配额拦截」卡片）。配额是「看得见才管得住」的典型。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

@@ -393,13 +393,28 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 模型用量统计（最近 N 天按日汇总 / 配额配置）：仅管理员及以上（含运维）
-        root.MapGet("/usage", (int? days, HttpContext ctx, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
+        // 模型用量统计（最近 N 天按日汇总 / 配额配置 / 今日各知聚明细）：仅管理员及以上（含运维）
+        root.MapGet("/usage", (int? days, HttpContext ctx, IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
+            // 今日各知聚明细：把「哪个知聚在烧 token」直接摆出来（配额也是按知聚日切，故对今日口径最有用）
+            var groupNames = sp.GetService<GroupHub>()?.Store.AllGroups()
+                .ToDictionary(g => g.GroupId, g => g.GroupName, StringComparer.Ordinal)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            var groupsToday = usage.GetGroupTodaySummary()
+                .Take(50)
+                .Select(g => new
+                {
+                    groupId = g.GroupId,
+                    name = groupNames.TryGetValue(g.GroupId, out var gn) ? gn : g.GroupId,
+                    tokens = g.Tokens,
+                    calls = g.Calls,
+                })
+                .ToList();
             return Results.Ok(new
             {
                 dailyQuotaPerUser = usage.DailyQuotaPerUser,
                 dailyQuotaPerGroup = usage.DailyQuotaPerGroup,
+                groupsToday,
                 days = usage.GetDailySummary(days ?? 7),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));

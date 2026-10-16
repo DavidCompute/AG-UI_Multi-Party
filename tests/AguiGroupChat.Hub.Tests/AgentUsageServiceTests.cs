@@ -115,6 +115,25 @@ public sealed class AgentUsageServiceTests
     }
 
     [Fact]
+    public void GetGroupTodaySummary_GroupsByGroup_SortedDesc()
+    {
+        var svc = CreateLive(() => 0, () => 0);
+        svc.RecordUsage("agent_a", "user_1", "group_k1", 100, 50, 10); // 160
+        svc.RecordUsage("agent_b", "user_2", "group_k1", 10, 10, 0);   // +20 → 180 / 2 次
+        svc.RecordUsage("agent_a", "user_1", "group_k2", 7, 3, 0);     // 10 / 1 次
+        svc.RecordUsage("agent_a", "user_1", 100, 100, 0);             // 无群上下文：不入分知聚
+
+        var rows = svc.GetGroupTodaySummary();
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("group_k1", rows[0].GroupId); // 降序：180 > 10
+        Assert.Equal(180, rows[0].Tokens);
+        Assert.Equal(2, rows[0].Calls);
+        Assert.Equal("group_k2", rows[1].GroupId);
+        Assert.Equal(10, rows[1].Tokens);
+        Assert.Equal(1, rows[1].Calls);
+    }
+
+    [Fact]
     public void GetDailySummary_AggregatesByDay()
     {
         var svc = Create();

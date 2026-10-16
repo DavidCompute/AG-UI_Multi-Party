@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.264**
+> Applies to version: **1.0.265**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3933,23 +3933,26 @@ The single server-side source of truth is `MemoryGovernance` (`MemoryGovernance.
 
 ### 8.6 Usage Stats tab (`#adminTabUsage`)
 
-`loadAdminUsage()` (`app.js:8836-8879`) calls `GET /ag-ui/admin/usage?days=7`.
+`loadAdminUsage()` (`app.js:8841-8900`) calls `GET /ag-ui/admin/usage?days=7`.
 
-The server (`AdminApi.cs:396-405`) returns:
+The server (`AdminApi.cs:397-421`) returns:
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls }… ], "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary` (`AgentUsageService.cs:138`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
-- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:112-128`, i.e. at most 90 days); the frontend always passes `days=7`.
-- Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited, `AgentUsageService.cs:83`); `dailyQuotaPerGroup` comes from `AgentUsageService.DailyQuotaPerGroup` (config `Agents:DailyTokenQuotaPerGroup`, `0` = unlimited, `AgentUsageService.cs:86`).
+- `UsageDaySummary` (`AgentUsageService.cs:152`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
+- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:126`, i.e. at most 90 days); the frontend always passes `days=7`.
+- **`groupsToday` (new in 1.0.265)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:84`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use** (shows "—" when no per-circle quota is set; the cell turns red at or over quota).
+- Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited, `AgentUsageService.cs:97`); `dailyQuotaPerGroup` comes from `AgentUsageService.DailyQuotaPerGroup` (config `Agents:DailyTokenQuotaPerGroup`, `0` = unlimited, `AgentUsageService.cs:100`).
 
-Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, noting "exceeding it will be rejected; auto-restores at UTC next day"); otherwise `admin.quotaDisabled`; if `quotaGroup > 0` it appends `admin.quotaGroupEnabled` (`app.js:8841-8849`). The table has 6 columns: date / total tokens / input / output / thinking / calls.
+Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, noting "exceeding it will be rejected; auto-restores at UTC next day"); otherwise `admin.quotaDisabled`; if `quotaGroup > 0` it appends `admin.quotaGroupEnabled` (`app.js:8847-8854`). The daily table has 6 columns: date / total tokens / input / output / thinking / calls.
 
-> The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,89-97`).
+> The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,103-111`).
 >
-> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:101-109`; the gateway-side check is `AgentGateway.cs:652-664`, error code `GROUP_QUOTA_EXCEEDED`).
+> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:115-123`; the gateway-side check is `AgentGateway.cs:653-665`, error code `GROUP_QUOTA_EXCEEDED`).
+>
+> **Rejections are observable (1.0.265)**: both quota checks increment `MetricsService.RecordQuotaRejection` (`AgentGateway.cs:638` / `:655`), observable via `knowgath_quota_rejections_total{scope="user|group"}` on `/ag-ui/metrics` and the **"Quota rejections" card** on the Runtime Metrics page (shown only once something has been blocked, with a "user N ｜ circle M" subtitle).
 
 > **Fixed (1.0.264)**: both quota values used to be copied into fields **at construction** of `AgentUsageService`, so an admin hot-changing the quota in Config Governance **did not actually apply** (it only took effect after a restart); they now read via an injected `Func<long>` **in real time** (`AgentHosting.cs:66-70`), so they apply on save.
 
@@ -3995,8 +3998,8 @@ View `#adminMetricsView` (`index.html`): a header `#adminMetricsMeta` + `#metric
 
 `loadAdminMetrics()`:
 
-- Main endpoint `GET /ag-ui/admin/metrics` (in-process counters `MetricsService.Snapshot`): `startedAtMs`, `uptimeSeconds`, `invocations`, `accepted`, `rejected`, `bridgeCalls`, `bridgeFailures`, `memoryHitCount`, `memoryEmptySearch`, `outputChars`, `byAgent` (top 30), `trend`, **and `process`** (`workingSetBytes` / `privateBytes` / `threadCount` / `handleCount` / `processorCount` / `gcHeapBytes` / `gcGen0-2` / `allocatedBytes`).
-- 6 business cards: total invocations, accepted (`accepted`), rejected (`rejected`, shown in red when >0), output chars (`outputChars`), bridge failures (`bridgeFailures / bridgeCalls`, with a ratio), memory hits (`memoryHitCount / (memoryHitCount+memoryEmptySearch)`, with a ratio).
+- Main endpoint `GET /ag-ui/admin/metrics` (in-process counters `MetricsService.Snapshot`): `startedAtMs`, `uptimeSeconds`, `invocations`, `accepted`, `rejected`, `bridgeCalls`, `bridgeFailures`, `memoryHitCount`, `memoryEmptySearch`, `embeddingCacheHits` / `embeddingCacheMisses`, `quotaUserRejections` / `quotaGroupRejections` (new in 1.0.265), `outputChars`, `byAgent` (top 30), `trend`, **and `process`** (`workingSetBytes` / `privateBytes` / `threadCount` / `handleCount` / `processorCount` / `gcHeapBytes` / `gcGen0-2` / `allocatedBytes`).
+- 6 fixed business cards: total invocations, accepted (`accepted`), rejected (`rejected`, shown in red when >0), output chars (`outputChars`), bridge failures (`bridgeFailures / bridgeCalls`, with a ratio), memory hits (`memoryHitCount / (memoryHitCount+memoryEmptySearch)`, with a ratio); plus **two conditional cards** (hidden when there is no data): "Memory dedup hits / writes" (once there have been write embeddings) and **"Quota rejections"** (when `quotaUserRejections + quotaGroupRejections > 0`; shown in red once something has been blocked, with a "user N ｜ circle M" subtitle so you can tell a per-circle burn from a personal one).
 - **4 process-health cards** (`#adminProcessCards`): working set (+ private), GC heap (+ G0/G1/G2 collections), threads (+ CPU count), total allocated (+ handles).
 - Per-digital-employee table `#adminByAgentRows`: `byAgent[].agentId / count`.
 - **Dashboard charts** (`renderMetricsDashboard`, `renderSparkSvg`): the server samples one point **every 60 seconds** and caches the latest **240** points (about 4 hours); the frontend takes the last N points of the selected window and **diffs** them (a 60s interval means each delta is a "per-minute increment"), plotting five multi-series charts — invocation rate, accepted / rejected, bridge calls / failures, memory hits / empty, and output throughput — plus a **success-rate ring** from the window's accepted / rejected sums (`renderDonut`; ≥90% green / ≥60% amber / else red). With fewer than 2 points the chart area is hidden and the ring shows `—`.
@@ -4664,7 +4667,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | POST | `/ag-ui/admin/eval-cases/run` | Run all (deterministic keyword judging; returns per-case passed / matched / missed / reply / durationMs) | Admin |
 | GET | `/ag-ui/admin/voice/voices` | Voice list for synthesis (proxies the TTS `/v1/audio/voices`): `{ voices: string[] }`; 404 unconfigured / unsupported, 503 unreachable | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
-| GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + quota) | Operator |
+| GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + today's per-circle breakdown + quota) | Operator |
 | GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `fromMs` / `toMs`) | Operator |
 | GET | `/ag-ui/admin/audit.csv` | Audit log CSV export (UTF-8 BOM, no 200-row limit) | Operator |
 | GET | `/ag-ui/admin/bridge-health` | Bridge endpoint health (`?refresh=true` for a live probe) | Operator |
@@ -4751,6 +4754,7 @@ curl -s -X POST "http://127.0.0.1:5200/agui/v1/groups/<groupId>/messages" \
 | `knowgath_agent_accepted_total` / `knowgath_agent_rejected_total` | counter | Answered / rejected |
 | `knowgath_bridge_calls_total` / `knowgath_bridge_failures_total` | counter | Bridge calls / failures |
 | `knowgath_memory_hits_total` / `knowgath_memory_empty_total` | counter | Memory hits / empty searches |
+| `knowgath_quota_rejections_total{scope="user|group"}` | counter | Triggers blocked by token quota (per user / per circle; new in 1.0.265) |
 | `knowgath_output_chars_total` | counter | Total output characters |
 | `knowgath_agent_invocations_by_agent_total{agent_id="…"}` | counter | Per-agent invocations (label values escaped) |
 | `knowgath_process_working_set_bytes` / `_private_bytes` / `_threads` / `_handles` / `knowgath_processors` | gauge | Process resources |

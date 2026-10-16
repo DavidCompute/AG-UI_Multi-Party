@@ -18,6 +18,8 @@ public sealed class MetricsService
     private long _memoryEmptySearch;
     private long _embeddingCacheHits;
     private long _embeddingCacheMisses;
+    private long _quotaUserRejections;
+    private long _quotaGroupRejections;
     private long _outputChars;
     private readonly ConcurrentDictionary<string, long> _byAgent = new(StringComparer.Ordinal);
     private readonly long _startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -62,6 +64,14 @@ public sealed class MetricsService
     public void RecordEmbeddingCache(bool hit)
     {
         if (hit) Interlocked.Increment(ref _embeddingCacheHits); else Interlocked.Increment(ref _embeddingCacheMisses);
+    }
+
+    /// <summary>配额拦截计数：本次触发因配额未执行。<paramref name="isGroup"/> = 知聚配额（false = 按用户配额）。
+    /// 与其它计数器一样是廉价原子累加，供运行指标页 / Prometheus 观察「有多少请求被挡」。 </summary>
+    public void RecordQuotaRejection(bool isGroup)
+    {
+        if (isGroup) Interlocked.Increment(ref _quotaGroupRejections);
+        else Interlocked.Increment(ref _quotaUserRejections);
     }
 
     /// <summary>读取侧惰性采样：距上次样本 ≥60s 时把当前累计值记入趋势环（保留最近 4 小时）。</summary>
@@ -149,6 +159,11 @@ public sealed class MetricsService
         Metric(sb, "knowgath_memory_empty_total", "counter", "Semantic-memory searches that returned nothing", Volatile.Read(ref _memoryEmptySearch));
         Metric(sb, "knowgath_memory_embedding_cache_hits_total", "counter", "Memory-write embedding calls avoided by content dedup cache", Volatile.Read(ref _embeddingCacheHits));
         Metric(sb, "knowgath_memory_embedding_cache_misses_total", "counter", "Memory-write embedding calls performed (dedup cache miss)", Volatile.Read(ref _embeddingCacheMisses));
+        // 配额拦截（知聚 / 按用户分开）：被挡住的请求数（非失败，是「政策拒绝」）
+        sb.Append("# HELP knowgath_quota_rejections_total Triggers rejected by token quota (by scope)\n");
+        sb.Append("# TYPE knowgath_quota_rejections_total counter\n");
+        sb.Append("knowgath_quota_rejections_total{scope=\"user\"} ").Append(Volatile.Read(ref _quotaUserRejections)).Append('\n');
+        sb.Append("knowgath_quota_rejections_total{scope=\"group\"} ").Append(Volatile.Read(ref _quotaGroupRejections)).Append('\n');
         Metric(sb, "knowgath_output_chars_total", "counter", "Total characters produced by agents", Volatile.Read(ref _outputChars));
 
         // 分数字员工调用量（带 agent_id 标签）
@@ -233,6 +248,8 @@ public sealed class MetricsService
             memoryEmptySearch = Volatile.Read(ref _memoryEmptySearch),
             embeddingCacheHits = Volatile.Read(ref _embeddingCacheHits),
             embeddingCacheMisses = Volatile.Read(ref _embeddingCacheMisses),
+            quotaUserRejections = Volatile.Read(ref _quotaUserRejections),
+            quotaGroupRejections = Volatile.Read(ref _quotaGroupRejections),
             outputChars = Volatile.Read(ref _outputChars),
             byAgent = _byAgent.OrderByDescending(kv => kv.Value).Take(30).Select(kv => new { agentId = kv.Key, count = kv.Value }),
             trend,
