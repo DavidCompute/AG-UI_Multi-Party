@@ -1,3 +1,36 @@
+# AG-UI 群聊桌面版 1.0.257 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.257 Release Notes (current Windows desktop release)
+
+**版本说明**：**组织编排落库前自检清单 + 连接双向归一**——一键编排 / 组织架构构建师出稿后，预览里逐条列出**自检清单**（结构 / 连接 / 技能 / 交付闭环），把“只有问题提升没有任务指派”“没人能产出你要的文件”“交付岗被写成等定稿才出文件的门卫”等问题在**确认落库之前**暴露出来；同时把「向下任务指派」与「向上问题提升」两条链**双向补全**。
+**Version note**: **Pre-commit self-check list for org orchestration + two-way link normalization** — after one-click orchestration / the org architect produces a plan, the preview now lists a **self-check checklist** item by item (structure / links / skills / delivery closed loop), surfacing problems such as “escalation only, no task assignment”, “nobody can produce the file you asked for” and “the delivery role was written as a gatekeeper that waits for a final draft” **before you confirm**, and it now **backfills both directions** of the assignment / escalation links.
+
+## 变更
+# Changes
+
+中文：
+- **自检清单（新）**：`AgentOrchestrator.SelfCheck(plan, requirement)` → `IReadOnlyList<OrgPlanCheck>`（每项 `{code, level(error/warn/info), message}`）。`/orchestrate` 与 `/orchestrate/stream`（`done` 事件）都新增 `selfCheck` 字段（`deliveryWarning` 保留不变，向后兼容）。
+- **逐条而不是只报第一条**：此前预览最多只显示一条 `deliveryWarning`（三选一 `??`）；现在结构、连接、技能、交付四类问题**全部列清**。检查项：`no_agents` / `dangling_link`（连接指向不存在的岗位，落库会被拒）/ `no_connections`（既无指派也无提升）/ `no_assignment`（只有提升没有指派）/ `no_escalation`（只有指派没有提升）/ `self_escalation` / `agent_without_skill` / `delivery_gap` / `hollow_delivery` / `delivery_gatekeeper`；全通过时给出 `ok` 摘要。
+- **连接双向归一**：`AgentOrchestrator.NormalizeConnections`（原 `InferAssignments`）与 `OrgApplyEngine.NormalizeConnections`（原 `EnsureAssignmentsForLeaders`）现在**两个方向**都补：由「提升目标」反推「直接下级」补进 `assignmentIds`（原有），再由「指派目标」反推**唯一**直接上级补进 `escalationAgentId`（新增）。带自环 / 二环保护；被多个上级指派的下级不猜上级；已有显式连接一律保留（只增不改）。
+- **前端预览渲染清单**：`formatOrchestrationPlan` 追加「落库前自检清单」（❌ error / ⚠️ warn / ✅ info 分行），状态栏显示 error 计数（`org.orchSelfCheckErr`）。
+
+English:
+- **Self-check checklist (new)**: `AgentOrchestrator.SelfCheck(plan, requirement)` → `IReadOnlyList<OrgPlanCheck>` (each `{code, level(error/warn/info), message}`). Both `/orchestrate` and `/orchestrate/stream` (the `done` event) now carry a `selfCheck` field (`deliveryWarning` is unchanged for backward compatibility).
+- **List every problem, not just the first**: the preview previously showed at most one `deliveryWarning` (a three-way `??`); now structural, link, skill and delivery problems are **all listed**. Codes: `no_agents` / `dangling_link` (a link points at a role that does not exist — apply would reject it) / `no_connections` (neither assignment nor escalation) / `no_assignment` (escalation only) / `no_escalation` (assignment only) / `self_escalation` / `agent_without_skill` / `delivery_gap` / `hollow_delivery` / `delivery_gatekeeper`; an `ok` summary when all pass.
+- **Two-way link normalization**: `AgentOrchestrator.NormalizeConnections` (was `InferAssignments`) and `OrgApplyEngine.NormalizeConnections` (was `EnsureAssignmentsForLeaders`) now fill **both** directions — from an escalation target derive its direct subordinates into `assignmentIds` (as before), and from an assignment target derive its **unique** direct superior into `escalationAgentId` (new). Self-loop / 2-cycle guards; a subordinate assigned by several managers is left alone; existing explicit links are always preserved (additive only).
+- **Front-end renders the list**: `formatOrchestrationPlan` appends a “pre-commit self-check” section (❌ error / ⚠️ warn / ✅ info per line) and the status line shows the error count (`org.orchSelfCheckErr`).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.7 补充「落库前自检清单」与「连接双向归一」；`docs/customer-service-and-org-builder.md` §B.1/§B.5 更新锚点（`NormalizeConnections`）；`ROADMAP.md` / `ROADMAP.en.md` §1.1 / §6.5 更新。
+English: `docs/user-guide.md` / `en.md` §3.7 adds the “pre-commit self-check” and “two-way normalization”; `docs/customer-service-and-org-builder.md` §B.1/§B.5 anchor update (`NormalizeConnections`); `ROADMAP.md` / `ROADMAP.en.md` §1.1 / §6.5 updated.
+
+## 测试
+# Tests
+
+中文：新增 `tests/AguiGroupChat.Hub.Tests/OrgPlanSelfCheckTests.cs`（14 例：扁平无连接→`no_connections`；只有提升→`no_assignment`；只有指派→`no_escalation`(warn)；成对→`ok`；悬空连接→error；自环→warn；无技能→warn；要 Word 无产出→`delivery_gap` 与结构问题**并列**列出；`no_agents` 短路；`Parse` 由提升补指派、由指派补提升、保留显式提升、多上级不猜、归一后自检无 error）。回归：`OrchestrationDeliveryLoopTests` **135 通过**、`AgentApiIntegrationTests` **40 通过**（含既有 `Orchestrate_Apply_AddsAssignmentsForLeaders_WhenOnlyEscalationGiven`）；`dotnet build` 0 错误；`node --check`、i18n 审计 **zh=en=1918，missing 0**、`check-i18n-keys`（884）、`check-orphan-keys`（931）均过。
+English: new `tests/AguiGroupChat.Hub.Tests/OrgPlanSelfCheckTests.cs` (14 cases: flat/no links → `no_connections`; escalation only → `no_assignment`; assignment only → `no_escalation` (warn); paired → `ok`; dangling link → error; self-loop → warn; no skill → warn; Word wanted with no producer → `delivery_gap` listed **alongside** the structural problem; `no_agents` short-circuits; `Parse` fills assignment from escalation, escalation from assignment, keeps an explicit escalation, does not guess for a shared subordinate, and a normalized plan passes with no error). Regression: `OrchestrationDeliveryLoopTests` **135 passed**, `AgentApiIntegrationTests` **40 passed** (including the existing `Orchestrate_Apply_AddsAssignmentsForLeaders_WhenOnlyEscalationGiven`); `dotnet build` 0 errors; `node --check`, the i18n audit **zh=en=1918, missing 0**, `check-i18n-keys` (884) and `check-orphan-keys` (931) all pass.
+
 # AG-UI 群聊桌面版 1.0.256 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.256 Release Notes (current Windows desktop release)
 
@@ -8,7 +41,7 @@
 # Changes
 
 中文：
-- **入口改为弹窗**：📥 → `openExportChatModal()` □ `#exportChatModal`（范围单选 + 格式单选 + 导出 / 取消；Esc / 点遮罩关闭），点导出 → `runChatExport()`。
+- **入口改为弹窗**：📥 → `openExportChatModal()` → `#exportChatModal`（范围单选 + 格式单选 + 导出 / 取消；Esc / 点遮罩关闭），点导出 → `runChatExport()`。
 - **范围**：当前话题（单节） / 整个知聚（按话题分节；MD 用 `## {话题}`，HTML 用 `<h2>`；最多 12 个话题，每话题至多 10 页）。
 - **HTML 导出（新）**：**单文件 + 内联样式 + 无外部引用**，离线可开、可打印为 PDF（`@media print` + `print-color-adjust: exact`）；正文用已渲染并消毒的 `renderMarkdown`，数字员工消息带浅蓝左边线。
 - **代码整理**：抽出 `fetchTopicMessages`（分页拉全）、`collectConversation`（按范围）、`topicLabel` / `fmtTs` / `msgFootnotes` / `mdMessageLines`（Markdown 与 HTML 共用脚注），`buildConversationMarkdown`（单话题）/ `buildGroupMarkdown` / `buildGroupHtml`（整知聚）。纯前端改动，**无新增接口**。

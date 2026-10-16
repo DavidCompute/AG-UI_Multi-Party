@@ -356,6 +356,8 @@ window.I18N_DICTS.zh = {
   "org.orchGenFail": "方案生成失败：{err}",
   "org.orchSecAgents": "数字员工岗位：",
   "org.orchSecSkills": "待创建技能：",
+  "org.orchSecSelfCheck": "落库前自检清单：",
+  "org.orchSelfCheckErr": "❌ 自检发现 {n} 项需修正，请先核对下方清单",
   "org.orchEmpty": "（生成后在此展示方案预览）",
   "org.orchApply": "确认并创建",
   "org.orchApplying": "创建中",

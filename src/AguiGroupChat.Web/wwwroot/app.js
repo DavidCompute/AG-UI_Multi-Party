@@ -1709,7 +1709,11 @@ async function generateOrchestration() {
           throw new Error(t("org.orchGenEmpty"));
         $("orgOrchPreview").textContent = formatOrchestrationPlan(orchestrationPreview);
         const hasPrivilegedSkill = (orchestrationPreview.skills || []).some((s) => (s.kind || "").toLowerCase() === "shell" || (s.kind || "").toLowerCase() === "http");
-        $("orgOrchStatus").textContent = (hasPrivilegedSkill ? t("org.orchNeedsAdmin") + " " : "") + t("org.orchGenDone");
+        const selfCheck = Array.isArray(orchestrationPreview.selfCheck) ? orchestrationPreview.selfCheck : [];
+        const selfCheckErrors = selfCheck.filter((c) => c.level === "error").length;
+        $("orgOrchStatus").textContent = (hasPrivilegedSkill ? t("org.orchNeedsAdmin") + " " : "")
+          + (selfCheckErrors ? t("org.orchSelfCheckErr", { n: selfCheckErrors }) + " " : "")
+          + t("org.orchGenDone");
         $("orgOrchApply").disabled = false;
         streamPanel.classList.add("hidden");
       } else if (msg.type === "error") {
@@ -1767,6 +1771,15 @@ function formatOrchestrationPlan(p) {
     lines.push("");
     lines.push(t("org.orchSecSkills"));
     (p.skills).forEach((s) => lines.push(` • ${s.name || s.skillId}（${s.kind}）`));
+  }
+  const checks = Array.isArray(p.selfCheck) ? p.selfCheck : [];
+  if (checks.length) {
+    lines.push("");
+    lines.push(t("org.orchSecSelfCheck"));
+    checks.forEach((c) => {
+      const icon = c.level === "error" ? "❌" : c.level === "warn" ? "⚠️" : "✅";
+      lines.push(` ${icon} ${c.message || ""}`);
+    });
   }
   return lines.join("\n");
 }

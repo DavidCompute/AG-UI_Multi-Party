@@ -125,9 +125,9 @@ public static class OrgApplyEngine
         }
 
         if (agents.Count == 0) throw new OrgApplyException(ErrorCodes.BadRequest, "方案里没有数字员工");
-        // 连接归一（兜底）：凡有下级以某岗位为向上提升目标，就把这些下级并入该岗位 assignmentIds（任务指派，只增不改、去重保序），
-        // 与 AgentOrchestrator.Parse 同规则——即使手写最终稿 / 旧方案只给“问题提升”链，落库后也是成对连接，组织不退化。
-        EnsureAssignmentsForLeaders(agents);
+        // 连接归一（双向兜底）：把“任务指派”与“问题提升”两条链补成全对，与 AgentOrchestrator.Parse 同规则——
+        // 即使手写最终稿 / 旧方案只给单向链，落库后也是成对连接，组织不退化。
+        NormalizeConnections(agents);
         var occupiedAgents = new HashSet<string>(catalog.ListDefinitions().Select(d => d.AgentId), StringComparer.Ordinal);
         var agentIdMap = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var a in agents)
@@ -211,32 +211,68 @@ public static class OrgApplyEngine
         return null;
     }
 
-    /// <summary>把“提升到某岗位”的直接下级并入其 assignmentIds（任务指派）。只增不改：已有显式指派保留，缺失的直接下级按方案顺序追加。</summary>
-    internal static void EnsureAssignmentsForLeaders(IReadOnlyList<OrgPlanAgent> agents)
+    /// <summary>连接归一（双向）：把“任务指派”（向下的 assignmentIds）与“问题提升”（向上的 escalationAgentId）补成全对。
+    /// 方向一：由“提升目标”反推其直接下级，并入上级的 assignmentIds；方向二：由“指派目标”反推唯一直接上级，为尚无可提升目标的岗位补上 escalationAgentId。
+    /// 只增不改：已有显式连接保留原样，叶子 / 顶层不受影响。</summary>
+    internal static void NormalizeConnections(IReadOnlyList<OrgPlanAgent> agents)
     {
         if (agents is null || agents.Count == 0) return;
         var ids = agents.Where(a => !string.IsNullOrWhiteSpace(a.AgentId)).Select(a => a.AgentId!.Trim()).ToHashSet(StringComparer.Ordinal);
-        var direct = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        // 自 → 直接上级（仅用于防自环 / 二环的判断）
+        var upOf = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var a in agents)
         {
-            if (string.IsNullOrWhiteSpace(a.AgentId)) continue;
+            var self = (a.AgentId ?? "").Trim();
             var up = (a.EscalationAgentId ?? "").Trim();
-            if (up.Length == 0 || string.Equals(up, a.AgentId, StringComparison.Ordinal) || !ids.Contains(up)) continue;
-            if (!direct.TryGetValue(up, out var list)) direct[up] = list = [];
-            list.Add(a.AgentId.Trim());
+            if (self.Length == 0 || up.Length == 0 || up == self || !ids.Contains(up)) continue;
+            upOf[self] = up;
         }
-        if (direct.Count == 0) return;
+
+        // 方向一：提升目标 → 上级的 assignmentIds
+        var direct = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (child, parent) in upOf)
+        {
+            if (!direct.TryGetValue(parent, out var list)) direct[parent] = list = [];
+            list.Add(child);
+        }
         foreach (var a in agents)
         {
-            if (string.IsNullOrWhiteSpace(a.AgentId) || !direct.TryGetValue(a.AgentId.Trim(), out var subs)) continue;
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0 || !direct.TryGetValue(self, out var subs)) continue;
             var existing = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList();
             var seen = new HashSet<string>(existing, StringComparer.Ordinal);
             var merged = new List<string>(existing.Count + subs.Count);
             merged.AddRange(existing);
             var changed = false;
             foreach (var sub in subs)
-                if (seen.Add(sub)) { merged.Add(sub); changed = true; }
+                // 跳过“上级反过来又提升到该下级”的二环，避免把互指写成互相指派
+                if (!string.Equals(upOf.GetValueOrDefault(self) ?? "", sub, StringComparison.Ordinal) && seen.Add(sub))
+                { merged.Add(sub); changed = true; }
             if (changed) a.AssignmentIds = merged;
+        }
+
+        // 方向二：指派目标 → 唯一直接上级的 escalationAgentId
+        var bosses = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var a in agents)
+        {
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0) continue;
+            foreach (var d in (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal))
+            {
+                if (d == self || !ids.Contains(d)) continue;
+                if (!bosses.TryGetValue(d, out var list)) bosses[d] = list = [];
+                list.Add(self);
+            }
+        }
+        foreach (var a in agents)
+        {
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0 || !string.IsNullOrWhiteSpace(a.EscalationAgentId)) continue;
+            if (!bosses.TryGetValue(self, out var bs) || bs.Count != 1) continue;
+            var boss = bs[0];
+            if (string.Equals(upOf.GetValueOrDefault(boss) ?? "", self, StringComparison.Ordinal)) continue;
+            a.EscalationAgentId = boss;
         }
     }
 }

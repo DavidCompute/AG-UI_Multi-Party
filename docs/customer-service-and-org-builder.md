@@ -280,7 +280,9 @@ An org role mounted on `org_design` auto-gains native tools `org_commit` (admin-
      失败→按报错修正、同一 teamKey 重试（覆盖 keep-latest）
 ```
 
-**连接自动成对（已实现）**：当出稿 / 最终稿只填了「向上问题提升」连接（`escalationAgentId`）、向下任务指派名册（`assignmentIds`）为空或不全时，系统会在**生成解析**（`AgentOrchestrator.Parse` → `InferAssignments`）与**共享落库引擎**（`OrgApplyEngine.EnsureAssignmentsForLeaders`）两处，自动把直接提升到该主管的下属并入其 `assignmentIds`——去重、保序、只增不改；因此不论经网页一键编排 / `org_plan_draft` / `org_commit`，落库组织都同时具备「指派 + 提升」双向连接，不会退化成单向提升链。生成器提示与内置 `org_design` 技能正文也已明确要求成对连接；库中已有旧组织不回写（重新生成 / 重新 apply 即生效）。
+**连接双向归一（已实现）**：当出稿 / 最终稿只填了单向链时，系统会在**生成解析**（`AgentOrchestrator.Parse` → `NormalizeConnections`）与**共享落库引擎**（`OrgApplyEngine.NormalizeConnections`）两处，**两个方向**都补——① 由「向上问题提升」（`escalationAgentId`）反推直接下级并入其 `assignmentIds`（任务指派）；② 由「向下任务指派」（`assignmentIds`）反推**唯一**直接上级补进其 `escalationAgentId`（问题提升）；去重、保序、只增不改，带自环 / 二环保护，被多个上级指派的下级不猜上级；因此不论经网页一键编排 / `org_plan_draft` / `org_commit`，落库组织都同时具备「指派 + 提升」双向连接，不会退化成单向链。生成器提示与内置 `org_design` 技能正文也已明确要求成对连接；库中已有旧组织不回写（重新生成 / 重新 apply 即生效）。
+
+**落库前自检清单（已实现）**：`AgentOrchestrator.SelfCheck(plan, requirement)` 把结构 / 连接 / 技能 / 交付闭环的确定性问题逐条列出（`OrgPlanCheck{code, level, message}`），随 `/orchestrate`（含流式 `done`）作为 `selfCheck` 下发，前端预览逐条渲染（❌/⚠️/✅）——把「只有提升没有指派」「连接指向不存在的岗位」「没人能产出要求的文件」「交付岗被写成等定稿才出文件的门卫」等问题在**确认落库之前**逐条暴露（此前最多只显示一条 `deliveryWarning`）。
 
 ### B.1 Overall flow
 
@@ -355,7 +357,7 @@ Normalize skills (dedupe/auto-suffix, require admin for shell/http/dotnet); norm
 
 组织架构构建师 = 路由 →（一键式/逐条）出稿 → 呈现等确认 → 管理员放行 → **唯一引擎整支落库/覆盖** →（可选建客服知聚，其运转规则见大段 A）。写库唯一、去重/引用/连接/自测都收敛在 `OrgApplyEngine`。
 
-Anchors：`AgentCatalog.Create`（挂 org_commit/org_plan_draft、注运行能力）；`AgentOrchestrator.cs`（一键初稿生成引擎）；`Tools/OrgOneShotDraftTool.cs`（org_plan_draft）；`Tools/OrgCommitTool.cs`（org_commit）；`OrgTeamManager.cs`(OrgTeamCommitter/OrgTeamStore)；`OrgApplyEngine.cs`（§B.3）；`AgentGateway`/`HasMountedOrgDeploy`。连接自动成对（§B.1）：`AgentOrchestrator.Parse`→`InferAssignments`、`OrgApplyEngine.EnsureAssignmentsForLeaders`。
+Anchors：`AgentCatalog.Create`（挂 org_commit/org_plan_draft、注运行能力）；`AgentOrchestrator.cs`（一键初稿生成引擎；`SelfCheck` 落库前自检清单）；`Tools/OrgOneShotDraftTool.cs`（org_plan_draft）；`Tools/OrgCommitTool.cs`（org_commit）；`OrgTeamManager.cs`(OrgTeamCommitter/OrgTeamStore)；`OrgApplyEngine.cs`（§B.3）；`AgentGateway`/`HasMountedOrgDeploy`。连接双向归一（§B.1）：`AgentOrchestrator.Parse`→`NormalizeConnections`、`OrgApplyEngine.NormalizeConnections`。
 
 Org-Architect = route → draft (structured/conversation) → confirm → admin’s `org_commit` → single `OrgApplyEngine` overwrite-write → (optional) support circle (rules: Part A). Anchors mirror code above.
 

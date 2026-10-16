@@ -342,6 +342,9 @@ public static class AgentApi
                     deliveryWarning = AgentOrchestrator.DetectDeliveryGap(plan, requirement)
                                       ?? AgentOrchestrator.DetectHollowDeliverySkill(plan)
                                       ?? AgentOrchestrator.DetectDeliveryGatekeeper(plan),
+                    // 落库前自检清单（结构 / 连接 / 技能 / 交付闭环逐条列出，而不是只给一条）：供前端预览逐条展示
+                    selfCheck = AgentOrchestrator.SelfCheck(plan, requirement)
+                                      .Select(c => new { code = c.Code, level = c.Level, message = c.Message }),
                     agents = plan.Agents.Select(a => new
                     {
                         agentId = a.AgentId,
@@ -444,6 +447,9 @@ public static class AgentApi
                         deliveryWarning = AgentOrchestrator.DetectDeliveryGap(plan, requirement)
                                           ?? AgentOrchestrator.DetectHollowDeliverySkill(plan)
                                           ?? AgentOrchestrator.DetectDeliveryGatekeeper(plan),
+                        // 落库前自检清单：与 /orchestrate 一致
+                        selfCheck = AgentOrchestrator.SelfCheck(plan, requirement)
+                                          .Select(c => new { code = c.Code, level = c.Level, message = c.Message }),
                         agents = plan.Agents.Select(a => new { agentId = a.AgentId, nickname = a.Nickname, description = a.Description, instructions = a.Instructions, triggerMode = a.TriggerMode ?? "mentioned", skillIds = a.SkillIds ?? [], assignmentIds = a.AssignmentIds ?? [], escalationAgentId = a.EscalationAgentId, relayToAgentId = a.RelayToAgentId, memoryProfile = a.MemoryProfile is null ? null : new { memoryType = a.MemoryProfile.MemoryType, styleMode = a.MemoryProfile.StyleMode, personaCard = a.MemoryProfile.PersonaCard, topK = a.MemoryProfile.TopK, personalTopK = a.MemoryProfile.PersonalTopK, minScore = a.MemoryProfile.MinScore, personalMinScore = a.MemoryProfile.PersonalMinScore } }),
                         skills = plan.Skills.Select(s => new { skillId = s.SkillId, name = s.Name, description = s.Description, kind = s.Kind, body = s.Body, executionLocation = s.ExecutionLocation ?? "server", requiresApproval = s.RequiresApproval }),
                     },

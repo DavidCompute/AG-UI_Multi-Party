@@ -356,6 +356,8 @@ window.I18N_DICTS.en = {
   "org.orchGenFail": "Preview generation failed: {err}",
   "org.orchSecAgents": "Digital employees:",
   "org.orchSecSkills": "Skills to create:",
+  "org.orchSecSelfCheck": "Pre-commit self-check:",
+  "org.orchSelfCheckErr": "❌ {n} issue(s) need fixing - review the list below",
   "org.orchEmpty": "(Preview will appear here after generation)",
   "org.orchApply": "Confirm & create",
   "org.orchApplying": "Creating",

@@ -360,6 +360,100 @@ public static class AgentOrchestrator
              + "请改成：拿到可用材料就先出文件，材料不完整时在文内列入“待确认项”，不以等待定稿为由不出文件。";
     }
 
+    /// <summary>组织方案自检项。<see cref="Level"/>：error=落库前必须修，warn=建议修，info=通过 / 摘要。</summary>
+    public sealed record OrgPlanCheck(string Code, string Level, string Message);
+
+    /// <summary>
+    /// 落库前的<b>自检清单</b>：把“结构是否成立、连接是否成对、是否真能交付”这些确定性判断汇总成一组可展示的条目。
+    ///
+    /// <para>
+    /// 为什么单独做（而不是只靠提示词 / 只给一条 deliveryWarning）：提示词只能“尽量引导”，模型仍会波动。
+    /// 实测两类退化最常见：① 只给“问题提升”链、没有“任务指派”，组织退化成单向上报，主管没法往下派活；
+    /// ② 需求要文件却没人能产出，或交付岗被写成“等定稿 / 等审批才出文件”的门卫。
+    /// 这里把这些问题<b>逐条列清</b>（而不是只显示第一条），让用户在“确认落库”之前就能看到并修，
+    /// 而不是等跑完一轮、拿不到东西才发现。
+    /// </para>
+    /// </summary>
+    /// <returns>自检条目（顺序：结构 / 连接 → 技能 → 交付闭环 → 通过摘要）；全部通过时含一条 <c>ok</c> 摘要。</returns>
+    public static IReadOnlyList<OrgPlanCheck> SelfCheck(OrchestrationPlan plan, string requirement)
+    {
+        var checks = new List<OrgPlanCheck>();
+        var agents = plan.Agents ?? [];
+        if (agents.Count == 0)
+        {
+            checks.Add(new OrgPlanCheck("no_agents", "error", "方案里没有任何数字员工，无法落库。"));
+            return checks;
+        }
+        var ids = agents.Where(a => !string.IsNullOrWhiteSpace(a.AgentId))
+                        .Select(a => a.AgentId!.Trim()).ToHashSet(StringComparer.Ordinal);
+
+        // —— 结构：连接（向下任务指派 / 向上问题提升 / 汇报中继）——
+        var assignEdges = 0; var escEdges = 0; var relayEdges = 0;
+        var dangling = new List<string>();
+        foreach (var a in agents)
+        {
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0) continue;
+            foreach (var d in (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()))
+            {
+                assignEdges++;
+                if (!ids.Contains(d)) dangling.Add($"{self}→{d}");
+            }
+            var up = (a.EscalationAgentId ?? "").Trim();
+            if (up.Length > 0)
+            {
+                escEdges++;
+                if (string.Equals(up, self, StringComparison.Ordinal))
+                    checks.Add(new OrgPlanCheck("self_escalation", "warn", $"岗位「{self}」把「问题提升」指向了自己（自环），应改指向其直接上级。"));
+                else if (!ids.Contains(up)) dangling.Add($"{self}↑{up}");
+            }
+            var relay = (a.RelayToAgentId ?? "").Trim();
+            if (relay.Length > 0) { relayEdges++; if (!ids.Contains(relay)) dangling.Add($"{self}⇄{relay}"); }
+        }
+
+        if (dangling.Count > 0)
+            checks.Add(new OrgPlanCheck("dangling_link", "error",
+                "有连接指向了方案里不存在的岗位（落库会被直接拒绝）：" + string.Join("、", dangling)
+                + "。请把这些连接改到真实存在的 agentId，或去掉。"));
+
+        if (assignEdges == 0 && escEdges == 0)
+            checks.Add(new OrgPlanCheck("no_connections", "error",
+                "这套组织没有任何岗位连接：既没有「向下任务指派」、也没有「向上问题提升」，落库后会各自为战、不成为组织。"
+                + "请在主管岗的 assignmentIds 里列出其直接下级（任务指派），并让下级用 escalationAgentId 指回直接上级（问题提升）。"));
+        else if (assignEdges == 0)
+            checks.Add(new OrgPlanCheck("no_assignment", "error",
+                "这套组织只有「向上问题提升」、没有「向下任务指派」——下级只会往上抛问题，上级却没法把任务派下去。"
+                + "请在有下级的岗位（主管/组长/经理…）的 assignmentIds 里补上其直接下级的 agentId。"));
+        else if (escEdges == 0)
+            checks.Add(new OrgPlanCheck("no_escalation", "warn",
+                "这套组织只有「向下任务指派」、没有「向上问题提升」——一线遇到自己不能决断的问题时没有上报出口。"
+                + "建议让非顶层岗位用 escalationAgentId 指向其直接上级。"));
+        else
+            checks.Add(new OrgPlanCheck("connections_ok", "info",
+                $"连接成对：任务指派 {assignEdges} 条、问题提升 {escEdges} 条"
+                + (relayEdges > 0 ? $"、汇报中继 {relayEdges} 条" : "") + "。"));
+
+        // —— 技能：是否人人有活可干 ——
+        var noSkill = agents.Where(a => !string.IsNullOrWhiteSpace(a.AgentId) && (a.SkillIds ?? []).Count == 0)
+                            .Select(a => a.AgentId!.Trim()).ToList();
+        if (noSkill.Count > 0)
+            checks.Add(new OrgPlanCheck("agent_without_skill", "warn",
+                "以下岗位没有挂载任何技能（可能不知道该怎么干活）：" + string.Join("、", noSkill) + "。建议至少各挂一个与职责相符的技能。"));
+
+        // —— 交付闭环：需求要的交付物是否真有人能产出 ——
+        var delivery = DetectDeliveryGap(plan, requirement);
+        if (delivery is not null) checks.Add(new OrgPlanCheck("delivery_gap", "error", delivery));
+        var hollow = DetectHollowDeliverySkill(plan);
+        if (hollow is not null) checks.Add(new OrgPlanCheck("hollow_delivery", "error", hollow));
+        var gatekeeper = DetectDeliveryGatekeeper(plan);
+        if (gatekeeper is not null) checks.Add(new OrgPlanCheck("delivery_gatekeeper", "error", gatekeeper));
+
+        if (!checks.Any(c => c.Level is "error" or "warn"))
+            checks.Add(new OrgPlanCheck("ok", "info",
+                $"自检通过：岗位 {agents.Count} 个、技能 {plan.Skills.Count} 个，连接与交付闭环均无问题。"));
+        return checks;
+    }
+
     /// <summary>测试钩子：暴露提示词构造，便于断言“可复用技能列表确实进了提示词”。勿在生产路径调用。</summary>
     internal static string BuildPromptForTest(string requirement, IReadOnlyList<ReusableSkill>? reusableSkills, bool allowDotnet = true)
         => BuildPrompt(requirement, reusableSkills, allowDotnet);
@@ -414,40 +508,76 @@ public static class AgentOrchestrator
         // 仍给不出 → null = 沿用全局召回（与旧行为一致，绝不因该字段失败）。
         foreach (var agent in plan.Agents)
             agent.MemoryProfile ??= SuggestMemoryProfile(agent);
-        // 连接归一：凡有下级岗位以某岗位为向上提升目标，就为该“上级”自动补全 assignmentIds（任务指派），
-        // 避免模型只给“问题提升”链、把组织生成成纯上抛结构；已显式指派过的上级保留原样，叶子不受影响。
-        InferAssignments(plan);
+        // 连接归一（双向）：既由“提升目标”反推“直接下级”补 assignmentIds（任务指派），
+        // 也由“指派目标”反推“直接上级”补 escalationAgentId（问题提升），
+        // 避免模型只给单向链（只上抛 / 只下派）把组织生成成半残结构。
+        NormalizeConnections(plan);
         return plan;
     }
 
-    /// <summary>连接归一：反向按 escalationAgentId 找出每个岗位的直接下级，并把空白 assignmentIds 的“上级”补成这些下级。</summary>
-    private static void InferAssignments(OrchestrationPlan plan)
+    /// <summary>连接归一：把“任务指派”（向下的 assignmentIds）与“问题提升”（向上的 escalationAgentId）两条链补成全对。
+    /// 只增不改：已有显式连接保留原样，只为空白处补全；叶子 / 顶层不受影响。</summary>
+    private static void NormalizeConnections(OrchestrationPlan plan)
     {
-        var ids = plan.Agents
-            .Where(a => !string.IsNullOrWhiteSpace(a.AgentId))
-            .Select(a => a.AgentId!)
-            .ToHashSet(StringComparer.Ordinal);
-        var direct = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        foreach (var a in plan.Agents)
+        var agents = plan.Agents ?? [];
+        var ids = agents.Where(a => !string.IsNullOrWhiteSpace(a.AgentId))
+                        .Select(a => a.AgentId!.Trim()).ToHashSet(StringComparer.Ordinal);
+        // 自 → 直接上级（仅用于防自环 / 二环的判断）
+        var upOf = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var a in agents)
         {
+            var self = (a.AgentId ?? "").Trim();
             var up = (a.EscalationAgentId ?? "").Trim();
-            if (up.Length == 0 || string.Equals(up, a.AgentId, StringComparison.Ordinal) || !ids.Contains(up)) continue;
-            if (!direct.TryGetValue(up, out var list)) direct[up] = list = [];
-            list.Add(a.AgentId!);
+            if (self.Length == 0 || up.Length == 0 || up == self || !ids.Contains(up)) continue;
+            upOf[self] = up;
         }
-        foreach (var a in plan.Agents)
+
+        // 方向一：由“提升目标”反推其直接下级，并入上级的 assignmentIds（任务指派）。
+        var subsOf = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var (child, parent) in upOf)
         {
-            if (a.AgentId is null || !direct.TryGetValue(a.AgentId, out var subs)) continue;
-            // 把“提升到本岗位”的直接下级并入 assignmentIds（按方案顺序追加、去重保留原顺序），
-            // 这样即使模型显式指派漏掉了某个下级，落库前也会被补齐成“能指派全部直接下级”。
-            var existing = a.AssignmentIds ?? [];
+            if (!subsOf.TryGetValue(parent, out var l)) subsOf[parent] = l = [];
+            l.Add(child);
+        }
+        foreach (var a in agents)
+        {
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0 || !subsOf.TryGetValue(self, out var subs)) continue;
+            var existing = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList();
             var seen = new HashSet<string>(existing, StringComparer.Ordinal);
             var merged = new List<string>(existing.Count + subs.Count);
             merged.AddRange(existing);
             var changed = false;
             foreach (var sub in subs)
-                if (seen.Add(sub)) { merged.Add(sub); changed = true; }
+                // 跳过“上级反过来又提升到该下级”的二环，避免把互指写成互相指派
+                if (!string.Equals(upOf.GetValueOrDefault(self) ?? "", sub, StringComparison.Ordinal) && seen.Add(sub))
+                { merged.Add(sub); changed = true; }
             if (changed) a.AssignmentIds = merged;
+        }
+
+        // 方向二：由“指派目标”反推其直接上级，为尚无可提升目标的岗位补上 escalationAgentId（问题提升）。
+        // 仅在唯一上级时才反推（多上级留待人工指定），并跳过会与本岗位现有提升目标互指的情况。
+        var bossesOf = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var a in agents)
+        {
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0) continue;
+            foreach (var d in (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal))
+            {
+                if (d == self || !ids.Contains(d)) continue;
+                if (!bossesOf.TryGetValue(d, out var l)) bossesOf[d] = l = [];
+                l.Add(self);
+            }
+        }
+        foreach (var a in agents)
+        {
+            var self = (a.AgentId ?? "").Trim();
+            if (self.Length == 0 || !string.IsNullOrWhiteSpace(a.EscalationAgentId)) continue;
+            if (!bossesOf.TryGetValue(self, out var bosses) || bosses.Count != 1) continue;
+            var boss = bosses[0];
+            // 二环保护：若该“上级”本就提升到本岗位，则不再互相补全
+            if (string.Equals(upOf.GetValueOrDefault(boss) ?? "", self, StringComparison.Ordinal)) continue;
+            a.EscalationAgentId = boss;
         }
     }
 

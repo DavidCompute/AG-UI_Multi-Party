@@ -1473,13 +1473,17 @@
 
 #### 3.7.3 方案预览与权限提示
 
-`formatOrchestrationPlan()` 把方案格式化为可读文本：标题、`org.orchSecAgents`＝`数字员工岗位：`（每岗列昵称/ID、可选记忆类型、技能、指派下级）、`org.orchSecSkills`＝`待创建技能：`。若方案含 `shell`/`http` 技能，状态栏追加 `org.orchNeedsAdmin`＝`⚠️ 方案含 Shell/HTTP 技能，仅管理员可创建`，成功后状态 `org.orchGenDone`。
+`formatOrchestrationPlan()` 把方案格式化为可读文本：标题、`org.orchSecAgents`＝`数字员工岗位：`（每岗列昵称/ID、可选记忆类型、技能、指派下级）、`org.orchSecSkills`＝`待创建技能：`，以及**`org.orchSecSelfCheck`＝`落库前自检清单：`**——把后端下发的 `selfCheck` 逐条渲染（❌ error / ⚠️ warn / ✅ info，见 §3.7.4）。若方案含 `shell`/`http` 技能，状态栏追加 `org.orchNeedsAdmin`＝`⚠️ 方案含 Shell/HTTP 技能，仅管理员可创建`；若自检有 error，状态栏再追加 `org.orchSelfCheckErr`＝`❌ 自检发现 {n} 项需修正，请先核对下方清单`。成功后状态 `org.orchGenDone`。
 
 #### 3.7.4 确认并创建（apply）
 
 `#orgOrchApply`（`org.orchApply`＝`确认并创建`，生成成功才解禁）→ `applyOrchestration()`：`POST /ag-ui/agents/orchestrate/apply`（body 含 `title/agents[]/skills[]/createSupportCircle/supportCircleName`；agent 项含 `skillIds/assignmentIds/escalationAgentId/relayToAgentId/memoryProfile`）。此步真实写库，`beginLongTask()` 置忙但**刻意不给中止句柄**（不可被“停止”打断）。成功后关闭弹窗并 `loadAgents() + loadSkills()`，提示 `org.orchApplied`＝`已创建 {n} 个数字员工及其技能与连接`。
 
-后端 `OrgApplyEngine.ExecuteAsync`（唯一落库引擎，与「组织架构构建师」`org_commit` 共用）：技能去重改名（空正文＝引用库内现成技能，不重建）→ server 技能自测（`SkillAutoFixer` 最多 3 次）→ 连接归一（`EnsureAssignmentsForLeaders` 把“向某主管提升”的下属并入其 `assignmentIds`）→ 逐个 Upsert 数字员工 → 可选建客服知聚。返回 `smoke` 自检结果，前端以通知汇报（`org.orchSmokeTitle/Count/Repaired/Failed`）。
+后端 `OrgApplyEngine.ExecuteAsync`（唯一落库引擎，与「组织架构构建师」`org_commit` 共用）：技能去重改名（空正文＝引用库内现成技能，不重建）→ server 技能自测（`SkillAutoFixer` 最多 3 次）→ 连接归一（`NormalizeConnections` 把「指派 ⇄ 提升」**双向**补全）→ 逐个 Upsert 数字员工 → 可选建客服知聚。返回 `smoke` 自检结果，前端以通知汇报（`org.orchSmokeTitle/Count/Repaired/Failed`）。
+
+**落库前自检清单（`AgentOrchestrator.SelfCheck`）**：`/orchestrate` 与 `/orchestrate/stream` 的 `done` 事件都在 `deliveryWarning` 之外新增 `selfCheck` 字段（数组，每项 `{code, level, message}`），把「结构 / 连接 / 技能 / 交付闭环」的问题**逐条列出**，而不是只显示第一条告警。条目 code：`no_agents`、`dangling_link`（连接指向不存在的岗位——落库会被直接拒绝）、`no_connections`（既无指派也无提升）、`no_assignment`（只有问题提升没有任务指派）、`no_escalation`（只有任务指派没有向上提升）、`self_escalation`、`agent_without_skill`、`delivery_gap`、`hollow_delivery`、`delivery_gatekeeper`；全部通过时给出 `ok` 摘要。
+
+**连接双向归一（`NormalizeConnections`）**：解析侧（`AgentOrchestrator`）与落库侧（`OrgApplyEngine`）同规则——① 由「向上提升」（`escalationAgentId`）反推直接下级并入其 `assignmentIds`（任务指派）；② 由「向下指派」（`assignmentIds`）反推**唯一**直接上级补进其 `escalationAgentId`（问题提升）；只增不改、去重保序，带自环 / 二环保护，被多个上级指派的下级不猜上级。
 
 #### 3.7.5 去重与客服知聚
 
