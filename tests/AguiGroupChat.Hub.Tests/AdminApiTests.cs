@@ -400,6 +400,58 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task QuotaStatus_ReportsWarnAndOverLevelsForGroups()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+
+        // 启用知聚配额（100）→ 80 为 warn、100 为 over；完事还原为 0，避免影响同类其它用例
+        using (var set = Authed(HttpMethod.Post, "/ag-ui/admin/config", token))
+        {
+            set.Content = JsonContent.Create(new { dailyTokenQuotaPerGroup = 100 });
+            (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+        }
+        try
+        {
+            usage.RecordUsage("agent_q", "user_q", "group_qw", 60, 20, 0); // 80 → warn（阈值含）
+            usage.RecordUsage("agent_q", "user_q", "group_qo", 60, 40, 0); // 100 → over
+            usage.RecordUsage("agent_q", "user_q", "group_qk", 10, 10, 0); // 20 → ok
+
+            using var req = Authed(HttpMethod.Get, "/ag-ui/admin/quota-status", token);
+            var res = await _client.SendAsync(req);
+            res.EnsureSuccessStatusCode();
+            var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(100, d.GetProperty("quotaPerGroup").GetInt64());
+            Assert.Equal(0.8, d.GetProperty("warnRatio").GetDouble(), 3);
+
+            var levels = d.GetProperty("groups").EnumerateArray()
+                .ToDictionary(x => x.GetProperty("groupId").GetString()!, x => x.GetProperty("level").GetString()!, StringComparer.Ordinal);
+            Assert.Equal("warn", levels["group_qw"]);
+            Assert.Equal("over", levels["group_qo"]);
+            Assert.Equal("ok", levels["group_qk"]);
+
+            // /usage 的 groupsToday 同口径带 level（单一阈值来源）
+            using var u = Authed(HttpMethod.Get, "/ag-ui/admin/usage?days=7", token);
+            var ud = await (await _client.SendAsync(u)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = ud.GetProperty("groupsToday").EnumerateArray()
+                .Single(x => x.GetProperty("groupId").GetString() == "group_qo");
+            Assert.Equal("over", row.GetProperty("level").GetString());
+
+            // 非管理员 → 403（配额 / 成本属运维信息）
+            var outsider = await RegisterAsync("quota_outsider");
+            using var denied = Authed(HttpMethod.Get, "/ag-ui/admin/quota-status", outsider.GetProperty("token").GetString()!);
+            Assert.Equal(HttpStatusCode.Forbidden, (await _client.SendAsync(denied)).StatusCode);
+        }
+        finally
+        {
+            using var restore = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+            restore.Content = JsonContent.Create(new { dailyTokenQuotaPerGroup = 0 });
+            await _client.SendAsync(restore);
+        }
+    }
+
+    [Fact]
     public async Task AdminUsage_IncludesGroupsTodayWithNames()
     {
         var admin = await RegisterAsync("admin_chief");

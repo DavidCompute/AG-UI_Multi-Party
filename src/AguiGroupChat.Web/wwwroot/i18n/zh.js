@@ -893,6 +893,7 @@ window.I18N_DICTS.zh = {
   "admin.thGroupTokens": "今日 Token",
   "admin.thQuotaUse": "配额使用",
   "admin.groupsTodayTitle": "今日各知聚用量（配额按知聚日切，此处为今日口径）",
+  "admin.quotaNear": "接近上限 {near} 个 ｜ 已超限 {over} 个",
   "admin.configHint": "在线调整并持久化运维参数（无需改配置文件 / 重启）。存储提供方 / 模型 / 记忆提供方等<span style=\"color:var(--warn)\r\">需重启</span>的项目为只读，可点下方「只读参数快照」查看当前生效值。",
   "admin.session": "会话有效期（小时）",
   "admin.history": "单知聚消息历史上限",
@@ -1321,6 +1322,8 @@ window.I18N_DICTS.zh = {
   /* --- 知聚/成员列表 --- */
   "list.unread": "{count} 条未读",
   "list.private": "私密知聚",
+  "list.quotaWarn": "⚠ 接近知聚配额上限（当日用量已达 80%，超出后本知聚当日不再触发）",
+  "list.quotaOver": "🔴 已达知聚配额上限（本知聚当日不再触发，UTC 次日自动恢复）",
 
   /* --- 新消息通知 --- */
   "notif.messageFrom": "{name} 发来消息",

@@ -1,4 +1,38 @@
-# AG-UI 群聊桌面版 1.0.265 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.266 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.266 Release Notes (current Windows desktop release)
+
+**版本说明**：**知聚配额从「事后可查」变成「事前可见」**——新增**配额水位预警**：当日用量达知聚配额 80% 即标 `⚠`、达 100% 标 `🔴`，**不打开控制台就能在侧边栏知聚列表上看到哪个知聚快满了**（仅 Operator+；配额 / 成本属运维信息，不下发普通用户）。同一水位口径同时用在用量统计页：表格按水位配色（蕾珀 / 红），meta 行多一句「接近上限 N 个 ｜ 已超限 M 个」。
+**Version note**: **The per-circle quota goes from "queryable after the fact" to "visible in advance"** — a new **quota-level warning**: at 80% of a circle's daily quota it shows `⚠`, at 100% `🔴`, so **you can see which circle is nearly full right in the sidebar circle list without opening the console** (Operator+ only; quota / cost is ops information and is not served to regular users). The same level source drives the Usage Stats page: the table is colour-coded by level (amber / red) and the meta line gains "{near} approaching limit ｜ {over} over limit".
+
+## 变更
+# Changes
+
+中文：
+- **单一阈值来源**：新增 `AgentUsageService.QuotaLevel(tokens, quota)` 与 `QuotaWarnRatio = 0.8`（`AgentUsageService`）——`ok` / `warn`（≥80%）/ `over`（≥配额），配额 0（不限）恒 `ok`。前后端**不再各写一份 80%**。
+- **新增 `GET /ag-ui/admin/quota-status`**（Operator+）：返回 `{ quotaPerGroup, warnRatio, groups: [{ groupId, level }] }`（今日有用量且非 `ok` 的知聚），供侧边栏打标。
+- **侧边栏知聚项预警角标**：`loadQuotaStatus()`（仅 Operator+）与知聚列表同刷新；`renderGroupList()` 给 `warn` / `over` 的知聚加 `.quota-tag`（`⚠` / `🔴`，`title` 解释原因）。登出即清（不残留）。
+- **用量页**：`groupsToday[]` 每行新增 `level`；配额使用列按水位配色（`warn` 蕾珀 `.usage-quota-warn` / `over` 红标 `.usage-quota-hit`）；meta 尾部追加「接近上限 N 个 ｜ 已超限 M 个」。`/usage` 与 `/quota-status` 共用同一个行构造（`GroupTodayRows`），口径一致。
+- **降级安全**：配额查询失败 / 非 Operator+ 一律静默（清空角标），绝不拖累知聚列表渲染。
+
+English:
+- **Single threshold source**: new `AgentUsageService.QuotaLevel(tokens, quota)` and `QuotaWarnRatio = 0.8` (`AgentUsageService`) — `ok` / `warn` (≥80%) / `over` (≥ quota), with quota 0 (unlimited) always `ok`. The frontend and backend **no longer each hard-code 80%**.
+- **New `GET /ag-ui/admin/quota-status`** (Operator+): returns `{ quotaPerGroup, warnRatio, groups: [{ groupId, level }] }` (circles with today's usage that are not `ok`), feeding the sidebar badges.
+- **Sidebar warning badges**: `loadQuotaStatus()` (Operator+ only) refreshes alongside the circle list; `renderGroupList()` adds `.quota-tag` (`⚠` / `🔴`, with a `title` explaining why) to `warn` / `over` circles. Cleared on logout (no residue).
+- **Usage page**: each `groupsToday[]` row gains `level`; the quota-use column is colour-coded by level (`warn` amber `.usage-quota-warn` / `over` red `.usage-quota-hit`); the meta line appends "{near} approaching limit ｜ {over} over limit". `/usage` and `/quota-status` share one row builder (`GroupTodayRows`), keeping the two consistent.
+- **Graceful degradation**: a failed quota query or a non-Operator+ user silently clears the badges and never drags down the circle-list rendering.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.1.1（知聚列表元素表新增 `.quota-tag` 配额水位角标）、§8.6（`groupsToday` 补 `level` 字段与配色 / meta 汇总，并把行号校正到当前实现）、§9.2.8（新增 `/ag-ui/admin/quota-status`）。
+English: `docs/user-guide.md` / `en.md` §2.1.1 (the circle-list element table gains the `.quota-tag` quota-level badge), §8.6 (`groupsToday` gains the `level` field with the colour coding / meta summary, and line numbers are corrected to the current implementation), §9.2.8 (new `/ag-ui/admin/quota-status`).
+
+## 测试
+# Tests
+
+中文：新增 2 例——`AgentUsageServiceTests.QuotaLevel_ThresholdsWarnAt80AndOverAt100`（边界：79 ok / 80 warn / 99 warn / 100 over / 150 over，且配额 0 恒 ok）；`AdminApiIntegrationTests.QuotaStatus_ReportsWarnAndOverLevelsForGroups`（设知聚配额 100 → 80 warn、100 over、20 ok；`/usage` 的 `groupsToday` 同口径带 `level`；非管理员 403；结束还原配额）。**全量测试通过**（1801 → 1803）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1942，missing 0**，4 个守卫脚本均过；Docker 重建后**真实浏览器**端到端（Playwright）**7/7**——把配额临时设为 1000 使真实历史用量越限：侧边栏出现 `🔴` `over` 角标、用量页 meta「接近上限 0 个 ｜ 已超限 1 个」、配额列红标高亮、**无页面脚本错误**，结束时还原配额。
+English: 2 new cases — `AgentUsageServiceTests.QuotaLevel_ThresholdsWarnAt80AndOverAt100` (boundaries: 79 ok / 80 warn / 99 warn / 100 over / 150 over, and quota 0 always ok); `AdminApiIntegrationTests.QuotaStatus_ReportsWarnAndOverLevelsForGroups` (quota 100 → 80 warn, 100 over, 20 ok; `/usage`'s `groupsToday` carries the same `level`; non-admin 403; quota restored afterwards). **All tests pass** (1801 → 1803); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1942, missing 0**, and all 4 guard scripts pass; after a Docker rebuild, a **real-browser** end-to-end (Playwright) **7/7** — with the quota temporarily set to 1000 so real historical usage crosses the threshold: the sidebar shows a `🔴` `over` badge, the usage page meta reads "0 approaching limit ｜ 1 over limit", the quota column is highlighted red, and there are **no page script errors**; the quota is restored at the end.
+
 # AG-UI Group Chat Desktop 1.0.265 Release Notes (current Windows desktop release)
 
 **版本说明**：**把「谁在烧 token」摆到台面上**——用量统计页新增「**今日各知聚用量**」明细（含**配额使用占比**，达/超配额标红），并给两处配额拦截补上**可观测**（Prometheus 计数器 + 运行指标页卡片）。上一版刚把「按知聚配额」加上，如果看不见「哪个知聚快烧到了」，配额就只能靠报警发现；这一版补上可见性。

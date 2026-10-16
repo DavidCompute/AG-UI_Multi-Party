@@ -896,6 +896,7 @@ window.I18N_DICTS.en = {
   "admin.thGroupTokens": "Today's tokens",
   "admin.thQuotaUse": "Quota use",
   "admin.groupsTodayTitle": "Today's usage per circle (quota resets daily per circle, so this is the today-scoped view)",
+  "admin.quotaNear": "{near} approaching limit ｜ {over} over limit",
   "admin.configHint": "Tune and persist ops parameters online (no config file / restart needed). Storage provider / model / memory provider etc. that are <span style=\"color:var(--warn)\r\">restart-required</span> are read-only; click “Read-only snapshot” below to see the values in effect.",
   "admin.session": "Session validity (hours)",
   "admin.history": "Message history limit per group",
@@ -1324,6 +1325,8 @@ window.I18N_DICTS.en = {
   /* --- 知聚/成员列表 --- */
   "list.unread": "{count} unread",
   "list.private": "Private group",
+  "list.quotaWarn": "⚠ Approaching the circle's token quota (today's usage has reached 80%; once exceeded, this circle cannot trigger agents until UTC next day)",
+  "list.quotaOver": "🔴 The circle's token quota is reached (this circle cannot trigger agents until UTC next day)",
 
   /* --- 新消息通知 --- */
   "notif.messageFrom": "{name} sent a message",

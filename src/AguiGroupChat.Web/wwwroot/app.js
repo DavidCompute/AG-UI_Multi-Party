@@ -45,6 +45,8 @@ const state = {
   mentionAll: false,
   // 按知聚未读信息（groupId → { lastMessageAt, unreadCount, byTopic: { topicId: n } }）：来自知聚列表 API，实时事件增量维护
   groupUnread: new Map(),
+  // 知聚配额水位（groupId → "warn" | "over"；仅 Operator+ 拉取）：侧边栏知聚项打标的主动预警
+  quotaLevels: new Map(),
   // 按知聚记忆的滚动位置（groupId → { top, stick }）：切走再回来停在原处（本次会话内有效）
   scrollMem: new Map(),
   // 上次离开各知聚的时间（groupId → ms）：用于「上次离开后」分隔线（会话内缓存，持久化在 localStorage）
@@ -482,6 +484,7 @@ async function logout() {
   state.isAdmin = false;
   state.platformRole = "user"; // 复位生效角色，避免登出后残留旧角色影响菜单/控制台判定
   state.isSuperAdmin = false;
+  state.quotaLevels.clear(); // 知聚配额水位属运维信息：登出即清，避免残留标标
   pendingAutoEnterGroup = false;
   clearAuth(); // 同时清除 sessionStorage 与 localStorage（保持登录状态随退出登录失效）
   try {
@@ -4691,6 +4694,8 @@ async function loadGroups() {
       byTopic: g.unreadByTopic || {},
     });
   }
+  // 知聚配额水位（仅 Operator+）：与知聚列表同时刷新，使侧边栏「快满 / 已满」标标实时
+  await loadQuotaStatus();
   renderGroupList();
   // 刷新完成：当前知聚话题栏同步最新未读（话题红点 / 主话题红点）
   if (state.activeGroupId) renderTopicBar();
@@ -4720,6 +4725,21 @@ async function loadGroups() {
     const g = last && state.groups.find((x) => x.groupId === last);
     if (g) selectGroup(g.groupId);
   }
+}
+
+/** 知聚配额水位（仅 Operator+）：拉今日各知聚水位，供侧边栏知聚项打标（不打开控制台也能看到哪个知聚快满）。
+ * 失败静默（清空标标）：配额是附加信息，不能因它拖累知聚列表渲染。 */
+async function loadQuotaStatus() {
+  if (!isOperatorPlus() || !state.token) { state.quotaLevels.clear(); return; }
+  try {
+    const res = await fetch("/ag-ui/admin/quota-status", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { state.quotaLevels.clear(); return; }
+    state.quotaLevels.clear();
+    for (const g of (d.groups || [])) {
+      if (g && g.groupId && g.level && g.level !== "ok") state.quotaLevels.set(g.groupId, g.level);
+    }
+  } catch { state.quotaLevels.clear(); }
 }
 
 function room(gid) {
@@ -6215,11 +6235,16 @@ function renderGroupList() {
     const kindTag = g.isSupportCircle ? `<span class="support-tag">${escapeHtml(t("support.badge"))}</span>` : "";
     const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
     const enterTag = needEnter ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
+    // 知聚配额水位（仅 Operator+ 拉取）：接近 / 已达上限时打标——「快满了」不用打开控制台就能看到
+    const qLevel = state.quotaLevels.get(g.groupId);
+    const quotaTag = qLevel
+      ? `<span class="quota-tag ${qLevel}" title="${escapeHtml(t(qLevel === "over" ? "list.quotaOver" : "list.quotaWarn"))}">${qLevel === "over" ? "🔴" : "⚠"}</span>`
+      : "";
     const muted = isMuted(g.groupId);
     if (muted) div.classList.add("muted");
     const muteTip = t(muted ? "notif.unmuteTip" : "notif.muteTip");
     const muteBtn = `<button type="button" class="group-mute" title="${escapeHtml(muteTip)}" aria-label="${escapeHtml(muteTip)}">${muted ? "🔕" : "🔔"}</button>`;
-    div.innerHTML = avatar + `<span class="group-name"></span>` + kindTag + enterTag +
+    div.innerHTML = avatar + `<span class="group-name"></span>` + kindTag + quotaTag + enterTag +
       (unread > 0 ? `<span class="unread-badge" title="${escapeHtml(t("list.unread", { count: unread }))}">${unread > 99 ? "99+" : unread}</span>` : "") +
       muteBtn +
       `<span class="count">${Number(g.memberCount) || 0}</span>`;
@@ -8865,14 +8890,22 @@ async function loadAdminUsage() {
       : `<tr><td colspan="6" class="admin-empty">${t("admin.usageEmpty")}</td></tr>`;
 
     // 今日各知聚明细：用量 + 配额使用占比（未设知聚配额时占比列显 "—"）
+    // level（ok / warn / over，由后端 80% 阈值给出，单一口径）：warn 蕾珀、over 红标——主动预警「哪个知聚快满」
     const groups = data.groupsToday || [];
+    const near = groups.filter((g) => g.level === "warn").length;
+    const over = groups.filter((g) => g.level === "over").length;
+    if (near > 0 || over > 0) {
+      $("adminUsageMeta").textContent += ($("adminUsageMeta").textContent ? " ｜ " : "") + t("admin.quotaNear", { near, over });
+    }
     $("adminUsageGroupRows").innerHTML = groups.length
       ? groups.map((g) => {
           const used = Number(g.tokens) || 0;
           let quotaCell = "—";
           if (quotaGroup > 0) {
             const ratio = Math.round((used / quotaGroup) * 100);
-            quotaCell = `<span${ratio >= 100 ? ' class="usage-quota-hit"' : ""}>${used.toLocaleString()} / ${quotaGroup.toLocaleString()}（${ratio}%）</span>`;
+            const cls = g.level === "over" ? " class=\"usage-quota-hit\"" : g.level === "warn" ? " class=\"usage-quota-warn\"" : "";
+            const mark = g.level === "over" ? "🔴 " : g.level === "warn" ? "⚠ " : "";
+            quotaCell = `<span${cls}>${mark}${used.toLocaleString()} / ${quotaGroup.toLocaleString()}（${ratio}%）</span>`;
           }
           return `<tr>
           <td>${escapeHtml(g.name || g.groupId)}</td>

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.265**
+> Applies to version: **1.0.266**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -614,6 +614,7 @@ The visual elements of each row (all are real classes):
 | Avatar `.group-avatar` | Shows the image if `groupAvatar` is present, otherwise uses a category icon: support circle `🛟`, direct chat `direct` `💬`, normal `👥` | `renderGroupList()` |
 | Private lock `.private-lock` | Private circles only: a `🔒` badge embedded at the bottom-right of the avatar (`title` is `list.private` "Private group") | `renderGroupList()` |
 | Tag `.support-tag` | Support circles show `support.badge` ("Support") | `renderGroupList()` |
+| Quota level `.quota-tag` (1.0.266) | **Operator+ only**: when the circle's today usage approaches / reaches `Agents:DailyTokenQuotaPerGroup`, shows `⚠` (warn, ≥ 80%) or `🔴` (over, ≥ 100%), with `title` `list.quotaWarn` / `list.quotaOver`. Data comes from `GET /ag-ui/admin/quota-status` (refreshed alongside the circle list, `loadQuotaStatus()`); not served to regular users (quota / cost is ops information) | `renderGroupList()`, `loadQuotaStatus()` |
 | Unread `.unread-badge` | Shows a count when there are unread messages; `>99` shows `99+` (`title` is `list.unread` "{count} unread") | `renderGroupList()` |
 | Mute `.group-mute` | `🔔` / `🔕` toggle, `title` is `notif.muteTip`/`notif.unmuteTip`; muted rows get the `muted` class | `renderGroupList()`, `toggleMutedGroup()` |
 | Member count `.count` | Member count on the right | `renderGroupList()` |
@@ -3933,24 +3934,27 @@ The single server-side source of truth is `MemoryGovernance` (`MemoryGovernance.
 
 ### 8.6 Usage Stats tab (`#adminTabUsage`)
 
-`loadAdminUsage()` (`app.js:8841-8900`) calls `GET /ag-ui/admin/usage?days=7`.
+`loadAdminUsage()` (`app.js:8866-8930`) calls `GET /ag-ui/admin/usage?days=7`.
 
-The server (`AdminApi.cs:397-421`) returns:
+The server (`AdminApi.cs:397-408`) returns:
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls }… ], "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls, level }… ], "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary` (`AgentUsageService.cs:152`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
-- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:126`, i.e. at most 90 days); the frontend always passes `days=7`.
-- **`groupsToday` (new in 1.0.265)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:84`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use** (shows "—" when no per-circle quota is set; the cell turns red at or over quota).
-- Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited, `AgentUsageService.cs:97`); `dailyQuotaPerGroup` comes from `AgentUsageService.DailyQuotaPerGroup` (config `Agents:DailyTokenQuotaPerGroup`, `0` = unlimited, `AgentUsageService.cs:100`).
+- `UsageDaySummary` (`AgentUsageService.cs:164`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
+- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:138`, i.e. at most 90 days); the frontend always passes `days=7`.
+- **`groupsToday` (new in 1.0.265; `level` added in 1.0.266)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:96`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use**.
+- **Quota level `level` (1.0.266)**: `AgentUsageService.QuotaLevel(tokens, quota)` (`AgentUsageService.cs:27`) returns `ok` / `warn` / `over` with the threshold `QuotaWarnRatio = 0.8` (`AgentUsageService.cs:24`) — a **single source for the threshold**, so the frontend does not duplicate the 80%. In the usage table: `ok` has no colour, `warn` is amber (`⚠` / `.usage-quota-warn`), `over` is red (`🔴` / `.usage-quota-hit`); the meta line appends `admin.quotaNear` "{near} approaching limit ｜ {over} over limit".
+- Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited); `dailyQuotaPerGroup` comes from `AgentUsageService.DailyQuotaPerGroup` (config `Agents:DailyTokenQuotaPerGroup`, `0` = unlimited).
 
 Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, noting "exceeding it will be rejected; auto-restores at UTC next day"); otherwise `admin.quotaDisabled`; if `quotaGroup > 0` it appends `admin.quotaGroupEnabled` (`app.js:8847-8854`). The daily table has 6 columns: date / total tokens / input / output / thinking / calls.
 
-> The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,103-111`).
+> The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,115-123`).
 >
-> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:115-123`; the gateway-side check is `AgentGateway.cs:653-665`, error code `GROUP_QUOTA_EXCEEDED`).
+> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:127-135`; the gateway-side check is `AgentGateway.cs:653-665`, error code `GROUP_QUOTA_EXCEEDED`).
+>
+> **Proactive warning (1.0.266)**: the same level source is also served by `GET /ag-ui/admin/quota-status` (`AdminApi.cs:410-426`) to the **sidebar group items** (Operator+ only) — so you can see which circle is "nearly full" without opening the console.
 >
 > **Rejections are observable (1.0.265)**: both quota checks increment `MetricsService.RecordQuotaRejection` (`AgentGateway.cs:638` / `:655`), observable via `knowgath_quota_rejections_total{scope="user|group"}` on `/ag-ui/metrics` and the **"Quota rejections" card** on the Runtime Metrics page (shown only once something has been blocked, with a "user N ｜ circle M" subtitle).
 
@@ -4668,6 +4672,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | GET | `/ag-ui/admin/voice/voices` | Voice list for synthesis (proxies the TTS `/v1/audio/voices`): `{ voices: string[] }`; 404 unconfigured / unsupported, 503 unreachable | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + today's per-circle breakdown + quota) | Operator |
+| GET | `/ag-ui/admin/quota-status` | Per-circle quota levels (today's `ok` / `warn` (≥80%) / `over` per circle, plus the quota and threshold; feeds the sidebar warning badges) | Operator |
 | GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `fromMs` / `toMs`) | Operator |
 | GET | `/ag-ui/admin/audit.csv` | Audit log CSV export (UTF-8 BOM, no 200-row limit) | Operator |
 | GET | `/ag-ui/admin/bridge-health` | Bridge endpoint health (`?refresh=true` for a live probe) | Operator |

@@ -396,28 +396,56 @@ public static class AdminApi
         // 模型用量统计（最近 N 天按日汇总 / 配额配置 / 今日各知聚明细）：仅管理员及以上（含运维）
         root.MapGet("/usage", (int? days, HttpContext ctx, IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
-            // 今日各知聚明细：把「哪个知聚在烧 token」直接摆出来（配额也是按知聚日切，故对今日口径最有用）
+            return Results.Ok(new
+            {
+                dailyQuotaPerUser = usage.DailyQuotaPerUser,
+                dailyQuotaPerGroup = usage.DailyQuotaPerGroup,
+                groupsToday = GroupTodayRows(sp, usage),
+                days = usage.GetDailySummary(days ?? 7),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 知聚配额水位（管理员侧主动预警）：供侧边栏知聚项打标（不打开控制台也能看到哪个知聚快满）
+        // 与用量页汇总。仅 Operator+（配额 / 成本属运维信息，不下发给普通用户）。
+        root.MapGet("/quota-status", (IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
+        {
+            var quota = usage.DailyQuotaPerGroup;
+            var groups = usage.GetGroupTodaySummary()
+                .Take(50)
+                .Select(g => new
+                {
+                    groupId = g.GroupId,
+                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, quota),
+                })
+                .ToList();
+            return Results.Ok(new
+            {
+                quotaPerGroup = quota,
+                warnRatio = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaWarnRatio,
+                groups,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 今日各知聚用量行（/usage 与 /quota-status 共用口径）：名字由群库解析，取不到回退 groupId；
+        // 同时带上配额水位 `level`（ok / warn / over）——单一阈值来源，避免前后端各写一份 80%。
+        static List<object> GroupTodayRows(IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage)
+        {
+            var quota = usage.DailyQuotaPerGroup;
             var groupNames = sp.GetService<GroupHub>()?.Store.AllGroups()
                 .ToDictionary(g => g.GroupId, g => g.GroupName, StringComparer.Ordinal)
                 ?? new Dictionary<string, string>(StringComparer.Ordinal);
-            var groupsToday = usage.GetGroupTodaySummary()
+            return usage.GetGroupTodaySummary()
                 .Take(50)
-                .Select(g => new
+                .Select(g => (object)new
                 {
                     groupId = g.GroupId,
                     name = groupNames.TryGetValue(g.GroupId, out var gn) ? gn : g.GroupId,
                     tokens = g.Tokens,
                     calls = g.Calls,
+                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, quota),
                 })
                 .ToList();
-            return Results.Ok(new
-            {
-                dailyQuotaPerUser = usage.DailyQuotaPerUser,
-                dailyQuotaPerGroup = usage.DailyQuotaPerGroup,
-                groupsToday,
-                days = usage.GetDailySummary(days ?? 7),
-            });
-        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+        }
 
         // 操作审计日志（4.3 / 企业合规）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。
         // 支持过滤：actor（操作者用户名 / ID 子串）、action（操作名子串）、targetId、fromMs / toMs（UTC 毫秒）。limit 最多 200。

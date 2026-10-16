@@ -217,6 +217,12 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   margin-left: 6px; padding: 0 7px; border-radius: 999px; background: var(--accent, #4f8cff);
   color: #fff; font-size: 11px; line-height: 18px; white-space: nowrap;
 }
+/* 知聚配额水位（仅 Operator+）：⚠ 接近上限 / 🔴 已达上限——侧边栏主动预警，不用打开控制台 */
+.group-item .quota-tag {
+  flex: none; margin-left: 4px; font-size: 12px; line-height: 18px; white-space: nowrap; cursor: help;
+}
+.group-item .quota-tag.warn { color: var(--warn, #f0a63a); }
+.group-item .quota-tag.over { color: var(--err, #ff6b6b); }
 /* 群头像：与 👥 图标同尺寸，圆形裁剪 */
 .group-item .group-avatar {
   width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; overflow: hidden;
@@ -1763,8 +1769,10 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .admin-table th { position: sticky; top: 0; background: var(--bg, #fff); z-index: 1; font-weight: 600; }
 .admin-table td:last-child { white-space: normal; }
 .admin-empty { text-align: center; color: var(--muted); padding: 24px 0; }
-/* 用量统计：知聚今日用量达到 / 超出配额时高亮该行数字（配额使用列） */
+/* 用量统计：知识聚今日用量达到 / 超出配额时高亮该行数字（配额使用列） */
 .usage-quota-hit { color: var(--err, #ff6b6b); font-weight: 600; }
+/* 接近上限（≥80%）：蕾珀提示，区别于已超限的红标 */
+.usage-quota-warn { color: var(--warn, #f0a63a); font-weight: 600; }
 .tag-admin, .tag-user, .tag-disabled, .tag-active { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .tag-admin { background: rgba(240, 166, 58, .15); color: var(--warn, #f0a63a); }
 .tag-user { background: rgba(128, 128, 128, .12); color: var(--muted, #888); }

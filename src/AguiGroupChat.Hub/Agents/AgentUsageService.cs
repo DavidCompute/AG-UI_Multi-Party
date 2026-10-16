@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 namespace AguiGroupChat.Hub.Agents;
 
 /// <summary>
-/// 模型 token 用量统计与配额服务：每次智能体模型调用结束后记录 (日期, 智能体, 触发者) 的用量，
+/// <summary>模型 token 用量统计与配额服务：每次智能体模型调用结束后记录 (日期, 智能体, 触发者) 的用量，
 /// 管理员可查看按天汇总；配额按「触发者当日累计 token」（Agents:DailyTokenQuotaPerUser）与
 /// 「知聚当日累计 token」（Agents:DailyTokenQuotaPerGroup）执行，均 0 = 不限，超限拒绝新触发。
 /// 定时任务以虚拟触发者 <see cref="SystemUserId"/> 发起，不计入个人配额，但**计入知聚配额**。
@@ -18,6 +18,18 @@ public sealed class AgentUsageService
 {
     /// <summary>定时任务触发的虚拟触发者 ID：不参与个人配额（系统任务不应被用户配额误伤）。</summary>
     public const string SystemUserId = "system";
+
+    /// <summary>知聚配额「接近上限」预警阈值：当日用量达到配额的该比例（含）即视为 warn。
+    /// 配额本就与用量同源（同一张「按知聚」聚合表），故这里只是阈值判定，不引入新状态。</summary>
+    public const double QuotaWarnRatio = 0.8;
+
+    /// <summary>知聚配额水位：<c>ok</c>（未启用 / 未达阈值）、<c>warn</c>（≥ {@link QuotaWarnRatio}）、<c>over</c>（≥ 配额）。</summary>
+    public static string QuotaLevel(long tokens, long quota)
+    {
+        if (quota <= 0) return "ok";            // 未启用配额：水位无意义
+        if (tokens >= quota) return "over";
+        return tokens >= quota * QuotaWarnRatio ? "warn" : "ok";
+    }
 
     private readonly IUsageStore _store;
     private readonly Func<long> _quotaPerUser;

@@ -134,6 +134,20 @@ public sealed class AgentUsageServiceTests
     }
 
     [Fact]
+    public void QuotaLevel_ThresholdsWarnAt80AndOverAt100()
+    {
+        // 未启用配额：水位无意义，恒 ok
+        Assert.Equal("ok", AgentUsageService.QuotaLevel(999999, 0));
+        // 阈值 80%（含）：79% ok、80% warn、99% warn、100% over
+        Assert.Equal("ok", AgentUsageService.QuotaLevel(79, 100));
+        Assert.Equal("warn", AgentUsageService.QuotaLevel(80, 100));
+        Assert.Equal("warn", AgentUsageService.QuotaLevel(99, 100));
+        Assert.Equal("over", AgentUsageService.QuotaLevel(100, 100));
+        Assert.Equal("over", AgentUsageService.QuotaLevel(150, 100));
+        Assert.Equal(0.8, AgentUsageService.QuotaWarnRatio);
+    }
+
+    [Fact]
     public void GetDailySummary_AggregatesByDay()
     {
         var svc = Create();

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.265**
+> 适用版本：**1.0.266**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -613,6 +613,7 @@
 | 头像 `.group-avatar` | 有 `groupAvatar` 显示图片，否则用类别图标：客服知聚 `🛟`、单聊 `direct` `💬`、普通 `👥` | `renderGroupList()` |
 | 私密锁 `.private-lock` | 仅私密知聚：`🔒` 角标内嵌在头像右下角（`title` 为 `list.private`「私密知聚」） | `renderGroupList()` |
 | 标签 `.support-tag` | 客服知聚显示 `support.badge`（「客服知聚」） | `renderGroupList()` |
+| 配额水位 `.quota-tag`（1.0.266） | **仅 Operator+**：该知聚当日用量接近 / 已达 `Agents:DailyTokenQuotaPerGroup` 时显示 `⚠`（warn，≥ 80%）或 `🔴`（over，≥ 100%），`title` 为 `list.quotaWarn` / `list.quotaOver`。数据来自 `GET /ag-ui/admin/quota-status`（与知聚列表同刷新，`loadQuotaStatus()`）；普通用户不下发（配额 / 成本属运维信息） | `renderGroupList()`、`loadQuotaStatus()` |
 | 未读 `.unread-badge` | 有未读时显示数字，`>99` 显示 `99+`（`title` 为 `list.unread`「{count} 条未读」） | `renderGroupList()` |
 | 静音 `.group-mute` | `🔔` / `🔕` 开关，`title` 为 `notif.muteTip`/`notif.unmuteTip`；已静音的行加 `muted` class | `renderGroupList()`、`toggleMutedGroup()` |
 | 成员数 `.count` | 右侧成员数量 | `renderGroupList()` |
@@ -3928,24 +3929,27 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.6 用量统计 tab（`#adminTabUsage`）
 
-`loadAdminUsage()`（`app.js:8841-8900`）调 `GET /ag-ui/admin/usage?days=7`。
+`loadAdminUsage()`（`app.js:8866-8930`）调 `GET /ag-ui/admin/usage?days=7`。
 
-服务端（`AdminApi.cs:397-421`）返回：
+服务端（`AdminApi.cs:397-408`）返回：
 
 ```jsonc
-{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls }… ], "days": [ UsageDaySummary… ] }
+{ "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>, "groupsToday": [ { groupId, name, tokens, calls, level }… ], "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary`（`AgentUsageService.cs:152`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
-- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:126`，即最多 90 天）；前端固定传 `days=7`。
-- **`groupsToday`（1.0.265 新增）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:84`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**（未设知聚配额时显「—」；达到或超出配额时该格标红）。
-- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限，`AgentUsageService.cs:97`）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限，`AgentUsageService.cs:100`）。
+- `UsageDaySummary`（`AgentUsageService.cs:164`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
+- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:138`，即最多 90 天）；前端固定传 `days=7`。
+- **`groupsToday`（1.0.265 新增，1.0.266 加 `level`）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:96`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**。
+- **配额水位 `level`（1.0.266）**：`AgentUsageService.QuotaLevel(tokens, quota)`（`AgentUsageService.cs:27`）返回 `ok` / `warn` / `over`，阈值 `QuotaWarnRatio = 0.8`（`AgentUsageService.cs:24`）——**单一阈值来源**，前端不重复写 80%。用量表：`ok` 无色、`warn` 琥珀（`⚠` / `.usage-quota-warn`）、`over` 红标（`🔴` / `.usage-quota-hit`）；meta 尾部追加 `admin.quotaNear`「接近上限 {near} 个 ｜ 已超限 {over} 个」。
+- 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限）。
 
 前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`；若 `quotaGroup > 0` 再追加 `admin.quotaGroupEnabled`（`app.js:8847-8854`）。按日表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
 
-> **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,103-111`）。
+> **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,115-123`）。
 >
-> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:115-123`，网关侧拦截见 `AgentGateway.cs:653-665`，错误码 `GROUP_QUOTA_EXCEEDED`）。
+> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:127-135`，网关侧拦截见 `AgentGateway.cs:653-665`，错误码 `GROUP_QUOTA_EXCEEDED`）。
+>
+> **主动预警（1.0.266）**：同一水位口径还经 `GET /ag-ui/admin/quota-status`（`AdminApi.cs:410-426`）下发到**侧边栏知聚项**（仅 Operator+）——不用打开控制台就能看到哪个知聚「快满」。
 >
 > **拦截可观测（1.0.265）**：两处配额拦截均累加 `MetricsService.RecordQuotaRejection`（`AgentGateway.cs:638` / `:655`），经 `/ag-ui/metrics` 的 `knowgath_quota_rejections_total{scope="user|group"}` 与「运行指标」页的**「配额拦截」卡片**（仅被挡过才显示，附「用户 N ｜ 知聚 M」）观察「有多少请求被挡」。
 
@@ -4662,6 +4666,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/voice/voices` | 语音合成音色列表（代理 TTS 服务 `/v1/audio/voices`）：`{ voices: string[] }`；未配置 / 不支持 404、不可达 503 | Operator |
 | GET | `/ag-ui/admin/voice/sample?voice=` | 音色试听：合成一句短样例并内联返回音频（便于 `<audio src>`，可带 `?token=`）；未启用 404、失败 503 | Operator |
 | GET | `/ag-ui/admin/usage?days=` | 模型用量统计（按日汇总 + 分知聚今日明细 + 配额） | 运维 |
+| GET | `/ag-ui/admin/quota-status` | 知聚配额水位（今日各知聚 `ok` / `warn`（≥80%）/ `over`，加配额值与阈值；供侧边栏知聚项预警角标） | 运维 |
 | GET | `/ag-ui/admin/audit` | 操作审计日志查询（`limit` 最多 200；过滤 `actor` / `action` / `targetId` / `fromMs` / `toMs`） | 运维 |
 | GET | `/ag-ui/admin/audit.csv` | 审计日志导出 CSV（UTF-8 BOM，无 200 条上限） | 运维 |
 | GET | `/ag-ui/admin/bridge-health` | 桥接端点健康度（`?refresh=true` 实时探测） | 运维 |
