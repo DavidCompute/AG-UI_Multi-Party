@@ -192,7 +192,7 @@ public static class AdminApi
 
         // 数字员工绩效看板（P0）：按数字员工聚合调用量 / token / 👍👎 好评率。仅运维及以上（只读）。
         // 数据源：agui_usage（按日期+员工+触发者聚合行）与消息反馈；窗口 days 只用于过滤反馈。
-        root.MapGet("/agent-performance", (int? days, IServiceProvider sp) =>
+        root.MapGet("/agent-performance", (int? days, string? groupId, IServiceProvider sp) =>
         {
             var usage = sp.GetService<IUsageStore>();
             var catalog = sp.GetService<AgentCatalog>();
@@ -201,11 +201,26 @@ public static class AdminApi
             var d = Math.Clamp(days ?? 30, 1, 365);
             var to = DateTimeOffset.UtcNow;
             var from = to.AddDays(-d + 1);
-            var rows = usage.GetUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"));
-            var feedback = sp.GetService<MessageFeedbackStore>()?.Snapshot() ?? (IReadOnlyList<MessageFeedbackEntry>)[];
             var names = catalog.ListDefinitions()
                 .ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
-            var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            var scopeId = string.IsNullOrWhiteSpace(groupId) ? null : groupId.Trim();
+            IReadOnlyList<AgentPerformance.AgentStat> stats;
+            string? scopeName = null;
+            if (scopeId is not null)
+            {
+                // 知聚范围：用量取「按知聚」聚合表；👍👎 / 好评率不按知聚记录，故 Up/Down 恒为 0（前端显示「—」）；
+                // seedAllAgents=false：只列该知聚内实际有用量的员工，避免「该群闲置」噪声。
+                var grows = usage.GetGroupUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"))
+                    .Where(r => string.Equals(r.GroupId, scopeId, StringComparison.Ordinal));
+                stats = AgentPerformance.Aggregate(grows, (IReadOnlyList<MessageFeedbackEntry>)[], names, d, to.ToUnixTimeMilliseconds(), seedAllAgents: false);
+                scopeName = sp.GetService<GroupHub>()?.Store.AllGroups().FirstOrDefault(g => g.GroupId == scopeId)?.GroupName;
+            }
+            else
+            {
+                var rows = usage.GetUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"));
+                var feedback = sp.GetService<MessageFeedbackStore>()?.Snapshot() ?? (IReadOnlyList<MessageFeedbackEntry>)[];
+                stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            }
             var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
@@ -216,6 +231,8 @@ public static class AdminApi
                 days = d,
                 from = from.ToString("yyyy-MM-dd"),
                 to = to.ToString("yyyy-MM-dd"),
+                // 知聚范围（为空即全部）：前端据此提示「👍👎 / 好评率不按知聚记录」
+                scope = scopeId is null ? null : new { groupId = scopeId, name = scopeName ?? scopeId },
                 pricing = new
                 {
                     configured = pricing.Configured,
@@ -245,6 +262,16 @@ public static class AdminApi
                     cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
                 }),
             });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 知聚下拉选项（绩效页「按知聚」筛选用）：仅运维及以上（只读）。
+        root.MapGet("/groups", (IServiceProvider sp) =>
+        {
+            var groups = (sp.GetService<GroupHub>()?.Store.AllGroups() ?? (IReadOnlyList<Group>)[])
+                .Select(g => new { groupId = g.GroupId, name = string.IsNullOrWhiteSpace(g.GroupName) ? g.GroupId : g.GroupName })
+                .OrderBy(x => x.name, StringComparer.CurrentCulture)
+                .ToList();
+            return Results.Ok(new { groups });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 组织体检报告（P0）：把「员工绩效 + 组织连接」汇成可导出的 Markdown。仅运维及以上（只读）。

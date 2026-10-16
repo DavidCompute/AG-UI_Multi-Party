@@ -44,7 +44,8 @@ public static class AgentPerformance
         IEnumerable<MessageFeedbackEntry> feedback,
         IReadOnlyDictionary<string, string> names,
         int days,
-        long nowMs)
+        long nowMs,
+        bool seedAllAgents = true)
     {
         var fromMs = nowMs - (long)Math.Max(1, days) * 24 * 3600 * 1000;
         var acc = new Dictionary<string, Acc>(StringComparer.Ordinal);
@@ -52,7 +53,9 @@ public static class AgentPerformance
 
         // 先把目录里的全部数字员工播种进来（calls=0）——便于识别「近 N 天无调用」的闲置岗位；
         // 无名字信息时（names 为空）保持原行为：只列出有用量 / 反馈的员工。
-        foreach (var id in names.Keys) Get(id);
+        // seedAllAgents=false：只列出实际有用量 / 反馈的员工（知聚范围视图用，避免大量「该群闲置」噪声）。
+        if (seedAllAgents)
+            foreach (var id in names.Keys) Get(id);
 
         foreach (var u in usage)
         {

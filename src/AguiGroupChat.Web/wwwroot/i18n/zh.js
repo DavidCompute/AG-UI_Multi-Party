@@ -1851,6 +1851,8 @@ window.I18N_DICTS.zh = {
   "admin.perfOnlyFlagged": "⚠️ 仅看需关注",
   "admin.perfNoMatch": "没有符合筛选条件的数字员工",
   "admin.perfShowing": "显示 {n} / {total}",
+  "admin.perfGroupAll": "全部知聚",
+  "admin.perfGroupHint": "知聚范围「{name}」：用量取自该知聚；👍👎 / 好评率不按知聚记录，显示「—」",
   "admin.perfMeta": "{from} ~ {to} · {agents} 位数字员工 · 共 {calls} 次调用 · {tokens} tokens · 综合好评率 {rate}",
   "admin.perfEmpty": "该范围内暂无数字员工调用或反馈记录",
   "admin.perfThAgent": "数字员工",

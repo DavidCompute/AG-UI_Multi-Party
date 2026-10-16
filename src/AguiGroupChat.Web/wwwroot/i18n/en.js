@@ -1858,6 +1858,8 @@ window.I18N_DICTS.en = {
   "admin.perfOnlyFlagged": "⚠️ Flagged only",
   "admin.perfNoMatch": "No employees match the filter",
   "admin.perfShowing": "Showing {n} / {total}",
+  "admin.perfGroupAll": "All groups",
+  "admin.perfGroupHint": "Group scope \"{name}\": usage is taken from this group; 👍👎 / positive rate are not recorded per group and show \"—\"",
   "admin.perfMeta": "{from} ~ {to} · {agents} agents · {calls} calls · {tokens} tokens · overall positive rate {rate}",
   "admin.perfEmpty": "No agent calls or feedback in this range",
   "admin.perfThAgent": "Agent",

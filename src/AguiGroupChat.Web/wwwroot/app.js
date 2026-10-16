@@ -7017,17 +7017,35 @@ async function runEvalCases(ids) {
 let perfData = null;            // 最近一次绩效响应（供筛选重绘）
 let perfOnlyFlagged = false;    // 仅看需关注
 let perfKeyword = "";           // 名称 / ID 关键词
+let perfGroupId = "";           // 知聚范围（空 = 全部）
+let perfGroupsLoaded = false;   // 知聚下拉是否已填充
+
+/** 知聚下拉选项（懒加载一次；失败不致命，下次再试）。 */
+async function loadPerfGroups() {
+  const sel = $("perfGroup");
+  if (!sel || perfGroupsLoaded) return;
+  try {
+    const res = await fetch("/ag-ui/admin/groups", { headers: { Authorization: "Bearer " + state.token } });
+    const d = res.ok ? await res.json().catch(() => null) : null;
+    const list = (d && d.groups) || [];
+    sel.innerHTML = `<option value="">${escapeHtml(t("admin.perfGroupAll"))}</option>`
+      + list.map((g) => `<option value="${escapeHtml(g.groupId)}">${escapeHtml(g.name || g.groupId)}</option>`).join("");
+    sel.value = perfGroupId;
+    perfGroupsLoaded = true;
+  } catch { /* 非致命 */ }
+}
 
 async function loadAgentPerformance() {
   const meta = $("adminPerfMeta");
   const hints = $("adminPerfHints");
   const rows = $("adminPerfRows");
   const days = Number($("perfRange") && $("perfRange").value) || 30;
+  const scope = perfGroupId ? `&groupId=${encodeURIComponent(perfGroupId)}` : "";
   if (meta) meta.textContent = t("admin.loading");
   if (hints) hints.textContent = "";
   rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
-    const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
+    const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}${scope}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) { perfData = null; if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
     perfData = d;
@@ -7051,6 +7069,10 @@ function renderPerfRows() {
   const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
     : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
   const flagged = list.filter((a) => (a.flags || []).length);
+  const scope = d.scope || null;         // 知聚范围（非空时 👍👎 / 好评率 不可用）
+  if (scope) perfOnlyFlagged = false;    // 知聚范围下无反馈，「仅看需关注」无意义
+  const flagBtn = $("perfFlaggedBtn");
+  if (flagBtn) { flagBtn.disabled = !!scope; if (scope) flagBtn.classList.remove("on"); }
   const kw = (perfKeyword || "").trim().toLowerCase();
   const filtered = list.filter((a) => {
     if (perfOnlyFlagged && !(a.flags || []).length) return false;
@@ -7068,10 +7090,12 @@ function renderPerfRows() {
     if (filtered.length !== list.length) m += " · " + t("admin.perfShowing", { n: filtered.length, total: list.length });
     meta.textContent = m;
   }
-  // 关注建议（确定性）：列出带标记的员工，便于「反哺编排 / 组织体检」
-  if (hints) hints.textContent = flagged.length
-    ? t("admin.perfHints", { names: flagged.slice(0, 8).map((a) => a.name + "（" + (a.flags || []).map(flagLabel).join(" / ") + "）").join("、") })
-    : t("admin.perfHintsNone");
+  // 关注建议（确定性）：列出带标记的员工，便于「反哺编排 / 组织体检」；知聚范围下改为范围提示
+  if (hints) hints.textContent = scope
+    ? t("admin.perfGroupHint", { name: scope.name || scope.groupId })
+    : (flagged.length
+      ? t("admin.perfHints", { names: flagged.slice(0, 8).map((a) => a.name + "（" + (a.flags || []).map(flagLabel).join(" / ") + "）").join("、") })
+      : t("admin.perfHintsNone"));
   if (!list.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
   if (!filtered.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfNoMatch"))}</td></tr>`; return; }
   rows.innerHTML = filtered.map((a) => {
@@ -7082,7 +7106,7 @@ function renderPerfRows() {
     return `<tr data-agent-id="${escapeHtml(a.agentId || "")}" title="${escapeHtml(a.agentId || "")}"><td>${escapeHtml(a.name || a.agentId)}</td>`
       + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
       + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
-      + `<td>${Number(a.up || 0).toLocaleString()}</td><td>${Number(a.down || 0).toLocaleString()}</td>`
+      + `<td>${scope ? "—" : Number(a.up || 0).toLocaleString()}</td><td>${scope ? "—" : Number(a.down || 0).toLocaleString()}</td>`
       + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
   }).join("");
 }
@@ -7584,6 +7608,7 @@ function switchAdminTab(tab) {
   } else if (apikeys) {
     loadApiKeys();
   } else if (perf) {
+    loadPerfGroups();
     loadAgentPerformance();
   } else if (evalTab) {
     loadEvalCases();
@@ -13810,6 +13835,8 @@ function init() {
   $("perfRefreshBtn").onclick = loadAgentPerformance;
   const perfSearchEl = $("perfSearch");
   if (perfSearchEl) perfSearchEl.addEventListener("input", () => { perfKeyword = perfSearchEl.value; renderPerfRows(); });
+  const perfGroupEl = $("perfGroup");
+  if (perfGroupEl) perfGroupEl.onchange = () => { perfGroupId = perfGroupEl.value || ""; loadAgentPerformance(); };
   const perfFlaggedEl = $("perfFlaggedBtn");
   if (perfFlaggedEl) perfFlaggedEl.onclick = () => { perfOnlyFlagged = !perfOnlyFlagged; perfFlaggedEl.classList.toggle("on", perfOnlyFlagged); renderPerfRows(); };
   $("perfReportBtn").onclick = downloadOrgHealthReport;

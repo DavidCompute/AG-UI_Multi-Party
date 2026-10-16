@@ -186,6 +186,40 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task AgentPerformance_ScopesByGroup()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        usage.RecordUsage("agent_p", "user_p", "group_p1", 100, 50, 0);
+        usage.RecordUsage("agent_p", "user_p", "group_p2", 10, 10, 0);
+
+        // 全量：agent_p 跨群共 2 次调用
+        using (var all = Authed(HttpMethod.Get, "/ag-ui/admin/agent-performance?days=7", token))
+        {
+            var d = await (await _client.SendAsync(all)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = d.GetProperty("agents").EnumerateArray().First(a => a.GetProperty("agentId").GetString() == "agent_p");
+            Assert.Equal(2, row.GetProperty("calls").GetInt64());
+        }
+
+        // 知聚范围：只算该群的用量，且反馈列不可用（null）
+        using (var scoped = Authed(HttpMethod.Get, "/ag-ui/admin/agent-performance?days=7&groupId=group_p1", token))
+        {
+            var res = await _client.SendAsync(scoped);
+            res.EnsureSuccessStatusCode();
+            var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("group_p1", d.GetProperty("scope").GetProperty("groupId").GetString());
+            var rows = d.GetProperty("agents").EnumerateArray().ToList();
+            var row = rows.First(a => a.GetProperty("agentId").GetString() == "agent_p");
+            Assert.Equal(1, row.GetProperty("calls").GetInt64());
+            Assert.Equal(150, row.GetProperty("totalTokens").GetInt64());
+            Assert.Equal(JsonValueKind.Null, row.GetProperty("positiveRate").ValueKind);
+            // seedAllAgents=false：不列未在该群使用过的员工（无 0 调用行）
+            Assert.DoesNotContain(rows, a => a.GetProperty("calls").GetInt64() == 0);
+        }
+    }
+
+    [Fact]
     public async Task OrgHealth_RequiresOperator()
     {
         var plain = await RegisterAsync("oh_plain");

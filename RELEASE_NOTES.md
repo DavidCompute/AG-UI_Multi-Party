@@ -1,3 +1,33 @@
+# AG-UI 群聊桌面版 1.0.252 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.252 Release Notes (current Windows desktop release)
+
+**版本说明**：**绩效页新增「知聚范围」**——选一个知聚即可看该知聚内的用量（调用 / token / 成本）；👍👎 / 好评率不按知聚记录，显示「—」。
+**Version note**: **The performance tab gains a "group scope"** — pick a group to see usage (calls / tokens / cost) inside it; 👍👎 / positive rate are not recorded per group and show "—".
+
+## 变更
+# Changes
+
+中文：
+- **后端**：`GET /ag-ui/admin/agent-performance` 新增可选 **`?groupId=`**——非空时用量取自**按知聚聚合表**（`agui_usage_group`），只列该知聚内有用量的员工（`AgentPerformance.Aggregate` 新增 `seedAllAgents=false`，避免「该群闲置」噪声），且**不注入反馈**，故 `up`/`down` 恒为 0、`positiveRate` 为 `null`；响应新增 **`scope`**（`{groupId,name}`，空即全部）。**向后兼容**（不传 `groupId` 行为不变）。
+- **后端**：新增 `GET /ag-ui/admin/groups`（Operator+）→ `{groups:[{groupId,name}]}`（按名称排序），供下拉选项。
+- **前端**：绩效页头部新增**知聚下拉**（懒加载一次；默认「全部知聚」）；选中后重新拉取带 `groupId` 的数据，表格 **👍 / 👎 / 好评率 / 关注 列均显示「—」**，下方提示「知聚范围「X」：用量取自该知聚；👍👎 / 好评率不按知聚记录，显示「—」」，且**「仅看需关注」自动置灰**（该范围下无反馈）。
+English:
+- **Backend**: `GET /ag-ui/admin/agent-performance` gains an optional **`?groupId=`** — when set, usage is taken from the **per-group aggregate table** (`agui_usage_group`), listing only employees with usage in that group (`AgentPerformance.Aggregate` gains `seedAllAgents=false` to avoid "idle in this group" noise) and **injecting no feedback**, so `up`/`down` are always 0 and `positiveRate` is `null`; the response gains **`scope`** (`{groupId,name}`; empty means all). **Backward compatible** (omitting `groupId` behaves as before).
+- **Backend**: a new `GET /ag-ui/admin/groups` (Operator+) returns `{groups:[{groupId,name}]}` (sorted by name) for the dropdown.
+- **Front end**: the perf tab header gains a **group dropdown** (lazily populated once; defaults to "All groups"); selecting one refetches with `groupId`, the table shows **"—" for 👍 / 👎 / positive rate / attention**, a hint is shown below ("Group scope \"X\": usage is taken from this group; 👍👎 / positive rate are not recorded per group and show \"—\""), and **"Flagged only" is greyed out** (no feedback in this scope).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（知聚范围）与 §9.2.8（`agent-performance` 补 `?groupId` / `scope`，新增 `/groups` 行）。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (group scope) and §9.2.8 (the `agent-performance` row notes `?groupId` / `scope`; new `/groups` row).
+
+## 测试
+# Tests
+
+中文：`AdminApiTests` 新增 `AgentPerformance_ScopesByGroup`（记录 `group_p1` / `group_p2` 两次用量：全量 `agent_p` calls=2；`?groupId=group_p1` 只算 1 次 / 150 token、`positiveRate` 为 null、无 0 调用行）。相关类合跑 **26/26**。`node --check`、i18n 审计 **zh=en=1893，missing 0**、`check-i18n-keys`（875 处引用）、`check-orphan-keys`（914 处 `t()` 引用）、`dotnet build` **0 错误**均过。浏览器实测（重建 web 后，管理员，真实数据）：下拉 **10 个选项**（首项「全部知聚」，含 hello / test 等）；选一个知聚 → 提示范围文案、**「仅看需关注」置灰**、请求带上了 `scope.groupId`；注入合成范围数据 → 行单元格为 **「甲 / 3 / 300 / — / — / — / — / 2026-10-15 / —」**（成本 / 👍 / 👎 / 好评率 / 关注 均「—」）；切回「全部知聚」→ **17 行**、开关恢复可用；**无页面报错**。
+English: `AdminApiTests` gains `AgentPerformance_ScopesByGroup` (recording two usages for `group_p1` / `group_p2`: all-scope `agent_p` has calls=2; `?groupId=group_p1` counts 1 call / 150 tokens, `positiveRate` null, and no zero-call rows). The related classes run **26/26**. `node --check`, the i18n audit **zh=en=1893, missing 0**, `check-i18n-keys` (875 references), `check-orphan-keys` (914 `t()` references) and `dotnet build` **0 errors** all pass. Browser-verified (after rebuilding web, as admin, real data): the dropdown has **10 options** (first "All groups", including hello / test); selecting one shows the scope hint, **greys out "Flagged only"** and sends `scope.groupId`; injecting synthetic scope data renders the cells **"甲 / 3 / 300 / — / — / — / — / 2026-10-15 / —"** (cost / 👍 / 👎 / positive rate / attention all "—"); back to "All groups" → **17 rows** with the toggle re-enabled; **no page errors**.
+
 # AG-UI 群聊桌面版 1.0.251 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.251 Release Notes (current Windows desktop release)
 
