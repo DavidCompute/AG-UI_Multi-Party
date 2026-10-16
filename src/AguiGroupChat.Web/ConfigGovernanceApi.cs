@@ -36,6 +36,13 @@ public sealed class ConfigGovernanceState
     public string? ModelRoutingSimpleModel { get; set; }
     public string? ModelRoutingStandardModel { get; set; }
     public string? ModelRoutingHeavyModel { get; set; }
+    // 记忆与向量化（6.3 + 2.4/2.6）：这些是“检索慢 / 超时”的主旋钮，均可运行时热改。
+    // 均为**每次调用重新读取**的字段，因此保存即对后续写入 / 检索生效。
+    public int? MemoryMaxQueryChars { get; set; }
+    public int? MemoryMaxWriteChars { get; set; }
+    public int? MemoryInteractiveEmbeddingWaitSeconds { get; set; }
+    public int? MemoryBackgroundEmbeddingWaitSeconds { get; set; }
+    public int? MemoryWriteEmbeddingCacheSize { get; set; }
 }
 
 /// <summary>配置治理写入请求体（每个字段可空，仅更新非空项）。</summary>
@@ -56,7 +63,13 @@ public sealed record ConfigGovernanceHttpRequest(
     bool? ModelRoutingEnabled,
     string? ModelRoutingSimpleModel,
     string? ModelRoutingStandardModel,
-    string? ModelRoutingHeavyModel);
+    string? ModelRoutingHeavyModel,
+    // 记忆与向量化（6.3）：运行时热改的记忆效率旋钮
+    int? MemoryMaxQueryChars,
+    int? MemoryMaxWriteChars,
+    int? MemoryInteractiveEmbeddingWaitSeconds,
+    int? MemoryBackgroundEmbeddingWaitSeconds,
+    int? MemoryWriteEmbeddingCacheSize);
 
 public static class ConfigGovernanceApi
 {
@@ -83,6 +96,13 @@ public static class ConfigGovernanceApi
         if (s.ModelRoutingStandardModel is { } c9) agents.ModelRouting.StandardModel = c9.Trim();
         if (s.ModelRoutingHeavyModel is { } c10) agents.ModelRouting.HeavyModel = c10.Trim();
 
+        // 记忆与向量化（6.3）：每次调用重新读取，故保存即生效（无需重启）
+        if (s.MemoryMaxQueryChars is { } m1 && m1 is > 0 and <= 10_000) agents.Memory.MaxQueryChars = m1;
+        if (s.MemoryMaxWriteChars is { } m2 && m2 is > 0 and <= 10_000) agents.Memory.MaxWriteChars = m2;
+        if (s.MemoryInteractiveEmbeddingWaitSeconds is { } m3 && m3 is > 0 and <= 600) agents.Memory.InteractiveEmbeddingWaitSeconds = m3;
+        if (s.MemoryBackgroundEmbeddingWaitSeconds is { } m4 && m4 is > 0 and <= 3_600) agents.Memory.BackgroundEmbeddingWaitSeconds = m4;
+        if (s.MemoryWriteEmbeddingCacheSize is { } m5 && m5 is >= 0 and <= 100_000) agents.Memory.WriteEmbeddingCacheSize = m5;
+
         if (s.AllowedFrameOrigins is { } d1)
             groupChat.AllowedFrameOrigins = d1.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList();
     }
@@ -107,6 +127,11 @@ public static class ConfigGovernanceApi
             if (req.DailyTokenQuotaPerUser is < 0) return BadReq("dailyTokenQuotaPerUser 不能为负");
             if (req.ModelRoutingSimpleModel is { Length: > 200 } || req.ModelRoutingStandardModel is { Length: > 200 } || req.ModelRoutingHeavyModel is { Length: > 200 })
                 return BadReq("模型名过长（≤200 字符）");
+            if (req.MemoryMaxQueryChars is { } q1 && q1 is not (> 0 and <= 10_000)) return BadReq("memoryMaxQueryChars 需在 1..10000");
+            if (req.MemoryMaxWriteChars is { } q2 && q2 is not (> 0 and <= 10_000)) return BadReq("memoryMaxWriteChars 需在 1..10000");
+            if (req.MemoryInteractiveEmbeddingWaitSeconds is { } q3 && q3 is not (> 0 and <= 600)) return BadReq("memoryInteractiveEmbeddingWaitSeconds 需在 1..600");
+            if (req.MemoryBackgroundEmbeddingWaitSeconds is { } q4 && q4 is not (> 0 and <= 3_600)) return BadReq("memoryBackgroundEmbeddingWaitSeconds 需在 1..3600");
+            if (req.MemoryWriteEmbeddingCacheSize is < 0) return BadReq("memoryWriteEmbeddingCacheSize 不能为负");
 
             // 更新持久化状态（保留未传/为空字段的旧值；数组用 ??= 保留旧列表）
             state.MessageHistoryLimit = req.MessageHistoryLimit ?? state.MessageHistoryLimit;
@@ -126,6 +151,11 @@ public static class ConfigGovernanceApi
             if (req.ModelRoutingSimpleModel is not null) state.ModelRoutingSimpleModel = req.ModelRoutingSimpleModel;
             if (req.ModelRoutingStandardModel is not null) state.ModelRoutingStandardModel = req.ModelRoutingStandardModel;
             if (req.ModelRoutingHeavyModel is not null) state.ModelRoutingHeavyModel = req.ModelRoutingHeavyModel;
+            state.MemoryMaxQueryChars = req.MemoryMaxQueryChars ?? state.MemoryMaxQueryChars;
+            state.MemoryMaxWriteChars = req.MemoryMaxWriteChars ?? state.MemoryMaxWriteChars;
+            state.MemoryInteractiveEmbeddingWaitSeconds = req.MemoryInteractiveEmbeddingWaitSeconds ?? state.MemoryInteractiveEmbeddingWaitSeconds;
+            state.MemoryBackgroundEmbeddingWaitSeconds = req.MemoryBackgroundEmbeddingWaitSeconds ?? state.MemoryBackgroundEmbeddingWaitSeconds;
+            state.MemoryWriteEmbeddingCacheSize = req.MemoryWriteEmbeddingCacheSize ?? state.MemoryWriteEmbeddingCacheSize;
 
             Apply(state, groupChat, authOptions, agents);
             changes.Notify(); // 驱动持久化
@@ -171,6 +201,11 @@ public static class ConfigGovernanceApi
             state.ModelRoutingSimpleModel = saved.ModelRoutingSimpleModel;
             state.ModelRoutingStandardModel = saved.ModelRoutingStandardModel;
             state.ModelRoutingHeavyModel = saved.ModelRoutingHeavyModel;
+            state.MemoryMaxQueryChars = saved.MemoryMaxQueryChars;
+            state.MemoryMaxWriteChars = saved.MemoryMaxWriteChars;
+            state.MemoryInteractiveEmbeddingWaitSeconds = saved.MemoryInteractiveEmbeddingWaitSeconds;
+            state.MemoryBackgroundEmbeddingWaitSeconds = saved.MemoryBackgroundEmbeddingWaitSeconds;
+            state.MemoryWriteEmbeddingCacheSize = saved.MemoryWriteEmbeddingCacheSize;
             // 把覆盖应用到运行时单例（重启后重新加载配置时一并覆盖）
             var groupChat = services.GetService<GroupChatOptions>();
             var auth = services.GetService<AuthOptions>();

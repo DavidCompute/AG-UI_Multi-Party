@@ -8879,6 +8879,11 @@ async function loadConfigGovernance() {
     setCfg("cfgRoutingSimple", d.modelRoutingSimpleModel);
     setCfg("cfgRoutingStandard", d.modelRoutingStandardModel);
     setCfg("cfgRoutingHeavy", d.modelRoutingHeavyModel);
+    setCfg("cfgMemMaxQueryChars", d.memoryMaxQueryChars);
+    setCfg("cfgMemMaxWriteChars", d.memoryMaxWriteChars);
+    setCfg("cfgMemInteractiveWait", d.memoryInteractiveEmbeddingWaitSeconds);
+    setCfg("cfgMemBackgroundWait", d.memoryBackgroundEmbeddingWaitSeconds);
+    setCfg("cfgMemDedupCache", d.memoryWriteEmbeddingCacheSize);
     $("cfgApprovalTools").value = (d.requireApprovalToolNames || []).join(", ");
     $("cfgFrameOrigins").value = (d.allowedFrameOrigins || []).join(", ");
   } catch { toast(t("admin.configLoadFail")); }
@@ -8922,6 +8927,11 @@ function collectCfg() {
   body.modelRoutingSimpleModel = $("cfgRoutingSimple").value.trim();
   body.modelRoutingStandardModel = $("cfgRoutingStandard").value.trim();
   body.modelRoutingHeavyModel = $("cfgRoutingHeavy").value.trim();
+  body.memoryMaxQueryChars = numOrNull("cfgMemMaxQueryChars");
+  body.memoryMaxWriteChars = numOrNull("cfgMemMaxWriteChars");
+  body.memoryInteractiveEmbeddingWaitSeconds = numOrNull("cfgMemInteractiveWait");
+  body.memoryBackgroundEmbeddingWaitSeconds = numOrNull("cfgMemBackgroundWait");
+  body.memoryWriteEmbeddingCacheSize = numOrNull("cfgMemDedupCache");
   body.requireApprovalToolNames = listOrUndefined($("cfgApprovalTools").value);
   body.allowedFrameOrigins = listOrUndefined($("cfgFrameOrigins").value);
   // 去掉 undefined / null 字段（保持后端语义：未传不修改）

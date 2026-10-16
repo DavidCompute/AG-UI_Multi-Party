@@ -42,7 +42,10 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
     // 避免后台批量任务（知识库入库 / 周期沉淀）把交互检索排到超时。未装配时为 null → 回退旧行为。
     private readonly EmbeddingGates? _gates;
     // 记忆写入侧「重复编码」去重缓存：容量 > 0 才构造；命中即复用向量、跳过 embedding。
-    private readonly MemoryEmbeddingCache? _embeddingCache;
+    // 非 readonly：容量可在管理员「配置治理」在线热改（0 = 关闭），由 <see cref="EmbeddingCache"/> 按需调整。
+    private MemoryEmbeddingCache? _embeddingCache;
+    private int _embeddingCacheCapacity;
+    private readonly object _embeddingCacheLock = new();
     // 运行指标（可选）：记录去重缓存的命中 / 未命中，供控制台与 Prometheus 观测收益。
     private readonly MetricsService? _metrics;
 
@@ -55,16 +58,40 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         _authorProfileResolver = authorProfileResolver;
         _gates = gates;
         _metrics = metrics;
-        _embeddingCache = _options.WriteEmbeddingCacheSize > 0
-            ? new MemoryEmbeddingCache(_options.WriteEmbeddingCacheSize)
-            : null;
         _logger.LogInformation("语义记忆已启用：embedding {Provider}，模型 {Model}，维度 {Dimensions}，检索范围 {Scope}（TopK={TopK}）",
             _options.Provider, _options.Provider == "llama" ? _options.LlamaModelPath : _options.EmbeddingModel,
             _options.EmbeddingDimensions, _options.Scope, _options.TopK);
-        if (_embeddingCache is not null)
-            _logger.LogInformation("记忆写入去重缓存已启用：容量 {Capacity} 条（写入前按入库文本命中即跳过 embedding）", _embeddingCache.Capacity);
+        if (_options.WriteEmbeddingCacheSize > 0)
+            _logger.LogInformation("记忆写入去重缓存已启用：容量 {Capacity} 条（写入前按入库文本命中即跳过 embedding）", _options.WriteEmbeddingCacheSize);
         // 后台消费者：串行向量化 + 落库（fire-and-forget，内部已兜底异常）
         _ = Task.Run(ProcessWriteQueueAsync);
+    }
+
+    /// <summary>
+    /// 取当前生效的写入去重缓存。容量取自 <see cref="MemoryOptions.WriteEmbeddingCacheSize"/>，**每次调用重新读取**，
+    /// 因此管理员在「配置治理」热改容量、甚至改 0 关闭，都会对后续写入立即生效（无需重启）。
+    /// 返回 null = 未启用去重（每次写入都真正向量化，与旧行为一致）。
+    /// </summary>
+    private MemoryEmbeddingCache? EmbeddingCache
+    {
+        get
+        {
+            var want = _options.WriteEmbeddingCacheSize;
+            if (want <= 0)
+            {
+                if (_embeddingCache is null) return null;
+                lock (_embeddingCacheLock) { _embeddingCache = null; _embeddingCacheCapacity = 0; }
+                return null;
+            }
+            if (_embeddingCache is not null && _embeddingCacheCapacity == want) return _embeddingCache;
+            lock (_embeddingCacheLock)
+            {
+                if (_embeddingCache is null) _embeddingCache = new MemoryEmbeddingCache(want);
+                else _embeddingCache.SetCapacity(want);
+                _embeddingCacheCapacity = want;
+                return _embeddingCache;
+            }
+        }
     }
 
     /// <summary>
@@ -139,7 +166,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 {
                     // 重复编码去重（ROADMAP §二）：同文本复用向量，跳过 embedding。
                     // 相同文本在同一模型下向量恒等 → 语义等价，只省去重复推理（也省掉一次后台池槽位占用）。
-                    float[]? embedding = _embeddingCache?.TryGet(stored);
+                    float[]? embedding = EmbeddingCache?.TryGet(stored);
                     if (embedding is not null)
                     {
                         _metrics?.RecordEmbeddingCache(hit: true);
@@ -158,7 +185,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                         _metrics?.RecordEmbeddingCache(hit: false);
                         embedding = await _embedding.EmbedAsync(stored);
                         if (embedding is null || embedding.Length == 0) continue;
-                        _embeddingCache?.Set(stored, embedding);
+                        EmbeddingCache?.Set(stored, embedding);
                     }
 
                     // 写入侧记忆拟人（仅对“数字员工本人的发言”按作者配置生效；用户消息 / 未配置一律维持旧行为）：
@@ -345,7 +372,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                 try
                 {
                     // 重复编码去重：同文本复用向量（导入包常含重复内容，命中率较高）。
-                    float[]? embedding = _embeddingCache?.TryGet(stored);
+                    float[]? embedding = EmbeddingCache?.TryGet(stored);
                     if (embedding is not null)
                     {
                         _metrics?.RecordEmbeddingCache(hit: true);
@@ -357,7 +384,7 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                         _metrics?.RecordEmbeddingCache(hit: false);
                         embedding = await _embedding.EmbedAsync(stored, ct);
                         if (embedding is null || embedding.Length == 0) continue;
-                        _embeddingCache?.Set(stored, embedding);
+                        EmbeddingCache?.Set(stored, embedding);
                     }
                     var importance = MemoryImportance.IsValid(it.Importance) ? it.Importance : MemoryImportance.Normal;
                     _store.Upsert(new MessageMemoryRecord(

@@ -267,8 +267,9 @@ docker compose down
 | `MEMORY_EMBEDDING_MODEL` | `bge-m3:latest` | embedding 模型名（改模型时须同步改 `MEMORY_EMBEDDING_DIMENSIONS`） |
 | `MEMORY_EMBEDDING_DIMENSIONS` | `1024` | 向量维度（bge-m3=1024、MiniLM=384、qwen3-embedding=2560） |
 | `MEMORY_TOP_K` / `MEMORY_MIN_SCORE` | `6` / `0.25` | 每次回复注入的记忆条数 / 相似度阈值。**`group_memory_search` 工具更严格**：阈值取 max(0.40, MIN_SCORE)、最多 3 条，低相关命中物理过滤，避免记忆泛滥 |
-| `MEMORY_MAX_QUERY_CHARS` / `MEMORY_MAX_WRITE_CHARS` | `500` / `800` | 记忆向量化的**输入长度**上限（检索 query / 写入内容）。embedding 耗时与输入长度成正比（实测约 5ms/字符，换 llama.cpp 前的内置 Ollama 约 8.5ms/字符），所以这两个值是“检索慢/超时”的主要旋钮；写入侧上限同时作用于入库文本与向量 |
+| `MEMORY_MAX_QUERY_CHARS` / `MEMORY_MAX_WRITE_CHARS` | `500` / `800` | 记忆向量化的**输入长度**上限（检索 query / 写入内容）。embedding 耗时与输入长度成正比（实测约 5ms/字符，换 llama.cpp 前的内置 Ollama 约 8.5ms/字符），所以这两个值是“检索慢/超时”的主要旋钮；写入侧上限同时作用于入库文本与向量。**可在控制台「配置治理」在线热改（保存即生效，无需重启）** |
 | `MEMORY_WRITE_EMBEDDING_CACHE_SIZE` | `512` | 写入侧「重复编码」去重缓存（条目数；**0 = 关闭**）。写入向量化前先用实际入库文本查进程内 LRU，命中即复用向量、跳过 embedding——相同文本在同一模型下向量恒等，故**语义等价**（召回结果不变），只是省去重复推理（CPU 上单条可达数秒）。可直接在控制台「运行指标」看命中占比 |
+| `MEMORY_INTERACTIVE_EMBED_CONCURRENCY` / `MEMORY_BACKGROUND_EMBED_CONCURRENCY` | `3` / `1` | 向量化并发闸门拆池（交互 / 后台），容量之和 = 总并发；**属需重启项**（信号量启动时定型），其余记忆旋钮与去重缓存容量可在「配置治理」在线热改 |
 | `MEMORY_EMBEDDING_TIMEOUT` | `60` | embedding 调用超时（秒）。CPU 环境首次加载 bge-m3 需数十秒 |
 | `MEMORY_SCOPE` | `agent` | 检索范围：`agent` 该智能体所在的所有群（默认）/ `group` 仅当前群 / `all` 全部群 |
 | `MEMORY_KNOWLEDGE_CHUNK_SIZE` / `MEMORY_KNOWLEDGE_CHUNK_OVERLAP` | `4096` / `512` | 知识库文档切片窗口（字符）与重叠（字符）：切分沿换行 / 句末标点收尾（避免句子中间硬切），相邻切片携带重叠尾部降低边界信息丢失；超长切片还会被 embedding 按模型 context 自动再分段（1.0.78 起字符/token 比取 0.9），长文档不受长度限制 |

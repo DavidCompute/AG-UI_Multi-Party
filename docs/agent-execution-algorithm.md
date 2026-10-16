@@ -226,6 +226,8 @@ flowchart TB
 
 **可观测**：新增计数器 `knowgath_memory_embedding_cache_hits_total` / `knowgath_memory_embedding_cache_misses_total`（分别见 `/ag-ui/metrics` 与控制台「运行指标」的**命中占比**卡片）。
 
+**可在线热改（1.0.263）**：`WriteEmbeddingCacheSize` 与 `MaxQueryChars` / `MaxWriteChars` / 交互·后台两个等待上限均可任管理员「配置治理」页在线调整（缓存容量改 0 = 立即关闭去重；写路径按需重建 / 热改容量），保存即生效、无需重启。并发额度（`Interactive/BackgroundEmbeddingConcurrency`）因闸门信号量启动定型，仍属需重启项。
+
 > 为何不把“同文本只存一条记忆”也做了：那会改变召回集合（少掉若干条目）、并使“引用来源”指向更早的那条消息——属语义变更，与“零行为变化的省钱优化”不同，若要做需单独评估。
 
 ### 交互 / 后台两池隔离（EmbeddingGates）

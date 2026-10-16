@@ -458,6 +458,8 @@ public sealed class MemoryOptions
     /// </para>
     ///
     /// <para>每条约占「维度 × 4 字节」（bge-m3 1024 维 ≈ 4KB），512 条约 2MB；LRU 淘汰最久未使用者，内存有界。</para>
+    ///
+    /// <para>可在管理员「配置治理」页**在线热改**（改 0 = 立即关闭去重；改大 / 改小立即生效，无需重启）。</para>
     /// </summary>
     public int WriteEmbeddingCacheSize { get; set; } = 512;
 

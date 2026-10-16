@@ -572,6 +572,12 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             modelRoutingSimpleModel = "deepseek-flash",
             modelRoutingStandardModel = "deepseek-flash",
             modelRoutingHeavyModel = "deepseek-v4-pro",
+            // 记忆与向量化（运行时热改，保存即生效）
+            memoryMaxQueryChars = 640,
+            memoryMaxWriteChars = 960,
+            memoryInteractiveEmbeddingWaitSeconds = 20,
+            memoryBackgroundEmbeddingWaitSeconds = 90,
+            memoryWriteEmbeddingCacheSize = 256,
         });
         var setRes = await _client.SendAsync(set);
         setRes.EnsureSuccessStatusCode();
@@ -587,6 +593,16 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.True(d.GetProperty("modelRoutingEnabled").GetBoolean());
         Assert.Equal("deepseek-flash", d.GetProperty("modelRoutingStandardModel").GetString());
         Assert.Equal("deepseek-v4-pro", d.GetProperty("modelRoutingHeavyModel").GetString());
+        // 记忆与向量化：回读一致，且真的落到运行时单例 AgentOptions.Memory（保存即生效）
+        Assert.Equal(640, d.GetProperty("memoryMaxQueryChars").GetInt32());
+        Assert.Equal(960, d.GetProperty("memoryMaxWriteChars").GetInt32());
+        Assert.Equal(256, d.GetProperty("memoryWriteEmbeddingCacheSize").GetInt32());
+        var agents = _fixture.App.Services.GetRequiredService<AgentOptions>();
+        Assert.Equal(640, agents.Memory.MaxQueryChars);
+        Assert.Equal(960, agents.Memory.MaxWriteChars);
+        Assert.Equal(20, agents.Memory.InteractiveEmbeddingWaitSeconds);
+        Assert.Equal(90, agents.Memory.BackgroundEmbeddingWaitSeconds);
+        Assert.Equal(256, agents.Memory.WriteEmbeddingCacheSize);
     }
 
     [Fact]
@@ -599,6 +615,14 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         using var bad = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
         bad.Content = JsonContent.Create(new { messageHistoryLimit = -1 });
         Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(bad)).StatusCode);
+
+        // 记忆旋钮越界 → 400（0 = 关闭仅在去重缓存上合法）
+        using var badMem = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badMem.Content = JsonContent.Create(new { memoryMaxQueryChars = 0 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badMem)).StatusCode);
+        using var badCache = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badCache.Content = JsonContent.Create(new { memoryWriteEmbeddingCacheSize = -1 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badCache)).StatusCode);
 
         // 非管理员 → 403
         var normal = await RegisterAsync("cfg_normal_admin");

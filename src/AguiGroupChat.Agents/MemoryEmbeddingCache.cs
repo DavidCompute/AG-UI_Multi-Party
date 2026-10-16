@@ -13,6 +13,7 @@ namespace AguiGroupChat.Agents;
 ///
 /// <para>
 /// 有界 LRU：容量 <c>MemoryOptions.WriteEmbeddingCacheSize</c>（0 = 关闭，调用方不构造本类），
+/// 容量可在管理员「配置治理」页**在线热改**（<see cref="SetCapacity"/>：调小时按 LRU 立即淘汰多余条目）；
 /// 无 TTL——同进程内模型不变，已算出的向量不会失效；容量满时淘汰最久未使用者以限制内存
 /// （每条约占「维度 × 4 字节」，bge-m3 1024 维 ≈ 4KB，512 条约 2MB）。
 /// </para>
@@ -24,7 +25,7 @@ namespace AguiGroupChat.Agents;
 /// </summary>
 public sealed class MemoryEmbeddingCache
 {
-    private readonly int _capacity;
+    private int _capacity;
     private readonly Dictionary<string, float[]> _map;
     private readonly LinkedList<string> _lru = new();
     private readonly Dictionary<string, LinkedListNode<string>> _nodes;
@@ -38,7 +39,24 @@ public sealed class MemoryEmbeddingCache
     }
 
     /// <summary>容量上限（条目数）。</summary>
-    public int Capacity => _capacity;
+    public int Capacity { get { lock (_lock) return _capacity; } }
+
+    /// <summary>在线热改容量（管理员把 <c>WriteEmbeddingCacheSize</c> 改大 / 改小时由写入路径调用）；
+    /// 调小时立即按 LRU 淘汰多余条目，已缓存命中不受影响。</summary>
+    public void SetCapacity(int capacity)
+    {
+        var cap = Math.Max(1, capacity);
+        lock (_lock)
+        {
+            _capacity = cap;
+            while (_map.Count > _capacity && _lru.Last is { } oldest)
+            {
+                _lru.RemoveLast();
+                _nodes.Remove(oldest.Value);
+                _map.Remove(oldest.Value);
+            }
+        }
+    }
 
     /// <summary>当前条目数（诊断 / 测试用）。</summary>
     public int Count { get { lock (_lock) return _map.Count; } }

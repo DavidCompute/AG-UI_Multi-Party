@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.263 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.263 Release Notes (current Windows desktop release)
+
+**版本说明**：**记忆与向量化旋钮上线「配置治理」**——把「语义记忆检索慢 / 超时」的主旋钮（检索 query 截断、写入侧截断、交互 / 后台等待上限）与新增的「写入去重缓存条数」搬到管理员控制台在线热改，保存即生效、无需改 appsettings / 重启。
+**Version note**: **Memory & vectorization knobs land in Config Governance** — the main knobs for “semantic-memory retrieval is slow / times out” (retrieval-query truncation, write-side truncation, interactive / background slot-wait ceilings) plus the new “write-dedup cache entries” are now editable online in the admin console, taking effect on save with no appsettings edit or restart.
+
+## 变更
+# Changes
+
+中文：
+- **配置治理新增 5 个记忆旋钮**（`ConfigGovernanceState` / `ConfigGovernanceHttpRequest` / `Apply` / 持久化恢复 / 边界校验全链）：`memoryMaxQueryChars`（1..10000）、`memoryMaxWriteChars`（1..10000）、`memoryInteractiveEmbeddingWaitSeconds`（1..600）、`memoryBackgroundEmbeddingWaitSeconds`（1..3600）、`memoryWriteEmbeddingCacheSize`（≥0；**0 = 关闭去重**），写入 `AgentOptions.Memory` 对应字段。
+- **保存即生效**：这五项在**每次写入 / 检索时重新读取**（`MemoryContextProvider` / `AgentMessageMemory.EnterEmbeddingAsync` / 写队列），所以保存对后续调用立即生效。
+- **去重缓存容量可热改**：`AgentMessageMemory` 改为**按需读取** `WriteEmbeddingCacheSize`（容量变了就重建 / 热改），`MemoryEmbeddingCache` 新增 `SetCapacity`（调小时按 LRU 立即淘汰多余条目）；改 0 = 立即关闭去重（行为回到旧版：每次写入都真正向量化）。
+- **前端**：配置治理页新增「记忆与向量化」提示行 `admin.memHint` + 5 个数字框（`#cfgMemMaxQueryChars` / `#cfgMemMaxWriteChars` / `#cfgMemInteractiveWait` / `#cfgMemBackgroundWait` / `#cfgMemDedupCache`），`loadConfigGovernance` / `collectCfg` 同步；i18n 新增 6 键（zh/en）。
+- **顺带修复**：1.0.263 开发中一次 fuzzy 编辑曾误删写队列消费者启动行（`_ = Task.Run(ProcessWriteQueueAsync)`）——已发现并修复，并由新增 / 既有记忆用例回归覆盖。
+
+English:
+- **Config Governance gains 5 memory knobs** (full chain: `ConfigGovernanceState` / `ConfigGovernanceHttpRequest` / `Apply` / persistence restore / bounds validation): `memoryMaxQueryChars` (1..10000), `memoryMaxWriteChars` (1..10000), `memoryInteractiveEmbeddingWaitSeconds` (1..600), `memoryBackgroundEmbeddingWaitSeconds` (1..3600), `memoryWriteEmbeddingCacheSize` (≥0; **0 = dedup off**), written into the corresponding `AgentOptions.Memory` fields.
+- **Save takes effect immediately**: these five are re-read on **every write / retrieval** (`MemoryContextProvider` / `AgentMessageMemory.EnterEmbeddingAsync` / the write queue), so saving applies to subsequent calls at once.
+- **Dedup cache capacity is hot-changeable**: `AgentMessageMemory` now reads `WriteEmbeddingCacheSize` **on demand** (rebuilds / resizes when it changes) and `MemoryEmbeddingCache` gains `SetCapacity` (shrinking evicts the excess by LRU at once); setting it to 0 disables dedup immediately (back to the old behaviour of embedding every write).
+- **Frontend**: the Config Governance page gains a “Memory & vectorization” hint `admin.memHint` plus 5 number boxes (`#cfgMemMaxQueryChars` / `#cfgMemMaxWriteChars` / `#cfgMemInteractiveWait` / `#cfgMemBackgroundWait` / `#cfgMemDedupCache`), kept in sync by `loadConfigGovernance` / `collectCfg`; i18n adds 6 keys (zh/en).
+- **Incidental fix**: during 1.0.263 development a fuzzy edit accidentally dropped the write-queue consumer startup line (`_ = Task.Run(ProcessWriteQueueAsync)`); it was caught and fixed, covered by the memory test regression.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.10（配置治理 **17 → 22 键**：新增 8.10.1 表行 #18–#22 与记忆旋钮说明、边界校验）；§9.2.8（`POST /ag-ui/admin/config` 描述补「记忆与向量化」）；`ROADMAP.md` §6.3。
+English: `docs/user-guide.md` / `en.md` §8.10 (Config Governance **17 → 22 keys**: new table rows #18–#22 with the memory-knob notes and bounds); §9.2.8 (`POST /ag-ui/admin/config` description gains “memory & vectorization”); `ROADMAP.md` §6.3.
+
+## 测试
+# Tests
+
+中文：扩展 `AdminApiIntegrationTests.ConfigGovernance_Post_AdminUpdatesAndPersists`（保存 5 个记忆旋钮 → 回读一致 + 断言真的落到运行时单例 `AgentOptions.Memory`）；`ConfigGovernance_Post_RejectsInvalidAndForbidsNonAdmin` 新增两条 400 边界（`memoryMaxQueryChars=0`、`memoryWriteEmbeddingCacheSize=-1`）。**全量 1794 测试通过**；`dotnet build AguiGroupChat.slnx` **0 错误**；i18n 审计 **zh=en=1931，missing 0**，`check-i18n-keys` / `check-orphan-keys` 均过。
+English: extended `AdminApiIntegrationTests.ConfigGovernance_Post_AdminUpdatesAndPersists` (save the 5 memory knobs → read back consistently + assert they truly land in the runtime `AgentOptions.Memory`); `ConfigGovernance_Post_RejectsInvalidAndForbidsNonAdmin` gains two 400 bounds (`memoryMaxQueryChars=0`, `memoryWriteEmbeddingCacheSize=-1`). **All 1794 tests pass**; `dotnet build AguiGroupChat.slnx` reports **0 errors**; the i18n audit is **zh=en=1931, missing 0**, and `check-i18n-keys` / `check-orphan-keys` both pass.
+
 # AG-UI 群聊桌面版 1.0.262 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.262 Release Notes (current Windows desktop release)
 

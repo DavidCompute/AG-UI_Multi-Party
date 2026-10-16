@@ -4089,13 +4089,13 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.10 配置治理 tab（`#adminTabConfig`）
 
-视图 `#adminConfigView`（`index.html:1619-1641`）：提示 `admin.configHint`（明确指出「存储提供方 / 模型 / 记忆提供方等需重启的项目为只读」）；6 个数字框 + 5 个三态复选框 + 2 个逗号列表 + 3 个模型名输入框（模型路由）+ `#cfgReload`（刷新）/ `#cfgSave`（保存）。
+视图 `#adminConfigView`（`index.html`）：提示 `admin.configHint`（明确指出「存储提供方 / 模型 / 记忆提供方等需重启的项目为只读」）；7 个数字框（会话 / 历史 / 成员 / 字符 / 保留 / 配额 / 防抖）+ 5 个三态复选框 + 2 个逗号列表 + 3 个模型名输入框（模型路由）+ **5 个记忆与向量化数字框（1.0.263 新增）** + `#cfgReload`（刷新）/ `#cfgSave`（保存）。
 
-接口：读 `GET /ag-ui/admin/config/governance`，写 `POST /ag-ui/admin/config`（`app.js:7007-7076`）。
+接口：读 `GET /ag-ui/admin/config/governance`，写 `POST /ag-ui/admin/config`（`app.js` 的 `loadConfigGovernance` / `collectCfg`）。
 
-#### 8.10.1 可热改键（UI 17 个 / 状态层 17 个）+ 边界
+#### 8.10.1 可热改键（UI 22 个 / 状态层 22 个）+ 边界
 
-`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-38`）共 **17** 个字段，UI 表单亦呈现 **17** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:41-54`）。
+`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-46`）共 **22** 个字段，UI 表单亦呈现 **22** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:48-72`）。
 
 | # | 前端字段 DOM id | 键 `key` | 类型 | UI 标签 i18n | 边界 / 校验 |
 |---|---|---|---|---|---|
@@ -4116,8 +4116,15 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 15 | `#cfgRoutingSimple` | `modelRoutingSimpleModel` | string | `admin.routingSimple` | 模型名 ≤ 200；**空串 = 清空该档**（要“不修改”需不提交） |
 | 16 | `#cfgRoutingStandard` | `modelRoutingStandardModel` | string | `admin.routingStandard` | 同上 |
 | 17 | `#cfgRoutingHeavy` | `modelRoutingHeavyModel` | string | `admin.routingHeavy` | 同上 |
+| 18 | `#cfgMemMaxQueryChars` | `memoryMaxQueryChars` | int | `admin.memMaxQueryChars` | 1..10000（**1.0.263 新增**） |
+| 19 | `#cfgMemMaxWriteChars` | `memoryMaxWriteChars` | int | `admin.memMaxWriteChars` | 1..10000 |
+| 20 | `#cfgMemInteractiveWait` | `memoryInteractiveEmbeddingWaitSeconds` | int | `admin.memInteractiveWait` | 1..600 |
+| 21 | `#cfgMemBackgroundWait` | `memoryBackgroundEmbeddingWaitSeconds` | int | `admin.memBackgroundWait` | 1..3600 |
+| 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0（**0 = 关闭去重**） |
 
-边界校验在服务端 `POST /ag-ui/admin/config`（`ConfigGovernanceApi.cs:88-96`）：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` 不能为负；模型名过长（>200）返回 400。
+边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）。
+
+> **记忆与向量化（6.3 + 2.4/2.6，1.0.263）**：#18–#22 对应 `AgentOptions.Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`。这四个（除缓存容量外）在**每次写入 / 检索时重新读取**，所以保存即生效；缓存容量则由写入路径**按需重建 / 热改容量**（改 0 = 立即关闭去重，改大 / 改小按 LRU 即时生效）。它们是「语义记忆检索慢 / 超时」的主旋钮（embedding 耗时与输入长度成正比），无需再改 appsettings / 重启。并发额度（`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`）因闸门信号量在启动时定型，仍属**需重启**项（见 8.10.4）。
 
 > **模型路由（6.7，1.0.260）**：#14–#17 对应 `AgentOptions.ModelRouting`（`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`）。**StandardModel 为本版新增**——此前 Standard 档固定不换。启用后按「复杂度自适应」同一份估计器（`RunComplexityEstimator`）为 Simple / Standard / Complex / Heavy 四档分别选模型（留空 = 该档不换）；例如 Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。与后台 `Agents:ModelRouting`（env `AGENTS_MODELROUTING_*`）同源，页面保存后即时生效并持久化。注意：与列表项「空 = 不修改」不同，模型名走字符串 `??` 语义 —— **空串会清空该档**（前端总是提交这三个字段，即“保存 = 以表单为准”）。
 
@@ -4127,7 +4134,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.10.3 生效方式
 
-`Apply(state, groupChat, auth, agents)`（`ConfigGovernanceApi.cs:59-82`）把覆盖写到运行时单例（`GroupChatOptions` / `AuthOptions` / `AgentOptions`，含 `AgentOptions.ModelRouting`），并 `changes.Notify()` 持久化到扩展区 `configGovernance`（重启恢复并重新应用，`ConfigGovernanceApi.cs:132-171`）。即**保存即时生效、无需重启**。成功写审计 `config.update`。
+`Apply(state, groupChat, auth, agents)`（`ConfigGovernanceApi.cs` 的 `Apply`）把覆盖写到运行时单例（`GroupChatOptions` / `AuthOptions` / `AgentOptions`，含 `AgentOptions.ModelRouting` 与 `AgentOptions.Memory`），并 `changes.Notify()` 持久化到扩展区 `configGovernance`（重启恢复并重新应用，`RegisterConfigGovernancePersistence`）。即**保存即时生效、无需重启**。成功写审计 `config.update`。
 
 #### 8.10.4 只读项（需改 appsettings / 重启）
 
@@ -4652,7 +4659,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/metrics` | 轻量运行指标快照 | 运维 |
 | GET | `/ag-ui/admin/config` | 运维配置只读快照（auth / groupChat / storage / persistence / agents 汇总） | 管理员 |
 | GET | `/ag-ui/admin/config/governance` | 配置治理当前覆盖值 | 管理员 |
-| POST | `/ag-ui/admin/config` | 保存运行时安全可改旋钮（会话 / 群 / 消息 / 工具 / 审批 / iframe 来源） | 管理员 |
+| POST | `/ag-ui/admin/config` | 保存运行时安全可改旋钮（会话 / 群 / 消息 / 工具 / 审批 / iframe 来源 / 模型路由 / **记忆与向量化**） | 管理员 |
 | GET | `/ag-ui/admin/execution` | 读取当前生效执行参数 | 管理员 |
 | GET | `/ag-ui/admin/execution/defaults` | 读取出厂默认执行参数 | 管理员 |
 | POST | `/ag-ui/admin/execution` | 写入运行时执行参数覆盖（改共享单例 `ExecutionOptions`，即时生效） | 管理员 |

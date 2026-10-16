@@ -4094,13 +4094,13 @@ The lower bound of the multipliers is always `1` (only relaxes, never tightens);
 
 ### 8.10 Config Governance tab (`#adminTabConfig`)
 
-View `#adminConfigView` (`index.html:1619-1641`): the hint `admin.configHint` (which states explicitly that "storage provider / model / memory provider etc. that require a restart are read-only"); 6 number boxes + 5 tri-state checkboxes + 2 comma lists + 3 model-name inputs (model routing) + `#cfgReload` (Refresh) / `#cfgSave` (Save).
+View `#adminConfigView` (`index.html`): the hint `admin.configHint` (which states explicitly that "storage provider / model / memory provider etc. that require a restart are read-only"); 7 number boxes (session / history / members / chars / retention / quota / debounce) + 5 tri-state checkboxes + 2 comma lists + 3 model-name inputs (model routing) + **5 memory & vectorization number boxes (new in 1.0.263)** + `#cfgReload` (Refresh) / `#cfgSave` (Save).
 
-Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/config` (`app.js:7007-7076`).
+Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/config` (`app.js` `loadConfigGovernance` / `collectCfg`).
 
-#### 8.10.1 Hot-changeable keys (17 in the UI / 17 in the state layer) + bounds
+#### 8.10.1 Hot-changeable keys (22 in the UI / 22 in the state layer) + bounds
 
-`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-38`) has **17** fields in total, and the UI form presents **17** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:41-54`).
+`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-46`) has **22** fields in total, and the UI form presents **22** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:48-72`).
 
 | # | Frontend field DOM id | Key `key` | Type | UI label i18n | Bounds / validation |
 |---|---|---|---|---|---|
@@ -4121,10 +4121,17 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 15 | `#cfgRoutingSimple` | `modelRoutingSimpleModel` | string | `admin.routingSimple` | Name ≤ 200; **empty string clears that tier** |
 | 16 | `#cfgRoutingStandard` | `modelRoutingStandardModel` | string | `admin.routingStandard` | as above |
 | 17 | `#cfgRoutingHeavy` | `modelRoutingHeavyModel` | string | `admin.routingHeavy` | as above |
+| 18 | `#cfgMemMaxQueryChars` | `memoryMaxQueryChars` | int | `admin.memMaxQueryChars` | 1..10000 (**new in 1.0.263**) |
+| 19 | `#cfgMemMaxWriteChars` | `memoryMaxWriteChars` | int | `admin.memMaxWriteChars` | 1..10000 |
+| 20 | `#cfgMemInteractiveWait` | `memoryInteractiveEmbeddingWaitSeconds` | int | `admin.memInteractiveWait` | 1..600 |
+| 21 | `#cfgMemBackgroundWait` | `memoryBackgroundEmbeddingWaitSeconds` | int | `admin.memBackgroundWait` | 1..3600 |
+| 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0 (**0 = dedup off**) |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config` (`ConfigGovernanceApi.cs:88-96`): out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` cannot be negative; an over-long model name (>200) returns 400.
+Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative).
 
 > **Model routing (6.7, 1.0.260)**: #14–#17 map to `AgentOptions.ModelRouting` (`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`). **StandardModel is new in this version** — previously the Standard tier never switched. Once enabled, the same `RunComplexityEstimator` used by complexity-adaptive timeouts picks a model per tier (Simple / Standard / Complex / Heavy; blank = don't switch that tier), e.g. `deepseek-flash` for Simple/Standard and `deepseek-v4-pro` for Heavy. It shares the `Agents:ModelRouting` config (env `AGENTS_MODELROUTING_*`); saving on this page takes effect immediately and persists. Note: unlike list items ("empty = do not modify"), model names follow string `??` semantics — **an empty string clears that tier** (the frontend always submits these three fields, i.e. "save = the form wins").
+
+> **Memory & vectorization (6.3 + 2.4/2.6, 1.0.263)**: #18–#22 map to `AgentOptions.Memory`'s `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`. These are re-read on **every write / retrieval**, so saving takes effect immediately; the dedup cache capacity is handled by the write path **rebuilding it / resizing it on demand** (setting 0 disables dedup at once; growing / shrinking applies immediately via LRU). They are the main knobs for "semantic-memory retrieval is slow / times out" (embedding cost is proportional to input length), so no appsettings edit / restart is needed any more. The concurrency limits (`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`) are **restart-only**, because the gate semaphores are sized at startup (see 8.10.4).
 
 #### 8.10.2 Tri-state booleans and "not sent means not changed"
 
@@ -4132,7 +4139,7 @@ The frontend's `setCfgBool` uses `indeterminate` to mean "keep the configured de
 
 #### 8.10.3 How it takes effect
 
-`Apply(state, groupChat, auth, agents)` (`ConfigGovernanceApi.cs:55-74`) writes the overrides to the runtime singletons (`GroupChatOptions` / `AuthOptions` / `AgentOptions`) and persists to the extension section `configGovernance` via `changes.Notify()` (restored and re-applied on restart, `ConfigGovernanceApi.cs:128-163`). That is, **a save takes effect immediately, with no restart needed**. On success, writes the audit entry `config.update`.
+`Apply(state, groupChat, auth, agents)` (`ConfigGovernanceApi.cs` `Apply`) writes the overrides to the runtime singletons (`GroupChatOptions` / `AuthOptions` / `AgentOptions`, including `AgentOptions.ModelRouting` and `AgentOptions.Memory`) and persists to the extension section `configGovernance` via `changes.Notify()` (restored and re-applied on restart, `RegisterConfigGovernancePersistence`). That is, **a save takes effect immediately, with no restart needed**. On success, writes the audit entry `config.update`.
 
 #### 8.10.4 Read-only items (require editing appsettings / a restart)
 
@@ -4658,7 +4665,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | GET | `/ag-ui/admin/metrics` | Lightweight metrics snapshot | Operator |
 | GET | `/ag-ui/admin/config` | Read-only config snapshot (auth / groupChat / storage / persistence / agents summary) | Admin |
 | GET | `/ag-ui/admin/config/governance` | Current config governance override values | Admin |
-| POST | `/ag-ui/admin/config` | Save the runtime-safe adjustable knobs (sessions / groups / messages / tools / approval / iframe origins) | Admin |
+| POST | `/ag-ui/admin/config` | Save the runtime-safe adjustable knobs (sessions / groups / messages / tools / approval / iframe origins / model routing / **memory & vectorization**) | Admin |
 | GET | `/ag-ui/admin/execution` | Read the currently effective execution params | Admin |
 | GET | `/ag-ui/admin/execution/defaults` | Read the factory-default execution params | Admin |
 | POST | `/ag-ui/admin/execution` | Write runtime execution param overrides (modifies the shared `ExecutionOptions` singleton, effective immediately) | Admin |
