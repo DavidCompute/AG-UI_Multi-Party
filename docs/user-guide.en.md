@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.268**
+> Applies to version: **1.0.269**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3740,7 +3740,7 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 
 | # | tab DOM id | i18n key | Label (en) | Content container | Main endpoints |
 |---|---|---|---|---|---|
-| 1 | `#adminTabUsers` | `admin.tabUsers` | User Management | `#adminUsersView` | `GET /ag-ui/admin/users`; for write operations see §8.3 |
+| 1 | `#adminTabUsers` | `admin.tabUsers` | User Management | `#adminUsersView` | `GET /ag-ui/admin/users` (including `todayTokens` / `quota` / `quotaLevel`); writes in 8.3 |
 | 2 | `#adminTabUsage` | `admin.tabUsage` | Usage Stats | `#adminUsageView` | `GET /ag-ui/admin/usage?days=7` |
 | 3 | `#adminTabMetrics` | `admin.tabMetrics` | Runtime Metrics | `#adminMetricsView` | `GET /ag-ui/admin/metrics` (+ `GET /ag-ui/admin/bridge-health`) |
 | 4 | `#adminTabConfig` | `admin.tabConfig` | Config Governance | `#adminConfigView` | `GET /ag-ui/admin/config/governance`, `POST /ag-ui/admin/config` |
@@ -3775,7 +3775,12 @@ View `#adminUsersView` (`index.html:1566-1573`): a 7-column header (username / n
 
 #### 8.3.1 List data
 
-`loadAdminUsers()` (`app.js:7192-7228`) calls `GET /ag-ui/admin/users`; the server returns (`AdminApi.cs:26-44`): `userId`, `username`, `nickname`, `avatar`, `isAdmin`, `platformRole` (**effective role**, via `RoleName(ResolveRole(u.UserId))`), `isDisabled`, `personalMemoryEnabled`, `createdAt`, `updatedAt`, `groupCount` (`hub.Store.GroupsOf(userId).Count`, the number of circles they're in).
+`loadAdminUsers()` (`app.js:9251-9287`) calls `GET /ag-ui/admin/users`; the server returns (`AdminApi.cs:30-59`): `userId`, `username`, `nickname`, `avatar`, `isAdmin`, `platformRole` (**effective role**, via `RoleName(ResolveRole(u.UserId))`), `isDisabled`, `personalMemoryEnabled`, `createdAt`, `updatedAt`, `groupCount` (`hub.Store.GroupsOf(userId).Count`, the number of circles they're in), and **`todayTokens` / `quota` / `quotaLevel` (new in 1.0.269)**.
+
+- The role column uses `roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"))`;
+- Status column: `#isDisabled` → `tag-disabled` (`admin.disabled`), otherwise `tag-active` (`admin.active`);
+- Your own row: an `admin.me` marker after the nickname, and the actions column shows `admin.currentAccount` with no buttons.
+- **Per-user quota level badge (1.0.269)**: `adminUserRow()` appends `.quota-tag` after the username — `quotaLevel = warn` (≥ 80% of `Agents:DailyTokenQuotaPerUser`) → `⚠`, `over` (≥ quota) → `🔴`, `ok` is hidden; the tooltip is `admin.userQuotaWarn` / `admin.userQuotaOver` (including today's usage and the quota). The level is **the same source** as the usage page / sidebar (`AgentUsageService.QuotaLevel`), so the threshold is written once in the backend.
 
 - The role column uses `roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"))`;
 - Status column: `#isDisabled` → `tag-disabled` (`admin.disabled` = Disabled), otherwise `tag-active` (`admin.active` = Active);
@@ -4678,7 +4683,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 
 | Method | Path | Purpose | Permission |
 | --- | --- | --- | --- |
-| GET | `/ag-ui/admin/users` | User list (disabled state / admin flag / platform role / group count) | Admin |
+| GET | `/ag-ui/admin/users` | User list (disabled state / admin flag / platform role / group count / **today's usage and per-user quota level `todayTokens`·`quota`·`quotaLevel`**) | Admin |
 | GET | `/ag-ui/admin/roles` | Platform role matrix (explicit + effective) | SuperAdmin |
 | POST | `/ag-ui/admin/roles/{userId}` | Grant / revoke another person's platform role (`user`/`operator`/`admin`/`superadmin`; cannot change your own) | SuperAdmin |
 | POST | `/ag-ui/admin/users/{userId}/disabled` | Disable / enable an account (disabling revokes all sessions; cannot disable yourself) | Admin |

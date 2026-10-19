@@ -591,6 +591,47 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task AdminUsers_IncludesTodayQuotaLevel()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var uid = admin.GetProperty("userId").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+
+        // 个人配额 50 → 该用户再记 60 tokens 应 over；用**增量**断言，避免与其它用例共享 store 时依赖顺序
+        using (var set = Authed(HttpMethod.Post, "/ag-ui/admin/config", token))
+        {
+            set.Content = JsonContent.Create(new { dailyTokenQuotaPerUser = 50 });
+            (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+        }
+        try
+        {
+            using (var before = Authed(HttpMethod.Get, "/ag-ui/admin/users", token))
+            {
+                var rows = await (await _client.SendAsync(before)).Content.ReadFromJsonAsync<JsonElement>();
+                var me = rows.EnumerateArray().Single(x => x.GetProperty("userId").GetString() == uid);
+                var beforeTokens = me.GetProperty("todayTokens").GetInt64();
+
+                usage.RecordUsage("agent_uq", uid, 40, 20, 0); // +60
+
+                using var after = Authed(HttpMethod.Get, "/ag-ui/admin/users", token);
+                var rows2 = await (await _client.SendAsync(after)).Content.ReadFromJsonAsync<JsonElement>();
+                var me2 = rows2.EnumerateArray().Single(x => x.GetProperty("userId").GetString() == uid);
+                Assert.Equal(beforeTokens + 60, me2.GetProperty("todayTokens").GetInt64());
+                Assert.Equal(50, me2.GetProperty("quota").GetInt64());
+                // 总量 >= 50 → over（该用户当天无法触发）
+                Assert.Equal("over", me2.GetProperty("quotaLevel").GetString());
+            }
+        }
+        finally
+        {
+            using var restore = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+            restore.Content = JsonContent.Create(new { dailyTokenQuotaPerUser = 0 });
+            await _client.SendAsync(restore);
+        }
+    }
+
+    [Fact]
     public async Task AdminUsage_IncludesGroupsTodayWithNames()
     {
         var admin = await RegisterAsync("admin_chief");

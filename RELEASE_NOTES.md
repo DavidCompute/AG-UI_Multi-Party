@@ -1,4 +1,34 @@
-# AG-UI 群聊桌面版 1.0.268 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.269 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.269 Release Notes (current Windows desktop release)
+
+**版本说明**：**配额水位预警补齐最后一个可见面**——用户管理列表现在也在用户名后显示个人配额角标（`⚠` 接近 / `🔴` 已满），悬停给出「今日已用 X / Y token」。至此同一个水位口径在**三处**可见：侧边栏知聚项（按知聚配额）、用量页分知聚 / 分触发者明细、用户管理列表（按个人配额）——管理员无论从哪个入口进来，都能一眼看到谁 / 哪个知聚快到顶。
+**Version note**: **The quota-level warning now covers its last visible surface** — the User Management list also shows a per-user quota badge after the username (`⚠` approaching / `🔴` reached), with a tooltip giving "used X / Y tokens today". The same level source is now visible in **three places**: the sidebar group items (per-circle quota), the usage page's per-circle / per-trigger breakdowns, and the User Management list (per-user quota) — so whichever entry point an admin uses, they can see at a glance who or which circle is about to hit its cap.
+
+## 变更
+# Changes
+
+中文：
+- **`GET /ag-ui/admin/users` 新增 3 字段**：`todayTokens`（今日 token）、`quota`（个人配额，即 `Agents:DailyTokenQuotaPerUser`）、`quotaLevel`（`ok` / `warn` / `over`，由 `AgentUsageService.QuotaLevel` 判定）。实现上先一次 `GetUserTodaySummary()` 建字典，再逐用户查——**不会 N+1 查询**（与用量页 / 侧边栏同源）。
+- **用户管理列表角标**：`adminUserRow()` 在用户名后追加 `.quota-tag`：`warn` → `⚠`（琥珀）、`over` → `🔴`（红）、`ok` 不显示；悬停提示 `admin.userQuotaWarn` / `admin.userQuotaOver`（含今日用量与配额数字）。
+- **样式复用**：新增 `.admin-table .quota-tag` 系列规则，与侧边栏 `.group-item .quota-tag` 共用同一套语义（琥珀 / 红）。
+
+English:
+- **`GET /ag-ui/admin/users` gains 3 fields**: `todayTokens`, `quota` (the per-user quota, i.e. `Agents:DailyTokenQuotaPerUser`) and `quotaLevel` (`ok` / `warn` / `over`, decided by `AgentUsageService.QuotaLevel`). It builds one dictionary from `GetUserTodaySummary()` and then looks each user up — **no N+1 queries** (same source as the usage page / sidebar).
+- **User Management list badge**: `adminUserRow()` appends `.quota-tag` after the username: `warn` → `⚠` (amber), `over` → `🔴` (red), `ok` is hidden; the tooltip is `admin.userQuotaWarn` / `admin.userQuotaOver` (including today's usage and the quota).
+- **Style reuse**: new `.admin-table .quota-tag` rules sharing the same semantics (amber / red) as the sidebar's `.group-item .quota-tag`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.3.1（用户列表字段与角标说明）、§8.2（tab 接口列表）、§9.2.8（`/ag-ui/admin/users` 端点描述）。
+English: `docs/user-guide.md` / `en.md` §8.3.1 (user-list fields and the badge), §8.2 (the tab's endpoint list), §9.2.8 (the `/ag-ui/admin/users` endpoint description).
+
+## 测试
+# Tests
+
+中文：新增 `AdminApiIntegrationTests.AdminUsers_IncludesTodayQuotaLevel`（设个人配额 50 → 该用户再记 60 tokens，断言 `todayTokens` **增量**正确、`quota=50`、`quotaLevel=over`；结束还原配额；用增量避免共享 store 的顺序依赖）。**全量测试通过**（1808 → 1809）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1951，missing 0**（含重复键守卫），4 个守卫脚本均过；Docker 重建后**真实浏览器**端到端（Playwright）**6/6**：真实接口返回数组且每行含三个新字段；受控数据下 warn / over / ok 三行渲染正确（1 个 ⚠ + 1 个 🔴，ok 无标），悬停提示含「850 / 1,000」与「1,500 / 1,000」数字，无页面脚本错误。
+English: new `AdminApiIntegrationTests.AdminUsers_IncludesTodayQuotaLevel` (quota 50 → record 60 more tokens for that user, then assert `todayTokens` **delta** is correct, `quota=50` and `quotaLevel=over`; quota restored afterwards; using a delta avoids depending on the shared store's execution order). **All tests pass** (1808 → 1809); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1951, missing 0** (including the duplicate-key guard), and all 4 guard scripts pass; after a Docker rebuild, a **real-browser** end-to-end (Playwright) **6/6**: the real endpoint returns an array with the three new fields on every row; with controlled data the warn / over / ok rows render correctly (one ⚠ plus one 🔴, none on ok), the tooltips contain "850 / 1,000" and "1,500 / 1,000", and there are no page script errors.
+
 # AG-UI Group Chat Desktop 1.0.268 Release Notes (current Windows desktop release)
 
 **版本说明**：**把配额水位预警补齐到「人」这一维度**——用量统计页新增「今日各触发者用量」明细（按个人配额算水位，`⚠` / `🔴` + meta 汇总），并把**知聚 / 模型覆写变更写进审计日志**（成本控制类配置谁来改、改成什么，现在有迹可查）。同时修掉 3 处**重复 i18n 键**（后者静默覆盖前者），其中一处导致「全局搜索」弹窗标题实际显示成「搜索消息 · 」；并给 CI 加上**重复键守卫**，以后不会再悄悄发生。

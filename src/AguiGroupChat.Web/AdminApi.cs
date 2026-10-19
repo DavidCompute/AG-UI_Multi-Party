@@ -27,22 +27,33 @@ public static class AdminApi
     public static void MapAdminApi(this WebApplication app)
     {
         var root = app.MapGroup("/ag-ui/admin");
-        root.MapGet("/users", (HttpContext ctx, AuthService auth, GroupHub hub) =>
+        root.MapGet("/users", (HttpContext ctx, AuthService auth, GroupHub hub, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
-            var users = auth.ListUsers().Select(u => new
+            // 个人配额水位（1.0.269）：把与用量页 / 侧边栏同源的 `QuotaLevel` 直接落到用户列表，
+            // 管理员在「用户管理」就能看到谁快到顶了；登限制用户不在列表里（它是定时任务虚拟触发者）。
+            var quota = usage.DailyQuotaPerUser;
+            var today = usage.GetUserTodaySummary().ToDictionary(u => u.UserId, u => u.Tokens, StringComparer.Ordinal);
+            var users = auth.ListUsers().Select(u =>
             {
-                u.UserId,
-                u.Username,
-                u.Nickname,
-                u.Avatar,
-                u.IsAdmin,
-                platformRole = WebIdentity.RoleName(u.PlatformRole),
-                u.IsDisabled,
-                u.PersonalMemoryEnabled,
-                u.CreatedAt,
-                u.UpdatedAt,
-                // 所在群数量（管理视角：账号活跃度参考）
-                groupCount = hub.Store.GroupsOf(u.UserId).Count,
+                var tokens = today.TryGetValue(u.UserId, out var tk) ? tk : 0;
+                return new
+                {
+                    u.UserId,
+                    u.Username,
+                    u.Nickname,
+                    u.Avatar,
+                    u.IsAdmin,
+                    platformRole = WebIdentity.RoleName(u.PlatformRole),
+                    u.IsDisabled,
+                    u.PersonalMemoryEnabled,
+                    u.CreatedAt,
+                    u.UpdatedAt,
+                    // 所在群数量（管理视角：账号活跃度参考）
+                    groupCount = hub.Store.GroupsOf(u.UserId).Count,
+                    todayTokens = tokens,
+                    quota,
+                    quotaLevel = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(tokens, quota),
+                };
             });
             return Results.Ok(users);
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());

@@ -899,6 +899,8 @@ window.I18N_DICTS.en = {
   "admin.usersTodayTitle": "Today's usage per trigger (per-user quota)",
   "admin.thTrigger": "Trigger",
   "admin.quotaNearUser": "{near} users approaching limit ｜ {over} over limit",
+  "admin.userQuotaWarn": "This user has used {used} / {quota} tokens today (80% reached; once exceeded they cannot trigger digital employees today)",
+  "admin.userQuotaOver": "This user has used {used} / {quota} tokens today (quota reached; they cannot trigger digital employees until UTC next day)",
   "admin.quotaExempt": "System task (exempt)",
   "admin.quotaNear": "{near} approaching limit ｜ {over} over limit",
   "admin.quotaOverrideTag": "Per-circle quota override: {quota} tokens/day (takes precedence over the global value)",

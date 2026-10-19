@@ -223,6 +223,10 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 }
 .group-item .quota-tag.warn { color: var(--warn, #f0a63a); }
 .group-item .quota-tag.over { color: var(--err, #ff6b6b); }
+/* 用户管理表同样复用配额水位角标（与侧边栏同源） */
+.admin-table .quota-tag { font-size: 12px; margin-left: 4px; cursor: help; white-space: nowrap; }
+.admin-table .quota-tag.warn { color: var(--warn, #f0a63a); }
+.admin-table .quota-tag.over { color: var(--err, #ff6b6b); }
 /* 群头像：与 👥 图标同尺寸，圆形裁剪 */
 .group-item .group-avatar {
   width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; overflow: hidden;

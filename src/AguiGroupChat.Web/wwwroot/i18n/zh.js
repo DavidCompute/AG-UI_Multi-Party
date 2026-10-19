@@ -897,6 +897,8 @@ window.I18N_DICTS.zh = {
   "admin.usersTodayTitle": "今日各触发者用量（按个人配额）",
   "admin.thTrigger": "触发者",
   "admin.quotaNearUser": "个人接近上限 {near} 人 ｜ 已超限 {over} 人",
+  "admin.userQuotaWarn": "个人今日已用 {used} / {quota} token（已达 80%，超出后该用户当天无法触发数字员工）",
+  "admin.userQuotaOver": "个人今日已用 {used} / {quota} token（已达上限，该用户当天无法触发，UTC 次日恢复）",
   "admin.quotaExempt": "系统任务（豁免）",
   "admin.quotaNear": "接近上限 {near} 个 ｜ 已超限 {over} 个",
   "admin.quotaOverrideTag": "本知聚配额覆写：{quota} token/日（优先于全局值）",

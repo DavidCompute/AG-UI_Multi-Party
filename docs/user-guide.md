@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.268**
+> 适用版本：**1.0.269**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3733,7 +3733,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 | # | tab DOM id | i18n key | 中文（zh） | 内容容器 | 主要接口 |
 |---|---|---|---|---|---|
-| 1 | `#adminTabUsers` | `admin.tabUsers` | 用户管理 | `#adminUsersView` | `GET /ag-ui/admin/users`；写操作见 §8.3 |
+| 1 | `#adminTabUsers` | `admin.tabUsers` | 用户管理 | `#adminUsersView` | `GET /ag-ui/admin/users`（含 `todayTokens` / `quota` / `quotaLevel`）；写操作见 §8.3 |
 | 2 | `#adminTabUsage` | `admin.tabUsage` | 用量统计 | `#adminUsageView` | `GET /ag-ui/admin/usage?days=7` |
 | 3 | `#adminTabMetrics` | `admin.tabMetrics` | 运行指标 | `#adminMetricsView` | `GET /ag-ui/admin/metrics`（+ `GET /ag-ui/admin/bridge-health`） |
 | 4 | `#adminTabConfig` | `admin.tabConfig` | 配置治理 | `#adminConfigView` | `GET /ag-ui/admin/config/governance`、`POST /ag-ui/admin/config` |
@@ -3770,11 +3770,12 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 #### 8.3.1 列表数据
 
-`loadAdminUsers()`（`app.js:7192-7228`）调 `GET /ag-ui/admin/users`，服务端返回（`AdminApi.cs:26-44`）：`userId`、`username`、`nickname`、`avatar`、`isAdmin`、`platformRole`（**生效角色**，经 `RoleName(ResolveRole(u.UserId))`）、`isDisabled`、`personalMemoryEnabled`、`createdAt`、`updatedAt`、`groupCount`（`hub.Store.GroupsOf(userId).Count`，所在知聚数）。
+`loadAdminUsers()`（`app.js:9251-9287`）调 `GET /ag-ui/admin/users`，服务端返回（`AdminApi.cs:30-59`）：`userId`、`username`、`nickname`、`avatar`、`isAdmin`、`platformRole`（**生效角色**，经 `RoleName(ResolveRole(u.UserId))`）、`isDisabled`、`personalMemoryEnabled`、`createdAt`、`updatedAt`、`groupCount`（`hub.Store.GroupsOf(userId).Count`，所在知聚数）、**`todayTokens` / `quota` / `quotaLevel`（1.0.269 新增）**。
 
 - 角色列用 `roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"))`；
 - 状态列：`#isDisabled` → `tag-disabled`（`admin.disabled` = 已禁用），否则 `tag-active`（`admin.active` = 正常）；
 - 自己那一行：昵称后加 `admin.me`（本人）标记，操作列显示 `admin.currentAccount`（当前账号），不提供任何按钮。
+- **个人配额水位角标（1.0.269）**：`adminUserRow()` 在用户名后追加 `.quota-tag`——`quotaLevel = warn`（≥ `Agents:DailyTokenQuotaPerUser` 的 80%）→ `⚠`，`over`（≥ 配额）→ `🔴`，`ok` 不显示；悬停提示为 `admin.userQuotaWarn` / `admin.userQuotaOver`（含今日用量与配额数字）。水位判定与用量页 / 侧边栏**同源**（`AgentUsageService.QuotaLevel`），阈值只在后端写一份。
 
 #### 8.3.2 禁用 / 启用（🔒 / 🔓）
 
@@ -4672,7 +4673,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 
 | 方法 | 路径 | 作用 | 权限 |
 | --- | --- | --- | --- |
-| GET | `/ag-ui/admin/users` | 用户列表（禁用状态 / 管理员标记 / 平台角色 / 群数） | 管理员 |
+| GET | `/ag-ui/admin/users` | 用户列表（禁用状态 / 管理员标记 / 平台角色 / 群数 / **今日用量与个人配额水位 `todayTokens`·`quota`·`quotaLevel`**） | 管理员 |
 | GET | `/ag-ui/admin/roles` | 平台角色矩阵（显式 + 生效） | 超管 |
 | POST | `/ag-ui/admin/roles/{userId}` | 授予 / 回收他人平台角色（`user`/`operator`/`admin`/`superadmin`；不可改自己） | 超管 |
 | POST | `/ag-ui/admin/users/{userId}/disabled` | 禁用 / 启用账号（禁用即吊销全部会话；不可禁用自己） | 管理员 |

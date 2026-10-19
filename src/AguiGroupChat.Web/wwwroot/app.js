@@ -9201,6 +9201,14 @@ function adminUserRow(u, meId) {
   const role = roleBadge(u.platformRole || (u.isAdmin ? "admin" : "user"));
   const status = u.isDisabled ? `<span class="tag-disabled">${t("admin.disabled")}</span>` : `<span class="tag-active">${t("admin.active")}</span>`;
   const self = u.userId === meId ? t("admin.me") : "";
+  // 个人配额水位（1.0.269）：与用量页 / 侧边栏同源（ok 不显示）——在用户管理页就能看到谁快到顶
+  const lvl = u.quotaLevel;
+  const quotaTag = (lvl === "warn" || lvl === "over")
+    ? ` <span class="quota-tag ${lvl}" title="${escapeHtml(t(lvl === "over" ? "admin.userQuotaOver" : "admin.userQuotaWarn", {
+        used: Number(u.todayTokens || 0).toLocaleString(),
+        quota: Number(u.quota || 0).toLocaleString(),
+      }))}">${lvl === "over" ? "🔴" : "⚠"}</span>`
+    : "";
   let actions;
   if (u.userId === meId) {
     actions = `<span class="muted">${t("admin.currentAccount")}</span>`;
@@ -9217,7 +9225,7 @@ function adminUserRow(u, meId) {
       + `<button class="chip-btn icon-btn" data-op="delete" data-uid="${cssEsc(u.userId)}" data-name="${cssEsc(u.username)}" title="${t("admin.deleteTitle")}">🗑️</button>`;
   }
   return `<tr>
-        <td>${escapeHtml(u.username)}${self}</td>
+        <td>${escapeHtml(u.username)}${self}${quotaTag}</td>
         <td>${escapeHtml(u.nickname || "")}</td>
         <td>${role}</td>
         <td>${status}</td>
