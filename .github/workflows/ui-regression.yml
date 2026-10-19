@@ -1,0 +1,93 @@
+name: UI regression (quota alerts)
+
+# 手工触发的浏览器回归：在干净的 runner 上起一个 mock + 内存存储的 Web，
+# 用 Playwright 跑 tools/ui-quota-alerts.mjs（配额水位 / 覆写同步，只读）。
+#
+# 为什么不用 docker compose：web 依赖 llama-embed，而后者需要 605MB 的 embedding 模型文件
+# （仓库不携带）；本回归只验证前端渲染与状态同步，mock + memory 足够且更快。
+#
+# 触发：Actions → "UI regression (quota alerts)" → Run workflow，或
+#   gh workflow run ui-regression.yml
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ui-regression-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  quota-ui:
+    name: Quota alerts UI (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build Web
+        run: dotnet build src/AguiGroupChat.Web/AguiGroupChat.Web.csproj -c Release --nologo
+
+      - name: Start web (mock provider + in-memory storage)
+        env:
+          ASPNETCORE_URLS: http://127.0.0.1:5200
+          ASPNETCORE_ENVIRONMENT: Production
+          Agents__Provider: mock
+          Agents__Memory__Enabled: "false"
+          Persistence__Enabled: "false"
+          Auth__FirstUserIsAdmin: "true"
+        run: |
+          nohup dotnet run --project src/AguiGroupChat.Web/AguiGroupChat.Web.csproj -c Release --no-build \
+            > /tmp/web.log 2>&1 &
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5200/ag-ui/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:5200/ag-ui/health
+
+      # 首个注册账号自动成为管理员（Auth:FirstUserIsAdmin=true）；
+      # 再建一个知聚，让脚本的「侧栏角标 / GROUP_UPDATED 同步」两组断言不被跳过。
+      - name: Register admin and seed a circle
+        run: |
+          RESP=$(curl -fsS -X POST http://127.0.0.1:5200/ag-ui/user/register \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"david","password":"lingtong"}')
+          TOKEN=$(printf '%s' "$RESP" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).token))")
+          UID=$(printf '%s' "$RESP" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).userId))")
+          echo "registered userId=$UID"
+          curl -fsS -X POST http://127.0.0.1:5200/ag-ui/group/create \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{\"groupName\":\"UI 回归知聚\",\"ownerId\":\"$UID\",\"memberIds\":[\"$UID\"]}" > /dev/null
+
+      - name: Install Playwright
+        working-directory: tools
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Run quota UI regression
+        working-directory: tools
+        env:
+          BASE_URL: http://127.0.0.1:5200
+          USERNAME: david
+          PASSWORD: lingtong
+          HEADLESS: "1"
+        run: node ui-quota-alerts.mjs
+
+      - name: Dump web log
+        if: failure()
+        run: tail -n 200 /tmp/web.log

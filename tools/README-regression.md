@@ -7,7 +7,7 @@
 |---|---|---|---|
 | `api-smoke.mjs` | 运行期 | 后端 HTTP 只读主流面（46 项）：路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 | 手动（需起服务） |
 | `ui-smoke.mjs` | 运行期 | 前端主要界面（Playwright）：**未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏** | 手动（需浏览器） |
-| `ui-quota-alerts.mjs` | 运行期 | 配额水位 / 覆写同步（Playwright）：用量页三张表（红/琥珀/`⚙`/豁免）、侧栏角标、水位**白名单**、`GROUP_UPDATED` 同步 `quotaPerGroup`/`model` | 手动（需浏览器） |
+| `ui-quota-alerts.mjs` | 运行期 | 配额水位 / 覆写同步（Playwright）：用量页三张表（红/琥珀/`⚙`/豁免）、侧栏角标、水位**白名单**、`GROUP_UPDATED` 同步 `quotaPerGroup`/`model` | 手动；也可在 Actions 手动触发（`ui-regression.yml`，mock + 内存，无需本地起服务） |
 | `check-config-keys.mjs` | **静态** | **配置键 ↔ C# 属性漂移**：compose / appsettings 里配了、代码里没属性 → **静默忽略、不报错也不生效**（文档 §9.9 专列此坑） | **已在 CI** |
 | `check-docs-links.mjs` | **静态** | **文档引用失效**：markdown 链接 + 反引号文件引用（含 `:行号` 越界）指向不存在 / 已移动的文件 | **已在 CI** |
 

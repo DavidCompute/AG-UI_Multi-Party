@@ -80,7 +80,7 @@ tools/README-playwright.md       # Install / run / exit-code notes for the orche
 tools/README-team-replace.md     # How-to for team batch replace / repeatedly re-editing the same team + plan.json structure
 tools/api-smoke.mjs              # Runtime regression: read-only backend HTTP sweep (46 checks, zero deps; see tools/README-regression.md)
 tools/ui-smoke.mjs               # Runtime regression: frontend console sweep (uncaught runtime errors + raw i18n key leaks, Playwright; see tools/README-regression.md)
-tools/ui-quota-alerts.mjs        # Runtime regression: quota levels / override sync (usage tables + sidebar badges + GROUP_UPDATED sync; read-only, Playwright; see tools/README-playwright.md)
+tools/ui-quota-alerts.mjs        # Runtime regression: quota levels / override sync (usage tables + sidebar badges + GROUP_UPDATED sync; read-only, Playwright; see tools/README-playwright.md; can also be run from Actions via ui-regression.yml)
 tools/check-config-keys.mjs      # Static guard: config-key ↔ C# property drift (catches "set but silently ignored" keys; wired into CI; see tools/README-regression.md)
 tools/check-docs-links.mjs       # Static guard: docs reference integrity (markdown links + backticked file refs + out-of-range line numbers; wired into CI)
 tools/README-regression.md       # Regression guards (runtime sweeps + static config/docs checks): usage / exit codes / criteria

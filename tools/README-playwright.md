@@ -60,6 +60,14 @@ cd tools && npm run ui:quota
 
 退出码：`0` = 通过（允许有跳过项，例如当前账号没有知聚）；`1` = 有失败项。
 
+## 在 GitHub Actions 里跑（无需本地起服务）
+
+`.github/workflows/ui-regression.yml`（**手工触发**：Actions → “UI regression (quota alerts)” → Run workflow，或 `gh workflow run ui-regression.yml`）：
+
+1. 在干净的 Ubuntu runner 上用 **mock 模型 + 内存存储** 起 Web（`dotnet run`，不用 docker compose——后者依赖 605MB 的 embedding 模型）；
+2. 注册 `david`（首用户自动成为管理员）并建一个知聚（避免角标 / `GROUP_UPDATED` 两组断言被跳过）；
+3. 安装 Playwright 并运行本脚本；失败时附带 Web 日志尾部。
+
 > 后端语义（阈值触发、覆写写入与权限、配额拦截）已由 .NET 集成测试覆盖，本脚本只盯前端；两者互补。
 
 ---
