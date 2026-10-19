@@ -121,6 +121,7 @@ public static class WebhookApi
         EventTypes.GroupTopicCreated, EventTypes.GroupTopicDeleted, EventTypes.GroupTopicCleared,
         EventTypes.RunError,
         EventTypes.QuotaThreshold, // 1.0.270：用量跨过 80% / 100% 的告警（个人 / 知聚两作用域）
+        EventTypes.QuotaOverrideExpiring, // 1.0.274：临时放额即将到期（提前 24 小时）
     ];
 
     public static void MapWebhookApi(this WebApplication app)

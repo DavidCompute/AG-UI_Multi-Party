@@ -9331,6 +9331,22 @@ function roleBadge(r) {
 }
 
 /** 审计日志查询（管理员控制台「审计」页）：按操作者 / 操作 / 目标过滤，展示最近 200 条。 */
+/* 审计日志：快捷筛选「临时放额」。服务端 detail 固定为中文标记（不随界面语言变化），
+   因此这里用同一字面量做过滤值；按钮只写 action + detail 两个条件，其余过滤框保持用户输入。 */
+const AUDIT_EXPIRING_DETAIL = "有效期至";
+let auditExpiringOnly = false;
+
+function toggleAuditExpiringFilter() {
+  auditExpiringOnly = !auditExpiringOnly;
+  $("auditAction").value = auditExpiringOnly ? "group.quotaOverride" : "";
+  const btn = $("auditExpiringBtn");
+  if (btn) {
+    btn.classList.toggle("on", auditExpiringOnly);
+    btn.setAttribute("aria-pressed", auditExpiringOnly ? "true" : "false");
+  }
+  loadAdminAudit();
+}
+
 async function loadAdminAudit() {
   const rows = $("adminAuditRows");
   if (!rows) return;
@@ -9342,6 +9358,7 @@ async function loadAdminAudit() {
   if (actor) q.set("actor", actor);
   if (action) q.set("action", action);
   if (target) q.set("targetId", target);
+  if (auditExpiringOnly) q.set("detail", AUDIT_EXPIRING_DETAIL);
   q.set("limit", "200");
   try {
     const res = await fetch(`/ag-ui/admin/audit?${q.toString()}`, { headers: { Authorization: "Bearer " + state.token } });
@@ -9368,6 +9385,7 @@ async function exportAdminAuditCsv() {
   if (actor) q.set("actor", actor);
   if (action) q.set("action", action);
   if (target) q.set("targetId", target);
+  if (auditExpiringOnly) q.set("detail", AUDIT_EXPIRING_DETAIL);
   try {
     const res = await fetch(`/ag-ui/admin/audit.csv?${q.toString()}`, { headers: { Authorization: "Bearer " + state.token } });
     if (!res.ok) { toast(t("admin.exportFail", { err: res.status })); return; }
@@ -14350,6 +14368,7 @@ function init() {
   $("storageRefreshBtn").onclick = loadStorageGovernance;
   $("storageReclaimBtn").onclick = runStorageReclaim;
   $("auditSearchBtn").onclick = () => loadAdminAudit();
+  if ($("auditExpiringBtn")) $("auditExpiringBtn").onclick = toggleAuditExpiringFilter;
   $("auditExportBtn").onclick = exportAdminAuditCsv;
   ["auditActor", "auditAction", "auditTarget"].forEach((id) =>
     $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); loadAdminAudit(); } }));

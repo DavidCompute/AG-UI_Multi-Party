@@ -1,5 +1,36 @@
-# AG-UI 群聊桌面版 1.0.273 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.273 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.274 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.274 Release Notes (current Windows desktop release)
+
+**版本说明**：**临时放额的闭合管理**——① 到期前 **24 小时**通过出站 Webhook 推一条 `QUOTA_OVERRIDE_EXPIRING`（同一额度只发一次），避免管理员设了临时放额后忘记续期；② 审计页新增 **「⏰ 临时放额」快捷筛选**，一键只看带到期时间的覆写变更（`/audit` 新增 `detail` 子串过滤，CSV 导出同口径）。
+**Version note**: **Closing the loop on temporary allowances** — ① a `QUOTA_OVERRIDE_EXPIRING` event is pushed to outbound webhooks **24 hours before expiry** (once per allowance), so admins no longer forget to renew; ② the audit page gains a **"⏰ Temporary allowances" quick filter** that shows only override changes carrying an expiry (`/audit` gains a `detail` substring filter, with CSV export using the same conditions).
+
+## 变更
+# Changes
+
+中文：
+- **新事件 `QUOTA_OVERRIDE_EXPIRING`**：载荷 `{ groupId, groupName, quota, until, remainingSeconds, timestamp }`；只经出站 Webhook 推送（不走群广播），事件目录 **19 → 20**。
+- **`QuotaExpiryReminderService`**：宿主启动后 **1 分钟**首次扫描、此后每 **15 分钟**一次；只提醒**仍生效**（`IsQuotaOverrideActive`）且 `until ∈ (now, now+24h]` 的覆写。同一额度（`groupId + until`）**进程内只发一次**；额度取消 / 改期 / 到期 / 知聚解散后去重键在下一轮扫描清理（改回同样的到期时间会重新提醒）。Web 与桌面两个组合根都注册并从 `ApplicationStarted` 启动。
+- **审计 `detail` 过滤**：`GET /ag-ui/admin/audit` / `/audit.csv` 新增 `detail`（大小写不敏感子串）；`IAuditStore` 与 Postgres / Relational 两套存储同步实现（SQL `detail LIKE`），内存回退模式在 `Matches` 中过滤。
+- **审计页快捷筛选**：`#auditExpiringBtn`（开关式 chip，`on` / `aria-pressed`）：点击自动填入 `action=group.quotaOverride` + `detail=有效期至` 并立即查询；再次点击清空。导出 CSV 沿用同一条件。
+
+English:
+- **New event `QUOTA_OVERRIDE_EXPIRING`**: payload `{ groupId, groupName, quota, until, remainingSeconds, timestamp }`; delivered **only via outbound webhooks** (not a group broadcast); event catalog **19 → 20**.
+- **`QuotaExpiryReminderService`**: first scan **1 minute** after host start, then every **15 minutes**; only overrides that are **still effective** (`IsQuotaOverrideActive`) with `until ∈ (now, now+24h]` are reminded. The same allowance (`groupId + until`) fires **once per process**; when it is cleared / re-dated / expired / the circle is disbanded, the dedup key is pruned on the next scan (setting the same deadline again later reminds again). Registered by both the web and desktop composition roots and started from `ApplicationStarted`.
+- **Audit `detail` filter**: `GET /ag-ui/admin/audit` / `/audit.csv` gain `detail` (case-insensitive substring); implemented in `IAuditStore` and both Postgres / Relational stores (SQL `detail LIKE`), with the in-memory fallback filtering in `Matches`.
+- **Audit quick filter**: `#auditExpiringBtn` (toggle chip with `on` / `aria-pressed`): clicking fills `action=group.quotaOverride` + `detail=有效期至` and queries immediately; clicking again clears both. The CSV export reuses the same conditions.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2.2（到期提醒）、§8.7（快捷筛选 + `detail` 过滤）、§8.19（事件目录 **20 类** + `QUOTA_OVERRIDE_EXPIRING` 小节）、§9.x（审计接口新参数）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.274。
+English: `docs/user-guide.md` / `en.md` §2.2.2.2 (expiry reminder), §8.7 (quick filter + `detail` filtering), §8.19 (event catalog **20 types** + the `QUOTA_OVERRIDE_EXPIRING` subsection), §9.x (the new audit parameter); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.274.
+
+## 测试
+# Tests
+
+中文：新增 7 例——`QuotaExpiryReminderTests` ×4（窗口内只发一次 / 窗口外不发直到进入 / 长期放额不发 / 改期后对新到期时间重新提醒）；`AuditStoreTests` ×2（SQLite 与内存回退的 `detail` 子串过滤）；`WebhookTests` ×1（`QUOTA_OVERRIDE_EXPIRING` 在目录内 + 签名信封与载荷字段）。**全量测试通过**（1823 → **1830**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1954，missing 0**；`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 均过。Docker 重建后实测：① Webhook 事件目录返回 **20 类且含新事件**；② 浏览器自动化 **9/9**（快捷筛选激活 / 取消、请求带 `action` + `detail`、真实 `/audit?detail=` 200 且命中行均含标记、无页面脚本错误）；③ **真实端到端**：本地 HTTP 接收器 + 订阅 + 建知聚（1 小时后到期）→ 重启 web → 首次扫描后收到带 HMAC 签名的 `QUOTA_OVERRIDE_EXPIRING`，`groupId` / `groupName` / `quota=4321` / `until` / `remainingSeconds` 全部正确；测试后已清理订阅与知聚。
+English: 7 new cases — `QuotaExpiryReminderTests` ×4 (fires once inside the window / does not fire until it enters / long-term overrides do not fire / a re-dated expiry fires for the new deadline); `AuditStoreTests` ×2 (`detail` substring filtering for SQLite and the in-memory fallback); `WebhookTests` ×1 (`QUOTA_OVERRIDE_EXPIRING` is in the catalog + the signed envelope and payload fields). **All tests pass** (1823 → **1830**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1954, missing 0**; `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass. After a Docker rebuild: ① the webhook event catalog returns **20 types including the new one**; ② browser automation **9/9** (the quick filter activates / clears, requests carry `action` + `detail`, the real `/audit?detail=` returns 200 with every matched row containing the marker, no page script errors); ③ **real end-to-end**: a local HTTP receiver + subscription + a new circle (expiring in 1 hour) → restart web → after the first scan a signed `QUOTA_OVERRIDE_EXPIRING` arrived with correct `groupId` / `groupName` / `quota=4321` / `until` / `remainingSeconds`; the subscription and circle were cleaned up afterwards.
+
 
 **版本说明**：**知聚配额「临时放额」**——管理员给某个知聚设配额覆写时，可以再给一个**到期时间**；到期后**自动回退全局配额**，不需要人工记得改回来。失效是**惰性**的（读时判定，无后台任务），存储里的旧值仍然保留，管理员能看到当时设了多少、原定何时到期。
 **Version note**: **Temporary per-circle quota allowances** — when an admin sets a quota override for a circle, it can now carry an **expiry time**; once it lapses the circle **automatically falls back to the global quota**, so nobody has to remember to undo it. Expiry is **lazy** (evaluated at read time, no background job) and the stored values are kept, so an admin can still see what was set and when it was due.

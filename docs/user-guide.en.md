@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.273**
+> Applies to version: **1.0.274**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -688,7 +688,8 @@ Support circles, in language and implementation: support circles **do not suppor
 - **Effect**: `AgentGateway` reads `GroupHub.GroupQuotaOverride(groupId)` (`AgentGateway.ResolveGroupQuota`) and passes it to `AgentUsageService.CheckGroupQuota(groupId, override)` — exceeding it blocks the trigger with `GROUP_QUOTA_EXCEEDED` (see 8.6).
 - **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value, and for a temporary allowance appends "temporary until {time}"); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).
 - **Rendering**: the group-list endpoint `GET /ag-ui/member/{memberId}/groups` returns `quotaOverride` and `quotaOverrideUntil` (`null` = not overridden / no expiry), and `openGroupSettings()` backfills both.
-- **Audit (1.0.268 / 1.0.273)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global"); when an expiry is set, "; effective until yyyy-MM-dd HH:mmZ" is appended.
+- **Audit (1.0.268 / 1.0.273)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global"); when an expiry is set, "; effective until yyyy-MM-dd HH:mmZ" is appended. The audit page's "⏰ Temporary allowances" quick filter matches on that detail (1.0.274, see 8.7).
+- **Expiry reminder (1.0.274)**: once the remaining time enters **24 hours**, `QuotaExpiryReminderService` scans every 15 minutes and emits `QUOTA_OVERRIDE_EXPIRING` to outbound webhooks (once per allowance, see 8.19); the reminder is notification only — the actual fallback still relies on the lazy evaluation above.
 - **External visibility**: the change rides on the existing `GROUP_UPDATED` event (`updateFields` contains `quotaPerGroup` / `quotaPerGroupUntil`, `groupInfo` carries the new value, and it is pushed **even with nobody online**) — no dedicated event needed; see 8.19.
 
 #### 2.2.3 Disbanding a Circle
@@ -4005,9 +4006,11 @@ View `#adminAuditView` (`index.html:1687-1702`): the filter bar `#auditActor` (`
 
 #### 8.7.1 Query and `limit ≤ 200`
 
-`loadAdminAudit()` (`app.js:7237-7263`): assembles the query by actor / action / target (`actor` / `action` / `targetId`), with a **fixed `limit=200`**, and calls `GET /ag-ui/admin/audit`.
+`loadAdminAudit()` (`app.js`): assembles the query by actor / action / target (`actor` / `action` / `targetId`), with a **fixed `limit=200`**, and calls `GET /ag-ui/admin/audit`.
 
-The server (`AdminApi.cs:155-163`) returns `{ total, entries }`: `total = audit.Count`, `entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs)`.
+**Quick filter "⏰ Temporary allowances" (1.0.274)**: `#auditExpiringBtn` is a toggle chip (adds the `on` class and `aria-pressed=true` when active). Clicking it fills `action` with `group.quotaOverride` and adds `detail=有效期至`, and clicking again clears both. The server's `detail` filter is a **case-insensitive substring match**, so only override records carrying an expiry are returned; the CSV export reuses the same conditions. The audit detail is a fixed Chinese marker (it does not follow the UI language), so the frontend uses the same literal `AUDIT_EXPIRING_DETAIL` as the filter value.
+
+The server (`AdminApi.cs:155-163`) returns `{ total, entries }`: `total = audit.Count`, `entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs, detail)`.
 
 **Hard cap of 200** (`AuditLogService.Query`, `AuditLogService.cs:80-93`): `limit = Math.Min(limit, Math.Min(count, 200))`; `limit <= 0` falls back to 100. All filters are substring / range matches and case-insensitive; the time range is `[fromMs, toMs]` (UTC milliseconds, inclusive of the endpoints).
 
@@ -4421,7 +4424,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | List subscriptions; the **signing secret is masked** (only `hasSecret`) |
-| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (19) |
+| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (20) |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | Last 100 delivery records (newest first) |
 | `POST` | `/ag-ui/admin/webhooks` | Create; **returns the plaintext secret once** (`whsec_…`) |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | Update (null fields = unchanged; `rotateSecret=true` rotates and returns the new secret) |
@@ -4430,7 +4433,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 
 **Subscription fields**: `name`, `url` (**must be an absolute http / https URL**, else 400), `eventTypes` (none selected = all except high-frequency streaming deltas; types outside the catalog are rejected with 400), `groupId` (optional, scopes pushes to one circle), `enabled`.
 
-**Selectable event types (19)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, and **`QUOTA_THRESHOLD` (1.0.270)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+**Selectable event types (20)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, **`QUOTA_THRESHOLD` (1.0.270)**, and **`QUOTA_OVERRIDE_EXPIRING` (1.0.274)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 
@@ -4446,7 +4449,19 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 - **Subscription filtering**: the `groupId` is an empty string for the user scope — so **group-scoped subscriptions do not receive per-user alerts**; only unscoped subscriptions do.
 - **No quota (0 = unlimited) means no events** and no extra queries.
 
-**How external systems see override changes**: circle-level **model / quota overrides have no dedicated webhook event** — they ride on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup` / `quotaPerGroupUntil`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**.
+**`QUOTA_OVERRIDE_EXPIRING` (temporary allowance expiring, 1.0.274)**: delivered when a circle's quota override has an expiry and the remaining time enters the **24-hour** window; `data` is:
+
+```jsonc
+{ "type": "QUOTA_OVERRIDE_EXPIRING", "groupId": "group_xxx", "groupName": "Temp allowance circle",
+  "quota": 4321, "until": 1800000000000, "remainingSeconds": 3600, "timestamp": 1767225600000 }
+```
+
+- **Scanning**: the first scan runs **1 minute** after the host starts, then every **15 minutes** (`QuotaExpiryReminderService`, no persisted scheduler state); only overrides that are **still effective** (`IsQuotaOverrideActive`) with `until` in `(now, now+24h]` are reminded.
+- **No flooding**: the same allowance (`groupId + until`) fires **once per process**; when the quota is cleared / the expiry is changed / it expires / the circle is disbanded, the dedup key is pruned on the next scan (setting the same deadline again later will remind again). A restart may emit once more (same convention as `QUOTA_THRESHOLD`; dedupe by `groupId + until` on the receiving side).
+- **Subscription filtering**: `groupId` is the circle itself, so group-scoped subscriptions receive it too.
+- **Relationship to expiry**: the reminder is **notification only**; the actual fallback to the global quota remains a **lazy read-time evaluation** (see 2.2.2.2) and happens even if nobody subscribes to webhooks.
+
+**How external systems see override changes**: the **change itself** of a circle-level **model / quota override has no dedicated event** — it rides on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup` / `quotaPerGroupUntil`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**. A dedicated `QUOTA_OVERRIDE_EXPIRING` event exists for **pre-expiry reminders** (see above).
 
 > If an external audit needs the **effective value** (a negative / non-numeric value counts as clearing the override), read the audit log's `group.quotaOverride` / `group.modelOverride` (whose `detail` records the **resulting** value, see 8.7), or read `quotaOverride` / `modelOverride` back from the group list.
 
@@ -4728,7 +4743,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | GET | `/ag-ui/admin/voice/sample?voice=` | Voice preview: synthesizes a short sample and returns the audio inline (for `<audio src>`, `?token=` accepted); 404 when off, 503 on failure | Operator |
 | GET | `/ag-ui/admin/usage?days=` | Model usage (daily aggregation + today's per-circle breakdown + today's per-trigger breakdown + quota) | Operator |
 | GET | `/ag-ui/admin/quota-status` | Per-circle quota levels (today's `ok` / `warn` (≥80%) / `over` per circle, plus the global quota and threshold; **each circle is judged against its own effective quota**, see 2.2.2.2; feeds the sidebar warning badges) | Operator |
-| GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `fromMs` / `toMs`) | Operator |
+| GET | `/ag-ui/admin/audit` | Audit log query (`limit` at most 200; filters `actor` / `action` / `targetId` / `detail` / `fromMs` / `toMs`) | Operator |
 | GET | `/ag-ui/admin/audit.csv` | Audit log CSV export (UTF-8 BOM, no 200-row limit) | Operator |
 | GET | `/ag-ui/admin/bridge-health` | Bridge endpoint health (`?refresh=true` for a live probe) | Operator |
 | GET | `/ag-ui/admin/bridge-capabilities` | Bridge capability negotiation (`?refresh=true` for a live probe) | Operator |

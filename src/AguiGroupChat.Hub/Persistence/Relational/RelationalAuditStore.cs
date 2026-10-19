@@ -35,11 +35,11 @@ public sealed class RelationalAuditStore : IAuditStore
     }
 
     public IReadOnlyList<AuditEntry> Query(int limit, string? actor = null, string? action = null,
-        string? targetId = null, long? fromMs = null, long? toMs = null)
+        string? targetId = null, long? fromMs = null, long? toMs = null, string? detail = null)
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        var where = BuildWhere(cmd, actor, action, targetId, fromMs, toMs);
+        var where = BuildWhere(cmd, actor, action, targetId, fromMs, toMs, detail);
         cmd.CommandText = $"""
             SELECT id, ts, action, actor_id, actor_username, group_id, target_type, target_id, detail, result
             FROM agui_audit WHERE {where}
@@ -50,11 +50,11 @@ public sealed class RelationalAuditStore : IAuditStore
     }
 
     public IReadOnlyList<AuditEntry> QueryAll(string? actor = null, string? action = null,
-        string? targetId = null, long? fromMs = null, long? toMs = null)
+        string? targetId = null, long? fromMs = null, long? toMs = null, string? detail = null)
     {
         using var conn = _db.Open();
         using var cmd = conn.CreateCommand();
-        var where = BuildWhere(cmd, actor, action, targetId, fromMs, toMs);
+        var where = BuildWhere(cmd, actor, action, targetId, fromMs, toMs, detail);
         cmd.CommandText = $"""
             SELECT id, ts, action, actor_id, actor_username, group_id, target_type, target_id, detail, result
             FROM agui_audit WHERE {where}
@@ -96,17 +96,19 @@ public sealed class RelationalAuditStore : IAuditStore
     }
 
     private static string BuildWhere(System.Data.Common.DbCommand cmd, string? actor, string? action,
-        string? targetId, long? fromMs, long? toMs)
+        string? targetId, long? fromMs, long? toMs, string? detail = null)
     {
         var groups = new List<string>();
-        string Like(string column)
+        string Like(string column, string value)
         {
-            cmd.AddWithValue($"p_{column.Replace("_", "")}", $"%{(column == "action" ? action : column == "target_id" ? targetId : actor)}%");
-            return $"LOWER({column}) LIKE LOWER(@p_{column.Replace("_", "")})";
+            var p = "p_" + column.Replace("_", "");
+            cmd.AddWithValue(p, $"%{value}%");
+            return $"LOWER({column}) LIKE LOWER(@{p})";
         }
-        if (!string.IsNullOrWhiteSpace(actor)) groups.Add($"({Like("actor_id")} OR {Like("actor_username")})");
-        if (!string.IsNullOrWhiteSpace(action)) groups.Add(Like("action"));
-        if (!string.IsNullOrWhiteSpace(targetId)) groups.Add(Like("target_id"));
+        if (!string.IsNullOrWhiteSpace(actor)) groups.Add($"({Like("actor_id", actor)} OR {Like("actor_username", actor)})");
+        if (!string.IsNullOrWhiteSpace(action)) groups.Add(Like("action", action));
+        if (!string.IsNullOrWhiteSpace(targetId)) groups.Add(Like("target_id", targetId));
+        if (!string.IsNullOrWhiteSpace(detail)) groups.Add(Like("detail", detail));
         if (fromMs is not null) { groups.Add("ts >= @from"); cmd.AddWithValue("from", fromMs.Value); }
         if (toMs is not null) { groups.Add("ts <= @to"); cmd.AddWithValue("to", toMs.Value); }
         return groups.Count == 0 ? "TRUE" : string.Join(" AND ", groups);

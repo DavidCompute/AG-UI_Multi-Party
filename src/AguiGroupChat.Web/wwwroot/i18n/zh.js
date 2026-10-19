@@ -969,6 +969,7 @@ window.I18N_DICTS.zh = {
   "admin.auditActionPh": "操作名…",
   "admin.auditTargetPh": "目标 ID…",
   "admin.auditSearch": "🔍 查询",
+  "admin.auditExpiring": "⏰ 临时放额",
   "admin.auditExport": "⬇ 导出 CSV",
   "admin.auditEmpty": "暂无审计记录（或不符合过滤条件）",
   "admin.thTime": "时间",

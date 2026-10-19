@@ -74,12 +74,12 @@ public sealed class AuditLogService
     /// 操作名（子串）、目标 ID（子串）、时间范围（[fromMs, toMs]，UTC 毫秒含端点）。limit 最多 200。
     /// </summary>
     public IReadOnlyList<AuditEntry> Query(int limit = 100, string? actor = null, string? action = null,
-        string? targetId = null, long? fromMs = null, long? toMs = null)
+        string? targetId = null, long? fromMs = null, long? toMs = null, string? detail = null)
     {
         if (_store is not null)
         {
             if (limit <= 0) limit = 100;
-            return _store.Query(Math.Min(limit, 200), actor, action, targetId, fromMs, toMs);
+            return _store.Query(Math.Min(limit, 200), actor, action, targetId, fromMs, toMs, detail);
         }
         lock (_gate)
         {
@@ -88,7 +88,7 @@ public sealed class AuditLogService
             limit = Math.Min(limit, Math.Min(_entries.Count, 200)); // 硬上限 200
             // 从最新（链表尾）开始过滤；OrderByDescending 稳定排序：同毫秒突发按插入序保持最新在前
             var query = _entries.Reverse()
-                .Where(e => Matches(e, actor, action, targetId, fromMs, toMs))
+                .Where(e => Matches(e, actor, action, targetId, fromMs, toMs, detail))
                 .OrderByDescending(e => e.Timestamp)
                 .Take(limit)
                 .ToArray();
@@ -97,7 +97,8 @@ public sealed class AuditLogService
     }
 
     /// <summary>是否命中全部过滤条件（null / 空串表示不限制）。</summary>
-    private static bool Matches(AuditEntry e, string? actor, string? action, string? targetId, long? fromMs, long? toMs)
+    private static bool Matches(AuditEntry e, string? actor, string? action, string? targetId, long? fromMs, long? toMs,
+        string? detail = null)
         => (string.IsNullOrWhiteSpace(actor)
                 || e.ActorId.Contains(actor, StringComparison.OrdinalIgnoreCase)
                 || e.ActorUsername.Contains(actor, StringComparison.OrdinalIgnoreCase))
@@ -105,6 +106,8 @@ public sealed class AuditLogService
                 || e.Action.Contains(action, StringComparison.OrdinalIgnoreCase))
            && (string.IsNullOrWhiteSpace(targetId)
                 || (e.TargetId?.Contains(targetId, StringComparison.OrdinalIgnoreCase) ?? false))
+           && (string.IsNullOrWhiteSpace(detail)
+                || (e.Detail?.Contains(detail, StringComparison.OrdinalIgnoreCase) ?? false))
            && (fromMs is null || e.Timestamp >= fromMs.Value)
            && (toMs is null || e.Timestamp <= toMs.Value);
 
@@ -123,12 +126,12 @@ public sealed class AuditLogService
     /// （内存模式为环形缓冲总容量，独立表模式为全表命中）。
     /// </summary>
     public IReadOnlyList<AuditEntry> QueryAll(string? actor = null, string? action = null,
-        string? targetId = null, long? fromMs = null, long? toMs = null)
+        string? targetId = null, long? fromMs = null, long? toMs = null, string? detail = null)
     {
-        if (_store is not null) return _store.QueryAll(actor, action, targetId, fromMs, toMs);
+        if (_store is not null) return _store.QueryAll(actor, action, targetId, fromMs, toMs, detail);
         lock (_gate)
         {
-            return _entries.Where(e => Matches(e, actor, action, targetId, fromMs, toMs))
+            return _entries.Where(e => Matches(e, actor, action, targetId, fromMs, toMs, detail))
                 .OrderBy(e => e.Timestamp).ToArray();
         }
     }

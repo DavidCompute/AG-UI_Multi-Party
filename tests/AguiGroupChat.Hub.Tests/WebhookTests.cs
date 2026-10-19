@@ -128,6 +128,35 @@ public sealed class WebhookTests
     }
 
     [Fact]
+    public async Task DeliverEventAsync_QuotaOverrideExpiringEnvelope()
+    {
+        Assert.Contains(EventTypes.QuotaOverrideExpiring, WebhookApi.EventCatalog);
+
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var dispatcher = Create(handler);
+        var sub = Sub(EventTypes.QuotaOverrideExpiring);
+        var evt = new QuotaOverrideExpiringEvent
+        {
+            GroupId = "group_1", GroupName = "临时放额群", Quota = 4321,
+            Until = 1_800_000_000_000, RemainingSeconds = 3600, Timestamp = 1,
+        };
+
+        var record = await dispatcher.DeliverEventAsync(sub, EventTypes.QuotaOverrideExpiring, "group_1", evt);
+
+        Assert.True(record.Ok);
+        var (request, body) = Assert.Single(handler.Requests);
+        Assert.Equal(EventTypes.QuotaOverrideExpiring, request.Headers.GetValues("X-KnowGath-Event").Single());
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(EventTypes.QuotaOverrideExpiring, doc.RootElement.GetProperty("event").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("group_1", data.GetProperty("groupId").GetString());
+        Assert.Equal("临时放额群", data.GetProperty("groupName").GetString());
+        Assert.Equal(4321, data.GetProperty("quota").GetInt64());
+        Assert.Equal(1_800_000_000_000, data.GetProperty("until").GetInt64());
+        Assert.Equal(3600, data.GetProperty("remainingSeconds").GetInt64());
+    }
+
+    [Fact]
     public async Task DeliverEventAsync_PostsSignedEnvelope()
     {
         var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));

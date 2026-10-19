@@ -626,6 +626,16 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
                 e.GetProperty("targetId").GetString() == gid
                 && (e.GetProperty("detail").GetString() ?? "").Contains("有效期至"));
         }
+        // detail 子串过滤：审计页「⏰ 临时放额」快捷筛选的服务端能力（返回行必须全部命中）
+        using (var aud2 = Authed(HttpMethod.Get,
+                   $"/ag-ui/admin/audit?action=group.quotaOverride&detail={Uri.EscapeDataString("有效期至")}&limit=20", token))
+        {
+            var ad = await (await _client.SendAsync(aud2)).Content.ReadFromJsonAsync<JsonElement>();
+            var rows = ad.GetProperty("entries").EnumerateArray().ToList();
+            Assert.NotEmpty(rows);
+            Assert.All(rows, e => Assert.Contains("有效期至", e.GetProperty("detail").GetString() ?? ""));
+            Assert.Contains(rows, e => e.GetProperty("targetId").GetString() == gid);
+        }
 
         // 还原：清覆写
         using var clear = Authed(HttpMethod.Post, "/ag-ui/group/update", token);

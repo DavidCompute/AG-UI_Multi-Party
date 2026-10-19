@@ -84,6 +84,9 @@ public static class EventTypes
     /// <summary>配额阈值（1.0.270）：某用户 / 某知聚的当日用量跨过 80%（warn）或 100%（over）。
     /// 它不是群广播事件，只经出站 Webhook 推送（`IGroupEventObserver.OnEvent`）——用于告警集成。</summary>
     public const string QuotaThreshold = "QUOTA_THRESHOLD";
+    /// <summary>临时放额即将到期（1.0.274）：某知聚的配额覆写带到期时间且已进入提醒窗口。
+    /// 同样只经出站 Webhook 推送（不走群广播）——避免管理员设了临时放额后忘记续期。</summary>
+    public const string QuotaOverrideExpiring = "QUOTA_OVERRIDE_EXPIRING";
 }
 
 // ================= 服务端下行事件 =================
@@ -108,6 +111,27 @@ public sealed class QuotaThresholdEvent
     public required long Quota { get; init; }
     /// <summary>统计日期（UTC，YYYY-MM-DD）。</summary>
     public required string Date { get; init; }
+    public required long Timestamp { get; init; }
+}
+
+/// <summary>
+/// QUOTA_OVERRIDE_EXPIRING（Hub 扩展，1.0.274）：某知聚的**临时放额**即将到期。
+/// 只进出站 Webhook（不经群广播）——让管理员在到期前收到提醒，避免忘记续期导致配额悄悄回退全局。
+/// 同一额度（groupId + until）在进程内**只发一次**；重启后重新扫描可能再发一次（与 QUOTA_THRESHOLD 同约定）。
+/// </summary>
+public sealed class QuotaOverrideExpiringEvent
+{
+    public string Type => EventTypes.QuotaOverrideExpiring;
+    /// <summary>知聚 ID（也是 Webhook 订阅「限定知聚」过滤用的 groupId）。</summary>
+    public required string GroupId { get; init; }
+    /// <summary>知聚名称（便于告警文案直接可读）。</summary>
+    public required string GroupName { get; init; }
+    /// <summary>当前覆写的每日 Token 额度（0 = 本知聚不限）。</summary>
+    public required long Quota { get; init; }
+    /// <summary>到期时间（UTC 毫秒）。</summary>
+    public required long Until { get; init; }
+    /// <summary>距到期的剩余秒数（> 0）。</summary>
+    public required long RemainingSeconds { get; init; }
     public required long Timestamp { get; init; }
 }
 

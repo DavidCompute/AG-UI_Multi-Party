@@ -508,21 +508,21 @@ public static class AdminApi
 
         // 操作审计日志（4.3 / 企业合规）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。
         // 支持过滤：actor（操作者用户名 / ID 子串）、action（操作名子串）、targetId、fromMs / toMs（UTC 毫秒）。limit 最多 200。
-        root.MapGet("/audit", (int? limit, string? actor, string? action, string? targetId, long? fromMs, long? toMs,
+        root.MapGet("/audit", (int? limit, string? actor, string? action, string? targetId, long? fromMs, long? toMs, string? detail,
             HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
             return Results.Ok(new
             {
                 total = audit.Count,
-                entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs),
+                entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs, detail),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 审计日志导出 CSV（RFC 4180 转义 + UTF-8 BOM，Excel 可直接打开）：同 /audit 过滤条件，按时间正序，无 200 条上限。
-        root.MapGet("/audit.csv", (string? actor, string? action, string? targetId, long? fromMs, long? toMs,
+        root.MapGet("/audit.csv", (string? actor, string? action, string? targetId, long? fromMs, long? toMs, string? detail,
             HttpContext ctx, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
-            var rows = audit.QueryAll(actor, action, targetId, fromMs, toMs);
+            var rows = audit.QueryAll(actor, action, targetId, fromMs, toMs, detail);
             var sb = new System.Text.StringBuilder(rows.Count * 160);
             sb.AppendLine("id,timeUtc,timeMs,action,actorId,actorUsername,groupId,targetType,targetId,detail,result");
             foreach (var e in rows) AppendCsvRow(sb, e);

@@ -40,4 +40,42 @@ public sealed class AuditStoreTests
         Assert.Equal(2, log.Count);
         Assert.Equal("admin.user.disable", log.Query(10)[0].Action);
     }
+
+    [Fact]
+    public void AuditStore_Sqlite_FiltersByDetail()
+    {
+        var db = new SqliteStore($"Data Source=file:audit-detail-{Guid.NewGuid():N}?mode=memory&cache=shared");
+        db.EnsureSchema();
+        var log = new AuditLogService(new RelationalAuditStore(db));
+
+        log.Record("group.quotaOverride", "user_1", "admin1", targetType: "group", targetId: "g1",
+            detail: "每日 Token 配额覆写 → 50（0 = 本知聚不限）；有效期至 2026-12-31 00:00Z");
+        log.Record("group.quotaOverride", "user_1", "admin1", targetType: "group", targetId: "g2",
+            detail: "每日 Token 配额覆写 → 100（0 = 本知聚不限）");
+        log.Record("model.override", "user_1", "admin1", targetType: "group", targetId: "g3", detail: "模型 → x");
+
+        // detail 子串过滤（与 actor / action / targetId 组合）
+        var hit = log.Query(10, detail: "有效期至");
+        Assert.Single(hit);
+        Assert.Equal("g1", hit[0].TargetId);
+        Assert.Equal(2, log.Query(10, action: "group.quotaOverride").Count);
+        Assert.Single(log.Query(10, action: "group.quotaOverride", detail: "有效期至"));
+        Assert.Empty(log.Query(10, detail: "不存在的子串"));
+        Assert.Single(log.QueryAll(detail: "有效期至"));
+    }
+
+    [Fact]
+    public void AuditLog_InMemory_FiltersByDetail()
+    {
+        var log = new AuditLogService();
+        log.Record("group.quotaOverride", "user_1", "admin1", targetType: "group", targetId: "g1",
+            detail: "每日 Token 配额覆写 → 50；有效期至 2026-12-31 00:00Z");
+        log.Record("group.quotaOverride", "user_1", "admin1", targetType: "group", targetId: "g2",
+            detail: "每日 Token 配额覆写 → （取消，回退全局）");
+
+        Assert.Single(log.Query(10, detail: "有效期至"));
+        Assert.Equal("g1", log.Query(10, detail: "有效期至")[0].TargetId);
+        Assert.Single(log.QueryAll(detail: "有效期至"));
+        Assert.Equal(2, log.Query(10, action: "group.quotaOverride").Count);
+    }
 }

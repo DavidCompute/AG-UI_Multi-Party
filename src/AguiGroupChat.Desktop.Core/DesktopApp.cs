@@ -56,6 +56,7 @@ public static class DesktopApp
         // 出站 Webhook（对外集成）：与 Web 组合根同一套（管理员配置回调地址 + 事件订阅）
         builder.Services.AddSingleton(new WebhookState());
         builder.Services.AddSingleton<WebhookDispatcher>();
+        builder.Services.AddSingleton<AguiGroupChat.Web.QuotaExpiryReminderService>(); // 临时放额到期提醒（QUOTA_OVERRIDE_EXPIRING）
         builder.Services.AddSingleton<IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>());
         // 模板市场在线分发：远程目录源 + 拉取
         builder.Services.AddSingleton(new MarketplaceState());
@@ -165,6 +166,8 @@ public static class DesktopApp
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Hub.Persistence.MessageRetentionService>().Start());
         // 应用就绪后启动 Webhook 出站投递工作线程
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<WebhookDispatcher>().Start());
+        // 应用就绪后启动临时放额到期提醒（在 Webhook 工作线程之后）
+        app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Web.QuotaExpiryReminderService>().Start());
         // 应用就绪后启动副本心跳发布（跨副本诊断）
         app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<ReplicaMetricsPublisher>().Start());
         app.MapFallbackToFile("index.html");

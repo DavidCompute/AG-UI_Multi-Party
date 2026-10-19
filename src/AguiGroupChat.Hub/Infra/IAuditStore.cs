@@ -12,11 +12,11 @@ public interface IAuditStore
 
     /// <summary>按过滤条件查询最近 <paramref name="limit"/> 条（时间倒序，最新在前）。</summary>
     IReadOnlyList<AuditEntry> Query(int limit, string? actor = null, string? action = null,
-        string? targetId = null, long? fromMs = null, long? toMs = null);
+        string? targetId = null, long? fromMs = null, long? toMs = null, string? detail = null);
 
     /// <summary>导出全部命中（时间正序，CSV 用；调用方自带上限语义）。</summary>
     IReadOnlyList<AuditEntry> QueryAll(string? actor = null, string? action = null,
-        string? targetId = null, long? fromMs = null, long? toMs = null);
+        string? targetId = null, long? fromMs = null, long? toMs = null, string? detail = null);
 
     /// <summary>当前总条数。</summary>
     long Count();

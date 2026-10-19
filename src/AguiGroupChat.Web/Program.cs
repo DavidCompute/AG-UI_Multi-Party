@@ -31,6 +31,7 @@ builder.Services.AddSingleton<SkillRunArtifactStore>(); // 技能试运行产物
 // 出站 Webhook（对外集成）：管理员配置回调地址，知聚事件以带 HMAC 签名的 POST 推送给外部系统。
 builder.Services.AddSingleton(new WebhookState()); // 订阅配置（持久化到扩展区「webhooks」）
 builder.Services.AddSingleton<WebhookDispatcher>(); // 事件→订阅过滤→后台投递（含重试 / 签名 / 投递日志）
+builder.Services.AddSingleton<QuotaExpiryReminderService>(); // 临时放额到期提醒：周期性扫描 → QUOTA_OVERRIDE_EXPIRING Webhook
 builder.Services.AddSingleton<AguiGroupChat.Hub.Messaging.IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>()); // GroupHub 出站钩子
 // 模板市场在线分发：远程目录源（管理员配置）+ 拉取（缓存 / 尺寸 / 协议防护）
 builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持久化到扩展区「marketplace」）
@@ -200,6 +201,8 @@ app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<A
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<AguiGroupChat.Hub.Persistence.MessageRetentionService>().Start());
 // 应用就绪后启动 Webhook 出站投递工作线程
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<WebhookDispatcher>().Start());
+// 应用就绪后启动临时放额到期提醒（需在 Webhook 工作线程就绪后）
+app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<QuotaExpiryReminderService>().Start());
 // 应用就绪后启动副本心跳发布（跳副本诊断）
 app.Lifetime.ApplicationStarted.Register(() => app.Services.GetRequiredService<ReplicaMetricsPublisher>().Start());
 

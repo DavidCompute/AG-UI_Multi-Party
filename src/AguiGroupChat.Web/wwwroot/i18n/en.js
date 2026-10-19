@@ -971,6 +971,7 @@ window.I18N_DICTS.en = {
   "admin.auditActionPh": "Action…",
   "admin.auditTargetPh": "Target ID…",
   "admin.auditSearch": "🔍 Search",
+  "admin.auditExpiring": "⏰ Temporary allowances",
   "admin.auditExport": "⬇ Export CSV",
   "admin.auditEmpty": "No audit records (or none match the filters)",
   "admin.thTime": "Time",
