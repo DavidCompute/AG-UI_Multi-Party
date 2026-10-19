@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Storage;
 using Microsoft.Extensions.Logging;
 
@@ -34,14 +36,29 @@ public sealed class AgentUsageService
     private readonly IUsageStore _store;
     private readonly Func<long> _quotaPerUser;
     private readonly Func<long> _quotaPerGroup;
+    private readonly Func<string, long?>? _groupQuotaOverride;
     private readonly ILogger<AgentUsageService> _logger;
 
-    /// <summary>主构造：配额值实时读取（由调用方以委托注入）。</summary>
-    public AgentUsageService(IUsageStore store, Func<long> quotaPerUser, Func<long> quotaPerGroup, ILogger<AgentUsageService> logger)
+    /// <summary>配额阈值告警回调（1.0.270）：当日用量**首次**跨过 80% / 100% 时触发，由组合根桥接到出站 Webhook。
+    /// 未设置则完全不做事（不产生额外查询）。</summary>
+    public Action<QuotaThresholdEvent>? OnQuotaThreshold { get; set; }
+
+    /// <summary>已告警过的最高水位（键 = <c>日期|作用域|ID</c>，值 = warn / over）：每作用域每级每日一次，避免刷屏。
+    /// 跨日时整体清空（键带日期，无需逐条过期）。</summary>
+    private readonly ConcurrentDictionary<string, string> _thresholdNotified = new(StringComparer.Ordinal);
+    private readonly object _thresholdGate = new();
+    private string _thresholdDate = "";
+
+    /// <summary>主构造：配额值实时读取（由调用方以委托注入）。
+    /// <paramref name="groupQuotaOverride"/>（可选）= 知聚级覆写解析器（由 Agents 层注入 `GroupHub.GroupQuotaOverride`），
+    /// 使 <see cref="EffectiveGroupQuota"/> 与阈值告警也拿到「本知聚自己的额度」。</summary>
+    public AgentUsageService(IUsageStore store, Func<long> quotaPerUser, Func<long> quotaPerGroup,
+        ILogger<AgentUsageService> logger, Func<string, long?>? groupQuotaOverride = null)
     {
         _store = store;
         _quotaPerUser = quotaPerUser;
         _quotaPerGroup = quotaPerGroup;
+        _groupQuotaOverride = groupQuotaOverride;
         _logger = logger;
     }
 
@@ -70,10 +87,83 @@ public sealed class AgentUsageService
             var r = Math.Max(0, reasoningTokens);
             _store.RecordUsage(date, agentId, userId, p, c, r);
             if (!string.IsNullOrEmpty(groupId)) _store.RecordGroupUsage(date, groupId, agentId, userId, p, c, r);
+            CheckThresholds(date, userId, groupId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "用量记录失败（不影响主流程）：agent={AgentId}", agentId);
+        }
+    }
+
+    /// <summary>
+    /// 阈值告警（1.0.270）：记录用量后检查个人 / 知聚两个作用域，**首次**跨过 80%（warn）/
+    /// 100%（over）时回调 <see cref="OnQuotaThreshold"/>。
+    /// 成本控制：未配配额（0）或已报过 over 的作用域**直接跳过**，不做多余的 store 查询。
+    /// </summary>
+    private void CheckThresholds(string date, string userId, string groupId)
+    {
+        var notify = OnQuotaThreshold;
+        if (notify is null) return;
+        ResetThresholdsIfNewDay(date);
+
+        // 个人配额：system 是定时任务虚拟触发者，**刻意豁免**——不产生个人超额告警
+        if (!string.IsNullOrEmpty(userId) && !string.Equals(userId, SystemUserId, StringComparison.Ordinal)
+            && !AlreadyOver(date, "user", userId))
+        {
+            var quota = DailyQuotaPerUser;
+            if (quota > 0) RaiseThreshold(date, "user", userId, GetUserTodayTokens(userId), quota, notify);
+        }
+
+        // 知聚配额：分母用**本知聚生效配额**（支持知聚级覆写）
+        if (!string.IsNullOrEmpty(groupId) && !AlreadyOver(date, "group", groupId))
+        {
+            var quota = EffectiveGroupQuota(groupId);
+            if (quota > 0) RaiseThreshold(date, "group", groupId, GetGroupTodayTokens(groupId), quota, notify);
+        }
+    }
+
+    private static int LevelRank(string level) => level switch { "over" => 2, "warn" => 1, _ => 0 };
+
+    private bool AlreadyOver(string date, string scope, string id)
+        => _thresholdNotified.TryGetValue($"{date}|{scope}|{id}", out var v) && v == "over";
+
+    /// <summary>只在**水位上升**时告警（ok → warn → over），同一作用域同一级当日只发一次。</summary>
+    private void RaiseThreshold(string date, string scope, string id, long used, long quota, Action<QuotaThresholdEvent> notify)
+    {
+        var level = QuotaLevel(used, quota);
+        if (level == "ok") return;
+        var key = $"{date}|{scope}|{id}";
+        var seen = _thresholdNotified.TryGetValue(key, out var v) ? v : "ok";
+        if (LevelRank(level) <= LevelRank(seen)) return;
+        _thresholdNotified[key] = level;
+        try
+        {
+            notify(new QuotaThresholdEvent
+            {
+                Scope = scope,
+                ScopeId = id,
+                Level = level,
+                Used = used,
+                Quota = quota,
+                Date = date,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "配额阈值告警回调失败（忽略）");
+        }
+    }
+
+    /// <summary>跨 UTC 日时清空告警状态（键已带日期，但不清会无限增长）。</summary>
+    private void ResetThresholdsIfNewDay(string date)
+    {
+        if (string.Equals(_thresholdDate, date, StringComparison.Ordinal)) return;
+        lock (_thresholdGate)
+        {
+            if (string.Equals(_thresholdDate, date, StringComparison.Ordinal)) return;
+            _thresholdNotified.Clear();
+            _thresholdDate = date;
         }
     }
 
@@ -129,17 +219,21 @@ public sealed class AgentUsageService
     public QuotaCheckResult? CheckGroupQuota(string groupId, long? quotaOverride = null)
     {
         if (string.IsNullOrEmpty(groupId)) return null;
-        var quota = quotaOverride is { } o && o >= 0 ? o : DailyQuotaPerGroup;
+        var quota = EffectiveGroupQuota(groupId, quotaOverride);
         if (quota <= 0) return null;
         var used = GetGroupTodayTokens(groupId);
         if (used < quota) return null;
         return new QuotaCheckResult(quota, used);
     }
 
-    /// <summary>某知聚的**生效**配额：知聚级覆写优先，否则全局 `Agents:DailyTokenQuotaPerGroup`（0 = 不限）。
-    /// 单一解析点，供校验与管理页展示共用（避免两处各写一遍回退逻辑）。</summary>
+    /// <summary>某知聚的**生效**配额：显式参数 > 知聚级覆写解析器 > 全局 `Agents:DailyTokenQuotaPerGroup`（0 = 不限）。
+    /// 单一解析点，供校验、展示与阈值告警共用（避免多处各写一遍回退逻辑）。</summary>
     public long EffectiveGroupQuota(string groupId, long? quotaOverride = null)
-        => quotaOverride is { } o && o >= 0 ? o : DailyQuotaPerGroup;
+    {
+        var ov = quotaOverride
+            ?? (string.IsNullOrEmpty(groupId) ? null : _groupQuotaOverride?.Invoke(groupId));
+        return ov is { } o && o >= 0 ? o : DailyQuotaPerGroup;
+    }
 
     /// <summary>今日各触发者用量汇总（一次查询聚合，按 token 降序）——供管理员「用量统计」的**分用户明细 / 个人配额水位**。
     /// 与 <see cref="GetUserTodayTokens"/> 同源（同一张按日聚合表），但一次取回全部触发者；

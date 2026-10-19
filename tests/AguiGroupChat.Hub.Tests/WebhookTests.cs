@@ -89,6 +89,45 @@ public sealed class WebhookTests
     }
 
     [Fact]
+    public void QuotaThreshold_IsInEventCatalog_AndUserScopeSkipsGroupScopedSubscriptions()
+    {
+        Assert.Contains(EventTypes.QuotaThreshold, WebhookApi.EventCatalog);
+
+        // 个人作用域传空 groupId：限定知聚的订阅收不到，未限定的收得到
+        var scoped = Sub(EventTypes.QuotaThreshold);
+        scoped.GroupId = "group_A";
+        var any = Sub(EventTypes.QuotaThreshold);
+        Assert.False(WebhookDispatcher.ShouldDeliver(scoped, "", EventTypes.QuotaThreshold));
+        Assert.True(WebhookDispatcher.ShouldDeliver(any, "", EventTypes.QuotaThreshold));
+    }
+
+    [Fact]
+    public async Task DeliverEventAsync_QuotaThresholdEnvelope()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var dispatcher = Create(handler);
+        var sub = Sub(EventTypes.QuotaThreshold);
+        var evt = new QuotaThresholdEvent
+        {
+            Scope = "group", ScopeId = "group_1", Level = "over",
+            Used = 1200, Quota = 1000, Date = "2026-01-01", Timestamp = 1,
+        };
+
+        var record = await dispatcher.DeliverEventAsync(sub, EventTypes.QuotaThreshold, "group_1", evt);
+
+        Assert.True(record.Ok);
+        var (request, body) = Assert.Single(handler.Requests);
+        Assert.Equal(EventTypes.QuotaThreshold, request.Headers.GetValues("X-KnowGath-Event").Single());
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(EventTypes.QuotaThreshold, doc.RootElement.GetProperty("event").GetString());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("group", data.GetProperty("scope").GetString());
+        Assert.Equal("over", data.GetProperty("level").GetString());
+        Assert.Equal(1200, data.GetProperty("used").GetInt64());
+        Assert.Equal(1000, data.GetProperty("quota").GetInt64());
+    }
+
+    [Fact]
     public async Task DeliverEventAsync_PostsSignedEnvelope()
     {
         var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));

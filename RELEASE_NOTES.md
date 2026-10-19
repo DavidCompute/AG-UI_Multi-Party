@@ -1,4 +1,40 @@
-# AG-UI 群聊桌面版 1.0.269 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.270 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.270 Release Notes (current Windows desktop release)
+
+**版本说明**：**配额预警从「拉」变成「推」**——当日用量**首次**跨过配额的 80%（`warn`）/ 100%（`over`）时，除既有的页面角标外，现在还会发一条 **`QUOTA_THRESHOLD`** 事件到**出站 Webhook**（照旧带 HMAC 签名 / 重试 / 投递记录），可直接推到 Slack / 告警平台 / n8n。个人与知聚两个作用域均支持，**每作用域每级每日只发一次**（不刷屏）。
+**Version note**: **Quota warnings go from "pull" to "push"** — when daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota, besides the existing page badges it now emits a **`QUOTA_THRESHOLD`** event to **outbound webhooks** (still HMAC-signed, with retries and delivery records), so it can go straight to Slack / an alerting platform / n8n. Both the user and circle scopes are supported, with **one event per scope per level per day** (no flooding).
+
+## 变更
+# Changes
+
+中文：
+- **阈值检测（`AgentUsageService`）**：记录用量后检查两个作用域，**只在水平上升时**回调（`ok → warn → over`），状态键为 `日期|作用域|ID`，跨 UTC 日自动清空。
+  - **成本控制**：未配配额（0）或已报过 `over` 的作用域**直接跳过**，不产生 store 查询——默认配置下零额外开销。
+  - **分母用生效配额**：知聚维度走 `EffectiveGroupQuota`（**知聚级覆写优先**）；为此 `AgentUsageService` 新增可选的 `Func<string,long?>` 覆写解析器（由 `AgentHosting` 注入 `GroupHub.GroupQuotaOverride`），`CheckGroupQuota` 也随之统一到这一个解析点。
+  - **`system` 豁免个人告警**（但仍计入知聚，可触发知聚告警）。
+- **事件与桥接**：新增 `EventTypes.QuotaThreshold` 与 `QuotaThresholdEvent`（`scope` / `scopeId` / `level` / `used` / `quota` / `date` / `timestamp`）；新增 `QuotaAlertBridge.WireQuotaAlerts()` 把回调接到 `WebhookDispatcher`，**Web 与桌面组合根均调用**（行为一致）；无 dispatcher 的精简宿主静默跳过。
+- **事件目录 18 → 19**：`QUOTA_THRESHOLD` 可选；**个人作用域 groupId 为空串**，因此限定了知聚的订阅收不到个人告警（避免错位）。
+
+English:
+- **Threshold detection (`AgentUsageService`)**: after recording usage it checks both scopes and calls back **only when the level rises** (`ok → warn → over`), with state keyed by `date|scope|id` and cleared on a new UTC day.
+  - **Cost control**: scopes with no quota (0) or already reported `over` are **skipped outright**, so no store queries happen — zero overhead under the default configuration.
+  - **The denominator is the effective quota**: the circle dimension goes through `EffectiveGroupQuota` (**per-circle override first**); to that end `AgentUsageService` gains an optional `Func<string,long?>` override resolver (injected by `AgentHosting` as `GroupHub.GroupQuotaOverride`), and `CheckGroupQuota` now shares that single resolution point.
+  - **`system` is exempt from per-user alerts** (but still counts toward the circle, so a circle alert can fire).
+- **Event and bridge**: new `EventTypes.QuotaThreshold` and `QuotaThresholdEvent` (`scope` / `scopeId` / `level` / `used` / `quota` / `date` / `timestamp`); new `QuotaAlertBridge.WireQuotaAlerts()` connects the callback to `WebhookDispatcher`, called by **both the web and desktop composition roots** (consistent behaviour); a minimal host without a dispatcher skips silently.
+- **Event catalog 18 → 19**: `QUOTA_THRESHOLD` is selectable; the **user scope passes an empty groupId**, so group-scoped subscriptions do not receive per-user alerts (avoiding misrouting).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（事件目录 **18 → 19**，新增 `QUOTA_THRESHOLD` 小节：载荷、不刷屏 / 生效分母 / system 豁免 / 订阅过滤 / 未配配额零开销）、§8.6（在配额水位说明里补「推送型预警」）。
+English: `docs/user-guide.md` / `en.md` §8.19 (event catalog **18 → 19** with a new `QUOTA_THRESHOLD` subsection: payload, no-flooding / effective denominator / system exemption / subscription filtering / zero overhead with no quota), §8.6 (the quota-level notes gain the "push-style warning").
+
+## 测试
+# Tests
+
+中文：新增 8 例——`AgentUsageServiceTests` ×4（一次 warn 再一次 over 且不重复、`system` 豁免个人但触发知聚、未配配额零事件、知聚覆写生效）；`WebhookTests` ×2（`QUOTA_THRESHOLD` 在目录内 + 个人作用域跳过限定知聚的订阅 + 载荷/签名投递）；`QuotaAlertBridgeTests` ×2（**真实桥接端到端**：设置订阅 → `RecordUsage` 跨阈值 → 后台工作线程投递并在 body 里看到 `QUOTA_THRESHOLD` / `warn` / `user` / `u1`；无 dispatcher 时保持 `OnQuotaThreshold = null`）。**全量测试通过**（1809 → 1817）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1951，missing 0**（含重复键守卫），4 个守卫脚本均过；Docker 重建后实测 `/ag-ui/admin/webhooks/events` 返回 **19 类且含 `QUOTA_THRESHOLD`**，`api-smoke` 46/46。
+English: 8 new cases — `AgentUsageServiceTests` ×4 (one warn then one over without repeats, `system` exempt from the user scope but still alerting the circle, no events when no quota is configured, the circle override taking effect); `WebhookTests` ×2 (`QUOTA_THRESHOLD` is in the catalog + the user scope skips group-scoped subscriptions + payload/signature delivery); `QuotaAlertBridgeTests` ×2 (**real bridge end-to-end**: subscription → `RecordUsage` crossing the threshold → the background worker delivers, and the body contains `QUOTA_THRESHOLD` / `warn` / `user` / `u1`; without a dispatcher `OnQuotaThreshold` stays `null`). **All tests pass** (1809 → 1817); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1951, missing 0** (with the duplicate-key guard), and all 4 guard scripts pass; after a Docker rebuild, `/ag-ui/admin/webhooks/events` returns **19 types including `QUOTA_THRESHOLD`**, and `api-smoke` is 46/46.
+
 # AG-UI Group Chat Desktop 1.0.269 Release Notes (current Windows desktop release)
 
 **版本说明**：**配额水位预警补齐最后一个可见面**——用户管理列表现在也在用户名后显示个人配额角标（`⚠` 接近 / `🔴` 已满），悬停给出「今日已用 X / Y token」。至此同一个水位口径在**三处**可见：侧边栏知聚项（按知聚配额）、用量页分知聚 / 分触发者明细、用户管理列表（按个人配额）——管理员无论从哪个入口进来，都能一眼看到谁 / 哪个知聚快到顶。

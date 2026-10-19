@@ -81,9 +81,35 @@ public static class EventTypes
     public const string GroupMessageRecall = "GROUP_MESSAGE_RECALL";
     /// <summary>WS 上行：重新回答最后一条智能体消息（等效 POST /ag-ui/group/message/regenerate）。</summary>
     public const string GroupMessageRegenerate = "GROUP_MESSAGE_REGENERATE";
+    /// <summary>配额阈值（1.0.270）：某用户 / 某知聚的当日用量跨过 80%（warn）或 100%（over）。
+    /// 它不是群广播事件，只经出站 Webhook 推送（`IGroupEventObserver.OnEvent`）——用于告警集成。</summary>
+    public const string QuotaThreshold = "QUOTA_THRESHOLD";
 }
 
 // ================= 服务端下行事件 =================
+
+/// <summary>
+/// QUOTA_THRESHOLD（Hub 扩展，1.0.270）：当日用量**首次**跨过阈值的告警事件。
+/// 只进出站 Webhook（不经群广播）——`Scope` 区分个人配额（user）与知聚配额（group）。
+/// 每个作用域每个自然日**每级只发一次**（warn → over 各一次），避免每次模型调用都刷屏。
+/// </summary>
+public sealed class QuotaThresholdEvent
+{
+    public string Type => EventTypes.QuotaThreshold;
+    /// <summary>作用域：<c>user</c>（个人配额）/ <c>group</c>（知聚配额）。</summary>
+    public required string Scope { get; init; }
+    /// <summary>作用域 ID：userId 或 groupId。</summary>
+    public required string ScopeId { get; init; }
+    /// <summary>水位：<c>warn</c>（≥80%）/ <c>over</c>（≥100%）。</summary>
+    public required string Level { get; init; }
+    /// <summary>当日已用 token。</summary>
+    public required long Used { get; init; }
+    /// <summary>生效配额（0 = 不限；不限时不会产生事件）。</summary>
+    public required long Quota { get; init; }
+    /// <summary>统计日期（UTC，YYYY-MM-DD）。</summary>
+    public required string Date { get; init; }
+    public required long Timestamp { get; init; }
+}
 
 /// <summary>GROUP_CREATED：群组创建成功，推送给所有初始成员（协议 4.2）。</summary>
 public sealed class GroupCreatedEvent

@@ -148,6 +148,7 @@ public static class DesktopApp
         app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
+        app.Services.WireQuotaAlerts(); // 配额阈值（80% / 100%）→ 出站 Webhook（QUOTA_THRESHOLD）
         app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
         app.Services.RegisterMarketplacePersistence(); // 市场目录源跨重启保持
         var loaded = HubApp.InitializePersistence(app);

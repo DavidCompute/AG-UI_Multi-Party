@@ -120,6 +120,7 @@ public static class WebhookApi
         EventTypes.ToolCallStart, EventTypes.ToolCallResult,
         EventTypes.GroupTopicCreated, EventTypes.GroupTopicDeleted, EventTypes.GroupTopicCleared,
         EventTypes.RunError,
+        EventTypes.QuotaThreshold, // 1.0.270：用量跨过 80% / 100% 的告警（个人 / 知聚两作用域）
     ];
 
     public static void MapWebhookApi(this WebApplication app)

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.269**
+> 适用版本：**1.0.270**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3955,29 +3955,31 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
   "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary`（`AgentUsageService.cs:186`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
-- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:160`，即最多 90 天）；前端固定传 `days=7`。
-- **`groupsToday`（1.0.265 新增，1.0.266 加 `level`，1.0.267 加 `quota`）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:96`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**。
-- **`usersToday`（1.0.268 新增）**：今日各**触发者**用量明细，由 `usage.GetUserTodaySummary()`（`AgentUsageService.cs:147`）从按日聚合表一次聚合（按 token 降序，取前 50），名字取账号昵称→用户名→userId（`AuthService.ListUsers`）。表列 4 项：触发者 / 今日 Token / 调用次数 / **配额使用**（按 `Agents:DailyTokenQuotaPerUser`）。
+- `UsageDaySummary`（`AgentUsageService.cs:280`）：`date`、`totalTokens`、`promptTokens`、`completionTokens`、`reasoningTokens`、`calls`。
+- `days` 由 `usage.GetDailySummary(days ?? 7)` 生成，内部 `Math.Clamp(days, 1, 90)`（`AgentUsageService.cs:254`，即最多 90 天）；前端固定传 `days=7`。
+- **`groupsToday`（1.0.265 新增，1.0.266 加 `level`，1.0.267 加 `quota`）**：今日各知聚用量明细，由 `usage.GetGroupTodaySummary()`（`AgentUsageService.cs:186`）一次聚合（复用「按知聚」聚合表的当日行，按 token 降序，取前 50），名字由 `GroupHub.Store.AllGroups()` 解析（取不到回退 `groupId`）。表列 4 项：知聚 / 今日 Token / 调用次数 / **配额使用**。
+- **`usersToday`（1.0.268 新增）**：今日各**触发者**用量明细，由 `usage.GetUserTodaySummary()`（`AgentUsageService.cs:241`）从按日聚合表一次聚合（按 token 降序，取前 50），名字取账号昵称→用户名→userId（`AuthService.ListUsers`）。表列 4 项：触发者 / 今日 Token / 调用次数 / **配额使用**（按 `Agents:DailyTokenQuotaPerUser`）。
   - `exempt`：定时任务的虚拟触发者 `system` **刻意豁免个人配额**——它也会出现（便于看到系统任务消耗），但 `exempt=true`、`level` 恒 `ok`，配额列显示「系统任务（豁免）」而不是「已超限」。
   - meta 尾部追加 `admin.quotaNearUser`「个人接近上限 {near} 人 ｜ 已超限 {over} 人」。
-- **`quota` = 本知聚生效配额（1.0.267）**：`AgentUsageService.EffectiveGroupQuota`（`AgentUsageService.cs:141`）——**知聚级覆写优先**，否则全局；因此每行的分母可能不同（不再是全局 `dailyQuotaPerGroup`）。覆写与全局不同时，知聚名后标 `⚙`（`admin.quotaOverrideTag`，悬停显示额度）。
-- **配额水位 `level`（1.0.266）**：`AgentUsageService.QuotaLevel(tokens, quota)`（`AgentUsageService.cs:27`）返回 `ok` / `warn` / `over`，阈值 `QuotaWarnRatio = 0.8`（`AgentUsageService.cs:24`）——**单一阈值来源**，前端不重复写 80%。用量表：`ok` 无色、`warn` 琥珀（`⚠` / `.usage-quota-warn`）、`over` 红标（`🔴` / `.usage-quota-hit`）；meta 尾部追加 `admin.quotaNear`「接近上限 {near} 个 ｜ 已超限 {over} 个」。
+- **`quota` = 本知聚生效配额（1.0.267）**：`AgentUsageService.EffectiveGroupQuota`（`AgentUsageService.cs:231`）——**知聚级覆写优先**，否则全局；因此每行的分母可能不同（不再是全局 `dailyQuotaPerGroup`）。覆写与全局不同时，知聚名后标 `⚙`（`admin.quotaOverrideTag`，悬停显示额度）。
+- **配额水位 `level`（1.0.266）**：`AgentUsageService.QuotaLevel(tokens, quota)`（`AgentUsageService.cs:29`）返回 `ok` / `warn` / `over`，阈值 `QuotaWarnRatio = 0.8`（`AgentUsageService.cs:26`）——**单一阈值来源**，前端不重复写 80%。用量表：`ok` 无色、`warn` 琥珀（`⚠` / `.usage-quota-warn`）、`over` 红标（`🔴` / `.usage-quota-hit`）；meta 尾部追加 `admin.quotaNear`「接近上限 {near} 个 ｜ 已超限 {over} 个」。
 - 配额：`dailyQuotaPerUser` 来自 `AgentUsageService.DailyQuotaPerUser`（配置 `Agents:DailyTokenQuotaPerUser`，`0` = 不限）；`dailyQuotaPerGroup` 来自 `AgentUsageService.DailyQuotaPerGroup`（配置 `Agents:DailyTokenQuotaPerGroup`，`0` = 不限）——注意它只是**全局回退值**，某知聚的实际分母以该行 `quota` 为准。
 
 前端提示：`quota > 0` → `admin.quotaEnabled`（含配额值，注明「超限触发将被拒绝，UTC 次日自动恢复」）；否则 `admin.quotaDisabled`；若 `quotaGroup > 0` 再追加 `admin.quotaGroupEnabled`（`app.js:8890-8896`）。按日表列 6 项：日期 / 总 Token / 输入 / 输出 / 思考 / 调用次数。
 
 > **按用户配额**按「触发者当日累计 token」执行（UTC 日切分），定时任务以虚拟触发者 `system` 触发**不计入**个人配额（`AgentUsageService.cs:20,115-123`）。
 >
-> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:129`，网关侧拦截见 `AgentGateway.cs:660`，错误码 `GROUP_QUOTA_EXCEEDED`）；实际分母经 `EffectiveGroupQuota` 解析（**知聚级覆写优先**，`Group.QuotaOverride`，见 2.2.2.2）。
+> **按知聚配额**（`Agents:DailyTokenQuotaPerGroup`）按「本知聚当日累计 token」执行，**对 `system` 触发同样生效**——定时 / 广播任务的消耗不计入任何人的个人配额，正是这一路要管的（`AgentUsageService.cs:219`，网关侧拦截见 `AgentGateway.cs:660`，错误码 `GROUP_QUOTA_EXCEEDED`）；实际分母经 `EffectiveGroupQuota` 解析（**知聚级覆写优先**，`Group.QuotaOverride`，见 2.2.2.2）。
 >
-> **主动预警（1.0.266）**：同一水位口径还经 `GET /ag-ui/admin/quota-status`（`AdminApi.cs:411-427`）下发到**侧边栏知聚项**（仅 Operator+）——不用打开控制台就能看到哪个知聚「快满」。
+> **主动预警（1.0.266）**：同一水位口径还经 `GET /ag-ui/admin/quota-status`（`AdminApi.cs:422-438`）下发到**侧边栏知聚项**（仅 Operator+）——不用打开控制台就能看到哪个知聚「快满」。
 >
-> **触发者维度（1.0.268）**：`usersToday` 把同一套 `QuotaLevel` 用到**个人配额**上（`AdminApi.cs:465`），让管理员在用量页直接看到「谁快到顶了」；`system` 标为豁免（见上）。
+> **推送型预警（1.0.270）**：同一阈值判定还会在**首次跨过 80% / 100%** 时发一条 `QUOTA_THRESHOLD` 事件给出站 Webhook（个人 / 知聚两作用域，每作用域每级每日一次）——预警从「拉」变「推」，见 §8.19。
+>
+> **触发者维度（1.0.268）**：`usersToday` 把同一套 `QuotaLevel` 用到**个人配额**上（`AdminApi.cs:476`），让管理员在用量页直接看到「谁快到顶了」；`system` 标为豁免（见上）。
 >
 > **拦截可观测（1.0.265）**：两处配额拦截均累加 `MetricsService.RecordQuotaRejection`（`AgentGateway.cs:645` / `:662`），经 `/ag-ui/metrics` 的 `knowgath_quota_rejections_total{scope="user|group"}` 与「运行指标」页的**「配额拦截」卡片**（仅被挡过才显示，附「用户 N ｜ 知聚 M」）观察「有多少请求被挡」。
 
-> **修复（1.0.264）**：此前两个配额值在 `AgentUsageService` **构造时**被拷贝成字段，导致管理员在「配置治理」热改配额**实际不生效**（只有重启才生效）；现改为注入 `Func<long>` **实时读取**（`AgentHosting.cs:66-70`），保存即生效。
+> **修复（1.0.264）**：此前两个配额值在 `AgentUsageService` **构造时**被拷贝成字段，导致管理员在「配置治理」热改配额**实际不生效**（只有重启才生效）；现改为注入 `Func<long>` **实时读取**（`AgentHosting.cs:66-72`），保存即生效。
 
 ---
 
@@ -4162,7 +4164,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 > **记忆与向量化（6.3 + 2.4/2.6，1.0.263）**：#18–#22 对应 `AgentOptions.Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`。这四个（除缓存容量外）在**每次写入 / 检索时重新读取**，所以保存即生效；缓存容量则由写入路径**按需重建 / 热改容量**（改 0 = 立即关闭去重，改大 / 改小按 LRU 即时生效）。它们是「语义记忆检索慢 / 超时」的主旋钮（embedding 耗时与输入长度成正比），无需再改 appsettings / 重启。并发额度（`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`）因闸门信号量在启动时定型，仍属**需重启**项（见 8.10.4）。
 
-> **配额（1.0.264）**：#6 / #6b 分别对应 `AgentOptions.DailyTokenQuotaPerUser` 与 `AgentOptions.DailyTokenQuotaPerGroup`（`0` = 不限）。两者均为「超限拒绝新触发」型硬限：按用户配额**豁免** `system` 触发者，按知聚配额**不豁免**（把定时 / 广播那路消耗管住）。它们由 `AgentUsageService` 以 `Func<long>` **实时读取**（`AgentHosting.cs:66-70`），所以保存即生效。
+> **配额（1.0.264）**：#6 / #6b 分别对应 `AgentOptions.DailyTokenQuotaPerUser` 与 `AgentOptions.DailyTokenQuotaPerGroup`（`0` = 不限）。两者均为「超限拒绝新触发」型硬限：按用户配额**豁免** `system` 触发者，按知聚配额**不豁免**（把定时 / 广播那路消耗管住）。它们由 `AgentUsageService` 以 `Func<long>` **实时读取**（`AgentHosting.cs:66-72`），所以保存即生效。
 
 > **模型路由（6.7，1.0.260）**：#14–#17 对应 `AgentOptions.ModelRouting`（`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`）。**StandardModel 为本版新增**——此前 Standard 档固定不换。启用后按「复杂度自适应」同一份估计器（`RunComplexityEstimator`）为 Simple / Standard / Complex / Heavy 四档分别选模型（留空 = 该档不换）；例如 Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。与后台 `Agents:ModelRouting`（env `AGENTS_MODELROUTING_*`）同源，页面保存后即时生效并持久化。注意：与列表项「空 = 不修改」不同，模型名走字符串 `??` 语义 —— **空串会清空该档**（前端总是提交这三个字段，即“保存 = 以表单为准”）。
 
@@ -4402,7 +4404,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | 列出订阅；**签名密钥脱敏**（只回 `hasSecret`，不回明文） |
-| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（18 类） |
+| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（19 类） |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | 最近 100 条投递记录（新→旧） |
 | `POST` | `/ag-ui/admin/webhooks` | 新建订阅；**返回一次性明文密钥** `whsec_…` |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | 更新订阅（字段为空 = 不变更；`rotateSecret=true` 轮换密钥并回新密钥） |
@@ -4411,7 +4413,21 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **订阅字段**：`name`（展示名）、`url`（**必须 http / https 绝对 URL**，否则 400）、`eventTypes`（不选＝除高频流式增量外的全部；目录外类型会被 400 拒绝）、`groupId`（可选，限定只推送该知聚）、`enabled`（启用 / 停用）。
 
-**可选事件类型（18 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
+**可选事件类型（19 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`、**`QUOTA_THRESHOLD`（1.0.270）**。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
+
+**`QUOTA_THRESHOLD`（配额预警推送，1.0.270）**：不是群广播事件，**只经出站 Webhook 推送**。当某用户 / 某知聚的当日用量**首次**跨过配额的 80%（`warn`）或 100%（`over`）时推送一条；`data` 为：
+
+```jsonc
+{ "type": "QUOTA_THRESHOLD", "scope": "user|group", "scopeId": "<userId|groupId>",
+  "level": "warn|over", "used": 1200, "quota": 1000,
+  "date": "2026-01-01", "timestamp": 1767225600000 }
+```
+
+- **不刷屏**：每个作用域每级每 UTC 日**只发一次**（服务端 `_thresholdNotified` 去重）；已 `over` 后当日不再产生事件，也不再做额外的用量查询。
+- **分母是「生效配额」**：知聚维度用 `EffectiveGroupQuota`（**知聚级覆写优先**，见 §2.2.2.2）。
+- **`system` 豁免**：定时任务的虚拟触发者不产生个人配额告警（但仍计入知聚配额，会触发知聚告警）。
+- **订阅过滤**：`groupId` 为空串（个人作用域）——因此**限定了知聚的订阅收不到个人超额告警**，只有未限定知聚的订阅会收到。
+- **未配配额（0 = 不限）时不产生事件**，也不产生额外查询。
 
 **投递契约**：
 

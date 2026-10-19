@@ -67,7 +67,9 @@ public static class AgentHosting
             sp.GetRequiredService<AguiGroupChat.Hub.Storage.IUsageStore>(),
             () => options.DailyTokenQuotaPerUser,
             () => options.DailyTokenQuotaPerGroup,
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AguiGroupChat.Hub.Agents.AgentUsageService>>()));
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AguiGroupChat.Hub.Agents.AgentUsageService>>(),
+            // 知聚级配额覆写：单次解析点（校验 / 展示 / 阈值告警共用）。Hub 未注册群库时（精简测试宿主）回退 null。
+            id => sp.GetService<AguiGroupChat.Hub.Messaging.GroupHub>()?.GroupQuotaOverride(id)));
         // 同时注册具体类型与接口：组合根 RegisterBridgeCursorPersistence 按具体类型解析网关（注册扩展区）
         services.AddSingleton<AgentGateway>();
         services.AddSingleton<IAgentGateway>(sp => sp.GetRequiredService<AgentGateway>());

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.269**
+> Applies to version: **1.0.270**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3964,29 +3964,31 @@ The server (`AdminApi.cs:397-408`) returns:
   "days": [ UsageDaySummary… ] }
 ```
 
-- `UsageDaySummary` (`AgentUsageService.cs:186`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
-- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:160`, i.e. at most 90 days); the frontend always passes `days=7`.
-- **`groupsToday` (new in 1.0.265; `level` in 1.0.266; `quota` in 1.0.267)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:96`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use**.
-- **`usersToday` (new in 1.0.268)**: today's per-**trigger** usage, aggregated in one pass by `usage.GetUserTodaySummary()` (`AgentUsageService.cs:147`) from the daily aggregate table (sorted by tokens descending, top 50), with names from nickname → username → userId (`AuthService.ListUsers`). The table has 4 columns: trigger / today's tokens / calls / **quota use** (against `Agents:DailyTokenQuotaPerUser`).
+- `UsageDaySummary` (`AgentUsageService.cs:280`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
+- `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:254`, i.e. at most 90 days); the frontend always passes `days=7`.
+- **`groupsToday` (new in 1.0.265; `level` in 1.0.266; `quota` in 1.0.267)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:186`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use**.
+- **`usersToday` (new in 1.0.268)**: today's per-**trigger** usage, aggregated in one pass by `usage.GetUserTodaySummary()` (`AgentUsageService.cs:241`) from the daily aggregate table (sorted by tokens descending, top 50), with names from nickname → username → userId (`AuthService.ListUsers`). The table has 4 columns: trigger / today's tokens / calls / **quota use** (against `Agents:DailyTokenQuotaPerUser`).
   - `exempt`: the scheduled-task virtual trigger `system` **deliberately bypasses the per-user quota** — it still appears (so system-task consumption is visible), but with `exempt=true` and `level` always `ok`, and the quota column reads "System task (exempt)" rather than "over".
   - The meta line appends `admin.quotaNearUser` "{near} users approaching limit ｜ {over} over limit".
-- **`quota` = the circle's effective quota (1.0.267)**: `AgentUsageService.EffectiveGroupQuota` (`AgentUsageService.cs:141`) — the **per-circle override wins**, otherwise the global value; so each row's denominator may differ (no longer the global `dailyQuotaPerGroup`). When the override differs from the global, a `⚙` follows the circle name (`admin.quotaOverrideTag`, hovering shows the amount).
-- **Quota level `level` (1.0.266)**: `AgentUsageService.QuotaLevel(tokens, quota)` (`AgentUsageService.cs:27`) returns `ok` / `warn` / `over` with the threshold `QuotaWarnRatio = 0.8` (`AgentUsageService.cs:24`) — a **single source for the threshold**, so the frontend does not duplicate the 80%. In the usage table: `ok` has no colour, `warn` is amber (`⚠` / `.usage-quota-warn`), `over` is red (`🔴` / `.usage-quota-hit`); the meta line appends `admin.quotaNear` "{near} approaching limit ｜ {over} over limit".
+- **`quota` = the circle's effective quota (1.0.267)**: `AgentUsageService.EffectiveGroupQuota` (`AgentUsageService.cs:231`) — the **per-circle override wins**, otherwise the global value; so each row's denominator may differ (no longer the global `dailyQuotaPerGroup`). When the override differs from the global, a `⚙` follows the circle name (`admin.quotaOverrideTag`, hovering shows the amount).
+- **Quota level `level` (1.0.266)**: `AgentUsageService.QuotaLevel(tokens, quota)` (`AgentUsageService.cs:29`) returns `ok` / `warn` / `over` with the threshold `QuotaWarnRatio = 0.8` (`AgentUsageService.cs:26`) — a **single source for the threshold**, so the frontend does not duplicate the 80%. In the usage table: `ok` has no colour, `warn` is amber (`⚠` / `.usage-quota-warn`), `over` is red (`🔴` / `.usage-quota-hit`); the meta line appends `admin.quotaNear` "{near} approaching limit ｜ {over} over limit".
 - Quota: `dailyQuotaPerUser` comes from `AgentUsageService.DailyQuotaPerUser` (config `Agents:DailyTokenQuotaPerUser`, `0` = unlimited); `dailyQuotaPerGroup` comes from `AgentUsageService.DailyQuotaPerGroup` (config `Agents:DailyTokenQuotaPerGroup`, `0` = unlimited) — note it is only the **global fallback**; a given circle's actual denominator is that row's `quota`.
 
 Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, noting "exceeding it will be rejected; auto-restores at UTC next day"); otherwise `admin.quotaDisabled`; if `quotaGroup > 0` it appends `admin.quotaGroupEnabled` (`app.js:8890-8896`). The daily table has 6 columns: date / total tokens / input / output / thinking / calls.
 
 > The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,115-123`).
 >
-> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:129`; the gateway-side check is `AgentGateway.cs:660`, error code `GROUP_QUOTA_EXCEEDED`); the actual denominator is resolved by `EffectiveGroupQuota` (**per-circle override first**, `Group.QuotaOverride`, see 2.2.2.2).
+> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:219`; the gateway-side check is `AgentGateway.cs:660`, error code `GROUP_QUOTA_EXCEEDED`); the actual denominator is resolved by `EffectiveGroupQuota` (**per-circle override first**, `Group.QuotaOverride`, see 2.2.2.2).
 >
-> **Proactive warning (1.0.266)**: the same level source is also served by `GET /ag-ui/admin/quota-status` (`AdminApi.cs:411-427`) to the **sidebar group items** (Operator+ only) — so you can see which circle is "nearly full" without opening the console.
+> **Proactive warning (1.0.266)**: the same level source is also served by `GET /ag-ui/admin/quota-status` (`AdminApi.cs:422-438`) to the **sidebar group items** (Operator+ only) — so you can see which circle is "nearly full" without opening the console.
 >
-> **Trigger dimension (1.0.268)**: `usersToday` applies the same `QuotaLevel` to the **per-user quota** (`AdminApi.cs:465`), so an admin can see "who is about to hit the cap" right on the usage page; `system` is marked exempt (see above).
+> **Push-style warning (1.0.270)**: the same threshold decision also emits a `QUOTA_THRESHOLD` event to outbound webhooks on the **first crossing** of 80% / 100% (both user and circle scopes, once per scope per level per day) — the warning goes from "pull" to "push"; see 8.19.
+>
+> **Trigger dimension (1.0.268)**: `usersToday` applies the same `QuotaLevel` to the **per-user quota** (`AdminApi.cs:476`), so an admin can see "who is about to hit the cap" right on the usage page; `system` is marked exempt (see above).
 >
 > **Rejections are observable (1.0.265)**: both quota checks increment `MetricsService.RecordQuotaRejection` (`AgentGateway.cs:645` / `:662`), observable via `knowgath_quota_rejections_total{scope="user|group"}` on `/ag-ui/metrics` and the **"Quota rejections" card** on the Runtime Metrics page (shown only once something has been blocked, with a "user N ｜ circle M" subtitle).
 
-> **Fixed (1.0.264)**: both quota values used to be copied into fields **at construction** of `AgentUsageService`, so an admin hot-changing the quota in Config Governance **did not actually apply** (it only took effect after a restart); they now read via an injected `Func<long>` **in real time** (`AgentHosting.cs:66-70`), so they apply on save.
+> **Fixed (1.0.264)**: both quota values used to be copied into fields **at construction** of `AgentUsageService`, so an admin hot-changing the quota in Config Governance **did not actually apply** (it only took effect after a restart); they now read via an injected `Func<long>` **in real time** (`AgentHosting.cs:66-72`), so they apply on save.
 
 ---
 
@@ -4169,7 +4171,7 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 
 Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative).
 
-> **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-70`), so saving applies at once.
+> **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-72`), so saving applies at once.
 
 > **Model routing (6.7, 1.0.260)**: #14–#17 map to `AgentOptions.ModelRouting` (`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`). **StandardModel is new in this version** — previously the Standard tier never switched. Once enabled, the same `RunComplexityEstimator` used by complexity-adaptive timeouts picks a model per tier (Simple / Standard / Complex / Heavy; blank = don't switch that tier), e.g. `deepseek-flash` for Simple/Standard and `deepseek-v4-pro` for Heavy. It shares the `Agents:ModelRouting` config (env `AGENTS_MODELROUTING_*`); saving on this page takes effect immediately and persists. Note: unlike list items ("empty = do not modify"), model names follow string `??` semantics — **an empty string clears that tier** (the frontend always submits these three fields, i.e. "save = the form wins").
 
@@ -4412,7 +4414,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | List subscriptions; the **signing secret is masked** (only `hasSecret`) |
-| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (18) |
+| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (19) |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | Last 100 delivery records (newest first) |
 | `POST` | `/ag-ui/admin/webhooks` | Create; **returns the plaintext secret once** (`whsec_…`) |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | Update (null fields = unchanged; `rotateSecret=true` rotates and returns the new secret) |
@@ -4421,7 +4423,21 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 
 **Subscription fields**: `name`, `url` (**must be an absolute http / https URL**, else 400), `eventTypes` (none selected = all except high-frequency streaming deltas; types outside the catalog are rejected with 400), `groupId` (optional, scopes pushes to one circle), `enabled`.
 
-**Selectable event types (18)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+**Selectable event types (19)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, and **`QUOTA_THRESHOLD` (1.0.270)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+
+**`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
+
+```jsonc
+{ "type": "QUOTA_THRESHOLD", "scope": "user|group", "scopeId": "<userId|groupId>",
+  "level": "warn|over", "used": 1200, "quota": 1000,
+  "date": "2026-01-01", "timestamp": 1767225600000 }
+```
+
+- **No flooding**: each scope fires **once per level per UTC day** (deduplicated by `_thresholdNotified`); after `over` no further events or usage queries are made that day.
+- **The denominator is the effective quota**: the circle dimension uses `EffectiveGroupQuota` (**per-circle override first**, see 2.2.2.2).
+- **`system` is exempt**: the scheduled-task virtual trigger produces no per-user alert (but still counts toward the circle quota, so a circle alert can fire).
+- **Subscription filtering**: the `groupId` is an empty string for the user scope — so **group-scoped subscriptions do not receive per-user alerts**; only unscoped subscriptions do.
+- **No quota (0 = unlimited) means no events** and no extra queries.
 
 **Delivery contract**:
 

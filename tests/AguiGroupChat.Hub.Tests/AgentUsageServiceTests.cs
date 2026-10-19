@@ -192,6 +192,71 @@ public sealed class AgentUsageServiceTests
     }
 
     [Fact]
+    public void QuotaThreshold_FiresOncePerLevelPerScopePerDay()
+    {
+        var events = new List<AguiGroupChat.Hub.Models.QuotaThresholdEvent>();
+        var svc = CreateLive(() => 100, () => 100);
+        svc.OnQuotaThreshold = events.Add;
+
+        svc.RecordUsage("a", "u1", "g1", 50, 0, 0); // 50 → 未达 80%
+        Assert.Empty(events);
+
+        svc.RecordUsage("a", "u1", "g1", 40, 0, 0); // 90 → user warn + group warn
+        Assert.Equal(2, events.Count);
+        Assert.Contains(events, e => e.Scope == "user" && e.ScopeId == "u1" && e.Level == "warn");
+        Assert.Contains(events, e => e.Scope == "group" && e.ScopeId == "g1" && e.Level == "warn");
+
+        svc.RecordUsage("a", "u1", "g1", 5, 0, 0); // 仍在 warn 区间 → 不重复
+        Assert.Equal(2, events.Count);
+
+        svc.RecordUsage("a", "u1", "g1", 10, 0, 0); // 105 → 两级各一条 over
+        Assert.Equal(4, events.Count);
+        Assert.Contains(events, e => e.Scope == "user" && e.Level == "over");
+        Assert.Contains(events, e => e.Scope == "group" && e.Level == "over");
+
+        svc.RecordUsage("a", "u1", "g1", 500, 0, 0); // 已 over → 不再发
+        Assert.Equal(4, events.Count);
+    }
+
+    [Fact]
+    public void QuotaThreshold_ExemptsSystemForUserScope_ButStillAlertsGroup()
+    {
+        var events = new List<AguiGroupChat.Hub.Models.QuotaThresholdEvent>();
+        var svc = CreateLive(() => 10, () => 10);
+        svc.OnQuotaThreshold = events.Add;
+
+        svc.RecordUsage("a", AgentUsageService.SystemUserId, "g2", 100, 0, 0);
+
+        Assert.DoesNotContain(events, e => e.Scope == "user"); // system 豁免个人配额
+        Assert.Contains(events, e => e.Scope == "group" && e.ScopeId == "g2" && e.Level == "over");
+    }
+
+    [Fact]
+    public void QuotaThreshold_NoQuotaConfigured_NoEvents()
+    {
+        var events = new List<AguiGroupChat.Hub.Models.QuotaThresholdEvent>();
+        var svc = CreateLive(() => 0, () => 0);
+        svc.OnQuotaThreshold = events.Add;
+
+        svc.RecordUsage("a", "u9", "g9", 1_000_000, 0, 0);
+        Assert.Empty(events); // 0 = 不限：水位无意义，不告警也不做多余查询
+    }
+
+    [Fact]
+    public void QuotaThreshold_UsesGroupQuotaOverride()
+    {
+        var events = new List<AguiGroupChat.Hub.Models.QuotaThresholdEvent>();
+        // 全局知聚配额 1000（不会触发），但该知聚覆写为 50 → 60 已 over
+        var svc = new AgentUsageService(new InMemoryUsageStore(), () => 0, () => 1000,
+            NullLogger<AgentUsageService>.Instance, id => id == "g_ov" ? 50 : null);
+        svc.OnQuotaThreshold = events.Add;
+
+        svc.RecordUsage("a", "u1", "g_ov", 60, 0, 0);
+
+        Assert.Contains(events, e => e.Scope == "group" && e.ScopeId == "g_ov" && e.Level == "over" && e.Quota == 50);
+    }
+
+    [Fact]
     public void GetDailySummary_AggregatesByDay()
     {
         var svc = Create();
