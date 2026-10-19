@@ -79,20 +79,24 @@ public sealed class AgentUsageService
     public void RecordUsage(string agentId, string userId, string groupId, long promptTokens, long completionTokens, long reasoningTokens)
     {
         if (promptTokens <= 0 && completionTokens <= 0 && reasoningTokens <= 0) return;
+        var date = Today();
         try
         {
-            var date = Today();
             var p = Math.Max(0, promptTokens);
             var c = Math.Max(0, completionTokens);
             var r = Math.Max(0, reasoningTokens);
             _store.RecordUsage(date, agentId, userId, p, c, r);
             if (!string.IsNullOrEmpty(groupId)) _store.RecordGroupUsage(date, groupId, agentId, userId, p, c, r);
-            CheckThresholds(date, userId, groupId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "用量记录失败（不影响主流程）：agent={AgentId}", agentId);
+            return; // 写入失败就不做阈值判定（读数不可信）
         }
+
+        // 阈值检查与写入分开 catch：它失败不能被误报成「用量记录失败」（诊断误导）
+        try { CheckThresholds(date, userId, groupId); }
+        catch (Exception ex) { _logger.LogDebug(ex, "配额阈值检查失败（忽略）：agent={AgentId}", agentId); }
     }
 
     /// <summary>

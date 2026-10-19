@@ -38,7 +38,6 @@ public sealed class Group
         }
         set
         {
-            if (Extra is null) return; // Extra 在初始值为 null 时不支持原地写入（由创建路径预置）
             Extra["kind"] = value switch
             {
                 GroupKind.Support => "support",
@@ -71,7 +70,6 @@ public sealed class Group
         get => Extra is not null && Extra.TryGetValue("model", out var v) ? StrOf(v) : null;
         set
         {
-            if (Extra is null) return; // Extra 为 null 时不支持原地写入（由创建路径预置）
             var s = (value ?? "").Trim();
             if (s.Length == 0) Extra.Remove("model"); // 空 = 取消覆写
             else Extra["model"] = s;
@@ -100,7 +98,6 @@ public sealed class Group
         get => Extra is not null && Extra.TryGetValue("quotaPerGroup", out var v) ? LongOf(v) : null;
         set
         {
-            if (Extra is null) return; // Extra 为 null 时不支持原地写入（由创建路径预置）
             if (value is not { } n || n < 0) Extra.Remove("quotaPerGroup"); // null / 负数 = 取消覆写
             else Extra["quotaPerGroup"] = n.ToString(); // 纯整数默认格式即无分隔符，与 culture 无关
         }
@@ -129,6 +126,16 @@ public sealed class Group
     /// <summary>创建时间戳（毫秒级）。</summary>
     public required long CreateTime { get; init; }
 
-    /// <summary>业务自定义扩展字段。</summary>
-    public Dictionary<string, object?>? Extra { get; init; }
+    private Dictionary<string, object?>? _extra;
+
+    /// <summary>
+    /// 业务自定义扩展字段。**读写均不会为 null**：旧数据库行 / 导入包里 `extra` 缺省时也能安全写入
+    /// <see cref="Kind"/> / <see cref="ModelOverride"/> / <see cref="QuotaOverride"/>。
+    /// 否则这些属性的 setter 会因「Extra 为 null」而**静默 no-op**——接口返回 200 但实际没改（1.0.271 修）。
+    /// </summary>
+    public Dictionary<string, object?> Extra
+    {
+        get => _extra ??= new Dictionary<string, object?>(StringComparer.Ordinal);
+        set => _extra = value ?? new Dictionary<string, object?>(StringComparer.Ordinal);
+    }
 }

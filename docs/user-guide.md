@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.270**
+> 适用版本：**1.0.271**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -677,7 +677,7 @@
 - **入口**：知聚设置弹窗内 `#gsQuotaGroup` / `#gsQuotaOverride`（`type=number`，`min=0`），**仅平台管理员（`isAdminPlus()`）可见**，否则该组隐藏。
 - **语义**：给某个知聚**单独指定每日 Token 额度**，**优先于**全局 `Agents:DailyTokenQuotaPerGroup`（`AgentUsageService.EffectiveGroupQuota`）。留空 = 用全局；`0` = **本知聚不限**（是一个有效覆写，不是「未设」）；负数 / 非数字 = 取消覆写。
 - **为什么需要**：全局配额对全部知聚一刀切，但知聚之间开销差异极大（客服知聚接待顾客 vs 内部小群）——有了覆写就能只给某个知聚放额，**不必抬高全平台上限**。
-- **存储（零迁移）**：存于 `Group.Extra["quotaPerGroup"]`（字符串，同 `ModelOverride`），既有所有群存储透传 extra JSON，无需新增列。读取兼容 JSON number 与纯数字字符串（`Group.QuotaOverride` / `LongOf`）。
+- **存储（零迁移）**：存于 `Group.Extra["quotaPerGroup"]`（字符串，同 `ModelOverride`），既有所有群存储透传 extra JSON，无需新增列。读取兼容 JSON number 与纯数字字符串（`Group.QuotaOverride` / `LongOf`）。**1.0.271 起 `Group.Extra` 为惰性非空属性**：旧数据库行 / 导入包缺省 `extra` 的群也能正常写入（之前会静默 no-op）。
 - **权限（服务端强校验）**：`HttpGroupApi` 的 `/update` 在 `updateFields` 含 `quotaPerGroup` 时要求生效角色 ≥ `PlatformRole.Admin`，否则 **403**（「仅平台管理员可设置知聚 Token 配额覆写」）；`GroupHub` 亦要求群主 / 群管理员。
 - **生效**：`AgentGateway` 取 `GroupHub.GroupQuotaOverride(groupId)`（`AgentGateway.ResolveGroupQuota`）后传入 `AgentUsageService.CheckGroupQuota(groupId, override)`——超限拦截报 `GROUP_QUOTA_EXCEEDED`（见 8.6）。
 - **与水位预警联动**：用量页「今日各知聚明细」的配额使用列改用**该行自己的分母**；与全局值不同时在知聚名后标 `⚙`（悬停显示具体额度）；侧边栏 `⚠` / `🔴` 角标也按各知聚自己的额度算（见 2.1.1 / 8.6）。
@@ -3973,7 +3973,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 >
 > **主动预警（1.0.266）**：同一水位口径还经 `GET /ag-ui/admin/quota-status`（`AdminApi.cs:422-438`）下发到**侧边栏知聚项**（仅 Operator+）——不用打开控制台就能看到哪个知聚「快满」。
 >
-> **推送型预警（1.0.270）**：同一阈值判定还会在**首次跨过 80% / 100%** 时发一条 `QUOTA_THRESHOLD` 事件给出站 Webhook（个人 / 知聚两作用域，每作用域每级每日一次）——预警从「拉」变「推」，见 §8.19。
+> **推送型预警（1.0.270）**：同一阈值判定还会在**首次跨过 80% / 100%** 时发一条 `QUOTA_THRESHOLD` 事件给出站 Webhook（个人 / 知聚两作用域，每作用域每级每日一次，**按进程计**）——预警从「拉」变「推」，见 §8.19。
 >
 > **触发者维度（1.0.268）**：`usersToday` 把同一套 `QuotaLevel` 用到**个人配额**上（`AdminApi.cs:476`），让管理员在用量页直接看到「谁快到顶了」；`system` 标为豁免（见上）。
 >

@@ -10,6 +10,27 @@ public sealed class GroupHubTests
     // ================= 群组生命周期 =================
 
     [Fact]
+    public void Extra_IsLazy_LegacyGroupsCanStillStoreOverrides()
+    {
+        // 回归（1.0.271）：旧数据库行 / 导入包里 `extra` 缺省时，Extra 曾为 null，
+        // 导致 Kind / ModelOverride / QuotaOverride 的 setter **静默 no-op**（接口 200 但没改）。
+        var g = new Group { GroupId = "group_legacy", GroupName = "旧知聚", OwnerId = "u1", CreateTime = 1 };
+
+        g.QuotaOverride = 500;
+        Assert.Equal(500, g.QuotaOverride);
+        g.ModelOverride = "deepseek-flash";
+        Assert.Equal("deepseek-flash", g.ModelOverride);
+        g.Kind = GroupKind.Support;
+        Assert.Equal(GroupKind.Support, g.Kind);
+
+        // 赋 null 也归一化为空字典（后续写入不会回到静默失败）
+        g.Extra = null!;
+        Assert.NotNull(g.Extra);
+        g.QuotaOverride = 0;
+        Assert.Equal(0, g.QuotaOverride);
+    }
+
+    [Fact]
     public async Task CreateGroup_StoresMembersAndDerivesAgentType()
     {
         var f = new HubFixture();

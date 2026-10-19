@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.270**
+> Applies to version: **1.0.271**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -678,7 +678,7 @@ Support circles, in language and implementation: support circles **do not suppor
 - **Entry**: inside the group settings dialog, `#gsQuotaGroup` / `#gsQuotaOverride` (`type=number`, `min=0`), **visible only to platform admins** (`isAdminPlus()`); otherwise the group is hidden.
 - **Meaning**: give one circle its **own daily token allowance**, **taking precedence over** the global `Agents:DailyTokenQuotaPerGroup` (`AgentUsageService.EffectiveGroupQuota`). Blank = use the global value; `0` = **unlimited for that circle** (a valid override, not "unset"); negative / non-numeric = clear the override.
 - **Why it is needed**: the global quota is one-size-fits-all, but circles differ hugely in cost (a support circle serving customers vs a small internal circle) — with an override you can give one circle headroom **without raising the platform-wide cap**.
-- **Storage (zero migration)**: kept in `Group.Extra["quotaPerGroup"]` (a string, like `ModelOverride`); every group store passes extra JSON through, so no new column is needed. Reading accepts both a JSON number and a numeric string (`Group.QuotaOverride` / `LongOf`).
+- **Storage (zero migration)**: kept in `Group.Extra["quotaPerGroup"]` (a string, like `ModelOverride`); every group store passes extra JSON through, so no new column is needed. Reading accepts both a JSON number and a numeric string (`Group.QuotaOverride` / `LongOf`). **Since 1.0.271 `Group.Extra` is a lazily non-null property**, so groups from old DB rows / import packs without `extra` can still store the override (previously a silent no-op).
 - **Permission (enforced server-side)**: `HttpGroupApi`'s `/update` requires an effective role ≥ `PlatformRole.Admin` when `updateFields` contains `quotaPerGroup`, otherwise **403** ("only platform admins can set a group token quota override"); `GroupHub` also requires owner / group-admin.
 - **Effect**: `AgentGateway` reads `GroupHub.GroupQuotaOverride(groupId)` (`AgentGateway.ResolveGroupQuota`) and passes it to `AgentUsageService.CheckGroupQuota(groupId, override)` — exceeding it blocks the trigger with `GROUP_QUOTA_EXCEEDED` (see 8.6).
 - **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).

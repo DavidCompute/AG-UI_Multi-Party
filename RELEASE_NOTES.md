@@ -1,4 +1,34 @@
-# AG-UI 群聊桌面版 1.0.270 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.271 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.271 Release Notes (current Windows desktop release)
+
+**版本说明**：**严格代码审核后的两项修复**（覆盖 1.0.264～1.0.270 的配额链路）——① 修复一个**静默失效**类缺陷：`Group.Extra` 是 `init` 且可为 `null`，当旧数据库行 / 导入包的 `extra` 缺省时，`QuotaOverride` / `ModelOverride` / `Kind` 的 setter 会**直接 return**，接口返回 200 但实际没改；现改为**惰性非空属性**。② 配额阈值检查从「用量记录」的 `try/catch` 里拆出，避免它的异常被误报成「用量记录失败」。
+**Version note**: **Two fixes after a strict code review** (covering the 1.0.264–1.0.270 quota chain) — ① a **silent-failure** class defect: `Group.Extra` was `init` and nullable, so when an old DB row or import pack had no `extra`, the `QuotaOverride` / `ModelOverride` / `Kind` setters **returned early** and the API still answered 200 without changing anything; it is now a **lazily non-null** property. ② The quota threshold check is lifted out of the usage-recording `try/catch`, so its exceptions are no longer misreported as "usage recording failed".
+
+## 变更
+# Changes
+
+中文：
+- **`Group.Extra` 改为惰性非空**：`get => _extra ??= new(StringComparer.Ordinal)`、`set => _extra = value ?? new(...)`。带来的效果：旧数据 / 导入包缺省 `extra` 的群，`Kind` / `ModelOverride` / `QuotaOverride` 现在能正常写入（之前是**静默 no-op**）；同时 `Extra = null` 也会被归一化为空字典，不会再次回到静默失败。序列化上无迁移代价（群存储本就透传 extra JSON，现在只会多一个 `"extra": {}`）。
+- **阈值检查独立 catch**：`RecordUsage` 先写两张聚合表（失败则记警告并 `return`，不再对不可信的读数做阈值判定），再单独 try 调用 `CheckThresholds`，异常记 `Debug`——诊断日志不再混淆两件事。
+- **审核确认无误的点**（未改动，仅记录）：阈值去重键 `日期|作用域|ID` 与跨日清理、`system` 个人豁免、知聚分母走 `EffectiveGroupQuota`（覆写优先）、未配配额 / 已 over 时零额外查询、个人作用域传空 `groupId` 避免错进限定知聚的订阅、Webhook 侧复用既有签名 / 重试 / 投递日志。
+
+English:
+- **`Group.Extra` is now lazily non-null**: `get => _extra ??= new(StringComparer.Ordinal)`, `set => _extra = value ?? new(...)`. Effect: groups whose `extra` was absent (old DB rows / import packs) can now write `Kind` / `ModelOverride` / `QuotaOverride` normally (it used to be a **silent no-op**); assigning `Extra = null` is also normalised to an empty dictionary, so it cannot regress into silent failure. No migration cost: the stores already pass extra JSON through, and serialization now just includes `"extra": {}`.
+- **Separate catch for the threshold check**: `RecordUsage` first writes both aggregate tables (on failure it logs a warning and `return`s, so no threshold decision is made on untrustworthy readings), then calls `CheckThresholds` in its own try, logging exceptions at `Debug` — the diagnostics no longer conflate the two.
+- **Points confirmed correct by the review** (unchanged, noted only): the dedup key `date|scope|id` with cross-day clearing, the `system` per-user exemption, the circle denominator going through `EffectiveGroupQuota` (override first), zero extra queries when no quota is set or the scope is already over, the empty `groupId` for the user scope keeping group-scoped subscriptions out, and the webhook side reusing the existing signing / retry / delivery log.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2.2（补一句「旧数据 / 导入包缺省 `extra` 也能写入」）。
+English: `docs/user-guide.md` / `en.md` §2.2.2.2 (adds that legacy / imported groups without `extra` can still store the override).
+
+## 测试
+# Tests
+
+中文：新增 `GroupHubTests.Extra_IsLazy_LegacyGroupsCanStillStoreOverrides`（未预置 `Extra` 的群 → `QuotaOverride` / `ModelOverride` / `Kind` 均能写入；`Extra = null` 归一化为空字典后仍可写）。**全量测试通过**（1817 → 1818）；`dotnet build` **0 错误**；i18n 审计 **zh=en=1951，missing 0**，守卫脚本均过。
+English: new `GroupHubTests.Extra_IsLazy_LegacyGroupsCanStillStoreOverrides` (a group without a pre-set `Extra` can write `QuotaOverride` / `ModelOverride` / `Kind`; after `Extra = null` is normalised to an empty dictionary, writes still work). **All tests pass** (1817 → 1818); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=1951, missing 0**, and the guard scripts pass.
+
 # AG-UI Group Chat Desktop 1.0.270 Release Notes (current Windows desktop release)
 
 **版本说明**：**配额预警从「拉」变成「推」**——当日用量**首次**跨过配额的 80%（`warn`）/ 100%（`over`）时，除既有的页面角标外，现在还会发一条 **`QUOTA_THRESHOLD`** 事件到**出站 Webhook**（照旧带 HMAC 签名 / 重试 / 投递记录），可直接推到 Slack / 告警平台 / n8n。个人与知聚两个作用域均支持，**每作用域每级每日只发一次**（不刷屏；去重状态是**进程内**的，多副本部署时每个副本各发一次——告警平台可按 `scopeId + level + date` 去重）。
