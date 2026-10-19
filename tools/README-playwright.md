@@ -43,7 +43,7 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 # 配额水位 / 覆写同步回归（`ui-quota-alerts.mjs`）
 
-覆盖 1.0.265～1.0.276 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
+覆盖 1.0.265～1.0.277 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
 
 覆盖点：
 

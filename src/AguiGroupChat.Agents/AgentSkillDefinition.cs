@@ -122,6 +122,14 @@ public sealed class AgentSkillDefinition
     /// </summary>
     public List<string>? AllowedUserGroupIds { get; set; }
 
+    /// <summary>
+    /// <b>图库写入能力（1.0.277）</b>：是否允许该技能调用平台的「技能建库 / 传图」自调用端点。
+    /// 默认 <c>false</c>；仅管理员可开启，且仅对<b>服务端执行</b>的非 prompt 技能生效
+    /// （客户端技能在用户机器上跑，拿不到平台自令牌）。开启后平台在技能入参 JSON 中注入
+    /// <c>imageWriteScopeId</c>（10 分钟能力句柄，绑定触发者 / 岗位 / 配额）。
+    /// </summary>
+    public bool ImageWrite { get; set; }
+
     /// <summary>技能名 / 智能体工具名的合法模式（OpenAI 工具名：字母数字下划线连字符）。</summary>
     private static readonly Regex ToolNamePattern = new("^[a-zA-Z0-9_-]{1,64}$", RegexOptions.Compiled);
 

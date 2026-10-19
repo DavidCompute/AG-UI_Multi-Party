@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using AguiGroupChat.Hub.Agents;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
@@ -11,7 +12,7 @@ public sealed class TwinTriggerTests
 {
     private sealed class RecordingGateway : IAgentGateway
     {
-        public List<string> InvokedAgents { get; } = [];
+        public ConcurrentBag<string> InvokedAgents { get; } = [];
         public Task<AgentInvocationResult> InvokeAsync(AgentInvocationContext context, CancellationToken ct)
         {
             InvokedAgents.Add(context.AgentId);
@@ -57,15 +58,26 @@ public sealed class TwinTriggerTests
 
         // 用户离线（无连接）→ 发消息 → 分身与普通智能体都被触发
         await hub.SendMessageAsync(new GroupMessageSendRequest { GroupId = group.GroupId, UserId = "user_1", Content = "离线时的问题" });
-        await Task.Delay(200);
+        await WaitUntilAsync(() => gateway.InvokedAgents.Contains("twin_user_1"));
         Assert.Contains("twin_user_1", gateway.InvokedAgents);
         gateway.InvokedAgents.Clear();
 
         // 用户上线（注册连接）→ 发消息 → 分身暂停（不触发），普通智能体仍触发
         f.NewConnection("user_1");
         await hub.SendMessageAsync(new GroupMessageSendRequest { GroupId = group.GroupId, UserId = "user_1", Content = "在线时的问题" });
-        await Task.Delay(200);
+        await WaitUntilAsync(() => gateway.InvokedAgents.Contains("agent_a"));
         Assert.DoesNotContain("twin_user_1", gateway.InvokedAgents);
         Assert.Contains("agent_a", gateway.InvokedAgents);
+    }
+
+    /// <summary>轮询等待异步触发完成（固定 200ms 在高并发全量运行时会不够，导致随机失败）。</summary>
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 4000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (condition()) return;
+            await Task.Delay(20);
+        }
     }
 }

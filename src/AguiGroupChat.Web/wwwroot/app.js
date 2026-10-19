@@ -2471,6 +2471,7 @@ function openSkillForm(skillId) {
   sf("sfBody").value = "";
   sf("sfRequiresApproval").checked = true;
   sf("sfRequiresApproval").disabled = false;
+  sf("sfImageWrite").checked = false;
   sf("sfExecutionLocation").value = "server";
   sf("sfClientRunner").value = "";
   sf("sgRequest").value = ""; // AI 生成区的需求/偏好属上一份内容，不跨技能保留
@@ -2487,6 +2488,7 @@ function openSkillForm(skillId) {
     sf("sfInterpreter").value = s.interpreter || "";
     sf("sfBody").value = s.body || "";
     sf("sfRequiresApproval").checked = s.requiresApproval !== false;
+    sf("sfImageWrite").checked = !!s.imageWrite;
     sf("sfExecutionLocation").value = s.executionLocation || "server";
     sf("sfClientRunner").value = s.clientRunner || "";
   }
@@ -2512,6 +2514,12 @@ function syncSkillKind() {
   $("sfBodyLabel").textContent = t(bodyKind);
   // 客户端执行 → 显示 ClientRunner 配置；否则隐藏
   $("sfClientRunnerGroup").style.display = isClientExec ? "" : "none";
+  // 图库写入能力：仅管理员 + 服务端 + 非 prompt；不满足时隐藏并清空
+  const canWriteImages = isAdminPlus() && !isOrgDeploy && kind !== "prompt" && !isClientExec;
+  const imgGroup = $("sfImageWriteGroup"), imgHint = $("sfImageWriteHint"), imgCb = $("sfImageWrite");
+  if (imgGroup) imgGroup.style.display = canWriteImages ? "" : "none";
+  if (imgHint) imgHint.style.display = canWriteImages ? "" : "none";
+  if (imgCb) { imgCb.disabled = !canWriteImages; if (!canWriteImages) imgCb.checked = false; }
 }
 
 /** 保存技能（新建 POST / 更新 PUT）。 */
@@ -2532,6 +2540,7 @@ async function saveSkill() {
     requiresApproval: $("sfRequiresApproval").checked,
     executionLocation: $("sfExecutionLocation").value || "server",
     clientRunner: $("sfClientRunner").value.trim() || null,
+    imageWrite: $("sfImageWrite").checked,
   };
   const url = editingSkillId ? `/ag-ui/skills/${encodeURIComponent(editingSkillId)}` : "/ag-ui/skills";
   const method = editingSkillId ? "PUT" : "POST";
@@ -2602,6 +2611,7 @@ async function generateSkill() {
     $("sfExecutionLocation").value = data.executionLocation === "client" ? "client" : "server";
     $("sfClientRunner").value = data.clientRunner || "";
     $("sfRequiresApproval").checked = !!data.requiresApproval;
+    $("sfImageWrite").checked = false; // 生成结果默认不开启图库写入（管理员保存后按需开启）
     syncSkillKind(); // 刷新正文标签 / 解释器 / ClientRunner 显隐
     toast(t("skill.gen.done"));
   } catch (ex) {

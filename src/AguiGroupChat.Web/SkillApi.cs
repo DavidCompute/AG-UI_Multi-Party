@@ -328,6 +328,8 @@ public static class SkillApi
             ["ownerId"] = s.OwnerId,
             // 细粒度访问授权：允许访问的技能用户组白名单（null = 不限制）
             ["allowedUserGroupIds"] = s.AllowedUserGroupIds is { Count: > 0 } ? s.AllowedUserGroupIds : null,
+            // 图库写入能力（管理员开启；仅服务端非 prompt 技能）
+            ["imageWrite"] = s.ImageWrite,
         };
         if (canReadBody)
         {
@@ -371,6 +373,13 @@ public static class SkillApi
         }
         if (executionLocation == AgentSkillExecutionLocation.Client)
             requiresApproval = true; // 客户端执行（尤其 shell / dotnet）属本机/外部副作用，一律需人工批准
+
+        // 图库写入能力（1.0.277）：管理员显式开启；仅服务端非 prompt 技能可持有
+        //（客户端技能在用户机器上跑，拿不到平台自令牌；prompt 技能没有执行面）。
+        var imageWrite = authorAdmin
+            && req.ImageWrite == true
+            && kind is not AgentSkillKind.Prompt
+            && executionLocation == AgentSkillExecutionLocation.Server;
         if ((kind == AgentSkillKind.Shell || kind == AgentSkillKind.Dotnet) && string.IsNullOrWhiteSpace(req.Body))
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "该技能正文（shell 命令/脚本，或 C# 源码）不能为空")));
         if (kind == AgentSkillKind.Http && string.IsNullOrWhiteSpace(req.Body))
@@ -405,6 +414,7 @@ public static class SkillApi
             ClientRunner = AgentApi.BuildClientRunner(kind, executionLocation, req.Body ?? "", req.ClientRunner),
             // 细粒度访问授权：允许挂载/可见的技能用户组白名单（空 = 不限制，向后兼容）
             AllowedUserGroupIds = req.AllowedUserGroupIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() is { Count: > 0 } glist ? glist : null,
+            ImageWrite = imageWrite,
         }, null);
     }
 
@@ -488,7 +498,9 @@ public sealed record SkillDefHttpRequest(
     bool? RequiresApproval,
     string? ExecutionLocation = null,
     string? ClientRunner = null,
-    IReadOnlyList<string>? AllowedUserGroupIds = null);
+    IReadOnlyList<string>? AllowedUserGroupIds = null,
+    // 图库写入能力（1.0.277）：仅管理员可开，且仅对服务端非 prompt 技能生效
+    bool? ImageWrite = null);
 
 /// <summary>技能试运行请求体。ClientId：本机执行的机器标识（浏览器本机桥 /ag-ui/bridge/info 读取），用于把 client dotnet 送到当前机器执行。</summary>
 public sealed record SkillRunHttpRequest(string Query = "", string? ClientId = null);

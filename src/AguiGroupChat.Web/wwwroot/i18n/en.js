@@ -449,6 +449,8 @@ window.I18N_DICTS.en = {
   "skill.form.bodyDotnet": "C# source containing public static string Run(string input); optional #r \"nuget: Package, Version\" lines at the top pull NuGet packages; requires approval, compiled by server / local bridge",
   "skill.form.bodyOrgDeploy": "Notes / constraints (optional): this skill is the deploying ability that writes the agreed final org plan into the store; there is no runnable body.",
   "skill.form.requiresApproval": "Requires human approval to run (shell is always forced; HTTP/prompt can be toggled off to auto-run)",
+  "skill.form.imageWrite": "Allow this skill to write to image libraries (create libraries / upload images; admins + server-side skills only)",
+  "skill.form.imageWriteHint": "When enabled, the platform injects imageWriteScopeId into the skill's JSON input (10 minutes; at most 1 library / 20 images / 10 MB per image per run). The skill may only write to the library it creates in this run, and every write is audited.",
   "skill.form.executionLocation": "Execution location",
   "skill.form.execServer": "Run on server (default, executed in the Hub process)",
   "skill.form.execClient": "Run on client (frontend / local, requires a ClientRunner config)",

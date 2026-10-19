@@ -22,7 +22,6 @@ public sealed class AuditLogService
     // 内存回退模式：读取 / 写入并发安全，用锁保护的有序队列（保持时间顺序 + 稳定查询）
     private readonly object _gate = new();
     private readonly LinkedList<AuditEntry> _entries = new();
-    private long _seq;
 
     // 独立表模式（可选）
     private readonly IAuditStore? _store;
@@ -40,7 +39,10 @@ public sealed class AuditLogService
     {
         var entry = new AuditEntry
         {
-            Id = "aud_" + (++_seq),
+            // 全局唯一 ID（1.0.277 修复）：此前用进程内自增序号 `aud_N`，重启后从 1 开始，
+            // 与独立表里已存在的 `aud_1/aud_2/...` 撞主键，被 `ON CONFLICT DO NOTHING` 静默丢弃 ——
+            // 表现为“重启后审计页再也不新增记录”。改用随机 ID 后无碰撞。
+            Id = "aud_" + IdGenerator.NewId(),
             Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             Action = action,
             ActorId = actorId,
@@ -150,15 +152,11 @@ public sealed class AuditLogService
         lock (_gate)
         {
             _entries.Clear();
-            long maxSeq = 0;
             foreach (var e in entries)
             {
-                if (e.Id is not null && e.Id.StartsWith("aud_", StringComparison.Ordinal)
-                    && long.TryParse(e.Id[4..], out var n) && n > maxSeq) maxSeq = n;
                 _entries.AddLast(e);
                 while (_entries.Count > Capacity) _entries.RemoveFirst();
             }
-            _seq = Math.Max(_seq, maxSeq);
         }
     }
 

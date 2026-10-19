@@ -449,6 +449,8 @@ window.I18N_DICTS.zh = {
   "skill.form.bodyDotnet": "C# 源码（含 public static string Run(string input)；顶部可写 #r \"nuget: 包名, 版本\" 引入 NuGet 包；需审批，服务端/本机桥编译执行）",
   "skill.form.bodyOrgDeploy": "说明 / 约束（可选）：本技能是被挂载数字员工“把最终组织稿写库”的能力，无可执行正文。",
   "skill.form.requiresApproval": "执行需人工批准（shell 强制；HTTP/提示词可关闭以自动执行）",
+  "skill.form.imageWrite": "允许该技能向图库写入（新建图库 / 上传图片；仅管理员 + 服务端技能）",
+  "skill.form.imageWriteHint": "开启后，平台会在技能入参 JSON 中注入 imageWriteScopeId（10 分钟、每轮最多 1 个库 / 20 张图 / 单图 10MB）；技能只能写入本轮新建的图库，所有写入均记入审计。",
   "skill.form.executionLocation": "执行位置",
   "skill.form.execServer": "服务端执行（默认，由 Hub 进程内执行）",
   "skill.form.execClient": "客户端执行（由前端 / 本机执行，需配合 ClientRunner 配置）",

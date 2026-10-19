@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.276 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.276 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.277 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.277 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能可以受控写入图库**——管理员可在单个技能上开启「图库写入」，平台在技能入参 JSON 中注入 10 分钟能力句柄 `imageWriteScopeId`，技能据此新建图库 / 上传图片（每轮 1 个库 / 20 张图 / 单图 10MB，只能写本轮新建的库，全程审计）。同时修复一个影响全平台审计的潜伏缺陷：审计 ID 用进程内自增序号，重启后与库中已有主键冲突并被静默丢弃。
+**Version note**: **Skills can write to image libraries under control** — an admin can enable "image library write" per skill; the platform injects a 10-minute capability handle `imageWriteScopeId` into the skill's JSON input, which the skill uses to create a library / upload images (1 library / 20 images / 10 MB per image per run; only the library created in this run; fully audited). Also fixes a latent platform-wide audit defect: IDs used a process-local counter that collided with existing primary keys after a restart and were silently dropped.
+
+## 变更
+# Changes
+
+中文：
+- **技能级能力开关**：`AgentSkillDefinition.ImageWrite`（默认 `false`）；仅管理员可开，且仅对**服务端执行的非 prompt** 技能生效（客户端技能拿不到平台自令牌，prompt 无执行面）；服务端对非法组合强制 `false`。技能表单新增 `#sfImageWrite`（仅当时条件满足时可见）。
+- **能力句柄**：`ImageLibraryCatalog.RegisterWriteScope` / `ResolveWriteScope`（TTL 10 分钟）、`TryConsumeLibraryCreate` / `TryConsumeImageUpload`（配额）、`AllowWriteLibrary` / `IsWriteLibraryAllowed`（本轮新建库白名单）。
+- **注入**：`AgentCatalog.WithImageScope` 在原有 `imageScopeId` 之外，按 `ImageWrite` 注入 `imageWriteScopeId`；读/写可同时注入（如带配图的 Word 技能）。
+- **自调用端点**（`SelfApi.IsSelf` + 句柄三重校验）：`POST /ag-ui/images/libraries`（建库，owner = 触发者）、`POST /ag-ui/images/libraries/{libId}/assets`（`attachmentId` 或 `base64`）；超配额返回 429；写入非本轮新建库返回 403。
+- **审计**：`skill.imageLibrary.create` / `skill.imageLibrary.upload`（带 skillId + agentId + 触发者）；审计页可按 action 过滤。
+- **生成器提示词**：补「平台图库写入能力」段落（端点、请求头、配额、只能写本轮新建库），自动生成的技能知道该能力。
+- **审计 ID 修复（重要）**：`AuditEntry.Id` 从 `aud_<自增>` 改为 `aud_<随机 16 hex>`。此前独立表模式下重启后自增从 1 开始，新记录与库中已有 `aud_1/aud_2/…` 撞主键，被 `ON CONFLICT DO NOTHING` 静默忽略——表现为「重启后审计页不再新增记录」。
+
+English:
+- **Per-skill capability flag**: `AgentSkillDefinition.ImageWrite` (default `false`); only admins can enable it, and only for **server-side non-prompt** skills (client skills cannot reach the platform self token; `prompt` has no execution surface); illegal combinations are forced to `false` by the server. The skill form gains `#sfImageWrite` (visible only when those conditions hold).
+- **Capability handle**: `ImageLibraryCatalog.RegisterWriteScope` / `ResolveWriteScope` (10-minute TTL), `TryConsumeLibraryCreate` / `TryConsumeImageUpload` (quotas), `AllowWriteLibrary` / `IsWriteLibraryAllowed` (allow-list of libraries created in this run).
+- **Injection**: `AgentCatalog.WithImageScope` now injects `imageWriteScopeId` when `ImageWrite` is on, alongside the existing `imageScopeId`; read and write can be injected together (e.g. a Word skill with illustrations).
+- **Self-call endpoints** (`SelfApi.IsSelf` plus the handle checks): `POST /ag-ui/images/libraries` (create; owner = trigger user), `POST /ag-ui/images/libraries/{libId}/assets` (`attachmentId` or `base64`); over quota returns 429; writing to a library not created in this run returns 403.
+- **Audit**: `skill.imageLibrary.create` / `skill.imageLibrary.upload` (with skillId + agentId + trigger user); filterable by action on the audit page.
+- **Generator prompt**: adds a "platform image-library write capability" section (endpoints, header, quotas, only the library created in this run), so auto-generated skills know about it.
+- **Audit ID fix (important)**: `AuditEntry.Id` changes from `aud_<counter>` to `aud_<random 16 hex>`. In dedicated-table mode the counter previously restarted at 1 after every restart, so new rows collided with existing `aud_1/aud_2/…` primary keys and were silently dropped by `ON CONFLICT DO NOTHING` — observable as "the audit page stops gaining records after a restart".
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.4（技能表单 `#sfImageWrite`）、§5.4.6（技能写入图库：开启、句柄、端点、安全模型、C# 示例）、§8.7（审计 ID 修复）、§9.x（两个自调用端点）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.277。
+English: `docs/user-guide.md` / `en.md` §4.3.4 (`#sfImageWrite` in the skill form), §5.4.6 (skill writes: enabling, handle, endpoints, security model, C# example), §8.7 (audit ID fix), §9.x (the two self-call endpoints); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.277.
+
+## 测试
+# Tests
+
+中文：新增 7 例——`AgentImageScopeBindingTests` ×5（写能力句柄绑定触发者 / 岗位 / 技能；文档技能读写同时注入；未开启不注入；客户端 / prompt 永不注入；配额与本轮新建库白名单）、`ClientToolBridgeApiTests` ×1（`imageWrite` 只对管理员 + 服务端非 prompt 保留）、`AuditStoreTests` ×1（重启后新实例写审计不再撞 ID）。**全量测试通过**（1838 → **1845**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1974，missing 0**；守卫脚本均过。Docker 真实端到端 **9/9**：管理员创建开启 `imageWrite` 的 dotnet 技能 → 技能试运行经 `imageWriteScopeId` 建库 + 传图 → 图库归属触发者且含图片 → 审计含 `skill.imageLibrary.create` / `.upload` → 无自令牌 / 伪造令牌均 403；测试后已清理。
+English: 7 new cases — `AgentImageScopeBindingTests` ×5 (the write handle is bound to the trigger user / agent / skill; document skills get both read and write; disabled skills get neither; client / prompt skills never get write; quota and the created-this-run allow-list), `ClientToolBridgeApiTests` ×1 (`imageWrite` is kept only for admin + server-side non-prompt), `AuditStoreTests` ×1 (a restarted instance no longer collides on audit IDs). **All tests pass** (1838 → **1845**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1974, missing 0**; guard scripts pass. Real Docker end-to-end **9/9**: an admin creates a dotnet skill with `imageWrite` → a trial run creates a library and uploads an image through `imageWriteScopeId` → the library is owned by the trigger user and contains the image → the audit contains `skill.imageLibrary.create` / `.upload` → no self token / a forged token both return 403; test data was cleaned up.
+
 
 **版本说明**：**提醒从「能推」到「不重不漏、不接也能看」**——① 提醒去重键**落盘**（扩展区 `quotaReminderState`），重启后不再重复推送同一条 `EXPIRING` / `EXPIRED`；② 新增**站内提醒**：管理员打开「用量统计」页即可看到即将到期 / 已回退，无需接 Webhook；③ 知聚设置新增 `+2 小时 / +1 天 / +3 天 / +7 天 / 清空` 到期模板。
 **Version note**: **From "can push" to "exactly once, and visible without an integration"** — ① reminder dedup keys are now **persisted** (extension section `quotaReminderState`), so a restart no longer re-delivers the same `EXPIRING` / `EXPIRED`; ② a new **in-app reminder** shows expiring / reverted allowances on the admin Usage Stats page without any webhook; ③ the group settings dialog gains `+2 hours / +1 day / +3 days / +7 days / Clear` expiry presets.

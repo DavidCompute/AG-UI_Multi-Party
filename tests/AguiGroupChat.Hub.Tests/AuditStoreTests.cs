@@ -42,6 +42,33 @@ public sealed class AuditStoreTests
     }
 
     [Fact]
+    public void AuditStore_RestartDoesNotReuseIds_NewEntriesStillLand()
+    {
+        var db = new SqliteStore($"Data Source=file:audit-restart-{Guid.NewGuid():N}?mode=memory&cache=shared");
+        db.EnsureSchema();
+        var store = new RelationalAuditStore(db);
+
+        // 第一个进程：写 3 条
+        var first = new AuditLogService(store);
+        first.Record("data.export", "user_1", "admin1", detail: "a");
+        first.Record("data.export", "user_1", "admin1", detail: "b");
+        first.Record("data.export", "user_1", "admin1", detail: "c");
+        Assert.Equal(3, first.Count);
+
+        // 模拟重启：新实例的自增序号从 0 重新开始（旧实现会生成 aud_1/aud_2 与库中撞主键，
+        // 被 ON CONFLICT DO NOTHING 静默丢弃）
+        var second = new AuditLogService(store);
+        second.Record("config.update", "user_1", "admin1", detail: "after-restart-1");
+        second.Record("config.update", "user_1", "admin1", detail: "after-restart-2");
+
+        Assert.Equal(5, second.Count);
+        var details = second.Query(10).Select(e => e.Detail).ToList();
+        Assert.Contains("after-restart-1", details);
+        Assert.Contains("after-restart-2", details);
+        Assert.All(second.Query(10), e => Assert.StartsWith("aud_", e.Id));
+    }
+
+    [Fact]
     public void AuditStore_Sqlite_FiltersByDetail()
     {
         var db = new SqliteStore($"Data Source=file:audit-detail-{Guid.NewGuid():N}?mode=memory&cache=shared");

@@ -219,6 +219,7 @@
   - **到期提醒 + 审计复盘（1.0.274）**：剩余 24 小时内每 15 分钟扫描一次，向出站 Webhook 发 `QUOTA_OVERRIDE_EXPIRING`（同一额度只发一次，事件目录 19 → 20）；审计页新增「⏰ 临时放额」快捷筛选（`/audit` 新增 `detail` 子串过滤，CSV 导出同口径）。
   - **提醒可配 + 到期回执 + 知聚筛选（1.0.275）**：提醒提前量 / 扫描间隔进配置治理（`quotaReminderLeadHours` / `quotaReminderScanMinutes`）；到期后 24 小时宽限期内补发 `QUOTA_OVERRIDE_EXPIRED`（事件目录 20 → 21）；审计页新增知聚下拉（`targetId`），可直看某知聚历次临时放额。
   - **跨重启去重 + 站内通道 + 到期模板（1.0.276）**：提醒去重键落盘（扩展区 `quotaReminderState`），重启不重复投递；用量页顶部新增站内提醒（`GET /ag-ui/admin/quota-reminders`，不依赖 Webhook）；知聚设置弹窗新增 `+2小时/+1天/+3天/+7天/清空` 到期模板。
+  - **技能写入图库（1.0.277）**：技能级 `imageWrite`（默认关闭、仅管理员 + 服务端非 prompt）；平台注入 `imageWriteScopeId`（10 分钟、每轮 1 库 / 20 图 / 单图 10MB）；新增自调用端点 `/ag-ui/images/libraries[/{id}/assets]`（建库 + 传图，只能写本轮新建的库）；全程审计；生成器提示词已包含该能力。同版修复审计 ID 重启后撞主键导致新记录被静默丢弃的缺陷。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

@@ -97,6 +97,14 @@ public static class SkillDefinitionGenerator
         // 早先把容器清单无条件拼接，会让“本机技能”被错误地告知“没有 pwsh/python”，反而生成出错的方案。
         var sandbox = SkillSandboxCapabilities.Describe(preferClient);
 
+        // 图库写入能力说明（仅在允许 dotnet 时拼接；单独定义避免条件表达式里字符串过长导致的解析问题）
+        const string imageWriteHint =
+            "【平台图库写入能力】若技能需要把图片素材沉淀到平台图库（管理员会在保存后开启「图库写入」）：\n" +
+            "平台会在入参 JSON 中注入 imageWriteScopeId（10 分钟能力句柄，绑定触发者/岗位/配额）。调用：\n" +
+            "POST {AGUI_SELF_BASE}/ag-ui/images/libraries  body:{writeScopeId,name,description?}（每轮最多建 1 个库）\n" +
+            "POST {AGUI_SELF_BASE}/ag-ui/images/libraries/{libId}/assets  body:{writeScopeId,attachmentId|fileName+base64,caption?,tags?}（每轮最多 20 张，单图≤10MB）\n" +
+            "请求头必须带 AGUI_SELF_TOKEN 请求头（值为环境变量 AGUI_SELF_TOKEN 的值）；只能写入本轮新建的图库。\n";
+
         return
             AgentCatalog.DeliberateFirstLine +
             "你是企业技能生成器。根据用户的自然语言需求，先给出取舍概述，再生成一份能直接保存的技能库配置。\n\n" +
@@ -109,7 +117,8 @@ public static class SkillDefinitionGenerator
                   "若需引用第三方 NuGet 库，在正文最顶部写一行 #r \"nuget: 包名, 版本\"（可多行，如 PdfSharp/Newtonsoft.Json），系统会在执行机器上联网还原。" +
                   (preferClient
                     ? "本次目标是本机，executionLocation 请写 client（由本机桥在用户机器编译执行，可直接访问该机路径/文件）。\n"
-                    : "executionLocation 按“目标环境”选择：操作本机文件建议 client（本机桥执行），纯计算/服务端数据则 server（Roslyn 编译执行）。\n")
+                    : "executionLocation 按“目标环境”选择：操作本机文件建议 client（本机桥执行），纯计算/服务端数据则 server（Roslyn 编译执行）。\n") +
+                  imageWriteHint
                 : "不要生成 kind=dotnet（非系统管理员无权建），也不要试图绕过。\n") +
             "skillId 用 ASCII（字母/数字/_/-，≤40）。只输出如下 JSON：\n" +
             "{\"name\":\"中文名\",\"skillId\":\"id\",\"kind\":\"(按允许类型)\",\"description\":\"给模型的调用说明，50~150 字\",\"body\":\"正文\",\"executionLocation\":\"server|client\",\"clientRunner\":null,\"requiresApproval\":true}\n\n" +

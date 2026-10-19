@@ -257,6 +257,94 @@ public static class ImageLibraryApi
         // ① 登录用户（前端调试）；② **技能的自令牌**（技能与平台同进程，没有用户会话）。
         // 过滤器只认用户令牌，会把技能请求在我方鉴权之前就 401 掉（实测踩过：注入生效、
         // 但技能一直静默回落网络）。鉴权在 handler 里自己做：IsSelf 或 RequireUser，两者都不过就 401。
+
+        // ---- 技能写入（1.0.277）：自令牌 + 写能力句柄 ----
+        // 安全模型：① 必须是技能自调用（AGUI_SELF_TOKEN）；② 必须持有平台注入的 imageWriteScopeId（10 分钟、
+        // 绑定触发者 / 岗位 / 配额）；③ 只能写入**本轮新建**的图库；④ 每轮配额与审计。
+        app.MapPost("/ag-ui/images/libraries", (ImageLibraryCreateBySkillRequest req, HttpContext ctx,
+            ImageLibraryCatalog catalog, AuthService auth, AuditLogService audit) =>
+        {
+            if (!SelfApi.IsSelf(ctx))
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "仅技能自调用可写入图库"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var scope = catalog.ResolveWriteScope(req.WriteScopeId);
+            if (scope is null)
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "写入能力句柄无效或已过期"),
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            var name = (req.Name ?? "").Trim();
+            if (name.Length == 0) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "图库名称不能为空"));
+            if (name.Length > 80) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "图库名称过长（≤80）"));
+            if (!catalog.TryConsumeLibraryCreate(scope))
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, $"本轮最多新建 {scope.MaxLibraries} 个图库"),
+                    statusCode: StatusCodes.Status429TooManyRequests);
+
+            var lib = catalog.CreateLibrary(name, req.Description ?? "", scope.OwnerUserId);
+            catalog.AllowWriteLibrary(scope, lib.LibId); // 后续只能在这个库里传图
+            audit.Record("skill.imageLibrary.create", scope.OwnerUserId, auth.GetUser(scope.OwnerUserId)?.Username,
+                targetType: "imageLibrary", targetId: lib.LibId,
+                detail: $"技能 {scope.SkillId ?? "-"}（岗位 {scope.AgentId ?? "-"}）新建图库「{lib.Name}」");
+            return Results.Ok(new { libId = lib.LibId, name = lib.Name, ownerId = lib.OwnerId });
+        });
+
+        app.MapPost("/ag-ui/images/libraries/{libId}/assets", (string libId, ImageAssetAddBySkillRequest req, HttpContext ctx,
+            ImageLibraryCatalog catalog, AttachmentStore attachments, AuthService auth, AuditLogService audit) =>
+        {
+            if (!SelfApi.IsSelf(ctx))
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "仅技能自调用可写入图库"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var scope = catalog.ResolveWriteScope(req.WriteScopeId);
+            if (scope is null)
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "写入能力句柄无效或已过期"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            if (!catalog.IsWriteLibraryAllowed(scope, libId))
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "该句柄无权写入此图库（只允许写入本轮新建的图库）"),
+                    statusCode: StatusCodes.Status403Forbidden);
+            var lib = catalog.GetLibrary(libId);
+            if (lib is null) return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"图库不存在：{libId}"));
+            if (!string.Equals(lib.OwnerId, scope.OwnerUserId, StringComparison.Ordinal))
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "图库归属与句柄不一致"),
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            byte[] bytes;
+            string? contentType = null;
+            var fileName = (req.FileName ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(req.AttachmentId))
+            {
+                var img = attachments.TryReadImageBytes(req.AttachmentId.Trim());
+                if (img is null)
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "附件不存在或不是图片"));
+                bytes = img.Value.Bytes;
+                contentType = img.Value.ContentType;
+                if (fileName.Length == 0) fileName = req.AttachmentId.Trim() + ".png";
+            }
+            else if (!string.IsNullOrWhiteSpace(req.Base64))
+            {
+                try { bytes = Convert.FromBase64String(req.Base64); }
+                catch { return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "base64 不是合法编码")); }
+                if (fileName.Length == 0)
+                    return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "base64 上传需提供 fileName（含扩展名）"));
+            }
+            else
+            {
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "attachmentId 或 base64 至少提供一个"));
+            }
+            if (bytes.LongLength > scope.MaxImageBytes)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest,
+                    $"图片过大（本轮上限 {scope.MaxImageBytes / 1024 / 1024} MB）"));
+            if (!catalog.TryConsumeImageUpload(scope))
+                return Results.Json(new AguiError(ErrorCodes.BadRequest, $"本轮最多上传 {scope.MaxImages} 张图片"),
+                    statusCode: StatusCodes.Status429TooManyRequests);
+
+            var (asset, error) = catalog.AddAsset(lib.LibId, fileName, contentType ?? "", bytes, scope.OwnerUserId);
+            if (asset is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "上传失败"));
+            if (!string.IsNullOrWhiteSpace(req.Caption)) asset.Caption = req.Caption!.Trim();
+            if (req.Tags is { Count: > 0 }) asset.Tags = req.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Take(20).ToList();
+            audit.Record("skill.imageLibrary.upload", scope.OwnerUserId, auth.GetUser(scope.OwnerUserId)?.Username,
+                targetType: "imageLibrary", targetId: lib.LibId,
+                detail: $"技能 {scope.SkillId ?? "-"}（岗位 {scope.AgentId ?? "-"}）上传图片 {fileName}（{bytes.LongLength / 1024} KB）");
+            return Results.Ok(ToAssetDto(lib, asset));
+        });
     }
 
     /// <summary>当前调用者的可见范围（成员群 + 是否管理员）。</summary>
@@ -319,3 +407,10 @@ public sealed record ImageAssetUpdateRequest(string? Caption, List<string>? Tags
 
 public sealed record ImageSearchRequest(string Query, List<string>? LibraryIds = null, int? TopK = null,
     double? MinScore = null, string? ScopeHandle = null);
+
+/// <summary>技能建库请求（1.0.277）：必须带平台注入的写能力句柄，仅自令牌可调。</summary>
+public sealed record ImageLibraryCreateBySkillRequest(string WriteScopeId, string Name, string? Description = null);
+
+/// <summary>技能传图请求（1.0.277）：<c>attachmentId</c> 或 <c>base64</c> 二选一；仅可写入本轮新建的图库。</summary>
+public sealed record ImageAssetAddBySkillRequest(string WriteScopeId, string? AttachmentId = null,
+    string? FileName = null, string? Base64 = null, string? Caption = null, List<string>? Tags = null);

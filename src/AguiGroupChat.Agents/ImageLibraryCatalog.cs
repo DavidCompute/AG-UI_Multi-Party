@@ -477,6 +477,111 @@ public sealed class ImageLibraryCatalog
         return entry.LibIds;
     }
 
+    // ================= 写入能力句柄（技能建库 / 传图，1.0.277） =================
+
+    /// <summary>写能力句柄 TTL：10 分钟（与检索句柄同口径）。</summary>
+    public const int WriteScopeTtlMs = 10 * 60 * 1000;
+    /// <summary>每轮最多新建图库数。</summary>
+    public const int DefaultWriteMaxLibraries = 1;
+    /// <summary>每轮最多上传图片数。</summary>
+    public const int DefaultWriteMaxImages = 20;
+    /// <summary>单张图片上限（10 MB；另受附件全局上限约束）。</summary>
+    public const long DefaultWriteMaxImageBytes = 10L * 1024 * 1024;
+
+    private readonly ConcurrentDictionary<string, ImageWriteScope> _writeScopes = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 一次技能调用内的**写入能力**：绑定触发者 / 岗位 / 技能、配额与到期时间。
+    /// 技能只能通过平台注入的 <c>imageWriteScopeId</c> 使用，不能自报图库越权。
+    /// </summary>
+    public sealed class ImageWriteScope
+    {
+        public required string ScopeId { get; init; }
+        public required string OwnerUserId { get; init; }
+        public string? AgentId { get; init; }
+        public string? SkillId { get; init; }
+        public required long ExpiresAtMs { get; init; }
+        public int MaxLibraries { get; init; } = DefaultWriteMaxLibraries;
+        public int MaxImages { get; init; } = DefaultWriteMaxImages;
+        public long MaxImageBytes { get; init; } = DefaultWriteMaxImageBytes;
+
+        internal readonly object Gate = new();
+        internal readonly HashSet<string> AllowedLibIds = new(StringComparer.Ordinal);
+        internal int LibrariesCreated;
+        internal int ImagesUploaded;
+    }
+
+    /// <summary>登记一个写入能力句柄（平台在调用开启 imageWrite 的技能前签发）。</summary>
+    public string RegisterWriteScope(string ownerUserId, string? agentId, string? skillId)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        foreach (var kv in _writeScopes)
+            if (now >= kv.Value.ExpiresAtMs) _writeScopes.TryRemove(kv.Key, out _);
+        if (_writeScopes.Count > MaxSearchScopes)
+            foreach (var kv in _writeScopes.OrderBy(k => k.Value.ExpiresAtMs).Take(_writeScopes.Count - MaxSearchScopes + 100).ToList())
+                _writeScopes.TryRemove(kv.Key, out _);
+
+        var handle = "iwscope_" + IdGenerator.NewId();
+        _writeScopes[handle] = new ImageWriteScope
+        {
+            ScopeId = handle,
+            OwnerUserId = ownerUserId,
+            AgentId = agentId,
+            SkillId = skillId,
+            ExpiresAtMs = now + WriteScopeTtlMs,
+        };
+        _logger.LogInformation("登记图库写入范围：agent={AgentId} skill={SkillId} owner={Owner} handle={Handle}",
+            agentId ?? "-", skillId ?? "-", ownerUserId, handle);
+        return handle;
+    }
+
+    /// <summary>句柄 → 写入能力；未知 / 已过期返回 null。</summary>
+    public ImageWriteScope? ResolveWriteScope(string? handle)
+    {
+        if (string.IsNullOrWhiteSpace(handle)) return null;
+        if (!_writeScopes.TryGetValue(handle!, out var scope)) return null;
+        if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() >= scope.ExpiresAtMs)
+        {
+            _writeScopes.TryRemove(handle!, out _);
+            return null;
+        }
+        return scope;
+    }
+
+    /// <summary>消耗一次「新建图库」配额；超出返回 false。</summary>
+    public bool TryConsumeLibraryCreate(ImageWriteScope scope)
+    {
+        lock (scope.Gate)
+        {
+            if (scope.LibrariesCreated >= scope.MaxLibraries) return false;
+            scope.LibrariesCreated++;
+            return true;
+        }
+    }
+
+    /// <summary>消耗一次「上传图片」配额；超出返回 false。</summary>
+    public bool TryConsumeImageUpload(ImageWriteScope scope)
+    {
+        lock (scope.Gate)
+        {
+            if (scope.ImagesUploaded >= scope.MaxImages) return false;
+            scope.ImagesUploaded++;
+            return true;
+        }
+    }
+
+    /// <summary>把本轮新建的图库记入该句柄（后续只能往这些库上传）。</summary>
+    public void AllowWriteLibrary(ImageWriteScope scope, string libId)
+    {
+        lock (scope.Gate) scope.AllowedLibIds.Add(libId);
+    }
+
+    /// <summary>该句柄是否允许写入指定图库（只允许本轮新建的库）。</summary>
+    public bool IsWriteLibraryAllowed(ImageWriteScope scope, string libId)
+    {
+        lock (scope.Gate) return scope.AllowedLibIds.Contains(libId);
+    }
+
     // ================= 检索 =================
 
     /// <summary>检索结果：给调用方（技能）的**文件路径** + 给用户看的描述。</summary>

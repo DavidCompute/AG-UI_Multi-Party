@@ -72,6 +72,18 @@ public sealed class AgentImageScopeBindingTests
         Body = "ls",
     };
 
+    /// <summary>开启图库写入的非文档技能（不会被注入读范围）。</summary>
+    private static readonly AgentSkillDefinition WriterSkill = new()
+    {
+        SkillId = "image_collector",
+        Name = "素材收集",
+        Description = "收集图片素材并沉淀到平台图库",
+        Kind = AgentSkillKind.Dotnet,
+        ExecutionLocation = AgentSkillExecutionLocation.Server,
+        ImageWrite = true,
+        Body = "",
+    };
+
     private static (AgentCatalog Catalog, ImageLibraryCatalog Libs) NewCatalog()
     {
         var options = new AgentOptions
@@ -111,6 +123,107 @@ public sealed class AgentImageScopeBindingTests
         using var doc = JsonDocument.Parse(injected);
         Assert.True(doc.RootElement.TryGetProperty("imageScopeId", out var h), "应注入 imageScopeId：" + injected);
         return libs.ResolveSearchScope(h.GetString());
+    }
+
+    private static ImageLibraryCatalog.ImageWriteScope? WriteScopeOf(string injected, ImageLibraryCatalog libs)
+    {
+        using var doc = JsonDocument.Parse(injected);
+        Assert.True(doc.RootElement.TryGetProperty("imageWriteScopeId", out var h), "应注入 imageWriteScopeId：" + injected);
+        return libs.ResolveWriteScope(h.GetString());
+    }
+
+    // ================= 图库写入能力（1.0.277） =================
+
+    [Fact]
+    public void ImageWriteSkill_InjectsWriteScopeBoundToTriggerUserAndAgent()
+    {
+        var (catalog, libs) = NewCatalog();
+        var injected = catalog.WithImageScope("{\"topic\":\"x\"}", WriterSkill, User, AgentId);
+        var scope = WriteScopeOf(injected, libs);
+
+        Assert.NotNull(scope);
+        Assert.Equal(User, scope!.OwnerUserId);
+        Assert.Equal(AgentId, scope.AgentId);
+        Assert.Equal(WriterSkill.SkillId, scope.SkillId);
+        Assert.Equal(1, scope.MaxLibraries);
+        Assert.Equal(20, scope.MaxImages);
+        Assert.False(libs.IsWriteLibraryAllowed(scope, "img_other")); // 尚未建库：任何已有库都不允许写
+    }
+
+    [Fact]
+    public void DocxSkillWithWrite_UsesBothReadAndWriteScopes()
+    {
+        var (catalog, libs) = NewCatalog();
+        var brand = libs.CreateLibrary("品牌图库", "", User);
+        Bind(catalog, brand.LibId);
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "docx_brand", Name = "品牌报告（Word）", Description = "生成 Word 品牌报告",
+            Kind = AgentSkillKind.Dotnet, ExecutionLocation = AgentSkillExecutionLocation.Server,
+            ImageWrite = true, Body = "",
+        };
+
+        var injected = catalog.WithImageScope("{\"title\":\"x\"}", skill, User, AgentId);
+        Assert.Equal([brand.LibId], ScopeOf(injected, libs));
+        Assert.NotNull(WriteScopeOf(injected, libs));
+    }
+
+    [Fact]
+    public void ImageWriteDisabled_NoWriteScopeInjected()
+    {
+        var (catalog, libs) = NewCatalog();
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "collect_no_write", Name = "素材收集", Description = "收集素材",
+            Kind = AgentSkillKind.Dotnet, ExecutionLocation = AgentSkillExecutionLocation.Server,
+            ImageWrite = false, Body = "",
+        };
+
+        Assert.Equal("{\"topic\":\"x\"}", catalog.WithImageScope("{\"topic\":\"x\"}", skill, User, AgentId));
+    }
+
+    [Fact]
+    public void ClientOrPromptSkill_NeverGetsWriteScope()
+    {
+        var (catalog, _) = NewCatalog();
+        var client = new AgentSkillDefinition
+        {
+            SkillId = "collect_client", Name = "本机收集", Description = "收集素材",
+            Kind = AgentSkillKind.Dotnet, ExecutionLocation = AgentSkillExecutionLocation.Client,
+            ImageWrite = true, Body = "",
+        };
+        var prompt = new AgentSkillDefinition
+        {
+            SkillId = "collect_prompt", Name = "提示词", Description = "只是模板",
+            Kind = AgentSkillKind.Prompt, ExecutionLocation = AgentSkillExecutionLocation.Server,
+            ImageWrite = true, Body = "",
+        };
+
+        Assert.Equal("{\"topic\":\"x\"}", catalog.WithImageScope("{\"topic\":\"x\"}", client, User, AgentId));
+        Assert.Equal("{\"topic\":\"x\"}", catalog.WithImageScope("{\"topic\":\"x\"}", prompt, User, AgentId));
+    }
+
+    [Fact]
+    public void WriteScope_EnforcesQuotasAndLibraryAllowList()
+    {
+        var (_, libs) = NewCatalog();
+        var handle = libs.RegisterWriteScope(User, AgentId, "image_collector");
+        var scope = libs.ResolveWriteScope(handle);
+        Assert.NotNull(scope);
+
+        // 每轮 1 个库 / 20 张图
+        Assert.True(libs.TryConsumeLibraryCreate(scope!));
+        Assert.False(libs.TryConsumeLibraryCreate(scope!));
+        for (var i = 0; i < 20; i++) Assert.True(libs.TryConsumeImageUpload(scope!));
+        Assert.False(libs.TryConsumeImageUpload(scope!));
+
+        // 只能写入本轮新建（并登记）的图库
+        var mine = libs.CreateLibrary("本轮新建", "", User);
+        Assert.False(libs.IsWriteLibraryAllowed(scope!, mine.LibId));
+        libs.AllowWriteLibrary(scope!, mine.LibId);
+        Assert.True(libs.IsWriteLibraryAllowed(scope!, mine.LibId));
+
+        Assert.Null(libs.ResolveWriteScope("iwscope_bogus"));
     }
 
     [Fact]

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.276**
+> Applies to version: **1.0.277**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1877,6 +1877,7 @@ Form (`#skillFormView`) fields and DOM ids:
 | `#sfClientRunnerGroup` / `#sfClientRunner` | ClientRunner (JSON) | Shown only for `client` |
 | `#sfBody` (label `#sfBodyLabel`) | Body | The label switches by type (`skill.form.bodyShell/Http/Prompt/Dotnet/OrgDeploy`) |
 | `#sfRequiresApproval` | Requires human approval to run | Disabled and force-checked for `shell`/`dotnet`/`client` |
+| `#sfImageWrite` | Allow writing to image libraries (1.0.277) | Visible only for **admin + server-side + non-prompt**; injects `imageWriteScopeId` into the skill's JSON input (see 5.4.6) |
 | `#sfBack` / `#sfTest` / `#sfSave` | Back / Test run / Save | |
 
 `syncSkillKind()` links them: shows the interpreter for `shell`; shows the ClientRunner for `client`; disables the approval checkbox for `shell`, `dotnet`, or `client` (approval is forced).
@@ -2492,6 +2493,37 @@ So "chunks / images that match lexically head-on" (such as the proper name "刘�
 
 - **Explainable**: each image in the search response (`/ag-ui/images/search`) carries `score`, `matchKind` (`vector` vs `keyword`), `tags`, and `mismatchCount`; the library's "test retrieval" (`#libSetModal`) shows these directly so it's clear *why* an image matched.
 - **Correctable (negative feedback)**: `POST /ag-ui/image-libs/{libId}/assets/{assetId}/feedback` (body `{relevant, query?}`) records relevant / not-relevant; feedback accumulates per **(query → image)** (`query` empty is stored as `*` = applies to all queries), and retrieval **lowers the score** only for the **same topic keyword** by the balance (`MismatchPenaltyStep = 0.08` each, capped at `MaxMismatchPenalty = 0.32`). Note the penalty is applied **after** gate filtering and does **not** re-apply the semantic gate (that would break the "keyword fallback bypasses the gate" invariant) — so the practical effect is **lower score / lower rank**, and an image is **excluded only once it is penalized down to 0**. Counts persist with the library snapshot (`MismatchCount` / `RelevantCount` are totals; `MismatchQueries` / `RelevantQueries` hold the per-query detail, newest 50 each; legacy entries without detail apply to all queries). The UI offers 👎 "mark not relevant" on each test-retrieval hit row (shown only to writers).
+
+#### 5.4.6 Skills writing to an image library (1.0.277, capability handle)
+
+Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/search`); now a skill can **write in a controlled way**, letting auto-generated skills deposit material into a library.
+
+**Enabling**: tick "Allow this skill to write to image libraries" in the skill form (`#sfImageWrite`, `AgentSkillDefinition.ImageWrite`). Off by default; only **admins** can enable it, and only for **server-side** non-`prompt` skills (client skills run on the user's machine and cannot reach the platform self token; `prompt` has no execution surface). The server forces `imageWrite=false` for anything else.
+
+**Injection**: before invoking the skill, `AgentCatalog.WithImageScope` injects `imageWriteScopeId` into the JSON input (alongside a document skill's `imageScopeId`). The handle lives 10 minutes, is bound to the trigger user / agent / skill, and carries quotas: **at most 1 library / 20 images / 10 MB per image per run** (`ImageLibraryCatalog.ImageWriteScope`).
+
+**Self-call endpoints** (no user token; use the request header `AGUI_SELF_TOKEN: <env value>`):
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| POST | `/ag-ui/images/libraries` | `{ writeScopeId, name, description? }` | Creates a library owned by the **trigger user**; returns `{ libId, name, ownerId }`; over quota → 429 |
+| POST | `/ag-ui/images/libraries/{libId}/assets` | `{ writeScopeId, attachmentId \| fileName+base64, caption?, tags? }` | Registers an image; only the library created in this run; over quota → 429 |
+
+**Security model**: ① the caller must be a skill self-call (`SelfApi.IsSelf`); ② the handle must be valid and unexpired; ③ writes are limited to the library created and registered in this run; ④ the library owner must match the handle's trigger user; ⑤ every write is audited as `skill.imageLibrary.create` / `skill.imageLibrary.upload` (with skillId + agentId + trigger user).
+
+**Skill-side example (C#)**:
+
+```csharp
+var scope = /* read imageWriteScopeId from the JSON input */;
+var baseUrl = Environment.GetEnvironmentVariable("AGUI_SELF_BASE");
+var token = Environment.GetEnvironmentVariable("AGUI_SELF_TOKEN");
+http.DefaultRequestHeaders.Add("AGUI_SELF_TOKEN", token);
+var create = await http.PostAsJsonAsync(baseUrl + "/ag-ui/images/libraries",
+    new { writeScopeId = scope, name = "Collected assets" });
+// then POST /ag-ui/images/libraries/{libId}/assets with writeScopeId and fileName+base64
+```
+
+> Auto-generated skills do **not** get write access by default; the generator prompt already documents the endpoints and quotas, and an admin ticks the box after saving.
 
 ### 5.5 Library settings: search strictness and test retrieval (`#libSetModal`)
 
@@ -4019,6 +4051,8 @@ The server (`AdminApi.cs:155-163`) returns `{ total, entries }`: `total = audit.
 
 **Hard cap of 200** (`AuditLogService.Query`, `AuditLogService.cs:80-93`): `limit = Math.Min(limit, Math.Min(count, 200))`; `limit <= 0` falls back to 100. All filters are substring / range matches and case-insensitive; the time range is `[fromMs, toMs]` (UTC milliseconds, inclusive of the endpoints).
 
+> **Audit IDs (fixed in 1.0.277)**: record IDs are now random `aud_<16hex>` (`IdGenerator.NewId`). Previously a **process-local auto-increment** restarted at `aud_1` after every restart, colliding with existing primary keys in the dedicated table and being silently dropped by `ON CONFLICT DO NOTHING` — observable as "the audit page stops gaining records after a restart". The fix applies to all audit writes, not just image libraries.
+
 Audit retention policy: `Capacity = 5000`, dropping the oldest when exceeded; in database mode (separate table `agui_audit`) it trims once every `256` writes (`AuditLogService.cs:15-23,71-93`).
 
 #### 8.7.2 CSV export (with BOM)
@@ -4678,6 +4712,8 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | POST | `/ag-ui/image-libs/{libId}/assets/{assetId}/feedback` | Illustration feedback (`{relevant, query?}`; lowers the score per query) | Login(strict) |
 | DELETE | `/ag-ui/image-libs/{libId}/assets/{assetId}` | Delete an image | Login(strict) |
 | GET | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | Read the original image (thumbnail / preview) | Login(strict) |
+| POST | `/ag-ui/images/libraries` | **Skill** creates a library (self token + `imageWriteScopeId`, see 5.4.6) | Self-call |
+| POST | `/ag-ui/images/libraries/{libId}/assets` | **Skill** uploads an image (self token + handle; `attachmentId` or base64) | Self-call |
 | POST | `/ag-ui/images/search` | Image library semantic search (**self-token or logged-in user**; the server path accepts only the self-token) | Self-token **or** Login(strict) |
 | GET | `/ag-ui/memory/groups` | Per-group memory statistics (within the manageable scope) | Login |
 | GET | `/ag-ui/memory` | Memory entry list (`groupId` / `senderId` / `keyword` / `limit` / `offset`; the queryable groups depend on the role) | Login |

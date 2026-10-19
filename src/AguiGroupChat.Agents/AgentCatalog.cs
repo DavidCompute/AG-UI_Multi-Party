@@ -249,32 +249,43 @@ public sealed class AgentCatalog
         try
         {
             if (string.IsNullOrWhiteSpace(query)) return query;
-            if (!AgentGatewayHelpers.IsDocumentGenerator(skill)) return query;
             var libs = _services.GetService<ImageLibraryCatalog>();
             if (libs is null) return query;
 
+            // 读范围：文档生成类技能（自动配图）
+            var wantRead = AgentGatewayHelpers.IsDocumentGenerator(skill);
+            // 写能力（1.0.277）：管理员显式开启 + 服务端执行 + 非 prompt + 已知触发者
+            var wantWrite = skill.ImageWrite
+                && !string.IsNullOrWhiteSpace(userId)
+                && skill.ExecutionLocation == AgentSkillExecutionLocation.Server
+                && skill.Kind is not AgentSkillKind.Prompt;
+            if (!wantRead && !wantWrite) return query;
+
             // 范围选择：岗位**绑定了图库就只用绑定的**（岗位用图更可控，如对外宣讲岗只准用已审核品牌图库）；
             // 没绑 = 用触发者本人可读的全部图库。
-            var bound = agentId is { } aid ? GetDefinition(aid)?.ImageLibraryIds : null;
-            var boundIds = bound?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [];
-            IReadOnlyList<string> ids;
-            if (boundIds.Count > 0)
+            IReadOnlyList<string> ids = [];
+            if (wantRead)
             {
-                var missing = boundIds.Where(id => libs.GetLibrary(id) is null).ToList();
-                if (missing.Count > 0)
-                    _logger.LogWarning("岗位绑定的图库已不存在（已跳过）：agent={AgentId} missing={Missing}",
-                        agentId, string.Join(",", missing));
-                ids = boundIds.Where(id => libs.GetLibrary(id) is not null).ToList();
+                var bound = agentId is { } aid ? GetDefinition(aid)?.ImageLibraryIds : null;
+                var boundIds = bound?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() ?? [];
+                if (boundIds.Count > 0)
+                {
+                    var missing = boundIds.Where(id => libs.GetLibrary(id) is null).ToList();
+                    if (missing.Count > 0)
+                        _logger.LogWarning("岗位绑定的图库已不存在（已跳过）：agent={AgentId} missing={Missing}",
+                            agentId, string.Join(",", missing));
+                    ids = boundIds.Where(id => libs.GetLibrary(id) is not null).ToList();
+                }
+                else
+                {
+                    var hub = _services.GetService<AguiGroupChat.Hub.Messaging.GroupHub>();
+                    var memberGroups = userId is null || hub is null
+                        ? new HashSet<string>(StringComparer.Ordinal)
+                        : hub.Store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
+                    ids = libs.ListLibraries(userId, memberGroups, isAdmin: false).Select(l => l.LibId).ToList();
+                }
             }
-            else
-            {
-                var hub = _services.GetService<AguiGroupChat.Hub.Messaging.GroupHub>();
-                var memberGroups = userId is null || hub is null
-                    ? new HashSet<string>(StringComparer.Ordinal)
-                    : hub.Store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
-                ids = libs.ListLibraries(userId, memberGroups, isAdmin: false).Select(l => l.LibId).ToList();
-            }
-            if (ids.Count == 0)
+            if (wantRead && ids.Count == 0 && !wantWrite)
             {
                 // 一个可用图库都没有：不注入，技能直接走图库之外的路径（不报错、不堆 warnings）
                 _logger.LogInformation("文档技能无可用图库可注入：skill={SkillId} user={User}", skill.SkillId, userId ?? "（未知触发者）");
@@ -288,26 +299,34 @@ public sealed class AgentCatalog
             // 容错不了就必须**原样交回**，不能拿空对象顶替（那会把技能改成“参数为空”）。
             if (!TryExtractJsonObject(query, out var normalized))
             {
-                _logger.LogDebug("文档技能入参不是 JSON 对象，跳过图库注入：skill={SkillId}", skill.SkillId);
+                _logger.LogDebug("技能入参不是 JSON 对象，跳过图库能力注入：skill={SkillId}", skill.SkillId);
                 return query;
             }
 
-            var handle = libs.RegisterSearchScope(ids, agentId);
             using var doc = JsonDocument.Parse(normalized);
             var dict = new Dictionary<string, object?>();
             foreach (var p in doc.RootElement.EnumerateObject())
                 dict[p.Name] = JsonSerializer.Deserialize<object?>(p.Value.GetRawText());
-            dict["imageScopeId"] = handle;
-            var rewritten = JsonSerializer.Serialize(dict, AguiJson.Options);
-            _logger.LogInformation("已为文档技能注入图库检索范围：skill={SkillId} user={User} libs={Count}",
-                skill.SkillId, userId ?? "（未知触发者）", ids.Count);
-            return rewritten;
+
+            if (wantRead && ids.Count > 0)
+            {
+                dict["imageScopeId"] = libs.RegisterSearchScope(ids, agentId);
+                _logger.LogInformation("已为文档技能注入图库检索范围：skill={SkillId} user={User} libs={Count}",
+                    skill.SkillId, userId ?? "（未知触发者）", ids.Count);
+            }
+            if (wantWrite)
+            {
+                dict["imageWriteScopeId"] = libs.RegisterWriteScope(userId!, agentId, skill.SkillId);
+                _logger.LogInformation("已为技能注入图库写入能力：skill={SkillId} agent={AgentId} owner={User}",
+                    skill.SkillId, agentId ?? "-", userId);
+            }
+            return JsonSerializer.Serialize(dict, AguiJson.Options);
         }
         catch (Exception ex)
         {
             // 注入失败绝不能把技能执行带坏：原样入参交回去，技能自己会降级（图库取不到就回落）。
             // 但**要报出来** —— 图库静默不生效是最难查的一类问题。
-            _logger.LogWarning(ex, "注入图库检索范围失败（按无图库处理）：skill={SkillId}", skill.SkillId);
+            _logger.LogWarning(ex, "注入图库能力失败（按无图库处理）：skill={SkillId}", skill.SkillId);
             return query;
         }
     }

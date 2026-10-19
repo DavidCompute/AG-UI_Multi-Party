@@ -66,6 +66,13 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
     private async Task<string> RegisterAsync(string username)
     {
         var res = await _client.PostAsJsonAsync("/ag-ui/user/register", new { username, password = "secret1", nickname = username });
+        if (res.StatusCode == HttpStatusCode.Conflict)
+        {
+            // 共享夹具：多个用例可能注册同一个管理员（如 admin_chief）→ 回退登录拿令牌
+            var login = await _client.PostAsJsonAsync("/ag-ui/user/login", new { username, password = "secret1" });
+            login.EnsureSuccessStatusCode();
+            return (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+        }
         res.EnsureSuccessStatusCode();
         return (await res.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
     }
@@ -75,6 +82,37 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
         var req = new HttpRequestMessage(method, path);
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
         return req;
+    }
+
+    [Fact]
+    public async Task ImageWrite_FlagOnlySticksForAdminServerNonPromptSkills()
+    {
+        var adminTok = await RegisterAsync("admin_chief");
+
+        async Task CreateAsync(string id, string kind, string location, bool imageWrite, string body)
+        {
+            using var req = Authed(HttpMethod.Post, "/ag-ui/skills", adminTok);
+            req.Content = JsonContent.Create(new
+            {
+                skillId = id, name = id, description = "图库写入测试", kind, body,
+                executionLocation = location, requiresApproval = true, imageWrite,
+            });
+            var res = await _client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        }
+
+        const string dotnetBody = "public class Skill { public static string Run(string input) => \"ok\"; }";
+        await CreateAsync("iw_server", "dotnet", "server", true, dotnetBody);
+        await CreateAsync("iw_prompt", "prompt", "server", true, "");
+        await CreateAsync("iw_client", "dotnet", "client", true, dotnetBody);
+
+        using var listReq = Authed(HttpMethod.Get, "/ag-ui/skills", adminTok);
+        var list = await (await _client.SendAsync(listReq)).Content.ReadFromJsonAsync<JsonElement>();
+        var rows = list.EnumerateArray().ToDictionary(x => x.GetProperty("skillId").GetString()!, x => x);
+
+        Assert.True(rows["iw_server"].GetProperty("imageWrite").GetBoolean());  // 服务端非 prompt → 保留
+        Assert.False(rows["iw_prompt"].GetProperty("imageWrite").GetBoolean()); // prompt → 强制关闭
+        Assert.False(rows["iw_client"].GetProperty("imageWrite").GetBoolean()); // 客户端执行 → 强制关闭
     }
 
     [Fact]
