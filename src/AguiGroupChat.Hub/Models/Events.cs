@@ -87,6 +87,9 @@ public static class EventTypes
     /// <summary>临时放额即将到期（1.0.274）：某知聚的配额覆写带到期时间且已进入提醒窗口。
     /// 同样只经出站 Webhook 推送（不走群广播）——避免管理员设了临时放额后忘记续期。</summary>
     public const string QuotaOverrideExpiring = "QUOTA_OVERRIDE_EXPIRING";
+    /// <summary>临时放额已到期（1.0.275）：到期时间已过、额度已回退全局。只经出站 Webhook 推送，
+    /// 与「即将到期」配对，让告警平台能确认「回退已发生」。</summary>
+    public const string QuotaOverrideExpired = "QUOTA_OVERRIDE_EXPIRED";
 }
 
 // ================= 服务端下行事件 =================
@@ -132,6 +135,26 @@ public sealed class QuotaOverrideExpiringEvent
     public required long Until { get; init; }
     /// <summary>距到期的剩余秒数（> 0）。</summary>
     public required long RemainingSeconds { get; init; }
+    public required long Timestamp { get; init; }
+}
+
+/// <summary>
+/// QUOTA_OVERRIDE_EXPIRED（Hub 扩展，1.0.275）：某知聚的**临时放额已到期并回退全局**。
+/// 只进出站 Webhook（不经群广播）——与 <see cref="QuotaOverrideExpiringEvent"/> 配对，形成
+/// 「即将到期 → 已回退」的完整闭环。
+/// 只在到期后的**宽限期**（24 小时）内发一次；更早的历史过期数据不会在重启时被补发。
+/// </summary>
+public sealed class QuotaOverrideExpiredEvent
+{
+    public string Type => EventTypes.QuotaOverrideExpired;
+    public required string GroupId { get; init; }
+    public required string GroupName { get; init; }
+    /// <summary>到期前生效的覆写额度（0 = 本知聚不限）。</summary>
+    public required long Quota { get; init; }
+    /// <summary>到期时间（UTC 毫秒）。</summary>
+    public required long Until { get; init; }
+    /// <summary>已过期多少秒（> 0）。</summary>
+    public required long ExpiredSeconds { get; init; }
     public required long Timestamp { get; init; }
 }
 

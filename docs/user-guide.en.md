@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.274**
+> Applies to version: **1.0.275**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -689,7 +689,7 @@ Support circles, in language and implementation: support circles **do not suppor
 - **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value, and for a temporary allowance appends "temporary until {time}"); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).
 - **Rendering**: the group-list endpoint `GET /ag-ui/member/{memberId}/groups` returns `quotaOverride` and `quotaOverrideUntil` (`null` = not overridden / no expiry), and `openGroupSettings()` backfills both.
 - **Audit (1.0.268 / 1.0.273)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global"); when an expiry is set, "; effective until yyyy-MM-dd HH:mmZ" is appended. The audit page's "⏰ Temporary allowances" quick filter matches on that detail (1.0.274, see 8.7).
-- **Expiry reminder (1.0.274)**: once the remaining time enters **24 hours**, `QuotaExpiryReminderService` scans every 15 minutes and emits `QUOTA_OVERRIDE_EXPIRING` to outbound webhooks (once per allowance, see 8.19); the reminder is notification only — the actual fallback still relies on the lazy evaluation above.
+- **Expiry reminder (1.0.274 / 1.0.275)**: `QuotaExpiryReminderService` scans periodically and emits two events to outbound webhooks — `QUOTA_OVERRIDE_EXPIRING` when the remaining time enters the **reminder window** (24 hours by default, configurable in Config Governance), and `QUOTA_OVERRIDE_EXPIRED` within the **24-hour grace period** after expiry (confirming the fallback happened); each event fires once per allowance, see 8.19. The reminder is notification only — the actual fallback still relies on the lazy evaluation above.
 - **External visibility**: the change rides on the existing `GROUP_UPDATED` event (`updateFields` contains `quotaPerGroup` / `quotaPerGroupUntil`, `groupInfo` carries the new value, and it is pushed **even with nobody online**) — no dedicated event needed; see 8.19.
 
 #### 2.2.3 Disbanding a Circle
@@ -4010,6 +4010,8 @@ View `#adminAuditView` (`index.html:1687-1702`): the filter bar `#auditActor` (`
 
 **Quick filter "⏰ Temporary allowances" (1.0.274)**: `#auditExpiringBtn` is a toggle chip (adds the `on` class and `aria-pressed=true` when active). Clicking it fills `action` with `group.quotaOverride` and adds `detail=有效期至`, and clicking again clears both. The server's `detail` filter is a **case-insensitive substring match**, so only override records carrying an expiry are returned; the CSV export reuses the same conditions. The audit detail is a fixed Chinese marker (it does not follow the UI language), so the frontend uses the same literal `AUDIT_EXPIRING_DETAIL` as the filter value.
 
+**Filter by circle (1.0.275)**: the `#auditGroupPick` dropdown loads all circles from `GET /ag-ui/admin/groups` on first entry; selecting one queries by `targetId=<groupId>` (taking precedence over the manual target input) and re-queries on change. Combined with "⏰ Temporary allowances" it answers "how many temporary allowances has this circle had?" directly.
+
 The server (`AdminApi.cs:155-163`) returns `{ total, entries }`: `total = audit.Count`, `entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs, detail)`.
 
 **Hard cap of 200** (`AuditLogService.Query`, `AuditLogService.cs:80-93`): `limit = Math.Min(limit, Math.Min(count, 200))`; `limit <= 0` falls back to 100. All filters are substring / range matches and case-insensitive; the time range is `[fromMs, toMs]` (UTC milliseconds, inclusive of the endpoints).
@@ -4149,9 +4151,9 @@ View `#adminConfigView` (`index.html`): the hint `admin.configHint` (which state
 
 Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/config` (`app.js` `loadConfigGovernance` / `collectCfg`).
 
-#### 8.10.1 Hot-changeable keys (23 in the UI / 23 in the state layer) + bounds
+#### 8.10.1 Hot-changeable keys (25 in the UI / 25 in the state layer) + bounds
 
-`ConfigGovernanceState` (`ConfigGovernanceApi.cs:18-47`) has **23** fields in total, and the UI form presents **23** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields (`ConfigGovernanceApi.cs:50-74`).
+`ConfigGovernanceState` (`ConfigGovernanceApi.cs`) has **25** fields in total, and the UI form presents **25** too. The write request body `ConfigGovernanceHttpRequest` corresponds one-to-one with the state fields.
 
 | # | Frontend field DOM id | Key `key` | Type | UI label i18n | Bounds / validation |
 |---|---|---|---|---|---|
@@ -4178,8 +4180,10 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 20 | `#cfgMemInteractiveWait` | `memoryInteractiveEmbeddingWaitSeconds` | int | `admin.memInteractiveWait` | 1..600 |
 | 21 | `#cfgMemBackgroundWait` | `memoryBackgroundEmbeddingWaitSeconds` | int | `admin.memBackgroundWait` | 1..3600 |
 | 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0 (**0 = dedup off**) |
+| 23 | `#cfgQuotaReminderLeadHours` | `quotaReminderLeadHours` | int | `admin.quotaReminderLead` | 1..720 (**new in 1.0.275**; read per scan) |
+| 24 | `#cfgQuotaReminderScanMinutes` | `quotaReminderScanMinutes` | int | `admin.quotaReminderScan` | 1..1440 (**new in 1.0.275**; reschedules on save) |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative).
+Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440).
 
 > **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-72`), so saving applies at once.
 
@@ -4424,7 +4428,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | List subscriptions; the **signing secret is masked** (only `hasSecret`) |
-| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (20) |
+| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (21) |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | Last 100 delivery records (newest first) |
 | `POST` | `/ag-ui/admin/webhooks` | Create; **returns the plaintext secret once** (`whsec_…`) |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | Update (null fields = unchanged; `rotateSecret=true` rotates and returns the new secret) |
@@ -4433,7 +4437,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 
 **Subscription fields**: `name`, `url` (**must be an absolute http / https URL**, else 400), `eventTypes` (none selected = all except high-frequency streaming deltas; types outside the catalog are rejected with 400), `groupId` (optional, scopes pushes to one circle), `enabled`.
 
-**Selectable event types (20)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, **`QUOTA_THRESHOLD` (1.0.270)**, and **`QUOTA_OVERRIDE_EXPIRING` (1.0.274)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+**Selectable event types (21)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, **`QUOTA_THRESHOLD` (1.0.270)**, **`QUOTA_OVERRIDE_EXPIRING` (1.0.274)**, and **`QUOTA_OVERRIDE_EXPIRED` (1.0.275)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 
@@ -4456,10 +4460,21 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
   "quota": 4321, "until": 1800000000000, "remainingSeconds": 3600, "timestamp": 1767225600000 }
 ```
 
-- **Scanning**: the first scan runs **1 minute** after the host starts, then every **15 minutes** (`QuotaExpiryReminderService`, no persisted scheduler state); only overrides that are **still effective** (`IsQuotaOverrideActive`) with `until` in `(now, now+24h]` are reminded.
+- **Scanning**: the first scan runs **1 minute** after the host starts, then every `quotaReminderScanMinutes` from Config Governance (default **15 minutes**); only overrides that are **still effective** (`IsQuotaOverrideActive`) with `until` in `(now, now+lead]` are reminded (lead defaults to **24 hours**, key `quotaReminderLeadHours`).
 - **No flooding**: the same allowance (`groupId + until`) fires **once per process**; when the quota is cleared / the expiry is changed / it expires / the circle is disbanded, the dedup key is pruned on the next scan (setting the same deadline again later will remind again). A restart may emit once more (same convention as `QUOTA_THRESHOLD`; dedupe by `groupId + until` on the receiving side).
 - **Subscription filtering**: `groupId` is the circle itself, so group-scoped subscriptions receive it too.
 - **Relationship to expiry**: the reminder is **notification only**; the actual fallback to the global quota remains a **lazy read-time evaluation** (see 2.2.2.2) and happens even if nobody subscribes to webhooks.
+
+**`QUOTA_OVERRIDE_EXPIRED` (temporary allowance already reverted, 1.0.275)**: delivered once when the expiry has passed and the quota has fallen back to the global value; `data` is:
+
+```jsonc
+{ "type": "QUOTA_OVERRIDE_EXPIRED", "groupId": "group_xxx", "groupName": "Temp allowance circle",
+  "quota": 4321, "until": 1800000000000, "expiredSeconds": 600, "timestamp": 1767225600000 }
+```
+
+- **Grace-period only**: sent only when the expiry is at most **24 hours** in the past — upgrades / restarts do not flood historical data.
+- **Paired with `QUOTA_OVERRIDE_EXPIRING`**: the same allowance produces "expiring" first and "expired" after the deadline, so an alerting platform can confirm the policy actually took effect.
+- **Stored values remain**: expiry only affects effectiveness; `quotaPerGroup` / `quotaPerGroupUntil` are not cleared (see 2.2.2.2).
 
 **How external systems see override changes**: the **change itself** of a circle-level **model / quota override has no dedicated event** — it rides on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup` / `quotaPerGroupUntil`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**. A dedicated `QUOTA_OVERRIDE_EXPIRING` event exists for **pre-expiry reminders** (see above).
 

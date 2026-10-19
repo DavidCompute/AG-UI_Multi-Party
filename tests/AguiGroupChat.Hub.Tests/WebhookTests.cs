@@ -157,6 +157,33 @@ public sealed class WebhookTests
     }
 
     [Fact]
+    public async Task DeliverEventAsync_QuotaOverrideExpiredEnvelope()
+    {
+        Assert.Contains(EventTypes.QuotaOverrideExpired, WebhookApi.EventCatalog);
+
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var dispatcher = Create(handler);
+        var sub = Sub(EventTypes.QuotaOverrideExpired);
+        var evt = new QuotaOverrideExpiredEvent
+        {
+            GroupId = "group_2", GroupName = "已回退群", Quota = 4321,
+            Until = 1_800_000_000_000, ExpiredSeconds = 600, Timestamp = 1,
+        };
+
+        var record = await dispatcher.DeliverEventAsync(sub, EventTypes.QuotaOverrideExpired, "group_2", evt);
+
+        Assert.True(record.Ok);
+        var (request, body) = Assert.Single(handler.Requests);
+        Assert.Equal(EventTypes.QuotaOverrideExpired, request.Headers.GetValues("X-KnowGath-Event").Single());
+        using var doc = JsonDocument.Parse(body);
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("group_2", data.GetProperty("groupId").GetString());
+        Assert.Equal("已回退群", data.GetProperty("groupName").GetString());
+        Assert.Equal(4321, data.GetProperty("quota").GetInt64());
+        Assert.Equal(600, data.GetProperty("expiredSeconds").GetInt64());
+    }
+
+    [Fact]
     public async Task DeliverEventAsync_PostsSignedEnvelope()
     {
         var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));

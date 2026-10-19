@@ -44,6 +44,10 @@ public sealed class ConfigGovernanceState
     public int? MemoryInteractiveEmbeddingWaitSeconds { get; set; }
     public int? MemoryBackgroundEmbeddingWaitSeconds { get; set; }
     public int? MemoryWriteEmbeddingCacheSize { get; set; }
+    // 临时放额到期提醒（1.0.275）：提前多久提醒（小时）与扫描间隔（分钟）。
+    // null = 用服务内置默认（24h / 15min）；服务每轮扫描重新读取，因此保存后**下一轮**生效。
+    public int? QuotaReminderLeadHours { get; set; }
+    public int? QuotaReminderScanMinutes { get; set; }
 }
 
 /// <summary>配置治理写入请求体（每个字段可空，仅更新非空项）。</summary>
@@ -71,7 +75,10 @@ public sealed record ConfigGovernanceHttpRequest(
     int? MemoryMaxWriteChars,
     int? MemoryInteractiveEmbeddingWaitSeconds,
     int? MemoryBackgroundEmbeddingWaitSeconds,
-    int? MemoryWriteEmbeddingCacheSize);
+    int? MemoryWriteEmbeddingCacheSize,
+    // 临时放额到期提醒（1.0.275）：提前量与扫描间隔
+    int? QuotaReminderLeadHours,
+    int? QuotaReminderScanMinutes);
 
 public static class ConfigGovernanceApi
 {
@@ -136,6 +143,8 @@ public static class ConfigGovernanceApi
             if (req.MemoryInteractiveEmbeddingWaitSeconds is { } q3 && q3 is not (> 0 and <= 600)) return BadReq("memoryInteractiveEmbeddingWaitSeconds 需在 1..600");
             if (req.MemoryBackgroundEmbeddingWaitSeconds is { } q4 && q4 is not (> 0 and <= 3_600)) return BadReq("memoryBackgroundEmbeddingWaitSeconds 需在 1..3600");
             if (req.MemoryWriteEmbeddingCacheSize is < 0) return BadReq("memoryWriteEmbeddingCacheSize 不能为负");
+            if (req.QuotaReminderLeadHours is { } qr1 && qr1 is not (> 0 and <= 720)) return BadReq("quotaReminderLeadHours 需在 1..720");
+            if (req.QuotaReminderScanMinutes is { } qr2 && qr2 is not (> 0 and <= 1440)) return BadReq("quotaReminderScanMinutes 需在 1..1440");
 
             // 更新持久化状态（保留未传/为空字段的旧值；数组用 ??= 保留旧列表）
             state.MessageHistoryLimit = req.MessageHistoryLimit ?? state.MessageHistoryLimit;
@@ -161,9 +170,13 @@ public static class ConfigGovernanceApi
             state.MemoryInteractiveEmbeddingWaitSeconds = req.MemoryInteractiveEmbeddingWaitSeconds ?? state.MemoryInteractiveEmbeddingWaitSeconds;
             state.MemoryBackgroundEmbeddingWaitSeconds = req.MemoryBackgroundEmbeddingWaitSeconds ?? state.MemoryBackgroundEmbeddingWaitSeconds;
             state.MemoryWriteEmbeddingCacheSize = req.MemoryWriteEmbeddingCacheSize ?? state.MemoryWriteEmbeddingCacheSize;
+            state.QuotaReminderLeadHours = req.QuotaReminderLeadHours ?? state.QuotaReminderLeadHours;
+            state.QuotaReminderScanMinutes = req.QuotaReminderScanMinutes ?? state.QuotaReminderScanMinutes;
 
             Apply(state, groupChat, authOptions, agents);
             changes.Notify(); // 驱动持久化
+            // 提醒间隔可能刚被改：按新值重新安排下一轮（提前量在每轮扫描时自然读取）
+            sp.GetService<QuotaExpiryReminderService>()?.Reschedule();
 
             audit.Record("config.update", me, auth.GetUser(me)?.Username,
                 detail: "更新运行配置（会话/群/消息/工具/审批/嵌入）");
@@ -212,6 +225,8 @@ public static class ConfigGovernanceApi
             state.MemoryInteractiveEmbeddingWaitSeconds = saved.MemoryInteractiveEmbeddingWaitSeconds;
             state.MemoryBackgroundEmbeddingWaitSeconds = saved.MemoryBackgroundEmbeddingWaitSeconds;
             state.MemoryWriteEmbeddingCacheSize = saved.MemoryWriteEmbeddingCacheSize;
+            state.QuotaReminderLeadHours = saved.QuotaReminderLeadHours;
+            state.QuotaReminderScanMinutes = saved.QuotaReminderScanMinutes;
             // 把覆盖应用到运行时单例（重启后重新加载配置时一并覆盖）
             var groupChat = services.GetService<GroupChatOptions>();
             var auth = services.GetService<AuthOptions>();

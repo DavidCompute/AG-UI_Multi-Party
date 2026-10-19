@@ -2057,6 +2057,8 @@
           <div class="form-group"><label data-i18n="admin.retention">消息保留天数（0=不清理）</label><input id="cfgMessageRetentionDays" class="modal-input" type="number" min="0" /></div>
           <div class="form-group"><label data-i18n="admin.quota">每日 Token 配额 / 用户</label><input id="cfgDailyTokenQuota" class="modal-input" type="number" min="0" /></div>
           <div class="form-group"><label data-i18n="admin.quotaGroup">每日 Token 配额 / 知聚（0=不限）</label><input id="cfgDailyTokenQuotaGroup" class="modal-input" type="number" min="0" /></div>
+          <div class="form-group"><label data-i18n="admin.quotaReminderLead">临时放额提醒提前量（小时）</label><input id="cfgQuotaReminderLeadHours" class="modal-input" type="number" min="1" max="720" placeholder="24" /></div>
+          <div class="form-group"><label data-i18n="admin.quotaReminderScan">临时放额扫描间隔（分钟）</label><input id="cfgQuotaReminderScanMinutes" class="modal-input" type="number" min="1" max="1440" placeholder="15" /></div>
           <div class="form-group"><label data-i18n="admin.writeDebounce">流式落库防抖（毫秒，0=立即）</label><input id="cfgMessageWriteDebounceMs" class="modal-input" type="number" min="0" /></div>
         </div>
         <div class="config-checks">
@@ -2150,6 +2152,9 @@
             <input id="auditTarget" class="modal-input" data-i18n-placeholder="admin.auditTargetPh" />
             <button type="button" class="search-clear" data-clear-for="auditTarget" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
+          <select id="auditGroupPick" class="modal-input" style="width:180px" data-i18n-title="admin.auditGroupPick">
+            <option value="" data-i18n="admin.auditAllGroups">全部知聚</option>
+          </select>
           <button id="auditSearchBtn" class="chip-btn" type="button" data-i18n="admin.auditSearch">🔍 查询</button>
           <button id="auditExpiringBtn" class="chip-btn" type="button" aria-pressed="false" data-i18n="admin.auditExpiring">⏰ 临时放额</button>
           <button id="auditExportBtn" class="chip-btn" type="button" data-i18n="admin.auditExport">⬇ 导出 CSV</button>

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.274**
+> 适用版本：**1.0.275**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -688,7 +688,7 @@
 - **与水位预警联动**：用量页「今日各知聚明细」的配额使用列改用**该行自己的分母**；与全局值不同时在知聚名后标 `⚙`（悬停显示具体额度，临时放额还会追加「临时放额至 {time}」）；侧边栏 `⚠` / `🔴` 角标也按各知聚自己的额度算（见 2.1.1 / 8.6）。
 - **回显**：群列表接口 `GET /ag-ui/member/{memberId}/groups` 下发 `quotaOverride` 与 `quotaOverrideUntil`（`null` = 未覆写 / 长期），`openGroupSettings()` 回填两者。
 - **审计（1.0.268 / 1.0.273）**：变更记 `group.quotaOverride`（action），detail 为改后的实际值（含「取消，回退全局」）；设了到期时间时追加「；有效期至 yyyy-MM-dd HH:mmZ」。审计页的「⏰ 临时放额」快捷筛选直接按该 detail 过滤（1.0.274，见 §8.7）。
-- **到期提醒（1.0.274）**：剩余时间进入 **24 小时**时，`QuotaExpiryReminderService` 每 15 分钟扫描一次并向出站 Webhook 发 `QUOTA_OVERRIDE_EXPIRING`（同一额度只发一次，见 §8.19）；提醒只是事前通知，真正回退仍靠上述惰性判定。
+- **到期提醒（1.0.274 / 1.0.275）**：`QuotaExpiryReminderService` 周期扫描并向出站 Webhook 发两类事件——剩余时间进入**提醒窗口**（默认 24 小时，可在「配置治理」改）时发 `QUOTA_OVERRIDE_EXPIRING`，到期后 **24 小时宽限期**内再发一条 `QUOTA_OVERRIDE_EXPIRED`（确认已回退全局）；同一额度每种事件只发一次，见 §8.19。提醒只是事前通知，真正回退仍靠上述惰性判定。
 - **对外感知**：变更随既有 `GROUP_UPDATED` 事件下发（`updateFields` 含 `quotaPerGroup` / `quotaPerGroupUntil`、`groupInfo` 带新值，且**无人在线也会推**），无需专用事件；详见 §8.19。
 
 #### 2.2.3 解散知聚
@@ -4001,6 +4001,8 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **快捷筛选「⏰ 临时放额」（1.0.274）**：`#auditExpiringBtn` 是一个开关式 chip（激活时加 `on` 类、`aria-pressed=true`），点击后自动把 `action` 填为 `group.quotaOverride` 并附 `detail=有效期至`，再次点击清空。服务端 `detail` 为**子串匹配**（大小写不敏感），因此只返回带到期时间的覆写记录；导出 CSV 也沿用同一条件。审计 detail 固定为中文标记（不随界面语言变化），前端用同一字面量 `AUDIT_EXPIRING_DETAIL` 作为过滤值。
 
+**按知聚筛选（1.0.275）**：`#auditGroupPick` 下拉首次进入审计页时从 `GET /ag-ui/admin/groups` 拉取全部知聚；选中后以 `targetId=<groupId>` 查询（优先于手填的目标输入框），切换即重新查询。与「⏰ 临时放额」组合使用即可回答「这个知聚历史上放过几次临时额度」。
+
 服务端（`AdminApi.cs:155-163`）返回 `{ total, entries }`：`total = audit.Count`，`entries = audit.Query(limit ?? 100, actor, action, targetId, fromMs, toMs)`。
 
 **硬上限 200**（`AuditLogService.Query`，`AuditLogService.cs:80-93`）：`limit = Math.Min(limit, Math.Min(count, 200))`；`limit <= 0` 回退 100。过滤均为子串 / 区间匹配、不区分大小写；时间范围 `[fromMs, toMs]`（UTC 毫秒含端点）。
@@ -4140,9 +4142,9 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 接口：读 `GET /ag-ui/admin/config/governance`，写 `POST /ag-ui/admin/config`（`app.js` 的 `loadConfigGovernance` / `collectCfg`）。
 
-#### 8.10.1 可热改键（UI 23 个 / 状态层 23 个）+ 边界
+#### 8.10.1 可热改键（UI 25 个 / 状态层 25 个）+ 边界
 
-`ConfigGovernanceState`（`ConfigGovernanceApi.cs:18-47`）共 **23** 个字段，UI 表单亦呈现 **23** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应（`ConfigGovernanceApi.cs:50-74`）。
+`ConfigGovernanceState`（`ConfigGovernanceApi.cs`）共 **25** 个字段，UI 表单亦呈现 **25** 个。写请求体 `ConfigGovernanceHttpRequest` 与状态字段一一对应。
 
 | # | 前端字段 DOM id | 键 `key` | 类型 | UI 标签 i18n | 边界 / 校验 |
 |---|---|---|---|---|---|
@@ -4169,14 +4171,18 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 20 | `#cfgMemInteractiveWait` | `memoryInteractiveEmbeddingWaitSeconds` | int | `admin.memInteractiveWait` | 1..600 |
 | 21 | `#cfgMemBackgroundWait` | `memoryBackgroundEmbeddingWaitSeconds` | int | `admin.memBackgroundWait` | 1..3600 |
 | 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0（**0 = 关闭去重**） |
+| 23 | `#cfgQuotaReminderLeadHours` | `quotaReminderLeadHours` | int | `admin.quotaReminderLead` | 1..720（**1.0.275 新增**；服务端按轮读取） |
+| 24 | `#cfgQuotaReminderScanMinutes` | `quotaReminderScanMinutes` | int | `admin.quotaReminderScan` | 1..1440（**1.0.275 新增**；保存时重排下一轮） |
 
-边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）。
+边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）；提醒旋钮越界同样 400（`quotaReminderLeadHours` 需在 1..720，`quotaReminderScanMinutes` 需在 1..1440）。
 
 > **记忆与向量化（6.3 + 2.4/2.6，1.0.263）**：#18–#22 对应 `AgentOptions.Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`。这四个（除缓存容量外）在**每次写入 / 检索时重新读取**，所以保存即生效；缓存容量则由写入路径**按需重建 / 热改容量**（改 0 = 立即关闭去重，改大 / 改小按 LRU 即时生效）。它们是「语义记忆检索慢 / 超时」的主旋钮（embedding 耗时与输入长度成正比），无需再改 appsettings / 重启。并发额度（`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`）因闸门信号量在启动时定型，仍属**需重启**项（见 8.10.4）。
 
 > **配额（1.0.264）**：#6 / #6b 分别对应 `AgentOptions.DailyTokenQuotaPerUser` 与 `AgentOptions.DailyTokenQuotaPerGroup`（`0` = 不限）。两者均为「超限拒绝新触发」型硬限：按用户配额**豁免** `system` 触发者，按知聚配额**不豁免**（把定时 / 广播那路消耗管住）。它们由 `AgentUsageService` 以 `Func<long>` **实时读取**（`AgentHosting.cs:66-72`），所以保存即生效。
 
 > **模型路由（6.7，1.0.260）**：#14–#17 对应 `AgentOptions.ModelRouting`（`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`）。**StandardModel 为本版新增**——此前 Standard 档固定不换。启用后按「复杂度自适应」同一份估计器（`RunComplexityEstimator`）为 Simple / Standard / Complex / Heavy 四档分别选模型（留空 = 该档不换）；例如 Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。与后台 `Agents:ModelRouting`（env `AGENTS_MODELROUTING_*`）同源，页面保存后即时生效并持久化。注意：与列表项「空 = 不修改」不同，模型名走字符串 `??` 语义 —— **空串会清空该档**（前端总是提交这三个字段，即“保存 = 以表单为准”）。
+
+> **临时放额提醒（1.0.275）**：#23 / #24 直接由 `QuotaExpiryReminderService` 读取 `ConfigGovernanceState`（未设时回退 24 小时 / 15 分钟）。提醒提前量在**每轮扫描时**重新读取；扫描间隔在保存时通过 `Reschedule()` 重排下一轮（最长等一个旧周期），无需重启。
 
 #### 8.10.2 三态布尔与「未传不改」
 
@@ -4414,7 +4420,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | 列出订阅；**签名密钥脱敏**（只回 `hasSecret`，不回明文） |
-| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（20 类） |
+| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（21 类） |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | 最近 100 条投递记录（新→旧） |
 | `POST` | `/ag-ui/admin/webhooks` | 新建订阅；**返回一次性明文密钥** `whsec_…` |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | 更新订阅（字段为空 = 不变更；`rotateSecret=true` 轮换密钥并回新密钥） |
@@ -4423,7 +4429,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **订阅字段**：`name`（展示名）、`url`（**必须 http / https 绝对 URL**，否则 400）、`eventTypes`（不选＝除高频流式增量外的全部；目录外类型会被 400 拒绝）、`groupId`（可选，限定只推送该知聚）、`enabled`（启用 / 停用）。
 
-**可选事件类型（20 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`、**`QUOTA_THRESHOLD`（1.0.270）**、**`QUOTA_OVERRIDE_EXPIRING`（1.0.274）**。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
+**可选事件类型（21 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`、**`QUOTA_THRESHOLD`（1.0.270）**、**`QUOTA_OVERRIDE_EXPIRING`（1.0.274）**、**`QUOTA_OVERRIDE_EXPIRED`（1.0.275）**。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
 
 **`QUOTA_THRESHOLD`（配额预警推送，1.0.270）**：不是群广播事件，**只经出站 Webhook 推送**。当某用户 / 某知聚的当日用量**首次**跨过配额的 80%（`warn`）或 100%（`over`）时推送一条；`data` 为：
 
@@ -4446,10 +4452,21 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
   "quota": 4321, "until": 1800000000000, "remainingSeconds": 3600, "timestamp": 1767225600000 }
 ```
 
-- **扫描方式**：宿主启动后 **1 分钟**首次扫描、此后每 **15 分钟**一次（`QuotaExpiryReminderService`，无持久化调度状态）；只提醒**仍生效**（`IsQuotaOverrideActive`）且 `until` 在 `(now, now+24h]` 的覆写。
+- **扫描方式**：宿主启动后 **1 分钟**首次扫描，此后按「配置治理」的 `quotaReminderScanMinutes`（默认 **15 分钟**）循环；只提醒**仍生效**（`IsQuotaOverrideActive`）且 `until` 在 `(now, now+提前量]` 的覆写（提前量默认 **24 小时**，配置键 `quotaReminderLeadHours`）。
 - **不刷屏**：同一额度（`groupId + until`）在进程内**只发一次**；额度取消 / 到期时间改写 / 已到期 / 知聚解散后，去重键在下一轮扫描被清理（若之后又设回同样的到期时间，会重新提醒）。重启后可能再发一次（与 `QUOTA_THRESHOLD` 同约定，告警平台可按 `groupId + until` 去重）。
 - **订阅过滤**：`groupId` 为该知聚，因此限定了知聚的订阅也能收到（与事件本身同知聚）。
 - **与到期失效的关系**：提醒只是「事前通知」；真正回退全局仍是**惰性判定**（见 §2.2.2.2），即使没人订阅 Webhook 也照常生效。
+
+**`QUOTA_OVERRIDE_EXPIRED`（临时放额已回退，1.0.275）**：到期时间已过、额度已回退全局时推送一条（只发一次）；`data` 为：
+
+```jsonc
+{ "type": "QUOTA_OVERRIDE_EXPIRED", "groupId": "group_xxx", "groupName": "临时放额知聚",
+  "quota": 4321, "until": 1800000000000, "expiredSeconds": 600, "timestamp": 1767225600000 }
+```
+
+- **只在宽限期内补发**：仅当「已过期 ≤ 24 小时」时发送——升级 / 重启不会为历史过期数据洪水式补发。
+- **与 `QUOTA_OVERRIDE_EXPIRING` 配对**：同一额度先收「即将到期」、到期后再收「已回退」，告警平台可据此确认策略真的生效。
+- **存储旧值仍保留**：到期只影响生效判定，`quotaPerGroup` / `quotaPerGroupUntil` 不会被清除（见 §2.2.2.2）。
 
 **覆写变更如何被外部感知**：知聚级**模型 / 配额覆写的变更本身没有单独事件**——它们随既有 `GROUP_UPDATED` 下发：`updateFields` 含 `model` / `quotaPerGroup` / `quotaPerGroupUntil`，`groupInfo` 带请求里的新值（`group-config` 事件对象见 §4.2）。出站钩子先于「无订阅者则提前返回」执行，所以**即使该知聚无人在线也会推送**。另有专门的 `QUOTA_OVERRIDE_EXPIRING` 事件用于**到期前提醒**（见上）。
 

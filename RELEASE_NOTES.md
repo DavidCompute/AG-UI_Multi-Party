@@ -1,5 +1,36 @@
-# AG-UI 群聊桌面版 1.0.274 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.274 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.275 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.275 Release Notes (current Windows desktop release)
+
+**版本说明**：**临时放额提醒的完整闭环**——① 提醒提前量与扫描间隔可在「配置治理」热改（默认 24 小时 / 15 分钟）；② 到期后 **24 小时宽限期**内补发 `QUOTA_OVERRIDE_EXPIRED`，让告警平台确定性看到「已回退全局」；③ 审计页新增**知聚下拉筛选**，可与「⏰ 临时放额」组合直看某知聚历次放额。
+**Version note**: **A complete loop for temporary-allowance reminders** — ① the lead time and scan interval are hot-changeable in Config Governance (default 24 hours / 15 minutes); ② within the **24-hour grace period** after expiry a `QUOTA_OVERRIDE_EXPIRED` event confirms the fallback to the global quota; ③ the audit page gains a **circle dropdown** that combines with "⏰ Temporary allowances" to review a circle's allowance history.
+
+## 变更
+# Changes
+
+中文：
+- **配置治理新增 2 个旋钮**：`quotaReminderLeadHours`（1..720）与 `quotaReminderScanMinutes`（1..1440），对应 `#cfgQuotaReminderLeadHours` / `#cfgQuotaReminderScanMinutes`；未设时回退 24 小时 / 15 分钟。提前量在**每轮扫描时**读取；扫描间隔保存时通过 `Reschedule()` 重排下一轮（最长等一个旧周期），无需重启。
+- **新事件 `QUOTA_OVERRIDE_EXPIRED`**：`{ groupId, groupName, quota, until, expiredSeconds, timestamp }`；到期后 24 小时宽限期内只发一次（升级 / 重启不会为历史数据洪水式补发），事件目录 **20 → 21**。
+- **提醒服务重构**：每轮扫描返回 `{ Expiring, Expired }` 两组事件；去重表分开维护，额度取消 / 改期 / 知聚解散时一并清理；定时器改为「每轮结束后按当前配置重排」，并加 `Interlocked` 防重入。
+- **审计页知聚下拉**：`#auditGroupPick` 首次进入审计页时从 `GET /ag-ui/admin/groups` 加载全部知聚；选中后以 `targetId=<groupId>` 查询（优先于手填目标），切换即重查；CSV 导出同口径。
+
+English:
+- **Two new Config Governance knobs**: `quotaReminderLeadHours` (1..720) and `quotaReminderScanMinutes` (1..1440), bound to `#cfgQuotaReminderLeadHours` / `#cfgQuotaReminderScanMinutes`; unset falls back to 24 hours / 15 minutes. The lead time is read **on every scan**; saving the scan interval calls `Reschedule()` so the next run is re-armed (at most one old interval of delay) with no restart.
+- **New event `QUOTA_OVERRIDE_EXPIRED`**: `{ groupId, groupName, quota, until, expiredSeconds, timestamp }`; emitted once within the 24-hour grace period after expiry (upgrades / restarts do not flood historical data); catalog **20 → 21**.
+- **Reminder service rework**: each scan returns `{ Expiring, Expired }`; the two dedup maps are maintained separately and pruned when the allowance is cleared / re-dated / the circle is disbanded; the timer now re-arms with the current config after each run, with an `Interlocked` re-entrancy guard.
+- **Audit circle dropdown**: `#auditGroupPick` loads all circles from `GET /ag-ui/admin/groups` on first entry; selecting one queries by `targetId=<groupId>` (taking precedence over the manual target) and re-queries on change; CSV export uses the same conditions.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2.2（两类提醒事件）、§8.7（知聚下拉）、§8.10（可热改键 23 → 25 + 新旋钮说明）、§8.19（事件目录 **21 类** + `QUOTA_OVERRIDE_EXPIRED` 小节）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.275。
+English: `docs/user-guide.md` / `en.md` §2.2.2.2 (both reminder events), §8.7 (circle dropdown), §8.10 (hot keys 23 → 25 + the new knobs), §8.19 (catalog **21 types** + the `QUOTA_OVERRIDE_EXPIRED` subsection); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.275.
+
+## 测试
+# Tests
+
+中文：新增 5 例——`QuotaExpiryReminderTests` ×4（提前量可配为 48h、到期后宽限期内发一次 `QUOTA_OVERRIDE_EXPIRED`、超过 24h 宽限期的历史数据不补发、取消覆写后两类事件均停止；既有 4 例适配新返回结构）；`WebhookTests` ×1（`QUOTA_OVERRIDE_EXPIRED` 在目录内 + 签名信封与载荷字段）。**全量测试通过**（1830 → **1835**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1958，missing 0**；`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 均过。Docker 重建后实测：Webhook 事件目录返回 **21 类**；配置治理写入两个新旋钮 → 回读一致（非法值 400）；浏览器自动化：知聚下拉加载、选择后请求带 `targetId`、与临时放额 chip 组合生效、无页面脚本错误。
+English: 5 new cases — `QuotaExpiryReminderTests` ×4 (a 48-hour configurable lead, one `QUOTA_OVERRIDE_EXPIRED` within the grace period, no back-fill for history older than 24 hours, both event kinds stop after the allowance is cleared; the existing 4 were adapted to the new result shape); `WebhookTests` ×1 (`QUOTA_OVERRIDE_EXPIRED` is in the catalog + the signed envelope and payload fields). **All tests pass** (1830 → **1835**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1958, missing 0**; `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass. After a Docker rebuild: the webhook catalog returns **21 types**; the two new governance knobs round-trip (invalid values 400); browser automation confirms the circle dropdown loads, the request carries `targetId`, it combines with the temporary-allowance chip, and there are no page script errors.
+
 
 **版本说明**：**临时放额的闭合管理**——① 到期前 **24 小时**通过出站 Webhook 推一条 `QUOTA_OVERRIDE_EXPIRING`（同一额度只发一次），避免管理员设了临时放额后忘记续期；② 审计页新增 **「⏰ 临时放额」快捷筛选**，一键只看带到期时间的覆写变更（`/audit` 新增 `detail` 子串过滤，CSV 导出同口径）。
 **Version note**: **Closing the loop on temporary allowances** — ① a `QUOTA_OVERRIDE_EXPIRING` event is pushed to outbound webhooks **24 hours before expiry** (once per allowance), so admins no longer forget to renew; ② the audit page gains a **"⏰ Temporary allowances" quick filter** that shows only override changes carrying an expiry (`/audit` gains a `detail` substring filter, with CSV export using the same conditions).

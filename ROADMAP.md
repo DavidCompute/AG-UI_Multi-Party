@@ -217,6 +217,7 @@
   - **前端审核修复（1.0.272）**：`GROUP_UPDATED` 现在同步 `model` / `quotaPerGroup`（之前只同步群名 / 头像 / 私密，导致另一位管理员改完覆写后本端弹窗回填旧值）；水位值加白名单；用量页失败时三张表全清。
   - **临时放额（1.0.273）**：知聚配额覆写可带**到期时间**（`Group.Extra["quotaPerGroupUntil"]`），到期后**惰性回退全局**（无后台任务，读时判定；存储旧值保留供管理员查看）；取消覆写时额度与到期时间一并清除；`/usage` 行新增 `quotaUntil`，审计 detail 追加有效期。
   - **到期提醒 + 审计复盘（1.0.274）**：剩余 24 小时内每 15 分钟扫描一次，向出站 Webhook 发 `QUOTA_OVERRIDE_EXPIRING`（同一额度只发一次，事件目录 19 → 20）；审计页新增「⏰ 临时放额」快捷筛选（`/audit` 新增 `detail` 子串过滤，CSV 导出同口径）。
+  - **提醒可配 + 到期回执 + 知聚筛选（1.0.275）**：提醒提前量 / 扫描间隔进配置治理（`quotaReminderLeadHours` / `quotaReminderScanMinutes`）；到期后 24 小时宽限期内补发 `QUOTA_OVERRIDE_EXPIRED`（事件目录 20 → 21）；审计页新增知聚下拉（`targetId`），可直看某知聚历次临时放额。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

@@ -7967,6 +7967,7 @@ function switchAdminTab(tab) {
   } else if (exec) {
     loadExecutionConfig();
   } else if (audit) {
+    ensureAuditGroupOptions();
     loadAdminAudit();
   } else if (orphans) {
     loadAdminOrphans();
@@ -9052,6 +9053,8 @@ async function loadConfigGovernance() {
     setCfg("cfgMessageRetentionDays", d.messageRetentionDays);
     setCfg("cfgDailyTokenQuota", d.dailyTokenQuotaPerUser);
     setCfg("cfgDailyTokenQuotaGroup", d.dailyTokenQuotaPerGroup);
+    setCfg("cfgQuotaReminderLeadHours", d.quotaReminderLeadHours);
+    setCfg("cfgQuotaReminderScanMinutes", d.quotaReminderScanMinutes);
     setCfg("cfgMessageWriteDebounceMs", d.messageWriteDebounceMs);
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
@@ -9101,6 +9104,8 @@ function collectCfg() {
   body.messageRetentionDays = numOrNull("cfgMessageRetentionDays");
   body.dailyTokenQuotaPerUser = numOrNull("cfgDailyTokenQuota");
   body.dailyTokenQuotaPerGroup = numOrNull("cfgDailyTokenQuotaGroup");
+  body.quotaReminderLeadHours = numOrNull("cfgQuotaReminderLeadHours");
+  body.quotaReminderScanMinutes = numOrNull("cfgQuotaReminderScanMinutes");
   body.messageWriteDebounceMs = numOrNull("cfgMessageWriteDebounceMs");
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");
@@ -9335,6 +9340,23 @@ function roleBadge(r) {
    因此这里用同一字面量做过滤值；按钮只写 action + detail 两个条件，其余过滤框保持用户输入。 */
 const AUDIT_EXPIRING_DETAIL = "有效期至";
 let auditExpiringOnly = false;
+let auditGroupsLoaded = false;
+
+/** 审计页知聚下拉：首次进入时拉取全部知聚（只读，失败不影响查询）。 */
+async function ensureAuditGroupOptions(force = false) {
+  const sel = $("auditGroupPick");
+  if (!sel || (auditGroupsLoaded && !force)) return;
+  try {
+    const res = await fetch("/ag-ui/admin/groups", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) return;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">${escapeHtml(t("admin.auditAllGroups"))}</option>`
+      + (d.groups || []).map((g) => `<option value="${escapeHtml(g.groupId)}">${escapeHtml(g.name)}</option>`).join("");
+    if (keep) sel.value = keep;
+    auditGroupsLoaded = true;
+  } catch { /* 下拉不可用不影响审计查询 */ }
+}
 
 function toggleAuditExpiringFilter() {
   auditExpiringOnly = !auditExpiringOnly;
@@ -9357,7 +9379,9 @@ async function loadAdminAudit() {
   const target = ($("auditTarget").value || "").trim();
   if (actor) q.set("actor", actor);
   if (action) q.set("action", action);
-  if (target) q.set("targetId", target);
+  const pickedGroup = $("auditGroupPick")?.value || "";
+  if (pickedGroup) q.set("targetId", pickedGroup);
+  else if (target) q.set("targetId", target);
   if (auditExpiringOnly) q.set("detail", AUDIT_EXPIRING_DETAIL);
   q.set("limit", "200");
   try {
@@ -9384,7 +9408,9 @@ async function exportAdminAuditCsv() {
   const target = ($("auditTarget").value || "").trim();
   if (actor) q.set("actor", actor);
   if (action) q.set("action", action);
-  if (target) q.set("targetId", target);
+  const pickedGroup = $("auditGroupPick")?.value || "";
+  if (pickedGroup) q.set("targetId", pickedGroup);
+  else if (target) q.set("targetId", target);
   if (auditExpiringOnly) q.set("detail", AUDIT_EXPIRING_DETAIL);
   try {
     const res = await fetch(`/ag-ui/admin/audit.csv?${q.toString()}`, { headers: { Authorization: "Bearer " + state.token } });
@@ -14369,6 +14395,7 @@ function init() {
   $("storageReclaimBtn").onclick = runStorageReclaim;
   $("auditSearchBtn").onclick = () => loadAdminAudit();
   if ($("auditExpiringBtn")) $("auditExpiringBtn").onclick = toggleAuditExpiringFilter;
+  if ($("auditGroupPick")) $("auditGroupPick").onchange = () => loadAdminAudit();
   $("auditExportBtn").onclick = exportAdminAuditCsv;
   ["auditActor", "auditAction", "auditTarget"].forEach((id) =>
     $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); loadAdminAudit(); } }));
