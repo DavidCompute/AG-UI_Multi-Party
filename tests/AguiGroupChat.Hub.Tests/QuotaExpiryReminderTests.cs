@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Web;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -13,8 +14,10 @@ namespace AguiGroupChat.Hub.Tests;
 /// </summary>
 public sealed class QuotaExpiryReminderTests
 {
-    private static QuotaExpiryReminderService NewService(HubFixture f, ConfigGovernanceState? cfg = null)
-        => new(f.Hub, cfg ?? new ConfigGovernanceState(), dispatcher: null, NullLogger<QuotaExpiryReminderService>.Instance);
+    private static QuotaExpiryReminderService NewService(HubFixture f, ConfigGovernanceState? cfg = null,
+        QuotaReminderStateStore? store = null)
+        => new(f.Hub, cfg ?? new ConfigGovernanceState(), store ?? new QuotaReminderStateStore(),
+            new ChangeHub(), dispatcher: null, NullLogger<QuotaExpiryReminderService>.Instance);
 
     private static Task SetAllowanceAsync(HubFixture f, string gid, long quota, long? until)
     {
@@ -194,5 +197,51 @@ public sealed class QuotaExpiryReminderTests
         var result = svc.RunOnce(f.Hub.NowMs);
         Assert.Empty(result.Expiring);
         Assert.Empty(result.Expired);
+    }
+
+    [Fact]
+    public async Task RunOnce_DedupSurvivesRestart_WhenStoreIsShared()
+    {
+        var clock = new FakeClock();
+        var f = new HubFixture(time: clock);
+        var store = new QuotaReminderStateStore();
+
+        // 即将到期：第一个实例发一次，模拟重启后的第二个实例（同一持久化 store）不再重复
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "重启去重", "user_1", "user_2");
+        var until = clock.GetUtcNow().AddHours(2).ToUnixTimeMilliseconds();
+        await SetAllowanceAsync(f, group.GroupId, 5000, until);
+
+        Assert.Single(NewService(f, store: store).RunOnce(f.Hub.NowMs).Expiring);
+        Assert.Empty(NewService(f, store: store).RunOnce(f.Hub.NowMs).Expiring);
+
+        // 已到期：同样跨实例只发一次
+        var group2 = await HubFixture.CreateGroupAsync(f.Hub, "重启去重-已到期", "user_1", "user_2");
+        var past = clock.GetUtcNow().AddMinutes(-30).ToUnixTimeMilliseconds();
+        await SetAllowanceAsync(f, group2.GroupId, 6000, past);
+
+        Assert.Single(NewService(f, store: store).RunOnce(f.Hub.NowMs).Expired);
+        Assert.Empty(NewService(f, store: store).RunOnce(f.Hub.NowMs).Expired);
+    }
+
+    [Fact]
+    public void ReminderStateStore_MarksPrunesAndRestores()
+    {
+        var store = new QuotaReminderStateStore();
+        Assert.True(store.MarkExpiring("g1|100"));
+        Assert.False(store.MarkExpiring("g1|100"));
+        Assert.True(store.MarkExpired("g1|100"));
+        Assert.False(store.MarkExpired("g1|100"));
+        Assert.Equal((1, 1), store.Counts);
+
+        // 只保留 g2|200 → g1 的两类键都被清掉
+        Assert.True(store.Prune(new HashSet<string> { "g2|200" }));
+        Assert.Equal((0, 0), store.Counts);
+        Assert.False(store.Prune(new HashSet<string> { "g2|200" })); // 无变化
+
+        store.Restore(["g3|300"], ["g4|400"]);
+        Assert.Equal(["g3|300"], store.SnapshotExpiring());
+        Assert.Equal(["g4|400"], store.SnapshotExpired());
+        store.Clear();
+        Assert.Equal((0, 0), store.Counts);
     }
 }

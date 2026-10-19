@@ -1500,6 +1500,14 @@
         <input id="gsQuotaOverride" class="modal-input" type="number" min="0" placeholder="0 = 本知聚不限" />
         <label for="gsQuotaUntil" data-i18n="gs.quotaUntil" style="margin-top:8px">⏳ 临时放额到期时间（留空 = 长期有效）</label>
         <input id="gsQuotaUntil" class="modal-input" type="datetime-local" />
+        <!-- 到期时长快捷模板（1.0.276）：只填到期时间，不改额度 -->
+        <div class="gs-until-presets" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+          <button type="button" class="chip-btn" data-until-hours="2" data-i18n="gs.until2h">+2 小时</button>
+          <button type="button" class="chip-btn" data-until-hours="24" data-i18n="gs.until1d">+1 天</button>
+          <button type="button" class="chip-btn" data-until-hours="72" data-i18n="gs.until3d">+3 天</button>
+          <button type="button" class="chip-btn" data-until-hours="168" data-i18n="gs.until7d">+7 天</button>
+          <button type="button" class="chip-btn" data-until-hours="0" data-i18n="gs.untilClear">清空</button>
+        </div>
         <span style="color:#8a8f98;font-size:12px" data-i18n="gs.quotaHint">仅平台管理员可设；优先于全局 Agents:DailyTokenQuotaPerGroup。全局配额对所有知聚一刀切，但知聚之间开销差异很大——可给客服知聚单独放额，或设为 0 让本知聚不限。留空 / 负数 = 取消覆写；到期后自动回退全局配额（无需人工改回）。</span>
       </div>
       <div class="danger-zone">
@@ -1868,6 +1876,16 @@
         </div>
       </div>
       <div id="adminUsageView" class="hidden">
+        <!-- 临时放额站内提醒（1.0.276）：不依赖 Webhook，打开用量页即可看到即将到期 / 已回退 -->
+        <div id="adminQuotaReminders" class="hidden" style="margin-bottom:12px">
+          <p class="form-hint" style="margin:2px 0 6px"><b data-i18n="admin.quotaRemindersTitle">⏳ 临时放额提醒</b> <span id="adminQuotaRemindersMeta"></span></p>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th data-i18n="admin.thGroup">知聚</th><th data-i18n="admin.thQuotaValue">额度</th><th data-i18n="admin.thUntil">到期时间</th><th data-i18n="admin.thState">状态</th></tr></thead>
+              <tbody id="adminQuotaReminderRows"></tbody>
+            </table>
+          </div>
+        </div>
         <p id="adminUsageMeta" class="form-hint"></p>
         <div class="admin-table-wrap">
           <table class="admin-table">

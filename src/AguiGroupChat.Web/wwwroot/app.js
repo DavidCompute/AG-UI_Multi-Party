@@ -8938,6 +8938,7 @@ async function loadReplicas() {
 
 /** 用量统计：最近 7 天按日汇总 + 配额配置。 */
 async function loadAdminUsage() {
+  loadQuotaReminders(); // 站内提醒（不阻断主表加载）
   try {
     const res = await fetch("/ag-ui/admin/usage?days=7", { headers: { Authorization: "Bearer " + state.token } });
     const data = await res.json().catch(() => null);
@@ -9036,6 +9037,35 @@ async function loadAdminUsage() {
     $("adminUsageGroupRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
     $("adminUsageUserRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
   }
+}
+
+/** 临时放额站内提醒（1.0.276）：管理员打开用量页即可看到即将到期 / 已回退，不依赖 Webhook。 */
+async function loadQuotaReminders() {
+  const box = $("adminQuotaReminders");
+  if (!box) return;
+  try {
+    const res = await fetch("/ag-ui/admin/quota-reminders", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const items = (res.ok && d && Array.isArray(d.items)) ? d.items : [];
+    if (!items.length) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    $("adminQuotaRemindersMeta").textContent = t("admin.quotaRemindersMeta", { lead: d.leadHours, n: items.length });
+    $("adminQuotaReminderRows").innerHTML = items.map((it) => {
+      const sec = Math.max(0, Number(it.seconds) || 0);
+      const state = it.state === "expired"
+        ? t("admin.quotaReminderExpired")
+        : sec >= 3600
+          ? t("admin.quotaReminderHoursLeft", { n: Math.ceil(sec / 3600) })
+          : t("admin.quotaReminderMinutesLeft", { n: Math.max(1, Math.ceil(sec / 60)) });
+      const quota = Number(it.quota) === 0 ? t("admin.quotaUnlimited") : Number(it.quota).toLocaleString();
+      return `<tr>
+        <td>${escapeHtml(it.name || it.groupId)}</td>
+        <td>${escapeHtml(quota)}</td>
+        <td class="nowrap">${fmtDateTime(Number(it.until) || 0)}</td>
+        <td>${escapeHtml(state)}</td>
+      </tr>`;
+    }).join("");
+  } catch { box.classList.add("hidden"); }
 }
 
 /* ============ 配置治理（6.3）：管理员在线调参 ============ */
@@ -14396,6 +14426,13 @@ function init() {
   $("auditSearchBtn").onclick = () => loadAdminAudit();
   if ($("auditExpiringBtn")) $("auditExpiringBtn").onclick = toggleAuditExpiringFilter;
   if ($("auditGroupPick")) $("auditGroupPick").onchange = () => loadAdminAudit();
+  // 临时放额到期时长快捷模板（只填到期时间，不改额度）
+  document.querySelectorAll("#gsQuotaGroup [data-until-hours]").forEach((btn) => {
+    btn.onclick = () => {
+      const h = Number(btn.dataset.untilHours) || 0;
+      $("gsQuotaUntil").value = h > 0 ? msToLocalInput(Date.now() + h * 3600_000) : "";
+    };
+  });
   $("auditExportBtn").onclick = exportAdminAuditCsv;
   ["auditActor", "auditAction", "auditTarget"].forEach((id) =>
     $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); loadAdminAudit(); } }));

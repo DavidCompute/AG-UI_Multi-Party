@@ -1,5 +1,36 @@
-# AG-UI 群聊桌面版 1.0.275 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.275 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.276 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.276 Release Notes (current Windows desktop release)
+
+**版本说明**：**提醒从「能推」到「不重不漏、不接也能看」**——① 提醒去重键**落盘**（扩展区 `quotaReminderState`），重启后不再重复推送同一条 `EXPIRING` / `EXPIRED`；② 新增**站内提醒**：管理员打开「用量统计」页即可看到即将到期 / 已回退，无需接 Webhook；③ 知聚设置新增 `+2 小时 / +1 天 / +3 天 / +7 天 / 清空` 到期模板。
+**Version note**: **From "can push" to "exactly once, and visible without an integration"** — ① reminder dedup keys are now **persisted** (extension section `quotaReminderState`), so a restart no longer re-delivers the same `EXPIRING` / `EXPIRED`; ② a new **in-app reminder** shows expiring / reverted allowances on the admin Usage Stats page without any webhook; ③ the group settings dialog gains `+2 hours / +1 day / +3 days / +7 days / Clear` expiry presets.
+
+## 变更
+# Changes
+
+中文：
+- **`QuotaReminderStateStore`**：两类事件各维护一份键集合（`groupId|untilMs`）；`MarkExpiring` / `MarkExpired` 返回是否首次，`Prune` 清理失效键，`Snapshot` / `Restore` 供持久化。注册到扩展区 `quotaReminderState`（Web 与桌面组合根都注册）；服务在扫描产生变更时 `ChangeHub.Notify()` 驱动落盘。持久化关闭时退化为进程内去重（行为同 1.0.275）。
+- **站内提醒接口** `GET /ag-ui/admin/quota-reminders`（Operator+）：返回 `{ leadHours, graceHours, items[] }`，`items` 为「生效中且进入提醒窗口」与「已到期但仍在 24h 宽限期」的覆写，含 `groupId / name / quota / until / state / seconds`；窗口取自配置治理的提前量。
+- **用量页站内提醒块**：`#adminQuotaReminders` 在页面顶部显示知聚 / 额度 / 到期时间 / 状态，无数据时隐藏；随 `loadAdminUsage()` 并行加载，不影响主表。
+- **到期模板**：`#gsQuotaGroup` 内新增 5 个 chip，只填 `#gsQuotaUntil`（不改额度），用 `msToLocalInput` 保持本地时区一致；`+0 小时` 即清空。
+
+English:
+- **`QuotaReminderStateStore`**: one key set per event kind (`groupId|untilMs`); `MarkExpiring` / `MarkExpired` return whether it was the first time, `Prune` drops stale keys, and `Snapshot` / `Restore` back persistence. Registered under extension section `quotaReminderState` (both web and desktop composition roots); the service calls `ChangeHub.Notify()` when a scan changes state. With persistence disabled it degrades to in-process dedup (same as 1.0.275).
+- **In-app endpoint** `GET /ag-ui/admin/quota-reminders` (Operator+): returns `{ leadHours, graceHours, items[] }`, where `items` are overrides that are effective and inside the reminder window, or already expired but within the 24-hour grace period, with `groupId / name / quota / until / state / seconds`; the window comes from Config Governance.
+- **Usage-page block**: `#adminQuotaReminders` shows circle / quota / expires at / state at the top, hidden when empty; it loads alongside `loadAdminUsage()` without blocking the main tables.
+- **Expiry presets**: five chips inside `#gsQuotaGroup` fill `#gsQuotaUntil` only (never the quota) via `msToLocalInput`, keeping the local-timezone round trip; `+0 hours` clears it.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2.2（去重持久化 + 站内提醒 + 模板）、§8.6（用量页站内提醒块与接口形状）、§8.19（跨重启去重语义）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.276。
+English: `docs/user-guide.md` / `en.md` §2.2.2.2 (persistent dedup + in-app reminder + presets), §8.6 (the usage-page block and response shape), §8.19 (cross-restart dedup semantics); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.276.
+
+## 测试
+# Tests
+
+中文：新增 3 例——`QuotaExpiryReminderTests` ×2（同一去重 store 跨两个服务实例模拟重启：`EXPIRING` / `EXPIRED` 均不重复；`QuotaReminderStateStore` 的标记 / 修剪 / 快照恢复）、`AdminApiTests` ×1（`/quota-reminders` 分别返回 `expiring` 与 `expired` 行及正确额度 / 剩余秒）。**全量测试通过**（1835 → **1838**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1972，missing 0**；守卫脚本均过。Docker 重建后真实端到端 **9/9**：首轮重启收到 `EXPIRING` + `EXPIRED`，站内接口返回 `expired` 行；**第二轮重启后 80 秒内无重复投递**（`before=2 after=2`）；用量页显示站内提醒块；`+2 小时` 模板回填误差 < 2 分钟、「清空」生效；无页面脚本错误。
+English: 3 new cases — `QuotaExpiryReminderTests` ×2 (sharing one dedup store across two service instances simulates a restart: neither `EXPIRING` nor `EXPIRED` repeats; the store's mark / prune / snapshot-restore behaviour), `AdminApiTests` ×1 (`/quota-reminders` returns an `expiring` and an `expired` row with the right quota / remaining seconds). **All tests pass** (1835 → **1838**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1972, missing 0**; guard scripts pass. After a Docker rebuild, the real end-to-end run is **9/9**: the first restart delivers `EXPIRING` + `EXPIRED` and the in-app endpoint returns an `expired` row; after a **second restart there are no duplicate deliveries within 80 seconds** (`before=2 after=2`); the usage page shows the reminder block; the `+2 hours` preset lands within 2 minutes and `Clear` works; no page script errors.
+
 
 **版本说明**：**临时放额提醒的完整闭环**——① 提醒提前量与扫描间隔可在「配置治理」热改（默认 24 小时 / 15 分钟）；② 到期后 **24 小时宽限期**内补发 `QUOTA_OVERRIDE_EXPIRED`，让告警平台确定性看到「已回退全局」；③ 审计页新增**知聚下拉筛选**，可与「⏰ 临时放额」组合直看某知聚历次放额。
 **Version note**: **A complete loop for temporary-allowance reminders** — ① the lead time and scan interval are hot-changeable in Config Governance (default 24 hours / 15 minutes); ② within the **24-hour grace period** after expiry a `QUOTA_OVERRIDE_EXPIRED` event confirms the fallback to the global quota; ③ the audit page gains a **circle dropdown** that combines with "⏰ Temporary allowances" to review a circle's allowance history.

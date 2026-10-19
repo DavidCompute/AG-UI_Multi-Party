@@ -650,6 +650,73 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task QuotaReminders_ListsExpiringAndExpiredWithinWindow()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var userId = admin.GetProperty("userId").GetString()!;
+
+        using var create = Authed(HttpMethod.Post, "/ag-ui/group/create", token);
+        create.Content = JsonContent.Create(new { groupName = "站内提醒知聚", ownerId = userId, memberIds = new[] { userId } });
+        var gid = (await (await _client.SendAsync(create)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+
+        try
+        {
+            // 即将到期（2 小时）→ expiring
+            var future = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeMilliseconds();
+            using (var set = Authed(HttpMethod.Post, "/ag-ui/group/update", token))
+            {
+                set.Content = JsonContent.Create(new
+                {
+                    groupId = gid, operatorId = userId,
+                    updateFields = new[] { "quotaPerGroup", "quotaPerGroupUntil" },
+                    groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = 3210, ["quotaPerGroupUntil"] = future },
+                });
+                (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+            }
+            using (var r = Authed(HttpMethod.Get, "/ag-ui/admin/quota-reminders", token))
+            {
+                var d = await (await _client.SendAsync(r)).Content.ReadFromJsonAsync<JsonElement>();
+                var row = d.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+                Assert.Equal("expiring", row.GetProperty("state").GetString());
+                Assert.Equal(3210, row.GetProperty("quota").GetInt64());
+                Assert.InRange(row.GetProperty("seconds").GetInt64(), 7199, 7200);
+            }
+
+            // 已到期（1 小时前）→ expired（存储值仍保留，站内提醒给出「已回退全局」）
+            var past = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
+            using (var set = Authed(HttpMethod.Post, "/ag-ui/group/update", token))
+            {
+                set.Content = JsonContent.Create(new
+                {
+                    groupId = gid, operatorId = userId,
+                    updateFields = new[] { "quotaPerGroupUntil" },
+                    groupInfo = new Dictionary<string, object?> { ["quotaPerGroupUntil"] = past },
+                });
+                (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+            }
+            using (var r2 = Authed(HttpMethod.Get, "/ag-ui/admin/quota-reminders", token))
+            {
+                var d = await (await _client.SendAsync(r2)).Content.ReadFromJsonAsync<JsonElement>();
+                var row = d.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+                Assert.Equal("expired", row.GetProperty("state").GetString());
+                Assert.InRange(row.GetProperty("seconds").GetInt64(), 3599, 3600);
+            }
+        }
+        finally
+        {
+            using var clear = Authed(HttpMethod.Post, "/ag-ui/group/update", token);
+            clear.Content = JsonContent.Create(new
+            {
+                groupId = gid, operatorId = userId,
+                updateFields = new[] { "quotaPerGroup" },
+                groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = "" },
+            });
+            await _client.SendAsync(clear);
+        }
+    }
+
+    [Fact]
     public async Task AdminUsage_UsersToday_ReportsLevelsAndExemptsSystem()
     {
         var admin = await RegisterAsync("admin_chief");

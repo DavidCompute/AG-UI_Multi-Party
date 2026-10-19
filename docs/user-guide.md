@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.275**
+> 适用版本：**1.0.276**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -688,7 +688,8 @@
 - **与水位预警联动**：用量页「今日各知聚明细」的配额使用列改用**该行自己的分母**；与全局值不同时在知聚名后标 `⚙`（悬停显示具体额度，临时放额还会追加「临时放额至 {time}」）；侧边栏 `⚠` / `🔴` 角标也按各知聚自己的额度算（见 2.1.1 / 8.6）。
 - **回显**：群列表接口 `GET /ag-ui/member/{memberId}/groups` 下发 `quotaOverride` 与 `quotaOverrideUntil`（`null` = 未覆写 / 长期），`openGroupSettings()` 回填两者。
 - **审计（1.0.268 / 1.0.273）**：变更记 `group.quotaOverride`（action），detail 为改后的实际值（含「取消，回退全局」）；设了到期时间时追加「；有效期至 yyyy-MM-dd HH:mmZ」。审计页的「⏰ 临时放额」快捷筛选直接按该 detail 过滤（1.0.274，见 §8.7）。
-- **到期提醒（1.0.274 / 1.0.275）**：`QuotaExpiryReminderService` 周期扫描并向出站 Webhook 发两类事件——剩余时间进入**提醒窗口**（默认 24 小时，可在「配置治理」改）时发 `QUOTA_OVERRIDE_EXPIRING`，到期后 **24 小时宽限期**内再发一条 `QUOTA_OVERRIDE_EXPIRED`（确认已回退全局）；同一额度每种事件只发一次，见 §8.19。提醒只是事前通知，真正回退仍靠上述惰性判定。
+- **到期提醒（1.0.274 / 1.0.275 / 1.0.276）**：`QuotaExpiryReminderService` 周期扫描并向出站 Webhook 发两类事件——剩余时间进入**提醒窗口**（默认 24 小时，可在「配置治理」改）时发 `QUOTA_OVERRIDE_EXPIRING`，到期后 **24 小时宽限期**内再发一条 `QUOTA_OVERRIDE_EXPIRED`（确认已回退全局）；同一额度每种事件只提醒一次，**去重键落盘跨重启保持**（1.0.276，见 §8.19）。提醒只是事前通知，真正回退仍靠上述惰性判定。
+- **站内提醒与模板（1.0.276）**：不想接 Webhook 也能看到——管理员「用量统计」页顶部会列出「即将到期 / 已回退」（`GET /ag-ui/admin/quota-reminders`，见 §8.6）；设置弹窗的到期时间下方有 `+2 小时 / +1 天 / +3 天 / +7 天 / 清空`快捷模板（只填到期时间，不改额度）。
 - **对外感知**：变更随既有 `GROUP_UPDATED` 事件下发（`updateFields` 含 `quotaPerGroup` / `quotaPerGroupUntil`、`groupInfo` 带新值，且**无人在线也会推**），无需专用事件；详见 §8.19。
 
 #### 2.2.3 解散知聚
@@ -3953,6 +3954,8 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 `loadAdminUsage()`（`app.js:8866-8930`）调 `GET /ag-ui/admin/usage?days=7`。
 
+**临时放额站内提醒（1.0.276）**：打开用量页时并行调用 `loadQuotaReminders()`（`GET /ag-ui/admin/quota-reminders`，Operator+），在页面顶部渲染 `#adminQuotaReminders`（知聚 / 额度 / 到期时间 / 状态）；无即将到期或已回退项时整块隐藏。它**不依赖 Webhook**，是「没接告警平台也能看到」的站内通道；窗口与提醒服务同源（配置治理的 `quotaReminderLeadHours`）。返回 `{ leadHours, graceHours, items:[{groupId,name,quota,until,state:expiring|expired,seconds}] }`，按「即将到期优先、到期时间升序」排序。
+
 服务端（`AdminApi.cs:397-408`）返回：
 
 ```jsonc
@@ -4453,7 +4456,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 ```
 
 - **扫描方式**：宿主启动后 **1 分钟**首次扫描，此后按「配置治理」的 `quotaReminderScanMinutes`（默认 **15 分钟**）循环；只提醒**仍生效**（`IsQuotaOverrideActive`）且 `until` 在 `(now, now+提前量]` 的覆写（提前量默认 **24 小时**，配置键 `quotaReminderLeadHours`）。
-- **不刷屏**：同一额度（`groupId + until`）在进程内**只发一次**；额度取消 / 到期时间改写 / 已到期 / 知聚解散后，去重键在下一轮扫描被清理（若之后又设回同样的到期时间，会重新提醒）。重启后可能再发一次（与 `QUOTA_THRESHOLD` 同约定，告警平台可按 `groupId + until` 去重）。
+- **不刷屏**：同一额度（`groupId + until`）在进程内**只发一次**；额度取消 / 到期时间改写 / 已到期 / 知聚解散后，去重键在下一轮扫描被清理（若之后又设回同样的到期时间，会重新提醒）。**1.0.276 起去重键落盘**（扩展区 `quotaReminderState`），常见部署下**重启不再重复推送**；仅当持久化被关闭（`Persistence:Enabled=false` / 无存储）时退化为进程内去重。
 - **订阅过滤**：`groupId` 为该知聚，因此限定了知聚的订阅也能收到（与事件本身同知聚）。
 - **与到期失效的关系**：提醒只是「事前通知」；真正回退全局仍是**惰性判定**（见 §2.2.2.2），即使没人订阅 Webhook 也照常生效。
 

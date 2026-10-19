@@ -439,6 +439,35 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 临时放额提醒（1.0.276，站内通道）：不依赖 Webhook，管理员打开控制台就能看到
+        // 「哪些知聚的临时额度即将到期 / 已回退」。窗口与提醒服务同源（配置治理的提前量）。
+        root.MapGet("/quota-reminders", (IServiceProvider sp) =>
+        {
+            var cfg = sp.GetService<ConfigGovernanceState>();
+            var leadHours = cfg?.QuotaReminderLeadHours is > 0 and <= 720
+                ? cfg.QuotaReminderLeadHours.Value
+                : QuotaExpiryReminderService.DefaultLeadHours;
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var leadMs = (long)TimeSpan.FromHours(leadHours).TotalMilliseconds;
+            var graceMs = (long)QuotaExpiryReminderService.ExpiredGrace.TotalMilliseconds;
+            var groups = sp.GetService<GroupHub>()?.Store.AllGroups() ?? (IReadOnlyList<Group>)[];
+            var items = new List<QuotaReminderRow>();
+            foreach (var g in groups)
+            {
+                if (g.QuotaOverride is not { } quota || g.QuotaOverrideUntil is not { } until) continue;
+                var delta = until - now;
+                if (delta > 0 && delta <= leadMs)
+                    items.Add(new QuotaReminderRow(g.GroupId, g.GroupName, quota, until, "expiring", delta / 1000));
+                else if (delta <= 0 && -delta <= graceMs)
+                    items.Add(new QuotaReminderRow(g.GroupId, g.GroupName, quota, until, "expired", (-delta) / 1000));
+            }
+            var ordered = items
+                .OrderBy(x => x.State == "expired" ? 1 : 0)
+                .ThenBy(x => x.Until)
+                .ToList();
+            return Results.Ok(new { leadHours, graceHours = (int)QuotaExpiryReminderService.ExpiredGrace.TotalHours, items = ordered });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 今日各知聚用量行（/usage 与 /quota-status 共用口径）：名字由群库解析，取不到回退 groupId；
         // 同时带上**本知聚生效配额** `quota` 与水位 `level`（ok / warn / over）——单一阈值来源，
         // 且支持知聚级配额覆写（每行自己的分母，前端直接用 `quota` 而非全局值）。
@@ -983,6 +1012,9 @@ public static class AdminApi
         catch (AguiProtocolException ex) { return Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)); }
     }
 }
+
+/// <summary>临时放额提醒行（站内通道，1.0.276）：<c>State</c> = expiring / expired。</summary>
+public sealed record QuotaReminderRow(string GroupId, string Name, long Quota, long Until, string State, long Seconds);
 
 /// <summary>管理员禁用 / 启用账号请求体。</summary>
 public sealed record AdminDisabledHttpRequest(bool Disabled);

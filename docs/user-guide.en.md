@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.275**
+> Applies to version: **1.0.276**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -689,7 +689,8 @@ Support circles, in language and implementation: support circles **do not suppor
 - **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value, and for a temporary allowance appends "temporary until {time}"); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).
 - **Rendering**: the group-list endpoint `GET /ag-ui/member/{memberId}/groups` returns `quotaOverride` and `quotaOverrideUntil` (`null` = not overridden / no expiry), and `openGroupSettings()` backfills both.
 - **Audit (1.0.268 / 1.0.273)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global"); when an expiry is set, "; effective until yyyy-MM-dd HH:mmZ" is appended. The audit page's "⏰ Temporary allowances" quick filter matches on that detail (1.0.274, see 8.7).
-- **Expiry reminder (1.0.274 / 1.0.275)**: `QuotaExpiryReminderService` scans periodically and emits two events to outbound webhooks — `QUOTA_OVERRIDE_EXPIRING` when the remaining time enters the **reminder window** (24 hours by default, configurable in Config Governance), and `QUOTA_OVERRIDE_EXPIRED` within the **24-hour grace period** after expiry (confirming the fallback happened); each event fires once per allowance, see 8.19. The reminder is notification only — the actual fallback still relies on the lazy evaluation above.
+- **Expiry reminder (1.0.274 / 1.0.275 / 1.0.276)**: `QuotaExpiryReminderService` scans periodically and emits two events to outbound webhooks — `QUOTA_OVERRIDE_EXPIRING` when the remaining time enters the **reminder window** (24 hours by default, configurable in Config Governance), and `QUOTA_OVERRIDE_EXPIRED` within the **24-hour grace period** after expiry (confirming the fallback happened); each event fires once per allowance, and the **dedup keys are persisted across restarts** (1.0.276, see 8.19). The reminder is notification only — the actual fallback still relies on the lazy evaluation above.
+- **In-app reminders and templates (1.0.276)**: no webhook needed — the admin Usage Stats page lists "expiring / reverted" allowances at the top (`GET /ag-ui/admin/quota-reminders`, see 8.6); the settings dialog's expiry field has `+2 hours / +1 day / +3 days / +7 days / Clear` preset chips (they only fill the expiry, not the quota).
 - **External visibility**: the change rides on the existing `GROUP_UPDATED` event (`updateFields` contains `quotaPerGroup` / `quotaPerGroupUntil`, `groupInfo` carries the new value, and it is pushed **even with nobody online**) — no dedicated event needed; see 8.19.
 
 #### 2.2.3 Disbanding a Circle
@@ -3962,6 +3963,8 @@ The single server-side source of truth is `MemoryGovernance` (`MemoryGovernance.
 
 `loadAdminUsage()` (`app.js:8866-8930`) calls `GET /ag-ui/admin/usage?days=7`.
 
+**In-app temporary-allowance reminders (1.0.276)**: opening the usage page also calls `loadQuotaReminders()` (`GET /ag-ui/admin/quota-reminders`, Operator+) and renders `#adminQuotaReminders` at the top (circle / quota / expires at / state); the block is hidden when nothing is expiring or reverted. It **does not depend on webhooks** — the in-app channel for deployments without an alerting platform; the window matches the reminder service (Config Governance `quotaReminderLeadHours`). The response is `{ leadHours, graceHours, items:[{groupId,name,quota,until,state:expiring|expired,seconds}] }`, ordered expiring-first then by expiry ascending.
+
 The server (`AdminApi.cs:397-408`) returns:
 
 ```jsonc
@@ -4461,7 +4464,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 ```
 
 - **Scanning**: the first scan runs **1 minute** after the host starts, then every `quotaReminderScanMinutes` from Config Governance (default **15 minutes**); only overrides that are **still effective** (`IsQuotaOverrideActive`) with `until` in `(now, now+lead]` are reminded (lead defaults to **24 hours**, key `quotaReminderLeadHours`).
-- **No flooding**: the same allowance (`groupId + until`) fires **once per process**; when the quota is cleared / the expiry is changed / it expires / the circle is disbanded, the dedup key is pruned on the next scan (setting the same deadline again later will remind again). A restart may emit once more (same convention as `QUOTA_THRESHOLD`; dedupe by `groupId + until` on the receiving side).
+- **No flooding**: the same allowance (`groupId + until`) fires **once per process**; when the quota is cleared / the expiry is changed / it expires / the circle is disbanded, the dedup key is pruned on the next scan (setting the same deadline again later will remind again). **Since 1.0.276 the dedup keys are persisted** (extension section `quotaReminderState`), so in normal deployments **a restart does not re-deliver**; only when persistence is disabled (`Persistence:Enabled=false` / no store) does it degrade to in-process dedup.
 - **Subscription filtering**: `groupId` is the circle itself, so group-scoped subscriptions receive it too.
 - **Relationship to expiry**: the reminder is **notification only**; the actual fallback to the global quota remains a **lazy read-time evaluation** (see 2.2.2.2) and happens even if nobody subscribes to webhooks.
 

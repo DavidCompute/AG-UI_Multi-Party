@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Persistence;
 using Microsoft.Extensions.Logging;
 
 namespace AguiGroupChat.Web;
@@ -32,19 +33,21 @@ public sealed class QuotaExpiryReminderService : IDisposable
 
     private readonly GroupHub _hub;
     private readonly ConfigGovernanceState _config;
+    private readonly QuotaReminderStateStore _state;
+    private readonly ChangeHub _changes;
     private readonly WebhookDispatcher? _dispatcher;
     private readonly ILogger<QuotaExpiryReminderService> _logger;
-    private readonly ConcurrentDictionary<string, byte> _expiringNotified = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _expiredNotified = new(StringComparer.Ordinal);
     private Timer? _timer;
     private bool _started;
     private int _running;
 
-    public QuotaExpiryReminderService(GroupHub hub, ConfigGovernanceState config,
-        WebhookDispatcher? dispatcher, ILogger<QuotaExpiryReminderService> logger)
+    public QuotaExpiryReminderService(GroupHub hub, ConfigGovernanceState config, QuotaReminderStateStore state,
+        ChangeHub changes, WebhookDispatcher? dispatcher, ILogger<QuotaExpiryReminderService> logger)
     {
         _hub = hub;
         _config = config;
+        _state = state;
+        _changes = changes;
         _dispatcher = dispatcher;
         _logger = logger;
     }
@@ -95,6 +98,7 @@ public sealed class QuotaExpiryReminderService : IDisposable
         var expiring = new List<QuotaOverrideExpiringEvent>();
         var expired = new List<QuotaOverrideExpiredEvent>();
         var liveKeys = new HashSet<string>(StringComparer.Ordinal);
+        var dirty = false;
 
         foreach (var g in _hub.Store.AllGroups())
         {
@@ -108,7 +112,8 @@ public sealed class QuotaExpiryReminderService : IDisposable
             if (delta > 0)
             {
                 if (delta > leadMs) continue;                        // 尚未进入提醒窗口
-                if (!_expiringNotified.TryAdd(key, 0)) continue;     // 同一额度只提醒一次
+                if (!_state.MarkExpiring(key)) continue;            // 同一额度只提醒一次（跨重启保持）
+                dirty = true;
                 var evt = new QuotaOverrideExpiringEvent
                 {
                     GroupId = g.GroupId,
@@ -126,7 +131,8 @@ public sealed class QuotaExpiryReminderService : IDisposable
             // 已到期：只在宽限期内补发一次「已回退」
             var ago = -delta;
             if (ago > graceMs) continue;
-            if (!_expiredNotified.TryAdd(key, 0)) continue;
+            if (!_state.MarkExpired(key)) continue;
+            dirty = true;
             var expiredEvt = new QuotaOverrideExpiredEvent
             {
                 GroupId = g.GroupId,
@@ -141,10 +147,8 @@ public sealed class QuotaExpiryReminderService : IDisposable
         }
 
         // 清理失效去重键：额度取消 / 到期时间改写 / 知聚解散。
-        foreach (var key in _expiringNotified.Keys)
-            if (!liveKeys.Contains(key)) _expiringNotified.TryRemove(key, out _);
-        foreach (var key in _expiredNotified.Keys)
-            if (!liveKeys.Contains(key)) _expiredNotified.TryRemove(key, out _);
+        if (_state.Prune(liveKeys)) dirty = true;
+        if (dirty) _changes.Notify(); // 驱动持久化（提醒键跨重启保持）
 
         return new QuotaExpiryScanResult(expiring, expired);
     }
