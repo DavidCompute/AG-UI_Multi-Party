@@ -1881,6 +1881,14 @@
             <tbody id="adminUsageGroupRows"></tbody>
           </table>
         </div>
+        <!-- 今日各触发者明细：按个人配额算水位（system 定时任务豁免） -->
+        <p class="form-hint" data-i18n="admin.usersTodayTitle" style="margin-top:14px">今日各触发者用量（按个人配额）</p>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="admin.thTrigger">触发者</th><th data-i18n="admin.thGroupTokens">今日 Token</th><th data-i18n="admin.thCalls">调用次数</th><th data-i18n="admin.thQuotaUse">配额使用</th></tr></thead>
+            <tbody id="adminUsageUserRows"></tbody>
+          </table>
+        </div>
       </div>
       <!-- 员工绩效看板（P0）：按数字员工聚合调用量 / token / 👍👎 好评率 -->
       <div id="adminPerfView" class="hidden">

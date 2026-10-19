@@ -394,13 +394,14 @@ public static class AdminApi
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 模型用量统计（最近 N 天按日汇总 / 配额配置 / 今日各知聚明细）：仅管理员及以上（含运维）
-        root.MapGet("/usage", (int? days, HttpContext ctx, IServiceProvider sp, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
+        root.MapGet("/usage", (int? days, HttpContext ctx, IServiceProvider sp, AuthService auth, AguiGroupChat.Hub.Agents.AgentUsageService usage) =>
         {
             return Results.Ok(new
             {
                 dailyQuotaPerUser = usage.DailyQuotaPerUser,
                 dailyQuotaPerGroup = usage.DailyQuotaPerGroup,
                 groupsToday = GroupTodayRows(sp, usage),
+                usersToday = UserTodayRows(auth, usage),
                 days = usage.GetDailySummary(days ?? 7),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
@@ -457,6 +458,36 @@ public static class AdminApi
         // 生效配额 = 知聚级覆写（Group.QuotaOverride）优先，否则全局 Agents:DailyTokenQuotaPerGroup。
         static long EffectiveQuota(GroupHub? hub, AguiGroupChat.Hub.Agents.AgentUsageService usage, string groupId)
             => usage.EffectiveGroupQuota(groupId, hub?.GroupQuotaOverride(groupId));
+
+        // 今日各触发者用量行（1.0.268）：按用户个人配额算水位，供用量页「接近 / 已超个人配额」汇总。
+        // system 是定时任务的虚拟触发者，**刻意豁免个人配额**——它也会出现（便于看到系统任务消耗），
+        // 但 exempt=true、level 恒 ok，否则前端会显示「已超限」而实际从不拦截。
+        static List<object> UserTodayRows(AuthService auth, AguiGroupChat.Hub.Agents.AgentUsageService usage)
+        {
+            var quota = usage.DailyQuotaPerUser;
+            var names = auth.ListUsers().ToDictionary(
+                u => u.UserId,
+                u => !string.IsNullOrWhiteSpace(u.Nickname) ? u.Nickname
+                    : !string.IsNullOrWhiteSpace(u.Username) ? u.Username : u.UserId,
+                StringComparer.Ordinal);
+            return usage.GetUserTodaySummary()
+                .Take(50)
+                .Select(u =>
+                {
+                    var exempt = string.Equals(u.UserId, AguiGroupChat.Hub.Agents.AgentUsageService.SystemUserId, StringComparison.Ordinal);
+                    return (object)new
+                    {
+                        userId = u.UserId,
+                        name = names.TryGetValue(u.UserId, out var n) ? n : u.UserId,
+                        tokens = u.Tokens,
+                        calls = u.Calls,
+                        quota,
+                        exempt,
+                        level = exempt ? "ok" : AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(u.Tokens, quota),
+                    };
+                })
+                .ToList();
+        }
 
         // 操作审计日志（4.3 / 企业合规）：关键 / 敏感操作留痕，仅管理员及以上（含运维）。
         // 支持过滤：actor（操作者用户名 / ID 子串）、action（操作名子串）、targetId、fromMs / toMs（UTC 毫秒）。limit 最多 200。

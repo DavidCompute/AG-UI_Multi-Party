@@ -854,7 +854,6 @@ window.I18N_DICTS.zh = {
   "mmd.close": "关闭",
 
   /* --- 消息搜索 --- */
-  "search.title": "🔍 搜索消息 · ",
   "search.titleText": "搜索消息",
   "search.ph": "输入关键词搜索知聚内消息（Enter 搜索）",
   "search.go": "搜索",
@@ -895,6 +894,10 @@ window.I18N_DICTS.zh = {
   "admin.thGroupTokens": "今日 Token",
   "admin.thQuotaUse": "配额使用",
   "admin.groupsTodayTitle": "今日各知聚用量（配额按知聚日切，此处为今日口径）",
+  "admin.usersTodayTitle": "今日各触发者用量（按个人配额）",
+  "admin.thTrigger": "触发者",
+  "admin.quotaNearUser": "个人接近上限 {near} 人 ｜ 已超限 {over} 人",
+  "admin.quotaExempt": "系统任务（豁免）",
   "admin.quotaNear": "接近上限 {near} 个 ｜ 已超限 {over} 个",
   "admin.quotaOverrideTag": "本知聚配额覆写：{quota} token/日（优先于全局值）",
   "admin.configHint": "在线调整并持久化运维参数（无需改配置文件 / 重启）。存储提供方 / 模型 / 记忆提供方等<span style=\"color:var(--warn)\r\">需重启</span>的项目为只读，可点下方「只读参数快照」查看当前生效值。",
@@ -969,7 +972,6 @@ window.I18N_DICTS.zh = {
   "admin.thActor": "操作者",
   "admin.thTarget": "目标",
   "admin.thResult": "结果",
-  "admin.thDetail": "详情",
   "admin.thPrivate": "私密",
   "admin.thSkill": "技能 ID",
   "admin.thName": "名称",

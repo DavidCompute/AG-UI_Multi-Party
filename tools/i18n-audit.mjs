@@ -8,9 +8,14 @@ const read = (rel) => fs.readFileSync(new URL(rel, webRoot), 'utf8');
 function loadDict(file) {
   const s = read('i18n/' + file);
   const m = new Map();
+  const dups = new Set();
   const re = /"([A-Za-z0-9_.\-]+)"\s*:\s*"([^"]*)"/g;
   let g;
-  while ((g = re.exec(s)) !== null) m.set(g[1], g[2]);
+  while ((g = re.exec(s)) !== null) {
+    if (m.has(g[1])) dups.add(g[1]);
+    m.set(g[1], g[2]);
+  }
+  m.dups = [...dups];
   return m;
 }
 
@@ -18,6 +23,18 @@ const zh = loadDict('zh.js');
 const en = loadDict('en.js');
 
 let failed = false;
+
+// 0) 重复键：同一文件内同名键会被后者静默覆盖（映射本身看不出，必须单独查）
+//    用行首 `"key":` 计数更可靠（值里可能含引号以外的任意文本）
+for (const file of ['zh.js', 'en.js']) {
+  const raw = read('i18n/' + file);
+  const seen = new Set();
+  const dups = new Set();
+  for (const m of raw.matchAll(/^\s*"([A-Za-z0-9_.\-]+)"\s*:/gm)) {
+    if (seen.has(m[1])) dups.add(m[1]); else seen.add(m[1]);
+  }
+  if (dups.size) { failed = true; console.log(`duplicate keys (${file}):`, [...dups].join(', ')); }
+}
 
 // 1) 双语对齐
 const enOnly = [...en.keys()].filter((k) => !zh.has(k));

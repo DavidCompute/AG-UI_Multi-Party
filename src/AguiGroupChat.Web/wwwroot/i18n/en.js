@@ -589,7 +589,6 @@ window.I18N_DICTS.en = {
   "libSet.mismatchFail": "Marking failed ({err})",
   "libSet.saved": "Search strictness saved; applies to the next retrieval",
   "libSet.fail": "Save failed ({err})",
-  "imgLib.newTitle": "New image library",
   "imgLib.newTitle": "New Image Library",
   "imgLib.createHint": "Once created, expand it in the list and use “Upload images” to add pictures (png / jpg / jpeg / gif / bmp / webp, multi-select). Descriptions are generated and vectorised so PPT / Word / PDF deliverables can be illustrated by semantic search.",
   "imgLib.name.ph": "Library name (e.g. Product shots)",
@@ -855,7 +854,6 @@ window.I18N_DICTS.en = {
   "mmd.close": "Close",
 
   /* --- 消息搜索 --- */
-  "search.title": "🔍 Search Messages · ",
   /* search 标题纯文本 */
   "search.titleText": "Search Messages",
   "search.ph": "Type keywords to search messages in this group (Enter to search)",
@@ -898,6 +896,10 @@ window.I18N_DICTS.en = {
   "admin.thGroupTokens": "Today's tokens",
   "admin.thQuotaUse": "Quota use",
   "admin.groupsTodayTitle": "Today's usage per circle (quota resets daily per circle, so this is the today-scoped view)",
+  "admin.usersTodayTitle": "Today's usage per trigger (per-user quota)",
+  "admin.thTrigger": "Trigger",
+  "admin.quotaNearUser": "{near} users approaching limit ｜ {over} over limit",
+  "admin.quotaExempt": "System task (exempt)",
   "admin.quotaNear": "{near} approaching limit ｜ {over} over limit",
   "admin.quotaOverrideTag": "Per-circle quota override: {quota} tokens/day (takes precedence over the global value)",
   "admin.configHint": "Tune and persist ops parameters online (no config file / restart needed). Storage provider / model / memory provider etc. that are <span style=\"color:var(--warn)\r\">restart-required</span> are read-only; click “Read-only snapshot” below to see the values in effect.",
@@ -972,7 +974,6 @@ window.I18N_DICTS.en = {
   "admin.thActor": "Actor",
   "admin.thTarget": "Target",
   "admin.thResult": "Result",
-  "admin.thDetail": "Details",
   "admin.thPrivate": "Private",
   "admin.thSkill": "Skill ID",
   "admin.thName": "Name",

@@ -141,6 +141,21 @@ public sealed class AgentUsageService
     public long EffectiveGroupQuota(string groupId, long? quotaOverride = null)
         => quotaOverride is { } o && o >= 0 ? o : DailyQuotaPerGroup;
 
+    /// <summary>今日各触发者用量汇总（一次查询聚合，按 token 降序）——供管理员「用量统计」的**分用户明细 / 个人配额水位**。
+    /// 与 <see cref="GetUserTodayTokens"/> 同源（同一张按日聚合表），但一次取回全部触发者；
+    /// <c>system</c>（定时任务虚拟触发者）也会出现在结果里，但它**不受个人配额约束**（水位由调用方标为 exempt）。</summary>
+    public IReadOnlyList<UserUsageToday> GetUserTodaySummary()
+    {
+        var today = Today();
+        return _store.GetUsageBetween(today, today)
+            .Where(r => !string.IsNullOrEmpty(r.UserId))
+            .GroupBy(r => r.UserId, StringComparer.Ordinal)
+            .Select(g => new UserUsageToday(g.Key, g.Sum(r => r.TotalTokens), g.Sum(r => r.Calls)))
+            .OrderByDescending(x => x.Tokens)
+            .ThenBy(x => x.UserId, StringComparer.Ordinal)
+            .ToList();
+    }
+
     /// <summary>最近 N 天的按天汇总（管理员用量统计页）。</summary>
     public IReadOnlyList<UsageDaySummary> GetDailySummary(int days)
     {
@@ -172,3 +187,6 @@ public sealed record UsageDaySummary(string Date, long TotalTokens, long PromptT
 
 /// <summary>今日某知聚的用量汇总（管理员「用量统计」分知聚明细）。</summary>
 public sealed record GroupUsageToday(string GroupId, long Tokens, long Calls);
+
+/// <summary>今日某触发者的用量汇总（管理员「用量统计」分用户明细 / 个人配额水位）。</summary>
+public sealed record UserUsageToday(string UserId, long Tokens, long Calls);

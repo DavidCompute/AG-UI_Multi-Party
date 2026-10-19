@@ -506,6 +506,15 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             Assert.Equal("over", row.GetProperty("level").GetString());
         }
 
+        // 成本控制类覆写必须留痕（审计页可按 action 过滤）
+        using (var aud = Authed(HttpMethod.Get, "/ag-ui/admin/audit?action=group.quotaOverride&limit=20", token))
+        {
+            var ad = await (await _client.SendAsync(aud)).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Contains(ad.GetProperty("entries").EnumerateArray(), e =>
+                e.GetProperty("action").GetString() == "group.quotaOverride"
+                && e.GetProperty("targetId").GetString() == gid);
+        }
+
         // 普通用户即群主也不能设（成本控制属平台管理员）→ 403
         var owner = await RegisterAsync("grp_quota_owner");
         var oToken = owner.GetProperty("token").GetString()!;
@@ -535,6 +544,50 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = "" },
         });
         (await _client.SendAsync(clear)).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task AdminUsage_UsersToday_ReportsLevelsAndExemptsSystem()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+        const string uid = "user_quota_wave"; // 唯一，避免与其它用例串
+        var sid = AguiGroupChat.Hub.Agents.AgentUsageService.SystemUserId;
+
+        // 个人配额 50 → uid 用量 60 应 over；system 用量 200 但**豁免** → 恒 ok
+        using (var set = Authed(HttpMethod.Post, "/ag-ui/admin/config", token))
+        {
+            set.Content = JsonContent.Create(new { dailyTokenQuotaPerUser = 50 });
+            (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+        }
+        try
+        {
+            usage.RecordUsage("agent_w", uid, 40, 20, 0);   // 60
+            usage.RecordUsage("agent_w", sid, 100, 100, 0); // 200，但 system 不受个人配额约束
+
+            using var req = Authed(HttpMethod.Get, "/ag-ui/admin/usage?days=7", token);
+            var d = await (await _client.SendAsync(req)).Content.ReadFromJsonAsync<JsonElement>();
+            var rows = d.GetProperty("usersToday").EnumerateArray()
+                .ToDictionary(x => x.GetProperty("userId").GetString()!, x => x, StringComparer.Ordinal);
+
+            Assert.True(rows.ContainsKey(uid), "usersToday 应含该触发者");
+            Assert.Equal(50, rows[uid].GetProperty("quota").GetInt64());
+            Assert.Equal("over", rows[uid].GetProperty("level").GetString());
+            Assert.False(rows[uid].GetProperty("exempt").GetBoolean());
+            // 无对应账号时名字回退为 userId
+            Assert.Equal(uid, rows[uid].GetProperty("name").GetString());
+
+            Assert.True(rows.ContainsKey(sid), "usersToday 应含 system（供看到定时任务消耗）");
+            Assert.True(rows[sid].GetProperty("exempt").GetBoolean());
+            Assert.Equal("ok", rows[sid].GetProperty("level").GetString()); // 豁免：不报「已超限」
+        }
+        finally
+        {
+            using var restore = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+            restore.Content = JsonContent.Create(new { dailyTokenQuotaPerUser = 0 });
+            await _client.SendAsync(restore);
+        }
     }
 
     [Fact]

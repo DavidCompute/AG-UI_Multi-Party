@@ -1775,6 +1775,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .usage-quota-warn { color: var(--warn, #f0a63a); font-weight: 600; }
 /* 本知聚配额覆写标记（该行分母不是全局值，悬停可见具体额度） */
 .usage-quota-ovr { color: var(--muted, #888); font-size: 12px; cursor: help; }
+/* 个人配额豁免（system 定时任务）：弱化显示，避免误认为「未设配额」 */
+.usage-quota-exempt { color: var(--muted, #888); font-size: 12px; }
 .tag-admin, .tag-user, .tag-disabled, .tag-active { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
 .tag-admin { background: rgba(240, 166, 58, .15); color: var(--warn, #f0a63a); }
 .tag-user { background: rgba(128, 128, 128, .12); color: var(--muted, #888); }

@@ -1,4 +1,38 @@
-# AG-UI 群聊桌面版 1.0.267 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.268 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.268 Release Notes (current Windows desktop release)
+
+**版本说明**：**把配额水位预警补齐到「人」这一维度**——用量统计页新增「今日各触发者用量」明细（按个人配额算水位，`⚠` / `🔴` + meta 汇总），并把**知聚 / 模型覆写变更写进审计日志**（成本控制类配置谁来改、改成什么，现在有迹可查）。同时修掉 3 处**重复 i18n 键**（后者静默覆盖前者），其中一处导致「全局搜索」弹窗标题实际显示成「搜索消息 · 」；并给 CI 加上**重复键守卫**，以后不会再悄悄发生。
+**Version note**: **Completing the quota-level warning for the "person" dimension** — the Usage Stats page gains a "today's usage per trigger" breakdown (judged against the per-user quota, with `⚠` / `🔴` and a meta summary), and **circle / model override changes now go into the audit log** (who changed a cost-control setting and to what is now traceable). Also fixes 3 **duplicate i18n keys** (the later silently overrode the earlier), one of which made the "Global Search" dialog title actually read "Search Messages · "; and adds a **duplicate-key guard** to CI so it cannot happen silently again.
+
+## 变更
+# Changes
+
+中文：
+- **用量页新增「今日各触发者用量」**（`GET /ag-ui/admin/usage` 出参新增 `usersToday[]`）：由 `AgentUsageService.GetUserTodaySummary()` 从按日聚合表一次聚合（按 token 降序取前 50），名字取 昵称→用户名→userId。每行带 `quota`（个人配额）与 `level`（同一套 `QuotaLevel`），配额使用列按水位配色（琥珀 / 红）；meta 追加「个人接近上限 N 人 ｜ 已超限 M 人」。
+- **`system` 标注为「豁免」**：定时任务以虚拟触发者 `system` 发起，**刻意不受个人配额约束**。它仍会出现在表里（便于看到系统任务消耗），但 `exempt=true`、`level` 恒 `ok`，配额列显示「系统任务（豁免）」而非「已超限」——避免把豁免误读为超限。
+- **知聚 / 模型覆写变更加审计**（`HttpGroupApi` `/update`）：`updateFields` 含 `model` 记 `group.modelOverride`，含 `quotaPerGroup` 记 `group.quotaOverride`，detail 为**改后的实际值**（含「（取消）」）。成本 / 容量控制类变更从此可在「审计日志」按 action 检索 / 导出。
+- **修复 3 处重复 i18n 键**（`tools/i18n-audit.mjs` 新守卫抓出）：`search.title`（前者是老键，导致**全局搜索弹窗标题错误显示为「🔍 搜索消息 · 」**）、`admin.thDetail`（zh 值相同，en 为 `Details` / `Detail`）、`imgLib.newTitle`（en 两条相邻重复）。保留语义正确的一条，删掉残余。
+- **新增 CI 守卫**：`check-i18n-keys.js` 与 `tools/i18n-audit.mjs` 均增加**行首 `"key":` 计数**的重复键检测（必须在 `eval` / `Map` 载入**之前**做，因为 JS 对象字面量会静默覆盖）。
+
+English:
+- **Usage page gains "today's usage per trigger"** (the `GET /ag-ui/admin/usage` response adds `usersToday[]`): aggregated in one pass by `AgentUsageService.GetUserTodaySummary()` from the daily aggregate table (top 50 by tokens descending), with names from nickname → username → userId. Each row carries `quota` (per-user) and `level` (the same `QuotaLevel`), and the quota-use column is colour-coded by level (amber / red); the meta line appends "{near} users approaching limit ｜ {over} over limit".
+- **`system` is marked "exempt"**: scheduled tasks run as the virtual trigger `system`, which **deliberately bypasses the per-user quota**. It still appears in the table (so system-task consumption is visible), but with `exempt=true` and `level` always `ok`, and the quota column reads "System task (exempt)" instead of "over" — so an exemption is not misread as a breach.
+- **Circle / model override changes are audited** (`HttpGroupApi` `/update`): `model` in `updateFields` records `group.modelOverride`, `quotaPerGroup` records `group.quotaOverride`, with the **resulting value** in `detail` (including "(cleared)"). Cost / capacity-control changes are now searchable / exportable by action in the Audit Log.
+- **3 duplicate i18n keys fixed** (caught by the new guard in `tools/i18n-audit.mjs`): `search.title` (the earlier stale key made the **Global Search dialog title render as "🔍 Search Messages · "**), `admin.thDetail` (same zh value; en had `Details` / `Detail`), and `imgLib.newTitle` (two adjacent en entries). Kept the semantically correct one and removed the residue.
+- **New CI guard**: both `check-i18n-keys.js` and `tools/i18n-audit.mjs` now detect duplicate keys by counting line-leading `"key":` occurrences — necessarily **before** `eval` / `Map` loading, because a JS object literal silently overwrites.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.6（`/usage` 出参新增 `usersToday[]` 与 `exempt` 语义 + 4 列表格）、§8.7（审计 action 清单新增 `group.modelOverride` / `group.quotaOverride`）、§2.2.2.1 / §2.2.2.2（覆写变更审计）、§9.2.8（`/usage` 描述）。
+English: `docs/user-guide.md` / `en.md` §8.6 (the `/usage` response gains `usersToday[]` with the `exempt` semantics and the 4-column table), §8.7 (the audit action list gains `group.modelOverride` / `group.quotaOverride`), §2.2.2.1 / §2.2.2.2 (override change auditing), §9.2.8 (the `/usage` description).
+
+## 测试
+# Tests
+
+中文：新增 2 例并扩展现有 1 例——`AgentUsageServiceTests.GetUserTodaySummary_GroupsByUser_SortedDesc`（跨智能体合并 / 降序 / 包含 `system`）；`AdminApiIntegrationTests.AdminUsage_UsersToday_ReportsLevelsAndExemptsSystem`（设个人配额 50 → 60 tokens 的触发者 `level=over`、无账号时名字回退 userId；`system` 用 200 仍 `exempt=true` 且 `level=ok`；结束还原配额）；扩展 `GroupQuotaOverride_...` 断言审计含 `group.quotaOverride` + 该知聚 `targetId`。**全量测试通过**（1806 → 1808）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1949，missing 0**（新增重复键守卫后仍通过），`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 均过；守卫**反向自测**（注入一条重复键 → 能检出）；Docker 重建后**真实浏览器**端到端（Playwright）**8/8**：`/usage` 出参含 `usersToday` 数组、表头为「触发者」、受控数据下 over/warn/exempt 三类行与配色正确、meta 为「个人接近上限 1 人 ｜ 已超限 1 人」、无页面脚本错误。
+English: 2 new cases plus one extended — `AgentUsageServiceTests.GetUserTodaySummary_GroupsByUser_SortedDesc` (cross-agent merge / descending / includes `system`); `AdminApiIntegrationTests.AdminUsage_UsersToday_ReportsLevelsAndExemptsSystem` (quota 50 → a trigger with 60 tokens is `level=over`; the name falls back to userId when there is no account; `system` with 200 tokens is still `exempt=true` with `level=ok`; quota restored afterwards); extended `GroupQuotaOverride_...` to assert the audit contains `group.quotaOverride` with that circle's `targetId`. **All tests pass** (1806 → 1808); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1949, missing 0** (and still passes with the new duplicate-key guard), and `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass; the guard was **reverse-tested** (injecting a duplicate key is detected); after a Docker rebuild, a **real-browser** end-to-end (Playwright) **8/8**: `/usage` returns a `usersToday` array, the header is "Trigger", the over / warn / exempt rows and their colours render correctly with controlled data, the meta reads "1 user approaching limit ｜ 1 over limit", and there are no page script errors.
+
 # AG-UI Group Chat Desktop 1.0.267 Release Notes (current Windows desktop release)
 
 **版本说明**：**知聚级配额覆写**——全局配额 `Agents:DailyTokenQuotaPerGroup` 是**一刀切**，但知聚之间开销差异极大（客服知聚接待顾客 vs 内部小群）。现在管理员可在「知聚设置」给**单个知聚**单独指定每日 Token 额度（含 `0` = 本知聚不限），**不必抬高全平台上限**。水位预警相应变成**每知聚各用自己的分母**。

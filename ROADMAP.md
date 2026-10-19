@@ -210,6 +210,7 @@
   - **配额可见性（1.0.265）**：用量统计页新增「今日各知聚用量」明细（`/usage` 出参 `groupsToday[]`，含配额使用占比、达/超标红）；两处配额拦截补上可观测（`knowgath_quota_rejections_total{scope="user|group"}` + 运行指标页「配额拦截」卡片）。配额是「看得见才管得住」的典型。
   - **配额事前预警（1.0.266）**：`AgentUsageService.QuotaLevel` + `QuotaWarnRatio=0.8` 作为**单一阈值来源**；新增 `GET /ag-ui/admin/quota-status`，让**侧边栏知聚项**直接打标（`⚠` ≥80% / `🔴` ≥100%，仅 Operator+），用量页同时按水位配色并在 meta 汇总「接近上限 N 个 ｜ 已超限 M 个」——配额从「事后可查」进到「事前可见」。
   - **知聚级配额覆写（1.0.267）**：全局配额一刀切，但知聚开销差异大——`Group.Extra["quotaPerGroup"]`（零迁移，同模型覆写）让管理员只给**单个知聚**放额（含 `0` = 本知聚不限），`EffectiveGroupQuota` 作为单一口径供**校验与展示共用**；水位预警随之改成**每知聚各用自己的分母**。
+  - **按用户水位 + 覆写审计（1.0.268）**：`/usage` 新增 `usersToday[]`，把同一套 `QuotaLevel` 用到**个人配额**（`system` 标为豁免）；`group.modelOverride` / `group.quotaOverride` 变更写审计（记改后实际值）。同版修复 3 处重复 i18n 键并给 CI 加**重复键守卫**（后者原本会静默覆盖前者）。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

@@ -15,12 +15,38 @@ function loadDict(file) {
   return window.I18N_DICTS[lang];
 }
 
+/**
+ * 重复键检测（必须在 eval 之前做）：JS 对象字面量里同名键**后者静默覆盖前者**，
+ * 所以加载后完全看不出来（曾踩到：新增 `admin.thUser` 把已有「用户名」改成了「触发者」）。
+ * 字典是一行一个键，按行首 `"key":` 计数即可可靠识别。
+ */
+function findDuplicateKeys(file) {
+  const raw = fs.readFileSync(path.join(i18nDir, file), "utf8");
+  const seen = new Set();
+  const dups = new Set();
+  for (const m of raw.matchAll(/^\s*"([A-Za-z0-9_.\-]+)"\s*:/gm)) {
+    if (seen.has(m[1])) dups.add(m[1]);
+    else seen.add(m[1]);
+  }
+  return [...dups];
+}
+
 function main() {
   const en = loadDict("en.js");
   const zh = loadDict("zh.js");
   const enKeys = Object.keys(en).sort();
   const zhKeys = Object.keys(zh).sort();
   let failed = false;
+
+  // 重复键：后者会静默覆盖前者，必须在加载前按原文检查
+  for (const file of ["en.js", "zh.js"]) {
+    const dups = findDuplicateKeys(file);
+    if (dups.length) {
+      failed = true;
+      console.error(`✗ ${file} 存在重复键（后者会静默覆盖前者）: ${dups.length} 个`);
+      dups.forEach((k) => console.error("    " + k));
+    }
+  }
 
   const onlyZh = zhKeys.filter((k) => !(k in en));
   if (onlyZh.length) {

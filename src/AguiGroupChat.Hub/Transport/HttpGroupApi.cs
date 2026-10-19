@@ -75,7 +75,7 @@ public static class HttpGroupApi
                 req.OwnerId = identity; // 创建者 = 服务端解析身份，防伪造
                 return Results.Ok(await hub.CreateGroupAsync(req, ct));
             }));
-        group.MapPost("/update", async (GroupUpdateRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
+        group.MapPost("/update", async (GroupUpdateRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, AguiGroupChat.Hub.Infra.AuditLogService audit, CancellationToken ct)
             => await RunAsync(async () =>
             {
                 var (identity, error) = RequireIdentity(ctx, auth, authOptions, fallback: req.OperatorId);
@@ -89,7 +89,17 @@ public static class HttpGroupApi
                 if (req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal) && auth.ResolveRole(identity) < PlatformRole.Admin)
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅平台管理员可设置知聚 Token 配额覆写"),
                         statusCode: StatusCodes.Status403Forbidden);
-                return Results.Ok(await hub.UpdateGroupAsync(req, ct));
+                var updated = await hub.UpdateGroupAsync(req, ct);
+                // 成本 / 容量控制类覆写属敏感变更：留痕（审计页可按 action 过滤；记改后的实际值，含「取消」）
+                if (req.UpdateFields.Contains("model", StringComparer.Ordinal))
+                    audit.Record("group.modelOverride", identity, auth.GetUser(identity)?.Username, groupId: req.GroupId,
+                        targetType: "group", targetId: req.GroupId,
+                        detail: updated.ModelOverride is { Length: > 0 } mo ? $"模型覆写 → {mo}" : "模型覆写 → （取消）");
+                if (req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal))
+                    audit.Record("group.quotaOverride", identity, auth.GetUser(identity)?.Username, groupId: req.GroupId,
+                        targetType: "group", targetId: req.GroupId,
+                        detail: updated.QuotaOverride is { } q ? $"每日 Token 配额覆写 → {q}（0 = 本知聚不限）" : "每日 Token 配额覆写 → （取消，回退全局）");
+                return Results.Ok(updated);
             }));
         group.MapPost("/disband", async (GroupDisbandRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)
             => await RunAsync(async () =>

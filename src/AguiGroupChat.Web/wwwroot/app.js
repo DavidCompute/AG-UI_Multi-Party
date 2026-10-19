@@ -8935,9 +8935,39 @@ async function loadAdminUsage() {
         </tr>`;
         }).join("")
       : `<tr><td colspan="4" class="admin-empty">${t("admin.usageEmpty")}</td></tr>`;
+
+    // 今日各触发者明细（1.0.268）：按**个人配额**算水位，预警「谁快到顶了」
+    // exempt（system 定时任务虚拟触发者）：刻意豁免个人配额，配额列显「豁免」而不是「已超限」
+    const users = data.usersToday || [];
+    const uNear = users.filter((u) => u.level === "warn").length;
+    const uOver = users.filter((u) => u.level === "over").length;
+    if (uNear > 0 || uOver > 0) {
+      $("adminUsageMeta").textContent += ($("adminUsageMeta").textContent ? " ｜ " : "") + t("admin.quotaNearUser", { near: uNear, over: uOver });
+    }
+    $("adminUsageUserRows").innerHTML = users.length
+      ? users.map((u) => {
+          const used = Number(u.tokens) || 0;
+          let cell = "—";
+          if (u.exempt) {
+            cell = `<span class="usage-quota-exempt">${escapeHtml(t("admin.quotaExempt"))}</span>`;
+          } else if (quota > 0) {
+            const ratio = Math.round((used / quota) * 100);
+            const cls = u.level === "over" ? " class=\"usage-quota-hit\"" : u.level === "warn" ? " class=\"usage-quota-warn\"" : "";
+            const mark = u.level === "over" ? "🔴 " : u.level === "warn" ? "⚠ " : "";
+            cell = `<span${cls}>${mark}${used.toLocaleString()} / ${quota.toLocaleString()}（${ratio}%）</span>`;
+          }
+          return `<tr>
+          <td>${escapeHtml(u.name || u.userId)}</td>
+          <td>${used.toLocaleString()}</td>
+          <td>${Number(u.calls).toLocaleString()}</td>
+          <td>${cell}</td>
+        </tr>`;
+        }).join("")
+      : `<tr><td colspan="4" class="admin-empty">${t("admin.usageEmpty")}</td></tr>`;
   } catch {
     $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
     $("adminUsageGroupRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
+    $("adminUsageUserRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.sysNetErr")}</td></tr>`;
   }
 }
 

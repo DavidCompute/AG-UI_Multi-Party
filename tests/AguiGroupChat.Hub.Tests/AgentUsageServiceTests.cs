@@ -175,6 +175,23 @@ public sealed class AgentUsageServiceTests
     }
 
     [Fact]
+    public void GetUserTodaySummary_GroupsByUser_SortedDesc()
+    {
+        var svc = CreateLive(() => 0, () => 0);
+        svc.RecordUsage("agent_a", "user_p1", 100, 50, 10); // 160
+        svc.RecordUsage("agent_b", "user_p1", 10, 10, 0);   // +20 → 180 / 2 次（跨智能体合并）
+        svc.RecordUsage("agent_a", "user_p2", 7, 3, 0);     // 10
+        svc.RecordUsage("agent_a", AgentUsageService.SystemUserId, 5, 5, 0); // 定时任务也算一个触发者
+
+        var rows = svc.GetUserTodaySummary();
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("user_p1", rows[0].UserId); // 降序：180 > 10
+        Assert.Equal(180, rows[0].Tokens);
+        Assert.Equal(2, rows[0].Calls);
+        Assert.Contains(rows, r => r.UserId == AgentUsageService.SystemUserId); // 包含但不等于「用户」
+    }
+
+    [Fact]
     public void GetDailySummary_AggregatesByDay()
     {
         var svc = Create();
