@@ -1,4 +1,36 @@
-# AG-UI 群聊桌面版 1.0.271 发布说明（当前 Windows 桌面版）
+# AG-UI 群聊桌面版 1.0.272 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.272 Release Notes (current Windows desktop release)
+
+**版本说明**：**前端严格审核（1.0.265～1.0.270 渲染路径）后的三项修复**——① 修复一个**缓存不同步**缺陷：`GROUP_UPDATED` 只同步了群名 / 头像 / 私密，没同步 `model` / `quotaPerGroup`，导致**另一位管理员（或另一个标签页）改完覆写后，本端再打开设置弹窗会回填旧值**（再保存还可能把新值覆盖回去）。② 给水位值加**白名单**（只接受 `warn` / `over`）。③ 用量页拉取失败时**三张表都清空**（之前只清按日表，另两张会残留旧数据，容易被当成当前数据）。
+**Version note**: **Three fixes after a strict frontend review (1.0.265–1.0.270 rendering paths)** — ① a **cache-sync** defect: `GROUP_UPDATED` synced only the name / avatar / private flag, not `model` / `quotaPerGroup`, so **after another admin (or another tab) changed an override, reopening the settings dialog here prefilled the old value** (and saving again could write it back). ② Quota levels are now **whitelisted** (only `warn` / `over`). ③ When the usage fetch fails, all **three tables are cleared** (previously only the daily table was, leaving stale rows that read as current).
+
+## 变更
+# Changes
+
+中文：
+- **`onGroupUpdated()` 同步覆写字段**：新增 `model` / `quotaPerGroup` 的本地同步（空串 / 非数字 / 负数 → `null`，与服务端「取消覆写」语义一致）；并在 `updateFields` 含 `quotaPerGroup` 时**异步刷新侧边栏水位角标**（覆写变了，快满 / 已满也会变）。
+- **水位值白名单**：新增 `quotaLevelOf()`（只返回 `warn` / `over`），用于 `loadQuotaStatus`、`renderGroupList`、`adminUserRow`——避免把服务端返回的任意字符串拼进 `class` 属性（防御性加固，非已存在漏洞）。
+- **失败时清空三张表**：`loadAdminUsage()` 在 `!res.ok || !data` 时同时填充按日 / 分知聚 / 分触发者三张表的错误占位，避免旧数据残留。
+- **审核确认无误**（未改动）：`saveGroupSettings()` 虽未手写 `Authorization`，但全局 `window.fetch` 包装会自动注入令牌（已验证）；`loadQuotaStatus` 仅 `Operator+` 调用且失败静默；所有插值均经 `escapeHtml` / 固定字面量。
+
+English:
+- **`onGroupUpdated()` syncs the override fields**: adds local sync for `model` / `quotaPerGroup` (empty / non-numeric / negative → `null`, matching the server's "clear override" semantics); when `updateFields` contains `quotaPerGroup` it also **refreshes the sidebar level badges asynchronously** (an override change can move a circle in or out of the warning band).
+- **Quota level whitelist**: new `quotaLevelOf()` (returns only `warn` / `over`), used by `loadQuotaStatus`, `renderGroupList` and `adminUserRow` — never interpolate an arbitrary server string into a `class` attribute (defence in depth, not a known exploit).
+- **Clear all three tables on failure**: `loadAdminUsage()` now fills the error placeholder into the daily / per-circle / per-trigger tables when `!res.ok || !data`, so stale rows cannot linger.
+- **Confirmed correct by the review** (unchanged): although `saveGroupSettings()` does not hand-write `Authorization`, the global `window.fetch` wrapper injects the token (verified); `loadQuotaStatus` is Operator+ only and fails silently; every interpolation goes through `escapeHtml` or a fixed literal.
+
+## 文档
+# Docs
+
+无需改文档（无用户可见的文案 / 接口 / 配置变更）。
+No doc changes (no user-visible copy, API or configuration change).
+
+## 测试
+# Tests
+
+中文：无新增 .NET 用例（本轮**无 C# 变更**）；新增临时 **Playwright 真浏览器**验证 **9/9** 并已删除：`GROUP_UPDATED`（`updateFields` + `groupInfo`）→ 本地 `quotaOverride` / `modelOverride` 同步、重开设置弹窗回填新值、空串→ `null`；注入非法 `level` 不进入 `state` 且页面无注入属性；合法 `warn` 正常收录；无页面脚本错误。`dotnet build` **0 错误**；`node --check` 通过；i18n 审计 **zh=en=1951，missing 0**；守卫脚本均过。
+English: no new .NET cases (this round has **no C# changes**); a temporary **real-browser Playwright** check passed **9/9** and was deleted: a `GROUP_UPDATED` (`updateFields` + `groupInfo`) syncs `quotaOverride` / `modelOverride`, reopening the dialog prefills the new values, an empty string becomes `null`; an injected illegal `level` stays out of `state` and leaves no injected attribute; a valid `warn` is recorded; no page script errors. `dotnet build` reports **0 errors**; `node --check` passes; the i18n audit is **zh=en=1951, missing 0**; the guard scripts pass.
+
 # AG-UI Group Chat Desktop 1.0.271 Release Notes (current Windows desktop release)
 
 **版本说明**：**严格代码审核后的两项修复**（覆盖 1.0.264～1.0.270 的配额链路）——① 修复一个**静默失效**类缺陷：`Group.Extra` 是 `init` 且可为 `null`，当旧数据库行 / 导入包的 `extra` 缺省时，`QuotaOverride` / `ModelOverride` / `Kind` 的 setter 会**直接 return**，接口返回 200 但实际没改；现改为**惰性非空属性**。② 配额阈值检查从「用量记录」的 `try/catch` 里拆出，避免它的异常被误报成「用量记录失败」。

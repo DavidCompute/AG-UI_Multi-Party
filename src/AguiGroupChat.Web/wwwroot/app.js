@@ -4744,6 +4744,9 @@ async function loadGroups() {
   }
 }
 
+/** 配额水位归一化：只接受 warn / over（防止把服务端返回的任意字符串拼进 class 属性）。 */
+function quotaLevelOf(v) { return v === "over" ? "over" : v === "warn" ? "warn" : null; }
+
 /** 知聚配额水位（仅 Operator+）：拉今日各知聚水位，供侧边栏知聚项打标（不打开控制台也能看到哪个知聚快满）。
  * 失败静默（清空标标）：配额是附加信息，不能因它拖累知聚列表渲染。 */
 async function loadQuotaStatus() {
@@ -4754,7 +4757,8 @@ async function loadQuotaStatus() {
     if (!res.ok || !d) { state.quotaLevels.clear(); return; }
     state.quotaLevels.clear();
     for (const g of (d.groups || [])) {
-      if (g && g.groupId && g.level && g.level !== "ok") state.quotaLevels.set(g.groupId, g.level);
+      const lvl = quotaLevelOf(g?.level);
+      if (g?.groupId && lvl) state.quotaLevels.set(g.groupId, lvl);
     }
   } catch { state.quotaLevels.clear(); }
 }
@@ -6205,10 +6209,21 @@ function onGroupUpdated(evt) {
     if (evt.groupInfo?.groupName) g.groupName = evt.groupInfo.groupName;
     if (evt.groupInfo?.groupAvatar !== undefined) g.groupAvatar = evt.groupInfo.groupAvatar || null;
     if (evt.groupInfo?.isPrivate !== undefined) g.isPrivate = evt.groupInfo.isPrivate;
+    // 成本控制类覆写随 GROUP_UPDATED 下发（updateFields 含 model / quotaPerGroup）：
+    // 必须同步回本地缓存，否则（别的标签页 / 另一位管理员改的）再次打开设置弹窗会回填旧值。
+    if (evt.groupInfo?.model !== undefined) g.modelOverride = evt.groupInfo.model || null;
+    if (evt.groupInfo?.quotaPerGroup !== undefined) {
+      const raw = evt.groupInfo.quotaPerGroup;
+      const n = Number(raw);
+      g.quotaOverride = (raw === "" || raw === null || !Number.isFinite(n) || n < 0) ? null : n;
+    }
   }
   renderGroupList();
   if (state.activeGroupId === evt.groupId)
     $("chatGroupName").textContent = (g?.isPrivate ? "🔒 " : "") + (evt.groupInfo?.groupName || g?.groupName || "");
+  // 配额覆写变了 → 水位可能变（快满 / 已满），异步刷新侧栏角标（不阻塞事件处理）
+  if (Array.isArray(evt.updateFields) && evt.updateFields.includes("quotaPerGroup"))
+    loadQuotaStatus().then(renderGroupList);
 }
 
 function addSystemLine(gid, text) {
@@ -6253,7 +6268,7 @@ function renderGroupList() {
     const needEnter = g.isSupportCircle && !g.isMember && !g.isEntered;
     const enterTag = needEnter ? `<span class="support-enter">${escapeHtml(t("support.enter"))}</span>` : "";
     // 知聚配额水位（仅 Operator+ 拉取）：接近 / 已达上限时打标——「快满了」不用打开控制台就能看到
-    const qLevel = state.quotaLevels.get(g.groupId);
+    const qLevel = quotaLevelOf(state.quotaLevels.get(g.groupId));
     const quotaTag = qLevel
       ? `<span class="quota-tag ${qLevel}" title="${escapeHtml(t(qLevel === "over" ? "list.quotaOver" : "list.quotaWarn"))}">${qLevel === "over" ? "🔴" : "⚠"}</span>`
       : "";
@@ -8884,7 +8899,14 @@ async function loadAdminUsage() {
   try {
     const res = await fetch("/ag-ui/admin/usage?days=7", { headers: { Authorization: "Bearer " + state.token } });
     const data = await res.json().catch(() => null);
-    if (!res.ok || !data) { $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) })}</td></tr>`; return; }
+    if (!res.ok || !data) {
+      // 失败时三张表都要清（否则旧数据留在页面上，容易被当成「当前」数据）
+      const msg = t("admin.loadFail", { err: escapeHtml(errMsg(data, "HTTP " + res.status)) });
+      $("adminUsageRows").innerHTML = `<tr><td colspan="6" class="admin-empty">${msg}</td></tr>`;
+      $("adminUsageGroupRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${msg}</td></tr>`;
+      $("adminUsageUserRows").innerHTML = `<tr><td colspan="4" class="admin-empty">${msg}</td></tr>`;
+      return;
+    }
     const quota = Number(data.dailyQuotaPerUser) || 0;
     const quotaGroup = Number(data.dailyQuotaPerGroup) || 0;
     $("adminUsageMeta").textContent = quota > 0
