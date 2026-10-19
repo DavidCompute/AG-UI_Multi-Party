@@ -4467,6 +4467,21 @@ function applyCreateKind() {
 let groupSettingsAvatar = null; // null=未改动；""=移除；url=新头像
 let gsAvatarPicker = null;
 
+/** UTC 毫秒 → `<input type="datetime-local">` 值（本地时区，`YYYY-MM-DDTHH:mm`）。 */
+function msToLocalInput(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** `<input type="datetime-local">` 值（本地时区）→ UTC 毫秒；空 / 非法 → null。 */
+function localInputToMs(v) {
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
 function openGroupSettings() {
   const gid = state.activeGroupId;
   const g = state.groups.find((x) => x.groupId === gid);
@@ -4484,6 +4499,7 @@ function openGroupSettings() {
   // 知聚级每日 Token 配额覆写：同属成本控制，仅平台管理员可见 / 可改（服务端同样限管理员）
   if ($("gsQuotaGroup")) $("gsQuotaGroup").classList.toggle("hidden", !isAdminPlus());
   if ($("gsQuotaOverride")) $("gsQuotaOverride").value = (g.quotaOverride === null || g.quotaOverride === undefined) ? "" : String(g.quotaOverride);
+  if ($("gsQuotaUntil")) $("gsQuotaUntil").value = msToLocalInput(Number(g.quotaOverrideUntil));
   // 客服知聚：私密开关隐藏且不可改（服务端强制非私密）
   const gsPrivLabel = $("gsIsPrivate").closest(".modal-label");
   if (gsPrivLabel) gsPrivLabel.style.display = g.isSupportCircle ? "none" : "";
@@ -4520,6 +4536,15 @@ async function saveGroupSettings() {
       groupInfo.quotaPerGroup = (raw !== "" && Number.isFinite(n) && n >= 0) ? n : "";
     }
   }
+  // 临时放额到期时间（留空 = 长期有效）；与服务端一致：只改它也可单独提交
+  if (isAdminPlus() && $("gsQuotaUntil")) {
+    const rawUntil = $("gsQuotaUntil").value;
+    const curUntil = msToLocalInput(Number(g.quotaOverrideUntil));
+    if (rawUntil !== curUntil) {
+      updateFields.push("quotaPerGroupUntil");
+      groupInfo.quotaPerGroupUntil = localInputToMs(rawUntil) ?? "";
+    }
+  }
   if (updateFields.length === 0) { $("groupSettingsModal").classList.add("hidden"); return; }
   try {
     const res = await fetch("/ag-ui/group/update", {
@@ -4535,8 +4560,16 @@ async function saveGroupSettings() {
     if (groupInfo.groupAvatar !== undefined) g.groupAvatar = groupInfo.groupAvatar;
     if (groupInfo.isPrivate !== undefined) g.isPrivate = groupInfo.isPrivate;
     if (groupInfo.model !== undefined) g.modelOverride = groupInfo.model || null;
-    if (groupInfo.quotaPerGroup !== undefined)
-      g.quotaOverride = (groupInfo.quotaPerGroup === "" || groupInfo.quotaPerGroup === null) ? null : Number(groupInfo.quotaPerGroup);
+    if (groupInfo.quotaPerGroup !== undefined) {
+      const n = Number(groupInfo.quotaPerGroup);
+      g.quotaOverride = (groupInfo.quotaPerGroup === "" || groupInfo.quotaPerGroup === null || !Number.isFinite(n) || n < 0) ? null : n;
+      // 取消覆写时服务端会一并清到期时间，本地同步清掉（避免弹窗回填过期的旧时间）
+      if (g.quotaOverride === null) g.quotaOverrideUntil = null;
+    }
+    if (groupInfo.quotaPerGroupUntil !== undefined) {
+      const u = Number(groupInfo.quotaPerGroupUntil);
+      g.quotaOverrideUntil = (groupInfo.quotaPerGroupUntil === "" || groupInfo.quotaPerGroupUntil === null || !Number.isFinite(u) || u <= 0) ? null : u;
+    }
     renderGroupList();
     $("chatGroupName").textContent = (g.isPrivate ? "🔒 " : "") + (g.groupName || "");
     toast(t("gs.saved"));
@@ -6216,13 +6249,21 @@ function onGroupUpdated(evt) {
       const raw = evt.groupInfo.quotaPerGroup;
       const n = Number(raw);
       g.quotaOverride = (raw === "" || raw === null || !Number.isFinite(n) || n < 0) ? null : n;
+      // 取消覆写时服务端会一并清到期时间（本地同步清，否则弹窗回填过期旧值）
+      if (g.quotaOverride === null) g.quotaOverrideUntil = null;
+    }
+    if (evt.groupInfo?.quotaPerGroupUntil !== undefined) {
+      const rawU = evt.groupInfo.quotaPerGroupUntil;
+      const u = Number(rawU);
+      g.quotaOverrideUntil = (rawU === "" || rawU === null || !Number.isFinite(u) || u <= 0) ? null : u;
     }
   }
   renderGroupList();
   if (state.activeGroupId === evt.groupId)
     $("chatGroupName").textContent = (g?.isPrivate ? "🔒 " : "") + (evt.groupInfo?.groupName || g?.groupName || "");
-  // 配额覆写变了 → 水位可能变（快满 / 已满），异步刷新侧栏角标（不阻塞事件处理）
-  if (Array.isArray(evt.updateFields) && evt.updateFields.includes("quotaPerGroup"))
+  // 配额覆写 / 临时放额到期变了 → 水位可能变（快满 / 已满），异步刷新侧栏角标（不阻塞事件处理）
+  if (Array.isArray(evt.updateFields)
+      && (evt.updateFields.includes("quotaPerGroup") || evt.updateFields.includes("quotaPerGroupUntil")))
     loadQuotaStatus().then(renderGroupList);
 }
 
@@ -8947,8 +8988,11 @@ async function loadAdminUsage() {
             const mark = g.level === "over" ? "🔴 " : g.level === "warn" ? "⚠ " : "";
             quotaCell = `<span${cls}>${mark}${used.toLocaleString()} / ${q.toLocaleString()}（${ratio}%）</span>`;
           }
-          // 与全局配额不同 → 说明本行用的是「本知聚覆写」（悬停可见具体值）
-          const ovr = q !== quotaGroup ? ` <span class="usage-quota-ovr" title="${escapeHtml(t("admin.quotaOverrideTag", { quota: q.toLocaleString() }))}">⚙</span>` : "";
+          // 与全局配额不同 → 说明本行用的是「本知聚覆写」（悬停可见具体值与临时到期时间）
+          const untilTip = g.quotaUntil ? t("admin.quotaOverrideUntilTag", { time: fmtDateTime(Number(g.quotaUntil)) }) : "";
+          const ovr = q !== quotaGroup
+            ? ` <span class="usage-quota-ovr" title="${escapeHtml(t("admin.quotaOverrideTag", { quota: q.toLocaleString() }) + (untilTip ? "；" + untilTip : ""))}">⚙</span>`
+            : "";
           return `<tr>
           <td>${escapeHtml(g.name || g.groupId)}${ovr}</td>
           <td>${used.toLocaleString()}</td>

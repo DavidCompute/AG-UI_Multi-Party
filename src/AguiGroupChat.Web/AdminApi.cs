@@ -428,7 +428,7 @@ public static class AdminApi
                 .Select(g => new
                 {
                     groupId = g.GroupId,
-                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, EffectiveQuota(hub, usage, g.GroupId)),
+                    level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, EffectiveQuota(hub, usage, g.GroupId).Quota),
                 })
                 .ToList();
             return Results.Ok(new
@@ -452,7 +452,7 @@ public static class AdminApi
                 .Take(50)
                 .Select(g =>
                 {
-                    var quota = EffectiveQuota(hub, usage, g.GroupId);
+                    var (quota, until) = EffectiveQuota(hub, usage, g.GroupId);
                     return (object)new
                     {
                         groupId = g.GroupId,
@@ -460,15 +460,21 @@ public static class AdminApi
                         tokens = g.Tokens,
                         calls = g.Calls,
                         quota,
+                        // 临时放额的到期时间（仅当覆写**仍生效**时给出，便于界面提示「临时至 X」）
+                        quotaUntil = until,
                         level = AguiGroupChat.Hub.Agents.AgentUsageService.QuotaLevel(g.Tokens, quota),
                     };
                 })
                 .ToList();
         }
 
-        // 生效配额 = 知聚级覆写（Group.QuotaOverride）优先，否则全局 Agents:DailyTokenQuotaPerGroup。
-        static long EffectiveQuota(GroupHub? hub, AguiGroupChat.Hub.Agents.AgentUsageService usage, string groupId)
-            => usage.EffectiveGroupQuota(groupId, hub?.GroupQuotaOverride(groupId));
+        // 生效配额 = 知聚级覆写（Group.QuotaOverride，且未到期）优先，否则全局 Agents:DailyTokenQuotaPerGroup。
+        // 一次取覆写值同时拿到期时间，避免两次群库读取。
+        static (long Quota, long? Until) EffectiveQuota(GroupHub? hub, AguiGroupChat.Hub.Agents.AgentUsageService usage, string groupId)
+        {
+            var ov = hub?.GroupQuotaOverride(groupId);
+            return (usage.EffectiveGroupQuota(groupId, ov), ov is null ? null : hub?.GroupQuotaOverrideUntil(groupId));
+        }
 
         // 今日各触发者用量行（1.0.268）：按用户个人配额算水位，供用量页「接近 / 已超个人配额」汇总。
         // system 是定时任务的虚拟触发者，**刻意豁免个人配额**——它也会出现（便于看到系统任务消耗），

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.272**
+> Applies to version: **1.0.273**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -673,18 +673,23 @@ Support circles, in language and implementation: support circles **do not suppor
 
 > **Latent store bug fixed alongside**: `PostgresGroupStore.UpdateGroup` / `RelationalGroupStore.UpdateGroup` did not write the `extra` column, so extra-backed fields such as `kind` / `model` could not be changed or cleared after creation (fixed in 1.0.261, with a regression test).
 
-#### 2.2.2.2 Per-circle token quota override (admin, 1.0.267)
+#### 2.2.2.2 Per-circle token quota override and temporary allowances (admin, 1.0.267 / 1.0.273)
 
-- **Entry**: inside the group settings dialog, `#gsQuotaGroup` / `#gsQuotaOverride` (`type=number`, `min=0`), **visible only to platform admins** (`isAdminPlus()`); otherwise the group is hidden.
+- **Entry**: inside the group settings dialog, `#gsQuotaGroup` / `#gsQuotaOverride` (`type=number`, `min=0`) and `#gsQuotaUntil` (`type=datetime-local`, **new in 1.0.273**), **visible only to platform admins** (`isAdminPlus()`); otherwise the group is hidden.
 - **Meaning**: give one circle its **own daily token allowance**, **taking precedence over** the global `Agents:DailyTokenQuotaPerGroup` (`AgentUsageService.EffectiveGroupQuota`). Blank = use the global value; `0` = **unlimited for that circle** (a valid override, not "unset"); negative / non-numeric = clear the override.
-- **Why it is needed**: the global quota is one-size-fits-all, but circles differ hugely in cost (a support circle serving customers vs a small internal circle) — with an override you can give one circle headroom **without raising the platform-wide cap**.
-- **Storage (zero migration)**: kept in `Group.Extra["quotaPerGroup"]` (a string, like `ModelOverride`); every group store passes extra JSON through, so no new column is needed. Reading accepts both a JSON number and a numeric string (`Group.QuotaOverride` / `LongOf`). **Since 1.0.271 `Group.Extra` is a lazily non-null property**, so groups from old DB rows / import packs without `extra` can still store the override (previously a silent no-op).
-- **Permission (enforced server-side)**: `HttpGroupApi`'s `/update` requires an effective role ≥ `PlatformRole.Admin` when `updateFields` contains `quotaPerGroup`, otherwise **403** ("only platform admins can set a group token quota override"); `GroupHub` also requires owner / group-admin.
+- **Temporary allowance (1.0.273)**: the override can carry an **expiry time** (`quotaPerGroupUntil`, UTC milliseconds). Once it expires the circle **automatically falls back to the global quota** — nobody has to remember to undo it.
+  - **Lazy expiry**: evaluated at read time (`Group.IsQuotaOverrideActive(nowMs)`); there is **no background cleanup job**. `GroupHub.GroupQuotaOverride` returns `null` once expired, while `GroupHub.GroupQuotaOverrideUntil` still returns the stored value.
+  - **Stored value is kept**: expiry only affects *whether it is effective*; both `Extra["quotaPerGroup"]` and `Extra["quotaPerGroupUntil"]` **remain**, so an admin reopening the dialog still sees what was set and when it was due.
+  - **Clearing removes orphans**: setting `QuotaOverride` to `null` / a negative value deletes **both** keys.
+  - **Frontend timezone handling**: `<input type="datetime-local">` is **local time**; `msToLocalInput` / `localInputToMs` (`app.js:4471-4483`) convert to and from UTC milliseconds, and the field is only submitted when it actually changed.
+- **Why it is needed**: the global quota is one-size-fits-all, but circles differ hugely in cost (a support circle serving customers vs a small internal circle) — with an override you can give one circle headroom **without raising the platform-wide cap**; with an expiry, temporary allowances (promotions / demos) do not quietly become permanent holes.
+- **Storage (zero migration)**: kept in `Group.Extra["quotaPerGroup"]` / `Group.Extra["quotaPerGroupUntil"]` (strings, like `ModelOverride`); every group store passes extra JSON through, so no new column is needed. Reading accepts both a JSON number and a numeric string (`Group.QuotaOverride` / `LongOf`). **Since 1.0.271 `Group.Extra` is a lazily non-null property**, so groups from old DB rows / import packs without `extra` can still store the override (previously a silent no-op).
+- **Permission (enforced server-side)**: `HttpGroupApi`'s `/update` requires an effective role ≥ `PlatformRole.Admin` when `updateFields` contains `quotaPerGroup` **or `quotaPerGroupUntil`**, otherwise **403**; `GroupHub` also requires owner / group-admin.
 - **Effect**: `AgentGateway` reads `GroupHub.GroupQuotaOverride(groupId)` (`AgentGateway.ResolveGroupQuota`) and passes it to `AgentUsageService.CheckGroupQuota(groupId, override)` — exceeding it blocks the trigger with `GROUP_QUOTA_EXCEEDED` (see 8.6).
-- **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).
-- **Rendering**: the group-list endpoint `GET /ag-ui/member/{memberId}/groups` returns `quotaOverride` (`null` = not overridden), which `openGroupSettings()` backfills.
-- **Audit (1.0.268)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global").
-- **External visibility**: the change rides on the existing `GROUP_UPDATED` event (`updateFields` contains `quotaPerGroup`, `groupInfo` carries the new value, and it is pushed **even with nobody online**) — no dedicated event needed; see 8.19.
+- **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value, and for a temporary allowance appends "temporary until {time}"); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).
+- **Rendering**: the group-list endpoint `GET /ag-ui/member/{memberId}/groups` returns `quotaOverride` and `quotaOverrideUntil` (`null` = not overridden / no expiry), and `openGroupSettings()` backfills both.
+- **Audit (1.0.268 / 1.0.273)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global"); when an expiry is set, "; effective until yyyy-MM-dd HH:mmZ" is appended.
+- **External visibility**: the change rides on the existing `GROUP_UPDATED` event (`updateFields` contains `quotaPerGroup` / `quotaPerGroupUntil`, `groupInfo` carries the new value, and it is pushed **even with nobody online**) — no dedicated event needed; see 8.19.
 
 #### 2.2.3 Disbanding a Circle
 
@@ -3960,14 +3965,15 @@ The server (`AdminApi.cs:397-408`) returns:
 
 ```jsonc
 { "dailyQuotaPerUser": <long>, "dailyQuotaPerGroup": <long>,
-  "groupsToday": [ { groupId, name, tokens, calls, quota, level }… ],
+  "groupsToday": [ { groupId, name, tokens, calls, quota, quotaUntil, level }… ],
   "usersToday":  [ { userId, name, tokens, calls, quota, level, exempt }… ],
   "days": [ UsageDaySummary… ] }
 ```
 
 - `UsageDaySummary` (`AgentUsageService.cs:280`): `date`, `totalTokens`, `promptTokens`, `completionTokens`, `reasoningTokens`, `calls`.
 - `days` is produced by `usage.GetDailySummary(days ?? 7)`, internally `Math.Clamp(days, 1, 90)` (`AgentUsageService.cs:254`, i.e. at most 90 days); the frontend always passes `days=7`.
-- **`groupsToday` (new in 1.0.265; `level` in 1.0.266; `quota` in 1.0.267)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:186`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use**.
+- **`groupsToday` (new in 1.0.265; `level` in 1.0.266; `quota` in 1.0.267; `quotaUntil` in 1.0.273)**: today's per-circle usage, aggregated in one pass by `usage.GetGroupTodaySummary()` (`AgentUsageService.cs:186`) reusing the per-circle aggregate table's today rows (sorted by tokens descending, top 50), with names resolved from `GroupHub.Store.AllGroups()` (falling back to the `groupId`). The table has 4 columns: circle / today's tokens / calls / **quota use**.
+  - **`quotaUntil` (1.0.273)**: present only when the circle's override is **still effective and has an expiry** (UTC milliseconds), otherwise `null`; it drives the "temporary until {time}" hover hint. After expiry it becomes `null` and `quota` falls back to the global value.
 - **`usersToday` (new in 1.0.268)**: today's per-**trigger** usage, aggregated in one pass by `usage.GetUserTodaySummary()` (`AgentUsageService.cs:241`) from the daily aggregate table (sorted by tokens descending, top 50), with names from nickname → username → userId (`AuthService.ListUsers`). The table has 4 columns: trigger / today's tokens / calls / **quota use** (against `Agents:DailyTokenQuotaPerUser`).
   - `exempt`: the scheduled-task virtual trigger `system` **deliberately bypasses the per-user quota** — it still appears (so system-task consumption is visible), but with `exempt=true` and `level` always `ok`, and the quota column reads "System task (exempt)" rather than "over".
   - The meta line appends `admin.quotaNearUser` "{near} users approaching limit ｜ {over} over limit".
@@ -3979,7 +3985,7 @@ Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, 
 
 > The **per-user quota** is enforced on "the trigger's cumulative tokens for the current day" (UTC day boundary); scheduled tasks triggered with the virtual trigger `system` are **not counted** against the personal quota (`AgentUsageService.cs:20,115-123`).
 >
-> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:219`; the gateway-side check is `AgentGateway.cs:660`, error code `GROUP_QUOTA_EXCEEDED`); the actual denominator is resolved by `EffectiveGroupQuota` (**per-circle override first**, `Group.QuotaOverride`, see 2.2.2.2).
+> The **per-circle quota** (`Agents:DailyTokenQuotaPerGroup`) is enforced on "this circle's cumulative tokens for the current day" and **does apply to `system` triggers** — scheduled / broadcast consumption is not counted against anyone's personal quota, which is exactly the path it caps (`AgentUsageService.cs:219`; the gateway-side check is `AgentGateway.cs:660`, error code `GROUP_QUOTA_EXCEEDED`); the actual denominator is resolved by `EffectiveGroupQuota` (**per-circle override first**, `Group.QuotaOverride`, and **a temporary allowance automatically falls back to the global value once it expires**, see 2.2.2.2).
 >
 > **Proactive warning (1.0.266)**: the same level source is also served by `GET /ag-ui/admin/quota-status` (`AdminApi.cs:422-438`) to the **sidebar group items** (Operator+ only) — so you can see which circle is "nearly full" without opening the console.
 >
@@ -4017,7 +4023,7 @@ Audit retention policy: `Capacity = 5000`, dropping the oldest when exceeded; in
 
 **CSV columns (header, `AdminApi.cs:171`)**: `id,timeUtc,timeMs,action,actorId,actorUsername,groupId,targetType,targetId,detail,result`.
 
-Key audit actions (partial, for searching): `admin.user.disable`, `admin.user.reset_password`, `admin.user.role`, `user.account.delete`, `admin.orphan.adopt`, `admin.orphan.delete`, `data.export`, `data.import`, `data.reset`, `settings.model`, `settings.branding`, `config.update`, `execution.patch`, `storage.reclaim`, `interaction.resolve`, **`group.modelOverride` / `group.quotaOverride` (1.0.268; records the resulting value, including "cleared")**.
+Key audit actions (partial, for searching): `admin.user.disable`, `admin.user.reset_password`, `admin.user.role`, `user.account.delete`, `admin.orphan.adopt`, `admin.orphan.delete`, `data.export`, `data.import`, `data.reset`, `settings.model`, `settings.branding`, `config.update`, `execution.patch`, `storage.reclaim`, `interaction.resolve`, **`group.modelOverride` / `group.quotaOverride` (1.0.268; records the resulting value, including "cleared"; since 1.0.273 it also appends "effective until …")**.
 
 ---
 
@@ -4440,7 +4446,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 - **Subscription filtering**: the `groupId` is an empty string for the user scope — so **group-scoped subscriptions do not receive per-user alerts**; only unscoped subscriptions do.
 - **No quota (0 = unlimited) means no events** and no extra queries.
 
-**How external systems see override changes**: circle-level **model / quota overrides have no dedicated webhook event** — they ride on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**.
+**How external systems see override changes**: circle-level **model / quota overrides have no dedicated webhook event** — they ride on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup` / `quotaPerGroupUntil`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**.
 
 > If an external audit needs the **effective value** (a negative / non-numeric value counts as clearing the override), read the audit log's `group.quotaOverride` / `group.modelOverride` (whose `detail` records the **resulting** value, see 8.7), or read `quotaOverride` / `modelOverride` back from the group list.
 
@@ -4538,7 +4544,7 @@ Identity resolution (`HttpGroupApi.RequireIdentity` L697-718): **a valid token �
 | GET | `/ag-ui/health` | Health check (connection count / group count) | Public |
 | GET | `/ag-ui/member/{memberId}/groups` | List of Circles a member belongs to (including unread counts); only the member themselves can query their own | Identity |
 | POST | `/ag-ui/group/create` | Create a Circle | Identity (creator = resolved identity) |
-| POST | `/ag-ui/group/update` | Update a Circle (when `updateFields` contains `model` or `quotaPerGroup` it needs a platform admin, see 2.2.2.1 / 2.2.2.2) | Identity (group management; cost-control fields need Admin) |
+| POST | `/ag-ui/group/update` | Update a Circle (when `updateFields` contains `model` / `quotaPerGroup` / `quotaPerGroupUntil` it needs a platform admin, see 2.2.2.1 / 2.2.2.2) | Identity (group management; cost-control fields need Admin) |
 | POST | `/ag-ui/group/disband` | Disband a Circle | Identity (group owner, server-verified) |
 | GET | `/ag-ui/group/discover` | Support circle discovery list (visible to any logged-in user) | Identity |
 | POST | `/ag-ui/group/{groupId}/enter` | Enter a support circle (non-members automatically become customer participants) | Identity |

@@ -43,14 +43,14 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 # 配额水位 / 覆写同步回归（`ui-quota-alerts.mjs`）
 
-覆盖 1.0.265～1.0.272 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
+覆盖 1.0.265～1.0.273 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
 
 覆盖点：
 
 1. `GET /ag-ui/admin/usage` 含 `groupsToday[]` / `usersToday[]`，分知聚行含 `quota` / `level`；`/quota-status` 含 `quotaPerGroup` / `warnRatio` / `groups`。
 2. 用量页三张表：分知聚（红 / 琥珀 / `⚙` 覆写标）、分触发者（红 / 琥珀 / `system` 豁免）、meta 汇总。
 3. 水位值**白名单**：注入非法 `level` 不得进入 `state`，页面不得出现注入属性；合法 `warn` 正常打标。
-4. `GROUP_UPDATED` 携带 `quotaPerGroup` / `model` 时**同步本地缓存**（否则重开设置弹窗会回填旧值），空串 → `null`。
+4. `GROUP_UPDATED` 携带 `quotaPerGroup` / `quotaPerGroupUntil` / `model` 时**同步本地缓存**（否则重开设置弹窗会回填旧值），空串 → `null`；到期时间可回填并**无损回转**，取消覆写时额度与到期时间一并清空。
 
 ```bash
 cd tools && HEADLESS=1 node ui-quota-alerts.mjs

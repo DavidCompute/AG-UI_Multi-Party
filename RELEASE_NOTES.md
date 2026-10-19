@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.272 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.272 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.273 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.273 Release Notes (current Windows desktop release)
+
+**版本说明**：**知聚配额「临时放额」**——管理员给某个知聚设配额覆写时，可以再给一个**到期时间**；到期后**自动回退全局配额**，不需要人工记得改回来。失效是**惰性**的（读时判定，无后台任务），存储里的旧值仍然保留，管理员能看到当时设了多少、原定何时到期。
+**Version note**: **Temporary per-circle quota allowances** — when an admin sets a quota override for a circle, it can now carry an **expiry time**; once it lapses the circle **automatically falls back to the global quota**, so nobody has to remember to undo it. Expiry is **lazy** (evaluated at read time, no background job) and the stored values are kept, so an admin can still see what was set and when it was due.
+
+## 变更
+# Changes
+
+中文：
+- **模型（`Group`）**：新增 `QuotaOverrideUntil`（存 `Extra["quotaPerGroupUntil"]`，UTC 毫秒；`<= 0` 视为清除）与 `IsQuotaOverrideActive(nowMs)`（有值且无到期或未到期）。`QuotaOverride` 置 `null` / 负数时**同时移除**额度与到期时间两个键（不留孤儿）。
+- **Hub（`GroupHub`）**：`UpdateGroupAsync` 的 `updateFields` 支持 `quotaPerGroupUntil`；`GroupQuotaOverride(groupId)` **到期即返回 `null`**（惰性失效）；新增 `GroupQuotaOverrideUntil(groupId)` 返回存储值（不判到期）。`OnGroupUpdated` 侧：`updateFields` 含 `quotaPerGroupUntil` 时也会刷新侧边栏水位角标。
+- **接口（`HttpGroupApi`）**：`/update` 在 `updateFields` 含 `quotaPerGroup` **或 `quotaPerGroupUntil`** 时要求平台管理员（否则 403）；群列表投影新增 `quotaOverrideUntil`；审计 detail 在设了到期时间时追加「；有效期至 yyyy-MM-dd HH:mmZ」。
+- **管理接口（`AdminApi`）**：`EffectiveQuota` 改为同时返回生效额度与到期时间；`/usage` 的 `groupsToday` 每行新增 `quotaUntil`（**仅当覆写仍生效时**给出，便于提示「临时至 X」）。
+- **前端**：知聚设置弹窗新增 `#gsQuotaUntil`（`datetime-local`，仅管理员可见）；新增 `msToLocalInput` / `localInputToMs` 做本地时间 ↔ UTC 毫秒换算；回填 / 保存 / `GROUP_UPDATED` 同步均覆盖到期时间，取消覆写时本地一并清空；用量页 `⚙` 悬浮提示追加「临时放额至 {time}」。
+- **语义不变的前提**：`0` 仍是**有效覆写**（本知聚不限），不是「未设」；到期失效**只影响是否生效**，不改写存储。
+
+English:
+- **Model (`Group`)**: adds `QuotaOverrideUntil` (stored in `Extra["quotaPerGroupUntil"]`, UTC milliseconds; `<= 0` clears) and `IsQuotaOverrideActive(nowMs)` (has a value and either no expiry or not yet expired). Setting `QuotaOverride` to `null` / a negative value now **removes both** the quota and the expiry key (no orphans).
+- **Hub (`GroupHub`)**: `UpdateGroupAsync` accepts `quotaPerGroupUntil` in `updateFields`; `GroupQuotaOverride(groupId)` **returns `null` once expired** (lazy expiry); new `GroupQuotaOverrideUntil(groupId)` returns the stored value regardless of expiry. On the event side, `updateFields` containing `quotaPerGroupUntil` also refreshes the sidebar level badges.
+- **API (`HttpGroupApi`)**: `/update` requires a platform admin (otherwise 403) when `updateFields` contains `quotaPerGroup` **or `quotaPerGroupUntil`**; the group-list projection gains `quotaOverrideUntil`; the audit `detail` appends "; effective until yyyy-MM-dd HH:mmZ" when an expiry is set.
+- **Admin API (`AdminApi`)**: `EffectiveQuota` now returns both the effective quota and the expiry; each `groupsToday` row in `/usage` gains `quotaUntil` (**only when the override is still effective**) to drive the "temporary until X" hint.
+- **Frontend**: the group settings dialog gains `#gsQuotaUntil` (`datetime-local`, admin only); new `msToLocalInput` / `localInputToMs` convert between local time and UTC milliseconds; prefill / save / `GROUP_UPDATED` sync all cover the expiry, and clearing the override also clears it locally; the usage page's `⚙` hover hint appends "temporary until {time}".
+- **Semantics unchanged otherwise**: `0` is still a **valid override** (unlimited for that circle), not "unset"; expiry **only affects effectiveness** and never rewrites storage.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.2.2.2（临时放额：惰性失效 / 存储保留 / 取消清孤儿 / 时区换算 / 审计）、§8.6（`groupsToday` 新增 `quotaUntil`；到期回退说明）、§8.7（审计 detail 追加有效期）、§9.2.2（`/update` 权限字段扩为 `quotaPerGroup` / `quotaPerGroupUntil`）；版本号与「适用版本」同步到 1.0.273。
+English: `docs/user-guide.md` / `en.md` §2.2.2.2 (temporary allowance: lazy expiry / stored values kept / clearing removes orphans / timezone handling / audit), §8.6 (`groupsToday` gains `quotaUntil`; fallback on expiry), §8.7 (audit detail appends the expiry), §9.2.2 (`/update` permission fields extended to `quotaPerGroup` / `quotaPerGroupUntil`); version numbers and "applies to version" bumped to 1.0.273.
+
+## 测试
+# Tests
+
+中文：新增 4 例——`GroupHubTests` ×3（`UpdateGroup_QuotaOverrideUntil_ExpiresLazily`：设额度 + 到期 → 生效；推进时钟 → 生效判定回退但存储保留；`UpdateGroup_QuotaOverrideUntil_InThePastIsImmediatelyInactive`：过去时间立即不生效；`UpdateGroup_QuotaOverride_ClearedAlsoClearsUntil`：取消覆写同时清两个键且 `Extra` 无残留）；`AdminApiTests` ×1（`GroupQuotaOverride_WithExpiry_ReturnsUntilThenFallsBackOnExpiry`：群列表回读 `quotaOverrideUntil`、`/usage` 行带 `quotaUntil` 且水位 `over`、改成过去时间后立刻回退全局 / `quotaUntil=null`、存储旧值保留、审计含「有效期至」）。**定向用例 5/5 通过**；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1953，missing 0**；`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 均过；`tools/ui-quota-alerts.mjs` 扩展后实跑 **19 通过 / 0 失败 / 1 跳过**（新增到期时间同步、回填可无损回转、取消清空断言）；Docker 重建后真实 API 端到端：设 1234 + 1 小时到期 → 群列表回读一致 → 改到过去 → 生效判定立即回退（`quotaOverride` 仍在）→ 取消覆写两个字段均 `null`。
+English: 4 new cases — `GroupHubTests` ×3 (`UpdateGroup_QuotaOverrideUntil_ExpiresLazily`: set quota + expiry → effective; advance the clock → the effective check falls back while storage is kept; `UpdateGroup_QuotaOverrideUntil_InThePastIsImmediatelyInactive`: a past time is immediately inactive; `UpdateGroup_QuotaOverride_ClearedAlsoClearsUntil`: clearing removes both keys with no `Extra` leftovers); `AdminApiTests` ×1 (`GroupQuotaOverride_WithExpiry_ReturnsUntilThenFallsBackOnExpiry`: the group list returns `quotaOverrideUntil`, the `/usage` row carries `quotaUntil` with level `over`, moving the expiry into the past immediately falls back to global with `quotaUntil=null`, stored values remain, and the audit contains "effective until"). **Targeted cases 5/5 pass**; `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1953, missing 0**; `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass; after extending it, `tools/ui-quota-alerts.mjs` runs **19 passed / 0 failed / 1 skipped** (new assertions for expiry sync, lossless prefill round-trip, and clearing); after a Docker rebuild, a real-API end-to-end run: set 1234 with a 1-hour expiry → the group list reads back consistently → move it into the past → the effective check immediately falls back (while `quotaOverride` is still stored) → clearing the override nulls both fields.
+
 
 **版本说明**：**前端严格审核（1.0.265～1.0.270 渲染路径）后的三项修复**——① 修复一个**缓存不同步**缺陷：`GROUP_UPDATED` 只同步了群名 / 头像 / 私密，没同步 `model` / `quotaPerGroup`，导致**另一位管理员（或另一个标签页）改完覆写后，本端再打开设置弹窗会回填旧值**（再保存还可能把新值覆盖回去）。② 给水位值加**白名单**（只接受 `warn` / `over`）。③ 用量页拉取失败时**三张表都清空**（之前只清按日表，另两张会残留旧数据，容易被当成当前数据）。
 **Version note**: **Three fixes after a strict frontend review (1.0.265–1.0.270 rendering paths)** — ① a **cache-sync** defect: `GROUP_UPDATED` synced only the name / avatar / private flag, not `model` / `quotaPerGroup`, so **after another admin (or another tab) changed an override, reopening the settings dialog here prefilled the old value** (and saving again could write it back). ② Quota levels are now **whitelisted** (only `warn` / `over`). ③ When the usage fetch fails, all **three tables are cleared** (previously only the daily table was, leaving stale rows that read as current).

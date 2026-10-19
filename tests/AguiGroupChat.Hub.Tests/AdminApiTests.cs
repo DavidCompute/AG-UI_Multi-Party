@@ -547,6 +547,99 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
     }
 
     [Fact]
+    public async Task GroupQuotaOverride_WithExpiry_ReturnsUntilThenFallsBackOnExpiry()
+    {
+        var admin = await RegisterAsync("admin_chief");
+        var token = admin.GetProperty("token").GetString()!;
+        var userId = admin.GetProperty("userId").GetString()!;
+        var usage = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
+
+        using var create = Authed(HttpMethod.Post, "/ag-ui/group/create", token);
+        create.Content = JsonContent.Create(new { groupName = "临时放额知聚", ownerId = userId, memberIds = new[] { userId } });
+        var gid = (await (await _client.SendAsync(create)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("groupId").GetString()!;
+        usage.RecordUsage("agent_t", "user_t", gid, 40, 20, 0); // 60 tokens
+
+        var future = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds();
+        using (var set = Authed(HttpMethod.Post, "/ag-ui/group/update", token))
+        {
+            set.Content = JsonContent.Create(new
+            {
+                groupId = gid,
+                operatorId = userId,
+                updateFields = new[] { "quotaPerGroup", "quotaPerGroupUntil" },
+                groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = 50, ["quotaPerGroupUntil"] = future },
+            });
+            (await _client.SendAsync(set)).EnsureSuccessStatusCode();
+        }
+
+        // 生效中：群列表回读到到期时间；/usage 行带 quotaUntil，分母用覆写值 50 → over
+        using (var list = Authed(HttpMethod.Get, $"/ag-ui/member/{userId}/groups", token))
+        {
+            var gs = await (await _client.SendAsync(list)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = gs.EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal(50, row.GetProperty("quotaOverride").GetInt64());
+            Assert.Equal(future, row.GetProperty("quotaOverrideUntil").GetInt64());
+        }
+        using (var u = Authed(HttpMethod.Get, "/ag-ui/admin/usage?days=7", token))
+        {
+            var ud = await (await _client.SendAsync(u)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = ud.GetProperty("groupsToday").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal(50, row.GetProperty("quota").GetInt64());
+            Assert.Equal(future, row.GetProperty("quotaUntil").GetInt64());
+            Assert.Equal("over", row.GetProperty("level").GetString());
+        }
+
+        // 把到期时间改到过去 → 生效判定立刻失效（惰性，无后台任务）：回退全局配额，行上不再给 quotaUntil
+        var past = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds();
+        using (var expire = Authed(HttpMethod.Post, "/ag-ui/group/update", token))
+        {
+            expire.Content = JsonContent.Create(new
+            {
+                groupId = gid,
+                operatorId = userId,
+                updateFields = new[] { "quotaPerGroupUntil" },
+                groupInfo = new Dictionary<string, object?> { ["quotaPerGroupUntil"] = past },
+            });
+            (await _client.SendAsync(expire)).EnsureSuccessStatusCode();
+        }
+        using (var u2 = Authed(HttpMethod.Get, "/ag-ui/admin/usage?days=7", token))
+        {
+            var ud = await (await _client.SendAsync(u2)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = ud.GetProperty("groupsToday").EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal(0, row.GetProperty("quota").GetInt64()); // 全局默认 0 = 不限
+            Assert.Equal(JsonValueKind.Null, row.GetProperty("quotaUntil").ValueKind);
+            Assert.Equal("ok", row.GetProperty("level").GetString());
+        }
+        // 存储里的旧值保留：管理员仍能看到当时设了多少（额度与到期时间都还在）
+        using (var list2 = Authed(HttpMethod.Get, $"/ag-ui/member/{userId}/groups", token))
+        {
+            var gs = await (await _client.SendAsync(list2)).Content.ReadFromJsonAsync<JsonElement>();
+            var row = gs.EnumerateArray().Single(x => x.GetProperty("groupId").GetString() == gid);
+            Assert.Equal(50, row.GetProperty("quotaOverride").GetInt64());
+            Assert.Equal(past, row.GetProperty("quotaOverrideUntil").GetInt64());
+        }
+        // 审计留痕含到期时间（运维复盘「谁在何时放了多大的额、何时到期」）
+        using (var aud = Authed(HttpMethod.Get, "/ag-ui/admin/audit?action=group.quotaOverride&limit=20", token))
+        {
+            var ad = await (await _client.SendAsync(aud)).Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Contains(ad.GetProperty("entries").EnumerateArray(), e =>
+                e.GetProperty("targetId").GetString() == gid
+                && (e.GetProperty("detail").GetString() ?? "").Contains("有效期至"));
+        }
+
+        // 还原：清覆写
+        using var clear = Authed(HttpMethod.Post, "/ag-ui/group/update", token);
+        clear.Content = JsonContent.Create(new
+        {
+            groupId = gid,
+            operatorId = userId,
+            updateFields = new[] { "quotaPerGroup" },
+            groupInfo = new Dictionary<string, object?> { ["quotaPerGroup"] = "" },
+        });
+        (await _client.SendAsync(clear)).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
     public async Task AdminUsage_UsersToday_ReportsLevelsAndExemptsSystem()
     {
         var admin = await RegisterAsync("admin_chief");

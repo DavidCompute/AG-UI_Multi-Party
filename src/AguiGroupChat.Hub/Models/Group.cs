@@ -98,10 +98,35 @@ public sealed class Group
         get => Extra is not null && Extra.TryGetValue("quotaPerGroup", out var v) ? LongOf(v) : null;
         set
         {
-            if (value is not { } n || n < 0) Extra.Remove("quotaPerGroup"); // null / 负数 = 取消覆写
+            if (value is not { } n || n < 0)
+            {
+                Extra.Remove("quotaPerGroup");       // null / 负数 = 取消覆写
+                Extra.Remove("quotaPerGroupUntil");  // 取消时一并清到期时间（不留孤儿）
+            }
             else Extra["quotaPerGroup"] = n.ToString(); // 纯整数默认格式即无分隔符，与 culture 无关
         }
     }
+
+    /// <summary>
+    /// 配额覆写的**到期时间**（UTC 毫秒；<c>null</c> = 长期有效）。
+    /// 为什么需要：给知聚「临时放额」（如大促 / 演示），到期**自动回退全局配额**，不需要人工记得改回来。
+    /// 失效是**惰性**的（读时判定，无后台任务）：超时后 <see cref="IsQuotaOverrideActive"/> 返回 false，
+    /// 存储里的旧值保留（管理员仍能在设置里看到当时设了多少）。
+    /// 存于 <c>Extra["quotaPerGroupUntil"]</c>（字符串）。
+    /// </summary>
+    public long? QuotaOverrideUntil
+    {
+        get => Extra is not null && Extra.TryGetValue("quotaPerGroupUntil", out var v) ? LongOf(v) : null;
+        set
+        {
+            if (value is not { } n || n <= 0) Extra.Remove("quotaPerGroupUntil");
+            else Extra["quotaPerGroupUntil"] = n.ToString();
+        }
+    }
+
+    /// <summary>在给定时刻（UTC 毫秒）覆写是否仍生效：需有值，且无到期时间或尚未到期。</summary>
+    public bool IsQuotaOverrideActive(long nowMs)
+        => QuotaOverride is not null && (QuotaOverrideUntil is not { } u || u > nowMs);
 
     /// <summary>Extra 值归一化为可空 long：兼容 CLR 数值 / JsonElement（number 或纯数字字符串）。非数字 = null（视为未覆写）。</summary>
     private static long? LongOf(object? v) => v switch

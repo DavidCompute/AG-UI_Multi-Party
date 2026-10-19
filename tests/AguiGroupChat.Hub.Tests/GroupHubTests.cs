@@ -226,6 +226,102 @@ public sealed class GroupHubTests
     }
 
     [Fact]
+    public async Task UpdateGroup_QuotaOverrideUntil_ExpiresLazily()
+    {
+        var clock = new FakeClock();
+        var f = new HubFixture(time: clock);
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "临时放额群", "user_1", "user_2");
+        var until = clock.GetUtcNow().AddHours(1).ToUnixTimeMilliseconds();
+
+        // 设置额度 + 到期时间（同一次请求，先额度后到期）
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup", "quotaPerGroupUntil"],
+            GroupInfo = new()
+            {
+                ["quotaPerGroup"] = JsonSerializer.SerializeToElement(50000),
+                ["quotaPerGroupUntil"] = JsonSerializer.SerializeToElement(until),
+            },
+        });
+
+        Assert.Equal(50000, f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+        Assert.Equal(until, f.Store.GetGroup(group.GroupId)!.QuotaOverrideUntil);
+        Assert.Equal(until, f.Hub.GroupQuotaOverrideUntil(group.GroupId));
+        Assert.Equal(50000, f.Hub.GroupQuotaOverride(group.GroupId));
+        Assert.True(f.Store.GetGroup(group.GroupId)!.IsQuotaOverrideActive(f.Hub.NowMs));
+
+        // 到期后惰性失效：生效判定回退全局，但存储里的旧值保留（管理员仍能看到当时设了多少）
+        clock.Advance(TimeSpan.FromHours(2));
+        Assert.Null(f.Hub.GroupQuotaOverride(group.GroupId));
+        Assert.False(f.Store.GetGroup(group.GroupId)!.IsQuotaOverrideActive(f.Hub.NowMs));
+        Assert.Equal(50000, f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+        Assert.Equal(until, f.Hub.GroupQuotaOverrideUntil(group.GroupId));
+    }
+
+    [Fact]
+    public async Task UpdateGroup_QuotaOverrideUntil_InThePastIsImmediatelyInactive()
+    {
+        var clock = new FakeClock();
+        var f = new HubFixture(time: clock);
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "过期放额群", "user_1", "user_2");
+
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup", "quotaPerGroupUntil"],
+            GroupInfo = new()
+            {
+                ["quotaPerGroup"] = JsonSerializer.SerializeToElement(50000),
+                ["quotaPerGroupUntil"] = JsonSerializer.SerializeToElement(
+                    clock.GetUtcNow().AddMinutes(-1).ToUnixTimeMilliseconds()),
+            },
+        });
+
+        Assert.Null(f.Hub.GroupQuotaOverride(group.GroupId));
+        Assert.Equal(50000, f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+    }
+
+    [Fact]
+    public async Task UpdateGroup_QuotaOverride_ClearedAlsoClearsUntil()
+    {
+        var f = new HubFixture();
+        var group = await HubFixture.CreateGroupAsync(f.Hub, "放额清理群", "user_1", "user_2");
+
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup", "quotaPerGroupUntil"],
+            GroupInfo = new()
+            {
+                ["quotaPerGroup"] = JsonSerializer.SerializeToElement(50000),
+                ["quotaPerGroupUntil"] = JsonSerializer.SerializeToElement(
+                    DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeMilliseconds()),
+            },
+        });
+        Assert.NotNull(f.Store.GetGroup(group.GroupId)!.QuotaOverrideUntil);
+
+        // 取消覆写（负数）→ 额度与到期时间一并清除，不留孤儿
+        await f.Hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup"],
+            GroupInfo = new() { ["quotaPerGroup"] = JsonSerializer.SerializeToElement(-1) },
+        });
+
+        Assert.Null(f.Store.GetGroup(group.GroupId)!.QuotaOverride);
+        Assert.Null(f.Store.GetGroup(group.GroupId)!.QuotaOverrideUntil);
+        Assert.Null(f.Hub.GroupQuotaOverride(group.GroupId));
+        Assert.Null(f.Hub.GroupQuotaOverrideUntil(group.GroupId));
+        Assert.DoesNotContain("quotaPerGroup", f.Store.GetGroup(group.GroupId)!.Extra.Keys);
+        Assert.DoesNotContain("quotaPerGroupUntil", f.Store.GetGroup(group.GroupId)!.Extra.Keys);
+    }
+
+    [Fact]
     public async Task UpdateGroup_NonAdmin_ThrowsPermissionDenied()
     {
         var f = new HubFixture();

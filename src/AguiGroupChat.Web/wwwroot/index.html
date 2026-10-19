@@ -1498,7 +1498,9 @@
       <div class="form-group hidden" id="gsQuotaGroup">
         <label for="gsQuotaOverride" data-i18n="gs.quota">🎚️ 本知聚每日 Token 配额覆写（管理员，留空 = 用全局）</label>
         <input id="gsQuotaOverride" class="modal-input" type="number" min="0" placeholder="0 = 本知聚不限" />
-        <span style="color:#8a8f98;font-size:12px" data-i18n="gs.quotaHint">仅平台管理员可设；优先于全局 Agents:DailyTokenQuotaPerGroup。全局配额对所有知聚一刀切，但知聚之间开销差异很大——可给客服知聚单独放额，或设为 0 让本知聚不限。留空 / 负数 = 取消覆写。</span>
+        <label for="gsQuotaUntil" data-i18n="gs.quotaUntil" style="margin-top:8px">⏳ 临时放额到期时间（留空 = 长期有效）</label>
+        <input id="gsQuotaUntil" class="modal-input" type="datetime-local" />
+        <span style="color:#8a8f98;font-size:12px" data-i18n="gs.quotaHint">仅平台管理员可设；优先于全局 Agents:DailyTokenQuotaPerGroup。全局配额对所有知聚一刀切，但知聚之间开销差异很大——可给客服知聚单独放额，或设为 0 让本知聚不限。留空 / 负数 = 取消覆写；到期后自动回退全局配额（无需人工改回）。</span>
       </div>
       <div class="danger-zone">
         <button id="gsDisbandBtn" class="btn-ghost danger" data-i18n="gs.disband">解散知聚</button>

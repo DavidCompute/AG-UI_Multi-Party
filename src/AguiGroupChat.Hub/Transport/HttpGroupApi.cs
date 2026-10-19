@@ -53,6 +53,7 @@ public static class HttpGroupApi
                         isSupportCircle = g.IsSupportCircle,
                         modelOverride = g.ModelOverride, // 知聚级模型覆写（管理员可设；前端设置弹窗回显）
                         quotaOverride = g.QuotaOverride, // 知聚级每日 Token 配额覆写（管理员可设；前端设置弹窗回显）
+                        quotaOverrideUntil = g.QuotaOverrideUntil, // 临时放额到期时间（UTC 毫秒；null = 长期 / 未设）
                         myRole = me?.Role,
                         myNickname = me?.Nickname,
                         // 活跃度排序 / 未读提示（前端按 lastMessageAt 降序展示，未读徽标）
@@ -86,7 +87,9 @@ public static class HttpGroupApi
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅平台管理员可设置知聚模型覆写"),
                         statusCode: StatusCodes.Status403Forbidden);
                 // 知聚级 Token 配额覆写：同属成本控制（能把一个知聚的消费上限抬高），同样仅平台管理员可设。
-                if (req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal) && auth.ResolveRole(identity) < PlatformRole.Admin)
+                if ((req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal)
+                     || req.UpdateFields.Contains("quotaPerGroupUntil", StringComparer.Ordinal))
+                    && auth.ResolveRole(identity) < PlatformRole.Admin)
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅平台管理员可设置知聚 Token 配额覆写"),
                         statusCode: StatusCodes.Status403Forbidden);
                 var updated = await hub.UpdateGroupAsync(req, ct);
@@ -95,10 +98,12 @@ public static class HttpGroupApi
                     audit.Record("group.modelOverride", identity, auth.GetUser(identity)?.Username, groupId: req.GroupId,
                         targetType: "group", targetId: req.GroupId,
                         detail: updated.ModelOverride is { Length: > 0 } mo ? $"模型覆写 → {mo}" : "模型覆写 → （取消）");
-                if (req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal))
+                if (req.UpdateFields.Contains("quotaPerGroup", StringComparer.Ordinal)
+                    || req.UpdateFields.Contains("quotaPerGroupUntil", StringComparer.Ordinal))
                     audit.Record("group.quotaOverride", identity, auth.GetUser(identity)?.Username, groupId: req.GroupId,
                         targetType: "group", targetId: req.GroupId,
-                        detail: updated.QuotaOverride is { } q ? $"每日 Token 配额覆写 → {q}（0 = 本知聚不限）" : "每日 Token 配额覆写 → （取消，回退全局）");
+                        detail: (updated.QuotaOverride is { } q ? $"每日 Token 配额覆写 → {q}（0 = 本知聚不限）" : "每日 Token 配额覆写 → （取消，回退全局）")
+                                + (updated.QuotaOverrideUntil is { } u ? $"；有效期至 {DateTimeOffset.FromUnixTimeMilliseconds(u):yyyy-MM-dd HH:mm}Z" : ""));
                 return Results.Ok(updated);
             }));
         group.MapPost("/disband", async (GroupDisbandRequest req, HttpContext ctx, AuthService auth, AuthOptions authOptions, GroupHub hub, CancellationToken ct)

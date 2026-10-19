@@ -159,29 +159,37 @@ try {
   if (badge.hasGroup) {
     const sync = await page.evaluate(() => {
       const gid = state.groups[0].groupId;
+      const until = Date.UTC(2027, 0, 2, 3, 4);
       state.activeGroupId = gid;
       onGroupUpdated({
         groupId: gid,
-        updateFields: ["quotaPerGroup", "model"],
-        groupInfo: { quotaPerGroup: 1234, model: "deepseek-flash" },
+        updateFields: ["quotaPerGroup", "quotaPerGroupUntil", "model"],
+        groupInfo: { quotaPerGroup: 1234, quotaPerGroupUntil: until, model: "deepseek-flash" },
       });
       const g = state.groups.find((x) => x.groupId === gid);
       openGroupSettings();
       const out = {
         quota: g.quotaOverride,
+        until: g.quotaOverrideUntil,
         model: g.modelOverride,
         prefilledQuota: document.getElementById("gsQuotaOverride").value,
+        prefilledUntil: document.getElementById("gsQuotaUntil").value,
+        prefilledUntilBack: localInputToMs(document.getElementById("gsQuotaUntil").value),
         prefilledModel: document.getElementById("gsModelOverride").value,
       };
       document.getElementById("groupSettingsModal").classList.add("hidden");
       onGroupUpdated({ groupId: gid, updateFields: ["quotaPerGroup"], groupInfo: { quotaPerGroup: "" } });
-      out.cleared = state.groups.find((x) => x.groupId === gid).quotaOverride;
+      const cleared = state.groups.find((x) => x.groupId === gid);
+      out.cleared = cleared.quotaOverride;
+      out.clearedUntil = cleared.quotaOverrideUntil;
       return out;
     });
     check("GROUP_UPDATED 同步 quotaOverride=1234", sync.quota === 1234, String(sync.quota));
+    check("GROUP_UPDATED 同步 quotaOverrideUntil", sync.until === Date.UTC(2027, 0, 2, 3, 4), String(sync.until));
     check("GROUP_UPDATED 同步 modelOverride", sync.model === "deepseek-flash", String(sync.model));
     check("重开设置弹窗回填新值", sync.prefilledQuota === "1234" && sync.prefilledModel === "deepseek-flash", JSON.stringify({ q: sync.prefilledQuota, m: sync.prefilledModel }));
-    check("空串覆写 → 本地归 null", sync.cleared === null, String(sync.cleared));
+    check("到期时间回填且可无损回转", sync.prefilledUntil.length === 16 && sync.prefilledUntilBack === Date.UTC(2027, 0, 2, 3, 4), JSON.stringify({ v: sync.prefilledUntil, back: sync.prefilledUntilBack }));
+    check("空串覆写 → 本地归 null（额度与到期时间）", sync.cleared === null && sync.clearedUntil === null, JSON.stringify({ q: sync.cleared, u: sync.clearedUntil }));
   } else {
     skipped("GROUP_UPDATED 同步", "当前账号没有知聚");
   }

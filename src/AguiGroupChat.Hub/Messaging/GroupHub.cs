@@ -354,6 +354,9 @@ public sealed class GroupHub : IDisposable
         // 知聚级每日 Token 配额覆写（管理员，治理层已限）；缺省 / 负数 / 非数字 = 取消覆写（回退全局）
         if (fields.Contains("quotaPerGroup", StringComparer.Ordinal))
             group.QuotaOverride = GetLongOrNull(req.GroupInfo, "quotaPerGroup");
+        // 临时放额的到期时间（UTC 毫秒；仅当本次也设了额度时才有意义，但允许分开发送）
+        if (fields.Contains("quotaPerGroupUntil", StringComparer.Ordinal))
+            group.QuotaOverrideUntil = GetLongOrNull(req.GroupInfo, "quotaPerGroupUntil");
 
         await FanOutAsync(group.GroupId, new GroupUpdatedEvent
         {
@@ -2270,11 +2273,24 @@ public sealed class GroupHub : IDisposable
     }
 
     /// <summary>本知聚的每日 Token 配额覆写（null = 用全局 <c>Agents:DailyTokenQuotaPerGroup</c>）。
-    /// 供网关与管理员用量页判断「本知聚自己的额度」（0 = 本知聚不限）。</summary>
+    /// 供网关与管理员用量页判断「本知聚自己的额度」（0 = 本知聚不限）。
+    /// **临时放额到期后返回 null**（惰性失效，无需后台任务）。</summary>
     public long? GroupQuotaOverride(string groupId)
     {
         if (_disbanded.ContainsKey(groupId)) return null;
-        try { return _store.GetGroup(groupId)?.QuotaOverride; }
+        try
+        {
+            var g = _store.GetGroup(groupId);
+            return g is not null && g.IsQuotaOverrideActive(NowMs) ? g.QuotaOverride : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>配额覆写的到期时间（UTC 毫秒；null = 未设 / 长期有效）。供管理页展示「临时至 X」。</summary>
+    public long? GroupQuotaOverrideUntil(string groupId)
+    {
+        if (_disbanded.ContainsKey(groupId)) return null;
+        try { return _store.GetGroup(groupId)?.QuotaOverrideUntil; }
         catch { return null; }
     }
 
