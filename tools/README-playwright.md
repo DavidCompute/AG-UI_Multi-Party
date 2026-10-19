@@ -41,6 +41,29 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 ---
 
+# 配额水位 / 覆写同步回归（`ui-quota-alerts.mjs`）
+
+覆盖 1.0.265～1.0.272 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
+
+覆盖点：
+
+1. `GET /ag-ui/admin/usage` 含 `groupsToday[]` / `usersToday[]`，分知聚行含 `quota` / `level`；`/quota-status` 含 `quotaPerGroup` / `warnRatio` / `groups`。
+2. 用量页三张表：分知聚（红 / 琥珀 / `⚙` 覆写标）、分触发者（红 / 琥珀 / `system` 豁免）、meta 汇总。
+3. 水位值**白名单**：注入非法 `level` 不得进入 `state`，页面不得出现注入属性；合法 `warn` 正常打标。
+4. `GROUP_UPDATED` 携带 `quotaPerGroup` / `model` 时**同步本地缓存**（否则重开设置弹窗会回填旧值），空串 → `null`。
+
+```bash
+cd tools && HEADLESS=1 node ui-quota-alerts.mjs
+# 或
+cd tools && npm run ui:quota
+```
+
+退出码：`0` = 通过（允许有跳过项，例如当前账号没有知聚）；`1` = 有失败项。
+
+> 后端语义（阈值触发、覆写写入与权限、配额拦截）已由 .NET 集成测试覆盖，本脚本只盯前端；两者互补。
+
+---
+
 ## 企业合规界面回归（账号注销入口 / 评价按钮 / 管理员审计）
 
 `ui-regression-compliance.mjs` 覆盖近期合规相关界面改动（无需手工造号）：

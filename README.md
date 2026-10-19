@@ -91,6 +91,7 @@ tools/README-playwright.md       # 上述编排自动化的安装 / 运行 / 退
 tools/README-team-replace.md     # 团队整批替换 / 反复修改同一支的操作与 plan.json 结构说明
 tools/api-smoke.mjs              # 运行期回归：后端 HTTP 只读主流面扫描（46 项，零依赖，见 tools/README-regression.md）
 tools/ui-smoke.mjs               # 运行期回归：前端控制台扫描（未捕获运行时错误 + i18n 原文键泄漏，Playwright，见 tools/README-regression.md）
+tools/ui-quota-alerts.mjs        # 运行期回归：配额水位 / 覆写同步（用量页三表 + 侧栏角标 + GROUP_UPDATED 同步，只读，Playwright，见 tools/README-playwright.md）
 tools/check-config-keys.mjs      # 静态守卫：配置键 ↔ C# 属性漂移校验（防“配了却没属性”静默忽略；已在 CI，见 tools/README-regression.md）
 tools/check-docs-links.mjs       # 静态守卫：文档引用完整性（markdown 链接 + 反引号文件引用 + 行号越界校验；已在 CI）
 tools/README-regression.md       # 回归与守卫（运行期扫描 + 配置/文档 静态校验）的使用 / 退出码 / 探针判据

@@ -1,16 +1,17 @@
 # 回归与守卫（运行期扫描 + 配置键静态校验）
 
-三个**可复用**的仓库级守卫，用来在一次运行中对「正在跑的服务」与「配置/文档 一致性」做自动体检。
+五个**可复用**的仓库级守卫，用来在一次运行中对「正在跑的服务」与「配置/文档 一致性」做自动体检。
 它们不替代单元 / 集成测试（`dotnet test`），而是覆盖测试之外的三类真实缺陷：
 
 | 脚本 | 类别 | 抓什么 | CI |
 |---|---|---|---|
 | `api-smoke.mjs` | 运行期 | 后端 HTTP 只读主流面（46 项）：路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 | 手动（需起服务） |
 | `ui-smoke.mjs` | 运行期 | 前端主要界面（Playwright）：**未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏** | 手动（需浏览器） |
+| `ui-quota-alerts.mjs` | 运行期 | 配额水位 / 覆写同步（Playwright）：用量页三张表（红/琥珀/`⚙`/豁免）、侧栏角标、水位**白名单**、`GROUP_UPDATED` 同步 `quotaPerGroup`/`model` | 手动（需浏览器） |
 | `check-config-keys.mjs` | **静态** | **配置键 ↔ C# 属性漂移**：compose / appsettings 里配了、代码里没属性 → **静默忽略、不报错也不生效**（文档 §9.9 专列此坑） | **已在 CI** |
 | `check-docs-links.mjs` | **静态** | **文档引用失效**：markdown 链接 + 反引号文件引用（含 `:行号` 越界）指向不存在 / 已移动的文件 | **已在 CI** |
 
-> 两个运行期脚本都是**只读**的：API 扫描全走 GET；UI 扫描只「打开界面 + 切换页签」，新增类弹窗只开一次即关（不保存）。两个静态脚本秒级、无需起服务，已接入 `.github/workflows/ci.yml`。
+> 三个运行期脚本都是**只读**的：API 扫描全走 GET；UI 扫描只「打开界面 + 切换页签」，新增类弹窗只开一次即关（不保存）。`ui-quota-alerts.mjs` 同样**只读**：服务端数据用 fetch 桩替换、事件直接投递，不写真实库。两个静态脚本秒级、无需起服务，已接入 `.github/workflows/ci.yml`。
 
 ## 依赖
 
@@ -21,6 +22,7 @@
   npm install
   npx playwright install chromium   # 首次安装浏览器内核
   ```
+- `ui-quota-alerts.mjs`：同样需要 Playwright。
 
 ## 运行
 
@@ -37,6 +39,14 @@ BASE_URL=http://127.0.0.1:5200 USERNAME=david PASSWORD='lingtong' node tools/ui-
 ```
 
 `ui-smoke.mjs` 可配 `TIMEOUT_S`（默认 240；总时长看门狗，防止任何一步挂死）；截图落在 `tools/screenshots/smoke/`。
+
+```bash
+# ---- 配额水位 / 覆写同步 回归（只读） ----
+cd tools && HEADLESS=1 node ui-quota-alerts.mjs
+cd tools && npm run ui:quota
+```
+
+`ui-quota-alerts.mjs` 允许跳过项（如当前账号没有知聚），此时退出码仍为 `0`。
 
 ## 退出码
 
