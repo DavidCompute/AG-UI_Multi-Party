@@ -21,8 +21,9 @@ public sealed class SkillApiApprovalTests
             ParametersJson: null, Interpreter: null, HttpTimeoutSeconds: 30,
             RequiresApproval: requiresApproval);
         var m = typeof(SkillApi).GetMethod("BuildDef", BindingFlags.NonPublic | BindingFlags.Static)!;
-        // 第 4 个参数为可选的用户组目录（用于校验白名单 id）；传 null = 不校验，保持原用例语义。
-        dynamic result = m.Invoke(null, new object?[] { req, "user_x", true, null })!;
+        // 第 4 个参数为可选的用户组目录（用于校验白名单 id）；第 5 个为可选图库目录。
+        // 传 null = 不校验，保持原用例语义。
+        dynamic result = m.Invoke(null, new object?[] { req, "user_x", true, null, null })!;
         return (result.Item1, result.Item2);
     }
 

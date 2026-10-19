@@ -88,29 +88,44 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
     public async Task ImageWrite_FlagOnlySticksForAdminServerNonPromptSkills()
     {
         var adminTok = await RegisterAsync("admin_chief");
+        var libs = _fixture.App.Services.GetRequiredService<ImageLibraryCatalog>();
+        var granted = libs.CreateLibrary("技能写入授权库", "", "admin_chief");
 
-        async Task CreateAsync(string id, string kind, string location, bool imageWrite, string body)
+        async Task CreateAsync(string id, string kind, string location, bool imageWrite, string body, string[]? writeLibs = null)
         {
             using var req = Authed(HttpMethod.Post, "/ag-ui/skills", adminTok);
             req.Content = JsonContent.Create(new
             {
                 skillId = id, name = id, description = "图库写入测试", kind, body,
-                executionLocation = location, requiresApproval = true, imageWrite,
+                executionLocation = location, requiresApproval = true, imageWrite, imageWriteLibraryIds = writeLibs,
             });
             var res = await _client.SendAsync(req);
             Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         }
 
         const string dotnetBody = "public class Skill { public static string Run(string input) => \"ok\"; }";
-        await CreateAsync("iw_server", "dotnet", "server", true, dotnetBody);
+        await CreateAsync("iw_server", "dotnet", "server", true, dotnetBody, [granted.LibId]);
         await CreateAsync("iw_prompt", "prompt", "server", true, "");
         await CreateAsync("iw_client", "dotnet", "client", true, dotnetBody);
+
+        // 引用不存在的图库 → 400
+        using (var bad = Authed(HttpMethod.Post, "/ag-ui/skills", adminTok))
+        {
+            bad.Content = JsonContent.Create(new
+            {
+                skillId = "iw_bad_lib", name = "iw_bad_lib", description = "x", kind = "dotnet", body = dotnetBody,
+                executionLocation = "server", imageWrite = true, imageWriteLibraryIds = new[] { "img_missing" },
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(bad)).StatusCode);
+        }
 
         using var listReq = Authed(HttpMethod.Get, "/ag-ui/skills", adminTok);
         var list = await (await _client.SendAsync(listReq)).Content.ReadFromJsonAsync<JsonElement>();
         var rows = list.EnumerateArray().ToDictionary(x => x.GetProperty("skillId").GetString()!, x => x);
 
         Assert.True(rows["iw_server"].GetProperty("imageWrite").GetBoolean());  // 服务端非 prompt → 保留
+        Assert.Equal([granted.LibId], rows["iw_server"].GetProperty("imageWriteLibraryIds")
+            .EnumerateArray().Select(x => x.GetString()).ToArray());
         Assert.False(rows["iw_prompt"].GetProperty("imageWrite").GetBoolean()); // prompt → 强制关闭
         Assert.False(rows["iw_client"].GetProperty("imageWrite").GetBoolean()); // 客户端执行 → 强制关闭
     }

@@ -130,6 +130,13 @@ public sealed class AgentSkillDefinition
     /// </summary>
     public bool ImageWrite { get; set; }
 
+    /// <summary>
+    /// <b>可写入的已有图库（1.0.278）</b>：开启 <see cref="ImageWrite"/> 时，除「本轮新建的库」外，
+    /// 还允许技能写入这些**管理员显式指定**的图库（跨归属，属于受控委托）。
+    /// null / 空 = 只能写本轮新建的库。仅管理员可设，且每个 ID 必须真实存在。
+    /// </summary>
+    public List<string>? ImageWriteLibraryIds { get; set; }
+
     /// <summary>技能名 / 智能体工具名的合法模式（OpenAI 工具名：字母数字下划线连字符）。</summary>
     private static readonly Regex ToolNamePattern = new("^[a-zA-Z0-9_-]{1,64}$", RegexOptions.Compiled);
 

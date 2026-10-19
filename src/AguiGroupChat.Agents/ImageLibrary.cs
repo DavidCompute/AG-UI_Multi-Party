@@ -78,6 +78,9 @@ public sealed class ImageAsset
 
     public long Bytes { get; set; }
 
+    /// <summary>内容 SHA-256（1.0.278）：写入去重用；旧快照 / 旧数据为 null 时在首次去重检查时懒补。</summary>
+    public string? ContentHash { get; set; }
+
     /// <summary>语义描述（视觉模型生成 / 用户手改）。检索就是拿它做 embedding。</summary>
     public string Caption { get; set; } = "";
 

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.277**
+> Applies to version: **1.0.278**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1878,6 +1878,7 @@ Form (`#skillFormView`) fields and DOM ids:
 | `#sfBody` (label `#sfBodyLabel`) | Body | The label switches by type (`skill.form.bodyShell/Http/Prompt/Dotnet/OrgDeploy`) |
 | `#sfRequiresApproval` | Requires human approval to run | Disabled and force-checked for `shell`/`dotnet`/`client` |
 | `#sfImageWrite` | Allow writing to image libraries (1.0.277) | Visible only for **admin + server-side + non-prompt**; injects `imageWriteScopeId` into the skill's JSON input (see 5.4.6) |
+| `#sfImageWriteLibs` | Existing libraries it may write to (1.0.278) | A multi-select list shown once `#sfImageWrite` is ticked; none = only the library created in this run |
 | `#sfBack` / `#sfTest` / `#sfSave` | Back / Test run / Save | |
 
 `syncSkillKind()` links them: shows the interpreter for `shell`; shows the ClientRunner for `client`; disables the approval checkbox for `shell`, `dotnet`, or `client` (approval is forced).
@@ -2456,6 +2457,8 @@ Upload (`addImageAssets(libId, files)`, supports **multi-select**):
 
 Backend `AddAsset` validation (in order): library exists, not over the per-library limit of **2000 images** (`MaxAssetsPerLibrary`), extension in the whitelist `png/jpg/jpeg/gif/bmp/webp`, non-empty, and ≤ **20 MB** (`AttachmentStore.MaxFileBytes`); it then writes to disk immediately and returns `status=processing`, after which the background `ProcessAssetAsync` generates a description → vectorizes.
 
+**Content dedup (1.0.278)**: both manual and skill uploads first compare the target library by byte-level SHA-256; a hit returns the existing record (`{ duplicated: true, asset }` on the skill side) without adding an image or re-vectorizing.
+
 Image files land in `data/images/{libId}/{assetId}{ext}` (`ImageLibraryCatalog` root directory `data/images`).
 
 **Four-state vectorization badge** (`assetBadge`, deliberately making "done" visible too):
@@ -2498,7 +2501,9 @@ So "chunks / images that match lexically head-on" (such as the proper name "刘�
 
 Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/search`); now a skill can **write in a controlled way**, letting auto-generated skills deposit material into a library.
 
-**Enabling**: tick "Allow this skill to write to image libraries" in the skill form (`#sfImageWrite`, `AgentSkillDefinition.ImageWrite`). Off by default; only **admins** can enable it, and only for **server-side** non-`prompt` skills (client skills run on the user's machine and cannot reach the platform self token; `prompt` has no execution surface). The server forces `imageWrite=false` for anything else.
+**Enabling**: tick "Allow this skill to write to image libraries" in the skill form (`#sfImageWrite`, `AgentSkillDefinition.ImageWrite`). Off by default; only **admins** can enable it, and only for **server-side** non-`prompt` skills (client skills run on the user's machine and cannot reach the platform self token; `prompt` has no execution surface). The server forces `imageWrite=false` for anything else. When a non-admin edits the skill, the server **preserves** the flag and library allow-list granted by an admin (they are not silently lost because the form did not submit them).
+
+**Existing libraries it may write to (1.0.278)**: ticking the flag reveals a library multi-select (`#sfImageWriteLibs`) that additionally authorizes writes to **existing libraries** (cross-ownership is allowed — an explicit delegation from the admin to the skill); none selected = only the library created in this run. The server validates every referenced library exists, otherwise 400.
 
 **Injection**: before invoking the skill, `AgentCatalog.WithImageScope` injects `imageWriteScopeId` into the JSON input (alongside a document skill's `imageScopeId`). The handle lives 10 minutes, is bound to the trigger user / agent / skill, and carries quotas: **at most 1 library / 20 images / 10 MB per image per run** (`ImageLibraryCatalog.ImageWriteScope`).
 
@@ -2507,9 +2512,13 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | POST | `/ag-ui/images/libraries` | `{ writeScopeId, name, description? }` | Creates a library owned by the **trigger user**; returns `{ libId, name, ownerId }`; over quota → 429 |
-| POST | `/ag-ui/images/libraries/{libId}/assets` | `{ writeScopeId, attachmentId \| fileName+base64, caption?, tags? }` | Registers an image; only the library created in this run; over quota → 429 |
+| POST | `/ag-ui/images/libraries/{libId}/assets` | `{ writeScopeId, attachmentId \| fileName+base64, caption?, tags? }` | Registers an image; only the library **created in this run** or **explicitly authorized on the skill**; over quota → 429; duplicate content → `{ duplicated: true, asset }` |
 
-**Security model**: ① the caller must be a skill self-call (`SelfApi.IsSelf`); ② the handle must be valid and unexpired; ③ writes are limited to the library created and registered in this run; ④ the library owner must match the handle's trigger user; ⑤ every write is audited as `skill.imageLibrary.create` / `skill.imageLibrary.upload` (with skillId + agentId + trigger user).
+**Security model**: ① the caller must be a skill self-call (`SelfApi.IsSelf`); ② the handle must be valid and unexpired; ③ writes are limited to the library created in this run or libraries explicitly authorized on the skill by an admin; ④ every write is audited as `skill.imageLibrary.create` / `skill.imageLibrary.upload` (with skillId + agentId + trigger user).
+
+**Content dedup (1.0.278)**: before uploading, the target library is compared by byte-level SHA-256; a hit returns `{ duplicated: true, asset }` without consuming vectors / quota (the hash is lazily backfilled for legacy assets on first comparison). Manual uploads (`POST /ag-ui/image-libs/{libId}/assets`) dedupe the same way and return the existing record.
+
+**On "human confirmation before writing"**: phase 1 uses **configuration-level pre-approval** — the capability is off by default, an admin must enable it and pick each writable library; libraries created by a skill are owned by the trigger user and not shared; every write has quotas and full audit. **Per-write HITL is intentionally not implemented**: a running skill cannot safely block on an interactive approval without changing the skill contract and holding long connections; a per-write approval queue is a phase-2 design.
 
 **Skill-side example (C#)**:
 

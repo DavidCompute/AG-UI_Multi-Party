@@ -2371,6 +2371,9 @@ let agentSkillPicks = [];    // 数字员工表单：可调用子数字员工（
 
 let skillList = [];      // 技能库 [{skillId,name,description,kind,body,parametersJson,interpreter,httpTimeoutSeconds,requiresApproval,ownerId}]
 let editingSkillId = null;
+// 图库写入：技能可写入的已有图库（1.0.278）
+let skillImageLibs = null; // 缓存 GET /ag-ui/image-libs
+let skillWriteLibSelection = []; // 当前表单选中的图库 ID
 let skillSearchQuery = "";  // 技能库搜索关键词（仅前端过滤）
 let selectedSkills = new Set(); // 技能批量删除所选 skillId
 let skillViewerReturnToAgent = false; // 从“数字员工表单 → ✏️ 查看/编辑技能”进入时：返回/保存后应直接回到该表单
@@ -2472,6 +2475,8 @@ function openSkillForm(skillId) {
   sf("sfRequiresApproval").checked = true;
   sf("sfRequiresApproval").disabled = false;
   sf("sfImageWrite").checked = false;
+  skillWriteLibSelection = [];
+  renderSkillImageLibs();
   sf("sfExecutionLocation").value = "server";
   sf("sfClientRunner").value = "";
   sf("sgRequest").value = ""; // AI 生成区的需求/偏好属上一份内容，不跨技能保留
@@ -2489,6 +2494,9 @@ function openSkillForm(skillId) {
     sf("sfBody").value = s.body || "";
     sf("sfRequiresApproval").checked = s.requiresApproval !== false;
     sf("sfImageWrite").checked = !!s.imageWrite;
+    skillWriteLibSelection = Array.isArray(s.imageWriteLibraryIds) ? s.imageWriteLibraryIds.slice() : [];
+    renderSkillImageLibs();
+    loadSkillImageLibs().then(renderSkillImageLibs); // 异步补齐名称（缓存命中时立即返回）
     sf("sfExecutionLocation").value = s.executionLocation || "server";
     sf("sfClientRunner").value = s.clientRunner || "";
   }
@@ -2520,6 +2528,47 @@ function syncSkillKind() {
   if (imgGroup) imgGroup.style.display = canWriteImages ? "" : "none";
   if (imgHint) imgHint.style.display = canWriteImages ? "" : "none";
   if (imgCb) { imgCb.disabled = !canWriteImages; if (!canWriteImages) imgCb.checked = false; }
+  syncImageWriteLibsVisibility(canWriteImages);
+}
+
+/** 图库写入：加载当前用户可读的图库清单（缓存）。 */
+async function loadSkillImageLibs() {
+  if (skillImageLibs) return;
+  try {
+    const res = await fetch("/ag-ui/image-libs", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (res.ok && d) skillImageLibs = d.libraries || [];
+  } catch { /* 忽略：列表不可用不影响保存 */ }
+}
+
+/** 渲染「可写入的已有图库」多选框。 */
+function renderSkillImageLibs() {
+  const box = $("sfImageWriteLibs");
+  if (!box) return;
+  const libs = skillImageLibs || [];
+  if (!libs.length) {
+    box.innerHTML = `<span class="muted">${escapeHtml(t("skill.form.imageWriteLibsEmpty"))}</span>`;
+    return;
+  }
+  const sel = new Set(skillWriteLibSelection);
+  box.innerHTML = libs.map((lib) => `<label style="display:flex;align-items:center;gap:6px;margin:3px 0">
+      <input type="checkbox" value="${escapeHtml(lib.libId)}"${sel.has(lib.libId) ? " checked" : ""} style="width:14px;height:14px;accent-color:#4f8cff" />
+      <span>${escapeHtml(lib.name || lib.libId)}</span>
+      <span class="muted" style="font-size:11px">${escapeHtml(lib.libId)}</span>
+    </label>`).join("");
+  box.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      skillWriteLibSelection = [...box.querySelectorAll("input[type=checkbox]:checked")].map((x) => x.value);
+    });
+  });
+}
+
+function syncImageWriteLibsVisibility(canWriteImages) {
+  const group = $("sfImageWriteLibsGroup");
+  if (!group) return;
+  const on = canWriteImages && $("sfImageWrite").checked;
+  group.style.display = on ? "" : "none";
+  if (on) loadSkillImageLibs().then(renderSkillImageLibs);
 }
 
 /** 保存技能（新建 POST / 更新 PUT）。 */
@@ -2541,6 +2590,7 @@ async function saveSkill() {
     executionLocation: $("sfExecutionLocation").value || "server",
     clientRunner: $("sfClientRunner").value.trim() || null,
     imageWrite: $("sfImageWrite").checked,
+    imageWriteLibraryIds: [...document.querySelectorAll("#sfImageWriteLibs input[type=checkbox]:checked")].map((x) => x.value),
   };
   const url = editingSkillId ? `/ag-ui/skills/${encodeURIComponent(editingSkillId)}` : "/ag-ui/skills";
   const method = editingSkillId ? "PUT" : "POST";
@@ -2612,6 +2662,8 @@ async function generateSkill() {
     $("sfClientRunner").value = data.clientRunner || "";
     $("sfRequiresApproval").checked = !!data.requiresApproval;
     $("sfImageWrite").checked = false; // 生成结果默认不开启图库写入（管理员保存后按需开启）
+    skillWriteLibSelection = [];
+    renderSkillImageLibs();
     syncSkillKind(); // 刷新正文标签 / 解释器 / ClientRunner 显隐
     toast(t("skill.gen.done"));
   } catch (ex) {
@@ -14436,6 +14488,7 @@ function init() {
   $("auditSearchBtn").onclick = () => loadAdminAudit();
   if ($("auditExpiringBtn")) $("auditExpiringBtn").onclick = toggleAuditExpiringFilter;
   if ($("auditGroupPick")) $("auditGroupPick").onchange = () => loadAdminAudit();
+  if ($("sfImageWrite")) $("sfImageWrite").onchange = () => syncSkillKind(); // 勾选/取消时联动「可写入已有图库」清单
   // 临时放额到期时长快捷模板（只填到期时间，不改额度）
   document.querySelectorAll("#gsQuotaGroup [data-until-hours]").forEach((btn) => {
     btn.onclick = () => {

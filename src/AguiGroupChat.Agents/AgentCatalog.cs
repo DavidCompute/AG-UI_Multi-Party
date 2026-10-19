@@ -316,9 +316,9 @@ public sealed class AgentCatalog
             }
             if (wantWrite)
             {
-                dict["imageWriteScopeId"] = libs.RegisterWriteScope(userId!, agentId, skill.SkillId);
-                _logger.LogInformation("已为技能注入图库写入能力：skill={SkillId} agent={AgentId} owner={User}",
-                    skill.SkillId, agentId ?? "-", userId);
+                dict["imageWriteScopeId"] = libs.RegisterWriteScope(userId!, agentId, skill.SkillId, skill.ImageWriteLibraryIds);
+                _logger.LogInformation("已为技能注入图库写入能力：skill={SkillId} agent={AgentId} owner={User} extraLibs={Libs}",
+                    skill.SkillId, agentId ?? "-", userId, skill.ImageWriteLibraryIds?.Count ?? 0);
             }
             return JsonSerializer.Serialize(dict, AguiJson.Options);
         }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using AguiGroupChat.Hub.Infra;
 using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Persistence;
@@ -177,6 +178,7 @@ public sealed class ImageLibraryCatalog
         if (bytes.LongLength == 0) return (null, "图片内容为空");
         if (bytes.LongLength > AttachmentStore.MaxFileBytes)
             return (null, $"图片过大（上限 {AttachmentStore.MaxFileBytes / 1024 / 1024} MB）");
+        var contentHash = Convert.ToHexString(SHA256.HashData(bytes));
 
         var store = _services.GetService<IMessageMemoryStore>();
         var embedding = _services.GetService<IEmbeddingProvider>();
@@ -208,6 +210,7 @@ public sealed class ImageLibraryCatalog
             Width = width,
             Height = height,
             Bytes = bytes.LongLength,
+            ContentHash = contentHash,
             Status = "processing",
             UploadedAtMs = now,
             UploadedBy = uploadedBy,
@@ -220,6 +223,37 @@ public sealed class ImageLibraryCatalog
         _processing[assetId] = task;
         _ = task.ContinueWith(t => _processing.TryRemove(assetId, out _), TaskScheduler.Default);
         return (asset, null);
+    }
+
+    /// <summary>
+    /// 内容去重（1.0.278）：在指定图库里找**字节完全相同**的已有图片（SHA-256）。
+    /// 旧快照没有 <see cref="ImageAsset.ContentHash"/> 时懒补（仅比对尺寸相同的候选，读盘一次）。
+    /// </summary>
+    public ImageAsset? FindDuplicate(string libId, byte[] bytes)
+    {
+        var lib = GetLibrary(libId);
+        if (lib is null || bytes.LongLength == 0) return null;
+        var hash = Convert.ToHexString(SHA256.HashData(bytes));
+        foreach (var a in lib.Assets.ToArray())
+        {
+            if (a.Bytes != bytes.LongLength) continue;
+            if (a.ContentHash is { } h)
+            {
+                if (string.Equals(h, hash, StringComparison.Ordinal)) return a;
+                continue;
+            }
+            var path = ResolveAssetPath(lib, a);
+            if (path is null) continue;
+            try
+            {
+                var existing = File.ReadAllBytes(path);
+                if (!string.Equals(Convert.ToHexString(SHA256.HashData(existing)), hash, StringComparison.Ordinal)) continue;
+                a.ContentHash = hash; // 懒回填：下次直接命中
+                return a;
+            }
+            catch { /* 文件缺失 / 读失败：忽略该候选 */ }
+        }
+        return null;
     }
 
     /// <summary>当前是否有图片正在处理（前端/测试轮询用）。</summary>
@@ -512,7 +546,9 @@ public sealed class ImageLibraryCatalog
     }
 
     /// <summary>登记一个写入能力句柄（平台在调用开启 imageWrite 的技能前签发）。</summary>
-    public string RegisterWriteScope(string ownerUserId, string? agentId, string? skillId)
+    /// <param name="seedLibraryIds">管理员在技能上指定的「可写入的已有图库」（可空）；本轮新建的库另外追加。</param>
+    public string RegisterWriteScope(string ownerUserId, string? agentId, string? skillId,
+        IReadOnlyList<string>? seedLibraryIds = null)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         foreach (var kv in _writeScopes)
@@ -522,7 +558,7 @@ public sealed class ImageLibraryCatalog
                 _writeScopes.TryRemove(kv.Key, out _);
 
         var handle = "iwscope_" + IdGenerator.NewId();
-        _writeScopes[handle] = new ImageWriteScope
+        var scope = new ImageWriteScope
         {
             ScopeId = handle,
             OwnerUserId = ownerUserId,
@@ -530,8 +566,12 @@ public sealed class ImageLibraryCatalog
             SkillId = skillId,
             ExpiresAtMs = now + WriteScopeTtlMs,
         };
-        _logger.LogInformation("登记图库写入范围：agent={AgentId} skill={SkillId} owner={Owner} handle={Handle}",
-            agentId ?? "-", skillId ?? "-", ownerUserId, handle);
+        if (seedLibraryIds is { Count: > 0 })
+            foreach (var id in seedLibraryIds.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal))
+                scope.AllowedLibIds.Add(id);
+        _writeScopes[handle] = scope;
+        _logger.LogInformation("登记图库写入范围：agent={AgentId} skill={SkillId} owner={Owner} libs={Libs} handle={Handle}",
+            agentId ?? "-", skillId ?? "-", ownerUserId, scope.AllowedLibIds.Count, handle);
         return handle;
     }
 

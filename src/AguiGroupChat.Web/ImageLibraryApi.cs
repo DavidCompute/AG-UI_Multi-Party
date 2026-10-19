@@ -113,6 +113,10 @@ public static class ImageLibraryApi
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest,
                     "附件不存在或不是图片（请先经 /ag-ui/upload 上传 png/jpg/jpeg/gif/bmp/webp）"));
 
+            // 内容去重（1.0.278）：同一张图重复上传直接返回已有记录，不重复占向量 / 配额
+            if (catalog.FindDuplicate(lib.LibId, img.Value.Bytes) is { } dupAsset)
+                return Results.Ok(ToAssetDto(lib, dupAsset));
+
             var name = string.IsNullOrWhiteSpace(req.FileName) ? req.AttachmentId.Trim() + ".png" : req.FileName!;
             var (asset, error) = catalog.AddAsset(lib.LibId, name, img.Value.ContentType, img.Value.Bytes, user.UserId);
             if (asset is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "上传失败"));
@@ -298,13 +302,10 @@ public static class ImageLibraryApi
                 return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "写入能力句柄无效或已过期"),
                     statusCode: StatusCodes.Status403Forbidden);
             if (!catalog.IsWriteLibraryAllowed(scope, libId))
-                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "该句柄无权写入此图库（只允许写入本轮新建的图库）"),
+                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "该句柄无权写入此图库（只允许写入本轮新建或管理员授权的图库）"),
                     statusCode: StatusCodes.Status403Forbidden);
             var lib = catalog.GetLibrary(libId);
             if (lib is null) return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"图库不存在：{libId}"));
-            if (!string.Equals(lib.OwnerId, scope.OwnerUserId, StringComparison.Ordinal))
-                return Results.Json(new AguiError(ErrorCodes.ImageLibraryPermissionDenied, "图库归属与句柄不一致"),
-                    statusCode: StatusCodes.Status403Forbidden);
 
             byte[] bytes;
             string? contentType = null;
@@ -332,6 +333,9 @@ public static class ImageLibraryApi
             if (bytes.LongLength > scope.MaxImageBytes)
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest,
                     $"图片过大（本轮上限 {scope.MaxImageBytes / 1024 / 1024} MB）"));
+            // 内容去重（1.0.278）：同图直接返回已有记录（不消耗配额）
+            if (catalog.FindDuplicate(lib.LibId, bytes) is { } dup)
+                return Results.Ok(new { duplicated = true, asset = ToAssetDto(lib, dup) });
             if (!catalog.TryConsumeImageUpload(scope))
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, $"本轮最多上传 {scope.MaxImages} 张图片"),
                     statusCode: StatusCodes.Status429TooManyRequests);

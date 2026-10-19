@@ -117,7 +117,8 @@ public static class SkillApi
             var isAdmin = auth.IsAdmin(user.UserId);
             if (RequiresPrivilegedKind(req.Kind) && !isAdmin)
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可创建 {req.Kind} 技能"), statusCode: StatusCodes.Status403Forbidden);
-            var (def, err) = BuildDef(req, ownerId: user.UserId, authorAdmin: isAdmin, groups: ugStore);
+            var (def, err) = BuildDef(req, ownerId: user.UserId, authorAdmin: isAdmin, groups: ugStore,
+                libs: ctx.RequestServices.GetService<AguiGroupChat.Agents.ImageLibraryCatalog>());
             if (err is not null) return err;
             var skill = def!; // BuildDef 保证 err 非空时 def 为空、err 为空时 def 非空
             if (catalog.Contains(skill.SkillId))
@@ -141,10 +142,17 @@ public static class SkillApi
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可编辑该技能"), statusCode: StatusCodes.Status403Forbidden);
             if (RequiresPrivilegedKind(req.Kind) && !isAdmin)
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, $"仅管理员可把技能改为 {req.Kind} 类型"), statusCode: StatusCodes.Status403Forbidden);
-            var (def, err) = BuildDef(req, ownerId: existing.OwnerId, authorAdmin: isAdmin, groups: ugStore);
+            var (def, err) = BuildDef(req, ownerId: existing.OwnerId, authorAdmin: isAdmin, groups: ugStore,
+                libs: ctx.RequestServices.GetService<AguiGroupChat.Agents.ImageLibraryCatalog>());
             if (err is not null) return err;
             var skill = def!; // BuildDef 保证 err 非空时 def 为空、err 为空时 def 非空
             skill.SkillId = skillId; // ID 用 URL 的，不允许改名
+            // 图库写入是管理员授予的能力：非管理员编辑技能时**保留**原授权，不能因表单未提交而静默丢失
+            if (!isAdmin)
+            {
+                skill.ImageWrite = existing.ImageWrite;
+                skill.ImageWriteLibraryIds = existing.ImageWriteLibraryIds;
+            }
             // 用户经界面改过 → 不再是“原样内置版”，清掉版本标记：升级时不再用新正文覆盖用户改动
             skill.BuiltinVersion = null;
             catalog.Upsert(skill);
@@ -330,6 +338,7 @@ public static class SkillApi
             ["allowedUserGroupIds"] = s.AllowedUserGroupIds is { Count: > 0 } ? s.AllowedUserGroupIds : null,
             // 图库写入能力（管理员开启；仅服务端非 prompt 技能）
             ["imageWrite"] = s.ImageWrite,
+            ["imageWriteLibraryIds"] = s.ImageWriteLibraryIds is { Count: > 0 } ? s.ImageWriteLibraryIds : null,
         };
         if (canReadBody)
         {
@@ -344,7 +353,8 @@ public static class SkillApi
     }
 
     private static (AgentSkillDefinition? Def, IResult? Err) BuildDef(SkillDefHttpRequest req, string? ownerId, bool authorAdmin,
-        AguiGroupChat.Agents.UserGroups.UserGroupStore? groups = null)
+        AguiGroupChat.Agents.UserGroups.UserGroupStore? groups = null,
+        AguiGroupChat.Agents.ImageLibraryCatalog? libs = null)
     {
         var rawId = (req.SkillId ?? "").Trim();
         var id = AgentSkillDefinition.IsValidAsciiToolId(rawId)
@@ -380,6 +390,18 @@ public static class SkillApi
             && req.ImageWrite == true
             && kind is not AgentSkillKind.Prompt
             && executionLocation == AgentSkillExecutionLocation.Server;
+        // 可写入的已有图库（1.0.278）：仅 imageWrite 生效时保留；每个 ID 必须真实存在
+        var writeLibs = imageWrite
+            ? req.ImageWriteLibraryIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList()
+            : null;
+        if (writeLibs is { Count: > 0 })
+        {
+            if (libs is null)
+                return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "图库服务不可用，无法校验授权图库")));
+            foreach (var libId in writeLibs)
+                if (libs.GetLibrary(libId) is null)
+                    return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"引用的图库不存在：{libId}")));
+        }
         if ((kind == AgentSkillKind.Shell || kind == AgentSkillKind.Dotnet) && string.IsNullOrWhiteSpace(req.Body))
             return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "该技能正文（shell 命令/脚本，或 C# 源码）不能为空")));
         if (kind == AgentSkillKind.Http && string.IsNullOrWhiteSpace(req.Body))
@@ -415,6 +437,7 @@ public static class SkillApi
             // 细粒度访问授权：允许挂载/可见的技能用户组白名单（空 = 不限制，向后兼容）
             AllowedUserGroupIds = req.AllowedUserGroupIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() is { Count: > 0 } glist ? glist : null,
             ImageWrite = imageWrite,
+            ImageWriteLibraryIds = writeLibs is { Count: > 0 } ? writeLibs : null,
         }, null);
     }
 
@@ -500,7 +523,9 @@ public sealed record SkillDefHttpRequest(
     string? ClientRunner = null,
     IReadOnlyList<string>? AllowedUserGroupIds = null,
     // 图库写入能力（1.0.277）：仅管理员可开，且仅对服务端非 prompt 技能生效
-    bool? ImageWrite = null);
+    bool? ImageWrite = null,
+    // 可写入的已有图库（1.0.278）：imageWrite 开启时生效；null/空 = 只能写本轮新建的库
+    IReadOnlyList<string>? ImageWriteLibraryIds = null);
 
 /// <summary>技能试运行请求体。ClientId：本机执行的机器标识（浏览器本机桥 /ag-ui/bridge/info 读取），用于把 client dotnet 送到当前机器执行。</summary>
 public sealed record SkillRunHttpRequest(string Query = "", string? ClientId = null);

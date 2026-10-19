@@ -169,6 +169,45 @@ public sealed class AgentImageScopeBindingTests
     }
 
     [Fact]
+    public void ImageWriteLibraryIds_AreSeededIntoScope()
+    {
+        var (catalog, libs) = NewCatalog();
+        var brand = libs.CreateLibrary("品牌库（他人所有）", "", Other);
+        var skill = new AgentSkillDefinition
+        {
+            SkillId = "collect_seeded", Name = "素材收集", Description = "收集素材",
+            Kind = AgentSkillKind.Dotnet, ExecutionLocation = AgentSkillExecutionLocation.Server,
+            ImageWrite = true, ImageWriteLibraryIds = [brand.LibId], Body = "",
+        };
+
+        var scope = WriteScopeOf(catalog.WithImageScope("{\"topic\":\"x\"}", skill, User, AgentId), libs);
+        Assert.NotNull(scope);
+        Assert.True(libs.IsWriteLibraryAllowed(scope!, brand.LibId)); // 管理员显式授权，允许跨归属写
+        Assert.False(libs.IsWriteLibraryAllowed(scope!, "img_not_seeded"));
+    }
+
+    [Fact]
+    public async Task AddAsset_FindDuplicate_ReturnsExistingAsset()
+    {
+        var (_, libs) = NewCatalog();
+        var lib = libs.CreateLibrary("去重库", "", User);
+        var bytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAANElEQVR42hXIIQEAMAhFQZKQhBDoaUIsyc+EphB7E2fO/PYeCAPzIiBM/UgCwuSPICBM9D59ZymRzPwZugAAAABJRU5ErkJggg==");
+
+        var (asset, error) = libs.AddAsset(lib.LibId, "dot.png", "image/png", bytes, User);
+        Assert.Null(error);
+        Assert.NotNull(asset);
+        Assert.False(string.IsNullOrEmpty(asset!.ContentHash));
+        await libs.WaitForProcessingAsync(asset.AssetId, TimeSpan.FromSeconds(5));
+
+        var dup = libs.FindDuplicate(lib.LibId, bytes);
+        Assert.NotNull(dup);
+        Assert.Equal(asset.AssetId, dup!.AssetId);
+
+        Assert.Null(libs.FindDuplicate(lib.LibId, [1, 2, 3, 4]));
+    }
+
+    [Fact]
     public void ImageWriteDisabled_NoWriteScopeInjected()
     {
         var (catalog, libs) = NewCatalog();

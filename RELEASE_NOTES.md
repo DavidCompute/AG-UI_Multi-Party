@@ -1,5 +1,36 @@
-# AG-UI 群聊桌面版 1.0.277 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.277 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.278 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.278 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能写图库从「只能新建」扩到「可写授权库」，并加上内容去重**——① 管理员可在技能上选定可写入的**已有图库**（支持跨归属），非管理员后续编辑不会丢失这项授权；② 上传前按字节 SHA-256 去重，同图直接返回已有记录、不占配额；③ 「写入前人工确认」采用**配置层预审批**（默认关闭 + 逐库授权 + 配额 + 审计），逐次写入 HITL 明确留作二期。
+**Version note**: **Skill image writes now cover authorized existing libraries, plus content dedup** — ① an admin can select **existing libraries** a skill may write to (cross-ownership allowed), and later edits by non-admins preserve that grant; ② uploads dedupe by byte-level SHA-256 (a hit returns the existing record without consuming quota); ③ "human confirmation before writing" is enforced as **configuration-level pre-approval** (off by default + per-library grant + quotas + audit), with per-write HITL explicitly deferred to phase 2.
+
+## 变更
+# Changes
+
+中文：
+- **技能模型**：`AgentSkillDefinition.ImageWriteLibraryIds`（仅 `ImageWrite` 生效时保留）；`SkillDefHttpRequest` / DTO 同步；服务端逐个校验图库存在（否则 400）。非管理员更新技能时保留管理员已授予的 `ImageWrite` 与白名单。
+- **能力句柄**：`RegisterWriteScope(..., seedLibraryIds)` 把授权库预置进句柄；`IsWriteLibraryAllowed` 同时接受「本轮新建」与「预置授权」；上传端点去掉「图库归属必须等于触发者」的限制（改由管理员授权白名单控权）。
+- **内容去重**：`ImageAsset.ContentHash` + `FindDuplicate(libId, bytes)`；`AddAsset` 写入时记录哈希；旧数据无哈希时首次比对懒补。技能上传命中返回 `{ duplicated: true, asset }`；手动上传命中直接返回已有记录。
+- **前端**：技能表单新增「可写入的已有图库」多选清单（`#sfImageWriteLibs`，勾选 `#sfImageWrite` 后显示，随图库列表加载）；保存提交 `imageWriteLibraryIds`；AI 生成结果默认清空。
+
+English:
+- **Skill model**: `AgentSkillDefinition.ImageWriteLibraryIds` (kept only when `ImageWrite` is effective); `SkillDefHttpRequest` / DTO updated; the server validates every referenced library exists (otherwise 400). Non-admin updates preserve the admin-granted `ImageWrite` flag and allow-list.
+- **Capability handle**: `RegisterWriteScope(..., seedLibraryIds)` seeds authorized libraries into the handle; `IsWriteLibraryAllowed` accepts both "created in this run" and "pre-authorized"; the upload endpoint drops the "library owner must equal trigger user" rule (the admin-granted allow-list is authoritative).
+- **Content dedup**: `ImageAsset.ContentHash` + `FindDuplicate(libId, bytes)`; `AddAsset` records the hash; legacy assets without one are lazily backfilled on first comparison. Skill uploads return `{ duplicated: true, asset }` on a hit; manual uploads return the existing record directly.
+- **Frontend**: the skill form gains an "existing libraries it may write to" multi-select (`#sfImageWriteLibs`, shown once `#sfImageWrite` is ticked, loaded from the library list); saving submits `imageWriteLibraryIds`; AI-generated results clear the selection by default.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.4（`#sfImageWriteLibs`）、§5.4.3（上传去重）、§5.4.6（已有图库授权、去重、预审批模型与二期说明）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.278。
+English: `docs/user-guide.md` / `en.md` §4.3.4 (`#sfImageWriteLibs`), §5.4.3 (upload dedup), §5.4.6 (existing-library grants, dedup, the pre-approval model and the phase-2 note); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.278.
+
+## 测试
+# Tests
+
+中文：新增 2 例——`AgentImageScopeBindingTests`（授权库被预置进写句柄且可跨归属；`AddAsset` 后 `FindDuplicate` 返回同一张图、不同字节返回 null）；扩展 `ClientToolBridgeApiTests`（`imageWriteLibraryIds` 写入 / 回读一致，引用不存在的图库返回 400）。**全量测试通过**（1845 → **1847**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1976，missing 0**；守卫脚本均过。Docker 真实端到端 **10/10**：管理员建图库 + 授权技能 → 技能写入该库 → 两次上传同一张图只保留 1 张（第二次 `duplicated`）→ 审计有上传记录；未授权技能写同一库返回 403。
+English: 2 new cases — `AgentImageScopeBindingTests` (authorized libraries are seeded into the write handle and may cross ownership; after `AddAsset`, `FindDuplicate` returns the same image and null for different bytes); extended `ClientToolBridgeApiTests` (`imageWriteLibraryIds` round-trips and a missing library returns 400). **All tests pass** (1845 → **1847**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1976, missing 0**; guard scripts pass. Real Docker end-to-end **10/10**: an admin creates a library and authorizes a skill → the skill writes into it → uploading the same image twice keeps only one (the second returns `duplicated`) → the audit has the upload record; an unauthorized skill writing the same library returns 403.
+
 
 **版本说明**：**技能可以受控写入图库**——管理员可在单个技能上开启「图库写入」，平台在技能入参 JSON 中注入 10 分钟能力句柄 `imageWriteScopeId`，技能据此新建图库 / 上传图片（每轮 1 个库 / 20 张图 / 单图 10MB，只能写本轮新建的库，全程审计）。同时修复一个影响全平台审计的潜伏缺陷：审计 ID 用进程内自增序号，重启后与库中已有主键冲突并被静默丢弃。
 **Version note**: **Skills can write to image libraries under control** — an admin can enable "image library write" per skill; the platform injects a 10-minute capability handle `imageWriteScopeId` into the skill's JSON input, which the skill uses to create a library / upload images (1 library / 20 images / 10 MB per image per run; only the library created in this run; fully audited). Also fixes a latent platform-wide audit defect: IDs used a process-local counter that collided with existing primary keys after a restart and were silently dropped.

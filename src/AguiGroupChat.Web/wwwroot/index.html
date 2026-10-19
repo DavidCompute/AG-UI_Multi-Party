@@ -777,6 +777,11 @@
           <input id="sfImageWrite" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
         </div>
         <p class="form-hint" id="sfImageWriteHint" style="margin:0 0 8px;font-size:12px" data-i18n="skill.form.imageWriteHint">开启后，平台会在技能入参 JSON 中注入 imageWriteScopeId（10 分钟、每轮最多 1 个库 / 20 张图 / 单图 10MB）；技能只能写入本轮新建的图库，所有写入均记入审计。</p>
+        <!-- 可写入的已有图库（1.0.278）：管理员显式授权，可跨归属 -->
+        <div class="form-group" id="sfImageWriteLibsGroup" style="display:none">
+          <label data-i18n="skill.form.imageWriteLibs">可写入的已有图库（可选；不选 = 只能写本轮新建的库）</label>
+          <div id="sfImageWriteLibs" style="max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px"></div>
+        </div>
         <div class="modal-actions">
           <button id="sfBack" class="btn-ghost" data-i18n="skill.form.back">返回</button>
           <button id="sfTest" class="btn-ghost" data-i18n="skill.form.test">▶ 试运行</button>

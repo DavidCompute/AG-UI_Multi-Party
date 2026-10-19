@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.277**
+> 适用版本：**1.0.278**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1875,6 +1875,7 @@
 | `#sfBody`（标签 `#sfBodyLabel`） | 正文 | 标签按类型切换（`skill.form.bodyShell/Http/Prompt/Dotnet/OrgDeploy`） |
 | `#sfRequiresApproval` | 执行需人工批准 | `shell`/`dotnet`/`client` 时禁用并强制勾选 |
 | `#sfImageWrite` | 允许向图库写入（1.0.277） | 仅**管理员 + 服务端 + 非 prompt** 可见；开启后平台在技能入参 JSON 注入 `imageWriteScopeId`（见 5.4.6） |
+| `#sfImageWriteLibs` | 可写入的已有图库（1.0.278） | `#sfImageWrite` 勾选后显示多选清单；不选 = 只能写本轮新建的库 |
 | `#sfBack` / `#sfTest` / `#sfSave` | 返回 / 试运行 / 保存 | |
 
 `syncSkillKind()` 联动：`shell` 时显示解释器；`client` 时显示 ClientRunner；`shell`、`dotnet` 或 `client` 时禁用审批勾选框（强制需审批）。图库写入勾选框仅在「管理员 + 服务端 + 非 prompt」时显示，否则隐藏并强制清空（服务端同样强制 `imageWrite=false`）。
@@ -2452,6 +2453,8 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 
 后端 `AddAsset` 校验（顺序）：库存在、未超单库上限 **2000 张**（`MaxAssetsPerLibrary`）、扩展名在白名单 `png/jpg/jpeg/gif/bmp/webp`、非空、且 ≤ **20 MB**（`AttachmentStore.MaxFileBytes`）；随后立即落盘并返回 `status=processing`，后台 `ProcessAssetAsync` 生成描述 → 向量化。
 
+**内容去重（1.0.278）**：手动上传与技能上传都会先按字节 SHA-256 比对目标图库；命中已有图片时直接返回该记录（技能端为 `{ duplicated: true, asset }`），不新增图片、不重复向量化。
+
 图片文件落 `data/images/{libId}/{assetId}{ext}`（`ImageLibraryCatalog` 根目录 `data/images`）。
 
 **向量化状态四态徽标**（`assetBadge`，刻意让「完成」也可见）：
@@ -2494,7 +2497,9 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 
 图库此前只对技能开放**读**（`/ag-ui/images/search`）；1.0.277 起可以**受控写入**，让自动生成的技能把素材沉淀进图库。
 
-**开启方式**：技能编辑表单勾选「允许该技能向图库写入」（`#sfImageWrite`，`AgentSkillDefinition.ImageWrite`）。默认关闭；仅**管理员**可开，且仅对**服务端执行**的非 `prompt` 技能生效（客户端技能在用户机器上跑，拿不到平台自令牌；`prompt` 无执行面）。服务端对不满足条件的请求强制 `imageWrite=false`。
+**开启方式**：技能编辑表单勾选「允许该技能向图库写入」（`#sfImageWrite`，`AgentSkillDefinition.ImageWrite`）。默认关闭；仅**管理员**可开，且仅对**服务端执行**的非 `prompt` 技能生效（客户端技能在用户机器上跑，拿不到平台自令牌；`prompt` 无执行面）。服务端对不满足条件的请求强制 `imageWrite=false`。非管理员编辑技能时，服务端**保留**管理员已授予的开关与图库白名单（不会因表单未提交而静默丢失）。
+
+**可写入的已有图库（1.0.278）**：勾选后下方会出现图库多选清单（`#sfImageWriteLibs`），可额外授权技能写入**已有图库**（支持跨归属，属于管理员对技能的显式委托）；不选 = 只能写本轮新建的库。保存时服务端逐个校验图库存在，否则 400。
 
 **注入**：技能调用前，`AgentCatalog.WithImageScope` 在入参 JSON 中注入 `imageWriteScopeId`（与文档技能的 `imageScopeId` 并列）。句柄 10 分钟有效，绑定触发者 / 岗位 / 技能，并带配额：**每轮最多 1 个图库 / 20 张图 / 单图 10 MB**（`ImageLibraryCatalog.ImageWriteScope`）。
 
@@ -2503,9 +2508,13 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 | 方法 | 路径 | 请求体 | 说明 |
 |---|---|---|---|
 | POST | `/ag-ui/images/libraries` | `{ writeScopeId, name, description? }` | 新建图库，owner = **触发者**；返回 `{ libId, name, ownerId }`；超配额 → 429 |
-| POST | `/ag-ui/images/libraries/{libId}/assets` | `{ writeScopeId, attachmentId \| fileName+base64, caption?, tags? }` | 登记图片；只允许写入**本轮新建**的图库；超配额 → 429 |
+| POST | `/ag-ui/images/libraries/{libId}/assets` | `{ writeScopeId, attachmentId \| fileName+base64, caption?, tags? }` | 登记图片；只允许**本轮新建**或**技能上显式授权**的库；超配额 → 429；内容重复 → 返回 `{ duplicated: true, asset }` |
 
-**安全模型**：① 必须是技能自调用（`SelfApi.IsSelf`）；② 句柄必须有效且未过期；③ 只能写入本轮新建并登记到句柄的图库；④ 图库归属必须与句柄的触发者一致；⑤ 每次写入记审计 `skill.imageLibrary.create` / `skill.imageLibrary.upload`（带 skillId + agentId + 触发者）。
+**安全模型**：① 必须是技能自调用（`SelfApi.IsSelf`）；② 句柄必须有效且未过期；③ 只能写入本轮新建、或管理员在技能上显式授权的图库；④ 每次写入记审计 `skill.imageLibrary.create` / `skill.imageLibrary.upload`（带 skillId + agentId + 触发者）。
+
+**内容去重（1.0.278）**：上传前按字节 SHA-256 比对目标图库，已存在则直接返回 `{ duplicated: true, asset }`，不重复占向量 / 配额；旧数据没有哈希时在首次比对时懒补。手动上传（`POST /ag-ui/image-libs/{libId}/assets`）同样去重，返回已有记录。
+
+**关于「写入前人工确认」**：一期采用**配置层预审批**——能力默认关闭，必须由管理员开启并逐个选择可写入的图库；新建的库归属触发者、默认不共享；每次写入有配额且全量审计。**不做逐次写入的 HITL**：技能执行中无法安全阻塞等待交互式审批（会改变技能契约并占用长连接），逐条审批队列适合作为二期。
 
 **技能侧示例（C#）**：
 
