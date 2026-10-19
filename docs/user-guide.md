@@ -683,6 +683,7 @@
 - **与水位预警联动**：用量页「今日各知聚明细」的配额使用列改用**该行自己的分母**；与全局值不同时在知聚名后标 `⚙`（悬停显示具体额度）；侧边栏 `⚠` / `🔴` 角标也按各知聚自己的额度算（见 2.1.1 / 8.6）。
 - **回显**：群列表接口 `GET /ag-ui/member/{memberId}/groups` 下发 `quotaOverride`（`null` = 未覆写），`openGroupSettings()` 回填。
 - **审计（1.0.268）**：变更记 `group.quotaOverride`（action），detail 为改后的实际值（含「取消，回退全局」）。
+- **对外感知**：变更随既有 `GROUP_UPDATED` 事件下发（`updateFields` 含 `quotaPerGroup`、`groupInfo` 带新值，且**无人在线也会推**），无需专用事件；详见 §8.19。
 
 #### 2.2.3 解散知聚
 
@@ -4428,6 +4429,10 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 - **`system` 豁免**：定时任务的虚拟触发者不产生个人配额告警（但仍计入知聚配额，会触发知聚告警）。
 - **订阅过滤**：`groupId` 为空串（个人作用域）——因此**限定了知聚的订阅收不到个人超额告警**，只有未限定知聚的订阅会收到。
 - **未配配额（0 = 不限）时不产生事件**，也不产生额外查询。
+
+**覆写变更如何被外部感知**：知聚级**模型 / 配额覆写没有单独的 Webhook 事件**——它们随既有 `GROUP_UPDATED` 下发：`updateFields` 含 `model` / `quotaPerGroup`，`groupInfo` 带请求里的新值（`group-config` 事件对象见 §4.2）。出站钩子先于「无订阅者则提前返回」执行，所以**即使该知聚无人在线也会推送**。
+
+> 若外部审计需要「**实际生效值**」（负值 / 非数字会被当作取消覆写），可直接查审计日志 `group.quotaOverride` / `group.modelOverride`（detail 记的是**改后实际值**，见 §8.7），或回读群列表的 `quotaOverride` / `modelOverride`。
 
 **投递契约**：
 

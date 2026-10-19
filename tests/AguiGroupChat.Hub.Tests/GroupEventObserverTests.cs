@@ -15,7 +15,12 @@ public sealed class GroupEventObserverTests
     private sealed class RecordingObserver : IGroupEventObserver
     {
         public List<(string GroupId, string? Type)> Events { get; } = [];
-        public void OnEvent(string groupId, object evt) => Events.Add((groupId, WebhookDispatcher.EventTypeOf(evt)));
+        public List<object> Objects { get; } = [];
+        public void OnEvent(string groupId, object evt)
+        {
+            Events.Add((groupId, WebhookDispatcher.EventTypeOf(evt)));
+            Objects.Add(evt);
+        }
     }
 
     private sealed class ThrowingObserver : IGroupEventObserver
@@ -54,6 +59,36 @@ public sealed class GroupEventObserverTests
         await hub.SendMessageAsync(new GroupMessageSendRequest { GroupId = group.GroupId, UserId = "user_1", Content = "hi" });
 
         Assert.Contains(observer.Events, e => e.Type == EventTypes.TextMessageEnd);
+    }
+
+    [Fact]
+    public async Task Observer_ReceivesGroupUpdated_CarryingOverrideValues()
+    {
+        // 成本控制类覆写变更无专用事件：它随 GROUP_UPDATED 下发（updateFields + groupInfo 新值）。
+        // 这条护栏防止以后有人把 updateFields / groupInfo 从事件里削掉（外部审计就会静默丢信息）。
+        var f = new HubFixture();
+        var observer = new RecordingObserver();
+        var hub = CreateHub(f, observer);
+        var group = await hub.CreateGroupAsync(new GroupCreateRequest { GroupName = "覆写集成", OwnerId = "user_1" });
+
+        await hub.UpdateGroupAsync(new GroupUpdateRequest
+        {
+            GroupId = group.GroupId,
+            OperatorId = "user_1",
+            UpdateFields = ["quotaPerGroup", "model"],
+            GroupInfo = new()
+            {
+                ["quotaPerGroup"] = System.Text.Json.JsonSerializer.SerializeToElement(5000),
+                ["model"] = System.Text.Json.JsonSerializer.SerializeToElement("deepseek-flash"),
+            },
+        });
+
+        var evt = Assert.Single(observer.Objects.OfType<GroupUpdatedEvent>());
+        Assert.Contains("quotaPerGroup", evt.UpdateFields);
+        Assert.Contains("model", evt.UpdateFields);
+        Assert.Equal(5000, evt.GroupInfo["quotaPerGroup"].GetInt64());
+        Assert.Equal("deepseek-flash", evt.GroupInfo["model"].GetString());
+        Assert.Equal("user_1", evt.OperatorId);
     }
 
     [Fact]

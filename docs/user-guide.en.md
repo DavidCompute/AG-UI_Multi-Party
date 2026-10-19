@@ -684,6 +684,7 @@ Support circles, in language and implementation: support circles **do not suppor
 - **Tied to the level warning**: the Usage Stats "today's usage per circle" table's quota-use column uses **that row's own denominator**; when it differs from the global value a `⚙` marker follows the circle name (hovering shows the value); the sidebar `⚠` / `🔴` badges likewise judge each circle against its own quota (see 2.1.1 / 8.6).
 - **Rendering**: the group-list endpoint `GET /ag-ui/member/{memberId}/groups` returns `quotaOverride` (`null` = not overridden), which `openGroupSettings()` backfills.
 - **Audit (1.0.268)**: changes are recorded as `group.quotaOverride`, with the resulting value in `detail` (including "cleared, back to global").
+- **External visibility**: the change rides on the existing `GROUP_UPDATED` event (`updateFields` contains `quotaPerGroup`, `groupInfo` carries the new value, and it is pushed **even with nobody online**) — no dedicated event needed; see 8.19.
 
 #### 2.2.3 Disbanding a Circle
 
@@ -4438,6 +4439,10 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 - **`system` is exempt**: the scheduled-task virtual trigger produces no per-user alert (but still counts toward the circle quota, so a circle alert can fire).
 - **Subscription filtering**: the `groupId` is an empty string for the user scope — so **group-scoped subscriptions do not receive per-user alerts**; only unscoped subscriptions do.
 - **No quota (0 = unlimited) means no events** and no extra queries.
+
+**How external systems see override changes**: circle-level **model / quota overrides have no dedicated webhook event** — they ride on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**.
+
+> If an external audit needs the **effective value** (a negative / non-numeric value counts as clearing the override), read the audit log's `group.quotaOverride` / `group.modelOverride` (whose `detail` records the **resulting** value, see 8.7), or read `quotaOverride` / `modelOverride` back from the group list.
 
 **Delivery contract**:
 
