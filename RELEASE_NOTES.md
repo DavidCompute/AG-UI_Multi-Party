@@ -1,8 +1,8 @@
 # AG-UI 群聊桌面版 1.0.270 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.270 Release Notes (current Windows desktop release)
 
-**版本说明**：**配额预警从「拉」变成「推」**——当日用量**首次**跨过配额的 80%（`warn`）/ 100%（`over`）时，除既有的页面角标外，现在还会发一条 **`QUOTA_THRESHOLD`** 事件到**出站 Webhook**（照旧带 HMAC 签名 / 重试 / 投递记录），可直接推到 Slack / 告警平台 / n8n。个人与知聚两个作用域均支持，**每作用域每级每日只发一次**（不刷屏）。
-**Version note**: **Quota warnings go from "pull" to "push"** — when daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota, besides the existing page badges it now emits a **`QUOTA_THRESHOLD`** event to **outbound webhooks** (still HMAC-signed, with retries and delivery records), so it can go straight to Slack / an alerting platform / n8n. Both the user and circle scopes are supported, with **one event per scope per level per day** (no flooding).
+**版本说明**：**配额预警从「拉」变成「推」**——当日用量**首次**跨过配额的 80%（`warn`）/ 100%（`over`）时，除既有的页面角标外，现在还会发一条 **`QUOTA_THRESHOLD`** 事件到**出站 Webhook**（照旧带 HMAC 签名 / 重试 / 投递记录），可直接推到 Slack / 告警平台 / n8n。个人与知聚两个作用域均支持，**每作用域每级每日只发一次**（不刷屏；去重状态是**进程内**的，多副本部署时每个副本各发一次——告警平台可按 `scopeId + level + date` 去重）。
+**Version note**: **Quota warnings go from "pull" to "push"** — when daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota, besides the existing page badges it now emits a **`QUOTA_THRESHOLD`** event to **outbound webhooks** (still HMAC-signed, with retries and delivery records), so it can go straight to Slack / an alerting platform / n8n. Both the user and circle scopes are supported, with **one event per scope per level per day** (no flooding; the dedup state is **per process**, so in a multi-replica deployment each replica emits once — an alerting platform can dedupe by `scopeId + level + date`).
 
 ## 变更
 # Changes

@@ -3982,7 +3982,7 @@ Frontend hint: `quota > 0` → `admin.quotaEnabled` (including the quota value, 
 >
 > **Proactive warning (1.0.266)**: the same level source is also served by `GET /ag-ui/admin/quota-status` (`AdminApi.cs:422-438`) to the **sidebar group items** (Operator+ only) — so you can see which circle is "nearly full" without opening the console.
 >
-> **Push-style warning (1.0.270)**: the same threshold decision also emits a `QUOTA_THRESHOLD` event to outbound webhooks on the **first crossing** of 80% / 100% (both user and circle scopes, once per scope per level per day) — the warning goes from "pull" to "push"; see 8.19.
+> **Push-style warning (1.0.270)**: the same threshold decision also emits a `QUOTA_THRESHOLD` event to outbound webhooks on the **first crossing** of 80% / 100% (both user and circle scopes, once per scope per level per day **per process**) — the warning goes from "pull" to "push"; see 8.19.
 >
 > **Trigger dimension (1.0.268)**: `usersToday` applies the same `QuotaLevel` to the **per-user quota** (`AdminApi.cs:476`), so an admin can see "who is about to hit the cap" right on the usage page; `system` is marked exempt (see above).
 >
@@ -4433,7 +4433,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
   "date": "2026-01-01", "timestamp": 1767225600000 }
 ```
 
-- **No flooding**: each scope fires **once per level per UTC day** (deduplicated by `_thresholdNotified`); after `over` no further events or usage queries are made that day.
+- **No flooding**: each scope fires **once per level per UTC day** (deduplicated by `_thresholdNotified`; the dedup state is **per process**, so in a multi-replica deployment each replica emits once — dedupe by `scopeId + level + date` on the receiving side); after `over` no further events or usage queries are made that day.
 - **The denominator is the effective quota**: the circle dimension uses `EffectiveGroupQuota` (**per-circle override first**, see 2.2.2.2).
 - **`system` is exempt**: the scheduled-task virtual trigger produces no per-user alert (but still counts toward the circle quota, so a circle alert can fire).
 - **Subscription filtering**: the `groupId` is an empty string for the user scope — so **group-scoped subscriptions do not receive per-user alerts**; only unscoped subscriptions do.
