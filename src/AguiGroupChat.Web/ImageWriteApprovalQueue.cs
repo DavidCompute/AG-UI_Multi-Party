@@ -48,6 +48,12 @@ public sealed record ResolvedImageWrite
     public required long AtMs { get; init; }
 }
 
+/// <summary>「最近处理」的持久化元数据（1.0.284；不含图片字节）。</summary>
+public sealed record ResolvedImageWriteDto(
+    string PendingId, string Status, string? Reason, string LibId, string? LibName,
+    string FileName, string? SkillId, string? AgentId, string? AssetId, bool Duplicated,
+    string? DecidedBy, long AtMs);
+
 /// <summary>
 /// 图库写入审批队列（1.0.279 / 1.0.280）：
 /// <list type="bullet">
@@ -171,6 +177,7 @@ public sealed class ImageWriteApprovalQueue
             _history.AddFirst(item);
             while (_history.Count > MaxHistory) _history.RemoveLast();
         }
+        _changes?.Notify(); // 让持久化尽快落盘（无变更钩子时忽略）
     }
 
     /// <summary>最近的已处理回执（新→旧；默认 20 条，上限 <see cref="MaxHistory"/>）。</summary>
@@ -178,6 +185,46 @@ public sealed class ImageWriteApprovalQueue
     {
         lock (_historyLock) return _history.Take(Math.Clamp(limit, 1, MaxHistory)).ToList();
     }
+
+    /// <summary>持久化快照（新→旧；最多 <see cref="MaxHistory"/> 条）。</summary>
+    public IReadOnlyList<ResolvedImageWriteDto> SnapshotHistory()
+    {
+        lock (_historyLock) return _history.Select(ToDto).ToList();
+    }
+
+    /// <summary>从持久化快照恢复（保持新→旧顺序；跳过缺主键 / 状态的行，超限截断）。</summary>
+    public void RestoreHistory(IEnumerable<ResolvedImageWriteDto>? items)
+    {
+        if (items is null) return;
+        lock (_historyLock)
+        {
+            _history.Clear();
+            foreach (var d in items)
+            {
+                if (string.IsNullOrWhiteSpace(d.PendingId) || string.IsNullOrWhiteSpace(d.Status)) continue;
+                _history.AddLast(new ResolvedImageWrite
+                {
+                    PendingId = d.PendingId,
+                    Status = d.Status,
+                    Reason = d.Reason,
+                    LibId = d.LibId ?? "",
+                    LibName = d.LibName,
+                    FileName = d.FileName ?? "",
+                    SkillId = d.SkillId,
+                    AgentId = d.AgentId,
+                    AssetId = d.AssetId,
+                    Duplicated = d.Duplicated,
+                    DecidedBy = d.DecidedBy,
+                    AtMs = d.AtMs,
+                });
+                if (_history.Count >= MaxHistory) break;
+            }
+        }
+    }
+
+    private static ResolvedImageWriteDto ToDto(ResolvedImageWrite x)
+        => new(x.PendingId, x.Status, x.Reason, x.LibId, x.LibName, x.FileName, x.SkillId, x.AgentId,
+            x.AssetId, x.Duplicated, x.DecidedBy, x.AtMs);
 
     /// <summary>持久化快照（元数据；字节已在磁盘上）。</summary>
     public IReadOnlyList<PendingImageWriteDto> Snapshot()
@@ -272,23 +319,40 @@ public sealed class ImageWriteApprovalQueue
     }
 }
 
-/// <summary>持久化扩展区「imageWritePending」：待审批元数据跨重启保持（字节在磁盘）。</summary>
+/// <summary>持久化扩展区「imageWritePending」（待审批）+「imageWriteHistory」（最近处理，1.0.284）。</summary>
 public static class ImageWriteApprovalPersistence
 {
     public static void RegisterImageWriteApprovalPersistence(this IServiceProvider services)
     {
         var queue = services.GetRequiredService<ImageWriteApprovalQueue>();
-        Func<object?> snapshot = () => queue.Snapshot().ToList();
-        Action<JsonElement> restore = element =>
-        {
-            var items = element.Deserialize<List<PendingImageWriteDto>>(AguiJson.Options);
-            queue.Restore(items);
-        };
 
-        var persistence = services.GetService<PersistenceService>();
-        if (persistence is not null)
-            persistence.AddSection("imageWritePending", snapshot, restore);
-        else
-            services.GetService<ISectionStore>()?.AddSection("imageWritePending", snapshot, restore);
+        void Register(string name, Func<object?> snapshot, Action<JsonElement> restore)
+        {
+            var persistence = services.GetService<PersistenceService>();
+            if (persistence is not null)
+                persistence.AddSection(name, snapshot, restore);
+            else
+                services.GetService<ISectionStore>()?.AddSection(name, snapshot, restore);
+        }
+
+        Register("imageWritePending",
+            () => queue.Snapshot().ToList(),
+            element =>
+            {
+                var items = element.Deserialize<List<PendingImageWriteDto>>(AguiJson.Options);
+                queue.Restore(items);
+            });
+
+        Register("imageWriteHistory",
+            () => queue.SnapshotHistory().ToList(),
+            element =>
+            {
+                try
+                {
+                    var items = element.Deserialize<List<ResolvedImageWriteDto>>(AguiJson.Options);
+                    queue.RestoreHistory(items);
+                }
+                catch { /* 旧 / 损坏数据：忽略，不阻断启动 */ }
+            });
     }
 }

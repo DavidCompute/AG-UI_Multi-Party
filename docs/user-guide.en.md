@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.283**
+> Applies to version: **1.0.284**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2514,7 +2514,7 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 - The queue has a **24h TTL**: at most 50 items, 20 per owner, and ≤ 64MB total. **Since 1.0.280 it survives restarts**: metadata lives in the persistence section `imageWritePending` and bytes in `data/pending-writes/{id}.bin` (same data volume); entries are restored and can still be approved after a restart. Only when persistence is disabled does it fall back to memory (orphan files older than the TTL are cleaned at startup).
 - **Active awareness and batch approval (1.0.281)**: on enqueue the server pushes an **`IMAGE_WRITE_PENDING`** outbound webhook (not bound to a circle — `groupId` is an empty string, so only subscriptions without a circle filter receive it; `data` carries `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes`, see 8.19). The admin UI also polls the pending list every **60 seconds** and puts **new items into the notification center** (plus a system notification when the page is in the background), so there is no need to keep the Image Library page open. The list header offers **Approve all / Reject all**: each item is processed through the single-item endpoint, one failure does not block the rest, and a final toast reports "processed X / N".
 - **Resolution receipts and click-through (1.0.282)**: approval / rejection pushes **`IMAGE_WRITE_RESOLVED`** (`status` = `approved` / `rejected` / `failed`, see 8.19); an approval carries `assetId`, a content-dedupe hit sets `duplicated=true`, and failures such as a missing target library carry a `reason`. Pending notifications are **clickable** and open Image Library Management directly (the pending block is at the top); while the dialog is open each poll also refreshes the list, so there is no need to reopen it after approving / rejecting.
-- **Recently processed view (1.0.283)**: Image Library Management gains **🧾 Recently processed**, listing the latest 20 resolution receipts — status (✅ approved / 🚫 rejected / ⚠️ failed), file → library, source skill / agent, decided-by, and time; failures carry a `reason`, and duplicate content is marked "already present". Data comes from `GET /ag-ui/admin/image-write-pending/history` (admin only); the queue keeps the **latest 50** in process (cleared on restart) — for long-term tracing use the audit log (`skill.imageLibrary.upload` / `.rejected`).
+- **Recently processed view (1.0.283 / persisted in 1.0.284)**: Image Library Management gains **🧾 Recently processed**, listing the latest 20 resolution receipts — status (✅ approved / 🚫 rejected / ⚠️ failed), file → library, source skill / agent, decided-by, and time; failures carry a `reason`, and duplicate content is marked "already present". Data comes from `GET /ag-ui/admin/image-write-pending/history` (admin only); the queue keeps the **latest 50**, and **since 1.0.284 they survive restarts** (extension section `imageWriteHistory`; falls back to in-process when persistence is disabled); for longer-term tracing use the audit log (`skill.imageLibrary.upload` / `.rejected`).
 
 **Injection**: before invoking the skill, `AgentCatalog.WithImageScope` injects `imageWriteScopeId` into the JSON input (alongside a document skill's `imageScopeId`). The handle lives 10 minutes, is bound to the trigger user / agent / skill, and carries quotas: **at most 1 library / 20 images / 10 MB per image per run** (`ImageLibraryCatalog.ImageWriteScope`).
 
@@ -4766,7 +4766,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | POST | `/ag-ui/images/libraries` | **Skill** creates a library (self token + `imageWriteScopeId`, see 5.4.6) | Self-call |
 | POST | `/ag-ui/images/libraries/{libId}/assets` | **Skill** uploads an image (self token + handle; `attachmentId` or base64) | Self-call |
 | GET | `/ag-ui/admin/image-write-pending` | Pending skill writes | Admin |
-| GET | `/ag-ui/admin/image-write-pending/history` | Recently processed receipts (max 20; in-process, cleared on restart) | Admin |
+| GET | `/ag-ui/admin/image-write-pending/history` | Recently processed receipts (max 20; survives restarts since 1.0.284) | Admin |
 | POST | `/ag-ui/admin/image-write-pending/{id}/approve` | Approve and write (with source marking) | Admin |
 | POST | `/ag-ui/admin/image-write-pending/{id}/reject` | Reject and audit | Admin |
 | POST | `/ag-ui/images/search` | Image library semantic search (**self-token or logged-in user**; the server path accepts only the self-token) | Self-token **or** Login(strict) |

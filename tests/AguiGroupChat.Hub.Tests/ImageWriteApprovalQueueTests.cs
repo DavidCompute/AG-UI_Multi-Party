@@ -1,4 +1,8 @@
+using AguiGroupChat.Hub.Infra;
+using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Web;
+using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -88,6 +92,70 @@ public sealed class ImageWriteApprovalQueueTests
     }
 
     [Fact]
+    public void RestoreHistory_TrimsAndSkipsInvalid()
+    {
+        var q = new ImageWriteApprovalQueue();
+        var rows = Enumerable.Range(0, ImageWriteApprovalQueue.MaxHistory + 3)
+            .Select(i => new ResolvedImageWriteDto("iwp_" + i, "approved", null, "img_1", null, $"f{i}.png", null, null, null, false, null, i))
+            .Append(new ResolvedImageWriteDto("", "approved", null, "img_1", null, "bad.png", null, null, null, false, null, 1))
+            .ToList();
+
+        q.RestoreHistory(rows);
+
+        var all = q.RecentResolved(ImageWriteApprovalQueue.MaxHistory + 10);
+        Assert.Equal(ImageWriteApprovalQueue.MaxHistory, all.Count);
+        Assert.Equal("iwp_0", all[0].PendingId); // 保持传入顺序（新→旧）
+        Assert.DoesNotContain(all, x => x.PendingId.Length == 0);
+    }
+
+    [Fact]
+    public void History_RoundTripsThroughPersistenceSection()
+    {
+        var store1 = new CaptureSectionStore();
+        var q1 = new ImageWriteApprovalQueue();
+        var sp1 = new ServiceCollection()
+            .AddSingleton(q1)
+            .AddSingleton<ISectionStore>(store1)
+            .BuildServiceProvider();
+        sp1.RegisterImageWriteApprovalPersistence();
+
+        q1.RecordResolved(new ResolvedImageWrite
+        {
+            PendingId = "iwp_1", Status = "approved", LibId = "img_1", LibName = "库",
+            FileName = "a.png", SkillId = "skill_x", AgentId = "agent_x", AssetId = "asset_1",
+            DecidedBy = "david", AtMs = 123,
+        });
+        q1.RecordResolved(new ResolvedImageWrite
+        {
+            PendingId = "iwp_2", Status = "rejected", LibId = "img_1", FileName = "b.png", AtMs = 124,
+        });
+
+        var snapshot = store1.Snapshots["imageWriteHistory"]();
+        var json = JsonSerializer.SerializeToElement(snapshot, AguiJson.Options);
+
+        // 模拟重启：新队列 + 新容器，调用同一扩展区的恢复回调
+        var q2 = new ImageWriteApprovalQueue();
+        var store2 = new CaptureSectionStore();
+        new ServiceCollection()
+            .AddSingleton(q2)
+            .AddSingleton<ISectionStore>(store2)
+            .BuildServiceProvider()
+            .RegisterImageWriteApprovalPersistence();
+
+        store2.Restores["imageWriteHistory"](json);
+
+        var restored = q2.RecentResolved();
+        Assert.Equal(2, restored.Count);
+        Assert.Equal("iwp_2", restored[0].PendingId); // 新→旧
+        Assert.Equal("rejected", restored[0].Status);
+        var first = restored[1];
+        Assert.Equal("approved", first.Status);
+        Assert.Equal("库", first.LibName);
+        Assert.Equal("asset_1", first.AssetId);
+        Assert.Equal("david", first.DecidedBy);
+    }
+
+    [Fact]
     public void PersistedQueue_RestoresAcrossRestart_AndDeletesBytesOnTake()
     {
         var root = Path.Combine(Path.GetTempPath(), "agui-iwq-" + Guid.NewGuid().ToString("N")[..8]);
@@ -137,5 +205,21 @@ public sealed class ImageWriteApprovalQueueTests
         {
             try { Directory.Delete(root, true); } catch { /* 忽略 */ }
         }
+    }
+
+    /// <summary>捕获扩展区注册的回调（无数据库 / 无持久化文件时验证快照 + 恢复语义）。</summary>
+    private sealed class CaptureSectionStore : ISectionStore
+    {
+        public Dictionary<string, Func<object?>> Snapshots { get; } = new(StringComparer.Ordinal);
+        public Dictionary<string, Action<JsonElement>> Restores { get; } = new(StringComparer.Ordinal);
+
+        public void AddSection(string name, Func<object?> snapshot, Action<JsonElement> restore)
+        {
+            Snapshots[name] = snapshot;
+            Restores[name] = restore;
+        }
+
+        public void LoadSections() { }
+        public void Flush() { }
     }
 }

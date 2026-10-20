@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.284 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.284 Release Notes (current Windows desktop release)
+
+**版本说明**：**审批历史跨重启保持**——「最近处理」不再随重启清空；回执（批准 / 拒绝 / 失败）写入持久化扩展区 `imageWriteHistory`，重启后图库管理里仍能回看，审计链路更完整。持久化关闭时自动退化为进程内，不影响审批本身。
+**Version note**: **Approval history survives restarts** — "Recently processed" no longer resets on restart; receipts (approved / rejected / failed) are persisted in the `imageWriteHistory` section, so the table is still there after a restart. With persistence disabled it degrades to in-process without affecting approvals.
+
+## 变更
+# Changes
+
+中文：
+- **持久化 DTO**：`ResolvedImageWriteDto`（不含图片字节）；`SnapshotHistory()` / `RestoreHistory()` 保持新→旧顺序，恢复时跳过缺主键 / 状态的行、超过 50 条截断。
+- **扩展区注册**：`RegisterImageWriteApprovalPersistence()` 现在注册两段—— `imageWritePending`（待审批）+ `imageWriteHistory`（最近处理）；Web 与桌面组合根无需改动。
+- **及时落盘**：`RecordResolved` 调用 `ChangeHub.Notify()`，回执在下一个冲刷周期（默认 5s）写入快照，无需等下一次审批或关闭。
+- **容错**：历史恢复包 try/catch——旧版快照 / 损坏数据不会阻断启动；无持久化时保持原进程内行为。
+- **测试**：新增 2 例——快照 → 恢复完整闭环（含扩展区注册与字段保真）、恢复时截断与非法行跳过。
+
+English:
+- **Persistence DTO**: `ResolvedImageWriteDto` (no image bytes); `SnapshotHistory()` / `RestoreHistory()` keep newest-first order, skip rows missing id / status and truncate beyond 50 on restore.
+- **Section registration**: `RegisterImageWriteApprovalPersistence()` now registers two sections — `imageWritePending` (pending) + `imageWriteHistory` (recently processed); no changes needed in the web or desktop composition roots.
+- **Prompt flush**: `RecordResolved` calls `ChangeHub.Notify()`, so receipts land in the next flush cycle (5s by default) without waiting for another approval or shutdown.
+- **Tolerant restore**: the history restore is wrapped in try/catch — old snapshots / corrupt data never block startup; without persistence the original in-process behaviour is unchanged.
+- **Tests**: 2 new cases — full snapshot → restore round trip (including section registration and field fidelity), and truncation / invalid-row skipping on restore.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（「最近处理」持久化）与 API 表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.284。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (persisted recently-processed) and the API table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.284.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1859 → **1861**）；`dotnet build` **0 错误**；i18n 审计 **zh=en=2002，missing 0**；四个守卫脚本全过；Docker 重建并部署（`/health` 200，持久化文件中可见 `imageWriteHistory` 扩展区）。
+English: full `dotnet test` passes (1859 → **1861**); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=2002, missing 0**; all four guard scripts pass; Docker was rebuilt and redeployed (`/health` 200, the `imageWriteHistory` section is visible in the persisted state file).
+
+---
+
 # AG-UI 群聊桌面版 1.0.283 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.283 Release Notes (current Windows desktop release)
 
