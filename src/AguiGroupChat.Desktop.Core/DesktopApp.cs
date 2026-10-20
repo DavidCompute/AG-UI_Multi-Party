@@ -58,7 +58,9 @@ public static class DesktopApp
         builder.Services.AddSingleton<WebhookDispatcher>();
         builder.Services.AddSingleton<AguiGroupChat.Web.QuotaExpiryReminderService>(); // 临时放额到期提醒（QUOTA_OVERRIDE_EXPIRING / EXPIRED）
         builder.Services.AddSingleton<AguiGroupChat.Web.QuotaReminderStateStore>(); // 提醒去重键（跨重启保持）
-        builder.Services.AddSingleton<AguiGroupChat.Web.ImageWriteApprovalQueue>(); // 图库写入审批队列
+        builder.Services.AddSingleton<AguiGroupChat.Web.ImageWriteApprovalQueue>(sp => new AguiGroupChat.Web.ImageWriteApprovalQueue(
+            Path.Combine(builder.Environment.ContentRootPath, "data", "pending-writes"),
+            sp.GetService<AguiGroupChat.Hub.Persistence.ChangeHub>())); // 图库写入审批队列（元数据持久化 + 字节落盘）
         builder.Services.AddSingleton<IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>());
         // 模板市场在线分发：远程目录源 + 拉取
         builder.Services.AddSingleton(new MarketplaceState());
@@ -152,6 +154,7 @@ public static class DesktopApp
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
         app.Services.RegisterQuotaReminderStatePersistence(); // 临时放额提醒去重键跨重启保持
+        app.Services.RegisterImageWriteApprovalPersistence(); // 待审批图库写入跨重启保持
         app.Services.WireQuotaAlerts(); // 配额阈值（80% / 100%）→ 出站 Webhook（QUOTA_THRESHOLD）
         app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
         app.Services.RegisterMarketplacePersistence(); // 市场目录源跨重启保持

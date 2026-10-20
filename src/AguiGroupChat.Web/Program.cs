@@ -33,7 +33,9 @@ builder.Services.AddSingleton(new WebhookState()); // 订阅配置（持久化�
 builder.Services.AddSingleton<WebhookDispatcher>(); // 事件→订阅过滤→后台投递（含重试 / 签名 / 投递日志）
 builder.Services.AddSingleton<QuotaExpiryReminderService>(); // 临时放额到期提醒：周期性扫描 → QUOTA_OVERRIDE_EXPIRING / EXPIRED
 builder.Services.AddSingleton<QuotaReminderStateStore>(); // 提醒去重键（跨重启保持，避免重复投递）
-builder.Services.AddSingleton<ImageWriteApprovalQueue>(); // 图库写入审批队列（技能写已有库时入队）
+builder.Services.AddSingleton<ImageWriteApprovalQueue>(sp => new ImageWriteApprovalQueue(
+    Path.Combine(builder.Environment.ContentRootPath, "data", "pending-writes"),
+    sp.GetService<AguiGroupChat.Hub.Persistence.ChangeHub>())); // 图库写入审批队列（元数据持久化 + 字节落盘）
 builder.Services.AddSingleton<AguiGroupChat.Hub.Messaging.IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>()); // GroupHub 出站钩子
 // 模板市场在线分发：远程目录源（管理员配置）+ 拉取（缓存 / 尺寸 / 协议防护）
 builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持久化到扩展区「marketplace」）
@@ -180,6 +182,7 @@ app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行�
 app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
 app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
 app.Services.RegisterQuotaReminderStatePersistence(); // 临时放额提醒去重键跨重启保持（避免重启后重复推送）
+app.Services.RegisterImageWriteApprovalPersistence(); // 待审批图库写入跨重启保持（字节在 data/pending-writes）
 app.Services.WireQuotaAlerts(); // 配额阈值（80% / 100%）→ 出站 Webhook（QUOTA_THRESHOLD）
 app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
 app.Services.RegisterMarketplacePersistence(); // 市场目录源跨重启保持

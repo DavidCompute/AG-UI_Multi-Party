@@ -1,5 +1,36 @@
-# AG-UI 群聊桌面版 1.0.279 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.279 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.280 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.280 Release Notes (current Windows desktop release)
+
+**版本说明**：**待审批写入不再一重启就消失**——审批队列的元数据落到持久化扩展区 `imageWritePending`，图片字节落到 `data/pending-writes/{id}.bin`（与 Web 数据同卷），重启后自动恢复，管理员仍可继续批准 / 拒绝。持久化关闭时退化为纯内存，并在启动时清理超 TTL 的孤儿文件。
+**Version note**: **Pending writes no longer vanish on restart** — approval metadata is persisted in the `imageWritePending` section and image bytes in `data/pending-writes/{id}.bin` (same data volume as the web host), so entries are restored after a restart and can still be approved / rejected. With persistence disabled it falls back to memory and cleans orphan files past the TTL at startup.
+
+## 变更
+# Changes
+
+中文：
+- **`ImageWriteApprovalQueue`**：新增可选的字节根目录与 `ChangeHub`；入队时写 `{id}.bin`，取出 / 拒绝 / 过期时删除。
+- **持久化**：`Snapshot()` 只含元数据（不含字节），`Restore()` 按元数据回读磁盘文件；缺文件 / 已过期 / 超限项自动跳过并清理，保留最新。
+- **注册**：Web 与桌面组合根都注册 `RegisterImageWriteApprovalPersistence()`（扩展区 `imageWritePending`），字节目录为 `{ContentRoot}/data/pending-writes`。
+- **无持久化时**：启动清理超过 24h 的孤儿 `.bin`，避免磁盘泄漏。
+
+English:
+- **`ImageWriteApprovalQueue`**: optional bytes root and `ChangeHub`; writes `{id}.bin` on enqueue and deletes it on take / reject / expiry.
+- **Persistence**: `Snapshot()` contains metadata only (no bytes), `Restore()` reads the files back by metadata; missing files / expired / over-limit items are skipped and cleaned, keeping the newest.
+- **Registration**: both the web and desktop composition roots call `RegisterImageWriteApprovalPersistence()` (section `imageWritePending`), with the bytes directory at `{ContentRoot}/data/pending-writes`.
+- **Without persistence**: startup removes orphan `.bin` files older than 24 hours to avoid disk leaks.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（队列跨重启、磁盘布局、持久化关闭时的退化行为）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.280。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (cross-restart queue, disk layout, degraded behaviour without persistence); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.280.
+
+## 测试
+# Tests
+
+中文：新增 2 例——`ImageWriteApprovalQueueTests`（同目录重启后元数据 + 字节均恢复、取出后字节文件被删；恢复时跳过过期项并删除其字节）。**全量测试通过**（1851 → **1853**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1990，missing 0**；守卫脚本均过。Docker 真实端到端 **6/6**：技能入队（202 + pendingId）→ 重启 web → 待审批项仍在 → 批准后图片落盘（字节从磁盘恢复）。
+English: 2 new cases — `ImageWriteApprovalQueueTests` (after a restart on the same directory both metadata and bytes are restored, and taking an item deletes its bytes; restore skips expired items and deletes their bytes). **All tests pass** (1851 → **1853**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1990, missing 0**; guard scripts pass. Real Docker end-to-end **6/6**: a skill enqueues a write (202 + pendingId) → restart web → the pending item is still there → after approval the image lands (bytes restored from disk).
+
 
 **版本说明**：**图库写入的二期能力**——① 逐次写入审批：技能写已有/授权库可要求管理员批准（先入队、返回 202 + pendingId，在「图库管理」顶部批准/拒绝）；② 写入来源标记：图片记录来源技能/岗位，图库支持「全部 / 技能写入 / 手动上传」筛选；③ 按技能配额：每轮最多新建 1..10 个库、上传 1..200 张图。新建库仍立即生效（隔离、风险低）。
 **Version note**: **Phase 2 of image-library writes** — ① per-write approval: a skill can require admin approval for writes to existing/authorized libraries (queued, 202 + pendingId, approved/rejected at the top of Image Library Management); ② write-source marking: images record the source skill/agent, and the library can filter All / Skill writes / Manual uploads; ③ per-skill quotas: 1..10 libraries and 1..200 images per run. Libraries created in the run still apply immediately (isolated, low risk).

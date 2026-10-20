@@ -60,4 +60,56 @@ public sealed class ImageWriteApprovalQueueTests
         Assert.Null(Add(q, "user_new", out var error));
         Assert.Contains("上限", error);
     }
+
+    [Fact]
+    public void PersistedQueue_RestoresAcrossRestart_AndDeletesBytesOnTake()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "agui-iwq-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var q1 = new ImageWriteApprovalQueue(root);
+            var item = Add(q1, "user_1", out var error);
+            Assert.Null(error);
+            Assert.NotNull(item);
+            var file = Path.Combine(root, item!.Id + ".bin");
+            Assert.True(File.Exists(file));
+            var snapshot = q1.Snapshot();
+
+            // 模拟重启：同一目录 + 恢复元数据
+            var q2 = new ImageWriteApprovalQueue(root);
+            q2.Restore(snapshot);
+            Assert.Equal(1, q2.Count);
+            Assert.Equal(item.Bytes, q2.List()[0].Bytes);
+
+            Assert.True(q2.TryTake(item.Id, out _));
+            Assert.False(File.Exists(file)); // 取出后字节文件清理
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { /* 忽略 */ }
+        }
+    }
+
+    [Fact]
+    public void Restore_SkipsExpiredItems_AndDeletesTheirBytes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "agui-iwq-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string id = "iwp_expired";
+            File.WriteAllBytes(Path.Combine(root, id + ".bin"), [1, 2, 3]);
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var q = new ImageWriteApprovalQueue(root);
+            q.Restore([new PendingImageWriteDto(id, "user_1", null, null, "img_1", "a.png", "image/png", null, null,
+                now - 10_000, now - 1)]);
+
+            Assert.Equal(0, q.Count);
+            Assert.False(File.Exists(Path.Combine(root, id + ".bin")));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { /* 忽略 */ }
+        }
+    }
 }

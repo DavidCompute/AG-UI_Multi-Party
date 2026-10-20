@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.279**
+> Applies to version: **1.0.280**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2511,7 +2511,7 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 
 - `#sfImageWriteMaxLibs` / `#sfImageWriteMaxImages`: max libraries created per run (1..10, default 1) and max images uploaded per run (1..200, default 20).
 - `#sfImageWriteApproval`: when on, writes to **existing/authorized libraries** are not applied directly — they enter the approval queue and the endpoint returns **202** `{ pendingId, status: "pending" }`; writes to the library **created in this run** still apply immediately (isolated, low risk). An admin approves / rejects them in the "⏳ Pending skill writes" block at the top of Image Library Management; only then is the image written and audited.
-- The queue is **in-memory with a 24h TTL**: at most 50 items, 20 per owner, and ≤ 64MB total; it is lost on restart (it is meant for short-lived approvals).
+- The queue has a **24h TTL**: at most 50 items, 20 per owner, and ≤ 64MB total. **Since 1.0.280 it survives restarts**: metadata lives in the persistence section `imageWritePending` and bytes in `data/pending-writes/{id}.bin` (same data volume); entries are restored and can still be approved after a restart. Only when persistence is disabled does it fall back to memory (orphan files older than the TTL are cleaned at startup).
 
 **Injection**: before invoking the skill, `AgentCatalog.WithImageScope` injects `imageWriteScopeId` into the JSON input (alongside a document skill's `imageScopeId`). The handle lives 10 minutes, is bound to the trigger user / agent / skill, and carries quotas: **at most 1 library / 20 images / 10 MB per image per run** (`ImageLibraryCatalog.ImageWriteScope`).
 
@@ -2530,7 +2530,7 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 
 **Audit (1.0.279)**: new `skill.imageLibrary.pending` (enqueued) and `skill.imageLibrary.rejected`; approval still records `skill.imageLibrary.upload` (detail includes the approval id).
 
-**On "human confirmation before writing"**: phase 1 uses **configuration-level pre-approval** — the capability is off by default, an admin must enable it and pick each writable library; libraries created by a skill are owned by the trigger user and not shared; every write has quotas and full audit. **1.0.279** adds **per-write approval**: a skill can require admin approval for writes to existing libraries; those writes are queued (202 + pendingId) and applied only after approval, while libraries created in the current run bypass the queue.
+**On "human confirmation before writing"**: phase 1 uses **configuration-level pre-approval** — the capability is off by default, an admin must enable it and pick each writable library; libraries created by a skill are owned by the trigger user and not shared; every write has quotas and full audit. **1.0.279** adds **per-write approval**: a skill can require admin approval for writes to existing libraries; those writes are queued (202 + pendingId) and applied only after approval, while libraries created in the current run bypass the queue. **1.0.280** makes the queue survive restarts (metadata + on-disk bytes).
 
 **Skill-side example (C#)**:
 
