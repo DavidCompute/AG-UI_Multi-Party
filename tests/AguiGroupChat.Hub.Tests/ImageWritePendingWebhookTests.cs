@@ -8,6 +8,7 @@ using AguiGroupChat.Agents;
 using AguiGroupChat.Hub;
 using AguiGroupChat.Hub.Messaging;
 using AguiGroupChat.Hub.Models;
+using AguiGroupChat.Hub.Persistence;
 using AguiGroupChat.Web;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -37,6 +38,37 @@ public sealed class ImageWritePendingWebhookFixture : IAsyncLifetime
     public string ReceiverBase { get; private set; } = null!;
     public ConcurrentQueue<ReceiverHit> Hits { get; } = new();
     public string PendingRoot { get; } = Path.Combine(Path.GetTempPath(), "agui-iwp-" + Guid.NewGuid().ToString("N")[..8]);
+
+    /// <summary>图库落盘需要存储 + 向量提供者；测试宿主用内存存储，这里补一个最小假件。</summary>
+    private sealed class FakeMemoryStore : IMessageMemoryStore
+    {
+        public List<MessageMemoryRecord> Records { get; } = [];
+        public void EnsureSchema() { }
+        public void Upsert(MessageMemoryRecord record)
+        {
+            Records.RemoveAll(r => r.MessageId == record.MessageId);
+            Records.Add(record);
+        }
+        public void Remove(string groupId, string messageId) => Records.RemoveAll(r => r.GroupId == groupId && r.MessageId == messageId);
+        public void RemoveGroup(string groupId) => Records.RemoveAll(r => r.GroupId == groupId);
+        public void ClearAll() => Records.Clear();
+        public IReadOnlyList<MessageMemoryHit> Search(string groupId, string? agentId, float[] embedding, int topK, double minScore, string scope) => [];
+        public IReadOnlyList<MessageMemoryHit> SearchPerson(string personId, string currentGroupId, float[] embedding, int topK, double minScore) => [];
+        public IReadOnlyList<MessageMemoryItem> ListMessages(string? groupId, string? senderId, string? keyword, int limit, int offset) => [];
+        public long CountMessages(string? groupId, string? senderId, string? keyword) => 0;
+        public IReadOnlyList<MessageMemoryGroupStat> GroupStats(long nowMs) => [];
+        public bool DeleteByMessageId(string messageId) => false;
+        public bool UpdateImportance(string messageId, int importance) => false;
+        public int SetExpiry(string? groupId, long? expiresAt, long nowMs) => 0;
+        public int PruneExpired(long nowMs) => 0;
+    }
+
+    private sealed class FakeEmbedding : IEmbeddingProvider
+    {
+        public Task<float[]?> EmbedAsync(string text, CancellationToken ct = default)
+            => Task.FromResult<float[]?>(string.IsNullOrWhiteSpace(text) ? null : [0.1f, 0.2f, 0.3f]);
+        public void Dispose() { }
+    }
 
     private WebApplication _receiver = null!;
 
@@ -75,6 +107,9 @@ public sealed class ImageWritePendingWebhookFixture : IAsyncLifetime
         builder.Services.AddSingleton<WebhookDispatcher>();
         builder.Services.AddSingleton<IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>());
         builder.Services.AddSingleton(new ImageWriteApprovalQueue(PendingRoot));
+        // 图库落盘要求「语义记忆可用」（存储 + 向量）；测试宿主用内存存储，这里补假件
+        builder.Services.AddSingleton<IMessageMemoryStore>(new FakeMemoryStore());
+        builder.Services.AddSingleton<IEmbeddingProvider>(new FakeEmbedding());
         builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)));
 
         App = builder.Build();
@@ -191,6 +226,54 @@ public sealed class ImageWritePendingWebhookTests : IClassFixture<ImageWritePend
         Assert.Equal(libId, data.GetProperty("libId").GetString());
         Assert.Equal("pending.png", data.GetProperty("fileName").GetString());
         Assert.Equal(png.LongLength, data.GetProperty("bytes").GetInt64());
+    }
+
+    [Fact]
+    public async Task ApprovingPendingWrite_PushesResolvedWebhook()
+    {
+        var (token, userId) = await AdminAsync();
+
+        using var createLib = Authed(HttpMethod.Post, "/ag-ui/image-libs/", token,
+            JsonContent.Create(new { name = "iwp-resolved-lib", description = "e2e" }));
+        var libRes = await _client.SendAsync(createLib);
+        libRes.EnsureSuccessStatusCode();
+        var libId = (await libRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("libId").GetString()!;
+
+        var catalog = _fx.App.Services.GetRequiredService<ImageLibraryCatalog>();
+        var scopeId = catalog.RegisterWriteScope(userId, agentId: "agent_iwr", skillId: "skill_iwr",
+            seedLibraryIds: [libId], requiresApproval: true);
+
+        // 同时订阅回执事件
+        using var subReq = Authed(HttpMethod.Post, "/ag-ui/admin/webhooks", token,
+            JsonContent.Create(new { name = "iwr-hook", url = _fx.ReceiverBase + "/hook", eventTypes = new[] { EventTypes.ImageWriteResolved } }));
+        (await _client.SendAsync(subReq)).EnsureSuccessStatusCode();
+
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0B };
+        using var addReq = new HttpRequestMessage(HttpMethod.Post, $"/ag-ui/images/libraries/{libId}/assets")
+        {
+            Content = JsonContent.Create(new
+            {
+                writeScopeId = scopeId,
+                fileName = "resolved.png",
+                base64 = Convert.ToBase64String(png),
+            }),
+        };
+        addReq.Headers.Add(SelfApi.TokenEnvVar, SelfApi.Token);
+        var addRes = await _client.SendAsync(addReq);
+        Assert.Equal(System.Net.HttpStatusCode.Accepted, addRes.StatusCode);
+        var pendingId = (await addRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pendingId").GetString()!;
+
+        using var approve = Authed(HttpMethod.Post, $"/ag-ui/admin/image-write-pending/{pendingId}/approve", token);
+        (await _client.SendAsync(approve)).EnsureSuccessStatusCode();
+
+        await WaitForHitAsync(h => h.EventType == EventTypes.ImageWriteResolved && h.Body.Contains(pendingId));
+        var hit = _fx.Hits.FirstOrDefault(h => h.EventType == EventTypes.ImageWriteResolved && h.Body.Contains(pendingId));
+        Assert.NotNull(hit);
+        var data = JsonDocument.Parse(hit!.Body).RootElement.GetProperty("data");
+        Assert.Equal(pendingId, data.GetProperty("pendingId").GetString());
+        Assert.Equal("approved", data.GetProperty("status").GetString());
+        Assert.False(data.GetProperty("duplicated").GetBoolean());
+        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("assetId").GetString()));
     }
 
     [Fact]

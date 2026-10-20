@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.281**
+> 适用版本：**1.0.282**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2509,6 +2509,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 - `#sfImageWriteApproval`：开启后，技能写**已有/授权库**时不直接落盘，而是进入待审批队列（返回 **202** `{ pendingId, status: "pending" }`）；写**本轮新建**的库仍立即生效（隔离、风险低）。管理员在「图库管理」顶部的「⏳ 待审批的技能写入」中批准 / 拒绝；批准后才落盘并记审计。
 - 待审批队列为**24h TTL**：最多 50 项、每人 20 项、总字节 ≤ 64MB。**1.0.280 起跨重启保持**：元数据存持久化扩展区 `imageWritePending`，图片字节存 `data/pending-writes/{id}.bin`（与 web 数据卷同卷）；重启后自动恢复并可继续批准。仅当持久化关闭时退化为纯内存（启动时清理超 TTL 的孤儿文件）。
 - **主动感知与批量审批（1.0.281）**：入队后立即推一条 **`IMAGE_WRITE_PENDING`** 出站 Webhook（不绑定知聚，`groupId` 为空串——只有未限定知聚的订阅会收到；`data` 含 `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes`，详见 §8.19）。管理员端每 **60 秒**轮询一次待审批列表，**新出现的项自动进通知中心**（页面在后台时同时弹系统通知），因此不必一直停留在图库管理页。列表标题行提供「全部批准 / 全部拒绝」：服务端逐条调用单条端点，单条失败不阻断其余项，结束后提示「已处理 X / N 项」。
+- **审批回执与点击直达（1.0.282）**：批准 / 拒绝后推 **`IMAGE_WRITE_RESOLVED`**（`status` = `approved` / `rejected` / `failed`，见 §8.19）；批准时带 `assetId`，命中内容去重时 `duplicated=true`，目标图库已不存在等失败场景带 `reason`。待审批通知**可点击**，直接打开「图库管理」（待审批块在顶部）；弹窗打开期间每轮轮询会顺带刷新列表，批准 / 拒绝后不用重新打开。
 
 **注入**：技能调用前，`AgentCatalog.WithImageScope` 在入参 JSON 中注入 `imageWriteScopeId`（与文档技能的 `imageScopeId` 并列）。句柄 10 分钟有效，绑定触发者 / 岗位 / 技能，并带配额：**每轮最多 1 个图库 / 20 张图 / 单图 10 MB**（`ImageLibraryCatalog.ImageWriteScope`）。
 
@@ -4479,7 +4480,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | 列出订阅；**签名密钥脱敏**（只回 `hasSecret`，不回明文） |
-| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（22 类） |
+| `GET` | `/ag-ui/admin/webhooks/events` | 可选事件类型目录（23 类） |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | 最近 100 条投递记录（新→旧） |
 | `POST` | `/ag-ui/admin/webhooks` | 新建订阅；**返回一次性明文密钥** `whsec_…` |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | 更新订阅（字段为空 = 不变更；`rotateSecret=true` 轮换密钥并回新密钥） |
@@ -4488,7 +4489,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **订阅字段**：`name`（展示名）、`url`（**必须 http / https 绝对 URL**，否则 400）、`eventTypes`（不选＝除高频流式增量外的全部；目录外类型会被 400 拒绝）、`groupId`（可选，限定只推送该知聚）、`enabled`（启用 / 停用）。
 
-**可选事件类型（22 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`、**`QUOTA_THRESHOLD`（1.0.270）**、**`QUOTA_OVERRIDE_EXPIRING`（1.0.274）**、**`QUOTA_OVERRIDE_EXPIRED`（1.0.275）**、**`IMAGE_WRITE_PENDING`（1.0.281）**。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
+**可选事件类型（23 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`、**`QUOTA_THRESHOLD`（1.0.270）**、**`QUOTA_OVERRIDE_EXPIRING`（1.0.274）**、**`QUOTA_OVERRIDE_EXPIRED`（1.0.275）**、**`IMAGE_WRITE_PENDING`（1.0.281）**、**`IMAGE_WRITE_RESOLVED`（1.0.282）**。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
 
 **`QUOTA_THRESHOLD`（配额预警推送，1.0.270）**：不是群广播事件，**只经出站 Webhook 推送**。当某用户 / 某知聚的当日用量**首次**跨过配额的 80%（`warn`）或 100%（`over`）时推送一条；`data` 为：
 
@@ -4538,6 +4539,21 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 - **目的**：让告警平台 / 管理员**立即知道「有人等着批准」**；管理员端的 60 秒轮询进通知中心是另一条路径，两者互不依赖（Webhook 未订阅也不影响站内提醒）。
 - **只在入队时推送**：批准 / 拒绝不再发事件；结果以审计日志为准（批准记 `skill.imageLibrary.upload`，拒绝记 `skill.imageLibrary.rejected`，均带 detail「审批通过 / 拒绝 {pendingId}」）。
 - **写本轮新建的图库不触发**：那条路径不需审批、直接落盘。
+
+**`IMAGE_WRITE_RESOLVED`（待审批写入已处理，1.0.282）**：管理员批准 / 拒绝后推送一条，与 `IMAGE_WRITE_PENDING` 配对形成闭环（外部系统不必轮询审批列表）。同样**只经出站 Webhook**、不绑定知聚；`data` 为：
+
+```jsonc
+{ "type": "IMAGE_WRITE_RESOLVED", "pendingId": "iw_xxx", "ownerUserId": "u_x",
+  "skillId": "skill_x", "agentId": "agent_x", "libId": "img_x", "libName": "素材库",
+  "fileName": "a.png", "bytes": 12345,
+  "status": "approved", "duplicated": false, "assetId": "asset_x", "reason": null,
+  "timestamp": 1767225600000 }
+```
+
+- **`status`**：`approved`（已落盘）/ `rejected`（管理员拒绝）/ `failed`（已取出但无法落盘）。
+- **批准分支**：正常落盘时带 `assetId`；若内容已存在于目标图库则 `duplicated=true`（返回已存在的 `assetId`，不重复落盘）。
+- **失败分支**：`reason` 为 `library_missing`（目标图库已不存在）或 `write_failed`（落盘报错）；此时 HTTP 响应也是 4xx。
+- **只在处理动作发生时推送**：待审批项 TTL 过期（24h）不会发事件（与「入队/处理」两态对齐，避免把过期当作人工决策）。
 
 **覆写变更如何被外部感知**：知聚级**模型 / 配额覆写的变更本身没有单独事件**——它们随既有 `GROUP_UPDATED` 下发：`updateFields` 含 `model` / `quotaPerGroup` / `quotaPerGroupUntil`，`groupInfo` 带请求里的新值（`group-config` 事件对象见 §4.2）。出站钩子先于「无订阅者则提前返回」执行，所以**即使该知聚无人在线也会推送**。另有专门的 `QUOTA_OVERRIDE_EXPIRING` 事件用于**到期前提醒**（见上）。
 

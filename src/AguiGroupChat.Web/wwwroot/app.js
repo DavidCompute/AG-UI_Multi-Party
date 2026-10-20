@@ -3919,8 +3919,11 @@ function startImageWritePendingPolling() {
             file: it.fileName || "-",
             lib: it.libName || it.libId || "-",
             skill: it.skillId || "-",
-          }));
+          }), { action: "imageLibPending" });
       }
+      // 弹窗开着时顺带刷新列表：批准 / 拒绝后不用重新打开
+      const modal = $("imgLibModal");
+      if (modal && !modal.classList.contains("hidden")) loadImageWritePending();
     } catch { /* 下一轮重试 */ }
   };
   tick();
@@ -6631,6 +6634,7 @@ function addNotification(type, title, body, opts = {}) {
     title, body,
     groupId: opts.groupId || null,
     topicId: opts.topicId || null,
+    action: opts.action || null,
     ts: Date.now(),
     read: false,
     icon: opts.icon || notifIcon(type),
@@ -6734,6 +6738,11 @@ function renderNotifications() {
     const go = () => {
       const n = state.notifications.find((x) => String(x.id) === el.dataset.nid);
       if (n) { n.read = true; renderNotifications(); }
+      if (n?.action === "imageLibPending") {
+        hideNotifPanel();
+        openImgLibModal(); // 待审批写入没有 groupId：直接打开图库管理（待审批块在顶部）
+        return;
+      }
       if (n?.groupId) {
         hideNotifPanel();
         selectGroup(n.groupId); // 跳转到来源知聚（话题跟随知聚内记忆恢复，可靠且无竞态）

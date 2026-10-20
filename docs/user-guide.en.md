@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.281**
+> Applies to version: **1.0.282**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2513,6 +2513,7 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 - `#sfImageWriteApproval`: when on, writes to **existing/authorized libraries** are not applied directly — they enter the approval queue and the endpoint returns **202** `{ pendingId, status: "pending" }`; writes to the library **created in this run** still apply immediately (isolated, low risk). An admin approves / rejects them in the "⏳ Pending skill writes" block at the top of Image Library Management; only then is the image written and audited.
 - The queue has a **24h TTL**: at most 50 items, 20 per owner, and ≤ 64MB total. **Since 1.0.280 it survives restarts**: metadata lives in the persistence section `imageWritePending` and bytes in `data/pending-writes/{id}.bin` (same data volume); entries are restored and can still be approved after a restart. Only when persistence is disabled does it fall back to memory (orphan files older than the TTL are cleaned at startup).
 - **Active awareness and batch approval (1.0.281)**: on enqueue the server pushes an **`IMAGE_WRITE_PENDING`** outbound webhook (not bound to a circle — `groupId` is an empty string, so only subscriptions without a circle filter receive it; `data` carries `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes`, see 8.19). The admin UI also polls the pending list every **60 seconds** and puts **new items into the notification center** (plus a system notification when the page is in the background), so there is no need to keep the Image Library page open. The list header offers **Approve all / Reject all**: each item is processed through the single-item endpoint, one failure does not block the rest, and a final toast reports "processed X / N".
+- **Resolution receipts and click-through (1.0.282)**: approval / rejection pushes **`IMAGE_WRITE_RESOLVED`** (`status` = `approved` / `rejected` / `failed`, see 8.19); an approval carries `assetId`, a content-dedupe hit sets `duplicated=true`, and failures such as a missing target library carry a `reason`. Pending notifications are **clickable** and open Image Library Management directly (the pending block is at the top); while the dialog is open each poll also refreshes the list, so there is no need to reopen it after approving / rejecting.
 
 **Injection**: before invoking the skill, `AgentCatalog.WithImageScope` injects `imageWriteScopeId` into the JSON input (alongside a document skill's `imageScopeId`). The handle lives 10 minutes, is bound to the trigger user / agent / skill, and carries quotas: **at most 1 library / 20 images / 10 MB per image per run** (`ImageLibraryCatalog.ImageWriteScope`).
 
@@ -4487,7 +4488,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/ag-ui/admin/webhooks` | List subscriptions; the **signing secret is masked** (only `hasSecret`) |
-| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (22) |
+| `GET` | `/ag-ui/admin/webhooks/events` | Catalog of selectable event types (23) |
 | `GET` | `/ag-ui/admin/webhooks/deliveries` | Last 100 delivery records (newest first) |
 | `POST` | `/ag-ui/admin/webhooks` | Create; **returns the plaintext secret once** (`whsec_…`) |
 | `PUT` | `/ag-ui/admin/webhooks/{id}` | Update (null fields = unchanged; `rotateSecret=true` rotates and returns the new secret) |
@@ -4496,7 +4497,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 
 **Subscription fields**: `name`, `url` (**must be an absolute http / https URL**, else 400), `eventTypes` (none selected = all except high-frequency streaming deltas; types outside the catalog are rejected with 400), `groupId` (optional, scopes pushes to one circle), `enabled`.
 
-**Selectable event types (22)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, **`QUOTA_THRESHOLD` (1.0.270)**, **`QUOTA_OVERRIDE_EXPIRING` (1.0.274)**, **`QUOTA_OVERRIDE_EXPIRED` (1.0.275)**, and **`IMAGE_WRITE_PENDING` (1.0.281)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+**Selectable event types (23)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, **`QUOTA_THRESHOLD` (1.0.270)**, **`QUOTA_OVERRIDE_EXPIRING` (1.0.274)**, **`QUOTA_OVERRIDE_EXPIRED` (1.0.275)**, **`IMAGE_WRITE_PENDING` (1.0.281)**, and **`IMAGE_WRITE_RESOLVED` (1.0.282)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 
@@ -4546,6 +4547,21 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 - **Purpose**: let an alerting platform / admin know **immediately that someone is waiting for approval**; the admin UI's 60-second notification-center poll is an independent path (no webhook subscription required for in-app alerts).
 - **Only on enqueue**: approval / rejection emit no further event; read the audit log instead (approval records `skill.imageLibrary.upload`, rejection records `skill.imageLibrary.rejected`, both with a `detail` naming the pending id).
 - **Not fired for libraries created in the current run**: that path skips approval and writes directly.
+
+**`IMAGE_WRITE_RESOLVED` (pending write resolved, 1.0.282)**: pushed after an admin approves / rejects, pairing with `IMAGE_WRITE_PENDING` to close the loop (external systems need not poll the approval list). Also **webhook-only** and not bound to a circle; `data` is:
+
+```jsonc
+{ "type": "IMAGE_WRITE_RESOLVED", "pendingId": "iw_xxx", "ownerUserId": "u_x",
+  "skillId": "skill_x", "agentId": "agent_x", "libId": "img_x", "libName": "Assets",
+  "fileName": "a.png", "bytes": 12345,
+  "status": "approved", "duplicated": false, "assetId": "asset_x", "reason": null,
+  "timestamp": 1767225600000 }
+```
+
+- **`status`**: `approved` (written) / `rejected` (admin declined) / `failed` (taken from the queue but could not be written).
+- **Approval branch**: carries `assetId` on a normal write; if identical content already exists in the target library it sets `duplicated=true` and returns the existing `assetId` without writing again.
+- **Failure branch**: `reason` is `library_missing` (target library gone) or `write_failed`; the HTTP response is 4xx in these cases.
+- **Only on a real decision**: a pending item expiring after its 24h TTL emits nothing (aligned with the enqueue / decision two-state model, so expiry is never mistaken for a human decision).
 
 **How external systems see override changes**: the **change itself** of a circle-level **model / quota override has no dedicated event** — it rides on the existing `GROUP_UPDATED`: `updateFields` contains `model` / `quotaPerGroup` / `quotaPerGroupUntil`, and `groupInfo` carries the requested values (see the group-config event object in 4.2). The outbound hook runs before the "no subscribers, return early" check, so it is pushed **even when nobody in that circle is online**. A dedicated `QUOTA_OVERRIDE_EXPIRING` event exists for **pre-expiry reminders** (see above).
 

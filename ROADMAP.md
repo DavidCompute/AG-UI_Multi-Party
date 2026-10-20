@@ -224,6 +224,7 @@
   - **审批队列 + 来源标记 + 按技能配额（1.0.279）**：`imageWriteRequiresApproval` 开启后，写已有/授权库先入队（202 + pendingId），管理员在图库管理顶部批准/拒绝；新建库仍立即生效。技能写入的图片记录 `sourceSkillId` / `sourceAgentId`，图库支持来源筛选；每轮配额可按技能调（1..10 库 / 1..200 图）。
   - **审批队列跨重启（1.0.280）**：待审批元数据存扩展区 `imageWritePending`、图片字节存 `data/pending-writes/{id}.bin`（同一数据卷），重启后自动恢复并可继续批准；持久化关闭时退化为内存并清理超 TTL 孤儿文件。
   - **待审批写入主动感知（1.0.281）**：入队即推出站 Webhook `IMAGE_WRITE_PENDING`（事件目录 21 → 22，不绑定知聚）；管理员端每 60s 轮询把新项送进通知中心；图库管理新增「全部批准 / 全部拒绝」批量操作（逐条调用、单条失败不阻断）。
+  - **审批回执 + 点击直达（1.0.282）**：批准 / 拒绝后推 `IMAGE_WRITE_RESOLVED`（事件目录 22 → 23，`status` = approved / rejected / failed，带 `assetId` / `duplicated` / `reason`）；待审批通知可点击直接打开图库管理，弹窗打开期间轮询顺带刷新列表。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

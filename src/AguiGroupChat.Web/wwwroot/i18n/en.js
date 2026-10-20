@@ -46,7 +46,7 @@ window.I18N_DICTS.en = {
   /* --- 通知中心 --- */
   "notif.title": "Notifications",
   "notif.imageWritePendingTitle": "🖼️ Pending image-library write",
-  "notif.imageWritePendingBody": "Skill {skill} wants to write {file} to \"{lib}\" (approve or reject in Image Library Management)",
+  "notif.imageWritePendingBody": "Skill {skill} wants to write {file} to \"{lib}\" (click to open Image Library Management and approve / reject)",
   "notif.clear": "Clear",
   "notif.clearAll": "Clear all notifications",
   "notif.empty": "No notifications",

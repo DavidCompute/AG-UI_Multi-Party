@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.282 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.282 Release Notes (current Windows desktop release)
+
+**版本说明**：**审批闭环补齐**——管理员批准 / 拒绝后推出站事件 `IMAGE_WRITE_RESOLVED`（含批准、拒绝、失败三态与落盘结果），外部系统不必再轮询审批列表；同时待审批通知**可点击直达**「图库管理」，弹窗打开期间轮询会顺带刷新列表。
+**Version note**: **The approval loop is now closed** — after an admin approves / rejects, an `IMAGE_WRITE_RESOLVED` outbound event is emitted (approved / rejected / failed, with the write outcome), so external systems no longer need to poll the approval list; pending notifications are also **clickable** and open Image Library Management, whose list refreshes on each poll while the dialog is open.
+
+## 变更
+# Changes
+
+中文：
+- **新事件 `IMAGE_WRITE_RESOLVED`**（`EventTypes.ImageWriteResolved` / `ImageWriteResolvedEvent`）：与 `IMAGE_WRITE_PENDING` 配对，**只经出站 Webhook**、不绑定知聚（`groupId` 为空串）。事件目录 **22 → 23**。载荷含 `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes / status / duplicated / assetId / reason / timestamp`。
+- **三态语义**：`status=approved` 正常落盘并带 `assetId`；内容已在目标图库时 `duplicated=true`（返回已存在的 `assetId`，不重复落盘）；`status=rejected` 表示管理员拒绝；`status=failed` 带 `reason`（`library_missing` / `write_failed`，与 4xx 响应一致）。
+- **前端直达**：通知中心的待审批项带 `action`，点击直接打开图库管理（待审批块在顶部）；弹窗打开时每轮轮询顺手刷新待审批列表，批量 / 单条处理完不用重新打开。
+- **回归测试**：新增 2 例——`WebhookTests.DeliverEventAsync_ImageWriteResolvedEnvelope`（信封 / 签名 / `data` 字段）与 `ImageWritePendingWebhookTests.ApprovingPendingWrite_PushesResolvedWebhook`（真实 HTTP：入队 → 批准 → 本地接收端收到 `IMAGE_WRITE_RESOLVED`，`status=approved`、`assetId` 非空）。
+
+English:
+- **New event `IMAGE_WRITE_RESOLVED`** (`EventTypes.ImageWriteResolved` / `ImageWriteResolvedEvent`): pairs with `IMAGE_WRITE_PENDING`; **webhook-only** and not bound to a circle (empty `groupId`). Catalog **22 → 23**. Payload carries `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes / status / duplicated / assetId / reason / timestamp`.
+- **Three-state semantics**: `status=approved` written normally with `assetId`; identical content already present sets `duplicated=true` (returns the existing `assetId`, no rewrite); `status=rejected` means an admin declined; `status=failed` carries `reason` (`library_missing` / `write_failed`, matching the 4xx response).
+- **Frontend deep link**: pending notifications carry an `action`; clicking opens Image Library Management (pending block at the top). While the dialog is open each poll also refreshes the pending list, so batch / single decisions need no reopen.
+- **Regression tests**: 2 new cases — `WebhookTests.DeliverEventAsync_ImageWriteResolvedEnvelope` (envelope / signature / `data` fields) and `ImageWritePendingWebhookTests.ApprovingPendingWrite_PushesResolvedWebhook` (real HTTP: enqueue → approve → local receiver gets `IMAGE_WRITE_RESOLVED` with `status=approved` and a non-empty `assetId`).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（审批回执 + 点击直达）、§8.19（事件目录 **23 类** + `IMAGE_WRITE_RESOLVED` 信封与三态语义）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.282。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (resolution receipts + click-through) and §8.19 (catalog **23 types** + `IMAGE_WRITE_RESOLVED` envelope and three-state semantics); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.282.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1856 → **1858**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1995，missing 0**；四个守卫脚本全过；Docker 重建并部署（`/health` 200，事件目录实测 **23 类**）。
+English: full `dotnet test` passes (1856 → **1858**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1995, missing 0**; all four guard scripts pass; Docker was rebuilt and redeployed (`/health` 200, event catalog observed at **23 types**).
+
+---
+
 # AG-UI 群聊桌面版 1.0.281 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.281 Release Notes (current Windows desktop release)
 

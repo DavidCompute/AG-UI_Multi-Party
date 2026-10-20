@@ -46,7 +46,7 @@ window.I18N_DICTS.zh = {
   /* --- 通知中心 --- */
   "notif.title": "通知",
   "notif.imageWritePendingTitle": "🖼️ 待审批的图库写入",
-  "notif.imageWritePendingBody": "技能 {skill} 请求写入「{lib}」：{file}（在「图库管理」中批准 / 拒绝）",
+  "notif.imageWritePendingBody": "技能 {skill} 请求写入「{lib}」：{file}（点击打开图库管理批准 / 拒绝）",
   "notif.clear": "清空",
   "notif.clearAll": "清除全部通知",
   "notif.empty": "暂无通知",

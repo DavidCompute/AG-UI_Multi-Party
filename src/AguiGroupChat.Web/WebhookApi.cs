@@ -124,6 +124,7 @@ public static class WebhookApi
         EventTypes.QuotaOverrideExpiring, // 1.0.274：临时放额即将到期（提前 24 小时，可配）
         EventTypes.QuotaOverrideExpired, // 1.0.275：临时放额已到期并回退全局
         EventTypes.ImageWritePending, // 1.0.281：待审批的技能图库写入
+        EventTypes.ImageWriteResolved, // 1.0.282：待审批写入已处理（批准 / 拒绝 / 失败）
     ];
 
     public static void MapWebhookApi(this WebApplication app)
