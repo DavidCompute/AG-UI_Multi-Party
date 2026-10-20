@@ -635,6 +635,8 @@ window.I18N_DICTS.en = {
   "imgLib.histCleared": "Cleared {n} receipt(s)",
   "imgLib.histClearFail": "Failed to clear, please retry",
   "imgLib.histNoMatch": "No matching outcomes",
+  "imgLib.histRetry": "Retry",
+  "imgLib.histStillPending": "still pending",
   "imgLib.col.name": "Name / ID",
   "imgLib.col.images": "Images",
   "imgLib.col.desc": "Description",

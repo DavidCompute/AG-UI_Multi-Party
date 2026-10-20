@@ -153,7 +153,7 @@ public sealed class ImageWriteApprovalQueue
         }
     }
 
-    /// <summary>取出并移除（批准 / 拒绝都先取出）。</summary>
+    /// <summary>取出并移除（拒绝时用；批准失败时不要用它，否则会丢掉字节）。</summary>
     public bool TryTake(string id, out PendingImageWrite? item)
     {
         lock (_lock)
@@ -163,6 +163,28 @@ public sealed class ImageWriteApprovalQueue
             DeleteFileLocked(id);
             _changes?.Notify();
             item = found;
+            return true;
+        }
+    }
+
+    /// <summary>查看而不移除（1.0.289）：批准需要「先试写、成功才移除」，失败时保留字节以便重试。</summary>
+    public PendingImageWrite? Peek(string id)
+    {
+        lock (_lock)
+        {
+            PruneLocked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            return _items.GetValueOrDefault(id);
+        }
+    }
+
+    /// <summary>写成功后移除（1.0.289）：删字节并通知持久化。</summary>
+    public bool Remove(string id)
+    {
+        lock (_lock)
+        {
+            if (!_items.Remove(id)) return false;
+            DeleteFileLocked(id);
+            _changes?.Notify();
             return true;
         }
     }

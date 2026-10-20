@@ -300,6 +300,54 @@ public sealed class ImageWritePendingWebhookTests : IClassFixture<ImageWritePend
     }
 
     [Fact]
+    public async Task FailedApprove_KeepsItemPendingForRetry()
+    {
+        var (token, userId) = await AdminAsync();
+
+        // 建库 + 入队一条待审批
+        using var createLib = Authed(HttpMethod.Post, "/ag-ui/image-libs/", token,
+            JsonContent.Create(new { name = "iwp-fail-lib", description = "e2e" }));
+        var libRes = await _client.SendAsync(createLib);
+        libRes.EnsureSuccessStatusCode();
+        var libId = (await libRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("libId").GetString()!;
+
+        var catalog = _fx.App.Services.GetRequiredService<ImageLibraryCatalog>();
+        var scopeId = catalog.RegisterWriteScope(userId, agentId: "agent_fail", skillId: "skill_fail",
+            seedLibraryIds: [libId], requiresApproval: true);
+
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0C };
+        using var addReq = new HttpRequestMessage(HttpMethod.Post, $"/ag-ui/images/libraries/{libId}/assets")
+        {
+            Content = JsonContent.Create(new { writeScopeId = scopeId, fileName = "retry.png", base64 = Convert.ToBase64String(png) }),
+        };
+        addReq.Headers.Add(SelfApi.TokenEnvVar, SelfApi.Token);
+        var addRes = await _client.SendAsync(addReq);
+        Assert.Equal(System.Net.HttpStatusCode.Accepted, addRes.StatusCode);
+        var pendingId = (await addRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("pendingId").GetString()!;
+
+        // 删掉目标图库 → 批准必然失败（1.0.289：失败不再把待审批项吃掉）
+        using var delLib = Authed(HttpMethod.Delete, $"/ag-ui/image-libs/{libId}", token);
+        (await _client.SendAsync(delLib)).EnsureSuccessStatusCode();
+
+        using var approve = Authed(HttpMethod.Post, $"/ag-ui/admin/image-write-pending/{pendingId}/approve", token);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, (await _client.SendAsync(approve)).StatusCode);
+
+        using var pendingReq = Authed(HttpMethod.Get, "/ag-ui/admin/image-write-pending", token);
+        var pendingItems = (await (await _client.SendAsync(pendingReq)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items");
+        Assert.Contains(pendingItems.EnumerateArray(), x => x.GetProperty("id").GetString() == pendingId);
+
+        using var histReq = Authed(HttpMethod.Get, "/ag-ui/admin/image-write-pending/history", token);
+        var hist = (await (await _client.SendAsync(histReq)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items");
+        var failed = hist.EnumerateArray().FirstOrDefault(x => x.GetProperty("pendingId").GetString() == pendingId);
+        Assert.Equal("failed", failed.GetProperty("status").GetString());
+        Assert.Equal("library_missing", failed.GetProperty("reason").GetString());
+
+        // 收尾：拒掉这一项（仍能正常处理）
+        using var reject = Authed(HttpMethod.Post, $"/ag-ui/admin/image-write-pending/{pendingId}/reject", token);
+        (await _client.SendAsync(reject)).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
     public async Task EventCatalog_ContainsImageWritePending()
     {
         var (token, _) = await AdminAsync();

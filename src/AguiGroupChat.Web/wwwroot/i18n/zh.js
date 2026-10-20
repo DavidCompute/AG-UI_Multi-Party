@@ -635,6 +635,8 @@ window.I18N_DICTS.zh = {
   "imgLib.histCleared": "已清空 {n} 条回执",
   "imgLib.histClearFail": "清空失败，请稍后重试",
   "imgLib.histNoMatch": "没有匹配的处理记录",
+  "imgLib.histRetry": "重试",
+  "imgLib.histStillPending": "仍在待审批",
   "imgLib.col.name": "名称 / ID",
   "imgLib.col.images": "图片",
   "imgLib.col.desc": "描述",

@@ -440,18 +440,22 @@ public static class ImageLibraryApi
         {
             var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
             if (queue is null) return Results.Problem("审批队列不可用", statusCode: 503);
-            if (!queue.TryTake(id, out var item) || item is null)
+            // 1.0.289：先查看、成功才移除——失败（库不在 / 落盘报错）时保留待审批项与字节，便于处理后重试
+            var item = queue.Peek(id);
+            if (item is null)
                 return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"待审批项不存在或已处理：{id}"));
             var lib = catalog.GetLibrary(item.LibId);
             if (lib is null)
             {
                 EmitWriteResolved(ctx, item, catalog, auth, "failed", reason: "library_missing");
-                return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"目标图库已不存在：{item.LibId}"));
+                return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound,
+                    $"目标图库已不存在：{item.LibId}（该项仍待审批，可重建后重试或直接拒绝）"));
             }
 
             var dup = catalog.FindDuplicate(lib.LibId, item.Bytes);
             if (dup is not null)
             {
+                queue.Remove(id);
                 EmitWriteResolved(ctx, item, catalog, auth, "approved", duplicated: true, assetId: dup.AssetId);
                 return Results.Ok(new { applied = true, duplicated = true, asset = ToAssetDto(lib, dup) });
             }
@@ -460,12 +464,14 @@ public static class ImageLibraryApi
             if (asset is null)
             {
                 EmitWriteResolved(ctx, item, catalog, auth, "failed", reason: "write_failed");
-                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "落盘失败"));
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest,
+                    (error ?? "落盘失败") + "（该项仍待审批，可稍后重试）"));
             }
             asset.SourceSkillId = item.SkillId;
             asset.SourceAgentId = item.AgentId;
             if (!string.IsNullOrWhiteSpace(item.Caption)) asset.Caption = item.Caption!.Trim();
             if (item.Tags is { Count: > 0 }) asset.Tags = item.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Take(20).ToList();
+            queue.Remove(id);
             audit.Record("skill.imageLibrary.upload", item.OwnerUserId, auth.GetUser(item.OwnerUserId)?.Username,
                 targetType: "imageLibrary", targetId: lib.LibId,
                 detail: $"审批通过 {item.Id}：技能 {item.SkillId ?? "-"}（岗位 {item.AgentId ?? "-"}）写入 {item.FileName}");

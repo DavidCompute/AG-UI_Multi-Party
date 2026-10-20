@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.289 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.289 Release Notes (current Windows desktop release)
+
+**版本说明**：**失败可重试**——批准失败（目标图库已删 / 落盘报错）不再把待审批项吃掉：项与字节留在队列里，接口返回 404/400 并提示「仍待审批」；「最近处理」的失败行会标注「仍在待审批」并给出行内「重试」。只有写成功（含重复命中）或管理员拒绝才会移除项。
+**Version note**: **Failures are retryable** — a failed approval (target library deleted / write error) no longer consumes the pending item: the item and its bytes stay queued, the endpoint returns 404/400 with a "still pending" hint, and the failed receipt is labelled "still pending" with an inline **Retry**. Only a successful write (including a duplicate hit) or an explicit rejection removes the item.
+
+## 变更
+# Changes
+
+中文：
+- **队列语义（`ImageWriteApprovalQueue`）**：新增 `Peek(id)`（查看不移除）与 `Remove(id)`（成功 / 重复命中后移除并删除字节）；拒绝仍用 `TryTake`。
+- **批准端点**：改为「先试写、成功才移除」；失败分支保留项，并在错误消息后追加「（该项仍待审批，可稍后重试）」。
+- **前端**：跟踪当前待审批 ID 集合；失败回执若仍在待审批，标「仍在待审批」并显示「重试」（直接调批准端点）；待审批集合一变就重渲染历史（不重复拉取）。
+- **仍然是内存 / 磁盘双清**：成功与拒绝都会删除 `{id}.bin`；失败保留以便重试，24h TTL 到期仍会自动清理。
+- **回归测试**：新增 2 例——队列 `Peek/Remove` 语义（含字节保留与删除）；集成用例「删库 → 批准 404 → 项仍在待审批 → 历史 `failed/library_missing` → 拒绝收尾」；Playwright 扩到 **21 项**（重试按钮可见、标注、点击调批准端点）。
+
+English:
+- **Queue semantics (`ImageWriteApprovalQueue`)**: adds `Peek(id)` (inspect without removing) and `Remove(id)` (drop item and bytes after success / duplicate hit); rejection still uses `TryTake`.
+- **Approve endpoint**: now "try to write, remove only on success"; failure branches keep the item and append "(still pending, retry later)" to the error message.
+- **Frontend**: tracks the current pending IDs; a failed receipt that is still pending is labelled "still pending" and shows **Retry** (calls approve again); the history re-renders whenever the pending set changes, without an extra fetch.
+- **Still cleans up both stores**: success and rejection delete `{id}.bin`; failures keep it for retry, and the 24h TTL still expires it automatically.
+- **Regression tests**: 2 new cases — queue `Peek/Remove` semantics (bytes kept then deleted) and an integration case (delete library → approve 404 → item still pending → history `failed/library_missing` → reject to clean up); Playwright grows to **21 checks** (retry button visible, label, click hits the approve endpoint).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（失败保留与重试语义）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.289。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (failure retention and retry semantics); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.289.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1862 → **1864**）；`dotnet build` **0 错误**；i18n 审计 **zh=en=2035，missing 0**；四个守卫脚本全过；Playwright **21/21**（待审批直达 + 历史 + 重试）与 **32/32**（Webhook 分组 / 筛选 / 最近投递）；Docker 重建并部署（`/health` 200）。
+English: full `dotnet test` passes (1862 → **1864**); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=2035, missing 0**; all four guard scripts pass; Playwright **21/21** (pending click-through + history + retry) and **32/32** (webhook grouping / filters / last delivery); Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.288 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.288 Release Notes (current Windows desktop release)
 

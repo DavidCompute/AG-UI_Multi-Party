@@ -3,8 +3,9 @@
 //   2. 通知文案提示「点击打开图库管理」；
 //   3. 点击通知 → 图库管理弹窗打开、待审批块可见、批量按钮可用、通知面板收起；
 //   4. 「最近处理」块渲染 3 条回执（批准 / 拒绝 / 失败），状态筛选与关键词筛选生效；
-//   5. 「清空历史」弹确认框 → 确认后列表块隐藏（DELETE 由路由桩承兑）；
-//   6. 无页面 JS 异常。
+//   5. 失败回执仍在待审批 → 标「仍在待审批」并可一键「重试」（重试调批准端点）；
+//   6. 「清空历史」弹确认框 → 确认后列表块隐藏（DELETE 由路由桩承兑）；
+//   7. 无页面 JS 异常。
 // 待审批列表、最近处理与清空都用路由桩（不落任何真实数据）：只为验证「感知 → 点击 → 直达 → 筛选/清空」这一段链路。
 // 用法：cd tools && HEADLESS=1 node ui-imglib-pending-click.mjs
 import { chromium } from "playwright";
@@ -20,9 +21,11 @@ const check = (label, cond, extra = "") => {
   else { fail++; console.log("  FAIL  " + label + (extra ? "  — " + extra : "")); }
 };
 
+const PENDING_ID = "iwp_ui_" + Date.now().toString(36);
+
 const PENDING = {
   items: [{
-    id: "iwp_ui_" + Date.now().toString(36),
+    id: PENDING_ID,
     ownerUserId: "u_ui",
     skillId: "skill_ui",
     agentId: "agent_ui",
@@ -49,7 +52,7 @@ const HISTORY = {
       duplicated: false, decidedBy: "david", atMs: Date.now() - 120_000,
     },
     {
-      pendingId: "iwp_ui_f", status: "failed", reason: "library_missing", libId: "img_ui", libName: "UI 素材库",
+      pendingId: PENDING_ID, status: "failed", reason: "library_missing", libId: "img_ui", libName: "UI 素材库",
       fileName: "ui-failed.png", skillId: "skill_ui", agentId: "agent_ui",
       duplicated: false, decidedBy: "david", atMs: Date.now() - 180_000,
     },
@@ -69,6 +72,12 @@ try {
       ? route.fulfill({ json: { cleared: HISTORY.items.length } })
       : route.fulfill({ json: HISTORY }));
   await page.route("**/ag-ui/admin/image-write-pending", (route) => route.fulfill({ json: PENDING }));
+  // 1.0.289：失败回执的「重试」→ 批准端点（只捕捉请求，不产生真实审批）
+  let retriedUrl = null;
+  await page.route("**/ag-ui/admin/image-write-pending/*/approve", (route) => {
+    retriedUrl = route.request().url();
+    return route.fulfill({ json: { applied: true } });
+  });
 
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#authOverlay", { timeout: 15000 });
@@ -114,6 +123,14 @@ try {
   const histText = (await page.locator("#imgLibHistory").innerText()).replace(/\s+/g, " ");
   check("含已批准 / 已拒绝 / 失败三态", ["已批准", "已拒绝", "失败"].every((s) => histText.includes(s)), histText.slice(0, 120));
   check("含文件与处理人", histText.includes("ui-approved.png") && histText.includes("david"));
+
+  // 1.0.289：失败的项仍在待审批 → 行内给「重试」
+  const retryBtn = page.locator('#imgLibHistoryList [data-retry]');
+  check("失败回执带「重试」按钮", (await retryBtn.count()) === 1, "count=" + (await retryBtn.count()));
+  check("失败回执标注「仍在待审批」", histText.includes("仍在待审批"));
+  await retryBtn.click();
+  await page.waitForFunction(() => document.querySelector('#imgLibHistoryList [data-retry]') !== null);
+  check("点重试 → 调用批准端点", !!retriedUrl && retriedUrl.includes(PENDING_ID), retriedUrl || "none");
 
   // 状态筛选：只看被拒绝
   await page.selectOption("#imgLibHistoryStatus", "rejected");

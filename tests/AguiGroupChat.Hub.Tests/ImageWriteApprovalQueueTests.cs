@@ -168,6 +168,38 @@ public sealed class ImageWriteApprovalQueueTests
     }
 
     [Fact]
+    public void PeekAndRemove_KeepThenDropBytes()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "agui-iwq-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var q = new ImageWriteApprovalQueue(root);
+            var item = Add(q, "user_1", out var error);
+            Assert.Null(error);
+            var file = Path.Combine(root, item!.Id + ".bin");
+
+            // 1.0.289：批准失败时先 Peek（不移除），字节仍可重试
+            var peeked = q.Peek(item.Id);
+            Assert.NotNull(peeked);
+            Assert.Equal(item.Id, peeked!.Id);
+            Assert.Equal(1, q.Count);
+            Assert.True(File.Exists(file));
+            Assert.Single(q.List());
+
+            // 写成功才 Remove：项与字节都清除
+            Assert.True(q.Remove(item.Id));
+            Assert.Equal(0, q.Count);
+            Assert.False(File.Exists(file));
+            Assert.Null(q.Peek(item.Id));
+            Assert.False(q.Remove(item.Id));
+        }
+        finally
+        {
+            try { Directory.Delete(root, true); } catch { /* 忽略 */ }
+        }
+    }
+
+    [Fact]
     public void PersistedQueue_RestoresAcrossRestart_AndDeletesBytesOnTake()
     {
         var root = Path.Combine(Path.GetTempPath(), "agui-iwq-" + Guid.NewGuid().ToString("N")[..8]);

@@ -3835,6 +3835,8 @@ async function openImgLibModal() {
 }
 
 /** 待审批的技能写入（1.0.279，仅管理员）：列表 + 批准 / 拒绝。 */
+let imgPendingIds = new Set(); // 当前仍待审批的 ID（1.0.289：失败回执可提示「仍在待审批」并提供重试）
+
 async function loadImageWritePending() {
   const box = $("imgLibPending");
   if (!box) return;
@@ -3843,6 +3845,9 @@ async function loadImageWritePending() {
     const res = await fetch("/ag-ui/admin/image-write-pending", { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     const items = (res.ok && d && Array.isArray(d.items)) ? d.items : [];
+    imgPendingIds = new Set(items.map((it) => it.id));
+    // 待审批集合变了 → 重渲染历史（决定「重试」按钮是否出现），不重复拉取
+    if (imgWriteHistory.length) renderImageWriteHistory();
     if (!items.length) { box.classList.add("hidden"); return; }
     box.classList.remove("hidden");
     $("imgLibPendingMeta").textContent = t("imgLib.pendingMeta", { n: items.length });
@@ -3905,11 +3910,15 @@ function renderImageWriteHistory() {
       : it.status === "rejected" ? t("imgLib.histRejected") : t("imgLib.histFailed");
     const dup = it.duplicated ? " " + t("imgLib.histDuplicated") : "";
     const reason = it.reason ? " · " + escapeHtml(it.reason) : "";
+    // 1.0.289：失败但仍在待审批（库已恢复 / 瞬时错误已过）→ 一步重试
+    const retry = (it.status === "failed" && imgPendingIds.has(it.pendingId))
+      ? ` · <button class="chip-btn" data-retry="${escapeHtml(it.pendingId)}" type="button">${t("imgLib.histRetry")}</button> <span class="muted">${escapeHtml(t("imgLib.histStillPending"))}</span>`
+      : "";
     return `
     <div class="kb-list-item" style="padding:6px 8px">
       <div class="kb-row" style="grid-template-columns:1fr auto">
         <div><b>${icon} ${label}</b>${dup} · ${escapeHtml(it.fileName)} → ${escapeHtml(it.libName || it.libId || "-")}
-          <span class="muted" style="font-size:12px"> · ${escapeHtml(it.skillId || "-")}${it.agentId ? " / " + escapeHtml(it.agentId) : ""}${reason}</span>
+          <span class="muted" style="font-size:12px"> · ${escapeHtml(it.skillId || "-")}${it.agentId ? " / " + escapeHtml(it.agentId) : ""}${reason}</span>${retry}
         </div>
         <div class="muted" style="font-size:12px;white-space:nowrap">
           ${it.decidedBy ? escapeHtml(t("imgLib.histBy", { user: it.decidedBy })) + " · " : ""}${fmtDateTime(Number(it.atMs) || 0)}
@@ -3917,6 +3926,9 @@ function renderImageWriteHistory() {
       </div>
     </div>`;
   }).join("");
+  listEl.querySelectorAll("[data-retry]").forEach((b) => {
+    b.onclick = () => decideImageWrite(b.dataset.retry, true);
+  });
 }
 
 /** 清空最近处理（1.0.286）：只清回执，不影响待审批 / 已落盘图片。 */
