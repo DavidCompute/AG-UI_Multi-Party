@@ -91,20 +91,22 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
         var libs = _fixture.App.Services.GetRequiredService<ImageLibraryCatalog>();
         var granted = libs.CreateLibrary("技能写入授权库", "", "admin_chief");
 
-        async Task CreateAsync(string id, string kind, string location, bool imageWrite, string body, string[]? writeLibs = null)
+        async Task CreateAsync(string id, string kind, string location, bool imageWrite, string body, string[]? writeLibs = null,
+            bool approval = false, int? maxLibs = null, int? maxImgs = null)
         {
             using var req = Authed(HttpMethod.Post, "/ag-ui/skills", adminTok);
             req.Content = JsonContent.Create(new
             {
                 skillId = id, name = id, description = "图库写入测试", kind, body,
                 executionLocation = location, requiresApproval = true, imageWrite, imageWriteLibraryIds = writeLibs,
+                imageWriteRequiresApproval = approval, imageWriteMaxLibraries = maxLibs, imageWriteMaxImages = maxImgs,
             });
             var res = await _client.SendAsync(req);
             Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         }
 
         const string dotnetBody = "public class Skill { public static string Run(string input) => \"ok\"; }";
-        await CreateAsync("iw_server", "dotnet", "server", true, dotnetBody, [granted.LibId]);
+        await CreateAsync("iw_server", "dotnet", "server", true, dotnetBody, [granted.LibId], approval: true, maxLibs: 3, maxImgs: 50);
         await CreateAsync("iw_prompt", "prompt", "server", true, "");
         await CreateAsync("iw_client", "dotnet", "client", true, dotnetBody);
 
@@ -119,6 +121,17 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
             Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(bad)).StatusCode);
         }
 
+        // 超出配额边界 → 400
+        using (var badQuota = Authed(HttpMethod.Post, "/ag-ui/skills", adminTok))
+        {
+            badQuota.Content = JsonContent.Create(new
+            {
+                skillId = "iw_bad_quota", name = "iw_bad_quota", description = "x", kind = "dotnet", body = dotnetBody,
+                executionLocation = "server", imageWrite = true, imageWriteMaxLibraries = 11,
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuota)).StatusCode);
+        }
+
         using var listReq = Authed(HttpMethod.Get, "/ag-ui/skills", adminTok);
         var list = await (await _client.SendAsync(listReq)).Content.ReadFromJsonAsync<JsonElement>();
         var rows = list.EnumerateArray().ToDictionary(x => x.GetProperty("skillId").GetString()!, x => x);
@@ -126,6 +139,9 @@ public sealed class ClientToolBridgeApiTests : IClassFixture<ClientToolBridgeFix
         Assert.True(rows["iw_server"].GetProperty("imageWrite").GetBoolean());  // 服务端非 prompt → 保留
         Assert.Equal([granted.LibId], rows["iw_server"].GetProperty("imageWriteLibraryIds")
             .EnumerateArray().Select(x => x.GetString()).ToArray());
+        Assert.True(rows["iw_server"].GetProperty("imageWriteRequiresApproval").GetBoolean());
+        Assert.Equal(3, rows["iw_server"].GetProperty("imageWriteMaxLibraries").GetInt32());
+        Assert.Equal(50, rows["iw_server"].GetProperty("imageWriteMaxImages").GetInt32());
         Assert.False(rows["iw_prompt"].GetProperty("imageWrite").GetBoolean()); // prompt → 强制关闭
         Assert.False(rows["iw_client"].GetProperty("imageWrite").GetBoolean()); // 客户端执行 → 强制关闭
     }

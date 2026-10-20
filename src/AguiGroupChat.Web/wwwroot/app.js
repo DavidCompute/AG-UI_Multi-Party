@@ -2475,6 +2475,9 @@ function openSkillForm(skillId) {
   sf("sfRequiresApproval").checked = true;
   sf("sfRequiresApproval").disabled = false;
   sf("sfImageWrite").checked = false;
+  sf("sfImageWriteApproval").checked = false;
+  sf("sfImageWriteMaxLibs").value = "";
+  sf("sfImageWriteMaxImages").value = "";
   skillWriteLibSelection = [];
   renderSkillImageLibs();
   sf("sfExecutionLocation").value = "server";
@@ -2494,6 +2497,9 @@ function openSkillForm(skillId) {
     sf("sfBody").value = s.body || "";
     sf("sfRequiresApproval").checked = s.requiresApproval !== false;
     sf("sfImageWrite").checked = !!s.imageWrite;
+    sf("sfImageWriteApproval").checked = !!s.imageWriteRequiresApproval;
+    sf("sfImageWriteMaxLibs").value = s.imageWriteMaxLibraries ?? "";
+    sf("sfImageWriteMaxImages").value = s.imageWriteMaxImages ?? "";
     skillWriteLibSelection = Array.isArray(s.imageWriteLibraryIds) ? s.imageWriteLibraryIds.slice() : [];
     renderSkillImageLibs();
     loadSkillImageLibs().then(renderSkillImageLibs); // 异步补齐名称（缓存命中时立即返回）
@@ -2529,6 +2535,11 @@ function syncSkillKind() {
   if (imgHint) imgHint.style.display = canWriteImages ? "" : "none";
   if (imgCb) { imgCb.disabled = !canWriteImages; if (!canWriteImages) imgCb.checked = false; }
   syncImageWriteLibsVisibility(canWriteImages);
+  const quotaGroup = $("sfImageWriteQuotaGroup"), approvalGroup = $("sfImageWriteApprovalGroup");
+  const writeOn = canWriteImages && $("sfImageWrite").checked;
+  if (quotaGroup) quotaGroup.style.display = writeOn ? "" : "none";
+  if (approvalGroup) approvalGroup.style.display = writeOn ? "" : "none";
+  if (!writeOn) $("sfImageWriteApproval").checked = false;
 }
 
 /** 图库写入：加载当前用户可读的图库清单（缓存）。 */
@@ -2591,6 +2602,9 @@ async function saveSkill() {
     clientRunner: $("sfClientRunner").value.trim() || null,
     imageWrite: $("sfImageWrite").checked,
     imageWriteLibraryIds: [...document.querySelectorAll("#sfImageWriteLibs input[type=checkbox]:checked")].map((x) => x.value),
+    imageWriteRequiresApproval: $("sfImageWriteApproval").checked,
+    imageWriteMaxLibraries: $("sfImageWriteMaxLibs").value.trim() === "" ? null : Number($("sfImageWriteMaxLibs").value),
+    imageWriteMaxImages: $("sfImageWriteMaxImages").value.trim() === "" ? null : Number($("sfImageWriteMaxImages").value),
   };
   const url = editingSkillId ? `/ag-ui/skills/${encodeURIComponent(editingSkillId)}` : "/ag-ui/skills";
   const method = editingSkillId ? "PUT" : "POST";
@@ -2662,6 +2676,9 @@ async function generateSkill() {
     $("sfClientRunner").value = data.clientRunner || "";
     $("sfRequiresApproval").checked = !!data.requiresApproval;
     $("sfImageWrite").checked = false; // 生成结果默认不开启图库写入（管理员保存后按需开启）
+    $("sfImageWriteApproval").checked = false;
+    $("sfImageWriteMaxLibs").value = "";
+    $("sfImageWriteMaxImages").value = "";
     skillWriteLibSelection = [];
     renderSkillImageLibs();
     syncSkillKind(); // 刷新正文标签 / 解释器 / ClientRunner 显隐
@@ -3481,6 +3498,7 @@ async function addKbDocument(kbId, file) {
 
 /* ============ 图库管理弹窗（仿知识库：创建 / 上传 / 缩略图网格 / 改描述 / 轮询状态） ============ */
 let imgLibSearchQuery = "";
+let imgLibSourceFilter = "";
 let imgLibExpanded = new Set();   // 已展开图片区的图库 libId
 
 /** 图库管理弹窗：每库一行（名称 / 图片数 / 描述 / 操作），展开后是缩略图网格。
@@ -3513,7 +3531,9 @@ function renderImgLibModal() {
   };
   visible.forEach((lib) => {
     const mine = lib.ownerId === state.memberId;
-    const assets = lib.assets || [];
+    const allAssets = lib.assets || [];
+    const assets = allAssets.filter((a) => !imgLibSourceFilter
+      || (imgLibSourceFilter === "skill" ? !!a.sourceSkillId : !a.sourceSkillId));
     const exp = imgLibExpanded.has(lib.libId);
     const hasProc = assets.some((a) => a.status === "processing");
     // 收起时也能一眼看出“还有几张没就绪”（否则要把每张展开逐个看）
@@ -3533,6 +3553,7 @@ function renderImgLibModal() {
             <div class="imglib-meta">
               <span class="imglib-file" title="${escapeHtml(a.fileName)}">${escapeHtml(a.fileName)}</span>
               ${a.width && a.height ? `<span class="imglib-dim">${a.width}×${a.height}</span>` : ""}
+              ${a.sourceSkillId ? `<span class="kb-status" title="${escapeHtml(t("imgLib.sourceTip", { skill: a.sourceSkillId, agent: a.sourceAgentId || "-" }))}">🤖 ${escapeHtml(a.sourceSkillId)}</span>` : ""}
               ${assetBadge(a)}
             </div>
             <input class="modal-input imglib-cap" data-lib="${escapeHtml(lib.libId)}" data-asset="${escapeHtml(a.assetId)}"
@@ -3802,10 +3823,52 @@ async function saveLibSettings() {
 
 async function openImgLibModal() {
   const s = $("imgLibSearch"); if (s) { s.value = ""; imgLibSearchQuery = ""; }
+  const f = $("imgLibSource"); if (f) { f.value = ""; imgLibSourceFilter = ""; }
   closeLibCreateDialog();
   $("imgLibModal").classList.remove("hidden");
   await loadImageLibs();
   startImgLibPolling();
+  loadImageWritePending();
+}
+
+/** 待审批的技能写入（1.0.279，仅管理员）：列表 + 批准 / 拒绝。 */
+async function loadImageWritePending() {
+  const box = $("imgLibPending");
+  if (!box) return;
+  if (!isAdminPlus()) { box.classList.add("hidden"); return; }
+  try {
+    const res = await fetch("/ag-ui/admin/image-write-pending", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const items = (res.ok && d && Array.isArray(d.items)) ? d.items : [];
+    if (!items.length) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    $("imgLibPendingMeta").textContent = t("imgLib.pendingMeta", { n: items.length });
+    $("imgLibPendingList").innerHTML = items.map((it) => `
+      <div class="kb-list-item" style="padding:6px 8px">
+        <div class="kb-row" style="grid-template-columns:1fr auto">
+          <div><b>${escapeHtml(it.fileName)}</b> → ${escapeHtml(it.libName || it.libId)}
+            <span class="muted" style="font-size:12px"> · ${escapeHtml(it.skillId || "-")}${it.agentId ? " / " + escapeHtml(it.agentId) : ""} · ${fmtDateTime(Number(it.atMs) || 0)}</span>
+          </div>
+          <div class="kb-op-col">
+            <button class="chip-btn" data-approve="${escapeHtml(it.id)}" type="button">${t("imgLib.approve")}</button>
+            <button class="chip-btn danger" data-reject="${escapeHtml(it.id)}" type="button">${t("imgLib.reject")}</button>
+          </div>
+        </div>
+      </div>`).join("");
+    box.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => decideImageWrite(b.dataset.approve, true)));
+    box.querySelectorAll("[data-reject]").forEach((b) => (b.onclick = () => decideImageWrite(b.dataset.reject, false)));
+  } catch { box.classList.add("hidden"); }
+}
+
+async function decideImageWrite(id, approve) {
+  const res = await fetch(`/ag-ui/admin/image-write-pending/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, {
+    method: "POST", headers: { Authorization: "Bearer " + state.token },
+  });
+  const d = await res.json().catch(() => null);
+  if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
+  toast(t(approve ? "imgLib.approved" : "imgLib.rejectedToast"));
+  await loadImageWritePending();
+  await loadImageLibs();
 }
 
 /* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */
@@ -14886,6 +14949,7 @@ function init() {
     if (($("libSetProbeQuery").value || "").trim()) runLibSetProbe();
   });
   $("imgLibSearch").addEventListener("input", () => { imgLibSearchQuery = $("imgLibSearch").value; renderImgLibModal(); });
+  if ($("imgLibSource")) $("imgLibSource").addEventListener("change", () => { imgLibSourceFilter = $("imgLibSource").value; renderImgLibModal(); });
   $("imgLibCloseBtn").onclick = () => { $("imgLibModal").classList.add("hidden"); stopImgLibPolling(); renderImgLibPicks(); };
   // 「新建知识库 / 新建图库」弹窗：确认 / 取消 / 点遮罩关闭 / Esc 关闭 / 回车提交
   $("libCreateOk").onclick = submitLibCreate;

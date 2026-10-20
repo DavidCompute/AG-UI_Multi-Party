@@ -336,12 +336,38 @@ public static class ImageLibraryApi
             // 内容去重（1.0.278）：同图直接返回已有记录（不消耗配额）
             if (catalog.FindDuplicate(lib.LibId, bytes) is { } dup)
                 return Results.Ok(new { duplicated = true, asset = ToAssetDto(lib, dup) });
+
+            // 写「已有/授权库」且技能要求审批 → 入队，管理员批准后才落盘（1.0.279）；
+            // 写本轮新建的库不受限制（隔离、风险低）。
+            if (scope.RequiresApproval && !catalog.WasCreatedInRun(scope, lib.LibId))
+            {
+                if (!catalog.TryConsumeImageUpload(scope))
+                    return Results.Json(new AguiError(ErrorCodes.BadRequest, $"本轮最多上传 {scope.MaxImages} 张图片"),
+                        statusCode: StatusCodes.Status429TooManyRequests);
+                var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
+                if (queue is null)
+                    return Results.Json(new AguiError(ErrorCodes.BadRequest, "审批队列不可用（宿主未注册）"),
+                        statusCode: StatusCodes.Status503ServiceUnavailable);
+                var pending = queue.Add(scope.OwnerUserId, scope.SkillId, scope.AgentId, lib.LibId,
+                    fileName, contentType, bytes, req.Caption, req.Tags, out var qerr);
+                if (pending is null)
+                    return Results.Json(new AguiError(ErrorCodes.BadRequest, qerr ?? "入队失败"),
+                        statusCode: StatusCodes.Status429TooManyRequests);
+                audit.Record("skill.imageLibrary.pending", scope.OwnerUserId, auth.GetUser(scope.OwnerUserId)?.Username,
+                    targetType: "imageLibrary", targetId: lib.LibId,
+                    detail: $"技能 {scope.SkillId ?? "-"}（岗位 {scope.AgentId ?? "-"}）请求写入 {fileName}，待审批 {pending.Id}");
+                return Results.Json(new { pendingId = pending.Id, status = "pending" }, statusCode: StatusCodes.Status202Accepted);
+            }
+
             if (!catalog.TryConsumeImageUpload(scope))
                 return Results.Json(new AguiError(ErrorCodes.BadRequest, $"本轮最多上传 {scope.MaxImages} 张图片"),
                     statusCode: StatusCodes.Status429TooManyRequests);
 
             var (asset, error) = catalog.AddAsset(lib.LibId, fileName, contentType ?? "", bytes, scope.OwnerUserId);
             if (asset is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "上传失败"));
+            // 写入来源标记（1.0.279）：图库界面可区分「技能/岗位写入」与「手动上传」
+            asset.SourceSkillId = scope.SkillId;
+            asset.SourceAgentId = scope.AgentId;
             if (!string.IsNullOrWhiteSpace(req.Caption)) asset.Caption = req.Caption!.Trim();
             if (req.Tags is { Count: > 0 }) asset.Tags = req.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Take(20).ToList();
             audit.Record("skill.imageLibrary.upload", scope.OwnerUserId, auth.GetUser(scope.OwnerUserId)?.Username,
@@ -349,6 +375,70 @@ public static class ImageLibraryApi
                 detail: $"技能 {scope.SkillId ?? "-"}（岗位 {scope.AgentId ?? "-"}）上传图片 {fileName}（{bytes.LongLength / 1024} KB）");
             return Results.Ok(ToAssetDto(lib, asset));
         });
+
+        // ---- 图库写入审批（1.0.279，管理员）：技能写已有/授权库时的待处理队列 ----
+        var pendingGroup = app.MapGroup("/ag-ui/admin/image-write-pending");
+
+        pendingGroup.MapGet("/", (HttpContext ctx, ImageLibraryCatalog catalog, AuthService auth) =>
+        {
+            var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
+            if (queue is null) return Results.Ok(new { items = Array.Empty<object>() });
+            var items = queue.List().Select(x => new
+            {
+                x.Id,
+                x.OwnerUserId,
+                ownerName = auth.GetUser(x.OwnerUserId)?.Username,
+                x.SkillId,
+                x.AgentId,
+                x.LibId,
+                libName = catalog.GetLibrary(x.LibId)?.Name,
+                x.FileName,
+                bytes = x.Bytes.LongLength,
+                x.Caption,
+                x.Tags,
+                x.AtMs,
+            }).ToList();
+            return Results.Ok(new { items });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        pendingGroup.MapPost("/{id}/approve", (string id, HttpContext ctx, ImageLibraryCatalog catalog,
+            AuthService auth, AuditLogService audit) =>
+        {
+            var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
+            if (queue is null) return Results.Problem("审批队列不可用", statusCode: 503);
+            if (!queue.TryTake(id, out var item) || item is null)
+                return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"待审批项不存在或已处理：{id}"));
+            var lib = catalog.GetLibrary(item.LibId);
+            if (lib is null)
+                return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"目标图库已不存在：{item.LibId}"));
+
+            var dup = catalog.FindDuplicate(lib.LibId, item.Bytes);
+            if (dup is not null)
+                return Results.Ok(new { applied = true, duplicated = true, asset = ToAssetDto(lib, dup) });
+
+            var (asset, error) = catalog.AddAsset(lib.LibId, item.FileName, item.ContentType ?? "", item.Bytes, item.OwnerUserId);
+            if (asset is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "落盘失败"));
+            asset.SourceSkillId = item.SkillId;
+            asset.SourceAgentId = item.AgentId;
+            if (!string.IsNullOrWhiteSpace(item.Caption)) asset.Caption = item.Caption!.Trim();
+            if (item.Tags is { Count: > 0 }) asset.Tags = item.Tags.Where(t => !string.IsNullOrWhiteSpace(t)).Take(20).ToList();
+            audit.Record("skill.imageLibrary.upload", item.OwnerUserId, auth.GetUser(item.OwnerUserId)?.Username,
+                targetType: "imageLibrary", targetId: lib.LibId,
+                detail: $"审批通过 {item.Id}：技能 {item.SkillId ?? "-"}（岗位 {item.AgentId ?? "-"}）写入 {item.FileName}");
+            return Results.Ok(new { applied = true, duplicated = false, asset = ToAssetDto(lib, asset) });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        pendingGroup.MapPost("/{id}/reject", (string id, HttpContext ctx, AuthService auth, AuditLogService audit) =>
+        {
+            var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
+            if (queue is null) return Results.Problem("审批队列不可用", statusCode: 503);
+            if (!queue.TryTake(id, out var item) || item is null)
+                return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"待审批项不存在或已处理：{id}"));
+            audit.Record("skill.imageLibrary.rejected", item.OwnerUserId, auth.GetUser(item.OwnerUserId)?.Username,
+                targetType: "imageLibrary", targetId: item.LibId,
+                detail: $"拒绝 {item.Id}：技能 {item.SkillId ?? "-"}（岗位 {item.AgentId ?? "-"}）写入 {item.FileName}");
+            return Results.Ok(new { rejected = true });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
     /// <summary>当前调用者的可见范围（成员群 + 是否管理员）。</summary>
@@ -390,6 +480,8 @@ public static class ImageLibraryApi
         a.Error,
         a.UploadedAtMs,
         a.UploadedBy,
+        a.SourceSkillId,
+        a.SourceAgentId,
         url = $"/ag-ui/image-libs/{lib.LibId}/assets/{a.AssetId}/raw",
     };
 }

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.278**
+> Applies to version: **1.0.279**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1879,6 +1879,8 @@ Form (`#skillFormView`) fields and DOM ids:
 | `#sfRequiresApproval` | Requires human approval to run | Disabled and force-checked for `shell`/`dotnet`/`client` |
 | `#sfImageWrite` | Allow writing to image libraries (1.0.277) | Visible only for **admin + server-side + non-prompt**; injects `imageWriteScopeId` into the skill's JSON input (see 5.4.6) |
 | `#sfImageWriteLibs` | Existing libraries it may write to (1.0.278) | A multi-select list shown once `#sfImageWrite` is ticked; none = only the library created in this run |
+| `#sfImageWriteMaxLibs` / `#sfImageWriteMaxImages` | Per-run quotas (1.0.279) | 1..10 / 1..200; blank = default 1 / 20 |
+| `#sfImageWriteApproval` | Writes to existing libraries need approval (1.0.279) | Queued for an admin; new libraries still apply immediately |
 | `#sfBack` / `#sfTest` / `#sfSave` | Back / Test run / Save | |
 
 `syncSkillKind()` links them: shows the interpreter for `shell`; shows the ClientRunner for `client`; disables the approval checkbox for `shell`, `dotnet`, or `client` (approval is forced).
@@ -2505,6 +2507,12 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 
 **Existing libraries it may write to (1.0.278)**: ticking the flag reveals a library multi-select (`#sfImageWriteLibs`) that additionally authorizes writes to **existing libraries** (cross-ownership is allowed — an explicit delegation from the admin to the skill); none selected = only the library created in this run. The server validates every referenced library exists, otherwise 400.
 
+**Per-skill quotas and write approval (1.0.279)**:
+
+- `#sfImageWriteMaxLibs` / `#sfImageWriteMaxImages`: max libraries created per run (1..10, default 1) and max images uploaded per run (1..200, default 20).
+- `#sfImageWriteApproval`: when on, writes to **existing/authorized libraries** are not applied directly — they enter the approval queue and the endpoint returns **202** `{ pendingId, status: "pending" }`; writes to the library **created in this run** still apply immediately (isolated, low risk). An admin approves / rejects them in the "⏳ Pending skill writes" block at the top of Image Library Management; only then is the image written and audited.
+- The queue is **in-memory with a 24h TTL**: at most 50 items, 20 per owner, and ≤ 64MB total; it is lost on restart (it is meant for short-lived approvals).
+
 **Injection**: before invoking the skill, `AgentCatalog.WithImageScope` injects `imageWriteScopeId` into the JSON input (alongside a document skill's `imageScopeId`). The handle lives 10 minutes, is bound to the trigger user / agent / skill, and carries quotas: **at most 1 library / 20 images / 10 MB per image per run** (`ImageLibraryCatalog.ImageWriteScope`).
 
 **Self-call endpoints** (no user token; use the request header `AGUI_SELF_TOKEN: <env value>`):
@@ -2518,7 +2526,11 @@ Until 1.0.277 image libraries were **read-only** for skills (`/ag-ui/images/sear
 
 **Content dedup (1.0.278)**: before uploading, the target library is compared by byte-level SHA-256; a hit returns `{ duplicated: true, asset }` without consuming vectors / quota (the hash is lazily backfilled for legacy assets on first comparison). Manual uploads (`POST /ag-ui/image-libs/{libId}/assets`) dedupe the same way and return the existing record.
 
-**On "human confirmation before writing"**: phase 1 uses **configuration-level pre-approval** — the capability is off by default, an admin must enable it and pick each writable library; libraries created by a skill are owned by the trigger user and not shared; every write has quotas and full audit. **Per-write HITL is intentionally not implemented**: a running skill cannot safely block on an interactive approval without changing the skill contract and holding long connections; a per-write approval queue is a phase-2 design.
+**Write source marking (1.0.279)**: images written by a skill (including via approval) record `sourceSkillId` / `sourceAgentId`; the image card shows a `🤖 {skillId}` badge and the toolbar gains an All sources / Skill writes / Manual uploads filter.
+
+**Audit (1.0.279)**: new `skill.imageLibrary.pending` (enqueued) and `skill.imageLibrary.rejected`; approval still records `skill.imageLibrary.upload` (detail includes the approval id).
+
+**On "human confirmation before writing"**: phase 1 uses **configuration-level pre-approval** — the capability is off by default, an admin must enable it and pick each writable library; libraries created by a skill are owned by the trigger user and not shared; every write has quotas and full audit. **1.0.279** adds **per-write approval**: a skill can require admin approval for writes to existing libraries; those writes are queued (202 + pendingId) and applied only after approval, while libraries created in the current run bypass the queue.
 
 **Skill-side example (C#)**:
 
@@ -4074,7 +4086,7 @@ Audit retention policy: `Capacity = 5000`, dropping the oldest when exceeded; in
 
 **CSV columns (header, `AdminApi.cs:171`)**: `id,timeUtc,timeMs,action,actorId,actorUsername,groupId,targetType,targetId,detail,result`.
 
-Key audit actions (partial, for searching): `admin.user.disable`, `admin.user.reset_password`, `admin.user.role`, `user.account.delete`, `admin.orphan.adopt`, `admin.orphan.delete`, `data.export`, `data.import`, `data.reset`, `settings.model`, `settings.branding`, `config.update`, `execution.patch`, `storage.reclaim`, `interaction.resolve`, **`group.modelOverride` / `group.quotaOverride` (1.0.268; records the resulting value, including "cleared"; since 1.0.273 it also appends "effective until …")**.
+Key audit actions (partial, for searching): `admin.user.disable`, `admin.user.reset_password`, `admin.user.role`, `user.account.delete`, `admin.orphan.adopt`, `admin.orphan.delete`, `data.export`, `data.import`, `data.reset`, `settings.model`, `settings.branding`, `config.update`, `execution.patch`, `storage.reclaim`, `interaction.resolve`, **`group.modelOverride` / `group.quotaOverride` (1.0.268; records the resulting value, including "cleared"; since 1.0.273 it also appends "effective until …")**, **`skill.imageLibrary.create` / `.upload` / `.pending` / `.rejected` (1.0.277–1.0.279)**.
 
 ---
 
@@ -4723,6 +4735,9 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | GET | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | Read the original image (thumbnail / preview) | Login(strict) |
 | POST | `/ag-ui/images/libraries` | **Skill** creates a library (self token + `imageWriteScopeId`, see 5.4.6) | Self-call |
 | POST | `/ag-ui/images/libraries/{libId}/assets` | **Skill** uploads an image (self token + handle; `attachmentId` or base64) | Self-call |
+| GET | `/ag-ui/admin/image-write-pending` | Pending skill writes | Admin |
+| POST | `/ag-ui/admin/image-write-pending/{id}/approve` | Approve and write (with source marking) | Admin |
+| POST | `/ag-ui/admin/image-write-pending/{id}/reject` | Reject and audit | Admin |
 | POST | `/ag-ui/images/search` | Image library semantic search (**self-token or logged-in user**; the server path accepts only the self-token) | Self-token **or** Login(strict) |
 | GET | `/ag-ui/memory/groups` | Per-group memory statistics (within the manageable scope) | Login |
 | GET | `/ag-ui/memory` | Memory entry list (`groupId` / `senderId` / `keyword` / `limit` / `offset`; the queryable groups depend on the role) | Login |

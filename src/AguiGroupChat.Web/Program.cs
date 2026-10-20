@@ -33,6 +33,7 @@ builder.Services.AddSingleton(new WebhookState()); // 订阅配置（持久化�
 builder.Services.AddSingleton<WebhookDispatcher>(); // 事件→订阅过滤→后台投递（含重试 / 签名 / 投递日志）
 builder.Services.AddSingleton<QuotaExpiryReminderService>(); // 临时放额到期提醒：周期性扫描 → QUOTA_OVERRIDE_EXPIRING / EXPIRED
 builder.Services.AddSingleton<QuotaReminderStateStore>(); // 提醒去重键（跨重启保持，避免重复投递）
+builder.Services.AddSingleton<ImageWriteApprovalQueue>(); // 图库写入审批队列（技能写已有库时入队）
 builder.Services.AddSingleton<AguiGroupChat.Hub.Messaging.IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>()); // GroupHub 出站钩子
 // 模板市场在线分发：远程目录源（管理员配置）+ 拉取（缓存 / 尺寸 / 协议防护）
 builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持久化到扩展区「marketplace」）

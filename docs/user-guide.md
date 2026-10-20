@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.278**
+> 适用版本：**1.0.279**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1876,6 +1876,8 @@
 | `#sfRequiresApproval` | 执行需人工批准 | `shell`/`dotnet`/`client` 时禁用并强制勾选 |
 | `#sfImageWrite` | 允许向图库写入（1.0.277） | 仅**管理员 + 服务端 + 非 prompt** 可见；开启后平台在技能入参 JSON 注入 `imageWriteScopeId`（见 5.4.6） |
 | `#sfImageWriteLibs` | 可写入的已有图库（1.0.278） | `#sfImageWrite` 勾选后显示多选清单；不选 = 只能写本轮新建的库 |
+| `#sfImageWriteMaxLibs` / `#sfImageWriteMaxImages` | 每轮配额（1.0.279） | 1..10 / 1..200；留空 = 默认 1 / 20 |
+| `#sfImageWriteApproval` | 写已有库需审批（1.0.279） | 入队待管理员批准；新建库仍立即生效 |
 | `#sfBack` / `#sfTest` / `#sfSave` | 返回 / 试运行 / 保存 | |
 
 `syncSkillKind()` 联动：`shell` 时显示解释器；`client` 时显示 ClientRunner；`shell`、`dotnet` 或 `client` 时禁用审批勾选框（强制需审批）。图库写入勾选框仅在「管理员 + 服务端 + 非 prompt」时显示，否则隐藏并强制清空（服务端同样强制 `imageWrite=false`）。
@@ -2501,6 +2503,12 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 
 **可写入的已有图库（1.0.278）**：勾选后下方会出现图库多选清单（`#sfImageWriteLibs`），可额外授权技能写入**已有图库**（支持跨归属，属于管理员对技能的显式委托）；不选 = 只能写本轮新建的库。保存时服务端逐个校验图库存在，否则 400。
 
+**按技能配额与写入审批（1.0.279）**：
+
+- `#sfImageWriteMaxLibs` / `#sfImageWriteMaxImages`：每轮最多新建图库（1..10，默认 1）与最多上传图片（1..200，默认 20）。
+- `#sfImageWriteApproval`：开启后，技能写**已有/授权库**时不直接落盘，而是进入待审批队列（返回 **202** `{ pendingId, status: "pending" }`）；写**本轮新建**的库仍立即生效（隔离、风险低）。管理员在「图库管理」顶部的「⏳ 待审批的技能写入」中批准 / 拒绝；批准后才落盘并记审计。
+- 待审批队列为**内存 + 24h TTL**：最多 50 项、每人 20 项、总字节 ≤ 64MB；重启会丢失（定位为短生命周期审批）。
+
 **注入**：技能调用前，`AgentCatalog.WithImageScope` 在入参 JSON 中注入 `imageWriteScopeId`（与文档技能的 `imageScopeId` 并列）。句柄 10 分钟有效，绑定触发者 / 岗位 / 技能，并带配额：**每轮最多 1 个图库 / 20 张图 / 单图 10 MB**（`ImageLibraryCatalog.ImageWriteScope`）。
 
 **自调用端点**（均不发用户令牌，改用请求头 `AGUI_SELF_TOKEN: <环境变量值>`）：
@@ -2514,7 +2522,11 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 
 **内容去重（1.0.278）**：上传前按字节 SHA-256 比对目标图库，已存在则直接返回 `{ duplicated: true, asset }`，不重复占向量 / 配额；旧数据没有哈希时在首次比对时懒补。手动上传（`POST /ag-ui/image-libs/{libId}/assets`）同样去重，返回已有记录。
 
-**关于「写入前人工确认」**：一期采用**配置层预审批**——能力默认关闭，必须由管理员开启并逐个选择可写入的图库；新建的库归属触发者、默认不共享；每次写入有配额且全量审计。**不做逐次写入的 HITL**：技能执行中无法安全阻塞等待交互式审批（会改变技能契约并占用长连接），逐条审批队列适合作为二期。
+**写入来源标记（1.0.279）**：技能（含审批通过）写入的图片会记录 `sourceSkillId` / `sourceAgentId`；图库卡片显示 `🤖 {skillId}` 徽标，工具栏新增「全部来源 / 技能写入 / 手动上传」筛选。
+
+**审计（1.0.279）**：新增 `skill.imageLibrary.pending`（入队）与 `skill.imageLibrary.rejected`（拒绝）；审批通过后仍记 `skill.imageLibrary.upload`（detail 含审批号）。
+
+**关于「写入前人工确认」**：一期采用**配置层预审批**——能力默认关闭，必须由管理员开启并逐个选择可写入的图库；新建的库归属触发者、默认不共享；每次写入有配额且全量审计。**1.0.279** 增加**逐次审批**：技能可设「写已有图库需管理员审批」，此类写入先入队（202 + pendingId），管理员在图库管理里批准后生效；本轮新建的库不经过审批队列。
 
 **技能侧示例（C#）**：
 
@@ -4065,7 +4077,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **CSV 列（表头，`AdminApi.cs:171`）**：`id,timeUtc,timeMs,action,actorId,actorUsername,groupId,targetType,targetId,detail,result`。
 
-审计记录的关键 action（部分，供检索）：`admin.user.disable`、`admin.user.reset_password`、`admin.user.role`、`user.account.delete`、`admin.orphan.adopt`、`admin.orphan.delete`、`data.export`、`data.import`、`data.reset`、`settings.model`、`settings.branding`、`config.update`、`execution.patch`、`storage.reclaim`、`interaction.resolve`、**`group.modelOverride` / `group.quotaOverride`（1.0.268，记改后实际值，含「取消」；1.0.273 起还追加「有效期至 …」）**。
+审计记录的关键 action（部分，供检索）：`admin.user.disable`、`admin.user.reset_password`、`admin.user.role`、`user.account.delete`、`admin.orphan.adopt`、`admin.orphan.delete`、`data.export`、`data.import`、`data.reset`、`settings.model`、`settings.branding`、`config.update`、`execution.patch`、`storage.reclaim`、`interaction.resolve`、**`group.modelOverride` / `group.quotaOverride`（1.0.268，记改后实际值，含「取消」；1.0.273 起还追加「有效期至 …」）**、**`skill.imageLibrary.create` / `.upload` / `.pending` / `.rejected`（1.0.277–1.0.279）**。
 
 ---
 
@@ -4715,6 +4727,9 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/image-libs/{libId}/assets/{assetId}/raw` | 原图读取（缩略图 / 预览） | 登录(严) |
 | POST | `/ag-ui/images/libraries` | **技能**建库（自令牌 + `imageWriteScopeId`，见 5.4.6） | 自调用 |
 | POST | `/ag-ui/images/libraries/{libId}/assets` | **技能**传图（自令牌 + 句柄；`attachmentId` 或 base64） | 自调用 |
+| GET | `/ag-ui/admin/image-write-pending` | 待审批的技能写入列表 | 管理员 |
+| POST | `/ag-ui/admin/image-write-pending/{id}/approve` | 批准并落盘（带来源标记） | 管理员 |
+| POST | `/ag-ui/admin/image-write-pending/{id}/reject` | 拒绝并留痕 | 管理员 |
 | POST | `/ag-ui/images/search` | 图库语义检索（**自令牌或登录用户**；服务器路径只给自令牌） | 自令牌 **或** 登录(严) |
 | GET | `/ag-ui/memory/groups` | 各群记忆统计（按可管理范围） | 登录 |
 | GET | `/ag-ui/memory` | 记忆条目列表（`groupId` / `senderId` / `keyword` / `limit` / `offset`，按角色限定可查群） | 登录 |

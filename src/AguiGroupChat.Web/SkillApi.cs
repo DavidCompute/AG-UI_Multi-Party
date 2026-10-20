@@ -152,6 +152,9 @@ public static class SkillApi
             {
                 skill.ImageWrite = existing.ImageWrite;
                 skill.ImageWriteLibraryIds = existing.ImageWriteLibraryIds;
+                skill.ImageWriteRequiresApproval = existing.ImageWriteRequiresApproval;
+                skill.ImageWriteMaxLibraries = existing.ImageWriteMaxLibraries;
+                skill.ImageWriteMaxImages = existing.ImageWriteMaxImages;
             }
             // 用户经界面改过 → 不再是“原样内置版”，清掉版本标记：升级时不再用新正文覆盖用户改动
             skill.BuiltinVersion = null;
@@ -339,6 +342,9 @@ public static class SkillApi
             // 图库写入能力（管理员开启；仅服务端非 prompt 技能）
             ["imageWrite"] = s.ImageWrite,
             ["imageWriteLibraryIds"] = s.ImageWriteLibraryIds is { Count: > 0 } ? s.ImageWriteLibraryIds : null,
+            ["imageWriteRequiresApproval"] = s.ImageWriteRequiresApproval,
+            ["imageWriteMaxLibraries"] = s.ImageWriteMaxLibraries,
+            ["imageWriteMaxImages"] = s.ImageWriteMaxImages,
         };
         if (canReadBody)
         {
@@ -390,6 +396,10 @@ public static class SkillApi
             && req.ImageWrite == true
             && kind is not AgentSkillKind.Prompt
             && executionLocation == AgentSkillExecutionLocation.Server;
+        if (req.ImageWriteMaxLibraries is { } ql && ql is not (>= 1 and <= 10))
+            return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "imageWriteMaxLibraries 需在 1..10")));
+        if (req.ImageWriteMaxImages is { } qi && qi is not (>= 1 and <= 200))
+            return (null, Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "imageWriteMaxImages 需在 1..200")));
         // 可写入的已有图库（1.0.278）：仅 imageWrite 生效时保留；每个 ID 必须真实存在
         var writeLibs = imageWrite
             ? req.ImageWriteLibraryIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList()
@@ -438,6 +448,9 @@ public static class SkillApi
             AllowedUserGroupIds = req.AllowedUserGroupIds?.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()).Distinct().ToList() is { Count: > 0 } glist ? glist : null,
             ImageWrite = imageWrite,
             ImageWriteLibraryIds = writeLibs is { Count: > 0 } ? writeLibs : null,
+            ImageWriteRequiresApproval = imageWrite && req.ImageWriteRequiresApproval == true,
+            ImageWriteMaxLibraries = imageWrite ? Math.Clamp(req.ImageWriteMaxLibraries ?? 1, 1, 10) : null,
+            ImageWriteMaxImages = imageWrite ? Math.Clamp(req.ImageWriteMaxImages ?? 20, 1, 200) : null,
         }, null);
     }
 
@@ -525,7 +538,11 @@ public sealed record SkillDefHttpRequest(
     // 图库写入能力（1.0.277）：仅管理员可开，且仅对服务端非 prompt 技能生效
     bool? ImageWrite = null,
     // 可写入的已有图库（1.0.278）：imageWrite 开启时生效；null/空 = 只能写本轮新建的库
-    IReadOnlyList<string>? ImageWriteLibraryIds = null);
+    IReadOnlyList<string>? ImageWriteLibraryIds = null,
+    // 写入审批与按技能配额（1.0.279）
+    bool? ImageWriteRequiresApproval = null,
+    int? ImageWriteMaxLibraries = null,
+    int? ImageWriteMaxImages = null);
 
 /// <summary>技能试运行请求体。ClientId：本机执行的机器标识（浏览器本机桥 /ag-ui/bridge/info 读取），用于把 client dotnet 送到当前机器执行。</summary>
 public sealed record SkillRunHttpRequest(string Query = "", string? ClientId = null);

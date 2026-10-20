@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.278 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.278 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.279 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.279 Release Notes (current Windows desktop release)
+
+**版本说明**：**图库写入的二期能力**——① 逐次写入审批：技能写已有/授权库可要求管理员批准（先入队、返回 202 + pendingId，在「图库管理」顶部批准/拒绝）；② 写入来源标记：图片记录来源技能/岗位，图库支持「全部 / 技能写入 / 手动上传」筛选；③ 按技能配额：每轮最多新建 1..10 个库、上传 1..200 张图。新建库仍立即生效（隔离、风险低）。
+**Version note**: **Phase 2 of image-library writes** — ① per-write approval: a skill can require admin approval for writes to existing/authorized libraries (queued, 202 + pendingId, approved/rejected at the top of Image Library Management); ② write-source marking: images record the source skill/agent, and the library can filter All / Skill writes / Manual uploads; ③ per-skill quotas: 1..10 libraries and 1..200 images per run. Libraries created in the run still apply immediately (isolated, low risk).
+
+## 变更
+# Changes
+
+中文：
+- **技能模型**：`ImageWriteRequiresApproval` / `ImageWriteMaxLibraries`（1..10）/ `ImageWriteMaxImages`（1..200）；仅 `ImageWrite` 生效时保留，非管理员更新时一并保留管理员授予值。
+- **能力句柄**：`ImageWriteScope` 新增 `RequiresApproval` 与 `CreatedLibIds`（区分「本轮新建」与「预置授权」）；`RegisterWriteScope` 接受配额与审批参数。
+- **审批队列 `ImageWriteApprovalQueue`**：内存 + 24h TTL；最多 50 项 / 每人 20 项 / 总字节 ≤ 64MB；记录 owner、skill、agent、lib、文件名/类型/字节/描述/标签。
+- **写入端点**：当 `RequiresApproval` 且目标库不是本轮新建时，消耗本轮配额后入队并返回 **202** `{ pendingId, status: "pending" }`；新建库走原立即写入路径。
+- **管理员端点**：`GET /ag-ui/admin/image-write-pending`、`POST /{id}/approve`（写盘 + 来源标记 + 审计）、`POST /{id}/reject`（审计 `skill.imageLibrary.rejected`）。
+- **来源标记**：`ImageAsset.SourceSkillId` / `SourceAgentId`；技能写入（含审批通过）时填充；图库卡片显示 `🤖 skillId`，工具栏新增来源筛选。
+- **审计**：新增 `skill.imageLibrary.pending` / `.rejected`；审批通过仍记 `skill.imageLibrary.upload`（detail 含审批号）。
+
+English:
+- **Skill model**: `ImageWriteRequiresApproval` / `ImageWriteMaxLibraries` (1..10) / `ImageWriteMaxImages` (1..200); kept only when `ImageWrite` is effective, and admin-granted values are preserved on non-admin edits.
+- **Capability handle**: `ImageWriteScope` gains `RequiresApproval` and `CreatedLibIds` (distinguishing "created in this run" from "pre-authorized"); `RegisterWriteScope` accepts quota and approval parameters.
+- **Approval queue `ImageWriteApprovalQueue`**: in-memory with a 24h TTL; at most 50 items / 20 per owner / 64MB total; stores owner, skill, agent, lib, filename/type/bytes/caption/tags.
+- **Write endpoint**: when `RequiresApproval` is on and the target library was not created in this run, it consumes the per-run quota, enqueues and returns **202** `{ pendingId, status: "pending" }`; new libraries keep the immediate path.
+- **Admin endpoints**: `GET /ag-ui/admin/image-write-pending`, `POST /{id}/approve` (write + source marking + audit), `POST /{id}/reject` (audits `skill.imageLibrary.rejected`).
+- **Source marking**: `ImageAsset.SourceSkillId` / `SourceAgentId`, filled for skill writes (including approved ones); the image card shows `🤖 skillId` and the toolbar gains a source filter.
+- **Audit**: new `skill.imageLibrary.pending` / `.rejected`; approvals still record `skill.imageLibrary.upload` (detail includes the approval id).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.4（配额与审批字段）、§5.4.6（审批队列、来源标记、审计）、§8.7（审计 action）、§9.x（管理员待审批端点）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.279。
+English: `docs/user-guide.md` / `en.md` §4.3.4 (quota and approval fields), §5.4.6 (approval queue, source marking, audit), §8.7 (audit actions), §9.x (admin pending endpoints); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.279.
+
+## 测试
+# Tests
+
+中文：新增 4 例——`ImageWriteApprovalQueueTests` ×3（入队/列表/取出；每人上限；全局限额）、`AgentImageScopeBindingTests` ×1（自定义配额与审批参数、预置库不算本轮新建）。**全量测试通过**（1847 → **1851**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1990，missing 0**；守卫脚本均过。Docker 真实端到端 **13/13**：带审批的技能首次写入返回 202 + pendingId → 管理员列表可见 → 批准后落盘且带 `sourceSkillId` → 审计含 pending/upload → 同图再次写入被去重、不再产生待审批。浏览器校验 **6/6**：来源下拉三档、技能徽标、两种筛选、待审批块与批准/拒绝按钮、无页面脚本错误。
+English: 4 new cases — `ImageWriteApprovalQueueTests` ×3 (add/list/take; per-owner cap; global cap), `AgentImageScopeBindingTests` ×1 (custom quotas and approval parameters; a seeded library is not "created in this run"). **All tests pass** (1847 → **1851**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1990, missing 0**; guard scripts pass. Real Docker end-to-end **13/13**: a skill with approval returns 202 + pendingId on the first write → the admin list shows it → after approval it is written with `sourceSkillId` → the audit contains pending/upload → writing the same image again is deduped and creates no new pending item. Browser checks **6/6**: three source options, the skill badge, both filters, the pending block with approve/reject buttons, and no page script errors.
+
 
 **版本说明**：**技能写图库从「只能新建」扩到「可写授权库」，并加上内容去重**——① 管理员可在技能上选定可写入的**已有图库**（支持跨归属），非管理员后续编辑不会丢失这项授权；② 上传前按字节 SHA-256 去重，同图直接返回已有记录、不占配额；③ 「写入前人工确认」采用**配置层预审批**（默认关闭 + 逐库授权 + 配额 + 审计），逐次写入 HITL 明确留作二期。
 **Version note**: **Skill image writes now cover authorized existing libraries, plus content dedup** — ① an admin can select **existing libraries** a skill may write to (cross-ownership allowed), and later edits by non-admins preserve that grant; ② uploads dedupe by byte-level SHA-256 (a hit returns the existing record without consuming quota); ③ "human confirmation before writing" is enforced as **configuration-level pre-approval** (off by default + per-library grant + quotas + audit), with per-write HITL explicitly deferred to phase 2.

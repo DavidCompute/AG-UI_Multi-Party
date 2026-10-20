@@ -221,6 +221,7 @@
   - **跨重启去重 + 站内通道 + 到期模板（1.0.276）**：提醒去重键落盘（扩展区 `quotaReminderState`），重启不重复投递；用量页顶部新增站内提醒（`GET /ag-ui/admin/quota-reminders`，不依赖 Webhook）；知聚设置弹窗新增 `+2小时/+1天/+3天/+7天/清空` 到期模板。
   - **技能写入图库（1.0.277）**：技能级 `imageWrite`（默认关闭、仅管理员 + 服务端非 prompt）；平台注入 `imageWriteScopeId`（10 分钟、每轮 1 库 / 20 图 / 单图 10MB）；新增自调用端点 `/ag-ui/images/libraries[/{id}/assets]`（建库 + 传图，只能写本轮新建的库）；全程审计；生成器提示词已包含该能力。同版修复审计 ID 重启后撞主键导致新记录被静默丢弃的缺陷。
   - **授权已有图库 + 内容去重（1.0.278）**：技能可额外写入管理员在技能上选定的**已有图库**（`imageWriteLibraryIds`，支持跨归属；非管理员编辑时保留授权）；上传前按字节 SHA-256 去重（命中返回 `duplicated`，不占配额）；人工确认采用**配置层预审批**（能力默认关闭 + 逐库授权 + 配额 + 审计），逐次写入 HITL 留作二期。
+  - **审批队列 + 来源标记 + 按技能配额（1.0.279）**：`imageWriteRequiresApproval` 开启后，写已有/授权库先入队（202 + pendingId），管理员在图库管理顶部批准/拒绝；新建库仍立即生效。技能写入的图片记录 `sourceSkillId` / `sourceAgentId`，图库支持来源筛选；每轮配额可按技能调（1..10 库 / 1..200 图）。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

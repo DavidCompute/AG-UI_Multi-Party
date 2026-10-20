@@ -137,6 +137,19 @@ public sealed class AgentSkillDefinition
     /// </summary>
     public List<string>? ImageWriteLibraryIds { get; set; }
 
+    /// <summary>
+    /// <b>写入需人工审批（1.0.279）</b>：开启后，技能写**已有/授权图库**时不直接落盘，
+    /// 而是先入待审批队列（管理员在图库管理里批准 / 拒绝）；写**本轮新建**的库仍立即生效（隔离、风险低）。
+    /// 仅管理员可设，默认 false。
+    /// </summary>
+    public bool ImageWriteRequiresApproval { get; set; }
+
+    /// <summary>每轮最多新建图库数（1.0.279，1..10；null = 默认 1）。</summary>
+    public int? ImageWriteMaxLibraries { get; set; }
+
+    /// <summary>每轮最多上传图片数（1.0.279，1..200；null = 默认 20）。</summary>
+    public int? ImageWriteMaxImages { get; set; }
+
     /// <summary>技能名 / 智能体工具名的合法模式（OpenAI 工具名：字母数字下划线连字符）。</summary>
     private static readonly Regex ToolNamePattern = new("^[a-zA-Z0-9_-]{1,64}$", RegexOptions.Compiled);
 

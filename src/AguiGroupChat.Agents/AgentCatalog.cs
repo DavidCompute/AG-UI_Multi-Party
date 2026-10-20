@@ -316,7 +316,10 @@ public sealed class AgentCatalog
             }
             if (wantWrite)
             {
-                dict["imageWriteScopeId"] = libs.RegisterWriteScope(userId!, agentId, skill.SkillId, skill.ImageWriteLibraryIds);
+                dict["imageWriteScopeId"] = libs.RegisterWriteScope(userId!, agentId, skill.SkillId, skill.ImageWriteLibraryIds,
+                    skill.ImageWriteMaxLibraries ?? ImageLibraryCatalog.DefaultWriteMaxLibraries,
+                    skill.ImageWriteMaxImages ?? ImageLibraryCatalog.DefaultWriteMaxImages,
+                    skill.ImageWriteRequiresApproval);
                 _logger.LogInformation("已为技能注入图库写入能力：skill={SkillId} agent={AgentId} owner={User} extraLibs={Libs}",
                     skill.SkillId, agentId ?? "-", userId, skill.ImageWriteLibraryIds?.Count ?? 0);
             }

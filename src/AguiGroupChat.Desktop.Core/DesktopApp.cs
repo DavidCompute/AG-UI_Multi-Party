@@ -58,6 +58,7 @@ public static class DesktopApp
         builder.Services.AddSingleton<WebhookDispatcher>();
         builder.Services.AddSingleton<AguiGroupChat.Web.QuotaExpiryReminderService>(); // 临时放额到期提醒（QUOTA_OVERRIDE_EXPIRING / EXPIRED）
         builder.Services.AddSingleton<AguiGroupChat.Web.QuotaReminderStateStore>(); // 提醒去重键（跨重启保持）
+        builder.Services.AddSingleton<AguiGroupChat.Web.ImageWriteApprovalQueue>(); // 图库写入审批队列
         builder.Services.AddSingleton<IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>());
         // 模板市场在线分发：远程目录源 + 拉取
         builder.Services.AddSingleton(new MarketplaceState());

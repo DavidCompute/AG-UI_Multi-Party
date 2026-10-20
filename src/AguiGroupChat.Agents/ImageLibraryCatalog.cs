@@ -538,9 +538,12 @@ public sealed class ImageLibraryCatalog
         public int MaxLibraries { get; init; } = DefaultWriteMaxLibraries;
         public int MaxImages { get; init; } = DefaultWriteMaxImages;
         public long MaxImageBytes { get; init; } = DefaultWriteMaxImageBytes;
+        /// <summary>写已有/授权库时是否需管理员审批（1.0.279）；新建库不受限。</summary>
+        public bool RequiresApproval { get; init; }
 
         internal readonly object Gate = new();
         internal readonly HashSet<string> AllowedLibIds = new(StringComparer.Ordinal);
+        internal readonly HashSet<string> CreatedLibIds = new(StringComparer.Ordinal);
         internal int LibrariesCreated;
         internal int ImagesUploaded;
     }
@@ -548,7 +551,8 @@ public sealed class ImageLibraryCatalog
     /// <summary>登记一个写入能力句柄（平台在调用开启 imageWrite 的技能前签发）。</summary>
     /// <param name="seedLibraryIds">管理员在技能上指定的「可写入的已有图库」（可空）；本轮新建的库另外追加。</param>
     public string RegisterWriteScope(string ownerUserId, string? agentId, string? skillId,
-        IReadOnlyList<string>? seedLibraryIds = null)
+        IReadOnlyList<string>? seedLibraryIds = null, int maxLibraries = DefaultWriteMaxLibraries,
+        int maxImages = DefaultWriteMaxImages, bool requiresApproval = false)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         foreach (var kv in _writeScopes)
@@ -565,13 +569,16 @@ public sealed class ImageLibraryCatalog
             AgentId = agentId,
             SkillId = skillId,
             ExpiresAtMs = now + WriteScopeTtlMs,
+            MaxLibraries = Math.Clamp(maxLibraries, 1, 10),
+            MaxImages = Math.Clamp(maxImages, 1, 200),
+            RequiresApproval = requiresApproval,
         };
         if (seedLibraryIds is { Count: > 0 })
             foreach (var id in seedLibraryIds.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal))
                 scope.AllowedLibIds.Add(id);
         _writeScopes[handle] = scope;
-        _logger.LogInformation("登记图库写入范围：agent={AgentId} skill={SkillId} owner={Owner} libs={Libs} handle={Handle}",
-            agentId ?? "-", skillId ?? "-", ownerUserId, scope.AllowedLibIds.Count, handle);
+        _logger.LogInformation("登记图库写入范围：agent={AgentId} skill={SkillId} owner={Owner} libs={Libs} quota={LibsQuota}/{ImgQuota} approval={Approval} handle={Handle}",
+            agentId ?? "-", skillId ?? "-", ownerUserId, scope.AllowedLibIds.Count, scope.MaxLibraries, scope.MaxImages, requiresApproval, handle);
         return handle;
     }
 
@@ -613,7 +620,17 @@ public sealed class ImageLibraryCatalog
     /// <summary>把本轮新建的图库记入该句柄（后续只能往这些库上传）。</summary>
     public void AllowWriteLibrary(ImageWriteScope scope, string libId)
     {
-        lock (scope.Gate) scope.AllowedLibIds.Add(libId);
+        lock (scope.Gate)
+        {
+            scope.CreatedLibIds.Add(libId);
+            scope.AllowedLibIds.Add(libId);
+        }
+    }
+
+    /// <summary>该库是否由本轮技能新建（1.0.279：新建库不受审批队列限制）。</summary>
+    public bool WasCreatedInRun(ImageWriteScope scope, string libId)
+    {
+        lock (scope.Gate) return scope.CreatedLibIds.Contains(libId);
     }
 
     /// <summary>该句柄是否允许写入指定图库（只允许本轮新建的库）。</summary>

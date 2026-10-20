@@ -782,6 +782,14 @@
           <label data-i18n="skill.form.imageWriteLibs">可写入的已有图库（可选；不选 = 只能写本轮新建的库）</label>
           <div id="sfImageWriteLibs" style="max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px"></div>
         </div>
+        <div class="config-grid" id="sfImageWriteQuotaGroup" style="display:none">
+          <div class="form-group"><label data-i18n="skill.form.imageWriteMaxLibs">每轮最多新建图库</label><input id="sfImageWriteMaxLibs" class="modal-input" type="number" min="1" max="10" placeholder="1" /></div>
+          <div class="form-group"><label data-i18n="skill.form.imageWriteMaxImages">每轮最多上传图片</label><input id="sfImageWriteMaxImages" class="modal-input" type="number" min="1" max="200" placeholder="20" /></div>
+        </div>
+        <div class="form-group" id="sfImageWriteApprovalGroup" style="display:none;align-items:center;gap:8px">
+          <label style="margin:0" data-i18n="skill.form.imageWriteApproval">写已有图库需管理员审批（新建库仍立即生效）</label>
+          <input id="sfImageWriteApproval" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
+        </div>
         <div class="modal-actions">
           <button id="sfBack" class="btn-ghost" data-i18n="skill.form.back">返回</button>
           <button id="sfTest" class="btn-ghost" data-i18n="skill.form.test">▶ 试运行</button>
@@ -843,11 +851,21 @@
     <div class="modal kb-modal">
       <div class="modal-title">🖼️ <span data-i18n="imgLib.title">图库管理</span></div>
       <div class="kb-view">
+        <!-- 待审批的技能写入（1.0.279，仅管理员）：技能写已有/授权图库时先入队 -->
+        <div id="imgLibPending" class="hidden" style="margin-bottom:10px">
+          <p class="form-hint" style="margin:2px 0 6px"><b data-i18n="imgLib.pendingTitle">⏳ 待审批的技能写入</b> <span id="imgLibPendingMeta"></span></p>
+          <div id="imgLibPendingList" class="kb-list"></div>
+        </div>
         <div class="kb-toolbar">
           <span class="search-clear-wrap" style="flex:1;min-width:160px">
             <input id="imgLibSearch" class="modal-input" data-i18n-placeholder="imgLib.search" />
             <button type="button" class="search-clear" data-clear-for="imgLibSearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
           </span>
+          <select id="imgLibSource" class="modal-input" style="width:auto;min-width:130px" data-i18n-title="imgLib.sourceFilter">
+            <option value="" data-i18n="imgLib.sourceAll">全部来源</option>
+            <option value="skill" data-i18n="imgLib.sourceSkill">技能写入</option>
+            <option value="user" data-i18n="imgLib.sourceUser">手动上传</option>
+          </select>
         </div>
         <div class="kb-grid-head">
           <span data-i18n="imgLib.col.name">名称 / ID</span>

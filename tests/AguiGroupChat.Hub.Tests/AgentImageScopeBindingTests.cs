@@ -259,10 +259,28 @@ public sealed class AgentImageScopeBindingTests
         // 只能写入本轮新建（并登记）的图库
         var mine = libs.CreateLibrary("本轮新建", "", User);
         Assert.False(libs.IsWriteLibraryAllowed(scope!, mine.LibId));
+        Assert.False(libs.WasCreatedInRun(scope!, mine.LibId));
         libs.AllowWriteLibrary(scope!, mine.LibId);
         Assert.True(libs.IsWriteLibraryAllowed(scope!, mine.LibId));
+        Assert.True(libs.WasCreatedInRun(scope!, mine.LibId));
 
         Assert.Null(libs.ResolveWriteScope("iwscope_bogus"));
+    }
+
+    [Fact]
+    public void WriteScope_CustomQuotasAndApproval_AreApplied()
+    {
+        var (_, libs) = NewCatalog();
+        var seeded = libs.CreateLibrary("预置库", "", Other);
+        var handle = libs.RegisterWriteScope(User, AgentId, "skill_x", [seeded.LibId],
+            maxLibraries: 3, maxImages: 5, requiresApproval: true);
+        var scope = libs.ResolveWriteScope(handle)!;
+
+        Assert.Equal(3, scope.MaxLibraries);
+        Assert.Equal(5, scope.MaxImages);
+        Assert.True(scope.RequiresApproval);
+        Assert.True(libs.IsWriteLibraryAllowed(scope, seeded.LibId));   // 预置授权可写
+        Assert.False(libs.WasCreatedInRun(scope, seeded.LibId));        // 但不算本轮新建（需审批）
     }
 
     [Fact]
