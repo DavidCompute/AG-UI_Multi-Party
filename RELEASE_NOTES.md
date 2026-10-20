@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.292 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.292 Release Notes (current Windows desktop release)
+
+**版本说明**：**投递记录跨重启保持**——最近 100 条投递写入持久化扩展区 `webhookDeliveries`，重启后仍能在「最近投递」查看、筛选与导出；不再只能看本次运行期间发生的事。
+**Version note**: **The delivery log now survives restarts** — the latest 100 deliveries are written to the `webhookDeliveries` extension section, so after a restart you can still view, filter and export them instead of only seeing what happened during the current process.
+
+## 变更
+# Changes
+
+中文：
+- **调度器**：`WebhookDispatcher` 新增 `SnapshotLog()`（旧→新）与 `RestoreLog()`（超限保留最新），`MaxLog` 改为公开常量（100）；投递写入后通过 `ChangeHub.Notify()` 标记脏位。
+- **持久化注册**：新增 `RegisterWebhookDeliveryPersistence()`，扩展区 `webhookDeliveries`；Web 与桌面组合根都已接入（在订阅持久化之后）。
+- **容错**：恢复包 try/catch，旧快照 / 损坏数据不阻断启动；持久化关闭时保持纯内存环形缓冲。
+- **兼容**：快照结构即既有投递记录（`deliveryId / subscriptionId / eventType / groupId / url / attempt / statusCode / ok / atMs / durationMs / error`），无新字段。
+- **测试**：新增 2 例——`RestoreLog` 顺序与截断（105 条 → 保留最新 100，新→旧口径正确）与扩展区完整往返（含 URL / 失败错误字段保真）。
+
+English:
+- **Dispatcher**: `WebhookDispatcher` gains `SnapshotLog()` (old→new) and `RestoreLog()` (keeps the newest on overflow); `MaxLog` becomes a public constant (100), and every recorded delivery marks state dirty via `ChangeHub.Notify()`.
+- **Persistence registration**: new `RegisterWebhookDeliveryPersistence()` for the `webhookDeliveries` section, wired into both the web and desktop composition roots (after subscription persistence).
+- **Tolerant restore**: the restore is wrapped in try/catch so old snapshots / corrupt data never block startup; with persistence off the in-memory ring buffer is unchanged.
+- **Compatible**: the snapshot is the existing delivery record (`deliveryId / subscriptionId / eventType / groupId / url / attempt / statusCode / ok / atMs / durationMs / error`) with no new fields.
+- **Tests**: 2 new cases — `RestoreLog` ordering and truncation (105 → newest 100, newest-first view correct) and a full section round trip (including URL and failure error fidelity).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（投递记录持久化）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.292。
+English: `docs/user-guide.md` / `en.md` §8.19 (delivery log persistence); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.292.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1864 → **1866**）；`dotnet build` **0 错误**；i18n 审计 **zh=en=2048，missing 0**；四个守卫脚本全过；Docker 重建并部署（`/health` 200，PostgreSQL `agui_sections` 中可见 `webhookDeliveries`）；`api-smoke` 46/46。
+English: full `dotnet test` passes (1864 → **1866**); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=2048, missing 0**; all four guard scripts pass; Docker was rebuilt and redeployed (`/health` 200, `webhookDeliveries` visible in PostgreSQL `agui_sections`); `api-smoke` 46/46.
+
+---
+
 # AG-UI 群聊桌面版 1.0.291 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.291 Release Notes (current Windows desktop release)
 

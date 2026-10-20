@@ -153,6 +153,7 @@ public static class DesktopApp
         app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
+        app.Services.RegisterWebhookDeliveryPersistence(); // 最近投递记录跨重启保持（最近 100 条）
         app.Services.RegisterQuotaReminderStatePersistence(); // 临时放额提醒去重键跨重启保持
         app.Services.RegisterImageWriteApprovalPersistence(); // 待审批图库写入跨重启保持
         app.Services.WireQuotaAlerts(); // 配额阈值（80% / 100%）→ 出站 Webhook（QUOTA_THRESHOLD）

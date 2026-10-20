@@ -41,7 +41,8 @@ public sealed class WebhookDispatcher : IGroupEventObserver, IDisposable
 {
     private const int MaxAttempts = 3;
     private const int AttemptTimeoutMs = 10_000;
-    private const int MaxLog = 100;
+    /// <summary>「最近投递」保留条数（内存与持久化一致）。</summary>
+    public const int MaxLog = 100;
     private const int QueueCapacity = 5_000;
 
     /// <summary>重试退避（秒，按尝试序号取用）。默认 <c>[1, 5, 25]</c>；测试可调小以避免长等待。</summary>
@@ -67,6 +68,9 @@ public sealed class WebhookDispatcher : IGroupEventObserver, IDisposable
     private Task[]? _workers;
 
     private sealed record DeliveryJob(WebhookSubscription Sub, string DeliveryId, string EventType, string GroupId, string Body);
+
+    /// <summary>持久化变更通知（组合根注册投递日志持久化时注入；null = 不通知）。</summary>
+    public ChangeHub? Changes { get; set; }
 
     // 事件类型读取器缓存：OnEvent 在热路径上，避免每次反射。
     private static readonly ConcurrentDictionary<Type, Func<object, string?>> TypeReaders = new();
@@ -307,10 +311,23 @@ public sealed class WebhookDispatcher : IGroupEventObserver, IDisposable
     {
         _log.Enqueue(record);
         while (_log.Count > MaxLog && _log.TryDequeue(out _)) { }
+        Changes?.Notify(); // 让持久化尽快落盘（1.0.292）
     }
 
     /// <summary>最近的投递记录（新→旧）。</summary>
     public IReadOnlyList<WebhookDeliveryRecord> RecentDeliveries() => _log.Reverse().ToList();
+
+    /// <summary>投递日志快照（旧→新；用于持久化，最多 <see cref="MaxLog"/> 条）。</summary>
+    public IReadOnlyList<WebhookDeliveryRecord> SnapshotLog() => _log.ToList();
+
+    /// <summary>从持久化快照恢复（旧→新传入；超限保留最新）。</summary>
+    public void RestoreLog(IEnumerable<WebhookDeliveryRecord>? items)
+    {
+        if (items is null) return;
+        var arr = items.ToList();
+        _log.Clear();
+        foreach (var r in arr.TakeLast(MaxLog)) _log.Enqueue(r);
+    }
 
     public void Dispose()
     {
@@ -318,5 +335,32 @@ public sealed class WebhookDispatcher : IGroupEventObserver, IDisposable
         _queue.Writer.TryComplete();
         if (_ownsHttp) _http.Dispose();
         _cts.Dispose();
+    }
+}
+
+/// <summary>持久化扩展区「webhookDeliveries」（1.0.292）：最近投递记录跨重启保持。</summary>
+public static class WebhookDeliveryPersistence
+{
+    public static void RegisterWebhookDeliveryPersistence(this IServiceProvider services)
+    {
+        var dispatcher = services.GetRequiredService<WebhookDispatcher>();
+        dispatcher.Changes = services.GetService<ChangeHub>(); // 投递发生后标记脏位，下个冲刷周期落盘
+
+        Func<object?> snapshot = () => dispatcher.SnapshotLog().ToList();
+        Action<JsonElement> restore = element =>
+        {
+            try
+            {
+                var items = element.Deserialize<List<WebhookDeliveryRecord>>(AguiJson.Options);
+                dispatcher.RestoreLog(items);
+            }
+            catch { /* 旧 / 损坏数据：忽略，不阻断启动 */ }
+        };
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+            persistence.AddSection("webhookDeliveries", snapshot, restore);
+        else
+            services.GetService<ISectionStore>()?.AddSection("webhookDeliveries", snapshot, restore);
     }
 }
