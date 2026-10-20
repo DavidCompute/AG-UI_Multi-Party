@@ -2,9 +2,10 @@
 //   1. 管理员登录后，待审批轮询把新项送进通知中心（徽标 +1，不依赖人工刷新）；
 //   2. 通知文案提示「点击打开图库管理」；
 //   3. 点击通知 → 图库管理弹窗打开、待审批块可见、批量按钮可用、通知面板收起；
-//   4. 「最近处理」块渲染已处理回执（状态 / 文件 / 处理人）；
-//   5. 无页面 JS 异常。
-// 待审批列表与最近处理都用路由桩（不落任何真实数据）：只为验证「感知 → 点击 → 直达」这一段链路。
+//   4. 「最近处理」块渲染 3 条回执（批准 / 拒绝 / 失败），状态筛选与关键词筛选生效；
+//   5. 「清空历史」弹确认框 → 确认后列表块隐藏（DELETE 由路由桩承兑）；
+//   6. 无页面 JS 异常。
+// 待审批列表、最近处理与清空都用路由桩（不落任何真实数据）：只为验证「感知 → 点击 → 直达 → 筛选/清空」这一段链路。
 // 用法：cd tools && HEADLESS=1 node ui-imglib-pending-click.mjs
 import { chromium } from "playwright";
 
@@ -36,19 +37,23 @@ const PENDING = {
 };
 
 const HISTORY = {
-  items: [{
-    pendingId: "iwp_ui_old",
-    status: "approved",
-    libId: "img_ui",
-    libName: "UI 素材库",
-    fileName: "ui-approved.png",
-    skillId: "skill_ui",
-    agentId: "agent_ui",
-    assetId: "asset_ui",
-    duplicated: false,
-    decidedBy: "david",
-    atMs: Date.now() - 60_000,
-  }],
+  items: [
+    {
+      pendingId: "iwp_ui_a", status: "approved", libId: "img_ui", libName: "UI 素材库",
+      fileName: "ui-approved.png", skillId: "skill_ui", agentId: "agent_ui", assetId: "asset_ui",
+      duplicated: false, decidedBy: "david", atMs: Date.now() - 60_000,
+    },
+    {
+      pendingId: "iwp_ui_r", status: "rejected", libId: "img_ui", libName: "UI 素材库",
+      fileName: "ui-rejected.png", skillId: "skill_other", agentId: "agent_ui",
+      duplicated: false, decidedBy: "david", atMs: Date.now() - 120_000,
+    },
+    {
+      pendingId: "iwp_ui_f", status: "failed", reason: "library_missing", libId: "img_ui", libName: "UI 素材库",
+      fileName: "ui-failed.png", skillId: "skill_ui", agentId: "agent_ui",
+      duplicated: false, decidedBy: "david", atMs: Date.now() - 180_000,
+    },
+  ],
 };
 
 const browser = await chromium.launch({ headless: HEADLESS });
@@ -59,7 +64,10 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + 
 
 try {
   // 登录前挂路由桩：poll 在 enterApp 里立即 tick 一次，必须提前就位
-  await page.route("**/ag-ui/admin/image-write-pending/history", (route) => route.fulfill({ json: HISTORY }));
+  await page.route("**/ag-ui/admin/image-write-pending/history*", (route) =>
+    route.request().method() === "DELETE"
+      ? route.fulfill({ json: { cleared: HISTORY.items.length } })
+      : route.fulfill({ json: HISTORY }));
   await page.route("**/ag-ui/admin/image-write-pending", (route) => route.fulfill({ json: PENDING }));
 
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
@@ -99,13 +107,44 @@ try {
   check("待审批块列出该文件与来源", pendingText.includes("ui-pending.png") && pendingText.includes("skill_ui"), pendingText.slice(0, 120));
   check("批量按钮可用", await page.locator("#imgLibPendingApproveAll").isVisible() && await page.locator("#imgLibPendingRejectAll").isVisible());
 
-  // 4) 最近处理（已处理回执）
+  // 4) 最近处理（已处理回执）+ 筛选 + 清空
   await page.waitForSelector("#imgLibHistory:not(.hidden)", { timeout: 5000 });
+  const histRows = page.locator("#imgLibHistoryList .kb-list-item");
+  check("最近处理渲染 3 条回执", (await histRows.count()) === 3, "rows=" + (await histRows.count()));
   const histText = (await page.locator("#imgLibHistory").innerText()).replace(/\s+/g, " ");
-  check("最近处理块可见且展示已批准", histText.includes("最近处理") && histText.includes("已批准"), histText.slice(0, 100));
-  check("最近处理含文件与处理人", histText.includes("ui-approved.png") && histText.includes("david"), histText.slice(0, 160));
+  check("含已批准 / 已拒绝 / 失败三态", ["已批准", "已拒绝", "失败"].every((s) => histText.includes(s)), histText.slice(0, 120));
+  check("含文件与处理人", histText.includes("ui-approved.png") && histText.includes("david"));
 
-  // 4) 无页面 JS 异常
+  // 状态筛选：只看被拒绝
+  await page.selectOption("#imgLibHistoryStatus", "rejected");
+  await page.waitForFunction(() => document.querySelectorAll("#imgLibHistoryList .kb-list-item").length === 1);
+  const rejText = (await page.locator("#imgLibHistoryList").innerText()).replace(/\s+/g, " ");
+  check("按状态筛选 → 仅剩拒绝项", rejText.includes("ui-rejected.png") && !rejText.includes("ui-approved.png"), rejText.slice(0, 80));
+
+  // 关键词筛选（回到全部状态后搜技能名）
+  await page.selectOption("#imgLibHistoryStatus", "");
+  await page.fill("#imgLibHistorySearch", "skill_other");
+  await page.waitForFunction(() => document.querySelectorAll("#imgLibHistoryList .kb-list-item").length === 1);
+  const kwText = (await page.locator("#imgLibHistoryList").innerText()).replace(/\s+/g, " ");
+  check("按关键词筛选 → 命中技能", kwText.includes("ui-rejected.png"), kwText.slice(0, 80));
+
+  // 无匹配提示 + 清空按钮（× 清空搜索）
+  await page.fill("#imgLibHistorySearch", "no-such-file");
+  await page.waitForSelector("#imgLibHistoryList .admin-empty", { timeout: 3000 });
+  check("无匹配时给提示", (await page.locator("#imgLibHistoryList .admin-empty").innerText()).includes("没有匹配"));
+  await page.click('button.search-clear[data-clear-for="imgLibHistorySearch"]');
+  await page.waitForFunction(() => document.querySelectorAll("#imgLibHistoryList .kb-list-item").length === 3);
+  check("× 清空搜索后恢复 3 条", true);
+
+  // 清空历史：确认框 → DELETE（路由桩）→ 块隐藏
+  await page.click("#imgLibHistoryClear");
+  await page.waitForSelector("#uiDialog:not(.hidden)", { timeout: 3000 });
+  check("清空前弹确认框", (await page.locator("#uiDialogMsg").innerText()).includes("不影响"));
+  await page.click("#uiDialogOk");
+  await page.waitForFunction(() => document.getElementById("imgLibHistory")?.classList.contains("hidden"), { timeout: 5000 });
+  check("清空后「最近处理」块隐藏", true);
+
+  // 5) 无页面 JS 异常
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));
 } catch (e) {
   fail++;

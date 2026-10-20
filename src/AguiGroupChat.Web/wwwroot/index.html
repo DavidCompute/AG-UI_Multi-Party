@@ -861,7 +861,20 @@
         </div>
         <!-- 最近处理（1.0.283，仅管理员）：批准 / 拒绝 / 失败的回执，避免只留在审计日志 -->
         <div id="imgLibHistory" class="hidden" style="margin-bottom:10px">
-          <p class="form-hint" style="margin:2px 0 6px"><b data-i18n="imgLib.historyTitle">🧾 最近处理</b> <span id="imgLibHistoryMeta"></span></p>
+          <div class="form-hint" style="margin:2px 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <b data-i18n="imgLib.historyTitle">🧾 最近处理</b> <span id="imgLibHistoryMeta"></span>
+            <span class="search-clear-wrap" style="flex:0 1 190px;min-width:130px">
+              <input id="imgLibHistorySearch" class="modal-input" data-i18n-placeholder="imgLib.histSearchPh" />
+              <button type="button" class="search-clear" data-clear-for="imgLibHistorySearch" tabindex="-1" data-i18n-title="common.clearSearch">×</button>
+            </span>
+            <select id="imgLibHistoryStatus" class="modal-input" style="width:auto;min-width:104px" data-i18n-title="imgLib.histFilterTip">
+              <option value="" data-i18n="imgLib.histAll">全部状态</option>
+              <option value="approved" data-i18n="imgLib.histApproved">已批准</option>
+              <option value="rejected" data-i18n="imgLib.histRejected">已拒绝</option>
+              <option value="failed" data-i18n="imgLib.histFailed">失败</option>
+            </select>
+            <button id="imgLibHistoryClear" class="chip-btn danger" type="button" data-i18n="imgLib.histClear" style="margin-left:auto">清空历史</button>
+          </div>
           <div id="imgLibHistoryList" class="kb-list"></div>
         </div>
         <div class="kb-toolbar">

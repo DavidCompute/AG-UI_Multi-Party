@@ -186,6 +186,18 @@ public sealed class ImageWriteApprovalQueue
         lock (_historyLock) return _history.Take(Math.Clamp(limit, 1, MaxHistory)).ToList();
     }
 
+    /// <summary>清空「最近处理」（返回清掉的条数；持久化下次冲刷时同步）。</summary>
+    public int ClearHistory()
+    {
+        lock (_historyLock)
+        {
+            var n = _history.Count;
+            _history.Clear();
+            if (n > 0) _changes?.Notify();
+            return n;
+        }
+    }
+
     /// <summary>持久化快照（新→旧；最多 <see cref="MaxHistory"/> 条）。</summary>
     public IReadOnlyList<ResolvedImageWriteDto> SnapshotHistory()
     {

@@ -109,6 +109,18 @@ public sealed class ImageWriteApprovalQueueTests
     }
 
     [Fact]
+    public void ClearHistory_ReturnsCountAndEmpties()
+    {
+        var q = new ImageWriteApprovalQueue();
+        q.RecordResolved(new ResolvedImageWrite { PendingId = "iwp_1", Status = "approved", LibId = "img_1", FileName = "a.png", AtMs = 1 });
+        q.RecordResolved(new ResolvedImageWrite { PendingId = "iwp_2", Status = "rejected", LibId = "img_1", FileName = "b.png", AtMs = 2 });
+
+        Assert.Equal(2, q.ClearHistory());
+        Assert.Empty(q.RecentResolved());
+        Assert.Equal(0, q.ClearHistory());
+    }
+
+    [Fact]
     public void History_RoundTripsThroughPersistenceSection()
     {
         var store1 = new CaptureSectionStore();

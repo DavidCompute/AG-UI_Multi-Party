@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.286 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.286 Release Notes (current Windows desktop release)
+
+**版本说明**：**「最近处理」可筛可选清**——按状态（全部 / 已批准 / 已拒绝 / 失败）与关键词（文件 / 技能 / 图库 / 处理人）快速定位回执；新增「清空历史」，二次确认后只清回执，待审批项、已落盘图片与审计日志均不受影响。
+**Version note**: **Recently processed is now filterable and clearable** — find receipts by outcome (all / approved / rejected / failed) or keyword (file / skill / library / decided-by); the new **Clear history** action confirms first and removes only the receipts, leaving pending items, written images and the audit log untouched.
+
+## 变更
+# Changes
+
+中文：
+- **接口**：`GET /ag-ui/admin/image-write-pending/history` 新增 `limit`（1..50，默认 20）；新增 `DELETE` 同路径（返回 `{ cleared }`，审计 `skill.imageLibrary.historyClear`）。
+- **队列**：`ClearHistory()` 返回清空条数并通知持久化（下个冲刷周期同步到 `imageWriteHistory` 扩展区）。
+- **前端**：筛选栏含状态下拉、关键词输入（带 × 清除）与「清空历史」；最多拉 50 条后**前端就地过滤**，输入即时生效；无匹配时显示提示；确认框复用现有 `uiConfirm`。
+- **不误伤**：清空只作用于回执列表，与待审批队列、图库图片、审计日志互不影响（确认文案已明示）。
+- **测试**：队列单测 +1（清空返回条数且幂等）；集成用例追加 DELETE → GET 为空；Playwright 脚本扩到 **18 项**（三态回执、状态筛选、关键词筛选、无匹配提示、× 清除、确认框与清空）。
+
+English:
+- **API**: `GET /ag-ui/admin/image-write-pending/history` gains `limit` (1..50, default 20); new `DELETE` on the same path (returns `{ cleared }`, audited as `skill.imageLibrary.historyClear`).
+- **Queue**: `ClearHistory()` returns the number cleared and notifies persistence (synced to the `imageWriteHistory` section on the next flush).
+- **Frontend**: the filter row has an outcome dropdown, a keyword input (with × clear) and Clear history; up to 50 rows are fetched and **filtered in place**, so typing is instant; a hint appears when nothing matches; confirmation reuses the existing `uiConfirm`.
+- **No collateral damage**: clearing only affects receipts — pending items, library images and the audit log are unaffected (stated in the confirmation text).
+- **Tests**: one new queue unit test (clear returns the count and is idempotent); the integration case now also does DELETE → GET empty; the Playwright script grows to **18 checks** (three-state receipts, outcome filter, keyword filter, no-match hint, × clear, confirmation and clear).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（筛选 / 清空语义）与 API 表（`limit` + `DELETE`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.286。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (filter / clear semantics) and the API table (`limit` + `DELETE`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.286.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1861 → **1862**）；`dotnet build` **0 错误**；`node --check` 前端脚本；i18n 审计 **zh=en=2022，missing 0**；四个守卫脚本全过；Playwright **18/18**；Docker 重建并部署（`/health` 200）。
+English: full `dotnet test` passes (1861 → **1862**); `dotnet build` reports **0 errors**; `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2022, missing 0**; all four guard scripts pass; Playwright **18/18**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.285 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.285 Release Notes (current Windows desktop release)
 

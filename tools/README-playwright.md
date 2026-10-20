@@ -43,7 +43,7 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 # 配额水位 / 覆写同步回归（`ui-quota-alerts.mjs`）
 
-覆盖 1.0.265～1.0.285 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
+覆盖 1.0.265～1.0.286 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
 
 覆盖点：
 
@@ -136,7 +136,7 @@ SAMPLES=../artifacts/e2e HEADLESS=1 node ui-doc-slides.mjs    # 23 项：办公�
 HEADLESS=1 node ui-play-sprites.mjs       # 23 项：演示文稿形状级动画（底图 + 精灵，含逐段行带切分）
 HEADLESS=1 node ui-kb-auto-toggle.mjs     # 17 项：「显示自动沉淀的知识库」开关（知识库管理 + 绑定知识库弹窗，两处共享状态）
 HEADLESS=1 node ui-kb-strictness.mjs      # 知识库检索严格度 + 操作列几何 + 自动沉淀库开关（检索部分需 embedding 可用）
-HEADLESS=1 node ui-imglib-pending-click.mjs  # 11 项：待审批通知进通知中心 → 点击直达图库管理 → 最近处理回执（路由桩，不写数据）
+HEADLESS=1 node ui-imglib-pending-click.mjs  # 18 项：待审批通知进通知中心 → 点击直达图库管理 → 最近处理筛选 / 清空（路由桩）
 HEADLESS=1 node ui-webhook-events.mjs    # 21 项：Webhook 事件按 8 类分组 / 无遗漏无重复 / 组内全选·清空
 HEADLESS=1 node ui-kb-auto-toggle.mjs     # 17 项：「显示自动沉淀的知识库」开关（知识库管理 + 绑定知识库弹窗，两处共享状态）
 ```

@@ -286,6 +286,17 @@ public sealed class ImageWritePendingWebhookTests : IClassFixture<ImageWritePend
         Assert.Equal("iwp_admin", entry.GetProperty("decidedBy").GetString());
         Assert.Equal(libId, entry.GetProperty("libId").GetString());
         Assert.Equal("resolved.png", entry.GetProperty("fileName").GetString());
+
+        // 7) 清空历史：只清回执，接口返回条数；随后列表为空
+        using var clearReq = Authed(HttpMethod.Delete, "/ag-ui/admin/image-write-pending/history", token);
+        var clearRes = await _client.SendAsync(clearReq);
+        clearRes.EnsureSuccessStatusCode();
+        var cleared = (await clearRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("cleared").GetInt32();
+        Assert.True(cleared >= 1, "清空条数应 ≥1，实际 " + cleared);
+
+        using var afterReq = Authed(HttpMethod.Get, "/ag-ui/admin/image-write-pending/history", token);
+        var after = (await (await _client.SendAsync(afterReq)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items");
+        Assert.Equal(0, after.GetArrayLength());
     }
 
     [Fact]

@@ -414,12 +414,25 @@ public static class ImageLibraryApi
             return Results.Ok(new { items });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
-        // ---- 最近处理（1.0.283）：批准 / 拒绝 / 失败的回执（进程内最近 50 条，默认取 20）----
+        // ---- 最近处理（1.0.283 / 1.0.284 持久化）：批准 / 拒绝 / 失败的回执 ----
         //     让管理员在图库管理里就能看到「刚处理了什么」，不必去审计日志逐条翻。
-        pendingGroup.MapGet("/history", (HttpContext ctx) =>
+        pendingGroup.MapGet("/history", (HttpContext ctx, int? limit) =>
         {
             var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
-            return Results.Ok(new { items = queue?.RecentResolved(20) ?? Array.Empty<ResolvedImageWrite>() });
+            var take = Math.Clamp(limit ?? 20, 1, ImageWriteApprovalQueue.MaxHistory);
+            return Results.Ok(new { items = queue?.RecentResolved(take) ?? Array.Empty<ResolvedImageWrite>() });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        // ---- 清空最近处理（1.0.286）：只清回执，不影响待审批队列 / 已落盘图片 ----
+        pendingGroup.MapDelete("/history", (HttpContext ctx, AuthService auth, AuditLogService audit) =>
+        {
+            var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
+            if (queue is null) return Results.Ok(new { cleared = 0 });
+            var cleared = queue.ClearHistory();
+            var me = WebIdentity.UserId(ctx);
+            audit.Record("skill.imageLibrary.historyClear", me ?? "", auth.GetUser(me ?? "")?.Username,
+                targetType: "imageLibrary", targetId: "history", detail: $"清空最近处理回执{cleared} 条");
+            return Results.Ok(new { cleared });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
         pendingGroup.MapPost("/{id}/approve", (string id, HttpContext ctx, ImageLibraryCatalog catalog,
