@@ -8684,6 +8684,7 @@ async function publishPack() {
 
 let webhookEventCatalog = null; // 事件类型目录（懒加载缓存）
 let webhooksById = {};
+let webhookSubs = []; // 订阅列表缓存（投递记录加载后用它重渲染「最近投递」列）
 
 function bindWebhookConsole() {
   $("adminTabWebhooks").onclick = () => switchAdminTab("webhooks");
@@ -8712,35 +8713,65 @@ function bindWebhookConsole() {
 async function loadWebhooks() {
   const rows = $("adminWebhookRows");
   if (!rows) return;
-  rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
     const res = await fetch("/ag-ui/admin/webhooks", { headers: { Authorization: "Bearer " + state.token } });
     const list = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(list)) {
-      rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(list, "HTTP " + res.status)) })}</td></tr>`;
+      rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(list, "HTTP " + res.status)) })}</td></tr>`;
       return;
     }
+    webhookSubs = list;
     webhooksById = {};
     for (const s of list) webhooksById[s.id] = s;
-    if (!list.length) { rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.whEmpty")}</td></tr>`; return; }
-    rows.innerHTML = list.map((s) => {
-      const ev = (s.eventTypes && s.eventTypes.length) ? t("admin.whEventsCount", { n: s.eventTypes.length }) : t("admin.whEventsAll");
-      const st = s.enabled ? `<span class="tag-active">${t("admin.whEnabledOn")}</span>` : `<span class="tag-disabled">${t("admin.whEnabledOff")}</span>`;
-      const id = escapeHtml(s.id);
-      return `<tr>
-        <td>${escapeHtml(s.name || "—")}</td>
-        <td style="word-break:break-all">${escapeHtml(s.url)}</td>
-        <td>${escapeHtml(ev)}</td>
-        <td>${st}</td>
-        <td>
-          <button class="chip-btn" data-act="test" data-id="${id}" type="button">${t("admin.whTest")}</button>
-          <button class="chip-btn" data-act="edit" data-id="${id}" type="button">${t("admin.whEdit")}</button>
-          <button class="chip-btn danger" data-act="del" data-id="${id}" type="button">${t("admin.whDel")}</button>
-        </td></tr>`;
-    }).join("");
-  } catch (ex) {
-    rows.innerHTML = `<tr><td colspan="5" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
+    renderWebhookRows();
+  } catch { rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: "network" })}</td></tr>`; }
+}
+
+/** 每个订阅最近一次投递（从最近 100 条投递记录里取，新→旧，首条即最近）。 */
+function lastDeliveryBySub() {
+  const map = new Map();
+  for (const d of whDeliveryList) {
+    if (d.subscriptionId && !map.has(d.subscriptionId)) map.set(d.subscriptionId, d);
   }
+  return map;
+}
+
+/** 渲染订阅表（含「最近投递」列）。 */
+function renderWebhookRows() {
+  const rows = $("adminWebhookRows");
+  if (!rows) return;
+  if (!webhookSubs.length) {
+    rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.whEmpty")}</td></tr>`;
+    return;
+  }
+  const last = lastDeliveryBySub();
+  rows.innerHTML = webhookSubs.map((s) => {
+    const ev = (s.eventTypes && s.eventTypes.length) ? t("admin.whEventsCount", { n: s.eventTypes.length }) : t("admin.whEventsAll");
+    const st = s.enabled ? `<span class="tag-active">${t("admin.whEnabledOn")}</span>` : `<span class="tag-disabled">${t("admin.whEnabledOff")}</span>`;
+    const id = escapeHtml(s.id);
+    const d = last.get(s.id);
+    let lastCell = "—";
+    if (d) {
+      const icon = d.ok ? "✅" : "❌";
+      const tip = d.ok ? t("admin.whLastOkTip")
+        : t("admin.whLastFailTip", { err: d.error || ("HTTP " + d.statusCode), attempt: d.attempt });
+      lastCell = `<span title="${escapeHtml(tip)}">${icon} ${escapeHtml(fmtDateTime(Number(d.atMs) || 0))}</span>`;
+    } else if (s.lastDeliveredAt) {
+      lastCell = `<span class="muted" title="${escapeHtml(t("admin.whLastEarlierTip"))}">🕒 ${escapeHtml(fmtDateTime(Number(s.lastDeliveredAt) || 0))}</span>`;
+    }
+    return `<tr>
+      <td>${escapeHtml(s.name || "—")}</td>
+      <td style="word-break:break-all">${escapeHtml(s.url)}</td>
+      <td>${escapeHtml(ev)}</td>
+      <td style="white-space:nowrap">${lastCell}</td>
+      <td>${st}</td>
+      <td>
+        <button class="chip-btn" data-act="test" data-id="${id}" type="button">${t("admin.whTest")}</button>
+        <button class="chip-btn" data-act="edit" data-id="${id}" type="button">${t("admin.whEdit")}</button>
+        <button class="chip-btn danger" data-act="del" data-id="${id}" type="button">${t("admin.whDel")}</button>
+      </td></tr>`;
+  }).join("");
 }
 
 /** 最近投递记录（新→旧）；一次拉 100 条，前端筛选与截断展示。 */
@@ -8756,6 +8787,7 @@ async function loadWebhookDeliveries() {
     whDeliveryList = Array.isArray(list) ? list : [];
   } catch { whDeliveryList = []; }
   renderWebhookDeliveries();
+  renderWebhookRows(); // 订阅表的「最近投递」列随投递记录一起刷新
 }
 
 /** 渲染投递记录：事件类型 / 结果两个筛选器 + 「显示 X / Y 条」。 */

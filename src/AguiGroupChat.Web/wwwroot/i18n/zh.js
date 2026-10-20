@@ -1955,6 +1955,10 @@ window.I18N_DICTS.zh = {
   "admin.whDelivMeta": "显示 {shown} / {total} 条",
   "admin.whDelivEventTip": "按事件类型筛选",
   "admin.whNoMatchingDeliveries": "没有匹配的投递记录",
+  "admin.whColLast": "最近投递",
+  "admin.whLastOkTip": "最近一次投递成功",
+  "admin.whLastFailTip": "最近一次投递失败：{err}（第 {attempt} 次）",
+  "admin.whLastEarlierTip": "最近投递时间（状态见下方投递记录）",
 
   /* --- Webhook 事件分组（1.0.285） --- */
   "whGroup.group": "知聚",

@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.288 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.288 Release Notes (current Windows desktop release)
+
+**版本说明**：**订阅列表直接显示最近投递**——每一行多出一列，按 `subscriptionId` 关联最近 100 条投递记录，直接看到最近一次 ✅/❌ 与时间；悬浮提示带错误原因与尝试次数。多订阅场景下不必再到下方投递表里按 URL 翻找。
+**Version note**: **Each subscription now shows its last delivery** — a new column joins `subscriptionId` against the latest 100 deliveries to display the most recent ✅/❌ and time, with the error and attempt count in the tooltip. With multiple subscriptions there is no need to hunt for the URL in the delivery table below.
+
+## 变更
+# Changes
+
+中文：
+- **订阅表新增列**：位置在「事件」与「状态」之间；无记录时显示「—」。
+- **关联规则**：投递表（新→旧）里每个订阅的第一条即最近一次；记录已滚出最近 100 条时，回落到订阅的 `lastDeliveredAt` 以 🕒 显示时间（状态见下方投递表）。
+- **联动刷新**：订阅列表与投递记录无论哪个先加载完成，都会重新渲染该列；点「↻ 刷新」两者一起更新。
+- **无后端变更**：仅使用既有 `GET /ag-ui/admin/webhooks`（含 `lastDeliveredAt`）与 `GET …/deliveries`（含 `subscriptionId`）。
+- **回归测试**：`ui-webhook-events.mjs` 扩到 **32 项**——新增「表头含该列」「订阅 A 最近为 ❌」「订阅 B 最近为 ✅」；订阅 / 投递均用路由桩，不写真实数据。
+
+English:
+- **New subscription column**: placed between Events and Status; shows "—" when there is no record.
+- **Join rule**: the first entry per subscription in the (newest-first) delivery table is the most recent one; once it scrolls past the latest 100, the column falls back to the subscription's `lastDeliveredAt` with 🕒 (status remains in the delivery table).
+- **Linked refresh**: whichever of the subscription list or delivery log finishes loading, the column is rendered again; the ↻ Refresh button updates both.
+- **No backend change**: only the existing `GET /ag-ui/admin/webhooks` (with `lastDeliveredAt`) and `GET …/deliveries` (with `subscriptionId`) are used.
+- **Regression test**: `ui-webhook-events.mjs` grows to **32 checks** — the header contains the column, subscription A's last delivery is ❌, and subscription B's is ✅; subscriptions and deliveries are route-stubbed and no real data is written.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（订阅表最近投递列与关联规则）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.288。
+English: `docs/user-guide.md` / `en.md` §8.19 (last-delivery column and join rule); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.288.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.286 的全量结果 **1862 通过 / 0 失败**）；`node --check` 前端脚本 + UI 脚本；i18n 审计 **zh=en=2033，missing 0**；四个守卫脚本全过；Playwright **32/32**（事件分组 + 投递筛选 + 最近投递列）与 **18/18**（待审批直达 + 历史筛选）；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.286's full run of **1862 passed / 0 failed**); `node --check` passes for the frontend and UI scripts; the i18n audit is **zh=en=2033, missing 0**; all four guard scripts pass; Playwright **32/32** (grouping + delivery filters + last-delivery column) and **18/18** (pending click-through + history filters); Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.287 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.287 Release Notes (current Windows desktop release)
 

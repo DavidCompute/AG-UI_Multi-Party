@@ -3,7 +3,8 @@
 //   2. 事件目录里的每个类型在界面上恰好出现一次（无遗漏、无重复）；
 //   3. 组头「全选 / 清空」可整组勾选与取消，计数同步（0/3 → 3/3 → 0/3）；
 //   4. 「最近投递」可按事件类型 / 成败筛选，计数「显示 X / Y」与无匹配提示正确；
-//   5. 无页面 JS 异常；不创建任何真实订阅。
+//   5. 订阅表「最近投递」列按 subscriptionId 关联，显示最近一次 ✅/❌ 与时间；
+//   6. 无页面 JS 异常；不创建任何真实订阅。
 // 用法：cd tools && HEADLESS=1 node ui-webhook-events.mjs
 import { chromium } from "playwright";
 
@@ -19,10 +20,15 @@ const check = (label, cond, extra = "") => {
 };
 
 const DELIVERIES = [
-  { atMs: Date.now() - 1_000, eventType: "GROUP_CREATED", ok: true, statusCode: 200, url: "https://example.com/hook", attempt: 1, durationMs: 12 },
-  { atMs: Date.now() - 2_000, eventType: "GROUP_CREATED", ok: false, statusCode: 500, error: "HTTP 500", url: "https://example.com/hook", attempt: 3, durationMs: 30 },
-  { atMs: Date.now() - 3_000, eventType: "IMAGE_WRITE_PENDING", ok: true, statusCode: 200, url: "https://example.com/hook", attempt: 1, durationMs: 15 },
-  { atMs: Date.now() - 4_000, eventType: "PING", ok: true, statusCode: 200, url: "https://example.com/hook", attempt: 1, durationMs: 9 },
+  { atMs: Date.now() - 1_000, subscriptionId: "wh_a", eventType: "GROUP_CREATED", ok: false, statusCode: 500, error: "HTTP 500", url: "https://example.com/a", attempt: 3, durationMs: 30 },
+  { atMs: Date.now() - 2_000, subscriptionId: "wh_a", eventType: "GROUP_CREATED", ok: true, statusCode: 200, url: "https://example.com/a", attempt: 1, durationMs: 12 },
+  { atMs: Date.now() - 3_000, subscriptionId: "wh_b", eventType: "IMAGE_WRITE_PENDING", ok: true, statusCode: 200, url: "https://example.com/b", attempt: 1, durationMs: 15 },
+  { atMs: Date.now() - 4_000, subscriptionId: "wh_a", eventType: "PING", ok: true, statusCode: 200, url: "https://example.com/a", attempt: 1, durationMs: 9 },
+];
+
+const SUBS = [
+  { id: "wh_a", name: "告警 A", url: "https://example.com/a", eventTypes: ["GROUP_CREATED"], groupId: null, enabled: true, createdAt: 1, createdBy: "u_admin", lastDeliveredAt: null, hasSecret: true },
+  { id: "wh_b", name: "告警 B", url: "https://example.com/b", eventTypes: [], groupId: null, enabled: false, createdAt: 2, createdBy: "u_admin", lastDeliveredAt: null, hasSecret: false },
 ];
 
 const browser = await chromium.launch({ headless: HEADLESS });
@@ -31,8 +37,10 @@ const errors = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 
-// 投递记录用路由桩（只用于渲染 / 筛选验证，不依赖真实投递）
+// 投递记录与订阅列表用路由桩（只用于渲染 / 筛选 / 最近投递列验证）
 await page.route("**/ag-ui/admin/webhooks/deliveries", (route) => route.fulfill({ json: DELIVERIES }));
+await page.route("**/ag-ui/admin/webhooks", (route) =>
+  route.request().method() === "GET" ? route.fulfill({ json: SUBS }) : route.fallback());
 
 try {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
@@ -57,6 +65,16 @@ try {
   await page.waitForSelector("#adminModal:not(.hidden)", { timeout: 5000 });
   await page.locator("#adminTabWebhooks").click();
   await page.waitForSelector("#adminWebhooksView:not(.hidden)", { timeout: 5000 });
+
+  // 0) 订阅表「最近投递」列：按 subscriptionId 关联最近一次结果
+  await page.waitForFunction(() => document.querySelectorAll("#adminWebhookRows tr").length === 2);
+  const headText = (await page.locator("#adminWebhooksView thead").first().innerText()).replace(/\s+/g, " ");
+  check("订阅表含「最近投递」列", headText.includes("最近投递"), headText.slice(0, 100));
+  const rowA = (await page.locator("#adminWebhookRows tr", { hasText: "告警 A" }).innerText()).replace(/\s+/g, " ");
+  const rowB = (await page.locator("#adminWebhookRows tr", { hasText: "告警 B" }).innerText()).replace(/\s+/g, " ");
+  check("订阅 A 最近投递为失败 ❌", rowA.includes("❌"), rowA.slice(0, 80));
+  check("订阅 B 最近投递为成功 ✅", rowB.includes("✅"), rowB.slice(0, 80));
+
   await page.locator("#whAddBtn").click();
   await page.waitForSelector("#webhookModal:not(.hidden)", { timeout: 5000 });
   await page.waitForSelector("#whEventList .wh-ev-group", { timeout: 5000 });

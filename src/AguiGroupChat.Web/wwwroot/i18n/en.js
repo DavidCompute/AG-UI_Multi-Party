@@ -1961,6 +1961,10 @@ window.I18N_DICTS.en = {
   "admin.whDelivMeta": "Showing {shown} / {total}",
   "admin.whDelivEventTip": "Filter by event type",
   "admin.whNoMatchingDeliveries": "No matching deliveries",
+  "admin.whColLast": "Last delivery",
+  "admin.whLastOkTip": "Last delivery succeeded",
+  "admin.whLastFailTip": "Last delivery failed: {err} (attempt {attempt})",
+  "admin.whLastEarlierTip": "Last delivery time (see the delivery log below for status)",
 
   /* --- Webhook event groups (1.0.285) --- */
   "whGroup.group": "Circles",

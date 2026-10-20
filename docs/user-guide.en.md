@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.287**
+> Applies to version: **1.0.288**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4503,6 +4503,8 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 **Grouped in the admin UI (1.0.285)**: the subscription dialog renders events in **8 groups** — 🏠 Circles / 👥 Members / 💬 Messages / 🤝 Collaboration & tools / 🧵 Topics / ⚙️ Runs / 📊 Quota / 🖼️ Image libraries; each group header shows "selected / total" and a Select all / Clear toggle. A catalog type the client does not know yet falls into **📦 Other**, so nothing disappears when the server and UI upgrade at different times.
 
 **Delivery filtering (1.0.287)**: the console's **Recent deliveries** table filters by **event type** and **result** (succeeded / failed) and shows "showing X / Y"; the event dropdown is built from actual deliveries (including the `PING` test), and filtering happens in the browser (one fetch of the latest 100, at most 50 rendered).
+
+**Last-delivery column (1.0.288)**: the subscription table gains a column that joins `subscriptionId` against the latest 100 deliveries to show the most recent ✅/❌ and time (the tooltip carries the error and attempt count); once a record scrolls out of the latest 100, it falls back to the subscription's `lastDeliveredAt` shown with 🕒 (see the delivery table below for status).
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 
