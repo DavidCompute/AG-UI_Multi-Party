@@ -1,3 +1,42 @@
+# AG-UI 群聊桌面版 1.0.290 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.290 Release Notes (current Windows desktop release)
+
+**版本说明**：**测试投递结果留在行内**——点订阅行的「测试」后先显示「⏳ 测试中…」，完成后把 ✅ 状态码 + 时间 + 耗时（或 ❌ 错误 + 时间）直接写回该行，不再只靠一闪而过的 toast；同时刷新「最近投递」列。
+**Version note**: **Test results stay in the row** — clicking **Test** on a subscription first shows "⏳ Testing…", then writes ✅ status + time + duration (or ❌ error + time) back into that row instead of relying on a fleeting toast; the **Last delivery** column refreshes as well.
+
+## 变更
+# Changes
+
+中文：
+- **内联结果**：新增会话内缓存（订阅 id → 最近测试结果），操作列下方渲染「⏳ 测试中… / ✅ 200 · 时间 · 12ms / ❌ HTTP 500 · 时间」；悬浮提示说明来自本次测试。
+- **状态流**：点击后立即置「测试中」并重渲染，请求结束再写最终结果；网络异常也落到该行（❌ + 错误信息）。
+- **联动**：测试投递会进投递日志，因此完成后自动重拉投递记录，「最近投递」列与投递表一并更新。
+- **失效清理**：修改或删除订阅时清掉该行的旧测试结果，避免拿旧配置的结果误导。
+- **无后端变更**：仍用 `POST /ag-ui/admin/webhooks/{id}/test`（返回投递记录）。
+- **回归测试**：`ui-webhook-events.mjs` 扩到 **35 项**——测试失败行内 ❌ HTTP 500、测试成功行内 ✅ 200 + 耗时、且不影响「最近投递」列。
+
+English:
+- **Inline result**: a session cache (subscription id → latest test result) renders under the action buttons as "⏳ Testing… / ✅ 200 · time · 12ms / ❌ HTTP 500 · time", with a tooltip saying it is this test's result.
+- **State flow**: clicking immediately shows "Testing…" and re-renders; the final result is written when the request finishes, and network errors also land in the row (❌ + message).
+- **Linked refresh**: test deliveries enter the delivery log, so the delivery records are re-fetched and both the Last delivery column and the table update.
+- **Stale cleanup**: editing or deleting a subscription clears its old test result so a stale config's outcome cannot mislead.
+- **No backend change**: still `POST /ag-ui/admin/webhooks/{id}/test` (returns the delivery record).
+- **Regression test**: `ui-webhook-events.mjs` grows to **35 checks** — a failed test shows ❌ HTTP 500 inline, a successful one shows ✅ 200 + duration, and the Last delivery column is unaffected.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（内联测试结果与刷新语义）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.290。
+English: `docs/user-guide.md` / `en.md` §8.19 (inline test result and refresh semantics); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.290.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.289 的全量结果 **1864 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2037，missing 0**；四个守卫脚本全过；Playwright **35/35**（Webhook）与 **21/21**（待审批 + 重试）；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.289's full run of **1864 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2037, missing 0**; all four guard scripts pass; Playwright **35/35** (webhooks) and **21/21** (pending approvals + retry); Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.289 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.289 Release Notes (current Windows desktop release)
 

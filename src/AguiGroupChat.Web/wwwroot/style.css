@@ -1488,6 +1488,8 @@ textarea:focus { outline: none; border-color: var(--accent); }
   max-height: 34vh; overflow-y: auto; border: 1px solid var(--border);
   border-radius: 8px; padding: 6px 8px;
 }
+/* 测试投递的内联结果（1.0.290）：跟在操作按钮下方，不挤占列宽 */
+.wh-test-result { font-size: 12px; margin-top: 4px; line-height: 1.4; }
 .wh-ev-group + .wh-ev-group { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 6px; }
 .wh-ev-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; }
 .wh-ev-title { font-size: 13px; font-weight: 600; }

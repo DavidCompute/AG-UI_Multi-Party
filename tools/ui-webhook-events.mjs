@@ -4,7 +4,8 @@
 //   3. 组头「全选 / 清空」可整组勾选与取消，计数同步（0/3 → 3/3 → 0/3）；
 //   4. 「最近投递」可按事件类型 / 成败筛选，计数「显示 X / Y」与无匹配提示正确；
 //   5. 订阅表「最近投递」列按 subscriptionId 关联，显示最近一次 ✅/❌ 与时间；
-//   6. 无页面 JS 异常；不创建任何真实订阅。
+//   6. 「测试」按钮结果内联写回该行（失败 ❌ / 成功 ✅），刷新「最近投递」列；
+//   7. 无页面 JS 异常；不创建任何真实订阅。
 // 用法：cd tools && HEADLESS=1 node ui-webhook-events.mjs
 import { chromium } from "playwright";
 
@@ -41,6 +42,16 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + 
 await page.route("**/ag-ui/admin/webhooks/deliveries", (route) => route.fulfill({ json: DELIVERIES }));
 await page.route("**/ag-ui/admin/webhooks", (route) =>
   route.request().method() === "GET" ? route.fulfill({ json: SUBS }) : route.fallback());
+// 测试投递：按订阅 id 返回失败 / 成功（不真的发请求）
+await page.route("**/ag-ui/admin/webhooks/*/test", (route) => {
+  const id = route.request().url().split("/").slice(-2)[0];
+  const atMs = Date.now();
+  return route.fulfill({
+    json: id === "wh_a"
+      ? { subscriptionId: "wh_a", eventType: "PING", ok: false, statusCode: 500, error: "HTTP 500", attempt: 1, atMs, durationMs: 20 }
+      : { subscriptionId: "wh_b", eventType: "PING", ok: true, statusCode: 200, attempt: 1, atMs, durationMs: 8 },
+  });
+});
 
 try {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
@@ -74,6 +85,18 @@ try {
   const rowB = (await page.locator("#adminWebhookRows tr", { hasText: "告警 B" }).innerText()).replace(/\s+/g, " ");
   check("订阅 A 最近投递为失败 ❌", rowA.includes("❌"), rowA.slice(0, 80));
   check("订阅 B 最近投递为成功 ✅", rowB.includes("✅"), rowB.slice(0, 80));
+
+  // 6) 「测试」结果内联写回该行
+  await page.locator("#adminWebhookRows tr", { hasText: "告警 A" }).locator('button[data-act="test"]').click();
+  await page.waitForFunction(() => document.querySelector('#adminWebhookRows tr:nth-child(1)')?.innerText.includes("❌ HTTP 500"));
+  const rowA2 = (await page.locator("#adminWebhookRows tr", { hasText: "告警 A" }).innerText()).replace(/\s+/g, " ");
+  check("测试失败 → 行内 ❌ HTTP 500", rowA2.includes("❌ HTTP 500"), rowA2.slice(0, 100));
+
+  await page.locator("#adminWebhookRows tr", { hasText: "告警 B" }).locator('button[data-act="test"]').click();
+  await page.waitForFunction(() => document.querySelector('#adminWebhookRows tr:nth-child(2)')?.innerText.includes("✅ 200"));
+  const rowB2 = (await page.locator("#adminWebhookRows tr", { hasText: "告警 B" }).innerText()).replace(/\s+/g, " ");
+  check("测试成功 → 行内 ✅ 200 + 耗时", rowB2.includes("✅ 200") && /\d+ms/.test(rowB2), rowB2.slice(0, 100));
+  check("内联结果不影响「最近投递」列", rowA2.includes("❌") && rowB2.includes("✅"));
 
   await page.locator("#whAddBtn").click();
   await page.waitForSelector("#webhookModal:not(.hidden)", { timeout: 5000 });

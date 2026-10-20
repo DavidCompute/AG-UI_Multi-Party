@@ -8697,6 +8697,7 @@ async function publishPack() {
 let webhookEventCatalog = null; // 事件类型目录（懒加载缓存）
 let webhooksById = {};
 let webhookSubs = []; // 订阅列表缓存（投递记录加载后用它重渲染「最近投递」列）
+let webhookTestResults = {}; // 订阅 id → 最近一次「测试」结果（内联展示；不参与持久化）
 
 function bindWebhookConsole() {
   $("adminTabWebhooks").onclick = () => switchAdminTab("webhooks");
@@ -8772,6 +8773,14 @@ function renderWebhookRows() {
     } else if (s.lastDeliveredAt) {
       lastCell = `<span class="muted" title="${escapeHtml(t("admin.whLastEarlierTip"))}">🕒 ${escapeHtml(fmtDateTime(Number(s.lastDeliveredAt) || 0))}</span>`;
     }
+    // 测试投递的内联结果（1.0.290）：只影响本行，不依赖下方投递表
+    const tr = webhookTestResults[s.id];
+    const testLine = !tr ? ""
+      : tr.pending
+        ? `<div class="wh-test-result muted">⏳ ${escapeHtml(t("admin.whTestRunning"))}</div>`
+        : tr.ok
+          ? `<div class="wh-test-result" title="${escapeHtml(t("admin.whTestResultTip"))}">✅ ${escapeHtml(String(tr.statusCode || "OK"))} · ${escapeHtml(fmtTime(Number(tr.atMs) || Date.now()))} · ${escapeHtml(String(tr.durationMs ?? 0))}ms</div>`
+          : `<div class="wh-test-result" title="${escapeHtml(t("admin.whTestResultTip"))}">❌ ${escapeHtml(tr.error || ("HTTP " + tr.statusCode))} · ${escapeHtml(fmtTime(Number(tr.atMs) || Date.now()))}</div>`;
     return `<tr>
       <td>${escapeHtml(s.name || "—")}</td>
       <td style="word-break:break-all">${escapeHtml(s.url)}</td>
@@ -8782,6 +8791,7 @@ function renderWebhookRows() {
         <button class="chip-btn" data-act="test" data-id="${id}" type="button">${t("admin.whTest")}</button>
         <button class="chip-btn" data-act="edit" data-id="${id}" type="button">${t("admin.whEdit")}</button>
         <button class="chip-btn danger" data-act="del" data-id="${id}" type="button">${t("admin.whDel")}</button>
+        ${testLine}
       </td></tr>`;
   }).join("");
 }
@@ -8945,6 +8955,7 @@ async function saveWebhook() {
     const d = await res.json().catch(() => null);
     if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
     toast(t("admin.whSaved"));
+    delete webhookTestResults[id]; // 配置变了，旧的测试结果不再可信
     await loadWebhooks();
     if (!id && d && d.secret) {
       // 新建：密钥仅此一次返回，留在弹窗里供复制
@@ -8965,17 +8976,32 @@ async function deleteWebhook(id) {
   });
   if (!res.ok) { const d = await res.json().catch(() => null); toast(errMsg(d, "HTTP " + res.status)); return; }
   toast(t("admin.whDeleted"));
+  delete webhookTestResults[id];
   await loadWebhooks();
 }
 
 async function testWebhook(id) {
-  const res = await fetch(`/ag-ui/admin/webhooks/${encodeURIComponent(id)}/test`, {
-    method: "POST", headers: { Authorization: "Bearer " + state.token },
-  });
-  const d = await res.json().catch(() => null);
-  if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
-  toast(d && d.ok ? t("admin.whTestOk", { code: d.statusCode || "OK" }) : t("admin.whTestFail", { err: (d && d.error) || "" }));
-  loadWebhookDeliveries();
+  // 1.0.290：先把行内状态置为「测试中」，结果直接写回该行（不依赖 toast / 投递表）
+  webhookTestResults[id] = { pending: true, atMs: Date.now() };
+  renderWebhookRows();
+  try {
+    const res = await fetch(`/ag-ui/admin/webhooks/${encodeURIComponent(id)}/test`, {
+      method: "POST", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      webhookTestResults[id] = { ok: false, error: errMsg(d, "HTTP " + res.status), atMs: Date.now() };
+      toast(errMsg(d, "HTTP " + res.status));
+    } else {
+      webhookTestResults[id] = d || { ok: false, error: "empty response", atMs: Date.now() };
+      toast(d && d.ok ? t("admin.whTestOk", { code: d.statusCode || "OK" }) : t("admin.whTestFail", { err: (d && d.error) || "" }));
+    }
+  } catch (ex) {
+    webhookTestResults[id] = { ok: false, error: ex.message, atMs: Date.now() };
+    toast(ex.message);
+  }
+  renderWebhookRows();
+  loadWebhookDeliveries(); // 测试投递也会进投递日志 → 刷新「最近投递」列
 }
 
 /* ============ 管理员控制台：托管 API 密钥（对外集成凭证） ============ */

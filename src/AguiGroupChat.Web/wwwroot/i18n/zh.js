@@ -1961,6 +1961,8 @@ window.I18N_DICTS.zh = {
   "admin.whLastOkTip": "最近一次投递成功",
   "admin.whLastFailTip": "最近一次投递失败：{err}（第 {attempt} 次）",
   "admin.whLastEarlierTip": "最近投递时间（状态见下方投递记录）",
+  "admin.whTestRunning": "测试中…",
+  "admin.whTestResultTip": "本次测试投递结果",
 
   /* --- Webhook 事件分组（1.0.285） --- */
   "whGroup.group": "知聚",

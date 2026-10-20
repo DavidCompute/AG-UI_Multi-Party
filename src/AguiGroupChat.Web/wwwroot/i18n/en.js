@@ -1967,6 +1967,8 @@ window.I18N_DICTS.en = {
   "admin.whLastOkTip": "Last delivery succeeded",
   "admin.whLastFailTip": "Last delivery failed: {err} (attempt {attempt})",
   "admin.whLastEarlierTip": "Last delivery time (see the delivery log below for status)",
+  "admin.whTestRunning": "Testing…",
+  "admin.whTestResultTip": "Result of this test delivery",
 
   /* --- Webhook event groups (1.0.285) --- */
   "whGroup.group": "Circles",
