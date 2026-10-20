@@ -28,8 +28,8 @@ English: `docs/user-guide.md` / `en.md` §5.4.6 (resolution receipts + click-thr
 ## 测试
 # Tests
 
-中文：`dotnet test` 全量通过（1856 → **1858**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1995，missing 0**；四个守卫脚本全过；Docker 重建并部署（`/health` 200，事件目录实测 **23 类**）。
-English: full `dotnet test` passes (1856 → **1858**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1995, missing 0**; all four guard scripts pass; Docker was rebuilt and redeployed (`/health` 200, event catalog observed at **23 types**).
+中文：`dotnet test` 全量通过（1856 → **1858**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1995，missing 0**；四个守卫脚本全过；Playwright UI 回归 `ui-imglib-pending-click.mjs` **9/9**（通知进中心 → 点击直达 → 待审批块与批量按钮可见，列表用路由桩不写真实数据）；Docker 重建并部署（`/health` 200，事件目录实测 **23 类**）。
+English: full `dotnet test` passes (1856 → **1858**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1995, missing 0**; all four guard scripts pass; the Playwright UI regression `ui-imglib-pending-click.mjs` passes **9/9** (notification lands in the center → click-through → pending block and batch buttons visible; the list is route-stubbed and writes no real data); Docker was rebuilt and redeployed (`/health` 200, event catalog observed at **23 types**).
 
 ---
 

@@ -136,6 +136,7 @@ SAMPLES=../artifacts/e2e HEADLESS=1 node ui-doc-slides.mjs    # 23 项：办公�
 HEADLESS=1 node ui-play-sprites.mjs       # 23 项：演示文稿形状级动画（底图 + 精灵，含逐段行带切分）
 HEADLESS=1 node ui-kb-auto-toggle.mjs     # 17 项：「显示自动沉淀的知识库」开关（知识库管理 + 绑定知识库弹窗，两处共享状态）
 HEADLESS=1 node ui-kb-strictness.mjs      # 知识库检索严格度 + 操作列几何 + 自动沉淀库开关（检索部分需 embedding 可用）
+HEADLESS=1 node ui-imglib-pending-click.mjs  # 9 项：待审批通知进通知中心 → 点击直达图库管理（列表用路由桩，不写数据）
 HEADLESS=1 node ui-kb-auto-toggle.mjs     # 17 项：「显示自动沉淀的知识库」开关（知识库管理 + 绑定知识库弹窗，两处共享状态）
 ```
 
