@@ -2292,6 +2292,15 @@
           </table>
         </div>
         <div class="modal-title" style="margin-top:14px" data-i18n="admin.whDeliveries">最近投递</div>
+        <div class="admin-toolbar" style="margin:2px 0 6px">
+          <select id="whDelivEvent" class="modal-input" style="width:auto;min-width:150px" data-i18n-title="admin.whDelivEventTip"></select>
+          <select id="whDelivStatus" class="modal-input" style="width:auto;min-width:120px">
+            <option value="" data-i18n="admin.whDelivAllResults">全部结果</option>
+            <option value="ok" data-i18n="admin.whDelivOk">成功</option>
+            <option value="fail" data-i18n="admin.whDelivFail">失败</option>
+          </select>
+          <span id="whDelivMeta" class="form-hint"></span>
+        </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead><tr><th data-i18n="admin.whColTime">时间</th><th data-i18n="admin.whColEvent">事件</th><th data-i18n="admin.whColStatus">结果</th><th data-i18n="admin.whColDetail">详情</th></tr></thead>

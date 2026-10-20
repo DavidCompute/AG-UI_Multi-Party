@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.287 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.287 Release Notes (current Windows desktop release)
+
+**版本说明**：**Webhook 排查更直接**——控制台的「最近投递」支持按事件类型与结果（成功 / 失败）筛选，并显示「显示 X / Y 条」；事件下拉来自实际投递（含测试 `PING`），集成出问题时可秒定位到哪类事件、哪个方向在失败。
+**Version note**: **Faster webhook triage** — the console's **Recent deliveries** table filters by event type and result (succeeded / failed) and shows "showing X / Y"; the event dropdown is built from actual deliveries (including the `PING` test), so a failing integration can be narrowed to a specific event type and direction in seconds.
+
+## 变更
+# Changes
+
+中文：
+- **筛选**：新增事件类型下拉（全部 + 实际出现过的类型）与结果下拉（全部 / 成功 / 失败），两者叠加生效；计数「显示 X / Y 条」，无匹配时提示「没有匹配的投递记录」。
+- **数据来源不变**：仍用 `GET /ag-ui/admin/webhooks/deliveries`（最近 100 条）；一次拉取后**前端筛选**，最多渲染 50 条（原为 30）。
+- **保留选择**：刷新或重新打开页签后，事件下拉会尽量保留原选项（类型不存在时回落到「全部」）。
+- **无后端变更**：路由、响应格式与权限均未动。
+- **回归测试**：`ui-webhook-events.mjs` 扩到 **29 项**——投递桩 4 条、事件筛选 2 条、叠加失败 1 条、无匹配组合提示、清空筛选恢复；已随原有 CI 步骤自动执行。
+
+English:
+- **Filters**: a new event-type dropdown (All + types actually seen) and a result dropdown (All / Succeeded / Failed) combine; the counter reads "showing X / Y" and an empty combination shows "No matching deliveries".
+- **Same data source**: still `GET /ag-ui/admin/webhooks/deliveries` (latest 100); filtering runs in the browser after one fetch, rendering at most 50 rows (previously 30).
+- **Selection is preserved**: after a refresh or reopening the tab, the event dropdown keeps the previous choice when that type still exists (otherwise falls back to All).
+- **No backend change**: routes, response shape and permissions are untouched.
+- **Regression test**: `ui-webhook-events.mjs` grows to **29 checks** — four stubbed deliveries, event filter → 2, add failed → 1, an empty combination hint, and clearing filters restores 4; it runs automatically in the existing CI step.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（投递筛选）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.287。
+English: `docs/user-guide.md` / `en.md` §8.19 (delivery filtering); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.287.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.286 的全量结果 **1862 通过 / 0 失败**）；`node --check` 前端脚本 + UI 脚本；i18n 审计 **zh=en=2029，missing 0**；四个守卫脚本全过；Playwright **29/29**（事件分组 + 投递筛选）与 **18/18**（待审批直达 + 历史筛选）；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.286's full run of **1862 passed / 0 failed**); `node --check` passes for the frontend and UI scripts; the i18n audit is **zh=en=2029, missing 0**; all four guard scripts pass; Playwright **29/29** (grouping + delivery filters) and **18/18** (pending click-through + history filters); Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.286 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.286 Release Notes (current Windows desktop release)
 

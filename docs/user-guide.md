@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.286**
+> 适用版本：**1.0.287**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -4493,6 +4493,8 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 **可选事件类型（23 类）**：`GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`、`GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`、`TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`、`GROUP_MESSAGE_RECALLED`、`AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`、`TOOL_CALL_START` / `TOOL_CALL_RESULT`、`GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`、`RUN_ERROR`、**`QUOTA_THRESHOLD`（1.0.270）**、**`QUOTA_OVERRIDE_EXPIRING`（1.0.274）**、**`QUOTA_OVERRIDE_EXPIRED`（1.0.275）**、**`IMAGE_WRITE_PENDING`（1.0.281）**、**`IMAGE_WRITE_RESOLVED`（1.0.282）**。**空订阅（= 全部）会排除**高频噪声：`TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`。
 
 **管理界面分组（1.0.285）**：订阅弹窗把事件按 **8 类**展示——🏠 知聚 / 👥 成员 / 💬 消息 / 🤝 协作与工具 / 🧵 话题 / ⚙️ 运行 / 📊 配额 / 🖼️ 图库；每组头部显示「已选 / 总数」与「全选 / 清空」。事件目录新增但客户端尚未登记分组的类型自动落入「📦 其他」，不会因升级顺序而消失。
+
+**最近投递筛选（1.0.287）**：控制台的「最近投递」支持按**事件类型**与**结果**（成功 / 失败）筛选，并显示「显示 X / Y 条」；事件下拉来自实际投递记录（含测试用 `PING`），筛选在前端完成（一次拉取最近 100 条，最多展示 50 条）。
 
 **`QUOTA_THRESHOLD`（配额预警推送，1.0.270）**：不是群广播事件，**只经出站 Webhook 推送**。当某用户 / 某知聚的当日用量**首次**跨过配额的 80%（`warn`）或 100%（`over`）时推送一条；`data` 为：
 

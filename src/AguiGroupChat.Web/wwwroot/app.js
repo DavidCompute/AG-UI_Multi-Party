@@ -8689,6 +8689,9 @@ function bindWebhookConsole() {
   $("adminTabWebhooks").onclick = () => switchAdminTab("webhooks");
   $("whAddBtn").onclick = () => openWebhookModal(null);
   $("whRefreshBtn").onclick = () => { loadWebhooks(); loadWebhookDeliveries(); };
+  // 最近投递：事件类型 / 结果筛选（1.0.287）
+  $("whDelivEvent").addEventListener("change", renderWebhookDeliveries);
+  $("whDelivStatus").addEventListener("change", renderWebhookDeliveries);
   $("whSaveBtn").onclick = saveWebhook;
   $("whCancelBtn").onclick = () => $("webhookModal").classList.add("hidden");
   $("whSecretCopy").onclick = () => {
@@ -8740,26 +8743,53 @@ async function loadWebhooks() {
   }
 }
 
-/** 拉取最近投递记录并渲染（新→旧，最多 30 条）。 */
+/** 最近投递记录（新→旧）；一次拉 100 条，前端筛选与截断展示。 */
+let whDeliveryList = [];
+
+/** 拉取最近投递记录并渲染（按事件类型 / 成败筛选，最多展示 50 条）。 */
 async function loadWebhookDeliveries() {
   const rows = $("adminWebhookDeliveryRows");
   if (!rows) return;
   try {
     const res = await fetch("/ag-ui/admin/webhooks/deliveries", { headers: { Authorization: "Bearer " + state.token } });
     const list = await res.json().catch(() => null);
-    if (!res.ok || !Array.isArray(list) || !list.length) {
-      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.whNoDeliveries")}</td></tr>`;
-      return;
-    }
-    rows.innerHTML = list.slice(0, 30).map((d) => {
-      const time = new Date(d.atMs).toLocaleString();
-      const st = d.ok
-        ? `<span class="tag-active">${escapeHtml(String(d.statusCode || "OK"))}</span>`
-        : `<span class="tag-disabled">${escapeHtml(d.error || ("HTTP " + d.statusCode))}</span>`;
-      return `<tr><td>${escapeHtml(time)}</td><td>${escapeHtml(d.eventType)}</td><td>${st}</td>
-        <td style="word-break:break-all">${escapeHtml(d.url)} · #${d.attempt} · ${d.durationMs}ms</td></tr>`;
-    }).join("");
-  } catch { rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.whNoDeliveries")}</td></tr>`; }
+    whDeliveryList = Array.isArray(list) ? list : [];
+  } catch { whDeliveryList = []; }
+  renderWebhookDeliveries();
+}
+
+/** 渲染投递记录：事件类型 / 结果两个筛选器 + 「显示 X / Y 条」。 */
+function renderWebhookDeliveries() {
+  const rows = $("adminWebhookDeliveryRows");
+  const evSel = $("whDelivEvent"), stSel = $("whDelivStatus");
+  if (!rows || !evSel || !stSel) return;
+
+  // 事件选项从实际投递里取（含测试用的 PING），保留当前选择
+  const prev = evSel.value;
+  const types = [...new Set(whDeliveryList.map((d) => d.eventType).filter(Boolean))];
+  evSel.innerHTML = `<option value="">${escapeHtml(t("admin.whDelivAllEvents"))}</option>`
+    + types.map((tp) => `<option value="${escapeHtml(tp)}">${escapeHtml(tp)}</option>`).join("");
+  evSel.value = types.includes(prev) ? prev : "";
+
+  const ev = evSel.value, st = stSel.value;
+  const filtered = whDeliveryList.filter((d) =>
+    (!ev || d.eventType === ev) && (!st || (st === "ok" ? !!d.ok : !d.ok)));
+  const shown = filtered.slice(0, 50);
+  $("whDelivMeta").textContent = t("admin.whDelivMeta", { shown: shown.length, total: whDeliveryList.length });
+
+  if (!shown.length) {
+    const key = whDeliveryList.length ? "admin.whNoMatchingDeliveries" : "admin.whNoDeliveries";
+    rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${escapeHtml(t(key))}</td></tr>`;
+    return;
+  }
+  rows.innerHTML = shown.map((d) => {
+    const time = new Date(d.atMs).toLocaleString();
+    const st = d.ok
+      ? `<span class="tag-active">${escapeHtml(String(d.statusCode || "OK"))}</span>`
+      : `<span class="tag-disabled">${escapeHtml(d.error || ("HTTP " + d.statusCode))}</span>`;
+    return `<tr><td>${escapeHtml(time)}</td><td>${escapeHtml(d.eventType)}</td><td>${st}</td>
+      <td style="word-break:break-all">${escapeHtml(d.url)} · #${d.attempt} · ${d.durationMs}ms</td></tr>`;
+  }).join("");
 }
 
 async function ensureWebhookCatalog() {

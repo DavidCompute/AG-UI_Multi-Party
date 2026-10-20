@@ -2,7 +2,8 @@
 //   1. 管理控制台 → Webhook → 新建订阅：事件按类别分组渲染（知聚 / 成员 / 消息 / 协作与工具 / 话题 / 运行 / 配额 / 图库）；
 //   2. 事件目录里的每个类型在界面上恰好出现一次（无遗漏、无重复）；
 //   3. 组头「全选 / 清空」可整组勾选与取消，计数同步（0/3 → 3/3 → 0/3）；
-//   4. 无页面 JS 异常；不创建任何真实订阅。
+//   4. 「最近投递」可按事件类型 / 成败筛选，计数「显示 X / Y」与无匹配提示正确；
+//   5. 无页面 JS 异常；不创建任何真实订阅。
 // 用法：cd tools && HEADLESS=1 node ui-webhook-events.mjs
 import { chromium } from "playwright";
 
@@ -17,11 +18,21 @@ const check = (label, cond, extra = "") => {
   else { fail++; console.log("  FAIL  " + label + (extra ? "  — " + extra : "")); }
 };
 
+const DELIVERIES = [
+  { atMs: Date.now() - 1_000, eventType: "GROUP_CREATED", ok: true, statusCode: 200, url: "https://example.com/hook", attempt: 1, durationMs: 12 },
+  { atMs: Date.now() - 2_000, eventType: "GROUP_CREATED", ok: false, statusCode: 500, error: "HTTP 500", url: "https://example.com/hook", attempt: 3, durationMs: 30 },
+  { atMs: Date.now() - 3_000, eventType: "IMAGE_WRITE_PENDING", ok: true, statusCode: 200, url: "https://example.com/hook", attempt: 1, durationMs: 15 },
+  { atMs: Date.now() - 4_000, eventType: "PING", ok: true, statusCode: 200, url: "https://example.com/hook", attempt: 1, durationMs: 9 },
+];
+
 const browser = await chromium.launch({ headless: HEADLESS });
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+
+// 投递记录用路由桩（只用于渲染 / 筛选验证，不依赖真实投递）
+await page.route("**/ag-ui/admin/webhooks/deliveries", (route) => route.fulfill({ json: DELIVERIES }));
 
 try {
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
@@ -87,7 +98,35 @@ try {
   check("点「清空」→ 整组取消", noneChecked);
   check("取消后计数回到 0/3", (await quotaCount.innerText()).trim() === "0/3", (await quotaCount.innerText()).trim());
 
-  // 4) 无页面 JS 异常
+  // 4) 最近投递：事件类型 / 成败筛选
+  const delivRows = page.locator("#adminWebhookDeliveryRows tr");
+  await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 4);
+  check("最近投递渲染 4 条（桩）", (await delivRows.count()) === 4, "rows=" + (await delivRows.count()));
+  check("计数显示 4 / 4", (await page.locator("#whDelivMeta").innerText()).includes("4 / 4"), (await page.locator("#whDelivMeta").innerText()).trim());
+
+  await page.waitForFunction(() => !!document.querySelector('#whDelivEvent option[value="GROUP_CREATED"]'));
+  await page.selectOption("#whDelivEvent", "GROUP_CREATED");
+  await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 2);
+  check("按事件筛选 → 2 条", true);
+  check("事件筛选后计数 2 / 4", (await page.locator("#whDelivMeta").innerText()).includes("2 / 4"));
+
+  await page.selectOption("#whDelivStatus", "fail");
+  await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 1);
+  const failText = (await page.locator("#adminWebhookDeliveryRows").innerText());
+  check("叠加「失败」→ 仅失败项", failText.includes("HTTP 500"), failText.replace(/\s+/g, " ").slice(0, 80));
+
+  await page.selectOption("#whDelivEvent", "PING");
+  await page.waitForSelector("#adminWebhookDeliveryRows .admin-empty", { timeout: 3000 });
+  check("无匹配组合 → 提示无匹配", (await page.locator("#adminWebhookDeliveryRows .admin-empty").innerText()).includes("没有匹配"));
+  check("无匹配时计数 0 / 4", (await page.locator("#whDelivMeta").innerText()).includes("0 / 4"));
+
+  // 复位，避免影响后续断言 / 眼观
+  await page.selectOption("#whDelivStatus", "");
+  await page.selectOption("#whDelivEvent", "");
+  await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 4);
+  check("清空筛选 → 恢复 4 条", true);
+
+  // 5) 无页面 JS 异常
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));
 } catch (e) {
   fail++;

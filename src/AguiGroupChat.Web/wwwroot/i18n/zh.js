@@ -1948,6 +1948,13 @@ window.I18N_DICTS.zh = {
   "admin.whEventsHint": "不勾选 = 除高频流式增量（正文/思考/输入状态/已读）外的全部事件；按类别分组，可整组全选。/清空。",
   "admin.whSelectAll": "全选",
   "admin.whClearGroup": "清空",
+  "admin.whDelivAllEvents": "全部事件",
+  "admin.whDelivAllResults": "全部结果",
+  "admin.whDelivOk": "成功",
+  "admin.whDelivFail": "失败",
+  "admin.whDelivMeta": "显示 {shown} / {total} 条",
+  "admin.whDelivEventTip": "按事件类型筛选",
+  "admin.whNoMatchingDeliveries": "没有匹配的投递记录",
 
   /* --- Webhook 事件分组（1.0.285） --- */
   "whGroup.group": "知聚",

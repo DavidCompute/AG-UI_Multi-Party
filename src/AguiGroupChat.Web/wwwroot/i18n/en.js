@@ -1954,6 +1954,13 @@ window.I18N_DICTS.en = {
   "admin.whEventsHint": "Leave all unchecked = all events except high-frequency streaming deltas (content / reasoning / typing / read). Events are grouped by category; each group can be selected / cleared at once.",
   "admin.whSelectAll": "Select all",
   "admin.whClearGroup": "Clear",
+  "admin.whDelivAllEvents": "All events",
+  "admin.whDelivAllResults": "All results",
+  "admin.whDelivOk": "Succeeded",
+  "admin.whDelivFail": "Failed",
+  "admin.whDelivMeta": "Showing {shown} / {total}",
+  "admin.whDelivEventTip": "Filter by event type",
+  "admin.whNoMatchingDeliveries": "No matching deliveries",
 
   /* --- Webhook event groups (1.0.285) --- */
   "whGroup.group": "Circles",
