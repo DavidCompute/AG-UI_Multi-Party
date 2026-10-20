@@ -98,6 +98,15 @@ jobs:
           HEADLESS: "1"
         run: node ui-imglib-pending-click.mjs
 
+      - name: Run webhook event grouping regression
+        working-directory: tools
+        env:
+          BASE_URL: http://127.0.0.1:5200
+          USERNAME: david
+          PASSWORD: lingtong
+          HEADLESS: "1"
+        run: node ui-webhook-events.mjs
+
       - name: Dump web log
         if: failure()
         run: tail -n 200 /tmp/web.log

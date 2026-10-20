@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.285 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.285 Release Notes (current Windows desktop release)
+
+**版本说明**：**Webhook 事件目录不再一长串平铺**——订阅弹窗按 8 个领域分组（🏠 知聚 / 👥 成员 / 💬 消息 / 🤝 协作与工具 / 🧵 话题 / ⚙️ 运行 / 📊 配额 / 🖼️ 图库），每组头部显示「已选 / 总数」并提供「全选 / 清空」；目录里将来新增但客户端尚未登记分组的类型自动落到「📦 其他」。
+**Version note**: **The webhook event catalog is no longer one long flat list** — the subscription dialog groups events into 8 domains (🏠 Circles / 👥 Members / 💬 Messages / 🤝 Collaboration & tools / 🧵 Topics / ⚙️ Runs / 📊 Quota / 🖼️ Image libraries), each header showing "selected / total" with Select all / Clear; a future catalog type the client does not know yet lands in **📦 Other**.
+
+## 变更
+# Changes
+
+中文：
+- **分组渲染**：`WEBHOOK_EVENT_GROUPS` 声明「分组 → 事件类型」映射，`webhookEventGroups()` 按服务端目录过滤，未知类型归入 `other`；每组标题本地化（`whGroup.*`）。
+- **整组操作**：组头按钮在「全选 / 清空」间切换，计数实时更新（如 0/3 → 3/3）；单条勾选同样更新计数与按钮文案。
+- **布局**：`#whEventList` 改为专用滚动容器，组内选项两列自适应栅格（宽屏更紧凑），组间分隔线区分。
+- **无需改后端**：仍使用 `GET /ag-ui/admin/webhooks/events` 的字符串数组（向后兼容）；保存时仍收集所有勾选项，请求体不变。
+- **回归测试**：新增 Playwright 脚本 `ui-webhook-events.mjs`（**21 项**）——8 组齐全且无「其他」、23 个类型恰好各出现一次、组内全选/清空与计数联动、无页面 JS 异常；已接入手工 UI 回归工作流。
+
+English:
+- **Grouped rendering**: `WEBHOOK_EVENT_GROUPS` declares the "group → event types" mapping; `webhookEventGroups()` filters it against the server catalog and routes unknown types to `other`; group titles are localized (`whGroup.*`).
+- **Whole-group actions**: the header button toggles between Select all / Clear and the counter updates live (e.g. 0/3 → 3/3); individual checkboxes update the counter and button label too.
+- **Layout**: `#whEventList` becomes a dedicated scroll container; options inside a group use a responsive two-column grid (denser on wide screens), with separators between groups.
+- **No backend change**: still consumes the `GET /ag-ui/admin/webhooks/events` string array (backwards compatible); saving still collects every checked item, so the request body is unchanged.
+- **Regression test**: new Playwright script `ui-webhook-events.mjs` (**21 checks**) — all 8 groups present with no "Other", the 23 types appear exactly once, group select-all / clear and counters stay in sync, and no page JS errors; wired into the manual UI regression workflow.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（事件分组与整组操作）；`tools/README-playwright.md`（新脚本与 CI 步骤）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.285。
+English: `docs/user-guide.md` / `en.md` §8.19 (grouping and whole-group actions); `tools/README-playwright.md` (new script and CI step); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.285.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.284 的全量结果 **1861 通过 / 0 失败**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本 + 新 UI 脚本；i18n 审计 **zh=en=2013，missing 0**；四个守卫脚本全过；Playwright **21/21**；Docker 重建并部署（`/health` 200，事件目录 **23 类**）。
+English: **no server-side logic changed** this round (carrying over 1.0.284's full run of **1861 passed / 0 failed**); `dotnet build` reports **0 errors**; `node --check` passes for the three frontend scripts plus the new UI script; the i18n audit is **zh=en=2013, missing 0**; all four guard scripts pass; Playwright **21/21**; Docker was rebuilt and redeployed (`/health` 200, catalog **23 types**).
+
+---
+
 # AG-UI 群聊桌面版 1.0.284 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.284 Release Notes (current Windows desktop release)
 

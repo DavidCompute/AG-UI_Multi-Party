@@ -8727,6 +8727,32 @@ async function ensureWebhookCatalog() {
   return webhookEventCatalog;
 }
 
+/** Webhook 事件分组（1.0.285）：23 类平铺太长，按领域归类；未登记的新类型自动落到「其他」。 */
+const WEBHOOK_EVENT_GROUPS = [
+  { key: "group", icon: "🏠", types: ["GROUP_CREATED", "GROUP_UPDATED", "GROUP_DISBANDED"] },
+  { key: "members", icon: "👥", types: ["GROUP_MEMBER_JOINED", "GROUP_MEMBER_LEFT", "GROUP_MEMBER_UPDATED"] },
+  { key: "messages", icon: "💬", types: ["TEXT_MESSAGE_START", "TEXT_MESSAGE_END", "TEXT_MESSAGE_ATTACHMENTS", "GROUP_MESSAGE_RECALLED"] },
+  { key: "interactions", icon: "🤝", types: ["AGENT_INTERACTION_REQUEST", "AGENT_INTERACTION_RESOLVED", "TOOL_CALL_START", "TOOL_CALL_RESULT"] },
+  { key: "topics", icon: "🧵", types: ["GROUP_TOPIC_CREATED", "GROUP_TOPIC_DELETED", "GROUP_TOPIC_CLEARED"] },
+  { key: "runs", icon: "⚙️", types: ["RUN_ERROR"] },
+  { key: "quota", icon: "📊", types: ["QUOTA_THRESHOLD", "QUOTA_OVERRIDE_EXPIRING", "QUOTA_OVERRIDE_EXPIRED"] },
+  { key: "images", icon: "🖼️", types: ["IMAGE_WRITE_PENDING", "IMAGE_WRITE_RESOLVED"] },
+];
+
+/** 把服务端事件目录归入分组（保持服务端顺序的声明顺序；未知类型追加「其他」）。 */
+function webhookEventGroups(catalog) {
+  const known = new Set(catalog);
+  const used = new Set();
+  const groups = WEBHOOK_EVENT_GROUPS.map((g) => {
+    const types = g.types.filter((tp) => known.has(tp));
+    types.forEach((tp) => used.add(tp));
+    return { ...g, types };
+  }).filter((g) => g.types.length > 0);
+  const other = catalog.filter((tp) => !used.has(tp));
+  if (other.length) groups.push({ key: "other", icon: "📦", types: other });
+  return groups;
+}
+
 /** 打开新建 / 编辑订阅弹窗；编辑时预填已选事件（密钥不回显）。 */
 async function openWebhookModal(sub) {
   const isEdit = !!sub;
@@ -8740,14 +8766,44 @@ async function openWebhookModal(sub) {
   $("whSecretValue").textContent = "";
   const catalog = await ensureWebhookCatalog();
   const selected = new Set(isEdit ? (sub.eventTypes || []) : []);
-  $("whEventList").innerHTML = catalog.map((tp) => {
-    const on = selected.has(tp);
-    return `<label class="pick-item${on ? " checked" : ""}">
-      <input type="checkbox" value="${escapeHtml(tp)}" ${on ? "checked" : ""} />
-      <span class="pick-name">${escapeHtml(tp)}</span></label>`;
-  }).join("");
-  $("whEventList").querySelectorAll("input[type=checkbox]").forEach((cb) => {
-    cb.onchange = () => cb.closest("label")?.classList.toggle("checked", cb.checked);
+  $("whEventList").innerHTML = webhookEventGroups(catalog).map((g) => `
+    <div class="wh-ev-group" data-group="${g.key}">
+      <div class="wh-ev-head">
+        <span class="wh-ev-title">${g.icon} ${escapeHtml(t("whGroup." + g.key))}</span>
+        <span class="wh-ev-count"></span>
+        <button class="chip-btn wh-ev-toggle" type="button"></button>
+      </div>
+      <div class="member-pick">
+        ${g.types.map((tp) => {
+          const on = selected.has(tp);
+          return `<label class="pick-item${on ? " checked" : ""}">
+            <input type="checkbox" value="${escapeHtml(tp)}" ${on ? "checked" : ""} />
+            <span class="pick-name" title="${escapeHtml(tp)}">${escapeHtml(tp)}</span></label>`;
+        }).join("")}
+      </div>
+    </div>`).join("");
+  $("whEventList").querySelectorAll(".wh-ev-group").forEach((group) => {
+    const boxes = [...group.querySelectorAll("input[type=checkbox]")];
+    const toggle = group.querySelector(".wh-ev-toggle");
+    const count = group.querySelector(".wh-ev-count");
+    const refresh = () => {
+      const on = boxes.filter((b) => b.checked).length;
+      count.textContent = `${on}/${boxes.length}`;
+      toggle.textContent = on === boxes.length ? t("admin.whClearGroup") : t("admin.whSelectAll");
+    };
+    boxes.forEach((cb) => (cb.onchange = () => {
+      cb.closest("label")?.classList.toggle("checked", cb.checked);
+      refresh();
+    }));
+    toggle.onclick = () => {
+      const all = boxes.every((b) => b.checked);
+      boxes.forEach((cb) => {
+        cb.checked = !all;
+        cb.closest("label")?.classList.toggle("checked", cb.checked);
+      });
+      refresh();
+    };
+    refresh();
   });
   $("webhookModal").classList.remove("hidden");
 }

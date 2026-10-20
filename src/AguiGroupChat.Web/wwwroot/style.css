@@ -1483,6 +1483,20 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .member-pick .pick-item .pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .member-pick .pick-item .pick-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .member-pick .pick-item .tag-agent { flex-shrink: 0; }
+/* Webhook 事件目录分组（1.0.285）：按类别折叠展示 + 每组全选 / 清空 */
+.wh-ev-list {
+  max-height: 34vh; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px;
+}
+.wh-ev-group + .wh-ev-group { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.wh-ev-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; }
+.wh-ev-title { font-size: 13px; font-weight: 600; }
+.wh-ev-count { font-size: 12px; color: var(--muted); }
+.wh-ev-head .chip-btn { margin-left: auto; }
+.wh-ev-group .member-pick {
+  margin-top: 2px; max-height: none; overflow: visible; border: none; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 8px;
+}
 /* 选择弹窗内的成员头像：与成员列表一致（状态图标叠加右下角） */
 .member-pick .pick-item .member-avatar {
   width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;

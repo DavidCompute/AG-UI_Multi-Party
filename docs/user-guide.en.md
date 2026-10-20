@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.284**
+> Applies to version: **1.0.285**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4499,6 +4499,8 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 **Subscription fields**: `name`, `url` (**must be an absolute http / https URL**, else 400), `eventTypes` (none selected = all except high-frequency streaming deltas; types outside the catalog are rejected with 400), `groupId` (optional, scopes pushes to one circle), `enabled`.
 
 **Selectable event types (23)**: `GROUP_CREATED` / `GROUP_UPDATED` / `GROUP_DISBANDED`, `GROUP_MEMBER_JOINED` / `GROUP_MEMBER_LEFT` / `GROUP_MEMBER_UPDATED`, `TEXT_MESSAGE_START` / `TEXT_MESSAGE_END` / `TEXT_MESSAGE_ATTACHMENTS`, `GROUP_MESSAGE_RECALLED`, `AGENT_INTERACTION_REQUEST` / `AGENT_INTERACTION_RESOLVED`, `TOOL_CALL_START` / `TOOL_CALL_RESULT`, `GROUP_TOPIC_CREATED` / `GROUP_TOPIC_DELETED` / `GROUP_TOPIC_CLEARED`, `RUN_ERROR`, **`QUOTA_THRESHOLD` (1.0.270)**, **`QUOTA_OVERRIDE_EXPIRING` (1.0.274)**, **`QUOTA_OVERRIDE_EXPIRED` (1.0.275)**, **`IMAGE_WRITE_PENDING` (1.0.281)**, and **`IMAGE_WRITE_RESOLVED` (1.0.282)**. **An empty subscription (all) excludes** high-frequency noise: `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_REASONING` / `GROUP_TYPING` / `GROUP_MESSAGE_READ`.
+
+**Grouped in the admin UI (1.0.285)**: the subscription dialog renders events in **8 groups** — 🏠 Circles / 👥 Members / 💬 Messages / 🤝 Collaboration & tools / 🧵 Topics / ⚙️ Runs / 📊 Quota / 🖼️ Image libraries; each group header shows "selected / total" and a Select all / Clear toggle. A catalog type the client does not know yet falls into **📦 Other**, so nothing disappears when the server and UI upgrade at different times.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 
