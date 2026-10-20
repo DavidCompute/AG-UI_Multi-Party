@@ -45,6 +45,8 @@ window.I18N_DICTS.zh = {
 
   /* --- 通知中心 --- */
   "notif.title": "通知",
+  "notif.imageWritePendingTitle": "🖼️ 待审批的图库写入",
+  "notif.imageWritePendingBody": "技能 {skill} 请求写入「{lib}」：{file}（在「图库管理」中批准 / 拒绝）",
   "notif.clear": "清空",
   "notif.clearAll": "清除全部通知",
   "notif.empty": "暂无通知",
@@ -614,6 +616,9 @@ window.I18N_DICTS.zh = {
   "imgLib.reject": "拒绝",
   "imgLib.approved": "已批准并写入图库",
   "imgLib.rejectedToast": "已拒绝该写入",
+  "imgLib.approveAll": "全部批准",
+  "imgLib.rejectAll": "全部拒绝",
+  "imgLib.batchDone": "已处理 {ok} / {n} 项",
   "imgLib.col.name": "名称 / ID",
   "imgLib.col.images": "图片",
   "imgLib.col.desc": "描述",

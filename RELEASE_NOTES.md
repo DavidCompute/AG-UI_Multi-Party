@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.281 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.281 Release Notes (current Windows desktop release)
+
+**版本说明**：**待审批的图库写入变得「主动可感知」**——技能请求写已有/授权图库、入队的那一刻就推出站事件 `IMAGE_WRITE_PENDING`；管理员端每 60 秒轮询，新待审批项自动进通知中心；图库管理新增「全部批准 / 全部拒绝」，不必逐条点。
+**Version note**: **Pending image-library writes are now actively observable** — the moment a skill request is queued for an existing/authorized library, an `IMAGE_WRITE_PENDING` outbound event fires; the admin UI polls every 60 seconds and routes new items into the notification center; Image Library Management gains **Approve all / Reject all** instead of clicking item by item.
+
+## 变更
+# Changes
+
+中文：
+- **新事件 `IMAGE_WRITE_PENDING`**（`EventTypes.ImageWritePending` / `ImageWritePendingEvent`）：入队成功后、返回 202 之前推送；**不绑定知聚**（`groupId` 为空串），只有未限定知聚的订阅会收到；载荷 `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes / timestamp`。事件目录 **21 → 22**。
+- **通知中心主动提醒**：管理员登录后每 **60 秒**拉取一次待审批列表，**未见过**的项各生成一条 `approval` 通知（页面在后台时同时弹系统通知）；登出即停；去重集合按当前待审批项裁剪，长时间在线不会无限增长。
+- **批量审批**：图库管理顶部标题行新增「全部批准 / 全部拒绝」；服务端逐条调用单条端点，**单条失败不阻断**其余项，完成后提示「已处理 X / N 项」。
+- **回归测试**：新增 3 例——`WebhookTests.DeliverEventAsync_ImageWritePendingEnvelope`（信封 + 签名 + 载荷字段）与 `ImageWritePendingWebhookTests`（2 例，真实 HTTP 全链路：建库 → 平台签发审批型写入句柄 → 技能自令牌上传 → **202 pendingId** → 本地接收端收到带完整信封与 `data` 字段的 `IMAGE_WRITE_PENDING`；以及事件目录包含该类型）。
+
+English:
+- **New event `IMAGE_WRITE_PENDING`** (`EventTypes.ImageWritePending` / `ImageWritePendingEvent`): pushed after a successful enqueue and before the 202 response; **not bound to a circle** (empty `groupId`), so only subscriptions without a circle filter receive it; payload `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes / timestamp`. Event catalog **21 → 22**.
+- **Notification-center awareness**: after login an admin polls the pending list every **60 seconds** and creates one `approval` notification per **unseen** item (plus a system notification when the page is in the background); polling stops on logout; the dedup set is pruned to the current items so a long session does not grow unbounded.
+- **Batch approval**: the header row gains **Approve all / Reject all**; each item goes through the single-item endpoint, **one failure does not block the rest**, and a final toast reports "processed X / N".
+- **Regression tests**: 3 new cases — `WebhookTests.DeliverEventAsync_ImageWritePendingEnvelope` (envelope + signature + payload fields) and `ImageWritePendingWebhookTests` (2 cases; full HTTP path: create a library → mint an approval-required write handle → upload with the skill self token → **202 pendingId** → a local receiver gets `IMAGE_WRITE_PENDING` with the full envelope and `data` fields; plus the event catalog contains the type).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（主动感知 + 批量审批）、§8.19（事件目录 **22 类** + `IMAGE_WRITE_PENDING` 信封示例与投递语义）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.281。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (active awareness + batch approval) and §8.19 (catalog **22 types** + `IMAGE_WRITE_PENDING` envelope example and delivery semantics); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.281.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1853 → **1856**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=1995，missing 0**；`check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` 全过；Docker 重建并部署（`/health` 200），端到端由新增集成测试在真实 HTTP 路径上覆盖。
+English: full `dotnet test` passes (1853 → **1856**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=1995, missing 0**; `check-i18n-keys` / `check-orphan-keys` / `check-config-keys` / `check-docs-links` all pass; Docker was rebuilt and redeployed (`/health` 200), and the end-to-end path is covered by the new integration test over real HTTP.
+
+---
+
 # AG-UI 群聊桌面版 1.0.280 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.280 Release Notes (current Windows desktop release)
 

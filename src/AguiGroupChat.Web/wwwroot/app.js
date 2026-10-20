@@ -369,6 +369,7 @@ function enterApp(data) {
     resetChatState();
     applyPanelWidths(); // 恢复该用户上次拖拽的左 / 右栏宽度（需在 resetChatState 清除内联变量之后）
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
+    startImageWritePendingPolling(); // 管理员：待审批图库写入进通知中心（60s 轮询）
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
@@ -476,6 +477,7 @@ async function logout() {
   }
   if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; } // 登出后禁止继续重连
   stopKbPolling(); // 知识库轮询随登出停止，避免跨账号残留定时器
+  stopImageWritePendingPolling();
   if (state.ws) state.ws.close();
   state.ws = null;
   state.token = null;
@@ -3857,6 +3859,9 @@ async function loadImageWritePending() {
       </div>`).join("");
     box.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => decideImageWrite(b.dataset.approve, true)));
     box.querySelectorAll("[data-reject]").forEach((b) => (b.onclick = () => decideImageWrite(b.dataset.reject, false)));
+    const approveAll = $("imgLibPendingApproveAll"), rejectAll = $("imgLibPendingRejectAll");
+    if (approveAll) approveAll.onclick = () => decideAllPending(true);
+    if (rejectAll) rejectAll.onclick = () => decideAllPending(false);
   } catch { box.classList.add("hidden"); }
 }
 
@@ -3869,6 +3874,62 @@ async function decideImageWrite(id, approve) {
   toast(t(approve ? "imgLib.approved" : "imgLib.rejectedToast"));
   await loadImageWritePending();
   await loadImageLibs();
+}
+
+/** 批量批准 / 拒绝（逐个调用单条端点，失败不阻断其余项）。 */
+async function decideAllPending(approve) {
+  const box = $("imgLibPendingList") || document;
+  const selector = approve ? "[data-approve]" : "[data-reject]";
+  const ids = [...box.querySelectorAll(selector)].map((b) => b.dataset[approve ? "approve" : "reject"]);
+  if (!ids.length) return;
+  let ok = 0;
+  for (const id of ids) {
+    try {
+      const res = await fetch(`/ag-ui/admin/image-write-pending/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, {
+        method: "POST", headers: { Authorization: "Bearer " + state.token },
+      });
+      if (res.ok) ok++;
+    } catch { /* 单条失败不阻断 */ }
+  }
+  toast(t("imgLib.batchDone", { ok, n: ids.length }));
+  await loadImageWritePending();
+  await loadImageLibs();
+}
+
+/* ---- 待审批写入的主动感知（1.0.281）：管理员每 60s 轮询一次，新项进通知中心 ---- */
+let imageWritePollTimer = null;
+const imageWriteSeen = new Set();
+
+function startImageWritePendingPolling() {
+  if (!isAdminPlus() || imageWritePollTimer) return;
+  const tick = async () => {
+    if (!state.token) return;
+    try {
+      const res = await fetch("/ag-ui/admin/image-write-pending", { headers: { Authorization: "Bearer " + state.token } });
+      const d = await res.json().catch(() => null);
+      const items = (res.ok && d && Array.isArray(d.items)) ? d.items : [];
+      // 只保留仍待审批的 ID，避免长时间在线时集合无限增长
+      const live = new Set(items.map((it) => it.id));
+      for (const id of [...imageWriteSeen]) if (!live.has(id)) imageWriteSeen.delete(id);
+      for (const it of items) {
+        if (imageWriteSeen.has(it.id)) continue;
+        imageWriteSeen.add(it.id);
+        addNotification("approval", t("notif.imageWritePendingTitle"),
+          t("notif.imageWritePendingBody", {
+            file: it.fileName || "-",
+            lib: it.libName || it.libId || "-",
+            skill: it.skillId || "-",
+          }));
+      }
+    } catch { /* 下一轮重试 */ }
+  };
+  tick();
+  imageWritePollTimer = setInterval(tick, 60_000);
+}
+
+function stopImageWritePendingPolling() {
+  if (imageWritePollTimer) { clearInterval(imageWritePollTimer); imageWritePollTimer = null; }
+  imageWriteSeen.clear();
 }
 
 /* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */

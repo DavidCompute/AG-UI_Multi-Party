@@ -853,7 +853,10 @@
       <div class="kb-view">
         <!-- 待审批的技能写入（1.0.279，仅管理员）：技能写已有/授权图库时先入队 -->
         <div id="imgLibPending" class="hidden" style="margin-bottom:10px">
-          <p class="form-hint" style="margin:2px 0 6px"><b data-i18n="imgLib.pendingTitle">⏳ 待审批的技能写入</b> <span id="imgLibPendingMeta"></span></p>
+          <p class="form-hint" style="margin:2px 0 6px"><b data-i18n="imgLib.pendingTitle">⏳ 待审批的技能写入</b> <span id="imgLibPendingMeta"></span>
+            <button id="imgLibPendingApproveAll" class="chip-btn" type="button" data-i18n="imgLib.approveAll" style="margin-left:8px">全部批准</button>
+            <button id="imgLibPendingRejectAll" class="chip-btn danger" type="button" data-i18n="imgLib.rejectAll">全部拒绝</button>
+          </p>
           <div id="imgLibPendingList" class="kb-list"></div>
         </div>
         <div class="kb-toolbar">

@@ -45,6 +45,8 @@ window.I18N_DICTS.en = {
 
   /* --- 通知中心 --- */
   "notif.title": "Notifications",
+  "notif.imageWritePendingTitle": "🖼️ Pending image-library write",
+  "notif.imageWritePendingBody": "Skill {skill} wants to write {file} to \"{lib}\" (approve or reject in Image Library Management)",
   "notif.clear": "Clear",
   "notif.clearAll": "Clear all notifications",
   "notif.empty": "No notifications",
@@ -614,6 +616,9 @@ window.I18N_DICTS.en = {
   "imgLib.reject": "Reject",
   "imgLib.approved": "Approved and written to the library",
   "imgLib.rejectedToast": "Write rejected",
+  "imgLib.approveAll": "Approve all",
+  "imgLib.rejectAll": "Reject all",
+  "imgLib.batchDone": "Processed {ok} / {n}",
   "imgLib.col.name": "Name / ID",
   "imgLib.col.images": "Images",
   "imgLib.col.desc": "Description",

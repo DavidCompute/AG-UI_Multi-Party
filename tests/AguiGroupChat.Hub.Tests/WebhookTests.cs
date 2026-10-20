@@ -184,6 +184,32 @@ public sealed class WebhookTests
     }
 
     [Fact]
+    public async Task DeliverEventAsync_ImageWritePendingEnvelope()
+    {
+        Assert.Contains(EventTypes.ImageWritePending, WebhookApi.EventCatalog);
+
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var dispatcher = Create(handler);
+        var sub = Sub(EventTypes.ImageWritePending);
+        var evt = new ImageWritePendingEvent
+        {
+            PendingId = "iwp_1", OwnerUserId = "user_1", SkillId = "skill_x", AgentId = "agent_y",
+            LibId = "img_1", LibName = "品牌库", FileName = "dot.png", Bytes = 109, Timestamp = 1,
+        };
+
+        var record = await dispatcher.DeliverEventAsync(sub, EventTypes.ImageWritePending, "", evt);
+
+        Assert.True(record.Ok);
+        var (request, body) = Assert.Single(handler.Requests);
+        Assert.Equal(EventTypes.ImageWritePending, request.Headers.GetValues("X-KnowGath-Event").Single());
+        using var doc = JsonDocument.Parse(body);
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("iwp_1", data.GetProperty("pendingId").GetString());
+        Assert.Equal("skill_x", data.GetProperty("skillId").GetString());
+        Assert.Equal("品牌库", data.GetProperty("libName").GetString());
+    }
+
+    [Fact]
     public async Task DeliverEventAsync_PostsSignedEnvelope()
     {
         var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));

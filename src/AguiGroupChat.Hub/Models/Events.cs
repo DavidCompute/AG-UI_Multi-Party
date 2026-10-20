@@ -90,6 +90,9 @@ public static class EventTypes
     /// <summary>临时放额已到期（1.0.275）：到期时间已过、额度已回退全局。只经出站 Webhook 推送，
     /// 与「即将到期」配对，让告警平台能确认「回退已发生」。</summary>
     public const string QuotaOverrideExpired = "QUOTA_OVERRIDE_EXPIRED";
+    /// <summary>待审批的技能图库写入（1.0.281）：技能写已有/授权图库时入队，等待管理员批准。
+    /// 只经出站 Webhook 推送（不绑定知聚，groupId 为空串）。</summary>
+    public const string ImageWritePending = "IMAGE_WRITE_PENDING";
 }
 
 // ================= 服务端下行事件 =================
@@ -155,6 +158,24 @@ public sealed class QuotaOverrideExpiredEvent
     public required long Until { get; init; }
     /// <summary>已过期多少秒（> 0）。</summary>
     public required long ExpiredSeconds { get; init; }
+    public required long Timestamp { get; init; }
+}
+
+/// <summary>
+/// IMAGE_WRITE_PENDING（Hub 扩展，1.0.281）：技能请求写入已有/授权图库，已进入待审批队列。
+/// 只进出站 Webhook（不经群广播）——让管理员 / 告警平台立即知道「有人等着批准」。
+/// </summary>
+public sealed class ImageWritePendingEvent
+{
+    public string Type => EventTypes.ImageWritePending;
+    public required string PendingId { get; init; }
+    public required string OwnerUserId { get; init; }
+    public string? SkillId { get; init; }
+    public string? AgentId { get; init; }
+    public required string LibId { get; init; }
+    public string? LibName { get; init; }
+    public required string FileName { get; init; }
+    public required long Bytes { get; init; }
     public required long Timestamp { get; init; }
 }
 

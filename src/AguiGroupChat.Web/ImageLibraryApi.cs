@@ -356,6 +356,19 @@ public static class ImageLibraryApi
                 audit.Record("skill.imageLibrary.pending", scope.OwnerUserId, auth.GetUser(scope.OwnerUserId)?.Username,
                     targetType: "imageLibrary", targetId: lib.LibId,
                     detail: $"技能 {scope.SkillId ?? "-"}（岗位 {scope.AgentId ?? "-"}）请求写入 {fileName}，待审批 {pending.Id}");
+                // 主动感知（1.0.281）：推一条 Webhook；不绑定知聚（groupId = ""），只有未限定知聚的订阅会收到
+                ctx.RequestServices.GetService<WebhookDispatcher>()?.OnEvent("", new ImageWritePendingEvent
+                {
+                    PendingId = pending.Id,
+                    OwnerUserId = scope.OwnerUserId,
+                    SkillId = scope.SkillId,
+                    AgentId = scope.AgentId,
+                    LibId = lib.LibId,
+                    LibName = lib.Name,
+                    FileName = fileName,
+                    Bytes = bytes.LongLength,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                });
                 return Results.Json(new { pendingId = pending.Id, status = "pending" }, statusCode: StatusCodes.Status202Accepted);
             }
 
