@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.289**
+> Applies to version: **1.0.291**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4508,6 +4508,8 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 **Last-delivery column (1.0.288)**: the subscription table gains a column that joins `subscriptionId` against the latest 100 deliveries to show the most recent ✅/❌ and time (the tooltip carries the error and attempt count); once a record scrolls out of the latest 100, it falls back to the subscription's `lastDeliveredAt` shown with 🕒 (see the delivery table below for status).
 
 **Inline test result (1.0.290)**: clicking a subscription's **Test** button first shows "⏳ Testing…", then writes **✅ status code + time + duration** (or **❌ error + time**) back into that row instead of relying on a fleeting toast; the **Last delivery** column is refreshed too (test deliveries also enter the log). Editing or deleting the subscription clears its stale test result.
+
+**Delivery CSV export (1.0.291)**: the filter row gains **⬇ Export CSV**, exporting the **current filter** (event type / result) with a UTF-8 BOM and RFC 4180 escaping so Excel opens it directly. Columns: time / event / result / HTTP status / attempt / duration (ms) / callback URL / error. The source is still the latest 100 deliveries; with no match it only shows a hint and downloads nothing.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 

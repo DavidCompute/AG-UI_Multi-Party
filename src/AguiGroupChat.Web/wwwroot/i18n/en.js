@@ -1969,6 +1969,17 @@ window.I18N_DICTS.en = {
   "admin.whLastEarlierTip": "Last delivery time (see the delivery log below for status)",
   "admin.whTestRunning": "Testing…",
   "admin.whTestResultTip": "Result of this test delivery",
+  "admin.whDelivExport": "⬇ Export CSV",
+  "admin.whDelivExportEmpty": "No deliveries match the current filters",
+  "admin.whDelivExportOk": "Exported {n} delivery record(s)",
+  "whCsv.time": "Time",
+  "whCsv.event": "Event",
+  "whCsv.result": "Result",
+  "whCsv.status": "HTTP status",
+  "whCsv.attempt": "Attempt",
+  "whCsv.duration": "Duration (ms)",
+  "whCsv.url": "Callback URL",
+  "whCsv.error": "Error",
 
   /* --- Webhook event groups (1.0.285) --- */
   "whGroup.group": "Circles",

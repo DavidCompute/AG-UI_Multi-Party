@@ -8706,6 +8706,7 @@ function bindWebhookConsole() {
   // 最近投递：事件类型 / 结果筛选（1.0.287）
   $("whDelivEvent").addEventListener("change", renderWebhookDeliveries);
   $("whDelivStatus").addEventListener("change", renderWebhookDeliveries);
+  $("whDelivExport").onclick = exportWebhookDeliveriesCsv; // 1.0.291：导出当前筛选结果
   $("whSaveBtn").onclick = saveWebhook;
   $("whCancelBtn").onclick = () => $("webhookModal").classList.add("hidden");
   $("whSecretCopy").onclick = () => {
@@ -8812,6 +8813,14 @@ async function loadWebhookDeliveries() {
   renderWebhookRows(); // 订阅表的「最近投递」列随投递记录一起刷新
 }
 
+/** 当前筛选后的投递记录（渲染与 CSV 导出共用同一口径）。 */
+function filteredWebhookDeliveries() {
+  const evSel = $("whDelivEvent"), stSel = $("whDelivStatus");
+  const ev = evSel ? evSel.value : "", st = stSel ? stSel.value : "";
+  return whDeliveryList.filter((d) =>
+    (!ev || d.eventType === ev) && (!st || (st === "ok" ? !!d.ok : !d.ok)));
+}
+
 /** 渲染投递记录：事件类型 / 结果两个筛选器 + 「显示 X / Y 条」。 */
 function renderWebhookDeliveries() {
   const rows = $("adminWebhookDeliveryRows");
@@ -8825,9 +8834,7 @@ function renderWebhookDeliveries() {
     + types.map((tp) => `<option value="${escapeHtml(tp)}">${escapeHtml(tp)}</option>`).join("");
   evSel.value = types.includes(prev) ? prev : "";
 
-  const ev = evSel.value, st = stSel.value;
-  const filtered = whDeliveryList.filter((d) =>
-    (!ev || d.eventType === ev) && (!st || (st === "ok" ? !!d.ok : !d.ok)));
+  const filtered = filteredWebhookDeliveries();
   const shown = filtered.slice(0, 50);
   $("whDelivMeta").textContent = t("admin.whDelivMeta", { shown: shown.length, total: whDeliveryList.length });
 
@@ -8844,6 +8851,36 @@ function renderWebhookDeliveries() {
     return `<tr><td>${escapeHtml(time)}</td><td>${escapeHtml(d.eventType)}</td><td>${st}</td>
       <td style="word-break:break-all">${escapeHtml(d.url)} · #${d.attempt} · ${d.durationMs}ms</td></tr>`;
   }).join("");
+}
+
+/** 导出投递记录为 CSV（1.0.291）：跟随当前筛选；UTF-8 BOM + RFC 4180 转义，Excel 可直接打开。 */
+function exportWebhookDeliveriesCsv() {
+  const list = filteredWebhookDeliveries();
+  if (!list.length) { toast(t("admin.whDelivExportEmpty")); return; }
+  const cell = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+  const header = [
+    t("whCsv.time"), t("whCsv.event"), t("whCsv.result"), t("whCsv.status"),
+    t("whCsv.attempt"), t("whCsv.duration"), t("whCsv.url"), t("whCsv.error"),
+  ].map(cell);
+  const rows = list.map((d) => [
+    new Date(d.atMs).toLocaleString(),
+    d.eventType || "",
+    d.ok ? t("admin.whDelivOk") : t("admin.whDelivFail"),
+    d.ok ? String(d.statusCode || "OK") : String(d.statusCode ?? ""),
+    d.attempt,
+    d.durationMs,
+    d.url || "",
+    d.ok ? "" : (d.error || ""),
+  ].map(cell));
+  const csv = "\uFEFF" + [header, ...rows].map((r) => r.join(",")).join("\r\n") + "\r\n";
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const a = document.createElement("a");
+  a.href = url; a.download = `webhook-deliveries-${stamp}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast(t("admin.whDelivExportOk", { n: list.length }));
 }
 
 async function ensureWebhookCatalog() {

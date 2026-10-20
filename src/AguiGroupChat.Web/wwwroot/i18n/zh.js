@@ -1963,6 +1963,17 @@ window.I18N_DICTS.zh = {
   "admin.whLastEarlierTip": "最近投递时间（状态见下方投递记录）",
   "admin.whTestRunning": "测试中…",
   "admin.whTestResultTip": "本次测试投递结果",
+  "admin.whDelivExport": "⬇ 导出 CSV",
+  "admin.whDelivExportEmpty": "当前筛选没有可导出的投递记录",
+  "admin.whDelivExportOk": "已导出 {n} 条投递记录",
+  "whCsv.time": "时间",
+  "whCsv.event": "事件",
+  "whCsv.result": "结果",
+  "whCsv.status": "HTTP 状态",
+  "whCsv.attempt": "尝试次数",
+  "whCsv.duration": "耗时(ms)",
+  "whCsv.url": "回调地址",
+  "whCsv.error": "错误",
 
   /* --- Webhook 事件分组（1.0.285） --- */
   "whGroup.group": "知聚",

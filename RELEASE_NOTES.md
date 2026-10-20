@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.291 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.291 Release Notes (current Windows desktop release)
+
+**版本说明**：**投递记录可导出**——「最近投递」筛选行新增「⬇ 导出 CSV」，按当前筛选（事件类型 / 结果）导出时间、事件、结果、HTTP 状态、尝试次数、耗时、回调地址与错误；UTF-8 BOM + RFC 4180 转义，Excel 直接打开不乱码。
+**Version note**: **Delivery records are exportable** — the filter row gains **⬇ Export CSV**, exporting time / event / result / HTTP status / attempt / duration / callback URL / error for the **current filter** (event type / result); with a UTF-8 BOM and RFC 4180 escaping, Excel opens it without garbled text.
+
+## 变更
+# Changes
+
+中文：
+- **导出范围**：与表格同一口径（当前事件类型 + 结果筛选），数据源为最近 100 条投递记录；无匹配时只提示、不产生空文件。
+- **格式**：首行表头本地化（与界面语言一致），每格加双引号并转义内部引号，`\r\n` 换行，前置 BOM；文件名 `webhook-deliveries-YYYY-MM-DD-HH-mm-ss.csv`。
+- **复用**：筛选逻辑抽为 `filteredWebhookDeliveries()`，渲染与导出共用，避免两处口径漂移。
+- **无后端变更**：纯前端生成 Blob 下载。
+- **回归测试**：`ui-webhook-events.mjs` 扩到 **39 项**——文件名 `.csv`、带 BOM 与本地化表头、仅含筛选后的 2 行、无匹配时提示不下载；同时修正该脚本在新建订阅弹窗未关闭时点击被遮挡的问题（先关闭弹窗再操作控制台）。
+
+English:
+- **Export scope**: same predicate as the table (current event type + result filters) over the latest 100 deliveries; with no match it only shows a hint and produces no empty file.
+- **Format**: localized header row (matching the UI language), every cell quoted with internal quotes escaped, `\r\n` line endings, a leading BOM, and the filename `webhook-deliveries-YYYY-MM-DD-HH-mm-ss.csv`.
+- **Shared logic**: filtering is extracted into `filteredWebhookDeliveries()`, used by both rendering and export so the two cannot drift.
+- **No backend change**: the Blob is generated entirely in the browser.
+- **Regression test**: `ui-webhook-events.mjs` grows to **39 checks** — `.csv` filename, BOM plus localized header, only the 2 filtered rows, and a no-download hint when nothing matches; it also fixes the script clicking through an open new-subscription dialog (the dialog is closed before driving the console).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（CSV 导出列与范围）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.291。
+English: `docs/user-guide.md` / `en.md` §8.19 (CSV columns and scope); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.291.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.289 的全量结果 **1864 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2048，missing 0**；四个守卫脚本全过；Playwright **39/39**（Webhook）与 **21/21**（待审批 + 重试）；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.289's full run of **1864 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2048, missing 0**; all four guard scripts pass; Playwright **39/39** (webhooks) and **21/21** (pending approvals + retry); Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.290 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.290 Release Notes (current Windows desktop release)
 

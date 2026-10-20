@@ -5,9 +5,11 @@
 //   4. 「最近投递」可按事件类型 / 成败筛选，计数「显示 X / Y」与无匹配提示正确；
 //   5. 订阅表「最近投递」列按 subscriptionId 关联，显示最近一次 ✅/❌ 与时间；
 //   6. 「测试」按钮结果内联写回该行（失败 ❌ / 成功 ✅），刷新「最近投递」列；
-//   7. 无页面 JS 异常；不创建任何真实订阅。
+//   7. 投递记录可导出 CSV（跟随当前筛选；无匹配时提示不导出）；
+//   8. 无页面 JS 异常；不创建任何真实订阅。
 // 用法：cd tools && HEADLESS=1 node ui-webhook-events.mjs
 import { chromium } from "playwright";
+import fs from "node:fs";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:5200";
 const USERNAME = process.env.USERNAME || "david";
@@ -33,7 +35,8 @@ const SUBS = [
 ];
 
 const browser = await chromium.launch({ headless: HEADLESS });
-const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
@@ -139,6 +142,10 @@ try {
   check("点「清空」→ 整组取消", noneChecked);
   check("取消后计数回到 0/3", (await quotaCount.innerText()).trim() === "0/3", (await quotaCount.innerText()).trim());
 
+  // 关闭新建订阅弹窗：后续投递筛选 / 测试 / 导出都发生在它后面的控制台里
+  await page.click("#whCancelBtn");
+  await page.waitForFunction(() => document.getElementById("webhookModal")?.classList.contains("hidden"));
+
   // 4) 最近投递：事件类型 / 成败筛选
   const delivRows = page.locator("#adminWebhookDeliveryRows tr");
   await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 4);
@@ -167,7 +174,26 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 4);
   check("清空筛选 → 恢复 4 条", true);
 
-  // 5) 无页面 JS 异常
+  // 5) 导出 CSV：跟随当前筛选
+  await page.selectOption("#whDelivEvent", "GROUP_CREATED");
+  await page.waitForFunction(() => document.querySelectorAll("#adminWebhookDeliveryRows tr").length === 2);
+  const [download] = await Promise.all([page.waitForEvent("download"), page.click("#whDelivExport")]);
+  const csvPath = await download.path();
+  const csv = fs.readFileSync(csvPath, "utf8");
+  const lines = csv.replace(/\r/g, "").split("\n").filter((l) => l.length > 0);
+  check("导出文件名 .csv", download.suggestedFilename().endsWith(".csv"), download.suggestedFilename());
+  check("CSV 带 BOM 且表头为当前语言", csv.charCodeAt(0) === 0xFEFF && lines[0].includes("HTTP 状态"), lines[0]);
+  check("CSV 仅含筛选结果（表头 + 2 行）", lines.length === 3 && lines.slice(1).every((l) => l.includes("GROUP_CREATED")), "lines=" + lines.length);
+
+  // 无匹配 → 不下载，提示
+  await page.selectOption("#whDelivStatus", "fail");
+  await page.selectOption("#whDelivEvent", "PING");
+  await page.waitForSelector("#adminWebhookDeliveryRows .admin-empty", { timeout: 3000 });
+  await page.click("#whDelivExport");
+  await page.waitForFunction(() => document.getElementById("toast")?.textContent.includes("没有可导出"));
+  check("无匹配时提示不可导出", (await page.locator("#toast").innerText()).includes("没有可导出"));
+
+  // 6) 无页面 JS 异常
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));
 } catch (e) {
   fail++;

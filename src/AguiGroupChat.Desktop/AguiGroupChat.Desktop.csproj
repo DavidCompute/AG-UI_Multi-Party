@@ -8,9 +8,9 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>AguiGroupChat.Desktop</RootNamespace>
     <AssemblyName>AguiGroupChat.Desktop</AssemblyName>
-    <Version>1.0.290</Version>
-    <FileVersion>1.0.290.0</FileVersion>
-    <ApplicationVersion>1.0.290</ApplicationVersion>
+    <Version>1.0.291</Version>
+    <FileVersion>1.0.291.0</FileVersion>
+    <ApplicationVersion>1.0.291</ApplicationVersion>
     <!-- 应用图标：exe / 任务栏（Windows） -->
     <ApplicationIcon>Assets\agui-icon.ico</ApplicationIcon>
   </PropertyGroup>
