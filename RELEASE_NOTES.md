@@ -1,3 +1,42 @@
+# AG-UI 群聊桌面版 1.0.293 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.293 Release Notes (current Windows desktop release)
+
+**版本说明**：**外部集成挂了会自己说**——管理员端每 5 分钟检查投递记录，某条投递「已结算失败」（最新尝试失败且已过 40 秒重试窗口）就往通知中心推一条，点击直达 Webhook 页签；首次检查只建基线，同订阅 10 分钟冷却，`PING` 测试投递不告警。
+**Version note**: **Broken integrations announce themselves** — the admin checks the delivery log every 5 minutes and pushes a notification when a delivery has **settled as failed** (latest attempt failed and the 40-second retry window has passed); clicking it opens the Webhook tab. The first check only builds a baseline, each subscription has a 10-minute cooldown, and `PING` test deliveries are skipped.
+
+## 变更
+# Changes
+
+中文：
+- **判定口径**：按 `deliveryId` 取最新一次尝试（列表新→旧首条）；`ok=false` 且 `now - atMs > 40s` 视为已结算（重试窗口 1+5+25s = 31s，留 9s 余量）；已结算成功 / `PING` 直接标记为已处理。
+- **噪声控制**：登录后首次检查只把现有 `deliveryId` 记为基线（不推历史失败）；同一订阅 **10 分钟**内最多一条；同一条投递只告警一次。
+- **点击直达**：通知带 `action=adminWebhooks`，点击打开控制台并切到 Webhook 页签（复用现有 `openAdminModal` / `switchAdminTab`）。
+- **生命周期**：随登录启动、登出停止；仅 `Admin+` 轮询。
+- **无后端变更**：复用 `GET /ag-ui/admin/webhooks/deliveries`。
+- **回归测试**：新增 `ui-webhook-alerts.mjs`（**10 项**）——基线、已结算失败推送、告警文案、<40s 不推、`PING`/成功不推、订阅冷却、另一订阅仍推、点击直达页签、无 JS 异常；已接入手工 UI 回归工作流。
+
+English:
+- **Settlement rule**: the latest attempt per `deliveryId` (first row of the newest-first list); `ok=false` and `now - atMs > 40s` counts as settled (the retry window is 1+5+25s = 31s, leaving 9s of margin); settled successes and `PING` are marked as handled.
+- **Noise control**: the first check after login only records current `deliveryId`s as a baseline (no historical replay); each subscription alerts at most once per **10 minutes**; each delivery alerts once.
+- **Click-through**: notifications carry `action=adminWebhooks`; clicking opens the console and switches to the Webhook tab (reusing `openAdminModal` / `switchAdminTab`).
+- **Lifecycle**: started on login, stopped on logout, `Admin+` only.
+- **No backend change**: reuses `GET /ag-ui/admin/webhooks/deliveries`.
+- **Regression test**: new `ui-webhook-alerts.mjs` (**10 checks**) — baseline, settled failure push, message contents, <40s suppression, `PING` / success suppression, subscription cooldown, another subscription still alerts, click-through, and no JS errors; wired into the manual UI regression workflow.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（告警判定与噪声控制）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.293。
+English: `docs/user-guide.md` / `en.md` §8.19 (alert rule and noise control); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.293.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.292 的全量结果 **1866 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2050，missing 0**；四个守卫脚本全过；Playwright **10/10**（新脚本）、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.292's full run of **1866 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2050, missing 0**; all four guard scripts pass; Playwright **10/10** (new), **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.292 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.292 Release Notes (current Windows desktop release)
 

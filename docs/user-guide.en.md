@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.292**
+> Applies to version: **1.0.293**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4512,6 +4512,8 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 **Delivery CSV export (1.0.291)**: the filter row gains **⬇ Export CSV**, exporting the **current filter** (event type / result) with a UTF-8 BOM and RFC 4180 escaping so Excel opens it directly. Columns: time / event / result / HTTP status / attempt / duration (ms) / callback URL / error. The source is still the latest 100 deliveries; with no match it only shows a hint and downloads nothing.
 
 **Delivery log persistence (1.0.292)**: the latest **100** delivery records are written to the `webhookDeliveries` extension section (same path for memory / file / PostgreSQL) and **remain visible and exportable after a restart**; every delivery marks the state dirty so it lands on the next flush (5s by default), and only the newest 100 are kept.
+
+**Proactive failure alerts (1.0.293)**: after login an admin checks the delivery log every **5 minutes** — when a delivery's **latest attempt failed** and that attempt is more than **40 seconds old** (past the 1+5+25s retry window, i.e. settled), a "🪝 Webhook delivery failed" notification is pushed to the notification center (URL / event / error). The first check only establishes a baseline so a login does not replay historical failures; `PING` test deliveries are skipped (their result is inline) and each subscription alerts at most once per **10 minutes** (storm guard). Clicking the notification opens the console's Webhook tab.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 

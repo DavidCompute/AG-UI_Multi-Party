@@ -47,6 +47,8 @@ window.I18N_DICTS.en = {
   "notif.title": "Notifications",
   "notif.imageWritePendingTitle": "🖼️ Pending image-library write",
   "notif.imageWritePendingBody": "Skill {skill} wants to write {file} to \"{lib}\" (click to open Image Library Management and approve / reject)",
+  "notif.webhookFailTitle": "🪝 Webhook delivery failed",
+  "notif.webhookFailBody": "{url} · {event} · {err} (still failing after retries; click to view deliveries)",
   "notif.clear": "Clear",
   "notif.clearAll": "Clear all notifications",
   "notif.empty": "No notifications",

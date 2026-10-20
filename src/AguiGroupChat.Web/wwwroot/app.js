@@ -370,6 +370,7 @@ function enterApp(data) {
     applyPanelWidths(); // 恢复该用户上次拖拽的左 / 右栏宽度（需在 resetChatState 清除内联变量之后）
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
     startImageWritePendingPolling(); // 管理员：待审批图库写入进通知中心（60s 轮询）
+    startWebhookDeliveryAlarmPolling(); // 管理员：投递失败主动告警（5 分钟轮询）
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
@@ -478,6 +479,7 @@ async function logout() {
   if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; } // 登出后禁止继续重连
   stopKbPolling(); // 知识库轮询随登出停止，避免跨账号残留定时器
   stopImageWritePendingPolling();
+  stopWebhookDeliveryAlarmPolling();
   if (state.ws) state.ws.close();
   state.ws = null;
   state.token = null;
@@ -4025,6 +4027,68 @@ function stopImageWritePendingPolling() {
   imageWriteSeen.clear();
 }
 
+/* ---- 投递失败主动告警（1.0.293）：管理员每 5 分钟检查一次投递记录 ---- */
+let webhookAlarmTimer = null;
+let webhookAlarmBaselineDone = false;
+const webhookAlarmed = new Set();       // 已告警 / 已建基线的 deliveryId
+const webhookAlarmCooldown = new Map(); // subscriptionId → 上次告警毫秒（防风暴）
+
+/**
+ * 检查一次投递记录，把「已结算的失败」送进通知中心。
+ * - 只新失败的投递：首次 tick 只建基线，避免登录时把历史失败全推一遍；
+ * - 「已结算」：距最新尝试 > 40s（超过 1+5+25s 重试窗口），避免把还会重试成功的当失败；
+ * - 同一订阅 10 分钟内最多一条；`PING` 测试投递不告警（行内已有结果）。
+ */
+async function checkWebhookDeliveryAlarmsOnce() {
+  if (!isAdminPlus() || !state.token) return;
+  try {
+    const res = await fetch("/ag-ui/admin/webhooks/deliveries", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const list = (res.ok && Array.isArray(d)) ? d : [];
+    const now = Date.now();
+    // 列表新→旧：每个 deliveryId 的第一条就是最新一次尝试
+    const latest = new Map();
+    for (const r of list) {
+      if (!r || !r.deliveryId || latest.has(r.deliveryId)) continue;
+      latest.set(r.deliveryId, r);
+    }
+    if (!webhookAlarmBaselineDone) {
+      for (const id of latest.keys()) webhookAlarmed.add(id);
+      webhookAlarmBaselineDone = true;
+      return;
+    }
+    for (const [id, r] of latest) {
+      if (webhookAlarmed.has(id)) continue;
+      if (r.ok || r.eventType === "PING") { webhookAlarmed.add(id); continue; }
+      if (now - Number(r.atMs || 0) < 40_000) continue; // 可能还在重试，下一轮再看
+      webhookAlarmed.add(id);
+      const key = r.subscriptionId || r.url || "-";
+      if (now - (webhookAlarmCooldown.get(key) || 0) < 10 * 60_000) continue;
+      webhookAlarmCooldown.set(key, now);
+      addNotification("error", t("notif.webhookFailTitle"),
+        t("notif.webhookFailBody", {
+          url: r.url || key,
+          event: r.eventType || "-",
+          err: r.error || ("HTTP " + r.statusCode),
+        }), { action: "adminWebhooks" });
+    }
+  } catch { /* 下一轮重试 */ }
+}
+
+function startWebhookDeliveryAlarmPolling() {
+  if (!isAdminPlus() || webhookAlarmTimer) return;
+  webhookAlarmBaselineDone = false;
+  checkWebhookDeliveryAlarmsOnce(); // 立即建基线
+  webhookAlarmTimer = setInterval(checkWebhookDeliveryAlarmsOnce, 5 * 60_000);
+}
+
+function stopWebhookDeliveryAlarmPolling() {
+  if (webhookAlarmTimer) { clearInterval(webhookAlarmTimer); webhookAlarmTimer = null; }
+  webhookAlarmed.clear();
+  webhookAlarmCooldown.clear();
+  webhookAlarmBaselineDone = false;
+}
+
 /* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */
 let imgLibPollTimer = null;
 
@@ -6831,6 +6895,11 @@ function renderNotifications() {
       if (n?.action === "imageLibPending") {
         hideNotifPanel();
         openImgLibModal(); // 待审批写入没有 groupId：直接打开图库管理（待审批块在顶部）
+        return;
+      }
+      if (n?.action === "adminWebhooks") {
+        hideNotifPanel();
+        openAdminModal().then(() => switchAdminTab("webhooks")); // 投递失败 → 直达 Webhook 页签
         return;
       }
       if (n?.groupId) {

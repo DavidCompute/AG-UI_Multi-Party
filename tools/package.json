@@ -8,6 +8,7 @@
     "ui:quota": "node ui-quota-alerts.mjs",
     "ui:imglib-pending": "node ui-imglib-pending-click.mjs",
     "ui:webhook-events": "node ui-webhook-events.mjs",
+    "ui:webhook-alerts": "node ui-webhook-alerts.mjs",
     "smoke:api": "node api-smoke.mjs",
     "smoke:ui": "node ui-smoke.mjs",
     "check:config": "node check-config-keys.mjs",
