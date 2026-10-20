@@ -27,6 +27,28 @@ public sealed record PendingImageWriteDto(
     string FileName, string? ContentType, string? Caption, List<string>? Tags, long AtMs, long ExpiresAtMs);
 
 /// <summary>
+/// 已处理的一条回执（1.0.283）：批准 / 拒绝 / 失败的近期记录，供图库管理「最近处理」展示。
+/// 只保留进程内的最新若干条（重启清空）；要长期追溯请查审计日志。
+/// </summary>
+public sealed record ResolvedImageWrite
+{
+    public required string PendingId { get; init; }
+    /// <summary><c>approved</c> / <c>rejected</c> / <c>failed</c>。</summary>
+    public required string Status { get; init; }
+    public string? Reason { get; init; }
+    public required string LibId { get; init; }
+    public string? LibName { get; init; }
+    public required string FileName { get; init; }
+    public string? SkillId { get; init; }
+    public string? AgentId { get; init; }
+    public string? AssetId { get; init; }
+    public bool Duplicated { get; init; }
+    /// <summary>处理人（管理员用户名；取不到时回落到 userId）。</summary>
+    public string? DecidedBy { get; init; }
+    public required long AtMs { get; init; }
+}
+
+/// <summary>
 /// 图库写入审批队列（1.0.279 / 1.0.280）：
 /// <list type="bullet">
 /// <item>只用于技能写**已有/授权图库**；写本轮新建的库仍立即生效（隔离、风险低）。</item>
@@ -42,9 +64,13 @@ public sealed class ImageWriteApprovalQueue
     public const int MaxItems = 50;
     public const long MaxTotalBytes = 64L * 1024 * 1024;
     public const int MaxPerOwner = 20;
+    /// <summary>「最近处理」保留的条数上限（进程内；不参与持久化）。</summary>
+    public const int MaxHistory = 50;
 
     private readonly object _lock = new();
     private readonly Dictionary<string, PendingImageWrite> _items = new(StringComparer.Ordinal);
+    private readonly object _historyLock = new();
+    private readonly LinkedList<ResolvedImageWrite> _history = new();
     private readonly string? _root;
     private readonly ChangeHub? _changes;
 
@@ -136,6 +162,22 @@ public sealed class ImageWriteApprovalQueue
     }
 
     public int Count { get { lock (_lock) return _items.Count; } }
+
+    /// <summary>登记一条已处理回执（最新在前，超出 <see cref="MaxHistory"/> 丢最旧的）。</summary>
+    public void RecordResolved(ResolvedImageWrite item)
+    {
+        lock (_historyLock)
+        {
+            _history.AddFirst(item);
+            while (_history.Count > MaxHistory) _history.RemoveLast();
+        }
+    }
+
+    /// <summary>最近的已处理回执（新→旧；默认 20 条，上限 <see cref="MaxHistory"/>）。</summary>
+    public IReadOnlyList<ResolvedImageWrite> RecentResolved(int limit = 20)
+    {
+        lock (_historyLock) return _history.Take(Math.Clamp(limit, 1, MaxHistory)).ToList();
+    }
 
     /// <summary>持久化快照（元数据；字节已在磁盘上）。</summary>
     public IReadOnlyList<PendingImageWriteDto> Snapshot()

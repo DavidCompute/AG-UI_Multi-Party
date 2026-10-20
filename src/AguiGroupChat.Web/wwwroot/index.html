@@ -859,6 +859,11 @@
           </p>
           <div id="imgLibPendingList" class="kb-list"></div>
         </div>
+        <!-- 最近处理（1.0.283，仅管理员）：批准 / 拒绝 / 失败的回执，避免只留在审计日志 -->
+        <div id="imgLibHistory" class="hidden" style="margin-bottom:10px">
+          <p class="form-hint" style="margin:2px 0 6px"><b data-i18n="imgLib.historyTitle">🧾 最近处理</b> <span id="imgLibHistoryMeta"></span></p>
+          <div id="imgLibHistoryList" class="kb-list"></div>
+        </div>
         <div class="kb-toolbar">
           <span class="search-clear-wrap" style="flex:1;min-width:160px">
             <input id="imgLibSearch" class="modal-input" data-i18n-placeholder="imgLib.search" />

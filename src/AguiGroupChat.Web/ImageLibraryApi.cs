@@ -414,6 +414,14 @@ public static class ImageLibraryApi
             return Results.Ok(new { items });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
+        // ---- 最近处理（1.0.283）：批准 / 拒绝 / 失败的回执（进程内最近 50 条，默认取 20）----
+        //     让管理员在图库管理里就能看到「刚处理了什么」，不必去审计日志逐条翻。
+        pendingGroup.MapGet("/history", (HttpContext ctx) =>
+        {
+            var queue = ctx.RequestServices.GetService<ImageWriteApprovalQueue>();
+            return Results.Ok(new { items = queue?.RecentResolved(20) ?? Array.Empty<ResolvedImageWrite>() });
+        }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
         pendingGroup.MapPost("/{id}/approve", (string id, HttpContext ctx, ImageLibraryCatalog catalog,
             AuthService auth, AuditLogService audit) =>
         {
@@ -424,21 +432,21 @@ public static class ImageLibraryApi
             var lib = catalog.GetLibrary(item.LibId);
             if (lib is null)
             {
-                EmitWriteResolved(ctx, item, catalog, "failed", reason: "library_missing");
+                EmitWriteResolved(ctx, item, catalog, auth, "failed", reason: "library_missing");
                 return Results.NotFound(new AguiError(ErrorCodes.ImageLibraryNotFound, $"目标图库已不存在：{item.LibId}"));
             }
 
             var dup = catalog.FindDuplicate(lib.LibId, item.Bytes);
             if (dup is not null)
             {
-                EmitWriteResolved(ctx, item, catalog, "approved", duplicated: true, assetId: dup.AssetId);
+                EmitWriteResolved(ctx, item, catalog, auth, "approved", duplicated: true, assetId: dup.AssetId);
                 return Results.Ok(new { applied = true, duplicated = true, asset = ToAssetDto(lib, dup) });
             }
 
             var (asset, error) = catalog.AddAsset(lib.LibId, item.FileName, item.ContentType ?? "", item.Bytes, item.OwnerUserId);
             if (asset is null)
             {
-                EmitWriteResolved(ctx, item, catalog, "failed", reason: "write_failed");
+                EmitWriteResolved(ctx, item, catalog, auth, "failed", reason: "write_failed");
                 return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, error ?? "落盘失败"));
             }
             asset.SourceSkillId = item.SkillId;
@@ -448,7 +456,7 @@ public static class ImageLibraryApi
             audit.Record("skill.imageLibrary.upload", item.OwnerUserId, auth.GetUser(item.OwnerUserId)?.Username,
                 targetType: "imageLibrary", targetId: lib.LibId,
                 detail: $"审批通过 {item.Id}：技能 {item.SkillId ?? "-"}（岗位 {item.AgentId ?? "-"}）写入 {item.FileName}");
-            EmitWriteResolved(ctx, item, catalog, "approved", assetId: asset.AssetId);
+            EmitWriteResolved(ctx, item, catalog, auth, "approved", assetId: asset.AssetId);
             return Results.Ok(new { applied = true, duplicated = false, asset = ToAssetDto(lib, asset) });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
@@ -461,34 +469,57 @@ public static class ImageLibraryApi
             audit.Record("skill.imageLibrary.rejected", item.OwnerUserId, auth.GetUser(item.OwnerUserId)?.Username,
                 targetType: "imageLibrary", targetId: item.LibId,
                 detail: $"拒绝 {item.Id}：技能 {item.SkillId ?? "-"}（岗位 {item.AgentId ?? "-"}）写入 {item.FileName}");
-            EmitWriteResolved(ctx, item, catalog, "rejected");
+            EmitWriteResolved(ctx, item, catalog, auth, "rejected");
             return Results.Ok(new { rejected = true });
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
     }
 
     /// <summary>
-    /// 审批结果回执（1.0.282）：批准 / 拒绝 / 失败后推出站 Webhook，与入队时的
-    /// <see cref="ImageWritePendingEvent"/> 配对；不绑定知聚（groupId = ""）。
-    /// 取不到调度器（测试宿主 / 未注册）时静默跳过——审批本身不受影响。
+    /// 审批结果回执（1.0.282 / 1.0.283）：批准 / 拒绝 / 失败后记录一条「最近处理」（图库管理展示），
+    /// 并推出站 Webhook，与入队时的 <see cref="ImageWritePendingEvent"/> 配对；不绑定知聚（groupId = ""）。
+    /// 取不到调度器 / 队列（测试宿主 / 未注册）时静默跳过——审批本身不受影响。
     /// </summary>
     private static void EmitWriteResolved(HttpContext ctx, PendingImageWrite item, ImageLibraryCatalog catalog,
-        string status, bool duplicated = false, string? assetId = null, string? reason = null)
-        => ctx.RequestServices.GetService<WebhookDispatcher>()?.OnEvent("", new ImageWriteResolvedEvent
+        AuthService auth, string status, bool duplicated = false, string? assetId = null, string? reason = null)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var libName = catalog.GetLibrary(item.LibId)?.Name;
+        var me = WebIdentity.UserId(ctx);
+        var decidedBy = auth.GetUser(me ?? "")?.Username ?? me;
+
+        ctx.RequestServices.GetService<ImageWriteApprovalQueue>()?.RecordResolved(new ResolvedImageWrite
+        {
+            PendingId = item.Id,
+            Status = status,
+            Reason = reason,
+            LibId = item.LibId,
+            LibName = libName,
+            FileName = item.FileName,
+            SkillId = item.SkillId,
+            AgentId = item.AgentId,
+            AssetId = assetId,
+            Duplicated = duplicated,
+            DecidedBy = decidedBy,
+            AtMs = now,
+        });
+
+        ctx.RequestServices.GetService<WebhookDispatcher>()?.OnEvent("", new ImageWriteResolvedEvent
         {
             PendingId = item.Id,
             OwnerUserId = item.OwnerUserId,
             SkillId = item.SkillId,
             AgentId = item.AgentId,
             LibId = item.LibId,
-            LibName = catalog.GetLibrary(item.LibId)?.Name,
+            LibName = libName,
             FileName = item.FileName,
             Bytes = item.Bytes.LongLength,
             Status = status,
             Duplicated = duplicated,
             AssetId = assetId,
             Reason = reason,
-            Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Timestamp = now,
         });
+    }
 
     /// <summary>当前调用者的可见范围（成员群 + 是否管理员）。</summary>
     private static (HashSet<string> MemberGroupIds, bool IsAdmin) Scope(HttpContext ctx, AuthService auth, GroupHub hub, string? userId)

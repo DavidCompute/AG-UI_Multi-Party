@@ -2,8 +2,9 @@
 //   1. 管理员登录后，待审批轮询把新项送进通知中心（徽标 +1，不依赖人工刷新）；
 //   2. 通知文案提示「点击打开图库管理」；
 //   3. 点击通知 → 图库管理弹窗打开、待审批块可见、批量按钮可用、通知面板收起；
-//   4. 无页面 JS 异常。
-// 待审批列表用路由桩（不落任何真实数据）：只为验证「感知 → 点击 → 直达」这一段链路。
+//   4. 「最近处理」块渲染已处理回执（状态 / 文件 / 处理人）；
+//   5. 无页面 JS 异常。
+// 待审批列表与最近处理都用路由桩（不落任何真实数据）：只为验证「感知 → 点击 → 直达」这一段链路。
 // 用法：cd tools && HEADLESS=1 node ui-imglib-pending-click.mjs
 import { chromium } from "playwright";
 
@@ -34,6 +35,22 @@ const PENDING = {
   }],
 };
 
+const HISTORY = {
+  items: [{
+    pendingId: "iwp_ui_old",
+    status: "approved",
+    libId: "img_ui",
+    libName: "UI 素材库",
+    fileName: "ui-approved.png",
+    skillId: "skill_ui",
+    agentId: "agent_ui",
+    assetId: "asset_ui",
+    duplicated: false,
+    decidedBy: "david",
+    atMs: Date.now() - 60_000,
+  }],
+};
+
 const browser = await chromium.launch({ headless: HEADLESS });
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 const errors = [];
@@ -42,6 +59,7 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + 
 
 try {
   // 登录前挂路由桩：poll 在 enterApp 里立即 tick 一次，必须提前就位
+  await page.route("**/ag-ui/admin/image-write-pending/history", (route) => route.fulfill({ json: HISTORY }));
   await page.route("**/ag-ui/admin/image-write-pending", (route) => route.fulfill({ json: PENDING }));
 
   await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
@@ -80,6 +98,12 @@ try {
   const pendingText = (await page.locator("#imgLibPending").innerText()).replace(/\s+/g, " ");
   check("待审批块列出该文件与来源", pendingText.includes("ui-pending.png") && pendingText.includes("skill_ui"), pendingText.slice(0, 120));
   check("批量按钮可用", await page.locator("#imgLibPendingApproveAll").isVisible() && await page.locator("#imgLibPendingRejectAll").isVisible());
+
+  // 4) 最近处理（已处理回执）
+  await page.waitForSelector("#imgLibHistory:not(.hidden)", { timeout: 5000 });
+  const histText = (await page.locator("#imgLibHistory").innerText()).replace(/\s+/g, " ");
+  check("最近处理块可见且展示已批准", histText.includes("最近处理") && histText.includes("已批准"), histText.slice(0, 100));
+  check("最近处理含文件与处理人", histText.includes("ui-approved.png") && histText.includes("david"), histText.slice(0, 160));
 
   // 4) 无页面 JS 异常
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));

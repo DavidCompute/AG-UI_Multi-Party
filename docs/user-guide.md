@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.282**
+> 适用版本：**1.0.283**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2510,6 +2510,7 @@ dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之�
 - 待审批队列为**24h TTL**：最多 50 项、每人 20 项、总字节 ≤ 64MB。**1.0.280 起跨重启保持**：元数据存持久化扩展区 `imageWritePending`，图片字节存 `data/pending-writes/{id}.bin`（与 web 数据卷同卷）；重启后自动恢复并可继续批准。仅当持久化关闭时退化为纯内存（启动时清理超 TTL 的孤儿文件）。
 - **主动感知与批量审批（1.0.281）**：入队后立即推一条 **`IMAGE_WRITE_PENDING`** 出站 Webhook（不绑定知聚，`groupId` 为空串——只有未限定知聚的订阅会收到；`data` 含 `pendingId / ownerUserId / skillId / agentId / libId / libName / fileName / bytes`，详见 §8.19）。管理员端每 **60 秒**轮询一次待审批列表，**新出现的项自动进通知中心**（页面在后台时同时弹系统通知），因此不必一直停留在图库管理页。列表标题行提供「全部批准 / 全部拒绝」：服务端逐条调用单条端点，单条失败不阻断其余项，结束后提示「已处理 X / N 项」。
 - **审批回执与点击直达（1.0.282）**：批准 / 拒绝后推 **`IMAGE_WRITE_RESOLVED`**（`status` = `approved` / `rejected` / `failed`，见 §8.19）；批准时带 `assetId`，命中内容去重时 `duplicated=true`，目标图库已不存在等失败场景带 `reason`。待审批通知**可点击**，直接打开「图库管理」（待审批块在顶部）；弹窗打开期间每轮轮询会顺带刷新列表，批准 / 拒绝后不用重新打开。
+- **最近处理视图（1.0.283）**：图库管理新增「🧾 最近处理」，列出最近 20 条已处理回执——状态（✅ 已批准 / 🚫 已拒绝 / ⚠️ 失败）、文件 → 图库、来源技能 / 岗位、处理人、时间；失败带 `reason`，内容重复会标注「已存在」。数据来自 `GET /ag-ui/admin/image-write-pending/history`（仅管理员），队列在进程内保留**最近 50 条**（重启清空）；要长期追溯请查审计日志（`skill.imageLibrary.upload` / `.rejected`）。
 
 **注入**：技能调用前，`AgentCatalog.WithImageScope` 在入参 JSON 中注入 `imageWriteScopeId`（与文档技能的 `imageScopeId` 并列）。句柄 10 分钟有效，绑定触发者 / 岗位 / 技能，并带配额：**每轮最多 1 个图库 / 20 张图 / 单图 10 MB**（`ImageLibraryCatalog.ImageWriteScope`）。
 
@@ -4757,6 +4758,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/images/libraries` | **技能**建库（自令牌 + `imageWriteScopeId`，见 5.4.6） | 自调用 |
 | POST | `/ag-ui/images/libraries/{libId}/assets` | **技能**传图（自令牌 + 句柄；`attachmentId` 或 base64） | 自调用 |
 | GET | `/ag-ui/admin/image-write-pending` | 待审批的技能写入列表 | 管理员 |
+| GET | `/ag-ui/admin/image-write-pending/history` | 最近处理回执（最多 20 条；进程内、重启清空） | 管理员 |
 | POST | `/ag-ui/admin/image-write-pending/{id}/approve` | 批准并落盘（带来源标记） | 管理员 |
 | POST | `/ag-ui/admin/image-write-pending/{id}/reject` | 拒绝并留痕 | 管理员 |
 | POST | `/ag-ui/images/search` | 图库语义检索（**自令牌或登录用户**；服务器路径只给自令牌） | 自令牌 **或** 登录(严) |

@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.283 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.283 Release Notes (current Windows desktop release)
+
+**版本说明**：**审批结果在站内可追溯**——图库管理新增「🧾 最近处理」，列出最近 20 条批准 / 拒绝 / 失败回执（状态、文件 → 图库、来源技能 / 岗位、处理人、时间）；失败带原因、内容重复会标注。此前只能去审计日志逐条翻。
+**Version note**: **Approval outcomes are now traceable in the UI** — Image Library Management gains **🧾 Recently processed**, listing the latest 20 approved / rejected / failed receipts (status, file → library, source skill / agent, decided-by, time); failures carry a reason and duplicates are marked. Previously this required digging through the audit log.
+
+## 变更
+# Changes
+
+中文：
+- **队列历史**：`ImageWriteApprovalQueue` 新增 `RecordResolved` / `RecentResolved`，进程内保留**最近 50 条**（新→旧），不参与持久化（重启清空）。
+- **新端点**：`GET /ag-ui/admin/image-write-pending/history`（仅管理员，默认返回 20 条）。字段：`pendingId / status / reason / libId / libName / fileName / skillId / agentId / assetId / duplicated / decidedBy / atMs`。
+- **回执记录时机**：批准（落盘 / 命中重复）、拒绝、失败（图库已不存在 / 落盘报错）都会记录；`decidedBy` 取当前管理员用户名（取不到回落到 userId）。Webhook 与站内历史共用同一个 `EmitWriteResolved`，不会两套口径。
+- **前端**：「🧾 最近处理」块（仅管理员、无数据时隐藏）；打开弹窗、单条 / 批量处理、以及弹窗打开期间的轮询都会刷新。
+- **回归测试**：队列环形历史 1 例（顺序 / 上限 / 淘汰最旧）；集成用例追加校验——批准后 `GET /history` 能看到该条且 `decidedBy=iwp_admin`；Playwright 脚本扩到 **11 项**（新增最近处理块渲染）。
+
+English:
+- **Queue history**: `ImageWriteApprovalQueue` gains `RecordResolved` / `RecentResolved`, keeping the **latest 50** in process (newest first), not persisted (cleared on restart).
+- **New endpoint**: `GET /ag-ui/admin/image-write-pending/history` (admin only, 20 by default). Fields: `pendingId / status / reason / libId / libName / fileName / skillId / agentId / assetId / duplicated / decidedBy / atMs`.
+- **When receipts are recorded**: approve (written / duplicate hit), reject, and failure (library gone / write error); `decidedBy` is the acting admin's username (falls back to userId). Webhooks and the in-app history share one `EmitWriteResolved`, so they cannot drift.
+- **Frontend**: the **🧾 Recently processed** block (admin only; hidden when empty) refreshes on dialog open, single / batch decisions, and while the dialog is open during polling.
+- **Regression tests**: one ring-buffer case (order / cap / oldest evicted); the integration case now also checks that `GET /history` contains the entry with `decidedBy=iwp_admin`; the Playwright script grows to **11 checks** (recently-processed rendering).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §5.4.6（最近处理视图与数据来源）、§8.5 API 表（`GET …/history`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.283。
+English: `docs/user-guide.md` / `en.md` §5.4.6 (recently-processed view and data source) and the §8.5 API table (`GET …/history`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.283.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（1858 → **1859**）；`dotnet build` **0 错误**；`node --check` 三份前端脚本；i18n 审计 **zh=en=2002，missing 0**；四个守卫脚本全过；Playwright UI 回归 **11/11**；Docker 重建并部署（`/health` 200，`GET …/history` 200，事件目录 **23 类**）。
+English: full `dotnet test` passes (1858 → **1859**); `dotnet build` reports **0 errors**; `node --check` passes for all three frontend scripts; the i18n audit is **zh=en=2002, missing 0**; all four guard scripts pass; the Playwright UI regression is **11/11**; Docker was rebuilt and redeployed (`/health` 200, `GET …/history` 200, catalog **23 types**).
+
+---
+
 # AG-UI 群聊桌面版 1.0.282 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.282 Release Notes (current Windows desktop release)
 

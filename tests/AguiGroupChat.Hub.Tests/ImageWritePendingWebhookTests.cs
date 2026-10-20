@@ -274,6 +274,18 @@ public sealed class ImageWritePendingWebhookTests : IClassFixture<ImageWritePend
         Assert.Equal("approved", data.GetProperty("status").GetString());
         Assert.False(data.GetProperty("duplicated").GetBoolean());
         Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("assetId").GetString()));
+
+        // 6) 图库管理「最近处理」也能看到这条回执（含处理人）
+        using var histReq = Authed(HttpMethod.Get, "/ag-ui/admin/image-write-pending/history", token);
+        var histRes = await _client.SendAsync(histReq);
+        histRes.EnsureSuccessStatusCode();
+        var items = (await histRes.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items").EnumerateArray().ToList();
+        var entry = items.FirstOrDefault(x => x.GetProperty("pendingId").GetString() == pendingId);
+        Assert.True(entry.ValueKind == JsonValueKind.Object, "最近处理应包含该 pendingId）；实际：" + string.Join(",", items.Select(x => x.GetProperty("pendingId").GetString())));
+        Assert.Equal("approved", entry.GetProperty("status").GetString());
+        Assert.Equal("iwp_admin", entry.GetProperty("decidedBy").GetString());
+        Assert.Equal(libId, entry.GetProperty("libId").GetString());
+        Assert.Equal("resolved.png", entry.GetProperty("fileName").GetString());
     }
 
     [Fact]

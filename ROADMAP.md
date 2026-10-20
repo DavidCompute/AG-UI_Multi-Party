@@ -225,6 +225,7 @@
   - **审批队列跨重启（1.0.280）**：待审批元数据存扩展区 `imageWritePending`、图片字节存 `data/pending-writes/{id}.bin`（同一数据卷），重启后自动恢复并可继续批准；持久化关闭时退化为内存并清理超 TTL 孤儿文件。
   - **待审批写入主动感知（1.0.281）**：入队即推出站 Webhook `IMAGE_WRITE_PENDING`（事件目录 21 → 22，不绑定知聚）；管理员端每 60s 轮询把新项送进通知中心；图库管理新增「全部批准 / 全部拒绝」批量操作（逐条调用、单条失败不阻断）。
   - **审批回执 + 点击直达（1.0.282）**：批准 / 拒绝后推 `IMAGE_WRITE_RESOLVED`（事件目录 22 → 23，`status` = approved / rejected / failed，带 `assetId` / `duplicated` / `reason`）；待审批通知可点击直接打开图库管理，弹窗打开期间轮询顺带刷新列表。
+  - **审批历史视图（1.0.283）**：图库管理显示「最近处理」20 条（状态 / 文件 / 来源 / 处理人 / 时间），新增 `GET /ag-ui/admin/image-write-pending/history`；队列进程内保留 50 条，重启清空（长期追溯走审计日志）。
   - **模型路由（1.0.260）**与**记忆与向量化（1.0.263）**也已上页：前者 `ModelRouting` 四旋钮（启用 + 简单 / 标准 / 复杂档模型名），后者 `Agents:Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`——均为「检索慢 / 超时」的主旋钮，保存即生效（并发额度因闸门信号量启动定型，仍属需重启项）。
   - 前端：管理员控制台新增「配置治理」页签（参数网格 + 开关 + 审批/嵌入来源），加载回填（未设置项三态沿用默认）、保存即时生效、刷新。
   - **已含 2 个集成测试**（管理员更新持久化 + 非法值 400 / 非管理员 403）。

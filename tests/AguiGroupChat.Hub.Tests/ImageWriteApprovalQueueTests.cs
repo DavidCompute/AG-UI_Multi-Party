@@ -30,6 +30,32 @@ public sealed class ImageWriteApprovalQueueTests
     }
 
     [Fact]
+    public void ResolvedHistory_KeepsNewestAndCaps()
+    {
+        var q = new ImageWriteApprovalQueue();
+        Assert.Empty(q.RecentResolved());
+
+        for (var i = 0; i < ImageWriteApprovalQueue.MaxHistory + 5; i++)
+            q.RecordResolved(new ResolvedImageWrite
+            {
+                PendingId = "iwp_" + i,
+                Status = i % 2 == 0 ? "approved" : "rejected",
+                LibId = "img_1",
+                FileName = $"f{i}.png",
+                AtMs = i,
+            });
+
+        var all = q.RecentResolved(ImageWriteApprovalQueue.MaxHistory + 5);
+        Assert.Equal(ImageWriteApprovalQueue.MaxHistory, all.Count);
+        Assert.Equal("iwp_54", all[0].PendingId); // 最新在前
+        Assert.Equal("iwp_5", all[^1].PendingId); // 最旧的 5 条已淘汰
+
+        var page = q.RecentResolved(3);
+        Assert.Equal(3, page.Count);
+        Assert.Equal(new[] { "iwp_54", "iwp_53", "iwp_52" }, page.Select(x => x.PendingId));
+    }
+
+    [Fact]
     public void PerOwnerCap_IsEnforced()
     {
         var q = new ImageWriteApprovalQueue();

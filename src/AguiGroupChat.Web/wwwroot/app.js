@@ -3831,6 +3831,7 @@ async function openImgLibModal() {
   await loadImageLibs();
   startImgLibPolling();
   loadImageWritePending();
+  loadImageWriteHistory();
 }
 
 /** 待审批的技能写入（1.0.279，仅管理员）：列表 + 批准 / 拒绝。 */
@@ -3865,6 +3866,39 @@ async function loadImageWritePending() {
   } catch { box.classList.add("hidden"); }
 }
 
+/** 最近处理（1.0.283，仅管理员）：批准 / 拒绝 / 失败的回执（最新 20 条；进程内，重启清空）。 */
+async function loadImageWriteHistory() {
+  const box = $("imgLibHistory");
+  if (!box) return;
+  if (!isAdminPlus()) { box.classList.add("hidden"); return; }
+  try {
+    const res = await fetch("/ag-ui/admin/image-write-pending/history", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const items = (res.ok && d && Array.isArray(d.items)) ? d.items : [];
+    if (!items.length) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    $("imgLibHistoryMeta").textContent = t("imgLib.historyMeta", { n: items.length });
+    $("imgLibHistoryList").innerHTML = items.map((it) => {
+      const icon = it.status === "approved" ? "✅" : it.status === "rejected" ? "🚫" : "⚠️";
+      const label = it.status === "approved" ? t("imgLib.histApproved")
+        : it.status === "rejected" ? t("imgLib.histRejected") : t("imgLib.histFailed");
+      const dup = it.duplicated ? " " + t("imgLib.histDuplicated") : "";
+      const reason = it.reason ? " · " + escapeHtml(it.reason) : "";
+      return `
+      <div class="kb-list-item" style="padding:6px 8px">
+        <div class="kb-row" style="grid-template-columns:1fr auto">
+          <div><b>${icon} ${label}</b>${dup} · ${escapeHtml(it.fileName)} → ${escapeHtml(it.libName || it.libId || "-")}
+            <span class="muted" style="font-size:12px"> · ${escapeHtml(it.skillId || "-")}${it.agentId ? " / " + escapeHtml(it.agentId) : ""}${reason}</span>
+          </div>
+          <div class="muted" style="font-size:12px;white-space:nowrap">
+            ${it.decidedBy ? escapeHtml(t("imgLib.histBy", { user: it.decidedBy })) + " · " : ""}${fmtDateTime(Number(it.atMs) || 0)}
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  } catch { box.classList.add("hidden"); }
+}
+
 async function decideImageWrite(id, approve) {
   const res = await fetch(`/ag-ui/admin/image-write-pending/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, {
     method: "POST", headers: { Authorization: "Bearer " + state.token },
@@ -3873,6 +3907,7 @@ async function decideImageWrite(id, approve) {
   if (!res.ok) { toast(errMsg(d, "HTTP " + res.status)); return; }
   toast(t(approve ? "imgLib.approved" : "imgLib.rejectedToast"));
   await loadImageWritePending();
+  await loadImageWriteHistory();
   await loadImageLibs();
 }
 
@@ -3893,6 +3928,7 @@ async function decideAllPending(approve) {
   }
   toast(t("imgLib.batchDone", { ok, n: ids.length }));
   await loadImageWritePending();
+  await loadImageWriteHistory();
   await loadImageLibs();
 }
 
@@ -3923,7 +3959,7 @@ function startImageWritePendingPolling() {
       }
       // 弹窗开着时顺带刷新列表：批准 / 拒绝后不用重新打开
       const modal = $("imgLibModal");
-      if (modal && !modal.classList.contains("hidden")) loadImageWritePending();
+      if (modal && !modal.classList.contains("hidden")) { loadImageWritePending(); loadImageWriteHistory(); }
     } catch { /* 下一轮重试 */ }
   };
   tick();
