@@ -370,7 +370,7 @@ function enterApp(data) {
     applyPanelWidths(); // 恢复该用户上次拖拽的左 / 右栏宽度（需在 resetChatState 清除内联变量之后）
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
     startImageWritePendingPolling(); // 管理员：待审批图库写入进通知中心（60s 轮询）
-    startWebhookDeliveryAlarmPolling(); // 管理员：投递失败主动告警（5 分钟轮询）
+    initWebhookAlarmPolling(); // 管理员：投递失败主动告警（参数读「配置治理」）
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
@@ -4027,11 +4027,36 @@ function stopImageWritePendingPolling() {
   imageWriteSeen.clear();
 }
 
-/* ---- 投递失败主动告警（1.0.293）：管理员每 5 分钟检查一次投递记录 ---- */
+/* ---- 投递失败主动告警（1.0.293，参数可配 1.0.294）：管理员按「配置治理」的间隔轮询投递记录 ---- */
 let webhookAlarmTimer = null;
 let webhookAlarmBaselineDone = false;
 const webhookAlarmed = new Set();       // 已告警 / 已建基线的 deliveryId
 const webhookAlarmCooldown = new Map(); // subscriptionId → 上次告警毫秒（防风暴）
+
+/** 告警参数：默认 5 分钟轮询 / 40 秒结算 / 10 分钟冷却；可从「配置治理」覆盖。 */
+const webhookAlarmSettings = { enabled: true, pollMinutes: 5, settleSeconds: 40, cooldownMinutes: 10 };
+
+async function loadWebhookAlarmSettings() {
+  if (!isAdminPlus() || !state.token) return;
+  try {
+    const res = await fetch("/ag-ui/admin/config/governance", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) return;
+    const num = (v, def, min, max) => (typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def);
+    webhookAlarmSettings.enabled = d.webhookAlarmEnabled !== false; // null = 沿用默认（开启）
+    webhookAlarmSettings.pollMinutes = num(d.webhookAlarmPollMinutes, 5, 1, 1440);
+    webhookAlarmSettings.settleSeconds = num(d.webhookAlarmSettleSeconds, 40, 5, 3600);
+    webhookAlarmSettings.cooldownMinutes = num(d.webhookAlarmCooldownMinutes, 10, 1, 1440);
+  } catch { /* 读不到就用默认值 */ }
+}
+
+/** 登录 / 保存配置后重新初始化：停止旧定时器 → 拉参数 → 按开关启动。 */
+async function initWebhookAlarmPolling() {
+  stopWebhookDeliveryAlarmPolling();
+  if (!isAdminPlus()) return;
+  await loadWebhookAlarmSettings();
+  if (webhookAlarmSettings.enabled) startWebhookDeliveryAlarmPolling();
+}
 
 /**
  * 检查一次投递记录，把「已结算的失败」送进通知中心。
@@ -4040,6 +4065,7 @@ const webhookAlarmCooldown = new Map(); // subscriptionId → 上次告警毫秒
  * - 同一订阅 10 分钟内最多一条；`PING` 测试投递不告警（行内已有结果）。
  */
 async function checkWebhookDeliveryAlarmsOnce() {
+  if (!webhookAlarmSettings.enabled) return; // 配置治理可关闭
   if (!isAdminPlus() || !state.token) return;
   try {
     const res = await fetch("/ag-ui/admin/webhooks/deliveries", { headers: { Authorization: "Bearer " + state.token } });
@@ -4060,10 +4086,10 @@ async function checkWebhookDeliveryAlarmsOnce() {
     for (const [id, r] of latest) {
       if (webhookAlarmed.has(id)) continue;
       if (r.ok || r.eventType === "PING") { webhookAlarmed.add(id); continue; }
-      if (now - Number(r.atMs || 0) < 40_000) continue; // 可能还在重试，下一轮再看
+      if (now - Number(r.atMs || 0) < webhookAlarmSettings.settleSeconds * 1000) continue; // 可能还在重试，下一轮再看
       webhookAlarmed.add(id);
       const key = r.subscriptionId || r.url || "-";
-      if (now - (webhookAlarmCooldown.get(key) || 0) < 10 * 60_000) continue;
+      if (now - (webhookAlarmCooldown.get(key) || 0) < webhookAlarmSettings.cooldownMinutes * 60_000) continue;
       webhookAlarmCooldown.set(key, now);
       addNotification("error", t("notif.webhookFailTitle"),
         t("notif.webhookFailBody", {
@@ -4079,7 +4105,7 @@ function startWebhookDeliveryAlarmPolling() {
   if (!isAdminPlus() || webhookAlarmTimer) return;
   webhookAlarmBaselineDone = false;
   checkWebhookDeliveryAlarmsOnce(); // 立即建基线
-  webhookAlarmTimer = setInterval(checkWebhookDeliveryAlarmsOnce, 5 * 60_000);
+  webhookAlarmTimer = setInterval(checkWebhookDeliveryAlarmsOnce, webhookAlarmSettings.pollMinutes * 60_000);
 }
 
 function stopWebhookDeliveryAlarmPolling() {
@@ -9620,6 +9646,10 @@ async function loadConfigGovernance() {
     setCfg("cfgDailyTokenQuotaGroup", d.dailyTokenQuotaPerGroup);
     setCfg("cfgQuotaReminderLeadHours", d.quotaReminderLeadHours);
     setCfg("cfgQuotaReminderScanMinutes", d.quotaReminderScanMinutes);
+    setCfg("cfgWebhookAlarmPoll", d.webhookAlarmPollMinutes);
+    setCfg("cfgWebhookAlarmSettle", d.webhookAlarmSettleSeconds);
+    setCfg("cfgWebhookAlarmCooldown", d.webhookAlarmCooldownMinutes);
+    setCfgBool("cfgWebhookAlarm", d.webhookAlarmEnabled);
     setCfg("cfgMessageWriteDebounceMs", d.messageWriteDebounceMs);
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
@@ -9671,6 +9701,10 @@ function collectCfg() {
   body.dailyTokenQuotaPerGroup = numOrNull("cfgDailyTokenQuotaGroup");
   body.quotaReminderLeadHours = numOrNull("cfgQuotaReminderLeadHours");
   body.quotaReminderScanMinutes = numOrNull("cfgQuotaReminderScanMinutes");
+  body.webhookAlarmPollMinutes = numOrNull("cfgWebhookAlarmPoll");
+  body.webhookAlarmSettleSeconds = numOrNull("cfgWebhookAlarmSettle");
+  body.webhookAlarmCooldownMinutes = numOrNull("cfgWebhookAlarmCooldown");
+  body.webhookAlarmEnabled = boolOrNull("cfgWebhookAlarm");
   body.messageWriteDebounceMs = numOrNull("cfgMessageWriteDebounceMs");
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");
@@ -9712,6 +9746,8 @@ async function saveConfigGovernance() {
     const data = await res.json().catch(() => null);
     if (!res.ok) { toast(errMsg(data, t("common.saveFail", { err: res.status }))); return; }
     toast(t("admin.configSaved"));
+    // 告警参数可能刚被改：按新值重新安排轮询（关闭则停）
+    initWebhookAlarmPolling();
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }

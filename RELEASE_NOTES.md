@@ -1,3 +1,38 @@
+# AG-UI 群聊桌面版 1.0.294 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.294 Release Notes (current Windows desktop release)
+
+**版本说明**：**投递失败告警可按部署调灵敏度**——轮询间隔、结算窗口、同订阅冷却与总开关进入「配置治理」，保存即重排轮询；不同外部系统的重试特性不同，不再写死。
+**Version note**: **Delivery-failure alerts are now tunable per deployment** — poll interval, settle window, per-subscription cooldown and an on/off switch live in Config Governance, and saving re-arms the poller instead of requiring a code change or restart.
+
+## 变更
+# Changes
+
+中文：
+- **服务端治理字段**：`webhookAlarmEnabled`（三态，未设 = 开启）、`webhookAlarmPollMinutes`（1..1440，默认 5）、`webhookAlarmSettleSeconds`（5..3600，默认 40）、`webhookAlarmCooldownMinutes`（1..1440，默认 10）；随 `configGovernance` 扩展区持久化，越界 400。
+- **配置页**：新增 1 个开关 + 3 个数字输入（含范围提示），加载回填、保存提交；保存成功后立即按新值重排轮询（关闭则停）。
+- **前端**：登录时拉取治理值（失败回退默认），定时器间隔 / 结算判定 / 冷却均取配置值；关闭后不启动；重开时 `stop → start` 会重建基线，**关闭期间的失败不补推**。
+- **测试**：既有配置治理用例扩展（保存 + 回读 + 两个越界 400）；Playwright 告警脚本扩到 **15 项**（配置生效 / 配置页字段存在 / 关闭不告警 / 结算调小后 10s 前失败也告警 / 重开不补推）。
+
+English:
+- **Server-side governance fields**: `webhookAlarmEnabled` (tri-state, unset = on), `webhookAlarmPollMinutes` (1..1440, default 5), `webhookAlarmSettleSeconds` (5..3600, default 40) and `webhookAlarmCooldownMinutes` (1..1440, default 10); persisted with the `configGovernance` section, out-of-range returns 400.
+- **Config page**: one toggle plus three numeric inputs (with range hints), backfilled on load and submitted on save; a successful save immediately re-arms the poller (or stops it when disabled).
+- **Frontend**: reads governance values at login (falling back to defaults), and uses them for the timer interval, settlement test and cooldown; disabled means no poller, and re-enabling does `stop → start`, which rebuilds the baseline so **failures during the off period are not replayed**.
+- **Tests**: the existing governance test now also saves, reads back and rejects two out-of-range values; the Playwright alert script grows to **15 checks** (config applied, config fields present, disabled suppresses, a smaller settle window alerts on a 10s-old failure, and re-enabling does not replay).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.19（告警参数）与 §8.10 配置治理表（#25–#28）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.294。
+English: `docs/user-guide.md` / `en.md` §8.19 (alert parameters) and the §8.10 governance table (#25–#28); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.294.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（**1866**，服务端仅新增治理字段与校验）；`dotnet build` **0 错误**；i18n 审计 **zh=en=2054，missing 0**；四个守卫脚本全过；Playwright **15/15**（告警）、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: full `dotnet test` passes (**1866**; the server change only adds governance fields and validation); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=2054, missing 0**; all four guard scripts pass; Playwright **15/15** (alerts), **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.293 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.293 Release Notes (current Windows desktop release)
 

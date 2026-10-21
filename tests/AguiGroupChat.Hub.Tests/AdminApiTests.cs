@@ -1008,6 +1008,11 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             // token 配额（热改）：按用户与按知聚
             dailyTokenQuotaPerUser = 12345,
             dailyTokenQuotaPerGroup = 6789,
+            // 投递失败站内告警（1.0.294）：轮询 / 结算 / 冷却
+            webhookAlarmEnabled = true,
+            webhookAlarmPollMinutes = 7,
+            webhookAlarmSettleSeconds = 55,
+            webhookAlarmCooldownMinutes = 12,
         });
         var setRes = await _client.SendAsync(set);
         setRes.EnsureSuccessStatusCode();
@@ -1044,6 +1049,12 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         var usageSvc = _fixture.App.Services.GetRequiredService<AguiGroupChat.Hub.Agents.AgentUsageService>();
         Assert.Equal(12345, usageSvc.DailyQuotaPerUser);
         Assert.Equal(6789, usageSvc.DailyQuotaPerGroup);
+
+        // 投递失败告警参数（1.0.294）：保存后可回读（前端据此调整轮询）
+        Assert.True(d.GetProperty("webhookAlarmEnabled").GetBoolean());
+        Assert.Equal(7, d.GetProperty("webhookAlarmPollMinutes").GetInt32());
+        Assert.Equal(55, d.GetProperty("webhookAlarmSettleSeconds").GetInt32());
+        Assert.Equal(12, d.GetProperty("webhookAlarmCooldownMinutes").GetInt32());
     }
 
     [Fact]
@@ -1072,6 +1083,14 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         using var badQuotaGroup = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
         badQuotaGroup.Content = JsonContent.Create(new { dailyTokenQuotaPerGroup = -1 });
         Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuotaGroup)).StatusCode);
+
+        // 投递失败告警参数越界 → 400（1.0.294）
+        using var badAlarmPoll = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badAlarmPoll.Content = JsonContent.Create(new { webhookAlarmPollMinutes = 0 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badAlarmPoll)).StatusCode);
+        using var badAlarmSettle = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badAlarmSettle.Content = JsonContent.Create(new { webhookAlarmSettleSeconds = 4 });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badAlarmSettle)).StatusCode);
 
         // 非管理员 → 403
         var normal = await RegisterAsync("cfg_normal_admin");

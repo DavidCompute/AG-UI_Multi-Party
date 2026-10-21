@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.293**
+> 适用版本：**1.0.294**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -4235,8 +4235,12 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0（**0 = 关闭去重**） |
 | 23 | `#cfgQuotaReminderLeadHours` | `quotaReminderLeadHours` | int | `admin.quotaReminderLead` | 1..720（**1.0.275 新增**；服务端按轮读取） |
 | 24 | `#cfgQuotaReminderScanMinutes` | `quotaReminderScanMinutes` | int | `admin.quotaReminderScan` | 1..1440（**1.0.275 新增**；保存时重排下一轮） |
+| 25 | `#cfgWebhookAlarm` | `webhookAlarmEnabled` | bool | `admin.webhookAlarmEnabled` | 三态（**1.0.294 新增**；未设 = 开启） |
+| 26 | `#cfgWebhookAlarmPoll` | `webhookAlarmPollMinutes` | int | `admin.webhookAlarmPoll` | 1..1440（**1.0.294 新增**；默认 5） |
+| 27 | `#cfgWebhookAlarmSettle` | `webhookAlarmSettleSeconds` | int | `admin.webhookAlarmSettle` | 5..3600（**1.0.294 新增**；默认 40） |
+| 28 | `#cfgWebhookAlarmCooldown` | `webhookAlarmCooldownMinutes` | int | `admin.webhookAlarmCooldown` | 1..1440（**1.0.294 新增**；默认 10） |
 
-边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）；提醒旋钮越界同样 400（`quotaReminderLeadHours` 需在 1..720，`quotaReminderScanMinutes` 需在 1..1440）。
+边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）；提醒旋钮越界同样 400（`quotaReminderLeadHours` 需在 1..720，`quotaReminderScanMinutes` 需在 1..1440）；投递告警旋钮越界同样 400（`webhookAlarmPollMinutes` 1..1440，`webhookAlarmSettleSeconds` 5..3600，`webhookAlarmCooldownMinutes` 1..1440）。
 
 > **记忆与向量化（6.3 + 2.4/2.6，1.0.263）**：#18–#22 对应 `AgentOptions.Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`。这四个（除缓存容量外）在**每次写入 / 检索时重新读取**，所以保存即生效；缓存容量则由写入路径**按需重建 / 热改容量**（改 0 = 立即关闭去重，改大 / 改小按 LRU 即时生效）。它们是「语义记忆检索慢 / 超时」的主旋钮（embedding 耗时与输入长度成正比），无需再改 appsettings / 重启。并发额度（`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`）因闸门信号量在启动时定型，仍属**需重启**项（见 8.10.4）。
 
@@ -4245,6 +4249,8 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 > **模型路由（6.7，1.0.260）**：#14–#17 对应 `AgentOptions.ModelRouting`（`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`）。**StandardModel 为本版新增**——此前 Standard 档固定不换。启用后按「复杂度自适应」同一份估计器（`RunComplexityEstimator`）为 Simple / Standard / Complex / Heavy 四档分别选模型（留空 = 该档不换）；例如 Simple/Standard 用 `deepseek-flash`、Heavy 用 `deepseek-v4-pro`。与后台 `Agents:ModelRouting`（env `AGENTS_MODELROUTING_*`）同源，页面保存后即时生效并持久化。注意：与列表项「空 = 不修改」不同，模型名走字符串 `??` 语义 —— **空串会清空该档**（前端总是提交这三个字段，即“保存 = 以表单为准”）。
 
 > **临时放额提醒（1.0.275）**：#23 / #24 直接由 `QuotaExpiryReminderService` 读取 `ConfigGovernanceState`（未设时回退 24 小时 / 15 分钟）。提醒提前量在**每轮扫描时**重新读取；扫描间隔在保存时通过 `Reschedule()` 重排下一轮（最长等一个旧周期），无需重启。
+
+> **投递失败告警（1.0.294）**：#25–#28 是**前端**读取的轮询参数（服务端只保存与回读）：登录时（及保存配置后）拉取 `GET /ag-ui/admin/config/governance`，按 `webhookAlarmPollMinutes` 安排定时器、按 `webhookAlarmSettleSeconds` 判定「已结算」、按 `webhookAlarmCooldownMinutes` 做同订阅冷却；`webhookAlarmEnabled=false` 时不启动轮询。重新开启会**重建基线**，关闭期间产生的失败不会补推。
 
 #### 8.10.2 三态布尔与「未传不改」
 
@@ -4505,7 +4511,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 **投递记录持久化（1.0.292）**：最近 **100 条**投递记录写入持久化扩展区 `webhookDeliveries`（内存 / 文件 / PostgreSQL 同一路径），**重启后仍可在「最近投递」查看与导出**；每次投递标记脏位，下个冲刷周期（默认 5s）落盘；超限保留最新 100 条。
 
-**投递失败主动告警（1.0.293）**：管理员登录后每 **5 分钟**检查一次投递记录——某条投递的**最新尝试失败**且距该尝试已超过 **40 秒**（超过 1+5+25s 重试窗口，视为已结算）时，往通知中心推一条「🪝 Webhook 投递失败」（含地址 / 事件 / 错误）；首次检查只建基线，避免登录时把历史失败全推一遍；`PING` 测试投递不告警（行内已有结果）；同一订阅 **10 分钟**内最多一条（防风暴）。点击通知直接打开控制台 Webhook 页签。
+**投递失败主动告警（1.0.293 / 参数可配 1.0.294）**：管理员登录后每 **5 分钟**（配置治理 `webhookAlarmPollMinutes`）检查一次投递记录——某条投递的**最新尝试失败**且距该尝试已超过 **40 秒**（`webhookAlarmSettleSeconds`，超过 1+5+25s 重试窗口，视为已结算）时，往通知中心推一条「🪝 Webhook 投递失败」（含地址 / 事件 / 错误）；首次检查只建基线，避免登录时把历史失败全推一遍；`PING` 测试投递不告警（行内已有结果）；同一订阅 **10 分钟**（`webhookAlarmCooldownMinutes`）内最多一条（防风暴）。可用 `webhookAlarmEnabled` 整开关关闭；重新开启会重建基线（关闭期间的失败不补推）。点击通知直接打开控制台 Webhook 页签。
 
 **`QUOTA_THRESHOLD`（配额预警推送，1.0.270）**：不是群广播事件，**只经出站 Webhook 推送**。当某用户 / 某知聚的当日用量**首次**跨过配额的 80%（`warn`）或 100%（`over`）时推送一条；`data` 为：
 

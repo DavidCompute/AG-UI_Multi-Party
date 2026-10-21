@@ -48,6 +48,12 @@ public sealed class ConfigGovernanceState
     // null = 用服务内置默认（24h / 15min）；服务每轮扫描重新读取，因此保存后**下一轮**生效。
     public int? QuotaReminderLeadHours { get; set; }
     public int? QuotaReminderScanMinutes { get; set; }
+    // 投递失败站内告警（1.0.294）：客户端轮询的参数（轮询间隔 / 结算窗口 / 同订阅冷却）；
+    // 均为前端读取后使用，服务端只负责保存与回读。null = 用前端内置默认（5min / 40s / 10min）。
+    public bool? WebhookAlarmEnabled { get; set; }
+    public int? WebhookAlarmPollMinutes { get; set; }
+    public int? WebhookAlarmSettleSeconds { get; set; }
+    public int? WebhookAlarmCooldownMinutes { get; set; }
 }
 
 /// <summary>配置治理写入请求体（每个字段可空，仅更新非空项）。</summary>
@@ -78,7 +84,12 @@ public sealed record ConfigGovernanceHttpRequest(
     int? MemoryWriteEmbeddingCacheSize,
     // 临时放额到期提醒（1.0.275）：提前量与扫描间隔
     int? QuotaReminderLeadHours,
-    int? QuotaReminderScanMinutes);
+    int? QuotaReminderScanMinutes,
+    // 投递失败站内告警（1.0.294）：前端轮询参数
+    bool? WebhookAlarmEnabled,
+    int? WebhookAlarmPollMinutes,
+    int? WebhookAlarmSettleSeconds,
+    int? WebhookAlarmCooldownMinutes);
 
 public static class ConfigGovernanceApi
 {
@@ -145,6 +156,9 @@ public static class ConfigGovernanceApi
             if (req.MemoryWriteEmbeddingCacheSize is < 0) return BadReq("memoryWriteEmbeddingCacheSize 不能为负");
             if (req.QuotaReminderLeadHours is { } qr1 && qr1 is not (> 0 and <= 720)) return BadReq("quotaReminderLeadHours 需在 1..720");
             if (req.QuotaReminderScanMinutes is { } qr2 && qr2 is not (> 0 and <= 1440)) return BadReq("quotaReminderScanMinutes 需在 1..1440");
+            if (req.WebhookAlarmPollMinutes is { } wa1 && wa1 is not (> 0 and <= 1440)) return BadReq("webhookAlarmPollMinutes 需在 1..1440");
+            if (req.WebhookAlarmSettleSeconds is { } wa2 && wa2 is not (>= 5 and <= 3600)) return BadReq("webhookAlarmSettleSeconds 需在 5..3600");
+            if (req.WebhookAlarmCooldownMinutes is { } wa3 && wa3 is not (> 0 and <= 1440)) return BadReq("webhookAlarmCooldownMinutes 需在 1..1440");
 
             // 更新持久化状态（保留未传/为空字段的旧值；数组用 ??= 保留旧列表）
             state.MessageHistoryLimit = req.MessageHistoryLimit ?? state.MessageHistoryLimit;
@@ -172,6 +186,10 @@ public static class ConfigGovernanceApi
             state.MemoryWriteEmbeddingCacheSize = req.MemoryWriteEmbeddingCacheSize ?? state.MemoryWriteEmbeddingCacheSize;
             state.QuotaReminderLeadHours = req.QuotaReminderLeadHours ?? state.QuotaReminderLeadHours;
             state.QuotaReminderScanMinutes = req.QuotaReminderScanMinutes ?? state.QuotaReminderScanMinutes;
+            state.WebhookAlarmEnabled = req.WebhookAlarmEnabled ?? state.WebhookAlarmEnabled;
+            state.WebhookAlarmPollMinutes = req.WebhookAlarmPollMinutes ?? state.WebhookAlarmPollMinutes;
+            state.WebhookAlarmSettleSeconds = req.WebhookAlarmSettleSeconds ?? state.WebhookAlarmSettleSeconds;
+            state.WebhookAlarmCooldownMinutes = req.WebhookAlarmCooldownMinutes ?? state.WebhookAlarmCooldownMinutes;
 
             Apply(state, groupChat, authOptions, agents);
             changes.Notify(); // 驱动持久化
@@ -227,6 +245,10 @@ public static class ConfigGovernanceApi
             state.MemoryWriteEmbeddingCacheSize = saved.MemoryWriteEmbeddingCacheSize;
             state.QuotaReminderLeadHours = saved.QuotaReminderLeadHours;
             state.QuotaReminderScanMinutes = saved.QuotaReminderScanMinutes;
+            state.WebhookAlarmEnabled = saved.WebhookAlarmEnabled;
+            state.WebhookAlarmPollMinutes = saved.WebhookAlarmPollMinutes;
+            state.WebhookAlarmSettleSeconds = saved.WebhookAlarmSettleSeconds;
+            state.WebhookAlarmCooldownMinutes = saved.WebhookAlarmCooldownMinutes;
             // 把覆盖应用到运行时单例（重启后重新加载配置时一并覆盖）
             var groupChat = services.GetService<GroupChatOptions>();
             var auth = services.GetService<AuthOptions>();

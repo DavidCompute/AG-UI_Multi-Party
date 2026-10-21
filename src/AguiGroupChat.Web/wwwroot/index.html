@@ -2127,6 +2127,9 @@
           <div class="form-group"><label data-i18n="admin.quotaGroup">每日 Token 配额 / 知聚（0=不限）</label><input id="cfgDailyTokenQuotaGroup" class="modal-input" type="number" min="0" /></div>
           <div class="form-group"><label data-i18n="admin.quotaReminderLead">临时放额提醒提前量（小时）</label><input id="cfgQuotaReminderLeadHours" class="modal-input" type="number" min="1" max="720" placeholder="24" /></div>
           <div class="form-group"><label data-i18n="admin.quotaReminderScan">临时放额扫描间隔（分钟）</label><input id="cfgQuotaReminderScanMinutes" class="modal-input" type="number" min="1" max="1440" placeholder="15" /></div>
+          <div class="form-group"><label data-i18n="admin.webhookAlarmPoll">投递失败告警：轮询间隔（分钟）</label><input id="cfgWebhookAlarmPoll" class="modal-input" type="number" min="1" max="1440" placeholder="5" /></div>
+          <div class="form-group"><label data-i18n="admin.webhookAlarmSettle">投递失败告警：结算窗口（秒）</label><input id="cfgWebhookAlarmSettle" class="modal-input" type="number" min="5" max="3600" placeholder="40" /></div>
+          <div class="form-group"><label data-i18n="admin.webhookAlarmCooldown">投递失败告警：同订阅冷却（分钟）</label><input id="cfgWebhookAlarmCooldown" class="modal-input" type="number" min="1" max="1440" placeholder="10" /></div>
           <div class="form-group"><label data-i18n="admin.writeDebounce">流式落库防抖（毫秒，0=立即）</label><input id="cfgMessageWriteDebounceMs" class="modal-input" type="number" min="0" /></div>
         </div>
         <div class="config-checks">
@@ -2134,6 +2137,7 @@
           <label class="cfg-check"><input id="cfgEnableTools" type="checkbox" /> <span data-i18n="admin.enableTools">启用工具调用</span></label>
           <label class="cfg-check"><input id="cfgEnableWebTools" type="checkbox" /> <span data-i18n="admin.enableWeb">启用联网工具</span></label>
           <label class="cfg-check"><input id="cfgThinking" type="checkbox" /> <span data-i18n="admin.thinking">思考模式</span></label>
+          <label class="cfg-check"><input id="cfgWebhookAlarm" type="checkbox" /> <span data-i18n="admin.webhookAlarmEnabled">启用投递失败站内告警</span></label>
         </div>
         <div class="config-checks">
           <label class="cfg-check"><input id="cfgModelRouting" type="checkbox" /> <span data-i18n="admin.modelRouting">按任务复杂度自动选模型（ModelRouting）</span></label>

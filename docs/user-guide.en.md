@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.293**
+> Applies to version: **1.0.294**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4244,8 +4244,12 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 22 | `#cfgMemDedupCache` | `memoryWriteEmbeddingCacheSize` | int | `admin.memDedupCache` | ≥ 0 (**0 = dedup off**) |
 | 23 | `#cfgQuotaReminderLeadHours` | `quotaReminderLeadHours` | int | `admin.quotaReminderLead` | 1..720 (**new in 1.0.275**; read per scan) |
 | 24 | `#cfgQuotaReminderScanMinutes` | `quotaReminderScanMinutes` | int | `admin.quotaReminderScan` | 1..1440 (**new in 1.0.275**; reschedules on save) |
+| 25 | `#cfgWebhookAlarm` | `webhookAlarmEnabled` | bool | `admin.webhookAlarmEnabled` | tri-state (**new in 1.0.294**; unset = enabled) |
+| 26 | `#cfgWebhookAlarmPoll` | `webhookAlarmPollMinutes` | int | `admin.webhookAlarmPoll` | 1..1440 (**new in 1.0.294**; default 5) |
+| 27 | `#cfgWebhookAlarmSettle` | `webhookAlarmSettleSeconds` | int | `admin.webhookAlarmSettle` | 5..3600 (**new in 1.0.294**; default 40) |
+| 28 | `#cfgWebhookAlarmCooldown` | `webhookAlarmCooldownMinutes` | int | `admin.webhookAlarmCooldown` | 1..1440 (**new in 1.0.294**; default 10) |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440).
+Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440); delivery-alert knobs too (`webhookAlarmPollMinutes` 1..1440, `webhookAlarmSettleSeconds` 5..3600, `webhookAlarmCooldownMinutes` 1..1440).
 
 > **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-72`), so saving applies at once.
 
@@ -4513,7 +4517,7 @@ The admin console gains a **Webhooks** tab (`#adminTabWebhooks`, visible to `Adm
 
 **Delivery log persistence (1.0.292)**: the latest **100** delivery records are written to the `webhookDeliveries` extension section (same path for memory / file / PostgreSQL) and **remain visible and exportable after a restart**; every delivery marks the state dirty so it lands on the next flush (5s by default), and only the newest 100 are kept.
 
-**Proactive failure alerts (1.0.293)**: after login an admin checks the delivery log every **5 minutes** — when a delivery's **latest attempt failed** and that attempt is more than **40 seconds old** (past the 1+5+25s retry window, i.e. settled), a "🪝 Webhook delivery failed" notification is pushed to the notification center (URL / event / error). The first check only establishes a baseline so a login does not replay historical failures; `PING` test deliveries are skipped (their result is inline) and each subscription alerts at most once per **10 minutes** (storm guard). Clicking the notification opens the console's Webhook tab.
+**Proactive failure alerts (1.0.293, configurable since 1.0.294)**: after login an admin checks the delivery log every **5 minutes** (`webhookAlarmPollMinutes`) — when a delivery's **latest attempt failed** and that attempt is more than **40 seconds old** (`webhookAlarmSettleSeconds`, past the 1+5+25s retry window, i.e. settled), a "🪝 Webhook delivery failed" notification is pushed to the notification center (URL / event / error). The first check only establishes a baseline so a login does not replay historical failures; `PING` test deliveries are skipped (their result is inline) and each subscription alerts at most once per **10 minutes** (`webhookAlarmCooldownMinutes`, storm guard). `webhookAlarmEnabled` turns it off entirely; re-enabling rebuilds the baseline (failures during the off period are not replayed). Clicking the notification opens the console's Webhook tab.
 
 **`QUOTA_THRESHOLD` (quota alert push, 1.0.270)**: not a group broadcast event — it is delivered **only via outbound webhooks**. It fires when a user's or circle's daily usage **first** crosses 80% (`warn`) or 100% (`over`) of the quota; `data` is:
 
