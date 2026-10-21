@@ -59,6 +59,8 @@ window.I18N_DICTS.zh = {
   "notif.permGranted": "桌面通知已开启",
   "notif.permDeniedShort": "未获授权：请在站点设置中允许通知",
   "notif.permEnableFail": "未能开启桌面通知，请稍后重试",
+  "notif.markUnread": "标为未读",
+  "notif.deleteOne": "删除这条通知",
   "notif.imageWritePendingTitle": "🖼️ 待审批的图库写入",
   "notif.imageWritePendingBody": "技能 {skill} 请求写入「{lib}」：{file}（点击打开图库管理批准 / 拒绝）",
   "notif.webhookFailTitle": "🪝 Webhook 投递失败",

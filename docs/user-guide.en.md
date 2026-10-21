@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.299**
+> Applies to version: **1.0.300**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -313,6 +313,8 @@ The notification panel `#notifPanel` (`.notif-panel`) contains the title `notif.
 Permission hint (1.0.298): when `Notification.permission` is not `granted`, opening the panel shows a hint at the top — for `default` it offers **Enable** (calls `Notification.requestPermission()`), for `denied` it explains how to allow notifications in site settings and hides the button; the close (×) button writes `localStorage.agui.notifPermDismissedAt` and re-prompts after **7 days**; environments without `Notification` show nothing.
 
 Local persistence (1.0.299): notifications are stored per user in `localStorage` (key `agui.notifications.<userId>`, latest **100 / 7 days**, including read flags and `action`), so the badge and list come back after a refresh or reopen; writes are coalesced over 500ms to avoid hammering storage; **Clear** also removes the local copy, and entries older than 7 days are dropped on restore.
+
+Row actions (1.0.300): hovering (or keyboard-focusing) an item reveals **● Mark unread** and **✕ Delete**; clicking them does not trigger the item's jump. Deleting also removes the stored copy, and skill-error notifications are additionally removed from the `agui.skillError.<userId>` reference store; marking unread makes the badge count it again.
 
 #### 1.2.2 Left column: My Groups (`aside.panel.groups`)
 

@@ -152,6 +152,15 @@ jobs:
           HEADLESS: "1"
         run: node ui-notif-persist.mjs
 
+      - name: Run notification row actions regression
+        working-directory: tools
+        env:
+          BASE_URL: http://127.0.0.1:5200
+          USERNAME: david
+          PASSWORD: lingtong
+          HEADLESS: "1"
+        run: node ui-notif-actions.mjs
+
       - name: Dump web log
         if: failure()
         run: tail -n 200 /tmp/web.log

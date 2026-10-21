@@ -13,6 +13,7 @@
     "ui:notif-filter": "node ui-notif-filter.mjs",
     "ui:notif-perm": "node ui-notif-perm.mjs",
     "ui:notif-persist": "node ui-notif-persist.mjs",
+    "ui:notif-actions": "node ui-notif-actions.mjs",
     "smoke:api": "node api-smoke.mjs",
     "smoke:ui": "node ui-smoke.mjs",
     "check:config": "node check-config-keys.mjs",

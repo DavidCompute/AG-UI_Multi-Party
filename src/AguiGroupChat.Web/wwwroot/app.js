@@ -7057,7 +7057,23 @@ function renderNotifications() {
         <span class="notif-text"><b>${escapeHtml(n.title)}</b><br/>${escapeHtml(n.body)}</span>
         <span class="notif-time">${escapeHtml(fmtTime(n.ts))}</span>
       </span>
+      <span class="notif-actions">
+        ${n.read ? `<button class="notif-act" data-nact="unread" type="button" title="${escapeHtml(t("notif.markUnread"))}" aria-label="${escapeHtml(t("notif.markUnread"))}">●</button>` : ""}
+        <button class="notif-act" data-nact="del" type="button" title="${escapeHtml(t("notif.deleteOne"))}" aria-label="${escapeHtml(t("notif.deleteOne"))}">✕</button>
+      </span>
     </div>`).join("");
+  // 单条操作（1.0.300）：删除 / 重新标为未读（不触发行点击的跳转）
+  for (const el of list.querySelectorAll(".notif-item")) {
+    el.querySelectorAll("[data-nact]").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const n = state.notifications.find((x) => String(x.id) === el.dataset.nid);
+        if (!n) return;
+        if (btn.dataset.nact === "del") deleteNotification(n.id);
+        else { n.read = false; renderNotifications(); scheduleSaveNotifications(); }
+      };
+    });
+  }
   // 点击跳转 / 键盘 Enter 触发
   for (const el of list.querySelectorAll(".notif-item")) {
     const go = () => {
@@ -7100,6 +7116,22 @@ function hideNotifPanel() {
   state.notifPanelOpen = false;
   $("notifPanel").classList.add("hidden");
   $("notifBtn").setAttribute("aria-expanded", "false");
+}
+
+/** 删除单条通知（1.0.300）：同步内存、本地副本与技能错误备查存储。 */
+function deleteNotification(id) {
+  const idx = state.notifications.findIndex((n) => String(n.id) === String(id));
+  if (idx < 0) return;
+  state.notifications.splice(idx, 1);
+  if (String(id).startsWith("skill_") && state.memberId) {
+    try {
+      const list = skillErrorStore(state.memberId);
+      localStorage.setItem(skillErrorKey(state.memberId),
+        JSON.stringify((Array.isArray(list) ? list : []).filter((x) => x && x.id !== id)));
+    } catch { /* 忽略 */ }
+  }
+  renderNotifications();
+  scheduleSaveNotifications();
 }
 
 function clearNotifications() {

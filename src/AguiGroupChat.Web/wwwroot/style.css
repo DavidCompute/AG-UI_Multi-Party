@@ -126,6 +126,14 @@ select {
 }
 .notif-list .notif-item:hover { background: var(--panel-2); }
 .notif-list .notif-item.unread { background: rgba(79,140,255,.08); }
+/* 单条操作（1.0.300）：悬浮 / 聚焦时显示删除与标为未读 */
+.notif-list .notif-item { position: relative; }
+.notif-actions { display: none; gap: 2px; flex: none; align-self: flex-start; margin-left: 2px; }
+.notif-list .notif-item:hover .notif-actions,
+.notif-list .notif-item:focus-within .notif-actions { display: flex; }
+.notif-act { background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 0 3px; font-size: 12px; line-height: 1; }
+.notif-act:hover { color: var(--accent); }
+.notif-act[data-nact="del"]:hover { color: #e5534b; }
 .notif-list .notif-item .notif-ico { font-size: 16px; flex: none; }
 .notif-list .notif-body { flex: 1; min-width: 0; }
 .notif-list .notif-item .notif-body .notif-text { white-space: normal; line-height: 1.45; color: var(--text); word-wrap: break-word; }

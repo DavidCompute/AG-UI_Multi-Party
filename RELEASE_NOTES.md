@@ -1,3 +1,42 @@
+# AG-UI 群聊桌面版 1.0.300 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.300 Release Notes (current Windows desktop release)
+
+**版本说明**：**通知可逐条打理**——悬浮通知时出现「● 标为未读」与「✕ 删除」，删除同步清本地副本（技能错误还会清备查存储），标为未读会让徽标重新计数。
+**Version note**: **Notifications can be managed one by one** — hovering an item reveals **● Mark unread** and **✕ Delete**; deleting also removes the local copy (and skill errors are cleared from the reference store), while marking unread makes the badge count it again.
+
+## 变更
+# Changes
+
+中文：
+- **交互**：悬浮或键盘聚焦显示操作；按钮 `stopPropagation`，不会触发条目的跳转 / 打开弹窗。
+- **删除**：`deleteNotification(id)` 同步内存、`agui.notifications.<userId>` 副本、`agui.skillError.<userId>` 备查存储，并合并写入。
+- **标为未读**：`read=false` 后重渲染 + 徽标 +1，同时落盘；条目再次变为未读底色。
+- **样式**：操作按钮默认隐藏，不干扰阅读；删除悬停变红。
+- **无后端变更**：纯前端。
+- **回归测试**：新增 `ui-notif-actions.mjs`（**11 项**）——默认隐藏 / 悬浮显示 / 两个按钮齐全、标为未读徽标与本地状态、删除同步列表与存储、刷新不复现、技能错误备查清理、无 JS 异常。
+
+English:
+- **Interaction**: actions appear on hover or keyboard focus; the buttons call `stopPropagation`, so the row's jump / modal action is not triggered.
+- **Delete**: `deleteNotification(id)` updates memory, the `agui.notifications.<userId>` copy and the `agui.skillError.<userId>` reference store, then schedules a save.
+- **Mark unread**: sets `read=false`, re-renders (badge +1) and persists; the row gets the unread background again.
+- **Styling**: actions are hidden until hover so they do not distract; delete turns red on hover.
+- **No backend change**: frontend only.
+- **Regression test**: new `ui-notif-actions.mjs` (**11 checks**) — hidden by default / shown on hover / both buttons, mark-unread badge and stored state, delete removes from list and storage, not restored after refresh, skill-error store cleanup, and no JS errors.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（单条操作）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.300。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (row actions); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.300.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.296 的全量结果 **1866 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2079，missing 0**；四个守卫脚本全过；Playwright **11/11**（新）、**11/11**、**11/11**、**12/12**、**12/12**、**15/15**、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.296's full run of **1866 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2079, missing 0**; all four guard scripts pass; Playwright **11/11** (new), **11/11**, **11/11**, **12/12**, **12/12**, **15/15**, **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.299 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.299 Release Notes (current Windows desktop release)
 

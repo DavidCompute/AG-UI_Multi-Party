@@ -59,6 +59,8 @@ window.I18N_DICTS.en = {
   "notif.permGranted": "Desktop notifications enabled",
   "notif.permDeniedShort": "Not allowed: please allow notifications in site settings",
   "notif.permEnableFail": "Could not enable desktop notifications; please retry",
+  "notif.markUnread": "Mark as unread",
+  "notif.deleteOne": "Delete this notification",
   "notif.imageWritePendingTitle": "🖼️ Pending image-library write",
   "notif.imageWritePendingBody": "Skill {skill} wants to write {file} to \"{lib}\" (click to open Image Library Management and approve / reject)",
   "notif.webhookFailTitle": "🪝 Webhook delivery failed",
