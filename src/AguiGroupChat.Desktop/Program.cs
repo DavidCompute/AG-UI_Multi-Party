@@ -65,7 +65,7 @@ public static class Program
 
         // 桌面窗口（WebView2 加载本地页面；共享同一后端，多实例各自独立窗口）
         var wpfApp = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        var window = new MainWindow(baseUrl, coordinator);
+        var window = new MainWindow(baseUrl, coordinator, startHidden: args.Contains("--autostart"));
 
         // 关窗：实例计数 -1；最后一个实例 → 通知后端优雅停机。
         // 停机在后台线程执行，不阻塞 UI；Run 返回后短等待放行，进程必退。

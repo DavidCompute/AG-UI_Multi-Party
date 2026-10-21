@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
 
     private System.Windows.Forms.NotifyIcon? _tray;
     private System.Windows.Forms.ContextMenuStrip? _trayMenu;
+    private System.Windows.Forms.ToolStripMenuItem? _openItem;
     private System.Windows.Forms.ToolStripMenuItem? _muteMenu;
     private System.Windows.Forms.ToolStripMenuItem? _mute30;
     private System.Windows.Forms.ToolStripMenuItem? _mute60;
@@ -23,7 +25,14 @@ public partial class MainWindow : Window
     private System.Windows.Forms.ToolStripMenuItem? _muteTomorrow;
     private System.Windows.Forms.ToolStripMenuItem? _unmuteItem;
     private System.Windows.Forms.ToolStripMenuItem? _closeToTrayItem;
+    private System.Windows.Forms.ToolStripMenuItem? _startupItem;
     private System.Windows.Forms.ToolStripMenuItem? _restartItem;
+
+    private System.Drawing.Icon? _baseIcon;
+    private System.Drawing.Icon? _badgeIcon;
+    private int _unreadCount;
+
+    private readonly bool _startHidden;
 
     private DateTime _mutedUntilUtc = DateTime.MinValue;
     private string? _mutePreset;
@@ -36,16 +45,26 @@ public partial class MainWindow : Window
     private const string MutePreset120 = "120";
     private const string MutePresetTomorrow = "tomorrow";
 
-    public MainWindow(string baseUrl, InstanceCoordinator coordinator)
+    public MainWindow(string baseUrl, InstanceCoordinator coordinator, bool startHidden = false)
     {
         InitializeComponent();
         _baseUrl = baseUrl;
         _coordinator = coordinator;
+        _startHidden = startHidden;
+        if (startHidden)
+        {
+            // 开机自启：先以透明窗口加载，Loaded 后隐藏到托盘（避免登录时闪一下窗口）
+            Opacity = 0;
+            ShowInTaskbar = false;
+            // WebView 初始化可能稍慢：先建好托盘，保证隐藏后仍有入口
+            EnsureTray();
+        }
         Loaded += OnLoaded;
         Closed += (_, _) =>
         {
             try { _tray?.Dispose(); } catch { /* 忽略 */ }
             try { _trayMenu?.Dispose(); } catch { /* 忽略 */ }
+            try { _badgeIcon?.Dispose(); } catch { /* 忽略 */ }
         };
         // 注销 / 关机时不能被「关闭到托盘」拦住
         System.Windows.Application.Current.SessionEnding += (_, _) => _exiting = true;
@@ -64,9 +83,16 @@ public partial class MainWindow : Window
             EnsureTray();
             StatusText.Text = L10n.StatusLocalService(_baseUrl);
             WebView.Source = new Uri(_baseUrl);
+            if (_startHidden)
+            {
+                Hide();
+                Opacity = 1;
+                ShowInTaskbar = true;
+            }
         }
         catch (Exception ex)
         {
+            BringToFront();
             StatusText.Text = L10n.WebviewInitFailed(ex.Message);
             MessageBox.Show(this,
                 L10n.WebviewRuntimeBody(ex.Message), L10n.MessageBoxTitle, MessageBoxButton.OK, MessageBoxImage.Error);
@@ -131,10 +157,20 @@ public partial class MainWindow : Window
         {
             using var doc = JsonDocument.Parse(e.WebMessageAsJson);
             var root = doc.RootElement;
-            if (!root.TryGetProperty("type", out var type) || type.GetString() != "notify") return;
-            var title = root.TryGetProperty("title", out var t) ? (t.GetString() ?? "") : "";
-            var body = root.TryGetProperty("body", out var b) ? (b.GetString() ?? "") : "";
-            ShowNotification(title, body);
+            if (!root.TryGetProperty("type", out var type)) return;
+            switch (type.GetString())
+            {
+                case "notify":
+                    var title = root.TryGetProperty("title", out var t) ? (t.GetString() ?? "") : "";
+                    var body = root.TryGetProperty("body", out var b) ? (b.GetString() ?? "") : "";
+                    ShowNotification(title, body);
+                    break;
+                case "unread":
+                    // 前端 updateDocTitle() 同步的总未读消息数（托盘 tooltip / 徽标，1.0.304）
+                    var count = root.TryGetProperty("count", out var c) && c.TryGetInt32(out var n) ? n : 0;
+                    SetUnreadCount(count);
+                    break;
+            }
         }
         catch { /* 非法消息忽略：不影响宿主 */ }
     }
@@ -159,6 +195,82 @@ public partial class MainWindow : Window
         }
         catch { /* 系统通知被禁用时静默 */ }
     }
+
+    /// <summary>前端上报的总未读消息数（1.0.304）：刷新托盘 tooltip / 徽标与菜单首项。</summary>
+    private void SetUnreadCount(int count)
+    {
+        var next = Math.Clamp(count, 0, 9999);
+        if (next == _unreadCount) return;
+        _unreadCount = next;
+        UpdateTrayVisuals();
+        UpdateMenuState();
+    }
+
+    private void UpdateTrayVisuals()
+    {
+        if (_tray is null) return;
+        try { _tray.Text = _unreadCount > 0 ? L10n.TrayTextUnread(_unreadCount) : L10n.TrayText; }
+        catch { /* tooltip 超长 / 系统限制：忽略 */ }
+        try
+        {
+            if (_unreadCount > 0)
+            {
+                var next = CreateBadgeIcon(_baseIcon ?? System.Drawing.SystemIcons.Application, _unreadCount);
+                var old = _badgeIcon;
+                _badgeIcon = next;
+                _tray.Icon = next;
+                old?.Dispose();
+            }
+            else if (_badgeIcon is not null)
+            {
+                _tray.Icon = _baseIcon ?? System.Drawing.SystemIcons.Application;
+                _badgeIcon.Dispose();
+                _badgeIcon = null;
+            }
+        }
+        catch { /* 绘制徽标失败：沿用当前图标 */ }
+    }
+
+    /// <summary>在应用图标右下角画未读红点（>9 缩小字号，>99 显示 99+）。</summary>
+    private static System.Drawing.Icon CreateBadgeIcon(System.Drawing.Icon baseIcon, int count)
+    {
+        const int size = 32;
+        using var bmp = new System.Drawing.Bitmap(size, size);
+        using (var g = System.Drawing.Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(System.Drawing.Color.Transparent);
+            g.DrawIcon(baseIcon, new System.Drawing.Rectangle(0, 0, size, size));
+
+            var text = count > 99 ? "99+" : count.ToString();
+            var badgeSize = count > 9 ? 18 : 16;
+            var rect = new System.Drawing.Rectangle(size - badgeSize, size - badgeSize, badgeSize, badgeSize);
+            using var brush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(224, 36, 36));
+            g.FillEllipse(brush, rect);
+            using var font = new System.Drawing.Font("Segoe UI",
+                count > 99 ? 6.5f : count > 9 ? 8f : 9.5f,
+                System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel);
+            using var format = new System.Drawing.StringFormat
+            {
+                Alignment = System.Drawing.StringAlignment.Center,
+                LineAlignment = System.Drawing.StringAlignment.Center,
+            };
+            g.DrawString(text, font, System.Drawing.Brushes.White, rect, format);
+        }
+        var hIcon = bmp.GetHicon();
+        try
+        {
+            using var tmp = System.Drawing.Icon.FromHandle(hIcon);
+            return (System.Drawing.Icon)tmp.Clone();
+        }
+        finally
+        {
+            DestroyIcon(hIcon);
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
 
     /// <summary>静音：只抑制宿主气泡，站内通知中心不受影响；传 null 表示取消静音。</summary>
     private void ApplyMute(TimeSpan? duration, string? preset)
@@ -274,6 +386,24 @@ public partial class MainWindow : Window
             ShowTrayBalloon(L10n.TrayCloseToTrayOffTitle, L10n.TrayCloseToTrayOffBody);
     }
 
+    /// <summary>开机自启动开关（HKCU Run，带 --autostart 静默进托盘）。</summary>
+    private void ToggleStartup()
+    {
+        var enable = !StartupRegistration.IsEnabled();
+        if (!StartupRegistration.SetEnabled(enable, out var error))
+        {
+            BringToFront();
+            MessageBox.Show(this, L10n.TrayStartupFailed(error ?? "unknown"), L10n.MessageBoxTitle,
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        UpdateMenuState();
+        if (enable)
+            ShowTrayBalloon(L10n.TrayStartupOnTitle, L10n.TrayStartupOnBody);
+        else
+            ShowTrayBalloon(L10n.TrayStartupOffTitle, L10n.TrayStartupOffBody);
+    }
+
     private void EnsureTray()
     {
         if (_tray is not null) return;
@@ -288,10 +418,11 @@ public partial class MainWindow : Window
             }
         }
         catch { /* 取不到就用系统图标 */ }
+        _baseIcon = icon;
 
-        var openItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayOpen);
-        openItem.Font = new System.Drawing.Font(openItem.Font, System.Drawing.FontStyle.Bold);
-        openItem.Click += (_, _) => BringToFront();
+        _openItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayOpen);
+        _openItem.Font = new System.Drawing.Font(_openItem.Font, System.Drawing.FontStyle.Bold);
+        _openItem.Click += (_, _) => BringToFront();
 
         var openDataItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayOpenDataDir);
         openDataItem.Click += (_, _) => OpenDataDirectory();
@@ -318,18 +449,21 @@ public partial class MainWindow : Window
 
         _closeToTrayItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayCloseToTray);
         _closeToTrayItem.Click += (_, _) => ToggleCloseToTray();
+        _startupItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayStartup);
+        _startupItem.Click += (_, _) => ToggleStartup();
 
         var exitItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayExit);
         exitItem.Click += (_, _) => ExitFromTray();
 
         _trayMenu = new System.Windows.Forms.ContextMenuStrip();
-        _trayMenu.Items.Add(openItem);
+        _trayMenu.Items.Add(_openItem);
         _trayMenu.Items.Add(openDataItem);
         _trayMenu.Items.Add(_restartItem);
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         _trayMenu.Items.Add(_muteMenu);
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         _trayMenu.Items.Add(_closeToTrayItem);
+        _trayMenu.Items.Add(_startupItem);
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         _trayMenu.Items.Add(exitItem);
         _trayMenu.Opening += (_, _) =>
@@ -341,13 +475,14 @@ public partial class MainWindow : Window
 
         _tray = new System.Windows.Forms.NotifyIcon
         {
-            Icon = icon,
+            Icon = _baseIcon,
             Text = L10n.TrayText,
             Visible = true,
             ContextMenuStrip = _trayMenu,
         };
         _tray.BalloonTipClicked += (_, _) => BringToFront();
         _tray.DoubleClick += (_, _) => BringToFront();
+        UpdateTrayVisuals();
         UpdateMenuState();
     }
 
@@ -367,6 +502,9 @@ public partial class MainWindow : Window
         if (_muteTomorrow is not null) _muteTomorrow.Checked = IsTrayMuted && _mutePreset == MutePresetTomorrow;
         if (_unmuteItem is not null) _unmuteItem.Enabled = IsTrayMuted;
         if (_closeToTrayItem is not null) _closeToTrayItem.Checked = _settings.CloseToTray;
+        if (_startupItem is not null) _startupItem.Checked = StartupRegistration.IsEnabled();
+        if (_openItem is not null)
+            _openItem.Text = _unreadCount > 0 ? L10n.TrayOpenUnread(_unreadCount) : L10n.TrayOpen;
     }
 
     private void ExitFromTray()
@@ -380,6 +518,8 @@ public partial class MainWindow : Window
     {
         try
         {
+            Opacity = 1;
+            ShowInTaskbar = true;
             Show();
             WindowState = WindowState == WindowState.Minimized ? WindowState.Normal : WindowState;
             Activate();

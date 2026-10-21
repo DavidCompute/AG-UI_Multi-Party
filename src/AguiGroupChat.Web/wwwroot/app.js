@@ -416,6 +416,7 @@ function resetChatState() {
   state.mentionAll = false;
   state.mentionMemory = new Map();
   state.groupUnread.clear();
+  updateDocTitle(); // 登出 / 切换身份：托盘与标签页未读数归零
   pendingAttachments = [];
   hideSendRetryBar();
   state.visibility = "all";
@@ -5189,6 +5190,7 @@ async function loadGroups() {
     const g = last && state.groups.find((x) => x.groupId === last);
     if (g) selectGroup(g.groupId);
   }
+  updateDocTitle(); // 知聚列表刷新后同步标签页标题与桌面托盘未读数
 }
 
 /** 配额水位归一化：只接受 warn / over（防止把服务端返回的任意字符串拼进 class 属性）。 */
@@ -6801,6 +6803,16 @@ function totalUnreadCount() {
 function updateDocTitle() {
   const n = totalUnreadCount();
   document.title = n > 0 ? `(${n}) ${t("brand.name")}` : t("brand.name");
+  syncDesktopUnread(n);
+}
+
+/** 桌面版托盘未读数（1.0.304）：只在 WebView2 宿主里上送，普通浏览器直接忽略。 */
+function syncDesktopUnread(n) {
+  try {
+    if (!isDesktopHost()) return;
+    const count = Math.max(0, Number(n) || 0);
+    window.chrome.webview.postMessage({ type: "unread", count });
+  } catch { /* 忽略 */ }
 }
 
 /** 浏览器桌面通知（Web Notification）：只要登录着，任何非本人触发的新消息都在浏览器弹系统通知（前台与后台均弹）；自己发的消息不弹；没授权先请求一次。 */

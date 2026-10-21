@@ -36,6 +36,24 @@ public static class L10n
     // 托盘图标（1.0.301）：右键菜单、静音与关闭行为
     public static string TrayText => IsZh() ? "知聚" : "KnowGath";
     public static string TrayOpen => IsZh() ? "打开知聚" : "Open KnowGath";
+    public static string TrayOpenUnread(int count) => IsZh()
+        ? $"打开知聚（{count} 条未读）"
+        : $"Open KnowGath ({count} unread)";
+    public static string TrayTextUnread(int count) => IsZh()
+        ? $"知聚 · {count} 条未读"
+        : $"KnowGath · {count} unread";
+    public static string TrayStartup => IsZh() ? "开机时自动启动" : "Start with Windows";
+    public static string TrayStartupOnTitle => IsZh() ? "已开启开机启动" : "Start with Windows enabled";
+    public static string TrayStartupOnBody => IsZh()
+        ? "下次登录 Windows 时知聚会静默启动到托盘（可在托盘菜单关闭）。"
+        : "KnowGath will start silently in the tray at your next Windows sign-in (turn it off from the tray menu).";
+    public static string TrayStartupOffTitle => IsZh() ? "已关闭开机启动" : "Start with Windows disabled";
+    public static string TrayStartupOffBody => IsZh()
+        ? "下次登录 Windows 时不会自动启动知聚。"
+        : "KnowGath will no longer start automatically at sign-in.";
+    public static string TrayStartupFailed(string message) => IsZh()
+        ? $"无法修改开机启动设置：{message}"
+        : $"Cannot change the Start with Windows setting: {message}";
     public static string TrayOpenDataDir => IsZh() ? "📂 打开数据目录" : "📂 Open data folder";
     public static string TrayOpenDataDirFailed(string message) => IsZh()
         ? $"无法打开数据目录：{message}"

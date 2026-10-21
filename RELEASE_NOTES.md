@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.303 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.303 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.304 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.304 Release Notes (current Windows desktop release)
+
+**版本说明**：**托盘能看未读、能开机自启**——托盘图标 tooltip 与红色徽标实时显示总未读消息数，另增「开机时自动启动」（登录后静默进托盘）。
+**Version note**: **The tray now shows unread counts and can start with Windows** — the tooltip and a red badge on the icon track total unread messages, plus an optional silent launch at sign-in.
+
+## 变更
+# Changes
+
+中文：
+- **未读同步**：前端 `updateDocTitle()` 在写标签页标题的同时调用 `syncDesktopUnread()`，仅在 WebView2 宿主里 `postMessage({ type: "unread", count })`；登录后加载知聚、收到消息、阅读后均会同步，登出归零。
+- **托盘展示**：宿主刷新 tooltip（`知聚 · N 条未读`）、菜单首项（`打开知聚（N 条未读）`）与图标右下角红色徽标；>9 缩小字号，>99 显示 `99+`；徽标为内存绘制（32×32），失败时回退原图标。
+- **开机自启动**：托盘菜单新增「☑ 开机时自动启动」，写当前用户 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（免管理员），命令带 `--autostart`；登录后窗口以透明方式加载、完成后隐藏到托盘，不闪窗也不弹窗；菜单勾选状态直接读注册表。
+- **工程**：新增 `StartupRegistration`（注册表读写，失败有文案）；`MainWindow` 新增 `startHidden` 参数；`Program` 识别 `--autostart`。
+- **无后端变更**。
+
+English:
+- **Unread sync**: the frontend's `updateDocTitle()` now also calls `syncDesktopUnread()`, which posts `{ type: "unread", count }` only inside a WebView2 host; it syncs after loading circles, on new messages, after reading, and resets to zero on logout.
+- **Tray presentation**: the host refreshes the tooltip (`KnowGath · N unread`), the first menu item (`Open KnowGath (N unread)`) and a red badge in the icon's bottom-right corner; the font shrinks above 9 and shows `99+` above 99. The badge is drawn in memory (32×32) and falls back to the original icon on failure.
+- **Start with Windows**: the tray menu gains **☑ Start with Windows**, writing the current user's `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (no admin required) with a `--autostart` switch. At sign-in the window loads transparently and then hides to the tray, so there is no flash and no popup; the check mark is read directly from the registry.
+- **Engineering**: new `StartupRegistration` (registry access with error text); `MainWindow` gains a `startHidden` parameter; `Program` recognizes `--autostart`.
+- **No backend change**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（未读数与开机启动）；桌面版 README 中英；`tools/README-playwright.md`（脚本 23 项）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.304。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (unread count and start with Windows); the desktop READMEs; `tools/README-playwright.md` (23 checks); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.304.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目与 `node --check` 通过；i18n 审计 **zh=en=2079，missing 0**；Playwright `ui-notif-desktop-bridge.mjs` **23/23**（含未读上送、标题联动、负数归零、浏览器不上送）；文档引用守卫通过；本轮无服务端变更，沿用 **1866 通过 / 0 失败**。**无法自动验证**：徽标绘制效果、开机自启注册表写入与静默启动（需安装版人工点验）。
+English: the desktop project builds and `node --check` passes; the i18n audit is **zh=en=2079, missing 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **23/23** (including unread posting, title linkage, negative clamping and browser no-op); the docs-reference guard passes; no server-side change, so **1866 passed / 0 failed** still applies. **Not automatically verifiable**: badge rendering, the startup registry write and silent launch (need a manual check in an installed build).
+
+---
+
+# AG-UI 群聊桌面版 1.0.303 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.303 Release Notes (historical)
 
 **版本说明**：**托盘成为桌面版的常驻入口**——新增打开数据目录、重启本地服务、四档静音、关闭到托盘（可持久化），不用退出应用也能打理本地服务。
 **Version note**: **The tray is now the desktop app's control center** — open the data folder, restart the local service, pick one of four mute durations, and optionally close to tray (persisted), all without quitting the app.

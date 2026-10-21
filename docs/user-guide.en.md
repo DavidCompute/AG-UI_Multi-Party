@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.303**
+> Applies to version: **1.0.304**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -320,11 +320,12 @@ Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), th
 
 Tray context menu (introduced in 1.0.302, expanded in 1.0.303):
 
-- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same.
+- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total unread messages (matching the tab title; `99+` above 99; updated on load, on new messages and after reading).
 - **📂 Open data folder**: opens `data/` under the process working directory (SQLite database, attachments and preview cache).
 - **🔄 Restart local service**: gracefully stops the backend, waits for the port to be released, starts a new backend process (preserving the multi-instance count) and reloads the page; every window sharing that backend disconnects briefly during the restart.
 - **🔕 Mute**: choose **30 minutes / 1 hour / 2 hours / until tomorrow 08:00**; while muted the menu shows the remaining time and offers **Unmute**. Only host balloons are suppressed — **the in-app notification center and unread badge keep working**; a confirmation balloon is shown when muting and restoring, and the mute state is process-local (it resets when the app restarts).
 - **☑ Minimize to tray when closing** (off by default): once enabled, closing the window only hides it and the app keeps running; use **Exit** in the tray menu to quit. A one-time explanation balloon is shown on the first hide. Windows logoff / shutdown is never blocked by this setting.
+- **☑ Start with Windows** (off by default): writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` for the current user (no admin required) with a `--autostart` switch, so the next Windows sign-in starts KnowGath silently in the tray. It registers the currently running executable, so **use it from an installed build**; turn it off before uninstalling (the uninstaller does not remove the registry value, and a leftover entry is ignored by Windows because the target no longer exists).
 - **Exit**: disposes the tray icon and menu, then closes the window, reusing the multi-instance shutdown chain so no backend process is left behind.
 
 #### 1.2.2 Left column: My Groups (`aside.panel.groups`)
