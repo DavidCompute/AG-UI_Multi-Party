@@ -33,6 +33,13 @@
       <span class="notif-title" data-i18n="notif.title">通知</span>
       <button id="notifClear" class="chip-btn" data-i18n-title="notif.clearAll">清空</button>
     </div>
+    <div id="notifPermHint" class="notif-perm hidden">
+      <span id="notifPermText" class="notif-perm-text"></span>
+      <span class="notif-perm-actions">
+        <button id="notifPermBtn" class="chip-btn" type="button" data-i18n="notif.permEnable">开启</button>
+        <button id="notifPermDismiss" class="chip-btn" type="button" data-i18n-title="notif.permDismiss">×</button>
+      </span>
+    </div>
     <div id="notifFilters" class="notif-filters">
       <button class="chip-btn on" data-nf="" type="button" data-i18n="notif.filterAll">全部</button>
       <button class="chip-btn" data-nf="mention" type="button" data-i18n="notif.filterMention">提及</button>

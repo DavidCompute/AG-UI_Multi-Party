@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.298 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.298 Release Notes (current Windows desktop release)
+
+**版本说明**：**不再“以为告警没触发”**——系统桌面通知未授权时，通知面板顶部会直接提示：未申请过给「开启」，已被拒绝则说明去站点设置允许；「×」可暂时关闭，**7 天后**再提醒。
+**Version note**: **No more "I thought the alert never fired"** — when desktop notifications are not granted, the notification panel shows a hint at the top: **Enable** when permission was never asked, or instructions for the site settings when it was denied; the × hides it and re-prompts after **7 days**.
+
+## 变更
+# Changes
+
+中文：
+- **判定**：`notifPermission()` 把 `"Notification" in window` 与 permission 统一成 `granted / default / denied / unsupported`（读取异常当 `unsupported`）。
+- **展示**：`default` → 「未开启」+ 开启按钮；`denied` → 拒绝说明，**不显示**开启按钮（再点也不会弹授权框）；`unsupported` / `granted` → 不显示。
+- **交互**：打开通知面板时评估；「开启」调 `Notification.requestPermission()`，成功 toast 提示；「×」写 `localStorage.agui.notifPermDismissedAt`，7 天内不再打扰。
+- **无后端变更**：纯前端。
+- **回归测试**：新增 `ui-notif-perm.mjs`（**11 项**）——未授权提示与开启、× 关闭与标记、授权后消失与 toast、已拒绝说明且无按钮、不支持时隐藏、无 JS 异常；Notification 权限用 initScript 桩模拟。
+
+English:
+- **Detection**: `notifPermission()` normalises `"Notification" in window` plus the permission into `granted / default / denied / unsupported` (a throwing getter counts as unsupported).
+- **Rendering**: `default` → "off" hint plus an Enable button; `denied` → an explanation for site settings with **no** button (requesting again would not prompt); `unsupported` / `granted` → hidden.
+- **Interaction**: evaluated when the panel opens; Enable calls `Notification.requestPermission()` and toasts on success; × writes `localStorage.agui.notifPermDismissedAt` and stays quiet for 7 days.
+- **No backend change**: frontend only.
+- **Regression test**: new `ui-notif-perm.mjs` (**11 checks**) — unpermissioned hint and enable, × dismissal and marker, granted hides with a toast, denied shows text without a button, unsupported hides, and no JS errors; Notification permission is stubbed via an init script.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（通知面板：权限引导）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.298。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (panel permission hint); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.298.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.296 的全量结果 **1866 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2077，missing 0**；四个守卫脚本全过；Playwright **11/11**（新）、**12/12**、**12/12**、**15/15**、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.296's full run of **1866 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2077, missing 0**; all four guard scripts pass; Playwright **11/11** (new), **12/12**, **12/12**, **15/15**, **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.297 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.297 Release Notes (current Windows desktop release)
 

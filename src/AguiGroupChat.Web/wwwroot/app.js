@@ -6823,6 +6823,43 @@ function handleSystemNotifyClick(groupId) {
   selectGroup(groupId);
 }
 
+/* ---- 桌面通知权限引导（1.0.298）：未授权时在通知面板顶部提示，避免“以为告警没触发” ---- */
+const NOTIF_PERM_DISMISS_KEY = "agui.notifPermDismissedAt";
+const NOTIF_PERM_RESHOW_MS = 7 * 24 * 3600 * 1000; // 手动关闭后 7 天再提醒
+
+function notifPermission() {
+  try {
+    if (!("Notification" in window)) return "unsupported";
+    return Notification.permission || "default";
+  } catch { return "unsupported"; }
+}
+
+function renderNotifPermHint() {
+  const box = $("notifPermHint");
+  if (!box) return;
+  const perm = notifPermission();
+  let dismissedAt = 0;
+  try { dismissedAt = Number(localStorage.getItem(NOTIF_PERM_DISMISS_KEY) || 0); } catch { /* 隐私模式 */ }
+  const recentlyDismissed = dismissedAt > 0 && Date.now() - dismissedAt < NOTIF_PERM_RESHOW_MS;
+  if (perm === "granted" || perm === "unsupported" || recentlyDismissed) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  $("notifPermText").textContent = perm === "denied" ? t("notif.permDenied") : t("notif.permHint");
+  // denied 后再点也不会弹授权框：只保留说明，隐藏「开启」
+  $("notifPermBtn").style.display = perm === "default" ? "" : "none";
+}
+
+async function requestNotifPermission() {
+  try {
+    const r = await Notification.requestPermission();
+    renderNotifPermHint();
+    if (r === "granted") toast(t("notif.permGranted"));
+    else if (r === "denied") toast(t("notif.permDeniedShort"));
+  } catch { toast(t("notif.permEnableFail")); }
+}
+
 /* ============ 应用内通知中心（5.4） ============ */
 
 /* ---- 按知聚静音：本地偏好（静音的知聚不再产生通知、不弹系统桌面通知） ---- */
@@ -7002,6 +7039,7 @@ function toggleNotifPanel() {
     // 打开即清空未读徽标（列表项保留，点击跳转时才标已读）——徽标只反映“新”数量
     state.notifications.forEach((n) => { n.read = true; });
     renderNotifications();
+    renderNotifPermHint(); // 桌面通知权限引导（未授权时提示）
   }
 }
 
@@ -15183,6 +15221,12 @@ function init() {
   // ---- 应用内通知中心（5.4）----
   $("notifBtn").onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); $("meMenu").classList.add("hidden"); };
   $("notifClear").onclick = (e) => { e.stopPropagation(); clearNotifications(); };
+  $("notifPermBtn").onclick = (e) => { e.stopPropagation(); requestNotifPermission(); };
+  $("notifPermDismiss").onclick = (e) => {
+    e.stopPropagation();
+    try { localStorage.setItem(NOTIF_PERM_DISMISS_KEY, String(Date.now())); } catch { /* 忽略 */ }
+    $("notifPermHint").classList.add("hidden");
+  };
   $("notifFilters").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-nf]");
     if (!btn) return;

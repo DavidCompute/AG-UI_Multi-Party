@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.297**
+> 适用版本：**1.0.298**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -308,7 +308,9 @@
 | 账户 | `#meChip`（头像 `#meAvatar`、昵称 `#meNickname`、箭头 `▾`） | title `topbar.account` | 展开账户菜单（见 1.7） |
 | 连接状态 | `#connStatus` | 如 `status.offline`「未连接」 | 显示 WebSocket 连接状态 |
 
-通知面板 `#notifPanel`（`.notif-panel`）含标题 `notif.title`、类型筛选 `#notifFilters`（全部 / 提及 / 审批 / 错误 / 消息 / 其他）、`#notifList` 列表、`#notifEmpty`（`notif.empty`「暂无通知」）与 `#notifNoMatch`（`notif.noMatch`「没有该类型的通知」）、清空按钮 `#notifClear`（`notif.clearAll`）；点击某条通知会跳转到来源知聚。**筛选只影响列表展示**，未读徽标始终反映全部未读数；「其他」= 未归入提及 / 审批 / 错误 / 消息的其余类型（如连接状态、提示）。
+通知面板 `#notifPanel`（`.notif-panel`）含标题 `notif.title`、权限引导 `#notifPermHint`、类型筛选 `#notifFilters`（全部 / 提及 / 审批 / 错误 / 消息 / 其他）、`#notifList` 列表、`#notifEmpty`（`notif.empty`「暂无通知」）与 `#notifNoMatch`（`notif.noMatch`「没有该类型的通知」）、清空按钮 `#notifClear`（`notif.clearAll`）；点击某条通知会跳转到来源知聚。**筛选只影响列表展示**，未读徽标始终反映全部未读数；「其他」= 未归入提及 / 审批 / 错误 / 消息的其余类型（如连接状态、提示）。
+
+权限引导（1.0.298）：当 `Notification.permission` 不是 `granted` 时，打开面板会在顶部显示提示——`default` 显示「开启」（调用 `Notification.requestPermission()`），`denied` 显示去站点设置允许的说明且不再显示按钮；「×」写入 `localStorage.agui.notifPermDismissedAt`，**7 天**后再次提醒；环境不支持 `Notification` 时不显示。
 
 #### 1.2.2 左栏：我的知聚（`aside.panel.groups`）
 

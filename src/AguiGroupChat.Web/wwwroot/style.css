@@ -110,6 +110,15 @@ select {
 .notif-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 2px; }
 .notif-filters .chip-btn { padding: 2px 8px; font-size: 12px; }
 .notif-filters .chip-btn.on { border-color: var(--accent); color: var(--accent); }
+/* 桌面通知权限引导（1.0.298）：未授权时在面板顶部提示 */
+.notif-perm {
+  display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  padding: 8px 14px; border-bottom: 1px solid var(--border);
+  background: rgba(255, 193, 7, .10); font-size: 12px; line-height: 1.45;
+}
+.notif-perm.hidden { display: none; }
+.notif-perm-text { flex: 1; min-width: 0; color: var(--text); }
+.notif-perm-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .notif-list { overflow-y: auto; }
 .notif-empty { padding: 24px 14px; text-align: center; color: var(--muted); font-size: 13px; }
 .notif-list .notif-item {
