@@ -33,6 +33,21 @@ public static class L10n
 
     public static string MessageBoxTitle => IsZh() ? "AG-UI 桌面版" : "AG-UI Desktop";
 
+    // 托盘图标（1.0.302）：右键菜单与静音反馈
+    public static string TrayText => IsZh() ? "知聚" : "KnowGath";
+    public static string TrayOpen => IsZh() ? "打开知聚" : "Open KnowGath";
+    public static string TrayMuteOneHour => IsZh() ? "🔕 静音 1 小时" : "🔕 Mute for 1 hour";
+    public static string TrayUnmute => IsZh() ? "🔔 取消静音" : "🔔 Unmute";
+    public static string TrayExit => IsZh() ? "退出" : "Exit";
+    public static string TrayMutedTitle => IsZh() ? "已静音 1 小时" : "Muted for 1 hour";
+    public static string TrayMutedBody => IsZh()
+        ? "未来 1 小时内不再弹出桌面通知（站内通知中心与未读徽标不受影响）。"
+        : "Desktop notifications are suppressed for the next hour (the in-app notification center and unread badge keep working).";
+    public static string TrayUnmutedTitle => IsZh() ? "已恢复桌面通知" : "Desktop notifications restored";
+    public static string TrayUnmutedBody => IsZh()
+        ? "之后的新消息与提醒会继续弹出气泡。"
+        : "New messages and alerts will pop up as balloons again.";
+
     /// <summary>首次启动一次性提示：本机未装 LibreOffice（办公文档在线查看 / PPT 播放依赖它）。</summary>
     public static string DocPreviewHintBody => IsZh()
         ? "本机未检测到 LibreOffice，办公文档（PPT / Word / Excel）的在线查看与播放将不可用——\n" +

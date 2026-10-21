@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.301 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.301 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.302 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.302 Release Notes (current Windows desktop release)
+
+**版本说明**：**托盘图标可打理了**——右键托盘图标可「打开知聚 / 静音 1 小时 / 退出」，临时不想被打扰时不用去关整个应用。
+**Version note**: **The tray icon is now actionable** — right-click it for **Open KnowGath / Mute for 1 hour / Exit**, so you can silence interruptions without quitting the app.
+
+## 变更
+# Changes
+
+中文：
+- **右键菜单**：`NotifyIcon.ContextMenuStrip` 提供「打开知聚」「🔕 静音 1 小时 / 🔔 取消静音」「退出」；打开菜单时按当前状态刷新静音项文案。
+- **静音语义**：只抑制宿主托盘气泡，**站内通知中心与未读徽标照常工作**；静音 / 恢复各弹一次确认气泡；状态只存在进程内，重启自动恢复。
+- **退出**：释放托盘图标与菜单后关闭主窗口，沿用 `ShutdownMode.OnMainWindowClose` 与多实例计数停机链路，不会残留后台进程。
+- **本地化**：新增文案走 `L10n`（中 / 英跟随系统），不涉及 Web i18n。
+- **无后端变更**：纯桌面壳改动。
+
+English:
+- **Context menu**: `NotifyIcon.ContextMenuStrip` now offers **Open KnowGath**, **🔕 Mute for 1 hour / 🔔 Unmute** and **Exit**; the mute item's text is refreshed against the current state whenever the menu opens.
+- **Mute semantics**: suppresses host tray balloons only — **the in-app notification center and unread badge keep working**; a confirmation balloon is shown on mute and on restore; the state is process-local and resets on restart.
+- **Exit**: disposes the tray icon and menu, then closes the main window, reusing `ShutdownMode.OnMainWindowClose` and the multi-instance shutdown chain so no backend process is left behind.
+- **Localization**: new strings live in `L10n` (Chinese / English following the system culture) and do not touch web i18n.
+- **No backend change**: desktop shell only.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（托盘右键菜单）；桌面版 README 中英（特性列表 + 版本号 + 打包示例）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.302。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (tray context menu); the desktop READMEs (feature list + version + packaging example); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.302.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目通过（0 错误）；本轮**无服务端与前端逻辑变更**，沿用 1.0.301 的全量结果 **1866 通过 / 0 失败**，i18n 审计仍为 **zh=en=2079，missing 0**，文档引用与配置键守卫通过。**无法自动验证**：真实托盘右键菜单与静音气泡（WinForms 托盘需人工在安装后的桌面版里点验）。
+English: the desktop project builds (0 errors); **no server-side or frontend logic changed**, so 1.0.301's full run of **1866 passed / 0 failed** still applies, the i18n audit remains **zh=en=2079, missing 0**, and the docs-reference and config-key guards pass. **Not automatically verifiable**: the real tray context menu and mute balloons (the WinForms tray needs a manual check in an installed desktop build).
+
+---
+
+# AG-UI 群聊桌面版 1.0.301 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.301 Release Notes (historical)
 
 **版本说明**：**桌面版系统通知终于能弹了**——WebView2 里 `Notification` 权限往往不可用、用户也无处改站点设置；现在前端把通知交给宿主，用 Windows 托盘气泡展示。
 **Version note**: **Desktop notifications finally work** — inside WebView2 the `Notification` permission is often unavailable and users cannot change site settings, so the frontend now hands notifications to the host, which shows them as Windows tray balloons.

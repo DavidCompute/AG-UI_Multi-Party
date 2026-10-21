@@ -10,13 +10,20 @@ public partial class MainWindow : Window
 {
     private readonly string _baseUrl;
     private System.Windows.Forms.NotifyIcon? _tray;
+    private System.Windows.Forms.ContextMenuStrip? _trayMenu;
+    private System.Windows.Forms.ToolStripMenuItem? _muteItem;
+    private DateTime _mutedUntilUtc = DateTime.MinValue;
 
     public MainWindow(string baseUrl)
     {
         InitializeComponent();
         _baseUrl = baseUrl;
         Loaded += OnLoaded;
-        Closed += (_, _) => { try { _tray?.Dispose(); } catch { /* 忽略 */ } };
+        Closed += (_, _) =>
+        {
+            try { _tray?.Dispose(); } catch { /* 忽略 */ }
+            try { _trayMenu?.Dispose(); } catch { /* 忽略 */ }
+        };
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -90,11 +97,49 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(title)) return;
         EnsureTray();
+        UpdateMuteItem();
+        if (IsTrayMuted) return; // 托盘菜单里的「静音 1 小时」（只影响气泡）
+        ShowTrayBalloon(title, body);
+    }
+
+    private bool IsTrayMuted => DateTime.UtcNow < _mutedUntilUtc;
+
+    private void ShowTrayBalloon(string title, string body)
+    {
         try
         {
             _tray!.ShowBalloonTip(6000, Truncate(title, 64), Truncate(body, 200), System.Windows.Forms.ToolTipIcon.Info);
         }
         catch { /* 系统通知被禁用时静默 */ }
+    }
+
+    /// <summary>托盘右键「静音 1 小时 / 取消静音」：仅抑制宿主气泡，站内通知中心不受影响。</summary>
+    private void ToggleTrayMute()
+    {
+        EnsureTray();
+        if (IsTrayMuted)
+        {
+            _mutedUntilUtc = DateTime.MinValue;
+            ShowTrayBalloon(L10n.TrayUnmutedTitle, L10n.TrayUnmutedBody);
+        }
+        else
+        {
+            _mutedUntilUtc = DateTime.UtcNow.AddHours(1);
+            ShowTrayBalloon(L10n.TrayMutedTitle, L10n.TrayMutedBody);
+        }
+        UpdateMuteItem();
+    }
+
+    private void UpdateMuteItem()
+    {
+        if (_muteItem is null) return;
+        _muteItem.Text = IsTrayMuted ? L10n.TrayUnmute : L10n.TrayMuteOneHour;
+    }
+
+    private void ExitFromTray()
+    {
+        try { _tray?.Dispose(); } catch { /* 忽略 */ }
+        Close(); // ShutdownMode.OnMainWindowClose → 整个桌面应用退出
     }
 
     private void EnsureTray()
@@ -112,11 +157,27 @@ public partial class MainWindow : Window
         }
         catch { /* 取不到就用系统图标 */ }
 
+        var openItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayOpen);
+        openItem.Click += (_, _) => BringToFront();
+        _muteItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayMuteOneHour);
+        _muteItem.Click += (_, _) => ToggleTrayMute();
+        var exitItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayExit);
+        exitItem.Click += (_, _) => ExitFromTray();
+
+        _trayMenu = new System.Windows.Forms.ContextMenuStrip();
+        _trayMenu.Items.Add(openItem);
+        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        _trayMenu.Items.Add(_muteItem);
+        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        _trayMenu.Items.Add(exitItem);
+        _trayMenu.Opening += (_, _) => UpdateMuteItem();
+
         _tray = new System.Windows.Forms.NotifyIcon
         {
             Icon = icon,
-            Text = "知聚",
+            Text = L10n.TrayText,
             Visible = true,
+            ContextMenuStrip = _trayMenu,
         };
         _tray.BalloonTipClicked += (_, _) => BringToFront();
         _tray.DoubleClick += (_, _) => BringToFront();

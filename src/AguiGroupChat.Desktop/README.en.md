@@ -2,14 +2,15 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows) **(current version 1.0.301)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+A pure desktop application (Windows) **(current version 1.0.302)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
 personal memory, AI twin, attachments, topics, trigger modes, memory personality types, office document online view and PPT playback (**needs local LibreOffice**, see Notes), etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
 
 - **Database**: SQLite (`data/agui.sqlite`); semantic memory uses **sqlite-vec** (`vec0` vector virtual table, shipped with `libs/vec0.dll`)
 - **Vector model**: **LLamaSharp** (the .NET implementation of llama.cpp) loads a GGUF embedding model locally, fully offline
-- **UI**: WPF + WebView2 window that embeds Kestrel to reuse the existing web frontend (no external browser required)
+- **UI**: a WPF + WebView2 window embedding Kestrel and reusing the existing web frontend (no external browser needed)
+- **System notifications**: the WebView2 notification bridge → Windows tray balloons; the tray context menu offers **Open KnowGath / Mute for 1 hour / Exit** (muting suppresses balloons only; in-app notifications keep working)
 
 ## Quick Start
 
@@ -31,16 +32,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### Building a release (win-x64 publish / MSI installer)
 
-Current version: **1.0.301** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+Current version: **1.0.302** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
 
 ```bash
 # 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. Build the MSI installer: outputs to artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    e.g. for 1.0.301:
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.301
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.301.msi
+#    e.g. for 1.0.302:
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.302
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.302.msi
 ```
 
 > `tools/build-msi.ps1` first does a **forced fresh publish** (cleans Release intermediates to avoid reusing stale DLLs), strips non-Windows native runtimes,
