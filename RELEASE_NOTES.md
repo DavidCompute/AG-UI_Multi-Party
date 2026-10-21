@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.308 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.308 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.309 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.309 Release Notes (current Windows desktop release)
+
+**版本说明**：**深链不再重复开窗**——跳转列表 / 快捷任务会交给已运行的窗口处理，不再多开窗口、出现重复托盘图标。
+**Version note**: **Deep links no longer open extra windows** — jump-list items and shortcuts are handed to the running window instead of starting another one and adding a duplicate tray icon.
+
+## 变更
+# Changes
+
+中文：
+- **本机管道接管**：第一个 UI 实例创建 `NamedPipeServerStream`（`PipeOptions.CurrentUserOnly`，仅同用户可连）；后续带 `--group/--new-group/--admin` 的进程先尝试投递请求，成功则直接退出。
+- **请求处理**：服务端读取一行 JSON（`{group, action}`），经 `Dispatcher.BeginInvoke` 回到 UI 线程——切知聚复用 `selectGroup()` / 回退深链，快捷任务复用 `openCreateModal` / `openAdminModal`，并自动前置窗口。
+- **降级**：没有 UI 在运行（或无服务端）时快速失败，照旧启动新窗口；服务端退出后，下一次启动的窗口接管管道。
+- **安全**：管道仅限当前用户；`action` 只接受 `new-group` / `admin`；知聚 id 经 `JsonSerializer.Serialize` 转义后再拼入脚本，避免注入。
+- **无后端变更**。
+
+English:
+- **Local pipe handoff**: the first UI instance creates a `NamedPipeServerStream` (`PipeOptions.CurrentUserOnly`, same-user only). Later processes launched with `--group/--new-group/--admin` try to post the request first and exit immediately on success.
+- **Request handling**: the server reads one JSON line (`{group, action}`), marshals it to the UI thread via `Dispatcher.BeginInvoke` — circle switches reuse `selectGroup()` (deep-link fallback), shortcuts reuse `openCreateModal` / `openAdminModal`, and the window is brought to the front.
+- **Fallback**: when no UI is running (or no server exists) the send fails fast and a new window starts as before; if the serving instance exits, the next window started takes over the pipe.
+- **Security**: the pipe is current-user only; `action` accepts only `new-group` / `admin`; circle ids are escaped with `JsonSerializer.Serialize` before being embedded in script, preventing injection.
+- **No backend change**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（深链接管语义）；桌面版 README 中英；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.309。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (deep-link handoff); the desktop READMEs; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.309.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目与 `node --check` 通过；i18n 审计 **zh=en=2079，missing 0**；Playwright `ui-notif-desktop-bridge.mjs` **30/30**（沿用）；文档引用守卫通过；本轮无服务端变更，沿用 **1866 通过 / 0 失败**。**无法自动验证**：命名管道接管的实际多进程行为（需安装版：先开一个窗口，再从任务栏跳转列表点一个知聚，确认不新开窗口且原窗口切换）。
+English: the desktop project builds and `node --check` passes; the i18n audit is **zh=en=2079, missing 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **30/30** (carried over); the docs-reference guard passes; no server-side change, so **1866 passed / 0 failed** still applies. **Not automatically verifiable**: the real multi-process pipe handoff (manual check in an installed build: open one window, then click a circle in the taskbar jump list and confirm no extra window opens while the existing one switches).
+
+---
+
+# AG-UI 群聊桌面版 1.0.308 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.308 Release Notes (historical)
 
 **版本说明**：**托盘可直接切换知聚、记住窗口位置**——托盘「最近知聚」子菜单覆盖私密知聚，新增新建知聚 / 管理控制台快捷入口；窗口大小、位置与最大化状态下次启动自动恢复。
 **Version note**: **Switch circles from the tray and remember window placement** — the tray's Recent circles submenu includes private circles, New circle / Admin console shortcuts are one click away, and window size, position and maximized state are restored on the next launch.

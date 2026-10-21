@@ -424,6 +424,18 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>深链请求（来自另一个进程，如跳转列表 / 托盘快捷任务）：切知聚或打开快捷弹窗。</summary>
+    internal void HandleDeepLink(string? groupId, string? action)
+    {
+        if (!string.IsNullOrWhiteSpace(groupId))
+        {
+            NavigateToGroup(groupId!);
+            return;
+        }
+        if (action is "new-group" or "admin")
+            RunQuickAction(action);
+    }
+
     /// <summary>托盘快速切换知聚：优先调用页面的 selectGroup()，不可用时回退到深链导航。</summary>
     private async void NavigateToGroup(string groupId)
     {

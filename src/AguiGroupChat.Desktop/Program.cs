@@ -38,6 +38,13 @@ public static class Program
         var baseUrl = $"http://127.0.0.1:{BackendPort}";
         var coordinator = new InstanceCoordinator();
 
+        var initialGroup = GetOption(args, "--group");
+        var initialAction = args.Contains("--new-group") ? "new-group" : args.Contains("--admin") ? "admin" : null;
+
+        // 跳转列表 / 快捷任务：已有 UI 实例时交给它处理（不新开窗口、不重复托盘图标）
+        if (DeepLinkClient.TrySend(initialGroup, initialAction))
+            return;
+
         // 后端未运行 → 启动子进程并等待就绪（首次启动可能建库 / 下载 embedding 模型，最多等 60s）
         var startedBackend = false;
         if (!coordinator.Probe(baseUrl))
@@ -65,12 +72,16 @@ public static class Program
 
         // 桌面窗口（WebView2 加载本地页面；共享同一后端，多实例各自独立窗口）
         var wpfApp = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        var initialAction = args.Contains("--new-group") ? "new-group" : args.Contains("--admin") ? "admin" : null;
         var window = new MainWindow(
             baseUrl, coordinator,
             startHidden: args.Contains("--autostart"),
-            initialGroupId: GetOption(args, "--group"),
+            initialGroupId: initialGroup,
             initialAction: initialAction);
+
+        // 第一个 UI 实例占有深链管道；后续实例 / 手动多开的窗口不抢占（同一时间只一个服务端）
+        var deepLink = new DeepLinkServer((group, action) =>
+            window.Dispatcher.BeginInvoke(() => window.HandleDeepLink(group, action)));
+        deepLink.TryStart();
 
         // 关窗：实例计数 -1；最后一个实例 → 通知后端优雅停机。
         // 停机在后台线程执行，不阻塞 UI；Run 返回后短等待放行，进程必退。
@@ -79,6 +90,7 @@ public static class Program
             _ = Task.Run(() => coordinator.RemoveInstanceAndShutdownIfLast(baseUrl));
         };
         wpfApp.Run(window);
+        deepLink.Dispose();
         Thread.Sleep(800); // 等后台停机请求发出（不阻塞关闭过程）
     }
 

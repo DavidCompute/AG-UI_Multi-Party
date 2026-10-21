@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-纯桌面应用（Windows）**（当前版本 1.0.308）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
+纯桌面应用（Windows）**（当前版本 1.0.309）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
 个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、办公文档在线查看与 PPT 播放（**需本机 LibreOffice**，见下方说明）等），但**数据与模型全部在本机**；服务在本机固定起在
 `http://127.0.0.1:5200`，即便断网也能跑通群聊 / 智能体管理 / 语义记忆等本地功能（仅对话模型 DeepSeek 等仍需联网），
 支持把标记为「本机执行」的客户端技能经本机桥在桌面机执行：
@@ -10,7 +10,7 @@
 - **数据库**：SQLite（`data/agui.sqlite`），语义记忆用 **sqlite-vec**（`vec0` 向量虚拟表，`libs/vec0.dll` 已随附）
 - **向量模型**：**LLamaSharp**（llama.cpp 的 .NET 实现）本地加载 GGUF embedding 模型，全程离线
 - **UI**：WPF + WebView2 窗口，内嵌 Kestrel 复用现有 Web 前端（不依赖外部浏览器）
-- **系统通知**：WebView2 通知桥 → Windows 托盘气泡；托盘右键菜单可「打开知聚 / 最近知聚切换 / 新建知聚 / 管理控制台 / 打开数据目录 / 重启本地服务 / 静音（30 分钟～到明天）/ 关闭窗口时最小化到托盘 / 开机时自动启动 / 退出」；托盘 tooltip 与图标徽标显示未读总数（含通知中心），静音只关气泡、站内通知照常；任务栏缩略图提供「打开 / 静音」按钮、未读覆盖徽标、长任务进度条（含当前步骤/技能提示）与「最近知聚 + 新建知聚/管理控制台」跳转列表；窗口大小/位置/最大化自动记忆
+- **系统通知**：WebView2 通知桥 → Windows 托盘气泡；托盘右键菜单可「打开知聚 / 最近知聚切换 / 新建知聚 / 管理控制台 / 打开数据目录 / 重启本地服务 / 静音（30 分钟～到明天）/ 关闭窗口时最小化到托盘 / 开机时自动启动 / 退出」；托盘 tooltip 与图标徽标显示未读总数（含通知中心），静音只关气泡、站内通知照常；任务栏缩略图提供「打开 / 静音」按钮、未读覆盖徽标、长任务进度条（含当前步骤/技能提示）与「最近知聚 + 新建知聚/管理控制台」跳转列表；窗口大小/位置/最大化自动记忆；跳转列表深链由已运行窗口接管（不重复开窗）
 
 ## 快速开始
 
@@ -31,16 +31,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### 构建发行版（win-x64 程序 / MSI 安装包）
 
-当前版本：**1.0.308**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
+当前版本：**1.0.309**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
 
 ```bash
 # 1. 发布 win-x64 产物到 artifacts/win-x64（含 SQLite / 本地 llama embedding / wwwroot / VC++ 运行库 / vec0.dll）
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. 打 MSI 安装包：输出到 artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    例如 1.0.308：
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.308
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.308.msi
+#    例如 1.0.309：
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.309
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.309.msi
 ```
 
 > `tools/build-msi.ps1` 会先**强制全新发布**（清理 Release 中间产物，防止增量复用旧 DLL）、排除非 Windows 原生运行库、
