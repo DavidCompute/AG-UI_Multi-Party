@@ -39,9 +39,13 @@ public static class L10n
     public static string TrayOpenUnread(int count) => IsZh()
         ? $"打开知聚（{count} 条未读）"
         : $"Open KnowGath ({count} unread)";
-    public static string TrayTextUnread(int count) => IsZh()
-        ? $"知聚 · {count} 条未读"
-        : $"KnowGath · {count} unread";
+    public static string TrayTextUnread(int count, int messages, int notifications) => IsZh()
+        ? (notifications > 0
+            ? $"知聚 · {count} 条未读（{messages} 消息 / {notifications} 通知）"
+            : $"知聚 · {count} 条未读")
+        : (notifications > 0
+            ? $"KnowGath · {count} unread ({messages} messages / {notifications} notifications)"
+            : $"KnowGath · {count} unread");
     public static string TrayStartup => IsZh() ? "开机时自动启动" : "Start with Windows";
     public static string TrayStartupOnTitle => IsZh() ? "已开启开机启动" : "Start with Windows enabled";
     public static string TrayStartupOnBody => IsZh()
@@ -54,6 +58,14 @@ public static class L10n
     public static string TrayStartupFailed(string message) => IsZh()
         ? $"无法修改开机启动设置：{message}"
         : $"Cannot change the Start with Windows setting: {message}";
+
+    // 任务栏缩略图按钮（1.0.305）
+    public static string TaskbarOpen => IsZh() ? "打开知聚" : "Open KnowGath";
+    public static string TaskbarMute => IsZh() ? "静音 1 小时" : "Mute for 1 hour";
+    public static string TaskbarUnmute => IsZh() ? "取消静音" : "Unmute";
+    public static string TaskbarUnread(int count) => IsZh()
+        ? $"未读 {count} 条"
+        : $"{count} unread";
     public static string TrayOpenDataDir => IsZh() ? "📂 打开数据目录" : "📂 Open data folder";
     public static string TrayOpenDataDirFailed(string message) => IsZh()
         ? $"无法打开数据目录：{message}"

@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.304 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.304 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.305 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.305 Release Notes (current Windows desktop release)
+
+**版本说明**：**任务栏也能打理知聚**——悬停任务栏图标即可「打开 / 静音」，未读徽标同时叠加到任务栏；托盘未读口径扩展为未读消息 + 通知中心。
+**Version note**: **The taskbar is now actionable too** — hover the taskbar icon for **Open / Mute**, with an unread overlay badge; the tray count now covers unread messages plus notification-center items.
+
+## 变更
+# Changes
+
+中文：
+- **未读口径（前端）**：`syncDesktopUnread()` 改为上报 `count = 未读消息 + 未读通知（排除 message 类，避免与消息未读重复）`，并附带 `messages / notifications` 明细；`renderNotifications()` 结束时同步，通知标为已读 / 删除 / 清空后立即生效；负数归零。
+- **托盘展示**：tooltip 显示明细（`N 条未读（M 消息 / K 通知）`），菜单首项与图标红点显示总数；任务栏图标右下角叠加同款未读覆盖图标。
+- **任务栏缩略图按钮**：新增 `TaskbarThumbnailBar`（`ITaskbarList3`）——悬停任务栏图标时显示「打开知聚」与「静音 1 小时 / 取消静音」；点击静音与托盘菜单共享状态（单次切换 1 小时），按钮图标与提示随状态更新；静音到期自动恢复。
+- **降级**：未启用缩略图预览、远程桌面或 COM 初始化失败时静默跳过，托盘菜单不受影响；图标句柄统一在换图后释放，避免 shell 引用已释放 HICON。
+- **无后端变更**。
+
+English:
+- **Unread semantics (frontend)**: `syncDesktopUnread()` now reports `count = unread messages + unread notification-center items (excluding message-type notifications to avoid double counting)` plus a `messages / notifications` breakdown. `renderNotifications()` syncs at the end, so marking read / deleting / clearing takes effect immediately; negative values clamp to zero.
+- **Tray presentation**: the tooltip shows the breakdown (`N unread (M messages / K notifications)`), while the first menu item and the icon badge show the total; the same unread overlay is applied to the taskbar icon.
+- **Taskbar thumbnail buttons**: new `TaskbarThumbnailBar` (`ITaskbarList3`) — hovering the taskbar icon shows **Open KnowGath** and **Mute for 1 hour / Unmute**. The mute button shares state with the tray menu (one click toggles one hour), its icon and tooltip follow the state, and it recovers automatically when the mute expires.
+- **Fallback**: thumbnail previews disabled, remote sessions or COM initialization failures are skipped silently, and the tray menu still works. Icon handles are released only after the shell receives the replacement, avoiding references to disposed HICONs.
+- **No backend change**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（未读口径、任务栏按钮）；桌面版 README 中英；`tools/README-playwright.md`（未读口径描述）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.305。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (unread semantics, taskbar buttons); the desktop READMEs; `tools/README-playwright.md` (unread description); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.305.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目与 `node --check` 通过；i18n 审计 **zh=en=2079，missing 0**；Playwright `ui-notif-desktop-bridge.mjs` **23/23**（新增合并未读、通知已读同步、负数归零）；文档引用守卫通过；本轮无服务端变更，沿用 **1866 通过 / 0 失败**。**无法自动验证**：任务栏缩略图按钮 / 覆盖徽标的实际渲染与点击（需安装版人工点验；远程桌面或关闭缩略图预览时会降级）。
+English: the desktop project builds and `node --check` passes; the i18n audit is **zh=en=2079, missing 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **23/23** (new combined unread, notification-read sync and negative clamping); the docs-reference guard passes; no server-side change, so **1866 passed / 0 failed** still applies. **Not automatically verifiable**: actual rendering / clicks of the taskbar thumbnail buttons and overlay badge (need a manual check in an installed build; they degrade in remote sessions or when thumbnail previews are disabled).
+
+---
+
+# AG-UI 群聊桌面版 1.0.304 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.304 Release Notes (historical)
 
 **版本说明**：**托盘能看未读、能开机自启**——托盘图标 tooltip 与红色徽标实时显示总未读消息数，另增「开机时自动启动」（登录后静默进托盘）。
 **Version note**: **The tray now shows unread counts and can start with Windows** — the tooltip and a red badge on the icon track total unread messages, plus an optional silent launch at sign-in.

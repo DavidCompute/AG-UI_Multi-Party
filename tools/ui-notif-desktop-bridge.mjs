@@ -3,7 +3,7 @@
 //   2. showSystemNotification → postMessage({type:"notify",title,body})，body 截断 200；
 //   3. 免打扰时段 / 按类型静音仍然拦截（不上送宿主）；
 //   4. notifyNewMessage 走桥；本人消息不弹；
-//   5. 未读计数（1.0.304）：syncDesktopUnread / updateDocTitle 上送 {type:"unread",count}，负数归零；
+//   5. 未读计数（1.0.305）：消息 + 非 message 通知合并上送，通知已读后同步，负数归零；
 //   6. 非桌面宿主（无 chrome.webview）不误判、仍走浏览器 Notification、不上送未读；
 //   7. 无页面 JS 异常。
 // 用法：cd tools && HEADLESS=1 node ui-notif-desktop-bridge.mjs
@@ -88,24 +88,41 @@ try {
   const longNotify = posted.find((m) => m.type === "notify");
   check("body 截断到 200 字", longNotify?.body?.length === 200, String(longNotify?.body?.length));
 
-  // 未读计数桥（1.0.304）
-  await a.evaluate(() => syncDesktopUnread(7));
-  posted = await drain(a);
-  check("未读计数上送宿主", posted.some((m) => m.type === "unread" && m.count === 7), JSON.stringify(posted));
-
+  // 未读计数桥（1.0.305）：未读消息 + 非 message 类未读通知（避免与消息未读重复计数）
   await a.evaluate(() => {
     state.groupUnread.clear();
-    state.groupUnread.set("gtest", { unreadCount: 4, byTopic: {} });
+    state.groupUnread.set("gtest", { unreadCount: 3, byTopic: {} });
+    state.notifications = [
+      { id: "n1", type: "approval", read: false, icon: "🔐", title: "审批", body: "待处理", ts: Date.now() },
+      { id: "n2", type: "error", read: false, icon: "⚠️", title: "错误", body: "失败", ts: Date.now() },
+      { id: "n3", type: "message", read: false, icon: "💬", title: "消息", body: "重复", ts: Date.now() },
+      { id: "n4", type: "info", read: true, icon: "ℹ️", title: "已读", body: "忽略", ts: Date.now() },
+    ];
     updateDocTitle();
   });
   posted = await drain(a);
-  check("标题更新同步未读计数", posted.some((m) => m.type === "unread" && m.count === 4), JSON.stringify(posted));
-  await a.evaluate(() => { state.groupUnread.delete("gtest"); updateDocTitle(); });
-  await drain(a);
+  const unreadMsg = posted.find((m) => m.type === "unread");
+  check("未读计数上送宿主", unreadMsg?.count === 5 && unreadMsg?.messages === 3 && unreadMsg?.notifications === 2, JSON.stringify(unreadMsg));
 
-  await a.evaluate(() => syncDesktopUnread(-3));
+  // 通知标为已读 → renderNotifications 自动同步（1.0.305）
+  await a.evaluate(() => { state.notifications[0].read = true; renderNotifications(); });
   posted = await drain(a);
-  check("负数未读归零", posted.some((m) => m.type === "unread" && m.count === 0), JSON.stringify(posted));
+  const afterRead = posted.find((m) => m.type === "unread");
+  check("通知已读后同步未读", afterRead?.count === 4 && afterRead?.notifications === 1, JSON.stringify(afterRead));
+
+  // 负数归零
+  await a.evaluate(() => {
+    state.groupUnread.clear();
+    state.groupUnread.set("gneg", { unreadCount: -3, byTopic: {} });
+    state.notifications = [];
+    updateDocTitle();
+  });
+  posted = await drain(a);
+  const clamped = posted.find((m) => m.type === "unread");
+  check("负数未读归零", clamped?.count === 0, JSON.stringify(clamped));
+
+  await a.evaluate(() => { state.groupUnread.clear(); state.notifications = []; renderNotifications(); updateDocTitle(); });
+  await drain(a);
 
   // 免打扰：构造覆盖当前时刻的窗口
   await a.evaluate(() => {
@@ -145,7 +162,7 @@ try {
   check("浏览器宿主仍按真实权限判定", (await b.evaluate(() => notifPermission())) === "denied");
   await b.evaluate(() => showSystemNotification("浏览器", "denied 不应弹", "agui", "info"));
   check("浏览器 denied 时无宿主消息", (await drain(b)).every((m) => m.type !== "notify"));
-  await b.evaluate(() => syncDesktopUnread(5));
+  await b.evaluate(() => syncDesktopUnread());
   check("浏览器不上送未读计数", (await drain(b)).length === 0);
 
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));

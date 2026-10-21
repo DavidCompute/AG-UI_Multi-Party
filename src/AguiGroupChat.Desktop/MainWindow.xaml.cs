@@ -30,7 +30,12 @@ public partial class MainWindow : Window
 
     private System.Drawing.Icon? _baseIcon;
     private System.Drawing.Icon? _badgeIcon;
+    private System.Drawing.Icon? _openThumbIcon;
+    private System.Drawing.Icon? _muteThumbIcon;
     private int _unreadCount;
+    private int _unreadMessages;
+    private int _unreadNotifications;
+    private readonly TaskbarThumbnailBar _taskbar = new();
 
     private readonly bool _startHidden;
 
@@ -65,9 +70,44 @@ public partial class MainWindow : Window
             try { _tray?.Dispose(); } catch { /* 忽略 */ }
             try { _trayMenu?.Dispose(); } catch { /* 忽略 */ }
             try { _badgeIcon?.Dispose(); } catch { /* 忽略 */ }
+            try { _openThumbIcon?.Dispose(); } catch { /* 忽略 */ }
+            try { _muteThumbIcon?.Dispose(); } catch { /* 忽略 */ }
+            try { _taskbar.Dispose(); } catch { /* 忽略 */ }
         };
         // 注销 / 关机时不能被「关闭到托盘」拦住
         System.Windows.Application.Current.SessionEnding += (_, _) => _exiting = true;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        try
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            var source = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
+            source?.AddHook(WndProc);
+            _taskbar.Initialize(hwnd);
+        }
+        catch { /* 远程桌面 / 老系统：降级为仅托盘 */ }
+    }
+
+    /// <summary>任务栏缩略图工具栏的按钮点击（THBN_CLICKED）。</summary>
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_COMMAND = 0x0111;
+        const int THBN_CLICKED = 0x1800;
+        if (msg == WM_COMMAND)
+        {
+            var v = wParam.ToInt64();
+            var id = (int)(v & 0xFFFF);
+            var code = (int)((v >> 16) & 0xFFFF);
+            if (code == THBN_CLICKED)
+            {
+                if (id == TaskbarThumbnailBar.OpenButtonId) { BringToFront(); handled = true; }
+                else if (id == TaskbarThumbnailBar.MuteButtonId) { ToggleQuickMute(); handled = true; }
+            }
+        }
+        return IntPtr.Zero;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -81,6 +121,7 @@ public partial class MainWindow : Window
             // 在宿主里未必可用（用户也无处改“站点设置”），因此由宿主兜底。
             WebView.CoreWebView2.WebMessageReceived += OnWebMessage;
             EnsureTray();
+            InitTaskbarButtons();
             StatusText.Text = L10n.StatusLocalService(_baseUrl);
             WebView.Source = new Uri(_baseUrl);
             if (_startHidden)
@@ -166,9 +207,11 @@ public partial class MainWindow : Window
                     ShowNotification(title, body);
                     break;
                 case "unread":
-                    // 前端 updateDocTitle() 同步的总未读消息数（托盘 tooltip / 徽标，1.0.304）
+                    // 前端同步：总未读 = 未读消息 + 未读通知（排除 message 类），1.0.305
                     var count = root.TryGetProperty("count", out var c) && c.TryGetInt32(out var n) ? n : 0;
-                    SetUnreadCount(count);
+                    var messages = root.TryGetProperty("messages", out var mEl) && mEl.TryGetInt32(out var mc) ? mc : count;
+                    var notifications = root.TryGetProperty("notifications", out var nEl) && nEl.TryGetInt32(out var nc) ? nc : 0;
+                    SetUnread(count, messages, notifications);
                     break;
             }
         }
@@ -196,12 +239,16 @@ public partial class MainWindow : Window
         catch { /* 系统通知被禁用时静默 */ }
     }
 
-    /// <summary>前端上报的总未读消息数（1.0.304）：刷新托盘 tooltip / 徽标与菜单首项。</summary>
-    private void SetUnreadCount(int count)
+    /// <summary>前端上报的未读数（1.0.304）：刷新托盘 tooltip / 徽标与菜单首项（1.0.305 起含通知中心）。</summary>
+    private void SetUnread(int count, int messages, int notifications)
     {
-        var next = Math.Clamp(count, 0, 9999);
-        if (next == _unreadCount) return;
-        _unreadCount = next;
+        var t = Math.Clamp(count, 0, 9999);
+        var m = Math.Clamp(messages, 0, 9999);
+        var n = Math.Clamp(notifications, 0, 9999);
+        if (t == _unreadCount && m == _unreadMessages && n == _unreadNotifications) return;
+        _unreadCount = t;
+        _unreadMessages = m;
+        _unreadNotifications = n;
         UpdateTrayVisuals();
         UpdateMenuState();
     }
@@ -209,26 +256,69 @@ public partial class MainWindow : Window
     private void UpdateTrayVisuals()
     {
         if (_tray is null) return;
-        try { _tray.Text = _unreadCount > 0 ? L10n.TrayTextUnread(_unreadCount) : L10n.TrayText; }
+        try { _tray.Text = _unreadCount > 0 ? L10n.TrayTextUnread(_unreadCount, _unreadMessages, _unreadNotifications) : L10n.TrayText; }
         catch { /* tooltip 超长 / 系统限制：忽略 */ }
+        System.Drawing.Icon? retired = null;
         try
         {
             if (_unreadCount > 0)
             {
                 var next = CreateBadgeIcon(_baseIcon ?? System.Drawing.SystemIcons.Application, _unreadCount);
-                var old = _badgeIcon;
+                retired = _badgeIcon;
                 _badgeIcon = next;
                 _tray.Icon = next;
-                old?.Dispose();
             }
             else if (_badgeIcon is not null)
             {
                 _tray.Icon = _baseIcon ?? System.Drawing.SystemIcons.Application;
-                _badgeIcon.Dispose();
+                retired = _badgeIcon;
                 _badgeIcon = null;
             }
         }
         catch { /* 绘制徽标失败：沿用当前图标 */ }
+        // 先让任务栏换到新图标，再释放旧图标（避免 shell 仍引用已释放的 HICON）
+        UpdateTaskbarOverlay();
+        try { retired?.Dispose(); } catch { /* 忽略 */ }
+    }
+
+    /// <summary>初始化 / 更新任务栏缩略图按钮（首次 Add，之后 Update）。</summary>
+    private void InitTaskbarButtons()
+    {
+        try
+        {
+            if (_openThumbIcon is null)
+                _openThumbIcon = new System.Drawing.Icon(_baseIcon ?? System.Drawing.SystemIcons.Application, 16, 16);
+            _muteThumbIcon ??= CreateMuteThumbIcon(IsTrayMuted);
+            _taskbar.SetButtons(_openThumbIcon, L10n.TaskbarOpen, _muteThumbIcon,
+                IsTrayMuted ? L10n.TaskbarUnmute : L10n.TaskbarMute);
+            UpdateTaskbarOverlay();
+        }
+        catch { /* 任务栏不支持缩略图按钮 */ }
+    }
+
+    /// <summary>静音状态变化时只刷新静音按钮的图标 / 提示。</summary>
+    private void UpdateTaskbarButtons()
+    {
+        if (_openThumbIcon is null) return;
+        var old = _muteThumbIcon;
+        _muteThumbIcon = CreateMuteThumbIcon(IsTrayMuted);
+        try
+        {
+            _taskbar.SetButtons(_openThumbIcon, L10n.TaskbarOpen, _muteThumbIcon,
+                IsTrayMuted ? L10n.TaskbarUnmute : L10n.TaskbarMute);
+        }
+        catch { /* 忽略 */ }
+        finally { old?.Dispose(); }
+    }
+
+    private void UpdateTaskbarOverlay()
+    {
+        try
+        {
+            _taskbar.SetOverlay(_unreadCount > 0 ? _badgeIcon : null,
+                _unreadCount > 0 ? L10n.TaskbarUnread(_unreadCount) : "");
+        }
+        catch { /* 忽略 */ }
     }
 
     /// <summary>在应用图标右下角画未读红点（>9 缩小字号，>99 显示 99+）。</summary>
@@ -257,6 +347,21 @@ public partial class MainWindow : Window
             };
             g.DrawString(text, font, System.Drawing.Brushes.White, rect, format);
         }
+        return BitmapToIcon(bmp);
+    }
+
+    /// <summary>任务栏静音按钮的快捷切换（未静音 → 静音 1 小时；已静音 → 取消）。</summary>
+    private void ToggleQuickMute()
+    {
+        if (IsTrayMuted) ApplyMute(duration: null, preset: null);
+        else ApplyMute(TimeSpan.FromHours(1), MutePreset60);
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
+    private static System.Drawing.Icon BitmapToIcon(System.Drawing.Bitmap bmp)
+    {
         var hIcon = bmp.GetHicon();
         try
         {
@@ -269,8 +374,40 @@ public partial class MainWindow : Window
         }
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyIcon(IntPtr hIcon);
+    /// <summary>任务栏静音按钮图标：深色圆底 + 白色喇叭；静音时加红色斜线。</summary>
+    private static System.Drawing.Icon CreateMuteThumbIcon(bool muted)
+    {
+        const int size = 16;
+        using var bmp = new System.Drawing.Bitmap(size, size);
+        using (var g = System.Drawing.Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(System.Drawing.Color.Transparent);
+            using (var bg = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(210, 32, 32, 32)))
+                g.FillEllipse(bg, 0, 0, size - 1, size - 1);
+            using (var white = new System.Drawing.SolidBrush(System.Drawing.Color.White))
+            {
+                var pts = new[]
+                {
+                    new System.Drawing.PointF(3f, 6f), new System.Drawing.PointF(5.5f, 6f),
+                    new System.Drawing.PointF(8.5f, 3f), new System.Drawing.PointF(8.5f, 13f),
+                    new System.Drawing.PointF(5.5f, 10f), new System.Drawing.PointF(3f, 10f),
+                };
+                g.FillPolygon(white, pts);
+            }
+            if (muted)
+            {
+                using var red = new System.Drawing.Pen(System.Drawing.Color.FromArgb(235, 70, 70), 2f);
+                g.DrawLine(red, 1.5f, 1.5f, 14.5f, 14.5f);
+            }
+            else
+            {
+                using var pen = new System.Drawing.Pen(System.Drawing.Color.White, 1.2f);
+                g.DrawArc(pen, 7.5f, 5f, 6f, 7f, -55f, 110f);
+            }
+        }
+        return BitmapToIcon(bmp);
+    }
 
     /// <summary>静音：只抑制宿主气泡，站内通知中心不受影响；传 null 表示取消静音。</summary>
     private void ApplyMute(TimeSpan? duration, string? preset)
@@ -289,6 +426,7 @@ public partial class MainWindow : Window
             ShowTrayBalloon(L10n.TrayMutedTitle, L10n.TrayMutedBody(FormatRemaining()));
         }
         UpdateMenuState();
+        UpdateTaskbarButtons();
     }
 
     /// <summary>「到明天 08:00」：本地时间，避免整夜被打扰。</summary>
@@ -484,6 +622,7 @@ public partial class MainWindow : Window
         _tray.DoubleClick += (_, _) => BringToFront();
         UpdateTrayVisuals();
         UpdateMenuState();
+        InitTaskbarButtons();
     }
 
     /// <summary>按当前静音 / 关闭行为刷新菜单文案与勾选状态。</summary>
@@ -493,6 +632,7 @@ public partial class MainWindow : Window
         {
             _mutedUntilUtc = DateTime.MinValue;
             _mutePreset = null;
+            UpdateTaskbarButtons(); // 静音到期：把任务栏按钮恢复为「静音」
         }
         if (_muteMenu is not null)
             _muteMenu.Text = IsTrayMuted ? L10n.TrayMuteMenuWithRemaining(FormatRemaining()) : L10n.TrayMuteMenu;

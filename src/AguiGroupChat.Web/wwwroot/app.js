@@ -6803,15 +6803,20 @@ function totalUnreadCount() {
 function updateDocTitle() {
   const n = totalUnreadCount();
   document.title = n > 0 ? `(${n}) ${t("brand.name")}` : t("brand.name");
-  syncDesktopUnread(n);
+  syncDesktopUnread();
 }
 
-/** 桌面版托盘未读数（1.0.304）：只在 WebView2 宿主里上送，普通浏览器直接忽略。 */
-function syncDesktopUnread(n) {
+/**
+ * 桌面版托盘未读（1.0.304；1.0.305 起合并通知中心）：
+ *   count = 未读消息 + 未读通知（排除 message 类，避免与消息未读重复计数）。
+ * 只在 WebView2 宿主里上送，普通浏览器直接忽略。
+ */
+function syncDesktopUnread() {
   try {
     if (!isDesktopHost()) return;
-    const count = Math.max(0, Number(n) || 0);
-    window.chrome.webview.postMessage({ type: "unread", count });
+    const messages = Math.max(0, Number(totalUnreadCount()) || 0);
+    const notifications = (state.notifications || []).filter((n) => !n.read && n.type !== "message").length;
+    window.chrome.webview.postMessage({ type: "unread", count: messages + notifications, messages, notifications });
   } catch { /* 忽略 */ }
 }
 
@@ -7124,6 +7129,7 @@ function renderNotifications() {
     el.onclick = go;
     el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
   }
+  syncDesktopUnread(); // 通知中心未读变化同步托盘（1.0.305）
 }
 
 function toggleNotifPanel() {
