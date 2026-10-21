@@ -53,8 +53,8 @@ internal sealed class TaskbarThumbnailBar : IDisposable
         _taskbar.SetOverlayIcon(_hwnd, icon?.Handle ?? IntPtr.Zero, description ?? "");
     }
 
-    /// <summary>任务栏进度（1.0.306）：none / indeterminate / normal / paused / error。</summary>
-    public void SetProgress(string state, ulong completed, ulong total)
+    /// <summary>任务栏进度（1.0.307）：none / indeterminate / normal / paused / error。</summary>
+    public void SetProgress(string state, ulong completed, ulong total, string label)
     {
         if (_taskbar is null || _hwnd == IntPtr.Zero) return;
         var flag = state switch
@@ -68,6 +68,7 @@ internal sealed class TaskbarThumbnailBar : IDisposable
         _taskbar.SetProgressState(_hwnd, flag);
         if (flag is 2 or 8)
             _taskbar.SetProgressValue(_hwnd, completed, total == 0 ? 1 : total);
+        _taskbar.SetThumbnailTooltip(_hwnd, label ?? "");
     }
 
     public void Dispose() => _taskbar = null;

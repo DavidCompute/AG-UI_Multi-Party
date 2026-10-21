@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.306 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.306 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.307 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.307 Release Notes (current Windows desktop release)
+
+**版本说明**：**跳转列表常用任务 + 进度细化**——任务栏右键可直接「新建知聚 / 打开管理控制台」；长任务进度显示当前步骤 / 技能名，无计划时按技能调用推进。
+**Version note**: **Jump-list tasks and finer progress** — right-click the taskbar icon for **New circle / Open admin console**; long-task progress names the current step / skill, and advances by skill calls when there is no plan.
+
+## 变更
+# Changes
+
+中文：
+- **跳转列表常用任务**：`ICustomDestinationList.AddUserTasks` 增加「新建知聚」（`--new-group`）与「打开管理控制台」（`--admin`）；无最近知聚时仍保留任务。启动后前端读取 `?action=`，一次性消费并自动打开对应弹窗（登录用户才生效）。
+- **进度细化**：有执行计划时继续按 `done/total`，并把当前未完成步骤文本作为缩略图 tooltip；无计划但有技能 / 工具调用时，按 `已完成 / 已开始` 单调推进（封顶 95%，不回退），tooltip 显示当前运行技能名；仅在既无计划也无调用时用不确定进度。
+- **工程**：`SetProgress` 增加 `SetThumbnailTooltip`；`MainWindow` 新增 `initialAction` 参数；`Program` 识别 `--new-group` / `--admin`。
+- **无后端变更**。
+
+English:
+- **Jump-list tasks**: `ICustomDestinationList.AddUserTasks` adds **New circle** (`--new-group`) and **Open admin console** (`--admin`); they remain even when there are no recent circles. On launch the frontend reads `?action=`, consumes it once and opens the matching dialog (signed-in users only).
+- **Finer progress**: with an execution plan the bar keeps `done/total` and the current unfinished step text becomes the thumbnail tooltip; without a plan but with skill / tool calls, it advances monotonically by `completed / started` (capped at 95%, never backwards) and names the running skill. Indeterminate progress is used only when there is neither a plan nor a call.
+- **Engineering**: `SetProgress` now also calls `SetThumbnailTooltip`; `MainWindow` gains an `initialAction` parameter; `Program` recognizes `--new-group` / `--admin`.
+- **No backend change**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（跳转任务、进度细化）；桌面版 README 中英；`tools/README-playwright.md`（脚本 30 项）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.307。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (jump-list tasks, finer progress); the desktop READMEs; `tools/README-playwright.md` (30 checks); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.307.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目与 `node --check` 通过；i18n 审计 **zh=en=2079，missing 0**；Playwright `ui-notif-desktop-bridge.mjs` **30/30**（新增计划当前步骤、技能调用 50% 进度、`?action=admin` 直达）；文档引用守卫通过；本轮无服务端变更，沿用 **1866 通过 / 0 失败**。**无法自动验证**：跳转列表任务与缩略图 tooltip 的实际渲染 / 点击（需安装版人工点验）。
+English: the desktop project builds and `node --check` passes; the i18n audit is **zh=en=2079, missing 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **30/30** (new plan step label, 50% skill-call progress and `?action=admin` deep link); the docs-reference guard passes; no server-side change, so **1866 passed / 0 failed** still applies. **Not automatically verifiable**: actual rendering / clicks of jump-list tasks and the thumbnail tooltip (need a manual check in an installed build).
+
+---
+
+# AG-UI 群聊桌面版 1.0.306 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.306 Release Notes (historical)
 
 **版本说明**：**任务栏能看进度、能直达最近知聚**——长任务在任务栏图标上显示进度条，右键任务栏图标多出「最近知聚」跳转列表。
 **Version note**: **Taskbar progress and quick access to recent circles** — long tasks show a progress bar on the taskbar icon, and right-clicking it reveals a **Recent circles** jump list.

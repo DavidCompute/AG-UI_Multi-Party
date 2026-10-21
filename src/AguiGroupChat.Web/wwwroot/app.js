@@ -5186,7 +5186,9 @@ async function loadGroups() {
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
   renderMessages();
   // 跳转列表启动（--group）→ 直接打开该知聚（参数一次性消费；优先于“上次知聚”）
-  const jumpGid = new URLSearchParams(location.search).get("group");
+  const jumpParams = new URLSearchParams(location.search);
+  const jumpGid = jumpParams.get("group");
+  const jumpAction = jumpParams.get("action");
   if (jumpGid) {
     pendingAutoEnterGroup = false;
     const target = state.groups.find((x) => x.groupId === jumpGid);
@@ -5198,6 +5200,15 @@ async function loadGroups() {
     const last = localStorage.getItem(LastGroupKey(state.memberId));
     const g = last && state.groups.find((x) => x.groupId === last);
     if (g) selectGroup(g.groupId);
+  }
+  // 跳转列表常用任务（1.0.307）：新建知聚 / 管理控制台（同样一次性消费）
+  if (jumpAction) {
+    if (!jumpGid) { try { history.replaceState(null, "", location.pathname); } catch { /* 忽略 */ } }
+    if (jumpAction === "new-group") {
+      Promise.all([loadAgentDirectory(), loadUserDirectory()]).then(openCreateModal).catch(() => {});
+    } else if (jumpAction === "admin") {
+      openAdminModal().catch(() => {});
+    }
   }
   updateDocTitle(); // 知聚列表刷新后同步标签页标题与桌面托盘未读数
   syncDesktopRecents(); // 跳转列表最近知聚
@@ -6843,11 +6854,13 @@ function syncDesktopTaskbarProgress() {
   try {
     if (!isDesktopHost()) return;
     let runningPlan = null;
+    let activeMsg = null;
     let busy = false;
     for (const r of state.rooms.values()) {
       for (const m of (r.messages || [])) {
         if (m.senderType !== "agent" || !m.streaming) continue;
         busy = true;
+        activeMsg = m;
         if (m.plan && Array.isArray(m.plan.steps) && m.plan.steps.length) runningPlan = m.plan;
       }
       if (!busy && r.typing && r.typing.size) {
@@ -6859,13 +6872,25 @@ function syncDesktopTaskbarProgress() {
     }
     if (runningPlan) {
       const done = runningPlan.steps.filter((s) => s.done).length;
+      const current = runningPlan.steps.find((s) => !s.done);
       window.chrome.webview.postMessage({
         type: "progress", state: runningPlan.paused ? "paused" : "normal",
-        value: done, total: runningPlan.steps.length,
+        value: done, total: runningPlan.steps.length, label: current?.text || runningPlan.title || "",
+      });
+    } else if (activeMsg && Array.isArray(activeMsg.toolCalls) && activeMsg.toolCalls.length) {
+      // 无计划：按已完成的技能 / 工具调用推进（单调不回退，封顶 95%，避免“还没结束就 100%”）
+      const started = activeMsg.toolCalls.length;
+      const done = activeMsg.toolCalls.filter((x) => x.done).length;
+      const pct = Math.min(95, Math.round((done / Math.max(1, started)) * 100));
+      activeMsg._desktopProgressMax = Math.max(activeMsg._desktopProgressMax || 0, pct);
+      const runningTool = activeMsg.toolCalls.find((x) => !x.done);
+      window.chrome.webview.postMessage({
+        type: "progress", state: "normal",
+        value: activeMsg._desktopProgressMax, total: 100, label: runningTool?.name || "",
       });
     } else {
       window.chrome.webview.postMessage({
-        type: "progress", state: busy ? "indeterminate" : "none", value: 0, total: 0,
+        type: "progress", state: busy ? "indeterminate" : "none", value: 0, total: 0, label: "",
       });
     }
   } catch { /* 忽略 */ }

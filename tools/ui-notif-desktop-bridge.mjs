@@ -4,7 +4,7 @@
 //   3. 免打扰时段 / 按类型静音仍然拦截（不上送宿主）；
 //   4. notifyNewMessage 走桥；本人消息不弹；
 //   5. 未读计数（1.0.305）：消息 + 非 message 通知合并上送，通知已读后同步，负数归零；
-//   6. 任务栏进度（1.0.306）：计划 done/total → normal / paused，结束后 none；
+//   6. 任务栏进度（1.0.306/307）：计划 done/total + 当前步骤 → normal / paused，技能调用推进百分比，结束后 none；
 //   7. 跳转列表（1.0.306）：最近非私密知聚按活跃时间倒序；
 //   8. 非桌面宿主（无 chrome.webview）不误判、仍走浏览器 Notification、不上送任何计数；
 //   9. 无页面 JS 异常。
@@ -135,7 +135,7 @@ try {
     syncDesktopTaskbarProgress();
   });
   posted = await drain(a);
-  check("任务栏进度按计划上送", posted.some((m) => m.type === "progress" && m.state === "normal" && m.value === 1 && m.total === 3), JSON.stringify(posted.filter((m) => m.type === "progress")));
+  check("任务栏进度按计划上送", posted.some((m) => m.type === "progress" && m.state === "normal" && m.value === 1 && m.total === 3 && m.label === "b"), JSON.stringify(posted.filter((m) => m.type === "progress")));
 
   await a.evaluate(() => {
     state.rooms.get("gprog").messages[0].plan.paused = true;
@@ -151,6 +151,21 @@ try {
   });
   posted = await drain(a);
   check("任务结束后清除进度", posted.some((m) => m.type === "progress" && m.state === "none"), JSON.stringify(posted.filter((m) => m.type === "progress")));
+
+  // 无计划时按技能 / 工具调用推进（1.0.307）
+  await a.evaluate(() => {
+    state.rooms.clear();
+    const r = room("gtool");
+    r.messages.push({
+      id: "mtool", senderType: "agent", streaming: true,
+      toolCalls: [{ id: "t1", name: "docx_report", done: true }, { id: "t2", name: "pptx_deck", done: false }],
+    });
+    syncDesktopTaskbarProgress();
+  });
+  posted = await drain(a);
+  check("技能步骤进度按调用推进", posted.some((m) => m.type === "progress" && m.state === "normal" && m.value === 50 && m.total === 100 && m.label === "pptx_deck"), JSON.stringify(posted.filter((m) => m.type === "progress")));
+  await a.evaluate(() => { state.rooms.clear(); syncDesktopTaskbarProgress(); });
+  await drain(a);
 
   // 跳转列表（1.0.306）：最近非私密知聚，按活跃时间倒序
   await a.evaluate(() => {
@@ -209,6 +224,16 @@ try {
   check("浏览器不上送未读计数", (await drain(b)).length === 0);
   await b.evaluate(() => { syncDesktopTaskbarProgress(); syncDesktopRecents(); });
   check("浏览器不上送进度/最近知聚", (await drain(b)).length === 0);
+
+  // ---- C. 跳转列表常用任务：?action=admin 自动打开控制台（david 为管理员）----
+  const c = await ctx.newPage();
+  c.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+  c.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+  await c.goto(BASE_URL + "/?action=admin", { waitUntil: "domcontentloaded" });
+  await c.waitForSelector("#authOverlay", { state: "attached", timeout: 15000 });
+  await c.waitForFunction(() => !document.getElementById("adminModal")?.classList.contains("hidden"), { timeout: 20000 }).catch(() => {});
+  check("跳转任务 ?action=admin 打开控制台", await c.locator("#adminModal").evaluate((el) => !el.classList.contains("hidden")));
+  await c.close();
 
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));
 } catch (e) {

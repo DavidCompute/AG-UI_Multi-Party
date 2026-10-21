@@ -67,6 +67,11 @@ public static class L10n
         ? $"未读 {count} 条"
         : $"{count} unread";
     public static string JumpListRecent => IsZh() ? "最近知聚" : "Recent circles";
+    public static string JumpListNewGroup => IsZh() ? "新建知聚" : "New circle";
+    public static string JumpListAdmin => IsZh() ? "打开管理控制台" : "Open admin console";
+    public static string TaskbarRunning(string label) => IsZh()
+        ? $"正在执行：{label}"
+        : $"Running: {label}";
     public static string TrayOpenDataDir => IsZh() ? "📂 打开数据目录" : "📂 Open data folder";
     public static string TrayOpenDataDirFailed(string message) => IsZh()
         ? $"无法打开数据目录：{message}"

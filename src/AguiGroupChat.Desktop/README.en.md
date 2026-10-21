@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.md)
 
-A pure desktop application (Windows) **(current version 1.0.306)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
+A pure desktop application (Windows) **(current version 1.0.307)**: it reuses all the features of the web version (group chat, agents, human-in-the-loop approval, semantic memory RAG,
 personal memory, AI twin, attachments, topics, trigger modes, memory personality types, office document online view and PPT playback (**needs local LibreOffice**, see Notes), etc.), but with **all data and models stored locally**; the service always runs on
 `http://127.0.0.1:5200`, so local features (group chat / agent management / semantic memory) work even offline (only the chat model such as DeepSeek still needs network);
 skills marked as "client-execution" can run on this machine via the local bridge.
@@ -10,7 +10,7 @@ skills marked as "client-execution" can run on this machine via the local bridge
 - **Database**: SQLite (`data/agui.sqlite`); semantic memory uses **sqlite-vec** (`vec0` vector virtual table, shipped with `libs/vec0.dll`)
 - **Vector model**: **LLamaSharp** (the .NET implementation of llama.cpp) loads a GGUF embedding model locally, fully offline
 - **UI**: a WPF + WebView2 window embedding Kestrel and reusing the existing web frontend (no external browser needed)
-- **System notifications**: the WebView2 notification bridge → Windows tray balloons; the tray context menu offers **Open KnowGath / Open data folder / Restart local service / Mute (30 minutes–until tomorrow) / Minimize to tray when closing / Start with Windows / Exit**; the tooltip and icon badge show the total unread count (including notification-center items), muting suppresses balloons only, and the taskbar provides **Open / Mute** thumbnail buttons, an unread overlay badge, long-task progress and a **Recent circles** jump list
+- **System notifications**: the WebView2 notification bridge → Windows tray balloons; the tray context menu offers **Open KnowGath / Open data folder / Restart local service / Mute (30 minutes–until tomorrow) / Minimize to tray when closing / Start with Windows / Exit**; the tooltip and icon badge show the total unread count (including notification-center items), muting suppresses balloons only, and the taskbar provides **Open / Mute** thumbnail buttons, an unread overlay badge, long-task progress (including the current step / skill) and a **Recent circles + New circle / Admin console** jump list
 
 ## Quick Start
 
@@ -32,16 +32,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### Building a release (win-x64 publish / MSI installer)
 
-Current version: **1.0.306** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
+Current version: **1.0.307** (see `<Version>` in `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj`).
 
 ```bash
 # 1. Publish the win-x64 output to artifacts/win-x64 (SQLite / local llama embedding / wwwroot / VC++ runtime / vec0.dll)
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. Build the MSI installer: outputs to artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    e.g. for 1.0.306:
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.306
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.306.msi
+#    e.g. for 1.0.307:
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.307
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.307.msi
 ```
 
 > `tools/build-msi.ps1` first does a **forced fresh publish** (cleans Release intermediates to avoid reusing stale DLLs), strips non-Windows native runtimes,

@@ -16,29 +16,29 @@ internal sealed class JumpListManager
         try
         {
             var list = (ICustomDestinationList)new CDestinationList();
-            if (groups.Count == 0)
-            {
-                list.DeleteList(null);
-                return true;
-            }
-
             var iid = typeof(IObjectArray).GUID;
             list.BeginList(out _, ref iid, out _);
 
-            var collection = (IObjectCollection)new CEnumerableObjectCollection();
             var exe = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(exe)) exe = "AguiGroupChat.Desktop.exe";
-            foreach (var g in groups.Take(MaxItems))
+
+            // 常用任务（1.0.307）：无最近知聚时也保留
+            var tasks = (IObjectCollection)new CEnumerableObjectCollection();
+            AddLink(tasks, exe!, "--new-group", L10n.JumpListNewGroup);
+            AddLink(tasks, exe!, "--admin", L10n.JumpListAdmin);
+            list.AddUserTasks(tasks);
+
+            if (groups.Count > 0)
             {
-                if (string.IsNullOrWhiteSpace(g.Id)) continue;
-                var link = (IShellLinkW)new CShellLink();
-                link.SetPath(exe!);
-                link.SetArguments($"--group \"{g.Id.Replace("\"", "")}\"");
-                link.SetDescription(Truncate(g.Name, 100));
-                link.SetIconLocation(exe!, 0);
-                collection.AddObject(link);
+                var collection = (IObjectCollection)new CEnumerableObjectCollection();
+                foreach (var g in groups.Take(MaxItems))
+                {
+                    if (string.IsNullOrWhiteSpace(g.Id)) continue;
+                    AddLink(collection, exe!, $"--group \"{g.Id.Replace("\"", "")}\"", Truncate(g.Name, 100));
+                }
+                list.AppendCategory(L10n.JumpListRecent, collection);
             }
-            list.AppendCategory(L10n.JumpListRecent, collection);
+
             list.CommitList();
             return true;
         }
@@ -47,6 +47,16 @@ internal sealed class JumpListManager
             // 组策略 / 远程桌面 / 旧系统：静默降级（应用功能不受影响）
             return false;
         }
+    }
+
+    private static void AddLink(IObjectCollection collection, string exe, string args, string description)
+    {
+        var link = (IShellLinkW)new CShellLink();
+        link.SetPath(exe);
+        link.SetArguments(args);
+        link.SetDescription(description);
+        link.SetIconLocation(exe, 0);
+        collection.AddObject(link);
     }
 
     private static string Truncate(string s, int max)

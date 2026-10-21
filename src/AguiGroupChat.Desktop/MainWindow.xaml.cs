@@ -38,12 +38,14 @@ public partial class MainWindow : Window
     private string _progressState = "none";
     private ulong _progressValue;
     private ulong _progressTotal;
+    private string _progressLabel = "";
     private string _recentsSignature = "";
     private readonly TaskbarThumbnailBar _taskbar = new();
     private readonly JumpListManager _jumpList = new();
 
     private readonly bool _startHidden;
     private readonly string? _initialGroupId;
+    private readonly string? _initialAction;
 
     private DateTime _mutedUntilUtc = DateTime.MinValue;
     private string? _mutePreset;
@@ -56,13 +58,15 @@ public partial class MainWindow : Window
     private const string MutePreset120 = "120";
     private const string MutePresetTomorrow = "tomorrow";
 
-    public MainWindow(string baseUrl, InstanceCoordinator coordinator, bool startHidden = false, string? initialGroupId = null)
+    public MainWindow(string baseUrl, InstanceCoordinator coordinator, bool startHidden = false,
+        string? initialGroupId = null, string? initialAction = null)
     {
         InitializeComponent();
         _baseUrl = baseUrl;
         _coordinator = coordinator;
         _startHidden = startHidden;
         _initialGroupId = initialGroupId;
+        _initialAction = initialAction;
         if (startHidden)
         {
             // 开机自启：先以透明窗口加载，Loaded 后隐藏到托盘（避免登录时闪一下窗口）
@@ -130,9 +134,12 @@ public partial class MainWindow : Window
             EnsureTray();
             InitTaskbarButtons();
             StatusText.Text = L10n.StatusLocalService(_baseUrl);
-            var startUrl = _baseUrl;
+            var query = new List<string>();
             if (!string.IsNullOrWhiteSpace(_initialGroupId))
-                startUrl += "/?group=" + Uri.EscapeDataString(_initialGroupId!);
+                query.Add("group=" + Uri.EscapeDataString(_initialGroupId!));
+            if (!string.IsNullOrWhiteSpace(_initialAction))
+                query.Add("action=" + Uri.EscapeDataString(_initialAction!));
+            var startUrl = query.Count == 0 ? _baseUrl : _baseUrl + "/?" + string.Join("&", query);
             WebView.Source = new Uri(startUrl);
             if (_startHidden)
             {
@@ -228,7 +235,8 @@ public partial class MainWindow : Window
                     var pState = root.TryGetProperty("state", out var st) ? (st.GetString() ?? "none") : "none";
                     var pValue = root.TryGetProperty("value", out var vEl) && vEl.TryGetInt64(out var v) ? (ulong)Math.Max(0, v) : 0UL;
                     var pTotal = root.TryGetProperty("total", out var tEl) && tEl.TryGetInt64(out var tt) ? (ulong)Math.Max(0, tt) : 0UL;
-                    SetTaskbarProgress(pState, pValue, pTotal);
+                    var pLabel = root.TryGetProperty("label", out var lEl) ? (lEl.GetString() ?? "") : "";
+                    SetTaskbarProgress(pState, pValue, pTotal, pLabel);
                     break;
                 case "recents":
                     // 跳转列表最近知聚（1.0.306）
@@ -323,7 +331,8 @@ public partial class MainWindow : Window
             _taskbar.SetButtons(_openThumbIcon, L10n.TaskbarOpen, _muteThumbIcon,
                 IsTrayMuted ? L10n.TaskbarUnmute : L10n.TaskbarMute);
             UpdateTaskbarOverlay();
-            _taskbar.SetProgress(_progressState, _progressValue, _progressTotal);
+            _taskbar.SetProgress(_progressState, _progressValue, _progressTotal,
+                _progressLabel.Length > 0 ? L10n.TaskbarRunning(_progressLabel) : "");
         }
         catch { /* 任务栏不支持缩略图按钮 */ }
     }
@@ -353,16 +362,25 @@ public partial class MainWindow : Window
         catch { /* 忽略 */ }
     }
 
-    /// <summary>任务栏进度（1.0.306）：相同值不重复调用 shell。</summary>
-    private void SetTaskbarProgress(string state, ulong completed, ulong total)
+    /// <summary>任务栏进度（1.0.306）：相同值不重复调用 shell；1.0.307 带当前步骤/技能提示。</summary>
+    private void SetTaskbarProgress(string state, ulong completed, ulong total, string label)
     {
         state = string.IsNullOrWhiteSpace(state) ? "none" : state;
+        label = label ?? "";
         if (string.Equals(_progressState, state, StringComparison.Ordinal)
-            && _progressValue == completed && _progressTotal == total) return;
+            && _progressValue == completed && _progressTotal == total
+            && string.Equals(_progressLabel, label, StringComparison.Ordinal)) return;
         _progressState = state;
         _progressValue = completed;
         _progressTotal = total;
-        try { _taskbar.SetProgress(state, completed, total); } catch { /* 忽略 */ }
+        _progressLabel = label;
+        try
+        {
+            _taskbar.SetProgress(state, completed, total, state == "none" || state == "indeterminate"
+                ? ""
+                : string.IsNullOrWhiteSpace(label) ? "" : L10n.TaskbarRunning(label));
+        }
+        catch { /* 忽略 */ }
     }
 
     /// <summary>跳转列表「最近知聚」（1.0.306）：内容未变不重建。</summary>
