@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.299 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.299 Release Notes (current Windows desktop release)
+
+**版本说明**：**刷新不再丢通知**——站内通知按用户写入 localStorage（最近 100 条 / 7 天，含已读标记），刷新或重开页面后徽标与列表自动恢复；「清空」同时删除本地副本。
+**Version note**: **Refreshing no longer loses notifications** — in-app notifications are stored per user in localStorage (latest 100 / 7 days, including read flags), so the badge and list come back after a refresh or reopen; **Clear** also removes the local copy.
+
+## 变更
+# Changes
+
+中文：
+- **存储**：新增 `saveNotificationsNow()` / `hydrateNotifications(uid)`，键 `agui.notifications.<userId>`；写入 **500ms 合并**，高频通知不会逐条写盘。
+- **恢复**：登录后先恢复通知、再合并技能错误（按 id 去重）；超过 7 天的条目丢弃，最多保留 100 条；`notifSeq` 同步恢复，避免新 id 撞车。
+- **时机**：新增 / 标已读 / 打开面板全标读 / 清空 / 登出都会落盘（登出前先冲刷并取消待写定时器）。
+- **兼容**：字段缺失的回退为 `null`；localStorage 不可用（隐私模式 / 配额满）时静默降级为纯内存。
+- **回归测试**：新增 `ui-notif-persist.mjs`（**11 项**）——写入 / 刷新恢复 / 内容一致 / 清空删副本 / 再刷新为空 / 7 天过期丢弃 / 徽标同步 / 无 JS 异常。
+
+English:
+- **Storage**: adds `saveNotificationsNow()` / `hydrateNotifications(uid)` under `agui.notifications.<userId>`, coalescing writes over **500ms** so notification bursts do not hit storage every time.
+- **Restore**: after login notifications are restored first, then skill errors merge in (deduplicated by id); entries older than 7 days are dropped, at most 100 are kept, and `notifSeq` is restored so new ids cannot collide.
+- **Triggers**: add / mark read / opening the panel (marks all read) / clear / logout all persist (logout flushes and cancels the pending timer first).
+- **Compatibility**: missing fields fall back to `null`; when localStorage is unavailable (private mode / quota) it silently degrades to memory.
+- **Regression test**: new `ui-notif-persist.mjs` (**11 checks**) — write / restore after refresh / identical content / clear removes the copy / still empty after another refresh / 7-day expiry dropped / badge in sync / no JS errors.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（通知本地持久化）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.299。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (local notification persistence); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.299.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.296 的全量结果 **1866 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2077，missing 0**；四个守卫脚本全过；Playwright **11/11**（持久化）、**11/11**、**12/12**、**12/12**、**15/15**、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.296's full run of **1866 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2077, missing 0**; all four guard scripts pass; Playwright **11/11** (persistence), **11/11**, **12/12**, **12/12**, **15/15**, **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.298 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.298 Release Notes (current Windows desktop release)
 

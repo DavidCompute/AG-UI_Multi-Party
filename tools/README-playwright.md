@@ -43,7 +43,7 @@ BASE_URL=http://localhost:5200 USERNAME=david PASSWORD='secret123' KEEP=1 node u
 
 # 配额水位 / 覆写同步回归（`ui-quota-alerts.mjs`）
 
-覆盖 1.0.265～1.0.298 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
+覆盖 1.0.265～1.0.299 的前端渲染与同步路径，**只读、不写真实数据**（服务端数据用 fetch 桩替换，事件直接投递）。
 
 覆盖点：
 
@@ -66,7 +66,7 @@ cd tools && npm run ui:quota
 
 1. 在干净的 Ubuntu runner 上用 **mock 模型 + 内存存储** 起 Web（`dotnet run`，不用 docker compose——后者依赖 605MB 的 embedding 模型）；
 2. 注册 `david`（首用户自动成为管理员）并建一个知聚（避免角标 / `GROUP_UPDATED` 两组断言被跳过）；
-3. 安装 Playwright 并运行七个脚本（`ui-quota-alerts.mjs` + `ui-imglib-pending-click.mjs` + `ui-webhook-events.mjs` + `ui-webhook-alerts.mjs` + `ui-notify-quiet.mjs` + `ui-notif-filter.mjs` + `ui-notif-perm.mjs`）；失败时附带 Web 日志尾部。
+3. 安装 Playwright 并运行八个脚本（`ui-quota-alerts.mjs` + `ui-imglib-pending-click.mjs` + `ui-webhook-events.mjs` + `ui-webhook-alerts.mjs` + `ui-notify-quiet.mjs` + `ui-notif-filter.mjs` + `ui-notif-perm.mjs` + `ui-notif-persist.mjs`）；失败时附带 Web 日志尾部。
 
 > 后端语义（阈值触发、覆写写入与权限、配额拦截）已由 .NET 集成测试覆盖，本脚本只盯前端；两者互补。
 
@@ -142,6 +142,7 @@ HEADLESS=1 node ui-webhook-alerts.mjs    # 15 项：投递失败告警（基线 
 HEADLESS=1 node ui-notify-quiet.mjs      # 12 项：桌面通知免打扰 / 按类型静音（跨午夜 / 同日 / 未知类型过滤 / 配置字段）
 HEADLESS=1 node ui-notif-filter.mjs      # 12 项：通知中心按类型筛选（全部 / 提及 / 审批 / 错误 / 消息 / 其他 / 无匹配提示）
 HEADLESS=1 node ui-notif-perm.mjs        # 11 项：桌面通知权限引导（未授权 / 关闭后 7 天重提醒 / 开启 / 已拒绝 / 不支持）
+HEADLESS=1 node ui-notif-persist.mjs     # 11 项：通知本地持久化（刷新恢复 / 清空删副本 / 7 天过期）
 HEADLESS=1 node ui-kb-auto-toggle.mjs     # 17 项：「显示自动沉淀的知识库」开关（知识库管理 + 绑定知识库弹窗，两处共享状态）
 ```
 

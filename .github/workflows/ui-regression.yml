@@ -143,6 +143,15 @@ jobs:
           HEADLESS: "1"
         run: node ui-notif-perm.mjs
 
+      - name: Run notification persistence regression
+        working-directory: tools
+        env:
+          BASE_URL: http://127.0.0.1:5200
+          USERNAME: david
+          PASSWORD: lingtong
+          HEADLESS: "1"
+        run: node ui-notif-persist.mjs
+
       - name: Dump web log
         if: failure()
         run: tail -n 200 /tmp/web.log

@@ -368,6 +368,7 @@ function enterApp(data) {
     applyChatResizer(); // 恢复该用户上次拖拽的聊天区高度
     resetChatState();
     applyPanelWidths(); // 恢复该用户上次拖拽的左 / 右栏宽度（需在 resetChatState 清除内联变量之后）
+    hydrateNotifications(data.userId); // 恢复本用户最近 100 条通知（7 天内）
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
     startImageWritePendingPolling(); // 管理员：待审批图库写入进通知中心（60s 轮询）
     initWebhookAlarmPolling(); // 管理员：投递失败主动告警（参数读「配置治理」）
@@ -464,6 +465,9 @@ let logoutInProgress = false; // 重入保护：服务端登出会踢 WS，WS �
 async function logout() {
   if (logoutInProgress) return;
   logoutInProgress = true;
+  // 1.0.299：先落盘通知（登出后 memberId 会被清空）
+  if (notifSaveTimer) { clearTimeout(notifSaveTimer); notifSaveTimer = null; }
+  saveNotificationsNow();
   if (state.token) {
     // 登出即断：先吊销本人在此平台领取的全部 setup 令牌（此时令牌仍有效，须先于 /user/logout 执行），
     // 再让同机本机桥断开并清除本机配置；最后才登出（会吊销会话令牌）。
@@ -6900,6 +6904,7 @@ function addNotification(type, title, body, opts = {}) {
   state.notifications.unshift(n);
   if (state.notifications.length > 100) state.notifications.pop(); // 上限：仅保留最近 100 条
   renderNotifications();
+  scheduleSaveNotifications(); // 1.0.299：本地持久化（刷新不丢）
   // 系统桌面通知（Web Notification）：前台 / 后台都弹，仅未授权 + 忽略；点击跳去其来源知聚
   showSystemNotification(title, body, opts.groupId || "agui", type);
 }
@@ -6922,6 +6927,7 @@ function notifySkillError(groupId, skillLabel, msg) {
   };
   // 并入当前会话通知中心
   state.notifications.unshift(entry);
+  scheduleSaveNotifications();
   if (state.notifications.length > 100) state.notifications.pop();
   renderNotifications();
   showSystemNotification(entry.title, entry.body, groupId || "agui", "error");
@@ -6944,6 +6950,52 @@ function skillErrorStore(uid) {
 }
 
 /** 登录后把该用户此前记录的技能错误重新载入通知中心（去重、按 id），实现“备查”。 */
+/** 通知本地持久化（1.0.299）：最近 100 条 / 7 天，按用户隔离，刷新不丢。 */
+const NOTIF_STORE_PREFIX = "agui.notifications.";
+const NOTIF_STORE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+let notifSaveTimer = null;
+
+function notifStoreKey(userId) { return NOTIF_STORE_PREFIX + (userId || "anon"); }
+
+function saveNotificationsNow() {
+  if (!state.memberId) return;
+  try {
+    const items = state.notifications.slice(0, 100).map((n) => ({
+      id: n.id, type: n.type, title: n.title, body: n.body,
+      groupId: n.groupId || null, topicId: n.topicId || null,
+      action: n.action || null, ts: n.ts, read: !!n.read, icon: n.icon,
+    }));
+    localStorage.setItem(notifStoreKey(state.memberId), JSON.stringify({ seq: state.notifSeq || 0, items }));
+  } catch { /* 隐私模式 / 配额满：忽略 */ }
+}
+
+/** 合并写入（短延迟）：高频通知（流式、多个知聚）不会每条都写一次 localStorage。 */
+function scheduleSaveNotifications() {
+  if (notifSaveTimer) return;
+  notifSaveTimer = setTimeout(() => { notifSaveTimer = null; saveNotificationsNow(); }, 500);
+}
+
+function hydrateNotifications(uid) {
+  if (!uid) return;
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(notifStoreKey(uid)) || "null"); } catch { /* 损坏数据忽略 */ }
+  if (!data || !Array.isArray(data.items)) return;
+  const cutoff = Date.now() - NOTIF_STORE_MAX_AGE_MS;
+  const stored = data.items
+    .filter((n) => n && typeof n.id === "string" && Number(n.ts || 0) >= cutoff)
+    .slice(0, 100);
+  if (!stored.length) return;
+  const byId = new Map();
+  [...stored, ...state.notifications].forEach((n) => { if (!byId.has(n.id)) byId.set(n.id, n); });
+  state.notifications = [...byId.values()]
+    .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0))
+    .slice(0, 100);
+  const maxSeq = Math.max(Number(data.seq) || 0,
+    ...stored.map((n) => Number(String(n.id).replace(/^n/, "")) || 0));
+  state.notifSeq = Math.max(Number(state.notifSeq) || 0, maxSeq);
+  renderNotifications();
+}
+
 function hydrateSkillErrors(uid) {
   if (!uid) return;
   const list = skillErrorStore(uid);
@@ -7010,7 +7062,7 @@ function renderNotifications() {
   for (const el of list.querySelectorAll(".notif-item")) {
     const go = () => {
       const n = state.notifications.find((x) => String(x.id) === el.dataset.nid);
-      if (n) { n.read = true; renderNotifications(); }
+      if (n) { n.read = true; renderNotifications(); scheduleSaveNotifications(); }
       if (n?.action === "imageLibPending") {
         hideNotifPanel();
         openImgLibModal(); // 待审批写入没有 groupId：直接打开图库管理（待审批块在顶部）
@@ -7038,6 +7090,7 @@ function toggleNotifPanel() {
   if (state.notifPanelOpen) {
     // 打开即清空未读徽标（列表项保留，点击跳转时才标已读）——徽标只反映“新”数量
     state.notifications.forEach((n) => { n.read = true; });
+    scheduleSaveNotifications();
     renderNotifications();
     renderNotifPermHint(); // 桌面通知权限引导（未授权时提示）
   }
@@ -7052,8 +7105,11 @@ function hideNotifPanel() {
 function clearNotifications() {
   state.notifications = [];
   renderNotifications();
-  // 「清空」同时清除已持久化的技能错误备查记录（否则下次登录会重新载入）
-  if (state.memberId) { try { localStorage.removeItem(skillErrorKey(state.memberId)); } catch { /* 忽略 */ } }
+  // 「清空」同时清除已持久化的技能错误备查记录与通知本地副本（否则下次登录会重新载入）
+  if (state.memberId) {
+    try { localStorage.removeItem(skillErrorKey(state.memberId)); } catch { /* 忽略 */ }
+    try { localStorage.removeItem(notifStoreKey(state.memberId)); } catch { /* 忽略 */ }
+  }
 }
 
 /** 本地把某话题未读清零（进入知聚 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
