@@ -1,5 +1,44 @@
-# AG-UI 群聊桌面版 1.0.300 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.300 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.301 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.301 Release Notes (current Windows desktop release)
+
+**版本说明**：**桌面版系统通知终于能弹了**——WebView2 里 `Notification` 权限往往不可用、用户也无处改站点设置；现在前端把通知交给宿主，用 Windows 托盘气泡展示。
+**Version note**: **Desktop notifications finally work** — inside WebView2 the `Notification` permission is often unavailable and users cannot change site settings, so the frontend now hands notifications to the host, which shows them as Windows tray balloons.
+
+## 变更
+# Changes
+
+中文：
+- **宿主桥**：前端检测 `window.chrome.webview.postMessage`；桌面宿主下 `notifPermission()` 视为 `granted`（隐藏权限引导），`showSystemNotification` 改为 `postMessage({ type: "notify", title, body })`。
+- **宿主展示**：WPF 壳新增 WinForms `NotifyIcon` 托盘图标，`ShowBalloonTip(6000)` 弹气泡；点击气泡或双击图标把窗口提到前台；退出时释放图标。
+- **规则一致**：免打扰时段、按类型静音、本人消息不弹等判定与浏览器端完全一致；正文最多 200 字（新消息先压空白并取前 120 字）。
+- **无回归**：没有 `chrome.webview` 的普通浏览器行为不变；`notifyNewMessage` 统一走 `showSystemNotification`，因此新消息通知现在同样受免打扰 / 静音约束（此前直接 `new Notification` 绕过了这两项）。
+- **工程**：`AguiGroupChat.Desktop.csproj` 增加 `UseWindowsForms`（复用框架自带 `NotifyIcon`，不引入新 NuGet）；`MainWindow.xaml.cs` / `Program.cs` 显式别名 `MessageBox` 消除 WPF/WinForms 歧义。
+- **回归测试**：新增 `ui-notif-desktop-bridge.mjs`（**19 项**）——桩注入 `chrome.webview`，验证宿主识别、权限视为 granted、载荷与 200 字截断、免打扰 / 类型静音仍拦截、本人消息不弹、浏览器宿主不误判、无 JS 异常。
+
+English:
+- **Host bridge**: the frontend detects `window.chrome.webview.postMessage`; on a desktop host `notifPermission()` reports `granted` (hiding the permission hint) and `showSystemNotification` posts `{ type: "notify", title, body }`.
+- **Host presentation**: the WPF shell adds a WinForms `NotifyIcon` tray icon and calls `ShowBalloonTip(6000)`; clicking the balloon or double-clicking the icon brings the window forward, and the icon is disposed on exit.
+- **Same rules**: quiet hours, per-type muting and "never notify me about my own message" behave exactly as in the browser; the body is capped at 200 characters (new messages collapse whitespace and take the first 120).
+- **No regression**: in a normal browser without `chrome.webview` nothing changes; `notifyNewMessage` now funnels through `showSystemNotification`, so new-message notifications are also subject to quiet hours / muting (previously a direct `new Notification` bypassed both).
+- **Engineering**: `AguiGroupChat.Desktop.csproj` enables `UseWindowsForms` (reusing the framework `NotifyIcon`, no new NuGet); `MainWindow.xaml.cs` / `Program.cs` alias `MessageBox` explicitly to resolve the WPF/WinForms ambiguity.
+- **Regression test**: new `ui-notif-desktop-bridge.mjs` (**19 checks**) — injects a `chrome.webview` stub and verifies host detection, `granted` permission, payload and 200-char truncation, quiet hours / type muting still blocking, no self-notifications, no false positives in browsers, and no JS errors.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（桌面版通知桥）；`tools/README-playwright.md`（脚本清单十个 + CI 步骤）；`ROADMAP.md` / `en.md`；桌面版 README 与版本号、`tools/README-playwright.md` 覆盖范围同步到 1.0.301。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (desktop notification bridge); `tools/README-playwright.md` (ten-script list + CI step); `ROADMAP.md` / `en.md`; the desktop READMEs, version numbers and the `tools/README-playwright.md` coverage range are bumped to 1.0.301.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目通过；`node --check` 前端脚本通过；i18n 审计 **zh=en=2079，missing 0**；Playwright 新增脚本 **19/19**（本地 Docker 实例）；全量 `dotnet test` 与 Docker 部署核对见发布提交。**无法自动验证**：真实 MSI 中的托盘气泡显示（需在 Windows 上安装后实测）。
+English: the desktop project builds; `node --check` passes for the frontend; the i18n audit is **zh=en=2079, missing 0**; the new Playwright script passes **19/19** against a local Docker instance; the full `dotnet test` run and Docker deployment check are recorded in the release commit. **Not automatically verifiable**: the tray balloon in a real MSI (needs a manual install-and-observe on Windows).
+
+---
+
+# AG-UI 群聊桌面版 1.0.300 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.300 Release Notes (historical)
 
 **版本说明**：**通知可逐条打理**——悬浮通知时出现「● 标为未读」与「✕ 删除」，删除同步清本地副本（技能错误还会清备查存储），标为未读会让徽标重新计数。
 **Version note**: **Notifications can be managed one by one** — hovering an item reveals **● Mark unread** and **✕ Delete**; deleting also removes the local copy (and skill errors are cleared from the reference store), while marking unread makes the badge count it again.

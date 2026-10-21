@@ -3,6 +3,7 @@ using AguiGroupChat.Hub.Messaging;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using MessageBox = System.Windows.MessageBox;
 
 namespace AguiGroupChat.Desktop;
 

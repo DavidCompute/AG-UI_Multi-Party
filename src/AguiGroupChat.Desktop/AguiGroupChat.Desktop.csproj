@@ -6,11 +6,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- 托盘气泡通知（桌面版系统通知桥，1.0.301）：WPF 与 WinForms 共存，避免额外 NuGet 依赖 -->
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>AguiGroupChat.Desktop</RootNamespace>
     <AssemblyName>AguiGroupChat.Desktop</AssemblyName>
-    <Version>1.0.300</Version>
-    <FileVersion>1.0.300.0</FileVersion>
-    <ApplicationVersion>1.0.300</ApplicationVersion>
+    <Version>1.0.301</Version>
+    <FileVersion>1.0.301.0</FileVersion>
+    <ApplicationVersion>1.0.301</ApplicationVersion>
     <!-- 应用图标：exe / 任务栏（Windows） -->
     <ApplicationIcon>Assets\agui-icon.ico</ApplicationIcon>
   </PropertyGroup>

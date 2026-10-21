@@ -6807,13 +6807,17 @@ function updateDocTitle() {
 function notifyNewMessage(evt, m) {
   try {
     if (evt.senderId === state.memberId) return;
+    const title = t("notif.messageFrom", { name: evt.senderNickname || evt.senderId });
+    const body = String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (isDesktopHost()) {
+      // 桌面版：交给宿主气泡（同样受免打扰 / 按类型静音约束）
+      showSystemNotification(title, body, "group_" + evt.groupId, "message");
+      return;
+    }
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
-      const n = new Notification(t("notif.messageFrom", { name: evt.senderNickname || evt.senderId }), {
-        body: String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 120),
-        tag: "group_" + evt.groupId, icon: "/agui-icon-256.png",
-      });
-      n.onclick = () => { window.focus(); n.close(); handleSystemNotifyClick(evt.groupId); };
+      // 统一走 showSystemNotification：免打扰、类型静音与点击跳转都在那里处理
+      showSystemNotification(title, body, "group_" + evt.groupId, "message");
     } else if (Notification.permission === "default") {
       Notification.requestPermission().catch(() => {});
     }
@@ -6833,9 +6837,15 @@ const NOTIF_PERM_RESHOW_MS = 7 * 24 * 3600 * 1000; // 手动关闭后 7 天再�
 
 function notifPermission() {
   try {
+    if (isDesktopHost()) return "granted"; // 桌面版由宿主托盘气泡展示，不依赖浏览器权限
     if (!("Notification" in window)) return "unsupported";
     return Notification.permission || "default";
   } catch { return "unsupported"; }
+}
+
+/** 是否运行在桌面版（WebView2）宿主里：有 chrome.webview.postMessage 即可（1.0.301）。 */
+function isDesktopHost() {
+  return !!(window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === "function");
 }
 
 function renderNotifPermHint() {
@@ -7017,6 +7027,11 @@ function showSystemNotification(title, body, tag, type) {
   try {
     if (isQuietNow()) return; // 免打扰时段（1.0.295）：仅抑制桌面通知，站内通知中心照常记录
     if (isTypeMuted(type)) return; // 按类型静音（1.0.296）
+    if (isDesktopHost()) {
+      // 桌面版系统通知桥（1.0.301）：宿主用托盘气泡展示，不依赖 WebView2 的 Notification 权限
+      window.chrome.webview.postMessage({ type: "notify", title: String(title || ""), body: String(body || "").slice(0, 200) });
+      return;
+    }
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const n = new Notification(title, { body: String(body || "").slice(0, 140), tag: tag || "agui", icon: "/agui-icon-256.png" });
     n.onclick = () => { window.focus(); n.close(); if (tag && tag !== "agui") handleSystemNotifyClick(tag); };

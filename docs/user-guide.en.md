@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.300**
+> Applies to version: **1.0.301**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -315,6 +315,8 @@ Permission hint (1.0.298): when `Notification.permission` is not `granted`, open
 Local persistence (1.0.299): notifications are stored per user in `localStorage` (key `agui.notifications.<userId>`, latest **100 / 7 days**, including read flags and `action`), so the badge and list come back after a refresh or reopen; writes are coalesced over 500ms to avoid hammering storage; **Clear** also removes the local copy, and entries older than 7 days are dropped on restore.
 
 Row actions (1.0.300): hovering (or keyboard-focusing) an item reveals **● Mark unread** and **✕ Delete**; clicking them does not trigger the item's jump. Deleting also removes the stored copy, and skill-error notifications are additionally removed from the `agui.skillError.<userId>` reference store; marking unread makes the badge count it again.
+
+Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), the `Notification` permission is often unavailable and users have nowhere to change "site settings". When the frontend detects the host-injected `window.chrome.webview.postMessage`, `notifPermission()` reports `granted` (so the permission hint is hidden) and `showSystemNotification` posts `{ type: "notify", title, body }` to the host, which shows a tray balloon (`NotifyIcon.ShowBalloonTip`, 6 seconds); clicking the balloon or double-clicking the tray icon brings the window to the front. Quiet hours, per-type muting and "never notify me about my own message" behave exactly as in the browser; the body is capped at 200 characters (new-message notifications first collapse whitespace and take the first 120). Without `chrome.webview` nothing changes and Web Notification is still used.
 
 #### 1.2.2 Left column: My Groups (`aside.panel.groups`)
 
