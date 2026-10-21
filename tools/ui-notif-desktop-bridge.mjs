@@ -167,7 +167,7 @@ try {
   await a.evaluate(() => { state.rooms.clear(); syncDesktopTaskbarProgress(); });
   await drain(a);
 
-  // 跳转列表（1.0.306）：最近非私密知聚，按活跃时间倒序
+  // 最近知聚（1.0.306 / 1.0.308）：按活跃时间倒序，带私密标记（跳转列表由宿主过滤私密）
   await a.evaluate(() => {
     state.groups = [
       { groupId: "g1", groupName: "最近公开", isPrivate: false, lastMessageAt: 100 },
@@ -177,8 +177,11 @@ try {
     syncDesktopRecents();
   });
   posted = await drain(a);
-  const recentsOk = posted.some((m) => m.type === "recents" && (m.items || []).map((x) => x.id).join(",") === "g2,g1");
-  check("跳转列表按最近排序并排除私密", recentsOk, JSON.stringify(posted.filter((m) => m.type === "recents")));
+  const recentsOk = posted.some((m) => {
+    const items = m.type === "recents" ? (m.items || []) : null;
+    return !!items && items.map((x) => x.id).join(",") === "g3,g2,g1" && items[0]?.private === true && items[1]?.private === false;
+  });
+  check("最近知聚按活跃排序且带私密标记", recentsOk, JSON.stringify(posted.filter((m) => m.type === "recents")));
   await a.evaluate(() => { state.groups = []; syncDesktopRecents(); });
   await drain(a);
 

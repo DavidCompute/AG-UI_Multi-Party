@@ -69,6 +69,10 @@ public static class L10n
     public static string JumpListRecent => IsZh() ? "最近知聚" : "Recent circles";
     public static string JumpListNewGroup => IsZh() ? "新建知聚" : "New circle";
     public static string JumpListAdmin => IsZh() ? "打开管理控制台" : "Open admin console";
+    public static string TrayRecent => IsZh() ? "最近知聚" : "Recent circles";
+    public static string TrayNewGroup => IsZh() ? "新建知聚" : "New circle";
+    public static string TrayAdmin => IsZh() ? "管理控制台" : "Admin console";
+    public static string TrayNoRecent => IsZh() ? "暂无最近知聚" : "No recent circles";
     public static string TaskbarRunning(string label) => IsZh()
         ? $"正在执行：{label}"
         : $"Running: {label}";

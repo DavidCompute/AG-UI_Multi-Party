@@ -14,6 +14,14 @@ public sealed class DesktopSettings
     /// <summary>关闭主窗口时最小化到托盘（默认关闭：关窗即退出）。</summary>
     public bool CloseToTray { get; set; }
 
+    // 窗口位置 / 尺寸（1.0.308）：只保存正常态边界；最大化状态单独记。
+    public bool HasWindowPlacement { get; set; }
+    public double WindowWidth { get; set; }
+    public double WindowHeight { get; set; }
+    public double WindowLeft { get; set; }
+    public double WindowTop { get; set; }
+    public bool WindowMaximized { get; set; }
+
     public static DesktopSettings Load()
     {
         try

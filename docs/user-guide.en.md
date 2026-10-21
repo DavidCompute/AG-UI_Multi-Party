@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.307**
+> Applies to version: **1.0.308**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -321,6 +321,9 @@ Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), th
 Tray context menu (introduced in 1.0.302, expanded in 1.0.303):
 
 - **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip).
+- **Recent circles ▸**: lists the 10 most recently active circles (**private ones carry a 🔒**). Clicking switches the current window without reloading or opening a new one; if the page is not ready it falls back to the `?group=` deep link. The taskbar jump list still lists non-private circles only.
+- **New circle / Admin console**: the tray menu opens the matching dialog directly (falling back to the `?action=` deep link when the page is not ready).
+- **Window placement**: window size, position and maximized state are saved to `desktop-settings.json` and restored on the next launch; if monitor changes put it off-screen, it falls back to the default position.
 - **📂 Open data folder**: opens `data/` under the process working directory (SQLite database, attachments and preview cache).
 - **🔄 Restart local service**: gracefully stops the backend, waits for the port to be released, starts a new backend process (preserving the multi-instance count) and reloads the page; every window sharing that backend disconnects briefly during the restart.
 - **Taskbar thumbnail buttons (1.0.305)**: hovering the taskbar icon shows **Open KnowGath** and **Mute for 1 hour / Unmute** below the thumbnail. The mute button shares state with the tray menu (one hour by default; pick another duration in the tray menu). The taskbar icon also gets an unread overlay badge (including notification-center items). These buttons are hidden when thumbnail previews are disabled or in some remote sessions; the tray menu still works.

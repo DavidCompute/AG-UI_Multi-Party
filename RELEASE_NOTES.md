@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.307 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.307 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.308 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.308 Release Notes (current Windows desktop release)
+
+**版本说明**：**托盘可直接切换知聚、记住窗口位置**——托盘「最近知聚」子菜单覆盖私密知聚，新增新建知聚 / 管理控制台快捷入口；窗口大小、位置与最大化状态下次启动自动恢复。
+**Version note**: **Switch circles from the tray and remember window placement** — the tray's Recent circles submenu includes private circles, New circle / Admin console shortcuts are one click away, and window size, position and maximized state are restored on the next launch.
+
+## 变更
+# Changes
+
+中文：
+- **托盘「最近知聚」**：最近活跃的 10 个知聚（含私密，前缀 🔒）；点击优先调用页面 `selectGroup(id)` **在当前窗口切换**（不重载、不新开窗口），页面未就绪时回退到 `/?group=` 深链。
+- **托盘快捷任务**：新增「新建知聚」「管理控制台」，直接调用页面 `openCreateModal` / `openAdminModal`，失败回退到 `/?action=`。
+- **跳转列表不变**：仍只列非私密知聚；最近知聚接口现在附带 `private` 标记，由宿主分别用于托盘（全部）和跳转列表（过滤）。
+- **窗口位置记忆**：`DesktopSettings` 新增 `HasWindowPlacement / WindowWidth / WindowHeight / WindowLeft / WindowTop / WindowMaximized`；关闭（含关闭到托盘）时保存正常态边界，启动时校验虚拟屏幕范围后恢复，显示器变化导致越界则回退默认位置。
+- **无后端变更**。
+
+English:
+- **Tray Recent circles**: the 10 most recently active circles (private ones prefixed with 🔒). Clicking prefers the page's `selectGroup(id)` to **switch in the current window** (no reload, no new window), falling back to the `/?group=` deep link when the page is not ready.
+- **Tray shortcuts**: **New circle** and **Admin console** call the page's `openCreateModal` / `openAdminModal`, falling back to `/?action=`.
+- **Jump list unchanged**: it still lists non-private circles only. The recents payload now carries a `private` flag so the host can use all items for the tray and filter for the jump list.
+- **Window placement**: `DesktopSettings` gains `HasWindowPlacement / WindowWidth / WindowHeight / WindowLeft / WindowTop / WindowMaximized`; normal-state bounds are saved on close (including close-to-tray) and restored after validating against the virtual screen, with a default fallback when monitor changes move it off-screen.
+- **No backend change**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（托盘最近知聚 / 快捷任务 / 窗口位置）；桌面版 README 中英；`tools/README-playwright.md`（最近知聚私密标记）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.308。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (tray recents / shortcuts / window placement); the desktop READMEs; `tools/README-playwright.md` (private flag in recents); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.308.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目与 `node --check` 通过；i18n 审计 **zh=en=2079，missing 0**；Playwright `ui-notif-desktop-bridge.mjs` **30/30**（最近知聚改为含私密标记与排序断言）；文档引用守卫通过；本轮无服务端变更，沿用 **1866 通过 / 0 失败**。**无法自动验证**：托盘子菜单切换、快捷任务与窗口位置恢复（需安装版人工点验）。
+English: the desktop project builds and `node --check` passes; the i18n audit is **zh=en=2079, missing 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **30/30** (recents now asserted with the private flag and ordering); the docs-reference guard passes; no server-side change, so **1866 passed / 0 failed** still applies. **Not automatically verifiable**: tray submenu switching, shortcuts and window-placement restore (need a manual check in an installed build).
+
+---
+
+# AG-UI 群聊桌面版 1.0.307 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.307 Release Notes (historical)
 
 **版本说明**：**跳转列表常用任务 + 进度细化**——任务栏右键可直接「新建知聚 / 打开管理控制台」；长任务进度显示当前步骤 / 技能名，无计划时按技能调用推进。
 **Version note**: **Jump-list tasks and finer progress** — right-click the taskbar icon for **New circle / Open admin console**; long-task progress names the current step / skill, and advances by skill calls when there is no plan.

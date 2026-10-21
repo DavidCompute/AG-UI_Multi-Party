@@ -18,6 +18,8 @@ public partial class MainWindow : Window
     private System.Windows.Forms.NotifyIcon? _tray;
     private System.Windows.Forms.ContextMenuStrip? _trayMenu;
     private System.Windows.Forms.ToolStripMenuItem? _openItem;
+    private System.Windows.Forms.ToolStripMenuItem? _recentMenu;
+    private List<(string Id, string Name, bool Private)> _recentItems = new();
     private System.Windows.Forms.ToolStripMenuItem? _muteMenu;
     private System.Windows.Forms.ToolStripMenuItem? _mute30;
     private System.Windows.Forms.ToolStripMenuItem? _mute60;
@@ -39,7 +41,7 @@ public partial class MainWindow : Window
     private ulong _progressValue;
     private ulong _progressTotal;
     private string _progressLabel = "";
-    private string _recentsSignature = "";
+    private string? _recentsSignature;
     private readonly TaskbarThumbnailBar _taskbar = new();
     private readonly JumpListManager _jumpList = new();
 
@@ -67,6 +69,7 @@ public partial class MainWindow : Window
         _startHidden = startHidden;
         _initialGroupId = initialGroupId;
         _initialAction = initialAction;
+        ApplySavedPlacement();
         if (startHidden)
         {
             // 开机自启：先以透明窗口加载，Loaded 后隐藏到托盘（避免登录时闪一下窗口）
@@ -193,6 +196,7 @@ public partial class MainWindow : Window
     /// </summary>
     protected override void OnClosing(CancelEventArgs e)
     {
+        SaveWindowPlacement();
         if (!_exiting && _settings.CloseToTray)
         {
             e.Cancel = true;
@@ -239,18 +243,19 @@ public partial class MainWindow : Window
                     SetTaskbarProgress(pState, pValue, pTotal, pLabel);
                     break;
                 case "recents":
-                    // 跳转列表最近知聚（1.0.306）
-                    var recents = new List<(string Id, string Name)>();
+                    // 最近知聚（1.0.306；1.0.308 起带私密标记：托盘全部显示，跳转列表只取非私密）
+                    var recents = new List<(string Id, string Name, bool Private)>();
                     if (root.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var item in arr.EnumerateArray())
                         {
                             var id = item.TryGetProperty("id", out var idEl) ? (idEl.GetString() ?? "") : "";
                             var name = item.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? id) : id;
-                            if (!string.IsNullOrWhiteSpace(id)) recents.Add((id, name));
+                            var priv = item.TryGetProperty("private", out var privEl) && privEl.ValueKind == JsonValueKind.True;
+                            if (!string.IsNullOrWhiteSpace(id)) recents.Add((id, name, priv));
                         }
                     }
-                    UpdateJumpList(recents);
+                    UpdateRecents(recents);
                     break;
             }
         }
@@ -383,12 +388,83 @@ public partial class MainWindow : Window
         catch { /* 忽略 */ }
     }
 
-    /// <summary>跳转列表「最近知聚」（1.0.306）：内容未变不重建。</summary>
-    private void UpdateJumpList(List<(string Id, string Name)> items)
+    /// <summary>最近知聚（1.0.308）：托盘菜单显示全部（私密标 🔒），跳转列表只取非私密。</summary>
+    private void UpdateRecents(List<(string Id, string Name, bool Private)> items)
     {
-        var signature = string.Join("\n", items.Select((i) => i.Id + "|" + i.Name));
-        if (signature == _recentsSignature) return;
-        if (_jumpList.SetRecentGroups(items)) _recentsSignature = signature; // 失败不缓存，下次重试
+        _recentItems = items;
+        RebuildRecentMenu();
+
+        var publicItems = items.Where((i) => !i.Private).Select((i) => (i.Id, i.Name)).ToList();
+        var signature = string.Join("\n", publicItems.Select((i) => i.Id + "|" + i.Name));
+        if (string.Equals(_recentsSignature, signature, StringComparison.Ordinal)) return;
+        if (_jumpList.SetRecentGroups(publicItems)) _recentsSignature = signature; // 失败不缓存，下次重试
+    }
+
+    /// <summary>托盘「最近知聚」子菜单：点击后无需重载页面即可切换（页面未就绪时回退到 ?group= 导航）。</summary>
+    private void RebuildRecentMenu()
+    {
+        if (_recentMenu is null) return;
+        _recentMenu.DropDownItems.Clear();
+        if (_recentItems.Count == 0)
+        {
+            var empty = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayNoRecent) { Enabled = false };
+            _recentMenu.DropDownItems.Add(empty);
+            return;
+        }
+        foreach (var g in _recentItems.Take(10))
+        {
+            var item = new System.Windows.Forms.ToolStripMenuItem(
+                (g.Private ? "🔒 " : "") + Truncate(g.Name, 40))
+            {
+                ToolTipText = g.Name,
+            };
+            var id = g.Id;
+            item.Click += (_, _) => NavigateToGroup(id);
+            _recentMenu.DropDownItems.Add(item);
+        }
+    }
+
+    /// <summary>托盘快速切换知聚：优先调用页面的 selectGroup()，不可用时回退到深链导航。</summary>
+    private async void NavigateToGroup(string groupId)
+    {
+        BringToFront();
+        var url = _baseUrl + "/?group=" + Uri.EscapeDataString(groupId);
+        try
+        {
+            if (WebView.CoreWebView2 is not null)
+            {
+                var idJs = JsonSerializer.Serialize(groupId);
+                var urlJs = JsonSerializer.Serialize(url);
+                var js = "try { if (typeof selectGroup === 'function' && Array.isArray(state?.groups)"
+                    + " && state.groups.some(g => g.groupId === " + idJs + ")) { selectGroup(" + idJs + "); }"
+                    + " else { location.href = " + urlJs + "; } } catch (e) { location.href = " + urlJs + "; }";
+                await WebView.CoreWebView2.ExecuteScriptAsync(js);
+                return;
+            }
+        }
+        catch { /* 回退导航 */ }
+        NavigateTo(url);
+    }
+
+    /// <summary>托盘快捷任务：新建知聚 / 管理控制台（页面未就绪时回退到 ?action= 深链）。</summary>
+    private async void RunQuickAction(string action)
+    {
+        BringToFront();
+        var url = _baseUrl + "/?action=" + Uri.EscapeDataString(action);
+        try
+        {
+            if (WebView.CoreWebView2 is not null)
+            {
+                var urlJs = JsonSerializer.Serialize(url);
+                var js = action == "new-group"
+                    ? "try { if (typeof openCreateModal === 'function') { Promise.all([loadAgentDirectory(), loadUserDirectory()]).then(openCreateModal).catch(() => {}); } else { location.href = " + urlJs + "; } } catch (e) { location.href = " + urlJs + "; }"
+                    : "try { if (typeof openAdminModal === 'function') { openAdminModal().catch(() => {}); } else { location.href = " + urlJs + "; } } catch (e) { location.href = " + urlJs + "; }";
+                await WebView.CoreWebView2.ExecuteScriptAsync(js);
+                return;
+            }
+        }
+        catch { /* 回退导航 */ }
+        NavigateTo(url);
     }
 
     /// <summary>在应用图标右下角画未读红点（>9 缩小字号，>99 显示 99+）。</summary>
@@ -632,6 +708,14 @@ public partial class MainWindow : Window
         _openItem.Font = new System.Drawing.Font(_openItem.Font, System.Drawing.FontStyle.Bold);
         _openItem.Click += (_, _) => BringToFront();
 
+        _recentMenu = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayRecent);
+        RebuildRecentMenu();
+
+        var newGroupItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayNewGroup);
+        newGroupItem.Click += (_, _) => RunQuickAction("new-group");
+        var adminItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayAdmin);
+        adminItem.Click += (_, _) => RunQuickAction("admin");
+
         var openDataItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayOpenDataDir);
         openDataItem.Click += (_, _) => OpenDataDirectory();
 
@@ -665,6 +749,10 @@ public partial class MainWindow : Window
 
         _trayMenu = new System.Windows.Forms.ContextMenuStrip();
         _trayMenu.Items.Add(_openItem);
+        _trayMenu.Items.Add(_recentMenu);
+        _trayMenu.Items.Add(newGroupItem);
+        _trayMenu.Items.Add(adminItem);
+        _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         _trayMenu.Items.Add(openDataItem);
         _trayMenu.Items.Add(_restartItem);
         _trayMenu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
@@ -735,6 +823,56 @@ public partial class MainWindow : Window
             Activate();
         }
         catch { /* 忽略 */ }
+    }
+
+    /// <summary>恢复上次的窗口位置 / 尺寸（1.0.308）：越界或尺寸异常时忽略。</summary>
+    private void ApplySavedPlacement()
+    {
+        try
+        {
+            if (!_settings.HasWindowPlacement) return;
+            var w = _settings.WindowWidth;
+            var h = _settings.WindowHeight;
+            if (w < 640 || h < 400) return;
+
+            var vLeft = SystemParameters.VirtualScreenLeft;
+            var vTop = SystemParameters.VirtualScreenTop;
+            var vRight = vLeft + SystemParameters.VirtualScreenWidth;
+            var vBottom = vTop + SystemParameters.VirtualScreenHeight;
+            var left = Math.Max(vLeft + 40, Math.Min(_settings.WindowLeft, vRight - 120));
+            var top = Math.Max(vTop, Math.Min(_settings.WindowTop, vBottom - 80));
+
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = left;
+            Top = top;
+            Width = w;
+            Height = h;
+            if (_settings.WindowMaximized) WindowState = WindowState.Maximized;
+        }
+        catch { /* 显示器布局变化：用默认位置 */ }
+    }
+
+    /// <summary>保存窗口位置 / 尺寸（只存正常态边界，最大化单独标记）。</summary>
+    private void SaveWindowPlacement()
+    {
+        try
+        {
+            var bounds = WindowState == WindowState.Normal
+                ? new Rect(Left, Top, Width, Height)
+                : RestoreBounds;
+            if (bounds.IsEmpty || bounds.Width < 200 || bounds.Height < 200) return;
+
+            var s = DesktopSettings.Load();
+            s.HasWindowPlacement = true;
+            s.WindowWidth = bounds.Width;
+            s.WindowHeight = bounds.Height;
+            s.WindowLeft = bounds.Left;
+            s.WindowTop = bounds.Top;
+            s.WindowMaximized = WindowState == WindowState.Maximized;
+            s.CloseToTray = _settings.CloseToTray; // 保留本窗口刚切换过的值
+            s.Save();
+        }
+        catch { /* 偏好写入失败不影响关闭 */ }
     }
 
     private static string Truncate(string s, int max)

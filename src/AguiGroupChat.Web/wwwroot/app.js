@@ -6896,16 +6896,17 @@ function syncDesktopTaskbarProgress() {
   } catch { /* 忽略 */ }
 }
 
-/** 桌面版跳转列表（1.0.306）：最近活跃的非私密知聚（最多 7 个，按最后消息时间倒序）。 */
+/** 桌面版最近知聚（1.0.308）：按最后消息时间倒序（最多 10 个）；带上私密标记——
+ *  托盘菜单显示全部（私密加 🔒），跳转列表只取非私密项。 */
 function syncDesktopRecents() {
   try {
     if (!isDesktopHost()) return;
     const items = (state.groups || [])
-      .filter((g) => g && g.groupId && !g.isPrivate)
+      .filter((g) => g && g.groupId)
       .slice()
       .sort((a, b) => (Number(b.lastMessageAt) || 0) - (Number(a.lastMessageAt) || 0))
-      .slice(0, 7)
-      .map((g) => ({ id: String(g.groupId), name: String(g.groupName || g.groupId).slice(0, 60) }));
+      .slice(0, 10)
+      .map((g) => ({ id: String(g.groupId), name: String(g.groupName || g.groupId).slice(0, 60), private: !!g.isPrivate }));
     window.chrome.webview.postMessage({ type: "recents", items });
   } catch { /* 忽略 */ }
 }
