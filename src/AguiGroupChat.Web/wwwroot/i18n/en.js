@@ -968,6 +968,8 @@ window.I18N_DICTS.en = {
   "admin.webhookAlarmPoll": "Delivery alerts: poll interval (minutes)",
   "admin.webhookAlarmSettle": "Delivery alerts: settle window (seconds)",
   "admin.webhookAlarmCooldown": "Delivery alerts: per-subscription cooldown (minutes)",
+  "admin.quietStart": "Desktop notifications quiet hours: start (HH:mm)",
+  "admin.quietEnd": "Desktop notifications quiet hours: end (HH:mm)",
   "admin.quotaRemindersTitle": "⏳ Temporary allowance reminders",
   "admin.quotaRemindersMeta": "Reminder lead {lead} hours ｜ {n} item(s)",
   "admin.quotaReminderHoursLeft": "{n} h left",

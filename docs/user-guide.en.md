@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.294**
+> Applies to version: **1.0.295**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4248,14 +4248,18 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 26 | `#cfgWebhookAlarmPoll` | `webhookAlarmPollMinutes` | int | `admin.webhookAlarmPoll` | 1..1440 (**new in 1.0.294**; default 5) |
 | 27 | `#cfgWebhookAlarmSettle` | `webhookAlarmSettleSeconds` | int | `admin.webhookAlarmSettle` | 5..3600 (**new in 1.0.294**; default 40) |
 | 28 | `#cfgWebhookAlarmCooldown` | `webhookAlarmCooldownMinutes` | int | `admin.webhookAlarmCooldown` | 1..1440 (**new in 1.0.294**; default 10) |
+| 29 | `#cfgQuietStart` | `notifyQuietStart` | string `HH:mm` | `admin.quietStart` | empty = disabled (**new in 1.0.295**) |
+| 30 | `#cfgQuietEnd` | `notifyQuietEnd` | string `HH:mm` | `admin.quietEnd` | overnight (start > end) supported; equal = disabled |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440); delivery-alert knobs too (`webhookAlarmPollMinutes` 1..1440, `webhookAlarmSettleSeconds` 5..3600, `webhookAlarmCooldownMinutes` 1..1440).
+Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440); delivery-alert knobs too (`webhookAlarmPollMinutes` 1..1440, `webhookAlarmSettleSeconds` 5..3600, `webhookAlarmCooldownMinutes` 1..1440); quiet-hour values must be `HH:mm` (e.g. `25:00` / `7:00` are rejected with 400).
 
 > **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-72`), so saving applies at once.
 
 > **Model routing (6.7, 1.0.260)**: #14–#17 map to `AgentOptions.ModelRouting` (`Enabled` / `SimpleModel` / `StandardModel` / `HeavyModel`). **StandardModel is new in this version** — previously the Standard tier never switched. Once enabled, the same `RunComplexityEstimator` used by complexity-adaptive timeouts picks a model per tier (Simple / Standard / Complex / Heavy; blank = don't switch that tier), e.g. `deepseek-flash` for Simple/Standard and `deepseek-v4-pro` for Heavy. It shares the `Agents:ModelRouting` config (env `AGENTS_MODELROUTING_*`); saving on this page takes effect immediately and persists. Note: unlike list items ("empty = do not modify"), model names follow string `??` semantics — **an empty string clears that tier** (the frontend always submits these three fields, i.e. "save = the form wins").
 
 > **Memory & vectorization (6.3 + 2.4/2.6, 1.0.263)**: #18–#22 map to `AgentOptions.Memory`'s `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`. These are re-read on **every write / retrieval**, so saving takes effect immediately; the dedup cache capacity is handled by the write path **rebuilding it / resizing it on demand** (setting 0 disables dedup at once; growing / shrinking applies immediately via LRU). They are the main knobs for "semantic-memory retrieval is slow / times out" (embedding cost is proportional to input length), so no appsettings edit / restart is needed any more. The concurrency limits (`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`) are **restart-only**, because the gate semaphores are sized at startup (see 8.10.4).
+
+> **Desktop notification quiet hours (1.0.295)**: #29 / #30 are a **global** time window that suppresses **desktop system notifications only** (Web Notification); the in-app notification center and unread badge keep working. The window may cross midnight (e.g. 22:00–07:00), and equal start/end or empty values mean disabled. Every signed-in user reads it via `GET /ag-ui/notify-quiet` (no admin required), and the frontend re-fetches immediately after a config save.
 
 #### 8.10.2 Tri-state booleans and "not sent means not changed"
 

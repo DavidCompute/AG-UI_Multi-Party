@@ -1013,6 +1013,9 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             webhookAlarmPollMinutes = 7,
             webhookAlarmSettleSeconds = 55,
             webhookAlarmCooldownMinutes = 12,
+            // 桌面通知免打扰（1.0.295）
+            notifyQuietStart = "22:00",
+            notifyQuietEnd = "07:00",
         });
         var setRes = await _client.SendAsync(set);
         setRes.EnsureSuccessStatusCode();
@@ -1055,6 +1058,17 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         Assert.Equal(7, d.GetProperty("webhookAlarmPollMinutes").GetInt32());
         Assert.Equal(55, d.GetProperty("webhookAlarmSettleSeconds").GetInt32());
         Assert.Equal(12, d.GetProperty("webhookAlarmCooldownMinutes").GetInt32());
+
+        // 免打扰时段（1.0.295）：保存回读 + 空串清除
+        Assert.Equal("22:00", d.GetProperty("notifyQuietStart").GetString());
+        Assert.Equal("07:00", d.GetProperty("notifyQuietEnd").GetString());
+        using var clearQuiet = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        clearQuiet.Content = JsonContent.Create(new { notifyQuietStart = "", notifyQuietEnd = "" });
+        (await _client.SendAsync(clearQuiet)).EnsureSuccessStatusCode();
+        using var afterClear = Authed(HttpMethod.Get, "/ag-ui/admin/config/governance", token);
+        var cleared = await (await _client.SendAsync(afterClear)).Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, cleared.GetProperty("notifyQuietStart").ValueKind);
+        Assert.Equal(JsonValueKind.Null, cleared.GetProperty("notifyQuietEnd").ValueKind);
     }
 
     [Fact]
@@ -1091,6 +1105,14 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         using var badAlarmSettle = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
         badAlarmSettle.Content = JsonContent.Create(new { webhookAlarmSettleSeconds = 4 });
         Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badAlarmSettle)).StatusCode);
+
+        // 免打扰时段格式非法 → 400（1.0.295）
+        using var badQuiet = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badQuiet.Content = JsonContent.Create(new { notifyQuietStart = "25:00" });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuiet)).StatusCode);
+        using var badQuiet2 = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badQuiet2.Content = JsonContent.Create(new { notifyQuietEnd = "7:00" });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuiet2)).StatusCode);
 
         // 非管理员 → 403
         var normal = await RegisterAsync("cfg_normal_admin");

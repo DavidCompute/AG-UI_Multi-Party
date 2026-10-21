@@ -371,6 +371,7 @@ function enterApp(data) {
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
     startImageWritePendingPolling(); // 管理员：待审批图库写入进通知中心（60s 轮询）
     initWebhookAlarmPolling(); // 管理员：投递失败主动告警（参数读「配置治理」）
+    loadNotifyQuiet(); // 所有用户：桌面通知免打扰时段
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
@@ -4022,6 +4023,35 @@ function startImageWritePendingPolling() {
   imageWritePollTimer = setInterval(tick, 60_000);
 }
 
+/* ---- 桌面通知免打扰（1.0.295）：全局窗口，登录用户都可读 ---- */
+const notifyQuiet = { start: null, end: null };
+
+/** "HH:mm" → 当日分钟数；非法 / 未设 → null。 */
+function parseHhMm(v) {
+  if (typeof v !== "string") return null;
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(v.trim());
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/** 当前是否处于免打扰窗口（跨午夜 start > end 也支持）；未设或起止相等 → 不启用。 */
+function isQuietNow(now = new Date()) {
+  const { start, end } = notifyQuiet;
+  if (start === null || end === null || start === end) return false;
+  const mins = now.getHours() * 60 + now.getMinutes();
+  return start > end ? (mins >= start || mins < end) : (mins >= start && mins < end);
+}
+
+async function loadNotifyQuiet() {
+  if (!state.token) return;
+  try {
+    const res = await fetch("/ag-ui/notify-quiet", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) return;
+    notifyQuiet.start = parseHhMm(d.start);
+    notifyQuiet.end = parseHhMm(d.end);
+  } catch { /* 默认不启用 */ }
+}
+
 function stopImageWritePendingPolling() {
   if (imageWritePollTimer) { clearInterval(imageWritePollTimer); imageWritePollTimer = null; }
   imageWriteSeen.clear();
@@ -6885,6 +6915,7 @@ function notifIcon(type) {
 /** 系统桌面通知（Web Notification）：前台 / 后台都弹；`tag` 传群 id（群 id）时点击跳到该知聚并关闭。 */
 function showSystemNotification(title, body, tag) {
   try {
+    if (isQuietNow()) return; // 免打扰时段（1.0.295）：仅抑制桌面通知，站内通知中心照常记录
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const n = new Notification(title, { body: String(body || "").slice(0, 140), tag: tag || "agui", icon: "/agui-icon-256.png" });
     n.onclick = () => { window.focus(); n.close(); if (tag && tag !== "agui") handleSystemNotifyClick(tag); };
@@ -9650,6 +9681,8 @@ async function loadConfigGovernance() {
     setCfg("cfgWebhookAlarmSettle", d.webhookAlarmSettleSeconds);
     setCfg("cfgWebhookAlarmCooldown", d.webhookAlarmCooldownMinutes);
     setCfgBool("cfgWebhookAlarm", d.webhookAlarmEnabled);
+    $("cfgQuietStart").value = d.notifyQuietStart || "";
+    $("cfgQuietEnd").value = d.notifyQuietEnd || "";
     setCfg("cfgMessageWriteDebounceMs", d.messageWriteDebounceMs);
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
@@ -9705,6 +9738,9 @@ function collectCfg() {
   body.webhookAlarmSettleSeconds = numOrNull("cfgWebhookAlarmSettle");
   body.webhookAlarmCooldownMinutes = numOrNull("cfgWebhookAlarmCooldown");
   body.webhookAlarmEnabled = boolOrNull("cfgWebhookAlarm");
+  // 免打扰：总是提交（空串 = 清除；服务端区分“未传 = 不变”）
+  body.notifyQuietStart = $("cfgQuietStart").value || "";
+  body.notifyQuietEnd = $("cfgQuietEnd").value || "";
   body.messageWriteDebounceMs = numOrNull("cfgMessageWriteDebounceMs");
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");
@@ -9748,6 +9784,7 @@ async function saveConfigGovernance() {
     toast(t("admin.configSaved"));
     // 告警参数可能刚被改：按新值重新安排轮询（关闭则停）
     initWebhookAlarmPolling();
+    loadNotifyQuiet(); // 免打扰时段可能刚被改：立刻生效
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }

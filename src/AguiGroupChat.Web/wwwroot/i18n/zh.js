@@ -966,6 +966,8 @@ window.I18N_DICTS.zh = {
   "admin.webhookAlarmPoll": "投递失败告警：轮询间隔（分钟）",
   "admin.webhookAlarmSettle": "投递失败告警：结算窗口（秒）",
   "admin.webhookAlarmCooldown": "投递失败告警：同订阅冷却（分钟）",
+  "admin.quietStart": "桌面通知免打扰：开始（HH:mm）",
+  "admin.quietEnd": "桌面通知免打扰：结束（HH:mm）",
   "admin.quotaRemindersTitle": "⏳ 临时放额提醒",
   "admin.quotaRemindersMeta": "提前 {lead} 小时提醒 ｜ 共 {n} 项",
   "admin.quotaReminderHoursLeft": "剩余 {n} 小时",

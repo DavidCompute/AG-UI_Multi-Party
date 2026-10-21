@@ -54,6 +54,10 @@ public sealed class ConfigGovernanceState
     public int? WebhookAlarmPollMinutes { get; set; }
     public int? WebhookAlarmSettleSeconds { get; set; }
     public int? WebhookAlarmCooldownMinutes { get; set; }
+    // 桌面通知免打扰时段（1.0.295）："HH:mm"；null / 空 = 不启用。跨午夜窗口（start > end）同样支持。
+    // 仅抑制**桌面系统通知**，站内通知中心仍照常记录。
+    public string? NotifyQuietStart { get; set; }
+    public string? NotifyQuietEnd { get; set; }
 }
 
 /// <summary>配置治理写入请求体（每个字段可空，仅更新非空项）。</summary>
@@ -89,7 +93,10 @@ public sealed record ConfigGovernanceHttpRequest(
     bool? WebhookAlarmEnabled,
     int? WebhookAlarmPollMinutes,
     int? WebhookAlarmSettleSeconds,
-    int? WebhookAlarmCooldownMinutes);
+    int? WebhookAlarmCooldownMinutes,
+    // 桌面通知免打扰（1.0.295）："HH:mm"；“空串 = 清除”与“未传 = 不变”区分
+    string? NotifyQuietStart,
+    string? NotifyQuietEnd);
 
 public static class ConfigGovernanceApi
 {
@@ -159,6 +166,8 @@ public static class ConfigGovernanceApi
             if (req.WebhookAlarmPollMinutes is { } wa1 && wa1 is not (> 0 and <= 1440)) return BadReq("webhookAlarmPollMinutes 需在 1..1440");
             if (req.WebhookAlarmSettleSeconds is { } wa2 && wa2 is not (>= 5 and <= 3600)) return BadReq("webhookAlarmSettleSeconds 需在 5..3600");
             if (req.WebhookAlarmCooldownMinutes is { } wa3 && wa3 is not (> 0 and <= 1440)) return BadReq("webhookAlarmCooldownMinutes 需在 1..1440");
+            if (!string.IsNullOrEmpty(req.NotifyQuietStart) && !IsTimeOfDay(req.NotifyQuietStart)) return BadReq("notifyQuietStart 需为 HH:mm");
+            if (!string.IsNullOrEmpty(req.NotifyQuietEnd) && !IsTimeOfDay(req.NotifyQuietEnd)) return BadReq("notifyQuietEnd 需为 HH:mm");
 
             // 更新持久化状态（保留未传/为空字段的旧值；数组用 ??= 保留旧列表）
             state.MessageHistoryLimit = req.MessageHistoryLimit ?? state.MessageHistoryLimit;
@@ -190,6 +199,9 @@ public static class ConfigGovernanceApi
             state.WebhookAlarmPollMinutes = req.WebhookAlarmPollMinutes ?? state.WebhookAlarmPollMinutes;
             state.WebhookAlarmSettleSeconds = req.WebhookAlarmSettleSeconds ?? state.WebhookAlarmSettleSeconds;
             state.WebhookAlarmCooldownMinutes = req.WebhookAlarmCooldownMinutes ?? state.WebhookAlarmCooldownMinutes;
+            // 免打扰：未传 = 不变；空串 = 清除
+            if (req.NotifyQuietStart is not null) state.NotifyQuietStart = req.NotifyQuietStart.Length == 0 ? null : req.NotifyQuietStart;
+            if (req.NotifyQuietEnd is not null) state.NotifyQuietEnd = req.NotifyQuietEnd.Length == 0 ? null : req.NotifyQuietEnd;
 
             Apply(state, groupChat, authOptions, agents);
             changes.Notify(); // 驱动持久化
@@ -207,8 +219,19 @@ public static class ConfigGovernanceApi
             return Results.Ok(state);
         }).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
 
+        // 免打扰时段（1.0.295）：全局设置，但**所有登录用户**都需要读（用于决定要不要弹桌面通知）
+        app.MapGet("/ag-ui/notify-quiet", (ConfigGovernanceState state) =>
+            Results.Ok(new { start = state.NotifyQuietStart, end = state.NotifyQuietEnd }))
+            .AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         static IResult BadReq(string msg) => Results.BadRequest(new AguiError(ErrorCodes.BadRequest, msg));
     }
+
+    /// <summary>"HH:mm"（00:00..23:59）：只接受两位小时 + 两位分钟，避免宽松解析把非法值静默存下。</summary>
+    private static bool IsTimeOfDay(string s)
+        => s.Length == 5 && s[2] == ':'
+           && int.TryParse(s.AsSpan(0, 2), out var h) && h is >= 0 and <= 23
+           && int.TryParse(s.AsSpan(3, 2), out var m) && m is >= 0 and <= 59;
 
     /// <summary>注册配置治理覆盖值到持久化扩展区「configGovernance」：重启后自动应用覆盖。</summary>
     public static void RegisterConfigGovernancePersistence(this IServiceProvider services)
@@ -249,6 +272,8 @@ public static class ConfigGovernanceApi
             state.WebhookAlarmPollMinutes = saved.WebhookAlarmPollMinutes;
             state.WebhookAlarmSettleSeconds = saved.WebhookAlarmSettleSeconds;
             state.WebhookAlarmCooldownMinutes = saved.WebhookAlarmCooldownMinutes;
+            state.NotifyQuietStart = saved.NotifyQuietStart;
+            state.NotifyQuietEnd = saved.NotifyQuietEnd;
             // 把覆盖应用到运行时单例（重启后重新加载配置时一并覆盖）
             var groupChat = services.GetService<GroupChatOptions>();
             var auth = services.GetService<AuthOptions>();

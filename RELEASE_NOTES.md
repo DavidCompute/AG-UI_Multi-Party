@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.295 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.295 Release Notes (current Windows desktop release)
+
+**版本说明**：**桌面通知可以「夜间静音」**——配置治理新增免打扰时段（HH:mm 开始 / 结束），仅抑制桌面系统通知，站内通知中心与未读徽标照常；支持跨午夜窗口（如 22:00–07:00），留空或起止相等 = 不启用。
+**Version note**: **Desktop notifications can be muted at night** — Config Governance gains a quiet-hours window (HH:mm start / end) that suppresses **desktop system notifications only**, while the in-app notification center and unread badge keep working; overnight windows (e.g. 22:00–07:00) are supported, and empty or equal start/end means disabled.
+
+## 变更
+# Changes
+
+中文：
+- **服务端**：`ConfigGovernanceState` 新增 `notifyQuietStart` / `notifyQuietEnd`（`HH:mm`，空串 = 清除，未传 = 不变）；格式校验非 `HH:mm`（如 `25:00` / `7:00`）返回 400；随 `configGovernance` 扩展区持久化。
+- **公共读接口**：`GET /ag-ui/notify-quiet`（仅需登录）返回全局窗口，因为免打扰对**所有用户**生效，而配置治理接口仅管理员可读。
+- **前端**：新增 `parseHhMm` / `isQuietNow`（支持跨午夜）与 `loadNotifyQuiet()`；登录时加载、保存配置后重拉；`showSystemNotification` 在免打扰窗口内直接返回（站内通知不受影响）。
+- **配置页**：新增两个 `type=time` 输入（开始 / 结束），加载回填、保存提交（总是提交，空串 = 清除）。
+- **测试**：配置治理用例扩展（保存回读 + 空串清除 + 两种非法格式 400）；新增 Playwright 脚本 `ui-notify-quiet.mjs`（**9 项**）：登录读取窗口、解析规则、跨午夜 / 同日边界、起止相等与未设、配置字段存在、无 JS 异常。
+
+English:
+- **Server**: `ConfigGovernanceState` gains `notifyQuietStart` / `notifyQuietEnd` (`HH:mm`; empty string clears, omitted leaves unchanged); values not matching `HH:mm` (e.g. `25:00` / `7:00`) return 400 and persist with the `configGovernance` section.
+- **Public read endpoint**: `GET /ag-ui/notify-quiet` (signed-in users only) exposes the global window, since quiet hours apply to **all users** while the governance endpoint is admin-only.
+- **Frontend**: adds `parseHhMm` / `isQuietNow` (overnight aware) and `loadNotifyQuiet()`, loaded at login and re-fetched after saving config; `showSystemNotification` returns early inside the window (in-app notifications are unaffected).
+- **Config page**: two `type=time` inputs (start / end), backfilled on load and always submitted on save (empty clears).
+- **Tests**: the governance test now saves/reads back, clears with empty strings and rejects two malformed values; a new Playwright script `ui-notify-quiet.mjs` (**9 checks**) covers login-time loading, parsing rules, overnight and same-day boundaries, equal/unset disabled, config fields and no JS errors.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.10（配置治理表 #29–#30 + 免打扰说明）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.295。
+English: `docs/user-guide.md` / `en.md` §8.10 (governance rows #29–#30 plus the quiet-hours note); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.295.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（**1866**）；`dotnet build` **0 错误**；i18n 审计 **zh=en=2056，missing 0**；四个守卫脚本全过；Playwright **9/9**（免打扰）、**15/15**、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: full `dotnet test` passes (**1866**); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=2056, missing 0**; all four guard scripts pass; Playwright **9/9** (quiet hours), **15/15**, **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.294 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.294 Release Notes (current Windows desktop release)
 
