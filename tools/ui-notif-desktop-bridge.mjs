@@ -4,8 +4,10 @@
 //   3. 免打扰时段 / 按类型静音仍然拦截（不上送宿主）；
 //   4. notifyNewMessage 走桥；本人消息不弹；
 //   5. 未读计数（1.0.305）：消息 + 非 message 通知合并上送，通知已读后同步，负数归零；
-//   6. 非桌面宿主（无 chrome.webview）不误判、仍走浏览器 Notification、不上送未读；
-//   7. 无页面 JS 异常。
+//   6. 任务栏进度（1.0.306）：计划 done/total → normal / paused，结束后 none；
+//   7. 跳转列表（1.0.306）：最近非私密知聚按活跃时间倒序；
+//   8. 非桌面宿主（无 chrome.webview）不误判、仍走浏览器 Notification、不上送任何计数；
+//   9. 无页面 JS 异常。
 // 用法：cd tools && HEADLESS=1 node ui-notif-desktop-bridge.mjs
 import { chromium } from "playwright";
 
@@ -101,14 +103,12 @@ try {
     updateDocTitle();
   });
   posted = await drain(a);
-  const unreadMsg = posted.find((m) => m.type === "unread");
-  check("未读计数上送宿主", unreadMsg?.count === 5 && unreadMsg?.messages === 3 && unreadMsg?.notifications === 2, JSON.stringify(unreadMsg));
+  check("未读计数上送宿主", posted.some((m) => m.type === "unread" && m.count === 5 && m.messages === 3 && m.notifications === 2), JSON.stringify(posted.filter((m) => m.type === "unread")));
 
   // 通知标为已读 → renderNotifications 自动同步（1.0.305）
   await a.evaluate(() => { state.notifications[0].read = true; renderNotifications(); });
   posted = await drain(a);
-  const afterRead = posted.find((m) => m.type === "unread");
-  check("通知已读后同步未读", afterRead?.count === 4 && afterRead?.notifications === 1, JSON.stringify(afterRead));
+  check("通知已读后同步未读", posted.some((m) => m.type === "unread" && m.count === 4 && m.notifications === 1), JSON.stringify(posted.filter((m) => m.type === "unread")));
 
   // 负数归零
   await a.evaluate(() => {
@@ -119,9 +119,52 @@ try {
   });
   posted = await drain(a);
   const clamped = posted.find((m) => m.type === "unread");
-  check("负数未读归零", clamped?.count === 0, JSON.stringify(clamped));
+  check("负数未读归零", clamped?.count === 0, JSON.stringify(posted.filter((m) => m.type === "unread")));
 
   await a.evaluate(() => { state.groupUnread.clear(); state.notifications = []; renderNotifications(); updateDocTitle(); });
+  await drain(a);
+
+  // 任务栏进度（1.0.306）：计划 done/total / paused / none
+  await a.evaluate(() => {
+    state.rooms.clear();
+    const r = room("gprog");
+    r.messages.push({
+      id: "mprog", senderType: "agent", streaming: true,
+      plan: { title: "计划", paused: false, steps: [{ text: "a", done: true }, { text: "b", done: false }, { text: "c", done: false }] },
+    });
+    syncDesktopTaskbarProgress();
+  });
+  posted = await drain(a);
+  check("任务栏进度按计划上送", posted.some((m) => m.type === "progress" && m.state === "normal" && m.value === 1 && m.total === 3), JSON.stringify(posted.filter((m) => m.type === "progress")));
+
+  await a.evaluate(() => {
+    state.rooms.get("gprog").messages[0].plan.paused = true;
+    syncDesktopTaskbarProgress();
+  });
+  posted = await drain(a);
+  check("计划暂停 → 任务栏 paused", posted.some((m) => m.type === "progress" && m.state === "paused"), JSON.stringify(posted.filter((m) => m.type === "progress")));
+
+  await a.evaluate(() => {
+    state.rooms.get("gprog").messages[0].streaming = false;
+    syncDesktopTaskbarProgress();
+    state.rooms.clear();
+  });
+  posted = await drain(a);
+  check("任务结束后清除进度", posted.some((m) => m.type === "progress" && m.state === "none"), JSON.stringify(posted.filter((m) => m.type === "progress")));
+
+  // 跳转列表（1.0.306）：最近非私密知聚，按活跃时间倒序
+  await a.evaluate(() => {
+    state.groups = [
+      { groupId: "g1", groupName: "最近公开", isPrivate: false, lastMessageAt: 100 },
+      { groupId: "g2", groupName: "更近公开", isPrivate: false, lastMessageAt: 300 },
+      { groupId: "g3", groupName: "私密", isPrivate: true, lastMessageAt: 500 },
+    ];
+    syncDesktopRecents();
+  });
+  posted = await drain(a);
+  const recentsOk = posted.some((m) => m.type === "recents" && (m.items || []).map((x) => x.id).join(",") === "g2,g1");
+  check("跳转列表按最近排序并排除私密", recentsOk, JSON.stringify(posted.filter((m) => m.type === "recents")));
+  await a.evaluate(() => { state.groups = []; syncDesktopRecents(); });
   await drain(a);
 
   // 免打扰：构造覆盖当前时刻的窗口
@@ -164,6 +207,8 @@ try {
   check("浏览器 denied 时无宿主消息", (await drain(b)).every((m) => m.type !== "notify"));
   await b.evaluate(() => syncDesktopUnread());
   check("浏览器不上送未读计数", (await drain(b)).length === 0);
+  await b.evaluate(() => { syncDesktopTaskbarProgress(); syncDesktopRecents(); });
+  check("浏览器不上送进度/最近知聚", (await drain(b)).length === 0);
 
   check("无页面 JS 异常", errors.length === 0, errors.slice(0, 3).join(" ; "));
 } catch (e) {

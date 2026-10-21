@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.305 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.305 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.306 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.306 Release Notes (current Windows desktop release)
+
+**版本说明**：**任务栏能看进度、能直达最近知聚**——长任务在任务栏图标上显示进度条，右键任务栏图标多出「最近知聚」跳转列表。
+**Version note**: **Taskbar progress and quick access to recent circles** — long tasks show a progress bar on the taskbar icon, and right-clicking it reveals a **Recent circles** jump list.
+
+## 变更
+# Changes
+
+中文：
+- **任务栏进度**：前端 `syncDesktopTaskbarProgress()` 汇总当前所有知聚的流式数字员工消息与执行计划——有计划按 `done/total` 上报 `normal`（暂停时 `paused`），无计划但有 typing / 流式消息时上报 `indeterminate`，本轮结束清除；宿主经 `ITaskbarList3.SetProgressState/SetProgressValue` 展示，相同值不重复调用。
+- **跳转列表**：前端按最近活跃时间上报最多 7 个**非私密**知聚；宿主用 `ICustomDestinationList` + `IShellLinkW` 重建「最近知聚」分类。点击项以 `--group <id>` 启动，新窗口加载 `/?group=<id>` 后自动进入该知聚（参数一次性消费；优先于“上次知聚”）。
+- **降级**：缩略图/跳转列表在组策略禁用、远程桌面或 COM 失败时静默跳过，托盘与聊天功能不受影响。
+- **无后端变更**。
+
+English:
+- **Taskbar progress**: the frontend's `syncDesktopTaskbarProgress()` aggregates streaming agent messages and execution plans across circles — with a plan it reports `normal` (or `paused`) with `done/total`; without a plan but with typing / streaming activity it reports `indeterminate`; it clears when the round ends. The host renders it via `ITaskbarList3.SetProgressState/SetProgressValue` and skips repeated identical values.
+- **Jump list**: the frontend reports up to 7 **non-private** circles ordered by recent activity; the host rebuilds the **Recent circles** category with `ICustomDestinationList` + `IShellLinkW`. Clicking an item starts the app with `--group <id>`; the new window loads `/?group=<id>` and opens that circle (the parameter is consumed once and wins over "last circle").
+- **Fallback**: thumbnail buttons / jump lists are skipped silently under group policy, in remote sessions or on COM failures; tray and chat features are unaffected.
+- **No backend change**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（任务栏进度与跳转列表）；桌面版 README 中英；`tools/README-playwright.md`（脚本 28 项）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.306。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (taskbar progress and jump list); the desktop READMEs; `tools/README-playwright.md` (28 checks); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.306.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目与 `node --check` 通过；i18n 审计 **zh=en=2079，missing 0**；Playwright `ui-notif-desktop-bridge.mjs` **28/28**（新增计划进度 / 暂停 / 结束清除、最近知聚排序与私密排除、浏览器不上送）；文档引用守卫通过；本轮无服务端变更，沿用 **1866 通过 / 0 失败**。**无法自动验证**：任务栏进度条与「最近知聚」跳转列表的实际渲染 / 点击（需安装版人工点验）。
+English: the desktop project builds and `node --check` passes; the i18n audit is **zh=en=2079, missing 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **28/28** (new plan progress / pause / clear, recent ordering and private exclusion, browser no-op); the docs-reference guard passes; no server-side change, so **1866 passed / 0 failed** still applies. **Not automatically verifiable**: the actual taskbar progress bar and jump-list rendering / clicks (need a manual check in an installed build).
+
+---
+
+# AG-UI 群聊桌面版 1.0.305 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.305 Release Notes (historical)
 
 **版本说明**：**任务栏也能打理知聚**——悬停任务栏图标即可「打开 / 静音」，未读徽标同时叠加到任务栏；托盘未读口径扩展为未读消息 + 通知中心。
 **Version note**: **The taskbar is now actionable too** — hover the taskbar icon for **Open / Mute**, with an unread overlay badge; the tray count now covers unread messages plus notification-center items.

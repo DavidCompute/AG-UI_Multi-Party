@@ -53,6 +53,23 @@ internal sealed class TaskbarThumbnailBar : IDisposable
         _taskbar.SetOverlayIcon(_hwnd, icon?.Handle ?? IntPtr.Zero, description ?? "");
     }
 
+    /// <summary>任务栏进度（1.0.306）：none / indeterminate / normal / paused / error。</summary>
+    public void SetProgress(string state, ulong completed, ulong total)
+    {
+        if (_taskbar is null || _hwnd == IntPtr.Zero) return;
+        var flag = state switch
+        {
+            "indeterminate" => 1, // TBPF_INDETERMINATE
+            "normal" => 2,        // TBPF_NORMAL
+            "paused" => 8,        // TBPF_PAUSED
+            "error" => 4,         // TBPF_ERROR
+            _ => 0,               // TBPF_NOPROGRESS
+        };
+        _taskbar.SetProgressState(_hwnd, flag);
+        if (flag is 2 or 8)
+            _taskbar.SetProgressValue(_hwnd, completed, total == 0 ? 1 : total);
+    }
+
     public void Dispose() => _taskbar = null;
 
     private static THUMBBUTTON CreateButton(uint id, System.Drawing.Icon icon, string tip) => new()

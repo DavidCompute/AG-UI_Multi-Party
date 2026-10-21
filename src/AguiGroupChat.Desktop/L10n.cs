@@ -66,6 +66,7 @@ public static class L10n
     public static string TaskbarUnread(int count) => IsZh()
         ? $"未读 {count} 条"
         : $"{count} unread";
+    public static string JumpListRecent => IsZh() ? "最近知聚" : "Recent circles";
     public static string TrayOpenDataDir => IsZh() ? "📂 打开数据目录" : "📂 Open data folder";
     public static string TrayOpenDataDirFailed(string message) => IsZh()
         ? $"无法打开数据目录：{message}"

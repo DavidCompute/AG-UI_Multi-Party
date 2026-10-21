@@ -35,9 +35,15 @@ public partial class MainWindow : Window
     private int _unreadCount;
     private int _unreadMessages;
     private int _unreadNotifications;
+    private string _progressState = "none";
+    private ulong _progressValue;
+    private ulong _progressTotal;
+    private string _recentsSignature = "";
     private readonly TaskbarThumbnailBar _taskbar = new();
+    private readonly JumpListManager _jumpList = new();
 
     private readonly bool _startHidden;
+    private readonly string? _initialGroupId;
 
     private DateTime _mutedUntilUtc = DateTime.MinValue;
     private string? _mutePreset;
@@ -50,12 +56,13 @@ public partial class MainWindow : Window
     private const string MutePreset120 = "120";
     private const string MutePresetTomorrow = "tomorrow";
 
-    public MainWindow(string baseUrl, InstanceCoordinator coordinator, bool startHidden = false)
+    public MainWindow(string baseUrl, InstanceCoordinator coordinator, bool startHidden = false, string? initialGroupId = null)
     {
         InitializeComponent();
         _baseUrl = baseUrl;
         _coordinator = coordinator;
         _startHidden = startHidden;
+        _initialGroupId = initialGroupId;
         if (startHidden)
         {
             // 开机自启：先以透明窗口加载，Loaded 后隐藏到托盘（避免登录时闪一下窗口）
@@ -123,7 +130,10 @@ public partial class MainWindow : Window
             EnsureTray();
             InitTaskbarButtons();
             StatusText.Text = L10n.StatusLocalService(_baseUrl);
-            WebView.Source = new Uri(_baseUrl);
+            var startUrl = _baseUrl;
+            if (!string.IsNullOrWhiteSpace(_initialGroupId))
+                startUrl += "/?group=" + Uri.EscapeDataString(_initialGroupId!);
+            WebView.Source = new Uri(startUrl);
             if (_startHidden)
             {
                 Hide();
@@ -213,6 +223,27 @@ public partial class MainWindow : Window
                     var notifications = root.TryGetProperty("notifications", out var nEl) && nEl.TryGetInt32(out var nc) ? nc : 0;
                     SetUnread(count, messages, notifications);
                     break;
+                case "progress":
+                    // 长任务进度（1.0.306）：计划 done/total → 任务栏百分比
+                    var pState = root.TryGetProperty("state", out var st) ? (st.GetString() ?? "none") : "none";
+                    var pValue = root.TryGetProperty("value", out var vEl) && vEl.TryGetInt64(out var v) ? (ulong)Math.Max(0, v) : 0UL;
+                    var pTotal = root.TryGetProperty("total", out var tEl) && tEl.TryGetInt64(out var tt) ? (ulong)Math.Max(0, tt) : 0UL;
+                    SetTaskbarProgress(pState, pValue, pTotal);
+                    break;
+                case "recents":
+                    // 跳转列表最近知聚（1.0.306）
+                    var recents = new List<(string Id, string Name)>();
+                    if (root.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in arr.EnumerateArray())
+                        {
+                            var id = item.TryGetProperty("id", out var idEl) ? (idEl.GetString() ?? "") : "";
+                            var name = item.TryGetProperty("name", out var nameEl) ? (nameEl.GetString() ?? id) : id;
+                            if (!string.IsNullOrWhiteSpace(id)) recents.Add((id, name));
+                        }
+                    }
+                    UpdateJumpList(recents);
+                    break;
             }
         }
         catch { /* 非法消息忽略：不影响宿主 */ }
@@ -292,6 +323,7 @@ public partial class MainWindow : Window
             _taskbar.SetButtons(_openThumbIcon, L10n.TaskbarOpen, _muteThumbIcon,
                 IsTrayMuted ? L10n.TaskbarUnmute : L10n.TaskbarMute);
             UpdateTaskbarOverlay();
+            _taskbar.SetProgress(_progressState, _progressValue, _progressTotal);
         }
         catch { /* 任务栏不支持缩略图按钮 */ }
     }
@@ -319,6 +351,26 @@ public partial class MainWindow : Window
                 _unreadCount > 0 ? L10n.TaskbarUnread(_unreadCount) : "");
         }
         catch { /* 忽略 */ }
+    }
+
+    /// <summary>任务栏进度（1.0.306）：相同值不重复调用 shell。</summary>
+    private void SetTaskbarProgress(string state, ulong completed, ulong total)
+    {
+        state = string.IsNullOrWhiteSpace(state) ? "none" : state;
+        if (string.Equals(_progressState, state, StringComparison.Ordinal)
+            && _progressValue == completed && _progressTotal == total) return;
+        _progressState = state;
+        _progressValue = completed;
+        _progressTotal = total;
+        try { _taskbar.SetProgress(state, completed, total); } catch { /* 忽略 */ }
+    }
+
+    /// <summary>跳转列表「最近知聚」（1.0.306）：内容未变不重建。</summary>
+    private void UpdateJumpList(List<(string Id, string Name)> items)
+    {
+        var signature = string.Join("\n", items.Select((i) => i.Id + "|" + i.Name));
+        if (signature == _recentsSignature) return;
+        if (_jumpList.SetRecentGroups(items)) _recentsSignature = signature; // 失败不缓存，下次重试
     }
 
     /// <summary>在应用图标右下角画未读红点（>9 缩小字号，>99 显示 99+）。</summary>

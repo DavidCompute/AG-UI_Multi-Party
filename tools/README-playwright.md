@@ -144,7 +144,7 @@ HEADLESS=1 node ui-notif-filter.mjs      # 12 项：通知中心按类型筛选�
 HEADLESS=1 node ui-notif-perm.mjs        # 11 项：桌面通知权限引导（未授权 / 关闭后 7 天重提醒 / 开启 / 已拒绝 / 不支持）
 HEADLESS=1 node ui-notif-persist.mjs     # 11 项：通知本地持久化（刷新恢复 / 清空删副本 / 7 天过期）
 HEADLESS=1 node ui-notif-actions.mjs     # 11 项：通知单条操作（悬浮显示 / 标为未读 / 删除同步本地 / 技能错误清理）
-HEADLESS=1 node ui-notif-desktop-bridge.mjs  # 23 项：桌面版通知桥（宿主识别 / 权限视为 granted / postMessage 载荷与截断 / 免打扰与类型静音仍拦截 / 本人消息不弹 / 未读=消息+非 message 通知、已读同步与负数归零 / 浏览器宿主不误判）
+HEADLESS=1 node ui-notif-desktop-bridge.mjs  # 28 项：桌面版通知/任务栏桥（宿主识别 / 权限视为 granted / postMessage 载荷与截断 / 免打扰与类型静音仍拦截 / 本人消息不弹 / 未读=消息+非 message 通知、已读同步与负数归零 / 计划进度与暂停 / 最近知聚排序与私密排除 / 浏览器宿主不误判）
 HEADLESS=1 node ui-kb-auto-toggle.mjs     # 17 项：「显示自动沉淀的知识库」开关（知识库管理 + 绑定知识库弹窗，两处共享状态）
 ```
 

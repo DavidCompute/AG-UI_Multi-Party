@@ -417,6 +417,8 @@ function resetChatState() {
   state.mentionMemory = new Map();
   state.groupUnread.clear();
   updateDocTitle(); // 登出 / 切换身份：托盘与标签页未读数归零
+  syncDesktopTaskbarProgress();
+  syncDesktopRecents();
   pendingAttachments = [];
   hideSendRetryBar();
   state.visibility = "all";
@@ -5183,14 +5185,22 @@ async function loadGroups() {
   // 要等下一条实时事件才恢复）：手动点「刷新」、成员加入 / 退出、重连后的 loadGroups 都会走到这里。
   resetVScroll(); renderGroupList(); renderMembers(); renderTopicBar();
   renderMessages();
-  // 登录后自动进入上次选择的知聚（一次性，手动刷新知聚列表不触发）
-  if (pendingAutoEnterGroup && state.memberId && !state.activeGroupId) {
+  // 跳转列表启动（--group）→ 直接打开该知聚（参数一次性消费；优先于“上次知聚”）
+  const jumpGid = new URLSearchParams(location.search).get("group");
+  if (jumpGid) {
+    pendingAutoEnterGroup = false;
+    const target = state.groups.find((x) => x.groupId === jumpGid);
+    try { history.replaceState(null, "", location.pathname); } catch { /* 忽略 */ }
+    if (target && state.activeGroupId !== jumpGid) selectGroup(jumpGid);
+  } else if (pendingAutoEnterGroup && state.memberId && !state.activeGroupId) {
+    // 登录后自动进入上次选择的知聚（一次性，手动刷新知聚列表不触发）
     pendingAutoEnterGroup = false;
     const last = localStorage.getItem(LastGroupKey(state.memberId));
     const g = last && state.groups.find((x) => x.groupId === last);
     if (g) selectGroup(g.groupId);
   }
   updateDocTitle(); // 知聚列表刷新后同步标签页标题与桌面托盘未读数
+  syncDesktopRecents(); // 跳转列表最近知聚
 }
 
 /** 配额水位归一化：只接受 warn / over（防止把服务端返回的任意字符串拼进 class 属性）。 */
@@ -5420,6 +5430,7 @@ function onMessageStart(evt) {
     }
   }
   if (state.activeGroupId !== evt.groupId) return; // 非当前知聚不渲染
+  syncDesktopTaskbarProgress(); // 数字员工开始输出：任务栏进度（1.0.306）
   // 是否跟随（滚动到底）由 stickBottom 决定：滚动监听只在用户停靠最底部时置位，
   // 任何上滑立即取消——避免滚轮大幅滚动时视口被反复拉回底部。
   scheduleVirtualRender();
@@ -5582,6 +5593,7 @@ function onMessagePlan(evt) {
   if (!m || !Array.isArray(evt.steps) || evt.steps.length === 0) return;
   m.plan = { title: evt.title || "", steps: evt.steps, paused: !!evt.paused, triggerMemberId: evt.triggerMemberId || null };
   m._html = undefined; // 计划变化 → 渲染缓存失效
+  syncDesktopTaskbarProgress(); // 计划步骤变化 → 任务栏百分比（1.0.306）
   if (state.activeGroupId !== evt.groupId) return;
   vscroll.force = true; // 计划追加 → 消息高度可能变化，强制重建窗口
   scheduleVirtualRender();
@@ -5654,6 +5666,7 @@ function onMessageEnd(evt) {
   const m = r.messages.find((x) => x.id === evt.messageId);
   if (!m) return;
   m.streaming = false;
+  syncDesktopTaskbarProgress(); // 本轮结束：清除 / 保留其他仍在跑的进度
   // 思考内容以结束事件携带的完整快照为准（防抖 / 乱序场景下保证回放完整）
   m.reasoning = evt.reasoning ?? m.reasoning;
   m.agentChain = evt.agentChain ?? m.agentChain; // 技能调用链（链路可视化）
@@ -5736,6 +5749,7 @@ function onTyping(evt) {
     r.typingTs.delete(evt.memberId);
   }
   renderTyping();
+  syncDesktopTaskbarProgress(); // 数字员工开始 / 结束输入 → 任务栏进度（1.0.306）
 }
 
 /** 撤回的本地状态与 DOM 更新（撤回者 HTTP 成功后立即调用 + GROUP_MESSAGE_RECALLED 事件到达时调用，幂等）。 */
@@ -6817,6 +6831,57 @@ function syncDesktopUnread() {
     const messages = Math.max(0, Number(totalUnreadCount()) || 0);
     const notifications = (state.notifications || []).filter((n) => !n.read && n.type !== "message").length;
     window.chrome.webview.postMessage({ type: "unread", count: messages + notifications, messages, notifications });
+  } catch { /* 忽略 */ }
+}
+
+/**
+ * 桌面版任务栏进度（1.0.306）：
+ *   有计划且未完成 → normal（done/total）；计划暂停 → paused；
+ *   无计划但有数字员工在跑（typing / 流式消息）→ indeterminate；否则 none。
+ */
+function syncDesktopTaskbarProgress() {
+  try {
+    if (!isDesktopHost()) return;
+    let runningPlan = null;
+    let busy = false;
+    for (const r of state.rooms.values()) {
+      for (const m of (r.messages || [])) {
+        if (m.senderType !== "agent" || !m.streaming) continue;
+        busy = true;
+        if (m.plan && Array.isArray(m.plan.steps) && m.plan.steps.length) runningPlan = m.plan;
+      }
+      if (!busy && r.typing && r.typing.size) {
+        const members = r.members || [];
+        for (const id of r.typing) {
+          if (members.some((x) => x.memberId === id && x.memberType === "agent")) { busy = true; break; }
+        }
+      }
+    }
+    if (runningPlan) {
+      const done = runningPlan.steps.filter((s) => s.done).length;
+      window.chrome.webview.postMessage({
+        type: "progress", state: runningPlan.paused ? "paused" : "normal",
+        value: done, total: runningPlan.steps.length,
+      });
+    } else {
+      window.chrome.webview.postMessage({
+        type: "progress", state: busy ? "indeterminate" : "none", value: 0, total: 0,
+      });
+    }
+  } catch { /* 忽略 */ }
+}
+
+/** 桌面版跳转列表（1.0.306）：最近活跃的非私密知聚（最多 7 个，按最后消息时间倒序）。 */
+function syncDesktopRecents() {
+  try {
+    if (!isDesktopHost()) return;
+    const items = (state.groups || [])
+      .filter((g) => g && g.groupId && !g.isPrivate)
+      .slice()
+      .sort((a, b) => (Number(b.lastMessageAt) || 0) - (Number(a.lastMessageAt) || 0))
+      .slice(0, 7)
+      .map((g) => ({ id: String(g.groupId), name: String(g.groupName || g.groupId).slice(0, 60) }));
+    window.chrome.webview.postMessage({ type: "recents", items });
   } catch { /* 忽略 */ }
 }
 

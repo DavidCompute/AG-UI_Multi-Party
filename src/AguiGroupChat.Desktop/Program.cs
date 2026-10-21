@@ -65,7 +65,10 @@ public static class Program
 
         // 桌面窗口（WebView2 加载本地页面；共享同一后端，多实例各自独立窗口）
         var wpfApp = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        var window = new MainWindow(baseUrl, coordinator, startHidden: args.Contains("--autostart"));
+        var window = new MainWindow(
+            baseUrl, coordinator,
+            startHidden: args.Contains("--autostart"),
+            initialGroupId: GetOption(args, "--group"));
 
         // 关窗：实例计数 -1；最后一个实例 → 通知后端优雅停机。
         // 停机在后台线程执行，不阻塞 UI；Run 返回后短等待放行，进程必退。
@@ -75,6 +78,17 @@ public static class Program
         };
         wpfApp.Run(window);
         Thread.Sleep(800); // 等后台停机请求发出（不阻塞关闭过程）
+    }
+
+    /// <summary>取 <c>--name value</c> 形式参数的 value（不存在返回 null）。</summary>
+    private static string? GetOption(string[] args, string name)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase))
+                return args[i + 1];
+        }
+        return null;
     }
 
     /// <summary>
