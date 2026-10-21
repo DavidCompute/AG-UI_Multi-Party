@@ -29,8 +29,12 @@ public sealed class InstanceCoordinator
         }
     }
 
-    /// <summary>启动后端子进程（当前可执行文件的 --backend 模式，无窗口）。</summary>
-    public void StartBackend()
+    /// <summary>
+    /// 启动后端子进程（当前可执行文件的 --backend 模式，无窗口）。
+    /// <paramref name="preserveInstanceCount"/>：托盘「重启本地服务」使用——后端通常会在启动时
+    /// 把残留计数归零，但重启时 UI 实例仍在，归零会被随后的关窗错误地判为「最后一个实例」。
+    /// </summary>
+    public void StartBackend(bool preserveInstanceCount = false)
     {
         var psi = new System.Diagnostics.ProcessStartInfo
         {
@@ -39,6 +43,7 @@ public sealed class InstanceCoordinator
             CreateNoWindow = true,
         };
         psi.ArgumentList.Add("--backend");
+        if (preserveInstanceCount) psi.ArgumentList.Add("--preserve-instance-count");
         System.Diagnostics.Process.Start(psi);
     }
 

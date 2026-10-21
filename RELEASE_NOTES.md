@@ -1,5 +1,46 @@
-# AG-UI 群聊桌面版 1.0.302 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.302 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.303 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.303 Release Notes (current Windows desktop release)
+
+**版本说明**：**托盘成为桌面版的常驻入口**——新增打开数据目录、重启本地服务、四档静音、关闭到托盘（可持久化），不用退出应用也能打理本地服务。
+**Version note**: **The tray is now the desktop app's control center** — open the data folder, restart the local service, pick one of four mute durations, and optionally close to tray (persisted), all without quitting the app.
+
+## 变更
+# Changes
+
+中文：
+- **常驻托盘**：窗口启动即创建托盘图标（不再等到第一条通知），右键菜单含打开知聚 / 📂 打开数据目录 / 🔄 重启本地服务 / 🔕 静音 / ☑ 关闭窗口时最小化到托盘 / 退出。
+- **点击打开数据目录**：打开进程工作目录下的 `data/`（与 SQLite 连接串 `data/agui.sqlite` 同一基准，含附件与预览缓存）。
+- **重启本地服务**：经 `/ag-ui/shutdown` 优雅停机 → 15s 内等待端口释放 → 以 `--backend --preserve-instance-count` 重启（不归零多实例计数）→ 90s 内等待就绪 → 自动重载页面；失败时气泡 + 弹窗提示，可直接重试。
+- **静音时长**：30 分钟 / 1 小时 / 2 小时 / 到明天 08:00，菜单显示剩余时间与当前选中项；仅抑制宿主气泡，站内通知中心与未读徽标照常。
+- **关闭到托盘**：默认关闭；开启后关窗只隐藏窗口（后台继续跑），从托盘「退出」才真正结束；设置写入 `%LocalAppData%\AguiGroupChat\desktop-settings.json`；Windows 注销 / 关机不会被拦住；首次隐藏弹一次说明。
+- **工程**：新增 `DesktopSettings`（容错读写本机偏好）；`InstanceCoordinator.StartBackend(preserveInstanceCount)`、`DesktopApp.Start(..., preserveInstanceCount)` 与 `Program` 的 `--preserve-instance-count` 参数配套，避免共享后端重启后被误判为「最后一个实例」。
+- **无后端 / 前端变更**：纯桌面壳。
+
+English:
+- **Persistent tray**: the tray icon is created as soon as the window starts (not on the first notification), with a context menu for Open KnowGath / 📂 Open data folder / 🔄 Restart local service / 🔕 Mute / ☑ Minimize to tray when closing / Exit.
+- **Open data folder**: opens `data/` under the process working directory (the same base as the `data/agui.sqlite` connection string, including attachments and preview cache).
+- **Restart local service**: gracefully stops via `/ag-ui/shutdown`, waits up to 15s for the port to be released, restarts with `--backend --preserve-instance-count` (the multi-instance count is not reset), waits up to 90s for readiness, then reloads the page; failures show a balloon plus a dialog and can be retried.
+- **Mute durations**: 30 minutes / 1 hour / 2 hours / until tomorrow 08:00, with remaining time and the active choice shown in the menu; host balloons only, so the in-app center and unread badge keep working.
+- **Close to tray**: off by default; when enabled, closing only hides the window (the app keeps running) and **Exit** in the tray menu really quits. The setting is stored in `%LocalAppData%\AguiGroupChat\desktop-settings.json`; Windows logoff / shutdown is never blocked; a one-time explanation is shown on the first hide.
+- **Engineering**: new `DesktopSettings` (tolerant local-preference reader/writer); `InstanceCoordinator.StartBackend(preserveInstanceCount)`, `DesktopApp.Start(..., preserveInstanceCount)` and the `--preserve-instance-count` switch work together so a restarted shared backend is not mistaken for "the last instance".
+- **No backend / frontend change**: desktop shell only.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（托盘菜单全量说明）；桌面版 README 中英；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.303。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (full tray-menu description); the desktop READMEs; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.303.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目通过（0 错误）；文档引用守卫通过；本轮**无服务端与前端逻辑变更**，沿用 1.0.301 的全量结果 **1866 通过 / 0 失败**，i18n 仍为 **zh=en=2079，missing 0**。**无法自动验证**：托盘菜单各项、关闭到托盘、静音倒计时与重启链路（WinForms 托盘需在安装后的桌面版人工点验）。
+English: the desktop project builds (0 errors) and the docs-reference guard passes; **no server-side or frontend logic changed**, so 1.0.301's full run of **1866 passed / 0 failed** still applies and i18n remains **zh=en=2079, missing 0**. **Not automatically verifiable**: every tray-menu action, close-to-tray, the mute countdown and the restart chain (the WinForms tray needs a manual check in an installed desktop build).
+
+---
+
+# AG-UI 群聊桌面版 1.0.302 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.302 Release Notes (historical)
 
 **版本说明**：**托盘图标可打理了**——右键托盘图标可「打开知聚 / 静音 1 小时 / 退出」，临时不想被打扰时不用去关整个应用。
 **Version note**: **The tray icon is now actionable** — right-click it for **Open KnowGath / Mute for 1 hour / Exit**, so you can silence interruptions without quitting the app.

@@ -26,7 +26,9 @@ public static class Program
         // ---- 后端进程角色：无 UI，固定 5200，阻塞等待停机信号 ----
         if (args.Contains("--backend"))
         {
-            var (app, _) = DesktopApp.Start(args, preferredPort: BackendPort, backendMode: true);
+            var (app, _) = DesktopApp.Start(
+                args, preferredPort: BackendPort, backendMode: true,
+                preserveInstanceCount: args.Contains("--preserve-instance-count"));
             StartBackendSelfWatchdog(app); // 兜底自监视停机（见下），托管线程阻塞到进程退出
             app.WaitForShutdown(); // /ag-ui/shutdown 触发 StopAsync 后返回 → Main 结束 → 进程退出
             return;
@@ -63,7 +65,7 @@ public static class Program
 
         // 桌面窗口（WebView2 加载本地页面；共享同一后端，多实例各自独立窗口）
         var wpfApp = new System.Windows.Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        var window = new MainWindow(baseUrl);
+        var window = new MainWindow(baseUrl, coordinator);
 
         // 关窗：实例计数 -1；最后一个实例 → 通知后端优雅停机。
         // 停机在后台线程执行，不阻塞 UI；Run 返回后短等待放行，进程必退。

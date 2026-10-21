@@ -29,7 +29,8 @@ public static class DesktopApp
     /// 多实例架构：UI 实例（默认模式）探测 5200 → 未运行则启动 <c>--backend</c> 子进程 → WebView 指向它；
     /// 每个 UI 实例关闭时实例计数 -1，归零才关后端（见 <see cref="InstanceCoordinator"/>）。
     /// </summary>
-    public static (WebApplication App, string BaseUrl) Start(string[] args, int preferredPort = 5200, bool backendMode = false)
+    public static (WebApplication App, string BaseUrl) Start(
+        string[] args, int preferredPort = 5200, bool backendMode = false, bool preserveInstanceCount = false)
     {
         // 关闭出站 HTTP 请求的 W3C trace 传播（不附加 traceparent 头）：部分 API 网关（如 DeepSeek）
         // 对 traceparent 校验严格，曾出现带该头的请求被网关以 invalid header 拒绝（请求头被截断畸形）。
@@ -183,7 +184,8 @@ public static class DesktopApp
         {
             // 后端是新进程：任何残留实例计数都已陈旧（上次异常退出可能遗留），必须先归零，
             // 否则遗留计数会把后续每次启动的计数抬升，导致计数永远到不了 0、后端永不关闭。
-            InstanceCoordinator.ResetInstanceCount();
+            // 例外：托盘「重启本地服务」时 UI 实例仍在（--preserve-instance-count），计数必须保留。
+            if (!preserveInstanceCount) InstanceCoordinator.ResetInstanceCount();
 
             // 优雅停机端点：最后一个 UI 实例关闭时调用（仅回环可达 + 共享 secret 校验），后台停机不阻塞请求
             var secret = InstanceCoordinator.ReadOrCreateBackendSecret();

@@ -33,20 +33,65 @@ public static class L10n
 
     public static string MessageBoxTitle => IsZh() ? "AG-UI 桌面版" : "AG-UI Desktop";
 
-    // 托盘图标（1.0.302）：右键菜单与静音反馈
+    // 托盘图标（1.0.301）：右键菜单、静音与关闭行为
     public static string TrayText => IsZh() ? "知聚" : "KnowGath";
     public static string TrayOpen => IsZh() ? "打开知聚" : "Open KnowGath";
-    public static string TrayMuteOneHour => IsZh() ? "🔕 静音 1 小时" : "🔕 Mute for 1 hour";
+    public static string TrayOpenDataDir => IsZh() ? "📂 打开数据目录" : "📂 Open data folder";
+    public static string TrayOpenDataDirFailed(string message) => IsZh()
+        ? $"无法打开数据目录：{message}"
+        : $"Cannot open the data folder: {message}";
+    public static string TrayRestartBackend => IsZh() ? "🔄 重启本地服务" : "🔄 Restart local service";
+    public static string TrayRestartingTitle => IsZh() ? "正在重启本地服务…" : "Restarting local service…";
+    public static string TrayRestartingBody => IsZh()
+        ? "窗口会短暂断开，重启完成后自动重新加载。"
+        : "The window disconnects briefly and reloads automatically when the restart finishes.";
+    public static string TrayRestartDoneTitle => IsZh() ? "本地服务已重启" : "Local service restarted";
+    public static string TrayRestartDoneBody => IsZh() ? "页面已重新加载。" : "The page has been reloaded.";
+    public static string TrayRestartFailedTitle => IsZh() ? "本地服务重启失败" : "Local service restart failed";
+    public static string TrayRestartFailedBody => IsZh()
+        ? "请稍后在托盘菜单重试，或退出后重新启动应用。"
+        : "Try again from the tray menu later, or quit and start the app again.";
+    public static string TrayMuteMenu => IsZh() ? "🔕 静音" : "🔕 Mute";
+    public static string TrayMuteMenuWithRemaining(string remaining) => IsZh()
+        ? $"🔕 静音（{remaining}）"
+        : $"🔕 Mute ({remaining})";
+    public static string TrayMute30 => IsZh() ? "30 分钟" : "30 minutes";
+    public static string TrayMute60 => IsZh() ? "1 小时" : "1 hour";
+    public static string TrayMute120 => IsZh() ? "2 小时" : "2 hours";
+    public static string TrayMuteTomorrow => IsZh() ? "到明天 08:00" : "Until tomorrow 08:00";
     public static string TrayUnmute => IsZh() ? "🔔 取消静音" : "🔔 Unmute";
     public static string TrayExit => IsZh() ? "退出" : "Exit";
-    public static string TrayMutedTitle => IsZh() ? "已静音 1 小时" : "Muted for 1 hour";
-    public static string TrayMutedBody => IsZh()
-        ? "未来 1 小时内不再弹出桌面通知（站内通知中心与未读徽标不受影响）。"
-        : "Desktop notifications are suppressed for the next hour (the in-app notification center and unread badge keep working).";
+    public static string TrayMutedTitle => IsZh() ? "已静音" : "Muted";
+    public static string TrayMutedBody(string remaining) => IsZh()
+        ? $"静音已生效（{remaining}）。期间不再弹出桌面通知（站内通知中心与未读徽标不受影响）。"
+        : $"Muted — {remaining}. Desktop notifications stay off until then (the in-app notification center and unread badge keep working).";
     public static string TrayUnmutedTitle => IsZh() ? "已恢复桌面通知" : "Desktop notifications restored";
     public static string TrayUnmutedBody => IsZh()
         ? "之后的新消息与提醒会继续弹出气泡。"
         : "New messages and alerts will pop up as balloons again.";
+    public static string TrayRemainingZero => IsZh() ? "即将结束" : "ending now";
+    public static string TrayRemainingMinutes(int minutes) => IsZh()
+        ? $"剩余 {minutes} 分钟"
+        : $"{minutes} min left";
+    public static string TrayRemainingHours(int hours) => IsZh()
+        ? $"剩余 {hours} 小时"
+        : $"{hours} h left";
+    public static string TrayRemainingHoursMinutes(int hours, int minutes) => IsZh()
+        ? $"剩余 {hours} 小时 {minutes} 分钟"
+        : $"{hours} h {minutes} min left";
+    public static string TrayCloseToTray => IsZh() ? "关闭窗口时最小化到托盘" : "Minimize to tray when closing";
+    public static string TrayCloseToTrayOnTitle => IsZh() ? "已开启：关闭到托盘" : "Close to tray enabled";
+    public static string TrayCloseToTrayOnBody => IsZh()
+        ? "关闭窗口后应用继续在后台运行；从托盘菜单「退出」可完全退出。"
+        : "The app keeps running after you close the window; use Exit in the tray menu to quit completely.";
+    public static string TrayCloseToTrayOffTitle => IsZh() ? "已关闭：关窗即退出" : "Close to tray disabled";
+    public static string TrayCloseToTrayOffBody => IsZh()
+        ? "关闭窗口将直接退出应用。"
+        : "Closing the window now quits the app.";
+    public static string TrayMinimizedTitle => IsZh() ? "已最小化到托盘" : "Minimized to tray";
+    public static string TrayMinimizedBody => IsZh()
+        ? "知聚仍在后台运行；双击托盘图标或右键选「打开知聚」即可回到窗口。"
+        : "KnowGath is still running in the background; double-click the tray icon or choose Open KnowGath to come back.";
 
     /// <summary>首次启动一次性提示：本机未装 LibreOffice（办公文档在线查看 / PPT 播放依赖它）。</summary>
     public static string DocPreviewHintBody => IsZh()

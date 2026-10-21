@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.302**
+> Applies to version: **1.0.303**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -318,7 +318,14 @@ Row actions (1.0.300): hovering (or keyboard-focusing) an item reveals **● Mar
 
 Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), the `Notification` permission is often unavailable and users have nowhere to change "site settings". When the frontend detects the host-injected `window.chrome.webview.postMessage`, `notifPermission()` reports `granted` (so the permission hint is hidden) and `showSystemNotification` posts `{ type: "notify", title, body }` to the host, which shows a tray balloon (`NotifyIcon.ShowBalloonTip`, 6 seconds); clicking the balloon or double-clicking the tray icon brings the window to the front. Quiet hours, per-type muting and "never notify me about my own message" behave exactly as in the browser; the body is capped at 200 characters (new-message notifications first collapse whitespace and take the first 120). Without `chrome.webview` nothing changes and Web Notification is still used.
 
-Tray context menu (1.0.302): right-clicking the tray icon offers **Open KnowGath / 🔕 Mute for 1 hour (becomes 🔔 Unmute while muted) / Exit**. Muting suppresses host balloons only; the in-app notification center and unread badge keep working. A confirmation balloon is shown when muting and when restoring, and the mute state is process-local (it resets when the app exits or restarts).
+Tray context menu (introduced in 1.0.302, expanded in 1.0.303):
+
+- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same.
+- **📂 Open data folder**: opens `data/` under the process working directory (SQLite database, attachments and preview cache).
+- **🔄 Restart local service**: gracefully stops the backend, waits for the port to be released, starts a new backend process (preserving the multi-instance count) and reloads the page; every window sharing that backend disconnects briefly during the restart.
+- **🔕 Mute**: choose **30 minutes / 1 hour / 2 hours / until tomorrow 08:00**; while muted the menu shows the remaining time and offers **Unmute**. Only host balloons are suppressed — **the in-app notification center and unread badge keep working**; a confirmation balloon is shown when muting and restoring, and the mute state is process-local (it resets when the app restarts).
+- **☑ Minimize to tray when closing** (off by default): once enabled, closing the window only hides it and the app keeps running; use **Exit** in the tray menu to quit. A one-time explanation balloon is shown on the first hide. Windows logoff / shutdown is never blocked by this setting.
+- **Exit**: disposes the tray icon and menu, then closes the window, reusing the multi-instance shutdown chain so no backend process is left behind.
 
 #### 1.2.2 Left column: My Groups (`aside.panel.groups`)
 
