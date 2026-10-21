@@ -1016,6 +1016,7 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
             // 桌面通知免打扰（1.0.295）
             notifyQuietStart = "22:00",
             notifyQuietEnd = "07:00",
+            notifyMutedTypes = new[] { "error", "approval" },
         });
         var setRes = await _client.SendAsync(set);
         setRes.EnsureSuccessStatusCode();
@@ -1062,13 +1063,16 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         // 免打扰时段（1.0.295）：保存回读 + 空串清除
         Assert.Equal("22:00", d.GetProperty("notifyQuietStart").GetString());
         Assert.Equal("07:00", d.GetProperty("notifyQuietEnd").GetString());
+        Assert.Contains(d.GetProperty("notifyMutedTypes").EnumerateArray(), x => x.GetString() == "error");
+        Assert.Contains(d.GetProperty("notifyMutedTypes").EnumerateArray(), x => x.GetString() == "approval");
         using var clearQuiet = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
-        clearQuiet.Content = JsonContent.Create(new { notifyQuietStart = "", notifyQuietEnd = "" });
+        clearQuiet.Content = JsonContent.Create(new { notifyQuietStart = "", notifyQuietEnd = "", notifyMutedTypes = Array.Empty<string>() });
         (await _client.SendAsync(clearQuiet)).EnsureSuccessStatusCode();
         using var afterClear = Authed(HttpMethod.Get, "/ag-ui/admin/config/governance", token);
         var cleared = await (await _client.SendAsync(afterClear)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("notifyQuietStart").ValueKind);
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("notifyQuietEnd").ValueKind);
+        Assert.Equal(0, cleared.GetProperty("notifyMutedTypes").GetArrayLength());
     }
 
     [Fact]
@@ -1113,6 +1117,11 @@ public sealed class AdminApiIntegrationTests : IClassFixture<AdminApiServerFixtu
         using var badQuiet2 = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
         badQuiet2.Content = JsonContent.Create(new { notifyQuietEnd = "7:00" });
         Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badQuiet2)).StatusCode);
+
+        // 未知通知类型 → 400（1.0.296）
+        using var badMute = Authed(HttpMethod.Post, "/ag-ui/admin/config", token);
+        badMute.Content = JsonContent.Create(new { notifyMutedTypes = new[] { "bogus" } });
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(badMute)).StatusCode);
 
         // 非管理员 → 403
         var normal = await RegisterAsync("cfg_normal_admin");

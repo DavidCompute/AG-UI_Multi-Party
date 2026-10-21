@@ -58,6 +58,9 @@ public sealed class ConfigGovernanceState
     // 仅抑制**桌面系统通知**，站内通知中心仍照常记录。
     public string? NotifyQuietStart { get; set; }
     public string? NotifyQuietEnd { get; set; }
+    // 按类型静音**桌面通知**（1.0.296）：mention / approval / message / reconnect / info / error / skill。
+    // null = 沿用（不静音）；空列表 = 全部恢复。站内通知中心不受影响。
+    public List<string>? NotifyMutedTypes { get; set; }
 }
 
 /// <summary>配置治理写入请求体（每个字段可空，仅更新非空项）。</summary>
@@ -96,7 +99,9 @@ public sealed record ConfigGovernanceHttpRequest(
     int? WebhookAlarmCooldownMinutes,
     // 桌面通知免打扰（1.0.295）："HH:mm"；“空串 = 清除”与“未传 = 不变”区分
     string? NotifyQuietStart,
-    string? NotifyQuietEnd);
+    string? NotifyQuietEnd,
+    // 按类型静音桌面通知（1.0.296）：null = 不变；[] = 全部恢复
+    List<string>? NotifyMutedTypes);
 
 public static class ConfigGovernanceApi
 {
@@ -168,6 +173,7 @@ public static class ConfigGovernanceApi
             if (req.WebhookAlarmCooldownMinutes is { } wa3 && wa3 is not (> 0 and <= 1440)) return BadReq("webhookAlarmCooldownMinutes 需在 1..1440");
             if (!string.IsNullOrEmpty(req.NotifyQuietStart) && !IsTimeOfDay(req.NotifyQuietStart)) return BadReq("notifyQuietStart 需为 HH:mm");
             if (!string.IsNullOrEmpty(req.NotifyQuietEnd) && !IsTimeOfDay(req.NotifyQuietEnd)) return BadReq("notifyQuietEnd 需为 HH:mm");
+            if (req.NotifyMutedTypes is { } mt && mt.Any(x => !NotifyTypes.Contains(x))) return BadReq("notifyMutedTypes 含未知通知类型");
 
             // 更新持久化状态（保留未传/为空字段的旧值；数组用 ??= 保留旧列表）
             state.MessageHistoryLimit = req.MessageHistoryLimit ?? state.MessageHistoryLimit;
@@ -202,6 +208,10 @@ public static class ConfigGovernanceApi
             // 免打扰：未传 = 不变；空串 = 清除
             if (req.NotifyQuietStart is not null) state.NotifyQuietStart = req.NotifyQuietStart.Length == 0 ? null : req.NotifyQuietStart;
             if (req.NotifyQuietEnd is not null) state.NotifyQuietEnd = req.NotifyQuietEnd.Length == 0 ? null : req.NotifyQuietEnd;
+            if (req.NotifyMutedTypes is not null)
+                state.NotifyMutedTypes = req.NotifyMutedTypes
+                    .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim())
+                    .Distinct(StringComparer.Ordinal).ToList();
 
             Apply(state, groupChat, authOptions, agents);
             changes.Notify(); // 驱动持久化
@@ -221,7 +231,7 @@ public static class ConfigGovernanceApi
 
         // 免打扰时段（1.0.295）：全局设置，但**所有登录用户**都需要读（用于决定要不要弹桌面通知）
         app.MapGet("/ag-ui/notify-quiet", (ConfigGovernanceState state) =>
-            Results.Ok(new { start = state.NotifyQuietStart, end = state.NotifyQuietEnd }))
+            Results.Ok(new { start = state.NotifyQuietStart, end = state.NotifyQuietEnd, mutedTypes = state.NotifyMutedTypes ?? [] }))
             .AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         static IResult BadReq(string msg) => Results.BadRequest(new AguiError(ErrorCodes.BadRequest, msg));
@@ -232,6 +242,12 @@ public static class ConfigGovernanceApi
         => s.Length == 5 && s[2] == ':'
            && int.TryParse(s.AsSpan(0, 2), out var h) && h is >= 0 and <= 23
            && int.TryParse(s.AsSpan(3, 2), out var m) && m is >= 0 and <= 59;
+
+    /// <summary>可静音的通知类型（与前端通知中心的 type 一致；未知值拒绝，避免配置漂移）。</summary>
+    private static readonly HashSet<string> NotifyTypes = new(StringComparer.Ordinal)
+    {
+        "mention", "approval", "message", "reconnect", "info", "error", "skill",
+    };
 
     /// <summary>注册配置治理覆盖值到持久化扩展区「configGovernance」：重启后自动应用覆盖。</summary>
     public static void RegisterConfigGovernancePersistence(this IServiceProvider services)
@@ -274,6 +290,7 @@ public static class ConfigGovernanceApi
             state.WebhookAlarmCooldownMinutes = saved.WebhookAlarmCooldownMinutes;
             state.NotifyQuietStart = saved.NotifyQuietStart;
             state.NotifyQuietEnd = saved.NotifyQuietEnd;
+            state.NotifyMutedTypes = saved.NotifyMutedTypes;
             // 把覆盖应用到运行时单例（重启后重新加载配置时一并覆盖）
             var groupChat = services.GetService<GroupChatOptions>();
             var auth = services.GetService<AuthOptions>();

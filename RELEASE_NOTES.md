@@ -1,3 +1,40 @@
+# AG-UI 群聊桌面版 1.0.296 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.296 Release Notes (current Windows desktop release)
+
+**版本说明**：**桌面通知可以按类型关**——除免打扰时段外，可单独静音「提及 / 审批 / 错误·投递失败 / 提示 / 新消息 / 连接状态」的**桌面系统通知**；站内通知中心与未读徽标照常。
+**Version note**: **Desktop notifications can be muted per type** — beyond quiet hours, you can now silence **desktop system notifications** for mentions / approvals / errors (incl. delivery failures) / info / new messages / connection state, while the in-app notification center and unread badge keep working.
+
+## 变更
+# Changes
+
+中文：
+- **服务端治理字段**：`notifyMutedTypes`（string[]，随 `configGovernance` 持久化）；白名单 `mention / approval / message / reconnect / info / error / skill`，未知值返回 **400**；未传 = 不变，空数组 = 全部恢复。
+- **公共读接口**：`GET /ag-ui/notify-quiet` 现在返回 `{ start, end, mutedTypes }`（仍仅需登录）。
+- **前端**：`notifyMuted` 集合 + `isTypeMuted(type)`（未知类型自动过滤）；`showSystemNotification` 增加 `type` 参数并做两道门（免打扰窗口 → 类型静音）；`addNotification` 与技能错误通知都传入各自类型。
+- **配置页**：新增「桌面通知静音类型」区（6 个勾选框），加载回填、保存总是提交（空 = 全部恢复）；保存后立即重拉生效。
+- **测试**：配置治理用例扩展（保存回读两种类型、空数组清除、未知类型 400）；Playwright 脚本扩到 **12 项**（读取静音类型、未知值过滤、`isTypeMuted` 语义、6 个勾选框）。
+
+English:
+- **Server governance field**: `notifyMutedTypes` (string[], persisted with `configGovernance`); allow-list `mention / approval / message / reconnect / info / error / skill`, unknown values return **400**; omitted = unchanged, empty array = all restored.
+- **Public read endpoint**: `GET /ag-ui/notify-quiet` now returns `{ start, end, mutedTypes }` (still sign-in only).
+- **Frontend**: a `notifyMuted` set plus `isTypeMuted(type)` (unknown types filtered); `showSystemNotification` gains a `type` parameter and two gates (quiet window → type mute); `addNotification` and the skill-error path pass their type.
+- **Config page**: a new "Mute desktop notifications for" block (6 checkboxes), backfilled on load and always submitted on save (empty = restore all); it reloads immediately after saving.
+- **Tests**: the governance case now saves/reads back two types, clears with an empty array and rejects an unknown type; the Playwright script grows to **12 checks** (reading muted types, filtering unknown values, `isTypeMuted` semantics, six checkboxes).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.10（治理表 #31 + 免打扰/静音说明与校验）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.296。
+English: `docs/user-guide.md` / `en.md` §8.10 (governance row #31 plus the quiet-hours / muting note and validation); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.296.
+
+## 测试
+# Tests
+
+中文：`dotnet test` 全量通过（**1866**）；`dotnet build` **0 错误**；i18n 审计 **zh=en=2063，missing 0**；四个守卫脚本全过；Playwright **12/12**、**15/15**、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: full `dotnet test` passes (**1866**); `dotnet build` reports **0 errors**; the i18n audit is **zh=en=2063, missing 0**; all four guard scripts pass; Playwright **12/12**, **15/15**, **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.295 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.295 Release Notes (current Windows desktop release)
 

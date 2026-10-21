@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.295**
+> 适用版本：**1.0.296**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -4241,8 +4241,9 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 28 | `#cfgWebhookAlarmCooldown` | `webhookAlarmCooldownMinutes` | int | `admin.webhookAlarmCooldown` | 1..1440（**1.0.294 新增**；默认 10） |
 | 29 | `#cfgQuietStart` | `notifyQuietStart` | string `HH:mm` | `admin.quietStart` | 空 = 不启用（**1.0.295 新增**） |
 | 30 | `#cfgQuietEnd` | `notifyQuietEnd` | string `HH:mm` | `admin.quietEnd` | 跨午夜（start > end）支持；相等 = 不启用 |
+| 31 | 各类型勾选 | `notifyMutedTypes` | string[] | `admin.muteHint` 等 | 限 `mention / approval / message / reconnect / info / error / skill`（**1.0.296 新增**；空列表 = 全部恢复） |
 
-边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）；提醒旋钮越界同样 400（`quotaReminderLeadHours` 需在 1..720，`quotaReminderScanMinutes` 需在 1..1440）；投递告警旋钮越界同样 400（`webhookAlarmPollMinutes` 1..1440，`webhookAlarmSettleSeconds` 5..3600，`webhookAlarmCooldownMinutes` 1..1440）；免打扰时段格式非法同样 400（必须为 `HH:mm`，如 `25:00` / `7:00`）。
+边界校验在服务端 `POST /ag-ui/admin/config` 的校验段：越界返回 **400**（如 `messageHistoryLimit` 需在 1..100000）；`messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` 不能为负；模型名过长（>200）返回 400；记忆旋钮越界同样 400（`memoryMaxQueryChars` 需在 1..10000，`memoryWriteEmbeddingCacheSize` 不能为负）；提醒旋钮越界同样 400（`quotaReminderLeadHours` 需在 1..720，`quotaReminderScanMinutes` 需在 1..1440）；投递告警旋钮越界同样 400（`webhookAlarmPollMinutes` 1..1440，`webhookAlarmSettleSeconds` 5..3600，`webhookAlarmCooldownMinutes` 1..1440）；免打扰时段格式非法同样 400（必须为 `HH:mm`，如 `25:00` / `7:00`）；静音类型含未知值同样 400。
 
 > **记忆与向量化（6.3 + 2.4/2.6，1.0.263）**：#18–#22 对应 `AgentOptions.Memory` 的 `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`。这四个（除缓存容量外）在**每次写入 / 检索时重新读取**，所以保存即生效；缓存容量则由写入路径**按需重建 / 热改容量**（改 0 = 立即关闭去重，改大 / 改小按 LRU 即时生效）。它们是「语义记忆检索慢 / 超时」的主旋钮（embedding 耗时与输入长度成正比），无需再改 appsettings / 重启。并发额度（`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`）因闸门信号量在启动时定型，仍属**需重启**项（见 8.10.4）。
 
@@ -4254,7 +4255,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 > **投递失败告警（1.0.294）**：#25–#28 是**前端**读取的轮询参数（服务端只保存与回读）：登录时（及保存配置后）拉取 `GET /ag-ui/admin/config/governance`，按 `webhookAlarmPollMinutes` 安排定时器、按 `webhookAlarmSettleSeconds` 判定「已结算」、按 `webhookAlarmCooldownMinutes` 做同订阅冷却；`webhookAlarmEnabled=false` 时不启动轮询。重新开启会**重建基线**，关闭期间产生的失败不会补推。
 
-> **桌面通知免打扰（1.0.295）**：#29 / #30 是**全局**时间窗口，**仅抑制桌面系统通知**（Web Notification），站内通知中心与未读徽标照常；窗口可跨午夜（如 22:00–07:00），起止相等或留空 = 不启用。所有登录用户通过 `GET /ag-ui/notify-quiet` 读取（无需管理员权限），保存配置后前端立即重拉。
+> **桌面通知免打扰（1.0.295）/ 按类型静音（1.0.296）**：#29 / #30 是**全局**时间窗口，#31 是**全局**类型列表；两者都**仅抑制桌面系统通知**（Web Notification），站内通知中心与未读徽标照常。窗口可跨午夜（如 22:00–07:00），起止相等或留空 = 不启用；静音类型取自 `mention / approval / message / reconnect / info / error / skill`，未知值 400。所有登录用户通过 `GET /ag-ui/notify-quiet` 读取 `{ start, end, mutedTypes }`（无需管理员权限），保存配置后前端立即重拉。
 
 #### 8.10.2 三态布尔与「未传不改」
 

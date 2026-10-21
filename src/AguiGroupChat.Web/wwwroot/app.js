@@ -371,7 +371,7 @@ function enterApp(data) {
     hydrateSkillErrors(data.userId); // 载入该用户此前记录的技能执行错误（备查）
     startImageWritePendingPolling(); // 管理员：待审批图库写入进通知中心（60s 轮询）
     initWebhookAlarmPolling(); // 管理员：投递失败主动告警（参数读「配置治理」）
-    loadNotifyQuiet(); // 所有用户：桌面通知免打扰时段
+    loadNotifyPreferences(); // 所有用户：桌面通知免打扰 / 静音类型
   } catch (e) { console.error("进入会话后的界面渲染出错（不影响连接）", e); }
   loadUserDirectory();
   loadGroups();
@@ -4023,8 +4023,12 @@ function startImageWritePendingPolling() {
   imageWritePollTimer = setInterval(tick, 60_000);
 }
 
-/* ---- 桌面通知免打扰（1.0.295）：全局窗口，登录用户都可读 ---- */
+/* ---- 桌面通知免打扰（1.0.295）/ 按类型静音（1.0.296）：全局设置，登录用户都可读 ---- */
 const notifyQuiet = { start: null, end: null };
+/** 被静音的桌面通知类型（站内通知中心不受影响）。 */
+const notifyMuted = new Set();
+/** 可静音的类型（与后端白名单一致；`skill` 暂无产生方，不暴露）。 */
+const NOTIFY_TYPES = ["mention", "approval", "error", "info", "message", "reconnect"];
 
 /** "HH:mm" → 当日分钟数；非法 / 未设 → null。 */
 function parseHhMm(v) {
@@ -4041,7 +4045,7 @@ function isQuietNow(now = new Date()) {
   return start > end ? (mins >= start || mins < end) : (mins >= start && mins < end);
 }
 
-async function loadNotifyQuiet() {
+async function loadNotifyPreferences() {
   if (!state.token) return;
   try {
     const res = await fetch("/ag-ui/notify-quiet", { headers: { Authorization: "Bearer " + state.token } });
@@ -4049,7 +4053,14 @@ async function loadNotifyQuiet() {
     if (!res.ok || !d) return;
     notifyQuiet.start = parseHhMm(d.start);
     notifyQuiet.end = parseHhMm(d.end);
+    notifyMuted.clear();
+    if (Array.isArray(d.mutedTypes)) d.mutedTypes.forEach((x) => { if (NOTIFY_TYPES.includes(x)) notifyMuted.add(x); });
   } catch { /* 默认不启用 */ }
+}
+
+/** 某类型是否被静音（只影响桌面通知）。 */
+function isTypeMuted(type) {
+  return !!type && notifyMuted.has(type);
 }
 
 function stopImageWritePendingPolling() {
@@ -6853,7 +6864,7 @@ function addNotification(type, title, body, opts = {}) {
   if (state.notifications.length > 100) state.notifications.pop(); // 上限：仅保留最近 100 条
   renderNotifications();
   // 系统桌面通知（Web Notification）：前台 / 后台都弹，仅未授权 + 忽略；点击跳去其来源知聚
-  showSystemNotification(title, body, opts.groupId || "agui");
+  showSystemNotification(title, body, opts.groupId || "agui", type);
 }
 
 /** 把一次“调用技能”失败记入右上角通知中心，并持久化到本地（刷新 / 重启可备查）。
@@ -6876,7 +6887,7 @@ function notifySkillError(groupId, skillLabel, msg) {
   state.notifications.unshift(entry);
   if (state.notifications.length > 100) state.notifications.pop();
   renderNotifications();
-  showSystemNotification(entry.title, entry.body, groupId || "agui");
+  showSystemNotification(entry.title, entry.body, groupId || "agui", "error");
   // 持久化到本用户本地存储（供刷新 / 下次登录备查）
   if (state.memberId) {
     try {
@@ -6913,9 +6924,10 @@ function notifIcon(type) {
 }
 
 /** 系统桌面通知（Web Notification）：前台 / 后台都弹；`tag` 传群 id（群 id）时点击跳到该知聚并关闭。 */
-function showSystemNotification(title, body, tag) {
+function showSystemNotification(title, body, tag, type) {
   try {
     if (isQuietNow()) return; // 免打扰时段（1.0.295）：仅抑制桌面通知，站内通知中心照常记录
+    if (isTypeMuted(type)) return; // 按类型静音（1.0.296）
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const n = new Notification(title, { body: String(body || "").slice(0, 140), tag: tag || "agui", icon: "/agui-icon-256.png" });
     n.onclick = () => { window.focus(); n.close(); if (tag && tag !== "agui") handleSystemNotifyClick(tag); };
@@ -9683,6 +9695,11 @@ async function loadConfigGovernance() {
     setCfgBool("cfgWebhookAlarm", d.webhookAlarmEnabled);
     $("cfgQuietStart").value = d.notifyQuietStart || "";
     $("cfgQuietEnd").value = d.notifyQuietEnd || "";
+    const muted = new Set(Array.isArray(d.notifyMutedTypes) ? d.notifyMutedTypes : []);
+    for (const tp of NOTIFY_TYPES) {
+      const el = $("cfgMute" + tp[0].toUpperCase() + tp.slice(1));
+      if (el) el.checked = muted.has(tp);
+    }
     setCfg("cfgMessageWriteDebounceMs", d.messageWriteDebounceMs);
     setCfgBool("cfgRequireToken", d.requireTokenOnRealTime);
     setCfgBool("cfgEnableTools", d.enableTools);
@@ -9741,6 +9758,11 @@ function collectCfg() {
   // 免打扰：总是提交（空串 = 清除；服务端区分“未传 = 不变”）
   body.notifyQuietStart = $("cfgQuietStart").value || "";
   body.notifyQuietEnd = $("cfgQuietEnd").value || "";
+  // 静音类型：总是提交（空列表 = 全部恢复）
+  body.notifyMutedTypes = NOTIFY_TYPES.filter((tp) => {
+    const el = $("cfgMute" + tp[0].toUpperCase() + tp.slice(1));
+    return !!el && el.checked;
+  });
   body.messageWriteDebounceMs = numOrNull("cfgMessageWriteDebounceMs");
   body.requireTokenOnRealTime = boolOrNull("cfgRequireToken");
   body.enableTools = boolOrNull("cfgEnableTools");
@@ -9784,7 +9806,7 @@ async function saveConfigGovernance() {
     toast(t("admin.configSaved"));
     // 告警参数可能刚被改：按新值重新安排轮询（关闭则停）
     initWebhookAlarmPolling();
-    loadNotifyQuiet(); // 免打扰时段可能刚被改：立刻生效
+    loadNotifyPreferences(); // 免打扰时段可能刚被改：立刻生效
   } catch (ex) { toast(t("common.saveFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }

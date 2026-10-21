@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.295**
+> Applies to version: **1.0.296**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -4250,8 +4250,9 @@ Endpoints: read `GET /ag-ui/admin/config/governance`, write `POST /ag-ui/admin/c
 | 28 | `#cfgWebhookAlarmCooldown` | `webhookAlarmCooldownMinutes` | int | `admin.webhookAlarmCooldown` | 1..1440 (**new in 1.0.294**; default 10) |
 | 29 | `#cfgQuietStart` | `notifyQuietStart` | string `HH:mm` | `admin.quietStart` | empty = disabled (**new in 1.0.295**) |
 | 30 | `#cfgQuietEnd` | `notifyQuietEnd` | string `HH:mm` | `admin.quietEnd` | overnight (start > end) supported; equal = disabled |
+| 31 | type checkboxes | `notifyMutedTypes` | string[] | `admin.muteHint` etc. | limited to `mention / approval / message / reconnect / info / error / skill` (**new in 1.0.296**; empty = all restored) |
 
-Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440); delivery-alert knobs too (`webhookAlarmPollMinutes` 1..1440, `webhookAlarmSettleSeconds` 5..3600, `webhookAlarmCooldownMinutes` 1..1440); quiet-hour values must be `HH:mm` (e.g. `25:00` / `7:00` are rejected with 400).
+Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range returns **400** (e.g. `messageHistoryLimit` must be within 1..100000); `messageRetentionDays` / `dailyTokenQuotaPerUser` / `dailyTokenQuotaPerGroup` cannot be negative; an over-long model name (>200) returns 400; memory knobs are likewise rejected with 400 when out of range (`memoryMaxQueryChars` within 1..10000, `memoryWriteEmbeddingCacheSize` not negative); reminder knobs too (`quotaReminderLeadHours` 1..720, `quotaReminderScanMinutes` 1..1440); delivery-alert knobs too (`webhookAlarmPollMinutes` 1..1440, `webhookAlarmSettleSeconds` 5..3600, `webhookAlarmCooldownMinutes` 1..1440); quiet-hour values must be `HH:mm` (e.g. `25:00` / `7:00` are rejected with 400); unknown notification types are rejected with 400 too.
 
 > **Quota (1.0.264)**: #6 / #6b map to `AgentOptions.DailyTokenQuotaPerUser` and `AgentOptions.DailyTokenQuotaPerGroup` (`0` = unlimited). Both are hard "reject new triggers once exceeded" limits: the per-user quota **exempts** the `system` trigger, while the per-circle quota **does not** (capping the scheduled / broadcast consumption path). They are read by `AgentUsageService` via a `Func<long>` **in real time** (`AgentHosting.cs:66-72`), so saving applies at once.
 
@@ -4259,7 +4260,7 @@ Bounds are validated on the server in `POST /ag-ui/admin/config`: out-of-range r
 
 > **Memory & vectorization (6.3 + 2.4/2.6, 1.0.263)**: #18–#22 map to `AgentOptions.Memory`'s `MaxQueryChars` / `MaxWriteChars` / `InteractiveEmbeddingWaitSeconds` / `BackgroundEmbeddingWaitSeconds` / `WriteEmbeddingCacheSize`. These are re-read on **every write / retrieval**, so saving takes effect immediately; the dedup cache capacity is handled by the write path **rebuilding it / resizing it on demand** (setting 0 disables dedup at once; growing / shrinking applies immediately via LRU). They are the main knobs for "semantic-memory retrieval is slow / times out" (embedding cost is proportional to input length), so no appsettings edit / restart is needed any more. The concurrency limits (`InteractiveEmbeddingConcurrency` / `BackgroundEmbeddingConcurrency`) are **restart-only**, because the gate semaphores are sized at startup (see 8.10.4).
 
-> **Desktop notification quiet hours (1.0.295)**: #29 / #30 are a **global** time window that suppresses **desktop system notifications only** (Web Notification); the in-app notification center and unread badge keep working. The window may cross midnight (e.g. 22:00–07:00), and equal start/end or empty values mean disabled. Every signed-in user reads it via `GET /ag-ui/notify-quiet` (no admin required), and the frontend re-fetches immediately after a config save.
+> **Desktop notification quiet hours (1.0.295) / per-type muting (1.0.296)**: #29 / #30 are a **global** time window and #31 is a **global** type list; both suppress **desktop system notifications only** (Web Notification), while the in-app notification center and unread badge keep working. The window may cross midnight (e.g. 22:00–07:00), and equal start/end or empty values mean disabled; muted types come from `mention / approval / message / reconnect / info / error / skill`, and unknown values return 400. Every signed-in user reads `{ start, end, mutedTypes }` via `GET /ag-ui/notify-quiet` (no admin required), and the frontend re-fetches immediately after a config save.
 
 #### 8.10.2 Tri-state booleans and "not sent means not changed"
 
