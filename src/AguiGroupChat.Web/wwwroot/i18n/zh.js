@@ -45,6 +45,13 @@ window.I18N_DICTS.zh = {
 
   /* --- 通知中心 --- */
   "notif.title": "通知",
+  "notif.filterAll": "全部",
+  "notif.filterMention": "提及",
+  "notif.filterApproval": "审批",
+  "notif.filterError": "错误",
+  "notif.filterMessage": "消息",
+  "notif.filterOther": "其他",
+  "notif.noMatch": "没有该类型的通知",
   "notif.imageWritePendingTitle": "🖼️ 待审批的图库写入",
   "notif.imageWritePendingBody": "技能 {skill} 请求写入「{lib}」：{file}（点击打开图库管理批准 / 拒绝）",
   "notif.webhookFailTitle": "🪝 Webhook 投递失败",

@@ -6940,6 +6940,16 @@ function unreadNotifCount() {
 }
 
 /** 渲染通知面板列表 + 徽标。 */
+/** 通知类型筛选（1.0.297）：空 = 全部；other = 未归类的其余类型。 */
+let notifFilter = "";
+const NOTIF_FILTER_KNOWN = ["mention", "approval", "error", "message"];
+
+function notifMatchesFilter(n) {
+  if (!notifFilter) return true;
+  if (notifFilter === "other") return !NOTIF_FILTER_KNOWN.includes(n.type);
+  return n.type === notifFilter;
+}
+
 function renderNotifications() {
   const list = $("notifList");
   if (!list) return;
@@ -6947,8 +6957,11 @@ function renderNotifications() {
   const unread = unreadNotifCount();
   badge.classList.toggle("hidden", unread === 0);
   badge.textContent = unread > 99 ? "99+" : String(unread);
+  const items = state.notifications.filter((n) => notifMatchesFilter(n));
   $("notifEmpty").classList.toggle("hidden", state.notifications.length > 0);
-  list.innerHTML = state.notifications.length === 0 ? "" : state.notifications.map((n) => `
+  const noMatch = $("notifNoMatch");
+  if (noMatch) noMatch.classList.toggle("hidden", !(state.notifications.length > 0 && items.length === 0));
+  list.innerHTML = items.length === 0 ? "" : items.map((n) => `
     <div class="notif-item${n.read ? "" : " unread"}" data-nid="${n.id}" role="listitem" tabindex="0">
       <span class="notif-ico">${n.icon}</span>
       <span class="notif-body">
@@ -15170,6 +15183,14 @@ function init() {
   // ---- 应用内通知中心（5.4）----
   $("notifBtn").onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); $("meMenu").classList.add("hidden"); };
   $("notifClear").onclick = (e) => { e.stopPropagation(); clearNotifications(); };
+  $("notifFilters").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-nf]");
+    if (!btn) return;
+    e.stopPropagation();
+    notifFilter = btn.dataset.nf || "";
+    $("notifFilters").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+    renderNotifications();
+  });
   document.addEventListener("click", (e) => {
     if (state.notifPanelOpen && !$("notifPanel").contains(e.target) && e.target !== $("notifBtn") && !$("notifBtn").contains(e.target)) hideNotifPanel();
   });

@@ -106,6 +106,10 @@ select {
 .notif-panel.hidden { display: none; }
 .notif-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .notif-title { font-size: 14px; font-weight: 600; }
+/* 按类型筛选（1.0.297）：与通知列表同宽，选中态跟主题主色 */
+.notif-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 2px; }
+.notif-filters .chip-btn { padding: 2px 8px; font-size: 12px; }
+.notif-filters .chip-btn.on { border-color: var(--accent); color: var(--accent); }
 .notif-list { overflow-y: auto; }
 .notif-empty { padding: 24px 14px; text-align: center; color: var(--muted); font-size: 13px; }
 .notif-list .notif-item {

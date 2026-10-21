@@ -10,6 +10,7 @@
     "ui:webhook-events": "node ui-webhook-events.mjs",
     "ui:webhook-alerts": "node ui-webhook-alerts.mjs",
     "ui:notify-quiet": "node ui-notify-quiet.mjs",
+    "ui:notif-filter": "node ui-notif-filter.mjs",
     "smoke:api": "node api-smoke.mjs",
     "smoke:ui": "node ui-smoke.mjs",
     "check:config": "node check-config-keys.mjs",

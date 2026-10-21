@@ -33,8 +33,17 @@
       <span class="notif-title" data-i18n="notif.title">通知</span>
       <button id="notifClear" class="chip-btn" data-i18n-title="notif.clearAll">清空</button>
     </div>
+    <div id="notifFilters" class="notif-filters">
+      <button class="chip-btn on" data-nf="" type="button" data-i18n="notif.filterAll">全部</button>
+      <button class="chip-btn" data-nf="mention" type="button" data-i18n="notif.filterMention">提及</button>
+      <button class="chip-btn" data-nf="approval" type="button" data-i18n="notif.filterApproval">审批</button>
+      <button class="chip-btn" data-nf="error" type="button" data-i18n="notif.filterError">错误</button>
+      <button class="chip-btn" data-nf="message" type="button" data-i18n="notif.filterMessage">消息</button>
+      <button class="chip-btn" data-nf="other" type="button" data-i18n="notif.filterOther">其他</button>
+    </div>
     <div id="notifList" class="notif-list" role="list"></div>
     <div id="notifEmpty" class="notif-empty hidden" data-i18n="notif.empty">暂无通知</div>
+    <div id="notifNoMatch" class="notif-empty hidden" data-i18n="notif.noMatch">没有该类型的通知</div>
   </div>
 
   <div id="meMenu" class="me-menu hidden">

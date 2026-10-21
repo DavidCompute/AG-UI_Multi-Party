@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.296**
+> Applies to version: **1.0.297**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -308,7 +308,7 @@ The top bar, from left to right:
 | Account | `#meChip` (avatar `#meAvatar`, nickname `#meNickname`, arrow `▾`) | title `topbar.account` | Expand the account menu (see 1.7) |
 | Connection status | `#connStatus` | e.g. `status.offline` "Offline" | Shows the WebSocket connection status |
 
-The notification panel `#notifPanel` (`.notif-panel`) contains the title `notif.title`, the list `#notifList`, `#notifEmpty` (`notif.empty` "No notifications") and the clear button `#notifClear` (`notif.clearAll`); clicking a notification jumps to the source circle.
+The notification panel `#notifPanel` (`.notif-panel`) contains the title `notif.title`, type filters `#notifFilters` (All / Mentions / Approvals / Errors / Messages / Other), the list `#notifList`, `#notifEmpty` (`notif.empty` "No notifications"), `#notifNoMatch` (`notif.noMatch` "No notifications of this type") and the clear button `#notifClear` (`notif.clearAll`); clicking a notification jumps to the source circle. **Filters only affect the visible list** — the unread badge always reflects every unread item; "Other" covers types outside mentions / approvals / errors / messages (e.g. connection state, info).
 
 #### 1.2.2 Left column: My Groups (`aside.panel.groups`)
 

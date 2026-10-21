@@ -1,3 +1,42 @@
+# AG-UI 群聊桌面版 1.0.297 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.297 Release Notes (current Windows desktop release)
+
+**版本说明**：**通知中心可按类型筛选**——顶部新增「全部 / 提及 / 审批 / 错误 / 消息 / 其他」一排 chip，通知多时能快速定位；筛选只影响列表，**未读徽标始终反映全部未读数**，无匹配时提示「没有该类型的通知」。
+**Version note**: **The notification center filters by type** — a row of chips (All / Mentions / Approvals / Errors / Messages / Other) lets you jump to the type you care about; filtering only affects the list, the **unread badge always reflects every unread item**, and an empty filter shows "No notifications of this type".
+
+## 变更
+# Changes
+
+中文：
+- **筛选规则**：`mention / approval / error / message` 各自独立；`other` = 其余类型（连接状态、提示等）。`notifFilter` 仅存活于当前会话（不落盘）。
+- **展示**：新增 `#notifFilters` 与 `#notifNoMatch`；`#notifEmpty`（「暂无通知」）仍只在完全无通知时出现。
+- **徽标**：`unreadNotifCount()` 不受筛选影响，避免“筛选后看起来全已读”。
+- **样式**：筛选 chip 复用 `.chip-btn`，选中态用主题主色；一行放不下自动换行。
+- **无后端变更**：数据仍取 `state.notifications`。
+- **回归测试**：新增 `ui-notif-filter.mjs`（**12 项**）——注入 4 类通知后验证徽标、默认全部、四类筛选、其他归类、无匹配提示、选中态与恢复、无 JS 异常；已接入手工 UI 回归工作流。
+
+English:
+- **Filter rules**: `mention / approval / error / message` are independent; `other` covers everything else (connection state, info, …). `notifFilter` lives only for the session (not persisted).
+- **Presentation**: adds `#notifFilters` and `#notifNoMatch`; `#notifEmpty` ("No notifications") still appears only when there are none at all.
+- **Badge**: `unreadNotifCount()` ignores the filter, so filtering never makes everything look read.
+- **Styling**: chips reuse `.chip-btn` with the theme accent for the active one; the row wraps.
+- **No backend change**: data still comes from `state.notifications`.
+- **Regression test**: new `ui-notif-filter.mjs` (**12 checks**) — injects four types and verifies the badge, default All, each filter, Other grouping, the no-match hint, active state and restoring All, plus no JS errors; wired into the manual UI regression workflow.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §1.2.1（通知面板结构 + 筛选语义）；`tools/README-playwright.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.297。
+English: `docs/user-guide.md` / `en.md` §1.2.1 (panel structure and filter semantics); `tools/README-playwright.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.297.
+
+## 测试
+# Tests
+
+中文：本轮**无服务端逻辑变更**（沿用 1.0.296 的全量结果 **1866 通过 / 0 失败**）；`node --check` 前端脚本；i18n 审计 **zh=en=2070，missing 0**；四个守卫脚本全过；Playwright **12/12**（筛选）、**12/12**（免打扰/静音）、**15/15**、**39/39**、**21/21**；Docker 重建并部署（`/health` 200）。
+English: **no server-side logic changed** this round (carrying over 1.0.296's full run of **1866 passed / 0 failed**); `node --check` passes for the frontend scripts; the i18n audit is **zh=en=2070, missing 0**; all four guard scripts pass; Playwright **12/12** (filters), **12/12** (quiet hours / muting), **15/15**, **39/39**, **21/21**; Docker was rebuilt and redeployed (`/health` 200).
+
+---
+
 # AG-UI 群聊桌面版 1.0.296 发布说明（当前 Windows 桌面版）
 # AG-UI Group Chat Desktop 1.0.296 Release Notes (current Windows desktop release)
 
