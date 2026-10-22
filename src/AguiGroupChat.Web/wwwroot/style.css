@@ -105,6 +105,12 @@ select {
 }
 .notif-panel.hidden { display: none; }
 .notif-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.notif-head-actions { display: inline-flex; align-items: center; gap: 6px; }
+/* 浮窗通知范围（1.0.316）：通知面板内的紧凑设置区 */
+.notif-toast-prefs { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.notif-toast-title { color: var(--muted); margin-bottom: 6px; }
+.notif-toast-types { display: flex; flex-wrap: wrap; gap: 10px; }
+.notif-toast-types label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text); }
 .notif-title { font-size: 14px; font-weight: 600; }
 /* 按类型筛选（1.0.297）：与通知列表同宽，选中态跟主题主色 */
 .notif-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 2px; }

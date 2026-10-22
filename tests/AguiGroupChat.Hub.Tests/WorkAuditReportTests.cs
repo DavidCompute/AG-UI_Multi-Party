@@ -196,15 +196,68 @@ public sealed class WorkAuditReportTests
                 store.AddMessage(Msg("m1", "agent_a", now, PlanWithTwo));
 
                 // 首次：归档为空 → 扫消息并回填
-                var first = WorkAuditReport.Collect(store, null, archive, 7, null, null, 100);
+                var first = WorkAuditReport.Collect(store, null, archive, 7, null, null, null, 100);
                 Assert.Equal("scan", first.Source);
                 Assert.Equal(2, first.Items.Count);
 
                 // 第二次：直接读归档，不再扫消息
-                var second = WorkAuditReport.Collect(store, null, archive, 7, null, null, 100);
+                var second = WorkAuditReport.Collect(store, null, archive, 7, null, null, null, 100);
                 Assert.Equal("archive", second.Source);
                 Assert.Equal(2, second.Items.Count);
                 Assert.Equal(0, second.ScannedMessages);
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        [Fact]
+        public void Read_PicksUpAppendedRowsAfterCacheWarm()
+        {
+            var (archive, dir) = NewArchive();
+            try
+            {
+                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                archive.Record(Entry("m1", now));
+                Assert.Single(archive.Read(now - 1000)); // 预热缓存
+
+                archive.Record(Entry("m2", now));
+                var rows = archive.Read(now - 1000);
+                Assert.Equal(2, rows.Count);
+                Assert.Contains(rows, (r) => r.MessageId == "m2");
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        [Fact]
+        public void Collect_FiltersByGroupAndExposesFacets()
+        {
+            var (archive, dir) = NewArchive();
+            try
+            {
+                var store = NewStore();
+                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                store.AddMessage(Msg("m1", "agent_a", now, PlanWithTwo));
+                store.AddGroup(new Group
+                {
+                    GroupId = "g2",
+                    GroupName = "客服",
+                    OwnerId = "user_1",
+                    CreateTime = now,
+                });
+                store.AddMessage(new GroupMessage
+                {
+                    MessageId = "m2", GroupId = "g2", ThreadId = "g2", SenderId = "agent_b",
+                    SenderType = MemberType.Agent, SenderNickname = "agent_b", Content = "x",
+                    Timestamp = now, PlanJson = PlanWithTwo,
+                });
+
+                var all = WorkAuditReport.Collect(store, null, archive, 7, null, null, null, 100);
+                Assert.Equal(4, all.Items.Count);
+                Assert.Equal(2, all.Groups.Count);
+                Assert.Equal(2, all.Agents.Count);
+
+                var onlyG2 = WorkAuditReport.Collect(store, null, archive, 7, null, "g2", null, 100);
+                Assert.Equal(2, onlyG2.Items.Count);
+                Assert.All(onlyG2.Items, (e) => Assert.Equal("客服", e.GroupName));
             }
             finally { try { Directory.Delete(dir, true); } catch { } }
         }

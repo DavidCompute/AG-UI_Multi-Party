@@ -688,14 +688,48 @@ public static class AdminApi
             return Results.Ok(new { ok = true, agentId, path });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 工作区文件上传（1.0.316）：multipart/form-data，可指定相对路径（默认用原文件名）；单文件上限 50 MB。
+        root.MapPost("/workspaces/{agentId}/upload", async (string agentId, string? path, HttpContext ctx, AgentOptions options,
+            AuthService auth, Microsoft.Extensions.Hosting.IHostEnvironment env, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
+                return Results.BadRequest(new { error = "missing_file" });
+            var file = ctx.Request.Form.Files[0];
+            const long maxBytes = 50L * 1024 * 1024;
+            if (file.Length <= 0) return Results.BadRequest(new { error = "empty_file" });
+            if (file.Length > maxBytes) return Results.BadRequest(new { error = "file_too_large" });
+
+            var rel = string.IsNullOrWhiteSpace(path) ? file.FileName : path!;
+            if (!WorkspaceMaintenance.TryResolveTarget(dir, rel, out var full))
+                return Results.BadRequest(new { error = "invalid_path" });
+            if (Directory.Exists(full)) return Results.BadRequest(new { error = "path_is_directory" });
+
+            var parent = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+            await using (var stream = file.OpenReadStream())
+            await using (var target = File.Create(full))
+            {
+                await stream.CopyToAsync(target, ctx.RequestAborted);
+            }
+
+            var me = WebIdentity.UserId(ctx)!;
+            var saved = Path.GetRelativePath(dir, full).Replace('\\', '/');
+            audit.Record("admin.workspaces.upload", me, auth.GetUser(me)?.Username, targetType: "workspace", targetId: agentId,
+                detail: $"上传文件 {saved}（{file.Length} 字节）");
+            return Results.Ok(new { ok = true, agentId, path = saved, bytes = file.Length });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 工作区操作审计汇总（1.0.314；1.0.315 起读按月归档）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
         // 归档服务用 GetService 可选解析：轻量宿主（测试 / 嵌入式）没注册时自动退回扫消息。
-        root.MapGet("/work-audits", (int? days, string? agentId, string? q, int? limit,
+        root.MapGet("/work-audits", (int? days, string? agentId, string? groupId, string? q, int? limit,
             GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
-                days ?? 7, agentId, q, limit ?? 500);
+                days ?? 7, agentId, groupId, q, limit ?? 500);
             return Results.Ok(new
             {
                 items = r.Items.Select(e => new
@@ -706,16 +740,18 @@ public static class AdminApi
                 r.Truncated,
                 r.ScannedMessages,
                 r.Source,
+                groups = r.Groups,
+                agents = r.Agents,
                 days = Math.Clamp(days ?? 7, 1, 90),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        root.MapGet("/work-audits.csv", (int? days, string? agentId, string? q,
+        root.MapGet("/work-audits.csv", (int? days, string? agentId, string? groupId, string? q,
             GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
-                days ?? 7, agentId, q, 5000);
+                days ?? 7, agentId, groupId, q, 5000);
             return Results.Text(WorkAuditReport.ToCsv(r.Items), "text/csv; charset=utf-8");
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

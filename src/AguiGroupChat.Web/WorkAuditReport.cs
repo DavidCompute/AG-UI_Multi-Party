@@ -31,8 +31,17 @@ public static class WorkAuditReport
         long DurationMs,
         string Text);
 
+    /// <summary>筛选项（知聚 / 数字员工）：取时间范围内的全部行统计，不受当前筛选影响。</summary>
+    public sealed record Facet(string Id, string Name, int Count);
+
     /// <summary><paramref name="Source"/>：<c>archive</c> = 读归档 / <c>scan</c> = 回扫消息。</summary>
-    public sealed record Result(IReadOnlyList<Entry> Items, bool Truncated, int ScannedMessages, string Source = "scan");
+    public sealed record Result(
+        IReadOnlyList<Entry> Items,
+        bool Truncated,
+        int ScannedMessages,
+        string Source,
+        IReadOnlyList<Facet> Groups,
+        IReadOnlyList<Facet> Agents);
 
     /// <summary>兼容旧调用（测试 / 无归档宿主）：直接扫消息。</summary>
     public static Result Collect(
@@ -42,7 +51,7 @@ public static class WorkAuditReport
         string? agentId,
         string? query,
         int limit)
-        => Collect(store, nicknameOf, archive: null, days, agentId, query, limit);
+        => Collect(store, nicknameOf, archive: null, days, agentId, groupId: null, query, limit);
 
     public static Result Collect(
         IGroupStore store,
@@ -50,6 +59,7 @@ public static class WorkAuditReport
         WorkAuditArchive? archive,
         int days,
         string? agentId,
+        string? groupId,
         string? query,
         int limit)
     {
@@ -80,10 +90,26 @@ public static class WorkAuditReport
 
         var needle = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
         var agentFilter = string.IsNullOrWhiteSpace(agentId) ? null : agentId.Trim();
+        var groupFilter = string.IsNullOrWhiteSpace(groupId) ? null : groupId.Trim();
+
+        // 筛选项：按时间范围内的全部行统计（不受员工 / 知聚 / 关键词筛选影响）
+        var groupFacets = rows
+            .GroupBy((x) => x.GroupId, StringComparer.Ordinal)
+            .Select((g) => new Facet(g.Key, g.First().GroupName, g.Count()))
+            .OrderByDescending((f) => f.Count).ThenBy((f) => f.Name, StringComparer.CurrentCulture)
+            .ToList();
+        var agentFacets = rows
+            .GroupBy((x) => x.AgentId, StringComparer.Ordinal)
+            .Where((g) => !string.IsNullOrWhiteSpace(g.Key))
+            .Select((g) => new Facet(g.Key,
+                g.Select((x) => x.AgentName).FirstOrDefault((n) => !string.IsNullOrWhiteSpace(n)) ?? g.Key, g.Count()))
+            .OrderByDescending((f) => f.Count).ThenBy((f) => f.Name, StringComparer.CurrentCulture)
+            .ToList();
 
         var items = new List<Entry>();
         var truncated = false;
         foreach (var r in rows
+            .Where((x) => groupFilter is null || string.Equals(x.GroupId, groupFilter, StringComparison.Ordinal))
             .Where((x) => agentFilter is null || string.Equals(x.AgentId, agentFilter, StringComparison.Ordinal))
             .Where((x) => needle is null
                 || x.Text.Contains(needle, StringComparison.OrdinalIgnoreCase)
@@ -95,7 +121,7 @@ public static class WorkAuditReport
             if (items.Count >= max) { truncated = true; break; }
         }
 
-        return new Result(items, truncated, scanned, source);
+        return new Result(items, truncated, scanned, source, groupFacets, agentFacets);
     }
 
     /// <summary>直接扫消息（归档回填 / 无归档宿主）：从 <c>planJson.audit</c> 抽行。</summary>

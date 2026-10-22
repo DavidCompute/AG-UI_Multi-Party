@@ -31,7 +31,21 @@
   <div id="notifPanel" class="notif-panel hidden" role="region" data-i18n-label="topbar.notifications">
     <div class="notif-head">
       <span class="notif-title" data-i18n="notif.title">通知</span>
-      <button id="notifClear" class="chip-btn" data-i18n-title="notif.clearAll">清空</button>
+      <span class="notif-head-actions">
+        <button id="notifToastCfg" class="chip-btn" type="button" data-i18n-title="notif.toastPrefs">⚙</button>
+        <button id="notifClear" class="chip-btn" data-i18n-title="notif.clearAll">清空</button>
+      </span>
+    </div>
+    <!-- 浮窗通知范围（1.0.316）：未勾选的类型只进通知中心，不弹系统浮窗 -->
+    <div id="notifToastPrefs" class="notif-toast-prefs hidden">
+      <div class="notif-toast-title" data-i18n="notif.toastPrefsTitle">浮窗通知范围（未勾选的只进通知中心）</div>
+      <div class="notif-toast-types">
+        <label><input type="checkbox" data-tt="mention" /> <span data-i18n="notif.filterMention">提及</span></label>
+        <label><input type="checkbox" data-tt="approval" /> <span data-i18n="notif.filterApproval">审批</span></label>
+        <label><input type="checkbox" data-tt="error" /> <span data-i18n="notif.filterError">错误</span></label>
+        <label><input type="checkbox" data-tt="message" /> <span data-i18n="notif.filterMessage">消息</span></label>
+        <label><input type="checkbox" data-tt="other" /> <span data-i18n="notif.filterOther">其他</span></label>
+      </div>
     </div>
     <div id="notifPermHint" class="notif-perm hidden">
       <span id="notifPermText" class="notif-perm-text"></span>
@@ -2335,6 +2349,8 @@
         <div id="adminWorkspaceFiles" class="hidden" style="margin-top:12px">
           <div class="admin-toolbar">
             <b id="adminWsFilesTitle"></b>
+            <button id="wsUploadBtn" class="chip-btn" type="button" data-i18n="admin.wsUpload">⬆ 上传</button>
+            <input id="wsUploadInput" type="file" multiple class="hidden" />
             <button id="wsNewDirBtn" class="chip-btn" type="button" data-i18n="admin.wsNewDir">＋ 新建目录</button>
             <button id="wsFilesCloseBtn" class="chip-btn" type="button" data-i18n="admin.wsFilesClose">≡ 收起</button>
           </div>
@@ -2365,6 +2381,16 @@
             <option value="90" data-i18n="admin.waDays90">最近 90 天</option>
           </select>
           <input id="waQuery" class="modal-input" style="width:auto;min-width:200px" data-i18n-placeholder="admin.waQueryPlaceholder" />
+          <select id="waGroup" class="modal-input" style="width:auto;min-width:150px">
+            <option value="" data-i18n="admin.waAllGroups">全部知聚</option>
+          </select>
+          <select id="waAgent" class="modal-input" style="width:auto;min-width:150px">
+            <option value="" data-i18n="admin.waAllAgents">全部员工</option>
+          </select>
+          <label class="form-hint" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+            <input id="waGroupByMsg" type="checkbox" />
+            <span data-i18n="admin.waGroupByMsg">按消息聚合</span>
+          </label>
           <button id="waRefreshBtn" class="chip-btn" type="button" data-i18n="admin.wsRefresh">↻ 刷新</button>
           <button id="waExportBtn" class="chip-btn" type="button" data-i18n="admin.waExport">⬇ 导出 CSV</button>
           <span id="waMeta" class="form-hint"></span>

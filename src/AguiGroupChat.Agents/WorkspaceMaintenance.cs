@@ -100,12 +100,12 @@ public static class WorkspaceMaintenance
 
     /// <summary>把工作区相对路径解析为绝对文件路径；越界 / 绝对路径 / 链接 / 不存在均返回 null。</summary>
     public static string? ResolveFile(string workspaceDir, string? relative)
-        => TryResolvePath(workspaceDir, relative, out var full) && File.Exists(full) ? full : null;
+        => TryResolveTarget(workspaceDir, relative, out var full) && File.Exists(full) ? full : null;
 
     /// <summary>删除工作区内的单个文件（1.0.315）。只删文件，不删目录；路径越界 / 链接 / 不存在返回 false。</summary>
     public static bool DeleteFile(string workspaceDir, string? relative)
     {
-        if (!TryResolvePath(workspaceDir, relative, out var full)) return false;
+        if (!TryResolveTarget(workspaceDir, relative, out var full)) return false;
         try
         {
             if (!File.Exists(full)) return false;
@@ -118,7 +118,7 @@ public static class WorkspaceMaintenance
     /// <summary>在工作区内创建目录（幂等，自动建父目录）。路径越界 / 链接返回 false。</summary>
     public static bool CreateDirectory(string workspaceDir, string? relative)
     {
-        if (!TryResolvePath(workspaceDir, relative, out var full)) return false;
+        if (!TryResolveTarget(workspaceDir, relative, out var full)) return false;
         try
         {
             Directory.CreateDirectory(full);
@@ -127,8 +127,8 @@ public static class WorkspaceMaintenance
         catch { return false; }
     }
 
-    /// <summary>路径归一化 + 越界 / 链接校验（目标可以尚不存在）。</summary>
-    private static bool TryResolvePath(string workspaceDir, string? relative, out string full)
+    /// <summary>路径归一化 + 越界 / 链接校验（目标可以尚不存在）；供上传等写操作使用。</summary>
+    public static bool TryResolveTarget(string workspaceDir, string? relative, out string full)
     {
         full = "";
         if (string.IsNullOrWhiteSpace(workspaceDir) || string.IsNullOrWhiteSpace(relative)) return false;

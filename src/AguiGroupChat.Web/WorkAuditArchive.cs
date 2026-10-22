@@ -26,6 +26,16 @@ public sealed class WorkAuditArchive : IWorkAuditSink
     private readonly string _dir;
     private readonly ILogger<WorkAuditArchive> _logger;
     private readonly object _gate = new();
+    private readonly Dictionary<string, MonthCache> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxCachedEntries = 100_000;
+
+    private sealed class MonthCache
+    {
+        public long Length { get; set; }
+        public long Ticks { get; set; }
+        public List<WorkAuditEntry> Entries { get; } = [];
+        public HashSet<string> Keys { get; } = new(StringComparer.Ordinal);
+    }
 
     public WorkAuditArchive(IHostEnvironment env, ILogger<WorkAuditArchive> logger)
         : this(Path.Combine(env.ContentRootPath, "data", "work-audit"), logger)
@@ -61,33 +71,101 @@ public sealed class WorkAuditArchive : IWorkAuditSink
         }
     }
 
-    /// <summary>读取 <paramref name="sinceMs"/> 之后（含）的审计行，按 key 去重（回填与实时写入可能重叠）。</summary>
+    /// <summary>读取 <paramref name="sinceMs"/> 之后（含）的审计行，按 key 去重（回填与实时写入可能重叠）。
+    /// 月份文件按「已解析前缀」缓存：重复查询只增量解析新追加的行。</summary>
     public IReadOnlyList<WorkAuditEntry> Read(long sinceMs, int max = 20000)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
         var result = new List<WorkAuditEntry>();
         foreach (var path in MonthFiles(sinceMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
         {
-            try
+            foreach (var e in ReadMonth(path))
             {
-                foreach (var line in File.ReadLines(path))
-                {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    WorkAuditEntry? e;
-                    try { e = JsonSerializer.Deserialize<WorkAuditEntry>(line, Json); }
-                    catch { continue; }
-                    if (e is null || e.At < sinceMs) continue;
-                    if (!seen.Add(KeyOf(e))) continue;
-                    result.Add(e);
-                    if (result.Count >= max) return result;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "工作区审计归档读取失败（跳过该月）：{Path}", path);
+                if (e.At < sinceMs) continue;
+                result.Add(e);
+                if (result.Count >= max) return result;
             }
         }
         return result;
+    }
+
+    /// <summary>读取单个月份文件（缓存 + 尾部增量）；失败返回空。</summary>
+    private IReadOnlyList<WorkAuditEntry> ReadMonth(string path)
+    {
+        try
+        {
+            var ticks = File.GetLastWriteTimeUtc(path).Ticks;
+            lock (_gate)
+            {
+                if (!_cache.TryGetValue(path, out var cached))
+                {
+                    cached = new MonthCache();
+                    cached.Length = AppendFrom(path, cached, 0);
+                    cached.Ticks = ticks;
+                    _cache[path] = cached;
+                    EvictIfNeeded();
+                    return cached.Entries;
+                }
+                if (cached.Ticks != ticks)
+                {
+                    cached.Length = AppendFrom(path, cached, cached.Length);
+                    cached.Ticks = ticks;
+                }
+                return cached.Entries;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "工作区审计归档读取失败（跳过该月）：{Path}", path);
+            return [];
+        }
+    }
+
+    /// <summary>从 <paramref name="offset"/> 开始解析并并入缓存；只消费到最后一个换行符
+    /// （避开写了一半的末行，等下次写入后再读）。返回新的已消费偏移。</summary>
+    private static long AppendFrom(string path, MonthCache cache, long offset)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (offset > fs.Length) offset = 0;
+        var available = fs.Length - offset;
+        if (available <= 0) return offset;
+        fs.Seek(offset, SeekOrigin.Begin);
+        var buffer = new byte[available];
+        var read = 0;
+        while (read < buffer.Length)
+        {
+            var n = fs.Read(buffer, read, buffer.Length - read);
+            if (n <= 0) break;
+            read += n;
+        }
+        if (read == 0) return offset;
+        var lastNewline = Array.LastIndexOf(buffer, (byte)'\n', read - 1);
+        if (lastNewline < 0) return offset;
+
+        var text = Encoding.UTF8.GetString(buffer, 0, lastNewline + 1);
+        foreach (var line in text.Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            WorkAuditEntry? e;
+            try { e = JsonSerializer.Deserialize<WorkAuditEntry>(line, Json); }
+            catch { continue; }
+            if (e is null) continue;
+            if (!cache.Keys.Add(KeyOf(e))) continue;
+            cache.Entries.Add(e);
+        }
+        return offset + lastNewline + 1;
+    }
+
+    /// <summary>缓存条目总量上限：超过则丢掉最早的月份（下次读再解析）。</summary>
+    private void EvictIfNeeded()
+    {
+        var total = _cache.Values.Sum((c) => c.Entries.Count);
+        if (total <= MaxCachedEntries) return;
+        foreach (var key in _cache.Keys.OrderBy((k) => k, StringComparer.OrdinalIgnoreCase).ToList())
+        {
+            if (total <= MaxCachedEntries) break;
+            total -= _cache[key].Entries.Count;
+            _cache.Remove(key);
+        }
     }
 
     /// <summary>删除早于保留期的月份文件，返回删除数（retentionDays ≤ 0 表示永久保留）。</summary>

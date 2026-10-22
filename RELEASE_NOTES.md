@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.315 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.315 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.316 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.316 Release Notes (current Windows desktop release)
+
+**版本说明**：**审计可筛可聚合 + 工作区可上传 + 浮窗可收敛**——审计归档增量读取，支持知聚 / 员工筛选与按消息聚合；工作区面板可直接上传文件；通知面板可只让部分类型弹浮窗。
+**Version note**: **Filterable and grouped audit, workspace uploads, scoped popups** — the audit archive is read incrementally with circle/agent filters and per-message grouping; the workspace panel accepts uploads; the notification panel can limit which types pop up.
+
+## 变更
+# Changes
+
+中文：
+- **归档增量读取**：`WorkAuditArchive` 按「已解析前缀」缓存每月文件，重复查询只解析新追加的行；只消费到最后一个换行，避开写了一半的末行（下次写入后再读）。缓存总条数上限 10 万，超出时丢弃最早月份。
+- **二次筛选与聚合**：`/ag-ui/admin/work-audits` 新增 `groupId` 参数并返回 `groups` / `agents` facets；前端新增「全部知聚 / 全部员工」两个下拉（选项来自 facets，保留当前选中）与「按消息聚合」开关——每条回答汇成一行（操作数 / 异常数 / 总耗时 / 首条摘要），可展开看明细；汇总行会标明数据来自归档（`source:archive`）。
+- **工作区上传**：新增 `POST /ag-ui/admin/workspaces/{agentId}/upload`（multipart，单文件上限 50 MB，写审计日志 `admin.workspaces.upload`）；面板工具栏「⬆ 上传」支持多选，逐个上传后重拉清单。
+- **浮窗范围**：通知面板右上角 `⚙` 打开本地偏好，勾选「提及 / 审批 / 错误 / 消息 / 其他」中哪些弹浮窗；未勾选的类型只进通知中心，按用户存 `localStorage`（全勾 = 默认行为，与免打扰 / 类型静音叠加生效）。
+- **测试**：新增 3 项（缓存后追加行可读 / 知聚筛选与 facets / 上传目标路径允许不存在但拒绝越界），全量 **1909 通过**。
+
+English:
+- **Incremental archive reads**: `WorkAuditArchive` caches each month file's parsed prefix, so repeat queries only parse newly appended rows; it consumes up to the last newline so a half-written line is read after the next write. Cache is capped at 100k entries, dropping the oldest months.
+- **Secondary filters and grouping**: `/ag-ui/admin/work-audits` gains `groupId` and returns `groups` / `agents` facets; the UI adds **All circles** / **All agents** dropdowns (populated from the facets, keeping the current selection) and a **Group by message** toggle — one row per reply (actions / failures / total duration / first summary) with expandable details; the summary line marks `source:archive`.
+- **Workspace uploads**: new `POST /ag-ui/admin/workspaces/{agentId}/upload` (multipart, 50 MB per file, `admin.workspaces.upload` audit entry); the panel's **⬆ Upload** accepts multiple files and refreshes the list afterwards.
+- **Popup scope**: the `⚙` action in the notification panel opens a local preference to choose which of mentions / approvals / errors / messages / other pop up; unchecked types only go to the notification center. Stored per user in `localStorage` (all checked = default) and applied on top of quiet hours and type muting.
+- **Tests**: 3 new checks (appended rows visible after cache warm / group filter and facets / upload targets may not exist but escapes are rejected); the full suite passes **1909**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（归档增量读取 / 筛选聚合 / 上传）、§1.2.1（浮窗范围）、§8 控制台页签表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.316。
+English: `docs/user-guide.md` / `en.md` §3.13 (incremental archive reads / filters and grouping / uploads), §1.2.1 (popup scope), and the chapter 8 tab table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.316.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2157，missing 0**；配置键守卫无漂移；文档引用 0 失效；全量 `dotnet test` **1909 通过 / 0 失败**。**无法自动验证**：归档增量读取在真实数据量下的性能表现、上传后 Agent 工具实际读到文件（需真实模型运行）。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2157, missing 0**; the config-key guard reports no drift; docs references are clean; the full `dotnet test` run passes **1909 / 0**. **Not automatically verifiable**: incremental archive performance at real data volumes and an agent actually reading an uploaded file (needs a real model run).
+
+---
+
+# AG-UI 群聊桌面版 1.0.315 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.315 Release Notes (historical)
 
 **版本说明**：**审计归档 + 工作区可治 + 通知定位一致**——工作区操作审计按月归档，查询不再扫全量消息；工作区可删单文件 / 建目录；通知中心每行可直接定位到消息。
 **Version note**: **Archived audit, manageable workspace, consistent notification locate** — workspace audit archives by month so queries stop scanning every message; the workspace panel can delete files and create folders; each notification-center row can jump to its message.

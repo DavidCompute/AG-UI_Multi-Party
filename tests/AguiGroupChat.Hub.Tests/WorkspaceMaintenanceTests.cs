@@ -214,4 +214,25 @@ public sealed class WorkspaceMaintenanceTests
         }
         finally { Cleanup(root); }
     }
+
+    [Fact]
+    public void TryResolveTarget_AllowsMissingTargetButRejectsEscapes()
+    {
+        // 上传前目标文件还不存在：仍要能解析（且不能带出工作区）
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            Directory.CreateDirectory(ws);
+
+            Assert.True(WorkspaceMaintenance.TryResolveTarget(ws, "notes/new.txt", out var full));
+            Assert.Equal(Path.Combine(ws, "notes", "new.txt"), full);
+            Assert.False(File.Exists(full));
+
+            Assert.False(WorkspaceMaintenance.TryResolveTarget(ws, "../escape.txt", out _));
+            Assert.False(WorkspaceMaintenance.TryResolveTarget(ws, Path.Combine(root, "abs.txt"), out _));
+            Assert.False(WorkspaceMaintenance.TryResolveTarget(ws, "", out _));
+        }
+        finally { Cleanup(root); }
+    }
 }

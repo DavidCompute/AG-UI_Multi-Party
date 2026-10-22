@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.315**
+> 适用版本：**1.0.316**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -320,7 +320,7 @@
 
 托盘右键菜单（1.0.302 起，1.0.303 扩展）：
 
-- **打开知聚**：窗口隐藏 / 最小化时回到前台；双击托盘图标同效。菜单首项会显示未读条数，托盘图标 tooltip 与右下角红色徽标同步显示未读总数（**未读消息 + 通知中心未读，排除 message 类通知以避免重复计数**；>99 显示 `99+`；登录后加载、收到消息、阅读通知后实时更新，tooltip 同时给出「消息 / 通知」明细）。**多窗口未读聚合（1.0.310）**：每个窗口把自己的未读数写入 `%LocalAppData%\AguiGroupChat\unread\`，所有窗口的托盘 / 任务栏徽标显示同一总数；窗口退出自动清除，异常残留 2 分钟后不再计入。**未读窗口明细（1.0.311）**：托盘菜单新增「未读窗口」子菜单，按窗口展开到知聚（最多 6 条）——本窗口的知聚条目点击即切换，其他窗口的条目点击**经逐窗口深链管道让那个窗口直接切到该知聚并前置**（管道不可达时退化为仅前置，1.0.312）；无未读时菜单项置灰。**消息级通知跳转（1.0.313）**：桌面系统通知点击后会切到触发它的知聚 → 话题 → 并滚到那条消息（`openDeepLink()`，浏览器 Web Notification 同效）。**可交互通知浮窗（1.0.314）**：带知聚目标的通知改用右下角浮窗（标题 / 摘要 + 「打开」「忽略」按钮，悬停暂停、8 秒自动消失、多条自下而上堆叠），「打开」直接定位到那条消息；无目标的系统级提示仍用托盘气泡。**通知中心定位（1.0.315）**：「忽略」后条目仍留在通知中心，列表每行新增 `↗` 定位按钮（跳知聚 → 话题 → 消息），与浮窗「打开」同一套深链。
+- **打开知聚**：窗口隐藏 / 最小化时回到前台；双击托盘图标同效。菜单首项会显示未读条数，托盘图标 tooltip 与右下角红色徽标同步显示未读总数（**未读消息 + 通知中心未读，排除 message 类通知以避免重复计数**；>99 显示 `99+`；登录后加载、收到消息、阅读通知后实时更新，tooltip 同时给出「消息 / 通知」明细）。**多窗口未读聚合（1.0.310）**：每个窗口把自己的未读数写入 `%LocalAppData%\AguiGroupChat\unread\`，所有窗口的托盘 / 任务栏徽标显示同一总数；窗口退出自动清除，异常残留 2 分钟后不再计入。**未读窗口明细（1.0.311）**：托盘菜单新增「未读窗口」子菜单，按窗口展开到知聚（最多 6 条）——本窗口的知聚条目点击即切换，其他窗口的条目点击**经逐窗口深链管道让那个窗口直接切到该知聚并前置**（管道不可达时退化为仅前置，1.0.312）；无未读时菜单项置灰。**消息级通知跳转（1.0.313）**：桌面系统通知点击后会切到触发它的知聚 → 话题 → 并滚到那条消息（`openDeepLink()`，浏览器 Web Notification 同效）。**可交互通知浮窗（1.0.314）**：带知聚目标的通知改用右下角浮窗（标题 / 摘要 + 「打开」「忽略」按钮，悬停暂停、8 秒自动消失、多条自下而上堆叠），「打开」直接定位到那条消息；无目标的系统级提示仍用托盘气泡。**通知中心定位（1.0.315）**：「忽略」后条目仍留在通知中心，列表每行新增 `↗` 定位按钮（跳知聚 → 话题 → 消息），与浮窗「打开」同一套深链。**浮窗范围（1.0.316）**：通知面板右上角 `⚙` 可勾选「哪些类型弹浮窗」（提及 / 审批 / 错误 / 消息 / 其他）；未勾选的类型**只进通知中心不弹浮窗**，按用户本地保存（全勾 = 默认行为）。
 - **最近知聚 ▸**：子菜单列出最近活跃的 10 个知聚（**私密知聚带 🔒 标记**），点击即在当前窗口切换（不重载、不新开窗口）；页面未就绪时回退到 `?group=` 深链。跳转列表（任务栏右键）则仍只列非私密知聚。
 - **新建知聚 / 管理控制台**：托盘菜单直接打开对应弹窗（页面未就绪时回退到 `?action=` 深链）。
 - **窗口位置记忆**：自动保存窗口大小、位置与最大化状态到 `desktop-settings.json`，下次启动恢复；显示器布局变化导致越界时自动回退默认位置。
@@ -1723,6 +1723,7 @@
 - **导出 CSV（1.0.313）**：右上角 `⬇ CSV` 把本条回答的审计行导出为 `work-audit-<messageId>.csv`（列：`tool / ok / durationMs / text`，带 BOM，Excel 直开不乱码）；
 - **跨消息汇总（1.0.314）**：管理控制台「工作区」页下方列出最近 1 / 7 / 30 / 90 天的全部工作区操作（时间 / 员工 / 工具 / 结果 / 耗时 / 摘要），可按关键词筛选、导出 CSV（`GET /ag-ui/admin/work-audits[.csv]`），点「定位」关掉控制台并跳到那条消息；
 - **按月归档（1.0.315）**：审计行在落库时同步写入 `data/work-audit/audit-YYYY-MM.jsonl`，查询按月份读文件、不再扫全量消息；归档为空时自动回扫并回填。过期月份由 `Agents:WorkAuditRetentionDays`（默认 365，`0` = 永久）清理。归档是独立留存：消息撤回 / 删除后归档行仍在；
+- **增量读取与二次筛选（1.0.316）**：月份文件按「已解析前缀」缓存，重复查询只解析新追加的行（只消费到最后一个换行，避开写了一半的末行）；查询接口新增 `groupId` 参数，返回 `groups` / `agents` facets，前端用两个下拉按知聚 / 员工筛选，并支持「按消息聚合」（同一条回答的多个操作并成一行，展开看明细，`source:archive` 会在汇总行标明数据来自归档）；
 - 只记摘要（不含文件正文与凭证），单次回答上限 60 条。
 
 **工作区容量治理（1.0.311）**
@@ -1739,6 +1740,7 @@
 - **文件浏览（1.0.313）**：每行「📂 浏览文件」在表格下方展开该工作区的文件清单（相对路径 / 大小 / 修改时间）并可单个下载；服务端只允许工作区内相对路径，越界 / 绝对路径 / 符号链接 / 联接点一律 400。
 - **在线预览（1.0.314）**：文本类（txt / md / json / csv / 代码 等，≤512 KB）与图片类（png / jpg / gif / webp / svg 等）可在面板内直接看，其余只给下载。
 - **文件操作（1.0.315）**：每行「🗑 删除」删单个文件（二次确认，写审计日志 `admin.workspaces.delete`）；面板工具栏「＋ 新建目录」建多级目录（`admin.workspaces.mkdir`）。两者与浏览同一套路径校验，越界一律 400。
+- **上传（1.0.316）**：面板工具栏「⬆ 上传」支持多选文件直接写入工作区根目录（单文件 50 MB 上限，写审计日志 `admin.workspaces.upload`；可重复上传覆盖同名文件）。
 
 > 安全提示：工作型工具能读写服务器文件并执行命令，**只应授予可信数字员工**；写文件与命令始终需要在知聚内人工批准。
 
@@ -3900,7 +3902,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys` |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | 员工绩效 | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | 评测回归 | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`、`DELETE …/{id}`、`POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files`、`GET …/{agentId}/file?path=`、`GET /ag-ui/admin/work-audits[.csv]`（1.0.312–1.0.314） |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`GET /ag-ui/admin/work-audits[.csv]`（1.0.312–1.0.316） |
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`、`…/events`、`…/deliveries`、`…/{id}/test`（见 §8.19） |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`、`DELETE /ag-ui/admin/api-keys/{id}`（见 §8.20） |
 
