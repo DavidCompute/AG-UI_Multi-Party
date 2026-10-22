@@ -180,19 +180,12 @@ public static class WorkAuditReport
     /// <summary>导出 CSV（带 BOM，Excel 直接打开不乱码）。</summary>
     public static string ToCsv(IReadOnlyList<Entry> items)
     {
-        static string Esc(string? v)
-        {
-            var s = v ?? "";
-            return s.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
-        }
-
         var sb = new StringBuilder();
         sb.Append('\uFEFF');
         sb.AppendLine("time,group,agent,agentId,tool,ok,durationMs,text,messageId,topicId");
         foreach (var e in items)
         {
-            sb.Append(Esc(DateTimeOffset.FromUnixTimeMilliseconds(e.At).ToLocalTime()
-                .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))).Append(',')
+            sb.Append(Esc(LocalTime(e.At))).Append(',')
               .Append(Esc(e.GroupName)).Append(',')
               .Append(Esc(string.IsNullOrWhiteSpace(e.AgentName) ? e.AgentId : e.AgentName)).Append(',')
               .Append(Esc(e.AgentId)).Append(',')
@@ -204,6 +197,41 @@ public static class WorkAuditReport
               .Append(Esc(e.TopicId)).Append('\n');
         }
         return sb.ToString();
+    }
+
+    /// <summary>按消息聚合导出 CSV（1.0.318）：一行一条回答，含操作数 / 异常数 / 总耗时。
+    /// 与管理控制台「按消息聚合」视图同一口径。</summary>
+    public static string ToGroupedCsv(IReadOnlyList<Entry> items)
+    {
+        var sb = new StringBuilder();
+        sb.Append('\uFEFF');
+        sb.AppendLine("time,group,agent,actions,failures,durationMs,firstText,messageId,topicId");
+        foreach (var g in items.GroupBy((e) => e.MessageId, StringComparer.Ordinal)
+                     .OrderByDescending((g) => g.Max((x) => x.At)))
+        {
+            var first = g.First();
+            var at = g.Max((x) => x.At);
+            sb.Append(Esc(LocalTime(at))).Append(',')
+              .Append(Esc(first.GroupName)).Append(',')
+              .Append(Esc(string.IsNullOrWhiteSpace(first.AgentName) ? first.AgentId : first.AgentName)).Append(',')
+              .Append(g.Count()).Append(',')
+              .Append(g.Count((x) => !x.Ok)).Append(',')
+              .Append(g.Sum((x) => x.DurationMs)).Append(',')
+              .Append(Esc(first.Text)).Append(',')
+              .Append(Esc(first.MessageId)).Append(',')
+              .Append(Esc(first.TopicId)).Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    private static string LocalTime(long atMs)
+        => DateTimeOffset.FromUnixTimeMilliseconds(atMs).ToLocalTime()
+            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static string Esc(string? v)
+    {
+        var s = v ?? "";
+        return s.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
     }
 
     private sealed record Row(string Tool, string Text, bool Ok, long DurationMs);

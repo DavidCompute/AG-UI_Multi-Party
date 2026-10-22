@@ -2464,6 +2464,7 @@ button { white-space: nowrap; }
 }
 .ws-crumb:hover { background: rgba(111,139,255,.12); }
 .ws-crumb-sep { color: var(--muted); }
+.ws-crumb-note { color: var(--muted); font-size: 12px; }
 .ws-dir-link {
   padding: 0; border: none; background: transparent; cursor: pointer;
   color: var(--accent-text); font-family: inherit; font-size: inherit; text-align: left;

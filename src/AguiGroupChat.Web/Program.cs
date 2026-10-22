@@ -22,6 +22,7 @@ builder.Services.AddSingleton<AgentScheduler>(); // 智能体定时任务（cron
 builder.Services.AddSingleton<AguiGroupChat.Hub.Persistence.MessageRetentionService>(); // 消息保留策略（按天清理历史）
 builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey），持久化到扩展区 modelConfig
 builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4），持久化到扩展区「branding」
+builder.Services.AddSingleton(new NotifyPrefsState()); // 按用户的通知偏好（1.0.318），持久化到扩展区「notifyPrefs」
 builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员持久化运维旋钮，持久化到扩展区「configGovernance」
 builder.Services.AddSingleton(builder.Configuration.GetSection("LinkProxy").Get<LinkProxyOptions>() ?? new LinkProxyOptions()); // 链接代理配置（appsettings 的 LinkProxy 节）
 builder.Services.AddSingleton(builder.Configuration.GetSection("ClientTool").Get<AguiGroupChat.Web.ClientToolOptions>() ?? new AguiGroupChat.Web.ClientToolOptions()); // 客户端技能本机桥配置（ClientTool 节：RequireAdmin 等）
@@ -144,6 +145,7 @@ app.MapMentionSuggestApi(); // 输入时「建议 @ 谁」（草稿对数字员�
 app.MapPlanControlApi(); // 编排计划「暂停 / 继续」
 app.MapSystemApi(); // 系统级：模型配置（endpoint / apiKey）+ 初始化（清空一切）
 app.MapBrandingApi(); // 白标 / 品牌化（6.4）：应用名 + Logo + 主色（管理员可配置）
+app.MapNotifyPrefsApi(); // 按用户的通知偏好（1.0.318）：浮窗范围
 app.MapMemoryApi(); // 记忆治理：分群分级 / 自动遗忘 / 可视化
 app.MapGlobalSearchApi(); // 全局智能检索（跨知聚搜索消息 / 记忆 / 知识库）
 app.MapScheduledTaskApi(); // 重复性定时任务（1.4）：按 cron 值班汇报
@@ -180,6 +182,7 @@ app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）
 app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
+app.Services.RegisterNotifyPrefsPersistence(); // 通知偏好（1.0.318）跨重启保持
 app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
 app.Services.RegisterExecutionRuntimePersistence(); // 执行期参数（运行时覆盖）跨重启保持
 app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）

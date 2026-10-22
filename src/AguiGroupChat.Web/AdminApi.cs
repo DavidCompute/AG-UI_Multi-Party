@@ -639,7 +639,7 @@ public static class AdminApi
 
         // 工作区文件浏览（1.0.313）：只读列出 / 下载工作区内的文件（路径严格限定在工作区目录内）。
         // 1.0.317：按目录逐层浏览（path 为空 = 根），返回子目录 + 文件，前端用面包屑导航。
-        root.MapGet("/workspaces/{agentId}/files", (string agentId, string? path, AgentOptions options,
+        root.MapGet("/workspaces/{agentId}/files", (string agentId, string? path, string? q, AgentOptions options,
             Microsoft.Extensions.Hosting.IHostEnvironment env) =>
         {
             var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
@@ -654,12 +654,33 @@ public static class AdminApi
                 return Results.BadRequest(new { error = "invalid_path" });
 
             var exists = Directory.Exists(full);
+
+            // 文件名搜索（1.0.318）：跨整个工作区递归匹配，最多 500 条
+            var needle = (q ?? "").Trim();
+            if (needle.Length > 0 && exists)
+            {
+                const int maxHits = 500;
+                var all = WorkspaceMaintenance.ListFiles(dir, maxHits + 1);
+                var hits = all.Where(f => f.Path.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                    .Take(maxHits)
+                    .Select(f => new
+                    {
+                        name = Path.GetFileName(f.Path),
+                        path = f.Path,
+                        isDir = false,
+                        bytes = f.Bytes,
+                        modifiedUtc = f.ModifiedUtc,
+                    })
+                    .ToList();
+                return Results.Ok(new { agentId, dir = rel, exists, mode = "search", q = needle, truncated = all.Count > maxHits, entries = hits });
+            }
+
             var entries = exists
                 ? WorkspaceMaintenance.ListEntries(dir, rel)
                     .Select(e => new { e.Name, e.Path, e.IsDir, e.Bytes, e.ModifiedUtc })
                     .ToList()
                 : [];
-            return Results.Ok(new { agentId, dir = rel, exists, entries });
+            return Results.Ok(new { agentId, dir = rel, exists, mode = "list", entries });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         root.MapGet("/workspaces/{agentId}/file", (string agentId, string? path, AgentOptions options,
@@ -758,13 +779,38 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 导出（1.0.318）：group=message → 按消息聚合；split=month → 打成 ZIP，一月一个 CSV
         root.MapGet("/work-audits.csv", (int? days, string? agentId, string? groupId, string? q,
-            GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
+            string? group, string? split, GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 days ?? 7, agentId, groupId, q, 5000);
-            return Results.Text(WorkAuditReport.ToCsv(r.Items), "text/csv; charset=utf-8");
+            var grouped = string.Equals(group, "message", StringComparison.OrdinalIgnoreCase);
+
+            if (string.Equals(split, "month", StringComparison.OrdinalIgnoreCase))
+            {
+                using var ms = new MemoryStream();
+                using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+                {
+                    foreach (var month in r.Items
+                                 .GroupBy((e) => DateTimeOffset.FromUnixTimeMilliseconds(e.At).UtcDateTime
+                                     .ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture))
+                                 .OrderBy((g) => g.Key, StringComparer.Ordinal))
+                    {
+                        var rows = month.ToList();
+                        var csv = grouped ? WorkAuditReport.ToGroupedCsv(rows) : WorkAuditReport.ToCsv(rows);
+                        var entry = zip.CreateEntry($"work-audits-{month.Key}.csv", System.IO.Compression.CompressionLevel.Fastest);
+                        using var stream = entry.Open();
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
+                        stream.Write(bytes, 0, bytes.Length);
+                    }
+                }
+                return Results.File(ms.ToArray(), "application/zip", $"work-audits-{days ?? 7}d.zip");
+            }
+
+            var text = grouped ? WorkAuditReport.ToGroupedCsv(r.Items) : WorkAuditReport.ToCsv(r.Items);
+            return Results.Text(text, "text/csv; charset=utf-8");
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员及以上（含运维）。

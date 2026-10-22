@@ -120,6 +120,23 @@ public sealed class WorkAuditReportTests
         Assert.Contains(",true,3,", csv);
     }
 
+    [Fact]
+    public void ToGroupedCsv_EmitsOneRowPerMessage()
+    {
+        var store = NewStore();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        store.AddMessage(Msg("m1", "agent_a", now, PlanWithTwo));
+
+        var csv = WorkAuditReport.ToGroupedCsv(WorkAuditReport.Collect(store, null, 7, null, null, 100).Items);
+
+        Assert.StartsWith("\uFEFF", csv);
+        Assert.Contains("time,group,agent,actions,failures,durationMs,firstText,messageId,topicId", csv);
+        var lines = csv.TrimEnd('\n').Split('\n');
+        Assert.Equal(2, lines.Length);       // 表头 + 1 条消息
+        Assert.Contains(",2,1,13,", csv);     // 2 项操作 / 1 项异常 / 12+1 ms
+        Assert.Contains(",m1,", csv);
+    }
+
     /// <summary>归档（1.0.315）：写入 → 读取 → 去重 → 保留期清理。归档后查询不再扫消息。</summary>
     public sealed class Archive
     {

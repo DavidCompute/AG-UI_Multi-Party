@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.317 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.317 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.318 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.318 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作区可搜 + 审计导出精细化 + 通知偏好跨设备**——文件名搜索跨整个工作区；审计可按聚合口径或按月分包导出；浮窗范围存到服务端。
+**Version note**: **Searchable workspaces, finer audit exports, server-synced notification prefs** — file-name search across the workspace; audit export either grouped or split per month; popup scope stored on the server.
+
+## 变更
+# Changes
+
+中文：
+- **工作区搜索**：`GET /admin/workspaces/{agentId}/files` 新增 `q`，在工作区内递归匹配文件名（最多 500 条、返回 `mode=search` 与 `truncated`）；前端搜索框 250 ms 防抖，面包屑处显示命中数，结果直接给完整相对路径并保留预览 / 下载 / 删除。
+- **审计导出**：CSV 新增 `group=message`（按消息聚合：`actions / failures / durationMs / firstText`）与 `split=month`（ZIP，一月一个 CSV）；前端「⬇ 导出 CSV」跟随筛选与聚合开关，新增「🗂 按月份导出」。`WorkAuditReport` 抽出共用 `Esc` / `LocalTime`。
+- **通知偏好上云**：新增 `NotifyPrefsState` + `GET/PUT /ag-ui/notify-prefs`，按用户存「浮窗范围」，注册到扩展区 `notifyPrefs` 跨重启保持；前端本地 `localStorage` 降为缓存，登录后以服务端为准（从未设置则把本地偏好一次性迁移上去）。空列表 = 都不弹，从未设置 = 全部弹。
+- **测试**：新增 1 项（按消息聚合 CSV 的行数与列语义），全量 **1912 通过**。
+
+English:
+- **Workspace search**: `GET /admin/workspaces/{agentId}/files` gains `q`, matching file names recursively inside the workspace (max 500 hits, returns `mode=search` and `truncated`); the UI debounces input by 250 ms, shows the hit count next to the breadcrumb, and keeps preview / download / delete on the results with full relative paths.
+- **Audit exports**: CSV gains `group=message` (per-message aggregation with `actions / failures / durationMs / firstText`) and `split=month` (ZIP with one CSV per month); the UI's **⬇ Export CSV** follows the filters and grouping toggle, plus a new **🗂 Export by month**. `WorkAuditReport` now shares `Esc` / `LocalTime` helpers.
+- **Notification prefs on the server**: new `NotifyPrefsState` and `GET/PUT /ag-ui/notify-prefs` store each user's popup scope in the `notifyPrefs` extension area (survives restarts); `localStorage` becomes a cache and the server wins after login (a never-set account migrates the local preference once). An empty list means "pop nothing", never set means "pop everything".
+- **Tests**: 1 new check (grouped CSV row count and column semantics); the full suite passes **1912**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（搜索 / 导出增强）、§1.2.1（通知偏好同步）、§8 控制台页签表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.318。
+English: `docs/user-guide.md` / `en.md` §3.13 (search / export improvements), §1.2.1 (notification-pref sync), and the chapter 8 tab table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.318.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2168，missing 0**；配置键守卫无漂移；文档引用 0 失效；全量 `dotnet test` **1912 通过 / 0 失败**。**无法自动验证**：搜索 / 按月导出在真实数据量下的表现，以及多设备登录后的偏好同步（需两个会话）。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2168, missing 0**; the config-key guard reports no drift; docs references are clean; the full `dotnet test` run passes **1912 / 0**. **Not automatically verifiable**: search / monthly export at real data volumes and preference sync across two sessions.
+
+---
+
+# AG-UI 群聊桌面版 1.0.317 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.317 Release Notes (historical)
 
 **版本说明**：**归档按天分片 + 工作区目录导航 + 通知批量操作**——审计分片更细、保留期按天生效；工作区可逐层浏览与管理；通知面板可一键全部已读与按类型清空。
 **Version note**: **Daily audit shards, folder navigation, notification bulk actions** — audit shards are finer and retention works per day; the workspace can be browsed and managed level by level; the notification panel marks all read or clears a single type.

@@ -4099,13 +4099,54 @@ function loadToastTypes() {
     }
   } catch { notifToastTypes = null; }
   renderToastPrefs();
+  syncToastTypesWithServer(); // 服务端口径（1.0.318）：多设备同步
 }
 
-function saveToastTypes() {
+/** 拉取服务端偏好：有记录（包括空数组 = 都不弹）就以服务端为准；从未设置则保留本地并一次性推上去。 */
+async function syncToastTypesWithServer() {
+  try {
+    if (!state.token) return;
+    const res = await fetch("/ag-ui/notify-prefs", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) return;
+    const server = d.toastTypes;
+    if (Array.isArray(server)) {
+      const allowed = server.filter((x) => NOTIF_TOAST_GROUPS.includes(x));
+      notifToastTypes = allowed.length >= NOTIF_TOAST_GROUPS.length ? null : new Set(allowed);
+      renderToastPrefs();
+      saveToastTypesLocal();
+      return;
+    }
+    // 服务端从未设置：本地有非默认偏好 → 迁移上去
+    if (notifToastTypes !== null) {
+      await pushToastTypes([...notifToastTypes]);
+    }
+  } catch { /* 离线：继续用本地 */ }
+}
+
+/** 推送到服务端（失败静默，本地已保存）。 */
+async function pushToastTypes(list) {
+  try {
+    if (!state.token) return;
+    await fetch("/ag-ui/notify-prefs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ toastTypes: list }),
+    });
+  } catch { /* 忽略 */ }
+}
+
+function saveToastTypesLocal() {
   try {
     if (notifToastTypes === null) localStorage.removeItem(notifToastKey(state.memberId));
     else localStorage.setItem(notifToastKey(state.memberId), JSON.stringify([...notifToastTypes]));
   } catch { /* 隐私模式：仅当前会话生效 */ }
+}
+
+/** 本地 + 服务端一起保存（1.0.318）。 */
+function saveToastTypes() {
+  saveToastTypesLocal();
+  pushToastTypes(notifToastTypes === null ? [...NOTIF_TOAST_GROUPS] : [...notifToastTypes]);
 }
 
 /** 是否应该弹系统通知（浮窗 / 浏览器 Notification）；false 时仍进通知中心。 */
@@ -9859,6 +9900,7 @@ async function loadStorageGovernance() {
 let adminWorkspacesRoot = "";
 let adminWsCurrentAgent = "";
 let adminWsCurrentPath = "";
+let adminWsSearch = "";
 
 async function loadAdminWorkspaces() {
   const rows = $("adminWorkspaceRows");
@@ -9904,7 +9946,11 @@ async function loadAdminWorkspaces() {
       btn.onclick = () => cleanupWorkspaces(btn.dataset.wsAgent);
     });
     rows.querySelectorAll("[data-ws-browse]").forEach((btn) => {
-      btn.onclick = () => browseWorkspaceFiles(btn.dataset.wsBrowse);
+      btn.onclick = () => {
+        const input = $("wsSearchInput");
+        if (input) input.value = "";
+        browseWorkspaceFiles(btn.dataset.wsBrowse, "", "");
+      };
     });
   } catch (ex) {
     rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
@@ -9913,22 +9959,27 @@ async function loadAdminWorkspaces() {
 
 /** 浏览工作区目录（1.0.313；1.0.317 起逐层导航）：面板嵌入在「工作区」页下方，不另开弹窗。
  *  path 为空 = 工作区根；子目录可点入、面包屑可回退。 */
-async function browseWorkspaceFiles(agentId, path = "") {
+async function browseWorkspaceFiles(agentId, path = "", query = "") {
   const box = $("adminWorkspaceFiles");
   const rows = $("adminWorkspaceFileRows");
   const title = $("adminWsFilesTitle");
   if (!box || !rows) return;
   const dir = String(path || "").replace(/^\/+|\/+$/g, "");
+  const q = String(query || "").trim();
   adminWsCurrentAgent = agentId;
   adminWsCurrentPath = dir;
+  adminWsSearch = q;
   $("adminWsFilePreview")?.classList.add("hidden");
   box.classList.remove("hidden");
   if (title) title.textContent = t("admin.wsFilesTitle", { id: agentId });
-  renderWsBreadcrumb(agentId, dir);
+  renderWsBreadcrumb(agentId, dir, q);
   rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
-    const url = `/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/files`
-      + (dir ? "?path=" + encodeURIComponent(dir) : "");
+    let url = `/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/files`;
+    const params = [];
+    if (dir) params.push("path=" + encodeURIComponent(dir));
+    if (q) params.push("q=" + encodeURIComponent(q));
+    if (params.length) url += "?" + params.join("&");
     const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) {
@@ -9936,8 +9987,11 @@ async function browseWorkspaceFiles(agentId, path = "") {
       return;
     }
     const entries = d.entries || [];
+    const searching = d.mode === "search";
+    renderWsBreadcrumb(agentId, dir, q, entries.length, !!d.truncated);
     if (!entries.length) {
-      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${escapeHtml(t(dir ? "admin.wsDirEmpty" : "admin.wsFilesEmpty"))}</td></tr>`;
+      const key = searching ? "admin.wsSearchEmpty" : (dir ? "admin.wsDirEmpty" : "admin.wsFilesEmpty");
+      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${escapeHtml(t(key))}</td></tr>`;
       return;
     }
     rows.innerHTML = entries.map((e, idx) => {
@@ -9949,7 +10003,9 @@ async function browseWorkspaceFiles(agentId, path = "") {
         : "";
       const nameCell = isDir
         ? `<button class="ws-dir-link" type="button" data-ws-dir="${idx}">📁 ${escapeHtml(e.name)}/</button>`
-        : `📄 <code>${escapeHtml(e.name)}</code>`;
+        : (searching
+            ? `📄 <code>${escapeHtml(e.path)}</code>`
+            : `📄 <code>${escapeHtml(e.name)}</code>`);
       const actions = isDir
         ? `<button class="chip-btn" type="button" data-ws-dir-act="${idx}">${escapeHtml(t("admin.wsOpen"))}</button>`
         : `${previewBtn}<a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a> <button class="chip-btn" type="button" data-ws-del="${idx}">🗑 ${escapeHtml(t("admin.wsDelete"))}</button>`;
@@ -9960,7 +10016,11 @@ async function browseWorkspaceFiles(agentId, path = "") {
         <td>${actions}</td>
       </tr>`;
     }).join("");
-    const openDir = (entry) => browseWorkspaceFiles(agentId, entry.path);
+    const openDir = (entry) => {
+      const input = $("wsSearchInput");
+      if (input) input.value = "";
+      browseWorkspaceFiles(agentId, entry.path, "");
+    };
     rows.querySelectorAll("[data-ws-dir], [data-ws-dir-act]").forEach((btn) => {
       const i = Number(btn.dataset.wsDir || btn.dataset.wsDirAct);
       btn.onclick = () => { if (entries[i]) openDir(entries[i]); };
@@ -9976,8 +10036,8 @@ async function browseWorkspaceFiles(agentId, path = "") {
   }
 }
 
-/** 面包屑（1.0.317）：根 / a / b 可点回退。 */
-function renderWsBreadcrumb(agentId, dir) {
+/** 面包屑（1.0.317）：根 / a / b 可点回退；搜索时额外标注命中数（1.0.318）。 */
+function renderWsBreadcrumb(agentId, dir, q = "", count = null, truncated = false) {
   const box = $("adminWsBreadcrumb");
   if (!box) return;
   const parts = String(dir || "").split("/").filter(Boolean);
@@ -9987,9 +10047,19 @@ function renderWsBreadcrumb(agentId, dir) {
     acc = wsJoinPath(acc, p);
     crumbs.push(`<span class="ws-crumb-sep">/</span><button class="ws-crumb" type="button" data-ws-path="${escapeHtml(acc)}">${escapeHtml(p)}</button>`);
   }
+  if (q) {
+    const label = count === null
+      ? t("admin.wsSearching", { q })
+      : t("admin.wsSearchResult", { q, count: String(count) });
+    crumbs.push(`<span class="ws-crumb-sep">·</span><span class="ws-crumb-note">🔍 ${escapeHtml(label)}${truncated ? " · " + escapeHtml(t("admin.waTruncated")) : ""}</span>`);
+  }
   box.innerHTML = crumbs.join("");
   box.querySelectorAll("[data-ws-path]").forEach((b) => {
-    b.onclick = () => browseWorkspaceFiles(agentId, b.dataset.wsPath || "");
+    b.onclick = () => {
+      const input = $("wsSearchInput");
+      if (input) input.value = "";
+      browseWorkspaceFiles(agentId, b.dataset.wsPath || "", "");
+    };
   });
 }
 
@@ -10191,16 +10261,35 @@ function renderWorkAuditRows() {
   });
 }
 
-/** 导出工作区操作审计 CSV（按当前筛选条件，最多 5000 条）。 */
-function exportWorkAudits() {
+/** 导出 URL（1.0.318）：跟随当前筛选；“按消息聚合”勾上时导出聚合口径，split=month 时打成 ZIP。 */
+function workAuditCsvUrl(splitMonth) {
   const { days, q, groupId, agentId } = workAuditQuery();
   let url = "/ag-ui/admin/work-audits.csv?days=" + days;
   if (q) url += "&q=" + encodeURIComponent(q);
   if (groupId) url += "&groupId=" + encodeURIComponent(groupId);
   if (agentId) url += "&agentId=" + encodeURIComponent(agentId);
+  if ($("waGroupByMsg")?.checked) url += "&group=message";
+  if (splitMonth) url += "&split=month";
+  return url;
+}
+
+/** 导出工作区操作审计 CSV（按当前筛选条件，最多 5000 条）。 */
+function exportWorkAudits() {
+  const { days } = workAuditQuery();
   const a = document.createElement("a");
-  a.href = authedAssetUrl(url);
+  a.href = authedAssetUrl(workAuditCsvUrl(false));
   a.download = `work-audits-${days}d.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** 按月份分文件导出（ZIP，一月一个 CSV；1.0.318）。 */
+function exportWorkAuditsByMonth() {
+  const { days } = workAuditQuery();
+  const a = document.createElement("a");
+  a.href = authedAssetUrl(workAuditCsvUrl(true));
+  a.download = `work-audits-${days}d.zip`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -10219,7 +10308,7 @@ async function deleteWorkspaceFile(agentId, f) {
       return;
     }
     toast(t("admin.wsDeleteDone", { path: f.path }));
-    browseWorkspaceFiles(agentId, adminWsCurrentPath);
+    browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
   } catch (ex) {
     toast(t("admin.wsDeleteFail", { err: ex.message }));
   }
@@ -10249,7 +10338,7 @@ async function uploadWorkspaceFiles(input) {
   }
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
-  browseWorkspaceFiles(agentId, adminWsCurrentPath);
+  browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
 }
 
 /** 新建目录（1.0.315）：输入相对路径，支持多级（a/b/c）。 */
@@ -10268,7 +10357,7 @@ async function createWorkspaceDir() {
       return;
     }
     toast(t("admin.wsNewDirDone", { path: target }));
-    browseWorkspaceFiles(agentId, adminWsCurrentPath);
+    browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
   } catch (ex) {
     toast(t("admin.wsNewDirFail", { err: ex.message }));
   }
@@ -16020,6 +16109,14 @@ function init() {
   $("wsNewDirBtn").onclick = () => createWorkspaceDir();
   $("wsUploadBtn").onclick = () => $("wsUploadInput").click();
   $("wsUploadInput").onchange = () => uploadWorkspaceFiles($("wsUploadInput"));
+  let wsSearchTimer = null;
+  $("wsSearchInput").oninput = () => {
+    clearTimeout(wsSearchTimer);
+    wsSearchTimer = setTimeout(() => {
+      if (!adminWsCurrentAgent) return;
+      browseWorkspaceFiles(adminWsCurrentAgent, adminWsCurrentPath, $("wsSearchInput").value.trim());
+    }, 250);
+  };
   $("wsFilePreviewClose").onclick = () => $("adminWsFilePreview").classList.add("hidden");
   $("wsCopyPathBtn").onclick = () => {
     if (!adminWorkspacesRoot) return;
@@ -16029,6 +16126,7 @@ function init() {
   };
   $("waRefreshBtn").onclick = () => loadWorkAudits();
   $("waExportBtn").onclick = () => exportWorkAudits();
+  $("waExportMonthsBtn").onclick = () => exportWorkAuditsByMonth();
   $("waGroup").onchange = () => loadWorkAudits();
   $("waAgent").onchange = () => loadWorkAudits();
   $("waGroupByMsg").onchange = () => renderWorkAuditRows();
