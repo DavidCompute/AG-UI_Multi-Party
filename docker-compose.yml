@@ -198,6 +198,9 @@ services:
       # 允许 work_run_command 执行的可执行文件名（逗号分隔，如 git,dotnet）；留空 = 禁止执行命令
       Agents__WorkToolCommands: ${AGENTS_WORK_TOOL_COMMANDS:-}
       Agents__WorkToolTimeoutMs: ${AGENTS_WORK_TOOL_TIMEOUT_MS:-30000}
+      # 工作区容量治理（1.0.311）：总配额 MB（0 = 不限制）/ 文件保留天数（0 = 不按时间清理）
+      Agents__WorkSpaceQuotaMb: ${AGENTS_WORKSPACE_QUOTA_MB:-1024}
+      Agents__WorkSpaceRetentionDays: ${AGENTS_WORKSPACE_RETENTION_DAYS:-30}
       # 需审批的工具名（命中后用 ApprovalRequiredAIFunction 包装，模型调用时运行中断等触发者决策）
       Agents__RequireApprovalToolNames__0: ${AGENTS_REQUIRE_APPROVAL_TOOLS:-publish_announcement}
       # 启动时播种示例群/成员/智能体（无历史数据时）

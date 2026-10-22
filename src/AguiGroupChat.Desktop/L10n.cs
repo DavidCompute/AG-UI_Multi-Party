@@ -73,6 +73,16 @@ public static class L10n
     public static string TrayNewGroup => IsZh() ? "新建知聚" : "New circle";
     public static string TrayAdmin => IsZh() ? "管理控制台" : "Admin console";
     public static string TrayNoRecent => IsZh() ? "暂无最近知聚" : "No recent circles";
+    // 多窗口未读明细（1.0.311）
+    public static string TrayWindows => IsZh() ? "未读窗口" : "Unread windows";
+    public static string TrayWindowsEmpty => IsZh() ? "暂无未读" : "Nothing unread";
+    public static string TrayWindowSelf(string label) => IsZh()
+        ? $"● {label}（本窗口）"
+        : $"● {label} (this window)";
+    public static string TrayWindowOther(string label) => IsZh()
+        ? $"○ {label}"
+        : $"○ {label}";
+    public static string TrayWindowUntitled => IsZh() ? "未选择知聚" : "No circle selected";
     public static string TaskbarRunning(string label) => IsZh()
         ? $"正在执行：{label}"
         : $"Running: {label}";

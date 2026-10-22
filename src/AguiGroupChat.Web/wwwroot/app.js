@@ -6836,8 +6836,9 @@ function updateDocTitle() {
 }
 
 /**
- * 桌面版托盘未读（1.0.304；1.0.305 起合并通知中心）：
+ * 桌面版托盘未读（1.0.304；1.0.305 起合并通知中心；1.0.311 起带窗口 / 知聚明细）：
  *   count = 未读消息 + 未读通知（排除 message 类，避免与消息未读重复计数）。
+ *   label / groups 供桌面壳在托盘「未读窗口」里展开到知聚。
  * 只在 WebView2 宿主里上送，普通浏览器直接忽略。
  */
 function syncDesktopUnread() {
@@ -6845,7 +6846,19 @@ function syncDesktopUnread() {
     if (!isDesktopHost()) return;
     const messages = Math.max(0, Number(totalUnreadCount()) || 0);
     const notifications = (state.notifications || []).filter((n) => !n.read && n.type !== "message").length;
-    window.chrome.webview.postMessage({ type: "unread", count: messages + notifications, messages, notifications });
+    const groups = [];
+    for (const [gid, info] of state.groupUnread) {
+      const count = Math.max(0, Number(info?.unreadCount) || 0);
+      if (!gid || count <= 0) continue;
+      const g = (state.groups || []).find((x) => x.groupId === gid);
+      groups.push({ id: String(gid), name: String(g?.groupName || gid).slice(0, 60), count });
+    }
+    groups.sort((a, b) => b.count - a.count);
+    const active = (state.groups || []).find((g) => g.groupId === state.activeGroupId);
+    window.chrome.webview.postMessage({
+      type: "unread", count: messages + notifications, messages, notifications,
+      label: active ? String(active.groupName || "").slice(0, 60) : "", groups: groups.slice(0, 6),
+    });
   } catch { /* 忽略 */ }
 }
 

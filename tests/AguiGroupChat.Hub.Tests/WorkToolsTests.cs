@@ -128,4 +128,50 @@ public sealed class WorkToolsTests
         }
         finally { Cleanup(root); }
     }
+
+    [Fact]
+    public async Task WriteFile_ExceedsWorkspaceQuota_Rejected()
+    {
+        // 配额 1 MB：先把工作区填到 700 KB，再写 700 KB 应被拒（1.0.311）
+        var options = new AgentOptions { WorkSpaceQuotaMb = 1, WorkToolMaxWriteChars = 4 * 1024 * 1024 };
+        var (tools, root) = Create(options);
+        try
+        {
+            var chunk = new string('x', 700 * 1024);
+            Assert.Contains("已写入", await tools.WriteFile("a.txt", chunk));
+            Assert.Contains("上限", await tools.WriteFile("b.txt", chunk));
+            // 覆盖写同一文件（不增加占用）仍应允许
+            Assert.Contains("已写入", await tools.WriteFile("a.txt", chunk));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public async Task WorkOps_RecordedIntoAudit()
+    {
+        // 审计（1.0.311）：写 / 命令成功与被拒都要落一条摘要，供「执行计划」卡回显
+        var options = new AgentOptions { WorkToolCommands = "whoami", WorkToolTimeoutMs = 10_000 };
+        var (tools, root) = Create(options);
+        var audit = new WorkOpAudit();
+        var prev = WorkOpAudit.Ambient.Value;
+        WorkOpAudit.Ambient.Value = audit;
+        try
+        {
+            await tools.WriteFile("notes/a.txt", "hi");
+            var ok = await tools.RunCommand("whoami");
+            Assert.Contains("退出码：0", ok);
+            Assert.Contains("不在白名单", await tools.RunCommand("curl"));
+        }
+        finally
+        {
+            WorkOpAudit.Ambient.Value = prev;
+            Cleanup(root);
+        }
+
+        Assert.Contains(audit.Ops, (o) => o.Tool == "work_write_file" && o.Ok && o.Summary.Contains("notes/a.txt"));
+        Assert.Contains(audit.Ops, (o) => o.Tool == "work_run_command" && o.Ok
+            && o.Summary.Contains("whoami") && o.Summary.Contains("退出码 0") && o.Summary.Contains("ms"));
+        Assert.Contains(audit.Ops, (o) => o.Tool == "work_run_command" && !o.Ok
+            && o.Summary.Contains("curl") && o.Summary.StartsWith("⚠"));
+    }
 }

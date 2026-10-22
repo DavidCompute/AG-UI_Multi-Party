@@ -697,6 +697,12 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         // 不依赖模型在正文里原样复述 JSON（模型常改写成人话而丢掉标记）。
         var prevToolResults = ToolResultCollector.Ambient.Value;
         ToolResultCollector.Ambient.Value = new ToolResultCollector();
+        // 工作区操作审计（1.0.311）：最外层创建，嵌套（子员工 / 技能）沿用同一实例，
+        // 运行结束时由最外层追加到本次消息的「执行计划」卡。
+        var prevWorkOps = WorkOpAudit.Ambient.Value;
+        var ownWorkOps = prevWorkOps is null;
+        var workOps = prevWorkOps ?? new WorkOpAudit();
+        WorkOpAudit.Ambient.Value = workOps;
 
         string? messageId = null;
         ToolApprovalRequestContent? approval = null;
@@ -944,6 +950,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             await AttachAgentChainAsync(context, messageId, runCt);
             if (ownUsage) await AttachUsageAsync(context, messageId, usageAcc, runCt);
             if (ownCites) await AttachCitationsAsync(context, messageId, citations, runCt);
+            if (ownWorkOps) await AttachWorkOpAuditAsync(context, messageId, workOps, runCt);
             // 空正文兜底：模型这一轮既没给正文、也没产出文件时，不要留一条**完全空白**的消息
             // （前端就是一只空气泡，用户不知道发生了什么）。与指派/提升、计划两条路径同一口径。
             if (string.IsNullOrWhiteSpace(accumulated) && attached == 0)
@@ -979,6 +986,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             UsageAccumulator.Ambient.Value = prevUsage;  // 恢复外层用量累加器
             CitationCollector.Ambient.Value = prevCites; // 恢复外层引用采集器
             ToolResultCollector.Ambient.Value = prevToolResults; // 恢复外层工具返回收集器
+            WorkOpAudit.Ambient.Value = prevWorkOps;              // 恢复外层工作区操作审计
             await _hub.Value.BroadcastTypingAsync(new GroupTypingRequest
             {
                 GroupId = context.GroupId,
@@ -4053,6 +4061,24 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "引用来源回档失败（不影响主流程）：消息 {MessageId}", messageId);
+        }
+    }
+
+    /// <summary>把本次回答的工作区操作审计（<c>work_*</c> 调用）追加到消息的「执行计划」卡（1.0.311），
+    /// 并随 <c>planJson</c> 落库。只记摘要（命令原文 / 文件路径 / 退出码 / 耗时），不含文件正文与凭证。</summary>
+    private async Task AttachWorkOpAuditAsync(AgentInvocationContext context, string messageId, WorkOpAudit audit, CancellationToken ct)
+    {
+        try
+        {
+            var ops = audit.Ops;
+            if (ops.Count == 0) return;
+            var steps = ops.Select((o) => new PlanStepInfo { Id = 0, Text = o.Summary, Done = true }).ToList();
+            await _hub.Value.AppendMessagePlanStepsAsync(context.GroupId, messageId, steps, ct);
+            _logger.LogDebug("工作区操作审计回档：消息 {MessageId}（{Count} 条）", messageId, ops.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "工作区操作审计回档失败（不影响主流程）：消息 {MessageId}", messageId);
         }
     }
 

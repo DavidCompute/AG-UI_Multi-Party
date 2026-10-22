@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.310**
+> 适用版本：**1.0.311**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -320,7 +320,7 @@
 
 托盘右键菜单（1.0.302 起，1.0.303 扩展）：
 
-- **打开知聚**：窗口隐藏 / 最小化时回到前台；双击托盘图标同效。菜单首项会显示未读条数，托盘图标 tooltip 与右下角红色徽标同步显示未读总数（**未读消息 + 通知中心未读，排除 message 类通知以避免重复计数**；>99 显示 `99+`；登录后加载、收到消息、阅读通知后实时更新，tooltip 同时给出「消息 / 通知」明细）。**多窗口未读聚合（1.0.310）**：每个窗口把自己的未读数写入 `%LocalAppData%\AguiGroupChat\unread\`，所有窗口的托盘 / 任务栏徽标显示同一总数；窗口退出自动清除，异常残留 2 分钟后不再计入。
+- **打开知聚**：窗口隐藏 / 最小化时回到前台；双击托盘图标同效。菜单首项会显示未读条数，托盘图标 tooltip 与右下角红色徽标同步显示未读总数（**未读消息 + 通知中心未读，排除 message 类通知以避免重复计数**；>99 显示 `99+`；登录后加载、收到消息、阅读通知后实时更新，tooltip 同时给出「消息 / 通知」明细）。**多窗口未读聚合（1.0.310）**：每个窗口把自己的未读数写入 `%LocalAppData%\AguiGroupChat\unread\`，所有窗口的托盘 / 任务栏徽标显示同一总数；窗口退出自动清除，异常残留 2 分钟后不再计入。**未读窗口明细（1.0.311）**：托盘菜单新增「未读窗口」子菜单，按窗口展开到知聚（最多 6 条）——本窗口的知聚条目点击即切换，其他窗口的条目点击把该窗口提到前台；无未读时菜单项置灰。
 - **最近知聚 ▸**：子菜单列出最近活跃的 10 个知聚（**私密知聚带 🔒 标记**），点击即在当前窗口切换（不重载、不新开窗口）；页面未就绪时回退到 `?group=` 深链。跳转列表（任务栏右键）则仍只列非私密知聚。
 - **新建知聚 / 管理控制台**：托盘菜单直接打开对应弹窗（页面未就绪时回退到 `?action=` 深链）。
 - **窗口位置记忆**：自动保存窗口大小、位置与最大化状态到 `desktop-settings.json`，下次启动恢复；显示器布局变化导致越界时自动回退默认位置。
@@ -1679,7 +1679,7 @@
 
 ---
 
-### 3.13 工作型数字员工（1.0.310）
+### 3.13 工作型数字员工（1.0.310；1.0.311 增加审计与容量治理）
 
 「AI 角色管理 → 编辑数字员工 → 记忆与权限」新增 **🛠️ 工作型数字员工** 开关。
 
@@ -1710,6 +1710,24 @@
 - 不经 shell：拒绝 `&`、`|`、`<`、`>`、`^`、`%`、`!`、`;`、反引号、`$` 与换行等元字符；不接受路径，只在 `PATH` 中解析可执行文件（拒绝工作区内同名程序）；
 - 继承环境变量时剔除名称含 `KEY / TOKEN / SECRET / PASSWORD / CREDENTIAL / AUTH` 的项；
 - 超时 `Agents:WorkToolTimeoutMs`（默认 30s），stdout / stderr 各截断 20000 字符。
+
+**操作审计（1.0.311）**
+
+每次 `work_*` 调用都会记一条摘要（命令原文 / 文件路径 / 退出码 / 耗时；被拒或失败标 `⚠`），
+在本次回答结束时追加到消息的「📋 执行计划」卡末尾，并随消息 `planJson` 落库——
+刷新页面、隔天回看聊天记录仍能看到「谁让哪个数字员工执行了什么命令、读了 / 写了哪些文件」。
+只记摘要（不含文件正文与凭证），单次回答最多 40 条。
+
+**工作区容量治理（1.0.311）**
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `Agents:WorkSpaceQuotaMb` | `1024` | 工作区总容量上限（MB）；`0` = 不限制 |
+| `Agents:WorkSpaceRetentionDays` | `30` | 文件保留天数；`0` = 不按时间清理 |
+
+- 写文件时按**增量**校验配额（覆盖写不会因为旧文件已占空间而被误拒），超限直接报错提示先清理；
+- 后台维护服务启动 10 分钟后首次扫描，此后每 6 小时一次：先按保留期删除过期文件，再按「最久未修改优先」删到配额内，并回收空目录；
+- 只处理 `{Agents:WorkSpaceRoot}`（默认 `data/workspaces`）：根目录直属文件与技能运行目录 `data/skillruns` 不参与清理；符号链接 / 联接点一律跳过。
 
 > 安全提示：工作型工具能读写服务器文件并执行命令，**只应授予可信数字员工**；写文件与命令始终需要在知聚内人工批准。
 
@@ -5359,10 +5377,12 @@ service:
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | `Agents:SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | `Agents:RequireApprovalToolNames__0` |
 | `AGENTS_WORK_TOOLS_ENABLED` / `AGENTS_WORK_TOOL_COMMANDS` | `false` / 空 | `Agents:WorkToolsEnabled` / `Agents:WorkToolCommands` |
+| `AGENTS_WORKSPACE_ROOT` / `AGENTS_WORKSPACE_QUOTA_MB` / `AGENTS_WORKSPACE_RETENTION_DAYS` | `data/workspaces` / `1024` / `30` | `Agents:WorkSpaceRoot` / `WorkSpaceQuotaMb` / `WorkSpaceRetentionDays`（1.0.311） |
 | `AGUI_DOCX_OUT` / `AGUI_PHOTO_API` / `AGUI_IMAGE_SOURCE` | `/app/docs` / 空 / `library` | 文档 / 配图（非配置键，技能读环境变量） |
 | `AGUI_PREVIEW_TOOLS` | `false` | 构建参数：是否装 poppler-utils（版面 QA，非「在线查看」依赖） |
 
 > `Agents__WorkToolsEnabled` / `Agents__WorkToolCommands` 已由 `AgentOptions.WorkToolsEnabled` / `WorkToolCommands` 绑定（1.0.310）；前者是总闸门，后者是 `work_run_command` 的命令白名单（空 = 禁止命令）。
+> 1.0.311 起新增容量治理：`WorkSpaceQuotaMb`（总配额，`0` = 不限制）与 `WorkSpaceRetentionDays`（保留天数，`0` = 不按时间清理），由 `WorkspaceMaintenanceService` 启动 10 分钟后首次执行、此后每 6 小时一次；`WorkTools.WriteFile` 写前按增量校验配额。
 
 #### 9.5.3 Docker 镜像与运行镜像要点（`Dockerfile`）
 

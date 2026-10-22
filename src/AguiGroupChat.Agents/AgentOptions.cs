@@ -176,6 +176,13 @@ public sealed class AgentOptions
     /// 每个启用工作工具的智能体拥有 <see cref="WorkSpaceRoot"/>/&lt;agentId&gt;/ 独立子目录。</summary>
     public string WorkSpaceRoot { get; set; } = "data/workspaces";
 
+    /// <summary>工作区总容量上限（MB，默认 1024；0 = 不限制）。超限时 <c>work_write_file</c> 拒绝写入；
+    /// 后台维护服务会按「最久未修改」顺序清理直到回到配额内。</summary>
+    public int WorkSpaceQuotaMb { get; set; } = 1024;
+
+    /// <summary>工作区文件保留天数（默认 30；0 = 永不按时间清理）。后台维护服务每 6 小时扫描一次。</summary>
+    public int WorkSpaceRetentionDays { get; set; } = 30;
+
     /// <summary>web_search 工具端点（默认 DuckDuckGo Instant Answer API，免费无密钥，返回摘要式结果）。</summary>
     public string WebSearchEndpoint { get; set; } = "https://api.duckduckgo.com/";
 

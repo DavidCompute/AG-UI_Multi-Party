@@ -205,6 +205,8 @@ public static class AgentHosting
         services.AddHostedService<MemoryAutoConsolidationService>();
         // 启动自检：HTTP embedding 端点的实际向量维度必须与配置一致，否则「RAG 静默失效」（见 EmbeddingDimensionProbe）
         services.AddHostedService<EmbeddingDimensionProbe>();
+        // 工作区容量治理（1.0.311）：按保留期 / 配额定时清理 data/workspaces（两者都为 0 时跳过）
+        services.AddHostedService<WorkspaceMaintenanceService>();
 
         if (provider == "postgres")
         {

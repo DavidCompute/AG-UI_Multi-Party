@@ -78,4 +78,55 @@ public sealed class TrayUnreadAggregatorTests
             try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
         }
     }
+
+    [Fact]
+    public void ReadWindows_ReportsLabelGroupsAndSelf()
+    {
+        var dir = NewDir();
+        try
+        {
+            var a = new TrayUnreadAggregator(dir, _ => { }, "win_a");
+            var b = new TrayUnreadAggregator(dir, _ => { }, "win_b");
+            a.Publish(3, 3, 0, "市场推广", 111, [new TrayUnreadGroup("g1", "市场推广", 2), new TrayUnreadGroup("g2", "客服", 1)]);
+            b.Publish(2, 2, 0, "产品研发", 222, [new TrayUnreadGroup("g3", "产品研发", 2)]);
+
+            var windows = a.ReadWindows();
+            Assert.Equal(2, windows.Count);
+            Assert.True(windows[0].IsSelf);            // 自身条目排最前
+            Assert.Equal("市场推广", windows[0].Label);
+            Assert.Equal(111, windows[0].Hwnd);
+            Assert.Equal(2, windows[0].Groups.Count);
+            Assert.Equal("g1", windows[0].Groups[0].Id);   // 按未读降序
+            Assert.Equal(2, windows[0].Groups[0].Count);
+            Assert.False(windows[1].IsSelf);
+            Assert.Equal(222, windows[1].Hwnd);
+            Assert.Equal(5, a.ReadTotals().Total);         // 明细不影响总数口径
+            b.Dispose();
+            a.Dispose();
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
+        }
+    }
+
+    [Fact]
+    public void Publish_LegacyOverload_HasNoDetails()
+    {
+        var dir = NewDir();
+        try
+        {
+            var a = new TrayUnreadAggregator(dir, _ => { }, "win_a");
+            a.Publish(1, 1, 0);
+            var windows = a.ReadWindows();
+            Assert.Single(windows);
+            Assert.Equal("", windows[0].Label);
+            Assert.Empty(windows[0].Groups);
+            a.Dispose();
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
+        }
+    }
 }

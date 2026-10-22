@@ -39,6 +39,10 @@ public partial class MainWindow : Window
     private int _unreadNotifications;
     private TrayUnreadTotals _unreadAggregate;
     private readonly TrayUnreadAggregator _unreadAggregator;
+    private string _unreadLabel = "";
+    private IReadOnlyList<TrayUnreadGroup> _unreadGroups = [];
+    private System.Windows.Forms.ToolStripMenuItem? _windowsMenu;
+    private nint _hwnd;
     private string _progressState = "none";
     private ulong _progressValue;
     private ulong _progressTotal;
@@ -105,6 +109,7 @@ public partial class MainWindow : Window
         try
         {
             var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            _hwnd = hwnd;
             var source = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
             source?.AddHook(WndProc);
             _taskbar.Initialize(hwnd);
@@ -235,11 +240,24 @@ public partial class MainWindow : Window
                     ShowNotification(title, body);
                     break;
                 case "unread":
-                    // 前端同步：总未读 = 未读消息 + 未读通知（排除 message 类），1.0.305
+                    // 前端同步：总未读 = 未读消息 + 未读通知（排除 message 类），1.0.305；
+                    // 1.0.311 起带窗口标识（当前知聚名）与各知聚未读明细，供托盘展开查看
                     var count = root.TryGetProperty("count", out var c) && c.TryGetInt32(out var n) ? n : 0;
                     var messages = root.TryGetProperty("messages", out var mEl) && mEl.TryGetInt32(out var mc) ? mc : count;
                     var notifications = root.TryGetProperty("notifications", out var nEl) && nEl.TryGetInt32(out var nc) ? nc : 0;
-                    SetUnread(count, messages, notifications);
+                    var label = root.TryGetProperty("label", out var labelEl) ? (labelEl.GetString() ?? "") : "";
+                    var groups = new List<TrayUnreadGroup>();
+                    if (root.TryGetProperty("groups", out var groupsEl) && groupsEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var g in groupsEl.EnumerateArray())
+                        {
+                            var gid = g.TryGetProperty("id", out var gidEl) ? (gidEl.GetString() ?? "") : "";
+                            var gname = g.TryGetProperty("name", out var gnameEl) ? (gnameEl.GetString() ?? gid) : gid;
+                            var gcount = g.TryGetProperty("count", out var gcountEl) && gcountEl.TryGetInt32(out var gc) ? gc : 0;
+                            if (!string.IsNullOrWhiteSpace(gid) && gcount > 0) groups.Add(new TrayUnreadGroup(gid, gname, gcount));
+                        }
+                    }
+                    SetUnread(count, messages, notifications, label, groups);
                     break;
                 case "progress":
                     // 长任务进度（1.0.306）：计划 done/total → 任务栏百分比
@@ -290,23 +308,42 @@ public partial class MainWindow : Window
         catch { /* 系统通知被禁用时静默 */ }
     }
 
-    /// <summary>前端上报的未读数（1.0.304）：刷新托盘 tooltip / 徽标与菜单首项（1.0.305 起含通知中心）。</summary>
-    private void SetUnread(int count, int messages, int notifications)
+    /// <summary>前端上报的未读数（1.0.304）：刷新托盘 tooltip / 徽标与菜单首项（1.0.305 起含通知中心）。
+    /// 1.0.311 起同时上送当前知聚名与各知聚未读明细，写入聚合文件供其他窗口的托盘菜单展开查看。</summary>
+    private void SetUnread(int count, int messages, int notifications, string? label = null,
+        IReadOnlyList<TrayUnreadGroup>? groups = null)
     {
         var t = Math.Clamp(count, 0, 9999);
         var m = Math.Clamp(messages, 0, 9999);
         var n = Math.Clamp(notifications, 0, 9999);
-        if (t == _unreadCount && m == _unreadMessages && n == _unreadNotifications) return;
+        var labelText = label ?? "";
+        var groupList = groups ?? [];
+        var unchanged = t == _unreadCount && m == _unreadMessages && n == _unreadNotifications
+            && string.Equals(labelText, _unreadLabel, StringComparison.Ordinal)
+            && SameGroups(groupList, _unreadGroups);
+        if (unchanged) return;
         _unreadCount = t;
         _unreadMessages = m;
         _unreadNotifications = n;
-        _unreadAggregator.Publish(t, m, n);
+        _unreadLabel = labelText;
+        _unreadGroups = groupList;
+        _unreadAggregator.Publish(t, m, n, labelText, _hwnd, groupList);
         var aggregate = _unreadAggregator.ReadTotals();
         // 文件写失败时至少保证本窗口的数字不回退
         ApplyUnreadAggregate(new TrayUnreadTotals(
             Math.Max(aggregate.Total, t),
             Math.Max(aggregate.Messages, m),
             Math.Max(aggregate.Notifications, n)));
+    }
+
+    private static bool SameGroups(IReadOnlyList<TrayUnreadGroup> a, IReadOnlyList<TrayUnreadGroup> b)
+    {
+        if (a.Count != b.Count) return false;
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!string.Equals(a[i].Id, b[i].Id, StringComparison.Ordinal) || a[i].Count != b[i].Count) return false;
+        }
+        return true;
     }
 
     /// <summary>多窗口未读汇总（1.0.310）：所有窗口的托盘 / 任务栏覆盖徽标显示同一总数。</summary>
@@ -444,6 +481,88 @@ public partial class MainWindow : Window
             item.Click += (_, _) => NavigateToGroup(id);
             _recentMenu.DropDownItems.Add(item);
         }
+    }
+
+    /// <summary>托盘「未读窗口」子菜单（1.0.311）：展开各窗口及其知聚明细；
+    /// 本窗口的知聚条目可直接切换，其他窗口条目点击后把该窗口提到前台（跨进程无法直接导航）。</summary>
+    private void RebuildWindowsMenu()
+    {
+        if (_windowsMenu is null) return;
+        foreach (System.Windows.Forms.ToolStripItem old in _windowsMenu.DropDownItems) old.Dispose();
+        _windowsMenu.DropDownItems.Clear();
+
+        IReadOnlyList<TrayUnreadWindow> windows;
+        try { windows = _unreadAggregator.ReadWindows(); }
+        catch { windows = []; }
+        var unread = windows.Where((w) => w.Total > 0).ToList();
+        if (unread.Count == 0)
+        {
+            _windowsMenu.Enabled = false;
+            _windowsMenu.DropDownItems.Add(new System.Windows.Forms.ToolStripMenuItem(L10n.TrayWindowsEmpty) { Enabled = false });
+            return;
+        }
+
+        _windowsMenu.Enabled = true;
+        foreach (var w in unread)
+        {
+            var label = string.IsNullOrWhiteSpace(w.Label) ? L10n.TrayWindowUntitled : Truncate(w.Label, 32);
+            var title = w.IsSelf ? L10n.TrayWindowSelf(label) : L10n.TrayWindowOther(label);
+            var item = new System.Windows.Forms.ToolStripMenuItem($"{title} — {w.Total}")
+            {
+                ToolTipText = w.IsSelf ? label : L10n.TrayWindowOther(label),
+            };
+            var hwnd = w.Hwnd;
+            if (w.Groups.Count == 0)
+            {
+                item.Click += (_, _) => ActivateWindow(hwnd);
+            }
+            else
+            {
+                foreach (var g in w.Groups)
+                {
+                    var sub = new System.Windows.Forms.ToolStripMenuItem($"{Truncate(g.Name, 40)} ({g.Count})")
+                    {
+                        ToolTipText = g.Name,
+                    };
+                    if (w.IsSelf)
+                    {
+                        var gid = g.Id;
+                        sub.Click += (_, _) => NavigateToGroup(gid);
+                    }
+                    else
+                    {
+                        sub.Click += (_, _) => ActivateWindow(hwnd);
+                    }
+                    item.DropDownItems.Add(sub);
+                }
+            }
+            _windowsMenu.DropDownItems.Add(item);
+        }
+    }
+
+    private const int SwRestore = 9;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindowAsync(nint hWnd, int nCmdShow);
+
+    /// <summary>把指定窗口提到前台（1.0.311）：自己的窗口走 WPF，其他进程窗口走 Win32。</summary>
+    private void ActivateWindow(long hwnd)
+    {
+        if (hwnd <= 0 || hwnd == _hwnd)
+        {
+            BringToFront();
+            return;
+        }
+        try
+        {
+            var handle = (nint)hwnd;
+            ShowWindowAsync(handle, SwRestore);
+            SetForegroundWindow(handle);
+        }
+        catch { /* 窗口已关闭 / 无权限：忽略 */ }
     }
 
     /// <summary>深链请求（来自另一个进程，如跳转列表 / 托盘快捷任务）：切知聚或打开快捷弹窗。</summary>
@@ -745,6 +864,9 @@ public partial class MainWindow : Window
         _recentMenu = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayRecent);
         RebuildRecentMenu();
 
+        _windowsMenu = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayWindows);
+        RebuildWindowsMenu();
+
         var newGroupItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayNewGroup);
         newGroupItem.Click += (_, _) => RunQuickAction("new-group");
         var adminItem = new System.Windows.Forms.ToolStripMenuItem(L10n.TrayAdmin);
@@ -783,6 +905,7 @@ public partial class MainWindow : Window
 
         _trayMenu = new System.Windows.Forms.ContextMenuStrip();
         _trayMenu.Items.Add(_openItem);
+        _trayMenu.Items.Add(_windowsMenu);
         _trayMenu.Items.Add(_recentMenu);
         _trayMenu.Items.Add(newGroupItem);
         _trayMenu.Items.Add(adminItem);
@@ -801,6 +924,7 @@ public partial class MainWindow : Window
             // 多窗口共享同一偏好文件：打开菜单时重读，其他窗口改过的设置也能立即反映
             _settings.CloseToTray = DesktopSettings.Load().CloseToTray;
             UpdateMenuState();
+            RebuildWindowsMenu(); // 未读明细随时间变化：每次展开菜单都重算
         };
 
         _tray = new System.Windows.Forms.NotifyIcon

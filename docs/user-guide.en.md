@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.310**
+> Applies to version: **1.0.311**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -320,7 +320,7 @@ Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), th
 
 Tray context menu (introduced in 1.0.302, expanded in 1.0.303):
 
-- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip). **Multi-window aggregation (1.0.310)**: each window writes its unread counts to `%LocalAppData%\AguiGroupChat\unread\`, and every window's tray / taskbar badge shows the same total; a window removes its file on exit, and stale files are ignored after 2 minutes.
+- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip). **Multi-window aggregation (1.0.310)**: each window writes its unread counts to `%LocalAppData%\AguiGroupChat\unread\`, and every window's tray / taskbar badge shows the same total; a window removes its file on exit, and stale files are ignored after 2 minutes. **Per-window breakdown (1.0.311)**: the tray menu gains an **Unread windows** submenu that expands each window down to its circles (up to 6) — a circle entry of the current window switches to it directly, while entries of other windows bring that window to the foreground; the item is disabled when nothing is unread.
 - **Recent circles ▸**: lists the 10 most recently active circles (**private ones carry a 🔒**). Clicking switches the current window without reloading or opening a new one; if the page is not ready it falls back to the `?group=` deep link. The taskbar jump list still lists non-private circles only.
 - **New circle / Admin console**: the tray menu opens the matching dialog directly (falling back to the `?action=` deep link when the page is not ready).
 - **Window placement**: window size, position and maximized state are saved to `desktop-settings.json` and restored on the next launch; if monitor changes put it off-screen, it falls back to the default position.
@@ -1682,7 +1682,7 @@ Entry: the AI-role toolbar → "🏪 Marketplace" (`#agentMarketBtn` → dialog 
 
 ---
 
-### 3.13 Work-capable digital employees (1.0.310)
+### 3.13 Work-capable digital employees (1.0.310; audit and quota added in 1.0.311)
 
 The agent form (**AI Role Management → Edit → Memory & permissions**) now has a **🛠️ Work-capable Digital Employee** switch.
 
@@ -1713,6 +1713,23 @@ The agent form (**AI Role Management → Edit → Memory & permissions**) now ha
 - No shell: metacharacters (`&`, `|`, `<`, `>`, `^`, `%`, `!`, `;`, backticks, `$`, newlines) are rejected; no paths are accepted, and executables are resolved from `PATH` only (a same-named program inside the workspace is refused);
 - Environment variables whose names contain `KEY / TOKEN / SECRET / PASSWORD / CREDENTIAL / AUTH` are removed;
 - Timeout `Agents:WorkToolTimeoutMs` (default 30s); stdout / stderr are each truncated to 20000 chars.
+
+**Operation audit (1.0.311)**
+
+Every `work_*` call records a one-line summary (command text / file path / exit code / duration; denied or failed calls are prefixed with `⚠`).
+When the answer finishes, these lines are appended to the message's **📋 Execution plan** card and persisted with the message's `planJson` — so after a refresh, or days later, you can still see who made which agent run what and which files it touched.
+Only summaries are stored (never file contents or credentials), capped at 40 entries per answer.
+
+**Workspace quota and cleanup (1.0.311)**
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Agents:WorkSpaceQuotaMb` | `1024` | Total workspace quota in MB; `0` = unlimited |
+| `Agents:WorkSpaceRetentionDays` | `30` | Retain files for N days; `0` = never expire by age |
+
+- Writes are checked against the quota **incrementally** (overwriting a file is not rejected just because the old copy occupies space); over-quota writes fail with a hint to clean up first;
+- A background service sweeps 10 minutes after startup and every 6 hours: first deleting files past the retention window, then deleting oldest-first until the total fits the quota, then reclaiming empty directories;
+- Only `{Agents:WorkSpaceRoot}` (default `data/workspaces`) is touched: files directly under the root and the skill run directory `data/skillruns` are never cleaned; symlinks and junctions are skipped.
 
 > Security: work tools can read/write server files and execute commands, so grant them only to trusted agents. Writes and commands always require human approval in the circle.
 
@@ -5365,10 +5382,12 @@ Named volumes: `agui-web-data` / `agui-docs` / `agui-hub-data` / `agui-pg-data`.
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | `Agents:SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | `Agents:RequireApprovalToolNames__0` |
 | `AGENTS_WORK_TOOLS_ENABLED` / `AGENTS_WORK_TOOL_COMMANDS` | `false` / empty | `Agents:WorkToolsEnabled` / `Agents:WorkToolCommands` |
+| `AGENTS_WORKSPACE_ROOT` / `AGENTS_WORKSPACE_QUOTA_MB` / `AGENTS_WORKSPACE_RETENTION_DAYS` | `data/workspaces` / `1024` / `30` | `Agents:WorkSpaceRoot` / `WorkSpaceQuotaMb` / `WorkSpaceRetentionDays` (1.0.311) |
 | `AGUI_DOCX_OUT` / `AGUI_PHOTO_API` / `AGUI_IMAGE_SOURCE` | `/app/docs` / empty / `library` | Documents / images (not config keys; skills read the env vars) |
 | `AGUI_PREVIEW_TOOLS` | `false` | Build arg: whether to install poppler-utils (layout QA, not a dependency of "View online") |
 
 > `Agents__WorkToolsEnabled` / `Agents__WorkToolCommands` are now bound to `AgentOptions.WorkToolsEnabled` / `WorkToolCommands` (1.0.310). The former is the global gate; the latter is the `work_run_command` executable allowlist (empty = no commands).
+> 1.0.311 adds capacity governance: `WorkSpaceQuotaMb` (total quota, `0` = unlimited) and `WorkSpaceRetentionDays` (retention, `0` = never expire by age), executed by `WorkspaceMaintenanceService` 10 minutes after startup and every 6 hours afterwards; `WorkTools.WriteFile` checks the quota incrementally before writing.
 
 #### 9.5.3 Key points of the Docker build and runtime images (`Dockerfile`)
 

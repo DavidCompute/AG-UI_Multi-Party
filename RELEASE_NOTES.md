@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.310 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.310 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.311 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.311 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作区操作可追溯 + 容量自治理 + 托盘未读明细**——工作型数字员工每一步文件 / 命令操作都写进「执行计划」卡并落库；工作区按保留期与配额自动清理；托盘可直接展开「窗口 → 知聚」未读。
+**Version note**: **Auditable workspace operations, self-governing capacity, and a per-window unread breakdown** — every work-agent file/command action lands in the Execution plan card and is persisted; workspaces self-clean by age and quota; the tray expands unread down to window → circle.
+
+## 变更
+# Changes
+
+中文：
+- **工作区操作审计**：新增 `WorkOpAudit`（`AsyncLocal` 采集器，与 `ToolResultCollector` 同一套路数）与 `GroupHub.AppendMessagePlanStepsAsync`。每次 `work_*` 调用记一条摘要（命令原文 / 文件路径 / 退出码 / 耗时；被拒或失败标 `⚠`），运行收尾时追加到消息「📋 执行计划」卡末尾并随 `planJson` 落库——刷新或隔天回看聊天记录仍可追溯。只记摘要，单次回答上限 40 条。
+- **工作区配额与清理**：`Agents:WorkSpaceQuotaMb`（默认 1024，`0` = 不限制）与 `Agents:WorkSpaceRetentionDays`（默认 30，`0` = 不按时间清理）；新增 `WorkspaceMaintenanceService`（启动 10 分钟后首次、此后每 6 小时）与 `WorkspaceMaintenance.Sweep`（先按保留期删过期文件，再按「最久未修改优先」删到配额内，回收空目录）。`work_write_file` 写前按**增量**校验配额，覆盖写不会误拒。根目录直属文件与 `data/skillruns` 不在清理范围，符号链接 / 联接点一律跳过。
+- **托盘未读明细**：`TrayUnreadAggregator` 的聚合文件新增 `label` / `hwnd` / `groups`；托盘菜单新增「未读窗口」子菜单，按窗口展开到知聚（最多 6 条）。本窗口的知聚条目点击即切换，其他窗口的条目点击把该窗口提到前台；无未读时置灰。前端 `syncDesktopUnread()` 上送当前知聚名与各知聚未读。
+- **配置 / 文档**：compose 暴露 `AGENTS_WORKSPACE_QUOTA_MB` / `AGENTS_WORKSPACE_RETENTION_DAYS`；用户手册 §3.13 补「操作审计 / 工作区容量治理」、§1.2.1 补「未读窗口明细」、§9.5 配置表补两行。
+- **测试**：新增 12 项（保留期清理 / 配额最旧优先 / 根目录不误删 / 空目录回收 / 配额写入拒绝 / 审计记录 / 计划卡追加与落库 / 窗口明细与自身标记），全量 **1891 通过**。
+
+English:
+- **Workspace operation audit**: new `WorkOpAudit` (an `AsyncLocal` collector following the `ToolResultCollector` pattern) plus `GroupHub.AppendMessagePlanStepsAsync`. Every `work_*` call records a one-line summary (command text / file path / exit code / duration; denied or failed calls prefixed with `⚠`), appended to the message's **📋 Execution plan** card when the answer finishes and persisted with `planJson` — traceable after a refresh or days later. Summaries only, capped at 40 per answer.
+- **Workspace quota and cleanup**: `Agents:WorkSpaceQuotaMb` (default 1024, `0` = unlimited) and `Agents:WorkSpaceRetentionDays` (default 30, `0` = never expire by age); new `WorkspaceMaintenanceService` (first run 10 minutes after startup, then every 6 hours) and `WorkspaceMaintenance.Sweep` (delete files past retention, then oldest-first until the quota fits, then reclaim empty directories). `work_write_file` checks the quota **incrementally** before writing, so overwrites are never rejected spuriously. Files directly under the root and `data/skillruns` are untouched; symlinks and junctions are skipped.
+- **Per-window tray unread**: the aggregator file gains `label` / `hwnd` / `groups`; the tray menu gains an **Unread windows** submenu that expands to circles (up to 6 per window). A circle of the current window switches to it directly; entries of other windows bring that window to the foreground; the item is disabled when nothing is unread. The frontend `syncDesktopUnread()` now sends the active circle name and per-circle counts.
+- **Config / docs**: compose exposes `AGENTS_WORKSPACE_QUOTA_MB` / `AGENTS_WORKSPACE_RETENTION_DAYS`; the user guide gains §3.13 audit and capacity sections, §1.2.1 per-window detail, and two §9.5 config rows.
+- **Tests**: 12 new checks (retention sweep / oldest-first quota / root files preserved / empty directory reclamation / quota write rejection / audit records / plan-card append and persistence / window breakdown and self flag); the full suite passes **1891**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13、§1.2.1、§9.5；`docker-compose.yml`；`ROADMAP.md` / `en.md`；`src/AguiGroupChat.Desktop/README.md` / `.en.md`；版本号与「适用版本」同步到 1.0.311。
+English: `docs/user-guide.md` / `en.md` §3.13, §1.2.1, §9.5; `docker-compose.yml`; `ROADMAP.md` / `en.md`; `src/AguiGroupChat.Desktop/README.md` / `.en.md`; version numbers and "applies to version" bumped to 1.0.311.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2079，missing 0**；配置键守卫 **119 键，未登记漂移 0**；文档引用 0 失效；全量 `dotnet test` **1891 通过 / 0 失败**。**无法自动验证**：真实模型触发的 `work_*` 审计在计划卡中的实际渲染（需开启工作型工具并批准一次写 / 命令）、多窗口托盘「未读窗口」子菜单的真实交互（需安装版多开窗口）。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2079, missing 0**; the config-key guard reports **119 keys, 0 unregistered drift**; docs references are clean; the full `dotnet test` run passes **1891 / 0**. **Not automatically verifiable**: how a real model's `work_*` audit lines render in the plan card (needs work tools enabled and one approved write / command) and the actual tray **Unread windows** submenu with several installed windows open.
+
+---
+
+# AG-UI 群聊桌面版 1.0.310 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.310 Release Notes (historical)
 
 **版本说明**：**工作型数字员工落地 + 多窗口未读聚合**——文件 / 命令工具进入专属工作区，写与命令强制审批；所有桌面窗口的托盘未读数统一。
 **Version note**: **Work-capable agents and aggregated unread across desktop windows** — file / command tools run in a dedicated workspace with mandatory approval for writes and commands, and every desktop window shows the same aggregated unread count.

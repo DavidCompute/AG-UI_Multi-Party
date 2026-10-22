@@ -1790,6 +1790,75 @@ public sealed class GroupHub : IDisposable
         }, state.Recipients, ct);
     }
 
+    /// <summary>把工作区操作审计（<c>work_*</c> 调用）追加到消息的「执行计划」卡并落库（1.0.311）。
+    /// 与 <see cref="BroadcastMessagePlanAsync"/> 互补：计划卡可能已由编排阶段广播过，这里在运行收尾时
+    /// 把「执行了什么命令 / 写了哪些文件 / 退出码 / 耗时」作为已完成步骤接在末尾，刷新后仍可回显。
+    /// 消息不存在 / 已结束流式时静默跳过（审计是增强，不阻断主流程）。</summary>
+    public Task AppendMessagePlanStepsAsync(string groupId, string messageId, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct = default)
+    {
+        if (steps is null || steps.Count == 0) return Task.CompletedTask;
+        if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
+            return Task.CompletedTask;
+
+        PlanPayload payload;
+        GroupMessage? msg = null;
+        try
+        {
+            msg = _store.GetMessage(groupId, messageId);
+            payload = msg?.PlanJson is { Length: > 0 } json
+                ? AguiJson.Deserialize<PlanPayload>(json) ?? new PlanPayload()
+                : new PlanPayload();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "计划卡读取失败，改为新建（审计仍会显示）：message={MessageId}", messageId);
+            payload = new PlanPayload();
+            msg = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(payload.Title)) payload.Title = "执行计划";
+        var nextId = payload.Steps.Count == 0 ? 1 : payload.Steps.Max((s) => s.Id) + 1;
+        foreach (var s in steps)
+            payload.Steps.Add(new PlanStepInfo { Id = nextId++, Text = s.Text, Done = s.Done });
+
+        try
+        {
+            var json = AguiJson.Serialize(payload);
+            var target = msg ?? _store.GetMessage(groupId, messageId);
+            if (target is not null)
+            {
+                target.PlanJson = json;
+                _store.UpdateMessage(target);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "计划卡落库失败（已忽略，仅实时广播）：message={MessageId}", messageId);
+        }
+
+        _agentStreams[messageId] = state with { LastActivityMs = NowMs };
+        _changes?.Notify();
+        return FanOutAsync(groupId, new TextMessagePlanEvent
+        {
+            MessageId = messageId,
+            GroupId = groupId,
+            Title = payload.Title,
+            Steps = payload.Steps,
+            Paused = payload.Paused,
+            TriggerMemberId = payload.TriggerMemberId,
+            Timestamp = NowMs,
+        }, state.Recipients, ct);
+    }
+
+    /// <summary>planJson 的可读写形态（追加步骤时需要保留原标题 / 暂停状态 / 触发者）。</summary>
+    private sealed class PlanPayload
+    {
+        public string? Title { get; set; }
+        public List<PlanStepInfo> Steps { get; set; } = [];
+        public bool Paused { get; set; }
+        public string? TriggerMemberId { get; set; }
+    }
+
     /// <summary>重置智能体应答内容：清空已回灌的中间内容（防抖缓冲 + 数据库）并广播 TEXT_MESSAGE_RESET。
     /// 用于人机交互中断：先清空半截回复，等用户反馈、运行继续结束后，最终结果再一次性回灌到同一消息。</summary>
     public Task ResetAgentContentAsync(string groupId, string messageId, CancellationToken ct = default)
