@@ -309,7 +309,21 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(title)) return;
         EnsureTray();
         UpdateMenuState();
-        if (IsTrayMuted) return; // 托盘菜单里的「静音」（只影响气泡）
+        if (IsTrayMuted) return; // 托盘菜单里的「静音」（只影响通知）
+        // 1.0.314：带知聚目标的通知用可交互浮窗（打开 / 忽略），点到「打开」直接定位到那条消息；
+        // 无目标的系统级提示仍用托盘气泡。
+        if (!string.IsNullOrWhiteSpace(_notifyGroupId))
+        {
+            var gid = _notifyGroupId;
+            var tid = _notifyTopicId;
+            var mid = _notifyMessageId;
+            try
+            {
+                new NotificationToast(title, body, () => HandleDeepLink(gid, null, tid, mid)).Show();
+                return;
+            }
+            catch { /* 浮窗创建失败：回退托盘气泡 */ }
+        }
         ShowTrayBalloon(title, body);
     }
 

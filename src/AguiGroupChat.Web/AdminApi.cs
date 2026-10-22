@@ -661,6 +661,31 @@ public static class AdminApi
             return Results.File(full, "application/octet-stream", Path.GetFileName(full), enableRangeProcessing: true);
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 工作区操作审计汇总（1.0.314）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
+        root.MapGet("/work-audits", (int? days, string? agentId, string? q, int? limit,
+            GroupHub hub, AgentCatalog catalog) =>
+        {
+            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, days ?? 7, agentId, q, limit ?? 500);
+            return Results.Ok(new
+            {
+                items = r.Items.Select(e => new
+                {
+                    e.GroupId, e.GroupName, e.AgentId, e.MessageId, e.TopicId, e.At,
+                    e.Tool, e.Ok, e.DurationMs, e.Text,
+                }),
+                r.Truncated,
+                r.ScannedMessages,
+                days = Math.Clamp(days ?? 7, 1, 90),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        root.MapGet("/work-audits.csv", (int? days, string? agentId, string? q,
+            GroupHub hub, AgentCatalog catalog) =>
+        {
+            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, days ?? 7, agentId, q, 5000);
+            return Results.Text(WorkAuditReport.ToCsv(r.Items), "text/csv; charset=utf-8");
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员及以上（含运维）。
         root.MapGet("/metrics", (HttpContext ctx, AguiGroupChat.Agents.MetricsService metrics) =>
         {

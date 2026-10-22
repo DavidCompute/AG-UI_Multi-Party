@@ -2343,6 +2343,44 @@
               <tbody id="adminWorkspaceFileRows"></tbody>
             </table>
           </div>
+          <!-- 文件预览（1.0.314）：文本 / 图片直接在面板内看，不下载 -->
+          <div id="adminWsFilePreview" class="hidden" style="margin-top:10px">
+            <div class="admin-toolbar">
+              <b id="adminWsFilePreviewTitle"></b>
+              <span id="adminWsFilePreviewMeta" class="form-hint"></span>
+              <button id="wsFilePreviewClose" class="chip-btn" type="button" data-i18n="admin.wsPreviewClose">✕ 关闭预览</button>
+            </div>
+            <div id="adminWsFilePreviewBody" class="ws-file-preview"></div>
+          </div>
+        </div>
+        <!-- 工作区操作审计汇总（1.0.314）：跨消息查最近 N 天的 work_* 调用，可导出 CSV -->
+        <div class="modal-title" style="margin-top:16px" data-i18n="admin.waTitle">工作区操作审计</div>
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="admin.waHint">汇总带计划卡的回答里的工作区操作（命令 / 读写 / 列目录）。按天数、关键词筛选，可导出 CSV 归档；“定位”会关掉控制台并跳到那条消息。</p>
+        <div class="admin-toolbar">
+          <select id="waDays" class="modal-input" style="width:auto;min-width:110px">
+            <option value="1" data-i18n="admin.waDays1">最近 1 天</option>
+            <option value="7" data-i18n="admin.waDays7" selected>最近 7 天</option>
+            <option value="30" data-i18n="admin.waDays30">最近 30 天</option>
+            <option value="90" data-i18n="admin.waDays90">最近 90 天</option>
+          </select>
+          <input id="waQuery" class="modal-input" style="width:auto;min-width:200px" data-i18n-placeholder="admin.waQueryPlaceholder" />
+          <button id="waRefreshBtn" class="chip-btn" type="button" data-i18n="admin.wsRefresh">↻ 刷新</button>
+          <button id="waExportBtn" class="chip-btn" type="button" data-i18n="admin.waExport">⬇ 导出 CSV</button>
+          <span id="waMeta" class="form-hint"></span>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr>
+              <th data-i18n="admin.thTime">时间</th>
+              <th data-i18n="admin.thAgent">数字员工</th>
+              <th data-i18n="admin.waTool">工具</th>
+              <th data-i18n="admin.waResult">结果</th>
+              <th data-i18n="admin.waCost">耗时</th>
+              <th data-i18n="admin.waText">摘要</th>
+              <th data-i18n="admin.thOps">操作</th>
+            </tr></thead>
+            <tbody id="adminWorkAuditRows"></tbody>
+          </table>
         </div>
       </div>
       <!-- 出站 Webhook（对外集成）：把知聚事件以带签名的 POST 推送给外部系统 -->

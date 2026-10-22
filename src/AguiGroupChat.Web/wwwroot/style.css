@@ -2440,6 +2440,19 @@ button { white-space: nowrap; }
 .plan-audit-item.bad { color: #e5a50a; }
 .plan-audit-item.bad::before { content: "⚠"; left: 0; }
 
+/* 工作区文件预览（1.0.314）：内联看文本 / 图片，不另开弹窗 */
+.ws-file-preview {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  background: rgba(128,141,180,.04); max-height: 380px; overflow: auto;
+}
+.ws-file-preview-text {
+  margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text);
+}
+.ws-file-preview-img { display: block; max-width: 100%; margin: 0 auto; border-radius: 6px; }
+/* 工作区操作审计汇总（1.0.314）：摘要列截断显示，完整内容看 title */
+.admin-table td.wa-text { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 智能体技能调用链（链路可视化）：嵌套缩进卡片 */
 .msg .chain-card {
   margin-top: 10px; padding: 2px 12px 10px;

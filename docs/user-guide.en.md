@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.313**
+> Applies to version: **1.0.314**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -320,7 +320,7 @@ Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), th
 
 Tray context menu (introduced in 1.0.302, expanded in 1.0.303):
 
-- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip). **Multi-window aggregation (1.0.310)**: each window writes its unread counts to `%LocalAppData%\AguiGroupChat\unread\`, and every window's tray / taskbar badge shows the same total; a window removes its file on exit, and stale files are ignored after 2 minutes. **Per-window breakdown (1.0.311)**: the tray menu gains an **Unread windows** submenu that expands each window down to its circles (up to 6) — a circle entry of the current window switches to it directly, while entries of other windows **send a targeted deep link over that window's pipe so it switches to the circle and comes forward** (falling back to just bringing it forward when the pipe is unreachable, 1.0.312); the item is disabled when nothing is unread. **Message-level notification jumps (1.0.313)**: clicking a desktop system notification switches to the circle that triggered it, selects the topic and scrolls to that message (`openDeepLink()`; the same applies to browser Web Notifications).
+- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip). **Multi-window aggregation (1.0.310)**: each window writes its unread counts to `%LocalAppData%\AguiGroupChat\unread\`, and every window's tray / taskbar badge shows the same total; a window removes its file on exit, and stale files are ignored after 2 minutes. **Per-window breakdown (1.0.311)**: the tray menu gains an **Unread windows** submenu that expands each window down to its circles (up to 6) — a circle entry of the current window switches to it directly, while entries of other windows **send a targeted deep link over that window's pipe so it switches to the circle and comes forward** (falling back to just bringing it forward when the pipe is unreachable, 1.0.312); the item is disabled when nothing is unread. **Message-level notification jumps (1.0.313)**: clicking a desktop system notification switches to the circle that triggered it, selects the topic and scrolls to that message (`openDeepLink()`; the same applies to browser Web Notifications). **Interactive toasts (1.0.314)**: notifications that carry a circle target use a bottom-right toast (title / excerpt plus **Open** and **Dismiss**, paused on hover, auto-dismiss after 8 seconds, stacked bottom-up), and **Open** jumps straight to the message; system-level notices without a target still use the tray balloon.
 - **Recent circles ▸**: lists the 10 most recently active circles (**private ones carry a 🔒**). Clicking switches the current window without reloading or opening a new one; if the page is not ready it falls back to the `?group=` deep link. The taskbar jump list still lists non-private circles only.
 - **New circle / Admin console**: the tray menu opens the matching dialog directly (falling back to the `?action=` deep link when the page is not ready).
 - **Window placement**: window size, position and maximized state are saved to `desktop-settings.json` and restored on the next launch; if monitor changes put it off-screen, it falls back to the default position.
@@ -1723,6 +1723,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - Grouped by tool: ⚡ commands / 💾 writes / 📄 reads / 📁 listings / 🔧 other;
 - When anything failed, only the failures are expanded by default; the button in the header cycles **show all / only failures / collapse**;
 - **CSV export (1.0.313)**: the `⬇ CSV` button exports this answer's audit rows as `work-audit-<messageId>.csv` (columns `tool / ok / durationMs / text`, BOM-prefixed so Excel opens it without mojibake);
+- **Cross-message aggregation (1.0.314)**: the admin **Workspaces** tab lists every workspace action from the last 1 / 7 / 30 / 90 days (time / agent / tool / result / duration / summary), filterable by keyword, exportable as CSV (`GET /ag-ui/admin/work-audits[.csv]`); **Locate** closes the console and jumps to that message;
 - Summaries only (never file contents or credentials), capped at 60 entries per answer.
 
 **Workspace quota and cleanup (1.0.311)**
@@ -1737,6 +1738,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - Only `{Agents:WorkSpaceRoot}` (default `data/workspaces`) is touched: files directly under the root and the skill run directory `data/skillruns` are never cleaned; symlinks and junctions are skipped.
 - **Visualization (1.0.312)**: the admin console's **Workspaces** tab lists each agent workspace's usage / file count / last modified, lets you copy the root path, and cleans one or all workspaces by policy (with a confirmation and an audit-log entry).
 - **File browser (1.0.313)**: **📂 Browse files** expands that workspace's file list below the table (relative path / size / modified) with per-file downloads; the server only accepts relative paths inside the workspace and rejects escapes, absolute paths, symlinks and junctions with 400.
+- **Inline preview (1.0.314)**: text files (txt / md / json / csv / code, ≤512 KB) and images (png / jpg / gif / webp / svg, etc.) render right in the panel; everything else is download-only.
 
 > Security: work tools can read/write server files and execute commands, so grant them only to trusted agents. Writes and commands always require human approval in the circle.
 
@@ -3902,7 +3904,7 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API keys | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`, `DELETE /ag-ui/admin/api-keys/{id}` (see 8.20) |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | Agent performance | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | Evaluation | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`, `DELETE …/{id}`, `POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | Workspaces | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`, `POST /ag-ui/admin/workspaces/cleanup[?agentId=]`, `GET /ag-ui/admin/workspaces/{agentId}/files`, `GET /ag-ui/admin/workspaces/{agentId}/file?path=` (1.0.312 / 1.0.313) |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | Workspaces | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`, `POST …/cleanup[?agentId=]`, `GET …/{agentId}/files`, `GET …/{agentId}/file?path=`, `GET /ag-ui/admin/work-audits[.csv]` (1.0.312–1.0.314) |
 
 Opening and switching (`app.js`):
 

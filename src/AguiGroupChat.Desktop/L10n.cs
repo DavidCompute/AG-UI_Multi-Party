@@ -83,6 +83,9 @@ public static class L10n
         ? $"○ {label}"
         : $"○ {label}";
     public static string TrayWindowUntitled => IsZh() ? "未选择知聚" : "No circle selected";
+    // 可交互通知浮窗（1.0.314）
+    public static string ToastOpen => IsZh() ? "打开" : "Open";
+    public static string ToastDismiss => IsZh() ? "忽略" : "Dismiss";
     public static string TaskbarRunning(string label) => IsZh()
         ? $"正在执行：{label}"
         : $"Running: {label}";

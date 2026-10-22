@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.313 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.313 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.314 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.314 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作区可预览 + 审计可汇总 + 通知可操作**——文本 / 图片在工作区面板内直接看；跨消息汇总最近 N 天的工作区操作并可导出 CSV；通知改成带「打开 / 忽略」的右下角浮窗。
+**Version note**: **Previewable workspaces, aggregated audit, actionable notifications** — text and images render right in the workspace panel; workspace actions aggregate across messages with CSV export; notifications become a bottom-right toast with Open and Dismiss.
+
+## 变更
+# Changes
+
+中文：
+- **工作区文件预览**：文件清单增加「👁 预览」。文本类（txt / md / json / csv / 代码等，≤512 KB）与图片类（png / jpg / gif / webp / svg）直接在面板内渲染，其余仍只提供下载；超限或不可预览时给明确提示。
+- **审计跨消息汇总**：新增 `GET /ag-ui/admin/work-audits`（`days` / `agentId` / `q` / `limit`）与 `.csv` 导出；`WorkAuditReport` 扫带 `planJson` 的回复，抽出 `audit[]` 并补上知聚 / 消息 / 时间，天数 1–90、条数上限 5000。管理控制台「工作区」页新增「工作区操作审计」表格：时间 / 员工 / 工具 / 结果 / 耗时 / 摘要 + 「定位」（关掉控制台并跳到该消息）+ CSV 导出。
+- **可交互通知浮窗**：新增 `NotificationToast`（无边框、右下角、不抢焦点）；带知聚目标的通知显示「打开 / 忽略」，悬停暂停、8 秒自动消失、多条自下而上堆叠；「打开」经深链定位到那条消息。无目标的系统级提示仍用托盘气泡。
+- **测试**：新增 5 项（审计抽取 / 员工与关键词与天数筛选 / 截断标记 / 非法 JSON 忽略 / CSV 转义与 BOM），全量 **1900 通过**。
+
+English:
+- **Workspace file preview**: the file list gains **👁 Preview**. Text (txt / md / json / csv / code, ≤512 KB) and images (png / jpg / gif / webp / svg) render inside the panel; everything else stays download-only, with a clear hint when a file is too large or unsupported.
+- **Cross-message audit aggregation**: new `GET /ag-ui/admin/work-audits` (`days` / `agentId` / `q` / `limit`) plus `.csv` export; `WorkAuditReport` scans replies carrying `planJson`, extracts `audit[]` and attaches circle / message / time, bounded to 1–90 days and 5000 rows. The admin **Workspaces** tab gains a **Workspace action audit** table (time / agent / tool / result / duration / summary) with **Locate** (closes the console and jumps to that message) and CSV export.
+- **Interactive notification toasts**: new `NotificationToast` (borderless, bottom-right, non-activating); notifications with a circle target show **Open** and **Dismiss**, pause on hover, auto-dismiss after 8 seconds and stack bottom-up; **Open** deep-links to the message. System-level notices without a target still use the tray balloon.
+- **Tests**: 5 new checks (audit extraction / agent, keyword and date filters / truncation flag / malformed JSON ignored / CSV escaping and BOM); the full suite passes **1900**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（文件预览 / 审计汇总）、§1.2.1（通知浮窗）、§8 控制台页签表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.314。
+English: `docs/user-guide.md` / `en.md` §3.13 (file preview / audit aggregation), §1.2.1 (notification toast), and the chapter 8 tab table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.314.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误（Desktop 0 警告）；`node --check app.js`；i18n 审计 **zh=en=2136，missing 0**；配置键守卫 **119 键，未登记漂移 0**；文档引用 0 失效；全量 `dotnet test` **1900 通过 / 0 失败**。**无法自动验证**：浮窗的实际弹出 / 堆叠 / 点「打开」定位（需安装版运行），以及真实模型产生审计后的汇总查询。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors (Desktop with 0 warnings); `node --check app.js` passes; the i18n audit reports **zh=en=2136, missing 0**; the config-key guard reports **119 keys, 0 unregistered drift**; docs references are clean; the full `dotnet test` run passes **1900 / 0**. **Not automatically verifiable**: the toast appearing / stacking / Open-jump (needs an installed build) and the aggregated query over audit rows produced by a real model.
+
+---
+
+# AG-UI 群聊桌面版 1.0.313 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.313 Release Notes (historical)
 
 **版本说明**：**工作区可浏览 + 审计可导出 + 通知可定位**——管理控制台可查看并下载工作区文件；计划卡审计一键导出 CSV；点击桌面通知直接跳到触发它的那条消息。
 **Version note**: **Browsable workspaces, exportable audit, pinpoint notifications** — the admin console can list and download workspace files; the plan-card audit exports to CSV in one click; clicking a desktop notification jumps straight to the message that triggered it.

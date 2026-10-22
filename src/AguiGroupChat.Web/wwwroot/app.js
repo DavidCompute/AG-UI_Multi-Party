@@ -8849,6 +8849,7 @@ function switchAdminTab(tab) {
     loadStorageGovernance();
   } else if (workspaces) {
     loadAdminWorkspaces();
+    loadWorkAudits();
   } else if (webhooks) {
     loadWebhooks();
     loadWebhookDeliveries();
@@ -9840,18 +9841,145 @@ async function browseWorkspaceFiles(agentId) {
       rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.wsFilesEmpty")}</td></tr>`;
       return;
     }
-    rows.innerHTML = files.map((f) => {
+    rows.innerHTML = files.map((f, idx) => {
       const url = authedAssetUrl(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(f.path)}`);
+      const kind = wsFileKind(f.path);
+      const canPreview = kind === "text" || kind === "image";
+      const previewBtn = canPreview
+        ? `<button class="chip-btn" type="button" data-ws-preview="${idx}">👁 ${escapeHtml(t("admin.wsPreview"))}</button> `
+        : "";
       return `<tr>
         <td><code>${escapeHtml(f.path)}</code></td>
         <td>${escapeHtml(fmtBytes(Number(f.bytes) || 0))}</td>
         <td>${f.modifiedUtc ? escapeHtml(fmtDateTime(f.modifiedUtc)) : "—"}</td>
-        <td><a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a></td>
+        <td>${previewBtn}<a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a></td>
       </tr>`;
     }).join("");
+    rows.querySelectorAll("[data-ws-preview]").forEach((btn) => {
+      btn.onclick = () => previewWorkspaceFile(agentId, files[Number(btn.dataset.wsPreview)]);
+    });
   } catch (ex) {
     rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
   }
+}
+
+/** 可预览类型（1.0.314）：文本类直接内联展示，图片类用 <img>；其余只给下载。 */
+const WS_PREVIEW_TEXT_EXT = new Set(["txt", "md", "markdown", "json", "csv", "tsv", "log", "xml", "yml", "yaml", "html", "htm", "css", "js", "mjs", "cjs", "ts", "py", "cs", "java", "go", "rs", "sh", "ps1", "bat", "sql", "ini", "conf", "toml", "env"]);
+const WS_PREVIEW_IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"]);
+const WS_PREVIEW_MAX_BYTES = 512 * 1024;
+
+function wsFileKind(path) {
+  const name = String(path || "");
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  if (WS_PREVIEW_IMAGE_EXT.has(ext)) return "image";
+  if (WS_PREVIEW_TEXT_EXT.has(ext)) return "text";
+  return "other";
+}
+
+/** 在面板内预览工作区文件（1.0.314）：文本 >512 KB 不给预览，避免把弹窗卡死。 */
+async function previewWorkspaceFile(agentId, f) {
+  const box = $("adminWsFilePreview");
+  const body = $("adminWsFilePreviewBody");
+  const title = $("adminWsFilePreviewTitle");
+  const meta = $("adminWsFilePreviewMeta");
+  if (!box || !body || !f) return;
+  const url = `/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(f.path)}`;
+  box.classList.remove("hidden");
+  if (title) title.textContent = f.path;
+  if (meta) meta.textContent = fmtBytes(Number(f.bytes) || 0);
+  const kind = wsFileKind(f.path);
+  if (kind === "image") {
+    body.innerHTML = `<img class="ws-file-preview-img" src="${escapeHtml(authedAssetUrl(url))}" alt="${escapeHtml(f.path)}" />`;
+    return;
+  }
+  if (kind !== "text") {
+    body.innerHTML = `<div class="form-hint">${escapeHtml(t("admin.wsPreviewUnsupported"))}</div>`;
+    return;
+  }
+  if ((Number(f.bytes) || 0) > WS_PREVIEW_MAX_BYTES) {
+    body.innerHTML = `<div class="form-hint">${escapeHtml(t("admin.wsPreviewTooLarge", { size: fmtBytes(WS_PREVIEW_MAX_BYTES) }))}</div>`;
+    return;
+  }
+  body.innerHTML = `<div class="form-hint">${escapeHtml(t("admin.loading"))}</div>`;
+  try {
+    const res = await fetch(authedAssetUrl(url));
+    if (!res.ok) {
+      body.innerHTML = `<div class="form-hint">${escapeHtml(t("admin.loadFail", { err: "HTTP " + res.status }))}</div>`;
+      return;
+    }
+    const text = await res.text();
+    body.innerHTML = `<pre class="ws-file-preview-text">${escapeHtml(text)}</pre>`;
+  } catch (ex) {
+    body.innerHTML = `<div class="form-hint">${escapeHtml(t("admin.loadFail", { err: ex.message }))}</div>`;
+  }
+}
+
+/** 工作区操作审计汇总（1.0.314）：跨消息查最近 N 天的 work_* 调用，支持关键词筛选 / CSV 导出 / 定位。 */
+let workAuditItems = [];
+
+function workAuditQuery() {
+  const days = Number($("waDays")?.value) || 7;
+  const q = ($("waQuery")?.value || "").trim();
+  return { days, q };
+}
+
+async function loadWorkAudits() {
+  const rows = $("adminWorkAuditRows");
+  const meta = $("waMeta");
+  if (!rows) return;
+  const { days, q } = workAuditQuery();
+  rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const url = `/ag-ui/admin/work-audits?days=${days}&limit=300` + (q ? "&q=" + encodeURIComponent(q) : "");
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) {
+      rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(d, "HTTP " + res.status)) })}</td></tr>`;
+      return;
+    }
+    workAuditItems = d.items || [];
+    if (meta) {
+      meta.textContent = t("admin.waMeta", { count: workAuditItems.length, scanned: d.scannedMessages || 0 })
+        + (d.truncated ? " · " + t("admin.waTruncated") : "");
+    }
+    if (!workAuditItems.length) {
+      rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.waEmpty")}</td></tr>`;
+      return;
+    }
+    rows.innerHTML = workAuditItems.map((x, idx) => `<tr>
+      <td>${escapeHtml(fmtDateTime(x.at))}</td>
+      <td>${escapeHtml(x.agentId || "—")}</td>
+      <td><code>${escapeHtml(x.tool || "")}</code></td>
+      <td>${x.ok ? "✅" : "⚠️"}</td>
+      <td>${Number(x.durationMs) || 0} ms</td>
+      <td class="wa-text" title="${escapeHtml(x.text || "")}">${escapeHtml(x.text || "")}</td>
+      <td><button class="chip-btn" type="button" data-wa-goto="${idx}">${escapeHtml(t("admin.waGoto"))}</button></td>
+    </tr>`).join("");
+    rows.querySelectorAll("[data-wa-goto]").forEach((btn) => {
+      btn.onclick = () => {
+        const e = workAuditItems[Number(btn.dataset.waGoto)];
+        if (!e) return;
+        $("adminModal").classList.add("hidden");
+        stopAdminMetricsPoll();
+        openDeepLink(e.groupId, e.topicId, e.messageId);
+      };
+    });
+  } catch (ex) {
+    rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
+  }
+}
+
+/** 导出工作区操作审计 CSV（按当前筛选条件，最多 5000 条）。 */
+function exportWorkAudits() {
+  const { days, q } = workAuditQuery();
+  const url = authedAssetUrl("/ag-ui/admin/work-audits.csv?days=" + days + (q ? "&q=" + encodeURIComponent(q) : ""));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `work-audits-${days}d.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /** 按策略清理（agentId 为空 = 整根目录）。清理前二次确认：删除不可恢复。 */
@@ -15597,12 +15725,15 @@ function init() {
   $("wsRefreshBtn").onclick = () => loadAdminWorkspaces();
   $("wsCleanupAllBtn").onclick = () => cleanupWorkspaces(null);
   $("wsFilesCloseBtn").onclick = () => $("adminWorkspaceFiles").classList.add("hidden");
+  $("wsFilePreviewClose").onclick = () => $("adminWsFilePreview").classList.add("hidden");
   $("wsCopyPathBtn").onclick = () => {
     if (!adminWorkspacesRoot) return;
     navigator.clipboard?.writeText(adminWorkspacesRoot).then(
       () => toast(t("admin.wsCopied")),
       () => toast(t("admin.wsCopyFail")));
   };
+  $("waRefreshBtn").onclick = () => loadWorkAudits();
+  $("waExportBtn").onclick = () => exportWorkAudits();
   $("adminTabPerf").onclick = () => switchAdminTab("perf");
   $("adminTabEval").onclick = () => switchAdminTab("eval");
   bindEvalConsole();
