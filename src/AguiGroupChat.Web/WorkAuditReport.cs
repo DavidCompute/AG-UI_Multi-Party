@@ -6,11 +6,13 @@ using AguiGroupChat.Hub.Storage;
 namespace AguiGroupChat.Web;
 
 /// <summary>
-/// 跨消息汇总「工作区操作审计」（1.0.314）：计划卡里的 <c>audit[]</c> 原本只跟着单条消息走，
-/// 想按员工 / 时间 / 命令查就得一条条翻聊天记录。这里把最近 N 天带 <c>planJson</c> 的回复扫一遍，
-/// 抽出审计行给管理控制台筛选与导出。
+/// 工作区操作审计查询（1.0.314；1.0.315 起改读按月归档）：
 ///
-/// <para>性能边界：只扫 <c>PlanJson</c> 非空的消息（工作型员工才会写），按时间截止过滤；
+/// <para>来源优先级：① <see cref="WorkAuditArchive"/>（按月 JSONL，查询成本只与命中行数相关）；
+/// ② 归档为空（首次使用 / 归档不可用）时回扫带 <c>planJson</c> 的回复，并把结果回填归档，
+/// 让后续查询走归档。即使回填与实时写入重叠，读取侧按 key 去重不会重复计数。</para>
+///
+/// <para>回扫边界：跳过「最近消息早于截止时间」的知聚（<see cref="IGroupStore.LastMessageAt"/>），
 /// 天数上限 90、条数上限 5000。</para>
 /// </summary>
 public static class WorkAuditReport
@@ -20,6 +22,7 @@ public static class WorkAuditReport
         string GroupId,
         string GroupName,
         string AgentId,
+        string AgentName,
         string MessageId,
         string TopicId,
         long At,
@@ -28,11 +31,23 @@ public static class WorkAuditReport
         long DurationMs,
         string Text);
 
-    public sealed record Result(IReadOnlyList<Entry> Items, bool Truncated, int ScannedMessages);
+    /// <summary><paramref name="Source"/>：<c>archive</c> = 读归档 / <c>scan</c> = 回扫消息。</summary>
+    public sealed record Result(IReadOnlyList<Entry> Items, bool Truncated, int ScannedMessages, string Source = "scan");
+
+    /// <summary>兼容旧调用（测试 / 无归档宿主）：直接扫消息。</summary>
+    public static Result Collect(
+        IGroupStore store,
+        Func<string, string?>? nicknameOf,
+        int days,
+        string? agentId,
+        string? query,
+        int limit)
+        => Collect(store, nicknameOf, archive: null, days, agentId, query, limit);
 
     public static Result Collect(
         IGroupStore store,
         Func<string, string?>? nicknameOf,
+        WorkAuditArchive? archive,
         int days,
         string? agentId,
         string? query,
@@ -41,40 +56,88 @@ public static class WorkAuditReport
         var clampedDays = Math.Clamp(days <= 0 ? 7 : days, 1, 90);
         var max = Math.Clamp(limit <= 0 ? 500 : limit, 1, 5000);
         var cutoff = DateTimeOffset.UtcNow.AddDays(-clampedDays).ToUnixTimeMilliseconds();
+
+        var rows = new List<WorkAuditEntry>();
+        var scanned = 0;
+        var source = "scan";
+
+        if (archive is not null)
+        {
+            try { rows.AddRange(archive.Read(cutoff)); } catch { /* 归档不可读：退回扫描 */ }
+            if (rows.Count > 0) source = "archive";
+        }
+
+        if (rows.Count == 0)
+        {
+            var (scannedRows, scannedMessages) = Scan(store, nicknameOf, cutoff);
+            scanned = scannedMessages;
+            rows = scannedRows;
+            if (archive is not null)
+            {
+                foreach (var r in rows) archive.Record(r); // 回填：下次查询走归档
+            }
+        }
+
         var needle = string.IsNullOrWhiteSpace(query) ? null : query.Trim();
         var agentFilter = string.IsNullOrWhiteSpace(agentId) ? null : agentId.Trim();
 
         var items = new List<Entry>();
-        var scanned = 0;
         var truncated = false;
+        foreach (var r in rows
+            .Where((x) => agentFilter is null || string.Equals(x.AgentId, agentFilter, StringComparison.Ordinal))
+            .Where((x) => needle is null
+                || x.Text.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                || x.Tool.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending((x) => x.At))
+        {
+            items.Add(new Entry(r.GroupId, r.GroupName, r.AgentId, r.AgentName, r.MessageId, r.TopicId, r.At,
+                r.Tool, r.Ok, r.DurationMs, r.Text));
+            if (items.Count >= max) { truncated = true; break; }
+        }
+
+        return new Result(items, truncated, scanned, source);
+    }
+
+    /// <summary>直接扫消息（归档回填 / 无归档宿主）：从 <c>planJson.audit</c> 抽行。</summary>
+    public static (List<WorkAuditEntry> Rows, int ScannedMessages) Scan(
+        IGroupStore store,
+        Func<string, string?>? nicknameOf,
+        long cutoffMs)
+    {
+        var rows = new List<WorkAuditEntry>();
+        var scanned = 0;
 
         foreach (var group in store.AllGroups())
         {
-            if (items.Count >= max) { truncated = true; break; }
+            // 整支知聚最近都没有消息 → 不可能有本区间的审计，直接跳过（省掉一次全量消息读取）
+            try
+            {
+                var last = store.LastMessageAt(group.GroupId);
+                if (last is null || last < cutoffMs) continue;
+            }
+            catch { /* 读不到活跃度：保守扫描 */ }
+
             IReadOnlyList<Hub.Models.GroupMessage> messages;
             try { messages = store.AllMessages(group.GroupId); }
             catch { continue; }
 
-            for (var i = messages.Count - 1; i >= 0; i--)
+            for (var i = 0; i < messages.Count; i++)
             {
                 var m = messages[i];
-                // 不依赖存储实现是否按时间排序（内存实现按插入顺序）：早于截止时间就跳过而不是停止
-                if (m.Timestamp < cutoff) continue;
+                if (m.Timestamp < cutoffMs) continue;
                 if (string.IsNullOrEmpty(m.PlanJson)) continue;
-                if (agentFilter is not null && !string.Equals(m.SenderId, agentFilter, StringComparison.Ordinal)) continue;
                 scanned++;
-                if (!TryReadAudit(m.PlanJson!, out var rows)) continue;
+                if (!TryReadAudit(m.PlanJson!, out var auditRows)) continue;
 
-                foreach (var row in rows)
+                var agent = nicknameOf?.Invoke(m.SenderId) ??
+                    (string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname!);
+                foreach (var row in auditRows)
                 {
-                    if (needle is not null
-                        && !row.Text.Contains(needle, StringComparison.OrdinalIgnoreCase)
-                        && !row.Tool.Contains(needle, StringComparison.OrdinalIgnoreCase)) continue;
-                    items.Add(new Entry(
+                    rows.Add(new WorkAuditEntry(
                         group.GroupId,
                         group.GroupName,
-                        nicknameOf?.Invoke(m.SenderId) ??
-                            (string.IsNullOrWhiteSpace(m.SenderNickname) ? m.SenderId : m.SenderNickname!),
+                        m.SenderId,
+                        agent,
                         m.MessageId,
                         m.TopicId,
                         m.Timestamp,
@@ -82,13 +145,10 @@ public static class WorkAuditReport
                         row.Ok,
                         row.DurationMs,
                         row.Text));
-                    if (items.Count >= max) { truncated = true; break; }
                 }
-                if (truncated) break;
             }
         }
-
-        return new Result(items.OrderByDescending((e) => e.At).ToList(), truncated, scanned);
+        return (rows, scanned);
     }
 
     /// <summary>导出 CSV（带 BOM，Excel 直接打开不乱码）。</summary>
@@ -102,12 +162,13 @@ public static class WorkAuditReport
 
         var sb = new StringBuilder();
         sb.Append('\uFEFF');
-        sb.AppendLine("time,group,agent,tool,ok,durationMs,text,messageId,topicId");
+        sb.AppendLine("time,group,agent,agentId,tool,ok,durationMs,text,messageId,topicId");
         foreach (var e in items)
         {
             sb.Append(Esc(DateTimeOffset.FromUnixTimeMilliseconds(e.At).ToLocalTime()
                 .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))).Append(',')
               .Append(Esc(e.GroupName)).Append(',')
+              .Append(Esc(string.IsNullOrWhiteSpace(e.AgentName) ? e.AgentId : e.AgentName)).Append(',')
               .Append(Esc(e.AgentId)).Append(',')
               .Append(Esc(e.Tool)).Append(',')
               .Append(e.Ok ? "true" : "false").Append(',')

@@ -183,6 +183,10 @@ public sealed class AgentOptions
     /// <summary>工作区文件保留天数（默认 30；0 = 永不按时间清理）。后台维护服务每 6 小时扫描一次。</summary>
     public int WorkSpaceRetentionDays { get; set; } = 30;
 
+    /// <summary>工作区操作审计归档保留天数（默认 365；0 = 永久保留）。
+    /// 归档按自然月存成 <c>data/work-audit/audit-YYYY-MM.jsonl</c>，过期月份在启动 10 分钟后 / 每 12 小时清理一次。</summary>
+    public int WorkAuditRetentionDays { get; set; } = 365;
+
     /// <summary>web_search 工具端点（默认 DuckDuckGo Instant Answer API，免费无密钥，返回摘要式结果）。</summary>
     public string WebSearchEndpoint { get; set; } = "https://api.duckduckgo.com/";
 

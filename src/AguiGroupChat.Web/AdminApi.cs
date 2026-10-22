@@ -661,28 +661,61 @@ public static class AdminApi
             return Results.File(full, "application/octet-stream", Path.GetFileName(full), enableRangeProcessing: true);
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 工作区操作审计汇总（1.0.314）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
-        root.MapGet("/work-audits", (int? days, string? agentId, string? q, int? limit,
-            GroupHub hub, AgentCatalog catalog) =>
+        // 工作区文件操作（1.0.315）：删除单文件 / 新建目录；同样走路径校验 + 审计日志。
+        root.MapDelete("/workspaces/{agentId}/file", (string agentId, string? path, HttpContext ctx, AgentOptions options,
+            AuthService auth, Microsoft.Extensions.Hosting.IHostEnvironment env, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
-            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, days ?? 7, agentId, q, limit ?? 500);
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            if (!WorkspaceMaintenance.DeleteFile(dir, path)) return Results.BadRequest(new { error = "invalid_path" });
+            var me = WebIdentity.UserId(ctx)!;
+            audit.Record("admin.workspaces.delete", me, auth.GetUser(me)?.Username, targetType: "workspace", targetId: agentId,
+                detail: $"删除文件 {path}");
+            return Results.Ok(new { ok = true, agentId, path });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        root.MapPost("/workspaces/{agentId}/dir", (string agentId, string? path, HttpContext ctx, AgentOptions options,
+            AuthService auth, Microsoft.Extensions.Hosting.IHostEnvironment env, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            if (!WorkspaceMaintenance.CreateDirectory(dir, path)) return Results.BadRequest(new { error = "invalid_path" });
+            var me = WebIdentity.UserId(ctx)!;
+            audit.Record("admin.workspaces.mkdir", me, auth.GetUser(me)?.Username, targetType: "workspace", targetId: agentId,
+                detail: $"新建目录 {path}");
+            return Results.Ok(new { ok = true, agentId, path });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 工作区操作审计汇总（1.0.314；1.0.315 起读按月归档）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
+        // 归档服务用 GetService 可选解析：轻量宿主（测试 / 嵌入式）没注册时自动退回扫消息。
+        root.MapGet("/work-audits", (int? days, string? agentId, string? q, int? limit,
+            GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
+        {
+            var archive = sp.GetService<WorkAuditArchive>();
+            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
+                days ?? 7, agentId, q, limit ?? 500);
             return Results.Ok(new
             {
                 items = r.Items.Select(e => new
                 {
-                    e.GroupId, e.GroupName, e.AgentId, e.MessageId, e.TopicId, e.At,
+                    e.GroupId, e.GroupName, e.AgentId, e.AgentName, e.MessageId, e.TopicId, e.At,
                     e.Tool, e.Ok, e.DurationMs, e.Text,
                 }),
                 r.Truncated,
                 r.ScannedMessages,
+                r.Source,
                 days = Math.Clamp(days ?? 7, 1, 90),
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         root.MapGet("/work-audits.csv", (int? days, string? agentId, string? q,
-            GroupHub hub, AgentCatalog catalog) =>
+            GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
-            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, days ?? 7, agentId, q, 5000);
+            var archive = sp.GetService<WorkAuditArchive>();
+            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
+                days ?? 7, agentId, q, 5000);
             return Results.Text(WorkAuditReport.ToCsv(r.Items), "text/csv; charset=utf-8");
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

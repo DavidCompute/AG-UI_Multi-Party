@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.314 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.314 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.315 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.315 Release Notes (current Windows desktop release)
+
+**版本说明**：**审计归档 + 工作区可治 + 通知定位一致**——工作区操作审计按月归档，查询不再扫全量消息；工作区可删单文件 / 建目录；通知中心每行可直接定位到消息。
+**Version note**: **Archived audit, manageable workspace, consistent notification locate** — workspace audit archives by month so queries stop scanning every message; the workspace panel can delete files and create folders; each notification-center row can jump to its message.
+
+## 变更
+# Changes
+
+中文：
+- **审计按月归档**：新增 `WorkAuditArchive`（实现 Hub 的 `IWorkAuditSink`）——`GroupHub.AppendMessagePlanAuditAsync` 落库时同步写 `data/work-audit/audit-YYYY-MM.jsonl`；查询（`/ag-ui/admin/work-audits`）优先读归档，归档为空时回扫并回填（读侧按 key 去重）。新增 `Agents:WorkAuditRetentionDays`（默认 365，`0` = 永久），由 `WorkAuditArchiveService` 启动 10 分钟后 + 每 12 小时清理过期月份。回扫时按 `LastMessageAt` 跳过整支无近期消息的知聚。
+- **工作区文件操作**：新增 `DELETE /ag-ui/admin/workspaces/{agentId}/file?path=` 与 `POST …/dir?path=`；`WorkspaceMaintenance` 抽出 `TryResolvePath`（删除 / 建目录 / 读文件共用同一套越界与链接校验），新增 `DeleteFile` / `CreateDirectory`。两次操作均写审计日志（`admin.workspaces.delete` / `admin.workspaces.mkdir`）。前端每行「🗑 删除」、面板「＋ 新建目录」（支持多级）。
+- **通知中心定位**：`addNotification` 记录 `messageId`（提及 / 普通消息带 `m.id`）；通知列表每行新增 `↗ 定位到消息`，与浮窗「打开」共用 `openDeepLink()`。浮窗「忽略」不删除通知中心条目，可随时从中心定位。
+- **测试**：新增 6 项（归档写入去重 / 跨月读取 / 保留期只删整月 / 归档优先与回填；删文件与建目录的越界拒绝），全量 **1906 通过**。
+
+English:
+- **Monthly audit archive**: new `WorkAuditArchive` (implementing Hub's `IWorkAuditSink`) — `GroupHub.AppendMessagePlanAuditAsync` writes `data/work-audit/audit-YYYY-MM.jsonl` as it persists; queries (`/ag-ui/admin/work-audits`) read the archive first and fall back to one scan + backfill (deduped on read) when it is empty. New `Agents:WorkAuditRetentionDays` (default 365, `0` = keep forever), enforced by `WorkAuditArchiveService` 10 minutes after startup and every 12 hours. The fallback scan skips circles whose `LastMessageAt` is older than the cutoff.
+- **Workspace file operations**: new `DELETE /ag-ui/admin/workspaces/{agentId}/file?path=` and `POST …/dir?path=`; `WorkspaceMaintenance` factors out `TryResolvePath` (shared escape/symlink checks) plus `DeleteFile` / `CreateDirectory`. Both write audit-log entries (`admin.workspaces.delete` / `admin.workspaces.mkdir`). The UI adds a per-row **🗑 Delete** and a **＋ New folder** action (nested paths allowed).
+- **Notification-center locate**: `addNotification` now records `messageId` (mentions and messages pass `m.id`); each notification row gains a `↗ Go to message` button sharing `openDeepLink()` with the toast's **Open**. Dismissing a toast keeps the entry in the center so it can be located later.
+- **Tests**: 6 new checks (archive write dedupe / cross-month reads / retention deletes whole months only / archive-first and backfill; delete and mkdir escape rejection); the full suite passes **1906**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（归档 / 保留期 / 文件操作）、§1.2.1（通知中心定位）、§9.5 配置表；`docker-compose.yml`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.315。
+English: `docs/user-guide.md` / `en.md` §3.13 (archive / retention / file operations), §1.2.1 (notification-center locate), and the §9.5 config table; `docker-compose.yml`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.315.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2145，missing 0**；配置键守卫（含新增 `WorkAuditRetentionDays`）无漂移；文档引用 0 失效；全量 `dotnet test` **1906 通过 / 0 失败**。**无法自动验证**：真实模型产出审计后的归档写入与查询（需开启工作型工具），以及通知中心 `↗` 在安装版中的定位效果。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2145, missing 0**; the config-key guard (including the new `WorkAuditRetentionDays`) reports no drift; docs references are clean; the full `dotnet test` run passes **1906 / 0**. **Not automatically verifiable**: archive writes and queries driven by a real model (needs work tools enabled) and the notification-center `↗` locate in an installed build.
+
+---
+
+# AG-UI 群聊桌面版 1.0.314 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.314 Release Notes (historical)
 
 **版本说明**：**工作区可预览 + 审计可汇总 + 通知可操作**——文本 / 图片在工作区面板内直接看；跨消息汇总最近 N 天的工作区操作并可导出 CSV；通知改成带「打开 / 忽略」的右下角浮窗。
 **Version note**: **Previewable workspaces, aggregated audit, actionable notifications** — text and images render right in the workspace panel; workspace actions aggregate across messages with CSV export; notifications become a bottom-right toast with Open and Dismiss.

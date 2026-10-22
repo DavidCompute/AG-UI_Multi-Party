@@ -37,6 +37,9 @@ builder.Services.AddSingleton<ImageWriteApprovalQueue>(sp => new ImageWriteAppro
     Path.Combine(builder.Environment.ContentRootPath, "data", "pending-writes"),
     sp.GetService<AguiGroupChat.Hub.Persistence.ChangeHub>())); // 图库写入审批队列（元数据持久化 + 字节落盘）
 builder.Services.AddSingleton<AguiGroupChat.Hub.Messaging.IGroupEventObserver>(sp => sp.GetRequiredService<WebhookDispatcher>()); // GroupHub 出站钩子
+builder.Services.AddSingleton<WorkAuditArchive>(); // 工作区操作审计按月归档（1.0.315）
+builder.Services.AddSingleton<AguiGroupChat.Hub.Storage.IWorkAuditSink>(sp => sp.GetRequiredService<WorkAuditArchive>()); // GroupHub 审计落地钩子
+builder.Services.AddHostedService<WorkAuditArchiveService>(); // 归档保留期清理（默认 365 天）
 // 模板市场在线分发：远程目录源（管理员配置）+ 拉取（缓存 / 尺寸 / 协议防护）
 builder.Services.AddSingleton(new MarketplaceState()); // 目录源配置（持久化到扩展区「marketplace」）
 builder.Services.AddSingleton<MarketplaceRemoteService>(); // 远程目录 / 分发包拉取

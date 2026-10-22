@@ -5438,10 +5438,10 @@ function onMessageStart(evt) {
     const isCurrentView = evt.groupId === state.activeGroupId && (m.topicId || "main") === (state.activeTopicId || "main");
     const gnameStr = (state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId;
     if (isMeMentioned) {
-      addNotification("mention", window.t("notif.mentionedYou", { name: evt.senderNickname || evt.senderId }), window.t("notif.mentionBody", { group: gnameStr, content: String(m.content || "").slice(0, 80) }), { groupId: evt.groupId, topicId: m.topicId });
+      addNotification("mention", window.t("notif.mentionedYou", { name: evt.senderNickname || evt.senderId }), window.t("notif.mentionBody", { group: gnameStr, content: String(m.content || "").slice(0, 80) }), { groupId: evt.groupId, topicId: m.topicId, messageId: m.id });
     } else if (!isCurrentView && evt.senderType !== "sys") {
       const label = evt.senderType === "agent" ? window.t("notif.agentSent") : window.t("notif.newMessage");
-      addNotification("message", window.t("notif.messageTitle", { group: gnameStr, sender: evt.senderNickname || evt.senderId }), String(m.content || window.t("notif.bodyAttachment")).slice(0, 80), { groupId: evt.groupId, topicId: m.topicId });
+      addNotification("message", window.t("notif.messageTitle", { group: gnameStr, sender: evt.senderNickname || evt.senderId }), String(m.content || window.t("notif.bodyAttachment")).slice(0, 80), { groupId: evt.groupId, topicId: m.topicId, messageId: m.id });
     }
   }
   if (state.activeGroupId !== evt.groupId) return; // 非当前知聚不渲染
@@ -7186,6 +7186,7 @@ function addNotification(type, title, body, opts = {}) {
     title, body,
     groupId: opts.groupId || null,
     topicId: opts.topicId || null,
+    messageId: opts.messageId || null,
     action: opts.action || null,
     ts: Date.now(),
     read: false,
@@ -7366,6 +7367,7 @@ function renderNotifications() {
         <span class="notif-time">${escapeHtml(fmtTime(n.ts))}</span>
       </span>
       <span class="notif-actions">
+        ${n.groupId ? `<button class="notif-act" data-nact="goto" type="button" title="${escapeHtml(t("notif.goto"))}" aria-label="${escapeHtml(t("notif.goto"))}">↗</button>` : ""}
         ${n.read ? `<button class="notif-act" data-nact="unread" type="button" title="${escapeHtml(t("notif.markUnread"))}" aria-label="${escapeHtml(t("notif.markUnread"))}">●</button>` : ""}
         <button class="notif-act" data-nact="del" type="button" title="${escapeHtml(t("notif.deleteOne"))}" aria-label="${escapeHtml(t("notif.deleteOne"))}">✕</button>
       </span>
@@ -7378,7 +7380,13 @@ function renderNotifications() {
         const n = state.notifications.find((x) => String(x.id) === el.dataset.nid);
         if (!n) return;
         if (btn.dataset.nact === "del") deleteNotification(n.id);
-        else { n.read = false; renderNotifications(); scheduleSaveNotifications(); }
+        else if (btn.dataset.nact === "goto") {
+          n.read = true;
+          renderNotifications();
+          scheduleSaveNotifications();
+          hideNotifPanel();
+          openDeepLink(n.groupId, n.topicId, n.messageId);
+        } else { n.read = false; renderNotifications(); scheduleSaveNotifications(); }
       };
     });
   }
@@ -9767,6 +9775,7 @@ async function loadStorageGovernance() {
 
 /** 工作区占用（1.0.312）：工作型数字员工的专属目录；清理只删「超保留期」或「超配额（最久未修改优先）」的文件。 */
 let adminWorkspacesRoot = "";
+let adminWsCurrentAgent = "";
 
 async function loadAdminWorkspaces() {
   const rows = $("adminWorkspaceRows");
@@ -9825,6 +9834,8 @@ async function browseWorkspaceFiles(agentId) {
   const rows = $("adminWorkspaceFileRows");
   const title = $("adminWsFilesTitle");
   if (!box || !rows) return;
+  adminWsCurrentAgent = agentId;
+  $("adminWsFilePreview")?.classList.add("hidden");
   box.classList.remove("hidden");
   if (title) title.textContent = t("admin.wsFilesTitle", { id: agentId });
   rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loading")}</td></tr>`;
@@ -9852,11 +9863,14 @@ async function browseWorkspaceFiles(agentId) {
         <td><code>${escapeHtml(f.path)}</code></td>
         <td>${escapeHtml(fmtBytes(Number(f.bytes) || 0))}</td>
         <td>${f.modifiedUtc ? escapeHtml(fmtDateTime(f.modifiedUtc)) : "—"}</td>
-        <td>${previewBtn}<a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a></td>
+        <td>${previewBtn}<a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a> <button class="chip-btn" type="button" data-ws-del="${idx}">🗑 ${escapeHtml(t("admin.wsDelete"))}</button></td>
       </tr>`;
     }).join("");
     rows.querySelectorAll("[data-ws-preview]").forEach((btn) => {
       btn.onclick = () => previewWorkspaceFile(agentId, files[Number(btn.dataset.wsPreview)]);
+    });
+    rows.querySelectorAll("[data-ws-del]").forEach((btn) => {
+      btn.onclick = () => deleteWorkspaceFile(agentId, files[Number(btn.dataset.wsDel)]);
     });
   } catch (ex) {
     rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
@@ -9949,7 +9963,7 @@ async function loadWorkAudits() {
     }
     rows.innerHTML = workAuditItems.map((x, idx) => `<tr>
       <td>${escapeHtml(fmtDateTime(x.at))}</td>
-      <td>${escapeHtml(x.agentId || "—")}</td>
+      <td>${escapeHtml(x.agentName || x.agentId || "—")}</td>
       <td><code>${escapeHtml(x.tool || "")}</code></td>
       <td>${x.ok ? "✅" : "⚠️"}</td>
       <td>${Number(x.durationMs) || 0} ms</td>
@@ -9980,6 +9994,46 @@ function exportWorkAudits() {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+/** 删除工作区内的单个文件（1.0.315）：二次确认后调 DELETE，成功后重拉清单。 */
+async function deleteWorkspaceFile(agentId, f) {
+  if (!f) return;
+  if (!window.confirm(t("admin.wsDeleteConfirm", { path: f.path }))) return;
+  try {
+    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(f.path)}`,
+      { method: "DELETE", headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.ok) {
+      toast(t("admin.wsDeleteFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    toast(t("admin.wsDeleteDone", { path: f.path }));
+    browseWorkspaceFiles(agentId);
+  } catch (ex) {
+    toast(t("admin.wsDeleteFail", { err: ex.message }));
+  }
+}
+
+/** 新建目录（1.0.315）：输入相对路径，支持多级（a/b/c）。 */
+async function createWorkspaceDir() {
+  const agentId = adminWsCurrentAgent;
+  if (!agentId) return;
+  const path = window.prompt(t("admin.wsNewDirPrompt"), "notes");
+  if (!path) return;
+  try {
+    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/dir?path=${encodeURIComponent(path)}`,
+      { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.ok) {
+      toast(t("admin.wsNewDirFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    toast(t("admin.wsNewDirDone", { path }));
+    browseWorkspaceFiles(agentId);
+  } catch (ex) {
+    toast(t("admin.wsNewDirFail", { err: ex.message }));
+  }
 }
 
 /** 按策略清理（agentId 为空 = 整根目录）。清理前二次确认：删除不可恢复。 */
@@ -15725,6 +15779,7 @@ function init() {
   $("wsRefreshBtn").onclick = () => loadAdminWorkspaces();
   $("wsCleanupAllBtn").onclick = () => cleanupWorkspaces(null);
   $("wsFilesCloseBtn").onclick = () => $("adminWorkspaceFiles").classList.add("hidden");
+  $("wsNewDirBtn").onclick = () => createWorkspaceDir();
   $("wsFilePreviewClose").onclick = () => $("adminWsFilePreview").classList.add("hidden");
   $("wsCopyPathBtn").onclick = () => {
     if (!adminWorkspacesRoot) return;

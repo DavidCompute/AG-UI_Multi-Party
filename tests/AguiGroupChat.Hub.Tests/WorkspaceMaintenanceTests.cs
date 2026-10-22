@@ -176,4 +176,42 @@ public sealed class WorkspaceMaintenanceTests
         }
         finally { Cleanup(root); }
     }
+
+    [Fact]
+    public void DeleteFile_OnlyInsideWorkspace()
+    {
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            var inside = AddFile(Path.Combine(ws, "notes"), "a.txt", 10);
+            var outside = AddFile(root, "keep.txt", 10);
+
+            Assert.False(WorkspaceMaintenance.DeleteFile(ws, "../keep.txt"));
+            Assert.True(File.Exists(outside));
+            Assert.True(WorkspaceMaintenance.DeleteFile(ws, "notes/a.txt"));
+            Assert.False(File.Exists(inside));
+            Assert.False(WorkspaceMaintenance.DeleteFile(ws, "notes/a.txt")); // 已不存在
+            Assert.False(WorkspaceMaintenance.DeleteFile(ws, "notes"));        // 目录不归它管
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void CreateDirectory_CreatesNestedAndRejectsEscapes()
+    {
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            Directory.CreateDirectory(ws);
+
+            Assert.True(WorkspaceMaintenance.CreateDirectory(ws, "notes/2026"));
+            Assert.True(Directory.Exists(Path.Combine(ws, "notes", "2026")));
+            Assert.True(WorkspaceMaintenance.CreateDirectory(ws, "notes/2026")); // 幂等
+            Assert.False(WorkspaceMaintenance.CreateDirectory(ws, "../outside"));
+            Assert.False(WorkspaceMaintenance.CreateDirectory(ws, Path.Combine(root, "abs")));
+        }
+        finally { Cleanup(root); }
+    }
 }

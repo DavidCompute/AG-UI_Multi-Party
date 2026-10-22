@@ -35,6 +35,7 @@ public sealed class GroupHub : IDisposable
     private readonly AguiGroupChat.Hub.Storage.IAttachmentLifecycle? _attachmentLifecycle;
     // 出站集成钩子（Webhook 等）：每次扇出事件同步回调一次，实现方须立即返回（见 IGroupEventObserver）
     private readonly IGroupEventObserver? _eventObserver;
+    private readonly IWorkAuditSink? _workAuditSink;
     private readonly ConcurrentDictionary<string, byte> _disbanded = new();
     // 客服知聚的非成员参与者（顾客）：key=groupId → 已进入的顾客 id 集合。顾客不是群成员，
     // 各自拥有与客服团队的独立会话（顾客之间彼此隔离）。仅存于内存（会话参与非持久成员）。
@@ -97,7 +98,8 @@ public sealed class GroupHub : IDisposable
         IGraphMemory? graph = null,
         IUserGroupService? userGroups = null,
         AguiGroupChat.Hub.Storage.IAttachmentLifecycle? attachmentLifecycle = null,
-        IGroupEventObserver? eventObserver = null)
+        IGroupEventObserver? eventObserver = null,
+        AguiGroupChat.Hub.Storage.IWorkAuditSink? workAuditSink = null)
     {
         _store = store;
         _users = users;
@@ -116,6 +118,7 @@ public sealed class GroupHub : IDisposable
         _userGroups = userGroups;
         _attachmentLifecycle = attachmentLifecycle;
         _eventObserver = eventObserver;
+        _workAuditSink = workAuditSink;
         _agentInvocationLimiter = new SemaphoreSlim(Math.Max(1, options.MaxConcurrentAgentInvocations));
         // 孤儿流兜底定时器：周期清理 End 丢失 / 智能体进程崩溃的流式消息（方法内 try/catch，Timer 随 Dispose 释放）
         _orphanTimer = new Timer(_ => CleanupOrphanStreams(), null, OrphanCleanupIntervalMs, OrphanCleanupIntervalMs);
@@ -1835,6 +1838,30 @@ public sealed class GroupHub : IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "计划卡落库失败（已忽略，仅实时广播）：message={MessageId}", messageId);
+        }
+
+        // 归档（1.0.315）：查询侧不再需要扫全量消息；失败不影响主流程（审计仍随 planJson 落库）。
+        if (_workAuditSink is not null)
+        {
+            try
+            {
+                var meta = msg ?? _store.GetMessage(groupId, messageId);
+                var groupName = _store.GetGroup(groupId)?.GroupName ?? groupId;
+                var senderId = meta?.SenderId ?? "";
+                var agentName = (string.IsNullOrWhiteSpace(senderId) ? null : _agentDefinitions?.GetDefinition(senderId)?.Nickname)
+                    ?? (string.IsNullOrWhiteSpace(meta?.SenderNickname) ? senderId : meta!.SenderNickname);
+                var topicId = meta?.TopicId ?? "main";
+                var at = meta?.Timestamp ?? NowMs;
+                foreach (var a in audit)
+                {
+                    _workAuditSink.Record(new WorkAuditEntry(groupId, groupName, senderId, agentName, messageId, topicId, at,
+                        a.Tool, a.Ok, a.DurationMs, a.Text));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "工作区审计归档失败（已忽略）：message={MessageId}", messageId);
+            }
         }
 
         _agentStreams[messageId] = state with { LastActivityMs = NowMs };
