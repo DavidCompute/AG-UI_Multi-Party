@@ -156,6 +156,22 @@ public sealed class AgentOptions
     /// 开启后工具可访问外网（搜索端点可配置）。</summary>
     public bool EnableWebTools { get; set; }
 
+    /// <summary>是否允许智能体启用工作型工具（文件 / 命令）。默认 false；
+    /// 还需智能体自身 <see cref="AgentDefinition.EnableWorkTools"/> 开启，两者同时为 true 才挂载。</summary>
+    public bool WorkToolsEnabled { get; set; }
+
+    /// <summary>work_run_command 允许执行的可执行文件名（逗号 / 分号分隔，相对 PATH）。空 = 禁止任何命令。</summary>
+    public string WorkToolCommands { get; set; } = "";
+
+    /// <summary>work_run_command 超时（毫秒），默认 30000，限制在 1s–120s。</summary>
+    public int WorkToolTimeoutMs { get; set; } = 30_000;
+
+    /// <summary>work_read_file 单次默认返回字符数（1–20000）。</summary>
+    public int WorkToolMaxReadChars { get; set; } = 12_000;
+
+    /// <summary>work_write_file 单次最大写入字符数（1–8MB）。</summary>
+    public int WorkToolMaxWriteChars { get; set; } = 2 * 1024 * 1024;
+
     /// <summary>工作型智能体工作区根目录（相对路径基于内容根解析；绝对路径直接使用）。
     /// 每个启用工作工具的智能体拥有 <see cref="WorkSpaceRoot"/>/&lt;agentId&gt;/ 独立子目录。</summary>
     public string WorkSpaceRoot { get; set; } = "data/workspaces";
@@ -680,6 +696,13 @@ public sealed class AgentDefinition
     /// 创建者以外的用户看不到 / 拉不进私密智能体。
     /// </summary>
     public bool IsPrivate { get; set; }
+
+    /// <summary>
+    /// **工作型工具开关**（默认关闭）：开启后可在专属工作区 <c>{WorkSpaceRoot}/{AgentId}</c> 读取 / 写入文件，
+    /// 并执行 <see cref="AgentOptions.WorkToolCommands"/> 白名单命令。还需全局 <see cref="AgentOptions.WorkToolsEnabled"/> 开启；
+    /// 写文件与执行命令始终需要人工审批。
+    /// </summary>
+    public bool EnableWorkTools { get; set; }
 
     /// <summary>
     /// <b>细粒度访问授权（用户组白名单，2.9）</b>：允许<u>访问 / 单聊 / 拉入群</u>本数字员工的<b>平台用户组</b> id 列表

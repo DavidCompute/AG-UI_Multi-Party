@@ -184,6 +184,65 @@ public sealed class ToolsTests
         Assert.Empty(catalog.GetAgentToolNames("a1"));
     }
 
+    // ================= 工作型工具（1.0.310） =================
+
+    [Fact]
+    public void BuildTools_WorkTools_RequireGlobalAndAgentFlag()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "agui-workspaces-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var options = new AgentOptions
+            {
+                Provider = "mock",
+                EnableTools = true,
+                WorkToolsEnabled = true,
+                WorkSpaceRoot = root,
+                Agents =
+                [
+                    new AgentDefinition { AgentId = "a1", Nickname = "A", Description = "", Instructions = "", EnableWorkTools = true },
+                    new AgentDefinition { AgentId = "a2", Nickname = "B", Description = "", Instructions = "" },
+                ],
+            };
+            var catalog = CreateCatalog(options);
+
+            var a1 = catalog.GetAgentToolNames("a1").ToHashSet();
+            Assert.Contains("work_list_dir", a1);
+            Assert.Contains("work_read_file", a1);
+            Assert.Contains("work_write_file", a1);
+            Assert.Contains("work_run_command", a1);
+
+            var a1Approvals = catalog.GetAgentApprovalToolNames("a1").ToHashSet();
+            Assert.Contains("work_write_file", a1Approvals);
+            Assert.Contains("work_run_command", a1Approvals);
+            Assert.DoesNotContain("work_list_dir", a1Approvals);
+            Assert.DoesNotContain("work_read_file", a1Approvals);
+
+            // 智能体开关关闭：不挂载
+            Assert.DoesNotContain("work_list_dir", catalog.GetAgentToolNames("a2"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* 忽略 */ }
+        }
+    }
+
+    [Fact]
+    public void BuildTools_WorkTools_GlobalGateOff_NoTools()
+    {
+        var options = new AgentOptions
+        {
+            Provider = "mock",
+            EnableTools = true,
+            WorkToolsEnabled = false,
+            Agents = [new AgentDefinition { AgentId = "a1", Nickname = "A", Description = "", Instructions = "", EnableWorkTools = true }],
+        };
+        var catalog = CreateCatalog(options);
+        var names = catalog.GetAgentToolNames("a1").ToHashSet();
+        Assert.DoesNotContain("work_list_dir", names);
+        Assert.DoesNotContain("work_write_file", names);
+    }
+
     // ================= GroupContextTools =================
 
     [Fact]

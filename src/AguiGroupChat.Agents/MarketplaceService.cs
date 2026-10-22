@@ -182,6 +182,7 @@ public sealed class MarketplaceService
         BridgeToken = d.BridgeToken,
         PersonalMemoryEnabled = d.PersonalMemoryEnabled,
         IsPrivate = d.IsPrivate,
+        EnableWorkTools = d.EnableWorkTools,
         OwnerId = d.OwnerId,
         RequireApprovalToolNames = d.RequireApprovalToolNames?.ToList() ?? [],
         Skills = d.Skills?.Select(s => new AgentSkillConfig { SkillId = s.SkillId, Description = s.Description, TargetAgentId = s.TargetAgentId }).ToList(),

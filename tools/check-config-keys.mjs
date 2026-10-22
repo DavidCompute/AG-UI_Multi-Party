@@ -36,7 +36,7 @@ const OPTION_FILES = {
 
 // 已登记为「有意保留 / 不参与强类型绑定」的键（文档已说明）：不算漂移
 const ALLOWLIST = new Map([
-  ["Agents:WorkToolsEnabled", "§9.9-5：协议/前端提到但未实现（已文档化）"],
+  // 已实现的配置键不再登记白名单（1.0.310：Agents:WorkToolsEnabled 已有强类型属性）
   ["Observability:ReplicaId", "§9.3.1：HubApp 启动时 `Configuration[\"Observability:ReplicaId\"]` 直读（非属性绑定）"],
   ["Agents:Memory:ModelDownloadUrl", "§9.9-3：桌面组合根直读 `memory[\"ModelDownloadUrl\"]`（非属性绑定）"],
 ]);

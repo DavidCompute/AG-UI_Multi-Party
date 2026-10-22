@@ -698,6 +698,8 @@ public static class AdminApi
                     provider = agents.Provider,
                     enableTools = agents.EnableTools,
                     enableWebTools = agents.EnableWebTools,
+                    workToolsEnabled = agents.WorkToolsEnabled,
+                    workToolCommands = agents.WorkToolCommands,
                     thinkingMode = agents.ThinkingMode,
                     dailyTokenQuotaPerUser = agents.DailyTokenQuotaPerUser,
                     dailyTokenQuotaPerGroup = agents.DailyTokenQuotaPerGroup,

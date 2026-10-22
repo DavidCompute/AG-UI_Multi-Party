@@ -195,6 +195,9 @@ services:
       # 读取/写入文件、执行白名单命令（写/删命令需群内人工审批）。默认关闭。
       Agents__WorkToolsEnabled: ${AGENTS_WORK_TOOLS_ENABLED:-false}
       Agents__WorkSpaceRoot: ${AGENTS_WORKSPACE_ROOT:-data/workspaces}
+      # 允许 work_run_command 执行的可执行文件名（逗号分隔，如 git,dotnet）；留空 = 禁止执行命令
+      Agents__WorkToolCommands: ${AGENTS_WORK_TOOL_COMMANDS:-}
+      Agents__WorkToolTimeoutMs: ${AGENTS_WORK_TOOL_TIMEOUT_MS:-30000}
       # 需审批的工具名（命中后用 ApprovalRequiredAIFunction 包装，模型调用时运行中断等触发者决策）
       Agents__RequireApprovalToolNames__0: ${AGENTS_REQUIRE_APPROVAL_TOOLS:-publish_announcement}
       # 启动时播种示例群/成员/智能体（无历史数据时）

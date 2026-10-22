@@ -1870,6 +1870,7 @@ function serializeAgent(a) {
     bridgeMode: a.bridgeMode || null,
     personalMemoryEnabled: !!a.personalMemoryEnabled,
     isPrivate: !!a.isPrivate,
+    enableWorkTools: !!a.enableWorkTools,
     knowledgeBaseIds: (a.knowledgeBaseIds || []),
     imageLibraryIds: (a.imageLibraryIds || []),
     skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
@@ -2004,6 +2005,7 @@ function buildAgentUpsertBody(a, { includeRefs = true, allowedGroupIds = null } 
     schedule: a.schedule || null,
     personalMemoryEnabled: !!a.personalMemoryEnabled,
     isPrivate: !!a.isPrivate,
+    enableWorkTools: !!a.enableWorkTools,
     knowledgeBaseIds: (a.knowledgeBaseIds || []),
     imageLibraryIds: (a.imageLibraryIds || []),
     skills: (a.skills || []).map((s) => ({ skillId: s.skillId || null, description: s.description || null, targetAgentId: s.targetAgentId || null })),
@@ -2250,6 +2252,7 @@ function openAgentForm(agentId) {
   $("afBridgeToken").value = "";
   $("afPersonalMemory").checked = !!a?.personalMemoryEnabled;
   $("afIsPrivate").checked = !!a?.isPrivate;
+  $("afEnableWorkTools").checked = !!a?.enableWorkTools;
   // 记忆拟人类型（按类型召回）：回显预设 / 口吻 / 人设 / 微调（未配置 = 跟随平台默认）
   const memProfile = a?.memoryProfile || null;
   $("afMemoryType").value = (memProfile && ["broad", "deep", "slowToLearn", "cueDependent", "fastForgetting"].includes(memProfile.memoryType)) ? memProfile.memoryType : "";
@@ -2316,6 +2319,7 @@ async function saveAgent() {
     bridgeToken: $("afBridgeToken").value.trim() || null, // 编辑时留空 → 后端沿用原令牌
     personalMemoryEnabled: $("afPersonalMemory").checked,
     isPrivate: $("afIsPrivate").checked,
+    enableWorkTools: $("afEnableWorkTools").checked,
     knowledgeBaseIds: [...agentKbIds],
     imageLibraryIds: [...agentImgLibIds],
     // 可调用子数字员工（Skills）：由表单「可调用子数字员工」勾选维护，skillId 留空后端自动生成

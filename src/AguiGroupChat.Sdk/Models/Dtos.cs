@@ -140,6 +140,7 @@ public sealed class AgentDefinitionDto
     public string? BridgeEndpoint { get; set; }
     public bool PersonalMemoryEnabled { get; set; }
     public bool IsPrivate { get; set; }
+    public bool EnableWorkTools { get; set; }
     public string? OwnerId { get; set; }
     public IReadOnlyList<string>? Skills { get; set; }
     public IReadOnlyList<string>? KnowledgeBaseIds { get; set; }

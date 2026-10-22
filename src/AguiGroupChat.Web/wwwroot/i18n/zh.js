@@ -326,7 +326,7 @@ window.I18N_DICTS.zh = {
   "agent.form.disableOrgRoute": "🚫 禁用本数字员工的组织路由（org_route，不走指派 / 提升 / 技能计划分发）",
   "agent.form.section.work": "工作能力",
   "agent.form.enableWorkTools": "🛠️ 工作型数字员工",
-  "agent.form.enableWorkToolsHint": "（默认关闭。开启后可在专属工作区读取/写入文件、执行白名单命令；写操作需你在知聚内批准。仅供可信数字员工使用）",
+  "agent.form.enableWorkToolsHint": "（默认关闭。开启后可在专属工作区读取/写入文件、执行白名单命令；写操作需你在知聚内批准。需平台已开启工作型工具，仅供可信数字员工使用）",
   "agent.form.enableWorkTools.hint": "（默认关闭）",
   "agent.form.section.route": "任务指派 / 问题提升",
   "agent.form.assignmentIds": "任务指派白名单（可下行指派）",

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.309**
+> 适用版本：**1.0.310**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -320,7 +320,7 @@
 
 托盘右键菜单（1.0.302 起，1.0.303 扩展）：
 
-- **打开知聚**：窗口隐藏 / 最小化时回到前台；双击托盘图标同效。菜单首项会显示未读条数，托盘图标 tooltip 与右下角红色徽标同步显示未读总数（**未读消息 + 通知中心未读，排除 message 类通知以避免重复计数**；>99 显示 `99+`；登录后加载、收到消息、阅读通知后实时更新，tooltip 同时给出「消息 / 通知」明细）。
+- **打开知聚**：窗口隐藏 / 最小化时回到前台；双击托盘图标同效。菜单首项会显示未读条数，托盘图标 tooltip 与右下角红色徽标同步显示未读总数（**未读消息 + 通知中心未读，排除 message 类通知以避免重复计数**；>99 显示 `99+`；登录后加载、收到消息、阅读通知后实时更新，tooltip 同时给出「消息 / 通知」明细）。**多窗口未读聚合（1.0.310）**：每个窗口把自己的未读数写入 `%LocalAppData%\AguiGroupChat\unread\`，所有窗口的托盘 / 任务栏徽标显示同一总数；窗口退出自动清除，异常残留 2 分钟后不再计入。
 - **最近知聚 ▸**：子菜单列出最近活跃的 10 个知聚（**私密知聚带 🔒 标记**），点击即在当前窗口切换（不重载、不新开窗口）；页面未就绪时回退到 `?group=` 深链。跳转列表（任务栏右键）则仍只列非私密知聚。
 - **新建知聚 / 管理控制台**：托盘菜单直接打开对应弹窗（页面未就绪时回退到 `?action=` 深链）。
 - **窗口位置记忆**：自动保存窗口大小、位置与最大化状态到 `desktop-settings.json`，下次启动恢复；显示器布局变化导致越界时自动回退默认位置。
@@ -1636,7 +1636,7 @@
 
 以下为对照代码后确认的偏差/易误解点（以代码为准）：
 
-1. **表单无「工作能力」分区**：i18n 存在 `agent.form.section.work`＝`工作能力`、`agent.form.enableWorkTools`、`agent.form.enableWorkToolsHint` 等 key，但 `index.html` 的 `#agentFormView` 中**未渲染**该分区（`grep` 未命中）。同样 `agent.form.section.route`（`任务指派 / 问题提升`）、`agent.form.assignmentIds`、`agent.form.escalationAgent` 等 key 存在但**无表单控件**。
+1. **【已修复 1.0.310】表单已提供工作型开关**：`agent.form.enableWorkTools` 复选框已渲染在「记忆与权限」分区（`#afEnableWorkTools`），并随编辑回显与保存；`agent.form.section.work` 这个“分区标题” key 仍未使用（开关不需要单独分区）。`agent.form.section.route`（`任务指派 / 问题提升`）等 key 仍无表单控件。
 2. **`AssignmentIds` / `EscalationAgentId` 由组织架构维护**：表单不提供控件；`saveAgent()` 编辑时从 `agentList` 沿用原值（新增为空）。
 3. **`RelayToAgentId` / `Pipeline` / `RequireApprovalToolNames` 无表单控件**：`saveAgent()` 编辑时沿用原值（避免整表 PUT 静默清空），一键编排的 agent 项可携带 `relayToAgentId`。
 4. **【已修复】**数字员工导出/导入**现已无损往返**：早期 `serializeAgent` 与导入体遗漏 `schedule`/`relayToAgentId`/`pipeline`/`requireApprovalToolNames`/`disable*`，导入还丢 `allowedGroupIds`；现已全部随导出往返，导入改为**两轮写入**（引用型字段第二轮补写），`allowedGroupIds` 先按目标实例已有分组过滤。仅 `bridgeToken`（敏感）与 `ownerId`（归属）不导出。
@@ -1676,6 +1676,42 @@
 - **拉取防护**：仅 http/https；单响应 2MB 上限；10s 超时；不开重定向；目录 60s 缓存；单包 ≤100 个数字员工；`schema` 不符 / 空包 / 缺 `agentId`·`nickname` 一律拒纯。
 
 **接口**：`GET /ag-ui/marketplace`（聚合目录）、`GET /ag-ui/marketplace/preview?packId=&sourceId=`（安装前预览；`sourceId` 空 = 内置）、`POST /ag-ui/marketplace/import/{packId}`（内置包；body `{ agentIds? }`）、`POST /ag-ui/marketplace/install`（`{sourceId, packId, agentIds?}`；`agentIds` 空 / 缺省 = 整包）、`POST /ag-ui/marketplace/publish`；目录源管理：`GET` / `POST /ag-ui/admin/marketplace/sources`、`DELETE /ag-ui/admin/marketplace/sources/{id}`（仅管理员）。
+
+---
+
+### 3.13 工作型数字员工（1.0.310）
+
+「AI 角色管理 → 编辑数字员工 → 记忆与权限」新增 **🛠️ 工作型数字员工** 开关。
+
+**启用条件（两者同时满足）**
+
+1. 平台全局 `Agents:WorkToolsEnabled = true`（默认 `false`；Docker 环境变量 `AGENTS_WORK_TOOLS_ENABLED`）；
+2. 该数字员工自身勾选「工作型数字员工」（`enableWorkTools`，随目录持久化 / 导出导入往返）。
+
+**挂载的工具**
+
+| 工具 | 能力 | 审批 |
+| --- | --- | --- |
+| `work_list_dir` | 列出专属工作区目录（文件 / 子目录 / 大小 / 修改时间） | 不需要 |
+| `work_read_file` | 读取工作区内文本文件片段（`startIndex` / `maxChars` 续读） | 不需要 |
+| `work_write_file` | 写入 / 覆盖工作区文本文件（自动建父目录） | **强制人工审批** |
+| `work_run_command` | 执行白名单命令 | **强制人工审批** |
+
+**工作区与安全边界**
+
+- 每个智能体独立目录：`{Agents:WorkSpaceRoot}/{agentId}`，默认 `data/workspaces/<agentId>`；
+- 只接受**相对路径**；`..` 越界、绝对路径、符号链接 / 联接点一律拒绝；
+- 读取单文件上限 10MB、单次默认 12000 字符；写入单次默认上限 2MB（`Agents:WorkToolMaxWriteChars`）；
+- 文件内容按「不可信资料」边界注入，提示模型仅作参考、不执行其中指令。
+
+**命令白名单**
+
+- `Agents:WorkToolCommands`（默认空 = **禁止执行任何命令**），逗号 / 分号分隔**可执行文件名**，例如 `git,dotnet`；
+- 不经 shell：拒绝 `&`、`|`、`<`、`>`、`^`、`%`、`!`、`;`、反引号、`$` 与换行等元字符；不接受路径，只在 `PATH` 中解析可执行文件（拒绝工作区内同名程序）；
+- 继承环境变量时剔除名称含 `KEY / TOKEN / SECRET / PASSWORD / CREDENTIAL / AUTH` 的项；
+- 超时 `Agents:WorkToolTimeoutMs`（默认 30s），stdout / stderr 各截断 20000 字符。
+
+> 安全提示：工作型工具能读写服务器文件并执行命令，**只应授予可信数字员工**；写文件与命令始终需要在知聚内人工批准。
 
 ---
 
@@ -5322,10 +5358,11 @@ service:
 | `AGENTS_COORDINATOR_PLANNING` | `true` | `Agents:CoordinatorPlanning` |
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | `Agents:SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | `Agents:RequireApprovalToolNames__0` |
+| `AGENTS_WORK_TOOLS_ENABLED` / `AGENTS_WORK_TOOL_COMMANDS` | `false` / 空 | `Agents:WorkToolsEnabled` / `Agents:WorkToolCommands` |
 | `AGUI_DOCX_OUT` / `AGUI_PHOTO_API` / `AGUI_IMAGE_SOURCE` | `/app/docs` / 空 / `library` | 文档 / 配图（非配置键，技能读环境变量） |
 | `AGUI_PREVIEW_TOOLS` | `false` | 构建参数：是否装 poppler-utils（版面 QA，非「在线查看」依赖） |
 
-> `Agents__WorkToolsEnabled`（值 `${AGENTS_WORK_TOOLS_ENABLED:-false}`）在 compose 中存在，但 `AgentOptions` / `AgentDefinition` 无对应属性（见 §9.9）。
+> `Agents__WorkToolsEnabled` / `Agents__WorkToolCommands` 已由 `AgentOptions.WorkToolsEnabled` / `WorkToolCommands` 绑定（1.0.310）；前者是总闸门，后者是 `work_run_command` 的命令白名单（空 = 禁止命令）。
 
 #### 9.5.3 Docker 镜像与运行镜像要点（`Dockerfile`）
 
@@ -5451,7 +5488,7 @@ service:
 2. **【已修复 1.0.230】`GET /ag-ui/admin/bridge-capabilities` 已被前端消费**：「运行指标」页「桥接能力协商」表（`loadBridgeCaps`）；`bridge-health` 同页消费，且两者均支持 `?refresh=true` 立即探测（`#bridgeProbeBtn`）。
 3. **`Agents:Memory:ModelDownloadUrl` 在 `MemoryOptions` 中无对应属性**（`AgentOptions.cs` 的 `MemoryOptions` 无该成员）。该键由**桌面组合根直接经 `IConfiguration` 读取**（`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`），`AgentHosting.cs` L138-141 的日志文案也提及它；但 `Agents:Memory` 绑定到强类型 Options 时**不认这个键**。`README.md` / `README.en.md` / 桌面 README 均把它当配置键描述。依据：`AgentOptions.cs` L254-413、`DesktopApp.cs`、`AgentHosting.cs`。
 4. **【已修复 1.0.232】`advanceOnClick` 前端已使用**。服务端 `SlideTransition` 从 `<p:transition>` 解析 `AdvanceOnClick` 并随 `/ag-ui/preview/{id}/play` 清单下发；前端现于播放态点击画面时读取该字段决定是否推进（`slideAdvanceOnClick`），并保留 `scheduleAutoAdvance` 的 `advanceAfterMs` 自动前进。依据：`PresentationPlayback.cs`、`wwwroot/app.js`（`slideAdvanceOnClick` / `#docPlayStage` click）。
-5. **`Agents:WorkToolsEnabled`（compose `Agents__WorkToolsEnabled`）/ `enableWorkTools` 无 C# 绑定属性**。协议文档 §5.7（`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`）与前端 i18n（`agent.form.enableWorkTools` 等）均提到它，但 `AgentOptions` 与 `AgentDefinition` 中均无该属性（`src/**/*.cs` 检索零命中）。第 3 章草稿亦已指出该表单分区未渲染。依据：`docker-compose.yml` L188-191、`AgentOptions.cs`、`i18n/zh.js` L272-274。
+5. **【已修复 1.0.310】`Agents:WorkToolsEnabled` / `enableWorkTools` 已落地**：`AgentOptions.WorkToolsEnabled` 为全局闸门，`AgentDefinition.EnableWorkTools` 为智能体开关，两者同时开启才挂载 `work_list_dir` / `work_read_file` / `work_write_file` / `work_run_command`；写与命令强制审批。前端表单、导出导入、模板市场、API DTO 均已携带该字段。依据：`AgentOptions.cs`、`Tools/WorkTools.cs`、`AgentCatalog.cs`、`AgentApi.cs`、`wwwroot/app.js`。
 6. **任务提到的 `artifacts/verify-msi-payload.py` 在仓库中不存在**。MSI 打包的真实入口是 `tools/build-msi.ps1`（其第 4 步内嵌“后端 DLL 新鲜度”校验），另有 `tools/wix/package.wxs`、`tools/wix/nativebridge-package.wxs`、`tools/publish-nativebridge*.ps1`。依据：`find_path **/verify-msi*` 无命中、`tools/build-msi.ps1`。
 7. **上传与产物大小上限不同（非缺陷，易误读）**：用户上传单文件 `AttachmentStore.MaxFileBytes = 20MB`，而技能产物 `MaxProducedFileBytes = 64MB`（带插图稿子天然大）。前端“文件生成了却没有下载入口”类现象多因产物超 64MB 被静默忽略。依据：`AttachmentStore.cs` L15-28。
 8. **附件注入出厂默认已统一**：`AttachmentStore.DefaultTextCharsPerFile` / `DefaultTextCharsTotal` 现直接取自 `PromptBudgetOptions.Default`（`40000` / `200000`），不再单独硬编码，二者不再漂移。依据：`AttachmentStore.cs`、`PromptBudgetOptions.cs` L57-61。

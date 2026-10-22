@@ -145,6 +145,7 @@ public sealed class AgentCatalog
     // 技能库与技能执行器（惰性解析：技能提供者为可选项）
     private readonly Lazy<AgentSkillCatalog?> _skillCatalog;
     private readonly Lazy<SkillRunner?> _skillRunner;
+    private readonly string _workspaceRoot;
 
     public AgentCatalog(AgentOptions options, ILoggerFactory loggerFactory, IServiceProvider services, ChangeHub? changes = null, MemoryContextProvider? memoryContext = null)
     {
@@ -163,9 +164,10 @@ public sealed class AgentCatalog
         foreach (var def in options.Agents) _definitions.TryAdd(def.AgentId, def);
         // 技能库 + 技能执行沙箱（data/skillruns）：沿用工作区根解析（data/workspaces 之上一级 /skillruns）
         _skillCatalog = new Lazy<AgentSkillCatalog?>(() => _services.GetService(typeof(AgentSkillCatalog)) as AgentSkillCatalog);
-        var skillRunRoot = Directory.GetParent(
-            Path.GetFullPath(Path.IsPathRooted(_options.WorkSpaceRoot) ? _options.WorkSpaceRoot : Path.Combine(contentRoot, _options.WorkSpaceRoot)))
-            is { } p
+        _workspaceRoot = Path.GetFullPath(Path.IsPathRooted(_options.WorkSpaceRoot)
+            ? _options.WorkSpaceRoot
+            : Path.Combine(contentRoot, _options.WorkSpaceRoot));
+        var skillRunRoot = Directory.GetParent(_workspaceRoot) is { } p
             ? Path.Combine(p.FullName, "skillruns")
             : Path.Combine(contentRoot, "data", "skillruns");
         _skillRunner = new Lazy<SkillRunner?>(() => new SkillRunner(skillRunRoot, _loggerFactory,
@@ -645,9 +647,10 @@ public sealed class AgentCatalog
         var approvalNames = def.RequireApprovalToolNames is { Count: > 0 }
             ? def.RequireApprovalToolNames
             : _options.RequireApprovalToolNames;
-        var tools = _options.EnableTools ? BuildTools(approvalNames) : null;
+        var tools = _options.EnableTools ? BuildTools(approvalNames, def) : null;
         if (isSkillTarget && tools is not null)
-            tools = tools.Where(t => t.Name is not ("web_search" or "read_url" or "read_attachment")).ToList();
+            tools = tools.Where(t => t.Name is not ("web_search" or "read_url" or "read_attachment"
+                or "work_list_dir" or "work_read_file" or "work_write_file" or "work_run_command")).ToList();
         _agentToolNames[agentId] = tools?.Select(t => t.Name).ToList() ?? [];
         _agentApprovalToolNames[agentId] = tools?.OfType<ApprovalRequiredAIFunction>().Select(t => t.Name).ToList() ?? [];
 
@@ -1184,7 +1187,7 @@ public sealed class AgentCatalog
     internal static string? ResolveVisionModelName(AgentOptions options, bool isDeepSeek)
         => !string.IsNullOrWhiteSpace(options.VisionModel) ? options.VisionModel!.Trim() : (isDeepSeek ? DeepSeekVisionModel : null);
 
-    private List<AITool> BuildTools(IEnumerable<string> requireApprovalNames)
+    private List<AITool> BuildTools(IEnumerable<string> requireApprovalNames, AgentDefinition def)
     {
         var tools = new List<AITool>
         {
@@ -1225,9 +1228,31 @@ public sealed class AgentCatalog
                 "读取网页链接的正文内容（html 转文本，拒绝内网地址）。参数：url 完整 http/https 链接"));
         }
 
+        // 工作型工具（1.0.310）：全局开关 + 智能体开关同时开启才挂载；写文件 / 执行命令强制审批。
+        var workToolsAdded = false;
+        if (_options.WorkToolsEnabled && def.EnableWorkTools)
+        {
+            var work = new WorkTools(_options, _workspaceRoot, def.AgentId, _loggerFactory);
+            tools.Add(AIFunctionFactory.Create(work.ListDir, "work_list_dir",
+                "列出专属工作区目录内容（只接受工作区内相对路径）。用于查看已有文件与子目录。参数：path 目录，默认 ."));
+            tools.Add(AIFunctionFactory.Create(work.ReadFile, "work_read_file",
+                "读取专属工作区内文本文件的片段（相对路径；二进制拒绝）。大文件用 startIndex 续读。参数：path 文件、startIndex 起始字符（默认 0）、maxChars 本次字符数（默认 12000）"));
+            tools.Add(AIFunctionFactory.Create(work.WriteFile, "work_write_file",
+                "在工作区写入文本文件（覆盖同名文件，自动建父目录）。需用户批准后执行。参数：path 相对路径、content 文本内容"));
+            tools.Add(AIFunctionFactory.Create(work.RunCommand, "work_run_command",
+                "在工作区执行白名单命令（不经 shell；拒绝管道 / 重定向 / 变量）。需用户批准后执行。参数：command 如 git status"));
+            workToolsAdded = true;
+        }
+
         // 需要审批的工具用 ApprovalRequiredAIFunction 包装：模型调用时运行中断，等待触发者决策（协议 4.5 人机交互）
         // requireApprovalNames 为当前智能体生效的审批名单（全局或该智能体覆盖值）
         var requireApproval = new HashSet<string>(requireApprovalNames, StringComparer.OrdinalIgnoreCase);
+        if (workToolsAdded)
+        {
+            // 工作型写 / 命令类工具属于极敏感操作，始终审批（不受 RequireApprovalToolNames 名单影响）
+            requireApproval.Add("work_write_file");
+            requireApproval.Add("work_run_command");
+        }
         for (var i = 0; i < tools.Count; i++)
         {
             if (requireApproval.Contains(tools[i].Name))

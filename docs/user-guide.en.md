@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.309**
+> Applies to version: **1.0.310**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -320,7 +320,7 @@ Desktop notification bridge (1.0.301): inside the desktop edition (WebView2), th
 
 Tray context menu (introduced in 1.0.302, expanded in 1.0.303):
 
-- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip).
+- **Open KnowGath**: brings a hidden / minimized window back; double-clicking the tray icon does the same. The first menu item shows the unread count, while the tray tooltip and the red badge in the icon's corner show the total (**unread messages + unread notification-center items, excluding `message`-type notifications to avoid double counting**; `99+` above 99; updated on load, on new messages and after reading notifications, with a messages / notifications breakdown in the tooltip). **Multi-window aggregation (1.0.310)**: each window writes its unread counts to `%LocalAppData%\AguiGroupChat\unread\`, and every window's tray / taskbar badge shows the same total; a window removes its file on exit, and stale files are ignored after 2 minutes.
 - **Recent circles ▸**: lists the 10 most recently active circles (**private ones carry a 🔒**). Clicking switches the current window without reloading or opening a new one; if the page is not ready it falls back to the `?group=` deep link. The taskbar jump list still lists non-private circles only.
 - **New circle / Admin console**: the tray menu opens the matching dialog directly (falling back to the `?action=` deep link when the page is not ready).
 - **Window placement**: window size, position and maximized state are saved to `desktop-settings.json` and restored on the next launch; if monitor changes put it off-screen, it falls back to the default position.
@@ -1638,7 +1638,7 @@ Import body fields mirror the export (see `buildAgentUpsertBody`) — including 
 
 The following are deviations / easily-misunderstood points confirmed by checking the code (the code is authoritative):
 
-1. **The form has no "Work Capabilities" section**: i18n has keys such as `agent.form.section.work` = `Work Capabilities`, `agent.form.enableWorkTools`, `agent.form.enableWorkToolsHint`, but this section is **not rendered** in `#agentFormView` of `index.html` (`grep` finds no hit). Likewise, keys such as `agent.form.section.route` (`Assignment / Escalation`), `agent.form.assignmentIds`, `agent.form.escalationAgent` exist but have **no form controls**.
+1. **Fixed in 1.0.310 — the form now has the work-tools switch**: the `agent.form.enableWorkTools` checkbox is rendered in the **Memory & permissions** section (`#afEnableWorkTools`) and is loaded/saved with the agent. The `agent.form.section.work` *section-title* key is still unused (the switch does not need its own section). Keys such as `agent.form.section.route` (`Assignment / Escalation`) still have no form controls.
 2. **`AssignmentIds` / `EscalationAgentId` are maintained by the org structure**: the form provides no controls; on edit, `saveAgent()` carries over the original values from `agentList` (empty for add).
 3. **`RelayToAgentId` / `Pipeline` / `RequireApprovalToolNames` have no form controls**: on edit, `saveAgent()` carries over the original values (to avoid a whole-row PUT silently clearing them); one-click orchestration's agent items can carry `relayToAgentId`.
 4. **[Fixed]** Digital-employee export/import is now **lossless**: an earlier `serializeAgent` and import body omitted `schedule` / `relayToAgentId` / `pipeline` / `requireApprovalToolNames` / `disable*`, and the import dropped `allowedGroupIds`; all now round-trip, the import is **two-pass** (reference-type fields written in pass 2), and `allowedGroupIds` is filtered against the target instance's existing groups. Only `bridgeToken` (sensitive) and `ownerId` (ownership) are not exported.
@@ -1679,6 +1679,42 @@ Entry: the AI-role toolbar → "🏪 Marketplace" (`#agentMarketBtn` → dialog 
 - **Fetch guards**: http/https only; 2MB per response; 10s timeout; no redirects; 60s catalog cache; ≤100 agents per pack; a wrong `schema` / empty pack / missing `agentId`·`nickname` is rejected outright.
 
 **API**: `GET /ag-ui/marketplace` (aggregate), `GET /ag-ui/marketplace/preview?packId=&sourceId=` (pre-install preview; empty `sourceId` = built-in), `POST /ag-ui/marketplace/import/{packId}` (built-in; body `{ agentIds? }`), `POST /ag-ui/marketplace/install` (`{sourceId, packId, agentIds?}`; empty / omitted `agentIds` = the whole pack), `POST /ag-ui/marketplace/publish`; catalog management: `GET` / `POST /ag-ui/admin/marketplace/sources`, `DELETE /ag-ui/admin/marketplace/sources/{id}` (admin only).
+
+---
+
+### 3.13 Work-capable digital employees (1.0.310)
+
+The agent form (**AI Role Management → Edit → Memory & permissions**) now has a **🛠️ Work-capable Digital Employee** switch.
+
+**Enablement (both required)**
+
+1. Platform-wide `Agents:WorkToolsEnabled = true` (default `false`; Docker `AGENTS_WORK_TOOLS_ENABLED`);
+2. The agent itself has **Enable work tools** checked (`enableWorkTools`, persisted in the catalog and carried through export/import).
+
+**Mounted tools**
+
+| Tool | Capability | Approval |
+| --- | --- | --- |
+| `work_list_dir` | List the dedicated workspace (files / directories / size / modified) | No |
+| `work_read_file` | Read text slices from a workspace file (`startIndex` / `maxChars` to continue) | No |
+| `work_write_file` | Write / overwrite a text file (creates parent directories) | **Always required** |
+| `work_run_command` | Run an allowlisted command | **Always required** |
+
+**Workspace and boundaries**
+
+- One directory per agent: `{Agents:WorkSpaceRoot}/{agentId}`, default `data/workspaces/<agentId>`;
+- Relative paths only; `..` escapes, absolute paths, symlinks and junctions are rejected;
+- Read: 10MB per file, 12000 chars per call by default; write: 2MB per call (`Agents:WorkToolMaxWriteChars`);
+- File contents are wrapped in the untrusted-data boundary so the model treats them as reference, not instructions.
+
+**Command allowlist**
+
+- `Agents:WorkToolCommands` (empty by default = **no commands allowed**), comma / semicolon separated **executable names**, e.g. `git,dotnet`;
+- No shell: metacharacters (`&`, `|`, `<`, `>`, `^`, `%`, `!`, `;`, backticks, `$`, newlines) are rejected; no paths are accepted, and executables are resolved from `PATH` only (a same-named program inside the workspace is refused);
+- Environment variables whose names contain `KEY / TOKEN / SECRET / PASSWORD / CREDENTIAL / AUTH` are removed;
+- Timeout `Agents:WorkToolTimeoutMs` (default 30s); stdout / stderr are each truncated to 20000 chars.
+
+> Security: work tools can read/write server files and execute commands, so grant them only to trusted agents. Writes and commands always require human approval in the circle.
 
 ---
 
@@ -5328,10 +5364,11 @@ Named volumes: `agui-web-data` / `agui-docs` / `agui-hub-data` / `agui-pg-data`.
 | `AGENTS_COORDINATOR_PLANNING` | `true` | `Agents:CoordinatorPlanning` |
 | `AGENTS_SKILL_AUTOTEST_SHELL` | `true` | `Agents:SkillAutoTestServerShell` |
 | `AGENTS_REQUIRE_APPROVAL_TOOLS` | `publish_announcement` | `Agents:RequireApprovalToolNames__0` |
+| `AGENTS_WORK_TOOLS_ENABLED` / `AGENTS_WORK_TOOL_COMMANDS` | `false` / empty | `Agents:WorkToolsEnabled` / `Agents:WorkToolCommands` |
 | `AGUI_DOCX_OUT` / `AGUI_PHOTO_API` / `AGUI_IMAGE_SOURCE` | `/app/docs` / empty / `library` | Documents / images (not config keys; skills read the env vars) |
 | `AGUI_PREVIEW_TOOLS` | `false` | Build arg: whether to install poppler-utils (layout QA, not a dependency of "View online") |
 
-> `Agents__WorkToolsEnabled` (value `${AGENTS_WORK_TOOLS_ENABLED:-false}`) exists in compose, but `AgentOptions` / `AgentDefinition` have no corresponding property (see §9.9).
+> `Agents__WorkToolsEnabled` / `Agents__WorkToolCommands` are now bound to `AgentOptions.WorkToolsEnabled` / `WorkToolCommands` (1.0.310). The former is the global gate; the latter is the `work_run_command` executable allowlist (empty = no commands).
 
 #### 9.5.3 Key points of the Docker build and runtime images (`Dockerfile`)
 
@@ -5457,7 +5494,7 @@ All of the following were verified against the source (line numbers are the loca
 2. **[Fixed in 1.0.230] `GET /ag-ui/admin/bridge-capabilities` is now consumed** by the Runtime Metrics tab's "Bridge capability negotiation" table (`loadBridgeCaps`); `bridge-health` is consumed on the same page, and both support `?refresh=true` for a live probe (`#bridgeProbeBtn`).
 3. **`Agents:Memory:ModelDownloadUrl` has no corresponding property in `MemoryOptions`** (the `MemoryOptions` in `AgentOptions.cs` has no such member). This key is **read directly via `IConfiguration` by the desktop composition root** (`DesktopApp.EnsureEmbeddingModel` → `memory["ModelDownloadUrl"]`), and the log text at `AgentHosting.cs` L138-141 also mentions it; but when `Agents:Memory` binds to the strongly typed Options, it **does not recognize this key**. `README.md` / `README.en.md` / the desktop README all describe it as a config key. Evidence: `AgentOptions.cs` L254-413, `DesktopApp.cs`, `AgentHosting.cs`.
 4. **[Fixed in 1.0.232] `advanceOnClick` is now used by the frontend**. The server-side `SlideTransition` parses `AdvanceOnClick` from `<p:transition>` and sends it down with the `/ag-ui/preview/{id}/play` manifest; the frontend now reads it when the stage is clicked during playback to decide whether to advance (`slideAdvanceOnClick`), while keeping `scheduleAutoAdvance`'s `advanceAfterMs` auto-advance. Evidence: `PresentationPlayback.cs`, `wwwroot/app.js` (`slideAdvanceOnClick` / `#docPlayStage` click).
-5. **`Agents:WorkToolsEnabled` (compose `Agents__WorkToolsEnabled`) / `enableWorkTools` has no C# binding property**. The protocol document §5.7 (`AG-UI 群聊扩展协议标准 v1.0.md` / `PROTOCOL.en.md`) and the frontend i18n (`agent.form.enableWorkTools`, etc.) both mention it, but neither `AgentOptions` nor `AgentDefinition` has this property (zero hits searching `src/**/*.cs`). The Chapter 3 draft also pointed out that this form section is not rendered. Evidence: `docker-compose.yml` L188-191, `AgentOptions.cs`, `i18n/zh.js` L272-274.
+5. **Fixed in 1.0.310 — `Agents:WorkToolsEnabled` / `enableWorkTools` is implemented**: `AgentOptions.WorkToolsEnabled` is the global gate and `AgentDefinition.EnableWorkTools` is the per-agent switch; both must be on to mount `work_list_dir` / `work_read_file` / `work_write_file` / `work_run_command`. Writes and commands always require approval. The agent form, export/import, marketplace and API DTOs all carry the field. Evidence: `AgentOptions.cs`, `Tools/WorkTools.cs`, `AgentCatalog.cs`, `AgentApi.cs`, `wwwroot/app.js`.
 6. **The `artifacts/verify-msi-payload.py` mentioned in the task does not exist in the repository**. The real entry point for MSI packaging is `tools/build-msi.ps1` (its step 4 embeds a "backend DLL freshness" check), along with `tools/wix/package.wxs`, `tools/wix/nativebridge-package.wxs`, and `tools/publish-nativebridge*.ps1`. Evidence: `find_path **/verify-msi*` has no hits, `tools/build-msi.ps1`.
 7. **The upload and artifact size limits differ (not a defect, but easy to misread)**: the user upload per-file limit is `AttachmentStore.MaxFileBytes = 20MB`, while the skill artifact limit is `MaxProducedFileBytes = 64MB` (illustrated drafts are naturally large). Frontend phenomena like "the file was generated but there is no download entry" are mostly because the artifact exceeded 64MB and was silently ignored. Evidence: `AttachmentStore.cs` L15-28.
 8. **Attachment injection factory defaults are now unified**: `AttachmentStore.DefaultTextCharsPerFile` / `DefaultTextCharsTotal` are taken directly from `PromptBudgetOptions.Default` (`40000` / `200000`) instead of being hardcoded separately, so the two no longer drift. Evidence: `AttachmentStore.cs`, `PromptBudgetOptions.cs` L57-61.

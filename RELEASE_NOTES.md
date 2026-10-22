@@ -1,5 +1,46 @@
-# AG-UI 群聊桌面版 1.0.309 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.309 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.310 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.310 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作型数字员工落地 + 多窗口未读聚合**——文件 / 命令工具进入专属工作区，写与命令强制审批；所有桌面窗口的托盘未读数统一。
+**Version note**: **Work-capable agents and aggregated unread across desktop windows** — file / command tools run in a dedicated workspace with mandatory approval for writes and commands, and every desktop window shows the same aggregated unread count.
+
+## 变更
+# Changes
+
+中文：
+- **工作型工具**：`AgentOptions.WorkToolsEnabled`（全局闸门，默认关）+ `AgentDefinition.EnableWorkTools`（智能体开关）；两者同时开启才挂载 `work_list_dir` / `work_read_file` / `work_write_file` / `work_run_command`。
+- **工作区沙箱**：`{WorkSpaceRoot}/{agentId}`（默认 `data/workspaces/<agentId>`）；只接受相对路径，拒绝 `..` 越界 / 绝对路径 / 符号链接 / 联接点；读 10MB 上限、写默认 2MB。
+- **强制审批**：写文件与执行命令始终用 `ApprovalRequiredAIFunction` 包装，不受 `RequireApprovalToolNames` 名单影响；读 / 列目录无需审批。
+- **命令白名单**：`Agents:WorkToolCommands`（默认空 = 禁止）逗号分隔可执行文件名；不经 shell、拒绝元字符与路径，只在 `PATH` 中解析（拒绝工作区内同名程序），剔除敏感环境变量，30s 超时与输出截断。
+- **配置 / 界面 / 数据**：compose 暴露 `AGENTS_WORK_TOOL_COMMANDS` / `AGENTS_WORK_TOOL_TIMEOUT_MS`；编辑表单新增「🛠️ 工作型数字员工」复选框；`enableWorkTools` 随 API、导出导入、模板市场往返。
+- **桌面未读聚合**：新增 `TrayUnreadAggregator`——每个窗口把未读数写到 `%LocalAppData%\AguiGroupChat\unread\`，所有托盘 / 任务栏徽标显示同一总数；退出删文件，2 分钟陈旧项忽略、10 分钟清理。
+- **测试**：新增 13 项（工作区沙箱 / 越界 / 写读回环 / 命令白名单 / 元字符 / 工具注册与强制审批 / 未读聚合），全量 **1879 通过**。
+
+English:
+- **Work tools**: `AgentOptions.WorkToolsEnabled` (global gate, off by default) plus `AgentDefinition.EnableWorkTools` (per-agent switch); both must be on to mount `work_list_dir` / `work_read_file` / `work_write_file` / `work_run_command`.
+- **Workspace sandbox**: `{WorkSpaceRoot}/{agentId}` (default `data/workspaces/<agentId>`); relative paths only, rejecting `..` escapes / absolute paths / symlinks / junctions; 10MB read cap and a 2MB default write cap.
+- **Mandatory approval**: writes and command execution are always wrapped in `ApprovalRequiredAIFunction`, independent of `RequireApprovalToolNames`; list / read need no approval.
+- **Command allowlist**: `Agents:WorkToolCommands` (empty = no commands) with comma-separated executable names; no shell, metacharacters and paths rejected, resolution from `PATH` only (a same-named workspace program is refused), sensitive environment variables stripped, 30s timeout and truncated output.
+- **Config / UI / data**: compose exposes `AGENTS_WORK_TOOL_COMMANDS` / `AGENTS_WORK_TOOL_TIMEOUT_MS`; the edit form gains a **🛠️ Work-capable Digital Employee** checkbox; `enableWorkTools` round-trips through the API, export/import and the marketplace.
+- **Desktop unread aggregation**: new `TrayUnreadAggregator` — each window writes its unread counts to `%LocalAppData%\AguiGroupChat\unread\`, every tray / taskbar badge shows the same total, files are removed on exit, stale ones ignored after 2 minutes and cleaned up after 10.
+- **Tests**: 13 new checks (workspace sandbox / traversal / write-read roundtrip / command allowlist / metacharacters / tool registration and mandatory approval / unread aggregation); the full suite passes **1879**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（工作型数字员工）、§1.2.1（多窗口未读聚合）、§9.5 / §9.9 / §3.11 审计状态；`docs/feature-review-2026-10.md`；`docker-compose.yml`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.310。
+English: `docs/user-guide.md` / `en.md` §3.13 (work-capable agents), §1.2.1 (multi-window unread aggregation), §9.5 / §9.9 / §3.11 audit status; `docs/feature-review-2026-10.md`; `docker-compose.yml`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.310.
+
+## 测试
+# Tests
+
+中文：`dotnet build` 桌面项目通过；`node --check` / i18n 审计 **zh=en=2079，missing 0**；配置键守卫（117 键，含新的 `WorkToolCommands` / `WorkToolTimeoutMs`）；文档引用 0 失效；全量 `dotnet test` **1879 通过 / 0 失败**；Playwright `ui-notif-desktop-bridge.mjs` **30/30**（沿用）。**无法自动验证**：真实模型调用工作型工具 + 审批卡片全链路（需配置工作型工具与审批人）、多窗口未读聚合的实际显示（需安装版多开窗口查看）。
+English: the desktop project builds; `node --check` and the i18n audit pass (**zh=en=2079, missing 0**); the config-key guard passes (117 keys, including the new `WorkToolCommands` / `WorkToolTimeoutMs`); docs references are clean; the full `dotnet test` run passes **1879 / 0**; Playwright `ui-notif-desktop-bridge.mjs` passes **30/30** (carried over). **Not automatically verifiable**: a real model invoking the work tools with the approval card (needs work tools configured plus an approver) and the actual multi-window unread display (needs an installed build with several windows).
+
+---
+
+# AG-UI 群聊桌面版 1.0.309 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.309 Release Notes (historical)
 
 **版本说明**：**深链不再重复开窗**——跳转列表 / 快捷任务会交给已运行的窗口处理，不再多开窗口、出现重复托盘图标。
 **Version note**: **Deep links no longer open extra windows** — jump-list items and shortcuts are handed to the running window instead of starting another one and adding a duplicate tray icon.

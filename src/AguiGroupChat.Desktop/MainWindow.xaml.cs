@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private int _unreadCount;
     private int _unreadMessages;
     private int _unreadNotifications;
+    private TrayUnreadTotals _unreadAggregate;
+    private readonly TrayUnreadAggregator _unreadAggregator;
     private string _progressState = "none";
     private ulong _progressValue;
     private ulong _progressTotal;
@@ -70,6 +72,10 @@ public partial class MainWindow : Window
         _initialGroupId = initialGroupId;
         _initialAction = initialAction;
         ApplySavedPlacement();
+        _unreadAggregator = new TrayUnreadAggregator(
+            Path.Combine(DesktopPaths.DataDir, "unread"),
+            (totals) => Dispatcher.BeginInvoke(new Action(() => ApplyUnreadAggregate(totals))));
+        _unreadAggregator.Start();
         if (startHidden)
         {
             // 开机自启：先以透明窗口加载，Loaded 后隐藏到托盘（避免登录时闪一下窗口）
@@ -87,6 +93,7 @@ public partial class MainWindow : Window
             try { _openThumbIcon?.Dispose(); } catch { /* 忽略 */ }
             try { _muteThumbIcon?.Dispose(); } catch { /* 忽略 */ }
             try { _taskbar.Dispose(); } catch { /* 忽略 */ }
+            try { _unreadAggregator.Dispose(); } catch { /* 忽略 */ }
         };
         // 注销 / 关机时不能被「关闭到托盘」拦住
         System.Windows.Application.Current.SessionEnding += (_, _) => _exiting = true;
@@ -293,6 +300,19 @@ public partial class MainWindow : Window
         _unreadCount = t;
         _unreadMessages = m;
         _unreadNotifications = n;
+        _unreadAggregator.Publish(t, m, n);
+        var aggregate = _unreadAggregator.ReadTotals();
+        // 文件写失败时至少保证本窗口的数字不回退
+        ApplyUnreadAggregate(new TrayUnreadTotals(
+            Math.Max(aggregate.Total, t),
+            Math.Max(aggregate.Messages, m),
+            Math.Max(aggregate.Notifications, n)));
+    }
+
+    /// <summary>多窗口未读汇总（1.0.310）：所有窗口的托盘 / 任务栏覆盖徽标显示同一总数。</summary>
+    private void ApplyUnreadAggregate(TrayUnreadTotals totals)
+    {
+        _unreadAggregate = totals;
         UpdateTrayVisuals();
         UpdateMenuState();
     }
@@ -300,14 +320,15 @@ public partial class MainWindow : Window
     private void UpdateTrayVisuals()
     {
         if (_tray is null) return;
-        try { _tray.Text = _unreadCount > 0 ? L10n.TrayTextUnread(_unreadCount, _unreadMessages, _unreadNotifications) : L10n.TrayText; }
+        var total = _unreadAggregate.Total;
+        try { _tray.Text = total > 0 ? L10n.TrayTextUnread(total, _unreadAggregate.Messages, _unreadAggregate.Notifications) : L10n.TrayText; }
         catch { /* tooltip 超长 / 系统限制：忽略 */ }
         System.Drawing.Icon? retired = null;
         try
         {
-            if (_unreadCount > 0)
+            if (total > 0)
             {
-                var next = CreateBadgeIcon(_baseIcon ?? System.Drawing.SystemIcons.Application, _unreadCount);
+                var next = CreateBadgeIcon(_baseIcon ?? System.Drawing.SystemIcons.Application, total);
                 retired = _badgeIcon;
                 _badgeIcon = next;
                 _tray.Icon = next;
@@ -359,10 +380,11 @@ public partial class MainWindow : Window
 
     private void UpdateTaskbarOverlay()
     {
+        var total = _unreadAggregate.Total;
         try
         {
-            _taskbar.SetOverlay(_unreadCount > 0 ? _badgeIcon : null,
-                _unreadCount > 0 ? L10n.TaskbarUnread(_unreadCount) : "");
+            _taskbar.SetOverlay(total > 0 ? _badgeIcon : null,
+                total > 0 ? L10n.TaskbarUnread(total) : "");
         }
         catch { /* 忽略 */ }
     }
@@ -814,7 +836,7 @@ public partial class MainWindow : Window
         if (_closeToTrayItem is not null) _closeToTrayItem.Checked = _settings.CloseToTray;
         if (_startupItem is not null) _startupItem.Checked = StartupRegistration.IsEnabled();
         if (_openItem is not null)
-            _openItem.Text = _unreadCount > 0 ? L10n.TrayOpenUnread(_unreadCount) : L10n.TrayOpen;
+            _openItem.Text = _unreadAggregate.Total > 0 ? L10n.TrayOpenUnread(_unreadAggregate.Total) : L10n.TrayOpen;
     }
 
     private void ExitFromTray()

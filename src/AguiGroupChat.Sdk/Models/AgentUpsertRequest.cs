@@ -25,6 +25,7 @@ public sealed class AgentUpsertRequest
 
     public bool? PersonalMemoryEnabled { get; set; }
     public bool? IsPrivate { get; set; }
+    public bool? EnableWorkTools { get; set; }
 
     public IReadOnlyList<string>? Skills { get; set; }
     public IReadOnlyList<string>? KnowledgeBaseIds { get; set; }

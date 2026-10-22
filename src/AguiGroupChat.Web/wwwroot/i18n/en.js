@@ -326,7 +326,7 @@ window.I18N_DICTS.en = {
   "agent.form.disableOrgRoute": "🚫 Disable org routing for this employee (org_route, skip assignment/escalation/skill-plan dispatch)",
   "agent.form.section.work": "Work Capabilities",
   "agent.form.enableWorkTools": "Work-capable Digital Employee",
-  "agent.form.enableWorkToolsHint": "(default off. When on, it can read/write files and run whitelisted commands in a dedicated workspace; write operations need your approval in the group. For trusted digital employees only)",
+  "agent.form.enableWorkToolsHint": "(default off. When on, it can read/write files and run whitelisted commands in a dedicated workspace; write operations need your approval in the group. The platform must enable work tools first; for trusted digital employees only)",
   "agent.form.enableWorkTools.hint": "(default off)",
   "agent.form.section.route": "Assignment / Escalation",
   "agent.form.assignmentIds": "Assignment whitelist (downstream)",
