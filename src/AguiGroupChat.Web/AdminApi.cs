@@ -639,7 +639,7 @@ public static class AdminApi
 
         // 工作区文件浏览（1.0.313）：只读列出 / 下载工作区内的文件（路径严格限定在工作区目录内）。
         // 1.0.317：按目录逐层浏览（path 为空 = 根），返回子目录 + 文件，前端用面包屑导航。
-        root.MapGet("/workspaces/{agentId}/files", (string agentId, string? path, string? q, AgentOptions options,
+        root.MapGet("/workspaces/{agentId}/files", (string agentId, string? path, string? q, string? scope, AgentOptions options,
             Microsoft.Extensions.Hosting.IHostEnvironment env) =>
         {
             var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
@@ -655,8 +655,25 @@ public static class AdminApi
 
             var exists = Directory.Exists(full);
 
-            // 文件名搜索（1.0.318）：跨整个工作区递归匹配，最多 500 条
+            // 文件名搜索（1.0.318）/ 内容搜索（1.0.319）：跨整个工作区；内容搜索额外给行号与片段
             var needle = (q ?? "").Trim();
+            var contentScope = string.Equals(scope, "content", StringComparison.OrdinalIgnoreCase);
+            if (needle.Length > 0 && exists && contentScope)
+            {
+                var matches = WorkspaceMaintenance.SearchContent(dir, needle)
+                    .Select(m => new
+                    {
+                        name = Path.GetFileName(m.Path),
+                        path = m.Path,
+                        isDir = false,
+                        bytes = m.Bytes,
+                        modifiedUtc = m.ModifiedUtc,
+                        line = m.Line,
+                        snippet = m.Snippet,
+                    })
+                    .ToList();
+                return Results.Ok(new { agentId, dir = rel, exists, mode = "search", scope = "content", q = needle, truncated = false, entries = matches });
+            }
             if (needle.Length > 0 && exists)
             {
                 const int maxHits = 500;
@@ -692,6 +709,36 @@ public static class AdminApi
             var full = WorkspaceMaintenance.ResolveFile(dir, path);
             if (full is null) return Results.BadRequest(new { error = "invalid_path" });
             return Results.File(full, "application/octet-stream", Path.GetFileName(full), enableRangeProcessing: true);
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 归档占用与手动清理（1.0.319）
+        root.MapGet("/work-audits/storage", (AgentOptions options, IServiceProvider sp) =>
+        {
+            var archive = sp.GetService<WorkAuditArchive>();
+            if (archive is null) return Results.Ok(new { available = false });
+            var stats = archive.Stats();
+            return Results.Ok(new
+            {
+                available = true,
+                dir = archive.RootDir,
+                files = stats.Files,
+                bytes = stats.Bytes,
+                oldestUtc = stats.Oldest,
+                newestUtc = stats.Newest,
+                retentionDays = options.WorkAuditRetentionDays,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        root.MapPost("/work-audits/sweep", (HttpContext ctx, AgentOptions options, AuthService auth,
+            IServiceProvider sp, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var archive = sp.GetService<WorkAuditArchive>();
+            if (archive is null) return Results.Ok(new { ok = true, deleted = 0 });
+            var deleted = archive.Sweep(options.WorkAuditRetentionDays);
+            var me = WebIdentity.UserId(ctx)!;
+            audit.Record("admin.workaudit.sweep", me, auth.GetUser(me)?.Username,
+                targetType: "workAudit", targetId: "*", detail: $"清理 {deleted} 个过期归档分片");
+            return Results.Ok(new { ok = true, deleted, retentionDays = options.WorkAuditRetentionDays });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 工作区文件操作（1.0.315）：删除单文件 / 新建目录；同样走路径校验 + 审计日志。

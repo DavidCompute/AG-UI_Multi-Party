@@ -4075,10 +4075,14 @@ function isTypeMuted(type) {
   return !!type && notifyMuted.has(type);
 }
 
-/* ---- 浮窗通知范围（1.0.316，本地偏好）：未勾选的类型只进通知中心 ---- */
+/* ---- 浮窗通知规则（1.0.316 起本地；1.0.318 服务端同步；1.0.319 加免打扰规则）----
+ * 规则只影响**弹不弹系统通知 / 桌面浮窗**：命中时通知仍写入通知中心。 */
 /** null = 全部类型都弹；否则只弹集合内的类型。 */
 let notifToastTypes = null;
 const NOTIF_TOAST_GROUPS = ["mention", "approval", "error", "message", "other"];
+
+/** 免打扰规则（1.0.319）：知聚 / 发送者 / 关键词。 */
+const notifRules = { groups: new Set(), senders: new Set(), keywords: [] };
 
 function notifToastKey(memberId) {
   return "agui.notifyToastTypes." + (memberId || "anon");
@@ -4109,6 +4113,13 @@ async function syncToastTypesWithServer() {
     const res = await fetch("/ag-ui/notify-prefs", { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) return;
+
+    // 免打扰规则（1.0.319）
+    notifRules.groups = new Set((d.muteGroups || []).filter(Boolean));
+    notifRules.senders = new Set((d.muteSenders || []).filter(Boolean));
+    notifRules.keywords = (d.muteKeywords || []).filter(Boolean).map((k) => String(k).toLowerCase());
+    renderNotifRules();
+
     const server = d.toastTypes;
     if (Array.isArray(server)) {
       const allowed = server.filter((x) => NOTIF_TOAST_GROUPS.includes(x));
@@ -4118,20 +4129,23 @@ async function syncToastTypesWithServer() {
       return;
     }
     // 服务端从未设置：本地有非默认偏好 → 迁移上去
-    if (notifToastTypes !== null) {
-      await pushToastTypes([...notifToastTypes]);
-    }
+    if (notifToastTypes !== null) await pushPrefs();
   } catch { /* 离线：继续用本地 */ }
 }
 
 /** 推送到服务端（失败静默，本地已保存）。 */
-async function pushToastTypes(list) {
+async function pushPrefs() {
   try {
     if (!state.token) return;
     await fetch("/ag-ui/notify-prefs", {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
-      body: JSON.stringify({ toastTypes: list }),
+      body: JSON.stringify({
+        toastTypes: notifToastTypes === null ? [...NOTIF_TOAST_GROUPS] : [...notifToastTypes],
+        muteGroups: [...notifRules.groups],
+        muteSenders: [...notifRules.senders],
+        muteKeywords: notifRules.keywords,
+      }),
     });
   } catch { /* 忽略 */ }
 }
@@ -4146,13 +4160,25 @@ function saveToastTypesLocal() {
 /** 本地 + 服务端一起保存（1.0.318）。 */
 function saveToastTypes() {
   saveToastTypesLocal();
-  pushToastTypes(notifToastTypes === null ? [...NOTIF_TOAST_GROUPS] : [...notifToastTypes]);
+  pushPrefs();
 }
 
-/** 是否应该弹系统通知（浮窗 / 浏览器 Notification）；false 时仍进通知中心。 */
-function shouldToast(type) {
-  if (notifToastTypes === null) return true;
-  return notifToastTypes.has(toastGroupOf(type));
+/** 保存免打扰规则（1.0.319）。 */
+function saveNotifRules() {
+  pushPrefs();
+}
+
+/** 是否应该弹系统通知（浮窗 / 浏览器 Notification）；false 时仍进通知中心。
+ *  meta：{ groupId, senderId, title, body }（能拿到多少传多少）。 */
+function shouldToast(type, meta = {}) {
+  if (notifToastTypes !== null && !notifToastTypes.has(toastGroupOf(type))) return false;
+  if (meta.groupId && notifRules.groups.has(meta.groupId)) return false;
+  if (meta.senderId && notifRules.senders.has(meta.senderId)) return false;
+  if (notifRules.keywords.length) {
+    const text = `${meta.title || ""} ${meta.body || ""}`.toLowerCase();
+    if (notifRules.keywords.some((k) => k && text.includes(k))) return false;
+  }
+  return true;
 }
 
 /** 回显浮窗偏好（null = 全部勾选）。 */
@@ -4162,6 +4188,37 @@ function renderToastPrefs() {
   box.querySelectorAll("input[data-tt]").forEach((cb) => {
     cb.checked = notifToastTypes === null || notifToastTypes.has(cb.dataset.tt);
   });
+}
+
+/** 回显免打扰规则（1.0.319）。 */
+function renderNotifRules() {
+  const kw = $("notifMuteKeywords");
+  if (kw) kw.value = notifRules.keywords.join(", ");
+  const senders = $("notifMuteSenders");
+  if (senders) senders.value = [...notifRules.senders].join(", ");
+
+  const chips = $("notifMuteGroupChips");
+  if (chips) {
+    chips.innerHTML = [...notifRules.groups].map((gid) =>
+      `<span class="notif-chip" data-nrg="${escapeHtml(gid)}">${escapeHtml(groupNameOf(gid))}
+        <button class="notif-chip-x" type="button" data-nrg-del="${escapeHtml(gid)}">×</button></span>`).join("");
+    chips.querySelectorAll("[data-nrg-del]").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        notifRules.groups.delete(b.dataset.nrgDel);
+        renderNotifRules();
+        saveNotifRules();
+      };
+    });
+  }
+
+  const sel = $("notifMuteGroupSel");
+  if (sel) {
+    const current = sel.value;
+    sel.innerHTML = (state.groups || []).filter((g) => g && g.groupId)
+      .map((g) => `<option value="${escapeHtml(g.groupId)}">${escapeHtml(g.groupName || g.groupId)}</option>`).join("");
+    if (current) sel.value = current;
+  }
 }
 
 function stopImageWritePendingPolling() {
@@ -5528,10 +5585,10 @@ function onMessageStart(evt) {
     const isCurrentView = evt.groupId === state.activeGroupId && (m.topicId || "main") === (state.activeTopicId || "main");
     const gnameStr = (state.groups.find((x) => x.groupId === evt.groupId)?.groupName) || evt.groupId;
     if (isMeMentioned) {
-      addNotification("mention", window.t("notif.mentionedYou", { name: evt.senderNickname || evt.senderId }), window.t("notif.mentionBody", { group: gnameStr, content: String(m.content || "").slice(0, 80) }), { groupId: evt.groupId, topicId: m.topicId, messageId: m.id });
+      addNotification("mention", window.t("notif.mentionedYou", { name: evt.senderNickname || evt.senderId }), window.t("notif.mentionBody", { group: gnameStr, content: String(m.content || "").slice(0, 80) }), { groupId: evt.groupId, topicId: m.topicId, messageId: m.id, senderId: evt.senderId });
     } else if (!isCurrentView && evt.senderType !== "sys") {
       const label = evt.senderType === "agent" ? window.t("notif.agentSent") : window.t("notif.newMessage");
-      addNotification("message", window.t("notif.messageTitle", { group: gnameStr, sender: evt.senderNickname || evt.senderId }), String(m.content || window.t("notif.bodyAttachment")).slice(0, 80), { groupId: evt.groupId, topicId: m.topicId, messageId: m.id });
+      addNotification("message", window.t("notif.messageTitle", { group: gnameStr, sender: evt.senderNickname || evt.senderId }), String(m.content || window.t("notif.bodyAttachment")).slice(0, 80), { groupId: evt.groupId, topicId: m.topicId, messageId: m.id, senderId: evt.senderId });
     }
   }
   if (state.activeGroupId !== evt.groupId) return; // 非当前知聚不渲染
@@ -7161,14 +7218,14 @@ function notifyNewMessage(evt, m) {
     if (isDesktopHost()) {
       // 桌面版：交给宿主气泡（同样受免打扰 / 按类型静音约束）
       showSystemNotification(title, body, "group_" + evt.groupId, "message",
-        { groupId: evt.groupId, topicId: m.topicId || null, messageId: m.id || null });
+        { groupId: evt.groupId, topicId: m.topicId || null, messageId: m.id || null, senderId: evt.senderId });
       return;
     }
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
       // 统一走 showSystemNotification：免打扰、类型静音与点击跳转都在那里处理
       showSystemNotification(title, body, "group_" + evt.groupId, "message",
-        { groupId: evt.groupId, topicId: m.topicId || null, messageId: m.id || null });
+        { groupId: evt.groupId, topicId: m.topicId || null, messageId: m.id || null, senderId: evt.senderId });
     } else if (Notification.permission === "default") {
       Notification.requestPermission().catch(() => {});
     }
@@ -7288,7 +7345,7 @@ function addNotification(type, title, body, opts = {}) {
   scheduleSaveNotifications(); // 1.0.299：本地持久化（刷新不丢）
   // 系统桌面通知（Web Notification）：前台 / 后台都弹，仅未授权 + 忽略；点击跳去其来源知聚
   showSystemNotification(title, body, opts.groupId || "agui", type,
-    { groupId: opts.groupId, topicId: opts.topicId, messageId: opts.messageId });
+    { groupId: opts.groupId, topicId: opts.topicId, messageId: opts.messageId, senderId: opts.senderId });
 }
 
 /** 把一次“调用技能”失败记入右上角通知中心，并持久化到本地（刷新 / 重启可备查）。
@@ -7399,10 +7456,10 @@ function showSystemNotification(title, body, tag, type, target) {
   try {
     if (isQuietNow()) return; // 免打扰时段（1.0.295）：仅抑制桌面通知，站内通知中心照常记录
     if (isTypeMuted(type)) return; // 按类型静音（1.0.296）
-    if (!shouldToast(type)) return; // 浮窗范围之外的只进通知中心（1.0.316）
     const tgt = target && target.groupId
-      ? { groupId: target.groupId, topicId: target.topicId || null, messageId: target.messageId || null }
+      ? { groupId: target.groupId, topicId: target.topicId || null, messageId: target.messageId || null, senderId: target.senderId || null }
       : null;
+    if (!shouldToast(type, { groupId: tgt?.groupId, senderId: tgt?.senderId, title, body })) return; // 浮窗域 / 免打扰规则（1.0.316/319）
     if (isDesktopHost()) {
       // 桌面版系统通知桥（1.0.301）：宿主用托盘气泡展示，不依赖 WebView2 的 Notification 权限
       // 1.0.313：带上知聚 / 话题 / 消息 id，点击气泡可直接定位到那条消息
@@ -9901,6 +9958,7 @@ let adminWorkspacesRoot = "";
 let adminWsCurrentAgent = "";
 let adminWsCurrentPath = "";
 let adminWsSearch = "";
+let adminWsScope = "name"; // name | content（1.0.319）
 
 async function loadAdminWorkspaces() {
   const rows = $("adminWorkspaceRows");
@@ -9979,6 +10037,7 @@ async function browseWorkspaceFiles(agentId, path = "", query = "") {
     const params = [];
     if (dir) params.push("path=" + encodeURIComponent(dir));
     if (q) params.push("q=" + encodeURIComponent(q));
+    if (q && adminWsScope === "content") params.push("scope=content");
     if (params.length) url += "?" + params.join("&");
     const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
@@ -10005,6 +10064,7 @@ async function browseWorkspaceFiles(agentId, path = "", query = "") {
         ? `<button class="ws-dir-link" type="button" data-ws-dir="${idx}">📁 ${escapeHtml(e.name)}/</button>`
         : (searching
             ? `📄 <code>${escapeHtml(e.path)}</code>`
+              + (e.snippet ? `<div class="ws-snippet" title="${escapeHtml(t("admin.wsMatchLine", { line: String(e.line || 0) }))}">${escapeHtml(e.snippet)}</div>` : "")
             : `📄 <code>${escapeHtml(e.name)}</code>`);
       const actions = isDir
         ? `<button class="chip-btn" type="button" data-ws-dir-act="${idx}">${escapeHtml(t("admin.wsOpen"))}</button>`
@@ -10167,6 +10227,7 @@ async function loadWorkAudits() {
     workAuditItems = d.items || [];
     syncWorkAuditFacets(d.groups, "waGroup", "admin.waAllGroups");
     syncWorkAuditFacets(d.agents, "waAgent", "admin.waAllAgents");
+    loadWorkAuditStorage();
 
     // 按消息聚合：同一条回答的多个操作并成一行，展开看明细
     const byMsg = new Map();
@@ -10271,6 +10332,40 @@ function workAuditCsvUrl(splitMonth) {
   if ($("waGroupByMsg")?.checked) url += "&group=message";
   if (splitMonth) url += "&split=month";
   return url;
+}
+
+/** 归档占用（1.0.319）：分片数 / 占用 / 最早日期 / 保留期。 */
+async function loadWorkAuditStorage() {
+  const box = $("waStorage");
+  if (!box) return;
+  try {
+    const res = await fetch("/ag-ui/admin/work-audits/storage", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { box.textContent = ""; return; }
+    if (d.available === false) { box.textContent = t("admin.waStorageUnavailable"); return; }
+    const oldest = d.oldestUtc ? fmtDateTime(d.oldestUtc).slice(0, 10) : "—";
+    box.textContent = t("admin.waStorage", {
+      files: d.files || 0,
+      size: fmtBytes(Number(d.bytes) || 0),
+      oldest,
+      days: d.retentionDays > 0 ? String(d.retentionDays) : t("admin.wsNoRetention"),
+    });
+    box.title = d.dir || "";
+  } catch { box.textContent = ""; }
+}
+
+/** 手动清理过期归档分片（1.0.319）：只删整片过期的，不动保留期内数据。 */
+async function sweepWorkAuditArchive() {
+  if (!window.confirm(t("admin.waSweepConfirm"))) return;
+  try {
+    const res = await fetch("/ag-ui/admin/work-audits/sweep", { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.ok) { toast(t("admin.waSweepFail", { err: errMsg(d, "HTTP " + res.status) })); return; }
+    toast(t("admin.waSweepDone", { count: d.deleted || 0 }));
+    loadWorkAuditStorage();
+  } catch (ex) {
+    toast(t("admin.waSweepFail", { err: ex.message }));
+  }
 }
 
 /** 导出工作区操作审计 CSV（按当前筛选条件，最多 5000 条）。 */
@@ -16117,6 +16212,16 @@ function init() {
       browseWorkspaceFiles(adminWsCurrentAgent, adminWsCurrentPath, $("wsSearchInput").value.trim());
     }, 250);
   };
+  const setScope = (scope) => {
+    adminWsScope = scope;
+    $("wsScopeName").classList.toggle("on", scope === "name");
+    $("wsScopeContent").classList.toggle("on", scope === "content");
+    if (adminWsCurrentAgent && $("wsSearchInput").value.trim()) {
+      browseWorkspaceFiles(adminWsCurrentAgent, adminWsCurrentPath, $("wsSearchInput").value.trim());
+    }
+  };
+  $("wsScopeName").onclick = () => setScope("name");
+  $("wsScopeContent").onclick = () => setScope("content");
   $("wsFilePreviewClose").onclick = () => $("adminWsFilePreview").classList.add("hidden");
   $("wsCopyPathBtn").onclick = () => {
     if (!adminWorkspacesRoot) return;
@@ -16127,6 +16232,7 @@ function init() {
   $("waRefreshBtn").onclick = () => loadWorkAudits();
   $("waExportBtn").onclick = () => exportWorkAudits();
   $("waExportMonthsBtn").onclick = () => exportWorkAuditsByMonth();
+  $("waSweepBtn").onclick = () => sweepWorkAuditArchive();
   $("waGroup").onchange = () => loadWorkAudits();
   $("waAgent").onchange = () => loadWorkAudits();
   $("waGroupByMsg").onchange = () => renderWorkAuditRows();
@@ -16279,6 +16385,25 @@ function init() {
     e.stopPropagation();
     $("notifToastPrefs").classList.toggle("hidden");
     renderToastPrefs();
+    renderNotifRules();
+  };
+  $("notifMuteKeywords").onchange = () => {
+    notifRules.keywords = $("notifMuteKeywords").value.split(",")
+      .map((s) => s.trim().toLowerCase()).filter(Boolean);
+    saveNotifRules();
+  };
+  $("notifMuteSenders").onchange = () => {
+    notifRules.senders = new Set($("notifMuteSenders").value.split(",")
+      .map((s) => s.trim()).filter(Boolean));
+    saveNotifRules();
+  };
+  $("notifMuteGroupAdd").onclick = (e) => {
+    e.stopPropagation();
+    const gid = $("notifMuteGroupSel").value;
+    if (!gid) return;
+    notifRules.groups.add(gid);
+    renderNotifRules();
+    saveNotifRules();
   };
   $("notifToastPrefs").querySelectorAll("input[data-tt]").forEach((cb) => {
     cb.onchange = () => {

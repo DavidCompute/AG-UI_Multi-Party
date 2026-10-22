@@ -223,6 +223,27 @@ public sealed class WorkAuditReportTests
         }
 
         [Fact]
+        public void Stats_ReportsFilesBytesAndOldest()
+        {
+            var (archive, dir) = NewArchive();
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                archive.Record(Entry("m_now", now.ToUnixTimeMilliseconds()));
+                archive.Record(Entry("m_old", now.AddDays(-40).ToUnixTimeMilliseconds()));
+
+                var stats = archive.Stats();
+
+                Assert.Equal(2, stats.Files);
+                Assert.True(stats.Bytes > 0);
+                Assert.NotNull(stats.Oldest);
+                Assert.NotNull(stats.Newest);
+                Assert.True(stats.Newest > stats.Oldest);
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        [Fact]
         public void Collect_PrefersArchiveAndBackfillsWhenEmpty()
         {
             var (archive, dir) = NewArchive();

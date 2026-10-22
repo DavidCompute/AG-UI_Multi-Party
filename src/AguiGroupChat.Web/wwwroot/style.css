@@ -111,6 +111,17 @@ select {
 .notif-toast-title { color: var(--muted); margin-bottom: 6px; }
 .notif-toast-types { display: flex; flex-wrap: wrap; gap: 10px; }
 .notif-toast-types label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text); }
+/* 免打扰规则（1.0.319）：紧凑输入行 + 知聚 chips */
+.notif-rule-title { color: var(--muted); margin: 10px 0 4px; }
+.notif-rule-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.notif-rule-row .modal-input { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 3px 8px; }
+.notif-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.notif-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+  border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text);
+}
+.notif-chip-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
+.notif-chip-x:hover { color: var(--danger, #e5484d); }
 .notif-title { font-size: 14px; font-weight: 600; }
 /* 按类型筛选（1.0.297）：与通知列表同宽，选中态跟主题主色 */
 .notif-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 2px; }

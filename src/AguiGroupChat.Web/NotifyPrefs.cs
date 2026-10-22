@@ -5,19 +5,34 @@ using AguiGroupChat.Hub.Persistence;
 
 namespace AguiGroupChat.Web;
 
+/// <summary>单个用户的通知偏好（1.0.318 起存浮窗范围；1.0.319 扩展为规则）。</summary>
+public sealed class NotifyUserPrefs
+{
+    /// <summary>允许弹浮窗的类型；<c>null</c> = 从未设置 / 全部弹；空数组 = 都不弹。</summary>
+    public List<string>? ToastTypes { get; set; }
+
+    /// <summary>这些知聚的通知不弹浮窗（仍进通知中心）。</summary>
+    public List<string>? MuteGroups { get; set; }
+
+    /// <summary>这些发送者（成员 id）的通知不弹浮窗。</summary>
+    public List<string>? MuteSenders { get; set; }
+
+    /// <summary>标题或正文包含任一关键词时不弹浮窗（不区分大小写）。</summary>
+    public List<string>? MuteKeywords { get; set; }
+}
+
 /// <summary>
-/// 按用户的**通知偏好**（1.0.318）：目前只有「浮窗范围」——哪些通知类型弹系统通知 / 桌面浮窗。
-/// 存在扩展区 <c>notifyPrefs</c> 里，多设备登录后同一账号口径一致；前端仍保留 <c>localStorage</c> 作本地缓存。
-///
-/// <para>语义：该用户没有记录 / 空列表 = 全部类型都弹（与历史行为一致）；否则只弹列表内的类型。</para>
+/// 按用户的**通知偏好**（1.0.318）：哪些类型弹系统通知 / 桌面浮窗；1.0.319 起再加
+/// 「按知聚 / 按发送者 / 按关键词」的免打扰规则。存扩展区 <c>notifyPrefs</c>，多设备登录后口径一致；
+/// 前端仍保留 <c>localStorage</c> 作本地缓存。
 /// </summary>
 public sealed class NotifyPrefsState
 {
-    /// <summary>userId → 允许弹浮窗的类型集合。键不存在 = 从未设置（全部弹）；空列表 = 明确“都不弹”。</summary>
-    public Dictionary<string, List<string>> ToastTypes { get; set; } = new(StringComparer.Ordinal);
+    /// <summary>userId → 偏好。</summary>
+    public Dictionary<string, NotifyUserPrefs> Users { get; set; } = new(StringComparer.Ordinal);
 }
 
-/// <summary>通知偏好接口（1.0.318）：<c>GET/PUT /ag-ui/notify-prefs</c>（需登录，只读写当前用户）。</summary>
+/// <summary>通知偏好接口（1.0.318/319）：<c>GET/PUT /ag-ui/notify-prefs</c>（需登录，只读写当前用户）。</summary>
 public static class NotifyPrefsApi
 {
     /// <summary>与前端通知中心的类型一致；未知值拒绝，避免配置漂移。</summary>
@@ -26,50 +41,97 @@ public static class NotifyPrefsApi
         "mention", "approval", "error", "message", "other",
     };
 
+    private const int MaxListItems = 100;
+    private const int MaxValueChars = 64;
+
     public static void MapNotifyPrefsApi(this WebApplication app)
     {
         app.MapGet("/ag-ui/notify-prefs", (HttpContext ctx, NotifyPrefsState state) =>
         {
             var uid = WebIdentity.UserId(ctx);
             if (string.IsNullOrEmpty(uid)) return Results.Empty;
-            // 键不存在（从未设置）→ null（前端按“全部弹”处理）；空数组 = 明确“都不弹”（1.0.318）
-            var list = state.ToastTypes.TryGetValue(uid, out var v) ? v : null;
-            return Results.Ok(new { toastTypes = list });
+            state.Users.TryGetValue(uid, out var prefs);
+            return Results.Ok(new
+            {
+                // null = 从未设置（前端按“全部弹”处理）；空数组 = 明确“都不弹”
+                toastTypes = prefs?.ToastTypes,
+                muteGroups = prefs?.MuteGroups ?? [],
+                muteSenders = prefs?.MuteSenders ?? [],
+                muteKeywords = prefs?.MuteKeywords ?? [],
+            });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         app.MapPut("/ag-ui/notify-prefs", (NotifyPrefsHttpRequest req, HttpContext ctx,
             NotifyPrefsState state, ChangeHub changes) =>
         {
             var uid = WebIdentity.UserId(ctx)!;
-            var cleaned = (req.ToastTypes ?? [])
-                .Where((x) => !string.IsNullOrWhiteSpace(x))
-                .Select((x) => x.Trim())
-                .Where(KnownTypes.Contains)
-                .Distinct(StringComparer.Ordinal)
-                .ToList();
+            var prefs = state.Users.TryGetValue(uid, out var existing) ? existing : new NotifyUserPrefs();
 
-            // 空列表是有效值（“都不弹”），不能删键：删掉会退回“从未设置 = 全部弹”
-            state.ToastTypes[uid] = cleaned;
+            // ToastTypes 显式传 null = 恢复“全部弹”；传数组（含空）= 按此执行
+            if (req.ToastTypes is not null)
+                prefs.ToastTypes = Clean(req.ToastTypes, KnownTypes.Contains);
+            if (req.MuteGroups is not null)
+                prefs.MuteGroups = Clean(req.MuteGroups);
+            if (req.MuteSenders is not null)
+                prefs.MuteSenders = Clean(req.MuteSenders);
+            if (req.MuteKeywords is not null)
+                prefs.MuteKeywords = Clean(req.MuteKeywords);
 
+            state.Users[uid] = prefs;
             changes.Notify(); // 驱动持久化
-            return Results.Ok(new { ok = true, toastTypes = cleaned });
+            return Results.Ok(new
+            {
+                ok = true,
+                toastTypes = prefs.ToastTypes,
+                muteGroups = prefs.MuteGroups ?? [],
+                muteSenders = prefs.MuteSenders ?? [],
+                muteKeywords = prefs.MuteKeywords ?? [],
+            });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
 
-    /// <summary>注册到持久化扩展区「notifyPrefs」：重启后恢复；须在 InitializePersistence 前调用。</summary>
+    /// <summary>去空白 / 去重 / 截断长度 / 限条数；可选附加白名单过滤。</summary>
+    private static List<string> Clean(IReadOnlyList<string>? values, Func<string, bool>? allow = null)
+        => (values ?? [])
+            .Where((x) => !string.IsNullOrWhiteSpace(x))
+            .Select((x) => x.Trim())
+            .Where((x) => x.Length <= MaxValueChars && (allow is null || allow(x)))
+            .Distinct(StringComparer.Ordinal)
+            .Take(MaxListItems)
+            .ToList();
+
+    /// <summary>注册到持久化扩展区「notifyPrefs」：重启后恢复；兼容 1.0.318 的「userId → 类型数组」旧格式。</summary>
     public static void RegisterNotifyPrefsPersistence(this IServiceProvider services)
     {
         var state = services.GetRequiredService<NotifyPrefsState>();
         Func<object?> snapshot = () => state;
         Action<JsonElement> restore = element =>
         {
-            var saved = element.Deserialize<NotifyPrefsState>(AguiJson.Options);
-            if (saved is null) return;
-            state.ToastTypes = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-            foreach (var (uid, list) in saved.ToastTypes ?? [])
+            state.Users = new Dictionary<string, NotifyUserPrefs>(StringComparer.Ordinal);
+            if (element.ValueKind != JsonValueKind.Object) return;
+            foreach (var prop in element.EnumerateObject())
             {
-                // 保留空列表（“都不弹”）；只过滤未知类型
-                state.ToastTypes[uid] = (list ?? []).Where(KnownTypes.Contains).Distinct(StringComparer.Ordinal).ToList();
+                try
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        // 旧格式：直接是 toastTypes 数组
+                        var list = prop.Value.Deserialize<List<string>>(AguiJson.Options) ?? [];
+                        state.Users[prop.Name] = new NotifyUserPrefs { ToastTypes = Clean(list, KnownTypes.Contains) };
+                        continue;
+                    }
+                    if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+                    var prefs = prop.Value.Deserialize<NotifyUserPrefs>(AguiJson.Options);
+                    if (prefs is null) continue;
+                    state.Users[prop.Name] = new NotifyUserPrefs
+                    {
+                        ToastTypes = prefs.ToastTypes is null ? null : Clean(prefs.ToastTypes, KnownTypes.Contains),
+                        MuteGroups = Clean(prefs.MuteGroups),
+                        MuteSenders = Clean(prefs.MuteSenders),
+                        MuteKeywords = Clean(prefs.MuteKeywords),
+                    };
+                }
+                catch { /* 单条损坏：跳过 */ }
             }
         };
 
@@ -79,5 +141,10 @@ public static class NotifyPrefsApi
     }
 }
 
-/// <summary>保存通知偏好的请求体：空数组 = 恢复「全部类型都弹」。</summary>
-public sealed record NotifyPrefsHttpRequest(IReadOnlyList<string>? ToastTypes);
+/// <summary>保存通知偏好的请求体；未传的字段 = 不改，<c>ToastTypes</c> 传空数组 = 都不弹。
+/// （构造参数带默认值：否则 System.Text.Json 会把缺失字段当成必填而 400。）</summary>
+public sealed record NotifyPrefsHttpRequest(
+    IReadOnlyList<string>? ToastTypes = null,
+    IReadOnlyList<string>? MuteGroups = null,
+    IReadOnlyList<string>? MuteSenders = null,
+    IReadOnlyList<string>? MuteKeywords = null);

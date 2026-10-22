@@ -265,4 +265,28 @@ public sealed class WorkspaceMaintenanceTests
         }
         finally { Cleanup(root); }
     }
+
+    [Fact]
+    public void SearchContent_ReturnsLineAndSnippet_SkipsBinaryAndOversize()
+    {
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            Directory.CreateDirectory(ws);
+            File.WriteAllText(Path.Combine(ws, "notes.txt"), "line1\r\nline2\r\nneedle here\r\nline4");
+            File.WriteAllBytes(Path.Combine(ws, "bin.dat"), [0, 1, 2, 3, (byte)'n', (byte)'e']);
+            File.WriteAllText(Path.Combine(ws, "big.txt"), new string('a', 64) + "needle");
+
+            var hits = WorkspaceMaintenance.SearchContent(ws, "needle", maxFileBytes: 32);
+
+            Assert.Single(hits);                       // big.txt 超单文件上限、bin.dat 是二进制
+            Assert.Equal("notes.txt", hits[0].Path);
+            Assert.Equal(3, hits[0].Line);
+            Assert.Contains("needle here", hits[0].Snippet);
+
+            Assert.Empty(WorkspaceMaintenance.SearchContent(ws, ""));
+        }
+        finally { Cleanup(root); }
+    }
 }

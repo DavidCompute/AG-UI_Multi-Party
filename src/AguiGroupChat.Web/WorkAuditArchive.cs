@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Storage;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -167,6 +168,29 @@ public sealed class WorkAuditArchive : IWorkAuditSink
             total -= _cache[key].Entries.Count;
             _cache.Remove(key);
         }
+    }
+
+    /// <summary>归档占用快照（1.0.319）：分片数 / 字节 / 最早与最新分片日期。</summary>
+    public WorkAuditStats Stats()
+    {
+        var files = 0;
+        long bytes = 0;
+        DateTimeOffset? oldest = null;
+        DateTimeOffset? newest = null;
+        try
+        {
+            foreach (var path in Directory.GetFiles(_dir, Prefix + "*.jsonl"))
+            {
+                var period = PeriodOf(path);
+                if (period is null) continue;
+                files++;
+                try { bytes += new FileInfo(path).Length; } catch { /* 被并发删除 */ }
+                if (oldest is null || period.Value.Start < oldest) oldest = period.Value.Start;
+                if (newest is null || period.Value.Start > newest) newest = period.Value.Start;
+            }
+        }
+        catch { /* 目录不可读：返回已收集的 */ }
+        return new WorkAuditStats(files, bytes, oldest, newest);
     }
 
     /// <summary>删除早于保留期的分片文件（1.0.317 起按天分片，保留旧的按月文件也会被清理），返回删除数。

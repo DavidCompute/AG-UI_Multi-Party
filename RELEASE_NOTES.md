@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.318 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.318 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.319 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.319 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作区内容搜索 + 归档可治理 + 通知规则化**——能在文件内容里搜；归档占用可见、可手动清理；通知可按知聚 / 发送者 / 关键词免打扰。
+**Version note**: **Content search, governable archive, notification rules** — search inside workspace files; see and sweep archive usage; skip popups by circle, sender or keyword.
+
+## 变更
+# Changes
+
+中文：
+- **内容搜索**：`/workspaces/{agentId}/files` 新增 `scope=content`（`WorkspaceMaintenance.SearchContent`）：遍历文本文件找首个命中，返回行号 + 前后 60 字符片段；跳过二进制与 >1 MB 文件，总扫描 32 MB / 100 条上限。前端搜索框旁加「文件名 / 内容」切换。
+- **归档治理**：新增 `GET /admin/work-audits/storage`（分片数 / 字节 / 最早与最新日期 / 保留期）与 `POST /admin/work-audits/sweep`（按保留期清理整片过期分片，写审计日志 `admin.workaudit.sweep`）；工作区页在审计区显示占用并提供「🧹 清理过期归档」。
+- **通知规则**：`NotifyUserPrefs` 从单一 `ToastTypes` 扩为 `ToastTypes + MuteGroups + MuteSenders + MuteKeywords`；`PUT /notify-prefs` 部分字段可选（null = 不改）。持久化恢复兼容 1.0.318 的旧格式（userId → 类型数组）。前端免打扰规则区支持关键词 / 知聚 chips / 发送者；命中规则**不弹浮窗但保留通知中心**。
+- **测试**：新增 2 项（内容搜索行号与片段 + 二进制 / 超大文件跳过、归档占用统计），全量 **1914 通过**。
+
+English:
+- **Content search**: `/workspaces/{agentId}/files` accepts `scope=content` (`WorkspaceMaintenance.SearchContent`), walking text files for the first hit and returning a line number plus a ±60-character snippet; binary files and files over 1 MB are skipped, with 32 MB / 100-hit caps. The UI adds a **File name / Content** toggle beside the search box.
+- **Archive governance**: new `GET /admin/work-audits/storage` (shards / bytes / oldest & newest date / retention) and `POST /admin/work-audits/sweep` (delete fully expired shards per retention, audit-logged as `admin.workaudit.sweep`); the workspaces tab shows usage and a **🧹 Sweep expired archive** action.
+- **Notification rules**: `NotifyUserPrefs` grows from `ToastTypes` to `ToastTypes + MuteGroups + MuteSenders + MuteKeywords`; `PUT /notify-prefs` fields are optional (null = leave unchanged). Persistence restore stays compatible with the 1.0.318 shape (userId → type array). The panel supports keyword / circle chips / sender rules; a matching notification **skips the popup but is still recorded in the center**.
+- **Tests**: 2 new checks (content-search line/snippet plus binary & oversize skipping, archive usage stats); the full suite passes **1914**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（内容搜索 / 归档治理）、§1.2.1（免打扰规则）、§8 控制台页签表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.319。
+English: `docs/user-guide.md` / `en.md` §3.13 (content search / archive governance), §1.2.1 (do-not-popup rules), and the chapter 8 tab table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.319.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2180，missing 0**；配置键守卫无漂移；文档引用 0 失效；全量 `dotnet test` **1914 通过 / 0 失败**。**无法自动验证**：内容搜索在大工作区下的耗时、多设备规则同步与真实通知命中。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2180, missing 0**; the config-key guard reports no drift; docs references are clean; the full `dotnet test` run passes **1914 / 0**. **Not automatically verifiable**: content-search latency on a large workspace, cross-device rule sync, and rule matching against real notifications.
+
+---
+
+# AG-UI 群聊桌面版 1.0.318 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.318 Release Notes (historical)
 
 **版本说明**：**工作区可搜 + 审计导出精细化 + 通知偏好跨设备**——文件名搜索跨整个工作区；审计可按聚合口径或按月分包导出；浮窗范围存到服务端。
 **Version note**: **Searchable workspaces, finer audit exports, server-synced notification prefs** — file-name search across the workspace; audit export either grouped or split per month; popup scope stored on the server.

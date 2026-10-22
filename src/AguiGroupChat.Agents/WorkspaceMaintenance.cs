@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +15,12 @@ public sealed record WorkspaceFile(string Path, long Bytes, DateTime ModifiedUtc
 
 /// <summary>目录浏览的一项（文件或子目录，1.0.317）。</summary>
 public sealed record WorkspaceEntry(string Name, string Path, bool IsDir, long Bytes, DateTime ModifiedUtc);
+
+/// <summary>内容搜索命中（1.0.319）：文件路径 + 首个命中行号与片段。</summary>
+public sealed record WorkspaceMatch(string Path, long Bytes, DateTime ModifiedUtc, int Line, string Snippet);
+
+/// <summary>归档占用快照（1.0.319）：分片数 / 字节 / 最早与最新日期。</summary>
+public sealed record WorkAuditStats(int Files, long Bytes, DateTimeOffset? Oldest, DateTimeOffset? Newest);
 
 /// <summary>
 /// 工作区容量治理（1.0.311）：<c>{WorkSpaceRoot}/{agentId}/</c> 会随工作型数字员工长期运行不断堆积，
@@ -129,6 +136,59 @@ public static class WorkspaceMaintenance
             .OrderBy((e) => e.IsDir ? 0 : 1)
             .ThenBy((e) => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>按内容搜索（1.0.319）：遍历工作区文本文件，找首个命中并返回行号与片段。
+    /// 跳过二进制 / 超过单文件上限的文件，并受总扫描字节数与命中数限制（避免拖死服务）。</summary>
+    public static IReadOnlyList<WorkspaceMatch> SearchContent(
+        string workspaceDir,
+        string? query,
+        int maxHits = 100,
+        long maxFileBytes = 1024 * 1024,
+        long maxTotalBytes = 32L * 1024 * 1024)
+    {
+        var hits = new List<WorkspaceMatch>();
+        var needle = (query ?? "").Trim();
+        if (needle.Length == 0 || string.IsNullOrWhiteSpace(workspaceDir) || !Directory.Exists(workspaceDir)) return hits;
+
+        long scanned = 0;
+        foreach (var file in ListFiles(workspaceDir, 5000))
+        {
+            if (hits.Count >= maxHits || scanned >= maxTotalBytes) break;
+            if (file.Bytes <= 0 || file.Bytes > maxFileBytes) continue;
+            try
+            {
+                var full = Path.Combine(workspaceDir, file.Path.Replace('/', Path.DirectorySeparatorChar));
+                var bytes = File.ReadAllBytes(full);
+                scanned += bytes.Length;
+                var probe = Math.Min(bytes.Length, 4096);
+                var binary = false;
+                for (var i = 0; i < probe; i++)
+                {
+                    if (bytes[i] == 0) { binary = true; break; }
+                }
+                if (binary) continue;
+
+                var text = Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
+                var idx = text.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0) continue;
+
+                var line = 1;
+                for (var i = 0; i < idx; i++)
+                {
+                    if (text[i] == '\n') line++;
+                }
+                var start = Math.Max(0, idx - 60);
+                var end = Math.Min(text.Length, idx + needle.Length + 60);
+                var snippet = text[start..end].Replace('\r', ' ').Replace('\n', ' ').Trim();
+                if (start > 0) snippet = "…" + snippet;
+                if (end < text.Length) snippet += "…";
+
+                hits.Add(new WorkspaceMatch(file.Path, file.Bytes, file.ModifiedUtc, line, snippet));
+            }
+            catch { /* 读取失败 / 编码异常：跳过该文件 */ }
+        }
+        return hits;
     }
 
     /// <summary>把工作区相对路径解析为绝对文件路径；越界 / 绝对路径 / 链接 / 不存在均返回 null。</summary>
