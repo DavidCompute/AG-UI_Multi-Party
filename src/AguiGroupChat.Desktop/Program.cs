@@ -79,8 +79,8 @@ public static class Program
             initialAction: initialAction);
 
         // 第一个 UI 实例占有深链管道；后续实例 / 手动多开的窗口不抢占（同一时间只一个服务端）
-        var deepLink = new DeepLinkServer((group, action) =>
-            window.Dispatcher.BeginInvoke(() => window.HandleDeepLink(group, action)));
+        var deepLink = new DeepLinkServer(req =>
+            window.Dispatcher.BeginInvoke(() => window.HandleDeepLink(req.Group, req.Action, req.TopicId, req.MessageId)));
         deepLink.TryStart();
 
         // 关窗：实例计数 -1；最后一个实例 → 通知后端优雅停机。

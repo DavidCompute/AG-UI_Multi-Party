@@ -127,4 +127,53 @@ public sealed class WorkspaceMaintenanceTests
         }
         finally { Cleanup(root); }
     }
+
+    [Fact]
+    public void ResolveWorkspaceDir_RejectsTraversalAndNesting()
+    {
+        var root = NewRoot();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "agent_a"));
+            Assert.NotNull(WorkspaceMaintenance.ResolveWorkspaceDir(root, "agent_a"));
+            Assert.Null(WorkspaceMaintenance.ResolveWorkspaceDir(root, ".."));
+            Assert.Null(WorkspaceMaintenance.ResolveWorkspaceDir(root, "a/b"));
+            Assert.Null(WorkspaceMaintenance.ResolveWorkspaceDir(root, @"a\b"));
+            Assert.Null(WorkspaceMaintenance.ResolveWorkspaceDir(root, ""));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void ResolveFile_RejectsEscapesAndMissing()
+    {
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            var file = AddFile(Path.Combine(ws, "notes"), "a.txt", 10);
+            Assert.Equal(file, WorkspaceMaintenance.ResolveFile(ws, "notes/a.txt"));
+            Assert.Null(WorkspaceMaintenance.ResolveFile(ws, "../outside.txt"));
+            Assert.Null(WorkspaceMaintenance.ResolveFile(ws, Path.Combine(root, "x.txt")));
+            Assert.Null(WorkspaceMaintenance.ResolveFile(ws, "notes/missing.txt"));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void ListFiles_ReturnsRelativePaths()
+    {
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            AddFile(Path.Combine(ws, "notes", "deep"), "b.txt", 5);
+            AddFile(ws, "a.txt", 7);
+            var files = WorkspaceMaintenance.ListFiles(ws);
+            Assert.Equal(2, files.Count);
+            Assert.Equal(["a.txt", "notes/deep/b.txt"], files.Select((f) => f.Path).ToArray());
+            Assert.Equal(7, files[0].Bytes);
+        }
+        finally { Cleanup(root); }
+    }
 }

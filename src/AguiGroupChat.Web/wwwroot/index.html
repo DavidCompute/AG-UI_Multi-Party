@@ -2331,6 +2331,19 @@
             <tbody id="adminWorkspaceRows"></tbody>
           </table>
         </div>
+        <!-- 文件浏览（1.0.313）：只读列出 / 下载，路径限定在该工作区内 -->
+        <div id="adminWorkspaceFiles" class="hidden" style="margin-top:12px">
+          <div class="admin-toolbar">
+            <b id="adminWsFilesTitle"></b>
+            <button id="wsFilesCloseBtn" class="chip-btn" type="button" data-i18n="admin.wsFilesClose">≡ 收起</button>
+          </div>
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead><tr><th data-i18n="admin.wsFilePath">文件</th><th data-i18n="admin.wsBytes">占用</th><th data-i18n="admin.wsLast">最近修改</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+              <tbody id="adminWorkspaceFileRows"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
       <!-- 出站 Webhook（对外集成）：把知聚事件以带签名的 POST 推送给外部系统 -->
       <div id="adminWebhooksView" class="hidden">

@@ -2425,6 +2425,13 @@ button { white-space: nowrap; }
   color: var(--muted); cursor: pointer; font-family: inherit;
 }
 .plan-audit-toggle:hover { color: var(--accent-text); border-color: rgba(79,140,255,.45); }
+.plan-audit-export {
+  margin-left: auto; padding: 1px 9px; font-size: 11px; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: 999px; background: transparent;
+  color: var(--muted); cursor: pointer; font-family: inherit;
+}
+.plan-audit-export:hover { color: var(--accent-text); border-color: rgba(79,140,255,.45); }
+.plan-audit-export + .plan-audit-toggle { margin-left: 0; }
 .plan-audit-body { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
 .plan-audit-group-head { font-size: 11px; color: var(--muted); font-weight: 600; }
 .plan-audit-list { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }

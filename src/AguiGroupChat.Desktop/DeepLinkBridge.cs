@@ -19,18 +19,26 @@ internal static class DeepLinkProtocol
     }
 }
 
+/// <summary>深链请求（1.0.313 带话题 / 消息定位）：任一字段可空。</summary>
+/// <param name="Group">目标知聚。</param>
+/// <param name="Action">快捷动作（new-group / admin）。</param>
+/// <param name="TopicId">目标话题（可空 = 主话题）。</param>
+/// <param name="MessageId">目标消息（可空 = 只切到话题）。</param>
+internal sealed record DeepLinkRequest(string? Group, string? Action, string? TopicId, string? MessageId);
+
 /// <summary>
 /// 深链服务端：第一个 UI 实例占有命名管道；跳转列表 / 快捷任务启动的新进程把请求交给它，
 /// 由它在前台窗口内切换知聚 / 打开弹窗，避免每次深链都新开窗口（以及重复托盘图标）。
+/// 1.0.313 起每个窗口额外开一条 <see cref="DeepLinkProtocol.PipeNameFor"/> 管道，供其他窗口定向投递。
 /// </summary>
 internal sealed class DeepLinkServer : IDisposable
 {
-    private readonly Action<string?, string?> _onRequest;
+    private readonly Action<DeepLinkRequest> _onRequest;
     private readonly string _pipeName;
     private readonly CancellationTokenSource _cts = new();
     private bool _started;
 
-    public DeepLinkServer(Action<string?, string?> onRequest, string? pipeName = null)
+    public DeepLinkServer(Action<DeepLinkRequest> onRequest, string? pipeName = null)
     {
         _onRequest = onRequest;
         _pipeName = string.IsNullOrWhiteSpace(pipeName) ? DeepLinkProtocol.PipeName : pipeName!;
@@ -75,7 +83,9 @@ internal sealed class DeepLinkServer : IDisposable
                         var root = doc.RootElement;
                         var group = root.TryGetProperty("group", out var g) ? g.GetString() : null;
                         var action = root.TryGetProperty("action", out var a) ? a.GetString() : null;
-                        _onRequest(group, action);
+                        var topicId = root.TryGetProperty("topicId", out var tp) ? tp.GetString() : null;
+                        var messageId = root.TryGetProperty("messageId", out var mi) ? mi.GetString() : null;
+                        _onRequest(new DeepLinkRequest(group, action, topicId, messageId));
                     }
                     catch { /* 非法请求忽略 */ }
                 }
@@ -108,6 +118,10 @@ internal sealed class DeepLinkServer : IDisposable
 internal static class DeepLinkClient
 {
     public static bool TrySend(string? group, string? action, string? pipeName = null, int timeoutMs = 600)
+        => TrySend(group, action, topicId: null, messageId: null, pipeName: pipeName, timeoutMs: timeoutMs);
+
+    public static bool TrySend(string? group, string? action, string? topicId, string? messageId,
+        string? pipeName = null, int timeoutMs = 600)
     {
         if (string.IsNullOrWhiteSpace(group) && string.IsNullOrWhiteSpace(action)) return false;
         try
@@ -117,7 +131,7 @@ internal static class DeepLinkClient
                 PipeDirection.Out, PipeOptions.CurrentUserOnly);
             client.Connect(timeoutMs);
             using var writer = new StreamWriter(client) { AutoFlush = true };
-            writer.WriteLine(JsonSerializer.Serialize(new { group, action }));
+            writer.WriteLine(JsonSerializer.Serialize(new { group, action, topicId, messageId }));
             return true;
         }
         catch

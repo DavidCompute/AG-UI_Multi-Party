@@ -9,6 +9,9 @@ public sealed record WorkspaceSweepResult(int Workspaces, int DeletedFiles, long
 /// <summary>单个工作区的占用快照（管理控制台「工作区」页用）。</summary>
 public sealed record WorkspaceUsage(string AgentId, long Bytes, int Files, DateTime? LastModifiedUtc);
 
+/// <summary>工作区内一个文件的元信息（管理控制台浏览用，1.0.313）。</summary>
+public sealed record WorkspaceFile(string Path, long Bytes, DateTime ModifiedUtc);
+
 /// <summary>
 /// 工作区容量治理（1.0.311）：<c>{WorkSpaceRoot}/{agentId}/</c> 会随工作型数字员工长期运行不断堆积，
 /// 需要有「按时间清理 + 按容量清理」的兜底，否则迟早把宿主磁盘写满。
@@ -58,6 +61,66 @@ public static class WorkspaceMaintenance
             list.Add(new WorkspaceUsage(Path.GetFileName(dir), bytes, files, last));
         }
         return list.OrderByDescending((x) => x.Bytes).ToList();
+    }
+
+    /// <summary>把 agentId 解析为工作区目录；只接受单层目录名，越界返回 null。</summary>
+    public static string? ResolveWorkspaceDir(string root, string? agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId)) return null;
+        if (agentId!.Contains('/') || agentId.Contains('\\') || agentId is "." or "..") return null;
+        var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var full = Path.GetFullPath(Path.Combine(rootFull, agentId)).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parent = Path.GetDirectoryName(full);
+        var cmp = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(parent, rootFull, cmp) ? full : null;
+    }
+
+    /// <summary>列出工作区中的文件（只读；跳过符号链接 / 联接点，按路径排序，最多 <paramref name="max"/> 条）。</summary>
+    public static IReadOnlyList<WorkspaceFile> ListFiles(string workspaceDir, int max = 2000)
+    {
+        var list = new List<WorkspaceFile>();
+        if (string.IsNullOrWhiteSpace(workspaceDir) || !Directory.Exists(workspaceDir)) return list;
+        try
+        {
+            foreach (var f in new DirectoryInfo(workspaceDir).EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if ((f.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    list.Add(new WorkspaceFile(
+                        Path.GetRelativePath(workspaceDir, f.FullName).Replace('\\', '/'), f.Length, f.LastWriteTimeUtc));
+                    if (list.Count >= max) break;
+                }
+                catch { /* 文件被删除：跳过 */ }
+            }
+        }
+        catch { /* 目录不可读：返回已收集的 */ }
+        return list.OrderBy((x) => x.Path, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>把工作区相对路径解析为绝对文件路径；越界 / 绝对路径 / 链接 / 不存在均返回 null。</summary>
+    public static string? ResolveFile(string workspaceDir, string? relative)
+    {
+        if (string.IsNullOrWhiteSpace(relative)) return null;
+        var rel = relative!.Trim().Replace('\\', '/');
+        if (Path.IsPathRooted(rel)) return null;
+        var dir = Path.GetFullPath(workspaceDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var full = Path.GetFullPath(Path.Combine(dir, rel));
+        var cmp = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!full.StartsWith(dir + Path.DirectorySeparatorChar, cmp)) return null;
+        // 逐段拒绝符号链接 / 联接点（可能把读取带出工作区）
+        var current = dir;
+        foreach (var part in Path.GetRelativePath(dir, full)
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, part);
+            try
+            {
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return null;
+            }
+            catch { return null; }
+        }
+        return File.Exists(full) ? full : null;
     }
 
     public static WorkspaceSweepResult Sweep(

@@ -6229,10 +6229,36 @@ function renderPlanAudit(plan, m) {
     + `<div class="plan-audit-head">`
     + `<span class="plan-audit-title">🔧 ${escapeHtml(t("plan.audit.title"))} · ${items.length}</span>`
     + (bad > 0 ? `<span class="plan-audit-bad">⚠ ${escapeHtml(t("plan.audit.bad", { count: bad }))}</span>` : "")
+    + `<button class="plan-audit-export" type="button" title="${escapeHtml(t("plan.audit.exportTitle"))}">⬇ CSV</button>`
     + `<button class="plan-audit-toggle" type="button">${escapeHtml(btnText)}</button>`
     + `</div>`
     + `<div class="plan-audit-body${mode === "hidden" ? " hidden" : ""}">${body}</div>`
     + `</div>`;
+}
+
+/** 导出本条回答的工作区操作审计为 CSV（1.0.313）：带 BOM，Excel 直接打开不乱码。 */
+function exportPlanAuditCsv(m) {
+  const items = (m && m.plan && Array.isArray(m.plan.audit) ? m.plan.audit : []).filter((x) => x && x.text);
+  if (!items.length) return;
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const rows = [["tool", "ok", "durationMs", "text"]];
+  for (const it of items) {
+    rows.push([it.tool || "", it.ok === false ? "false" : "true", it.durationMs ?? "", it.text || ""]);
+  }
+  const csv = "\uFEFF" + rows.map((r) => r.map(esc).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `work-audit-${String(m.id || "message").slice(0, 12)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(t("plan.audit.exported", { count: items.length }));
 }
 
 /** 绑定计划卡「暂停 / 继续」与「收缩 / 展开」按钮（渲染后由 msgDom 调用一次）。 */
@@ -6268,6 +6294,11 @@ function bindPlanCardButtons(container, m) {
       auditModeOverride.set(m.id, next);
       applyPlanAuditMode(root, next);
     };
+  }
+  // 导出审计 CSV（1.0.313）
+  const exportBtn = container.querySelector(".plan-audit-export");
+  if (exportBtn && m) {
+    exportBtn.onclick = (e) => { e.stopPropagation(); exportPlanAuditCsv(m); };
   }
 }
 
@@ -7039,13 +7070,15 @@ function notifyNewMessage(evt, m) {
     const body = String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 120);
     if (isDesktopHost()) {
       // 桌面版：交给宿主气泡（同样受免打扰 / 按类型静音约束）
-      showSystemNotification(title, body, "group_" + evt.groupId, "message");
+      showSystemNotification(title, body, "group_" + evt.groupId, "message",
+        { groupId: evt.groupId, topicId: m.topicId || null, messageId: m.id || null });
       return;
     }
     if (!("Notification" in window)) return;
     if (Notification.permission === "granted") {
       // 统一走 showSystemNotification：免打扰、类型静音与点击跳转都在那里处理
-      showSystemNotification(title, body, "group_" + evt.groupId, "message");
+      showSystemNotification(title, body, "group_" + evt.groupId, "message",
+        { groupId: evt.groupId, topicId: m.topicId || null, messageId: m.id || null });
     } else if (Notification.permission === "default") {
       Notification.requestPermission().catch(() => {});
     }
@@ -7057,6 +7090,25 @@ function handleSystemNotifyClick(groupId) {
   if (!groupId || !(state.groups || []).some((g) => g.groupId === groupId)) return;
   hideNotifPanel();
   selectGroup(groupId);
+}
+
+/**
+ * 深链打开（1.0.313）：切知聚 → 切话题 → 滚到具体消息，供桌面壳的托盘气泡 / 跳转列表调用。
+ * 找不到消息时回退到只看知聚（不报错）；不在成员列表里的知聚直接忽略。
+ */
+async function openDeepLink(groupId, topicId, messageId) {
+  try {
+    if (!groupId || !(state.groups || []).some((g) => g.groupId === groupId)) return false;
+    hideNotifPanel();
+    if (state.activeGroupId !== groupId) {
+      await selectGroup(groupId);
+      // 等快照落地（话题列表 / 消息窗口就绪）再定位，避免刚切过去就找不到消息
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    }
+    if (messageId) return await locateMessage(messageId, topicId || "main");
+    if (topicId && state.activeTopicId !== topicId) await selectTopic(topicId);
+    return true;
+  } catch { return false; }
 }
 
 /* ---- 桌面通知权限引导（1.0.298）：未授权时在通知面板顶部提示，避免“以为告警没触发” ---- */
@@ -7144,7 +7196,8 @@ function addNotification(type, title, body, opts = {}) {
   renderNotifications();
   scheduleSaveNotifications(); // 1.0.299：本地持久化（刷新不丢）
   // 系统桌面通知（Web Notification）：前台 / 后台都弹，仅未授权 + 忽略；点击跳去其来源知聚
-  showSystemNotification(title, body, opts.groupId || "agui", type);
+  showSystemNotification(title, body, opts.groupId || "agui", type,
+    { groupId: opts.groupId, topicId: opts.topicId, messageId: opts.messageId });
 }
 
 /** 把一次“调用技能”失败记入右上角通知中心，并持久化到本地（刷新 / 重启可备查）。
@@ -7168,7 +7221,7 @@ function notifySkillError(groupId, skillLabel, msg) {
   scheduleSaveNotifications();
   if (state.notifications.length > 100) state.notifications.pop();
   renderNotifications();
-  showSystemNotification(entry.title, entry.body, groupId || "agui", "error");
+  showSystemNotification(entry.title, entry.body, groupId || "agui", "error", { groupId });
   // 持久化到本用户本地存储（供刷新 / 下次登录备查）
   if (state.memberId) {
     try {
@@ -7251,18 +7304,30 @@ function notifIcon(type) {
 }
 
 /** 系统桌面通知（Web Notification）：前台 / 后台都弹；`tag` 传群 id（群 id）时点击跳到该知聚并关闭。 */
-function showSystemNotification(title, body, tag, type) {
+function showSystemNotification(title, body, tag, type, target) {
   try {
     if (isQuietNow()) return; // 免打扰时段（1.0.295）：仅抑制桌面通知，站内通知中心照常记录
     if (isTypeMuted(type)) return; // 按类型静音（1.0.296）
+    const tgt = target && target.groupId
+      ? { groupId: target.groupId, topicId: target.topicId || null, messageId: target.messageId || null }
+      : null;
     if (isDesktopHost()) {
       // 桌面版系统通知桥（1.0.301）：宿主用托盘气泡展示，不依赖 WebView2 的 Notification 权限
-      window.chrome.webview.postMessage({ type: "notify", title: String(title || ""), body: String(body || "").slice(0, 200) });
+      // 1.0.313：带上知聚 / 话题 / 消息 id，点击气泡可直接定位到那条消息
+      window.chrome.webview.postMessage({
+        type: "notify", title: String(title || ""), body: String(body || "").slice(0, 200),
+        groupId: tgt?.groupId || null, topicId: tgt?.topicId || null, messageId: tgt?.messageId || null,
+      });
       return;
     }
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     const n = new Notification(title, { body: String(body || "").slice(0, 140), tag: tag || "agui", icon: "/agui-icon-256.png" });
-    n.onclick = () => { window.focus(); n.close(); if (tag && tag !== "agui") handleSystemNotifyClick(tag); };
+    n.onclick = () => {
+      window.focus();
+      n.close();
+      if (tgt) openDeepLink(tgt.groupId, tgt.topicId, tgt.messageId);
+      else if (tag && tag !== "agui") handleSystemNotifyClick(tag);
+    };
   } catch { /* 忽略 */ }
 }
 
@@ -9736,14 +9801,56 @@ async function loadAdminWorkspaces() {
       <td>${escapeHtml(x.nickname || "—")}</td>
       <td>${escapeHtml(mb(x.bytes))}</td>
       <td>${Number(x.files) || 0}</td>
-      <td>${x.lastModifiedUtc ? escapeHtml(fmtTime(x.lastModifiedUtc)) : "—"}</td>
-      <td><button class="chip-btn" type="button" data-ws-agent="${escapeHtml(x.agentId)}">${escapeHtml(t("admin.wsCleanupOne"))}</button></td>
+      <td>${x.lastModifiedUtc ? escapeHtml(fmtDateTime(x.lastModifiedUtc)) : "—"}</td>
+      <td>
+        <button class="chip-btn" type="button" data-ws-browse="${escapeHtml(x.agentId)}">${escapeHtml(t("admin.wsBrowse"))}</button>
+        <button class="chip-btn" type="button" data-ws-agent="${escapeHtml(x.agentId)}">${escapeHtml(t("admin.wsCleanupOne"))}</button>
+      </td>
     </tr>`).join("");
     rows.querySelectorAll("[data-ws-agent]").forEach((btn) => {
       btn.onclick = () => cleanupWorkspaces(btn.dataset.wsAgent);
     });
+    rows.querySelectorAll("[data-ws-browse]").forEach((btn) => {
+      btn.onclick = () => browseWorkspaceFiles(btn.dataset.wsBrowse);
+    });
   } catch (ex) {
     rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
+  }
+}
+
+/** 浏览某个工作区的文件（只读 + 下载，1.0.313）：面板嵌入在「工作区」页表格下方，不另开弹窗。 */
+async function browseWorkspaceFiles(agentId) {
+  const box = $("adminWorkspaceFiles");
+  const rows = $("adminWorkspaceFileRows");
+  const title = $("adminWsFilesTitle");
+  if (!box || !rows) return;
+  box.classList.remove("hidden");
+  if (title) title.textContent = t("admin.wsFilesTitle", { id: agentId });
+  rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/files`,
+      { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) {
+      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(d, "HTTP " + res.status)) })}</td></tr>`;
+      return;
+    }
+    const files = d.files || [];
+    if (!files.length) {
+      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.wsFilesEmpty")}</td></tr>`;
+      return;
+    }
+    rows.innerHTML = files.map((f) => {
+      const url = authedAssetUrl(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(f.path)}`);
+      return `<tr>
+        <td><code>${escapeHtml(f.path)}</code></td>
+        <td>${escapeHtml(fmtBytes(Number(f.bytes) || 0))}</td>
+        <td>${f.modifiedUtc ? escapeHtml(fmtDateTime(f.modifiedUtc)) : "—"}</td>
+        <td><a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a></td>
+      </tr>`;
+    }).join("");
+  } catch (ex) {
+    rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
   }
 }
 
@@ -15489,6 +15596,7 @@ function init() {
   $("adminTabWorkspaces").onclick = () => switchAdminTab("workspaces");
   $("wsRefreshBtn").onclick = () => loadAdminWorkspaces();
   $("wsCleanupAllBtn").onclick = () => cleanupWorkspaces(null);
+  $("wsFilesCloseBtn").onclick = () => $("adminWorkspaceFiles").classList.add("hidden");
   $("wsCopyPathBtn").onclick = () => {
     if (!adminWorkspacesRoot) return;
     navigator.clipboard?.writeText(adminWorkspacesRoot).then(

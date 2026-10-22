@@ -637,6 +637,30 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 工作区文件浏览（1.0.313）：只读列出 / 下载工作区内的文件（路径严格限定在工作区目录内）。
+        root.MapGet("/workspaces/{agentId}/files", (string agentId, AgentOptions options,
+            Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            var files = WorkspaceMaintenance.ListFiles(dir)
+                .Select(f => new { path = f.Path, bytes = f.Bytes, modifiedUtc = f.ModifiedUtc })
+                .ToList();
+            return Results.Ok(new { agentId, exists = Directory.Exists(dir), files });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        root.MapGet("/workspaces/{agentId}/file", (string agentId, string? path, AgentOptions options,
+            Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            var full = WorkspaceMaintenance.ResolveFile(dir, path);
+            if (full is null) return Results.BadRequest(new { error = "invalid_path" });
+            return Results.File(full, "application/octet-stream", Path.GetFileName(full), enableRangeProcessing: true);
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员及以上（含运维）。
         root.MapGet("/metrics", (HttpContext ctx, AguiGroupChat.Agents.MetricsService metrics) =>
         {

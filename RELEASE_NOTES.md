@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.312 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.312 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.313 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.313 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作区可浏览 + 审计可导出 + 通知可定位**——管理控制台可查看并下载工作区文件；计划卡审计一键导出 CSV；点击桌面通知直接跳到触发它的那条消息。
+**Version note**: **Browsable workspaces, exportable audit, pinpoint notifications** — the admin console can list and download workspace files; the plan-card audit exports to CSV in one click; clicking a desktop notification jumps straight to the message that triggered it.
+
+## 变更
+# Changes
+
+中文：
+- **工作区文件浏览**：新增 `GET /ag-ui/admin/workspaces/{agentId}/files`（相对路径 / 大小 / 修改时间）与 `GET /ag-ui/admin/workspaces/{agentId}/file?path=`（单文件下载，支持 Range）；`WorkspaceMaintenance` 新增 `ResolveWorkspaceDir` / `ListFiles` / `ResolveFile`，只接受单层 agentId 与工作区内相对路径，越界 / 绝对路径 / 符号链接 / 联接点一律返回 400。管理控制台「工作区」页每行增加「📂 浏览文件」，在表格下方展开文件清单并可逐个下载。
+- **审计导出 CSV**：计划卡的 **🔧 工作区操作** 右上角新增 `⬇ CSV`，把本条回答的审计行导出为 `work-audit-<messageId>.csv`（`tool / ok / durationMs / text`，带 BOM）。纯前端生成，不请求服务端。
+- **消息级通知跳转**：`showSystemNotification()` 增加目标参数（`groupId` / `topicId` / `messageId`）；桌面宿主记住最近一条通知的目标，气泡点击时经深链切到知聚 → 话题 → 滚到该消息；浏览器 Web Notification 点击同效。前端新增 `openDeepLink()`（找不到消息时回退到只看知聚）。深链协议扩展为 `{group, action, topicId, messageId}`。
+- **测试**：新增 3 项（agentId 越界拒绝 / 文件路径越界与不存在拒绝 / 文件清单相对路径），全量 **1895 通过**。
+
+English:
+- **Workspace file browsing**: new `GET /ag-ui/admin/workspaces/{agentId}/files` (relative path / size / modified) and `GET /ag-ui/admin/workspaces/{agentId}/file?path=` (single-file download with range support); `WorkspaceMaintenance` gains `ResolveWorkspaceDir` / `ListFiles` / `ResolveFile` that only accept a single-segment `agentId` and workspace-relative paths, returning 400 for escapes, absolute paths, symlinks and junctions. Each row in the admin **Workspaces** tab gains **📂 Browse files**, expanding the file list below the table with per-file downloads.
+- **Audit CSV export**: the **🔧 Workspace actions** header gains `⬇ CSV`, exporting this answer's audit rows as `work-audit-<messageId>.csv` (`tool / ok / durationMs / text`, BOM-prefixed). Generated entirely in the browser, no server round trip.
+- **Message-level notification jumps**: `showSystemNotification()` takes a target (`groupId` / `topicId` / `messageId`); the desktop host remembers the latest notification target and, on balloon click, deep-links to the circle → topic → message. Browser Web Notifications behave the same. A new frontend `openDeepLink()` falls back to just opening the circle when the message cannot be found. The deep-link protocol becomes `{group, action, topicId, messageId}`.
+- **Tests**: 3 new checks (agentId escape rejection / file path escape and missing-file rejection / relative paths in listings); the full suite passes **1895**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（审计导出 / 工作区文件浏览）、§1.2.1（消息级通知跳转）、§8 控制台页签表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.313。
+English: `docs/user-guide.md` / `en.md` §3.13 (audit export / workspace file browser), §1.2.1 (message-level notification jumps), and the chapter 8 tab table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.313.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2116，missing 0**；配置键守卫 **119 键，未登记漂移 0**；文档引用 0 失效；全量 `dotnet test` **1895 通过 / 0 失败**。**无法自动验证**：安装版下点击通知气泡的定位效果与工作区文件的实际下载（需真实运行桌面版 / 有文件的工作区）。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2116, missing 0**; the config-key guard reports **119 keys, 0 unregistered drift**; docs references are clean; the full `dotnet test` run passes **1895 / 0**. **Not automatically verifiable**: notification-balloon jumps and actual workspace file downloads in an installed desktop build (needs a real desktop run and a workspace containing files).
+
+---
+
+# AG-UI 群聊桌面版 1.0.312 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.312 Release Notes (historical)
 
 **版本说明**：**审计可读 + 工作区可管 + 未读可直达**——工作区操作从计划步骤中拆出、按工具分组且默认只看异常；管理控制台新增「工作区」页（占用统计 + 按策略清理）；托盘「未读窗口」点其他窗口的知聚可直达。
 **Version note**: **Readable audit, manageable workspaces, direct unread navigation** — workspace actions move out of the plan steps into their own grouped block (failures only by default); a new **Workspaces** admin tab reports usage and cleans by policy; tray unread entries of other windows now jump straight to that circle.

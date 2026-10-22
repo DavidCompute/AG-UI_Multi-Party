@@ -43,6 +43,9 @@ public partial class MainWindow : Window
     private IReadOnlyList<TrayUnreadGroup> _unreadGroups = [];
     private System.Windows.Forms.ToolStripMenuItem? _windowsMenu;
     private DeepLinkServer? _windowLink;
+    private string? _notifyGroupId;
+    private string? _notifyTopicId;
+    private string? _notifyMessageId;
     private nint _hwnd;
     private string _progressState = "none";
     private ulong _progressValue;
@@ -84,7 +87,8 @@ public partial class MainWindow : Window
         // 逐窗口深链管道（1.0.312）：其他窗口的托盘菜单可把「切到某知聚」定向投递给本窗口，
         // 而不只是把它提到前台。与 <see cref="DeepLinkProtocol.PipeName"/>（首个实例占用）互不干扰。
         _windowLink = new DeepLinkServer(
-            (group, action) => Dispatcher.BeginInvoke(new Action(() => HandleDeepLink(group, action))),
+            (req) => Dispatcher.BeginInvoke(new Action(() =>
+                HandleDeepLink(req.Group, req.Action, req.TopicId, req.MessageId))),
             DeepLinkProtocol.PipeNameFor(_unreadAggregator.WindowId));
         _windowLink.TryStart();
         if (startHidden)
@@ -245,6 +249,10 @@ public partial class MainWindow : Window
                 case "notify":
                     var title = root.TryGetProperty("title", out var t) ? (t.GetString() ?? "") : "";
                     var body = root.TryGetProperty("body", out var b) ? (b.GetString() ?? "") : "";
+                    // 1.0.313：记住通知目标，点击气泡直接定位到那条消息
+                    _notifyGroupId = root.TryGetProperty("groupId", out var ng) ? ng.GetString() : null;
+                    _notifyTopicId = root.TryGetProperty("topicId", out var nt) ? nt.GetString() : null;
+                    _notifyMessageId = root.TryGetProperty("messageId", out var nm) ? nm.GetString() : null;
                     ShowNotification(title, body);
                     break;
                 case "unread":
@@ -588,20 +596,20 @@ public partial class MainWindow : Window
         ActivateWindow(hwnd);
     }
 
-    /// <summary>深链请求（来自另一个进程，如跳转列表 / 托盘快捷任务）：切知聚或打开快捷弹窗。</summary>
-    internal void HandleDeepLink(string? groupId, string? action)
+    /// <summary>深链请求（来自另一个进程，如跳转列表 / 托盘快捷任务 / 逐窗口投递）：切知聚或打开快捷弹窗。</summary>
+    internal void HandleDeepLink(string? groupId, string? action, string? topicId = null, string? messageId = null)
     {
         if (!string.IsNullOrWhiteSpace(groupId))
         {
-            NavigateToGroup(groupId!);
+            NavigateToGroup(groupId!, topicId, messageId);
             return;
         }
         if (action is "new-group" or "admin")
             RunQuickAction(action);
     }
 
-    /// <summary>托盘快速切换知聚：优先调用页面的 selectGroup()，不可用时回退到深链导航。</summary>
-    private async void NavigateToGroup(string groupId)
+    /// <summary>托盘快速切换知聚：优先调用页面的 openDeepLink()（1.0.313 可定位到话题 / 消息），不可用时回退到深链导航。</summary>
+    private async void NavigateToGroup(string groupId, string? topicId = null, string? messageId = null)
     {
         BringToFront();
         var url = _baseUrl + "/?group=" + Uri.EscapeDataString(groupId);
@@ -610,8 +618,12 @@ public partial class MainWindow : Window
             if (WebView.CoreWebView2 is not null)
             {
                 var idJs = JsonSerializer.Serialize(groupId);
+                var topicJs = JsonSerializer.Serialize(topicId);
+                var msgJs = JsonSerializer.Serialize(messageId);
                 var urlJs = JsonSerializer.Serialize(url);
-                var js = "try { if (typeof selectGroup === 'function' && Array.isArray(state?.groups)"
+                var js = "try {"
+                    + " if (typeof openDeepLink === 'function') { openDeepLink(" + idJs + ", " + topicJs + ", " + msgJs + "); }"
+                    + " else if (typeof selectGroup === 'function' && Array.isArray(state?.groups)"
                     + " && state.groups.some(g => g.groupId === " + idJs + ")) { selectGroup(" + idJs + "); }"
                     + " else { location.href = " + urlJs + "; } } catch (e) { location.href = " + urlJs + "; }";
                 await WebView.CoreWebView2.ExecuteScriptAsync(js);
@@ -957,7 +969,14 @@ public partial class MainWindow : Window
             Visible = true,
             ContextMenuStrip = _trayMenu,
         };
-        _tray.BalloonTipClicked += (_, _) => BringToFront();
+        _tray.BalloonTipClicked += (_, _) =>
+        {
+            // 1.0.313：气泡点了就跳到触发它的那条消息（无目标时仅前置窗口）
+            if (!string.IsNullOrWhiteSpace(_notifyGroupId))
+                HandleDeepLink(_notifyGroupId, null, _notifyTopicId, _notifyMessageId);
+            else
+                BringToFront();
+        };
         _tray.DoubleClick += (_, _) => BringToFront();
         UpdateTrayVisuals();
         UpdateMenuState();
