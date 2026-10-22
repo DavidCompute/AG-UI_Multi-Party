@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.319 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.319 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.320 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.320 Release Notes (current Windows desktop release)
+
+**版本说明**：**命中可定位 + 归档可知构成 + 通知模板化**——内容搜索结果点开即高亮定位；归档统计给出工具分布；通知范围可一键套用模板。
+**Version note**: **Pinpoint hits, informative archive stats, notification presets** — content-search results open highlighted at the hit; archive stats show the tool breakdown; popup scope can be applied from presets.
+
+## 变更
+# Changes
+
+中文：
+- **内容搜索命中高亮**：`previewWorkspaceFile()` 接受 `highlight` 参数，`highlightText()` 把命中词包成 `<mark class="ws-hit">`（最多 300 处）并自动滚到第一处；内容搜索结果的文件名也变成可点击按钮，点击即带高亮打开预览。
+- **归档体量构成**：`WorkAuditStats` 扩展为含 `Entries / Failed / Tools`，`Stats()` 复用归档缓存统计各工具条数（最多 5 万条）；`GET /admin/work-audits/storage` 返回 `entries / failed / tools`，工作区页在归档占用后面追加「命令 N · 写入 N · 读取 N … · 共 N 条 · 异常 N 条」。
+- **通知模板**：通知偏好面板新增模板下拉 —— 全部通知 / 只留 @我 与审批 / 只留审批 / 只留错误 / 全部静音，一键设置 `toastTypes` 并同步服务端。
+- **测试**：沿用既有归档用例，并扩展断言到 `Entries / Failed / Tools`，全量 **1914 通过**。
+
+English:
+- **Content-search hit highlighting**: `previewWorkspaceFile()` takes a `highlight` argument; `highlightText()` wraps every occurrence in `<mark class="ws-hit">` (max 300) and scrolls to the first one. File names in content-search results are now clickable buttons that open the highlighted preview.
+- **Archive composition**: `WorkAuditStats` grows `Entries / Failed / Tools`; `Stats()` reuses the archive cache to count per-tool rows (up to 50k); `GET /admin/work-audits/storage` returns `entries / failed / tools`, and the workspaces tab appends "commands N · writes N · reads N … · N entries · N failed".
+- **Notification presets**: the preference panel gains a preset dropdown — all / mentions & approvals / approvals only / errors only / silence everything — setting `toastTypes` in one click and syncing to the server.
+- **Tests**: existing archive cases extended to assert `Entries / Failed / Tools`; the full suite passes **1914**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（命中高亮 / 体量构成）、§1.2.1（通知模板）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.320。
+English: `docs/user-guide.md` / `en.md` §3.13 (hit highlighting / composition), §1.2.1 (notification presets); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.320.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2189，missing 0**；配置键守卫无漂移；文档引用 0 失效；全量 `dotnet test` **1914 通过 / 0 失败**。**无法自动验证**：高亮滚动定位与模板应用在安装版中的实际交互。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2189, missing 0**; the config-key guard reports no drift; docs references are clean; the full `dotnet test` run passes **1914 / 0**. **Not automatically verifiable**: the highlight scroll and preset application in an installed build.
+
+---
+
+# AG-UI 群聊桌面版 1.0.319 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.319 Release Notes (historical)
 
 **版本说明**：**工作区内容搜索 + 归档可治理 + 通知规则化**——能在文件内容里搜；归档占用可见、可手动清理；通知可按知聚 / 发送者 / 关键词免打扰。
 **Version note**: **Content search, governable archive, notification rules** — search inside workspace files; see and sweep archive usage; skip popups by circle, sender or keyword.

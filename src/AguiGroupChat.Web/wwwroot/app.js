@@ -10063,7 +10063,7 @@ async function browseWorkspaceFiles(agentId, path = "", query = "") {
       const nameCell = isDir
         ? `<button class="ws-dir-link" type="button" data-ws-dir="${idx}">📁 ${escapeHtml(e.name)}/</button>`
         : (searching
-            ? `📄 <code>${escapeHtml(e.path)}</code>`
+            ? `<button class="ws-dir-link" type="button" data-ws-preview="${idx}">📄 <code>${escapeHtml(e.path)}</code></button>`
               + (e.snippet ? `<div class="ws-snippet" title="${escapeHtml(t("admin.wsMatchLine", { line: String(e.line || 0) }))}">${escapeHtml(e.snippet)}</div>` : "")
             : `📄 <code>${escapeHtml(e.name)}</code>`);
       const actions = isDir
@@ -10086,7 +10086,7 @@ async function browseWorkspaceFiles(agentId, path = "", query = "") {
       btn.onclick = () => { if (entries[i]) openDir(entries[i]); };
     });
     rows.querySelectorAll("[data-ws-preview]").forEach((btn) => {
-      btn.onclick = () => previewWorkspaceFile(agentId, entries[Number(btn.dataset.wsPreview)]);
+      btn.onclick = () => previewWorkspaceFile(agentId, entries[Number(btn.dataset.wsPreview)], searching ? q : "");
     });
     rows.querySelectorAll("[data-ws-del]").forEach((btn) => {
       btn.onclick = () => deleteWorkspaceFile(agentId, entries[Number(btn.dataset.wsDel)]);
@@ -10147,7 +10147,7 @@ function wsFileKind(path) {
 }
 
 /** 在面板内预览工作区文件（1.0.314）：文本 >512 KB 不给预览，避免把弹窗卡死。 */
-async function previewWorkspaceFile(agentId, f) {
+async function previewWorkspaceFile(agentId, f, highlight = "") {
   const box = $("adminWsFilePreview");
   const body = $("adminWsFilePreviewBody");
   const title = $("adminWsFilePreviewTitle");
@@ -10178,10 +10178,36 @@ async function previewWorkspaceFile(agentId, f) {
       return;
     }
     const text = await res.text();
-    body.innerHTML = `<pre class="ws-file-preview-text">${escapeHtml(text)}</pre>`;
+    body.innerHTML = `<pre class="ws-file-preview-text">${highlightText(text, highlight)}</pre>`;
+    // 内容搜索跳转（1.0.320）：直接滚到第一个命中
+    if (highlight) {
+      const mark = body.querySelector("mark.ws-hit");
+      if (mark) mark.scrollIntoView({ block: "center" });
+    }
   } catch (ex) {
     body.innerHTML = `<div class="form-hint">${escapeHtml(t("admin.loadFail", { err: ex.message }))}</div>`;
   }
+}
+
+/** 转义并把命中词包成 <mark>（1.0.320）：最多标 300 处，避免长文本卡顿。 */
+function highlightText(text, query) {
+  const q = String(query || "").trim();
+  if (!q) return escapeHtml(text);
+  const lower = text.toLowerCase();
+  const needle = q.toLowerCase();
+  let out = "";
+  let from = 0;
+  let hits = 0;
+  while (hits < 300) {
+    const idx = lower.indexOf(needle, from);
+    if (idx < 0) break;
+    out += escapeHtml(text.slice(from, idx));
+    out += `<mark class="ws-hit">${escapeHtml(text.slice(idx, idx + needle.length))}</mark>`;
+    from = idx + needle.length;
+    hits++;
+  }
+  out += escapeHtml(text.slice(from));
+  return out;
 }
 
 /** 工作区操作审计汇总（1.0.314；1.0.315 起读归档；1.0.316 加知聚 / 员工筛选与按消息聚合）。 */
@@ -10334,15 +10360,16 @@ function workAuditCsvUrl(splitMonth) {
   return url;
 }
 
-/** 归档占用（1.0.319）：分片数 / 占用 / 最早日期 / 保留期。 */
+/** 归档占用（1.0.319；1.0.320 加工具分布）：分片数 / 占用 / 最早日期 / 保留期。 */
 async function loadWorkAuditStorage() {
   const box = $("waStorage");
+  const toolsBox = $("waStorageTools");
   if (!box) return;
   try {
     const res = await fetch("/ag-ui/admin/work-audits/storage", { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { box.textContent = ""; return; }
-    if (d.available === false) { box.textContent = t("admin.waStorageUnavailable"); return; }
+    if (!res.ok || !d) { box.textContent = ""; if (toolsBox) toolsBox.textContent = ""; return; }
+    if (d.available === false) { box.textContent = t("admin.waStorageUnavailable"); if (toolsBox) toolsBox.textContent = ""; return; }
     const oldest = d.oldestUtc ? fmtDateTime(d.oldestUtc).slice(0, 10) : "—";
     box.textContent = t("admin.waStorage", {
       files: d.files || 0,
@@ -10351,7 +10378,23 @@ async function loadWorkAuditStorage() {
       days: d.retentionDays > 0 ? String(d.retentionDays) : t("admin.wsNoRetention"),
     });
     box.title = d.dir || "";
-  } catch { box.textContent = ""; }
+
+    if (toolsBox) {
+      const label = {
+        work_run_command: "plan.audit.group.command",
+        work_write_file: "plan.audit.group.write",
+        work_read_file: "plan.audit.group.read",
+        work_list_dir: "plan.audit.group.list",
+      };
+      const parts = Object.entries(d.tools || {})
+        .sort((a, b) => Number(b[1]) - Number(a[1]))
+        .map(([tool, count]) => `${t(label[tool] || "plan.audit.group.other")} ${count}`);
+      const extra = [];
+      if (d.entries) extra.push(t("admin.waStorageEntries", { count: d.entries }));
+      if (d.failed) extra.push(t("admin.waStorageFailed", { count: d.failed }));
+      toolsBox.textContent = [...parts, ...extra].join(" · ");
+    }
+  } catch { box.textContent = ""; if (toolsBox) toolsBox.textContent = ""; }
 }
 
 /** 手动清理过期归档分片（1.0.319）：只删整片过期的，不动保留期内数据。 */
@@ -16404,6 +16447,20 @@ function init() {
     notifRules.groups.add(gid);
     renderNotifRules();
     saveNotifRules();
+  };
+  // 快捷模板（1.0.320）：一键套用常见组合
+  $("notifPresetApply").onclick = (e) => {
+    e.stopPropagation();
+    const preset = $("notifPresetSel").value;
+    if (preset === "all") notifToastTypes = null;
+    else if (preset === "mentionApproval") notifToastTypes = new Set(["mention", "approval"]);
+    else if (preset === "approval") notifToastTypes = new Set(["approval"]);
+    else if (preset === "error") notifToastTypes = new Set(["error"]);
+    else if (preset === "none") notifToastTypes = new Set();
+    else return;
+    renderToastPrefs();
+    saveToastTypes();
+    toast(t("notif.presetApplied"));
   };
   $("notifToastPrefs").querySelectorAll("input[data-tt]").forEach((cb) => {
     cb.onchange = () => {

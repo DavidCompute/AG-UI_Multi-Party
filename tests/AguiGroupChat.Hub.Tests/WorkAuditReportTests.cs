@@ -239,6 +239,9 @@ public sealed class WorkAuditReportTests
                 Assert.NotNull(stats.Oldest);
                 Assert.NotNull(stats.Newest);
                 Assert.True(stats.Newest > stats.Oldest);
+                Assert.Equal(2, stats.Entries);
+                Assert.Equal(0, stats.Failed);
+                Assert.Equal(2, stats.Tools["work_run_command"]);
             }
             finally { try { Directory.Delete(dir, true); } catch { } }
         }

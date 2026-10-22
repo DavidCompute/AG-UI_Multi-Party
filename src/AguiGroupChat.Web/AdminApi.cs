@@ -725,6 +725,9 @@ public static class AdminApi
                 bytes = stats.Bytes,
                 oldestUtc = stats.Oldest,
                 newestUtc = stats.Newest,
+                entries = stats.Entries,
+                failed = stats.Failed,
+                tools = stats.Tools,
                 retentionDays = options.WorkAuditRetentionDays,
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));

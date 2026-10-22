@@ -20,7 +20,15 @@ public sealed record WorkspaceEntry(string Name, string Path, bool IsDir, long B
 public sealed record WorkspaceMatch(string Path, long Bytes, DateTime ModifiedUtc, int Line, string Snippet);
 
 /// <summary>归档占用快照（1.0.319）：分片数 / 字节 / 最早与最新日期。</summary>
-public sealed record WorkAuditStats(int Files, long Bytes, DateTimeOffset? Oldest, DateTimeOffset? Newest);
+/// <summary>归档占用快照（1.0.319；1.0.320 加条数与工具分布）。</summary>
+public sealed record WorkAuditStats(
+    int Files,
+    long Bytes,
+    DateTimeOffset? Oldest,
+    DateTimeOffset? Newest,
+    int Entries,
+    int Failed,
+    IReadOnlyDictionary<string, int> Tools);
 
 /// <summary>
 /// 工作区容量治理（1.0.311）：<c>{WorkSpaceRoot}/{agentId}/</c> 会随工作型数字员工长期运行不断堆积，

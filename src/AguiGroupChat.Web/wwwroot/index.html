@@ -49,6 +49,17 @@
       </div>
       <!-- 免打扰规则（1.0.319）：命中则不弹浮窗，仍进通知中心 -->
       <div class="notif-rule-title" data-i18n="notif.muteRulesTitle">免打扰规则（命中不弹浮窗，仍进通知中心）</div>
+      <!-- 快捷模板（1.0.320） -->
+      <div class="notif-rule-row">
+        <select id="notifPresetSel" class="modal-input">
+          <option value="all" data-i18n="notif.presetAll">全部通知</option>
+          <option value="mentionApproval" data-i18n="notif.presetMentionApproval">只留 @我 与审批</option>
+          <option value="approval" data-i18n="notif.presetApproval">只留审批</option>
+          <option value="error" data-i18n="notif.presetError">只留错误</option>
+          <option value="none" data-i18n="notif.presetNone">全部静音</option>
+        </select>
+        <button id="notifPresetApply" class="chip-btn" type="button" data-i18n="notif.presetApply">应用</button>
+      </div>
       <div class="notif-rule-row">
         <input id="notifMuteKeywords" class="modal-input" data-i18n-placeholder="notif.muteKeywords" />
       </div>
@@ -2415,6 +2426,7 @@
           <button id="waExportBtn" class="chip-btn" type="button" data-i18n="admin.waExport">⬇ 导出 CSV</button>
           <button id="waExportMonthsBtn" class="chip-btn" type="button" data-i18n="admin.waExportMonths">🗂 按月份导出</button>
           <span id="waStorage" class="form-hint"></span>
+          <span id="waStorageTools" class="form-hint"></span>
           <button id="waSweepBtn" class="chip-btn" type="button" data-i18n="admin.waSweep">🧹 清理过期归档</button>
           <span id="waMeta" class="form-hint"></span>
         </div>

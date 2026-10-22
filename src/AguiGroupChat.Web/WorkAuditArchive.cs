@@ -190,7 +190,13 @@ public sealed class WorkAuditArchive : IWorkAuditSink
             }
         }
         catch { /* 目录不可读：返回已收集的 */ }
-        return new WorkAuditStats(files, bytes, oldest, newest);
+
+        // 工具分布（1.0.320）：复用缓存读取，最多统计 5 万条
+        var rows = Read(0, 50000);
+        var tools = rows
+            .GroupBy((r) => string.IsNullOrWhiteSpace(r.Tool) ? "other" : r.Tool, StringComparer.Ordinal)
+            .ToDictionary((g) => g.Key, (g) => g.Count(), StringComparer.Ordinal);
+        return new WorkAuditStats(files, bytes, oldest, newest, rows.Count, rows.Count((r) => !r.Ok), tools);
     }
 
     /// <summary>删除早于保留期的分片文件（1.0.317 起按天分片，保留旧的按月文件也会被清理），返回删除数。
