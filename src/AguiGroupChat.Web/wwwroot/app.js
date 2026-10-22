@@ -7392,10 +7392,14 @@ function unreadNotifCount() {
 let notifFilter = "";
 const NOTIF_FILTER_KNOWN = ["mention", "approval", "error", "message"];
 
+function notifMatchesType(n, type) {
+  if (!type) return true;
+  if (type === "other") return !NOTIF_FILTER_KNOWN.includes(n.type);
+  return n.type === type;
+}
+
 function notifMatchesFilter(n) {
-  if (!notifFilter) return true;
-  if (notifFilter === "other") return !NOTIF_FILTER_KNOWN.includes(n.type);
-  return n.type === notifFilter;
+  return notifMatchesType(n, notifFilter);
 }
 
 function renderNotifications() {
@@ -7406,6 +7410,13 @@ function renderNotifications() {
   badge.classList.toggle("hidden", unread === 0);
   badge.textContent = unread > 99 ? "99+" : String(unread);
   const items = state.notifications.filter((n) => notifMatchesFilter(n));
+  // 「清空」的语义跟随当前筛选：选了类型 = 只清这一类（1.0.317）
+  const clearBtn = $("notifClear");
+  if (clearBtn) {
+    const label = notifFilter ? t("notif.clearType") : t("notif.clearAll");
+    clearBtn.textContent = label;
+    clearBtn.title = label;
+  }
   $("notifEmpty").classList.toggle("hidden", state.notifications.length > 0);
   const noMatch = $("notifNoMatch");
   if (noMatch) noMatch.classList.toggle("hidden", !(state.notifications.length > 0 && items.length === 0));
@@ -7501,7 +7512,17 @@ function deleteNotification(id) {
   scheduleSaveNotifications();
 }
 
-function clearNotifications() {
+function clearNotifications(type = "") {
+  // 1.0.317：传了类型 = 只清当前筛选那一类（通知面板的「清空」按钮随筛选变化）
+  if (type) {
+    state.notifications = state.notifications.filter((n) => !notifMatchesType(n, type));
+    renderNotifications();
+    scheduleSaveNotifications();
+    if (type === "error" && state.memberId) {
+      try { localStorage.removeItem(skillErrorKey(state.memberId)); } catch { /* 忽略 */ }
+    }
+    return;
+  }
   state.notifications = [];
   renderNotifications();
   // 「清空」同时清除已持久化的技能错误备查记录与通知本地副本（否则下次登录会重新载入）
@@ -7509,6 +7530,17 @@ function clearNotifications() {
     try { localStorage.removeItem(skillErrorKey(state.memberId)); } catch { /* 忽略 */ }
     try { localStorage.removeItem(notifStoreKey(state.memberId)); } catch { /* 忽略 */ }
   }
+}
+
+/** 全部标为已读（1.0.317）：不删除，仅消徽标。 */
+function markAllNotificationsRead() {
+  let changed = false;
+  for (const n of state.notifications) {
+    if (!n.read) { n.read = true; changed = true; }
+  }
+  if (!changed) return;
+  renderNotifications();
+  scheduleSaveNotifications();
 }
 
 /** 本地把某话题未读清零（进入知聚 / 切话题 / 当前话题收到新消息时），并重渲染列表与话题栏。 */
@@ -9826,6 +9858,7 @@ async function loadStorageGovernance() {
 /** 工作区占用（1.0.312）：工作型数字员工的专属目录；清理只删「超保留期」或「超配额（最久未修改优先）」的文件。 */
 let adminWorkspacesRoot = "";
 let adminWsCurrentAgent = "";
+let adminWsCurrentPath = "";
 
 async function loadAdminWorkspaces() {
   const rows = $("adminWorkspaceRows");
@@ -9878,53 +9911,95 @@ async function loadAdminWorkspaces() {
   }
 }
 
-/** 浏览某个工作区的文件（只读 + 下载，1.0.313）：面板嵌入在「工作区」页表格下方，不另开弹窗。 */
-async function browseWorkspaceFiles(agentId) {
+/** 浏览工作区目录（1.0.313；1.0.317 起逐层导航）：面板嵌入在「工作区」页下方，不另开弹窗。
+ *  path 为空 = 工作区根；子目录可点入、面包屑可回退。 */
+async function browseWorkspaceFiles(agentId, path = "") {
   const box = $("adminWorkspaceFiles");
   const rows = $("adminWorkspaceFileRows");
   const title = $("adminWsFilesTitle");
   if (!box || !rows) return;
+  const dir = String(path || "").replace(/^\/+|\/+$/g, "");
   adminWsCurrentAgent = agentId;
+  adminWsCurrentPath = dir;
   $("adminWsFilePreview")?.classList.add("hidden");
   box.classList.remove("hidden");
   if (title) title.textContent = t("admin.wsFilesTitle", { id: agentId });
+  renderWsBreadcrumb(agentId, dir);
   rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
-    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/files`,
-      { headers: { Authorization: "Bearer " + state.token } });
+    const url = `/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/files`
+      + (dir ? "?path=" + encodeURIComponent(dir) : "");
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) {
       rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(d, "HTTP " + res.status)) })}</td></tr>`;
       return;
     }
-    const files = d.files || [];
-    if (!files.length) {
-      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.wsFilesEmpty")}</td></tr>`;
+    const entries = d.entries || [];
+    if (!entries.length) {
+      rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${escapeHtml(t(dir ? "admin.wsDirEmpty" : "admin.wsFilesEmpty"))}</td></tr>`;
       return;
     }
-    rows.innerHTML = files.map((f, idx) => {
-      const url = authedAssetUrl(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(f.path)}`);
-      const kind = wsFileKind(f.path);
-      const canPreview = kind === "text" || kind === "image";
-      const previewBtn = canPreview
+    rows.innerHTML = entries.map((e, idx) => {
+      const isDir = !!e.isDir;
+      const url = authedAssetUrl(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/file?path=${encodeURIComponent(e.path)}`);
+      const kind = isDir ? "dir" : wsFileKind(e.path);
+      const previewBtn = (!isDir && (kind === "text" || kind === "image"))
         ? `<button class="chip-btn" type="button" data-ws-preview="${idx}">👁 ${escapeHtml(t("admin.wsPreview"))}</button> `
         : "";
+      const nameCell = isDir
+        ? `<button class="ws-dir-link" type="button" data-ws-dir="${idx}">📁 ${escapeHtml(e.name)}/</button>`
+        : `📄 <code>${escapeHtml(e.name)}</code>`;
+      const actions = isDir
+        ? `<button class="chip-btn" type="button" data-ws-dir-act="${idx}">${escapeHtml(t("admin.wsOpen"))}</button>`
+        : `${previewBtn}<a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a> <button class="chip-btn" type="button" data-ws-del="${idx}">🗑 ${escapeHtml(t("admin.wsDelete"))}</button>`;
       return `<tr>
-        <td><code>${escapeHtml(f.path)}</code></td>
-        <td>${escapeHtml(fmtBytes(Number(f.bytes) || 0))}</td>
-        <td>${f.modifiedUtc ? escapeHtml(fmtDateTime(f.modifiedUtc)) : "—"}</td>
-        <td>${previewBtn}<a class="chip-btn" href="${escapeHtml(url)}" download>⬇ ${escapeHtml(t("admin.wsDownload"))}</a> <button class="chip-btn" type="button" data-ws-del="${idx}">🗑 ${escapeHtml(t("admin.wsDelete"))}</button></td>
+        <td>${nameCell}</td>
+        <td>${isDir ? "—" : escapeHtml(fmtBytes(Number(e.bytes) || 0))}</td>
+        <td>${e.modifiedUtc ? escapeHtml(fmtDateTime(e.modifiedUtc)) : "—"}</td>
+        <td>${actions}</td>
       </tr>`;
     }).join("");
+    const openDir = (entry) => browseWorkspaceFiles(agentId, entry.path);
+    rows.querySelectorAll("[data-ws-dir], [data-ws-dir-act]").forEach((btn) => {
+      const i = Number(btn.dataset.wsDir || btn.dataset.wsDirAct);
+      btn.onclick = () => { if (entries[i]) openDir(entries[i]); };
+    });
     rows.querySelectorAll("[data-ws-preview]").forEach((btn) => {
-      btn.onclick = () => previewWorkspaceFile(agentId, files[Number(btn.dataset.wsPreview)]);
+      btn.onclick = () => previewWorkspaceFile(agentId, entries[Number(btn.dataset.wsPreview)]);
     });
     rows.querySelectorAll("[data-ws-del]").forEach((btn) => {
-      btn.onclick = () => deleteWorkspaceFile(agentId, files[Number(btn.dataset.wsDel)]);
+      btn.onclick = () => deleteWorkspaceFile(agentId, entries[Number(btn.dataset.wsDel)]);
     });
   } catch (ex) {
     rows.innerHTML = `<tr><td colspan="4" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
   }
+}
+
+/** 面包屑（1.0.317）：根 / a / b 可点回退。 */
+function renderWsBreadcrumb(agentId, dir) {
+  const box = $("adminWsBreadcrumb");
+  if (!box) return;
+  const parts = String(dir || "").split("/").filter(Boolean);
+  const crumbs = [`<button class="ws-crumb" type="button" data-ws-path="">${escapeHtml(t("admin.wsRoot"))}</button>`];
+  let acc = "";
+  for (const p of parts) {
+    acc = wsJoinPath(acc, p);
+    crumbs.push(`<span class="ws-crumb-sep">/</span><button class="ws-crumb" type="button" data-ws-path="${escapeHtml(acc)}">${escapeHtml(p)}</button>`);
+  }
+  box.innerHTML = crumbs.join("");
+  box.querySelectorAll("[data-ws-path]").forEach((b) => {
+    b.onclick = () => browseWorkspaceFiles(agentId, b.dataset.wsPath || "");
+  });
+}
+
+/** 拼接工作区相对路径（避免重复 / 与空段）。 */
+function wsJoinPath(a, b) {
+  const left = String(a || "").replace(/^\/+|\/+$/g, "");
+  const right = String(b || "").replace(/^\/+|\/+$/g, "");
+  if (!left) return right;
+  if (!right) return left;
+  return left + "/" + right;
 }
 
 /** 可预览类型（1.0.314）：文本类直接内联展示，图片类用 <img>；其余只给下载。 */
@@ -10144,7 +10219,7 @@ async function deleteWorkspaceFile(agentId, f) {
       return;
     }
     toast(t("admin.wsDeleteDone", { path: f.path }));
-    browseWorkspaceFiles(agentId);
+    browseWorkspaceFiles(agentId, adminWsCurrentPath);
   } catch (ex) {
     toast(t("admin.wsDeleteFail", { err: ex.message }));
   }
@@ -10160,9 +10235,10 @@ async function uploadWorkspaceFiles(input) {
   let fail = 0;
   for (const f of files) {
     try {
+      const target = wsJoinPath(adminWsCurrentPath, f.name);
       const fd = new FormData();
       fd.append("file", f, f.name);
-      const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload`, {
+      const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload?path=${encodeURIComponent(target)}`, {
         method: "POST",
         headers: { Authorization: "Bearer " + state.token },
         body: fd,
@@ -10173,7 +10249,7 @@ async function uploadWorkspaceFiles(input) {
   }
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
-  browseWorkspaceFiles(agentId);
+  browseWorkspaceFiles(agentId, adminWsCurrentPath);
 }
 
 /** 新建目录（1.0.315）：输入相对路径，支持多级（a/b/c）。 */
@@ -10182,16 +10258,17 @@ async function createWorkspaceDir() {
   if (!agentId) return;
   const path = window.prompt(t("admin.wsNewDirPrompt"), "notes");
   if (!path) return;
+  const target = wsJoinPath(adminWsCurrentPath, path);
   try {
-    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/dir?path=${encodeURIComponent(path)}`,
+    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/dir?path=${encodeURIComponent(target)}`,
       { method: "POST", headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d || !d.ok) {
       toast(t("admin.wsNewDirFail", { err: errMsg(d, "HTTP " + res.status) }));
       return;
     }
-    toast(t("admin.wsNewDirDone", { path }));
-    browseWorkspaceFiles(agentId);
+    toast(t("admin.wsNewDirDone", { path: target }));
+    browseWorkspaceFiles(agentId, adminWsCurrentPath);
   } catch (ex) {
     toast(t("admin.wsNewDirFail", { err: ex.message }));
   }
@@ -16098,7 +16175,8 @@ function init() {
 
   // ---- 应用内通知中心（5.4）----
   $("notifBtn").onclick = (e) => { e.stopPropagation(); toggleNotifPanel(); $("meMenu").classList.add("hidden"); };
-  $("notifClear").onclick = (e) => { e.stopPropagation(); clearNotifications(); };
+  $("notifClear").onclick = (e) => { e.stopPropagation(); clearNotifications(notifFilter); };
+  $("notifReadAll").onclick = (e) => { e.stopPropagation(); markAllNotificationsRead(); };
   $("notifToastCfg").onclick = (e) => {
     e.stopPropagation();
     $("notifToastPrefs").classList.toggle("hidden");

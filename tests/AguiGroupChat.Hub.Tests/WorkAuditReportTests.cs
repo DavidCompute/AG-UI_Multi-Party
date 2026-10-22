@@ -166,7 +166,7 @@ public sealed class WorkAuditReportTests
         }
 
         [Fact]
-        public void Sweep_DeletesOnlyFullyExpiredMonths()
+        public void Sweep_DeletesOnlyFullyExpiredPeriods()
         {
             var (archive, dir) = NewArchive();
             try
@@ -181,6 +181,26 @@ public sealed class WorkAuditReportTests
                 Assert.Equal(1, deleted);
                 Assert.Single(Directory.GetFiles(dir, "audit-*.jsonl"));
                 Assert.Equal(0, archive.Sweep(0)); // 0 = 永久保留
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+        }
+
+        [Fact]
+        public void Sweep_UsesDailyGranularity()
+        {
+            // 1.0.317：同一个月内的旧天数会被删，当天的保留（月度分片做不到这一点）
+            var (archive, dir) = NewArchive();
+            try
+            {
+                var now = DateTimeOffset.UtcNow;
+                archive.Record(Entry("m_today", now.ToUnixTimeMilliseconds()));
+                archive.Record(Entry("m_40d", now.AddDays(-40).ToUnixTimeMilliseconds()));
+                archive.Record(Entry("m_35d", now.AddDays(-35).ToUnixTimeMilliseconds()));
+                Assert.Equal(3, Directory.GetFiles(dir, "audit-*.jsonl").Length);
+
+                Assert.Equal(2, archive.Sweep(30));
+                Assert.Single(Directory.GetFiles(dir, "audit-*.jsonl"));
+                Assert.Single(archive.Read(now.AddDays(-1).ToUnixTimeMilliseconds()));
             }
             finally { try { Directory.Delete(dir, true); } catch { } }
         }

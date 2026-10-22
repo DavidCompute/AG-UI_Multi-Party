@@ -638,16 +638,28 @@ public static class AdminApi
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 工作区文件浏览（1.0.313）：只读列出 / 下载工作区内的文件（路径严格限定在工作区目录内）。
-        root.MapGet("/workspaces/{agentId}/files", (string agentId, AgentOptions options,
+        // 1.0.317：按目录逐层浏览（path 为空 = 根），返回子目录 + 文件，前端用面包屑导航。
+        root.MapGet("/workspaces/{agentId}/files", (string agentId, string? path, AgentOptions options,
             Microsoft.Extensions.Hosting.IHostEnvironment env) =>
         {
             var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
             var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
             if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
-            var files = WorkspaceMaintenance.ListFiles(dir)
-                .Select(f => new { path = f.Path, bytes = f.Bytes, modifiedUtc = f.ModifiedUtc })
-                .ToList();
-            return Results.Ok(new { agentId, exists = Directory.Exists(dir), files });
+
+            var rel = (path ?? "").Trim().Replace('\\', '/').Trim('/');
+            if (rel is "." or "..") rel = "";
+            string full;
+            if (rel.Length == 0) full = dir;
+            else if (!WorkspaceMaintenance.TryResolveTarget(dir, rel, out full))
+                return Results.BadRequest(new { error = "invalid_path" });
+
+            var exists = Directory.Exists(full);
+            var entries = exists
+                ? WorkspaceMaintenance.ListEntries(dir, rel)
+                    .Select(e => new { e.Name, e.Path, e.IsDir, e.Bytes, e.ModifiedUtc })
+                    .ToList()
+                : [];
+            return Results.Ok(new { agentId, dir = rel, exists, entries });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         root.MapGet("/workspaces/{agentId}/file", (string agentId, string? path, AgentOptions options,

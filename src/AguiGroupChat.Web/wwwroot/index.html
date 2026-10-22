@@ -32,6 +32,7 @@
     <div class="notif-head">
       <span class="notif-title" data-i18n="notif.title">通知</span>
       <span class="notif-head-actions">
+        <button id="notifReadAll" class="chip-btn" type="button" data-i18n-title="notif.markAllRead">✓</button>
         <button id="notifToastCfg" class="chip-btn" type="button" data-i18n-title="notif.toastPrefs">⚙</button>
         <button id="notifClear" class="chip-btn" data-i18n-title="notif.clearAll">清空</button>
       </span>
@@ -2354,9 +2355,10 @@
             <button id="wsNewDirBtn" class="chip-btn" type="button" data-i18n="admin.wsNewDir">＋ 新建目录</button>
             <button id="wsFilesCloseBtn" class="chip-btn" type="button" data-i18n="admin.wsFilesClose">≡ 收起</button>
           </div>
+          <div id="adminWsBreadcrumb" class="ws-breadcrumb"></div>
           <div class="admin-table-wrap">
             <table class="admin-table">
-              <thead><tr><th data-i18n="admin.wsFilePath">文件</th><th data-i18n="admin.wsBytes">占用</th><th data-i18n="admin.wsLast">最近修改</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+              <thead><tr><th data-i18n="admin.wsName">名称</th><th data-i18n="admin.wsBytes">占用</th><th data-i18n="admin.wsLast">最近修改</th><th data-i18n="admin.thOps">操作</th></tr></thead>
               <tbody id="adminWorkspaceFileRows"></tbody>
             </table>
           </div>

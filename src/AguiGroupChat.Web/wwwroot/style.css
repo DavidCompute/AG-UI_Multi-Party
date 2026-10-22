@@ -2456,6 +2456,19 @@ button { white-space: nowrap; }
   font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text);
 }
 .ws-file-preview-img { display: block; max-width: 100%; margin: 0 auto; border-radius: 6px; }
+/* 目录面包屑（1.0.317）：根 / a / b，可点回退 */
+.ws-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 2px 0 8px; font-size: 12px; }
+.ws-crumb {
+  padding: 1px 6px; border: none; background: transparent; cursor: pointer;
+  color: var(--accent-text); font-family: inherit; font-size: 12px; border-radius: 6px;
+}
+.ws-crumb:hover { background: rgba(111,139,255,.12); }
+.ws-crumb-sep { color: var(--muted); }
+.ws-dir-link {
+  padding: 0; border: none; background: transparent; cursor: pointer;
+  color: var(--accent-text); font-family: inherit; font-size: inherit; text-align: left;
+}
+.ws-dir-link:hover { text-decoration: underline; }
 /* 工作区操作审计汇总（1.0.314）：摘要列截断显示，完整内容看 title */
 .admin-table td.wa-text { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

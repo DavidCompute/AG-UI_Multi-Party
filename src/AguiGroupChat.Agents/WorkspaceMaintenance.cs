@@ -12,6 +12,9 @@ public sealed record WorkspaceUsage(string AgentId, long Bytes, int Files, DateT
 /// <summary>工作区内一个文件的元信息（管理控制台浏览用，1.0.313）。</summary>
 public sealed record WorkspaceFile(string Path, long Bytes, DateTime ModifiedUtc);
 
+/// <summary>目录浏览的一项（文件或子目录，1.0.317）。</summary>
+public sealed record WorkspaceEntry(string Name, string Path, bool IsDir, long Bytes, DateTime ModifiedUtc);
+
 /// <summary>
 /// 工作区容量治理（1.0.311）：<c>{WorkSpaceRoot}/{agentId}/</c> 会随工作型数字员工长期运行不断堆积，
 /// 需要有「按时间清理 + 按容量清理」的兜底，否则迟早把宿主磁盘写满。
@@ -98,6 +101,36 @@ public static class WorkspaceMaintenance
         return list.OrderBy((x) => x.Path, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>列出工作区某个目录的直接子项（文件 + 子目录，不递归；1.0.317）。
+    /// 路径越界 / 链接 / 目录不存在时返回空。</summary>
+    public static IReadOnlyList<WorkspaceEntry> ListEntries(string workspaceDir, string? relative)
+    {
+        var list = new List<WorkspaceEntry>();
+        var rel = string.IsNullOrWhiteSpace(relative) ? "." : relative!.Trim();
+        if (!TryResolveTarget(workspaceDir, rel, out var full) || !Directory.Exists(full)) return list;
+        try
+        {
+            foreach (var info in new DirectoryInfo(full).EnumerateFileSystemInfos())
+            {
+                try
+                {
+                    if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    var entryPath = Path.GetRelativePath(workspaceDir, info.FullName).Replace('\\', '/');
+                    if (info is DirectoryInfo)
+                        list.Add(new WorkspaceEntry(info.Name, entryPath, true, 0, info.LastWriteTimeUtc));
+                    else if (info is FileInfo f)
+                        list.Add(new WorkspaceEntry(info.Name, entryPath, false, f.Length, f.LastWriteTimeUtc));
+                }
+                catch { /* 枚举与读取之间被删：跳过 */ }
+            }
+        }
+        catch { /* 目录不可读：返回已收集的 */ }
+        return list
+            .OrderBy((e) => e.IsDir ? 0 : 1)
+            .ThenBy((e) => e.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>把工作区相对路径解析为绝对文件路径；越界 / 绝对路径 / 链接 / 不存在均返回 null。</summary>
     public static string? ResolveFile(string workspaceDir, string? relative)
         => TryResolveTarget(workspaceDir, relative, out var full) && File.Exists(full) ? full : null;
@@ -137,7 +170,8 @@ public static class WorkspaceMaintenance
         var dir = Path.GetFullPath(workspaceDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         full = Path.GetFullPath(Path.Combine(dir, rel));
         var cmp = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!full.StartsWith(dir + Path.DirectorySeparatorChar, cmp)) return false;
+        // 工作区根自身（rel = "."）允许，便于目录浏览；其余必须严格在根之下
+        if (!string.Equals(full, dir, cmp) && !full.StartsWith(dir + Path.DirectorySeparatorChar, cmp)) return false;
         // 逐段拒绝符号链接 / 联接点（已存在的前缀）；不存在的部分无法判定，建目录后会自然处于工作区内
         var current = dir;
         foreach (var part in Path.GetRelativePath(dir, full)

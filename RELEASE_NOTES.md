@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.316 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.316 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.317 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.317 Release Notes (current Windows desktop release)
+
+**版本说明**：**归档按天分片 + 工作区目录导航 + 通知批量操作**——审计分片更细、保留期按天生效；工作区可逐层浏览与管理；通知面板可一键全部已读与按类型清空。
+**Version note**: **Daily audit shards, folder navigation, notification bulk actions** — audit shards are finer and retention works per day; the workspace can be browsed and managed level by level; the notification panel marks all read or clears a single type.
+
+## 变更
+# Changes
+
+中文：
+- **归档按天分片**：新写入改为 `data/work-audit/audit-YYYY-MM-DD.jsonl`；读取同时兼容 1.0.315/316 的按月文件（同一套尾部长量缓存）。保留期改为按天判定：整个分片区间都早于保留期才删，当天数据不会被切碎。
+- **工作区目录导航**：`GET /admin/workspaces/{agentId}/files?path=` 改为只列**直接子项**（目录在前），返回 `entries[{name,path,isDir,bytes,modifiedUtc}]`；新增 `WorkspaceMaintenance.ListEntries`。前端加面包屑「根 / a / b」可回退，目录可点入；上传、新建目录、删除、预览、下载都以**当前目录**为基准。`TryResolveTarget` 现在允许解析到工作区根（`.`），但仍严格拒绝越界。
+- **通知批量操作**：标题栏新增 `✓`（全部标为已读）；「清空」按钮跟随当前类型筛选——选了一类就只清这一类（标签同步变为「清空本类」），否则清空全部。抽出 `notifMatchesType()` 供筛选与清空共用。
+- **测试**：新增 2 项（按天粒度的归档清理 / 目录只列直接子项与相对路径），全量 **1911 通过**。
+
+English:
+- **Daily archive shards**: new rows go to `data/work-audit/audit-YYYY-MM-DD.jsonl`; reads stay compatible with the 1.0.315/316 monthly files (same tail-read cache). Retention is now evaluated per day: a shard is deleted only when its whole period is older than the cutoff, so today's data is never split.
+- **Workspace folder navigation**: `GET /admin/workspaces/{agentId}/files?path=` now lists **direct children only** (folders first) and returns `entries[{name,path,isDir,bytes,modifiedUtc}]`; new `WorkspaceMaintenance.ListEntries`. The UI adds a clickable **Root / a / b** breadcrumb and enters folders; upload, new folder, delete, preview and download all operate on the **current folder**. `TryResolveTarget` now allows the workspace root (`.`) while still rejecting escapes.
+- **Notification bulk actions**: a `✓` action marks everything read; **Clear** follows the active type filter — with a type selected it clears just that type (the label becomes "Clear this type"), otherwise everything. A shared `notifMatchesType()` backs both filtering and clearing.
+- **Tests**: 2 new checks (daily-granularity retention sweep / direct-children listing with relative paths); the full suite passes **1911**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（按天分片 / 目录导航）、§1.2.1（通知批量操作）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.317。
+English: `docs/user-guide.md` / `en.md` §3.13 (daily shards / folder navigation), §1.2.1 (notification bulk actions); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.317.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2163，missing 0**；配置键守卫无漂移；文档引用 0 失效；全量 `dotnet test` **1911 通过 / 0 失败**。**无法自动验证**：目录导航与通知批量操作在安装版中的实际交互（需真实浏览器 / 桌面会话）。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2163, missing 0**; the config-key guard reports no drift; docs references are clean; the full `dotnet test` run passes **1911 / 0**. **Not automatically verifiable**: the actual folder-navigation and notification bulk-action interactions in an installed build (needs a real browser / desktop session).
+
+---
+
+# AG-UI 群聊桌面版 1.0.316 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.316 Release Notes (historical)
 
 **版本说明**：**审计可筛可聚合 + 工作区可上传 + 浮窗可收敛**——审计归档增量读取，支持知聚 / 员工筛选与按消息聚合；工作区面板可直接上传文件；通知面板可只让部分类型弹浮窗。
 **Version note**: **Filterable and grouped audit, workspace uploads, scoped popups** — the audit archive is read incrementally with circle/agent filters and per-message grouping; the workspace panel accepts uploads; the notification panel can limit which types pop up.

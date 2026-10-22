@@ -8,8 +8,9 @@ using Microsoft.Extensions.Logging;
 namespace AguiGroupChat.Web;
 
 /// <summary>
-/// 工作区操作审计的按月归档（1.0.315）：每个自然月一个 JSONL 文件
-/// <c>{ContentRoot}/data/work-audit/audit-YYYY-MM.jsonl</c>，一行一条 <see cref="WorkAuditEntry"/>。
+/// 工作区操作审计的按天归档（1.0.315 按月，1.0.317 起按天）：
+/// 每天一个 JSONL 文件 <c>{ContentRoot}/data/work-audit/audit-YYYY-MM-DD.jsonl</c>，一行一条 <see cref="WorkAuditEntry"/>；
+/// 1.0.315/316 写下的 <c>audit-YYYY-MM.jsonl</c> 仍可读取，并在过期时一并清理。
 ///
 /// <para>为什么要单独存：查询「最近 N 天干了什么」原先要扫全部知聚的全部消息并逐条解析 <c>planJson</c>，
 /// 随消息量线性变慢；归档后按月份直接读文件，查询成本只与命中行数相关。同时它也是合规意义上的审计留存——
@@ -76,7 +77,7 @@ public sealed class WorkAuditArchive : IWorkAuditSink
     public IReadOnlyList<WorkAuditEntry> Read(long sinceMs, int max = 20000)
     {
         var result = new List<WorkAuditEntry>();
-        foreach (var path in MonthFiles(sinceMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+        foreach (var path in FilesSince(sinceMs))
         {
             foreach (var e in ReadMonth(path))
             {
@@ -168,7 +169,8 @@ public sealed class WorkAuditArchive : IWorkAuditSink
         }
     }
 
-    /// <summary>删除早于保留期的月份文件，返回删除数（retentionDays ≤ 0 表示永久保留）。</summary>
+    /// <summary>删除早于保留期的分片文件（1.0.317 起按天分片，保留旧的按月文件也会被清理），返回删除数。
+    /// 只有整个分片区间都早于保留期才删：不切碎当天数据。</summary>
     public int Sweep(int retentionDays)
     {
         if (retentionDays <= 0) return 0;
@@ -178,10 +180,9 @@ public sealed class WorkAuditArchive : IWorkAuditSink
         {
             foreach (var path in Directory.EnumerateFiles(_dir, Prefix + "*.jsonl"))
             {
-                var month = MonthOf(path);
-                if (month is null) continue;
-                // 整月都早于保留期才删：不切碎当月数据
-                if (month.Value.AddMonths(1) > cutoff) continue;
+                var period = PeriodOf(path);
+                if (period is null) continue;
+                if (period.Value.End > cutoff) continue;
                 try { File.Delete(path); deleted++; }
                 catch (Exception ex) { _logger.LogDebug(ex, "归档文件删除失败：{Path}", path); }
             }
@@ -195,34 +196,40 @@ public sealed class WorkAuditArchive : IWorkAuditSink
 
     private string PathFor(long atMs)
         => Path.Combine(_dir, Prefix + DateTimeOffset.FromUnixTimeMilliseconds(atMs).UtcDateTime
-            .ToString("yyyy-MM", CultureInfo.InvariantCulture) + ".jsonl");
+            .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".jsonl");
 
     private static string KeyOf(WorkAuditEntry e)
         => string.Concat(e.MessageId, "|", e.Tool, "|", e.DurationMs.ToString(CultureInfo.InvariantCulture), "|", e.Text);
 
-    /// <summary>覆盖 [since, until] 的所有月份文件路径（不存在的跳过）。</summary>
-    private IEnumerable<string> MonthFiles(long sinceMs, long untilMs)
+    /// <summary>覆盖 since 之后的所有分片文件（按天分片；也兼容 1.0.315/316 的按月文件）。</summary>
+    private IEnumerable<string> FilesSince(long sinceMs)
     {
-        var start = DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(0, sinceMs)).UtcDateTime;
-        var end = DateTimeOffset.FromUnixTimeMilliseconds(untilMs).UtcDateTime;
-        var month = new DateTime(start.Year, start.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var guard = 0;
-        while (month <= end && guard++ < 600)
+        var since = DateTimeOffset.FromUnixTimeMilliseconds(Math.Max(0, sinceMs)).UtcDateTime;
+        string[] files;
+        try { files = Directory.GetFiles(_dir, Prefix + "*.jsonl"); }
+        catch { yield break; }
+        foreach (var path in files)
         {
-            var path = Path.Combine(_dir, Prefix + month.ToString("yyyy-MM", CultureInfo.InvariantCulture) + ".jsonl");
-            if (File.Exists(path)) yield return path;
-            month = month.AddMonths(1);
+            var period = PeriodOf(path);
+            if (period is null) continue;
+            if (period.Value.End <= since) continue; // 整个分片都比 since 早
+            yield return path;
         }
     }
 
-    private static DateTimeOffset? MonthOf(string path)
+    /// <summary>解析文件名的时间区间：<c>audit-YYYY-MM-DD</c>（一天）或 <c>audit-YYYY-MM</c>（旧格式，一个月）。</summary>
+    private static (DateTimeOffset Start, DateTimeOffset End)? PeriodOf(string path)
     {
         var name = Path.GetFileNameWithoutExtension(path);
         if (!name.StartsWith(Prefix, StringComparison.Ordinal)) return null;
-        return DateTimeOffset.TryParseExact(name[Prefix.Length..], "yyyy-MM", CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal, out var d)
-            ? d
-            : null;
+        var stamp = name[Prefix.Length..];
+        if (DateTimeOffset.TryParseExact(stamp, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var day))
+            return (day, day.AddDays(1));
+        if (DateTimeOffset.TryParseExact(stamp, "yyyy-MM", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var month))
+            return (month, month.AddMonths(1));
+        return null;
     }
 }
 

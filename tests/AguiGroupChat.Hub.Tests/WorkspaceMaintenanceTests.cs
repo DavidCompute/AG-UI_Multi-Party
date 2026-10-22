@@ -178,6 +178,36 @@ public sealed class WorkspaceMaintenanceTests
     }
 
     [Fact]
+    public void ListEntries_ReturnsOnlyDirectChildren_DirsFirst()
+    {
+        // 1.0.317 目录浏览：只列直接子项，目录排在文件前，path 相对工作区根
+        var root = NewRoot();
+        try
+        {
+            var ws = Path.Combine(root, "agent_a");
+            AddFile(Path.Combine(ws, "zeta"), "deep.txt", 3);
+            AddFile(Path.Combine(ws, "notes"), "a.txt", 9);
+            AddFile(ws, "b.txt", 4);
+
+            var rootEntries = WorkspaceMaintenance.ListEntries(ws, "");
+            Assert.Equal(3, rootEntries.Count);
+            Assert.True(rootEntries[0].IsDir);   // notes / zeta（目录）
+            Assert.True(rootEntries[1].IsDir);
+            Assert.False(rootEntries[2].IsDir);  // b.txt
+            Assert.Equal("b.txt", rootEntries[2].Path);
+
+            var notes = WorkspaceMaintenance.ListEntries(ws, "notes");
+            Assert.Single(notes);
+            Assert.Equal("notes/a.txt", notes[0].Path);
+            Assert.Equal(9, notes[0].Bytes);
+
+            Assert.Empty(WorkspaceMaintenance.ListEntries(ws, "missing"));
+            Assert.Empty(WorkspaceMaintenance.ListEntries(ws, "../escape"));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void DeleteFile_OnlyInsideWorkspace()
     {
         var root = NewRoot();
