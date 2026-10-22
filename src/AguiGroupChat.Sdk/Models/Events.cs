@@ -158,6 +158,8 @@ public sealed class TextMessagePlanEvent : AguiEvent
     public string? GroupId { get; set; }
     public string? Title { get; set; }
     public IReadOnlyList<PlanStepInfo>? Steps { get; set; }
+    /// <summary>工作区操作审计（<c>work_*</c> 调用，1.0.312）。与步骤分开：步骤参与进度，审计只供追责查看。</summary>
+    public IReadOnlyList<PlanAuditInfo>? Audit { get; set; }
     /// <summary>是否处于暂停状态（Paused=true 时计划卡展示「继续」）。</summary>
     public bool Paused { get; set; }
     /// <summary>发起计划的成员 id（仅其可暂停/继续）。</summary>
@@ -169,6 +171,14 @@ public sealed class PlanStepInfo
     public int Id { get; set; }
     public string? Text { get; set; }
     public bool Done { get; set; }
+}
+
+public sealed class PlanAuditInfo
+{
+    public string? Tool { get; set; }
+    public string? Text { get; set; }
+    public bool Ok { get; set; }
+    public long DurationMs { get; set; }
 }
 
 public sealed class TextMessageEndEvent : AguiEvent

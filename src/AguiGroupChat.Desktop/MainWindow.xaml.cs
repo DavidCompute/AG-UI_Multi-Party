@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private string _unreadLabel = "";
     private IReadOnlyList<TrayUnreadGroup> _unreadGroups = [];
     private System.Windows.Forms.ToolStripMenuItem? _windowsMenu;
+    private DeepLinkServer? _windowLink;
     private nint _hwnd;
     private string _progressState = "none";
     private ulong _progressValue;
@@ -80,6 +81,12 @@ public partial class MainWindow : Window
             Path.Combine(DesktopPaths.DataDir, "unread"),
             (totals) => Dispatcher.BeginInvoke(new Action(() => ApplyUnreadAggregate(totals))));
         _unreadAggregator.Start();
+        // 逐窗口深链管道（1.0.312）：其他窗口的托盘菜单可把「切到某知聚」定向投递给本窗口，
+        // 而不只是把它提到前台。与 <see cref="DeepLinkProtocol.PipeName"/>（首个实例占用）互不干扰。
+        _windowLink = new DeepLinkServer(
+            (group, action) => Dispatcher.BeginInvoke(new Action(() => HandleDeepLink(group, action))),
+            DeepLinkProtocol.PipeNameFor(_unreadAggregator.WindowId));
+        _windowLink.TryStart();
         if (startHidden)
         {
             // 开机自启：先以透明窗口加载，Loaded 后隐藏到托盘（避免登录时闪一下窗口）
@@ -98,6 +105,7 @@ public partial class MainWindow : Window
             try { _muteThumbIcon?.Dispose(); } catch { /* 忽略 */ }
             try { _taskbar.Dispose(); } catch { /* 忽略 */ }
             try { _unreadAggregator.Dispose(); } catch { /* 忽略 */ }
+            try { _windowLink?.Dispose(); } catch { /* 忽略 */ }
         };
         // 注销 / 关机时不能被「关闭到托盘」拦住
         System.Windows.Application.Current.SessionEnding += (_, _) => _exiting = true;
@@ -531,7 +539,9 @@ public partial class MainWindow : Window
                     }
                     else
                     {
-                        sub.Click += (_, _) => ActivateWindow(hwnd);
+                        var windowId = w.WindowId;
+                        var gid = g.Id;
+                        sub.Click += (_, _) => FocusWindowGroup(windowId, gid, hwnd);
                     }
                     item.DropDownItems.Add(sub);
                 }
@@ -548,7 +558,8 @@ public partial class MainWindow : Window
     [DllImport("user32.dll")]
     private static extern bool ShowWindowAsync(nint hWnd, int nCmdShow);
 
-    /// <summary>把指定窗口提到前台（1.0.311）：自己的窗口走 WPF，其他进程窗口走 Win32。</summary>
+    /// <summary>把指定窗口提到前台（1.0.311）：自己的窗口走 WPF，其他进程窗口走 Win32。
+    /// 1.0.312：若目标窗口在线，先经逐窗口深链管道让它切到指定知聚，再前置。</summary>
     private void ActivateWindow(long hwnd)
     {
         if (hwnd <= 0 || hwnd == _hwnd)
@@ -563,6 +574,18 @@ public partial class MainWindow : Window
             SetForegroundWindow(handle);
         }
         catch { /* 窗口已关闭 / 无权限：忽略 */ }
+    }
+
+    /// <summary>另一个窗口里的某个知聚未读：定向投递深链后再前置（投递失败时退化为仅前置）。</summary>
+    private void FocusWindowGroup(string windowId, string groupId, long hwnd)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(windowId))
+                DeepLinkClient.TrySend(groupId, null, DeepLinkProtocol.PipeNameFor(windowId));
+        }
+        catch { /* 目标窗口不可达：仅前置 */ }
+        ActivateWindow(hwnd);
     }
 
     /// <summary>深链请求（来自另一个进程，如跳转列表 / 托盘快捷任务）：切知聚或打开快捷弹窗。</summary>

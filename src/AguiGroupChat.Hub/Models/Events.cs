@@ -343,6 +343,8 @@ public sealed class TextMessagePlanEvent
     public string? Title { get; init; }
     /// <summary>步骤清单（含完成状态）。</summary>
     public required IReadOnlyList<PlanStepInfo> Steps { get; init; }
+    /// <summary>工作区操作审计（<c>work_*</c> 调用；1.0.312）。与步骤分开：步骤参与进度，审计只供追责查看。</summary>
+    public IReadOnlyList<PlanAuditInfo>? Audit { get; init; }
     /// <summary>是否处于暂停状态（暂停后等触发者点「继续」）。</summary>
     public bool Paused { get; init; }
     /// <summary>发起计划的成员 id（仅该成员可暂停/继续；群主/管理员后端额外放行）。</summary>
@@ -359,6 +361,20 @@ public sealed class PlanStepInfo
     public required string Text { get; init; }
     /// <summary>是否已完成。</summary>
     public bool Done { get; init; }
+}
+
+/// <summary>一条工作区操作审计（<c>work_*</c> 调用，1.0.312）。
+/// 前端按工具名分组（命令 / 写入 / 读取 / 目录），默认只展开异常项。</summary>
+public sealed class PlanAuditInfo
+{
+    /// <summary>工具名：<c>work_run_command</c> / <c>work_write_file</c> / <c>work_read_file</c> / <c>work_list_dir</c>。</summary>
+    public required string Tool { get; init; }
+    /// <summary>单行摘要（命令原文 / 路径 / 退出码 / 耗时）。</summary>
+    public required string Text { get; init; }
+    /// <summary>是否成功（被拒 / 失败 / 超时为 false）。</summary>
+    public bool Ok { get; init; }
+    /// <summary>耗时（毫秒）。</summary>
+    public long DurationMs { get; init; }
 }
 
 /// <summary>TEXT_MESSAGE_END：消息结束（协议 4.4；Reasoning 为消息结束时思考内容的完整快照，供前端回放）。</summary>

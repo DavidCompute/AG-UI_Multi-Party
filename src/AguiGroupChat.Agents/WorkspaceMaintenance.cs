@@ -6,6 +6,9 @@ namespace AguiGroupChat.Agents;
 /// <summary>工作区清理结果（用于日志与测试断言）。</summary>
 public sealed record WorkspaceSweepResult(int Workspaces, int DeletedFiles, long DeletedBytes, long TotalBytes);
 
+/// <summary>单个工作区的占用快照（管理控制台「工作区」页用）。</summary>
+public sealed record WorkspaceUsage(string AgentId, long Bytes, int Files, DateTime? LastModifiedUtc);
+
 /// <summary>
 /// 工作区容量治理（1.0.311）：<c>{WorkSpaceRoot}/{agentId}/</c> 会随工作型数字员工长期运行不断堆积，
 /// 需要有「按时间清理 + 按容量清理」的兜底，否则迟早把宿主磁盘写满。
@@ -20,6 +23,43 @@ public sealed record WorkspaceSweepResult(int Workspaces, int DeletedFiles, long
 /// </summary>
 public static class WorkspaceMaintenance
 {
+    /// <summary>把配置里的工作区根目录解析为绝对路径（与 <c>AgentCatalog</c> 同一口径）。</summary>
+    public static string ResolveRoot(string? configured, string contentRoot)
+        => Path.GetFullPath(Path.IsPathRooted(configured)
+            ? configured!
+            : Path.Combine(contentRoot, string.IsNullOrWhiteSpace(configured) ? "data/workspaces" : configured));
+
+    /// <summary>列出各工作区的占用（字节 / 文件数 / 最近修改），按占用降序。</summary>
+    public static IReadOnlyList<WorkspaceUsage> Describe(string root)
+    {
+        var list = new List<WorkspaceUsage>();
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return list;
+        foreach (var dir in Directory.EnumerateDirectories(root))
+        {
+            if (IsReparsePoint(dir)) continue;
+            long bytes = 0;
+            var files = 0;
+            DateTime? last = null;
+            try
+            {
+                foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        if ((f.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                        bytes += f.Length;
+                        files++;
+                        if (last is null || f.LastWriteTimeUtc > last) last = f.LastWriteTimeUtc;
+                    }
+                    catch { /* 文件被删除：跳过 */ }
+                }
+            }
+            catch { /* 目录不可读：按 0 计 */ }
+            list.Add(new WorkspaceUsage(Path.GetFileName(dir), bytes, files, last));
+        }
+        return list.OrderByDescending((x) => x.Bytes).ToList();
+    }
+
     public static WorkspaceSweepResult Sweep(
         string root,
         int quotaMb,

@@ -93,6 +93,7 @@ public sealed class TrayUnreadAggregatorTests
             var windows = a.ReadWindows();
             Assert.Equal(2, windows.Count);
             Assert.True(windows[0].IsSelf);            // 自身条目排最前
+            Assert.Equal("win_a", windows[0].WindowId);
             Assert.Equal("市场推广", windows[0].Label);
             Assert.Equal(111, windows[0].Hwnd);
             Assert.Equal(2, windows[0].Groups.Count);

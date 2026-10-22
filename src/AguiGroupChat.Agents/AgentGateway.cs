@@ -4064,7 +4064,7 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         }
     }
 
-    /// <summary>把本次回答的工作区操作审计（<c>work_*</c> 调用）追加到消息的「执行计划」卡（1.0.311），
+    /// <summary>把本次回答的工作区操作审计（<c>work_*</c> 调用）追加到消息的「执行计划」卡（1.0.311；1.0.312 起单独成组），
     /// 并随 <c>planJson</c> 落库。只记摘要（命令原文 / 文件路径 / 退出码 / 耗时），不含文件正文与凭证。</summary>
     private async Task AttachWorkOpAuditAsync(AgentInvocationContext context, string messageId, WorkOpAudit audit, CancellationToken ct)
     {
@@ -4072,8 +4072,14 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         {
             var ops = audit.Ops;
             if (ops.Count == 0) return;
-            var steps = ops.Select((o) => new PlanStepInfo { Id = 0, Text = o.Summary, Done = true }).ToList();
-            await _hub.Value.AppendMessagePlanStepsAsync(context.GroupId, messageId, steps, ct);
+            var items = ops.Select((o) => new PlanAuditInfo
+            {
+                Tool = o.Tool,
+                Text = o.Summary,
+                Ok = o.Ok,
+                DurationMs = o.DurationMs,
+            }).ToList();
+            await _hub.Value.AppendMessagePlanAuditAsync(context.GroupId, messageId, items, ct);
             _logger.LogDebug("工作区操作审计回档：消息 {MessageId}（{Count} 条）", messageId, ops.Count);
         }
         catch (Exception ex)

@@ -2411,6 +2411,28 @@ button { white-space: nowrap; }
 .plan-steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .plan-steps li { display: flex; align-items: flex-start; gap: 7px; font-size: 13px; color: var(--text); }
 
+/* 工作区操作审计（1.0.312）：计划卡内的二级折叠区，按工具分组，默认只展开异常项 */
+.plan-audit { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(157,107,255,.3); }
+.plan-audit-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.plan-audit-title { font-weight: 600; color: var(--text); }
+.plan-audit-bad {
+  font-size: 11px; color: #e5a50a; border: 1px solid rgba(240,166,58,.5);
+  background: rgba(240,166,58,.12); border-radius: 999px; padding: 1px 8px;
+}
+.plan-audit-toggle {
+  margin-left: auto; padding: 1px 9px; font-size: 11px; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: 999px; background: transparent;
+  color: var(--muted); cursor: pointer; font-family: inherit;
+}
+.plan-audit-toggle:hover { color: var(--accent-text); border-color: rgba(79,140,255,.45); }
+.plan-audit-body { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.plan-audit-group-head { font-size: 11px; color: var(--muted); font-weight: 600; }
+.plan-audit-list { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.plan-audit-item { position: relative; padding-left: 16px; font-size: 12px; line-height: 1.5; color: var(--text); word-break: break-all; }
+.plan-audit-item::before { content: "·"; position: absolute; left: 4px; color: var(--muted); }
+.plan-audit-item.bad { color: #e5a50a; }
+.plan-audit-item.bad::before { content: "⚠"; left: 0; }
+
 /* 智能体技能调用链（链路可视化）：嵌套缩进卡片 */
 .msg .chain-card {
   margin-top: 10px; padding: 2px 12px 10px;

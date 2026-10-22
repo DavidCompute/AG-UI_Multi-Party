@@ -1790,13 +1790,13 @@ public sealed class GroupHub : IDisposable
         }, state.Recipients, ct);
     }
 
-    /// <summary>把工作区操作审计（<c>work_*</c> 调用）追加到消息的「执行计划」卡并落库（1.0.311）。
+    /// <summary>把工作区操作审计（<c>work_*</c> 调用）追加到消息的「执行计划」卡并落库（1.0.311；1.0.312 起单独成组）。
     /// 与 <see cref="BroadcastMessagePlanAsync"/> 互补：计划卡可能已由编排阶段广播过，这里在运行收尾时
-    /// 把「执行了什么命令 / 写了哪些文件 / 退出码 / 耗时」作为已完成步骤接在末尾，刷新后仍可回显。
-    /// 消息不存在 / 已结束流式时静默跳过（审计是增强，不阻断主流程）。</summary>
-    public Task AppendMessagePlanStepsAsync(string groupId, string messageId, IReadOnlyList<PlanStepInfo> steps, CancellationToken ct = default)
+    /// 把「执行了什么命令 / 写了哪些文件 / 退出码 / 耗时」作为<b>审计项</b>接在卡里（不参与步骤进度），
+    /// 前端按工具分组、默认只展开异常项。消息不存在 / 已结束流式时静默跳过（审计是增强，不阻断主流程）。</summary>
+    public Task AppendMessagePlanAuditAsync(string groupId, string messageId, IReadOnlyList<PlanAuditInfo> audit, CancellationToken ct = default)
     {
-        if (steps is null || steps.Count == 0) return Task.CompletedTask;
+        if (audit is null || audit.Count == 0) return Task.CompletedTask;
         if (!_agentStreams.TryGetValue(messageId, out var state) || state.GroupId != groupId)
             return Task.CompletedTask;
 
@@ -1817,9 +1817,10 @@ public sealed class GroupHub : IDisposable
         }
 
         if (string.IsNullOrWhiteSpace(payload.Title)) payload.Title = "执行计划";
-        var nextId = payload.Steps.Count == 0 ? 1 : payload.Steps.Max((s) => s.Id) + 1;
-        foreach (var s in steps)
-            payload.Steps.Add(new PlanStepInfo { Id = nextId++, Text = s.Text, Done = s.Done });
+        payload.Audit ??= [];
+        payload.Audit.AddRange(audit);
+        if (payload.Audit.Count > MaxAuditEntries)
+            payload.Audit = payload.Audit.Skip(payload.Audit.Count - MaxAuditEntries).ToList();
 
         try
         {
@@ -1844,17 +1845,22 @@ public sealed class GroupHub : IDisposable
             GroupId = groupId,
             Title = payload.Title,
             Steps = payload.Steps,
+            Audit = payload.Audit,
             Paused = payload.Paused,
             TriggerMemberId = payload.TriggerMemberId,
             Timestamp = NowMs,
         }, state.Recipients, ct);
     }
 
-    /// <summary>planJson 的可读写形态（追加步骤时需要保留原标题 / 暂停状态 / 触发者）。</summary>
+    /// <summary>单次回答保留的审计条数上限（防超长计划卡）。</summary>
+    private const int MaxAuditEntries = 60;
+
+    /// <summary>planJson 的可读写形态（追加审计时需要保留原标题 / 步骤 / 暂停状态 / 触发者）。</summary>
     private sealed class PlanPayload
     {
         public string? Title { get; set; }
         public List<PlanStepInfo> Steps { get; set; } = [];
+        public List<PlanAuditInfo>? Audit { get; set; }
         public bool Paused { get; set; }
         public string? TriggerMemberId { get; set; }
     }

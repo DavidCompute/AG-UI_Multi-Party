@@ -1927,6 +1927,7 @@
         <button id="adminTabOrphans" class="chip-btn admin-tab" data-i18n="admin.tabOrphans">孤儿盘点</button>
         <button id="adminTabUserGroups" class="chip-btn admin-tab" data-i18n="admin.tabUserGroups">用户分组</button>
         <button id="adminTabStorage" class="chip-btn admin-tab" data-i18n="admin.tabStorage">存储治理</button>
+        <button id="adminTabWorkspaces" class="chip-btn admin-tab" data-i18n="admin.tabWorkspaces">工作区</button>
         <button id="adminTabWebhooks" class="chip-btn admin-tab" data-i18n="admin.tabWebhooks">Webhook</button>
         <button id="adminTabApiKeys" class="chip-btn admin-tab" data-i18n="admin.tabApiKeys">API 密钥</button>
         <button id="adminTabPerf" class="chip-btn admin-tab" data-i18n="admin.tabPerf">员工绩效</button>
@@ -2313,6 +2314,22 @@
         <div class="admin-toolbar">
           <button id="storageRefreshBtn" class="chip-btn" type="button" data-i18n="admin.storageRefresh">↻ 刷新</button>
           <button id="storageReclaimBtn" class="chip-btn" type="button" data-i18n="admin.storageReclaim">🧹 回收可回收空间</button>
+        </div>
+      </div>
+      <!-- 工作区（工作型数字员工，1.0.312）：占用统计 + 按策略清理 -->
+      <div id="adminWorkspacesView" class="hidden">
+        <p class="form-hint" style="margin:2px 0 8px" data-i18n-html="admin.wsHint">工作型数字员工的专属工作区占用统计。保留期与配额由配置决定；这里的清理只删「超过保留期」或「超出配额（最久未修改优先）」的文件，并回收空目录。</p>
+        <div class="admin-toolbar">
+          <span id="adminWsMeta" class="form-hint"></span>
+          <button id="wsRefreshBtn" class="chip-btn" type="button" data-i18n="admin.wsRefresh">↻ 刷新</button>
+          <button id="wsCopyPathBtn" class="chip-btn" type="button" data-i18n="admin.wsCopyPath">📋 复制目录路径</button>
+          <button id="wsCleanupAllBtn" class="chip-btn" type="button" data-i18n="admin.wsCleanupAll">🧹 全部按策略清理</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th data-i18n="admin.thAgent">数字员工</th><th data-i18n="admin.thNick">昵称</th><th data-i18n="admin.wsBytes">占用</th><th data-i18n="admin.wsFiles">文件数</th><th data-i18n="admin.wsLast">最近修改</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+            <tbody id="adminWorkspaceRows"></tbody>
+          </table>
         </div>
       </div>
       <!-- 出站 Webhook（对外集成）：把知聚事件以带签名的 POST 推送给外部系统 -->

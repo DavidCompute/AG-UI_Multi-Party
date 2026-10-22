@@ -15,6 +15,7 @@ public sealed record TrayUnreadGroup(string Id, string Name, int Count);
 /// <param name="Label">窗口标识：当前打开的知聚名（未选中知聚时为空）。</param>
 /// <param name="Hwnd">该窗口的主窗口句柄（用于把窗口提到前台；0 = 未知）。</param>
 /// <param name="IsSelf">是否是本进程自己的条目。</param>
+/// <param name="WindowId">该窗口的聚合 id（用于定向深链）。</param>
 /// <param name="Groups">该窗口内按知聚拆分的未读（最多 6 条，按未读数降序）。</param>
 public sealed record TrayUnreadWindow(
     int Total,
@@ -23,6 +24,7 @@ public sealed record TrayUnreadWindow(
     string Label,
     long Hwnd,
     bool IsSelf,
+    string WindowId,
     IReadOnlyList<TrayUnreadGroup> Groups);
 
 /// <summary>
@@ -69,6 +71,9 @@ public sealed class TrayUnreadAggregator : IDisposable
         _timer = new Timer(_ => Poll(), null, _interval, _interval);
     }
 
+    /// <summary>本窗口的聚合 id（1.0.312：其他窗口据此把深链定向投递给本窗口）。</summary>
+    public string WindowId => _windowId;
+
     /// <summary>发布本窗口当前未读（覆盖写；失败静默，不阻塞 UI）。</summary>
     public void Publish(int total, int messages, int notifications)
         => Publish(total, messages, notifications, null, 0, null);
@@ -92,6 +97,7 @@ public sealed class TrayUnreadAggregator : IDisposable
                 Notifications = Math.Max(0, notifications),
                 Label = string.IsNullOrWhiteSpace(label) ? null : label!.Trim(),
                 Hwnd = hwnd,
+                WindowId = _windowId,
                 UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Groups = groups is null
                     ? []
@@ -156,6 +162,7 @@ public sealed class TrayUnreadAggregator : IDisposable
                         entry.Label ?? "",
                         entry.Hwnd,
                         isSelf,
+                        string.IsNullOrWhiteSpace(entry.WindowId) ? WindowIdFromPath(path) : entry.WindowId!,
                         groups));
                 }
                 catch { /* 单个文件损坏：跳过 */ }
@@ -196,6 +203,7 @@ public sealed class TrayUnreadAggregator : IDisposable
         public int Notifications { get; set; }
         public string? Label { get; set; }
         public long Hwnd { get; set; }
+        public string? WindowId { get; set; }
         public long UpdatedAt { get; set; }
         public List<EntryGroup?>? Groups { get; set; }
     }
@@ -205,5 +213,12 @@ public sealed class TrayUnreadAggregator : IDisposable
         public string? Id { get; set; }
         public string? Name { get; set; }
         public int Count { get; set; }
+    }
+
+    /// <summary>旧版本文件没写 WindowId 时，从 <c>unread-&lt;id&gt;.json</c> 文件名回推。</summary>
+    private static string WindowIdFromPath(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.StartsWith(Prefix, StringComparison.Ordinal) ? name[Prefix.Length..] : name;
     }
 }

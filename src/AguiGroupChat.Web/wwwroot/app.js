@@ -5605,8 +5605,11 @@ function onMessageAttachments(evt) {
 function onMessagePlan(evt) {
   const r = room(evt.groupId);
   const m = r.messages.find((x) => x.id === evt.messageId);
-  if (!m || !Array.isArray(evt.steps) || evt.steps.length === 0) return;
-  m.plan = { title: evt.title || "", steps: evt.steps, paused: !!evt.paused, triggerMemberId: evt.triggerMemberId || null };
+  if (!m) return;
+  const steps = Array.isArray(evt.steps) ? evt.steps : [];
+  const audit = Array.isArray(evt.audit) ? evt.audit : [];
+  if (!steps.length && !audit.length) return;
+  m.plan = { title: evt.title || "", steps, audit, paused: !!evt.paused, triggerMemberId: evt.triggerMemberId || null };
   m._html = undefined; // 计划变化 → 渲染缓存失效
   syncDesktopTaskbarProgress(); // 计划步骤变化 → 任务栏百分比（1.0.306）
   if (state.activeGroupId !== evt.groupId) return;
@@ -5619,10 +5622,18 @@ function parsePlanJson(planJson) {
   if (!planJson) return null;
   try {
     const p = JSON.parse(planJson);
-    if (p && Array.isArray(p.steps) && p.steps.length)
-      return { title: p.title || "", steps: p.steps, paused: !!p.paused, triggerMemberId: p.triggerMemberId || null };
-    return null;
+    if (!p) return null;
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    const audit = Array.isArray(p.audit) ? p.audit : [];
+    if (!steps.length && !audit.length) return null;
+    return { title: p.title || "", steps, audit, paused: !!p.paused, triggerMemberId: p.triggerMemberId || null };
   } catch { return null; }
+}
+
+/** 计划卡是否有内容可渲染：编排步骤，或只有工作区操作审计（1.0.312）。 */
+function planHasContent(plan) {
+  return !!plan && ((Array.isArray(plan.steps) && plan.steps.length > 0)
+    || (Array.isArray(plan.audit) && plan.audit.length > 0));
 }
 
 /** 解析消息携带的 usageJson（本次回答用量）；非法 / 缺失 / 全零返回 null。 */
@@ -6143,6 +6154,7 @@ function renderPlanCard(plan, m, r) {
   const paused = !!plan.paused;
   const total = steps.length;
   // 默认状态：还没执行完（或有暂停等未完结）→ 展开；全部完成 → 收起。用户手动点过箭头则以其选择为准。
+  // 只有审计项、没有编排步骤时不自动收起（审计块自己有三态开关）。
   const autoCollapsed = total > 0 && done >= total && !paused;
   const collapsed = m && planCollapseOverride.has(m.id) ? planCollapseOverride.get(m.id) : autoCollapsed;
   const myRole = r?.members?.find((x) => x.memberId === state.memberId)?.role;
@@ -6154,17 +6166,72 @@ function renderPlanCard(plan, m, r) {
   const act = paused
     ? (canControl ? `<button class="chip-btn plan-resume-btn" type="button">▶ ${escapeHtml(t("plan.resume"))}</button>` : "")
     : (canControl ? `<button class="chip-btn plan-pause-btn" type="button">⏸ ${escapeHtml(t("plan.pause"))}</button>` : "");
+  const headRight = total > 0
+    ? `<span class="plan-progress-txt">${done}/${total}（${pct}%）</span>${stateLine}`
+    : stateLine;
   return `<div class="plan-card-head">`
     + `<span class="plan-head-left">📋 ${plan.title ? `<b>${escapeHtml(plan.title)}</b>` : t("itx.planCardTitle")}</span>`
     + `<span class="plan-head-right">`
-    + `<span class="plan-progress-txt">${done}/${total}（${pct}%）</span>${stateLine}`
+    + headRight
     + `<button class="plan-toggle" type="button" aria-expanded="${collapsed ? "false" : "true"}" title="${escapeHtml(collapsed ? t("plan.expand") : t("plan.collapse"))}">${collapsed ? "›" : "⌄"}</button>`
     + `</span></div>`
     + `<div class="plan-body${collapsed ? " hidden" : ""}">`
-    + `<div class="plan-progress"><div class="plan-progress-bar" style="width:${pct}%"></div></div>`
-    + `<ul class="plan-steps">${steps.map((s) =>
-        `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>`
+    + (total > 0 ? `<div class="plan-progress"><div class="plan-progress-bar" style="width:${pct}%"></div></div>` : "")
+    + (total > 0 ? `<ul class="plan-steps">${steps.map((s) =>
+        `<li class="${s.done ? "done" : ""}"><span class="plan-check">${s.done ? "✅" : "⬜"}</span><span class="plan-step-text">${escapeHtml(s.text || "")}</span></li>`).join("")}</ul>` : "")
+    + renderPlanAudit(plan, m)
     + (act ? `<div class="plan-actions">${act}</div>` : "")
+    + `</div>`;
+}
+
+/** 审计项按工具分组的展示顺序（未收录的工具归入「其他」）。 */
+const AUDIT_GROUPS = [
+  { key: "command", icon: "⚡", labelKey: "plan.audit.group.command" },
+  { key: "write", icon: "💾", labelKey: "plan.audit.group.write" },
+  { key: "read", icon: "📄", labelKey: "plan.audit.group.read" },
+  { key: "list", icon: "📁", labelKey: "plan.audit.group.list" },
+  { key: "other", icon: "🔧", labelKey: "plan.audit.group.other" },
+];
+
+/** 工具名 → 分组 key（1.0.312："work_run_command" 等固定四件套，未知归入 other）。 */
+function auditGroupKey(tool) {
+  switch (String(tool || "")) {
+    case "work_run_command": return "command";
+    case "work_write_file": return "write";
+    case "work_read_file": return "read";
+    case "work_list_dir": return "list";
+    default: return "other";
+  }
+}
+
+/** 每个消息的审计块展开状态：problems（默认，只看异常）/ all（全部）/ hidden（收起）。 */
+const auditModeOverride = new Map();
+
+/** 工作区操作审计块（1.0.312）：按工具分组，默认只展开异常项，可一键切「展开全部 / 只看异常 / 收起」。 */
+function renderPlanAudit(plan, m) {
+  const items = (Array.isArray(plan.audit) ? plan.audit : []).filter((x) => x && x.text);
+  if (!items.length) return "";
+  const bad = items.filter((x) => x.ok === false).length;
+  const mode = (m && auditModeOverride.get(m.id)) || (bad > 0 ? "problems" : "hidden");
+  const groups = AUDIT_GROUPS.map((g) => ({ ...g, items: items.filter((x) => auditGroupKey(x.tool) === g.key) }))
+    .filter((g) => g.items.length > 0);
+  const btnText = mode === "all"
+    ? t(bad > 0 ? "plan.audit.onlyProblems" : "plan.audit.collapse")
+    : t("plan.audit.expandAll");
+  const body = groups.map((g) => `<div class="plan-audit-group" data-group="${g.key}">`
+    + `<div class="plan-audit-group-head">${g.icon} ${escapeHtml(t(g.labelKey))}（${g.items.length}）</div>`
+    + `<ul class="plan-audit-list">` + g.items.map((x) => {
+        const isBad = x.ok === false;
+        const hidden = mode === "problems" && !isBad;
+        return `<li class="plan-audit-item${isBad ? " bad" : ""}${hidden ? " hidden" : ""}" data-ok="${isBad ? "0" : "1"}" title="${escapeHtml(x.tool || "")}">${escapeHtml(x.text)}</li>`;
+      }).join("") + `</ul></div>`).join("");
+  return `<div class="plan-audit" data-audit-mode="${mode}" data-has-bad="${bad > 0 ? "1" : "0"}">`
+    + `<div class="plan-audit-head">`
+    + `<span class="plan-audit-title">🔧 ${escapeHtml(t("plan.audit.title"))} · ${items.length}</span>`
+    + (bad > 0 ? `<span class="plan-audit-bad">⚠ ${escapeHtml(t("plan.audit.bad", { count: bad }))}</span>` : "")
+    + `<button class="plan-audit-toggle" type="button">${escapeHtml(btnText)}</button>`
+    + `</div>`
+    + `<div class="plan-audit-body${mode === "hidden" ? " hidden" : ""}">${body}</div>`
     + `</div>`;
 }
 
@@ -6179,7 +6246,7 @@ function bindPlanCardButtons(container, m) {
     toggleBtn.onclick = (e) => {
       e.stopPropagation();
       // 直接切换 DOM（不动整块渲染缓存）：body 显隐 + 箭头方向 + 无障碍状态；
-      // 同时记下手动覆盖，后续重渲染不冉按“完成度默认值”覆盖掉用户的选择。
+      // 同时记下手动覆盖，后续重渲染不再按“完成度默认值”覆盖掉用户的选择。
       const nowCollapsed = !container.querySelector(".plan-body")?.classList.contains("hidden");
       planCollapseOverride.set(m.id, nowCollapsed);
       container.querySelector(".plan-body")?.classList.toggle("hidden", nowCollapsed);
@@ -6187,6 +6254,42 @@ function bindPlanCardButtons(container, m) {
       toggleBtn.setAttribute("aria-expanded", String(!nowCollapsed));
       toggleBtn.title = t(nowCollapsed ? "plan.expand" : "plan.collapse");
     };
+  }
+  // 审计块三态开关（1.0.312）：problems（默认）/ all / hidden
+  const auditBtn = container.querySelector(".plan-audit-toggle");
+  if (auditBtn && m) {
+    auditBtn.onclick = (e) => {
+      e.stopPropagation();
+      const root = auditBtn.closest(".plan-audit");
+      if (!root) return;
+      const cur = root.dataset.auditMode || "hidden";
+      const hasBad = root.dataset.hasBad === "1";
+      const next = cur === "all" ? (hasBad ? "problems" : "hidden") : "all";
+      auditModeOverride.set(m.id, next);
+      applyPlanAuditMode(root, next);
+    };
+  }
+}
+
+/** 切换审计块三态（纯 DOM，不重渲染整条消息）：problems 只看异常 / all 全部 / hidden 收起。 */
+function applyPlanAuditMode(root, mode) {
+  if (!root) return;
+  root.dataset.auditMode = mode;
+  const body = root.querySelector(".plan-audit-body");
+  if (body) body.classList.toggle("hidden", mode === "hidden");
+  root.querySelectorAll(".plan-audit-item").forEach((li) => {
+    li.classList.toggle("hidden", mode === "problems" && li.dataset.ok !== "1");
+  });
+  root.querySelectorAll(".plan-audit-group").forEach((g) => {
+    const any = Array.from(g.querySelectorAll(".plan-audit-item")).some((li) => !li.classList.contains("hidden"));
+    g.classList.toggle("hidden", !any);
+  });
+  const btn = root.querySelector(".plan-audit-toggle");
+  if (btn) {
+    const hasBad = root.dataset.hasBad === "1";
+    btn.textContent = t(mode === "all"
+      ? (hasBad ? "plan.audit.onlyProblems" : "plan.audit.collapse")
+      : "plan.audit.expandAll");
   }
 }
 
@@ -8628,6 +8731,7 @@ function switchAdminTab(tab) {
   const orphans = tab === "orphans";
   const usergroups = tab === "usergroups";
   const storage = tab === "storage";
+  const workspaces = tab === "workspaces";
   const webhooks = tab === "webhooks";
   const apikeys = tab === "apikeys";
   const perf = tab === "perf";
@@ -8641,6 +8745,7 @@ function switchAdminTab(tab) {
   $("adminTabOrphans").classList.toggle("on", orphans);
   $("adminTabUserGroups").classList.toggle("on", usergroups);
   $("adminTabStorage").classList.toggle("on", storage);
+  $("adminTabWorkspaces").classList.toggle("on", workspaces);
   $("adminTabWebhooks").classList.toggle("on", webhooks);
   $("adminTabApiKeys").classList.toggle("on", apikeys);
   $("adminTabPerf").classList.toggle("on", perf);
@@ -8654,6 +8759,7 @@ function switchAdminTab(tab) {
   $("adminOrphansView").classList.toggle("hidden", !orphans);
   $("adminUserGroupsView").classList.toggle("hidden", !usergroups);
   $("adminStorageView").classList.toggle("hidden", !storage);
+  $("adminWorkspacesView").classList.toggle("hidden", !workspaces);
   $("adminWebhooksView").classList.toggle("hidden", !webhooks);
   $("adminApiKeysView").classList.toggle("hidden", !apikeys);
   $("adminPerfView").classList.toggle("hidden", !perf);
@@ -8676,6 +8782,8 @@ function switchAdminTab(tab) {
     loadAdminOrphans();
   } else if (storage) {
     loadStorageGovernance();
+  } else if (workspaces) {
+    loadAdminWorkspaces();
   } else if (webhooks) {
     loadWebhooks();
     loadWebhookDeliveries();
@@ -9588,6 +9696,78 @@ async function loadStorageGovernance() {
     }
   } catch (ex) {
     cards.innerHTML = `<div class="admin-metric-card"><div>${t("admin.loadFail", { err: escapeHtml(ex.message) })}</div><b>—</b></div>`;
+  }
+}
+
+/** 工作区占用（1.0.312）：工作型数字员工的专属目录；清理只删「超保留期」或「超配额（最久未修改优先）」的文件。 */
+let adminWorkspacesRoot = "";
+
+async function loadAdminWorkspaces() {
+  const rows = $("adminWorkspaceRows");
+  const meta = $("adminWsMeta");
+  if (!rows) return;
+  rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  try {
+    const res = await fetch("/ag-ui/admin/workspaces", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) {
+      rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(errMsg(d, "HTTP " + res.status)) })}</td></tr>`;
+      return;
+    }
+    adminWorkspacesRoot = d.root || "";
+    const mb = (n) => (Number(n || 0) / 1048576).toFixed(1) + " MB";
+    const items = d.items || [];
+    if (meta) {
+      const total = items.reduce((s, x) => s + (Number(x.bytes) || 0), 0);
+      meta.textContent = t("admin.wsMeta", {
+        count: items.length,
+        used: mb(total),
+        quota: d.quotaMb > 0 ? mb(d.quotaMb * 1048576) : t("admin.wsNoQuota"),
+        days: d.retentionDays > 0 ? String(d.retentionDays) : t("admin.wsNoRetention"),
+      });
+      meta.title = d.root || "";
+    }
+    if (!items.length) {
+      rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.wsEmpty")}</td></tr>`;
+      return;
+    }
+    rows.innerHTML = items.map((x) => `<tr>
+      <td><code>${escapeHtml(x.agentId)}</code></td>
+      <td>${escapeHtml(x.nickname || "—")}</td>
+      <td>${escapeHtml(mb(x.bytes))}</td>
+      <td>${Number(x.files) || 0}</td>
+      <td>${x.lastModifiedUtc ? escapeHtml(fmtTime(x.lastModifiedUtc)) : "—"}</td>
+      <td><button class="chip-btn" type="button" data-ws-agent="${escapeHtml(x.agentId)}">${escapeHtml(t("admin.wsCleanupOne"))}</button></td>
+    </tr>`).join("");
+    rows.querySelectorAll("[data-ws-agent]").forEach((btn) => {
+      btn.onclick = () => cleanupWorkspaces(btn.dataset.wsAgent);
+    });
+  } catch (ex) {
+    rows.innerHTML = `<tr><td colspan="6" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
+  }
+}
+
+/** 按策略清理（agentId 为空 = 整根目录）。清理前二次确认：删除不可恢复。 */
+async function cleanupWorkspaces(agentId) {
+  const target = agentId || t("admin.wsAllLabel");
+  if (!window.confirm(t("admin.wsCleanupConfirm", { target }))) return;
+  const url = agentId
+    ? "/ag-ui/admin/workspaces/cleanup?agentId=" + encodeURIComponent(agentId)
+    : "/ag-ui/admin/workspaces/cleanup";
+  try {
+    const res = await fetch(url, { method: "POST", headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.ok) {
+      toast(t("admin.wsCleanupFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    toast(t("admin.wsCleanupDone", {
+      files: d.deletedFiles || 0,
+      size: ((Number(d.deletedBytes) || 0) / 1048576).toFixed(1) + " MB",
+    }));
+    loadAdminWorkspaces();
+  } catch (ex) {
+    toast(t("admin.wsCleanupFail", { err: ex.message }));
   }
 }
 
@@ -12075,7 +12255,7 @@ function msgDom(m, r, prev) {
     ? renderChainCard(m.agentChain)
     : "";
   // 计划卡（工作型数字员工消息结束时由 renderPlanCard 绘制）
-  const planCardHtml = (m.plan && m.plan.steps && m.plan.steps.length && !m.recalled)
+  const planCardHtml = (planHasContent(m.plan) && !m.recalled)
     ? `<div class="plan-card">${renderPlanCard(m.plan, m, r)}</div>`
     : "";
   // 本次用量（模型 token / 估算成本）：随回答落库，刷新后仍可回显
@@ -13236,7 +13416,7 @@ function isBlankAgentGhost(m) {
     && !(m.attachments && m.attachments.length)
     && !m.interaction
     && !(m.toolCalls && m.toolCalls.length)
-    && !(m.plan && m.plan.steps && m.plan.steps.length);
+    && !planHasContent(m.plan);
 }
 
 /** 消息发送者是否为“数字员工/分身”（后续待命 agent 回复）——不以 id 前缀硬编码缩窄：
@@ -15306,6 +15486,15 @@ function init() {
   bindApiKeyConsole(); // 对外集成凭证：托管 API 密钥后台页签
   bindMarketConsole(); // 模板市场（在线分发）
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
+  $("adminTabWorkspaces").onclick = () => switchAdminTab("workspaces");
+  $("wsRefreshBtn").onclick = () => loadAdminWorkspaces();
+  $("wsCleanupAllBtn").onclick = () => cleanupWorkspaces(null);
+  $("wsCopyPathBtn").onclick = () => {
+    if (!adminWorkspacesRoot) return;
+    navigator.clipboard?.writeText(adminWorkspacesRoot).then(
+      () => toast(t("admin.wsCopied")),
+      () => toast(t("admin.wsCopyFail")));
+  };
   $("adminTabPerf").onclick = () => switchAdminTab("perf");
   $("adminTabEval").onclick = () => switchAdminTab("eval");
   bindEvalConsole();

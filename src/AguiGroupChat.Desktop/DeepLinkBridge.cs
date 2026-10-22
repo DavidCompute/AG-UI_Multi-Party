@@ -8,6 +8,15 @@ internal static class DeepLinkProtocol
 {
     /// <summary>同一用户会话内唯一的深链命名管道（<see cref="PipeOptions.CurrentUserOnly"/> 隔离其他用户）。</summary>
     public const string PipeName = "AguiGroupChat.Desktop.DeepLink";
+
+    /// <summary>逐窗口管道名（1.0.312）：多开时让另一个窗口也能被定向切知聚。
+    /// 只保留字母数字下划线，避免非法管道字符。</summary>
+    public static string PipeNameFor(string windowId)
+    {
+        var safe = new string((windowId ?? "").Where((ch) => char.IsLetterOrDigit(ch) || ch == '_').ToArray());
+        if (safe.Length == 0) safe = "window";
+        return PipeName + "." + safe;
+    }
 }
 
 /// <summary>
@@ -17,10 +26,15 @@ internal static class DeepLinkProtocol
 internal sealed class DeepLinkServer : IDisposable
 {
     private readonly Action<string?, string?> _onRequest;
+    private readonly string _pipeName;
     private readonly CancellationTokenSource _cts = new();
     private bool _started;
 
-    public DeepLinkServer(Action<string?, string?> onRequest) => _onRequest = onRequest;
+    public DeepLinkServer(Action<string?, string?> onRequest, string? pipeName = null)
+    {
+        _onRequest = onRequest;
+        _pipeName = string.IsNullOrWhiteSpace(pipeName) ? DeepLinkProtocol.PipeName : pipeName!;
+    }
 
     /// <summary>尝试占有管道；已有实例在服务时返回 false（本窗口不处理深链）。</summary>
     public bool TryStart()
@@ -39,8 +53,8 @@ internal sealed class DeepLinkServer : IDisposable
         }
     }
 
-    private static NamedPipeServerStream CreateServer() =>
-        new(DeepLinkProtocol.PipeName, PipeDirection.In, 1,
+    private NamedPipeServerStream CreateServer() =>
+        new(_pipeName, PipeDirection.In, 1,
             PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
@@ -93,12 +107,13 @@ internal sealed class DeepLinkServer : IDisposable
 /// <summary>深链客户端：把请求交给已运行的 UI；没有实例在服务时快速失败（调用方继续正常启动）。</summary>
 internal static class DeepLinkClient
 {
-    public static bool TrySend(string? group, string? action, int timeoutMs = 600)
+    public static bool TrySend(string? group, string? action, string? pipeName = null, int timeoutMs = 600)
     {
         if (string.IsNullOrWhiteSpace(group) && string.IsNullOrWhiteSpace(action)) return false;
         try
         {
-            using var client = new NamedPipeClientStream(".", DeepLinkProtocol.PipeName,
+            using var client = new NamedPipeClientStream(".",
+                string.IsNullOrWhiteSpace(pipeName) ? DeepLinkProtocol.PipeName : pipeName!,
                 PipeDirection.Out, PipeOptions.CurrentUserOnly);
             client.Connect(timeoutMs);
             using var writer = new StreamWriter(client) { AutoFlush = true };

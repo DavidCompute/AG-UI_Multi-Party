@@ -581,6 +581,62 @@ public static class AdminApi
             return Results.Ok(caps.GetCached().Select(r => new { r.AgentId, r.Endpoint, supportsProtocol = r.Cap.Discovered, r.Cap.SupportsTools, r.Cap.SupportsAttachments, r.Cap.ApprovalTypes }));
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 工作区可视化（1.0.312）：列出各数字员工工作区占用，支持按策略清理。仅运维及以上。
+        //   GET  /ag-ui/admin/workspaces —— 根目录 / 配额 / 保留期 + 各工作区占用
+        //   POST /ag-ui/admin/workspaces/cleanup?agentId=xxx —— 不传 agentId = 按全局策略清整根；传 = 仅清该工作区
+        root.MapGet("/workspaces", (AgentOptions options, AgentCatalog catalog,
+            Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var items = WorkspaceMaintenance.Describe(root)
+                .Select(w => new
+                {
+                    agentId = w.AgentId,
+                    nickname = catalog.GetDefinition(w.AgentId)?.Nickname ?? "",
+                    bytes = w.Bytes,
+                    files = w.Files,
+                    lastModifiedUtc = w.LastModifiedUtc,
+                })
+                .ToList();
+            return Results.Ok(new
+            {
+                root,
+                quotaMb = options.WorkSpaceQuotaMb,
+                retentionDays = options.WorkSpaceRetentionDays,
+                items,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        root.MapPost("/workspaces/cleanup", (string? agentId, HttpContext ctx, AgentOptions options,
+            AuthService auth, Microsoft.Extensions.Hosting.IHostEnvironment env,
+            ILoggerFactory loggerFactory, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var me = WebIdentity.UserId(ctx)!;
+            var logger = loggerFactory.CreateLogger("AdminWorkspaces");
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var scope = string.IsNullOrWhiteSpace(agentId) ? "all" : "agent";
+            var target = scope == "all" ? root : Path.GetFullPath(Path.Combine(root, agentId!));
+            // 防越界：agentId 仅允许单层目录名（不接受路径符号）
+            if (scope == "agent"
+                && (agentId!.Contains('/') || agentId.Contains('\\') || agentId is "." or ".."
+                    || !string.Equals(Path.GetDirectoryName(target), Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+                return Results.BadRequest(new { error = "invalid_agent_id" });
+
+            var result = WorkspaceMaintenance.Sweep(target, options.WorkSpaceQuotaMb, options.WorkSpaceRetentionDays, logger);
+            audit.Record("admin.workspaces.cleanup", me, auth.GetUser(me)?.Username, targetType: "workspace", targetId: agentId ?? "*",
+                detail: $"删除 {result.DeletedFiles} 个文件（{Math.Round(result.DeletedBytes / 1024d / 1024d, 1)} MB）");
+            return Results.Ok(new
+            {
+                ok = true,
+                scope,
+                agentId,
+                deletedFiles = result.DeletedFiles,
+                deletedBytes = result.DeletedBytes,
+                totalBytes = result.TotalBytes,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 轻量运行指标（6.1）：智能体调用 / 桥接 / 记忆命中 / 输出长度 的进程内计数，仅管理员及以上（含运维）。
         root.MapGet("/metrics", (HttpContext ctx, AguiGroupChat.Agents.MetricsService metrics) =>
         {

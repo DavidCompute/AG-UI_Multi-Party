@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.311 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.311 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.312 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.312 Release Notes (current Windows desktop release)
+
+**版本说明**：**审计可读 + 工作区可管 + 未读可直达**——工作区操作从计划步骤中拆出、按工具分组且默认只看异常；管理控制台新增「工作区」页（占用统计 + 按策略清理）；托盘「未读窗口」点其他窗口的知聚可直达。
+**Version note**: **Readable audit, manageable workspaces, direct unread navigation** — workspace actions move out of the plan steps into their own grouped block (failures only by default); a new **Workspaces** admin tab reports usage and cleans by policy; tray unread entries of other windows now jump straight to that circle.
+
+## 变更
+# Changes
+
+中文：
+- **审计单独成组**：`planJson` 新增 `audit[]`（`tool` / `text` / `ok` / `durationMs`），与 `steps` 分开——审计不再占用步骤进度。`GroupHub.AppendMessagePlanStepsAsync` 改为 `AppendMessagePlanAuditAsync`，单次回答上限 60 条。
+- **计划卡审计区**：前端按工具分组（⚡ 命令 / 💾 写入 / 📄 读取 / 📁 目录 / 🔧 其他）；有异常时**默认只展开异常项**，按钮在「展开全部 / 只看异常 / 收起」间切换（纯 DOM，不重渲染）。只有审计、没有编排步骤时也能正常出卡。
+- **工作区可视化**：新增 `GET /ag-ui/admin/workspaces`（根目录 / 配额 / 保留期 + 各工作区占用、文件数、最近修改、昵称）与 `POST /ag-ui/admin/workspaces/cleanup[?agentId=]`（按策略清理单个或全部，写审计日志）。管理控制台新增「工作区」页签，支持复制目录路径。
+- **跨窗口未读直达**：每个窗口额外开一条逐窗口深链管道（`AguiGroupChat.Desktop.DeepLink.<windowId>`）；托盘点其他窗口的知聚时定向投递，让目标窗口切到该知聚再前置（不可达时退化为仅前置）。聚合文件新增 `windowId`。
+- **测试**：审计用例扩展到 3 项（追加与落库 / 保留已有步骤 / 流已结束跳过），全量 **1892 通过**。
+
+English:
+- **Audit becomes its own block**: `planJson` gains `audit[]` (`tool` / `text` / `ok` / `durationMs`), separate from `steps`, so audit entries no longer consume step progress. `GroupHub.AppendMessagePlanStepsAsync` becomes `AppendMessagePlanAuditAsync`, capped at 60 entries per answer.
+- **Plan-card audit pane**: grouped by tool (⚡ commands / 💾 writes / 📄 reads / 📁 listings / 🔧 other); when anything failed, **only failures are expanded by default**, and the header button cycles **show all / only failures / collapse** (pure DOM, no re-render). Cards render correctly even when there are audit entries but no orchestration steps.
+- **Workspace visibility**: new `GET /ag-ui/admin/workspaces` (root / quota / retention plus per-workspace usage, file count, last modified, nickname) and `POST /ag-ui/admin/workspaces/cleanup[?agentId=]` (clean one or all by policy, audit-logged). The admin console gains a **Workspaces** tab with a copy-path action.
+- **Direct cross-window unread navigation**: each window opens an extra per-window deep-link pipe (`AguiGroupChat.Desktop.DeepLink.<windowId>`); clicking another window's circle in the tray delivers a targeted deep link so that window switches to the circle and comes forward (falling back to bringing it forward when unreachable). Aggregation files gain `windowId`.
+- **Tests**: the audit suite grows to 3 checks (append and persistence / existing steps preserved / ended stream skipped); the full suite passes **1892**.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（审计分组 / 工作区页）、§1.2.1（未读直达）、§8 控制台页签表新增第 14 行；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.312。
+English: `docs/user-guide.md` / `en.md` §3.13 (audit grouping / workspaces tab), §1.2.1 (direct unread navigation), and a 14th row in the chapter 8 tab table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.312.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Agents` / `Web` / `Desktop` 均 0 错误；`node --check app.js`；i18n 审计 **zh=en=2108，missing 0**；配置键守卫 **119 键，未登记漂移 0**；文档引用 0 失效；全量 `dotnet test` **1892 通过 / 0 失败**。**无法自动验证**：真实模型触发的审计分组渲染（需开启工作型工具并批准写 / 命令）、管理控制台「工作区」页与托盘的跨窗口直达（需安装版多开窗口）。
+English: `AguiGroupChat.Agents` / `Web` / `Desktop` build with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2108, missing 0**; the config-key guard reports **119 keys, 0 unregistered drift**; docs references are clean; the full `dotnet test` run passes **1892 / 0**. **Not automatically verifiable**: rendering of the grouped audit block with a real model (needs work tools enabled and one approved write / command), and the admin **Workspaces** tab plus tray cross-window navigation in an installed multi-window build.
+
+---
+
+# AG-UI 群聊桌面版 1.0.311 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.311 Release Notes (historical)
 
 **版本说明**：**工作区操作可追溯 + 容量自治理 + 托盘未读明细**——工作型数字员工每一步文件 / 命令操作都写进「执行计划」卡并落库；工作区按保留期与配额自动清理；托盘可直接展开「窗口 → 知聚」未读。
 **Version note**: **Auditable workspace operations, self-governing capacity, and a per-window unread breakdown** — every work-agent file/command action lands in the Execution plan card and is persisted; workspaces self-clean by age and quota; the tray expands unread down to window → circle.
