@@ -903,14 +903,14 @@ public static class AdminApi
 
         // 工作区操作审计汇总（1.0.314；1.0.315 起读按月归档）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
         // 归档服务用 GetService 可选解析：轻量宿主（测试 / 嵌入式）没注册时自动退回扫消息。
-        root.MapGet("/work-audits", (int? days, string? agentId, string? groupId, string? q, int? limit, string? date,
+        root.MapGet("/work-audits", (int? days, string? agentId, string? groupId, string? q, int? limit, string? date, string? tool,
             GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 days ?? 7, agentId, groupId, q, limit ?? 500);
-            // 看板钻取（1.0.324）：只筛展示行，facets 仍按完整窗口统计
-            var items = WorkAuditReport.FilterByDate(r.Items, date);
+            // 看板钻取 / 工具筛选（1.0.324–1.0.325）：只筛展示行，facets 仍按完整窗口统计
+            var items = WorkAuditReport.FilterByTool(WorkAuditReport.FilterByDate(r.Items, date), tool);
             return Results.Ok(new
             {
                 items = items.Select(e => new
@@ -925,16 +925,20 @@ public static class AdminApi
                 agents = r.Agents,
                 days = Math.Clamp(days ?? 7, 1, 90),
                 date = string.IsNullOrWhiteSpace(date) ? null : date,
+                tool = string.IsNullOrWhiteSpace(tool) ? null : tool,
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 导出（1.0.318）：group=message → 按消息聚合；split=month → 打成 ZIP，一月一个 CSV
+        // 1.0.324/1.0.325 起跟随「日期 / 工具」筛选，导出口径与表格一致
         root.MapGet("/work-audits.csv", (int? days, string? agentId, string? groupId, string? q,
-            string? group, string? split, GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
+            string? group, string? split, string? date, string? tool, GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
-            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
+            var collected = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 days ?? 7, agentId, groupId, q, 5000);
+            var rowsFiltered = WorkAuditReport.FilterByTool(WorkAuditReport.FilterByDate(collected.Items, date), tool);
+            var r = collected with { Items = rowsFiltered };
             var grouped = string.Equals(group, "message", StringComparison.OrdinalIgnoreCase);
 
             if (string.Equals(split, "month", StringComparison.OrdinalIgnoreCase))

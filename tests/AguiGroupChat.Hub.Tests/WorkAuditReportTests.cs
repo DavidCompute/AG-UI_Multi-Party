@@ -163,6 +163,32 @@ public sealed class WorkAuditReportTests
     }
 
     [Fact]
+    public void FilterByTool_MatchesCategoriesAndLeavesUnknownAlone()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        WorkAuditReport.Entry Row(string id, string tool) => new(
+            "g1", "市场推广", "agent_a", "agent_a", id, "main", now, tool, true, 1, "x");
+        var items = new List<WorkAuditReport.Entry>
+        {
+            Row("m1", "work_run_command"),
+            Row("m2", "work_write_file"),
+            Row("m3", "work_read_file"),
+            Row("m4", "work_list_dir"),
+            Row("m5", "skill_call"),
+        };
+
+        Assert.Equal("m1", Assert.Single(WorkAuditReport.FilterByTool(items, "command")).MessageId);
+        Assert.Equal("m2", Assert.Single(WorkAuditReport.FilterByTool(items, "write")).MessageId);
+        Assert.Equal("m3", Assert.Single(WorkAuditReport.FilterByTool(items, "read")).MessageId);
+        Assert.Equal("m4", Assert.Single(WorkAuditReport.FilterByTool(items, "list")).MessageId);
+        Assert.Equal("m5", Assert.Single(WorkAuditReport.FilterByTool(items, "other")).MessageId);
+        // 空 / all / 未知值：不筛
+        Assert.Same(items, WorkAuditReport.FilterByTool(items, ""));
+        Assert.Same(items, WorkAuditReport.FilterByTool(items, "all"));
+        Assert.Same(items, WorkAuditReport.FilterByTool(items, "nonsense"));
+    }
+
+    [Fact]
     public void FilterByDate_KeepsOnlyThatUtcDay()
     {
         var now = DateTimeOffset.UtcNow;

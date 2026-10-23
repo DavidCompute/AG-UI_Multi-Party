@@ -273,6 +273,23 @@ public static class WorkAuditReport
         return items.Where((e) => e.At >= from && e.At < to).ToList();
     }
 
+    /// <summary>按工具筛选可见行（1.0.325）：command / write / read / list / other；其余值（含 all）不筛。</summary>
+    public static IReadOnlyList<Entry> FilterByTool(IReadOnlyList<Entry> items, string? tool)
+    {
+        var t = (tool ?? "").Trim().ToLowerInvariant();
+        if (t.Length == 0 || t == "all") return items;
+        var isKnown = t is "command" or "write" or "read" or "list" or "other";
+        if (!isKnown) return items;
+        return items.Where((e) => t switch
+        {
+            "command" => e.Tool == "work_run_command",
+            "write" => e.Tool == "work_write_file",
+            "read" => e.Tool == "work_read_file",
+            "list" => e.Tool == "work_list_dir",
+            _ => e.Tool is not ("work_run_command" or "work_write_file" or "work_read_file" or "work_list_dir"),
+        }).ToList();
+    }
+
     /// <summary>导出 CSV（带 BOM，Excel 直接打开不乱码）。</summary>
     public static string ToCsv(IReadOnlyList<Entry> items)
     {

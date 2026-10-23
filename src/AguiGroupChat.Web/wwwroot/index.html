@@ -2404,6 +2404,7 @@
           <div id="wsUploadProgress" class="ws-progress hidden">
             <div id="wsUploadFill" class="ws-progress-fill"></div>
             <span id="wsUploadText" class="ws-progress-text"></span>
+            <button id="wsUploadCancelBtn" class="chip-btn ws-progress-cancel" type="button" data-i18n="admin.wsUploadCancel">取消</button>
           </div>
           <div id="adminWsBreadcrumb" class="ws-breadcrumb"></div>
           <div class="admin-table-wrap">
@@ -2438,6 +2439,15 @@
           </select>
           <select id="waAgent" class="modal-input" style="width:auto;min-width:150px">
             <option value="" data-i18n="admin.waAllAgents">全部员工</option>
+          </select>
+          <!-- 工具筛选（1.0.325）：与看板下钻、日期筛选叠加生效 -->
+          <select id="waTool" class="modal-input" style="width:auto;min-width:120px">
+            <option value="" data-i18n="admin.waToolAny">全部工具</option>
+            <option value="command" data-i18n="admin.waToolCmd">命令</option>
+            <option value="write" data-i18n="admin.waToolWrite">写入</option>
+            <option value="read" data-i18n="admin.waToolRead">读取</option>
+            <option value="list" data-i18n="admin.waToolList">目录</option>
+            <option value="other" data-i18n="admin.waToolOther">其他</option>
           </select>
           <label class="form-hint" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
             <input id="waGroupByMsg" type="checkbox" />

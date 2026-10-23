@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.324 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.324 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.325 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.325 Release Notes (current Windows desktop release)
+
+**版本说明**：**下钻看得见 + 上传能取消 + 审计可按工具筛**——当前筛选的柱体高亮；大文件夹传错了可以中途停下；审计表格可以只看命令 / 写入 / 读取 / 目录。
+**Version note**: **Visible drill-down, cancellable uploads, tool filtering** — the drilled column is highlighted, a folder upload can be stopped midway, and the audit table can be narrowed to one tool category.
+
+## 变更
+# Changes
+
+中文：
+- **下钻高亮**：`renderWorkAuditChart()` 根据当前维度取活动键（按员工 / 知聚看下拉，按天看 `waDate`），命中的柱体加 `.wa-chart-col-active`（描边 + 标签主色）；切换下拉 / 日期时同步重绘，无需重新请求。
+- **取消上传**：进度条内新增「取消」，点击置位 `wsUploadCancelled` 并用 `AbortController` 中断当前文件；后续排队不再发送，已完成的文件保留，toast 给出「已取消：完成 N/M」。上传期间「⬆ 上传」按钮置灰。
+- **审计工具筛选**：新增 `WorkAuditReport.FilterByTool()`（`command|write|read|list|other`，空值 / `all` / 未知值不筛）与工具栏工具下拉；`/work-audits` 与 `/work-audits.csv` 均支持 `tool=`，CSV 同时补上 `date=`，导出与表格同口径。
+
+English:
+- **Drill highlight**: `renderWorkAuditChart()` derives the active key from the current dimension (drop-downs for agent / circle, `waDate` for day) and tags the matching column with `.wa-chart-col-active` (outline plus accent label); switching a drop-down or the date repaints from cache without refetching.
+- **Cancel uploads**: a **Cancel** button inside the progress bar sets `wsUploadCancelled` and aborts the in-flight file via `AbortController`; queued files are skipped, completed ones stay, and the toast reads "Cancelled after N/M files". The **⬆ Upload** button is disabled while a batch runs.
+- **Tool filtering**: `WorkAuditReport.FilterByTool()` (`command|write|read|list|other`; empty / `all` / unknown are no-ops) backs a new toolbar drop-down; both `/work-audits` and `/work-audits.csv` accept `tool=`, and CSV also gains `date=`, so exports match the table.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（下钻高亮 / 取消上传 / 工具筛选）、§8.2（页签表补 `tool=`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.325。
+English: `docs/user-guide.md` / `en.md` §3.13 (drill highlight / upload cancel / tool filter), §8.2 (tab table gains `tool=`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.325.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2241，missing 0**；新增 `FilterByTool_MatchesCategoriesAndLeavesUnknownAlone`；Docker 冒烟验证 `tool` 回显、空值 / 未知值不误筛、CSV 带 `tool` / `date` / `group=message` 三种组合均 200；全量 `dotnet test` **1920 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2241, missing 0**; `FilterByTool_MatchesCategoriesAndLeavesUnknownAlone` is new; the Docker smoke verifies `tool` echoing, that empty / unknown values filter nothing, and that CSV returns 200 with `tool`, `date` and `group=message` combinations; the full `dotnet test` run passes **1920 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.324 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.324 Release Notes (historical)
 
 **版本说明**：**折线可关 + 柱体可下钻 + 上传有进度**——失败率折线可一键隐藏；点柱体直接筛出对应的审计明细；大文件夹上传能看到进度。
 **Version note**: **Toggleable rate line, drill-down columns, upload progress** — hide the failure-rate line with one click, drill into a column for its audit rows, and watch progress while uploading a folder.

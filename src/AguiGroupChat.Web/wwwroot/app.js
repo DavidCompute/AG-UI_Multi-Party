@@ -10092,6 +10092,8 @@ let adminWsCurrentPath = "";
 let adminWsSearch = "";
 let adminWsScope = "name"; // name | content（1.0.319）
 let wsSelected = new Set();   // 当前文件面板里勾选的文件相对路径（1.0.321）
+let wsUploadCancelled = false;  // 上传取消标志（1.0.325）
+let wsUploadController = null;  // 当前在传文件的 AbortController（1.0.325）
 
 async function loadAdminWorkspaces() {
   const rows = $("adminWorkspaceRows");
@@ -10492,7 +10494,8 @@ function workAuditQuery() {
   const q = ($("waQuery")?.value || "").trim();
   const groupId = $("waGroup")?.value || "";
   const agentId = $("waAgent")?.value || "";
-  return { days, q, groupId, agentId, date: waDate };
+  const tool = $("waTool")?.value || "";
+  return { days, q, groupId, agentId, date: waDate, tool };
 }
 
 /** 用 facets 重建下拉项（保留当前选中；选项不在了则回落到「全部」）。 */
@@ -10510,7 +10513,7 @@ async function loadWorkAudits() {
   const rows = $("adminWorkAuditRows");
   const meta = $("waMeta");
   if (!rows) return;
-  const { days, q, groupId, agentId, date } = workAuditQuery();
+  const { days, q, groupId, agentId, date, tool } = workAuditQuery();
   rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
     let url = `/ag-ui/admin/work-audits?days=${days}&limit=300`;
@@ -10518,6 +10521,7 @@ async function loadWorkAudits() {
     if (groupId) url += "&groupId=" + encodeURIComponent(groupId);
     if (agentId) url += "&agentId=" + encodeURIComponent(agentId);
     if (date) url += "&date=" + encodeURIComponent(date);
+    if (tool) url += "&tool=" + encodeURIComponent(tool);
     const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) {
@@ -10576,6 +10580,7 @@ function renderWaDateChip() {
 function setWaDate(date) {
   waDate = date || "";
   renderWaDateChip();
+  renderWorkAuditChart(waChartBuckets);
   loadWorkAudits();
 }
 
@@ -10638,6 +10643,10 @@ function renderWorkAuditChart(buckets) {
   const totals = buckets.map(totalOf);
   const max = Math.max(1, ...totals);
   const rates = buckets.map((d, i) => (totals[i] > 0 ? (Number(d.failed) || 0) / totals[i] * 100 : null));
+  // 当前下钻的柱体（1.0.325）：员工 / 知聚看下拉，按天看日期筛选
+  const activeChartKey = waChartBy === "agent" ? ($("waAgent")?.value || "")
+    : waChartBy === "group" ? ($("waGroup")?.value || "")
+    : (waDate || "");
   const legend = WA_CHART_SEGS.map(([, cls, key]) =>
     `<span class="wa-chart-key"><i class="${cls}"></i>${escapeHtml(t(key))}</span>`).join("")
     + (waShowRate
@@ -10653,7 +10662,8 @@ function renderWorkAuditChart(buckets) {
     const full = String(d.label || d.key || "");
     const label = full.length > 10 ? full.slice(0, 9) + "…" : full;
     const rate = (waShowRate && rates[i] !== null) ? ` · ⚠ ${rates[i].toFixed(0)}%` : "";
-    return `<div class="wa-chart-col wa-chart-clickable" data-wa-i="${i}" title="${escapeHtml(full)} · ${total}${rate} · ${escapeHtml(t("admin.waDrillHint"))}">
+    const active = activeChartKey && d.key === activeChartKey ? " wa-chart-col-active" : "";
+    return `<div class="wa-chart-col wa-chart-clickable${active}" data-wa-i="${i}" title="${escapeHtml(full)} · ${total}${rate} · ${escapeHtml(t("admin.waDrillHint"))}">
       <div class="wa-chart-bar" style="height:${h.toFixed(1)}%">${segs}</div>
       <span class="wa-chart-day">${escapeHtml(label)}</span>
     </div>`;
@@ -10774,11 +10784,13 @@ function renderWorkAuditRows() {
 
 /** 导出 URL（1.0.318）：跟随当前筛选；“按消息聚合”勾上时导出聚合口径，split=month 时打成 ZIP。 */
 function workAuditCsvUrl(splitMonth) {
-  const { days, q, groupId, agentId } = workAuditQuery();
+  const { days, q, groupId, agentId, date, tool } = workAuditQuery();
   let url = "/ag-ui/admin/work-audits.csv?days=" + days;
   if (q) url += "&q=" + encodeURIComponent(q);
   if (groupId) url += "&groupId=" + encodeURIComponent(groupId);
   if (agentId) url += "&agentId=" + encodeURIComponent(agentId);
+  if (date) url += "&date=" + encodeURIComponent(date);
+  if (tool) url += "&tool=" + encodeURIComponent(tool);
   if ($("waGroupByMsg")?.checked) url += "&group=message";
   if (splitMonth) url += "&split=month";
   return url;
@@ -10886,7 +10898,7 @@ async function uploadWorkspaceFiles(input) {
   })));
 }
 
-/** 上传一组 {file, rel}（1.0.323；1.0.324 加进度）：rel 是相对当前目录的路径（文件夹拖拽会带子路径）。 */
+/** 上传一组 {file, rel}（1.0.323；1.0.324 加进度，1.0.325 可取消）。 */
 async function uploadWorkspaceEntries(agentId, entries) {
   if (!agentId || !entries.length) return;
   const overwrite = !!$("wsOverwriteToggle")?.checked;
@@ -10895,41 +10907,60 @@ async function uploadWorkspaceEntries(agentId, entries) {
   let skipped = 0;
   let fail = 0;
   let done = 0;
+  wsUploadCancelled = false;
   const prog = $("wsUploadProgress");
   const fill = $("wsUploadFill");
   const text = $("wsUploadText");
+  const cancelBtn = $("wsUploadCancelBtn");
+  const uploadBtn = $("wsUploadBtn");
   const paint = (name) => {
     const pct = total ? Math.round((done / total) * 100) : 0;
     if (fill) fill.style.width = pct + "%";
     if (text) {
-      const prefix = t("admin.wsUploading", { done: String(done), total: String(total) });
+      const prefix = wsUploadCancelled
+        ? t("admin.wsUploadCancelling")
+        : t("admin.wsUploading", { done: String(done), total: String(total) });
       text.textContent = prefix + (name ? " · " + name : "");
     }
   };
   if (prog) prog.classList.remove("hidden");
+  if (cancelBtn) cancelBtn.classList.remove("hidden");
+  if (uploadBtn) uploadBtn.disabled = true;
   paint("");
   for (const it of entries) {
+    if (wsUploadCancelled) break;
     try {
       const target = wsJoinPath(adminWsCurrentPath, it.rel);
       const fd = new FormData();
       fd.append("file", it.file, it.file.name);
       const qs = `path=${encodeURIComponent(target)}` + (overwrite ? "" : "&overwrite=false");
+      const controller = new AbortController();
+      wsUploadController = controller;
       const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload?${qs}`, {
         method: "POST",
         headers: { Authorization: "Bearer " + state.token },
         body: fd,
+        signal: controller.signal,
       });
       const d = await res.json().catch(() => null);
       if (res.ok && d && d.skipped) skipped++;
       else if (res.ok && d && d.ok) ok++;
       else fail++;
-    } catch { fail++; }
+    } catch {
+      if (wsUploadCancelled) break; // 用户取消：不再计入失败
+      fail++;
+    } finally {
+      wsUploadController = null;
+    }
     done++;
     paint(it.rel);
   }
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
   if (skipped) toast(t("admin.wsUploadSkipped", { count: skipped }));
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
+  if (wsUploadCancelled) toast(t("admin.wsUploadCancelled", { done: String(done), total: String(total) }));
+  if (cancelBtn) cancelBtn.classList.add("hidden");
+  if (uploadBtn) uploadBtn.disabled = false;
   if (prog) setTimeout(() => prog.classList.add("hidden"), 1200);
   browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
 }
@@ -16731,6 +16762,11 @@ function init() {
   $("wsNewDirBtn").onclick = () => createWorkspaceDir();
   $("wsUploadBtn").onclick = () => $("wsUploadInput").click();
   $("wsUploadInput").onchange = () => uploadWorkspaceFiles($("wsUploadInput"));
+  // 取消上传（1.0.325）：中断在传文件并停止后续排队
+  $("wsUploadCancelBtn").onclick = () => {
+    wsUploadCancelled = true;
+    wsUploadController?.abort();
+  };
   // 拖拽上传（1.0.323）：文件和文件夹都可以直接拖进文件面板
   const wsDrop = $("adminWorkspaceFiles");
   if (wsDrop) {
@@ -16793,8 +16829,9 @@ function init() {
   $("waExportMonthsBtn").onclick = () => exportWorkAuditsByMonth();
   $("waChartCsvBtn").onclick = () => exportWorkAuditChartCsv();
   $("waSweepBtn").onclick = () => sweepWorkAuditArchive();
-  $("waGroup").onchange = () => loadWorkAudits();
-  $("waAgent").onchange = () => loadWorkAudits();
+  $("waGroup").onchange = () => { loadWorkAudits(); renderWorkAuditChart(waChartBuckets); };
+  $("waAgent").onchange = () => { loadWorkAudits(); renderWorkAuditChart(waChartBuckets); };
+  $("waTool").onchange = () => loadWorkAudits();
   $("waGroupByMsg").onchange = () => renderWorkAuditRows();
   // 看板维度（1.0.322）
   $("waChartSwitch").addEventListener("click", (e) => {
