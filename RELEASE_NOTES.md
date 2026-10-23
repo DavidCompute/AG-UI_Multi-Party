@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.331 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.331 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.332 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.332 Release Notes (current Windows desktop release)
+
+**版本说明**：**队列可搜可筛 + 视图可共享 + 看板可截图**——上传队列能按文件名 / 状态找；常用视图可以分享给其他运营；看板一键导出 PNG。同时修了一个重启后偏好丢失的持久化缺陷。
+**Version note**: **Searchable queue, shared views, PNG charts** — find uploads by name or state, share useful views with other operators, and export the chart as an image. Also fixes preferences being lost after a restart.
+
+## 变更
+# Changes
+
+中文：
+- **队列搜索 / 过滤**：新增 `wsQueueSearch` 与「全部 / 失败 / 上传中 / 完成」筛选，可叠加；过滤只影响显示，汇总与勾选索引仍指向原列表。
+- **共享视图**：`AuditViewsState` 增加 `Shared` 池，新增 `POST/DELETE /ag-ui/audit-views/share`（运营及以上）；下拉以「共享视图」分组展示，个人视图可「⇪ 分享」，选中共享项可「⇪ 取消分享」；默认视图仍只适用于个人视图。
+- **PNG 导出**：`exportWorkAuditChartPng()` 按当前维度 / 叠加模式手写自包含 SVG（标题、总量、基线、堆叠段），再栅格化为 2× PNG 下载，无第三方依赖。
+- **持久化修复**：`notifyPrefs` 与 `auditViews` 的快照是 `{users:{…}}`，旧恢复逻辑把外层当 userId，导致重启后数据丢失；现统一先解包 `users`（并兼容旧的裸 map / 数组格式），共享池一并恢复。
+
+English:
+- **Queue search / filters**: `wsQueueSearch` plus **All / Failed / Uploading / Done** chips, stackable; filtering changes only what is rendered, so summaries and checkbox indices still refer to the full list.
+- **Shared views**: `AuditViewsState` gains a `Shared` pool with `POST/DELETE /ag-ui/audit-views/share` (operators and above); the dropdown shows a "Shared views" group, personal views expose **⇪ Share**, shared ones **⇪ Unshare**, and the default view stays personal-only.
+- **PNG export**: `exportWorkAuditChartPng()` writes a self-contained SVG for the current dimension / stacking mode (title, totals, baseline, stacked segments) and rasterises it to a 2× PNG — no third-party dependency.
+- **Persistence fix**: `notifyPrefs` and `auditViews` snapshots are `{users:{…}}`, but the old restore treated the wrapper as a userId, losing data on restart; restore now unwraps `users` (and still accepts the legacy bare map / array shapes) and recovers the shared pool too.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（队列搜索 / 共享视图 / PNG）；§8.2（页签表补 `audit-views/share`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.332。
+English: `docs/user-guide.md` / `en.md` §3.13 (queue search / shared views / PNG), §8.2 (`audit-views/share`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.332.
+
+## 测试
+# Tests
+
+中文：`Web` 构建 0 错误；`node --check app.js`；i18n 审计 **zh=en=2291，missing 0**；新增 `Restore_UnwrapsUsersAndReadsSharedPool`、`Restore_AcceptsLegacyRootMapWithoutUsersWrapper` 与 `NotifyPrefsRestoreTests`（2 个）；Docker 冒烟：发布共享 → **重启容器** → 个人视图 / 默认视图 / 共享池均恢复；全量 `dotnet test` **1930 通过 / 0 失败**。
+English: `Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2291, missing 0**; new tests `Restore_UnwrapsUsersAndReadsSharedPool`, `Restore_AcceptsLegacyRootMapWithoutUsersWrapper` plus `NotifyPrefsRestoreTests` (2); the Docker smoke shares a view, **restarts the container**, and confirms personal views / default / shared pool all survive; the full `dotnet test` run passes **1930 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.331 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.331 Release Notes (historical)
 
 **版本说明**：**队列可挑着重试 + 一键显示全部 + 视图可搜**——失败文件只重传勾选项；看板收敛后一键回到全量；视图多了能搜索。
 **Version note**: **Pick what to retry, show-all shortcut, searchable views** — retry only the ticked failures, clear chart filters in one click, and find a view by typing.

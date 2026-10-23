@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.331**
+> Applies to version: **1.0.332**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1741,6 +1741,8 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Segment tool breakdown and default view (1.0.329)**: hovering an agent segment shows that agent's tool mix for the bucket (`commands N · writes N · reads N · listings N · other N · failed N`), and views gain **★ Set default** — opening the Workspaces tab auto-applies the default (marked with `★` in the dropdown, click again to clear), with the default synced through the server and carried by view JSON export / import.
 - **Reset and chart narrowing (1.0.330)**: the toolbar gains **↺ Reset** — days / keyword / circle / agent / tool / date / grouping all return to defaults and reload; drilling by agent or circle (column click or dropdown) **refetches the chart**, so it shows only the selected agent / circle with "· filtered" appended to the title, and clearing the filter restores the full view.
 - **Show all and view search (1.0.331)**: when the chart is narrowed by agent / circle a **Show all** button appears next to the title and clears just those two filters (days / keyword / tool stay); the view dropdown gains a **search box** that filters options as you type, with Enter applying the first match so large view lists stay navigable.
+- **Shared views and PNG export (1.0.332)**: **⇪ Share** publishes the selected personal view to a **shared pool** (`POST/DELETE /ag-ui/audit-views/share`, writable by operators and above) shown in a "Shared views" group that everyone can apply; **🖼 Export PNG** renders the current chart data as an inline SVG and rasterises it to a 2× PNG (title, totals, baseline) without any charting library.
+  - Also fixes a persistence defect: `notifyPrefs` / `auditViews` snapshots look like `{users:{…}}`, but the old restore treated the wrapper as a userId, so preferences and views vanished on restart. Restore now unwraps `users` first, handles the legacy shape, and the views section gains the shared pool.
 - Summaries only (never file contents or credentials), capped at 60 entries per answer.
 
 **Workspace quota and cleanup (1.0.311)**
@@ -1767,6 +1769,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Pause hint (1.0.329)**: the first pause raises a toast — "Pause stays on for the rest of this batch; it lands after the current chunk" — so it is clear the whole batch is suspended, not just the current file.
 - **Upload queue panel (1.0.330)**: below the bar every file in the batch is listed (name / size / state: queued / uploading NN% / done / skipped / failed / cancelled), capped at 200 rows and scrollable with a "…and N more" note; a fully successful batch hides it after 3 seconds, while failures or a cancel keep it (with a **Hide** button).
 - **Retry selected (1.0.331)**: failed / cancelled rows are selectable, and **↻ Retry selected** in the queue header re-sends only the ticked entries (disabled with nothing selected); the global **↻ Retry failed** still exists.
+- **Queue search and filters (1.0.332)**: the queue header gains a search box plus **All / Failed / Uploading / Done** chips (stackable, case-insensitive); filtering only affects what is shown, so the summary and checkbox indices stay correct.
 - **Folder navigation (1.0.317)**: the file panel now browses **one level at a time** (`?path=` lists direct children, folders first), with a clickable **Root / a / b** breadcrumb; uploads and new folders land in the **current folder**, as do delete / preview / download.
 - **File search (1.0.318)**: the toolbar search box matches **file names** recursively across the workspace (up to 500 hits, count shown next to the breadcrumb); results show the full relative path and keep preview / download / delete actions.
 - **Content search (1.0.319)**: a **File name / Content** toggle sits next to the search box. Content mode walks text files and reports the first hit (binary and >1 MB files skipped, 32 MB total scan cap, up to 100 hits) with a line number and surrounding snippet; preview / download / delete still work.
@@ -3938,7 +3941,7 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API keys | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`, `DELETE /ag-ui/admin/api-keys/{id}` (see 8.20) |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | Agent performance | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | Evaluation | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`, `DELETE …/{id}`, `POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | Workspaces | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`, `POST …/cleanup[?agentId=]`, `GET …/{agentId}/files[?path=&q=&scope=content]`, `GET …/{agentId}/file?path=`, `DELETE …/{agentId}/file?path=`, `POST …/{agentId}/dir?path=`, `POST …/{agentId}/upload` (supports `overwrite=false`), `GET …/{agentId}/upload-offset?path=&size=`, `POST …/{agentId}/upload-chunk?path=&offset=&total=`, `POST …/{agentId}/download`, `GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`, `GET …/work-audits/storage`, `POST …/work-audits/sweep`, `GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group|tool&stack=agent`, `GET …/work-audits/timeline.csv?…&by=`, `GET …/work-audits?…&date=YYYY-MM-DD&tool=command|write|read|list|other`, `GET …/work-audits.csv?…&date=&tool=`, `GET/PUT /ag-ui/audit-views` (supports `defaultView`; uploads support `overwrite=false`; 1.0.312–1.0.329) |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | Workspaces | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`, `POST …/cleanup[?agentId=]`, `GET …/{agentId}/files[?path=&q=&scope=content]`, `GET …/{agentId}/file?path=`, `DELETE …/{agentId}/file?path=`, `POST …/{agentId}/dir?path=`, `POST …/{agentId}/upload` (supports `overwrite=false`), `GET …/{agentId}/upload-offset?path=&size=`, `POST …/{agentId}/upload-chunk?path=&offset=&total=`, `POST …/{agentId}/download`, `GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`, `GET …/work-audits/storage`, `POST …/work-audits/sweep`, `GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group|tool&stack=agent`, `GET …/work-audits/timeline.csv?…&by=`, `GET …/work-audits?…&date=YYYY-MM-DD&tool=command|write|read|list|other`, `GET …/work-audits.csv?…&date=&tool=`, `GET/PUT /ag-ui/audit-views`, `POST/DELETE /ag-ui/audit-views/share` (supports `defaultView` / `sharedViews`; uploads support `overwrite=false`; 1.0.312–1.0.332) |
 
 Opening and switching (`app.js`):
 

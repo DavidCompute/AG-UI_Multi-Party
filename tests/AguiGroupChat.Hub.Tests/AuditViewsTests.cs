@@ -1,4 +1,5 @@
 using AguiGroupChat.Web;
+using System.Text.Json;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -53,6 +54,39 @@ public sealed class AuditViewsTests
         var longName = new string('a', 40);
         var cleaned = AuditViewsApi.Clean([new AuditViewDefinition { Name = longName }]);
         Assert.Equal(30, cleaned[0].Name!.Length);
+    }
+
+    [Fact]
+    public void Restore_UnwrapsUsersAndReadsSharedPool()
+    {
+        const string json = """
+            {"users":{"u1":{"views":[{"name":"A","days":5}],"defaultView":"A"}},"shared":[{"name":"S","days":10}]}
+            """;
+        using var doc = JsonDocument.Parse(json);
+        var state = new AuditViewsState();
+
+        AuditViewsApi.Restore(state, doc.RootElement);
+
+        Assert.True(state.Users.ContainsKey("u1"));
+        Assert.Single(state.Users["u1"].Views!);
+        Assert.Equal(5, state.Users["u1"].Views![0].Days);
+        Assert.Equal("A", state.Users["u1"].DefaultView);
+        Assert.Single(state.Shared);
+        Assert.Equal("S", state.Shared[0].Name);
+    }
+
+    [Fact]
+    public void Restore_AcceptsLegacyRootMapWithoutUsersWrapper()
+    {
+        const string json = """{"u1":[{"name":"A","days":7}]}""";
+        using var doc = JsonDocument.Parse(json);
+        var state = new AuditViewsState();
+
+        AuditViewsApi.Restore(state, doc.RootElement);
+
+        Assert.Single(state.Users["u1"].Views!);
+        Assert.Equal("", state.Users["u1"].DefaultView);
+        Assert.Empty(state.Shared);
     }
 
     [Fact]

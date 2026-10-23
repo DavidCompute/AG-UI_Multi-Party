@@ -137,40 +137,45 @@ public static class NotifyPrefsApi
     {
         var state = services.GetRequiredService<NotifyPrefsState>();
         Func<object?> snapshot = () => state;
-        Action<JsonElement> restore = element =>
-        {
-            state.Users = new Dictionary<string, NotifyUserPrefs>(StringComparer.Ordinal);
-            if (element.ValueKind != JsonValueKind.Object) return;
-            foreach (var prop in element.EnumerateObject())
-            {
-                try
-                {
-                    if (prop.Value.ValueKind == JsonValueKind.Array)
-                    {
-                        // 旧格式：直接是 toastTypes 数组
-                        var list = prop.Value.Deserialize<List<string>>(AguiJson.Options) ?? [];
-                        state.Users[prop.Name] = new NotifyUserPrefs { ToastTypes = Clean(list, KnownTypes.Contains) };
-                        continue;
-                    }
-                    if (prop.Value.ValueKind != JsonValueKind.Object) continue;
-                    var prefs = prop.Value.Deserialize<NotifyUserPrefs>(AguiJson.Options);
-                    if (prefs is null) continue;
-                    state.Users[prop.Name] = new NotifyUserPrefs
-                    {
-                        ToastTypes = prefs.ToastTypes is null ? null : Clean(prefs.ToastTypes, KnownTypes.Contains),
-                        MuteGroups = Clean(prefs.MuteGroups),
-                        MuteSenders = Clean(prefs.MuteSenders),
-                        MuteKeywords = Clean(prefs.MuteKeywords),
-                        Presets = CleanPresets(prefs.Presets),
-                    };
-                }
-                catch { /* 单条损坏：跳过 */ }
-            }
-        };
+        Action<JsonElement> restore = element => Restore(state, element);
 
         var persistence = services.GetService<PersistenceService>();
         if (persistence is not null) persistence.AddSection("notifyPrefs", snapshot, restore);
         else services.GetService<ISectionStore>()?.AddSection("notifyPrefs", snapshot, restore);
+    }
+
+    /// <summary>恢复（1.0.332 修复）：快照形如 <c>{"users":{…}}</c>，先解包再按 userId 循环；
+    /// 也兼容根直接就是 userId map 的旧快照。</summary>
+    public static void Restore(NotifyPrefsState state, JsonElement element)
+    {
+        state.Users = new Dictionary<string, NotifyUserPrefs>(StringComparer.Ordinal);
+        if (element.ValueKind != JsonValueKind.Object) return;
+        var map = element.TryGetProperty("users", out var inner) && inner.ValueKind == JsonValueKind.Object ? inner : element;
+        foreach (var prop in map.EnumerateObject())
+        {
+            try
+            {
+                if (prop.Value.ValueKind == JsonValueKind.Array)
+                {
+                    // 旧格式：直接是 toastTypes 数组
+                    var list = prop.Value.Deserialize<List<string>>(AguiJson.Options) ?? [];
+                    state.Users[prop.Name] = new NotifyUserPrefs { ToastTypes = Clean(list, KnownTypes.Contains) };
+                    continue;
+                }
+                if (prop.Value.ValueKind != JsonValueKind.Object) continue;
+                var prefs = prop.Value.Deserialize<NotifyUserPrefs>(AguiJson.Options);
+                if (prefs is null) continue;
+                state.Users[prop.Name] = new NotifyUserPrefs
+                {
+                    ToastTypes = prefs.ToastTypes is null ? null : Clean(prefs.ToastTypes, KnownTypes.Contains),
+                    MuteGroups = Clean(prefs.MuteGroups),
+                    MuteSenders = Clean(prefs.MuteSenders),
+                    MuteKeywords = Clean(prefs.MuteKeywords),
+                    Presets = CleanPresets(prefs.Presets),
+                };
+            }
+            catch { /* 单条损坏：跳过 */ }
+        }
     }
 }
 

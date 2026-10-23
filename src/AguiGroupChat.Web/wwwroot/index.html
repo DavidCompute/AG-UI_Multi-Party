@@ -2412,6 +2412,13 @@
           <div id="wsUploadQueue" class="ws-queue hidden">
             <div class="ws-queue-head">
               <b data-i18n="admin.wsQueueTitle">上传队列</b>
+              <input id="wsQueueSearch" class="modal-input" style="width:auto;min-width:100px;font-size:11px" data-i18n-placeholder="admin.wsQueueSearch" />
+              <span id="wsQueueFilters" class="ws-queue-filters">
+                <button class="chip-btn on" type="button" data-q-filter="" data-i18n="admin.wsQueueAll">全部</button>
+                <button class="chip-btn" type="button" data-q-filter="fail" data-i18n="admin.wsQueueFail">失败</button>
+                <button class="chip-btn" type="button" data-q-filter="run" data-i18n="admin.wsQueueRunning">上传中</button>
+                <button class="chip-btn" type="button" data-q-filter="ok" data-i18n="admin.wsQueueOk">完成</button>
+              </span>
               <span id="wsQueueSummary" class="form-hint"></span>
               <button id="wsQueueRetrySel" class="chip-btn hidden" type="button" data-i18n="admin.wsQueueRetrySel">↻ 重试选中</button>
               <button id="wsQueueClose" class="chip-btn" type="button" data-i18n="admin.wsQueueClose">收起</button>
@@ -2470,6 +2477,7 @@
           <button id="waExportBtn" class="chip-btn" type="button" data-i18n="admin.waExport">⬇ 导出 CSV</button>
           <button id="waExportMonthsBtn" class="chip-btn" type="button" data-i18n="admin.waExportMonths">🗂 按月份导出</button>
           <button id="waChartCsvBtn" class="chip-btn" type="button" data-i18n="admin.waChartCsv">📊 看板 CSV</button>
+          <button id="waChartPngBtn" class="chip-btn" type="button" data-i18n="admin.waChartPng">🖼 导出 PNG</button>
           <!-- 筛选视图（1.0.326；1.0.331 支持搜索） -->
           <input id="waViewSearch" class="modal-input" style="width:auto;min-width:110px" data-i18n-placeholder="admin.waViewSearch" />
           <select id="waViewSel" class="modal-input" style="width:auto;min-width:140px">
@@ -2478,6 +2486,8 @@
           <button id="waViewSave" class="chip-btn" type="button" data-i18n="admin.waViewSave">＋ 保存视图</button>
           <button id="waViewDelete" class="chip-btn" type="button" data-i18n="admin.waViewDelete">🗑 删除视图</button>
           <button id="waViewDefault" class="chip-btn" type="button" data-i18n="admin.waViewDefault">★ 设为默认</button>
+          <button id="waViewShare" class="chip-btn" type="button" data-i18n="admin.waViewShare">⇪ 分享</button>
+          <button id="waViewUnshare" class="chip-btn" type="button" data-i18n="admin.waViewUnshare">⇪ 取消分享</button>
           <button id="waViewExport" class="chip-btn" type="button" data-i18n="admin.waViewExport">⤓ 导出视图</button>
           <button id="waViewImport" class="chip-btn" type="button" data-i18n="admin.waViewImport">⤒ 导入视图</button>
           <input id="waViewImportInput" type="file" accept="application/json,.json" class="hidden" />

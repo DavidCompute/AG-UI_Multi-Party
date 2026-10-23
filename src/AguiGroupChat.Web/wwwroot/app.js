@@ -10628,6 +10628,8 @@ function drillWorkAudit(bucket) {
 const WA_VIEW_MAX = 20;
 let waDefaultView = "";
 let waViewFilter = ""; // 视图搜索词（1.0.331）
+let waSharedViews = []; // 共享视图池（1.0.332）
+const WA_SHARED_PREFIX = "s::";
 
 function waViewsKey() {
   return "agui.waViews." + (state.memberId || "anon");
@@ -10672,6 +10674,7 @@ async function syncWaViewsFromServer() {
     }
     try { localStorage.setItem(waViewsKey(), JSON.stringify(d.views)); } catch { /* 隐私模式 */ }
     waDefaultView = String(d.defaultView || "");
+    waSharedViews = Array.isArray(d.sharedViews) ? d.sharedViews : [];
     renderWaViews();
     // 打开工作区页时自动套用默认视图（1.0.329）
     const def = d.views.find((v) => v && v.name === waDefaultView);
@@ -10685,10 +10688,29 @@ function renderWaViews() {
   const all = loadWaViews();
   const current = sel.value;
   const q = waViewFilter.trim().toLowerCase();
-  const list = q ? all.filter((v) => String(v.name).toLowerCase().includes(q)) : all;
+  const match = (v) => !q || String(v.name).toLowerCase().includes(q);
+  const list = all.filter(match);
+  const shared = waSharedViews.filter(match);
   sel.innerHTML = `<option value="">${escapeHtml(t("admin.waViewPlaceholder"))}</option>`
-    + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("");
-  sel.value = list.some((v) => v.name === current) ? current : "";
+    + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
+    + (shared.length
+      ? `<optgroup label="${escapeHtml(t("admin.waSharedGroup"))}">`
+        + shared.map((v) => `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${escapeHtml(v.name)}</option>`).join("")
+        + `</optgroup>`
+      : "");
+  sel.value = (list.some((v) => v.name === current) || shared.some((v) => WA_SHARED_PREFIX + v.name === current))
+    ? current : "";
+}
+
+/** 当前下拉选中项：个人视图 / 共享视图 / null。 */
+function currentWaView() {
+  const value = $("waViewSel")?.value || "";
+  if (!value) return null;
+  if (value.startsWith(WA_SHARED_PREFIX)) {
+    const name = value.slice(WA_SHARED_PREFIX.length);
+    return waSharedViews.find((v) => v.name === name) || null;
+  }
+  return loadWaViews().find((v) => v.name === value) || null;
 }
 
 /** 设为 / 取消默认视图（1.0.329）：默认视图在每次打开工作区页时自动套用。 */
@@ -10696,8 +10718,8 @@ function toggleDefaultView() {
   const sel = $("waViewSel");
   const list = loadWaViews();
   const name = sel?.value || "";
-  if (!sel || !name || !list.some((v) => v.name === name)) {
-    toast(t("admin.waViewNone"));
+  if (!sel || !name || name.startsWith(WA_SHARED_PREFIX) || !list.some((v) => v.name === name)) {
+    toast(t("admin.waViewShareNeedPersonal"));
     return;
   }
   if (waDefaultView === name) {
@@ -10725,10 +10747,64 @@ function resetWorkAuditFilters() {
   loadWorkAudits();
 }
 
+/** 分享当前个人视图到共享池（1.0.332）。 */
+async function shareSelectedWaView() {
+  const v = currentWaView();
+  const value = $("waViewSel")?.value || "";
+  if (!v || value.startsWith(WA_SHARED_PREFIX)) {
+    toast(t("admin.waViewShareNeedPersonal"));
+    return;
+  }
+  try {
+    const res = await fetch("/ag-ui/audit-views/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ view: v }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      toast(t("admin.waViewShareFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    waSharedViews = Array.isArray(d?.sharedViews) ? d.sharedViews : waSharedViews;
+    renderWaViews();
+    toast(t("admin.waViewShared", { name: v.name }));
+  } catch (ex) {
+    toast(t("admin.waViewShareFail", { err: ex.message }));
+  }
+}
+
+/** 撤销共享（1.0.332）：选中共享视图时就删它；选中个人视图时按同名撤销。 */
+async function unshareSelectedWaView() {
+  const value = $("waViewSel")?.value || "";
+  const name = value.startsWith(WA_SHARED_PREFIX) ? value.slice(WA_SHARED_PREFIX.length) : value;
+  if (!name) {
+    toast(t("admin.waViewNone"));
+    return;
+  }
+  try {
+    const res = await fetch(`/ag-ui/audit-views/share?name=${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      toast(t("admin.waViewShareFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    waSharedViews = Array.isArray(d?.sharedViews) ? d.sharedViews : waSharedViews;
+    renderWaViews();
+    toast(t("admin.waViewUnshared", { name }));
+  } catch (ex) {
+    toast(t("admin.waViewShareFail", { err: ex.message }));
+  }
+}
+
 /** 套用视图：回填控件与日期 chip，再按新条件重拉表格。 */
 function applyWaView(v) {
   if (!v) return;
-  if ($("waViewSel")) $("waViewSel").value = v.name || "";
+  const sel = $("waViewSel");
+  if (sel && [...sel.options].some((o) => o.value === v.name)) sel.value = v.name;
   if ($("waDays")) $("waDays").value = String(v.days || 7);
   if ($("waQuery")) $("waQuery").value = v.q || "";
   if ($("waGroup")) $("waGroup").value = v.groupId || "";
@@ -10770,7 +10846,7 @@ function deleteWaView() {
   const sel = $("waViewSel");
   const list = loadWaViews();
   const name = sel?.value || "";
-  const idx = list.findIndex((v) => v.name === name);
+  const idx = name.startsWith(WA_SHARED_PREFIX) ? -1 : list.findIndex((v) => v.name === name);
   if (!sel || !name || idx < 0) {
     toast(t("admin.waViewNone"));
     return;
@@ -11029,6 +11105,122 @@ function renderWorkAuditChartStacked(buckets) {
       loadWorkAudits(); // 图表也跟随 refetch（1.0.330）
     };
   });
+}
+
+const WA_SEG_COLORS = {
+  commands: "#6c8cff",
+  writes: "#4cc38a",
+  reads: "#8e7cf0",
+  listings: "#d0a53c",
+  other: "#7d8794",
+  failed: "#e5484d",
+};
+
+/** 看板导出 PNG（1.0.332）：手写自包含 SVG 再栅格化，不依赖图表库。 */
+async function exportWorkAuditChartPng() {
+  const buckets = waChartBuckets;
+  if (!buckets || !buckets.length) {
+    toast(t("admin.waChartEmpty"));
+    return;
+  }
+  const style = getComputedStyle(document.body);
+  const bg = (style.getPropertyValue("--panel") || "#1b1e24").trim();
+  const fg = (style.getPropertyValue("--text") || "#e6e6e6").trim();
+  const muted = (style.getPropertyValue("--muted") || "#9aa0a6").trim();
+
+  const totalOf = (b) => waStackActive
+    ? (Number(b.total) || (b.parts || []).reduce((s, p) => s + (Number(p.total) || 0), 0))
+    : WA_CHART_SEGS.reduce((s, [k]) => s + (Number(b[k]) || 0), 0);
+  const totals = buckets.map(totalOf);
+  const max = Math.max(1, ...totals);
+
+  const segsOf = (b) => {
+    if (waStackActive) {
+      const sums = new Map();
+      for (const p of (b.parts || [])) {
+        const label = String(p.label || p.key || "");
+        sums.set(label, (sums.get(label) || 0) + (Number(p.total) || 0));
+      }
+      const top = [...sums.entries()].sort((x, y) => y[1] - x[1]).map(([k]) => k).slice(0, 8);
+      const out = [];
+      let other = 0;
+      for (const [label, v] of sums) {
+        if (top.includes(label)) out.push({ v, color: WA_PART_COLORS[top.indexOf(label) % WA_PART_COLORS.length] });
+        else other += v;
+      }
+      if (other) out.push({ v: other, color: "#7d8794" });
+      return out.sort((a, b2) => b2.v - a.v);
+    }
+    return WA_CHART_SEGS.filter(([k]) => Number(b[k]) > 0)
+      .map(([k]) => ({ v: Number(b[k]), color: WA_SEG_COLORS[k] }));
+  };
+
+  const colW = 34;
+  const width = Math.max(520, buckets.length * colW + 80);
+  const height = 260;
+  const plotTop = 56;
+  const plotBottom = 200;
+  const plotH = plotBottom - plotTop;
+  const titleKey = waChartBy === "agent" ? "admin.waChartTitleAgent"
+    : waChartBy === "group" ? "admin.waChartTitleGroup"
+    : waChartBy === "tool" ? "admin.waChartTitleTool" : "admin.waChartTitle";
+  const title = t(titleKey) + (waStackActive ? " · " + t("admin.waStackAgent") : "");
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" font-family="Segoe UI, system-ui, sans-serif">`;
+  svg += `<rect width="${width}" height="${height}" fill="${bg}"/>`;
+  svg += `<text x="28" y="30" fill="${fg}" font-size="15" font-weight="600">${escapeHtml(title)}</text>`;
+  buckets.forEach((b, i) => {
+    const x = 40 + i * colW;
+    const total = totals[i];
+    const h = total > 0 ? Math.max(3, total / max * plotH) : 0;
+    let y = plotBottom;
+    for (const s of segsOf(b)) {
+      const sh = total > 0 ? (s.v / total) * h : 0;
+      y -= sh;
+      svg += `<rect x="${x}" y="${y.toFixed(1)}" width="20" height="${sh.toFixed(1)}" fill="${s.color}"/>`;
+    }
+    if (total > 0) {
+      svg += `<text x="${x + 10}" y="${(plotBottom - h - 6).toFixed(1)}" fill="${muted}" font-size="10" text-anchor="middle">${total}</text>`;
+    }
+    const raw = String(b.label || b.key || "");
+    const label = raw.length > 8 ? raw.slice(0, 8) : raw;
+    svg += `<text x="${x + 10}" y="${plotBottom + 16}" fill="${muted}" font-size="10" text-anchor="middle">${escapeHtml(label)}</text>`;
+  });
+  svg += `<line x1="32" y1="${plotBottom}" x2="${width - 32}" y2="${plotBottom}" stroke="${muted}" stroke-opacity="0.35"/>`;
+  svg += "</svg>";
+
+  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    canvas.toBlob((png) => {
+      if (!png) {
+        toast(t("admin.waChartPngFail"));
+        return;
+      }
+      const purl = URL.createObjectURL(png);
+      const a = document.createElement("a");
+      a.href = purl;
+      a.download = `work-audit-chart-${waChartBy}-${new Date().toISOString().slice(0, 10)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(purl), 1000);
+    }, "image/png");
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    toast(t("admin.waChartPngFail"));
+  };
+  img.src = url;
 }
 
 /** 看板 CSV（1.0.323）：与当前维度 / 筛选同口径，一行一个桶。 */
@@ -11358,6 +11550,8 @@ async function uploadOneEntry(agentId, it, overwrite, signal, onProgress) {
 /** 上传队列逐项状态（1.0.330）：wait / run / ok / skip / fail / cancel。 */
 let wsUploadQueueItems = [];
 let wsUploadQueueSelected = new Set(); // 选中的失败 / 取消项，供「重试选中」（1.0.331）
+let wsQueueFilter = "";  // "" | fail | run | ok（1.0.332）
+let wsQueueSearch = "";
 const WS_Q_LABEL = {
   wait: "admin.wsQueueWait",
   run: "admin.wsQueueRunning",
@@ -11389,24 +11583,27 @@ function renderUploadQueue() {
     retrySel.classList.toggle("hidden", canRetry === 0);
     retrySel.disabled = wsUploadQueueSelected.size === 0;
   }
-  const shown = items.slice(0, 200);
-  rows.innerHTML = shown.map((it, idx) => {
-    const label = it.status === "run"
-      ? `${Math.min(100, Math.round((it.bytes / (it.size || 1)) * 100))}%`
-      : t(WS_Q_LABEL[it.status] || "admin.wsQueueWait");
-    const canSel = it.status === "fail" || it.status === "cancel";
-    const cb = canSel
-      ? `<input type="checkbox" data-q-sel="${idx}" ${wsUploadQueueSelected.has(idx) ? "checked" : ""} /> `
-      : `<span class="ws-q-gap"></span>`;
-    return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}" title="${escapeHtml(it.rel)}">
-      ${cb}<span class="ws-q-name">${escapeHtml(it.rel)}</span>
-      <span class="ws-q-size">${escapeHtml(fmtBytes(it.size || 0))}</span>
-      <span class="ws-q-state">${escapeHtml(label)}</span>
-    </div>`;
-  }).join("")
-    + (items.length > shown.length
-      ? `<div class="ws-q-more">${escapeHtml(t("admin.wsQueueMore", { count: String(items.length - shown.length) }))}</div>`
-      : "");
+  const shown = items.filter((it) => (wsQueueFilter ? it.status === wsQueueFilter : true))
+    .filter((it) => (wsQueueSearch.trim() ? String(it.rel).toLowerCase().includes(wsQueueSearch.trim().toLowerCase()) : true))
+    .slice(0, 200);
+  rows.innerHTML = (shown.length
+    ? shown.map((it) => {
+      const idx = items.indexOf(it);
+      const label = it.status === "run"
+        ? `${Math.min(100, Math.round((it.bytes / (it.size || 1)) * 100))}%`
+        : t(WS_Q_LABEL[it.status] || "admin.wsQueueWait");
+      const canSel = it.status === "fail" || it.status === "cancel";
+      const cb = canSel
+        ? `<input type="checkbox" data-q-sel="${idx}" ${wsUploadQueueSelected.has(idx) ? "checked" : ""} /> `
+        : `<span class="ws-q-gap"></span>`;
+      return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}" title="${escapeHtml(it.rel)}">
+        ${cb}<span class="ws-q-name">${escapeHtml(it.rel)}</span>
+        <span class="ws-q-size">${escapeHtml(fmtBytes(it.size || 0))}</span>
+        <span class="ws-q-state">${escapeHtml(label)}</span>
+      </div>`;
+    }).join("")
+    : `<div class="ws-q-more">${escapeHtml(t("admin.wsQueueNoMatch"))}</div>`)
+    + (shown.length >= 200 ? `<div class="ws-q-more">${escapeHtml(t("admin.wsQueueMore", { count: String(items.length - shown.length) }))}</div>` : "");
   rows.querySelectorAll("[data-q-sel]").forEach((cb) => {
     cb.onchange = () => {
       const i = Number(cb.dataset.qSel);
@@ -17355,6 +17552,18 @@ function init() {
   // 上传队列（1.0.330；1.0.331 支持只重试选中项）
   $("wsQueueClose").onclick = () => $("wsUploadQueue").classList.add("hidden");
   $("wsQueueRetrySel").onclick = () => retrySelectedUploads();
+  // 队列搜索 / 状态过滤（1.0.332）
+  $("wsQueueSearch").addEventListener("input", () => {
+    wsQueueSearch = $("wsQueueSearch").value || "";
+    renderUploadQueue();
+  });
+  $("wsQueueFilters").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-q-filter]");
+    if (!btn) return;
+    wsQueueFilter = btn.dataset.qFilter || "";
+    $("wsQueueFilters").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+    renderUploadQueue();
+  });
   $("wsUploadRetryBtn").onclick = () => {
     if (!wsUploadFailed.length || !wsUploadLastAgent) return;
     const list = wsUploadFailed.slice();
@@ -17423,6 +17632,7 @@ function init() {
   $("waExportBtn").onclick = () => exportWorkAudits();
   $("waExportMonthsBtn").onclick = () => exportWorkAuditsByMonth();
   $("waChartCsvBtn").onclick = () => exportWorkAuditChartCsv();
+  $("waChartPngBtn").onclick = () => exportWorkAuditChartPng();
   $("waSweepBtn").onclick = () => sweepWorkAuditArchive();
   $("waGroup").onchange = () => loadWorkAudits();
   $("waAgent").onchange = () => loadWorkAudits(); // 图表跟随 agentId refetch（1.0.330）
@@ -17430,9 +17640,9 @@ function init() {
   // 筛选视图（1.0.326）
   renderWaViews();
   $("waViewSel").onchange = () => {
-    const name = $("waViewSel").value;
-    if (!name) return;
-    applyWaView(loadWaViews().find((v) => v.name === name));
+    const v = currentWaView();
+    if (!v) return;
+    applyWaView(v);
   };
   // 视图搜索（1.0.331）：输入过滤选项，回车套用第一个命中
   $("waViewSearch").addEventListener("input", () => {
@@ -17450,6 +17660,8 @@ function init() {
   $("waViewSave").onclick = () => saveWaView();
   $("waViewDelete").onclick = () => deleteWaView();
   $("waViewDefault").onclick = () => toggleDefaultView();
+  $("waViewShare").onclick = () => shareSelectedWaView();
+  $("waViewUnshare").onclick = () => unshareSelectedWaView();
   $("waViewExport").onclick = () => exportWaViews();
   $("waViewImport").onclick = () => $("waViewImportInput").click();
   $("waViewImportInput").onchange = () => importWaViews($("waViewImportInput"));

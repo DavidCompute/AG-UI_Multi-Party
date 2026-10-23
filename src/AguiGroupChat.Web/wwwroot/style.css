@@ -2514,7 +2514,10 @@ button { white-space: nowrap; }
 /* 上传队列（1.0.330）：逐项状态，最多 200 行后滚动 */
 .ws-queue { margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .ws-queue-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: rgba(127, 127, 127, 0.06); font-size: 12px; }
-.ws-queue-head .chip-btn { margin-left: auto; }
+.ws-queue-head .chip-btn { margin-left: 0; }
+.ws-queue-head #wsQueueClose { margin-left: auto; }
+.ws-queue-filters { display: inline-flex; gap: 4px; }
+.ws-queue-filters .chip-btn { font-size: 10px; height: 16px; line-height: 14px; padding: 0 6px; }
 .ws-queue-rows { max-height: 180px; overflow-y: auto; }
 .ws-q-row { display: flex; align-items: center; gap: 8px; padding: 2px 8px; font-size: 11px; border-top: 1px solid var(--border); }
 .ws-q-row input[type="checkbox"] { margin: 0; }
