@@ -10709,6 +10709,20 @@ function toggleDefaultView() {
   pushWaViews(list);
 }
 
+/** 一键还原筛选（1.0.330）：回到默认条件、清空视图选中并重拉表格 / 看板。 */
+function resetWorkAuditFilters() {
+  if ($("waDays")) $("waDays").value = "7";
+  if ($("waQuery")) $("waQuery").value = "";
+  if ($("waGroup")) $("waGroup").value = "";
+  if ($("waAgent")) $("waAgent").value = "";
+  if ($("waTool")) $("waTool").value = "";
+  if ($("waGroupByMsg")) $("waGroupByMsg").checked = false;
+  if ($("waViewSel")) $("waViewSel").value = "";
+  waDate = "";
+  renderWaDateChip();
+  loadWorkAudits();
+}
+
 /** 套用视图：回填控件与日期 chip，再按新条件重拉表格。 */
 function applyWaView(v) {
   if (!v) return;
@@ -10855,12 +10869,17 @@ function renderWorkAuditChart(buckets) {
   const titleKey = waChartBy === "agent" ? "admin.waChartTitleAgent"
     : waChartBy === "group" ? "admin.waChartTitleGroup"
     : waChartBy === "tool" ? "admin.waChartTitleTool" : "admin.waChartTitle";
-  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}
+  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}${waChartFiltered() ? " · " + escapeHtml(t("admin.waFilteredChart")) : ""}
       <span class="wa-chart-legend">${legend}</span></div>
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
   box.querySelectorAll("[data-wa-i]").forEach((el) => {
     el.onclick = () => drillWorkAudit(waChartBuckets[Number(el.dataset.waI)]);
   });
+}
+
+/** 看板是否已被员工 / 知聚筛选收窄（1.0.330）：用于标题提示。 */
+function waChartFiltered() {
+  return !!($("waAgent")?.value || $("waGroup")?.value);
 }
 
 /** 当前下钻的柱体 key（1.0.325；1.0.326 加按工具）。 */
@@ -10969,7 +10988,7 @@ function renderWorkAuditChartStacked(buckets) {
   const empty = totals.every((x) => x === 0)
     ? `<div class="admin-empty">${escapeHtml(t("admin.waChartEmpty"))}</div>` : "";
   const titleKey = waChartBy === "group" ? "admin.waChartTitleGroup" : "admin.waChartTitle";
-  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))} · ${escapeHtml(t("admin.waStackAgent"))}
+  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))} · ${escapeHtml(t("admin.waStackAgent"))}${waChartFiltered() ? " · " + escapeHtml(t("admin.waFilteredChart")) : ""}
       <span class="wa-chart-legend">${legend}</span></div>
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
   box.querySelectorAll("[data-wa-i]").forEach((el) => {
@@ -10984,8 +11003,7 @@ function renderWorkAuditChartStacked(buckets) {
       if (!sel || !key) return;
       ensureSelectOption(sel, key, el.dataset.waAgentLabel || key);
       sel.value = sel.value === key ? "" : key;
-      renderWorkAuditChart(waChartBuckets);
-      loadWorkAudits();
+      loadWorkAudits(); // 图表也跟随 refetch（1.0.330）
     };
   });
 }
@@ -11314,7 +11332,51 @@ async function uploadOneEntry(agentId, it, overwrite, signal, onProgress) {
   return "ok";
 }
 
-/** 上传一组 {file, rel}（1.0.323；1.0.327 起按字节推进并支持大文件续传）。 */
+/** 上传队列逐项状态（1.0.330）：wait / run / ok / skip / fail / cancel。 */
+let wsUploadQueueItems = [];
+const WS_Q_LABEL = {
+  wait: "admin.wsQueueWait",
+  run: "admin.wsQueueRunning",
+  ok: "admin.wsQueueOk",
+  skip: "admin.wsQueueSkip",
+  fail: "admin.wsQueueFail",
+  cancel: "admin.wsQueueCancel",
+};
+
+function renderUploadQueue() {
+  const box = $("wsUploadQueue");
+  const rows = $("wsQueueRows");
+  const summary = $("wsQueueSummary");
+  if (!box || !rows) return;
+  const items = wsUploadQueueItems;
+  if (!items.length) {
+    box.classList.add("hidden");
+    return;
+  }
+  const count = (s) => items.filter((x) => x.status === s).length;
+  if (summary) {
+    summary.textContent = ["ok", "skip", "fail", "cancel"]
+      .map((s) => `${t(WS_Q_LABEL[s])} ${count(s)}`)
+      .join(" · ");
+  }
+  const shown = items.slice(0, 200);
+  rows.innerHTML = shown.map((it) => {
+    const label = it.status === "run"
+      ? `${Math.min(100, Math.round((it.bytes / (it.size || 1)) * 100))}%`
+      : t(WS_Q_LABEL[it.status] || "admin.wsQueueWait");
+    return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}" title="${escapeHtml(it.rel)}">
+      <span class="ws-q-name">${escapeHtml(it.rel)}</span>
+      <span class="ws-q-size">${escapeHtml(fmtBytes(it.size || 0))}</span>
+      <span class="ws-q-state">${escapeHtml(label)}</span>
+    </div>`;
+  }).join("")
+    + (items.length > shown.length
+      ? `<div class="ws-q-more">${escapeHtml(t("admin.wsQueueMore", { count: String(items.length - shown.length) }))}</div>`
+      : "");
+  box.classList.remove("hidden");
+}
+
+/** 上传一组 {file, rel}（1.0.323；1.0.330 加逐项队列）。 */
 async function uploadWorkspaceEntries(agentId, entries) {
   if (!agentId || !entries.length) return;
   const overwrite = !!$("wsOverwriteToggle")?.checked;
@@ -11330,6 +11392,7 @@ async function uploadWorkspaceEntries(agentId, entries) {
   wsUploadCancelled = false;
   wsUploadPaused = false;
   wsUploadPauseHintShown = false;
+  wsUploadQueueItems = entries.map((it) => ({ rel: it.rel, size: it.file.size || 0, bytes: 0, status: "wait" }));
   const prog = $("wsUploadProgress");
   const fill = $("wsUploadFill");
   const text = $("wsUploadText");
@@ -11362,21 +11425,32 @@ async function uploadWorkspaceEntries(agentId, entries) {
   if (retryBtn) retryBtn.classList.add("hidden");
   if (uploadBtn) uploadBtn.disabled = true;
   paint("", 0);
+  renderUploadQueue();
 
-  for (const it of entries) {
+  for (let qi = 0; qi < entries.length; qi++) {
+    const it = entries[qi];
+    const q = wsUploadQueueItems[qi];
     if (wsUploadCancelled) break;
     await waitWhileUploadPaused();
     if (wsUploadCancelled) break;
+    q.status = "run";
+    renderUploadQueue();
     const controller = new AbortController();
     wsUploadController = controller;
     try {
-      const outcome = await uploadOneEntry(agentId, it, overwrite, controller.signal, (bytes) => paint(it.rel, bytes));
-      if (outcome === "skipped") skipped++;
-      else ok++;
+      const outcome = await uploadOneEntry(agentId, it, overwrite, controller.signal, (bytes) => {
+        q.bytes = bytes;
+        paint(it.rel, bytes);
+        renderUploadQueue();
+      });
+      q.bytes = q.size;
+      if (outcome === "skipped") { skipped++; q.status = "skip"; }
+      else { ok++; q.status = "ok"; }
       doneBytes += it.file.size || 0;
     } catch {
-      if (wsUploadCancelled) break; // 用户取消：不再计入失败
+      if (wsUploadCancelled) { q.status = "cancel"; break; } // 用户取消：不再计入失败
       fail++;
+      q.status = "fail";
       failedNow.push(it);
       doneBytes += it.file.size || 0; // 失败也推进总量，避免进度卡死
     } finally {
@@ -11384,6 +11458,13 @@ async function uploadWorkspaceEntries(agentId, entries) {
     }
     done++;
     paint("", 0);
+    renderUploadQueue();
+  }
+
+  // 取消时把未开始的条目标为「已取消」
+  if (wsUploadCancelled) {
+    for (const q of wsUploadQueueItems) if (q.status === "wait" || q.status === "run") q.status = "cancel";
+    renderUploadQueue();
   }
 
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
@@ -11399,6 +11480,9 @@ async function uploadWorkspaceEntries(agentId, entries) {
   // 有失败就保留进度条并给出重试入口（1.0.326）
   if (retryBtn && failedNow.length) retryBtn.classList.remove("hidden");
   if (prog && !failedNow.length) setTimeout(() => prog.classList.add("hidden"), 1200);
+  // 队列：全部成功时稍后自动收起，有失败 / 取消则保留（1.0.330）
+  if (!failedNow.length && !wsUploadCancelled) 
+    setTimeout(() => { if (!wsUploadFailed.length) $("wsUploadQueue")?.classList.add("hidden"); }, 3000);
   browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
 }
 
@@ -17214,7 +17298,8 @@ function init() {
     }
     try { wsUploadRepaint?.(); } catch { /* 忽略 */ }
   };
-  // 重试失败项（1.0.326）
+  // 上传队列（1.0.330）
+  $("wsQueueClose").onclick = () => $("wsUploadQueue").classList.add("hidden");
   $("wsUploadRetryBtn").onclick = () => {
     if (!wsUploadFailed.length || !wsUploadLastAgent) return;
     const list = wsUploadFailed.slice();
@@ -17279,12 +17364,13 @@ function init() {
       () => toast(t("admin.wsCopyFail")));
   };
   $("waRefreshBtn").onclick = () => loadWorkAudits();
+  $("waResetBtn").onclick = () => resetWorkAuditFilters();
   $("waExportBtn").onclick = () => exportWorkAudits();
   $("waExportMonthsBtn").onclick = () => exportWorkAuditsByMonth();
   $("waChartCsvBtn").onclick = () => exportWorkAuditChartCsv();
   $("waSweepBtn").onclick = () => sweepWorkAuditArchive();
-  $("waGroup").onchange = () => { loadWorkAudits(); renderWorkAuditChart(waChartBuckets); };
-  $("waAgent").onchange = () => { loadWorkAudits(); renderWorkAuditChart(waChartBuckets); };
+  $("waGroup").onchange = () => loadWorkAudits();
+  $("waAgent").onchange = () => loadWorkAudits(); // 图表跟随 agentId refetch（1.0.330）
   $("waTool").onchange = () => { loadWorkAudits(); renderWorkAuditChart(waChartBuckets); };
   // 筛选视图（1.0.326）
   renderWaViews();

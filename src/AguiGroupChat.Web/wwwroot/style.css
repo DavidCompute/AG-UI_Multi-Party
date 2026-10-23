@@ -2511,6 +2511,21 @@ button { white-space: nowrap; }
 .ws-progress-retry { position: absolute; right: 52px; top: 1px; z-index: 2; height: 16px; line-height: 14px; font-size: 10px; padding: 0 6px; }
 .ws-progress-pause { position: absolute; right: 52px; top: 1px; z-index: 2; height: 16px; line-height: 14px; font-size: 10px; padding: 0 6px; }
 .ws-progress .ws-progress-text { padding-right: 130px; }
+/* 上传队列（1.0.330）：逐项状态，最多 200 行后滚动 */
+.ws-queue { margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.ws-queue-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: rgba(127, 127, 127, 0.06); font-size: 12px; }
+.ws-queue-head .chip-btn { margin-left: auto; }
+.ws-queue-rows { max-height: 180px; overflow-y: auto; }
+.ws-q-row { display: flex; align-items: center; gap: 8px; padding: 2px 8px; font-size: 11px; border-top: 1px solid var(--border); }
+.ws-q-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-q-size { flex: 0 0 auto; color: var(--muted); }
+.ws-q-state { flex: 0 0 60px; text-align: right; color: var(--muted); }
+.ws-q-ok .ws-q-state { color: #4cc38a; }
+.ws-q-skip .ws-q-state { color: var(--muted); }
+.ws-q-fail .ws-q-state { color: #e5484d; }
+.ws-q-run .ws-q-state { color: var(--accent); }
+.ws-q-cancel .ws-q-state { color: #d0a53c; }
+.ws-q-more { padding: 3px 8px; font-size: 11px; color: var(--muted); }
 /* 看板下钻 / 日期筛选（1.0.324） */
 .wa-chart-clickable { cursor: pointer; }
 .wa-chart-clickable:hover .wa-chart-day { color: var(--accent); }

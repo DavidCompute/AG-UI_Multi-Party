@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.329**
+> Applies to version: **1.0.330**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1739,6 +1739,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Stack by agent and portable views (1.0.327)**: with **Stack by agent** ticked, day and circle columns split into per-agent segments (`stack=agent`; the top 8 agents get colours and the rest fold into "Other"; the tool dimension ignores it) while the failure-rate line still applies. Saved views gain **⤓ Export views / ⤒ Import views** (JSON `{version:1,views:[…]}`, same name overwrites, max 20) for machine moves and team sharing.
 - **Segment drill and server-side views (1.0.328)**: in stacked mode **clicking an agent segment** filters the table to that agent (click again to clear; the active segment is outlined; the aggregated "Other" segment is not clickable). Saved views move to **server storage** (`GET/PUT /ag-ui/audit-views`, persisted in the `auditViews` extension area), so they follow the account across devices while `localStorage` becomes an offline cache; the first run pushes local views up.
 - **Segment tool breakdown and default view (1.0.329)**: hovering an agent segment shows that agent's tool mix for the bucket (`commands N · writes N · reads N · listings N · other N · failed N`), and views gain **★ Set default** — opening the Workspaces tab auto-applies the default (marked with `★` in the dropdown, click again to clear), with the default synced through the server and carried by view JSON export / import.
+- **Reset and chart narrowing (1.0.330)**: the toolbar gains **↺ Reset** — days / keyword / circle / agent / tool / date / grouping all return to defaults and reload; drilling by agent or circle (column click or dropdown) **refetches the chart**, so it shows only the selected agent / circle with "· filtered" appended to the title, and clearing the filter restores the full view.
 - Summaries only (never file contents or credentials), capped at 60 entries per answer.
 
 **Workspace quota and cleanup (1.0.311)**
@@ -1763,6 +1764,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Resumable uploads (1.0.327)**: files above 1 MB upload **in 1 MB chunks** — `GET …/{agentId}/upload-offset?path=&size=` reports the bytes already stored, then `POST …/{agentId}/upload-chunk?path=&offset=&total=` appends from that offset. A mismatch answers `409 {offset}` so the client realigns; once `total` bytes arrive the server merges the parts into the real file (honouring **Overwrite**). Parts live under `data/upload-parts/<agentId>/<hash>.part` and expire after two days; the progress bar now advances by **bytes**.
 - **Pause / resume (1.0.328)**: the bar gains **Pause** (turning into **Resume**) that takes effect at the **next chunk boundary** without interrupting the in-flight chunk; the text switches to "Paused · NN%", and resuming continues from the stored offset without re-sending bytes.
 - **Pause hint (1.0.329)**: the first pause raises a toast — "Pause stays on for the rest of this batch; it lands after the current chunk" — so it is clear the whole batch is suspended, not just the current file.
+- **Upload queue panel (1.0.330)**: below the bar every file in the batch is listed (name / size / state: queued / uploading NN% / done / skipped / failed / cancelled), capped at 200 rows and scrollable with a "…and N more" note; a fully successful batch hides it after 3 seconds, while failures or a cancel keep it (with a **Hide** button).
 - **Folder navigation (1.0.317)**: the file panel now browses **one level at a time** (`?path=` lists direct children, folders first), with a clickable **Root / a / b** breadcrumb; uploads and new folders land in the **current folder**, as do delete / preview / download.
 - **File search (1.0.318)**: the toolbar search box matches **file names** recursively across the workspace (up to 500 hits, count shown next to the breadcrumb); results show the full relative path and keep preview / download / delete actions.
 - **Content search (1.0.319)**: a **File name / Content** toggle sits next to the search box. Content mode walks text files and reports the first hit (binary and >1 MB files skipped, 32 MB total scan cap, up to 100 hits) with a line number and surrounding snippet; preview / download / delete still work.

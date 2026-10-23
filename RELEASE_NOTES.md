@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.329 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.329 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.330 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.330 Release Notes (current Windows desktop release)
+
+**版本说明**：**一键还原 + 图表随筛选收敛 + 上传队列可见**——筛选一键清回默认；按员工 / 知聚下钻时看板只显示被选项；上传时能看到每个文件的状态。
+**Version note**: **One-click reset, filter-aware chart, visible upload queue** — reset every filter at once, narrow the chart to the drilled agent or circle, and watch each file's state while uploading.
+
+## 变更
+# Changes
+
+中文：
+- **一键还原**：新增「↺ 还原」按钮与 `resetWorkAuditFilters()`，把天数 / 关键词 / 知聚 / 员工 / 工具 / 日期 / 聚合开关一次清回默认并重拉表格与看板。
+- **图表收敛**：员工段点击、`waAgent` / `waGroup` 下拉、按员工 / 知聚柱体下钻都改为重新拉取看板（`agentId` / `groupId` 传给 `Collect`），只显示被选项；标题追加「· 已筛选」，取消后恢复全量。
+- **上传队列**：新增 `wsUploadQueueItems` 与 `renderUploadQueue()`，逐项展示「等待中 / 上传中 NN% / 完成 / 已跳过 / 失败 / 已取消」，最多 200 行可滚动，超过提示「…还有 N 个」；全部成功 3 秒后自动收起，有失败 / 取消则保留并带「收起」。
+
+English:
+- **One-click reset**: a new **↺ Reset** button plus `resetWorkAuditFilters()` clears days / keyword / circle / agent / tool / date / grouping and reloads both the table and the chart.
+- **Filter-aware chart**: clicking an agent segment, changing the `waAgent` / `waGroup` dropdowns, or drilling an agent / circle column now refetches the chart (`agentId` / `groupId` reach `Collect`) so it only shows the selection; the title appends "· filtered" and clearing restores the full view.
+- **Upload queue**: `wsUploadQueueItems` plus `renderUploadQueue()` list every file as queued / uploading NN% / done / skipped / failed / cancelled, capped at 200 scrollable rows with a "…and N more" note; a fully successful batch collapses after 3 seconds while failures or a cancel keep the panel with a **Hide** button.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（一键还原 / 图表收敛 / 上传队列）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.330。
+English: `docs/user-guide.md` / `en.md` §3.13 (reset / chart narrowing / upload queue); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.330.
+
+## 测试
+# Tests
+
+中文：本轮为前端交互改造，无后端 / 契约变更；`Web` 构建 0 错误；`node --check app.js`；i18n 审计 **zh=en=2276，missing 0**；Docker 重建后页面元素与 `/health` 验证通过；全量 `dotnet test` **1926 通过 / 0 失败**。
+English: this round is UI-only with no backend or contract changes; `Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2276, missing 0**; after the Docker rebuild the page markers and `/health` were verified; the full `dotnet test` run passes **1926 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.329 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.329 Release Notes (historical)
 
 **版本说明**：**段内看构成 + 暂停有提示 + 视图有默认**——员工段悬停看到工具分布；暂停首次有明确提示；可把常用筛选设为默认视图，打开即套用。
 **Version note**: **Segment tooltips, pause hint, default view** — hover an agent segment for its tool mix, a clear pause hint on first use, and a default saved view that applies when the tab opens.
