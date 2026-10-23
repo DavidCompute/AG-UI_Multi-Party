@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.321 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.321 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.322 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.322 Release Notes (current Windows desktop release)
+
+**版本说明**：**看板可换维度 + 整目录打包 + 模板可导入导出**——审计柱图能在「按天 / 按员工 / 按知聚」之间切换；工作区可以一键把当前目录（含子目录）打包下载；通知模板能导出成 JSON 再导入。
+**Version note**: **Chart dimensions, whole-folder download, portable presets** — the audit chart switches between day / agent / circle; a workspace folder can be packaged in one click; notification presets export to and import from JSON.
+
+## 变更
+# Changes
+
+中文：
+- **看板维度切换**：`WorkAuditReport.GroupTimeline()` 按员工 / 知聚聚合（总量降序、标签取昵称 / 知聚名）；`GET /ag-ui/admin/work-audits/timeline` 新增 `by=day|agent|group`（非法值回落 `day`），响应统一为 `buckets[{key,label,…,total}]`；前端新增三段开关并按维度换标题。
+- **目录整包下载**：`WorkspaceDownloadRequest` 增加 `Dir`，`POST …/download` 支持 `{dir:"…"}` 递归打包（根用 `"."`，跳过符号链接 / 联接点，仍是 200 文件 / 200 MB 上限）；新增 `📦 下载当前目录` 按钮；错误码 `invalid_path` / `no_files` / `too_many_files` / `too_large` 映射为可读文案。
+- **模板导入导出**：通知面板新增 `⬇ 导出模板` / `⬆ 导入模板`，JSON 格式 `{version:1,presets:[…]}`，导入兼容裸数组、同名覆盖、上限 10 个，导入后立即同步服务端。
+
+English:
+- **Chart dimensions**: `WorkAuditReport.GroupTimeline()` aggregates by agent / circle (total descending, nickname / circle name as label); `GET /ag-ui/admin/work-audits/timeline` takes `by=day|agent|group` (unknown → `day`) and returns a unified `buckets[{key,label,…,total}]`; the UI adds a three-way switch that also swaps the title.
+- **Whole-folder download**: `WorkspaceDownloadRequest` gains `Dir`; `POST …/download` accepts `{dir:"…"}` and walks the tree (root = `"."`, symlinks / junctions skipped, still capped at 200 files / 200 MB). A new **📦 Download current folder** button; `invalid_path` / `no_files` / `too_many_files` / `too_large` are rendered as readable messages.
+- **Preset portability**: the notification panel gains **⬇ Export presets** / **⬆ Import presets** using `{version:1,presets:[…]}`; import also accepts a bare array, overwrites by name, caps at 10 and syncs immediately.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（目录整包 / 看板维度）、§1.2.1（模板导入导出）、§8.2（页签表补 `by=`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.322。
+English: `docs/user-guide.md` / `en.md` §3.13 (folder download / chart dimensions), §1.2.1 (preset import-export), §8.2 (tab table gains `by=`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.322.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2225，missing 0**；新增 `GroupTimeline_SplitsByAgentAndGroup`；Docker 冒烟覆盖 `by=day/agent/group/bogus`、根目录 / 子目录整包、`../..` 越界、目录不存在与空目录；全量 `dotnet test` **1917 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2225, missing 0**; `GroupTimeline_SplitsByAgentAndGroup` is new; the Docker smoke covers `by=day/agent/group/bogus`, root and subfolder packaging, a `../..` escape, a missing folder and an empty folder; the full `dotnet test` run passes **1917 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.321 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.321 Release Notes (historical)
 
 **版本说明**：**工作区批量操作 + 审计看板 + 自定义通知模板**——文件可多选批量下载 / 删除；审计区多了一张按天柱状图；通知偏好可把当前设置存成自己的模板。
 **Version note**: **Batch workspace actions, audited activity chart, custom notification presets** — multi-select files to download or delete; a per-day chart in the audit view; save current notification setup as your own preset.

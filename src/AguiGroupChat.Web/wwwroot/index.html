@@ -77,6 +77,12 @@
         <button id="notifPresetSave" class="chip-btn" type="button" data-i18n="notif.presetSave">保存当前</button>
       </div>
       <div id="notifPresetChips" class="notif-chips"></div>
+      <!-- 模板导入导出（1.0.322）：换机器 / 团队共享用 -->
+      <div class="notif-rule-row">
+        <button id="notifPresetExport" class="chip-btn" type="button" data-i18n="notif.presetExport">⬇ 导出模板</button>
+        <button id="notifPresetImport" class="chip-btn" type="button" data-i18n="notif.presetImport">⬆ 导入模板</button>
+        <input id="notifPresetImportInput" type="file" accept="application/json,.json" class="hidden" />
+      </div>
     </div>
     <div id="notifPermHint" class="notif-perm hidden">
       <span id="notifPermText" class="notif-perm-text"></span>
@@ -2387,6 +2393,7 @@
             </span>
             <button id="wsDownloadSelBtn" class="chip-btn" type="button" disabled data-i18n="admin.wsDownloadSel">⬇ 下载所选</button>
             <button id="wsDeleteSelBtn" class="chip-btn" type="button" disabled data-i18n="admin.wsDeleteSel">🗑 删除所选</button>
+            <button id="wsDownloadDirBtn" class="chip-btn" type="button" data-i18n="admin.wsDownloadDir">📦 下载当前目录</button>
             <button id="wsUploadBtn" class="chip-btn" type="button" data-i18n="admin.wsUpload">⬆ 上传</button>
             <input id="wsUploadInput" type="file" multiple class="hidden" />
             <button id="wsNewDirBtn" class="chip-btn" type="button" data-i18n="admin.wsNewDir">＋ 新建目录</button>
@@ -2438,7 +2445,12 @@
           <button id="waSweepBtn" class="chip-btn" type="button" data-i18n="admin.waSweep">🧹 清理过期归档</button>
           <span id="waMeta" class="form-hint"></span>
         </div>
-        <!-- 审计看板（1.0.321）：按天的操作量柱状图 -->
+        <!-- 审计看板（1.0.321；1.0.322 增加按员工 / 知聚维度） -->
+        <div id="waChartSwitch" class="wa-chart-switch">
+          <button class="chip-btn on" type="button" data-wa-by="day" data-i18n="admin.waByDay">按天</button>
+          <button class="chip-btn" type="button" data-wa-by="agent" data-i18n="admin.waByAgent">按员工</button>
+          <button class="chip-btn" type="button" data-wa-by="group" data-i18n="admin.waByGroup">按知聚</button>
+        </div>
         <div id="waChart" class="wa-chart"></div>
         <div class="admin-table-wrap">
           <table class="admin-table">

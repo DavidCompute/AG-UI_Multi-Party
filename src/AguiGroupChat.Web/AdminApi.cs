@@ -712,14 +712,24 @@ public static class AdminApi
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 归档占用与手动清理（1.0.319）
-        root.MapGet("/work-audits/timeline", (int? days, string? agentId, string? groupId, string? q,
+        // 审计看板（1.0.321；1.0.322 增加按员工 / 知聚维度）
+        root.MapGet("/work-audits/timeline", (int? days, string? agentId, string? groupId, string? q, string? by,
             GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
             var clamped = Math.Clamp(days ?? 7, 1, 90);
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 clamped, agentId, groupId, q, 5000);
-            return Results.Ok(new { days = WorkAuditReport.Timeline(r.Items, clamped), window = clamped });
+            var dim = string.Equals(by, "agent", StringComparison.OrdinalIgnoreCase) ? "agent"
+                : string.Equals(by, "group", StringComparison.OrdinalIgnoreCase) ? "group"
+                : "day";
+            var buckets = dim == "day"
+                ? WorkAuditReport.Timeline(r.Items, clamped)
+                    .Select((d) => new WorkAuditReport.TimelineBucket(d.Date, d.Date.Length > 5 ? d.Date[5..] : d.Date,
+                        d.Commands, d.Writes, d.Reads, d.Listings, d.Other, d.Failed))
+                    .ToList()
+                : WorkAuditReport.GroupTimeline(r.Items, dim);
+            return Results.Ok(new { by = dim, window = clamped, buckets });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         root.MapGet("/work-audits/storage", (AgentOptions options, IServiceProvider sp) =>
@@ -754,38 +764,68 @@ public static class AdminApi
             return Results.Ok(new { ok = true, deleted, retentionDays = options.WorkAuditRetentionDays });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
-        // 工作区批量下载（1.0.321）：按相对路径打包 ZIP（仅文件；单次 200 个 / 200 MB 上限）。
+        // 工作区批量下载（1.0.321；1.0.322 支持按目录整包）：按相对路径打包 ZIP（仅文件；单次 200 个 / 200 MB 上限）。
         root.MapPost("/workspaces/{agentId}/download", (string agentId, WorkspaceDownloadRequest req, AgentOptions options,
             Microsoft.Extensions.Hosting.IHostEnvironment env) =>
         {
+            const int maxFiles = 200;
             var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
             var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
             if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
 
             var paths = (req.Paths ?? []).Where((p) => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal).ToList();
-            if (paths.Count == 0) return Results.BadRequest(new { error = "missing_paths" });
-            if (paths.Count > 200) return Results.BadRequest(new { error = "too_many_files" });
+            var byDir = !string.IsNullOrWhiteSpace(req.Dir);
+            if (!byDir && paths.Count == 0) return Results.BadRequest(new { error = "missing_paths" });
+            if (!byDir && paths.Count > maxFiles) return Results.BadRequest(new { error = "too_many_files" });
 
-            const long maxTotalBytes = 200L * 1024 * 1024;
+            string? dirFull = null;
+            if (byDir)
+            {
+                // 目录整包：允许工作区根（"."），越界 / 不存在 / 链接一律拒绝
+                if (!WorkspaceMaintenance.TryResolveTarget(dir, req.Dir, out var resolved) || !Directory.Exists(resolved))
+                    return Results.BadRequest(new { error = "invalid_path" });
+                dirFull = resolved;
+            }
+
             long total = 0;
             var added = 0;
+            string? failure = null;
             using var ms = new MemoryStream();
             using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
             {
-                foreach (var rel in paths)
+                if (dirFull is not null)
                 {
-                    var full = WorkspaceMaintenance.ResolveFile(dir, rel);
-                    if (full is null) continue; // 不存在 / 越界：跳过
-                    var size = new FileInfo(full).Length;
-                    if (total + size > maxTotalBytes) return Results.BadRequest(new { error = "too_large" });
-                    total += size;
-                    var entry = zip.CreateEntry(Path.GetRelativePath(dir, full).Replace('\\', '/'), System.IO.Compression.CompressionLevel.Fastest);
-                    using var target = entry.Open();
-                    using var source = File.OpenRead(full);
-                    source.CopyTo(target);
-                    added++;
+                    List<string> files;
+                    try
+                    {
+                        files = Directory.EnumerateFiles(dirFull, "*", SearchOption.AllDirectories)
+                            .Where((f) => (File.GetAttributes(f) & FileAttributes.ReparsePoint) == 0)
+                            .ToList();
+                    }
+                    catch
+                    {
+                        return Results.BadRequest(new { error = "invalid_path" });
+                    }
+                    if (files.Count > maxFiles) return Results.BadRequest(new { error = "too_many_files" });
+                    foreach (var full in files)
+                    {
+                        var rel = Path.GetRelativePath(dir, full).Replace('\\', '/');
+                        var err = TryAddZipEntry(zip, full, rel, ref total, ref added);
+                        if (err is not null) { failure = err; break; }
+                    }
+                }
+                else
+                {
+                    foreach (var rel in paths)
+                    {
+                        var full = WorkspaceMaintenance.ResolveFile(dir, rel);
+                        if (full is null) continue; // 不存在 / 越界：跳过
+                        var err = TryAddZipEntry(zip, full, Path.GetRelativePath(dir, full).Replace('\\', '/'), ref total, ref added);
+                        if (err is not null) { failure = err; break; }
+                    }
                 }
             }
+            if (failure is not null) return Results.BadRequest(new { error = failure });
             // 空 Zip 归档也会写出 22 字节的中央目录，所以按「实际加入的条目数」判断（1.0.321）。
             if (added == 0) return Results.BadRequest(new { error = "no_files" });
             return Results.File(ms.ToArray(), "application/zip", $"workspace-{agentId}.zip");
@@ -1342,6 +1382,22 @@ public static class AdminApi
         try { return action(); }
         catch (AguiProtocolException ex) { return Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)); }
     }
+
+    /// <summary>往批量下载 ZIP 里写一个文件（1.0.322）：超出总上限时返回错误码，否则返回 null。</summary>
+    private static string? TryAddZipEntry(System.IO.Compression.ZipArchive zip, string full, string rel,
+        ref long total, ref int added)
+    {
+        const long maxTotalBytes = 200L * 1024 * 1024;
+        var size = new FileInfo(full).Length;
+        if (total + size > maxTotalBytes) return "too_large";
+        total += size;
+        var entry = zip.CreateEntry(rel, System.IO.Compression.CompressionLevel.Fastest);
+        using var target = entry.Open();
+        using var source = File.OpenRead(full);
+        source.CopyTo(target);
+        added++;
+        return null;
+    }
 }
 
 /// <summary>临时放额提醒行（站内通道，1.0.276）：<c>State</c> = expiring / expired。</summary>
@@ -1356,5 +1412,5 @@ public sealed record AdminPasswordHttpRequest(string NewPassword);
 /// <summary>平台角色设置请求体（RBAC 分层，仅超级管理员）：role 取 user / operator / admin / superadmin。</summary>
 public sealed record AdminRoleHttpRequest(string Role);
 
-/// <summary>工作区批量下载请求体（1.0.321）：工作区内相对路径列表。</summary>
-public sealed record WorkspaceDownloadRequest(IReadOnlyList<string>? Paths);
+/// <summary>工作区批量下载请求体（1.0.321；1.0.322 增加 dir）：paths = 相对路径列表，dir = 按目录整包。</summary>
+public sealed record WorkspaceDownloadRequest(IReadOnlyList<string>? Paths, string? Dir = null);

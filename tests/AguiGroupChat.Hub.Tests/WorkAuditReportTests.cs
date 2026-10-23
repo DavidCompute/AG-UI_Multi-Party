@@ -132,6 +132,36 @@ public sealed class WorkAuditReportTests
     }
 
     [Fact]
+    public void GroupTimeline_SplitsByAgentAndGroup()
+    {
+        var store = NewStore();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        store.AddMessage(Msg("m1", "agent_a", now, PlanWithTwo)); // 命令 1 + 失败 1
+        store.AddMessage(Msg("m2", "agent_b", now, """
+            {"audit":[{"tool":"work_write_file","text":"💾 a.txt","ok":true,"durationMs":2}]}
+            """));
+
+        var items = WorkAuditReport.Collect(store, null, 7, null, null, 100).Items;
+
+        var byAgent = WorkAuditReport.GroupTimeline(items, "agent");
+        Assert.Equal(2, byAgent.Count);
+        Assert.Equal("agent_a", byAgent[0].Key); // 总量降序：2 > 1
+        Assert.Equal(1, byAgent[0].Commands);
+        Assert.Equal(1, byAgent[0].Failed);
+        Assert.Equal(2, byAgent[0].Total);
+        Assert.Equal("agent_b", byAgent[1].Key);
+        Assert.Equal(1, byAgent[1].Writes);
+        Assert.Equal(1, byAgent[1].Total);
+        Assert.False(string.IsNullOrWhiteSpace(byAgent[0].Label));
+
+        var byGroup = WorkAuditReport.GroupTimeline(items, "group");
+        Assert.Single(byGroup);
+        Assert.Equal("g1", byGroup[0].Key);
+        Assert.Equal("市场推广", byGroup[0].Label);
+        Assert.Equal(3, byGroup[0].Total);
+    }
+
+    [Fact]
     public void Timeline_ClampsWindowToOneThroughNinetyDays()
     {
         Assert.Equal(7, WorkAuditReport.Timeline([], 0).Count); // 0 → 默认 7 天

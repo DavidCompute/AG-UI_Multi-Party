@@ -2489,6 +2489,7 @@ button { white-space: nowrap; }
 /* 工作区操作审计汇总（1.0.314）：摘要列截断显示，完整内容看 title */
 .admin-table td.wa-text { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 审计看板（1.0.321）：按天堆叠柱图，纯 HTML/CSS */
+.wa-chart-switch { display: flex; gap: 6px; margin: 8px 0 0; }
 .wa-chart { margin: 10px 0 6px; }
 .wa-chart:empty { display: none; }
 .wa-chart-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 6px; }

@@ -41,6 +41,50 @@ public static class WorkAuditReport
         public int Total => Commands + Writes + Reads + Listings + Other + Failed;
     }
 
+    /// <summary>看板的一根柱（1.0.322）：按天 / 按员工 / 按知聚都归一到这个形状。</summary>
+    public sealed record TimelineBucket(
+        string Key, string Label, int Commands, int Writes, int Reads, int Listings, int Other, int Failed)
+    {
+        public int Total => Commands + Writes + Reads + Listings + Other + Failed;
+    }
+
+    /// <summary>按「员工 / 知聚」聚合工具分布（1.0.322）：总量降序，失败单独成段。</summary>
+    public static IReadOnlyList<TimelineBucket> GroupTimeline(IReadOnlyList<Entry> items, string dimension)
+    {
+        var byAgent = string.Equals(dimension, "agent", StringComparison.OrdinalIgnoreCase);
+        var map = new Dictionary<string, (string? Label, int C, int W, int R, int L, int O, int F)>(StringComparer.Ordinal);
+        foreach (var e in items)
+        {
+            var key = byAgent ? e.AgentId : e.GroupId;
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            if (!map.TryGetValue(key, out var b))
+                b.Label = byAgent
+                    ? (string.IsNullOrWhiteSpace(e.AgentName) ? e.AgentId : e.AgentName)
+                    : (string.IsNullOrWhiteSpace(e.GroupName) ? e.GroupId : e.GroupName);
+            if (!e.Ok)
+            {
+                b.F++;
+                map[key] = b;
+                continue;
+            }
+            switch (e.Tool)
+            {
+                case "work_run_command": b.C++; break;
+                case "work_write_file": b.W++; break;
+                case "work_read_file": b.R++; break;
+                case "work_list_dir": b.L++; break;
+                default: b.O++; break;
+            }
+            map[key] = b;
+        }
+        return map
+            .Select((kv) => new TimelineBucket(kv.Key, kv.Value.Label ?? kv.Key,
+                kv.Value.C, kv.Value.W, kv.Value.R, kv.Value.L, kv.Value.O, kv.Value.F))
+            .OrderByDescending((x) => x.Total)
+            .ThenBy((x) => x.Label, StringComparer.Ordinal)
+            .ToList();
+    }
+
     /// <summary>把审计行按 UTC 日期分桶（缺失的日期补 0），供看板画柱状图。</summary>
     public static IReadOnlyList<TimelineDay> Timeline(IReadOnlyList<Entry> items, int days)
     {
