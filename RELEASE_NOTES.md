@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.323 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.323 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.324 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.324 Release Notes (current Windows desktop release)
+
+**版本说明**：**折线可关 + 柱体可下钻 + 上传有进度**——失败率折线可一键隐藏；点柱体直接筛出对应的审计明细；大文件夹上传能看到进度。
+**Version note**: **Toggleable rate line, drill-down columns, upload progress** — hide the failure-rate line with one click, drill into a column for its audit rows, and watch progress while uploading a folder.
+
+## 变更
+# Changes
+
+中文：
+- **失败率开关**：看板开关旁新增「失败率」勾选，关闭后不画折线 / 不显示悬停百分比（图例同步隐藏）；选择写入 `localStorage`（`agui.waShowRate`），重开面板保持。
+- **柱体下钻**：`drillWorkAudit()` 按维度分流——员工 / 知聚维度回填 `waAgent` / `waGroup` 下拉（选项不存在时自动补一行），按天维度设置 `waDate` 并显示可清除的「筛选 {date}」chip；再点同一根即取消。后端 `GET /work-audits` 新增 `date=YYYY-MM-DD`（UTC 日界，`WorkAuditReport.FilterByDate()` 仅筛展示行，facets 仍按完整窗口统计）。
+- **上传进度**：`uploadWorkspaceEntries()` 逐文件推进进度条（`已完成/总数 · 百分比 · 当前文件`），结束后 1.2 秒收起；拖拽与选择框上传共用。
+
+English:
+- **Rate toggle**: a **Failure rate** checkbox next to the chart switch hides the polyline and the tooltip percentage (legend follows); the choice persists in `localStorage` (`agui.waShowRate`).
+- **Column drill-down**: `drillWorkAudit()` routes by dimension — agent / circle modes fill the `waAgent` / `waGroup` dropdowns (adding an option when the facet list lacks it), day mode sets `waDate` and shows a clearable "Filtered to {date}" chip; clicking the same column again clears it. The backend's `GET /work-audits` accepts `date=YYYY-MM-DD` (UTC day bounds; `WorkAuditReport.FilterByDate()` filters display rows only, leaving facets on the full window).
+- **Upload progress**: `uploadWorkspaceEntries()` advances a progress bar per file (`done/total · percentage · current name`) and hides it 1.2 s after the batch; drag-drop and the picker share the same path.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（失败率开关 / 柱体下钻 / 上传进度）、§8.2（页签表补 `date=`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.324。
+English: `docs/user-guide.md` / `en.md` §3.13 (rate toggle / drill-down / upload progress), §8.2 (tab table gains `date=`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.324.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2232，missing 0**；新增 `FilterByDate_KeepsOnlyThatUtcDay`；Docker 冒烟验证 `date` 参数回显与非法值不误删、看板 / CSV 不受影响；全量 `dotnet test` **1919 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2232, missing 0**; `FilterByDate_KeepsOnlyThatUtcDay` is new; the Docker smoke verifies the `date` echo, that an invalid date drops nothing, and that the chart / CSV are unaffected; the full `dotnet test` run passes **1919 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.323 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.323 Release Notes (historical)
 
 **版本说明**：**看板看失败率 + 拖拽整目录上传 + 看板可导出**——柱图叠加失败率折线；文件 / 文件夹可以直接拖进工作区，并可选「不覆盖同名」；看板能按当前维度导出 CSV。
 **Version note**: **Failure rate on the chart, drag-and-drop folders, chart export** — the chart overlays a failure-rate line; files and folders drop straight into a workspace with an optional no-overwrite rule; the chart exports the current dimension as CSV.

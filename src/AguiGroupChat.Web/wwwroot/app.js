@@ -10482,13 +10482,17 @@ function highlightText(text, query) {
 let workAuditItems = [];
 let workAuditGrouped = [];
 let waChartBy = "day"; // day | agent | group（1.0.322）
+let waShowRate = true;  // 失败率折线开关（1.0.324）
+let waDate = "";        // 看板按天钻取的日期筛选（1.0.324）
+let waChartBuckets = [];
+const WA_RATE_PREF_KEY = "agui.waShowRate";
 
 function workAuditQuery() {
   const days = Number($("waDays")?.value) || 7;
   const q = ($("waQuery")?.value || "").trim();
   const groupId = $("waGroup")?.value || "";
   const agentId = $("waAgent")?.value || "";
-  return { days, q, groupId, agentId };
+  return { days, q, groupId, agentId, date: waDate };
 }
 
 /** 用 facets 重建下拉项（保留当前选中；选项不在了则回落到「全部」）。 */
@@ -10506,13 +10510,14 @@ async function loadWorkAudits() {
   const rows = $("adminWorkAuditRows");
   const meta = $("waMeta");
   if (!rows) return;
-  const { days, q, groupId, agentId } = workAuditQuery();
+  const { days, q, groupId, agentId, date } = workAuditQuery();
   rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
     let url = `/ag-ui/admin/work-audits?days=${days}&limit=300`;
     if (q) url += "&q=" + encodeURIComponent(q);
     if (groupId) url += "&groupId=" + encodeURIComponent(groupId);
     if (agentId) url += "&agentId=" + encodeURIComponent(agentId);
+    if (date) url += "&date=" + encodeURIComponent(date);
     const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d) {
@@ -10546,9 +10551,55 @@ async function loadWorkAudits() {
         + (d.truncated ? " · " + t("admin.waTruncated") : "");
     }
     renderWorkAuditRows();
+    renderWaDateChip();
   } catch (ex) {
     rows.innerHTML = `<tr><td colspan="7" class="admin-empty">${t("admin.loadFail", { err: escapeHtml(ex.message) })}</td></tr>`;
   }
+}
+
+/** 看板按天钻取的日期筛选提示（1.0.324）：只有按天维度才会出现。 */
+function renderWaDateChip() {
+  const chip = $("waDateChip");
+  if (!chip) return;
+  if (!waDate) {
+    chip.classList.add("hidden");
+    chip.innerHTML = "";
+    return;
+  }
+  chip.classList.remove("hidden");
+  chip.innerHTML = `${escapeHtml(t("admin.waFilterDay", { date: waDate }))}
+    <button class="notif-chip-x" type="button" data-wa-date-clear="1">×</button>`;
+  chip.querySelector("[data-wa-date-clear]").onclick = () => setWaDate("");
+}
+
+/** 设置 / 清除按天筛选（1.0.324）。 */
+function setWaDate(date) {
+  waDate = date || "";
+  renderWaDateChip();
+  loadWorkAudits();
+}
+
+function ensureSelectOption(sel, value, label) {
+  if (!value) return;
+  if ([...sel.options].some((o) => o.value === value)) return;
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = label || value;
+  sel.appendChild(opt);
+}
+
+/** 点柱体下钻（1.0.324）：员工 / 知聚复用下拉筛选，按天用日期筛选；再点同一根取消。 */
+function drillWorkAudit(bucket) {
+  if (!bucket || !bucket.key) return;
+  if (waChartBy === "agent" || waChartBy === "group") {
+    const sel = $(waChartBy === "agent" ? "waAgent" : "waGroup");
+    if (!sel) return;
+    ensureSelectOption(sel, bucket.key, bucket.label || bucket.key);
+    sel.value = sel.value === bucket.key ? "" : bucket.key;
+    loadWorkAudits();
+    return;
+  }
+  setWaDate(waDate === bucket.key ? "" : bucket.key);
 }
 
 /** 审计看板（1.0.321；1.0.322 支持按员工 / 知聚）：堆叠柱图，纯 HTML/CSS，不引入图表库。 */
@@ -10582,13 +10633,16 @@ const WA_CHART_SEGS = [
 function renderWorkAuditChart(buckets) {
   const box = $("waChart");
   if (!box) return;
+  waChartBuckets = buckets;
   const totalOf = (d) => WA_CHART_SEGS.reduce((s, [k]) => s + (Number(d[k]) || 0), 0);
   const totals = buckets.map(totalOf);
   const max = Math.max(1, ...totals);
   const rates = buckets.map((d, i) => (totals[i] > 0 ? (Number(d.failed) || 0) / totals[i] * 100 : null));
   const legend = WA_CHART_SEGS.map(([, cls, key]) =>
     `<span class="wa-chart-key"><i class="${cls}"></i>${escapeHtml(t(key))}</span>`).join("")
-    + `<span class="wa-chart-key"><i class="wa-line-key"></i>${escapeHtml(t("admin.waFailureRate"))}</span>`;
+    + (waShowRate
+      ? `<span class="wa-chart-key"><i class="wa-line-key"></i>${escapeHtml(t("admin.waFailureRate"))}</span>`
+      : "");
   const cols = buckets.map((d, i) => {
     const total = totals[i];
     const segs = WA_CHART_SEGS
@@ -10598,24 +10652,26 @@ function renderWorkAuditChart(buckets) {
     const h = total > 0 ? Math.max(4, total / max * 100) : 0;
     const full = String(d.label || d.key || "");
     const label = full.length > 10 ? full.slice(0, 9) + "…" : full;
-    const rate = rates[i] === null ? "" : ` · ⚠ ${rates[i].toFixed(0)}%`;
-    return `<div class="wa-chart-col" title="${escapeHtml(full)} · ${total}${rate}">
+    const rate = (waShowRate && rates[i] !== null) ? ` · ⚠ ${rates[i].toFixed(0)}%` : "";
+    return `<div class="wa-chart-col wa-chart-clickable" data-wa-i="${i}" title="${escapeHtml(full)} · ${total}${rate} · ${escapeHtml(t("admin.waDrillHint"))}">
       <div class="wa-chart-bar" style="height:${h.toFixed(1)}%">${segs}</div>
       <span class="wa-chart-day">${escapeHtml(label)}</span>
     </div>`;
   }).join("");
 
-  // 失败率折线（1.0.323）：空桶断开成多段，避免把 0 当成真实失败率
+  // 失败率折线（1.0.323；1.0.324 可关）：空桶断开成多段，避免把 0 当成真实失败率
   const runs = [];
   let run = [];
-  rates.forEach((r, i) => {
-    if (r === null) {
-      if (run.length) { runs.push(run); run = []; }
-      return;
-    }
-    run.push(`${(((i + 0.5) / buckets.length) * 100).toFixed(2)},${(100 - r).toFixed(2)}`);
-  });
-  if (run.length) runs.push(run);
+  if (waShowRate) {
+    rates.forEach((r, i) => {
+      if (r === null) {
+        if (run.length) { runs.push(run); run = []; }
+        return;
+      }
+      run.push(`${(((i + 0.5) / buckets.length) * 100).toFixed(2)},${(100 - r).toFixed(2)}`);
+    });
+    if (run.length) runs.push(run);
+  }
   const lines = runs.filter((r) => r.length >= 2)
     .map((r) => `<polyline points="${r.join(" ")}" />`).join("");
   const svg = lines
@@ -10629,6 +10685,9 @@ function renderWorkAuditChart(buckets) {
   box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}
       <span class="wa-chart-legend">${legend}</span></div>
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
+  box.querySelectorAll("[data-wa-i]").forEach((el) => {
+    el.onclick = () => drillWorkAudit(waChartBuckets[Number(el.dataset.waI)]);
+  });
 }
 
 /** 看板 CSV（1.0.323）：与当前维度 / 筛选同口径，一行一个桶。 */
@@ -10827,13 +10886,28 @@ async function uploadWorkspaceFiles(input) {
   })));
 }
 
-/** 上传一组 {file, rel}（1.0.323）：rel 是相对当前目录的路径（文件夹拖拽会带子路径）。 */
+/** 上传一组 {file, rel}（1.0.323；1.0.324 加进度）：rel 是相对当前目录的路径（文件夹拖拽会带子路径）。 */
 async function uploadWorkspaceEntries(agentId, entries) {
   if (!agentId || !entries.length) return;
   const overwrite = !!$("wsOverwriteToggle")?.checked;
+  const total = entries.length;
   let ok = 0;
   let skipped = 0;
   let fail = 0;
+  let done = 0;
+  const prog = $("wsUploadProgress");
+  const fill = $("wsUploadFill");
+  const text = $("wsUploadText");
+  const paint = (name) => {
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    if (fill) fill.style.width = pct + "%";
+    if (text) {
+      const prefix = t("admin.wsUploading", { done: String(done), total: String(total) });
+      text.textContent = prefix + (name ? " · " + name : "");
+    }
+  };
+  if (prog) prog.classList.remove("hidden");
+  paint("");
   for (const it of entries) {
     try {
       const target = wsJoinPath(adminWsCurrentPath, it.rel);
@@ -10850,10 +10924,13 @@ async function uploadWorkspaceEntries(agentId, entries) {
       else if (res.ok && d && d.ok) ok++;
       else fail++;
     } catch { fail++; }
+    done++;
+    paint(it.rel);
   }
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
   if (skipped) toast(t("admin.wsUploadSkipped", { count: skipped }));
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
+  if (prog) setTimeout(() => prog.classList.add("hidden"), 1200);
   browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
 }
 
@@ -16727,6 +16804,19 @@ function init() {
     $("waChartSwitch").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
     loadWorkAuditTimeline();
   });
+  // 失败率折线开关（1.0.324）：记住用户选择
+  try {
+    if (localStorage.getItem(WA_RATE_PREF_KEY) === "0") waShowRate = false;
+  } catch { /* 隐私模式 */ }
+  const rateToggle = $("waRateToggle");
+  if (rateToggle) {
+    rateToggle.checked = waShowRate;
+    rateToggle.onchange = () => {
+      waShowRate = !!rateToggle.checked;
+      try { localStorage.setItem(WA_RATE_PREF_KEY, waShowRate ? "1" : "0"); } catch { /* 忽略 */ }
+      renderWorkAuditChart(waChartBuckets);
+    };
+  }
   $("adminTabPerf").onclick = () => switchAdminTab("perf");
   $("adminTabEval").onclick = () => switchAdminTab("eval");
   bindEvalConsole();

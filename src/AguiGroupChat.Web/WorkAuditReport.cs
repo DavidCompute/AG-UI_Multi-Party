@@ -262,6 +262,17 @@ public static class WorkAuditReport
         return (rows, scanned);
     }
 
+    /// <summary>按天钻取（1.0.324）：保留落在某个 UTC 日期内的审计行；date 为空 / 格式不合法时原样返回。</summary>
+    public static IReadOnlyList<Entry> FilterByDate(IReadOnlyList<Entry> items, string? date)
+    {
+        if (string.IsNullOrWhiteSpace(date)) return items;
+        if (!DateTime.TryParseExact(date.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var day)) return items;
+        var from = new DateTimeOffset(DateTime.SpecifyKind(day, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        var to = from + 86_400_000L;
+        return items.Where((e) => e.At >= from && e.At < to).ToList();
+    }
+
     /// <summary>导出 CSV（带 BOM，Excel 直接打开不乱码）。</summary>
     public static string ToCsv(IReadOnlyList<Entry> items)
     {

@@ -903,15 +903,17 @@ public static class AdminApi
 
         // 工作区操作审计汇总（1.0.314；1.0.315 起读按月归档）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
         // 归档服务用 GetService 可选解析：轻量宿主（测试 / 嵌入式）没注册时自动退回扫消息。
-        root.MapGet("/work-audits", (int? days, string? agentId, string? groupId, string? q, int? limit,
+        root.MapGet("/work-audits", (int? days, string? agentId, string? groupId, string? q, int? limit, string? date,
             GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 days ?? 7, agentId, groupId, q, limit ?? 500);
+            // 看板钻取（1.0.324）：只筛展示行，facets 仍按完整窗口统计
+            var items = WorkAuditReport.FilterByDate(r.Items, date);
             return Results.Ok(new
             {
-                items = r.Items.Select(e => new
+                items = items.Select(e => new
                 {
                     e.GroupId, e.GroupName, e.AgentId, e.AgentName, e.MessageId, e.TopicId, e.At,
                     e.Tool, e.Ok, e.DurationMs, e.Text,
@@ -922,6 +924,7 @@ public static class AdminApi
                 groups = r.Groups,
                 agents = r.Agents,
                 days = Math.Clamp(days ?? 7, 1, 90),
+                date = string.IsNullOrWhiteSpace(date) ? null : date,
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

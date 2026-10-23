@@ -2503,6 +2503,14 @@ button { white-space: nowrap; }
 .ws-overwrite { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .ws-overwrite input { margin: 0; }
 .ws-drop-active { outline: 2px dashed var(--accent); outline-offset: -4px; background: rgba(79, 140, 255, 0.06); }
+/* 上传进度（1.0.324）：按文件粒度推进 */
+.ws-progress { position: relative; height: 20px; margin: 6px 0 4px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: rgba(127, 127, 127, 0.08); }
+.ws-progress-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); opacity: 0.25; transition: width 0.15s ease; }
+.ws-progress-text { position: relative; z-index: 1; display: block; font-size: 11px; line-height: 18px; padding: 0 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 看板下钻 / 日期筛选（1.0.324） */
+.wa-chart-clickable { cursor: pointer; }
+.wa-chart-clickable:hover .wa-chart-day { color: var(--accent); }
+.wa-date-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
 .wa-chart-col { flex: 1 0 12px; min-width: 12px; height: 100%; display: grid; grid-template-rows: 1fr auto; align-items: end; }
 .wa-chart-col:hover .wa-chart-bar { filter: brightness(1.15); }
 .wa-chart-bar { width: 100%; max-width: 26px; margin: 0 auto; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; }

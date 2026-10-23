@@ -2,6 +2,7 @@ using AguiGroupChat.Hub.Models;
 using AguiGroupChat.Hub.Storage;
 using AguiGroupChat.Web;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Globalization;
 using Xunit;
 
 namespace AguiGroupChat.Hub.Tests;
@@ -159,6 +160,25 @@ public sealed class WorkAuditReportTests
         Assert.Equal("g1", byGroup[0].Key);
         Assert.Equal("市场推广", byGroup[0].Label);
         Assert.Equal(3, byGroup[0].Total);
+    }
+
+    [Fact]
+    public void FilterByDate_KeepsOnlyThatUtcDay()
+    {
+        var now = DateTimeOffset.UtcNow;
+        WorkAuditReport.Entry Row(string id, DateTimeOffset at) => new(
+            "g1", "市场推广", "agent_a", "agent_a", id, "main", at.ToUnixTimeMilliseconds(),
+            "work_run_command", true, 1, "x");
+        var items = new List<WorkAuditReport.Entry> { Row("m1", now), Row("m2", now.AddDays(-1)) };
+        var day = now.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var filtered = WorkAuditReport.FilterByDate(items, day);
+
+        Assert.Single(filtered);
+        Assert.Equal("m1", filtered[0].MessageId);
+        // 空值 / 格式不合法：原样返回（不误删数据）
+        Assert.Same(items, WorkAuditReport.FilterByDate(items, null));
+        Assert.Same(items, WorkAuditReport.FilterByDate(items, "not-a-date"));
     }
 
     [Fact]

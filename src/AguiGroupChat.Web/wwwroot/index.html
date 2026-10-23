@@ -2400,6 +2400,11 @@
             <button id="wsNewDirBtn" class="chip-btn" type="button" data-i18n="admin.wsNewDir">＋ 新建目录</button>
             <button id="wsFilesCloseBtn" class="chip-btn" type="button" data-i18n="admin.wsFilesClose">≡ 收起</button>
           </div>
+          <!-- 上传进度（1.0.324）：按文件粒度推进，大文件夹拖拽时能看到进展 -->
+          <div id="wsUploadProgress" class="ws-progress hidden">
+            <div id="wsUploadFill" class="ws-progress-fill"></div>
+            <span id="wsUploadText" class="ws-progress-text"></span>
+          </div>
           <div id="adminWsBreadcrumb" class="ws-breadcrumb"></div>
           <div class="admin-table-wrap">
             <table class="admin-table">
@@ -2452,6 +2457,8 @@
           <button class="chip-btn on" type="button" data-wa-by="day" data-i18n="admin.waByDay">按天</button>
           <button class="chip-btn" type="button" data-wa-by="agent" data-i18n="admin.waByAgent">按员工</button>
           <button class="chip-btn" type="button" data-wa-by="group" data-i18n="admin.waByGroup">按知聚</button>
+          <label class="ws-overwrite"><input id="waRateToggle" type="checkbox" checked /> <span data-i18n="admin.waFailureRate">失败率</span></label>
+          <span id="waDateChip" class="wa-date-chip hidden"></span>
         </div>
         <div id="waChart" class="wa-chart"></div>
         <div class="admin-table-wrap">
