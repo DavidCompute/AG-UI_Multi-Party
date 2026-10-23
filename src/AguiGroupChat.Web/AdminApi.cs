@@ -712,8 +712,8 @@ public static class AdminApi
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 归档占用与手动清理（1.0.319）
-        // 审计看板（1.0.321；1.0.322 增加按员工 / 知聚维度）
-        root.MapGet("/work-audits/timeline", (int? days, string? agentId, string? groupId, string? q, string? by,
+        // 审计看板（1.0.321；1.0.322 增加按员工 / 知聚维度；1.0.326 加按工具；1.0.327 支持叠加员工）
+        root.MapGet("/work-audits/timeline", (int? days, string? agentId, string? groupId, string? q, string? by, string? stack,
             GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
@@ -721,7 +721,17 @@ public static class AdminApi
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 clamped, agentId, groupId, q, 5000);
             var dim = NormalizeTimelineDim(by);
-            return Results.Ok(new { by = dim, window = clamped, buckets = TimelineBuckets(r.Items, clamped, dim) });
+            if (string.Equals(stack, "agent", StringComparison.OrdinalIgnoreCase) && dim != "tool" && dim != "agent")
+            {
+                return Results.Ok(new
+                {
+                    by = dim,
+                    stack = "agent",
+                    window = clamped,
+                    buckets = WorkAuditReport.StackByAgent(r.Items, clamped, dim),
+                });
+            }
+            return Results.Ok(new { by = dim, stack = (string?)null, window = clamped, buckets = TimelineBuckets(r.Items, clamped, dim) });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 看板导出 CSV（1.0.323）：与当前维度 / 筛选同一口径，一行一个桶。
@@ -899,6 +909,96 @@ public static class AdminApi
             audit.Record("admin.workspaces.upload", me, auth.GetUser(me)?.Username, targetType: "workspace", targetId: agentId,
                 detail: $"上传文件 {saved}（{file.Length} 字节）");
             return Results.Ok(new { ok = true, agentId, path = saved, bytes = file.Length });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 断点续传（1.0.327）：先问已收到多少字节，再从偏移继续分片，满 total 后合并为正式文件。
+        root.MapGet("/workspaces/{agentId}/upload-offset", (string agentId, string? path, long? size, AgentOptions options,
+            Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            if (string.IsNullOrWhiteSpace(path)) return Results.BadRequest(new { error = "missing_path" });
+            if (!WorkspaceMaintenance.TryResolveTarget(dir, path, out var full))
+                return Results.BadRequest(new { error = "invalid_path" });
+            if (Directory.Exists(full)) return Results.BadRequest(new { error = "path_is_directory" });
+            var expected = size ?? 0;
+            if (expected <= 0) return Results.BadRequest(new { error = "missing_size" });
+            if (expected > MaxUploadBytes) return Results.BadRequest(new { error = "file_too_large" });
+
+            var part = UploadPartPath(env.ContentRootPath, agentId, path!);
+            CleanupUploadParts(Path.GetDirectoryName(part), TimeSpan.FromDays(2));
+            var complete = File.Exists(full) && new FileInfo(full).Length == expected;
+            long offset = complete ? expected : (File.Exists(part) ? new FileInfo(part).Length : 0);
+            if (offset > expected) // 残留的更大分片：丢弃重传
+            {
+                try { File.Delete(part); } catch { /* 忽略 */ }
+                offset = 0;
+            }
+            return Results.Ok(new { offset, complete, bytes = expected });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        root.MapPost("/workspaces/{agentId}/upload-chunk", async (string agentId, string? path, long? offset, long? total,
+            bool? overwrite, HttpContext ctx, AgentOptions options, AuthService auth,
+            Microsoft.Extensions.Hosting.IHostEnvironment env, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+            if (string.IsNullOrWhiteSpace(path)) return Results.BadRequest(new { error = "missing_path" });
+            if (!WorkspaceMaintenance.TryResolveTarget(dir, path, out var full))
+                return Results.BadRequest(new { error = "invalid_path" });
+            if (Directory.Exists(full)) return Results.BadRequest(new { error = "path_is_directory" });
+            var expected = total ?? 0;
+            if (expected <= 0) return Results.BadRequest(new { error = "missing_total" });
+            if (expected > MaxUploadBytes) return Results.BadRequest(new { error = "file_too_large" });
+            if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
+                return Results.BadRequest(new { error = "missing_file" });
+            var file = ctx.Request.Form.Files[0];
+            if (file.Length <= 0) return Results.BadRequest(new { error = "empty_file" });
+
+            var part = UploadPartPath(env.ContentRootPath, agentId, path!);
+            var partDir = Path.GetDirectoryName(part)!;
+            Directory.CreateDirectory(partDir);
+            CleanupUploadParts(partDir, TimeSpan.FromDays(2));
+
+            var off = Math.Max(0, offset ?? 0);
+            var existing = File.Exists(part) ? new FileInfo(part).Length : 0;
+            if (off == 0)
+            {
+                try { File.Delete(part); } catch { /* 忽略 */ }
+                existing = 0;
+            }
+            // 偏移对不上就让客户端按服务端真实偏移重传（避免静默拼错）
+            if (existing != off) return Results.Conflict(new { error = "offset_mismatch", offset = existing });
+
+            await using (var fs = new FileStream(part, FileMode.Append, FileAccess.Write, FileShare.None))
+            await using (var src = file.OpenReadStream())
+            {
+                await src.CopyToAsync(fs, ctx.RequestAborted);
+            }
+            var newLen = new FileInfo(part).Length;
+            if (newLen > expected)
+            {
+                try { File.Delete(part); } catch { /* 忽略 */ }
+                return Results.BadRequest(new { error = "file_too_large" });
+            }
+            if (newLen < expected) return Results.Ok(new { ok = true, partial = true, offset = newLen });
+
+            var savedRel = Path.GetRelativePath(dir, full).Replace('\\', '/');
+            if (overwrite == false && File.Exists(full))
+            {
+                try { File.Delete(part); } catch { /* 忽略 */ }
+                return Results.Ok(new { ok = true, skipped = true, agentId, path = savedRel });
+            }
+            var parent = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+            File.Move(part, full, overwrite: true);
+
+            var me = WebIdentity.UserId(ctx)!;
+            audit.Record("admin.workspaces.upload", me, auth.GetUser(me)?.Username, targetType: "workspace", targetId: agentId,
+                detail: $"上传文件 {savedRel}（{expected} 字节，分片续传）");
+            return Results.Ok(new { ok = true, agentId, path = savedRel, bytes = expected });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 工作区操作审计汇总（1.0.314；1.0.315 起读按月归档）：按时间 / 员工 / 关键词查最近 N 天的 work_* 调用，可导出 CSV。
@@ -1417,6 +1517,33 @@ public static class AdminApi
             : dim == "tool"
                 ? WorkAuditReport.ToolTimeline(items)
                 : WorkAuditReport.GroupTimeline(items, dim);
+
+    /// <summary>上传总大小上限（单文件 / 分片累计，1.0.327）。</summary>
+    private const long MaxUploadBytes = 200L * 1024 * 1024;
+
+    /// <summary>分片临时文件路径（1.0.327）：按 agentId + 相对路径哈希存放，避免工作区里出现 .part。</summary>
+    private static string UploadPartPath(string contentRoot, string agentId, string rel)
+    {
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(rel))).ToLowerInvariant()[..32];
+        return Path.Combine(contentRoot, "data", "upload-parts", agentId, hash + ".part");
+    }
+
+    /// <summary>清理过期的分片残留（1.0.327）：只在用到分片时顺手扫一遍该员工的目录。</summary>
+    private static void CleanupUploadParts(string? partDir, TimeSpan maxAge)
+    {
+        if (string.IsNullOrWhiteSpace(partDir)) return;
+        try
+        {
+            if (!Directory.Exists(partDir)) return;
+            var cutoff = DateTime.UtcNow - maxAge;
+            foreach (var f in Directory.EnumerateFiles(partDir, "*.part"))
+            {
+                try { if (File.GetLastWriteTimeUtc(f) < cutoff) File.Delete(f); } catch { /* 忽略单个 */ }
+            }
+        }
+        catch { /* 目录不可读：忽略 */ }
+    }
 
     /// <summary>往批量下载 ZIP 里写一个文件（1.0.322）：超出总上限时返回错误码，否则返回 null。</summary>
     private static string? TryAddZipEntry(System.IO.Compression.ZipArchive zip, string full, string rel,

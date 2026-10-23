@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.326 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.326 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.327 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.327 Release Notes (current Windows desktop release)
+
+**版本说明**：**大文件能续传 + 看板能拆员工 + 视图可携带**——超大附件断点续传（断网 / 刷新也不重传已传字节）；按天 / 按知聚的柱体可按员工拆段；筛选视图可导出再导入。
+**Version note**: **Resumable uploads, per-agent stacking, portable views** — large uploads survive interruptions, day / circle columns can split by agent, and saved views travel as JSON.
+
+## 变更
+# Changes
+
+中文：
+- **断点续传**：新增 `GET …/upload-offset`（返回已收字节 / 是否已完成）与 `POST …/upload-chunk`（按 `offset` 追写，满 `total` 合并；偏移不符返 `409 {offset}`）。分片存 `data/upload-parts/<agentId>/<hash>.part`，2 天过期自动清理；客户端 >1 MB 走分片，进度按字节计算。
+- **看板叠加员工**：`WorkAuditReport.StackByAgent()` 把按天 / 按知聚的每一根柱再按员工拆段（`stack=agent`，按工具维度忽略）；前端新增「叠加员工」开关（记忆选择），前 8 名员工分配颜色、其余归「其他」，图例与失败率折线同步。
+- **视图导入导出**：`⤓ 导出视图` 生成 `work-audit-views.json`（`{version:1,views:[…]}`）；`⤒ 导入视图` 兼容裸数组，同名覆盖、上限 20，导入后立即生效。
+
+English:
+- **Resumable uploads**: new `GET …/upload-offset` (bytes stored plus completion) and `POST …/upload-chunk` (append by `offset`, merge at `total`; a stale offset answers `409 {offset}`). Parts live under `data/upload-parts/<agentId>/<hash>.part` and expire after two days; files above 1 MB use the chunked path and progress is byte-based.
+- **Stack by agent**: `WorkAuditReport.StackByAgent()` splits each day / circle column by agent (`stack=agent`; ignored for the tool dimension); the UI adds a remembered **Stack by agent** toggle, colours the top 8 agents, folds the rest into "Other", and keeps the failure-rate line.
+- **View import / export**: **⤓ Export views** writes `work-audit-views.json` (`{version:1,views:[…]}`); **⤒ Import views** also accepts a bare array, overwrites by name, caps at 20 and applies immediately.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（断点续传 / 叠加员工 / 视图导入导出）、§8.2（页签表补 `upload-offset` / `upload-chunk` / `stack=agent`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.327。
+English: `docs/user-guide.md` / `en.md` §3.13 (resume / stacking / view portability), §8.2 (`upload-offset` / `upload-chunk` / `stack=agent`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.327.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2257，missing 0**；新增 `StackByAgent_SplitsEachDayByAgentAndKeepsEmptyDays`；Docker 冒烟验证 2.5 MB 三分片上传（位移对齐 / 409 自校正 / 最终内容逐字节一致 / `complete=true`）与 `stack=agent` 在 day / group / tool 三档的行为；全量 `dotnet test` **1922 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2257, missing 0**; `StackByAgent_SplitsEachDayByAgentAndKeepsEmptyDays` is new; the Docker smoke runs a 2.5 MB three-chunk upload (offset alignment, 409 self-correction, byte-identical result, `complete=true`) and checks `stack=agent` across day / group / tool; the full `dotnet test` run passes **1922 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.326 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.326 Release Notes (historical)
 
 **版本说明**：**看工具用量 + 筛选可存 + 失败可重试**——看板多了「按工具」维度；常用筛选组合能命名保存；上传失败项一键重传。
 **Version note**: **Tool-level chart, saved filter views, retryable uploads** — a fourth chart dimension by tool, named filter views, and one-click retry for failed uploads.

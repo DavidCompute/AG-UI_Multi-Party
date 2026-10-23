@@ -2464,6 +2464,9 @@
           </select>
           <button id="waViewSave" class="chip-btn" type="button" data-i18n="admin.waViewSave">＋ 保存视图</button>
           <button id="waViewDelete" class="chip-btn" type="button" data-i18n="admin.waViewDelete">🗑 删除视图</button>
+          <button id="waViewExport" class="chip-btn" type="button" data-i18n="admin.waViewExport">⤓ 导出视图</button>
+          <button id="waViewImport" class="chip-btn" type="button" data-i18n="admin.waViewImport">⤒ 导入视图</button>
+          <input id="waViewImportInput" type="file" accept="application/json,.json" class="hidden" />
           <span id="waStorage" class="form-hint"></span>
           <span id="waStorageTools" class="form-hint"></span>
           <button id="waSweepBtn" class="chip-btn" type="button" data-i18n="admin.waSweep">🧹 清理过期归档</button>
@@ -2476,6 +2479,7 @@
           <button class="chip-btn" type="button" data-wa-by="group" data-i18n="admin.waByGroup">按知聚</button>
           <button class="chip-btn" type="button" data-wa-by="tool" data-i18n="admin.waByTool">按工具</button>
           <label class="ws-overwrite"><input id="waRateToggle" type="checkbox" checked /> <span data-i18n="admin.waFailureRate">失败率</span></label>
+          <label class="ws-overwrite"><input id="waStackAgent" type="checkbox" /> <span data-i18n="admin.waStackAgent">叠加员工</span></label>
           <span id="waDateChip" class="wa-date-chip hidden"></span>
         </div>
         <div id="waChart" class="wa-chart"></div>

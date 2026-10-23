@@ -41,11 +41,73 @@ public static class WorkAuditReport
         public int Total => Commands + Writes + Reads + Listings + Other + Failed;
     }
 
-    /// <summary>看板的一根柱（1.0.322）：按天 / 按员工 / 按知聚都归一到这个形状。</summary>
+    /// <summary>看板的一根柱（1.0.322）：按天 / 按员工 / 按知聚 / 按工具都归一到这个形状。</summary>
     public sealed record TimelineBucket(
         string Key, string Label, int Commands, int Writes, int Reads, int Listings, int Other, int Failed)
     {
         public int Total => Commands + Writes + Reads + Listings + Other + Failed;
+    }
+
+    /// <summary>叠加段（1.0.327）：一根柱里某个员工的量。</summary>
+    public sealed record TimelinePart(string Key, string Label, int Total, int Failed);
+
+    /// <summary>按员工叠加的柱（1.0.327）：用于「按知聚 / 按天 × 叠加员工」的组合看板。</summary>
+    public sealed record StackBucket(string Key, string Label, int Total, int Failed, IReadOnlyList<TimelinePart> Parts);
+
+    /// <summary>维度聚合后，每根柱再按员工拆成段（1.0.327）。dim 只接受 day / group，其余回落到按天。</summary>
+    public static IReadOnlyList<StackBucket> StackByAgent(IReadOnlyList<Entry> items, int days, string dim)
+    {
+        var byDay = !string.Equals(dim, "group", StringComparison.OrdinalIgnoreCase);
+        var n = Math.Clamp(days <= 0 ? 7 : days, 1, 90);
+        var today = DateTimeOffset.UtcNow.UtcDateTime.Date;
+
+        // 先固定顺序（按天补零），再逐行累加
+        var order = new List<string>();
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+        var parts = new Dictionary<string, Dictionary<string, (string Label, int Total, int Failed)>>(StringComparer.Ordinal);
+
+        if (byDay)
+        {
+            for (var i = n - 1; i >= 0; i--)
+            {
+                var key = today.AddDays(-i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                order.Add(key);
+                labels[key] = key.Length > 5 ? key[5..] : key;
+                parts[key] = new Dictionary<string, (string, int, int)>(StringComparer.Ordinal);
+            }
+        }
+
+        foreach (var e in items)
+        {
+            var key = byDay
+                ? DateTimeOffset.FromUnixTimeMilliseconds(e.At).UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                : e.GroupId;
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            if (!parts.TryGetValue(key, out var bucket))
+            {
+                parts[key] = bucket = new Dictionary<string, (string, int, int)>(StringComparer.Ordinal);
+                order.Add(key);
+                labels[key] = byDay
+                    ? (key.Length > 5 ? key[5..] : key)
+                    : (string.IsNullOrWhiteSpace(e.GroupName) ? key : e.GroupName);
+            }
+            var agentKey = string.IsNullOrWhiteSpace(e.AgentId) ? "?" : e.AgentId;
+            var agentLabel = string.IsNullOrWhiteSpace(e.AgentName) ? agentKey : e.AgentName;
+            bucket.TryGetValue(agentKey, out var p);
+            if (string.IsNullOrEmpty(p.Label)) p.Label = agentLabel;
+            p.Total++;
+            if (!e.Ok) p.Failed++;
+            bucket[agentKey] = p;
+        }
+
+        return order.Select((key) =>
+        {
+            var list = parts[key].Select((kv) => new TimelinePart(kv.Key, kv.Value.Label ?? kv.Key, kv.Value.Total, kv.Value.Failed))
+                .OrderByDescending((p) => p.Total)
+                .ThenBy((p) => p.Label, StringComparer.Ordinal)
+                .ToList();
+            return new StackBucket(key, labels[key], list.Sum((p) => p.Total), list.Sum((p) => p.Failed), list);
+        }).ToList();
     }
 
     /// <summary>按「员工 / 知聚」聚合工具分布（1.0.322）：总量降序，失败单独成段。</summary>

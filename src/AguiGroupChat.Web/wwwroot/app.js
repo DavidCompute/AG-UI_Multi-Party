@@ -10487,9 +10487,12 @@ let workAuditItems = [];
 let workAuditGrouped = [];
 let waChartBy = "day"; // day | agent | group（1.0.322）
 let waShowRate = true;  // 失败率折线开关（1.0.324）
+let waChartStack = false; // 叠加员工开关（1.0.327）
+let waStackActive = false; // 当前看板数据是否已按员工拆分
 let waDate = "";        // 看板按天钻取的日期筛选（1.0.324）
 let waChartBuckets = [];
 const WA_RATE_PREF_KEY = "agui.waShowRate";
+const WA_STACK_PREF_KEY = "agui.waStackAgent";
 
 function workAuditQuery() {
   const days = Number($("waDays")?.value) || 7;
@@ -10705,6 +10708,8 @@ async function loadWorkAuditTimeline() {
   if (!box) return;
   const { days, q, groupId, agentId } = workAuditQuery();
   let url = `/ag-ui/admin/work-audits/timeline?days=${days}&by=${encodeURIComponent(waChartBy)}`;
+  const canStack = waChartStack && (waChartBy === "day" || waChartBy === "group");
+  if (canStack) url += "&stack=agent";
   if (q) url += "&q=" + encodeURIComponent(q);
   if (groupId) url += "&groupId=" + encodeURIComponent(groupId);
   if (agentId) url += "&agentId=" + encodeURIComponent(agentId);
@@ -10712,6 +10717,7 @@ async function loadWorkAuditTimeline() {
     const res = await fetch(url, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
     if (!res.ok || !d || !Array.isArray(d.buckets)) { box.innerHTML = ""; return; }
+    waStackActive = d.stack === "agent";
     renderWorkAuditChart(d.buckets);
   } catch {
     box.innerHTML = "";
@@ -10753,15 +10759,13 @@ function renderWorkAuditChart(buckets) {
   const box = $("waChart");
   if (!box) return;
   waChartBuckets = buckets;
+  if (waStackActive) { renderWorkAuditChartStacked(buckets); return; }
   const totalOf = (d) => WA_CHART_SEGS.reduce((s, [k]) => s + (Number(d[k]) || 0), 0);
   const totals = buckets.map(totalOf);
   const max = Math.max(1, ...totals);
   const rates = buckets.map((d, i) => (totals[i] > 0 ? (Number(d.failed) || 0) / totals[i] * 100 : null));
   // 当前下钻的柱体（1.0.325；1.0.326 加按工具）
-  const activeChartKey = waChartBy === "agent" ? ($("waAgent")?.value || "")
-    : waChartBy === "group" ? ($("waGroup")?.value || "")
-    : waChartBy === "tool" ? Object.keys(WA_TOOL_PARAM).find((k) => WA_TOOL_PARAM[k] === ($("waTool")?.value || "")) || ""
-    : (waDate || "");
+  const activeChartKey = waActiveChartKey();
   const legend = WA_CHART_SEGS.map(([, cls, key]) =>
     `<span class="wa-chart-key"><i class="${cls}"></i>${escapeHtml(t(key))}</span>`).join("")
     + (waShowRate
@@ -10785,23 +10789,7 @@ function renderWorkAuditChart(buckets) {
   }).join("");
 
   // 失败率折线（1.0.323；1.0.324 可关）：空桶断开成多段，避免把 0 当成真实失败率
-  const runs = [];
-  let run = [];
-  if (waShowRate) {
-    rates.forEach((r, i) => {
-      if (r === null) {
-        if (run.length) { runs.push(run); run = []; }
-        return;
-      }
-      run.push(`${(((i + 0.5) / buckets.length) * 100).toFixed(2)},${(100 - r).toFixed(2)}`);
-    });
-    if (run.length) runs.push(run);
-  }
-  const lines = runs.filter((r) => r.length >= 2)
-    .map((r) => `<polyline points="${r.join(" ")}" />`).join("");
-  const svg = lines
-    ? `<svg class="wa-chart-line" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>`
-    : "";
+  const svg = waRateLineSvg(rates);
 
   const empty = totals.every((x) => x === 0)
     ? `<div class="admin-empty">${escapeHtml(t("admin.waChartEmpty"))}</div>` : "";
@@ -10809,6 +10797,98 @@ function renderWorkAuditChart(buckets) {
     : waChartBy === "group" ? "admin.waChartTitleGroup"
     : waChartBy === "tool" ? "admin.waChartTitleTool" : "admin.waChartTitle";
   box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}
+      <span class="wa-chart-legend">${legend}</span></div>
+    <div class="wa-chart-body">${empty || svg + cols}</div>`;
+  box.querySelectorAll("[data-wa-i]").forEach((el) => {
+    el.onclick = () => drillWorkAudit(waChartBuckets[Number(el.dataset.waI)]);
+  });
+}
+
+/** 当前下钻的柱体 key（1.0.325；1.0.326 加按工具）。 */
+function waActiveChartKey() {
+  return waChartBy === "agent" ? ($("waAgent")?.value || "")
+    : waChartBy === "group" ? ($("waGroup")?.value || "")
+    : waChartBy === "tool" ? Object.keys(WA_TOOL_PARAM).find((k) => WA_TOOL_PARAM[k] === ($("waTool")?.value || "")) || ""
+    : (waDate || "");
+}
+
+/** 失败率折线 SVG（1.0.323；1.0.327 抽出来给叠加模式复用）：空桶断开。 */
+function waRateLineSvg(rates) {
+  if (!waShowRate || !rates.length) return "";
+  const runs = [];
+  let run = [];
+  rates.forEach((r, i) => {
+    if (r === null) {
+      if (run.length) { runs.push(run); run = []; }
+      return;
+    }
+    run.push(`${(((i + 0.5) / rates.length) * 100).toFixed(2)},${(100 - r).toFixed(2)}`);
+  });
+  if (run.length) runs.push(run);
+  const lines = runs.filter((r) => r.length >= 2)
+    .map((r) => `<polyline points="${r.join(" ")}" />`).join("");
+  return lines ? `<svg class="wa-chart-line" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>` : "";
+}
+
+const WA_PART_COLORS = ["#6c8cff", "#4cc38a", "#8e7cf0", "#d0a53c", "#3aa6b9", "#e07a5f", "#b07cf0", "#7d8794"];
+
+/** 按员工叠加的看板（1.0.327）：每根柱按员工分段，颜色按员工总量排序分配。 */
+function renderWorkAuditChartStacked(buckets) {
+  const box = $("waChart");
+  if (!box) return;
+  const totalOf = (b) => Number(b.total) || (b.parts || []).reduce((s, p) => s + (Number(p.total) || 0), 0);
+  const totals = buckets.map(totalOf);
+  const max = Math.max(1, ...totals);
+  const rates = buckets.map((b, i) => (totals[i] > 0 ? (Number(b.failed) || 0) / totals[i] * 100 : null));
+  const activeChartKey = waActiveChartKey();
+  const otherKey = "\u0000other";
+  const otherLabel = t("admin.waSegOther");
+
+  // 员工总量排序：前 8 名占色，其余归「其他」
+  const sums = new Map();
+  for (const b of buckets) {
+    for (const p of (b.parts || [])) {
+      const label = String(p.label || p.key || "");
+      sums.set(label, (sums.get(label) || 0) + (Number(p.total) || 0));
+    }
+  }
+  const top = [...sums.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 8);
+  const colorOf = (label) => {
+    const i = top.indexOf(label);
+    return i >= 0 ? WA_PART_COLORS[i % WA_PART_COLORS.length] : "#7d8794";
+  };
+  const legend = top.map((l) => `<span class="wa-chart-key"><i style="background:${colorOf(l)}"></i>${escapeHtml(l)}</span>`).join("")
+    + (sums.size > top.length ? `<span class="wa-chart-key"><i style="background:#7d8794"></i>${escapeHtml(otherLabel)}</span>` : "")
+    + (waShowRate ? `<span class="wa-chart-key"><i class="wa-line-key"></i>${escapeHtml(t("admin.waFailureRate"))}</span>` : "");
+
+  const cols = buckets.map((b, i) => {
+    const total = totals[i];
+    const agg = new Map();
+    for (const p of (b.parts || [])) {
+      const label = String(p.label || p.key || "");
+      const key = top.includes(label) ? label : otherKey;
+      agg.set(key, (agg.get(key) || 0) + (Number(p.total) || 0));
+    }
+    const segs = [...agg.entries()].sort((a, b2) => b2[1] - a[1]).map(([key, v]) => {
+      const color = key === otherKey ? "#7d8794" : colorOf(key);
+      return `<i style="background:${color};height:${(v / total * 100).toFixed(1)}%"></i>`;
+    }).join("");
+    const h = total > 0 ? Math.max(4, total / max * 100) : 0;
+    const full = String(b.label || b.key || "");
+    const label = full.length > 10 ? full.slice(0, 9) + "…" : full;
+    const rate = (waShowRate && rates[i] !== null) ? ` · ⚠ ${rates[i].toFixed(0)}%` : "";
+    const active = activeChartKey && b.key === activeChartKey ? " wa-chart-col-active" : "";
+    return `<div class="wa-chart-col wa-chart-clickable${active}" data-wa-i="${i}" title="${escapeHtml(full)} · ${total}${rate} · ${escapeHtml(t("admin.waDrillHint"))}">
+      <div class="wa-chart-bar" style="height:${h.toFixed(1)}%">${segs}</div>
+      <span class="wa-chart-day">${escapeHtml(label)}</span>
+    </div>`;
+  }).join("");
+
+  const svg = waRateLineSvg(rates);
+  const empty = totals.every((x) => x === 0)
+    ? `<div class="admin-empty">${escapeHtml(t("admin.waChartEmpty"))}</div>` : "";
+  const titleKey = waChartBy === "group" ? "admin.waChartTitleGroup" : "admin.waChartTitle";
+  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))} · ${escapeHtml(t("admin.waStackAgent"))}
       <span class="wa-chart-legend">${legend}</span></div>
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
   box.querySelectorAll("[data-wa-i]").forEach((el) => {
@@ -10829,6 +10909,68 @@ function exportWorkAuditChartCsv() {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+/** 导出筛选视图（1.0.327）：JSON 文件，便于换机器 / 团队共享。 */
+function exportWaViews() {
+  const list = loadWaViews();
+  if (!list.length) {
+    toast(t("admin.waViewExportEmpty"));
+    return;
+  }
+  const blob = new Blob([JSON.stringify({ version: 1, views: list }, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "work-audit-views.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 导入筛选视图（1.0.327）：接受 `{views:[…]}` 或裸数组，同名覆盖，上限 20。 */
+async function importWaViews(input) {
+  const f = input?.files?.[0];
+  if (input) input.value = "";
+  if (!f) return;
+  try {
+    const parsed = JSON.parse(await f.text());
+    const incoming = Array.isArray(parsed) ? parsed : parsed?.views;
+    if (!Array.isArray(incoming)) {
+      toast(t("admin.waViewImportFail", { err: "invalid_format" }));
+      return;
+    }
+    const list = loadWaViews();
+    let n = 0;
+    for (const v of incoming) {
+      const name = String(v?.name || "").trim().slice(0, 30);
+      if (!name) continue;
+      const clean = {
+        name,
+        days: Math.min(90, Math.max(1, Number(v.days) || 7)),
+        q: String(v.q || "").slice(0, 200),
+        groupId: String(v.groupId || ""),
+        agentId: String(v.agentId || ""),
+        tool: String(v.tool || ""),
+        date: String(v.date || ""),
+        groupByMsg: !!v.groupByMsg,
+      };
+      const idx = list.findIndex((x) => x.name === name);
+      if (idx >= 0) {
+        list[idx] = clean;
+      } else {
+        if (list.length >= WA_VIEW_MAX) list.shift();
+        list.push(clean);
+      }
+      n++;
+    }
+    persistWaViews(list);
+    renderWaViews();
+    toast(n ? t("admin.waViewImported", { count: String(n) }) : t("admin.waViewImportFail", { err: "empty" }));
+  } catch (ex) {
+    toast(t("admin.waViewImportFail", { err: ex.message }));
+  }
 }
 
 /** 渲染审计表：平铺（每条操作一行）/ 聚合（每条消息一行 + 展开明细）。 */
@@ -11014,15 +11156,68 @@ async function uploadWorkspaceFiles(input) {
   })));
 }
 
-/** 上传一组 {file, rel}（1.0.323；1.0.324 加进度，1.0.325 可取消）。 */
+const WS_CHUNK_BYTES = 1024 * 1024; // 分片大小：1 MB（1.0.327）
+
+/** 上传单个条目（1.0.327）：≤1 MB 直传；更大走 upload-offset 查偏移 + upload-chunk 续传。 */
+async function uploadOneEntry(agentId, it, overwrite, signal, onProgress) {
+  const target = wsJoinPath(adminWsCurrentPath, it.rel);
+  const size = it.file.size || 0;
+  const auth = { Authorization: "Bearer " + state.token };
+  const overwriteQs = overwrite ? "" : "&overwrite=false";
+
+  if (size <= WS_CHUNK_BYTES) {
+    const fd = new FormData();
+    fd.append("file", it.file, it.file.name);
+    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload?path=${encodeURIComponent(target)}${overwriteQs}`,
+      { method: "POST", headers: auth, body: fd, signal });
+    const d = await res.json().catch(() => null);
+    if (res.ok && d && d.skipped) return "skipped";
+    if (res.ok && d && d.ok) { onProgress(size); return "ok"; }
+    throw new Error((d && d.error) || ("HTTP " + res.status));
+  }
+
+  const st = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload-offset?path=${encodeURIComponent(target)}&size=${size}`,
+    { headers: auth, signal });
+  const sd = await st.json().catch(() => null);
+  if (!st.ok) throw new Error((sd && sd.error) || ("HTTP " + st.status));
+  if (sd && sd.complete) { onProgress(size); return "ok"; }
+
+  let offset = Number(sd && sd.offset) || 0;
+  onProgress(offset);
+  while (offset < size) {
+    const end = Math.min(offset + WS_CHUNK_BYTES, size);
+    const fd = new FormData();
+    fd.append("file", it.file.slice(offset, end), it.file.name);
+    const qs = `path=${encodeURIComponent(target)}&offset=${offset}&total=${size}${overwriteQs}`;
+    const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload-chunk?${qs}`,
+      { method: "POST", headers: auth, body: fd, signal });
+    const d = await res.json().catch(() => null);
+    // 偏移对不上：服务端告知真实偏移，按它对齐后继续（1.0.327）
+    if (res.status === 409 && d && typeof d.offset === "number") {
+      offset = d.offset;
+      onProgress(offset);
+      continue;
+    }
+    if (!res.ok) throw new Error((d && d.error) || ("HTTP " + res.status));
+    offset = d && typeof d.offset === "number" ? d.offset : end;
+    onProgress(offset);
+    if (d && d.skipped) return "skipped";
+    if (d && d.ok) return "ok";
+  }
+  return "ok";
+}
+
+/** 上传一组 {file, rel}（1.0.323；1.0.327 起按字节推进并支持大文件续传）。 */
 async function uploadWorkspaceEntries(agentId, entries) {
   if (!agentId || !entries.length) return;
   const overwrite = !!$("wsOverwriteToggle")?.checked;
   const total = entries.length;
+  const totalBytes = entries.reduce((s, it) => s + (it.file.size || 0), 0) || 1;
   let ok = 0;
   let skipped = 0;
   let fail = 0;
   let done = 0;
+  let doneBytes = 0;
   const failedNow = [];
   wsUploadLastAgent = agentId;
   wsUploadCancelled = false;
@@ -11032,50 +11227,44 @@ async function uploadWorkspaceEntries(agentId, entries) {
   const cancelBtn = $("wsUploadCancelBtn");
   const retryBtn = $("wsUploadRetryBtn");
   const uploadBtn = $("wsUploadBtn");
-  const paint = (name) => {
-    const pct = total ? Math.round((done / total) * 100) : 0;
+  const paint = (name, currentBytes) => {
+    const bytes = Math.min(totalBytes, doneBytes + (currentBytes || 0));
+    const pct = Math.round((bytes / totalBytes) * 100);
     if (fill) fill.style.width = pct + "%";
     if (text) {
       const prefix = wsUploadCancelled
         ? t("admin.wsUploadCancelling")
         : t("admin.wsUploading", { done: String(done), total: String(total) });
-      text.textContent = prefix + (name ? " · " + name : "");
+      text.textContent = prefix + " · " + pct + "%" + (name ? " · " + name : "");
     }
   };
   if (prog) prog.classList.remove("hidden");
   if (cancelBtn) cancelBtn.classList.remove("hidden");
   if (retryBtn) retryBtn.classList.add("hidden");
   if (uploadBtn) uploadBtn.disabled = true;
-  paint("");
+  paint("", 0);
+
   for (const it of entries) {
     if (wsUploadCancelled) break;
+    const controller = new AbortController();
+    wsUploadController = controller;
     try {
-      const target = wsJoinPath(adminWsCurrentPath, it.rel);
-      const fd = new FormData();
-      fd.append("file", it.file, it.file.name);
-      const qs = `path=${encodeURIComponent(target)}` + (overwrite ? "" : "&overwrite=false");
-      const controller = new AbortController();
-      wsUploadController = controller;
-      const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload?${qs}`, {
-        method: "POST",
-        headers: { Authorization: "Bearer " + state.token },
-        body: fd,
-        signal: controller.signal,
-      });
-      const d = await res.json().catch(() => null);
-      if (res.ok && d && d.skipped) skipped++;
-      else if (res.ok && d && d.ok) ok++;
-      else { fail++; failedNow.push(it); }
+      const outcome = await uploadOneEntry(agentId, it, overwrite, controller.signal, (bytes) => paint(it.rel, bytes));
+      if (outcome === "skipped") skipped++;
+      else ok++;
+      doneBytes += it.file.size || 0;
     } catch {
       if (wsUploadCancelled) break; // 用户取消：不再计入失败
       fail++;
       failedNow.push(it);
+      doneBytes += it.file.size || 0; // 失败也推进总量，避免进度卡死
     } finally {
       wsUploadController = null;
     }
     done++;
-    paint(it.rel);
+    paint("", 0);
   }
+
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
   if (skipped) toast(t("admin.wsUploadSkipped", { count: skipped }));
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
@@ -16971,6 +17160,9 @@ function init() {
   };
   $("waViewSave").onclick = () => saveWaView();
   $("waViewDelete").onclick = () => deleteWaView();
+  $("waViewExport").onclick = () => exportWaViews();
+  $("waViewImport").onclick = () => $("waViewImportInput").click();
+  $("waViewImportInput").onchange = () => importWaViews($("waViewImportInput"));
   $("waGroupByMsg").onchange = () => renderWorkAuditRows();
   // 看板维度（1.0.322）
   $("waChartSwitch").addEventListener("click", (e) => {
@@ -16991,6 +17183,19 @@ function init() {
       waShowRate = !!rateToggle.checked;
       try { localStorage.setItem(WA_RATE_PREF_KEY, waShowRate ? "1" : "0"); } catch { /* 忽略 */ }
       renderWorkAuditChart(waChartBuckets);
+    };
+  }
+  // 叠加员工开关（1.0.327）：需要重新拉数据，不能只重绘
+  try {
+    if (localStorage.getItem(WA_STACK_PREF_KEY) === "1") waChartStack = true;
+  } catch { /* 隐私模式 */ }
+  const stackToggle = $("waStackAgent");
+  if (stackToggle) {
+    stackToggle.checked = waChartStack;
+    stackToggle.onchange = () => {
+      waChartStack = !!stackToggle.checked;
+      try { localStorage.setItem(WA_STACK_PREF_KEY, waChartStack ? "1" : "0"); } catch { /* 忽略 */ }
+      loadWorkAuditTimeline();
     };
   }
   $("adminTabPerf").onclick = () => switchAdminTab("perf");

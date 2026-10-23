@@ -163,6 +163,44 @@ public sealed class WorkAuditReportTests
     }
 
     [Fact]
+    public void StackByAgent_SplitsEachDayByAgentAndKeepsEmptyDays()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var nowMs = now.ToUnixTimeMilliseconds();
+        WorkAuditReport.Entry Row(string id, DateTimeOffset at, string agent, bool ok) => new(
+            "g1", "市场推广", agent, agent, id, "main", at.ToUnixTimeMilliseconds(),
+            "work_run_command", ok, 1, "x");
+        var items = new List<WorkAuditReport.Entry>
+        {
+            Row("m1", now, "agent_a", true),
+            Row("m2", now, "agent_a", false),
+            Row("m3", now, "agent_b", true),
+            Row("m4", now.AddDays(-2), "agent_b", true),
+        };
+
+        var days = WorkAuditReport.StackByAgent(items, 7, "day");
+
+        Assert.Equal(7, days.Count);
+        var today = days[^1];
+        Assert.Equal(3, today.Total);
+        Assert.Equal(1, today.Failed);
+        Assert.Equal(2, today.Parts.Count);
+        Assert.Equal("agent_a", today.Parts[0].Key); // 总量降序
+        Assert.Equal(2, today.Parts[0].Total);
+        Assert.Equal(1, today.Parts[0].Failed);
+        Assert.Equal("agent_b", today.Parts[1].Key);
+        Assert.Equal(1, today.Parts[1].Total);
+        Assert.Equal(0, days[^2].Total); // 补零的空日
+
+        var groups = WorkAuditReport.StackByAgent(items, 7, "group");
+        Assert.Single(groups);
+        Assert.Equal("g1", groups[0].Key);
+        Assert.Equal("市场推广", groups[0].Label);
+        Assert.Equal(4, groups[0].Total);
+        Assert.Equal(2, groups[0].Parts.Count);
+    }
+
+    [Fact]
     public void ToolTimeline_GroupsByToolWithFailures()
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

@@ -10,9 +10,9 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>AguiGroupChat.Desktop</RootNamespace>
     <AssemblyName>AguiGroupChat.Desktop</AssemblyName>
-    <Version>1.0.326</Version>
-    <FileVersion>1.0.326.0</FileVersion>
-    <ApplicationVersion>1.0.326</ApplicationVersion>
+    <Version>1.0.327</Version>
+    <FileVersion>1.0.327.0</FileVersion>
+    <ApplicationVersion>1.0.327</ApplicationVersion>
     <!-- 应用图标：exe / 任务栏（Windows） -->
     <ApplicationIcon>Assets\agui-icon.ico</ApplicationIcon>
   </PropertyGroup>
