@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.327 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.327 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.328 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.328 Release Notes (current Windows desktop release)
+
+**版本说明**：**员工段可下钻 + 上传可暂停 + 视图走服务端**——叠加看板点员工段直接筛人；大文件上传可暂停 / 继续；筛选视图换设备也跟着走。
+**Version note**: **Agent-segment drill-down, pausable uploads, server-synced views** — click an agent segment to filter, pause and resume large uploads, and keep audit views across devices.
+
+## 变更
+# Changes
+
+中文：
+- **员工段下钻**：叠加模式的每个员工段带 `data-wa-agent`，点击即按该员工筛表（再点取消，当前员工段加描边；聚合的「其他」段不可点）；列级下钻保持不变。
+- **暂停 / 继续**：新增 `wsUploadPaused` 与 `waitWhileUploadPaused()`，在分片边界挂起；进度条出现「暂停 / 继续」按钮，文案切为「已暂停 · NN%」，继续后从已存偏移接着传。
+- **视图上云**：新增 `AuditViews.cs`（`GET/PUT /ag-ui/audit-views`，清洗规则：名称 ≤30、天数 1–90、工具白名单、日期 `yyyy-MM-dd`、上限 20、同名覆盖）与扩展区 `auditViews` 持久化；前端打开工作区页时拉取，保存 / 删除 / 导入后上推，`localStorage` 退为缓存，首次升级自动上传本地视图。
+
+English:
+- **Agent-segment drill-down**: every agent segment in stacked mode carries `data-wa-agent`; clicking filters the table to that agent (click again to clear, the active segment is outlined, the aggregated "Other" segment stays inert) while column-level drill is unchanged.
+- **Pause / resume**: new `wsUploadPaused` plus `waitWhileUploadPaused()` suspend the batch at chunk boundaries; the bar shows **Pause / Resume**, the text switches to "Paused · NN%", and resuming continues from the stored offset.
+- **Server-side views**: `AuditViews.cs` adds `GET/PUT /ag-ui/audit-views` (name ≤30 chars, days 1–90, tool allow-list, `yyyy-MM-dd` date, max 20, same name overwrites) persisted in the `auditViews` extension area; the UI pulls on opening the workspaces tab, pushes on save / delete / import, keeps `localStorage` as cache and uploads local views on first run.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（员工段下钻 / 暂停继续 / 视图上云）、§8.2（页签表补 `audit-views`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.328。
+English: `docs/user-guide.md` / `en.md` §3.13 (segment drill / pause-resume / server views), §8.2 (`audit-views`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.328.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` / `Desktop` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2261，missing 0**；新增 `AuditViewsTests`（清洗 / 同名覆盖 / 上限 / 名称截断）与 `DesktopCompositionTests` 同步通过；Docker 冒烟验证 `GET/PUT /ag-ui/audit-views` 的清洗、上限 20 与复原；全量 `dotnet test` **1925 通过 / 0 失败**。
+English: `AguiGroupChat.Web` / `Desktop` build clean; `node --check app.js`; the i18n audit reports **zh=en=2261, missing 0**; `AuditViewsTests` (cleanup / overwrite / cap / name truncation) and `DesktopCompositionTests` pass; the Docker smoke verifies `GET/PUT /ag-ui/audit-views` cleanup, the 20-item cap and restore; the full `dotnet test` run passes **1925 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.327 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.327 Release Notes (historical)
 
 **版本说明**：**大文件能续传 + 看板能拆员工 + 视图可携带**——超大附件断点续传（断网 / 刷新也不重传已传字节）；按天 / 按知聚的柱体可按员工拆段；筛选视图可导出再导入。
 **Version note**: **Resumable uploads, per-agent stacking, portable views** — large uploads survive interruptions, day / circle columns can split by agent, and saved views travel as JSON.

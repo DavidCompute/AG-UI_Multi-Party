@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.327**
+> 适用版本：**1.0.328**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1735,6 +1735,7 @@
 - **下钻高亮与工具筛选（1.0.325）**：当前下钻的柱体加描边高亮（按员工 / 知聚看下拉、按天看日期筛选）；审计工具栏新增**工具下拉**（命令 / 写入 / 读取 / 目录 / 其他，`tool=command|write|read|list|other`，与日期、员工、知聚筛选叠加）；CSV 导出同步跟随日期与工具筛选，保证导出口径与表格一致。
 - **按工具维度与筛选视图（1.0.326）**：看板新增第四种维度「按工具」（`by=tool`）——每根柱是一个工具分类（成功数），失败用红色段叠加，点击同样下钻到工具筛选；审计工具栏新增**筛选视图**（天数 + 关键词 + 知聚 + 员工 + 工具 + 日期 + 聚合开关），「＋ 保存视图」命名保存、「🗑 删除视图」删除，最多 20 个，按用户存在 `localStorage`（`agui.waViews.<memberId>`）。
 - **叠加员工与视图可携带（1.0.327）**：勾选「叠加员工」后，按天 / 按知聚的柱体会按员工拆段（`stack=agent`，前 8 名员工分配颜色，其余归「其他」；按工具维度不支持叠加），图例随员工变化、失败率折线照常；筛选视图新增「⤓ 导出视图 / ⤒ 导入视图」（JSON `{version:1,views:[…]}`，同名覆盖，上限 20，便于换机与团队共享）。
+- **段级下钻与视图上云（1.0.328）**：叠加模式下**点员工段**可直接按该员工筛表（再点取消，当前员工段加描边高亮；「其他」聚合段不可点）；筛选视图改为**服务端存储**（`GET/PUT /ag-ui/audit-views`，持久化到扩展区 `auditViews`）——换设备登录后自动同步，本地 `localStorage` 退为离线缓存，首次升级会把本地视图上推。
 - 只记摘要（不含文件正文与凭证），单次回答上限 60 条。
 
 **工作区容量治理（1.0.311）**
@@ -1757,6 +1758,7 @@
 - **取消上传（1.0.325）**：进度条右侧「取消」按钮中断当前文件（`AbortController`）并停止后续排队，已完成的文件不回滚，toast 给出「完成 N/M」。
 - **失败重试（1.0.326）**：批次结束后若有失败，进度条保持显示并出现「↻ 重试失败」；点击只用**失败的那几项**重新上传（成功 / 跳过的不重传）。
 - **断点续传（1.0.327）**：>1 MB 的文件改为**分片上传**（1 MB/片）。先 `GET …/{agentId}/upload-offset?path=&size=` 问已收字节，再从该偏移 `POST …/{agentId}/upload-chunk?path=&offset=&total=`；偏移对不上返回 `409 {offset}`，客户端按真实偏移重试；满 `total` 后服务端合并为正式文件（沿用「覆盖同名」）。分片暂存 `data/upload-parts/<agentId>/<hash>.part`，2 天未完成自动清理；进度条改成按**字节**推进。
+- **暂停 / 继续（1.0.328）**：进度条右侧新增「暂停」（再点变「继续」），**在下一个分片边界生效**（不中断在传分片）；文案显示「已暂停 · NN%」，继续后从原偏移接着传，已传字节不重传。
 - **目录导航（1.0.317）**：文件面板改为**逐层浏览**（`?path=` 只列直接子项，目录排在文件前），顶部面包屑「根 / a / b」可点回退；上传与新建目录都落在**当前目录**下，删除 / 预览 / 下载同理。
 - **文件搜索（1.0.318）**：面板工具栏搜索框按**文件名**在工作区内递归匹配（最多 500 条，面包屑处标命中数）；搜到后显示完整相对路径，可直接预览 / 下载 / 删除。
 - **内容搜索（1.0.319）**：搜索框旁「文件名 / 内容」切换。内容模式遍历工作区文本文件找首个命中（跳过二进制与 >1 MB 的文件，总扫描量上限 32 MB，最多 100 条），结果带上行号与前后片段；预览 / 下载 / 删除照常可用。
@@ -3924,7 +3926,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys` |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | 员工绩效 | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | 评测回归 | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`、`DELETE …/{id}`、`POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files[?path=&q=&scope=content]`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`GET …/{agentId}/upload-offset?path=&size=`、`POST …/{agentId}/upload-chunk?path=&offset=&total=`、`POST …/{agentId}/download`、`GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`、`GET …/work-audits/storage`、`POST …/work-audits/sweep`、`GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group|tool&stack=agent`、`GET …/work-audits/timeline.csv?…&by=`、`GET …/work-audits?…&date=YYYY-MM-DD&tool=command|write|read|list|other`、`GET …/work-audits.csv?…&date=&tool=`（上传支持 `overwrite=false`；1.0.312–1.0.327） |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files[?path=&q=&scope=content]`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`GET …/{agentId}/upload-offset?path=&size=`、`POST …/{agentId}/upload-chunk?path=&offset=&total=`、`POST …/{agentId}/download`、`GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`、`GET …/work-audits/storage`、`POST …/work-audits/sweep`、`GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group|tool&stack=agent`、`GET …/work-audits/timeline.csv?…&by=`、`GET …/work-audits?…&date=YYYY-MM-DD&tool=command|write|read|list|other`、`GET …/work-audits.csv?…&date=&tool=`、`GET/PUT /ag-ui/audit-views`（上传支持 `overwrite=false`；1.0.312–1.0.328） |
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`、`…/events`、`…/deliveries`、`…/{id}/test`（见 §8.19） |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`、`DELETE /ag-ui/admin/api-keys/{id}`（见 §8.20） |
 

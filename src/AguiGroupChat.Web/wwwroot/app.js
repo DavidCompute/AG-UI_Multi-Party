@@ -10093,6 +10093,8 @@ let adminWsSearch = "";
 let adminWsScope = "name"; // name | content（1.0.319）
 let wsSelected = new Set();   // 当前文件面板里勾选的文件相对路径（1.0.321）
 let wsUploadCancelled = false;  // 上传取消标志（1.0.325）
+let wsUploadPaused = false;     // 上传暂停标志（1.0.328）
+let wsUploadRepaint = null;     // 暂停/继续时立即刷新进度文案（1.0.328）
 let wsUploadController = null;  // 当前在传文件的 AbortController（1.0.325）
 let wsUploadFailed = [];        // 本批次失败项，供一键重试（1.0.326）
 let wsUploadLastAgent = "";
@@ -10637,7 +10639,37 @@ function loadWaViews() {
 }
 
 function persistWaViews(list) {
-  try { localStorage.setItem(waViewsKey(), JSON.stringify(list.slice(0, WA_VIEW_MAX))); } catch { /* 隐私模式 */ }
+  const trimmed = list.slice(0, WA_VIEW_MAX);
+  try { localStorage.setItem(waViewsKey(), JSON.stringify(trimmed)); } catch { /* 隐私模式 */ }
+  pushWaViews(trimmed);
+}
+
+/** 推送到服务端（1.0.328）：失败静默，本地缓存仍在。 */
+async function pushWaViews(list) {
+  try {
+    if (!state.token) return;
+    await fetch("/ag-ui/audit-views", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ views: list }),
+    });
+  } catch { /* 离线 */ }
+}
+
+/** 从服务端拉取视图（1.0.328）：跨设备口径；首次升级时把本地缓存迁上去。 */
+async function syncWaViewsFromServer() {
+  try {
+    if (!state.token) return;
+    const res = await fetch("/ag-ui/audit-views", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !Array.isArray(d.views)) return;
+    if (!d.views.length) {
+      const local = loadWaViews();
+      if (local.length) { await pushWaViews(local); return; }
+    }
+    try { localStorage.setItem(waViewsKey(), JSON.stringify(d.views)); } catch { /* 隐私模式 */ }
+    renderWaViews();
+  } catch { /* 离线：用本地缓存 */ }
 }
 
 function renderWaViews() {
@@ -10841,7 +10873,6 @@ function renderWorkAuditChartStacked(buckets) {
   const max = Math.max(1, ...totals);
   const rates = buckets.map((b, i) => (totals[i] > 0 ? (Number(b.failed) || 0) / totals[i] * 100 : null));
   const activeChartKey = waActiveChartKey();
-  const otherKey = "\u0000other";
   const otherLabel = t("admin.waSegOther");
 
   // 员工总量排序：前 8 名占色，其余归「其他」
@@ -10863,15 +10894,24 @@ function renderWorkAuditChartStacked(buckets) {
 
   const cols = buckets.map((b, i) => {
     const total = totals[i];
-    const agg = new Map();
+    const selectedAgent = $("waAgent")?.value || "";
+    // 逐员工出段（1.0.328）：前 8 名可点击下钻，其余合并为不可点击的「其他」
+    const segs = [];
+    let otherSum = 0;
     for (const p of (b.parts || [])) {
       const label = String(p.label || p.key || "");
-      const key = top.includes(label) ? label : otherKey;
-      agg.set(key, (agg.get(key) || 0) + (Number(p.total) || 0));
+      const v = Number(p.total) || 0;
+      if (top.includes(label)) segs.push({ key: p.key || "", label, v, color: colorOf(label) });
+      else otherSum += v;
     }
-    const segs = [...agg.entries()].sort((a, b2) => b2[1] - a[1]).map(([key, v]) => {
-      const color = key === otherKey ? "#7d8794" : colorOf(key);
-      return `<i style="background:${color};height:${(v / total * 100).toFixed(1)}%"></i>`;
+    if (otherSum > 0) segs.push({ key: "", label: otherLabel, v: otherSum, color: "#7d8794" });
+    segs.sort((a, b2) => b2.v - a.v);
+    const segHtml = segs.map((s) => {
+      const active = s.key && selectedAgent === s.key ? " wa-seg-active" : "";
+      const attrs = s.key
+        ? ` data-wa-agent="${escapeHtml(s.key)}" data-wa-agent-label="${escapeHtml(s.label)}" title="${escapeHtml(s.label)} · ${s.v} · ${escapeHtml(t("admin.waDrillAgentHint"))}"`
+        : ` title="${escapeHtml(s.label)} · ${s.v}"`;
+      return `<i class="${active}" style="background:${s.color};height:${(s.v / total * 100).toFixed(1)}%"${attrs}></i>`;
     }).join("");
     const h = total > 0 ? Math.max(4, total / max * 100) : 0;
     const full = String(b.label || b.key || "");
@@ -10893,6 +10933,19 @@ function renderWorkAuditChartStacked(buckets) {
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
   box.querySelectorAll("[data-wa-i]").forEach((el) => {
     el.onclick = () => drillWorkAudit(waChartBuckets[Number(el.dataset.waI)]);
+  });
+  // 点员工段 → 直接按该员工筛表（1.0.328）
+  box.querySelectorAll("[data-wa-agent]").forEach((el) => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const key = el.dataset.waAgent;
+      const sel = $("waAgent");
+      if (!sel || !key) return;
+      ensureSelectOption(sel, key, el.dataset.waAgentLabel || key);
+      sel.value = sel.value === key ? "" : key;
+      renderWorkAuditChart(waChartBuckets);
+      loadWorkAudits();
+    };
   });
 }
 
@@ -11158,8 +11211,16 @@ async function uploadWorkspaceFiles(input) {
 
 const WS_CHUNK_BYTES = 1024 * 1024; // 分片大小：1 MB（1.0.327）
 
+/** 暂停时挂起（1.0.328）：分片边界生效，取消优先。 */
+async function waitWhileUploadPaused() {
+  while (wsUploadPaused && !wsUploadCancelled) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
 /** 上传单个条目（1.0.327）：≤1 MB 直传；更大走 upload-offset 查偏移 + upload-chunk 续传。 */
 async function uploadOneEntry(agentId, it, overwrite, signal, onProgress) {
+  await waitWhileUploadPaused();
   const target = wsJoinPath(adminWsCurrentPath, it.rel);
   const size = it.file.size || 0;
   const auth = { Authorization: "Bearer " + state.token };
@@ -11185,6 +11246,8 @@ async function uploadOneEntry(agentId, it, overwrite, signal, onProgress) {
   let offset = Number(sd && sd.offset) || 0;
   onProgress(offset);
   while (offset < size) {
+    await waitWhileUploadPaused();
+    if (wsUploadCancelled) throw new DOMException("cancelled", "AbortError");
     const end = Math.min(offset + WS_CHUNK_BYTES, size);
     const fd = new FormData();
     fd.append("file", it.file.slice(offset, end), it.file.name);
@@ -11221,30 +11284,43 @@ async function uploadWorkspaceEntries(agentId, entries) {
   const failedNow = [];
   wsUploadLastAgent = agentId;
   wsUploadCancelled = false;
+  wsUploadPaused = false;
   const prog = $("wsUploadProgress");
   const fill = $("wsUploadFill");
   const text = $("wsUploadText");
   const cancelBtn = $("wsUploadCancelBtn");
+  const pauseBtn = $("wsUploadPauseBtn");
   const retryBtn = $("wsUploadRetryBtn");
   const uploadBtn = $("wsUploadBtn");
+  let lastLabel = "";
   const paint = (name, currentBytes) => {
+    if (name !== undefined) lastLabel = name || "";
     const bytes = Math.min(totalBytes, doneBytes + (currentBytes || 0));
     const pct = Math.round((bytes / totalBytes) * 100);
     if (fill) fill.style.width = pct + "%";
     if (text) {
       const prefix = wsUploadCancelled
         ? t("admin.wsUploadCancelling")
-        : t("admin.wsUploading", { done: String(done), total: String(total) });
-      text.textContent = prefix + " · " + pct + "%" + (name ? " · " + name : "");
+        : wsUploadPaused
+          ? t("admin.wsUploadPaused")
+          : t("admin.wsUploading", { done: String(done), total: String(total) });
+      text.textContent = prefix + " · " + pct + "%" + (lastLabel ? " · " + lastLabel : "");
     }
   };
+  wsUploadRepaint = () => paint(undefined, 0);
   if (prog) prog.classList.remove("hidden");
   if (cancelBtn) cancelBtn.classList.remove("hidden");
+  if (pauseBtn) {
+    pauseBtn.classList.remove("hidden");
+    pauseBtn.textContent = t("admin.wsUploadPause");
+  }
   if (retryBtn) retryBtn.classList.add("hidden");
   if (uploadBtn) uploadBtn.disabled = true;
   paint("", 0);
 
   for (const it of entries) {
+    if (wsUploadCancelled) break;
+    await waitWhileUploadPaused();
     if (wsUploadCancelled) break;
     const controller = new AbortController();
     wsUploadController = controller;
@@ -11270,7 +11346,10 @@ async function uploadWorkspaceEntries(agentId, entries) {
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
   if (wsUploadCancelled) toast(t("admin.wsUploadCancelled", { done: String(done), total: String(total) }));
   wsUploadFailed = failedNow;
+  wsUploadRepaint = null;
+  wsUploadPaused = false;
   if (cancelBtn) cancelBtn.classList.add("hidden");
+  if (pauseBtn) pauseBtn.classList.add("hidden");
   if (uploadBtn) uploadBtn.disabled = false;
   // 有失败就保留进度条并给出重试入口（1.0.326）
   if (retryBtn && failedNow.length) retryBtn.classList.remove("hidden");
@@ -17068,7 +17147,7 @@ function init() {
   bindApiKeyConsole(); // 对外集成凭证：托管 API 密钥后台页签
   bindMarketConsole(); // 模板市场（在线分发）
   $("adminTabStorage").onclick = () => switchAdminTab("storage");
-  $("adminTabWorkspaces").onclick = () => { switchAdminTab("workspaces"); renderWaViews(); };
+  $("adminTabWorkspaces").onclick = () => { switchAdminTab("workspaces"); renderWaViews(); syncWaViewsFromServer(); };
   $("wsRefreshBtn").onclick = () => loadAdminWorkspaces();
   $("wsCleanupAllBtn").onclick = () => cleanupWorkspaces(null);
   $("wsFilesCloseBtn").onclick = () => $("adminWorkspaceFiles").classList.add("hidden");
@@ -17079,6 +17158,12 @@ function init() {
   $("wsUploadCancelBtn").onclick = () => {
     wsUploadCancelled = true;
     wsUploadController?.abort();
+  };
+  // 暂停 / 继续（1.0.328）：在下一个分片边界生效
+  $("wsUploadPauseBtn").onclick = () => {
+    wsUploadPaused = !wsUploadPaused;
+    $("wsUploadPauseBtn").textContent = wsUploadPaused ? t("admin.wsUploadResume") : t("admin.wsUploadPause");
+    try { wsUploadRepaint?.(); } catch { /* 忽略 */ }
   };
   // 重试失败项（1.0.326）
   $("wsUploadRetryBtn").onclick = () => {

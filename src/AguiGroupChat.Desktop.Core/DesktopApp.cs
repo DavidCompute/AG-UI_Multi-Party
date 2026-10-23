@@ -54,6 +54,7 @@ public static class DesktopApp
         builder.Services.AddSingleton(new SystemApi.ModelConfigState()); // 运行时模型配置（endpoint / apiKey）
         builder.Services.AddSingleton(new BrandingState()); // 白标 / 品牌化配置（6.4）：应用名 + Logo + 主色
         builder.Services.AddSingleton(new NotifyPrefsState()); // 按用户的通知偏好（1.0.318）：浮窗范围
+        builder.Services.AddSingleton(new AuditViewsState()); // 按用户的审计筛选视图（1.0.328）：跨设备同步
         builder.Services.AddSingleton(new ConfigGovernanceState()); // 配置治理（6.3）：管理员在线调整的运维旋钮
         // 出站 Webhook（对外集成）：与 Web 组合根同一套（管理员配置回调地址 + 事件订阅）
         builder.Services.AddSingleton(new WebhookState());
@@ -122,6 +123,7 @@ public static class DesktopApp
         app.MapUserGroupApi();      // 用户分组 / 组织单元（细粒度授权）
         app.MapBrandingApi();   // 白标 / 品牌化（6.4）：应用名 + Logo + 主色
         app.MapNotifyPrefsApi(); // 按用户的通知偏好（1.0.318）：浮窗范围
+        app.MapAuditViewsApi(); // 按用户的审计筛选视图（1.0.328）
         app.MapWebhookApi();    // 出站 Webhook（对外集成）：管理员配置回调地址 + 事件订阅 + 投递记录
         app.MapManualApi();     // 内置用户手册：前端「📖 完整手册」按界面语言拉取（嵌入资源，仅登录可读）
         app.MapExternalApi();   // 版本化对外 REST API（入站集成）：/agui/v1 发消息 / 读历史 / 同步等回复
@@ -155,6 +157,7 @@ public static class DesktopApp
         app.Services.RegisterSkillRunArtifactStorePersistence(); // 技能试运行产物归属跨重启保持（否则重启后旧链接全变无权访问）
         app.Services.RegisterBrandingPersistence(); // 白标 / 品牌化配置（6.4）跨重启保持
         app.Services.RegisterNotifyPrefsPersistence(); // 通知偏好（1.0.318）跨重启保持
+        app.Services.RegisterAuditViewsPersistence(); // 审计筛选视图（1.0.328）跨重启保持
         app.Services.RegisterConfigGovernancePersistence(); // 配置治理覆盖（6.3）跨重启保持
         app.Services.RegisterWebhookPersistence(); // Webhook 订阅跨重启保持（签名密钥加密落盘）
         app.Services.RegisterWebhookDeliveryPersistence(); // 最近投递记录跨重启保持（最近 100 条）

@@ -2509,6 +2509,7 @@ button { white-space: nowrap; }
 .ws-progress-text { position: relative; z-index: 1; display: block; font-size: 11px; line-height: 18px; padding: 0 8px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-progress-cancel { position: absolute; right: 3px; top: 1px; z-index: 2; height: 16px; line-height: 14px; font-size: 10px; padding: 0 6px; }
 .ws-progress-retry { position: absolute; right: 52px; top: 1px; z-index: 2; height: 16px; line-height: 14px; font-size: 10px; padding: 0 6px; }
+.ws-progress-pause { position: absolute; right: 52px; top: 1px; z-index: 2; height: 16px; line-height: 14px; font-size: 10px; padding: 0 6px; }
 .ws-progress .ws-progress-text { padding-right: 130px; }
 /* 看板下钻 / 日期筛选（1.0.324） */
 .wa-chart-clickable { cursor: pointer; }
@@ -2516,6 +2517,10 @@ button { white-space: nowrap; }
 /* 当前下钻柱体（1.0.325） */
 .wa-chart-col-active .wa-chart-bar { outline: 2px solid var(--accent); outline-offset: 1px; }
 .wa-chart-col-active .wa-chart-day { color: var(--accent); font-weight: 600; }
+/* 叠加员工时可点击的员工段（1.0.328） */
+.wa-chart-bar i[data-wa-agent] { cursor: pointer; }
+.wa-chart-bar i[data-wa-agent]:hover { filter: brightness(1.18); }
+.wa-seg-active { outline: 1px solid var(--accent); outline-offset: -1px; }
 .wa-date-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
 .wa-chart-col { flex: 1 0 12px; min-width: 12px; height: 100%; display: grid; grid-template-rows: 1fr auto; align-items: end; }
 .wa-chart-col:hover .wa-chart-bar { filter: brightness(1.15); }
