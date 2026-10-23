@@ -122,6 +122,8 @@ select {
 }
 .notif-chip-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
 .notif-chip-x:hover { color: var(--danger, #e5484d); }
+.notif-chip-apply { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 11px; padding: 0; }
+.notif-chip-apply:hover { text-decoration: underline; }
 .notif-title { font-size: 14px; font-weight: 600; }
 /* 按类型筛选（1.0.297）：与通知列表同宽，选中态跟主题主色 */
 .notif-filters { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 2px; }
@@ -2486,6 +2488,25 @@ button { white-space: nowrap; }
 .ws-dir-link:hover { text-decoration: underline; }
 /* 工作区操作审计汇总（1.0.314）：摘要列截断显示，完整内容看 title */
 .admin-table td.wa-text { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 审计看板（1.0.321）：按天堆叠柱图，纯 HTML/CSS */
+.wa-chart { margin: 10px 0 6px; }
+.wa-chart:empty { display: none; }
+.wa-chart-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.wa-chart-legend { display: flex; gap: 10px; flex-wrap: wrap; }
+.wa-chart-key { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.wa-chart-key i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.wa-chart-body { display: flex; align-items: flex-end; gap: 3px; height: 110px; padding: 0 2px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.wa-chart-col { flex: 1 0 12px; min-width: 12px; height: 100%; display: grid; grid-template-rows: 1fr auto; align-items: end; }
+.wa-chart-col:hover .wa-chart-bar { filter: brightness(1.15); }
+.wa-chart-bar { width: 100%; max-width: 26px; margin: 0 auto; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; }
+.wa-chart-bar i { display: block; width: 100%; }
+.wa-chart-day { font-size: 9px; color: var(--muted); margin-top: 2px; white-space: nowrap; text-align: center; }
+.wa-seg-cmd { background: #6c8cff; }
+.wa-seg-write { background: #4cc38a; }
+.wa-seg-read { background: #8e7cf0; }
+.wa-seg-list { background: #d0a53c; }
+.wa-seg-other { background: #7d8794; }
+.wa-seg-fail { background: #e5484d; }
 
 /* 智能体技能调用链（链路可视化）：嵌套缩进卡片 */
 .msg .chain-card {

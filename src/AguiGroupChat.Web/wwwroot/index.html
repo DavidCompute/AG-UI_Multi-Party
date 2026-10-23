@@ -71,6 +71,12 @@
       <div class="notif-rule-row">
         <input id="notifMuteSenders" class="modal-input" data-i18n-placeholder="notif.muteSenders" />
       </div>
+      <!-- 自定义模板（1.0.321）：把当前组合存为「我的模板」 -->
+      <div class="notif-rule-row">
+        <input id="notifPresetName" class="modal-input" data-i18n-placeholder="notif.presetNamePlaceholder" />
+        <button id="notifPresetSave" class="chip-btn" type="button" data-i18n="notif.presetSave">保存当前</button>
+      </div>
+      <div id="notifPresetChips" class="notif-chips"></div>
     </div>
     <div id="notifPermHint" class="notif-perm hidden">
       <span id="notifPermText" class="notif-perm-text"></span>
@@ -2379,6 +2385,8 @@
               <button id="wsScopeName" class="chip-btn on" type="button" data-i18n="admin.wsScopeName">文件名</button>
               <button id="wsScopeContent" class="chip-btn" type="button" data-i18n="admin.wsScopeContent">内容</button>
             </span>
+            <button id="wsDownloadSelBtn" class="chip-btn" type="button" disabled data-i18n="admin.wsDownloadSel">⬇ 下载所选</button>
+            <button id="wsDeleteSelBtn" class="chip-btn" type="button" disabled data-i18n="admin.wsDeleteSel">🗑 删除所选</button>
             <button id="wsUploadBtn" class="chip-btn" type="button" data-i18n="admin.wsUpload">⬆ 上传</button>
             <input id="wsUploadInput" type="file" multiple class="hidden" />
             <button id="wsNewDirBtn" class="chip-btn" type="button" data-i18n="admin.wsNewDir">＋ 新建目录</button>
@@ -2387,7 +2395,7 @@
           <div id="adminWsBreadcrumb" class="ws-breadcrumb"></div>
           <div class="admin-table-wrap">
             <table class="admin-table">
-              <thead><tr><th data-i18n="admin.wsName">名称</th><th data-i18n="admin.wsBytes">占用</th><th data-i18n="admin.wsLast">最近修改</th><th data-i18n="admin.thOps">操作</th></tr></thead>
+              <thead><tr><th style="width:28px"><input id="wsSelectAll" type="checkbox" /></th><th data-i18n="admin.wsName">名称</th><th data-i18n="admin.wsBytes">占用</th><th data-i18n="admin.wsLast">最近修改</th><th data-i18n="admin.thOps">操作</th></tr></thead>
               <tbody id="adminWorkspaceFileRows"></tbody>
             </table>
           </div>
@@ -2430,6 +2438,8 @@
           <button id="waSweepBtn" class="chip-btn" type="button" data-i18n="admin.waSweep">🧹 清理过期归档</button>
           <span id="waMeta" class="form-hint"></span>
         </div>
+        <!-- 审计看板（1.0.321）：按天的操作量柱状图 -->
+        <div id="waChart" class="wa-chart"></div>
         <div class="admin-table-wrap">
           <table class="admin-table">
             <thead><tr>

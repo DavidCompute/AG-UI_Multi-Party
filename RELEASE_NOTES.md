@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.320 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.320 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.321 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.321 Release Notes (current Windows desktop release)
+
+**版本说明**：**工作区批量操作 + 审计看板 + 自定义通知模板**——文件可多选批量下载 / 删除；审计区多了一张按天柱状图；通知偏好可把当前设置存成自己的模板。
+**Version note**: **Batch workspace actions, audited activity chart, custom notification presets** — multi-select files to download or delete; a per-day chart in the audit view; save current notification setup as your own preset.
+
+## 变更
+# Changes
+
+中文：
+- **工作区批量操作**：文件清单新增勾选列与表头全选（支持半选态），工具栏「⬇ 下载所选 / 🗑 删除所选」带实时计数。批量下载走 `POST /ag-ui/admin/workspaces/{agentId}/download`（`{paths:[…]}`）：服务端按相对路径打包 ZIP，单次上限 200 个文件 / 200 MB，越界或不存在路径跳过，空集合返回 `no_files`；批量删除复用单文件 `DELETE` 接口逐个执行，结束后提示成功 / 失败数量并重拉清单。
+- **审计看板**：`WorkAuditReport.Timeline()` 按 UTC 日期分桶并补零（1–90 天），新增 `GET /ag-ui/admin/work-audits/timeline`；前端用纯 HTML/CSS 画堆叠柱图（命令 / 写入 / 读取 / 目录 / 其他 / 失败），失败单独成段不重复计入分类，悬停显示日期与总量。
+- **自定义通知模板**：`NotifyUserPrefs.Presets` + `CleanPresets()`（名称 ≤40 字、最多 10 个）随 `GET/PUT /ag-ui/notify-prefs` 上云；面板新增「模板名称 + 保存当前」与模板 chips，点击套用、`×` 删除。
+
+English:
+- **Batch workspace actions**: the file list gains a checkbox column and header select-all (with an indeterminate state); the toolbar shows **⬇ Download selected / 🗑 Delete selected** with live counts. Batch download posts `{paths:[…]}` to `POST /ag-ui/admin/workspaces/{agentId}/download`, which zips the resolved paths server-side (≤200 files / ≤200 MB, out-of-scope or missing paths skipped, empty set → `no_files`). Batch delete reuses the single-file `DELETE` endpoint per path and reports successes / failures before reloading.
+- **Audit chart**: `WorkAuditReport.Timeline()` buckets rows by UTC day with zero-fill (1–90 days) behind `GET /ag-ui/admin/work-audits/timeline`; the front end draws a pure HTML/CSS stacked bar chart (commands / writes / reads / listings / other / failed), with failures as their own segment so nothing is double-counted, and hover shows date plus total.
+- **Custom notification presets**: `NotifyUserPrefs.Presets` + `CleanPresets()` (name ≤40 chars, max 10) ride along `GET/PUT /ag-ui/notify-prefs`; the panel gains a name field with **Save current** and preset chips that apply on click and delete via `×`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（批量操作 / 审计看板）、§1.2.1（自定义模板）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.321。
+English: `docs/user-guide.md` / `en.md` §3.13 (batch actions / audit chart), §1.2.1 (custom presets); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.321.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2210，missing 0**；`WorkAuditReportTests` 新增 Timeline 分桶 / 补零 / 窗口钳制用例；全量 `dotnet test` 结果见下方提交说明。
+English: `AguiGroupChat.Web` builds with 0 errors; `node --check app.js` passes; the i18n audit reports **zh=en=2210, missing 0**; `WorkAuditReportTests` gains Timeline bucketing / zero-fill / window-clamp cases; the full `dotnet test` result is recorded in the commit description.
+
+---
+
+# AG-UI 群聊桌面版 1.0.320 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.320 Release Notes (historical)
 
 **版本说明**：**命中可定位 + 归档可知构成 + 通知模板化**——内容搜索结果点开即高亮定位；归档统计给出工具分布；通知范围可一键套用模板。
 **Version note**: **Pinpoint hits, informative archive stats, notification presets** — content-search results open highlighted at the hit; archive stats show the tool breakdown; popup scope can be applied from presets.

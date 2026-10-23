@@ -34,6 +34,47 @@ public static class WorkAuditReport
     /// <summary>筛选项（知聚 / 数字员工）：取时间范围内的全部行统计，不受当前筛选影响。</summary>
     public sealed record Facet(string Id, string Name, int Count);
 
+    /// <summary>按天的工具分布（1.0.321）：用于审计看板柱状图。</summary>
+    public sealed record TimelineDay(
+        string Date, int Commands, int Writes, int Reads, int Listings, int Other, int Failed)
+    {
+        public int Total => Commands + Writes + Reads + Listings + Other + Failed;
+    }
+
+    /// <summary>把审计行按 UTC 日期分桶（缺失的日期补 0），供看板画柱状图。</summary>
+    public static IReadOnlyList<TimelineDay> Timeline(IReadOnlyList<Entry> items, int days)
+    {
+        var n = Math.Clamp(days <= 0 ? 7 : days, 1, 90);
+        var today = DateTimeOffset.UtcNow.UtcDateTime.Date;
+        var buckets = new SortedDictionary<string, (int C, int W, int R, int L, int O, int F)>(StringComparer.Ordinal);
+        for (var i = n - 1; i >= 0; i--)
+            buckets[today.AddDays(-i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)] = (0, 0, 0, 0, 0, 0);
+
+        foreach (var e in items)
+        {
+            var key = DateTimeOffset.FromUnixTimeMilliseconds(e.At).UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (!buckets.TryGetValue(key, out var b)) continue;
+            // 失败单独成段（不重复计入工具分类），否则堆叠柱的总量会被重复计数
+            if (!e.Ok)
+            {
+                b.F++;
+                buckets[key] = b;
+                continue;
+            }
+            switch (e.Tool)
+            {
+                case "work_run_command": b.C++; break;
+                case "work_write_file": b.W++; break;
+                case "work_read_file": b.R++; break;
+                case "work_list_dir": b.L++; break;
+                default: b.O++; break;
+            }
+            buckets[key] = b;
+        }
+
+        return buckets.Select((kv) => new TimelineDay(kv.Key, kv.Value.C, kv.Value.W, kv.Value.R, kv.Value.L, kv.Value.O, kv.Value.F)).ToList();
+    }
+
     /// <summary><paramref name="Source"/>：<c>archive</c> = 读归档 / <c>scan</c> = 回扫消息。</summary>
     public sealed record Result(
         IReadOnlyList<Entry> Items,

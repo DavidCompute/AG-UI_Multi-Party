@@ -712,6 +712,16 @@ public static class AdminApi
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 归档占用与手动清理（1.0.319）
+        root.MapGet("/work-audits/timeline", (int? days, string? agentId, string? groupId, string? q,
+            GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
+        {
+            var archive = sp.GetService<WorkAuditArchive>();
+            var clamped = Math.Clamp(days ?? 7, 1, 90);
+            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
+                clamped, agentId, groupId, q, 5000);
+            return Results.Ok(new { days = WorkAuditReport.Timeline(r.Items, clamped), window = clamped });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         root.MapGet("/work-audits/storage", (AgentOptions options, IServiceProvider sp) =>
         {
             var archive = sp.GetService<WorkAuditArchive>();
@@ -742,6 +752,43 @@ public static class AdminApi
             audit.Record("admin.workaudit.sweep", me, auth.GetUser(me)?.Username,
                 targetType: "workAudit", targetId: "*", detail: $"清理 {deleted} 个过期归档分片");
             return Results.Ok(new { ok = true, deleted, retentionDays = options.WorkAuditRetentionDays });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 工作区批量下载（1.0.321）：按相对路径打包 ZIP（仅文件；单次 200 个 / 200 MB 上限）。
+        root.MapPost("/workspaces/{agentId}/download", (string agentId, WorkspaceDownloadRequest req, AgentOptions options,
+            Microsoft.Extensions.Hosting.IHostEnvironment env) =>
+        {
+            var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
+            var dir = WorkspaceMaintenance.ResolveWorkspaceDir(root, agentId);
+            if (dir is null) return Results.BadRequest(new { error = "invalid_agent_id" });
+
+            var paths = (req.Paths ?? []).Where((p) => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.Ordinal).ToList();
+            if (paths.Count == 0) return Results.BadRequest(new { error = "missing_paths" });
+            if (paths.Count > 200) return Results.BadRequest(new { error = "too_many_files" });
+
+            const long maxTotalBytes = 200L * 1024 * 1024;
+            long total = 0;
+            var added = 0;
+            using var ms = new MemoryStream();
+            using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var rel in paths)
+                {
+                    var full = WorkspaceMaintenance.ResolveFile(dir, rel);
+                    if (full is null) continue; // 不存在 / 越界：跳过
+                    var size = new FileInfo(full).Length;
+                    if (total + size > maxTotalBytes) return Results.BadRequest(new { error = "too_large" });
+                    total += size;
+                    var entry = zip.CreateEntry(Path.GetRelativePath(dir, full).Replace('\\', '/'), System.IO.Compression.CompressionLevel.Fastest);
+                    using var target = entry.Open();
+                    using var source = File.OpenRead(full);
+                    source.CopyTo(target);
+                    added++;
+                }
+            }
+            // 空 Zip 归档也会写出 22 字节的中央目录，所以按「实际加入的条目数」判断（1.0.321）。
+            if (added == 0) return Results.BadRequest(new { error = "no_files" });
+            return Results.File(ms.ToArray(), "application/zip", $"workspace-{agentId}.zip");
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 工作区文件操作（1.0.315）：删除单文件 / 新建目录；同样走路径校验 + 审计日志。
@@ -1308,3 +1355,6 @@ public sealed record AdminPasswordHttpRequest(string NewPassword);
 
 /// <summary>平台角色设置请求体（RBAC 分层，仅超级管理员）：role 取 user / operator / admin / superadmin。</summary>
 public sealed record AdminRoleHttpRequest(string Role);
+
+/// <summary>工作区批量下载请求体（1.0.321）：工作区内相对路径列表。</summary>
+public sealed record WorkspaceDownloadRequest(IReadOnlyList<string>? Paths);

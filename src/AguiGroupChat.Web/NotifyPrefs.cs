@@ -19,6 +19,19 @@ public sealed class NotifyUserPrefs
 
     /// <summary>标题或正文包含任一关键词时不弹浮窗（不区分大小写）。</summary>
     public List<string>? MuteKeywords { get; set; }
+
+    /// <summary>自定义模板（1.0.321）：一键套用的一组范围 + 规则。</summary>
+    public List<NotifyPreset>? Presets { get; set; }
+}
+
+/// <summary>自定义通知模板（1.0.321）。</summary>
+public sealed class NotifyPreset
+{
+    public string? Name { get; set; }
+    public List<string>? ToastTypes { get; set; }
+    public List<string>? MuteGroups { get; set; }
+    public List<string>? MuteSenders { get; set; }
+    public List<string>? MuteKeywords { get; set; }
 }
 
 /// <summary>
@@ -58,6 +71,7 @@ public static class NotifyPrefsApi
                 muteGroups = prefs?.MuteGroups ?? [],
                 muteSenders = prefs?.MuteSenders ?? [],
                 muteKeywords = prefs?.MuteKeywords ?? [],
+                presets = prefs?.Presets ?? [],
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
@@ -76,6 +90,8 @@ public static class NotifyPrefsApi
                 prefs.MuteSenders = Clean(req.MuteSenders);
             if (req.MuteKeywords is not null)
                 prefs.MuteKeywords = Clean(req.MuteKeywords);
+            if (req.Presets is not null)
+                prefs.Presets = CleanPresets(req.Presets);
 
             state.Users[uid] = prefs;
             changes.Notify(); // 驱动持久化
@@ -86,6 +102,7 @@ public static class NotifyPrefsApi
                 muteGroups = prefs.MuteGroups ?? [],
                 muteSenders = prefs.MuteSenders ?? [],
                 muteKeywords = prefs.MuteKeywords ?? [],
+                presets = prefs.Presets ?? [],
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
     }
@@ -98,6 +115,21 @@ public static class NotifyPrefsApi
             .Where((x) => x.Length <= MaxValueChars && (allow is null || allow(x)))
             .Distinct(StringComparer.Ordinal)
             .Take(MaxListItems)
+            .ToList();
+
+    /// <summary>模板清理（1.0.321）：名称 ≤ 40 字、最多 10 个、各字段同样清洗。</summary>
+    private static List<NotifyPreset> CleanPresets(IReadOnlyList<NotifyPreset>? presets)
+        => (presets ?? [])
+            .Where((p) => p is not null && !string.IsNullOrWhiteSpace(p.Name))
+            .Select((p) => new NotifyPreset
+            {
+                Name = p.Name!.Trim().Length <= 40 ? p.Name!.Trim() : p.Name!.Trim()[..40],
+                ToastTypes = p.ToastTypes is null ? null : Clean(p.ToastTypes, KnownTypes.Contains),
+                MuteGroups = Clean(p.MuteGroups),
+                MuteSenders = Clean(p.MuteSenders),
+                MuteKeywords = Clean(p.MuteKeywords),
+            })
+            .Take(10)
             .ToList();
 
     /// <summary>注册到持久化扩展区「notifyPrefs」：重启后恢复；兼容 1.0.318 的「userId → 类型数组」旧格式。</summary>
@@ -129,6 +161,7 @@ public static class NotifyPrefsApi
                         MuteGroups = Clean(prefs.MuteGroups),
                         MuteSenders = Clean(prefs.MuteSenders),
                         MuteKeywords = Clean(prefs.MuteKeywords),
+                        Presets = CleanPresets(prefs.Presets),
                     };
                 }
                 catch { /* 单条损坏：跳过 */ }
@@ -147,4 +180,5 @@ public sealed record NotifyPrefsHttpRequest(
     IReadOnlyList<string>? ToastTypes = null,
     IReadOnlyList<string>? MuteGroups = null,
     IReadOnlyList<string>? MuteSenders = null,
-    IReadOnlyList<string>? MuteKeywords = null);
+    IReadOnlyList<string>? MuteKeywords = null,
+    IReadOnlyList<NotifyPreset>? Presets = null);

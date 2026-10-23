@@ -104,6 +104,42 @@ public sealed class WorkAuditReportTests
     }
 
     [Fact]
+    public void Timeline_BucketsByDayAndPadsMissingDays()
+    {
+        var store = NewStore();
+        var now = DateTimeOffset.UtcNow;
+        store.AddMessage(Msg("m1", "agent_a", now.ToUnixTimeMilliseconds(), PlanWithTwo));
+        store.AddMessage(Msg("m2", "agent_a", now.AddDays(-2).ToUnixTimeMilliseconds(), """
+            {"audit":[{"tool":"work_write_file","text":"💾 a.txt","ok":true,"durationMs":2}]}
+            """));
+        // 超出窗口：不参与统计
+        store.AddMessage(Msg("old", "agent_a", now.AddDays(-30).ToUnixTimeMilliseconds(), PlanWithTwo));
+
+        var items = WorkAuditReport.Collect(store, null, 7, null, null, 100).Items;
+        var days = WorkAuditReport.Timeline(items, 7);
+
+        Assert.Equal(7, days.Count);
+        var today = days[^1];
+        Assert.Equal(1, today.Commands);
+        Assert.Equal(1, today.Failed); // 失败单列，不重复计入命令
+        Assert.Equal(2, today.Total);
+        var twoDaysAgo = days[^3];
+        Assert.Equal(1, twoDaysAgo.Writes);
+        Assert.Equal(1, twoDaysAgo.Total);
+        // 中间的空白日补 0
+        Assert.Equal(0, days[^2].Total);
+        Assert.True(days.Select((d) => d.Date).SequenceEqual(days.Select((d) => d.Date).OrderBy((d) => d, StringComparer.Ordinal)));
+    }
+
+    [Fact]
+    public void Timeline_ClampsWindowToOneThroughNinetyDays()
+    {
+        Assert.Equal(7, WorkAuditReport.Timeline([], 0).Count); // 0 → 默认 7 天
+        Assert.Equal(90, WorkAuditReport.Timeline([], 999).Count);
+        Assert.Equal(3, WorkAuditReport.Timeline([], 3).Count);
+    }
+
+    [Fact]
     public void ToCsv_HasBomHeaderAndEscapesQuotes()
     {
         var store = NewStore();
