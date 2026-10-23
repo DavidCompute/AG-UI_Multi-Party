@@ -313,6 +313,28 @@ public static class WorkAuditReport
         => DateTimeOffset.FromUnixTimeMilliseconds(atMs).ToLocalTime()
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
+    /// <summary>看板导出 CSV（1.0.323）：一行一个桶（天 / 员工 / 知聚），带失败率与 BOM。</summary>
+    public static string ToTimelineCsv(IReadOnlyList<TimelineBucket> buckets)
+    {
+        var sb = new StringBuilder();
+        sb.Append('\uFEFF');
+        sb.AppendLine("bucket,total,commands,writes,reads,listings,other,failed,failureRate");
+        foreach (var b in buckets)
+        {
+            var rate = b.Total > 0 ? b.Failed * 100.0 / b.Total : 0;
+            sb.Append(Esc(b.Key)).Append(',')
+              .Append(b.Total).Append(',')
+              .Append(b.Commands).Append(',')
+              .Append(b.Writes).Append(',')
+              .Append(b.Reads).Append(',')
+              .Append(b.Listings).Append(',')
+              .Append(b.Other).Append(',')
+              .Append(b.Failed).Append(',')
+              .Append(rate.ToString("F1", CultureInfo.InvariantCulture)).Append('\n');
+        }
+        return sb.ToString();
+    }
+
     private static string Esc(string? v)
     {
         var s = v ?? "";

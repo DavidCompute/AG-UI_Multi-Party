@@ -162,6 +162,25 @@ public sealed class WorkAuditReportTests
     }
 
     [Fact]
+    public void ToTimelineCsv_HasBomAndFailureRate()
+    {
+        var buckets = new List<WorkAuditReport.TimelineBucket>
+        {
+            new("agent_a", "agent_a", 2, 0, 0, 0, 0, 2),
+            new("agent_b", "agent_b", 0, 1, 0, 0, 0, 0),
+        };
+
+        var csv = WorkAuditReport.ToTimelineCsv(buckets);
+
+        Assert.StartsWith("\uFEFF", csv);
+        var lines = csv.TrimEnd('\n').Split('\n');
+        Assert.Equal(3, lines.Length);
+        Assert.StartsWith("bucket,total,commands,writes,reads,listings,other,failed,failureRate", lines[0]);
+        Assert.Equal("agent_a,4,2,0,0,0,0,2,50.0", lines[1]);
+        Assert.Equal("agent_b,1,0,1,0,0,0,0,0.0", lines[2]);
+    }
+
+    [Fact]
     public void Timeline_ClampsWindowToOneThroughNinetyDays()
     {
         Assert.Equal(7, WorkAuditReport.Timeline([], 0).Count); // 0 → 默认 7 天

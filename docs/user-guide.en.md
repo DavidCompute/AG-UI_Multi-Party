@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.322**
+> Applies to version: **1.0.323**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1732,6 +1732,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Composition (1.0.320)**: the same line adds the tool breakdown (commands / writes / reads / listings), total entries and failure count, so it is clear where the volume comes from;
 - **Per-day chart (1.0.321)**: the audit area gains a stacked bar chart per day (`GET /ag-ui/admin/work-audits/timeline?days=&agentId=&groupId=&q=`). Each column is one day, segmented by commands / writes / reads / listings / other / failed (failures form their own segment instead of double-counting a category), and hovering shows the date and total. The window is 1–90 days and follows the active filters.
 - **Chart dimensions (1.0.322)**: a three-way switch above the chart picks **by day / by agent / by circle** (`by=day|agent|group`, default `day`, unknown values fall back to `day`). The response is unified as `buckets[{key,label,commands,writes,reads,listings,other,failed,total}]`; agent and circle buckets sort by total descending and use the nickname / circle name as the label (falling back to the id), with long labels truncated and the full text kept in the tooltip.
+- **Failure-rate line and chart export (1.0.323)**: the chart overlays a **failure-rate line** (pure SVG, `failed/total`, broken across empty buckets so missing data never reads as 0%), and the tooltip adds the percentage. The audit toolbar gains **📊 Chart CSV** (`GET /ag-ui/admin/work-audits/timeline.csv?days=&by=&agentId=&groupId=&q=`), exporting the current dimension and filters as `bucket,total,commands,…,failed,failureRate` with a BOM.
 - Summaries only (never file contents or credentials), capped at 60 entries per answer.
 
 **Workspace quota and cleanup (1.0.311)**
@@ -1749,6 +1750,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Inline preview (1.0.314)**: text files (txt / md / json / csv / code, ≤512 KB) and images (png / jpg / gif / webp / svg, etc.) render right in the panel; everything else is download-only.
 - **File operations (1.0.315)**: each row's **🗑 Delete** removes a single file (with confirmation and an `admin.workspaces.delete` audit entry); the panel toolbar's **＋ New folder** creates nested directories (`admin.workspaces.mkdir`). Both share the browser's path checks and reject escapes with 400.
 - **Uploads (1.0.316)**: the toolbar's **⬆ Upload** writes selected files into the workspace (50 MB per file, `admin.workspaces.upload` audit entry; re-uploading overwrites a same-named file).
+- **Folders and drag-drop (1.0.323)**: drop files or whole folders onto the file panel (`webkitGetAsEntry` recursion keeps the folder structure); a `webkitdirectory` picker uploads a folder too. A new **Overwrite** checkbox controls collisions — unchecked skips existing files untouched (`?overwrite=false` returns `{ok:true,skipped:true}`), and the toast reports saved / skipped / failed counts.
 - **Folder navigation (1.0.317)**: the file panel now browses **one level at a time** (`?path=` lists direct children, folders first), with a clickable **Root / a / b** breadcrumb; uploads and new folders land in the **current folder**, as do delete / preview / download.
 - **File search (1.0.318)**: the toolbar search box matches **file names** recursively across the workspace (up to 500 hits, count shown next to the breadcrumb); results show the full relative path and keep preview / download / delete actions.
 - **Content search (1.0.319)**: a **File name / Content** toggle sits next to the search box. Content mode walks text files and reports the first hit (binary and >1 MB files skipped, 32 MB total scan cap, up to 100 hits) with a line number and surrounding snippet; preview / download / delete still work.
@@ -3920,7 +3922,7 @@ Different admin endpoints use **different minimum roles** (governed by `RequireR
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API keys | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`, `DELETE /ag-ui/admin/api-keys/{id}` (see 8.20) |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | Agent performance | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | Evaluation | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`, `DELETE …/{id}`, `POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | Workspaces | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`, `POST …/cleanup[?agentId=]`, `GET …/{agentId}/files[?path=&q=&scope=content]`, `GET …/{agentId}/file?path=`, `DELETE …/{agentId}/file?path=`, `POST …/{agentId}/dir?path=`, `POST …/{agentId}/upload`, `POST …/{agentId}/download`, `GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`, `GET …/work-audits/storage`, `POST …/work-audits/sweep`, `GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group` (1.0.312–1.0.322) |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | Workspaces | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`, `POST …/cleanup[?agentId=]`, `GET …/{agentId}/files[?path=&q=&scope=content]`, `GET …/{agentId}/file?path=`, `DELETE …/{agentId}/file?path=`, `POST …/{agentId}/dir?path=`, `POST …/{agentId}/upload` (supports `overwrite=false`), `POST …/{agentId}/download`, `GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`, `GET …/work-audits/storage`, `POST …/work-audits/sweep`, `GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group`, `GET …/work-audits/timeline.csv?…&by=` (1.0.312–1.0.323) |
 
 Opening and switching (`app.js`):
 

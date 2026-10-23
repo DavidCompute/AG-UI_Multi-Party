@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.322 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.322 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.323 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.323 Release Notes (current Windows desktop release)
+
+**版本说明**：**看板看失败率 + 拖拽整目录上传 + 看板可导出**——柱图叠加失败率折线；文件 / 文件夹可以直接拖进工作区，并可选「不覆盖同名」；看板能按当前维度导出 CSV。
+**Version note**: **Failure rate on the chart, drag-and-drop folders, chart export** — the chart overlays a failure-rate line; files and folders drop straight into a workspace with an optional no-overwrite rule; the chart exports the current dimension as CSV.
+
+## 变更
+# Changes
+
+中文：
+- **失败率折线**：`renderWorkAuditChart()` 用一条 SVG 折线把 `failed/total` 叠在堆叠柱上（`preserveAspectRatio=none` + `non-scaling-stroke`，空桶断成多段，避免把「无数据」误读成 0%），悬停额外给出百分比，图例增加「失败率」。
+- **文件夹拖拽与覆盖策略**：`collectDroppedEntries()` 用 `webkitGetAsEntry()` 递归目录（`readEntries` 循环到空，保留子路径），工具栏新增「覆盖同名」勾选；上传接口新增 `overwrite=false`，同名文件直接返回 `{ok:true,skipped:true}`，前端分别统计成功 / 跳过 / 失败。
+- **看板 CSV**：新增 `GET /ag-ui/admin/work-audits/timeline.csv`（与 JSON 端点同一套 `Collect` + 维度归一 + `TimelineBuckets()`），列 `bucket,total,commands,writes,reads,listings,other,failed,failureRate`，带 BOM；工具栏「📊 看板 CSV」按当前维度与筛选下载。
+
+English:
+- **Failure-rate line**: `renderWorkAuditChart()` overlays `failed/total` as an SVG polyline on the stacked bars (`preserveAspectRatio=none` plus `non-scaling-stroke`; empty buckets break the line so "no data" never reads as 0%). The tooltip adds the percentage and the legend gains a failure-rate key.
+- **Folder drag-and-drop and overwrite policy**: `collectDroppedEntries()` recurses directories via `webkitGetAsEntry()` (looping `readEntries` until empty, preserving sub-paths); the toolbar gains an **Overwrite** checkbox, and the upload endpoint accepts `overwrite=false`, returning `{ok:true,skipped:true}` for existing names while the UI counts saved / skipped / failed.
+- **Chart CSV**: new `GET /ag-ui/admin/work-audits/timeline.csv` (same `Collect`, dimension normalisation and `TimelineBuckets()` as the JSON endpoint) with `bucket,total,commands,writes,reads,listings,other,failed,failureRate` and a BOM; the **📊 Chart CSV** button exports the current dimension and filters.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（失败率折线 / 拖拽上传 / 看板 CSV）、§8.2（页签表补 `timeline.csv` 与 `overwrite=`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.323。
+English: `docs/user-guide.md` / `en.md` §3.13 (failure-rate line / drag-drop upload / chart CSV), §8.2 (tab table gains `timeline.csv` and `overwrite=`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.323.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2229，missing 0**；新增 `ToTimelineCsv_HasBomAndFailureRate`；Docker 冒烟验证 CSV 三字节 BOM + 表头、`overwrite=false` 保留原内容、强制覆盖生效、子路径上传与整目录打包；全量 `dotnet test` **1918 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2229, missing 0**; `ToTimelineCsv_HasBomAndFailureRate` is new; the Docker smoke verifies the 3-byte BOM and header, that `overwrite=false` keeps the original, that forcing overwrite takes effect, and nested upload plus whole-folder packaging; the full `dotnet test` run passes **1918 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.322 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.322 Release Notes (historical)
 
 **版本说明**：**看板可换维度 + 整目录打包 + 模板可导入导出**——审计柱图能在「按天 / 按员工 / 按知聚」之间切换；工作区可以一键把当前目录（含子目录）打包下载；通知模板能导出成 JSON 再导入。
 **Version note**: **Chart dimensions, whole-folder download, portable presets** — the audit chart switches between day / agent / circle; a workspace folder can be packaged in one click; notification presets export to and import from JSON.

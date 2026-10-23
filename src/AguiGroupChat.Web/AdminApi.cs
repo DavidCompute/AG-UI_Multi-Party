@@ -720,16 +720,21 @@ public static class AdminApi
             var clamped = Math.Clamp(days ?? 7, 1, 90);
             var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
                 clamped, agentId, groupId, q, 5000);
-            var dim = string.Equals(by, "agent", StringComparison.OrdinalIgnoreCase) ? "agent"
-                : string.Equals(by, "group", StringComparison.OrdinalIgnoreCase) ? "group"
-                : "day";
-            var buckets = dim == "day"
-                ? WorkAuditReport.Timeline(r.Items, clamped)
-                    .Select((d) => new WorkAuditReport.TimelineBucket(d.Date, d.Date.Length > 5 ? d.Date[5..] : d.Date,
-                        d.Commands, d.Writes, d.Reads, d.Listings, d.Other, d.Failed))
-                    .ToList()
-                : WorkAuditReport.GroupTimeline(r.Items, dim);
-            return Results.Ok(new { by = dim, window = clamped, buckets });
+            var dim = NormalizeTimelineDim(by);
+            return Results.Ok(new { by = dim, window = clamped, buckets = TimelineBuckets(r.Items, clamped, dim) });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 看板导出 CSV（1.0.323）：与当前维度 / 筛选同一口径，一行一个桶。
+        root.MapGet("/work-audits/timeline.csv", (int? days, string? agentId, string? groupId, string? q, string? by,
+            GroupHub hub, AgentCatalog catalog, IServiceProvider sp) =>
+        {
+            var archive = sp.GetService<WorkAuditArchive>();
+            var clamped = Math.Clamp(days ?? 7, 1, 90);
+            var r = WorkAuditReport.Collect(hub.Store, id => catalog.GetDefinition(id)?.Nickname, archive,
+                clamped, agentId, groupId, q, 5000);
+            var dim = NormalizeTimelineDim(by);
+            var csv = WorkAuditReport.ToTimelineCsv(TimelineBuckets(r.Items, clamped, dim));
+            return Results.File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"work-audit-timeline-{dim}-{clamped}d.csv");
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         root.MapGet("/work-audits/storage", (AgentOptions options, IServiceProvider sp) =>
@@ -859,7 +864,7 @@ public static class AdminApi
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 工作区文件上传（1.0.316）：multipart/form-data，可指定相对路径（默认用原文件名）；单文件上限 50 MB。
-        root.MapPost("/workspaces/{agentId}/upload", async (string agentId, string? path, HttpContext ctx, AgentOptions options,
+        root.MapPost("/workspaces/{agentId}/upload", async (string agentId, string? path, bool? overwrite, HttpContext ctx, AgentOptions options,
             AuthService auth, Microsoft.Extensions.Hosting.IHostEnvironment env, AguiGroupChat.Hub.Infra.AuditLogService audit) =>
         {
             var root = WorkspaceMaintenance.ResolveRoot(options.WorkSpaceRoot, env.ContentRootPath);
@@ -879,6 +884,10 @@ public static class AdminApi
 
             var parent = Path.GetDirectoryName(full);
             if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+
+            // 覆盖策略（1.0.323）：overwrite=false 时同名文件直接跳过，不改动已有内容。
+            if (overwrite == false && File.Exists(full))
+                return Results.Ok(new { ok = true, skipped = true, agentId, path = Path.GetRelativePath(dir, full).Replace('\\', '/') });
             await using (var stream = file.OpenReadStream())
             await using (var target = File.Create(full))
             {
@@ -1382,6 +1391,22 @@ public static class AdminApi
         try { return action(); }
         catch (AguiProtocolException ex) { return Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)); }
     }
+
+    /// <summary>看板维度归一（1.0.323）：非法值统一回落到按天。</summary>
+    private static string NormalizeTimelineDim(string? by)
+        => string.Equals(by, "agent", StringComparison.OrdinalIgnoreCase) ? "agent"
+         : string.Equals(by, "group", StringComparison.OrdinalIgnoreCase) ? "group"
+         : "day";
+
+    /// <summary>按维度算看板桶（1.0.323）：日维度补零，员工 / 知聚维度按总量排序。</summary>
+    private static IReadOnlyList<WorkAuditReport.TimelineBucket> TimelineBuckets(
+        IReadOnlyList<WorkAuditReport.Entry> items, int days, string dim)
+        => dim == "day"
+            ? WorkAuditReport.Timeline(items, days)
+                .Select((d) => new WorkAuditReport.TimelineBucket(d.Date, d.Date.Length > 5 ? d.Date[5..] : d.Date,
+                    d.Commands, d.Writes, d.Reads, d.Listings, d.Other, d.Failed))
+                .ToList()
+            : WorkAuditReport.GroupTimeline(items, dim);
 
     /// <summary>往批量下载 ZIP 里写一个文件（1.0.322）：超出总上限时返回错误码，否则返回 null。</summary>
     private static string? TryAddZipEntry(System.IO.Compression.ZipArchive zip, string full, string rel,

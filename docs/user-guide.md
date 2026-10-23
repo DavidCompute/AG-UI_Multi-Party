@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.322**
+> 适用版本：**1.0.323**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1730,6 +1730,7 @@
 - **体量构成（1.0.320）**：同一行再给出工具分布（命令 / 写入 / 读取 / 目录各多少条）、总条数与异常条数，便于判断审计体量来源；
 - **按天看板（1.0.321）**：审计区顶部新增按天堆叠柱图（`GET /ag-ui/admin/work-audits/timeline?days=&agentId=&groupId=&q=`），每天一根柱，段颜色区分命令 / 写入 / 读取 / 目录 / 其他 / 失败（失败单独成段、不重复计入分类），悬停给出当天日期与总量；窗口 1–90 天，跟随当前筛选条件。
 - **看板维度切换（1.0.322）**：柱图上方新增「按天 / 按员工 / 按知聚」三段开关（`by=day|agent|group`，默认 `day`，非法值回落到 `day`），响应统一为 `buckets[{key,label,commands,writes,reads,listings,other,failed,total}]`；员工 / 知聚维度按总量降序、标签取昵称 / 知聚名（缺失回落到 id），长标签截断并保留完整悬停提示。
+- **失败率折线与新导出（1.0.323）**：柱图叠加一条**失败率折线**（纯 SVG，`failed/total`，空桶断开避免误读 0%），悬停额外给出当日 / 当员工的失败百分比；审计工具栏新增「📊 看板 CSV」（`GET /ag-ui/admin/work-audits/timeline.csv?days=&by=&agentId=&groupId=&q=`），导出当前维度与筛选口径的 `bucket,total,commands,…,failed,failureRate`（带 BOM）。
 - 只记摘要（不含文件正文与凭证），单次回答上限 60 条。
 
 **工作区容量治理（1.0.311）**
@@ -1747,6 +1748,7 @@
 - **在线预览（1.0.314）**：文本类（txt / md / json / csv / 代码 等，≤512 KB）与图片类（png / jpg / gif / webp / svg 等）可在面板内直接看，其余只给下载。
 - **文件操作（1.0.315）**：每行「🗑 删除」删单个文件（二次确认，写审计日志 `admin.workspaces.delete`）；面板工具栏「＋ 新建目录」建多级目录（`admin.workspaces.mkdir`）。两者与浏览同一套路径校验，越界一律 400。
 - **上传（1.0.316）**：面板工具栏「⬆ 上传」支持多选文件直接写入工作区（单文件 50 MB 上限，写审计日志 `admin.workspaces.upload`；可重复上传覆盖同名文件）。
+- **文件夹上传与拖拽（1.0.323）**：可以直接把文件 / 文件夹拖进文件面板（`webkitGetAsEntry` 逐层递归，保留子目录结构）；选择框也带 `webkitdirectory` 时可整目录上传。工具栏新增「覆盖同名」勾选：不勾时同名文件**直接跳过不改动**（接口 `?overwrite=false` 返回 `{ok:true,skipped:true}`），结束后分别提示成功 / 跳过 / 失败数量。
 - **目录导航（1.0.317）**：文件面板改为**逐层浏览**（`?path=` 只列直接子项，目录排在文件前），顶部面包屑「根 / a / b」可点回退；上传与新建目录都落在**当前目录**下，删除 / 预览 / 下载同理。
 - **文件搜索（1.0.318）**：面板工具栏搜索框按**文件名**在工作区内递归匹配（最多 500 条，面包屑处标命中数）；搜到后显示完整相对路径，可直接预览 / 下载 / 删除。
 - **内容搜索（1.0.319）**：搜索框旁「文件名 / 内容」切换。内容模式遍历工作区文本文件找首个命中（跳过二进制与 >1 MB 的文件，总扫描量上限 32 MB，最多 100 条），结果带上行号与前后片段；预览 / 下载 / 删除照常可用。
@@ -3914,7 +3916,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys` |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | 员工绩效 | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | 评测回归 | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`、`DELETE …/{id}`、`POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files[?path=&q=&scope=content]`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`POST …/{agentId}/download`、`GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`、`GET …/work-audits/storage`、`POST …/work-audits/sweep`、`GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group`（1.0.312–1.0.322） |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files[?path=&q=&scope=content]`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`POST …/{agentId}/download`、`GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`、`GET …/work-audits/storage`、`POST …/work-audits/sweep`、`GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group`、`GET …/work-audits/timeline.csv?…&by=`（上传支持 `overwrite=false`；1.0.312–1.0.323） |
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`、`…/events`、`…/deliveries`、`…/{id}/test`（见 §8.19） |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`、`DELETE /ag-ui/admin/api-keys/{id}`（见 §8.20） |
 

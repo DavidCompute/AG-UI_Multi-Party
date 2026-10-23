@@ -2496,7 +2496,13 @@ button { white-space: nowrap; }
 .wa-chart-legend { display: flex; gap: 10px; flex-wrap: wrap; }
 .wa-chart-key { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
 .wa-chart-key i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
-.wa-chart-body { display: flex; align-items: flex-end; gap: 3px; height: 110px; padding: 0 2px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.wa-chart-body { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 110px; padding: 0 2px; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.wa-chart-line { position: absolute; left: 0; right: 0; top: 0; height: calc(100% - 14px); width: 100%; pointer-events: none; overflow: visible; }
+.wa-chart-line polyline { fill: none; stroke: #e5484d; stroke-width: 1.5; vector-effect: non-scaling-stroke; opacity: .9; }
+.wa-line-key { width: 14px; height: 2px; background: #e5484d; border-radius: 1px; display: inline-block; }
+.ws-overwrite { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ws-overwrite input { margin: 0; }
+.ws-drop-active { outline: 2px dashed var(--accent); outline-offset: -4px; background: rgba(79, 140, 255, 0.06); }
 .wa-chart-col { flex: 1 0 12px; min-width: 12px; height: 100%; display: grid; grid-template-rows: 1fr auto; align-items: end; }
 .wa-chart-col:hover .wa-chart-bar { filter: brightness(1.15); }
 .wa-chart-bar { width: 100%; max-width: 26px; margin: 0 auto; display: flex; flex-direction: column-reverse; border-radius: 2px 2px 0 0; overflow: hidden; }

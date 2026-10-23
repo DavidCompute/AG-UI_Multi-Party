@@ -10585,8 +10585,10 @@ function renderWorkAuditChart(buckets) {
   const totalOf = (d) => WA_CHART_SEGS.reduce((s, [k]) => s + (Number(d[k]) || 0), 0);
   const totals = buckets.map(totalOf);
   const max = Math.max(1, ...totals);
+  const rates = buckets.map((d, i) => (totals[i] > 0 ? (Number(d.failed) || 0) / totals[i] * 100 : null));
   const legend = WA_CHART_SEGS.map(([, cls, key]) =>
-    `<span class="wa-chart-key"><i class="${cls}"></i>${escapeHtml(t(key))}</span>`).join("");
+    `<span class="wa-chart-key"><i class="${cls}"></i>${escapeHtml(t(key))}</span>`).join("")
+    + `<span class="wa-chart-key"><i class="wa-line-key"></i>${escapeHtml(t("admin.waFailureRate"))}</span>`;
   const cols = buckets.map((d, i) => {
     const total = totals[i];
     const segs = WA_CHART_SEGS
@@ -10596,18 +10598,52 @@ function renderWorkAuditChart(buckets) {
     const h = total > 0 ? Math.max(4, total / max * 100) : 0;
     const full = String(d.label || d.key || "");
     const label = full.length > 10 ? full.slice(0, 9) + "…" : full;
-    return `<div class="wa-chart-col" title="${escapeHtml(full)} · ${total}">
+    const rate = rates[i] === null ? "" : ` · ⚠ ${rates[i].toFixed(0)}%`;
+    return `<div class="wa-chart-col" title="${escapeHtml(full)} · ${total}${rate}">
       <div class="wa-chart-bar" style="height:${h.toFixed(1)}%">${segs}</div>
       <span class="wa-chart-day">${escapeHtml(label)}</span>
     </div>`;
   }).join("");
+
+  // 失败率折线（1.0.323）：空桶断开成多段，避免把 0 当成真实失败率
+  const runs = [];
+  let run = [];
+  rates.forEach((r, i) => {
+    if (r === null) {
+      if (run.length) { runs.push(run); run = []; }
+      return;
+    }
+    run.push(`${(((i + 0.5) / buckets.length) * 100).toFixed(2)},${(100 - r).toFixed(2)}`);
+  });
+  if (run.length) runs.push(run);
+  const lines = runs.filter((r) => r.length >= 2)
+    .map((r) => `<polyline points="${r.join(" ")}" />`).join("");
+  const svg = lines
+    ? `<svg class="wa-chart-line" viewBox="0 0 100 100" preserveAspectRatio="none">${lines}</svg>`
+    : "";
+
   const empty = totals.every((x) => x === 0)
     ? `<div class="admin-empty">${escapeHtml(t("admin.waChartEmpty"))}</div>` : "";
   const titleKey = waChartBy === "agent" ? "admin.waChartTitleAgent"
     : waChartBy === "group" ? "admin.waChartTitleGroup" : "admin.waChartTitle";
   box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}
       <span class="wa-chart-legend">${legend}</span></div>
-    <div class="wa-chart-body">${empty || cols}</div>`;
+    <div class="wa-chart-body">${empty || svg + cols}</div>`;
+}
+
+/** 看板 CSV（1.0.323）：与当前维度 / 筛选同口径，一行一个桶。 */
+function exportWorkAuditChartCsv() {
+  const { days, q, groupId, agentId } = workAuditQuery();
+  let url = `/ag-ui/admin/work-audits/timeline.csv?days=${days}&by=${encodeURIComponent(waChartBy)}`;
+  if (q) url += "&q=" + encodeURIComponent(q);
+  if (groupId) url += "&groupId=" + encodeURIComponent(groupId);
+  if (agentId) url += "&agentId=" + encodeURIComponent(agentId);
+  const a = document.createElement("a");
+  a.href = authedAssetUrl(url);
+  a.download = `work-audit-timeline-${waChartBy}-${days}d.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /** 渲染审计表：平铺（每条操作一行）/ 聚合（每条消息一行 + 展开明细）。 */
@@ -10781,31 +10817,73 @@ async function deleteWorkspaceFile(agentId, f) {
   }
 }
 
-/** 上传文件到当前工作区（1.0.316）：逐个 POST multipart，全部结束后重拉清单。 */
+/** 上传文件到当前工作区（1.0.316；1.0.323 支持文件夹 / 拖拽）：逐个 POST multipart，全部结束后重拉清单。 */
 async function uploadWorkspaceFiles(input) {
-  const agentId = adminWsCurrentAgent;
   const files = Array.from(input?.files || []);
   if (input) input.value = "";
-  if (!agentId || !files.length) return;
+  await uploadWorkspaceEntries(adminWsCurrentAgent, files.map((f) => ({
+    file: f,
+    rel: f.webkitRelativePath || f.name,
+  })));
+}
+
+/** 上传一组 {file, rel}（1.0.323）：rel 是相对当前目录的路径（文件夹拖拽会带子路径）。 */
+async function uploadWorkspaceEntries(agentId, entries) {
+  if (!agentId || !entries.length) return;
+  const overwrite = !!$("wsOverwriteToggle")?.checked;
   let ok = 0;
+  let skipped = 0;
   let fail = 0;
-  for (const f of files) {
+  for (const it of entries) {
     try {
-      const target = wsJoinPath(adminWsCurrentPath, f.name);
+      const target = wsJoinPath(adminWsCurrentPath, it.rel);
       const fd = new FormData();
-      fd.append("file", f, f.name);
-      const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload?path=${encodeURIComponent(target)}`, {
+      fd.append("file", it.file, it.file.name);
+      const qs = `path=${encodeURIComponent(target)}` + (overwrite ? "" : "&overwrite=false");
+      const res = await fetch(`/ag-ui/admin/workspaces/${encodeURIComponent(agentId)}/upload?${qs}`, {
         method: "POST",
         headers: { Authorization: "Bearer " + state.token },
         body: fd,
       });
       const d = await res.json().catch(() => null);
-      if (res.ok && d && d.ok) ok++; else fail++;
+      if (res.ok && d && d.skipped) skipped++;
+      else if (res.ok && d && d.ok) ok++;
+      else fail++;
     } catch { fail++; }
   }
   if (ok) toast(t("admin.wsUploadDone", { count: ok }));
+  if (skipped) toast(t("admin.wsUploadSkipped", { count: skipped }));
   if (fail) toast(t("admin.wsUploadFail", { count: fail }));
   browseWorkspaceFiles(agentId, adminWsCurrentPath, adminWsSearch);
+}
+
+/** 把拖入的条目展平成 {file, rel}（1.0.323）：目录用 webkitGetAsEntry 递归；readEntries 每次最多 100 条，要循环到空。 */
+async function collectDroppedEntries(dt) {
+  const out = [];
+  const items = Array.from(dt?.items || []);
+  const roots = items.map((it) => it.webkitGetAsEntry?.()).filter(Boolean);
+  if (!roots.length) {
+    for (const f of Array.from(dt?.files || [])) out.push({ file: f, rel: f.name });
+    return out;
+  }
+  const walk = async (entry, prefix) => {
+    if (!entry) return;
+    if (entry.isFile) {
+      const file = await new Promise((res, rej) => entry.file(res, rej));
+      out.push({ file, rel: wsJoinPath(prefix, file.name) });
+      return;
+    }
+    if (!entry.isDirectory) return;
+    const reader = entry.createReader();
+    const dirPrefix = wsJoinPath(prefix, entry.name);
+    for (;;) {
+      const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      if (!batch.length) break;
+      for (const child of batch) await walk(child, dirPrefix);
+    }
+  };
+  for (const r of roots) await walk(r, "");
+  return out;
 }
 
 /** 新建目录（1.0.315）：输入相对路径，支持多级（a/b/c）。 */
@@ -16576,6 +16654,25 @@ function init() {
   $("wsNewDirBtn").onclick = () => createWorkspaceDir();
   $("wsUploadBtn").onclick = () => $("wsUploadInput").click();
   $("wsUploadInput").onchange = () => uploadWorkspaceFiles($("wsUploadInput"));
+  // 拖拽上传（1.0.323）：文件和文件夹都可以直接拖进文件面板
+  const wsDrop = $("adminWorkspaceFiles");
+  if (wsDrop) {
+    ["dragenter", "dragover"].forEach((ev) => wsDrop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      wsDrop.classList.add("ws-drop-active");
+    }));
+    wsDrop.addEventListener("dragleave", (e) => {
+      if (!wsDrop.contains(e.relatedTarget)) wsDrop.classList.remove("ws-drop-active");
+    });
+    wsDrop.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      wsDrop.classList.remove("ws-drop-active");
+      if (!adminWsCurrentAgent) return;
+      const entries = await collectDroppedEntries(e.dataTransfer);
+      if (entries.length) await uploadWorkspaceEntries(adminWsCurrentAgent, entries);
+    });
+  }
   // 批量操作（1.0.321）
   $("wsDownloadSelBtn").onclick = () => downloadSelectedWorkspaceFiles();
   $("wsDeleteSelBtn").onclick = () => deleteSelectedWorkspaceFiles();
@@ -16617,6 +16714,7 @@ function init() {
   $("waRefreshBtn").onclick = () => loadWorkAudits();
   $("waExportBtn").onclick = () => exportWorkAudits();
   $("waExportMonthsBtn").onclick = () => exportWorkAuditsByMonth();
+  $("waChartCsvBtn").onclick = () => exportWorkAuditChartCsv();
   $("waSweepBtn").onclick = () => sweepWorkAuditArchive();
   $("waGroup").onchange = () => loadWorkAudits();
   $("waAgent").onchange = () => loadWorkAudits();
