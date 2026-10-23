@@ -1399,13 +1399,14 @@ public static class AdminApi
         catch (AguiProtocolException ex) { return Results.BadRequest(new AguiError(ex.ErrorCode, ex.Message)); }
     }
 
-    /// <summary>看板维度归一（1.0.323）：非法值统一回落到按天。</summary>
+    /// <summary>看板维度归一（1.0.323；1.0.326 加按工具）：非法值统一回落到按天。</summary>
     private static string NormalizeTimelineDim(string? by)
         => string.Equals(by, "agent", StringComparison.OrdinalIgnoreCase) ? "agent"
          : string.Equals(by, "group", StringComparison.OrdinalIgnoreCase) ? "group"
+         : string.Equals(by, "tool", StringComparison.OrdinalIgnoreCase) ? "tool"
          : "day";
 
-    /// <summary>按维度算看板桶（1.0.323）：日维度补零，员工 / 知聚维度按总量排序。</summary>
+    /// <summary>按维度算看板桶（1.0.323）：日维度补零，员工 / 知聚 / 工具维度按总量排序。</summary>
     private static IReadOnlyList<WorkAuditReport.TimelineBucket> TimelineBuckets(
         IReadOnlyList<WorkAuditReport.Entry> items, int days, string dim)
         => dim == "day"
@@ -1413,7 +1414,9 @@ public static class AdminApi
                 .Select((d) => new WorkAuditReport.TimelineBucket(d.Date, d.Date.Length > 5 ? d.Date[5..] : d.Date,
                     d.Commands, d.Writes, d.Reads, d.Listings, d.Other, d.Failed))
                 .ToList()
-            : WorkAuditReport.GroupTimeline(items, dim);
+            : dim == "tool"
+                ? WorkAuditReport.ToolTimeline(items)
+                : WorkAuditReport.GroupTimeline(items, dim);
 
     /// <summary>往批量下载 ZIP 里写一个文件（1.0.322）：超出总上限时返回错误码，否则返回 null。</summary>
     private static string? TryAddZipEntry(System.IO.Compression.ZipArchive zip, string full, string rel,

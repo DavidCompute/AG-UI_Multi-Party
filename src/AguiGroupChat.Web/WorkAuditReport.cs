@@ -262,6 +262,31 @@ public static class WorkAuditReport
         return (rows, scanned);
     }
 
+    /// <summary>按「工具」聚合（1.0.326）：每根柱是一个工具分类（成功数），失败单独成段，总量降序。</summary>
+    public static IReadOnlyList<TimelineBucket> ToolTimeline(IReadOnlyList<Entry> items)
+    {
+        var map = new Dictionary<string, (int Ok, int F)>(StringComparer.Ordinal);
+        foreach (var e in items)
+        {
+            if (string.IsNullOrWhiteSpace(e.Tool)) continue;
+            map.TryGetValue(e.Tool, out var b);
+            if (e.Ok) b.Ok++;
+            else b.F++;
+            map[e.Tool] = b;
+        }
+        return map
+            .Select((kv) => new TimelineBucket(kv.Key, kv.Key,
+                kv.Key == "work_run_command" ? kv.Value.Ok : 0,
+                kv.Key == "work_write_file" ? kv.Value.Ok : 0,
+                kv.Key == "work_read_file" ? kv.Value.Ok : 0,
+                kv.Key == "work_list_dir" ? kv.Value.Ok : 0,
+                kv.Key is "work_run_command" or "work_write_file" or "work_read_file" or "work_list_dir" ? 0 : kv.Value.Ok,
+                kv.Value.F))
+            .OrderByDescending((x) => x.Total)
+            .ThenBy((x) => x.Key, StringComparer.Ordinal)
+            .ToList();
+    }
+
     /// <summary>按天钻取（1.0.324）：保留落在某个 UTC 日期内的审计行；date 为空 / 格式不合法时原样返回。</summary>
     public static IReadOnlyList<Entry> FilterByDate(IReadOnlyList<Entry> items, string? date)
     {

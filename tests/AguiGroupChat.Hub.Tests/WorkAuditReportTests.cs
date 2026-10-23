@@ -163,6 +163,36 @@ public sealed class WorkAuditReportTests
     }
 
     [Fact]
+    public void ToolTimeline_GroupsByToolWithFailures()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        WorkAuditReport.Entry Row(string id, string tool, bool ok) => new(
+            "g1", "市场推广", "agent_a", "agent_a", id, "main", now, tool, ok, 1, "x");
+        var items = new List<WorkAuditReport.Entry>
+        {
+            Row("m1", "work_run_command", true),
+            Row("m2", "work_run_command", true),
+            Row("m3", "work_run_command", false),
+            Row("m4", "work_write_file", true),
+            Row("m5", "skill_call", true),
+        };
+
+        var buckets = WorkAuditReport.ToolTimeline(items);
+
+        Assert.Equal(3, buckets.Count);
+        var cmd = buckets[0]; // 总量降序
+        Assert.Equal("work_run_command", cmd.Key);
+        Assert.Equal(2, cmd.Commands);
+        Assert.Equal(1, cmd.Failed);
+        Assert.Equal(3, cmd.Total);
+        var write = buckets.Single((b) => b.Key == "work_write_file");
+        Assert.Equal(1, write.Writes);
+        Assert.Equal(0, write.Failed);
+        var other = buckets.Single((b) => b.Key == "skill_call");
+        Assert.Equal(1, other.Other);
+    }
+
+    [Fact]
     public void FilterByTool_MatchesCategoriesAndLeavesUnknownAlone()
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

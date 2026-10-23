@@ -2404,6 +2404,7 @@
           <div id="wsUploadProgress" class="ws-progress hidden">
             <div id="wsUploadFill" class="ws-progress-fill"></div>
             <span id="wsUploadText" class="ws-progress-text"></span>
+            <button id="wsUploadRetryBtn" class="chip-btn ws-progress-retry hidden" type="button" data-i18n="admin.wsUploadRetry">↻ 重试失败</button>
             <button id="wsUploadCancelBtn" class="chip-btn ws-progress-cancel" type="button" data-i18n="admin.wsUploadCancel">取消</button>
           </div>
           <div id="adminWsBreadcrumb" class="ws-breadcrumb"></div>
@@ -2457,6 +2458,12 @@
           <button id="waExportBtn" class="chip-btn" type="button" data-i18n="admin.waExport">⬇ 导出 CSV</button>
           <button id="waExportMonthsBtn" class="chip-btn" type="button" data-i18n="admin.waExportMonths">🗂 按月份导出</button>
           <button id="waChartCsvBtn" class="chip-btn" type="button" data-i18n="admin.waChartCsv">📊 看板 CSV</button>
+          <!-- 筛选视图（1.0.326）：把当前天数 / 知聚 / 员工 / 工具 / 日期组合存起来 -->
+          <select id="waViewSel" class="modal-input" style="width:auto;min-width:140px">
+            <option value="" data-i18n="admin.waViewPlaceholder">筛选视图</option>
+          </select>
+          <button id="waViewSave" class="chip-btn" type="button" data-i18n="admin.waViewSave">＋ 保存视图</button>
+          <button id="waViewDelete" class="chip-btn" type="button" data-i18n="admin.waViewDelete">🗑 删除视图</button>
           <span id="waStorage" class="form-hint"></span>
           <span id="waStorageTools" class="form-hint"></span>
           <button id="waSweepBtn" class="chip-btn" type="button" data-i18n="admin.waSweep">🧹 清理过期归档</button>
@@ -2467,6 +2474,7 @@
           <button class="chip-btn on" type="button" data-wa-by="day" data-i18n="admin.waByDay">按天</button>
           <button class="chip-btn" type="button" data-wa-by="agent" data-i18n="admin.waByAgent">按员工</button>
           <button class="chip-btn" type="button" data-wa-by="group" data-i18n="admin.waByGroup">按知聚</button>
+          <button class="chip-btn" type="button" data-wa-by="tool" data-i18n="admin.waByTool">按工具</button>
           <label class="ws-overwrite"><input id="waRateToggle" type="checkbox" checked /> <span data-i18n="admin.waFailureRate">失败率</span></label>
           <span id="waDateChip" class="wa-date-chip hidden"></span>
         </div>

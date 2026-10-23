@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.325 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.325 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.326 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.326 Release Notes (current Windows desktop release)
+
+**版本说明**：**看工具用量 + 筛选可存 + 失败可重试**——看板多了「按工具」维度；常用筛选组合能命名保存；上传失败项一键重传。
+**Version note**: **Tool-level chart, saved filter views, retryable uploads** — a fourth chart dimension by tool, named filter views, and one-click retry for failed uploads.
+
+## 变更
+# Changes
+
+中文：
+- **看板按工具**：新增 `WorkAuditReport.ToolTimeline()`（工具分类成功数 + 失败段，总量降序），`by=tool` 接入端点与前端第四段开关；点击柱体下钻到 `waTool` 筛选（工具名 → `command|write|read|list|other`）。
+- **筛选视图**：天数 / 关键词 / 知聚 / 员工 / 工具 / 日期 / 聚合开关可命名保存（同名覆盖，上限 20，按用户存 `localStorage`），下拉即可套用，套用后回填控件、日期 chip 并重拉表格与看板。
+- **上传重试**：批次内记录失败项（`wsUploadFailed`），失败时进度条不自动收起并显示「↻ 重试失败」；重试只重传失败项，成功 / 跳过的不重复上传。
+
+English:
+- **Chart by tool**: `WorkAuditReport.ToolTimeline()` (success counts per tool category plus a failure segment, sorted by total) backs `by=tool` and a fourth switch; clicking a column drills into `waTool` (tool name → `command|write|read|list|other`).
+- **Saved views**: days / keyword / circle / agent / tool / date / grouping can be named and saved (same name overwrites, max 20, stored per user in `localStorage`); picking one refills the controls and the date chip, then reloads both the table and the chart.
+- **Upload retry**: failures are collected per batch (`wsUploadFailed`); the progress bar stays visible and exposes **↻ Retry failed**, which re-sends only the failed entries.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（按工具维度 / 筛选视图 / 失败重试）、§8.2（页签表 `by=day|agent|group|tool`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.326。
+English: `docs/user-guide.md` / `en.md` §3.13 (tool dimension / saved views / retry), §8.2 (`by=day|agent|group|tool`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.326.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2251，missing 0**；新增 `ToolTimeline_GroupsByToolWithFailures`；Docker 冒烟验证四种维度 + `bogus→day` 回落、`by=tool` 的 CSV 文件名 / BOM / 表头；全量 `dotnet test` **1921 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2251, missing 0**; `ToolTimeline_GroupsByToolWithFailures` is new; the Docker smoke verifies all four dimensions plus the `bogus→day` fallback and the `by=tool` CSV name / BOM / header; the full `dotnet test` run passes **1921 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.325 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.325 Release Notes (historical)
 
 **版本说明**：**下钻看得见 + 上传能取消 + 审计可按工具筛**——当前筛选的柱体高亮；大文件夹传错了可以中途停下；审计表格可以只看命令 / 写入 / 读取 / 目录。
 **Version note**: **Visible drill-down, cancellable uploads, tool filtering** — the drilled column is highlighted, a folder upload can be stopped midway, and the audit table can be narrowed to one tool category.
