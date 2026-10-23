@@ -255,6 +255,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
   - **Segment drill-down, pausable uploads, server-synced views (1.0.328)**: click an agent segment to filter the table; uploads pause and resume at chunk boundaries; audit views live on the server (`auditViews`) so devices agree.
   - **Segment tooltips, pause hint, default view (1.0.329)**: agent segments reveal their tool mix, the first pause explains itself, and a default view applies whenever the tab opens.
   - **Reset, filter-aware chart, upload queue (1.0.330)**: reset every audit filter at once; the chart narrows to the drilled agent or circle; uploads list each file's state.
+  - **Retry selected, show all, searchable views (1.0.331)**: tick failed uploads to retry just those, return the chart to the full set in one click, and filter saved views by typing.
   - Frontend: the admin console gained a "Configuration Governance" tab (parameter grid + toggles + approval / embed origins), with load-and-backfill (unset items are tri-state, falling back to defaults), save with immediate effect, and refresh.
   - Includes 2 integration tests (admin update persists + invalid value 400 / non-admin 403).
   - **Config-key guard (implemented)**: `tools/check-config-keys.mjs` statically checks "config keys in compose / appsettings ↔ C# option properties" — turning the "set but no property, silently ignored" trap documented in §9.9 from a **manual note** into an **automated guard** (an allowlist records intentional exceptions; `--no-allowlist` self-checks / audits).

@@ -2413,6 +2413,7 @@
             <div class="ws-queue-head">
               <b data-i18n="admin.wsQueueTitle">上传队列</b>
               <span id="wsQueueSummary" class="form-hint"></span>
+              <button id="wsQueueRetrySel" class="chip-btn hidden" type="button" data-i18n="admin.wsQueueRetrySel">↻ 重试选中</button>
               <button id="wsQueueClose" class="chip-btn" type="button" data-i18n="admin.wsQueueClose">收起</button>
             </div>
             <div id="wsQueueRows" class="ws-queue-rows"></div>
@@ -2469,7 +2470,8 @@
           <button id="waExportBtn" class="chip-btn" type="button" data-i18n="admin.waExport">⬇ 导出 CSV</button>
           <button id="waExportMonthsBtn" class="chip-btn" type="button" data-i18n="admin.waExportMonths">🗂 按月份导出</button>
           <button id="waChartCsvBtn" class="chip-btn" type="button" data-i18n="admin.waChartCsv">📊 看板 CSV</button>
-          <!-- 筛选视图（1.0.326）：把当前天数 / 知聚 / 员工 / 工具 / 日期组合存起来 -->
+          <!-- 筛选视图（1.0.326；1.0.331 支持搜索） -->
+          <input id="waViewSearch" class="modal-input" style="width:auto;min-width:110px" data-i18n-placeholder="admin.waViewSearch" />
           <select id="waViewSel" class="modal-input" style="width:auto;min-width:140px">
             <option value="" data-i18n="admin.waViewPlaceholder">筛选视图</option>
           </select>

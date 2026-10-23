@@ -10627,6 +10627,7 @@ function drillWorkAudit(bucket) {
 /* ---- 审计筛选视图（1.0.326；1.0.328 上云；1.0.329 加默认视图）---- */
 const WA_VIEW_MAX = 20;
 let waDefaultView = "";
+let waViewFilter = ""; // 视图搜索词（1.0.331）
 
 function waViewsKey() {
   return "agui.waViews." + (state.memberId || "anon");
@@ -10681,23 +10682,24 @@ async function syncWaViewsFromServer() {
 function renderWaViews() {
   const sel = $("waViewSel");
   if (!sel) return;
+  const all = loadWaViews();
   const current = sel.value;
-  const list = loadWaViews();
+  const q = waViewFilter.trim().toLowerCase();
+  const list = q ? all.filter((v) => String(v.name).toLowerCase().includes(q)) : all;
   sel.innerHTML = `<option value="">${escapeHtml(t("admin.waViewPlaceholder"))}</option>`
-    + list.map((v, i) => `<option value="${i}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("");
-  sel.value = list[Number(current)] ? current : "";
+    + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("");
+  sel.value = list.some((v) => v.name === current) ? current : "";
 }
 
 /** 设为 / 取消默认视图（1.0.329）：默认视图在每次打开工作区页时自动套用。 */
 function toggleDefaultView() {
   const sel = $("waViewSel");
   const list = loadWaViews();
-  const i = Number(sel?.value);
-  if (!sel || sel.value === "" || !list[i]) {
+  const name = sel?.value || "";
+  if (!sel || !name || !list.some((v) => v.name === name)) {
     toast(t("admin.waViewNone"));
     return;
   }
-  const name = list[i].name;
   if (waDefaultView === name) {
     waDefaultView = "";
     toast(t("admin.waViewDefaultCleared"));
@@ -10726,6 +10728,7 @@ function resetWorkAuditFilters() {
 /** 套用视图：回填控件与日期 chip，再按新条件重拉表格。 */
 function applyWaView(v) {
   if (!v) return;
+  if ($("waViewSel")) $("waViewSel").value = v.name || "";
   if ($("waDays")) $("waDays").value = String(v.days || 7);
   if ($("waQuery")) $("waQuery").value = v.q || "";
   if ($("waGroup")) $("waGroup").value = v.groupId || "";
@@ -10755,21 +10758,25 @@ function saveWaView() {
     list.push(view);
   }
   persistWaViews(list);
+  waViewFilter = "";
+  if ($("waViewSearch")) $("waViewSearch").value = "";
   renderWaViews();
   const sel = $("waViewSel");
-  if (sel) sel.value = String(list.findIndex((v) => v.name === name));
+  if (sel) sel.value = name;
   toast(t("admin.waViewSaved", { name }));
 }
 
 function deleteWaView() {
   const sel = $("waViewSel");
   const list = loadWaViews();
-  const i = Number(sel?.value);
-  if (!sel || sel.value === "" || !list[i]) {
+  const name = sel?.value || "";
+  const idx = list.findIndex((v) => v.name === name);
+  if (!sel || !name || idx < 0) {
     toast(t("admin.waViewNone"));
     return;
   }
-  const [removed] = list.splice(i, 1);
+  const [removed] = list.splice(idx, 1);
+  if (waDefaultView === removed.name) waDefaultView = "";
   persistWaViews(list);
   renderWaViews();
   toast(t("admin.waViewDeleted", { name: removed.name }));
@@ -10869,9 +10876,10 @@ function renderWorkAuditChart(buckets) {
   const titleKey = waChartBy === "agent" ? "admin.waChartTitleAgent"
     : waChartBy === "group" ? "admin.waChartTitleGroup"
     : waChartBy === "tool" ? "admin.waChartTitleTool" : "admin.waChartTitle";
-  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}${waChartFiltered() ? " · " + escapeHtml(t("admin.waFilteredChart")) : ""}
+  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))}${waChartFiltered() ? " · " + escapeHtml(t("admin.waFilteredChart")) : ""}${waShowAllBtn()}
       <span class="wa-chart-legend">${legend}</span></div>
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
+  box.querySelectorAll("[data-wa-show-all]").forEach((b) => { b.onclick = () => clearWaChartFilters(); });
   box.querySelectorAll("[data-wa-i]").forEach((el) => {
     el.onclick = () => drillWorkAudit(waChartBuckets[Number(el.dataset.waI)]);
   });
@@ -10880,6 +10888,20 @@ function renderWorkAuditChart(buckets) {
 /** 看板是否已被员工 / 知聚筛选收窄（1.0.330）：用于标题提示。 */
 function waChartFiltered() {
   return !!($("waAgent")?.value || $("waGroup")?.value);
+}
+
+/** 清除看板的员工 / 知聚筛选（1.0.331）：保留天数 / 关键词 / 工具。 */
+function clearWaChartFilters() {
+  if ($("waAgent")) $("waAgent").value = "";
+  if ($("waGroup")) $("waGroup").value = "";
+  loadWorkAudits();
+}
+
+/** 看板标题里的「显示全部」按钮（1.0.331）：只在被筛选时出现。 */
+function waShowAllBtn() {
+  return waChartFiltered()
+    ? ` <button class="chip-btn" type="button" data-wa-show-all>${escapeHtml(t("admin.waShowAll"))}</button>`
+    : "";
 }
 
 /** 当前下钻的柱体 key（1.0.325；1.0.326 加按工具）。 */
@@ -10988,9 +11010,10 @@ function renderWorkAuditChartStacked(buckets) {
   const empty = totals.every((x) => x === 0)
     ? `<div class="admin-empty">${escapeHtml(t("admin.waChartEmpty"))}</div>` : "";
   const titleKey = waChartBy === "group" ? "admin.waChartTitleGroup" : "admin.waChartTitle";
-  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))} · ${escapeHtml(t("admin.waStackAgent"))}${waChartFiltered() ? " · " + escapeHtml(t("admin.waFilteredChart")) : ""}
+  box.innerHTML = `<div class="wa-chart-title">${escapeHtml(t(titleKey))} · ${escapeHtml(t("admin.waStackAgent"))}${waChartFiltered() ? " · " + escapeHtml(t("admin.waFilteredChart")) : ""}${waShowAllBtn()}
       <span class="wa-chart-legend">${legend}</span></div>
     <div class="wa-chart-body">${empty || svg + cols}</div>`;
+  box.querySelectorAll("[data-wa-show-all]").forEach((b) => { b.onclick = () => clearWaChartFilters(); });
   box.querySelectorAll("[data-wa-i]").forEach((el) => {
     el.onclick = () => drillWorkAudit(waChartBuckets[Number(el.dataset.waI)]);
   });
@@ -11334,6 +11357,7 @@ async function uploadOneEntry(agentId, it, overwrite, signal, onProgress) {
 
 /** 上传队列逐项状态（1.0.330）：wait / run / ok / skip / fail / cancel。 */
 let wsUploadQueueItems = [];
+let wsUploadQueueSelected = new Set(); // 选中的失败 / 取消项，供「重试选中」（1.0.331）
 const WS_Q_LABEL = {
   wait: "admin.wsQueueWait",
   run: "admin.wsQueueRunning",
@@ -11359,13 +11383,23 @@ function renderUploadQueue() {
       .map((s) => `${t(WS_Q_LABEL[s])} ${count(s)}`)
       .join(" · ");
   }
+  const retrySel = $("wsQueueRetrySel");
+  if (retrySel) {
+    const canRetry = items.filter((x) => x.status === "fail" || x.status === "cancel").length;
+    retrySel.classList.toggle("hidden", canRetry === 0);
+    retrySel.disabled = wsUploadQueueSelected.size === 0;
+  }
   const shown = items.slice(0, 200);
-  rows.innerHTML = shown.map((it) => {
+  rows.innerHTML = shown.map((it, idx) => {
     const label = it.status === "run"
       ? `${Math.min(100, Math.round((it.bytes / (it.size || 1)) * 100))}%`
       : t(WS_Q_LABEL[it.status] || "admin.wsQueueWait");
+    const canSel = it.status === "fail" || it.status === "cancel";
+    const cb = canSel
+      ? `<input type="checkbox" data-q-sel="${idx}" ${wsUploadQueueSelected.has(idx) ? "checked" : ""} /> `
+      : `<span class="ws-q-gap"></span>`;
     return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}" title="${escapeHtml(it.rel)}">
-      <span class="ws-q-name">${escapeHtml(it.rel)}</span>
+      ${cb}<span class="ws-q-name">${escapeHtml(it.rel)}</span>
       <span class="ws-q-size">${escapeHtml(fmtBytes(it.size || 0))}</span>
       <span class="ws-q-state">${escapeHtml(label)}</span>
     </div>`;
@@ -11373,7 +11407,26 @@ function renderUploadQueue() {
     + (items.length > shown.length
       ? `<div class="ws-q-more">${escapeHtml(t("admin.wsQueueMore", { count: String(items.length - shown.length) }))}</div>`
       : "");
+  rows.querySelectorAll("[data-q-sel]").forEach((cb) => {
+    cb.onchange = () => {
+      const i = Number(cb.dataset.qSel);
+      if (cb.checked) wsUploadQueueSelected.add(i); else wsUploadQueueSelected.delete(i);
+      renderUploadQueue();
+    };
+  });
   box.classList.remove("hidden");
+}
+
+/** 只重试选中的失败 / 取消项（1.0.331）。 */
+function retrySelectedUploads() {
+  if (!wsUploadLastAgent) return;
+  const list = [...wsUploadQueueSelected]
+    .map((i) => wsUploadQueueItems[i])
+    .filter((q) => q && (q.status === "fail" || q.status === "cancel") && q.entry)
+    .map((q) => q.entry);
+  if (!list.length) return;
+  wsUploadQueueSelected.clear();
+  uploadWorkspaceEntries(wsUploadLastAgent, list);
 }
 
 /** 上传一组 {file, rel}（1.0.323；1.0.330 加逐项队列）。 */
@@ -11392,7 +11445,8 @@ async function uploadWorkspaceEntries(agentId, entries) {
   wsUploadCancelled = false;
   wsUploadPaused = false;
   wsUploadPauseHintShown = false;
-  wsUploadQueueItems = entries.map((it) => ({ rel: it.rel, size: it.file.size || 0, bytes: 0, status: "wait" }));
+  wsUploadQueueItems = entries.map((it) => ({ rel: it.rel, size: it.file.size || 0, bytes: 0, status: "wait", entry: it }));
+  wsUploadQueueSelected = new Set();
   const prog = $("wsUploadProgress");
   const fill = $("wsUploadFill");
   const text = $("wsUploadText");
@@ -17298,8 +17352,9 @@ function init() {
     }
     try { wsUploadRepaint?.(); } catch { /* 忽略 */ }
   };
-  // 上传队列（1.0.330）
+  // 上传队列（1.0.330；1.0.331 支持只重试选中项）
   $("wsQueueClose").onclick = () => $("wsUploadQueue").classList.add("hidden");
+  $("wsQueueRetrySel").onclick = () => retrySelectedUploads();
   $("wsUploadRetryBtn").onclick = () => {
     if (!wsUploadFailed.length || !wsUploadLastAgent) return;
     const list = wsUploadFailed.slice();
@@ -17375,9 +17430,23 @@ function init() {
   // 筛选视图（1.0.326）
   renderWaViews();
   $("waViewSel").onchange = () => {
-    if ($("waViewSel").value === "") return;
-    applyWaView(loadWaViews()[Number($("waViewSel").value)]);
+    const name = $("waViewSel").value;
+    if (!name) return;
+    applyWaView(loadWaViews().find((v) => v.name === name));
   };
+  // 视图搜索（1.0.331）：输入过滤选项，回车套用第一个命中
+  $("waViewSearch").addEventListener("input", () => {
+    waViewFilter = $("waViewSearch").value || "";
+    renderWaViews();
+  });
+  $("waViewSearch").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const sel = $("waViewSel");
+    const name = sel.value || sel.options[1]?.value || "";
+    const v = loadWaViews().find((x) => x.name === name);
+    if (v) applyWaView(v);
+  });
   $("waViewSave").onclick = () => saveWaView();
   $("waViewDelete").onclick = () => deleteWaView();
   $("waViewDefault").onclick = () => toggleDefaultView();

@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.330 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.330 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.331 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.331 Release Notes (current Windows desktop release)
+
+**版本说明**：**队列可挑着重试 + 一键显示全部 + 视图可搜**——失败文件只重传勾选项；看板收敛后一键回到全量；视图多了能搜索。
+**Version note**: **Pick what to retry, show-all shortcut, searchable views** — retry only the ticked failures, clear chart filters in one click, and find a view by typing.
+
+## 变更
+# Changes
+
+中文：
+- **只重试选中项**：队列的失败 / 取消行可勾选，标题栏「↻ 重试选中」只重传勾选项（未选置灰）；队列项新增 `entry` 引用以便重建上传列表，开始新批次时清空选择。
+- **显示全部**：`waChartFiltered()` 为真时，看板标题旁出现「显示全部」按钮，点后清空员工 / 知聚筛选并重拉（保留天数 / 关键词 / 工具）。
+- **视图搜索**：视图下拉改为按**名称**取值，新增 `#waViewSearch` 过滤框（输入即筛、回车套用首个命中）；保存视图后自动清空搜索词并选中新视图。
+
+English:
+- **Retry selected**: failed / cancelled queue rows are selectable and **↻ Retry selected** re-sends only the ticked ones (disabled when nothing is ticked); queue items carry an `entry` reference and selections reset on each new batch.
+- **Show all**: when `waChartFiltered()` is true the chart title exposes **Show all**, clearing the agent / circle filters and refetching while keeping days / keyword / tool.
+- **View search**: the dropdown now uses **names** as values and gains `#waViewSearch` (filters as you type, Enter applies the first match); saving a view clears the filter and selects the new name.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（只重试选中 / 显示全部 / 视图搜索）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.331。
+English: `docs/user-guide.md` / `en.md` §3.13 (retry selected / show all / view search); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.331.
+
+## 测试
+# Tests
+
+中文：前端交互改造，无后端 / 契约变更；`node --check app.js`；i18n 审计 **zh=en=2279，missing 0**；Docker 重建后页面包含 `waViewSearch` / `wsQueueRetrySel`，`/health` 200；全量 `dotnet test` **1926 通过 / 0 失败**。
+English: UI-only round with no backend or contract changes; `node --check app.js`; the i18n audit reports **zh=en=2279, missing 0**; after the Docker rebuild the page contains `waViewSearch` / `wsQueueRetrySel` and `/health` is 200; the full `dotnet test` run passes **1926 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.330 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.330 Release Notes (historical)
 
 **版本说明**：**一键还原 + 图表随筛选收敛 + 上传队列可见**——筛选一键清回默认；按员工 / 知聚下钻时看板只显示被选项；上传时能看到每个文件的状态。
 **Version note**: **One-click reset, filter-aware chart, visible upload queue** — reset every filter at once, narrow the chart to the drilled agent or circle, and watch each file's state while uploading.
