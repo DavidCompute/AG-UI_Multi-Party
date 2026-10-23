@@ -10094,6 +10094,7 @@ let adminWsScope = "name"; // name | content（1.0.319）
 let wsSelected = new Set();   // 当前文件面板里勾选的文件相对路径（1.0.321）
 let wsUploadCancelled = false;  // 上传取消标志（1.0.325）
 let wsUploadPaused = false;     // 上传暂停标志（1.0.328）
+let wsUploadPauseHintShown = false; // 暂停提示每次批次只弹一次（1.0.329）
 let wsUploadRepaint = null;     // 暂停/继续时立即刷新进度文案（1.0.328）
 let wsUploadController = null;  // 当前在传文件的 AbortController（1.0.325）
 let wsUploadFailed = [];        // 本批次失败项，供一键重试（1.0.326）
@@ -10623,8 +10624,9 @@ function drillWorkAudit(bucket) {
   setWaDate(waDate === bucket.key ? "" : bucket.key);
 }
 
-/* ---- 审计筛选视图（1.0.326）：天数 / 知聚 / 员工 / 工具 / 日期 / 聚合开关存成命名视图，按用户存在本地 ---- */
+/* ---- 审计筛选视图（1.0.326；1.0.328 上云；1.0.329 加默认视图）---- */
 const WA_VIEW_MAX = 20;
+let waDefaultView = "";
 
 function waViewsKey() {
   return "agui.waViews." + (state.memberId || "anon");
@@ -10644,19 +10646,19 @@ function persistWaViews(list) {
   pushWaViews(trimmed);
 }
 
-/** 推送到服务端（1.0.328）：失败静默，本地缓存仍在。 */
+/** 推送到服务端（1.0.328；1.0.329 带默认视图）：失败静默，本地缓存仍在。 */
 async function pushWaViews(list) {
   try {
     if (!state.token) return;
     await fetch("/ag-ui/audit-views", {
       method: "PUT",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
-      body: JSON.stringify({ views: list }),
+      body: JSON.stringify({ views: list, defaultView: waDefaultView || "" }),
     });
   } catch { /* 离线 */ }
 }
 
-/** 从服务端拉取视图（1.0.328）：跨设备口径；首次升级时把本地缓存迁上去。 */
+/** 从服务端拉取视图（1.0.328；1.0.329 带默认视图并自动套用）：跨设备口径；首次升级时把本地缓存迁上去。 */
 async function syncWaViewsFromServer() {
   try {
     if (!state.token) return;
@@ -10668,7 +10670,11 @@ async function syncWaViewsFromServer() {
       if (local.length) { await pushWaViews(local); return; }
     }
     try { localStorage.setItem(waViewsKey(), JSON.stringify(d.views)); } catch { /* 隐私模式 */ }
+    waDefaultView = String(d.defaultView || "");
     renderWaViews();
+    // 打开工作区页时自动套用默认视图（1.0.329）
+    const def = d.views.find((v) => v && v.name === waDefaultView);
+    if (def) applyWaView(def);
   } catch { /* 离线：用本地缓存 */ }
 }
 
@@ -10678,8 +10684,29 @@ function renderWaViews() {
   const current = sel.value;
   const list = loadWaViews();
   sel.innerHTML = `<option value="">${escapeHtml(t("admin.waViewPlaceholder"))}</option>`
-    + list.map((v, i) => `<option value="${i}">${escapeHtml(v.name)}</option>`).join("");
+    + list.map((v, i) => `<option value="${i}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("");
   sel.value = list[Number(current)] ? current : "";
+}
+
+/** 设为 / 取消默认视图（1.0.329）：默认视图在每次打开工作区页时自动套用。 */
+function toggleDefaultView() {
+  const sel = $("waViewSel");
+  const list = loadWaViews();
+  const i = Number(sel?.value);
+  if (!sel || sel.value === "" || !list[i]) {
+    toast(t("admin.waViewNone"));
+    return;
+  }
+  const name = list[i].name;
+  if (waDefaultView === name) {
+    waDefaultView = "";
+    toast(t("admin.waViewDefaultCleared"));
+  } else {
+    waDefaultView = name;
+    toast(t("admin.waViewDefaultSaved", { name }));
+  }
+  renderWaViews();
+  pushWaViews(list);
 }
 
 /** 套用视图：回填控件与日期 chip，再按新条件重拉表格。 */
@@ -10864,6 +10891,18 @@ function waRateLineSvg(rates) {
 
 const WA_PART_COLORS = ["#6c8cff", "#4cc38a", "#8e7cf0", "#d0a53c", "#3aa6b9", "#e07a5f", "#b07cf0", "#7d8794"];
 
+/** 员工段 tooltip 的工具分布（1.0.329）：只列非零项。 */
+function waPartToolBits(p) {
+  const bits = [];
+  if (Number(p.commands) > 0) bits.push(`${t("admin.waSegCmd")} ${p.commands}`);
+  if (Number(p.writes) > 0) bits.push(`${t("admin.waSegWrite")} ${p.writes}`);
+  if (Number(p.reads) > 0) bits.push(`${t("admin.waSegRead")} ${p.reads}`);
+  if (Number(p.listings) > 0) bits.push(`${t("admin.waSegList")} ${p.listings}`);
+  if (Number(p.other) > 0) bits.push(`${t("admin.waSegOther")} ${p.other}`);
+  if (Number(p.failed) > 0) bits.push(`${t("admin.waSegFail")} ${p.failed}`);
+  return bits.join(" · ");
+}
+
 /** 按员工叠加的看板（1.0.327）：每根柱按员工分段，颜色按员工总量排序分配。 */
 function renderWorkAuditChartStacked(buckets) {
   const box = $("waChart");
@@ -10901,17 +10940,19 @@ function renderWorkAuditChartStacked(buckets) {
     for (const p of (b.parts || [])) {
       const label = String(p.label || p.key || "");
       const v = Number(p.total) || 0;
-      if (top.includes(label)) segs.push({ key: p.key || "", label, v, color: colorOf(label) });
+      if (top.includes(label)) segs.push({ key: p.key || "", label, v, color: colorOf(label), bits: waPartToolBits(p) });
       else otherSum += v;
     }
-    if (otherSum > 0) segs.push({ key: "", label: otherLabel, v: otherSum, color: "#7d8794" });
+    if (otherSum > 0) segs.push({ key: "", label: otherLabel, v: otherSum, color: "#7d8794", bits: "" });
     segs.sort((a, b2) => b2.v - a.v);
     const segHtml = segs.map((s) => {
       const active = s.key && selectedAgent === s.key ? " wa-seg-active" : "";
+      const tip = `${s.label} · ${s.v}` + (s.bits ? ` · ${s.bits}` : "")
+        + (s.key ? ` · ${t("admin.waDrillAgentHint")}` : "");
       const attrs = s.key
-        ? ` data-wa-agent="${escapeHtml(s.key)}" data-wa-agent-label="${escapeHtml(s.label)}" title="${escapeHtml(s.label)} · ${s.v} · ${escapeHtml(t("admin.waDrillAgentHint"))}"`
-        : ` title="${escapeHtml(s.label)} · ${s.v}"`;
-      return `<i class="${active}" style="background:${s.color};height:${(s.v / total * 100).toFixed(1)}%"${attrs}></i>`;
+        ? ` data-wa-agent="${escapeHtml(s.key)}" data-wa-agent-label="${escapeHtml(s.label)}"`
+        : "";
+      return `<i class="${active}" style="background:${s.color};height:${(s.v / total * 100).toFixed(1)}%" title="${escapeHtml(tip)}"${attrs}></i>`;
     }).join("");
     const h = total > 0 ? Math.max(4, total / max * 100) : 0;
     const full = String(b.label || b.key || "");
@@ -10971,7 +11012,7 @@ function exportWaViews() {
     toast(t("admin.waViewExportEmpty"));
     return;
   }
-  const blob = new Blob([JSON.stringify({ version: 1, views: list }, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify({ version: 1, views: list, defaultView: waDefaultView }, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -11019,6 +11060,9 @@ async function importWaViews(input) {
       n++;
     }
     persistWaViews(list);
+    // 导入时带上默认视图（1.0.329）：名称必须在合并后的列表里
+    const def = String(parsed?.defaultView || "").trim();
+    if (def && list.some((v) => v.name === def)) waDefaultView = def;
     renderWaViews();
     toast(n ? t("admin.waViewImported", { count: String(n) }) : t("admin.waViewImportFail", { err: "empty" }));
   } catch (ex) {
@@ -11285,6 +11329,7 @@ async function uploadWorkspaceEntries(agentId, entries) {
   wsUploadLastAgent = agentId;
   wsUploadCancelled = false;
   wsUploadPaused = false;
+  wsUploadPauseHintShown = false;
   const prog = $("wsUploadProgress");
   const fill = $("wsUploadFill");
   const text = $("wsUploadText");
@@ -17159,10 +17204,14 @@ function init() {
     wsUploadCancelled = true;
     wsUploadController?.abort();
   };
-  // 暂停 / 继续（1.0.328）：在下一个分片边界生效
+  // 暂停 / 继续（1.0.328）：在下一个分片边界生效，本批次后续文件保持暂停
   $("wsUploadPauseBtn").onclick = () => {
     wsUploadPaused = !wsUploadPaused;
     $("wsUploadPauseBtn").textContent = wsUploadPaused ? t("admin.wsUploadResume") : t("admin.wsUploadPause");
+    if (wsUploadPaused && !wsUploadPauseHintShown) {
+      wsUploadPauseHintShown = true;
+      toast(t("admin.wsUploadPauseHint"));
+    }
     try { wsUploadRepaint?.(); } catch { /* 忽略 */ }
   };
   // 重试失败项（1.0.326）
@@ -17245,6 +17294,7 @@ function init() {
   };
   $("waViewSave").onclick = () => saveWaView();
   $("waViewDelete").onclick = () => deleteWaView();
+  $("waViewDefault").onclick = () => toggleDefaultView();
   $("waViewExport").onclick = () => exportWaViews();
   $("waViewImport").onclick = () => $("waViewImportInput").click();
   $("waViewImportInput").onchange = () => importWaViews($("waViewImportInput"));

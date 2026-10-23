@@ -188,8 +188,10 @@ public sealed class WorkAuditReportTests
         Assert.Equal("agent_a", today.Parts[0].Key); // 总量降序
         Assert.Equal(2, today.Parts[0].Total);
         Assert.Equal(1, today.Parts[0].Failed);
+        Assert.Equal(1, today.Parts[0].Commands); // 1.0.329：段内工具分布
         Assert.Equal("agent_b", today.Parts[1].Key);
         Assert.Equal(1, today.Parts[1].Total);
+        Assert.Equal(1, today.Parts[1].Commands);
         Assert.Equal(0, days[^2].Total); // 补零的空日
 
         var groups = WorkAuditReport.StackByAgent(items, 7, "group");

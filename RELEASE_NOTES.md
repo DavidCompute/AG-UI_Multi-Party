@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.328 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.328 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.329 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.329 Release Notes (current Windows desktop release)
+
+**版本说明**：**段内看构成 + 暂停有提示 + 视图有默认**——员工段悬停看到工具分布；暂停首次有明确提示；可把常用筛选设为默认视图，打开即套用。
+**Version note**: **Segment tooltips, pause hint, default view** — hover an agent segment for its tool mix, a clear pause hint on first use, and a default saved view that applies when the tab opens.
+
+## 变更
+# Changes
+
+中文：
+- **段内工具分布**：`TimelinePart` 增加 `Commands / Writes / Reads / Listings / Other`（失败仍单列）；`StackByAgent()` 逐行累加，前端段 tooltip 拼出「命令 N · 写入 N · … · 失败 N」。
+- **暂停提示**：首次点暂停弹一次 toast 说明「暂停保持到本批次结束、在分片边界生效」；每批次重置提示标志。
+- **默认视图**：`AuditViewsUser` 增加 `DefaultView`（`GET/PUT /ag-ui/audit-views` 同时返回 / 接收），服务端校验名称必须存在于视图列表；前端「★ 设为默认 / 再点取消」，打开工作区页拉取后自动套用，下拉与导出 JSON 均带 `★` / `defaultView`。
+
+English:
+- **Segment tool mix**: `TimelinePart` gains `Commands / Writes / Reads / Listings / Other` (failures stay separate) filled by `StackByAgent()`; segment tooltips read "commands N · writes N · … · failed N".
+- **Pause hint**: the first pause raises one toast explaining that the pause holds for the rest of the batch and lands at the chunk boundary; the flag resets per batch.
+- **Default view**: `AuditViewsUser` gains `DefaultView`, returned and accepted by `GET/PUT /ag-ui/audit-views` with server-side validation that the name exists; the UI offers **★ Set default** (click again to clear), auto-applies it when the Workspaces tab opens, and both the dropdown and the exported JSON carry `★` / `defaultView`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（段内分布 / 暂停提示 / 默认视图）、§8.2（`audit-views` 补 `defaultView`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.329。
+English: `docs/user-guide.md` / `en.md` §3.13 (tool mix / pause hint / default view), §8.2 (`audit-views` gains `defaultView`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.329.
+
+## 测试
+# Tests
+
+中文：`AguiGroupChat.Web` 0 错误；`node --check app.js`；i18n 审计 **zh=en=2265，missing 0**；新增 `CleanDefault_RequiresAnExistingView`，`StackByAgent` 断言补充段内 `Commands`；Docker 冒烟验证 `defaultView` 的有效值 / 不存在值 / 回显与 `stack=agent` 响应形状；全量 `dotnet test` **1926 通过 / 0 失败**。
+English: `AguiGroupChat.Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2265, missing 0**; `CleanDefault_RequiresAnExistingView` is new and the `StackByAgent` test now asserts per-part `Commands`; the Docker smoke verifies a valid `defaultView`, a missing one, the GET echo and the `stack=agent` shape; the full `dotnet test` run passes **1926 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.328 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.328 Release Notes (historical)
 
 **版本说明**：**员工段可下钻 + 上传可暂停 + 视图走服务端**——叠加看板点员工段直接筛人；大文件上传可暂停 / 继续；筛选视图换设备也跟着走。
 **Version note**: **Agent-segment drill-down, pausable uploads, server-synced views** — click an agent segment to filter, pause and resume large uploads, and keep audit views across devices.

@@ -54,4 +54,18 @@ public sealed class AuditViewsTests
         var cleaned = AuditViewsApi.Clean([new AuditViewDefinition { Name = longName }]);
         Assert.Equal(30, cleaned[0].Name!.Length);
     }
+
+    [Fact]
+    public void CleanDefault_RequiresAnExistingView()
+    {
+        var views = AuditViewsApi.Clean([
+            new AuditViewDefinition { Name = "A" },
+            new AuditViewDefinition { Name = "B" },
+        ]);
+
+        Assert.Equal("B", AuditViewsApi.CleanDefault("  B  ", views));
+        Assert.Equal("", AuditViewsApi.CleanDefault("missing", views));
+        Assert.Equal("", AuditViewsApi.CleanDefault(null, views));
+        Assert.Equal("", AuditViewsApi.CleanDefault("", views));
+    }
 }

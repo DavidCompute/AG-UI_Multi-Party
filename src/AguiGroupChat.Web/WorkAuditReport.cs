@@ -48,8 +48,10 @@ public static class WorkAuditReport
         public int Total => Commands + Writes + Reads + Listings + Other + Failed;
     }
 
-    /// <summary>叠加段（1.0.327）：一根柱里某个员工的量。</summary>
-    public sealed record TimelinePart(string Key, string Label, int Total, int Failed);
+    /// <summary>叠加段（1.0.327）：一根柱里某个员工的量；1.0.329 补充各工具分布。</summary>
+    public sealed record TimelinePart(
+        string Key, string Label, int Total, int Failed,
+        int Commands = 0, int Writes = 0, int Reads = 0, int Listings = 0, int Other = 0);
 
     /// <summary>按员工叠加的柱（1.0.327）：用于「按知聚 / 按天 × 叠加员工」的组合看板。</summary>
     public sealed record StackBucket(string Key, string Label, int Total, int Failed, IReadOnlyList<TimelinePart> Parts);
@@ -64,7 +66,7 @@ public static class WorkAuditReport
         // 先固定顺序（按天补零），再逐行累加
         var order = new List<string>();
         var labels = new Dictionary<string, string>(StringComparer.Ordinal);
-        var parts = new Dictionary<string, Dictionary<string, (string Label, int Total, int Failed)>>(StringComparer.Ordinal);
+        var parts = new Dictionary<string, Dictionary<string, (string? Label, int Total, int Failed, int C, int W, int R, int L, int O)>>(StringComparer.Ordinal);
 
         if (byDay)
         {
@@ -73,7 +75,7 @@ public static class WorkAuditReport
                 var key = today.AddDays(-i).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 order.Add(key);
                 labels[key] = key.Length > 5 ? key[5..] : key;
-                parts[key] = new Dictionary<string, (string, int, int)>(StringComparer.Ordinal);
+                parts[key] = new Dictionary<string, (string? Label, int Total, int Failed, int C, int W, int R, int L, int O)>(StringComparer.Ordinal);
             }
         }
 
@@ -85,7 +87,7 @@ public static class WorkAuditReport
             if (string.IsNullOrWhiteSpace(key)) continue;
             if (!parts.TryGetValue(key, out var bucket))
             {
-                parts[key] = bucket = new Dictionary<string, (string, int, int)>(StringComparer.Ordinal);
+                parts[key] = bucket = new Dictionary<string, (string? Label, int Total, int Failed, int C, int W, int R, int L, int O)>(StringComparer.Ordinal);
                 order.Add(key);
                 labels[key] = byDay
                     ? (key.Length > 5 ? key[5..] : key)
@@ -96,13 +98,29 @@ public static class WorkAuditReport
             bucket.TryGetValue(agentKey, out var p);
             if (string.IsNullOrEmpty(p.Label)) p.Label = agentLabel;
             p.Total++;
-            if (!e.Ok) p.Failed++;
+            if (!e.Ok)
+            {
+                p.Failed++;
+            }
+            else
+            {
+                switch (e.Tool)
+                {
+                    case "work_run_command": p.C++; break;
+                    case "work_write_file": p.W++; break;
+                    case "work_read_file": p.R++; break;
+                    case "work_list_dir": p.L++; break;
+                    default: p.O++; break;
+                }
+            }
             bucket[agentKey] = p;
         }
 
         return order.Select((key) =>
         {
-            var list = parts[key].Select((kv) => new TimelinePart(kv.Key, kv.Value.Label ?? kv.Key, kv.Value.Total, kv.Value.Failed))
+            var list = parts[key]
+                .Select((kv) => new TimelinePart(kv.Key, kv.Value.Label ?? kv.Key,
+                    kv.Value.Total, kv.Value.Failed, kv.Value.C, kv.Value.W, kv.Value.R, kv.Value.L, kv.Value.O))
                 .OrderByDescending((p) => p.Total)
                 .ThenBy((p) => p.Label, StringComparer.Ordinal)
                 .ToList();
