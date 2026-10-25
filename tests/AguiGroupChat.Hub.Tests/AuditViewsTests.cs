@@ -90,6 +90,30 @@ public sealed class AuditViewsTests
     }
 
     [Fact]
+    public void Restore_KeepsSharedDefaultOnlyWhenItExists()
+    {
+        const string ok = """
+            {"users":{},"shared":[{"name":"S"}],"sharedDefaultView":"S"}
+            """;
+        using (var doc = JsonDocument.Parse(ok))
+        {
+            var state = new AuditViewsState();
+            AuditViewsApi.Restore(state, doc.RootElement);
+            Assert.Equal("S", state.SharedDefaultView);
+        }
+
+        const string bad = """
+            {"users":{},"shared":[{"name":"S"}],"sharedDefaultView":"missing"}
+            """;
+        using (var doc = JsonDocument.Parse(bad))
+        {
+            var state = new AuditViewsState();
+            AuditViewsApi.Restore(state, doc.RootElement);
+            Assert.Null(state.SharedDefaultView);
+        }
+    }
+
+    [Fact]
     public void CleanDefault_RequiresAnExistingView()
     {
         var views = AuditViewsApi.Clean([

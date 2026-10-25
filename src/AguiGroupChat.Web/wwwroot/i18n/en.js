@@ -2097,6 +2097,8 @@ window.I18N_DICTS.en = {
   "admin.waViewShareFail": "Share failed: {err}",
   "admin.waViewShareNeedPersonal": "Pick one of your own views first",
   "admin.waSharedGroup": "Shared views",
+  "admin.waSharedDefaultSaved": "\"{name}\" is now the team default view",
+  "admin.waSharedDefaultCleared": "Team default view cleared",
   "admin.waViewDefaultSaved": "\"{name}\" is now the default view",
   "admin.waViewDefaultCleared": "Default view cleared",
   "admin.waViewPrompt": "View name",

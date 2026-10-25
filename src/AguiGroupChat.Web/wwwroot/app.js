@@ -10629,6 +10629,7 @@ const WA_VIEW_MAX = 20;
 let waDefaultView = "";
 let waViewFilter = ""; // 视图搜索词（1.0.331）
 let waSharedViews = []; // 共享视图池（1.0.332）
+let waSharedDefaultView = ""; // 团队默认视图（1.0.333）
 const WA_SHARED_PREFIX = "s::";
 
 function waViewsKey() {
@@ -10675,9 +10676,11 @@ async function syncWaViewsFromServer() {
     try { localStorage.setItem(waViewsKey(), JSON.stringify(d.views)); } catch { /* 隐私模式 */ }
     waDefaultView = String(d.defaultView || "");
     waSharedViews = Array.isArray(d.sharedViews) ? d.sharedViews : [];
+    waSharedDefaultView = String(d.sharedDefaultView || "");
     renderWaViews();
-    // 打开工作区页时自动套用默认视图（1.0.329）
-    const def = d.views.find((v) => v && v.name === waDefaultView);
+    // 打开工作区页时自动套用默认视图：个人默认优先，其次团队默认（1.0.333）
+    const def = (d.views || []).find((v) => v && v.name === waDefaultView)
+      || (d.sharedViews || []).find((v) => v && v.name === waSharedDefaultView);
     if (def) applyWaView(def);
   } catch { /* 离线：用本地缓存 */ }
 }
@@ -10695,7 +10698,7 @@ function renderWaViews() {
     + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
     + (shared.length
       ? `<optgroup label="${escapeHtml(t("admin.waSharedGroup"))}">`
-        + shared.map((v) => `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${escapeHtml(v.name)}</option>`).join("")
+        + shared.map((v) => `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${v.name === waSharedDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
         + `</optgroup>`
       : "");
   sel.value = (list.some((v) => v.name === current) || shared.some((v) => WA_SHARED_PREFIX + v.name === current))
@@ -10713,12 +10716,21 @@ function currentWaView() {
   return loadWaViews().find((v) => v.name === value) || null;
 }
 
-/** 设为 / 取消默认视图（1.0.329）：默认视图在每次打开工作区页时自动套用。 */
+/** 设为 / 取消默认视图（1.0.329；1.0.333 共享项走团队默认）。 */
 function toggleDefaultView() {
   const sel = $("waViewSel");
+  const value = sel?.value || "";
+  if (!value) {
+    toast(t("admin.waViewShareNeedPersonal"));
+    return;
+  }
+  if (value.startsWith(WA_SHARED_PREFIX)) {
+    toggleSharedDefault(value.slice(WA_SHARED_PREFIX.length));
+    return;
+  }
   const list = loadWaViews();
-  const name = sel?.value || "";
-  if (!sel || !name || name.startsWith(WA_SHARED_PREFIX) || !list.some((v) => v.name === name)) {
+  const name = value;
+  if (!list.some((v) => v.name === name)) {
     toast(t("admin.waViewShareNeedPersonal"));
     return;
   }
@@ -10731,6 +10743,31 @@ function toggleDefaultView() {
   }
   renderWaViews();
   pushWaViews(list);
+}
+
+/** 团队默认视图（1.0.333）：设置 / 取消共享池里的某一项。 */
+async function toggleSharedDefault(name) {
+  if (!name) return;
+  const clear = waSharedDefaultView === name;
+  try {
+    const res = await fetch("/ag-ui/audit-views/shared-default", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ name: clear ? "" : name }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      toast(t("admin.waViewShareFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    waSharedDefaultView = String(d?.sharedDefaultView || "");
+    renderWaViews();
+    toast(clear
+      ? t("admin.waSharedDefaultCleared")
+      : t("admin.waSharedDefaultSaved", { name }));
+  } catch (ex) {
+    toast(t("admin.waViewShareFail", { err: ex.message }));
+  }
 }
 
 /** 一键还原筛选（1.0.330）：回到默认条件、清空视图选中并重拉表格 / 看板。 */
@@ -11157,7 +11194,7 @@ async function exportWorkAuditChartPng() {
 
   const colW = 34;
   const width = Math.max(520, buckets.length * colW + 80);
-  const height = 260;
+  const height = 300;
   const plotTop = 56;
   const plotBottom = 200;
   const plotH = plotBottom - plotTop;
@@ -11187,6 +11224,50 @@ async function exportWorkAuditChartPng() {
     svg += `<text x="${x + 10}" y="${plotBottom + 16}" fill="${muted}" font-size="10" text-anchor="middle">${escapeHtml(label)}</text>`;
   });
   svg += `<line x1="32" y1="${plotBottom}" x2="${width - 32}" y2="${plotBottom}" stroke="${muted}" stroke-opacity="0.35"/>`;
+
+  // 失败率折线（1.0.333）：空桶断开
+  const rates = buckets.map((b, i) => (totals[i] > 0 ? (Number(b.failed) || 0) / totals[i] * 100 : null));
+  const runs = [];
+  let run = [];
+  rates.forEach((r, i) => {
+    if (r === null) {
+      if (run.length) { runs.push(run); run = []; }
+      return;
+    }
+    run.push(`${40 + i * colW + 10},${(plotBottom - (r / 100) * plotH).toFixed(1)}`);
+  });
+  if (run.length) runs.push(run);
+  for (const r of runs.filter((x) => x.length >= 2)) {
+    svg += `<polyline points="${r.join(" ")}" fill="none" stroke="#e5484d" stroke-width="1.5"/>`;
+  }
+
+  // 图例（1.0.333）：与屏幕看板同色，最后一项为失败率折线
+  const cjkWidth = (s) => [...String(s)].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 10 : 6), 0);
+  let lx = 32;
+  let ly = 240;
+  const drawLegend = (label, color, isLine) => {
+    if (lx > width - 120) { lx = 32; ly += 20; }
+    if (isLine) svg += `<line x1="${lx}" y1="${ly - 3}" x2="${lx + 14}" y2="${ly - 3}" stroke="${color}" stroke-width="2"/>`;
+    else svg += `<rect x="${lx}" y="${ly - 8}" width="10" height="10" rx="2" fill="${color}"/>`;
+    svg += `<text x="${lx + 18}" y="${ly}" fill="${muted}" font-size="10">${escapeHtml(label)}</text>`;
+    lx += 18 + cjkWidth(label) + 14;
+  };
+  if (waStackActive) {
+    const sums = new Map();
+    for (const b of buckets) {
+      for (const p of (b.parts || [])) {
+        const label = String(p.label || p.key || "");
+        sums.set(label, (sums.get(label) || 0) + (Number(p.total) || 0));
+      }
+    }
+    const top = [...sums.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 8);
+    top.forEach((label, i) => drawLegend(label, WA_PART_COLORS[i % WA_PART_COLORS.length], false));
+    if (sums.size > top.length) drawLegend(t("admin.waSegOther"), "#7d8794", false);
+  } else {
+    for (const [field, , key] of WA_CHART_SEGS) drawLegend(t(key), WA_SEG_COLORS[field], false);
+  }
+  drawLegend(t("admin.waFailureRate"), "#e5484d", true);
+
   svg += "</svg>";
 
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
@@ -11552,6 +11633,7 @@ let wsUploadQueueItems = [];
 let wsUploadQueueSelected = new Set(); // 选中的失败 / 取消项，供「重试选中」（1.0.331）
 let wsQueueFilter = "";  // "" | fail | run | ok（1.0.332）
 let wsQueueSearch = "";
+let wsQueueDragIndex = null; // 拖拽排序中的源下标（1.0.333）
 const WS_Q_LABEL = {
   wait: "admin.wsQueueWait",
   run: "admin.wsQueueRunning",
@@ -11596,7 +11678,8 @@ function renderUploadQueue() {
       const cb = canSel
         ? `<input type="checkbox" data-q-sel="${idx}" ${wsUploadQueueSelected.has(idx) ? "checked" : ""} /> `
         : `<span class="ws-q-gap"></span>`;
-      return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}" title="${escapeHtml(it.rel)}">
+      const drag = it.status === "wait" ? ` draggable="true" data-q-drag="${idx}"` : "";
+      return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}"${drag} title="${escapeHtml(it.rel)}">
         ${cb}<span class="ws-q-name">${escapeHtml(it.rel)}</span>
         <span class="ws-q-size">${escapeHtml(fmtBytes(it.size || 0))}</span>
         <span class="ws-q-state">${escapeHtml(label)}</span>
@@ -11610,6 +11693,34 @@ function renderUploadQueue() {
       if (cb.checked) wsUploadQueueSelected.add(i); else wsUploadQueueSelected.delete(i);
       renderUploadQueue();
     };
+  });
+  // 拖拽排序（1.0.333）：只在「等待中」的行之间调整上传优先级
+  rows.querySelectorAll("[data-q-drag]").forEach((el) => {
+    el.addEventListener("dragstart", (e) => {
+      wsQueueDragIndex = Number(el.dataset.qDrag);
+      e.dataTransfer.effectAllowed = "move";
+    });
+    el.addEventListener("dragover", (e) => {
+      if (wsQueueDragIndex === null) return;
+      e.preventDefault();
+      el.classList.add("ws-q-drop");
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("ws-q-drop"));
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.classList.remove("ws-q-drop");
+      const to = Number(el.dataset.qDrag);
+      const from = wsQueueDragIndex;
+      wsQueueDragIndex = null;
+      if (from === null || from === to) return;
+      const items = wsUploadQueueItems;
+      if (items[from]?.status !== "wait" || items[to]?.status !== "wait") return;
+      const [moved] = items.splice(from, 1);
+      items.splice(to, 0, moved);
+      wsUploadQueueSelected.clear();
+      renderUploadQueue();
+    });
+    el.addEventListener("dragend", () => { wsQueueDragIndex = null; });
   });
   box.classList.remove("hidden");
 }
@@ -11678,10 +11789,12 @@ async function uploadWorkspaceEntries(agentId, entries) {
   paint("", 0);
   renderUploadQueue();
 
-  for (let qi = 0; qi < entries.length; qi++) {
-    const it = entries[qi];
-    const q = wsUploadQueueItems[qi];
+  for (;;) {
     if (wsUploadCancelled) break;
+    // 永远取第一个「等待中」的项：拖拽排序改的就是这个顺序（1.0.333）
+    const q = wsUploadQueueItems.find((x) => x.status === "wait");
+    if (!q) break;
+    const it = q.entry;
     await waitWhileUploadPaused();
     if (wsUploadCancelled) break;
     q.status = "run";

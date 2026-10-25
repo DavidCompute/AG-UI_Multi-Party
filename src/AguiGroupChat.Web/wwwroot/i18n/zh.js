@@ -2091,6 +2091,8 @@ window.I18N_DICTS.zh = {
   "admin.waViewShareFail": "分享失败：{err}",
   "admin.waViewShareNeedPersonal": "先选择一个自己的视图",
   "admin.waSharedGroup": "共享视图",
+  "admin.waSharedDefaultSaved": "已将「{name}」设为团队默认视图",
+  "admin.waSharedDefaultCleared": "已取消团队默认视图",
   "admin.waViewDefaultSaved": "已将「{name}」设为默认视图",
   "admin.waViewDefaultCleared": "已取消默认视图",
   "admin.waViewPrompt": "视图名称",

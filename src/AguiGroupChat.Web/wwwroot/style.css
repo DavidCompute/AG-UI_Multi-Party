@@ -2521,6 +2521,8 @@ button { white-space: nowrap; }
 .ws-queue-rows { max-height: 180px; overflow-y: auto; }
 .ws-q-row { display: flex; align-items: center; gap: 8px; padding: 2px 8px; font-size: 11px; border-top: 1px solid var(--border); }
 .ws-q-row input[type="checkbox"] { margin: 0; }
+.ws-q-row[draggable="true"] { cursor: grab; }
+.ws-q-row.ws-q-drop { outline: 1px dashed var(--accent); outline-offset: -1px; }
 .ws-q-gap { display: inline-block; width: 13px; }
 .ws-q-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-q-size { flex: 0 0 auto; color: var(--muted); }

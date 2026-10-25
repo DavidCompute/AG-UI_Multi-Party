@@ -39,6 +39,9 @@ public sealed class AuditViewsState
 
     /// <summary>共享视图池（1.0.332）：所有运营/管理员都可读，用于跨人复用常用筛选。</summary>
     public List<AuditViewDefinition> Shared { get; set; } = [];
+
+    /// <summary>团队默认视图（1.0.333）：共享池里的某一项，打开工作区页时自动套用。</summary>
+    public string? SharedDefaultView { get; set; }
 }
 
 /// <summary>筛选视图接口（1.0.328；1.0.329 加默认视图）：<c>GET/PUT /ag-ui/audit-views</c>（需登录，只读写当前用户）。</summary>
@@ -66,6 +69,7 @@ public static class AuditViewsApi
                 views = entry?.Views ?? [],
                 defaultView = entry?.DefaultView ?? "",
                 sharedViews = state.Shared,
+                sharedDefaultView = state.SharedDefaultView ?? "",
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
@@ -89,7 +93,23 @@ public static class AuditViewsApi
             if (target.Length == 0) return Results.BadRequest(new { error = "missing_name" });
             var removed = state.Shared.RemoveAll((v) => string.Equals(v.Name, target, StringComparison.Ordinal));
             if (removed > 0) changes.Notify();
-            return Results.Ok(new { ok = true, removed, sharedViews = state.Shared });
+            if (removed > 0 && string.Equals(state.SharedDefaultView, target, StringComparison.Ordinal))
+            {
+                state.SharedDefaultView = null;
+                changes.Notify();
+            }
+            return Results.Ok(new { ok = true, removed, sharedViews = state.Shared, sharedDefaultView = state.SharedDefaultView ?? "" });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 团队默认视图（1.0.333）：名称必须存在于共享池；空字符串 = 取消
+        app.MapPut("/ag-ui/audit-views/shared-default", (AuditViewsSharedDefaultRequest req, AuditViewsState state, ChangeHub changes) =>
+        {
+            var name = (req.Name ?? "").Trim();
+            if (name.Length > 0 && !state.Shared.Any((v) => string.Equals(v.Name, name, StringComparison.Ordinal)))
+                return Results.BadRequest(new { error = "missing_view" });
+            state.SharedDefaultView = name.Length == 0 ? null : name;
+            changes.Notify();
+            return Results.Ok(new { ok = true, sharedDefaultView = state.SharedDefaultView ?? "" });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         app.MapPut("/ag-ui/audit-views", (AuditViewsHttpRequest req, HttpContext ctx,
@@ -169,12 +189,19 @@ public static class AuditViewsApi
     {
         state.Users = new Dictionary<string, AuditViewsUser>(StringComparer.Ordinal);
         state.Shared = [];
+        state.SharedDefaultView = null;
         if (element.ValueKind != JsonValueKind.Object) return;
 
         if (element.TryGetProperty("shared", out var shared) && shared.ValueKind == JsonValueKind.Array)
         {
             try { state.Shared = Clean(shared.Deserialize<List<AuditViewDefinition>>(AguiJson.Options)); }
             catch { /* 共享区损坏：跳过 */ }
+        }
+        if (element.TryGetProperty("sharedDefaultView", out var sharedDef) && sharedDef.ValueKind == JsonValueKind.String)
+        {
+            var name = (sharedDef.GetString() ?? "").Trim();
+            if (name.Length > 0 && state.Shared.Any((v) => string.Equals(v.Name, name, StringComparison.Ordinal)))
+                state.SharedDefaultView = name;
         }
 
         var map = element.TryGetProperty("users", out var inner) && inner.ValueKind == JsonValueKind.Object ? inner : element;
@@ -212,3 +239,6 @@ public sealed record AuditViewsHttpRequest(
 
 /// <summary>发布共享视图的请求体（1.0.332）。</summary>
 public sealed record AuditViewsShareRequest(AuditViewDefinition? View = null);
+
+/// <summary>设置团队默认视图的请求体（1.0.333）：name 为空 = 取消。</summary>
+public sealed record AuditViewsSharedDefaultRequest(string? Name = null);

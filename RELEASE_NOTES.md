@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.332 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.332 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.333 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.333 Release Notes (current Windows desktop release)
+
+**版本说明**：**团队默认视图 + PNG 更像样 + 队列可拖排序**——共享视图能设为团队默认；导出的 PNG 带图例与失败率线；上传队列可拖拽调整优先级。
+**Version note**: **Team default view, richer PNG, draggable queue** — share a default across operators, export a PNG with legend and failure line, and drag queued uploads to reprioritise.
+
+## 变更
+# Changes
+
+中文：
+- **团队默认视图**：`AuditViewsState.SharedDefaultView` + `PUT /ag-ui/audit-views/shared-default`（名称必须在共享池，空值取消）；删除共享项会同步清空团队默认；前端打开工作区时**个人默认优先、其次团队默认**，下拉里两者都用 `★` 标识。
+- **PNG 完善**：导出图新增底部**图例**（堆叠模式列员工、普通模式列工具分类）与**失败率折线**（空桶断开、颜色与屏幕一致），画布高度增至 300 并自动换行。
+- **队列拖拽排序**：上传循环改为「总是取第一个等待项」，队列中「等待中」的行可拖拽重排（拖放高亮、拖到目标行前插入），调序立即影响后续上传顺序；过滤 / 搜索不影响真实索引。
+
+English:
+- **Team default view**: `AuditViewsState.SharedDefaultView` plus `PUT /ag-ui/audit-views/shared-default` (the name must exist in the pool; empty clears); unsharing clears it automatically. The UI prefers the personal default, then the team default, and marks both with `★`.
+- **Richer PNG**: the exported image gains a bottom **legend** (agents when stacked, tool categories otherwise) and the **failure-rate line** (broken across empty buckets, same colours as on screen); the canvas grows to 300px and wraps.
+- **Queue drag & drop**: the upload loop now always takes the first **queued** item, and queued rows can be dragged (drop highlight, inserted before the target), so reordering takes effect immediately while filters and search keep real indices.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（团队默认 / PNG 图例与折线 / 拖拽排序）、§8.2（补 `shared-default`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.333。
+English: `docs/user-guide.md` / `en.md` §3.13 (team default / PNG legend and line / drag reorder), §8.2 (`shared-default`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.333.
+
+## 测试
+# Tests
+
+中文：`Web` 构建 0 错误；`node --check app.js`；i18n 审计 **zh=en=2293，missing 0**；新增 `Restore_KeepsSharedDefaultOnlyWhenItExists`；Docker 冒烟：设团队默认 → 重启容器后仍在，不存在的名称返回 400，取消共享后团队默认为空；全量 `dotnet test` **1931 通过 / 0 失败**。
+English: `Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2293, missing 0**; `Restore_KeepsSharedDefaultOnlyWhenItExists` is new; the Docker smoke sets a team default, restarts the container and still sees it, gets 400 for an unknown name, and clears the default when unsharing; the full `dotnet test` run passes **1931 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.332 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.332 Release Notes (historical)
 
 **版本说明**：**队列可搜可筛 + 视图可共享 + 看板可截图**——上传队列能按文件名 / 状态找；常用视图可以分享给其他运营；看板一键导出 PNG。同时修了一个重启后偏好丢失的持久化缺陷。
 **Version note**: **Searchable queue, shared views, PNG charts** — find uploads by name or state, share useful views with other operators, and export the chart as an image. Also fixes preferences being lost after a restart.
