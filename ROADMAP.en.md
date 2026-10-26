@@ -258,6 +258,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
   - **Retry selected, show all, searchable views (1.0.331)**: tick failed uploads to retry just those, return the chart to the full set in one click, and filter saved views by typing.
   - **Searchable queue, shared views, PNG charts (1.0.332)**: filter uploads by name and state, publish views to a shared pool, export the chart as PNG, and fix preferences/views vanishing after a restart.
   - **Team default, richer PNG, draggable queue (1.0.333)**: mark a shared view as the team default, export a PNG with legend and failure line, and drag queued uploads to reprioritise.
+  - **Shared import, PNG percentages, button reorder (1.0.334)**: publish view JSON into the shared pool, print failure-rate percentages on the exported chart, and reorder queued uploads with ▲/▼.
   - Frontend: the admin console gained a "Configuration Governance" tab (parameter grid + toggles + approval / embed origins), with load-and-backfill (unset items are tri-state, falling back to defaults), save with immediate effect, and refresh.
   - Includes 2 integration tests (admin update persists + invalid value 400 / non-admin 403).
   - **Config-key guard (implemented)**: `tools/check-config-keys.mjs` statically checks "config keys in compose / appsettings ↔ C# option properties" — turning the "set but no property, silently ignored" trap documented in §9.9 from a **manual note** into an **automated guard** (an allowlist records intentional exceptions; `--no-allowlist` self-checks / audits).

@@ -11240,6 +11240,15 @@ async function exportWorkAuditChartPng() {
   for (const r of runs.filter((x) => x.length >= 2)) {
     svg += `<polyline points="${r.join(" ")}" fill="none" stroke="#e5484d" stroke-width="1.5"/>`;
   }
+  // 数值标注（1.0.334）：列数不太多时写出百分比
+  if (buckets.length <= 40) {
+    rates.forEach((r, i) => {
+      if (r === null) return;
+      const x = 40 + i * colW + 10;
+      const y = plotBottom - (r / 100) * plotH;
+      svg += `<text x="${x}" y="${(y - 4).toFixed(1)}" fill="#e5484d" font-size="9" text-anchor="middle">${r.toFixed(0)}%</text>`;
+    });
+  }
 
   // 图例（1.0.333）：与屏幕看板同色，最后一项为失败率折线
   const cjkWidth = (s) => [...String(s)].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 10 : 6), 0);
@@ -11381,6 +11390,52 @@ async function importWaViews(input) {
     toast(n ? t("admin.waViewImported", { count: String(n) }) : t("admin.waViewImportFail", { err: "empty" }));
   } catch (ex) {
     toast(t("admin.waViewImportFail", { err: ex.message }));
+  }
+}
+
+/** 导入到共享池（1.0.334）：逐个发布，JSON 带 defaultView 时顺便设为团队默认。 */
+async function importSharedWaViews(input) {
+  const f = input?.files?.[0];
+  if (input) input.value = "";
+  if (!f) return;
+  try {
+    const parsed = JSON.parse(await f.text());
+    const incoming = Array.isArray(parsed) ? parsed : parsed?.views;
+    if (!Array.isArray(incoming)) {
+      toast(t("admin.waViewImportSharedFail", { err: "invalid_format" }));
+      return;
+    }
+    let n = 0;
+    const names = [];
+    for (const v of incoming) {
+      const name = String(v?.name || "").trim();
+      if (!name) continue;
+      const res = await fetch("/ag-ui/audit-views/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+        body: JSON.stringify({ view: v }),
+      });
+      const d = await res.json().catch(() => null);
+      if (res.ok) {
+        waSharedViews = Array.isArray(d?.sharedViews) ? d.sharedViews : waSharedViews;
+        n++;
+        names.push(name);
+      }
+    }
+    const def = String(parsed?.defaultView || "").trim();
+    if (def && names.includes(def)) {
+      const res = await fetch("/ag-ui/audit-views/shared-default", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+        body: JSON.stringify({ name: def }),
+      });
+      const d = await res.json().catch(() => null);
+      if (res.ok) waSharedDefaultView = String(d?.sharedDefaultView || "");
+    }
+    renderWaViews();
+    toast(n ? t("admin.waViewImportedShared", { count: String(n) }) : t("admin.waViewImportSharedFail", { err: "empty" }));
+  } catch (ex) {
+    toast(t("admin.waViewImportSharedFail", { err: ex.message }));
   }
 }
 
@@ -11679,10 +11734,17 @@ function renderUploadQueue() {
         ? `<input type="checkbox" data-q-sel="${idx}" ${wsUploadQueueSelected.has(idx) ? "checked" : ""} /> `
         : `<span class="ws-q-gap"></span>`;
       const drag = it.status === "wait" ? ` draggable="true" data-q-drag="${idx}"` : "";
+      const moves = it.status === "wait"
+        ? `<span class="ws-q-moves">
+            <button class="chip-btn ws-q-move" type="button" data-q-up="${idx}" title="${escapeHtml(t("admin.wsQueueMoveUp"))}">▲</button>
+            <button class="chip-btn ws-q-move" type="button" data-q-down="${idx}" title="${escapeHtml(t("admin.wsQueueMoveDown"))}">▼</button>
+          </span>`
+        : "";
       return `<div class="ws-q-row ws-q-${escapeHtml(it.status)}"${drag} title="${escapeHtml(it.rel)}">
         ${cb}<span class="ws-q-name">${escapeHtml(it.rel)}</span>
         <span class="ws-q-size">${escapeHtml(fmtBytes(it.size || 0))}</span>
         <span class="ws-q-state">${escapeHtml(label)}</span>
+        ${moves}
       </div>`;
     }).join("")
     : `<div class="ws-q-more">${escapeHtml(t("admin.wsQueueNoMatch"))}</div>`)
@@ -11722,7 +11784,29 @@ function renderUploadQueue() {
     });
     el.addEventListener("dragend", () => { wsQueueDragIndex = null; });
   });
+  // 上移 / 下移（1.0.334）：触屏 / 键盘可达的重排方式
+  rows.querySelectorAll("[data-q-up]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); moveQueueItem(Number(b.dataset.qUp), -1); };
+  });
+  rows.querySelectorAll("[data-q-down]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); moveQueueItem(Number(b.dataset.qDown), 1); };
+  });
   box.classList.remove("hidden");
+}
+
+/** 上移 / 下移（1.0.334）：与下一个「等待中」项交换位置；跳过已开始的行。 */
+function moveQueueItem(index, delta) {
+  const items = wsUploadQueueItems;
+  const item = items[index];
+  if (!item || item.status !== "wait") return;
+  let target = index + delta;
+  while (target >= 0 && target < items.length && items[target].status !== "wait") target += delta;
+  if (target < 0 || target >= items.length) return;
+  const tmp = items[index];
+  items[index] = items[target];
+  items[target] = tmp;
+  wsUploadQueueSelected.clear();
+  renderUploadQueue();
 }
 
 /** 只重试选中的失败 / 取消项（1.0.331）。 */
@@ -17778,6 +17862,8 @@ function init() {
   $("waViewExport").onclick = () => exportWaViews();
   $("waViewImport").onclick = () => $("waViewImportInput").click();
   $("waViewImportInput").onchange = () => importWaViews($("waViewImportInput"));
+  $("waViewImportShared").onclick = () => $("waViewImportSharedInput").click();
+  $("waViewImportSharedInput").onchange = () => importSharedWaViews($("waViewImportSharedInput"));
   $("waGroupByMsg").onchange = () => renderWorkAuditRows();
   // 看板维度（1.0.322）
   $("waChartSwitch").addEventListener("click", (e) => {

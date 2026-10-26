@@ -2523,6 +2523,8 @@ button { white-space: nowrap; }
 .ws-q-row input[type="checkbox"] { margin: 0; }
 .ws-q-row[draggable="true"] { cursor: grab; }
 .ws-q-row.ws-q-drop { outline: 1px dashed var(--accent); outline-offset: -1px; }
+.ws-q-moves { display: inline-flex; gap: 2px; flex: 0 0 auto; }
+.ws-q-move { height: 14px; line-height: 12px; font-size: 9px; padding: 0 4px; }
 .ws-q-gap { display: inline-block; width: 13px; }
 .ws-q-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-q-size { flex: 0 0 auto; color: var(--muted); }

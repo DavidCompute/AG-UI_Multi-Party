@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.333 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.333 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.334 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.334 Release Notes (current Windows desktop release)
+
+**版本说明**：**共享可导入 + PNG 带数值 + 队列可按钮排序**——视图 JSON 直接发布到共享池；导出图写出失败率百分比；上传队列支持 ▲/▼ 重排。
+**Version note**: **Import to shared pool, PNG percentages, button reordering** — publish view JSON straight to the shared pool, read failure rates off the exported image, and reorder uploads with ▲/▼.
+
+## 变更
+# Changes
+
+中文：
+- **导入共享池**：新增「⤒ 导入共享」与独立文件输入，逐个 `POST /ag-ui/audit-views/share`；JSON 若带 `defaultView` 且名称在导入列表内，顺带 `PUT /shared-default` 设为团队默认；导入后刷新共享分组。
+- **PNG 数值标注**：在失败率折线的每个点上写入百分比（`≤40` 列时才写，避免拥挤），颜色与折线一致。
+- **队列按钮排序**：`moveQueueItem()` 让「等待中」行可以用「▲ / ▼」与相邻等待项交换（自动跳过已开始行），与拖拽排序共用同一数据源，触屏 / 键盘也可用。
+
+English:
+- **Import to shared pool**: **⤒ Import shared** with its own file input publishes each view via `POST /ag-ui/audit-views/share`; when the JSON carries `defaultView` and that name was imported, it also calls `PUT /shared-default` so the team default follows. The shared group refreshes afterwards.
+- **PNG percentages**: the failure-rate line now carries a percentage label at every point (only when there are ≤40 columns, to avoid clutter) in the same red as the line.
+- **Button reordering**: `moveQueueItem()` lets queued rows swap with the neighbouring queued item via **▲ / ▼** (skipping started rows) and shares the same data source as drag-and-drop, so touch and keyboard users can reprioritise too.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（导入共享 / PNG 数值 / 队列按钮排序）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.334。
+English: `docs/user-guide.md` / `en.md` §3.13 (shared import / PNG labels / button reorder); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.334.
+
+## 测试
+# Tests
+
+中文：前端交互改造（无后端 / 契约变更）；`node --check app.js`；i18n 审计 **zh=en=2298，missing 0**；Docker 重建后页面包含 `waViewImportShared` / `wsQueueMoveUp`，`/health` 200；全量 `dotnet test` **1931 通过 / 0 失败**。
+English: UI-only round with no backend or contract changes; `node --check app.js`; the i18n audit reports **zh=en=2298, missing 0**; after the Docker rebuild the page contains `waViewImportShared` / `wsQueueMoveUp` and `/health` is 200; the full `dotnet test` run passes **1931 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.333 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.333 Release Notes (historical)
 
 **版本说明**：**团队默认视图 + PNG 更像样 + 队列可拖排序**——共享视图能设为团队默认；导出的 PNG 带图例与失败率线；上传队列可拖拽调整优先级。
 **Version note**: **Team default view, richer PNG, draggable queue** — share a default across operators, export a PNG with legend and failure line, and drag queued uploads to reprioritise.
