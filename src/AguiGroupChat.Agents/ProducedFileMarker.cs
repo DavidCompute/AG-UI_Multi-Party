@@ -101,6 +101,27 @@ public static class ProducedFileMarker
         }
     }
 
+    /// <summary>抽出产物标记里声明的文件路径（去重、保序；不校验证件是否存在）。</summary>
+    public static IReadOnlyList<string> ExtractPaths(string? content)
+    {
+        if (string.IsNullOrEmpty(content)) return [];
+        var paths = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var json in ExtractObjects(content))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("path", out var pEl)
+                    || pEl.ValueKind != System.Text.Json.JsonValueKind.String) continue;
+                var path = pEl.GetString();
+                if (!string.IsNullOrWhiteSpace(path) && seen.Add(path)) paths.Add(path);
+            }
+            catch { /* 非法候选对象：跳过，不影响其它产物 */ }
+        }
+        return paths;
+    }
+
     /// <summary>
     /// 扫描 <paramref name="content"/> 里的产物标记，把**真实存在且合规**的文件入库为附件（同一路径只挂一次）。
     ///

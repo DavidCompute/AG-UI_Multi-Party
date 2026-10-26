@@ -215,8 +215,15 @@ public sealed class AgentCatalog
     /// 技能库 API 测试运行：按技能定义执行一次（shell / http / prompt），返回结果文本。
     /// 供管理界面试运行 / 调试验证技能定义；失败返回错误文本不抛（与技能运行时一致）。
     /// </summary>
-    public Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
-        => _skillRunner.Value is { } runner ? runner.InvokeAsync(skill, query, ct) : Task.FromResult("技能执行器不可用。");
+    public async Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
+    {
+        var result = _skillRunner.Value is { } runner
+            ? await runner.InvokeAsync(skill, query, ct).ConfigureAwait(false)
+            : "技能执行器不可用。";
+        // 产物契约（1.0.341）：文档技能“跑完但没有可交付文件 / 只有标题”时明确告警；
+        // 文件仍保留在返回里供 ProducedFileMarker 回档，不吞掉已生成的内容。
+        return SkillArtifactContract.AppendWarningIfViolated(skill, result);
+    }
 
     /// <summary>
     /// 给文档技能注入「图库检索范围句柄」（技能据此回调平台做图库语义检索）。

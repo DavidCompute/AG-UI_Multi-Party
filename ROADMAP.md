@@ -119,6 +119,7 @@
 - **落点模块**：`AgentApi`、前端「智能体管理」、复用 starter JSON 打包结构。
 - **在线分发（已实现）**：除内置角色包外，管理员可配置<b>在线目录源</b>（任意静态 JSON 地址），用户一键安装目录里的包；也可把自建数字员工<b>发布</b>为分包文件自行托管。合同为纯 JSON（目录索引 + 包 `schema=knowgath/marketplace-pack/v1`），无需专用后端。安装<b>两趟</b>处理（先分配新 ID，再把包内相互引用重映射），并做<b>安全净化</b>（清桥接端点 / 令牌、他实例用户组 id、私有标记）；拉取限制 http/https、2MB、10s、不开重定向、60s 缓存，坏源不影响聚合。前端：「AI 角色管理」工具栏「🏪 模板市场」。落点：`Agents/MarketplaceService.cs`（`ImportDefinitions`）、`Web/MarketplaceRemote.cs`、`Web/MarketplaceApi.cs`。
 - **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
+- **产物契约与自动修补（1.0.341，已实现）**：`SkillArtifactContract` 在文档技能执行后校验 `produce_file`、扩展名、ZIP/PDF 签名与真实内容（Word 正文 / 幻灯片文字 / 工作表单元格 / PDF 页面）；空壳产物追加明确告警且不再被交付兑底当成成功。生成期 `SkillAutoFixer` 对服务端自建文档技能用标准样例真实跑一次，契约失败进入既有自动修复循环（最多 3 轮）；试运行遇到契约失败也会返回“一键应用修正正文”。
 
 ---
 

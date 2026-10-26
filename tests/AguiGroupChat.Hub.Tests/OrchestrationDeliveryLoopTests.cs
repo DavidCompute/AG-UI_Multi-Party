@@ -503,6 +503,17 @@ public sealed class OrchestrationDeliveryLoopTests
         Assert.Equal(0, blocks);
     }
 
+    [Fact]
+    public void DeliveryResult_ContractFailureIsNotTreatedAsDelivered()
+    {
+        // 有 produce_file 但契约明确判为只有标题 / 空壳：不能当成已交付，
+        // 否则交付兑底会把它当成功、用户仍拿不到可用的稿子。
+        var hollow = "{\"ok\":true,\"blocks\":12,\"produce_file\":{\"path\":\"/app/docs/c.docx\"}}\n\n"
+            + "⚠ " + SkillArtifactContract.FailurePrefix + "：Word 文档只有标题或正文过短";
+        var (hasFile, _) = AgentGateway.ParseDeliveryResult(hollow, "docx_");
+        Assert.False(hasFile);
+    }
+
     // ---------- 文档技能入参校验（拦住“只有标题”的空壳文档） ----------
 
     private static AgentSkillDefinition DocxSkill() => new()

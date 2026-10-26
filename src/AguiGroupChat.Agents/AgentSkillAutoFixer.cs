@@ -87,7 +87,7 @@ public sealed class SkillAutoFixer
     private async Task<(bool Ok, string? Error)> ProbeAsync(AgentSkillDefinition def, string body, string description, CancellationToken ct)
     {
         if (def.Kind == AgentSkillKind.Dotnet)
-            return await DotnetCompileProbeAsync(body, ct).ConfigureAwait(false);
+            return await DotnetProbeAsync(def, body, ct).ConfigureAwait(false);
         if (def.Kind == AgentSkillKind.Http)
             return HttpLint(body);
         if (def.Kind == AgentSkillKind.Shell)
@@ -97,19 +97,58 @@ public sealed class SkillAutoFixer
 
     /// <summary>C# 技能自测：服务端 Roslyn <b>只编译不运行</b>（client 技能不得在服务端执行本机代码），
     /// 同时校验入口 public static string Run(string) 存在。返回空串表示通过。</summary>
-    private async Task<(bool Ok, string? Error)> DotnetCompileProbeAsync(string body, CancellationToken ct)
+    private async Task<(bool Ok, string? Error)> DotnetProbeAsync(AgentSkillDefinition def, string body, CancellationToken ct)
     {
         if (_catalog is null) return (false, "技能执行器不可用，无法自测 dotnet 技能");
         try
         {
             var err = await _catalog.CompileDotnetOnlyAsync(body, ct).ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(err) ? (true, null) : (false, err);
+            if (!string.IsNullOrWhiteSpace(err)) return (false, err);
         }
         catch (Exception ex)
         {
             return (false, "dotnet 技能编译校验失败：" + ex.Message);
         }
+
+        // 文档技能：编译通过只是第一步，还要真的跑出一份非空壳产物。
+        // 只对服务端执行的自建技能做（client 技能不得在服务器上运行本机代码）；
+        // 内置技能不经过本修复器（BuiltinVersion 非空时调用方也不会走到这里）。
+        var kind = SkillArtifactContract.ExpectedKind(def);
+        if (kind == SkillArtifactKind.None
+            || def.ExecutionLocation != AgentSkillExecutionLocation.Server
+            || def.BuiltinVersion is not null) return (true, null);
+
+        try
+        {
+            var copy = CloneWithBody(def, body);
+            var sample = SkillArtifactContract.SampleInput(kind);
+            var output = await _catalog.RunSkillAsync(copy, sample, ct).ConfigureAwait(false);
+            var validation = SkillArtifactContract.Validate(copy, output);
+            if (validation.IsSatisfied) return (true, null);
+            var detail = validation.Issues.Count > 0
+                ? string.Join("；", validation.Issues)
+                : "产物未通过契约校验";
+            var tail = output.Length > MaxShellProbeChars ? output[^MaxShellProbeChars..] : output;
+            return (false, "文档技能产物自测未通过：" + detail + "\n技能输出：\n" + tail);
+        }
+        catch (Exception ex)
+        {
+            return (false, "文档技能产物自测异常：" + ex.Message);
+        }
     }
+
+    private static AgentSkillDefinition CloneWithBody(AgentSkillDefinition def, string body) => new()
+    {
+        SkillId = def.SkillId,
+        Name = def.Name,
+        Description = def.Description,
+        Kind = def.Kind,
+        Body = body,
+        ParametersJson = def.ParametersJson,
+        Interpreter = def.Interpreter,
+        ExecutionLocation = def.ExecutionLocation,
+        BuiltinVersion = def.BuiltinVersion,
+    };
 
     private async Task<(bool Ok, string? Error)> PromptSelfTalkAsync(AgentSkillDefinition def, string body, string description, CancellationToken ct)
     {
@@ -214,6 +253,12 @@ public sealed class SkillAutoFixer
             var ov = AgentCatalog.StructuredFastModel(isDeepSeek); // 技能修正是结构化改写（JSON/脚本），不进 reasoner
             using var client = AgentCatalog.BuildOpenAIChatClient(
                 _options, new AgentDefinition { AgentId = "skill_repair", Nickname = "技能修复器" }, isDeepSeek, ov, AgentCatalog.DeepSeekThinking.Disabled).AsIChatClient();
+            var artifactKind = SkillArtifactContract.ExpectedKind(def);
+            var artifactRule = artifactKind == SkillArtifactKind.None
+                ? ""
+                : $"\n该技能是文档生成技能，必须真正产出 {SkillArtifactContract.Extension(artifactKind)} 文件："
+                  + "返回文本里要包含 produce_file（path/name/bytes）标记，文件必须含实际正文，"
+                  + "不能只有标题 / 封面 / 空表。标准样例输入：" + SkillArtifactContract.SampleInput(artifactKind);
             var heading = def.Kind switch
             {
                 AgentSkillKind.Dotnet => "该技能是 C#（dotnet）技能：正文为 C# 源码，须<b>能编译通过</b>且含 public static string Run(string input) 入口，代码必须写在 class 内（形如 public class Skill {{ public static string Run(string input){{...}} }}，可含私有辅助方法）；不要把方法写在文件顶层、不要用顶层语句。"
@@ -237,7 +282,7 @@ public sealed class SkillAutoFixer
                 // 修复多轮仍跑不通（实测：python3 缺失的技能反复修成 python3）。
                 // 按目标执行位置分流：client 技能在用户机器跑，不能套服务端容器清单。
                 SkillSandboxCapabilities.Describe(def.ExecutionLocation == AgentSkillExecutionLocation.Client) + "\n\n" +
-                heading + "\n请只输出修正后的技能正文。";
+                heading + artifactRule + "\n请只输出修正后的技能正文。";
             var resp = await client.GetResponseAsync([new ChatMessage(ChatRole.User, prompt)], cancellationToken: ct);
             var txt = (resp.Text ?? "").Trim();
             if (txt.Length == 0) return null;

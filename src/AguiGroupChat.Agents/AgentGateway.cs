@@ -3291,7 +3291,10 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     internal static (bool HasFile, int Blocks) ParseDeliveryResult(string? text, string? skillPrefix = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return (false, 0);
-        var hasFile = text.Contains("produce_file", StringComparison.OrdinalIgnoreCase);
+        // 产物契约失败（缺失 / 空壳 / 只有标题）不能被当成“已交付”：
+        // 否则 fallback 会把一张只有标题的封面当成成功，用户仍然拿不到可用的稿子。
+        var contractFailed = text.Contains(SkillArtifactContract.FailurePrefix, StringComparison.Ordinal);
+        var hasFile = text.Contains("produce_file", StringComparison.OrdinalIgnoreCase) && !contractFailed;
         // 度量口径<b>按交付物类型分别选</b>，不能混着取最大值：各技能报的字段语义不同，
         // 混取会让“一张三行的表”因为 sheets=1 而被当成内容丰富（或反之误报很薄）。
         var amount = MetricFor(skillPrefix) switch

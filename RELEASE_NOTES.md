@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.340 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.340 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.341 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.341 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能产物契约 + 自动修补**——文档技能必须真的产出可打开、含正文的文件；缺失 / 空壳 / 只有标题会被明确告警，不再被当成成功交付；生成期自测用真实样例跑一次，契约失败进入自动修复。
+**Version note**: **Skill artifact contract and auto-repair** — document skills must produce a real, openable file with content; missing / hollow / title-only artifacts are explicitly reported and no longer count as delivered, while generation-time self-tests run real samples and feed contract failures into auto-repair.
+
+## 变更
+# Changes
+
+中文：
+- **运行期产物契约**：新增 `SkillArtifactContract`。文档技能（按 id / 名称识别 docx / xlsx / pptx / pdf）执行后校验 `produce_file`、扩展名匹配、文件存在且非空、OOXML ZIP / PDF 签名，以及真实内容（Word 正文 ≥ 20 非空白字符、PPT 至少一页且文字 ≥ 20、Excel 至少一个工作表与单元格、PDF 至少一个页面对象）。
+- **不再把空壳当成功**：契约失败时在原结果末尾追加「⚠ 技能产物校验失败：…」；`AgentGateway.ParseDeliveryResult` 不再把契约失败视为已交付，交付兑底会继续尝试或如实说明。
+- **生成期自动修补**：`SkillAutoFixer` 对服务端自建文档技能在编译通过后用标准样例真实跑一次（Word = 标题 + 多段正文；Excel = 列 + 数据行；PPT = 封面 + 要点页；PDF = 标题 + 正文块）。契约失败会带具体缺口进入既有修复循环（最多 3 轮），且只对 `BuiltinVersion=null` 的自建技能生效。
+- **试运行修复入口**：`SkillApi.TryDotnetAutoFixAsync` 把「技能产物校验失败」纳入修复触发条件，前端仍以「应用修复后的正文」让用户确认后保存。
+- **生成提示词同步**：自然语言生成技能与一键组织编排都会要求文档技能返回 `produce_file`，且文件必须有实际正文，禁止只写标题 / 封面 / 空表。
+
+English:
+- **Runtime artifact contract**: new `SkillArtifactContract`. After a document skill (recognised by id / name as docx / xlsx / pptx / pdf) runs, it validates `produce_file`, extension match, existence and non-emptiness, OOXML ZIP / PDF signatures, and real content (Word body ≥ 20 non-whitespace chars, at least one PPT slide with ≥ 20 chars, at least one Excel sheet and cell, at least one PDF page object).
+- **Hollow output is no longer success**: on failure the original result gets "⚠ 技能产物校验失败：…"; `AgentGateway.ParseDeliveryResult` no longer treats a contract failure as delivered, so delivery fallback keeps trying or explains the gap honestly.
+- **Generation-time auto-repair**: after compilation, `SkillAutoFixer` runs a server-side user document skill once with standard samples (Word = title + paragraphs; Excel = columns + data rows; PPT = cover + bullets; PDF = title + blocks). Contract gaps enter the existing repair loop (up to 3 rounds), only for user skills with `BuiltinVersion=null`.
+- **Test-run repair entry**: `SkillApi.TryDotnetAutoFixAsync` treats "技能产物校验失败" as a repair trigger; the frontend still asks the user to confirm before saving the repaired body.
+- **Generation prompts aligned**: natural-language skill generation and one-click org orchestration now require `produce_file` and real body content for document skills, forbidding title-only / cover-only / empty-table artifacts.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.5.5（产物契约）、§4.6.5 / §4.6.6（生成期自测与修复触发）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.341。
+English: `docs/user-guide.md` / `en.md` §4.5.5 (artifact contract), §4.6.5 / §4.6.6 (generation-time self-test and repair triggers); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.341.
+
+## 测试
+# Tests
+
+中文：`SkillArtifactContractTests` 10 项 + 交付判定拒绝空壳 1 项通过；`node --check app.js`；i18n 审计 **zh=en=2335，missing 0**；配置键与文档引用校验通过；Docker 重建后技能试运行与产物回档正常；全量 `dotnet vstest` **1958 通过 / 0 失败**。
+English: ten `SkillArtifactContractTests` plus one delivery-result rejection test pass; `node --check app.js`; the i18n audit reports **zh=en=2335, missing 0**; config-key and docs-reference checks pass; after the Docker rebuild skill test runs and artifact recall work; the full `dotnet vstest` run passes **1958 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.340 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.340 Release Notes (historical)
 
 **版本说明**：**记忆周期巩固 / 遗忘**——按数字员工的记忆拟人类型定期整理存量记忆：深记型补巩固、难录入型在反复出现后巩固、快速遗忘型收紧过期，只改元数据不改原文。
 **Version note**: **Periodic memory consolidation / forgetting** — existing memories are maintained by each digital employee's memory personality: deep memories are consolidated, slow-to-learn memories become durable after repetition, fast-forgetting memories are tightened; metadata only, never the original text.

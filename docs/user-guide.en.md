@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.340**
+> Applies to version: **1.0.341**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2128,6 +2128,24 @@ Built-in document skills write files to the server disk, and the test-run result
 - `/run` is a **manual execution with no approval channel**, so `shell`/`http` client skills / system skills are all restricted to the owner or an administrator (to prevent any logged-in user from triggering arbitrary commands / outbound calls).
 - If the current browser is not connected to the Local bridge for a client skill, what is returned is **guidance text** rather than an execution result.
 
+#### 4.5.5 Document artifact contract (1.0.341)
+
+`SkillArtifactContract` checks after execution whether the file a skill claims to have produced is genuinely deliverable. Document skills are recognised by strong id / name signals (`docx` / `xlsx` / `pptx` / `pdf`):
+
+| Check | Rule |
+| --- | --- |
+| Artifact declared | The returned text must contain `produce_file` (path / name / bytes) |
+| Extension | Must match the skill type (a docx skill cannot return a PDF) |
+| Exists / non-empty | The path must exist and the file size must be > 0 |
+| File format | Office files need the ZIP signature; PDFs need the `%PDF-` header |
+| Real content | Word needs `word/document.xml` with at least 20 non-whitespace characters; PPT needs at least one slide and 20 characters; Excel needs at least one worksheet and one cell; PDF needs at least one `/Type /Page` |
+
+On failure `AgentCatalog.RunSkillAsync` appends "⚠ 技能产物校验失败：…" to the original result. The file is still recalled where possible, but:
+- delivery fallback (`ParseDeliveryResult`) does **not** treat a contract failure as delivered (a bare `produce_file` cannot masquerade as success);
+- a test run includes the warning in `TryDotnetAutoFixAsync`'s repair triggers and returns a one-click applicable corrected body.
+
+> The contract intentionally ignores the description: an ordinary skill saying “can export PDF” in its description is not misclassified as a PDF generator.
+
 ---
 
 ### 4.6 C# / .NET skills: Roslyn compilation and auto-repair
@@ -2183,7 +2201,7 @@ Models / users often write methods **directly at the file's top level** (not wra
 
 | Type | Self-test method |
 | --- | --- |
-| `dotnet` | Server-side Roslyn **compiles only, does not run** (`CompileDotnetOnlyAsync`), and validates that the `Run` entry point exists |
+| `dotnet` | Server-side Roslyn compilation + `Run` entry validation; **document-type user skills** additionally run once with a standard sample and validate the artifact contract (1.0.341, see 4.5.5) |
 | `prompt` (`server`) | **Actually asks the model once** with the template; it passes only if non-empty text is produced |
 | `http` (`server`) | **Does not make a real outbound call** (to prevent side effects / SSRF); it only validates the legality of the Body JSON (url / method) |
 | `shell` (`server`) | When the switch `Agents:SkillAutoTestServerShell` (default `true`) is on, **runs it blindly once** (sandbox, 60s fallback), judging failure by exit code / timeout / the "skill execution failed" marker |
@@ -2191,14 +2209,17 @@ Models / users often write methods **directly at the file's top level** (not wra
 
 When `Provider=mock` everything is skipped (`Skipped = true`). During repair it hands "the original skill + smoke input + errors + the sandbox's real capability list" to the model, rewriting only the body of the same id / kind (including the description when necessary).
 
-#### 4.6.6 Triggering "apply the repaired body": the 4 error markers
+Artifact self-test for document-type user skills only runs for **server-executed skills with `BuiltinVersion=null`**: it runs the skill once with standard sample input (Word = title + paragraphs; Excel = columns + data rows; PPT = cover + bullet page; PDF = title + content blocks) and feeds contract gaps into the same repair loop, up to 3 rounds. Built-in and client skills do not run a server-side artifact probe (client code must not execute on the server).
 
-After a dotnet skill test run / generation, if the returned text hits **one of the following four markers** (`SkillApi.TryDotnetAutoFixAsync` checks with `runResult.Contains(...)`), and the caller can edit the skill, and it is not mock, then it triggers `SkillAutoFixer.VerifyOrRepairAsync(maxAttempts: 3)` and returns the repair candidate to the frontend with the response:
+#### 4.6.6 Triggering "apply the repaired body": the 5 error markers
+
+After a dotnet skill test run / generation, if the returned text hits **one of the following five markers** (`SkillApi.TryDotnetAutoFixAsync` checks with `runResult.Contains(...)`), and the caller can edit the skill, and it is not mock, then it triggers `SkillAutoFixer.VerifyOrRepairAsync(maxAttempts: 3)` and returns the repair candidate to the frontend with the response:
 
 1. `.NET 技能编译失败`
 2. `NuGet 引用还原失败`
 3. `缺少入口`
 4. `编译校验失败`
+5. `技能产物校验失败` (1.0.341)
 
 After the frontend receives `autoFix.correctedBody`, it shows the button `#skillRunFixApply` in the test-run result dialog (text `skill.testApplyFix` "Apply auto-fixed body", title `skill.testFixHint`); clicking it runs `applySkillFix()` → `PUT /ag-ui/skills/{id}` to save the repaired body (`skill.testFixApplied`). **The repair candidate is not saved automatically**; the user must click the button.
 

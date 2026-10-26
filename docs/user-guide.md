@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.340**
+> 适用版本：**1.0.341**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2126,6 +2126,24 @@
 - `/run` 是**无审批通道的手动执行**，因此 `shell`/`http` 客户端技能 / 系统技能都做了归属或管理员限制（避免任意登录用户触发任意命令 / 外呼）。
 - 客户端技能若当前浏览器未连接本机桥，返回的是**指引文本**而非执行结果。
 
+#### 4.5.5 文档产物契约（1.0.341）
+
+`SkillArtifactContract` 在技能执行后检查“说的文件”是否真的是可交付的稿子。文档技能按 id / 名称识别（`docx` / `xlsx` / `pptx` / `pdf`）：
+
+| 检查 | 规则 |
+| --- | --- |
+| 产物声明 | 返回文本必须有 `produce_file`（path / name / bytes） |
+| 扩展名 | 必须与技能类型一致（docx 技能不能交 PDF） |
+| 文件存在 / 非空 | 路径存在且大小 > 0 |
+| 文件格式 | Office 必须带 ZIP 签名；PDF 必须带 `%PDF-` 头 |
+| 真实内容 | Word 必须有 `word/document.xml` 且正文非空白字符 ≥ 20；PPT 至少一张幻灯片且文字 ≥ 20；Excel 至少一个工作表且至少一个单元格；PDF 至少一个 `/Type /Page` |
+
+失败时 `AgentCatalog.RunSkillAsync` 在原结果末尾追加「⚠ 技能产物校验失败：…」，文件仍尽量回档，但：
+- 交付兑底 `ParseDeliveryResult` 不把契约失败当成已交付（不会拿“有 produce_file”冒充成功）；
+- 试运行会把该告警纳入 `TryDotnetAutoFixAsync` 的修复触发条件，返回可一键应用的修正正文。
+
+> 契约只识别强信号 id / 名称，**不看描述**：描述里顺带写“可导出 PDF”的普通技能不会被误判成 PDF 生成器。
+
 ---
 
 ### 4.6 C# / .NET 技能：Roslyn 编译与自动修复
@@ -2181,7 +2199,7 @@ dotnet 技能的 body 是一段 C# 源码，约定须含 `public static string R
 
 | 类型 | 自测方式 |
 | --- | --- |
-| `dotnet` | 服务端 Roslyn **只编译不运行**（`CompileDotnetOnlyAsync`），并校验 `Run` 入口存在 |
+| `dotnet` | 服务端 Roslyn 编译 + 校验 `Run` 入口；**文档类自建技能**还会用标准样例真实跑一次并校验产物契约（1.0.341，见 4.5.5） |
 | `prompt`（`server`） | 拿模板**真实问一次模型**，产出非空文本才通过 |
 | `http`（`server`） | **不发真实外呼**（防副作用 / SSRF），只校验 Body JSON（url / method）合法性 |
 | `shell`（`server`） | 开关 `Agents:SkillAutoTestServerShell`（默认 `true`）开启时**盲跑一次**（沙箱、60s 兜底），按退出码 / 超时 / 「技能执行失败」标志判失败 |
@@ -2189,14 +2207,17 @@ dotnet 技能的 body 是一段 C# 源码，约定须含 `public static string R
 
 `Provider=mock` 时全部跳过（`Skipped = true`）。修复时把「原技能 + 冒烟输入 + 报错 + 沙箱真实能力清单」交给模型，只重写同一 id / kind 的正文（必要时含描述）。
 
-#### 4.6.6 触发「应用修复后的正文」：4 类错误标志
+文档类自建技能的产物自测只对 **server 执行、`BuiltinVersion=null`** 的技能做：用标准样例输入（Word = 标题 + 多段正文；Excel = 列 + 数据行；PPT = 封面 + 要点页；PDF = 标题 + 正文块）真实跑一次，失败缺口交给同一个修复循环，最多 3 轮。内置技能与 client 技能不跑服务端产物测试（client 代码不得在服务器执行）。
 
-dotnet 技能试运行 / 生成后若返回文本命中以下**四类标志之一**（`SkillApi.TryDotnetAutoFixAsync` 用 `runResult.Contains(...)` 判断），且调用者可编辑该技能、且非 mock，则触发 `SkillAutoFixer.VerifyOrRepairAsync(maxAttempts: 3)`，把修复候选随响应回给前端：
+#### 4.6.6 触发「应用修复后的正文」：5 类错误标志
+
+dotnet 技能试运行 / 生成后若返回文本命中以下**五类标志之一**（`SkillApi.TryDotnetAutoFixAsync` 用 `runResult.Contains(...)` 判断），且调用者可编辑该技能、且非 mock，则触发 `SkillAutoFixer.VerifyOrRepairAsync(maxAttempts: 3)`，把修复候选随响应回给前端：
 
 1. `.NET 技能编译失败`
 2. `NuGet 引用还原失败`
 3. `缺少入口`
 4. `编译校验失败`
+5. `技能产物校验失败`（1.0.341）
 
 前端拿到 `autoFix.correctedBody` 后，在试运行结果弹窗显示按钮 `#skillRunFixApply`（文案 `skill.testApplyFix`「应用修复后的正文」，title `skill.testFixHint`）；点击执行 `applySkillFix()` → `PUT /ag-ui/skills/{id}` 保存修复正文（`skill.testFixApplied`）。**修复候选不会自动保存**，必须用户点按钮。
 

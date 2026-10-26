@@ -120,6 +120,8 @@ public static class SkillDefinitionGenerator
                     : "executionLocation 按“目标环境”选择：操作本机文件建议 client（本机桥执行），纯计算/服务端数据则 server（Roslyn 编译执行）。\n") +
                   imageWriteHint
                 : "不要生成 kind=dotnet（非系统管理员无权建），也不要试图绕过。\n") +
+            "【产物契约】若技能用于生成 Word / Excel / PPT / PDF 等文件，成功时返回文本必须包含 " +
+            "produce_file（含 path / name / bytes），且文件里必须写入实际正文，不能只有标题、封面或空表。\n" +
             "skillId 用 ASCII（字母/数字/_/-，≤40）。只输出如下 JSON：\n" +
             "{\"name\":\"中文名\",\"skillId\":\"id\",\"kind\":\"(按允许类型)\",\"description\":\"给模型的调用说明，50~150 字\",\"body\":\"正文\",\"executionLocation\":\"server|client\",\"clientRunner\":null,\"requiresApproval\":true}\n\n" +
             runSummary + "。\n" + runSettings + "\n\n" +

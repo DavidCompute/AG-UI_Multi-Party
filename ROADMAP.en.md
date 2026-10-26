@@ -108,6 +108,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
 - **Goal**: a built-in "industry roles / skills / knowledge base template" download marketplace for one-click distribution.
 - **Target module**: `AgentApi`, frontend "Agent Management", reusing the starter JSON packaging structure.
 - **Skill library search & bulk delete (implemented)**: the skill library now has reusable `prompt` / `shell` / `http` kinds (`shell`/`http` admin-created only), with <b>search by name / ID</b> (frontend filter) and <b>selected bulk delete</b>; `POST /ag-ui/skills/generate` produces a skill definition from natural language (no hand-written commands / JSON).
+- **Artifact contract and auto-repair (1.0.341, implemented)**: `SkillArtifactContract` validates `produce_file`, extension, ZIP/PDF signature, and real content (Word body / slide text / worksheet cells / PDF pages) after a document skill runs; hollow artifacts get an explicit warning and are no longer treated as delivered by delivery fallback. At generation time `SkillAutoFixer` runs server-side user document skills once with standard samples; contract failures enter the existing repair loop (up to 3 rounds), and a contract failure in a test run offers a one-click applicable repaired body.
 
 ---
 

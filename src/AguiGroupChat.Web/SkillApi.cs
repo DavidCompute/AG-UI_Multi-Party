@@ -497,7 +497,8 @@ public static class SkillApi
         var isCompileFailure = runResult.Contains(".NET 技能编译失败", StringComparison.Ordinal)
             || runResult.Contains("NuGet 引用还原失败", StringComparison.Ordinal)
             || runResult.Contains("缺少入口", StringComparison.Ordinal)
-            || runResult.Contains("编译校验失败", StringComparison.Ordinal);
+            || runResult.Contains("编译校验失败", StringComparison.Ordinal)
+            || runResult.Contains(AguiGroupChat.Agents.SkillArtifactContract.FailurePrefix, StringComparison.Ordinal);
         if (!isCompileFailure) return (runResult, null);
         if (string.Equals(options.Provider, "mock", StringComparison.OrdinalIgnoreCase)) return (runResult, null);
         try
