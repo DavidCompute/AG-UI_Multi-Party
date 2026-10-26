@@ -76,6 +76,15 @@ public sealed class ExecutionOptions
     /// </summary>
     public int MaxAutoApprovedRounds { get; set; } = 30;
 
+    /// <summary>
+    /// 计划步骤空产出重试（1.0.339，默认开）：子岗位 / 技能返回空文本时，用同一输入再问一次，
+    /// 要求直接给出结论或说明缺什么；仍为空则记入「未产出清单」并保留原输入供后续步骤使用。
+    /// </summary>
+    public bool PlanStepRetryOnEmpty { get; set; } = true;
+
+    /// <summary>空产出重试次数上限（默认 1；0 = 不重试，仅如实记录）。</summary>
+    public int PlanStepEmptyRetryMax { get; set; } = 1;
+
     /// <summary>合法阶段 token 白名单（ExecutionOrder 只允许这些；语义见各入口方法注释）。</summary>
     private static readonly string[] LegalTokens = [StageBridge, StagePipeline, StageRelay, StageOrgRoute, StageStreaming];
 
@@ -129,6 +138,7 @@ public sealed class ExecutionOptions
         MaxRouteDepth = Positive(MaxRouteDepth, Default.MaxRouteDepth, nameof(MaxRouteDepth), logger);
         MaxInteractionRounds = Positive(MaxInteractionRounds, Default.MaxInteractionRounds, nameof(MaxInteractionRounds), logger);
         MaxAutoApprovedRounds = Positive(MaxAutoApprovedRounds, Default.MaxAutoApprovedRounds, nameof(MaxAutoApprovedRounds), logger);
+        PlanStepEmptyRetryMax = NonNegative(PlanStepEmptyRetryMax, Default.PlanStepEmptyRetryMax, nameof(PlanStepEmptyRetryMax), logger);
         ExecutionOrder = NormalizeExecutionOrder(ExecutionOrder, Default.ExecutionOrder, logger);
         return this;
     }
@@ -196,6 +206,16 @@ public sealed class ExecutionOptions
     private static int Positive(int value, int fallback, string name, ILogger? logger)
     {
         if (value > 0) return value;
+        logger?.LogWarning(
+            "Agents:Execution:{Name} 配置非法（{Value}），已回退默认值 {Fallback}",
+            name, value, fallback);
+        return fallback;
+    }
+
+    /// <summary>夹紧单个非负整数（0 合法）：负数回退默认值并按需告警。</summary>
+    private static int NonNegative(int value, int fallback, string name, ILogger? logger)
+    {
+        if (value >= 0) return value;
         logger?.LogWarning(
             "Agents:Execution:{Name} 配置非法（{Value}），已回退默认值 {Fallback}",
             name, value, fallback);

@@ -60,6 +60,8 @@ public static class ExecutionRuntimeApi
         if (req.MaxRouteDepth is { } rd) e.MaxRouteDepth = rd;
         if (req.MaxInteractionRounds is { } ir) e.MaxInteractionRounds = ir;
         if (req.MaxAutoApprovedRounds is { } mar) e.MaxAutoApprovedRounds = mar;
+        if (req.PlanStepRetryOnEmpty is { } pre) e.PlanStepRetryOnEmpty = pre;
+        if (req.PlanStepEmptyRetryMax is { } prm) e.PlanStepEmptyRetryMax = prm;
         if (req.ExecutionOrder is { } order) e.ExecutionOrder = order;
         if (req.EnableBridge is { } eb) e.EnableBridge = eb;
         if (req.EnablePipeline is { } ep) e.EnablePipeline = ep;
@@ -91,6 +93,7 @@ public static class ExecutionRuntimeApi
             e.SessionLockTtlMinutes, e.ApprovedSkillTtlMinutes, e.SessionLockMaxEntries,
             e.CoordinatorPlanMaxItems, e.CoordinatorPlanMaxSteps, e.MaxRecursiveRounds,
             e.MaxRouteDepth, e.MaxInteractionRounds, e.MaxAutoApprovedRounds,
+            e.PlanStepRetryOnEmpty, e.PlanStepEmptyRetryMax,
             executionOrder = e.ExecutionOrder,
             e.EnableBridge, e.EnablePipeline, e.EnableRelay, e.EnableOrgRoute,
             complexityTimeouts = new
@@ -107,6 +110,7 @@ public static class ExecutionRuntimeApi
            $"stream={e.StreamTimeoutMinutes};attempts={e.MaxModelAttempts};" +
            $"bridge={e.EnableBridge};pipeline={e.EnablePipeline};relay={e.EnableRelay};org={e.EnableOrgRoute};" +
            $"interaction={e.MaxInteractionRounds};autoApproved={e.MaxAutoApprovedRounds};" +
+           $"stepRetry={e.PlanStepRetryOnEmpty}/{e.PlanStepEmptyRetryMax};" +
            $"complexity={e.ComplexityTimeouts?.Enabled};autoApprovedTiers=" +
            $"{e.ComplexityTimeouts?.AutoApprovedStandard}/{e.ComplexityTimeouts?.AutoApprovedComplex}/{e.ComplexityTimeouts?.AutoApprovedHeavy}";
 
@@ -134,6 +138,13 @@ public static class ExecutionRuntimeApi
             exec.MaxRouteDepth = saved.MaxRouteDepth;
             exec.MaxInteractionRounds = saved.MaxInteractionRounds;
             exec.MaxAutoApprovedRounds = saved.MaxAutoApprovedRounds;
+            // 1.0.339 新增：旧快照没有这两个键，只在确实带了的时候覆盖（避免把 appsettings 配置冲成默认值）
+            if (element.ValueKind == JsonValueKind.Object
+                && (element.TryGetProperty("planStepRetryOnEmpty", out _) || element.TryGetProperty("PlanStepRetryOnEmpty", out _)))
+                exec.PlanStepRetryOnEmpty = saved.PlanStepRetryOnEmpty;
+            if (element.ValueKind == JsonValueKind.Object
+                && (element.TryGetProperty("planStepEmptyRetryMax", out _) || element.TryGetProperty("PlanStepEmptyRetryMax", out _)))
+                exec.PlanStepEmptyRetryMax = saved.PlanStepEmptyRetryMax;
             exec.ExecutionOrder = saved.ExecutionOrder;
             exec.EnableBridge = saved.EnableBridge;
             exec.EnablePipeline = saved.EnablePipeline;
@@ -159,6 +170,7 @@ public sealed record ExecutionPatchReq(
     int? CoordinatorPlanMaxItems, int? CoordinatorPlanMaxSteps, int? MaxRecursiveRounds,
     int? MaxRouteDepth, int? MaxInteractionRounds,
     int? MaxAutoApprovedRounds,
+    bool? PlanStepRetryOnEmpty, int? PlanStepEmptyRetryMax,
     string[]? ExecutionOrder,
     bool? EnableBridge, bool? EnablePipeline, bool? EnableRelay, bool? EnableOrgRoute,
     ComplexityTimeoutPatch? ComplexityTimeouts);

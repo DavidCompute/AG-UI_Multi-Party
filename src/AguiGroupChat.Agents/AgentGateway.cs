@@ -1596,6 +1596,9 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         var sb = new StringBuilder();
         // 被跳过的步骤与原因：兜底时要如实说明跳了什么、为什么，不要再笼统道歉
         var skipNotes = new List<string>();
+        // 未产出清单（1.0.339）：步骤确实执行了但拿不到正文 / 结果，重试后仍空时记到这里，
+        // 最终答复里如实列出“缺哪些”，而不是假装已经汇总完毕。
+        var stepFailures = new List<string>();
         // 真正跑过（指派 / 技能 / 批量客户端技能）的步骤数：用于兜底时区分
         // “一步都没跑”与“跑了但没有任何可展示产出”，不再写死“已收集各岗位结果”
         var stepsRan = 0;
@@ -1677,18 +1680,51 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                 var session = await child.CreateSessionAsync(ct);
                 var prev = AgentGateway.AmbientContext.Value;
                 AgentGateway.AmbientContext.Value = context with { AgentId = target.AgentId, AgentNickname = target.Nickname ?? target.AgentId };
+                var stepHadOutput = false;
                 try
                 {
                     var resp = await child.RunAsync([new ChatMessage(ChatRole.User, prompt)], session, null, ct);
                     stepsRan++;
-                    var stepOut = string.IsNullOrWhiteSpace(resp.Text) ? "（未返回内容）" : resp.Text.Trim();
-                    if (!hops.Any(h => h.AgentId == step.Target))
-                        hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = AgentGatewayHelpers.TruncateForChain(working), Result = AgentGatewayHelpers.TruncateForChain(stepOut) });
-                    Remember(target.Nickname ?? step.Target, stepOut);
-                    working = stepOut;
+                    var stepOut = (resp.Text ?? "").Trim();
+                    // 空产出重试（1.0.339）：同一会话再问一次，要求直接给结论 / 说清缺什么。
+                    // 目的：把“子岗位静默返回空、下游拿到占位符或空串”这类空回复收在最前一线。
+                    var attempts = 0;
+                    while (stepOut.Length == 0 && _execution.PlanStepRetryOnEmpty && attempts < _execution.PlanStepEmptyRetryMax)
+                    {
+                        attempts++;
+                        _logger.LogInformation("指派步骤空产出，重试第 {N} 次：target={TargetId}", attempts, step.Target);
+                        var retryResp = await child.RunAsync(
+                            [new ChatMessage(ChatRole.User, "上一轮没有返回任何正文。请基于上面同样的要求直接给出结论；若确实缺少信息，请明确说明缺什么，不要返回空内容。")],
+                            session, null, ct);
+                        stepOut = (retryResp.Text ?? "").Trim();
+                    }
+
+                    if (stepOut.Length == 0)
+                    {
+                        // 仍为空：记入未产出清单，且**不把占位符喂给下游**（working 保持原值）
+                        stepFailures.Add($"「{target.Nickname ?? step.Target}」未返回可展示内容");
+                        if (!hops.Any(h => h.AgentId == step.Target))
+                            hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = AgentGatewayHelpers.TruncateForChain(working), Result = "（未产出）" });
+                    }
+                    else
+                    {
+                        stepHadOutput = true;
+                        if (!hops.Any(h => h.AgentId == step.Target))
+                            hops.Add(new ChainNode { Kind = "assignment", AgentId = step.Target, AgentNickname = target.Nickname ?? step.Target, Query = AgentGatewayHelpers.TruncateForChain(working), Result = AgentGatewayHelpers.TruncateForChain(stepOut) });
+                        Remember(target.Nickname ?? step.Target, stepOut);
+                        working = stepOut;
+                    }
                 }
                 finally { AgentGateway.AmbientContext.Value = prev; }
-                if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
+                if (si < display.Count)
+                {
+                    display[si] = new PlanStepInfo
+                    {
+                        Id = display[si].Id,
+                        Text = display[si].Text + (stepHadOutput ? "" : "（未产出）"),
+                        Done = true,
+                    };
+                }
                 await BroadcastPlanAsync(gid, messageId, display, ct);
             }
             else if (step.Action == "skill")
@@ -1769,18 +1805,49 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
                     }
                 }
 
-                var res = await _catalog.RunSkillAsync(skill, skillQuery, ct);
-                stepsRan++;
                 _logger.LogInformation("编排计划激活技能：agent={AgentId} skill={SkillId} query={Q}", context.AgentId, skill.SkillId, AgentGatewayHelpers.TruncateForChain(skillQuery));
-                // 编排路径的技能产物同样需要回档：技能返回值里的 produce_file 标记要入库为附件，
-                // 否则「计划里调了 docx 技能、用户却拿不到文件」——这条路径不经过模型正文，
-                // 产物只存在于 res 里，不处理就彻底丢了。
-                await AttachSkillProducedFilesAsync(gid, messageId, res, ct);
-                if (!hops.Any(h => h.AgentId == skill.SkillId))
-                    hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = AgentGatewayHelpers.TruncateForChain(res) });
-                Remember(skill.Name ?? skill.SkillId, res);
-                working = res;
-                if (si < display.Count) display[si] = new PlanStepInfo { Id = display[si].Id, Text = display[si].Text, Done = true };
+                // 执行为局部函数：每次尝试都立即回档产物，避免重试路径新增调用点却漏掉回档。
+                // 编排路径不经过模型正文，产物只存在于技能返回值里，不回档就彻底丢了。
+                async Task<string> RunSkillAndRecallAsync(string? query)
+                {
+                    var output = await _catalog.RunSkillAsync(skill, query ?? "", ct);
+                    await AttachSkillProducedFilesAsync(gid, messageId, output, ct);
+                    return output;
+                }
+
+                var res = await RunSkillAndRecallAsync(skillQuery);
+                stepsRan++;
+                // 空产出重试（1.0.339）：同一入参再跑一次（只在确实空时；上限可配，默认 1）
+                var skillAttempts = 0;
+                while (string.IsNullOrWhiteSpace(res) && _execution.PlanStepRetryOnEmpty && skillAttempts < _execution.PlanStepEmptyRetryMax)
+                {
+                    skillAttempts++;
+                    _logger.LogInformation("技能步骤空产出，重试第 {N} 次：skill={SkillId}", skillAttempts, skill.SkillId);
+                    res = await RunSkillAndRecallAsync(skillQuery);
+                }
+                var skillHadOutput = !string.IsNullOrWhiteSpace(res);
+                if (!skillHadOutput)
+                {
+                    stepFailures.Add($"技能「{skill.Name ?? skill.SkillId}」未返回结果");
+                    if (!hops.Any(h => h.AgentId == skill.SkillId))
+                        hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = "（未产出）" });
+                }
+                else
+                {
+                    if (!hops.Any(h => h.AgentId == skill.SkillId))
+                        hops.Add(new ChainNode { Kind = "skill", AgentId = skill.SkillId, AgentNickname = skill.Name ?? skill.SkillId, Query = AgentGatewayHelpers.TruncateForChain(skillQuery), Result = AgentGatewayHelpers.TruncateForChain(res) });
+                    Remember(skill.Name ?? skill.SkillId, res);
+                    working = res;
+                }
+                if (si < display.Count)
+                {
+                    display[si] = new PlanStepInfo
+                    {
+                        Id = display[si].Id,
+                        Text = display[si].Text + (skillHadOutput ? "" : "（未产出）"),
+                        Done = true,
+                    };
+                }
                 await BroadcastPlanAsync(gid, messageId, display, ct);
             }
         }
@@ -1874,8 +1941,17 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
         if (string.IsNullOrWhiteSpace(text)) text = "（处理对象未返回内容）";
         text = UnwrapCoordinationAnswer(text); // 防御：若模型把内部 JSON 决策原样当回复，剥出 user-facing answer
         if (string.IsNullOrWhiteSpace(text.Trim()))
-            text = "（本轮协作已执行，但未产出可直接展示的正文。可让我按计划分步重试，或换一种更明确的问法。当前不存在可作答的遗漏步骤。）";
+            text = stepFailures.Count > 0
+                ? "（本轮有步骤未返回内容，具体缺口见下方清单。）"
+                : "（本轮协作已执行，但未产出可直接展示的正文。可让我按计划分步重试，或换一种更明确的问法。当前不存在可作答的遗漏步骤。）";
         text = text.Trim();
+        // 未产出清单（1.0.339）：重试后仍为空的步骤要如实列出，用户才知道缺什么、怎么补；
+        // 降级成“部分交付 + 明确说明”，而不是一句空泛道歉或空白回复。
+        if (stepFailures.Count > 0)
+        {
+            text += "\n\n⚠ 本轮有 " + stepFailures.Count + " 个步骤没有产出：" + string.Join("；", stepFailures)
+                + "。可以直接让我重跑这些步骤，或补充所需信息后再试。";
+        }
         planTextOut = text;
         // 交给交付兑底收尾时不在这里发正文：交付成了就由它给正文＋下载卡片，
         // 而计划这段“什么都没跑”的说明叠在交付结果前面只会让用户困惑（实测就这么出现过）。

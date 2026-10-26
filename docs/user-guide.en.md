@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.338**
+> Applies to version: **1.0.339**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1088,7 +1088,9 @@ Reasoning content from digital employees (including external AG-UI bridge expert
 
 #### 2.10.4 Plan card (`.plan-card`)
 
-Drawn by `renderPlanCard()` (work-type digital employees): the title comes from `plan.title`, defaulting to `itx.planCardTitle` ("Task plan"); the status shows `plan.running` ("Executing…") / `plan.paused` ("Paused"); the header has expand / collapse buttons (`plan.expand` / `plan.collapse`). During streaming execution you can "Pause plan" (`plan.pause`) / "Resume" (`plan.resume`); on success toast `plan.pausedOk` / `plan.resumedOk`, on failure `plan.fail`.
+Drawn by `renderPlanCard()` (work-capable digital employees): the title is `plan.title`, defaulting to `itx.planCardTitle` ("Task plan"); the state shows `plan.running` ("Running…") / `plan.paused` ("Paused"); the header has expand / collapse buttons (`plan.expand` / `plan.collapse`). While streaming you can **Pause plan** (`plan.pause`) / **Resume** (`plan.resume`), with `plan.pausedOk` / `plan.resumedOk` toasts on success and `plan.fail` on failure.
+
+**Empty-step retry and gap list (1.0.339)**: when a plan's `dispatch` (assigned employee) or `skill` (server-side skill) step returns an empty body, the gateway retries automatically with the **same session / same input** (once by default; tune with `planStepRetryOnEmpty` / `planStepEmptyRetryMax` in Execution Params). The retry prompt is fixed: "The previous round returned no body. Give the conclusion directly from the same requirements above; if information is truly missing, state exactly what is missing — do not return empty content." If the step is still empty, its plan step and call-chain node are marked "(no output)", the placeholder is **not passed downstream**, and the final reply appends "⚠ N step(s) produced no output: …". When the final synthesis itself is empty, the reply becomes "(Some steps returned no content; see the gap list below.)" instead of a blank message. This covers plan steps only; the existing "fall back to plan outputs / explain honestly" behaviour for a missing final synthesis is unchanged.
 
 #### 2.10.5 Skill call-chain card (`.chain-card`)
 
@@ -4284,11 +4286,11 @@ Summary: totals of `aggregate.invocations` and friends across replicas. The Redi
 
 ### 8.9 Execution Params tab (`#adminTabExec`)
 
-View `#adminExecView` (`index.html:1642-1685`): the hint `admin.execHint`; the order input `#efExecutionOrder`; 4 stage toggles `#efEnableBridge` / `#efEnablePipeline` / `#efEnableRelay` / `#efEnableOrgRoute`; 12 number boxes; complexity adaptation with 1 toggle + 9 number boxes; and at the bottom `#efReload` / `#efReset` (Restore defaults) / `#efSave`.
+View `#adminExecView` (`index.html:2255-2305`): the hint `admin.execHint`; the order input `#efExecutionOrder`; 4 stage toggles `#efEnableBridge` / `#efEnablePipeline` / `#efEnableRelay` / `#efEnableOrgRoute`; 13 number boxes (including `#efPlanStepEmptyRetryMax`); the **retry empty plan steps** toggle `#efPlanStepRetryOnEmpty`; complexity adaptation with 1 toggle + 9 number boxes; and at the bottom `#efReload` / `#efReset` (Restore defaults) / `#efSave`.
 
 Endpoints: `GET /ag-ui/admin/execution` (populate), `POST /ag-ui/admin/execution` (save, then populate after normalization), `GET /ag-ui/admin/execution/defaults` (factory snapshot, read-only, used for "Restore defaults"). `app.js:7079-7190`.
 
-#### 8.9.1 Full table of defaults for the 17 platform-level keys
+#### 8.9.1 Full table of defaults for the 19 platform-level keys
 
 Source: `ExecutionOptions` (`src/AguiGroupChat.Agents/ExecutionOptions.cs`); the key names output by `ToDto` use lower camelCase (`ExecutionRuntimeApi.cs:85-103`).
 
@@ -4306,13 +4308,15 @@ Source: `ExecutionOptions` (`src/AguiGroupChat.Agents/ExecutionOptions.cs`); the
 | 10 | `maxRouteDepth` | `4` | Maximum depth of assignment / escalation routing (to prevent pathological deep chains) | `ExecutionOptions.cs:48` |
 | 11 | `maxInteractionRounds` | `15` | Maximum number of human-approval rounds for the same message (counting only the round that actually interrupts the user) | `ExecutionOptions.cs:60` |
 | 12 | `maxAutoApprovedRounds` | `30` | Upper bound on auto-approved tool calls (**the simple-tier baseline / the fallback when adaptation is off**) | `ExecutionOptions.cs:77` |
+| 12a | `planStepRetryOnEmpty` | `true` | Whether to retry a plan dispatch / server-skill step that returns an empty body | `ExecutionOptions.cs:83` |
+| 12b | `planStepEmptyRetryMax` | `1` | Maximum retries for an empty step; **0 is valid (retry off)**, negatives fall back to the default | `ExecutionOptions.cs:86` |
 | 13 | `executionOrder[]` | `[bridge, pipeline, relay, org_route, streaming]` | Dispatch-stage evaluation order (whitelist; `streaming` is always placed last) | `ExecutionOptions.cs:93-94` |
 | 14 | `enableBridge` | `true` | Whether the platform enables the bridge stage | `ExecutionOptions.cs:98` |
 | 15 | `enablePipeline` | `true` | Whether the platform enables the pipeline stage | `ExecutionOptions.cs:101` |
 | 16 | `enableRelay` | `true` | Whether the platform enables the whole-turn handoff stage | `ExecutionOptions.cs:104` |
 | 17 | `enableOrgRoute` | `true` | Whether the platform enables the organized-routing stage | `ExecutionOptions.cs:107` |
 
-The `executionOrder` whitelist allows only `bridge` / `pipeline` / `relay` / `org_route` / `streaming`; on save, `Normalize` removes unknown tokens, deduplicates while preserving order, and always appends `streaming` at the end; if after filtering there is no valid non-streaming stage, the whole table falls back to the default order (`ExecutionOptions.NormalizeExecutionOrder`, `ExecutionOptions.cs:140-193`). Any positive-integer field `≤ 0` falls back to the default and logs a warn (`Positive`, `ExecutionOptions.cs:196-203`).
+The `executionOrder` whitelist allows only `bridge` / `pipeline` / `relay` / `org_route` / `streaming`; on save, `Normalize` removes unknown tokens, deduplicates while preserving order, and always appends `streaming` at the end; if after filtering there is no valid non-streaming stage, the whole table falls back to the default order (`ExecutionOptions.NormalizeExecutionOrder`, `ExecutionOptions.cs:150-193`). Any positive-integer field `≤ 0` falls back to the default and logs a warn (`Positive`, `ExecutionOptions.cs:196-214`); `planStepEmptyRetryMax` is the one non-negative exception — `0` is valid and only negatives fall back (`NonNegative`, `ExecutionOptions.cs:216-224`).
 
 #### 8.9.2 Full table of defaults for the 10 complexity-adaptation keys
 
@@ -5306,6 +5310,8 @@ service:
 | `MaxRouteDepth` | 4 | Maximum depth of assignment / escalation routing |
 | `MaxInteractionRounds` | 15 | Maximum number of manual approval rounds for the same message |
 | `MaxAutoApprovedRounds` | 30 | Maximum number of auto-approvals for the same run (degrades to a lower bound when adaptive) |
+| `PlanStepRetryOnEmpty` | `true` | Retry a plan step once when it returns an empty body, then report the gaps |
+| `PlanStepEmptyRetryMax` | 1 | Maximum retries for an empty step; `0` disables retry (negatives fall back to the default) |
 | `ExecutionOrder` | `['bridge','pipeline','relay','org_route','streaming']` | Execution stage dispatch order (whitelist; `streaming` is always last) |
 | `EnableBridge` / `EnablePipeline` / `EnableRelay` / `EnableOrgRoute` | `true` | Platform-level execution stage toggles |
 | `ComplexityTimeouts:*` | `Enabled`, `StandardMultiplier`, `ComplexMultiplier`, `HeavyMultiplier`, `MaxRunTimeoutMinutes`, `MaxSkillTimeoutMs`, `MaxClientSkillTimeoutSec`, `AutoApprovedStandard/Complex/Heavy` | Complexity-adaptive timeouts (nested node, `ComplexityTimeoutOptions`) |

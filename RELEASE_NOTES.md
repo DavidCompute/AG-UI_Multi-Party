@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.338 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.338 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.339 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.339 Release Notes (current Windows desktop release)
+
+**版本说明**：**计划步骤空产出自动重试 + 缺口清单**——编排中的指班子步骤 / 服务端技能步骤返回空正文时自动重试一次，仍空则如实列出哪些步骤没有产出，不再给用户空白回复。
+**Version note**: **Retry empty plan steps and report the gaps** — assigned-employee and server-skill steps that return an empty body are retried once; if they are still empty, the reply lists exactly which steps produced nothing instead of returning a blank message.
+
+## 变更
+# Changes
+
+中文：
+- **空产出重试**：`ExecuteCoordinatedPlanAsync` 的 `dispatch` 与 `skill` 分支在步骤正文为空时，用**同一会话 / 同一入参**再执行一次（默认 1 次）；重试提示明确要求直接给结论或说明缺什么，不得返回空内容。
+- **缺口清单**：重试后仍为空时，计划卡对应步骤与调用链标记「（未产出）」，**不把占位符传给下游**，最终回复末尾追加「⚠ 本轮有 N 个步骤没有产出：…」；最终汇总本身为空时改为「（本轮有步骤未返回内容，具体缺口见下方清单。）」。
+- **可热调**：新增执行参数 `planStepRetryOnEmpty`（默认 `true`）与 `planStepEmptyRetryMax`（默认 `1`，`0` = 关闭重试，负数回退默认），保存即对后续调用生效，并随 `executionRuntime` 快照持久化；旧快照不含这两个键时不会覆盖 appsettings 配置。
+
+English:
+- **Empty-step retry**: the `dispatch` and `skill` branches of `ExecuteCoordinatedPlanAsync` re-run a step that returned an empty body with the **same session / same input** (once by default); the retry prompt requires a direct conclusion or an explicit statement of what is missing, never empty content.
+- **Gap list**: if the step is still empty, its plan step and call-chain node are marked "(no output)", the placeholder is **not passed downstream**, and the final reply appends "⚠ N step(s) produced no output: …"; when the final synthesis itself is empty, it becomes "(Some steps returned no content; see the gap list below.)".
+- **Hot-tunable**: new execution params `planStepRetryOnEmpty` (default `true`) and `planStepEmptyRetryMax` (default `1`; `0` disables retry, negatives fall back to the default). Saved values apply to subsequent calls and persist in the `executionRuntime` snapshot; an older snapshot without these keys does not overwrite the appsettings values.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.10.4（空产出重试与缺口清单）、§8.9 / §9.3.5（两项新执行参数）、`docs/execution-configuration.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.339。
+English: `docs/user-guide.md` / `en.md` §2.10.4 (empty-step retry and gap list), §8.9 / §9.3.5 (the two new execution params), and `docs/execution-configuration.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.339.
+
+## 测试
+# Tests
+
+中文：`ExecutionOptionsRetryTests` 4 项通过（默认值 / `0` 合法 / 负数回退 / 开关不被改写）；`node --check app.js`；i18n 审计 **zh=en=2327，missing 0**；配置键与文档引用校验通过；Docker 重建后 `/ag-ui/admin/execution` 返回两项新键；全量 `dotnet vstest` **1936 通过 / 0 失败**。
+English: four `ExecutionOptionsRetryTests` pass (defaults / `0` is valid / negatives fall back / the switch is preserved); `node --check app.js`; the i18n audit reports **zh=en=2327, missing 0**; config-key and docs-reference checks pass; after the Docker rebuild `/ag-ui/admin/execution` returns both new keys; the full `dotnet vstest` run passes **1936 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.338 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.338 Release Notes (historical)
 
 **版本说明**：**失败可按原因筛 + 视图可改名 + PNG 图例合并**——上传失败能按大小 / 路径 / 网络 / 服务端筛；视图支持重命名（含团队默认跟随）；叠加图按前缀合并图例。
 **Version note**: **Filter failures by reason, rename views, merge PNG legends** — narrow upload failures by cause, rename any view (team defaults follow), and group stacked legends by prefix.

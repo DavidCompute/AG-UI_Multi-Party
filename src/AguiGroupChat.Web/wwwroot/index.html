@@ -2271,6 +2271,10 @@
           <div class="form-group"><label data-i18n="admin.exec.MaxRouteDepth">组织路由最大深度</label><input id="efMaxRouteDepth" class="modal-input" type="number" min="0" /></div>
           <div class="form-group"><label data-i18n="admin.exec.MaxInteractionRounds">最大交互轮数</label><input id="efMaxInteractionRounds" class="modal-input" type="number" min="1" /></div>
           <div class="form-group"><label data-i18n="admin.exec.MaxAutoApprovedRounds">自动放行上限（工具调用次数）</label><input id="efMaxAutoApprovedRounds" class="modal-input" type="number" min="1" /></div>
+          <div class="form-group"><label data-i18n="admin.exec.PlanStepEmptyRetryMax">空产出重试次数</label><input id="efPlanStepEmptyRetryMax" class="modal-input" type="number" min="0" /></div>
+        </div>
+        <div class="config-checks">
+          <label class="cfg-check"><input id="efPlanStepRetryOnEmpty" type="checkbox" /> <span data-i18n="admin.exec.PlanStepRetryOnEmpty">计划步骤空产出自动重试（并如实列出缺口）</span></label>
         </div>
         <p class="form-hint" style="margin:10px 0 4px" data-i18n-html="admin.execComplexityHint"></p>
         <div class="config-checks">

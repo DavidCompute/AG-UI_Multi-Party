@@ -42,6 +42,8 @@
 | 10 | `maxRouteDepth` | 4 | 指派/提升路由最大层数（防病态深链） | `InvokeAssignmentEscalationAsync` |
 | 11 | `maxInteractionRounds` | 15 | 同一消息最多允许的**人工审批**轮数（只数“真的打断了用户”的那一轮；已同意技能 / 批量批准这类自动放行不计入） | 审批 / 恢复循环 |
 | 11b | `maxAutoApprovedRounds` | 30 | 同一运行最多允许的**自动放行**工具调用次数（**简单档基准值 / 关闭自适应时的兜底**；启用后实际上限由档位决定，见 §A.1） | 审批 / 恢复循环 |
+| 11c | `planStepRetryOnEmpty` | true | 编排计划内指班子步骤 / 服务端技能步骤返回空正文时，是否用同一会话 / 同一入参自动重试 | `ExecuteCoordinatedPlanAsync`（dispatch / skill 分支） |
+| 11d | `planStepEmptyRetryMax` | 1 | 空产出步骤重试次数上限；**0 合法（= 关闭重试）**，负数回退默认（`NonNegative`） | 同上 |
 | 12 | `executionOrder[]` | `bridge,pipeline,relay,org_route,streaming` | 分派阶段判定顺序；白名单，`streaming` 恒置末 | `InvokeCoreAsync` |
 | 13 | `enableBridge` | true | 平台是否启用“AG-UI 桥接”阶段 | 网关 switch(bridge) → `InvokeBridgeAsync` |
 | 14 | `enablePipeline` | true | 平台是否启用“编排流水线”阶段 | case pipeline → `InvokePipelineAsync` |
@@ -50,6 +52,8 @@
 | 17 | `complexityTimeouts` | 见 §A.1 | **复杂度自适应**：按触发消息估出的任务量级，在 `streamTimeoutMinutes` 之上乘倍率并夹上界；同时定档**自动放行上限** | `RunTimeoutPolicy` / `RunComplexityEstimator`（所有运行入口） |
 
 真实生效顺序 = `ExecutionOrder`（过滤去重后）；`streaming` 无条件下沉为兜底：若前面阶段都不命中/被关，就以普通带工具流式 run 收尾。
+
+`planStepEmptyRetryMax` 是唯一允许 `0` 的字段：`Normalize` 用 `NonNegative` 夹紧，只有负数回退默认；其余正整数字段仍用 `Positive`。
 
 ---
 

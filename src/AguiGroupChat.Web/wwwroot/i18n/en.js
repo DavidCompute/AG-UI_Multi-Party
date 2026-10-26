@@ -1065,6 +1065,8 @@ window.I18N_DICTS.en = {
   "admin.exec.MaxRouteDepth": "Max org-route depth",
   "admin.exec.MaxInteractionRounds": "Max interaction rounds",
   "admin.exec.MaxAutoApprovedRounds": "Max auto-approved tool calls (simplest tier / fallback when adaptive is off)",
+  "admin.exec.PlanStepRetryOnEmpty": "Retry empty plan steps (and list the gaps honestly)",
+  "admin.exec.PlanStepEmptyRetryMax": "Empty-output retry count",
   "admin.execComplexityHint": "Complexity-adaptive timeouts and auto-approval limits: the trigger message is scored for task magnitude (deliverable format / pages / words / items / multi-step wording / attachment size / whether the role fans out downward) and the stream timeout is multiplied accordingly (standard / complex / heavy), capped by the run-budget ceiling. The built-in document-skill budget scales by the same multiplier, and the client-skill wait ceiling plus the model network fallback widen with it; the auto-approved tool-call limit is tiered by the same score (a legitimate big job naturally calls skills dozens of times). Every tier is <b>widen-only, never shrinking</b>: a tier value below the baseline above is ignored in favour of the baseline.",
   "admin.execComplexityEnabled": "Enable complexity-adaptive timeouts",
   "admin.exec.ComplexityStandardMultiplier": "Standard tier multiplier",

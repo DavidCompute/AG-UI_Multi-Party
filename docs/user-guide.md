@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.338**
+> 适用版本：**1.0.339**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1088,6 +1088,8 @@
 #### 2.10.4 计划卡（`.plan-card`）
 
 由 `renderPlanCard()` 绘制（工作型数字员工）：标题取 `plan.title`，缺省为 `itx.planCardTitle`（「任务计划」）；状态显示 `plan.running`（「执行中…」）/ `plan.paused`（「已暂停」）；头部有展开 / 收起按钮（`plan.expand` / `plan.collapse`）。流式执行中可「暂停计划」（`plan.pause`）/「继续执行」（`plan.resume`），成功 toast `plan.pausedOk` / `plan.resumedOk`，失败 `plan.fail`。
+
+**步骤空产出重试与缺口清单（1.0.339）**：编排计划里每个 `dispatch`（指班子岗位）或 `skill`（服务端技能）步骤返回空正文时，网关会用**同一会话 / 同一入参**自动重试（默认 1 次，可由执行参数 `planStepRetryOnEmpty` / `planStepEmptyRetryMax` 调整），重试提示固定为「上一轮没有返回任何正文。请基于上面同样的要求直接给出结论；若确实缺少信息，请明确说明缺什么，不要返回空内容。」。重试后仍为空：计划卡对应步骤追加「（未产出）」、调用链记「（未产出）」、**不把占位符传给下游步骤**，并在最终回复末尾如实追加「⚠ 本轮有 N 个步骤没有产出：…」；若最终汇总本身也为空，则改为「（本轮有步骤未返回内容，具体缺口见下方清单。）」而不是返回空白。该行为只覆盖计划内步骤；最终汇总仍为空时，原有「回退展示计划内产出 / 如实兜底」逻辑不变。
 
 #### 2.10.5 技能调用链卡（`.chain-card`）
 
@@ -4276,11 +4278,11 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 
 ### 8.9 执行参数 tab（`#adminTabExec`）
 
-视图 `#adminExecView`（`index.html:1642-1685`）：提示 `admin.execHint`；顺序输入 `#efExecutionOrder`；4 个阶段开关 `#efEnableBridge` / `#efEnablePipeline` / `#efEnableRelay` / `#efEnableOrgRoute`；12 个数字框；复杂度自适应 1 开关 + 9 数字框；底部 `#efReload` / `#efReset`（恢复默认）/ `#efSave`。
+视图 `#adminExecView`（`index.html:2255-2305`）：提示 `admin.execHint`；顺序输入 `#efExecutionOrder`；4 个阶段开关 `#efEnableBridge` / `#efEnablePipeline` / `#efEnableRelay` / `#efEnableOrgRoute`；13 个数字框（含 `#efPlanStepEmptyRetryMax`）；「计划步骤空产出自动重试」开关 `#efPlanStepRetryOnEmpty`；复杂度自适应 1 开关 + 9 数字框；底部 `#efReload` / `#efReset`（恢复默认）/ `#efSave`。
 
 接口：`GET /ag-ui/admin/execution`（回填）、`POST /ag-ui/admin/execution`（保存、归一化后回填）、`GET /ag-ui/admin/execution/defaults`（出厂快照，只读，供「恢复默认」）。`app.js:7079-7190`。
 
-#### 8.9.1 平台级 17 个键的默认值全表
+#### 8.9.1 平台级 19 个键的默认值全表
 
 来源 `ExecutionOptions`（`src/AguiGroupChat.Agents/ExecutionOptions.cs`），`ToDto` 输出键名为小驼峰（`ExecutionRuntimeApi.cs:85-103`）。
 
@@ -4298,13 +4300,15 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 10 | `maxRouteDepth` | `4` | 指派 / 提升路由最大层数（防病态深链） | `ExecutionOptions.cs:48` |
 | 11 | `maxInteractionRounds` | `15` | 同一消息最多人工审批轮数（只数真正打断用户的那一轮） | `ExecutionOptions.cs:60` |
 | 12 | `maxAutoApprovedRounds` | `30` | 自动放行工具调用次数上限（**简单档基准值 / 关闭自适应时的兜底**） | `ExecutionOptions.cs:77` |
+| 12a | `planStepRetryOnEmpty` | `true` | 计划内指班子步骤 / 服务端技能步骤返回空正文时是否自动重试 | `ExecutionOptions.cs:83` |
+| 12b | `planStepEmptyRetryMax` | `1` | 空产出步骤最多重试次数；**允许 0（= 关闭重试）**，负数回退默认 | `ExecutionOptions.cs:86` |
 | 13 | `executionOrder[]` | `[bridge, pipeline, relay, org_route, streaming]` | 分派阶段判定顺序（白名单，`streaming` 恒置末） | `ExecutionOptions.cs:93-94` |
 | 14 | `enableBridge` | `true` | 平台是否启用桥接阶段 | `ExecutionOptions.cs:98` |
 | 15 | `enablePipeline` | `true` | 平台是否启用流水线阶段 | `ExecutionOptions.cs:101` |
 | 16 | `enableRelay` | `true` | 平台是否启用整轮交接阶段 | `ExecutionOptions.cs:104` |
 | 17 | `enableOrgRoute` | `true` | 平台是否启用组织化路由阶段 | `ExecutionOptions.cs:107` |
 
-`executionOrder` 白名单只允许 `bridge` / `pipeline` / `relay` / `org_route` / `streaming`；保存时 `Normalize` 会剔除未知 token、去重保序、恒把 `streaming` 补到最末；若过滤后无任何合法非流式阶段则整表回退默认顺序（`ExecutionOptions.NormalizeExecutionOrder`，`ExecutionOptions.cs:140-193`）。所有正整数字段 `≤ 0` 会回退默认并记 warn（`Positive`，`ExecutionOptions.cs:196-203`）。
+`executionOrder` 白名单只允许 `bridge` / `pipeline` / `relay` / `org_route` / `streaming`；保存时 `Normalize` 会剔除未知 token、去重保序、恒把 `streaming` 补到最末；若过滤后无任何合法非流式阶段则整表回退默认顺序（`ExecutionOptions.NormalizeExecutionOrder`，`ExecutionOptions.cs:150-193`）。所有正整数字段 `≤ 0` 会回退默认并记 warn（`Positive`，`ExecutionOptions.cs:196-214`）；`planStepEmptyRetryMax` 是唯一的「非负」例外——`0` 合法，仅负数回退默认（`NonNegative`，`ExecutionOptions.cs:216-224`）。
 
 #### 8.9.2 复杂度自适应 10 个键的默认值全表
 
@@ -5301,6 +5305,8 @@ service:
 | `MaxRouteDepth` | 4 | 指派 / 提升路由最大层数 |
 | `MaxInteractionRounds` | 15 | 同一消息最多人工审批轮数 |
 | `MaxAutoApprovedRounds` | 30 | 同一运行最多自动放行次数（自适应时退化为下界） |
+| `PlanStepRetryOnEmpty` | `true` | 计划步骤返回空正文时自动重试一次，仍空则列出缺口 |
+| `PlanStepEmptyRetryMax` | 1 | 空产出步骤重试次数上限；`0` = 关闭重试（负数回退默认） |
 | `ExecutionOrder` | `['bridge','pipeline','relay','org_route','streaming']` | 执行阶段分派顺序（白名单；`streaming` 恒置末） |
 | `EnableBridge` / `EnablePipeline` / `EnableRelay` / `EnableOrgRoute` | `true` | 平台级执行阶段开关 |
 | `ComplexityTimeouts:*` | `Enabled`、`StandardMultiplier`、`ComplexMultiplier`、`HeavyMultiplier`、`MaxRunTimeoutMinutes`、`MaxSkillTimeoutMs`、`MaxClientSkillTimeoutSec`、`AutoApprovedStandard/Complex/Heavy` | 复杂度自适应超时（嵌套节点，`ComplexityTimeoutOptions`） |
