@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.334**
+> 适用版本：**1.0.335**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1742,6 +1742,7 @@
 - **共享视图与 PNG 导出（1.0.332）**：「⇪ 分享」把当前个人视图发布到**共享视图池**（`POST/DELETE /ag-ui/audit-views/share`，运营及以上可写），下拉以「共享视图」分组展示，所有人可套用；「🖼 导出 PNG」按当前看板数据现场生成 SVG 再栅格化为 2× PNG（含标题、总量与刻度线），无需任何图表库。
 - **团队默认视图与 PNG 完善（1.0.333）**：共享项也能「★ 设为默认」（`PUT /ag-ui/audit-views/shared-default`，名称必须存在于共享池），打开工作区时**个人默认优先、其次团队默认**；取消共享会自动清掉团队默认。PNG 新增底部图例与**失败率折线**（与屏幕看板同色、空桶断开）。
 - **PNG 数值标注（1.0.334）**：导出图在失败率折线的每个点上写出百分比（列数 ≤40 时），分享截图时不用再对照图例估读。
+- **PNG 浅色适配（1.0.335）**：导出前检测背景亮度，浅色主题自动换用加深调色板（含失败率折线与「其他」段），白底上仍可读。
   - 另修一个持久化缺陷：`notifyPrefs` / `auditViews` 的快照形如 `{users:{…}}`，旧恢复逻辑把它当成 userId 逐项解析，导致重启后偏好 / 视图丢失；现统一先解包 `users` 再逐用户恢复，并新增共享池字段与旧格式兼容。
 - 只记摘要（不含文件正文与凭证），单次回答上限 60 条。
 
@@ -1772,6 +1773,7 @@
 - **队列搜索 / 过滤（1.0.332）**：队列标题栏新增搜索框与「全部 / 失败 / 上传中 / 完成」状态筛选（可叠加，搜索不区分大小写），过滤仅影响显示，汇总与勾选索引不变。
 - **拖拽调优先级（1.0.333）**：队列里「等待中」的行可拖拽重排（拖到目标行位置即插到它前面），上传循环总是取第一个「等待中」项，所以调顺序立即影响后续上传顺序。
 - **按钮排序与共享导入（1.0.334）**：「等待中」行额外提供「▲ / ▼」上移 / 下移按钮（触屏与键盘可用，自动跳过已开始的行）；视图工具栏新增「⤒ 导入共享」——把 JSON 里的视图直接发布到共享池，若带 `defaultView` 且名称在导入列表内则顺便设为团队默认。
+- **用量计数与失败导出（1.0.335）**：每次套用共享视图自动上报一次（`POST /ag-ui/audit-views/shared-usage`，无需手动维护），下拉里直接显示「· N 次」，便于清理冷门视图；上传队列新增「⬇ 失败 CSV」——导出失败 / 取消项的 `path,bytes,status,error`（带 BOM），便于整理重试清单。
 - **目录导航（1.0.317）**：文件面板改为**逐层浏览**（`?path=` 只列直接子项，目录排在文件前），顶部面包屑「根 / a / b」可点回退；上传与新建目录都落在**当前目录**下，删除 / 预览 / 下载同理。
 - **文件搜索（1.0.318）**：面板工具栏搜索框按**文件名**在工作区内递归匹配（最多 500 条，面包屑处标命中数）；搜到后显示完整相对路径，可直接预览 / 下载 / 删除。
 - **内容搜索（1.0.319）**：搜索框旁「文件名 / 内容」切换。内容模式遍历工作区文本文件找首个命中（跳过二进制与 >1 MB 的文件，总扫描量上限 32 MB，最多 100 条），结果带上行号与前后片段；预览 / 下载 / 删除照常可用。
@@ -3939,7 +3941,7 @@ return (PlatformRole)Math.Max((int)explicitRole, (int)derived);
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys` |
 | 12 | `#adminTabPerf` | `admin.tabPerf` | 员工绩效 | `#adminPerfView` | `GET /ag-ui/admin/agent-performance?days=N` |
 | 13 | `#adminTabEval` | `admin.tabEval` | 评测回归 | `#adminEvalView` | `GET/POST /ag-ui/admin/eval-cases`、`DELETE …/{id}`、`POST …/run` |
-| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files[?path=&q=&scope=content]`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`GET …/{agentId}/upload-offset?path=&size=`、`POST …/{agentId}/upload-chunk?path=&offset=&total=`、`POST …/{agentId}/download`、`GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`、`GET …/work-audits/storage`、`POST …/work-audits/sweep`、`GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group|tool&stack=agent`、`GET …/work-audits/timeline.csv?…&by=`、`GET …/work-audits?…&date=YYYY-MM-DD&tool=command|write|read|list|other`、`GET …/work-audits.csv?…&date=&tool=`、`GET/PUT /ag-ui/audit-views`、`POST/DELETE /ag-ui/audit-views/share`、`PUT /ag-ui/audit-views/shared-default`（支持 `defaultView` / `sharedViews` / `sharedDefaultView`；上传支持 `overwrite=false`；1.0.312–1.0.333） |
+| 14 | `#adminTabWorkspaces` | `admin.tabWorkspaces` | 工作区 | `#adminWorkspacesView` | `GET /ag-ui/admin/workspaces`、`POST …/cleanup[?agentId=]`、`GET …/{agentId}/files[?path=&q=&scope=content]`、`GET …/{agentId}/file?path=`、`DELETE …/{agentId}/file?path=`、`POST …/{agentId}/dir?path=`、`POST …/{agentId}/upload`、`GET …/{agentId}/upload-offset?path=&size=`、`POST …/{agentId}/upload-chunk?path=&offset=&total=`、`POST …/{agentId}/download`、`GET /ag-ui/admin/work-audits[.csv?group=message&split=month]`、`GET …/work-audits/storage`、`POST …/work-audits/sweep`、`GET …/work-audits/timeline?days=&agentId=&groupId=&q=&by=day|agent|group|tool&stack=agent`、`GET …/work-audits/timeline.csv?…&by=`、`GET …/work-audits?…&date=YYYY-MM-DD&tool=command|write|read|list|other`、`GET …/work-audits.csv?…&date=&tool=`、`GET/PUT /ag-ui/audit-views`、`POST/DELETE /ag-ui/audit-views/share`、`PUT /ag-ui/audit-views/shared-default`、`POST /ag-ui/audit-views/shared-usage`（支持 `defaultView` / `sharedViews` / `sharedDefaultView` / `sharedUsage`；上传支持 `overwrite=false`；1.0.312–1.0.335） |
 | 10 | `#adminTabWebhooks` | `admin.tabWebhooks` | Webhook | `#adminWebhooksView` | `GET/POST/DELETE /ag-ui/admin/webhooks`、`…/events`、`…/deliveries`、`…/{id}/test`（见 §8.19） |
 | 11 | `#adminTabApiKeys` | `admin.tabApiKeys` | API 密钥 | `#adminApiKeysView` | `GET/POST /ag-ui/admin/api-keys`、`DELETE /ag-ui/admin/api-keys/{id}`（见 §8.20） |
 

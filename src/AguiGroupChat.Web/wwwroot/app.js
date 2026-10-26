@@ -10630,6 +10630,7 @@ let waDefaultView = "";
 let waViewFilter = ""; // 视图搜索词（1.0.331）
 let waSharedViews = []; // 共享视图池（1.0.332）
 let waSharedDefaultView = ""; // 团队默认视图（1.0.333）
+let waSharedUsage = {}; // 共享视图使用次数（1.0.335）
 const WA_SHARED_PREFIX = "s::";
 
 function waViewsKey() {
@@ -10677,11 +10678,13 @@ async function syncWaViewsFromServer() {
     waDefaultView = String(d.defaultView || "");
     waSharedViews = Array.isArray(d.sharedViews) ? d.sharedViews : [];
     waSharedDefaultView = String(d.sharedDefaultView || "");
+    waSharedUsage = d.sharedUsage && typeof d.sharedUsage === "object" ? d.sharedUsage : {};
     renderWaViews();
     // 打开工作区页时自动套用默认视图：个人默认优先，其次团队默认（1.0.333）
-    const def = (d.views || []).find((v) => v && v.name === waDefaultView)
-      || (d.sharedViews || []).find((v) => v && v.name === waSharedDefaultView);
-    if (def) applyWaView(def);
+    const personalDef = (d.views || []).find((v) => v && v.name === waDefaultView);
+    const sharedDef = (d.sharedViews || []).find((v) => v && v.name === waSharedDefaultView);
+    if (personalDef) applyWaView(personalDef, false);
+    else if (sharedDef) applyWaView(sharedDef, true);
   } catch { /* 离线：用本地缓存 */ }
 }
 
@@ -10694,11 +10697,16 @@ function renderWaViews() {
   const match = (v) => !q || String(v.name).toLowerCase().includes(q);
   const list = all.filter(match);
   const shared = waSharedViews.filter(match);
+  const usageOf = (name) => Number(waSharedUsage?.[name] || 0);
   sel.innerHTML = `<option value="">${escapeHtml(t("admin.waViewPlaceholder"))}</option>`
     + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
     + (shared.length
       ? `<optgroup label="${escapeHtml(t("admin.waSharedGroup"))}">`
-        + shared.map((v) => `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${v.name === waSharedDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
+        + shared.map((v) => {
+          const n = usageOf(v.name);
+          const suffix = n > 0 ? ` · ${t("admin.waViewUsage", { count: String(n) })}` : "";
+          return `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${v.name === waSharedDefaultView ? "★ " : ""}${escapeHtml(v.name)}${escapeHtml(suffix)}</option>`;
+        }).join("")
         + `</optgroup>`
       : "");
   sel.value = (list.some((v) => v.name === current) || shared.some((v) => WA_SHARED_PREFIX + v.name === current))
@@ -10837,8 +10845,24 @@ async function unshareSelectedWaView() {
   }
 }
 
+/** 上报共享视图使用次数（1.0.335）：失败静默，不影响套用。 */
+async function reportSharedUsage(name) {
+  if (!name) return;
+  try {
+    const res = await fetch("/ag-ui/audit-views/shared-usage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ name }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) return;
+    waSharedUsage = { ...waSharedUsage, [name]: Number(d.count) || 0 };
+    renderWaViews();
+  } catch { /* 离线 */ }
+}
+
 /** 套用视图：回填控件与日期 chip，再按新条件重拉表格。 */
-function applyWaView(v) {
+function applyWaView(v, fromShared = false) {
   if (!v) return;
   const sel = $("waViewSel");
   if (sel && [...sel.options].some((o) => o.value === v.name)) sel.value = v.name;
@@ -10852,6 +10876,7 @@ function applyWaView(v) {
   renderWaDateChip();
   renderWorkAuditChart(waChartBuckets);
   loadWorkAudits();
+  if (fromShared) reportSharedUsage(v.name);
 }
 
 function saveWaView() {
@@ -11153,6 +11178,30 @@ const WA_SEG_COLORS = {
   failed: "#e5484d",
 };
 
+// 浅色主题下的加深版本（1.0.335）：保证白底上仍可读
+const WA_SEG_COLORS_LIGHT = {
+  commands: "#3b6fd4",
+  writes: "#2f9e6a",
+  reads: "#6b5bd2",
+  listings: "#b07b1e",
+  other: "#5c6673",
+  failed: "#c0392b",
+};
+const WA_PART_COLORS_LIGHT = ["#3b6fd4", "#2f9e6a", "#6b5bd2", "#b07b1e", "#2a8f9e", "#c0603f", "#8a4fc0", "#5c6673"];
+
+/** 估算背景亮度（0–1）：仅支持 hex；其他格式按深色处理。 */
+function cssColorLuminance(value) {
+  const s = String(value || "").trim();
+  const m = s.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return 0;
+  let hex = m[1];
+  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
 /** 看板导出 PNG（1.0.332）：手写自包含 SVG 再栅格化，不依赖图表库。 */
 async function exportWorkAuditChartPng() {
   const buckets = waChartBuckets;
@@ -11164,6 +11213,9 @@ async function exportWorkAuditChartPng() {
   const bg = (style.getPropertyValue("--panel") || "#1b1e24").trim();
   const fg = (style.getPropertyValue("--text") || "#e6e6e6").trim();
   const muted = (style.getPropertyValue("--muted") || "#9aa0a6").trim();
+  const isLight = cssColorLuminance(bg) > 0.6;
+  const segPalette = isLight ? WA_SEG_COLORS_LIGHT : WA_SEG_COLORS;
+  const partPalette = isLight ? WA_PART_COLORS_LIGHT : WA_PART_COLORS;
 
   const totalOf = (b) => waStackActive
     ? (Number(b.total) || (b.parts || []).reduce((s, p) => s + (Number(p.total) || 0), 0))
@@ -11182,14 +11234,14 @@ async function exportWorkAuditChartPng() {
       const out = [];
       let other = 0;
       for (const [label, v] of sums) {
-        if (top.includes(label)) out.push({ v, color: WA_PART_COLORS[top.indexOf(label) % WA_PART_COLORS.length] });
+        if (top.includes(label)) out.push({ v, color: partPalette[top.indexOf(label) % partPalette.length] });
         else other += v;
       }
-      if (other) out.push({ v: other, color: "#7d8794" });
+      if (other) out.push({ v: other, color: partPalette[partPalette.length - 1] });
       return out.sort((a, b2) => b2.v - a.v);
     }
     return WA_CHART_SEGS.filter(([k]) => Number(b[k]) > 0)
-      .map(([k]) => ({ v: Number(b[k]), color: WA_SEG_COLORS[k] }));
+      .map(([k]) => ({ v: Number(b[k]), color: segPalette[k] }));
   };
 
   const colW = 34;
@@ -11238,7 +11290,7 @@ async function exportWorkAuditChartPng() {
   });
   if (run.length) runs.push(run);
   for (const r of runs.filter((x) => x.length >= 2)) {
-    svg += `<polyline points="${r.join(" ")}" fill="none" stroke="#e5484d" stroke-width="1.5"/>`;
+    svg += `<polyline points="${r.join(" ")}" fill="none" stroke="${segPalette.failed}" stroke-width="1.5"/>`;
   }
   // 数值标注（1.0.334）：列数不太多时写出百分比
   if (buckets.length <= 40) {
@@ -11246,7 +11298,7 @@ async function exportWorkAuditChartPng() {
       if (r === null) return;
       const x = 40 + i * colW + 10;
       const y = plotBottom - (r / 100) * plotH;
-      svg += `<text x="${x}" y="${(y - 4).toFixed(1)}" fill="#e5484d" font-size="9" text-anchor="middle">${r.toFixed(0)}%</text>`;
+      svg += `<text x="${x}" y="${(y - 4).toFixed(1)}" fill="${segPalette.failed}" font-size="9" text-anchor="middle">${r.toFixed(0)}%</text>`;
     });
   }
 
@@ -11270,12 +11322,12 @@ async function exportWorkAuditChartPng() {
       }
     }
     const top = [...sums.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 8);
-    top.forEach((label, i) => drawLegend(label, WA_PART_COLORS[i % WA_PART_COLORS.length], false));
-    if (sums.size > top.length) drawLegend(t("admin.waSegOther"), "#7d8794", false);
+    top.forEach((label, i) => drawLegend(label, partPalette[i % partPalette.length], false));
+    if (sums.size > top.length) drawLegend(t("admin.waSegOther"), partPalette[partPalette.length - 1], false);
   } else {
-    for (const [field, , key] of WA_CHART_SEGS) drawLegend(t(key), WA_SEG_COLORS[field], false);
+    for (const [field, , key] of WA_CHART_SEGS) drawLegend(t(key), segPalette[field], false);
   }
-  drawLegend(t("admin.waFailureRate"), "#e5484d", true);
+  drawLegend(t("admin.waFailureRate"), segPalette.failed, true);
 
   svg += "</svg>";
 
@@ -11719,6 +11771,8 @@ function renderUploadQueue() {
     const canRetry = items.filter((x) => x.status === "fail" || x.status === "cancel").length;
     retrySel.classList.toggle("hidden", canRetry === 0);
     retrySel.disabled = wsUploadQueueSelected.size === 0;
+    const csvBtn = $("wsQueueCsv");
+    if (csvBtn) csvBtn.classList.toggle("hidden", canRetry === 0);
   }
   const shown = items.filter((it) => (wsQueueFilter ? it.status === wsQueueFilter : true))
     .filter((it) => (wsQueueSearch.trim() ? String(it.rel).toLowerCase().includes(wsQueueSearch.trim().toLowerCase()) : true))
@@ -11792,6 +11846,32 @@ function renderUploadQueue() {
     b.onclick = (e) => { e.stopPropagation(); moveQueueItem(Number(b.dataset.qDown), 1); };
   });
   box.classList.remove("hidden");
+}
+
+/** 导出失败 / 取消项（1.0.335）：带 BOM 的 CSV，便于整理与重试清单。 */
+function exportUploadQueueCsv() {
+  const rows = wsUploadQueueItems.filter((q) => q.status === "fail" || q.status === "cancel");
+  if (!rows.length) {
+    toast(t("admin.wsQueueNoFailures"));
+    return;
+  }
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = ["path,bytes,status,error"];
+  for (const q of rows) {
+    lines.push([esc(q.rel), q.size || 0, q.status, esc(q.error || "")].join(","));
+  }
+  const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `upload-queue-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** 上移 / 下移（1.0.334）：与下一个「等待中」项交换位置；跳过已开始的行。 */
@@ -11895,10 +11975,11 @@ async function uploadWorkspaceEntries(agentId, entries) {
       if (outcome === "skipped") { skipped++; q.status = "skip"; }
       else { ok++; q.status = "ok"; }
       doneBytes += it.file.size || 0;
-    } catch {
+    } catch (ex) {
       if (wsUploadCancelled) { q.status = "cancel"; break; } // 用户取消：不再计入失败
       fail++;
       q.status = "fail";
+      q.error = (ex && ex.message) || "failed";
       failedNow.push(it);
       doneBytes += it.file.size || 0; // 失败也推进总量，避免进度卡死
     } finally {
@@ -17749,6 +17830,7 @@ function init() {
   // 上传队列（1.0.330；1.0.331 支持只重试选中项）
   $("wsQueueClose").onclick = () => $("wsUploadQueue").classList.add("hidden");
   $("wsQueueRetrySel").onclick = () => retrySelectedUploads();
+  $("wsQueueCsv").onclick = () => exportUploadQueueCsv();
   // 队列搜索 / 状态过滤（1.0.332）
   $("wsQueueSearch").addEventListener("input", () => {
     wsQueueSearch = $("wsQueueSearch").value || "";
@@ -17839,7 +17921,7 @@ function init() {
   $("waViewSel").onchange = () => {
     const v = currentWaView();
     if (!v) return;
-    applyWaView(v);
+    applyWaView(v, ($("waViewSel").value || "").startsWith(WA_SHARED_PREFIX));
   };
   // 视图搜索（1.0.331）：输入过滤选项，回车套用第一个命中
   $("waViewSearch").addEventListener("input", () => {
@@ -17851,8 +17933,12 @@ function init() {
     e.preventDefault();
     const sel = $("waViewSel");
     const name = sel.value || sel.options[1]?.value || "";
-    const v = loadWaViews().find((x) => x.name === name);
-    if (v) applyWaView(v);
+    if (!name) return;
+    const isShared = name.startsWith(WA_SHARED_PREFIX);
+    const v = isShared
+      ? waSharedViews.find((x) => x.name === name.slice(WA_SHARED_PREFIX.length))
+      : loadWaViews().find((x) => x.name === name);
+    if (v) applyWaView(v, isShared);
   });
   $("waViewSave").onclick = () => saveWaView();
   $("waViewDelete").onclick = () => deleteWaView();

@@ -114,6 +114,21 @@ public sealed class AuditViewsTests
     }
 
     [Fact]
+    public void Restore_KeepsUsageOnlyForSharedViews()
+    {
+        const string json = """
+            {"users":{},"shared":[{"name":"S"}],"sharedUsage":{"S":7,"Gone":3}}
+            """;
+        using var doc = JsonDocument.Parse(json);
+        var state = new AuditViewsState();
+
+        AuditViewsApi.Restore(state, doc.RootElement);
+
+        Assert.Equal(7, state.SharedUsage["S"]);
+        Assert.False(state.SharedUsage.ContainsKey("Gone")); // 共享池里已不存在的计数丢弃
+    }
+
+    [Fact]
     public void CleanDefault_RequiresAnExistingView()
     {
         var views = AuditViewsApi.Clean([

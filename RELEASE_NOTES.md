@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.334 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.334 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.335 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.335 Release Notes (current Windows desktop release)
+
+**版本说明**：**共享视图有用量 + PNG 适浅色 + 失败可导出**——共享视图显示被套用次数；导出的 PNG 在浅色主题下也清晰；上传失败项可导出 CSV。
+**Version note**: **Shared-view usage, light-theme PNG, failed-upload CSV** — shared views show how often they are used, exported charts stay readable on white, and failed uploads export to CSV.
+
+## 变更
+# Changes
+
+中文：
+- **共享视图用量**：`AuditViewsState.SharedUsage` + `POST /ag-ui/audit-views/shared-usage`（名称必须在共享池，逐次 +1），`GET` 返回 `sharedUsage`；前端每次套用共享视图自动上报，下拉里显示「· N 次」；取消共享会同步删除计数，恢复时丢弃共享池里已不存在的计数。
+- **PNG 浅色适配**：新增 `cssColorLuminance()`，导出前按 `--panel` 亮度判断主题，浅色时换用加深调色板（工具段、员工段、「其他」段与失败率折线与数值标注同步）。
+- **失败项 CSV**：队列新增「⬇ 失败 CSV」（有失败 / 取消项时出现），导出 `path,bytes,status,error`，带 BOM；每项在失败时记录错误信息，便于整理重试清单。
+
+English:
+- **Shared-view usage**: `AuditViewsState.SharedUsage` plus `POST /ag-ui/audit-views/shared-usage` (the name must exist in the pool; +1 per call) with `GET` returning `sharedUsage`; the UI reports automatically when a shared view is applied and shows "· N uses". Unsharing drops the counter, and restore discards counts for views no longer in the pool.
+- **PNG light theme**: `cssColorLuminance()` inspects the `--panel` brightness before export and switches to a deepened palette (tool segments, agent segments, the "Other" segment, the failure line and its labels).
+- **Failed-upload CSV**: the queue gains **⬇ Failed CSV** (shown when failed / cancelled rows exist), exporting `path,bytes,status,error` with a BOM; each failure keeps its error message for later follow-up.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（共享用量 / PNG 浅色 / 失败 CSV）、§8.2（补 `shared-usage`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.335。
+English: `docs/user-guide.md` / `en.md` §3.13 (shared usage / PNG light theme / failed CSV), §8.2 (`shared-usage`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.335.
+
+## 测试
+# Tests
+
+中文：`Web` 构建 0 错误；`node --check app.js`；i18n 审计 **zh=en=2301，missing 0**；新增 `Restore_KeepsUsageOnlyForSharedViews`；Docker 冒烟：连续上报 1→2→3、未知视图返回 400、**重启后用量仍在**、取消共享后计数清空；全量 `dotnet test` **1932 通过 / 0 失败**。
+English: `Web` builds clean; `node --check app.js`; the i18n audit reports **zh=en=2301, missing 0**; `Restore_KeepsUsageOnlyForSharedViews` is new; the Docker smoke reports 1→2→3, gets 400 for an unknown view, keeps the count **across a restart**, and clears it on unshare; the full `dotnet test` run passes **1932 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.334 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.334 Release Notes (historical)
 
 **版本说明**：**共享可导入 + PNG 带数值 + 队列可按钮排序**——视图 JSON 直接发布到共享池；导出图写出失败率百分比；上传队列支持 ▲/▼ 重排。
 **Version note**: **Import to shared pool, PNG percentages, button reordering** — publish view JSON straight to the shared pool, read failure rates off the exported image, and reorder uploads with ▲/▼.

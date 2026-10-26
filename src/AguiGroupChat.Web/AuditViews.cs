@@ -42,6 +42,9 @@ public sealed class AuditViewsState
 
     /// <summary>团队默认视图（1.0.333）：共享池里的某一项，打开工作区页时自动套用。</summary>
     public string? SharedDefaultView { get; set; }
+
+    /// <summary>共享视图使用次数（1.0.335）：每次套用 +1，用于清理冷门视图。</summary>
+    public Dictionary<string, int> SharedUsage { get; set; } = new(StringComparer.Ordinal);
 }
 
 /// <summary>筛选视图接口（1.0.328；1.0.329 加默认视图）：<c>GET/PUT /ag-ui/audit-views</c>（需登录，只读写当前用户）。</summary>
@@ -70,7 +73,19 @@ public static class AuditViewsApi
                 defaultView = entry?.DefaultView ?? "",
                 sharedViews = state.Shared,
                 sharedDefaultView = state.SharedDefaultView ?? "",
+                sharedUsage = state.SharedUsage,
             });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // 共享视图使用计数（1.0.335）：套用时上报一次，便于盘点冷门视图
+        app.MapPost("/ag-ui/audit-views/shared-usage", (AuditViewsUsageRequest req, AuditViewsState state, ChangeHub changes) =>
+        {
+            var name = (req.Name ?? "").Trim();
+            if (name.Length == 0 || !state.Shared.Any((v) => string.Equals(v.Name, name, StringComparison.Ordinal)))
+                return Results.BadRequest(new { error = "missing_view" });
+            state.SharedUsage[name] = (state.SharedUsage.TryGetValue(name, out var n) ? n : 0) + 1;
+            changes.Notify();
+            return Results.Ok(new { ok = true, count = state.SharedUsage[name] });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // 共享视图（1.0.332）：运营及以上可发布 / 撤销；所有人能读到（在 GET 里）
@@ -98,6 +113,7 @@ public static class AuditViewsApi
                 state.SharedDefaultView = null;
                 changes.Notify();
             }
+            if (removed > 0) state.SharedUsage.Remove(target);
             return Results.Ok(new { ok = true, removed, sharedViews = state.Shared, sharedDefaultView = state.SharedDefaultView ?? "" });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
@@ -203,6 +219,19 @@ public static class AuditViewsApi
             if (name.Length > 0 && state.Shared.Any((v) => string.Equals(v.Name, name, StringComparison.Ordinal)))
                 state.SharedDefaultView = name;
         }
+        if (element.TryGetProperty("sharedUsage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in usage.EnumerateObject())
+            {
+                try
+                {
+                    if (prop.Value.ValueKind != JsonValueKind.Number || !prop.Value.TryGetInt32(out var n)) continue;
+                    if (!state.Shared.Any((v) => string.Equals(v.Name, prop.Name, StringComparison.Ordinal))) continue;
+                    state.SharedUsage[prop.Name] = Math.Max(0, n);
+                }
+                catch { /* 单条损坏：跳过 */ }
+            }
+        }
 
         var map = element.TryGetProperty("users", out var inner) && inner.ValueKind == JsonValueKind.Object ? inner : element;
         foreach (var prop in map.EnumerateObject())
@@ -242,3 +271,6 @@ public sealed record AuditViewsShareRequest(AuditViewDefinition? View = null);
 
 /// <summary>设置团队默认视图的请求体（1.0.333）：name 为空 = 取消。</summary>
 public sealed record AuditViewsSharedDefaultRequest(string? Name = null);
+
+/// <summary>上报共享视图使用次数的请求体（1.0.335）。</summary>
+public sealed record AuditViewsUsageRequest(string? Name = null);
