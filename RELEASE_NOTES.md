@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.336 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.336 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.337 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.337 Release Notes (current Windows desktop release)
+
+**版本说明**：**续传只挑断点项 + PNG 可加备注 + 共享视图自动分组**——失败项能看出已传进度并一键续传；导出图可写备注；共享视图按前缀归组。
+**Version note**: **Resume just the partial items, note on PNGs, grouped shared views** — see how far a failure got and resume only those, label exports, and group shared views by prefix.
+
+## 变更
+# Changes
+
+中文：
+- **续传未完成**：失败 / 取消项保留最后一次偏移，队列显示「失败 · 62%」；「⏯ 续传未完成」只重传 `bytes > 0` 的项，服务端 `upload-offset` 从既有分片接着写（无断点的小文件不会出现该按钮）。
+- **PNG 备注**：导出前弹输入框（可留空，最长 80 字），内容拼到脚注末尾（`备注：…`）。
+- **共享视图分组**：按名称里第一个 `/` 前缀自动分组（`团队/xxx` → 「团队」），组内仍按用量降序、带 `★` 默认标识；无前缀的仍归「共享视图」。
+
+English:
+- **Resume incomplete**: failed / cancelled rows keep their last offset and show "Failed · 62%"; **⏯ Resume incomplete** re-sends only items with `bytes > 0`, and the server continues from the stored part (the button stays hidden when nothing has a resume point).
+- **PNG note**: an input box (optional, ≤80 chars) appears before export and its text is appended to the footnote as `note: …`.
+- **Grouped shared views**: names split on the first `/`, so `Team/xxx` lands in a "Team" group; ordering by usage and the `★` default marker still apply, and prefix-less views stay under "Shared views".
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（续传未完成 / PNG 备注 / 共享分组）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.337。
+English: `docs/user-guide.md` / `en.md` §3.13 (resume incomplete / PNG note / grouping); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.337.
+
+## 测试
+# Tests
+
+中文：前端交互改造（无后端 / 契约变更）；`node --check app.js`；i18n 审计 **zh=en=2315，missing 0**；Docker 重建后页面包含 `wsQueueResume`，`/health` 200；全量 `dotnet test` **1932 通过 / 0 失败**。
+English: UI-only round with no backend or contract changes; `node --check app.js`; the i18n audit reports **zh=en=2315, missing 0**; after the Docker rebuild the page contains `wsQueueResume` and `/health` is 200; the full `dotnet test` run passes **1932 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.336 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.336 Release Notes (historical)
 
 **版本说明**：**冷门视图一目了然 + PNG 自带口径 + 队列可排序**——共享视图按用量排序并提示冷门项；导出图带时间与筛选脚注；上传队列可按名称 / 大小 / 状态排序。
 **Version note**: **Spot cold views, self-describing PNGs, sortable queue** — shared views sort by usage with a cold-view hint, exports carry their scope, and the queue sorts by name, size or state.

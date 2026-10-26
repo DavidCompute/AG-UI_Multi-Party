@@ -10701,17 +10701,28 @@ function renderWaViews() {
   // 按用量降序：常用的排前面，从没用过的退到最后（1.0.336）
   const sharedSorted = [...shared].sort((a, b) =>
     usageOf(b.name) - usageOf(a.name) || String(a.name).localeCompare(String(b.name)));
+  // 按名称前缀分组（1.0.337）：`团队/xxx` 自动归到「团队」组
+  const groups = new Map();
+  for (const v of sharedSorted) {
+    const name = String(v.name || "");
+    const slash = name.indexOf("/");
+    const label = slash > 0 ? name.slice(0, slash) : t("admin.waSharedGroup");
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(v);
+  }
+  const sharedHtml = [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([label, views]) => `<optgroup label="${escapeHtml(label)}">`
+      + views.map((v) => {
+        const n = usageOf(v.name);
+        const suffix = n > 0 ? ` · ${t("admin.waViewUsage", { count: String(n) })}` : "";
+        return `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${v.name === waSharedDefaultView ? "★ " : ""}${escapeHtml(v.name)}${escapeHtml(suffix)}</option>`;
+      }).join("")
+      + `</optgroup>`)
+    .join("");
   sel.innerHTML = `<option value="">${escapeHtml(t("admin.waViewPlaceholder"))}</option>`
     + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
-    + (sharedSorted.length
-      ? `<optgroup label="${escapeHtml(t("admin.waSharedGroup"))}">`
-        + sharedSorted.map((v) => {
-          const n = usageOf(v.name);
-          const suffix = n > 0 ? ` · ${t("admin.waViewUsage", { count: String(n) })}` : "";
-          return `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${v.name === waSharedDefaultView ? "★ " : ""}${escapeHtml(v.name)}${escapeHtml(suffix)}</option>`;
-        }).join("")
-        + `</optgroup>`
-      : "");
+    + sharedHtml;
   sel.value = (list.some((v) => v.name === current) || sharedSorted.some((v) => WA_SHARED_PREFIX + v.name === current))
     ? current : "";
   // 冷门视图按钮（1.0.336）：有未被用过的共享视图时才出现
@@ -11237,6 +11248,8 @@ async function exportWorkAuditChartPng() {
   const bg = (style.getPropertyValue("--panel") || "#1b1e24").trim();
   const fg = (style.getPropertyValue("--text") || "#e6e6e6").trim();
   const muted = (style.getPropertyValue("--muted") || "#9aa0a6").trim();
+  // 导出备注（1.0.337）：可留空；取消输入按无备注导出
+  const note = String(window.prompt(t("admin.waPngNotePrompt"), "") ?? "").trim().slice(0, 80);
   const isLight = cssColorLuminance(bg) > 0.6;
   const segPalette = isLight ? WA_SEG_COLORS_LIGHT : WA_SEG_COLORS;
   const partPalette = isLight ? WA_PART_COLORS_LIGHT : WA_PART_COLORS;
@@ -11366,6 +11379,7 @@ async function exportWorkAuditChartPng() {
   if (tool?.value) filters.push(t("admin.waFilterTool", { name: optionText(tool, tool.value) }));
   const kw = String($("waQuery")?.value || "").trim();
   if (kw) filters.push(t("admin.waFilterQuery", { q: kw }));
+  if (note) filters.push(t("admin.waFilterNote", { note }));
   svg += `<text x="32" y="${height - 12}" fill="${muted}" font-size="10">${escapeHtml(filters.join(" · "))}</text>`;
 
   svg += "</svg>";
@@ -11808,12 +11822,15 @@ function renderUploadQueue() {
       .join(" · ");
   }
   const retrySel = $("wsQueueRetrySel");
+  const resumable = items.filter((x) => (x.status === "fail" || x.status === "cancel") && Number(x.bytes) > 0);
   if (retrySel) {
     const canRetry = items.filter((x) => x.status === "fail" || x.status === "cancel").length;
     retrySel.classList.toggle("hidden", canRetry === 0);
     retrySel.disabled = wsUploadQueueSelected.size === 0;
     const csvBtn = $("wsQueueCsv");
     if (csvBtn) csvBtn.classList.toggle("hidden", canRetry === 0);
+    const resumeBtn = $("wsQueueResume");
+    if (resumeBtn) resumeBtn.classList.toggle("hidden", resumable.length === 0);
   }
   const shown = items.filter((it) => (wsQueueFilter ? it.status === wsQueueFilter : true))
     .filter((it) => (wsQueueSearch.trim() ? String(it.rel).toLowerCase().includes(wsQueueSearch.trim().toLowerCase()) : true))
@@ -11821,9 +11838,12 @@ function renderUploadQueue() {
   rows.innerHTML = (shown.length
     ? shown.map((it) => {
       const idx = items.indexOf(it);
+      const partial = (it.status === "fail" || it.status === "cancel") && Number(it.bytes) > 0 && Number(it.size) > 0
+        ? ` · ${Math.round((it.bytes / it.size) * 100)}%`
+        : "";
       const label = it.status === "run"
         ? `${Math.min(100, Math.round((it.bytes / (it.size || 1)) * 100))}%`
-        : t(WS_Q_LABEL[it.status] || "admin.wsQueueWait");
+        : t(WS_Q_LABEL[it.status] || "admin.wsQueueWait") + partial;
       const canSel = it.status === "fail" || it.status === "cancel";
       const cb = canSel
         ? `<input type="checkbox" data-q-sel="${idx}" ${wsUploadQueueSelected.has(idx) ? "checked" : ""} /> `
@@ -11934,6 +11954,17 @@ function sortUploadQueue(key) {
   const box = $("wsQueueSort");
   if (box) box.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.qSort === key));
   renderUploadQueue();
+}
+
+/** 只续传有断点的失败 / 取消项（1.0.337）：服务端已有部分序列，重传会从 offset 接着走。 */
+function resumeIncompleteUploads() {
+  if (!wsUploadLastAgent) return;
+  const list = wsUploadQueueItems
+    .filter((q) => (q.status === "fail" || q.status === "cancel") && Number(q.bytes) > 0 && q.entry)
+    .map((q) => q.entry);
+  if (!list.length) return;
+  wsUploadQueueSelected.clear();
+  uploadWorkspaceEntries(wsUploadLastAgent, list);
 }
 
 /** 上移 / 下移（1.0.334）：与下一个「等待中」项交换位置；跳过已开始的行。 */
@@ -17893,6 +17924,7 @@ function init() {
   $("wsQueueClose").onclick = () => $("wsUploadQueue").classList.add("hidden");
   $("wsQueueRetrySel").onclick = () => retrySelectedUploads();
   $("wsQueueCsv").onclick = () => exportUploadQueueCsv();
+  $("wsQueueResume").onclick = () => resumeIncompleteUploads();
   $("wsQueueSort").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-q-sort]");
     if (btn) sortUploadQueue(btn.dataset.qSort);
