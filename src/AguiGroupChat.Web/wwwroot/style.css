@@ -2525,6 +2525,9 @@ button { white-space: nowrap; }
 .ws-q-row.ws-q-drop { outline: 1px dashed var(--accent); outline-offset: -1px; }
 .ws-q-moves { display: inline-flex; gap: 2px; flex: 0 0 auto; }
 .ws-q-move { height: 14px; line-height: 12px; font-size: 9px; padding: 0 4px; }
+.ws-q-head { display: flex; gap: 6px; padding: 2px 8px; border-top: 1px solid var(--border); background: rgba(127, 127, 127, 0.04); }
+.ws-q-sort { font-size: 10px; height: 16px; line-height: 14px; padding: 0 6px; }
+.ws-q-sort.on { color: var(--accent); border-color: var(--accent); }
 .ws-q-gap { display: inline-block; width: 13px; }
 .ws-q-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-q-size { flex: 0 0 auto; color: var(--muted); }

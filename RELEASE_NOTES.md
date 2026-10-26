@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.335 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.335 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.336 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.336 Release Notes (current Windows desktop release)
+
+**版本说明**：**冷门视图一目了然 + PNG 自带口径 + 队列可排序**——共享视图按用量排序并提示冷门项；导出图带时间与筛选脚注；上传队列可按名称 / 大小 / 状态排序。
+**Version note**: **Spot cold views, self-describing PNGs, sortable queue** — shared views sort by usage with a cold-view hint, exports carry their scope, and the queue sorts by name, size or state.
+
+## 变更
+# Changes
+
+中文：
+- **冷门视图**：共享项按用量降序渲染（未用过的最后），工具栏「🧹 冷门视图 (N)」列出从未被套用的名称（最多 5 个 + 省略号），弹出提示后可逐个取消分享。
+- **PNG 脚注**：导出图高度 300→330，底部一行标注导出时间与天数 / 知聚 / 员工 / 工具 / 关键词；选项名取当前下拉的展示文本。
+- **队列排序**：新增表头「名称 / 大小 / 状态」，再点同一列切换升降序；状态按 `上传中 → 等待 → 失败 → 取消 → 跳过 → 完成` 排序，与拖拽 / ▲▼ 共用同一数组。
+
+English:
+- **Cold views**: shared entries render by usage descending (never-used last) and **🧹 Cold views (N)** lists up to five unused names in a toast so each can be unshared individually.
+- **PNG footnote**: the exported image grows to 330px and ends with the export time plus the active days / circle / agent / tool / keyword filters, using the dropdown labels as names.
+- **Queue sorting**: a new header offers **name / size / state** with a second click reversing the order; state sorts as running → queued → failed → cancelled → skipped → done and shares the same array as drag and ▲/▼.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（冷门视图 / PNG 脚注 / 队列排序）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.336。
+English: `docs/user-guide.md` / `en.md` §3.13 (cold views / PNG footnote / queue sorting); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.336.
+
+## 测试
+# Tests
+
+中文：本轮为前端交互改造，无后端 / 契约变更；`node --check app.js`；i18n 审计 **zh=en=2312，missing 0**；Docker 重建后页面包含 `waViewCold` / `wsQueueSort`，`/health` 200；全量 `dotnet test` **1932 通过 / 0 失败**。
+English: UI-only round with no backend or contract changes; `node --check app.js`; the i18n audit reports **zh=en=2312, missing 0**; after the Docker rebuild the page contains `waViewCold` / `wsQueueSort` and `/health` is 200; the full `dotnet test` run passes **1932 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.335 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.335 Release Notes (historical)
 
 **版本说明**：**共享视图有用量 + PNG 适浅色 + 失败可导出**——共享视图显示被套用次数；导出的 PNG 在浅色主题下也清晰；上传失败项可导出 CSV。
 **Version note**: **Shared-view usage, light-theme PNG, failed-upload CSV** — shared views show how often they are used, exported charts stay readable on white, and failed uploads export to CSV.

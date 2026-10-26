@@ -10698,19 +10698,43 @@ function renderWaViews() {
   const list = all.filter(match);
   const shared = waSharedViews.filter(match);
   const usageOf = (name) => Number(waSharedUsage?.[name] || 0);
+  // 按用量降序：常用的排前面，从没用过的退到最后（1.0.336）
+  const sharedSorted = [...shared].sort((a, b) =>
+    usageOf(b.name) - usageOf(a.name) || String(a.name).localeCompare(String(b.name)));
   sel.innerHTML = `<option value="">${escapeHtml(t("admin.waViewPlaceholder"))}</option>`
     + list.map((v) => `<option value="${escapeHtml(v.name)}">${v.name === waDefaultView ? "★ " : ""}${escapeHtml(v.name)}</option>`).join("")
-    + (shared.length
+    + (sharedSorted.length
       ? `<optgroup label="${escapeHtml(t("admin.waSharedGroup"))}">`
-        + shared.map((v) => {
+        + sharedSorted.map((v) => {
           const n = usageOf(v.name);
           const suffix = n > 0 ? ` · ${t("admin.waViewUsage", { count: String(n) })}` : "";
           return `<option value="${WA_SHARED_PREFIX}${escapeHtml(v.name)}">${v.name === waSharedDefaultView ? "★ " : ""}${escapeHtml(v.name)}${escapeHtml(suffix)}</option>`;
         }).join("")
         + `</optgroup>`
       : "");
-  sel.value = (list.some((v) => v.name === current) || shared.some((v) => WA_SHARED_PREFIX + v.name === current))
+  sel.value = (list.some((v) => v.name === current) || sharedSorted.some((v) => WA_SHARED_PREFIX + v.name === current))
     ? current : "";
+  // 冷门视图按钮（1.0.336）：有未被用过的共享视图时才出现
+  const coldBtn = $("waViewCold");
+  if (coldBtn) {
+    const cold = waSharedViews.filter((v) => usageOf(v.name) === 0).length;
+    coldBtn.classList.toggle("hidden", cold === 0);
+    coldBtn.textContent = t("admin.waViewCold") + (cold ? ` (${cold})` : "");
+  }
+}
+
+/** 冷门共享视图提示（1.0.336）：列出从未被套用的视图，便于清理。 */
+function showColdSharedViews() {
+  const unused = waSharedViews.filter((v) => !Number(waSharedUsage?.[v.name] || 0));
+  if (!unused.length) {
+    toast(t("admin.waViewColdNone"));
+    return;
+  }
+  const names = unused.slice(0, 5).map((v) => v.name).join("、");
+  toast(t("admin.waViewColdHint", {
+    count: String(unused.length),
+    names: names + (unused.length > 5 ? " …" : ""),
+  }));
 }
 
 /** 当前下拉选中项：个人视图 / 共享视图 / null。 */
@@ -11246,7 +11270,7 @@ async function exportWorkAuditChartPng() {
 
   const colW = 34;
   const width = Math.max(520, buckets.length * colW + 80);
-  const height = 300;
+  const height = 330;
   const plotTop = 56;
   const plotBottom = 200;
   const plotH = plotBottom - plotTop;
@@ -11328,6 +11352,21 @@ async function exportWorkAuditChartPng() {
     for (const [field, , key] of WA_CHART_SEGS) drawLegend(t(key), segPalette[field], false);
   }
   drawLegend(t("admin.waFailureRate"), segPalette.failed, true);
+
+  // 脚注（1.0.336）：导出时间 + 当前筛选条件
+  const filters = [new Date().toLocaleString()];
+  const days = Number($("waDays")?.value) || 7;
+  filters.push(t("admin.waFilterDays", { days: String(days) }));
+  const optionText = (el, fallback) => el?.selectedOptions?.[0]?.textContent?.trim() || fallback || "";
+  const g = $("waGroup");
+  if (g?.value) filters.push(t("admin.waFilterGroup", { name: optionText(g, g.value) }));
+  const a = $("waAgent");
+  if (a?.value) filters.push(t("admin.waFilterAgent", { name: optionText(a, a.value) }));
+  const tool = $("waTool");
+  if (tool?.value) filters.push(t("admin.waFilterTool", { name: optionText(tool, tool.value) }));
+  const kw = String($("waQuery")?.value || "").trim();
+  if (kw) filters.push(t("admin.waFilterQuery", { q: kw }));
+  svg += `<text x="32" y="${height - 12}" fill="${muted}" font-size="10">${escapeHtml(filters.join(" · "))}</text>`;
 
   svg += "</svg>";
 
@@ -11741,6 +11780,8 @@ let wsUploadQueueSelected = new Set(); // 选中的失败 / 取消项，供「�
 let wsQueueFilter = "";  // "" | fail | run | ok（1.0.332）
 let wsQueueSearch = "";
 let wsQueueDragIndex = null; // 拖拽排序中的源下标（1.0.333）
+let wsQueueSort = { key: "", desc: false }; // 表头排序状态（1.0.336）
+const WS_Q_STATUS_ORDER = { run: 0, wait: 1, fail: 2, cancel: 3, skip: 4, ok: 5 };
 const WS_Q_LABEL = {
   wait: "admin.wsQueueWait",
   run: "admin.wsQueueRunning",
@@ -11872,6 +11913,27 @@ function exportUploadQueueCsv() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 表头排序（1.0.336）：按名称 / 大小 / 状态，再点同一列切换升降序。 */
+function sortUploadQueue(key) {
+  if (!wsUploadQueueItems.length) return;
+  if (wsQueueSort.key === key) wsQueueSort.desc = !wsQueueSort.desc;
+  else { wsQueueSort.key = key; wsQueueSort.desc = key === "size"; }
+  const dir = wsQueueSort.desc ? -1 : 1;
+  wsUploadQueueItems.sort((a, b) => {
+    const byName = String(a.rel).localeCompare(String(b.rel));
+    if (key === "size") return dir * ((Number(a.size) || 0) - (Number(b.size) || 0)) || byName;
+    if (key === "status") {
+      const d = (WS_Q_STATUS_ORDER[a.status] ?? 9) - (WS_Q_STATUS_ORDER[b.status] ?? 9);
+      return dir * d || byName;
+    }
+    return dir * byName;
+  });
+  wsUploadQueueSelected.clear();
+  const box = $("wsQueueSort");
+  if (box) box.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.qSort === key));
+  renderUploadQueue();
 }
 
 /** 上移 / 下移（1.0.334）：与下一个「等待中」项交换位置；跳过已开始的行。 */
@@ -17831,6 +17893,10 @@ function init() {
   $("wsQueueClose").onclick = () => $("wsUploadQueue").classList.add("hidden");
   $("wsQueueRetrySel").onclick = () => retrySelectedUploads();
   $("wsQueueCsv").onclick = () => exportUploadQueueCsv();
+  $("wsQueueSort").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-q-sort]");
+    if (btn) sortUploadQueue(btn.dataset.qSort);
+  });
   // 队列搜索 / 状态过滤（1.0.332）
   $("wsQueueSearch").addEventListener("input", () => {
     wsQueueSearch = $("wsQueueSearch").value || "";
@@ -17950,6 +18016,7 @@ function init() {
   $("waViewImportInput").onchange = () => importWaViews($("waViewImportInput"));
   $("waViewImportShared").onclick = () => $("waViewImportSharedInput").click();
   $("waViewImportSharedInput").onchange = () => importSharedWaViews($("waViewImportSharedInput"));
+  $("waViewCold").onclick = () => showColdSharedViews();
   $("waGroupByMsg").onchange = () => renderWorkAuditRows();
   // 看板维度（1.0.322）
   $("waChartSwitch").addEventListener("click", (e) => {
