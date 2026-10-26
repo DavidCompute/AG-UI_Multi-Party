@@ -31,11 +31,21 @@ public static class MemoryProfileWritePolicy
             ? Math.Max(baseImportance, MemoryImportance.Important)
             : baseImportance;
 
+    /// <summary>按记忆拟人类型解析保留天数：快速遗忘型为全局保留期的约 40%（最少 2 天）；
+    /// 其余类型沿用全局保留期。<paramref name="options"/> 未开启自动遗忘（&lt;=0）时返回 0（永不过期）。</summary>
+    public static int RetentionDaysFor(MemoryProfile? profile, MemoryOptions options)
+    {
+        if (options.RetentionDays <= 0) return 0;
+        if (profile?.MemoryType != MemoryPersonalityTypes.FastForgetting) return options.RetentionDays;
+        return Math.Max(MinFastForgettingRetentionDays,
+            (int)Math.Ceiling(options.RetentionDays * FastForgettingRetentionRatio));
+    }
+
     /// <summary>解析写入过期：快速遗忘型在自动遗忘开启时返回缩短后的过期时间；其余返回 null（沿用全局逻辑）。</summary>
     public static long? ExpiryFor(MemoryProfile? profile, MemoryOptions options, long timestampMs)
     {
         if (profile?.MemoryType != MemoryPersonalityTypes.FastForgetting || options.RetentionDays <= 0) return null;
-        var days = Math.Max(MinFastForgettingRetentionDays, (int)Math.Ceiling(options.RetentionDays * FastForgettingRetentionRatio));
+        var days = RetentionDaysFor(profile, options);
         return timestampMs + days * 86_400_000L;
     }
 }

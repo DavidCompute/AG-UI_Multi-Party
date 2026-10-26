@@ -606,6 +606,8 @@ async function openMemoryModal() {
   syncMemForgetHint();
   $("memConsolidateBtn").disabled = false;
   $("memConsolidateBtn").textContent = t("memory.consolidate");
+  $("memLifecycleRow").classList.toggle("hidden", !state.isAdmin);
+  if (state.isAdmin) loadMemoryLifecycle();
   $("memoryModal").classList.remove("hidden");
   $("memGraphQuery").value = "";
   if ($("memGraphStats")) $("memGraphStats").textContent = "";
@@ -754,6 +756,54 @@ async function consolidateGroupMemory() {
     toast(t("memory.consolidatedOk", { n: data?.memoryCount ?? 0, doc: data?.fileName || "" }));
     loadMemoryGroups(); // 刷新各知聚记忆统计（沉淀后无结构性变化，主要保持一致性）
   } catch (ex) { toast(t("memory.consolidateFail", { err: ex.message })); }
+  finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+/** 记忆生命周期状态（管理员）：读取最近一轮摘要 + 配置开关。 */
+async function loadMemoryLifecycle() {
+  if (!state.isAdmin) return;
+  const el = $("memLifecycleStatus");
+  if (!el) return;
+  try {
+    const res = await fetch("/ag-ui/memory/lifecycle", { headers: { Authorization: "Bearer " + (state.token || "") } });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) { el.textContent = ""; return; }
+    if (!data.enabled) { el.textContent = t("memory.lifecycleOff"); return; }
+    const last = data.last;
+    el.textContent = last
+      ? t("memory.lifecycleLast", {
+          scanned: last.scanned || 0,
+          promoted: last.promoted || 0,
+          set: last.expiriesSet || 0,
+          pruned: last.pruned || 0,
+        })
+      : t("memory.lifecycleNever", { hours: data.intervalHours || 24 });
+  } catch { el.textContent = ""; }
+}
+
+/** 手动跑一轮记忆生命周期（管理员）：巩固 / 收紧遗忘 / 清理过期。 */
+async function runMemoryLifecycle() {
+  const btn = $("memLifecycleRun");
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = t("memory.lifecycleRunning");
+  try {
+    const res = await fetch("/ag-ui/memory/lifecycle/run", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + (state.token || "") },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) { toast(errMsg(data, t("memory.lifecycleFail", { err: res.status }))); return; }
+    const r = data?.report || {};
+    toast(t("memory.lifecycleOk", {
+      promoted: r.promoted || 0,
+      set: r.expiriesSet || 0,
+      pruned: r.pruned || 0,
+    }));
+    await loadMemoryLifecycle();
+    refreshMemView();
+    loadMemoryGroups();
+  } catch (ex) { toast(t("memory.lifecycleFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
 }
 
@@ -18264,6 +18314,7 @@ function init() {
   $("memGraphQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") loadMemoryGraph(); });
   $("memForgetBtn").onclick = () => $("memForgetPanel").classList.toggle("hidden");
   $("memConsolidateBtn").onclick = consolidateGroupMemory;
+  $("memLifecycleRun").onclick = runMemoryLifecycle;
   $("memForgetCancel").onclick = () => $("memForgetPanel").classList.add("hidden");
   $("memForgetConfirm").onclick = async () => {
     const groupId = $("memGroupSelect").value;

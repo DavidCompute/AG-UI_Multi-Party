@@ -528,6 +528,26 @@ public sealed class MemoryOptions
     /// <summary>重要结论自动周期沉淀间隔（小时，>=1）。默认 12 小时跑一轮。</summary>
     public int AutoConsolidateIntervalHours { get; set; } = 12;
 
+    /// <summary>
+    /// 记忆生命周期周期任务（1.0.340，默认开）：按「记忆拟人类型」定期巩固 / 收紧遗忘——
+    /// 深记型补升为重要并清除过期时间；难录入型在重复出现达到阈值后巩固；
+    /// 快速遗忘型按缩短后的保留期收紧；其余类型按全局 <see cref="RetentionDays"/> 补齐过期时间。
+    /// 只改记忆元数据（级别 / 过期时间），不改写原文；重要级记忆不会被自动过期。
+    /// </summary>
+    public bool LifecycleEnabled { get; set; } = true;
+
+    /// <summary>记忆生命周期任务间隔（小时，1–720）。默认 24 小时。</summary>
+    public int LifecycleIntervalHours { get; set; } = 24;
+
+    /// <summary>单轮最多扫描的记忆条数（默认 2000，防一次任务拖垮大库）。</summary>
+    public int LifecycleMaxPerRun { get; set; } = 2000;
+
+    /// <summary>深记型旧记忆补巩固的年龄门槛（小时，默认 24；写入侧新记忆已即时巩固）。</summary>
+    public int DeepConsolidateAfterHours { get; set; } = 24;
+
+    /// <summary>难录入型巩固阈值：同一员工的同一内容重复出现达到该次数后升为重要并不过期（默认 3）。</summary>
+    public int SlowToLearnRepeatThreshold { get; set; } = 3;
+
     /// <summary>沉淀文档是否用模型润色（把原文拼接整理为结论/决策/待办结构化条目）。
     /// mock / 未配置 API Key 时自动跳过（保持确定性原文），失败也回退原文。</summary>
     public bool PolishConsolidation { get; set; } = true;

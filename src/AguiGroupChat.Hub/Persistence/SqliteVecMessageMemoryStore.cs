@@ -554,6 +554,34 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
         }
     }
 
+    public bool SetExpiryForMessage(string messageId, long? expiresAt)
+    {
+        if (!_ready || string.IsNullOrWhiteSpace(messageId)) return false;
+        try
+        {
+            using var conn = _db.Open();
+            using var cmd = conn.CreateCommand();
+            if (expiresAt is null)
+            {
+                // 清除过期：深记型 / 已巩固记忆不再随时间淡化
+                cmd.CommandText = "UPDATE agui_message_memory SET expires_at = NULL WHERE message_id = @mid AND recalled = 0";
+            }
+            else
+            {
+                // 只收紧普通记忆，绝不覆盖重要级的“永不过期”
+                cmd.CommandText = "UPDATE agui_message_memory SET expires_at = @expires WHERE message_id = @mid AND recalled = 0 AND importance = 0";
+                cmd.AddWithValue("expires", expiresAt.Value);
+            }
+            cmd.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆单条过期时间设置失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
     public int PruneExpired(long nowMs)
     {
         if (!_ready) return 0;

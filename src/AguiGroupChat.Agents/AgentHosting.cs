@@ -98,6 +98,10 @@ public static class AgentHosting
         services.AddSingleton<MarketplaceService>();
         // 桥接能力协商（3.2）：探测外部端点能力供管理员查看
         services.AddSingleton<BridgeCapabilitiesService>();
+        // 记忆生命周期（1.0.340）：始终注册具体类型（管理端要注入查状态 / 手动执行），
+        // 再以同一单例作为宿主服务启动；StartAsync 内部按记忆开关跳过。
+        services.AddSingleton<MemoryLifecycleService>();
+        services.AddHostedService(sp => sp.GetRequiredService<MemoryLifecycleService>());
         AddMessageMemory(services, options, configuration);
     }
 

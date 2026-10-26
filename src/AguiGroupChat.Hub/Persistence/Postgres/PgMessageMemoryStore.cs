@@ -373,6 +373,32 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
         }
     }
 
+    public bool SetExpiryForMessage(string messageId, long? expiresAt)
+    {
+        if (!_ready || string.IsNullOrWhiteSpace(messageId)) return false;
+        try
+        {
+            using var conn = _pg.Open();
+            using var cmd = conn.CreateCommand();
+            if (expiresAt is null)
+            {
+                cmd.CommandText = "UPDATE agui_message_memory SET expires_at = NULL WHERE message_id = @mid AND recalled = FALSE";
+            }
+            else
+            {
+                cmd.CommandText = "UPDATE agui_message_memory SET expires_at = @expires WHERE message_id = @mid AND recalled = FALSE AND importance = 0";
+                cmd.Parameters.AddWithValue("expires", expiresAt.Value);
+            }
+            cmd.Parameters.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆单条过期时间设置失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
     public int PruneExpired(long nowMs)
     {
         if (!_ready) return 0;

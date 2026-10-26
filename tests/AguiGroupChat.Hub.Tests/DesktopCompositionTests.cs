@@ -170,6 +170,14 @@ public sealed class DesktopCompositionTests
     }
 
     [Fact]
+    public void MemoryLifecycleService_IsAvailableForAdminEndpoints()
+    {
+        // 管理端 /ag-ui/memory/lifecycle 直接注入具体类型；AddHostedService<T> 只登记 IHostedService，
+        // 所以必须同时登记单例（否则端点运行期报 500，而路由探测仍显示“已挂载”）。
+        Assert.NotNull(_fixture.App.Services.GetService(typeof(AguiGroupChat.Agents.MemoryLifecycleService)));
+    }
+
+    [Fact]
     public async Task ImageLibrary_CreateAndList_WorkOnDesktopHost()
     {
         // 端到端：注册 → 建库 → 列表能看到。这是用户在桌面版点「创建图库」的真实路径。

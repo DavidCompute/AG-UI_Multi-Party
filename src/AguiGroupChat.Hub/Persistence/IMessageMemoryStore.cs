@@ -58,6 +58,11 @@ public interface IMessageMemoryStore
     /// 把「更早的记忆」设为过去时间戳 → 立即失效；未来时间戳 = 延后遗忘）。返回受影响条数。</summary>
     int SetExpiry(string? groupId, long? expiresAt, long nowMs);
 
+    /// <summary>设置 / 清除单条记忆的过期时间（记忆生命周期周期任务用）。
+    /// <paramref name="expiresAt"/> 为 null 表示清除过期；设置非空时只作用于普通记忆，不覆盖重要级。
+    /// 默认返回 false（未实现时调用方应视为未改）。</summary>
+    bool SetExpiryForMessage(string messageId, long? expiresAt) => false;
+
     /// <summary>物理删除已过期记忆（自动遗忘的清理执行；返回删除条数）。</summary>
     int PruneExpired(long nowMs);
 }

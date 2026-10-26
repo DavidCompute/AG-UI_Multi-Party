@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.339**
+> 适用版本：**1.0.340**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2983,6 +2983,11 @@ flowchart TD
 | `AutoConsolidateEnabled` | `true` | 未设 | 未设 | 重要结论自动周期沉淀 |
 | `AutoConsolidateIntervalHours` | `12` | 未设 | 未设 | 自动沉淀间隔（运行期钳制到 1..720） |
 | `PolishConsolidation` | `true` | 未设 | 未设 | 沉淀文档是否用模型润色（mock 跳过） |
+| `LifecycleEnabled` | `true` | 未设 | 未设 | 记忆生命周期周期任务（按拟人类型巩固 / 收紧遗忘，见 6.5.3） |
+| `LifecycleIntervalHours` | `24` | 未设 | 未设 | 生命周期任务间隔（小时，钳制到 1..720；首轮启动 15 分钟后） |
+| `LifecycleMaxPerRun` | `2000` | 未设 | 未设 | 单轮最多扫描条数（防一次任务拖垮大库） |
+| `DeepConsolidateAfterHours` | `24` | 未设 | 未设 | 深记型旧普通记忆补巩固的年龄门槛（小时） |
+| `SlowToLearnRepeatThreshold` | `3` | 未设 | 未设 | 难录入型同内容重复达到该次数后巩固为重要 |
 | `GraphEnabled` | `false` | `false` | `false` | 图谱记忆（Graph RAG）总开关 |
 | `GraphTopK` | `2` | `2` | `2` | 图谱检索种子实体数 |
 | `GraphMinScore` | `0.45` | `0.45` | `0.45` | 种子实体召回阈值 |
@@ -3096,6 +3101,7 @@ flowchart TD
 - 过期效果：检索 SQL 带 `AND (m.expires_at IS NULL OR m.expires_at > @now)`，过期记忆**不再被检索命中**；界面上仍可见，但标记 `.mem-expired`「已过期」。
 - 物理清理：后台 `MemoryMaintenanceService`（首次 5 分钟后、此后每小时一次）调用 `PruneExpired`。清理 SQL 只删除 `importance = 0` 且已过期的行——**手动标记为重要 / 关键（>0）的记忆永不因保留期被物理删除**。
 - 与消息保留策略独立：`MessageRetentionService` 的 `GroupChat:MessageRetentionDays` 只清理消息表，不涉及语义记忆。
+- **存量补齐**：`MemoryLifecycleService`（见 6.5.3）会按保存期给缺失过期时间的旧普通记忆补齐；`RetentionDays=0` 时不做全局补齐（避免误删），仅深记 / 已巩固的难录入型会被提升并清除过期。
 
 #### 6.5.2 手动遗忘（界面 / 接口 / 权限）
 
@@ -3111,6 +3117,23 @@ flowchart TD
 前端确认文案：`memory.forgetConfirm`「确定遗忘{scope}的记忆{retain}？将不再被检索，后台定时清理。」（`scope` ∈ `scopeThis` / `scopeAll`，`retain` ∈ `forgetRetain` / `forgetImmediate`）。
 
 > **实现细节提醒**：`SetExpiry` 的 SQL 不按 `importance` 过滤，即「整群手动遗忘」会把**重要 / 关键记忆也设上过期时间**（从而不再被检索）；因为 `PruneExpired` 豁免 `importance>0`，这些重要记忆只是「检索不到」而非被物理删除。普通成员的「遗忘本人发言」走的是物理删除路径。
+
+#### 6.5.3 周期巩固 / 遗忘（1.0.340）
+
+实现：`MemoryLifecycleService`（宿主自动启动）+ `MemoryLifecyclePolicy`（纯函数判据）。任务**只改记忆元数据**（`importance` / `expires_at`），不改写原文、不直接物理删除；物理删除仍由 `MemoryMaintenanceService` 按过期时间执行。
+
+**执行节奏**：首轮在应用启动 15 分钟后，此后每 `LifecycleIntervalHours` 小时一轮；单轮按时间倒序扫描最多 `LifecycleMaxPerRun` 条（默认 2000），已过期的条目跳过（留给清理任务，避免被巩固逻辑“复活”）。每轮重新读取员工记忆类型，改配置无需重启。
+
+| 记忆类型 | 周期处置 |
+|---|---|
+| `deep` 深记 | 旧**普通**记忆达到 `DeepConsolidateAfterHours`（默认 24h）后升为**重要**；任何深记型记忆若带过期时间则清除（烙印不随时淡化） |
+| `slowToLearn` 难录入 | 同一员工 + 规范化后内容重复达到 `SlowToLearnRepeatThreshold`（默认 3）次：升为重要并清除过期；未达阈值按全局保留期补齐 |
+| `fastForgetting` 快速遗忘 | 平台 `RetentionDays > 0` 时，按 `max(2, ceil(RetentionDays×0.4))` 天收紧普通记忆的过期时间；未开自动遗忘时不做处置 |
+| `broad` / `cueDependent` / 未配置 / 用户消息 | 仅按全局 `RetentionDays` 补齐过期时间（普通级）；重要级不动 |
+
+边界：重要 / 关键记忆**不会**被自动写入过期时间；提升失败时本轮不继续清过期，避免只改一半；规范化重复键要求至少 8 个字母 / 数字，避免「收到 / 好的」这类短句被误巩固。
+
+**界面与接口**：管理员在「账户菜单 → 记忆管理」顶部看到「🧠 记忆生命周期」状态与「立即巩固 / 遗忘」按钮；`GET /ag-ui/memory/lifecycle` 返回开关、间隔与最近一轮摘要，`POST /ag-ui/memory/lifecycle/run` 手动触发一轮（均仅管理员）。
 
 ---
 
@@ -3210,9 +3233,10 @@ i18n key 前缀为 **`agent.form.memoryType.*`**（标题 `agent.form.memoryType
 
 | 类型 | 写入行为 |
 |---|---|
-| `deep` 深记 | `ImportanceFor`：本人发言自动升为 **重要**（`max(基准, Important=1)`）——不随自动遗忘过期、同相似度检索优先（「说出口即烙印」） |
-| `fastForgetting` 快速遗忘 | `ExpiryFor`：平台 `RetentionDays > 0` 时，本人**普通**发言 `expiresAt = 时间戳 + max(2, ceil(RetentionDays × 0.4)) × 86_400_000L`（最短 2 天）；平台未开自动遗忘时返回 `null`，不主动引入过期 |
-| `broad` / `slowToLearn` / `cueDependent` | 无差别落库（差异只在读取侧） |
+| `deep` 深记 | `ImportanceFor`：本人发言自动升为 **重要**（`max(基准, Important=1)`）——不随自动遗忘过期、同相似度检索优先（「说出口即烙印」）；生命周期任务会补巩固旧普通记忆并清除过期 |
+| `fastForgetting` 快速遗忘 | `ExpiryFor`：平台 `RetentionDays > 0` 时，本人**普通**发言 `expiresAt = 时间戳 + max(2, ceil(RetentionDays × 0.4)) × 86_400_000L`（最短 2 天）；平台未开自动遗忘时返回 `null`，不主动引入过期；生命周期任务会按同一保留期收紧存量 |
+| `slowToLearn` 难录入 | 写入无差别；生命周期任务在**同内容重复达到阈值**（默认 3）后升为重要并清除过期（“反复几次终于记住，之后不容易忘”） |
+| `broad` / `cueDependent` | 无差别落库（差异只在读取侧）；生命周期仅按全局保留期补齐过期 |
 
 #### 6.6.5 术语与键位对照
 
@@ -4938,6 +4962,8 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | DELETE | `/ag-ui/memory/{messageId}` | 物理删除单条记忆 | 登录（同上） |
 | POST | `/ag-ui/memory/forget` | 手动遗忘（按群或全部设过期，可选保留最近 N 小时） | 登录（同上） |
 | POST | `/ag-ui/memory/consolidate` | 把某群「关键」级记忆聚合沉淀为知识库文档（需语义记忆已启用） | 登录 |
+| GET | `/ag-ui/memory/lifecycle` | 记忆生命周期配置 + 最近一轮摘要 | 管理员 |
+| POST | `/ag-ui/memory/lifecycle/run` | 手动执行一轮记忆巩固 / 遗忘 | 管理员 |
 | GET | `/ag-ui/memory/export` | 记忆即数据包导出（`groupId` 空 = 全部所在群；`since` 增量；分页） | 登录 |
 | POST | `/ag-ui/memory/import` | 增量导入（按 `messageId` 去重；非管理员只能导自己所在群，user 型强制本人 / 管理员 / 群管理） | 登录 |
 | GET | `/ag-ui/search` | 全局智能检索（跨知聚搜消息 / 记忆 / 知识库；`q` 至少 2 字，`limit` 1..100 默认 40） | 登录 |

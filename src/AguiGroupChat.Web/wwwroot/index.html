@@ -1384,6 +1384,11 @@
         <button id="memConsolidateBtn" class="chip-btn" type="button" data-i18n="memory.consolidate">沉淀关键结论</button>
         <span class="mem-cons-hint" data-i18n="memory.consolidateHint">把所选知聚中「关键」级记忆自动聚合为一条知识文档（供绑定数字员工检索），需已启用语义记忆</span>
       </div>
+      <div id="memLifecycleRow" class="memory-consolidate-row hidden">
+        <span class="mem-cons-label" data-i18n="memory.lifecycleLabel">🧠 记忆生命周期：</span>
+        <span id="memLifecycleStatus" class="mem-cons-hint"></span>
+        <button id="memLifecycleRun" class="chip-btn" type="button" data-i18n="memory.lifecycleRun">立即巩固 / 遗忘</button>
+      </div>
       <div id="memForgetPanel" class="memory-forget-panel hidden">
         <span style="color:var(--muted);font-size:12px" data-i18n="memory.forgetRange">遗忘范围：</span>
         <select id="memForgetRange" class="modal-input" style="flex:1">

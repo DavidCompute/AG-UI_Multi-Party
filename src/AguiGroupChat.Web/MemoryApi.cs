@@ -224,6 +224,25 @@ public static class MemoryApi
             return Results.Ok(new { ok = true, affected });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
+        // ---- 记忆生命周期（1.0.340）：只读状态 / 手动触发一轮（管理员） ----
+        root.MapGet("/lifecycle", ([Microsoft.AspNetCore.Mvc.FromServices] AguiGroupChat.Agents.MemoryLifecycleService lifecycle,
+            [Microsoft.AspNetCore.Mvc.FromServices] AguiGroupChat.Agents.AgentOptions options) => Results.Ok(new
+        {
+            enabled = options.Memory.Enabled && options.Memory.LifecycleEnabled,
+            intervalHours = options.Memory.LifecycleIntervalHours,
+            maxPerRun = options.Memory.LifecycleMaxPerRun,
+            deepConsolidateAfterHours = options.Memory.DeepConsolidateAfterHours,
+            slowToLearnRepeatThreshold = options.Memory.SlowToLearnRepeatThreshold,
+            last = lifecycle.LastReport,
+        })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
+        root.MapPost("/lifecycle/run", async ([Microsoft.AspNetCore.Mvc.FromServices] AguiGroupChat.Agents.MemoryLifecycleService lifecycle,
+            CancellationToken ct) => Results.Ok(new
+        {
+            ok = true,
+            report = await lifecycle.RunOnceAsync(ct),
+        })).AddEndpointFilter(new WebIdentity.RequireAdminFilter());
+
         // ---- 记忆 / 结论沉淀为知识库文档（1.3）：把某群「关键」级别的记忆聚合写入指定知识库 ----
         root.MapPost("/consolidate", async (MemoryConsolidateHttpRequest req, HttpContext ctx,
             AuthService auth, IGroupStore store,

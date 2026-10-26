@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.339**
+> Applies to version: **1.0.340**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2987,6 +2987,11 @@ Observability: new counters `knowgath_memory_embedding_cache_hits_total` / `know
 | `AutoConsolidateEnabled` | `true` | not set | not set | automatic periodic consolidation of important conclusions |
 | `AutoConsolidateIntervalHours` | `12` | not set | not set | auto-consolidation interval (clamped to 1..720 at runtime) |
 | `PolishConsolidation` | `true` | not set | not set | whether consolidated documents are polished by the model (skipped in mock) |
+| `LifecycleEnabled` | `true` | not set | not set | periodic memory lifecycle task (consolidate / tighten forgetting by memory type, see 6.5.3) |
+| `LifecycleIntervalHours` | `24` | not set | not set | lifecycle interval (hours, clamped to 1..720; first run 15 minutes after startup) |
+| `LifecycleMaxPerRun` | `2000` | not set | not set | maximum memories scanned per run (keeps a large store from being processed in one go) |
+| `DeepConsolidateAfterHours` | `24` | not set | not set | age threshold (hours) for backfilling deep-type ordinary memories |
+| `SlowToLearnRepeatThreshold` | `3` | not set | not set | repeated-content count at which a slow-to-learn memory is consolidated |
 | `GraphEnabled` | `false` | `false` | `false` | graph memory (Graph RAG) master switch |
 | `GraphTopK` | `2` | `2` | `2` | number of seed entities for graph retrieval |
 | `GraphMinScore` | `0.45` | `0.45` | `0.45` | seed-entity recall threshold |
@@ -3100,6 +3105,7 @@ Ways to adjust:
 - Expiry effect: the retrieval SQL carries `AND (m.expires_at IS NULL OR m.expires_at > @now)`, so expired memories are **no longer hit by retrieval**; they remain visible in the UI but are marked `.mem-expired` "Expired".
 - Physical cleanup: the background `MemoryMaintenanceService` (first after 5 minutes, then once per hour) calls `PruneExpired`. The cleanup SQL deletes only rows with `importance = 0` that have expired — **memories manually marked as Important / Critical (>0) are never physically deleted due to the retention period**.
 - Independent of the message retention policy: `MessageRetentionService`'s `GroupChat:MessageRetentionDays` only cleans the message table and does not touch semantic memory.
+- **Backfill**: `MemoryLifecycleService` (see 6.5.3) backfills the expiry of old ordinary memories that lack one; when `RetentionDays=0` it does not apply global backfill (to avoid unintended deletion), and only deep-type / consolidated slow-to-learn memories are promoted with their expiry cleared.
 
 #### 6.5.2 Manual forgetting (UI / API / permissions)
 
@@ -3115,6 +3121,23 @@ The server has two paths (`MemoryApi`):
 Frontend confirmation text: `memory.forgetConfirm` "Confirm forgetting the memory{scope}{retain}? It will no longer be retrieved and will be cleaned up in the background." (`scope` ∈ `scopeThis` / `scopeAll`, `retain` ∈ `forgetRetain` / `forgetImmediate`).
 
 > **Implementation-detail reminder**: `SetExpiry`'s SQL does not filter by `importance`, i.e., "forget the whole group manually" will **also set an expiry time on Important / Critical memories** (so they are no longer retrieved); because `PruneExpired` exempts `importance>0`, these important memories are merely "not retrievable" rather than physically deleted. An ordinary member's "forget own utterances" goes through the physical-delete path.
+
+#### 6.5.3 Periodic consolidation / forgetting (1.0.340)
+
+Implementation: `MemoryLifecycleService` (started by the host) + `MemoryLifecyclePolicy` (pure decision rules). The task **only changes memory metadata** (`importance` / `expires_at`); it never rewrites the original text or deletes rows directly. Physical deletion still happens in `MemoryMaintenanceService` based on expiry.
+
+**Cadence**: the first run is 15 minutes after startup, then every `LifecycleIntervalHours` hours. Each run scans at most `LifecycleMaxPerRun` memories (default 2000) in reverse chronological order; already-expired items are skipped (left for pruning, so consolidation cannot resurrect them). The agent profiles are re-read every run, so changing a memory type needs no restart.
+
+| Memory type | Periodic action |
+|---|---|
+| `deep` | An old **ordinary** memory is promoted to **Important** after `DeepConsolidateAfterHours` (default 24 h); any deep-type memory with an expiry has it cleared (a strong trace does not fade) |
+| `slowToLearn` | When the same agent's normalized content repeats `SlowToLearnRepeatThreshold` times (default 3), it is promoted to Important with expiry cleared; below the threshold it follows global retention |
+| `fastForgetting` | When `RetentionDays > 0`, ordinary memories are tightened to `max(2, ceil(RetentionDays×0.4))` days; no action when auto-forgetting is off |
+| `broad` / `cueDependent` / unconfigured / user messages | Only backfill the global `RetentionDays` expiry for ordinary memories; important levels are untouched |
+
+Boundaries: Important / Critical memories are **never** given an automatic expiry; if promotion fails, the run does not proceed to clear the expiry (avoiding a half-applied change); the normalized repeat key requires at least 8 letters/digits so short replies like "ok" do not get consolidated by accident.
+
+**UI and API**: an admin sees **🧠 Memory lifecycle** status and **Consolidate / forget now** at the top of Account menu → Memory management. `GET /ag-ui/memory/lifecycle` returns the switches, interval, and the latest summary; `POST /ag-ui/memory/lifecycle/run` triggers one run (both admin-only).
 
 ---
 
@@ -3214,9 +3237,10 @@ It takes effect only when **the message author is the digital employee itself** 
 
 | Type | Write behavior |
 |---|---|
-| `deep` Deep | `ImportanceFor`: the person's own utterances are automatically promoted to **Important** (`max(baseline, Important=1)`) — they do not expire with auto-forget and rank first at equal similarity ("speaking it out is branding it in") |
-| `fastForgetting` Fast forgetting | `ExpiryFor`: when the platform has `RetentionDays > 0`, the person's **ordinary** utterances get `expiresAt = timestamp + max(2, ceil(RetentionDays × 0.4)) × 86_400_000L` (at least 2 days); when the platform has auto-forget off, it returns `null` and does not proactively introduce an expiry |
-| `broad` / `slowToLearn` / `cueDependent` | persisted without distinction (the difference is only on the read side) |
+| `deep` Deep | `ImportanceFor`: the person's own utterances are automatically promoted to **Important** (`max(baseline, Important=1)`) — they do not expire with auto-forget and rank first at equal similarity ("speaking it out is branding it in"); the lifecycle task backfills old ordinary memories and clears their expiry |
+| `fastForgetting` Fast forgetting | `ExpiryFor`: when the platform has `RetentionDays > 0`, the person's **ordinary** utterances get `expiresAt = timestamp + max(2, ceil(RetentionDays × 0.4)) × 86_400_000L` (at least 2 days); when the platform has auto-forget off, it returns `null` and does not proactively introduce an expiry; the lifecycle task tightens existing rows to the same retention |
+| `slowToLearn` Slow to learn | No special write behaviour; the lifecycle task promotes it to Important and clears the expiry once **the same content repeats** `SlowToLearnRepeatThreshold` times (default 3) — "learned after repetition, then hard to forget" |
+| `broad` / `cueDependent` | persisted without distinction (the difference is only on the read side); the lifecycle task only backfills the global retention expiry |
 
 #### 6.6.5 Terminology and key mapping
 
@@ -4943,6 +4967,8 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | DELETE | `/ag-ui/memory/{messageId}` | Physically delete a single memory | Login (same as above) |
 | POST | `/ag-ui/memory/forget` | Manual forgetting (expire by group or everything; optionally keep the most recent N hours) | Login (same as above) |
 | POST | `/ag-ui/memory/consolidate` | Consolidate a group's "critical"-level memories into a knowledge base document (requires semantic memory to be enabled) | Login |
+| GET | `/ag-ui/memory/lifecycle` | Memory lifecycle configuration + latest run summary | Admin |
+| POST | `/ag-ui/memory/lifecycle/run` | Run one memory consolidation / forgetting pass manually | Admin |
 | GET | `/ag-ui/memory/export` | Export memories as a data package (`groupId` empty = all groups you are in; `since` for incremental; paginated) | Login |
 | POST | `/ag-ui/memory/import` | Incremental import (deduplicated by `messageId`; non-admins can only import into groups they belong to; the user type is forced to self / admin / group management) | Login |
 | GET | `/ag-ui/search` | Global smart search (searches messages / memory / knowledge bases across Circles; `q` at least 2 characters, `limit` 1..100 default 40) | Login |

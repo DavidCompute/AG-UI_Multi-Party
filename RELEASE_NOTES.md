@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.339 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.339 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.340 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.340 Release Notes (current Windows desktop release)
+
+**版本说明**：**记忆周期巩固 / 遗忘**——按数字员工的记忆拟人类型定期整理存量记忆：深记型补巩固、难录入型在反复出现后巩固、快速遗忘型收紧过期，只改元数据不改原文。
+**Version note**: **Periodic memory consolidation / forgetting** — existing memories are maintained by each digital employee's memory personality: deep memories are consolidated, slow-to-learn memories become durable after repetition, fast-forgetting memories are tightened; metadata only, never the original text.
+
+## 变更
+# Changes
+
+中文：
+- **生命周期任务**：新增 `MemoryLifecycleService`（启动 15 分钟后首轮，此后默认每 24 小时）与纯规则 `MemoryLifecyclePolicy`。单轮最多扫描 2000 条，已过期条目跳过；每轮重新读取员工配置，改记忆类型无需重启。
+- **逐档处置**：深记型旧普通记忆满 24 小时补升为「重要」并清除过期；难录入型在同员工同规范化内容重复 3 次后巩固；快速遗忘型在开启自动遗忘时按 `max(2, ceil(RetentionDays×0.4))` 天收紧；广记 / 存得住想不起 / 未配置 / 用户消息只按全局保留期补齐。
+- **安全边界**：只改 `importance` / `expires_at`，不改写原文、不直接物理删除；重要 / 关键记忆不会被自动写入过期时间；提升失败时本轮不继续清过期；规范化重复键少于 8 字符不计数。
+- **可观测 / 可手动触发**：管理端「记忆管理」新增「🧠 记忆生命周期」状态与「立即巩固 / 遗忘」；新增 `GET /ag-ui/memory/lifecycle`、`POST /ag-ui/memory/lifecycle/run`（仅管理员）。
+- **配置**：`LifecycleEnabled`（默认 `true`）、`LifecycleIntervalHours`（24）、`LifecycleMaxPerRun`（2000）、`DeepConsolidateAfterHours`（24）、`SlowToLearnRepeatThreshold`（3）。
+
+English:
+- **Lifecycle task**: new `MemoryLifecycleService` (first run 15 minutes after startup, then every 24 h by default) and the pure rule set `MemoryLifecyclePolicy`. A run scans at most 2000 memories and skips expired rows; agent profiles are re-read every run, so changing a memory type needs no restart.
+- **Per-type actions**: deep-type ordinary memories older than 24 h are promoted to Important with expiry cleared; slow-to-learn memories are consolidated after the same agent repeats the same normalized content 3 times; fast-forgetting memories are tightened to `max(2, ceil(RetentionDays×0.4))` days when auto-forgetting is on; broad / cue-dependent / unconfigured / user memories only receive the global retention backfill.
+- **Safety boundaries**: only `importance` / `expires_at` change — no text rewrite and no direct physical deletion; Important / Critical memories are never given an automatic expiry; a failed promotion stops that item before clearing expiry; normalized repeat keys shorter than 8 characters are ignored.
+- **Observable / manually triggerable**: Memory management gains a **🧠 Memory lifecycle** status and **Consolidate / forget now**; new `GET /ag-ui/memory/lifecycle` and `POST /ag-ui/memory/lifecycle/run` (admin only).
+- **Config**: `LifecycleEnabled` (`true`), `LifecycleIntervalHours` (24), `LifecycleMaxPerRun` (2000), `DeepConsolidateAfterHours` (24), `SlowToLearnRepeatThreshold` (3).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §6.2 / §6.5.3 / §6.6.4 / §9.2；`docs/memory-personality.md` 新增 §7（周期巩固 / 遗忘）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.340。
+English: `docs/user-guide.md` / `en.md` §6.2 / §6.5.3 / §6.6.4 / §9.2; `docs/memory-personality.md` gains §7 (periodic consolidation / forgetting); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.340.
+
+## 测试
+# Tests
+
+中文：`MemoryLifecyclePolicyTests` 9 项 + SQLite 存储生命周期用例 1 项 + 桌面组合根服务注册守卫 1 项全部通过；`node --check app.js`；i18n 审计 **zh=en=2335，missing 0**；配置键与文档引用校验通过；Docker 重建后记忆生命周期接口可读 / 手动执行；全量 `dotnet vstest` **1947 通过 / 0 失败**。
+English: nine `MemoryLifecyclePolicyTests`, one SQLite store lifecycle test, and one desktop composition service-registration guard pass; `node --check app.js`; the i18n audit reports **zh=en=2335, missing 0**; config-key and docs-reference checks pass; after the Docker rebuild the lifecycle endpoints read and run; the full `dotnet vstest` run passes **1947 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.339 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.339 Release Notes (historical)
 
 **版本说明**：**计划步骤空产出自动重试 + 缺口清单**——编排中的指班子步骤 / 服务端技能步骤返回空正文时自动重试一次，仍空则如实列出哪些步骤没有产出，不再给用户空白回复。
 **Version note**: **Retry empty plan steps and report the gaps** — assigned-employee and server-skill steps that return an empty body are retried once; if they are still empty, the reply lists exactly which steps produced nothing instead of returning a blank message.

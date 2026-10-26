@@ -88,6 +88,28 @@ public sealed class SqliteVecMemoryStoreTests
     }
 
     [Fact]
+    public void SetExpiryForMessage_SetsClearsAndSkipsImportant()
+    {
+        var (_, memory) = Create();
+        memory.Upsert(new MessageMemoryRecord(
+            "se1", "g1", "main", "agent_a", "Agent", "生命周期测试记忆",
+            [1, 0, 0, 0, 0, 0, 0, 0], 1000));
+
+        Assert.True(memory.SetExpiryForMessage("se1", 9_000L));
+        Assert.Equal(9_000L, Assert.Single(memory.ListMessages("g1", null, null, 10, 0)).ExpiresAt);
+
+        Assert.True(memory.SetExpiryForMessage("se1", null));
+        Assert.Null(Assert.Single(memory.ListMessages("g1", null, null, 10, 0)).ExpiresAt);
+
+        // 重要级不允许被自动写入过期时间（只允许清除）
+        Assert.True(memory.PromoteImportance("se1", MemoryImportance.Important));
+        Assert.False(memory.SetExpiryForMessage("se1", 12_000));
+        Assert.Null(Assert.Single(memory.ListMessages("g1", null, null, 10, 0)).ExpiresAt);
+
+        Assert.False(memory.SetExpiryForMessage("missing", 1));
+    }
+
+    [Fact]
     public void Search_ScopeAgent_OnlyGroupsWhereAgentIsMember()
     {
         var (store, memory) = Create();

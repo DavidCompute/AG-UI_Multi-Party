@@ -90,6 +90,7 @@
   读取侧 `MemoryProfileTuning.Resolve` → `MemoryRetrievalTuning` 单次覆盖传给 store 检索，含存得住想不起型的回忆提示分支与快速遗忘型的 21 天近期窗口；写入侧 `MemoryProfileWritePolicy`
   仅对该员工本人发言生效（深记型自动刻为「重要」记忆、快速遗忘型在开启自动遗忘时保留更短）；编辑 UI 见
   「记忆与权限 → 🧠 记忆类型」。机制与调试详见 `docs/memory-personality.md`。另：组织编排 / 组织架构构建师起草团队时已会按岗位自动配好合适预设，缺失 / 非法预设安全回退（null=全局，向后兼容），机制详见 `docs/memory-personality.md` §4.4。
+  - **周期巩固 / 遗忘（1.0.340，已实现）**：新增 `MemoryLifecycleService`——按记忆拟人类型扫描存量记忆并调整元数据：深记型旧普通记忆补巩固为重要并清除过期；难录入型在同内容重复达到阈值后巩固；快速遗忘型按缩短保留期收紧；其余按全局保留期补齐。只改 `importance`/`expires_at`，不改写原文、不直接删除；重要级不会被自动过期。管理端记忆管理新增状态与「立即巩固 / 遗忘」，并提供 `GET/POST /ag-ui/memory/lifecycle*`。配置：`LifecycleEnabled` / `LifecycleIntervalHours` / `LifecycleMaxPerRun` / `DeepConsolidateAfterHours` / `SlowToLearnRepeatThreshold`。
 
 ### 2.6 记忆写入去重（重复编码）（★☆☆ 成本 / 延迟） ✅已实现（1.0.262）
 - **现状**：同一段文本每次写入都要重新向量化一遍（组织编排 / 定时汇报里反复出现的短句与模板文案、导入包里的重复内容），CPU 上单条可达数秒，且占着后台池那唯一的槽位。
