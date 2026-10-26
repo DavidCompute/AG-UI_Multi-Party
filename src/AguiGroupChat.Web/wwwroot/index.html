@@ -2419,6 +2419,14 @@
                 <button class="chip-btn" type="button" data-q-filter="run" data-i18n="admin.wsQueueRunning">上传中</button>
                 <button class="chip-btn" type="button" data-q-filter="ok" data-i18n="admin.wsQueueOk">完成</button>
               </span>
+              <select id="wsQueueError" class="modal-input" style="width:auto;min-width:110px;font-size:11px">
+                <option value="" data-i18n="admin.wsQueueErrAny">全部原因</option>
+                <option value="size" data-i18n="admin.wsQueueErrSize">超出大小</option>
+                <option value="path" data-i18n="admin.wsQueueErrPath">路径无效</option>
+                <option value="network" data-i18n="admin.wsQueueErrNetwork">网络中断</option>
+                <option value="server" data-i18n="admin.wsQueueErrServer">服务端错误</option>
+                <option value="other" data-i18n="admin.wsQueueErrOther">其他</option>
+              </select>
               <span id="wsQueueSummary" class="form-hint"></span>
               <button id="wsQueueRetrySel" class="chip-btn hidden" type="button" data-i18n="admin.wsQueueRetrySel">↻ 重试选中</button>
               <button id="wsQueueResume" class="chip-btn hidden" type="button" data-i18n="admin.wsQueueResume">⏯ 续传未完成</button>
@@ -2496,6 +2504,7 @@
           <button id="waViewDefault" class="chip-btn" type="button" data-i18n="admin.waViewDefault">★ 设为默认</button>
           <button id="waViewShare" class="chip-btn" type="button" data-i18n="admin.waViewShare">⇪ 分享</button>
           <button id="waViewUnshare" class="chip-btn" type="button" data-i18n="admin.waViewUnshare">⇪ 取消分享</button>
+          <button id="waViewRename" class="chip-btn" type="button" data-i18n="admin.waViewRename">✎ 重命名</button>
           <button id="waViewExport" class="chip-btn" type="button" data-i18n="admin.waViewExport">⤓ 导出视图</button>
           <button id="waViewImport" class="chip-btn" type="button" data-i18n="admin.waViewImport">⤒ 导入视图</button>
           <button id="waViewImportShared" class="chip-btn" type="button" data-i18n="admin.waViewImportShared">⤒ 导入共享</button>

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.337**
+> Applies to version: **1.0.338**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1747,6 +1747,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **PNG light theme (1.0.335)**: the exporter measures the background luminance and switches to a deepened palette (including the failure line and the "Other" segment) so charts stay readable on white.
 - **PNG footnote (1.0.336)**: the exported image ends with a line listing the export time plus the active days / circle / agent / tool / keyword filters, so an archived screenshot shows its own scope.
 - **PNG custom note (1.0.337)**: an optional note (up to 80 characters, cancel to skip) is captured before export and appended to the footnote — handy for "pre-release regression" or "weekly review" labels.
+- **PNG legend grouping (1.0.338)**: in stacked mode, agent names carrying a `/` prefix (e.g. `Sales/Ada`) merge their segments and legend entries per prefix, so exports stay compact and colours stay stable.
   - Also fixes a persistence defect: `notifyPrefs` / `auditViews` snapshots look like `{users:{…}}`, but the old restore treated the wrapper as a userId, so preferences and views vanished on restart. Restore now unwraps `users` first, handles the legacy shape, and the views section gains the shared pool.
 - Summaries only (never file contents or credentials), capped at 60 entries per answer.
 
@@ -1780,6 +1781,7 @@ When the answer finishes these lines are collected into the **🔧 Workspace act
 - **Usage counts and failure export (1.0.335)**: applying a shared view reports one use (`POST /ag-ui/audit-views/shared-usage`), shown as "· N uses" in the dropdown so cold views are easy to prune; the upload queue gains **⬇ Failed CSV** exporting failed / cancelled rows as `path,bytes,status,error` with a BOM.
 - **Cold-view hint and queue sorting (1.0.336)**: shared views sort by usage descending with never-used ones at the end, and **🧹 Cold views (N)** lists the unused names in one click; the queue gains a **sort header** (name / size / state, click again to reverse) sharing the same list as drag and ▲/▼.
 - **Resume incomplete and grouping (1.0.337)**: failed / cancelled rows that already hold bytes show "Failed · 62%", and **⏯ Resume incomplete** re-sends only those items (the server continues from the stored offset); shared views group automatically by name prefix (`Team/xxx` lands in a "Team" group).
+- **Reason filter and view rename (1.0.338)**: the queue gains an **all reasons / too large / bad path / network / server error / other** dropdown (failing rows only) with errors classified on arrival, and views gain **✎ Rename** — personal views rename in place (updating the default pointer), while shared views publish the new name and drop the old one (a team default follows along).
 - **Folder navigation (1.0.317)**: the file panel now browses **one level at a time** (`?path=` lists direct children, folders first), with a clickable **Root / a / b** breadcrumb; uploads and new folders land in the **current folder**, as do delete / preview / download.
 - **File search (1.0.318)**: the toolbar search box matches **file names** recursively across the workspace (up to 500 hits, count shown next to the breadcrumb); results show the full relative path and keep preview / download / delete actions.
 - **Content search (1.0.319)**: a **File name / Content** toggle sits next to the search box. Content mode walks text files and reports the first hit (binary and >1 MB files skipped, 32 MB total scan cap, up to 100 hits) with a line number and surrounding snippet; preview / download / delete still work.

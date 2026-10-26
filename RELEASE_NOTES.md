@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.337 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.337 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.338 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.338 Release Notes (current Windows desktop release)
+
+**版本说明**：**失败可按原因筛 + 视图可改名 + PNG 图例合并**——上传失败能按大小 / 路径 / 网络 / 服务端筛；视图支持重命名（含团队默认跟随）；叠加图按前缀合并图例。
+**Version note**: **Filter failures by reason, rename views, merge PNG legends** — narrow upload failures by cause, rename any view (team defaults follow), and group stacked legends by prefix.
+
+## 变更
+# Changes
+
+中文：
+- **失败原因筛选**：`uploadErrorKind()` 把服务端错误码 / 网络异常归为 `size / path / network / server / other`；队列新增原因下拉（只作用于失败项），失败时立即记录分类。
+- **视图重命名**：个人视图直接改名（若为默认视图同步更新）；共享视图=发布新名 + 删除旧名，若旧名是团队默认则自动把团队默认指向新名，随后刷新共享池与用量。
+- **PNG 图例合并**：叠加模式下若存在带 `/` 前缀的员工名，则按前缀合并段与图例（无前缀时保持逐员工）。
+
+English:
+- **Failure reason filter**: `uploadErrorKind()` maps server codes / network errors to `size / path / network / server / other`; the queue gains a reason dropdown that applies to failed rows, with the class recorded at failure time.
+- **View rename**: personal views rename in place (the default pointer follows), while shared views publish the new name and delete the old one; if it was the team default, the default is re-pointed and the shared pool / usage are refreshed.
+- **PNG legend merge**: in stacked mode, any agent name with a `/` prefix merges segments and legend entries by that prefix (per-agent stays when no prefix is used).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.13（失败原因 / 视图重命名 / PNG 图例合并）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.338。
+English: `docs/user-guide.md` / `en.md` §3.13 (failure reason / view rename / PNG legend merge); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.338.
+
+## 测试
+# Tests
+
+中文：前端交互改造（无后端 / 契约变更）；`node --check app.js`；i18n 审计 **zh=en=2325，missing 0**；Docker 重建后页面包含 `wsQueueError` / `waViewRename`，`/health` 200；全量 `dotnet test` **1932 通过 / 0 失败**。
+English: UI-only round with no backend or contract changes; `node --check app.js`; the i18n audit reports **zh=en=2325, missing 0**; after the Docker rebuild the page contains `wsQueueError` / `waViewRename` and `/health` is 200; the full `dotnet test` run passes **1932 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.337 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.337 Release Notes (historical)
 
 **版本说明**：**续传只挑断点项 + PNG 可加备注 + 共享视图自动分组**——失败项能看出已传进度并一键续传；导出图可写备注；共享视图按前缀归组。
 **Version note**: **Resume just the partial items, note on PNGs, grouped shared views** — see how far a failure got and resume only those, label exports, and group shared views by prefix.

@@ -262,6 +262,7 @@ Existing foundation: standard / hub dialects, HTTP / WS dual transport, approval
   - **Usage counts, light-theme PNG, failed CSV (1.0.335)**: shared views track how often they are applied (persisted), exported charts adapt to light themes, and failed uploads export to CSV.
   - **Cold views, PNG footnote, sortable queue (1.0.336)**: shared views sort by usage with a cold-view hint, exports label their scope, and the queue sorts by name, size or state.
   - **Resume incomplete, PNG note, grouped shared views (1.0.337)**: partial failures show their progress and resume in one click, exports accept a note, and shared views group by prefix.
+  - **Reason filter, view rename, PNG legend merge (1.0.338)**: filter upload failures by cause, rename views with team defaults following, and merge stacked legends by prefix.
   - Frontend: the admin console gained a "Configuration Governance" tab (parameter grid + toggles + approval / embed origins), with load-and-backfill (unset items are tri-state, falling back to defaults), save with immediate effect, and refresh.
   - Includes 2 integration tests (admin update persists + invalid value 400 / non-admin 403).
   - **Config-key guard (implemented)**: `tools/check-config-keys.mjs` statically checks "config keys in compose / appsettings ↔ C# option properties" — turning the "set but no property, silently ignored" trap documented in §9.9 from a **manual note** into an **automated guard** (an allowlist records intentional exceptions; `--no-allowlist` self-checks / audits).

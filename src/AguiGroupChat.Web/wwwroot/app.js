@@ -10896,6 +10896,77 @@ async function reportSharedUsage(name) {
   } catch { /* 离线 */ }
 }
 
+/** 重命名视图（1.0.338）：个人视图改名；共享视图 = 发布新名 + 删除旧名（保留团队默认指向）。 */
+async function renameSelectedWaView() {
+  const sel = $("waViewSel");
+  const value = sel?.value || "";
+  if (!value) {
+    toast(t("admin.waViewNone"));
+    return;
+  }
+  const isShared = value.startsWith(WA_SHARED_PREFIX);
+  const oldName = isShared ? value.slice(WA_SHARED_PREFIX.length) : value;
+  const view = isShared
+    ? waSharedViews.find((v) => v.name === oldName)
+    : loadWaViews().find((v) => v.name === oldName);
+  if (!view) {
+    toast(t("admin.waViewNone"));
+    return;
+  }
+  const next = String(window.prompt(t("admin.waViewRenamePrompt"), oldName) ?? "").trim().slice(0, 30);
+  if (!next || next === oldName) return;
+
+  if (!isShared) {
+    const list = loadWaViews();
+    const idx = list.findIndex((v) => v.name === oldName);
+    if (idx < 0) return;
+    list[idx] = { ...view, name: next };
+    if (waDefaultView === oldName) waDefaultView = next;
+    persistWaViews(list);
+    renderWaViews();
+    if (sel) sel.value = next;
+    toast(t("admin.waViewRenamed", { name: next }));
+    return;
+  }
+
+  const wasTeamDefault = waSharedDefaultView === oldName;
+  try {
+    const res = await fetch("/ag-ui/audit-views/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ view: { ...view, name: next } }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      toast(t("admin.waViewRenameFail", { err: errMsg(d, "HTTP " + res.status) }));
+      return;
+    }
+    await fetch(`/ag-ui/audit-views/share?name=${encodeURIComponent(oldName)}`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    if (wasTeamDefault) {
+      await fetch("/ag-ui/audit-views/shared-default", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+        body: JSON.stringify({ name: next }),
+      });
+    }
+    const refresh = await fetch("/ag-ui/audit-views", { headers: { Authorization: "Bearer " + state.token } });
+    const rd = await refresh.json().catch(() => null);
+    if (rd) {
+      waSharedViews = Array.isArray(rd.sharedViews) ? rd.sharedViews : waSharedViews;
+      waSharedDefaultView = String(rd.sharedDefaultView || "");
+      waSharedUsage = rd.sharedUsage && typeof rd.sharedUsage === "object" ? rd.sharedUsage : waSharedUsage;
+    }
+    renderWaViews();
+    if (sel) sel.value = WA_SHARED_PREFIX + next;
+    toast(t("admin.waViewRenamed", { name: next }));
+  } catch (ex) {
+    toast(t("admin.waViewRenameFail", { err: ex.message }));
+  }
+}
+
 /** 套用视图：回填控件与日期 chip，再按新条件重拉表格。 */
 function applyWaView(v, fromShared = false) {
   if (!v) return;
@@ -11260,18 +11331,37 @@ async function exportWorkAuditChartPng() {
   const totals = buckets.map(totalOf);
   const max = Math.max(1, ...totals);
 
+  // 图例分组合并（1.0.338）：叠加模式下若员工名带 `/` 前缀，按前缀合并段与图例
+  const partLabelOf = (p) => String(p.label || p.key || "");
+  const groupedParts = waStackActive
+    && buckets.some((b) => (b.parts || []).some((p) => partLabelOf(p).includes("/")));
+  const groupKeyOf = (label) => {
+    if (!groupedParts) return label;
+    const i = label.indexOf("/");
+    return i > 0 ? label.slice(0, i) : label;
+  };
+  const partSums = new Map();
+  if (waStackActive) {
+    for (const b of buckets) {
+      for (const p of (b.parts || [])) {
+        const k = groupKeyOf(partLabelOf(p));
+        partSums.set(k, (partSums.get(k) || 0) + (Number(p.total) || 0));
+      }
+    }
+  }
+  const partTop = [...partSums.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 8);
+
   const segsOf = (b) => {
     if (waStackActive) {
       const sums = new Map();
       for (const p of (b.parts || [])) {
-        const label = String(p.label || p.key || "");
-        sums.set(label, (sums.get(label) || 0) + (Number(p.total) || 0));
+        const k = groupKeyOf(partLabelOf(p));
+        sums.set(k, (sums.get(k) || 0) + (Number(p.total) || 0));
       }
-      const top = [...sums.entries()].sort((x, y) => y[1] - x[1]).map(([k]) => k).slice(0, 8);
       const out = [];
       let other = 0;
-      for (const [label, v] of sums) {
-        if (top.includes(label)) out.push({ v, color: partPalette[top.indexOf(label) % partPalette.length] });
+      for (const [k, v] of sums) {
+        if (partTop.includes(k)) out.push({ v, color: partPalette[partTop.indexOf(k) % partPalette.length] });
         else other += v;
       }
       if (other) out.push({ v: other, color: partPalette[partPalette.length - 1] });
@@ -11351,16 +11441,8 @@ async function exportWorkAuditChartPng() {
     lx += 18 + cjkWidth(label) + 14;
   };
   if (waStackActive) {
-    const sums = new Map();
-    for (const b of buckets) {
-      for (const p of (b.parts || [])) {
-        const label = String(p.label || p.key || "");
-        sums.set(label, (sums.get(label) || 0) + (Number(p.total) || 0));
-      }
-    }
-    const top = [...sums.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 8);
-    top.forEach((label, i) => drawLegend(label, partPalette[i % partPalette.length], false));
-    if (sums.size > top.length) drawLegend(t("admin.waSegOther"), partPalette[partPalette.length - 1], false);
+    partTop.forEach((label, i) => drawLegend(label, partPalette[i % partPalette.length], false));
+    if (partSums.size > partTop.length) drawLegend(t("admin.waSegOther"), partPalette[partPalette.length - 1], false);
   } else {
     for (const [field, , key] of WA_CHART_SEGS) drawLegend(t(key), segPalette[field], false);
   }
@@ -11793,6 +11875,7 @@ let wsUploadQueueItems = [];
 let wsUploadQueueSelected = new Set(); // 选中的失败 / 取消项，供「重试选中」（1.0.331）
 let wsQueueFilter = "";  // "" | fail | run | ok（1.0.332）
 let wsQueueSearch = "";
+let wsQueueErrorKind = ""; // 失败原因筛选（1.0.338）
 let wsQueueDragIndex = null; // 拖拽排序中的源下标（1.0.333）
 let wsQueueSort = { key: "", desc: false }; // 表头排序状态（1.0.336）
 const WS_Q_STATUS_ORDER = { run: 0, wait: 1, fail: 2, cancel: 3, skip: 4, ok: 5 };
@@ -11804,6 +11887,17 @@ const WS_Q_LABEL = {
   fail: "admin.wsQueueFail",
   cancel: "admin.wsQueueCancel",
 };
+
+/** 失败原因分类（1.0.338）：把服务端错误码 / 网络异常归成可筛的桶。 */
+function uploadErrorKind(err) {
+  const s = String(err || "").toLowerCase();
+  if (!s) return "other";
+  if (/(too_large|file_too_large|too_many_files)/.test(s)) return "size";
+  if (/(invalid_path|missing_path|path_is_directory|missing_file|missing_total|offset_mismatch)/.test(s)) return "path";
+  if (/(failed to fetch|networkerror|network error|load failed|aborterror|aborted)/.test(s)) return "network";
+  if (/(http 5\d\d|internal|server error)/.test(s)) return "server";
+  return "other";
+}
 
 function renderUploadQueue() {
   const box = $("wsUploadQueue");
@@ -11833,6 +11927,7 @@ function renderUploadQueue() {
     if (resumeBtn) resumeBtn.classList.toggle("hidden", resumable.length === 0);
   }
   const shown = items.filter((it) => (wsQueueFilter ? it.status === wsQueueFilter : true))
+    .filter((it) => (wsQueueErrorKind ? it.status === "fail" && it.errorKind === wsQueueErrorKind : true))
     .filter((it) => (wsQueueSearch.trim() ? String(it.rel).toLowerCase().includes(wsQueueSearch.trim().toLowerCase()) : true))
     .slice(0, 200);
   rows.innerHTML = (shown.length
@@ -12073,6 +12168,7 @@ async function uploadWorkspaceEntries(agentId, entries) {
       fail++;
       q.status = "fail";
       q.error = (ex && ex.message) || "failed";
+      q.errorKind = uploadErrorKind(q.error);
       failedNow.push(it);
       doneBytes += it.file.size || 0; // 失败也推进总量，避免进度卡死
     } finally {
@@ -17941,6 +18037,11 @@ function init() {
     $("wsQueueFilters").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
     renderUploadQueue();
   });
+  // 失败原因筛选（1.0.338）
+  $("wsQueueError").onchange = () => {
+    wsQueueErrorKind = $("wsQueueError").value || "";
+    renderUploadQueue();
+  };
   $("wsUploadRetryBtn").onclick = () => {
     if (!wsUploadFailed.length || !wsUploadLastAgent) return;
     const list = wsUploadFailed.slice();
@@ -18043,6 +18144,7 @@ function init() {
   $("waViewDefault").onclick = () => toggleDefaultView();
   $("waViewShare").onclick = () => shareSelectedWaView();
   $("waViewUnshare").onclick = () => unshareSelectedWaView();
+  $("waViewRename").onclick = () => renameSelectedWaView();
   $("waViewExport").onclick = () => exportWaViews();
   $("waViewImport").onclick = () => $("waViewImportInput").click();
   $("waViewImportInput").onchange = () => importWaViews($("waViewImportInput"));
