@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.343 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.343 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.344 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.344 Release Notes (current Windows desktop release)
+
+**版本说明**：**产物质量趋势 + 按技能下钻**——按天看平均分变化，按技能看执行 / 合格率 / 低分，点开低分记录看缺失项并直接跳到技能编辑 / 修复。
+**Version note**: **Artifact-quality trend and per-skill drill-down** — see daily average scores, per-skill runs / pass rate / low scores, and open a low-score record to inspect missing items and jump straight to skill edit / repair.
+
+## 变更
+# Changes
+
+中文：
+- **新接口**：`GET /ag-ui/admin/artifact-quality?days=&groupId=&agentId=&skillId=`（Operator+）返回 `summary / daily / skills / recent`：总览（执行 / 合格 / 合格率 / 平均分 / 低分 / 技能数）、按天趋势、按技能聚合（执行 / 合格率 / 平均分 / 低分 / 最近活跃 / 关联岗位 / Top 缺失项）、最近 100 条低分事件。
+- **绩效页入口**：工具栏新增「🧪 产物质量」，打开 `#artifactQualityModal`：KPI 卡片、按天平均分曲线、按技能表；点击技能行或「查看低分」列出最近低分事件的评分 / 岗位 / 时间 / 缺失项；「编辑 / 修复」关闭弹窗并直接打开该技能编辑器。
+- **范围过滤**：沿用绩效页的知聚范围；接口也支持按 `agentId` / `skillId` 过滤，便于后续从岗位或技能直接下钻。
+
+English:
+- **New API**: `GET /ag-ui/admin/artifact-quality?days=&groupId=&agentId=&skillId=` (Operator+) returns `summary / daily / skills / recent`: overview (runs / valid / pass rate / average / low / skills), daily trend, per-skill aggregation (runs / pass rate / average / low / last active / agents / top missing items), and the latest 100 low-score events.
+- **Performance entry**: the toolbar gains **🧪 Artifact quality**, opening `#artifactQualityModal` with KPI cards, a daily average-score curve, and a per-skill table; clicking a skill row or **View low scores** lists recent low-score records with score / agent / time / missing items; **Edit / repair** closes the dialog and opens that skill editor directly.
+- **Scope filtering**: reuses the performance tab's group scope; the API also accepts `agentId` / `skillId` filters for future per-agent or per-skill drill-down.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.6（产物质量下钻）、§9.2（新接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.344。
+English: `docs/user-guide.md` / `en.md` §8.6 (artifact-quality drill-down), §9.2 (new API); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.344.
+
+## 测试
+# Tests
+
+中文：新增 `ArtifactQuality` API 形状 / 鉴权用例通过；全量 `dotnet vstest` **1965 通过 / 0 失败**；`node --check app.js`；i18n 审计 **zh=en=2355，missing 0**；配置键与文档引用校验通过；Docker 重建后产物质量接口返回 `summary / daily / skills / recent`。
+English: the new artifact-quality API shape / auth case passes; the full `dotnet vstest` run passes **1965 / 0**; `node --check app.js`; the i18n audit reports **zh=en=2355, missing 0**; config-key and docs-reference checks pass; after the Docker rebuild the artifact-quality API returns `summary / daily / skills / recent`.
+
+---
+
+# AG-UI 群聊桌面版 1.0.343 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.343 Release Notes (historical)
 
 **版本说明**：**产物质量接入绩效与交付看板**——每次带产物契约的技能执行记录岗位 / 评分 / 是否合格 / 缺失项；绩效表与组织体检新增「产物质量」与 `low-artifact` 关注标记。
 **Version note**: **Artifact quality in performance and delivery dashboard** — every skill execution with an artifact contract records agent / score / pass / missing items; the performance table and org health gain **Artifact quality** and a `low-artifact` attention flag.

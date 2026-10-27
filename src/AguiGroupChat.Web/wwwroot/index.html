@@ -713,6 +713,39 @@
     </div>
   </div>
 
+  <!-- 产物质量看板：按天趋势 + 按技能聚合 + 低分下钻修复 -->
+  <div id="artifactQualityModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal kb-modal">
+      <div class="modal-title">🧪 <span data-i18n="admin.aqTitle">产物质量</span><span id="aqMeta" class="gf-count"></span></div>
+      <div class="kb-view">
+        <div id="aqCards" class="oh-cards"></div>
+        <div class="oh-section-title" data-i18n="admin.aqTrend">按天质量趋势</div>
+        <div id="aqTrend"></div>
+        <div class="oh-section-title" data-i18n="admin.aqSkills">按技能</div>
+        <div class="admin-table-wrap" style="max-height:280px;overflow:auto">
+          <table class="admin-table">
+            <thead><tr>
+              <th data-i18n="admin.aqThSkill">技能</th>
+              <th data-i18n="admin.aqThKind">类型</th>
+              <th data-i18n="admin.perfThCalls">执行次数</th>
+              <th data-i18n="admin.aqThValid">合格率</th>
+              <th data-i18n="admin.aqThScore">平均分</th>
+              <th data-i18n="admin.aqThLow">低分</th>
+              <th data-i18n="admin.perfThLast">最近活跃</th>
+              <th data-i18n="admin.aqThActions">操作</th>
+            </tr></thead>
+            <tbody id="aqSkillRows"></tbody>
+          </table>
+        </div>
+        <div class="oh-section-title" data-i18n="admin.aqIssuesTitle">近期低分原因</div>
+        <div id="aqIssues" class="aq-issues"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="aqClose" class="btn-ghost" data-i18n="admin.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 模板市场·安装前预览：查看包内数字员工（含技能 / 知识库 / 记忆类型）再决定安装 -->
   <div id="marketPreviewModal" class="modal-overlay modal-over-console hidden">
     <div class="modal pick-modal">
@@ -2050,6 +2083,7 @@
           </select>
           <select id="perfGroup" class="modal-input" style="width:auto;display:inline-block;padding:2px 8px;max-width:220px"></select>
           <button id="perfRefreshBtn" class="chip-btn" type="button" data-i18n="admin.perfRefresh">↻ 刷新</button>
+          <button id="perfArtifactBtn" class="chip-btn" type="button" data-i18n="admin.perfArtifactBtn">🧪 产物质量</button>
           <button id="perfReportBtn" class="chip-btn" type="button" data-i18n="admin.perfReport">📄 组织体检报告</button>
           <button id="perfChartBtn" class="chip-btn" type="button" data-i18n="admin.orgHealthBtn">📊 图表</button>
           <span class="search-clear-wrap" style="width:190px;flex:none">

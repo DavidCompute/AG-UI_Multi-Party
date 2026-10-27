@@ -288,6 +288,131 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 产物质量看板（1.0.344）：按天趋势 + 按技能聚合 + 最近低分事件（绩效页「🧪 产物质量」）。
+        root.MapGet("/artifact-quality", (int? days, string? groupId, string? agentId, string? skillId, IServiceProvider sp) =>
+        {
+            var store = sp.GetService<ArtifactQualityStore>();
+            if (store is null)
+                return Results.Ok(new { days = 0, from = "", to = "", summary = new { }, daily = Array.Empty<object>(), skills = Array.Empty<object>(), recent = Array.Empty<object>() });
+            var d = Math.Clamp(days ?? 30, 1, 365);
+            var to = DateTimeOffset.UtcNow;
+            var from = to.AddDays(-d + 1);
+            var scopeGroup = string.IsNullOrWhiteSpace(groupId) ? null : groupId.Trim();
+            var scopeAgent = string.IsNullOrWhiteSpace(agentId) ? null : agentId.Trim();
+            var scopeSkill = string.IsNullOrWhiteSpace(skillId) ? null : skillId.Trim();
+            IEnumerable<ArtifactQualityEvent> events = store.Query(from.ToUnixTimeMilliseconds(), scopeAgent, scopeGroup);
+            if (scopeSkill is not null) events = events.Where(e => string.Equals(e.SkillId, scopeSkill, StringComparison.Ordinal));
+            var list = events.ToList();
+
+            var catalog = sp.GetService<AgentCatalog>();
+            var skillCatalog = sp.GetService<AgentSkillCatalog>();
+            var agentNames = catalog?.ListDefinitions()
+                .ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            string AgentName(string id) => agentNames.TryGetValue(id, out var n) ? n : id;
+            string SkillName(string id) => skillCatalog?.Get(id)?.Name is { Length: > 0 } n ? n : id;
+            string SkillKind(string id, string fallback) => skillCatalog?.Get(id)?.Kind.ToString() ?? fallback;
+            var runs = list.Count;
+            var valid = list.Count(e => e.Satisfied);
+            var avg = runs == 0 ? (double?)null : Math.Round(list.Average(e => Math.Clamp(e.Score, 0, 100)), 1);
+            var low = list.Count(e => !e.Satisfied || e.Score < 70);
+
+            var daily = list
+                .GroupBy(e => DateTimeOffset.FromUnixTimeMilliseconds(e.TimestampMs).ToLocalTime().ToString("yyyy-MM-dd"))
+                .Select(g =>
+                {
+                    var n = g.Count();
+                    var ok = g.Count(e => e.Satisfied);
+                    return new
+                    {
+                        date = g.Key,
+                        runs = n,
+                        valid = ok,
+                        validRate = n == 0 ? (double?)null : Math.Round((double)ok / n, 4),
+                        avgScore = Math.Round(g.Average(e => Math.Clamp(e.Score, 0, 100)), 1),
+                        low = g.Count(e => !e.Satisfied || e.Score < 70),
+                    };
+                })
+                .OrderBy(x => x.date, StringComparer.Ordinal)
+                .ToList();
+
+            var skills = list.GroupBy(e => e.SkillId, StringComparer.Ordinal)
+                .Select(g =>
+                {
+                    var n = g.Count();
+                    var ok = g.Count(e => e.Satisfied);
+                    var last = g.Max(e => e.TimestampMs);
+                    var missing = g.SelectMany(e => e.Missing)
+                        .Where(m => !string.IsNullOrWhiteSpace(m))
+                        .GroupBy(m => m, StringComparer.Ordinal)
+                        .OrderByDescending(x => x.Count())
+                        .Take(3)
+                        .Select(x => new { text = x.Key, count = x.Count() })
+                        .ToList();
+                    return new
+                    {
+                        skillId = g.Key,
+                        name = SkillName(g.Key),
+                        kind = SkillKind(g.Key, g.First().Kind),
+                        runs = n,
+                        valid = ok,
+                        validRate = n == 0 ? (double?)null : Math.Round((double)ok / n, 4),
+                        avgScore = Math.Round(g.Average(e => Math.Clamp(e.Score, 0, 100)), 1),
+                        low = g.Count(e => !e.Satisfied || e.Score < 70),
+                        lastAt = DateTimeOffset.FromUnixTimeMilliseconds(last).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                        agents = g.Select(e => e.AgentId).Where(id => id.Length > 0).Distinct(StringComparer.Ordinal)
+                            .Select(id => new { agentId = id, name = AgentName(id) }).ToList(),
+                        topMissing = missing,
+                    };
+                })
+                .OrderByDescending(x => x.low)
+                .ThenBy(x => x.avgScore)
+                .ThenByDescending(x => x.runs)
+                .ToList();
+
+            var recent = list
+                .Where(e => !e.Satisfied || e.Score < 70)
+                .OrderByDescending(e => e.TimestampMs)
+                .Take(100)
+                .Select(e => new
+                {
+                    agentId = e.AgentId,
+                    agentName = AgentName(e.AgentId),
+                    skillId = e.SkillId,
+                    skillName = SkillName(e.SkillId),
+                    kind = SkillKind(e.SkillId, e.Kind),
+                    score = e.Score,
+                    satisfied = e.Satisfied,
+                    missing = e.Missing,
+                    groupId = e.GroupId,
+                    at = DateTimeOffset.FromUnixTimeMilliseconds(e.TimestampMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                })
+                .ToList();
+
+            var groups = sp.GetService<GroupHub>()?.Store.AllGroups()
+                .ToDictionary(g => g.GroupId, g => g.GroupName, StringComparer.Ordinal)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            return Results.Ok(new
+            {
+                days = d,
+                from = from.ToString("yyyy-MM-dd"),
+                to = to.ToString("yyyy-MM-dd"),
+                scope = scopeGroup is null ? null : new { groupId = scopeGroup, name = groups.TryGetValue(scopeGroup, out var gn) ? gn : scopeGroup },
+                summary = new
+                {
+                    runs,
+                    valid,
+                    validRate = runs == 0 ? (double?)null : Math.Round((double)valid / runs, 4),
+                    avgScore = avg,
+                    low,
+                    skills = skills.Count,
+                },
+                daily,
+                skills,
+                recent,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 知聚下拉选项（绩效页「按知聚」筛选用）：仅运维及以上（只读）。
         root.MapGet("/groups", (IServiceProvider sp) =>
         {

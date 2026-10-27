@@ -204,4 +204,22 @@ public sealed class AgentPerformanceApiTests : IClassFixture<AdminApiServerFixtu
         var anon = await _client.GetAsync("/ag-ui/admin/agent-performance");
         Assert.Equal(HttpStatusCode.Unauthorized, anon.StatusCode);
     }
+
+    [Fact]
+    public async Task ArtifactQuality_RequiresOperator_AndReturnsShape()
+    {
+        var token = await AdminTokenAsync();
+        using var req = new HttpRequestMessage(HttpMethod.Get, "/ag-ui/admin/artifact-quality?days=7");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var res = await _client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var d = await res.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Array, d.GetProperty("daily").ValueKind);
+        Assert.Equal(JsonValueKind.Array, d.GetProperty("skills").ValueKind);
+        Assert.Equal(JsonValueKind.Array, d.GetProperty("recent").ValueKind);
+        Assert.True(d.GetProperty("summary").TryGetProperty("avgScore", out _));
+
+        var anon = await _client.GetAsync("/ag-ui/admin/artifact-quality");
+        Assert.Equal(HttpStatusCode.Unauthorized, anon.StatusCode);
+    }
 }

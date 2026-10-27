@@ -9109,6 +9109,126 @@ function renderOrgHealthBars() {
   }).join("");
 }
 
+/** 产物质量看板（1.0.344）：按天趋势 + 按技能聚合 + 低分下钻 / 跳转编辑。 */
+let aqData = null;
+let aqSelectedSkill = "";
+
+async function openArtifactQualityModal() {
+  if (!isOperatorPlus()) { toast(t("admin.adminOnly")); return; }
+  const days = Number($("perfRange") && $("perfRange").value) || 30;
+  aqData = null;
+  aqSelectedSkill = "";
+  $("aqMeta").textContent = "";
+  $("aqCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.loading"))}</div>`;
+  $("aqTrend").innerHTML = "";
+  $("aqSkillRows").innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.loading"))}</td></tr>`;
+  $("aqIssues").innerHTML = "";
+  $("artifactQualityModal").classList.remove("hidden");
+  try {
+    const scope = perfGroupId ? `&groupId=${encodeURIComponent(perfGroupId)}` : "";
+    const res = await fetch(`/ag-ui/admin/artifact-quality?days=${encodeURIComponent(days)}${scope}`, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) { $("aqCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(errMsg(d, "HTTP " + res.status))}</div>`; return; }
+    aqData = d;
+    renderArtifactQuality();
+  } catch (ex) {
+    $("aqCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(ex.message)}</div>`;
+  }
+}
+
+function renderArtifactQuality() {
+  const d = aqData;
+  if (!d) return;
+  const s = d.summary || {};
+  const num = (v) => Number(v || 0).toLocaleString();
+  const rate = s.validRate == null ? "—" : Math.round(s.validRate * 100) + "%";
+  const avg = s.avgScore == null ? "—" : Number(s.avgScore).toFixed(1) + "/100";
+  const card = (k, v) => `<div class="oh-card"><div class="oh-card-k">${escapeHtml(k)}</div><div class="oh-card-v">${escapeHtml(String(v))}</div></div>`;
+  $("aqCards").innerHTML = card(t("admin.perfThCalls"), num(s.runs))
+    + card(t("admin.aqThValid"), rate)
+    + card(t("admin.aqThScore"), avg)
+    + card(t("admin.aqThLow"), num(s.low))
+    + card(t("admin.aqSkills"), num(s.skills));
+  const scope = d.scope ? ` · ${d.scope.name || d.scope.groupId}` : "";
+  $("aqMeta").textContent = t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" }) + scope;
+  $("aqTrend").innerHTML = aqTrendSvg(d.daily || [], t("admin.aqNoTrend"));
+  renderAqSkillRows();
+  renderAqIssues();
+}
+
+function aqTrendSvg(rows, emptyText) {
+  if (!rows || rows.length < 2) return `<div class="aq-empty">${escapeHtml(emptyText)}</div>`;
+  const w = 800, h = 110, pad = 10;
+  const step = (w - 2 * pad) / (rows.length - 1);
+  const yOf = (v) => (h - pad - (Math.max(0, Math.min(100, v)) / 100) * (h - 2 * pad)).toFixed(1);
+  const pts = rows.map((r, i) => `${(pad + i * step).toFixed(1)},${yOf(r.avgScore)}`).join(" ");
+  const area = `${pad},${(h - pad).toFixed(1)} ${pts} ${(w - pad).toFixed(1)},${(h - pad).toFixed(1)}`;
+  const grid = [0, 50, 100].map((v) => `<line x1="0" y1="${yOf(v)}" x2="${w}" y2="${yOf(v)}" stroke="#94a3b8" stroke-opacity="0.25" stroke-width="1"/>`).join("");
+  const dots = rows.map((r, i) => `<circle cx="${(pad + i * step).toFixed(1)}" cy="${yOf(r.avgScore)}" r="2.5" fill="#4f8cff"><title>${escapeHtml(r.date + " · " + Number(r.avgScore || 0).toFixed(1) + "/100 · " + (r.validRate == null ? "—" : Math.round(r.validRate * 100) + "%") + " · " + r.runs + " 次")}</title></circle>`).join("");
+  return `<div class="admin-chart" style="padding:8px 10px"><svg viewBox="0 0 ${w} ${h}" width="100%" height="110" preserveAspectRatio="none">`
+    + grid + `<polygon points="${area}" fill="#4f8cff" fill-opacity="0.14"/>`
+    + `<polyline points="${pts}" fill="none" stroke="#4f8cff" stroke-width="2" vector-effect="non-scaling-stroke"/>` + dots + `</svg></div>`;
+}
+
+function renderAqSkillRows() {
+  const d = aqData;
+  if (!d) return;
+  const list = d.skills || [];
+  if (!list.length) { $("aqSkillRows").innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.aqEmpty"))}</td></tr>`; return; }
+  const rate = (r) => r.validRate == null ? "—" : Math.round(r.validRate * 100) + "%";
+  $("aqSkillRows").innerHTML = list.map((r) => {
+    const on = aqSelectedSkill === r.skillId ? " on" : "";
+    const low = Number(r.low || 0) > 0 ? `<span class="tag-disabled">${Number(r.low)}</span>` : `<span class="muted">0</span>`;
+    return `<tr data-aq-skill="${escapeHtml(r.skillId)}" class="aq-skill-row${on}">`
+      + `<td><div>${escapeHtml(r.name || r.skillId)}</div><div class="form-hint" style="margin:0">${escapeHtml(r.skillId)}</div></td>`
+      + `<td>${escapeHtml(r.kind || "—")}</td><td>${Number(r.runs || 0)}</td><td>${rate(r)}</td>`
+      + `<td>${Number(r.avgScore || 0).toFixed(1)}</td><td>${low}</td><td>${escapeHtml(r.lastAt || "—")}</td>`
+      + `<td><button class="chip-btn" type="button" data-aq-issues="${escapeHtml(r.skillId)}">${escapeHtml(t("admin.aqViewIssues"))}</button> `
+      + `<button class="chip-btn" type="button" data-aq-edit="${escapeHtml(r.skillId)}">${escapeHtml(t("admin.aqEditSkill"))}</button></td></tr>`;
+  }).join("");
+  $("aqSkillRows").querySelectorAll("tr[data-aq-skill]").forEach((row) => {
+    row.onclick = () => { aqSelectedSkill = row.dataset.aqSkill || ""; renderAqSkillRows(); renderAqIssues(); };
+  });
+  $("aqSkillRows").querySelectorAll("[data-aq-issues]").forEach((btn) => {
+    btn.onclick = (e) => { e.stopPropagation(); aqSelectedSkill = btn.dataset.aqIssues || ""; renderAqSkillRows(); renderAqIssues(); };
+  });
+  $("aqSkillRows").querySelectorAll("[data-aq-edit]").forEach((btn) => {
+    btn.onclick = (e) => { e.stopPropagation(); editArtifactSkill(btn.dataset.aqEdit || ""); };
+  });
+}
+
+function renderAqIssues() {
+  const d = aqData;
+  if (!d) return;
+  let list = d.recent || [];
+  if (aqSelectedSkill) list = list.filter((x) => x.skillId === aqSelectedSkill);
+  if (!list.length) {
+    $("aqIssues").innerHTML = `<div class="aq-empty">${escapeHtml(t("admin.aqNoIssues"))}</div>`;
+    return;
+  }
+  $("aqIssues").innerHTML = list.slice(0, 20).map((x) => {
+    const missing = (x.missing || []).filter(Boolean).join("；") || "—";
+    return `<div class="aq-issue-row"><div class="aq-issue-head"><span class="aq-issue-score">${Number(x.score || 0)}/100</span>`
+      + `<b>${escapeHtml(x.skillName || x.skillId)}</b><span class="muted">${escapeHtml(x.agentName || x.agentId || "—")}</span>`
+      + `<span class="muted">${escapeHtml(x.at || "")}</span></div>`
+      + `<div class="aq-issue-missing">${escapeHtml(missing)}</div>`
+      + `<div class="aq-issue-actions"><button class="chip-btn" type="button" data-aq-edit="${escapeHtml(x.skillId)}">${escapeHtml(t("admin.aqEditSkill"))}</button></div></div>`;
+  }).join("");
+  $("aqIssues").querySelectorAll("[data-aq-edit]").forEach((btn) => {
+    btn.onclick = () => editArtifactSkill(btn.dataset.aqEdit || "");
+  });
+}
+
+async function editArtifactSkill(skillId) {
+  if (!skillId) return;
+  $("artifactQualityModal").classList.add("hidden");
+  if (!skillList.length) await loadSkills();
+  if (!(skillList || []).some((x) => x.skillId === skillId)) { toast(t("skill.notFound")); return; }
+  await openSkillModal();
+  showSkillFormView();
+  openSkillForm(skillId);
+}
+
 /** 把 /admin/usage 的一天行换算为当前所选指标的值（调用次数 / Token / 成本）。 */
 function orgHealthTrendValue(r) {
   if (orgHealthMetric === "tokens") return Number(r.totalTokens || 0);
@@ -18267,6 +18387,9 @@ function init() {
   if (perfFlaggedEl) perfFlaggedEl.onclick = () => { perfOnlyFlagged = !perfOnlyFlagged; perfFlaggedEl.classList.toggle("on", perfOnlyFlagged); renderPerfRows(); };
   $("perfReportBtn").onclick = downloadOrgHealthReport;
   $("perfChartBtn").onclick = openOrgHealthCharts;
+  $("perfArtifactBtn").onclick = openArtifactQualityModal;
+  $("aqClose").onclick = () => $("artifactQualityModal").classList.add("hidden");
+  $("artifactQualityModal").addEventListener("click", (e) => { if (e.target === $("artifactQualityModal")) $("artifactQualityModal").classList.add("hidden"); });
   $("orgHealthClose").onclick = () => $("orgHealthModal").classList.add("hidden");
   $("orgHealthDownload").onclick = downloadOrgHealthReport;
   $("orgHealthCsv").onclick = downloadOrgHealthCsv;

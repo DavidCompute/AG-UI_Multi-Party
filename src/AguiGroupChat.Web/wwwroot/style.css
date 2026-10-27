@@ -2781,3 +2781,15 @@ button { white-space: nowrap; }
 .donut-val.warn { stroke: var(--warn, #f0a63a); }
 .donut-val.bad { stroke: var(--err, #ff6b6b); }
 .donut-label { position: absolute; font-size: 13px; font-weight: 600; }
+
+/* ================= 产物质量下钻 ================= */
+.aq-issues { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.aq-issue-row { border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; background: var(--panel-2); font-size: 12px; }
+.aq-issue-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.aq-issue-score { font-weight: 600; color: var(--warn, #f0a63a); }
+.aq-issue-missing { color: var(--muted); margin-top: 3px; word-break: break-word; }
+.aq-issue-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.aq-skill-row { cursor: pointer; }
+.aq-skill-row:hover { background: var(--panel-2); }
+.aq-skill-row.on { outline: 1px solid var(--accent, #4f8cff); }
+.aq-empty { color: var(--muted); font-size: 12px; padding: 6px 0; }
