@@ -117,6 +117,23 @@ public sealed class SkillLessonStore
     }
 
     /// <summary>
+    /// 编排用（1.0.350）：某技能跨岗位的<b>未解决失败</b>经验（最新在前，最多 <paramref name="max"/> 条）。
+    /// 已在修复成功后解决的旧故障不计入，正向修复经验也不计入“已知坑”。
+    /// </summary>
+    public IReadOnlyList<SkillLesson> FailuresForSkill(string skillId, int max = 2)
+    {
+        if (string.IsNullOrWhiteSpace(skillId)) return [];
+        lock (_gate)
+            return _lessons
+                .Where(l => !l.Resolved
+                            && string.Equals(l.SkillId, skillId, StringComparison.Ordinal)
+                            && !string.Equals(l.Kind, SkillLessonKinds.Repair, StringComparison.Ordinal))
+                .OrderByDescending(l => l.TimestampMs)
+                .Take(Math.Max(1, max))
+                .ToArray();
+    }
+
+    /// <summary>
     /// 修复成功后：把该技能的失败经验标记为已解决（技能级 + 所有岗位级），
     /// 只保留正向的修复经验，避免旧故障继续污染上下文。
     /// </summary>

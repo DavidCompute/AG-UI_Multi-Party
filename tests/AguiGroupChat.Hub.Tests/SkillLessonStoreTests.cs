@@ -95,6 +95,21 @@ public sealed class SkillLessonStoreTests
     }
 
     [Fact]
+    public void FailuresForSkill_IgnoresResolvedAndRepairLessons()
+    {
+        var store = new SkillLessonStore();
+        store.Add(Lesson("docx", "writer", SkillLessonKinds.Failure, "未解决失败", 100, ["缺少正文"]));
+        store.Add(Lesson("docx", "writer", SkillLessonKinds.Failure, "已解决失败", 200, resolved: true));
+        store.Add(Lesson("docx", null, SkillLessonKinds.Repair, "已修复", 300));
+
+        var got = store.FailuresForSkill("docx", 5);
+
+        Assert.Single(got);
+        Assert.Equal("未解决失败", got[0].Summary);
+        Assert.Equal(SkillLessonKinds.Failure, got[0].Kind);
+    }
+
+    [Fact]
     public void ToPromptLine_RepairUsesPositiveWording()
     {
         var repair = Lesson("docx", null, SkillLessonKinds.Repair, "模型修正后自测通过（第 2 次）", 1,

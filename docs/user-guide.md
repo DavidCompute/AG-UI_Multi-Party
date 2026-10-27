@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.349**
+> 适用版本：**1.0.350**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1542,7 +1542,9 @@
 
 后端 `OrgApplyEngine.ExecuteAsync`（唯一落库引擎，与「组织架构构建师」`org_commit` 共用）：技能去重改名（空正文＝引用库内现成技能，不重建）→ server 技能自测（`SkillAutoFixer` 最多 3 次）→ 连接归一（`NormalizeConnections` 把「指派 ⇄ 提升」**双向**补全）→ 逐个 Upsert 数字员工 → 可选建客服知聚。返回 `smoke` 自检结果，前端以通知汇报（`org.orchSmokeTitle/Count/Repaired/Failed`）。
 
-**落库前自检清单（`AgentOrchestrator.SelfCheck`）**：`/orchestrate` 与 `/orchestrate/stream` 的 `done` 事件都在 `deliveryWarning` 之外新增 `selfCheck` 字段（数组，每项 `{code, level, message}`），把「结构 / 连接 / 技能 / 交付闭环」的问题**逐条列出**，而不是只显示第一条告警。条目 code：`no_agents`、`dangling_link`（连接指向不存在的岗位——落库会被直接拒绝）、`no_connections`（既无指派也无提升）、`no_assignment`（只有问题提升没有任务指派）、`no_escalation`（只有任务指派没有向上提升）、`self_escalation`、`agent_without_skill`、`delivery_gap`、`hollow_delivery`、`delivery_gatekeeper`、`skill_quality_risk`（1.0.348，见下）；全部通过时给出 `ok` 摘要。
+**落库前自检清单（`AgentOrchestrator.SelfCheck`）**：`/orchestrate` 与 `/orchestrate/stream` 的 `done` 事件都在 `deliveryWarning` 之外新增 `selfCheck` 字段（数组，每项 `{code, level, message}`），把「结构 / 连接 / 技能 / 交付闭环」的问题**逐条列出**，而不是只显示第一条告警。条目 code：`no_agents`、`dangling_link`（连接指向不存在的岗位——落库会被直接拒绝）、`no_connections`（既无指派也无提升）、`no_assignment`（只有问题提升没有任务指派）、`no_escalation`（只有任务指派没有向上提升）、`self_escalation`、`agent_without_skill`、`delivery_gap`、`hollow_delivery`、`delivery_gatekeeper`、`skill_quality_risk`（1.0.348）、`skill_experience_risk`（1.0.350，见下）；全部通过时给出 `ok` 摘要。
+
+**技能经验进编排（1.0.350）**：候选技能会附上未解决的历史失败经验（“已知坑”，最多 2 条，已解决 / 修复经验不计入），并要求模型在岗位 `instructions` 里写明规避步骤；`SelfCheck` 新增 `skill_experience_risk`（warn）——方案挂载了带未解决失败的技能时逐条列出“上次失败 + 改进方式”，提示写入规避步骤或先修复。网页 `/orchestrate`、流式与 `org_plan_draft` 同口径。
 
 **技能质量画像进编排（1.0.348）**：候选技能会附上近 30 天的产物质量画像（`SkillQualityProfiles.Load(ArtifactQualityStore)`，按技能聚合 `runs / valid / 合格率 / 均分 / 低分 / Top 缺失项`），提示词逐条写成「近期质量：近 30 天 N 次，合格率 X%，平均 Y 分」，并明令模型**优先选合格率高、均分高的技能**、慎用标「质量偏低」的技能。方案自检新增 `skill_quality_risk`（warn）：若方案挂载的技能≥ 3 次执行且合格率 < 60% 或均分 < 70，逐条列出并在预览里提示「先在技能库点 🩺 诊断修复，或改用更可靠的技能」。网页一键编排、流式编排与内置「组织架构构建师」的 `org_plan_draft` 均走同一口径。
 
@@ -2088,7 +2090,8 @@
 - 一键修复**真正改写了正文**后：把该技能所有旧失败经验标记为已解决，并写入一条正向修复经验；
 - 挂载技能时（`AgentCatalog.Create`）把「岗位级 + 技能级」未解决经验注入工具说明（最多 3 条，前缀 `经验（避免重蹈覆辙）`），模型每次调用都能看到踩过的坑；
 - 经验只含技能名 / 缺失项 / 改进方式，**不含用户原文**；技能删除时其经验一并清空；
-- 可在 `GET /ag-ui/skills/{skillId}/lessons` 查看（归属者或管理员），repair 响应新增 `lessonSaved`。
+- 可在 `GET /ag-ui/skills/{skillId}/lessons` 查看（归属者或管理员），repair 响应新增 `lessonSaved`；
+- **编排也会带上经验（1.0.350）**：未解决的失败经验以“已知坑”出现在候选技能旁，方案自检用 `skill_experience_risk` 提醒在岗位说明里写规避步骤。
 
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 

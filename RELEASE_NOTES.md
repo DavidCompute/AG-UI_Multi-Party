@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.349 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.349 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.350 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.350 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能经验进编排**——组队时不仅看到技能近期的合格率，还能看到它未解决的历史坑；模型会被要求在岗位说明里写上规避步骤，方案自检也会单独提醒。
+**Version note**: **Skill experience in orchestration** — when building a team, the model sees not only recent pass rates but also each skill's unresolved historical pitfalls, is asked to write avoidance steps into role instructions, and gets a dedicated self-check warning.
+
+## 变更
+# Changes
+
+中文：
+- **候选带经验**：`ToReusableSkills` 新增可选 `SkillLessonStore`，每个候选附上未解决的失败经验（“已知坑”，最多 2 条；已解决的旧故障与正向修复经验不计入），提示词明确要求“在岗位 instructions 里写明规避步骤”。
+- **方案自检**：`SelfCheck` 新增 `skill_experience_risk`（warn）——方案挂载了带未解决失败的技能时，逐条列出“上次失败 + 改进方式”，提示写入规避步骤或先在技能库点 🩺 修复。
+- **经验查询**：`SkillLessonStore.FailuresForSkill` 提供跨岗位的未解决失败经验（最新在前），供编排与后续界面复用。
+- **同一口径**：网页 `/orchestrate`、流式 `/orchestrate/stream` 与内置「组织架构构建师」的 `org_plan_draft` 全部接入。
+
+English:
+- **Experience in candidates**: `ToReusableSkills` takes an optional `SkillLessonStore` and attaches each skill's unresolved failure lessons ("known pitfalls", up to 2; resolved failures and repair lessons are excluded); the prompt explicitly asks for avoidance steps in each role's `instructions`.
+- **Plan self-check**: `SelfCheck` gains `skill_experience_risk` (warn) — when a plan mounts a skill with unresolved failures, it lists the past failure and its improvement and suggests writing avoidance steps or running 🩺 repair first.
+- **Lesson query**: `SkillLessonStore.FailuresForSkill` returns unresolved failures across roles (newest first), reusable by orchestration and future UI.
+- **One behaviour everywhere**: web `/orchestrate`, `/orchestrate/stream` and the built-in Org Architect's `org_plan_draft` all use it.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.7.4（自检清单与经验预警）、§4.3.8（经验进编排）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.350。
+English: `docs/user-guide.md` / `en.md` §3.7.4 (self-check and experience warnings), §4.3.8 (experience in orchestration); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.350.
+
+## 测试
+# Tests
+
+中文：新增经验进编排用例（候选注入 / 提示词规则 / 自检预警 / 已解决不误报 / `FailuresForSkill` 过滤）5 条；定向测试 19 条全通过；全量 `dotnet vstest` **1998 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2384，missing 0；配置键与文档引用校验通过。
+English: new experience-in-orchestration cases (candidate notes / prompt rule / self-check warning / resolved lessons do not warn / `FailuresForSkill` filtering), 5 tests; 19 targeted tests pass; the full `dotnet vstest` run passes **1998 / 0**; `node --check app.js`; the i18n audit reports zh=en=2384, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.349 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.349 Release Notes (historical)
 
 **版本说明**：**技能经验沉淀**——失败与修复不再只停留在告警里，而是成为岗位经验；挂载该技能时自动注入工具说明，让模型记住“上次为什么失败、怎么避”。
 **Version note**: **Skill experience** — failures and fixes no longer live only in alerts; they become role experience injected into the tool description when the skill is mounted, so the model remembers why it failed and how to avoid it.

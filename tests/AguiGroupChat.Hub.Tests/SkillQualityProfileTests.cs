@@ -133,4 +133,77 @@ public sealed class SkillQualityProfileTests
         var checks = AgentOrchestrator.SelfCheck(plan, "写一份报告");
         Assert.DoesNotContain(checks, c => c.Code == "skill_quality_risk");
     }
+
+    // ---------- 技能经验进编排（1.0.350） ----------
+
+    [Fact]
+    public void ToReusableSkills_AttachesExperienceNote()
+    {
+        var lessons = new SkillLessonStore();
+        lessons.Add(new SkillLesson("sl_1", "docx_report", "writer", SkillLessonKinds.Failure,
+            "连续 2/3 次产物未达标", ["缺少正文"], "先备齐正文", "g1", 100, false));
+
+        var skills = new[]
+        {
+            new AgentSkillDefinition { SkillId = "docx_report", Name = "报告", Kind = AgentSkillKind.Dotnet },
+            new AgentSkillDefinition { SkillId = "new_skill", Name = "新技能", Kind = AgentSkillKind.Prompt },
+        };
+
+        var list = AgentOrchestrator.ToReusableSkills(skills, quality: null, lessons: lessons);
+
+        Assert.Contains("缺少正文", list.Single(r => r.SkillId == "docx_report").ExperienceNote);
+        Assert.Null(list.Single(r => r.SkillId == "new_skill").ExperienceNote);
+    }
+
+    [Fact]
+    public void Prompt_IncludesExperienceNoteAndRule()
+    {
+        var reusable = new List<AgentOrchestrator.ReusableSkill>
+        {
+            new("docx_report", "报告", "生成工作报告", "dotnet", null,
+                "上次失败：连续 2/3 次产物未达标（缺少正文）；改进：先备齐正文"),
+        };
+
+        var prompt = AgentOrchestrator.BuildPromptForTest("做一个文案组，要出 Word", reusable);
+
+        Assert.Contains("已知坑", prompt);
+        Assert.Contains("缺少正文", prompt);
+        Assert.Contains("规避步骤", prompt);
+    }
+
+    [Fact]
+    public void SelfCheck_WarnsForUnresolvedSkillExperience()
+    {
+        var plan = new OrchestrationPlan
+        {
+            Agents = [new OrchestratedAgent { AgentId = "writer", Nickname = "写手", SkillIds = ["docx_report"] }],
+            Skills = [],
+        };
+        var lessons = new SkillLessonStore();
+        lessons.Add(new SkillLesson("sl_1", "docx_report", "writer", SkillLessonKinds.Failure,
+            "连续 2/3 次产物未达标", ["缺少正文"], "先备齐正文", "g1", 100, false));
+
+        var checks = AgentOrchestrator.SelfCheck(plan, "写一份报告", quality: null, lessons: lessons);
+
+        var risk = Assert.Single(checks, c => c.Code == "skill_experience_risk");
+        Assert.Equal("warn", risk.Level);
+        Assert.Contains("docx_report", risk.Message);
+        Assert.Contains("缺少正文", risk.Message);
+    }
+
+    [Fact]
+    public void SelfCheck_ResolvedLesson_NoExperienceCheck()
+    {
+        var plan = new OrchestrationPlan
+        {
+            Agents = [new OrchestratedAgent { AgentId = "writer", Nickname = "写手", SkillIds = ["docx_report"] }],
+            Skills = [],
+        };
+        var lessons = new SkillLessonStore();
+        lessons.Add(new SkillLesson("sl_1", "docx_report", "writer", SkillLessonKinds.Failure,
+            "已解决", ["缺少正文"], null, "g1", 100, Resolved: true));
+
+        var checks = AgentOrchestrator.SelfCheck(plan, "写一份报告", quality: null, lessons: lessons);
+        Assert.DoesNotContain(checks, c => c.Code == "skill_experience_risk");
+    }
 }

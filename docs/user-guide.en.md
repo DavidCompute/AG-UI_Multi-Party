@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.349**
+> Applies to version: **1.0.350**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1544,7 +1544,9 @@ During generation, `#orgOrchStop` is shown (`msg.stopGenerating` = `Stop generat
 
 Backend `OrgApplyEngine.ExecuteAsync` (the only write-through engine, shared with the "Org Architect" `org_commit`): skills are deduplicated and renamed (an empty body = reference an existing Skill Library skill; not rebuilt) → server-side skill self-test (`SkillAutoFixer`, at most 3 times) → link normalization (`NormalizeConnections` fills **both** directions of the assignment / escalation links) → Upsert each digital employee → optionally create a support circle. It returns the `smoke` self-check result, which the frontend reports via notifications (`org.orchSmokeTitle/Count/Repaired/Failed`).
 
-**Pre-commit self-check list (`AgentOrchestrator.SelfCheck`)**: both `/orchestrate` and the `/orchestrate/stream` `done` event add a `selfCheck` field (an array; each item `{code, level, message}`) alongside `deliveryWarning`, listing **every** structure / link / skill / delivery problem instead of only the first warning. Codes: `no_agents`, `dangling_link` (a link points at a non-existent role — apply would reject it), `no_connections` (neither assignment nor escalation), `no_assignment` (escalation only), `no_escalation` (assignment only), `self_escalation`, `agent_without_skill`, `delivery_gap`, `hollow_delivery`, `delivery_gatekeeper`, `skill_quality_risk` (1.0.348, see below), plus an `ok` summary when all pass.
+**Pre-commit self-check list (`AgentOrchestrator.SelfCheck`)**: both `/orchestrate` and the `/orchestrate/stream` `done` event add a `selfCheck` field (an array; each item `{code, level, message}`) alongside `deliveryWarning`, listing **every** structure / link / skill / delivery problem instead of only the first warning. Codes: `no_agents`, `dangling_link` (a link points at a non-existent role — apply would reject it), `no_connections` (neither assignment nor escalation), `no_assignment` (escalation only), `no_escalation` (assignment only), `self_escalation`, `agent_without_skill`, `delivery_gap`, `hollow_delivery`, `delivery_gatekeeper`, `skill_quality_risk` (1.0.348), `skill_experience_risk` (1.0.350, see below), plus an `ok` summary when all pass.
+
+**Skill experience in orchestration (1.0.350)**: candidates now carry their unresolved failure lessons ("known pitfalls", up to 2; resolved failures and repair lessons are excluded), and the model is asked to write avoidance steps into each role's `instructions`. `SelfCheck` gains `skill_experience_risk` (warn): when a plan mounts a skill with unresolved failures, it lists the past failure and its improvement and suggests writing avoidance steps or repairing first. Web `/orchestrate`, streaming and `org_plan_draft` behave identically.
 
 **Skill quality profiles in orchestration (1.0.348)**: each candidate skill now carries its last-30-day artifact quality profile (`SkillQualityProfiles.Load(ArtifactQualityStore)`, aggregated per skill as `runs / valid / pass rate / average / low / top missing`). The prompt renders "Recent quality: N runs, X% pass rate, Y average" per candidate and tells the model to **prefer reliable skills** and be wary of ones marked "low quality". The self-check gains `skill_quality_risk` (warn): if a mounted skill has at least 3 runs and a pass rate < 60% or an average < 70, it is listed with the advice to run 🩺 repair in the skill library or switch to a more reliable skill. The web one-click orchestration, the streaming variant and the built-in Org Architect's `org_plan_draft` all share this behaviour.
 
@@ -2091,6 +2093,7 @@ Skill failures and fixes no longer live only in alerts; they become **role exper
 - When a skill is mounted (`AgentCatalog.Create`), unresolved role-level + skill-level lessons are injected into the tool description (up to 3, prefixed `Experience (avoid repeating)`), so the model sees the known pitfalls on every call;
 - Lessons contain only skill names / missing items / improvements — **never user text**; deleting a skill clears its lessons;
 - View them at `GET /ag-ui/skills/{skillId}/lessons` (owner or admin); the repair response gains `lessonSaved`.
+- **Orchestration also sees experience (1.0.350)**: unresolved failures appear as "known pitfalls" beside candidate skills, and the self-check warns via `skill_experience_risk` to write avoidance steps into role instructions.
 
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
