@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.341 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.341 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.342 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.342 Release Notes (current Windows desktop release)
+
+**版本说明**：**产物契约扩展到图片 / 压缩包 / 代码 + 质量评分**——不只文档，图片、ZIP、源码产物也要过签名 / 结构与内容校验；每次校验给出 0–100 分与缺失项清单。
+**Version note**: **Artifact contract extended to images / archives / code + quality score** — beyond documents, images, ZIPs, and source artifacts now pass signature, structure, and content checks, with a 0–100 score and a missing-item list for every validation.
+
+## 变更
+# Changes
+
+中文：
+- **新增三类契约**：图片（PNG/JPEG/GIF/WEBP/BMP 签名；非 WebP 宽高均 ≥32；≥512 字节）、压缩包（ZIP 签名、至少一个条目、不能全为空文件）、代码（`.cs/.py/.java/.go/.rs/.ts/.sql/.c/.h/.cpp/.hpp/.vb`；无 NUL 二进制、非空白字符 ≥40）。
+- **识别更稳**：只按 id / 名称的强信号，并要求生成动词（`gen/generate/create/export/生成/导出/打包` 等）；`image_reader` / `zip_reader` / `code_review` 不会被误判为产物生成器。
+- **质量评分与缺失项**：`SkillArtifactValidation` 新增 `Score`（0–100）与 `MissingItems`；告警变为「⚠ 技能产物校验失败（质量评分 X/100）：缺失项：…」，交付兑底仍不把失败当成功。
+- **源码可下载**：`.cs/.py/.java/.go/.rs/.ts/.sql/.c/.h/.cpp/.hpp/.vb` 加入下载白名单，但下载端强制 `attachment`（不内联渲染）；`.js/.mjs/.sh/.ps1/.html/.svg` 仍拒绝。
+- **自动修复边界**：图片 / 压缩包 / 代码没有统一输入契约，只做运行期校验；文档四类仍保留生成期真实样例自测与自动修复。
+
+English:
+- **Three new contracts**: images (PNG/JPEG/GIF/WEBP/BMP signature; non-WebP width/height ≥32; ≥512 bytes), archives (ZIP signature, at least one entry, not all empty), and code (`.cs/.py/.java/.go/.rs/.ts/.sql/.c/.h/.cpp/.hpp/.vb`; no NUL binary, ≥40 non-whitespace chars).
+- **More stable detection**: only strong id / name signals plus a generation verb (`gen/generate/create/export/生成/导出/打包`, etc.); `image_reader` / `zip_reader` / `code_review` are not misclassified as producers.
+- **Quality score and missing items**: `SkillArtifactValidation` gains `Score` (0–100) and `MissingItems`; warnings become "⚠ 技能产物校验失败（质量评分 X/100）：缺失项：…", and delivery fallback still refuses to count failures as delivered.
+- **Source downloads**: `.cs/.py/.java/.go/.rs/.ts/.sql/.c/.h/.cpp/.hpp/.vb` join the download whitelist but are forced as `attachment` downloads (never inline); `.js/.mjs/.sh/.ps1/.html/.svg` remain rejected.
+- **Auto-repair boundary**: images / archives / code have no universal input contract and receive runtime validation only; the four document types keep generation-time real-sample self-test and auto-repair.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §2.6.3（源码扩展名白名单）、§4.5.5（三类新契约 + 质量评分）、§4.6.5（自动修复边界）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.342。
+English: `docs/user-guide.md` / `en.md` §2.6.3 (source extension whitelist), §4.5.5 (three new contracts + quality score), §4.6.5 (auto-repair boundary); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.342.
+
+## 测试
+# Tests
+
+中文：`SkillArtifactContractTests` 13 项（含图片 / ZIP / 代码 / 评分与缺失项）+ 附件白名单源码用例 + 交付判定拒绝空壳通过；`node --check app.js`；i18n 审计 **zh=en=2335，missing 0**；配置键与文档引用校验通过；Docker 重建后四类文档产物仍无告警、空壳仍告警；全量 `dotnet vstest` **1961 通过 / 0 失败**。
+English: thirteen `SkillArtifactContractTests` (including image / ZIP / code / score and missing items) plus the source-extension whitelist case and delivery rejection pass; `node --check app.js`; the i18n audit reports **zh=en=2335, missing 0**; config-key and docs-reference checks pass; after the Docker rebuild the four document artifact types still pass without warnings and hollow output still warns; the full `dotnet vstest` run passes **1961 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.341 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.341 Release Notes (historical)
 
 **版本说明**：**技能产物契约 + 自动修补**——文档技能必须真的产出可打开、含正文的文件；缺失 / 空壳 / 只有标题会被明确告警，不再被当成成功交付；生成期自测用真实样例跑一次，契约失败进入自动修复。
 **Version note**: **Skill artifact contract and auto-repair** — document skills must produce a real, openable file with content; missing / hollow / title-only artifacts are explicitly reported and no longer count as delivered, while generation-time self-tests run real samples and feed contract failures into auto-repair.

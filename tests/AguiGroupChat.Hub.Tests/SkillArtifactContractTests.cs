@@ -56,6 +56,12 @@ public sealed class SkillArtifactContractTests : IDisposable
         Assert.Equal(SkillArtifactKind.Xlsx, SkillArtifactContract.ExpectedKind(Skill("xlsx_book")));
         Assert.Equal(SkillArtifactKind.Pptx, SkillArtifactContract.ExpectedKind(Skill("pptx_deck")));
         Assert.Equal(SkillArtifactKind.Pdf, SkillArtifactContract.ExpectedKind(Skill("pdf_doc")));
+        Assert.Equal(SkillArtifactKind.Image, SkillArtifactContract.ExpectedKind(Skill("image_generate")));
+        Assert.Equal(SkillArtifactKind.Archive, SkillArtifactContract.ExpectedKind(Skill("zip_pack")));
+        Assert.Equal(SkillArtifactKind.Code, SkillArtifactContract.ExpectedKind(Skill("code_gen")));
+        Assert.Equal(SkillArtifactKind.None, SkillArtifactContract.ExpectedKind(Skill("image_reader")));
+        Assert.Equal(SkillArtifactKind.None, SkillArtifactContract.ExpectedKind(Skill("zip_reader")));
+        Assert.Equal(SkillArtifactKind.None, SkillArtifactContract.ExpectedKind(Skill("code_review")));
         Assert.Equal(SkillArtifactKind.None, SkillArtifactContract.ExpectedKind(Skill("query_weather")));
         Assert.Equal(SkillArtifactKind.None, SkillArtifactContract.ExpectedKind(Skill("docx_report", AgentSkillKind.Prompt)));
     }
@@ -72,13 +78,83 @@ public sealed class SkillArtifactContractTests : IDisposable
     }
 
     [Fact]
-    public void Docx_WithoutMarker_FailsContract()
+    public void Docx_WithoutMarker_FailsContractWithZeroScore()
     {
         var validation = SkillArtifactContract.Validate(Skill("docx_report"), "已完成排版。");
 
         Assert.True(validation.HasExpectedArtifact);
         Assert.False(validation.IsSatisfied);
-        Assert.Contains(validation.Issues, i => i.Contains("produce_file", StringComparison.Ordinal));
+        Assert.Equal(0, validation.Score);
+        Assert.Contains(validation.MissingItems, i => i.Contains("produce_file", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Image_ValidPng_Passes_AndTinyPngFails()
+    {
+        var valid = Path.Combine(_dir, "good.png");
+        File.WriteAllBytes(valid, Png(64, 64));
+        Assert.True(SkillArtifactContract.Validate(Skill("image_generate"), Output(valid)).IsSatisfied);
+
+        var tiny = Path.Combine(_dir, "tiny.png");
+        File.WriteAllBytes(tiny, Png(8, 8));
+        var validation = SkillArtifactContract.Validate(Skill("image_generate"), Output(tiny));
+        Assert.False(validation.IsSatisfied);
+        Assert.Contains(validation.MissingItems, i => i.Contains("尺寸过小", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Archive_WithFile_Passes_AndEmptyZipFails()
+    {
+        var good = Path.Combine(_dir, "good.zip");
+        using (var fs = File.Create(good))
+        using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
+        {
+            var e = zip.CreateEntry("readme.txt", CompressionLevel.NoCompression);
+            using var w = new StreamWriter(e.Open());
+            w.Write("压缩包内的实际内容");
+        }
+        Assert.True(SkillArtifactContract.Validate(Skill("zip_pack"), Output(good)).IsSatisfied);
+
+        var empty = Path.Combine(_dir, "empty.zip");
+        using (var fs = File.Create(empty))
+        using (var _ = new ZipArchive(fs, ZipArchiveMode.Create)) { }
+        var validation = SkillArtifactContract.Validate(Skill("zip_pack"), Output(empty));
+        Assert.False(validation.IsSatisfied);
+        Assert.Contains(validation.MissingItems, i => i.Contains("没有任何文件", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Code_WithSource_Passes_AndShortOrBinaryFails()
+    {
+        var good = Path.Combine(_dir, "good.cs");
+        File.WriteAllText(good, "public static class Skill { public static string Run(string input) => input; }");
+        Assert.True(SkillArtifactContract.Validate(Skill("code_gen"), Output(good)).IsSatisfied);
+
+        var shortFile = Path.Combine(_dir, "short.py");
+        File.WriteAllText(shortFile, "print(1)");
+        var shortValidation = SkillArtifactContract.Validate(Skill("code_gen"), Output(shortFile));
+        Assert.False(shortValidation.IsSatisfied);
+        Assert.Contains(shortValidation.MissingItems, i => i.Contains("内容过短", StringComparison.Ordinal));
+
+        var binary = Path.Combine(_dir, "binary.ts");
+        File.WriteAllBytes(binary, [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F]);
+        var binaryValidation = SkillArtifactContract.Validate(Skill("code_gen"), Output(binary));
+        Assert.False(binaryValidation.IsSatisfied);
+        Assert.Contains(binaryValidation.MissingItems, i => i.Contains("二进制", StringComparison.Ordinal));
+    }
+
+    private static byte[] Png(int width, int height)
+    {
+        var bytes = new List<byte>();
+        bytes.AddRange([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        bytes.AddRange([0, 0, 0, 13]);
+        bytes.AddRange("IHDR"u8.ToArray());
+        bytes.AddRange([(byte)(width >> 24), (byte)(width >> 16), (byte)(width >> 8), (byte)width]);
+        bytes.AddRange([(byte)(height >> 24), (byte)(height >> 16), (byte)(height >> 8), (byte)height]);
+        bytes.AddRange([8, 6, 0, 0, 0]);
+        bytes.AddRange([0, 0, 0, 0]);
+        bytes.AddRange(new byte[600]);
+        return bytes.ToArray();
     }
 
     [Fact]
@@ -153,6 +229,8 @@ public sealed class SkillArtifactContractTests : IDisposable
         var text = SkillArtifactContract.AppendWarningIfViolated(Skill("docx_report"), missing);
 
         Assert.Contains(SkillArtifactContract.FailurePrefix, text);
+        Assert.Contains("质量评分", text);
+        Assert.Contains("缺失项", text);
         Assert.StartsWith(missing, text);
         // 重复调用不叠加告警
         Assert.Equal(text, SkillArtifactContract.AppendWarningIfViolated(Skill("docx_report"), text));

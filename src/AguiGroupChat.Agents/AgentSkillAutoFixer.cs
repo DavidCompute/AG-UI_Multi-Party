@@ -115,6 +115,7 @@ public sealed class SkillAutoFixer
         // 内置技能不经过本修复器（BuiltinVersion 非空时调用方也不会走到这里）。
         var kind = SkillArtifactContract.ExpectedKind(def);
         if (kind == SkillArtifactKind.None
+            || !SkillArtifactContract.SupportsGenerationProbe(kind)
             || def.ExecutionLocation != AgentSkillExecutionLocation.Server
             || def.BuiltinVersion is not null) return (true, null);
 
@@ -256,9 +257,12 @@ public sealed class SkillAutoFixer
             var artifactKind = SkillArtifactContract.ExpectedKind(def);
             var artifactRule = artifactKind == SkillArtifactKind.None
                 ? ""
-                : $"\n该技能是文档生成技能，必须真正产出 {SkillArtifactContract.Extension(artifactKind)} 文件："
-                  + "返回文本里要包含 produce_file（path/name/bytes）标记，文件必须含实际正文，"
-                  + "不能只有标题 / 封面 / 空表。标准样例输入：" + SkillArtifactContract.SampleInput(artifactKind);
+                : $"\n该技能是产物生成技能，必须真正产出 {string.Join("/", SkillArtifactContract.Extensions(artifactKind))} 文件："
+                  + "返回文本里要包含 produce_file（path/name/bytes）标记，文件必须含实际内容，"
+                  + "不能只有标题 / 封面 / 空表。"
+                  + (SkillArtifactContract.SupportsGenerationProbe(artifactKind)
+                      ? "标准样例输入：" + SkillArtifactContract.SampleInput(artifactKind)
+                      : "");
             var heading = def.Kind switch
             {
                 AgentSkillKind.Dotnet => "该技能是 C#（dotnet）技能：正文为 C# 源码，须<b>能编译通过</b>且含 public static string Run(string input) 入口，代码必须写在 class 内（形如 public class Skill {{ public static string Run(string input){{...}} }}，可含私有辅助方法）；不要把方法写在文件顶层、不要用顶层语句。"

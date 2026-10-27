@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.341**
+> Applies to version: **1.0.342**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -852,6 +852,7 @@ The server's `AttachmentStore.AllowedUploadExtensions` is a whitelist of upload 
 - Images: `.png .jpg .jpeg .gif .webp .bmp`
 - Audio (voice messages): `.mp3 .wav .ogg .oga .m4a .aac .flac .opus .webm`
 - Text / documents / archives: `.txt .md .markdown .json .csv .tsv .log .yaml .yml .toml .ini .cfg .conf .properties .env .xml .pdf .docx .xlsx .pptx .zip`
+- Source-code artifacts (1.0.342): `.cs .py .java .go .rs .ts .sql .c .h .cpp .hpp .vb`; like archives, these are **forced as attachment downloads** (`ForceDownload`, never inline), while `.js/.mjs/.sh/.ps1/.html/.svg` remain rejected.
 
 After upload, `AttachmentStore.Classify()` classifies each into one of four `kind`s: `image` / `audio` / `text` / `document`.
 
@@ -2128,9 +2129,9 @@ Built-in document skills write files to the server disk, and the test-run result
 - `/run` is a **manual execution with no approval channel**, so `shell`/`http` client skills / system skills are all restricted to the owner or an administrator (to prevent any logged-in user from triggering arbitrary commands / outbound calls).
 - If the current browser is not connected to the Local bridge for a client skill, what is returned is **guidance text** rather than an execution result.
 
-#### 4.5.5 Document artifact contract (1.0.341)
+#### 4.5.5 Artifact contract: documents / images / archives / code (1.0.341; extended in 1.0.342)
 
-`SkillArtifactContract` checks after execution whether the file a skill claims to have produced is genuinely deliverable. Document skills are recognised by strong id / name signals (`docx` / `xlsx` / `pptx` / `pdf`):
+`SkillArtifactContract` checks after execution whether the file a skill claims to have produced is genuinely deliverable. It recognises strong id / name signals (the four document types plus `image` / `img`, archives, code, etc.) **and requires a generation verb** such as `gen/generate/create/export/生成/导出/打包`:
 
 | Check | Rule |
 | --- | --- |
@@ -2139,12 +2140,17 @@ Built-in document skills write files to the server disk, and the test-run result
 | Exists / non-empty | The path must exist and the file size must be > 0 |
 | File format | Office files need the ZIP signature; PDFs need the `%PDF-` header |
 | Real content | Word needs `word/document.xml` with at least 20 non-whitespace characters; PPT needs at least one slide and 20 characters; Excel needs at least one worksheet and one cell; PDF needs at least one `/Type /Page` |
+| Images (1.0.342) | PNG / JPEG / GIF / WEBP / BMP signature; non-WebP must expose width and height, both ≥ 32; file ≥ 512 bytes |
+| Archives (1.0.342) | ZIP signature; at least one entry; not every entry may be empty |
+| Code (1.0.342) | `.cs/.py/.java/.go/.rs/.ts/.sql/.c/.h/.cpp/.hpp/.vb`; no NUL binary content; at least 40 non-whitespace characters |
 
-On failure `AgentCatalog.RunSkillAsync` appends "⚠ 技能产物校验失败：…" to the original result. The file is still recalled where possible, but:
+Every validation yields a **0–100 quality score** and a **missing-item list** (`SkillArtifactValidation.Score` / `MissingItems`): no `produce_file` = 0; wrong/missing extension ≈ 20; missing / empty files or structural / content problems deduct by severity; at least one valid artifact = 100.
+
+On failure `AgentCatalog.RunSkillAsync` appends "⚠ 技能产物校验失败（质量评分 X/100）：缺失项：…" to the original result. The file is still recalled where possible, but:
 - delivery fallback (`ParseDeliveryResult`) does **not** treat a contract failure as delivered (a bare `produce_file` cannot masquerade as success);
 - a test run includes the warning in `TryDotnetAutoFixAsync`'s repair triggers and returns a one-click applicable corrected body.
 
-> The contract intentionally ignores the description: an ordinary skill saying “can export PDF” in its description is not misclassified as a PDF generator.
+> The contract only uses strong id / name signals plus a generation verb and intentionally ignores the description: an ordinary read/write skill saying “can export PDF / can generate images” is not misclassified as a producer.
 
 ---
 
@@ -2209,7 +2215,7 @@ Models / users often write methods **directly at the file's top level** (not wra
 
 When `Provider=mock` everything is skipped (`Skipped = true`). During repair it hands "the original skill + smoke input + errors + the sandbox's real capability list" to the model, rewriting only the body of the same id / kind (including the description when necessary).
 
-Artifact self-test for document-type user skills only runs for **server-executed skills with `BuiltinVersion=null`**: it runs the skill once with standard sample input (Word = title + paragraphs; Excel = columns + data rows; PPT = cover + bullet page; PDF = title + content blocks) and feeds contract gaps into the same repair loop, up to 3 rounds. Built-in and client skills do not run a server-side artifact probe (client code must not execute on the server).
+Artifact self-test for document-type user skills only runs for **server-executed skills with `BuiltinVersion=null`**: it runs the skill once with standard sample input (Word = title + paragraphs; Excel = columns + data rows; PPT = cover + bullet page; PDF = title + content blocks) and feeds contract gaps into the same repair loop, up to 3 rounds. Built-in and client skills do not run a server-side artifact probe (client code must not execute on the server). Images / archives / code have no universal input contract, so they only get runtime validation (4.5.5), not a generation-time real-sample probe.
 
 #### 4.6.6 Triggering "apply the repaired body": the 5 error markers
 

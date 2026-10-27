@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.341**
+> 适用版本：**1.0.342**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -851,6 +851,7 @@
 - 图片：`.png .jpg .jpeg .gif .webp .bmp`
 - 音频（语音消息）：`.mp3 .wav .ogg .oga .m4a .aac .flac .opus .webm`
 - 文本 / 文档 / 压缩包：`.txt .md .markdown .json .csv .tsv .log .yaml .yml .toml .ini .cfg .conf .properties .env .xml .pdf .docx .xlsx .pptx .zip`
+- 源码产物（1.0.342）：`.cs .py .java .go .rs .ts .sql .c .h .cpp .hpp .vb`；这些扩展名与压缩包一样**强制附件下载**（`ForceDownload`，不内联渲染），`.js/.mjs/.sh/.ps1/.html/.svg` 仍被拒绝。
 
 上传后由 `AttachmentStore.Classify()` 归为四类 `kind`：`image` / `audio` / `text` / `document`。
 
@@ -2126,9 +2127,9 @@
 - `/run` 是**无审批通道的手动执行**，因此 `shell`/`http` 客户端技能 / 系统技能都做了归属或管理员限制（避免任意登录用户触发任意命令 / 外呼）。
 - 客户端技能若当前浏览器未连接本机桥，返回的是**指引文本**而非执行结果。
 
-#### 4.5.5 文档产物契约（1.0.341）
+#### 4.5.5 产物契约：文档 / 图片 / 压缩包 / 代码（1.0.341；1.0.342 扩展）
 
-`SkillArtifactContract` 在技能执行后检查“说的文件”是否真的是可交付的稿子。文档技能按 id / 名称识别（`docx` / `xlsx` / `pptx` / `pdf`）：
+`SkillArtifactContract` 在技能执行后检查“说的文件”是否真的是可交付的产物。按技能 id / 名称的强信号识别（文档四类 + `image` / `img` / 压缩包 / 代码等，且必须有生成动词，如 `gen/generate/create/export/生成/导出/打包`）：
 
 | 检查 | 规则 |
 | --- | --- |
@@ -2137,12 +2138,17 @@
 | 文件存在 / 非空 | 路径存在且大小 > 0 |
 | 文件格式 | Office 必须带 ZIP 签名；PDF 必须带 `%PDF-` 头 |
 | 真实内容 | Word 必须有 `word/document.xml` 且正文非空白字符 ≥ 20；PPT 至少一张幻灯片且文字 ≥ 20；Excel 至少一个工作表且至少一个单元格；PDF 至少一个 `/Type /Page` |
+| 图片（1.0.342） | PNG / JPEG / GIF / WEBP / BMP 签名；非 WebP 还要求宽高可读且均 ≥ 32；文件 ≥ 512 字节 |
+| 压缩包（1.0.342） | ZIP 签名；至少一个条目；不能所有条目都是空文件 |
+| 代码（1.0.342） | `.cs/.py/.java/.go/.rs/.ts/.sql/.c/.h/.cpp/.hpp/.vb`；不得含 NUL 二进制；非空白字符 ≥ 40 |
 
-失败时 `AgentCatalog.RunSkillAsync` 在原结果末尾追加「⚠ 技能产物校验失败：…」，文件仍尽量回档，但：
+每次校验给出 **0–100 质量评分**与**缺失项清单**（`SkillArtifactValidation.Score` / `MissingItems`）：没有 `produce_file` 为 0；只有不匹配扩展名约 20；文件不存在 / 空文件 / 结构或内容问题按严重程度扣分；至少一个合格产物为 100。
+
+失败时 `AgentCatalog.RunSkillAsync` 在原结果末尾追加「⚠ 技能产物校验失败（质量评分 X/100）：缺失项：…」，文件仍尽量回档，但：
 - 交付兑底 `ParseDeliveryResult` 不把契约失败当成已交付（不会拿“有 produce_file”冒充成功）；
 - 试运行会把该告警纳入 `TryDotnetAutoFixAsync` 的修复触发条件，返回可一键应用的修正正文。
 
-> 契约只识别强信号 id / 名称，**不看描述**：描述里顺带写“可导出 PDF”的普通技能不会被误判成 PDF 生成器。
+> 契约只识别强信号 id / 名称且要求生成动词，**不看描述**：描述里顺带写“可导出 PDF / 可生成图片”的普通读写技能不会被误判为产物生成器。
 
 ---
 
@@ -2207,7 +2213,7 @@ dotnet 技能的 body 是一段 C# 源码，约定须含 `public static string R
 
 `Provider=mock` 时全部跳过（`Skipped = true`）。修复时把「原技能 + 冒烟输入 + 报错 + 沙箱真实能力清单」交给模型，只重写同一 id / kind 的正文（必要时含描述）。
 
-文档类自建技能的产物自测只对 **server 执行、`BuiltinVersion=null`** 的技能做：用标准样例输入（Word = 标题 + 多段正文；Excel = 列 + 数据行；PPT = 封面 + 要点页；PDF = 标题 + 正文块）真实跑一次，失败缺口交给同一个修复循环，最多 3 轮。内置技能与 client 技能不跑服务端产物测试（client 代码不得在服务器执行）。
+文档类自建技能的产物自测只对 **server 执行、`BuiltinVersion=null`** 的技能做：用标准样例输入（Word = 标题 + 多段正文；Excel = 列 + 数据行；PPT = 封面 + 要点页；PDF = 标题 + 正文块）真实跑一次，失败缺口交给同一个修复循环，最多 3 轮。内置技能与 client 技能不跑服务端产物测试（client 代码不得在服务器执行）。图片 / 压缩包 / 代码没有统一输入契约，只做运行期校验（4.5.5），不做生成期真实样例探针。
 
 #### 4.6.6 触发「应用修复后的正文」：5 类错误标志
 

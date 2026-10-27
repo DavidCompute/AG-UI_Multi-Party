@@ -270,8 +270,10 @@ public static class AttachmentApi
             ".txt" or ".md" or ".markdown" or ".log" or ".csv" or ".tsv"
                 or ".yaml" or ".yml" or ".toml" or ".ini" or ".cfg" or ".conf" or ".properties" or ".env"
                 => "text/plain; charset=utf-8",
-            // 可执行 / 脚本 / 内联渲染类：一律按二进制处理（配合 ForceDownload 强制附件下载）
+            // 可执行 / 脚本 / 内联渲染类与源码产物：一律按二进制处理（配合 ForceDownload 强制附件下载）
             ".svg" or ".js" or ".mjs" or ".css" or ".html" or ".htm" or ".xml" or ".zip"
+                or ".cs" or ".py" or ".java" or ".go" or ".rs" or ".ts" or ".sql"
+                or ".c" or ".h" or ".cpp" or ".hpp" or ".vb"
                 => "application/octet-stream",
             _ => "application/octet-stream",
         };
@@ -281,6 +283,8 @@ public static class AttachmentApi
     private static bool ForceDownload(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        return ext is ".svg" or ".js" or ".mjs" or ".css" or ".html" or ".htm" or ".xml" or ".zip";
+        return ext is ".svg" or ".js" or ".mjs" or ".css" or ".html" or ".htm" or ".xml" or ".zip"
+            or ".cs" or ".py" or ".java" or ".go" or ".rs" or ".ts" or ".sql"
+            or ".c" or ".h" or ".cpp" or ".hpp" or ".vb";
     }
 }

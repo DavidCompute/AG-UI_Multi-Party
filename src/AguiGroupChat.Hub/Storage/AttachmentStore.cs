@@ -42,6 +42,8 @@ public sealed class AttachmentStore
         // 文本 / 文档 / 压缩包
         ".txt", ".md", ".markdown", ".json", ".csv", ".tsv", ".log", ".yaml", ".yml", ".toml",
         ".ini", ".cfg", ".conf", ".properties", ".env", ".xml", ".pdf", ".docx", ".xlsx", ".pptx", ".zip",
+        // 源码类产物（文档系不内联渲染；下载端强制 attachment，仍排除 .js/.mjs/.css/.html/.svg 等可执行 / 内联类）
+        ".cs", ".py", ".java", ".go", ".rs", ".ts", ".sql", ".c", ".h", ".cpp", ".hpp", ".vb",
     };
 
     /// <summary>文件扩展名是否在允许上传的白名单内（无扩展名视为不允许）。</summary>

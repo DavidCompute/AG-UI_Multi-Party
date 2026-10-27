@@ -88,8 +88,11 @@ public sealed class AttachmentStoreTests : IDisposable
     {
         Assert.True(AttachmentStore.IsAllowedUploadExtension("msg.mp3"));
         Assert.True(AttachmentStore.IsAllowedUploadExtension("msg.ogg"));
+        Assert.True(AttachmentStore.IsAllowedUploadExtension("skill.cs"));    // 源码产物可下载（强制附件）
+        Assert.True(AttachmentStore.IsAllowedUploadExtension("skill.py"));
         Assert.False(AttachmentStore.IsAllowedUploadExtension("x.svg"));      // 内联渲染类仍拒绝
         Assert.False(AttachmentStore.IsAllowedUploadExtension("x.html"));     // 可执行 / 脚本类仍拒绝
+        Assert.False(AttachmentStore.IsAllowedUploadExtension("x.js"));       // 脚本类仍拒绝
         Assert.False(AttachmentStore.IsAllowedUploadExtension(""));           // 无扩展名拒绝
     }
 
