@@ -2585,6 +2585,25 @@ function skillLessonKindBadge(kind) {
   return "⚠️ " + t("skill.lessons.kind.failure");
 }
 
+/** 经验有效性回看（1.0.352）：写入前后的合格率对比。 */
+function skillLessonEffectivenessLine(e) {
+  if (!e) return "";
+  if (e.status === "insufficient") {
+    return `<div class="skill-lesson-eff insufficient">• ${escapeHtml(t("skill.lessons.eff.title"))}${escapeHtml(t("skill.lessons.eff.insufficientLine", { n: e.afterRuns }))}</div>`;
+  }
+  const pct = (v) => Math.round((Number(v) || 0) * 100) + "%";
+  const delta = Math.round((Number(e.delta) || 0) * 100);
+  const sign = delta > 0 ? "+" : "";
+  const statusText = {
+    improved: t("skill.lessons.eff.improved"),
+    declined: t("skill.lessons.eff.declined"),
+    flat: t("skill.lessons.eff.flat"),
+  }[e.status] || "";
+  const icon = e.status === "improved" ? "📈" : e.status === "declined" ? "📉" : "•";
+  const nums = `${pct(e.beforeRate)} → ${pct(e.afterRate)}（${sign}${delta}pt，${t("skill.lessons.eff.runs", { n: e.afterRuns })}）`;
+  return `<div class="skill-lesson-eff ${escapeHtml(e.status || "")}">${icon} ${escapeHtml(t("skill.lessons.eff.title"))}${escapeHtml(nums)} · ${escapeHtml(statusText)}</div>`;
+}
+
 async function openSkillLessonsModal(skillId) {
   if (!state.token) { toast(t("agent.err.loginRequired")); return; }
   lessonsSkillId = skillId;
@@ -2638,6 +2657,7 @@ async function loadSkillLessons() {
       const missing = Array.isArray(l.missing) && l.missing.length
         ? `<div class="skill-lesson-meta">${escapeHtml(t("skill.lessons.missingLabel"))} ${escapeHtml(l.missing.join("、"))}</div>` : "";
       const fix = l.fix ? `<div class="skill-lesson-meta">${escapeHtml(t("skill.lessons.fixLabel"))} ${escapeHtml(l.fix)}</div>` : "";
+      const eff = skillLessonEffectivenessLine(l.effectiveness);
       row.innerHTML = `
         <div class="skill-lesson-head">
           <span class="skill-lesson-kind">${skillLessonKindBadge(l.kind)}</span>
@@ -2646,7 +2666,7 @@ async function loadSkillLessons() {
           <button class="icon-btn danger" data-lesson-del="${escapeHtml(l.id)}" title="${escapeHtml(t("skill.lessons.delete"))}">🗑️</button>
         </div>
         <div class="skill-lesson-summary">${escapeHtml(l.summary || "")}</div>
-        ${missing}${fix}`;
+        ${missing}${fix}${eff}`;
       row.querySelector("[data-lesson-del]").onclick = () => deleteSkillLesson(l.id);
       el.appendChild(row);
     }

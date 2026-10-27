@@ -180,6 +180,26 @@ public static class SkillApi
             if (skill.OwnerId is null && !isAdmin)
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可查看经验"), statusCode: StatusCodes.Status403Forbidden);
             var lessons = ctx.RequestServices.GetService<SkillLessonStore>()?.ForSkill(skillId) ?? Array.Empty<SkillLesson>();
+            // 有效性回看（1.0.352）：用该技能最近 60 天的产物质量事件，按每条经验的时间切前后两段。
+            var events = ctx.RequestServices.GetService<ArtifactQualityStore>()
+                ?.Query(DateTimeOffset.UtcNow.AddDays(-60).ToUnixTimeMilliseconds())
+                .Where(e => string.Equals(e.SkillId, skillId, StringComparison.Ordinal))
+                .ToList() ?? [];
+            object? Effectiveness(SkillLesson l)
+            {
+                var e = LessonEffectiveness.Evaluate(events, l.TimestampMs);
+                return e is null ? null : new
+                {
+                    beforeRuns = e.BeforeRuns,
+                    beforeRate = e.BeforeRate,
+                    beforeAvg = e.BeforeAvg,
+                    afterRuns = e.AfterRuns,
+                    afterRate = e.AfterRate,
+                    afterAvg = e.AfterAvg,
+                    e.Delta,
+                    e.Status,
+                };
+            }
             return Results.Ok(new
             {
                 skillId,
@@ -187,6 +207,7 @@ public static class SkillApi
                 {
                     l.Id, l.AgentId, l.Kind, l.Summary, l.Missing, l.Fix, l.GroupId,
                     atMs = l.TimestampMs, l.Resolved,
+                    effectiveness = Effectiveness(l),
                 }),
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());

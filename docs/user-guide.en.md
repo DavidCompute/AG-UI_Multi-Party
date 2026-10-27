@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.351**
+> Applies to version: **1.0.352**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2103,6 +2103,7 @@ The skill edit form gains **💡 Experience** at the bottom (only for saved skil
 - Add a lesson manually: applicable agent (`All agents (skill level)` or a specific one), lesson text (required, ≤ 500), missing items (comma / semicolon separated) and how to avoid (≤ 300).
 - Manual lessons are stored as `note` and render as "Experience: …; practice: …" when injected; the latest 3 per skill + agent are kept.
 - APIs: `POST /ag-ui/skills/{skillId}/lessons`, `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`, with the same permissions as editing (owner or admin).
+- **Effectiveness lookback (1.0.352)**: each lesson shows the artifact pass rate before vs after it was written (latest 10 samples per side, at least 2 on each side): a rise of 10+ points or crossing 80% → `improved` (📈); a drop of 10+ points → `declined` (📉, review it); otherwise `flat`; too few samples → `insufficient`. Data comes from the `effectiveness` field returned by `GET /lessons`, so stale or ineffective lessons can be cleaned up.
 
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
@@ -2134,7 +2135,7 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | Pause mounting (1.0.345) | Owner or admin; evicts cached agents immediately |
 | `POST /ag-ui/skills/{skillId}/resume` | Resume mounting (1.0.345) | Same; clears the paused flags and re-mounts |
 | `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | Diagnose and repair (1.0.347) | Model rewrite + server self-test; only `apply=true` persists, see 4.3.7 |
-| `GET /ag-ui/skills/{skillId}/lessons` | Skill experience (1.0.349) | Owner or admin; failure / repair lessons, see 4.3.8 |
+| `GET /ag-ui/skills/{skillId}/lessons` | Skill experience (1.0.349) | Owner or admin; failure / repair lessons, see 4.3.8; since 1.0.352 each carries `effectiveness` |
 | `POST /ag-ui/skills/{skillId}/lessons` | Add a lesson manually (1.0.351) | Owner or admin; `note` kind, see 4.3.9 |
 | `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | Delete a lesson (1.0.351) | Owner or admin; must belong to this skill |
 

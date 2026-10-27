@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.351 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.351 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.352 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.352 Release Notes (current Windows desktop release)
+
+**版本说明**：**经验有效性回看**——每条经验旁直接显示写入前后的产物合格率变化，运营能看出哪些经验真的起作用、哪些反而拖后了交付。
+**Version note**: **Lesson effectiveness lookback** — each lesson now shows the artifact pass rate before vs after it was written, so operators can tell which lessons actually help and which may be hurting delivery.
+
+## 变更
+# Changes
+
+中文：
+- **回看口径**（`LessonEffectiveness`，纯函数）：以经验写入时间切分同一技能的产物质量事件，前后各取最近 10 条；前后均需 ≥ 2 次才判定。提升 ≥ 10 个百分点或从 < 80% 跨到 ≥ 80% → `improved`；下降 ≥ 10 个百分点 → `declined`；其余 `flat`；样本不够 → `insufficient`。
+- **接口**：`GET /ag-ui/skills/{skillId}/lessons` 每条经验新增 `effectiveness`（`beforeRuns/beforeRate/beforeAvg/afterRuns/afterRate/afterAvg/delta/status`），窗口取最近 60 天。
+- **界面**：经验列表每条显示一行回看：`📈 效果回看：33% → 100%（+67pt，后续 3 次）· 明显改善`；下降为红色 `📉 反而下降，建议复核`，样本不足为灰色「样本不足」。
+
+English:
+- **Rule** (`LessonEffectiveness`, pure): split the skill's artifact-quality events at the lesson timestamp, taking the latest 10 per side; at least 2 runs on each side are required. A rise of 10+ points or crossing from < 80% to ≥ 80% → `improved`; a drop of 10+ points → `declined`; otherwise `flat`; too few samples → `insufficient`.
+- **API**: each lesson from `GET /ag-ui/skills/{skillId}/lessons` gains `effectiveness` (`beforeRuns/beforeRate/beforeAvg/afterRuns/afterRate/afterAvg/delta/status`), over the last 60 days.
+- **UI**: every lesson row shows `📈 Lookback: 33% → 100% (+67pt, 3 runs after) · clearly improved`; a drop renders red with "got worse - please review", and insufficient samples render grey.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（有效性回看）、§4.4.1（lessons 响应字段）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.352。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (effectiveness lookback), §4.4.1 (lessons response fields); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.352.
+
+## 测试
+# Tests
+
+中文：新增 `LessonEffectivenessTests`（改善 / 跨 80% / 下降 / 持平 / 样本不足 / 时间边界 / 截断）7 条通过；全量 `dotnet vstest` **2007 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2415，missing 0；配置键与文档引用校验通过。
+English: new `LessonEffectivenessTests` (improved / crossing 80% / declined / flat / insufficient / timestamp boundary / sample cap), 7 passing; the full `dotnet vstest` run passes **2007 / 0**; `node --check app.js`; the i18n audit reports zh=en=2415, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.351 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.351 Release Notes (historical)
 
 **版本说明**：**技能经验管理界面**——在技能编辑里查看、手动补写、删除岗位经验，让运营能纠偏，而不只是依赖系统自动沉淀。
 **Version note**: **Skill experience management UI** — view, add and delete role experience from the skill editor, so operators can correct and extend what the system captures automatically.

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.351**
+> 适用版本：**1.0.352**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2101,6 +2101,7 @@
 - 底部可手工补写：适用岗位（`全部岗位（技能级）` 或指定岗位）、经验内容（必填，≤ 500）、缺失项（逗号 / 分号分隔）、改进方式（≤ 300）。
 - 手工经验以 `note` 类型保存，注入时读作「经验：…；做法：…」；同「技能 + 岗位」仍只保留最近 3 条。
 - 接口：`POST /ag-ui/skills/{skillId}/lessons`、`DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`，权限与编辑技能一致（归属者或管理员）。
+- **有效性回看（1.0.352）**：每条经验旁显示写入前后的产物合格率对比（各取最近 10 条，前后均需 ≥ 2 次才判定）：提升 ≥ 10 个百分点或跨过 80% → `improved`（📈 明显改善）；下降 ≥ 10 个百分点 → `declined`（📉 反而下降，建议复核）；否则 `flat`；样本不够 → `insufficient`。数据来自 `GET /lessons` 随包下发的 `effectiveness` 字段，可据此清理无效或已过时的经验。
 
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 
@@ -2132,7 +2133,7 @@
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | 暂停挂载（1.0.345） | 归属者或管理员；立即失效相关智能体缓存 |
 | `POST /ag-ui/skills/{skillId}/resume` | 恢复挂载（1.0.345） | 同上；清空暂停标志后重新挂载 |
 | `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | 诊断修复（1.0.347） | 模型改写正文 + 服务端自测；`apply=true` 才落库，见 4.3.7 |
-| `GET /ag-ui/skills/{skillId}/lessons` | 查看技能经验（1.0.349） | 归属者或管理员；失败 / 修复经验，见 4.3.8 |
+| `GET /ag-ui/skills/{skillId}/lessons` | 查看技能经验（1.0.349） | 归属者或管理员；失败 / 修复经验，见 4.3.8；1.0.352 起每条带 `effectiveness` |
 | `POST /ag-ui/skills/{skillId}/lessons` | 手工补写经验（1.0.351） | 归属者或管理员；`note` 类型，见 4.3.9 |
 | `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | 删除一条经验（1.0.351） | 归属者或管理员；仅限该技能 |
 
