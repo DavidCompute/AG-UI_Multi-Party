@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.346**
+> 适用版本：**1.0.347**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1991,7 +1991,7 @@
 - 搜索框 `#skillSearch`，占位文案 `skill.search`（「搜索技能（名称 / ID / 类型 / 描述）…」）。过滤按 `name` / `skillId` / `description` / `kind` 做小写包含匹配；无结果显示 `skill.searchEmpty`。
 - 表头列（`skill-grid-head`）：名称 / ID、类型、描述、操作（i18n `skill.col.name` / `skill.col.kind` / `skill.col.desc` / `skill.col.ops`），另有左侧勾选列。
 - 每行操作按钮：`▶`（试运行，`skill.testRun`）、`✏️`（编辑，`skill.edit`）、`🗑️`（删除，`skill.del`）。编辑 / 删除按钮仅对**可管理**的行显示（`canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId`；内置技能 `ownerId` 为 `null`，仅管理员 `canManage`）。
-- **已暂停标记与恢复（1.0.345）**：被自动隔离或手工暂停的技能，在名称下方显示 `⏸ 已暂停`（`skill.suspended`，悬浮显示暂停原因），可管理者的操作列额外出现 `🔓`（`skill.resume`「恢复技能（重新挂载到数字员工）」）。
+- **已暂停标记与恢复（1.0.345）**：被自动隔离或手工暂停的技能，在名称下方显示 `⏸ 已暂停`（`skill.suspended`，悬浮显示暂停原因），可管理者的操作列额外出现 `🔓`（`skill.resume`「恢复技能（重新挂载到数字员工）」）与 `🩺`（`skill.repair.action`「诊断修复」，见 4.3.7）。
 - 底部按钮：`#skillAddBtn`（＋ 新增技能，`skill.add`）、`#skillCloseBtn`（关闭，`skill.close`）。
 
 #### 4.3.3 批量删除
@@ -2066,6 +2066,18 @@
 
 **前端**：通知中心每分钟轮询 `GET /ag-ui/admin/artifact-quality/alerts?since=`，新告警以 `error` 类型入列（点击直达技能库）；技能库列表显示 `⏸ 已暂停` 与 `🔓 恢复`。
 
+#### 4.3.7 诊断修复（`🩺`，1.0.347）
+
+被暂停的技能在技能库行内多一个 `🩺`，打开 `#skillRepairModal`：
+
+- 顶部显示技能名、暂停原因与描述；结果区先显示最近 7 天的执行 / 低分次数与主要缺失项（接口随包返回 `diagnosis`）；
+- 点「🩺 诊断修复并恢复」→ `POST /ag-ui/skills/{id}/repair?apply=true&resume=true`：服务端用 `SkillAutoFixer` 按最近产物失败项 / 编译错误让模型改写正文，并**真实自测**（prompt 问一次 / http 校验配置 / shell 盲跑 / C# 编译并试产，最多 3 轮）；
+- **只有自测通过才落库**：写入修正后的正文（`ApplyRepair`，`BuiltinVersion` 置空）并恢复挂载；失败时原技能一字不改，界面如实展示每轮错误；
+- 本机（client）执行技能无法在服务端自测，接口直接返回 `skipped=true` 与指引，不跑模型；
+- 同一面板可看到当前状态（已恢复 / 仍暂停），关闭后技能库列表即时刷新。
+
+编排联动：`ToReusableSkills` 不再把已暂停技能列入候选（模型不会把停用技能排进岗位）；`OrgApplyEngine` 即使方案里写了已暂停技能也会跳不挂载，并在 `warnings` 里明确告知（避免“看起来有技能、实际不执行”的假交付）。绑定弹窗里已暂停技能会置灰不可勾选。
+
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 
 | 键 | 默认 | 含义 |
@@ -2095,6 +2107,7 @@
 | `POST /ag-ui/skills/{skillId}/suggest` | 试运行参数建议 | 让模型给一个典型 `query` |
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | 暂停挂载（1.0.345） | 归属者或管理员；立即失效相关智能体缓存 |
 | `POST /ag-ui/skills/{skillId}/resume` | 恢复挂载（1.0.345） | 同上；清空暂停标志后重新挂载 |
+| `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | 诊断修复（1.0.347） | 模型改写正文 + 服务端自测；`apply=true` 才落库，见 4.3.7 |
 
 #### 4.4.2 谁能创建 / 编辑 / 删除哪些类型
 
@@ -2130,6 +2143,7 @@
 - 权限与编辑一致：归属者或系统管理员；内置技能（`ownerId=null`）仅管理员。
 - 两个端点都会调用 `AgentCatalog.InvalidateAgentsUsingSkill`，使已缓存的智能体立即重建（挂载列表同步）。
 - `GET /ag-ui/skills` 的 DTO 新增 `suspended` / `suspendedReason` / `suspendedAtMs`，前端据此渲染徽标与恢复按钮。
+- `POST /ag-ui/skills/{skillId}/repair`（1.0.347）：`SkillAutoFixer` 自测 + 模型修正文（最多 3 轮）；`apply=true` 且自测通过时经 `ApplyRepair` 写入正文并（默认）恢复，随后 `InvalidateAgentsUsingSkill`；返回 `skipped / ok / attempts / lastError / correctedBody / applied / resumed / diagnosis`。
 
 ---
 

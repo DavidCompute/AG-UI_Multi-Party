@@ -2487,12 +2487,13 @@ function renderSkillList() {
       <span class="skill-desc">${escapeHtml(s.description || "—")}</span>
       <span class="skill-op-col">
         <button class="icon-btn" data-skill-act="test" title="${escapeHtml(t("skill.testRun"))}">▶</button>
-        ${canManage && suspended ? `<button class="icon-btn" data-skill-act="resume" title="${escapeHtml(t("skill.resume"))}">🔓</button>` : ""}
+        ${canManage && suspended ? `<button class="icon-btn" data-skill-act="repair" title="${escapeHtml(t("skill.repair.action"))}">🩺</button><button class="icon-btn" data-skill-act="resume" title="${escapeHtml(t("skill.resume"))}">🔓</button>` : ""}
         ${canManage ? `<button class="icon-btn" data-skill-act="edit" title="${escapeHtml(t("skill.edit"))}">✏️</button><button class="icon-btn danger" data-skill-act="del" title="${escapeHtml(t("skill.del"))}">🗑️</button>` : ""}
       </span>`;
     if (canManage) row.querySelector('[data-skill-act="edit"]').onclick = () => openSkillForm(s.skillId);
     if (canManage) row.querySelector('[data-skill-act="del"]').onclick = () => deleteSkill(s.skillId);
     if (canManage && suspended) row.querySelector('[data-skill-act="resume"]').onclick = () => resumeSkill(s.skillId, s.name);
+    if (canManage && suspended) row.querySelector('[data-skill-act="repair"]').onclick = () => openSkillRepairModal(s.skillId);
     const cb = row.querySelector(".skill-sel-cb");
     if (cb) cb.onchange = () => { if (cb.checked) selectedSkills.add(s.skillId); else selectedSkills.delete(s.skillId); updateSkillBatchStatus(); };
     row.querySelector('[data-skill-act="test"]').onclick = () => testSkill(s.skillId);
@@ -2513,6 +2514,65 @@ async function resumeSkill(skillId, name) {
     toast(t("skill.resumed", { name: name || skillId }));
     await loadSkills(); renderSkillList();
   } catch (e) { toast(t("skill.resumeFail", { err: e })); }
+}
+
+/* ===== 诊断修复（1.0.347）：模型按产物失败项修正文 + 服务端自测，通过后应用并恢复 ===== */
+let repairSkillId = null;
+
+function openSkillRepairModal(skillId) {
+  const s = (skillList || []).find((x) => x.skillId === skillId);
+  repairSkillId = skillId;
+  $("skillRepairTarget").textContent = s ? `${s.name}（${s.skillId}）` : skillId;
+  const bits = [];
+  if (s && s.suspended) bits.push(t("skill.repair.suspended", { reason: s.suspendedReason || "—" }));
+  if (s && s.description) bits.push(s.description);
+  $("skillRepairDiagnosis").textContent = bits.join(" · ");
+  $("skillRepairResult").classList.add("hidden");
+  $("skillRepairPreviewWrap").classList.add("hidden");
+  $("skillRepairPreview").value = "";
+  $("skillRepairResultBody").textContent = "";
+  setSkillRepairBusy(false);
+  $("skillRepairModal").classList.remove("hidden");
+}
+
+function closeSkillRepairModal() { $("skillRepairModal").classList.add("hidden"); }
+
+function setSkillRepairBusy(busy) {
+  const btn = $("skillRepairRun");
+  if (!btn) return;
+  btn.disabled = busy;
+  btn.textContent = busy ? "⏳ " + t("skill.repair.running") : t("skill.repair.run");
+}
+
+async function runSkillRepair() {
+  if (!repairSkillId || !state.token) return;
+  setSkillRepairBusy(true);
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(repairSkillId)}/repair?apply=true&resume=true`, {
+      method: "POST", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("skill.repair.fail", { err: (d && (d.message || d.code)) || res.status })); return; }
+    const diag = d && d.diagnosis ? d.diagnosis : null;
+    const lines = [];
+    if (diag) lines.push(t("skill.repair.diagnosis", { runs: diag.runs, low: diag.lowRuns }));
+    if (diag && Array.isArray(diag.missing) && diag.missing.length)
+      lines.push(t("skill.repair.missing") + "\n" + diag.missing.join("；"));
+    if (d.skipped) lines.push(d.lastError || t("skill.repair.skipped"));
+    else if (d.ok) lines.push(t("skill.repair.ok", { n: d.attempts }));
+    else lines.push(t("skill.repair.notOk", { n: d.attempts }) + (d.lastError ? "\n" + d.lastError : ""));
+    if (d.applied) lines.push(t("skill.repair.applied"));
+    lines.push(t("skill.repair.state", { state: d.resumed ? t("skill.repair.stateResumed") : t("skill.repair.stateSuspended") }));
+    $("skillRepairResult").classList.remove("hidden");
+    $("skillRepairResultBody").textContent = lines.join("\n");
+    if (d.correctedBody) {
+      $("skillRepairPreview").value = d.correctedBody;
+      $("skillRepairPreviewWrap").classList.remove("hidden");
+    }
+    if (d.applied || (d.ok && !d.skipped && d.resumed)) toast(t("skill.repair.appliedToast"));
+    await loadSkills(); renderSkillList();
+  } catch (e) { toast(t("skill.repair.fail", { err: e })); }
+  finally { setSkillRepairBusy(false); }
 }
 
 /// <summary>刷新技能批量删除状态栏（选中数）与全选。</summary>
@@ -3252,14 +3312,16 @@ function renderAgentPickList() {
       const hay = `${s.name} ${s.skillId} ${s.description || ""} ${s.kind || ""}`.toLowerCase();
       if (q && !hay.includes(q)) return;
       const on = agentSkillDefIds.includes(s.skillId);
+      const paused = !!s.suspended;
       const row = document.createElement("label");
-      row.className = "kb-pick-item" + (on ? " on" : "");
-      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer";
-      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
+      row.className = "kb-pick-item" + (on ? " on" : "") + (paused ? " pick-paused" : "");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:" + (paused ? "not-allowed" : "pointer") + (paused ? ";opacity:.6" : "");
+      row.innerHTML = `<input type="checkbox" ${on ? "checked" : ""} ${paused ? "disabled" : ""} style="flex-shrink:0;width:15px;height:15px;accent-color:#4f8cff" />`
         + `<span class="skill-kind tag-skill">${escapeHtml(skillKindTagFor(s))}</span>`
         + `<b>${escapeHtml(s.name)}</b> <code>${escapeHtml(s.skillId)}</code>`
+        + (paused ? ` <span class="skill-suspended">⏸ ${escapeHtml(t("skill.suspended"))}</span>` : "")
         + (s.description ? ` <span class="kb-meta" style="white-space:nowrap">${escapeHtml(s.description)}</span>` : "");
-      row.querySelector("input").addEventListener("change", (e) => agentPickToggle("skill", s.skillId, e.target.checked));
+      if (!paused) row.querySelector("input").addEventListener("change", (e) => agentPickToggle("skill", s.skillId, e.target.checked));
       el.appendChild(row);
       count++;
     });
@@ -18735,6 +18797,11 @@ function init() {
   $("skillRunResultClose").onclick = closeSkillRunResult;
   $("skillRunResultModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSkillRunResult(); });
   $("skillRunResultModal").addEventListener("click", (e) => { if (e.target === $("skillRunResultModal")) closeSkillRunResult(); });
+  // 诊断修复弹窗（1.0.347）
+  $("skillRepairClose").onclick = closeSkillRepairModal;
+  $("skillRepairRun").onclick = runSkillRepair;
+  $("skillRepairModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSkillRepairModal(); });
+  $("skillRepairModal").addEventListener("click", (e) => { if (e.target === $("skillRepairModal")) closeSkillRepairModal(); });
   $("skillAddBtn").onclick = () => openSkillForm(null);
   $("sfBack").onclick = () => {
     if (longTaskBusy) { toast(t("common.busyLongTask")); return; }

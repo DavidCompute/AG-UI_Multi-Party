@@ -920,6 +920,27 @@
     </div>
   </div>
 
+  <!-- 技能诊断修复（1.0.347）：产物质量连续低分 / 被暂停后，让模型按最近失败项修正文并自测；确认后应用并恢复 -->
+  <div id="skillRepairModal" class="modal-overlay hidden">
+    <div class="modal skill-modal" style="max-width:720px">
+      <div class="modal-title">🩺 <span data-i18n="skill.repair.title">诊断修复技能</span></div>
+      <p class="form-hint" style="margin:2px 0 10px" data-i18n="skill.repair.hint">模型会根据技能定义与最近 7 天的产物失败项修正文，并在服务端自测（prompt 真实问一次 / http 校验配置 / shell 盲跑 / C# 编译并试产）；只有自测通过才会落库并恢复挂载。</p>
+      <div id="skillRepairTarget" class="skill-repair-target"></div>
+      <div id="skillRepairDiagnosis" class="skill-repair-diagnosis"></div>
+      <div id="skillRepairResult" class="hidden">
+        <pre id="skillRepairResultBody" class="skill-test-result" style="white-space:pre-wrap;word-break:break-word;max-height:30vh;overflow:auto;margin:8px 0;font-size:12.5px;line-height:1.5"></pre>
+        <div id="skillRepairPreviewWrap" class="hidden">
+          <label style="font-size:12px;color:var(--muted)" data-i18n="skill.repair.preview">修复后的正文（已写入技能库）</label>
+          <textarea id="skillRepairPreview" class="modal-input agent-instructions" rows="8" readonly style="width:100%;resize:vertical;margin-top:4px"></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="skillRepairRun" class="send" data-i18n="skill.repair.run">🩺 诊断修复并恢复</button>
+        <button id="skillRepairClose" class="btn-ghost" data-i18n="skill.repair.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 知识库管理：创建知识库、上传文档（附件提取文本 + 向量化）；参考技能库的列表式布局 -->
   <div id="kbModal" class="modal-overlay modal-over-console hidden">
     <div class="modal kb-modal">

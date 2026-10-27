@@ -77,6 +77,30 @@ public sealed class OrgReusableSkillsTests
         Assert.NotNull(skills.Get("docx_report"));
     }
 
+    [Fact]
+    public async Task Apply_SkipsSuspendedLibrarySkill_AndRecordsWarning()
+    {
+        // 已暂停的技能即使出现在方案里也不能挂上（运行时本来就会跳过），
+        // 且必须在结果里明确告知，避免“看起来有技能、实际不执行”的假交付。
+        var (catalog, skills, hub) = CreateSut(Opts());
+        skills.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "paused_skill", Name = "暂停技能", Description = "d", Kind = AgentSkillKind.Prompt,
+            Body = "模板", Suspended = true, SuspendedReason = "产物质量连续未达标",
+        });
+
+        var result = await OrgApplyEngine.ExecuteAsync(
+            "boss", isAdmin: true,
+            NoSkills, [Agent("writer", "paused_skill")],
+            createSupportCircle: false, supportCircleName: null, title: "组",
+            catalog, skills, hub, Opts(), NullLoggerFactory.Instance, CancellationToken.None);
+
+        var def = catalog.GetDefinition("writer");
+        Assert.NotNull(def);
+        Assert.Empty(def!.SkillDefIds);
+        Assert.Contains(result.Warnings, w => w.Contains("paused_skill"));
+    }
+
     private static readonly IReadOnlyList<OrgPlanSkill> NoSkills = [];
 
     [Fact]

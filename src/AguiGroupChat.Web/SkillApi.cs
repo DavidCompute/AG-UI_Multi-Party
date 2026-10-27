@@ -227,6 +227,91 @@ public static class SkillApi
             return Results.Ok(new { suspended = false, skillId, already = false });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 诊断修复（1.0.347）：产物质量连续低分 / 被暂停后，让模型按最近失败项改进正文并自测；??apply=true 时落库并恢复 ----
+        //      权限与 suspend / resume 一致；本机(client)执行技能服务端无法自测，直接返回指引。
+        root.MapPost("/{skillId}/repair", async (string skillId, bool? apply, bool? resume, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog, AgentCatalog agents, AgentOptions options, ILoggerFactory loggerFactory, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可操作"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可操作该技能"), statusCode: StatusCodes.Status403Forbidden);
+
+            // 最近 7 天的产物质量记录（给界面看“为什么判它坏了”，不必再拉绩效看板）
+            var quality = ctx.RequestServices.GetService<ArtifactQualityStore>();
+            var since = DateTimeOffset.UtcNow.AddDays(-7).ToUnixTimeMilliseconds();
+            var events = (quality?.Query(since) ?? (IReadOnlyList<ArtifactQualityEvent>)[])
+                .Where(e => string.Equals(e.SkillId, skillId, StringComparison.Ordinal))
+                .ToList();
+            var lows = events.Where(e => !e.Satisfied || e.Score < ArtifactAlertPolicy.DefaultLowScoreThreshold).ToList();
+            var diagnosis = new
+            {
+                runs = events.Count,
+                lowRuns = lows.Count,
+                missing = lows.SelectMany(e => e.Missing ?? []).Where(m => !string.IsNullOrWhiteSpace(m))
+                    .Distinct(StringComparer.Ordinal).Take(8).ToArray(),
+            };
+
+            if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client)
+            {
+                return Results.Ok(new
+                {
+                    skillId, skipped = true, ok = false, attempts = 0,
+                    lastError = "本机(client)执行技能无法在服务端自测 / 修复；请编辑正文后在本机对话或试运行中验证。",
+                    correctedBody = (string?)null, correctedDescription = (string?)null,
+                    applied = false, resumed = false, diagnosis,
+                });
+            }
+
+            SkillAutoFixResult fix;
+            try
+            {
+                var fixer = new SkillAutoFixer(options, agents, loggerFactory);
+                fix = await fixer.VerifyOrRepairAsync(skill, maxAttempts: 3, ct);
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger("SkillApi.Repair").LogWarning(ex, "技能诊断修复异常：{SkillId}", skillId);
+                return Results.Ok(new
+                {
+                    skillId, skipped = false, ok = false, attempts = 0,
+                    lastError = "修复过程异常：" + ex.Message,
+                    correctedBody = (string?)null, correctedDescription = (string?)null,
+                    applied = false, resumed = catalog.Get(skillId)?.Suspended == false, diagnosis,
+                });
+            }
+
+            var applied = false;
+            if (apply == true && fix.Ok && !fix.Skipped && fix.CorrectedBody is { Length: > 0 } body)
+                applied = catalog.ApplyRepair(skillId, body, fix.CorrectedDescription, resume != false);
+
+            // “自测通过但正文没改”也是有效结果（技能可能只是被暂停）：apply 时一并恢复
+            if (apply == true && fix.Ok && !fix.Skipped)
+            {
+                if (resume != false) catalog.Resume(skillId);
+                agents.InvalidateAgentsUsingSkill(skillId);
+            }
+
+            return Results.Ok(new
+            {
+                skillId,
+                fix.Skipped,
+                fix.Ok,
+                fix.Attempts,
+                fix.LastError,
+                fix.CorrectedBody,
+                fix.CorrectedDescription,
+                applied,
+                resumed = catalog.Get(skillId)?.Suspended == false,
+                diagnosis,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 试运行技能（仅归属者或管理员；系统技能仅管理员）----
         //      /run 是无审批通道的手动执行，不能让它被任意登录用户触发 shell / HTTP；
         //      归属者运行自己建的 prompt 技能用于调试验证，shell / HTTP 则限定管理员与归属者。

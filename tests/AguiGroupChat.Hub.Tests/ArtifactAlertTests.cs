@@ -126,6 +126,49 @@ public sealed class ArtifactAlertTests
         Assert.False(skills.Resume("missing"));
     }
 
+    // ---------- 编排 / 修复闭环（1.0.347） ----------
+
+    [Fact]
+    public void ToReusableSkills_ExcludesSuspendedSkills()
+    {
+        var skills = new[]
+        {
+            new AgentSkillDefinition { SkillId = "ok_skill", Name = "可用", Kind = AgentSkillKind.Prompt },
+            new AgentSkillDefinition { SkillId = "paused_skill", Name = "已暂停", Kind = AgentSkillKind.Prompt, Suspended = true },
+        };
+
+        var ids = AgentOrchestrator.ToReusableSkills(skills).Select(r => r.SkillId).ToList();
+
+        Assert.Contains("ok_skill", ids);
+        Assert.DoesNotContain("paused_skill", ids);
+    }
+
+    [Fact]
+    public void ApplyRepair_WritesBodyAndResumes()
+    {
+        var skills = new AgentSkillCatalog(NullLoggerFactory.Instance, new AgentOptions());
+        skills.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "s", Name = "n", Kind = AgentSkillKind.Prompt, Body = "old", Description = "d",
+            BuiltinVersion = "1.0.0", Suspended = true, SuspendedReason = "低分", SuspendedAtMs = 1,
+        });
+
+        Assert.True(skills.ApplyRepair("s", "new body", "new desc", resume: true));
+
+        var s = skills.Get("s")!;
+        Assert.Equal("new body", s.Body);
+        Assert.Equal("new desc", s.Description);
+        Assert.Null(s.BuiltinVersion); // 与手工编辑同语义：不再是原样内置版
+        Assert.False(s.Suspended);
+        Assert.Null(s.SuspendedReason);
+        Assert.Null(s.SuspendedAtMs);
+
+        // 空正文不得把技能清空（修复失败不应造成数据丢失）
+        Assert.False(skills.ApplyRepair("s", "", "x", resume: true));
+        Assert.Equal("new body", skills.Get("s")!.Body);
+        Assert.False(skills.ApplyRepair("missing", "x", null, true));
+    }
+
     // ---------- 运行时行为 ----------
 
     [Fact]

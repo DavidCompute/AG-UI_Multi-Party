@@ -40,6 +40,8 @@ public sealed class OrgApplyResult
     public List<string> Skills { get; set; } = [];
     public string? SupportCircleGroupId { get; set; }
     public List<object> Smoke { get; set; } = [];
+    /// <summary>落库时被跳过、但值得管理员注意的项（1.0.347：岗位引用了已暂停技能）。</summary>
+    public List<string> Warnings { get; set; } = [];
 }
 
 /// <summary>
@@ -154,16 +156,28 @@ public static class OrgApplyEngine
 
         foreach (var s in builtSkills) skillCatalog.Upsert(s);
         var created = new List<string>();
+        var warnings = new List<string>();
         foreach (var a in agents)
         {
             var id = agentIdMap[(a.AgentId ?? "").Trim()];
             // 技能引用重映射：本次新建的技能走 skillIdMap（可能被改名避让）；
             // 直接引用库内技能的则不映射，原 id 落库（库内优先）。
+            // 已暂停的技能不挂载（1.0.347）：运行时本来就会跳过，提前剔除并记警告，
+            // 避免“岗位看起来有技能、实际不执行”的假交付。
+            var skippedSuspended = new List<string>();
             var remapSkill = (List<string>?)a.SkillIds?
                 .Where(sid => !string.IsNullOrWhiteSpace(sid))
                 .Select(sid => skillIdMap.TryGetValue(sid, out var mapped) ? mapped : sid)
+                .Where(sid =>
+                {
+                    if (skillCatalog.Get(sid)?.Suspended != true) return true;
+                    skippedSuspended.Add(sid);
+                    return false;
+                })
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
+            foreach (var sid in skippedSuspended.Distinct(StringComparer.Ordinal))
+                warnings.Add($"技能 {sid} 已暂停（产物质量），未挂载到数字员工 {id}");
             var remapAssign = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(d => agentIdMap[d]).ToList();
             catalog.Upsert(new AgentDefinition
             {
@@ -200,7 +214,7 @@ public static class OrgApplyEngine
             }
         }
 
-        return new OrgApplyResult { Agents = created, Skills = builtSkills.Select(s => s.SkillId).ToList(), SupportCircleGroupId = supportGroupId, Smoke = smokeResults };
+        return new OrgApplyResult { Agents = created, Skills = builtSkills.Select(s => s.SkillId).ToList(), SupportCircleGroupId = supportGroupId, Smoke = smokeResults, Warnings = warnings };
     }
 
     /// <summary>客户端执行 shell 技能缺 clientRunner 时的默认构造（与历史保持一致）。</summary>

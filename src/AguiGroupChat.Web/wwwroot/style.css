@@ -2689,6 +2689,8 @@ button { white-space: nowrap; }
 .skill-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .skill-name code { font-size: 10px; color: var(--muted); }
 .skill-suspended { font-size: 10px; color: #d97706; font-weight: 600; }
+.skill-repair-target { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.skill-repair-diagnosis { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 6px; word-break: break-word; }
 .skill-desc { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-kind { flex: none; font-size: 11px; }
 .skill-op-col { display: flex; gap: 6px; justify-content: flex-end; }

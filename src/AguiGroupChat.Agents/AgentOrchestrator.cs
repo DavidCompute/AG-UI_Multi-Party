@@ -24,6 +24,9 @@ public static class AgentOrchestrator
     public static IReadOnlyList<ReusableSkill> ToReusableSkills(IEnumerable<AgentSkillDefinition>? skills)
         => (skills ?? [])
             .Where(s => !string.IsNullOrWhiteSpace(s.SkillId))
+            // 已暂停（产物质量连续低分）的技能不再作为编排候选（1.0.347）：
+            // 否则模型会把它排进岗位，而运行时又因暂停而不挂载，形成“看起来有技能、实际不执行”的假交付。
+            .Where(s => !s.Suspended)
             // org_deploy / org_design 属构建师自身的工具，不应被编排挂到普通岗位
             .Where(s => s.Kind != AgentSkillKind.Org_deploy)
             .Where(s => !string.Equals(s.SkillId, "org_design", StringComparison.OrdinalIgnoreCase))

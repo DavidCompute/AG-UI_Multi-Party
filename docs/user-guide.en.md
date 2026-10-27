@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.346**
+> Applies to version: **1.0.347**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1993,7 +1993,7 @@ The dialog has two views: the list `#skillListView` and the editor `#skillFormVi
 - Search box `#skillSearch`, placeholder text `skill.search` ("Search skills (name / ID / type / description)…"). Filtering does a lowercase contains match on `name` / `skillId` / `description` / `kind`; when there are no results it shows `skill.searchEmpty`.
 - Header columns (`skill-grid-head`): Name / ID, Type, Description, Actions (i18n `skill.col.name` / `skill.col.kind` / `skill.col.desc` / `skill.col.ops`), plus a checkbox column on the left.
 - Per-row action buttons: `▶` (test run, `skill.testRun`), `✏️` (edit, `skill.edit`), `🗑️` (delete, `skill.del`). The edit / delete buttons are shown only for **manageable** rows (`canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId`; built-in skills have `ownerId` `null`, so only administrators have `canManage`).
-- **Paused badge and resume (1.0.345)**: a skill isolated by the quality guard or paused manually shows `⏸ Paused` under its name (`skill.suspended`, hovering reveals the reason), and manageable rows gain a `🔓` button (`skill.resume` "Resume skill (re-mount to agents)").
+- **Paused badge and resume (1.0.345)**: a skill isolated by the quality guard or paused manually shows `⏸ Paused` under its name (`skill.suspended`, hovering reveals the reason), and manageable rows gain a `🔓` button (`skill.resume` "Resume skill (re-mount to agents)") and a `🩺` button (`skill.repair.action`, see 4.3.7).
 - Bottom buttons: `#skillAddBtn` (+ New Skill, `skill.add`), `#skillCloseBtn` (Close, `skill.close`).
 
 #### 4.3.3 Batch delete
@@ -2068,6 +2068,18 @@ The server-side `SkillApi` `/generate` calls `SkillDefinitionGenerator.GenerateA
 
 **Front end**: the notification center polls `GET /ag-ui/admin/artifact-quality/alerts?since=` every minute and adds new alerts as `error` entries (clicking opens the skill library); the library shows `⏸ Paused` and `🔓 Resume`.
 
+#### 4.3.7 Diagnose and repair (`🩺`, 1.0.347)
+
+A paused skill gains a `🩺` action in the library row, opening `#skillRepairModal`:
+
+- The header shows the skill name, paused reason and description; the result area first shows the last 7 days of runs / low scores and the main missing items (returned as `diagnosis`);
+- **🩺 Diagnose, repair and resume** calls `POST /ag-ui/skills/{id}/repair?apply=true&resume=true`: the server uses `SkillAutoFixer` to have the model rewrite the body from recent artifact failures / compile errors, then **really self-tests** it (prompt is run once / http config is validated / shell is dry-run / C# is compiled and test-produced, up to 3 rounds);
+- **The change is saved only when the self-test passes**: the repaired body is written (`ApplyRepair`, `BuiltinVersion` cleared) and the skill resumed; on failure the original skill is left untouched and every attempt's error is shown;
+- Client-executed skills cannot be self-tested on the server: the endpoint returns `skipped=true` with guidance and does not call the model;
+- The same panel shows the current state (resumed / still paused); closing refreshes the library list immediately.
+
+Orchestration link: `ToReusableSkills` no longer offers suspended skills (so the model cannot assign a disabled skill to a role), and `OrgApplyEngine` skips suspended references and reports them in `warnings` (avoiding a "looks mounted but never runs" false delivery). In the binding dialog, paused skills are greyed out and cannot be selected.
+
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
 | Key | Default | Meaning |
@@ -2097,6 +2109,7 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `POST /ag-ui/skills/{skillId}/suggest` | Test-run parameter suggestion | Has the model provide a typical `query` |
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | Pause mounting (1.0.345) | Owner or admin; evicts cached agents immediately |
 | `POST /ag-ui/skills/{skillId}/resume` | Resume mounting (1.0.345) | Same; clears the paused flags and re-mounts |
+| `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | Diagnose and repair (1.0.347) | Model rewrite + server self-test; only `apply=true` persists, see 4.3.7 |
 
 #### 4.4.2 Who can create / edit / delete which types
 
@@ -2132,6 +2145,7 @@ In the `GET /` list response, **only the owner themselves or an administrator** 
 - Permissions match editing: owner or system administrator; built-ins (`ownerId=null`) are administrator-only.
 - Both endpoints call `AgentCatalog.InvalidateAgentsUsingSkill` so cached agents rebuild immediately with the new mount list.
 - The `GET /ag-ui/skills` DTO now carries `suspended` / `suspendedReason` / `suspendedAtMs`, which drive the badge and resume button.
+- `POST /ag-ui/skills/{skillId}/repair` (1.0.347): `SkillAutoFixer` self-test + model repair (up to 3 rounds); with `apply=true` and a passing self-test, `ApplyRepair` writes the body and (by default) resumes, then `InvalidateAgentsUsingSkill` runs. Returns `skipped / ok / attempts / lastError / correctedBody / applied / resumed / diagnosis`.
 
 ---
 

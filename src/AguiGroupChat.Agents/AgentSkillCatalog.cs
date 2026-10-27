@@ -130,6 +130,28 @@ public sealed class AgentSkillCatalog
         return true;
     }
 
+    /// <summary>
+    /// 应用一次「诊断修复」的结果（1.0.347）：写入修正后的正文 / 描述，并可同时恢复挂载。
+    /// 与手工编辑同语义：写过之后不再是原样内置版（<see cref="AgentSkillDefinition.BuiltinVersion"/> 置空）。
+    /// 正文为空时不做任何修改（避免把修复失败当成“清空技能”）。
+    /// </summary>
+    public bool ApplyRepair(string skillId, string? body, string? description, bool resume)
+    {
+        var skill = Get(skillId);
+        if (skill is null || string.IsNullOrWhiteSpace(body)) return false;
+        skill.Body = body;
+        if (!string.IsNullOrWhiteSpace(description)) skill.Description = description;
+        skill.BuiltinVersion = null;
+        if (resume)
+        {
+            skill.Suspended = false;
+            skill.SuspendedReason = null;
+            skill.SuspendedAtMs = null;
+        }
+        Upsert(skill);
+        return true;
+    }
+
     /// <summary>从持久化快照恢复：先重放常驻种子，再由快照按 SkillId 覆盖（持久化版本优先）。</summary>
     public void RestoreAll(IEnumerable<AgentSkillDefinition> skills)
     {

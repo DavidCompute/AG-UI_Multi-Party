@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.346 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.346 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.347 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.347 Release Notes (current Windows desktop release)
+
+**版本说明**：**低质量技能闭环：一键诊断修复 + 质量感知编排**——被暂停的技能可让模型按产物失败项重写正文并服务端自测，通过后一键应用并恢复；编排与绑定不再使用已暂停技能。
+**Version note**: **Closing the low-quality skill loop**: one-click diagnose-and-repair plus quality-aware orchestration — the model rewrites a paused skill against its artifact failures and self-tests it on the server, then one click applies and resumes it; orchestration and binding no longer use suspended skills.
+
+## 变更
+# Changes
+
+中文：
+- **一键诊断修复**：新增 `POST /ag-ui/skills/{skillId}/repair?apply=&resume=`。服务端用 `SkillAutoFixer` 按技能定义与最近 7 天产物失败项让模型改写正文，并真实自测（prompt 问一次 / http 校验配置 / shell 盲跑 / C# 编译并试产，最多 3 轮）；**只有自测通过才落库**（`ApplyRepair`，同时 `BuiltinVersion` 置空）并默认恢复挂载，失败时原技能不改。本机（client）技能直接返回 `skipped=true` 与指引。
+- **界面**：技能库中被暂停的行新增 `🩺`，打开 `#skillRepairModal`：显示暂停原因、最近 7 天执行 / 低分与主要缺失项，一键“诊断修复并恢复”，结果区如实展示尝试次数、错误与修复后正文预览，关闭后列表即时刷新。
+- **编排不再使用暂停技能**：`AgentOrchestrator.ToReusableSkills` 排除 `suspended` 技能；`OrgApplyEngine` 即使方案引用了已暂停技能也跳过挂载，并在结果 `warnings` 中明确指出（避免“看起来有技能、实际不执行”的假交付）。
+- **绑定弹窗**：已暂停技能置灰不可勾选，并显示 `⏸ 已暂停`，避免人工重新挂上。
+
+English:
+- **One-click diagnose and repair**: new `POST /ag-ui/skills/{skillId}/repair?apply=&resume=`. The server uses `SkillAutoFixer` to have the model rewrite the body from the definition and the last 7 days of artifact failures, then really self-tests it (prompt run once / http config validated / shell dry-run / C# compiled and test-produced, up to 3 rounds). **Only a passing self-test is persisted** (`ApplyRepair`, clearing `BuiltinVersion`) and by default resumes mounting; on failure the original skill is untouched. Client-executed skills return `skipped=true` with guidance.
+- **UI**: paused rows in the skill library gain a `🩺` action opening `#skillRepairModal`, which shows the paused reason, last 7 days of runs / low scores and main missing items, then runs diagnose-and-repair in one click with attempts, errors and a preview of the repaired body; the list refreshes on close.
+- **Orchestration ignores suspended skills**: `AgentOrchestrator.ToReusableSkills` filters out `suspended` skills, and `OrgApplyEngine` skips suspended references even when a plan mentions them, reporting them in `warnings` (no more "looks mounted but never runs").
+- **Binding dialog**: paused skills are greyed out, cannot be selected, and show `⏸ Paused`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.2（`🩺` 入口）、§4.3.7（诊断修复）、§4.4.1 / §4.4.6（repair 接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.347。
+English: `docs/user-guide.md` / `en.md` §4.3.2 (the `🩺` entry), §4.3.7 (diagnose and repair), §4.4.1 / §4.4.6 (repair API); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.347.
+
+## 测试
+# Tests
+
+中文：新增编排排除 / `ApplyRepair` 往返用例，定向测试 23 条全通过；全量 `dotnet vstest` **1979 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2383，missing 0；配置键与文档引用校验通过；Docker 重建后 repair 接口实测（正常技能 `ok=true`、不存在 404、不可自测技能 `skipped=true`）。
+English: new orchestration-exclusion / `ApplyRepair` round-trip cases, with 23 targeted tests passing; the full `dotnet vstest` run passes **1979 / 0**; `node --check app.js`; the i18n audit reports zh=en=2383, missing 0; config-key and docs-reference checks pass; after the Docker rebuild the repair API was exercised (valid skill `ok=true`, unknown 404, non-testable skill `skipped=true`).
+
+---
+
+# AG-UI 群聊桌面版 1.0.346 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.346 Release Notes (historical)
 
 **版本说明**：**桌面版闪退热修复**——任务栏跳转列表（「最近知聚」）的 COM 互操作会写坏 shell link 的 vtable，触发不可捕获的 `AccessViolationException`，进程直接消失。本版修复该问题。
 **Version note**: **Hotfix for the desktop crash** — the taskbar jump-list ("Recent groups") COM interop corrupted the shell link vtable, raising an uncatchable `AccessViolationException` that killed the process. Fixed in this release.
