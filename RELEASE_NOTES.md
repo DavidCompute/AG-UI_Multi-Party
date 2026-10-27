@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.347 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.347 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.348 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.348 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能质量画像驱动编排**——一键编排会看到每个候选技能近 30 天的合格率 / 均分 / 主要缺失项，优先选可靠技能，并在方案里标出“挂上就很可能交残次品”的风险项。
+**Version note**: **Quality-aware orchestration** — one-click orchestration now sees each candidate skill's last-30-day pass rate / average score / top missing items, prefers reliable skills, and flags risky ones that are likely to keep producing sub-par artifacts.
+
+## 变更
+# Changes
+
+中文：
+- **质量画像**：新增 `SkillQualityProfiles`（纯函数）——把 `ArtifactQualityStore` 的事件按技能聚合成 `runs / valid / 合格率 / 均分 / 低分 / Top 缺失项 / 最近执行`；默认窗口 30 天，与绩效看板 / 告警同一低分口径（< 70）。风险判定：≥ 3 次执行且合格率 < 60% 或均分 < 70。
+- **候选带质量**：`AgentOrchestrator.ToReusableSkills` 新增可选质量画像参数，提示词逐条渲染「近期质量：近 30 天 N 次，合格率 X%，平均 Y 分」与主要缺失项，并明令模型优先选合格率高 / 均分高的技能、慎用标「质量偏低」的技能。
+- **方案预警**：`SelfCheck` 新增 `skill_quality_risk`（warn）——方案挂载的技能若近期质量偏低，预览里逐条列出并提示“先在技能库点 🩺 诊断修复，或改用更可靠的技能”。
+- **同一口径**：网页 `/orchestrate`、`/orchestrate/stream` 与内置「组织架构构建师」的 `org_plan_draft` 均接入质量画像。
+- **闭环**：质量 → 告警 / 隔离 → 一键修复（1.0.347）→ 恢复 → 质量画像更新 → 编排优先选它，形成完整回路。
+
+English:
+- **Quality profiles**: new `SkillQualityProfiles` (pure) aggregates `ArtifactQualityStore` events per skill into `runs / valid / pass rate / average / low / top missing / last run`, with a 30-day default window and the same low-score threshold (< 70) as the dashboard and alerts. A skill is risky with at least 3 runs and a pass rate < 60% or average < 70.
+- **Quality in candidates**: `AgentOrchestrator.ToReusableSkills` takes an optional profile map; the prompt renders "Recent quality: N runs, X% pass rate, Y average" plus top missing items per candidate and instructs the model to prefer reliable skills and be wary of ones marked "low quality".
+- **Plan warnings**: `SelfCheck` gains `skill_quality_risk` (warn) — when a mounted skill has poor recent quality, the preview lists it with the advice to run 🩺 repair in the skill library or switch to a more reliable skill.
+- **One behaviour everywhere**: web `/orchestrate`, `/orchestrate/stream` and the built-in Org Architect's `org_plan_draft` all use the profiles.
+- **Closed loop**: quality → alerts / isolation → one-click repair (1.0.347) → resume → updated profile → orchestration prefers it again.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.7.4（自检清单与质量预警）、§4.3.7（诊断修复）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.348。
+English: `docs/user-guide.md` / `en.md` §3.7.4 (self-check and quality warnings), §4.3.7 (diagnose and repair); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.348.
+
+## 测试
+# Tests
+
+中文：新增 `SkillQualityProfileTests`（聚合口径 / 风险判定 / 描述文案 / 候选质量注入 / 自检预警 / 无数据不误报）；定向测试 7 条通过；全量 `dotnet vstest` **1986 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2383，missing 0；配置键与文档引用校验通过。
+English: new `SkillQualityProfileTests` (aggregation / risk rule / description / candidate notes / self-check warning / no false positive without data), 7 targeted tests passing; the full `dotnet vstest` run passes **1986 / 0**; `node --check app.js`; the i18n audit reports zh=en=2383, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.347 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.347 Release Notes (historical)
 
 **版本说明**：**低质量技能闭环：一键诊断修复 + 质量感知编排**——被暂停的技能可让模型按产物失败项重写正文并服务端自测，通过后一键应用并恢复；编排与绑定不再使用已暂停技能。
 **Version note**: **Closing the low-quality skill loop**: one-click diagnose-and-repair plus quality-aware orchestration — the model rewrites a paused skill against its artifact failures and self-tests it on the server, then one click applies and resumes it; orchestration and binding no longer use suspended skills.

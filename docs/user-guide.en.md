@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.347**
+> Applies to version: **1.0.348**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1544,7 +1544,9 @@ During generation, `#orgOrchStop` is shown (`msg.stopGenerating` = `Stop generat
 
 Backend `OrgApplyEngine.ExecuteAsync` (the only write-through engine, shared with the "Org Architect" `org_commit`): skills are deduplicated and renamed (an empty body = reference an existing Skill Library skill; not rebuilt) → server-side skill self-test (`SkillAutoFixer`, at most 3 times) → link normalization (`NormalizeConnections` fills **both** directions of the assignment / escalation links) → Upsert each digital employee → optionally create a support circle. It returns the `smoke` self-check result, which the frontend reports via notifications (`org.orchSmokeTitle/Count/Repaired/Failed`).
 
-**Pre-commit self-check list (`AgentOrchestrator.SelfCheck`)**: both `/orchestrate` and the `/orchestrate/stream` `done` event add a `selfCheck` field (an array; each item `{code, level, message}`) alongside `deliveryWarning`, listing **every** structure / link / skill / delivery problem instead of only the first warning. Codes: `no_agents`, `dangling_link` (a link points at a non-existent role — apply would reject it), `no_connections` (neither assignment nor escalation), `no_assignment` (escalation only), `no_escalation` (assignment only), `self_escalation`, `agent_without_skill`, `delivery_gap`, `hollow_delivery`, `delivery_gatekeeper`, plus an `ok` summary when all pass.
+**Pre-commit self-check list (`AgentOrchestrator.SelfCheck`)**: both `/orchestrate` and the `/orchestrate/stream` `done` event add a `selfCheck` field (an array; each item `{code, level, message}`) alongside `deliveryWarning`, listing **every** structure / link / skill / delivery problem instead of only the first warning. Codes: `no_agents`, `dangling_link` (a link points at a non-existent role — apply would reject it), `no_connections` (neither assignment nor escalation), `no_assignment` (escalation only), `no_escalation` (assignment only), `self_escalation`, `agent_without_skill`, `delivery_gap`, `hollow_delivery`, `delivery_gatekeeper`, `skill_quality_risk` (1.0.348, see below), plus an `ok` summary when all pass.
+
+**Skill quality profiles in orchestration (1.0.348)**: each candidate skill now carries its last-30-day artifact quality profile (`SkillQualityProfiles.Load(ArtifactQualityStore)`, aggregated per skill as `runs / valid / pass rate / average / low / top missing`). The prompt renders "Recent quality: N runs, X% pass rate, Y average" per candidate and tells the model to **prefer reliable skills** and be wary of ones marked "low quality". The self-check gains `skill_quality_risk` (warn): if a mounted skill has at least 3 runs and a pass rate < 60% or an average < 70, it is listed with the advice to run 🩺 repair in the skill library or switch to a more reliable skill. The web one-click orchestration, the streaming variant and the built-in Org Architect's `org_plan_draft` all share this behaviour.
 
 **Two-way link normalization (`NormalizeConnections`)**: the same rule on both the parse side (`AgentOrchestrator`) and the apply side (`OrgApplyEngine`) — (1) from an upward escalation (`escalationAgentId`) derive its direct subordinates into `assignmentIds` (task assignment); (2) from a downward assignment (`assignmentIds`) derive its **unique** direct superior into `escalationAgentId` (problem escalation); additive only, deduped and order-preserving, with self-loop / 2-cycle guards, and no guessing for a subordinate assigned by several managers.
 

@@ -18,12 +18,15 @@ public sealed class OrgOneShotDraftTool
     private readonly AgentOptions _options;
     private readonly ILogger _logger;
     private readonly AgentSkillCatalog? _skillCatalog;
+    private readonly ArtifactQualityStore? _quality;
 
-    public OrgOneShotDraftTool(AgentOptions options, ILoggerFactory loggerFactory, AgentSkillCatalog? skillCatalog = null)
+    public OrgOneShotDraftTool(AgentOptions options, ILoggerFactory loggerFactory, AgentSkillCatalog? skillCatalog = null,
+        ArtifactQualityStore? quality = null)
     {
         _options = options;
         _logger = loggerFactory.CreateLogger<OrgOneShotDraftTool>();
         _skillCatalog = skillCatalog;
+        _quality = quality;
     }
 
     /// <summary>
@@ -40,8 +43,9 @@ public sealed class OrgOneShotDraftTool
 
         try
         {
-            // 也带上技能库里的现成可复用技能：让构建师优先引用（与网页一键编排同一口径）
-            var reusable = AgentOrchestrator.ToReusableSkills(_skillCatalog?.ListAll());
+            // 也带上技能库里的现成可复用技能 + 近 30 天质量画像：让构建师优先引用可靠技能（与网页一键编排同一口径）
+            var reusable = AgentOrchestrator.ToReusableSkills(
+                _skillCatalog?.ListAll(), SkillQualityProfiles.Load(_quality));
             var plan = await AgentOrchestrator.GenerateAsync(_options, requirement.Trim(), _logger, CancellationToken.None, reusable);
 
             // 与 org_commit 期望的 one-click apply 相一致的字段名（agentId/skillIds/... 小驼峰）

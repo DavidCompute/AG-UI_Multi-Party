@@ -18,10 +18,17 @@ public static class AgentOrchestrator
     /// 技能库中可复用技能的轻量投影（供编排提示词列举）。只带模型判断所需的最小信息：
     /// id / 名称 / 用途说明 / 类型 —— 不带正文（正文进提示词会很长且无用）。
     /// </summary>
-    public sealed record ReusableSkill(string SkillId, string Name, string Description, string Kind);
+    /// <param name="QualityNote">近 30 天产物质量画像（1.0.348；无记录时为 null），用于让模型优先选可靠的技能。</param>
+    public sealed record ReusableSkill(string SkillId, string Name, string Description, string Kind, string? QualityNote = null);
 
-    /// <summary>从技能库构造可复用技能清单（只列非内置的也能列；内置的同样可复用）。</summary>
-    public static IReadOnlyList<ReusableSkill> ToReusableSkills(IEnumerable<AgentSkillDefinition>? skills)
+    /// <summary>
+    /// 从技能库构造可复用技能清单（只列非内置的也能列；内置的同样可复用）。
+    /// <paramref name="quality"/> 为近 30 天技能质量画像：带上时每个候选会附上合格率 / 均分 / 主要缺失项，
+    /// 模型据此优先选择稳定技能、避开持续低分的技能。
+    /// </summary>
+    public static IReadOnlyList<ReusableSkill> ToReusableSkills(
+        IEnumerable<AgentSkillDefinition>? skills,
+        IReadOnlyDictionary<string, SkillQualityProfile>? quality = null)
         => (skills ?? [])
             .Where(s => !string.IsNullOrWhiteSpace(s.SkillId))
             // 已暂停（产物质量连续低分）的技能不再作为编排候选（1.0.347）：
@@ -30,7 +37,9 @@ public static class AgentOrchestrator
             // org_deploy / org_design 属构建师自身的工具，不应被编排挂到普通岗位
             .Where(s => s.Kind != AgentSkillKind.Org_deploy)
             .Where(s => !string.Equals(s.SkillId, "org_design", StringComparison.OrdinalIgnoreCase))
-            .Select(s => new ReusableSkill(s.SkillId, s.Name ?? s.SkillId, s.Description ?? "", s.Kind.ToString().ToLowerInvariant()))
+            .Select(s => new ReusableSkill(
+                s.SkillId, s.Name ?? s.SkillId, s.Description ?? "", s.Kind.ToString().ToLowerInvariant(),
+                quality is not null && quality.TryGetValue(s.SkillId, out var q) && q.Runs > 0 ? q.Describe() : null))
             .ToList();
     /// <summary>生成组织方案。真实模型走 OpenAI 兼容接口；mock 走确定性模板。</summary>
     /// <param name="reusableSkills">技能库中可复用的现成技能（可为空）。编排优先引用它们，避免重复造轮子。</param>
@@ -380,7 +389,9 @@ public static class AgentOrchestrator
     /// </para>
     /// </summary>
     /// <returns>自检条目（顺序：结构 / 连接 → 技能 → 交付闭环 → 通过摘要）；全部通过时含一条 <c>ok</c> 摘要。</returns>
-    public static IReadOnlyList<OrgPlanCheck> SelfCheck(OrchestrationPlan plan, string requirement)
+    public static IReadOnlyList<OrgPlanCheck> SelfCheck(
+        OrchestrationPlan plan, string requirement,
+        IReadOnlyDictionary<string, SkillQualityProfile>? quality = null)
     {
         var checks = new List<OrgPlanCheck>();
         var agents = plan.Agents ?? [];
@@ -445,6 +456,23 @@ public static class AgentOrchestrator
             checks.Add(new OrgPlanCheck("agent_without_skill", "warn",
                 "以下岗位没有挂载任何技能（可能不知道该怎么干活）：" + string.Join("、", noSkill) + "。建议至少各挂一个与职责相符的技能。"));
 
+        // —— 技能质量：方案引用的技能近期是否持续交残次品（1.0.348）——
+        if (quality is { Count: > 0 })
+        {
+            var risky = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var a in agents)
+                foreach (var sid in (a.SkillIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()))
+                {
+                    if (!quality.TryGetValue(sid, out var q) || !q.IsRisky) continue;
+                    if (seen.Add(sid)) risky.Add($"「{sid}」（{q.Describe()}）");
+                }
+            if (risky.Count > 0)
+                checks.Add(new OrgPlanCheck("skill_quality_risk", "warn",
+                    "以下技能近期产物质量偏低，挂到岗位上可能持续交残次品：" + string.Join("；", risky)
+                    + "。建议先在技能库点 🩺 诊断修复，或改用更可靠的技能后再落库。"));
+        }
+
         // —— 交付闭环：需求要的交付物是否真有人能产出 ——
         var delivery = DetectDeliveryGap(plan, requirement);
         if (delivery is not null) checks.Add(new OrgPlanCheck("delivery_gap", "error", delivery));
@@ -480,12 +508,16 @@ public static class AgentOrchestrator
         {
             var desc = s.Description.Length > 120 ? s.Description.Substring(0, 120) + "…" : s.Description;
             sb.Append("- ").Append(s.SkillId).Append("（").Append(s.Name).Append("，kind=").Append(s.Kind).Append("）：").Append(desc).Append('\n');
+            if (!string.IsNullOrWhiteSpace(s.QualityNote))
+                sb.Append("    · 近期质量：").Append(s.QualityNote).Append('\n');
         }
         sb.Append("\n复用规则（很重要）：\n");
         sb.Append("- 若某岗位的职责能被上面的技能覆盖（如“生成 Word 文档/公文/报告”对应 docx_*、“做 PPT/演示文稿”对应 pptx_deck、" +
                   "“做 Excel/表格/报表”对应 xlsx_book、“出 PDF 报告”对应 pdf_doc），**必须直接引用它**，不要另建 prompt 技能。\n");
         sb.Append("- 引用写在 skillIds 里；skills 数组里<b>只放</b>库中没有、需要新造的技能。\n");
-        sb.Append("- 若 skills 里新造的技能与上面某个已有技能同 id，视为重复，应改为直接引用。\n\n");
+        sb.Append("- 若 skills 里新造的技能与上面某个已有技能同 id，视为重复，应改为直接引用。\n");
+        sb.Append("- 标注「质量偏低」的技能慎用：优先选择合格率高、均分高的技能；若某个职责只有低质量技能能覆盖，" +
+                  "宁可自建一个更可靠的技能（写清楚完整执行步骤与产物要求），也不要把持续交残次品的技能排进岗位。\n\n");
         return sb.ToString();
     }
 
