@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.345 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.345 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.346 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.346 Release Notes (current Windows desktop release)
+
+**版本说明**：**桌面版闪退热修复**——任务栏跳转列表（「最近知聚」）的 COM 互操作会写坏 shell link 的 vtable，触发不可捕获的 `AccessViolationException`，进程直接消失。本版修复该问题。
+**Version note**: **Hotfix for the desktop crash** — the taskbar jump-list ("Recent groups") COM interop corrupted the shell link vtable, raising an uncatchable `AccessViolationException` that killed the process. Fixed in this release.
+
+## 变更
+# Changes
+
+中文：
+- **根因**：`JumpListManager` 把 `IObjectCollection` 声明为继承 `IObjectArray`。在 .NET 10 的 COM interop 下，派生接口的 vtable 并未把基接口方法排在前面，`AddObject` 实际落到 `GetCount` 上，把计数 0 写进了 shell link 的 vtable 指针；随后任何一次调用都触发 `AccessViolationException`（`InterfaceMarshaler.ClearNative` / `Marshal.Release`），属于不可捕获异常，表现为窗口刚打开就闪退。通常在页面首次上报「最近知聚」时触发。
+- **修复一（vtable）**：`ICustomDestinationList` / `IObjectArray` / `IObjectCollection` / `IShellLinkW` / `IPropertyStore` 全部**独立声明**，严格按 `shobjidl_core.h` 顺序列出方法；并补齐 `ICustomDestinationList.GetRemovedDestinations` 占位。
+- **修复二（显示名）**：跳转列表项的显示名取自 `System.Title` 属性，`SetDescription` 不算；原实现缺这一步，`AddUserTasks` / `AppendCategory` 会返回 `E_INVALIDARG`（列表永远出不来）。现通过 `IPropertyStore.SetValue(PKEY_Title)` + `Commit` 写入。
+- **验证**：最小复现程序（同一套 COM 调用）连续 3 次 `SetRecentGroups` 均返回成功；Release 桌面进程连续运行 **>110 秒**无崩溃（修复前约 28 秒即闪退）。
+
+English:
+- **Root cause**: `JumpListManager` declared `IObjectCollection` as deriving from `IObjectArray`. Under .NET 10 COM interop the derived interface's vtable does not place the base methods first, so `AddObject` actually landed on `GetCount`, writing the value 0 over the shell link's vtable pointer; the next call then raised an uncatchable `AccessViolationException` (`InterfaceMarshaler.ClearNative` / `Marshal.Release`), and the process vanished right after the window opened. It typically triggered when the page first reported **Recent groups**.
+- **Fix 1 (vtable)**: `ICustomDestinationList` / `IObjectArray` / `IObjectCollection` / `IShellLinkW` / `IPropertyStore` are now **declared standalone**, with methods in exact `shobjidl_core.h` order; `ICustomDestinationList.GetRemovedDestinations` is added for a complete vtable.
+- **Fix 2 (display name)**: jump-list item titles come from the `System.Title` property, not `SetDescription`; without it `AddUserTasks` / `AppendCategory` return `E_INVALIDARG` (the list never appears). The title is now written via `IPropertyStore.SetValue(PKEY_Title)` + `Commit`.
+- **Verified**: a minimal repro (same COM calls) succeeds for 3 consecutive `SetRecentGroups` runs; the Release desktop process ran **>110 s** without a crash (it crashed after ~28 s before the fix).
+
+## 文档
+# Docs
+
+中文：`src/AguiGroupChat.Desktop/JumpListManager.cs`（根因与约束写入类注释）；`docs/user-guide.md` / `en.md` 适用版本 → 1.0.346；`ROADMAP.md` / `en.md`；版本号同步到 1.0.346。
+English: `src/AguiGroupChat.Desktop/JumpListManager.cs` (root cause and constraints documented in the class comment); `docs/user-guide.md` / `en.md` applies-to version → 1.0.346; `ROADMAP.md` / `en.md`; version numbers bumped to 1.0.346.
+
+## 测试
+# Tests
+
+中文：本次只改桌面壳（WinForms/WPF），不涉及被测试程序集，全量测试结果沿用 **1976 通过 / 0 失败**；已用最小复现程序与 Release 桌面二进程实测（见上）。
+English: this change touches only the desktop shell (WinForms/WPF), not the tested assemblies, so the full suite remains **1976 passed / 0 failed**; validation used the minimal repro plus a real Release desktop run (see above).
+
+---
+
+# AG-UI 群聊桌面版 1.0.345 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.345 Release Notes (historical)
 
 **版本说明**：**低质量技能告警与自动隔离**——技能产物连续不达标时告警（Webhook + 站内通知），可选自动暂停该技能；暂停后不再挂载、不再执行，管理员在技能库一键恢复。
 **Version note**: **Low-quality skill alerts and auto-isolation** — when a skill keeps producing sub-par artifacts, the platform alerts (Webhook + in-app), can auto-pause it, and stops mounting / executing it until an administrator resumes it from the skill library.
