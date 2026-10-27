@@ -897,6 +897,7 @@
           <input id="sfImageWriteApproval" type="checkbox" style="width:15px;height:15px;accent-color:#4f8cff" />
         </div>
         <div class="modal-actions">
+          <button id="sfLessons" class="btn-ghost hidden" data-i18n="skill.lessons.action">💡 经验</button>
           <button id="sfBack" class="btn-ghost" data-i18n="skill.form.back">返回</button>
           <button id="sfTest" class="btn-ghost" data-i18n="skill.form.test">▶ 试运行</button>
           <button id="sfSave" class="send" data-i18n="skill.form.save">保存技能</button>
@@ -937,6 +938,37 @@
       <div class="modal-actions">
         <button id="skillRepairRun" class="send" data-i18n="skill.repair.run">🩺 诊断修复并恢复</button>
         <button id="skillRepairClose" class="btn-ghost" data-i18n="skill.repair.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 技能经验管理（1.0.351）：查看 / 手动补写 / 删除岗位经验 -->
+  <div id="skillLessonsModal" class="modal-overlay hidden">
+    <div class="modal skill-modal" style="max-width:760px">
+      <div class="modal-title">💡 <span data-i18n="skill.lessons.title">技能经验</span></div>
+      <p class="form-hint" style="margin:2px 0 10px" data-i18n="skill.lessons.hint">经验会注入到挂载该技能的数字员工工具说明（最多 3 条）；已解决的旧失败不会注入。可手动补写运营知识，也可删除不适用的条目。</p>
+      <div id="skillLessonsTarget" class="skill-repair-target"></div>
+      <div id="skillLessonsList" class="skill-lessons-list"></div>
+      <div class="form-section" data-i18n="skill.lessons.addSection">补充一条经验</div>
+      <div class="form-group">
+        <label data-i18n="skill.lessons.agentScope">适用岗位</label>
+        <select id="slAgent" class="modal-input" style="width:100%"></select>
+      </div>
+      <div class="form-group">
+        <label data-i18n="skill.lessons.summary">经验内容</label>
+        <input id="slSummary" class="modal-input" maxlength="500" style="width:100%" data-i18n-placeholder="skill.lessons.summaryPh" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="skill.lessons.missing">缺失项（逗号分隔，可空）</label>
+        <input id="slMissing" class="modal-input" style="width:100%" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="skill.lessons.fix">改进方式（可空）</label>
+        <textarea id="slFix" class="modal-input agent-instructions" rows="2" maxlength="300" style="width:100%;resize:vertical"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="skillLessonsAdd" class="send" data-i18n="skill.lessons.save">＋ 添加经验</button>
+        <button id="skillLessonsClose" class="btn-ghost" data-i18n="skill.lessons.close">关闭</button>
       </div>
     </div>
   </div>

@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.350 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.350 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.351 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.351 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能经验管理界面**——在技能编辑里查看、手动补写、删除岗位经验，让运营能纠偏，而不只是依赖系统自动沉淀。
+**Version note**: **Skill experience management UI** — view, add and delete role experience from the skill editor, so operators can correct and extend what the system captures automatically.
+
+## 变更
+# Changes
+
+中文：
+- **入口**：技能编辑表单底部新增「💡 经验」（仅已保存技能可见），打开 `#skillLessonsModal`。
+- **列表**：按时间倒序展示失败 / 修复 / 笔记三类经验，含适用岗位、缺失项、改进方式、`已解决` 标记与删除按钮；删除仅限该技能。
+- **手动补写**：可指定「全部岗位（技能级）」或某个岗位；经验内容必填（≤ 500），缺失项逗号 / 分号分隔，改进方式 ≤ 300；以 `note` 类型保存，注入时读作「经验：…；做法：…」。
+- **接口**：`POST /ag-ui/skills/{skillId}/lessons`、`DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`（归属者或管理员）；岗位 ID 会校验存在。
+- **保持边界**：经验不含用户原文，同「技能 + 岗位」仍只保留最近 3 条，重启保留。
+
+English:
+- **Entry**: the skill edit form gains **💡 Experience** at the bottom (saved skills only), opening `#skillLessonsModal`.
+- **List**: failure / repair / note lessons newest first, with applicable agent, missing items, improvement, a **Resolved** tag and a delete action (scoped to this skill).
+- **Manual capture**: choose **All agents (skill level)** or a specific agent; the lesson text is required (≤ 500), missing items are comma / semicolon separated, and the improvement is ≤ 300. Stored as `note` and rendered as "Experience: …; practice: …" when injected.
+- **APIs**: `POST /ag-ui/skills/{skillId}/lessons`, `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` (owner or admin); agent IDs are validated.
+- **Boundaries kept**: lessons never contain user text, the latest 3 per skill + agent are kept, and they survive restarts.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（经验管理界面）、§4.4.1（经验接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.351。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (experience management), §4.4.1 (lessons APIs); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.351.
+
+## 测试
+# Tests
+
+中文：新增 `AddManual` 裁剪 / `Remove` 跨技能隔离 / `note` 提示词文案用例 2 条；经验库定向测试 10 条通过；全量 `dotnet vstest` **2000 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2409，missing 0；配置键与文档引用校验通过。
+English: new cases for `AddManual` trimming / `Remove` cross-skill isolation / `note` prompt wording (2 tests); 10 targeted lesson-store tests pass; the full `dotnet vstest` run passes **2000 / 0**; `node --check app.js`; the i18n audit reports zh=en=2409, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.350 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.350 Release Notes (historical)
 
 **版本说明**：**技能经验进编排**——组队时不仅看到技能近期的合格率，还能看到它未解决的历史坑；模型会被要求在岗位说明里写上规避步骤，方案自检也会单独提醒。
 **Version note**: **Skill experience in orchestration** — when building a team, the model sees not only recent pass rates but also each skill's unresolved historical pitfalls, is asked to write avoidance steps into role instructions, and gets a dedicated self-check warning.

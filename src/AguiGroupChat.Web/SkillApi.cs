@@ -191,6 +191,49 @@ public static class SkillApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 手动补写经验（1.0.351）：归属者或管理员可为该技能添加一条经验笔记 ----
+        root.MapPost("/{skillId}/lessons", (string skillId, SkillLessonCreateRequest req, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog, AgentCatalog agentCatalog) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可编辑该技能经验"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可编辑经验"), statusCode: StatusCodes.Status403Forbidden);
+            if (string.IsNullOrWhiteSpace(req.Summary))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "经验内容不能为空"));
+            var agentId = (req.AgentId ?? "").Trim();
+            if (agentId.Length > 0 && agentCatalog.GetDefinition(agentId) is null)
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, $"岗位不存在：{agentId}"));
+            var lessons = ctx.RequestServices.GetService<SkillLessonStore>();
+            if (lessons is null) return Results.Json(new AguiError(ErrorCodes.BadRequest, "经验库不可用"), statusCode: StatusCodes.Status503ServiceUnavailable);
+            var lesson = lessons.AddManual(skillId, agentId.Length == 0 ? null : agentId, req.Summary, req.Missing, req.Fix);
+            if (lesson is null) return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "经验内容不能为空"));
+            return Results.Ok(new { created = true, lessonId = lesson.Id });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 删除一条经验（1.0.351）：归属者或管理员；仅限属于该技能的经验 ----
+        root.MapDelete("/{skillId}/lessons/{lessonId}", (string skillId, string lessonId, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可编辑该技能经验"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可编辑经验"), statusCode: StatusCodes.Status403Forbidden);
+            var removed = ctx.RequestServices.GetService<SkillLessonStore>()?.Remove(skillId, lessonId) == true;
+            if (!removed) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "经验不存在"));
+            return Results.Ok(new { deleted = true, lessonId });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 删除技能（技能归属者或系统管理员）；已被数字员工引用的技能一并解除（按引用的 agent 引用清理在下文做，暂无外键）----
         root.MapDelete("/{skillId}", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
@@ -731,6 +774,9 @@ public sealed record SkillDefHttpRequest(
 
 /// <summary>技能试运行请求体。ClientId：本机执行的机器标识（浏览器本机桥 /ag-ui/bridge/info 读取），用于把 client dotnet 送到当前机器执行。</summary>
 public sealed record SkillRunHttpRequest(string Query = "", string? ClientId = null);
+
+/// <summary>新增技能经验请求（1.0.351）：AgentId 为空 = 技能级经验。</summary>
+public sealed record SkillLessonCreateRequest(string? AgentId, string Summary, string[]? Missing = null, string? Fix = null);
 
 /// <summary>用自然语言生成技能配置的请求体。ClientOs：客户端/本机执行时的浏览器所在系统（windows/macos/linux/other），供生成对应脚本；服务端执行时后端自行推断。</summary>
 public sealed record SkillGenerateRequest(string Request, bool? PreferClient = null, string? ClientOs = null);

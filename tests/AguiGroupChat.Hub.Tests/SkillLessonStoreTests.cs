@@ -135,4 +135,37 @@ public sealed class SkillLessonStoreTests
         dst.RestoreState([new SkillLesson("sl_x", "", null, SkillLessonKinds.Failure, "x", [], null, "", 1, false)]);
         Assert.Empty(dst.ForSkill("docx"));
     }
+
+    // ---------- 经验管理（1.0.351） ----------
+
+    [Fact]
+    public void AddManual_CreatesNoteAndTrimsInput()
+    {
+        var store = new SkillLessonStore();
+        Assert.Null(store.AddManual("docx", "writer", "   ", null, null));
+
+        var lesson = store.AddManual("docx", "writer", " 先备齐正文 ", [" 缺少正文 ", "  "], " 调用前检查 ");
+
+        Assert.NotNull(lesson);
+        Assert.Equal(SkillLessonKinds.Note, lesson!.Kind);
+        Assert.Equal("先备齐正文", lesson.Summary);
+        Assert.Equal(["缺少正文"], lesson.Missing);
+        Assert.Equal("调用前检查", lesson.Fix);
+        Assert.False(lesson.Resolved);
+        Assert.Contains("经验：先备齐正文", store.BuildPromptBlock("writer", "docx"));
+    }
+
+    [Fact]
+    public void Remove_OnlyDeletesMatchingSkill()
+    {
+        var store = new SkillLessonStore();
+        var docx = store.AddManual("docx", null, "无正文", null, null)!;
+        store.AddManual("pptx", null, "无备注", null, null);
+
+        Assert.False(store.Remove("pptx", docx.Id)); // 跨技能不得删
+        Assert.True(store.Remove("docx", docx.Id));
+        Assert.Empty(store.ForSkill("docx"));
+        Assert.Single(store.ForSkill("pptx"));
+        Assert.False(store.Remove("docx", docx.Id)); // 已删除
+    }
 }

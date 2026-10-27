@@ -2691,6 +2691,16 @@ button { white-space: nowrap; }
 .skill-suspended { font-size: 10px; color: #d97706; font-weight: 600; }
 .skill-repair-target { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 .skill-repair-diagnosis { font-size: 12px; color: var(--muted); line-height: 1.6; margin-bottom: 6px; word-break: break-word; }
+.skill-lessons-list { max-height: 32vh; overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px; margin-bottom: 10px; }
+.skill-lesson-row { padding: 8px; border-bottom: 1px solid rgba(128,141,180,.12); }
+.skill-lesson-row:last-child { border-bottom: none; }
+.skill-lesson-row.resolved { opacity: .6; }
+.skill-lesson-head { display: flex; align-items: center; gap: 8px; }
+.skill-lesson-kind { font-size: 11px; color: var(--accent); flex: none; }
+.skill-lesson-meta { font-size: 11px; color: var(--muted); }
+.skill-lesson-resolved { font-size: 10px; color: #3ba55d; }
+.skill-lesson-head .icon-btn { margin-left: auto; }
+.skill-lesson-summary { font-size: 13px; margin-top: 4px; word-break: break-word; }
 .skill-desc { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-kind { flex: none; font-size: 11px; }
 .skill-op-col { display: flex; gap: 6px; justify-content: flex-end; }

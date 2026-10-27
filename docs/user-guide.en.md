@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.350**
+> Applies to version: **1.0.351**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2095,6 +2095,15 @@ Skill failures and fixes no longer live only in alerts; they become **role exper
 - View them at `GET /ag-ui/skills/{skillId}/lessons` (owner or admin); the repair response gains `lessonSaved`.
 - **Orchestration also sees experience (1.0.350)**: unresolved failures appear as "known pitfalls" beside candidate skills, and the self-check warns via `skill_experience_risk` to write avoidance steps into role instructions.
 
+#### 4.3.9 Experience management UI (💡, 1.0.351)
+
+The skill edit form gains **💡 Experience** at the bottom (only for saved skills), opening `#skillLessonsModal`:
+
+- The list shows failure / repair / note lessons newest first, with the applicable agent, missing items, improvement and a **Resolved** tag; each can be deleted with 🗑️ (never across skills).
+- Add a lesson manually: applicable agent (`All agents (skill level)` or a specific one), lesson text (required, ≤ 500), missing items (comma / semicolon separated) and how to avoid (≤ 300).
+- Manual lessons are stored as `note` and render as "Experience: …; practice: …" when injected; the latest 3 per skill + agent are kept.
+- APIs: `POST /ag-ui/skills/{skillId}/lessons`, `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`, with the same permissions as editing (owner or admin).
+
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
 | Key | Default | Meaning |
@@ -2126,6 +2135,8 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `POST /ag-ui/skills/{skillId}/resume` | Resume mounting (1.0.345) | Same; clears the paused flags and re-mounts |
 | `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | Diagnose and repair (1.0.347) | Model rewrite + server self-test; only `apply=true` persists, see 4.3.7 |
 | `GET /ag-ui/skills/{skillId}/lessons` | Skill experience (1.0.349) | Owner or admin; failure / repair lessons, see 4.3.8 |
+| `POST /ag-ui/skills/{skillId}/lessons` | Add a lesson manually (1.0.351) | Owner or admin; `note` kind, see 4.3.9 |
+| `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | Delete a lesson (1.0.351) | Owner or admin; must belong to this skill |
 
 #### 4.4.2 Who can create / edit / delete which types
 

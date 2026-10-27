@@ -2576,6 +2576,122 @@ async function runSkillRepair() {
   finally { setSkillRepairBusy(false); }
 }
 
+/* ===== 技能经验管理（1.0.351）：查看 / 手动补写 / 删除 ===== */
+let lessonsSkillId = null;
+
+function skillLessonKindBadge(kind) {
+  if (kind === "repair") return "✅ " + t("skill.lessons.kind.repair");
+  if (kind === "note") return "📝 " + t("skill.lessons.kind.note");
+  return "⚠️ " + t("skill.lessons.kind.failure");
+}
+
+async function openSkillLessonsModal(skillId) {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  lessonsSkillId = skillId;
+  if (!(agentList || []).length) { try { await loadAgents(); } catch { /* 下拉退化为技能级 */ } }
+  const s = (skillList || []).find((x) => x.skillId === skillId);
+  $("skillLessonsTarget").textContent = s ? `${s.name}（${skillId}）` : skillId;
+  $("slSummary").value = "";
+  $("slMissing").value = "";
+  $("slFix").value = "";
+  fillSkillLessonAgentSelect();
+  $("skillLessonsModal").classList.remove("hidden");
+  await loadSkillLessons();
+}
+
+function fillSkillLessonAgentSelect() {
+  const sel = $("slAgent");
+  if (!sel) return;
+  const opts = (agentList || [])
+    .filter((a) => !a.isSkillTarget)
+    .map((a) => `<option value="${escapeHtml(a.agentId)}">${escapeHtml(a.nickname || a.agentId)}</option>`)
+    .join("");
+  sel.innerHTML = `<option value="">${escapeHtml(t("skill.lessons.skillScope"))}</option>` + opts;
+}
+
+async function loadSkillLessons() {
+  const el = $("skillLessonsList");
+  if (!el || !lessonsSkillId) return;
+  el.innerHTML = `<div class="kb-empty">${escapeHtml(t("skill.lessons.loading"))}</div>`;
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(lessonsSkillId)}/lessons`, {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) {
+      el.innerHTML = `<div class="kb-empty">${escapeHtml(t("skill.lessons.fail", { err: (d && (d.message || d.code)) || res.status }))}</div>`;
+      return;
+    }
+    const list = (d && Array.isArray(d.lessons)) ? d.lessons : [];
+    if (!list.length) {
+      el.innerHTML = `<div class="kb-empty">${escapeHtml(t("skill.lessons.empty"))}</div>`;
+      return;
+    }
+    el.innerHTML = "";
+    for (const l of list) {
+      const row = document.createElement("div");
+      row.className = "skill-lesson-row" + (l.resolved ? " resolved" : "");
+      const agentName = l.agentId
+        ? ((agentList || []).find((a) => a.agentId === l.agentId)?.nickname || l.agentId)
+        : t("skill.lessons.skillScope");
+      const at = l.atMs ? new Date(l.atMs).toLocaleString() : "";
+      const missing = Array.isArray(l.missing) && l.missing.length
+        ? `<div class="skill-lesson-meta">${escapeHtml(t("skill.lessons.missingLabel"))} ${escapeHtml(l.missing.join("、"))}</div>` : "";
+      const fix = l.fix ? `<div class="skill-lesson-meta">${escapeHtml(t("skill.lessons.fixLabel"))} ${escapeHtml(l.fix)}</div>` : "";
+      row.innerHTML = `
+        <div class="skill-lesson-head">
+          <span class="skill-lesson-kind">${skillLessonKindBadge(l.kind)}</span>
+          <span class="skill-lesson-meta">${escapeHtml(agentName)} · ${escapeHtml(at)}</span>
+          ${l.resolved ? `<span class="skill-lesson-resolved">${escapeHtml(t("skill.lessons.resolved"))}</span>` : ""}
+          <button class="icon-btn danger" data-lesson-del="${escapeHtml(l.id)}" title="${escapeHtml(t("skill.lessons.delete"))}">🗑️</button>
+        </div>
+        <div class="skill-lesson-summary">${escapeHtml(l.summary || "")}</div>
+        ${missing}${fix}`;
+      row.querySelector("[data-lesson-del]").onclick = () => deleteSkillLesson(l.id);
+      el.appendChild(row);
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="kb-empty">${escapeHtml(t("skill.lessons.fail", { err: e }))}</div>`;
+  }
+}
+
+async function addSkillLesson() {
+  if (!lessonsSkillId || !state.token) return;
+  const summary = $("slSummary").value.trim();
+  if (!summary) { toast(t("skill.lessons.required")); return; }
+  const missing = $("slMissing").value.split(/[,，;；]/).map((x) => x.trim()).filter(Boolean);
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(lessonsSkillId)}/lessons`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + state.token },
+      body: JSON.stringify({ agentId: $("slAgent").value || null, summary, missing, fix: $("slFix").value.trim() || null }),
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("skill.lessons.fail", { err: (d && (d.message || d.code)) || res.status })); return; }
+    toast(t("skill.lessons.added"));
+    $("slSummary").value = "";
+    $("slMissing").value = "";
+    $("slFix").value = "";
+    await loadSkillLessons();
+  } catch (e) { toast(t("skill.lessons.fail", { err: e })); }
+}
+
+async function deleteSkillLesson(lessonId) {
+  if (!lessonsSkillId || !state.token) return;
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(lessonsSkillId)}/lessons/${encodeURIComponent(lessonId)}`, {
+      method: "DELETE", headers: { Authorization: "Bearer " + state.token },
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => null);
+      toast(t("skill.lessons.fail", { err: (d && (d.message || d.code)) || res.status }));
+      return;
+    }
+    toast(t("skill.lessons.deleted"));
+    await loadSkillLessons();
+  } catch (e) { toast(t("skill.lessons.fail", { err: e })); }
+}
+
 /// <summary>刷新技能批量删除状态栏（选中数）与全选。</summary>
 function updateSkillBatchStatus() {
   const box = $("skillSelectAll");
@@ -2631,6 +2747,8 @@ function openSkillForm(skillId) {
   sf("sgRequest").value = ""; // AI 生成区的需求/偏好属上一份内容，不跨技能保留
   const pref = $("sgPreferClient");
   if (pref) pref.checked = false;
+  // 经验管理只对已保存的技能开放（新建尚未落库，没有可挂载的经验）
+  $("sfLessons")?.classList.toggle("hidden", !s);
 
   // 重新装载目标：编辑 → 取该技能字段；新建 → 保持上面的空默认
   if (s) {
@@ -18803,6 +18921,13 @@ function init() {
   $("skillRepairRun").onclick = runSkillRepair;
   $("skillRepairModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSkillRepairModal(); });
   $("skillRepairModal").addEventListener("click", (e) => { if (e.target === $("skillRepairModal")) closeSkillRepairModal(); });
+  // 技能经验管理（1.0.351）
+  const closeLessons = () => $("skillLessonsModal").classList.add("hidden");
+  $("sfLessons").onclick = () => { if (editingSkillId) openSkillLessonsModal(editingSkillId); };
+  $("skillLessonsAdd").onclick = addSkillLesson;
+  $("skillLessonsClose").onclick = closeLessons;
+  $("skillLessonsModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeLessons(); });
+  $("skillLessonsModal").addEventListener("click", (e) => { if (e.target === $("skillLessonsModal")) closeLessons(); });
   $("skillAddBtn").onclick = () => openSkillForm(null);
   $("sfBack").onclick = () => {
     if (longTaskBusy) { toast(t("common.busyLongTask")); return; }

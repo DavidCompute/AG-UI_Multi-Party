@@ -7,6 +7,8 @@ public static class SkillLessonKinds
     public const string Failure = "failure";
     /// <summary>修复成功后的正向经验（怎么改好的）。</summary>
     public const string Repair = "repair";
+    /// <summary>人工补写的经验笔记（1.0.351）。</summary>
+    public const string Note = "note";
 }
 
 /// <summary>
@@ -41,6 +43,8 @@ public sealed record SkillLesson(
         var missing = Missing is { Length: > 0 } ? "（" + string.Join("、", Missing) + "）" : "";
         if (string.Equals(Kind, SkillLessonKinds.Repair, StringComparison.Ordinal))
             return "修复经验：" + Summary + (string.IsNullOrWhiteSpace(Fix) ? "" : "；" + Fix);
+        if (string.Equals(Kind, SkillLessonKinds.Note, StringComparison.Ordinal))
+            return "经验：" + Summary + missing + (string.IsNullOrWhiteSpace(Fix) ? "" : "；做法：" + Fix);
         return "上次失败：" + Summary + missing + (string.IsNullOrWhiteSpace(Fix) ? "" : "；改进：" + Fix);
     }
 }
@@ -160,6 +164,43 @@ public sealed class SkillLessonStore
     {
         if (string.IsNullOrWhiteSpace(skillId)) return 0;
         lock (_gate) return _lessons.RemoveAll(l => string.Equals(l.SkillId, skillId, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 人工补写一条经验笔记（1.0.351）：供经验管理界面纠偏 / 补充运营知识。
+    /// 内容为空时返回 null；同「技能 + 岗位」仍按 <see cref="MaxPerSkillAgent"/> 保留最近几条。
+    /// </summary>
+    public SkillLesson? AddManual(string skillId, string? agentId, string summary, string[]? missing, string? fix)
+    {
+        var text = (summary ?? "").Trim();
+        if (text.Length == 0) return null;
+        if (text.Length > 500) text = text[..500];
+        var miss = (missing ?? [])
+            .Where(m => !string.IsNullOrWhiteSpace(m))
+            .Select(m => m.Trim())
+            .Take(10)
+            .ToArray();
+        var fixText = string.IsNullOrWhiteSpace(fix) ? null : fix.Trim();
+        if (fixText is { Length: > 300 }) fixText = fixText[..300];
+        var lesson = new SkillLesson(
+            "sl_" + Guid.NewGuid().ToString("N")[..12],
+            skillId,
+            string.IsNullOrWhiteSpace(agentId) ? null : agentId.Trim(),
+            SkillLessonKinds.Note,
+            text, miss, fixText, "",
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Resolved: false);
+        Add(lesson);
+        return lesson;
+    }
+
+    /// <summary>删除单条经验（仅当它确实属于该技能时）；返回是否删除。</summary>
+    public bool Remove(string skillId, string lessonId)
+    {
+        if (string.IsNullOrWhiteSpace(skillId) || string.IsNullOrWhiteSpace(lessonId)) return false;
+        lock (_gate)
+            return _lessons.RemoveAll(l =>
+                string.Equals(l.Id, lessonId, StringComparison.Ordinal)
+                && string.Equals(l.SkillId, skillId, StringComparison.Ordinal)) > 0;
     }
 
     /// <summary>
