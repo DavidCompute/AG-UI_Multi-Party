@@ -53,6 +53,42 @@ public sealed class AgentPerformanceTests
     }
 
     [Fact]
+    public void ArtifactQualityStore_FiltersByAgentGroupAndTime()
+    {
+        var store = new ArtifactQualityStore();
+        store.Record(new ArtifactQualityEvent("a1", "docx_report", "Docx", 100, true, [], "g1", 1000));
+        store.Record(new ArtifactQualityEvent("a2", "zip_pack", "Archive", 40, false, ["空包"], "g2", 2000));
+        store.Record(new ArtifactQualityEvent("", "docx_report", "Docx", 0, false, [], "g1", 3000)); // 无岗位丢弃
+
+        Assert.Equal(2, store.Snapshot().Count);
+        Assert.Single(store.Query(1500));
+        Assert.Equal("a2", Assert.Single(store.Query(0, agentId: "a2")).AgentId);
+        Assert.Equal("a1", Assert.Single(store.Query(0, groupId: "g1")).AgentId);
+    }
+
+    [Fact]
+    public void Aggregate_Artifacts_ComputesAvgScoreAndFlagsLowQuality()
+    {
+        var artifacts = new[]
+        {
+            new ArtifactQualityEvent("a1", "docx_report", "Docx", 100, true, [], "g1", Now - 1000),
+            new ArtifactQualityEvent("a1", "docx_report", "Docx", 40, false, ["正文过短"], "g1", Now - 900),
+            new ArtifactQualityEvent("a1", "xlsx_book", "Xlsx", 70, true, [], "g1", Now - 800),
+            new ArtifactQualityEvent("a1", "docx_report", "Docx", 0, false, ["缺少产物"], "g1", Now - 40L * 24 * 3600 * 1000),
+        };
+        var names = new Dictionary<string, string> { ["a1"] = "交付岗" };
+
+        var stat = AgentPerformance.Aggregate([], [], names, 30, Now, artifacts: artifacts)
+            .Single(s => s.AgentId == "a1");
+
+        Assert.Equal(3, stat.ArtifactRuns); // 窗口外的一条不计
+        Assert.Equal(2, stat.ArtifactValid);
+        Assert.Equal(70.0, stat.ArtifactAvgScore, 1); // (100+40+70)/3
+        Assert.Equal(2.0 / 3, stat.ArtifactValidRate!.Value, 3);
+        Assert.Contains("low-artifact", stat.Flags);
+    }
+
+    [Fact]
     public void Aggregate_ExcludesFeedbackOutsideWindow_AndFallsBackToId()
     {
         var fb = new[]

@@ -119,6 +119,7 @@
 - **落点模块**：`AgentApi`、前端「智能体管理」、复用 starter JSON 打包结构。
 - **在线分发（已实现）**：除内置角色包外，管理员可配置<b>在线目录源</b>（任意静态 JSON 地址），用户一键安装目录里的包；也可把自建数字员工<b>发布</b>为分包文件自行托管。合同为纯 JSON（目录索引 + 包 `schema=knowgath/marketplace-pack/v1`），无需专用后端。安装<b>两趟</b>处理（先分配新 ID，再把包内相互引用重映射），并做<b>安全净化</b>（清桥接端点 / 令牌、他实例用户组 id、私有标记）；拉取限制 http/https、2MB、10s、不开重定向、60s 缓存，坏源不影响聚合。前端：「AI 角色管理」工具栏「🏪 模板市场」。落点：`Agents/MarketplaceService.cs`（`ImportDefinitions`）、`Web/MarketplaceRemote.cs`、`Web/MarketplaceApi.cs`。
 - **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
+- **产物质量接入绩效与交付看板（1.0.343，已实现）**：新增 `ArtifactQualityStore`（扩展区 `artifactQuality`，最近 5000 条），每次带产物契约的技能执行记录岗位 / 技能 / 类型 / 评分 / 是否合格 / 缺失项 / 知聚；绩效表与图表 KPI 新增「产物质量」（平均分 + 合格率），关注标记新增 `low-artifact`；组织体检 Markdown / CSV / HTML 同步带出产物质量与建议。生成期自动修复探针会清空 ambient，不计入岗位绩效。
 - **产物契约扩展到图片 / 压缩包 / 代码（1.0.342，已实现）**：`SkillArtifactContract` 新增图片（PNG/JPEG/GIF/WEBP/BMP 签名与尺寸）、ZIP 压缩包（至少一个非空条目）、源码文件（无 NUL、足够内容）校验；每次校验输出 **0–100 质量评分 + 缺失项清单**，告警文案直接带出。源码类扩展名（`.cs/.py/...`）进入下载白名单但强制附件下载，`.js/.sh/.html/.svg` 仍拒绝。
 - **产物契约与自动修补（1.0.341，已实现）**：`SkillArtifactContract` 在文档技能执行后校验 `produce_file`、扩展名、ZIP/PDF 签名与真实内容（Word 正文 / 幻灯片文字 / 工作表单元格 / PDF 页面）；空壳产物追加明确告警且不再被交付兑底当成成功。生成期 `SkillAutoFixer` 对服务端自建文档技能用标准样例真实跑一次，契约失败进入既有自动修复循环（最多 3 轮）；试运行遇到契约失败也会返回“一键应用修正正文”。
 

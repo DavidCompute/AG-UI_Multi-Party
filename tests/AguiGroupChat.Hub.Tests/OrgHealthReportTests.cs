@@ -55,6 +55,23 @@ public sealed class OrgHealthReportTests
     }
 
     [Fact]
+    public void BuildMarkdown_ReportsArtifactQualityAndAdvice()
+    {
+        var stats = new[]
+        {
+            new AgentPerformance.AgentStat("a1", "空壳专员", 5, 100, 100, 0, 200, 0, 0, "2026-10-10",
+                ArtifactRuns: 4, ArtifactValid: 1, ArtifactAvgScore: 40, ArtifactLow: 3),
+        };
+        var defs = new Dictionary<string, AgentDefinition> { ["a1"] = new AgentDefinition { AgentId = "a1", Nickname = "空壳专员" } };
+
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, new PricingOptions(), 1_700_000_000_000);
+
+        Assert.Contains("产物质量：平均 40.0/100", md);
+        Assert.Contains("产物质量偏低", md);
+        Assert.Contains("40.0/100 · 25%", md);
+    }
+
+    [Fact]
     public void BuildMarkdown_WithPrevStats_ShowsPeriodOverPeriodLine()
     {
         // 本期：调用 200；上期：100 → ▲100%

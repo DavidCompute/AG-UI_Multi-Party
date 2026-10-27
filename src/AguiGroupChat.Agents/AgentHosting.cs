@@ -88,6 +88,8 @@ public static class AgentHosting
         services.AddSingleton<BridgeHealthService>();
         // 轻量运行指标（6.1）：进程内计数器，管理员控制台查看
         services.AddSingleton<MetricsService>();
+        // 产物质量事件（1.0.343）：技能产物契约结果，供绩效 / 交付看板聚合
+        services.AddSingleton<ArtifactQualityStore>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效
@@ -454,6 +456,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("msgFeedback", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册产物质量事件到持久化扩展区「artifactQuality」：重启后近期交付质量不丢。</summary>
+    public static void RegisterArtifactQualityPersistence(this IServiceProvider services)
+    {
+        var quality = services.GetRequiredService<ArtifactQualityStore>();
+        Func<object?> snapshot = () => quality.SnapshotState();
+        Action<JsonElement> restore = element => quality.RestoreState(
+            element.Deserialize<List<ArtifactQualityEvent>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("artifactQuality", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("artifactQuality", snapshot, restore);
         }
     }
 

@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.342 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.342 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.343 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.343 Release Notes (current Windows desktop release)
+
+**版本说明**：**产物质量接入绩效与交付看板**——每次带产物契约的技能执行记录岗位 / 评分 / 是否合格 / 缺失项；绩效表与组织体检新增「产物质量」与 `low-artifact` 关注标记。
+**Version note**: **Artifact quality in performance and delivery dashboard** — every skill execution with an artifact contract records agent / score / pass / missing items; the performance table and org health gain **Artifact quality** and a `low-artifact` attention flag.
+
+## 变更
+# Changes
+
+中文：
+- **质量事件采集**：新增 `ArtifactQualityStore`（扩展区 `artifactQuality`，最近 5000 条，重启保留），记录 `agentId / skillId / kind / score / satisfied / missing / groupId / timestamp`；只记录有明确产物契约的技能执行，生成期自动修复探针会临时清空 ambient，不计入岗位绩效。
+- **绩效看板**：`/ag-ui/admin/agent-performance` 新增 `artifactRuns / artifactValid / artifactValidRate / artifactAvgScore / artifactLow`；表格新增「产物质量」列（平均分 / 100 · 合格率），meta 显示整体产物质量；`low-artifact` 判据为「窗口内至少 2 次产物执行，且平均分 < 70 或合格率 < 70%」。
+- **组织体检**：Markdown 新增「产物质量」总览行、明细列与建议；图表 KPI 新增产物质量卡片（含环比）；CSV / HTML 明细同步携带；`low-artifact` 柱体按红色关注显示。
+- **知聚范围**：按 `?groupId=` 查看绩效时，产物质量事件也按 `groupId` 过滤，不再混入其他知聚。
+
+English:
+- **Quality event collection**: new `ArtifactQualityStore` (extension area `artifactQuality`, latest 5000 events, persisted across restarts) records `agentId / skillId / kind / score / satisfied / missing / groupId / timestamp`; only executions with an explicit artifact contract are recorded, and generation-time auto-repair probes clear ambient so they do not count toward employee performance.
+- **Performance dashboard**: `/ag-ui/admin/agent-performance` gains `artifactRuns / artifactValid / artifactValidRate / artifactAvgScore / artifactLow`; the table gains an **Artifact quality** column (average / 100 · pass rate), the meta line shows overall artifact quality, and the `low-artifact` rule is "at least 2 artifact executions in the window with average score < 70 or pass rate < 70%".
+- **Org health**: Markdown gains an artifact-quality overview line, detail column, and advice; the chart KPI gains an artifact-quality card (with period-over-period); CSV / HTML details carry the same data; `low-artifact` bars use the red attention style.
+- **Group scope**: when viewing performance with `?groupId=`, artifact-quality events are filtered by `groupId` as well.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.6（绩效 / 图表 / 报告）、§9.2（绩效接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.343。
+English: `docs/user-guide.md` / `en.md` §8.6 (performance / charts / report), §9.2 (performance API); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.343.
+
+## 测试
+# Tests
+
+中文：`ArtifactQualityStore` 过滤用例、绩效产物聚合 / `low-artifact` 标记、组织体检产物质量行均通过；`node --check app.js`；i18n 审计 **zh=en=2339，missing 0**；配置键与文档引用校验通过；Docker 重建后技能试运行与产物质量上报正常；全量 `dotnet vstest` **1964 通过 / 0 失败**。
+English: the `ArtifactQualityStore` filtering case, performance artifact aggregation / `low-artifact` flag, and org-health artifact-quality line all pass; `node --check app.js`; the i18n audit reports **zh=en=2339, missing 0**; config-key and docs-reference checks pass; after the Docker rebuild skill test runs and artifact-quality reporting work; the full `dotnet vstest` run passes **1964 / 0**.
+
+---
+
+# AG-UI 群聊桌面版 1.0.342 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.342 Release Notes (historical)
 
 **版本说明**：**产物契约扩展到图片 / 压缩包 / 代码 + 质量评分**——不只文档，图片、ZIP、源码产物也要过签名 / 结构与内容校验；每次校验给出 0–100 分与缺失项清单。
 **Version note**: **Artifact contract extended to images / archives / code + quality score** — beyond documents, images, ZIPs, and source artifacts now pass signature, structure, and content checks, with a 0–100 score and a missing-item list for every validation.

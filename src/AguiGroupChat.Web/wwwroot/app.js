@@ -8460,14 +8460,14 @@ async function loadAgentPerformance() {
   const scope = perfGroupId ? `&groupId=${encodeURIComponent(perfGroupId)}` : "";
   if (meta) meta.textContent = t("admin.loading");
   if (hints) hints.textContent = "";
-  rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${t("admin.loading")}</td></tr>`;
+  rows.innerHTML = `<tr><td colspan="10" class="admin-empty">${t("admin.loading")}</td></tr>`;
   try {
     const res = await fetch(`/ag-ui/admin/agent-performance?days=${encodeURIComponent(days)}${scope}`, { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
-    if (!res.ok || !d) { perfData = null; if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
+    if (!res.ok || !d) { perfData = null; if (meta) meta.textContent = ""; rows.innerHTML = `<tr><td colspan="10" class="admin-empty">${escapeHtml(errMsg(d, "HTTP " + res.status))}</td></tr>`; return; }
     perfData = d;
     renderPerfRows();
-  } catch { perfData = null; if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
+  } catch { perfData = null; if (meta) meta.textContent = ""; if (hints) hints.textContent = ""; rows.innerHTML = `<tr><td colspan="10" class="admin-empty">${escapeHtml(t("admin.sysNetErr"))}</td></tr>`; }
 }
 
 /** 按当前筛选（仅看需关注 / 名称关键词）渲染绩效表（数据已就绪时不再重新拉取）。 */
@@ -8484,6 +8484,7 @@ function renderPerfRows() {
   const cur = price.currency || "$";
   const fmtCost = (v) => price.configured ? cur + Number(v || 0).toFixed(2) : "—";
   const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+    : f === "low-artifact" ? t("admin.perfFlagLowArtifact")
     : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
   const flagged = list.filter((a) => (a.flags || []).length);
   const scope = d.scope || null;         // 知聚范围（非空时 👍👎 / 好评率 不可用）
@@ -8503,6 +8504,7 @@ function renderPerfRows() {
       rate: s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%",
     });
     if (price.configured) m += " · " + t("admin.perfCost", { cost: fmtCost(s.cost) });
+    if (s.artifactRuns) m += " · " + t("admin.perfArtifactMeta", { score: Number(s.artifactAvgScore || 0).toFixed(1), rate: Math.round(Number(s.artifactValidRate || 0) * 100) });
     if (s.budgetPct != null) m += " · " + t("admin.perfBudget", { currency: cur, budget: Number(s.budget || 0).toFixed(2), pct: s.budgetPct }) + (s.overBudget ? " ⚠" : "");
     if (filtered.length !== list.length) m += " · " + t("admin.perfShowing", { n: filtered.length, total: list.length });
     meta.textContent = m;
@@ -8513,10 +8515,13 @@ function renderPerfRows() {
     : (flagged.length
       ? t("admin.perfHints", { names: flagged.slice(0, 8).map((a) => a.name + "（" + (a.flags || []).map(flagLabel).join(" / ") + "）").join("、") })
       : t("admin.perfHintsNone"));
-  if (!list.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
-  if (!filtered.length) { rows.innerHTML = `<tr><td colspan="9" class="admin-empty">${escapeHtml(t("admin.perfNoMatch"))}</td></tr>`; return; }
+  if (!list.length) { rows.innerHTML = `<tr><td colspan="10" class="admin-empty">${escapeHtml(t("admin.perfEmpty"))}</td></tr>`; return; }
+  if (!filtered.length) { rows.innerHTML = `<tr><td colspan="10" class="admin-empty">${escapeHtml(t("admin.perfNoMatch"))}</td></tr>`; return; }
   rows.innerHTML = filtered.map((a) => {
     const rate = a.positiveRate == null ? "—" : Math.round(a.positiveRate * 100) + "%";
+    const artifact = a.artifactRuns
+      ? `${Number(a.artifactAvgScore || 0).toFixed(1)}/100 · ${Math.round(Number(a.artifactValidRate || 0) * 100)}%`
+      : "—";
     const flags = (a.flags || []).length
       ? (a.flags || []).map((f) => `<span class="tag-disabled">${escapeHtml(flagLabel(f))}</span>`).join(" ")
       : `<span class="muted">—</span>`;
@@ -8524,7 +8529,7 @@ function renderPerfRows() {
       + `<td>${Number(a.calls || 0).toLocaleString()}</td><td>${Number(a.totalTokens || 0).toLocaleString()}</td>`
       + `<td>${price.configured ? fmtCost(a.cost) : "—"}</td>`
       + `<td>${scope ? "—" : Number(a.up || 0).toLocaleString()}</td><td>${scope ? "—" : Number(a.down || 0).toLocaleString()}</td>`
-      + `<td>${rate}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
+      + `<td>${rate}</td><td>${escapeHtml(artifact)}</td><td>${escapeHtml(a.lastDate || "—")}</td><td>${flags}</td></tr>`;
   }).join("");
 }
 
@@ -8597,14 +8602,17 @@ function orgHealthTable() {
     };
   }
   const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+    : f === "low-artifact" ? t("admin.perfFlagLowArtifact")
     : f === "idle" ? t("admin.perfFlagIdle", { days: d.days || 30 }) : f;
   return {
     header: [t("admin.perfThAgent"), t("admin.perfThAgentId"), t("admin.perfThCalls"), t("admin.perfThTokens"),
-      t("admin.perfThUp"), t("admin.perfThDown"), t("admin.perfThRate"), t("admin.perfThCost"), t("admin.perfThLast"), t("admin.perfThFlag")],
+      t("admin.perfThUp"), t("admin.perfThDown"), t("admin.perfThRate"), t("admin.perfThArtifact"),
+      t("admin.perfThCost"), t("admin.perfThLast"), t("admin.perfThFlag")],
     rows: (d.agents || []).slice().sort((a, b) => (b.calls || 0) - (a.calls || 0)).map((a) => [
       a.name || a.agentId, a.agentId || "", Number(a.calls || 0), Number(a.totalTokens || 0),
       Number(a.up || 0), Number(a.down || 0),
       a.positiveRate == null ? "" : Math.round(a.positiveRate * 1000) / 10 + "%",
+      a.artifactRuns ? `${Number(a.artifactAvgScore || 0).toFixed(1)}/100 · ${Math.round(Number(a.artifactValidRate || 0) * 100)}%` : "",
       costCell(a.cost), a.lastDate || "", (a.flags || []).map(flagLabel).join(" / "),
     ]),
   };
@@ -8678,6 +8686,9 @@ function downloadOrgHealthHtml() {
     + card(t("admin.perfThTokens"), num(s.totalTokens), dOf(s.totalTokens, prev && prev.totalTokens))
     + card(t("admin.perfThCost"), priced ? cur + Number(s.cost || 0).toFixed(2) : "—", priced && prev && prev.cost != null ? dOf(Number(s.cost || 0), Number(prev.cost)) : null)
     + card(t("admin.perfThRate"), s.positiveRate == null ? "—" : Math.round(s.positiveRate * 100) + "%", dOf(s.positiveRate, prev && prev.positiveRate))
+    + card(t("admin.orgHealthArtifact"), s.artifactAvgScore == null ? "—"
+      : `${Number(s.artifactAvgScore).toFixed(1)}/100 · ${Math.round(Number(s.artifactValidRate || 0) * 100)}%`,
+      dOf(s.artifactValidRate, prev && prev.artifactValidRate))
     + card(t("admin.orgHealthFlagged"), num(s.flagged), dOf(s.flagged, prev && prev.flagged));
 
   const barRows = orgHealthBarRows().filter((r) => orgHealthBarValue(r) > 0).slice().sort((a, b) => orgHealthBarValue(b) - orgHealthBarValue(a)).slice(0, 12);
@@ -8686,7 +8697,7 @@ function downloadOrgHealthHtml() {
     const v = orgHealthBarValue(r);
     const pct = Math.max(2, Math.round((v / bmax) * 100));
     const flags = r.flags || [];
-    const cls = flags.includes("low-praise") ? " low" : flags.includes("idle") ? " idle" : "";
+    const cls = flags.includes("low-praise") || flags.includes("low-artifact") ? " low" : flags.includes("idle") ? " idle" : "";
     const rt = r.positiveRate == null ? "" : " · " + Math.round(r.positiveRate * 100) + "%";
     return `<div class="bar-row"><span class="bar-name">${escapeHtml(r.name)}</span><span class="bar-track"><span class="bar-fill${cls}" style="width:${pct}%"></span></span><span class="bar-val">${escapeHtml(fmtVal(v) + rt)}</span></div>`;
   }).join("") : `<div class="meta">${escapeHtml(t(orgHealthDim === "agents" ? "admin.perfEmpty" : "admin.orgHealthDimEmpty"))}</div>`;
@@ -9032,6 +9043,9 @@ function renderOrgHealthCharts(d, days) {
     + card(t("admin.perfThTokens"), num(s.totalTokens), dOf(s.totalTokens, prev && prev.totalTokens))
     + card(t("admin.perfThCost"), cost, price.configured && prev && prev.cost != null ? dOf(Number(s.cost || 0), Number(prev.cost)) : null)
     + card(t("admin.perfThRate"), rate, dOf(s.positiveRate, prev && prev.positiveRate))
+    + card(t("admin.orgHealthArtifact"), s.artifactAvgScore == null ? "—"
+      : `${Number(s.artifactAvgScore).toFixed(1)}/100 · ${Math.round(Number(s.artifactValidRate || 0) * 100)}%`,
+      dOf(s.artifactValidRate, prev && prev.artifactValidRate))
     + card(t("admin.orgHealthFlagged"), num(s.flagged), dOf(s.flagged, prev && prev.flagged));
   $("orgHealthMeta").textContent = t("admin.orgHealthWindow", { from: d.from || "", to: d.to || "" })
     + (prev ? " · " + t("admin.orgHealthPrevHint", { days }) : "");
@@ -9039,6 +9053,7 @@ function renderOrgHealthCharts(d, days) {
   renderOrgHealthBars();
 
   const flagLabel = (f) => f === "low-praise" ? t("admin.perfFlagLowPraise")
+    : f === "low-artifact" ? t("admin.perfFlagLowArtifact")
     : f === "idle" ? t("admin.perfFlagIdle", { days }) : f;
   const flagged = (d.agents || []).filter((a) => a.flags && a.flags.length);
   $("orgHealthFlags").innerHTML = flagged.length
@@ -9085,7 +9100,7 @@ function renderOrgHealthBars() {
     const v = orgHealthBarValue(r);
     const pct = Math.max(2, Math.round((v / max) * 100));
     const flags = r.flags || [];
-    const cls = flags.includes("low-praise") ? " low" : flags.includes("idle") ? " idle" : "";
+    const cls = flags.includes("low-praise") || flags.includes("low-artifact") ? " low" : flags.includes("idle") ? " idle" : "";
     const rt = r.positiveRate == null ? "" : " · " + Math.round(r.positiveRate * 100) + "%";
     const valText = orgHealthMetric === "cost" ? cur + v.toFixed(2) : num(Math.round(v));
     return `<div class="oh-bar-row"><span class="oh-bar-name" title="${escapeHtml(r.id || "")}">${escapeHtml(r.name)}</span>`

@@ -20,10 +20,19 @@ public static class AgentPerformance
         long TotalTokens,
         int Up,
         int Down,
-        string? LastDate)
+        string? LastDate,
+        int ArtifactRuns = 0,
+        int ArtifactValid = 0,
+        double ArtifactAvgScore = 0,
+        int ArtifactLow = 0)
     {
         /// <summary>好评率 = 👍 / (👍 + 👎)；无反馈时为 null（前端显示「—」）。</summary>
         public double? PositiveRate => (Up + Down) == 0 ? null : Math.Round((double)Up / (Up + Down), 4);
+
+        /// <summary>产物合格率 = 契约通过次数 / 有产物契约的技能执行次数；无数据为 null。</summary>
+        public double? ArtifactValidRate => ArtifactRuns == 0 ? null : Math.Round((double)ArtifactValid / ArtifactRuns, 4);
+
+        public bool HasArtifactData => ArtifactRuns > 0;
 
         /// <summary>需要关注的标记（确定性、可解释）：<c>low-praise</c> 好评率偏低 / <c>idle</c> 无调用。
         /// 供控制台「员工绩效」页的「关注」列与建议栏使用（前端按 i18n 渲染）。</summary>
@@ -33,6 +42,7 @@ public static class AgentPerformance
             {
                 var flags = new List<string>();
                 if (Up + Down >= 3 && PositiveRate is { } rate && rate < 0.6) flags.Add("low-praise");
+                if (ArtifactRuns >= 2 && (ArtifactAvgScore < 70 || ArtifactValidRate < 0.7)) flags.Add("low-artifact");
                 if (Calls == 0) flags.Add("idle");
                 return flags;
             }
@@ -45,7 +55,8 @@ public static class AgentPerformance
         IReadOnlyDictionary<string, string> names,
         int days,
         long nowMs,
-        bool seedAllAgents = true)
+        bool seedAllAgents = true,
+        IReadOnlyList<ArtifactQualityEvent>? artifacts = null)
     {
         var fromMs = nowMs - (long)Math.Max(1, days) * 24 * 3600 * 1000;
         var acc = new Dictionary<string, Acc>(StringComparer.Ordinal);
@@ -76,6 +87,19 @@ public static class AgentPerformance
             else if (f.Value < 0) a.Down++;
         }
 
+        if (artifacts is not null)
+        {
+            foreach (var e in artifacts)
+            {
+                if (string.IsNullOrWhiteSpace(e.AgentId) || e.TimestampMs < fromMs || e.TimestampMs > nowMs) continue;
+                var a = Get(e.AgentId);
+                a.ArtifactRuns++;
+                if (e.Satisfied) a.ArtifactValid++;
+                a.ArtifactScoreSum += Math.Clamp(e.Score, 0, 100);
+                if (e.Score < 70) a.ArtifactLow++;
+            }
+        }
+
         return acc
             .Select(kv => new AgentStat(
                 kv.Key,
@@ -87,7 +111,11 @@ public static class AgentPerformance
                 kv.Value.Prompt + kv.Value.Completion + kv.Value.Reasoning,
                 kv.Value.Up,
                 kv.Value.Down,
-                kv.Value.LastDate))
+                kv.Value.LastDate,
+                kv.Value.ArtifactRuns,
+                kv.Value.ArtifactValid,
+                kv.Value.ArtifactRuns == 0 ? 0 : Math.Round((double)kv.Value.ArtifactScoreSum / kv.Value.ArtifactRuns, 1),
+                kv.Value.ArtifactLow))
             .OrderByDescending(s => s.Calls)
             .ThenByDescending(s => s.Up + s.Down)
             .ThenBy(s => s.Name, StringComparer.CurrentCulture)
@@ -99,5 +127,7 @@ public static class AgentPerformance
         public long Calls, Prompt, Completion, Reasoning;
         public int Up, Down;
         public string? LastDate;
+        public int ArtifactRuns, ArtifactValid, ArtifactLow;
+        public long ArtifactScoreSum;
     }
 }

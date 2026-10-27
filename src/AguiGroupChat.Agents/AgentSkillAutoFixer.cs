@@ -123,7 +123,19 @@ public sealed class SkillAutoFixer
         {
             var copy = CloneWithBody(def, body);
             var sample = SkillArtifactContract.SampleInput(kind);
-            var output = await _catalog.RunSkillAsync(copy, sample, ct).ConfigureAwait(false);
+            // 生成期探针是平台自测，不是该岗位对用户的真实交付：临时清空 ambient，
+            // 避免把样例运行记进「产物质量」绩效。
+            var previousAmbient = AgentGateway.AmbientContext.Value;
+            AgentGateway.AmbientContext.Value = null;
+            string output;
+            try
+            {
+                output = await _catalog.RunSkillAsync(copy, sample, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                AgentGateway.AmbientContext.Value = previousAmbient;
+            }
             var validation = SkillArtifactContract.Validate(copy, output);
             if (validation.IsSatisfied) return (true, null);
             var detail = validation.Issues.Count > 0

@@ -49,7 +49,13 @@ public static class OrgHealthReport
         var totalCost = pricing.EstimateCost(stats.Sum(s => s.PromptTokens), stats.Sum(s => s.CompletionTokens), stats.Sum(s => s.ReasoningTokens));
         var flagged = stats.Where(s => s.Flags.Count > 0).OrderByDescending(s => s.Flags.Count).ThenBy(s => s.Name, StringComparer.CurrentCulture).ToList();
         var lowPraise = stats.Count(s => s.Flags.Contains("low-praise"));
+        var lowArtifact = stats.Count(s => s.Flags.Contains("low-artifact"));
         var idle = stats.Count(s => s.Flags.Contains("idle"));
+        var artifactRuns = stats.Sum(s => s.ArtifactRuns);
+        var artifactValid = stats.Sum(s => s.ArtifactValid);
+        var artifactAvg = artifactRuns == 0 ? (double?)null
+            : Math.Round(stats.Sum(s => s.ArtifactAvgScore * s.ArtifactRuns) / artifactRuns, 1);
+        var artifactRate = artifactRuns == 0 ? (double?)null : (double)artifactValid / artifactRuns;
         var assignmentEdges = defs.Values.Sum(d => d.AssignmentIds?.Count ?? 0);
         var escalationEdges = defs.Values.Count(d => !string.IsNullOrWhiteSpace(d.EscalationAgentId));
         var pipelineSteps = defs.Values.Where(d => d.Pipeline is { Count: > 0 }).Sum(d => d.Pipeline!.Count);
@@ -63,6 +69,9 @@ public static class OrgHealthReport
         sb.AppendLine($"- 数字员工：{stats.Count} 位（窗口内有调用 {active} 位）");
         sb.AppendLine($"- 调用次数：{N0(totalCalls)}；Token：{N0(totalTokens)}；成本：{(priced ? cur + totalCost.ToString("0.00", CultureInfo.InvariantCulture) : "未配置单价（Agents:Pricing）")}");
         sb.AppendLine($"- 综合好评率：{Pct((up + down) == 0 ? null : (double)up / (up + down))}（👍 {up} / 👎 {down}）");
+        sb.AppendLine(artifactRuns == 0
+            ? "- 产物质量：—（窗口内没有带产物契约的技能执行）"
+            : $"- 产物质量：平均 {artifactAvg:0.0}/100，合格率 {Pct(artifactRate)}（{artifactValid}/{artifactRuns} 次合格）");
         if (prevStats is not null)
         {
             // 环比：与紧邻的上一同长度窗口对比（涨跌箭头 + 百分比）
@@ -89,6 +98,7 @@ public static class OrgHealthReport
                 var reasons = s.Flags.Select(f => f switch
                 {
                     "low-praise" => $"好评率偏低（{Pct(s.PositiveRate)}，👍 {s.Up} / 👎 {s.Down}）",
+                    "low-artifact" => $"产物质量偏低（平均 {s.ArtifactAvgScore:0.0}/100，合格率 {Pct(s.ArtifactValidRate)}，{s.ArtifactRuns} 次）",
                     "idle" => $"近 {days} 天无调用",
                     _ => f,
                 });
@@ -98,10 +108,10 @@ public static class OrgHealthReport
         sb.AppendLine();
         sb.AppendLine("## 三、数字员工绩效明细");
         sb.AppendLine();
-        sb.AppendLine("| 数字员工 | 调用 | Token | 成本 | 👍 | 👎 | 好评率 | 最近活跃 | 关注 |");
-        sb.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |");
+        sb.AppendLine("| 数字员工 | 调用 | Token | 成本 | 👍 | 👎 | 好评率 | 产物质量 | 最近活跃 | 关注 |");
+        sb.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |");
         foreach (var s in stats.OrderByDescending(x => x.Calls).ThenBy(x => x.Name, StringComparer.CurrentCulture))
-            sb.AppendLine($"| {s.Name} | {N0(s.Calls)} | {N0(s.TotalTokens)} | {Cost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens)} | {s.Up} | {s.Down} | {Pct(s.PositiveRate)} | {s.LastDate ?? "—"} | {(s.Flags.Count == 0 ? "—" : string.Join(" / ", s.Flags))} |");
+            sb.AppendLine($"| {s.Name} | {N0(s.Calls)} | {N0(s.TotalTokens)} | {Cost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens)} | {s.Up} | {s.Down} | {Pct(s.PositiveRate)} | {(s.ArtifactRuns == 0 ? "—" : $"{s.ArtifactAvgScore:0.0}/100 · {Pct(s.ArtifactValidRate)}")} | {s.LastDate ?? "—"} | {(s.Flags.Count == 0 ? "—" : string.Join(" / ", s.Flags))} |");
         sb.AppendLine();
         sb.AppendLine("## 四、组织架构（指派 / 提升 / 流水线）");
         var anyRel = false;
@@ -121,6 +131,7 @@ public static class OrgHealthReport
         var advice = new List<string>();
         if (lowPraise > 0) advice.Add($"有 {lowPraise} 位数字员工好评率偏低，建议复核其提示词或技能配置（可用「评测回归」建金标准用例对照）。");
         if (idle > 0) advice.Add($"有 {idle} 位数字员工近 {days} 天无调用，建议归档，或检查其触发关键词 / 可见范围是否过窄。");
+        if (lowArtifact > 0) advice.Add($"有 {lowArtifact} 位数字员工的产物质量偏低（空壳 / 缺正文 / 格式不合格），建议检查其文档技能输入与产物契约告警。");
         if (priced && totalCalls > 0)
         {
             var top = stats.OrderByDescending(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens)).FirstOrDefault();

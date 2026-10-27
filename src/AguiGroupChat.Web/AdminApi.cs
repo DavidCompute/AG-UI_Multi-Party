@@ -215,6 +215,7 @@ public static class AdminApi
             var names = catalog.ListDefinitions()
                 .ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
             var scopeId = string.IsNullOrWhiteSpace(groupId) ? null : groupId.Trim();
+            var artifactQuality = sp.GetService<ArtifactQualityStore>();
             IReadOnlyList<AgentPerformance.AgentStat> stats;
             string? scopeName = null;
             if (scopeId is not null)
@@ -223,20 +224,26 @@ public static class AdminApi
                 // seedAllAgents=false：只列该知聚内实际有用量的员工，避免「该群闲置」噪声。
                 var grows = usage.GetGroupUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"))
                     .Where(r => string.Equals(r.GroupId, scopeId, StringComparison.Ordinal));
-                stats = AgentPerformance.Aggregate(grows, (IReadOnlyList<MessageFeedbackEntry>)[], names, d, to.ToUnixTimeMilliseconds(), seedAllAgents: false);
+                IReadOnlyList<ArtifactQualityEvent> gArtifacts = artifactQuality?.Query(from.ToUnixTimeMilliseconds(), groupId: scopeId) ?? [];
+                stats = AgentPerformance.Aggregate(grows, (IReadOnlyList<MessageFeedbackEntry>)[], names, d, to.ToUnixTimeMilliseconds(), seedAllAgents: false, artifacts: gArtifacts);
                 scopeName = sp.GetService<GroupHub>()?.Store.AllGroups().FirstOrDefault(g => g.GroupId == scopeId)?.GroupName;
             }
             else
             {
                 var rows = usage.GetUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"));
                 var feedback = sp.GetService<MessageFeedbackStore>()?.Snapshot() ?? (IReadOnlyList<MessageFeedbackEntry>)[];
-                stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+                IReadOnlyList<ArtifactQualityEvent> artifacts = artifactQuality?.Query(from.ToUnixTimeMilliseconds()) ?? [];
+                stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds(), artifacts: artifacts);
             }
             var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
             var totalCost = stats.Sum(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens));
             var dailyAvgCost = totalCost / d;
+            var artifactRuns = stats.Sum(s => s.ArtifactRuns);
+            var artifactValid = stats.Sum(s => s.ArtifactValid);
+            var artifactAvgScore = artifactRuns == 0 ? (double?)null
+                : Math.Round(stats.Sum(s => s.ArtifactAvgScore * s.ArtifactRuns) / artifactRuns, 1);
             return Results.Ok(new
             {
                 days = d,
@@ -265,11 +272,17 @@ public static class AdminApi
                     budget = pricing.DailyBudget,
                     budgetPct = pricing.DailyBudget > 0 ? (double)Math.Round(dailyAvgCost / pricing.DailyBudget * 100, 1) : (double?)null,
                     overBudget = pricing.DailyBudget > 0 && dailyAvgCost > pricing.DailyBudget,
+                    artifactRuns,
+                    artifactValid,
+                    artifactValidRate = artifactRuns == 0 ? (double?)null : Math.Round((double)artifactValid / artifactRuns, 4),
+                    artifactAvgScore,
+                    artifactLow = stats.Sum(s => s.ArtifactLow),
                 },
                 agents = stats.Select(s => new
                 {
                     s.AgentId, s.Name, s.Calls, s.PromptTokens, s.CompletionTokens, s.ReasoningTokens, s.TotalTokens,
                     s.Up, s.Down, s.PositiveRate, s.LastDate, s.Flags,
+                    s.ArtifactRuns, s.ArtifactValid, s.ArtifactValidRate, s.ArtifactAvgScore, s.ArtifactLow,
                     cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
                 }),
             });
@@ -297,14 +310,17 @@ public static class AdminApi
             var from = to.AddDays(-d + 1);
             var rows = usage.GetUsageBetween(from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"));
             var feedback = sp.GetService<MessageFeedbackStore>()?.Snapshot() ?? (IReadOnlyList<MessageFeedbackEntry>)[];
+            var artifactQuality = sp.GetService<ArtifactQualityStore>();
             var defs = catalog.ListDefinitions();
             var names = defs.ToDictionary(x => x.AgentId, x => string.IsNullOrWhiteSpace(x.Nickname) ? x.AgentId : x.Nickname, StringComparer.Ordinal);
-            var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds());
+            IReadOnlyList<ArtifactQualityEvent> artifacts = artifactQuality?.Query(from.ToUnixTimeMilliseconds()) ?? [];
+            var stats = AgentPerformance.Aggregate(rows, feedback, names, d, to.ToUnixTimeMilliseconds(), artifacts: artifacts);
             // 上一窗口（同长度、紧邻当前窗口之前）：供环比
             var prevTo = from.AddDays(-1);
             var prevFrom = prevTo.AddDays(-d + 1);
             var prevRows = usage.GetUsageBetween(prevFrom.ToString("yyyy-MM-dd"), prevTo.ToString("yyyy-MM-dd"));
-            var prevStats = AgentPerformance.Aggregate(prevRows, feedback, names, d, prevTo.ToUnixTimeMilliseconds());
+            IReadOnlyList<ArtifactQualityEvent> prevArtifacts = artifactQuality?.Query(prevTo.AddDays(-d + 1).ToUnixTimeMilliseconds()) ?? [];
+            var prevStats = AgentPerformance.Aggregate(prevRows, feedback, names, d, prevTo.ToUnixTimeMilliseconds(), artifacts: prevArtifacts);
             var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var byId = defs.ToDictionary(x => x.AgentId, x => x, StringComparer.Ordinal);
             var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
@@ -376,6 +392,15 @@ public static class AdminApi
                     positiveRate = (up + down) == 0 ? (double?)null : Math.Round((double)up / (up + down), 4),
                     cost = Math.Round(totalCost, 4),
                     flagged = stats.Count(s => s.Flags is { Count: > 0 }),
+                    artifactRuns = stats.Sum(s => s.ArtifactRuns),
+                    artifactValid = stats.Sum(s => s.ArtifactValid),
+                    artifactValidRate = stats.Sum(s => s.ArtifactRuns) == 0
+                        ? (double?)null
+                        : Math.Round((double)stats.Sum(s => s.ArtifactValid) / stats.Sum(s => s.ArtifactRuns), 4),
+                    artifactAvgScore = stats.Sum(s => s.ArtifactRuns) == 0
+                        ? (double?)null
+                        : Math.Round(stats.Sum(s => s.ArtifactAvgScore * s.ArtifactRuns) / stats.Sum(s => s.ArtifactRuns), 1),
+                    artifactLow = stats.Sum(s => s.ArtifactLow),
                 },
                 // 上一窗口（同长度）：供前端 / 报告做环比
                 prev = new
@@ -390,11 +415,18 @@ public static class AdminApi
                         cost = Math.Round(prevTotalCost, 4),
                         positiveRate = (prevUp + prevDown) == 0 ? (double?)null : Math.Round((double)prevUp / (prevUp + prevDown), 4),
                         flagged = prevStats.Count(s => s.Flags is { Count: > 0 }),
+                        artifactValidRate = prevStats.Sum(s => s.ArtifactRuns) == 0
+                            ? (double?)null
+                            : Math.Round((double)prevStats.Sum(s => s.ArtifactValid) / prevStats.Sum(s => s.ArtifactRuns), 4),
+                        artifactAvgScore = prevStats.Sum(s => s.ArtifactRuns) == 0
+                            ? (double?)null
+                            : Math.Round(prevStats.Sum(s => s.ArtifactAvgScore * s.ArtifactRuns) / prevStats.Sum(s => s.ArtifactRuns), 1),
                     },
                 },
                 agents = stats.Select(s => new
                 {
                     s.AgentId, s.Name, s.Calls, s.TotalTokens, s.Up, s.Down, s.PositiveRate, s.LastDate, s.Flags,
+                    s.ArtifactRuns, s.ArtifactValid, s.ArtifactValidRate, s.ArtifactAvgScore, s.ArtifactLow,
                     cost = Math.Round(pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens), 4),
                 }),
                 // 图表视图「触发者」维度：按调用次数降序的前 50 名（无反馈 / flags，故仅调用量 / token / 成本）。

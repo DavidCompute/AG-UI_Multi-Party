@@ -188,9 +188,12 @@ public static class SkillArtifactContract
 
     /// <summary>契约失败时在原结果后追加告警；通过 / 非文档技能原样返回。</summary>
     public static string AppendWarningIfViolated(AgentSkillDefinition skill, string? output)
+        => AppendWarning((output ?? ""), Validate(skill, output));
+
+    /// <summary>用已算好的校验结果追加告警（避免调用方重复解析文件）。</summary>
+    public static string AppendWarning(string? output, SkillArtifactValidation validation)
     {
         var text = output ?? "";
-        var validation = Validate(skill, text);
         if (!validation.HasExpectedArtifact || validation.IsSatisfied) return text;
         if (text.Contains(FailurePrefix, StringComparison.Ordinal)) return text;
 

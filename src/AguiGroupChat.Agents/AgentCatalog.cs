@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.Collections.Concurrent;
+using AguiGroupChat.Hub.Agents;
 using System.ComponentModel;
 using System.Text.Json;
 using AguiGroupChat.Agents.Tools;
@@ -222,7 +223,22 @@ public sealed class AgentCatalog
             : "技能执行器不可用。";
         // 产物契约（1.0.341）：文档技能“跑完但没有可交付文件 / 只有标题”时明确告警；
         // 文件仍保留在返回里供 ProducedFileMarker 回档，不吞掉已生成的内容。
-        return SkillArtifactContract.AppendWarningIfViolated(skill, result);
+        var validation = SkillArtifactContract.Validate(skill, result);
+        if (validation.HasExpectedArtifact
+            && _services.GetService(typeof(ArtifactQualityStore)) is ArtifactQualityStore quality)
+        {
+            var ctx = AgentGateway.AmbientContext.Value;
+            quality.Record(new ArtifactQualityEvent(
+                ctx?.AgentId ?? "",
+                skill.SkillId ?? "",
+                validation.Kind.ToString(),
+                validation.Score,
+                validation.IsSatisfied,
+                validation.MissingItems.ToArray(),
+                ctx?.GroupId ?? "",
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+        }
+        return SkillArtifactContract.AppendWarning(result, validation);
     }
 
     /// <summary>
