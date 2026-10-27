@@ -92,6 +92,8 @@ public static class AgentHosting
         services.AddSingleton<ArtifactQualityStore>();
         // 产物质量告警（1.0.345）：连续低分告警，供管理端轮询与通知中心
         services.AddSingleton<ArtifactAlertStore>();
+        // 技能经验（1.0.349）：岗位级失败 / 修复经验，挂载技能时注入工具说明
+        services.AddSingleton<SkillLessonStore>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效
@@ -477,6 +479,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("artifactQuality", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册技能经验到持久化扩展区「skillLessons」：重启后岗位经验不丢（1.0.349）。</summary>
+    public static void RegisterSkillLessonPersistence(this IServiceProvider services)
+    {
+        var lessons = services.GetRequiredService<SkillLessonStore>();
+        Func<object?> snapshot = () => lessons.SnapshotState();
+        Action<JsonElement> restore = element => lessons.RestoreState(
+            element.Deserialize<List<SkillLesson>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("skillLessons", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("skillLessons", snapshot, restore);
         }
     }
 

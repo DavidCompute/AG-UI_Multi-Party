@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.348**
+> Applies to version: **1.0.349**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2082,6 +2082,16 @@ A paused skill gains a `🩺` action in the library row, opening `#skillRepairMo
 
 Orchestration link: `ToReusableSkills` no longer offers suspended skills (so the model cannot assign a disabled skill to a role), and `OrgApplyEngine` skips suspended references and reports them in `warnings` (avoiding a "looks mounted but never runs" false delivery). In the binding dialog, paused skills are greyed out and cannot be selected.
 
+#### 4.3.8 Skill experience (1.0.349)
+
+Skill failures and fixes no longer live only in alerts; they become **role experience** (`SkillLessonStore`, extension area `skillLessons`, latest 1000 entries, persisted across restarts):
+
+- When an artifact-quality alert fires, a **failure lesson** is recorded (N consecutive misses, missing items, how to avoid), keeping at most the latest 3 per skill + agent;
+- When a one-click repair **actually rewrites the body**, all previous failure lessons for that skill are marked resolved and a positive repair lesson is recorded;
+- When a skill is mounted (`AgentCatalog.Create`), unresolved role-level + skill-level lessons are injected into the tool description (up to 3, prefixed `Experience (avoid repeating)`), so the model sees the known pitfalls on every call;
+- Lessons contain only skill names / missing items / improvements — **never user text**; deleting a skill clears its lessons;
+- View them at `GET /ag-ui/skills/{skillId}/lessons` (owner or admin); the repair response gains `lessonSaved`.
+
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
 | Key | Default | Meaning |
@@ -2112,6 +2122,7 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | Pause mounting (1.0.345) | Owner or admin; evicts cached agents immediately |
 | `POST /ag-ui/skills/{skillId}/resume` | Resume mounting (1.0.345) | Same; clears the paused flags and re-mounts |
 | `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | Diagnose and repair (1.0.347) | Model rewrite + server self-test; only `apply=true` persists, see 4.3.7 |
+| `GET /ag-ui/skills/{skillId}/lessons` | Skill experience (1.0.349) | Owner or admin; failure / repair lessons, see 4.3.8 |
 
 #### 4.4.2 Who can create / edit / delete which types
 

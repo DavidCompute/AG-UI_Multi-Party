@@ -477,6 +477,7 @@ window.I18N_DICTS.en = {
   "skill.repair.ok": "Self-test passed (attempt {n}).",
   "skill.repair.notOk": "Self-test failed after {n} attempts; the skill was not changed.",
   "skill.repair.applied": "The repaired body was saved.",
+  "skill.repair.lessonSaved": "This failure and its fix were saved as role experience; the model will be reminded on the next call.",
   "skill.repair.state": "Current state: {state}",
   "skill.repair.stateResumed": "resumed",
   "skill.repair.stateSuspended": "still paused",

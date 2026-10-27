@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.348 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.348 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.349 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.349 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能经验沉淀**——失败与修复不再只停留在告警里，而是成为岗位经验；挂载该技能时自动注入工具说明，让模型记住“上次为什么失败、怎么避”。
+**Version note**: **Skill experience** — failures and fixes no longer live only in alerts; they become role experience injected into the tool description when the skill is mounted, so the model remembers why it failed and how to avoid it.
+
+## 变更
+# Changes
+
+中文：
+- **经验库**：新增 `SkillLessonStore`（扩展区 `skillLessons`，最近 1000 条，重启保留）；与语义记忆分开存放——经验是确定性工程笔记，不做 embedding、不被相似度稀释、不混入聊天记忆的遗忘曲线。
+- **自动沉淀**：产物质量告警命中时写一条失败经验（连续 N 次未达标 / 缺失项 / 避免方式），同一「技能 + 岗位」最多保留最近 3 条；新经验写入后失效引用该技能的智能体缓存，立即对已挂载岗位生效。
+- **修复闭环**：一键修复**真正改写正文**后，把该技能全部旧失败经验标为已解决，并写入一条正向修复经验（“模型修正后自测通过”）。
+- **召回方式**：`AgentCatalog.Create` 挂载技能时，把「岗位级 + 技能级」未解决经验注入工具说明（最多 3 条，前缀 `经验（避免重蹈覆辙）`），模型每次调用都能看到。
+- **边界**：经验只含技能名 / 缺失项 / 改进方式，**不含用户原文**；技能删除时经验一并清空；`GET /ag-ui/skills/{skillId}/lessons` 可查看（归属者或管理员），repair 响应新增 `lessonSaved`。
+
+English:
+- **Lesson store**: new `SkillLessonStore` (extension area `skillLessons`, latest 1000 entries, persisted). It is deliberately separate from semantic memory: lessons are deterministic engineering notes with no embedding, no similarity dilution and no chat-memory forgetting curve.
+- **Automatic capture**: an artifact-quality alert records a failure lesson (N consecutive misses / missing items / how to avoid), keeping the latest 3 per skill + agent; the agent cache is evicted so mounted roles see it immediately.
+- **Repair loop**: when a one-click repair **actually rewrites the body**, all previous failure lessons for that skill are marked resolved and a positive repair lesson is recorded.
+- **Recall**: when mounting a skill, `AgentCatalog.Create` injects unresolved role-level + skill-level lessons into the tool description (up to 3, prefixed `Experience (avoid repeating)`) so the model sees them on every call.
+- **Boundaries**: lessons contain only skill names / missing items / improvements — **never user text**; deleting a skill clears its lessons; view them at `GET /ag-ui/skills/{skillId}/lessons` (owner or admin); the repair response gains `lessonSaved`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.8（技能经验沉淀）、§4.4.1（经验接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.349。
+English: `docs/user-guide.md` / `en.md` §4.3.8 (skill experience), §4.4.1 (lessons API); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.349.
+
+## 测试
+# Tests
+
+中文：新增 `SkillLessonStoreTests`（去重上限 / 岗位召回 / 修复后解决 / 删除清理 / 提示词块 / 持久化往返）7 条通过；全量 `dotnet vstest` **1993 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2384，missing 0；配置键与文档引用校验通过；Docker 重建后验证 lessons / repair 接口与重启恢复。
+English: new `SkillLessonStoreTests` (per-key cap / role recall / resolve-after-repair / delete cleanup / prompt block / persistence round-trip), 7 passing; the full `dotnet vstest` run passes **1993 / 0**; `node --check app.js`; the i18n audit reports zh=en=2384, missing 0; config-key and docs-reference checks pass; after the Docker rebuild the lessons / repair APIs and restart restore are verified.
+
+---
+
+# AG-UI 群聊桌面版 1.0.348 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.348 Release Notes (historical)
 
 **版本说明**：**技能质量画像驱动编排**——一键编排会看到每个候选技能近 30 天的合格率 / 均分 / 主要缺失项，优先选可靠技能，并在方案里标出“挂上就很可能交残次品”的风险项。
 **Version note**: **Quality-aware orchestration** — one-click orchestration now sees each candidate skill's last-30-day pass rate / average score / top missing items, prefers reliable skills, and flags risky ones that are likely to keep producing sub-par artifacts.

@@ -181,6 +181,7 @@ app.Services.RegisterTopicSummaryPersistence(); // 话题滚动小结（游标+�
 app.Services.RegisterMessageFeedbackPersistence(); // 消息 👍/👎 反馈跨重启保持
 app.Services.RegisterEvalCasePersistence(); // 数字员工评测集跨重启保持
 app.Services.RegisterArtifactQualityPersistence(); // 产物质量事件跨重启保持（绩效 / 交付看板）
+app.Services.RegisterSkillLessonPersistence(); // 技能经验（岗位级失败 / 修复笔记）跨重启保持（1.0.349）
 app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群→知识库 + 时间水位）跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）

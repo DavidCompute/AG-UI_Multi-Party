@@ -167,6 +167,30 @@ public static class SkillApi
             return Results.Ok(new { updated = true, skillId = skill.SkillId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 技能经验（1.0.349）：查看该技能沉淀的岗位失败 / 修复经验（归属者或管理员）----
+        root.MapGet("/{skillId}/lessons", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可查看该技能经验"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可查看经验"), statusCode: StatusCodes.Status403Forbidden);
+            var lessons = ctx.RequestServices.GetService<SkillLessonStore>()?.ForSkill(skillId) ?? Array.Empty<SkillLesson>();
+            return Results.Ok(new
+            {
+                skillId,
+                lessons = lessons.Select(l => new
+                {
+                    l.Id, l.AgentId, l.Kind, l.Summary, l.Missing, l.Fix, l.GroupId,
+                    atMs = l.TimestampMs, l.Resolved,
+                }),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 删除技能（技能归属者或系统管理员）；已被数字员工引用的技能一并解除（按引用的 agent 引用清理在下文做，暂无外键）----
         root.MapDelete("/{skillId}", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
@@ -180,6 +204,8 @@ public static class SkillApi
             if (!auth.IsAdmin(user.UserId) && existing.OwnerId != user.UserId)
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可删除该技能"), statusCode: StatusCodes.Status403Forbidden);
             catalog.Remove(skillId);
+            // 技能没了，其岗位经验也一并清空（1.0.349）。
+            ctx.RequestServices.GetService<SkillLessonStore>()?.RemoveSkill(skillId);
             return Results.Ok(new { deleted = true, skillId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
@@ -297,6 +323,25 @@ public static class SkillApi
                 agents.InvalidateAgentsUsingSkill(skillId);
             }
 
+            // 修复成功且真的改了正文：把旧失败经验标为已解决，并沉淀一条正向修复经验（1.0.349）。
+            var lessonSaved = false;
+            if (applied)
+            {
+                var lessons = ctx.RequestServices.GetService<SkillLessonStore>();
+                if (lessons is not null)
+                {
+                    lessons.ResolveFailures(skillId);
+                    lessons.Add(new SkillLesson(
+                        "sl_" + Guid.NewGuid().ToString("N")[..12],
+                        skillId, null, SkillLessonKinds.Repair,
+                        $"模型修正后自测通过（第 {fix.Attempts} 次）",
+                        [],
+                        "按新正文执行；产出后仍确认交付文件齐全",
+                        "", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Resolved: false));
+                    lessonSaved = true;
+                }
+            }
+
             return Results.Ok(new
             {
                 skillId,
@@ -308,6 +353,7 @@ public static class SkillApi
                 fix.CorrectedDescription,
                 applied,
                 resumed = catalog.Get(skillId)?.Suspended == false,
+                lessonSaved,
                 diagnosis,
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());

@@ -898,6 +898,10 @@ public sealed class AgentCatalog
                 // 关键在于它在<b>真实执行时</b>生效，所以流式路径与审批恢复路径都能拦住。
                 // 客户端执行技能不经服务端，跳过。
                 var needsDocInputCheck = !isClientSkill && AgentGatewayHelpers.IsDocumentGenerator(skill);
+                // 技能经验（1.0.349）：把这个岗位用该技能踩过的坑注入工具说明（确定性笔记，不含用户隐私）。
+                var lessonBlock = (_services.GetService(typeof(SkillLessonStore)) as SkillLessonStore)
+                    ?.BuildPromptBlock(agentId, skill.SkillId);
+                if (!string.IsNullOrWhiteSpace(lessonBlock)) desc += "\n" + lessonBlock;
                 // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；批准恢复时 MSAGENT 会执行这个占位函数，
                 // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
                 AIFunction func = isClientSkill

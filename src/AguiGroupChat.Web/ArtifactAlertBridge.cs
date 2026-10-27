@@ -40,6 +40,7 @@ public static class ArtifactAlertBridge
         var skillCatalog = services.GetService(typeof(AgentSkillCatalog)) as AgentSkillCatalog;
         var agentCatalog = services.GetService(typeof(AgentCatalog)) as AgentCatalog;
         var alertStore = services.GetService(typeof(ArtifactAlertStore)) as ArtifactAlertStore;
+        var lessons = services.GetService(typeof(SkillLessonStore)) as SkillLessonStore;
         var dispatcher = services.GetService(typeof(WebhookDispatcher)) as WebhookDispatcher;
         var logger = (services.GetService(typeof(ILoggerFactory)) as ILoggerFactory)?.CreateLogger("ArtifactAlerts");
 
@@ -91,6 +92,24 @@ public static class ArtifactAlertBridge
                     decision.Runs, decision.LowRuns, Math.Clamp(evt.Score, 0, 100),
                     options.LowScoreThreshold, decision.Missing, suspended,
                     evt.GroupId ?? "", now));
+
+                // 岗位经验（1.0.349）：把“为什么失败 / 下次怎么避免”沉淀下来，下次挂载该技能时注入工具说明。
+                if (lessons is not null)
+                {
+                    lessons.Add(new SkillLesson(
+                        "sl_" + Guid.NewGuid().ToString("N")[..12],
+                        evt.SkillId,
+                        string.IsNullOrWhiteSpace(evt.AgentId) ? null : evt.AgentId,
+                        SkillLessonKinds.Failure,
+                        $"连续 {decision.LowRuns}/{decision.Runs} 次产物未达标（最近一次 {Math.Clamp(evt.Score, 0, 100)} 分）",
+                        decision.Missing,
+                        suspended
+                            ? "该技能已自动暂停；管理员在技能库点 🩺 修复后恢复"
+                            : "调用前确认已提供完整正文 / 页数 / 数据，产出后检查交付文件是否齐全",
+                        evt.GroupId ?? "", now, Resolved: false));
+                    // 新经验要能被已在缓存里的智能体看见：失效引用该技能的缓存，下次触发时重建工具说明。
+                    agentCatalog?.InvalidateAgentsUsingSkill(evt.SkillId);
+                }
 
                 dispatcher?.OnEvent(evt.GroupId ?? "", new ArtifactQualityAlertEvent
                 {
