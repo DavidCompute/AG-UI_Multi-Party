@@ -23,15 +23,27 @@ public sealed class ArtifactQualityStore
     private readonly object _gate = new();
     private readonly List<ArtifactQualityEvent> _events = new();
 
+    /// <summary>
+    /// 记录回调（1.0.345）：每次 <see cref="Record"/> 落库后触发一次，由
+    /// <c>ArtifactAlertBridge</c> 用来判定「连续低分 → 告警 / 自动隔离」。
+    /// 回调异常在这里吞掉，绝不影响技能执行主流程。
+    /// </summary>
+    public Action<ArtifactQualityEvent>? OnRecord { get; set; }
+
     public void Record(ArtifactQualityEvent evt)
     {
         if (string.IsNullOrWhiteSpace(evt.AgentId) || string.IsNullOrWhiteSpace(evt.Kind)) return;
+        Action<ArtifactQualityEvent>? callback;
         lock (_gate)
         {
             _events.Add(evt);
             if (_events.Count > MaxEvents)
                 _events.RemoveRange(0, _events.Count - MaxEvents);
+            callback = OnRecord;
         }
+        if (callback is null) return;
+        try { callback(evt); }
+        catch { /* 告警是增强，不影响产物记录与技能执行 */ }
     }
 
     public IReadOnlyList<ArtifactQualityEvent> Snapshot()

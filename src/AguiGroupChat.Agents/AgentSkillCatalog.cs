@@ -102,6 +102,34 @@ public sealed class AgentSkillCatalog
     /// <summary>是否已存在该技能 ID。</summary>
     public bool Contains(string skillId) => _skills.ContainsKey(skillId);
 
+    /// <summary>
+    /// 暂停技能挂载（1.0.345）：产物质量连续低分被自动隔离，或管理员手工暂停。
+    /// 暂停后不再挂载到数字员工，直接执行也会被拦截。返回技能是否存在。
+    /// </summary>
+    public bool Suspend(string skillId, string reason, long atMs)
+    {
+        var skill = Get(skillId);
+        if (skill is null) return false;
+        skill.Suspended = true;
+        skill.SuspendedReason = reason;
+        skill.SuspendedAtMs = atMs;
+        Upsert(skill);
+        return true;
+    }
+
+    /// <summary>恢复被暂停的技能（1.0.345）：清空暂停标志，下次构建时重新挂载。返回技能是否存在。</summary>
+    public bool Resume(string skillId)
+    {
+        var skill = Get(skillId);
+        if (skill is null) return false;
+        if (!skill.Suspended && skill.SuspendedReason is null && skill.SuspendedAtMs is null) return true;
+        skill.Suspended = false;
+        skill.SuspendedReason = null;
+        skill.SuspendedAtMs = null;
+        Upsert(skill);
+        return true;
+    }
+
     /// <summary>从持久化快照恢复：先重放常驻种子，再由快照按 SkillId 覆盖（持久化版本优先）。</summary>
     public void RestoreAll(IEnumerable<AgentSkillDefinition> skills)
     {

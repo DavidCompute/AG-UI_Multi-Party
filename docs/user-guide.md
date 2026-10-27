@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.344**
+> 适用版本：**1.0.345**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1991,6 +1991,7 @@
 - 搜索框 `#skillSearch`，占位文案 `skill.search`（「搜索技能（名称 / ID / 类型 / 描述）…」）。过滤按 `name` / `skillId` / `description` / `kind` 做小写包含匹配；无结果显示 `skill.searchEmpty`。
 - 表头列（`skill-grid-head`）：名称 / ID、类型、描述、操作（i18n `skill.col.name` / `skill.col.kind` / `skill.col.desc` / `skill.col.ops`），另有左侧勾选列。
 - 每行操作按钮：`▶`（试运行，`skill.testRun`）、`✏️`（编辑，`skill.edit`）、`🗑️`（删除，`skill.del`）。编辑 / 删除按钮仅对**可管理**的行显示（`canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId`；内置技能 `ownerId` 为 `null`，仅管理员 `canManage`）。
+- **已暂停标记与恢复（1.0.345）**：被自动隔离或手工暂停的技能，在名称下方显示 `⏸ 已暂停`（`skill.suspended`，悬浮显示暂停原因），可管理者的操作列额外出现 `🔓`（`skill.resume`「恢复技能（重新挂载到数字员工）」）。
 - 底部按钮：`#skillAddBtn`（＋ 新增技能，`skill.add`）、`#skillCloseBtn`（关闭，`skill.close`）。
 
 #### 4.3.3 批量删除
@@ -2046,6 +2047,35 @@
 
 服务端 `SkillApi` 的 `/generate` 会调 `SkillDefinitionGenerator.GenerateAsync`。对 **无实体（`kind=dotnet`）时** 额外的自测见 4.6。请求里的 `clientOs` 来自 `detectClientOs()`（探测浏览器平台，返回 `windows|macos|linux|other`），用于拼接目标环境说明（`DescribeClientEnv`）。
 
+#### 4.3.6 低质量技能告警与自动隔离（1.0.345）
+
+**触发口径**（`ArtifactAlertPolicy.Evaluate`，纯函数）：同一「数字员工 + 技能」在最近 `WindowRuns`（默认 3）次带产物契约的执行中，低分次数 ≥ `LowRunsToAlert`（默认 2）即告警。低分 = 产物契约不满足（`!Satisfied`，如缺文件 / 只有标题）**或** `Score < LowScoreThreshold`（默认 70）。只看最近 24 小时的执行，单次偶发失败不告警；同一 `agentId|skillId` 在 `CooldownMinutes`（默认 60）内只告警一次。
+
+**命中后做三件事**（`ArtifactAlertBridge`）：
+
+1. 写一条内存告警（`ArtifactAlertStore`，最近 200 条），供前端通知中心轮询；
+2. 经 `WebhookDispatcher` 推送 `ARTIFACT_QUALITY_ALERT`（含 `skillId/agentId/runs/lowRuns/score/threshold/missing/suspended`）；
+3. 若配置 `Agents:ArtifactQuality:AutoSuspendEnabled=true`，把该技能置为**暂停**并推送 `ARTIFACT_SKILL_SUSPENDED`。**默认关闭**——自动暂停会打断线上交付，需管理员显式开启；且只对用户 / 编排创建的技能（`OwnerId != null`）生效，平台内置技能只告警不自动停。
+
+**暂停后的运行时行为**：
+
+- `AgentCatalog.Create` 挂载技能时跳过已暂停技能 → 模型看不到该工具；
+- 直接执行（计划步骤 / 旧缓存闭包）在 `RunSkillAsync` 入口被拦截，返回「技能「X」已暂停（原因）…」而**不执行、不写产物**；
+- 暂停 / 恢复都会 `InvalidateAgentsUsingSkill` 失效相关智能体缓存，立即生效；
+- 编辑技能（`PUT`）**保留**暂停状态——修正文不等于恢复上线，避免管理员刚停掉的技能被一次保存重新挂回岗位。
+
+**前端**：通知中心每分钟轮询 `GET /ag-ui/admin/artifact-quality/alerts?since=`，新告警以 `error` 类型入列（点击直达技能库）；技能库列表显示 `⏸ 已暂停` 与 `🔓 恢复`。
+
+配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
+
+| 键 | 默认 | 含义 |
+| --- | --- | --- |
+| `AutoSuspendEnabled` | `false` | 自动暂停连续低分技能 |
+| `LowScoreThreshold` | `70` | 低分阈值 |
+| `WindowRuns` | `3` | 判定窗口（最近几次执行） |
+| `LowRunsToAlert` | `2` | 窗口内低分几次才告警 |
+| `CooldownMinutes` | `60` | 同岗位同技能的告警冷却 |
+
 ---
 
 ### 4.4 技能管理与权限
@@ -2063,6 +2093,8 @@
 | `DELETE /ag-ui/skills/{skillId}` | 删除 | 内置只读 |
 | `POST /ag-ui/skills/{skillId}/run` | 试运行 | 见 4.5 |
 | `POST /ag-ui/skills/{skillId}/suggest` | 试运行参数建议 | 让模型给一个典型 `query` |
+| `POST /ag-ui/skills/{skillId}/suspend?reason=` | 暂停挂载（1.0.345） | 归属者或管理员；立即失效相关智能体缓存 |
+| `POST /ag-ui/skills/{skillId}/resume` | 恢复挂载（1.0.345） | 同上；清空暂停标志后重新挂载 |
 
 #### 4.4.2 谁能创建 / 编辑 / 删除哪些类型
 
@@ -2090,6 +2122,14 @@
 #### 4.4.5 用户组白名单
 
 `AllowedUserGroupIds` 是「允许挂载 / 可见」的技能用户组白名单，用于把敏感技能限定给特定分组；为空表示不限制（向后兼容）。
+
+#### 4.4.6 暂停 / 恢复（1.0.345）
+
+- `POST /ag-ui/skills/{skillId}/suspend?reason=...`：置 `suspended=true`，写入 `suspendedReason` / `suspendedAtMs`。重复调用幂等（`already=true`）。
+- `POST /ag-ui/skills/{skillId}/resume`：清空三个暂停字段；未暂停时幂等。
+- 权限与编辑一致：归属者或系统管理员；内置技能（`ownerId=null`）仅管理员。
+- 两个端点都会调用 `AgentCatalog.InvalidateAgentsUsingSkill`，使已缓存的智能体立即重建（挂载列表同步）。
+- `GET /ag-ui/skills` 的 DTO 新增 `suspended` / `suspendedReason` / `suspendedAtMs`，前端据此渲染徽标与恢复按钮。
 
 ---
 
@@ -5057,6 +5097,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/agent-performance` | 数字员工绩效看板（按员工聚合调用次数 / token / 成本 / 👍👎 好评率 / **产物质量** / 最近活跃，`?days=N`，可选 `?groupId=` 限定**知聚范围**——用量取自按知聚聚合表、反馈列不可用、产物质量按事件 `groupId` 过滤；另含 `scope` / `pricing` 与预算字段与 `flags` 标记） | Operator |
 | GET | `/ag-ui/admin/groups` | 知聚选项（`groupId` / `name`，按名称排序；绩效页「按知聚」下拉用） | Operator |
 | GET | `/ag-ui/admin/artifact-quality` | 产物质量看板（`?days=N`，可选 `?groupId=` / `?agentId=` / `?skillId=`）：总览 / 按天趋势 / 按技能聚合 / 最近低分事件 | Operator |
+| GET | `/ag-ui/admin/artifact-quality/alerts` | 产物质量告警列表（`?since=<ms>`）：`skillId / agentId / runs / lowRuns / score / threshold / missing / suspended / atMs`；前端通知中心轮询用 | Operator |
 | GET | `/ag-ui/admin/org-health` | 组织体检报告（`?days=N`）：Markdown（总览 / 关注项 / 绩效明细 / 组织架构 / 建议 / **评测回归（通过率）**）**+ 结构化数据**（`summary` / `agents` / `users`（按触发者聚合调用量 / token / 成本）/ `groups`（按知聚聚合，本版起）/ `prev`（上一窗口，供环比）/ `pricing`（含 `currency` / `inputPerMillion` / `outputPerMillion` 单价，供前端按成本维度画趋势），供前端图表视图） | Operator |
 | GET | `/ag-ui/admin/eval-cases` | 数字员工评测用例列表 + 被测员工候选 + 跑分历史（`runs`） | 管理员 |
 | POST | `/ag-ui/admin/eval-cases` | 新建 / 更新评测用例（name / agentId / prompt / expected[] / matchMode=any·all / expectDeliverable / enabled） | 管理员 |

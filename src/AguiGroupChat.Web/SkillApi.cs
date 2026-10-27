@@ -158,6 +158,11 @@ public static class SkillApi
             }
             // 用户经界面改过 → 不再是“原样内置版”，清掉版本标记：升级时不再用新正文覆盖用户改动
             skill.BuiltinVersion = null;
+            // 暂停状态由独立的 suspend / resume 端点维护：编辑技能（修正文）不等于恢复上线，
+            // 若在这里丢掉标志，用户一保存就把管理员刚停掉的技能重新挂回岗位。
+            skill.Suspended = existing.Suspended;
+            skill.SuspendedReason = existing.SuspendedReason;
+            skill.SuspendedAtMs = existing.SuspendedAtMs;
             catalog.Upsert(skill);
             return Results.Ok(new { updated = true, skillId = skill.SkillId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
@@ -176,6 +181,50 @@ public static class SkillApi
                 return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可删除该技能"), statusCode: StatusCodes.Status403Forbidden);
             catalog.Remove(skillId);
             return Results.Ok(new { deleted = true, skillId });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 暂停 / 恢复技能挂载（1.0.345）：产物质量连续低分时自动隔离，管理员可手工操作 ----
+        //      暂停后：不再挂载到数字员工（模型看不到），直接执行会被拦截；恢复后立即重新挂载。
+        //      权限与编辑一致：归属者或系统管理员（系统内置技能仅管理员）。
+        root.MapPost("/{skillId}/suspend", (string skillId, string? reason, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog, AgentCatalog agents) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可操作"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可操作该技能"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.Suspended)
+                return Results.Ok(new { suspended = true, skillId, already = true, reason = skill.SuspendedReason, suspendedAtMs = skill.SuspendedAtMs });
+            var why = string.IsNullOrWhiteSpace(reason) ? "管理员手工暂停" : reason.Trim();
+            if (why.Length > 200) why = why[..200];
+            var atMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            catalog.Suspend(skillId, why, atMs);
+            agents.InvalidateAgentsUsingSkill(skillId);
+            return Results.Ok(new { suspended = true, skillId, already = false, reason = why, suspendedAtMs = atMs });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        root.MapPost("/{skillId}/resume", (string skillId, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog, AgentCatalog agents) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可操作"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可操作该技能"), statusCode: StatusCodes.Status403Forbidden);
+            if (!skill.Suspended)
+                return Results.Ok(new { suspended = false, skillId, already = true });
+            catalog.Resume(skillId);
+            agents.InvalidateAgentsUsingSkill(skillId);
+            return Results.Ok(new { suspended = false, skillId, already = false });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 试运行技能（仅归属者或管理员；系统技能仅管理员）----
@@ -345,6 +394,10 @@ public static class SkillApi
             ["imageWriteRequiresApproval"] = s.ImageWriteRequiresApproval,
             ["imageWriteMaxLibraries"] = s.ImageWriteMaxLibraries,
             ["imageWriteMaxImages"] = s.ImageWriteMaxImages,
+            // 暂停挂载（1.0.345）：连续低分被自动隔离或管理员手工暂停
+            ["suspended"] = s.Suspended,
+            ["suspendedReason"] = s.SuspendedReason,
+            ["suspendedAtMs"] = s.SuspendedAtMs,
         };
         if (canReadBody)
         {

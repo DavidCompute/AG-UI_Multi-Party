@@ -150,6 +150,19 @@ public sealed class AgentSkillDefinition
     /// <summary>每轮最多上传图片数（1.0.279，1..200；null = 默认 20）。</summary>
     public int? ImageWriteMaxImages { get; set; }
 
+    /// <summary>
+    /// <b>已暂停（1.0.345）</b>：产物质量连续不达标时由自动隔离置位（或管理员手工暂停）。
+    /// 暂停后：不再挂载到数字员工（模型看不到该工具），直接执行也会被拦截并返回明确提示；
+    /// 管理员修复技能后点「恢复」清空。默认 false（向后兼容）。
+    /// </summary>
+    public bool Suspended { get; set; }
+
+    /// <summary>暂停原因（给管理界面的说明；仅 <see cref="Suspended"/> 为 true 时有效）。</summary>
+    public string? SuspendedReason { get; set; }
+
+    /// <summary>暂停时间（Unix 毫秒；仅 <see cref="Suspended"/> 为 true 时有效）。</summary>
+    public long? SuspendedAtMs { get; set; }
+
     /// <summary>技能名 / 智能体工具名的合法模式（OpenAI 工具名：字母数字下划线连字符）。</summary>
     private static readonly Regex ToolNamePattern = new("^[a-zA-Z0-9_-]{1,64}$", RegexOptions.Compiled);
 

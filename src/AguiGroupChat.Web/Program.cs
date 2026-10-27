@@ -195,6 +195,7 @@ app.Services.RegisterWebhookDeliveryPersistence(); // 最近投递记录跨重�
 app.Services.RegisterQuotaReminderStatePersistence(); // 临时放额提醒去重键跨重启保持（避免重启后重复推送）
 app.Services.RegisterImageWriteApprovalPersistence(); // 待审批图库写入跨重启保持（字节在 data/pending-writes）
 app.Services.WireQuotaAlerts(); // 配额阈值（80% / 100%）→ 出站 Webhook（QUOTA_THRESHOLD）
+app.Services.WireArtifactAlerts(); // 产物质量连续低分 → 告警 / 自动暂停（1.0.345）
 app.Services.RegisterApiKeyPersistence(); // 托管 API 密钥跨重启保持（只存哈希）
 app.Services.RegisterMarketplacePersistence(); // 市场目录源跨重启保持
 

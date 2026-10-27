@@ -96,6 +96,12 @@ public static class EventTypes
     /// <summary>待审批写入已处理（1.0.282）：管理员批准 / 拒绝后的回执。只经出站 Webhook 推送，
     /// 与「待审批」配对，让外部系统能确认「结果已定」。</summary>
     public const string ImageWriteResolved = "IMAGE_WRITE_RESOLVED";
+    /// <summary>产物质量告警（1.0.345）：同一「数字员工 + 技能」连续多次产出不达标。
+    /// 只经出站 Webhook 推送（不绑定知聚广播），同时进站内通知中心。</summary>
+    public const string ArtifactQualityAlert = "ARTIFACT_QUALITY_ALERT";
+    /// <summary>技能因产物质量被暂停（1.0.345）：自动隔离或管理员手工暂停。
+    /// 只经出站 Webhook 推送，与告警配对，让集成方能确认「已下线该技能」。</summary>
+    public const string ArtifactSkillSuspended = "ARTIFACT_SKILL_SUSPENDED";
 }
 
 // ================= 服务端下行事件 =================
@@ -672,5 +678,50 @@ public sealed class RunErrorEvent
     public string? GroupId { get; init; }
     public required string ErrorCode { get; init; }
     public required string Message { get; init; }
+    public required long Timestamp { get; init; }
+}
+
+/// <summary>
+/// ARTIFACT_QUALITY_ALERT（Hub 扩展，1.0.345）：同一「数字员工 + 技能」连续多次产出不达标。
+/// 只进出站 Webhook（不经群广播）—— 用于把“技能正在持续交残次品”送进告警平台。
+/// </summary>
+public sealed class ArtifactQualityAlertEvent
+{
+    public string Type => EventTypes.ArtifactQualityAlert;
+    public required string SkillId { get; init; }
+    public required string SkillName { get; init; }
+    public string AgentId { get; init; } = "";
+    public string AgentName { get; init; } = "";
+    public required string Kind { get; init; }
+    /// <summary>参与判定的最近执行次数（窗口）。</summary>
+    public required int Runs { get; init; }
+    /// <summary>窗口内低分次数。</summary>
+    public required int LowRuns { get; init; }
+    /// <summary>触发告警的本次评分（0~100）。</summary>
+    public required int Score { get; init; }
+    /// <summary>低分阈值。</summary>
+    public required int Threshold { get; init; }
+    /// <summary>窗口内出现过的缺失项（去重）。</summary>
+    public string[] Missing { get; init; } = [];
+    /// <summary>本次告警是否同时暂停了该技能。</summary>
+    public bool Suspended { get; init; }
+    /// <summary>触发所在的知聚（可为空串）。</summary>
+    public string GroupId { get; init; } = "";
+    public string Hint { get; init; } = "";
+    public required long Timestamp { get; init; }
+}
+
+/// <summary>
+/// ARTIFACT_SKILL_SUSPENDED（Hub 扩展，1.0.345）：技能因产物质量被暂停挂载。
+/// 只进出站 Webhook（不经群广播），与 <see cref="ArtifactQualityAlertEvent"/> 配对。
+/// </summary>
+public sealed class ArtifactSkillSuspendedEvent
+{
+    public string Type => EventTypes.ArtifactSkillSuspended;
+    public required string SkillId { get; init; }
+    public required string SkillName { get; init; }
+    public required string Reason { get; init; }
+    public string AgentId { get; init; } = "";
+    public string GroupId { get; init; } = "";
     public required long Timestamp { get; init; }
 }

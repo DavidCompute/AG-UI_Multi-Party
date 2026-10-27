@@ -90,6 +90,8 @@ public static class AgentHosting
         services.AddSingleton<MetricsService>();
         // 产物质量事件（1.0.343）：技能产物契约结果，供绩效 / 交付看板聚合
         services.AddSingleton<ArtifactQualityStore>();
+        // 产物质量告警（1.0.345）：连续低分告警，供管理端轮询与通知中心
+        services.AddSingleton<ArtifactAlertStore>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效

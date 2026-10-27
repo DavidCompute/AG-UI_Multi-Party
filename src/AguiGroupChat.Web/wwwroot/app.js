@@ -489,6 +489,7 @@ async function logout() {
   stopKbPolling(); // 知识库轮询随登出停止，避免跨账号残留定时器
   stopImageWritePendingPolling();
   stopWebhookDeliveryAlarmPolling();
+  stopArtifactAlertPolling();
   if (state.ws) state.ws.close();
   state.ws = null;
   state.token = null;
@@ -2478,23 +2479,40 @@ function renderSkillList() {
     row.className = "skill-row skill-list-item";
     const canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId;
     const checked = selectedSkills.has(s.skillId);
+    const suspended = !!s.suspended;
     row.innerHTML = `
       <span class="skill-sel-col">${canManage ? `<input type="checkbox" class="skill-sel-cb" data-skill-id="${escapeHtml(s.skillId)}" ${checked ? "checked" : ""} style="width:15px;height:15px;accent-color:#4f8cff" />` : ""}</span>
-      <span class="skill-name"><b>${escapeHtml(s.name)}</b><code>${escapeHtml(s.skillId)}</code></span>
+      <span class="skill-name"><b>${escapeHtml(s.name)}</b><code>${escapeHtml(s.skillId)}</code>${suspended ? `<span class="skill-suspended" title="${escapeHtml(s.suspendedReason || t("skill.suspendedTip"))}">⏸ ${escapeHtml(t("skill.suspended"))}</span>` : ""}</span>
       <span class="skill-kind tag-skill">${escapeHtml(kindLabel[s.kind] || s.kind)}</span>
       <span class="skill-desc">${escapeHtml(s.description || "—")}</span>
       <span class="skill-op-col">
         <button class="icon-btn" data-skill-act="test" title="${escapeHtml(t("skill.testRun"))}">▶</button>
+        ${canManage && suspended ? `<button class="icon-btn" data-skill-act="resume" title="${escapeHtml(t("skill.resume"))}">🔓</button>` : ""}
         ${canManage ? `<button class="icon-btn" data-skill-act="edit" title="${escapeHtml(t("skill.edit"))}">✏️</button><button class="icon-btn danger" data-skill-act="del" title="${escapeHtml(t("skill.del"))}">🗑️</button>` : ""}
       </span>`;
     if (canManage) row.querySelector('[data-skill-act="edit"]').onclick = () => openSkillForm(s.skillId);
     if (canManage) row.querySelector('[data-skill-act="del"]').onclick = () => deleteSkill(s.skillId);
+    if (canManage && suspended) row.querySelector('[data-skill-act="resume"]').onclick = () => resumeSkill(s.skillId, s.name);
     const cb = row.querySelector(".skill-sel-cb");
     if (cb) cb.onchange = () => { if (cb.checked) selectedSkills.add(s.skillId); else selectedSkills.delete(s.skillId); updateSkillBatchStatus(); };
     row.querySelector('[data-skill-act="test"]').onclick = () => testSkill(s.skillId);
     el.appendChild(row);
   });
   updateSkillBatchStatus();
+}
+
+/** 恢复被暂停的技能（1.0.345）：清空暂停标志并立即重新挂载到数字员工。 */
+async function resumeSkill(skillId, name) {
+  if (!state.token) { toast(t("agent.err.loginRequired")); return; }
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(skillId)}/resume`, {
+      method: "POST", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("skill.resumeFail", { err: (d && (d.message || d.code)) || res.status })); return; }
+    toast(t("skill.resumed", { name: name || skillId }));
+    await loadSkills(); renderSkillList();
+  } catch (e) { toast(t("skill.resumeFail", { err: e })); }
 }
 
 /// <summary>刷新技能批量删除状态栏（选中数）与全选。</summary>
@@ -4434,7 +4452,9 @@ async function loadWebhookAlarmSettings() {
 /** 登录 / 保存配置后重新初始化：停止旧定时器 → 拉参数 → 按开关启动。 */
 async function initWebhookAlarmPolling() {
   stopWebhookDeliveryAlarmPolling();
+  stopArtifactAlertPolling();
   if (!isAdminPlus()) return;
+  startArtifactAlertPolling(); // 1.0.345：产物质量告警（不依赖 Webhook 开关）
   await loadWebhookAlarmSettings();
   if (webhookAlarmSettings.enabled) startWebhookDeliveryAlarmPolling();
 }
@@ -4494,6 +4514,53 @@ function stopWebhookDeliveryAlarmPolling() {
   webhookAlarmed.clear();
   webhookAlarmCooldown.clear();
   webhookAlarmBaselineDone = false;
+}
+
+/* ===== 产物质量告警轮询（1.0.345）：连续低分的技能送进通知中心 ===== */
+let artifactAlertTimer = null;
+const artifactAlertsSeen = new Set();
+let artifactAlertBaselineDone = false;
+
+async function checkArtifactAlertsOnce() {
+  if (!isAdminPlus() || !state.token) return;
+  try {
+    const res = await fetch("/ag-ui/admin/artifact-quality/alerts", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const list = (res.ok && d && Array.isArray(d.alerts)) ? d.alerts : [];
+    if (!artifactAlertBaselineDone) {
+      // 首次只建基线：避免登录时把历史告警全部推一遍
+      for (const a of list) artifactAlertsSeen.add(`${a.skillId}|${a.agentId}|${a.atMs}`);
+      artifactAlertBaselineDone = true;
+      return;
+    }
+    // 服务端按时间倒序：反向遍历 → 旧到新，通知顺序自然
+    for (const a of list.slice().reverse()) {
+      const key = `${a.skillId}|${a.agentId}|${a.atMs}`;
+      if (artifactAlertsSeen.has(key)) continue;
+      artifactAlertsSeen.add(key);
+      addNotification("error", t("notif.artifactQualityTitle"), t("notif.artifactQualityBody", {
+        agent: a.agentName || a.agentId || "—",
+        skill: a.skillName || a.skillId,
+        low: String(a.lowRuns),
+        runs: String(a.runs),
+        score: String(a.score),
+        suspended: a.suspended ? t("notif.artifactQualitySuspended") : "",
+      }), { action: "skillAlerts" });
+    }
+  } catch { /* 下一轮重试 */ }
+}
+
+function startArtifactAlertPolling() {
+  if (!isAdminPlus() || artifactAlertTimer) return;
+  artifactAlertBaselineDone = false;
+  checkArtifactAlertsOnce(); // 立即建基线
+  artifactAlertTimer = setInterval(checkArtifactAlertsOnce, 60_000);
+}
+
+function stopArtifactAlertPolling() {
+  if (artifactAlertTimer) { clearInterval(artifactAlertTimer); artifactAlertTimer = null; }
+  artifactAlertsSeen.clear();
+  artifactAlertBaselineDone = false;
 }
 
 /* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */
@@ -7746,6 +7813,11 @@ function renderNotifications() {
         openAdminModal().then(() => switchAdminTab("webhooks")); // 投递失败 → 直达 Webhook 页签
         return;
       }
+      if (n?.action === "skillAlerts") {
+        hideNotifPanel();
+        openSkillModal(); // 产物质量告警 → 直达技能库（可直接「恢复」或编辑修复）
+        return;
+      }
       if (n?.groupId) {
         hideNotifPanel();
         selectGroup(n.groupId); // 跳转到来源知聚（话题跟随知聚内记忆恢复，可靠且无竞态）
@@ -9997,6 +10069,7 @@ const WEBHOOK_EVENT_GROUPS = [
   { key: "runs", icon: "⚙️", types: ["RUN_ERROR"] },
   { key: "quota", icon: "📊", types: ["QUOTA_THRESHOLD", "QUOTA_OVERRIDE_EXPIRING", "QUOTA_OVERRIDE_EXPIRED"] },
   { key: "images", icon: "🖼️", types: ["IMAGE_WRITE_PENDING", "IMAGE_WRITE_RESOLVED"] },
+  { key: "artifacts", icon: "🧪", types: ["ARTIFACT_QUALITY_ALERT", "ARTIFACT_SKILL_SUSPENDED"] },
 ];
 
 /** 把服务端事件目录归入分组（保持服务端顺序的声明顺序；未知类型追加「其他」）。 */

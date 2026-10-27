@@ -212,12 +212,43 @@ public sealed class AgentCatalog
             _agents.TryRemove(key, out _);
     }
 
+    /// <summary>技能已暂停时回给模型 / 管理界面的明确提示（不暴露内部细节）。</summary>
+    internal static string SuspendedSkillMessage(AgentSkillDefinition skill)
+    {
+        var name = string.IsNullOrWhiteSpace(skill.Name) ? skill.SkillId : skill.Name;
+        var reason = string.IsNullOrWhiteSpace(skill.SuspendedReason) ? "产物质量连续未达标" : skill.SuspendedReason;
+        return $"技能「{name}」已暂停（{reason}）。请联系管理员在「技能库」中修复并恢复，或改用其他技能完成本次请求。";
+    }
+
+    /// <summary>
+    /// 失效所有引用了指定技能的智能体缓存，使“暂停 / 恢复”立即生效（否则已缓存的
+    /// ChatClientAgent 仍持有旧的工具列表，模型仍能看到已暂停技能）。
+    /// </summary>
+    public void InvalidateAgentsUsingSkill(string skillId)
+    {
+        if (string.IsNullOrWhiteSpace(skillId)) return;
+        var hit = false;
+        foreach (var (agentId, def) in _definitions)
+        {
+            if (def.SkillDefIds is not { Count: > 0 } ids || !ids.Contains(skillId, StringComparer.Ordinal)) continue;
+            EvictAgent(agentId);
+            _agentToolNames.TryRemove(agentId, out _);
+            _agentApprovalToolNames.TryRemove(agentId, out _);
+            _agentClientToolNames.TryRemove(agentId, out _);
+            hit = true;
+        }
+        if (hit) _changes?.Notify();
+    }
+
     /// <summary>
     /// 技能库 API 测试运行：按技能定义执行一次（shell / http / prompt），返回结果文本。
     /// 供管理界面试运行 / 调试验证技能定义；失败返回错误文本不抛（与技能运行时一致）。
     /// </summary>
     public async Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
     {
+        // 已暂停（1.0.345）：产物质量连续不达标时不再执行，避免继续输出残次交付。
+        // 放在最前面：不跑技能、不写产物、不记录质量事件（暂停状态本身不再是新的质量问题）。
+        if (skill.Suspended) return SuspendedSkillMessage(skill);
         var result = _skillRunner.Value is { } runner
             ? await runner.InvokeAsync(skill, query, ct).ConfigureAwait(false)
             : "技能执行器不可用。";
@@ -824,6 +855,12 @@ public sealed class AgentCatalog
                     _logger.LogWarning("智能体 {AgentId} 引用技能 {Ref} 不存在（已跳过）", agentId, refId);
                     continue;
                 }
+                // 已暂停技能不挂载（1.0.345）：模型连工具都看不到，自然不会误调。
+                if (skill.Suspended)
+                {
+                    _logger.LogWarning("智能体 {AgentId} 的技能 {SkillId} 已暂停（产物质量），跳过挂载", agentId, refId);
+                    continue;
+                }
                 // 工具名：库内 SkillId 本身即 ASCII 工具名；占位则在已占用名上规避
                 var toolName = AgentSkillDefinition.IsValidAsciiToolId(skill.SkillId)
                     ? skill.SkillId
@@ -885,7 +922,11 @@ public sealed class AgentCatalog
                                 skill.SkillId, why);
                             return why;
                         }
-                        return await runner.InvokeAsync(skill, WithImageScope(input, skill), ct);
+                        // 用技能库里的**最新**定义执行：技能可能在本次会话中途被暂停 / 修复，
+                        // 而缓存的工具闭包捕获的是挂载时的旧对象。
+                        var liveSkill = skillCatalog.Get(refId) ?? skill;
+                        if (liveSkill.Suspended) return SuspendedSkillMessage(liveSkill);
+                        return await runner.InvokeAsync(liveSkill, WithImageScope(input, liveSkill), ct);
                     });
                 // 客户端执行技能一律审批包装：模型调用即中断，等待前端执行并回传结果（服务端不自动执行）
                 var needsApproval = skill.RequiresApproval || isClientSkill;

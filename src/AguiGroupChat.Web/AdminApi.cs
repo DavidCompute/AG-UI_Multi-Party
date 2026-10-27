@@ -413,6 +413,34 @@ public static class AdminApi
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 产物质量告警列表（1.0.345）：前端通知中心轮询用（轻量，不做聚合）。仅运维及以上（只读）。
+        root.MapGet("/artifact-quality/alerts", (long? since, IServiceProvider sp) =>
+        {
+            var store = sp.GetService<ArtifactAlertStore>();
+            var sinceMs = Math.Max(0, since ?? 0);
+            var alerts = (store?.Snapshot(sinceMs) ?? (IReadOnlyList<ArtifactQualityAlert>)[])
+                .OrderByDescending(a => a.TimestampMs)
+                .Select(a => new
+                {
+                    skillId = a.SkillId,
+                    skillName = a.SkillName,
+                    agentId = a.AgentId,
+                    agentName = a.AgentName,
+                    kind = a.Kind,
+                    runs = a.Runs,
+                    lowRuns = a.LowRuns,
+                    score = a.Score,
+                    threshold = a.Threshold,
+                    missing = a.Missing,
+                    suspended = a.Suspended,
+                    groupId = a.GroupId,
+                    atMs = a.TimestampMs,
+                    at = DateTimeOffset.FromUnixTimeMilliseconds(a.TimestampMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                })
+                .ToList();
+            return Results.Ok(new { alerts });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 知聚下拉选项（绩效页「按知聚」筛选用）：仅运维及以上（只读）。
         root.MapGet("/groups", (IServiceProvider sp) =>
         {

@@ -1,5 +1,44 @@
-# AG-UI 群聊桌面版 1.0.344 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.344 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.345 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.345 Release Notes (current Windows desktop release)
+
+**版本说明**：**低质量技能告警与自动隔离**——技能产物连续不达标时告警（Webhook + 站内通知），可选自动暂停该技能；暂停后不再挂载、不再执行，管理员在技能库一键恢复。
+**Version note**: **Low-quality skill alerts and auto-isolation** — when a skill keeps producing sub-par artifacts, the platform alerts (Webhook + in-app), can auto-pause it, and stops mounting / executing it until an administrator resumes it from the skill library.
+
+## 变更
+# Changes
+
+中文：
+- **判定口径**：`ArtifactAlertPolicy.Evaluate`（纯函数）——同一「数字员工 + 技能」最近 3 次带产物契约的执行中，≥2 次低分（契约不满足或评分 < 70）即告警；只看最近 24 小时，同岗位同技能 60 分钟冷却，单次偶发失败不告警。
+- **告警通道**：`ArtifactAlertBridge` 写站内告警（`ArtifactAlertStore`，最近 200 条）并推送 `ARTIFACT_QUALITY_ALERT` Webhook（含 `runs / lowRuns / score / threshold / missing / suspended`）；前端通知中心每分钟轮询 `GET /ag-ui/admin/artifact-quality/alerts`，点击直达技能库。
+- **自动隔离（可选，默认关）**：`Agents:ArtifactQuality:AutoSuspendEnabled=true` 时暂停该技能并推送 `ARTIFACT_SKILL_SUSPENDED`；只对用户 / 编排创建的技能生效（`OwnerId != null`），平台内置技能只告警。
+- **暂停语义**：`AgentSkillDefinition` 新增 `suspended / suspendedReason / suspendedAtMs`（向后兼容）；暂停技能不进工具列表，直接执行在 `RunSkillAsync` 入口被拦截并返回明确提示；`PUT` 编辑保留暂停状态。
+- **管理接口**：`POST /ag-ui/skills/{id}/suspend?reason=` 与 `/resume`（归属者或管理员，幂等），均立即失效相关智能体缓存；技能库列表显示 `⏸ 已暂停` 与 `🔓 恢复`。
+- **Webhook 事件目录**新增「🧪 产物质量」分组。
+
+English:
+- **Rule**: `ArtifactAlertPolicy.Evaluate` (pure) — for the same agent + skill, among the latest 3 artifact-contract runs, alert when 2+ are low (contract unsatisfied or score < 70); only the last 24 hours count, with a 60-minute cooldown per agent + skill, so a single flaky run never alerts.
+- **Channels**: `ArtifactAlertBridge` writes an in-app alert (`ArtifactAlertStore`, latest 200) and emits an `ARTIFACT_QUALITY_ALERT` Webhook (`runs / lowRuns / score / threshold / missing / suspended`); the notification center polls `GET /ag-ui/admin/artifact-quality/alerts` every minute and opens the skill library on click.
+- **Auto-isolation (optional, off by default)**: with `Agents:ArtifactQuality:AutoSuspendEnabled=true` the skill is paused and `ARTIFACT_SKILL_SUSPENDED` is emitted; only user / orchestration-created skills (`OwnerId != null`) are affected, built-ins only alert.
+- **Pause semantics**: `AgentSkillDefinition` gains `suspended / suspendedReason / suspendedAtMs` (backward compatible); paused skills are not mounted, direct execution is short-circuited in `RunSkillAsync`, and `PUT` preserves the paused state.
+- **Admin API**: `POST /ag-ui/skills/{id}/suspend?reason=` and `/resume` (owner or admin, idempotent) both evict cached agents immediately; the library shows `⏸ Paused` and `🔓 Resume`.
+- **Webhook catalog** gains an **🧪 Artifact quality** group.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.2（暂停徽标与恢复）、§4.3.6（告警与自动隔离）、§4.4.1 / §4.4.6（suspend / resume 接口）、§9.2（告警接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.345。
+English: `docs/user-guide.md` / `en.md` §4.3.2 (paused badge and resume), §4.3.6 (alerts and auto-isolation), §4.4.1 / §4.4.6 (suspend / resume APIs), §9.2 (alerts API); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.345.
+
+## 测试
+# Tests
+
+中文：新增 `ArtifactAlertTests`（判定口径 / 窗口 / 告警存储 / 暂停往返 / 不挂载 / 不执行）；全量 `dotnet vstest` **1976 通过 / 0 失败**；`node --check app.js`；i18n 审计 **zh=en=2364，missing 0**；配置键与文档引用校验通过。
+English: new `ArtifactAlertTests` (rule / window / alert store / pause round-trip / not mounted / not executed); the full `dotnet vstest` run passes **1976 / 0**; `node --check app.js`; the i18n audit reports **zh=en=2364, missing 0**; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.344 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.344 Release Notes (historical)
 
 **版本说明**：**产物质量趋势 + 按技能下钻**——按天看平均分变化，按技能看执行 / 合格率 / 低分，点开低分记录看缺失项并直接跳到技能编辑 / 修复。
 **Version note**: **Artifact-quality trend and per-skill drill-down** — see daily average scores, per-skill runs / pass rate / low scores, and open a low-score record to inspect missing items and jump straight to skill edit / repair.

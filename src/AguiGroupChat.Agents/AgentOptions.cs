@@ -227,6 +227,12 @@ public sealed class AgentOptions
     /// <summary>绩效反哺编排（appsettings：<c>Agents:PerformanceFeedback</c>，默认关）：指派路由时把候选员工的近期好评率作为参考。</summary>
     public PerformanceFeedbackOptions PerformanceFeedback { get; set; } = new();
 
+    /// <summary>
+    /// 产物质量告警与自动隔离（1.0.345）。技能带产物契约的执行连续低分时，
+    /// 经出站 Webhook 与站内通知告警；可选用开启「自动暂停挂载」。
+    /// </summary>
+    public ArtifactQualityOptions ArtifactQuality { get; set; } = new();
+
     public List<AgentDefinition> Agents { get; set; } = [];
 
     /// <summary>技能库种子（appsettings 声明）：启动时若技能库为空则播种，与 <see cref="Agents"/> 同模式。</summary>
@@ -887,4 +893,37 @@ public sealed class AgentSkillConfig
         for (var i = 2; !occupied.Add(name); i++) name = baseName + "_" + i;
         return name;
     }
+}
+
+/// <summary>
+/// 产物质量告警与自动隔离配置（<c>Agents:ArtifactQuality</c>，1.0.345）。
+///
+/// <para>
+/// 当同一「数字员工 + 技能」连续多次产出不达标（缺文件 / 只有标题 / 评分低）时：
+/// 推送 <c>ARTIFACT_QUALITY_ALERT</c> Webhook + 站内通知；若开启
+/// <see cref="AutoSuspendEnabled"/>，还会自动暂停该技能（不再挂载到数字员工，
+/// 直到管理员在技能库恢复）。
+/// </para>
+///
+/// <para>
+/// <b>默认关闭自动隔离</b>：自动暂停会直接打断线上交付，属于破坏性变更，
+/// 需要管理员显式开启；告警本身默认开启（只读信号，不改变行为）。
+/// </para>
+/// </summary>
+public sealed class ArtifactQualityOptions
+{
+    /// <summary>自动暂停连续低分技能（默认 false；仅对非内置技能生效，内置技能可告警但不自动停）。</summary>
+    public bool AutoSuspendEnabled { get; set; }
+
+    /// <summary>低分阈值（默认 70）：<c>Score &lt; 阈值</c> 或产物契约不满足都算低分。</summary>
+    public int LowScoreThreshold { get; set; } = ArtifactAlertPolicy.DefaultLowScoreThreshold;
+
+    /// <summary>判定窗口：看最近几次执行（默认 3）。</summary>
+    public int WindowRuns { get; set; } = 3;
+
+    /// <summary>窗口内低分次数达到几次才告警（默认 2）。</summary>
+    public int LowRunsToAlert { get; set; } = 2;
+
+    /// <summary>同一「数字员工 + 技能」的告警冷却分钟数（默认 60），避免持续刷屏。</summary>
+    public int CooldownMinutes { get; set; } = 60;
 }

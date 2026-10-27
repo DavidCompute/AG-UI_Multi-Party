@@ -125,6 +125,8 @@ public static class WebhookApi
         EventTypes.QuotaOverrideExpired, // 1.0.275：临时放额已到期并回退全局
         EventTypes.ImageWritePending, // 1.0.281：待审批的技能图库写入
         EventTypes.ImageWriteResolved, // 1.0.282：待审批写入已处理（批准 / 拒绝 / 失败）
+        EventTypes.ArtifactQualityAlert, // 1.0.345：技能产物质量连续低分
+        EventTypes.ArtifactSkillSuspended, // 1.0.345：技能因产物质量被暂停挂载
     ];
 
     public static void MapWebhookApi(this WebApplication app)

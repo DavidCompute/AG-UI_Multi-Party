@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.344**
+> Applies to version: **1.0.345**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -1993,6 +1993,7 @@ The dialog has two views: the list `#skillListView` and the editor `#skillFormVi
 - Search box `#skillSearch`, placeholder text `skill.search` ("Search skills (name / ID / type / description)…"). Filtering does a lowercase contains match on `name` / `skillId` / `description` / `kind`; when there are no results it shows `skill.searchEmpty`.
 - Header columns (`skill-grid-head`): Name / ID, Type, Description, Actions (i18n `skill.col.name` / `skill.col.kind` / `skill.col.desc` / `skill.col.ops`), plus a checkbox column on the left.
 - Per-row action buttons: `▶` (test run, `skill.testRun`), `✏️` (edit, `skill.edit`), `🗑️` (delete, `skill.del`). The edit / delete buttons are shown only for **manageable** rows (`canManage = !s.ownerId || state.isAdmin || s.ownerId === state.memberId`; built-in skills have `ownerId` `null`, so only administrators have `canManage`).
+- **Paused badge and resume (1.0.345)**: a skill isolated by the quality guard or paused manually shows `⏸ Paused` under its name (`skill.suspended`, hovering reveals the reason), and manageable rows gain a `🔓` button (`skill.resume` "Resume skill (re-mount to agents)").
 - Bottom buttons: `#skillAddBtn` (+ New Skill, `skill.add`), `#skillCloseBtn` (Close, `skill.close`).
 
 #### 4.3.3 Batch delete
@@ -2048,6 +2049,35 @@ The generation area is the collapsible panel `#skillGenPanel` at the top of the 
 
 The server-side `SkillApi` `/generate` calls `SkillDefinitionGenerator.GenerateAsync`. For the **bodiless case (`kind=dotnet`)** the additional self-test is covered in 4.6. The `clientOs` in the request comes from `detectClientOs()` (probes the browser platform and returns `windows|macos|linux|other`) and is used to assemble the target-environment description (`DescribeClientEnv`).
 
+#### 4.3.6 Low-quality skill alerts and auto-isolation (1.0.345)
+
+**Trigger rule** (`ArtifactAlertPolicy.Evaluate`, a pure function): for the same agent + skill, among the latest `WindowRuns` (default 3) executions that carry an artifact contract, alert when the low-score count reaches `LowRunsToAlert` (default 2). "Low" means the contract is unsatisfied (`!Satisfied`, e.g. missing file / title only) **or** `Score < LowScoreThreshold` (default 70). Only the last 24 hours are considered, a single flaky run never alerts, and the same `agentId|skillId` alerts at most once per `CooldownMinutes` (default 60).
+
+**What happens on a hit** (`ArtifactAlertBridge`):
+
+1. Writes an in-memory alert (`ArtifactAlertStore`, latest 200) that the notification center polls;
+2. Emits `ARTIFACT_QUALITY_ALERT` through `WebhookDispatcher` (`skillId/agentId/runs/lowRuns/score/threshold/missing/suspended`);
+3. If `Agents:ArtifactQuality:AutoSuspendEnabled=true`, marks the skill **paused** and emits `ARTIFACT_SKILL_SUSPENDED`. **Off by default** — auto-pausing interrupts live deliveries and must be enabled explicitly; it applies only to user / orchestration-created skills (`OwnerId != null`), while built-ins alert but are never auto-paused.
+
+**Runtime behaviour while paused**:
+
+- `AgentCatalog.Create` skips paused skills, so the model never sees the tool;
+- Direct execution (plan steps / stale cached closures) is short-circuited at `RunSkillAsync` with "Skill X is paused (reason)…" and **does not execute or write artifacts**;
+- Suspend and resume both call `InvalidateAgentsUsingSkill`, so cached agents rebuild immediately;
+- Editing a skill (`PUT`) **preserves** the paused state — fixing the body is not the same as going back online, so a save cannot silently re-mount a skill an administrator just paused.
+
+**Front end**: the notification center polls `GET /ag-ui/admin/artifact-quality/alerts?since=` every minute and adds new alerts as `error` entries (clicking opens the skill library); the library shows `⏸ Paused` and `🔓 Resume`.
+
+Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `AutoSuspendEnabled` | `false` | Auto-pause skills that keep failing |
+| `LowScoreThreshold` | `70` | Low-score threshold |
+| `WindowRuns` | `3` | Judgement window (latest runs) |
+| `LowRunsToAlert` | `2` | Low runs within the window needed to alert |
+| `CooldownMinutes` | `60` | Alert cooldown per agent + skill |
+
 ---
 
 ### 4.4 Skill management and permissions
@@ -2065,6 +2095,8 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `DELETE /ag-ui/skills/{skillId}` | Delete | Built-ins are read-only |
 | `POST /ag-ui/skills/{skillId}/run` | Test run | See 4.5 |
 | `POST /ag-ui/skills/{skillId}/suggest` | Test-run parameter suggestion | Has the model provide a typical `query` |
+| `POST /ag-ui/skills/{skillId}/suspend?reason=` | Pause mounting (1.0.345) | Owner or admin; evicts cached agents immediately |
+| `POST /ag-ui/skills/{skillId}/resume` | Resume mounting (1.0.345) | Same; clears the paused flags and re-mounts |
 
 #### 4.4.2 Who can create / edit / delete which types
 
@@ -2092,6 +2124,14 @@ In the `GET /` list response, **only the owner themselves or an administrator** 
 #### 4.4.5 User group whitelist
 
 `AllowedUserGroupIds` is the whitelist of user groups "allowed to mount / see" a skill, used to restrict sensitive skills to specific groups; empty means no restriction (backward compatible).
+
+#### 4.4.6 Pause / resume (1.0.345)
+
+- `POST /ag-ui/skills/{skillId}/suspend?reason=...`: sets `suspended=true` and records `suspendedReason` / `suspendedAtMs`. Idempotent (`already=true` when already paused).
+- `POST /ag-ui/skills/{skillId}/resume`: clears the three paused fields; idempotent when not paused.
+- Permissions match editing: owner or system administrator; built-ins (`ownerId=null`) are administrator-only.
+- Both endpoints call `AgentCatalog.InvalidateAgentsUsingSkill` so cached agents rebuild immediately with the new mount list.
+- The `GET /ag-ui/skills` DTO now carries `suspended` / `suspendedReason` / `suspendedAtMs`, which drive the badge and resume button.
 
 ---
 
@@ -5062,6 +5102,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | GET | `/ag-ui/admin/agent-performance` | Digital-employee performance dashboard (aggregates calls / token / cost / 👍👎 positive rate / **artifact quality** / last active per employee, `?days=N`, optional `?groupId=` for **group scope** — usage comes from the per-group aggregate table, feedback columns are unavailable, artifact quality is filtered by event `groupId`; also includes `scope` / `pricing`, budget fields, and `flags`) | Operator |
 | GET | `/ag-ui/admin/groups` | Group options (`groupId` / `name`, sorted by name; used by the perf tab's "by group" dropdown) | Operator |
 | GET | `/ag-ui/admin/artifact-quality` | Artifact-quality dashboard (`?days=N`, optional `?groupId=` / `?agentId=` / `?skillId=`): overview / daily trend / per-skill aggregation / recent low-score events | Operator |
+| GET | `/ag-ui/admin/artifact-quality/alerts` | Artifact-quality alerts (`?since=<ms>`): `skillId / agentId / runs / lowRuns / score / threshold / missing / suspended / atMs`; polled by the front-end notification center | Operator |
 | GET | `/ag-ui/admin/org-health` | Org health report (`?days=N`): Markdown (overview / attention / detail / org structure / advice / **eval regression (pass rate)**) **plus structured data** (`summary` / `agents` / `users` (calls / tokens / cost aggregated per trigger) / `groups` (aggregated per group, since this version) / `prev` (previous window, for period-over-period) / `pricing` (with `currency` / `inputPerMillion` / `outputPerMillion` unit prices, so the front end can plot a cost trend), for the front-end chart view) | Operator |
 | GET | `/ag-ui/admin/eval-cases` | Digital-employee eval cases + target-employee options + run history (`runs`) | Admin |
 | POST | `/ag-ui/admin/eval-cases` | Create / update an eval case (name / agentId / prompt / expected[] / matchMode=any·all / expectDeliverable / enabled) | Admin |
