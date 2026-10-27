@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.352**
+> Applies to version: **1.0.353**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2104,6 +2104,7 @@ The skill edit form gains **💡 Experience** at the bottom (only for saved skil
 - Manual lessons are stored as `note` and render as "Experience: …; practice: …" when injected; the latest 3 per skill + agent are kept.
 - APIs: `POST /ag-ui/skills/{skillId}/lessons`, `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`, with the same permissions as editing (owner or admin).
 - **Effectiveness lookback (1.0.352)**: each lesson shows the artifact pass rate before vs after it was written (latest 10 samples per side, at least 2 on each side): a rise of 10+ points or crossing 80% → `improved` (📈); a drop of 10+ points → `declined` (📉, review it); otherwise `flat`; too few samples → `insufficient`. Data comes from the `effectiveness` field returned by `GET /lessons`, so stale or ineffective lessons can be cleaned up.
+- **Commit-time guarantee (1.0.353)**: when an organization is persisted (web apply or `org_commit`), any role mounting a skill with **unresolved** failure lessons gets a deterministic `【技能经验·必须遵守】` block appended to its `instructions` (up to 3 skills, one lesson each) — it does not depend on the model remembering to write avoidance steps; resolved lessons are not written.
 
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 

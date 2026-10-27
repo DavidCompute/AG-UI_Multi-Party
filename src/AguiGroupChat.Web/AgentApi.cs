@@ -506,7 +506,8 @@ public static class AgentApi
                 var r = await OrgApplyEngine.ExecuteAsync(
                     ownerId: user.UserId, isAdmin: isAdmin, skills, agents,
                     req.CreateSupportCircle, req.SupportCircleName, req.Title,
-                    catalog, skillCatalog, hub, agentOptions, loggerFactory, ct);
+                    catalog, skillCatalog, hub, agentOptions, loggerFactory, ct,
+                    lessons: ctx.RequestServices.GetService<SkillLessonStore>());
                 return Results.Ok(new { applied = true, title = req.Title, agents = r.Agents, skills = r.Skills, supportCircleGroupId = r.SupportCircleGroupId, smoke = r.Smoke });
             }
             catch (OrgApplyException ex)

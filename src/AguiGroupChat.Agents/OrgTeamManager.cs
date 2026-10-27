@@ -159,7 +159,8 @@ public sealed class OrgTeamCommitter
                 ownerId: ownerId, isAdmin: true, skills: skillSpecs, agents: agentSpecs,
                 createSupportCircle: plan.createSupportCircle, supportCircleName: null, title: plan.title,
                 catalog: _catalog, skillCatalog: _skills, hub: _hub!, agentOptions: _options,
-                loggerFactory: _loggerFactory, ct: ct);
+                loggerFactory: _loggerFactory, ct: ct,
+                lessons: _services.GetService<SkillLessonStore>());
         }
         catch (OrgApplyException ex)
         {

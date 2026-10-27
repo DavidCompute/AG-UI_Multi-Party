@@ -56,7 +56,7 @@ public static class OrgApplyEngine
         string ownerId, bool isAdmin, IReadOnlyList<OrgPlanSkill> skills, IReadOnlyList<OrgPlanAgent> agents,
         bool createSupportCircle, string? supportCircleName, string? title,
         AgentCatalog catalog, AgentSkillCatalog skillCatalog, GroupHub hub, AgentOptions agentOptions,
-        ILoggerFactory loggerFactory, CancellationToken ct)
+        ILoggerFactory loggerFactory, CancellationToken ct, SkillLessonStore? lessons = null)
     {
         // ---- 1. 技能：去重 + 记录原→新映射，供数字员工引用重映射 (保持官方语义) ----
         // 库内已有的可复用技能：方案可直接引用（写在 skillIds），无需在 skills 里重复定义。
@@ -179,9 +179,15 @@ public static class OrgApplyEngine
             foreach (var sid in skippedSuspended.Distinct(StringComparer.Ordinal))
                 warnings.Add($"技能 {sid} 已暂停（产物质量），未挂载到数字员工 {id}");
             var remapAssign = (a.AssignmentIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(d => agentIdMap[d]).ToList();
+            // 技能经验兜底（1.0.353）：组织落库时确定性写进岗位说明，
+            // 不依赖模型是否记得在 instructions 里写规避步骤。只写未解决失败（最多 3 个技能、每技能 1 条）。
+            var lessonBlock = lessons?.BuildInstructionBlock(remapSkill) ?? "";
+            var instructions = a.Instructions ?? "";
+            if (lessonBlock.Length > 0)
+                instructions = instructions.TrimEnd() + (instructions.Trim().Length > 0 ? "\n\n" : "") + lessonBlock;
             catalog.Upsert(new AgentDefinition
             {
-                AgentId = id, Nickname = a.Nickname!.Trim(), Description = a.Description ?? "", Instructions = a.Instructions ?? "",
+                AgentId = id, Nickname = a.Nickname!.Trim(), Description = a.Description ?? "", Instructions = instructions,
                 TriggerMode = Enum.TryParse<AgentTriggerMode>(a.TriggerMode, true, out var tm) ? tm : AgentTriggerMode.Mentioned,
                 SkillDefIds = remapSkill ?? [], AssignmentIds = remapAssign,
                 EscalationAgentId = string.IsNullOrWhiteSpace(a.EscalationAgentId) ? null : agentIdMap[a.EscalationAgentId],

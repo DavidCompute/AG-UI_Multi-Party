@@ -101,6 +101,53 @@ public sealed class OrgReusableSkillsTests
         Assert.Contains(result.Warnings, w => w.Contains("paused_skill"));
     }
 
+    [Fact]
+    public async Task Apply_AppendsSkillExperienceToInstructions()
+    {
+        // 1.0.353：技能有未解决失败经验时，落库确定性写入岗位说明（不依赖模型是否照做）。
+        var (catalog, skills, hub) = CreateSut(Opts());
+        skills.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "exp_skill", Name = "经验技能", Description = "d", Kind = AgentSkillKind.Prompt, Body = "模板",
+        });
+        var lessons = new SkillLessonStore();
+        lessons.Add(new SkillLesson("sl_1", "exp_skill", "writer", SkillLessonKinds.Failure,
+            "连续 2/3 次产物未达标", ["缺少正文"], "先备齐正文", "g", 100, false));
+
+        await OrgApplyEngine.ExecuteAsync(
+            "boss", isAdmin: true, NoSkills, [Agent("writer", "exp_skill")],
+            createSupportCircle: false, supportCircleName: null, title: "组",
+            catalog, skills, hub, Opts(), NullLoggerFactory.Instance, CancellationToken.None, lessons);
+
+        var def = catalog.GetDefinition("writer");
+        Assert.NotNull(def);
+        Assert.Contains("【技能经验·必须遵守】", def!.Instructions);
+        Assert.Contains("缺少正文", def.Instructions);
+        Assert.Contains("先备齐正文", def.Instructions);
+    }
+
+    [Fact]
+    public async Task Apply_DoesNotAppendResolvedExperience()
+    {
+        var (catalog, skills, hub) = CreateSut(Opts());
+        skills.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "exp_skill", Name = "经验技能", Description = "d", Kind = AgentSkillKind.Prompt, Body = "模板",
+        });
+        var lessons = new SkillLessonStore();
+        lessons.Add(new SkillLesson("sl_1", "exp_skill", "writer", SkillLessonKinds.Failure,
+            "已解决", ["缺少正文"], null, "g", 100, Resolved: true));
+
+        await OrgApplyEngine.ExecuteAsync(
+            "boss", isAdmin: true, NoSkills, [Agent("writer", "exp_skill")],
+            createSupportCircle: false, supportCircleName: null, title: "组",
+            catalog, skills, hub, Opts(), NullLoggerFactory.Instance, CancellationToken.None, lessons);
+
+        var def = catalog.GetDefinition("writer");
+        Assert.NotNull(def);
+        Assert.DoesNotContain("【技能经验", def!.Instructions);
+    }
+
     private static readonly IReadOnlyList<OrgPlanSkill> NoSkills = [];
 
     [Fact]

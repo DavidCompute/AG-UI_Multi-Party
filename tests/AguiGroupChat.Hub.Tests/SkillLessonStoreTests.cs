@@ -168,4 +168,39 @@ public sealed class SkillLessonStoreTests
         Assert.Single(store.ForSkill("pptx"));
         Assert.False(store.Remove("docx", docx.Id)); // 已删除
     }
+
+    // ---------- 落库兜底块（1.0.353） ----------
+
+    [Fact]
+    public void BuildInstructionBlock_ListsActiveFailuresAndSkipsResolved()
+    {
+        var store = new SkillLessonStore();
+        Assert.Equal("", store.BuildInstructionBlock(["docx"]));
+
+        store.Add(Lesson("docx", "writer", SkillLessonKinds.Failure, "连续 2/3 次产物未达标", 100, ["缺少正文"], "先备齐正文"));
+        store.Add(Lesson("pptx", null, SkillLessonKinds.Failure, "已解决", 200, resolved: true));
+
+        var block = store.BuildInstructionBlock(["docx", "pptx"]);
+
+        Assert.Contains("【技能经验·必须遵守】", block);
+        Assert.Contains("docx", block);
+        Assert.Contains("缺少正文", block);
+        Assert.Contains("先备齐正文", block);
+        Assert.DoesNotContain("pptx", block); // 已解决的不写
+    }
+
+    [Fact]
+    public void BuildInstructionBlock_CapsSkillCount()
+    {
+        var store = new SkillLessonStore();
+        foreach (var sid in new[] { "s1", "s2", "s3", "s4" })
+            store.Add(Lesson(sid, null, SkillLessonKinds.Failure, "失败", 100, ["缺东西"]));
+
+        var block = store.BuildInstructionBlock(["s1", "s2", "s3", "s4"], maxSkills: 2);
+
+        Assert.Contains("s1", block);
+        Assert.Contains("s2", block);
+        Assert.DoesNotContain("s3", block);
+        Assert.DoesNotContain("s4", block);
+    }
 }

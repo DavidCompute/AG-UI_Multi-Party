@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.352 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.352 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.353 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.353 Release Notes (current Windows desktop release)
+
+**版本说明**：**经验规避确定性落库**——组织落库时，若岗位挂载的技能有未解决的历史失败，平台会把规避要点直接写进岗位说明，不再依赖模型是否照做。
+**Version note**: **Deterministic avoidance at commit time** — when an organization is persisted, any role mounting a skill with unresolved failures gets the avoidance notes written directly into its instructions instead of relying on the model to remember.
+
+## 变更
+# Changes
+
+中文：
+- **落库兜底**：`OrgApplyEngine` 新增可选 `SkillLessonStore`；为每个岗位按最终挂载的技能生成「【技能经验·必须遵守】」块（每个技能取最近 1 条未解决失败，最多 3 个技能），追加到 `instructions` 末尾；已解决 / 修复经验不写。
+- **覆盖两条落库路径**：网页一键编排 `apply` 与内置「组织架构构建师」的 `org_commit`（经 `OrgTeamCommitter`）同口径。
+- **不污染手写岗位**：仅组织批量落库时追加；手工新建 / 编辑数字员工不会改写你写的 instructions。
+- **与编排预览形成闭环**：1.0.350 让模型看到“已知坑”并自主写规避，本版在落库时做确定性兜底，即使模型忘了也会生效。
+
+English:
+- **Commit-time guarantee**: `OrgApplyEngine` takes an optional `SkillLessonStore`; for each role it builds a `【技能经验·必须遵守】` block from the finally-mounted skills (one latest unresolved failure per skill, up to 3 skills) and appends it to `instructions`; resolved / repair lessons are never written.
+- **Both commit paths**: web one-click apply and the built-in Org Architect's `org_commit` (via `OrgTeamCommitter`) behave identically.
+- **No pollution of hand-written roles**: the block is only appended during bulk organization persistence; creating or editing an agent manually never rewrites your instructions.
+- **Completes the loop with the preview**: 1.0.350 lets the model see "known pitfalls" and write avoidance itself; this release guarantees it even when the model forgets.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（落库兜底）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.353。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (commit-time guarantee); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.353.
+
+## 测试
+# Tests
+
+中文：新增 `BuildInstructionBlock` 过滤 / 截断用例与组织落库追加 / 已解决不追加用例 4 条；定向测试 24 条通过；全量 `dotnet vstest` **2011 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2415，missing 0；配置键与文档引用校验通过。
+English: new cases for `BuildInstructionBlock` filtering / capping and commit-time append / resolved-not-appended (4 tests); 24 targeted tests pass; the full `dotnet vstest` run passes **2011 / 0**; `node --check app.js`; the i18n audit reports zh=en=2415, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.352 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.352 Release Notes (historical)
 
 **版本说明**：**经验有效性回看**——每条经验旁直接显示写入前后的产物合格率变化，运营能看出哪些经验真的起作用、哪些反而拖后了交付。
 **Version note**: **Lesson effectiveness lookback** — each lesson now shows the artifact pass rate before vs after it was written, so operators can tell which lessons actually help and which may be hurting delivery.

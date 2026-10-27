@@ -214,6 +214,26 @@ public sealed class SkillLessonStore
         return "经验（避免重蹈覆辙）：\n" + string.Join("\n", lessons.Select(l => "- " + l.ToPromptLine()));
     }
 
+    /// <summary>
+    /// 生成写入岗位说明的「技能经验·必须遵守」块（1.0.353）：组织落库时确定性追加，
+    /// 不依赖模型是否记得在 instructions 里写规避步骤。无经验时返回空串。
+    /// </summary>
+    public string BuildInstructionBlock(IEnumerable<string>? skillIds, int maxSkills = 3)
+    {
+        var lines = new List<string>();
+        foreach (var sid in (skillIds ?? [])
+                     .Where(s => !string.IsNullOrWhiteSpace(s))
+                     .Select(s => s.Trim())
+                     .Distinct(StringComparer.Ordinal)
+                     .Take(Math.Max(1, maxSkills)))
+        {
+            var failures = FailuresForSkill(sid, 1);
+            if (failures.Count == 0) continue;
+            lines.Add($"- 技能 {sid}：{failures[0].ToPromptLine()}");
+        }
+        return lines.Count == 0 ? "" : "【技能经验·必须遵守】\n" + string.Join("\n", lines);
+    }
+
     public object SnapshotState() => ForAll();
 
     public void RestoreState(IReadOnlyList<SkillLesson>? rows)
