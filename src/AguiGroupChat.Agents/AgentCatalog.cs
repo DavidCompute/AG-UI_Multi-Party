@@ -244,11 +244,13 @@ public sealed class AgentCatalog
     /// 技能库 API 测试运行：按技能定义执行一次（shell / http / prompt），返回结果文本。
     /// 供管理界面试运行 / 调试验证技能定义；失败返回错误文本不抛（与技能运行时一致）。
     /// </summary>
-    public async Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default)
+    public async Task<string> RunSkillAsync(AgentSkillDefinition skill, string query, CancellationToken ct = default,
+        bool ignoreSuspension = false)
     {
         // 已暂停（1.0.345）：产物质量连续不达标时不再执行，避免继续输出残次交付。
         // 放在最前面：不跑技能、不写产物、不记录质量事件（暂停状态本身不再是新的质量问题）。
-        if (skill.Suspended) return SuspendedSkillMessage(skill);
+        // 回归用例（1.0.355）需要验证“暂停技能是否已修好”，传 ignoreSuspension=true 绕过。
+        if (skill.Suspended && !ignoreSuspension) return SuspendedSkillMessage(skill);
         var result = _skillRunner.Value is { } runner
             ? await runner.InvokeAsync(skill, query, ct).ConfigureAwait(false)
             : "技能执行器不可用。";

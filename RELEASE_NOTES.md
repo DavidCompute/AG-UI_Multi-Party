@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.354 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.354 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.355 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.355 Release Notes (current Windows desktop release)
+
+**版本说明**：**技能回归用例**——真实产物失败会自动生成一条标准样例回归用例，可随时重跑，防止修复或后续改动再次退化；回归不保存用户输入。
+**Version note**: **Skill regression cases** — a real artifact failure automatically creates a standard-sample regression case that can be re-run at any time, preventing regressions after a fix or later changes; no user input is stored.
+
+## 变更
+# Changes
+
+中文：
+- **自动生成**：产物质量告警命中时，若技能有文档类产物契约（docx / xlsx / pptx / pdf），自动创建回归用例（同「技能 + 类型」幂等，每技能最多 5 条，全库最多 500 条，重启保留）。
+- **隐私边界**：回归只用 `SkillArtifactContract.SampleInput` 的确定性样例，**不保存触发失败时的用户输入**。
+- **运行**：`POST /ag-ui/skills/{skillId}/regression/run` 逐个真实执行并校验收产物契约（最多 3 条），把通过与否 / 评分 / 时间回写到用例；暂停中的技能也可跑（`ignoreSuspension` 仅限此路径），用于验证是否已修好。
+- **界面**：经验弹窗新增「🧪 回归用例」区，显示每条的最近结果与「▶ 跑回归」按钮，完成后提示通过数。
+- **接口**：`GET /ag-ui/skills/{skillId}/regression`（归属者或管理员）。
+
+English:
+- **Automatic creation**: when an artifact-quality alert fires for a skill with a document contract (docx / xlsx / pptx / pdf), a regression case is created (idempotent per skill + kind, up to 5 per skill, 500 total, persisted).
+- **Privacy boundary**: regressions use the deterministic `SkillArtifactContract.SampleInput`, **never the user input that triggered the failure**.
+- **Run**: `POST /ag-ui/skills/{skillId}/regression/run` really executes each case and validates the artifact contract (up to 3), writing pass / score / time back to the case; paused skills can also be run (`ignoreSuspension` only for this path) to verify they are fixed.
+- **UI**: the experience dialog gains a **🧪 Regression cases** section with each case's latest result and a **▶ Run regressions** button, reporting how many passed.
+- **API**: `GET /ag-ui/skills/{skillId}/regression` (owner or admin).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（回归用例）、§4.4.1（回归接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.355。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (regression cases), §4.4.1 (regression APIs); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.355.
+
+## 测试
+# Tests
+
+中文：新增 `SkillRegressionCaseStoreTests`（幂等创建 / 按技能上限 / 结果回写 / 删除隔离 / 持久化往返）5 条通过；全量 `dotnet vstest` **2019 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2426，missing 0；配置键与文档引用校验通过；Docker 重建后验证回归接口。
+English: new `SkillRegressionCaseStoreTests` (idempotent create / per-skill cap / result write-back / scoped delete / persistence round-trip), 5 passing; the full `dotnet vstest` run passes **2019 / 0**; `node --check app.js`; the i18n audit reports zh=en=2426, missing 0; config-key and docs-reference checks pass; the regression APIs are verified after the Docker rebuild.
+
+---
+
+# AG-UI 群聊桌面版 1.0.354 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.354 Release Notes (historical)
 
 **版本说明**：**经验生命周期清理**——回看为“反而下降”的经验可以一键停用（不再注入），避免过时经验长期污染上下文。
 **Version note**: **Lesson lifecycle cleanup** — lessons whose lookback shows a decline can be disabled in one click (no longer injected), so stale experience stops polluting the context.

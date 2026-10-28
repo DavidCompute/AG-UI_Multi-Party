@@ -289,6 +289,74 @@ public static class SkillApi
             return Results.Ok(new { cleaned, mode = delete ? "delete" : "resolve", ids });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 技能回归用例（1.0.355）：真实失败触发，用标准样例重跑，防修复后退化 ----
+        root.MapGet("/{skillId}/regression", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可查看该技能回归用例"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可查看回归用例"), statusCode: StatusCodes.Status403Forbidden);
+            var cases = ctx.RequestServices.GetService<SkillRegressionCaseStore>()?.List(skillId) ?? Array.Empty<SkillRegressionCase>();
+            return Results.Ok(new
+            {
+                skillId,
+                cases = cases.Select(c => new
+                {
+                    c.Id, c.Kind, c.MinScore, c.Source,
+                    createdAtMs = c.CreatedAtMs,
+                    c.LastPassed, c.LastScore, c.LastRunAtMs,
+                }),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
+        // ---- 跑回归（1.0.355）：逐个用例用标准样例真实执行并校验收产物契约，最多 3 条 ----
+        root.MapPost("/{skillId}/regression/run", async (string skillId, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog, AgentCatalog agents, CancellationToken ct) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可跑该技能回归"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可跑回归"), statusCode: StatusCodes.Status403Forbidden);
+            var store = ctx.RequestServices.GetService<SkillRegressionCaseStore>();
+            if (store is null) return Results.Json(new AguiError(ErrorCodes.BadRequest, "回归用例库不可用"), statusCode: StatusCodes.Status503ServiceUnavailable);
+
+            var results = new List<object>();
+            foreach (var c in store.List(skillId).Take(3))
+            {
+                if (!Enum.TryParse<SkillArtifactKind>(c.Kind, true, out var kind)
+                    || !SkillArtifactContract.SupportsGenerationProbe(kind))
+                {
+                    results.Add(new { caseId = c.Id, kind = c.Kind, skipped = true });
+                    continue;
+                }
+                var sample = SkillArtifactContract.SampleInput(kind);
+                // 暂停技能也要能验证“是否已修好”：ignoreSuspension=true（仅此处显式调用）。
+                var output = await agents.RunSkillAsync(skill, sample, ct, ignoreSuspension: true);
+                var v = SkillArtifactContract.Validate(skill, output);
+                var passed = v.IsSatisfied && v.Score >= c.MinScore;
+                store.RecordRun(c.Id, passed, v.Score, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                results.Add(new
+                {
+                    caseId = c.Id,
+                    kind = c.Kind,
+                    score = v.Score,
+                    passed,
+                    missing = v.MissingItems,
+                });
+            }
+            return Results.Ok(new { skillId, ran = results.Count, results });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 删除技能（技能归属者或系统管理员）；已被数字员工引用的技能一并解除（按引用的 agent 引用清理在下文做，暂无外键）----
         root.MapDelete("/{skillId}", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {
@@ -304,6 +372,7 @@ public static class SkillApi
             catalog.Remove(skillId);
             // 技能没了，其岗位经验也一并清空（1.0.349）。
             ctx.RequestServices.GetService<SkillLessonStore>()?.RemoveSkill(skillId);
+            ctx.RequestServices.GetService<SkillRegressionCaseStore>()?.RemoveSkill(skillId);
             return Results.Ok(new { deleted = true, skillId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 

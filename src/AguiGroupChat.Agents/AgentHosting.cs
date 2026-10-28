@@ -94,6 +94,8 @@ public static class AgentHosting
         services.AddSingleton<ArtifactAlertStore>();
         // 技能经验（1.0.349）：岗位级失败 / 修复经验，挂载技能时注入工具说明
         services.AddSingleton<SkillLessonStore>();
+        // 技能回归用例（1.0.355）：真实失败触发的标准样例重跑，防修复后退化
+        services.AddSingleton<SkillRegressionCaseStore>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效
@@ -498,6 +500,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("skillLessons", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册技能回归用例到持久化扩展区「skillRegressions」：重启后回归用例与最近结果不丢（1.0.355）。</summary>
+    public static void RegisterSkillRegressionPersistence(this IServiceProvider services)
+    {
+        var store = services.GetRequiredService<SkillRegressionCaseStore>();
+        Func<object?> snapshot = () => store.SnapshotState();
+        Action<JsonElement> restore = element => store.RestoreState(
+            element.Deserialize<List<SkillRegressionCase>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("skillRegressions", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("skillRegressions", snapshot, restore);
         }
     }
 

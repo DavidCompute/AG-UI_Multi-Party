@@ -949,6 +949,13 @@
       <p class="form-hint" style="margin:2px 0 10px" data-i18n="skill.lessons.hint">经验会注入到挂载该技能的数字员工工具说明（最多 3 条）；已解决的旧失败不会注入。可手动补写运营知识，也可删除不适用的条目。</p>
       <div id="skillLessonsTarget" class="skill-repair-target"></div>
       <div id="skillLessonsList" class="skill-lessons-list"></div>
+      <div id="skillRegressionWrap" class="hidden">
+        <div class="form-section" data-i18n="skill.regression.title">🧪 回归用例（标准样例，不含用户内容）</div>
+        <div id="skillRegressionList" class="skill-lessons-list" style="max-height:20vh"></div>
+        <div style="margin-bottom:10px">
+          <button id="skillRegressionRun" class="chip-btn" data-i18n="skill.regression.run">▶ 跑回归</button>
+        </div>
+      </div>
       <div class="form-section" data-i18n="skill.lessons.addSection">补充一条经验</div>
       <div class="form-group">
         <label data-i18n="skill.lessons.agentScope">适用岗位</label>

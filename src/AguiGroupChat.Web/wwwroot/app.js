@@ -2626,7 +2626,7 @@ async function openSkillLessonsModal(skillId) {
   fillSkillLessonAgentSelect();
   syncLessonCleanupButton([]);
   $("skillLessonsModal").classList.remove("hidden");
-  await loadSkillLessons();
+  await Promise.all([loadSkillLessons(), loadSkillRegressions()]);
 }
 
 function fillSkillLessonAgentSelect() {
@@ -2740,6 +2740,60 @@ async function cleanupSkillLessons() {
     toast(t("skill.lessons.cleaned", { n: (d && d.cleaned) || 0 }));
     await loadSkillLessons();
   } catch (e) { toast(t("skill.lessons.fail", { err: e })); }
+}
+
+/* ===== 回归用例（1.0.355）：真实失败触发的标准样例重跑 ===== */
+
+function skillRegressionStateLabel(c) {
+  if (!c.lastRunAtMs) return t("skill.regression.never");
+  return c.lastPassed
+    ? t("skill.regression.passed", { score: c.lastScore })
+    : t("skill.regression.failed", { score: c.lastScore });
+}
+
+async function loadSkillRegressions() {
+  const wrap = $("skillRegressionWrap");
+  if (!wrap || !lessonsSkillId) return;
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(lessonsSkillId)}/regression`, {
+      headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    const cases = (res.ok && d && Array.isArray(d.cases)) ? d.cases : [];
+    if (!cases.length) {
+      wrap.classList.add("hidden");
+      $("skillRegressionList").innerHTML = "";
+      return;
+    }
+    wrap.classList.remove("hidden");
+    $("skillRegressionList").innerHTML = cases.map((c) => {
+      const cls = c.lastRunAtMs ? (c.lastPassed ? "improved" : "declined") : "insufficient";
+      return `<div class="skill-lesson-row"><div class="skill-lesson-head">`
+        + `<span class="skill-lesson-kind">🧪 ${escapeHtml(c.kind)}</span>`
+        + `<span class="skill-lesson-eff ${cls}" style="margin-top:0">${escapeHtml(skillRegressionStateLabel(c))}</span>`
+        + `</div></div>`;
+    }).join("");
+  } catch { wrap.classList.add("hidden"); }
+}
+
+async function runSkillRegression() {
+  if (!lessonsSkillId || !state.token) return;
+  const btn = $("skillRegressionRun");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⏳ " + t("skill.regression.running");
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(lessonsSkillId)}/regression/run`, {
+      method: "POST", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("skill.regression.fail", { err: (d && (d.message || d.code)) || res.status })); return; }
+    const list = (d && Array.isArray(d.results)) ? d.results : [];
+    const ok = list.filter((r) => r.passed).length;
+    toast(t("skill.regression.done", { ok, n: list.length }));
+    await loadSkillRegressions();
+  } catch (e) { toast(t("skill.regression.fail", { err: e })); }
+  finally { btn.disabled = false; btn.textContent = old || t("skill.regression.run"); }
 }
 
 /// <summary>刷新技能批量删除状态栏（选中数）与全选。</summary>
@@ -18976,6 +19030,7 @@ function init() {
   $("sfLessons").onclick = () => { if (editingSkillId) openSkillLessonsModal(editingSkillId); };
   $("skillLessonsAdd").onclick = addSkillLesson;
   $("skillLessonsCleanup").onclick = cleanupSkillLessons;
+  $("skillRegressionRun").onclick = runSkillRegression;
   $("skillLessonsClose").onclick = closeLessons;
   $("skillLessonsModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeLessons(); });
   $("skillLessonsModal").addEventListener("click", (e) => { if (e.target === $("skillLessonsModal")) closeLessons(); });

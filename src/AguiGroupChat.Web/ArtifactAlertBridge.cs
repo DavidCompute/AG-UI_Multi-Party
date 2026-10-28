@@ -41,6 +41,7 @@ public static class ArtifactAlertBridge
         var agentCatalog = services.GetService(typeof(AgentCatalog)) as AgentCatalog;
         var alertStore = services.GetService(typeof(ArtifactAlertStore)) as ArtifactAlertStore;
         var lessons = services.GetService(typeof(SkillLessonStore)) as SkillLessonStore;
+        var regressions = services.GetService(typeof(SkillRegressionCaseStore)) as SkillRegressionCaseStore;
         var dispatcher = services.GetService(typeof(WebhookDispatcher)) as WebhookDispatcher;
         var logger = (services.GetService(typeof(ILoggerFactory)) as ILoggerFactory)?.CreateLogger("ArtifactAlerts");
 
@@ -109,6 +110,14 @@ public static class ArtifactAlertBridge
                         evt.GroupId ?? "", now, Resolved: false));
                     // 新经验要能被已在缓存里的智能体看见：失效引用该技能的缓存，下次触发时重建工具说明。
                     agentCatalog?.InvalidateAgentsUsingSkill(evt.SkillId);
+                }
+
+                // 回归用例（1.0.355）：真实失败触发一次标准样例重跑用例（幂等），防止修复后退化。
+                if (regressions is not null && skill is not null)
+                {
+                    var probeKind = SkillArtifactContract.ExpectedKind(skill);
+                    if (probeKind != SkillArtifactKind.None && SkillArtifactContract.SupportsGenerationProbe(probeKind))
+                        regressions.Ensure(skill.SkillId, probeKind.ToString(), options.LowScoreThreshold);
                 }
 
                 dispatcher?.OnEvent(evt.GroupId ?? "", new ArtifactQualityAlertEvent
