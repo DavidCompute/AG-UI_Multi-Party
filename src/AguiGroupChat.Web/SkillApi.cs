@@ -457,6 +457,10 @@ public static class SkillApi
             }
 
             var applied = false;
+            // 回滚保护（1.0.357）：先记住修复前的正文，回归不通过时恢复。
+            var previousBody = skill.Body;
+            var previousDescription = skill.Description;
+            var previousBuiltinVersion = skill.BuiltinVersion;
             // 先只写正文、不立即恢复：回归不通过时必须保持暂停（1.0.356）。
             if (apply == true && fix.Ok && !fix.Skipped && fix.CorrectedBody is { Length: > 0 } body)
                 applied = catalog.ApplyRepair(skillId, body, fix.CorrectedDescription, resume: false);
@@ -471,6 +475,14 @@ public static class SkillApi
                     regression = await SkillRegressionRunner.RunAsync(live, cases, agents, regressions, ct);
             }
             var regressionBlocked = SkillRegressionRunner.BlocksResume(regression);
+
+            // 回归未通过：把技能恢复到修复前的正文（1.0.357），避免留下“可能更差”的版本。
+            var rolledBack = false;
+            if (applied && regressionBlocked)
+            {
+                rolledBack = catalog.RestoreBody(skillId, previousBody, previousDescription, previousBuiltinVersion);
+                if (rolledBack) applied = false;
+            }
 
             // 自测通过且回归通过（或没有可跑的回归）：才恢复挂载并失效缓存。
             if (apply == true && fix.Ok && !fix.Skipped && !regressionBlocked)
@@ -503,6 +515,29 @@ public static class SkillApi
                 }
             }
 
+            // 回归未通过：记一条失败经验（含“已回滚”），避免下次再试同一种改法。
+            if (regressionBlocked)
+            {
+                var lessonsFail = ctx.RequestServices.GetService<SkillLessonStore>();
+                if (lessonsFail is not null)
+                {
+                    var failed = regression!.Results.Where(r => !r.Skipped && !r.Passed).ToList();
+                    var detail = string.Join("、", failed.Select(r => $"{r.Kind} {r.Score} 分"));
+                    var missing = failed.SelectMany(r => r.Missing)
+                        .Where(m => !string.IsNullOrWhiteSpace(m))
+                        .Distinct(StringComparer.Ordinal)
+                        .Take(3)
+                        .ToArray();
+                    lessonsFail.Add(new SkillLesson(
+                        "sl_" + Guid.NewGuid().ToString("N")[..12],
+                        skillId, null, SkillLessonKinds.Failure,
+                        $"修复后回归未通过（{detail}）" + (rolledBack ? "，已回滚到修复前正文" : ""),
+                        missing,
+                        "不要沿用这次改法；先复现回归失败再重新修复，或改用更可靠的执行方案",
+                        "", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Resolved: false));
+                }
+            }
+
             return Results.Ok(new
             {
                 skillId,
@@ -515,6 +550,7 @@ public static class SkillApi
                 applied,
                 resumed = catalog.Get(skillId)?.Suspended == false,
                 lessonSaved,
+                rolledBack,
                 regressionRan = regression?.Ran ?? 0,
                 regressionPassed = !regressionBlocked,
                 regression,

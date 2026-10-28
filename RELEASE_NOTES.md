@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.356 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.356 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.357 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.357 Release Notes (current Windows desktop release)
+
+**版本说明**：**修复回滚保护**——回归未通过时自动恢复到修复前的正文，并记一条失败经验，不在技能里留下“可能更差”的版本。
+**Version note**: **Rollback protection** — when regressions fail, the skill is restored to its pre-repair body and a failure lesson is recorded, so a possibly-worse version is never left behind.
+
+## 变更
+# Changes
+
+中文：
+- **回滚**：修复前记住正文 / 描述 / 内置版本标记；若回归未通过且已写入新正文，则调用 `RestoreBody` 恢复（**保留暂停状态**，回滚不等于恢复上线）。
+- **失败经验**：回归未通过时写一条失败经验（含失败用例与评分、已回滚标记、规避建议），下次修复可看到；不会写正向修复经验、也不会把旧失败标为已解决。
+- **响应与界面**：repair 新增 `rolledBack`；弹窗在失败时显示「已回滚到修复前正文（回归未通过，技能保持暂停）」，且不弹成功 toast。
+- **边界**：若修复未改写正文（自测第 1 次就通过）但回归仍失败，则无需回滚，只保持暂停并记录失败经验。
+
+English:
+- **Rollback**: the pre-repair body / description / built-in version marker are captured first; if regressions fail after a new body was written, `RestoreBody` puts them back (**suspension preserved** — rollback is not going live).
+- **Failure lesson**: when regressions fail, a failure lesson is recorded (failed cases and scores, rolled-back marker, avoidance advice), visible on the next repair; no positive repair lesson is written and old failures are not resolved.
+- **Response and UI**: repair adds `rolledBack`; the dialog shows "Rolled back to the pre-repair body (regression failed; the skill stays paused)" and suppresses the success toast.
+- **Boundary**: if the repair did not rewrite the body (self-test passed on the first attempt) but regressions still fail, there is nothing to roll back; the skill stays paused and the failure lesson is recorded.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（回滚保护）、§4.4.1（repair 字段）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.357。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (rollback protection), §4.4.1 (repair fields); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.357.
+
+## 测试
+# Tests
+
+中文：新增 `RestoreBody` 回滚 / 保留暂停 / 内置版本恢复用例 1 条；`ArtifactAlertTests` 14 条全通过；全量 `dotnet vstest` **2021 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2429，missing 0；配置键与文档引用校验通过。
+English: new `RestoreBody` rollback / suspension-preserved / built-in-version-restored case; all 14 `ArtifactAlertTests` pass; the full `dotnet vstest` run passes **2021 / 0**; `node --check app.js`; the i18n audit reports zh=en=2429, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.356 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.356 Release Notes (historical)
 
 **版本说明**：**修复后自动回归**——一键修复成功会先用修正后的正文跑一遍回归用例；只有全部通过才恢复挂载，否则保持暂停并明确提示。
 **Version note**: **Regression after repair** — a successful one-click repair now re-runs the regression cases with the repaired body; only an all-pass result resumes the skill, otherwise it stays paused with an explicit message.

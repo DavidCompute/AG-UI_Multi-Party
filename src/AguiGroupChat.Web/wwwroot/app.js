@@ -2568,6 +2568,7 @@ async function runSkillRepair() {
       lines.push(t("skill.repair.regression", { ok, n: d.regression.ran }));
       if (d.regression.allPassed === false) lines.push(t("skill.repair.regressionBlocked"));
     }
+    if (d.rolledBack) lines.push(t("skill.repair.rolledBack"));
     lines.push(t("skill.repair.state", { state: d.resumed ? t("skill.repair.stateResumed") : t("skill.repair.stateSuspended") }));
     $("skillRepairResult").classList.remove("hidden");
     $("skillRepairResultBody").textContent = lines.join("\n");

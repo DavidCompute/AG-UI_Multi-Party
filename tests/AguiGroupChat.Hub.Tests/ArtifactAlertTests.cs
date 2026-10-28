@@ -144,6 +144,30 @@ public sealed class ArtifactAlertTests
     }
 
     [Fact]
+    public void RestoreBody_RollsBackAndKeepsSuspension()
+    {
+        var skills = new AgentSkillCatalog(NullLoggerFactory.Instance, new AgentOptions());
+        skills.Upsert(new AgentSkillDefinition
+        {
+            SkillId = "s", Name = "n", Kind = AgentSkillKind.Prompt, Body = "old", Description = "d", BuiltinVersion = "1.0.0",
+        });
+        skills.Suspend("s", "低分", 1);
+
+        Assert.True(skills.ApplyRepair("s", "new body", "new desc", resume: false));
+        Assert.Equal("new body", skills.Get("s")!.Body);
+        Assert.Null(skills.Get("s")!.BuiltinVersion);
+        Assert.True(skills.Get("s")!.Suspended);
+
+        Assert.True(skills.RestoreBody("s", "old", "d", "1.0.0"));
+        var s = skills.Get("s")!;
+        Assert.Equal("old", s.Body);
+        Assert.Equal("d", s.Description);
+        Assert.Equal("1.0.0", s.BuiltinVersion);
+        Assert.True(s.Suspended); // 回滚不等于恢复上线
+        Assert.False(skills.RestoreBody("missing", "x", null, null));
+    }
+
+    [Fact]
     public void ApplyRepair_WritesBodyAndResumes()
     {
         var skills = new AgentSkillCatalog(NullLoggerFactory.Instance, new AgentOptions());

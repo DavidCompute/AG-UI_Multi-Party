@@ -131,6 +131,21 @@ public sealed class AgentSkillCatalog
     }
 
     /// <summary>
+    /// 回滚到修复前的正文（1.0.357）：只恢复正文 / 描述 / 内置版本标记，
+    /// <b>保留当前暂停状态</b>（回滚不等于恢复上线）。用于“修复后回归未通过”的保护。
+    /// </summary>
+    public bool RestoreBody(string skillId, string body, string? description, string? builtinVersion)
+    {
+        var skill = Get(skillId);
+        if (skill is null) return false;
+        skill.Body = body ?? "";
+        skill.Description = description ?? "";
+        skill.BuiltinVersion = builtinVersion;
+        Upsert(skill);
+        return true;
+    }
+
+    /// <summary>
     /// 应用一次「诊断修复」的结果（1.0.347）：写入修正后的正文 / 描述，并可同时恢复挂载。
     /// 与手工编辑同语义：写过之后不再是原样内置版（<see cref="AgentSkillDefinition.BuiltinVersion"/> 置空）。
     /// 正文为空时不做任何修改（避免把修复失败当成“清空技能”）。

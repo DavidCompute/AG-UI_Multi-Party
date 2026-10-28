@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.356**
+> Applies to version: **1.0.357**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2108,6 +2108,7 @@ The skill edit form gains **💡 Experience** at the bottom (only for saved skil
 - **Lifecycle cleanup (1.0.354)**: when lessons with `declined` effectiveness (enough samples, pass rate dropped) exist, the dialog shows **🧹 Disable ineffective (N)**; confirming calls `POST /ag-ui/skills/{id}/lessons/cleanup` to mark them resolved in bulk (no longer injected, still auditable). `?mode=delete` removes them physically. Resolved lessons are never selected twice, and the operation is idempotent.
 - **Regression cases (1.0.355)**: when an artifact-quality alert fires for a skill with a document contract (docx / xlsx / pptx / pdf), a **standard-sample regression case** is created automatically (idempotent per skill + kind, up to 5 per skill). The experience dialog can **▶ Run regressions**: each case really executes `SkillArtifactContract.SampleInput` and validates the produced artifact contract, with pass / score / time written back and persisted. Regression **never stores user input** (deterministic samples only), and paused skills can be run to verify they are fixed.
 - **Regression after repair (1.0.356)**: when a one-click repair succeeds (self-test passes) and the skill has regression cases, the repaired body is automatically re-run through them (up to 3): **only all-pass resumes the skill and records the repair lesson**; any failure keeps it paused, with `regressionRan / regressionPassed / regression` in the response and an explicit UI note "Regression failed: the skill stays paused; fix it and retry" — no more "looks fixed but is worse".
+- **Rollback on failed regression (1.0.357)**: when regressions fail, the skill's body / description / built-in version marker are restored to their **pre-repair** state (`RestoreBody`, suspension preserved) and a failure lesson "repair failed regressions (rolled back)" is recorded; the repair response adds `rolledBack` and the UI shows it, so a possibly-worse body is never left behind.
 
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
@@ -2138,7 +2139,7 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `POST /ag-ui/skills/{skillId}/suggest` | Test-run parameter suggestion | Has the model provide a typical `query` |
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | Pause mounting (1.0.345) | Owner or admin; evicts cached agents immediately |
 | `POST /ag-ui/skills/{skillId}/resume` | Resume mounting (1.0.345) | Same; clears the paused flags and re-mounts |
-| `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | Diagnose and repair (1.0.347) | Model rewrite + server self-test; only `apply=true` persists; since 1.0.356 a successful repair runs regressions first and stays paused if they fail |
+| `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | Diagnose and repair (1.0.347) | Model rewrite + server self-test; only `apply=true` persists; since 1.0.356 a successful repair runs regressions first, and since 1.0.357 a failed regression rolls the body back and keeps it paused |
 | `GET /ag-ui/skills/{skillId}/lessons` | Skill experience (1.0.349) | Owner or admin; failure / repair lessons, see 4.3.8; since 1.0.352 each carries `effectiveness` |
 | `POST /ag-ui/skills/{skillId}/lessons` | Add a lesson manually (1.0.351) | Owner or admin; `note` kind, see 4.3.9 |
 | `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | Delete a lesson (1.0.351) | Owner or admin; must belong to this skill |
