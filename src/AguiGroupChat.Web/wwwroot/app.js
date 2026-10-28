@@ -9550,6 +9550,7 @@ async function openArtifactQualityModal() {
   $("aqIssues").innerHTML = "";
   $("aqLoopCards").innerHTML = "";
   $("aqLoopRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.loading"))}</td></tr>`;
+  $("aqLoopMeta").textContent = "";
   $("artifactQualityModal").classList.remove("hidden");
   try {
     const scope = perfGroupId ? `&groupId=${encodeURIComponent(perfGroupId)}` : "";
@@ -9594,6 +9595,17 @@ async function loadArtifactLoop(days) {
 
 function renderArtifactLoop(d) {
   const s = d && d.summary ? d.summary : null;
+  // 自动修复（1.0.360）：开关状态与队列计数（门控参数一并展示，方便判断为何没自动修）。
+  const ar = d && d.autoRepair ? d.autoRepair : null;
+  $("aqLoopMeta").textContent = ar
+    ? t("admin.loopAutoRepair", {
+        state: t(ar.enabled ? "admin.loopAutoRepairOn" : "admin.loopAutoRepairOff"),
+        cooldown: String(ar.cooldownMinutes || 0),
+        cap: String(ar.maxPerDay || 0),
+        queued: String(ar.queued || 0),
+        processed: String(ar.processed || 0),
+      })
+    : "";
   const card = (k, v) => `<div class="oh-card"><div class="oh-card-k">${escapeHtml(k)}</div><div class="oh-card-v">${escapeHtml(String(v))}</div></div>`;
   if (!s) {
     $("aqLoopCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.loopNoData"))}</div>`;

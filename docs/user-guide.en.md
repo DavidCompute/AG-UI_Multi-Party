@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.359**
+> Applies to version: **1.0.360**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2110,6 +2110,7 @@ The skill edit form gains **💡 Experience** at the bottom (only for saved skil
 - **Regression after repair (1.0.356)**: when a one-click repair succeeds (self-test passes) and the skill has regression cases, the repaired body is automatically re-run through them (up to 3): **only all-pass resumes the skill and records the repair lesson**; any failure keeps it paused, with `regressionRan / regressionPassed / regression` in the response and an explicit UI note "Regression failed: the skill stays paused; fix it and retry" — no more "looks fixed but is worse".
 - **Rollback protection (1.0.357)**: when regressions fail, the skill's body / description / built-in version marker are restored to their **pre-repair** state (`RestoreBody`, suspension preserved) and a failure lesson "repair failed regressions (rolled back)" is recorded; the repair response adds `rolledBack` and the UI shows it, so a possibly-worse body is never left behind.
 - **Self-healing loop alerts and regression top-up (1.0.359)**: after every `repair?apply=true` records its outcome, the skill's loop events from the last 7 days decide "did the repair work well" (latest 5 **effective** attempts; `skipped` does not count): **≥2 rollbacks**, **≥2 self-test failures**, or a **success rate < 50%** triggers an alert (60-minute cooldown per skill; fewer than 2 effective attempts never alerts, matching the artifact-quality "two in a row" rule). On a hit: (1) if the skill has a document artifact contract and no regression case yet, one standard-sample case is added (guarding against regressions after the fix); (2) an in-app alert is stored (`SkillLoopAlertStore`, latest 200, cleared on restart); (3) `SKILL_LOOP_ALERT` is pushed through Webhooks (`attempts / successes / rolledBack / failed / successRate / avgMs / reasons / regressionEnsured`). The notification center polls `GET /ag-ui/admin/skill-loop/alerts` every minute and opens the skill library on click. Skills are **never auto-paused** — failed repairs and rollbacks already leave them paused, so pausing after a successful repair would be pointless.
+- **Alert → auto-repair (1.0.360)**: with `Agents:ArtifactQuality:AutoRepairEnabled=true`, a loop alert (or a skill auto-suspended for artifact quality) queues one background repair that runs the **exact same** pipeline as the **🩺 Repair** button (`SkillRepairRunner`: self-test rewrite → write body → regressions → roll back and keep paused if they fail → lessons → loop event), so automatic repairs are gated by regressions too and never leave a possibly-worse body live. Two brakes keep model spend bounded: **automatic repairs for the same skill are at least `AutoRepairCooldownMinutes` apart (default 60; only the automatic path is gated, manual repairs are never blocked)** and **at most `AutoRepairMaxPerDay` (default 3) in 24 hours**. Only non-built-in skills (`OwnerId != null`) that can be self-tested server-side are handled; client-executed skills cannot be self-tested on the server and are skipped. The queue is bounded at 64 (dropping the oldest) and never back-pressures chat. The **🔁 Self-healing loop** section of the artifact-quality dialog shows "Auto-repair: on / off · N min cooldown · N per day · queued / processed" at the top.
 
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
@@ -2120,6 +2121,9 @@ Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omi
 | `WindowRuns` | `3` | Judgement window (latest runs) |
 | `LowRunsToAlert` | `2` | Low runs within the window needed to alert |
 | `CooldownMinutes` | `60` | Alert cooldown per agent + skill |
+| `AutoRepairEnabled` | `false` | Retry the repair automatically after a loop alert (1.0.360; non-built-in skills only) |
+| `AutoRepairCooldownMinutes` | `60` | Auto-repair cooldown; only gates the automatic path, manual repairs are never blocked |
+| `AutoRepairMaxPerDay` | `3` | Automatic repairs allowed per 24 hours before leaving it to a human |
 
 ---
 
@@ -5154,7 +5158,7 @@ The Local bridge process's own loopback service (`src/AguiGroupChat.NativeBridge
 | GET | `/ag-ui/admin/groups` | Group options (`groupId` / `name`, sorted by name; used by the perf tab's "by group" dropdown) | Operator |
 | GET | `/ag-ui/admin/artifact-quality` | Artifact-quality dashboard (`?days=N`, optional `?groupId=` / `?agentId=` / `?skillId=`): overview / daily trend / per-skill aggregation / recent low-score events | Operator |
 | GET | `/ag-ui/admin/artifact-quality/alerts` | Artifact-quality alerts (`?since=<ms>`): `skillId / agentId / runs / lowRuns / score / threshold / missing / suspended / atMs`; polled by the front-end notification center | Operator |
-| GET | `/ag-ui/admin/skill-loop` | Self-healing loop metrics (`?days=N`): `summary` (attempts / successes / failures / rollbacks / success rate / average time / regression runs) / `daily` / `skills` | Operator |
+| GET | `/ag-ui/admin/skill-loop` | Self-healing loop metrics (`?days=N`): `summary` (attempts / successes / failures / rollbacks / success rate / average time / regression runs) / `daily` / `skills` / `autoRepair` (switch / cooldown / daily cap / queue counters; 1.0.360) | Operator |
 | GET | `/ag-ui/admin/skill-loop/alerts` | Self-healing loop alerts (`?since=ms`): `alerts` (skill / attempts / successes / rollbacks / failures / success rate / time / `reasons` / whether a regression case was added) | Operator |
 | GET | `/ag-ui/admin/org-health` | Org health report (`?days=N`): Markdown (overview / attention / detail / org structure / advice / **eval regression (pass rate)**) **plus structured data** (`summary` / `agents` / `users` (calls / tokens / cost aggregated per trigger) / `groups` (aggregated per group, since this version) / `prev` (previous window, for period-over-period) / `pricing` (with `currency` / `inputPerMillion` / `outputPerMillion` unit prices, so the front end can plot a cost trend), for the front-end chart view) | Operator |
 | GET | `/ag-ui/admin/eval-cases` | Digital-employee eval cases + target-employee options + run history (`runs`) | Admin |

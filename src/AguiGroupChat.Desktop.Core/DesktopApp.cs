@@ -59,6 +59,7 @@ public static class DesktopApp
         // 出站 Webhook（对外集成）：与 Web 组合根同一套（管理员配置回调地址 + 事件订阅）
         builder.Services.AddSingleton(new WebhookState());
         builder.Services.AddSingleton<WebhookDispatcher>();
+        builder.Services.RegisterSkillLoopAlerts(); // 闭环事件 → 告警 / 自动修复（1.0.360）
         builder.Services.AddSingleton<AguiGroupChat.Web.QuotaExpiryReminderService>(); // 临时放额到期提醒（QUOTA_OVERRIDE_EXPIRING / EXPIRED）
         builder.Services.AddSingleton<AguiGroupChat.Web.QuotaReminderStateStore>(); // 提醒去重键（跨重启保持）
         builder.Services.AddSingleton<AguiGroupChat.Web.ImageWriteApprovalQueue>(sp => new AguiGroupChat.Web.ImageWriteApprovalQueue(

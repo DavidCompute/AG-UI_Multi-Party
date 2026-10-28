@@ -1,9 +1,33 @@
 using System.Collections.Concurrent;
 using AguiGroupChat.Agents;
 using AguiGroupChat.Hub.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace AguiGroupChat.Web;
+
+/// <summary>
+/// 把闭环事件接给告警桥（1.0.360）：人工修复与自动修复都经此入口，不必互相知道对方。
+/// </summary>
+public sealed class SkillLoopAlertObserver : ISkillLoopObserver
+{
+    private readonly IServiceProvider _services;
+
+    public SkillLoopAlertObserver(IServiceProvider services) => _services = services;
+
+    public void OnOutcomeRecorded(string skillId, string outcome)
+        => SkillLoopAlertBridge.OnOutcome(_services, skillId, outcome);
+}
+
+/// <summary>Web 侧注册（1.0.360）：Program.cs 与 DesktopApp.cs 各调一次（组合根漂移守卫）。</summary>
+public static class SkillLoopAlertRegistration
+{
+    public static IServiceCollection RegisterSkillLoopAlerts(this IServiceCollection services)
+    {
+        services.AddSingleton<ISkillLoopObserver, SkillLoopAlertObserver>();
+        return services;
+    }
+}
 
 /// <summary>
 /// 自愈闭环 → 告警 / 回归用例补充桥接（1.0.359）。
@@ -77,6 +101,17 @@ public static class SkillLoopAlertBridge
             alerts?.Add(new SkillLoopAlert(
                 skillId, skillName, decision.Attempts, decision.Successes, decision.RolledBack, decision.Failed,
                 decision.SuccessRate, decision.AvgMs, decision.Reasons, ensured, now));
+
+            // 自动修复（1.0.360）：告警之后先把最便宜的一步做掉——后台再试一次修复。
+            // 只对非内置、服务端可自测的技能排队；真正的闸门在工作线程里（冷却 + 每日上限）。
+            var options = (services.GetService(typeof(AgentOptions)) as AgentOptions)?.ArtifactQuality;
+            if (options is { AutoRepairEnabled: true }
+                && skill is { OwnerId: not null }
+                && skill.ExecutionLocation != AgentSkillExecutionLocation.Client)
+            {
+                (services.GetService(typeof(SkillAutoRepairQueue)) as SkillAutoRepairQueue)
+                    ?.TryEnqueue(skillId, string.Join(",", decision.Reasons));
+            }
 
             var dispatcher = services.GetService(typeof(WebhookDispatcher)) as WebhookDispatcher;
             dispatcher?.OnEvent("", new SkillLoopAlertEvent

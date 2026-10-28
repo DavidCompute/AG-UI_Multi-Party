@@ -1,5 +1,12 @@
 namespace AguiGroupChat.Agents;
 
+/// <summary>修复来源（1.0.360）：人工点“一键修复”或闭环告警自动触发。</summary>
+public static class SkillRepairSources
+{
+    public const string Manual = "manual";
+    public const string Auto = "auto";
+}
+
 /// <summary>一次修复尝试的结局（1.0.358）。</summary>
 public static class SkillLoopOutcomes
 {
@@ -27,7 +34,11 @@ public sealed record SkillLoopEvent(
     long DurationMs,
     int RegressionRan,
     bool RegressionPassed,
-    long TimestampMs);
+    long TimestampMs)
+{
+    /// <summary>修复来源：<c>manual</c>（人工触发）/ <c>auto</c>（闭环告警自动触发，1.0.360）。</summary>
+    public string Source { get; init; } = "manual";
+}
 
 /// <summary>
 /// 自愈闭环事件库：有界内存（默认 2000 条）+ 扩展区持久化。
@@ -39,7 +50,7 @@ public sealed class SkillLoopEventStore
     private readonly object _gate = new();
     private readonly List<SkillLoopEvent> _events = new();
 
-    public SkillLoopEvent Record(string skillId, string outcome, int attempts, long durationMs, int regressionRan, bool regressionPassed)
+    public SkillLoopEvent Record(string skillId, string outcome, int attempts, long durationMs, int regressionRan, bool regressionPassed, string source = SkillRepairSources.Manual)
     {
         var evt = new SkillLoopEvent(
             "lp_" + Guid.NewGuid().ToString("N")[..12],
@@ -49,7 +60,10 @@ public sealed class SkillLoopEventStore
             Math.Max(0, durationMs),
             Math.Max(0, regressionRan),
             regressionPassed,
-            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+        {
+            Source = string.IsNullOrWhiteSpace(source) ? SkillRepairSources.Manual : source,
+        };
         if (string.IsNullOrWhiteSpace(evt.SkillId)) return evt;
         lock (_gate)
         {

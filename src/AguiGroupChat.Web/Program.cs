@@ -33,6 +33,7 @@ builder.Services.AddSingleton<SkillRunArtifactStore>(); // 技能试运行产物
 // 出站 Webhook（对外集成）：管理员配置回调地址，知聚事件以带 HMAC 签名的 POST 推送给外部系统。
 builder.Services.AddSingleton(new WebhookState()); // 订阅配置（持久化到扩展区「webhooks」）
 builder.Services.AddSingleton<WebhookDispatcher>(); // 事件→订阅过滤→后台投递（含重试 / 签名 / 投递日志）
+builder.Services.RegisterSkillLoopAlerts(); // 闭环事件 → 告警 / 自动修复（1.0.360）
 builder.Services.AddSingleton<QuotaExpiryReminderService>(); // 临时放额到期提醒：周期性扫描 → QUOTA_OVERRIDE_EXPIRING / EXPIRED
 builder.Services.AddSingleton<QuotaReminderStateStore>(); // 提醒去重键（跨重启保持，避免重复投递）
 builder.Services.AddSingleton<ImageWriteApprovalQueue>(sp => new ImageWriteApprovalQueue(

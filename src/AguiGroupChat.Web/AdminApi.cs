@@ -491,6 +491,15 @@ public static class AdminApi
                 summary,
                 daily,
                 skills,
+                // 自动修复（1.0.360）：是否开启、门控参数与队列计数
+                autoRepair = new
+                {
+                    enabled = (sp.GetService<AgentOptions>()?.ArtifactQuality.AutoRepairEnabled) ?? false,
+                    cooldownMinutes = (sp.GetService<AgentOptions>()?.ArtifactQuality.AutoRepairCooldownMinutes) ?? 0,
+                    maxPerDay = (sp.GetService<AgentOptions>()?.ArtifactQuality.AutoRepairMaxPerDay) ?? 0,
+                    queued = sp.GetService<SkillAutoRepairQueue>()?.Queued ?? 0,
+                    processed = sp.GetService<SkillAutoRepairQueue>()?.Processed ?? 0,
+                },
             });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 

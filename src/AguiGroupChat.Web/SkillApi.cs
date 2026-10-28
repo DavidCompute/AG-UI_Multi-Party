@@ -438,139 +438,41 @@ public static class SkillApi
                 });
             }
 
-            var loopWatch = System.Diagnostics.Stopwatch.StartNew();
-            SkillAutoFixResult fix;
-            try
+            var run = await SkillRepairRunner.RunAsync(
+                skill, catalog, agents, options, loggerFactory,
+                ctx.RequestServices.GetService<SkillRegressionCaseStore>(),
+                ctx.RequestServices.GetService<SkillLessonStore>(),
+                ctx.RequestServices.GetService<SkillLoopEventStore>(),
+                ctx.RequestServices.GetService<ISkillLoopObserver>(),
+                apply == true, resume, SkillRepairSources.Manual, ct);
+
+            if (run.Threw)
             {
-                var fixer = new SkillAutoFixer(options, agents, loggerFactory);
-                fix = await fixer.VerifyOrRepairAsync(skill, maxAttempts: 3, ct);
-            }
-            catch (Exception ex)
-            {
-                loggerFactory.CreateLogger("SkillApi.Repair").LogWarning(ex, "技能诊断修复异常：{SkillId}", skillId);
                 return Results.Ok(new
                 {
                     skillId, skipped = false, ok = false, attempts = 0,
-                    lastError = "修复过程异常：" + ex.Message,
+                    lastError = run.LastError,
                     correctedBody = (string?)null, correctedDescription = (string?)null,
-                    applied = false, resumed = catalog.Get(skillId)?.Suspended == false, diagnosis,
+                    applied = false, resumed = run.Resumed, diagnosis,
                 });
-            }
-
-            var applied = false;
-            // 回滚保护（1.0.357）：先记住修复前的正文，回归不通过时恢复。
-            var previousBody = skill.Body;
-            var previousDescription = skill.Description;
-            var previousBuiltinVersion = skill.BuiltinVersion;
-            // 先只写正文、不立即恢复：回归不通过时必须保持暂停（1.0.356）。
-            if (apply == true && fix.Ok && !fix.Skipped && fix.CorrectedBody is { Length: > 0 } body)
-                applied = catalog.ApplyRepair(skillId, body, fix.CorrectedDescription, resume: false);
-
-            // 修复后自动回归（1.0.356）：有回归用例就真实跑一遍标准样例，结果回写用例。
-            var regressions = ctx.RequestServices.GetService<SkillRegressionCaseStore>();
-            SkillRegressionRunResult? regression = null;
-            if (apply == true && fix.Ok && !fix.Skipped && regressions is not null && catalog.Get(skillId) is { } live)
-            {
-                var cases = regressions.List(skillId);
-                if (cases.Count > 0)
-                    regression = await SkillRegressionRunner.RunAsync(live, cases, agents, regressions, ct);
-            }
-            var regressionBlocked = SkillRegressionRunner.BlocksResume(regression);
-
-            // 回归未通过：把技能恢复到修复前的正文（1.0.357），避免留下“可能更差”的版本。
-            var rolledBack = false;
-            if (applied && regressionBlocked)
-            {
-                rolledBack = catalog.RestoreBody(skillId, previousBody, previousDescription, previousBuiltinVersion);
-                if (rolledBack) applied = false;
-            }
-
-            // 自测通过且回归通过（或没有可跑的回归）：才恢复挂载并失效缓存。
-            if (apply == true && fix.Ok && !fix.Skipped && !regressionBlocked)
-            {
-                if (resume != false) catalog.Resume(skillId);
-                agents.InvalidateAgentsUsingSkill(skillId);
-            }
-            else if (apply == true && fix.Ok && !fix.Skipped)
-            {
-                // 回归未通过：保持（或继续）暂停；新正文已写入，仍要让缓存重建。
-                agents.InvalidateAgentsUsingSkill(skillId);
-            }
-
-            // 修复成功、真的改了正文且回归通过：旧失败经验标为已解决，并沉淀正向修复经验（1.0.349）。
-            var lessonSaved = false;
-            if (applied && !regressionBlocked)
-            {
-                var lessons = ctx.RequestServices.GetService<SkillLessonStore>();
-                if (lessons is not null)
-                {
-                    lessons.ResolveFailures(skillId);
-                    lessons.Add(new SkillLesson(
-                        "sl_" + Guid.NewGuid().ToString("N")[..12],
-                        skillId, null, SkillLessonKinds.Repair,
-                        $"模型修正后自测通过（第 {fix.Attempts} 次）",
-                        [],
-                        "按新正文执行；产出后仍确认交付文件齐全",
-                        "", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Resolved: false));
-                    lessonSaved = true;
-                }
-            }
-
-            // 回归未通过：记一条失败经验（含“已回滚”），避免下次再试同一种改法。
-            if (regressionBlocked)
-            {
-                var lessonsFail = ctx.RequestServices.GetService<SkillLessonStore>();
-                if (lessonsFail is not null)
-                {
-                    var failed = regression!.Results.Where(r => !r.Skipped && !r.Passed).ToList();
-                    var detail = string.Join("、", failed.Select(r => $"{r.Kind} {r.Score} 分"));
-                    var missing = failed.SelectMany(r => r.Missing)
-                        .Where(m => !string.IsNullOrWhiteSpace(m))
-                        .Distinct(StringComparer.Ordinal)
-                        .Take(3)
-                        .ToArray();
-                    lessonsFail.Add(new SkillLesson(
-                        "sl_" + Guid.NewGuid().ToString("N")[..12],
-                        skillId, null, SkillLessonKinds.Failure,
-                        $"修复后回归未通过（{detail}）" + (rolledBack ? "，已回滚到修复前正文" : ""),
-                        missing,
-                        "不要沿用这次改法；先复现回归失败再重新修复，或改用更可靠的执行方案",
-                        "", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Resolved: false));
-                }
-            }
-
-            // 自愈闭环事件（1.0.358）：记录这次修复尝试的结局与耗时，供质量看板统计。
-            if (apply == true)
-            {
-                var outcome = fix.Skipped
-                    ? SkillLoopOutcomes.Skipped
-                    : !fix.Ok ? SkillLoopOutcomes.Failed
-                    : rolledBack ? SkillLoopOutcomes.RolledBack
-                    : applied ? SkillLoopOutcomes.Applied
-                    : SkillLoopOutcomes.Resumed;
-                ctx.RequestServices.GetService<SkillLoopEventStore>()?.Record(
-                    skillId, outcome, fix.Attempts, loopWatch.ElapsedMilliseconds,
-                    regression?.Ran ?? 0, !regressionBlocked);
-                // 自愈闭环告警（1.0.359）：反复失败 / 回滚时补回归用例并通知运营。
-                SkillLoopAlertBridge.OnOutcome(ctx.RequestServices, skillId, outcome);
             }
 
             return Results.Ok(new
             {
                 skillId,
-                fix.Skipped,
-                fix.Ok,
-                fix.Attempts,
-                fix.LastError,
-                fix.CorrectedBody,
-                fix.CorrectedDescription,
-                applied,
-                resumed = catalog.Get(skillId)?.Suspended == false,
-                lessonSaved,
-                rolledBack,
-                regressionRan = regression?.Ran ?? 0,
-                regressionPassed = !regressionBlocked,
-                regression,
+                run.Skipped,
+                run.Ok,
+                run.Attempts,
+                run.LastError,
+                run.CorrectedBody,
+                run.CorrectedDescription,
+                run.Applied,
+                run.Resumed,
+                lessonSaved = run.LessonSaved,
+                run.RolledBack,
+                regressionRan = run.RegressionRan,
+                regressionPassed = run.RegressionPassed,
+                run.Regression,
                 diagnosis,
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());

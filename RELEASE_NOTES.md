@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.359 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.359 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.360 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.360 Release Notes (current Windows desktop release)
+
+**版本说明**：**从告警走到自愈**——闭环告警不再只是通知：开启开关后，平台会在后台再试一次修复，跑完回归才恢复；失败就回滚、停手、等人工。
+**Version note**: **From alert to self-healing** — loop alerts no longer just notify: with the switch on, the platform retries the repair in the background, resumes only after regressions pass, and otherwise rolls back, stops, and waits for a human.
+
+## 变更
+# Changes
+
+中文：
+- **共用流水线**：把 `repair` 端点里的「自测修复 → 写正文 → 回归 → 回滚 / 恢复 → 经验 → 闭环事件 → 告警」抽成 `SkillRepairRunner`，人工修复与自动修复走完全相同的路径（版本漂移在这里等于“自动修复绕过回归”，所以必须共用）。
+- **自动修复**：新增 `SkillAutoRepairQueue`（有界 64，满了丢最旧）+ `SkillAutoRepairWorker`（后台 `BackgroundService`），闭环告警命中或技能因产物质量被自动暂停时入队。开关 `Agents:ArtifactQuality:AutoRepairEnabled`（**默认关闭**）。
+- **门控**（`SkillAutoRepairPolicy`，纯函数）：同一技能的自动修复间隔 ≥ `AutoRepairCooldownMinutes`（默认 60，只卡自动，人工不受限），最近 24 小时自动修复 ≤ `AutoRepairMaxPerDay`（默认 3）；只处理非内置（`OwnerId != null`）且服务端可自测的技能。
+- **来源区分**：闭环事件新增 `Source`（`manual` / `auto`，旧数据缺字段回退 `manual`），看板能区分人工修复与自动修复。
+- **界面**：「🔁 自愈闭环」区顶部显示自动修复开关 / 冷却 / 每日上限 / 队列计数；接口 `/ag-ui/admin/skill-loop` 下发 `autoRepair`。
+
+English:
+- **Shared pipeline**: the repair endpoint's "self-test rewrite → write body → regressions → roll back / resume → lessons → loop event → alert" flow is extracted into `SkillRepairRunner`, so manual and automatic repairs take the exact same path (divergence here would mean "auto-repair bypasses regressions").
+- **Auto-repair**: new `SkillAutoRepairQueue` (bounded at 64, dropping the oldest) plus `SkillAutoRepairWorker` (a background `BackgroundService`); jobs are queued on a loop alert or when a skill is auto-suspended for artifact quality. Switch: `Agents:ArtifactQuality:AutoRepairEnabled` (**off by default**).
+- **Gating** (`SkillAutoRepairPolicy`, pure): automatic repairs for a skill are at least `AutoRepairCooldownMinutes` apart (default 60; only the automatic path is gated) and at most `AutoRepairMaxPerDay` (default 3) per 24 hours; only non-built-in (`OwnerId != null`) skills that can be self-tested server-side are handled.
+- **Source tracking**: loop events gain `Source` (`manual` / `auto`; legacy data falls back to `manual`), so the dashboard can tell manual repairs from automatic ones.
+- **UI**: the **🔁 Self-healing loop** section shows the switch, cooldown, daily cap and queue counters; `/ag-ui/admin/skill-loop` returns `autoRepair`.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（自动修复 + 配置表新增三个键）、§9.2.8（`/skill-loop` 的 `autoRepair`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.360。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (auto-repair plus three new config keys), §9.2.8 (the `autoRepair` payload of `/skill-loop`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.360.
+
+## 测试
+# Tests
+
+中文：新增 `SkillAutoRepairPolicyTests` 10 条（冷却 / 每日上限 / 人工不阻塞 / 24 小时窗口 / 未来事件 / 队列计数）与闭环事件 `Source` 序列化往返 1 条；全量 `dotnet vstest` **2050 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2453，missing 0；配置键与文档引用校验通过。
+English: ten new `SkillAutoRepairPolicyTests` cases (cooldown / daily cap / manual attempts not blocking / the 24-hour window / future events / queue counters) and one loop-event `Source` round-trip case; the full `dotnet vstest` run passes **2050 / 0**; `node --check app.js`; the i18n audit reports zh=en=2453, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.359 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.359 Release Notes (historical)
 
 **版本说明**：**闭环指标反馈回去**——产物质量告警看「产出好不好」，本版加一条并行的判据看「修得好不好」：修复反复失败 / 回滚的技能自动补回归用例、进通知中心、推 Webhook，并写进组织体检报告。
 **Version note**: **Loop metrics feed back** — artifact-quality alerts watch whether output is good; this release adds a parallel signal for whether *repairs* work: skills whose repairs keep failing or rolling back get regression cases, in-app alerts, Webhook events, and a section in the org-health report.

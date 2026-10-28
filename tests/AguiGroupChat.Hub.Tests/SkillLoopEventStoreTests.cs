@@ -135,4 +135,28 @@ public sealed class SkillLoopEventStoreTests
         Assert.Equal(0, rows[0].Applied);
         Assert.Equal(0, rows[0].AvgMs);
     }
+
+    [Fact]
+    public void Record_PreservesSourceAndSurvivesJsonRoundTrip()
+    {
+        var store = new SkillLoopEventStore();
+        var auto = store.Record("s1", SkillLoopOutcomes.Failed, 1, 10, 0, false, SkillRepairSources.Auto);
+        var manual = store.Record("s2", SkillLoopOutcomes.Applied, 1, 10, 0, true);
+
+        Assert.Equal(SkillRepairSources.Auto, auto.Source);
+        Assert.Equal(SkillRepairSources.Manual, manual.Source);
+
+        // 持久化走 System.Text.Json：Source 必须能往返（旧数据缺该字段时回退 manual）
+        var json = System.Text.Json.JsonSerializer.Serialize(store.Snapshot());
+        var back = System.Text.Json.JsonSerializer.Deserialize<List<SkillLoopEvent>>(json)!;
+        var dst = new SkillLoopEventStore();
+        dst.RestoreState(back);
+
+        Assert.Equal(SkillRepairSources.Auto, dst.Snapshot().Single(e => e.SkillId == "s1").Source);
+        Assert.Equal(SkillRepairSources.Manual, dst.Snapshot().Single(e => e.SkillId == "s2").Source);
+
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<List<SkillLoopEvent>>(
+            "[{\"Id\":\"lp_old\",\"SkillId\":\"s3\",\"Outcome\":\"failed\",\"Attempts\":1,\"DurationMs\":10,\"RegressionRan\":0,\"RegressionPassed\":false,\"TimestampMs\":5}]");
+        Assert.Equal(SkillRepairSources.Manual, legacy![0].Source);
+    }
 }

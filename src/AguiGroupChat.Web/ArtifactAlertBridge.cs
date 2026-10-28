@@ -94,6 +94,15 @@ public static class ArtifactAlertBridge
                     options.LowScoreThreshold, decision.Missing, suspended,
                     evt.GroupId ?? "", now));
 
+                // 自动修复（1.0.360）：因产物质量被自动暂停后，后台先自己试一次修复（默认关闭）。
+                if (suspended)
+                {
+                    var autoRepair = (services.GetService(typeof(AgentOptions)) as AgentOptions)?.ArtifactQuality;
+                    if (autoRepair is { AutoRepairEnabled: true })
+                        (services.GetService(typeof(SkillAutoRepairQueue)) as SkillAutoRepairQueue)
+                            ?.TryEnqueue(evt.SkillId, "artifact-suspend");
+                }
+
                 // 岗位经验（1.0.349）：把“为什么失败 / 下次怎么避免”沉淀下来，下次挂载该技能时注入工具说明。
                 if (lessons is not null)
                 {

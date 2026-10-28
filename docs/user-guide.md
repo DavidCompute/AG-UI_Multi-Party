@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.359**
+> 适用版本：**1.0.360**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2108,6 +2108,7 @@
 - **修复后自动回归（1.0.356）**：一键修复成功（自测通过）且该技能存在回归用例时，自动用修正后的正文跑一遍回归（最多 3 条）：**全部通过才恢复挂载并沉淀修复经验**；有失败则保持/继续暂停，响应带 `regressionRan / regressionPassed / regression`，界面明确提示「回归未通过：技能保持暂停，请修复后重试」——避免“看起来修好、实际更差”。
 - **修复回滚保护（1.0.357）**：回归未通过时，把技能的正文 / 描述 / 内置版本标记恢复到**修复前**（`RestoreBody`，保留暂停状态），并记录一条「修复后回归未通过（已回滚）」的失败经验；repair 响应新增 `rolledBack`，界面显示「已回滚到修复前正文」——不再把“可能更差”的新正文留在技能里。
 - **自愈闭环告警与回归用例补充（1.0.359）**：每次 `repair?apply=true` 记录结局后，按最近 7 天该技能的闭环事件判定「修得好不好」（窗口取最近 5 次**有效**尝试，`skipped` 不计入）：**回滚 ≥ 2 次**、**自测失败 ≥ 2 次**、或**成功率 < 50%** 任一命中即告警（同一技能 60 分钟冷却；有效尝试不足 2 次不告警，与产物质量「连续两次才算缺陷」同口径）。命中后：① 若该技能有文档类产物契约且尚无回归用例，自动补一条标准样例用例（守住「修好后别再退化」）；② 写一条站内告警（`SkillLoopAlertStore`，最近 200 条，重启清空）；③ 经 Webhook 推送 `SKILL_LOOP_ALERT`（含 `attempts / successes / rolledBack / failed / successRate / avgMs / reasons / regressionEnsured`）。通知中心每分钟轮询 `GET /ag-ui/admin/skill-loop/alerts`，点击直达技能库。**不自动暂停技能**——修复失败 / 回滚本身已保持暂停，修复成功后再暂停没有意义。
+- **告警 → 自动修复（1.0.360）**：开启 `Agents:ArtifactQuality:AutoRepairEnabled=true` 后，闭环告警命中（或技能因产物质量被自动暂停）会在后台排一次自动修复：走与「🩺 一键修复」**完全相同**的流水线（`SkillRepairRunner`：自测改写 → 写正文 → 回归 → 不过则回滚并保持暂停 → 经验 → 闭环事件），所以自动修复同样受回归守门，不会把“可能更差”的版本留在线上。两道闸防止刷模型费用：**同一技能的自动修复间隔 ≥ `AutoRepairCooldownMinutes`（默认 60 分钟，只卡自动，人工点修复不受影响）**，**最近 24 小时自动修复 ≤ `AutoRepairMaxPerDay`（默认 3 次）**。只处理非内置（`OwnerId != null`）且服务端可自测的技能；本机（client）执行的技能在服务端跑不了自测，直接跳过。队列有界 64（满了丢最旧），绝不反压聊天主流程。产物质量弹窗的「🔁 自愈闭环」区顶部会显示「自动修复：已开启 / 未开启 · 冷却 N 分钟 · 每日上限 N 次 · 已排队 / 已处理」。
 
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 
@@ -2118,6 +2119,9 @@
 | `WindowRuns` | `3` | 判定窗口（最近几次执行） |
 | `LowRunsToAlert` | `2` | 窗口内低分几次才告警 |
 | `CooldownMinutes` | `60` | 同岗位同技能的告警冷却 |
+| `AutoRepairEnabled` | `false` | 闭环告警命中后自动再试一次修复（1.0.360，只对非内置技能） |
+| `AutoRepairCooldownMinutes` | `60` | 自动修复冷却：只卡自动这条线，人工修复不受限 |
+| `AutoRepairMaxPerDay` | `3` | 最近 24 小时最多自动修几次，超过后留给人工 |
 
 ---
 
@@ -5149,7 +5153,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/admin/groups` | 知聚选项（`groupId` / `name`，按名称排序；绩效页「按知聚」下拉用） | Operator |
 | GET | `/ag-ui/admin/artifact-quality` | 产物质量看板（`?days=N`，可选 `?groupId=` / `?agentId=` / `?skillId=`）：总览 / 按天趋势 / 按技能聚合 / 最近低分事件 | Operator |
 | GET | `/ag-ui/admin/artifact-quality/alerts` | 产物质量告警列表（`?since=<ms>`）：`skillId / agentId / runs / lowRuns / score / threshold / missing / suspended / atMs`；前端通知中心轮询用 | Operator |
-| GET | `/ag-ui/admin/skill-loop` | 自愈闭环指标（`?days=N`）：`summary`（尝试 / 成功 / 失败 / 回滚 / 成功率 / 平均耗时 / 回归次数）/ `daily` / `skills` | Operator |
+| GET | `/ag-ui/admin/skill-loop` | 自愈闭环指标（`?days=N`）：`summary`（尝试 / 成功 / 失败 / 回滚 / 成功率 / 平均耗时 / 回归次数）/ `daily` / `skills` / `autoRepair`（开关 / 冷却 / 每日上限 / 队列计数，1.0.360） | Operator |
 | GET | `/ag-ui/admin/skill-loop/alerts` | 自愈闭环告警（`?since=毫秒`）：`alerts`（技能 / 尝试 / 成功 / 回滚 / 失败 / 成功率 / 耗时 / `reasons` / 是否补了回归用例） | Operator |
 | GET | `/ag-ui/admin/org-health` | 组织体检报告（`?days=N`）：Markdown（总览 / 关注项 / 绩效明细 / 组织架构 / 建议 / **评测回归（通过率）**）**+ 结构化数据**（`summary` / `agents` / `users`（按触发者聚合调用量 / token / 成本）/ `groups`（按知聚聚合，本版起）/ `prev`（上一窗口，供环比）/ `pricing`（含 `currency` / `inputPerMillion` / `outputPerMillion` 单价，供前端按成本维度画趋势），供前端图表视图） | Operator |
 | GET | `/ag-ui/admin/eval-cases` | 数字员工评测用例列表 + 被测员工候选 + 跑分历史（`runs`） | 管理员 |

@@ -100,6 +100,9 @@ public static class AgentHosting
         services.AddSingleton<SkillLoopEventStore>();
         // 自愈闭环告警（1.0.359）：修复反复失败 / 回滚，供通知中心与 Webhook
         services.AddSingleton<SkillLoopAlertStore>();
+        // 自动修复（1.0.360）：闭环告警命中后在后台再试一次修复（默认关闭，由 Agents:ArtifactQuality:AutoRepairEnabled 开启）
+        services.AddSingleton<SkillAutoRepairQueue>();
+        services.AddHostedService<SkillAutoRepairWorker>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效

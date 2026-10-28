@@ -926,4 +926,16 @@ public sealed class ArtifactQualityOptions
 
     /// <summary>同一「数字员工 + 技能」的告警冷却分钟数（默认 60），避免持续刷屏。</summary>
     public int CooldownMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// 闭环告警命中后自动再试一次修复（1.0.360，默认 false）。
+    /// 只对非内置技能生效；每次都要跑回归，回归不过就回滚并保持暂停。
+    /// </summary>
+    public bool AutoRepairEnabled { get; set; }
+
+    /// <summary>自动修复的冷却分钟数（默认 60）：人工或自动刚修过就不重复修。</summary>
+    public int AutoRepairCooldownMinutes { get; set; } = SkillAutoRepairPolicy.DefaultCooldownMinutes;
+
+    /// <summary>最近 24 小时最多自动修几次（默认 3），超过后留给人工。</summary>
+    public int AutoRepairMaxPerDay { get; set; } = SkillAutoRepairPolicy.DefaultMaxPerDay;
 }
