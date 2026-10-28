@@ -65,4 +65,12 @@ public interface IMessageMemoryStore
 
     /// <summary>物理删除已过期记忆（自动遗忘的清理执行；返回删除条数）。</summary>
     int PruneExpired(long nowMs);
+
+    // ================= 记忆冲突（1.0.363）：旧事实被新事实取代 =================
+
+    /// <summary>把一条记忆标为「已被取代」：检索不再命中（保留可追溯）。默认不实现返回 false。</summary>
+    bool MarkSuperseded(string messageId, string supersededByMessageId) => false;
+
+    /// <summary>撤销「已被取代」标记（人工裁决：认为旧记忆仍有效）。默认不实现返回 false。</summary>
+    bool ClearSuperseded(string messageId) => false;
 }

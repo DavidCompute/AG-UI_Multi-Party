@@ -44,13 +44,15 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                     timestamp BIGINT NOT NULL,
                     recalled BOOLEAN NOT NULL DEFAULT FALSE,
                     importance INTEGER NOT NULL DEFAULT 0,
-                    expires_at BIGINT
+                    expires_at BIGINT,
+                    superseded_by TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_message_memory_hnsw ON agui_message_memory USING hnsw (embedding vector_cosine_ops);
                 CREATE INDEX IF NOT EXISTS idx_message_memory_group ON agui_message_memory(group_id, timestamp);
                 -- 旧库迁移（CREATE TABLE IF NOT EXISTS 不修改已有表）
                 ALTER TABLE agui_message_memory ADD COLUMN IF NOT EXISTS importance INTEGER NOT NULL DEFAULT 0;
                 ALTER TABLE agui_message_memory ADD COLUMN IF NOT EXISTS expires_at BIGINT;
+                ALTER TABLE agui_message_memory ADD COLUMN IF NOT EXISTS superseded_by TEXT;
                 """;
             cmd.ExecuteNonQuery();
             _ready = true;
@@ -71,8 +73,8 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
             using var conn = _pg.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO agui_message_memory (message_id, group_id, topic_id, sender_id, sender_type, content, embedding, timestamp, recalled, importance, expires_at)
-                VALUES (@mid, @gid, @topic, @sender, @senderType, @content, @emb::vector, @time, FALSE, @importance, @expires)
+                INSERT INTO agui_message_memory (message_id, group_id, topic_id, sender_id, sender_type, content, embedding, timestamp, recalled, importance, expires_at, superseded_by)
+                VALUES (@mid, @gid, @topic, @sender, @senderType, @content, @emb::vector, @time, FALSE, @importance, @expires, @superseded)
                 ON CONFLICT (message_id) DO UPDATE SET
                     group_id = EXCLUDED.group_id,
                     topic_id = EXCLUDED.topic_id,
@@ -82,7 +84,8 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                     embedding = EXCLUDED.embedding,
                     timestamp = EXCLUDED.timestamp,
                     importance = EXCLUDED.importance,
-                    expires_at = EXCLUDED.expires_at
+                    expires_at = EXCLUDED.expires_at,
+                    superseded_by = EXCLUDED.superseded_by
                 """;
             cmd.Parameters.AddWithValue("mid", record.MessageId);
             cmd.Parameters.AddWithValue("gid", record.GroupId);
@@ -94,6 +97,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
             cmd.Parameters.AddWithValue("time", record.Timestamp);
             cmd.Parameters.AddWithValue("importance", record.Importance);
             cmd.Parameters.AddWithValue("expires", (object?)record.ExpiresAt ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("superseded", (object?)record.SupersededBy ?? DBNull.Value);
             cmd.ExecuteNonQuery();
         }
         catch (Exception ex)
@@ -163,7 +167,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
             using var conn = _pg.Open();
             using var cmd = conn.CreateCommand();
             var sql = """
-                SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at
+                SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at, superseded_by
                 FROM agui_message_memory
                 WHERE recalled = FALSE
                 """;
@@ -191,7 +195,8 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                     Content: reader.GetString(5),
                     Timestamp: reader.GetInt64(6),
                     Importance: reader.GetInt32(7),
-                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8)));
+                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                    SupersededBy: reader.IsDBNull(9) ? null : reader.GetString(9)));
             }
             return list;
         }
@@ -289,7 +294,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
             using var conn = _pg.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at
+                SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at, superseded_by
                 FROM agui_message_memory WHERE message_id = @mid AND recalled = FALSE
                 """;
             cmd.Parameters.AddWithValue("mid", messageId);
@@ -304,7 +309,8 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                     Content: reader.GetString(5),
                     Timestamp: reader.GetInt64(6),
                     Importance: reader.GetInt32(7),
-                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8))
+                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                    SupersededBy: reader.IsDBNull(9) ? null : reader.GetString(9))
                 : null;
         }
         catch (Exception ex)
@@ -348,6 +354,48 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "记忆单调升级失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
+    public bool MarkSuperseded(string messageId, string supersededByMessageId)
+    {
+        if (!_ready || string.IsNullOrWhiteSpace(messageId) || string.IsNullOrWhiteSpace(supersededByMessageId)) return false;
+        try
+        {
+            using var conn = _pg.Open();
+            using var cmd = conn.CreateCommand();
+            // 只标记比新事实更早的记忆：更晚的不动，避免反向覆盖。
+            cmd.CommandText = """
+                UPDATE agui_message_memory SET superseded_by = @by
+                WHERE message_id = @mid AND recalled = FALSE
+                  AND timestamp < (SELECT timestamp FROM agui_message_memory WHERE message_id = @by)
+                """;
+            cmd.Parameters.AddWithValue("by", supersededByMessageId);
+            cmd.Parameters.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆取代标记失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
+    public bool ClearSuperseded(string messageId)
+    {
+        if (!_ready || string.IsNullOrWhiteSpace(messageId)) return false;
+        try
+        {
+            using var conn = _pg.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE agui_message_memory SET superseded_by = NULL WHERE message_id = @mid AND superseded_by IS NOT NULL";
+            cmd.Parameters.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆取代标记撤销失败：{MessageId}", messageId);
             return false;
         }
     }
@@ -446,6 +494,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                 WHERE m.recalled = FALSE
                   AND m.embedding IS NOT NULL
                   AND (m.expires_at IS NULL OR m.expires_at > @now)
+                  AND m.superseded_by IS NULL
                   AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%')
                   AND (m.sender_type <> 'img' OR m.group_id LIKE 'img:%')
                   AND 1 - (m.embedding <=> @q::vector) >= @minScore{groupFilter}
@@ -501,6 +550,7 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                   AND m.embedding IS NOT NULL
                   AND m.sender_id = @person
                   AND (m.expires_at IS NULL OR m.expires_at > @now)
+                  AND m.superseded_by IS NULL
                   AND 1 - (m.embedding <=> @q::vector) >= @minScore
                   AND (m.group_id = @gid OR COALESCE(g.is_private, FALSE) = FALSE)
                 ORDER BY m.embedding <=> @q::vector, m.importance DESC

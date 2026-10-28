@@ -56,6 +56,9 @@ public interface IMessageMemory
     /// <summary>物理删除已过期记忆（自动遗忘定时清理执行）。</summary>
     int PruneExpired();
 
+    /// <summary>撤销「已被取代」标记（1.0.363：人工裁决认为旧记忆仍有效）。默认不实现返回 false。</summary>
+    bool Unsupersede(string messageId) => false;
+
     // ================= 跨实例记忆同步（2.3）：导出「记忆即数据包」 / 增量导入 =================
 
     /// <summary>导出记忆（分页；可选择群与时间下限，供增量同步到中心 Hub）。默认返回空（未实现时回退）。</summary>

@@ -50,7 +50,8 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
                     timestamp BIGINT NOT NULL,
                     recalled INTEGER NOT NULL DEFAULT 0,
                     importance INTEGER NOT NULL DEFAULT 0,
-                    expires_at BIGINT
+                    expires_at BIGINT,
+                    superseded_by TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_message_memory_group ON agui_message_memory(group_id, timestamp);
                 CREATE INDEX IF NOT EXISTS idx_message_memory_sender ON agui_message_memory(sender_id, timestamp);
@@ -64,7 +65,8 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
             cmd.ExecuteNonQuery();
             // 旧库迁移：补记忆治理列（已存在则忽略错误，SQLite ADD COLUMN 幂等由 PRAGMA 保障）
             foreach (var ddl in new[] { "ALTER TABLE agui_message_memory ADD COLUMN importance INTEGER NOT NULL DEFAULT 0",
-                                        "ALTER TABLE agui_message_memory ADD COLUMN expires_at BIGINT" })
+                                        "ALTER TABLE agui_message_memory ADD COLUMN expires_at BIGINT",
+                                        "ALTER TABLE agui_message_memory ADD COLUMN superseded_by TEXT" })
             {
                 try { using var c2 = conn.CreateCommand(); c2.CommandText = ddl; c2.ExecuteNonQuery(); }
                 catch { /* 列已存在：忽略 */ }
@@ -196,14 +198,14 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = """
-                    INSERT INTO agui_message_memory (message_id, group_id, topic_id, sender_id, sender_type, content, embedding, timestamp, recalled, importance, expires_at)
-                    VALUES (@mid, @gid, @topic, @sender, @senderType, @content, @emb, @time, 0, @importance, @expires)
+                    INSERT INTO agui_message_memory (message_id, group_id, topic_id, sender_id, sender_type, content, embedding, timestamp, recalled, importance, expires_at, superseded_by)
+                    VALUES (@mid, @gid, @topic, @sender, @senderType, @content, @emb, @time, 0, @importance, @expires, @superseded)
                     ON CONFLICT (message_id) DO UPDATE SET
                         group_id = EXCLUDED.group_id, topic_id = EXCLUDED.topic_id,
                         sender_id = EXCLUDED.sender_id, sender_type = EXCLUDED.sender_type,
                         content = EXCLUDED.content, embedding = EXCLUDED.embedding,
                         timestamp = EXCLUDED.timestamp, importance = EXCLUDED.importance,
-                        expires_at = EXCLUDED.expires_at
+                        expires_at = EXCLUDED.expires_at, superseded_by = EXCLUDED.superseded_by
                     """;
                 cmd.Parameters.AddWithValue("mid", record.MessageId);
                 cmd.Parameters.AddWithValue("gid", record.GroupId);
@@ -215,6 +217,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
                 cmd.Parameters.AddWithValue("time", record.Timestamp);
                 cmd.Parameters.AddWithValue("importance", record.Importance);
                 cmd.Parameters.AddWithValue("expires", (object?)record.ExpiresAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("superseded", (object?)record.SupersededBy ?? DBNull.Value);
                 cmd.ExecuteNonQuery();
             }
             if (_vecEnabled)
@@ -334,7 +337,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
         {
             using var conn = _db.Open();
             using var cmd = conn.CreateCommand();
-            var sql = "SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at FROM agui_message_memory WHERE recalled = 0";
+            var sql = "SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at, superseded_by FROM agui_message_memory WHERE recalled = 0";
             if (!string.IsNullOrWhiteSpace(groupId)) sql += " AND group_id = @gid";
             if (!string.IsNullOrWhiteSpace(senderId)) sql += " AND sender_id = @sender";
             if (!string.IsNullOrWhiteSpace(keyword)) sql += " AND content LIKE @kw";
@@ -359,7 +362,8 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
                     Content: reader.GetString(5),
                     Timestamp: reader.GetInt64(6),
                     Importance: reader.GetInt32(7),
-                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8)));
+                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                    SupersededBy: reader.IsDBNull(9) ? null : reader.GetString(9)));
             }
             return list;
         }
@@ -471,7 +475,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
             using var conn = _db.Open();
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at
+                SELECT message_id, group_id, topic_id, sender_id, sender_type, content, timestamp, importance, expires_at, superseded_by
                 FROM agui_message_memory WHERE message_id = @mid AND recalled = 0
                 """;
             cmd.AddWithValue("mid", messageId);
@@ -486,7 +490,8 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
                     Content: reader.GetString(5),
                     Timestamp: reader.GetInt64(6),
                     Importance: reader.GetInt32(7),
-                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8))
+                    ExpiresAt: reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                    SupersededBy: reader.IsDBNull(9) ? null : reader.GetString(9))
                 : null;
         }
         catch (Exception ex)
@@ -530,6 +535,45 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "记忆单调升级失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
+    public bool MarkSuperseded(string messageId, string supersededByMessageId)
+    {
+        if (!_ready || string.IsNullOrWhiteSpace(messageId) || string.IsNullOrWhiteSpace(supersededByMessageId)) return false;
+        try
+        {
+            using var conn = _db.Open();
+            using var cmd = conn.CreateCommand();
+            // 只标记比新事实更早的记忆：同一时刻 / 更晚的不动，避免反向覆盖。
+            cmd.CommandText = "UPDATE agui_message_memory SET superseded_by = @by WHERE message_id = @mid AND recalled = 0"
+                              + " AND timestamp < (SELECT timestamp FROM agui_message_memory WHERE message_id = @by)";
+            cmd.AddWithValue("by", supersededByMessageId);
+            cmd.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆取代标记失败：{MessageId}", messageId);
+            return false;
+        }
+    }
+
+    public bool ClearSuperseded(string messageId)
+    {
+        if (!_ready || string.IsNullOrWhiteSpace(messageId)) return false;
+        try
+        {
+            using var conn = _db.Open();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE agui_message_memory SET superseded_by = NULL WHERE message_id = @mid AND superseded_by IS NOT NULL";
+            cmd.AddWithValue("mid", messageId);
+            return cmd.ExecuteNonQuery() > 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "记忆取代标记撤销失败：{MessageId}", messageId);
             return false;
         }
     }
@@ -659,6 +703,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
                     WHERE v.embedding MATCH @q AND v.k = @cand
                       AND m.recalled = 0{groupFilter}{privacy}{kbFilter}
                       AND (m.expires_at IS NULL OR m.expires_at > @now)
+                      AND m.superseded_by IS NULL
                     ORDER BY v.distance, m.importance DESC
                     """;
                 cmd.Parameters.AddWithValue("q", ToVectorText(embedding));
@@ -697,6 +742,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
                     WHERE v.embedding MATCH @q AND v.k = @cand
                       AND m.recalled = 0{senderFilter}{privacy}
                       AND (m.expires_at IS NULL OR m.expires_at > @now)
+                      AND m.superseded_by IS NULL
                     ORDER BY v.distance, m.importance DESC
                     """;
                 cmd.Parameters.AddWithValue("q", ToVectorText(embedding));
@@ -748,6 +794,7 @@ public sealed class SqliteVecMessageMemoryStore : IMessageMemoryStore
             LEFT JOIN agui_groups g ON g.group_id = m.group_id
             WHERE m.recalled = 0 AND m.embedding IS NOT NULL AND (m.sender_type <> 'kb' OR m.group_id LIKE 'kb:%') AND (m.sender_type <> 'img' OR m.group_id LIKE 'img:%'){groupFilter}{privacy}{senderFilter}
               AND (m.expires_at IS NULL OR m.expires_at > @now)
+              AND m.superseded_by IS NULL
             """;
         if (scopeKey is not ("group" or "all")) cmd.Parameters.AddWithValue("agent", agentId);
         cmd.Parameters.AddWithValue("gid", groupId);

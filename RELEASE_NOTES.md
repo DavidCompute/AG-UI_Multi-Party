@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.362 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.362 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.363 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.363 Release Notes (current Windows desktop release)
+
+**版本说明**：**记忆开始会“改主意”**——同一件事被推翻时（换负责人 / 改时间 / 方案作废），旧记忆不再与新说法并存地当事实用：系统把它标为「已被取代」、从检索中退出，并在记忆列表里划线展示、可人工撤销。
+**Version note**: **Memory can change its mind** — when a fact is overturned (new owner, new date, plan scrapped), the old memory no longer persists alongside the new one as if both were true: it is marked "superseded", drops out of retrieval, and stays visible (struck through) in the memory list with a manual revert.
+
+## 变更
+# Changes
+
+中文：
+- **检测**：新增 `MemoryConflictDetector`（纯函数）——在**写入侧**触发（复用已有向量，不加定时扫描），四个条件缺一不可：新的这条含**更正线索**、两侧都是**短句**（≤ 200 字符）、向量相似度 ≥ **0.9**、共享 ≥ 2 个**字符二元组**。宁可漏判，不要误判。
+- **取代**：命中后 `MarkSuperseded(旧, 新)`，旧记忆检索不再命中但保留可追溯；存储层只允许取代**更早**的记忆。
+- **存储**：`agui_message_memory.superseded_by`（SQLite / PostgreSQL 自动迁移）；`MessageMemoryRecord` / `MessageMemoryItem` 新增 `SupersededBy`；两种检索（群记忆 / 个人记忆）都加了 `superseded_by IS NULL` 过滤。
+- **人工裁决**：记忆列表里被取代条目带划线 + 「已被取代」徒标与「撤销取代」按钮；接口 `POST /ag-ui/memory/{messageId}/unsupersede`。
+- **配置**：`Agents:Memory:ConflictDetectionEnabled`（默认开）/ `ConflictMinScore`（0.9）/ `ConflictMaxChars`（200）/ `ConflictMaxMarks`（2）。
+
+English:
+- **Detection**: new pure `MemoryConflictDetector` runs on the **write path** (reusing the existing embedding, no scan job); all four conditions must hold: a **correction cue** in the new text, **short** texts on both sides (≤200 chars), similarity ≥ **0.9**, and at least 2 shared **character bigrams**. Missing a conflict beats mislabelling one.
+- **Supersede**: `MarkSuperseded(old, new)` hides the old memory from retrieval while keeping it traceable; the store only supersedes **older** rows.
+- **Storage**: `agui_message_memory.superseded_by` (auto-migrated on SQLite and PostgreSQL); `MessageMemoryRecord` / `MessageMemoryItem` gain `SupersededBy`; both retrieval paths (group and personal memory) filter `superseded_by IS NULL`.
+- **Manual ruling**: superseded rows show a strikethrough plus a "Superseded" badge and a **Revert** button; API `POST /ag-ui/memory/{messageId}/unsupersede`.
+- **Config**: `Agents:Memory:ConflictDetectionEnabled` (on by default) / `ConflictMinScore` (0.9) / `ConflictMaxChars` (200) / `ConflictMaxMarks` (2).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §6.5.4（记忆冲突）、§6.1 配置表（4 个新键）、§9.2 接口表（`unsupersede`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.363。
+English: `docs/user-guide.md` / `en.md` §6.5.4 (memory conflicts), the §6.1 config table (four new keys) and the §9.2 API table (`unsupersede`); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.363.
+
+## 测试
+# Tests
+
+中文：新增 `MemoryConflictDetectorTests` 10 条（更正线索 / 相似度 / 短句 / 时间序 / 词面锚点 / 上限 / 边界）与 SQLite 存储取代行为 2 条（隐藏但可见可撤销、只能取代更早）；全量 `dotnet vstest` **2081 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2458，missing 0；配置键与文档引用校验通过。
+English: ten new `MemoryConflictDetectorTests` cases (correction cue / similarity / short texts / ordering / lexical anchor / cap / boundaries) and two SQLite store cases for supersede behaviour (hidden from search yet listed and revertible; only older rows); the full `dotnet vstest` run passes **2081 / 0**; `node --check app.js`; the i18n audit reports zh=en=2458, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.362 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.362 Release Notes (historical)
 
 **版本说明**：**闭环跳到运行时的最后一环**——修复健康不再只在建组织时提醒，而是每次派活 / 执行时都提醒：候选技能不稳就把活派给更稳的人；真的要用它，就在执行前把「产出后必须自检」写进工具说明。
 **Version note**: **The final link to runtime** — repair health is no longer just an orchestration-time note: it reaches every dispatch and execution. An unstable skill makes the router prefer a steadier candidate, and when the skill really is used, the tool description asks the model to self-check before delivering.

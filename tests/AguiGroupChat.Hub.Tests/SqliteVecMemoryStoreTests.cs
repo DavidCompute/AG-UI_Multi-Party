@@ -176,4 +176,45 @@ public sealed class SqliteVecMemoryStoreTests
         var hits = memory.Search("g1", null, [1, 0, 0, 0, 0, 0, 0, 0], topK: 5, minScore: 0.1, scope: "all");
         Assert.Empty(hits);
     }
+
+    // ---------- 记忆冲突（1.0.363）：已被取代的旧记忆不参与检索，但仍可查看 / 撤销 ----------
+
+    [Fact]
+    public void MarkSuperseded_HidesFromSearch_KeepsInList_AndCanBeReverted()
+    {
+        var (store, memory) = Create();
+        var v = new float[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        memory.Upsert(Rec("m_old", "g1", "u1", "项目负责人是李四", v, ts: 1000));
+        memory.Upsert(Rec("m_new", "g1", "u1", "项目负责人改为张三", v, ts: 2000));
+        AddGroup(store, "g1", isPrivate: false);
+
+        Assert.Equal(2, memory.Search("g1", null, v, topK: 5, minScore: 0.0, scope: "group").Count);
+        Assert.True(memory.MarkSuperseded("m_old", "m_new"));
+
+        var hits = memory.Search("g1", null, v, topK: 5, minScore: 0.0, scope: "group");
+        Assert.Single(hits);
+        Assert.Equal("m_new", hits[0].MessageId);
+
+        // 可视化列表仍可见（带取代标记），不丢可追溯性
+        Assert.Equal("m_new", memory.GetByMessageId("m_old")!.SupersededBy);
+        Assert.Contains(memory.ListMessages("g1", null, null, 10, 0), m => m.MessageId == "m_old");
+
+        // 人工裁决撤销 → 重新参与检索
+        Assert.True(memory.ClearSuperseded("m_old"));
+        Assert.Null(memory.GetByMessageId("m_old")!.SupersededBy);
+        Assert.Equal(2, memory.Search("g1", null, v, topK: 5, minScore: 0.0, scope: "group").Count);
+    }
+
+    [Fact]
+    public void MarkSuperseded_RefusesNewerOrEqualMemories()
+    {
+        var (_, memory) = Create();
+        var v = new float[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        memory.Upsert(Rec("m_old", "g1", "u1", "旧说法", v, ts: 3000));
+        memory.Upsert(Rec("m_new", "g1", "u1", "新说法", v, ts: 2000));
+
+        Assert.False(memory.MarkSuperseded("m_old", "m_new"));
+        Assert.Null(memory.GetByMessageId("m_old")!.SupersededBy);
+        Assert.False(memory.MarkSuperseded("m_old", ""));
+    }
 }

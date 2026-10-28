@@ -24,7 +24,8 @@ public sealed record MessageMemoryEntry(
     long Timestamp);
 
 /// <summary>记忆存储中的一条记录（含向量）。Importance=记忆级别（0 普通 / 1 重要 / 2 关键）；
-/// ExpiresAt=自动遗忘的过期时间戳（毫秒，null=永不过期，检索与清理均按此过滤）。</summary>
+/// ExpiresAt=自动遗忘的过期时间戳（毫秒，null=永不过期，检索与清理均按此过滤）；
+/// SupersededBy=被哪条更新的记忆取代（1.0.363：非空则检索不再命中，但可视化仍可见、可撤销）。</summary>
 public sealed record MessageMemoryRecord(
     string MessageId,
     string GroupId,
@@ -35,7 +36,8 @@ public sealed record MessageMemoryRecord(
     float[] Embedding,
     long Timestamp,
     int Importance = MemoryImportance.Normal,
-    long? ExpiresAt = null);
+    long? ExpiresAt = null,
+    string? SupersededBy = null);
 
 /// <summary>语义检索命中结果（Score 为余弦相似度 0..1）。</summary>
 public sealed record MessageMemoryHit(
@@ -47,7 +49,7 @@ public sealed record MessageMemoryHit(
     int Importance = MemoryImportance.Normal,
     string GroupId = "");
 
-/// <summary>记忆条目（可视化列表用，无向量）。</summary>
+/// <summary>记忆条目（可视化列表用，无向量）。SupersededBy 非空 = 已被更新的记忆取代（1.0.363）。</summary>
 public sealed record MessageMemoryItem(
     string MessageId,
     string GroupId,
@@ -57,7 +59,8 @@ public sealed record MessageMemoryItem(
     string Content,
     long Timestamp,
     int Importance,
-    long? ExpiresAt);
+    long? ExpiresAt,
+    string? SupersededBy = null);
 
 /// <summary>群级记忆统计（记忆可视化用）。</summary>
 public sealed record MessageMemoryGroupStat(

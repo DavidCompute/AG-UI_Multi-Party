@@ -659,6 +659,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 }
 .memory-item { border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; background: var(--panel-2); }
 .memory-item.expired { opacity: .55; }
+/* 1.0.363：已被更新的说法取代（不参与检索，人工可撤销） */
+.memory-item.superseded { opacity: .7; border-style: dashed; }
+.memory-item.superseded .mem-content { text-decoration: line-through; text-decoration-color: rgba(255,107,107,.55); }
 .mem-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mem-badge {
   font-size: 11px; border-radius: 999px; padding: 1px 9px; flex: none;
@@ -683,6 +686,11 @@ body.resizing-x { cursor: col-resize; user-select: none; }
   background: none; border-radius: 6px; padding: 2px 12px; cursor: pointer;
 }
 .mem-ops .mem-del:hover { background: rgba(255,107,107,.1); }
+.mem-ops .mem-unsup {
+  font-size: 12px; border: 1px solid var(--border); color: var(--muted);
+  background: none; border-radius: 6px; padding: 2px 12px; cursor: pointer;
+}
+.mem-ops .mem-unsup:hover { color: var(--accent); border-color: var(--accent); }
 .mem-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 28px 10px; }
 /* ================= 记忆可视化：视图切换 / 时间线 / 图谱 ================= */
 .memory-viewbar { display: flex; gap: 8px; margin: 4px 0 8px; }

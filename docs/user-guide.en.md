@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.362**
+> Applies to version: **1.0.363**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3109,7 +3109,11 @@ Observability: new counters `knowgath_memory_embedding_cache_hits_total` / `know
 | `KnowledgeChunkSize` | `4096` | not set | `4096` | knowledge base document chunk size (characters) |
 | `KnowledgeChunkOverlap` | `512` | not set | `512` | knowledge base chunk overlap (characters) |
 | `EmbeddingTimeoutSeconds` | `60` | not set | `60` | embedding call timeout (seconds) |
-| `RetentionDays` | `0` (never) | not set (=0) | not set (=0) | auto-forget retention days; when `>0`, ordinary new memories get an expiry time, important memories are not limited |
+| `RetentionDays` | `0` (never) | unset (=0) | unset (=0) | Auto-forget retention days; when `>0`, new ordinary memories get an expiry while important ones are exempt |
+| `ConflictDetectionEnabled` | `true` | unset | unset | Memory conflict detection (1.0.363): an explicit correction supersedes semantically close older memories in the same group |
+| `ConflictMinScore` | `0.9` | unset | unset | Similarity threshold for conflict detection (prefer missing over mislabelling) |
+| `ConflictMaxChars` | `200` | unset | unset | Longest text eligible for conflict detection (both sides must be short) |
+| `ConflictMaxMarks` | `2` | unset | unset | How many older memories one new memory may supersede |
 | `AutoConsolidateEnabled` | `true` | not set | not set | automatic periodic consolidation of important conclusions |
 | `AutoConsolidateIntervalHours` | `12` | not set | not set | auto-consolidation interval (clamped to 1..720 at runtime) |
 | `PolishConsolidation` | `true` | not set | not set | whether consolidated documents are polished by the model (skipped in mock) |
@@ -3264,6 +3268,23 @@ Implementation: `MemoryLifecycleService` (started by the host) + `MemoryLifecycl
 Boundaries: Important / Critical memories are **never** given an automatic expiry; if promotion fails, the run does not proceed to clear the expiry (avoiding a half-applied change); the normalized repeat key requires at least 8 letters/digits so short replies like "ok" do not get consolidated by accident.
 
 **UI and API**: an admin sees **🧠 Memory lifecycle** status and **Consolidate / forget now** at the top of Account menu → Memory management. `GET /ag-ui/memory/lifecycle` returns the switches, interval, and the latest summary; `POST /ag-ui/memory/lifecycle/run` triggers one run (both admin-only).
+
+#### 6.5.4 Memory conflicts: newer facts supersede older ones (1.0.363)
+
+Problem: when a fact is overturned (new owner, new date, new plan), the old and new memories **coexist**, so retrieval may feed the contradicted old conclusion back as fact.
+
+**Detection (`MemoryConflictDetector`, pure)**: runs on the **write path** (the embedding already exists, so one neighbour lookup is enough — no scan job, no added reply latency). All four conditions must hold; prefer missing a conflict over mislabelling one:
+
+1. the new message carries a **correction cue** (`改成 / 改为 / 换成 / 更正为 / 不再是 / 作废 / 以后按 …`, see `CorrectionCues`);
+2. both texts are **short** (each ≤ `ConflictMaxChars`, 200 by default) — a long message mentioning "change" must not invalidate unrelated memories;
+3. vector similarity ≥ `ConflictMinScore` (0.9 by default);
+4. at least 2 shared **character bigrams** (a lexical anchor, so "semantically close but about something else" is rejected).
+
+On a hit, `MarkSuperseded(old, new)` marks the old memory as superseded: **retrieval skips it** (never injected as fact) while the list still shows it (struck through plus a "Superseded" badge). The store only supersedes **older** memories (`timestamp <` the new one), never the other way around.
+
+**Manual ruling**: every superseded entry has a **Revert** button (same ownership rules) calling `POST /ag-ui/memory/{messageId}/unsupersede`, which clears the mark and lets it be retrieved again.
+
+**Storage**: an `agui_message_memory.superseded_by` column (auto-migrated on SQLite and PostgreSQL); `MessageMemoryRecord.SupersededBy` / `MessageMemoryItem.SupersededBy` are shipped to the client. Switch: `Agents:Memory:ConflictDetectionEnabled` (on by default); turning it off restores the old behaviour (already-marked rows need a manual revert).
 
 ---
 
@@ -5090,6 +5111,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | GET | `/ag-ui/memory/timeline` | Memory timeline (replays a topic old→new) | Login |
 | GET | `/ag-ui/memory/graph` | Graph-memory subgraph (seeds entities / relations by `groupId` + topic `q`, for the frontend graph view; returns `enabled=false` when not enabled) | Login (member / admin) |
 | POST | `/ag-ui/memory/{messageId}/importance` | Adjust a single memory's importance level (0 normal / 1 important / 2 critical) | Login (owner / group management / admin) |
+| POST | `/ag-ui/memory/{messageId}/unsupersede` | Clear the "superseded" mark (1.0.363) | Login (same as above) |
 | DELETE | `/ag-ui/memory/{messageId}` | Physically delete a single memory | Login (same as above) |
 | POST | `/ag-ui/memory/forget` | Manual forgetting (expire by group or everything; optionally keep the most recent N hours) | Login (same as above) |
 | POST | `/ag-ui/memory/consolidate` | Consolidate a group's "critical"-level memories into a knowledge base document (requires semantic memory to be enabled) | Login |

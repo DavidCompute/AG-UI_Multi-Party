@@ -66,6 +66,7 @@ Existing foundation: RAG (pgvector / sqlite-vec), personal memory, memory tierin
 - **Current state**: memory only records "latest" plus expiry deletion, with no evolution playback.
 - **Goal**: replay "how a conclusion on a topic evolved" along a timeline, serving retrospectives and auditing.
 - **Target module**: `MessageMemory` (temporal dimension), `MemoryMaintenanceService`.
+- **Memory conflicts and supersede (1.0.363, implemented)**: the pure `MemoryConflictDetector` runs on the write path and, when all four conditions hold (explicit correction cue, short texts, similarity ≥0.9, at least 2 shared character bigrams), marks older memories in the same group as superseded via a `superseded_by` column (auto-migrated on SQLite and PostgreSQL); both retrieval paths filter `superseded_by IS NULL`; superseded rows are struck through in the memory list with a **Revert** action (`POST /ag-ui/memory/{messageId}/unsupersede`). Config: `ConflictDetectionEnabled` (on by default) / `ConflictMinScore` / `ConflictMaxChars` / `ConflictMaxMarks`.
 
 ### 2.3 Cross-Instance Memory Sync (★★☆ bridges desktop/Web silos) ✅ Implemented (memory-as-packet / incremental sync)
 - **Current state**: the desktop and Web builds each keep their own local memory, unaware of each other.

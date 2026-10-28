@@ -90,6 +90,7 @@ public static class MemoryApi
                     m.Timestamp,
                     m.Importance,
                     m.ExpiresAt,
+                    m.SupersededBy,
                     canManage = MemoryGovernance.CanManageItem(store, auth, userId, m),
                 }),
             });
@@ -125,7 +126,7 @@ public static class MemoryApi
                     {
                         m.MessageId, m.Timestamp, m.SenderId, m.SenderType,
                         senderNickname = ResolveSenderName(store, users, m.GroupId, m.SenderId, m.SenderType),
-                        m.Content, m.Importance,
+                        m.Content, m.Importance, m.SupersededBy,
                     }).ToList(),
                 }).ToList(),
             });
@@ -177,6 +178,15 @@ public static class MemoryApi
             return memory.UpdateImportance(messageId, req.Importance)
                 ? Results.Ok(new { ok = true })
                 : Results.NotFound(new AguiError(ErrorCodes.GroupMessageNotFound, "记忆不存在"));
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // ---- 撤销「已被更新事实取代」标记（1.0.363，人工裁决：旧记忆仍然有效）----
+        root.MapPost("/{messageId}/unsupersede", (string messageId, HttpContext ctx, AuthService auth, IGroupStore store, IMessageMemory memory) =>
+        {
+            var userId = WebIdentity.UserId(ctx)!;
+            var ownership = CheckOwnership(store, memory, auth, messageId, userId);
+            if (ownership is not null) return ownership;
+            return Results.Ok(new { ok = memory.Unsupersede(messageId) });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 物理删除单条记忆 ----

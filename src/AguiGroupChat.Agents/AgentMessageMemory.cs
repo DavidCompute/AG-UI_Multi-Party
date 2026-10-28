@@ -207,6 +207,38 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
                         importance, expiresAt));
                     _logger.LogDebug("语义记忆已写入：{MessageId}（group={GroupId}，importance={Importance}，expiresAt={ExpiresAt}）",
                         entry.MessageId, entry.GroupId, importance, expiresAt);
+
+                    // 记忆冲突（1.0.363）：这条如果是“明确更正”的短句，就把同群语义相近且更早的记忆标为已被取代。
+                    // 知识库 / 图库行是切片而非事实陈述，不参与判定。
+                    if (_options.ConflictDetectionEnabled
+                        && stored.Length <= Math.Max(1, _options.ConflictMaxChars)
+                        && !entry.SenderType.Equals("kb", StringComparison.OrdinalIgnoreCase)
+                        && !entry.SenderType.Equals("img", StringComparison.OrdinalIgnoreCase)
+                        && MemoryConflictDetector.HasCorrectionCue(stored))
+                    {
+                        try
+                        {
+                            // 先把门槛略降后交给检测器精确判：让日志能看到“差一点命中”的候选，而不是被底层直接过滤。
+                            var neighbors = _store.Search(entry.GroupId, null, embedding, topK: 6,
+                                    Math.Max(0.0, _options.ConflictMinScore - 0.05), "group")
+                                .Where(h => !string.Equals(h.MessageId, entry.MessageId, StringComparison.Ordinal))
+                                .Select(h => new MemoryConflictCandidate(h.MessageId, h.Content, h.Timestamp, h.Score))
+                                .ToList();
+                            foreach (var conflict in MemoryConflictDetector.Detect(
+                                         stored, neighbors, entry.Timestamp,
+                                         _options.ConflictMinScore, _options.ConflictMaxChars,
+                                         maxMarks: _options.ConflictMaxMarks))
+                            {
+                                if (_store.MarkSuperseded(conflict.OlderMessageId, entry.MessageId))
+                                    _logger.LogInformation("记忆冲突：{Old} 被 {New} 取代（{Reason}）",
+                                        conflict.OlderMessageId, entry.MessageId, conflict.Reason);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "记忆冲突检测失败（忽略）：{MessageId}", entry.MessageId);
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -268,6 +300,14 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         if (!_options.Enabled) return false;
         try { return _store.UpdateImportance(messageId, importance); }
         catch (Exception ex) { _logger.LogDebug(ex, "记忆分级失败：{MessageId}", messageId); return false; }
+    }
+
+    /// <summary>撤销「已被取代」标记（1.0.363）：人工判定旧记忆仍然有效时恢复它参与检索。</summary>
+    public bool Unsupersede(string messageId)
+    {
+        if (!_options.Enabled) return false;
+        try { return _store.ClearSuperseded(messageId); }
+        catch (Exception ex) { _logger.LogDebug(ex, "撤销取代标记失败：{MessageId}", messageId); return false; }
     }
 
     public bool PromoteImportance(string messageId, int atLeast)

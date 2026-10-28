@@ -528,6 +528,22 @@ public sealed class MemoryOptions
     /// </summary>
     public int RetentionDays { get; set; }
 
+    /// <summary>
+    /// 记忆冲突检测（1.0.363，默认开）：写入一条「明确更正」的短消息时，若同群有语义相近（≥ <see cref="ConflictMinScore"/>）
+    /// 且词面有锚点的旧记忆，把旧记忆标为「已被取代」——检索不再命中，但可视化仍可见、可人工撤销。
+    /// 只在写入侧触发，不加定时扫描，不影响回复延迟。
+    /// </summary>
+    public bool ConflictDetectionEnabled { get; set; } = true;
+
+    /// <summary>冲突判定的向量相似度门槛（默认 0.9；宁可漏判不要误判）。</summary>
+    public double ConflictMinScore { get; set; } = 0.9;
+
+    /// <summary>参与冲突判定的最长文本（字符，默认 200）：长消息里顺带提到“改”不该判人失效。</summary>
+    public int ConflictMaxChars { get; set; } = 200;
+
+    /// <summary>一条新记忆最多取代几条旧记忆（默认 2）。</summary>
+    public int ConflictMaxMarks { get; set; } = 2;
+
     /// <summary>重要结论自动周期沉淀（1.3）：把各知聚「关键」级记忆定期聚合为知识文档写入该知聚专属知识库。默认开。</summary>
     public bool AutoConsolidateEnabled { get; set; } = true;
 

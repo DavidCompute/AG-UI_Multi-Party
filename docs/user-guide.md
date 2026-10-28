@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.362**
+> 适用版本：**1.0.363**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3106,6 +3106,10 @@ flowchart TD
 | `KnowledgeChunkOverlap` | `512` | 未设 | `512` | 知识库切片重叠（字符） |
 | `EmbeddingTimeoutSeconds` | `60` | 未设 | `60` | embedding 调用超时（秒） |
 | `RetentionDays` | `0`（永不） | 未设（=0） | 未设（=0） | 自动遗忘保留天数；`>0` 时普通新记忆带过期时间，重要记忆不受限 |
+| `ConflictDetectionEnabled` | `true` | 未设 | 未设 | 记忆冲突检测（1.0.363）：写入明确更正时把同群语义相近的旧记忆标为已被取代 |
+| `ConflictMinScore` | `0.9` | 未设 | 未设 | 冲突判定的向量相似度门槛（宁可漏判不要误判） |
+| `ConflictMaxChars` | `200` | 未设 | 未设 | 参与冲突判定的最长文本（两侧都要短句） |
+| `ConflictMaxMarks` | `2` | 未设 | 未设 | 一条新记忆最多取代几条旧记忆 |
 | `AutoConsolidateEnabled` | `true` | 未设 | 未设 | 重要结论自动周期沉淀 |
 | `AutoConsolidateIntervalHours` | `12` | 未设 | 未设 | 自动沉淀间隔（运行期钳制到 1..720） |
 | `PolishConsolidation` | `true` | 未设 | 未设 | 沉淀文档是否用模型润色（mock 跳过） |
@@ -3260,6 +3264,23 @@ flowchart TD
 边界：重要 / 关键记忆**不会**被自动写入过期时间；提升失败时本轮不继续清过期，避免只改一半；规范化重复键要求至少 8 个字母 / 数字，避免「收到 / 好的」这类短句被误巩固。
 
 **界面与接口**：管理员在「账户菜单 → 记忆管理」顶部看到「🧠 记忆生命周期」状态与「立即巩固 / 遗忘」按钮；`GET /ag-ui/memory/lifecycle` 返回开关、间隔与最近一轮摘要，`POST /ag-ui/memory/lifecycle/run` 手动触发一轮（均仅管理员）。
+
+#### 6.5.4 记忆冲突：旧事实被新事实取代（1.0.363）
+
+问题：同一事实被新信息推翻时（改负责人 / 改时间 / 换方案），旧记忆与新的会**并存**，检索时可能把矛盾的旧结论当事实用。
+
+**检测（`MemoryConflictDetector`，纯函数）**：在**写入侧**做（写入时本来就有向量，顺带检索一次同群近邻，不加定时扫描、不影响回复延迟）。四个条件**缺一不可**，宁可漏判不要误判：
+
+1. 新消息含**更正线索**（`改成 / 改为 / 换成 / 更正为 / 不再是 / 作废 / 以后按 …`，见 `CorrectionCues`）；
+2. 新旧都是**短句**（各 ≤ `ConflictMaxChars` 200 字符）——长文里顺带提到“改”不该让别人失效；
+3. 向量相似度 ≥ `ConflictMinScore`（默认 0.9）；
+4. 共享 ≥ 2 个**字符二元组**（词面锚点，防“语义相近但说的不是一件事”）。
+
+命中后调用 `MarkSuperseded(旧, 新)` 把旧记忆标为「已被取代」：**检索不再命中**（不会被当成事实注入），但**列表仍可见**（划线 + 「已被取代」徒标）。存储层只允许取代**更早**的记忆（`timestamp <` 新记忆），不会反向覆盖。
+
+**人工裁决**：记忆列表中每条被取代的条目带「撤销取代」按钮（同一归属权限规则），调用 `POST /ag-ui/memory/{messageId}/unsupersede` 清除标记、重新参与检索。
+
+**存储**：`agui_message_memory.superseded_by` 列（SQLite / PostgreSQL 均自动迁移）；`MessageMemoryRecord.SupersededBy` / `MessageMemoryItem.SupersededBy` 随包下发。开关 `Agents:Memory:ConflictDetectionEnabled`（默认开），可随时关闭回到旧行为（已标的条目需手工撤销）。
 
 ---
 
@@ -5085,6 +5106,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/memory/timeline` | 记忆时间线（按话题回放旧→新） | 登录 |
 | GET | `/ag-ui/memory/graph` | 图谱记忆子图（按 `groupId` + 主题词 `q` 召回实体 / 关系，供前端关系图；未启用返回 `enabled=false`） | 登录（群成员 / 管理员） |
 | POST | `/ag-ui/memory/{messageId}/importance` | 调整单条记忆级别（0 普通 / 1 重要 / 2 关键） | 登录（归属 / 群管理 / 管理员） |
+| POST | `/ag-ui/memory/{messageId}/unsupersede` | 撤销「已被取代」标记（1.0.363） | 登录（同上） |
 | DELETE | `/ag-ui/memory/{messageId}` | 物理删除单条记忆 | 登录（同上） |
 | POST | `/ag-ui/memory/forget` | 手动遗忘（按群或全部设过期，可选保留最近 N 小时） | 登录（同上） |
 | POST | `/ag-ui/memory/consolidate` | 把某群「关键」级记忆聚合沉淀为知识库文档（需语义记忆已启用） | 登录 |

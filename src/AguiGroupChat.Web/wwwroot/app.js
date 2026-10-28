@@ -893,12 +893,14 @@ async function loadMemoryList(offset = memOffset) {
       const impKey = Number.isInteger(impN) && impN >= 0 ? impN : 0;
       const imp = [t("memory.level0"), t("memory.level1"), t("memory.level2")][impKey] || t("memory.level0");
       const expired = m.expiresAt && m.expiresAt <= Date.now();
-      return `<div class="memory-item ${expired ? "expired" : ""}">
+      const superseded = !!m.supersededBy; // 1.0.363：已被更新的说法取代（不参与检索，可撤销）
+      return `<div class="memory-item ${expired ? "expired" : ""}${superseded ? " superseded" : ""}">
         <div class="mem-head">
           <span class="mem-badge imp-${impKey}">${imp}</span>
           <span class="mem-sender">${escapeHtml(memorySenderName(m))}</span>
           <span class="mem-time">${new Date(m.timestamp).toLocaleString()}</span>
           ${expired ? `<span class="mem-expired">${t("memory.expired")}</span>` : ""}
+          ${superseded ? `<span class="mem-expired" title="${escapeHtml(t("memory.supersededTitle"))}">${t("memory.superseded")}</span>` : ""}
         </div>
         <div class="mem-content">${escapeHtml(m.content)}</div>
         ${m.canManage ? `<div class="mem-ops">
@@ -907,6 +909,7 @@ async function loadMemoryList(offset = memOffset) {
             <option value="1" ${impN === 1 ? "selected" : ""}>${t("memory.level1")}</option>
             <option value="2" ${impN === 2 ? "selected" : ""}>${t("memory.level2")}</option>
           </select>
+          ${superseded ? `<button class="mem-unsup" data-mid="${escapeHtml(m.messageId)}" title="${escapeHtml(t("memory.unsupersedeTitle"))}">${t("memory.unsupersede")}</button>` : ""}
           <button class="mem-del" data-mid="${escapeHtml(m.messageId)}" title="${t("memory.delTitle")}">${t("memory.delBtn")}</button>
         </div>` : '<div class="mem-ops muted">' + t("memory.onlyOwner") + '</div>'}
       </div>`;
@@ -944,6 +947,17 @@ async function loadMemoryList(offset = memOffset) {
         toast(res.ok ? t("memory.deleted") : t("memory.delFail"));
         loadMemoryList(memOffset);
         loadMemoryGroups();
+      };
+    });
+    // 1.0.363：人工撤销「已被取代」标记（认为旧说法仍然有效）
+    list.querySelectorAll(".mem-unsup").forEach((btn) => {
+      btn.onclick = async () => {
+        const res = await fetch(`/ag-ui/memory/${encodeURIComponent(btn.dataset.mid)}/unsupersede`, {
+          method: "POST",
+          headers: { Authorization: "Bearer " + (state.token || "") },
+        });
+        toast(res.ok ? t("memory.unsuperseded") : t("memory.updateFail"));
+        loadMemoryList(memOffset);
       };
     });
   } catch { list.innerHTML = `<div class="mem-empty">${t("memory.loadFail")}</div>`; }
