@@ -2578,6 +2578,16 @@ async function runSkillRepair() {
 
 /* ===== 技能经验管理（1.0.351）：查看 / 手动补写 / 删除 ===== */
 let lessonsSkillId = null;
+let lessonsDeclinedIds = [];
+
+/** 同步「停用无效经验」按钮：有 declined 经验时才显示，并带上数量。 */
+function syncLessonCleanupButton(ids) {
+  lessonsDeclinedIds = Array.isArray(ids) ? ids : [];
+  const btn = $("skillLessonsCleanup");
+  if (!btn) return;
+  btn.classList.toggle("hidden", lessonsDeclinedIds.length === 0);
+  if (lessonsDeclinedIds.length) btn.textContent = t("skill.lessons.cleanup", { n: lessonsDeclinedIds.length });
+}
 
 function skillLessonKindBadge(kind) {
   if (kind === "repair") return "✅ " + t("skill.lessons.kind.repair");
@@ -2614,6 +2624,7 @@ async function openSkillLessonsModal(skillId) {
   $("slMissing").value = "";
   $("slFix").value = "";
   fillSkillLessonAgentSelect();
+  syncLessonCleanupButton([]);
   $("skillLessonsModal").classList.remove("hidden");
   await loadSkillLessons();
 }
@@ -2643,6 +2654,7 @@ async function loadSkillLessons() {
     }
     const list = (d && Array.isArray(d.lessons)) ? d.lessons : [];
     if (!list.length) {
+      syncLessonCleanupButton([]);
       el.innerHTML = `<div class="kb-empty">${escapeHtml(t("skill.lessons.empty"))}</div>`;
       return;
     }
@@ -2670,6 +2682,9 @@ async function loadSkillLessons() {
       row.querySelector("[data-lesson-del]").onclick = () => deleteSkillLesson(l.id);
       el.appendChild(row);
     }
+    syncLessonCleanupButton(list
+      .filter((l) => l.effectiveness && l.effectiveness.status === "declined")
+      .map((l) => l.id));
   } catch (e) {
     el.innerHTML = `<div class="kb-empty">${escapeHtml(t("skill.lessons.fail", { err: e }))}</div>`;
   }
@@ -2708,6 +2723,21 @@ async function deleteSkillLesson(lessonId) {
       return;
     }
     toast(t("skill.lessons.deleted"));
+    await loadSkillLessons();
+  } catch (e) { toast(t("skill.lessons.fail", { err: e })); }
+}
+
+/** 一键停用“反而下降”的经验（1.0.354）：标记为已解决，不再注入。 */
+async function cleanupSkillLessons() {
+  if (!lessonsSkillId || !state.token || !lessonsDeclinedIds.length) return;
+  if (!confirm(t("skill.lessons.cleanupConfirm", { n: lessonsDeclinedIds.length }))) return;
+  try {
+    const res = await fetch(`/ag-ui/skills/${encodeURIComponent(lessonsSkillId)}/lessons/cleanup?mode=resolve`, {
+      method: "POST", headers: { Authorization: "Bearer " + state.token },
+    });
+    const d = await res.json().catch(() => null);
+    if (!res.ok) { toast(t("skill.lessons.fail", { err: (d && (d.message || d.code)) || res.status })); return; }
+    toast(t("skill.lessons.cleaned", { n: (d && d.cleaned) || 0 }));
     await loadSkillLessons();
   } catch (e) { toast(t("skill.lessons.fail", { err: e })); }
 }
@@ -18945,6 +18975,7 @@ function init() {
   const closeLessons = () => $("skillLessonsModal").classList.add("hidden");
   $("sfLessons").onclick = () => { if (editingSkillId) openSkillLessonsModal(editingSkillId); };
   $("skillLessonsAdd").onclick = addSkillLesson;
+  $("skillLessonsCleanup").onclick = cleanupSkillLessons;
   $("skillLessonsClose").onclick = closeLessons;
   $("skillLessonsModal").addEventListener("keydown", (e) => { if (e.key === "Escape") closeLessons(); });
   $("skillLessonsModal").addEventListener("click", (e) => { if (e.target === $("skillLessonsModal")) closeLessons(); });

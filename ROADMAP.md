@@ -119,6 +119,7 @@
 - **落点模块**：`AgentApi`、前端「智能体管理」、复用 starter JSON 打包结构。
 - **在线分发（已实现）**：除内置角色包外，管理员可配置<b>在线目录源</b>（任意静态 JSON 地址），用户一键安装目录里的包；也可把自建数字员工<b>发布</b>为分包文件自行托管。合同为纯 JSON（目录索引 + 包 `schema=knowgath/marketplace-pack/v1`），无需专用后端。安装<b>两趟</b>处理（先分配新 ID，再把包内相互引用重映射），并做<b>安全净化</b>（清桥接端点 / 令牌、他实例用户组 id、私有标记）；拉取限制 http/https、2MB、10s、不开重定向、60s 缓存，坏源不影响聚合。前端：「AI 角色管理」工具栏「🏪 模板市场」。落点：`Agents/MarketplaceService.cs`（`ImportDefinitions`）、`Web/MarketplaceRemote.cs`、`Web/MarketplaceApi.cs`。
 - **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
+- **经验生命周期清理（1.0.354，已实现）**：`LessonCleanup.SelectDeclined` 挑出回看为 `declined` 的未解决经验（已解决不重复挑）；`POST /ag-ui/skills/{id}/lessons/cleanup` 默认批量标为已解决（停止注入），`mode=delete` 物理删除，幂等且限该技能。弹窗在存在无效经验时显示「🧹 停用无效经验（N）」。
 - **经验规避确定性落库（1.0.353，已实现）**：`OrgApplyEngine` 组织落库时为岗位挂载的技能生成「【技能经验·必须遵守】」块（每技能 1 条未解决失败，最多 3 个）追加到 `instructions`，网页 apply 与 `org_commit` 同口径；已解决经验不写，手工编辑不改写。
 - **经验有效性回看（1.0.352，已实现）**：`LessonEffectiveness` 以经验时间为界对比同一技能前后的产物合格率（各取最近 10 条、前后均需 ≥ 2 次）：提升 ≥ 10pt 或跨 80% → `improved`；下降 ≥ 10pt → `declined`；否则 `flat`；样本不足 → `insufficient`。`GET /lessons` 每条带 `effectiveness`，界面直接显示「📈 33% → 100%（+67pt，后续 3 次）」并标色。
 - **技能经验管理界面（1.0.351，已实现）**：技能编辑底部「💡 经验」打开 `#skillLessonsModal`，按时间倒序展示失败 / 修复 / 笔记经验（适用岗位、缺失项、改进、已解决），可删除；支持手动补写（技能级或指定岗位，`note` 类型）与岗位校验。接口：`POST /ag-ui/skills/{id}/lessons`、`DELETE /ag-ui/skills/{id}/lessons/{lessonId}`。

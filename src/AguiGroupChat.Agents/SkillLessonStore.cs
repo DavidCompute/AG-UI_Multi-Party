@@ -204,6 +204,29 @@ public sealed class SkillLessonStore
     }
 
     /// <summary>
+    /// 批量把指定经验标为已解决（1.0.354 清理无效经验用）：不再注入到工具说明 / 岗位说明，
+    /// 但仍保留在列表里可追溯。返回实际改动条数。
+    /// </summary>
+    public int Resolve(string skillId, IReadOnlyCollection<string>? lessonIds)
+    {
+        if (string.IsNullOrWhiteSpace(skillId) || lessonIds is not { Count: > 0 }) return 0;
+        var ids = new HashSet<string>(lessonIds.Where(x => !string.IsNullOrWhiteSpace(x)), StringComparer.Ordinal);
+        if (ids.Count == 0) return 0;
+        lock (_gate)
+        {
+            var n = 0;
+            for (var i = 0; i < _lessons.Count; i++)
+            {
+                var l = _lessons[i];
+                if (l.Resolved || !string.Equals(l.SkillId, skillId, StringComparison.Ordinal) || !ids.Contains(l.Id)) continue;
+                _lessons[i] = l with { Resolved = true };
+                n++;
+            }
+            return n;
+        }
+    }
+
+    /// <summary>
     /// 生成注入到工具说明的「经验」块；没有经验时返回空串。
     /// 不暴露用户原文，只含技能名 / 缺失项 / 改进方式。
     /// </summary>

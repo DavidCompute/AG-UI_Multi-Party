@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.353**
+> 适用版本：**1.0.354**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2103,6 +2103,7 @@
 - 接口：`POST /ag-ui/skills/{skillId}/lessons`、`DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`，权限与编辑技能一致（归属者或管理员）。
 - **有效性回看（1.0.352）**：每条经验旁显示写入前后的产物合格率对比（各取最近 10 条，前后均需 ≥ 2 次才判定）：提升 ≥ 10 个百分点或跨过 80% → `improved`（📈 明显改善）；下降 ≥ 10 个百分点 → `declined`（📉 反而下降，建议复核）；否则 `flat`；样本不够 → `insufficient`。数据来自 `GET /lessons` 随包下发的 `effectiveness` 字段，可据此清理无效或已过时的经验。
 - **落库兜底（1.0.353）**：组织落库（网页 apply 与 `org_commit`）时，若岗位挂载的技能有**未解决**失败经验，平台会确定性把「【技能经验·必须遵守】」块追加到该岗位 `instructions`（最多 3 个技能、每技能 1 条）——不依赖模型是否记得在 instructions 里写规避步骤；已解决的经验不写。
+- **生命周期清理（1.0.354）**：弹窗在有 `declined`（反而下降且样本足够）经验时显示「🧹 停用无效经验（N）」，确认后调用 `POST /ag-ui/skills/{id}/lessons/cleanup` 把它们批量标为已解决（不再注入，但保留可追溯）；`?mode=delete` 可改为物理删除。已解决的经验不重复挑、幂等。
 
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 
@@ -2137,6 +2138,7 @@
 | `GET /ag-ui/skills/{skillId}/lessons` | 查看技能经验（1.0.349） | 归属者或管理员；失败 / 修复经验，见 4.3.8；1.0.352 起每条带 `effectiveness` |
 | `POST /ag-ui/skills/{skillId}/lessons` | 手工补写经验（1.0.351） | 归属者或管理员；`note` 类型，见 4.3.9 |
 | `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | 删除一条经验（1.0.351） | 归属者或管理员；仅限该技能 |
+| `POST /ag-ui/skills/{skillId}/lessons/cleanup` | 清理无效经验（1.0.354） | `?mode=resolve`（默认，标为已解决）/ `?mode=delete`；只处理回看为 `declined` 的未解决经验 |
 
 #### 4.4.2 谁能创建 / 编辑 / 删除哪些类型
 

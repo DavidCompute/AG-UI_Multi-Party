@@ -255,6 +255,40 @@ public static class SkillApi
             return Results.Ok(new { deleted = true, lessonId });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
+        // ---- 清理无效经验（1.0.354）：把回看为“反而下降”的经验批量停用（默认）或删除 ----
+        root.MapPost("/{skillId}/lessons/cleanup", (string skillId, string? mode, HttpContext ctx, AuthService auth,
+            AgentSkillCatalog catalog) =>
+        {
+            var user = WebIdentity.User(ctx, auth);
+            if (user is null) return Unauthorized();
+            var skill = catalog.Get(skillId);
+            if (skill is null) return Results.NotFound(new AguiError(ErrorCodes.SkillNotFound, "技能不存在"));
+            var isAdmin = auth.IsAdmin(user.UserId);
+            if (skill.OwnerId is not null && !isAdmin && skill.OwnerId != user.UserId)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "仅创建者或系统管理员可清理该技能经验"), statusCode: StatusCodes.Status403Forbidden);
+            if (skill.OwnerId is null && !isAdmin)
+                return Results.Json(new AguiError(ErrorCodes.SkillPermissionDenied, "系统内置技能仅管理员可清理经验"), statusCode: StatusCodes.Status403Forbidden);
+
+            var store = ctx.RequestServices.GetService<SkillLessonStore>();
+            if (store is null) return Results.Json(new AguiError(ErrorCodes.BadRequest, "经验库不可用"), statusCode: StatusCodes.Status503ServiceUnavailable);
+            var events = ctx.RequestServices.GetService<ArtifactQualityStore>()
+                ?.Query(DateTimeOffset.UtcNow.AddDays(-60).ToUnixTimeMilliseconds())
+                .Where(e => string.Equals(e.SkillId, skillId, StringComparison.Ordinal))
+                .ToList() ?? [];
+            var ids = LessonCleanup.SelectDeclined(store.ForSkill(skillId), events);
+            var delete = string.Equals(mode, "delete", StringComparison.OrdinalIgnoreCase);
+            var cleaned = 0;
+            if (delete)
+            {
+                foreach (var id in ids) if (store.Remove(skillId, id)) cleaned++;
+            }
+            else
+            {
+                cleaned = store.Resolve(skillId, ids);
+            }
+            return Results.Ok(new { cleaned, mode = delete ? "delete" : "resolve", ids });
+        }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
+
         // ---- 删除技能（技能归属者或系统管理员）；已被数字员工引用的技能一并解除（按引用的 agent 引用清理在下文做，暂无外键）----
         root.MapDelete("/{skillId}", (string skillId, HttpContext ctx, AuthService auth, AgentSkillCatalog catalog) =>
         {

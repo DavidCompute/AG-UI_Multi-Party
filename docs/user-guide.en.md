@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.353**
+> Applies to version: **1.0.354**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -2105,6 +2105,7 @@ The skill edit form gains **💡 Experience** at the bottom (only for saved skil
 - APIs: `POST /ag-ui/skills/{skillId}/lessons`, `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}`, with the same permissions as editing (owner or admin).
 - **Effectiveness lookback (1.0.352)**: each lesson shows the artifact pass rate before vs after it was written (latest 10 samples per side, at least 2 on each side): a rise of 10+ points or crossing 80% → `improved` (📈); a drop of 10+ points → `declined` (📉, review it); otherwise `flat`; too few samples → `insufficient`. Data comes from the `effectiveness` field returned by `GET /lessons`, so stale or ineffective lessons can be cleaned up.
 - **Commit-time guarantee (1.0.353)**: when an organization is persisted (web apply or `org_commit`), any role mounting a skill with **unresolved** failure lessons gets a deterministic `【技能经验·必须遵守】` block appended to its `instructions` (up to 3 skills, one lesson each) — it does not depend on the model remembering to write avoidance steps; resolved lessons are not written.
+- **Lifecycle cleanup (1.0.354)**: when lessons with `declined` effectiveness (enough samples, pass rate dropped) exist, the dialog shows **🧹 Disable ineffective (N)**; confirming calls `POST /ag-ui/skills/{id}/lessons/cleanup` to mark them resolved in bulk (no longer injected, still auditable). `?mode=delete` removes them physically. Resolved lessons are never selected twice, and the operation is idempotent.
 
 Configuration (`Agents:ArtifactQuality`, all values have defaults and may be omitted):
 
@@ -2139,6 +2140,7 @@ All skill APIs are mounted under the prefix `/ag-ui/skills` (`src/AguiGroupChat.
 | `GET /ag-ui/skills/{skillId}/lessons` | Skill experience (1.0.349) | Owner or admin; failure / repair lessons, see 4.3.8; since 1.0.352 each carries `effectiveness` |
 | `POST /ag-ui/skills/{skillId}/lessons` | Add a lesson manually (1.0.351) | Owner or admin; `note` kind, see 4.3.9 |
 | `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | Delete a lesson (1.0.351) | Owner or admin; must belong to this skill |
+| `POST /ag-ui/skills/{skillId}/lessons/cleanup` | Clean ineffective lessons (1.0.354) | `?mode=resolve` (default, mark resolved) / `?mode=delete`; only unresolved lessons whose lookback is `declined` |
 
 #### 4.4.2 Who can create / edit / delete which types
 

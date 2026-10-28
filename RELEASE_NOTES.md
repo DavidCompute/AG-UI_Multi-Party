@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.353 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.353 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.354 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.354 Release Notes (current Windows desktop release)
+
+**版本说明**：**经验生命周期清理**——回看为“反而下降”的经验可以一键停用（不再注入），避免过时经验长期污染上下文。
+**Version note**: **Lesson lifecycle cleanup** — lessons whose lookback shows a decline can be disabled in one click (no longer injected), so stale experience stops polluting the context.
+
+## 变更
+# Changes
+
+中文：
+- **候选筛选**（`LessonCleanup.SelectDeclined`，纯函数）：只选未解决、且回看为 `declined`（前后各有足够样本、合格率下降 ≥ 10 个百分点）的经验；已解决的不会被重复挑。
+- **批量停用**：`POST /ag-ui/skills/{skillId}/lessons/cleanup`——默认 `mode=resolve` 把它们标为已解决（不再注入工具 / 岗位说明，但保留可追溯）；`mode=delete` 物理删除。幂等、只作用于该技能。
+- **界面**：经验弹窗在存在 `declined` 经验时显示「🧹 停用无效经验（N）」，确认后一键停用并刷新列表；单条 🗑️ 删除仍然保留。
+- **权限**：与查看 / 编辑经验一致（归属者或管理员；系统内置技能仅管理员）。
+
+English:
+- **Selection** (`LessonCleanup.SelectDeclined`, pure): only unresolved lessons whose lookback is `declined` (enough samples on both sides, pass rate down 10+ points); resolved lessons are never selected again.
+- **Bulk disable**: `POST /ag-ui/skills/{skillId}/lessons/cleanup` — `mode=resolve` (default) marks them resolved (no longer injected into tool / role instructions, still auditable); `mode=delete` removes them physically. Idempotent and scoped to the skill.
+- **UI**: when `declined` lessons exist, the experience dialog shows **🧹 Disable ineffective (N)**; confirming disables them in one click and refreshes the list. Per-row 🗑️ deletion remains.
+- **Permissions**: same as viewing / editing lessons (owner or admin; built-ins admin-only).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（生命周期清理）、§4.4.1（清理接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.354。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (lifecycle cleanup), §4.4.1 (cleanup API); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.354.
+
+## 测试
+# Tests
+
+中文：新增 `SelectDeclined` 样本 / 已解决 / 跨技能与批量 `Resolve` 幂等用例 3 条；定向测试 22 条通过；全量 `dotnet vstest` **2014 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2418，missing 0；配置键与文档引用校验通过。
+English: new cases for `SelectDeclined` samples / resolved / cross-skill and idempotent bulk `Resolve` (3 tests); 22 targeted tests pass; the full `dotnet vstest` run passes **2014 / 0**; `node --check app.js`; the i18n audit reports zh=en=2418, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.353 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.353 Release Notes (historical)
 
 **版本说明**：**经验规避确定性落库**——组织落库时，若岗位挂载的技能有未解决的历史失败，平台会把规避要点直接写进岗位说明，不再依赖模型是否照做。
 **Version note**: **Deterministic avoidance at commit time** — when an organization is persisted, any role mounting a skill with unresolved failures gets the avoidance notes written directly into its instructions instead of relying on the model to remember.

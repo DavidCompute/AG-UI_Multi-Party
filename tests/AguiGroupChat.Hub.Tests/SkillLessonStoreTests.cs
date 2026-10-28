@@ -169,6 +169,24 @@ public sealed class SkillLessonStoreTests
         Assert.False(store.Remove("docx", docx.Id)); // 已删除
     }
 
+    [Fact]
+    public void Resolve_BatchMarksOnlyMatchingSkillAndIsIdempotent()
+    {
+        var store = new SkillLessonStore();
+        var a = store.AddManual("docx", null, "a", null, null)!;
+        var b = store.AddManual("docx", null, "b", null, null)!;
+        var c = store.AddManual("pptx", null, "c", null, null)!;
+
+        Assert.Equal(1, store.Resolve("docx", [a.Id]));
+        Assert.Equal(0, store.Resolve("docx", [a.Id])); // 幂等：已解决的不会重复计数
+        Assert.Equal(0, store.Resolve("pptx", [a.Id])); // 跨技能不得改
+
+        Assert.True(store.ForSkill("docx").Single(x => x.Id == a.Id).Resolved);
+        Assert.False(store.ForSkill("docx").Single(x => x.Id == b.Id).Resolved);
+        Assert.False(store.ForSkill("pptx").Single(x => x.Id == c.Id).Resolved);
+        Assert.Equal(0, store.Resolve("docx", []));
+    }
+
     // ---------- 落库兜底块（1.0.353） ----------
 
     [Fact]

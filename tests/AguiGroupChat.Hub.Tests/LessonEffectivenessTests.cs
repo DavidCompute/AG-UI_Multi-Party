@@ -96,6 +96,42 @@ public sealed class LessonEffectivenessTests
     }
 
     [Fact]
+    public void SelectDeclined_OnlyUnresolvedLessonsWithEnoughDecliningSamples()
+    {
+        var events = new[]
+        {
+            // 写入前：3 次全合格
+            new ArtifactQualityEvent("a", "docx", "Docx", 90, true, [], "g", 100),
+            new ArtifactQualityEvent("a", "docx", "Docx", 90, true, [], "g", 200),
+            new ArtifactQualityEvent("a", "docx", "Docx", 90, true, [], "g", 300),
+            // 写入后：1/3 合格 → declined
+            new ArtifactQualityEvent("a", "docx", "Docx", 50, false, [], "g", 1000),
+            new ArtifactQualityEvent("a", "docx", "Docx", 90, true, [], "g", 1100),
+            new ArtifactQualityEvent("a", "docx", "Docx", 40, false, [], "g", 1200),
+            // 另一条经验之后只有 1 次执行 → 样本不足
+            new ArtifactQualityEvent("a", "docx", "Docx", 90, true, [], "g", 5000),
+        };
+        var lessons = new[]
+        {
+            new SkillLesson("sl_bad", "docx", null, SkillLessonKinds.Failure, "降了", [], null, "g", 500, false),
+            new SkillLesson("sl_resolved", "docx", null, SkillLessonKinds.Failure, "已解决", [], null, "g", 500, true),
+            new SkillLesson("sl_few", "docx", null, SkillLessonKinds.Failure, "样本少", [], null, "g", 4000, false),
+        };
+
+        var ids = LessonCleanup.SelectDeclined(lessons, events);
+
+        Assert.Equal(["sl_bad"], ids);
+    }
+
+    [Fact]
+    public void SelectDeclined_NoEvents_ReturnsEmpty()
+    {
+        var lessons = new[] { new SkillLesson("sl", "docx", null, SkillLessonKinds.Note, "x", [], null, "", 1, false) };
+        Assert.Empty(LessonCleanup.SelectDeclined(lessons, []));
+        Assert.Empty(LessonCleanup.SelectDeclined(null, null));
+    }
+
+    [Fact]
     public void CapsSamplesPerSide_AndHandlesEmpty()
     {
         var many = Enumerable.Range(1, 15).Select(i => Evt(i * 10, 40, false))
