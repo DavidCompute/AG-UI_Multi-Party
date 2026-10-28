@@ -86,4 +86,36 @@ public sealed class OrgHealthReportTests
         // 好评率：本期 3/3=100%、上期 1/2=50% → ▲...
         Assert.Contains("好评率 ▲", md);
     }
+
+    [Fact]
+    public void BuildMarkdown_ReportsSkillLoopSectionAndAdvice()
+    {
+        var stats = new[] { new AgentPerformance.AgentStat("a1", "好员工", 5, 10, 10, 0, 20, 3, 0, "2026-10-10") };
+        var defs = new Dictionary<string, AgentDefinition> { ["a1"] = new AgentDefinition { AgentId = "a1", Nickname = "好员工" } };
+        var loop = new SkillLoopSummary(3, 1, 0, 0, 2, 0, 0.3333, 4200, 2, 1);
+        var rows = new[] { new OrgHealthReport.SkillLoopRow("docx_report", 3, 1, 2, 0, 4200) };
+
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, new PricingOptions(),
+            1_700_000_000_000, null, null, loop, rows);
+
+        Assert.Contains("## 六、技能自愈闭环", md); // 未传评测用例时排在第六节
+        Assert.Contains("修复尝试：3 次；成功 1 次（成功率 33%）；回滚 2 次；失败 0 次；平均耗时 4.2 秒", md);
+        Assert.Contains("| docx_report | 3 | 1 | 2 | 0 | 4.2 秒 |", md);
+        Assert.Contains("技能自愈成功率偏低", md);
+    }
+
+    [Fact]
+    public void BuildMarkdown_SkillLoopEmptyAndNumbering()
+    {
+        var stats = new[] { new AgentPerformance.AgentStat("a1", "好员工", 5, 10, 10, 0, 20, 3, 0, "2026-10-10") };
+        var defs = new Dictionary<string, AgentDefinition> { ["a1"] = new AgentDefinition { AgentId = "a1", Nickname = "好员工" } };
+        var evalCases = new List<EvalCase>();
+
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, new PricingOptions(),
+            1_700_000_000_000, evalCases, null, new SkillLoopSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0), []);
+
+        Assert.Contains("## 七、技能自愈闭环", md); // 有评测用例时顺延到第七节
+        Assert.Contains("窗口内没有修复记录", md);
+        Assert.DoesNotContain("技能自愈成功率偏低", md);
+    }
 }

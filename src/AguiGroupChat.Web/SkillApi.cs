@@ -551,6 +551,8 @@ public static class SkillApi
                 ctx.RequestServices.GetService<SkillLoopEventStore>()?.Record(
                     skillId, outcome, fix.Attempts, loopWatch.ElapsedMilliseconds,
                     regression?.Ran ?? 0, !regressionBlocked);
+                // 自愈闭环告警（1.0.359）：反复失败 / 回滚时补回归用例并通知运营。
+                SkillLoopAlertBridge.OnOutcome(ctx.RequestServices, skillId, outcome);
             }
 
             return Results.Ok(new

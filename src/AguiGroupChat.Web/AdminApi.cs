@@ -467,22 +467,17 @@ public static class AdminApi
                 })
                 .ToList();
 
-            var skills = list
-                .GroupBy(e => e.SkillId, StringComparer.Ordinal)
-                .Select(g =>
+            var skills = SkillLoopMetrics.BySkill(list)
+                .Select(s => new
                 {
-                    var effective = g.Where(e => e.Outcome != SkillLoopOutcomes.Skipped).ToList();
-                    return new
-                    {
-                        skillId = g.Key,
-                        name = Name(g.Key),
-                        attempts = g.Count(),
-                        applied = g.Count(e => Ok(e.Outcome)),
-                        rolledBack = g.Count(e => e.Outcome == SkillLoopOutcomes.RolledBack),
-                        failed = g.Count(e => e.Outcome == SkillLoopOutcomes.Failed),
-                        avgMs = effective.Count == 0 ? 0L : (long)Math.Round(effective.Average(e => Math.Max(0, e.DurationMs))),
-                        lastAt = DateTimeOffset.FromUnixTimeMilliseconds(g.Max(e => e.TimestampMs)).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
-                    };
+                    skillId = s.SkillId,
+                    name = Name(s.SkillId),
+                    attempts = s.Attempts,
+                    applied = s.Applied,
+                    rolledBack = s.RolledBack,
+                    failed = s.Failed,
+                    avgMs = s.AvgMs,
+                    lastAt = DateTimeOffset.FromUnixTimeMilliseconds(s.LastMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
                 })
                 .OrderByDescending(x => x.attempts)
                 .ThenBy(x => x.name, StringComparer.CurrentCulture)
@@ -497,6 +492,32 @@ public static class AdminApi
                 daily,
                 skills,
             });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
+        // 自愈闭环告警（1.0.359）：修复反复失败 / 回滚的技能，供通知中心轮询。
+        root.MapGet("/skill-loop/alerts", (long? since, IServiceProvider sp) =>
+        {
+            var store = sp.GetService<SkillLoopAlertStore>();
+            var sinceMs = Math.Max(0, since ?? 0);
+            var alerts = (store?.Snapshot(sinceMs) ?? (IReadOnlyList<SkillLoopAlert>)[])
+                .OrderByDescending(a => a.TimestampMs)
+                .Select(a => new
+                {
+                    skillId = a.SkillId,
+                    skillName = a.SkillName,
+                    attempts = a.Attempts,
+                    successes = a.Successes,
+                    rolledBack = a.RolledBack,
+                    failed = a.Failed,
+                    successRate = a.SuccessRate,
+                    avgMs = a.AvgMs,
+                    reasons = a.Reasons,
+                    regressionEnsured = a.RegressionEnsured,
+                    atMs = a.TimestampMs,
+                    at = DateTimeOffset.FromUnixTimeMilliseconds(a.TimestampMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                })
+                .ToList();
+            return Results.Ok(new { alerts });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
         // 知聚下拉选项（绩效页「按知聚」筛选用）：仅运维及以上（只读）。
@@ -534,8 +555,21 @@ public static class AdminApi
             var prevStats = AgentPerformance.Aggregate(prevRows, feedback, names, d, prevTo.ToUnixTimeMilliseconds(), artifacts: prevArtifacts);
             var pricing = sp.GetService<AgentOptions>()?.Pricing ?? new PricingOptions();
             var byId = defs.ToDictionary(x => x.AgentId, x => x, StringComparer.Ordinal);
+            // 自愈闭环（1.0.359）：把「修复成功了多少」也带进体检报告，与产物质量对照看。
+            var loopEvents = sp.GetService<SkillLoopEventStore>()?.Query(from.ToUnixTimeMilliseconds())
+                             ?? (IReadOnlyList<SkillLoopEvent>)[];
+            var loopSummary = SkillLoopMetrics.Summarize(loopEvents);
+            var skillCatalog = sp.GetService<AgentSkillCatalog>();
+            var loopRows = SkillLoopMetrics.BySkill(loopEvents)
+                .Select(s => new OrgHealthReport.SkillLoopRow(
+                    skillCatalog?.Get(s.SkillId)?.Name is { Length: > 0 } n ? n : s.SkillId,
+                    s.Attempts, s.Applied, s.RolledBack, s.Failed, s.AvgMs))
+                .OrderByDescending(r => r.Attempts)
+                .ThenBy(r => r.Name, StringComparer.CurrentCulture)
+                .ToList();
             var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
-                stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List(), prevStats);
+                stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List(), prevStats,
+                loopSummary, loopRows);
             // 除 Markdown 外，同时下发结构化数据（供前端图表视图：KPI / 调用量 Top / 关注项）。
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
@@ -582,6 +616,24 @@ public static class AdminApi
                 filename = $"org-health-{to:yyyyMMdd}.md",
                 markdown = md,
                 days = d,
+                loop = new
+                {
+                    attempts = loopSummary.Attempts,
+                    successes = loopSummary.Applied + loopSummary.Resumed,
+                    successRate = loopSummary.SuccessRate,
+                    rolledBack = loopSummary.RolledBack,
+                    failed = loopSummary.Failed,
+                    avgMs = loopSummary.AvgMs,
+                    skills = loopRows.Select(r => new
+                    {
+                        name = r.Name,
+                        attempts = r.Attempts,
+                        applied = r.Applied,
+                        rolledBack = r.RolledBack,
+                        failed = r.Failed,
+                        avgMs = r.AvgMs,
+                    }).ToList(),
+                },
                 from = from.ToString("yyyy-MM-dd"),
                 to = to.ToString("yyyy-MM-dd"),
                 pricing = new

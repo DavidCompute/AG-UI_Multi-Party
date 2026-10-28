@@ -100,6 +100,19 @@ public sealed record SkillLoopSummary(
     int RegressionPassed);
 
 /// <summary>
+/// 按技能聚合的闭环指标（1.0.359）：尝试数包含 skipped，平均耗时不计 skipped。
+/// </summary>
+public sealed record SkillLoopSkillStat(
+    string SkillId,
+    int Attempts,
+    int Applied,
+    int RolledBack,
+    int Failed,
+    int Skipped,
+    long AvgMs,
+    long LastMs);
+
+/// <summary>
 /// 闭环指标聚合（1.0.358，纯函数）：成功率 =（applied + resumed）/（尝试 − skipped），
 /// 平均耗时不计 skipped；回归次数 / 通过数按事件求和。
 /// </summary>
@@ -127,5 +140,32 @@ public static class SkillLoopMetrics
         var regressionPassed = list.Count(e => e.RegressionRan > 0 && e.RegressionPassed);
         return new SkillLoopSummary(list.Count, applied, resumed, failed, rolledBack, skipped,
             successRate, avgMs, regressionRuns, regressionPassed);
+    }
+
+    /// <summary>
+    /// 按技能聚合（1.0.359）：供管理端明细表与组织体检报告共用，避免两处各写一套口径。
+    /// 排序：尝试数降序 → 技能 ID 升序（调用方可再按名称重排）。
+    /// </summary>
+    public static IReadOnlyList<SkillLoopSkillStat> BySkill(IEnumerable<SkillLoopEvent>? events)
+    {
+        var list = (events ?? []).Where(e => !string.IsNullOrWhiteSpace(e.SkillId)).ToList();
+        return list
+            .GroupBy(e => e.SkillId, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var effective = g.Where(e => e.Outcome != SkillLoopOutcomes.Skipped).ToList();
+                return new SkillLoopSkillStat(
+                    g.Key,
+                    g.Count(),
+                    g.Count(e => e.Outcome is SkillLoopOutcomes.Applied or SkillLoopOutcomes.Resumed),
+                    g.Count(e => e.Outcome == SkillLoopOutcomes.RolledBack),
+                    g.Count(e => e.Outcome == SkillLoopOutcomes.Failed),
+                    g.Count(e => e.Outcome == SkillLoopOutcomes.Skipped),
+                    effective.Count == 0 ? 0L : (long)Math.Round(effective.Average(e => Math.Max(0, e.DurationMs))),
+                    g.Max(e => e.TimestampMs));
+            })
+            .OrderByDescending(x => x.Attempts)
+            .ThenBy(x => x.SkillId, StringComparer.Ordinal)
+            .ToList();
     }
 }

@@ -4816,6 +4816,8 @@ let artifactAlertBaselineDone = false;
 
 async function checkArtifactAlertsOnce() {
   if (!isAdminPlus() || !state.token) return;
+  // 自愈闭环告警（1.0.359）：与产物质量告警共用同一轮询节奏
+  void checkSkillLoopAlertsOnce();
   try {
     const res = await fetch("/ag-ui/admin/artifact-quality/alerts", { headers: { Authorization: "Bearer " + state.token } });
     const d = await res.json().catch(() => null);
@@ -4854,6 +4856,39 @@ function stopArtifactAlertPolling() {
   if (artifactAlertTimer) { clearInterval(artifactAlertTimer); artifactAlertTimer = null; }
   artifactAlertsSeen.clear();
   artifactAlertBaselineDone = false;
+  loopAlertsSeen.clear();
+  loopAlertBaselineDone = false;
+}
+
+/* ===== 自愈闭环告警轮询（1.0.359）：修复反复失败 / 回滚的技能送进通知中心 ===== */
+const loopAlertsSeen = new Set();
+let loopAlertBaselineDone = false;
+
+async function checkSkillLoopAlertsOnce() {
+  if (!isAdminPlus() || !state.token) return;
+  try {
+    const res = await fetch("/ag-ui/admin/skill-loop/alerts", { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    const list = (res.ok && d && Array.isArray(d.alerts)) ? d.alerts : [];
+    if (!loopAlertBaselineDone) {
+      // 首次只建基线：避免登录时把历史告警全部推一遍
+      for (const a of list) loopAlertsSeen.add(`${a.skillId}|${a.atMs}`);
+      loopAlertBaselineDone = true;
+      return;
+    }
+    for (const a of list.slice().reverse()) {
+      const key = `${a.skillId}|${a.atMs}`;
+      if (loopAlertsSeen.has(key)) continue;
+      loopAlertsSeen.add(key);
+      addNotification("error", t("notif.skillLoopTitle"), t("notif.skillLoopBody", {
+        skill: a.skillName || a.skillId,
+        attempts: String(a.attempts),
+        rate: Math.round(Number(a.successRate || 0) * 100) + "%",
+        rollbacks: String(a.rolledBack),
+        failed: String(a.failed),
+      }), { action: "skillAlerts" });
+    }
+  } catch { /* 下一轮重试 */ }
 }
 
 /* 图片处理状态轮询：有 processing 图片时每 2s 刷新（视觉模型写描述要几秒），全部完成自动停止。 */
@@ -9090,6 +9125,30 @@ function downloadOrgHealthHtml() {
       + `</tbody></table>`
     : `<div class="meta">${escapeHtml(t("admin.orgHealthDimEmpty"))}</div>`;
 
+  // 技能自愈闭环（1.0.359）：产物质量看「产出好不好」，这里看「修得好不好」。
+  const loop = d.loop || null;
+  const loopRows = loop ? (loop.skills || []) : [];
+  const loopTable = loopRows.length
+    ? `<table><thead><tr>`
+      + ["admin.orgHealthLoopThSkill", "admin.orgHealthLoopThAttempts", "admin.orgHealthLoopThApplied", "admin.orgHealthLoopThRolledBack", "admin.orgHealthLoopThFailed", "admin.orgHealthLoopThAvg"]
+        .map((k) => `<th>${escapeHtml(t(k))}</th>`).join("")
+      + `</tr></thead><tbody>`
+      + loopRows.map((r) => `<tr><td>${escapeHtml(r.name || "")}</td><td class="num">${num(r.attempts)}</td><td class="num">${num(r.applied)}</td><td class="num">${num(r.rolledBack)}</td><td class="num">${num(r.failed)}</td><td class="num">${(Number(r.avgMs || 0) / 1000).toFixed(1)}s</td></tr>`).join("")
+      + `</tbody></table>`
+    : `<div class="meta">${escapeHtml(t("admin.orgHealthLoopEmpty"))}</div>`;
+  const loopSec = loop
+    ? `<h2>${escapeHtml(t("admin.orgHealthLoop"))}</h2>\n`
+      + (Number(loop.attempts) > 0
+        ? `<div class="meta">${escapeHtml(t("admin.orgHealthLoopSummary", {
+            attempts: num(loop.attempts), success: num(loop.successes),
+            rate: Math.round(Number(loop.successRate || 0) * 100) + "%",
+            rollbacks: num(loop.rolledBack), failed: num(loop.failed),
+            avg: (Number(loop.avgMs || 0) / 1000).toFixed(1),
+          }))}</div>\n`
+        : "")
+      + loopTable + "\n"
+    : "";
+
   const style = `:root{--border:#d7dde8;--muted:#667085;--accent:#4f8cff;--bad:#dc2626}`
     + `*{box-sizing:border-box}body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#1e2432;margin:24px;background:#fff}`
     + `h1{font-size:20px;margin:0 0 4px}h2{font-size:13px;color:var(--muted);margin:18px 0 6px}`
@@ -9118,6 +9177,7 @@ function downloadOrgHealthHtml() {
     + `<div class="grow"><h2>${escapeHtml(t("admin.orgHealthTrend"))} · ${escapeHtml(metricLabel)}</h2>${trend}</div></div>\n`
     + `<h2>${escapeHtml(t("admin.orgHealthFlags"))}</h2>\n<div>${flags}</div>\n`
     + `<h2>${escapeHtml(t("admin.orgHealthHtmlAppendix"))} · ${escapeHtml(dimLabel)}</h2>\n${table}\n`
+    + loopSec
     + `</body></html>`;
 
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
@@ -10400,7 +10460,7 @@ const WEBHOOK_EVENT_GROUPS = [
   { key: "runs", icon: "⚙️", types: ["RUN_ERROR"] },
   { key: "quota", icon: "📊", types: ["QUOTA_THRESHOLD", "QUOTA_OVERRIDE_EXPIRING", "QUOTA_OVERRIDE_EXPIRED"] },
   { key: "images", icon: "🖼️", types: ["IMAGE_WRITE_PENDING", "IMAGE_WRITE_RESOLVED"] },
-  { key: "artifacts", icon: "🧪", types: ["ARTIFACT_QUALITY_ALERT", "ARTIFACT_SKILL_SUSPENDED"] },
+  { key: "artifacts", icon: "🧪", types: ["ARTIFACT_QUALITY_ALERT", "ARTIFACT_SKILL_SUSPENDED", "SKILL_LOOP_ALERT"] },
 ];
 
 /** 把服务端事件目录归入分组（保持服务端顺序的声明顺序；未知类型追加「其他」）。 */

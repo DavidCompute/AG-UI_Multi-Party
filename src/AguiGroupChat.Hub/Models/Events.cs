@@ -102,6 +102,9 @@ public static class EventTypes
     /// <summary>技能因产物质量被暂停（1.0.345）：自动隔离或管理员手工暂停。
     /// 只经出站 Webhook 推送，与告警配对，让集成方能确认「已下线该技能」。</summary>
     public const string ArtifactSkillSuspended = "ARTIFACT_SKILL_SUSPENDED";
+    /// <summary>技能自愈闭环告警（1.0.359）：修复反复失败 / 回滚、成功率偏低。
+    /// 只经出站 Webhook 推送（不绑定知聚广播），同时进站内通知中心。</summary>
+    public const string SkillLoopAlert = "SKILL_LOOP_ALERT";
 }
 
 // ================= 服务端下行事件 =================
@@ -723,5 +726,33 @@ public sealed class ArtifactSkillSuspendedEvent
     public required string Reason { get; init; }
     public string AgentId { get; init; } = "";
     public string GroupId { get; init; } = "";
+    public required long Timestamp { get; init; }
+}
+
+/// <summary>
+/// SKILL_LOOP_ALERT（Hub 扩展，1.0.359）：同一技能的修复反复失败 / 回滚，成功率偏低。
+/// 只进出站 Webhook（不经群广播）—— 与 <see cref="ArtifactQualityAlertEvent"/> 互补：
+/// 前者看「产物好不好」，这里看「修得好不好」。
+/// </summary>
+public sealed class SkillLoopAlertEvent
+{
+    public string Type => EventTypes.SkillLoopAlert;
+    public required string SkillId { get; init; }
+    public required string SkillName { get; init; }
+    /// <summary>窗口内有效修复次数（不含 skipped）。</summary>
+    public required int Attempts { get; init; }
+    /// <summary>窗口内成功次数（applied + resumed）。</summary>
+    public required int Successes { get; init; }
+    public required int RolledBack { get; init; }
+    public required int Failed { get; init; }
+    /// <summary>窗口内成功率（0~1）。</summary>
+    public required double SuccessRate { get; init; }
+    /// <summary>窗口内平均耗时（毫秒，排除 skipped）。</summary>
+    public required long AvgMs { get; init; }
+    /// <summary>命中的判据：<c>rollback</c> / <c>failure</c> / <c>low-success</c>。</summary>
+    public string[] Reasons { get; init; } = [];
+    /// <summary>本次告警是否同时补充了回归用例。</summary>
+    public bool RegressionEnsured { get; init; }
+    public string Hint { get; init; } = "";
     public required long Timestamp { get; init; }
 }

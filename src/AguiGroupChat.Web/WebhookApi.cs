@@ -127,6 +127,7 @@ public static class WebhookApi
         EventTypes.ImageWriteResolved, // 1.0.282：待审批写入已处理（批准 / 拒绝 / 失败）
         EventTypes.ArtifactQualityAlert, // 1.0.345：技能产物质量连续低分
         EventTypes.ArtifactSkillSuspended, // 1.0.345：技能因产物质量被暂停挂载
+        EventTypes.SkillLoopAlert, // 1.0.359：技能自愈反复失败 / 回滚
     ];
 
     public static void MapWebhookApi(this WebApplication app)

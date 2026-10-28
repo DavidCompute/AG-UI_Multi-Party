@@ -95,4 +95,44 @@ public sealed class SkillLoopEventStoreTests
 
         Assert.Equal(SkillLoopEventStore.MaxEvents, store.Snapshot().Count);
     }
+
+    [Fact]
+    public void BySkill_AggregatesPerSkillAndExcludesSkippedFromAverage()
+    {
+        var events = new[]
+        {
+            Evt("a", SkillLoopOutcomes.Applied, 100, atMs: 10),
+            Evt("a", SkillLoopOutcomes.RolledBack, 300, atMs: 20),
+            Evt("a", SkillLoopOutcomes.Skipped, 999, atMs: 30),
+            Evt("b", SkillLoopOutcomes.Resumed, 50, atMs: 40),
+        };
+
+        var rows = SkillLoopMetrics.BySkill(events);
+
+        Assert.Equal(2, rows.Count);
+        var a = rows.Single(r => r.SkillId == "a");
+        Assert.Equal(3, a.Attempts);     // skipped 计入尝试数
+        Assert.Equal(1, a.Applied);      // applied + resumed
+        Assert.Equal(1, a.RolledBack);
+        Assert.Equal(1, a.Skipped);
+        Assert.Equal(200, a.AvgMs);      // 只算 applied/rolledback：(100+300)/2
+        Assert.Equal(30, a.LastMs);
+
+        var b = rows.Single(r => r.SkillId == "b");
+        Assert.Equal(1, b.Attempts);
+        Assert.Equal(1, b.Applied);
+        Assert.Equal(50, b.AvgMs);
+    }
+
+    [Fact]
+    public void BySkill_EmptyAndAllSkipped()
+    {
+        Assert.Empty(SkillLoopMetrics.BySkill([]));
+
+        var rows = SkillLoopMetrics.BySkill([Evt("a", SkillLoopOutcomes.Skipped, 500)]);
+        Assert.Single(rows);
+        Assert.Equal(1, rows[0].Attempts);
+        Assert.Equal(0, rows[0].Applied);
+        Assert.Equal(0, rows[0].AvgMs);
+    }
 }

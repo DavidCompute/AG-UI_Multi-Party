@@ -98,6 +98,8 @@ public static class AgentHosting
         services.AddSingleton<SkillRegressionCaseStore>();
         // 自愈闭环事件（1.0.358）：修复 / 回归 / 回滚的结局与耗时，供质量看板统计
         services.AddSingleton<SkillLoopEventStore>();
+        // 自愈闭环告警（1.0.359）：修复反复失败 / 回滚，供通知中心与 Webhook
+        services.AddSingleton<SkillLoopAlertStore>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效

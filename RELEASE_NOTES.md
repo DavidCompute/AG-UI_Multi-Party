@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.358 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.358 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.359 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.359 Release Notes (current Windows desktop release)
+
+**版本说明**：**闭环指标反馈回去**——产物质量告警看「产出好不好」，本版加一条并行的判据看「修得好不好」：修复反复失败 / 回滚的技能自动补回归用例、进通知中心、推 Webhook，并写进组织体检报告。
+**Version note**: **Loop metrics feed back** — artifact-quality alerts watch whether output is good; this release adds a parallel signal for whether *repairs* work: skills whose repairs keep failing or rolling back get regression cases, in-app alerts, Webhook events, and a section in the org-health report.
+
+## 变更
+# Changes
+
+中文：
+- **告警判据**：`SkillLoopAlertPolicy.Evaluate`（纯函数）——取同一技能最近 7 天、最近 5 次**有效**修复尝试（`skipped` 不计入，也不占窗口）：回滚 ≥ 2 次 → `rollback`；自测失败 ≥ 2 次 → `failure`；成功率 < 50% → `low-success`。有效尝试不足 2 次不告警。
+- **处置**：命中后自动为该技能补一条标准样例回归用例（仅文档类产物契约且尚无用例时），写一条站内告警（`SkillLoopAlertStore`，最近 200 条），并推送 `SKILL_LOOP_ALERT`；同一技能 60 分钟冷却。**不自动暂停技能**。
+- **接口**：新增 `GET /ag-ui/admin/skill-loop/alerts?since=`（Operator+）；`/skill-loop` 的按技能明细改由 `SkillLoopMetrics.BySkill` 统一口径。
+- **通知中心**：与产物质量告警共用同一轮询节奏，弹出「🔁 技能自愈闭环告警」，点击直达技能库。
+- **组织体检报告**：Markdown 与单文件 HTML 新增「技能自愈闭环」一节（尝试 / 成功 / 成功率 / 回滚 / 失败 / 平均耗时 + 按技能明细），成功率 < 50% 时进入「建议」；`/org-health` 响应新增 `loop` 结构化数据。
+
+English:
+- **Alert rule**: `SkillLoopAlertPolicy.Evaluate` (pure) — for a skill's last 7 days and latest 5 **effective** repair attempts (`skipped` neither counts nor occupies a slot): ≥2 rollbacks → `rollback`; ≥2 self-test failures → `failure`; success rate < 50% → `low-success`. Fewer than 2 effective attempts never alerts.
+- **Handling**: on a hit the skill gets a standard-sample regression case (document contracts only, and only when none exists), an in-app alert (`SkillLoopAlertStore`, latest 200), and a `SKILL_LOOP_ALERT` Webhook event; each skill is cooled down for 60 minutes. Skills are **never auto-paused**.
+- **API**: new `GET /ag-ui/admin/skill-loop/alerts?since=` (Operator+); the per-skill breakdown of `/skill-loop` now shares `SkillLoopMetrics.BySkill`.
+- **Notification center**: polls on the same cadence as artifact alerts, shows "🔁 Skill self-healing loop alert", and opens the skill library on click.
+- **Org-health report**: the Markdown and single-file HTML reports gain a **Skill self-healing loop** section (attempts / successes / success rate / rollbacks / failures / average time plus a per-skill table), and a success rate below 50% is called out in the advice; `/org-health` ships the structured `loop` payload.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（自愈闭环告警与回归用例补充）、§8.1.5（看板告警与体检报告）、§9.2.8（`/skill-loop/alerts`）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.359。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (loop alerts and regression top-up), §8.1.5 (dashboard alerts and health report), §9.2.8 (the `/skill-loop/alerts` endpoint); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.359.
+
+## 测试
+# Tests
+
+中文：新增 `SkillLoopAlertPolicyTests` 9 条（三条判据、窗口裁剪、skipped 不占窗口、成功率边界、耗时口径、告警库边界）与 `BySkill` 2 条、组织体检报告闭环节 2 条；全量 `dotnet vstest` **2039 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2450，missing 0；配置键与文档引用校验通过。
+English: nine new `SkillLoopAlertPolicyTests` cases (the three signals, window trimming, skipped not occupying the window, the success-rate boundary, duration counting, alert-store bounds), two `BySkill` cases, and two org-health loop-section cases; the full `dotnet vstest` run passes **2039 / 0**; `node --check app.js`; the i18n audit reports zh=en=2450, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.358 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.358 Release Notes (historical)
 
 **版本说明**：**自愈闭环可度量**——每次技能修复的结局（生效 / 恢复 / 回滚 / 失败 / 跳过）与耗时都被记录，并在产物质量看板里以「🔁 自愈闭环」区呈现，让“告警 → 修复 → 回归 → 回滚”这条链路从“能跑”变成“看得见”。
 **Version note**: **Measurable self-healing loop** — every skill repair's outcome (applied / resumed / rolled back / failed / skipped) and duration is recorded and surfaced as a **🔁 Self-healing loop** section in the artifact-quality dashboard, turning the alert → repair → regression → rollback chain from "it works" into "it is observable".

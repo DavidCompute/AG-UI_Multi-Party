@@ -11,6 +11,9 @@ namespace AguiGroupChat.Web;
 /// </summary>
 public static class OrgHealthReport
 {
+    /// <summary>报告里的一行自愈闭环明细（1.0.359）。</summary>
+    public sealed record SkillLoopRow(string Name, int Attempts, int Applied, int RolledBack, int Failed, long AvgMs);
+
     public static string BuildMarkdown(
         int days,
         string from,
@@ -20,7 +23,9 @@ public static class OrgHealthReport
         PricingOptions pricing,
         long nowMs,
         IReadOnlyList<EvalCase>? evalCases = null,
-        IReadOnlyList<AgentPerformance.AgentStat>? prevStats = null)
+        IReadOnlyList<AgentPerformance.AgentStat>? prevStats = null,
+        SkillLoopSummary? loop = null,
+        IReadOnlyList<SkillLoopRow>? loopRows = null)
     {
         var sb = new StringBuilder();
         var cur = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency;
@@ -132,6 +137,8 @@ public static class OrgHealthReport
         if (lowPraise > 0) advice.Add($"有 {lowPraise} 位数字员工好评率偏低，建议复核其提示词或技能配置（可用「评测回归」建金标准用例对照）。");
         if (idle > 0) advice.Add($"有 {idle} 位数字员工近 {days} 天无调用，建议归档，或检查其触发关键词 / 可见范围是否过窄。");
         if (lowArtifact > 0) advice.Add($"有 {lowArtifact} 位数字员工的产物质量偏低（空壳 / 缺正文 / 格式不合格），建议检查其文档技能输入与产物契约告警。");
+        if (loop is { Attempts: > 0 } && loop.SuccessRate < 0.5)
+            advice.Add($"技能自愈成功率偏低（{Pct(loop.SuccessRate)}，最近 {loop.Attempts} 次修复中回滚 {loop.RolledBack} 次），建议在技能库查看「💡 经验 / 🧪 回归用例」，必要时手工调整技能定义或产物契约。");
         if (priced && totalCalls > 0)
         {
             var top = stats.OrderByDescending(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens)).FirstOrDefault();
@@ -164,6 +171,30 @@ public static class OrgHealthReport
                     var result = c.LastRunAtMs == 0 ? "未跑过" : (c.LastPassed == true ? "通过" : "未通过");
                     var at = c.LastRunAtMs == 0 ? "—" : DateTimeOffset.FromUnixTimeMilliseconds(c.LastRunAtMs).ToLocalTime().ToString("yyyy-MM-dd HH:mm");
                     sb.AppendLine($"| {c.Name} | {Name(c.AgentId)} | {result} | {at} |");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        // 自愈闭环（1.0.359）：产物质量看「产出好不好」，这里看「修得好不好」。
+        if (loop is not null)
+        {
+            sb.AppendLine(evalCases is not null ? "## 七、技能自愈闭环" : "## 六、技能自愈闭环");
+            if (loop.Attempts == 0)
+            {
+                sb.AppendLine("- 窗口内没有修复记录");
+            }
+            else
+            {
+                var avgS = (loop.AvgMs / 1000.0).ToString("0.0", CultureInfo.InvariantCulture);
+                sb.AppendLine($"- 修复尝试：{loop.Attempts} 次；成功 {loop.Applied + loop.Resumed} 次（成功率 {Pct(loop.SuccessRate)}）；回滚 {loop.RolledBack} 次；失败 {loop.Failed} 次；平均耗时 {avgS} 秒");
+                if (loopRows is { Count: > 0 })
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("| 技能 | 尝试 | 成功 | 回滚 | 失败 | 平均耗时 |");
+                    sb.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: |");
+                    foreach (var r in loopRows)
+                        sb.AppendLine($"| {r.Name} | {r.Attempts} | {r.Applied} | {r.RolledBack} | {r.Failed} | {(r.AvgMs / 1000.0).ToString("0.0", CultureInfo.InvariantCulture)} 秒 |");
                 }
             }
             sb.AppendLine();
