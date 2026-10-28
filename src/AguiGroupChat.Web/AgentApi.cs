@@ -21,6 +21,15 @@ public static class AgentApi
     {
         var root = app.MapGroup("/ag-ui/agents");
 
+        // 近 30 天修复健康度（1.0.361）：编排候选与自检共用同一伪数据，避免两个入口口径不一。
+        static IReadOnlyDictionary<string, SkillLoopHealth> LoadLoopHealth(IServiceProvider sp)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var from = now.AddDays(-SkillLoopHealthBoard.DefaultWindowDays).ToUnixTimeMilliseconds();
+            return SkillLoopHealthBoard.Build(
+                sp.GetService<SkillLoopEventStore>()?.Query(from), now.ToUnixTimeMilliseconds());
+        }
+
         // ---- 目录（登录可见自己创建的私密智能体；匿名 / 他人不可见私密智能体；技能目标与 AI 分身不暴露）----
         root.MapGet("/", (HttpContext ctx, AuthService auth, AgentCatalog catalog, AguiGroupChat.Agents.UserGroups.UserGroupStore groups) =>
         {
@@ -333,9 +342,10 @@ public static class AgentApi
                 // 近 30 天技能质量画像（1.0.348）+ 未解决历史问题（1.0.350）：让模型优先选可靠技能，并在编排时预先设计规避。
                 var quality = SkillQualityProfiles.Load(ctx.RequestServices.GetService<ArtifactQualityStore>());
                 var lessons = ctx.RequestServices.GetService<SkillLessonStore>();
+                var loopHealth = LoadLoopHealth(ctx.RequestServices);
                 var plan = await AgentOrchestrator.GenerateAsync(
                     agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct,
-                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll(), quality, lessons),
+                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll(), quality, lessons, loopHealth),
                     allowDotnet: auth.IsAdmin(user.UserId));
                 return Results.Ok(new
                 {
@@ -346,7 +356,7 @@ public static class AgentApi
                                       ?? AgentOrchestrator.DetectHollowDeliverySkill(plan)
                                       ?? AgentOrchestrator.DetectDeliveryGatekeeper(plan),
                     // 落库前自检清单（结构 / 连接 / 技能 / 交付闭环逐条列出，而不是只给一条）：供前端预览逐条展示
-                    selfCheck = AgentOrchestrator.SelfCheck(plan, requirement, quality, lessons)
+                    selfCheck = AgentOrchestrator.SelfCheck(plan, requirement, quality, lessons, loopHealth)
                                       .Select(c => new { code = c.Code, level = c.Level, message = c.Message }),
                     agents = plan.Agents.Select(a => new
                     {
@@ -418,8 +428,9 @@ public static class AgentApi
                 var lastProgressAt = 0L;
                 var quality = SkillQualityProfiles.Load(ctx.RequestServices.GetService<ArtifactQualityStore>());
                 var lessons = ctx.RequestServices.GetService<SkillLessonStore>();
+                var loopHealth = LoadLoopHealth(ctx.RequestServices);
                 await foreach (var delta in AgentOrchestrator.StreamTextAsync(agentOptions, requirement, loggerFactory.CreateLogger("AgentOrchestrator"), ct,
-                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll(), quality, lessons), allowDotnet: auth.IsAdmin(user.UserId)))
+                    AgentOrchestrator.ToReusableSkills(skillCatalog.ListAll(), quality, lessons, loopHealth), allowDotnet: auth.IsAdmin(user.UserId)))
                 {
                     sb.Append(delta);
                     await SendAsync(new { type = "token", delta }, ct);
@@ -453,7 +464,7 @@ public static class AgentApi
                                           ?? AgentOrchestrator.DetectHollowDeliverySkill(plan)
                                           ?? AgentOrchestrator.DetectDeliveryGatekeeper(plan),
                         // 落库前自检清单：与 /orchestrate 一致
-                        selfCheck = AgentOrchestrator.SelfCheck(plan, requirement, quality, lessons)
+                        selfCheck = AgentOrchestrator.SelfCheck(plan, requirement, quality, lessons, loopHealth)
                                           .Select(c => new { code = c.Code, level = c.Level, message = c.Message }),
                         agents = plan.Agents.Select(a => new { agentId = a.AgentId, nickname = a.Nickname, description = a.Description, instructions = a.Instructions, triggerMode = a.TriggerMode ?? "mentioned", skillIds = a.SkillIds ?? [], assignmentIds = a.AssignmentIds ?? [], escalationAgentId = a.EscalationAgentId, relayToAgentId = a.RelayToAgentId, memoryProfile = a.MemoryProfile is null ? null : new { memoryType = a.MemoryProfile.MemoryType, styleMode = a.MemoryProfile.StyleMode, personaCard = a.MemoryProfile.PersonaCard, topK = a.MemoryProfile.TopK, personalTopK = a.MemoryProfile.PersonalTopK, minScore = a.MemoryProfile.MinScore, personalMinScore = a.MemoryProfile.PersonalMinScore } }),
                         skills = plan.Skills.Select(s => new { skillId = s.SkillId, name = s.Name, description = s.Description, kind = s.Kind, body = s.Body, executionLocation = s.ExecutionLocation ?? "server", requiresApproval = s.RequiresApproval }),

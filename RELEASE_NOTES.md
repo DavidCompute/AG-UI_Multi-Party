@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.360 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.360 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.361 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.361 Release Notes (current Windows desktop release)
+
+**版本说明**：**闭环结论回到编排**——除了“产出好不好”和“踩过什么坑”，编排现在还会看“修得好不好”：反复修不稳的技能进候选时就带提醒，方案自检会点名，模型被要求优先选同类更稳的技能。
+**Version note**: **Loop conclusions feed orchestration** — beyond "is the output good" and "what went wrong before", orchestration now sees "do repairs work": unstable skills carry a warning as candidates, the plan self-check names them, and the model is told to prefer a more stable equivalent.
+
+## 变更
+# Changes
+
+中文：
+- **健康度汇总**：新增 `SkillLoopHealthBoard.Build`（纯函数）——汇总近 30 天闭环事件（跳过 `skipped`，与质量画像同窗口），得出每个技能的有效修复数 / 成功数 / 回滚 / 失败 / 成功率。
+- **划分**：**避用**（至少 2 次有效修复，且成功率 < 50% 或回滚 ≥ 2 次）/ **留意**（有失败或回滚，或成功率 < 70%）/ 其余视为健康；只有避用 / 留意会被写进提示词与自检，避免噪声。
+- **候选提示**：`ReusableSkill` 新增 `HealthNote`，提示词新增「· 修复健康：…」行，并写明规则：优先选同类更稳的技能；职责只能用它时，在岗位 `instructions` 里写兵底做法（先跑 🧪 回归确认可用）。
+- **方案自检**：`SelfCheck` 新增 `skill_loop_risk`（warn），避用与留意分两条列出（各自带近 N 次修复的成功 / 回滚 / 失败）。
+- **同口径**：网页 `/orchestrate`、`/orchestrate/stream` 与构建师工具 `org_plan_draft` 都带上健康度。
+
+English:
+- **Health summary**: new `SkillLoopHealthBoard.Build` (pure) aggregates the last 30 days of loop events (`skipped` excluded, same window as the quality profile) into effective repairs / successes / rollbacks / failures / success rate per skill.
+- **Classification**: **avoid** (2+ effective repairs with a success rate below 50% or 2+ rollbacks) / **watch** (any failure or rollback, or a success rate below 70%) / otherwise healthy; only avoid / watch reach the prompt and the self-check, keeping noise out.
+- **Candidate hint**: `ReusableSkill` gains `HealthNote`; the prompt gains a "· Repair health: …" line and a rule to prefer a more stable equivalent, or — when only this skill fits — to write a fallback into the role's `instructions` (run 🧪 regressions first).
+- **Plan self-check**: `SelfCheck` gains `skill_loop_risk` (warn), listing avoid and watch skills separately with their repair numbers.
+- **Consistency**: web `/orchestrate`, `/orchestrate/stream` and the builder tool `org_plan_draft` all carry the health data.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §3.7.4（修复健康进编排 + 自检清单 code）、§4.3.9（闭环反哺编排）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.361。
+English: `docs/user-guide.md` / `en.md` §3.7.4 (repair health in orchestration plus the self-check code), §4.3.9 (loop data feeding orchestration); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.361.
+
+## 测试
+# Tests
+
+中文：新增 `SkillLoopHealthTests` 9 条（避用 / 留意 / 健康划分、跳过与窗口、未来事件、自检条目）与候选提示词 / `HealthNote` 2 条；全量 `dotnet vstest` **2061 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2453，missing 0；配置键与文档引用校验通过。
+English: nine new `SkillLoopHealthTests` cases (avoid / watch / healthy classification, skipped and window handling, future events, self-check entries) plus two candidate-prompt / `HealthNote` cases; the full `dotnet vstest` run passes **2061 / 0**; `node --check app.js`; the i18n audit reports zh=en=2453, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.360 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.360 Release Notes (historical)
 
 **版本说明**：**从告警走到自愈**——闭环告警不再只是通知：开启开关后，平台会在后台再试一次修复，跑完回归才恢复；失败就回滚、停手、等人工。
 **Version note**: **From alert to self-healing** — loop alerts no longer just notify: with the switch on, the platform retries the repair in the background, resumes only after regressions pass, and otherwise rolls back, stops, and waits for a human.

@@ -265,4 +265,43 @@ public sealed class OrgReusableSkillsTests
         Assert.Contains("skill_40", prompt);
         Assert.DoesNotContain("skill_41", prompt);
     }
+
+    [Fact]
+    public void ToReusableSkills_AttachesLoopHealthNoteOnlyWhenRisky()
+    {
+        // 1.0.361：修复反复失败的技能要带提醒；健康技能不得多出噪音。
+        var opts = Opts();
+        var skills = new AgentSkillCatalog(NullLoggerFactory.Instance, opts);
+        skills.Upsert(new AgentSkillDefinition { SkillId = "flaky", Name = "不稳技能", Description = "d", Kind = AgentSkillKind.Prompt, Body = "模板" });
+        skills.Upsert(new AgentSkillDefinition { SkillId = "steady", Name = "稳定技能", Description = "d", Kind = AgentSkillKind.Prompt, Body = "模板" });
+
+        var health = new Dictionary<string, SkillLoopHealth>(StringComparer.Ordinal)
+        {
+            ["flaky"] = new("flaky", 2, 0, 2, 0, 0),
+            ["steady"] = new("steady", 2, 2, 0, 0, 1),
+        };
+
+        var reusable = AgentOrchestrator.ToReusableSkills(skills.ListAll(), null, null, health);
+
+        var flaky = reusable.Single(r => r.SkillId == "flaky");
+        Assert.NotNull(flaky.HealthNote);
+        Assert.Contains("修复后仍不稳定", flaky.HealthNote);
+        Assert.Contains("回滚 2 次", flaky.HealthNote);
+        Assert.Null(reusable.Single(r => r.SkillId == "steady").HealthNote);
+    }
+
+    [Fact]
+    public void ReusableSkillsSection_RendersHealthNoteAndGuidance()
+    {
+        var reusable = new List<AgentOrchestrator.ReusableSkill>
+        {
+            new("flaky", "不稳技能", "d", "prompt", HealthNote: "修复后仍不稳定：近 2 次修复成功 0 次（0%）、回滚 2 次、失败 0 次"),
+        };
+
+        var prompt = AgentOrchestrator.BuildPromptForTest("建组", reusable);
+
+        Assert.Contains("修复健康", prompt);
+        Assert.Contains("回滚 2 次", prompt);
+        Assert.Contains("优先选同类更稳的技能", prompt);
+    }
 }

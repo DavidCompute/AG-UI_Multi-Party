@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.360**
+> 适用版本：**1.0.361**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -1542,9 +1542,11 @@
 
 后端 `OrgApplyEngine.ExecuteAsync`（唯一落库引擎，与「组织架构构建师」`org_commit` 共用）：技能去重改名（空正文＝引用库内现成技能，不重建）→ server 技能自测（`SkillAutoFixer` 最多 3 次）→ 连接归一（`NormalizeConnections` 把「指派 ⇄ 提升」**双向**补全）→ 逐个 Upsert 数字员工 → 可选建客服知聚。返回 `smoke` 自检结果，前端以通知汇报（`org.orchSmokeTitle/Count/Repaired/Failed`）。
 
-**落库前自检清单（`AgentOrchestrator.SelfCheck`）**：`/orchestrate` 与 `/orchestrate/stream` 的 `done` 事件都在 `deliveryWarning` 之外新增 `selfCheck` 字段（数组，每项 `{code, level, message}`），把「结构 / 连接 / 技能 / 交付闭环」的问题**逐条列出**，而不是只显示第一条告警。条目 code：`no_agents`、`dangling_link`（连接指向不存在的岗位——落库会被直接拒绝）、`no_connections`（既无指派也无提升）、`no_assignment`（只有问题提升没有任务指派）、`no_escalation`（只有任务指派没有向上提升）、`self_escalation`、`agent_without_skill`、`delivery_gap`、`hollow_delivery`、`delivery_gatekeeper`、`skill_quality_risk`（1.0.348）、`skill_experience_risk`（1.0.350，见下）；全部通过时给出 `ok` 摘要。
+**落库前自检清单（`AgentOrchestrator.SelfCheck`）**：`/orchestrate` 与 `/orchestrate/stream` 的 `done` 事件都在 `deliveryWarning` 之外新增 `selfCheck` 字段（数组，每项 `{code, level, message}`），把「结构 / 连接 / 技能 / 交付闭环」的问题**逐条列出**，而不是只显示第一条告警。条目 code：`no_agents`、`dangling_link`（连接指向不存在的岗位——落库会被直接拒绝）、`no_connections`（既无指派也无提升）、`no_assignment`（只有问题提升没有任务指派）、`no_escalation`（只有任务指派没有向上提升）、`self_escalation`、`agent_without_skill`、`delivery_gap`、`hollow_delivery`、`delivery_gatekeeper`、`skill_quality_risk`（1.0.348）、`skill_experience_risk`（1.0.350，见下）、`skill_loop_risk`（1.0.361，修复反复失败 / 回滚）；全部通过时给出 `ok` 摘要。
 
 **技能经验进编排（1.0.350）**：候选技能会附上未解决的历史失败经验（“已知坑”，最多 2 条，已解决 / 修复经验不计入），并要求模型在岗位 `instructions` 里写明规避步骤；`SelfCheck` 新增 `skill_experience_risk`（warn）——方案挂载了带未解决失败的技能时逐条列出“上次失败 + 改进方式”，提示写入规避步骤或先修复。网页 `/orchestrate`、流式与 `org_plan_draft` 同口径。
+
+**修复健康进编排（1.0.361）**：除了“产出好不好”（质量画像）与“踩过什么坑”（经验），编排还看“修得好不好”。`SkillLoopHealthBoard.Build` 汇总近 30 天该技能的闭环事件（不计 `skipped`）：**避用**（至少 2 次有效修复，且成功率 < 50% 或回滚 ≥ 2 次）/ **留意**（有失败或回滚，或成功率 < 70%）。候选技能会多一行「修复健康：近 N 次修复成功 M 次（X%）、回滚 R 次、失败 F 次」，提示词要求模型**优先选同类更稳的技能**，只能用它时在岗位说明写明兵底做法（先跑 🧪 回归确认可用）；`SelfCheck` 新增 `skill_loop_risk`（warn）逐条列出。网页 `/orchestrate`、`/orchestrate/stream` 与构建师工具 `org_plan_draft` 同口径。
 
 **技能质量画像进编排（1.0.348）**：候选技能会附上近 30 天的产物质量画像（`SkillQualityProfiles.Load(ArtifactQualityStore)`，按技能聚合 `runs / valid / 合格率 / 均分 / 低分 / Top 缺失项`），提示词逐条写成「近期质量：近 30 天 N 次，合格率 X%，平均 Y 分」，并明令模型**优先选合格率高、均分高的技能**、慎用标「质量偏低」的技能。方案自检新增 `skill_quality_risk`（warn）：若方案挂载的技能≥ 3 次执行且合格率 < 60% 或均分 < 70，逐条列出并在预览里提示「先在技能库点 🩺 诊断修复，或改用更可靠的技能」。网页一键编排、流式编排与内置「组织架构构建师」的 `org_plan_draft` 均走同一口径。
 
@@ -2108,7 +2110,7 @@
 - **修复后自动回归（1.0.356）**：一键修复成功（自测通过）且该技能存在回归用例时，自动用修正后的正文跑一遍回归（最多 3 条）：**全部通过才恢复挂载并沉淀修复经验**；有失败则保持/继续暂停，响应带 `regressionRan / regressionPassed / regression`，界面明确提示「回归未通过：技能保持暂停，请修复后重试」——避免“看起来修好、实际更差”。
 - **修复回滚保护（1.0.357）**：回归未通过时，把技能的正文 / 描述 / 内置版本标记恢复到**修复前**（`RestoreBody`，保留暂停状态），并记录一条「修复后回归未通过（已回滚）」的失败经验；repair 响应新增 `rolledBack`，界面显示「已回滚到修复前正文」——不再把“可能更差”的新正文留在技能里。
 - **自愈闭环告警与回归用例补充（1.0.359）**：每次 `repair?apply=true` 记录结局后，按最近 7 天该技能的闭环事件判定「修得好不好」（窗口取最近 5 次**有效**尝试，`skipped` 不计入）：**回滚 ≥ 2 次**、**自测失败 ≥ 2 次**、或**成功率 < 50%** 任一命中即告警（同一技能 60 分钟冷却；有效尝试不足 2 次不告警，与产物质量「连续两次才算缺陷」同口径）。命中后：① 若该技能有文档类产物契约且尚无回归用例，自动补一条标准样例用例（守住「修好后别再退化」）；② 写一条站内告警（`SkillLoopAlertStore`，最近 200 条，重启清空）；③ 经 Webhook 推送 `SKILL_LOOP_ALERT`（含 `attempts / successes / rolledBack / failed / successRate / avgMs / reasons / regressionEnsured`）。通知中心每分钟轮询 `GET /ag-ui/admin/skill-loop/alerts`，点击直达技能库。**不自动暂停技能**——修复失败 / 回滚本身已保持暂停，修复成功后再暂停没有意义。
-- **告警 → 自动修复（1.0.360）**：开启 `Agents:ArtifactQuality:AutoRepairEnabled=true` 后，闭环告警命中（或技能因产物质量被自动暂停）会在后台排一次自动修复：走与「🩺 一键修复」**完全相同**的流水线（`SkillRepairRunner`：自测改写 → 写正文 → 回归 → 不过则回滚并保持暂停 → 经验 → 闭环事件），所以自动修复同样受回归守门，不会把“可能更差”的版本留在线上。两道闸防止刷模型费用：**同一技能的自动修复间隔 ≥ `AutoRepairCooldownMinutes`（默认 60 分钟，只卡自动，人工点修复不受影响）**，**最近 24 小时自动修复 ≤ `AutoRepairMaxPerDay`（默认 3 次）**。只处理非内置（`OwnerId != null`）且服务端可自测的技能；本机（client）执行的技能在服务端跑不了自测，直接跳过。队列有界 64（满了丢最旧），绝不反压聊天主流程。产物质量弹窗的「🔁 自愈闭环」区顶部会显示「自动修复：已开启 / 未开启 · 冷却 N 分钟 · 每日上限 N 次 · 已排队 / 已处理」。
+- **告警 → 自动修复（1.0.360）**：开启 `Agents:ArtifactQuality:AutoRepairEnabled=true` 后，闭环告警命中（或技能因产物质量被自动暂停）会在后台排一次自动修复：走与「🩺 一键修复」**完全相同**的流水线（`SkillRepairRunner`：自测改写 → 写正文 → 回归 → 不过则回滚并保持暂停 → 经验 → 闭环事件），所以自动修复同样受回归守门，不会把“可能更差”的版本留在线上。两道闸防止刷模型费用：**同一技能的自动修复间隔 ≥ `AutoRepairCooldownMinutes`（默认 60 分钟，只卡自动，人工点修复不受影响）**，**最近 24 小时自动修复 ≤ `AutoRepairMaxPerDay`（默认 3 次）**。只处理非内置（`OwnerId != null`）且服务端可自测的技能；本机（client）执行的技能在服务端跑不了自测，直接跳过。队列有界 64（满了丢最旧），绝不反压聊天主流程。产物质量弹窗的「🔁 自愈闭环」区顶部会显示「自动修复：已开启 / 未开启 · 冷却 N 分钟 · 每日上限 N 次 · 已排队 / 已处理」。**反哺编排（1.0.361）**：这些闭环结论还会进入一键编排与构建师工具——修复反复失败 / 回滚的技能会被标「修复健康」并触发 `skill_loop_risk` 自检（见 3.7.4）。
 
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 

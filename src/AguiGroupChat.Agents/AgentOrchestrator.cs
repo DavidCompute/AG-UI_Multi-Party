@@ -20,21 +20,24 @@ public static class AgentOrchestrator
     /// </summary>
     /// <param name="QualityNote">近 30 天产物质量画像（1.0.348；无记录时为 null），用于让模型优先选可靠的技能。</param>
     /// <param name="ExperienceNote">未解决的历史失败经验（1.0.350；无则为 null），用于让模型在岗位说明里写明规避步骤。</param>
+    /// <param name="HealthNote">近 30 天修复健康度（1.0.361；只在修复不稳时才有值），用于提醒模型慎用或设计兵底方案。</param>
     public sealed record ReusableSkill(
         string SkillId, string Name, string Description, string Kind,
-        string? QualityNote = null, string? ExperienceNote = null);
+        string? QualityNote = null, string? ExperienceNote = null, string? HealthNote = null);
 
     /// <summary>
     /// 从技能库构造可复用技能清单（只列非内置的也能列；内置的同样可复用）。
     /// <paramref name="quality"/> 为近 30 天技能质量画像：带上时每个候选会附上合格率 / 均分 / 主要缺失项，
     /// 模型据此优先选择稳定技能、避开持续低分的技能。
-    /// <paramref name="lessons"/> 为岗位经验库（1.0.350）：带上时把未解决的失败经验也列进候选，
-    /// 让编排能提前设计规避步骤（如岗位说明里要求先备齐正文 / 页数）。
-    /// </summary>
+    /// <param name="lessons">为岗位经验库（1.0.350）：带上时把未解决的失败经验也列进候选，
+    /// 让编排能提前设计规避步骤（如岗位说明里要求先备齐正文 / 页数）。</param>
+    /// <param name="loopHealth">为近 30 天修复健康度（1.0.361）：带上时对“修也修不好”的技能附提醒，
+    /// 让模型避开反复回滚的技能，或至少把兵底方案（先跑回归 / 换同类技能）写进岗位说明。</param>
     public static IReadOnlyList<ReusableSkill> ToReusableSkills(
         IEnumerable<AgentSkillDefinition>? skills,
         IReadOnlyDictionary<string, SkillQualityProfile>? quality = null,
-        SkillLessonStore? lessons = null)
+        SkillLessonStore? lessons = null,
+        IReadOnlyDictionary<string, SkillLoopHealth>? loopHealth = null)
         => (skills ?? [])
             .Where(s => !string.IsNullOrWhiteSpace(s.SkillId))
             // 已暂停（产物质量连续低分）的技能不再作为编排候选（1.0.347）：
@@ -51,9 +54,13 @@ public static class AgentOrchestrator
                 var experienceNote = failures.Count > 0
                     ? string.Join("；", failures.Select(l => l.ToPromptLine()))
                     : null;
+                var healthNote = loopHealth is not null
+                                 && loopHealth.TryGetValue(s.SkillId, out var h) && h.IsRisky
+                    ? (h.IsAvoid ? "修复后仍不稳定：" : "修复不够稳：") + h.Describe()
+                    : null;
                 return new ReusableSkill(
                     s.SkillId, s.Name ?? s.SkillId, s.Description ?? "", s.Kind.ToString().ToLowerInvariant(),
-                    qualityNote, experienceNote);
+                    qualityNote, experienceNote, healthNote);
             })
             .ToList();
     /// <summary>生成组织方案。真实模型走 OpenAI 兼容接口；mock 走确定性模板。</summary>
@@ -407,7 +414,8 @@ public static class AgentOrchestrator
     public static IReadOnlyList<OrgPlanCheck> SelfCheck(
         OrchestrationPlan plan, string requirement,
         IReadOnlyDictionary<string, SkillQualityProfile>? quality = null,
-        SkillLessonStore? lessons = null)
+        SkillLessonStore? lessons = null,
+        IReadOnlyDictionary<string, SkillLoopHealth>? loopHealth = null)
     {
         var checks = new List<OrgPlanCheck>();
         var agents = plan.Agents ?? [];
@@ -508,6 +516,29 @@ public static class AgentOrchestrator
                     + "。建议在对应岗位的 instructions 里写明规避步骤，或先在技能库点 🩺 修复。"));
         }
 
+        // —— 修复健康：方案挂载的技能是不是“修也修不好”（1.0.361）——
+        if (loopHealth is { Count: > 0 })
+        {
+            var avoid = new List<string>();
+            var watch = new List<string>();
+            var seenHealth = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var a in agents)
+                foreach (var sid in (a.SkillIds ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()))
+                {
+                    if (!seenHealth.Add(sid)) continue;
+                    if (!loopHealth.TryGetValue(sid, out var h) || !h.IsRisky) continue;
+                    (h.IsAvoid ? avoid : watch).Add($"「{sid}」（{h.Describe()}）");
+                }
+            if (avoid.Count > 0)
+                checks.Add(new OrgPlanCheck("skill_loop_risk", "warn",
+                    "以下技能最近反复修复后仍失败或回滚，挂到新岗位上很可能反复卡住：" + string.Join(";", avoid)
+                    + "。建议改用同类更稳定的技能，或先在技能库看「💡 经验 / 🧪 回归用例」并手工调整。"));
+            if (watch.Count > 0)
+                checks.Add(new OrgPlanCheck("skill_loop_risk", "warn",
+                    "以下技能最近的修复不够稳：" + string.Join(";", watch)
+                    + "。建议在对应岗位的 instructions 里写明兵底做法（先跑回归确认可用）。"));
+        }
+
         // —— 交付闭环：需求要的交付物是否真有人能产出 ——
         var delivery = DetectDeliveryGap(plan, requirement);
         if (delivery is not null) checks.Add(new OrgPlanCheck("delivery_gap", "error", delivery));
@@ -547,6 +578,8 @@ public static class AgentOrchestrator
                 sb.Append("    · 近期质量：").Append(s.QualityNote).Append('\n');
             if (!string.IsNullOrWhiteSpace(s.ExperienceNote))
                 sb.Append("    · 已知坑：").Append(s.ExperienceNote).Append('\n');
+            if (!string.IsNullOrWhiteSpace(s.HealthNote))
+                sb.Append("    · 修复健康：").Append(s.HealthNote).Append('\n');
         }
         sb.Append("\n复用规则（很重要）：\n");
         sb.Append("- 若某岗位的职责能被上面的技能覆盖（如“生成 Word 文档/公文/报告”对应 docx_*、“做 PPT/演示文稿”对应 pptx_deck、" +
@@ -556,7 +589,9 @@ public static class AgentOrchestrator
         sb.Append("- 标注「质量偏低」的技能慎用：优先选择合格率高、均分高的技能；若某个职责只有低质量技能能覆盖，" +
                   "宁可自建一个更可靠的技能（写清楚完整执行步骤与产物要求），也不要把持续交残次品的技能排进岗位。\n");
         sb.Append("- 标注「已知坑」的技能：在对应岗位的 instructions 里写明规避步骤（如“调用前先备齐正文 / 页数 / 数据，" +
-                  "产出后检查交付文件是否齐全”），不要忽略历史失败经验。\n\n");
+                  "产出后检查交付文件是否齐全”），不要忽略历史失败经验。\n");
+        sb.Append("- 标注「修复健康」的技能：这说明它最近反复修也修不稳（回滚 / 自测失败）。**优先选同类更稳的技能**；" +
+                  "若职责只能用它，就在岗位 instructions 里写明兵底做法（先跑 🧪 回归确认可用，不通过就改用其他方式产出）。\n\n");
         return sb.ToString();
     }
 
