@@ -119,6 +119,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     private readonly Lazy<TopicSummaryStore?> _topicSummary;
     // 消息反馈（👍/👎 偏好画像）：可选
     private readonly Lazy<MessageFeedbackStore?> _feedback;
+    // 自愈闭环事件（1.0.362）：可选；开启 RoutingHintEnabled 时用于把修复健康反哺到指派路由
+    private readonly Lazy<SkillLoopEventStore?> _loop;
     // 编排计划暂停/继续控制：可选（未注册服务时计划照常一口气执行）
     private readonly Lazy<CoordinatedPlanControlStore?> _planControl;
     // 桥接断线自动重连退避（3.1）：连续失败后短时抑制重连（防断线风暴）
@@ -290,6 +292,8 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             services.GetService(typeof(TopicSummaryStore)) as TopicSummaryStore);
         _feedback = new Lazy<MessageFeedbackStore?>(() =>
             services.GetService(typeof(MessageFeedbackStore)) as MessageFeedbackStore);
+        _loop = new Lazy<SkillLoopEventStore?>(() =>
+            services.GetService(typeof(SkillLoopEventStore)) as SkillLoopEventStore);
         _planControl = new Lazy<CoordinatedPlanControlStore?>(() =>
             services.GetService(typeof(CoordinatedPlanControlStore)) as CoordinatedPlanControlStore);
         // HITL 悬挂清理与会话锁 TTL 清理改为独立定时器定期执行（不再依赖「新增交互时顺带清理」），
@@ -2752,6 +2756,20 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
     /// dotnet / shell / http 均算 —— 它们必须经完整路径才能拿到工具调用、审批与产物回档。
     /// </para>
     /// </summary>
+    /// <summary>
+    /// 近 30 天修复健康度（1.0.362）：未开启反哺 / 无闭环事件时返回空字典，调用方据此不注入任何提示。
+    /// 每次路由调用重算（事件库最多 2000 条，开销可忽略；比缓存更能反映刚刚发生的一次失败修复）。
+    /// </summary>
+    private IReadOnlyDictionary<string, SkillLoopHealth> LoopHealthNow()
+    {
+        if (!_options.ArtifactQuality.RoutingHintEnabled) return new Dictionary<string, SkillLoopHealth>();
+        var store = _loop.Value;
+        if (store is null) return new Dictionary<string, SkillLoopHealth>();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var from = now - (long)SkillLoopHealthBoard.DefaultWindowDays * 24 * 3600 * 1000;
+        return SkillLoopHealthBoard.Build(store.Query(from), now);
+    }
+
     private bool HasExecutableSkill(AgentDefinition def)
     {
         if (def.SkillDefIds is not { Count: > 0 }) return false;
@@ -2795,6 +2813,19 @@ public sealed class AgentGateway : IAgentGateway, IDisposable
             {
                 sb.AppendLine("候选近期绩效（仅供参考；同等匹配时优先好评率高者、避开明显偏低者）：");
                 foreach (var l in lines) sb.AppendLine("  - " + l);
+            }
+        }
+        // 修复健康反哺（1.0.362，默认关）：候选下游若有「修也修不好」的技能，提示模型优先派给更稳的人。
+        var loopHealth = LoopHealthNow();
+        if (loopHealth.Count > 0)
+        {
+            var healthLines = SkillLoopRoutingHint.BuildAssignmentLines(loopHealth, candidates,
+                cid => (IReadOnlyList<string>?)_catalog.GetDefinition(cid)?.SkillDefIds ?? [],
+                cid => _catalog.GetDefinition(cid)?.Nickname ?? cid);
+            if (healthLines.Count > 0)
+            {
+                sb.AppendLine("候选技能修复健康（仅供参考；同等匹配时优先技能更稳的候选、避开反复修不稳者）：");
+                foreach (var l in healthLines) sb.AppendLine("  - " + l);
             }
         }
         sb.AppendLine("按匹配度从高到低输出一个或多个候选 agentId，多个用英文逗号分隔；若都不适合只输出 NONE。");

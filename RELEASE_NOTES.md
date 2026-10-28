@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.361 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.361 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.362 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.362 Release Notes (current Windows desktop release)
+
+**版本说明**：**闭环跳到运行时的最后一环**——修复健康不再只在建组织时提醒，而是每次派活 / 执行时都提醒：候选技能不稳就把活派给更稳的人；真的要用它，就在执行前把「产出后必须自检」写进工具说明。
+**Version note**: **The final link to runtime** — repair health is no longer just an orchestration-time note: it reaches every dispatch and execution. An unstable skill makes the router prefer a steadier candidate, and when the skill really is used, the tool description asks the model to self-check before delivering.
+
+## 变更
+# Changes
+
+中文：
+- **反哺开关**：`Agents:ArtifactQuality:RoutingHintEnabled`（**默认关**）。关闭时提示词与旧版逐字一致。
+- **指派路由**：`AgentGateway.RankAssignTargetsAsync` 在候选职责后追加「候选技能修复健康」参考行，每个候选取其**最不稳**的技能（避用级优先），并声明“同等匹配时优先技能更稳的候选”。
+- **工具说明**：`AgentCatalog` 挂载技能时，若该技能在避用 / 留意级，描述里追加「【修复健康·注意】」——避用级要求执行成功后**必须自检交付物**（标题 / 正文 / 页数 / 文件齐全），不合格就重做或换方式；留意级只要求抽查。
+- **口径复用**：两处都用 `SkillLoopHealthBoard` + 新增纯函数 `SkillLoopRoutingHint`，与编排、看板同一口径。
+
+English:
+- **Switch**: `Agents:ArtifactQuality:RoutingHintEnabled` (**off by default**); when off the prompt is byte-for-byte identical to before.
+- **Assignment routing**: `AgentGateway.RankAssignTargetsAsync` appends a "candidate skill repair health" reference line after the candidates' duties, one line per candidate using its **least stable** skill (avoid level first), and states that steadier candidates win an equal match.
+- **Tool descriptions**: when `AgentCatalog` mounts a skill at avoid / watch level, the description gains a `[Repair health · attention]` line — avoid level demands the model **self-check the deliverable** (title / body / page count / file presence) and redo or switch approach when it falls short; watch level only asks for a spot check.
+- **Shared numbers**: both paths reuse `SkillLoopHealthBoard` plus the new pure `SkillLoopRoutingHint`, matching orchestration and the dashboard.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（运行时反哺 + 配置表新增 `RoutingHintEnabled`）；桌面版 README 配置表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.362。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (runtime routing hint plus the new `RoutingHintEnabled` key); the desktop README config table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.362.
+
+## 测试
+# Tests
+
+中文：新增 `SkillLoopRoutingHintTests` 8 条（避用 / 留意 / 健康静默 / 最差技能优先 / 未知技能忽略 / 工具说明两级强度与空值）；全量 `dotnet vstest` **2069 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2453，missing 0；配置键与文档引用校验通过。
+English: eight new `SkillLoopRoutingHintTests` cases (avoid / watch / silent for healthy / worst skill first / unknown ids ignored / both tool-warning strengths and empty input); the full `dotnet vstest` run passes **2069 / 0**; `node --check app.js`; the i18n audit reports zh=en=2453, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.361 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.361 Release Notes (historical)
 
 **版本说明**：**闭环结论回到编排**——除了“产出好不好”和“踩过什么坑”，编排现在还会看“修得好不好”：反复修不稳的技能进候选时就带提醒，方案自检会点名，模型被要求优先选同类更稳的技能。
 **Version note**: **Loop conclusions feed orchestration** — beyond "is the output good" and "what went wrong before", orchestration now sees "do repairs work": unstable skills carry a warning as candidates, the plan self-check names them, and the model is told to prefer a more stable equivalent.

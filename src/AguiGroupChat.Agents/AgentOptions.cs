@@ -938,4 +938,10 @@ public sealed class ArtifactQualityOptions
 
     /// <summary>最近 24 小时最多自动修几次（默认 3），超过后留给人工。</summary>
     public int AutoRepairMaxPerDay { get; set; } = SkillAutoRepairPolicy.DefaultMaxPerDay;
+
+    /// <summary>
+    /// 修复健康反哺运行时（1.0.362，默认 false）：任务指派路由把候选的技能健康度当参考，
+    /// 且执行不健康技能的工具有说明里追加「产出后必须自检」的提醒。关闭 = 行为与旧版一致。
+    /// </summary>
+    public bool RoutingHintEnabled { get; set; }
 }

@@ -847,6 +847,18 @@ public sealed class AgentCatalog
         if (def.SkillDefIds is { Count: > 0 } && _skillCatalog.Value is { } skillCatalog && _skillRunner.Value is { } runner)
         {
             var defTools = new List<AITool>();
+            // 修复健康（1.0.362）：只算一次，作用于本次挂载的所有技能工具说明。
+            IReadOnlyDictionary<string, SkillLoopHealth>? loopHealth = null;
+            if (_options.ArtifactQuality.RoutingHintEnabled)
+            {
+                var loopStore = _services.GetService(typeof(SkillLoopEventStore)) as SkillLoopEventStore;
+                if (loopStore is not null)
+                {
+                    var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    loopHealth = SkillLoopHealthBoard.Build(
+                        loopStore.Query(nowMs - (long)SkillLoopHealthBoard.DefaultWindowDays * 24 * 3600 * 1000), nowMs);
+                }
+            }
             // 排除已挂工具名，避免技能工具名与内置 / 子代理技能撞名
             var occupied = new HashSet<string>(StringComparer.Ordinal);
             if (chatOptions.ChatOptions.Tools is IEnumerable<AITool> existingTools)
@@ -905,6 +917,12 @@ public sealed class AgentCatalog
                 var lessonBlock = (_services.GetService(typeof(SkillLessonStore)) as SkillLessonStore)
                     ?.BuildPromptBlock(agentId, skill.SkillId);
                 if (!string.IsNullOrWhiteSpace(lessonBlock)) desc += "\n" + lessonBlock;
+                // 修复健康反哺（1.0.362，默认关）：反复修不稳的技能，在执行前就把「产出后必须自检」写进工具说明。
+                var healthWarn = loopHealth is not null
+                    ? SkillLoopRoutingHint.BuildToolWarning(
+                        loopHealth.TryGetValue(skill.SkillId, out var loopH) ? loopH : null, skill.SkillId)
+                    : "";
+                if (healthWarn.Length > 0) desc += "\n" + healthWarn;
                 // 客户端执行技能：服务端只在模型调用时中断、下发给前端执行；批准恢复时 MSAGENT 会执行这个占位函数，
                 // 它从 <see cref="ClientToolResultStore"/> 读取前端回传的真实结果返回给模型（避免返回占位文本让模型在服务端跑 stub）
                 AIFunction func = isClientSkill
