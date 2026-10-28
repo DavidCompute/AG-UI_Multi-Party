@@ -119,6 +119,7 @@
 - **落点模块**：`AgentApi`、前端「智能体管理」、复用 starter JSON 打包结构。
 - **在线分发（已实现）**：除内置角色包外，管理员可配置<b>在线目录源</b>（任意静态 JSON 地址），用户一键安装目录里的包；也可把自建数字员工<b>发布</b>为分包文件自行托管。合同为纯 JSON（目录索引 + 包 `schema=knowgath/marketplace-pack/v1`），无需专用后端。安装<b>两趟</b>处理（先分配新 ID，再把包内相互引用重映射），并做<b>安全净化</b>（清桥接端点 / 令牌、他实例用户组 id、私有标记）；拉取限制 http/https、2MB、10s、不开重定向、60s 缓存，坏源不影响聚合。前端：「AI 角色管理」工具栏「🏪 模板市场」。落点：`Agents/MarketplaceService.cs`（`ImportDefinitions`）、`Web/MarketplaceRemote.cs`、`Web/MarketplaceApi.cs`。
 - **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
+- **自愈闭环指标进质量看板（1.0.358，已实现）**：新增 `SkillLoopEventStore`（扩展区 `skillLoop`，最近 2000 条，重启保留）记录每次修复尝试的结局（applied / resumed / rolledback / failed / skipped）、耗时、是否跑回归与回归结果；`SkillLoopMetrics.Summarize` 给出成功率（排除 skipped）与平均耗时（排除 skipped）；`GET /ag-ui/admin/skill-loop?days=N` 返回 `summary / daily / skills`，产物质量弹窗新增「🔁 自愈闭环」区（KPI 卡片 + 按技能明细表）。
 - **修复回滚保护（1.0.357，已实现）**：修复前记住正文 / 描述 / 内置版本；回归未通过且已写入新正文时 `RestoreBody` 恢复（保留暂停），并写一条「修复后回归未通过（已回滚）」失败经验；repair 新增 `rolledBack`，界面明确提示且不弹成功 toast。
 - **修复后自动回归（1.0.356，已实现）**：一键修复先写正文不立即恢复；有回归用例则用新正文真实跑一遍（≤ 3 条），全部通过才恢复挂载并沉淀修复经验，任一失败则保持暂停；repair 响应新增 `regressionRan / regressionPassed / regression`，界面明确提示。回归执行抽为 `SkillRegressionRunner` 与「跑回归」共用。
 - **技能回归用例（1.0.355，已实现）**：产物质量告警时为文档类技能自动创建标准样例回归用例（同技能同类型幂等、每技能 ≤ 5、全库 ≤ 500，重启保留）；`POST /ag-ui/skills/{id}/regression/run` 真实执行并校验收产物契约（不超过 3 条），回写通过 / 评分 / 时间；回归不保存用户输入，暂停技能也可跑以验证是否修好。经验弹窗新增「🧪 回归用例」区。

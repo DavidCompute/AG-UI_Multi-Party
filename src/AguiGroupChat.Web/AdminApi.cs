@@ -441,6 +441,64 @@ public static class AdminApi
             return Results.Ok(new { alerts });
         }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
 
+        // 自愈闭环指标（1.0.358）：修复尝试 / 成功 / 回滚 / 回归 / 耗时，供质量看板「🔁 自愈闭环」。
+        root.MapGet("/skill-loop", (int? days, IServiceProvider sp) =>
+        {
+            var store = sp.GetService<SkillLoopEventStore>();
+            var d = Math.Clamp(days ?? 30, 1, 365);
+            var to = DateTimeOffset.UtcNow;
+            var from = to.AddDays(-d + 1);
+            var list = (store?.Query(from.ToUnixTimeMilliseconds()) ?? (IReadOnlyList<SkillLoopEvent>)[]).ToList();
+            var summary = SkillLoopMetrics.Summarize(list);
+            var skillCatalog = sp.GetService<AgentSkillCatalog>();
+            string Name(string id) => skillCatalog?.Get(id)?.Name is { Length: > 0 } n ? n : id;
+            bool Ok(string outcome) => outcome is SkillLoopOutcomes.Applied or SkillLoopOutcomes.Resumed;
+
+            var daily = list
+                .GroupBy(e => DateTimeOffset.FromUnixTimeMilliseconds(e.TimestampMs).ToLocalTime().ToString("yyyy-MM-dd"))
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => new
+                {
+                    date = g.Key,
+                    attempts = g.Count(),
+                    applied = g.Count(e => Ok(e.Outcome)),
+                    rolledBack = g.Count(e => e.Outcome == SkillLoopOutcomes.RolledBack),
+                    failed = g.Count(e => e.Outcome == SkillLoopOutcomes.Failed),
+                })
+                .ToList();
+
+            var skills = list
+                .GroupBy(e => e.SkillId, StringComparer.Ordinal)
+                .Select(g =>
+                {
+                    var effective = g.Where(e => e.Outcome != SkillLoopOutcomes.Skipped).ToList();
+                    return new
+                    {
+                        skillId = g.Key,
+                        name = Name(g.Key),
+                        attempts = g.Count(),
+                        applied = g.Count(e => Ok(e.Outcome)),
+                        rolledBack = g.Count(e => e.Outcome == SkillLoopOutcomes.RolledBack),
+                        failed = g.Count(e => e.Outcome == SkillLoopOutcomes.Failed),
+                        avgMs = effective.Count == 0 ? 0L : (long)Math.Round(effective.Average(e => Math.Max(0, e.DurationMs))),
+                        lastAt = DateTimeOffset.FromUnixTimeMilliseconds(g.Max(e => e.TimestampMs)).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                    };
+                })
+                .OrderByDescending(x => x.attempts)
+                .ThenBy(x => x.name, StringComparer.CurrentCulture)
+                .ToList();
+
+            return Results.Ok(new
+            {
+                days = d,
+                from = from.ToString("yyyy-MM-dd"),
+                to = to.ToString("yyyy-MM-dd"),
+                summary,
+                daily,
+                skills,
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireRoleFilter(PlatformRole.Operator));
+
         // 知聚下拉选项（绩效页「按知聚」筛选用）：仅运维及以上（只读）。
         root.MapGet("/groups", (IServiceProvider sp) =>
         {

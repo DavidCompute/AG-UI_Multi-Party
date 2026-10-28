@@ -9488,6 +9488,8 @@ async function openArtifactQualityModal() {
   $("aqTrend").innerHTML = "";
   $("aqSkillRows").innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(t("admin.loading"))}</td></tr>`;
   $("aqIssues").innerHTML = "";
+  $("aqLoopCards").innerHTML = "";
+  $("aqLoopRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.loading"))}</td></tr>`;
   $("artifactQualityModal").classList.remove("hidden");
   try {
     const scope = perfGroupId ? `&groupId=${encodeURIComponent(perfGroupId)}` : "";
@@ -9496,6 +9498,7 @@ async function openArtifactQualityModal() {
     if (!res.ok || !d) { $("aqCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(errMsg(d, "HTTP " + res.status))}</div>`; return; }
     aqData = d;
     renderArtifactQuality();
+    await loadArtifactLoop(days);
   } catch (ex) {
     $("aqCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(ex.message)}</div>`;
   }
@@ -9519,6 +9522,41 @@ function renderArtifactQuality() {
   $("aqTrend").innerHTML = aqTrendSvg(d.daily || [], t("admin.aqNoTrend"));
   renderAqSkillRows();
   renderAqIssues();
+}
+
+async function loadArtifactLoop(days) {
+  try {
+    const res = await fetch(`/ag-ui/admin/skill-loop?days=${encodeURIComponent(days)}`, { headers: { Authorization: "Bearer " + state.token } });
+    const d = await res.json().catch(() => null);
+    renderArtifactLoop(res.ok ? d : null);
+  } catch { renderArtifactLoop(null); }
+}
+
+function renderArtifactLoop(d) {
+  const s = d && d.summary ? d.summary : null;
+  const card = (k, v) => `<div class="oh-card"><div class="oh-card-k">${escapeHtml(k)}</div><div class="oh-card-v">${escapeHtml(String(v))}</div></div>`;
+  if (!s) {
+    $("aqLoopCards").innerHTML = `<div class="muted" style="font-size:12px">${escapeHtml(t("admin.loopNoData"))}</div>`;
+    $("aqLoopRows").innerHTML = "";
+    return;
+  }
+  const pct = (v) => Math.round(Number(v || 0) * 100) + "%";
+  const seconds = (ms) => (Number(ms || 0) / 1000).toFixed(1) + "s";
+  $("aqLoopCards").innerHTML = card(t("admin.loopAttempts"), Number(s.attempts || 0))
+    + card(t("admin.loopApplied"), Number(s.applied || 0) + Number(s.resumed || 0))
+    + card(t("admin.loopSuccess"), pct(s.successRate))
+    + card(t("admin.loopRolledBack"), Number(s.rolledBack || 0))
+    + card(t("admin.loopAvgMs"), seconds(s.avgMs));
+  const rows = Array.isArray(d.skills) ? d.skills : [];
+  if (!rows.length) {
+    $("aqLoopRows").innerHTML = `<tr><td colspan="7" class="admin-empty">${escapeHtml(t("admin.loopEmpty"))}</td></tr>`;
+    return;
+  }
+  $("aqLoopRows").innerHTML = rows.map((r) => `<tr>`
+    + `<td><div>${escapeHtml(r.name || r.skillId)}</div><div class="form-hint" style="margin:0">${escapeHtml(r.skillId)}</div></td>`
+    + `<td>${Number(r.attempts || 0)}</td><td>${Number(r.applied || 0)}</td>`
+    + `<td>${Number(r.rolledBack || 0)}</td><td>${Number(r.failed || 0)}</td>`
+    + `<td>${seconds(r.avgMs)}</td><td>${escapeHtml(r.lastAt || "—")}</td></tr>`).join("");
 }
 
 function aqTrendSvg(rows, emptyText) {

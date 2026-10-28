@@ -1,5 +1,42 @@
-# AG-UI 群聊桌面版 1.0.357 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.357 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.358 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.358 Release Notes (current Windows desktop release)
+
+**版本说明**：**自愈闭环可度量**——每次技能修复的结局（生效 / 恢复 / 回滚 / 失败 / 跳过）与耗时都被记录，并在产物质量看板里以「🔁 自愈闭环」区呈现，让“告警 → 修复 → 回归 → 回滚”这条链路从“能跑”变成“看得见”。
+**Version note**: **Measurable self-healing loop** — every skill repair's outcome (applied / resumed / rolled back / failed / skipped) and duration is recorded and surfaced as a **🔁 Self-healing loop** section in the artifact-quality dashboard, turning the alert → repair → regression → rollback chain from "it works" into "it is observable".
+
+## 变更
+# Changes
+
+中文：
+- **结局事件存储**：新增 `SkillLoopEventStore`（扩展区 `skillLoop`，最近 2000 条，重启保留），记录技能 ID、结局、尝试次数、耗时、是否跑回归与回归结果、时间戳；提供 `Query(sinceMs)` / `Snapshot` / `RestoreState`。
+- **指标聚合**：`SkillLoopMetrics.Summarize` 计算修复尝试数、成功数（applied + resumed）、失败数、回滚数、成功率与平均耗时、回归执行次数，以及按技能的明细；**成功率与平均耗时均排除 `skipped`**（没实际改写的尝试不应拉低或抬高指标）。
+- **记录点**：`POST /ag-ui/skills/{id}/repair?apply=true` 用 `Stopwatch` 计时，按「skipped → failed → rolledback → applied → resumed」优先级只记一条结局事件；`apply=false` 只诊断不记录。
+- **接口**：新增 `GET /ag-ui/admin/skill-loop?days=N`（Operator+），返回 `summary / daily / skills`。
+- **界面**：产物质量弹窗（`#artifactQualityModal`）新增「🔁 自愈闭环」区——修复尝试 / 成功 / 成功率 / 回滚 / 失败 / 平均耗时 六张 KPI 卡片 + 按技能明细表（尝试 / 成功 / 回滚 / 失败 / 耗时 / 最近）；随窗口天数一起刷新，无数据时给空态提示。
+
+English:
+- **Outcome event store**: a new `SkillLoopEventStore` (extension area `skillLoop`, latest 2000 events, persisted) records skill ID, outcome, attempts, duration, whether regressions ran and their result, and a timestamp; it exposes `Query(sinceMs)` / `Snapshot` / `RestoreState`.
+- **Metrics aggregation**: `SkillLoopMetrics.Summarize` derives repair attempts, successes (applied + resumed), failures, rollbacks, success rate, average duration, regression runs, and per-skill detail; **success rate and average duration exclude `skipped`** so attempts that never rewrote anything neither drag down nor inflate the numbers.
+- **Recording point**: `POST /ag-ui/skills/{id}/repair?apply=true` times the request with a `Stopwatch` and records exactly one outcome event using the priority skipped → failed → rolledback → applied → resumed; `apply=false` diagnoses only and records nothing.
+- **API**: new `GET /ag-ui/admin/skill-loop?days=N` (Operator+) returning `summary / daily / skills`.
+- **UI**: the artifact-quality dialog (`#artifactQualityModal`) gains a **🔁 Self-healing loop** section — six KPI cards (attempts / successes / success rate / rollbacks / failures / average duration) plus a per-skill table (attempts / successes / rollbacks / failures / duration / last run), refreshed together with the window selector, with an empty state when there is no data.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（产物质量弹窗「自愈闭环」区）、§9.2.8（`/ag-ui/admin/skill-loop` 接口）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.358。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (self-healing loop section in the artifact-quality dialog) and §9.2.8 (the `/ag-ui/admin/skill-loop` endpoint); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.358.
+
+## 测试
+# Tests
+
+中文：新增 `SkillLoopEventStoreTests` 5 条（结局计数与成功率排除 skipped、平均耗时、回归计数、空边界、快照往返）；全量 `dotnet vstest` **2026 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2439，missing 0；配置键与文档引用校验通过。
+English: five new `SkillLoopEventStoreTests` cases (outcome counts with skipped excluded from the success rate, average duration, regression counting, empty boundaries, snapshot round-trip); the full `dotnet vstest` run passes **2026 / 0**; `node --check app.js`; the i18n audit reports zh=en=2439, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.357 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.357 Release Notes (historical)
 
 **版本说明**：**修复回滚保护**——回归未通过时自动恢复到修复前的正文，并记一条失败经验，不在技能里留下“可能更差”的版本。
 **Version note**: **Rollback protection** — when regressions fail, the skill is restored to its pre-repair body and a failure lesson is recorded, so a possibly-worse version is never left behind.

@@ -183,6 +183,7 @@ app.Services.RegisterEvalCasePersistence(); // 数字员工评测集跨重启保
 app.Services.RegisterArtifactQualityPersistence(); // 产物质量事件跨重启保持（绩效 / 交付看板）
 app.Services.RegisterSkillLessonPersistence(); // 技能经验（岗位级失败 / 修复笔记）跨重启保持（1.0.349）
 app.Services.RegisterSkillRegressionPersistence(); // 技能回归用例（标准样例重跑）跨重启保持（1.0.355）
+app.Services.RegisterSkillLoopPersistence(); // 自愈闭环事件（修复 / 回归 / 回滚）跨重启保持（1.0.358）
 app.Services.RegisterAutoConsolidationPersistence(); // 自动沉淀水位（群→知识库 + 时间水位）跨重启保持
 app.Services.RegisterTotpPersistence(); // TOTP 二次验证密钥跨重启保持
 app.Services.RegisterAuditPersistence(); // 操作审计日志跨重启保持（企业合规留痕）

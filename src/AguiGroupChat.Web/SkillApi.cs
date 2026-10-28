@@ -438,6 +438,7 @@ public static class SkillApi
                 });
             }
 
+            var loopWatch = System.Diagnostics.Stopwatch.StartNew();
             SkillAutoFixResult fix;
             try
             {
@@ -536,6 +537,20 @@ public static class SkillApi
                         "不要沿用这次改法；先复现回归失败再重新修复，或改用更可靠的执行方案",
                         "", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Resolved: false));
                 }
+            }
+
+            // 自愈闭环事件（1.0.358）：记录这次修复尝试的结局与耗时，供质量看板统计。
+            if (apply == true)
+            {
+                var outcome = fix.Skipped
+                    ? SkillLoopOutcomes.Skipped
+                    : !fix.Ok ? SkillLoopOutcomes.Failed
+                    : rolledBack ? SkillLoopOutcomes.RolledBack
+                    : applied ? SkillLoopOutcomes.Applied
+                    : SkillLoopOutcomes.Resumed;
+                ctx.RequestServices.GetService<SkillLoopEventStore>()?.Record(
+                    skillId, outcome, fix.Attempts, loopWatch.ElapsedMilliseconds,
+                    regression?.Ran ?? 0, !regressionBlocked);
             }
 
             return Results.Ok(new

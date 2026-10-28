@@ -96,6 +96,8 @@ public static class AgentHosting
         services.AddSingleton<SkillLessonStore>();
         // 技能回归用例（1.0.355）：真实失败触发的标准样例重跑，防修复后退化
         services.AddSingleton<SkillRegressionCaseStore>();
+        // 自愈闭环事件（1.0.358）：修复 / 回归 / 回滚的结局与耗时，供质量看板统计
+        services.AddSingleton<SkillLoopEventStore>();
         // 语音问答（ASR 转写）：默认关闭；需 Agents:Audio:Enabled=true 且能解析出端点才生效
         services.AddSingleton<AudioTranscriptionService>();
         // 语音回复（TTS 合成）：默认关闭；需 Agents:Audio:SpeechEnabled=true 且能解析出端点才生效
@@ -519,6 +521,25 @@ public static class AgentHosting
         else
         {
             services.GetService<ISectionStore>()?.AddSection("skillRegressions", snapshot, restore);
+        }
+    }
+
+    /// <summary>注册自愈闭环事件到持久化扩展区「skillLoop」：重启后闭环指标不丢（1.0.358）。</summary>
+    public static void RegisterSkillLoopPersistence(this IServiceProvider services)
+    {
+        var store = services.GetRequiredService<SkillLoopEventStore>();
+        Func<object?> snapshot = () => store.SnapshotState();
+        Action<JsonElement> restore = element => store.RestoreState(
+            element.Deserialize<List<SkillLoopEvent>>(AguiJson.Options) ?? []);
+
+        var persistence = services.GetService<PersistenceService>();
+        if (persistence is not null)
+        {
+            persistence.AddSection("skillLoop", snapshot, restore);
+        }
+        else
+        {
+            services.GetService<ISectionStore>()?.AddSection("skillLoop", snapshot, restore);
         }
     }
 

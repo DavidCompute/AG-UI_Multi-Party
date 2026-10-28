@@ -739,6 +739,22 @@
         </div>
         <div class="oh-section-title" data-i18n="admin.aqIssuesTitle">近期低分原因</div>
         <div id="aqIssues" class="aq-issues"></div>
+        <div class="oh-section-title" data-i18n="admin.loopTitle">🔁 自愈闭环</div>
+        <div id="aqLoopCards" class="oh-cards"></div>
+        <div class="admin-table-wrap" style="max-height:200px;overflow:auto">
+          <table class="admin-table">
+            <thead><tr>
+              <th data-i18n="admin.loopThSkill">技能</th>
+              <th data-i18n="admin.loopAttempts">修复尝试</th>
+              <th data-i18n="admin.loopApplied">修复成功</th>
+              <th data-i18n="admin.loopRolledBack">回滚</th>
+              <th data-i18n="admin.loopFailed">失败</th>
+              <th data-i18n="admin.loopAvgMs">平均耗时</th>
+              <th data-i18n="admin.perfThLast">最近活跃</th>
+            </tr></thead>
+            <tbody id="aqLoopRows"></tbody>
+          </table>
+        </div>
       </div>
       <div class="modal-actions">
         <button id="aqClose" class="btn-ghost" data-i18n="admin.close">关闭</button>
