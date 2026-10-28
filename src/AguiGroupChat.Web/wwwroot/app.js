@@ -2563,6 +2563,11 @@ async function runSkillRepair() {
     else lines.push(t("skill.repair.notOk", { n: d.attempts }) + (d.lastError ? "\n" + d.lastError : ""));
     if (d.applied) lines.push(t("skill.repair.applied"));
     if (d.lessonSaved) lines.push(t("skill.repair.lessonSaved"));
+    if (d.regression && d.regression.ran > 0) {
+      const ok = (d.regression.results || []).filter((r) => r.passed).length;
+      lines.push(t("skill.repair.regression", { ok, n: d.regression.ran }));
+      if (d.regression.allPassed === false) lines.push(t("skill.repair.regressionBlocked"));
+    }
     lines.push(t("skill.repair.state", { state: d.resumed ? t("skill.repair.stateResumed") : t("skill.repair.stateSuspended") }));
     $("skillRepairResult").classList.remove("hidden");
     $("skillRepairResultBody").textContent = lines.join("\n");
@@ -2570,7 +2575,9 @@ async function runSkillRepair() {
       $("skillRepairPreview").value = d.correctedBody;
       $("skillRepairPreviewWrap").classList.remove("hidden");
     }
-    if (d.applied || (d.ok && !d.skipped && d.resumed)) toast(t("skill.repair.appliedToast"));
+    if (d.applied || (d.ok && !d.skipped && d.resumed)) {
+      if (!d.regression || d.regression.allPassed !== false) toast(t("skill.repair.appliedToast"));
+    }
     await loadSkills(); renderSkillList();
   } catch (e) { toast(t("skill.repair.fail", { err: e })); }
   finally { setSkillRepairBusy(false); }

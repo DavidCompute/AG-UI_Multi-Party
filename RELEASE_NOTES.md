@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.355 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.355 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.356 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.356 Release Notes (current Windows desktop release)
+
+**版本说明**：**修复后自动回归**——一键修复成功会先用修正后的正文跑一遍回归用例；只有全部通过才恢复挂载，否则保持暂停并明确提示。
+**Version note**: **Regression after repair** — a successful one-click repair now re-runs the regression cases with the repaired body; only an all-pass result resumes the skill, otherwise it stays paused with an explicit message.
+
+## 变更
+# Changes
+
+中文：
+- **流程调整**：修复时先写入正文但**不立即恢复**；若有回归用例，用新正文真实跑一遍（最多 3 条，结果回写用例）；全部通过才 `Resume` 并失效缓存，任一失败则保持 / 继续暂停。
+- **经验只在真正成功时沉淀**：修复经验与「旧失败经验标为已解决」仅在回归通过后才写入，避免把未修复成功的结果记成正向经验。
+- **响应与界面**：repair 新增 `regressionRan / regressionPassed / regression`；修复弹窗显示「回归：X/Y 通过」，失败时追加「回归未通过：技能保持暂停，请修复后重试」，成功 toast 也会在回归失败时抑制。
+- **复用**：回归执行抽为 `SkillRegressionRunner`（「跑回归」按钮与修复后自动回归同一实现）。
+
+English:
+- **Flow change**: a repair writes the body but **does not resume immediately**; if regression cases exist, the repaired body is really executed through them (up to 3, results written back). Only an all-pass `Resume`s the skill and evicts caches; any failure keeps it paused.
+- **Experience only on real success**: the repair lesson and resolving old failures now happen only after regressions pass, so an incomplete fix is never recorded as positive experience.
+- **Response and UI**: repair adds `regressionRan / regressionPassed / regression`; the repair dialog shows "Regression: X/Y passed" and appends "Regression failed: the skill stays paused; fix it and retry"; the success toast is suppressed when regressions fail.
+- **Reuse**: regression execution is extracted into `SkillRegressionRunner`, shared by the **Run regressions** button and the automatic post-repair run.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §4.3.9（修复后自动回归）、§4.4.1（repair 响应字段）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.356。
+English: `docs/user-guide.md` / `en.md` §4.3.9 (regression after repair), §4.4.1 (repair response fields); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.356.
+
+## 测试
+# Tests
+
+中文：新增 `BlocksResume` 判定用例（无回归 / 全跳过 / 全通过 / 有失败）1 条；回归库定向测试 6 条通过；全量 `dotnet vstest` **2020 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2428，missing 0；配置键与文档引用校验通过。
+English: new `BlocksResume` cases (no regressions / all skipped / all passed / one failed); 6 targeted regression-store tests pass; the full `dotnet vstest` run passes **2020 / 0**; `node --check app.js`; the i18n audit reports zh=en=2428, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.355 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.355 Release Notes (historical)
 
 **版本说明**：**技能回归用例**——真实产物失败会自动生成一条标准样例回归用例，可随时重跑，防止修复或后续改动再次退化；回归不保存用户输入。
 **Version note**: **Skill regression cases** — a real artifact failure automatically creates a standard-sample regression case that can be re-run at any time, preventing regressions after a fix or later changes; no user input is stored.

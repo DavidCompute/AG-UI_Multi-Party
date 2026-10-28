@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.355**
+> 适用版本：**1.0.356**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -2105,6 +2105,7 @@
 - **落库兜底（1.0.353）**：组织落库（网页 apply 与 `org_commit`）时，若岗位挂载的技能有**未解决**失败经验，平台会确定性把「【技能经验·必须遵守】」块追加到该岗位 `instructions`（最多 3 个技能、每技能 1 条）——不依赖模型是否记得在 instructions 里写规避步骤；已解决的经验不写。
 - **生命周期清理（1.0.354）**：弹窗在有 `declined`（反而下降且样本足够）经验时显示「🧹 停用无效经验（N）」，确认后调用 `POST /ag-ui/skills/{id}/lessons/cleanup` 把它们批量标为已解决（不再注入，但保留可追溯）；`?mode=delete` 可改为物理删除。已解决的经验不重复挑、幂等。
 - **回归用例（1.0.355）**：产物质量告警命中时，若技能有文档类产物契约（docx / xlsx / pptx / pdf），自动创建一个**标准样例回归用例**（同技能同类型幂等，每技能最多 5 条）。经验弹窗里可「▶ 跑回归」：逐个用 `SkillArtifactContract.SampleInput` 真实执行并校验收产物契约，结果（通过与否 / 评分 / 时间）回写并持久化。回归**不保存用户输入**，只用确定性样例；暂停中的技能也可跑（用于验证是否已修好）。
+- **修复后自动回归（1.0.356）**：一键修复成功（自测通过）且该技能存在回归用例时，自动用修正后的正文跑一遍回归（最多 3 条）：**全部通过才恢复挂载并沉淀修复经验**；有失败则保持/继续暂停，响应带 `regressionRan / regressionPassed / regression`，界面明确提示「回归未通过：技能保持暂停，请修复后重试」——避免“看起来修好、实际更差”。
 
 配置项（`Agents:ArtifactQuality`，均有默认值，可不写）：
 
@@ -2135,7 +2136,7 @@
 | `POST /ag-ui/skills/{skillId}/suggest` | 试运行参数建议 | 让模型给一个典型 `query` |
 | `POST /ag-ui/skills/{skillId}/suspend?reason=` | 暂停挂载（1.0.345） | 归属者或管理员；立即失效相关智能体缓存 |
 | `POST /ag-ui/skills/{skillId}/resume` | 恢复挂载（1.0.345） | 同上；清空暂停标志后重新挂载 |
-| `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | 诊断修复（1.0.347） | 模型改写正文 + 服务端自测；`apply=true` 才落库，见 4.3.7 |
+| `POST /ag-ui/skills/{skillId}/repair?apply=&resume=` | 诊断修复（1.0.347） | 模型改写正文 + 服务端自测；`apply=true` 才落库；1.0.356 起修复成功会先跑回归，失败则保持暂停 |
 | `GET /ag-ui/skills/{skillId}/lessons` | 查看技能经验（1.0.349） | 归属者或管理员；失败 / 修复经验，见 4.3.8；1.0.352 起每条带 `effectiveness` |
 | `POST /ag-ui/skills/{skillId}/lessons` | 手工补写经验（1.0.351） | 归属者或管理员；`note` 类型，见 4.3.9 |
 | `DELETE /ag-ui/skills/{skillId}/lessons/{lessonId}` | 删除一条经验（1.0.351） | 归属者或管理员；仅限该技能 |

@@ -478,6 +478,8 @@ window.I18N_DICTS.zh = {
   "skill.repair.notOk": "自测未通过（尝试 {n} 次），原技能未改动。",
   "skill.repair.applied": "已应用修复后的正文。",
   "skill.repair.lessonSaved": "已将本次失败与修复沉淀为岗位经验（下次调用会自动提醒模型避开）。",
+  "skill.repair.regression": "回归：{ok}/{n} 通过",
+  "skill.repair.regressionBlocked": "回归未通过：技能保持暂停，请修复后重试。",
   "skill.repair.state": "当前状态：{state}",
   "skill.repair.stateResumed": "已恢复",
   "skill.repair.stateSuspended": "仍暂停",

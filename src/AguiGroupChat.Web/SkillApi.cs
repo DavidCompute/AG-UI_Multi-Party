@@ -330,31 +330,8 @@ public static class SkillApi
             var store = ctx.RequestServices.GetService<SkillRegressionCaseStore>();
             if (store is null) return Results.Json(new AguiError(ErrorCodes.BadRequest, "回归用例库不可用"), statusCode: StatusCodes.Status503ServiceUnavailable);
 
-            var results = new List<object>();
-            foreach (var c in store.List(skillId).Take(3))
-            {
-                if (!Enum.TryParse<SkillArtifactKind>(c.Kind, true, out var kind)
-                    || !SkillArtifactContract.SupportsGenerationProbe(kind))
-                {
-                    results.Add(new { caseId = c.Id, kind = c.Kind, skipped = true });
-                    continue;
-                }
-                var sample = SkillArtifactContract.SampleInput(kind);
-                // 暂停技能也要能验证“是否已修好”：ignoreSuspension=true（仅此处显式调用）。
-                var output = await agents.RunSkillAsync(skill, sample, ct, ignoreSuspension: true);
-                var v = SkillArtifactContract.Validate(skill, output);
-                var passed = v.IsSatisfied && v.Score >= c.MinScore;
-                store.RecordRun(c.Id, passed, v.Score, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                results.Add(new
-                {
-                    caseId = c.Id,
-                    kind = c.Kind,
-                    score = v.Score,
-                    passed,
-                    missing = v.MissingItems,
-                });
-            }
-            return Results.Ok(new { skillId, ran = results.Count, results });
+            var run = await SkillRegressionRunner.RunAsync(skill, store.List(skillId), agents, store, ct);
+            return Results.Ok(new { skillId, ran = run.Ran, allPassed = run.AllPassed, results = run.Results });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());
 
         // ---- 删除技能（技能归属者或系统管理员）；已被数字员工引用的技能一并解除（按引用的 agent 引用清理在下文做，暂无外键）----
@@ -480,19 +457,36 @@ public static class SkillApi
             }
 
             var applied = false;
+            // 先只写正文、不立即恢复：回归不通过时必须保持暂停（1.0.356）。
             if (apply == true && fix.Ok && !fix.Skipped && fix.CorrectedBody is { Length: > 0 } body)
-                applied = catalog.ApplyRepair(skillId, body, fix.CorrectedDescription, resume != false);
+                applied = catalog.ApplyRepair(skillId, body, fix.CorrectedDescription, resume: false);
 
-            // “自测通过但正文没改”也是有效结果（技能可能只是被暂停）：apply 时一并恢复
-            if (apply == true && fix.Ok && !fix.Skipped)
+            // 修复后自动回归（1.0.356）：有回归用例就真实跑一遍标准样例，结果回写用例。
+            var regressions = ctx.RequestServices.GetService<SkillRegressionCaseStore>();
+            SkillRegressionRunResult? regression = null;
+            if (apply == true && fix.Ok && !fix.Skipped && regressions is not null && catalog.Get(skillId) is { } live)
+            {
+                var cases = regressions.List(skillId);
+                if (cases.Count > 0)
+                    regression = await SkillRegressionRunner.RunAsync(live, cases, agents, regressions, ct);
+            }
+            var regressionBlocked = SkillRegressionRunner.BlocksResume(regression);
+
+            // 自测通过且回归通过（或没有可跑的回归）：才恢复挂载并失效缓存。
+            if (apply == true && fix.Ok && !fix.Skipped && !regressionBlocked)
             {
                 if (resume != false) catalog.Resume(skillId);
                 agents.InvalidateAgentsUsingSkill(skillId);
             }
+            else if (apply == true && fix.Ok && !fix.Skipped)
+            {
+                // 回归未通过：保持（或继续）暂停；新正文已写入，仍要让缓存重建。
+                agents.InvalidateAgentsUsingSkill(skillId);
+            }
 
-            // 修复成功且真的改了正文：把旧失败经验标为已解决，并沉淀一条正向修复经验（1.0.349）。
+            // 修复成功、真的改了正文且回归通过：旧失败经验标为已解决，并沉淀正向修复经验（1.0.349）。
             var lessonSaved = false;
-            if (applied)
+            if (applied && !regressionBlocked)
             {
                 var lessons = ctx.RequestServices.GetService<SkillLessonStore>();
                 if (lessons is not null)
@@ -521,6 +515,9 @@ public static class SkillApi
                 applied,
                 resumed = catalog.Get(skillId)?.Suspended == false,
                 lessonSaved,
+                regressionRan = regression?.Ran ?? 0,
+                regressionPassed = !regressionBlocked,
+                regression,
                 diagnosis,
             });
         }).AddEndpointFilter(new WebIdentity.RequireTokenFilter());

@@ -77,6 +77,29 @@ public sealed class SkillRegressionCaseStoreTests
     }
 
     [Fact]
+    public void BlocksResume_OnlyWhenARealCaseFailed()
+    {
+        Assert.False(SkillRegressionRunner.BlocksResume(null));
+        Assert.False(SkillRegressionRunner.BlocksResume(new SkillRegressionRunResult(0, true, [])));
+
+        Assert.False(SkillRegressionRunner.BlocksResume(new SkillRegressionRunResult(2, true,
+        [
+            new SkillRegressionCaseResult("a", "Docx", false, true, 90, []),
+            new SkillRegressionCaseResult("b", "Pptx", false, true, 88, []),
+        ])));
+
+        Assert.True(SkillRegressionRunner.BlocksResume(new SkillRegressionRunResult(2, false,
+        [
+            new SkillRegressionCaseResult("a", "Docx", false, true, 90, []),
+            new SkillRegressionCaseResult("b", "Pptx", false, false, 40, ["缺少正文"]),
+        ])));
+
+        // 全部跳过（无统一输入契约的类型）：不算阻塞
+        Assert.False(SkillRegressionRunner.BlocksResume(new SkillRegressionRunResult(0, true,
+            [new SkillRegressionCaseResult("a", "Archive", true, false, 0, [])])));
+    }
+
+    [Fact]
     public void Restore_RoundTripsAndDropsInvalid()
     {
         var src = new SkillRegressionCaseStore();
