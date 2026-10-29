@@ -51,6 +51,8 @@ public static class MemoryConflictScan
         int maxPairs = 50,
         bool includeAlreadySuperseded = false)
     {
+        // 先一次性规范化 + 提二元组：两两比较是 O(n²)（800 条 ≈ 32 万对），
+        // 若每对都重新 Normalize/建集合，接口会被拖到秒级；预计算后每对只是一次集合交集。
         var list = (items ?? [])
             .Where(i => i is not null)
             .Where(i => !string.IsNullOrWhiteSpace(i.Content))
@@ -58,7 +60,9 @@ public static class MemoryConflictScan
             .Where(i => !i.SenderType.Equals("kb", StringComparison.OrdinalIgnoreCase))
             .Where(i => !i.SenderType.Equals("img", StringComparison.OrdinalIgnoreCase))
             .Where(i => includeAlreadySuperseded || string.IsNullOrEmpty(i.SupersededBy))
-            .OrderBy(i => i.Timestamp)
+            .Select(i => new Prepared(i, Normalize(i.Content)))
+            .Where(p => p.Norm.Length >= 4)
+            .OrderBy(p => p.Item.Timestamp)
             .ToList();
         if (list.Count < 2) return [];
 
@@ -69,12 +73,11 @@ public static class MemoryConflictScan
             for (var j = 0; j < i; j++)
             {
                 var older = list[j];
-                if (older.Timestamp >= newer.Timestamp) continue;
-                if (string.Equals(older.Content, newer.Content, StringComparison.Ordinal)) continue;
+                if (older.Item.Timestamp >= newer.Item.Timestamp) continue;
 
-                var res = Judge(older.Content, newer.Content, minSharedPrefix, minContainment);
+                var res = JudgePrepared(older, newer, minSharedPrefix, minContainment);
                 if (res is null) continue;
-                pairs.Add(new MemoryConflictPair(older, newer, res.Value.SharedPrefix, res.Value.Score));
+                pairs.Add(new MemoryConflictPair(older.Item, newer.Item, res.Value.SharedPrefix, res.Value.Score));
             }
         }
 
@@ -85,6 +88,12 @@ public static class MemoryConflictScan
             .ToList();
     }
 
+    /// <summary>预处理的记忆：规范化文本 + 二元组集合（只算一次）。</summary>
+    private sealed record Prepared(MessageMemoryItem Item, string Norm)
+    {
+        public HashSet<string> Grams { get; } = MemoryConflictDetector.Bigrams(Item.Content);
+    }
+
     /// <summary>
     /// 判定一对文本是否“像同一句话只差一个值”。返回共享前缀长度与重合度；不构成疑似冲突返回 null。
     /// </summary>
@@ -93,6 +102,17 @@ public static class MemoryConflictScan
     {
         var a = Normalize(older);
         var b = Normalize(newer);
+        var oa = new Prepared(new MessageMemoryItem("a", "", "", "", "user", older, 0, 0, null), a);
+        var ob = new Prepared(new MessageMemoryItem("b", "", "", "", "user", newer, 0, 0, null), b);
+        return JudgePrepared(oa, ob, minSharedPrefix, minContainment);
+    }
+
+    /// <summary>判定核心（用预计算的规范化文本与二元组，两两比较时无重复分配）。</summary>
+    private static (int SharedPrefix, double Score)? JudgePrepared(
+        Prepared older, Prepared newer, int minSharedPrefix, double minContainment)
+    {
+        var a = older.Norm;
+        var b = newer.Norm;
         if (a.Length == 0 || b.Length == 0) return null;
         if (a.Length < 4 || b.Length < 4) return null;
         if (a == b) return null;
@@ -108,9 +128,9 @@ public static class MemoryConflictScan
         if (hasCue && prefix >= 3)
             return (prefix, Math.Round((double)prefix / Math.Min(a.Length, b.Length), 3));
 
-        var grams = MemoryConflictDetector.Bigrams(a);
-        var shared = MemoryConflictDetector.SharedBigrams(grams, b);
-        var containment = grams.Count == 0 ? 0 : Math.Round((double)shared / grams.Count, 3);
+        if (older.Grams.Count == 0) return null;
+        var shared = older.Grams.Count(g => newer.Grams.Contains(g));
+        var containment = Math.Round((double)shared / older.Grams.Count, 3);
         var threshold = hasCue ? Math.Min(minContainment, 0.5) : minContainment;
         return containment >= Math.Max(0.1, threshold) ? (prefix, containment) : null;
     }

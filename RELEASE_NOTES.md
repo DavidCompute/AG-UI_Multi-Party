@@ -1,5 +1,38 @@
-# AG-UI 群聊桌面版 1.0.366 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.366 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.367 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.367 Release Notes (current Windows desktop release)
+
+**版本说明**：**严格审核后的一轮修复**——自动修复不再越过管理员的手工暂停；存量体检扫描从秒级降到毫秒级；扫描上限与存储层对齐。
+**Version note**: **Fixes after a strict audit** — auto-repair no longer overrides a manual pause, the stored-memory sweep drops from seconds to milliseconds, and the scan limits match the storage layer.
+
+## 变更
+# Changes
+
+中文：
+- **安全（自动修复不得越过人工暂停）**：新增 `SkillSuspension`——只有「未暂停」或「因产物质量被自动隔离（原因以‘产物质量’开头）」的技能允许自动修复；告警桥入队与工作线程执行**双重判定**（入队后被人工暂停也能拦住），非自动修复不弹 `resume`。
+- **性能（存量体检）**：`MemoryConflictScan.FindPairs` 先把每条记忆**规范化文本与字符二元组算一次**再两两比较；800 条（约 32 万对）从“每对重建字符串与集合”的秒级降到毫秒级，并新增规模回归测试守住。
+- **一致性（上限）**：`/ag-ui/memory/conflicts` 与 `/ag-ui/memory/quality` 的扫描上限改为 500（与存储层 `ListMessages` 的 `1..500` 对齐，原来传 1000/800 实际被截断），文档同步更正（含 1.0.365 发布说明）。
+
+English:
+- **Safety (auto-repair never overrides a manual pause)**: new `SkillSuspension` — only skills that are not suspended, or were auto-isolated for artifact quality (reason starting with 产物质量), may be auto-repaired; both the alert bridge enqueue and the worker execution check it (so a pause applied after enqueue still wins), and the runner no longer resumes them otherwise.
+- **Performance (stored-memory sweep)**: `MemoryConflictScan.FindPairs` normalizes each memory and builds its character bigrams **once** before the pairwise pass; 800 memories (~320k pairs) drop from seconds (rebuilding strings and sets per pair) to milliseconds, guarded by a scale regression test.
+- **Consistency (limits)**: the scan limits of `/ag-ui/memory/conflicts` and `/ag-ui/memory/quality` become 500 (matching `ListMessages`' `1..500`; the old 1000/800 values were silently truncated), with the docs corrected too (including the 1.0.365 notes).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §6.5.5 / §6.5.6（扫描上限）；`RELEASE_NOTES.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.367。
+English: `docs/user-guide.md` / `en.md` §6.5.5 / §6.5.6 (scan limits); `RELEASE_NOTES.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.367.
+
+## 测试
+# Tests
+
+中文：新增 `SkillSuspensionTests` 5 条（未暂停 / 产物质量自动隔离可修，人工暂停拦住，前缀判定，800 条扫描耗时回归）；全量 `dotnet vstest` **2101 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2485，missing 0；配置键与文档引用校验通过。
+English: five new `SkillSuspensionTests` cases (not suspended / artifact auto-isolation allowed, manual pause blocked, prefix matching, and an 800-memory scan timing regression); the full `dotnet vstest` run passes **2101 / 0**; `node --check app.js`; the i18n audit reports zh=en=2485, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.366 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.366 Release Notes (historical)
 
 **版本说明**：**已有组织也会被巡检**——技能健康度之前只在建组织时提醒；现在组织体检报告新增「技能健康巡检」：逐个岗位列出修不稳的技能（避用 / 留意），并给出更换或兜底建议。
 **Version note**: **Existing organizations get inspected too** — skill health used to be consulted only while building an org; the health report now adds a **skill health inspection** that lists unstable skills per role (avoid / watch) with replacement or fallback advice.
@@ -45,13 +78,13 @@ English: two new report cases (avoid / watch rows with advice, and the healthy m
 中文：
 - **统计**：`MessageMemoryGroupStat` 新增 `SupersededCount`；SQLite / PostgreSQL 的 `GroupStats` 均用 `COUNT(*) FILTER (WHERE superseded_by IS NOT NULL)` 统计，与过期数同一条查询。
 - **接口**：`GET /ag-ui/memory/quality?groupId=`——`summary`（`groups` / `memories` / `expired` / `superseded` / `supersededRate` / `pendingPairs`）+ 按知聚明细；只返回调用者有权限的知聚。
-- **待处理对**：只对当前选中的知聚真算（扫描上限 800 条，全量扫是 O(n²)，不对整库跑），未选时返回 `null`（界面显 `—`）。
+- **待处理对**：只对当前选中的知聚真算（扫描上限 500 条，存储层上限，全量扫是 O(n²)，不对整库跑），未选时返回 `null`（界面显 `—`）。
 - **界面**：记忆弹窗新增「📊 质量概览」一行 + 「刷新」；切知聚、体检、取代/撤销后自动重算。
 
 English:
 - **Stats**: `MessageMemoryGroupStat` gains `SupersededCount`; `GroupStats` on both SQLite and PostgreSQL counts `COUNT(*) FILTER (WHERE superseded_by IS NOT NULL)` in the same query as the expired count.
 - **API**: `GET /ag-ui/memory/quality?groupId=` — `summary` (`groups` / `memories` / `expired` / `superseded` / `supersededRate` / `pendingPairs`) plus per-group rows; only groups the caller may see are returned.
-- **Pending pairs**: computed only for the selected group (scans up to 800 memories — a full sweep is O(n²), so the whole library is never scanned); `null` (rendered as `—`) when no group is selected.
+- **Pending pairs**: computed only for the selected group (scans up to 500 memories (the storage cap) — a full sweep is O(n²), so the whole library is never scanned); `null` (rendered as `—`) when no group is selected.
 - **UI**: the memory dialog gains a **📊 Quality overview** line with **Refresh**, recomputed on group switch, after audits and after supersede/revert actions.
 
 ## 文档

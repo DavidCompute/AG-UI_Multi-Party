@@ -72,6 +72,7 @@
 - **存量一致性体检（1.0.364，已实现）**：`MemoryConflictScan`（纯函数）在指定知聚内扫「同一句话差一个值」的短句对（共同开头 ≥4 字停在属性槽位、数字差异、或二元组重合度 ≥0.75；前缀包含视为补充说明）；`GET /ag-ui/memory/conflicts` 列出疑似对，`POST /ag-ui/memory/conflicts/resolve` 支持 `supersede` / `keep`；记忆管理「🔍 一致性体检」弹窗人工裁决。
 - **记忆质量概览（1.0.365，已实现）**：`MessageMemoryGroupStat.SupersededCount`（SQLite / PostgreSQL 同一 SQL 统计）+ `GET /ag-ui/memory/quality`（`summary`：知聚数 / 条数 / 过期 / 已被取代 / 取代率 / 待处理对，后者仅对选中知聚计算）+ 记忆弹窗「📊 质量概览」行与刷新。
 - **组织体检技能健康巡检（1.0.366，已实现）**：`OrgHealthReport.SkillHealthRow` + `BuildMarkdown(..., skillHealth)`；`/org-health` 用 `SkillLoopHealthBoard` 逐个岗位汇总挂载技能，避用 / 留意入表（已避用优先），Markdown 与 HTML 报告新增「技能健康巡检」一节，避用 > 0 写入建议；章节编号改为动态计数。
+- **严格审核修复（1.0.367，已实现）**：`SkillSuspension.MayAutoRepair` 阻止自动修复越过人工暂停（告警桥入队 + 工作线程双重判定）；`MemoryConflictScan` 预计算规范化文本与二元组（800 条扫描毫秒级，含规模回归测试）；`/memory/conflicts` 与 `/memory/quality` 扫描上限对齐存储层 500。
 
 ### 2.3 跨实例记忆同步（★★☆ 打通桌面/Web 孤岛） ✅已实现（记忆即数据包 / 增量同步）
 - **现状**：桌面版与 Web 各自本地记忆，互不相通。

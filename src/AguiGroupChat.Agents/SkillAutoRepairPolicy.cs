@@ -163,6 +163,12 @@ public sealed class SkillAutoRepairWorker : BackgroundService
         var skill = _catalog.Get(job.SkillId);
         if (skill is null || skill.OwnerId is null) return;
         if (skill.ExecutionLocation == AgentSkillExecutionLocation.Client) return;
+        // 人工暂停是人的决定：自动修复不得越过它（只处理产物质量自动隔离 / 未暂停）。
+        if (!SkillSuspension.MayAutoRepair(skill))
+        {
+            _logger.LogInformation("自动修复跳过：技能被人工暂停（{Reason}）skill={SkillId}", skill.SuspendedReason, job.SkillId);
+            return;
+        }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var history = _loop.Query(now - LookbackMs)

@@ -208,7 +208,7 @@ public static class MemoryApi
                 if (!global && !memberGroups.Contains(groupId))
                     return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看该群记忆质量"),
                         statusCode: StatusCodes.Status403Forbidden);
-                var items = memory.ListMessages(groupId, null, null, Math.Clamp(limit, 50, 1000), 0).ToList();
+                var items = memory.ListMessages(groupId, null, null, Math.Clamp(limit, 50, 500), 0).ToList();
                 pending = AguiGroupChat.Agents.MemoryConflictScan.FindPairs(items, maxPairs: 200).Count;
             }
 
@@ -263,7 +263,7 @@ public static class MemoryApi
                 m.Content, m.Importance, m.ExpiresAt, m.SupersededBy,
             };
 
-            var items = memory.ListMessages(groupId, null, null, Math.Clamp(limit, 50, 1000), 0).ToList();
+            var items = memory.ListMessages(groupId, null, null, Math.Clamp(limit, 50, 500), 0).ToList();
             var pairs = AguiGroupChat.Agents.MemoryConflictScan.FindPairs(items, maxPairs: 50, includeAlreadySuperseded: true);
             return Results.Ok(new
             {

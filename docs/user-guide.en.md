@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.366**
+> Applies to version: **1.0.367**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3295,7 +3295,7 @@ Write-time detection only covers the future; contradictions already sitting in h
 - **Resolution**: `POST /ag-ui/memory/conflicts/resolve` with `action=supersede` calls `Supersede(old, new)` (the same storage semantics as write-time detection, dropping the old statement from retrieval); `action=keep` reverts the mark if it was superseded. Resolved pairs are labelled as handled.
 - **Intent**: this is a **review list, not an automatic verdict** — the heuristic misses some pairs and over-reports others; a false positive costs one glance, a miss keeps a contradiction alive.
 
-Limits: one sweep reads at most 1000 memories (`limit` 50..1000) and returns at most 50 pairs.
+Limits: one sweep reads at most 500 memories (`limit` 50..500, the storage cap) and returns at most 50 pairs.
 
 #### 6.5.6 Memory quality overview (1.0.365)
 

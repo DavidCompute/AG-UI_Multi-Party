@@ -107,7 +107,8 @@ public static class SkillLoopAlertBridge
             var options = (services.GetService(typeof(AgentOptions)) as AgentOptions)?.ArtifactQuality;
             if (options is { AutoRepairEnabled: true }
                 && skill is { OwnerId: not null }
-                && skill.ExecutionLocation != AgentSkillExecutionLocation.Client)
+                && skill.ExecutionLocation != AgentSkillExecutionLocation.Client
+                && SkillSuspension.MayAutoRepair(skill))
             {
                 (services.GetService(typeof(SkillAutoRepairQueue)) as SkillAutoRepairQueue)
                     ?.TryEnqueue(skillId, string.Join(",", decision.Reasons));
