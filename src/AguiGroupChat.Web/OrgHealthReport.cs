@@ -14,6 +14,19 @@ public static class OrgHealthReport
     /// <summary>报告里的一行自愈闭环明细（1.0.359）。</summary>
     public sealed record SkillLoopRow(string Name, int Attempts, int Applied, int RolledBack, int Failed, long AvgMs);
 
+    /// <summary>技能健康巡检的一行（1.0.366）：某岗位挂载的某个“修不稳”的技能。</summary>
+    /// <param name="Level"><c>avoid</c> 避用 / <c>watch</c> 留意。</param>
+    public sealed record SkillHealthRow(
+        string AgentName,
+        string SkillId,
+        string SkillName,
+        int Attempts,
+        int Successes,
+        int RolledBack,
+        int Failed,
+        double SuccessRate,
+        string Level);
+
     public static string BuildMarkdown(
         int days,
         string from,
@@ -25,7 +38,8 @@ public static class OrgHealthReport
         IReadOnlyList<EvalCase>? evalCases = null,
         IReadOnlyList<AgentPerformance.AgentStat>? prevStats = null,
         SkillLoopSummary? loop = null,
-        IReadOnlyList<SkillLoopRow>? loopRows = null)
+        IReadOnlyList<SkillLoopRow>? loopRows = null,
+        IReadOnlyList<SkillHealthRow>? skillHealth = null)
     {
         var sb = new StringBuilder();
         var cur = string.IsNullOrWhiteSpace(pricing.Currency) ? "$" : pricing.Currency;
@@ -139,6 +153,9 @@ public static class OrgHealthReport
         if (lowArtifact > 0) advice.Add($"有 {lowArtifact} 位数字员工的产物质量偏低（空壳 / 缺正文 / 格式不合格），建议检查其文档技能输入与产物契约告警。");
         if (loop is { Attempts: > 0 } && loop.SuccessRate < 0.5)
             advice.Add($"技能自愈成功率偏低（{Pct(loop.SuccessRate)}，最近 {loop.Attempts} 次修复中回滚 {loop.RolledBack} 次），建议在技能库查看「💡 经验 / 🧪 回归用例」，必要时手工调整技能定义或产物契约。");
+        var healthAvoid = skillHealth?.Count(r => string.Equals(r.Level, "avoid", StringComparison.Ordinal)) ?? 0;
+        if (healthAvoid > 0)
+            advice.Add($"有 {healthAvoid} 个“避用级”技能仍挂载在岗位上（反复修复后仍失败 / 回滚），建议改用同类更稳的技能，或先在技能库手工调整后再重新参与编排。");
         if (priced && totalCalls > 0)
         {
             var top = stats.OrderByDescending(s => pricing.EstimateCost(s.PromptTokens, s.CompletionTokens, s.ReasoningTokens)).FirstOrDefault();
@@ -150,11 +167,13 @@ public static class OrgHealthReport
         sb.AppendLine();
 
         // 评测回归（持久化基线）：让报告能带「回归通过率」
+        var section = 6;
+        string Cn(int n) => "一二三四五六七八九十"[Math.Clamp(n, 1, 10) - 1].ToString();
         if (evalCases is not null)
         {
             var run = evalCases.Where(c => c.LastRunAtMs > 0).ToList();
             var passedN = run.Count(c => c.LastPassed == true);
-            sb.AppendLine("## 六、评测回归");
+            sb.AppendLine($"## {Cn(section++)}、评测回归");
             if (evalCases.Count == 0)
             {
                 sb.AppendLine("- 暂无评测用例（可在控制台「评测回归」创建）");
@@ -179,7 +198,7 @@ public static class OrgHealthReport
         // 自愈闭环（1.0.359）：产物质量看「产出好不好」，这里看「修得好不好」。
         if (loop is not null)
         {
-            sb.AppendLine(evalCases is not null ? "## 七、技能自愈闭环" : "## 六、技能自愈闭环");
+            sb.AppendLine($"## {Cn(section++)}、技能自愈闭环");
             if (loop.Attempts == 0)
             {
                 sb.AppendLine("- 窗口内没有修复记录");
@@ -195,6 +214,34 @@ public static class OrgHealthReport
                     sb.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: |");
                     foreach (var r in loopRows)
                         sb.AppendLine($"| {r.Name} | {r.Attempts} | {r.Applied} | {r.RolledBack} | {r.Failed} | {(r.AvgMs / 1000.0).ToString("0.0", CultureInfo.InvariantCulture)} 秒 |");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        // 技能健康巡检（1.0.366）：已有组织不会因为成员技能变差而被自动重检，这里补上。
+        if (skillHealth is not null)
+        {
+            sb.AppendLine($"## {Cn(section++)}、技能健康巡检");
+            if (skillHealth.Count == 0)
+            {
+                sb.AppendLine("- 已挂载技能近期没有修复失败 / 回滚记录，无需处理");
+            }
+            else
+            {
+                var avoidN = skillHealth.Count(r => string.Equals(r.Level, "avoid", StringComparison.Ordinal));
+                var watchN = skillHealth.Count - avoidN;
+                var agentsN = skillHealth.Select(r => r.AgentName).Distinct(StringComparer.Ordinal).Count();
+                sb.AppendLine($"- 巡检：{agentsN} 个岗位的 {skillHealth.Count} 个技能修不稳；避用 {avoidN} 个、留意 {watchN} 个");
+                sb.AppendLine();
+                sb.AppendLine("| 岗位 | 技能 | 修复成功率 | 回滚 | 失败 | 建议 |");
+                sb.AppendLine("| --- | --- | ---: | ---: | ---: | --- |");
+                foreach (var r in skillHealth)
+                {
+                    var suggestion = string.Equals(r.Level, "avoid", StringComparison.Ordinal)
+                        ? "改用同类更稳的技能，或先手工修复并跑回归"
+                        : "岗位说明里写明兜底做法（先跑回归确认可用）";
+                    sb.AppendLine($"| {r.AgentName} | {r.SkillName}（{r.SkillId}） | {Pct(r.SuccessRate)} | {r.RolledBack} | {r.Failed} | {suggestion} |");
                 }
             }
             sb.AppendLine();

@@ -118,4 +118,40 @@ public sealed class OrgHealthReportTests
         Assert.Contains("窗口内没有修复记录", md);
         Assert.DoesNotContain("技能自愈成功率偏低", md);
     }
+
+    [Fact]
+    public void BuildMarkdown_ReportsSkillHealthInspection()
+    {
+        var stats = new[] { new AgentPerformance.AgentStat("a1", "好员工", 5, 10, 10, 0, 20, 3, 0, "2026-10-10") };
+        var defs = new Dictionary<string, AgentDefinition> { ["a1"] = new AgentDefinition { AgentId = "a1", Nickname = "好员工" } };
+        var loop = new SkillLoopSummary(2, 0, 0, 0, 2, 0, 0, 4000, 0, 0);
+        var rows = new[]
+        {
+            new OrgHealthReport.SkillHealthRow("写手", "flaky", "不稳技能", 2, 0, 2, 0, 0, "avoid"),
+            new OrgHealthReport.SkillHealthRow("审校", "wonky", "略不稳技能", 2, 1, 0, 1, 0.5, "watch"),
+        };
+
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, new PricingOptions(),
+            1_700_000_000_000, null, null, loop, [], rows);
+
+        Assert.Contains("## 七、技能健康巡检", md); // 闭环一节占六，巡检顺延到七
+        Assert.Contains("2 个岗位的 2 个技能修不稳；避用 1 个、留意 1 个", md);
+        Assert.Contains("| 写手 | 不稳技能（flaky） | 0% | 2 | 0 |", md);
+        Assert.Contains("改用同类更稳的技能", md);
+        Assert.Contains("兜底做法", md);
+        Assert.Contains("有 1 个“避用级”技能仍挂载在岗位上", md);
+    }
+
+    [Fact]
+    public void BuildMarkdown_SkillHealthEmptyIsReportedAsClean()
+    {
+        var stats = new[] { new AgentPerformance.AgentStat("a1", "好员工", 5, 10, 10, 0, 20, 3, 0, "2026-10-10") };
+        var defs = new Dictionary<string, AgentDefinition> { ["a1"] = new AgentDefinition { AgentId = "a1", Nickname = "好员工" } };
+
+        var md = OrgHealthReport.BuildMarkdown(30, "2026-09-11", "2026-10-10", stats, defs, new PricingOptions(),
+            1_700_000_000_000, null, null, null, null, []);
+
+        Assert.Contains("## 六、技能健康巡检", md);
+        Assert.Contains("已挂载技能近期没有修复失败 / 回滚记录", md);
+    }
 }

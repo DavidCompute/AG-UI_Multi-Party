@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.365 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.365 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.366 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.366 Release Notes (current Windows desktop release)
+
+**版本说明**：**已有组织也会被巡检**——技能健康度之前只在建组织时提醒；现在组织体检报告新增「技能健康巡检」：逐个岗位列出修不稳的技能（避用 / 留意），并给出更换或兜底建议。
+**Version note**: **Existing organizations get inspected too** — skill health used to be consulted only while building an org; the health report now adds a **skill health inspection** that lists unstable skills per role (avoid / watch) with replacement or fallback advice.
+
+## 变更
+# Changes
+
+中文：
+- **巡检数据**：`OrgHealthReport.SkillHealthRow` + `BuildMarkdown(..., skillHealth)`；`/org-health` 用 `SkillLoopHealthBoard` 汇总后逐个岗位遍历 `SkillDefIds`，命中避用 / 留意即入表（避用优先、按修复次数降序）。
+- **报告**：Markdown「技能健康巡检」一节（岗位 / 技能 / 成功率 / 回滚 / 失败 / 建议 + 汇总行）；避用 > 0 时写入「建议」；章节编号改为动态计数，避免因前序章节缺失而跳号。
+- **HTML**：单文件导出同步新增「技能健康巡检」表（避用 / 留意 / 涉及岗位数 + 明细）。
+- **接口**：`/org-health` 响应新增 `skillHealth`（`avoid` / `watch` / `agents` / `rows`）。
+
+English:
+- **Data**: `OrgHealthReport.SkillHealthRow` plus the `skillHealth` argument to `BuildMarkdown`; `/org-health` summarizes loop events with `SkillLoopHealthBoard` and walks each definition's `SkillDefIds`, adding avoid / watch entries (avoid first, then by repair count).
+- **Report**: a **Skill health inspection** Markdown section (role / skill / success rate / rollbacks / failures / advice plus a summary line); an avoid count above zero is repeated in the advice; section numbering is now counted dynamically so no numbers are skipped when earlier sections are absent.
+- **HTML**: the single-file export gains the same inspection table (avoid / watch / roles affected plus rows).
+- **API**: `/org-health` returns `skillHealth` (`avoid` / `watch` / `agents` / `rows`).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §8.1.5（体检报告新增巡检一节）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.366；顺手修正了 1.0.361 文档里的「兵底」错字为「兜底」。
+English: `docs/user-guide.md` / `en.md` §8.1.5 (the new inspection section in the health report); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.366; a typo from the 1.0.361 notes was corrected as well.
+
+## 测试
+# Tests
+
+中文：新增报告巡检用例 2 条（避用 / 留意入表与建议、空巡检时的健康提示）；全量 `dotnet vstest` **2096 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2485，missing 0；配置键与文档引用校验通过。
+English: two new report cases (avoid / watch rows with advice, and the healthy message for an empty inspection); the full `dotnet vstest` run passes **2096 / 0**; `node --check app.js`; the i18n audit reports zh=en=2485, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.365 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.365 Release Notes (historical)
 
 **版本说明**：**记忆治理终于有反馈**——记忆管理顶部新增「📊 质量概览」：几个知聚 / 多少条记忆 / 多少已过期 / 多少已被取代（占比）/ 本知聚待处理几对，切知聚即重算。
 **Version note**: **Memory governance now has feedback** — Memory management gains a **📊 Quality overview**: groups, memories, expired, superseded (share) and pending pairs for the selected group, recomputed on switch.
@@ -152,7 +187,7 @@ English: eight new `SkillLoopRoutingHintTests` cases (avoid / watch / silent for
 中文：
 - **健康度汇总**：新增 `SkillLoopHealthBoard.Build`（纯函数）——汇总近 30 天闭环事件（跳过 `skipped`，与质量画像同窗口），得出每个技能的有效修复数 / 成功数 / 回滚 / 失败 / 成功率。
 - **划分**：**避用**（至少 2 次有效修复，且成功率 < 50% 或回滚 ≥ 2 次）/ **留意**（有失败或回滚，或成功率 < 70%）/ 其余视为健康；只有避用 / 留意会被写进提示词与自检，避免噪声。
-- **候选提示**：`ReusableSkill` 新增 `HealthNote`，提示词新增「· 修复健康：…」行，并写明规则：优先选同类更稳的技能；职责只能用它时，在岗位 `instructions` 里写兵底做法（先跑 🧪 回归确认可用）。
+- **候选提示**：`ReusableSkill` 新增 `HealthNote`，提示词新增「· 修复健康：…」行，并写明规则：优先选同类更稳的技能；职责只能用它时，在岗位 `instructions` 里写兜底做法（先跑 🧪 回归确认可用）。
 - **方案自检**：`SelfCheck` 新增 `skill_loop_risk`（warn），避用与留意分两条列出（各自带近 N 次修复的成功 / 回滚 / 失败）。
 - **同口径**：网页 `/orchestrate`、`/orchestrate/stream` 与构建师工具 `org_plan_draft` 都带上健康度。
 

@@ -71,6 +71,7 @@
 - **记忆冲突与取代（1.0.363，已实现）**：`MemoryConflictDetector`（纯函数）在写入侧判定「明确更正 + 短句 + 相似度 ≥ 0.9 + ≥2 个共享字符二元组」四条同时成立时，把同群更早的旧记忆标为已被取代（`superseded_by` 列，SQLite / PostgreSQL 自动迁移）；两种检索均加 `superseded_by IS NULL` 过滤；记忆列表划线展示并可「撤销取代」（`POST /ag-ui/memory/{messageId}/unsupersede`）。配置：`ConflictDetectionEnabled`（默认开）/ `ConflictMinScore` / `ConflictMaxChars` / `ConflictMaxMarks`。
 - **存量一致性体检（1.0.364，已实现）**：`MemoryConflictScan`（纯函数）在指定知聚内扫「同一句话差一个值」的短句对（共同开头 ≥4 字停在属性槽位、数字差异、或二元组重合度 ≥0.75；前缀包含视为补充说明）；`GET /ag-ui/memory/conflicts` 列出疑似对，`POST /ag-ui/memory/conflicts/resolve` 支持 `supersede` / `keep`；记忆管理「🔍 一致性体检」弹窗人工裁决。
 - **记忆质量概览（1.0.365，已实现）**：`MessageMemoryGroupStat.SupersededCount`（SQLite / PostgreSQL 同一 SQL 统计）+ `GET /ag-ui/memory/quality`（`summary`：知聚数 / 条数 / 过期 / 已被取代 / 取代率 / 待处理对，后者仅对选中知聚计算）+ 记忆弹窗「📊 质量概览」行与刷新。
+- **组织体检技能健康巡检（1.0.366，已实现）**：`OrgHealthReport.SkillHealthRow` + `BuildMarkdown(..., skillHealth)`；`/org-health` 用 `SkillLoopHealthBoard` 逐个岗位汇总挂载技能，避用 / 留意入表（已避用优先），Markdown 与 HTML 报告新增「技能健康巡检」一节，避用 > 0 写入建议；章节编号改为动态计数。
 
 ### 2.3 跨实例记忆同步（★★☆ 打通桌面/Web 孤岛） ✅已实现（记忆即数据包 / 增量同步）
 - **现状**：桌面版与 Web 各自本地记忆，互不相通。
@@ -123,7 +124,7 @@
 - **在线分发（已实现）**：除内置角色包外，管理员可配置<b>在线目录源</b>（任意静态 JSON 地址），用户一键安装目录里的包；也可把自建数字员工<b>发布</b>为分包文件自行托管。合同为纯 JSON（目录索引 + 包 `schema=knowgath/marketplace-pack/v1`），无需专用后端。安装<b>两趟</b>处理（先分配新 ID，再把包内相互引用重映射），并做<b>安全净化</b>（清桥接端点 / 令牌、他实例用户组 id、私有标记）；拉取限制 http/https、2MB、10s、不开重定向、60s 缓存，坏源不影响聚合。前端：「AI 角色管理」工具栏「🏪 模板市场」。落点：`Agents/MarketplaceService.cs`（`ImportDefinitions`）、`Web/MarketplaceRemote.cs`、`Web/MarketplaceApi.cs`。
 - **技能库搜索与批量删除（已实现）**：技能库新增 `prompt` / `shell` / `http` 三类可复用技能（`shell`/`http` 仅管理员创建），支持<b>按名称 / ID 搜索</b>（前端过滤）与<b>勾选批量删除</b>；`POST /ag-ui/skills/generate` 用自然语言生成技能定义（无需手写命令 / JSON）。
 - **修复健康反哺运行时（1.0.362，已实现）**：`Agents:ArtifactQuality:RoutingHintEnabled`（默认关）；`SkillLoopRoutingHint`（纯函数）生成指派路由的候选健康参考行与工具说明的自检提醒（避用级要求产出后必检、留意级抽查）；`AgentGateway.RankAssignTargetsAsync` 与 `AgentCatalog` 挂载技能时共用 `SkillLoopHealthBoard` 口径。
-- **修复健康进编排（1.0.361，已实现）**：`SkillLoopHealthBoard.Build` 汇总近 30 天闭环事件（不计 skipped）得出避用 / 留意 / 健康；`ReusableSkill.HealthNote` + 提示词规则（优先选同类更稳的技能，否则写兵底做法）；`SelfCheck` 新增 `skill_loop_risk`（warn）；网页、流式与 `org_plan_draft` 同口径。
+- **修复健康进编排（1.0.361，已实现）**：`SkillLoopHealthBoard.Build` 汇总近 30 天闭环事件（不计 skipped）得出避用 / 留意 / 健康；`ReusableSkill.HealthNote` + 提示词规则（优先选同类更稳的技能，否则写兜底做法）；`SelfCheck` 新增 `skill_loop_risk`（warn）；网页、流式与 `org_plan_draft` 同口径。
 - **告警 → 自动修复（1.0.360，已实现）**：`SkillRepairRunner` 把 repair 端点流水线抽出共用；`SkillAutoRepairQueue` + `SkillAutoRepairWorker` 在闭环告警 / 产物质量自动暂停时后台再试一次修复（默认关闭，`Agents:ArtifactQuality:AutoRepairEnabled`）；`SkillAutoRepairPolicy` 卡冷却（60 分钟，仅自动）与每日上限（3 次），只处理非内置且服务端可自测的技能；闭环事件新增 `Source`（manual / auto），看板显示开关与队列计数。
 - **闭环告警与回归用例补充（1.0.359，已实现）**：`SkillLoopAlertPolicy.Evaluate`（纯函数）按最近 7 天最近 5 次有效修复判定回滚 ≥ 2 / 失败 ≥ 2 / 成功率 < 50%，命中后自动补标准样例回归用例（文档类契约且尚无用例时），写 `SkillLoopAlertStore`（200 条）并推送 `SKILL_LOOP_ALERT`（60 分钟冷却，不自动暂停）；`GET /ag-ui/admin/skill-loop/alerts` 供通知中心轮询；组织体检 Markdown / HTML 报告新增「技能自愈闭环」一节；`SkillLoopMetrics.BySkill` 统一按技能口径。
 - **自愈闭环指标进质量看板（1.0.358，已实现）**：新增 `SkillLoopEventStore`（扩展区 `skillLoop`，最近 2000 条，重启保留）记录每次修复尝试的结局（applied / resumed / rolledback / failed / skipped）、耗时、是否跑回归与回归结果；`SkillLoopMetrics.Summarize` 给出成功率（排除 skipped）与平均耗时（排除 skipped）；`GET /ag-ui/admin/skill-loop?days=N` 返回 `summary / daily / skills`，产物质量弹窗新增「🔁 自愈闭环」区（KPI 卡片 + 按技能明细表）。

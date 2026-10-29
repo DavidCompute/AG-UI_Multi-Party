@@ -576,9 +576,30 @@ public static class AdminApi
                 .OrderByDescending(r => r.Attempts)
                 .ThenBy(r => r.Name, StringComparer.CurrentCulture)
                 .ToList();
+            // 技能健康巡检（1.0.366）：已有组织不会因成员技能变差而被自动重检，体检报告里补上。
+            var healthMap = SkillLoopHealthBoard.Build(loopEvents, to.ToUnixTimeMilliseconds());
+            var skillHealthRows = defs
+                .SelectMany(def => (def.SkillDefIds ?? [])
+                    .Where(sid => !string.IsNullOrWhiteSpace(sid))
+                    .Distinct(StringComparer.Ordinal)
+                    .Select(sid => (Agent: def, SkillId: sid)))
+                .Where(x => healthMap.TryGetValue(x.SkillId, out var h0) && h0.IsRisky)
+                .Select(x =>
+                {
+                    var h = healthMap[x.SkillId];
+                    return new OrgHealthReport.SkillHealthRow(
+                        string.IsNullOrWhiteSpace(x.Agent.Nickname) ? x.Agent.AgentId : x.Agent.Nickname!,
+                        x.SkillId,
+                        skillCatalog?.Get(x.SkillId)?.Name is { Length: > 0 } sn ? sn : x.SkillId,
+                        h.Attempts, h.Successes, h.RolledBack, h.Failed, h.SuccessRate,
+                        h.IsAvoid ? "avoid" : "watch");
+                })
+                .OrderByDescending(r => string.Equals(r.Level, "avoid", StringComparison.Ordinal))
+                .ThenByDescending(r => r.Attempts)
+                .ToList();
             var md = OrgHealthReport.BuildMarkdown(d, from.ToString("yyyy-MM-dd"), to.ToString("yyyy-MM-dd"),
                 stats, byId, pricing, to.ToUnixTimeMilliseconds(), sp.GetService<EvalCaseStore>()?.List(), prevStats,
-                loopSummary, loopRows);
+                loopSummary, loopRows, skillHealthRows);
             // 除 Markdown 外，同时下发结构化数据（供前端图表视图：KPI / 调用量 Top / 关注项）。
             var up = stats.Sum(s => s.Up);
             var down = stats.Sum(s => s.Down);
@@ -641,6 +662,24 @@ public static class AdminApi
                         rolledBack = r.RolledBack,
                         failed = r.Failed,
                         avgMs = r.AvgMs,
+                    }).ToList(),
+                },
+                skillHealth = new
+                {
+                    avoid = skillHealthRows.Count(r => r.Level == "avoid"),
+                    watch = skillHealthRows.Count(r => r.Level == "watch"),
+                    agents = skillHealthRows.Select(r => r.AgentName).Distinct(StringComparer.Ordinal).Count(),
+                    rows = skillHealthRows.Select(r => new
+                    {
+                        agentName = r.AgentName,
+                        skillId = r.SkillId,
+                        skillName = r.SkillName,
+                        attempts = r.Attempts,
+                        successes = r.Successes,
+                        rolledBack = r.RolledBack,
+                        failed = r.Failed,
+                        successRate = r.SuccessRate,
+                        level = r.Level,
                     }).ToList(),
                 },
                 from = from.ToString("yyyy-MM-dd"),

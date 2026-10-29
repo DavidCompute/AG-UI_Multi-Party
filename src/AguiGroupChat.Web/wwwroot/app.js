@@ -9264,6 +9264,27 @@ function downloadOrgHealthHtml() {
       + loopTable + "\n"
     : "";
 
+  // 技能健康巡检（1.0.366）：已有组织里修不稳的技能，按避用 / 留意列出。
+  const sh = d.skillHealth || null;
+  const shRows = sh && Array.isArray(sh.rows) ? sh.rows : [];
+  const shTable = shRows.length
+    ? `<table><thead><tr>`
+      + ["admin.orgHealthHealthThAgent", "admin.orgHealthHealthThSkill", "admin.perfThRate", "admin.loopRolledBack", "admin.loopFailed"]
+        .map((k) => `<th>${escapeHtml(t(k))}</th>`).join("")
+      + `</tr></thead><tbody>`
+      + shRows.map((r) => `<tr><td>${escapeHtml(r.agentName || "")}</td><td>${escapeHtml(`${r.skillName || r.skillId}（${r.skillId}）`)}</td>`
+        + `<td class="num">${Math.round(Number(r.successRate || 0) * 100)}%</td>`
+        + `<td class="num">${num(r.rolledBack)}</td><td class="num">${num(r.failed)}</td></tr>`).join("")
+      + `</tbody></table>`
+    : `<div class="meta">${escapeHtml(t("admin.orgHealthHealthNone"))}</div>`;
+  const shSec = sh
+    ? `<h2>${escapeHtml(t("admin.orgHealthHealth"))}</h2>\n`
+      + `<div class="meta">${escapeHtml(t("admin.orgHealthHealthSummary", {
+          avoid: num(sh.avoid), watch: num(sh.watch), agents: num(sh.agents),
+        }))}</div>\n`
+      + shTable + "\n"
+    : "";
+
   const style = `:root{--border:#d7dde8;--muted:#667085;--accent:#4f8cff;--bad:#dc2626}`
     + `*{box-sizing:border-box}body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#1e2432;margin:24px;background:#fff}`
     + `h1{font-size:20px;margin:0 0 4px}h2{font-size:13px;color:var(--muted);margin:18px 0 6px}`
@@ -9293,6 +9314,7 @@ function downloadOrgHealthHtml() {
     + `<h2>${escapeHtml(t("admin.orgHealthFlags"))}</h2>\n<div>${flags}</div>\n`
     + `<h2>${escapeHtml(t("admin.orgHealthHtmlAppendix"))} · ${escapeHtml(dimLabel)}</h2>\n${table}\n`
     + loopSec
+    + shSec
     + `</body></html>`;
 
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });

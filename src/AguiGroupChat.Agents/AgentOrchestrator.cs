@@ -20,7 +20,7 @@ public static class AgentOrchestrator
     /// </summary>
     /// <param name="QualityNote">近 30 天产物质量画像（1.0.348；无记录时为 null），用于让模型优先选可靠的技能。</param>
     /// <param name="ExperienceNote">未解决的历史失败经验（1.0.350；无则为 null），用于让模型在岗位说明里写明规避步骤。</param>
-    /// <param name="HealthNote">近 30 天修复健康度（1.0.361；只在修复不稳时才有值），用于提醒模型慎用或设计兵底方案。</param>
+    /// <param name="HealthNote">近 30 天修复健康度（1.0.361；只在修复不稳时才有值），用于提醒模型慎用或设计兜底方案。</param>
     public sealed record ReusableSkill(
         string SkillId, string Name, string Description, string Kind,
         string? QualityNote = null, string? ExperienceNote = null, string? HealthNote = null);
@@ -32,7 +32,7 @@ public static class AgentOrchestrator
     /// <param name="lessons">为岗位经验库（1.0.350）：带上时把未解决的失败经验也列进候选，
     /// 让编排能提前设计规避步骤（如岗位说明里要求先备齐正文 / 页数）。</param>
     /// <param name="loopHealth">为近 30 天修复健康度（1.0.361）：带上时对“修也修不好”的技能附提醒，
-    /// 让模型避开反复回滚的技能，或至少把兵底方案（先跑回归 / 换同类技能）写进岗位说明。</param>
+    /// 让模型避开反复回滚的技能，或至少把兜底方案（先跑回归 / 换同类技能）写进岗位说明。</param>
     public static IReadOnlyList<ReusableSkill> ToReusableSkills(
         IEnumerable<AgentSkillDefinition>? skills,
         IReadOnlyDictionary<string, SkillQualityProfile>? quality = null,
@@ -536,7 +536,7 @@ public static class AgentOrchestrator
             if (watch.Count > 0)
                 checks.Add(new OrgPlanCheck("skill_loop_risk", "warn",
                     "以下技能最近的修复不够稳：" + string.Join(";", watch)
-                    + "。建议在对应岗位的 instructions 里写明兵底做法（先跑回归确认可用）。"));
+                    + "。建议在对应岗位的 instructions 里写明兜底做法（先跑回归确认可用）。"));
         }
 
         // —— 交付闭环：需求要的交付物是否真有人能产出 ——
@@ -591,7 +591,7 @@ public static class AgentOrchestrator
         sb.Append("- 标注「已知坑」的技能：在对应岗位的 instructions 里写明规避步骤（如“调用前先备齐正文 / 页数 / 数据，" +
                   "产出后检查交付文件是否齐全”），不要忽略历史失败经验。\n");
         sb.Append("- 标注「修复健康」的技能：这说明它最近反复修也修不稳（回滚 / 自测失败）。**优先选同类更稳的技能**；" +
-                  "若职责只能用它，就在岗位 instructions 里写明兵底做法（先跑 🧪 回归确认可用，不通过就改用其他方式产出）。\n\n");
+                  "若职责只能用它，就在岗位 instructions 里写明兜底做法（先跑 🧪 回归确认可用，不通过就改用其他方式产出）。\n\n");
         return sb.ToString();
     }
 
