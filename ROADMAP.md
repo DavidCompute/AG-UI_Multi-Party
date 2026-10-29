@@ -75,6 +75,7 @@
 - **严格审核修复（1.0.367，已实现）**：`SkillSuspension.MayAutoRepair` 阻止自动修复越过人工暂停（告警桥入队 + 工作线程双重判定）；`MemoryConflictScan` 预计算规范化文本与二元组（800 条扫描毫秒级，含规模回归测试）；`/memory/conflicts` 与 `/memory/quality` 扫描上限对齐存储层 500。
 - **性能 / 容量基线（1.0.368，已实现）**：`PerformanceBaselineTests` 7 条用存储层上限数据固定热路径耗时（闭环 / 质量画像 / 编排候选 / 体检报告 / 记忆扫描 / 用量聚合），阈值取几十倍余量防 CI 抖动；`MemoryConflictScan` 新增前 4 字桶与长度比剪枝（数学上安全，不漏判）。
 - **两条新链路的 E2E 守门（1.0.369，已实现）**：`tools/e2e-memory-conflict.mjs`（API 级确定性：发消息 → 体检列出 → 取代 → 列表 / 质量反映 → 标已处理 → 撤销 → 清理，不调模型）；`tools/ui-quality-chains.mjs`（Playwright：记忆质量概览 / 体检弹窗 / 自愈闭环 KPI 与自动修复状态行 / 无前端运行时错误）；含耗时断言的测试类全部移入 `DisableParallelization` 集合，避免并发假红灯。
+- **守门接入流水线（1.0.370，已实现）**：`api-smoke.mjs` 增至 51 项（含 `/admin/skill-loop`、`/admin/skill-loop/alerts`、`/admin/artifact-quality`、`/memory/quality`、`/memory/conflicts`）；`ui-quality-chains.mjs` 接入 `ui-regression.yml`；两个 E2E 在记忆不可用时打 `[SKIP]` 退出码 `0`，可安全接入任意环境。
 
 ### 2.3 跨实例记忆同步（★★☆ 打通桌面/Web 孤岛） ✅已实现（记忆即数据包 / 增量同步）
 - **现状**：桌面版与 Web 各自本地记忆，互不相通。

@@ -126,6 +126,13 @@ let userToken = null;
   await check("存储治理", ["/ag-ui/admin/storage", "/ag-ui/admin/storage/"]);
   await check("托管 API 密钥", ["/ag-ui/admin/api-keys", "/ag-ui/admin/api-keys/"]);
   await check("评测回归", ["/ag-ui/admin/eval-cases", "/ag-ui/admin/eval-cases/"]);
+  // 1.0.370：自愈闭环与记忆质量两个新面（只读）。
+  await check("自愈闭环指标", "/ag-ui/admin/skill-loop");
+  await check("自愈闭环告警", "/ag-ui/admin/skill-loop/alerts");
+  await check("技能产物质量", "/ag-ui/admin/artifact-quality");
+  await check("记忆质量概览", "/ag-ui/memory/quality");
+  // 体检需要指定知聚：不带 groupId 时应返 400（路由与鉴权正常即可，不算缺陷）
+  await check("记忆一致性体检（缺参 400）", "/ag-ui/memory/conflicts", { expect: [200, 400] });
   await check("市场源", ["/ag-ui/admin/marketplace/sources", "/ag-ui/admin/marketplace/sources/"]);
   await check("Webhook", ["/ag-ui/admin/webhooks", "/ag-ui/admin/webhooks/"]);
   await check("原生桥安装包信息", "/ag-ui/native-bridge/download/info");

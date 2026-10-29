@@ -69,9 +69,21 @@ try {
   ok("登录成功");
 
   // ---- 1) 记忆管理：质量概览 ----
-  await page.click("#meChip");
-  await page.click("#meMenuMemory");
-  await page.waitForSelector("#memoryModal:not(.hidden)", { timeout: 8000 });
+  // 记忆未启用（mock + 内存存储的 CI 环境）时接口不可用：整段跳过，但产物质量那段仍会跑。
+  const memoryApiOk = await page.evaluate(async () => {
+    const raw = sessionStorage.getItem("agui.auth") || localStorage.getItem("agui.auth") || "{}";
+    const token = (JSON.parse(raw) || {}).token || "";
+    try {
+      const r = await fetch("/ag-ui/memory/quality", { headers: token ? { Authorization: "Bearer " + token } : {} });
+      return r.ok;
+    } catch { return false; }
+  });
+  if (!memoryApiOk) {
+    console.log("  [SKIP] 记忆未启用（/ag-ui/memory/quality 不可用）——跳过记忆质量 / 体检两组断言");
+  } else {
+    await page.click("#meChip");
+    await page.click("#meMenuMemory");
+    await page.waitForSelector("#memoryModal:not(.hidden)", { timeout: 8000 });
 
   const qualityOk = await waitFor(async () => {
     const t = (await page.locator("#memQualityText").innerText()).trim();
@@ -114,6 +126,7 @@ try {
 
   await page.click("#memoryClose");
   await waitHidden("#memoryModal");
+  }
 
   // ---- 3) 管理控制台 → 员工绩效 → 产物质量 → 自愈闭环 ----
   await page.click("#meChip");

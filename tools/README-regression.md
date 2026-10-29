@@ -60,7 +60,7 @@ cd tools && node ui-quality-chains.mjs
 cd tools && HEADLESS=0 node ui-quality-chains.mjs   # 有头
 ```
 
-`e2e-memory-conflict.mjs` 需服务端已启用语义记忆与 embedding（Docker 栈默认满足）；它会在测试知聚里发两条消息、验证“体检 → 取代 → 反映 → 撤销”整条闭环，结束时默认解散该知聚并遗忘记忆（`KEEP=1` 保留）。
+`e2e-memory-conflict.mjs` 需服务端已启用语义记忆与 embedding（Docker 栈默认满足）；它会在测试知聚里发两条消息、验证“体检 → 取代 → 反映 → 撤销”整条闭环，结束时默认解散该知聚并遗忘记忆（`KEEP=1` 保留）。记忆未启用（mock + 内存存储）时脚本会打印 `[SKIP]` 并以退出码 `0` 退出，便于接入任意环境。
 
 ## 退出码
 

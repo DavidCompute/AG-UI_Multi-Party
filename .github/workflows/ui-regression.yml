@@ -1,8 +1,9 @@
 name: UI regression (quota + pending approvals)
 
 # 手工触发的浏览器回归：在干净的 runner 上起一个 mock + 内存存储的 Web，
-# 用 Playwright 跑 tools/ui-quota-alerts.mjs（配额水位 / 覆写同步，只读）与
-# tools/ui-imglib-pending-click.mjs（待审批通知 → 点击直达图库管理，列表用路由桩）。
+# 用 Playwright 跑 tools/ui-quota-alerts.mjs（配额水位 / 覆写同步，只读）、
+# tools/ui-imglib-pending-click.mjs（待审批通知 → 点击直达图库管理，列表用路由桩）
+# 与 tools/ui-quality-chains.mjs（记忆质量 / 技能自愈界面；记忆未启用时自动跳过记忆两组断言）。
 #
 # 为什么不用 docker compose：web 依赖 llama-embed，而后者需要 605MB 的 embedding 模型文件
 # （仓库不携带）；本回归只验证前端渲染与状态同步，mock + memory 足够且更快。
@@ -97,6 +98,16 @@ jobs:
           PASSWORD: lingtong
           HEADLESS: "1"
         run: node ui-imglib-pending-click.mjs
+
+      # 1.0.370：记忆质量 / 技能自愈界面（记忆未启用时脚本自行跳过记忆两组断言，产物质量那段照跑）
+      - name: Run quality-chain UI regression
+        working-directory: tools
+        env:
+          BASE_URL: http://127.0.0.1:5200
+          USERNAME: david
+          PASSWORD: lingtong
+          HEADLESS: "1"
+        run: node ui-quality-chains.mjs
 
       - name: Run webhook event grouping regression
         working-directory: tools

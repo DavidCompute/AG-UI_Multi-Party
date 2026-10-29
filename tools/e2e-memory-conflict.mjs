@@ -72,6 +72,13 @@ if (!userId) {
 }
 ok(`登录成功（${USER} / ${userId}）`);
 
+// 记忆未启用（mock + 内存存储 / 非 pgvector 部署）时跳过：本剧本必须有真实向量写入。
+const probe = await api("GET", "/ag-ui/memory/quality");
+if (probe.status !== 200) {
+  console.log("  [SKIP] 记忆未启用（/ag-ui/memory/quality 不可用）——本剧本需要语义记忆 + embedding 服务，跳过");
+  process.exit(0);
+}
+
 // 2) 建一个私密测试知聚
 const created = await api("POST", "/ag-ui/group/create", {
   groupName: `E2E 冲突-${stamp}`,

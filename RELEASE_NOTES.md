@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.369 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.369 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.370 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.370 Release Notes (current Windows desktop release)
+
+**版本说明**：**守门从本机走到流水线**——两条新链路的 E2E 接入 CI（界面回归进 `ui-regression.yml`，记忆冲突剧本在无记忆环境自动跳过），API 扫描覆盖到四个新端点。
+**Version note**: **Guards move from a laptop into the pipeline** — both new chains join CI (the UI regression in `ui-regression.yml`, the conflict script self-skips where memory is off), and the API sweep covers the four new endpoints.
+
+## 变更
+# Changes
+
+中文：
+- **API 扫描**：`tools/api-smoke.mjs` 新增 5 项探测——`/admin/skill-loop`、`/admin/skill-loop/alerts`、`/admin/artifact-quality`、`/memory/quality`，以及 `/memory/conflicts`（不带 `groupId` 时接受 `400`，只验路由 / 鉴权）。当前 **51/51 通过**。
+- **CI 接入**：`ui-regression.yml` 新增 `ui-quality-chains.mjs` 步骤（mock + 内存环境）；脚本会先探 `/memory/quality`，记忆未启用时打 `[SKIP]` 并继续跑“产物质量 → 自愈闭环”那段，**不会假失败**。
+- **跳过语义**：`e2e-memory-conflict.mjs` 同样在记忆不可用时打 `[SKIP]` 并退出码 `0`，方便接入任意环境；在 compose 栈（pgvector + llama-embed）上仍跑完整 12 项断言。
+- **文档**：`tools/README-regression.md`（两个脚本的位置、依赖与跳过语义）与 `docs/user-guide` §9.7 同步。
+
+English:
+- **API sweep**: `tools/api-smoke.mjs` gains five probes — `/admin/skill-loop`, `/admin/skill-loop/alerts`, `/admin/artifact-quality`, `/memory/quality`, and `/memory/conflicts` (a missing `groupId` may return `400`, which still proves routing and auth). Currently **51/51 pass**.
+- **CI wiring**: `ui-regression.yml` gains a `ui-quality-chains.mjs` step (mock + in-memory); the script probes `/memory/quality` first, prints `[SKIP]` when memory is off and still runs the artifact-quality → self-healing segment, so it cannot fail spuriously.
+- **Skip semantics**: `e2e-memory-conflict.mjs` likewise prints `[SKIP]` and exits `0` when memory is unavailable, so it can be wired anywhere; on the compose stack (pgvector + llama-embed) it still runs all 12 assertions.
+- **Docs**: `tools/README-regression.md` (locations, dependencies, skip semantics) and `docs/user-guide` §9.7 are updated.
+
+## 文档
+# Docs
+
+中文：`tools/README-regression.md`；`docs/user-guide.md` / `en.md` §9.7；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.370。
+English: `tools/README-regression.md`; `docs/user-guide.md` / `en.md` §9.7; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.370.
+
+## 测试
+# Tests
+
+中文：`api-smoke.mjs` **51/51 通过**；`e2e-memory-conflict.mjs` 对 Docker 栈 **12 项断言全过**（含清理）；`ui-quality-chains.mjs` **7 项断言全过**；全量 `dotnet vstest` **2108 通过 / 0 失败**；i18n 审计 zh=en=2485，missing 0；文档引用校验通过。
+English: `api-smoke.mjs` passes **51/51**; `e2e-memory-conflict.mjs` passes all **12 assertions** against the Docker stack (including cleanup); `ui-quality-chains.mjs` passes all **7**; the full `dotnet vstest` run passes **2108 / 0**; the i18n audit reports zh=en=2485, missing 0; docs references resolve.
+
+---
+
+# AG-UI 群聊桌面版 1.0.369 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.369 Release Notes (historical)
 
 **版本说明**：**两条新链路有了机器守门**——新增 API 级「记忆冲突」端到端剧本（不调模型、确定性）与「记忆质量 / 技能自愈」界面回归；顺手修掉性能用例在全量并发下的假红灯。
 **Version note**: **The two newest chains are now machine-guarded** — an API-level, model-free memory-conflict E2E and a UI regression for the memory-quality / skill self-healing surfaces, plus a fix for timing tests that went red under full-suite parallelism.
