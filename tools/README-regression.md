@@ -8,6 +8,8 @@
 | `api-smoke.mjs` | 运行期 | 后端 HTTP 只读主流面（46 项）：路由 404/500、鉴权错位、序列化异常、Prometheus 指标缺失 | 手动（需起服务） |
 | `ui-smoke.mjs` | 运行期 | 前端主要界面（Playwright）：**未捕获运行时错误**（`ReferenceError` 等）、**i18n 原文键泄漏** | 手动（需浏览器） |
 | `ui-quota-alerts.mjs` | 运行期 | 配额水位 / 覆写同步（Playwright）：用量页三张表（红/琥珀/`⚙`/豁免）、侧栏角标、水位**白名单**、`GROUP_UPDATED` 同步 `quotaPerGroup`/`model` | 手动；也可在 Actions 手动触发（`ui-regression.yml`，mock + 内存，无需本地起服务） |
+| `e2e-memory-conflict.mjs` | 运行期 | **记忆冲突链路（API 级、确定性）**：发两条“同一件事改了一个值”的消息 → 体检列出 → 取代 → 列表/质量概览反映 → 体检标已处理 → 撤销取代 → 解散测试知聚 | 手动（需起服务；不调模型） |
+| `ui-quality-chains.mjs` | 运行期 | **记忆质量 / 技能自愈界面（Playwright）**：记忆「📊 质量概览」有数字、「🔍 一致性体检」可开可关、产物质量弹窗「🔁 自愈闭环」有 KPI 与自动修复状态行、全程无前端运行时错误 | 手动（需浏览器） |
 | `check-config-keys.mjs` | **静态** | **配置键 ↔ C# 属性漂移**：compose / appsettings 里配了、代码里没属性 → **静默忽略、不报错也不生效**（文档 §9.9 专列此坑） | **已在 CI** |
 | `check-docs-links.mjs` | **静态** | **文档引用失效**：markdown 链接 + 反引号文件引用（含 `:行号` 越界）指向不存在 / 已移动的文件 | **已在 CI** |
 
@@ -47,6 +49,18 @@ cd tools && npm run ui:quota
 ```
 
 `ui-quota-alerts.mjs` 允许跳过项（如当前账号没有知聚），此时退出码仍为 `0`。
+
+```bash
+# ---- 记忆冲突链路（API 级、确定性；不调模型） ----
+node tools/e2e-memory-conflict.mjs
+KEEP=1 node tools/e2e-memory-conflict.mjs     # 保留测试知聚（便于手动看界面）
+
+# ---- 记忆质量 / 技能自愈界面 ----
+cd tools && node ui-quality-chains.mjs
+cd tools && HEADLESS=0 node ui-quality-chains.mjs   # 有头
+```
+
+`e2e-memory-conflict.mjs` 需服务端已启用语义记忆与 embedding（Docker 栈默认满足）；它会在测试知聚里发两条消息、验证“体检 → 取代 → 反映 → 撤销”整条闭环，结束时默认解散该知聚并遗忘记忆（`KEEP=1` 保留）。
 
 ## 退出码
 

@@ -17,6 +17,8 @@
     "ui:notif-desktop-bridge": "node ui-notif-desktop-bridge.mjs",
     "smoke:api": "node api-smoke.mjs",
     "smoke:ui": "node ui-smoke.mjs",
+    "e2e:memory-conflict": "node e2e-memory-conflict.mjs",
+    "ui:quality-chains": "node ui-quality-chains.mjs",
     "check:config": "node check-config-keys.mjs",
     "check:docs": "node check-docs-links.mjs"
   },

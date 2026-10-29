@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.368**
+> Applies to version: **1.0.369**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -5745,6 +5745,8 @@ Named volumes: `agui-web-data` / `agui-docs` / `agui-hub-data` / `agui-pg-data`.
 | Desktop release | `.github/workflows/release-desktop.yml` | Installs WiX v4, downloads / caches the embedding model (hard gate: <400MB fails), parses the version, builds the MSI, and publishes the GitHub Release |
 | MSI packaging script | `powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version <ver>` | Generates `artifacts/wix/AguiGroupChat-Desktop-<ver>.msi`; includes steps such as "clean Release intermediates → publish → strip non-Win native libraries → bundle VC++ → generate files.wxs → wix build → verify backend DLL freshness" |
 | Browser E2E (Playwright) | `cd tools && node ui-*.mjs` | Multiple script sets; **must be run serially** (concurrent runs against the same backend cause timing contention) |
+| Memory-conflict E2E (API level) | `node tools/e2e-memory-conflict.mjs` | Deterministic chain: send two "same fact, one value changed" messages → the audit lists the pair → supersede → list and quality overview reflect it → the audit marks it handled → revert → disband the test group (`KEEP=1` keeps it); **no model calls** |
+| Quality-chain UI regression | `cd tools && node ui-quality-chains.mjs` | The **📊 Quality overview** shows numbers, the audit dialog opens and closes, the artifact-quality dialog renders the **🔁 Self-healing loop** KPIs and the auto-repair status line, and no frontend runtime errors occur |
 | E2E prerequisites | `cd tools && npm install && npx playwright install chromium` | Headed by default, `HEADLESS=1` for headless |
 | Performance baseline | `dotnet vstest <tests.dll> --TestCaseFilter:"FullyQualifiedName~PerformanceBaselineTests"` | Runs recent hot paths at **storage caps** (loop aggregation / quality profiles / orchestration candidates / health report / memory scan / usage aggregation); thresholds are tens of times the measured values, so only **order-of-magnitude** regressions fail |
 

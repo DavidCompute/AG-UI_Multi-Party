@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.368**
+> 适用版本：**1.0.369**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -5740,6 +5740,8 @@ service:
 | 桌面发布 | `.github/workflows/release-desktop.yml` | 安装 WiX v4、下载 / 缓存 embedding 模型（硬闸门：<400MB 失败）、解析版本、构建 MSI、发 GitHub Release |
 | MSI 打包脚本 | `powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version <ver>` | 生成 `artifacts/wix/AguiGroupChat-Desktop-<ver>.msi`；内含「清Release中间产物 → publish → 剔非 Win 原生库 → 捆 VC++ → 生成 files.wxs → wix build → 校验后端 DLL 新鲜度」等步骤 |
 | 浏览器 E2E（Playwright） | `cd tools && node ui-*.mjs` | 多套脚本；**必须串行执行**（并发打同一后端会时序争用） |
+| 记忆冲突 E2E（API 级） | `node tools/e2e-memory-conflict.mjs` | 确定性闭环：发两条“同一件事改了值”的消息 → 体检列出 → 取代 → 列表 / 质量概览反映 → 体检标已处理 → 撤销取代 → 解散测试知聚（`KEEP=1` 保留）；**不调模型** |
+| 质量链路 UI 回归 | `cd tools && node ui-quality-chains.mjs` | 记忆「📊 质量概览」有数字、体检弹窗可开可关、产物质量弹窗「🔁 自愈闭环」有 KPI 与自动修复状态行、全程无前端运行时错误 |
 | E2E 前置 | `cd tools && npm install && npx playwright install chromium` | 默认有头，`HEADLESS=1` 无头 |
 | 性能基线 | `dotnet vstest <tests.dll> --TestCaseFilter:"FullyQualifiedName~PerformanceBaselineTests"` | 用**存储层上限**的数据量跑近期热路径（闭环聚合 / 质量画像 / 编排候选 / 体检报告 / 记忆扫描 / 用量聚合）；阈值取实测的几十倍，只捕捉**数量级**劣化（不追精确基准） |
 

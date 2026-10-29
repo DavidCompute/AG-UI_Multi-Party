@@ -9,6 +9,7 @@ namespace AguiGroupChat.Hub.Tests;
 /// 暂停来源判定（1.0.367）：自动修复不得越过管理员的手工暂停。
 /// 另含存量扫描的规模回归（预计算后 800 条应在毫秒级完成）。
 /// </summary>
+[Collection(PerformanceCollection.Name)]
 public sealed class SkillSuspensionTests
 {
     private static AgentSkillDefinition Skill(bool suspended, string? reason = null)

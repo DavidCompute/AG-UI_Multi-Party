@@ -20,6 +20,7 @@ namespace AguiGroupChat.Hub.Tests;
 /// 记忆冲突检测与存量扫描（500/800 条）。
 /// </para>
 /// </summary>
+[Collection(PerformanceCollection.Name)]
 public sealed class PerformanceBaselineTests
 {
     private const int LoopCap = 2000;       // SkillLoopEventStore.MaxEvents

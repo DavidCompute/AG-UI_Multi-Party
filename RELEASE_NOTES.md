@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.368 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.368 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.369 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.369 Release Notes (current Windows desktop release)
+
+**版本说明**：**两条新链路有了机器守门**——新增 API 级「记忆冲突」端到端剧本（不调模型、确定性）与「记忆质量 / 技能自愈」界面回归；顺手修掉性能用例在全量并发下的假红灯。
+**Version note**: **The two newest chains are now machine-guarded** — an API-level, model-free memory-conflict E2E and a UI regression for the memory-quality / skill self-healing surfaces, plus a fix for timing tests that went red under full-suite parallelism.
+
+## 变更
+# Changes
+
+中文：
+- **`tools/e2e-memory-conflict.mjs`（API 级、确定性）**：登录 → 建私密测试知聚 → 发两条“同一件事改了一个值”的消息 → 等写入侧检测 / 体检列出 → 取代 → 断言列表 `supersededBy`、质量概览 `superseded≥1`、体检标已处理 → 撤销取代 → 断言标记清除 → 默认解散知聚并遗忘记忆（`KEEP=1` 保留）。**全程不调模型**。
+- **`tools/ui-quality-chains.mjs`（Playwright）**：记忆「📊 质量概览」有数字且非 i18n 键泄漏、体检弹窗可开 / 有结果 / 可关、产物质量弹窗「🔁 自愈闭环」有 KPI 卡片与自动修复状态行、全程无前端运行时错误。
+- **性能用例稳定性**：xUnit 默认跨类并行，本机 4 核在全量套件下会被其它用例吃满 CPU（隔离 ~180ms 的扫描并发时能到 3.5s）。新增 `[CollectionDefinition("performance-timing", DisableParallelization = true)]`，所有含耗时断言的类入该集合。
+- **文档 / 工具**：`tools/README-regression.md` 与 `docs/user-guide.md` §9.7 补两条入口；`tools/package.json` 加 `e2e:memory-conflict` / `ui:quality-chains`。
+
+English:
+- **`tools/e2e-memory-conflict.mjs` (API level, deterministic)**: login → create a private test group → send two "same fact, one value changed" messages → wait for write-time detection / the audit to list the pair → supersede → assert `supersededBy` in the list, `superseded≥1` in the quality overview and the pair marked handled → revert → assert the mark is gone → disband the group and forget its memories by default (`KEEP=1` keeps it). **No model calls.**
+- **`tools/ui-quality-chains.mjs` (Playwright)**: the **📊 Quality overview** shows numbers with no i18n key leaks, the audit dialog opens / shows results / closes, the artifact-quality dialog renders **🔁 Self-healing loop** KPI cards plus the auto-repair status line, and no frontend runtime errors occur.
+- **Timing-test stability**: xUnit parallelises across classes, so on a 4-core box the rest of the suite starves the CPU (a scan that takes ~180ms in isolation reached 3.5s). A new `[CollectionDefinition("performance-timing", DisableParallelization = true)]` holds every class with timing assertions.
+- **Docs / tooling**: entries added to `tools/README-regression.md` and `docs/user-guide.md` §9.7; `tools/package.json` gains `e2e:memory-conflict` / `ui:quality-chains`.
+
+## 文档
+# Docs
+
+中文：`tools/README-regression.md`；`docs/user-guide.md` / `en.md` §9.7；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.369。
+English: `tools/README-regression.md`; `docs/user-guide.md` / `en.md` §9.7; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.369.
+
+## 测试
+# Tests
+
+中文：两条新脚本对当前 Docker 栈实跑通过（记忆冲突 12 项断言、界面回归 7 项断言）；全量 `dotnet vstest` **2108 通过 / 0 失败**；`node --check`（新脚本 + app.js）；i18n 审计 zh=en=2485，missing 0；文档引用校验通过。
+English: both new scripts pass against the running Docker stack (12 assertions for the conflict chain, 7 for the UI regression); the full `dotnet vstest` run passes **2108 / 0**; `node --check` on the new scripts and `app.js`; the i18n audit reports zh=en=2485, missing 0; docs references resolve.
+
+---
+
+# AG-UI 群聊桌面版 1.0.368 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.368 Release Notes (historical)
 
 **版本说明**：**把性能钉住了**——新增一组按「存储层上限」跑的性能基线测试，覆盖近期所有热路径；并给存量记忆扫描加了两道**数学上安全**的剪枝（500 条从 ~234ms 降到 ~180ms）。
 **Version note**: **Performance is now pinned** — a new baseline suite runs recent hot paths at storage caps, and the stored-memory scan gained two mathematically safe prunes (500 items: ~234ms → ~180ms).
