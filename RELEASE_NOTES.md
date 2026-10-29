@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.363 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.363 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.364 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.364 Release Notes (current Windows desktop release)
+
+**版本说明**：**存量矛盾也能治理**——写入期的冲突检测只管以后；本版给已有记忆加一次「🔍 一致性体检」：找出同一知聚里“同一句话差一个值”的旧 / 新说法，人工确认后让旧说法退出检索。
+**Version note**: **Existing contradictions become manageable** — write-time detection only covers the future; this release adds a **consistency check** over stored memories: it surfaces old/new statements that differ in a single value, and one confirmation drops the old one from retrieval.
+
+## 变更
+# Changes
+
+中文：
+- **扫描**：`MemoryConflictScan`（纯函数）在指定知聚内两两比较短句：共同开头 ≥ 4 字且停在属性槽位上（前缀结尾为 是 / 为 / 由…、某侧尾部以系词开头、任一侧带数字、或含更正线索），共同开头不达标时用二元组重合度 ≥ 0.75 兜底；一方是另一方前缀时视为补充说明，不算冲突；跳过知识库 / 图库行。
+- **接口**：`GET /ag-ui/memory/conflicts?groupId=`（成员 / 全局管理员，单次最多 1000 条、最多 50 对）与 `POST /ag-ui/memory/conflicts/resolve`（`action=supersede` 让旧说法作废；`action=keep` 确认旧说法仍有效并撤销已有取代标记）。
+- **界面**：记忆管理新增「🔍 一致性体检」→ `#memConflictModal`，新旧说法并排展示（发送者 / 时间 / 重合度），一键「旧说法作废」或「保留旧说法」，已处理的对会标出。
+- **说明**：这是体检清单而非自动判决——启发式会漏也会误；误报只是一眼成本，漏报会让矛盾一直存在。
+
+English:
+- **Scan**: `MemoryConflictScan` (pure) compares short statements pairwise inside one group: a shared opening of at least 4 characters ending on an attribute slot (prefix ends with 是 / 为 / 由…, either tail starts with a copula, either side carries digits, or a correction cue is present), with bigram containment ≥ 0.75 as a fallback; a text that is a prefix of the other counts as elaboration, not conflict; knowledge-base and image rows are skipped.
+- **API**: `GET /ag-ui/memory/conflicts?groupId=` (member / global admin, at most 1000 memories and 50 pairs per sweep) and `POST /ag-ui/memory/conflicts/resolve` (`action=supersede` drops the old statement; `action=keep` confirms it and reverts any existing mark).
+- **UI**: Memory management gains **🔍 Consistency check** opening `#memConflictModal` with the old and new statements side by side (sender / time / overlap) and one-click **Supersede the old statement** or **Keep the old statement**; handled pairs are labelled.
+- **Intent**: a review list, not an automatic verdict — the heuristic both misses and over-reports; a false positive costs a glance, a miss keeps a contradiction alive.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §6.5.5（存量一致性体检）、§9.2 接口表（两条新端点）；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.364。
+English: `docs/user-guide.md` / `en.md` §6.5.5 (auditing existing memories) and the §9.2 API table (two new endpoints); `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.364.
+
+## 测试
+# Tests
+
+中文：新增 `MemoryConflictScanTests` 12 条（槽位变更 / 数字变更 / 标点差异 / 补充说明不判 / 不同主题不判 / 时间序 / 知识库跳过 / 长文跳过 / 已处理隐藏 / 排序与上限 / 过短文本 / 规范化）；全量 `dotnet vstest` **2093 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2475，missing 0；配置键与文档引用校验通过。
+English: twelve new `MemoryConflictScanTests` cases (slot change / numeric change / punctuation variance / elaboration skipped / unrelated subject skipped / ordering / kb rows skipped / long text skipped / handled pairs hidden / ordering and cap / too-short text / normalization); the full `dotnet vstest` run passes **2093 / 0**; `node --check app.js`; the i18n audit reports zh=en=2475, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.363 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.363 Release Notes (historical)
 
 **版本说明**：**记忆开始会“改主意”**——同一件事被推翻时（换负责人 / 改时间 / 方案作废），旧记忆不再与新说法并存地当事实用：系统把它标为「已被取代」、从检索中退出，并在记忆列表里划线展示、可人工撤销。
 **Version note**: **Memory can change its mind** — when a fact is overturned (new owner, new date, plan scrapped), the old memory no longer persists alongside the new one as if both were true: it is marked "superseded", drops out of retrieval, and stays visible (struck through) in the memory list with a manual revert.

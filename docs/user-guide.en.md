@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.363**
+> Applies to version: **1.0.364**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3286,6 +3286,17 @@ On a hit, `MarkSuperseded(old, new)` marks the old memory as superseded: **retri
 
 **Storage**: an `agui_message_memory.superseded_by` column (auto-migrated on SQLite and PostgreSQL); `MessageMemoryRecord.SupersededBy` / `MessageMemoryItem.SupersededBy` are shipped to the client. Switch: `Agents:Memory:ConflictDetectionEnabled` (on by default); turning it off restores the old behaviour (already-marked rows need a manual revert).
 
+#### 6.5.5 Auditing existing memories (1.0.364)
+
+Write-time detection only covers the future; contradictions already sitting in history need a sweep. Pick a group and click **🔍 Consistency check** in Memory management (`GET /ag-ui/memory/conflicts?groupId=`, members of that group or a global admin):
+
+- **Rule (`MemoryConflictScan`, pure)**: both sides must be short (≤200 chars) and neither may be a knowledge-base / image row; a **shared opening of at least 4 characters** that ends on an attribute slot (prefix ends with 是 / 为 / 由 / 在…, or either tail starts with a copula, or either side carries digits, or a correction cue is present); when one text is a **prefix** of the other it is an elaboration, not a conflict; below the prefix rule, bigram containment ≥ 0.75 acts as a fallback.
+- **Presentation**: each pair shows the older and newer statements side by side (sender, time, overlap) with **Supersede the old statement** and **Keep the old statement**.
+- **Resolution**: `POST /ag-ui/memory/conflicts/resolve` with `action=supersede` calls `Supersede(old, new)` (the same storage semantics as write-time detection, dropping the old statement from retrieval); `action=keep` reverts the mark if it was superseded. Resolved pairs are labelled as handled.
+- **Intent**: this is a **review list, not an automatic verdict** — the heuristic misses some pairs and over-reports others; a false positive costs one glance, a miss keeps a contradiction alive.
+
+Limits: one sweep reads at most 1000 memories (`limit` 50..1000) and returns at most 50 pairs.
+
 ---
 
 ### 6.6 The five tiers of "Memory Type (human-like recall)"
@@ -5112,6 +5123,8 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | GET | `/ag-ui/memory/graph` | Graph-memory subgraph (seeds entities / relations by `groupId` + topic `q`, for the frontend graph view; returns `enabled=false` when not enabled) | Login (member / admin) |
 | POST | `/ag-ui/memory/{messageId}/importance` | Adjust a single memory's importance level (0 normal / 1 important / 2 critical) | Login (owner / group management / admin) |
 | POST | `/ag-ui/memory/{messageId}/unsupersede` | Clear the "superseded" mark (1.0.363) | Login (same as above) |
+| GET | `/ag-ui/memory/conflicts` | Memory consistency audit (1.0.364): `?groupId=` required; returns suspected pairs (both sides, overlap, handled flag) | Login (group member / global admin) |
+| POST | `/ag-ui/memory/conflicts/resolve` | Resolve an audited pair (1.0.364): `{olderId, newerId, action}`, `action=supersede/keep` | Login (same as above) |
 | DELETE | `/ag-ui/memory/{messageId}` | Physically delete a single memory | Login (same as above) |
 | POST | `/ag-ui/memory/forget` | Manual forgetting (expire by group or everything; optionally keep the most recent N hours) | Login (same as above) |
 | POST | `/ag-ui/memory/consolidate` | Consolidate a group's "critical"-level memories into a knowledge base document (requires semantic memory to be enabled) | Login |

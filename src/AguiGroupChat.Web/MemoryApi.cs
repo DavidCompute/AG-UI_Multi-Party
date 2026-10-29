@@ -189,6 +189,63 @@ public static class MemoryApi
             return Results.Ok(new { ok = memory.Unsupersede(messageId) });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
+        // ---- 存量记忆一致性体检（1.0.364）：找出“同一句话差一个值”的疑似冲突对，交人工裁决 ----
+        root.MapGet("/conflicts", (HttpContext ctx, AuthService auth, IGroupStore store, IUserStore users,
+            IMessageMemory memory, string? groupId, int limit = 500) =>
+        {
+            var userId = WebIdentity.UserId(ctx)!;
+            if (string.IsNullOrWhiteSpace(groupId))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "请指定要体检的知聚"));
+            var global = MemoryGovernance.IsGlobalManager(auth, userId);
+            if (!global && !store.IsMember(groupId, userId))
+                return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可体检该群记忆"),
+                    statusCode: StatusCodes.Status403Forbidden);
+
+            object Item(MessageMemoryItem m) => new
+            {
+                m.MessageId, m.Timestamp, m.SenderId, m.SenderType,
+                senderNickname = ResolveSenderName(store, users, m.GroupId, m.SenderId, m.SenderType),
+                m.Content, m.Importance, m.ExpiresAt, m.SupersededBy,
+            };
+
+            var items = memory.ListMessages(groupId, null, null, Math.Clamp(limit, 50, 1000), 0).ToList();
+            var pairs = AguiGroupChat.Agents.MemoryConflictScan.FindPairs(items, maxPairs: 50, includeAlreadySuperseded: true);
+            return Results.Ok(new
+            {
+                groupId,
+                scanned = items.Count,
+                pairs = pairs.Select(p => new
+                {
+                    older = Item(p.Older),
+                    newer = Item(p.Newer),
+                    sharedPrefix = p.SharedPrefix,
+                    score = p.Score,
+                    resolved = !string.IsNullOrEmpty(p.Older.SupersededBy),
+                }),
+            });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // ---- 一致性体检裁决（1.0.364）：supersede = 旧说法作废；keep = 确认旧说法仍成立（若已被取代则撤销） ----
+        root.MapPost("/conflicts/resolve", (MemoryConflictResolveHttpRequest req, HttpContext ctx,
+            AuthService auth, IGroupStore store, IMessageMemory memory) =>
+        {
+            var userId = WebIdentity.UserId(ctx)!;
+            if (string.IsNullOrWhiteSpace(req.OlderId))
+                return Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "缺少 olderId"));
+            var ownership = CheckOwnership(store, memory, auth, req.OlderId!, userId);
+            if (ownership is not null) return ownership;
+
+            var action = (req.Action ?? "supersede").Trim().ToLowerInvariant();
+            return action switch
+            {
+                "keep" => Results.Ok(new { ok = true, reverted = memory.Unsupersede(req.OlderId!) }),
+                "supersede" => string.IsNullOrWhiteSpace(req.NewerId)
+                    ? Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "缺少 newerId"))
+                    : Results.Ok(new { ok = memory.Supersede(req.OlderId!, req.NewerId!) }),
+                _ => Results.BadRequest(new AguiError(ErrorCodes.BadRequest, "action 只支持 supersede / keep")),
+            };
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
         // ---- 物理删除单条记忆 ----
         root.MapDelete("/{messageId}", (string messageId, HttpContext ctx, AuthService auth, IGroupStore store, IMessageMemory memory) =>
         {
@@ -475,6 +532,9 @@ public sealed record MemoryImportanceHttpRequest(int Importance);
 
 /// <summary>手动遗忘请求体：groupId 为空 = 全部群；retentionHours 为空 = 立即遗忘，否则保留最近 N 小时。</summary>
 public sealed record MemoryForgetHttpRequest(string? GroupId, double? RetentionHours);
+
+/// <summary>一致性体检裁决（1.0.364）：action = supersede（旧说法作废）/ keep（旧说法仍然有效）。</summary>
+public sealed record MemoryConflictResolveHttpRequest(string? OlderId, string? NewerId, string? Action);
 
 /// <summary>记忆 / 结论沉淀请求体（1.3）：把某群「关键」级记忆写入指定知识库。</summary>
 public sealed record MemoryConsolidateHttpRequest(string? GroupId, string? KbId);

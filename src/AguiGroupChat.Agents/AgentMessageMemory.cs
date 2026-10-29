@@ -310,6 +310,14 @@ public sealed class AgentMessageMemory : IMessageMemory, IDisposable
         catch (Exception ex) { _logger.LogDebug(ex, "撤销取代标记失败：{MessageId}", messageId); return false; }
     }
 
+    /// <summary>标记「已被取代」（1.0.364）：一致性体检人工确认后执行，与写入期检测同一存储语义。</summary>
+    public bool Supersede(string messageId, string supersededByMessageId)
+    {
+        if (!_options.Enabled) return false;
+        try { return _store.MarkSuperseded(messageId, supersededByMessageId); }
+        catch (Exception ex) { _logger.LogDebug(ex, "记忆取代标记失败：{MessageId}", messageId); return false; }
+    }
+
     public bool PromoteImportance(string messageId, int atLeast)
     {
         if (!_options.Enabled) return false;

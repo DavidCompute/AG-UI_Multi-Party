@@ -69,6 +69,7 @@
 - **目标**：按时间线回放「某主题结论如何演进」，服务复盘与审计。
 - **落点模块**：`MessageMemory`（时间维度）、`MemoryMaintenanceService`。
 - **记忆冲突与取代（1.0.363，已实现）**：`MemoryConflictDetector`（纯函数）在写入侧判定「明确更正 + 短句 + 相似度 ≥ 0.9 + ≥2 个共享字符二元组」四条同时成立时，把同群更早的旧记忆标为已被取代（`superseded_by` 列，SQLite / PostgreSQL 自动迁移）；两种检索均加 `superseded_by IS NULL` 过滤；记忆列表划线展示并可「撤销取代」（`POST /ag-ui/memory/{messageId}/unsupersede`）。配置：`ConflictDetectionEnabled`（默认开）/ `ConflictMinScore` / `ConflictMaxChars` / `ConflictMaxMarks`。
+- **存量一致性体检（1.0.364，已实现）**：`MemoryConflictScan`（纯函数）在指定知聚内扫「同一句话差一个值」的短句对（共同开头 ≥4 字停在属性槽位、数字差异、或二元组重合度 ≥0.75；前缀包含视为补充说明）；`GET /ag-ui/memory/conflicts` 列出疑似对，`POST /ag-ui/memory/conflicts/resolve` 支持 `supersede` / `keep`；记忆管理「🔍 一致性体检」弹窗人工裁决。
 
 ### 2.3 跨实例记忆同步（★★☆ 打通桌面/Web 孤岛） ✅已实现（记忆即数据包 / 增量同步）
 - **现状**：桌面版与 Web 各自本地记忆，互不相通。

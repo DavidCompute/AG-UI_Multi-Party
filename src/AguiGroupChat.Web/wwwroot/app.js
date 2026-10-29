@@ -808,6 +808,81 @@ async function runMemoryLifecycle() {
   finally { btn.disabled = false; btn.textContent = orig; }
 }
 
+/* ===== 记忆一致性体检（1.0.364）：存量矛盾的“同一句话差一个值”人工裁决 ===== */
+let memConflictPairs = [];
+let memConflictScanned = 0;
+
+async function openMemoryConflicts() {
+  const groupId = $("memGroupSelect").value;
+  if (!groupId) { toast(t("memory.conflictNeedGroup")); return; }
+  $("memConflictMeta").textContent = "";
+  $("memConflictList").innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.loading"))}</div>`;
+  $("memConflictModal").classList.remove("hidden");
+  try {
+    const res = await fetch(`/ag-ui/memory/conflicts?groupId=${encodeURIComponent(groupId)}`, {
+      headers: { Authorization: "Bearer " + (state.token || "") },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) { $("memConflictList").innerHTML = `<div class="mem-empty">${escapeHtml(errMsg(data, "HTTP " + res.status))}</div>`; return; }
+    memConflictPairs = Array.isArray(data.pairs) ? data.pairs : [];
+    memConflictScanned = Number(data.scanned) || 0;
+    renderMemoryConflicts(memConflictScanned);
+  } catch (ex) {
+    $("memConflictList").innerHTML = `<div class="mem-empty">${escapeHtml(ex.message)}</div>`;
+  }
+}
+
+function renderMemoryConflicts(scanned) {
+  const list = $("memConflictList");
+  $("memConflictMeta").textContent = t("memory.conflictMeta", { pairs: memConflictPairs.length, scanned });
+  if (!memConflictPairs.length) {
+    list.innerHTML = `<div class="mem-empty">${escapeHtml(t("memory.conflictEmpty"))}</div>`;
+    return;
+  }
+  const row = (m, tag, cls) => `<div class="mem-conflict-side ${cls}">
+      <div class="mem-conflict-head"><span class="mem-badge">${escapeHtml(tag)}</span>
+        <span class="mem-sender">${escapeHtml(memorySenderName(m))}</span>
+        <span class="mem-time">${new Date(m.timestamp).toLocaleString()}</span></div>
+      <div class="mem-conflict-text">${escapeHtml(m.content)}</div>
+    </div>`;
+  list.innerHTML = memConflictPairs.map((p, i) => `<div class="mem-conflict-pair${p.resolved ? " resolved" : ""}">
+      ${row(p.older, t("memory.conflictOlder"), "older")}
+      ${row(p.newer, t("memory.conflictNewer"), "newer")}
+      <div class="mem-conflict-ops">
+        ${p.resolved ? `<span class="mem-expired">${escapeHtml(t("memory.conflictResolved"))}</span>` : ""}
+        <span class="mem-conflict-hint">${escapeHtml(t("memory.conflictScore", { n: Math.round(Number(p.score || 0) * 100) }))}</span>
+        <span style="flex:1"></span>
+        <button class="chip-btn mem-conflict-supersede" data-i="${i}">${escapeHtml(t("memory.conflictDoSupersede"))}</button>
+        <button class="chip-btn mem-conflict-keep" data-i="${i}" ${p.resolved ? "disabled" : ""}>${escapeHtml(t("memory.conflictDoKeep"))}</button>
+      </div>
+    </div>`).join("");
+
+  const resolve = async (index, action) => {
+    const p = memConflictPairs[index];
+    if (!p) return;
+    if (action === "supersede" && !await uiConfirm({ message: t("memory.conflictConfirm", { older: p.older.content.slice(0, 60) }), danger: true })) return;
+    try {
+      const res = await fetch("/ag-ui/memory/conflicts/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + (state.token || "") },
+        body: JSON.stringify({ olderId: p.older.messageId, newerId: p.newer.messageId, action }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { toast(errMsg(data, t("memory.updateFail"))); return; }
+      toast(action === "supersede" ? t("memory.conflictSuperseded") : t("memory.conflictKept"));
+      if (action === "supersede") p.resolved = true;
+      renderMemoryConflicts(memConflictScanned);
+      refreshMemView();
+    } catch (ex) { toast(t("memory.updateFail") + "：" + ex.message); }
+  };
+  list.querySelectorAll(".mem-conflict-supersede").forEach((btn) => {
+    btn.onclick = () => resolve(Number(btn.dataset.i), "supersede");
+  });
+  list.querySelectorAll(".mem-conflict-keep").forEach((btn) => {
+    btn.onclick = () => resolve(Number(btn.dataset.i), "keep");
+  });
+}
+
 /* ============ 白标 / 品牌化（6.4）弹窗：应用名 / Logo / 主色 / 强制深色 ============ */
 
 function openBrandingModal() {
@@ -18943,6 +19018,9 @@ function init() {
   $("memForgetBtn").onclick = () => $("memForgetPanel").classList.toggle("hidden");
   $("memConsolidateBtn").onclick = consolidateGroupMemory;
   $("memLifecycleRun").onclick = runMemoryLifecycle;
+  $("memConflictBtn").onclick = openMemoryConflicts;
+  $("memConflictClose").onclick = () => $("memConflictModal").classList.add("hidden");
+  $("memConflictModal").addEventListener("click", (e) => { if (e.target === $("memConflictModal")) $("memConflictModal").classList.add("hidden"); });
   $("memForgetCancel").onclick = () => $("memForgetPanel").classList.add("hidden");
   $("memForgetConfirm").onclick = async () => {
     const groupId = $("memGroupSelect").value;

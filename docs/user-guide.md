@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.363**
+> 适用版本：**1.0.364**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3282,6 +3282,17 @@ flowchart TD
 
 **存储**：`agui_message_memory.superseded_by` 列（SQLite / PostgreSQL 均自动迁移）；`MessageMemoryRecord.SupersededBy` / `MessageMemoryItem.SupersededBy` 随包下发。开关 `Agents:Memory:ConflictDetectionEnabled`（默认开），可随时关闭回到旧行为（已标的条目需手工撤销）。
 
+#### 6.5.5 存量一致性体检（1.0.364）
+
+写入期检测只管「以后」；历史里已经并存的矛盾需要单独扫。记忆管理页「🔍 一致性体检」选中知聚后开始（`GET /ag-ui/memory/conflicts?groupId=`，仅该知聚成员 / 全局管理员）：
+
+- **判据（`MemoryConflictScan`，纯函数）**：两侧都是短句（≤ 200 字符）且跳过知识库 / 图库行；**共同开头 ≥ 4 字**且停在属性槽位上（前缀以 是 / 为 / 由 / 在… 结尾，或某侧尾部以系词开头，或两侧任一侧带数字，或文本含更正线索）；一方是另一方的**前缀**时不算（那是补充说明）；共同开头不达标时用二元组重合度 ≥ 0.75 兜底。
+- **呈现**：每对并排展示旧 / 新说法（发送者、时间、重合度），提供「旧说法作废」与「保留旧说法」两个动作。
+- **裁决**：`POST /ag-ui/memory/conflicts/resolve`，`action=supersede` → `Supersede(旧, 新)`（与写入期同一存储语义，旧说法退出检索）；`action=keep` → 若旧说法已被取代则撤销标记（确认它仍然成立）。已取代的对会标「已处理」。
+- **定位**：这是**体检清单**而非自动判决——启发式会漏也会误；误报的代价只是“多看一眼”，但漏报会让矛盾一直存在。
+
+限流：单次扫描最多取 1000 条记忆（`limit` 50..1000）与最多 50 对，避免大群拖慢界面。
+
 ---
 
 ### 6.6 五档「记忆拟人类型」
@@ -5107,6 +5118,8 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | GET | `/ag-ui/memory/graph` | 图谱记忆子图（按 `groupId` + 主题词 `q` 召回实体 / 关系，供前端关系图；未启用返回 `enabled=false`） | 登录（群成员 / 管理员） |
 | POST | `/ag-ui/memory/{messageId}/importance` | 调整单条记忆级别（0 普通 / 1 重要 / 2 关键） | 登录（归属 / 群管理 / 管理员） |
 | POST | `/ag-ui/memory/{messageId}/unsupersede` | 撤销「已被取代」标记（1.0.363） | 登录（同上） |
+| GET | `/ag-ui/memory/conflicts` | 存量记忆一致性体检（1.0.364）：`?groupId=` 必填，返回疑似冲突对（旧 / 新两侧内容 + 重合度 + 是否已处理） | 登录（群成员 / 全局管理员） |
+| POST | `/ag-ui/memory/conflicts/resolve` | 体检裁决（1.0.364）：`{olderId, newerId, action}`，`action=supersede/keep` | 登录（同上） |
 | DELETE | `/ag-ui/memory/{messageId}` | 物理删除单条记忆 | 登录（同上） |
 | POST | `/ag-ui/memory/forget` | 手动遗忘（按群或全部设过期，可选保留最近 N 小时） | 登录（同上） |
 | POST | `/ag-ui/memory/consolidate` | 把某群「关键」级记忆聚合沉淀为知识库文档（需语义记忆已启用） | 登录 |

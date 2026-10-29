@@ -1500,6 +1500,11 @@
         <span id="memLifecycleStatus" class="mem-cons-hint"></span>
         <button id="memLifecycleRun" class="chip-btn" type="button" data-i18n="memory.lifecycleRun">立即巩固 / 遗忘</button>
       </div>
+      <div class="memory-consolidate-row">
+        <span class="mem-cons-label" data-i18n="memory.conflictLabel">🔍 一致性体检：</span>
+        <span class="mem-cons-hint" data-i18n="memory.conflictHint">找出同一知聚里“同一句话差一个值”的旧 / 新说法，人工确认后让旧说法退出检索</span>
+        <button id="memConflictBtn" class="chip-btn" type="button" data-i18n="memory.conflictRun">开始体检</button>
+      </div>
       <div id="memForgetPanel" class="memory-forget-panel hidden">
         <span style="color:var(--muted);font-size:12px" data-i18n="memory.forgetRange">遗忘范围：</span>
         <select id="memForgetRange" class="modal-input" style="flex:1">
@@ -1533,6 +1538,18 @@
       <div id="memPager" class="memory-pager"></div>
       <div class="modal-actions">
         <button id="memoryClose" class="btn-ghost" data-i18n="memory.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 记忆一致性体检（1.0.364）：存量矛盾的人工裁决 -->
+  <div id="memConflictModal" class="modal-overlay modal-over-console hidden">
+    <div class="modal" style="width:760px;max-width:94vw">
+      <div class="modal-title">🔍 <span data-i18n="memory.conflictTitle">记忆一致性体检</span> <span id="memConflictMeta" class="count-badge"></span></div>
+      <p class="form-hint" style="margin:2px 0 8px" data-i18n="memory.conflictExplain">按所选知聚扫描「短句、共同开头、只差一个值」的记忆对。判定是启发式的，可能误报也可能漏报；确认后「旧说法作废」会让它在检索中失效（仍可在列表撤销）。</p>
+      <div id="memConflictList" class="mem-conflict-list"></div>
+      <div class="modal-actions">
+        <button id="memConflictClose" class="btn-ghost" data-i18n="memory.close">关闭</button>
       </div>
     </div>
   </div>
