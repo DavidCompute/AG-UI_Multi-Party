@@ -75,6 +75,13 @@ public static class MemoryConflictScan
                 var older = list[j];
                 if (older.Item.Timestamp >= newer.Item.Timestamp) continue;
 
+                // 剪枝（数学上安全，不会漏判）：
+                // ① 前缀判据要求前 4 字相同；② 包容度 ≥ threshold 要求 |较短| ≥ threshold×|较长|
+                //    （|A∩B| ≤ |B|），最宽松 threshold 是 0.5（任一侧含更正线索）。两者都不满足就不可能命中。
+                var minLen = Math.Min(older.Norm.Length, newer.Norm.Length);
+                var maxLen = Math.Max(older.Norm.Length, newer.Norm.Length);
+                if (!string.Equals(older.Head, newer.Head, StringComparison.Ordinal) && minLen * 2 < maxLen) continue;
+
                 var res = JudgePrepared(older, newer, minSharedPrefix, minContainment);
                 if (res is null) continue;
                 pairs.Add(new MemoryConflictPair(older.Item, newer.Item, res.Value.SharedPrefix, res.Value.Score));
@@ -88,10 +95,13 @@ public static class MemoryConflictScan
             .ToList();
     }
 
-    /// <summary>预处理的记忆：规范化文本 + 二元组集合（只算一次）。</summary>
+    /// <summary>预处理的记忆：规范化文本 + 前 4 字桶 + 二元组集合（都只算一次）。</summary>
     private sealed record Prepared(MessageMemoryItem Item, string Norm)
     {
         public HashSet<string> Grams { get; } = MemoryConflictDetector.Bigrams(Item.Content);
+
+        /// <summary>规范化前 4 字：共同开头 ≥4 字是前缀判据的**必要条件**，可据此整对剪枝。</summary>
+        public string Head { get; } = Norm.Length <= 4 ? Norm : Norm[..4];
     }
 
     /// <summary>

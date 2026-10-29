@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.367 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.367 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.368 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.368 Release Notes (current Windows desktop release)
+
+**版本说明**：**把性能钉住了**——新增一组按「存储层上限」跑的性能基线测试，覆盖近期所有热路径；并给存量记忆扫描加了两道**数学上安全**的剪枝（500 条从 ~234ms 降到 ~180ms）。
+**Version note**: **Performance is now pinned** — a new baseline suite runs recent hot paths at storage caps, and the stored-memory scan gained two mathematically safe prunes (500 items: ~234ms → ~180ms).
+
+## 变更
+# Changes
+
+中文：
+- **基线测试**：`PerformanceBaselineTests`（7 条）用上限数据量固定耗时：闭环聚合 / 健康度 + 告警 + 自动修复门控（2000 事件）、产物质量画像 + 告警（5000）、编排候选（200 技能带质量 / 经验 / 健康注）、体检报告（200 岗位 + 100 评测 + 60 闭环行 + 50 巡检行）、记忆冲突检测与存量扫描（6 候选 / 500 条）、用量聚合（1500 行 / 1000 反馈 / 50 员工）。
+- **阈值策略**：断言只拦**数量级**劣化（预算为实测的几十倍），避免 CI 机器差异造成随机红灯；每条用例用 `ITestOutputHelper` 打印实测耗时。
+- **扫描剪枝**：`MemoryConflictScan` 预计算规范化前 4 字与二元组；对每对先判「前缀判据需同前 4 字」「包容度 ≥ threshold 要求较短者不短于较长者的 threshold 比」——两者都不可能时才跳过，**不会漏判**。
+- **文档**：§9.7 新增「性能基线」入口与实测数字（容量 / 耗时 / 剪枝说明）。
+
+English:
+- **Baseline suite**: seven `PerformanceBaselineTests` cases pin timings at storage caps: loop aggregation / health + alerts + auto-repair gating (2000 events), artifact-quality profiles + alerting (5000), orchestration candidates (200 skills with quality / lessons / health notes), the health report (200 roles + 100 eval cases + 60 loop rows + 50 inspection rows), conflict detection and the stored-memory scan (6 candidates / 500 items), and usage aggregation (1500 rows / 1000 feedback / 50 employees).
+- **Threshold policy**: assertions only catch **order-of-magnitude** regressions (budgets are tens of times the measured values) so CI hardware differences cannot cause flaky failures; each case prints its measured time through `ITestOutputHelper`.
+- **Scan prunes**: `MemoryConflictScan` precomputes the normalized first four characters and the bigram set, then skips a pair only when neither the prefix rule (same first four characters) nor the containment bound (shorter ≥ threshold × longer) can hold — **no missed matches**.
+- **Docs**: §9.7 gains the performance-baseline entry point with the measured numbers (capacity / timing / prune rationale).
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §9.7（性能基线）；`RELEASE_NOTES.md`；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.368。
+English: `docs/user-guide.md` / `en.md` §9.7 (performance baseline); `RELEASE_NOTES.md`; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.368.
+
+## 测试
+# Tests
+
+中文：新增 `PerformanceBaselineTests` 7 条；全量 `dotnet vstest` **2108 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2485，missing 0；配置键与文档引用校验通过。
+English: seven new `PerformanceBaselineTests` cases; the full `dotnet vstest` run passes **2108 / 0**; `node --check app.js`; the i18n audit reports zh=en=2485, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.367 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.367 Release Notes (historical)
 
 **版本说明**：**严格审核后的一轮修复**——自动修复不再越过管理员的手工暂停；存量体检扫描从秒级降到毫秒级；扫描上限与存储层对齐。
 **Version note**: **Fixes after a strict audit** — auto-repair no longer overrides a manual pause, the stored-memory sweep drops from seconds to milliseconds, and the scan limits match the storage layer.

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.367**
+> Applies to version: **1.0.368**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -5746,8 +5746,11 @@ Named volumes: `agui-web-data` / `agui-docs` / `agui-hub-data` / `agui-pg-data`.
 | MSI packaging script | `powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version <ver>` | Generates `artifacts/wix/AguiGroupChat-Desktop-<ver>.msi`; includes steps such as "clean Release intermediates → publish → strip non-Win native libraries → bundle VC++ → generate files.wxs → wix build → verify backend DLL freshness" |
 | Browser E2E (Playwright) | `cd tools && node ui-*.mjs` | Multiple script sets; **must be run serially** (concurrent runs against the same backend cause timing contention) |
 | E2E prerequisites | `cd tools && npm install && npx playwright install chromium` | Headed by default, `HEADLESS=1` for headless |
+| Performance baseline | `dotnet vstest <tests.dll> --TestCaseFilter:"FullyQualifiedName~PerformanceBaselineTests"` | Runs recent hot paths at **storage caps** (loop aggregation / quality profiles / orchestration candidates / health report / memory scan / usage aggregation); thresholds are tens of times the measured values, so only **order-of-magnitude** regressions fail |
 
 > Note: the `artifacts/verify-msi-payload.py` that the task asked to verify **was not found in the repository** (see §9.9). The MSI payload / freshness check is embedded in step 4 of `tools/build-msi.ps1` (comparing the write time of `AguiGroupChat.*.dll` with the script start time).
+>
+> **Performance baseline (1.0.368)**: `PerformanceBaselineTests` pins these capacities and timings (dev machine, magnitude only): loop aggregation over 2000 events ~2ms; health + alert + auto-repair gating over 2000 events ~2ms; artifact-quality profiles over 5000 events ~2ms; 200 orchestration candidates (with quality / lessons / health notes) ~1ms; org health report (200 roles + 100 eval cases + 60 loop rows + 50 inspection rows) ~2ms; conflict detection over 6 candidates <1ms; stored-memory scan over 500 items ~180ms (quadratic, with a 4-character head bucket and a length-ratio prune); usage aggregation (1500 rows / 1000 feedback / 50 employees) <1ms. Assertion thresholds keep tens of times of headroom so CI hardware differences do not cause flaky failures.
 
 ---
 

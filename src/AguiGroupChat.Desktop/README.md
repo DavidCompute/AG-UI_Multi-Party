@@ -2,7 +2,7 @@
 
 [English](README.en.md) | **简体中文**
 
-纯桌面应用（Windows）**（当前版本 1.0.367）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
+纯桌面应用（Windows）**（当前版本 1.0.368）**：复用 Web 版全部功能（群聊、智能体、人机交互审批、语义记忆 RAG、
 个人记忆、AI 分身、附件、话题、触发方式、记忆拟人类型、办公文档在线查看与 PPT 播放（**需本机 LibreOffice**，见下方说明）等），但**数据与模型全部在本机**；服务在本机固定起在
 `http://127.0.0.1:5200`，即便断网也能跑通群聊 / 智能体管理 / 语义记忆等本地功能（仅对话模型 DeepSeek 等仍需联网），
 支持把标记为「本机执行」的客户端技能经本机桥在桌面机执行：
@@ -31,16 +31,16 @@ dotnet run --project src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj
 
 ### 构建发行版（win-x64 程序 / MSI 安装包）
 
-当前版本：**1.0.367**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
+当前版本：**1.0.368**（见 `src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj` 的 `<Version>`）。
 
 ```bash
 # 1. 发布 win-x64 产物到 artifacts/win-x64（含 SQLite / 本地 llama embedding / wwwroot / VC++ 运行库 / vec0.dll）
 dotnet publish src/AguiGroupChat.Desktop/AguiGroupChat.Desktop.csproj -c Release -o artifacts/win-x64
 
 # 2. 打 MSI 安装包：输出到 artifacts/wix/AguiGroupChat-Desktop-<Version>.msi
-#    例如 1.0.367：
-powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.367
-#     → artifacts/wix/AguiGroupChat-Desktop-1.0.367.msi
+#    例如 1.0.368：
+powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.368
+#     → artifacts/wix/AguiGroupChat-Desktop-1.0.368.msi
 ```
 
 > `tools/build-msi.ps1` 会先**强制全新发布**（清理 Release 中间产物，防止增量复用旧 DLL）、排除非 Windows 原生运行库、
@@ -85,7 +85,7 @@ powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version 1.0.367
 | `Agents:Pricing:*` | `0` / `$` | 成本估算：`InputPerMillion` / `OutputPerMillion`（每百万 token 单价）、`Currency`、`DailyBudget`。用于「员工绩效」看板成本列与预算提示；单价为 0 = 不估算 |
 | `Agents:ModelRouting:Enabled` | `false` | 按复杂度模型路由（默认关）：用与自适应超时同一份估计器，把简单档路由到 `SimpleModel`、复杂/繁重档路由到 `HeavyModel`；某档模型留空 = 不换（关闭时行为完全不变） |
 | `Agents:PerformanceFeedback:Enabled` | `false` | 绩效反哺编排（默认关）：指派路由时把候选员工的近期好评率（👍👎，`WindowDays`/`MinRatings`）作为参考注入提示词（数据驱动，关闭时行为完全不变） |
-| `Agents:ArtifactQuality:RoutingHintEnabled` | `false` | 修复健康反哺运行时（1.0.367，默认关）：指派路由给候选加修复健康参考行，并在不稳定技能的工具说明里要求产出后自检；关闭时提示词与旧版一致 |
+| `Agents:ArtifactQuality:RoutingHintEnabled` | `false` | 修复健康反哺运行时（1.0.368，默认关）：指派路由给候选加修复健康参考行，并在不稳定技能的工具说明里要求产出后自检；关闭时提示词与旧版一致 |
 
 > 对话模型（DeepSeek 等）仍需联网；**语义记忆 / 群聊 / 智能体管理**等核心功能离线可用。
 

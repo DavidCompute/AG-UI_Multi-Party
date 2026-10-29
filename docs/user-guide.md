@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.367**
+> 适用版本：**1.0.368**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -5741,8 +5741,11 @@ service:
 | MSI 打包脚本 | `powershell -ExecutionPolicy Bypass -File tools/build-msi.ps1 -Version <ver>` | 生成 `artifacts/wix/AguiGroupChat-Desktop-<ver>.msi`；内含「清Release中间产物 → publish → 剔非 Win 原生库 → 捆 VC++ → 生成 files.wxs → wix build → 校验后端 DLL 新鲜度」等步骤 |
 | 浏览器 E2E（Playwright） | `cd tools && node ui-*.mjs` | 多套脚本；**必须串行执行**（并发打同一后端会时序争用） |
 | E2E 前置 | `cd tools && npm install && npx playwright install chromium` | 默认有头，`HEADLESS=1` 无头 |
+| 性能基线 | `dotnet vstest <tests.dll> --TestCaseFilter:"FullyQualifiedName~PerformanceBaselineTests"` | 用**存储层上限**的数据量跑近期热路径（闭环聚合 / 质量画像 / 编排候选 / 体检报告 / 记忆扫描 / 用量聚合）；阈值取实测的几十倍，只捕捉**数量级**劣化（不追精确基准） |
 
 > 说明：任务要求核实的 `artifacts/verify-msi-payload.py` **在仓库中未找到**（参见 §9.9）。MSI 的负载 / 新鲜度校验是内嵌在 `tools/build-msi.ps1` 的第 4 步（比较 `AguiGroupChat.*.dll` 写入时间与脚本启动时间）。
+>
+> **性能基线（1.0.368）**：`PerformanceBaselineTests` 固定了这些容量与耗时（开发机实测，仅供量级参考）：闭环聚合 2000 条 → ~2ms；健康度 + 告警 + 自动修复门控 2000 条 → ~2ms；产物质量画像 5000 条 → ~2ms；编排候选 200 技能（带质量 / 经验 / 健康注） → ~1ms；组织体检报告（200 岗位 + 100 评测 + 60 闭环行 + 50 巡检行） → ~2ms；记忆冲突检测 6 候选 → <1ms；存量扫描 500 条 → ~180ms（O(n²)，已有前 4 字桶与长度比剪枝）；用量聚合（1500 行 / 1000 反馈 / 50 员工） → <1ms。断言阈值留有几十倍余量，避免 CI 机器差异造成随机红灯。
 
 ---
 
