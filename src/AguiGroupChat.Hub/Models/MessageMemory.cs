@@ -62,9 +62,10 @@ public sealed record MessageMemoryItem(
     long? ExpiresAt,
     string? SupersededBy = null);
 
-/// <summary>群级记忆统计（记忆可视化用）。</summary>
+/// <summary>群级记忆统计（记忆可视化用）。SupersededCount（1.0.365）= 已被更新事实取代的条数。</summary>
 public sealed record MessageMemoryGroupStat(
     string GroupId,
     int Count,
     long LastAt,
-    int ExpiredCount);
+    int ExpiredCount,
+    int SupersededCount = 0);

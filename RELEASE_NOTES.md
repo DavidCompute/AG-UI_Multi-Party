@@ -1,5 +1,40 @@
-# AG-UI 群聊桌面版 1.0.364 发布说明（当前 Windows 桌面版）
-# AG-UI Group Chat Desktop 1.0.364 Release Notes (current Windows desktop release)
+# AG-UI 群聊桌面版 1.0.365 发布说明（当前 Windows 桌面版）
+# AG-UI Group Chat Desktop 1.0.365 Release Notes (current Windows desktop release)
+
+**版本说明**：**记忆治理终于有反馈**——记忆管理顶部新增「📊 质量概览」：几个知聚 / 多少条记忆 / 多少已过期 / 多少已被取代（占比）/ 本知聚待处理几对，切知聚即重算。
+**Version note**: **Memory governance now has feedback** — Memory management gains a **📊 Quality overview**: groups, memories, expired, superseded (share) and pending pairs for the selected group, recomputed on switch.
+
+## 变更
+# Changes
+
+中文：
+- **统计**：`MessageMemoryGroupStat` 新增 `SupersededCount`；SQLite / PostgreSQL 的 `GroupStats` 均用 `COUNT(*) FILTER (WHERE superseded_by IS NOT NULL)` 统计，与过期数同一条查询。
+- **接口**：`GET /ag-ui/memory/quality?groupId=`——`summary`（`groups` / `memories` / `expired` / `superseded` / `supersededRate` / `pendingPairs`）+ 按知聚明细；只返回调用者有权限的知聚。
+- **待处理对**：只对当前选中的知聚真算（扫描上限 800 条，全量扫是 O(n²)，不对整库跑），未选时返回 `null`（界面显 `—`）。
+- **界面**：记忆弹窗新增「📊 质量概览」一行 + 「刷新」；切知聚、体检、取代/撤销后自动重算。
+
+English:
+- **Stats**: `MessageMemoryGroupStat` gains `SupersededCount`; `GroupStats` on both SQLite and PostgreSQL counts `COUNT(*) FILTER (WHERE superseded_by IS NOT NULL)` in the same query as the expired count.
+- **API**: `GET /ag-ui/memory/quality?groupId=` — `summary` (`groups` / `memories` / `expired` / `superseded` / `supersededRate` / `pendingPairs`) plus per-group rows; only groups the caller may see are returned.
+- **Pending pairs**: computed only for the selected group (scans up to 800 memories — a full sweep is O(n²), so the whole library is never scanned); `null` (rendered as `—`) when no group is selected.
+- **UI**: the memory dialog gains a **📊 Quality overview** line with **Refresh**, recomputed on group switch, after audits and after supersede/revert actions.
+
+## 文档
+# Docs
+
+中文：`docs/user-guide.md` / `en.md` §6.5.6（记忆质量概览）、§9.2 接口表；`ROADMAP.md` / `en.md`；版本号与「适用版本」同步到 1.0.365。
+English: `docs/user-guide.md` / `en.md` §6.5.6 (memory quality overview) and the §9.2 API table; `ROADMAP.md` / `en.md`; version numbers and "applies to version" bumped to 1.0.365.
+
+## 测试
+# Tests
+
+中文：新增 `GroupStats` 取代 / 过期计数用例 1 条；全量 `dotnet vstest` **2094 通过 / 0 失败**；`node --check app.js`；i18n 审计 zh=en=2480，missing 0；配置键与文档引用校验通过。
+English: one new `GroupStats` superseded/expired counting case; the full `dotnet vstest` run passes **2094 / 0**; `node --check app.js`; the i18n audit reports zh=en=2480, missing 0; config-key and docs-reference checks pass.
+
+---
+
+# AG-UI 群聊桌面版 1.0.364 发布说明（历史）
+# AG-UI Group Chat Desktop 1.0.364 Release Notes (historical)
 
 **版本说明**：**存量矛盾也能治理**——写入期的冲突检测只管以后；本版给已有记忆加一次「🔍 一致性体检」：找出同一知聚里“同一句话差一个值”的旧 / 新说法，人工确认后让旧说法退出检索。
 **Version note**: **Existing contradictions become manageable** — write-time detection only covers the future; this release adds a **consistency check** over stored memories: it surfaces old/new statements that differ in a single value, and one confirmation drops the old one from retrieval.

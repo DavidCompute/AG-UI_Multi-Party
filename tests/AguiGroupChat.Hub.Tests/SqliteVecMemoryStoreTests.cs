@@ -217,4 +217,22 @@ public sealed class SqliteVecMemoryStoreTests
         Assert.Null(memory.GetByMessageId("m_old")!.SupersededBy);
         Assert.False(memory.MarkSuperseded("m_old", ""));
     }
+
+    [Fact]
+    public void GroupStats_CountsSupersededAndExpired()
+    {
+        var (_, memory) = Create();
+        var v = new float[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        memory.Upsert(Rec("m1", "g1", "u1", "旧说法", v, ts: 1000));
+        memory.Upsert(Rec("m2", "g1", "u1", "新说法", v, ts: 2000));
+        memory.Upsert(new MessageMemoryRecord("m3", "g1", "main", "u1", "user", "已过期", v, 3000,
+            MemoryImportance.Normal, ExpiresAt: 1));
+        Assert.True(memory.MarkSuperseded("m1", "m2"));
+
+        var stat = Assert.Single(memory.GroupStats(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+        Assert.Equal("g1", stat.GroupId);
+        Assert.Equal(3, stat.Count);
+        Assert.Equal(1, stat.SupersededCount);
+        Assert.Equal(1, stat.ExpiredCount);
+    }
 }

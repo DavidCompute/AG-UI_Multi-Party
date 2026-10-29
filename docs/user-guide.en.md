@@ -2,7 +2,7 @@
 
 **English** | [简体中文](user-guide.md)
 
-> Applies to version: **1.0.364**
+> Applies to version: **1.0.365**
 > Purpose: an end-user manual — every module, field, button, and configuration key, grounded in the current code.
 > How it was produced: compiled from source code / front-end structure / i18n strings; it describes **implemented behavior, not plans**.
 
@@ -3297,6 +3297,14 @@ Write-time detection only covers the future; contradictions already sitting in h
 
 Limits: one sweep reads at most 1000 memories (`limit` 50..1000) and returns at most 50 pairs.
 
+#### 6.5.6 Memory quality overview (1.0.365)
+
+Memory management gains a **📊 Quality overview** line: **groups / memories / expired / superseded (share) / pending pairs in this group**, recomputed on group switch or **Refresh**.
+
+- Data: `GET /ag-ui/memory/quality?groupId=` — `summary` (`groups` / `memories` / `expired` / `superseded` / `supersededRate` / `pendingPairs`) plus per-group rows (count / expired / superseded / last active); only groups you may see are returned.
+- **Superseded** comes from the new `superseded_by` count in `GroupStats` (same numbers on SQLite and PostgreSQL); **pending pairs** is computed only for the selected group (a full sweep is O(n²), so the whole library is never scanned; shows `—` otherwise).
+- Why: auditing is not a one-off — a rising supersede share means facts change often, a growing pending count means nobody is ruling on them.
+
 ---
 
 ### 6.6 The five tiers of "Memory Type (human-like recall)"
@@ -5125,6 +5133,7 @@ Real-time channels (`HubApp.MapEndpoints`): `GET /ws?memberId=…` (WebSocket), 
 | POST | `/ag-ui/memory/{messageId}/unsupersede` | Clear the "superseded" mark (1.0.363) | Login (same as above) |
 | GET | `/ag-ui/memory/conflicts` | Memory consistency audit (1.0.364): `?groupId=` required; returns suspected pairs (both sides, overlap, handled flag) | Login (group member / global admin) |
 | POST | `/ag-ui/memory/conflicts/resolve` | Resolve an audited pair (1.0.364): `{olderId, newerId, action}`, `action=supersede/keep` | Login (same as above) |
+| GET | `/ag-ui/memory/quality` | Memory quality overview (1.0.365): optional `?groupId=`; `summary` (count / expired / superseded / rate / pending pairs) plus per-group rows | Login (visible groups only) |
 | DELETE | `/ag-ui/memory/{messageId}` | Physically delete a single memory | Login (same as above) |
 | POST | `/ag-ui/memory/forget` | Manual forgetting (expire by group or everything; optionally keep the most recent N hours) | Login (same as above) |
 | POST | `/ag-ui/memory/consolidate` | Consolidate a group's "critical"-level memories into a knowledge base document (requires semantic memory to be enabled) | Login |

@@ -2,7 +2,7 @@
 
 **简体中文** | [English](user-guide.en.md)
 
-> 适用版本：**1.0.364**
+> 适用版本：**1.0.365**
 > 文档定位：面向最终用户的使用手册 —— 依据当前代码实现，逐模块、逐字段、逐按钮、逐配置项描述。
 > 成文方式：由源码 / 前端界面结构 / i18n 文案清点整理而成，**描述「已实现的行为」而非规划**。
 
@@ -3293,6 +3293,14 @@ flowchart TD
 
 限流：单次扫描最多取 1000 条记忆（`limit` 50..1000）与最多 50 对，避免大群拖慢界面。
 
+#### 6.5.6 记忆质量概览（1.0.365）
+
+记忆管理页顶部新增「📊 质量概览」：一行字把「**几个知聚 / 多少条记忆 / 已过期 / 已被取代（占比）/ 本知聚待处理对**」说清，切知聚或点「刷新」即时重算。
+
+- 数据源：`GET /ag-ui/memory/quality?groupId=`——`summary`（`groups` / `memories` / `expired` / `superseded` / `supersededRate` / `pendingPairs`）+ 按知聚明细（条数 / 过期 / 已被取代 / 最近活跃）；只能看自己有权限的知聚。
+- **已被取代**来自 `GroupStats` 新增的 `superseded_by` 计数（SQLite / PostgreSQL 同口径）；**待处理对**只对当前选中的知聚真算（全量扫是 O(n²)，不对整库跑，未选时为 `—`）。
+- 用途：体检不是一次性动作——看取代率是否在涨（说明事实在频繁更正）、待处理是否堆积（说明没人裁决）。
+
 ---
 
 ### 6.6 五档「记忆拟人类型」
@@ -5120,6 +5128,7 @@ Web 组合根（`src/AguiGroupChat.Web`）所有 HTTP 接口的身份判定收�
 | POST | `/ag-ui/memory/{messageId}/unsupersede` | 撤销「已被取代」标记（1.0.363） | 登录（同上） |
 | GET | `/ag-ui/memory/conflicts` | 存量记忆一致性体检（1.0.364）：`?groupId=` 必填，返回疑似冲突对（旧 / 新两侧内容 + 重合度 + 是否已处理） | 登录（群成员 / 全局管理员） |
 | POST | `/ag-ui/memory/conflicts/resolve` | 体检裁决（1.0.364）：`{olderId, newerId, action}`，`action=supersede/keep` | 登录（同上） |
+| GET | `/ag-ui/memory/quality` | 记忆质量概览（1.0.365）：`?groupId=` 可选；`summary`（条数 / 过期 / 已被取代 / 取代率 / 待处理对）+ 按知聚明细 | 登录（仅自己可见的知聚） |
 | DELETE | `/ag-ui/memory/{messageId}` | 物理删除单条记忆 | 登录（同上） |
 | POST | `/ag-ui/memory/forget` | 手动遗忘（按群或全部设过期，可选保留最近 N 小时） | 登录（同上） |
 | POST | `/ag-ui/memory/consolidate` | 把某群「关键」级记忆聚合沉淀为知识库文档（需语义记忆已启用） | 登录 |

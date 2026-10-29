@@ -39,6 +39,8 @@ public static class MemoryApi
                     groupId = s.GroupId,
                     groupName = store.GetGroup(s.GroupId)?.GroupName ?? s.GroupId,
                     count = s.Count,
+                    expired = s.ExpiredCount,
+                    superseded = s.SupersededCount,
                     lastAt = s.LastAt,
                     expiredCount = s.ExpiredCount,
                     // 该知聚当前用户是否可整群治理（前端据此切换遗忘范围提示）
@@ -187,6 +189,59 @@ public static class MemoryApi
             var ownership = CheckOwnership(store, memory, auth, messageId, userId);
             if (ownership is not null) return ownership;
             return Results.Ok(new { ok = memory.Unsupersede(messageId) });
+        }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
+
+        // ---- 记忆质量看板（1.0.365）：按知聚汇总「存量 / 已过期 / 已被取代 / 待处理体检」----
+        root.MapGet("/quality", (HttpContext ctx, AuthService auth, IGroupStore store,
+            IMessageMemory memory, string? groupId, int limit = 800) =>
+        {
+            var userId = WebIdentity.UserId(ctx)!;
+            var global = MemoryGovernance.IsGlobalManager(auth, userId);
+            var memberGroups = store.GroupsOf(userId).Select(g => g.GroupId).ToHashSet(StringComparer.Ordinal);
+
+            var stats = memory.GroupStats().Where(s => global || memberGroups.Contains(s.GroupId)).ToList();
+
+            // 待处理体检对只对「当前选中的知聚」真算（全量扫是 O(n²)，不能对整个库跑）。
+            int? pending = null;
+            if (!string.IsNullOrWhiteSpace(groupId))
+            {
+                if (!global && !memberGroups.Contains(groupId))
+                    return Results.Json(new AguiError(ErrorCodes.GroupPermissionDenied, "仅群成员可查看该群记忆质量"),
+                        statusCode: StatusCodes.Status403Forbidden);
+                var items = memory.ListMessages(groupId, null, null, Math.Clamp(limit, 50, 1000), 0).ToList();
+                pending = AguiGroupChat.Agents.MemoryConflictScan.FindPairs(items, maxPairs: 200).Count;
+            }
+
+            var rows = stats.Select(s => new
+            {
+                groupId = s.GroupId,
+                groupName = store.GetGroup(s.GroupId)?.GroupName ?? s.GroupId,
+                count = s.Count,
+                expired = s.ExpiredCount,
+                superseded = s.SupersededCount,
+                lastAt = s.LastAt,
+                pendingPairs = string.Equals(s.GroupId, groupId, StringComparison.Ordinal) ? pending : null,
+            })
+            .OrderByDescending(r => r.count)
+            .ToList();
+
+            var total = stats.Sum(s => s.Count);
+            var expired = stats.Sum(s => s.ExpiredCount);
+            var superseded = stats.Sum(s => s.SupersededCount);
+            return Results.Ok(new
+            {
+                groupId,
+                summary = new
+                {
+                    groups = stats.Count,
+                    memories = total,
+                    expired,
+                    superseded,
+                    supersededRate = total == 0 ? 0 : Math.Round((double)superseded / total, 4),
+                    pendingPairs = pending,
+                },
+                groups = rows,
+            });
         }).AddEndpointFilter(new WebIdentity.RequireIdentityFilter());
 
         // ---- 存量记忆一致性体检（1.0.364）：找出“同一句话差一个值”的疑似冲突对，交人工裁决 ----

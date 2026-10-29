@@ -242,7 +242,8 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                 SELECT group_id,
                        COUNT(*) AS cnt,
                        MAX(timestamp) AS last_at,
-                       COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= @now) AS expired
+                       COUNT(*) FILTER (WHERE expires_at IS NOT NULL AND expires_at <= @now) AS expired,
+                       COUNT(*) FILTER (WHERE superseded_by IS NOT NULL) AS superseded
                 FROM agui_message_memory
                 WHERE recalled = FALSE
                 GROUP BY group_id
@@ -257,7 +258,8 @@ public sealed class PgMessageMemoryStore : IMessageMemoryStore
                     GroupId: reader.GetString(0),
                     Count: reader.GetInt32(1),
                     LastAt: reader.GetInt64(2),
-                    ExpiredCount: reader.GetInt32(3)));
+                    ExpiredCount: reader.GetInt32(3),
+                    SupersededCount: reader.GetInt32(4)));
             }
             return list;
         }

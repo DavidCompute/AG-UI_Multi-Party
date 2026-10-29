@@ -617,6 +617,7 @@ async function openMemoryModal() {
   syncMemForgetHint();
   await loadMemoryKbs();
   await loadMemoryList(0);
+  loadMemoryQuality();
 }
 
 /* ============ 记忆可视化：列表 / 时间线 / 图谱 ============ */
@@ -806,6 +807,31 @@ async function runMemoryLifecycle() {
     loadMemoryGroups();
   } catch (ex) { toast(t("memory.lifecycleFail", { err: ex.message })); }
   finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+/* ===== 记忆质量看板（1.0.365）：存量 / 已过期 / 已被取代 / 待处理体检一屏可见 ===== */
+async function loadMemoryQuality() {
+  const el = $("memQualityText");
+  if (!el) return;
+  el.textContent = t("memory.qualityLoading");
+  try {
+    const groupId = $("memGroupSelect").value;
+    const qs = groupId ? `?groupId=${encodeURIComponent(groupId)}` : "";
+    const res = await fetch("/ag-ui/memory/quality" + qs, { headers: { Authorization: "Bearer " + (state.token || "") } });
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d || !d.summary) { el.textContent = ""; return; }
+    const s = d.summary || {};
+    const pct = Math.round(Number(s.supersededRate || 0) * 1000) / 10;
+    el.textContent = t("memory.qualitySummary", {
+      groups: String(s.groups || 0),
+      memories: String(s.memories || 0),
+      expired: String(s.expired || 0),
+      superseded: String(s.superseded || 0),
+      rate: String(pct),
+      pending: s.pendingPairs == null ? "—" : String(s.pendingPairs),
+    });
+    el.title = t("memory.qualityHint");
+  } catch { el.textContent = ""; }
 }
 
 /* ===== 记忆一致性体检（1.0.364）：存量矛盾的“同一句话差一个值”人工裁决 ===== */
@@ -19009,7 +19035,7 @@ function init() {
   $("voiceServiceRecheck").onclick = () => renderVoiceService();
   $("memSearchBtn").onclick = () => refreshMemView();
   $("memKeyword").addEventListener("keydown", (e) => { if (e.key === "Enter") refreshMemView(); });
-  $("memGroupSelect").addEventListener("change", () => { refreshMemView(); syncMemForgetHint(); });
+  $("memGroupSelect").addEventListener("change", () => { refreshMemView(); syncMemForgetHint(); loadMemoryQuality(); });
   $("memViewList").onclick = () => switchMemView("list");
   $("memViewTimeline").onclick = () => switchMemView("timeline");
   $("memViewGraph").onclick = () => switchMemView("graph");
@@ -19019,6 +19045,7 @@ function init() {
   $("memConsolidateBtn").onclick = consolidateGroupMemory;
   $("memLifecycleRun").onclick = runMemoryLifecycle;
   $("memConflictBtn").onclick = openMemoryConflicts;
+  $("memQualityBtn").onclick = loadMemoryQuality;
   $("memConflictClose").onclick = () => $("memConflictModal").classList.add("hidden");
   $("memConflictModal").addEventListener("click", (e) => { if (e.target === $("memConflictModal")) $("memConflictModal").classList.add("hidden"); });
   $("memForgetCancel").onclick = () => $("memForgetPanel").classList.add("hidden");
